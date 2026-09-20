@@ -26,7 +26,7 @@ it is what the visual check runs, since a fixture somebody has to install is
 a fixture that is different on every machine.
 
     $ cd Build
-    $ BUILDAT_LUANTI_GAME=minimal bin/buildat_server -m ../games/luanti_launcher
+    $ BUILDAT_LUANTI_GAME=minimal bin/buildat_server -m ../games/vanilla
     $ bin/buildat -s localhost           # in another terminal
 
 A real game, once there is one to point at:
@@ -35,9 +35,9 @@ A real game, once there is one to point at:
     $ cp -r ~/projects/luanti/games/devtest user/luanti/games/devtest
     $ mkdir user/luanti/worlds/devtest_world
     $ printf 'gameid = devtest\n' > user/luanti/worlds/devtest_world/world.mt
-    $ cd Build && bin/buildat_server -m ../games/luanti_launcher
+    $ cd Build && bin/buildat_server -m ../games/vanilla
 
-games/luanti_launcher runs the first world it finds, the one
+games/vanilla runs the first world it finds, the one
 BUILDAT_LUANTI_WORLD names, or the game BUILDAT_LUANTI_GAME names. It extends
 nothing; it is what the module is tested against.
 
@@ -225,7 +225,7 @@ world is made; the harness writes it into the save's world.mt. A world that
 already has a seed keeps it, as in Luanti.
 
     BUILDAT_LUANTI_LUAPROF=10000 BUILDAT_LUANTI_GAME=mineclone2 \
-        bin/buildat_server -m ../games/luanti_launcher -D ../user
+        bin/buildat_server -m ../games/vanilla -D ../user
 
     Lua profile: 361580 samples, every 10000 instructions
     Lua profile:  27.1%  98029  lua/classes.lua:171 parse_itemstring()

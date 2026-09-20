@@ -2,7 +2,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=dig_check \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/dig.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- Connect a client, take the third hotbar slot -- which is empty, so the
 -- hand digs -- point at the ground and hold the left button. What the log

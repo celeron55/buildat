@@ -3,7 +3,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=chat_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/chat.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- Connect a client: four lines arrive at the bottom left, three of them
 -- coloured and the last one plain.

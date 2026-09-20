@@ -3,7 +3,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=statbar_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/statbar.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- Connect a client and look above the hotbar. Three things have to hold,
 -- and each one was wrong at some point:

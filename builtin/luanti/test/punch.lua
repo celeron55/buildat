@@ -2,7 +2,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=punch_check \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/punch.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- Five targets in a row three nodes in front of the player, and a steel
 -- sword in the first slot. Point at one and hold the left button: what the log

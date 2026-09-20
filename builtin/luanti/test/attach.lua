@@ -2,7 +2,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=attach_check \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/attach.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- A cube is attached to the player four and a half nodes over their head and
 -- follows them as they walk; a second one is attached to the first, a node

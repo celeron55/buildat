@@ -124,11 +124,11 @@ kill -9 "$srv" 2>/dev/null
 # --- the module, with the launcher in front of it
 cd "$here/Build"
 save=buildat_test_episode
-rm -rf "../user/games/luanti_launcher/saves/$save"
+rm -rf "../user/games/vanilla/saves/$save"
 port=$(( 29900 + (RANDOM % 90) ))
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -m ../games/luanti_launcher -D ../user -P "$port" 2>&1 \
+	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/module_srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/module_srv.log" 2>/dev/null && break

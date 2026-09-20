@@ -3,7 +3,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=bench \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/bench.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- and a client connected, since the bulk ones read the player's position.
 -- Each line the commands would have said in chat is logged as

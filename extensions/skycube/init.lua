@@ -5,7 +5,7 @@
 -- The sky, rendered into a small cube for the world to reflect: sun, moon
 -- and dawn where they are, rather than the gradient VoxelSky.xml baked at
 -- build time with a sun disc at one fixed direction. One piece for both
--- Luanti clients -- games/luanti_launcher and extensions/luanti_client --
+-- Luanti clients -- games/vanilla and extensions/luanti_client --
 -- since the sky shader and the zone handover are shared between them. See
 -- [SKY_REFLECTIONS] in doc/plan/rendering_plan.md.
 --

@@ -1,4 +1,4 @@
--- Buildat: luanti_launcher/client_lua/menu.lua
+-- Buildat: vanilla/client_lua/menu.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -10,7 +10,7 @@
 -- The scan is the server's, because the server owns the filesystem; this
 -- draws what it sends and sends back what was chosen. Once something is
 -- chosen this goes away and main/init.lua is what arrives.
-local log = buildat.Logger("luanti_launcher")
+local log = buildat.Logger("vanilla")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local ui_utils = require("buildat/extension/ui_utils")
@@ -70,7 +70,7 @@ end
 
 local function waiting(message)
 	close()
-	root = uistack.main:push({desc = "luanti_launcher menu"})
+	root = uistack.main:push({desc = "vanilla menu"})
 	local menu = ui_utils.vertical_menu(root, {min_width = 420})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	local text = menu.window:CreateChild("Text")
@@ -178,14 +178,14 @@ end
 function draw(saves, save_games)
 	last_saves, last_save_games = saves, save_games
 	close()
-	root = uistack.main:push({desc = "luanti_launcher menu"})
+	root = uistack.main:push({desc = "vanilla menu"})
 	local menu = ui_utils.vertical_menu(root, {min_width = 420})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 
 	local title = menu.window:CreateChild("Text")
 	title:SetStyleAuto()
 	title:SetText(menu_game and (menu_game .. ": which world?") or
-			"luanti_launcher: which save?")
+			"vanilla: which save?")
 
 	-- Every save, twelve at a time, newest first: the server sorts them by
 	-- when each was last played
@@ -312,7 +312,7 @@ end
 -- found with a line each, and both can go back to the save list.
 local function import_menu(title)
 	close()
-	root = uistack.main:push({desc = "luanti_launcher menu"})
+	root = uistack.main:push({desc = "vanilla menu"})
 	local menu = ui_utils.vertical_menu(root, {min_width = 420})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	local text = menu.window:CreateChild("Text")

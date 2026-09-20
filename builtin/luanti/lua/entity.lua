@@ -2855,7 +2855,7 @@ end
 -- What a landing costs, which is Luanti's own arithmetic from its client
 -- environment: one hit point per node a second over fourteen, rounded, and
 -- nothing at or under it. The speed is the client's word and is bounded
--- before it gets here; see on_fell() in games/luanti_launcher/main/main.cpp.
+-- before it gets here; see on_fell() in games/vanilla/main/main.cpp.
 --
 -- simplified: no fall_damage_add_percent, from the node landed on or from
 -- the player's own armour groups. Luanti multiplies the speed by both
@@ -3437,7 +3437,7 @@ end
 -- a fall happens in the client's own physics and nothing reports one -- and
 -- no drowning. See "Nothing hurts" in doc/plan/luanti_module_plan.md.
 -- Where a player's nose is, which Luanti approximates with the eyes. The
--- same number games/luanti_launcher's player.lua puts the camera at.
+-- same number games/vanilla's player.lua puts the camera at.
 local EYE_HEIGHT = 1.625
 
 local function eye_node(o)

@@ -1,4 +1,4 @@
--- Buildat: luanti_launcher/client_lua/init.lua
+-- Buildat: vanilla/client_lua/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -8,7 +8,7 @@
 -- player.lua, copied from extensions/luanti_client, which is also where its
 -- checks live; what is here is the keys, the camera and the world to ask
 -- about.
-local log = buildat.Logger("luanti_launcher")
+local log = buildat.Logger("vanilla")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local replicate = require("buildat/extension/replicate")
@@ -80,14 +80,14 @@ local FALL_TOLERANCE = 14
 local ok_player, err_player, player_physics =
 		buildat.run_script_file("main/player.lua")
 if not ok_player or type(player_physics) ~= "table" then
-	error("luanti_launcher: could not load player.lua: " .. tostring(err_player))
+	error("vanilla: could not load player.lua: " .. tostring(err_player))
 end
 
 -- A game's own sky, which is six pictures rather than a gradient; see the
 -- header of skybox.lua
 local ok_sky, err_sky, skybox = buildat.run_script_file("main/skybox.lua")
 if not ok_sky or type(skybox) ~= "table" then
-	error("luanti_launcher: could not load skybox.lua: " .. tostring(err_sky))
+	error("vanilla: could not load skybox.lua: " .. tostring(err_sky))
 end
 
 -- And the sky itself, which is Luanti's own shader rather than buildat's;
@@ -95,7 +95,7 @@ end
 local ok_lsky, err_lsky, luanti_sky =
 		buildat.run_script_file("main/luanti_sky.lua")
 if not ok_lsky or type(luanti_sky) ~= "table" then
-	error("luanti_launcher: could not load luanti_sky.lua: " ..
+	error("vanilla: could not load luanti_sky.lua: " ..
 			tostring(err_lsky))
 end
 
@@ -3355,7 +3355,7 @@ end
 -- being at Lua's 200 locals
 (function(ok, err, install)
 	if not ok or type(install) ~= "function" then
-		error("luanti_launcher: could not load scan.lua: " .. tostring(err))
+		error("vanilla: could not load scan.lua: " .. tostring(err))
 	end
 	return install
 end)(buildat.run_script_file("main/scan.lua"))({
@@ -3937,5 +3937,5 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			frame_peak.skyvis_us - sky_cube.us
 end)
 
-log:info("luanti_launcher client ready")
+log:info("vanilla client ready")
 -- vim: set noet ts=4 sw=4:

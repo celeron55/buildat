@@ -4,7 +4,7 @@
 --   BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=import_check \
 --   BUILDAT_LUANTI_IMPORT=/path/to/a/luanti/world \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/import.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- It says what is there every ten seconds of the world's own clock, which
 -- is not ten seconds of yours: an import holds the thread the steps are on,

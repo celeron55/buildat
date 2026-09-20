@@ -35,7 +35,7 @@ local NO_SPOTS = (os.getenv("BUILDAT_LUANTI_NO_SPOTS") or "") ~= ""
 local surface = dofile(__buildat_extension_path("luanti_client")..
 		"/surface.lua")
 -- The sky rendered into a cube for the world to reflect, shared with
--- games/luanti_launcher; see [SKY_REFLECTIONS]
+-- games/vanilla; see [SKY_REFLECTIONS]
 local skycube = require("buildat/extension/skycube").safe
 
 local M = {}

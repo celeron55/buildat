@@ -2006,7 +2006,7 @@ struct Module: public interface::Module, public luanti::Interface
 
 	// core.get_cache_path(): buildat's own cache, never the user's Luanti
 	// install. The games and worlds themselves are under the user path; see
-	// games/luanti_launcher.
+	// games/vanilla.
 	ss_ luanti_cache_path()
 	{
 		return m_server->get_config().get<ss_>("cache_path")+"/luanti";
@@ -4768,9 +4768,9 @@ struct Module: public interface::Module, public luanti::Interface
 	// Not vendored: Luanti's textures are CC BY-SA with their authors listed
 	// in its LICENSE.txt, and nothing here copies them into the tree. What
 	// the user does is put the pack in buildat's own directory, which is the
-	// same rule the games follow -- see games/luanti_launcher.
+	// same rule the games follow -- see games/vanilla.
 	// The render mode the launcher game's settings screen wrote
-	// (games/luanti_launcher's launcher.json in the user path), "" when
+	// (games/vanilla's launcher.json in the user path), "" when
 	// there is none. Read here with no JSON parser: the file is the
 	// game's own, one line, and the key's value is a bare word.
 	ss_ settings_render_mode()
@@ -5741,7 +5741,7 @@ struct Module: public interface::Module, public luanti::Interface
 		// positive downwards, both in radians, which is what
 		// get_look_horizontal() and get_look_vertical() answer.
 		// The client turns them into its own convention -- see send_where()
-		// in games/luanti_launcher, which is this in reverse.
+		// in games/vanilla, which is this in reverse.
 		for(int i = 6; i <= 7; i++){
 			char buf[32];
 			snprintf(buf, sizeof buf, "%.4f",
@@ -6372,7 +6372,7 @@ struct Module: public interface::Module, public luanti::Interface
 		// How far this client tilts the sun and the moon's orbit when the
 		// game has no opinion, in degrees. A game that sets body_orbit_tilt
 		// is obeyed instead, whatever this says; see the sky handler in
-		// games/luanti_launcher. **Zero is what a comparison against
+		// games/vanilla. **Zero is what a comparison against
 		// official Luanti wants**, because that is what Luanti does with a
 		// game that never asks. Read here rather than in the client's Lua
 		// for the same reason the mode is: that half runs in the sandbox,

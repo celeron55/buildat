@@ -44,7 +44,7 @@ namespace pv = PolyVox;
 #define PV3I_FORMAT "(%i, %i, %i)"
 #define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
 
-namespace luanti_launcher {
+namespace vanilla {
 
 struct World
 {
@@ -1600,6 +1600,24 @@ struct Module: public interface::Module
 	// runs what the environment says, which is what every check here does.
 	void on_start()
 	{
+		// The game was games/luanti_launcher until 2026-09-20 and its saves
+		// lived under that name: moved to this one on the first start
+		// that finds the new directory absent, so nobody loses a world
+		// ([LAUNCH_GRID]'s rename checklist)
+		{
+			const ss_ games = m_server->get_config().get<ss_>("user_path")+
+					"/games";
+			const ss_ old_dir = games+"/luanti_launcher";
+			const ss_ new_dir = games+"/vanilla";
+			if(interface::fs::path_exists(old_dir) &&
+					!interface::fs::path_exists(new_dir)){
+				if(rename(old_dir.c_str(), new_dir.c_str()) == 0)
+					log_i(MODULE, "Moved %s to %s", cs(old_dir), cs(new_dir));
+				else
+					log_w(MODULE, "Could not move %s to %s", cs(old_dir),
+							cs(new_dir));
+			}
+		}
 		// What this game does about a client that stops reading. Luanti's
 		// own answer: a window of what may be in flight, and a timeout that
 		// disconnects rather than a queue that grows without bound -- a

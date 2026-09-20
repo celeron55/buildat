@@ -4,7 +4,7 @@
 --
 --   BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=vlpunch \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/vlpunch.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- A pig beside the player, punched three times through the same
 -- ObjectRef:punch a client's punch comes to. hp stays; health drops once

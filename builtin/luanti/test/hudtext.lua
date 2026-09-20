@@ -3,7 +3,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=hudtext_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/hudtext.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- Connect a client: four lines sit in the middle of the screen, the first
 -- three coloured word by word and the last one plain, which is what says a

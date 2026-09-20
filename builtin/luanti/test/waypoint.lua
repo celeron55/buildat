@@ -4,7 +4,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=waypoint_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/waypoint.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- Connect a client and look straight ahead: the label is eight metres away
 -- and the heart is a metre above it. Both follow the world as the player

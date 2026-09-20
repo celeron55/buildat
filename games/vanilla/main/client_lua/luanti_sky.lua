@@ -1,4 +1,4 @@
--- Buildat: luanti_launcher/client_lua/luanti_sky.lua
+-- Buildat: vanilla/client_lua/luanti_sky.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -19,7 +19,7 @@
 -- **Every uniform is set here at creation**, including the ones nothing ever
 -- changes: a shader parameter a material never sets reads as zero, and zero
 -- for most of these is a black sky.
-local log = buildat.Logger("luanti_launcher")
+local log = buildat.Logger("vanilla")
 local magic = require("buildat/extension/urho3d")
 
 local M = {}

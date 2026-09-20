@@ -97,7 +97,7 @@ if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	killall -KILL buildat_server buildat 2>/dev/null || true
 	sleep 1
 fi
-rm -rf "../user/games/luanti_launcher/saves/$save"
+rm -rf "../user/games/vanilla/saves/$save"
 port=$(( 29600 + (RANDOM % 90) ))
 # **The orbit's tilt is the set's for pbr and zero for the parity modes.**
 # This client tilts the sun and the moon when the game has no opinion,
@@ -122,7 +122,7 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_IMPORT="$world" BUILDAT_LUANTI_PBR="$first_mode" \
 	BUILDAT_VOXELWORLD_KEEP_LOADED=1 \
 	BUILDAT_LUANTI_LUA="$fixture" \
-	bin/buildat_server -m ../games/luanti_launcher -D ../user -P "$port" 2>&1 \
+	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$tmp/srv.log" 2>/dev/null && break

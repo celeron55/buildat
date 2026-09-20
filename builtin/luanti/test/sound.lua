@@ -2,7 +2,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=sound_check \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/sound.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user \
+--   bin/buildat_server -m ../games/vanilla -D ../user \
 --   -o sound_mute=0
 --
 -- The client mutes the sound by default, so it is worth saying so on the

@@ -399,7 +399,7 @@ end
 -- everyone. Both want the same thing: ask the peer for a fresh
 -- core:tell_after_all_files_transferred and wait for client_file's
 -- files_transmitted event. **The trap in doing that** is that
--- games/luanti_launcher listens to the same event and shows the world to
+-- games/vanilla listens to the same event and shows the world to
 -- whoever it names, so a second one for a player already in the world
 -- re-runs their init.lua; that has to be settled first.
 local dynamic_media_n = 0

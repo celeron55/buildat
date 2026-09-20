@@ -2908,7 +2908,7 @@ buildat.sub_packet("luanti:world_info", function(data)
 	world_info = {game = values[1] or "", seed = values[2] or "",
 			version = values[3] or "", mode = values[4] or "pbr",
 			-- Empty means the client's own default; see the sky handler in
-			-- games/luanti_launcher
+			-- games/vanilla
 			orbit_tilt = tonumber(values[5] or ""),
 			-- The server's longest step, held and decayed, and the phase
 			-- that set it; re-sent when it moves. See [STEP_PEAK].

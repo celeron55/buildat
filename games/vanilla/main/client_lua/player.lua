@@ -1,4 +1,4 @@
--- Buildat: luanti_launcher/client_lua/player.lua
+-- Buildat: vanilla/client_lua/player.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --

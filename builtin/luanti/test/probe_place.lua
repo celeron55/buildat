@@ -7,7 +7,7 @@
 --     BUILDAT_LUANTI_IMPORT=../local/reference_worlds/<seed> \
 --     BUILDAT_VOXELWORLD_KEEP_LOADED=1 \
 --     BUILDAT_LUANTI_LUA=../builtin/luanti/test/probe_place.lua \
---     bin/buildat_server -m ../games/luanti_launcher -D ../user
+--     bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- The place and the node are the two constants below, edited per question:
 -- a fixture that answers "what is here" has a different here every time, and

@@ -1,4 +1,4 @@
--- Buildat: games/luanti_launcher/launcher/init.lua
+-- Buildat: games/vanilla/launcher/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -11,12 +11,12 @@ return function(ctx)
 		order = 192,
 		description = "Import search paths, the render mode",
 		run = function()
-			ctx.launch{game = "luanti_launcher", params = {menu = "settings"}}
+			ctx.launch{game = "vanilla", params = {menu = "settings"}}
 		end},
 	-- ContentDB's games, fetched and installed by the server ([CONTENTDB])
 	{id = "contentdb", label = "ContentDB", icon = "luanti.png", order = 193,
 		description = "Browse and install games from content.luanti.org",
 		run = function()
-			ctx.launch{game = "luanti_launcher", params = {menu = "contentdb"}}
+			ctx.launch{game = "vanilla", params = {menu = "contentdb"}}
 		end}}
 end

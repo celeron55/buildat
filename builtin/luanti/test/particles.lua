@@ -2,7 +2,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=particle_check \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/particles.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- Three things to look at, all out of the engine's own textures so that
 -- they are there whatever the game ships:

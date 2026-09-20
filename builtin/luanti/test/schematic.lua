@@ -4,7 +4,7 @@
 --
 --   BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=schematic \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/schematic.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 --   schematic: desert well 5x7x5, 175 nodes read, 77 placed of 175
 core.register_on_mods_loaded(function()

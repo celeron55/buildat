@@ -2,7 +2,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=minimap_check \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/minimap.lua \
---   bin/buildat_server -m ../games/luanti_launcher -D ../user
+--   bin/buildat_server -m ../games/vanilla -D ../user
 --
 -- A square in the top right corner of the screen holding the world around
 -- the player seen from above, and a second one at the bottom left that is
