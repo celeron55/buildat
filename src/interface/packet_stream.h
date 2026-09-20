@@ -77,9 +77,29 @@ namespace interface
 		// is framing.
 		uint64_t m_input_offset = 0;
 
+		// Bulk is sliced ([NET_CHANNELS]): a payload over FRAGMENT_BYTES
+		// goes down the wire as core:fragment packets of that size, each
+		// carrying the sequence's id, its index and count and the
+		// payload's type, and the reader hands the whole back under its
+		// own name. What it buys is that a small packet queued behind a
+		// megabyte waits one fragment, not the megabyte, once the queue
+		// in front of the socket takes it first. On the wire nothing
+		// else changes: a payload under the size is what it always was.
+		static const size_t FRAGMENT_BYTES = 64 * 1024;
+		uint32_t m_next_fragment_id = 1;
+		struct Fragments {
+			ss_ name;
+			size_t count = 0;
+			sv_<ss_> parts;
+			size_t have = 0;
+		};
+		sm_<uint32_t, Fragments> m_incoming_fragments;
+
 		PacketStream(){
 			m_outgoing_types.set(0, "core:define_packet_type");
 			m_incoming_types.set(0, "core:define_packet_type");
+			m_outgoing_types.set(1, "core:fragment");
+			m_incoming_types.set(1, "core:fragment");
 		}
 
 		void input(std::deque<char> &socket_buffer,

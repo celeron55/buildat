@@ -78,6 +78,17 @@ namespace network
 		// ignores both.
 		virtual void set_send_policy(SendPolicy policy,
 				size_t max_queue_bytes, int64_t grace_us) = 0;
+		// What a packet's name means for the queue in front of the socket
+		// ([NET_CHANNELS]): the module that defines the packet declares it,
+		// once, and the declaration holds for every peer. LatestOnly: the
+		// packet goes ahead of everything queued and replaces an unsent
+		// one of the same name -- a position, a clock, a HUD value, whose
+		// order against other packets does not matter and whose stale copy
+		// is worth nothing. Everything undeclared keeps its order behind
+		// what was queued before it, sliced into fragments, so a
+		// LatestOnly packet waits one fragment and not the bulk.
+		enum class Channel { Ordered, LatestOnly };
+		virtual void declare(const ss_ &packet_name, Channel channel) = 0;
 	};
 
 	inline bool access(interface::Server *server,

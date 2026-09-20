@@ -12,6 +12,8 @@
 #include "interface/os.h"
 #include "interface/select_handler.h"
 #include <cereal/archives/portable_binary.hpp>
+#include <deque>
+#include <set>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
 #include <deque>
@@ -58,12 +60,56 @@ struct Peer
 	// how much of the front of it has already gone.
 	ss_ out_buf;
 	size_t out_sent = 0;
+	// Behind it, the queue: packets (a fragment each at most) in the order
+	// they were sent, and ahead of them the LatestOnly ones by name, one
+	// per name, the newest ([NET_CHANNELS]). out_buf is what is being
+	// written now; a packet moves into it when it drains.
+	std::deque<ss_> out_queue;
+	std::deque<std::pair<ss_, ss_>> out_latest; // name, packet
+	size_t out_queued_bytes = 0;
 	// When the queue first went over the policy's limit, for Disconnect
 	int64_t over_since_us = 0;
 	// Said once per peer rather than per packet
 	bool warned_full = false;
 
-	size_t out_pending() const { return out_buf.size() - out_sent; }
+	size_t out_pending() const {
+		return out_buf.size() - out_sent + out_queued_bytes;
+	}
+	// The next packet into out_buf, if it is empty and there is one
+	void refill()
+	{
+		if(out_sent < out_buf.size())
+			return;
+		out_buf.clear();
+		out_sent = 0;
+		if(!out_latest.empty()){
+			out_buf = std::move(out_latest.front().second);
+			out_latest.pop_front();
+		} else if(!out_queue.empty()){
+			out_buf = std::move(out_queue.front());
+			out_queue.pop_front();
+		} else {
+			return;
+		}
+		out_queued_bytes -= out_buf.size();
+	}
+	void enqueue(const ss_ &name, const ss_ &packet, bool latest_only)
+	{
+		if(latest_only){
+			for(auto &pair : out_latest){
+				if(pair.first == name){
+					out_queued_bytes -= pair.second.size();
+					out_queued_bytes += packet.size();
+					pair.second = packet;
+					return;
+				}
+			}
+			out_latest.push_back(std::make_pair(name, packet));
+		} else {
+			out_queue.push_back(packet);
+		}
+		out_queued_bytes += packet.size();
+	}
 
 	Peer(){}
 	Peer(Id id, sp_<interface::TCPSocket> socket):
@@ -290,26 +336,23 @@ struct Module: public interface::Module, public network::Interface
 	// error for nothing to go: the peer is not reading and the rest waits.
 	void flush_peer(Peer &peer)
 	{
-		while(peer.out_pending() > 0){
+		for(;;){
+			peer.refill();
+			if(peer.out_sent >= peer.out_buf.size())
+				break;
 			size_t sent = 0;
 			if(!peer.socket->send_some(peer.out_buf, peer.out_sent, &sent)){
 				// The socket is gone; the read side notices and cleans up
 				peer.out_buf.clear();
 				peer.out_sent = 0;
+				peer.out_queue.clear();
+				peer.out_latest.clear();
+				peer.out_queued_bytes = 0;
 				return;
 			}
 			if(sent == 0)
 				break;
 			peer.out_sent += sent;
-		}
-		if(peer.out_sent >= peer.out_buf.size()){
-			peer.out_buf.clear();
-			peer.out_sent = 0;
-		} else if(peer.out_sent > 64 * 1024){
-			// Keep the front from growing without bound: what has gone is
-			// dropped off once there is enough of it to be worth the copy
-			peer.out_buf = peer.out_buf.substr(peer.out_sent);
-			peer.out_sent = 0;
 		}
 		if(peer.out_pending() <= m_max_queue_bytes){
 			peer.over_since_us = 0;
@@ -368,8 +411,20 @@ struct Module: public interface::Module, public network::Interface
 
 	void send_u(Peer &peer, const ss_ &name, const ss_ &data)
 	{
+		const bool latest_only = m_latest_only.count(name) > 0;
+		// A drop policy drops the whole of a fragmented packet or none of
+		// it: the fragments of one call are one packet to the reader
+		bool dropping = false;
+		// A LatestOnly payload may not overtake its own definition, which
+		// the stream writes ahead of the first payload of a name: that
+		// first one goes ordered, behind it
+		bool defined_now = false;
 		peer.packet_stream.output(name, data,
 				[&](const ss_ &packet_data, bool droppable){
+			if(!droppable)
+				defined_now = true;
+			if(dropping && droppable)
+				return;
 			// Over the limit, a Drop game throws the new packet away rather
 			// than queueing it. Buffer and Disconnect both queue; what
 			// Disconnect does about it is in flush_peers(), on the thread
@@ -387,9 +442,13 @@ struct Module: public interface::Module, public network::Interface
 					log_w(MODULE, "Peer %zu is %zu bytes behind; dropping "
 							"what does not fit", peer.id, peer.out_pending());
 				}
+				dropping = true;
 				return;
 			}
-			peer.out_buf += packet_data;
+			// A definition is ordered whatever the payload is: it has to be
+			// read before the payload, and the queue keeps that
+			peer.enqueue(name, packet_data,
+					latest_only && droppable && !defined_now);
 		});
 		// The common case is a peer that is keeping up, and then this writes
 		// the packet and leaves nothing behind
@@ -438,6 +497,16 @@ struct Module: public interface::Module, public network::Interface
 	{
 		log_d(MODULE, "network::send()");
 		send_u(recipient, name, data);
+	}
+
+	std::set<ss_> m_latest_only;
+
+	void declare(const ss_ &packet_name, Channel channel)
+	{
+		if(channel == Channel::LatestOnly)
+			m_latest_only.insert(packet_name);
+		else
+			m_latest_only.erase(packet_name);
 	}
 
 	void set_send_policy(SendPolicy policy, size_t max_queue_bytes,

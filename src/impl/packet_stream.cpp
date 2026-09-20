@@ -97,6 +97,45 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 			continue;
 		}
 
+		if(name == "core:fragment"){
+			// [u32 id][u16 index][u16 count][u16 type][bytes]
+			if(data.size() < 10)
+				continue;
+			const unsigned char *d = (const unsigned char*)data.c_str();
+			uint32_t id = d[0] | d[1]<<8 | d[2]<<16 | (uint32_t)d[3]<<24;
+			size_t index = d[4] | d[5]<<8;
+			size_t count = d[6] | d[7]<<8;
+			PacketType ptype = d[8] | d[9]<<8;
+			if(count == 0 || index >= count)
+				continue;
+			Fragments &f = m_incoming_fragments[id];
+			if(f.count == 0){
+				f.name = m_incoming_types.get_name(ptype);
+				f.count = count;
+				f.parts.resize(count);
+			}
+			if(f.count != count || !f.parts[index].empty())
+				continue;
+			f.parts[index] = data.substr(10);
+			f.have++;
+			if(f.have < f.count){
+				// A sequence a sender's drop policy cut short never
+				// completes; the ones older than a handful of newer ones
+				// are let go
+				while(m_incoming_fragments.size() > 8)
+					m_incoming_fragments.erase(m_incoming_fragments.begin());
+				continue;
+			}
+			ss_ whole;
+			for(const ss_ &part : f.parts)
+				whole += part;
+			ss_ whole_name = f.name;
+			m_incoming_fragments.erase(id);
+			log_d(MODULE, "<< %s (%zu fragments)", cs(whole_name), count);
+			cb(whole_name, whole);
+			continue;
+		}
+
 		log_d(MODULE, "<< %s", cs(name));
 		cb(name, data);
 	}
@@ -138,6 +177,27 @@ void PacketStream::output(const ss_ &name, const ss_ &data,
 	}
 
 	log_d(MODULE, ">> %s", cs(name));
+
+	if(data.size() > FRAGMENT_BYTES && droppable && name != "core:fragment"){
+		const uint32_t id = m_next_fragment_id++;
+		const size_t count = (data.size() + FRAGMENT_BYTES - 1) / FRAGMENT_BYTES;
+		for(size_t i = 0; i < count; i++){
+			ss_ frag;
+			frag += (char)((id>>0) & 0xff);
+			frag += (char)((id>>8) & 0xff);
+			frag += (char)((id>>16) & 0xff);
+			frag += (char)((id>>24) & 0xff);
+			frag += (char)((i>>0) & 0xff);
+			frag += (char)((i>>8) & 0xff);
+			frag += (char)((count>>0) & 0xff);
+			frag += (char)((count>>8) & 0xff);
+			frag += (char)((type>>0) & 0xff);
+			frag += (char)((type>>8) & 0xff);
+			frag += data.substr(i * FRAGMENT_BYTES, FRAGMENT_BYTES);
+			output("core:fragment", frag, cb, true);
+		}
+		return;
+	}
 
 	// Create actual packet including type and length
 	std::ostringstream os(std::ios::binary);
@@ -218,6 +278,31 @@ static void self_check()
 			throw Exception(ss_()+"packet_stream self_check: a type past 127 "
 					"did not survive the round trip ("+
 					itos((int64_t)got2.size())+" of 40 back)");
+	}
+
+	// Bulk: a payload over a fragment goes as fragments and comes back whole
+	{
+		PacketStream w3, r3;
+		ss_ s3;
+		size_t packets = 0;
+		auto write3 = [&](const ss_ &d, bool droppable){ s3 += d; packets++; };
+		ss_ big(PacketStream::FRAGMENT_BYTES * 2 + 5, 'x');
+		big[PacketStream::FRAGMENT_BYTES] = 'y';
+		w3.output("test:big", big, write3);
+		if(packets != 1 + 3)
+			throw Exception(ss_()+"packet_stream self_check: bulk is a "
+					"definition and three fragments, not "+
+					itos((int64_t)packets)+" packets");
+		w3.output("test:small", "s", write3);
+		sv_<std::pair<ss_, ss_>> got3;
+		std::deque<char> b3(s3.begin(), s3.end());
+		r3.input(b3, [&](const ss_ &name, const ss_ &data){
+			got3.push_back(std::make_pair(name, data));
+		});
+		if(got3.size() != 2 || got3[0].first != "test:big" ||
+				got3[0].second != big || got3[1].second != "s")
+			throw Exception("packet_stream self_check: bulk did not come "
+					"back whole");
 	}
 
 	// A type nobody defined: what a stream read at the wrong offset looks

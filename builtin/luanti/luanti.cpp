@@ -1098,7 +1098,19 @@ struct Module: public interface::Module, public luanti::Interface
 				on_inv_action, network::Packet)
 	}
 
-	void on_start(){}
+	void on_start()
+	{
+		// What may go ahead of the queue and replace its own stale copy
+		// ([NET_CHANNELS]): the player's own position and the clock. The
+		// objects' packet carries every object and is not keyed, so it
+		// stays ordered for now.
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->declare("luanti:player_pos",
+					network::Interface::Channel::LatestOnly);
+			inetwork->declare("luanti:time",
+					network::Interface::Channel::LatestOnly);
+		});
+	}
 	void on_unload(){}
 	void on_continue(){}
 
