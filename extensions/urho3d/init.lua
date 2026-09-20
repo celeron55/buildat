@@ -137,8 +137,20 @@ end
 
 local mouse = { hide_wanted = false }
 
+-- What set_preferred_viewports() was last given, unsafe, for
+-- renderer:GetViewport(): a preferred viewport drawn at a render scale, or
+-- in the scripted client at its logical size ([SEQ_FIXED_SIZE]), goes onto
+-- a texture and the renderer holds no viewports at all -- and every
+-- reader of GetViewport(0) (voxel_shading's shader parameters, the sky
+-- visibility, the parity modes' render path) got nil and gave up in
+-- silence: the reference sets since 2026-09-20 had no bounce, ground or
+-- lamp term (found on the interior fit). The wrapper answers with the
+-- game's own when the renderer has none.
+local preferred = {}
+
 safe_classes.define(Safe, {
 	wc = wc,
+	preferred_viewport = function(index) return preferred[index + 1] end,
 	wrap_instance = wrap_instance,
 	wrap_function = wrap_function,
 	self_function = self_function,
@@ -374,6 +386,7 @@ function Safe.set_preferred_viewports(viewports)
 	for i = 1, #viewports do
 		unsafe[i] = magic_sandbox.safe_to_unsafe(viewports[i], "Viewport")
 	end
+	preferred = unsafe
 	__buildat_set_preferred_viewports(unsafe)
 end
 

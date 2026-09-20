@@ -1116,7 +1116,10 @@ function M.define(dst, util)
 			),
 			GetViewport = util.wrap_function({"Renderer", "number"},
 				function(self, index)
-					local ret = self:GetViewport(index)
+					-- The game's preferred viewport when the renderer holds
+					-- none (it is on a texture then); see init.lua
+					local ret = self:GetViewport(index) or
+							util.preferred_viewport(index)
 					if ret == nil then return nil end
 					return util.wrap_instance("Viewport", ret)
 				end
