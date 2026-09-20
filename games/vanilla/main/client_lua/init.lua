@@ -47,15 +47,22 @@ voxel_shading.use_sun_gate(true)
 -- stays theirs -- it is still what chooses between these eight and what
 -- pushes their parameters, and the .glsl behind them is the extension's.
 -- See [SHADER_HOME] in doc/plan/master_plan.md.
+-- BUILDAT_LUANTI_ABLATE=gate: the sun-gated four replaced by the plain
+-- four, so the nibble never gates the sun -- a fit's ablation ([PBR_FIT])
+local gated = not (buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""):find("gate")
 voxel_shading.use_technique_set({
 	plain = "luanti_client/res/LuantiVoxel.xml",
 	modifiers = "luanti_client/res/LuantiVoxelModifiers.xml",
 	alpha = "luanti_client/res/LuantiVoxelAlpha.xml",
 	masked = "luanti_client/res/LuantiVoxelMasked.xml",
-	sun = "luanti_client/res/LuantiVoxelSun.xml",
-	sun_modifiers = "luanti_client/res/LuantiVoxelSunModifiers.xml",
-	sun_alpha = "luanti_client/res/LuantiVoxelSunAlpha.xml",
-	sun_masked = "luanti_client/res/LuantiVoxelSunMasked.xml",
+	sun = gated and "luanti_client/res/LuantiVoxelSun.xml" or
+			"luanti_client/res/LuantiVoxel.xml",
+	sun_modifiers = gated and "luanti_client/res/LuantiVoxelSunModifiers.xml" or
+			"luanti_client/res/LuantiVoxelModifiers.xml",
+	sun_alpha = gated and "luanti_client/res/LuantiVoxelSunAlpha.xml" or
+			"luanti_client/res/LuantiVoxelAlpha.xml",
+	sun_masked = gated and "luanti_client/res/LuantiVoxelSunMasked.xml" or
+			"luanti_client/res/LuantiVoxelMasked.xml",
 })
 
 -- Luanti's origin is where its mods build, so that is what the camera frames
