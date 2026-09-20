@@ -162,13 +162,21 @@ vec2 SkyOfAlpha(float a)
         // it here: a power on it deepened all four at once, the deep ones
         // most, and banded the dark end ([SHADE_NIBBLE]). Occlusion is
         // fitted per factor in the mesher, on the pbr path.
-        // The share is the low nibble alone: the geometric terms are the
-        // sky's visibility, and the flood's nibble, a level a node from
-        // an opening, is not -- multiplied in it blacked a cave's floor
-        // three nodes inside a mouth that the rays saw 0.83 open and the
-        // render lit at 0.93 off its sky ([PBR_FIT] 2026-09-20). The
-        // nibble keeps the sun's gate and the bounce's falloff.
-        return vec2(hi / 15.0, lo / 15.0);
+        // The share: the geometric terms (the low nibble -- corners,
+        // rays, cap) times the flood's nibble squared. The nibble is the
+        // one term that carries depth into a cave or a bore -- a level a
+        // node from the opening -- and the geometric terms do not: with
+        // the nibble out, a bore's walls read one level the whole way
+        // down where the render ramps them 13-18 times to the back
+        // ([INTERIOR_FALLOFF]'s six crops, 2026-09-20: cave_falloff
+        // render 0.056 against 0.85, bore_falloff 0.075 against 1.25).
+        // Cubed, fitted to the ramps: linear read the back of the bore
+        // at 62 times the render, squared at 10, the cubed one is the
+        // reading in the plan; at the surface the nibble is 15 and the
+        // geometric terms stand alone, which is the underground rule
+        // without a test for the surface.
+        float sky = hi / 15.0;
+        return vec2(sky, lo / 15.0 * sky * sky * sky);
     }
     return vec2(a, a);
 }

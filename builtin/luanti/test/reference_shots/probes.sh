@@ -151,6 +151,12 @@ sky_horizon_0545|vp1_0545|60x20+1100+225|vp1 the horizon opposite the dawn
 sky_night_0200|vp5_0200|60x40+20+20|vp5 away from the moon, 02:00
 night_snow_lit|vp5_0200|160x40+320+600|vp5 02:00 the moonlit snow field ([NIGHT_LIGHT]'s ladder crop; 77 of 255 at moon x3)
 night_cave_wall|vp4_2030|50x50+811+460|vp4 20:30 the cave wall the moon does not reach
+cave_lit_wall|vp4_1300|40x32+448+410|vp4 the small cave's wall at a nibble of 14 ([INTERIOR_FALLOFF], user's crop)
+cave_back_wall|vp4_1300|64x32+768+448|vp4 the small cave's back wall, a handful of nodes in
+cave_ao_corner|vp4_1300|16x16+438+384|vp4 a corner the mesher's AO should darken, so the shade reads sharp
+bore_wall_near|vp9_1300|64x32+544+320|vp9 the bore's side wall about one voxel down
+bore_wall_far|vp9_1300|64x32+576+320|vp9 much of the rest of the bore's side wall
+bore_back_wall|vp9_1300|32x64+624+320|vp9 the bore's back wall, ten columns in
 "
 # The ratios, from the crops' names. kind: lum -- luminance over luminance;
 # rgb -- per channel; sat -- max over min channel of one crop; hue -- R/B
@@ -163,6 +169,9 @@ contrast_dirt_pit|lum|lit_dirt|pit_dirt|a deep shadow hemmed in on three sides: 
 incidence_dirt|lum|dirt_side_lit|dirt_side_camera|the face-shade table and the sun's direction
 contrast_snow|lum|snow_sun|snow_shade|at the top of the range
 night_range|lum|night_snow_lit|night_cave_wall|moonlit snow over a dark wall: the night's range
+cave_falloff|lum|cave_back_wall|cave_lit_wall|the small cave's ramp, back over lit ([INTERIOR_FALLOFF])
+cave_ao|lum|cave_ao_corner|cave_lit_wall|the corner table's darkening, corner over lit wall
+bore_falloff|lum|bore_back_wall|bore_wall_near|the bore's ramp, back over near
 contrast_cave|lum|sun_step|deep_wall|pbri: the sun reaching into the cave (the fold is PBRI's)
 cave_wall_near|lum|near_wall|deep_wall|pbri: the interior's falloff past the flood (PBRI's)
 cave_opening|lum|sky_mouth|near_wall|the range across the mouth the meter spans
