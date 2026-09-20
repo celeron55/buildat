@@ -656,6 +656,12 @@ def stair_step(s, mem, pick, down):
     under = (floor[0], floor[1] - 1, floor[2])
     drop = world.get(floor) is not None and not solid_at(world, floor) and \
         world.get(under) is not None and not solid_at(world, under)
+    # And an unknown floor is not stepped onto: the cube is read first
+    # (the player fell nine nodes into lava off a step whose floor the
+    # map had not seen, 2026-09-20)
+    if world.get(floor) is None or world.get(under) is None:
+        mem["dug_since_volume"] = True
+        return "stair_look", ["delay 200"], None
     # Lava, not water: a stair in a lake is a wet stair, not a dead
     # player (824 quarter-turns in a lake at y 0, 2026-09-20). Standing
     # in water the stair yields to the water rules further down.
@@ -1197,6 +1203,8 @@ def main():
                 mem["no_place_until"] = turn + 1
             elif expect_name == "make_room":
                 say("turn %d: the room did not open" % turn)
+            elif expect_name == "stair_look":
+                pass
             elif expect_name.startswith("dig_out_") or \
                     expect_name in ("mine", "stair_walk", "stair_aim", "tunnel_aim",
                                  "stair_clear", "tunnel_clear", "room_clear",
@@ -1319,7 +1327,8 @@ done, 8 lines""".splitlines()
             "voxels y=22 z=11 x=9: 0 0 0",
             "voxels y=21 z=11 x=9: 0 1 0",
             "voxels y=20 z=11 x=9: 2 2 2",
-            "voxels y=19 z=11 x=9: 1 1 1"]
+            "voxels y=19 z=11 x=9: 1 1 1",
+            "voxels y=18 z=11 x=9: 1 1 1"]
     cs = parse(cube)
     m = {"stair_yaw": 0.0}
     cs.world = update_world(m, cs)
@@ -1363,7 +1372,7 @@ done, 8 lines""".splitlines()
     # With a stone pickaxe and no ore in view the driver mines for it
     mine = parse(["self at 0,-35,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_stone 1 | 2:mcl_core:cobble 20 | 3:mcl_crafting_table:crafting_table 1 | 4:mcl_core:stick 2 | 5:mcl_furnaces:furnace 1"])
     name, cmds, exp = rules(mine, {})
-    assert name == "tunnel_aim", (name, cmds)
+    assert name == "stair_look", (name, cmds)   # the floor unknown: the cube first
     # Ore in the crosshair with a pickaxe is dug
     ore = parse(["self at 0,0,0 yaw 0 pitch 30 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_stone 1 | 2:mcl_core:cobble 20 | 3:mcl_crafting_table:crafting_table 1 | 4:mcl_core:stick 2",
                  "crosshair mcl_core:stone_with_iron at 0,-1,1"])
@@ -1402,7 +1411,7 @@ done, 8 lines""".splitlines()
     assert name == "stair_aim", (name, cmds)
     # and with none in sight, down through the ground
     name, cmds, exp = rules(parse(["self at 0,5,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_crafting_table:crafting_table 1 | 3:mcl_core:stick 2"]), {})
-    assert name == "stair_aim", name
+    assert name == "stair_look", name
     # A craft: a log in the hotbar wants planks; the form's slots give the
     # clicks, source, cell, source, result, empty slot
     inv = parse(["self at 0,0,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:jungletree 4",
