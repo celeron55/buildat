@@ -1148,6 +1148,13 @@ luanti.sub_world_info(function(info)
 	-- Lua 5.1's two hundred locals and has been for a while
 	sky_now.unlit = true
 	sky_now.shadows = mode == "shadows"
+	-- The packed vertex layout is the pbr shader's ([PBR_FIT] 2c); the
+	-- unlit shader draws the vertex colour as the light, and read the
+	-- packed one as purple and green since 2026-09-18 (found 2026-09-20 on
+	-- the vp7/vp8 shots). Off here, before any chunk is meshed: the world
+	-- streams only after the texture modifiers, which come after this.
+	voxelworld.horizon = false
+	voxel_shading.set_packed_sky(false)
 	-- **And no tonemap, which is half of what either parity mode means.** The
 	-- unlit shader writes the light the mesher baked, which is already the
 	-- number that belongs on the screen; put that through an HDR buffer, an

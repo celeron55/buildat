@@ -3481,6 +3481,38 @@ struct CInstance: public voxelworld::Instance
 			update_light((LightField)f, 0);
 	}
 
+	// A write's seeds flooded now, to the end, while a deferred relight's
+	// flood is under way and would otherwise take them on its end -- ticks
+	// or seconds later under relight_stale()'s budget: a placed lamp lit
+	// nothing in the reference set's vp8 and check_map read its room lit
+	// before the flood ([DIG_LIGHT], [CHECK_MAP_FLAKE]). The relight's
+	// state is put aside, the seeds run as a flood of their own, and the
+	// relight goes on where it was; the two write the same voxels and the
+	// relight's pass, which takes light out and lets it back in, settles
+	// whatever they disagree on.
+	void update_skylight_now()
+	{
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+			if(m_light_seeds[f].empty())
+				continue;
+			FloodState paused;
+			paused.active = m_flood[f].active;
+			paused.unlight.swap(m_flood[f].unlight);
+			paused.spread.swap(m_flood[f].spread);
+			paused.blockers.swap(m_flood[f].blockers);
+			paused.ui = m_flood[f].ui; paused.si = m_flood[f].si;
+			paused.seeds_n = m_flood[f].seeds_n; paused.t0 = m_flood[f].t0;
+			m_flood[f] = FloodState();
+			update_light((LightField)f, 0);
+			m_flood[f].active = paused.active;
+			m_flood[f].unlight.swap(paused.unlight);
+			m_flood[f].spread.swap(paused.spread);
+			m_flood[f].blockers.swap(paused.blockers);
+			m_flood[f].ui = paused.ui; m_flood[f].si = paused.si;
+			m_flood[f].seeds_n = paused.seeds_n; m_flood[f].t0 = paused.t0;
+		}
+	}
+
 	// Every field's flood until the deadline (microseconds of time_us(),
 	// 0 for none); false when one is still unfinished
 	bool update_skylight_until(int64_t deadline_us)
@@ -3929,6 +3961,8 @@ struct CInstance: public voxelworld::Instance
 		// made meanwhile wait on the end of that flood, a few ticks.
 		if(!m_relight_pending)
 			update_skylight();
+		else
+			update_skylight_now();
 		const int64_t t_light = interface::os::time_us();
 
 		if(m_sections_with_loaded_buffers.empty())
