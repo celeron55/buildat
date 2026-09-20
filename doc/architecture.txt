@@ -3,7 +3,7 @@ Buildat architecture
 What the engine is made of and how the parts talk: the client, the server,
 modules, extensions, the launch grid, the network, the voxel world. What is
 being built next is doc/plan/master_plan.md; the client's Lua API is
-client_api.txt.
+client_api.txt and a C++ module's is server_api.txt.
 
 A small engine for networked 3D games. License: Apache 2.0.
 

@@ -129,6 +129,48 @@ def server_headers():
     return names
 
 
+def cpp_declarations(path):
+    """The types and functions a C++ header declares, by name: struct and
+    class names, free and member functions (virtual or not), typedefs,
+    and the EVENT_ macros. simplified: line-based; a declaration split
+    over lines is seen by its first line, which holds the name."""
+    text = read(path)
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    names = []
+    seen = set()
+    for line in text.splitlines():
+        line = re.sub(r"//.*", "", line).strip()
+        if not line or line.startswith("#"):
+            if line.startswith("#define ") and "EVENT_" in line:
+                m = re.match(r"#define\s+(\w+)", line)
+                if m and m.group(1) not in seen:
+                    names.append(m.group(1)); seen.add(m.group(1))
+            continue
+        m = re.match(r"(?:struct|class)\s+(\w+)\b(?!\s*;)", line)
+        if m and m.group(1) not in seen:
+            names.append(m.group(1)); seen.add(m.group(1)); continue
+        m = re.match(r"typedef\s+.*\b(\w+)\s*;", line)
+        if m and m.group(1) not in seen:
+            names.append(m.group(1)); seen.add(m.group(1)); continue
+        m = re.match(r"(?:virtual\s+|static\s+|inline\s+|explicit\s+)*"
+                r"[\w:<>,&*\s]+?[\s&*](~?\w+)\s*\(", line)
+        if m and not line.startswith(("return", "if", "for", "while", "else",
+                "switch", "throw", "delete", "new")) \
+                and m.group(1) not in ("if", "for", "while", "switch", "sizeof",
+                "return", "catch") and m.group(1) not in seen:
+            names.append(m.group(1)); seen.add(m.group(1))
+    return names
+
+
+def server_listing(server):
+    out = []
+    for h in sorted(server):
+        path = os.path.join(root, "src" if h.startswith("interface/") else "",
+                h)
+        out.append("%s: %s" % (h, ", ".join(cpp_declarations(path))))
+    return "\n".join(out) + "\n"
+
+
 def doc_names_text(text, prefixes):
     found = set()
     for p in prefixes:
@@ -205,18 +247,22 @@ def main():
     client = client_buildat() | client_magic() | client_extensions()
     server = server_headers()
     cpath = os.path.join(root, "doc/client_api.txt")
+    spath = os.path.join(root, "doc/server_api.txt")
     if "--appendix" in sys.argv:
         sys.stdout.write(appendix(client))
+        sys.stdout.write(server_listing(server))
         return 0
     if "--write-appendix" in sys.argv:
-        text = read(cpath)
-        a, b = text.find(APPENDIX_BEGIN), text.find(APPENDIX_END)
-        if a < 0 or b < 0:
-            print("no appendix markers in doc/client_api.txt", file=sys.stderr)
-            return 1
-        text = text[:a + len(APPENDIX_BEGIN)] + "\n" + appendix(client) + text[b:]
-        with open(cpath, "w", encoding="utf-8") as f:
-            f.write(text)
+        for path, body in ((cpath, appendix(client)),
+                (spath, server_listing(server))):
+            text = read(path)
+            a, b = text.find(APPENDIX_BEGIN), text.find(APPENDIX_END)
+            if a < 0 or b < 0:
+                print("no appendix markers in %s" % path, file=sys.stderr)
+                return 1
+            text = text[:a + len(APPENDIX_BEGIN)] + "\n" + body + text[b:]
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
         return 0
     if "--check" not in sys.argv:
         for n in sorted(client) + sorted(server):
@@ -245,11 +291,22 @@ def main():
             continue
         print("client_api.txt names %s, which the code does not" % n)
         bad += 1
-    sdoc_path = os.path.join(root, "doc/server_api.txt")
-    sdoc = read(sdoc_path) if os.path.isfile(sdoc_path) else ""
+    sdoc = read(spath) if os.path.isfile(spath) else ""
+    sbody = sdoc.split(APPENDIX_BEGIN)[0]
     for n in sorted(server):
-        if n not in sdoc:
-            print("server_api.txt lacks %s" % n)
+        if n not in sbody:
+            print("server_api.txt lacks a section for %s" % n)
+            bad += 1
+    # the listing is what the code declares now
+    if APPENDIX_BEGIN in sdoc:
+        have = sdoc.split(APPENDIX_BEGIN)[1].split(APPENDIX_END)[0].strip()
+        if have != server_listing(server).strip():
+            print("server_api.txt's listing is stale: run --write-appendix")
+            bad += 1
+    if APPENDIX_BEGIN in cdoc:
+        have = cdoc.split(APPENDIX_BEGIN)[1].split(APPENDIX_END)[0].strip()
+        if have != appendix(client).strip():
+            print("client_api.txt's listing is stale: run --write-appendix")
             bad += 1
     print("%d findings" % bad)
     return 1 if bad else 0
