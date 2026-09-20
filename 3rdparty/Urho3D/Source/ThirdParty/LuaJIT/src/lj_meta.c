@@ -1,6 +1,6 @@
 /*
 ** Metamethod handling.
-** Copyright (C) 2005-2016 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2026 Mike Pall. See Copyright Notice in luajit.h
 **
 ** Portions taken verbatim or adapted from the Lua interpreter.
 ** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
@@ -22,6 +22,11 @@
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
 #include "lj_lib.h"
+#if LJ_HASFFI
+#include "lj_ctype.h"
+#include "lj_cdata.h"
+#include "lj_carith.h"
+#endif
 
 /* -- Metamethod handling ------------------------------------------------- */
 
@@ -47,7 +52,7 @@ void lj_meta_init(lua_State *L)
 cTValue *lj_meta_cache(GCtab *mt, MMS mm, GCstr *name)
 {
   cTValue *mo = lj_tab_getstr(mt, name);
-  lua_assert(mm <= MM_FAST);
+  lj_assertX(mm <= MM_FAST, "bad metamethod %d", mm);
   if (!mo || tvisnil(mo)) {  /* No metamethod? */
     mt->nomm |= (uint8_t)(1u<<mm);  /* Set negative cache flag. */
     return NULL;
@@ -86,8 +91,8 @@ int lj_meta_tailcall(lua_State *L, cTValue *tv)
   else
     top->u32.lo = LJ_CONT_TAILCALL;
   setframe_pc(top++, pc);
-  if (LJ_FR2) top++;
   setframe_gc(top, obj2gco(L), LJ_TTHREAD);  /* Dummy frame object. */
+  if (LJ_FR2) top++;
   setframe_ftsz(top, ((char *)(top+1) - (char *)base) + FRAME_CONT);
   L->base = L->top = top+1;
   /*
@@ -234,14 +239,84 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
   }
 }
 
+/* Helper for bit operators. No bitop metamethods in v2.1. */
+void lj_meta_bitop(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc, BCReg op)
+{
+#if LJ_HASFFI
+  CTypeID id = 0, id_ignore = 0;
+  uint64_t b = lj_carith_checkbit64(L, rb, &id);
+  uint64_t c = lj_carith_checkbit64(L, rc, op >= BC_BSHL ? &id_ignore : &id);
+  if (id) {
+    if (tvisnum(rb)) {
+      b = id == CTID_UINT64 ? lj_num2u64(numV(rb)) : (uint64_t)lj_num2i64(numV(rb));
+    }
+    if (tvisnum(rc)) {
+      c = id == CTID_UINT64 ? lj_num2u64(numV(rc)) : (uint64_t)lj_num2i64(numV(rc));
+    }
+  }
+  switch (op) {
+  case BC_BNOT: b = ~b; break;
+  case BC_BAND: b &= c; break;
+  case BC_BOR: b |= c; break;
+  case BC_BXOR: b ^= c; break;
+  default:
+    if (id) {
+      b = lj_carith_shift64(b, (int32_t)c, op-BC_BSHL);
+    } else if (op == BC_BSHL) {
+      b = (uint64_t)((uint32_t)b << ((uint32_t)c & 31));
+    } else if (op == BC_BSHR) {
+      b = (uint64_t)((uint32_t)b >> ((uint32_t)c & 31));
+    } else {
+      lj_assertL(op == BC_BSAR, "bad bytecode op %d", op);
+      b = (uint64_t)(uint32_t)((int32_t)b >> ((uint32_t)c & 31));
+    }
+    break;
+  }
+  if (id) {
+    GCcdata *cd = lj_cdata_new_(L, id, 8);
+    *(uint64_t *)cdataptr(cd) = b;
+    setcdataV(L, ra, cd);
+  } else {
+    setintV(ra, (int32_t)b);
+  }
+#else
+#if LJ_DUALNUM
+  uint32_t b = 0, c = 0;
+  if (tvisint(rb)) b = (uint32_t)intV(rb);
+  else if (tvisnum(rb)) b = (uint32_t)lj_num2bit(numV(rb));
+  else goto err;
+  if (tvisint(rc)) c = (uint32_t)intV(rc);
+  else if (tvisnum(rc)) c = (uint32_t)lj_num2bit(numV(rc));
+  else goto err;
+  switch (op) {
+  case BC_BNOT: b = ~b; break;
+  case BC_BAND: b &= c; break;
+  case BC_BOR: b |= c; break;
+  case BC_BXOR: b ^= c; break;
+  case BC_BSHL: b <<= (c & 31); break;
+  case BC_BSHR: b >>= (c & 31); break;
+  case BC_BSAR: b = (uint32_t)((int32_t)b >> (c & 31)); break;
+  default:
+    lj_assertL(0, "bad bytecode op %d", op);
+    break;
+  }
+  setintV(ra, (int32_t)b);
+  return;
+err:
+#endif
+  UNUSED(ra); UNUSED(op);
+  lj_err_optype(L, tvisnumber(rb) ? rc : rb, LJ_ERR_OPARITH);
+#endif
+}
+
 /* Helper for CAT. Coercion, iterative concat, __concat metamethod. */
 TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
 {
   int fromc = 0;
   if (left < 0) { left = -left; fromc = 1; }
   do {
-    if (!(tvisstr(top) || tvisnumber(top)) ||
-	!(tvisstr(top-1) || tvisnumber(top-1))) {
+    if (!(tvisstr(top) || tvisnumber(top) || tvisbuf(top)) ||
+	!(tvisstr(top-1) || tvisnumber(top-1) || tvisbuf(top-1))) {
       cTValue *mo = lj_meta_lookup(L, top-1, MM_concat);
       if (tvisnil(mo)) {
 	mo = lj_meta_lookup(L, top, MM_concat);
@@ -277,10 +352,12 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
       ** next step: [...][CAT stack ............]
       */
       TValue *e, *o = top;
-      uint64_t tlen = tvisstr(o) ? strV(o)->len : STRFMT_MAXBUF_NUM;
+      uint64_t tlen = tvisstr(o) ? strV(o)->len :
+		      tvisbuf(o) ? sbufxlen(bufV(o)) : STRFMT_MAXBUF_NUM;
       SBuf *sb;
       do {
-	o--; tlen += tvisstr(o) ? strV(o)->len : STRFMT_MAXBUF_NUM;
+	o--; tlen += tvisstr(o) ? strV(o)->len :
+		     tvisbuf(o) ? sbufxlen(bufV(o)) : STRFMT_MAXBUF_NUM;
       } while (--left > 0 && (tvisstr(o-1) || tvisnumber(o-1)));
       if (tlen >= LJ_MAX_STR) lj_err_msg(L, LJ_ERR_STROV);
       sb = lj_buf_tmp_(L);
@@ -290,6 +367,9 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
 	  GCstr *s = strV(o);
 	  MSize len = s->len;
 	  lj_buf_putmem(sb, strdata(s), len);
+	} else if (tvisbuf(o)) {
+	  SBufExt *sbx = bufV(o);
+	  lj_buf_putmem(sb, sbx->r, sbufxlen(sbx));
 	} else if (tvisint(o)) {
 	  lj_strfmt_putint(sb, intV(o));
 	} else {
@@ -363,7 +443,7 @@ TValue * LJ_FASTCALL lj_meta_equal_cd(lua_State *L, BCIns ins)
   } else if (op == BC_ISEQN) {
     o2 = &mref(curr_proto(L)->k, cTValue)[bc_d(ins)];
   } else {
-    lua_assert(op == BC_ISEQP);
+    lj_assertL(op == BC_ISEQP, "bad bytecode op %d", op);
     setpriV(&tv, ~bc_d(ins));
     o2 = &tv;
   }
@@ -426,7 +506,7 @@ void lj_meta_istype(lua_State *L, BCReg ra, BCReg tp)
 {
   L->top = curr_topL(L);
   ra++; tp--;
-  lua_assert(LJ_DUALNUM || tp != ~LJ_TNUMX);  /* ISTYPE -> ISNUM broken. */
+  lj_assertL(LJ_DUALNUM || tp != ~LJ_TNUMX, "bad type for ISTYPE");
   if (LJ_DUALNUM && tp == ~LJ_TNUMX) lj_lib_checkint(L, ra);
   else if (tp == ~LJ_TNUMX+1) lj_lib_checknum(L, ra);
   else if (tp == ~LJ_TSTR) lj_lib_checkstr(L, ra);
@@ -460,7 +540,8 @@ void LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
       if (tvisint(o+i)) {
 	k[i] = intV(o+i); nint++;
       } else {
-	k[i] = lj_num2int(numV(o+i)); nint += ((lua_Number)k[i] == numV(o+i));
+	int64_t i64;
+	if (lj_num2int_check(numV(o+i), i64, k[i])) nint++;
       }
     }
     if (nint == 3) {  /* Narrow to integers. */

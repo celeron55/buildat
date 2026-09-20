@@ -214,6 +214,10 @@ public:
     void RemoveAllGestures();
     /// Set the mouse cursor position. Uses the backbuffer (Graphics width/height) coordinates.
     void SetMousePosition(const IntVector2& position);
+    /// Buildat: a virtual mouse position for a scripted client. While set, GetMousePosition() returns it and SetMousePosition() moves it instead of warping the real cursor, which stays the desk's.
+    void SetVirtualMousePosition(const IntVector2& position);
+    /// Buildat: back to the real cursor.
+    void ClearVirtualMousePosition();
     /// Center the mouse position.
     void CenterMousePosition();
 
@@ -397,6 +401,9 @@ private:
     IntVector2 lastMousePosition_;
     /// Last mouse position before being set to not visible.
     IntVector2 lastVisibleMousePosition_;
+    /// Buildat: the virtual mouse position, if any; see SetVirtualMousePosition().
+    IntVector2 virtualMousePosition_;
+    bool virtualMouse_{};
     /// Mouse movement since last frame.
     IntVector2 mouseMove_;
     /// Mouse wheel movement since last frame.

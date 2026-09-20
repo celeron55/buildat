@@ -34,7 +34,8 @@ void init_atlas(lua_State *L)
 	module(L)[
 		class_<AtlasRegistry, bases<>, sp_<AtlasRegistry>>("AtlasRegistry")
 			.def("update", &AtlasRegistry::update)
-			.def("set_surface_maps", &AtlasRegistry::set_surface_maps),
+			.def("set_surface_maps", &AtlasRegistry::set_surface_maps)
+			.def("describe_segments", &AtlasRegistry::describe_segments),
 		def("__buildat_createAtlasRegistry", &createAtlasRegistry)
 	];
 }

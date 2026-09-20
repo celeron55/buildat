@@ -1,5 +1,8 @@
 Buildat conventions
 ===================
+Coding style, naming, exceptions, threads, the directory layout, commit
+messages and the coordinate convention. Read before the first commit.
+
 C++ Coding style
 ----------------
 Using the correct coding style is important. If you are asked to fix your style
@@ -114,22 +117,27 @@ Directory structure
 │   ├── interface << Interface available to modules
 │   └── server  << Server-specific code
 ├── games       << Games that can be run using buildat_server -m <path>
-└── util        << Miscellaneous development utilities
+├── doc         << This documentation; doc/plan is the plan and its history
+├── user        << The user's data: saves, imported Luanti games and worlds,
+│                  preferences -- never in git
+├── local       << Runs' outputs: fuzz and driven runs, reference shots,
+│                  options filed for the user -- never in git
+└── util        << Development utilities: packaging, the squash push, benches
 
 Commit messages
 ---------------
-Commit messages must be formatted in the following way:
+Present tense, describing what the commit leaves in the tree rather than the
+work it took. Where it fits, start with the place (a module, a script, a
+directory) and end with the plan item's codename in brackets, so the history
+and the plan read each other:
 
-In present tense. Prepend a location to the message where possible. When adding
-something, the "add" verb should be left out. Fine enough examples:
-- client/sandbox.lua: Fix string concatenation when creating an error message
-- interface::Server::check_module
-- doc: conventions.txt, todo.txt
-- Remove Module::test_add
-- client, 3rdparty/c55lib: Command-line parameters
-- 3rdparty/cereal
-- client: Disable Urho3D log file
-- extensions/__menu: Fix UI warnings
+- voxelworld: a dug blocker starts dark and the flood fills it from around it [DIG_LIGHT]
+- drive: a run has a goal rung and ends when it is met [DRIVE_GOAL]
+- plan: the list re-cut -- the unit gap and the hand first
+- 3rdparty/Urho3D: a virtual mouse position for the scripted client [SEQ_MOUSE_FREE]
+
+No marketing. A message describes the final diff: a fix that was made and
+undone before the commit is not in it.
 
 Coordinates
 -----------
