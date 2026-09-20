@@ -566,6 +566,8 @@ def wanted_craft_3x3(s, mem=None):
     for r in RECIPES_3X3:
         if have(s, r[2], r[3], mem):
             continue
+        if r[2] == "furnace" and mem is not None and mem.get("furnace_fed_turn") is not None:
+            continue
         need = {}
         for w in r[1].values():
             need[w] = need.get(w, 0) + 1
@@ -772,10 +774,12 @@ def rules(s, mem):
                     cmds += click_at(src[0][2], src[0][3], src[0][4]) + \
                         click_at(by[lst][2], by[lst][3], by[lst][4])
             if cmds:
+                mem["furnace_fed_turn"] = turn
                 return "feed_furnace", cmds + ["delay 300"], \
                     lambda n: any(sl[0] in ("fuel", "src") and sl[5] for sl in n.slots)
-            # Fed: closed, and back in a while for the ingot
-            mem["furnace_fed_turn"] = turn
+            # Fed and nothing in dst yet: closed, and back in a while for
+            # the ingot (a smelt is ten seconds)
+            mem["furnace_fed_turn"] = mem.get("furnace_fed_turn", turn)
         # The table's form: the 3x3 crafts
         if craft_cells == 9:
             r = wanted_craft_3x3(s, mem)
@@ -976,9 +980,15 @@ def rules(s, mem):
             name, cmds, exp = stair_step(s, mem, pick, down=s.pos[1] > -30)
             return name, cmds, exp
         # Iron and coal to smelt, a furnace held: place it as the table is,
-        # use it; the form rule feeds it
-        if have(s, "raw_iron", 1, mem) and have(s, "coal", 1, mem) and \
-                not have(s, "iron_ingot", 1, mem):
+        # use it; the form rule feeds it. A furnace fed is gone back to
+        # for the ingot: after the feed the iron is in the furnace and
+        # nothing else here would return (the driver went off to craft a
+        # second furnace, 2026-09-20)
+        fed = mem.get("furnace_fed_turn") is not None and not have(s, "iron_ingot", 1, mem)
+        if fed or (have(s, "raw_iron", 1, mem) and have(s, "coal", 1, mem) and
+                   not have(s, "iron_ingot", 1, mem)):
+            if fed and turn < mem["furnace_fed_turn"] + 3:
+                return "smelt_wait", ["delay 2000"], None
             if s.crosshair and "furnace" in s.crosshair[0]:
                 return "use_furnace", ["mouse_click right", ms(1.0)], \
                     lambda n: n.form is not None
