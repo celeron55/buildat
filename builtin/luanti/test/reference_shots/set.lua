@@ -55,6 +55,14 @@ rawset(_G, "REFSET", {
 		{pos = {x = 326.2, y = 9.2, z = -294.8}, yaw = 56.3, pitch = -16.0},
 		{pos = {x = 310.5, y = 0.2, z = -286.2}, yaw = 241.3, pitch = 26.0},
 		{pos = {x = 324.3, y = 1.0, z = -288.7}, yaw = 56.3, pitch = -20.0},
+		-- 9 down the bore ([STAIR_VIEW], user 2026-09-20): vp1 turned to
+		-- look exactly along the bore's trace (yaw +X, pitch -30) and
+		-- moved 80 % of the way from its eye to the first column's voxel
+		-- (326, 14, -302): 8.675 nodes along (cos 30, -sin 30, 0), the
+		-- eye at 325.0, 15.66, the feet 1.625 under it. 13:00 only,
+		-- frozen; the mouth fills the lower half, and the meter's common
+		-- case -- a dark hole in a sunlit meadow -- gets its picture.
+		{pos = {x = 325.0, y = 14.03, z = -302.0}, yaw = 270.0, pitch = -30.0},
 	},
 
 	-- One lamp in the reference ([LAMP_REF]): a light source placed by
@@ -103,6 +111,7 @@ rawset(_G, "REFSET", {
 		[6] = {"1300"},
 		[7] = {"1300"},
 		[8] = {"1300"},
+		[9] = {"1300"},
 	},
 	-- Rain is the surface set, at 15:00; a cave at 15:00 in rain is not a
 	-- third lighting question
@@ -129,6 +138,8 @@ rawset(_G, "REFSET", {
 		{view = 4, hour = "0545", weather = "none"},
 		-- and the lamp's ([LAMP_REF])
 		{view = 8, hour = "1300", weather = "none"},
+		-- and the bore's ([STAIR_VIEW])
+		{view = 9, hour = "1300", weather = "none"},
 	},
 	-- One dump per viewpoint at its primary hour, for [PATH_TRACE_REF].
 	-- Caves first: a later state that never draws must not drop them.
@@ -136,6 +147,7 @@ rawset(_G, "REFSET", {
 		{view = 6, hour = "1300", weather = "none"},
 		{view = 7, hour = "1300", weather = "none"},
 		{view = 8, hour = "1300", weather = "none"},
+		{view = 9, hour = "1300", weather = "none"},
 		{view = 1, hour = "1300", weather = "none"},
 		{view = 2, hour = "1300", weather = "none"},
 		{view = 3, hour = "1300", weather = "none"},
