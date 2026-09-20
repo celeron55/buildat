@@ -215,25 +215,44 @@ local function dig_bore()
 	if not b then
 		return
 	end
+	-- Per column along X: every voxel whose centre is within `half` of
+	-- the line in Y (one or two of them; at thirty degrees a half of 0.5
+	-- leaves the steps touching at their corners only, so set.lua says
+	-- 0.8 and each step overlaps the next). The depth counts columns
+	-- from the first that held anything solid.
 	local tan = math.tan(math.rad(b.pitch))
-	local dug, first = 0, nil
+	local half = b.half or 0.5
+	local columns, first = 0, false
 	for i = 1, 40 do
-		if dug >= b.depth then
+		if columns >= b.depth then
 			break
 		end
 		local x = math.floor(b.from.x) + i
-		local y = b.from.y + (x - b.from.x) * tan
-		local pos = {x = x, y = math.floor(y + 0.5), z = math.floor(b.from.z + 0.5)}
-		local node = core.get_node_or_nil(pos)
-		local name = node and node.name or "ignore"
-		if first == nil and name ~= "air" and name ~= "ignore" then
-			first = pos
+		local yl = b.from.y + (x - b.from.x) * tan
+		local z = math.floor(b.from.z + 0.5)
+		local solid = false
+		for y = math.ceil(yl - half), math.floor(yl + half) do
+			local node = core.get_node_or_nil({x = x, y = y, z = z})
+			local name = node and node.name or "ignore"
+			if name ~= "air" and name ~= "ignore" then
+				solid = true
+			end
 		end
-		if first ~= nil then
-			core.remove_node(pos)
-			dug = dug + 1
-			core.log("action", string.format("REFSHOT bore %d at %d,%d,%d (vp%d), was %s",
-					dug, pos.x, pos.y, pos.z, b.view, name))
+		if solid then
+			first = true
+		end
+		if first then
+			columns = columns + 1
+			for y = math.ceil(yl - half), math.floor(yl + half) do
+				local pos = {x = x, y = y, z = z}
+				local node = core.get_node_or_nil(pos)
+				local name = node and node.name or "ignore"
+				if name ~= "air" and name ~= "ignore" then
+					core.remove_node(pos)
+					core.log("action", string.format("REFSHOT bore column %d at %d,%d,%d (vp%d), was %s",
+							columns, pos.x, pos.y, pos.z, b.view, name))
+				end
+			end
 		end
 	end
 end

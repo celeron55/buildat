@@ -75,11 +75,13 @@ rawset(_G, "REFSET", {
 	-- along vp1's own line of sight so the camera looks straight down
 	-- it. The trace: from vp1's eye (its feet plus Luanti's 1.625)
 	-- toward +X pitched -30 degrees; every voxel whose centre is within
-	-- half a node of the line in Y goes to air, ten deep counted from
-	-- the first solid voxel the trace meets. The trace is the number;
-	-- which voxels it meets is the world's, the same in every run.
+	-- `half` of the line in Y goes to air (0.8: at thirty degrees 0.5
+	-- left the steps touching at their corners only, user 2026-09-20),
+	-- ten columns deep counted from the first that held anything solid.
+	-- The trace is the number; which voxels it meets is the world's,
+	-- the same in every run.
 	bore = {view = 1, from = {x = 319.0, y = 17.5 + 1.625, z = -302.0},
-		pitch = -30, depth = 10},
+		pitch = -30, half = 0.8, depth = 10},
 
 	-- Luanti's day as one whole unit. The fractions are the plan's own.
 	hours = {
