@@ -170,6 +170,7 @@ smoke_test_wine() {
 	if ! grep -q "Command sequence complete" "$dir/cli.log"; then
 		echo "smoke test under Wine: the client joined and drew but did not finish its commands; its log's end:" >&2
 		tail -20 "$dir/cli.log" >&2
+		read_crash "$dir/cli.log" || exit 1
 	fi
 	echo "smoke test under Wine passed: the server compiled every module and generated a section, the client joined and drew"
 }
@@ -219,25 +220,92 @@ make_one() {
 # compiled by the shipped compiler, the game's mods load and one section
 # generates. games/digger before never compiled either, and a mapgen that
 # did not build under mingw shipped in 0.4.2.
-wait_for_vanilla() {
-	local log="$1" srv="$2" what="$3"
-	local i
-	for i in $(seq 1 900); do
-		grep -q "Listening at" "$log" 2>/dev/null && break
-		kill -0 "$srv" 2>/dev/null || break
+# The CPU time, in seconds, of a process and everything under it: under
+# Wine the work is in the children, and a compile's is in the compiler
+tree_cpu() {
+	ps -eo pid=,ppid=,times= | awk -v root="$1" '
+		{ pp[$1] = $2; t[$1] = $3 }
+		END {
+			for (p in pp) {
+				q = p
+				while (q != root && (q in pp)) q = pp[q]
+				if (q == root) s += t[p]
+			}
+			print s + 0
+		}'
+}
+
+# Wait for $pattern in $log while the server is alive and doing something:
+# a log that has not grown and a process tree whose CPU time has not
+# moved for 30 s is a hang -- an idle select, a build step stuck, a Wine
+# dialog nobody can click -- and is failed on the spot rather than at the
+# end of the ceiling ([WIN_SMOKE_STALL]). A compile keeps the CPU moving,
+# worldgen keeps the log moving. A progress line every 30 s says which.
+wait_for_line() {
+	local log="$1" srv="$2" pattern="$3" ceiling="$4"
+	local i size cpu last_size=-1 last_cpu=-1 still=0
+	for i in $(seq 1 "$ceiling"); do
+		grep -q "$pattern" "$log" 2>/dev/null && return 0
+		kill -0 "$srv" 2>/dev/null || return 1
+		size=$(stat -c %s "$log" 2>/dev/null || echo 0)
+		cpu=$(tree_cpu "$srv")
+		if [ "$size" = "$last_size" ] && [ "$cpu" = "$last_cpu" ]; then
+			still=$((still + 1))
+		else
+			still=0; last_size=$size; last_cpu=$cpu
+		fi
+		if [ "$still" -ge 30 ]; then
+			echo "waited ${i}s: no log or CPU movement for 30 s; the server hangs" >&2
+			return 1
+		fi
+		if [ $((i % 30)) -eq 0 ]; then
+			echo "waited ${i}s, cpu ${cpu}s, last line: $(tail -n 1 "$log" 2>/dev/null | cut -c1-120)"
+		fi
 		sleep 1
 	done
-	if ! grep -q "Listening at" "$log"; then
+	return 1
+}
+
+# A crash in the client's log, read rather than passed over
+# ([WIN_SMOKE_STALL]): winedbg's report names the module of every frame,
+# and the topmost frame's module is the answer to whether the desktop
+# has the same crash. Wine's own -- its GL, its window server, its
+# libc -- is Wine's and is reported (return 0); anything else is
+# buildat's and is a failed smoke (return 1). No report at all is
+# reported too. The Linux client says only "Segmentation fault", which
+# is printed for what it is.
+read_crash() {
+	local log="$1" frame
+	if grep -q "Unhandled page fault\|Unhandled exception" "$log"; then
+		echo "the client crashed; the report:" >&2
+		grep -A12 "Unhandled page fault\|Unhandled exception" "$log" | head -40 >&2
+		frame=$(grep -m1 "^=>0 " "$log" || true)
+		if [ -z "$frame" ]; then
+			echo "the client crashed and left no backtrace" >&2
+			return 0
+		fi
+		if echo "$frame" | grep -qi " in \(opengl32\|wined3d\|winex11\|win32u\|gdi32\|user32\|ntdll\|kernel32\|kernelbase\|ucrtbase\|msvcrt\|winevulkan\|dxgi\|d3d[0-9]*\|mesa\|libgl[a-z0-9_]*\|swrast[a-z0-9_]*\|llvmpipe\)"; then
+			echo "the client crashed in Wine's own code; reported, not a verdict" >&2
+			return 0
+		fi
+		echo "the client crashed in buildat's own code: $frame" >&2
+		return 1
+	fi
+	if grep -q "Segmentation fault\|SIGSEGV" "$log"; then
+		echo "the client crashed:" >&2
+		grep -B2 -A2 "Segmentation fault\|SIGSEGV" "$log" | head -10 >&2
+	fi
+	return 0
+}
+
+wait_for_vanilla() {
+	local log="$1" srv="$2" what="$3"
+	if ! wait_for_line "$log" "$srv" "Listening at" 900; then
 		echo "$what: the server did not come up; its log:" >&2
 		tail -40 "$log" >&2
 		return 1
 	fi
-	for i in $(seq 1 300); do
-		grep -q "Generating section\|on_generated" "$log" 2>/dev/null && break
-		kill -0 "$srv" 2>/dev/null || break
-		sleep 1
-	done
-	if ! grep -q "Generating section\|on_generated" "$log"; then
+	if ! wait_for_line "$log" "$srv" "Generating section\|on_generated" 300; then
 		echo "$what: the game loaded no world; its log:" >&2
 		tail -40 "$log" >&2
 		return 1
@@ -296,6 +364,7 @@ smoke_test() {
 			! grep -q "drawn again\|Node update\|player physics enabled\|chunks in scene" "$dir/cli.log"; then
 		echo "smoke test: the client did not join, draw and finish; see $dir/cli.log" >&2
 		tail -40 "$dir/cli.log" >&2
+		read_crash "$dir/cli.log"
 		exit 1
 	fi
 	local mean
