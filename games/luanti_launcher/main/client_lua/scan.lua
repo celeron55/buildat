@@ -176,6 +176,16 @@ return function(ctx)
 		lines[#lines + 1] = string.format("scan %s: frame %dx%d root %dx%d ui_scale %.3f",
 				label, lw, lh, magic.ui.root.width, magic.ui.root.height,
 				magic.ui:GetScale() or 0)
+		-- The light where the player stands, the eye voxel's two nibbles
+		-- (0..15): what says it is dark enough for a torch ([DRIVE_STORY]
+		-- rung 5)
+		local ev = voxelworld.get_static_voxel(buildat.Vector3(
+				math.floor(px + 0.5), math.floor(py + 1.5 + 0.5), math.floor(pz + 0.5)))
+		if ev ~= nil then
+			local reg = voxelworld.get_voxel_registry()
+			lines[#lines + 1] = string.format("scan %s: light sky %d lamp %d", label,
+					reg:light_sky_of(ev), reg:light_lamp_of(ev))
+		end
 		-- The HUD's bars: health, hunger, breath, armour, by their picture
 		for _, e in pairs(luanti.hud_elements) do
 			if e.type == "statbar" then

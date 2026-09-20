@@ -101,6 +101,7 @@ class State:
         self.slots = []      # (list, index, x, y, size, item string), pixels
         self.objects = []    # dict(id, label, at, d, screen, bin): every one on the screen
         self.voxels = {}     # (x, y, z) -> name, the cube the scan carried ("air" for 0)
+        self.light = None    # (sky, lamp) nibbles at the eye
         self.voxel_names = {}
 
 
@@ -132,6 +133,10 @@ def parse(lines):
         m = re.match(r"crosshair (\S+) at (-?\d+),(-?\d+),(-?\d+)", line)
         if m:
             s.crosshair = (m.group(1),) + tuple(int(m.group(i)) for i in (2, 3, 4))
+            continue
+        m = re.match(r"light sky (\d+) lamp (\d+)", line)
+        if m:
+            s.light = (int(m.group(1)), int(m.group(2)))
             continue
         m = re.match(r"voxel names (.*)$", line)
         if m:
@@ -459,6 +464,8 @@ RECIPES_2X2 = [
     ("planks", {1: "tree"}, "wood", 16),
     ("sticks", {1: "wood", 3: "wood"}, "stick", 6),
     ("table", {1: "wood", 2: "wood", 3: "wood", 4: "wood"}, "crafting_table", 1),
+    # Rung 5: a coal over a stick is four torches
+    ("torches", {1: "coal", 3: "stick"}, "torch", 8),
 ]
 
 
@@ -762,7 +769,7 @@ def rules(s, mem):
                         lambda n, w=r[2], h=had: count_held(n, w, mem) > h
             # A thing wanted in the hand lies past the hotbar: moved to
             # an empty hotbar slot (a pick up and a put down)
-            for word in ("crafting_table", "pick_stone", "pick_wood", "furnace"):
+            for word in ("crafting_table", "pick_stone", "pick_wood", "furnace", "torch"):
                 if hotbar_slot_of(s, word) is not None:
                     continue
                 src = [sl for sl in s.slots if sl[0] == "main" and sl[1] > 9 and
@@ -912,7 +919,7 @@ def rules(s, mem):
     # A thing wanted in the hand lying past the hotbar -- a stone pickaxe
     # crafted and left in main:20 while the wooden one dug on -- and a
     # hotbar slot free: the inventory, whose rule moves it
-    for word in ("crafting_table", "pick_stone", "pick_wood", "furnace"):
+    for word in ("crafting_table", "pick_stone", "pick_wood", "furnace", "torch"):
         if hotbar_slot_of(s, word) is None and \
                 any(item_is(st, word) for i, st in mem.get("main", []) if i > 9) and \
                 any(st == "" for _, st in s.hotbar):
@@ -949,6 +956,30 @@ def rules(s, mem):
         if tables:
             bx, by = min(tables, key=lambda k: s.bins[k]["d"])
             return "to_table", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
+
+    # Rung 5: a torch where it is dark -- the eye's lamp light under 5
+    # and no daylight to speak of -- on the floor ahead, and the
+    # expectation is the lamp light up on the next scan. Every thirty
+    # turns at most, so a cave is not carpeted.
+    tslot = hotbar_slot_of(s, "torch")
+    if s.light is not None and s.light[1] < 5 and s.light[0] < 5 and \
+            mem.get("torch_turn", -99) < turn - 30 and \
+            (tslot is not None or have(s, "torch", 1, mem)):
+        if tslot is None:
+            return "open_inventory", ["keypress I", ms(1.0)], \
+                lambda n: n.form is not None
+        yr = math.radians(s.yaw)
+        mem["torch_turn"] = turn
+        was = s.light[1]
+        cmds = ["keypress %d" % tslot, "delay 150",
+                "look_dir %.3f -1.2 %.3f" % (math.sin(yr), math.cos(yr)),
+                "delay 300", "mouse_click right", ms(0.8)]
+        def placed(n, w=was):
+            ok = n.light is not None and n.light[1] > w
+            if ok:
+                mem["torches_placed"] = mem.get("torches_placed", 0) + 1
+            return ok
+        return "place_torch", cmds, placed
 
     # A fed furnace comes before more ore: the ingot is the rung
     if mem.get("furnace_fed_turn") is not None and not have(s, "iron_ingot", 1, mem) \
@@ -1194,6 +1225,7 @@ GOALS = {
     2: lambda s, mem: have(s, "pick_wood", 1, mem),
     3: lambda s, mem: have(s, "pick_stone", 1, mem) and have(s, "furnace", 1, mem),
     4: lambda s, mem: have(s, "ingot", 1, mem),
+    5: lambda s, mem: mem.get("torches_placed", 0) >= 1,
 }
 
 
@@ -1418,6 +1450,12 @@ done, 8 lines""".splitlines()
     cs.world[(10, 21, 11)] = "air"; cs.world[(10, 20, 11)] = "air"
     assert stair_step(cs, m, 1, down=True)[0] == "stair_walk"
     assert cs.world[(10, 19, 11)] == "mcl_core:stone"
+    # In the dark with torches, one is placed; the light up is the check
+    dark = parse(["self at 0,-20,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_torches:torch 4 | 2:mcl_tools:pick_stone 1",
+                  "light sky 0 lamp 0"])
+    name, cmds, exp = rules(dark, {})
+    assert name == "place_torch" and cmds[0] == "keypress 1", (name, cmds)
+    assert exp(parse(["self at 0,-20,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:", "light sky 0 lamp 12"]))
     # A tool is not its material
     assert not item_is("mcl_tools:pick_wood 1", "wood") and item_is("mcl_tools:pick_wood 1", "pick_wood")
     assert item_is("mcl_core:junglewood 4", "wood") and not item_is("mcl_core:jungletree", "wood")
