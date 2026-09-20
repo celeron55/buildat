@@ -145,7 +145,10 @@ srv=$(pgrep -x buildat_server | head -1)
 # is only the client's outside lifetime. Half an hour used to be plenty and
 # stopped being so once the fixture waited for its viewpoints to load -- the
 # client quit mid-run with eleven states still to shoot.
-{ echo "delay 3600000"; echo "quit"; } > "$tmp/cmds.txt"
+# CMDS="delay 90000\nevent scan_volume 6 vp7 light" runs the client's
+# scripted commands before the wait -- a scan of the nibbles at a
+# viewpoint, timed to the states' order ([PBR_FIT]'s cave reading)
+{ [ -n "${CMDS:-}" ] && printf '%b\n' "$CMDS"; echo "delay 3600000"; echo "quit"; } > "$tmp/cmds.txt"
 
 status=0
 shots_dir="$here/user/screenshots"

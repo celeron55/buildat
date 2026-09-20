@@ -777,7 +777,20 @@ void PS()
             // nothing in rock. Under a tree the sun is at full here and the
             // shadow map does the darkening; in a cave there is no sun to
             // shadow.
-            lightColor *= vSkyVisibility;
+            // ... where the shadow map does not reach. Within its range
+            // the map knows what the flood's nibble cannot: the sun
+            // through a cave's sideways mouth lights the floor at the
+            // player's feet where the nibble has decayed to nothing (vp7's
+            // sun_step, 0.93 in the render against 0 here, [PBR_FIT]
+            // 2026-09-20). Urho's own fade says how far past the range a
+            // fragment is; the gate takes over exactly there.
+            #ifdef SHADOW
+                float beyond = clamp((vWorldPos.w - cShadowDepthFade.z) *
+                        cShadowDepthFade.w, 0.0, 1.0);
+                lightColor *= mix(1.0, vSkyVisibility, beyond);
+            #else
+                lightColor *= vSkyVisibility;
+            #endif
         #endif
 
         vec3 toCamera = normalize(cCameraPosPS - vWorldPos.xyz);
