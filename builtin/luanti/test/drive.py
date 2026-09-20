@@ -334,6 +334,9 @@ def hold_for(name):
         return 3800
     if "stone" in base or "ore" in base or "cobble" in base or "deepslate" in base:
         return 1800
+    # Bamboo and cactus are a second and a half by hand
+    if "bamboo" in base or "cactus" in base:
+        return 1800
     if any(w in base for w in ("dirt", "gravel", "sand", "clay", "podzol", "mycelium")):
         return 1100
     return 600
@@ -366,7 +369,18 @@ def dig_one(s, mem, targets, pick, name):
         # Or anything at all in the player's own two nodes -- stone the
         # player ended up inside at y -30, which every ray met first
         # and the map called a wall between the eye and everything
-        hold = hold_for(s.crosshair[0]) if in_own else 700
+        hold = hold_for(s.crosshair[0]) if (in_own or is_plant(s.crosshair[0])) else 700
+        # A thing cleared thrice and still there is out of reach: the
+        # stair turns a quarter rather than clearing it a fourth time
+        # (216 holds on one bamboo, 2026-09-20)
+        cp = tuple(s.crosshair[1:4])
+        clears = mem.setdefault("clears", {})
+        clears[cp] = clears.get(cp, 0) + 1
+        if clears[cp] > 3:
+            clears[cp] = 0
+            mem["stair_yaw"] = (mem.get("stair_yaw", 0) + 90) % 360
+            mem["aimed"] = None
+            return name + "_turn", ["delay 200"], None
         mem["aimed"] = aimed
         mem["dug_since_volume"] = True
         return name + "_clear", ["mouse_down left", "delay %d" % hold, "mouse_up left",
