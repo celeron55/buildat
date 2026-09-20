@@ -96,15 +96,17 @@ echo "$PROBES" | while IFS='|' read -r name pic crop why; do
 			flag=$(echo "$rgb $t_rgb" | awk -v n="$name" '{
 				br=$3/($1+1e-9); tbr=$6/($4+1e-9); d=br-tbr; if(d<0)d=-d;
 				lim=(n=="stone")?0.03:0.05;
+				m=($1+$2+$3)/3; tm=($4+$5+$6)/3; r=(tm>0.02)?m/tm:1;
 				printf "  vs %s B/R %.2f  %s", "target", tbr,
-						(d>lim ? (n=="stone" ? "** CONTROL MOVED **" : "** HUE OFF **") : "ok")}')
+						(d>lim ? (n=="stone" ? "** CONTROL MOVED **" : "** HUE OFF **") :
+						(r>1.25||r<0.8) ? "** LEVEL OFF **" : "ok")}')
 			line="$line$flag"
 		fi
 		echo "$line"
 	done
 done
 echo
-echo "Hue is the verdict; mean is for TOO_BRIGHT and carries no pass mark."
+echo "Hue is the verdict; mean is for TOO_BRIGHT, and against a parity target a mean off by a quarter is LEVEL OFF: a mode that lost a term ([PARITY_LEFTOVERS])."
 
 # [PBR_FIT]: what the fit is run against, in linear light -- the render's
 # EXR, the client's 16-bit sRGB PNG undone to linear (magick's RGB

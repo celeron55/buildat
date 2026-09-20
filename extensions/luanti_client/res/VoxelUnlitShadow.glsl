@@ -45,11 +45,12 @@ varying vec3 vNormal;
     #endif
 #endif
 
-// How dark a shadowed surface is left, against the same surface in the sun.
-// Luanti's own shadow strength is a setting -- shadow_intensity, 0.33 by
-// default -- and this is the light that is left when it is applied, which is
-// what a comparison against the reference shots is against.
-const float SHADOW_LEFT = 0.67;
+// How dark a shadowed surface is left is the light's shadowIntensity --
+// Urho3D's GetShadow() returns cShadowIntensity.y (the light kept) in
+// full shadow and 1 in the sun -- which the launcher sets from the game's
+// set_lighting() and defaults to 0.67, Luanti's shadow_intensity 0.33 as
+// VoxeLibre asks. It was a constant here as well once, and the two
+// multiplied: a shadow at 0.89 that read like unlit ([PARITY_LEFTOVERS]).
 
 void VS()
 {
@@ -72,21 +73,20 @@ void VS()
 
 void PS()
 {
-    float shadow = 1.0;
+    float k = 1.0;
     #if defined(PERPIXEL) && defined(SHADOW)
-        shadow = GetShadow(vShadowPos, vWorldPos.w);
+        k = GetShadow(vShadowPos, vWorldPos.w);
+        // A face the light cannot see is in its own shadow whatever the map
+        // says, and the map cannot say it: a wall facing away from the sun
+        // is lit exactly as its neighbour facing into it. Luanti folds the
+        // same term in beside its shadow map. The terminator is softened
+        // over a fifth of a unit so that a curved surface -- a mob, a leaf
+        // quad -- does not get a hard line across it.
+        #ifdef DIRLIGHT
+            k = min(k, mix(cShadowIntensity.y, 1.0,
+                    smoothstep(0.0, 0.2, dot(normalize(vNormal), cLightDirPS))));
+        #endif
     #endif
-    // A face the light cannot see is in its own shadow whatever the map says,
-    // and the map cannot say it: a wall facing away from the sun is lit
-    // exactly as its neighbour facing into it. Luanti folds the same term in
-    // beside its shadow map. The terminator is softened over a fifth of a
-    // unit so that a curved surface -- a mob, a leaf quad -- does not get a
-    // hard line across it.
-    #if defined(PERPIXEL) && defined(DIRLIGHT)
-        shadow = min(shadow,
-                smoothstep(0.0, 0.2, dot(normalize(vNormal), cLightDirPS)));
-    #endif
-    float k = mix(SHADOW_LEFT, 1.0, shadow);
     #ifdef TRANSLUCENT
         k = mix(1.0, k, texture2D(sDiffMap, vTexCoord).a);
     #endif

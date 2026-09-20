@@ -1167,6 +1167,11 @@ luanti.sub_world_info(function(info)
 	-- Lua 5.1's two hundred locals and has been for a while
 	sky_now.unlit = true
 	sky_now.shadows = mode == "shadows"
+	-- The light kept in a shadow, until the game's set_lighting() says
+	-- (below, the hud handler): Luanti's shadow_intensity 0.33. The shadow
+	-- pass reads it from the light and carries no constant of its own.
+	sky_lights.sun.shadowIntensity = 0.67
+	sky_lights.moon.shadowIntensity = 0.67
 	-- The packed vertex layout is the pbr shader's ([PBR_FIT] 2c); the
 	-- unlit shader draws the vertex colour as the light, and read the
 	-- packed one as purple and green since 2026-09-18 (found 2026-09-20 on
