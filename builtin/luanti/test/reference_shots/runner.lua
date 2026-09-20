@@ -215,13 +215,12 @@ local function dig_bore()
 	if not b then
 		return
 	end
-	-- Per column along X: every voxel whose centre is within `half` of
-	-- the line in Y (one or two of them; at thirty degrees a half of 0.5
-	-- leaves the steps touching at their corners only, so set.lua says
-	-- 0.8 and each step overlaps the next). The depth counts columns
-	-- from the first that held anything solid.
+	-- Per column along X: `tall` voxels (three: what a player needs to
+	-- walk a stair, user 2026-09-20), the lowest the one whose centre
+	-- is nearest the line, so the line is the stair's floor. The depth
+	-- counts columns from the first that held anything solid.
 	local tan = math.tan(math.rad(b.pitch))
-	local half = b.half or 0.5
+	local tall = b.tall or 3
 	local columns, first = 0, false
 	for i = 1, 40 do
 		if columns >= b.depth then
@@ -230,8 +229,9 @@ local function dig_bore()
 		local x = math.floor(b.from.x) + i
 		local yl = b.from.y + (x - b.from.x) * tan
 		local z = math.floor(b.from.z + 0.5)
+		local y0 = math.floor(yl + 0.5)
 		local solid = false
-		for y = math.ceil(yl - half), math.floor(yl + half) do
+		for y = y0, y0 + tall - 1 do
 			local node = core.get_node_or_nil({x = x, y = y, z = z})
 			local name = node and node.name or "ignore"
 			if name ~= "air" and name ~= "ignore" then
@@ -243,7 +243,7 @@ local function dig_bore()
 		end
 		if first then
 			columns = columns + 1
-			for y = math.ceil(yl - half), math.floor(yl + half) do
+			for y = y0, y0 + tall - 1 do
 				local pos = {x = x, y = y, z = z}
 				local node = core.get_node_or_nil(pos)
 				local name = node and node.name or "ignore"
