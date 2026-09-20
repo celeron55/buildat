@@ -1,11 +1,13 @@
-# [SQUASHED_BRANCH] / [PACKAGING_CI]: the release archives, made the one way
-# they are made -- util/package_in_docker.sh, the same image as on a desk --
-# on every push to a squashed prerelease branch and on tags. The archives
-# are workflow artifacts; a tag also gets a release with them attached.
+# [SQUASHED_BRANCH] / [PACKAGING_CI] / [SQUASH_RELEASE]: the release
+# archives, made the one way they are made -- util/package_in_docker.sh,
+# the same image as on a desk -- on every tag. squash_push.sh tags each
+# squash v<version>-<hash>, so a squash push builds and lands under
+# Releases as a prerelease with the two tarballs and the zip; a plain
+# v<version> tag placed by hand on a squash is the real release. The
+# archives are workflow artifacts as well.
 name: package
 on:
   push:
-    branches: ['luanti-module-squashed-*']
     tags: ['v*']
 jobs:
   linux:
@@ -28,11 +30,6 @@ jobs:
           name: linux-smoke
           path: Build/package/out/smoke/
           if-no-files-found: ignore
-      - name: Release on a tag
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: Build/package/out/*.tar.gz
   windows:
     runs-on: ubuntu-latest
     steps:
@@ -52,8 +49,28 @@ jobs:
           name: windows-smoke
           path: Build/package/out/smoke/
           if-no-files-found: ignore
-      - name: Release on a tag
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+  # One release from both builds: two jobs on one tag would race on
+  # creating it. A tag with a hash in it is a squash, a prerelease; a
+  # bare v<version> is the release. No generated notes: the squash's
+  # one commit says nothing worth a release note.
+  release:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          files: Build/package/out/*.zip
+          name: linux-archives
+          path: out
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-archive
+          path: out
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            out/*.tar.gz
+            out/*.zip

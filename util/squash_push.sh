@@ -35,8 +35,13 @@ git rm -r -q --cached doc/plan && rm -rf doc/plan
 sed -i '/doc\/plan\/master_plan.md/{N;N;d}' README.md
 git add -A
 git commit -q -m "luanti-module at $h, $(date +%F), version $v"
-echo "made $b"
+# And a tag on it, v<version>-<hash>: package.yml fires on the tag and
+# makes a prerelease with the archives ([SQUASH_RELEASE]); a plain
+# v<version> tag placed by hand on a squash is the real release
+t="v$v-$h"
+git tag -f "$t"
+echo "made $b, tagged $t"
 if [ "${PUSH:-1}" = 1 ]; then
-	git push github "$b"
+	git push github "$b" "$t"
 fi
 git checkout -q "$src"
