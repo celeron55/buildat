@@ -33,9 +33,11 @@ Install dependencies
 
 	$ # A compiler and cmake, plus the X, sound and GL headers Urho3D needs
 	$ sudo apt-get install build-essential cmake \
-	        libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev
+	        libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev \
+	        libcurl4-openssl-dev
 	$ sudo dnf install gcc-c++ cmake \
-	        libX11-devel libXrandr-devel alsa-lib-devel mesa-libGL-devel
+	        libX11-devel libXrandr-devel alsa-lib-devel mesa-libGL-devel \
+	        libcurl-devel
 
 The server also needs a C++ compiler at run time, not just at build time: it
 compiles game modules as it loads them. It looks for `c++` in PATH.

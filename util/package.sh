@@ -230,10 +230,14 @@ windows)
 	tc="${CMAKE_TOOLCHAIN_FILE:-$here/3rdparty/Urho3D/CMake/Toolchains/MinGW.cmake}"
 	# and the native tree the archive ships under compiler/, which the
 	# image unpacks to /opt/winlibs/mingw64
+	# and libcurl's mingw tree (util/docker/windows unpacks curl-for-win
+	# to /opt/curlwin/curl); CURLWIN in the environment overrides
+	cw="${CURLWIN:-/opt/curlwin/curl}"
 	a=$(make_one "buildat-$version-win64" -DPORTABLE=TRUE \
 		-DCMAKE_TOOLCHAIN_FILE="$tc" \
 		-DMINGW_PREFIX="${MINGW_PREFIX:-/usr/bin/x86_64-w64-mingw32}" \
-		-DBUILDAT_SHIP_COMPILER="${BUILDAT_SHIP_COMPILER:-/opt/winlibs/mingw64}")
+		-DBUILDAT_SHIP_COMPILER="${BUILDAT_SHIP_COMPILER:-/opt/winlibs/mingw64}" \
+		-DCURL_INCLUDE_DIR="$cw/include" -DCURL_LIBRARY="$cw/lib/libcurl.dll.a")
 	echo "archive: $a"
 	smoke_test_wine "$a"
 	;;

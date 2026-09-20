@@ -303,6 +303,7 @@ set(BUILDAT_CORE_SRCS
 	src/impl/voxel_volume.cpp
 	src/impl/compress.cpp
 	src/impl/zip.cpp
+	src/impl/http.cpp
 	src/impl/thread_pool.cpp
 	src/impl/thread.cpp
 	src/impl/magic_event_handler.cpp
@@ -343,12 +344,19 @@ set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} ${BUILDAT_VERSION_CPP})
 add_library(${BUILDAT_CORE_NAME} SHARED ${BUILDAT_CORE_SRCS}
 	$<TARGET_OBJECTS:sqlite>)
 add_dependencies(${BUILDAT_CORE_NAME} buildat_version)
+# libcurl, required ([CONTENTDB]): ContentDB is HTTPS only and the tree has
+# no TLS of its own. The system's on Linux; on the mingw cross build a
+# curl-for-win tree, CURL_INCLUDE_DIR and CURL_LIBRARY passed by
+# util/package.sh and its DLL shipped beside the executables.
+find_package(CURL REQUIRED)
+target_include_directories(${BUILDAT_CORE_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
 target_link_libraries(${BUILDAT_CORE_NAME}
 	c55lib
 	smallsha1
 	PolyVoxCore
 	zlib
 	zstd
+	${CURL_LIBRARIES}
 )
 if(NOT WIN32)
 	find_package(Threads REQUIRED)
@@ -508,6 +516,13 @@ if(WIN32)
 		foreach(DLL libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
 			install(FILES "${BUILDAT_SHIP_COMPILER}/bin/${DLL}" DESTINATION "${DST_BIN}")
 		endforeach()
+	endif()
+	# libcurl's DLL from the curl-for-win tree the image unpacks (its
+	# bin/ beside the lib/ CURL_LIBRARY names)
+	if(CURL_LIBRARY)
+		get_filename_component(CURL_LIB_DIR "${CURL_LIBRARY}" DIRECTORY)
+		install(DIRECTORY "${CURL_LIB_DIR}/../bin/" DESTINATION "${DST_BIN}"
+			FILES_MATCHING PATTERN "libcurl*.dll")
 	endif()
 endif()
 if(BUILD_CLIENT)

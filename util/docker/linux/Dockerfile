@@ -9,6 +9,7 @@ FROM debian:bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	build-essential cmake git ca-certificates \
 	libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev \
+	libcurl4-openssl-dev \
 	xvfb xauth libgl1-mesa-dri imagemagick zip tar gzip \
 	&& rm -rf /var/lib/apt/lists/*
 WORKDIR /work

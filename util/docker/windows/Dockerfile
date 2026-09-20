@@ -30,4 +30,15 @@ RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-in
 	&& echo "$WINLIBS_SHA256  /tmp/winlibs.zip" | sha256sum -c - \
 	&& mkdir -p /opt/winlibs && unzip -q /tmp/winlibs.zip -d /opt/winlibs \
 	&& rm /tmp/winlibs.zip
+# libcurl for the cross build ([CONTENTDB], a required dependency): Debian
+# has no mingw-w64 curl package, so curl-for-win's mingw build, pinned the
+# same way -- headers and import library for the link, the DLL shipped
+# beside the executables. util/package.sh hands its paths to CMake.
+ARG CURLWIN_URL=https://curl.se/windows/dl-8.22.0_1/curl-8.22.0_1-win64-mingw.zip
+ARG CURLWIN_SHA256=7f23b039f6ea4197362d4468e1a0e71428201222e1bef3b680d5ef7b2aefb714
+RUN curl -sSL -o /tmp/curlwin.zip "$CURLWIN_URL" \
+	&& echo "$CURLWIN_SHA256  /tmp/curlwin.zip" | sha256sum -c - \
+	&& mkdir -p /opt/curlwin && unzip -q /tmp/curlwin.zip -d /opt/curlwin \
+	&& mv /opt/curlwin/curl-*-win64-mingw /opt/curlwin/curl \
+	&& rm /tmp/curlwin.zip
 WORKDIR /work
