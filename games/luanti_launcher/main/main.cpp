@@ -601,12 +601,35 @@ struct Module: public interface::Module
 	// worlds/ inside it -- which is also the shape of an in-tree development
 	// build, so that needs no special case.
 	// The launcher's settings, in the user path beside luanti/games and
-	// luanti/worlds ([LAUNCH_GRID]): {"import_paths": ["..."]}, the search
-	// paths the import screens add to the defaults. Written by hand and
-	// read with sajson, which is all a list of strings needs.
+	// luanti/worlds ([LAUNCH_GRID]): {"import_paths": ["..."],
+	// "render_mode": "pbr"}, the search paths the import screens add to
+	// the defaults and the mode a session draws in when BUILDAT_LUANTI_PBR
+	// says nothing (read by builtin/luanti where the variable is). Written
+	// by hand and read with sajson. On the wire the two are one list of
+	// strings, the mode as a "render_mode=<mode>" entry after the paths.
 	ss_ settings_path()
 	{
 		return luanti_path()+"/launcher.json";
+	}
+	ss_ read_render_mode()
+	{
+		std::ifstream f(settings_path());
+		if(!f.good())
+			return "";
+		std::stringstream ss;
+		ss << f.rdbuf();
+		const ss_ text = ss.str();
+		const sajson::document doc =
+				sajson::parse(sajson::string(text.c_str(), text.size()));
+		if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_OBJECT)
+			return "";
+		sajson::value root = doc.get_root();
+		for(size_t i = 0; i < root.get_length(); i++){
+			if(root.get_object_key(i).as_string() == "render_mode" &&
+					root.get_object_value(i).get_type() == sajson::TYPE_STRING)
+				return root.get_object_value(i).as_string();
+		}
+		return "";
 	}
 	sv_<ss_> read_import_paths()
 	{
@@ -641,11 +664,11 @@ struct Module: public interface::Module
 		}
 		return out;
 	}
-	void write_import_paths(const sv_<ss_> &paths)
+	void write_settings(const sv_<ss_> &paths, const ss_ &mode)
 	{
 		interface::fs::create_directories(luanti_path());
 		std::ofstream f(settings_path(), std::ios::trunc);
-		f << "{\"import_paths\": [";
+		f << "{\"render_mode\": \"" << mode << "\", \"import_paths\": [";
 		for(size_t i = 0; i < paths.size(); i++){
 			f << (i ? ", \"" : "\"");
 			for(char c : paths[i]){
@@ -667,7 +690,10 @@ struct Module: public interface::Module
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
-			ar(read_import_paths());
+			sv_<ss_> list = read_import_paths();
+			ss_ mode = read_render_mode();
+			list.push_back("render_mode="+(mode.empty() ? ss_("pbr") : mode));
+			ar(list);
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "main:settings", os.str());
@@ -691,13 +717,18 @@ struct Module: public interface::Module
 			return;
 		}
 		sv_<ss_> paths;
+		ss_ mode = "pbr";
 		for(const ss_ &v : values){
-			if(!v.empty() && v.size() <= 4096)
+			if(v.compare(0, 12, "render_mode=") == 0){
+				const ss_ m = v.substr(12);
+				if(m == "unlit" || m == "shadows" || m == "pbr")
+					mode = m;
+			} else if(!v.empty() && v.size() <= 4096)
 				paths.push_back(v);
 		}
-		write_import_paths(paths);
-		log_i(MODULE, "settings: %zu import paths written to %s",
-				paths.size(), cs(settings_path()));
+		write_settings(paths, mode);
+		log_i(MODULE, "settings: %zu import paths and render_mode %s "
+				"written to %s", paths.size(), cs(mode), cs(settings_path()));
 		send_settings(packet.sender);
 	}
 

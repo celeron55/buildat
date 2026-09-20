@@ -328,14 +328,42 @@ end
 -- variable) are the server's and not in the list.
 function draw_settings(paths)
 	local menu = import_menu("Luanti settings")
-	local text = menu.window:CreateChild("Text")
-	text:SetStyleAuto()
-	text:SetText("Import search paths, besides ~/.luanti and ~/.minetest:")
+	-- The render mode rides in the list as "render_mode=<mode>"
+	local mode = "pbr"
+	local kept = {}
+	for _, p in ipairs(paths) do
+		local m = p:match("^render_mode=(.*)$")
+		if m then
+			mode = m
+		else
+			kept[#kept + 1] = p
+		end
+	end
+	paths = kept
 	local function send(list)
 		waiting("Saving...")
+		list[#list + 1] = "render_mode=" .. mode
 		buildat.send_packet("main:set_settings",
 				cereal.binary_output(list, {"array", "string"}))
 	end
+	-- The mode a session draws in, unless BUILDAT_LUANTI_PBR says
+	-- otherwise ([RENDER_MODES]); the current one marked
+	local modes = menu.window:CreateChild("Text")
+	modes:SetStyleAuto()
+	modes:SetText("Render mode (the next session's; BUILDAT_LUANTI_PBR overrides):")
+	for _, m in ipairs({"pbr", "shadows", "unlit"}) do
+		menu:add((m == mode and "[x] " or "[ ] ") .. m, function()
+			mode = m
+			local list = {}
+			for _, p in ipairs(paths) do
+				list[#list + 1] = p
+			end
+			send(list)
+		end)
+	end
+	local text = menu.window:CreateChild("Text")
+	text:SetStyleAuto()
+	text:SetText("Import search paths, besides ~/.luanti and ~/.minetest:")
 	for i, path in ipairs(paths) do
 		menu:add("remove  " .. path, function()
 			local list = {}

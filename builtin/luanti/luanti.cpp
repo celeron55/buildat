@@ -4769,6 +4769,29 @@ struct Module: public interface::Module, public luanti::Interface
 	// in its LICENSE.txt, and nothing here copies them into the tree. What
 	// the user does is put the pack in buildat's own directory, which is the
 	// same rule the games follow -- see games/luanti_launcher.
+	// The render mode the launcher game's settings screen wrote
+	// (games/luanti_launcher's launcher.json in the user path), "" when
+	// there is none. Read here with no JSON parser: the file is the
+	// game's own, one line, and the key's value is a bare word.
+	ss_ settings_render_mode()
+	{
+		std::ifstream f(m_server->get_config().get<ss_>("user_path")+
+				"/luanti/launcher.json");
+		if(!f.good())
+			return "";
+		std::stringstream ss;
+		ss << f.rdbuf();
+		const ss_ text = ss.str();
+		const size_t k = text.find("\"render_mode\"");
+		if(k == ss_::npos)
+			return "";
+		const size_t q1 = text.find('"', k + 13);
+		const size_t q2 = q1 == ss_::npos ? ss_::npos : text.find('"', q1 + 1);
+		if(q2 == ss_::npos)
+			return "";
+		return text.substr(q1 + 1, q2 - q1 - 1);
+	}
+
 	ss_ base_textures_path()
 	{
 		return m_server->get_config().get<ss_>("user_path")+
@@ -6330,6 +6353,10 @@ struct Module: public interface::Module, public luanti::Interface
 		const char *mode = getenv("BUILDAT_LUANTI_PBR");
 		ss_ m = !asked_mode.empty() ? asked_mode :
 				(mode != nullptr) ? ss_(mode) : ss_("");
+		// Neither side saying: the launcher game's setting
+		// (user/luanti/launcher.json, its "render_mode"; [LAUNCH_GRID])
+		if(m.empty())
+			m = settings_render_mode();
 		if(m == "0")
 			m = "unlit";
 		else if(m == "" || m == "1")

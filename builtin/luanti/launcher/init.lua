@@ -40,11 +40,6 @@ return function(ctx)
 		run = function()
 			ctx.launch{game = "luanti_launcher", params = {menu = "import_world"}}
 		end}
-	out[#out + 1] = {id = "settings", label = "Luanti settings",
-		icon = "luanti.png", order = 192,
-		description = "Where the import screens look, and more later",
-		run = function()
-			ctx.launch{game = "luanti_launcher", params = {menu = "settings"}}
-		end}
+	-- The settings tile is the launcher game's own (its launcher/init.lua)
 	return out
 end
