@@ -928,7 +928,9 @@ buildat.sub_packet("luanti:model", function(data)
 		end
 		quads[#quads + 1] = q
 	end
-	log:info("luanti:model: " .. name .. ", " .. #quads .. " quads")
+	local centre, radius = model_bounds(quads)
+	log:info(string.format("luanti:model: %s, %d quads, radius %.2f about %.1f,%.1f,%.1f",
+			name, #quads, radius, centre[1], centre[2], centre[3]))
 	if #quads == 0 then
 		-- Nothing could read it: the objects of this kind keep their box,
 		-- and asking again would only ask again
