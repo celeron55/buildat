@@ -28,11 +28,11 @@ int main(void)
 		do {
 			HMODULE m = LoadLibraryA(fd.cFileName);
 			DWORD err = m ? 0 : GetLastError();
-			printf("%-28s %s%lu\n", fd.cFileName, m ? "ok" : "FAILED ",
+			printf("%-28s %s%lu\n", fd.cFileName, m ? "ok " : "FAILED ",
 					(unsigned long)err);
 			if(out)
 				fprintf(out, "%-28s %s%lu\n", fd.cFileName,
-						m ? "ok" : "FAILED ", (unsigned long)err);
+						m ? "ok " : "FAILED ", (unsigned long)err);
 			if(!m)
 				failed++;
 			if(m)
