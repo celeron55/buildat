@@ -976,8 +976,12 @@ def rules(s, mem):
     # expectation is the lamp light up on the next scan. Every thirty
     # turns at most, so a cave is not carpeted.
     tslot = hotbar_slot_of(s, "torch")
-    if s.light is not None and s.light[1] < 5 and s.light[0] < 5 and \
-            mem.get("torch_turn", -99) < turn - 30 and \
+    f = feet_node(s)
+    torch_near = any("torch" in (n or "") and math.dist(p, f) <= 6
+                     for p, n in s.world.items() if abs(p[1] - f[1]) <= 3)
+    dark = (s.light is not None and s.light[1] < 5 and s.light[0] < 5) or \
+        (f[1] < -8 and not torch_near)
+    if dark and mem.get("torch_turn", -99) < turn - 30 and \
             (tslot is not None or have(s, "torch", 1, mem)):
         if tslot is None:
             return "open_inventory", ["keypress I", ms(1.0)], \
@@ -988,8 +992,9 @@ def rules(s, mem):
         cmds = ["keypress %d" % tslot, "delay 150",
                 "look_dir %.3f -1.2 %.3f" % (math.sin(yr), math.cos(yr)),
                 "delay 300", "mouse_click right", ms(0.8)]
-        def placed(n, w=was):
-            ok = n.light is not None and n.light[1] > w
+        def placed(n, w=was, f=f):
+            ok = (n.light is not None and n.light[1] > w) or \
+                any("torch" in (nm or "") and math.dist(p, f) <= 4 for p, nm in n.world.items())
             if ok:
                 mem["torches_placed"] = mem.get("torches_placed", 0) + 1
             return ok

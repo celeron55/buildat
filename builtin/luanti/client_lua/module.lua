@@ -1919,6 +1919,116 @@ function M.item_face_texture(item_name)
 	end
 	return texture_of(expr)
 end
+-- What the hand holds, as a shape ([WIELD_MESH] 1 and 2, official's
+-- WieldMeshSceneNode::setItem): a flat item is its picture extruded into
+-- a slab -- a front and a back quad per opaque pixel and an edge quad
+-- wherever an opaque pixel borders a transparent one, each quad's texture
+-- coordinates at that pixel's centre -- so a pickaxe held is a pickaxe;
+-- a node that is a cube is the cube with its three visible faces (top and
+-- two sides, the sides darkened as the inventory's picture darkens them),
+-- and anything else the extrusion of its own picture. Builds into the
+-- given node's CustomGeometry, one geometry per texture, and returns the
+-- textures' resource names in geometry order, or nil for an item with no
+-- picture. The mesh is a unit across; the caller scales it.
+function M.wield_geometry(node, item_name)
+	local expr = item_images[item_name]
+	if expr == nil then
+		return nil
+	end
+	local cg = node:GetComponent("CustomGeometry") or
+			node:CreateComponent("CustomGeometry")
+	local function quad(a, b, c, d, u, v)
+		for _, p in ipairs({a, b, c, a, c, d}) do
+			cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
+			cg:DefineTexCoord(magic.Vector2(u, v))
+		end
+	end
+	if string.sub(expr, 1, #CUBE_MARK) == CUBE_MARK then
+		local faces = {}
+		for part in string.gmatch(string.sub(expr, #CUBE_MARK + 1), "[^\1]+") do
+			faces[#faces + 1] = part
+		end
+		if #faces ~= 3 then
+			return nil
+		end
+		-- top, then the two sides the picture shows and their two hidden
+		-- opposites wearing the same; the bottom wears the top's
+		local textures = {}
+		for i = 1, 3 do
+			local resource = texture_of(faces[i])
+			if resource == nil then
+				return nil
+			end
+			textures[i] = resource
+		end
+		cg:SetNumGeometries(3)
+		local h = 0.5
+		-- top and bottom on geometry 0, +/-x sides on 1, +/-z on 2
+		cg:BeginGeometry(0, magic.TRIANGLE_LIST)
+		local function uvface(a, b, c, d)
+			local uv = {{0, 0}, {1, 0}, {1, 1}, {0, 1}}
+			local ps = {a, b, c, d}
+			for _, i in ipairs({1, 2, 3, 1, 3, 4}) do
+				cg:DefineVertex(magic.Vector3(ps[i][1], ps[i][2], ps[i][3]))
+				cg:DefineTexCoord(magic.Vector2(uv[i][1], uv[i][2]))
+			end
+		end
+		uvface({-h, h, -h}, {h, h, -h}, {h, h, h}, {-h, h, h})
+		uvface({-h, -h, h}, {h, -h, h}, {h, -h, -h}, {-h, -h, -h})
+		cg:BeginGeometry(1, magic.TRIANGLE_LIST)
+		uvface({h, h, -h}, {h, h, h}, {h, -h, h}, {h, -h, -h})
+		uvface({-h, h, h}, {-h, h, -h}, {-h, -h, -h}, {-h, -h, h})
+		cg:BeginGeometry(2, magic.TRIANGLE_LIST)
+		uvface({-h, h, -h}, {-h, -h, -h}, {h, -h, -h}, {h, h, -h})
+		uvface({h, h, h}, {h, -h, h}, {-h, -h, h}, {-h, h, h})
+		cg:Commit()
+		return textures
+	end
+	local resource = texture_of(expr)
+	if resource == nil then
+		return nil
+	end
+	local img = magic.cache:GetResource("Image", resource)
+	if img == nil or img.width == 0 then
+		return nil
+	end
+	local w, h = img.width, img.height
+	local function opaque(x, y)
+		if x < 0 or y < 0 or x >= w or y >= h then
+			return false
+		end
+		return img:GetPixel(x, y).a > 0.5
+	end
+	cg:SetNumGeometries(1)
+	cg:BeginGeometry(0, magic.TRIANGLE_LIST)
+	local t = 0.5 / w
+	for y = 0, h - 1 do
+		for x = 0, w - 1 do
+			if opaque(x, y) then
+				local u, v = (x + 0.5) / w, (y + 0.5) / h
+				local x0, x1 = (x - w / 2) / w, (x + 1 - w / 2) / w
+				local y0, y1 = (h / 2 - y - 1) / h, (h / 2 - y) / h
+				quad({x0, y1, -t}, {x1, y1, -t}, {x1, y0, -t}, {x0, y0, -t}, u, v)
+				quad({x0, y1, t}, {x0, y0, t}, {x1, y0, t}, {x1, y1, t}, u, v)
+				if not opaque(x - 1, y) then
+					quad({x0, y1, -t}, {x0, y0, -t}, {x0, y0, t}, {x0, y1, t}, u, v)
+				end
+				if not opaque(x + 1, y) then
+					quad({x1, y1, t}, {x1, y0, t}, {x1, y0, -t}, {x1, y1, -t}, u, v)
+				end
+				if not opaque(x, y - 1) then
+					quad({x0, y1, t}, {x1, y1, t}, {x1, y1, -t}, {x0, y1, -t}, u, v)
+				end
+				if not opaque(x, y + 1) then
+					quad({x0, y0, -t}, {x1, y0, -t}, {x1, y0, t}, {x0, y0, t}, u, v)
+				end
+			end
+		end
+	end
+	cg:Commit()
+	return {resource}
+end
+
 -- The ones that have no image, said once each
 local imageless = {}
 

@@ -806,20 +806,6 @@ wield_node.scale = magic.Vector3(0.033 * wield_k, 0.033 * wield_k,
 		0.033 * wield_k)
 wield_node.enabled = false
 
-local function draw_wielded(item_name)
-	-- One face of it and not the whole picture: a node's item image is the
-	-- little cube an inventory draws, and a cube wearing a picture of a cube
-	-- is not what the hand holds
-	local tex = item_name and
-			game_texture(luanti.item_face_texture(item_name))
-	if tex == nil or not luanti.hud_flag("wielditem") then
-		wield_node.enabled = false
-		return
-	end
-	wield_material:SetTexture(magic.TU_DIFFUSE, tex)
-	wield_node.enabled = true
-end
-
 -- The name of what is in hand, above the slots: Luanti shows it when the
 -- player switches, and it is what says an empty-looking slot has something
 -- in it that has no image
@@ -832,6 +818,67 @@ wielded_text:SetPosition(0, -(8 + SLOT + 30))
 -- The pictures the game named, kept as textures because these are asked for
 -- on every redraw and a name is composed anew each time it is looked up
 local hotbar_pictures = {}
+
+-- The shape in the hand is the item's ([WIELD_MESH]): a flat item's
+-- picture extruded, a node's cube with its faces, built by the module's
+-- client half into a CustomGeometry; one material per texture, all of
+-- them lit by the same colour update_sky() sets. The box stays for an
+-- item the module has no shape for.
+-- (the shapes live on hotbar_pictures under a marker key: this file is
+-- at Lua's 200 locals)
+local function draw_wielded(item_name)
+	hotbar_pictures["\1shapes"] = hotbar_pictures["\1shapes"] or {}
+	local wield_shapes = hotbar_pictures["\1shapes"]
+	if item_name == nil or not luanti.hud_flag("wielditem") then
+		wield_node.enabled = false
+		return
+	end
+	local shape = wield_shapes[item_name]
+	if shape == nil then
+		local holder = wield_node:CreateChild("shape")
+		local resources = luanti.wield_geometry(holder, item_name)
+		if resources == nil then
+			holder:Remove()
+			shape = false
+		else
+			local cg = holder:GetComponent("CustomGeometry")
+			local materials = {}
+			for i, resource in ipairs(resources) do
+				local m = wield_material:Clone()
+				local tex = game_texture(resource)
+				if tex then
+					m:SetTexture(magic.TU_DIFFUSE, tex)
+				end
+				cg:SetMaterial(i - 1, m)
+				materials[i] = m
+			end
+			cg.castShadows = false
+			holder.enabled = false
+			shape = {node = holder, materials = materials}
+		end
+		wield_shapes[item_name] = shape
+	end
+	for name, sh in pairs(wield_shapes) do
+		if sh then
+			sh.node.enabled = (name == item_name)
+		end
+	end
+	if shape then
+		wield_model.enabled = false
+		wield_node.enabled = true
+		return
+	end
+	-- No shape: the box wearing one face of the picture, as before
+	local tex = game_texture(luanti.item_face_texture(item_name))
+	if tex == nil then
+		wield_node.enabled = false
+		return
+	end
+	wield_material:SetTexture(magic.TU_DIFFUSE, tex)
+	wield_model.enabled = true
+	wield_node.enabled = true
+end
+
 
 local function hotbar_picture(name)
 	if name == nil then
@@ -1676,6 +1723,14 @@ local function update_sky(dt)
 	end
 	wield_material:SetShaderParameter("MatDiffColor",
 			magic.Color(k, k, k, 1.0))
+	-- and the shapes' own materials, clones of it ([WIELD_MESH])
+	for _, sh in pairs(hotbar_pictures["\1shapes"] or {}) do
+		if sh then
+			for _, m in ipairs(sh.materials) do
+				m:SetShaderParameter("MatDiffColor", magic.Color(k, k, k, 1.0))
+			end
+		end
+	end
 end
 
 -- What the game says its sky is: the two ends of the gradient and how much
