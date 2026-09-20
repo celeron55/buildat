@@ -462,13 +462,35 @@ RECIPES_2X2 = [
 ]
 
 
+TOOL_WORDS = ("pick_", "axe_", "shovel_", "sword_", "hoe_", "_pick", "_axe", "_shovel", "_sword", "_hoe")
+
+
 def item_is(stack, word):
+    """Whether the stack is that kind of item, by a word in its name -- a
+    tool counted only as itself: the wooden pickaxe was counted as
+    planks and sticks were crafted from it eighty-four times."""
     name = stack.split(" ")[0]
-    return word in name and not name.endswith("sapling")
+    base = base_of(name)
+    if word not in name or name.endswith("sapling"):
+        return False
+    if any(t in base for t in TOOL_WORDS) and not any(t in word for t in ("pick", "axe", "shovel", "sword", "hoe")):
+        return False
+    return True
 
 
 def count_of(stack):
     return int(stack.split(" ")[1]) if " " in stack else (1 if stack else 0)
+
+
+def count_held(s, word, mem=None):
+    """How many such items are held, the way have() looks."""
+    if any(sl[0] == "main" for sl in s.slots):
+        stacks = [sl[5] for sl in s.slots if sl[0] == "main"]
+    else:
+        stacks = [st for _, st in s.hotbar]
+        if mem is not None:
+            stacks += [st for i, st in mem.get("main", []) if i > len(s.hotbar)]
+    return sum(count_of(st) for st in stacks if item_is(st, word))
 
 
 def have(s, word, n=1, mem=None):
@@ -705,8 +727,9 @@ def rules(s, mem):
             if r is not None:
                 cmds = craft_2x2(s, r)
                 if cmds is not None:
+                    had = count_held(s, r[2], mem)
                     return "craft_" + r[0], cmds + ["delay 300"], \
-                        lambda n, w=r[2]: have(n, w, 1, mem)
+                        lambda n, w=r[2], h=had: count_held(n, w, mem) > h
             # A thing wanted in the hand lies past the hotbar: moved to
             # an empty hotbar slot (a pick up and a put down)
             for word in ("crafting_table", "pick_stone", "pick_wood", "furnace"):
@@ -753,8 +776,9 @@ def rules(s, mem):
             if r is not None:
                 cmds = craft_2x2(s, r)
                 if cmds is not None:
+                    had = count_held(s, r[2], mem)
                     return "craft_" + r[0], cmds + ["delay 300"], \
-                        lambda n, w=r[2]: have(n, w, 1, mem)
+                        lambda n, w=r[2], h=had: count_held(n, w, mem) > h
         mem["closes_in_row"] = mem.get("closes_in_row", 0) + 1
         return "close_form", ["keypress Escape", ms(TURN_S)], \
             lambda n: n.form is None
@@ -1324,6 +1348,9 @@ done, 8 lines""".splitlines()
     cs.world[(10, 21, 11)] = "air"; cs.world[(10, 20, 11)] = "air"
     assert stair_step(cs, m, 1, down=True)[0] == "stair_walk"
     assert cs.world[(10, 19, 11)] == "mcl_core:stone"
+    # A tool is not its material
+    assert not item_is("mcl_tools:pick_wood 1", "wood") and item_is("mcl_tools:pick_wood 1", "pick_wood")
+    assert item_is("mcl_core:junglewood 4", "wood") and not item_is("mcl_core:jungletree", "wood")
     # Solid against pointable
     assert solid_name("mcl_core:dirt_with_grass") and not is_plant("mcl_core:dirt_with_grass")
     assert not solid_name("mcl_flowers:tallgrass") and is_plant("mcl_flowers:double_fern_top")
