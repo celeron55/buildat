@@ -30,6 +30,10 @@
 #include <cereal/types/string.hpp>
 #include "interface/polyvox_cereal.h"
 #include "core/sajson.h"
+#include "interface/http.h"
+#include "interface/zip.h"
+#include "interface/thread.h"
+#include <atomic>
 #include <PolyVoxCore/Vector.h>
 #define MODULE "main"
 
@@ -108,6 +112,10 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:set_settings"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:contentdb_query"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:contentdb_install"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:import_game"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:import_world"));
@@ -151,6 +159,10 @@ struct Module: public interface::Module
 				on_get_settings, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:set_settings",
 				on_set_settings, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:contentdb_query",
+				on_contentdb_query, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:contentdb_install",
+				on_contentdb_install, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:import_game",
 				on_import_game, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:import_world",
@@ -238,6 +250,7 @@ struct Module: public interface::Module
 	// this is for; thirty would be worse than what it replaced.
 	void on_tick(const interface::TickEvent &event)
 	{
+		poll_contentdb();
 		m_where_timer += event.dtime;
 		if(m_where_timer < 0.2f)
 			return;
@@ -699,6 +712,262 @@ struct Module: public interface::Module
 			inetwork->send(peer, "main:settings", os.str());
 		});
 	}
+	// ContentDB ([CONTENTDB]): a browser of its games, the server fetching
+	// through libcurl on a thread per job -- a listing, an install -- and
+	// on_tick() reading the finished ones. The listing is the API's
+	// packages query, games only, sent to the client as five strings a
+	// row; an install takes the newest release's zip into the cache and
+	// extracts it under luanti/games/<name>, the way an import lands.
+	static const char *CONTENTDB;
+	struct Job : public interface::ThreadedThing {
+		enum Kind { LIST, INSTALL } kind;
+		network::PeerInfo::Id peer;
+		ss_ q; // LIST: the query; INSTALL: author/name
+		ss_ name; // INSTALL: the game's directory
+		ss_ zip_path, into_dir;
+		ss_ result, error;
+		std::atomic<uint64_t> got{0}, total{0};
+		std::atomic<bool> done{false};
+		interface::Thread *thread = nullptr;
+		void run(interface::Thread *) override
+		{
+			try {
+				if(kind == LIST){
+					// Twenty, the most downloaded first: the whole list is
+					// hundreds and the screen has no pages yet (the search
+					// field narrows it)
+					result = interface::http_get(ss_(CONTENTDB)+
+							"/api/packages/?type=game&limit=20&sort=downloads"
+							"&order=desc&q="+q);
+				} else {
+					const ss_ rel = interface::http_get(ss_(CONTENTDB)+
+							"/api/packages/"+q+"/releases/");
+					const ss_ url = newest_release_url(rel);
+					if(url.empty())
+						throw Exception("no release to download");
+					interface::http_download(url, zip_path,
+							[&](uint64_t g, uint64_t t){
+						got = g; total = t; return true;
+					});
+					interface::fs::remove_all(into_dir);
+					interface::zip_extract(zip_path, into_dir);
+					interface::fs::remove_all(zip_path);
+				}
+			} catch(std::exception &e){
+				error = e.what();
+			}
+			done = true;
+		}
+		void on_crash(interface::Thread *) override
+		{
+			error = "the fetch crashed";
+			done = true;
+		}
+		// The releases list is newest first; "url" is the zip, absolute
+		// or site-relative
+		static ss_ newest_release_url(const ss_ &json)
+		{
+			const sajson::document doc =
+					sajson::parse(sajson::string(json.c_str(), json.size()));
+			if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_ARRAY ||
+					doc.get_root().get_length() == 0)
+				return "";
+			sajson::value r = doc.get_root().get_array_element(0);
+			if(r.get_type() != sajson::TYPE_OBJECT)
+				return "";
+			for(size_t i = 0; i < r.get_length(); i++){
+				if(r.get_object_key(i).as_string() == "url" &&
+						r.get_object_value(i).get_type() == sajson::TYPE_STRING){
+					ss_ u = r.get_object_value(i).as_string();
+					if(!u.empty() && u[0] == '/')
+						u = ss_(CONTENTDB)+u;
+					return u;
+				}
+			}
+			return "";
+		}
+	};
+	// The thread owns its Job (interface::Thread deletes the thing it
+	// ran); this list is the jobs still to be read
+	sv_<Job*> m_contentdb_jobs;
+
+	static ss_ url_encode(const ss_ &s)
+	{
+		ss_ out;
+		char buf[4];
+		for(unsigned char c : s){
+			if(isalnum(c) || c == '-' || c == '_' || c == '.')
+				out += (char)c;
+			else {
+				snprintf(buf, sizeof buf, "%%%02X", c);
+				out += buf;
+			}
+		}
+		return out;
+	}
+
+	void start_job(Job *job)
+	{
+		job->thread = interface::createThread(job);
+		job->thread->set_name("contentdb");
+		job->thread->start();
+		m_contentdb_jobs.push_back(job);
+	}
+
+	void on_contentdb_query(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:contentdb_query: %s", e.what());
+			return;
+		}
+		Job *job = new Job();
+		job->kind = Job::LIST;
+		job->peer = packet.sender;
+		job->q = url_encode(values.empty() ? "" : values[0].substr(0, 200));
+		start_job(job);
+	}
+
+	void on_contentdb_install(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:contentdb_install: %s", e.what());
+			return;
+		}
+		if(values.size() < 2)
+			return;
+		const ss_ author = values[0], name = values[1];
+		// A name is a directory: letters, digits, _ and - only
+		for(const ss_ *v : {&author, &name}){
+			for(char c : *v){
+				if(!isalnum((unsigned char)c) && c != '_' && c != '-'){
+					menu_error(packet.sender, "Not a ContentDB name: "+*v);
+					return;
+				}
+			}
+		}
+		const ss_ to = luanti_path()+"/games/"+name;
+		if(interface::fs::path_exists(to)){
+			menu_error(packet.sender, name+" is already installed. Remove "+
+					to+" yourself if you mean to replace it.");
+			return;
+		}
+		Job *job = new Job();
+		job->kind = Job::INSTALL;
+		job->peer = packet.sender;
+		job->q = author+"/"+name;
+		job->name = name;
+		const ss_ cache = m_server->get_config().get<ss_>("cache_path")+
+				"/luanti/contentdb";
+		interface::fs::create_directories(cache);
+		job->zip_path = cache+"/"+author+"_"+name+".zip";
+		job->into_dir = to+".installing";
+		send_progress(packet.sender, "Fetching "+name+"...");
+		start_job(job);
+	}
+
+	// The finished jobs answered, the running installs' progress told
+	void poll_contentdb()
+	{
+		for(size_t i = 0; i < m_contentdb_jobs.size(); ){
+			Job *job = m_contentdb_jobs[i];
+			if(!job->done){
+				if(job->kind == Job::INSTALL && job->total > 0){
+					send_progress(job->peer, "Downloading "+job->name+": "+
+							itos(job->got * 100 / job->total)+"%");
+				}
+				i++;
+				continue;
+			}
+			m_contentdb_jobs.erase(m_contentdb_jobs.begin() + i);
+			job->thread->request_stop();
+			job->thread->join();
+			// The job's fields read before the thread (and with it the
+			// job) is deleted at the end of the block
+			struct Free { interface::Thread *t; ~Free(){ delete t; } } free{job->thread};
+			if(!job->error.empty()){
+				menu_error(job->peer, (job->kind == Job::LIST ?
+						"ContentDB: " : "Installing "+job->name+" failed: ")+
+						job->error);
+				continue;
+			}
+			if(job->kind == Job::LIST){
+				send_contentdb_list(job->peer, job->result);
+				continue;
+			}
+			// The zip's one top-level directory is the game; renamed into
+			// place, and the game shows on the grid as an imported one does
+			ss_ top;
+			size_t tops = 0;
+			for(const auto &n : interface::fs::list_directory(job->into_dir)){
+				if(n.is_directory){
+					top = n.name;
+					tops++;
+				}
+			}
+			const ss_ to = luanti_path()+"/games/"+job->name;
+			const ss_ from = tops == 1 ? job->into_dir+"/"+top : job->into_dir;
+			if(rename(from.c_str(), to.c_str()) != 0){
+				menu_error(job->peer, "Installing "+job->name+" failed: cannot "
+						"rename "+from);
+				continue;
+			}
+			interface::fs::remove_all(job->into_dir);
+			log_i(MODULE, "Installed game %s from ContentDB", cs(job->name));
+			menu_message(job->peer, job->name+" installed from ContentDB");
+		}
+	}
+
+	// Five strings a row: author, name, title, short_description, thumbnail
+	void send_contentdb_list(network::PeerInfo::Id peer, const ss_ &json)
+	{
+		sv_<ss_> flat;
+		const sajson::document doc =
+				sajson::parse(sajson::string(json.c_str(), json.size()));
+		if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_ARRAY){
+			menu_error(peer, "ContentDB answered with something that is not "
+					"a list");
+			return;
+		}
+		sajson::value root = doc.get_root();
+		for(size_t i = 0; i < root.get_length(); i++){
+			sajson::value r = root.get_array_element(i);
+			if(r.get_type() != sajson::TYPE_OBJECT)
+				continue;
+			ss_ f[5];
+			static const char *keys[5] = {"author", "name", "title",
+					"short_description", "thumbnail"};
+			for(size_t j = 0; j < r.get_length(); j++){
+				const ss_ k = r.get_object_key(j).as_string();
+				sajson::value v = r.get_object_value(j);
+				if(v.get_type() != sajson::TYPE_STRING)
+					continue;
+				for(size_t n = 0; n < 5; n++)
+					if(k == keys[n])
+						f[n] = v.as_string();
+			}
+			for(size_t n = 0; n < 5; n++)
+				flat.push_back(f[n]);
+		}
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "main:contentdb_list", os.str());
+		});
+	}
+
 	void on_get_settings(const network::Packet &packet)
 	{
 		send_settings(packet.sender);
@@ -1509,6 +1778,8 @@ struct Module: public interface::Module
 		});
 	}
 };
+
+const char *Module::CONTENTDB = "https://content.luanti.org";
 
 extern "C" {
 	BUILDAT_EXPORT void* createModule_main(interface::Server *server){

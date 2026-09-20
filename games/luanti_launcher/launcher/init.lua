@@ -12,5 +12,11 @@ return function(ctx)
 		description = "Import search paths, the render mode",
 		run = function()
 			ctx.launch{game = "luanti_launcher", params = {menu = "settings"}}
+		end},
+	-- ContentDB's games, fetched and installed by the server ([CONTENTDB])
+	{id = "contentdb", label = "ContentDB", icon = "luanti.png", order = 193,
+		description = "Browse and install games from content.luanti.org",
+		run = function()
+			ctx.launch{game = "luanti_launcher", params = {menu = "contentdb"}}
 		end}}
 end

@@ -91,6 +91,9 @@ local draw_import_games
 local draw_import_worlds
 -- And the settings screen, drawn from the server's main:settings
 local draw_settings
+-- ContentDB's games ([CONTENTDB]): the server fetches, this asks and draws
+local ask_contentdb, draw_contentdb
+local contentdb_query = ""
 -- And the name field of a new save, which the one-game list goes to
 local draw_new_save_name
 
@@ -269,6 +272,9 @@ function draw(saves, save_games)
 		menu_wanted = nil
 		waiting("Reading the settings...")
 		buildat.send_packet("main:get_settings", "")
+	elseif menu_wanted == "contentdb" then
+		menu_wanted = nil
+		ask_contentdb("")
 	end
 end
 
@@ -393,6 +399,49 @@ function draw_settings(paths)
 		list[#list + 1] = path
 		send(list)
 	end)
+	back_to_saves(menu)
+end
+
+-- ContentDB's games, fetched by the server ([CONTENTDB]): a search field,
+-- a line per game with its title, author and one-line description, and
+-- Install on each, which the server answers with progress lines and a
+-- message when the game is in place (it shows on the grid as an imported
+-- game does). simplified: no thumbnails yet, and the first page only --
+-- the query narrows it.
+function ask_contentdb(query)
+	contentdb_query = query
+	waiting("Asking ContentDB...")
+	buildat.send_packet("main:contentdb_query",
+			cereal.binary_output({query}, {"array", "string"}))
+end
+
+function draw_contentdb(flat)
+	local menu = import_menu("ContentDB: games" ..
+			(contentdb_query ~= "" and (" matching \"" .. contentdb_query .. "\"") or ""))
+	local edit = menu.window:CreateChild("LineEdit")
+	edit:SetStyleAuto()
+	edit.minHeight = 26
+	edit.enabled = true
+	edit:SetText(contentdb_query)
+	menu:add("Search", function()
+		ask_contentdb((edit:GetText():gsub("^%s+", ""):gsub("%s+$", "")))
+	end)
+	local n = 0
+	for i = 1, #flat - 4, 5 do
+		local author, name, title, desc = flat[i], flat[i + 1], flat[i + 2], flat[i + 3]
+		n = n + 1
+		menu:add("Install  " .. title .. "  by " .. author ..
+				(desc ~= "" and ("  -- " .. desc) or ""), function()
+			waiting("Fetching " .. name .. "...")
+			buildat.send_packet("main:contentdb_install",
+					cereal.binary_output({author, name}, {"array", "string"}))
+		end)
+	end
+	if n == 0 then
+		local none = menu.window:CreateChild("Text")
+		none:SetStyleAuto()
+		none:SetText("Nothing found")
+	end
 	back_to_saves(menu)
 end
 
@@ -618,6 +667,13 @@ buildat.sub_packet("main:imports", function(data)
 	else
 		draw_import_games()
 	end
+end)
+
+buildat.sub_packet("main:contentdb_list", function(data)
+	if done then
+		return
+	end
+	draw_contentdb(cereal.binary_input(data, {"array", "string"}))
 end)
 
 buildat.sub_packet("main:settings", function(data)
