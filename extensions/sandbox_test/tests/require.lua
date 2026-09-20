@@ -39,3 +39,15 @@ assert(require("buildat/extension/cereal") == cereal,
 		"an extension loaded twice is not the same table")
 
 log:info("require.lua: the standard libraries are not requirable")
+
+-- An extension without a safe interface is refused, and one with it hands
+-- out that table alone: the launch grid's check file used to try this
+-- from the menu at every start ([UI_UAF]), which is not where a probe of
+-- the sandbox belongs
+refuses("buildat/extension/sandbox_test")
+assert(cereal.safe == nil and cereal.run == nil,
+		"an extension's own table reached the sandbox")
+
+-- And the libraries the sandbox never had
+assert(io == nil or io.open == nil, "io.open is in the sandbox")
+assert(os.execute == nil, "os.execute is in the sandbox")

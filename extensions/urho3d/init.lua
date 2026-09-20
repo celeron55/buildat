@@ -466,6 +466,81 @@ Safe.SubscribeToEvent("MouseButtonDown", function()
 end)
 
 --
+-- A removed UI element is dead to the sandbox ([UI_UAF])
+--
+-- tolua's userdata outlives the element it points at, so a wrapper held
+-- past the element's removal -- a closed form's button -- reads freed
+-- memory on its next property. The tree sends ElementRemoved for the
+-- element before it detaches, while it and its children are whole, so
+-- every wrapper of it or of anything under it is marked dead here and
+-- errors from then on. A re-parent is a removal followed by an add in
+-- the same C++ call (UIElement::InsertChild) with no Lua between: the
+-- add un-marks what the removal marked, and only that.
+--
+-- simplified: a wrapper's dead-ness is by pointer, and a freed element's
+-- address can be reused; the add's un-mark then reaches wrappers of an
+-- old element that a new one happens to sit on. No crash from it -- the
+-- wrapper then reads the new element -- and the fix is a generation
+-- counter on the C++ side.
+
+local removed_wrappers = setmetatable({}, {__mode = "k"})
+
+-- The removed subtree, walked while it is whole; the wrappers are then
+-- matched by table lookup and nothing of theirs is called -- a wrapper
+-- whose element went without an event (the tree torn down from C++) is
+-- exactly the dangling pointer this is here for, and GetParent() on it
+-- was the walk's own use-after-free (a driven run, 2026-09-20 16:08)
+local function subtree(element, set)
+	set[element] = true
+	for i = 0, element:GetNumChildren() - 1 do
+		subtree(element:GetChild(i), set)
+	end
+	return set
+end
+
+add_global_event_handler("ElementRemoved", "__buildat_ui_dead",
+	function(_, data)
+		local removed = data["Element"]:GetPtr("UIElement")
+		local gone = subtree(removed, {})
+		local set = {}
+		for safe, meta in pairs(magic_sandbox.live) do
+			if not meta.dead and gone[meta.unsafe] then
+				meta.dead = "UIElement " .. dump(meta.unsafe:GetName()) ..
+						" was removed"
+				set[safe] = meta
+			end
+		end
+		removed_wrappers[removed] = set
+	end)
+
+add_global_event_handler("ElementAdded", "__buildat_ui_dead",
+	function(_, data)
+		local added = data["Element"]:GetPtr("UIElement")
+		local set = removed_wrappers[added]
+		if not set then return end
+		removed_wrappers[added] = nil
+		for _, meta in pairs(set) do
+			meta.dead = nil
+		end
+	end)
+
+do
+	local holder = Safe.ui.root:CreateChild("UIElement")
+	local child = holder:CreateChild("UIElement", "uaf_child")
+	local moved = holder:CreateChild("UIElement", "uaf_moved")
+	-- The re-parent on the unsafe side: AddChild is not whitelisted
+	ui.root:AddChild(getmetatable(moved).unsafe)
+	assert(moved:GetName() == "uaf_moved", "a re-parented element read as dead")
+	holder:Remove()
+	local ok, err = pcall(function() return child:GetName() end)
+	assert(not ok and tostring(err):find("uaf_child"),
+			"a removed element's child did not error: " .. tostring(err))
+	moved:Remove()
+	assert(not pcall(function() return moved:GetName() end),
+			"a removed element did not error")
+end
+
+--
 -- What the whitelist actually lets through
 --
 -- A property missing from safe_classes.lua makes a feature **silently do

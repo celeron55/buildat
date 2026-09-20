@@ -65,9 +65,11 @@ function M.run()
 	log:info("sandbox_test(): Finished")
 end
 
--- Enabled when this module is loaded.
--- Normally that happens when Ctrl+F12 is pressed on the client.
-local value_checker_enabled = true
+-- Armed by toggle() (Ctrl+F12), not by loading: a sandboxed file's
+-- require("buildat/extension/sandbox_test") loads this file before
+-- learning it has no safe interface, and armed at load the walk ran in
+-- every client from the menu on ([UI_UAF], 2026-09-20).
+local value_checker_enabled = false
 function M.check_value(value)
 	if not value_checker_enabled then return end
 	log:debug("sandbox_test.check_value()")

@@ -5,6 +5,12 @@ local log = buildat.Logger("extension/magic_sandbox")
 local dump = buildat.dump
 local M = {safe = {}}
 
+-- Every wrapper alive, safe -> its meta, so that what happens to the
+-- unsafe side can reach them: a UI element's removal marks its wrappers
+-- dead (extension/urho3d, [UI_UAF]) -- tolua keeps a userdata after its
+-- object is deleted, and a property read through it is a use-after-free.
+M.live = setmetatable({}, {__mode = "k"})
+
 -- The resulting value from this function should be placed directly in the
 -- sandbox environment's global environment as _G[type_name]
 function M.wrap_class(type_name, def)
@@ -26,6 +32,7 @@ function M.wrap_class(type_name, def)
 			__index = class_meta, -- For reading class properties
 		})
 		meta.__index = function(table, key)
+			if meta.dead then error(meta.dead, 2) end
 			if def.custom_index then
 				return def.custom_index(safe, key)
 			end
@@ -84,6 +91,7 @@ function M.wrap_class(type_name, def)
 			error("Instance of "..dump(type_name).." does not have field or property "..dump(key))
 		end
 		meta.__newindex = function(table, key, value)
+			if meta.dead then error(meta.dead, 2) end
 			if def.custom_newindex then
 				return def.custom_newindex(safe, key, value)
 			end
@@ -140,6 +148,7 @@ function M.wrap_class(type_name, def)
 			end
 		end
 		setmetatable(safe, meta)
+		M.live[safe] = meta
 		return safe
 	end
 	class_meta.create_new = function(_, ...)
@@ -195,6 +204,7 @@ function M.safe_to_unsafe(safe_thing, valid_types)
 	end
 	local meta = getmetatable(safe_thing)
 	if meta and meta.type_name then
+		if meta.dead then error(meta.dead, 2) end
 		-- Check if it is directly this kind of wrapped type
 		for _, valid_type in ipairs(valid_types) do
 			if allowed_type_name(valid_type) == meta.type_name then
