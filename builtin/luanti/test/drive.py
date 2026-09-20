@@ -49,16 +49,28 @@ def say(s):
     print("drive: " + s, flush=True)
 
 
+# Set when the client's log says the connection is gone: an end condition
+# of the run (user, 2026-09-21), read on every wait -- a run that keeps
+# scanning a client that has left, or writes to a fifo nobody reads,
+# waits for nothing until its ceiling
+disconnected = False
+
+
 def write(*cmds):
-    for c in cmds:
-        fifo.write(c + "\n")
-    fifo.flush()
+    if disconnected:
+        return
+    try:
+        for c in cmds:
+            fifo.write(c + "\n")
+        fifo.flush()
+    except (BrokenPipeError, OSError):
+        pass
 
 
 def read_block(label):
     """Read cli.log until `scan <label>: done`; the block's lines without
     the label prefix, or None on timeout."""
-    global seen
+    global seen, disconnected
     t0 = time.time()
     buf = b""
     start = seen
@@ -68,6 +80,10 @@ def read_block(label):
             data = f.read()
         if data:
             buf += data
+            if b"Disconnected from server" in data or b"SIGTERM; shutting down" in data:
+                disconnected = True
+                seen = start + len(buf)
+                return None, time.time() - t0
             m = re.search(br"scan %s: done, \d+ lines" % re.escape(label).encode(), buf)
             if m:
                 # Only up to this block's end is consumed: the next block
@@ -1299,6 +1315,9 @@ def main():
         lines, took = read_block(label)
         if lines is not None and vlines is not None:
             lines = vlines + lines
+        if disconnected:
+            say("FAILED disconnected: the client's connection is gone at turn %d" % turn)
+            break
         if lines is None:
             say("turn %d: no scan block in %.1f s" % (turn, took))
             slow += 1

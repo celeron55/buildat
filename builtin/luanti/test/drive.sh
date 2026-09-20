@@ -85,10 +85,21 @@ exec 3> "$fifo"
 # where the driver could read the world's arrival off its first scans)
 START_WAIT="${START_WAIT:-$([ -n "${NETSIM:-}" ] && echo 240 || echo 40)}"
 echo "delay $((START_WAIT * 1000))" >&3
-sleep "$START_WAIT"
-python3 "$me/drive.py" "$out/cli.log" "$fifo" "$MINUTES" "$out" "$SEED" $GOAL \
-	> "$out/drive.log" 2>&1 &
-drv=$!
+# A client that leaves during the wait -- disconnected, crashed -- ends
+# the run there (user, 2026-09-21): a driver started after it would open
+# the fifo for a reader that is gone and wait for nothing
+for i in $(seq 1 "$START_WAIT"); do
+	kill -0 "$cli" 2>/dev/null || break
+	sleep 1
+done
+drv=
+if kill -0 "$cli" 2>/dev/null; then
+	python3 "$me/drive.py" "$out/cli.log" "$fifo" "$MINUTES" "$out" "$SEED" $GOAL \
+		> "$out/drive.log" 2>&1 &
+	drv=$!
+else
+	echo "drive: FAILED disconnected: the client left during the start wait" > "$out/drive.log"
+fi
 
 limit=$((MINUTES * 60 + 300))
 for i in $(seq 1 "$limit"); do
@@ -102,7 +113,13 @@ if kill -0 "$cli" 2>/dev/null; then
 fi
 wait "$cli"
 cli_status=$?
-wait "$drv" 2>/dev/null
+# The driver ends itself on a disconnect it sees; one blocked on the fifo
+# with the client gone is ended here
+if [ -n "$drv" ] && kill -0 "$drv" 2>/dev/null; then
+	sleep 2
+	kill "$drv" 2>/dev/null
+fi
+[ -n "$drv" ] && wait "$drv" 2>/dev/null
 exec 3>&-
 sleep 2
 kill -INT "$srv" 2>/dev/null
