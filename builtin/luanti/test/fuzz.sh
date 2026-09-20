@@ -116,8 +116,8 @@ if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 fi
 rm -rf "../user/games/vanilla/saves/$save"
 port=$(( 29800 + (SEED % 90) ))
-srv=""; cli=""
-trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
+srv=""; cli=""; netsim=""
+trap 'kill "$cli" 2>/dev/null; kill "${netsim:-}" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 { echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
@@ -133,7 +133,18 @@ sleep 5
 srv=$(pgrep -x buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; tail -3 "$out/srv.log" >&2; exit 1; }
 
-bin/buildat -s "localhost:$port" -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
+# NETSIM="--delay 80 --rate 2000 --loss 2": the client goes through
+# util/netsim.py's lossy link to the server ([NET_SIM]); the proxy's port
+# is the server's plus a hundred
+cport=$port
+if [ -n "${NETSIM:-}" ]; then
+	cport=$((port + 100))
+	python3 "$here/util/netsim.py" --listen "$cport" --to "localhost:$port" \
+		$NETSIM > "$out/netsim.log" 2>&1 &
+	netsim=$!
+	sleep 1
+fi
+bin/buildat -s "localhost:$cport" -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
 	-c @"$out/cmds.txt" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
 cli=$!
