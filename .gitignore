@@ -13,3 +13,4 @@ session.vim
 
 /tmp
 /local
+__pycache__/
