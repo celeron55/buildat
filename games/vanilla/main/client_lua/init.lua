@@ -1366,8 +1366,12 @@ local function apply_sky_of_hour()
 		local sc = sky_lights.sun.color
 		world_sky:set_sun_radiance(disc * sc.r, disc * sc.g, disc * sc.b)
 	end
-	sky_lights.moon.color = blend(PHYS.MOON_COLOR,
-			game_sky.moon_tint or luanti_sky.MOON_TINT, share)
+	-- pbr: the render's moon, a 4100 K lamp (1, 0.86, 0.70) -- the cold
+	-- blue is the parity modes' look, and the night probe read pbr's snow
+	-- blue against the render's warm ([NIGHT_LIGHT], 2026-09-20)
+	sky_lights.moon.color = sky_now.unlit and blend(PHYS.MOON_COLOR,
+			game_sky.moon_tint or luanti_sky.MOON_TINT, share) or
+			magic.Color(1.0, 0.86, 0.70)
 
 	-- The sun and the moon are two bodies, drawn at once: the shader puts
 	-- the moon opposite the sun, which is where Luanti puts it, so both are
@@ -1548,12 +1552,16 @@ local function update_sky(dt)
 	-- VoxeLibre turns all three off when the weather turns -- so that is a
 	-- gate and not a dimming. 0.8 is what a full overcast takes.
 	local through_cloud = 1 - 0.8 * (game_sky.cloud_cover or 0)
+	-- The discs' visibility (set_sun / set_moon) is the discs' alone:
+	-- official Luanti lights the day the same with the sun hidden, having
+	-- no light from either body, and the reference fixture hides the
+	-- moon's disc to keep it out of the crops while its moonlit ground
+	-- stays -- the light went with the disc and the night probe read the
+	-- moon as absent ([NIGHT_LIGHT], 2026-09-20)
 	local up = luanti_sky.sun_amount(daylight) *
-			luanti_sky.above_horizon(smooth_sy) * through_cloud *
-			((game_sky.sun_visible ~= false) and 1 or 0)
+			luanti_sky.above_horizon(smooth_sy) * through_cloud
 	local moon_up = luanti_sky.moon_amount(daylight) *
-			luanti_sky.above_horizon(-smooth_sy) * through_cloud *
-			((game_sky.moon_visible ~= false) and 1 or 0)
+			luanti_sky.above_horizon(-smooth_sy) * through_cloud
 	-- A light below the horizon is taken out of the scene rather than
 	-- dimmed: a directional light does not know about the horizon, and one
 	-- under it lights the undersides of everything and puts the night's
@@ -1580,6 +1588,14 @@ local function update_sky(dt)
 	end
 	sky_lights.moon_node.enabled = moon_up > 0 and
 			not (sky_now.unlit and not sky_now.shadows)
+	-- Said when it changes: the night probe read the moon as absent
+	-- ([NIGHT_LIGHT], 2026-09-20), and this is the first thing to ask
+	if sky_now.moon_on ~= sky_lights.moon_node.enabled then
+		sky_now.moon_on = sky_lights.moon_node.enabled
+		log:info(string.format("moon light %s: amount %.2f, elevation %.2f, cloud %.2f, visible %s",
+				sky_now.moon_on and "on" or "off", luanti_sky.moon_amount(daylight),
+				-smooth_sy, game_sky.cloud_cover or 0, tostring(game_sky.moon_visible)))
+	end
 	if moon_up > 0 then
 		sky_lights.moon_node.direction =
 				magic.Vector3(-dir.x, -dir.y, -dir.z)
