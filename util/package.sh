@@ -128,6 +128,12 @@ smoke_test_wine() {
 	local port=$(( 29600 + (RANDOM % 90) ))
 	echo "smoke test under Wine in $unpacked"
 	export WINEDEBUG=-all WINEPREFIX="$dir/wine"
+	# A crash's report and not its dialog: winedbg shows a "Program
+	# Error" box on the display first and writes the backtrace when it
+	# is closed, which nobody does on the virtual display -- the smoke's
+	# client sat in it until its timeout and the log ended on "starting
+	# debugger..." ([WIN_SMOKE_STALL])
+	"$wine" reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f > /dev/null 2>&1 || true
 	# One virtual display for the whole of it: the wineserver the server's
 	# run starts is the one the client's run finds, and it keeps the
 	# display it was started without
@@ -152,7 +158,14 @@ smoke_test_wine() {
 	# asks: joined, drawn a chunk, run its commands to the end
 	sleep 5
 	printf 'delay 25000\nscreenshot %s/shot.png\nquit\n' "Z:$dir" > "$dir/cmds.txt"
-	(cd "$unpacked" && timeout 180 "$wine" bin/buildat.exe -s "localhost:$port" -w 640x360 -l 3 -c "@Z:$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
+	# Under the server's stall rule: a dialog or a deadlock -- winedbg's
+	# crash box before ShowCrashDialog was off -- costs half a minute,
+	# not the ceiling
+	(cd "$unpacked" && "$wine" bin/buildat.exe -s "localhost:$port" -w 640x360 -l 3 -c "@Z:$dir/cmds.txt" > "$dir/cli.log" 2>&1) &
+	local cli=$!
+	wait_for_line "$dir/cli.log" "$cli" "Command sequence complete" 180 || true
+	sleep 5
+	kill -9 "$cli" 2>/dev/null; wait "$cli" 2>/dev/null || true
 	kill -INT "$srv" 2>/dev/null; sleep 3; kill -9 "$srv" 2>/dev/null
 	wait "$srv" 2>/dev/null || true
 	"$wine"server -k 2>/dev/null || true
@@ -385,6 +398,11 @@ smoke_test() {
 }
 
 case "$target" in
+# The Windows smoke alone on an archive already made, for reading its
+# leavings without the build: util/package.sh smoke out/x.zip
+smoke)
+	smoke_test_wine "$2"
+	;;
 linux)
 	a=$(make_one "buildat-$version-linux-x86_64-portable" -DPORTABLE=TRUE)
 	b=$(make_one "buildat-$version-linux-x86_64-xdg" -DPORTABLE=FALSE)
