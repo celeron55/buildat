@@ -133,10 +133,6 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 		# library that owns the memory as much as in what calls it
 		"-DCMAKE_CXX_FLAGS=${SANITIZE_FLAGS}"
 		"-DCMAKE_C_FLAGS=${SANITIZE_FLAGS}"
-		# And the link flags, which is how a static-runtime variant
-		# reaches Urho3D.dll ([WIN_DLL_INIT]); empty otherwise
-		"-DCMAKE_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
-		"-DCMAKE_SHARED_LINKER_FLAGS=${CMAKE_SHARED_LINKER_FLAGS}"
 		# A cross build hands the engine the same toolchain file and, for
 		# Urho3D's MinGW.cmake, the tool prefix ([PACKAGING] step 3) --
 		# and not the compilers, which the toolchain sets and Urho3D's
@@ -528,24 +524,18 @@ if(WIN32)
 	# Where the three runtime DLLs beside the executables come from
 	# ([WIN_DLL_INIT]): "winlibs", the shipped compiler's (one libstdc++
 	# for the binaries and the modules it compiles); "toolchain", the
-	# cross toolchain's own that built the binaries; "static", libstdc++
-	# and winpthread linked into each binary (util/package.sh sets the
-	# link flags with it) and the toolchain's libgcc_s alone shipped --
+	# cross toolchain's own that built the binaries. Not a static one:
 	# a static libgcc in two DLLs that export everything defines
-	# _Unwind_Resume twice.
+	# _Unwind_Resume twice, the toolchain's libgcc_s itself imports
+	# winpthread, and g++'s own -lpthread comes after any -Bstatic.
 	set(BUILDAT_RUNTIME_DLLS "winlibs" CACHE STRING
-		"Source of the runtime DLLs: winlibs, toolchain or static")
+		"Source of the runtime DLLs: winlibs or toolchain")
 	if(BUILDAT_RUNTIME_DLLS STREQUAL "winlibs" AND BUILDAT_SHIP_COMPILER)
 		foreach(DLL libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
 			install(FILES "${BUILDAT_SHIP_COMPILER}/bin/${DLL}" DESTINATION "${DST_BIN}")
 		endforeach()
-	elseif(BUILDAT_RUNTIME_DLLS STREQUAL "toolchain" OR BUILDAT_RUNTIME_DLLS STREQUAL "static")
-		if(BUILDAT_RUNTIME_DLLS STREQUAL "static")
-			set(RUNTIME_DLLS libgcc_s_seh-1.dll)
-		else()
-			set(RUNTIME_DLLS libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
-		endif()
-		foreach(DLL ${RUNTIME_DLLS})
+	elseif(BUILDAT_RUNTIME_DLLS STREQUAL "toolchain")
+		foreach(DLL libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll)
 			# The compiler's own copy: what -print-file-name resolves
 			execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=${DLL}
 				OUTPUT_VARIABLE DLL_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
