@@ -1408,7 +1408,7 @@ done, 8 lines""".splitlines()
     st = parse(["self at 0,0,0 yaw 0 pitch 30 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_crafting_table:crafting_table 1 | 3:mcl_core:stick 2",
                 "crosshair mcl_core:stone at 0,0,1"])
     name, cmds, exp = rules(st, {})
-    assert name == "stair_aim", (name, cmds)
+    assert name == "stair_look", (name, cmds)   # nothing mapped yet: the cube first
     # and with none in sight, down through the ground
     name, cmds, exp = rules(parse(["self at 0,5,0 yaw 0 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_tools:pick_wood 1 | 2:mcl_crafting_table:crafting_table 1 | 3:mcl_core:stick 2"]), {})
     assert name == "stair_look", name
