@@ -1536,9 +1536,6 @@ struct Module: public interface::Module
 
 	void show_world_to(network::PeerInfo::Id peer)
 	{
-		replicate::access(m_server, [&](replicate::Interface *ireplicate){
-			ireplicate->assign_scene_to_peer(m_scene, peer);
-		});
 		network::access(m_server, [&](network::Interface *inetwork){
 			// The menu takes itself away first: it is a script of its own
 			// and has no other way of knowing that it is done with
@@ -1546,8 +1543,16 @@ struct Module: public interface::Module
 			inetwork->send(peer, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
 		});
+		// The player before the scene: the placement goes out ordered
+		// behind the script that subscribes to it ([PLAYER_POS_RACE]), and
+		// the scene brings voxelworld's registry, megabytes that over a
+		// slow link held the placement -- and the client's input -- for
+		// minutes ([NET_SIM]'s link cell)
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->add_player(player_name_of(peer), peer);
+		});
+		replicate::access(m_server, [&](replicate::Interface *ireplicate){
+			ireplicate->assign_scene_to_peer(m_scene, peer);
 		});
 	}
 
