@@ -5,6 +5,7 @@
 #include "interface/server.h"
 #include "interface/module.h"
 #include <functional>
+#include <cstdint>
 
 namespace network
 {
@@ -42,11 +43,41 @@ namespace network
 		OldClient(const PeerInfo &info): info(info){}
 	};
 
+	// What a server does about a peer that will not read what it is sent.
+	// A peer's socket does not block any more, so what cannot go right away
+	// waits in a queue of its own -- and this says what happens when that
+	// queue keeps growing.
+	//
+	// The choice is the game's: a game knows whether a client that has
+	// fallen behind is better off waiting, losing data, or being let go.
+	// See set_send_policy(), and doc/plan/luanti_module_plan.md, "Settled".
+	enum class SendPolicy
+	{
+		// Queue whatever it takes. Nothing is ever lost and nothing ever
+		// waits, and a peer that never reads costs memory without bound.
+		// The default, because it is what a game that has not thought about
+		// this wants: it works.
+		Buffer,
+		// Over the limit, a new packet is dropped and said so once. For a
+		// game whose packets are a stream of the latest of something --
+		// positions -- and where an old one is worth nothing anyway.
+		Drop,
+		// Over the limit for longer than the grace period, the peer is
+		// disconnected. Luanti's own answer, and what
+		// games/vanilla picks.
+		Disconnect,
+	};
+
 	struct Interface
 	{
 		virtual void send(PeerInfo::Id recipient, const ss_ &name,
 				const ss_ &data) = 0;
 		virtual sv_<PeerInfo::Id> list_peers() = 0;
+		// max_queue_bytes is what Drop and Disconnect measure against, and
+		// grace_us how long Disconnect lets a peer stay over it. Buffer
+		// ignores both.
+		virtual void set_send_policy(SendPolicy policy,
+				size_t max_queue_bytes, int64_t grace_us) = 0;
 	};
 
 	inline bool access(interface::Server *server,

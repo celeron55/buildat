@@ -6,6 +6,19 @@ local dump = buildat.dump
 local magic_sandbox = require("buildat/extension/magic_sandbox")
 local safe_globals = dofile(buildat.extension_path("urho3d").."/safe_globals.lua")
 local safe_events = dofile(buildat.extension_path("urho3d").."/safe_events.lua")
+-- command_seq:<name> is any name a command sequence's `event` line gives,
+-- with the rest of the line as Param ([CMD_EVENT]); the prefix is the
+-- whitelist entry
+local COMMAND_SEQ_EVENT = {Param = {variant = "String", safe = "string"}}
+local function safe_event_def(name)
+	if safe_events[name] then
+		return safe_events[name]
+	end
+	if type(name) == "string" and name:sub(1, 12) == "command_seq:" then
+		return COMMAND_SEQ_EVENT
+	end
+	return nil
+end
 local safe_classes = dofile(buildat.extension_path("urho3d").."/safe_classes.lua")
 
 local Safe = {}
@@ -164,7 +177,10 @@ local global_event_mux_installed = {}
 local function add_global_event_handler(event_type, cb_name, fn)
 	if not global_event_mux_installed[event_type] then
 		global_event_mux[event_type] = {}
-		local mux_name = "__buildat_mux_"..event_type
+		-- A global's name, so only letters and digits: an event named
+		-- with a colon (command_seq:scan, [CMD_EVENT]) is a function
+		-- Urho3D cannot look up otherwise
+		local mux_name = "__buildat_mux_"..event_type:gsub("[^%w_]", "_")
 		_G[mux_name] = function(event_type_thing, unsafe_event_data)
 			-- A copy, because a handler is allowed to unsubscribe from
 			-- inside the event -- leaving a session on Escape does -- and
@@ -223,7 +239,7 @@ function Safe.SubscribeToEvent(x, y, z)
 			error("SubscribeToEvent(): Object must be sandboxed")
 		end
 	end
-	if not safe_events[sub_event_type] then
+	if not safe_event_def(sub_event_type) then
 		error("Event type is not whitelisted: "..dump(sub_event_type))
 	end
 	if type(callback) == 'string' then
@@ -250,7 +266,7 @@ function Safe.SubscribeToEvent(x, y, z)
 			-- Let's just assume it's the correct one...
 			local got_event_type = sub_event_type
 			-- Filter event_data (Urho3D::VariantMap)
-			local safe_fields = safe_events[got_event_type]
+			local safe_fields = safe_event_def(got_event_type)
 			if not safe_fields then
 				log:warning("Received unsafe event: "..dump(got_event_type))
 				return
@@ -336,6 +352,30 @@ Safe.render_scene_to_texture = wrap_function({"Scene", "Node", "number",
 	return wrap_instance("Texture2D", __buildat_render_scene_to_texture(
 			scene, camera_node, w, h))
 end)
+
+-- The viewports the user's graphics preferences are applied to, as against
+-- the raw renderer:SetViewport() ones which are drawn the way the game says
+-- and nothing else. Use this instead of renderer:SetViewport(): the engine
+-- draws the scene at the render_scale the user asked for, under a UI that
+-- stays at native resolution, and the viewport stays the game's own -- what
+-- it does to renderPath afterwards still works.
+--
+--     magic.set_preferred_viewports({viewport})            -- one view
+--     magic.set_preferred_viewports({vp_top, vp_bottom})   -- two
+--     magic.set_preferred_viewports({})                    -- teardown
+--
+-- A game that does not call this is drawn at native resolution and keeps
+-- working; the preference is a preference.
+function Safe.set_preferred_viewports(viewports)
+	if type(viewports) ~= 'table' then
+		error("set_preferred_viewports(): expected a table of Viewports")
+	end
+	local unsafe = {}
+	for i = 1, #viewports do
+		unsafe[i] = magic_sandbox.safe_to_unsafe(viewports[i], "Viewport")
+	end
+	__buildat_set_preferred_viewports(unsafe)
+end
 
 --
 -- Unsafe interface
@@ -424,6 +464,172 @@ Safe.SubscribeToEvent("MouseButtonDown", function()
 		input:SetMouseVisible(false)
 	end
 end)
+
+--
+-- What the whitelist actually lets through
+--
+-- A property missing from safe_classes.lua makes a feature **silently do
+-- nothing** -- no error, no warning -- which is the whole cost of a
+-- whitelist sweep and the reason one is done in batches. So the classes a
+-- sweep adds get a round trip here, once, at load: made through
+-- CreateChild the way a game makes them, written to and read back. An
+-- element that never arrived in the whitelist errors on CreateChild, and a
+-- property that did not arrive comes back wrong.
+--
+-- util/whitelist_sweep.py is the other half: it says which of Urho3D's
+-- classes are still neither wrapped nor refused.
+
+do
+	local holder = Safe.ui.root:CreateChild("UIElement")
+
+	local view = holder:CreateChild("ScrollView")
+	view.scrollStep = 0.25
+	assert(math.abs(view.scrollStep - 0.25) < 1e-6,
+			"whitelist: ScrollView.scrollStep did not stick")
+	local content = holder:CreateChild("UIElement")
+	view.contentElement = content
+	assert(view.contentElement ~= nil,
+			"whitelist: ScrollView.contentElement did not stick")
+
+	local bar = holder:CreateChild("ScrollBar")
+	bar.orientation = O_VERTICAL
+	bar.range = 10
+	bar.value = 4
+	assert(bar.orientation == O_VERTICAL and math.abs(bar.value - 4) < 1e-6,
+			"whitelist: ScrollBar did not take its orientation and value")
+	bar:ChangeValue(1)
+	assert(math.abs(bar.value - 5) < 1e-6,
+			"whitelist: ScrollBar:ChangeValue() did nothing")
+
+	local slider = holder:CreateChild("Slider")
+	slider.range = 100
+	slider.value = 20
+	assert(math.abs(slider.value - 20) < 1e-6,
+			"whitelist: Slider.value did not stick")
+
+	local progress = holder:CreateChild("ProgressBar")
+	progress.range = 1
+	progress.value = 0.5
+	progress.showPercentText = false
+	assert(math.abs(progress.value - 0.5) < 1e-6 and
+			progress.showPercentText == false,
+			"whitelist: ProgressBar did not take its value")
+
+	local list = holder:CreateChild("ListView")
+	assert(list.numItems == 0, "whitelist: a new ListView is not empty")
+	list:AddItem(holder:CreateChild("Text"))
+	list:AddItem(holder:CreateChild("Text"))
+	assert(list.numItems == 2,
+			"whitelist: ListView:AddItem() did not add")
+	list.selection = 1
+	assert(list.selection == 1 and list:IsSelected(1),
+			"whitelist: ListView.selection did not stick")
+	assert(list:GetItem(0) ~= nil,
+			"whitelist: ListView:GetItem() answered nothing")
+	list:RemoveItem(0)
+	assert(list.numItems == 1,
+			"whitelist: ListView:RemoveItem() did not remove")
+
+	local menu = holder:CreateChild("Menu")
+	local popup = holder:CreateChild("Window")
+	menu.popup = popup
+	menu.popupOffset = Safe.IntVector2(0, 20)
+	assert(menu.popup ~= nil and menu.popupOffset.y == 20,
+			"whitelist: Menu did not take its popup and offset")
+
+	local drop = holder:CreateChild("DropDownList")
+	drop.placeholderText = "pick one"
+	drop:AddItem(holder:CreateChild("Text"))
+	drop:AddItem(holder:CreateChild("Text"))
+	assert(drop.numItems == 2 and drop.placeholderText == "pick one",
+			"whitelist: DropDownList did not take its items")
+	assert(drop.listView ~= nil,
+			"whitelist: DropDownList has no list view of its own")
+
+	local tip = holder:CreateChild("ToolTip")
+	tip.delay = 0.5
+	assert(math.abs(tip.delay - 0.5) < 1e-6,
+			"whitelist: ToolTip.delay did not stick")
+
+	local cursor = holder:CreateChild("Cursor")
+	cursor.useSystemShapes = false
+	assert(cursor.useSystemShapes == false,
+			"whitelist: Cursor.useSystemShapes did not stick")
+
+	-- Text3D is a Drawable rather than a UI element, so it wants a node of
+	-- its own; the scene is thrown away with it
+	local scene = Safe.Scene:new()
+	-- With no Octree a drawable says so, once per frame, into everybody
+	-- else's log: this scene exists for two property writes and is thrown
+	-- away, but it is still a scene
+	scene:CreateComponent("Octree")
+	local node = scene:CreateChild("whitelist_check")
+	local label = node:CreateComponent("Text3D")
+	-- **The font first.** Text::SetFontSize() begins "Initial font must be
+	-- set" and returns false without one, so a size set before a font is
+	-- silently the default -- which is the exact shape of failure this whole
+	-- sweep exists to catch, and it was caught here.
+	label:SetFont(Safe.cache:GetResource("Font",
+			"Fonts/OverpassMono-Regular.ttf"), 24)
+	label.text = "over there"
+	label.wordwrap = false
+	label.fixedScreenSize = true
+	assert(label.text == "over there" and label.fontSize == 24 and
+			label.fixedScreenSize == true,
+			"whitelist: Text3D did not take its font, text and size")
+	node:Remove()
+
+	-- Pixels, and the six faces a sky is drawn on. An image made here rather
+	-- than read from anywhere: what the cache hands over is the same class.
+	local img = Safe.Image:new()
+	assert(img:SetSize(4, 4, 4), "whitelist: Image:SetSize() refused")
+	assert(img.width == 4 and img.components == 4,
+			"whitelist: Image did not take its size")
+	img:SetPixel(1, 1, Safe.Color(1, 0, 0, 1))
+	local px = img:GetPixel(1, 1)
+	assert(px.r > 0.99 and px.g < 0.01,
+			"whitelist: a pixel written is not the pixel read")
+	assert(img:Resize(2, 2) and img.width == 2,
+			"whitelist: Image:Resize() did nothing")
+
+	-- SetData sizes the cube from face 0, so this is the whole of it: one
+	-- square image on every face
+	local cube = Safe.TextureCube:new()
+	local face = Safe.Image:new()
+	face:SetSize(4, 4, 4)
+	face:Clear(Safe.Color(0, 0, 1, 1))
+	for i = 0, 5 do
+		assert(cube:SetData(i, face),
+				"whitelist: TextureCube:SetData() refused face " .. i)
+	end
+
+	-- Arithmetic, which is the whole of the Math batch, so it is checked by
+	-- doing some rather than by writing a number and reading it back.
+	local iv = Safe.IntVector3(1, 2, 3) + Safe.IntVector3(4, 5, 6)
+	assert(iv.x == 5 and iv.y == 7 and iv.z == 9,
+			"whitelist: IntVector3 does not add")
+	assert(math.abs(Safe.Vector4(1, 2, 3, 4):DotProduct(
+			Safe.Vector4(1, 0, 0, 0)) - 1) < 1e-6,
+			"whitelist: Vector4 does not dot")
+	-- Five out along -Z, pointing back at a box two across around the
+	-- origin: the near face is four away
+	local ray = Safe.Ray(Safe.Vector3(0, 0, -5), Safe.Vector3(0, 0, 1))
+	assert(math.abs(ray:HitDistanceBox(Safe.BoundingBox(-1, 1)) - 4) < 1e-3,
+			"whitelist: a ray does not hit a box where it should")
+	-- And a sphere of radius two: a point five out is three from its surface
+	assert(math.abs(Safe.Sphere(Safe.Vector3(0, 0, 0), 2):Distance(
+			Safe.Vector3(0, 0, 5)) - 3) < 1e-3,
+			"whitelist: a sphere does not measure to a point")
+
+	holder:Remove()
+
+	-- Said out loud, because the failure that cost the most here was a check
+	-- that could not be told from one that never ran: an error anywhere in
+	-- this block takes the whole extension down with it, and then nothing
+	-- logs anything at all. A run without this line is a run where the
+	-- sandbox did not load.
+	log:info("whitelist: the wrapped classes round-tripped")
+end
 
 --
 -- Create the final interface

@@ -51,6 +51,13 @@ function M.run()
 	local success = run_in_sandbox(bytecode)
 	assert(success == false)
 
+	-- Check that the standard libraries cannot be required
+	log:info("sandbox_test(): Testing require")
+	local require_content = get_file_content(ext_path.."/tests/require.lua")
+	assert(require_content)
+	local success = run_in_sandbox(require_content, "=require.lua")
+	assert(success)
+
 	-- Run the exploit search
 	log:info("sandbox_test(): Trying to find an exploit")
 	try_exploit.run()
@@ -59,7 +66,7 @@ function M.run()
 end
 
 -- Enabled when this module is loaded.
--- Normally that happens when KEY_F10 is pressed on the client.
+-- Normally that happens when Ctrl+F12 is pressed on the client.
 local value_checker_enabled = true
 function M.check_value(value)
 	if not value_checker_enabled then return end

@@ -295,6 +295,7 @@ function M.resolve(expr, ctx, extra)
 	end
 	local ops, size = M.build(expr, {
 		resource = ctx.resource,
+		png = ctx.png,
 		compose = function(sub) return M.resolve(sub, ctx) end,
 	})
 	if not ops then

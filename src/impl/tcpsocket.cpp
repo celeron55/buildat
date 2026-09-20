@@ -286,6 +286,49 @@ struct CTCPSocket: public TCPSocket
 		}
 		return true;
 	}
+	bool set_nonblocking(bool nonblocking)
+	{
+		if(m_fd == -1)
+			return false;
+#ifdef _WIN32
+		u_long on = nonblocking ? 1 : 0;
+		return ioctlsocket(m_fd, FIONBIO, &on) == 0;
+#else
+		int flags = fcntl(m_fd, F_GETFL, 0);
+		if(flags == -1)
+			return false;
+		if(nonblocking)
+			flags |= O_NONBLOCK;
+		else
+			flags &= ~O_NONBLOCK;
+		return fcntl(m_fd, F_SETFL, flags) == 0;
+#endif
+	}
+	// What fits, and how much that was. A socket whose buffer is full is not
+	// an error: nothing goes, `sent` is zero and the caller keeps the rest.
+	bool send_some(const ss_ &data, size_t offset, size_t *sent)
+	{
+		*sent = 0;
+		if(m_fd == -1)
+			return false;
+		if(offset >= data.size())
+			return true;
+		ssize_t n = send(m_fd, &data[offset], data.size() - offset, 0);
+		if(n < 0){
+#ifdef _WIN32
+			// Winsock says "would block" its own way, and errno says nothing
+			if(WSAGetLastError() == WSAEWOULDBLOCK)
+				return true;
+#else
+			if(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+				return true;
+#endif
+			std::cerr<<"send: "<<strerror(errno)<<std::endl;
+			return false;
+		}
+		*sent = (size_t)n;
+		return true;
+	}
 	bool wait_data(int timeout_us)
 	{
 		if(m_fd == -1)

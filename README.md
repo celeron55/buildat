@@ -18,6 +18,8 @@ Further reading:
 * [doc/conventions.txt](doc/conventions.txt)
 * [doc/client_api.txt](doc/client_api.txt)
 * [doc/client_commands.txt](doc/client_commands.txt)
+* [doc/luanti_client.txt](doc/luanti_client.txt) -- playing on a real Luanti server
+* [doc/luanti_module.txt](doc/luanti_module.txt) -- running a Luanti game inside buildat_server
 * [doc/todo.txt](doc/todo.txt)
 
 Buildat Linux How-To
@@ -28,9 +30,11 @@ Install dependencies
 
 	$ # A compiler and cmake, plus the X, sound and GL headers Urho3D needs
 	$ sudo apt-get install build-essential cmake \
-	        libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev
+	        libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev \
+	        libcurl4-openssl-dev
 	$ sudo dnf install gcc-c++ cmake \
-	        libX11-devel libXrandr-devel alsa-lib-devel mesa-libGL-devel
+	        libX11-devel libXrandr-devel alsa-lib-devel mesa-libGL-devel \
+	        libcurl-devel
 
 The server also needs a C++ compiler at run time, not just at build time: it
 compiles game modules as it loads them. It looks for `c++` in PATH.
@@ -48,12 +52,16 @@ required for the module interface.
     $ cmake .. -DCMAKE_BUILD_TYPE=Debug
     $ make -j4
 
-The bundled Urho3D is built by a sub-build that uses every core regardless of
-the `-j` given here, which is where the `-j0 forced in submake` warning comes
-from.
-
 You can use -DBUILD_SERVER=false or -DBUILD_CLIENT=false if you don't need the
 server or the client, respectively.
+
+`-DPORTABLE=TRUE`, the default, keeps the cache and the user's own things
+beside the program, in `cache/` and `user/`. That is what development wants.
+`-DPORTABLE=FALSE` puts them where the platform says instead
+(`$XDG_DATA_HOME/buildat` and `$XDG_CACHE_HOME/buildat` on Linux,
+`%APPDATA%\buildat` and `%LOCALAPPDATA%\buildat\cache` on Windows,
+`~/Library/Application Support/buildat` and `~/Library/Caches/buildat` on
+macOS), which is what an installed copy wants. `-C` and `-D` override either.
 
 Optional: `-DURHO3D_LUAJIT=TRUE` builds the bundled LuaJIT instead of Lua.
 `URHO3D_HOME` still overrides the bundled tree if you need an external build.
@@ -71,7 +79,39 @@ Debug keys, in any game:
 
 * F8: draw debug geometry
 * F9: on-screen profiler, render and resource stats
-* F10: sandbox test extension
+* Ctrl+F12: sandbox test extension
+
+Preferences
+-----------
+
+What the user sets once and every game honours: `render_scale` (3D viewports
+drawn at a fraction of the window size, with the UI left at native
+resolution), `vsync`, `max_fps`, `multisampling`, `sound_volume` and
+`sound_mute`. They live in `user/preferences.json` beside the remembered
+window size, and there is no screen for them yet -- edit the file, or set them
+for one run with `-o`, which is not written back:
+
+    $ bin/buildat -o render_scale=0.5,vsync=0,sound_mute=1
+
+`user/` is where what the user made, chose or downloaded deliberately goes, as
+against `cache/`, which is what the program can recreate by itself. In the
+default portable build both sit in the buildat directory; `-D` and `-C` move
+them, and `-DPORTABLE=FALSE` puts them where the platform says (see Build).
+
+See [doc/client_api.txt](doc/client_api.txt) for what a game does to honour
+`render_scale`, and what the client does not get to decide.
+
+Saves
+-----
+
+A game can persist its world. `games/digger` does: it opens or creates the
+save `user/games/digger/saves/world`, and what you dig is there next time.
+Delete that directory to start over. Every other game generates and forgets,
+which is what they did before saves existed -- persistence is opt-in, and an
+arena game whose world is gone when the match ends should not have one.
+
+Behind it is a key-to-blob store per save, in one vendored SQLite database,
+namespaced per module. See `builtin/storage/api.h`.
 
 Server and client
 -----------------
@@ -108,6 +148,12 @@ Edit something and then restart the client (CTRL+C in terminal 2):
     $ vim games/minigame/main/client_lua/init.lua
     $ vim games/minigame/main/main.cpp
     $ vim builtin/network/network.cpp
+
+The server can do that part for you while you develop: `-R` makes it restart
+a module when its source changes, and `-w` pushes an edited client script to
+the clients that have it. Both are off by default -- a restart throws away
+whatever the module was holding, and neither belongs in a run whose output
+is being measured.
 
 Buildat Windows How-To
 ======================

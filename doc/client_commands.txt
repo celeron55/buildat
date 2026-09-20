@@ -14,6 +14,15 @@ exits after the sequence finishes (exit status 1 if a command fails).
 -w WxH runs windowed at a fixed size without changing the size the client
 remembers between runs. Use it for anything that compares images between runs.
 
+-c ignores user/preferences.json entirely and runs on the built-in defaults,
+so a preference someone left at render_scale=0.5 can never change what a
+screenshot looks like, and a run never writes the file. A -c run is also muted
+unless -o says otherwise: nothing captures audio, and a driven run playing a
+game's music through whoever's speakers is a small recurring annoyance with no
+upside. -o still wins, which is how a preference itself gets tested:
+
+    $ bin/buildat -s localhost -w 1600x900 -o render_scale=0.5 -c @check.txt
+
 @path reads the commands from a file. Empty lines and lines starting with # are
 ignored.
 
@@ -109,6 +118,20 @@ look_dir <x> <y> <z>
 
 text <string>
     SDL text input (UI text fields). Rest of the line is the string.
+
+event <name> [param]
+    Send the Urho3D event command_seq:<name> on the client, with the rest of
+    the line as its string field Param, at this point in the sequence. Any
+    client Lua may subscribe to it (the command_seq: prefix is whitelisted in
+    the sandbox); the runner knows nothing of the names. A receiver answers
+    in the log, which is what a test reads.
+
+    The first receiver, in the Luanti launcher game's client: `event scan
+    <resolution> <label>` logs, under `scan <label>:` lines, what the
+    crosshair points at, a <resolution>x<resolution> grid of what a ray from
+    each bin hits within ten voxels (and what it passed through), and every
+    element of an open form or the chat line with its position and size.
+    A screenshot in the same sequence line pairs with it.
 
 quit
     Stop the sequence early. The client always exits at the end of -c anyway.

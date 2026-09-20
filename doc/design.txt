@@ -97,29 +97,61 @@ is where they were written when a separate launcher binary ran a menu of its
 own. When disconnecting from a server, the whole client window is closed and
 reopened.
 
-Launchable extensions
----------------------
-An extension that is a thing to launch rather than a library says so with a
-table:
+The launch grid
+---------------
+The client's start screen is a grid of launch actions, and they come from
+the tree: any number, zero or more, from every games/<name>, builtin/<name>
+and extensions/<name> that ships launcher/init.lua. Nothing else is
+scanned. The file runs in the sandbox as a module's client Lua does, with
+buildat.safe, the sandboxed magic and a require that hands out an
+extension's .safe table and nothing else -- it is on the way into a game,
+and a whole-server sandbox is only as good as the least-trusted code on
+that path. It is called every time the menu is shown and answers within a
+frame.
 
-    M.launch = {
-        title = "Play on a Luanti server",  -- what the menu calls it
-        icon = "luanti_client/res/icon.png",  -- optional, 120x120
-        run = function() ... end,  -- what picking it does
-    }
+    -- extensions/<name>/launcher/init.lua
+    return function(ctx)
+        return {
+            { id = "play", label = "Devtest", icon = "devtest.png",
+              description = "A fresh world",      -- optional, a tooltip
+              order = 10,                          -- optional, sorts first
+              run = function() ctx.launch{game = "devtest"} end },
+        }
+    end
 
-`run` is called with the launch menu underneath it on the UI stack, so it
-should push a screen of its own and come back rather than assuming it owns the
-client. An extension that can also be the client's whole reason for running --
-`buildat -m <name>` -- keeps an M.boot() for that case, and the two differ in
-what leaving the extension means: with the menu underneath, going back is going
-back to it; without, it is quitting.
+label and run are required; id is a stable name within the source; icon
+is a file name inside launcher/, resolved on the trusted side to
+<source>/launcher/<icon> (the buildat logo when absent). run is a callback
+with the menu underneath it on the UI stack: push a screen and come back,
+never Exit(). A file that errors, returns a non-table or an action without
+label or run is one warning naming it, and the rest of the grid draws. A
+game without launcher/ gets one tile, its name and its icon.png; a game
+with one replaces that and may return zero.
 
-The launch menu keeps the list of extensions it offers (LAUNCHABLE in
-extensions/__menu/init.lua). It is a list rather than a search of the extension
-tree because finding out whether an extension is launchable means requiring it,
-and requiring every extension to build a menu would run all of their loading
-code.
+The one way out of a file is ctx.launch:
+
+    ctx.launch{ extension = "luanti_client", params = { address = "..." } }
+    ctx.launch{ game = "digger" }
+
+params cross as plain data -- strings, numbers, booleans and tables of
+them, copied; a function or a userdata is an error at the call. An
+extension is entered through M.on_untrusted_launch(request), request =
+{ from = "extension/<name>", params = {...} }: the name says what it is,
+and the rule is to treat request.params as a packet from a server --
+validate, default, ignore the rest. An extension without that function is
+not a target. An extension that can also be the client's whole reason for
+running -- `buildat -m <name>` -- keeps M.boot() for that case; the two
+differ in what leaving means, back to the menu or quitting. A game starts
+a local server the way the local-game screen does, with the params' top
+level as key=value lines through the server's -u, kept as
+`untrusted_launch` in its config for a module to read as it would a
+packet -- never the environment. A builtin module is not a target yet.
+
+`buildat -a kind/name/id` runs one action on boot, with the grid
+underneath it. The grid's order: explicit order first, then by kind -- the menu's own,
+games, builtins, extensions -- then label. The check is
+extensions/sandbox_test/launcher/init.lua, whose tiles each try something
+the sandbox must refuse and say so on their label.
 
 Network protocol
 ----------------
