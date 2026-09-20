@@ -564,6 +564,11 @@ function M.define(dst, util)
 	})
 
 	util.wc("Component", {
+		properties = {
+			-- Whether it takes part: a model switched off for a shape in
+			-- the same node ([WIELD_MESH])
+			enabled = util.simple_property("boolean"),
+		},
 	})
 
 	util.wc("Octree", {

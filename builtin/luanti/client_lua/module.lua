@@ -1940,8 +1940,11 @@ function M.wield_geometry(node, item_name)
 	end
 	local cg = node:GetComponent("CustomGeometry") or
 			node:CreateComponent("CustomGeometry")
+	-- Both windings of every quad: a shape in the hand is looked at from
+	-- whatever side the hand turns to, and a face culled for its winding
+	-- was a dirt block held as a thin dark plate
 	local function quad(a, b, c, d, u, v)
-		for _, p in ipairs({a, b, c, a, c, d}) do
+		for _, p in ipairs({a, b, c, a, c, d, a, c, b, a, d, c}) do
 			cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
 			cg:DefineTexCoord(magic.Vector2(u, v))
 		end
@@ -1971,7 +1974,7 @@ function M.wield_geometry(node, item_name)
 		local function uvface(a, b, c, d)
 			local uv = {{0, 0}, {1, 0}, {1, 1}, {0, 1}}
 			local ps = {a, b, c, d}
-			for _, i in ipairs({1, 2, 3, 1, 3, 4}) do
+			for _, i in ipairs({1, 2, 3, 1, 3, 4, 1, 3, 2, 1, 4, 3}) do
 				cg:DefineVertex(magic.Vector3(ps[i][1], ps[i][2], ps[i][3]))
 				cg:DefineTexCoord(magic.Vector2(uv[i][1], uv[i][2]))
 			end
