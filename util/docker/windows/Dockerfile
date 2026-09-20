@@ -4,8 +4,17 @@
 # test. The compiler the archive ships under compiler/ is a separate,
 # native MinGW-w64 distribution -- not this one, which is a Linux program
 # -- pinned by URL and hash below once step 3's install rules take it.
-FROM debian:bookworm
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Pinned ([WIN_DLL_INIT]): the base image by digest and the packages from
+# a snapshot.debian.org date, so two builds of one commit are one archive.
+# The 0.3.0 zip that ran and the one that did not were the same source
+# through an image rebuilt from unpinned packages (gcc-mingw-w64-base
+# moved to 12.2.0-14+deb12u1 between them), and the difference sat in
+# Urho3D.dll's DllMain. Moving the date is a deliberate commit.
+FROM debian:bookworm@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26
+ARG DEBIAN_SNAPSHOT=20260920T000000Z
+RUN rm -f /etc/apt/sources.list.d/debian.sources \
+	&& printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s bookworm main\ndeb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s bookworm-security main\n' "$DEBIAN_SNAPSHOT" "$DEBIAN_SNAPSHOT" > /etc/apt/sources.list \
+	&& apt-get -o Acquire::Retries=5 update && apt-get install -y --no-install-recommends \
 	build-essential cmake git ca-certificates \
 	mingw-w64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 \
 	zip tar gzip curl xz-utils \
@@ -23,7 +32,7 @@ ARG WINLIBS_SHA256=675f79b6fba8d3c8165bd9b5fb8e96ab73370dd8611f13e520cb185357d3d
 # And Wine, for the smoke test: the server out of the archive, compiling
 # a module with the compiler the archive ships, under the virtual display
 # the client will want later
-RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-install-recommends unzip \
+RUN dpkg --add-architecture i386 && apt-get -o Acquire::Retries=5 update && apt-get install -y --no-install-recommends unzip \
 	wine wine64 wine32:i386 xvfb xauth libgl1-mesa-dri imagemagick \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& curl -sSL -o /tmp/winlibs.zip "$WINLIBS_URL" \

@@ -192,6 +192,18 @@ make_one() {
 		echo "install failed; see $build/install.log" >&2; exit 1; }
 	gather_licenses "$stage"
 	echo "$version" > "$stage/VERSION"
+	# What built it ([WIN_DLL_INIT]): the toolchain packages' versions, into
+	# the archive and the build log, so the next difference between two
+	# archives of one source is read off two text files
+	if command -v dpkg >/dev/null 2>&1; then
+		{ echo "built $(date -u +%Y-%m-%dT%H:%MZ) from ${BUILDAT_GIT_HASH:-?}"
+		  cat /etc/apt/sources.list 2>/dev/null | grep -v '^#'
+		  dpkg -l 'mingw-w64*' 'gcc-mingw-w64*' 'binutils-mingw-w64*' \
+			'gcc' 'g++' 'libc6' 'libstdc++6' 'cmake' 2>/dev/null \
+			| awk '/^ii/ {print $2, $3}'
+		} > "$stage/bin/TOOLCHAIN"
+		echo "toolchain:"; sed 's/^/  /' "$stage/bin/TOOLCHAIN"
+	fi
 	case "$name" in
 		*win64*)
 			(cd "$stage/.." && rm -f "$out/$name.zip" && zip -qr "$out/$name.zip" "$name")
