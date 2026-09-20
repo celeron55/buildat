@@ -111,8 +111,10 @@ ss_ get_absolute_path(const ss_ &path0)
 		// Preserve network path
 		path2 = "\\\\"+path2.substr(1);
 	} else {
-		// Path will be in a silly format like "/Z:/home/"
-		path2 = path2.substr(1);
+		// Path will be in a silly format like "/Z:/home/"; the root alone
+		// is empty here, and substr(1) of it throws
+		if(!path2.empty())
+			path2 = path2.substr(1);
 	}
 #endif
 	return path2;

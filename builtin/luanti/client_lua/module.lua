@@ -785,6 +785,12 @@ local function object_node(id)
 		return nil
 	end
 	if have then
+		-- Out of the table before the build: a build that raises -- a
+		-- texture that cannot be composed -- must not leave the entry
+		-- pointing at a node already removed, or the next packet removes
+		-- it again through a dangling pointer (the Windows client's page
+		-- fault, [WIN_SMOKE_STALL])
+		object_nodes[id] = nil
 		have.node:Remove()
 	end
 	local t0 = buildat.get_time_us()
