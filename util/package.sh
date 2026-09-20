@@ -61,6 +61,53 @@ gather_licenses() {
 	return 0
 }
 
+# The Windows archive stands alone: every DLL an exe or dll in it imports
+# is in the archive or is Windows' own. Wine never proved this -- it
+# finds what a DLL wants in the image's mingw bin/ and its own built-ins
+# -- and 0.3.1 shipped a libcurl whose DLL failed to initialise on a
+# desktop ([WIN_DLL_INIT]). objdump -p lists the imports; the compiler
+# tree under compiler/ is a distribution of its own and is left out.
+check_imports() {
+	local archive="$1"
+	local objdump
+	objdump=$(command -v x86_64-w64-mingw32-objdump || command -v objdump) || {
+		echo "import check: no objdump here; not run"; return 0; }
+	local dir
+	dir=$(mktemp -d)
+	unzip -q "$archive" -d "$dir" || { echo "import check: cannot unzip $archive" >&2; exit 1; }
+	# Windows' own, lower case; the api-ms-win-* set by prefix, except the
+	# api-ms-win-crt-* ones: those are the UCRT, and this archive is built
+	# on msvcrt -- a DLL importing them brings a second C runtime into the
+	# process, which is what 0.3.1's libcurl did
+	local own=" kernel32.dll user32.dll gdi32.dll advapi32.dll shell32.dll \
+ole32.dll oleaut32.dll ws2_32.dll opengl32.dll winmm.dll dbghelp.dll \
+imm32.dll version.dll setupapi.dll crypt32.dll bcrypt.dll secur32.dll \
+iphlpapi.dll msvcrt.dll comdlg32.dll shlwapi.dll uuid.dll rpcrt4.dll \
+wldap32.dll normaliz.dll ntdll.dll psapi.dll userenv.dll cfgmgr32.dll \
+hid.dll dinput8.dll dxgi.dll d3d11.dll d3d9.dll xinput1_4.dll \
+xinput9_1_0.dll dwmapi.dll "
+	local bad=0 f name have
+	have=$(find "$dir" -path '*/compiler' -prune -o -iname '*.dll' -print \
+		| xargs -n1 basename | tr 'A-Z' 'a-z' | sort -u)
+	while IFS= read -r f; do
+		for name in $("$objdump" -p "$f" 2>/dev/null | awk '/DLL Name:/ {print tolower($3)}'); do
+			case "$name" in
+			api-ms-win-crt-*)
+				echo "import check: ${f#$dir/} imports $name: the UCRT, a second C runtime" >&2
+				bad=1; continue ;;
+			api-ms-win-*) continue ;;
+			esac
+			if ! grep -qx "$name" <<<"$have" && [[ "$own" != *" $name "* ]]; then
+				echo "import check: ${f#$dir/} imports $name, which the archive does not carry" >&2
+				bad=1
+			fi
+		done
+	done < <(find "$dir" -path '*/compiler' -prune -o \( -iname '*.exe' -o -iname '*.dll' \) -print)
+	rm -rf "$dir"
+	[ "$bad" = 0 ] || { echo "import check failed" >&2; exit 1; }
+	echo "import check: every import is in the archive or Windows' own"
+}
+
 # The Windows archive under Wine: the half that says the archive works
 # where it is going -- buildat_server.exe compiling every module of a game
 # with the compiler the archive ships -- and not yet the client, which
@@ -233,15 +280,16 @@ windows)
 	tc="${CMAKE_TOOLCHAIN_FILE:-$here/3rdparty/Urho3D/CMake/Toolchains/MinGW.cmake}"
 	# and the native tree the archive ships under compiler/, which the
 	# image unpacks to /opt/winlibs/mingw64
-	# and libcurl's mingw tree (util/docker/windows unpacks curl-for-win
-	# to /opt/curlwin/curl); CURLWIN in the environment overrides
+	# and libcurl's static build (util/docker/windows builds it into
+	# /opt/curlwin/curl); CURLWIN in the environment overrides
 	cw="${CURLWIN:-/opt/curlwin/curl}"
 	a=$(make_one "buildat-$version-win64" -DPORTABLE=TRUE \
 		-DCMAKE_TOOLCHAIN_FILE="$tc" \
 		-DMINGW_PREFIX="${MINGW_PREFIX:-/usr/bin/x86_64-w64-mingw32}" \
 		-DBUILDAT_SHIP_COMPILER="${BUILDAT_SHIP_COMPILER:-/opt/winlibs/mingw64}" \
-		-DCURL_INCLUDE_DIR="$cw/include" -DCURL_LIBRARY="$cw/lib/libcurl.dll.a")
+		-DCURL_INCLUDE_DIR="$cw/include" -DCURL_LIBRARY="$cw/lib/libcurl.a")
 	echo "archive: $a"
+	check_imports "$a"
 	smoke_test_wine "$a"
 	;;
 *)

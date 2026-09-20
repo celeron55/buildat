@@ -31,14 +31,25 @@ RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-in
 	&& mkdir -p /opt/winlibs && unzip -q /tmp/winlibs.zip -d /opt/winlibs \
 	&& rm /tmp/winlibs.zip
 # libcurl for the cross build ([CONTENTDB], a required dependency): Debian
-# has no mingw-w64 curl package, so curl-for-win's mingw build, pinned the
-# same way -- headers and import library for the link, the DLL shipped
-# beside the executables. util/package.sh hands its paths to CMake.
-ARG CURLWIN_URL=https://curl.se/windows/dl-8.22.0_1/curl-8.22.0_1-win64-mingw.zip
-ARG CURLWIN_SHA256=7f23b039f6ea4197362d4468e1a0e71428201222e1bef3b680d5ef7b2aefb714
-RUN curl -sSL -o /tmp/curlwin.zip "$CURLWIN_URL" \
-	&& echo "$CURLWIN_SHA256  /tmp/curlwin.zip" | sha256sum -c - \
-	&& mkdir -p /opt/curlwin && unzip -q /tmp/curlwin.zip -d /opt/curlwin \
-	&& mv /opt/curlwin/curl-*-win64-mingw /opt/curlwin/curl \
-	&& rm /tmp/curlwin.zip
+# has no mingw-w64 curl package, so curl's source, built here with the
+# same cross toolchain as everything else, static, TLS through Windows'
+# own schannel so nothing else is needed. Not curl-for-win's prebuilt
+# DLL: that one is llvm-mingw's against the UCRT, and inside an msvcrt
+# process it failed to initialise on a Windows 11 desktop
+# (0xc0000142, [WIN_DLL_INIT]). util/package.sh hands the paths to CMake.
+ARG CURL_URL=https://curl.se/download/curl-8.22.0.tar.xz
+ARG CURL_SHA256=f7ef3ae8a22e521f289803fe93543eb64c329b58aa73a9e224dfd915a2a5f4f7
+RUN curl -sSL -o /tmp/curl.tar.xz "$CURL_URL" \
+	&& echo "$CURL_SHA256  /tmp/curl.tar.xz" | sha256sum -c - \
+	&& mkdir -p /tmp/curl && tar -xJf /tmp/curl.tar.xz -C /tmp/curl --strip-components=1 \
+	&& cd /tmp/curl \
+	&& ./configure --host=x86_64-w64-mingw32 --prefix=/opt/curlwin/curl \
+		--disable-shared --enable-static --with-schannel --without-libpsl \
+		--disable-ldap --disable-ldaps --disable-manual --disable-docs \
+		--without-zlib --without-brotli --without-zstd --without-libidn2 \
+		--disable-dict --disable-file --disable-ftp --disable-gopher \
+		--disable-imap --disable-mqtt --disable-pop3 --disable-rtsp \
+		--disable-smb --disable-smtp --disable-telnet --disable-tftp \
+	&& make -j"$(nproc)" install-strip \
+	&& rm -rf /tmp/curl /tmp/curl.tar.xz
 WORKDIR /work
