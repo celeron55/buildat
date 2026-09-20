@@ -523,7 +523,29 @@ def craft_2x2(s, recipe):
     by = {(sl[0], sl[1]): sl for sl in s.slots}
     cmds = []
     used = {}
+    # The grid cleared first: what an earlier craft left in a cell (the
+    # wooden pickaxe sat in craft:2 through three furnace tries,
+    # 2026-09-20) goes to an empty main slot, and a cell that already
+    # holds what the recipe wants there is left alone
+    empties = [sl for sl in s.slots if sl[0] == "main" and sl[5] == ""]
+    for sl in s.slots:
+        if sl[0] != "craft" or not sl[5]:
+            continue
+        want = cells.get(sl[1])
+        if want is not None and item_is(sl[5], want) and count_of(sl[5]) == 1:
+            continue
+        if not empties:
+            return None
+        e = empties.pop(0)
+        cmds += click_at(sl[2], sl[3], sl[4]) + click_at(e[2], e[3], e[4])
+        by[("main", e[1])] = (e[0], e[1], e[2], e[3], e[4], sl[5])
+    # the recipe's cells that are already right are skipped below
+    have_cells = {sl[1] for sl in s.slots if sl[0] == "craft" and sl[5] and
+                  cells.get(sl[1]) is not None and item_is(sl[5], cells[sl[1]]) and
+                  count_of(sl[5]) == 1}
     for cell, word in sorted(cells.items()):
+        if cell in have_cells:
+            continue
         src = None
         for sl in s.slots:
             if sl[0] == "main" and item_is(sl[5], word):
@@ -539,7 +561,7 @@ def craft_2x2(s, recipe):
         cmds += click_at(target[2], target[3], target[4], button="right")
         cmds += click_at(src[2], src[3], src[4])
     out = by.get(("craftpreview", 1))
-    empty = [sl for sl in s.slots if sl[0] == "main" and sl[5] == ""]
+    empty = empties
     if out is None or not empty:
         return None
     cmds += click_at(out[2], out[3], out[4])
@@ -1396,6 +1418,19 @@ done, 8 lines""".splitlines()
            "slot nodemeta:1,2,3:dst:1 at 400,100 size 48x48 item \"\""]
     name, cmds, exp = rules(parse(fur), {})
     assert name == "feed_furnace" and cmds.count("mouse_click left") == 4, (name, cmds)
+    # A cell holding something else is cleared to an empty main slot first
+    grid2 = ["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:", "form \"main\" open",
+             "slot current_player:main:1 at 0,500 size 48x48 item \"mcl_core:junglewood 16\"",
+             "slot current_player:main:2 at 60,500 size 48x48 item \"mcl_core:stick 6\"",
+             "slot current_player:main:3 at 120,500 size 48x48 item \"\"",
+             "slot current_player:main:4 at 180,500 size 48x48 item \"\"",
+             "slot current_player:main:5 at 240,500 size 48x48 item \"mcl_crafting_table:crafting_table 1\"",
+             "slot current_player:craftpreview:1 at 600,100 size 48x48 item \"\""]
+    grid2 += ["slot current_player:craft:%d at %d,%d size 48x48 item \"%s\"" % (
+        i, 200 + (i - 1) % 3 * 60, 50 + (i - 1) // 3 * 60, "mcl_tools:pick_wood 1" if i == 2 else "")
+        for i in range(1, 10)]
+    name, cmds, exp = rules(parse(grid2), {})
+    assert name == "craft_pick_wood" and cmds[0] == "mouse_pos 284 74", (name, cmds[:3])
     # With planks, sticks and a table in the hotbar a pickaxe is wanted:
     # the table is placed, then used, then its 3x3 form crafts
     tab = parse(["self at 0,0,0 yaw 90 pitch 0 fov 72 hp ? wield \"\" hotbar 1:mcl_core:junglewood 16 | 2:mcl_core:stick 6 | 3:mcl_crafting_table:crafting_table 1"])
