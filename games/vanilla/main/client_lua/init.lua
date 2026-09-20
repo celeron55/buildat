@@ -3213,8 +3213,9 @@ luanti.sub_hud(function()
 		if sky_lights.moon then
 			sky_lights.moon.shadowIntensity = keep
 		end
-		log:info(string.format("set_lighting: shadows keep %.2f, " ..
-				"saturation %.2f (not drawn)", keep, l.saturation))
+		log:info(string.format("set_lighting: shadows keep %.2f (the light reads %s), " ..
+				"saturation %.2f (not drawn)", keep,
+				tostring(sky_lights.sun.shadowIntensity), l.saturation))
 	end
 end)
 

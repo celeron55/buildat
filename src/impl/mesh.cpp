@@ -898,9 +898,13 @@ static void face_vertex_colors(VoxelVolume &volume,
 	// corner table keeps the crease and this keeps the surroundings.
 	// simplified: nine rays, four voxels; a cutout block (leaves, plants)
 	// does not block, rock and anything else with an edge material does.
+	// The packed layout's term only: the plain one is the parity modes',
+	// and official Luanti's baked light has no such term -- with it the
+	// shaded probes read at a third of official's ([PARITY_LEFTOVERS],
+	// 2026-09-21: stone 18 against 61, the cave floor 23 against 46).
 	static const int HEMI_REACH = 4;
 	float hemi = 1.0f;
-	{
+	if(horizon || SHADOW_KINDS){
 		const pv::Vector3DInt32 ni((int)std::round(n.getX()),
 				(int)std::round(n.getY()), (int)std::round(n.getZ()));
 		const pv::Vector3DInt32 dirs[9] = {
