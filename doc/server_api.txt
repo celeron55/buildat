@@ -264,7 +264,10 @@ go, what games/vanilla picks); the grace counts from when the socket
 last took anything from the peer. declare(name, Channel::LatestOnly):
 a packet of that name waits in a lane of its own where a newer one
 replaces an older still queued (positions, HUD values) and goes ahead of
-the ordered queue. A payload over 64 KB is fragmented on the wire and
+the ordered queue -- except a peer's first packets of the name, which
+go ordered behind what was queued before them, so a payload cannot
+overtake its own definition or the modules that subscribe to it. A
+payload over 64 KB is fragmented on the wire and
 handed back whole. Events: "network:client_connected"
 (NewClient), "network:client_disconnected" (OldClient),
 "network:packet_received/<name>" (Packet: sender, name, data). PeerInfo

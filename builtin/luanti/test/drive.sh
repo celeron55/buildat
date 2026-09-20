@@ -38,7 +38,9 @@ cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
-rm -rf "../user/games/vanilla/saves/$save"
+# KEEP_SAVE=1 rejoins the run before's world: the player is a returning
+# one, placed at join ([PLAYER_POS_RACE])
+[ -n "${KEEP_SAVE:-}" ] || rm -rf "../user/games/vanilla/saves/$save"
 port=$(( 29800 + (SEED % 90) ))
 srv=""; cli=""; drv=""; netsim=""
 trap 'kill "$drv" 2>/dev/null; kill "$cli" 2>/dev/null; kill "${netsim:-}" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
@@ -74,7 +76,14 @@ if [ -n "${NETSIM:-}" ]; then
 	netsim=$!
 	sleep 1
 fi
-bin/buildat -s "localhost:$cport" -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
+# COLD=1: the client starts with an empty cache of its own, so every file
+# the server has is fetched at join ([PLAYER_POS_RACE]: the race is between
+# that bulk and the first player_pos)
+cold=""
+if [ -n "${COLD:-}" ]; then
+	rm -rf "$out/cache"; cold="-C $out/cache"
+fi
+bin/buildat -s "localhost:$cport" -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" $cold \
 	-c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
 cli=$!

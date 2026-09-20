@@ -64,8 +64,14 @@ struct Peer
 	// they were sent, and ahead of them the LatestOnly ones by name, one
 	// per name, the newest ([NET_CHANNELS]). out_buf is what is being
 	// written now; a packet moves into it when it drains.
-	std::deque<ss_> out_queue;
+	std::deque<std::pair<ss_, ss_>> out_queue; // name, packet
 	std::deque<std::pair<ss_, ss_>> out_latest; // name, packet
+	// LatestOnly names with packets still in the ordered queue, and how
+	// many: the definition and the first payload go ordered (send_u), and
+	// a payload in the lane while they are queued would overtake them --
+	// the peer reads a type it has not been told. Until the count is
+	// zero the name's payloads go ordered too.
+	sm_<ss_, size_t> ordered_first;
 	size_t out_queued_bytes = 0;
 	// When the queue first went over the policy's limit, for Disconnect
 	int64_t over_since_us = 0;
@@ -92,34 +98,40 @@ struct Peer
 			out_buf = std::move(out_latest.front().second);
 			out_latest.pop_front();
 		} else if(!out_queue.empty()){
-			out_buf = std::move(out_queue.front());
+			out_buf = std::move(out_queue.front().second);
+			auto f = ordered_first.find(out_queue.front().first);
+			if(f != ordered_first.end() && --f->second == 0)
+				ordered_first.erase(f);
 			out_queue.pop_front();
 		} else {
 			return;
 		}
 		out_queued_bytes -= out_buf.size();
 	}
-	// coalesce: replace an unsent packet of the same name in the latest
-	// lane; a definition goes into that lane too, ahead of its payload
-	// and never replaced, so a payload that overtakes the queue never
-	// overtakes what names its type
-	void enqueue(const ss_ &name, const ss_ &packet, bool latest_lane,
-			bool coalesce)
+	// A LatestOnly name's payload replaces an unsent one in the lane. Its
+	// definition (the undroppable packet the stream writes ahead of the
+	// first payload) goes ordered, and so does every payload while any
+	// ordered packet of the name is still queued: at join the queue holds
+	// the client's module files and the scene, and a placement in the lane
+	// overtook them and was read before the client's luanti half had
+	// subscribed -- dropped, never resent ([PLAYER_POS_RACE]).
+	void enqueue(const ss_ &name, const ss_ &packet, bool latest_only,
+			bool droppable)
 	{
-		if(latest_lane){
-			if(coalesce){
-				for(auto &pair : out_latest){
-					if(pair.first == name){
-						out_queued_bytes -= pair.second.size();
-						out_queued_bytes += packet.size();
-						pair.second = packet;
-						return;
-					}
+		if(latest_only && droppable && !ordered_first.count(name)){
+			for(auto &pair : out_latest){
+				if(pair.first == name){
+					out_queued_bytes -= pair.second.size();
+					out_queued_bytes += packet.size();
+					pair.second = packet;
+					return;
 				}
 			}
-			out_latest.push_back(std::make_pair(coalesce ? name : "", packet));
+			out_latest.push_back(std::make_pair(name, packet));
 		} else {
-			out_queue.push_back(packet);
+			out_queue.push_back(std::make_pair(name, packet));
+			if(latest_only)
+				ordered_first[name]++;
 		}
 		out_queued_bytes += packet.size();
 	}
@@ -360,6 +372,7 @@ struct Module: public interface::Module, public network::Interface
 				peer.out_sent = 0;
 				peer.out_queue.clear();
 				peer.out_latest.clear();
+				peer.ordered_first.clear();
 				peer.out_queued_bytes = 0;
 				return;
 			}
@@ -458,9 +471,6 @@ struct Module: public interface::Module, public network::Interface
 				dropping = true;
 				return;
 			}
-			// A LatestOnly name's definition (the undroppable packet the
-			// stream writes ahead of its first payload) goes in the
-			// latest lane with it, so the payload never overtakes it
 			peer.enqueue(name, packet_data, latest_only, droppable);
 		});
 		// The common case is a peer that is keeping up, and then this writes
