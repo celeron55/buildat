@@ -523,7 +523,9 @@ do
 	-- a fifth of that (user, 2026-09-20, [BLOOM_FIFTH]). How much is grade
 	-- ([PBR_FIT] step 5; its ladder starts from here).
 	rp:SetShaderParameter("BloomHDRThreshold", 1.2)
-	rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0, 0.03))
+	-- BUILDAT_LUANTI_BLOOM=<mix>: the ladder's knob ([PBR_FIT] step 5)
+	rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0,
+			tonumber(buildat.get_env("BUILDAT_LUANTI_BLOOM") or "") or 0.03))
 	-- No bias on top of the meter: the meter owns the level and a bias is
 	-- a second exposure that pushes the lit parts up the curve's shoulder
 	-- ([PBR_FIT] term 4). EXPOSURE_BIAS stays the minimap's, which is not
