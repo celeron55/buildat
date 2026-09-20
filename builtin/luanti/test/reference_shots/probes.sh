@@ -123,8 +123,8 @@ dirt_side_camera|vp1_1300|40x12+666+564|vp1 a dirt side facing the camera
 snow_sun|vp5_1000|60x40+420+540|vp5 the sunlit snow field
 snow_shade|vp5_1000|60x30+400+660|vp5 snow in the tree's shadow
 sun_step|vp7_1300|60x8+560+650|vp7 the sunlit floor step in the cave mouth
-near_wall|vp7_1300|60x40+560+560|vp7 the cave wall near the mouth
-deep_wall|vp7_1300|128x36+256+252|vp7 the deep wall, on the fold where it turns back
+near_wall|vp7_1300|60x40+545+560|vp7 the cave wall near the mouth (moved fifteen left off the closer wall the flood cannot light, 2026-09-20)
+deep_wall|vp7_1300|128x36+256+252|pbri: vp7 the deep wall, on the fold where it turns back -- the mouth's bounce, PBRI's, not held against the render ([CAVE_PROBES])
 sky_mouth|vp7_1300|128x36+704+252|vp7 the sky through the mouth
 lit_rim|vp7_1300|64x36+768+324|vp7 the sunlit rim of the mouth
 outside_terrain|vp7_1300|64x36+512+432|vp7 the half-lit terrain seen through the mouth
@@ -163,11 +163,11 @@ contrast_dirt_pit|lum|lit_dirt|pit_dirt|a deep shadow hemmed in on three sides: 
 incidence_dirt|lum|dirt_side_lit|dirt_side_camera|the face-shade table and the sun's direction
 contrast_snow|lum|snow_sun|snow_shade|at the top of the range
 night_range|lum|night_snow_lit|night_cave_wall|moonlit snow over a dark wall: the night's range
-contrast_cave|lum|sun_step|deep_wall|the sun reaching into the cave
-cave_wall_near|lum|near_wall|deep_wall|the interior's falloff
-cave_opening|lum|sky_mouth|deep_wall|the range across the mouth the meter spans
-cave_rim|lum|lit_rim|deep_wall|the sky must read above the lit rim
-cave_outside|lum|outside_terrain|deep_wall|the meter keys on the interior without blowing the outside
+contrast_cave|lum|sun_step|deep_wall|pbri: the sun reaching into the cave (the fold is PBRI's)
+cave_wall_near|lum|near_wall|deep_wall|pbri: the interior's falloff past the flood (PBRI's)
+cave_opening|lum|sky_mouth|near_wall|the range across the mouth the meter spans
+cave_rim|lum|lit_rim|near_wall|the sky must read above the lit rim
+cave_outside|lum|outside_terrain|near_wall|the meter keys on the interior without blowing the outside
 saturation_grass|sat|grass_lit||chroma
 saturation_leaves|sat|leaves||chroma
 saturation_water|sat|water_sea||chroma
@@ -242,11 +242,16 @@ while IFS='|' read -r name pic crop why; do
 	[ -n "$name" ] || continue
 	r=${VAL[pathtrace_r150/$name]:-}; p=${VAL[module_pbr_r150/$name]:-}
 	printf "  %-18s" "$name"
-	awk -v r="$r" -v p="$p" 'BEGIN{ nr=split(r,a," "); np=split(p,b," ");
+	# A row tagged pbri: (see [CAVE_PROBES]) is the render's second
+	# bounce past the flood's reach, [PBRI]'s: pbr's number is printed
+	# and not read against the render
+	pbri=0; case "$why" in pbri:*) pbri=1 ;; esac
+	awk -v r="$r" -v p="$p" -v pbri="$pbri" 'BEGIN{ nr=split(r,a," "); np=split(p,b," ");
 		if(nr==3) printf "%.3f/%.3f/%.3f", a[1],a[2],a[3]; else printf "(no render)";
 		printf "  ";
 		if(np==3) printf "%.3f/%.3f/%.3f", b[1],b[2],b[3]; else printf "(no pbr)";
-		if(nr==3 && np==3){ printf "  ("; for(i=1;i<=3;i++) printf "%s%s", (i>1?"/":""), (a[i]>0.0005 ? sprintf("%.2f", b[i]/a[i]) : "-"); printf ")" }
+		if(pbri) printf "  (pbri: not held)";
+		else if(nr==3 && np==3){ printf "  ("; for(i=1;i<=3;i++) printf "%s%s", (i>1?"/":""), (a[i]>0.0005 ? sprintf("%.2f", b[i]/a[i]) : "-"); printf ")" }
 		printf "  -- %s\n", ARGV[1] }' "$why"
 done <<< "$CROPS"
 
