@@ -11,7 +11,8 @@
 # is the ceiling. The goal line is the pass; the minutes running out
 # first is the stop to sort.
 #
-# Lands under local/drive/<seed>/: both logs, drive.log (a line per turn
+# Lands under local/drive/<seed>/ (the run before's pictures moved to
+# previous/): both logs, drive.log (a line per turn
 # naming the rule that fired), a screenshot every tenth turn beside the
 # scan block of the same stem in cli.log. Never beside another
 # buildat_server. LOG_LEVEL and CLIENT_LOG_LEVEL as in fuzz.sh.
@@ -24,9 +25,13 @@ GAME="${GAME:-mineclone2}"
 GOAL="${GOAL:-}"
 out="$here/local/drive/$SEED"
 mkdir -p "$out"
-# The logs are overwritten per run; so are the pictures, or an earlier
-# run's higher-numbered ones sit beside this run's and read as its
-rm -f "$out"/d[0-9]*.png
+# The logs are overwritten per run; the pictures go to previous/ (the
+# one run before, for comparison; user), or an earlier run's
+# higher-numbered ones sit beside this run's and read as its
+if ls "$out"/d[0-9]*.png >/dev/null 2>&1; then
+	rm -rf "$out/previous"; mkdir -p "$out/previous"
+	mv "$out"/d[0-9]*.png "$out/previous/"
+fi
 save="buildat_test_drive_$SEED"
 
 cd "$here/Build"
