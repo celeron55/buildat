@@ -1156,19 +1156,23 @@ luanti.sub_world_info(function(info)
 	magic.renderer.HDRRendering = false
 	-- The difference between the two modes is one technique: LuantiVoxelUnlit
 	-- adds a light pass that multiplies by the shadow factor, VoxelUnlit does
-	-- not. Water is VoxelUnlitAlpha either way, being unshadowed in both.
+	-- not; the water the same way through LuantiVoxelUnlitAlpha
+	-- ([PARITY_LEFTOVERS]).
 	local opaque = sky_now.shadows and
 			"luanti_client/res/LuantiVoxelUnlit.xml" or
 			"luanti_client/res/VoxelUnlit.xml"
+	local alpha = sky_now.shadows and
+			"luanti_client/res/LuantiVoxelUnlitAlpha.xml" or
+			"luanti_client/res/VoxelUnlitAlpha.xml"
 	voxel_shading.use_technique_set({
 		plain = opaque,
 		modifiers = opaque,
 		masked = opaque,
-		alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
+		alpha = alpha,
 		sun = opaque,
 		sun_modifiers = opaque,
 		sun_masked = opaque,
-		sun_alpha = "luanti_client/res/VoxelUnlitAlpha.xml",
+		sun_alpha = alpha,
 	})
 end)
 -- Whether the eye is in a node that tints the screen

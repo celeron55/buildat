@@ -25,6 +25,16 @@
 
 varying vec4 vWorldPos;
 varying vec3 vNormal;
+// TRANSLUCENT ([PARITY_LEFTOVERS]): the same pass over a blended surface,
+// water. The multiply lands on what is already composited -- the water
+// and the bed seen through it, which has its own shadow pass -- so the
+// darkening is weighted by the texel's alpha: the water's own share is
+// shadowed, the bed's is left. simplified: the bed's share under a
+// shadowed water is still darkened a little (1 - a of the way), which a
+// second render target would avoid.
+#ifdef TRANSLUCENT
+    varying vec2 vTexCoord;
+#endif
 #ifdef PERPIXEL
     #ifdef SHADOW
         #ifndef GL_ES
@@ -48,6 +58,9 @@ void VS()
     gl_Position = GetClipPos(worldPos);
     vNormal = GetWorldNormal(modelMatrix);
     vWorldPos = vec4(worldPos, GetDepth(gl_Position));
+    #ifdef TRANSLUCENT
+        vTexCoord = iTexCoord;
+    #endif
     #ifdef PERPIXEL
         #ifdef SHADOW
             vec4 projWorldPos = vec4(worldPos, 1.0);
@@ -74,5 +87,8 @@ void PS()
                 smoothstep(0.0, 0.2, dot(normalize(vNormal), cLightDirPS)));
     #endif
     float k = mix(SHADOW_LEFT, 1.0, shadow);
+    #ifdef TRANSLUCENT
+        k = mix(1.0, k, texture2D(sDiffMap, vTexCoord).a);
+    #endif
     gl_FragColor = vec4(k, k, k, 1.0);
 }
