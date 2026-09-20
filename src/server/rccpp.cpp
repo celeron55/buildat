@@ -132,6 +132,21 @@ struct CCompiler: public Compiler
 					interface::process::get_environment_variable("PATH");
 			log_d(MODULE, "Using PATH=%s", cs(exec_opts.env["PATH"]));
 		}
+		// GCC wants TMPDIR, TMP or TEMP for its temporary files and, given
+		// none, falls back to C:\WINDOWS\, which a desktop refuses -- the
+		// first module build of the 0.3.0 archive failed on it ([WIN_TMP]).
+		// The compiler inherits the desktop's environment now; a desktop
+		// that sets none gets a tmp/ beside the out path (the cache).
+		if(interface::process::get_environment_variable("TEMP").empty() &&
+				interface::process::get_environment_variable("TMP").empty() &&
+				interface::process::get_environment_variable("TMPDIR").empty()){
+			const ss_ tmp = interface::fs::strip_file_name(out_path) + "/tmp";
+			interface::fs::create_directories(tmp);
+			exec_opts.env["TEMP"] = tmp;
+			exec_opts.env["TMP"] = tmp;
+			log_i(MODULE, "No TEMP in the environment; the compiler gets %s",
+					cs(tmp));
+		}
 #endif
 		int exit_status = interface::process::shell_exec(command, exec_opts);
 

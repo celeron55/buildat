@@ -748,14 +748,16 @@ for _ = 1, 200 do
 	p:update(1 / 60, NO_WISH)
 	if p.y > top then top = p.y end
 end
-assert(top > 1.5 and top < 3, "player: jumped to "..top)
+-- Luanti's apex: 6.5^2 / (2 * 2 * 9.81) = 1.08 nodes over the feet, the
+-- gravity being doubled there ([PLAYER_PHYSICS])
+assert(top > 1.55 and top < 1.65, "player: jumped to "..top)
 assert(math.abs(p.y - 0.5) < 1e-6, "player: landed at "..p.y)
 
--- Falling into the hole lands in the water and stops sinking at its bottom,
--- and the jump key swims back out of it
+-- Falling into the hole lands in the water and sinks -- slowly, as an idle
+-- player in Luanti does -- to its bottom, and the jump key swims back out
 local w = player.new(is_solid, is_liquid)
 w:set_position(0, 0.5, 6)
-settle(w, 300)
+settle(w, 1500)
 assert(w.in_liquid, "player: not in the water")
 assert(math.abs(w.y - (-2.5)) < 1e-6, "player: sank to "..w.y)
 settle(w, 300, {x = 0, z = 0, jump = true})
@@ -858,6 +860,53 @@ do
 	local before = air.vx
 	air:update(0.5, wish)
 	assert(air.vx < before, "player: the push decays")
+end
+
+-- The standing node's groups ([PLAYER_PHYSICS]): the ground at x <= -6 is
+-- ice (slippery 3), at x >= 6 a trampoline (bouncy 80), at z = -6 a node
+-- that refuses jumps
+do
+	local function groups_at(x, y, z)
+		if y ~= 0 then return nil end
+		if z == -6 then return {disable_jump = true} end
+		if x <= -6 then return {slippery = 3} end
+		if x >= 6 then return {bouncy = 80} end
+		return nil
+	end
+	local flat = function(x, y, z) return y <= 0 end
+	local g = player.new(flat, nil, nil, nil, groups_at)
+	-- Ice: walking for a second gets a slower start than dirt does
+	g:set_position(0, 0.5, 0)
+	settle(g, 12, {x = 1, z = 0})
+	local dirt_vx = g.vx
+	g:set_position(-10, 0.5, 0)
+	g.vx, g.vz = 0, 0
+	settle(g, 12, {x = 1, z = 0})
+	assert(g.vx > 0 and g.vx < dirt_vx / 2,
+			"player: ice accelerates like dirt, "..g.vx.." vs "..dirt_vx)
+	-- and the stop is slower still, twice as slippery with no key held
+	local sliding = g.vx
+	settle(g, 6)
+	assert(g.vx > sliding * 0.6, "player: ice stops like dirt, "..g.vx)
+	-- The trampoline: a fall from four nodes comes back up, lower each
+	-- time, and settles in the end
+	g:set_position(10, 4.5, 0)
+	g.vx, g.vz = 0, 0
+	local bounced, top = false, 0
+	for _ = 1, 600 do
+		g:update(1 / 60, NO_WISH)
+		if g.vy > 0 and not g.on_ground then bounced = true end
+		if bounced and g.y > top then top = g.y end
+	end
+	assert(bounced and top > 1.5 and top < 4,
+			"player: the trampoline bounced to "..top)
+	assert(math.abs(g.y - 0.5) < 1e-6 and g.on_ground,
+			"player: the bounce did not settle, y = "..g.y)
+	-- No jump from a node that refuses it
+	g:set_position(0, 0.5, -6)
+	g.vx, g.vz = 0, 0
+	settle(g, 30, {x = 0, z = 0, jump = true})
+	assert(math.abs(g.y - 0.5) < 1e-6, "player: jumped where refused, y = "..g.y)
 end
 
 print("player: ok")
