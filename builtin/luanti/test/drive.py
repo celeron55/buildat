@@ -950,6 +950,24 @@ def rules(s, mem):
             bx, by = min(tables, key=lambda k: s.bins[k]["d"])
             return "to_table", [look_at_bin(s, bx, by, level=False), ms(0.3)], None
 
+    # A fed furnace comes before more ore: the ingot is the rung
+    if mem.get("furnace_fed_turn") is not None and not have(s, "iron_ingot", 1, mem) \
+            and pick is not None:
+        if turn < mem["furnace_fed_turn"] + 3:
+            return "smelt_wait", ["delay 2000"], None
+        if s.crosshair and "furnace" in s.crosshair[0]:
+            mem["furnace_at"] = tuple(s.crosshair[1:4])
+            return "use_furnace", ["mouse_click right", ms(1.0)], \
+                lambda n: n.form is not None
+        if mem.get("furnace_at") is not None:
+            fa = mem["furnace_at"]
+            d = math.dist(s.pos, fa)
+            look = look_at_object(s, {"at": fa}, level=False)
+            if look and d > 3.0:
+                return "back_to_furnace", [look] + walk(min(TURN_S, (d - 2) / 4)), None
+            if look:
+                return "back_to_furnace", [look, ms(0.3)], None
+
     # Rung 4: ore in view -- coal with any pickaxe, iron with the stone
     # one -- dug until there is a few of each; then the furnace placed and
     # fed through its form (below, among the form rules)
@@ -1012,8 +1030,19 @@ def rules(s, mem):
             if fed and turn < mem["furnace_fed_turn"] + 3:
                 return "smelt_wait", ["delay 2000"], None
             if s.crosshair and "furnace" in s.crosshair[0]:
+                mem["furnace_at"] = tuple(s.crosshair[1:4])
                 return "use_furnace", ["mouse_click right", ms(1.0)], \
                     lambda n: n.form is not None
+            # A fed furnace out of view: back to where it was, by the map
+            # (the driver walked off mining after the feed, 2026-09-20)
+            if fed and mem.get("furnace_at") is not None:
+                fa = mem["furnace_at"]
+                d = math.dist(s.pos, fa)
+                look = look_at_object(s, {"at": fa}, level=False)
+                if look and d > 3.0:
+                    return "back_to_furnace", [look] + walk(min(TURN_S, (d - 2) / 4)), None
+                if look:
+                    return "back_to_furnace", [look, ms(0.3)], None
             furnaces = [(x, y) for (x, y), b in s.bins.items()
                         if "furnace" in b["name"] and b["d"] <= 6]
             fslot = hotbar_slot_of(s, "furnace")
