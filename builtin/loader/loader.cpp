@@ -400,6 +400,7 @@ struct Module: public interface::Module, public loader::Interface
 		log_i(MODULE, "Module load order: %s",
 				cs(dump(resolve.m_module_load_order)));
 
+		m_server->set_module_count(resolve.m_module_load_order.size());
 		for(const ss_ &name : resolve.m_module_load_order){
 			interface::ModuleInfo *info = get_module_info(name);
 			if(!info)
