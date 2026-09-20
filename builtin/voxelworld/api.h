@@ -373,8 +373,13 @@ namespace voxelworld
 		// in the same step as its own 200 ms). Until then the section wears
 		// the light the write's own flood left, which is nearly right.
 		virtual void relight_region_later(const pv::Region &region) = 0;
-		// Returns how many sections are still stale
-		virtual size_t relight_stale(int64_t budget_us) = 0;
+		// Returns how many sections are still stale. The nearest a load point
+		// goes first; while that one is within near_sections of a load
+		// point the budget is near_budget_us instead -- a jungle spawn's
+		// own canopy is black until its sections are relit, and the tick
+		// may spend more on those than on the far ones ([SEED5_SETTLE])
+		virtual size_t relight_stale(int64_t budget_us,
+				int64_t near_budget_us = 0, int near_sections = 2) = 0;
 		// While on, a write does not flood light from what it changed: for
 		// a writer that will ask for a relight of everything it touched
 		// anyway, whose flood was the same work twice ([STEP_SLICE])

@@ -1579,7 +1579,8 @@ struct Module: public interface::Module, public luanti::Interface
 			size_t left = 0;
 			voxelworld::access(m_server, m_scene,
 					[&](voxelworld::Instance *world){
-				left = world->relight_stale(RELIGHT_BUDGET_US);
+				left = world->relight_stale(RELIGHT_BUDGET_US,
+						RELIGHT_NEAR_BUDGET_US);
 			});
 			const int64_t took = interface::os::time_us() - t0;
 			if(took > 1000){
@@ -1616,6 +1617,10 @@ struct Module: public interface::Module, public luanti::Interface
 	// How much of a tick the deferred relights may take; a section is
 	// about 160 ms on VoxeLibre, so this is one a tick
 	static const int64_t RELIGHT_BUDGET_US = 20000;
+	// And while a stale section is within two of a player: the player's
+	// own canopy black for twenty seconds was the small budget on
+	// 250k-blocker sections ([SEED5_SETTLE])
+	static const int64_t RELIGHT_NEAR_BUDGET_US = 100000;
 
 	void step_environment(float dtime)
 	{

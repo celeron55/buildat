@@ -1967,10 +1967,32 @@ struct CInstance: public voxelworld::Instance
 		}
 	}
 
-	size_t relight_stale(int64_t budget_us)
+	size_t relight_stale(int64_t budget_us, int64_t near_budget_us = 0,
+			int near_sections = 2)
 	{
 		const int64_t t0 = interface::os::time_us();
-		const int64_t deadline = t0 + budget_us;
+		int64_t deadline = t0 + budget_us;
+		// The near budget while the nearest stale section is close to a
+		// load point (the pending flood counts as near: it was picked so)
+		if(near_budget_us > budget_us && !m_load_points.empty()){
+			bool near = m_relight_pending;
+			const int64_t r2 = (int64_t)near_sections * near_sections;
+			for(size_t i = 0; i < m_relight_queue.size() && !near; i++){
+				const pv::Vector3DInt16 &sp = m_relight_queue[i];
+				for(const voxelworld::LoadPoint &lp : m_load_points){
+					const pv::Vector3DInt16 lps = section_of_voxel(lp.p);
+					int64_t dx = (int64_t)sp.getX() - lps.getX();
+					int64_t dy = (int64_t)sp.getY() - lps.getY();
+					int64_t dz = (int64_t)sp.getZ() - lps.getZ();
+					if(dx * dx + dy * dy + dz * dz <= r2){
+						near = true;
+						break;
+					}
+				}
+			}
+			if(near)
+				deadline = t0 + near_budget_us;
+		}
 		// A flood a previous tick left unfinished comes first
 		if(!relight_continue(deadline))
 			return m_relight_queue.size() + 1;
