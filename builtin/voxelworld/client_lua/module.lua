@@ -15,10 +15,43 @@ log:info("voxelworld loading")
 -- physics_distance small so no collision shapes are built at all.
 M.lod_distance = 80
 M.physics_distance = 100
+-- How much world this client wants sent to it, in voxels. Only the client
+-- knows what its computer can draw, and what it is not going to draw is the
+-- server's memory and this connection's bandwidth spent on nothing. The
+-- server sends the smaller of this and what it keeps loaded, so asking for
+-- more than the game has is not an error. Set it before the world arrives.
+M.send_distance = 1000
+-- Whether the game has said the world may be sent yet ([TEXMOD_RACE]):
+-- until it does the client asks for nothing (a send distance of nought),
+-- so no chunk is meshed before the game's textures are there -- a chunk
+-- that wants a texture modifier not yet composed is not drawn at all. A
+-- game that has nothing to wait for says so at load
+-- (voxelworld.allow_streaming()); builtin/luanti's client half says so
+-- once its modifiers are composed.
+M.streaming_allowed = false
+local init_seen = false
+function M.allow_streaming()
+	if M.streaming_allowed then
+		return
+	end
+	M.streaming_allowed = true
+	if init_seen then
+		buildat.send_packet("voxelworld:set_send_distance",
+				tostring(math.floor(M.send_distance)))
+	end
+end
 
 local UPDATE_TIME_FRACTION = 0.10
+local MESH_BUDGET_CAP_US = 15000
 
 local LOD_THRESHOLD = 0.2
+-- How the update queue orders what it has: it sorts by distance divided by
+-- these, so a bigger one is a chunk that goes first.
+--
+-- Raising the modified ones to a hundred -- which puts a changed chunk in
+-- front of any new one that is not a hundred times closer -- was tried on
+-- 2026-09-14 against a dug voxel that stays drawn, and changed nothing
+-- measurable. Whatever that fault is, it is not the order of this queue.
 local INITIAL_PHYSICS_NEAR_WEIGHT = 1.0
 local MODIFIED_PHYSICS_NEAR_WEIGHT = 1.0
 
@@ -53,6 +86,16 @@ local atlas_reg = buildat.createAtlasRegistry()
 M.use_skylight = false
 
 M.chunk_size_voxels = nil
+-- Whether the mesher is handed a horizon map with each chunk, which also
+-- packs the vertex alpha (see interface/mesh.h and voxel_shading's
+-- set_packed_sky()); a game turns it on when its shader reads it
+M.horizon = false
+-- Microseconds this module spent since the caller last zeroed these: the
+-- mesh commit (buildat.set_voxel_geometry and the LOD one) and the
+-- horizon map's build and merge. The frame peak reads and zeroes them once
+-- a frame ([FRAME_PEAK]); accumulated rather than reset here, since the
+-- horizon work also runs from replicate's events outside the update.
+M.frame_us = {mesh = 0, horizon = 0, physics = 0}
 M.section_size_chunks = nil
 M.section_size_voxels = nil
 -- Start higher than any conceivable value because otherwise things will never
@@ -75,8 +118,21 @@ local node_update_queue = nil
 -- Defined further down, next to remesh_all(), and used before that
 local queue_modified_node_update
 
+-- When a chunk that *changed* was queued, so that the wait until it is drawn
+-- again can be said out loud. A dug voxel that is still drawn is the fault
+-- this is about, and the number nobody had was how long the remesh waited;
+-- see section 3 of doc/plan/master_plan.md. Declared up here because the
+-- loop that reads it is written before the function that writes it.
+local modified_queued_us = {}
+-- And which of those have been complained about, so that one that is never
+-- drawn again says so once rather than every frame
+local modified_warned = {}
+
 -- NOTE: node can be nil, meaning that it was cached to be nil
 local static_node_cache = {} -- {z: {y: {x: {node:, fetched:}}}} (chunk_p)
+-- Chunk node id -> its geometry has been built at least once; see
+-- M.is_chunk_drawn()
+local geometry_done = {}
 
 function on_ready()
 	if is_ready then
@@ -111,6 +167,12 @@ buildat.sub_packet("voxelworld:init", function(data)
 	-- Clear caches
 	node_volume_cache = {}
 	static_node_cache = {}
+
+	-- What this client wants sent to it; see M.send_distance -- and
+	-- nothing until the game says it may ([TEXMOD_RACE])
+	init_seen = true
+	buildat.send_packet("voxelworld:set_send_distance",
+			M.streaming_allowed and tostring(math.floor(M.send_distance)) or "0")
 end)
 
 buildat.sub_packet("voxelworld:voxel_registry", function(data)
@@ -122,8 +184,158 @@ buildat.sub_packet("voxelworld:ready", function(data)
 	on_ready()
 end)
 
+-- The terrain's horizon around each chunk, for the mesher's sky share
+-- ([PBR_FIT] 2c, the terrain scale). Per chunk column (x, z in chunks):
+-- the heights of each chunk in it, out of buildat.column_heights(), and
+-- their merged world-y maximum as a string of 32x32 int16 the map is cut
+-- from. A column whose maximum moves -- a chunk arriving, a dig or a place
+-- that moves a top -- dirties the 3x3 chunk columns around it, and a
+-- flush a second later re-meshes the chunks in them that have geometry.
+-- Only for chunks of 32: the map is three chunks a side.
+local HORIZON_CHUNK = 32
+local HORIZON_SIZE = 96
+local HORIZON_NONE = -32768
+local HORIZON_FLUSH_US = 5000000
+local horizon_cols = {}   -- "x,z" -> {chunks = {cy = local string}, merged = string or nil, changed_us}
+local horizon_dirty = {}  -- "x,z" -> time_us the column last moved
+local horizon_meshed_us = {}  -- node id -> time_us its geometry was last made
+local horizon_none_row = nil
+
+local function horizon_key(cx, cz)
+	return cx .. "," .. cz
+end
+
+local function int16_char(v)
+	if v < 0 then v = v + 65536 end
+	return string.char(v % 256, math.floor(v / 256) % 256)
+end
+
+local function int16_at(str, i)   -- 0-based entry
+	local lo, hi = string.byte(str, i * 2 + 1, i * 2 + 2)
+	local v = lo + hi * 256
+	if v >= 32768 then v = v - 65536 end
+	return v
+end
+
+local function horizon_merge(col)
+	local out = {}
+	local n = HORIZON_CHUNK * HORIZON_CHUNK
+	for i = 0, n - 1 do
+		local best = HORIZON_NONE
+		for cy, str in pairs(col.chunks) do
+			local h = int16_at(str, i)
+			if h ~= HORIZON_NONE then
+				local w = cy * HORIZON_CHUNK + h
+				if w > best then best = w end
+			end
+		end
+		out[i + 1] = int16_char(best)
+	end
+	return table.concat(out)
+end
+
+-- A chunk's heights have arrived or changed
+local function horizon_note_chunk(chunk_p, heights, moved)
+	local key = horizon_key(chunk_p.x, chunk_p.z)
+	local col = horizon_cols[key]
+	if not col then
+		col = {chunks = {}}
+		horizon_cols[key] = col
+	end
+	if col.chunks[chunk_p.y] == heights then
+		return
+	end
+	col.chunks[chunk_p.y] = heights
+	local merged = horizon_merge(col)
+	if merged == col.merged then
+		return
+	end
+	col.merged = merged
+	-- The columns this one is in the map of, marked with when it moved;
+	-- the flush re-meshes only what was meshed before that, once. Only
+	-- for a change to a chunk that was here already -- a dig or a place
+	-- that moves a top -- and not for a chunk arriving: a world loading
+	-- arrives faster than it meshes, so a chunk is meshed with its
+	-- neighbours already in its map, and re-meshing every chunk for
+	-- each arriving neighbour starved the far ones out of the frame.
+	if not moved then
+		return
+	end
+	local now = buildat.get_time_us()
+	for dz = -1, 1 do
+		for dx = -1, 1 do
+			horizon_dirty[horizon_key(chunk_p.x + dx, chunk_p.z + dz)] = now
+		end
+	end
+end
+
+local function horizon_forget_chunk(chunk_p)
+	local col = horizon_cols[horizon_key(chunk_p.x, chunk_p.z)]
+	if col and col.chunks[chunk_p.y] then
+		col.chunks[chunk_p.y] = nil
+		col.merged = horizon_merge(col)
+	end
+end
+
+-- The map for a chunk: origin, then 96 rows of 96 int16 out of the 3x3
+-- chunk columns' merged heights, HORIZON_NONE where a column is unknown
+local function horizon_map_for(chunk_p)
+	if not horizon_none_row then
+		horizon_none_row = string.rep(int16_char(HORIZON_NONE), HORIZON_CHUNK)
+	end
+	local parts = {}
+	local ox = (chunk_p.x - 1) * HORIZON_CHUNK
+	local oy = chunk_p.y * HORIZON_CHUNK
+	local oz = (chunk_p.z - 1) * HORIZON_CHUNK
+	local function int32_char(v)
+		if v < 0 then v = v + 4294967296 end
+		return string.char(v % 256, math.floor(v / 256) % 256,
+				math.floor(v / 65536) % 256, math.floor(v / 16777216) % 256)
+	end
+	parts[1] = int32_char(ox) .. int32_char(oy) .. int32_char(oz)
+	for dz = -1, 1 do
+		local cols = {}
+		for dx = -1, 1 do
+			local col = horizon_cols[horizon_key(chunk_p.x + dx, chunk_p.z + dz)]
+			cols[dx + 2] = col and col.merged or nil
+		end
+		for zz = 0, HORIZON_CHUNK - 1 do
+			for dx = 1, 3 do
+				local m = cols[dx]
+				if m then
+					local from = zz * HORIZON_CHUNK * 2 + 1
+					parts[#parts + 1] = string.sub(m, from, from + HORIZON_CHUNK * 2 - 1)
+				else
+					parts[#parts + 1] = horizon_none_row
+				end
+			end
+		end
+	end
+	-- A map with nothing known is still a map: the mesher packs the alpha
+	-- for any map, and a chunk meshed without one -- the far ones, before
+	-- their columns arrive -- came out in the plain layout with the
+	-- constant bounce, lit like lamps at night
+	return table.concat(parts)
+end
+
 function sub_events()
 	node_update_queue = buildat.SpatialUpdateQueue()
+
+	local function note_horizon(node, moved)
+		if not M.horizon or not M.chunk_size_voxels or
+				M.chunk_size_voxels.x ~= HORIZON_CHUNK or
+				M.chunk_size_voxels.z ~= HORIZON_CHUNK then
+			return
+		end
+		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
+		local chunk_p = buildat.Vector3(node:GetWorldPosition()):div_components(
+				M.chunk_size_voxels):floor()
+		local t0 = buildat.get_time_us()
+		horizon_note_chunk(chunk_p, buildat.column_heights(data, voxel_reg),
+				moved)
+		M.frame_us.horizon = M.frame_us.horizon + buildat.get_time_us() - t0
+	end
+
 
 	local function queue_initial_node_update(node)
 		node_update_queue:put(node:GetWorldPosition(),
@@ -148,6 +360,9 @@ function sub_events()
 		log:info("voxelworld:node_volume_updated: "..dump(values))
 		node_volume_cache[values.node_id] = nil -- Clear cache
 		local node = replicate.main_scene:GetNode(values.node_id)
+		if node and not node:GetVar("buildat_voxel_data"):IsEmpty() then
+			note_horizon(node, true)
+		end
 		queue_modified_node_update(node)
 	end)
 
@@ -187,41 +402,58 @@ function sub_events()
 			-- clip out -> 4
 			near_trigger_d = 1.2 * M.camera_far_clip
 			near_weight = 0.4
-		elseif lod == 1 then
-			buildat.set_voxel_geometry(
-					node, data, voxel_reg, atlas_reg, M.use_skylight,
-					set_up_materials)
-
-			-- 1 -> 2
-			far_trigger_d = M.lod_distance * (1.0 + LOD_THRESHOLD)
-			far_weight = 0.5
 		else
-			buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg,
-					atlas_reg, M.use_skylight, set_up_materials)
-
+			-- The same map for every LOD: a far chunk meshed without one
+			-- kept the constant bounce and the plain alpha layout under a
+			-- shader reading the packed one ([LOD_LIGHT])
+			local horizon = nil
+			local t0 = buildat.get_time_us()
+			if M.horizon and M.use_skylight and M.chunk_size_voxels and
+					M.chunk_size_voxels.x == HORIZON_CHUNK then
+				horizon = horizon_map_for(buildat.Vector3(node_p):div_components(
+						M.chunk_size_voxels):floor())
+			end
+			local t1 = buildat.get_time_us()
+			M.frame_us.horizon = M.frame_us.horizon + t1 - t0
+			horizon_meshed_us[node:GetID()] = t1
 			if lod == 1 then
-				-- Shouldn't go here
-			elseif lod == 2 then
-				-- 2 -> 1
-				near_trigger_d = M.lod_distance * (1.0 - LOD_THRESHOLD)
-				near_weight = 0.75
-				-- 2 -> 3
-				far_trigger_d = 2 * M.lod_distance * (1.0 + LOD_THRESHOLD)
-				far_weight = 0.4
-			elseif lod == 3 then
-				-- 3 -> 2
-				near_trigger_d = 2 * M.lod_distance * (1.0 - LOD_THRESHOLD)
-				near_weight = 0.6
-				-- 3 -> 4
-				far_trigger_d = 3 * M.lod_distance * (1.0 + LOD_THRESHOLD)
-				far_weight = 0.4
-			elseif lod == 4 then
-				-- 4 -> 3
-				near_trigger_d = 3 * M.lod_distance * (1.0 - LOD_THRESHOLD)
-				near_weight = 0.5
-				-- 4 -> clip out
-				far_trigger_d = M.camera_far_clip * 1.4
-				far_weight = 0.4
+				buildat.set_voxel_geometry(
+						node, data, voxel_reg, atlas_reg, M.use_skylight,
+						set_up_materials, horizon)
+				M.frame_us.mesh = M.frame_us.mesh + buildat.get_time_us() - t1
+
+				-- 1 -> 2
+				far_trigger_d = M.lod_distance * (1.0 + LOD_THRESHOLD)
+				far_weight = 0.5
+			else
+				buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg,
+						atlas_reg, M.use_skylight, set_up_materials, horizon)
+				M.frame_us.mesh = M.frame_us.mesh + buildat.get_time_us() - t1
+
+				if lod == 1 then
+					-- Shouldn't go here
+				elseif lod == 2 then
+					-- 2 -> 1
+					near_trigger_d = M.lod_distance * (1.0 - LOD_THRESHOLD)
+					near_weight = 0.75
+					-- 2 -> 3
+					far_trigger_d = 2 * M.lod_distance * (1.0 + LOD_THRESHOLD)
+					far_weight = 0.4
+				elseif lod == 3 then
+					-- 3 -> 2
+					near_trigger_d = 2 * M.lod_distance * (1.0 - LOD_THRESHOLD)
+					near_weight = 0.6
+					-- 3 -> 4
+					far_trigger_d = 3 * M.lod_distance * (1.0 + LOD_THRESHOLD)
+					far_weight = 0.4
+				elseif lod == 4 then
+					-- 4 -> 3
+					near_trigger_d = 3 * M.lod_distance * (1.0 - LOD_THRESHOLD)
+					near_weight = 0.5
+					-- 4 -> clip out
+					far_trigger_d = M.camera_far_clip * 1.4
+					far_weight = 0.4
+				end
 			end
 		end
 		node_update_queue:put(node_p,
@@ -284,6 +516,36 @@ function sub_events()
 			M.camera_far_clip = camera_node:GetComponent("Camera").farClip
 		end
 
+		-- Chunk columns whose horizon moved a while ago: re-mesh the chunks
+		-- in them that were meshed before the move, once. A world loading
+		-- moves every column as its chunks arrive, and a chunk meshed after
+		-- its neighbours arrived already has them in its map; the wait is
+		-- what keeps the load from re-meshing each chunk nine times over.
+		if next(horizon_dirty) and update_counter % 60 == 0 then
+			local now = buildat.get_time_us()
+			for key, t in pairs(horizon_dirty) do
+				if now - t >= HORIZON_FLUSH_US then
+					horizon_dirty[key] = nil
+					local cx, cz = key:match("^(-?%d+),(-?%d+)$")
+					cx, cz = tonumber(cx), tonumber(cz)
+					local ztable = static_node_cache[cz]
+					if ztable then
+						for _, ytable in pairs(ztable) do
+							local c = ytable[cx]
+							if c and c.node then
+								local id = c.node:GetID()
+								local meshed = horizon_meshed_us[id]
+								if meshed and meshed < t then
+									horizon_meshed_us[id] = now
+									queue_modified_node_update(c.node)
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+
 		if camera_node and M.section_size_voxels then
 			-- TODO: How should position information be sent to the server?
 			local p = camera_p
@@ -306,8 +568,30 @@ function sub_events()
 		local current_us = buildat.get_time_us()
 		-- Spend time doing this proportionate to the rest of the update cycle
 		local last_outer_frame_us = (current_us - end_of_update_processing_us)
-		local max_handling_time_us = last_outer_frame_us * UPDATE_TIME_FRACTION
+		-- Capped: a fraction of the last frame with no ceiling let a long
+		-- frame buy a long budget, and the join's first frames meshed ten
+		-- dense chunks in one frame -- 1.3 s ([FRAME_PEAK]'s mesh row).
+		-- The worst frame is now one chunk's mesh over the cap.
+		local max_handling_time_us = math.min(
+				last_outer_frame_us * UPDATE_TIME_FRACTION, MESH_BUDGET_CAP_US)
 		local stop_at_us = current_us + max_handling_time_us
+
+		-- A chunk that changed and has still not been drawn again after two
+		-- seconds: said once each, because "never" and "late" are different
+		-- faults and only this tells them apart. See section 3 of
+		-- doc/plan/master_plan.md.
+		for node_id, queued_us in pairs(modified_queued_us) do
+			if not modified_warned[node_id] then
+				local waited = (current_us - queued_us) / 1000000
+				if waited >= 2.0 then
+					modified_warned[node_id] = true
+					log:warning(string.format(
+							"chunk node %d has not been drawn again after" ..
+							" %.1f s, with %d in the queue", node_id, waited,
+							node_update_queue:get_length()))
+				end
+			end
+		end
 
 		node_update_queue:set_p(camera_p)
 		-- Scale queue update operations according to the handling time of the
@@ -328,10 +612,51 @@ function sub_events()
 							", fw="..(math.floor(fw*100)/100)..")"..
 							": "..node:GetName())
 					if node_update.type == "geometry" then
+						-- How long a chunk that changed waited to be drawn
+						-- again, when that is long enough to see
+						local queued_us = modified_queued_us[
+								node_update.node_id]
+						if queued_us then
+							modified_queued_us[node_update.node_id] = nil
+							modified_warned[node_update.node_id] = nil
+							local waited = (buildat.get_time_us() -
+									queued_us) / 1000000
+							if waited >= 1.0 then
+								log:warning(string.format(
+										"chunk node %d waited %.1f s to be" ..
+										" drawn again, with %d in the queue",
+										node_update.node_id, waited,
+										node_update_queue:get_length()))
+							else
+								-- The prompt case says so as well. The
+								-- question section 3 of
+								-- doc/plan/master_plan.md is about is
+								-- whether a chunk that changed was drawn
+								-- again at all, and a line that only
+								-- appears when it was late cannot answer
+								-- it: no line then means either "at once"
+								-- or "never".
+								log:info(string.format(
+										"chunk node %d drawn again after" ..
+										" %.2f s, with %d in the queue",
+										node_update.node_id, waited,
+										node_update_queue:get_length()))
+							end
+						end
 						update_voxel_geometry(node)
+						-- **That this ran is the only honest "it is
+						-- drawn".** A chunk's scene node exists from the
+						-- moment it is replicated, so its presence says
+						-- nothing about whether there is anything to see;
+						-- an empty chunk runs this too and is then as
+						-- drawn as it will ever be. See M.is_chunk_drawn().
+						geometry_done[node_update.node_id] = true
 					end
 					if node_update.type == "physics" then
+						local t0 = buildat.get_time_us()
 						update_voxel_physics(node)
+						M.frame_us.physics = M.frame_us.physics +
+								buildat.get_time_us() - t0
 					end
 				end
 				did_update = true
@@ -360,6 +685,7 @@ function sub_events()
 
 	replicate.sub_sync_node_added({}, function(node)
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
+			note_horizon(node, false)
 			queue_initial_node_update(node)
 		end
 		if node:GetVar("buildat_static"):GetBool() == true and
@@ -375,6 +701,7 @@ function sub_events()
 
 	replicate.sub_sync_node_removed(function(node, node_id)
 		node_volume_cache[node_id] = nil
+		horizon_meshed_us[node_id] = nil
 		if node and M.chunk_size_voxels then
 			local p = node:GetWorldPosition()
 			local chunk_p = buildat.Vector3(p):div_components(
@@ -382,6 +709,7 @@ function sub_events()
 			local cache = M.get_static_node_cache(chunk_p)
 			cache.node = nil
 			cache.fetched = false
+			horizon_forget_chunk(chunk_p)
 		end
 	end)
 end
@@ -430,6 +758,7 @@ function queue_modified_node_update(node)
 	if not node_update_queue then
 		return
 	end
+	modified_queued_us[node:GetID()] = buildat.get_time_us()
 	node_update_queue:put(node:GetWorldPosition(),
 			MODIFIED_GEOMETRY_NEAR_WEIGHT, M.camera_far_clip * 1.2,
 			nil, nil, {
@@ -457,6 +786,42 @@ end
 
 function M.get_voxel_registry_used()
 	return voxel_reg
+end
+
+-- What a line of detail wants to know about the world: how many chunks this
+-- client holds, how many are waiting for a mesh, and how many voxel types
+-- the registry it was sent has. A count that is not the server's is a fault
+-- with a name; see doc/plan/luanti_module_plan.md, "The numbers before the
+-- pixels".
+function M.counts()
+	local chunks = 0
+	for _, ztable in pairs(static_node_cache) do
+		for _, ytable in pairs(ztable) do
+			for _, cache in pairs(ytable) do
+				if cache.node then
+					chunks = chunks + 1
+				end
+			end
+		end
+	end
+	return {
+		chunks = chunks,
+		to_mesh = node_update_queue and node_update_queue:get_length() or 0,
+		-- How near the front of the queue is to being due. The queue is
+		-- spatial and this is distance over trigger distance, so the loop
+		-- above meshes while it is at most 1 and leaves the rest for when
+		-- the camera is closer: **nil or above 1 means the client will draw
+		-- nothing more where it is standing**, which is a far more useful
+		-- question than how long the queue is. A world pinned by a
+		-- forceloading fixture keeps thousands of chunks queued that are
+		-- nowhere near the camera. **After a jump the queue re-sorts over
+		-- frames**, and until it has, its head says nothing: a picture taken
+		-- on those frames had the far chunks of the new place still waiting.
+		next_mesh_f = node_update_queue and
+				(node_update_queue:is_sorting() and 0 or
+				node_update_queue:peek_next_f()) or nil,
+		voxel_types = voxel_reg and voxel_reg:get_count() or 0,
+	}
 end
 
 -- Every chunk that is loaded, queued for a new mesh. The queue is spatial, so
@@ -492,6 +857,41 @@ function M.chunk_has_physics(chunk_p)
 		return false
 	end
 	return node:GetVar("buildat_physics_ready"):GetBool()
+end
+
+-- **How much of the world around a place is actually drawn.** Returns how
+-- many chunks within `chunk_radius` of `p` have no scene node, which is the
+-- positive question: "nothing is queued" is also true of a place whose
+-- chunks have not been asked for yet, and a picture taken then is of an
+-- empty sky. See [ONE_CYCLE] in doc/plan/rendering_plan.md, where exactly
+-- that was photographed.
+-- Whether this chunk has had its geometry built, rather than merely having
+-- arrived. See the note where the flag is set.
+function M.is_chunk_drawn(chunk_p)
+	local node = M.get_static_node(chunk_p)
+	if not node then
+		return false
+	end
+	return geometry_done[node:GetID()] == true
+end
+
+function M.undrawn_around(p, chunk_radius)
+	local c0 = M.get_chunk_position(p)
+	if c0 == nil then
+		return 0
+	end
+	local missing = 0
+	for dz = -chunk_radius, chunk_radius do
+		for dy = -chunk_radius, chunk_radius do
+			for dx = -chunk_radius, chunk_radius do
+				if not M.is_chunk_drawn(buildat.Vector3(
+						c0.x + dx, c0.y + dy, c0.z + dz)) then
+					missing = missing + 1
+				end
+			end
+		end
+	end
+	return missing
 end
 
 function M.get_static_node_cache(chunk_p)
