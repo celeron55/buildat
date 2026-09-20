@@ -582,8 +582,11 @@ struct CInstance: public voxelworld::Instance
 			return;
 		int section_w = m_chunk_size_voxels.getX() *
 				m_section_size_chunks.getX();
-		// A section the point is anywhere in is one the client can see into
-		int radius = (distance_voxels + section_w - 1) / section_w;
+		// A section the point is anywhere in is one the client can see into;
+		// nought is nothing at all, not the section the point is in -- a
+		// client that has not said it may have the world yet ([TEXMOD_RACE])
+		int radius = distance_voxels == 0 ? -1 :
+				(distance_voxels + section_w - 1) / section_w;
 		log_v(MODULE, "C%zu: wants %i voxels of world, which is %i sections",
 				(size_t)packet.sender, distance_voxels, radius);
 		{

@@ -21,6 +21,25 @@ M.physics_distance = 100
 -- server sends the smaller of this and what it keeps loaded, so asking for
 -- more than the game has is not an error. Set it before the world arrives.
 M.send_distance = 1000
+-- Whether the game has said the world may be sent yet ([TEXMOD_RACE]):
+-- until it does the client asks for nothing (a send distance of nought),
+-- so no chunk is meshed before the game's textures are there -- a chunk
+-- that wants a texture modifier not yet composed is not drawn at all. A
+-- game that has nothing to wait for says so at load
+-- (voxelworld.allow_streaming()); builtin/luanti's client half says so
+-- once its modifiers are composed.
+M.streaming_allowed = false
+local init_seen = false
+function M.allow_streaming()
+	if M.streaming_allowed then
+		return
+	end
+	M.streaming_allowed = true
+	if init_seen then
+		buildat.send_packet("voxelworld:set_send_distance",
+				tostring(math.floor(M.send_distance)))
+	end
+end
 
 local UPDATE_TIME_FRACTION = 0.10
 local MESH_BUDGET_CAP_US = 15000
@@ -149,9 +168,11 @@ buildat.sub_packet("voxelworld:init", function(data)
 	node_volume_cache = {}
 	static_node_cache = {}
 
-	-- What this client wants sent to it; see M.send_distance
+	-- What this client wants sent to it; see M.send_distance -- and
+	-- nothing until the game says it may ([TEXMOD_RACE])
+	init_seen = true
 	buildat.send_packet("voxelworld:set_send_distance",
-			tostring(math.floor(M.send_distance)))
+			M.streaming_allowed and tostring(math.floor(M.send_distance)) or "0")
 end)
 
 buildat.sub_packet("voxelworld:voxel_registry", function(data)

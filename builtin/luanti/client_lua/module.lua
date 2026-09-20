@@ -270,6 +270,9 @@ buildat.sub_packet("luanti:texmods", function(data)
 	texmods_done = true
 	log:info("luanti:texmods: " .. n .. " textures composed, " .. failed ..
 			" could not be")
+	-- Now the world may come: nothing is meshed before its textures are
+	-- there ([TEXMOD_RACE])
+	voxelworld.allow_streaming()
 	for name, _ in pairs(texmod.unimplemented) do
 		log:info("texmod: no \"" .. name .. "\" yet")
 	end
