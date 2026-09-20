@@ -545,7 +545,12 @@ static const float AO_LEVELS[4] = {1.0f, 0.72f, 0.52f, 0.38f};
 // takes as pbr, keeps every game's table, since the other games set
 // nothing and their look must not move; the upgrade is the launcher
 // telling the mesher through set_voxel_geometry().
-static const float AO_LEVELS_PBR[4] = {1.0f, 0.55f, 0.26f, 0.16f};
+// The deep entries lowered 2026-09-20 (0.26, 0.16 before; grass_occluded
+// 2.2 -> 2.05 of the render, nothing else moved). The one-occluder entry
+// is the open shade's as much as the corner's: at 0.30 the cliff top's
+// shaded face fell to 0.37 of the render for a corner at 1.2, so the
+// cave corner's 1.5 (cave_ao 0.49 against 0.128) is not this table's.
+static const float AO_LEVELS_PBR[4] = {1.0f, 0.55f, 0.20f, 0.10f};
 static const bool PBR_MODE = getenv("BUILDAT_LUANTI_PBR") != nullptr && (
 		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr" ||
 		ss_(getenv("BUILDAT_LUANTI_PBR")) == "1" ||
