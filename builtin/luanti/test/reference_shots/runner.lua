@@ -207,6 +207,37 @@ local function place_lamps()
 	end
 end
 
+-- The set's bore ([STAIR_VIEW]), dug with the lamps: along the trace
+-- set.lua gives, one voxel per step in X at the line's Y, from the first
+-- solid one the trace meets, `depth` of them
+local function dig_bore()
+	local b = REFSET.bore
+	if not b then
+		return
+	end
+	local tan = math.tan(math.rad(b.pitch))
+	local dug, first = 0, nil
+	for i = 1, 40 do
+		if dug >= b.depth then
+			break
+		end
+		local x = math.floor(b.from.x) + i
+		local y = b.from.y + (x - b.from.x) * tan
+		local pos = {x = x, y = math.floor(y + 0.5), z = math.floor(b.from.z + 0.5)}
+		local node = core.get_node_or_nil(pos)
+		local name = node and node.name or "ignore"
+		if first == nil and name ~= "air" and name ~= "ignore" then
+			first = pos
+		end
+		if first ~= nil then
+			core.remove_node(pos)
+			dug = dug + 1
+			core.log("action", string.format("REFSHOT bore %d at %d,%d,%d (vp%d), was %s",
+					dug, pos.x, pos.y, pos.z, b.view, name))
+		end
+	end
+end
+
 local function pin_view(player)
 	core.settings:set("viewing_range", tostring(RANGE))
 	local sky = player:get_sky(true)
@@ -604,6 +635,7 @@ core.register_on_joinplayer(function(player)
 					n .. " of " .. #probes .. " places")
 			say("refshot: loaded, starting")
 			place_lamps()
+			dig_bore()
 			show(1)
 			return
 		end
