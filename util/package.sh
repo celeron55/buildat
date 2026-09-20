@@ -202,7 +202,8 @@ make_one() {
 			'gcc' 'g++' 'libc6' 'libstdc++6' 'cmake' 2>/dev/null \
 			| awk '/^ii/ {print $2, $3}'
 		} > "$stage/bin/TOOLCHAIN"
-		echo "toolchain:"; sed 's/^/  /' "$stage/bin/TOOLCHAIN"
+		# To stderr: this function's stdout is the archive's path
+		echo "toolchain:" >&2; sed 's/^/  /' "$stage/bin/TOOLCHAIN" >&2
 	fi
 	case "$name" in
 		*win64*)
