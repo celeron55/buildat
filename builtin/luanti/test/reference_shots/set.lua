@@ -75,8 +75,9 @@ rawset(_G, "REFSET", {
 	-- along vp1's own line of sight so the camera looks straight down
 	-- it. The trace: from vp1's eye (its feet plus Luanti's 1.625)
 	-- toward +X pitched -30 degrees; per column along it three voxels
-	-- go to air, the lowest the one nearest the line -- a player needs
-	-- three to walk a stair (user, 2026-09-20) -- ten columns deep
+	-- go to air, centred on the line -- a player needs three to walk a
+	-- stair, and centred the camera sees into it (user, 2026-09-20) --
+	-- ten columns deep
 	-- counted from the first that held anything solid. The trace is the
 	-- number; which voxels it meets is the world's, the same in every
 	-- run.
