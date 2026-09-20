@@ -921,13 +921,24 @@ static void face_vertex_colors(VoxelVolume &volume,
 	// the chunk is (its x and z less HORIZON_PAD). A LOD volume is the
 	// chunk at one voxel per lod^3, so its offsets are times lod.
 	float terrain = 1.0f;
+	// Whether the face is under its own column's surface -- the map's
+	// height there above the voxel in front -- which is the underground
+	// rule ([STAIR_DARK]): the cap looks out from four columns and reads
+	// a cave wall facing its mouth as open. Underground the packed g
+	// carries nought, so the shader's ground term is the interior's
+	// (the flood's nibble, [INTERIOR_FALLOFF]) and not the open's.
+	bool under = false;
 	if(horizon){
 		const pv::Vector3DInt32 lc = volume.getEnclosingRegion().getLowerCorner();
-		terrain = terrain_sky(horizon,
-				horizon->origin_x + HORIZON_PAD + (front_p.getX() - lc.getX() - 1) * lod,
-				horizon->origin_y + (front_p.getY() - lc.getY() - 1) * lod,
-				horizon->origin_z + HORIZON_PAD + (front_p.getZ() - lc.getZ() - 1) * lod,
-				n);
+		int wx = horizon->origin_x + HORIZON_PAD + (front_p.getX() - lc.getX() - 1) * lod;
+		int wy = horizon->origin_y + (front_p.getY() - lc.getY() - 1) * lod;
+		int wz = horizon->origin_z + HORIZON_PAD + (front_p.getZ() - lc.getZ() - 1) * lod;
+		terrain = terrain_sky(horizon, wx, wy, wz, n);
+		int cx = wx - horizon->origin_x, cz = wz - horizon->origin_z;
+		if(cx >= 0 && cz >= 0 && cx < HORIZON_SIZE && cz < HORIZON_SIZE){
+			int16_t h = horizon->heights[cz * HORIZON_SIZE + cx];
+			under = h != HORIZON_NONE && h > wy;
+		}
 	}
 
 	for(size_t i = 0; i < 4; i++){
@@ -991,7 +1002,7 @@ static void face_vertex_colors(VoxelVolume &volume,
 			if(local_ao < SHADE_FLOOR)
 				local_ao = SHADE_FLOOR;
 			float local = local_ao * FACE_SHADE[face_id] / 1.15f;
-			out[i] = Color(lamp_shade, terrain,
+			out[i] = Color(lamp_shade, under ? 0.0f : terrain,
 					local > 1.0f ? 1.0f : local,
 					sky_alpha(sky_f, sky_shade, true)).ToUInt();
 			continue;

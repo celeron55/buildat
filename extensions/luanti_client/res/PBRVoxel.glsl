@@ -407,11 +407,30 @@ void VS()
             // what tells them apart (contrast_dirt 5.0 to 4.1 of the
             // render's 2.8, contrast_dirt_pit 6.4 to 6.7 of 12)
             groundSeen *= groundSeen * groundSeen;
+            // And the interior's share of the lit ground: a wall just
+            // inside a mouth is warm in the render (cave_lit_wall
+            // 0.160/0.091/0.065, the sunlit floor's bounce through the
+            // opening) where the sky share alone is grey-blue at a fifth
+            // of it ([INTERIOR_FALLOFF], 2026-09-20). What says "inside,
+            // near the mouth" is the mesher's underground rule (g = 0
+            // under the column's own surface) and the flood's nibble
+            // still high: the nibble to the sixth (cubed, the cave's
+            // back wall and corner read twice the render and its ramp
+            // flatter than without the term; to the sixth the back is
+            // the render's and the lit wall keeps most of its warmth).
+            // Nought in the open, where the cap is g and groundSeen is
+            // the term, and nought at a nibble of 15 either: the
+            // mesher's rule takes a pit's floor row for underground (the
+            // map's 3x3 erosion), and a face the sky reaches whole is
+            // the open's.
+            float n3 = sky.x * sky.x * sky.x;
+            float interior = isPacked ?
+                shade * (1.0 - iColor.g) * n3 * n3 * (1.0 - step(0.97, sky.x)) : 0.0;
             vVertexLight = cShadowKinds > 0.5 ? iColor.rgb : baked +
                 cBounceLight * (0.15 + 1.0 * sky.x) *
                     (1.0 - ShapeSkylight(sky.x)) * shade +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *
-                    ShapeSkylight(sky.x) * groundSeen;
+                    (ShapeSkylight(sky.x) * groundSeen + interior);
         #endif
         vSkyVisibility = ShapeSkylight(SkyOfAlpha(iColor.a).x);
 
