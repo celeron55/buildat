@@ -518,10 +518,12 @@ do
 	rp:SetEnabled("BloomHDR", buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
 	-- The bloom's threshold is against the exposed frame, so it sits where
 	-- that frame clips (the tonemap's shoulder starts above 1.0), and the
-	-- stock 40% mix is a haze over a whole daylight picture; 15% is a glow
-	-- on what clips ([BLOOM_PLACE]). How much is grade ([PBR_FIT] step 5).
+	-- stock 40% mix is a haze over a whole daylight picture; 15% was a
+	-- glow on what clips ([BLOOM_PLACE]) and still too much on a desk, so
+	-- a fifth of that (user, 2026-09-20, [BLOOM_FIFTH]). How much is grade
+	-- ([PBR_FIT] step 5; its ladder starts from here).
 	rp:SetShaderParameter("BloomHDRThreshold", 1.2)
-	rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0, 0.15))
+	rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0, 0.03))
 	-- No bias on top of the meter: the meter owns the level and a bias is
 	-- a second exposure that pushes the lit parts up the curve's shoulder
 	-- ([PBR_FIT] term 4). EXPOSURE_BIAS stays the minimap's, which is not
