@@ -597,7 +597,12 @@ static bool occludes_sky(VoxelVolume &volume,
 // gate the sun by the nibble (a cave) without the shade taking the sun off
 // a lit wall in a trench, which one number cannot help doing. See
 // [PBR_FIT] 2c.
-static const float SHADE_FLOOR = 0.3f;
+// 0.3 until 2026-09-20 21:30; 0.1 read better on every row it touches
+// with the vertex terms live: the pit (contrast_dirt_pit 7.0 of 12, was
+// 5.9), the corner (cave_ao_corner 0.85-1.23, was 1.25-1.97), the bore's
+// walls (a shaft's rays are nought its whole length, so the floor is
+// its level: 1.17/3.2/6.6 of the render at the near wall, was 2/5/11)
+static const float SHADE_FLOOR = 0.1f;
 
 static float sky_alpha(float sky_f, float shade, bool packed)
 {
