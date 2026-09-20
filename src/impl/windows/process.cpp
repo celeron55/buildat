@@ -1,6 +1,7 @@
 #include "interface/process.h"
 #include "core/log.h"
 #include "ports/windows_minimal.h"
+#include <cstring>
 #define MODULE "__process"
 
 namespace interface {
@@ -39,9 +40,27 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 	char command_c[50000];
 	snprintf(command_c, 50000, cs(command));
 
-	// The environment block is a null-terminated buffer of null-terminated strings
+	// The environment block is a null-terminated buffer of null-terminated
+	// strings: the parent's, with opts.env set over it -- not opts.env
+	// alone, which left the shipped compiler with no TEMP and its first
+	// module build failing in C:\WINDOWS\ ([WIN_TMP], 2026-09-20).
+	sm_<ss_, ss_> env;
+	{
+		LPCH parent = GetEnvironmentStrings();
+		if(parent){
+			for(const char *p = parent; *p; p += strlen(p) + 1){
+				const char *eq = strchr(p + 1, '='); // a name may start with '='
+				if(!eq)
+					continue;
+				env[ss_(p, eq - p)] = ss_(eq + 1);
+			}
+			FreeEnvironmentStrings(parent);
+		}
+	}
+	for(auto &pair : opts.env)
+		env[pair.first] = pair.second;
 	sv_<char> env_block;
-	for(auto &pair : opts.env){
+	for(auto &pair : env){
 		const ss_ &name = pair.first;
 		const ss_ &value = pair.second;
 		env_block.insert(env_block.end(), name.c_str(), name.c_str() + name.size());

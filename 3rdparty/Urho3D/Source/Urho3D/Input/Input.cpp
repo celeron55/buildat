@@ -1377,6 +1377,9 @@ IntVector2 Input::GetMousePosition() const
     if (!initialized_)
         return ret;
 
+    if (virtualMouse_)
+        return virtualMousePosition_;
+
     SDL_GetMouseState(&ret.x_, &ret.y_);
     ret.x_ = (int)(ret.x_ * inputScale_.x_);
     ret.y_ = (int)(ret.y_ * inputScale_.y_);
@@ -1795,7 +1798,24 @@ void Input::SetMousePosition(const IntVector2& position)
     if (!graphics_)
         return;
 
+    if (virtualMouse_)
+    {
+        virtualMousePosition_ = position;
+        return;
+    }
+
     SDL_WarpMouseInWindow(graphics_->GetWindow(), (int)(position.x_ / inputScale_.x_), (int)(position.y_ / inputScale_.y_));
+}
+
+void Input::SetVirtualMousePosition(const IntVector2& position)
+{
+    virtualMouse_ = true;
+    virtualMousePosition_ = position;
+}
+
+void Input::ClearVirtualMousePosition()
+{
+    virtualMouse_ = false;
 }
 
 void Input::CenterMousePosition()
