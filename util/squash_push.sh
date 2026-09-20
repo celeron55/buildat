@@ -47,4 +47,10 @@ echo "made $b, tagged $t"
 if [ "${PUSH:-1}" = 1 ]; then
 	git push github "$b" "$t"
 fi
-git checkout -q "$src"
+# Back to the branch, or to the tip it was detached at (release.sh's worktree)
+if git show-ref --verify --quiet "refs/heads/$src" &&
+		git worktree list --porcelain | grep -q "^branch refs/heads/$src$"; then
+	git checkout -q --detach "$src"
+else
+	git checkout -q "$src"
+fi
