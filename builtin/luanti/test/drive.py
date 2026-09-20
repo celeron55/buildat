@@ -582,11 +582,18 @@ def craft_2x2(s, recipe):
         cmds += click_at(target[2], target[3], target[4], button="right")
         cmds += click_at(src[2], src[3], src[4])
     out = by.get(("craftpreview", 1))
-    empty = empties
-    if out is None or not empty:
+    # The product onto a stack of its own kind with room, else an empty
+    # slot: a full inventory with planks in it still takes planks
+    # (the run of 2026-09-20 08:31 opened and closed the inventory 280
+    # times over a full one)
+    product = recipe[2]
+    partial = [sl for sl in s.slots if sl[0] == "main" and item_is(sl[5], product)
+               and count_of(sl[5]) <= 64 - recipe[3]]
+    dst = partial or empties
+    if out is None or not dst:
         return None
     cmds += click_at(out[2], out[3], out[4])
-    cmds += click_at(empty[0][2], empty[0][3], empty[0][4])
+    cmds += click_at(dst[0][2], dst[0][3], dst[0][4])
     return cmds
 
 
@@ -781,6 +788,9 @@ def rules(s, mem):
                     had = count_held(s, r[2], mem)
                     return "craft_" + r[0], cmds + ["delay 300"], \
                         lambda n, w=r[2], h=had: count_held(n, w, mem) > h
+                # No room for it: not asked again for a while, or the
+                # inventory is opened and closed every other turn
+                mem["craft_blocked_until"] = turn + 60
             # A thing wanted in the hand lies past the hotbar: moved to
             # an empty hotbar slot (a pick up and a put down)
             for word in ("crafting_table", "pick_stone", "pick_wood", "furnace", "torch"):
@@ -927,7 +937,8 @@ def rules(s, mem):
 
     # something to craft from what is held: open the inventory, and the
     # form rule above does the craft
-    if wanted_craft(s, mem) is not None:
+    if wanted_craft(s, mem) is not None and \
+            mem.get("craft_blocked_until", 0) <= turn:
         return "open_inventory", ["keypress I", ms(1.0)], \
             lambda n: n.form is not None
     # A thing wanted in the hand lying past the hotbar -- a stone pickaxe
