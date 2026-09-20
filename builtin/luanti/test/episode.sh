@@ -1,0 +1,161 @@
+#!/bin/bash
+# [AUTO_PLAYTEST] part 2: a compared episode. episode.lua builds one state
+# on official Luanti's server and on this module, the client does one
+# scripted thing, and the census the fixture logs is diffed between the
+# two. The Luanti server's client is extensions/luanti_client, which is a
+# scripted Luanti client; the module's is the launcher.
+#
+#   EPISODE=dig GAME=mineclone2 builtin/luanti/test/episode.sh
+#
+# What lands under local/episode/<episode>/: both servers' logs, both
+# clients' logs, and the two census lines. Needs the Luanti checkout and
+# its server binary the way reference_shots/shoot_luanti_server.sh does,
+# and nothing else running.
+set -u
+here=$(cd "$(dirname "$0")/../../.." && pwd)
+me=$(cd "$(dirname "$0")" && pwd)
+EPISODE="${EPISODE:-dig}"
+GAME="${GAME:-mineclone2}"
+# The client is driven over its stdin (`-c -`): the runner waits for the
+# fixture's `episode: ready` in the server log and only then writes the
+# action, and the fixture takes the census this many seconds after ready.
+# Timed by delays instead, the module under VoxeLibre missed every window
+# -- its steps are seconds long while the world emerges around a player
+# put in the sky.
+SECONDS_GIVEN="${SECONDS_GIVEN:-20}"
+out="$here/local/episode/$EPISODE"
+mkdir -p "$out"
+luanti=~/projects/luanti
+bin=${LUANTI_BIN:-$luanti/bin/luanti-refshots}
+
+# The client's part: what the episode is, written to its stdin at ready
+case "$EPISODE" in
+dig)
+	# Straight down for three seconds: the dirt underfoot, by hand
+	{ echo "look 0 -89"; echo "mouse_down left"
+		echo "delay 3000"; echo "mouse_up left"; } > "$out/cmds.txt" ;;
+place)
+	# Ten of the game's dirt in the first slot (the fixture puts them
+	# there for this episode), one placed on the platform by a right
+	# click straight down: the census gains a dirt and the stack loses one
+	{ echo "look 0 -89"; echo "mouse_click right"; } > "$out/cmds.txt" ;;
+*) echo "unknown episode $EPISODE (dig, place)" >&2; exit 2 ;;
+esac
+
+{ echo "rawset(_G, \"EPISODE_NAME\", \"$EPISODE\")"
+	echo "rawset(_G, \"EPISODE_SECONDS\", $SECONDS_GIVEN)"
+	cat "$me/episode.lua"; } > "$out/fixture.lua"
+
+if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null ||
+		pgrep -x luanti-refshots >/dev/null; then
+	echo "a server or client is already running" >&2; exit 2
+fi
+srv=""; cli=""
+trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
+
+# Wait for ready, write the action into the client, wait for the census.
+# The client's stdin is a fifo the runner holds open; closing it is what
+# ends the client. Both waits are bounded by the emerge time seen so far.
+drive() {   # log fifo -> the census line, or nothing
+	local log="$1" fifo="$2" i
+	for i in $(seq 1 240); do
+		grep -aq "episode: ready\|episode: FAILED" "$log" && break
+		kill -0 "$cli" 2>/dev/null || break
+		sleep 1
+	done
+	if grep -aq "episode: ready" "$log"; then
+		cat "$out/cmds.txt" > "$fifo"
+	else
+		echo "the fixture never said ready" >&2
+	fi
+	# Ten minutes: the module under VoxeLibre has had steps of 47 seconds
+	# while it emerged the world around a player put in the sky, and the
+	# fixture's timer only fires between them
+	for i in $(seq 1 600); do
+		grep -aq "episode: census\|episode: FAILED" "$log" && break
+		kill -0 "$cli" 2>/dev/null || break
+		sleep 1
+	done
+	grep -a "episode: census" "$log" | sed 's/^.*episode: census //' | head -1
+}
+
+# --- the Luanti server, with the extension in front of it
+work="$out/luanti_world"
+rm -rf "$work"; mkdir -p "$work/worldmods/episode"
+cat > "$work/world.mt" <<EOF
+gameid = $GAME
+backend = sqlite3
+player_backend = sqlite3
+auth_backend = sqlite3
+mod_storage_backend = sqlite3
+world_name = episode
+creative_mode = false
+enable_damage = false
+server_announce = false
+EOF
+cp "$out/fixture.lua" "$work/worldmods/episode/init.lua"
+printf 'name = episode\n' > "$work/worldmods/episode/mod.conf"
+{ echo "fixed_map_seed = 1"; echo "time_speed = 0"; echo "enable_damage = false"
+	echo "mute_sound = true"; } > "$out/luanti.conf"
+port=30030
+( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
+	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
+for i in $(seq 1 300); do
+	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
+	sleep 1
+done
+sleep 3
+srv=$(pgrep -x luanti-refshots | head -1)
+[ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
+fifo="$out/extension_stdin"; rm -f "$fifo"; mkfifo "$fifo"
+BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ep \
+	BUILDAT_LUANTI_CONNECT=1 \
+	"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
+	-c - < "$fifo" > "$out/extension_cli.log" 2>&1 &
+cli=$!
+exec 3>"$fifo"
+luanti_census=$(drive "$out/luanti_srv.log" "$fifo")
+exec 3>&-
+kill "$cli" 2>/dev/null; sleep 1
+kill "$srv" 2>/dev/null
+for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+kill -9 "$srv" 2>/dev/null
+
+# --- the module, with the launcher in front of it
+cd "$here/Build"
+save=buildat_test_episode
+rm -rf "../user/games/vanilla/saves/$save"
+port=$(( 29900 + (RANDOM % 90) ))
+BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
+	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
+	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" 2>&1 \
+	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/module_srv.log" &
+for i in $(seq 1 400); do
+	grep -q "Mods loaded" "$out/module_srv.log" 2>/dev/null && break
+	grep -q "Shutdown:" "$out/module_srv.log" 2>/dev/null && break
+	sleep 1
+done
+sleep 5
+srv=$(pgrep -x buildat_server | head -1)
+[ -n "$srv" ] || { echo "the module's server did not come up" >&2; exit 1; }
+fifo="$out/module_stdin"; rm -f "$fifo"; mkfifo "$fifo"
+bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c - < "$fifo" \
+	> "$out/module_cli.log" 2>&1 &
+cli=$!
+exec 3>"$fifo"
+module_census=$(drive "$out/module_srv.log" "$fifo")
+exec 3>&-
+kill "$cli" 2>/dev/null; sleep 1
+kill -INT "$srv" 2>/dev/null
+for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+
+echo "luanti: ${luanti_census:-no census}"
+echo "module: ${module_census:-no census}"
+printf '%s\n%s\n' "$luanti_census" "$module_census" > "$out/census.txt"
+if [ -z "$luanti_census" ] || [ -z "$module_census" ]; then
+	echo "FAIL: a side gave no census" >&2; exit 1
+fi
+if [ "$luanti_census" != "$module_census" ]; then
+	echo "FAIL: the censuses differ" >&2; exit 1
+fi
+echo "same"

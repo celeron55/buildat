@@ -171,8 +171,15 @@ local function show_starting(game)
 	local status = window:CreateChild("Text")
 	status:SetStyleAuto()
 	status.text = "Starting "..game.."..."
+	-- What the server says it is doing, off the STATUS lines of its log
+	-- ([START_PROGRESS]): a first start compiles fourteen modules behind
+	-- this screen, and this is what makes that read as progress
+	local stage = window:CreateChild("Text")
+	stage:SetStyleAuto()
+	stage.text = ""
 
 	local t0 = buildat.get_time_us()
+	local last_status, last_status_at, last_poll = nil, t0, 0
 	local done = false
 	root:SubscribeToStackEvent("Update", function(event_type, event_data)
 		if done then
@@ -185,15 +192,30 @@ local function show_starting(game)
 		end
 		if not buildat.local_server_running() then
 			done = true
-			show_error("Server exited")
 			uistack.main:pop(root)
+			M.show_dead_server("The server exited while starting")
 			return
 		end
-		if buildat.get_time_us() - t0 > 90 * 1000000 then
+		local now = buildat.get_time_us()
+		if now - last_poll > 250000 then
+			last_poll = now
+			local line = buildat.local_server_status()
+			if line ~= last_status then
+				last_status, last_status_at = line, now
+			end
+		end
+		if last_status then
+			local secs = math.floor((now - last_status_at) / 1000000)
+			stage.text = last_status..(secs >= 10 and ("  "..secs.." s") or "")
+		end
+		-- Not a fixed wait: a fresh compile of every module can outlast
+		-- one on a slow machine. A hang is no new status line for 120 s.
+		if now - last_status_at > 120 * 1000000 then
 			done = true
 			buildat.request_stop_local_server()
-			show_error("Server did not start")
 			uistack.main:pop(root)
+			show_error("Server did not start: no progress for 120 s"..
+					(last_status and (", last at \""..last_status.."\"") or ""))
 		end
 	end)
 
@@ -207,8 +229,8 @@ local function show_starting(game)
 	end)
 end
 
-local function do_start_local_game(game)
-	local ok, err = buildat.start_local_server(game)
+local function do_start_local_game(game, launch)
+	local ok, err = buildat.start_local_server(game, launch)
 	if not ok then
 		show_error(err)
 		return
@@ -216,7 +238,7 @@ local function do_start_local_game(game)
 	show_starting(game)
 end
 
-local function show_waiting_for_old_server(game)
+local function show_waiting_for_old_server(game, launch)
 	local root = uistack.main:push({desc="stopping_old_server"})
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
@@ -240,7 +262,7 @@ local function show_waiting_for_old_server(game)
 		if not buildat.local_server_running() then
 			done = true
 			uistack.main:pop(root)
-			do_start_local_game(game)
+			do_start_local_game(game, launch)
 			return
 		end
 		if buildat.get_time_us() - t0 > 10 * 1000000 then
@@ -251,7 +273,7 @@ local function show_waiting_for_old_server(game)
 				"It may be saving. Force kill it?",
 				function()
 					buildat.force_kill_local_server()
-					do_start_local_game(game)
+					do_start_local_game(game, launch)
 				end,
 				function()
 				end)
@@ -267,13 +289,13 @@ local function show_waiting_for_old_server(game)
 	end)
 end
 
-local function start_local_game(game)
+local function start_local_game(game, launch)
 	buildat.request_stop_local_server()
 	if not buildat.local_server_running() then
-		do_start_local_game(game)
+		do_start_local_game(game, launch)
 		return
 	end
-	show_waiting_for_old_server(game)
+	show_waiting_for_old_server(game, launch)
 end
 
 local function show_local_game()
@@ -316,8 +338,26 @@ end
 -- The two things this extension knows how to do, for the launch menu to put
 -- in front of a player: the list of local games, and connecting to a remote
 -- server. Both push a screen of their own and come back on their own.
+-- A local server that died: the last lines of its log and where the
+-- whole of it is, so a crash's backtrace is on the screen and not just
+-- gone ([START_PROGRESS]). on_close runs when the dialog is closed.
+function M.show_dead_server(title, on_close)
+	local path, tail = buildat.local_server_log_tail(20)
+	ui_utils.show_message_dialog(title.."\n\n"..tail..
+			"\nThe full log is at "..path, on_close)
+end
+
 M.show_local_game = show_local_game
 M.show_connect_to_server = show_connect_to_server
+-- And starting a game by name, which is what a tile on the launch grid
+-- ends in ([LAUNCH_GRID]); the same screens as picking it from the list
+M.start_local_game = start_local_game
+-- And the same two for the sandboxed launcher file ([LAUNCH_GRID]): each
+-- pushes a trusted screen and comes back, and takes nothing from the caller
+M.safe = {
+	show_local_game = function() show_local_game() end,
+	show_connect_to_server = function() show_connect_to_server() end,
+}
 
 -- Kept so that `-m launch_menu` still starts something: the launch menu
 -- itself is extensions/__menu, which is what the client boots by default.

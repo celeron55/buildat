@@ -11,6 +11,11 @@
 #include <cstring>
 #include <cstdarg>
 #ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+#ifdef _WIN32
 	#include "ports/windows_compat.h"
 #else
 	#include <pthread.h>
@@ -58,9 +63,14 @@ void log_set_file(const char *path)
 {
 	log_mutex.lock();
 	file = fopen(path, "a");
-	if(file)
+	if(file){
 		fprintf(stderr, "Opened log file \"%s\"\n", path);
-	else
+		// And stderr into the same file: a crash's backtrace is written
+		// there by the signal handler, and a local server a client
+		// started has no terminal for it to land on ([START_PROGRESS])
+		fflush(stderr);
+		dup2(fileno(file), 2);
+	} else
 		log_w("__log", "Failed to open log file \"%s\"", path);
 	log_mutex.unlock();
 }
