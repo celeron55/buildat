@@ -2579,7 +2579,9 @@ struct CInstance: public voxelworld::Instance
 							p, get_light(old_first, lf), old_transparent,
 							lf == LIGHT_LAMP ? voxel_light_source(old) : 0});
 				}
-				set_light(first, get_light(old_first, lf), lf);
+				// A dug blocker starts dark; see set_voxel()
+				set_light(first, (!old_transparent && now_transparent) ? 0 :
+						get_light(old_first, lf), lf);
 			}
 			nv.planes[0] = first.data;
 		}
@@ -2668,7 +2670,15 @@ struct CInstance: public voxelworld::Instance
 							p, get_light(old_first, lf), old_transparent,
 							lf == LIGHT_LAMP ? voxel_light_source(old) : 0});
 				}
-				set_light(nv, get_light(old_first, lf), lf);
+				// Not from a blocker that has just been dug out: what a
+				// blocker wears is the brightest light beside it, for the
+				// mesher's sake, and carried into the air it becomes the
+				// flood spreads it on as the air's own -- a stair dug
+				// sideways never dimmed, since each step's wall wore the
+				// step's light and was then dug ([DIG_LIGHT]). Dark, and
+				// the flood fills it from around it a level lower.
+				set_light(nv, (!old_transparent && now_transparent) ? 0 :
+						get_light(old_first, lf), lf);
 			}
 		}
 
@@ -2963,7 +2973,8 @@ struct CInstance: public voxelworld::Instance
 						continue;
 					}
 					bool old_transparent = voxel_transmits_light(dst_v);
-					if(old_transparent != voxel_transmits_light(src_v) ||
+					const bool now_transparent = voxel_transmits_light(src_v);
+					if(old_transparent != now_transparent ||
 							(lf == LIGHT_LAMP &&
 							voxel_light_source(dst_v) !=
 							voxel_light_source(src_v))){
@@ -2973,7 +2984,9 @@ struct CInstance: public voxelworld::Instance
 								lf == LIGHT_LAMP ?
 								voxel_light_source(dst_v) : 0});
 					}
-					set_light(nv, get_light(old, lf), lf);
+					// A dug blocker starts dark; see set_voxel()
+					set_light(nv, (!old_transparent && now_transparent) ? 0 :
+							get_light(old, lf), lf);
 				}
 
 				dst.setVoxel(nv);
@@ -3510,6 +3523,28 @@ struct CInstance: public voxelworld::Instance
 		for(const SkylightSeed &seed : seeds){
 			VoxelInstance v = light_get(seed.p);
 			bool now_transparent = transmits_light_at(seed.p);
+			// A handful of seeds is a player's dig: said one by one, so a
+			// dig whose light does not come out right can be read off
+			// the log ([DIG_LIGHT])
+			if(seeds.size() <= 4){
+				log_d(MODULE, "%s seed " PV3I_FORMAT ": was %s now %s, old %u, "
+						"holds %u, emits %u", field == LIGHT_SKY ? "sky" : "lamp",
+						PV3I_PARAMS(seed.p),
+						seed.was_transparent ? "clear" : "solid",
+						now_transparent ? "clear" : "solid",
+						(unsigned)seed.old_level, (unsigned)flood_get(v),
+						(unsigned)emitted_at(seed.p));
+				for(size_t k = 0; k < 6; k++){
+					pv::Vector3DInt32 n(
+							seed.p.getX() + LIGHT_OFF[k][0],
+							seed.p.getY() + LIGHT_OFF[k][1],
+							seed.p.getZ() + LIGHT_OFF[k][2]);
+					log_d(MODULE, "  beside " PV3I_FORMAT ": %s, holds %u",
+							PV3I_PARAMS(n),
+							transmits_light_at(n) ? "clear" : "solid",
+							(unsigned)flood_get(light_get(n)));
+				}
+			}
 			if(seed.was_transparent && !now_transparent){
 				// It took its light with it
 				unlight.push_back(LightNode{seed.p, seed.old_level});

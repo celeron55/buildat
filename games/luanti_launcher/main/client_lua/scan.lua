@@ -106,9 +106,14 @@ return function(ctx)
 	-- to dig and which to keep (user, 2026-09-20), which the rays of
 	-- `scan` cannot give it; its own event, since a scan every turn does
 	-- not need the cube every turn. 0 is air or anything not there.
+	-- A third word `light` adds a `light` row per (y, z): the sky nibble
+	-- the client holds for each voxel, `-` where none is loaded
+	-- ([DIG_LIGHT]: what the mesher lights the faces by, beside the
+	-- server's own reading).
 	magic.SubscribeToEvent("command_seq:scan_volume", function(event_type, event_data)
 		local param = event_data:GetString("Param") or ""
-		local r, label = param:match("^(%d+)%s*(%S*)")
+		local r, label, extra = param:match("^(%d+)%s*(%S*)%s*(%S*)")
+		local with_light = extra == "light"
 		r = math.max(1, math.min(8, tonumber(r) or 4))
 		if label == nil or label == "" then
 			label = "volume"
@@ -119,12 +124,14 @@ return function(ctx)
 		local fz0 = math.floor(pz + 0.5)
 		local names, index = {}, {}
 		local lines = {}
+		local reg = voxelworld.get_voxel_registry()
 		for y = fy0 - r, fy0 + r do
 			for z = fz0 - r, fz0 + r do
-				local row = {}
+				local row, lrow = {}, {}
 				for x = fx0 - r, fx0 + r do
 					local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
 					local name = v ~= nil and ctx.node_name_at(buildat.Vector3(x, y, z)) or nil
+					lrow[#lrow + 1] = v ~= nil and tostring(reg:light_sky_of(v)) or "-"
 					local i = 0
 					if name ~= nil and name ~= "air" then
 						i = index[name]
@@ -138,6 +145,10 @@ return function(ctx)
 				end
 				lines[#lines + 1] = string.format("scan %s: voxels y=%d z=%d x=%d: %s",
 						label, y, z, fx0 - r, table.concat(row, " "))
+				if with_light then
+					lines[#lines + 1] = string.format("scan %s: light y=%d z=%d x=%d: %s",
+							label, y, z, fx0 - r, table.concat(lrow, " "))
+				end
 			end
 		end
 		local legend = {}
