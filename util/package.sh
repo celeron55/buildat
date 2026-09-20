@@ -141,21 +141,12 @@ smoke_test_wine() {
 	# With TEMP and TMP unset, as a desktop with nothing set ([WIN_TMP]);
 	# Wine gives its own from the registry, so this proves less than a
 	# desktop does, and the desktop is the done-when
-	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR "$wine" bin/buildat_server.exe -m games/digger -P "$port" > "$dir/srv.log" 2>&1) &
+	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
+		"$wine" bin/buildat_server.exe -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
-	for i in $(seq 1 900); do
-		grep -q "Listening at" "$dir/srv.log" 2>/dev/null && break
-		kill -0 "$srv" 2>/dev/null || break
-		sleep 1
-	done
-	if ! grep -q "Listening at" "$dir/srv.log"; then
-		kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null || true
-		echo "smoke test under Wine: the server did not come up; its log:" >&2
-		tail -40 "$dir/srv.log" >&2
-		exit 1
-	fi
-	echo "smoke test under Wine: the server compiled its modules and listened"
+	wait_for_vanilla "$dir/srv.log" "$srv" "smoke test under Wine" || {
+		kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null || true; exit 1; }
 	# And the client, on the virtual display through Wine's GL, which is
 	# software rendering; what it has to have done is what the Linux smoke
 	# asks: joined, drawn a chunk, run its commands to the end
@@ -168,7 +159,7 @@ smoke_test_wine() {
 	[ -n "$xvfb_pid" ] && kill "$xvfb_pid" 2>/dev/null
 	if ! grep -q "Connect succeeded" "$dir/cli.log" ||
 			! grep -q "Command sequence complete" "$dir/cli.log" ||
-			! grep -q "drawn again\|Node update\|player physics enabled" "$dir/cli.log"; then
+			! grep -q "drawn again\|Node update\|player physics enabled\|chunks in scene" "$dir/cli.log"; then
 		echo "smoke test under Wine: the client did not join, draw and finish; its log:" >&2
 		tail -40 "$dir/cli.log" >&2
 		exit 1
@@ -215,8 +206,45 @@ make_one() {
 	esac
 }
 
+# What both smoke tests wait for from the server ([WIN_MAPGEN_BUILD]):
+# games/vanilla with the bundled minimal game, so that every builtin --
+# luanti and luanti_mapgen above all, the modules a player uses -- is
+# compiled by the shipped compiler, the game's mods load and one section
+# generates. games/digger before never compiled either, and a mapgen that
+# did not build under mingw shipped in 0.4.2.
+wait_for_vanilla() {
+	local log="$1" srv="$2" what="$3"
+	local i
+	for i in $(seq 1 900); do
+		grep -q "Listening at" "$log" 2>/dev/null && break
+		kill -0 "$srv" 2>/dev/null || break
+		sleep 1
+	done
+	if ! grep -q "Listening at" "$log"; then
+		echo "$what: the server did not come up; its log:" >&2
+		tail -40 "$log" >&2
+		return 1
+	fi
+	for i in $(seq 1 300); do
+		grep -q "on_generated" "$log" 2>/dev/null && break
+		kill -0 "$srv" 2>/dev/null || break
+		sleep 1
+	done
+	if ! grep -q "on_generated" "$log"; then
+		echo "$what: the game loaded no world; its log:" >&2
+		tail -40 "$log" >&2
+		return 1
+	fi
+	if grep -q "Failed to build module" "$log"; then
+		echo "$what: a module did not build; its log:" >&2
+		grep -n "Failed to build\|error" "$log" | head -20 >&2
+		return 1
+	fi
+	echo "$what: the server compiled every module, loaded the game and generated a section"
+}
+
 # The archive unpacked into a clean directory and run: the server on
-# games/digger through the found compiler, a client connected for one
+# games/vanilla with the bundled game through the found compiler, a client connected for one
 # screenshot, which must not be black. The one check that says the archive
 # starts on the machine it is on.
 smoke_test() {
@@ -228,17 +256,15 @@ smoke_test() {
 	unpacked=$(ls -d "$dir"/*/ | head -1)
 	local port=$(( 29600 + (RANDOM % 90) ))
 	echo "smoke test in $unpacked"
-	(cd "$unpacked" && bin/buildat_server -m games/digger -P "$port" > "$dir/srv.log" 2>&1) &
+	(cd "$unpacked" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
+		bin/buildat_server -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
 	# The server compiles every module it loads through the compiler
 	# the archive found, which is minutes on a first run; the client
-	# joins once the server listens
-	for i in $(seq 1 900); do
-		grep -q "Listening at" "$dir/srv.log" 2>/dev/null && break
-		kill -0 "$srv" 2>/dev/null || { echo "server exited; see $dir/srv.log" >&2; exit 1; }
-		sleep 1
-	done
+	# joins once the server listens and the world is there
+	wait_for_vanilla "$dir/srv.log" "$srv" "smoke test" || {
+		kill -9 "$srv" 2>/dev/null; exit 1; }
 	sleep 5
 	printf 'delay 25000\nscreenshot %s/shot.png\nquit\n' "$dir" > "$dir/cmds.txt"
 	# Software GL where there is no GPU (the container); harmless with one
@@ -260,7 +286,7 @@ smoke_test() {
 	# frame the client drew, so it is reported and not a verdict there.
 	if ! grep -q "Connect succeeded" "$dir/cli.log" ||
 			! grep -q "Command sequence complete" "$dir/cli.log" ||
-			! grep -q "drawn again\|Node update\|player physics enabled" "$dir/cli.log"; then
+			! grep -q "drawn again\|Node update\|player physics enabled\|chunks in scene" "$dir/cli.log"; then
 		echo "smoke test: the client did not join, draw and finish; see $dir/cli.log" >&2
 		tail -40 "$dir/cli.log" >&2
 		exit 1

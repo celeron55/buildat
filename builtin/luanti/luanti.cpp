@@ -1853,8 +1853,6 @@ struct Module: public interface::Module, public luanti::Interface
 	// box reads it with read_region() below.
 	uint32_t read_node(int32_t x, int32_t y, int32_t z)
 	{
-		if(!m_scene)
-			return 0;
 		// A buffered write answers with the word that went in. The read
 		// used to flush the buffer first so that a mod placing a lamp and
 		// asking what the room is lit by saw the flood -- but every flush
@@ -1872,6 +1870,13 @@ struct Module: public interface::Module, public luanti::Interface
 		auto it = m_node_writes.find(pos_key(x, y, z));
 		if(it != m_node_writes.end())
 			return it->second.word;
+		// Before the world exists -- the mods are loading -- everything
+		// else is ignore; the buffer above still answers, which is what
+		// a mod's own load-time check of set_node and place_node reads
+		// (the minimal game's floor mod; [WIN_MAPGEN_BUILD] found it
+		// failing since the guard stood ahead of the buffer)
+		if(!m_scene)
+			return 0;
 		// And out of a cache of 16^3 blocks for the rest: an access() is
 		// a handoff to voxelworld's thread and back, a quarter of a
 		// millisecond whatever it reads, and what reads node by node is a

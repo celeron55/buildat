@@ -14,6 +14,14 @@
 #include "map.h"
 #include "util/container.h"
 #include "util/basic_macros.h"
+// The managers whole, not forward-declared: ~EmergeParams() deletes
+// them, and a delete of an incomplete type runs no destructor
+// (-Wdelete-incomplete; upstream's emerge.cpp has these, the vendor
+// copy's includers did not) ([WIN_MAPGEN_BUILD])
+#include "mg_biome.h"
+#include "mg_ore.h"
+#include "mg_decoration.h"
+#include "mg_schematic.h"
 #include <set>
 #include <string>
 
