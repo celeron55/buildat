@@ -14,16 +14,26 @@ streams an infinite world with the same modules.
 
 Further reading:
 
-* [doc/design.txt](doc/design.txt)
-* [doc/conventions.txt](doc/conventions.txt)
-* [doc/client_api.txt](doc/client_api.txt)
-* [doc/client_commands.txt](doc/client_commands.txt)
-* [doc/luanti_client.txt](doc/luanti_client.txt) -- playing on a real Luanti server
-* [doc/luanti_module.txt](doc/luanti_module.txt) -- running a Luanti game inside buildat_server
+* [doc/architecture.txt](doc/architecture.txt) -- what the engine is made of:
+  client, server, modules, extensions, the launch grid, the network, voxels
+* [doc/conventions.txt](doc/conventions.txt) -- coding style, naming, commit
+  messages, coordinates
+* [doc/client_api.txt](doc/client_api.txt) -- the Lua API a game's client
+  code and an extension see (out of date; a full pass is planned)
+* [doc/client_commands.txt](doc/client_commands.txt) -- driving the client from
+  a command file: keys, mouse, look, screenshot, the scan events
+* [doc/luanti_module.txt](doc/luanti_module.txt) -- builtin/luanti: a Luanti
+  game running inside buildat_server, and how it is checked
+* [doc/luanti_client.txt](doc/luanti_client.txt) -- extensions/luanti_client:
+  playing on a real Luanti server over its own protocol
+* [doc/urho3d_fork.txt](doc/urho3d_fork.txt) -- what the bundled Urho3D
+  carries that upstream does not
+* [doc/developer_notes.txt](doc/developer_notes.txt) -- small things worth
+  knowing when working on the engine
+* [doc/whynot.txt](doc/whynot.txt) -- decisions against, and why
 * [doc/plan/master_plan.md](doc/plan/master_plan.md) -- what is being built, in
   what order, and the reasoning behind each decision. The other files in
   `doc/plan/` are the detail it points at.
-* [doc/todo.txt](doc/todo.txt)
 
 Buildat Linux How-To
 ====================

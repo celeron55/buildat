@@ -82,7 +82,7 @@ keypress <key>
     keydown / delay / keyup to hold a key across frames (movement).
 
 mouse_pos <x> <y>
-    Move the visible cursor to window pixel coordinates (backbuffer). For UI.
+    Set the client's mouse position to window pixel coordinates (backbuffer). For UI.
 
 mouse_move <dx> <dy>
     Relative motion in pixels (GetMouseMove). Use this to look around. Does
@@ -122,16 +122,35 @@ text <string>
 event <name> [param]
     Send the Urho3D event command_seq:<name> on the client, with the rest of
     the line as its string field Param, at this point in the sequence. Any
-    client Lua may subscribe to it (the command_seq: prefix is whitelisted in
-    the sandbox); the runner knows nothing of the names. A receiver answers
-    in the log, which is what a test reads.
+    client Lua may subscribe to it (the command_seq: prefix is on the
+    sandbox's safe list); the runner knows nothing of the names. The reply,
+    if any, is a line in the log, which is what a test reads.
 
-    The first receiver, in the Luanti launcher game's client: `event scan
-    <resolution> <label>` logs, under `scan <label>:` lines, what the
-    crosshair points at, a <resolution>x<resolution> grid of what a ray from
-    each bin hits within ten voxels (and what it passed through), and every
-    element of an open form or the chat line with its position and size.
-    A screenshot in the same sequence line pairs with it.
+    The receivers in games/vanilla's client (builtin/luanti):
+
+    event scan <resolution> <label>
+        Logs, under `scan <label>:` lines and ending in `scan <label>: end`,
+        what the client sees: a `self` line (position, yaw, pitch, hp, the
+        wielded item, the hotbar), the eye voxel's `light sky`/`lamp`, one
+        `hud` line per HUD element with its rectangle, the crosshair's hit,
+        a <resolution>x<resolution> grid of bins with the voxel each bin's
+        ray hits within ten voxels (and what it passed through), one
+        `object` line per object on the screen with its screen position,
+        and every element of an open form with its text, image and
+        rectangle. All rectangles are in window pixels, the coordinates
+        mouse_pos takes. A screenshot in the same sequence line pairs with
+        it; drive.py reads the block after every turn.
+
+    event scan_volume <radius> <label> [light]
+        Logs the voxels in a cube of that radius around the player, one
+        row per column, as names -- or the light nibbles with `light` --
+        which drive.py keeps as its map.
+
+    event status_text <text>
+        Shows the text at the top right of the screen in the harness's
+        pale yellow, replacing the previous one; an empty text clears it.
+        drive.py writes the rule it is about to act on, so a person
+        watching the run sees what it is attempting.
 
 quit
     Stop the sequence early. The client always exits at the end of -c anyway.

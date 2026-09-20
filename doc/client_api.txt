@@ -1,5 +1,15 @@
 Buildat Client API
 ==================
+The Lua API a game's client_lua and an extension see: buildat.*, the
+sandboxed magic (Urho3D), the built-in extensions' safe interfaces, and
+the voxel data model as Lua reads it.
+
+OUT OF DATE as of 2026-09-20: this file predates most of builtin/luanti and
+the launch grid, and names have been added, moved and removed since without
+this being followed. A full pass against the bindings (src/lua_bindings,
+client/api.lua, extensions/urho3d/safe_classes.lua) is planned as
+[CLIENT_API_DOC] in doc/plan/master_plan.md; until it is done, the code is
+the reference and this is a guide to its shape.
 
 Lua code is run in two subtly different environments.
 

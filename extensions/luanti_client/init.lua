@@ -3342,7 +3342,7 @@ end
 -- What makes this extension one of the things buildat's own menu offers: a
 -- name to show, an icon, and what to do when it is picked. The menu keeps
 -- the list of extensions it offers; an extension says how to launch itself.
--- See doc/design.txt, "Launchable extensions".
+-- See doc/architecture.txt, "The launch grid".
 -- Entered from the launch grid ([LAUNCH_GRID]): the tile is
 -- launcher/init.lua, sandboxed, and this is the one door it has. The name
 -- says what the request is: treat request.params as a packet from a
