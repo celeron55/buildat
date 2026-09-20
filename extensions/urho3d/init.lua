@@ -486,7 +486,7 @@ end)
 local removed_wrappers = setmetatable({}, {__mode = "k"})
 
 -- The removed subtree, walked while it is whole; the wrappers are then
--- matched by table lookup and nothing of theirs is called -- a wrapper
+-- found by lookup and nothing of theirs is called -- a wrapper
 -- whose element went without an event (the tree torn down from C++) is
 -- exactly the dangling pointer this is here for, and GetParent() on it
 -- was the walk's own use-after-free (a driven run, 2026-09-20 16:08)
@@ -501,13 +501,20 @@ end
 add_global_event_handler("ElementRemoved", "__buildat_ui_dead",
 	function(_, data)
 		local removed = data["Element"]:GetPtr("UIElement")
-		local gone = subtree(removed, {})
-		local set = {}
-		for safe, meta in pairs(magic_sandbox.live) do
-			if not meta.dead and gone[meta.unsafe] then
-				meta.dead = "UIElement " .. dump(meta.unsafe:GetName()) ..
+		-- Weak too, and `true` for the same reason as magic_sandbox.live
+		local set = setmetatable({}, {__mode = "k"})
+		for element in pairs(subtree(removed, {})) do
+			local wrappers = magic_sandbox.live[element]
+			if wrappers then
+				local why = "UIElement " .. dump(element:GetName()) ..
 						" was removed"
-				set[safe] = meta
+				for safe in pairs(wrappers) do
+					local meta = getmetatable(safe)
+					if not meta.dead then
+						meta.dead = why
+						set[safe] = true
+					end
+				end
 			end
 		end
 		removed_wrappers[removed] = set
@@ -519,8 +526,8 @@ add_global_event_handler("ElementAdded", "__buildat_ui_dead",
 		local set = removed_wrappers[added]
 		if not set then return end
 		removed_wrappers[added] = nil
-		for _, meta in pairs(set) do
-			meta.dead = nil
+		for safe in pairs(set) do
+			getmetatable(safe).dead = nil
 		end
 	end)
 

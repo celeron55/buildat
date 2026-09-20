@@ -5,11 +5,27 @@ local log = buildat.Logger("extension/magic_sandbox")
 local dump = buildat.dump
 local M = {safe = {}}
 
--- Every wrapper alive, safe -> its meta, so that what happens to the
--- unsafe side can reach them: a UI element's removal marks its wrappers
--- dead (extension/urho3d, [UI_UAF]) -- tolua keeps a userdata after its
--- object is deleted, and a property read through it is a use-after-free.
+-- Every wrapper alive, by what it wraps: unsafe -> {safe -> true}, both
+-- levels weak, so that what happens to the unsafe side can reach them
+-- without a walk: a UI element's removal marks its wrappers dead
+-- (extension/urho3d, [UI_UAF]) -- tolua keeps a userdata after its object
+-- is deleted, and a property read through it is a use-after-free. Keyed
+-- by the unsafe because the HUD makes and removes elements every frame,
+-- and a walk of every wrapper per removal held frames for seconds. The
+-- value is `true` and not the meta: LuaJIT has no ephemerons, so a value
+-- that reaches its own key (the meta reaches the safe and the unsafe)
+-- pins the entry, and every wrapper ever made stayed for the collector
+-- to walk (a frame of 58 s in the objects packet). The meta is
+-- getmetatable(safe).
 M.live = setmetatable({}, {__mode = "k"})
+local function register(unsafe, safe)
+	local set = M.live[unsafe]
+	if not set then
+		set = setmetatable({}, {__mode = "k"})
+		M.live[unsafe] = set
+	end
+	set[safe] = true
+end
 
 -- The resulting value from this function should be placed directly in the
 -- sandbox environment's global environment as _G[type_name]
@@ -148,7 +164,7 @@ function M.wrap_class(type_name, def)
 			end
 		end
 		setmetatable(safe, meta)
-		M.live[safe] = meta
+		register(unsafe, safe)
 		return safe
 	end
 	class_meta.create_new = function(_, ...)
