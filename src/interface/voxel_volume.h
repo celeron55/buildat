@@ -134,6 +134,28 @@ namespace interface
 		void set_sample_at(int32_t x, int32_t y, int32_t z,
 				const VoxelSample &v);
 
+		// One run of voxels along x, copied out of another volume into
+		// this one across every plane the two share by name. What wants it
+		// is a region read, which is rows of a chunk into rows of the
+		// answer: a devtest profile had the per-voxel sampler underneath
+		// one at 12% of the server's whole CPU, and a run is a memcpy.
+		//
+		// False when the run is not wholly inside both volumes, and then
+		// nothing is written and the caller does it whatever way it did
+		// before.
+		bool copy_run_from(const VoxelVolume &src,
+				int32_t sx, int32_t sy, int32_t sz,
+				int32_t dx, int32_t dy, int32_t dz, size_t n);
+
+		// A run of plane 0 along x as words, for a caller handing voxels
+		// to something that wants an array of them -- a region read into
+		// Lua is the one that asked. Zero wherever the volume has nothing.
+		//
+		// False when the run is not wholly inside the volume, and then
+		// nothing is written.
+		bool read_words(int32_t x, int32_t y, int32_t z, size_t n,
+				uint32_t *out) const;
+
 		// A whole plane's bytes, for a caller that sweeps one rather than
 		// asking per voxel. Empty when nothing has written the plane, which
 		// means every value in it is zero.
@@ -142,6 +164,12 @@ namespace interface
 		// pv::RawVolume had and what every blob written before planes is in.
 		const sv_<uint8_t>& plane_bytes(uint8_t plane) const;
 		sv_<uint8_t>& plane_bytes_for_write(uint8_t plane);
+		// A plane filled from bytes that cover the whole of it, without the
+		// clearing plane_bytes_for_write() does when it materialises one.
+		// What asks is reading a chunk back in, which overwrote every byte
+		// of a plane it had just cleared -- 157 kB a chunk, and 3.5% of the
+		// whole server in a devtest profile.
+		void set_plane_bytes(uint8_t plane, const uint8_t *data, size_t size);
 		bool plane_is_materialised(uint8_t plane) const
 		{
 			return plane < m_data.size() && !m_data[plane].empty();
@@ -214,6 +242,39 @@ namespace interface
 	ss_ serialize_volume_simple(const VoxelVolume &volume);
 	ss_ serialize_volume_compressed(const VoxelVolume &volume);
 	up_<VoxelVolume> deserialize_volume(const ss_ &data);
+
+	// Moving a saved chunk from the cut it was written in to the cut the
+	// world is running now.
+	//
+	// The rule is that the engine moves data and never reinterprets it:
+	//
+	//   same role, same width, somewhere else   moved
+	//   a role the world has and the save does not   left zero
+	//   a role the save has and the world does not   dropped, with a warning
+	//   a plane the save has and the world does not  dropped, with a warning
+	//   bits no role of either format claims         copied where they are
+	//   any width change                             refused
+	//
+	// The last row is the point of the whole thing. Loading a 4-bit field
+	// into a 3-bit one loses data and 4 bits into 5 is a choice -- scale, or
+	// zero-extend? -- that only the game can make, so the engine refuses
+	// rather than guessing. Returns null and fills why when it does; the
+	// game's own migration is what answers that case, and there is no hook
+	// for it yet.
+	//
+	// The id field moves like any other. What the ids *mean* across a format
+	// change is a different question with a different answer -- the save's
+	// name table -- and remap_volume_ids() is that part.
+	up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
+			const VoxelFormat &from_format, const VoxelFormat &to_format,
+			ss_ *why);
+
+	// Rewrites every voxel's id field through map, which is indexed by the
+	// id as it is stored. An id past the end of map is left alone, and
+	// map[0] has to be 0 -- nothing has generated a voxel with id 0, and a
+	// plane nothing wrote is skipped on the strength of that.
+	void remap_volume_ids(VoxelVolume &volume, const VoxelFormat &format,
+			const sv_<VoxelTypeId> &map);
 
 	// pv::RawVolume<int32_t>
 	ss_ serialize_volume_simple(const pv::RawVolume<int32_t> &volume);

@@ -42,7 +42,25 @@ local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or "buildat"
 -- The PBR checkbox's starting state. A scripted run has to hit the box by
 -- pixel coordinates otherwise, and a miss looks like the shader not working
 -- rather than like a missed click.
-local DEFAULT_PBR = (os.getenv("BUILDAT_LUANTI_PBR") or "") ~= ""
+-- Which of the three rendering modes to draw in: "unlit", "shadows" or "pbr".
+-- Unset means this client's own default, which is unlit; the numbers keep
+-- working for whatever already passes them, 0 having been the unlit path and
+-- 1 the PBR one before either had a name. builtin/luanti reads the same
+-- variable with the same answers, its own default being pbr -- see
+-- [RENDER_MODES] in doc/plan/rendering_plan.md.
+local DEFAULT_MODE = (function()
+	local v = os.getenv("BUILDAT_LUANTI_PBR") or ""
+	if v == "" or v == "0" then
+		return "unlit"
+	elseif v == "1" then
+		return "pbr"
+	elseif v == "unlit" or v == "shadows" or v == "pbr" then
+		return v
+	end
+	log:warning("BUILDAT_LUANTI_PBR=\"" .. v .. "\" is not a mode; " ..
+			"drawing unlit. Wanted unlit, shadows or pbr")
+	return "unlit"
+end)()
 
 -- How far the camera sees, and how far out blocks are kept, in nodes. The
 -- client asks the server for blocks by the same distance; see
@@ -125,8 +143,9 @@ local BINDINGS = {
 	{action = "left", key = KEY_A, name = "A", what = "Walk left"},
 	{action = "right", key = KEY_D, name = "D", what = "Walk right"},
 	{action = "jump", key = KEY_SPACE, name = "Space", what = "Jump"},
-	{action = "sneak", key = KEY_CTRL, name = "Ctrl", what = "Sneak"},
-	{action = "fast", key = KEY_SHIFT, name = "Shift", what = "Move fast"},
+	-- The same keys as games/vanilla's, so one scripted episode drives both
+	{action = "sneak", key = KEY_SHIFT, name = "Shift", what = "Sneak"},
+	{action = "fast", key = KEY_CTRL, name = "Ctrl", what = "Move fast"},
 	{action = "fly", key = KEY_K, name = "K", what = "Fly on and off"},
 	{action = "noclip", key = KEY_H, name = "H",
 			what = "Through walls on and off"},
@@ -231,9 +250,9 @@ end
 local show_connect_dialog
 
 -- The screen that shows what the client is doing, and drives it every frame
--- pbr: whether to draw the world with the PBR shader; see the connect
+-- mode: which of unlit, shadows and pbr to draw the world in; see the connect
 -- dialog, where it is chosen, and world.lua for what it changes
-local function show_client(host, port, name, password, pbr)
+local function show_client(host, port, name, password, mode)
 	local root = uistack.main:push({desc="luanti_client"})
 	-- Held rather than read back off the element: the sandbox hands out no
 	-- resource it did not just wrap
@@ -381,7 +400,7 @@ local function show_client(host, port, name, password, pbr)
 
 		local view = world.new(magic, buildat.safe, log, {
 				far_clip = FAR_CLIP,
-				pbr = pbr,
+				mode = mode,
 				read_image = buildat.read_image,
 				read_mesh = function(def)
 					return read_mesh and read_mesh(def) or nil
@@ -806,7 +825,14 @@ local function show_client(host, port, name, password, pbr)
 			for _, def in pairs(defs) do
 				node_by_name[def.name] = def
 			end
+			local through, blocking = 0, 0
+			for _, def in pairs(defs) do
+				if def.pointable == 0 then through = through + 1 end
+				if def.pointable == 2 then blocking = blocking + 1 end
+			end
 			add_line(count.." node definitions")
+			log:info(count.." node definitions, "..through..
+					" the ray goes through, "..blocking.." block it")
 			registry_stale = true
 			-- Starts the fallback clock: a server that never announces its
 			-- media must not leave the loading panel up forever
@@ -856,7 +882,9 @@ local function show_client(host, port, name, password, pbr)
 		-- stands still until the ground under them is there.
 		local avatar = player.new(
 				function(x, y, z) return view:is_solid(x, y, z) end,
-				function(x, y, z) return view:is_liquid(x, y, z) end)
+				function(x, y, z) return view:is_liquid(x, y, z) end,
+				nil,
+				function(x, y, z) return view:resistance_at(x, y, z) end)
 		client.on_movement = function(m)
 			avatar.movement = m
 			add_line("The game's movement constants arrived")
@@ -2219,6 +2247,23 @@ local function show_client(host, port, name, password, pbr)
 				open_form(spec, "", "nodemeta", pointed_under)
 				return
 			end
+			-- Not into the player's own space, as Game::nodePlacement
+			-- refuses: a walkable node that would land in the body's box
+			-- -- into under when that is buildable_to, else into above --
+			-- is not placed, and the server trusts the client on this
+			-- ([POINTABLE])
+			local held = wielded()
+			local hdef = held and node_by_name and node_by_name[held.name]
+			if hdef and hdef.walkable then
+				local udef = node_def_at(pointed_under)
+				local at = (udef and udef.buildable_to) and pointed_under or
+						pointed_above
+				if at[1] + 0.5 > avatar.x - 0.3 and at[1] - 0.5 < avatar.x + 0.3 and
+						at[2] + 0.5 > avatar.y and at[2] - 0.5 < avatar.y + 1.75 and
+						at[3] + 0.5 > avatar.z - 0.3 and at[3] - 0.5 < avatar.z + 0.3 then
+					return
+				end
+			end
 			client:interact(luanti.INTERACT_PLACE, wield_index - 1,
 					{under = pointed_under, above = pointed_above})
 		end
@@ -3228,7 +3273,11 @@ show_connect_dialog = function(address, name)
 	local pbr_label = pbr_row:CreateChild("Text")
 	pbr_label:SetStyleAuto()
 	pbr_label.text = "Enable PBR (slower to load)"
-	pbr_check.checked = DEFAULT_PBR
+	-- A checkbox says two things and there are three modes, so it says the
+	-- one it always said: pbr or not. The other two are named by the
+	-- environment variable, which is what a scripted run uses anyway; a mode
+	-- picker in this dialog waits until somebody wants one by hand.
+	pbr_check.checked = DEFAULT_MODE == "pbr"
 	-- The password is the field a second try is most likely about, and it is
 	-- the one that is not filled in
 	if address then
@@ -3254,7 +3303,8 @@ show_connect_dialog = function(address, name)
 		end
 		uistack.main:pop(root)
 		show_client(host, port, name, password_edit:GetText(),
-				pbr_check.checked)
+				pbr_check.checked and "pbr" or
+				(DEFAULT_MODE == "pbr" and "unlit" or DEFAULT_MODE))
 	end
 
 	local function cancel()
@@ -3300,22 +3350,42 @@ end
 function M.boot()
 	cancel_exits = true
 	self_tests()
+	-- A scripted run has nothing to click, and the dialog's focus is in a
+	-- LineEdit that swallows Return. BUILDAT_LUANTI_CONNECT goes straight in
+	-- with the address and the name the environment already supplies -- see
+	-- DEFAULT_ADDRESS above, which says those two are for scripted runs. The
+	-- reference shot harness is what wants it; a person still gets the dialog.
+	if (os.getenv("BUILDAT_LUANTI_CONNECT") or "") ~= "" then
+		local host, port = split_address(DEFAULT_ADDRESS)
+		log:info("connecting to " .. host .. ":" .. port ..
+				" without the dialog, as BUILDAT_LUANTI_CONNECT asks")
+		show_client(host, port, DEFAULT_NAME,
+				os.getenv("BUILDAT_LUANTI_PASSWORD") or "", DEFAULT_MODE)
+		return
+	end
 	show_connect_dialog()
 end
 
 -- What makes this extension one of the things buildat's own menu offers: a
 -- name to show, an icon, and what to do when it is picked. The menu keeps
 -- the list of extensions it offers; an extension says how to launch itself.
--- See doc/design.txt, "Launchable extensions".
-M.launch = {
-	title = "Play on a Luanti server",
-	icon = "luanti_client/res/icon.png",
-	run = function()
-		cancel_exits = false
-		self_tests()
-		show_connect_dialog()
-	end,
-}
+-- See doc/architecture.txt, "The launch grid".
+-- Entered from the launch grid ([LAUNCH_GRID]): the tile is
+-- launcher/init.lua, sandboxed, and this is the one door it has. The name
+-- says what the request is: treat request.params as a packet from a
+-- server -- validate, default, ignore the rest. The menu is underneath,
+-- so cancelling the dialog goes back to it rather than exiting.
+function M.on_untrusted_launch(request)
+	local params = type(request) == "table" and
+			type(request.params) == "table" and request.params or {}
+	local address = type(params.address) == "string" and
+			#params.address <= 256 and params.address or nil
+	local name = type(params.name) == "string" and #params.name <= 64 and
+			params.name or nil
+	cancel_exits = false
+	self_tests()
+	show_connect_dialog(address, name)
+end
 
 return M
 -- vim: set noet ts=4 sw=4:

@@ -299,6 +299,16 @@ local function read_node(r)
 	-- masked -- every texel either solid or gone -- where the game meant it
 	-- to be seen through.
 	def.alpha_mode = r:u8()
+	-- >= 5.5: how much the node holds a body back (water's is its
+	-- viscosity unless the game says otherwise) and whether a body in it
+	-- swims -- what LocalPlayer reads for in_liquid ([WATER_PARITY]).
+	-- Defaults for an older server: none, and swims if it is a liquid.
+	def.move_resistance = 0
+	def.liquid_move_physics = def.liquid_type ~= nil and def.liquid_type ~= 0
+	if r:remaining() >= 2 then
+		def.move_resistance = r:u8()
+		def.liquid_move_physics = r:u8() ~= 0
+	end
 	return def
 end
 

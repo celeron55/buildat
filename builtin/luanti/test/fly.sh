@@ -1,0 +1,86 @@
+#!/bin/bash
+# [FLY_MODES]: the three modes as official has them, driven. A devtest
+# world (the singleplayer holds every privilege): K, then Space held for
+# two seconds, and the player is up in the air; the fixture then revokes
+# fly, the client's chat has "Fly mode enabled (note: no 'fly' privilege)"
+# on the next K, and the player is down again within a few seconds (the
+# client stops flying without the privilege; the server's hold-down is
+# the backstop). Prints PASS or FAIL.
+#
+#   builtin/luanti/test/fly.sh
+set -u
+here=$(cd "$(dirname "$0")/../../.." && pwd)
+me=$(cd "$(dirname "$0")" && pwd)
+tmp=$(mktemp -d)
+cd "$here/Build"
+rm -rf ../user/games/vanilla/saves/buildat_test_fly
+srv=""; cli=""
+trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
+port=$(( 29500 + (RANDOM % 90) ))
+cat > "$tmp/fixture.lua" <<'LUA'
+-- fly.sh's server half: twenty seconds after the join, the player's fly
+-- privilege goes, and the position is logged every second for the runner
+core.register_on_joinplayer(function(player)
+	local name = player:get_player_name()
+	core.settings:set("singleplayer", "false")
+	local privs = core.get_player_privs(name)
+	privs.fly = true; privs.fast = true; privs.noclip = true; privs.interact = true
+	core.set_player_privs(name, privs)
+	local function tick()
+		if player:is_player() then
+			local p = player:get_pos()
+			core.log("action", string.format("fly: y=%.1f", p.y))
+			core.after(1, tick)
+		end
+	end
+	core.after(1, tick)
+	core.after(20, function()
+		core.log("action", "fly: revoking fly")
+		local p = core.get_player_privs(name)
+		p.fly = nil
+		core.set_player_privs(name, p)
+	end)
+end)
+LUA
+BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_fly \
+	BUILDAT_LUANTI_LUA="$tmp/fixture.lua" \
+	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" 2>&1 \
+	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/srv.log" &
+for i in $(seq 1 200); do
+	grep -q "Mods loaded" "$tmp/srv.log" 2>/dev/null && break
+	sleep 1
+done
+sleep 3
+srv=$(pgrep -x buildat_server | head -1)
+# Join, fly up 8 s in, keep flying; at 22 s (fly revoked at 20) press K
+# twice: off, then on again without the privilege
+{ echo "delay 8000"; echo "keypress K"; echo "delay 300"; echo "keydown Space"; echo "delay 2000"
+	echo "keyup Space"; echo "delay 12000"; echo "keypress K"; echo "delay 300"; echo "keypress K"
+	echo "delay 8000"; echo "quit"; } > "$tmp/cmds.txt"
+bin/buildat -s "localhost:$port" -w 640x360 -l 3 -c @"$tmp/cmds.txt" \
+	2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
+cli=$!
+for i in $(seq 1 60); do
+	kill -0 "$cli" 2>/dev/null || break
+	sleep 1
+done
+ys=$(grep -a "fly: y=" "$tmp/srv.log" | sed 's/.*y=//' | tr '\n' ' ')
+first=$(grep -a "fly: y=" "$tmp/srv.log" | sed -n '1s/.*y=//p')
+flying=$(grep -a "fly: y=" "$tmp/srv.log" | sed -n '12s/.*y=//p')
+last=$(grep -a "fly: y=" "$tmp/srv.log" | tail -1 | sed 's/.*y=//')
+note=$(grep -ac "Fly mode enabled (note: no 'fly' privilege)" "$tmp/cli.log")
+held=$(grep -ac "is held down" "$tmp/srv.log")
+echo "y: $ys"
+echo "first $first, flying $flying, last $last; the note $note times, held down $held times"
+echo "logs in $tmp"
+up=$(python3 -c "print(1 if float('$flying' or 0) > float('$first' or 0) + 3 else 0)")
+back=$(python3 -c "print(1 if float('$last' or 99) < float('$flying' or 0) - 2 else 0)")
+# The client drops the player itself once it knows the privilege is gone
+# (official's rule); the server's hold-down is the backstop for a client
+# that does not, so its count is printed and not required
+if [ "$up" = 1 ] && [ "$note" -ge 1 ] && [ "$back" = 1 ]; then
+	echo PASS
+else
+	echo FAIL
+	exit 1
+fi
