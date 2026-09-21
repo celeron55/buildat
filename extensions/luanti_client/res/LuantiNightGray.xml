@@ -2,7 +2,7 @@
      LuantiNightGray.glsl. Appended before the auto-exposure. -->
 <renderpath>
     <command type="quad" tag="NightGray" vs="luanti_client/res/LuantiNightGray" ps="luanti_client/res/LuantiNightGray" output="viewport">
-        <parameter name="NightGray" value="0.02 0.2" />
+        <parameter name="NightGray" value="0.01 0.1" />
         <texture unit="diffuse" name="viewport" />
     </command>
 </renderpath>

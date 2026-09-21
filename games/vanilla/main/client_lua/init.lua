@@ -498,20 +498,12 @@ do
 	-- that took the shadows with it.
 	-- The gray of the eye's rods first, before the meter: the pass reads
 	-- the scene's radiance in the reference's units ([NIGHT_GRAY]).
-	-- BUILDAT_LUANTI_NIGHT_GRAY="L0,L1" is the ladder's knob; off under
-	-- BUILDAT_LUANTI_LINEAR, where the probes read linear light.
+	-- (0.01, 0.1) picked from the ladder shot 2026-09-21, the lightest
+	-- rung; off under BUILDAT_LUANTI_LINEAR, where the probes read linear
+	-- light.
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"luanti_client/res/LuantiNightGray.xml"))
-	do
-		local l0, l1 = 0.02, 0.2
-		local knob = buildat.get_env("BUILDAT_LUANTI_NIGHT_GRAY") or ""
-		local a, b = knob:match("^([%d.]+),([%d.]+)$")
-		if a then
-			l0, l1 = tonumber(a), tonumber(b)
-		end
-		rp:SetShaderParameter("NightGray", magic.Vector2(l0, l1))
-		rp:SetEnabled("NightGray", buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
-	end
+	rp:SetEnabled("NightGray", buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"luanti_client/res/LuantiAutoExposure.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
