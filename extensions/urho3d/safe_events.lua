@@ -21,6 +21,11 @@ return {
 	KeyUp = {
 		Key = {variant = "Int", safe = "number"},
 	},
+	-- The window gained or lost input focus ([FOCUS_LOG]): what the
+	-- mouse's capture follows
+	InputFocus = {
+		Focus = {variant = "Bool", safe = "boolean"},
+	},
 	MouseButtonDown = {
 		Button = {variant = "Int", safe = "number"},
 		Buttons = {variant = "Int", safe = "number"},

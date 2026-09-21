@@ -456,25 +456,29 @@ function Unsafe.SubscribeToEvent(x, y, z)
 	return global_callback_name
 end
 
--- Alt drops capture (ungrab + show cursor) so alt+tab reaches the WM.
--- Click recaptures if the game still wants the cursor hidden.
-Safe.SubscribeToEvent("KeyDown", function(_, event_data)
+-- Capture follows focus, not keys ([FOCUS_LOG] 4). The game says what it
+-- wants through SetMouseVisible (hide_wanted); the window losing input
+-- focus -- alt-tab, another window, the WM -- frees the cursor for it,
+-- and the focus coming back hides and captures it again when the game
+-- still wants that. The handlers this replaces freed the cursor on Alt
+-- down and recaptured on a click while free: a click after a focus
+-- regained through a move or a resize never reached the recapture
+-- (Urho drops button events while its inputFocus_ is false), and the
+-- cursor stayed free over a world that thought the mouse was in it, for
+-- good. SDL frees the cursor for the WM's alt-tab on its own once the
+-- window loses focus, so nothing has to happen on the key.
+Safe.SubscribeToEvent("InputFocus", function(_, event_data)
 	if not mouse.hide_wanted then
 		return
 	end
-	local key = event_data:GetInt("Key")
-	if key == KEY_ALT or key == KEY_LALT or key == KEY_RALT then
-		input:SetMouseMode(MM_FREE)
-		input:SetMouseVisible(true)
-	end
-end)
-Safe.SubscribeToEvent("MouseButtonDown", function()
-	if not mouse.hide_wanted then
-		return
-	end
-	if input:GetMouseMode() == MM_FREE then
+	local focus = event_data:GetBool("Focus")
+	input:SetMouseChangeReason(focus and "focus regained" or "focus lost")
+	if focus then
 		input:SetMouseMode(MM_ABSOLUTE)
 		input:SetMouseVisible(false)
+	else
+		input:SetMouseMode(MM_FREE)
+		input:SetMouseVisible(true)
 	end
 end)
 
