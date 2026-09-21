@@ -109,6 +109,11 @@ struct Section
 	bool loaded = false;
 	bool save_enabled = false;
 	bool generated = false;
+	// The generator's own merge has been over it. generated is set when
+	// the generation is asked for; between the two, what stands in the
+	// section was put there by a write (a game's set_node past the
+	// generated world) and the generator's merge keeps it.
+	bool arrived = false;
 	// Something has changed since this section was read from the save, or it
 	// was never in one. A section is written only when this is set, which is
 	// what keeps saving a world nobody is digging in free.
@@ -2895,6 +2900,11 @@ struct CInstance: public voxelworld::Instance
 			VoxelVolume::Sampler src(
 					const_cast<VoxelVolume*>(&volume));
 			VoxelVolume::Sampler dst(buf.volume.get());
+			// A generator over a section it has not merged before keeps
+			// what stands there: the minimal game's floor, written while
+			// its mods loaded, lost the chunk whose section was generated
+			// after the write
+			const bool keep_standing = owned != nullptr && !section->arrived;
 
 			bool chunk_written = false;
 			// The rows the copy below reads to see whether it can take them
@@ -2937,6 +2947,9 @@ struct CInstance: public voxelworld::Instance
 						y <= owned->getUpperCorner().getY() &&
 						z >= owned->getLowerCorner().getZ() &&
 						z <= owned->getUpperCorner().getZ());
+				if(keep_standing && !old_undefined &&
+						!voxel_is_fully_empty(dst_v))
+					continue;
 				if(!writer_owns && !old_undefined){
 					// Anything already standing here wins
 					if(!voxel_is_fully_empty(dst_v))
@@ -3055,7 +3068,8 @@ struct CInstance: public voxelworld::Instance
 								&dst_words[0]);
 				for(size_t k = 0; k < n && can_copy; k++){
 					const VoxelInstance sv(src_words[k]);
-					if(is_undefined(sv)){
+					if(is_undefined(sv) || (keep_standing &&
+							!is_undefined(VoxelInstance(dst_words[k])))){
 						can_copy = false;
 						break;
 					}
@@ -3107,6 +3121,13 @@ struct CInstance: public voxelworld::Instance
 		}
 
 		// Buffers were loaded above; keep to the limit once, not per voxel
+		if(owned != nullptr){
+			Section *s = get_section(container_coord16(container_coord(
+					owned->getLowerCorner(), m_chunk_size_voxels),
+					m_section_size_chunks));
+			if(s)
+				s->arrived = true;
+		}
 		maintain_maximum_buffer_limit();
 
 		log_d(MODULE, "%s: %zu voxels written",

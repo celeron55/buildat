@@ -515,11 +515,25 @@ core.set_node({x = SEED_TOO_HIGH.x, y = SEED_TOO_HIGH.y - 1,
 core.set_node(SEED_TOO_HIGH, {name = "floor:seed"})
 
 function core.__game_check()
-	-- One step of the ABM's whole interval, so it runs exactly once
+	-- One step of the ABM's whole interval, so it fires exactly once; its
+	-- sweep over the map is a budget's worth per step, so a few more
+	-- steps too short to fire it again let the sweep finish
 	core.__step(1.0)
+	for _ = 1, 50 do
+		if core.get_node(SEED_ON_FLOOR).name == "floor:sprout" then
+			break
+		end
+		core.__step(0.01)
+	end
 	local grown = core.get_node(SEED_ON_FLOOR).name
 	if grown ~= "floor:sprout" then
-		error("floor: the abm left the seed on the floor as " .. grown)
+		-- What the three columns hold, so a seed that is not there says
+		-- whether it was the write or the rule
+		error("floor: the abm left the seed on the floor as " .. grown ..
+				" (under it " .. core.get_node({x = SEED_ON_FLOOR.x,
+				y = SEED_ON_FLOOR.y - 1, z = SEED_ON_FLOOR.z}).name ..
+				", the one in the air " .. core.get_node(SEED_IN_AIR).name ..
+				", the high one " .. core.get_node(SEED_TOO_HIGH).name .. ")")
 	end
 	local kept = core.get_node(SEED_IN_AIR).name
 	if kept ~= "floor:seed" then
@@ -532,7 +546,14 @@ function core.__game_check()
 	core.log("action", "floor: the abm grew the one seed of three that its " ..
 			"neighbors and max_y allowed")
 
-	-- The same step is the one the map was loaded for, so the lbm has run
+	-- The lbm sweeps the map a budget's worth per step, so it is given a
+	-- few; the first was the one the map was loaded for
+	for _ = 1, 50 do
+		if lbm.seen >= TORCHES then
+			break
+		end
+		core.__step(0.01)
+	end
 	if lbm.seen ~= TORCHES or lbm.wrong ~= 0 then
 		error("floor: the lbm saw " .. lbm.seen .. " of " .. TORCHES ..
 				" torches, " .. lbm.wrong .. " of them something else")
@@ -564,7 +585,15 @@ function core.__game_check()
 		error("floor: the faller moved sideways")
 	end
 	faller:remove()
-	if faller:is_valid() or core.luaentities[1] ~= nil then
+	-- Its own entry and nothing else's: the dig above dropped items, and
+	-- those are entities of the builtin's
+	local still = false
+	for _, le in pairs(core.luaentities) do
+		if le.name == "floor:faller" then
+			still = true
+		end
+	end
+	if faller:is_valid() or still then
 		error("floor: the faller outlived its remove()")
 	end
 	-- One more left where it lands, so that a client has an object to look

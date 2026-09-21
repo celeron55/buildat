@@ -776,7 +776,14 @@ function core.__check_map_read()
 	-- the mods load, since the registries freeze once they have. A game that
 	-- defines this gets called here, with the map flushed and readable.
 	if core.__game_check then
-		core.__game_check()
+		-- Nobody is in the world, so nothing would be active; a game's
+		-- rules, timers and objects step over the whole map for this
+		core.__active_everywhere = true
+		local ok, err = pcall(core.__game_check)
+		core.__active_everywhere = false
+		if not ok then
+			error(err, 0)
+		end
 	end
 end
 

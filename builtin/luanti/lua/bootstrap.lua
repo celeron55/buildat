@@ -4362,9 +4362,28 @@ end
 -- the same reason and stop for the same one.
 local active_boxes_cache = nil
 
+-- The loaded sections, once a step: the world streams between steps and not
+-- during one, so every answer inside a step agrees with every other -- which
+-- is what a mod comparing two of them relies on.
+local loaded_boxes_cache = nil
+
+local function loaded_boxes_now()
+	if loaded_boxes_cache == nil then
+		loaded_boxes_cache = __luanti_loaded_boxes and __luanti_loaded_boxes()
+				or {}
+	end
+	return loaded_boxes_cache
+end
+
+-- The map check's switch: with nobody in the world nothing is active, and
+-- the check runs a game's rules over the map it just wrote, so while it
+-- runs every loaded section is (lua/check_map.lua)
+core.__active_everywhere = false
+
 function core.__active_boxes_now()
 	if active_boxes_cache == nil then
-		active_boxes_cache = __active_boxes()
+		active_boxes_cache = core.__active_everywhere and loaded_boxes_now()
+				or __active_boxes()
 	end
 	return active_boxes_cache
 end
@@ -4398,19 +4417,6 @@ end
 -- simplified: nothing here indexes what the save holds but has not loaded,
 -- so the third is always empty. Luanti's answers what its map database has
 -- on disk, which a mod uses to walk a world without generating it.
--- The loaded sections, once a step: the world streams between steps and not
--- during one, so every answer inside a step agrees with every other -- which
--- is what a mod comparing two of them relies on.
-local loaded_boxes_cache = nil
-
-local function loaded_boxes_now()
-	if loaded_boxes_cache == nil then
-		loaded_boxes_cache = __luanti_loaded_boxes and __luanti_loaded_boxes()
-				or {}
-	end
-	return loaded_boxes_cache
-end
-
 core.__forget_loaded_boxes = function()
 	loaded_boxes_cache = nil
 end
