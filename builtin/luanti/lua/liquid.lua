@@ -328,8 +328,20 @@ local function decide(x0, y0, z0, must_reflow, falling)
 	end
 end
 
+-- A pass is cut at this many microseconds as well as at loop_max: a fresh
+-- VoxeLibre world's ocean queues half a million nodes and 20000 of them
+-- took a 4 s step, under which a click's answer came after the next
+-- scan (the driven first run's crafts, 2026-09-22). A cut pass is
+-- followed by the next one sooner than liquid_update, so the queue
+-- drains at the same rate in shorter steps.
+-- simplified: a fixed 250 ms; a setting when a game wants it.
+local PASS_US = 250000
+local cut_short = false
+
 local function transform(loop_max)
 	local loops = 0
+	local t0 = core.get_us_time()
+	cut_short = false
 	local must_reflow = {}
 	local changed = {}
 	local falling = {}
@@ -339,6 +351,10 @@ local function transform(loop_max)
 	-- the one above it already water
 	while head <= tail and loops < loop_max do
 		loops = loops + 1
+		if loops % 256 == 0 and core.get_us_time() - t0 > PASS_US then
+			cut_short = true
+			break
+		end
 		local x0, y0, z0 = pop()
 		local w = decide(x0, y0, z0, must_reflow, falling)
 		if w then
@@ -435,6 +451,9 @@ function core.__step_liquids(dtime)
 		return 0
 	end
 	local n = transform(loop_max)
+	if cut_short then
+		due = math.min(due, 0.25)
+	end
 	-- What the transform did, at most every five seconds
 	said_n = said_n + n
 	if core.get_us_time() - said_at > 5000000 then

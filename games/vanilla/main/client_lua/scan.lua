@@ -263,6 +263,14 @@ return function(ctx)
 		else
 			lines[#lines + 1] = string.format("scan %s: no form open", label)
 		end
+		-- A menu screen left over the world ([WIN_WORLD] (b): a box kept
+		-- "Building the world" up after the join); the driver fails on it
+		local stack = require("buildat/extension/uistack").main.stack
+		local top = stack[#stack]
+		if top and top:GetName():find(": vanilla menu: ", 1, true) then
+			lines[#lines + 1] = string.format("scan %s: menu screen %s over the world",
+					label, buildat.dump(top:GetName()))
+		end
 		lines[#lines + 1] = string.format("scan %s: done, %d lines", label, #lines)
 		log:info(table.concat(lines, "\n"))
 	end)

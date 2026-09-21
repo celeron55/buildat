@@ -208,6 +208,10 @@ def run(write, read_block, say, seed, game="mineclone2", save_name="menu_run", m
         if not still.check(s):
             return False
         if s.world:
+            over = [l for l in lines if l.startswith("menu screen ")]
+            if over:
+                say("FAILED menu: %s" % over[0])
+                return False
             say("menu: the world answered after %d screens" % n)
             return True
         if s.name != last_name:

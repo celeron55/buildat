@@ -61,6 +61,17 @@ local game_filter = ""
 local game_page = 1
 
 local function close()
+	-- A screen of another instance of this script: the media batch re-runs
+	-- the client scripts, and the second instance's root is nil while the
+	-- first's "Building the world" is still on top of the stack, held by
+	-- nobody ([WIN_WORLD] (b), the box). The stack is the extension's, one
+	-- for every instance, so the screen on top is closed by its name.
+	if root == nil then
+		local top = uistack.main.stack[#uistack.main.stack]
+		if top and top:GetName():find(": vanilla menu: ", 1, true) then
+			root = top
+		end
+	end
 	if root then
 		uistack.main:pop(root)
 		root = nil
