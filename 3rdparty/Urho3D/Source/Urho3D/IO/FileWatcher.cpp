@@ -31,6 +31,7 @@
 #include <windows.h>
 #elif __linux__
 #include <sys/inotify.h>
+#include <poll.h>
 extern "C"
 {
 // Need read/close for inotify
@@ -283,6 +284,21 @@ void FileWatcher::ThreadFunction()
 
     while (shouldRun_)
     {
+        // buildat: wait with a timeout rather than block in read(), so that
+        // StopWatching() is seen. It counted on inotify_rm_watch() queueing
+        // IN_IGNORED to wake the read, and a watch on a directory deleted
+        // during the run is gone already, so nothing ever did: the client
+        // sat in Thread::Stop() at exit for as long as it was left.
+        pollfd pfd;
+        pfd.fd = watchHandle_;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        int ready = poll(&pfd, 1, 200);
+        if (ready < 0)
+            return;
+        if (ready == 0)
+            continue;
+
         int i = 0;
         int length = (int)read(watchHandle_, buffer, sizeof(buffer));
 

@@ -31,7 +31,10 @@ ss_ zerr(int ret)
 	}
 }
 
-void compress_zlib(const ss_ &data_in, std::ostream &os, int level)
+// Negative window bits is zlib's way of saying "no header and no checksum",
+// which is what a raw deflate stream is
+static void compress_deflate(const ss_ &data_in, std::ostream &os, int level,
+		int window_bits)
 {
 	z_stream z;
 	const size_t bufsize = 16384;
@@ -43,7 +46,8 @@ void compress_zlib(const ss_ &data_in, std::ostream &os, int level)
 	z.zfree = Z_NULL;
 	z.opaque = Z_NULL;
 
-	ret = deflateInit(&z, level);
+	ret = deflateInit2(&z, level, Z_DEFLATED, window_bits, 8,
+			Z_DEFAULT_STRATEGY);
 	if(ret != Z_OK)
 		throw Exception("compress_zlib: deflateInit failed");
 
@@ -74,7 +78,18 @@ void compress_zlib(const ss_ &data_in, std::ostream &os, int level)
 	deflateEnd(&z);
 }
 
-void decompress_zlib(std::istream &is, std::ostream &os)
+void compress_zlib(const ss_ &data_in, std::ostream &os, int level)
+{
+	compress_deflate(data_in, os, level, MAX_WBITS);
+}
+
+void compress_deflate_raw(const ss_ &data_in, std::ostream &os, int level)
+{
+	compress_deflate(data_in, os, level, -MAX_WBITS);
+}
+
+static void decompress_deflate(std::istream &is, std::ostream &os,
+		int window_bits)
 {
 	z_stream z;
 	const size_t bufsize = 16384;
@@ -89,7 +104,7 @@ void decompress_zlib(std::istream &is, std::ostream &os)
 	z.zfree = Z_NULL;
 	z.opaque = Z_NULL;
 
-	ret = inflateInit(&z);
+	ret = inflateInit2(&z, window_bits);
 	if(ret != Z_OK)
 		throw Exception("dcompress_zlib: inflateInit failed");
 
@@ -156,6 +171,16 @@ void decompress_zlib(std::istream &is, std::ostream &os)
 	inflateEnd(&z);
 }
 
+void decompress_zlib(std::istream &is, std::ostream &os)
+{
+	decompress_deflate(is, os, MAX_WBITS);
+}
+
+void decompress_deflate_raw(std::istream &is, std::ostream &os)
+{
+	decompress_deflate(is, os, -MAX_WBITS);
+}
+
 
 void compress_zstd(const ss_ &data_in, std::ostream &os, int level)
 {
@@ -166,6 +191,15 @@ void compress_zstd(const ss_ &data_in, std::ostream &os, int level)
 	if(ZSTD_isError(size))
 		throw Exception(ss_("compress_zstd: ") + ZSTD_getErrorName(size));
 	os.write(buffer.c_str(), size);
+}
+
+size_t decompress_zstd(const ss_ &data_in, uint8_t *out, size_t out_size)
+{
+	const size_t got = ZSTD_decompress(out, out_size,
+			data_in.c_str(), data_in.size());
+	if(ZSTD_isError(got))
+		throw Exception(ss_("decompress_zstd: ") + ZSTD_getErrorName(got));
+	return got;
 }
 
 size_t decompress_zstd(const ss_ &data_in, std::ostream &os)

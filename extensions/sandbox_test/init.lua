@@ -51,6 +51,13 @@ function M.run()
 	local success = run_in_sandbox(bytecode)
 	assert(success == false)
 
+	-- Check that the standard libraries cannot be required
+	log:info("sandbox_test(): Testing require")
+	local require_content = get_file_content(ext_path.."/tests/require.lua")
+	assert(require_content)
+	local success = run_in_sandbox(require_content, "=require.lua")
+	assert(success)
+
 	-- Run the exploit search
 	log:info("sandbox_test(): Trying to find an exploit")
 	try_exploit.run()
@@ -58,9 +65,11 @@ function M.run()
 	log:info("sandbox_test(): Finished")
 end
 
--- Enabled when this module is loaded.
--- Normally that happens when KEY_F10 is pressed on the client.
-local value_checker_enabled = true
+-- Armed by toggle() (Ctrl+F12), not by loading: a sandboxed file's
+-- require("buildat/extension/sandbox_test") loads this file before
+-- learning it has no safe interface, and armed at load the walk ran in
+-- every client from the menu on ([UI_UAF], 2026-09-20).
+local value_checker_enabled = false
 function M.check_value(value)
 	if not value_checker_enabled then return end
 	log:debug("sandbox_test.check_value()")
