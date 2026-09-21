@@ -18,7 +18,9 @@
 -- many faces were neither triangles nor quads. Each quad is 21 numbers: the
 -- tile it wears, then its four corners and their four texture coordinates,
 -- which is what interface::VoxelQuad holds.
-function core.__mesh_quads(name, data, scale)
+-- frame: an object's model posed at that frame of its animation; only
+-- .b3d carries one ([OBJECT_MESH])
+function core.__mesh_quads(name, data, scale, frame)
 	local lower = tostring(name):lower()
 	local read = nil
 	if lower:match("%.obj$") then
@@ -31,7 +33,8 @@ function core.__mesh_quads(name, data, scale)
 	if read == nil then
 		return nil, 0
 	end
-	local ok, quads, groups, skipped = pcall(read, data)
+	local ok, quads, groups, skipped = pcall(read, data,
+			(frame ~= nil and frame >= 0) and frame or nil)
 	if not ok then
 		core.log("warning", "mesh " .. tostring(name) .. ": " ..
 				tostring(quads))

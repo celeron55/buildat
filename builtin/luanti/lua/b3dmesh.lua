@@ -141,7 +141,20 @@ local function node_matrix(px, py, pz, sx, sy, sz, qw, qx, qy, qz)
 	}
 end
 
--- parse(data) -> quads, groups, skipped
+-- The inverse of node_matrix() with the same arguments: the position
+-- undone, then the rotation, then the scale, which is the same three the
+-- other way round
+local function node_matrix_inverse(px, py, pz, sx, sy, sz, qw, qx, qy, qz)
+	local unrotate = node_matrix(0, 0, 0, 1, 1, 1, qw, -qx, -qy, -qz)
+	local unscale = {1 / (sx ~= 0 and sx or 1), 0, 0, 0,
+			0, 1 / (sy ~= 0 and sy or 1), 0, 0,
+			0, 0, 1 / (sz ~= 0 and sz or 1), 0,
+			0, 0, 0, 1}
+	local untranslate = {1, 0, 0, -px, 0, 1, 0, -py, 0, 0, 1, -pz, 0, 0, 0, 1}
+	return multiply(unscale, multiply(unrotate, untranslate))
+end
+
+-- parse(data[, frame]) -> quads, groups, skipped
 --
 -- The same shape objmesh.parse() gives back: quads of
 -- {group = n, p = {12 numbers}, uv = {8 numbers}}, so the caller does not
@@ -152,13 +165,20 @@ end
 -- word for a material, so a mesh with two materials has its faces marked 1
 -- and 2 and the caller can put them on different tiles.
 --
+-- frame: the model posed at that frame of its animation -- every bone's
+-- transform from the last of its KEYS at or before the frame, and every
+-- vertex moved by the bones that weight it, as Irrlicht does for Luanti.
+-- Without it the mesh is its bind pose, which for a mob authored in Blender
+-- is the arms out and the legs together ([OBJECT_MESH]).
+--
 -- What comes back is nil and a reason for bytes that are not a .b3d at all.
 --
 -- simplified: the winding and the axes go through as they are, which is what
 -- the .obj reader does too. A node mesh is drawn from both sides, so a
 -- winding that is the wrong way round costs the lighting of a face rather
--- than the face.
-function M.parse(data)
+-- than the face. A frame between two keys takes the earlier one; the
+-- animation itself is [OBJECT_MESH] step 1's.
+function M.parse(data, frame)
 	data = tostring(data)
 	local r = reader(data)
 	if r.left() < 12 or r.bytes(4) ~= "BB3D" then
@@ -171,6 +191,13 @@ function M.parse(data)
 	local quads = {}
 	local groups = 0
 	local skipped = 0
+	-- Every vertex of every mesh in file order, in the model's space
+	-- ({x, y, z, u, v}), which is what a bone's weights index
+	local vertices = {}
+	local tris = {} -- {group, a, b, c} into vertices
+	-- Every node with bones or keys, in tree order: parent index, its rest
+	-- transform's arguments, its keys and its weights
+	local bones = {}
 
 	-- Every chunk in a range: the tag, and the range of its payload
 	local function chunks(from, to, fn)
@@ -194,7 +221,7 @@ function M.parse(data)
 	local function read_mesh(from, to, matrix)
 		r.seek(from)
 		local mesh_brush = r.i32()
-		local vertices = nil
+		local base = #vertices
 		chunks(r.tell(), to, function(tag, body, body_end)
 			if tag == "VRTS" then
 				r.seek(body)
@@ -205,7 +232,6 @@ function M.parse(data)
 				local has_color = math.floor(flags / 2) % 2 == 1
 				local per_vertex = 3 + (has_normal and 3 or 0) +
 						(has_color and 4 or 0) + sets * set_size
-				vertices = {}
 				while r.tell() + per_vertex * 4 <= body_end do
 					local x, y, z = r.f32(), r.f32(), r.f32()
 					if has_normal then
@@ -242,33 +268,16 @@ function M.parse(data)
 					groups = group
 				end
 				while r.tell() + 12 <= body_end do
-					local a = r.i32() + 1
-					local b = r.i32() + 1
-					local c = r.i32() + 1
-					local va = vertices and vertices[a]
-					local vb = vertices and vertices[b]
-					local vc = vertices and vertices[c]
-					if not va or not vb or not vc then
-						skipped = skipped + 1
-					else
-						-- A triangle is a quad with its last corner twice,
-						-- which is what the mesher takes and what costs
-						-- nothing to draw
-						quads[#quads + 1] = {
-							group = group,
-							p = {va[1], va[2], va[3], vb[1], vb[2], vb[3],
-									vc[1], vc[2], vc[3],
-									vc[1], vc[2], vc[3]},
-							uv = {va[4], va[5], vb[4], vb[5], vc[4], vc[5],
-									vc[4], vc[5]},
-						}
-					end
+					local a = base + r.i32() + 1
+					local b = base + r.i32() + 1
+					local c = base + r.i32() + 1
+					tris[#tris + 1] = {group, a, b, c}
 				end
 			end
 		end)
 	end
 
-	local function read_node(from, to, parent)
+	local function read_node(from, to, parent, parent_bone)
 		r.seek(from)
 		r.cstring() -- name
 		local px, py, pz = r.f32(), r.f32(), r.f32()
@@ -276,23 +285,145 @@ function M.parse(data)
 		local qw, qx, qy, qz = r.f32(), r.f32(), r.f32(), r.f32()
 		local matrix = multiply(parent, node_matrix(px, py, pz,
 				sx, sy, sz, qw, qx, qy, qz))
+		local bone = {parent = parent_bone,
+				rest = {px, py, pz, sx, sy, sz, qw, qx, qy, qz},
+				keys = {}, weights = {}}
+		bones[#bones + 1] = bone
+		local me = #bones
 		chunks(r.tell(), to, function(tag, body, body_end)
 			if tag == "MESH" then
 				read_mesh(body, body_end, matrix)
 			elseif tag == "NODE" then
-				read_node(body, body_end, matrix)
+				read_node(body, body_end, matrix, me)
+			elseif tag == "BONE" then
+				r.seek(body)
+				while r.tell() + 8 <= body_end do
+					local vertex = r.i32() + 1
+					local weight = r.f32()
+					if weight > 0 then
+						bone.weights[#bone.weights + 1] = {vertex, weight}
+					end
+				end
+			elseif tag == "KEYS" then
+				r.seek(body)
+				local flags = r.i32()
+				local has_pos = flags % 2 == 1
+				local has_scale = math.floor(flags / 2) % 2 == 1
+				local has_rot = math.floor(flags / 4) % 2 == 1
+				local per_key = 4 + (has_pos and 12 or 0) +
+						(has_scale and 12 or 0) + (has_rot and 16 or 0)
+				while r.tell() + per_key <= body_end do
+					local key = {frame = r.i32()}
+					if has_pos then
+						key.pos = {r.f32(), r.f32(), r.f32()}
+					end
+					if has_scale then
+						key.scale = {r.f32(), r.f32(), r.f32()}
+					end
+					if has_rot then
+						key.rot = {r.f32(), r.f32(), r.f32(), r.f32()}
+					end
+					bone.keys[#bone.keys + 1] = key
+				end
 			end
-			-- BONE, KEYS and ANIM are the animation; see the header
+			-- ANIM is the frame count and the speed, which the game's
+			-- own animation ranges already say
 		end)
 	end
 
 	chunks(r.tell(), top_end, function(tag, body, body_end)
 		if tag == "NODE" then
-			read_node(body, body_end, IDENTITY)
+			read_node(body, body_end, IDENTITY, nil)
 		end
 		-- TEXS and BRUS say what the model's own textures are, and a Luanti
 		-- node mesh does not wear them: it wears the node's own tiles
 	end)
+
+	if frame ~= nil then
+		-- Each bone's transform at the frame, against its rest: global
+		-- matrices down the tree, and the rest's inverse the same way
+		local posed = {}
+		for i, bone in ipairs(bones) do
+			local rest = bone.rest
+			local p = {rest[1], rest[2], rest[3]}
+			local sc = {rest[4], rest[5], rest[6]}
+			local q = {rest[7], rest[8], rest[9], rest[10]}
+			local best = nil
+			for _, key in ipairs(bone.keys) do
+				if key.frame <= frame and (best == nil or
+						key.frame >= best.frame) then
+					best = key
+				end
+			end
+			if best == nil and #bone.keys > 0 then
+				best = bone.keys[1]
+			end
+			if best then
+				p = best.pos or p
+				sc = best.scale or sc
+				q = best.rot or q
+			end
+			local local_now = node_matrix(p[1], p[2], p[3], sc[1], sc[2],
+					sc[3], q[1], q[2], q[3], q[4])
+			local rest_inv = node_matrix_inverse(rest[1], rest[2], rest[3],
+					rest[4], rest[5], rest[6], rest[7], rest[8], rest[9],
+					rest[10])
+			local parent = bone.parent and posed[bone.parent]
+			posed[i] = {
+				global = multiply(parent and parent.global or IDENTITY,
+						local_now),
+				-- inverse(parent_rest * local_rest)
+				rest_inv = multiply(rest_inv,
+						parent and parent.rest_inv or IDENTITY),
+			}
+		end
+		local moved = {}
+		local weight_sum = {}
+		for i, bone in ipairs(bones) do
+			if #bone.weights > 0 then
+				local skin = multiply(posed[i].global, posed[i].rest_inv)
+				for _, w in ipairs(bone.weights) do
+					local v = vertices[w[1]]
+					if v then
+						local x, y, z = transform(skin, v[1], v[2], v[3])
+						local m = moved[w[1]]
+						if m == nil then
+							m = {0, 0, 0}
+							moved[w[1]] = m
+						end
+						m[1] = m[1] + x * w[2]
+						m[2] = m[2] + y * w[2]
+						m[3] = m[3] + z * w[2]
+						weight_sum[w[1]] = (weight_sum[w[1]] or 0) + w[2]
+					end
+				end
+			end
+		end
+		for index, m in pairs(moved) do
+			local total = weight_sum[index]
+			if total > 0 then
+				local v = vertices[index]
+				v[1], v[2], v[3] = m[1] / total, m[2] / total, m[3] / total
+			end
+		end
+	end
+
+	for _, t in ipairs(tris) do
+		local va, vb, vc = vertices[t[2]], vertices[t[3]], vertices[t[4]]
+		if not va or not vb or not vc then
+			skipped = skipped + 1
+		else
+			-- A triangle is a quad with its last corner twice, which is
+			-- what the mesher takes and what costs nothing to draw
+			quads[#quads + 1] = {
+				group = t[1],
+				p = {va[1], va[2], va[3], vb[1], vb[2], vb[3],
+						vc[1], vc[2], vc[3], vc[1], vc[2], vc[3]},
+				uv = {va[4], va[5], vb[4], vb[5], vc[4], vc[5],
+						vc[4], vc[5]},
+			}
+		end
+	end
 
 	if groups < 1 then
 		groups = 1

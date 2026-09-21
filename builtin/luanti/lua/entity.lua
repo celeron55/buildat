@@ -277,7 +277,11 @@ function ObjectRef:set_properties(props)
 		if PROPERTY_VECTOR2[k] and type(v) == "table" then
 			v = vector2.new(v.x or v[1] or 0, v.y or v[2] or 0)
 		elseif PROPERTY_VECTOR3[k] and type(v) == "table" then
-			v = vector.new(v.x or v[1] or 0, v.y or v[2] or 0, v.z or v[3] or 0)
+			-- visual_size = {x, y} is Luanti's older spelling and its z is
+			-- the x: a 0 here drew every VoxeLibre mob as a sheet
+			-- ([OBJECT_MESH])
+			local x = v.x or v[1] or 0
+			v = vector.new(x, v.y or v[2] or 0, v.z or v[3] or x)
 		end
 		o.props[k] = v
 	end
@@ -407,12 +411,32 @@ end
 -- looks, and nothing draws it yet. They answer rather than being missing,
 -- because a mod that sets a texture and carries on should carry on.
 for _, name in ipairs({
-	"set_texture_mod", "set_sprite", "set_animation",
+	"set_texture_mod", "set_sprite",
 	"set_animation_frame_speed",
 	"set_nametag_attributes", "set_observers",
 	"set_local_animation",
 }) do
 	ObjectRef[name] = function() end
+end
+
+-- The animation is kept and its first frame reaches the client with the
+-- look, which draws the model posed there ([OBJECT_MESH]: a mob standing
+-- as its game poses it rather than in its bind pose). The frames in
+-- between are step 1's.
+function ObjectRef:set_animation(frame_range, frame_speed, frame_blend, frame_loop)
+	local o = state_of(self)
+	if o then
+		local range = frame_range or {x = 1, y = 1}
+		o.animation = {x = range.x or 1, y = range.y or 1,
+				speed = frame_speed or 15, blend = frame_blend or 0,
+				loop = frame_loop ~= false}
+	end
+end
+
+function ObjectRef:get_animation()
+	local o = state_of(self)
+	local a = o and o.animation or {x = 1, y = 1, speed = 15, blend = 0, loop = true}
+	return {x = a.x, y = a.y}, a.speed, a.blend, a.loop
 end
 
 -- Luanti's own deprecated names, which it keeps as real methods on ObjectRef
@@ -3218,10 +3242,13 @@ local function appearance_of(o)
 			return "cube", textures[1] or ""
 		end
 		local v = props.visual_size or {}
+		-- The size, and behind it the frame the model is posed at: the
+		-- animation's first, or none for the bind pose
 		local detail = {mesh,
 				tostring(v.x or v[1] or 1) .. "," ..
 				tostring(v.y or v[2] or 1) .. "," ..
-				tostring(v.z or v[3] or v.x or v[1] or 1)}
+				tostring(v.z or v[3] or v.x or v[1] or 1) ..
+				(o.animation and ("," .. tostring(o.animation.x)) or "")}
 		for _, t in ipairs(textures) do
 			detail[#detail + 1] = t
 		end

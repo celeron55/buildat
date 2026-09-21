@@ -9,18 +9,15 @@
 -- is drawn.
 core.register_on_joinplayer(function(player)
 	core.after(6, function()
+		-- A stone platform in the sky over the spawn, so the stage is the
+		-- same whatever the world put at the spawn; the player at its
+		-- west end looking east at the mobs
 		local p = player:get_pos()
-		local base = {x = math.floor(p.x) + 4, y = math.floor(p.y), z = math.floor(p.z)}
-		-- A clearing with a stone floor, the player at its west end looking
-		-- east at the mobs
-		for dz = -5, 5 do
-			for dx = -6, 4 do
+		local base = {x = math.floor(p.x), y = math.floor(p.y) + 12, z = math.floor(p.z)}
+		for dz = -6, 6 do
+			for dx = -8, 6 do
 				core.set_node({x = base.x + dx, y = base.y - 1, z = base.z + dz},
 						{name = "mcl_core:stone"})
-				for dy = 0, 5 do
-					core.set_node({x = base.x + dx, y = base.y + dy, z = base.z + dz},
-							{name = "air"})
-				end
 			end
 		end
 		player:set_pos({x = base.x - 6, y = base.y + 2.5, z = base.z})
@@ -49,9 +46,9 @@ core.register_on_joinplayer(function(player)
 				local pr = obj:get_properties() or {}
 				local v = pr.visual_size or {}
 				core.log("action", string.format(
-						"mobmesh: %s visual=%s mesh=%s size=%s,%s textures=%s",
+						"mobmesh: %s visual=%s mesh=%s size=%s,%s,%s textures=%s",
 						name, tostring(pr.visual), tostring(pr.mesh),
-						tostring(v.x), tostring(v.y),
+						tostring(v.x), tostring(v.y), tostring(v.z),
 						table.concat(pr.textures or {}, ";")))
 			end
 		end)

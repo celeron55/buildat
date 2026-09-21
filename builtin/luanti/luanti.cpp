@@ -4183,7 +4183,10 @@ struct Module: public interface::Module, public luanti::Interface
 	// Read here rather than on the client because a node's shape belongs in
 	// its definition, where every other drawtype's shape is: the client is
 	// sent quads and does not care where they came from.
-	sv_<interface::VoxelQuad> mesh_quads(const ss_ &name, float scale)
+	// frame < 0: the bind pose; otherwise the model posed at that frame of
+	// its animation (b3d only; see lua/b3dmesh.lua)
+	sv_<interface::VoxelQuad> mesh_quads(const ss_ &name, float scale,
+			float frame = -1.0f)
 	{
 		sv_<interface::VoxelQuad> out;
 		auto it = m_served_media.find(name);
@@ -4204,7 +4207,8 @@ struct Module: public interface::Module, public luanti::Interface
 		lua_pushlstring(L, name.c_str(), name.size());
 		lua_pushlstring(L, data.c_str(), data.size());
 		lua_pushnumber(L, scale);
-		if(lua_pcall(L, 3, 2, 0) != 0){
+		lua_pushnumber(L, frame);
+		if(lua_pcall(L, 4, 2, 0) != 0){
 			log_w(MODULE, "__mesh_quads(\"%s\"): %s", cs(name),
 					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
 			lua_settop(L, base);
@@ -6276,14 +6280,20 @@ struct Module: public interface::Module, public luanti::Interface
 		if(asked.empty() || asked[0].empty())
 			return;
 		const ss_ name = asked[0];
-		sv_<ss_> flat{name};
+		// The second value, if any, is the frame the model is wanted
+		// posed at, and the answer carries it back so the client files
+		// the quads under the right key
+		const ss_ frame_s = asked.size() > 1 ? asked[1] : "";
+		const float frame = frame_s.empty() ? -1.0f : (float)atof(frame_s.c_str());
+		sv_<ss_> flat{name, frame_s};
 		{
 			interface::MutexScope ms(m_lua_mutex);
 			// Scale 1: an object's model is scaled by its visual_size,
 			// which is the client's to apply and is not the same number
 			// for two objects of one kind
-			const sv_<interface::VoxelQuad> quads = mesh_quads(name, 1.0f);
-			flat.reserve(1 + quads.size() * 21);
+			const sv_<interface::VoxelQuad> quads = mesh_quads(name, 1.0f,
+					frame);
+			flat.reserve(2 + quads.size() * 21);
 			char buf[32];
 			for(const interface::VoxelQuad &q : quads){
 				snprintf(buf, sizeof buf, "%d", (int)q.tile);

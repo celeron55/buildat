@@ -454,13 +454,20 @@ local models = {}
 -- copied inside the engine instead.
 local model_templates = {}
 
-local function want_model(name)
-	if name == nil or name == "" or models[name] ~= nil then
+-- A model is filed by its name and the frame it is posed at: "name" for
+-- the bind pose, "name@frame" for a pose ([OBJECT_MESH])
+local function model_key(name, frame)
+	return frame and (name .. "@" .. tostring(frame)) or name
+end
+
+local function want_model(name, frame)
+	if name == nil or name == "" or models[model_key(name, frame)] ~= nil then
 		return
 	end
-	models[name] = false
+	models[model_key(name, frame)] = false
 	buildat.send_packet("luanti:get_model",
-			cereal.binary_output({name}, {"array", "string"}))
+			cereal.binary_output({name, frame and tostring(frame) or ""},
+			{"array", "string"}))
 end
 
 -- The quads of one model, grouped by the material they wear, on a node of
@@ -592,12 +599,14 @@ local function model_element(parent, w, h, mesh, textures, rot_x, rot_y)
 end
 
 local function model_template(look)
-	local key = look.mesh .. "\1" .. table.concat(look.textures or {}, "\1")
+	local key = model_key(look.mesh, look.frame) .. "\1" ..
+			table.concat(look.textures or {}, "\1")
 	local entry = model_templates[key]
 	if entry == nil then
 		local node = object_scene:CreateChild("model_template")
 		node.enabled = false
-		local _, materials = build_model(node, models[look.mesh].quads,
+		local _, materials = build_model(node,
+				models[model_key(look.mesh, look.frame)].quads,
 				look.textures or {})
 		entry = {node = node, materials = materials}
 		model_templates[key] = entry
@@ -610,8 +619,8 @@ local function make_object_node(look)
 	-- materials it is given again -- a Material made in Lua has no resource
 	-- name, so it is not an attribute Urho3D copies with the node
 	if look.kind == "mesh" and look.mesh ~= nil then
-		want_model(look.mesh)
-		if models[look.mesh] then
+		want_model(look.mesh, look.frame)
+		if models[model_key(look.mesh, look.frame)] then
 			local template = model_template(look)
 			local node = template.node:Clone()
 			node.enabled = true
@@ -774,11 +783,12 @@ local function object_node(id)
 	-- A model whose quads arrived after the object did is built then: what
 	-- was drawn until now is the box it falls back to
 	local drawn_as = look.kind
-	if look.kind == "mesh" and not (look.mesh and models[look.mesh]) then
+	if look.kind == "mesh" and
+			not (look.mesh and models[model_key(look.mesh, look.frame)]) then
 		drawn_as = "box"
 	end
 	if have and have.drawn_as == drawn_as and have.texture == look.texture and
-			have.mesh == look.mesh then
+			have.mesh == look.mesh and have.frame == look.frame then
 		return have.node
 	end
 	if object_build_left_us <= 0 then
@@ -798,7 +808,7 @@ local function object_node(id)
 	local node, materials = make_object_node(look)
 	object_build_left_us = object_build_left_us -
 			(buildat.get_time_us() - t0)
-	object_nodes[id] = {node = node, drawn_as = drawn_as, mesh = look.mesh,
+	object_nodes[id] = {node = node, drawn_as = drawn_as, mesh = look.mesh, frame = look.frame,
 			texture = look.texture, look = look, materials = materials or {},
 			lit = nil}
 	return node
@@ -825,14 +835,19 @@ local function parse_look(kind, texture, detail)
 	look.size = {1, 1, 1}
 	local i = 1
 	for n in string.gmatch(parts[2] or "", "[^,]+") do
-		look.size[i] = tonumber(n) or 1
+		if i <= 3 then
+			look.size[i] = tonumber(n) or 1
+		else
+			-- The fourth number is the frame the model is posed at
+			look.frame = tonumber(n)
+		end
 		i = i + 1
 	end
 	look.textures = {}
 	for j = 3, #parts do
 		look.textures[j - 2] = parts[j]
 	end
-	want_model(look.mesh)
+	want_model(look.mesh, look.frame)
 	return look
 end
 
@@ -917,8 +932,10 @@ buildat.sub_packet("luanti:model", function(data)
 	if name == nil then
 		return
 	end
+	-- The frame it was asked posed at rides second; the quads follow
+	name = model_key(name, tonumber(values[2]))
 	local quads = {}
-	for i = 2, #values - 20, 21 do
+	for i = 3, #values - 20, 21 do
 		local q = {tile = tonumber(values[i]) or 0, p = {}, uv = {}}
 		for j = 1, 12 do
 			q.p[j] = tonumber(values[i + j]) or 0
