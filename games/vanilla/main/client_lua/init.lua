@@ -520,22 +520,19 @@ do
 	-- that frame clips (the tonemap's shoulder starts above 1.0), and the
 	-- stock 40% mix is a haze over a whole daylight picture; 15% was a
 	-- glow on what clips ([BLOOM_PLACE]) and still too much on a desk, so
-	-- a fifth of that (user, 2026-09-20, [BLOOM_FIFTH]). How much is grade
-	-- ([PBR_FIT] step 5; its ladder starts from here).
+	-- a fifth of that (user, 2026-09-20, [BLOOM_FIFTH]); the grade's
+	-- ladder kept it (user, 2026-09-21, [PBR_GRADE]).
 	rp:SetShaderParameter("BloomHDRThreshold", 1.2)
-	-- BUILDAT_LUANTI_BLOOM=<mix>: the ladder's knob ([PBR_FIT] step 5)
-	rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0,
-			tonumber(buildat.get_env("BUILDAT_LUANTI_BLOOM") or "") or 0.03))
+	rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0, 0.03))
 	-- No bias on top of the meter: the meter owns the level and a bias is
 	-- a second exposure that pushes the lit parts up the curve's shoulder
 	-- ([PBR_FIT] term 4). EXPOSURE_BIAS stays the minimap's, which is not
 	-- metered.
 	rp:SetShaderParameter("TonemapExposureBias", 1.0)
-	-- BUILDAT_LUANTI_WHITE=<n>: Uncharted2's white point (Urho's 4.0),
-	-- for the grade's ladder ([PBR_FIT] step 5); the shoulder is the
+	-- Uncharted2's white point: 2, the grade's ladder's pick (user,
+	-- 2026-09-21, [PBR_GRADE]; Urho's own is 4.0); the shoulder is the
 	-- curve's own
-	rp:SetShaderParameter("TonemapMaxWhite",
-			tonumber(buildat.get_env("BUILDAT_LUANTI_WHITE") or "") or 4.0)
+	rp:SetShaderParameter("TonemapMaxWhite", 2.0)
 	rp:SetShaderParameter("AutoExposureAdaptRate", AUTO_EXPOSURE.adapt_rate)
 	-- BUILDAT_LUANTI_KEY=<lum> pins the metered key by closing the range on
 	-- it, so an ablation's frames are comparable in absolute terms: with
