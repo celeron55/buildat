@@ -58,6 +58,16 @@ function M.safe.new(magic, material)
 			magic.TEXTURE_RENDERTARGET) then
 		error("skycube: could not make a " .. SIZE .. " render target cube")
 	end
+	-- The texture held by the engine, not only by whoever draws with it:
+	-- a Lua handle does not count in Urho3D's reference count, and when
+	-- a game with its own six-picture skybox took the cube off the
+	-- world's zone, the cube was freed under these surfaces and the next
+	-- update() wrote into freed memory (nodecore, 2026-09-21: the client
+	-- died ten seconds in). A Zone of the cube's own scene holds it; the
+	-- scene is held by the faces' viewports.
+	local hold = node:CreateComponent("Zone")
+	hold.zoneTexture = self.texture
+	hold.priority = -1000
 	self.surfaces = {}
 	for i, f in ipairs(FACES) do
 		local cam_node = self.scene:CreateChild("Face" .. i)
