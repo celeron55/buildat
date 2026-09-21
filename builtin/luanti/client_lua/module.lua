@@ -2965,7 +2965,8 @@ buildat.sub_packet("luanti:world_info", function(data)
 			-- The server's longest step, held and decayed, and the phase
 			-- that set it; re-sent when it moves. See [STEP_PEAK].
 			step_peak = tonumber(values[6] or "") or 0,
-			step_peak_phase = values[7] or ""}
+			step_peak_phase = values[7] or "",
+			step_latest = tonumber(values[8] or "") or 0}
 	-- Once: the packet comes again whenever the step peak moves
 	if not world_info_logged then
 		world_info_logged = true

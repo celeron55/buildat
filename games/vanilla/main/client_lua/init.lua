@@ -2193,7 +2193,8 @@ end
 -- One table, this file being near Lua's 200 locals. A frame over
 -- CEILING_S is a line at debug (trace is voxelworld's per-voxel spam), and the worst since the last info line
 -- is said at info every LINE_S; the fuzz run reads the info lines.
-local frame_peak = {DECAY = 0.99425, DECAY_EVERY_S = 0.5,
+-- DECAY halves the peak per 12 s, a fifth of Luanti's minute ([STATUS_MS])
+local frame_peak = {DECAY = 0.9715, DECAY_EVERY_S = 0.5,
 		CEILING_S = 0.05, LINE_S = 5,
 		s = 0, phase = "", decay_due = 0,
 		worst = 0, worst_phase = "", line_due = 5,
@@ -2204,6 +2205,7 @@ function frame_peak.note(dt)
 	local wall = frame_peak.last_us and (now - frame_peak.last_us) / 1000000
 			or dt
 	frame_peak.last_us = now
+	frame_peak.wall = wall
 	local vw = voxelworld.frame_us
 	local pk = buildat.packet_us
 	local phases = {
@@ -2373,7 +2375,7 @@ local function status_lines(level)
 	-- prevent: one that cannot be told from a shot of something else.
 	local rmode = info.mode or "pbr"
 	local place = string.format(
-			"pos: (%.1f, %.1f, %.1f) | yaw: %.1f\194\176 %s" ..
+			"(%.1f, %.1f, %.1f) | yaw: %.1f\194\176 %s" ..
 			" | pitch: %.1f\194\176 | seed: %s",
 			player.x, player.y, player.z,
 			lyaw, cardinal,
@@ -2389,9 +2391,12 @@ local function status_lines(level)
 	-- debugging, which is what that level is for.
 	-- The server's longest step, held and decayed: what a click has been
 	-- waiting on lately. See [STEP_PEAK] in doc/plan/performance_plan.md.
-	local step = string.format("step: %.2f s", info.step_peak or 0)
+	-- Latest/peak in whole milliseconds ([STATUS_MS])
+	local step = string.format("step: %d/%d ms",
+			(info.step_latest or 0) * 1000, (info.step_peak or 0) * 1000)
 	-- And the client's longest frame beside it ([FRAME_PEAK])
-	local frame = string.format("frame: %.2f s", frame_peak.s)
+	local frame = string.format("frame: %d/%d ms",
+			(frame_peak.wall or 0) * 1000, frame_peak.s * 1000)
 	if level == 1 then
 		return "buildat | " .. game .. " | " .. rmode .. " | " .. step ..
 				" | " .. frame .. " | " .. place

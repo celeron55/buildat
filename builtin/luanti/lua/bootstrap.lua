@@ -1923,11 +1923,12 @@ function core.__world_info()
 	}
 end
 
--- The step peak as world_info's tail: seconds and phase, re-sent when the
--- row would show a different number. See [STEP_PEAK].
+-- The step peak as world_info's tail: seconds and phase, and the latest
+-- step's seconds, re-sent when the row would show a different number.
+-- See [STEP_PEAK], [STATUS_MS].
 function core.__step_peak_info()
-	local peak, phase = core.get_server_step_peak()
-	return {string.format("%.2f", peak), phase}
+	local peak, phase, latest = core.get_server_step_peak()
+	return {string.format("%.3f", peak), phase, string.format("%.3f", latest)}
 end
 
 -- Whose world this is. Luanti means by it "the client started this server
@@ -5064,22 +5065,24 @@ local slow_said_at = nil
 local slow_worst, slow_worst_phase = 0, ""
 
 -- The longest step's wall time, held and decayed the way Luanti's own
--- max_lag is: the peak is what the last minute was like, not what the
+-- max_lag is: the peak is what the last while was like, not what the
 -- last step was. Multiplied by DECAY every DECAY_EVERY_S, which halves it
--- per minute; with the phase that set it.
-local DECAY, DECAY_EVERY_S = 0.99425, 0.5
+-- per 12 s -- a fifth of Luanti's minute, the user's pick ([STATUS_MS]);
+-- with the phase that set it. And the latest step beside it for the row.
+local DECAY, DECAY_EVERY_S = 0.9715, 0.5
 local step_peak, step_peak_phase = 0, ""
+local step_latest = 0
 -- The worst step since somebody last asked, undecayed: the fixture's
 -- count of seconds over the ceiling read the decaying peak and counted
 -- one 0.45 s step eighty times ([STEP_SLICE], seed 5's rerun)
 local step_worst, step_worst_phase = 0, ""
 local decay_due = 0
-local peak_told = -1
+local peak_told, latest_told, told_at = -1, -1, 0
 
--- get_server_step_peak() -> seconds, phase. Luanti's get_server_max_lag()
--- is the same number under its own name.
+-- get_server_step_peak() -> seconds, phase, latest step's seconds.
+-- Luanti's get_server_max_lag() is the first number under its own name.
 function core.get_server_step_peak()
-	return step_peak, step_peak_phase
+	return step_peak, step_peak_phase, step_latest
 end
 
 -- get_server_step_worst() -> seconds, phase: the worst step since the
@@ -5154,16 +5157,23 @@ function core.__step(dtime)
 		step_peak = step_peak * DECAY
 		decay_due = DECAY_EVERY_S
 	end
+	step_latest = total
 	if total > step_peak then
 		step_peak, step_peak_phase = total, longest_phase
 	end
 	if total > step_worst then
 		step_worst, step_worst_phase = total, longest_phase
 	end
-	-- Told to the clients when the row would show a different number
-	local shown = math.floor(step_peak * 100)
-	if shown ~= peak_told then
-		peak_told = shown
+	-- Told to the clients when the row would show a different number:
+	-- the peak's millisecond, the latest's 10 ms bucket -- that one at
+	-- most four times a second, so the row is live without a packet per
+	-- step
+	local shown = math.floor(step_peak * 1000)
+	local bucket = math.floor(total * 100)
+	local now = core.get_us_time()
+	if shown ~= peak_told or
+			(bucket ~= latest_told and now - told_at >= 250000) then
+		peak_told, latest_told, told_at = shown, bucket, now
 		__luanti_step_peak(step_peak, step_peak_phase)
 	end
 	if total >= SLOW_STEP_S then
