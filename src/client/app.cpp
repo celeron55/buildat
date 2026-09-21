@@ -1028,6 +1028,7 @@ struct CApp: public App, public magic::Application
 
 		// Default to not grabbing the mouse
 		magic::Input *magic_input = GetSubsystem<magic::Input>();
+		magic_input->SetMouseChangeReason("the client's start");
 		magic_input->SetMouseVisible(true);
 
 		// Default to auto-loading resources as they are modified
@@ -2023,12 +2024,13 @@ struct CApp: public App, public magic::Application
 	// WM has not given the window SDL's input focus. A client that stops
 	// taking the mouse looks like that; this is the line that says so
 	// (doc/plan/luanti_module_history.md, [MOUSE_FOCUS_LOST]).
+	// The reason and the state before it are Urho3D's line (Input.cpp,
+	// [FOCUS_LOG]); this adds what only the client knows
 	void on_inputfocus(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
-		magic::Input *input = GetSubsystem<magic::Input>();
-		log_i(MODULE, "input focus %s (mouse %s)",
+		log_i(MODULE, "input focus %s; a command sequence %s",
 				event_data["Focus"].GetBool() ? "gained" : "lost",
-				input->IsMouseVisible() ? "visible" : "hidden");
+				m_command_seq_active ? "is running" : "is not running");
 	}
 
 	void on_screenmode(magic::StringHash event_type, magic::VariantMap &event_data)
@@ -2073,7 +2075,13 @@ struct CApp: public App, public magic::Application
 		if(magic_level == magic::LOG_DEBUG)
 			c55_level = CORE_DEBUG;
 		else if(magic_level == magic::LOG_INFO)
-			c55_level = CORE_VERBOSE;
+			// Urho3D's INFO is chatter, except the input lines this tree
+			// added to it ([FOCUS_LOG]): a lost mouse is read from a log
+			// at info
+			// (the message carries Urho's "INFO: " prefix)
+			c55_level = (message.find("INFO: input ") != ss_::npos ||
+					message.find("INFO: mouse ") != ss_::npos) ?
+					CORE_INFO : CORE_VERBOSE;
 		else if(magic_level == magic::LOG_WARNING)
 			c55_level = CORE_WARNING;
 		else if(magic_level == magic::LOG_ERROR)

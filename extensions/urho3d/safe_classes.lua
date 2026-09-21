@@ -1810,8 +1810,10 @@ function M.define(dst, util)
 	local scripted = __buildat_is_scripted()
 	util.wc("Input", {
 		instance = {
-			SetMouseVisible = util.wrap_function({"Input", "boolean"},
-				function(self, enable)
+			-- The second argument is a word for the log ([FOCUS_LOG]): what
+			-- asked for the cursor to change
+			SetMouseVisible = util.wrap_function({"Input", "boolean", {"string", "__nil"}},
+				function(self, enable, reason)
 					if scripted and not enable then
 						return
 					end
@@ -1820,6 +1822,7 @@ function M.define(dst, util)
 					if util.mouse then
 						util.mouse.hide_wanted = not enable
 					end
+					self:SetMouseChangeReason(reason or "")
 					self:SetMouseVisible(enable)
 				end),
 			SetMouseMode = util.wrap_function({"Input", "number"},

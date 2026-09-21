@@ -320,9 +320,11 @@ local pitch = 0
 -- world while playing, on the screen while a form is open or Tab says so.
 local mouse_in_world = false
 
-local function set_mouse_in_world(enable)
+-- reason: a word for the log ([FOCUS_LOG]), which is where a lost mouse
+-- is read from
+local function set_mouse_in_world(enable, reason)
 	mouse_in_world = enable
-	magic.input:SetMouseVisible(not enable)
+	magic.input:SetMouseVisible(not enable, reason or "set_mouse_in_world")
 end
 
 -- A form is clicked with the pointer, so while one is open the mouse is on
@@ -341,9 +343,9 @@ do
 		was_open = open
 		if open then
 			before = mouse_in_world
-			set_mouse_in_world(false)
+			set_mouse_in_world(false, "a form opened")
 		else
-			set_mouse_in_world(before)
+			set_mouse_in_world(before, "the form closed")
 		end
 	end)
 end
@@ -583,7 +585,7 @@ end
 voxelworld.set_camera(camera_node)
 voxel_shading.set_camera(camera_node)
 
-magic.input:SetMouseVisible(true)
+magic.input:SetMouseVisible(true, "the launcher's start")
 
 -- Every line of the HUD is drawn over a world that may be snow, sand or a
 -- dark cave, so all of them carry a shadow; without it a white world takes
@@ -2095,7 +2097,7 @@ luanti.sub_player_pos(function(p)
 	end
 	if not player_placed then
 		player_placed = true
-		set_mouse_in_world(true)
+		set_mouse_in_world(true, "the first placement")
 	end
 	log:info("the server put the player at " ..
 			string.format("%.1f, %.1f, %.1f", p.x, p.y, p.z) ..
@@ -3744,7 +3746,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	elseif key == BIND.chat.key then
 		chat_wanted = true
 	elseif key == BIND.mouse.key then
-		set_mouse_in_world(not mouse_in_world)
+		set_mouse_in_world(not mouse_in_world, "the mouse key")
 	elseif key == BIND.drop.key then
 		-- Luanti's own drop key: the whole stack, and one of it with the
 		-- key that means "one" everywhere else here. The server takes it

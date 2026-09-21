@@ -267,7 +267,7 @@ function draw(saves, save_games)
 		ask_for_imports("worlds")
 	end)
 
-	magic.input:SetMouseVisible(true)
+	magic.input:SetMouseVisible(true, "a menu screen")
 
 	-- A launch that asked for an import screen goes straight to it, once
 	-- the save list it comes back to is drawn ([LAUNCH_GRID])
@@ -334,7 +334,7 @@ local function back_to_saves(menu)
 	menu:add("< back", function()
 		draw(last_saves, last_save_games)
 	end)
-	magic.input:SetMouseVisible(true)
+	magic.input:SetMouseVisible(true, "a menu screen")
 end
 
 -- The launcher's settings ([LAUNCH_GRID]): the import search paths, a list
@@ -489,7 +489,7 @@ function draw_new_save_name(gameid)
 	menu:add("< back", function()
 		draw_new_game()
 	end)
-	magic.input:SetMouseVisible(true)
+	magic.input:SetMouseVisible(true, "a menu screen")
 end
 
 function draw_new_game()
@@ -593,7 +593,7 @@ local function draw_import_world_name(world)
 	menu:add("< back", function()
 		draw_import_worlds()
 	end)
-	magic.input:SetMouseVisible(true)
+	magic.input:SetMouseVisible(true, "a menu screen")
 end
 
 function draw_import_worlds()

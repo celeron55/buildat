@@ -404,18 +404,43 @@ void Input::Update()
 #else
         if (!inputFocus_ && (flags & SDL_WINDOW_INPUT_FOCUS))
 #endif
+        {
             focusedThisFrame_ = true;
+            focusReason_ = "the window has input focus";
+        }
 
         // Forced focus does not wait for the OS to hand any over
         if (!inputFocus_ && forceInputFocus_)
+        {
             focusedThisFrame_ = true;
+            focusReason_ = "focus forced";
+        }
 
         if (focusedThisFrame_)
+        {
+            // buildat [FOCUS_LOG]: the state before Urho reacts, and why
+            URHO3D_LOGINFOF("input focus gained: %s; window flags 0x%x"
+                " (input focus %d, mouse focus %d), mouse visible %d, mode %d,"
+                " relative %d", focusReason_ ? focusReason_ : "?", flags,
+                (flags & SDL_WINDOW_INPUT_FOCUS) != 0,
+                (flags & SDL_WINDOW_MOUSE_FOCUS) != 0, (int)mouseVisible_,
+                (int)mouseMode_, (int)sdlMouseRelative_);
+            focusReason_ = 0;
             GainFocus();
+        }
 
         // Check for losing focus. The window flags are not reliable when using an external window, so prevent losing focus in that case
         if (inputFocus_ && !forceInputFocus_ && !graphics_->GetExternalWindow() && (flags & SDL_WINDOW_INPUT_FOCUS) == 0)
+        {
+            // buildat [FOCUS_LOG]: the one way focus is lost -- the window
+            // flags say the WM took it; the same frame as a click's gain
+            // means the click reached SDL and the WM never raised us
+            URHO3D_LOGINFOF("input focus lost: the window's SDL_WINDOW_INPUT_FOCUS"
+                " flag is clear%s; flags 0x%x, mouse visible %d, mode %d,"
+                " relative %d", focusedThisFrame_ ? " in the frame a click regained it" : "",
+                flags, (int)mouseVisible_, (int)mouseMode_, (int)sdlMouseRelative_);
             LoseFocus();
+        }
     }
     else
         return;
@@ -533,6 +558,10 @@ void Input::Update()
 
 void Input::SetMouseVisible(bool enable, bool suppressEvent)
 {
+    // buildat [FOCUS_LOG]: every change of the cursor, with what asked
+    if (enable != mouseVisible_)
+        URHO3D_LOGINFOF("mouse %s (%s)", enable ? "visible" : "hidden",
+            mouseChangeReason_.Empty() ? "no reason given" : mouseChangeReason_.CString());
     const bool startMouseVisible = mouseVisible_;
 
     // In touch emulation mode only enabled mouse is allowed
@@ -825,6 +854,9 @@ void Input::SetMouseModeRelative(SDL_bool enable)
 
 void Input::SetMouseMode(MouseMode mode, bool suppressEvent)
 {
+    if (mode != mouseMode_)
+        URHO3D_LOGINFOF("mouse mode %d (%s)", (int)mode,
+            mouseChangeReason_.Empty() ? "no reason given" : mouseChangeReason_.CString());
     const MouseMode previousMode = mouseMode_;
 
 #ifdef __EMSCRIPTEN__
@@ -1519,6 +1551,27 @@ void Input::Initialize()
     ResetJoysticks();
     ResetState();
 
+    // buildat [FOCUS_LOG]: the display and input setup, once, so a log of a
+    // lost mouse says what it ran under
+    {
+        SDL_Window* w = graphics_->GetWindow();
+        unsigned flags = w ? SDL_GetWindowFlags(w) : 0;
+        const char* drv = SDL_GetCurrentVideoDriver();
+        URHO3D_LOGINFOF("input setup: video driver %s, window flags 0x%x"
+            " (input focus %d, mouse focus %d, fullscreen %d), mouse mode %d,"
+            " mouse visible %d, relative mode %s, click to focus %s",
+            drv ? drv : "?", flags, (flags & SDL_WINDOW_INPUT_FOCUS) != 0,
+            (flags & SDL_WINDOW_MOUSE_FOCUS) != 0,
+            (flags & SDL_WINDOW_FULLSCREEN) != 0, (int)mouseMode_,
+            (int)mouseVisible_,
+            SDL_SetRelativeMouseMode(SDL_GetRelativeMouseMode()) == 0 ? "available" : "unsupported",
+#ifdef REQUIRE_CLICK_TO_FOCUS
+            "required");
+#else
+            "not required");
+#endif
+    }
+
     SubscribeToEvent(E_BEGINFRAME, URHO3D_HANDLER(Input, HandleBeginFrame));
 #ifdef __EMSCRIPTEN__
     SubscribeToEvent(E_ENDFRAME, URHO3D_HANDLER(Input, HandleEndFrame));
@@ -1860,6 +1913,7 @@ void Input::HandleSDLEvent(void* sdlEvent)
             evt.button.y < graphics_->GetHeight() - 1)
         {
             focusedThisFrame_ = true;
+            focusReason_ = "a click inside the window";
             // Do not cause the click to actually go throughfin
             return;
         }
