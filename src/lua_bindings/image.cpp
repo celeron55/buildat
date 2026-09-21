@@ -206,6 +206,7 @@ enum BlendMode {
 	BLEND_AND,      // Bitwise, per channel; this is what a mask is
 	BLEND_MULTIPLY,
 	BLEND_SCREEN,
+	BLEND_HARDLIGHT, // Luanti's [hardlight: multiply below half, screen above
 };
 
 static BlendMode parse_blend(const ss_ &s)
@@ -220,6 +221,8 @@ static BlendMode parse_blend(const ss_ &s)
 		return BLEND_MULTIPLY;
 	if(s == "screen")
 		return BLEND_SCREEN;
+	if(s == "hardlight")
+		return BLEND_HARDLIGHT;
 	throw Exception("compose_image(): unknown blend \""+s+"\"");
 }
 
@@ -241,6 +244,12 @@ static void blend_pixel(const uint8_t *src, uint8_t *dst, BlendMode mode)
 	case BLEND_SCREEN:
 		for(int i = 0; i < 3; i++)
 			dst[i] = (uint8_t)(255 - (255 - dst[i]) * (255 - src[i]) / 255);
+		return;
+	case BLEND_HARDLIGHT:
+		for(int i = 0; i < 3; i++)
+			dst[i] = src[i] < 128 ?
+					(uint8_t)(2 * src[i] * dst[i] / 255) :
+					(uint8_t)(255 - 2 * (255 - src[i]) * (255 - dst[i]) / 255);
 		return;
 	case BLEND_OVER:
 		break;
@@ -530,6 +539,31 @@ static void apply_op(magic::Context *context, Canvas &c,
 			for(int k = 0; k < 4; k++)
 				c.data[i + k] = (uint8_t)(c.data[i + k] *
 						clamp_byte(color[k]) / 255);
+		}
+		return;
+	}
+	if(op == "invert"){
+		// Which channels, as flags; Luanti's [invert:<mode> with r, g, b, a
+		int channels[4] = {0, 0, 0, 0};
+		table_ints(t, "channels", channels, 4);
+		for(size_t i = 0; i < c.data.size(); i += 4){
+			for(int k = 0; k < 4; k++)
+				if(channels[k])
+					c.data[i + k] = (uint8_t)(255 - c.data[i + k]);
+		}
+		return;
+	}
+	if(op == "contrast"){
+		// Luanti's [contrast:<contrast>:<brightness>, both -127..127, its
+		// own curve: the factor 259 (c + 255) / (255 (259 - c)) about 128
+		const float contrast = (float)table_number(t, "contrast", 0);
+		const float brightness = (float)table_number(t, "brightness", 0);
+		const float factor = (259.0f * (contrast + 255.0f)) /
+				(255.0f * (259.0f - contrast));
+		for(size_t i = 0; i < c.data.size(); i += 4){
+			for(int k = 0; k < 3; k++)
+				c.data[i + k] = clamp_byte((int)(factor *
+						((float)c.data[i + k] - 128.0f) + 128.0f + brightness));
 		}
 		return;
 	}
