@@ -1101,13 +1101,16 @@ struct Module: public interface::Module, public luanti::Interface
 	void on_start()
 	{
 		// What may go ahead of the queue and replace its own stale copy
-		// ([NET_CHANNELS]): the player's own position and the clock. The
-		// objects' packet carries every object and is not keyed, so it
-		// stays ordered for now.
+		// ([NET_CHANNELS]): the player's own position, the clock, and the
+		// objects -- whose packet is the whole list every time (the
+		// client removes what is not in it), so the newest replaces an
+		// older one whole and no key by id is needed.
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->declare("luanti:player_pos",
 					network::Interface::Channel::LatestOnly);
 			inetwork->declare("luanti:time",
+					network::Interface::Channel::LatestOnly);
+			inetwork->declare("luanti:objects",
 					network::Interface::Channel::LatestOnly);
 		});
 	}
