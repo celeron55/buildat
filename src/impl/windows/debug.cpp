@@ -103,6 +103,25 @@ static void log_stack(CONTEXT *ctx)
 	memset(&frame, 0, sizeof frame);
 #ifdef _M_X64
 	DWORD machine = IMAGE_FILE_MACHINE_AMD64;
+	// A call through a null pointer faults with the PC at 0 and the
+	// return address the call pushed untouched at [RSP]: the walk starts
+	// from that caller instead, with the stack popped past it, since a
+	// PC of 0 ends a walk before its first frame ([WIN8_START] 13). The
+	// raw [RSP] is logged regardless, as the one number that names the
+	// caller when the walk itself gives nothing.
+	{
+		uint64_t ret = 0;
+		if(c.Rsp && !IsBadReadPtr((const void*)(uintptr_t)c.Rsp, sizeof ret))
+			ret = *(const uint64_t*)(uintptr_t)c.Rsp;
+		log_e(MODULE, "  [rsp] = %p (%s)", (void*)(uintptr_t)ret,
+				cs(module_of_address((void*)(uintptr_t)ret)));
+		if(c.Rip == 0 && ret != 0){
+			log_e(MODULE, "  the PC is 0: a call through a null pointer; "
+					"the walk starts from the caller");
+			c.Rip = ret;
+			c.Rsp += sizeof ret;
+		}
+	}
 	frame.AddrPC.Offset = c.Rip;
 	frame.AddrFrame.Offset = c.Rbp;
 	frame.AddrStack.Offset = c.Rsp;
@@ -138,6 +157,49 @@ static void log_stack(CONTEXT *ctx)
 	}
 }
 
+// The watched thread's handle and the time it last said so; the watcher
+// suspends it, walks its stack from its context, and lets it go on
+static HANDLE g_watched_thread = NULL;
+static volatile LONG64 g_watched_alive_us = 0;
+static int g_watchdog_stall_s = 10;
+
+static DWORD WINAPI watchdog_main(LPVOID)
+{
+	int64_t stalled_since = 0;
+	int64_t next_report = 0;
+	for(;;){
+		Sleep(1000);
+		const int64_t now = (int64_t)GetTickCount64() * 1000;
+		const int64_t alive = g_watched_alive_us;
+		if(now - alive < (int64_t)g_watchdog_stall_s * 1000000){
+			stalled_since = 0;
+			continue;
+		}
+		if(stalled_since == 0){
+			stalled_since = alive;
+			next_report = now;
+		}
+		if(now < next_report)
+			continue;
+		next_report = now + 60000000;
+		log_e(MODULE, "Watchdog: no frame for %d s; the main thread's stack:",
+				(int)((now - alive) / 1000000));
+		if(SuspendThread(g_watched_thread) == (DWORD)-1){
+			log_e(MODULE, "  (SuspendThread failed)");
+			continue;
+		}
+		CONTEXT ctx;
+		memset(&ctx, 0, sizeof ctx);
+		ctx.ContextFlags = CONTEXT_FULL;
+		if(GetThreadContext(g_watched_thread, &ctx))
+			log_stack(&ctx);
+		else
+			log_e(MODULE, "  (GetThreadContext failed)");
+		ResumeThread(g_watched_thread);
+	}
+	return 0;
+}
+
 static LONG WINAPI unhandled_exception(EXCEPTION_POINTERS *e)
 {
 	static volatile LONG active = 0;
@@ -165,6 +227,22 @@ void init_signal_handlers(const SigConfig &config)
 {
 	if(config.catch_segfault)
 		SetUnhandledExceptionFilter(unhandled_exception);
+}
+
+void watchdog_alive(int stall_seconds)
+{
+	g_watched_alive_us = (LONG64)GetTickCount64() * 1000;
+	if(g_watched_thread)
+		return;
+	g_watchdog_stall_s = stall_seconds;
+	DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
+			GetCurrentProcess(), &g_watched_thread, 0, FALSE,
+			DUPLICATE_SAME_ACCESS);
+	HANDLE t = CreateThread(NULL, 0, watchdog_main, NULL, 0, NULL);
+	if(t)
+		CloseHandle(t);
+	log_i(MODULE, "Watchdog: the main thread's stack is logged after %d s "
+			"without a frame", stall_seconds);
 }
 
 }

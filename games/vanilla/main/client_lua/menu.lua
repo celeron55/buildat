@@ -68,7 +68,21 @@ local function close()
 	waiting_text = nil
 end
 
+-- The world came up while the menu was still asking for the save list: the
+-- server was busy loading the game, so the answer it was asked for arrives
+-- after it says the menu is done with. Without this the list draws itself
+-- over the world the client is already in. And the guard the other way
+-- round ([WIN8_START] 15): nothing here opens a screen once the world is
+-- up, whatever packet asks -- a box kept "Building the world" over a
+-- world the player was walking in.
+local done = false
+
 local function waiting(message)
+	if done then
+		log:info("menu: no waiting screen for " .. tostring(message) ..
+				": the world is up")
+		return
+	end
 	close()
 	root = uistack.main:push({desc = "vanilla menu: waiting"})
 	local menu = ui_utils.vertical_menu(root, {min_width = 420})
@@ -674,11 +688,6 @@ function draw_import_worlds()
 	back_to_saves(menu)
 end
 
--- The world came up while the menu was still asking for the save list: the
--- server was busy loading the game, so the answer it was asked for arrives
--- after it says the menu is done with. Without this the list draws itself
--- over the world the client is already in.
-local done = false
 
 buildat.sub_packet("main:saves", function(data)
 	if done then
@@ -761,6 +770,7 @@ buildat.sub_packet("main:progress", function(data)
 	if line == nil then
 		return
 	end
+	log:verbose("menu: progress " .. line)
 	if waiting_text then
 		waiting_text:SetText(line)
 	else
@@ -790,6 +800,7 @@ end)
 
 -- The world is up and main/init.lua is what draws from here on
 buildat.sub_packet("main:menu_done", function()
+	log:info("menu: done; the world is up")
 	done = true
 	waiting_text = nil
 	close()

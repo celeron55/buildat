@@ -10,6 +10,7 @@
 #include "lua_bindings/util.h"
 #include "lua_bindings/replicate.h"
 #include "interface/fs.h"
+#include "interface/debug.h"
 #include <sys/stat.h>
 #include <ctime>
 #include "interface/os.h"
@@ -1755,6 +1756,9 @@ struct CApp: public App, public magic::Application
 
 	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
+		// A frame: the watchdog hears it, and logs this thread's stack
+		// when none comes for ten seconds ([WIN8_START] 14)
+		interface::debug::watchdog_alive(10);
 		/*magic::AutoProfileBlock profiler_block(
 				GetSubsystem<magic::Profiler>(), "App::on_update");*/
 
