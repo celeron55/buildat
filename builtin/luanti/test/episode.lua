@@ -21,7 +21,10 @@
 local NAME = rawget(_G, "EPISODE_NAME") or "dig"
 local SECONDS = tonumber(rawget(_G, "EPISODE_SECONDS")) or 20
 -- The episodes in the pool, where gravity stays on and the census reads y
-local POOL = {sink = true, swim = true, fall = true, dive = true}
+local POOL = {sink = true, swim = true, fall = true, dive = true,
+		seaplace = true}
+-- The ones where the body is in the pool and gravity stays on
+local SWIMMING = {sink = true, swim = true, fall = true, dive = true}
 local ORIGIN = {x = 0, y = 120, z = 0}
 
 -- The first registered node whose name says what it is: a game's dirt
@@ -308,14 +311,14 @@ core.register_on_joinplayer(function(player)
 		end
 		stamp()
 		player:get_inventory():set_list("main", {})
-		if NAME == "place" then
+		if NAME == "place" or NAME == "seaplace" then
 			-- Ten of the dirt in the first slot, which is what the
 			-- launcher's and the extension's hotbar select on join
 			player:get_inventory():set_stack("main", 1,
 					ItemStack(dirt .. " 10"))
 		end
 		-- Gravity stays on in the pool: sinking is the measure
-		if not POOL[NAME] then
+		if not SWIMMING[NAME] then
 			player:set_physics_override({gravity = 0})
 		end
 		for id, _ in pairs(player:hud_get_all()) do
@@ -329,7 +332,8 @@ core.register_on_joinplayer(function(player)
 		-- episodes; on the platform otherwise
 		-- a node under the surface for sink and swim, four above it for
 		-- the fall in
-		local drop = NAME == "fall" and 8 or (POOL[NAME] and 2 or 1)
+		local drop = NAME == "fall" and 8 or (SWIMMING[NAME] and 2 or
+				(NAME == "seaplace" and 5 or 1))
 		player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
 		local ent = some_entity()
 		if ent then

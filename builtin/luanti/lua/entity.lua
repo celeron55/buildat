@@ -2109,12 +2109,16 @@ function core.__use_node(playername, under, above, sneak)
 	local under_def = under_node and core.registered_nodes[under_node.name]
 	if def and def.walkable ~= false and
 			not (under_def and under_def.on_rightclick and not sneak) then
+		-- Where the node lands, which is what nodePlacement tests: into
+		-- under when that is buildable_to (grass, snow, a flower --
+		-- item_place_node's rule), else into above ([POINTABLE])
+		local at = (under_def and under_def.buildable_to) and under or above
 		local p = ref:get_pos()
 		local box = ref:get_properties().collisionbox or
 				{-0.3, 0, -0.3, 0.3, 1.75, 0.3}
-		if above.x + 0.5 > p.x + box[1] and above.x - 0.5 < p.x + box[4] and
-				above.y + 0.5 > p.y + box[2] and above.y - 0.5 < p.y + box[5] and
-				above.z + 0.5 > p.z + box[3] and above.z - 0.5 < p.z + box[6] then
+		if at.x + 0.5 > p.x + box[1] and at.x - 0.5 < p.x + box[4] and
+				at.y + 0.5 > p.y + box[2] and at.y - 0.5 < p.y + box[5] and
+				at.z + 0.5 > p.z + box[3] and at.z - 0.5 < p.z + box[6] then
 			return false
 		end
 	end

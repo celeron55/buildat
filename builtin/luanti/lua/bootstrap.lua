@@ -1807,6 +1807,11 @@ function core.__voxel_defs()
 			-- ([WATER_PARITY])
 			swimmable = (def and def.liquid_move_physics ~= nil) and
 					(def.liquid_move_physics and true or false) or is_liquid,
+			-- Whether a ray stops at it: Luanti's pointable -- true, false
+			-- (the ray goes through) or "blocking" (it stops with nothing
+			-- pointed); a node that says nothing is pointable ([POINTABLE])
+			pointable = (def and def.pointable == false) and 0 or
+					((def and def.pointable == "blocking") and 2 or 1),
 			-- What standing on it does to the player: the groups of the
 			-- same names, read by the client's physics ([PLAYER_PHYSICS])
 			bouncy = (def and def.groups and def.groups.bouncy) or 0,

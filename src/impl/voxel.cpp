@@ -378,6 +378,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.climbable = def.climbable;
 		cache.move_resistance = def.move_resistance;
 		cache.swimmable = def.swimmable;
+		cache.pointable = def.pointable;
 		cache.liquid_top = def.liquid_top;
 		cache.connect_group = def.connect_group;
 		cache.connect_mask = def.connect_mask;

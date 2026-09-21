@@ -273,6 +273,11 @@ namespace interface
 		// game may set either way -- a swimmable non-liquid, a liquid
 		// walked through ([WATER_PARITY]). is_liquid stays the drawing.
 		bool swimmable = false;
+		// Whether a ray stops here: Luanti's pointable -- 1 true, 0 false
+		// (the ray goes through: water in most games, decor), 2 "blocking"
+		// (the ray stops with nothing pointed). Objects carry the same
+		// field on their own ([POINTABLE]).
+		uint8_t pointable = 1;
 		// Which family of connecting voxels this one belongs to, 1...32, or
 		// 0 for one nothing reaches out to; and which families this one
 		// reaches out to, as a bit per family. A fence and its gates are one
@@ -382,6 +387,8 @@ namespace interface
 		uint8_t move_resistance = 0;
 		// Copied from the definition; see VoxelDefinition::swimmable
 		bool swimmable = false;
+		// Copied from the definition; see VoxelDefinition::pointable
+		uint8_t pointable = 1;
 		uint8_t connect_group = 0;
 		uint32_t connect_mask = 0;
 		bool connect_to_solid = false;

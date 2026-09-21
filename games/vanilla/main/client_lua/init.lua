@@ -3406,8 +3406,9 @@ local function voxel_is_solid(v)
 		return false
 	end
 	local def = reg:get_by_id(id)
-	return def ~= nil and not def.fully_empty
+	return def ~= nil and not def.fully_empty, def
 end
+
 
 -- The voxel the ray hit, and the last empty one before it -- which is where
 -- a node is placed and what Luanti calls the "above" of a pointed thing.
@@ -3422,7 +3423,15 @@ local function find_pointed_voxel()
 	for i = 1, math.floor(range / POINT_STEP) do
 		local p = (p0 + dir * (i * POINT_STEP)):round()
 		if p ~= last then
-			if voxel_is_solid(voxelworld.get_static_voxel(p)) then
+			-- Luanti's pointable ([POINTABLE]): the ray goes through a
+			-- pointable = false node (water in most games, decor) as
+			-- through the void, and stops with nothing pointed at
+			-- "blocking" (2)
+			local solid, def = voxel_is_solid(voxelworld.get_static_voxel(p))
+			if solid and def.pointable ~= 0 then
+				if def.pointable == 2 then
+					return nil, nil
+				end
 				return p, last or p
 			end
 			last = p

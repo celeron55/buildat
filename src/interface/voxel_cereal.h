@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 19;
+		uint8_t version = 20;
 		archive(
 				version,
 				v.name,
@@ -127,6 +127,10 @@ namespace interface
 		// ([WATER_PARITY])
 		if(version >= 19){
 			archive(v.swimmable);
+		}
+		// Version 20 added pointable, what the ray stops at ([POINTABLE])
+		if(version >= 20){
+			archive(v.pointable);
 		}
 	}
 

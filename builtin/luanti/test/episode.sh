@@ -39,6 +39,12 @@ place)
 	# there for this episode), one placed on the platform by a right
 	# click straight down: the census gains a dirt and the stack loses one
 	{ echo "look 0 -89"; echo "mouse_click right"; } > "$out/cmds.txt" ;;
+seaplace)
+	# Ten dirt in the first slot, one placed by a right click straight down
+	# from over the pool: the ray goes through the water (pointable false
+	# in VoxeLibre) to the floor, and the dirt lands in the water node over
+	# it ([POINTABLE]); the census gains a dirt where the water was
+	{ echo "look 0 -89"; echo "mouse_click right"; } > "$out/cmds.txt" ;;
 sink)
 	# Nothing pressed: the body sinks in the pool and the census says how
 	# far in EPISODE_SECONDS, and what the breath is by then
@@ -63,7 +69,7 @@ flood)
 	# Nothing pressed: the fixture digs from the sea floor into the cave
 	# under it on seed 1 and the census counts the cave's water by level
 	{ echo "look 0 -89"; } > "$out/cmds.txt" ;;
-*) echo "unknown episode $EPISODE (dig, place, sink, swim, fall, dive, pour, flood)" >&2; exit 2 ;;
+*) echo "unknown episode $EPISODE (dig, place, seaplace, sink, swim, fall, dive, pour, flood)" >&2; exit 2 ;;
 esac
 
 { echo "rawset(_G, \"EPISODE_NAME\", \"$EPISODE\")"
