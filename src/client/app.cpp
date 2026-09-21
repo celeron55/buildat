@@ -186,6 +186,10 @@ struct LookAxis
 extern client::Config g_client_config;
 extern volatile sig_atomic_t g_shutdown_signal;
 
+// The preference the local server's -l comes from, kept where the static
+// start function can read it ([LOG_LEVEL_PREF])
+static int g_server_log_level_pref = 3;
+
 static ss_ preferences_path()
 {
 	return g_client_config.get<ss_>("user_path")+"/preferences.json";
@@ -238,6 +242,12 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->sound_volume = (float)v;
 		} else if(key == "sound_mute"){
 			opt->sound_mute = (v != 0);
+		} else if(key == "log_level"){
+			in_range = (v >= 0 && v <= 6);
+			opt->log_level = (int)v;
+		} else if(key == "server_log_level"){
+			in_range = (v >= 0 && v <= 6);
+			opt->server_log_level = (int)v;
 		} else {
 			*error = "unknown preference \""+key+"\"";
 			return false;
@@ -423,9 +433,15 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jms = o.get("multisampling");
 	const json::Value &jsv = o.get("sound_volume");
 	const json::Value &jsm = o.get("sound_mute");
+	const json::Value &jll = o.get("log_level");
+	const json::Value &jsl = o.get("server_log_level");
 	// Through the same parser as -o, so that the range checks are written
 	// once and a hand-edited file is refused the same way a flag is
 	ss_ items;
+	if(jll.is_integer())
+		items += ss_()+(items.empty()?"":",")+"log_level="+itos(jll.as_integer());
+	if(jsl.is_integer())
+		items += ss_()+(items.empty()?"":",")+"server_log_level="+itos(jsl.as_integer());
 	if(jrs.is_number())
 		items += ss_()+(items.empty()?"":",")+"render_scale="+ftos(jrs.as_number());
 	if(jvs.is_boolean())
@@ -488,6 +504,8 @@ static void save_preferences(const app::Options &opt)
 	o.set("multisampling", opt.graphics.multisampling);
 	o.set("sound_volume", opt.sound_volume);
 	o.set("sound_mute", opt.sound_mute);
+	o.set("log_level", opt.log_level);
+	o.set("server_log_level", opt.server_log_level);
 	o.save_file(preferences_path().c_str());
 }
 
@@ -502,8 +520,12 @@ static void resolve_preferences(app::Options *opt)
 	// -w says what the size is, so nothing else has to; -c reads no file at
 	// all, and then the size can only come from the default
 	bool size_ok = opt->graphics.size_forced;
-	if(!opt->preferences_disabled && load_preferences(desk_w, desk_h, opt))
+	if(!opt->preferences_disabled && load_preferences(desk_w, desk_h, opt)){
 		size_ok = true;
+		if(!g_client_config.get<bool>("log_level_given"))
+			log_set_max_level(opt->log_level);
+		g_server_log_level_pref = opt->server_log_level;
+	}
 	if(!size_ok)
 		pick_default_window_size(desk_w, desk_h,
 				&opt->graphics.window_w, &opt->graphics.window_h);
@@ -2006,6 +2028,14 @@ struct CApp: public App, public magic::Application
 		if(m_options.sound_volume != before.sound_volume ||
 				m_options.sound_mute != before.sound_mute)
 			apply_sound_preferences();
+		// The client's own level at once; the server's on its next start.
+		// Not over a -l given for this run.
+		if(m_options.log_level != before.log_level &&
+				!g_client_config.get<bool>("log_level_given")){
+			log_set_max_level(m_options.log_level);
+			log_i(MODULE, "log level %d, from the preferences", m_options.log_level);
+		}
+		g_server_log_level_pref = m_options.server_log_level;
 		if(g.max_fps != b.max_fps){
 			if(magic::Engine *e = GetSubsystem<magic::Engine>())
 				e->SetMaxFps(g.max_fps);
@@ -2308,6 +2338,11 @@ struct CApp: public App, public magic::Application
 			args.push_back("-l");
 			args.push_back(itos(log_get_max_level()));
 		} else {
+			// The server's level from the preferences ([LOG_LEVEL_PREF]);
+			// a -l given to this client for the run is handed on instead
+			args.push_back("-l");
+			args.push_back(itos(g_client_config.get<bool>("log_level_given") ?
+					log_get_max_level() : g_server_log_level_pref));
 			g_local_server_log = g_client_config.get<ss_>("cache_path")+
 					"/buildat_server.log";
 		}
@@ -2430,6 +2465,10 @@ struct CApp: public App, public magic::Application
 			lua_pushnumber(L, o.sound_volume);
 		else if(name == "sound_mute")
 			lua_pushboolean(L, o.sound_mute);
+		else if(name == "log_level")
+			lua_pushinteger(L, o.log_level);
+		else if(name == "server_log_level")
+			lua_pushinteger(L, o.server_log_level);
 		else
 			lua_pushnil(L);
 		return 1;

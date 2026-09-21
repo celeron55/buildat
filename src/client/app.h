@@ -66,6 +66,11 @@ namespace app
 		// preferences, GraphicsOptions is a display mode
 		float sound_volume = 1.0f;
 		bool sound_mute = false;
+		// The client's own log level and the one it hands its local server
+		// as -l ([LOG_LEVEL_PREF]): a box report without a shell. 3 is
+		// info; -l on the command line wins for that run.
+		int log_level = 3;
+		int server_log_level = 3;
 		// -o k=v,...: applied on top of the saved file, and never written
 		// back, the same rule -w already follows
 		ss_ preference_overrides;

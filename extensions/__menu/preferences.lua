@@ -31,6 +31,10 @@ local function percent(v)
 	return string.format("%d%%", math.floor(v * 100 + 0.5))
 end
 
+-- Named as the -l numbers are; the two upper ones say what they cost
+local LOG_LEVEL_NAMES = {[1] = "error", [2] = "warning", [3] = "info",
+		[4] = "verbose (large logs, slower)", [5] = "debug (huge logs, slow)"}
+
 local PREFERENCES = {
 	{
 		name = "render_scale",
@@ -70,6 +74,22 @@ local PREFERENCES = {
 		name = "sound_mute",
 		label = "Mute",
 		values = {false, true},
+	},
+	-- The two logs' levels ([LOG_LEVEL_PREF]): a box report without a
+	-- shell. The client's takes at once, the server's on its next start;
+	-- -l on the command line wins for that run. The logs are
+	-- cache/buildat.log and cache/buildat_server.log.
+	{
+		name = "log_level",
+		label = "Client log (cache/buildat.log)",
+		values = {1, 2, 3, 4, 5},
+		show = function(v) return LOG_LEVEL_NAMES[v] end,
+	},
+	{
+		name = "server_log_level",
+		label = "Server log (cache/buildat_server.log), next start",
+		values = {1, 2, 3, 4, 5},
+		show = function(v) return LOG_LEVEL_NAMES[v] end,
 	},
 }
 
