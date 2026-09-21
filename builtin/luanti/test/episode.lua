@@ -198,36 +198,52 @@ local function census(player)
 	return out
 end
 
--- The first column, x then z outward from the origin, where the sea
--- stands over ground with a cave under it within 24 nodes: the sea floor
+-- The first column, ring by ring outward from the origin to 50, where the
+-- sea stands over ground with a cave under it within 40 nodes: the sea floor
 -- (the first non-water under the water) and, under it, an air run at
 -- least 3 tall whose floor is stone or the like. Both engines run it on
 -- the same seed and find the same column. Nil when there is none.
 local function find_flood_spot()
-	local water_top = 62
-	for r = 0, 30 do
+	-- EPISODE_SPOT = "x,z" pins the column, when the two engines' searches
+	-- would land on different caves
+	local pin_x, pin_z = tostring(rawget(_G, "EPISODE_SPOT") or ""):match("^(-?%d+),(-?%d+)$")
+	for r = 0, 50 do
 		for x = -r, r do
 			for z = -r, r do
-				if math.max(math.abs(x), math.abs(z)) == r then
-					local n = core.get_node({x = x, y = water_top, z = z}).name
-					if n == water then
+				local pinned = pin_x and (x ~= tonumber(pin_x) or z ~= tonumber(pin_z))
+				if math.max(math.abs(x), math.abs(z)) == r and not pinned then
+					-- The sea's top in this column, if it is a sea column:
+					-- the first water under the air from 80 down
+					local y = 40
+					while y > -60 and core.get_node({x = x, y = y, z = z}).name == "air" do
+						y = y - 1
+					end
+					if core.get_node({x = x, y = y, z = z}).name == water then
 						-- Down to the floor
-						local y = water_top
 						while core.get_node({x = x, y = y, z = z}).name == water and
-								y > 0 do
+								y > -90 do
 							y = y - 1
 						end
 						local floor_y = y
 						-- And on down, through ground, to an air run
 						local yy = floor_y - 1
-						while yy > floor_y - 24 do
+						while yy > floor_y - 40 do
 							local name = core.get_node({x = x, y = yy, z = z}).name
 							if name == "air" then
 								local top = yy
 								while core.get_node({x = x, y = yy - 1, z = z}).name == "air" do
 									yy = yy - 1
 								end
-								if top - yy >= 2 then
+								-- A natural cave, not a mineshaft: nothing
+								-- built within 3 of the column at its
+								-- levels (the module generates no
+								-- structures, official does)
+								local built = core.find_nodes_in_area(
+										{x = x - 6, y = yy - 2, z = z - 6},
+										{x = x + 6, y = floor_y, z = z + 6},
+										{"group:wood", "group:fence", "group:rail",
+										"mcl_core:cobweb", "group:tree", "group:torch"})
+								if top - yy >= 2 and #built == 0 then
 									return {x = x, z = z, floor_y = floor_y,
 											cave_top = top, cave_bottom = yy}
 								end
@@ -253,14 +269,14 @@ core.register_on_joinplayer(function(player)
 					water = name
 				end
 			end
-			core.emerge_area({x = -34, y = 20, z = -34}, {x = 34, y = 70, z = 34},
+			core.emerge_area({x = -52, y = -40, z = -52}, {x = 52, y = 40, z = 52},
 					function(blockpos, action, remaining)
 				if remaining > 0 then
 					return
 				end
 				local spot = find_flood_spot()
 				if not spot then
-					core.log("action", "episode: FAILED no sea over a cave within 30")
+					core.log("action", "episode: FAILED no sea over a cave within 50")
 					return
 				end
 				flood = spot

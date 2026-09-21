@@ -2758,7 +2758,7 @@ local function __set_node(x, y, z, id, param1, param2)
 	core.__note_block_changed(x, y, z)
 	-- And the liquid transform's queue: this node and the six beside it
 	-- ([LIQUID_FLOW], lua/liquid.lua)
-	core.__liquid_node_written(x, y, z)
+	core.__liquid_node_written(x, y, z, id)
 	return __set_node_raw(x, y, z, id, param1, param2)
 end
 local __get_node = __luanti_get_node

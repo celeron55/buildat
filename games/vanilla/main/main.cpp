@@ -1777,8 +1777,19 @@ struct Module: public interface::Module
 		storage::Save *save = nullptr;
 		storage::access(m_server, [&](storage::Interface *istorage){
 			save = istorage->open(world_name);
-			if(!save)
+			if(!save){
 				save = istorage->create(world_name);
+				// BUILDAT_LUANTI_SEED: a new save's seed, the way the
+				// menu's third value is, so a scripted run on both engines
+				// is of one world
+				const char *seed = getenv("BUILDAT_LUANTI_SEED");
+				if(save && seed && seed[0]){
+					const ss_ dir = save->path()+"/luanti";
+					interface::fs::create_directories(dir);
+					std::ofstream f(dir+"/world.mt", std::ios::app);
+					f<<"fixed_map_seed = "<<seed<<"\n";
+				}
+			}
 		});
 		if(!save){
 			ss_ message = "Could not open or create the save "+world_name;

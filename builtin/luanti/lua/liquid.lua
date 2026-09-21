@@ -14,10 +14,9 @@
 -- liquid_viscosity, floodable, floats, on_flood. The level is param2's low
 -- three bits and the flowing-down bit is bit 3, as on the wire.
 --
--- simplified: a generated section does not queue its liquids' edges the
--- way Mapgen::updateLiquid does, so an ocean the mapgen left over a cave
--- stays until something beside it is dug or placed; and rollback is not a
--- thing here.
+-- A generated section queues its liquids' edges the way Mapgen::updateLiquid
+-- does (the scan is C++, luanti.cpp liquid_edges). simplified: rollback is
+-- not a thing here.
 
 local LEVEL_MAX = 7
 local LEVEL_MASK = 0x07
@@ -31,8 +30,27 @@ local IGNORE, AIR = core.CONTENT_IGNORE, core.CONTENT_AIR
 local DIRS = {{0, 1, 0}, {0, 0, 1}, {1, 0, 0}, {0, 0, -1}, {-1, 0, 0}, {0, -1, 0}}
 local KIND = {UPPER, SAME, SAME, SAME, SAME, LOWER}
 
+local function key(x, y, z)
+	return x .. "," .. y .. "," .. z
+end
+
 local get_node_raw = core.get_node_raw
 local set_node_raw = core.__set_node_raw
+
+-- What this pass has decided and not yet written, by position: a read
+-- sees it, as official's does its immediate write. Written to the map at
+-- the pass's end, so that the map is read and then written rather than
+-- alternately -- voxelworld commits its write buffer on every read, and a
+-- read-write-read per node cost a step 0.4 s for a pour.
+local pending = {}
+local pending_list = {}
+local function get(x, y, z)
+	local w = pending[key(x, y, z)]
+	if w then
+		return w[4], 0, w[5]
+	end
+	return get_node_raw(x, y, z)
+end
 
 -- What the transform needs of a content id, read once from the definition
 local info_of = {}
@@ -67,9 +85,6 @@ end
 
 -- A unique queue: positions once each, in arrival order
 local queue, queued, head, tail = {}, {}, 1, 0
-local function key(x, y, z)
-	return x .. "," .. y .. "," .. z
-end
 local function push(x, y, z)
 	local k = key(x, y, z)
 	if queued[k] then
@@ -91,14 +106,23 @@ function core.transforming_liquid_add(pos)
 	push(math.floor(pos.x + 0.5), math.floor(pos.y + 0.5), math.floor(pos.z + 0.5))
 end
 
--- A node written: it and its six neighbours, as addNodeAndUpdate does (the
--- node itself last, so that a removed liquid is read after what was
--- beside it)
-function core.__liquid_node_written(x, y, z)
+-- A node written: the neighbours that are liquid or air, and then the node
+-- itself when it is, as addNodeAndUpdate does. Only those, and the node
+-- last, and that is the queue's order: a column dug top-down queues top
+-- to bottom -- the node under a dug one is still stone when it is dug --
+-- and fills in one pass, each node seeing the one above it already water.
+-- Read before the write, which is what set_node does anyway.
+function core.__liquid_node_written(x, y, z, new_id)
 	for i = 1, 6 do
-		push(x + DIRS[i][1], y + DIRS[i][2], z + DIRS[i][3])
+		local nx, ny, nz = x + DIRS[i][1], y + DIRS[i][2], z + DIRS[i][3]
+		local id = get_node_raw(nx, ny, nz)
+		if id == AIR or info(id).liquid_type ~= "none" then
+			push(nx, ny, nz)
+		end
 	end
-	push(x, y, z)
+	if new_id == AIR or info(new_id).liquid_type ~= "none" then
+		push(x, y, z)
+	end
 end
 
 function core.__liquid_queue_length()
@@ -124,19 +148,11 @@ local function max_level_from(nb_level, nb_flow_down, nt, current)
 	return current
 end
 
--- One node's decision: what it becomes, or nothing. The reads are here and
--- the write is the caller's, so that a generation of the queue is read
--- whole and then written whole -- voxelworld commits its write buffer on
--- every read, and a read-write-read of the map per node cost a step 0.4 s
--- for a pour.
--- simplified: official writes each node before reading the next, so a
--- node later in the same pass sees an earlier one's change; here a
--- generation reads the map as it stood before it. What a change queues
--- is the next generation's, so a ring of the spread is one generation
--- either way, and the pour census matches official's exactly.
+-- One node's decision: what it becomes, or nothing. The reads are here
+-- (through the pending writes) and the write is the caller's.
 local function decide(x0, y0, z0, must_reflow, falling)
 	do
-		local id0, _, param2_0 = get_node_raw(x0, y0, z0)
+		local id0, _, param2_0 = get(x0, y0, z0)
 		local i0 = info(id0)
 		local lt0 = i0.liquid_type
 
@@ -168,7 +184,7 @@ local function decide(x0, y0, z0, must_reflow, falling)
 		for i = 1, 6 do
 			local nt = KIND[i]
 			local nx, ny, nz = x0 + DIRS[i][1], y0 + DIRS[i][2], z0 + DIRS[i][3]
-			local nid, _, np2 = get_node_raw(nx, ny, nz)
+			local nid, _, np2 = get(nx, ny, nz)
 			local ni = info(nid)
 			if nt == UPPER and ni.floats then
 				floating_above = true
@@ -320,24 +336,22 @@ local function transform(loop_max)
 	local must_reflow = {}
 	local changed = {}
 	local falling = {}
+	-- Official's loop: the queue in arrival order, what a change queues
+	-- taken in the same pass while the budget lasts -- which is what
+	-- lets a dug column fill top to bottom in one pass, each node seeing
+	-- the one above it already water
 	while head <= tail and loops < loop_max do
-		-- A generation: the queue as it stands, read whole, written whole
-		local writes = {}
-		local last = tail
-		while head <= last and loops < loop_max do
-			loops = loops + 1
-			local x0, y0, z0 = pop()
-			local w = decide(x0, y0, z0, must_reflow, falling)
-			if w then
-				writes[#writes + 1] = w
+		loops = loops + 1
+		local x0, y0, z0 = pop()
+		local w = decide(x0, y0, z0, must_reflow, falling)
+		if w then
+			local k = key(x0, y0, z0)
+			if not pending[k] then
+				pending_list[#pending_list + 1] = w
 			end
-		end
-		for _, w in ipairs(writes) do
-			local x0, y0, z0, new_id, new_param2 = w[1], w[2], w[3], w[4], w[5]
-			local flows, nf, airs, na = w[6], w[7], w[8], w[9]
-			core.__note_block_changed(x0, y0, z0)
-			set_node_raw(x0, y0, z0, new_id, 0, new_param2)
+			pending[k] = w
 			changed[#changed + 1] = {x = x0, y = y0, z = z0}
+			local new_id, flows, nf, airs, na = w[4], w[6], w[7], w[8], w[9]
 			-- The neighbours that follow from the change
 			local new_lt = info(new_id).liquid_type
 			if new_lt == "source" or new_lt == "flowing" then
@@ -359,7 +373,13 @@ local function transform(loop_max)
 			end
 		end
 	end
-
+	-- The pass's writes, each position's last decision
+	for _, w in ipairs(pending_list) do
+		local last = pending[key(w[1], w[2], w[3])]
+		core.__note_block_changed(last[1], last[2], last[3])
+		set_node_raw(last[1], last[2], last[3], last[4], 0, last[5])
+	end
+	pending, pending_list = {}, {}
 	for _, p in ipairs(must_reflow) do
 		push(p[1], p[2], p[3])
 	end
@@ -422,8 +442,17 @@ function core.__step_liquids(dtime)
 	said_n = said_n + n
 	if core.get_us_time() - said_at > 5000000 then
 		if said_n > 0 then
-			core.log("info", string.format("liquids: %d nodes taken, %d queued",
-					said_n, tail - head + 1))
+			-- And what the front of the queue is, since a queue that never
+			-- empties is one that re-queues itself
+			local sample = {}
+			for i = head, math.min(tail, head + 3) do
+				local q = queue[i]
+				local id, _, p2 = get_node_raw(q[1], q[2], q[3])
+				sample[#sample + 1] = string.format("%d,%d,%d %s/%d", q[1], q[2],
+						q[3], core.get_name_from_content_id(id), p2)
+			end
+			core.log("info", string.format("liquids: %d nodes taken, %d queued: %s",
+					said_n, tail - head + 1, table.concat(sample, "; ")))
 		end
 		said_n, said_at = 0, core.get_us_time()
 	end

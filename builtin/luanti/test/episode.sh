@@ -67,6 +67,7 @@ flood)
 esac
 
 { echo "rawset(_G, \"EPISODE_NAME\", \"$EPISODE\")"
+	[ -n "${SPOT:-}" ] && echo "rawset(_G, \"EPISODE_SPOT\", \"$SPOT\")"
 	echo "rawset(_G, \"EPISODE_SECONDS\", $SECONDS_GIVEN)"
 	cat "$me/episode.lua"; } > "$out/fixture.lua"
 
@@ -154,7 +155,7 @@ cd "$here/Build"
 save=buildat_test_episode
 rm -rf "../user/games/vanilla/saves/$save"
 port=$(( 29900 + (RANDOM % 90) ))
-BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
+BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" BUILDAT_LUANTI_SEED=1 \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
 	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/module_srv.log" &
