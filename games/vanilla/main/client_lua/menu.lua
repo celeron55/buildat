@@ -458,11 +458,24 @@ function draw_new_save_name(gameid)
 	edit.minHeight = 26
 	edit.enabled = true
 	edit:SetText("world")
+	-- The seed, beside the name: empty is a random one; a number is
+	-- Luanti's fixed_map_seed for this world ([FIRST_RUN]: the driven
+	-- first run types the seed it knows how to play)
+	local seed_text = menu.window:CreateChild("Text")
+	seed_text:SetStyleAuto()
+	seed_text:SetText("seed (empty for a random one):")
+	local seed_edit = menu.window:CreateChild("LineEdit")
+	seed_edit:SetStyleAuto()
+	seed_edit.minHeight = 26
+	seed_edit.enabled = true
+	seed_edit:SetText("")
 	menu:add("Create and play", function()
 		local name = edit:GetText()
+		local seed = seed_edit:GetText()
 		waiting("Creating " .. name .. "...")
 		buildat.send_packet("main:create",
-				cereal.binary_output({name, gameid}, {"array", "string"}))
+				cereal.binary_output({name, gameid, seed},
+				{"array", "string"}))
 	end)
 	menu:add("< back", function()
 		draw_new_game()

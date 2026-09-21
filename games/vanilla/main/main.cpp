@@ -1489,11 +1489,21 @@ struct Module: public interface::Module
 			menu_error(packet.sender, "There is no game called "+gameid);
 			return;
 		}
+		// A third value is the seed the menu was given, or empty for a
+		// random one: Luanti's own fixed_map_seed, written into the world's
+		// world.mt where the module reads it when the world is made
+		const ss_ seed = values.size() > 2 ? values[2] : "";
 		storage::Save *save = nullptr;
 		storage::access(m_server, [&](storage::Interface *istorage){
 			save = istorage->create(name);
 			if(save){
 				save->store("main")->set("gameid", gameid);
+				if(!seed.empty()){
+					const ss_ dir = save->path()+"/luanti";
+					interface::fs::create_directories(dir);
+					std::ofstream f(dir+"/world.mt", std::ios::app);
+					f<<"fixed_map_seed = "<<seed<<"\n";
+				}
 				istorage->close(save);
 			}
 		});
