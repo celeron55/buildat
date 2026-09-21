@@ -212,7 +212,13 @@ local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		-- at 1.2 snow's is 10.7 and its shade reads 1.0, dirt's 4.0; 1.5
 		-- overshot snow's shade (1.13) and the pit (1.73). The tables are
 		-- under local/options_for_PBR_FIT_viewport/probes_dome_*.txt
-		bounce = 0.15, lamp = 8, dome = 1.2, ground = {r = 0.50, g = 0.44, b = 0.30}, -- doubled 2026-09-19 with groundSeen cubed,
+		-- ground x1.5 (2026-09-21 22:15, [PBR_FIT] a): the open-sky
+		-- contrast 4.0 -> 3.19 against 2.81, the open shaded dirt face
+		-- 0.53 -> 0.66 of the render's, the small cave's lit wall 0.38 ->
+		-- 0.47 and both falloffs nearer; snow untouched. The shade's blue
+		-- lags its red (0.5 against 0.66): the ground's hue is the next
+		-- rung. probes_ground_075_kept.txt beside the dome tables.
+		bounce = 0.15, lamp = 8, dome = 1.2, ground = {r = 0.75, g = 0.66, b = 0.45}, -- doubled 2026-09-19 with groundSeen cubed,
 		-- the transmitted light through a leaf, over Lambert through its
 		-- colour ([PBR_FIT] 3b, canopy_dawn)
 		translucency = 1.0,
