@@ -416,6 +416,13 @@ if(BUILD_CLIENT)
 	)
 
 	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
+	# A GUI executable on Windows ([WIN8_START] 19): no console window,
+	# whose synchronous writes made the client pay a console write per
+	# log line. A shell start attaches to the shell's console at boot
+	# (boot/basic_init.h) so -c runs and --help still print there.
+	if(WIN32)
+		set_target_properties(${CLIENT_EXE_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
+	endif()
 
 	target_link_libraries(${CLIENT_EXE_NAME}
 		${BUILDAT_CORE_NAME}

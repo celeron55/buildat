@@ -17,6 +17,7 @@
 #endif
 #ifdef _WIN32
 	#include "ports/windows_compat.h"
+	#include "ports/windows_minimal.h"
 #else
 	#include <pthread.h>
 #endif
@@ -66,6 +67,17 @@ int log_get_max_level()
 void log_set_file(const char *path, bool tee_)
 {
 	log_mutex.lock();
+#ifdef _WIN32
+	// Nothing to tee to: a GUI client started by a click has no stderr
+	// at all, and nothing here opens a console -- the file is the
+	// output. A redirected stderr (the smoke's file) and an attached
+	// shell console are handles, and keep the tee ([WIN8_START] 19).
+	{
+		HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+		if(tee_ && (err == NULL || err == INVALID_HANDLE_VALUE))
+			tee_ = false;
+	}
+#endif
 	// Binary, so that a Windows log is the same bytes as a Linux one: in
 	// text mode msvcrt writes \r\n and a reader of the file sees a \r on
 	// every line ([WIN8_START] 12)

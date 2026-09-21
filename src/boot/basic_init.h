@@ -18,6 +18,20 @@ namespace boot
 	struct BasicInitScope
 	{
 		BasicInitScope(){
+#ifdef _WIN32
+			// A GUI executable started from a shell prints there: the
+			// shell's console attached and the two streams reopened onto
+			// it. Started by a click there is none, and nothing opens one
+			// -- the log is the output ([WIN8_START] 19).
+			// Only when nothing was redirected: a stdout already a file
+			// (a harness's) stays that file
+			if(!GetConsoleWindow() &&
+					GetStdHandle(STD_OUTPUT_HANDLE) == NULL &&
+					AttachConsole(ATTACH_PARENT_PROCESS)){
+				freopen("CONOUT$", "w", stdout);
+				freopen("CONOUT$", "w", stderr);
+			}
+#endif
 			signal_handler_init();
 
 			// Force '.' as decimal point

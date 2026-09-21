@@ -165,10 +165,13 @@ Handle start(const ss_ &path, const sv_<ss_> &args, const ss_ &cwd)
 	char command_c[50000];
 	snprintf(command_c, 50000, "%s", cs(cmd));
 
+	// No window of its own for the child ([WIN8_START] 19): a server the
+	// client starts writes its log to a file, and a console window beside
+	// the game was one more thing to watch and a synchronous sink
 	if(!CreateProcess(
 			path.c_str(),
 			command_c,
-			NULL, NULL, false, 0,
+			NULL, NULL, false, CREATE_NO_WINDOW,
 			NULL, cwd.empty() ? NULL : cwd.c_str(), &si, &pi)){
 		log_w(MODULE, "start(\"%s\"): CreateProcess failed: %s",
 				cs(path), cs(format_last_error()));
