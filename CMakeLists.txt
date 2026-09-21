@@ -143,6 +143,10 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 		-DURHO3D_SAFE_LUA=${URHO3D_SAFE_LUA}
 		-DURHO3D_LUAJIT=${URHO3D_LUAJIT}
 		-DURHO3D_ANGELSCRIPT=${URHO3D_ANGELSCRIPT}
+		# generic, not Urho3D's default native: a Urho3D.dll compiled for
+		# the CI runner's CPU (AVX-512) died in DllMain on any box without
+		# it ([WIN_MARCH]); package.sh's guard checks the result
+		-DURHO3D_DEPLOYMENT_TARGET=generic
 		-DURHO3D_SAMPLES=FALSE
 		-DURHO3D_TOOLS=FALSE
 		-DURHO3D_EXTRAS=FALSE

@@ -204,6 +204,29 @@ make_one() {
 		echo "install failed; see $build/install.log" >&2; exit 1; }
 	gather_licenses "$stage"
 	echo "$version" > "$stage/VERSION"
+	# No CPU-specific code in what ships ([WIN_MARCH]): Urho3D's CMake
+	# compiles for the building machine unless told otherwise, and a DLL
+	# with AVX-512 in a static initialiser dies on any other box before the
+	# smoke, which runs on the same machine, can see it. Every shipped exe,
+	# DLL and .so disassembled; a zmm register, a ymm one or vpternlog
+	# fails the packaging.
+	if ! command -v objdump >/dev/null 2>&1; then
+		echo "package.sh: no objdump to check the shipped binaries with (binutils)" >&2
+		return 1
+	fi
+	{
+		bad=""
+		while IFS= read -r f; do
+			n=$(objdump -d "$f" 2>/dev/null | grep -cE 'zmm|ymm|vpternlog' || true)
+			[ "$n" -gt 0 ] && bad="$bad $(basename "$f")=$n"
+		done < <(find "$stage" -type f \( -name '*.exe' -o -name '*.dll' -o -name '*.so' -o -name '*.so.*' -o -name 'buildat' -o -name 'buildat_server' \) )
+		if [ -n "$bad" ]; then
+			echo "package.sh: CPU-specific code in what would ship:$bad" >&2
+			echo "  (Urho3D's URHO3D_DEPLOYMENT_TARGET is not generic, or a compiler flag has -march)" >&2
+			return 1
+		fi
+		echo "no zmm, ymm or vpternlog in the shipped binaries" >&2
+	}
 	# What built it ([WIN_DLL_INIT]): the toolchain packages' versions, into
 	# the archive and the build log, so the next difference between two
 	# archives of one source is read off two text files
@@ -213,6 +236,7 @@ make_one() {
 		  dpkg -l 'mingw-w64*' 'gcc-mingw-w64*' 'binutils-mingw-w64*' \
 			'gcc' 'g++' 'libc6' 'libstdc++6' 'cmake' 2>/dev/null \
 			| awk '/^ii/ {print $2, $3}'
+		  echo "march: generic (URHO3D_DEPLOYMENT_TARGET=generic; buildat's own binaries carry no -march)"
 		} > "$stage/bin/TOOLCHAIN"
 		# To stderr: this function's stdout is the archive's path
 		echo "toolchain:" >&2; sed 's/^/  /' "$stage/bin/TOOLCHAIN" >&2
