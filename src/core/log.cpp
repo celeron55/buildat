@@ -11,7 +11,13 @@
 #include <cstring>
 #include <cstdarg>
 #ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+#ifdef _WIN32
 	#include "ports/windows_compat.h"
+	#include "ports/windows_minimal.h"
 #else
 	#include <pthread.h>
 #endif
@@ -39,6 +45,10 @@ static std::atomic_int current_level(0);
 static std::atomic_int max_level(CORE_INFO);
 
 static FILE *file = NULL;
+// The file beside stderr rather than instead of it: the default log
+// ([WIN8_START]), where the terminal and a harness reading the stream
+// keep what they had
+static bool tee = false;
 
 void log_init()
 {
@@ -54,13 +64,36 @@ int log_get_max_level()
 	return max_level;
 }
 
-void log_set_file(const char *path)
+void log_set_file(const char *path, bool tee_)
 {
 	log_mutex.lock();
-	file = fopen(path, "a");
-	if(file)
+#ifdef _WIN32
+	// Nothing to tee to: a GUI client started by a click has no stderr
+	// at all, and nothing here opens a console -- the file is the
+	// output. A redirected stderr (the smoke's file) and an attached
+	// shell console are handles, and keep the tee ([WIN8_START] 19).
+	{
+		HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+		if(tee_ && (err == NULL || err == INVALID_HANDLE_VALUE))
+			tee_ = false;
+	}
+#endif
+	// Binary, so that a Windows log is the same bytes as a Linux one: in
+	// text mode msvcrt writes \r\n and a reader of the file sees a \r on
+	// every line ([WIN8_START] 12)
+	file = fopen(path, "ab");
+	tee = tee_;
+	if(file){
 		fprintf(stderr, "Opened log file \"%s\"\n", path);
-	else
+		// And stderr into the same file: a crash's backtrace is written
+		// there by the signal handler, and a local server a client
+		// started has no terminal for it to land on ([START_PROGRESS]).
+		// Not when teeing: the stream stays what it was.
+		if(!tee){
+			fflush(stderr);
+			dup2(fileno(file), 2);
+		}
+	} else
 		log_w("__log", "Failed to open log file \"%s\"", path);
 	log_mutex.unlock();
 }
@@ -86,7 +119,8 @@ void log_nl_nolock()
 		if(file){
 			fprintf(file, "\n");
 			fflush(file);
-		} else {
+		}
+		if(!file || tee){
 			fprintf(stderr, "\n");
 			if(use_colors)
 				fprintf(stderr, "\033[0m");
@@ -107,7 +141,7 @@ void log_nl()
 
 static void print(int level, const char *sys, const char *fmt, va_list va_args)
 {
-	if(use_colors && !file &&
+	if(use_colors && (!file || tee) &&
 			(level != current_level || line_begin) && level <= max_level){
 		if(level == CORE_FATAL)
 			fprintf(stderr, "\033[0m\033[0;1;41m"); // reset, bright red bg
@@ -148,13 +182,17 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 		const char *levelcs = "FEWIVDT";
 		if(file)
 			fprintf(file, "%s %c %s: ", timestr, levelcs[level], sysstr);
-		else
+		if(!file || tee)
 			fprintf(stderr, "%s %c %s: ", timestr, levelcs[level], sysstr);
 		line_begin = false;
 	}
-	if(file)
-		vfprintf(file, fmt, va_args);
-	else
+	if(file){
+		va_list copy;
+		va_copy(copy, va_args);
+		vfprintf(file, fmt, copy);
+		va_end(copy);
+	}
+	if(!file || tee)
 		vfprintf(stderr, fmt, va_args);
 }
 
@@ -165,7 +203,7 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 	FILE *f = file;
 	if(f == NULL)
 		f = stderr;
-	if(use_colors && !file)
+	if(use_colors && (!file || tee))
 		fprintf(f, "\033[0m"); // reset
 	vfprintf(f, fmt, va_args);
 	fprintf(f, "\n");
