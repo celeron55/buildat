@@ -2196,34 +2196,153 @@ function core.mod_channel_join(name)
 	return setmetatable({name = tostring(name), joined = true}, ModChannel)
 end
 
--- The ones Luanti always answers with a list, whether or not there is
--- anything in it. A stub that says nil instead takes its caller down the
--- moment it writes the ipairs() every one of these is written for: devtest's
--- testhud does it in a globalstep, twelve times a second, and the error is
--- in the mod rather than anywhere that says what is really missing.
+-- core.get_node_boxes(box_type, pos, node) -> {{x1,y1,z1,x2,y2,z2}, ...}
 --
--- A fresh table each call, because a caller may keep or add to what it is
--- given and the next caller should not see that.
---
-local function stub_list(name)
-	core[name] = function()
-		if not stub_warned[name] then
-			stub_warned[name] = true
-			core.log("warning", "core." .. name .. "() is a stub")
-		end
-		return {}
+-- A node's real shape, which a mod reasoning about collision or selection
+-- asks for (VoxeLibre's mob spawning, its line of sight). The box of the
+-- type asked for, falling back as Luanti does: collision_box -> node_box,
+-- selection_box -> node_box, and a nodebox-less node is the whole cube.
+-- "fixed" as given; "regular" the cube; "leveled" the cube up to param2
+-- sixty-fourths; "wallmounted" the wall_* box the param2 picks;
+-- "connected" the fixed part and each connect_* side whose neighbour is
+-- one of connects_to (or solid, the fence's rule). Boxes are turned by
+-- a facedir/4dir param2 about y, which is what a stair or a slab asks
+-- for; simplified: the facedir's other 20 orientations (a node on its
+-- side) are answered unturned.
+-- BEGIN get_node_boxes (builtin/luanti/test/node_boxes.lua runs this span alone)
+local function rotate_box_y(b, turns)
+	local x1, y1, z1, x2, y2, z2 = b[1], b[2], b[3], b[4], b[5], b[6]
+	for _ = 1, turns % 4 do
+		-- Luanti's facedir 1 is rotateXZBy(-90): (x, z) -> (z, -x); the
+		-- box's corners re-sorted, since a rotated min is not a min
+		x1, z1, x2, z2 = z1, -x2, z2, -x1
 	end
+	return {x1, y1, z1, x2, y2, z2}
 end
 
-for _, name in ipairs({
-	-- A node's real shape, which a mod reasoning about collision or
-	-- selection asks for. The boxes exist -- node_boxes() above reads them
-	-- for the mesher -- and what is missing is the rotation a paramtype2
-	-- turns them by, which is the reason this is not four lines either.
-	"get_node_boxes",
-}) do
-	stub_list(name)
+local function box_list(boxes)
+	if type(boxes) ~= "table" then
+		return {}
+	end
+	if type(boxes[1]) == "number" then
+		return {{boxes[1], boxes[2], boxes[3], boxes[4], boxes[5], boxes[6]}}
+	end
+	local out = {}
+	for _, b in ipairs(boxes) do
+		if type(b) == "table" and #b >= 6 then
+			out[#out + 1] = {b[1], b[2], b[3], b[4], b[5], b[6]}
+		end
+	end
+	return out
 end
+
+local CUBE = {{-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}}
+local WALLMOUNTED_KEYS = {[0] = "wall_top", "wall_bottom", "wall_side",
+		"wall_side", "wall_side", "wall_side"}
+local CONNECT_SIDES = {
+	{key = "connect_top", d = {x = 0, y = 1, z = 0}},
+	{key = "connect_bottom", d = {x = 0, y = -1, z = 0}},
+	{key = "connect_front", d = {x = 0, y = 0, z = -1}},
+	{key = "connect_left", d = {x = -1, y = 0, z = 0}},
+	{key = "connect_back", d = {x = 0, y = 0, z = 1}},
+	{key = "connect_right", d = {x = 1, y = 0, z = 0}},
+}
+
+local function connects(def, other_name)
+	local odef = core.registered_nodes[other_name]
+	if not odef then
+		return false
+	end
+	for _, want in ipairs(def.connects_to or {}) do
+		if want == other_name then
+			return true
+		end
+		local g = want:match("^group:(.+)$")
+		if g and (odef.groups or {})[g] and odef.groups[g] > 0 then
+			return true
+		end
+	end
+	return false
+end
+
+function core.get_node_boxes(box_type, pos, node)
+	node = node or core.get_node(pos)
+	local def = core.registered_nodes[node.name]
+	if not def then
+		return {}
+	end
+	local box = nil
+	if box_type == "collision_box" then
+		box = def.collision_box or def.node_box
+	elseif box_type == "selection_box" then
+		box = def.selection_box or def.node_box
+	else
+		box = def.node_box
+	end
+	if type(box) ~= "table" then
+		if def.drawtype == "nodebox" or def.drawtype == "mesh" then
+			return {}
+		end
+		return {CUBE[1]}
+	end
+	local p2 = node.param2 or 0
+	local out
+	if box.type == "regular" then
+		out = {CUBE[1]}
+	elseif box.type == "leveled" then
+		local h = -0.5 + math.max(0, math.min(64, p2)) / 64
+		out = {{-0.5, -0.5, -0.5, 0.5, h, 0.5}}
+	elseif box.type == "wallmounted" then
+		local key = WALLMOUNTED_KEYS[p2 % 8] or "wall_side"
+		out = box_list(box[key] or box.wall_side)
+		if key == "wall_side" then
+			-- The side boxes are given for the -x wall (Luanti's
+			-- transformNodeBox: +x turned 180, -z +90, +z -90; a turn
+			-- here is -90): param2 2 +x, 3 -x, 4 +z, 5 -z
+			local turns = ({[2] = 2, [3] = 0, [4] = 1, [5] = 3})[p2 % 8] or 0
+			for i, b in ipairs(out) do
+				out[i] = rotate_box_y(b, turns)
+			end
+		end
+		return out
+	elseif box.type == "connected" then
+		out = box_list(box.fixed)
+		for _, side in ipairs(CONNECT_SIDES) do
+			local n = core.get_node({x = pos.x + side.d.x, y = pos.y + side.d.y,
+					z = pos.z + side.d.z})
+			if connects(def, n.name) then
+				for _, b in ipairs(box_list(box[side.key])) do
+					out[#out + 1] = b
+				end
+			else
+				for _, b in ipairs(box_list(box["dis" .. side.key])) do
+					out[#out + 1] = b
+				end
+			end
+		end
+		return out
+	else
+		out = box_list(box.fixed)
+	end
+	local ptype = def.paramtype2 or ""
+	if ptype == "facedir" or ptype == "colorfacedir" then
+		local fd = p2 % 32
+		if ptype == "colorfacedir" then
+			fd = p2 % 32
+		end
+		if fd < 4 then
+			for i, b in ipairs(out) do
+				out[i] = rotate_box_y(b, fd)
+			end
+		end
+	elseif ptype == "4dir" or ptype == "color4dir" then
+		for i, b in ipairs(out) do
+			out[i] = rotate_box_y(b, p2 % 4)
+		end
+	end
+	return out
+end
+-- END get_node_boxes
 
 -- The two an object is in, which lua/entity.lua fills: tables rather than
 -- functions, because indexing a function is an error and a mod that only
