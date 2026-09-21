@@ -340,6 +340,12 @@ static size_t facing_variant_count(const ss_ &facing)
 		return 4;
 	if(facing == "wallmounted")
 		return 8;
+	// A plantlike node's meshoptions: the shape in bits 0-2 and the 1.4x
+	// size in bit 4 ([PLANT_SIZE]); the random offset and the random dip
+	// (bits 3 and 5) want the position and are not a variant --
+	// simplified: they are drawn as the plain shape
+	if(facing == "meshoptions")
+		return 16;
 	return 0;
 }
 
@@ -351,6 +357,8 @@ static uint8_t facing_variant_of_param(const ss_ &facing, uint8_t param)
 		return (uint8_t)(param & 0x03);
 	if(facing == "wallmounted")
 		return (uint8_t)(param & 0x07);
+	if(facing == "meshoptions")
+		return (uint8_t)((param & 0x07) | ((param & 0x10) ? 8 : 0));
 	return 0;
 }
 
@@ -614,6 +622,9 @@ static uint8_t facing_facedir(const ss_ &facing, size_t variant)
 {
 	if(facing == "wallmounted")
 		return WALLMOUNTED_FACEDIR[variant & 7];
+	// A plant's shape is not a turn of its tiles
+	if(facing == "meshoptions")
+		return 0;
 	return (uint8_t)(variant % 24);
 }
 
@@ -3293,15 +3304,19 @@ struct Module: public interface::Module, public luanti::Interface
 	// base is where the plant stands: the floor of its own voxel for
 	// plantlike, and the top of it for plantlike_rooted, whose plant is
 	// drawn into the space above the cube it is rooted in.
+	// shape: meshoptions' bits 0-2 -- 0 the "x" (two quads on the
+	// diagonals), 1 the "+" (two quads on the axes), 2 the "*" (three
+	// quads 60 degrees apart), 3 the "#" (four quads, two along each axis
+	// a quarter in from the middle), 4 the "#" leaning outwards. Each
+	// quad is visual_scale wide, as official's drawPlantlike has it
+	// (vertices at +-BS/2 * scale, then the turn), so a diagonal quad's
+	// reach along an axis is that over sqrt(2): a cross from corner to
+	// corner was 41 % too wide at every scale ([PLANT_SIZE]).
 	static void add_plant_quads(sv_<interface::VoxelQuad> &out, float scale,
-			float base = -0.5f, uint8_t tile = 0)
+			float base = -0.5f, uint8_t tile = 0, unsigned shape = 0)
 	{
-		// Each quad is visual_scale wide and turned 45 degrees, as
-		// official's drawPlantlike has it (vertices at +-BS/2 * scale
-		// before the turn), so its reach along an axis is that over
-		// sqrt(2): a cross from corner to corner was 41 % too wide at
-		// every scale ([PLANT_SIZE])
-		const float r = 0.5f * scale * 0.70710678f;
+		const float half = 0.5f * scale;
+		const float r = half * 0.70710678f;
 		const float y0 = base;
 		const float y1 = base + scale;
 		auto quad = [&](float ax, float az, float bx, float bz){
@@ -3318,8 +3333,30 @@ struct Module: public interface::Module, public luanti::Interface
 			q.tile = tile;
 			out.push_back(q);
 		};
-		quad(-r, -r, r, r);
-		quad(-r, r, r, -r);
+		switch(shape){
+		case 1: // +
+			quad(-half, 0, half, 0);
+			quad(0, half, 0, -half);
+			break;
+		case 2: // *, three at 60 degrees, the first along x
+			for(int i = 0; i < 3; i++){
+				const float a = (float)i * 3.14159265f / 3.0f;
+				const float dx = half * cosf(a), dz = half * sinf(a);
+				quad(-dx, -dz, dx, dz);
+			}
+			break;
+		case 3: // #, two along each axis, a quarter in from the middle
+		case 4: // the same leaning outwards; simplified: drawn upright
+			quad(-half, -0.25f * scale, half, -0.25f * scale);
+			quad(-half, 0.25f * scale, half, 0.25f * scale);
+			quad(-0.25f * scale, half, -0.25f * scale, -half);
+			quad(0.25f * scale, half, 0.25f * scale, -half);
+			break;
+		default: // x
+			quad(-r, -r, r, r);
+			quad(-r, r, r, -r);
+			break;
+		}
 	}
 
 	// One quad lying flat against the surface it is mounted on, which is what
@@ -4603,6 +4640,11 @@ struct Module: public interface::Module, public luanti::Interface
 					// variant index is the wallmounted direction itself
 					add_wall_quads(wall_shape, var.shape,
 							visual_scale > 0.0f ? visual_scale : 1.0f, i);
+				} else if(facing == "meshoptions" && drawtype == "plantlike"){
+					// The shape the param2 names, 1.4x with bit 4
+					const float vs = visual_scale > 0.0f ? visual_scale : 1.0f;
+					add_plant_quads(var.shape, (i & 8) ? vs * 1.4f : vs,
+							-0.5f, 0, (unsigned)(i & 7));
 				} else if(!shape.empty() && !shape_over_cube && d != 0){
 					// A node that has a shape turns the shape too: a stair
 					// facing the other way is the same quads rotated, and

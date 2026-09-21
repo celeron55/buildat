@@ -984,6 +984,9 @@ local FACING_OF_PARAMTYPE2 = {
 	facedir = "facedir", colorfacedir = "facedir",
 	["4dir"] = "4dir", color4dir = "4dir",
 	wallmounted = "wallmounted", colorwallmounted = "wallmounted",
+	-- A plant's shape and size out of its param2 ([PLANT_SIZE]): the
+	-- mesher makes a variant per shape and size bit
+	meshoptions = "meshoptions",
 }
 
 -- And which of them take their colour out of a palette. Luanti ignores a
