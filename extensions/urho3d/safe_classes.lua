@@ -1332,6 +1332,9 @@ function M.define(dst, util)
 			-- on white without it. effectColor is what it is drawn with.
 			SetTextEffect = util.self_function(
 					"SetTextEffect", {}, {"Text", "number"}),
+			-- Wrapped within the element's width ([LAUNCH_DESC])
+			SetWordwrap = util.self_function(
+					"SetWordwrap", {}, {"Text", "boolean"}),
 		},
 		properties = {
 			text = util.simple_property("string"),

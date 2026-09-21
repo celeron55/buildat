@@ -150,8 +150,9 @@ function M.boot(launch_action)
 	end
 
 	local items = {}
-	local function add(icon, text, action)
+	local function add(icon, text, action, description)
 		items[#items + 1] = {button = menu_entry(icon, text),
+				label = text, description = description,
 				action = function()
 					log:info("Menu entry: "..dump(text))
 					action()
@@ -160,11 +161,38 @@ function M.boot(launch_action)
 
 	-- What the user sets once and every game honours; not a launch, so
 	-- the menu's own rather than a tile from the tree
-	add("__menu/res/icon_preferences.png", "Preferences", preferences.show)
+	add("__menu/res/icon_preferences.png", "Preferences", preferences.show,
+			"What every game honours: the window, the sound, the mouse.")
 	-- And every launch action the tree offers, in the grid's order
 	local actions = launch_grid.actions(log)
 	for _, action in ipairs(actions) do
-		add(action.icon, action.label, action.run)
+		add(action.icon, action.label, action.run, action.description)
+	end
+
+	-- The selected entry's name and description, to the right of the logo
+	-- in the logo's row ([LAUNCH_DESC]): the label on the first line,
+	-- larger, the description under it, wrapping to the window's right
+	-- edge; set as the selection moves, by keys or by the mouse, and
+	-- cleared when nothing is selected
+	local DESC_MARGIN = 24
+	local desc_x = math.floor(magic.ui.root.width / 2) + 80 + DESC_MARGIN
+	local desc_w = math.max(100, magic.ui.root.width - desc_x - DESC_MARGIN)
+	local desc_name = logo_holder:CreateChild("Text")
+	desc_name:SetStyleAuto()
+	desc_name:SetFontSize(22)
+	desc_name:SetPosition(desc_x, 40)
+	desc_name:SetFixedWidth(desc_w)
+	desc_name.color = magic.Color(0.867, 0.867, 0.867)
+	local desc_text = logo_holder:CreateChild("Text")
+	desc_text:SetStyleAuto()
+	desc_text:SetFontSize(14)
+	desc_text:SetPosition(desc_x, 72)
+	desc_text:SetFixedWidth(desc_w)
+	desc_text:SetWordwrap(true)
+	desc_text.color = magic.Color(0.7, 0.7, 0.7)
+	local function show_description(item)
+		desc_name.text = item and item.label or ""
+		desc_text.text = item and item.description or ""
 	end
 
 	-- Now that the entries are known: a grid wrapping by the window's
@@ -222,6 +250,9 @@ function M.boot(launch_action)
 		button:GetChild("ButtonText").color = magic.Color(c, c, c)
 		if selected and index then
 			scroll_to(index)
+			show_description(items[index])
+		elseif not selected and index and desc_name.text == items[index].label then
+			show_description(nil)
 		end
 	end)
 
