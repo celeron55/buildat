@@ -6773,6 +6773,98 @@ struct Module: public interface::Module, public luanti::Interface
 		return 1;
 	}
 
+	// liquid_edges(x0, y0, z0, x1, y1, z1, liquid_ids, floodable_ids) ->
+	// positions, flat: the liquid nodes of a generated box that have
+	// somewhere to flow, which is what Mapgen::updateLiquid queues --
+	// per column from the top, the topmost node of a liquid run when a
+	// floodable node is beside it, and the lowest node of a run when the
+	// node under it is floodable (or the topmost was not checked and is
+	// flowable). Columns on the box's rim are skipped as official skips
+	// them: their side neighbours are outside. Ignore ends a run without
+	// queueing. [LIQUID_FLOW]
+	static int l_liquid_edges(lua_State *L)
+	{
+		Module *self = module_of(L);
+		int32_t x0 = luaL_checkinteger(L, 1);
+		int32_t y0 = luaL_checkinteger(L, 2);
+		int32_t z0 = luaL_checkinteger(L, 3);
+		int32_t x1 = luaL_checkinteger(L, 4);
+		int32_t y1 = luaL_checkinteger(L, 5);
+		int32_t z1 = luaL_checkinteger(L, 6);
+		luaL_checktype(L, 7, LUA_TTABLE);
+		luaL_checktype(L, 8, LUA_TTABLE);
+		lua_newtable(L);
+		if(x1 - x0 < 2 || z1 - z0 < 2 || y1 < y0)
+			return 1;
+		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
+				(double)(z1 - z0 + 1);
+		if(volume > (double)MAX_REGION_VOXELS)
+			return luaL_error(L, "liquid_edges(): %s voxels is more than "
+					"the %d this reads at once", cs(itos((int64_t)volume)),
+					(int)MAX_REGION_VOXELS);
+		// Bit 0: a liquid; bit 1: floodable
+		sv_<uint8_t> kind(65536, 0);
+		for(int arg = 7; arg <= 8; arg++){
+			size_t n_ids = lua_objlen(L, arg);
+			for(size_t i = 1; i <= n_ids; i++){
+				lua_rawgeti(L, arg, (int)i);
+				lua_Integer id = lua_tointeger(L, -1);
+				lua_pop(L, 1);
+				if(id >= 0 && id <= 65535)
+					kind[id] |= (arg == 7) ? 1 : 2;
+			}
+		}
+		sv_<uint32_t> words;
+		self->read_region(x0, y0, z0, x1, y1, z1, words);
+		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
+		const size_t sx = x1 - x0 + 1, sy = y1 - y0 + 1;
+		auto at = [&](int32_t x, int32_t y, int32_t z) -> uint16_t {
+			return f.id.get(words[((size_t)(z - z0) * sy + (y - y0)) * sx +
+					(x - x0)]);
+		};
+		auto flowable = [&](int32_t x, int32_t y, int32_t z) -> bool {
+			return (kind[at(x + 1, y, z)] & 2) || (kind[at(x - 1, y, z)] & 2) ||
+					(kind[at(x, y, z + 1)] & 2) || (kind[at(x, y, z - 1)] & 2);
+		};
+		int n = 0;
+		auto push = [&](int32_t x, int32_t y, int32_t z){
+			lua_pushinteger(L, x); lua_rawseti(L, -2, ++n);
+			lua_pushinteger(L, y); lua_rawseti(L, -2, ++n);
+			lua_pushinteger(L, z); lua_rawseti(L, -2, ++n);
+		};
+		for(int32_t z = z0 + 1; z <= z1 - 1; z++)
+		for(int32_t x = x0 + 1; x <= x1 - 1; x++){
+			bool wasignored = true, wasliquid = false;
+			bool waschecked = false, waspushed = false;
+			for(int32_t y = y1; y >= y0; y--){
+				uint16_t id = at(x, y, z);
+				bool isignored = id == 0;
+				bool isliquid = (kind[id] & 1) != 0;
+				if(isignored || wasignored || isliquid == wasliquid){
+					waschecked = false;
+					waspushed = false;
+				} else if(isliquid){
+					// The topmost node of a liquid run
+					bool pushed = false;
+					if(flowable(x, y, z)){
+						push(x, y, z);
+						pushed = true;
+					}
+					waschecked = true;
+					waspushed = pushed;
+				} else {
+					// The topmost node under a liquid run
+					if(!waspushed && ((kind[id] & 2) ||
+							(!waschecked && flowable(x, y + 1, z))))
+						push(x, y + 1, z);
+				}
+				wasliquid = isliquid;
+				wasignored = isignored;
+			}
+		}
+		return 1;
+	}
+
 	// find_nodes(x0, y0, z0, x1, y1, z1, ids) -> positions, ids_at
 	//
 	// Every voxel of the box whose content id is in the list: the positions
@@ -7943,6 +8035,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
 		set_global_cfunction("__luanti_loaded_boxes", l_loaded_boxes);
 		set_global_cfunction("__luanti_find_ids", l_find_ids);
+		set_global_cfunction("__luanti_liquid_edges", l_liquid_edges);
 		set_global_cfunction("__luanti_find_nodes", l_find_nodes);
 		set_global_cfunction("__luanti_ids_at", l_ids_at);
 		// The world is not made yet and a mod that asks how big a chunk is

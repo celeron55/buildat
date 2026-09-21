@@ -338,11 +338,21 @@ local function bind_top(n)
 	return "; bindings ms: " .. table.concat(parts, ", ")
 end
 
+local run_on_generated_mods
+
 function core.__run_on_generated(x0, y0, z0, x1, y1, z1, blockseed)
 	local callbacks = core.registered_on_generateds
-	if callbacks == nil or #callbacks == 0 then
-		return
+	if callbacks ~= nil and #callbacks > 0 then
+		run_on_generated_mods(callbacks, x0, y0, z0, x1, y1, z1, blockseed)
 	end
+	-- After the mods' writes: the liquids that have somewhere to flow are
+	-- queued, as the mapgen's own would be ([LIQUID_FLOW], lua/liquid.lua)
+	if core.__liquid_scan_generated then
+		core.__liquid_scan_generated(x0, y0, z0, x1, y1, z1)
+	end
+end
+
+run_on_generated_mods = function(callbacks, x0, y0, z0, x1, y1, z1, blockseed)
 	mapgen_gennotify = parse_gennotify(__luanti_gennotify)
 	-- Vectors and not plain tables: a mod calls vector methods on what it
 	-- is given, which is what Luanti hands it

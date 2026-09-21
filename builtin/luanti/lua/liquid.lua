@@ -376,8 +376,36 @@ local function transform(loop_max)
 	return loops
 end
 
+-- A generated box: the liquids with somewhere to flow queued, as
+-- Mapgen::updateLiquid does -- the scan is C++ (luanti.cpp, liquid_edges);
+-- the sets it takes are every liquid id and every floodable id, read once
+local liquid_ids, floodable_ids = nil, nil
+function core.__liquid_scan_generated(x0, y0, z0, x1, y1, z1)
+	if liquid_ids == nil then
+		liquid_ids, floodable_ids = {}, {}
+		for name, def in pairs(core.registered_nodes) do
+			local id = core.get_content_id(name)
+			if def.liquidtype and def.liquidtype ~= "none" then
+				liquid_ids[#liquid_ids + 1] = id
+			elseif def.floodable then
+				floodable_ids[#floodable_ids + 1] = id
+			end
+		end
+	end
+	if #liquid_ids == 0 then
+		return 0
+	end
+	local flat = __luanti_liquid_edges(x0, y0, z0, x1, y1, z1,
+			liquid_ids, floodable_ids)
+	for i = 1, #flat, 3 do
+		push(flat[i], flat[i + 1], flat[i + 2])
+	end
+	return #flat / 3
+end
+
 -- Once every liquid_update seconds, the whole queue at most once
 local due = 0
+local said_n, said_at = 0, 0
 function core.__step_liquids(dtime)
 	due = due - dtime
 	if due > 0 then
@@ -389,5 +417,15 @@ function core.__step_liquids(dtime)
 	if loop_max <= 0 then
 		return 0
 	end
-	return transform(loop_max)
+	local n = transform(loop_max)
+	-- What the transform did, at most every five seconds
+	said_n = said_n + n
+	if core.get_us_time() - said_at > 5000000 then
+		if said_n > 0 then
+			core.log("info", string.format("liquids: %d nodes taken, %d queued",
+					said_n, tail - head + 1))
+		end
+		said_n, said_at = 0, core.get_us_time()
+	end
+	return n
 end
