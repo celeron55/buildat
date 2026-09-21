@@ -28,6 +28,10 @@ namespace command_seq
 		Text,
 		Quit,
 		Look,
+		// event <name> <param>: the Urho3D event command_seq:<name> sent
+		// on the client with the rest of the line as its Param, for any
+		// client Lua to handle ([CMD_EVENT])
+		Event,
 	};
 
 	struct Command
@@ -42,6 +46,8 @@ namespace command_seq
 		// is what a direction vector (x, y, z) comes out as.
 		double yaw = 0.0;
 		double pitch = 0.0;
+		// Event only: the rest of the line after the name
+		ss_ param;
 	};
 
 	// One command per line. Empty lines and '#' comments are ignored.
@@ -77,8 +83,21 @@ namespace command_seq
 	bool inject_mouse_move(Urho3D::Input *input, int dx, int dy, ss_ *error);
 	bool inject_mouse_wheel(Urho3D::Input *input, int delta, ss_ *error);
 	bool inject_text(Urho3D::Input *input, const ss_ &text, ss_ *error);
+	// Waits for every screenshot still being written; before the process
+	// ends, so a run's last picture is whole
+	void finish_screenshots();
+
+	// With a logical size, the picture is that size: the letterboxed
+	// frame at (ox, oy) scaled by s in the window, resampled back
+	// ([SEQ_FIXED_SIZE])
 	bool save_screenshot(Urho3D::Graphics *graphics, const ss_ &path,
-			ss_ *error);
+			ss_ *error, int logical_w = 0, int logical_h = 0,
+			int ox = 0, int oy = 0, float s = 1.f);
+	// What to call the next screenshot in a directory: the date and the
+	// time, screenshot_20250713_130617.png, with a numbered suffix when one
+	// second holds two of them. The caller is given the name back and has
+	// to be able to tell one shot from the next.
+	ss_ screenshot_name(const ss_ &dir);
 }
 }
 // vim: set noet ts=4 sw=4:
