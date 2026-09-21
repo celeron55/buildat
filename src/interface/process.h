@@ -11,6 +11,9 @@ namespace interface
 
 		struct ExecOptions {
 			sm_<ss_, ss_> env;
+			// A file the child's stdout and stderr go into, when set: what
+			// a failed compile said, for the log ([WIN8_START] 9)
+			ss_ output_path;
 		};
 
 		int shell_exec(const std::string &command,

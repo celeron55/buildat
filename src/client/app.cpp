@@ -10,6 +10,8 @@
 #include "lua_bindings/util.h"
 #include "lua_bindings/replicate.h"
 #include "interface/fs.h"
+#include <sys/stat.h>
+#include <ctime>
 #include "interface/os.h"
 #include "interface/process.h"
 #include "interface/tcpsocket.h"
@@ -524,6 +526,8 @@ static ss_ g_local_server_port;
 // The local server's log, tailed for its STATUS lines ([START_PROGRESS])
 static ss_ g_local_server_log;
 static size_t g_local_server_log_offset = 0;
+static bool g_local_server_listening = false;
+static int64_t g_local_server_started_s = 0;
 static ss_ g_local_server_status;
 
 // simplified: A free port is picked by probing; a race with another process
@@ -2304,6 +2308,8 @@ struct CApp: public App, public magic::Application
 					"/buildat_server.log";
 		}
 		g_local_server_log_offset = 0;
+		g_local_server_listening = false;
+		g_local_server_started_s = (int64_t)time(NULL);
 		g_local_server_status.clear();
 		log_i(MODULE, "server log: %s", cs(g_local_server_log));
 		// And whether that server restarts a module when its source
@@ -2515,7 +2521,41 @@ struct CApp: public App, public magic::Application
 		return 0;
 	}
 
-	// local_server_ready() -> bool
+	// The local server's log from where the last read left off, for its
+	// "STATUS ..." lines; "STATUS Listening" is the one readiness reads
+	static void tail_local_server_log()
+	{
+		if(g_local_server_log.empty())
+			return;
+		// Not the run before: a default log is rotated away by the child
+		// when it starts, and until then the file here is the old one,
+		// with an old "Listening" in it
+		struct stat st;
+		if(stat(g_local_server_log.c_str(), &st) != 0 ||
+				(int64_t)st.st_mtime < g_local_server_started_s)
+			return;
+		std::ifstream f(g_local_server_log, std::ios::binary);
+		if(!f.good())
+			return;
+		f.seekg(g_local_server_log_offset);
+		ss_ line;
+		while(std::getline(f, line)){
+			g_local_server_log_offset += line.size() + 1;
+			const size_t at = line.find("STATUS ");
+			if(at != ss_::npos){
+				g_local_server_status = line.substr(at + 7);
+				if(g_local_server_status == "Listening")
+					g_local_server_listening = true;
+			}
+		}
+	}
+
+	// local_server_ready() -> bool: the server runs and has logged that it
+	// listens. Read from its log rather than by connecting to it: a probe
+	// connect was a peer to the server, one that vanished before it said
+	// anything, and the server warned about it twice per start
+	// ([WIN8_START] 11). A server started by somebody else (the pidfile's)
+	// has no log here and is probed.
 	static int l_local_server_ready(lua_State *L)
 	{
 		adopt_pidfile();
@@ -2523,8 +2563,13 @@ struct CApp: public App, public magic::Application
 			lua_pushboolean(L, false);
 			return 1;
 		}
-		lua_pushboolean(L, interface::probe_connect("127.0.0.1",
-				g_local_server_port));
+		if(g_local_server_log.empty()){
+			lua_pushboolean(L, interface::probe_connect("127.0.0.1",
+					g_local_server_port));
+			return 1;
+		}
+		tail_local_server_log();
+		lua_pushboolean(L, g_local_server_listening);
 		return 1;
 	}
 
@@ -2532,21 +2577,7 @@ struct CApp: public App, public magic::Application
 	// the local server logged, read from where the last call left off
 	static int l_local_server_status(lua_State *L)
 	{
-		if(g_local_server_log.empty()){
-			lua_pushnil(L);
-			return 1;
-		}
-		std::ifstream f(g_local_server_log, std::ios::binary);
-		if(f.good()){
-			f.seekg(g_local_server_log_offset);
-			ss_ line;
-			while(std::getline(f, line)){
-				g_local_server_log_offset += line.size() + 1;
-				const size_t at = line.find("STATUS ");
-				if(at != ss_::npos)
-					g_local_server_status = line.substr(at + 7);
-			}
-		}
+		tail_local_server_log();
 		if(g_local_server_status.empty())
 			lua_pushnil(L);
 		else

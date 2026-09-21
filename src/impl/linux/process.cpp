@@ -1,4 +1,5 @@
 #include "interface/process.h"
+#include <fcntl.h>
 #include "core/log.h"
 #include <unistd.h>
 #include <sys/wait.h>
@@ -25,6 +26,15 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 	log_d(MODULE, "shell_exec(\"%s\")", cs(command));
 	int f = fork();
 	if(f == 0){
+		if(!opts.output_path.empty()){
+			int fd = open(opts.output_path.c_str(),
+					O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			if(fd >= 0){
+				dup2(fd, 1);
+				dup2(fd, 2);
+				close(fd);
+			}
+		}
 		execl("/bin/sh", "sh", "-c", command.c_str(), (const char*)nullptr);
 		_exit(127);
 	}

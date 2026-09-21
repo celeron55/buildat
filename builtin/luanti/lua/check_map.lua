@@ -520,10 +520,44 @@ local function check_light()
 
 	local beside = {x = LIGHT_AT.x + 1, y = LIGHT_AT.y, z = LIGHT_AT.z}
 	local further = {x = LIGHT_AT.x + 2, y = LIGHT_AT.y + 1, z = LIGHT_AT.z}
+	-- The room's relight is a tick's work under the tick's budget, and
+	-- the liquids flooding a fresh world's caves keep that queue busy
+	-- ([LIQUID_FLOW]): a few steps, as for the lamp below
 	local dark = core.get_node_light(beside)
+	for _ = 1, 50 do
+		if dark ~= nil and dark == 0 then
+			break
+		end
+		core.__step(0.01)
+		dark = core.get_node_light(beside)
+	end
 	if dark == nil or dark > 0 then
+		-- What the room is made of, for the line: a wall that is not
+		-- there and a room that is not air are different faults
+		local holes, filled = 0, {}
+		for x = LIGHT_MIN.x, LIGHT_MAX.x do
+			for y = LIGHT_MIN.y, LIGHT_MAX.y do
+				for z = LIGHT_MIN.z, LIGHT_MAX.z do
+					local edge = (x == LIGHT_MIN.x or x == LIGHT_MAX.x or
+							y == LIGHT_MIN.y or y == LIGHT_MAX.y or
+							z == LIGHT_MIN.z or z == LIGHT_MAX.z)
+					local n = core.get_node({x = x, y = y, z = z}).name
+					if edge and n ~= wall then
+						holes = holes + 1
+					elseif not edge and n ~= "air" then
+						filled[n] = (filled[n] or 0) + 1
+					end
+				end
+			end
+		end
+		local parts = {}
+		for n, c in pairs(filled) do
+			parts[#parts + 1] = n .. ":" .. c
+		end
 		error("check_map: a room with nothing in it is lit: " ..
-				tostring(dark))
+				tostring(dark) .. " (" .. holes .. " holes in the walls; inside: " ..
+				(#parts > 0 and table.concat(parts, ",") or "air") ..
+				"; beside is " .. core.get_node(beside).name .. ")")
 	end
 
 	if lamp then

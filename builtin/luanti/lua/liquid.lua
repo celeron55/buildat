@@ -106,22 +106,19 @@ function core.transforming_liquid_add(pos)
 	push(math.floor(pos.x + 0.5), math.floor(pos.y + 0.5), math.floor(pos.z + 0.5))
 end
 
--- A node written: the neighbours that are liquid or air, and then the node
--- itself when it is, as addNodeAndUpdate does. Only those, and the node
--- last, and that is the queue's order: a column dug top-down queues top
--- to bottom -- the node under a dug one is still stone when it is dug --
--- and fills in one pass, each node seeing the one above it already water.
--- Read before the write, which is what set_node does anyway.
-function core.__liquid_node_written(x, y, z, new_id)
+-- A node written: it, then its six neighbours, no reads -- a read here
+-- flushed voxelworld's write buffer under every set_node, a commit and a
+-- relight per node ([DIG_LIGHT]'s room read its light too early). The
+-- pass skips what is neither liquid nor floodable at the cost of a read.
+-- The order is the column's: dug top-down, the node under a dug one is
+-- queued right after it, so the column fills in one pass, each node
+-- seeing the one above it already water. Official queues the node last
+-- and only the liquid and air neighbours; a removed liquid here is read
+-- before its neighbours rather than after, and refills a pass sooner.
+function core.__liquid_node_written(x, y, z)
+	push(x, y, z)
 	for i = 1, 6 do
-		local nx, ny, nz = x + DIRS[i][1], y + DIRS[i][2], z + DIRS[i][3]
-		local id = get_node_raw(nx, ny, nz)
-		if id == AIR or info(id).liquid_type ~= "none" then
-			push(nx, ny, nz)
-		end
-	end
-	if new_id == AIR or info(new_id).liquid_type ~= "none" then
-		push(x, y, z)
+		push(x + DIRS[i][1], y + DIRS[i][2], z + DIRS[i][3])
 	end
 end
 

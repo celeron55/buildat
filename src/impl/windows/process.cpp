@@ -70,19 +70,38 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 	}
 	env_block.push_back(0);
 
-	if(!CreateProcess(
+	// The child's stdout and stderr into a file when asked, inherited
+	HANDLE out = INVALID_HANDLE_VALUE;
+	if(!opts.output_path.empty()){
+		SECURITY_ATTRIBUTES sa;
+		memset(&sa, 0, sizeof sa);
+		sa.nLength = sizeof sa;
+		sa.bInheritHandle = TRUE;
+		out = CreateFileA(opts.output_path.c_str(), GENERIC_WRITE,
+				FILE_SHARE_READ, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		if(out != INVALID_HANDLE_VALUE){
+			si.dwFlags |= STARTF_USESTDHANDLES;
+			si.hStdOutput = out;
+			si.hStdError = out;
+			si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+		}
+	}
+	BOOL created = CreateProcess(
 			NULL, // Module name
 			command_c, // Command line (non-const)
 			NULL, // Process handle not inheritable
 			NULL, // Thread handle not inheritable
-			false, // Set handle inheritance to FALSE
+			out != INVALID_HANDLE_VALUE, // Inherit handles for the output file
 			0, // No creation flags
 			env_block.data(), // Use a new environment block
 			//NULL, // Use parent's environment block
 			NULL, // Use parent's starting directory
 			&si, // Pointer to STARTUPINFO structure
 			&pi // Pointer to PROCESS_INFORMATION structure
-	)){
+	);
+	if(out != INVALID_HANDLE_VALUE)
+		CloseHandle(out);
+	if(!created){
 		log_w(MODULE, "Trying to run \"%s\": CreateProcess failed: %s",
 				cs(command), cs(format_last_error()));
 		return 1;
@@ -103,6 +122,31 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 bool Handle::valid() const
 {
 	return impl != 0;
+}
+
+// The Job Object every child goes into: when the last handle to it
+// closes -- this process exiting, however it exits -- the children are
+// killed with it. Linux has PR_SET_PDEATHSIG for the same. Without it a
+// client that died at its connect left its server running, holding the
+// module DLLs the next server could not overwrite ([WIN8_START] 7).
+static HANDLE children_job()
+{
+	static HANDLE job = NULL;
+	if(job)
+		return job;
+	job = CreateJobObject(NULL, NULL);
+	if(!job){
+		log_w(MODULE, "CreateJobObject failed: %s", cs(format_last_error()));
+		return NULL;
+	}
+	JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
+	memset(&info, 0, sizeof info);
+	info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+	if(!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+			&info, sizeof info))
+		log_w(MODULE, "SetInformationJobObject failed: %s",
+				cs(format_last_error()));
+	return job;
 }
 
 Handle start(const ss_ &path, const sv_<ss_> &args, const ss_ &cwd)
@@ -132,6 +176,10 @@ Handle start(const ss_ &path, const sv_<ss_> &args, const ss_ &cwd)
 	}
 	CloseHandle(pi.hThread);
 	h.impl = (intptr_t)pi.hProcess;
+	HANDLE job = children_job();
+	if(job && !AssignProcessToJobObject(job, pi.hProcess))
+		log_w(MODULE, "AssignProcessToJobObject failed: %s",
+				cs(format_last_error()));
 	log_i(MODULE, "Started process: %s", cs(path));
 	return h;
 }
@@ -167,6 +215,11 @@ void terminate(Handle &h)
 bool is_running(const Handle &h)
 {
 	if(!h.valid())
+		return false;
+	// The handle signals when the process has exited: asked first, so
+	// that a child which exited with 259 (STILL_ACTIVE's value) is not
+	// taken for a live one ([WIN8_START] 10)
+	if(WaitForSingleObject((HANDLE)h.impl, 0) == WAIT_OBJECT_0)
 		return false;
 	DWORD code = 0;
 	if(!GetExitCodeProcess((HANDLE)h.impl, &code))
