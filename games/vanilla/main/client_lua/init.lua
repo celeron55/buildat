@@ -207,7 +207,12 @@ local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		-- the night sky at the user's pick off the 0.00002 | 0.00005 | 0.0002
 		-- ladder (2026-09-20, [NIGHT_LIGHT]); the render's NIGHT_SKY is the same
 		night_sky = 0.0001,
-		bounce = 0.15, lamp = 8, dome = 0.9, ground = {r = 0.50, g = 0.44, b = 0.30}, -- doubled 2026-09-19 with groundSeen cubed,
+		-- dome 0.9 -> 1.2 (2026-09-21, [PBR_FIT] a): the open-sky contrast
+		-- read 4.5 against the render's 2.8 and snow's 13.6 against 11.2;
+		-- at 1.2 snow's is 10.7 and its shade reads 1.0, dirt's 4.0; 1.5
+		-- overshot snow's shade (1.13) and the pit (1.73). The tables are
+		-- under local/options_for_PBR_FIT_viewport/probes_dome_*.txt
+		bounce = 0.15, lamp = 8, dome = 1.2, ground = {r = 0.50, g = 0.44, b = 0.30}, -- doubled 2026-09-19 with groundSeen cubed,
 		-- the transmitted light through a leaf, over Lambert through its
 		-- colour ([PBR_FIT] 3b, canopy_dawn)
 		translucency = 1.0,
