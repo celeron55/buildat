@@ -172,6 +172,14 @@ struct SpatialUpdateQueue
 		return m_queue.empty();
 	}
 
+	// The item for a value, or nullptr: what a chunk that never comes up
+	// is waiting as ([MISSING_CHUNK]). Not the ones mid-sort.
+	const Item* find(const Value &value)
+	{
+		auto it = m_index.find(value);
+		return it == m_index.end() ? nullptr : &it->second->second;
+	}
+
 	void pop()
 	{
 		if(m_queue.empty())
@@ -359,6 +367,20 @@ struct LuaSUQ
 		lua_setfield(L, -2, "node_id");
 		return 1;
 	}
+	// find(type, node_id) -> f, fw, or nil when the queue holds no such
+	// item (mid-sort ones included)
+	static int l_find(lua_State *L){
+		LuaSUQ *o = internal_checkobject(L, 1);
+		SpatialUpdateQueue::Value value;
+		value.type = luaL_checkstring(L, 2);
+		value.node_id = luaL_checkinteger(L, 3);
+		const SpatialUpdateQueue::Item *item = o->internal.find(value);
+		if(!item)
+			return 0;
+		lua_pushnumber(L, item->f);
+		lua_pushnumber(L, item->fw);
+		return 2;
+	}
 	static int l_peek_next_f(lua_State *L){
 		LuaSUQ *o = internal_checkobject(L, 1);
 		if(o->internal.empty())
@@ -429,6 +451,7 @@ struct LuaSUQ
 		DEF_METHOD(peek_next_f);
 		DEF_METHOD(peek_next_fw);
 		DEF_METHOD(peek_next_value);
+		DEF_METHOD(find);
 		DEF_METHOD(get_length);
 		DEF_METHOD(is_sorting);
 

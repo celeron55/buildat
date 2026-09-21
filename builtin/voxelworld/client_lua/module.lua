@@ -631,7 +631,7 @@ function sub_events()
 				local v = node_update_queue:peek_next_value()
 				local last = stuck_pops.last
 				-- The nearest undrawn chunk, by node
-				local near_id, near_d = "-", -1
+				local near_id, near_d, near_state = "-", -1, ""
 				local c0 = M.get_chunk_position(camera_p)
 				if c0 then
 					for dz = -2, 2 do for dy = -2, 2 do for dx = -2, 2 do
@@ -642,6 +642,16 @@ function sub_events()
 									camera_p):Length() or -1
 							if near_d < 0 or (d >= 0 and d < near_d) then
 								near_id, near_d = node and node:GetID() or "none", d
+								if node then
+									local qf, qfw = node_update_queue:find(
+											"geometry", node:GetID())
+									near_state = string.format(
+											" (data %s, queued %s)",
+											node:GetVar("buildat_voxel_data"):IsEmpty()
+													and "empty" or "there",
+											qf and string.format("f=%.2f fw=%.2f",
+													qf, qfw) or "no")
+								end
 							end
 						end
 					end end end
@@ -649,7 +659,7 @@ function sub_events()
 				log:warning(string.format("mesh queue: %d undrawn within 2 " ..
 						"for %d s: %d queued, sorting %s, front f=%s fw=%s %s " ..
 						"node %s; %d pops in the window, %d distinct, last %s " ..
-						"node %s f=%s at %.0f; nearest undrawn node %s at %.0f; " ..
+						"node %s f=%s at %.0f; nearest undrawn node %s at %.0f%s; " ..
 						"camera %.0f,%.0f,%.0f", undrawn, stuck_seconds,
 						node_update_queue:get_length(),
 						tostring(node_update_queue:is_sorting()),
@@ -659,7 +669,7 @@ function sub_events()
 						last and last.type or "-",
 						tostring(last and last.node_id or "-"),
 						tostring(last and last.f or "-"), last and last.d or -1,
-						tostring(near_id), near_d,
+						tostring(near_id), near_d, near_state,
 						camera_p.x, camera_p.y, camera_p.z))
 			end
 			if stuck_seconds == 0 then
