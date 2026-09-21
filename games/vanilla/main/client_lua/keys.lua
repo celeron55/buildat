@@ -29,10 +29,15 @@ M.BINDINGS = {
 			what = "Jump, and up while flying"},
 	{action = "sneak", key = magic.KEY_LSHIFT, name = "Shift",
 			what = "Sneak, and down while flying"},
-	{action = "fast", key = magic.KEY_LCTRL, name = "Ctrl", what = "Move fast"},
-	{action = "fly", key = magic.KEY_K, name = "K", what = "Fly on and off"},
+	-- Official's three modes and its special key ([FLY_MODES]): fast mode
+	-- is a toggle, and on the ground the special key is what moves fast
+	-- while it is on
+	{action = "aux1", key = magic.KEY_E, name = "E",
+			what = "Special - move fast in fast mode"},
+	{action = "fly", key = magic.KEY_K, name = "K", what = "Fly mode on and off"},
+	{action = "fast", key = magic.KEY_J, name = "J", what = "Fast mode on and off"},
 	{action = "noclip", key = magic.KEY_H, name = "H",
-			what = "Through walls on and off"},
+			what = "Noclip mode on and off - through walls while flying"},
 	{action = "hotbar", first = magic.KEY_1, last = magic.KEY_9,
 			name = "1 - 9", what = "Pick a hotbar slot"},
 	{action = "chat", key = magic.KEY_T, name = "T",

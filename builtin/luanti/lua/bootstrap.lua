@@ -2176,7 +2176,7 @@ local STUBS_NIL = {
 	-- three particle calls in lua/particles.lua
 	"hud_replace_builtin",
 	-- Auth and privileges (M4)
-	"get_password_hash", "check_password_entry", "notify_authentication_modified",
+	"get_password_hash", "check_password_entry",
 	"set_player_privs", "auth_reload",
 	"kick_player", "disconnect_player", "ban_player", "unban_player_or_ip",
 	"get_ban_list", "get_ban_description",
@@ -5254,6 +5254,31 @@ function core.get_player_privs(name)
 	local handler = core.get_auth_handler and core.get_auth_handler()
 	local entry = handler and handler.get_auth and handler.get_auth(name)
 	return (entry and entry.privileges) or {}
+end
+
+-- The player's privileges to their client, sorted, on join and whenever
+-- the auth handler says they changed (set_player_privs, /grant, /revoke
+-- all end in notify_authentication_modified) ([FLY_MODES])
+function core.__send_privs(name)
+	if not (name and __luanti_send_privs) then
+		return
+	end
+	local list = {}
+	for priv, _ in pairs(core.get_player_privs(name)) do
+		list[#list + 1] = priv
+	end
+	table.sort(list)
+	__luanti_send_privs(name, list)
+end
+
+function core.notify_authentication_modified(name)
+	if name then
+		core.__send_privs(name)
+	else
+		for _, player in ipairs(core.get_connected_players()) do
+			core.__send_privs(player:get_player_name())
+		end
+	end
 end
 
 -- What the module sends the clients every few seconds; they carry the clock

@@ -784,10 +784,15 @@ settle(f, 300, {x = 0, z = 0, sneak = true, fast = true})
 assert(math.abs(f.y - 0.5) < 1e-6, "player: flew down to "..f.y)
 
 -- Going through walls takes the player out of anything they are inside, and
--- gravity does not apply while it is on
+-- gravity does not apply while it is on -- noclip acts while flying, as
+-- official's does ([FLY_MODES]); on its own it is nothing
 local n = player.new(is_solid)
 n:set_position(3, 0.5, 0)
 n.noclip = true
+settle(n, 60, {x = 0, z = 0, jump = true})
+assert(n.y < 5, "player: noclip without fly went through the wall, y = "..n.y)
+n:set_position(3, 0.5, 0)
+n.fly = true
 settle(n, 120)
 assert(math.abs(n.y - 0.5) < 1e-6, "player: fell while noclipping to "..n.y)
 settle(n, 120, {x = 0, z = 0, jump = true})

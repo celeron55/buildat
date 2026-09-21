@@ -2022,6 +2022,36 @@ buildat.sub_packet("luanti:chat", function(data)
 	end
 end)
 
+-- A line the client says to itself, in the chat as official's client
+-- puts its own notes ("Fly mode enabled")
+function M.chat_local(line)
+	M.chat_lines[#M.chat_lines + 1] = line
+	M.chat_raw[#M.chat_raw + 1] = line
+	for _, f in ipairs(chat_subs) do
+		f(line, M.chat_lines, line)
+	end
+end
+
+-- What the player may do, the server's list on join and on every change
+-- ([FLY_MODES]); privs.fly and the rest are true when held
+M.privs = {}
+local privs_subs = {}
+function M.sub_privs(f)
+	privs_subs[#privs_subs + 1] = f
+end
+buildat.sub_packet("luanti:privs", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	local privs = {}
+	for _, p in ipairs(values) do
+		privs[p] = true
+	end
+	M.privs = privs
+	log:info("privileges: " .. table.concat(values, ", "))
+	for _, f in ipairs(privs_subs) do
+		f(privs)
+	end
+end)
+
 local ok_ui, err_ui, formspec_ui =
 		buildat.run_script_file("luanti/formspec_ui.lua")
 if not ok_ui or type(formspec_ui) ~= "table" then

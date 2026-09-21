@@ -126,6 +126,7 @@ local function key_down(action)
 	return b ~= nil and b.key ~= nil and magic.input:GetKeyDown(b.key)
 end
 
+
 -- The same PBR setup the lighting games use; games/voxel_lighting's README
 -- says why these numbers are what they are. These are what noon looks like;
 -- the sun moves with the world's clock, and night is the same sun dimmed
@@ -2338,8 +2339,18 @@ local place_chat
 local function status_lines(level)
 	local info = luanti.world_info()
 	local fps, jitter = frame_stats()
-	local mode = player.noclip and "noclip" or (player.fly and "flying" or
-			(player.on_ground and "on the ground" or "falling"))
+	-- The three modes as words, the ones on and whether they act
+	-- ([FLY_MODES]); then the ground
+	local mode = player.on_ground and "on the ground" or "falling"
+	if player.fly then
+		mode = (player.fly_active and "flying" or "fly (no privilege)")
+		if player.noclip then
+			mode = mode .. (player.noclip_active and ", noclip" or ", noclip (no privilege)")
+		end
+	end
+	if player.fast then
+		mode = mode .. (luanti.privs.fast and ", fast" or ", fast (no privilege)")
+	end
 	local chunk_p = voxelworld.get_chunk_position(buildat.Vector3(
 			player.x, player.y, player.z))
 	local lyaw, cardinal = luanti_yaw(yaw)
@@ -3729,6 +3740,20 @@ magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
 			button == magic.MOUSEB_MIDDLE and "middle" or "left")
 end)
 
+-- Official's three mode toggles ([FLY_MODES]): each says its line in the
+-- chat, with the note when the player lacks the privilege of the same
+-- name -- the mode is still switched, as official does, and the server
+-- holds the player down
+keys.toggle_mode = function(mode, word)
+	player[mode] = not player[mode]
+	local line = word .. (player[mode] and " enabled" or " disabled")
+	if player[mode] and not luanti.privs[mode] then
+		line = line .. " (note: no '" .. mode .. "' privilege)"
+	end
+	luanti.chat_local(line)
+	log:info(line)
+end
+
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	-- A form takes escape to close itself; what is left is this game's own
@@ -3777,11 +3802,11 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		-- world: nothing opened for it to point at.
 		luanti.open_player_inventory()
 	elseif key == BIND.fly.key then
-		player.fly = not player.fly
-		log:info(player.fly and "flying" or "walking")
+		keys.toggle_mode("fly", "Fly mode")
+	elseif key == BIND.fast.key then
+		keys.toggle_mode("fast", "Fast mode")
 	elseif key == BIND.noclip.key then
-		player.noclip = not player.noclip
-		log:info(player.noclip and "through walls" or "solid walls")
+		keys.toggle_mode("noclip", "Noclip mode")
 	elseif key == BIND.hud.key then
 		hud_shown = not hud_shown
 		draw_hud(hud_elements)
@@ -3972,7 +3997,16 @@ function frame_peak.update(dt)
 		if key_down("left") then walk(-fz, fx) end
 		wish.jump = key_down("jump")
 		wish.sneak = key_down("sneak")
-		wish.fast = key_down("fast")
+		-- The modes as official's LocalPlayer has them ([FLY_MODES]):
+		-- each acts only with its privilege -- the mode stays "enabled"
+		-- and does nothing, so a revoked fly is a fall -- and fast is
+		-- the special key on the ground and always while flying
+		-- (always_fly_fast)
+		local privs = luanti.privs
+		player.fly_active = player.fly and privs.fly == true
+		player.noclip_active = player.noclip and privs.noclip == true
+		wish.fast = player.fast and privs.fast == true and
+				(key_down("aux1") or player.fly_active)
 	end
 
 	update_dig(dt, playing)

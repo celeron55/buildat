@@ -5995,6 +5995,29 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// __luanti_send_privs(player_name, {priv, priv, ...}): what the player
+	// may do, on join and whenever it changes; the client gates its fly,
+	// fast and noclip on it ([FLY_MODES])
+	static int l_send_privs(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		ss_ name(name_p ? name_p : "", name_len);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		sv_<ss_> flat;
+		const size_t n = lua_objlen(L, 2);
+		for(size_t i = 0; i < n; i++){
+			lua_rawgeti(L, 2, (int)i + 1);
+			size_t len = 0;
+			const char *p = lua_tolstring(L, -1, &len);
+			flat.push_back(ss_(p ? p : "", p ? len : 0));
+			lua_pop(L, 1);
+		}
+		self->send_to_player(name, "luanti:privs", flat);
+		return 0;
+	}
+
 	// __luanti_send_physics(player_name, {name, value, name, value, ...}):
 	// a player's physics override, which is what set_physics_override()
 	// writes. The client's movement is its own constants times these, so a
@@ -8054,6 +8077,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_chat", l_send_chat);
 		set_global_cfunction("__luanti_send_hud", l_send_hud);
 		set_global_cfunction("__luanti_send_physics", l_send_physics);
+		set_global_cfunction("__luanti_send_privs", l_send_privs);
 		set_global_cfunction("__luanti_send_camera", l_send_camera);
 		set_global_cfunction("__luanti_send_day_night", l_send_day_night);
 		set_global_cfunction("__luanti_send_sound", l_send_sound);

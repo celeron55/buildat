@@ -266,6 +266,7 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		-- privileges will pull them back with its movement checks
 		fly = false,
 		noclip = false,
+		fast = false,
 		-- A copy: the game's constants are written into it when they arrive
 		movement = copy_movement(),
 		-- What a mod has done to how this player moves: Luanti's
@@ -312,7 +313,18 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		-- Going through walls is the collision test answering no to
 		-- everything, which is also how a player who ended up inside
 		-- something gets out
-		local stops = self.noclip and never_solid or is_solid
+		-- Noclip acts only while flying, as official's does ([FLY_MODES]);
+		-- fly_active and noclip_active are the modes the game lets act
+		-- (its privileges), nil when the game does not say
+		local fly = self.fly
+		if self.fly_active ~= nil then
+			fly = self.fly_active
+		end
+		local noclip = self.noclip and fly
+		if self.noclip_active ~= nil then
+			noclip = self.noclip_active and fly
+		end
+		local stops = noclip and never_solid or is_solid
 
 		local nx = math.floor(self.x + 0.5)
 		local nz = math.floor(self.z + 0.5)
@@ -331,13 +343,13 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		-- A ladder is climbed from the node half a node above the feet or
 		-- the one a fifth below them, which is how a player on the bottom
 		-- rung holds on and how the top of one is left
-		self.climbing = is_climbable ~= nil and not self.fly and
-				not self.noclip and
+		self.climbing = is_climbable ~= nil and not fly and
+				not noclip and
 				(is_climbable(nx, math.floor(self.y + 0.5 + 0.5), nz) or
 				is_climbable(nx, math.floor(self.y - 0.2 + 0.5), nz))
 		-- How much what they are standing in holds them back, read from
 		-- the same node the liquid is
-		local resistance = (resistance_at ~= nil and not self.noclip) and
+		local resistance = (resistance_at ~= nil and not noclip) and
 				resistance_at(nx, lny, nz) or 0
 		-- What the node stood on and the one the feet are in do to the
 		-- player (LocalPlayer::move, "the standing node"): either can
@@ -357,7 +369,7 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		-- ones unless the server has said otherwise
 		local ov = self.override or EMPTY_OVERRIDE
 		local ov_speed = ov.speed or 1
-		local free_move = self.fly or self.noclip
+		local free_move = fly
 		-- Horizontal: accelerate towards what the keys ask for. Each
 		-- constant has a multiplier of its own in the override besides
 		-- the one over all of them.

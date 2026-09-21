@@ -2843,6 +2843,7 @@ function core.__add_player(name)
 	send_camera(o)
 	send_day_night(o)
 	send_sky(o)
+	core.__send_privs(o.player_name)
 	-- And what time it is. The module sends this to everyone every few
 	-- seconds of the world's own clock, which under load is a good deal
 	-- longer than a few seconds of anyone else's -- and a client with no
@@ -2939,10 +2940,73 @@ do
 	assert(cost(23.9) == 10, "fall: it rounds rather than truncating")
 end
 
+-- Official's anticheat at its simplest ([FLY_MODES]): a player without
+-- the fly privilege who is off the ground and not falling for a second
+-- of updates, or without noclip whose body is inside a walkable node, is
+-- put back at the last position that was fine. Water, ladders and the
+-- like are not the ground but are not flying either.
+local function node_walkable(p)
+	local n = core.get_node_or_nil(p)
+	local def = n and core.registered_nodes[n.name]
+	return def ~= nil and def.walkable ~= false
+end
+local function node_holds(p)
+	local n = core.get_node_or_nil(p)
+	local def = n and core.registered_nodes[n.name]
+	return def == nil or def.walkable ~= false or def.liquidtype ~= "none" or
+			def.climbable == true or def.liquid_move_physics == true
+end
+local function hold_down(o, x, y, z)
+	-- The privileges once a second, not per update: the singleplayer's
+	-- is a table of every one built each time
+	local now = core.get_us_time()
+	if not o.privs or now - (o.privs_at or 0) > 1000000 then
+		o.privs = core.get_player_privs(o.player_name)
+		o.privs_at = now
+	end
+	local privs = o.privs
+	if privs.fly and privs.noclip then
+		o.airborne = 0
+		o.good_pos = {x = x, y = y, z = z}
+		return false
+	end
+	local feet = {x = math.floor(x + 0.5), y = math.floor(y + 0.5), z = math.floor(z + 0.5)}
+	local inside = node_walkable(feet) or
+			node_walkable({x = feet.x, y = feet.y + 1, z = feet.z})
+	if not privs.noclip and inside and o.good_pos then
+		return true
+	end
+	-- Off the ground: nothing holds under the feet (a fifth below), and
+	-- the body is not falling
+	local under = {x = feet.x, y = math.floor(y - 0.2 + 0.5), z = feet.z}
+	local falling = o.pos and y < o.pos.y - 0.01
+	if not privs.fly and not node_holds(under) and not node_holds(feet) and
+			not falling then
+		o.airborne = (o.airborne or 0) + 1
+		if o.airborne > 10 and o.good_pos then
+			return true
+		end
+	else
+		o.airborne = 0
+	end
+	if not inside then
+		o.good_pos = {x = x, y = y, z = z}
+	end
+	return false
+end
+
 function core.__set_player_pos(name, x, y, z, look_h, look_v, controls)
 	local id = players[name]
 	local o = id and objects[id]
 	if not o then
+		return
+	end
+	if o.player_name and hold_down(o, x, y, z) then
+		local g = o.good_pos
+		o.airborne = 0
+		core.log("action", name .. " is held down: put back at " ..
+				core.pos_to_string(g))
+		o.ref:set_pos(g)
 		return
 	end
 	o.pos = {x = x, y = y, z = z}
