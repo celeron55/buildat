@@ -643,14 +643,17 @@ function sub_events()
 							if near_d < 0 or (d >= 0 and d < near_d) then
 								near_id, near_d = node and node:GetID() or "none", d
 								if node then
-									local qf, qfw = node_update_queue:find(
+									local qf, qfw, qx, qy, qz = node_update_queue:find(
 											"geometry", node:GetID())
+									local np = node:GetWorldPosition()
 									near_state = string.format(
-											" (data %s, queued %s)",
+											" (%s at %.0f,%.0f,%.0f; data %s, queued %s)",
+											node:GetName(), np.x, np.y, np.z,
 											node:GetVar("buildat_voxel_data"):IsEmpty()
 													and "empty" or "there",
-											qf and string.format("f=%.2f fw=%.2f",
-													qf, qfw) or "no")
+											qf and string.format(
+													"f=%.2f fw=%.2f put at %.0f,%.0f,%.0f",
+													qf, qfw, qx, qy, qz) or "no")
 								end
 							end
 						end
