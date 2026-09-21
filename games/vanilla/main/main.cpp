@@ -978,6 +978,12 @@ struct Module: public interface::Module
 			// The job's fields read before the thread (and with it the
 			// job) is deleted at the end of the block
 			struct Free { interface::Thread *t; ~Free(){ delete t; } } free{job->thread};
+			if(job->peer == 0 && job->kind == Job::LIST){
+				log_i(MODULE, "contentdb: fetched once: %s",
+						job->error.empty() ? cs("ok, "+itos(job->result.size())+
+						" bytes") : cs("error: "+job->error));
+				continue;
+			}
 			if(!job->error.empty()){
 				menu_error(job->peer, (job->kind == Job::LIST ?
 						"ContentDB: " : "Installing "+job->name+" failed: ")+
@@ -1724,6 +1730,19 @@ struct Module: public interface::Module
 	// runs what the environment says, which is what every check here does.
 	void on_start()
 	{
+		// BUILDAT_LUANTI_FETCH_ONCE: one ContentDB listing at start, its
+		// outcome logged and sent to nobody -- the smoke's way of running
+		// http_get, whose std::call_once died on the box through a
+		// winpthreads linked into Urho3D.dll ([WIN8_START] 16); a fetch
+		// that errors is a fetch that ran
+		if(getenv("BUILDAT_LUANTI_FETCH_ONCE")){
+			Job *job = new Job();
+			job->kind = Job::LIST;
+			job->peer = 0;
+			job->q = "";
+			start_job(job);
+			log_i(MODULE, "contentdb: fetching once, for the log");
+		}
 		// The game was games/luanti_launcher until 2026-09-20 and its saves
 		// lived under that name: moved to this one on the first start
 		// that finds the new directory absent, so nobody loses a world

@@ -103,9 +103,37 @@ xinput9_1_0.dll dwmapi.dll "
 			fi
 		done
 	done < <(find "$dir" -path '*/compiler' -prune -o \( -iname '*.exe' -o -iname '*.dll' \) -print)
+	# And no DLL of the archive's own exports what the runtime DLLs
+	# export: a static runtime linked into a DLL that exports everything
+	# is a second copy of that runtime, and whoever links against the
+	# DLL's import library may take it -- libbuildat_core took
+	# Urho3D.dll's pthread_once, which had never run its init, and
+	# called a null pointer ([WIN8_START] 16)
+	local runtime own_exports
+	runtime=$(mktemp); own_exports=$(mktemp)
+	while IFS= read -r f; do
+		local base
+		base=$(basename "$f" | tr 'A-Z' 'a-z')
+		local into="$own_exports"
+		case "$base" in
+			libstdc++-6.dll|libgcc_s_seh-1.dll|libwinpthread-1.dll) into="$runtime" ;;
+		esac
+		"$objdump" -p "$f" 2>/dev/null | awk -v F="$(basename "$f")" '
+			/^\[Ordinal\/Name Pointer\] Table/ {t=1; next}
+			t && /^\t\[ *[0-9]+\] / {print $NF, F}
+			t && /^$/ {t=0}' >> "$into"
+	done < <(find "$dir/"*/bin "$dir/"*/cache -iname '*.dll' 2>/dev/null)
+	local dup
+	dup=$(awk 'NR==FNR {r[$1]=$2; next} ($1 in r) {print $1": "$2" (the runtime\x27s, "r[$1]")"}' "$runtime" "$own_exports" | sort | head -20)
+	if [ -n "$dup" ]; then
+		echo "import check: a runtime's symbol exported by the archive's own DLL, a runtime linked into it ($(awk 'NR==FNR {r[$1]; next} ($1 in r)' "$runtime" "$own_exports" | wc -l) of them; the first 20):" >&2
+		echo "$dup" | sed 's/^/  /' >&2
+		bad=1
+	fi
+	rm -f "$runtime" "$own_exports"
 	rm -rf "$dir"
 	[ "$bad" = 0 ] || { echo "import check failed" >&2; exit 1; }
-	echo "import check: every import is in the archive or Windows' own"
+	echo "import check: every import is in the archive or Windows' own, and no symbol is exported twice"
 }
 
 # The Windows archive under Wine: the half that says the archive works
@@ -149,6 +177,7 @@ smoke_test_wine() {
 	# desktop does, and the desktop is the done-when
 	rm -f "$unpacked"/cache/rccpp_build/client_file*
 	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
+		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://Z:$dir/nowhere" \
 		"$wine" bin/buildat_server.exe -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
@@ -156,6 +185,10 @@ smoke_test_wine() {
 		kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null || true; exit 1; }
 	if ! grep -q "STATUS Compiling client_file" "$dir/srv.log"; then
 		echo "smoke test under Wine: the shipped compiler built nothing (client_file was taken out of the cache)" >&2
+		"$wine"server -k 2>/dev/null || true; exit 1
+	fi
+	if ! wait_for_line "$dir/srv.log" "$srv" "contentdb: fetched once" 60; then
+		echo "smoke test under Wine: the server's one ContentDB fetch never answered (http_get died or hangs)" >&2
 		"$wine"server -k 2>/dev/null || true; exit 1
 	fi
 	# And the client, on the virtual display through Wine's GL, which is
@@ -447,6 +480,7 @@ smoke_test() {
 	# module's output taken out, so the start has to build it
 	rm -f "$unpacked"/cache/rccpp_build/client_file*
 	(cd "$unpacked" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
+		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://$dir/nowhere" \
 		bin/buildat_server -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
@@ -457,6 +491,12 @@ smoke_test() {
 		kill -9 "$srv" 2>/dev/null; exit 1; }
 	if ! grep -q "STATUS Compiling client_file" "$dir/srv.log"; then
 		echo "smoke test: the shipped compiler built nothing (client_file was taken out of the cache)" >&2
+		kill -9 "$srv" 2>/dev/null; exit 1
+	fi
+	# http_get ran once ([WIN8_START] 16): a fetch that answered, with an
+	# error or not, is a fetch whose call_once did not die
+	if ! wait_for_line "$dir/srv.log" "$srv" "contentdb: fetched once" 60; then
+		echo "smoke test: the server's one ContentDB fetch never answered (http_get died or hangs)" >&2
 		kill -9 "$srv" 2>/dev/null; exit 1
 	fi
 	sleep 5
