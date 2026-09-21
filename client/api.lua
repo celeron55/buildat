@@ -86,6 +86,25 @@ buildat.read_image        = __buildat_read_image
 buildat.get_env           = __buildat_get_env
 
 buildat.safe.disconnect    = __buildat_disconnect
+-- The one preference a game may set ([BOX_FIXES] b): the player's ear.
+-- Official's pause menu has mute and volume, and that is where a player
+-- reaches for them. get_sound() -> mute, volume; set_sound(mute, volume)
+-- -> true, or false and why. The rest of the preferences stay the
+-- launcher's.
+buildat.safe.get_sound = function()
+	return __buildat_get_preference("sound_mute") == true,
+			__buildat_get_preference("sound_volume") or 1
+end
+buildat.safe.set_sound = function(mute, volume)
+	if type(mute) ~= "boolean" or type(volume) ~= "number" then
+		return false, "set_sound(mute, volume): a boolean and a number"
+	end
+	local ok, err = __buildat_set_preference("sound_mute", mute)
+	if not ok then
+		return false, err
+	end
+	return __buildat_set_preference("sound_volume", tostring(volume))
+end
 buildat.safe.set_ui_scale  = __buildat_set_ui_scale
 buildat.safe.get_ui_scale  = __buildat_get_ui_scale
 buildat.safe.logical_size  = __buildat_logical_size

@@ -3286,16 +3286,32 @@ local function pause_spec()
 	-- nobody was told about is a menu that traps people. button_exit closes
 	-- the form by itself, which is what continuing is.
 	--
-	-- simplified: no sound here. The extension's menu mutes the sound, and
-	-- what that would be is the user's own sound preference, which a game's
-	-- client Lua is deliberately not allowed to write -- see "Client
-	-- preferences" in doc/client_api.txt. Nothing here makes a noise yet
-	-- either.
-	return "size[6,4.7]" ..
+	-- The sound row, as official's pause menu has it ([BOX_FIXES] b): a
+	-- click cycles mute and a volume ladder; buildat.set_sound is the one
+	-- preference a game may write ("Client preferences" in
+	-- doc/client_api.txt).
+	local mute, volume = buildat.get_sound()
+	local sound = mute and "Sound: muted" or
+			string.format("Sound: on %d%%", math.floor(volume * 100 + 0.5))
+	return "size[6,5.8]" ..
 			"label[0.2,0.2;Paused]" ..
 			"button_exit[0.4,1.0;5.2,0.8;continue;Continue playing]" ..
 			"button[0.4,2.1;5.2,0.8;keys;Key bindings]" ..
-			"button[0.4,3.2;5.2,0.8;leave;Leave the game]"
+			"button[0.4,3.2;5.2,0.8;sound;" .. sound .. "]" ..
+			"button[0.4,4.3;5.2,0.8;leave;Leave the game]"
+end
+
+-- Each click: muted -> 100 %, then down the ladder, then muted again.
+-- On keys rather than a local of its own: this file is at Lua's 200.
+keys.cycle_sound = function()
+	local mute, volume = buildat.get_sound()
+	if mute then
+		buildat.set_sound(false, 1.0)
+	elseif volume > 0.15 then
+		buildat.set_sound(false, math.floor((volume - 0.2) * 10 + 0.5) / 10)
+	else
+		buildat.set_sound(true, 1.0)
+	end
 end
 
 local menu_fields
@@ -3312,6 +3328,9 @@ menu_fields = function(fields)
 			set_mouse_in_world(true, "the key bindings closed")
 			luanti.show_local_form(pause_spec(), menu_fields)
 		end)
+	elseif fields.sound then
+		keys.cycle_sound()
+		luanti.show_local_form(pause_spec(), menu_fields)
 	elseif fields.back then
 		luanti.show_local_form(pause_spec(), menu_fields)
 	elseif fields.leave then
@@ -3831,6 +3850,11 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		keys.toggle_mode("fast", "Fast mode")
 	elseif key == BIND.noclip.key then
 		keys.toggle_mode("noclip", "Noclip mode")
+	elseif key == BIND.mute.key then
+		-- Official's mute key ([BOX_FIXES] b)
+		local mute, volume = buildat.get_sound()
+		buildat.set_sound(not mute, volume)
+		luanti.chat_local(mute and "Sound unmuted" or "Sound muted")
 	elseif key == BIND.hud.key then
 		hud_shown = not hud_shown
 		draw_hud(hud_elements)

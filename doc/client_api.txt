@@ -76,6 +76,11 @@ buildat.get_env(name) -> string, or nil when unset or not BUILDAT_-prefixed
   ablation); the prefix is the fence, so a server's Lua cannot read the
   user's environment.
 
+buildat.get_sound() -> mute, volume; buildat.set_sound(mute, volume) -> ok, err
+- The one preference a game may write: the player's ear, from a pause menu.
+  Through the preferences' own parser and file, so the launcher's page and
+  the game's row agree.
+
 buildat.take_screenshot() -> file name, or nil and why not
 - Into <user>/screenshots, named by the date and time. The caller says when
   and nothing else: no path, no reading back, no overwrite. The file lands at

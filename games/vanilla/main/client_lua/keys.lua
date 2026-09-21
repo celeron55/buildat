@@ -37,16 +37,18 @@ M.BINDINGS = {
 	{action = "fly", key = magic.KEY_K, name = "K", what = "Fly mode on and off"},
 	{action = "fast", key = magic.KEY_J, name = "J", what = "Fast mode on and off"},
 	{action = "noclip", key = magic.KEY_H, name = "H",
-			what = "Noclip mode on and off - through walls while flying"},
+			what = "Noclip on and off (while flying)"},
 	{action = "hotbar", first = magic.KEY_1, last = magic.KEY_9,
 			name = "1 - 9", what = "Pick a hotbar slot"},
 	{action = "chat", key = magic.KEY_T, name = "T",
-			what = "Say something - a line starting with / is a command"},
+			what = "Chat - a / line is a command"},
 	{action = "inventory", key = magic.KEY_I, name = "I", what = "Inventory"},
 	{action = "drop", key = magic.KEY_Q, name = "Q",
-			what = "Drop what is held - with Ctrl, one of it"},
+			what = "Drop what is held (Ctrl: one)"},
 	{action = "mouse", key = magic.KEY_TAB, name = "Tab",
-			what = "The mouse in the world or on the screen"},
+			what = "The mouse: in the world, on the screen"},
+	{action = "mute", key = magic.KEY_M, name = "M",
+			what = "Sound muted or not"},
 	{action = "hud", key = magic.KEY_F1, name = "F1",
 			what = "The HUD on and off"},
 	{action = "chatlog", key = magic.KEY_F2, name = "F2",
@@ -54,7 +56,7 @@ M.BINDINGS = {
 	{action = "detail", key = magic.KEY_F5, name = "F5",
 			what = "The line of detail on and off"},
 	{action = "menu", key = magic.KEY_ESCAPE, name = "Escape",
-			what = "The pause menu, or close what is open"},
+			what = "Pause menu, or close what is open"},
 	-- Listed for the player's sake; the code for these is the mouse
 	-- handling rather than a key lookup, and they are not bindable
 	{action = "dig", name = "Left mouse", what = "Dig"},
@@ -139,15 +141,43 @@ end
 -- menu.
 function M.draw(on_back)
 	local root = uistack.main:push({desc = "vanilla keys"})
-	local menu = ui_utils.vertical_menu(root, {min_width = 520})
-	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-	local title = menu.window:CreateChild("Text")
+	root.defaultStyle = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	local window = root:CreateChild("Window")
+	window:SetStyleAuto()
+	window:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(10, 10, 10, 10))
+	window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	local title = window:CreateChild("Text")
 	title:SetStyleAuto()
 	title:SetText("Key bindings")
-	local hint = menu.window:CreateChild("Text")
+	local hint = window:CreateChild("Text")
 	hint:SetStyleAuto()
 	hint:SetText("Pick a row and press a key. Escape leaves it, Backspace puts the default back.")
+	-- Two columns, so that the rows fit a 720 window ([BOX_FIXES] a): the
+	-- buttons interleave left, right, left... which is the order the
+	-- grid nav walks with two columns
+	local columns = window:CreateChild("UIElement")
+	columns:SetLayout(magic.LM_HORIZONTAL, 12, magic.IntRect(0, 0, 0, 0))
+	local col = {}
+	for c = 1, 2 do
+		col[c] = columns:CreateChild("UIElement")
+		col[c]:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	end
+	local function make_button(parent, label)
+		local button = parent:CreateChild("Button")
+		button:SetStyleAuto()
+		button:SetName("Button")
+		button:SetLayout(magic.LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+		button.minHeight = 24
+		button.minWidth = 380
+		local text = button:CreateChild("Text")
+		text:SetName("ButtonText")
+		text:SetStyleAuto()
+		text.text = label
+		text:SetTextAlignment(magic.HA_LEFT)
+		return button
+	end
 	local rows = {}
+	local items = {}
 	local listening = nil
 	local function label_of(b)
 		return string.format("%-8s  %s", b.name, b.what)
@@ -172,16 +202,27 @@ function M.draw(on_back)
 			end
 		end
 	end
-	for _, b in ipairs(M.BINDINGS) do
-		local button = menu:add(label_of(b), function()
+	for i, b in ipairs(M.BINDINGS) do
+		local button = make_button(col[(i - 1) % 2 + 1], label_of(b))
+		rows[#rows + 1] = {b = b, button = button}
+		items[#items + 1] = {button, function()
 			if bindable(b) then
 				listening = b
 				refresh()
 			end
-		end)
-		rows[#rows + 1] = {b = b, button = button}
+		end}
 	end
-	menu:add("Defaults", function()
+	-- An odd count leaves the right column a row short; the two rows
+	-- under the columns are a row of their own each, so the nav's index
+	-- arithmetic stays on the grid: a blank fills the gap
+	if #M.BINDINGS % 2 == 1 then
+		local blank = col[2]:CreateChild("UIElement")
+		blank.minHeight = 24
+	end
+	local bottom = window:CreateChild("UIElement")
+	bottom:SetLayout(magic.LM_HORIZONTAL, 12, magic.IntRect(0, 0, 0, 0))
+	local defaults = make_button(bottom, "Defaults")
+	items[#items + 1] = {defaults, function()
 		for _, b in ipairs(M.BINDINGS) do
 			if bindable(b) then
 				b.key, b.name = b.default_key, b.default_name
@@ -190,11 +231,14 @@ function M.draw(on_back)
 		listening = nil
 		refresh()
 		save()
-	end)
-	menu:add("< back", function()
+	end}
+	local back = make_button(bottom, "< back")
+	items[#items + 1] = {back, function()
 		uistack.main:pop(root)
 		on_back()
-	end)
+	end}
+	local nav = ui_utils.bind_button_menu(root, items)
+	nav:set_columns(2)
 	-- The key while a row listens, before the menu's own navigation gets it
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		if listening == nil then

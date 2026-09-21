@@ -835,9 +835,18 @@ struct CState: public State, public interface::Server
 								std::istreambuf_iterator<char>());
 					}
 				}
-				if(previous_hash == content_hash){
+				// The file holds the hash as hex: the raw bytes, read back
+				// in text mode on Windows, ended at a 0x1a (Ctrl-Z) -- two
+				// of fifteen modules' hashes held one and compiled on every
+				// start of the box ([BOX_FIXES] c). An old raw file
+				// mismatches once and is rewritten.
+				if(previous_hash == interface::sha1::hex(content_hash)){
 					log_v(MODULE, "No need to recompile %s", cs(info.name));
 					skip_compile = true;
+				} else {
+					log_v(MODULE, "%s: the cached hash differs (%s against %s); "
+							"compiling", cs(info.name), cs(previous_hash.substr(0, 12)),
+							cs(interface::sha1::hex(content_hash).substr(0, 12)));
 				}
 			}
 		}
@@ -868,7 +877,7 @@ struct CState: public State, public interface::Server
 		// Update hash file
 		if(!skip_compile){
 			std::ofstream f(hashfile_path);
-			f<<content_hash;
+			f<<interface::sha1::hex(content_hash);
 		}
 
 		// Construct instance
