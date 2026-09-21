@@ -2780,6 +2780,13 @@ function M.show_local_form(spec, handler)
 	show_form("", spec, nil, handler)
 end
 
+-- The open form closed by the game itself, the way its Escape would
+function M.close_form()
+	if form then
+		close_form(true)
+	end
+end
+
 -- A click, from whoever is reading the mouse. Returns whether the form took
 -- it, so that a click that was not on one still digs.
 function M.click(x, y, button)

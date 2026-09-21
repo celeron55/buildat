@@ -23,6 +23,8 @@
 #include "storage/api.h"
 #include <cstdlib>
 #include <fstream>
+#include <cctype>
+#include <utility>
 #include <set>
 #include <sstream>
 #include <algorithm>
@@ -680,6 +682,37 @@ struct Module: public interface::Module
 		}
 		return "";
 	}
+	// The key bindings ([KEY_BINDINGS]): launcher.json's "keys" object,
+	// action to key name, as "key.<action>=<name>" rows of the list
+	sv_<ss_> read_key_rows()
+	{
+		sv_<ss_> out;
+		std::ifstream f(settings_path());
+		if(!f.good())
+			return out;
+		std::stringstream ss;
+		ss << f.rdbuf();
+		const ss_ text = ss.str();
+		const sajson::document doc =
+				sajson::parse(sajson::string(text.c_str(), text.size()));
+		if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_OBJECT)
+			return out;
+		sajson::value root = doc.get_root();
+		for(size_t i = 0; i < root.get_length(); i++){
+			if(root.get_object_key(i).as_string() != "keys")
+				continue;
+			sajson::value keys = root.get_object_value(i);
+			if(keys.get_type() != sajson::TYPE_OBJECT)
+				continue;
+			for(size_t j = 0; j < keys.get_length(); j++){
+				sajson::value v = keys.get_object_value(j);
+				if(v.get_type() == sajson::TYPE_STRING && !v.as_string().empty())
+					out.push_back("key."+keys.get_object_key(j).as_string()+
+							"="+v.as_string());
+			}
+		}
+		return out;
+	}
 	sv_<ss_> read_import_paths()
 	{
 		sv_<ss_> out;
@@ -713,24 +746,37 @@ struct Module: public interface::Module
 		}
 		return out;
 	}
-	void write_settings(const sv_<ss_> &paths, const ss_ &mode)
+	static void write_json_string(std::ofstream &f, const ss_ &s)
+	{
+		f << '"';
+		for(char c : s){
+			if(c == '"' || c == '\\')
+				f << '\\' << c;
+			else if((unsigned char)c < 0x20)
+				f << ' ';
+			else
+				f << c;
+		}
+		f << '"';
+	}
+	void write_settings(const sv_<ss_> &paths, const ss_ &mode,
+			const sv_<std::pair<ss_, ss_>> &keys)
 	{
 		interface::fs::create_directories(luanti_path());
 		std::ofstream f(settings_path(), std::ios::trunc);
 		f << "{\"render_mode\": \"" << mode << "\", \"import_paths\": [";
 		for(size_t i = 0; i < paths.size(); i++){
-			f << (i ? ", \"" : "\"");
-			for(char c : paths[i]){
-				if(c == '"' || c == '\\')
-					f << '\\' << c;
-				else if((unsigned char)c < 0x20)
-					f << ' ';
-				else
-					f << c;
-			}
-			f << "\"";
+			f << (i ? ", " : "");
+			write_json_string(f, paths[i]);
 		}
-		f << "]}\n";
+		f << "], \"keys\": {";
+		for(size_t i = 0; i < keys.size(); i++){
+			f << (i ? ", " : "");
+			write_json_string(f, keys[i].first);
+			f << ": ";
+			write_json_string(f, keys[i].second);
+		}
+		f << "}}\n";
 		if(!f.good())
 			log_w(MODULE, "could not write %s", cs(settings_path()));
 	}
@@ -742,6 +788,8 @@ struct Module: public interface::Module
 			sv_<ss_> list = read_import_paths();
 			ss_ mode = read_render_mode();
 			list.push_back("render_mode="+(mode.empty() ? ss_("pbr") : mode));
+			for(const ss_ &row : read_key_rows())
+				list.push_back(row);
 			ar(list);
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
@@ -1022,18 +1070,32 @@ struct Module: public interface::Module
 			return;
 		}
 		sv_<ss_> paths;
+		sv_<std::pair<ss_, ss_>> keys;
 		ss_ mode = "pbr";
 		for(const ss_ &v : values){
 			if(v.compare(0, 12, "render_mode=") == 0){
 				const ss_ m = v.substr(12);
 				if(m == "unlit" || m == "shadows" || m == "pbr")
 					mode = m;
+			} else if(v.compare(0, 4, "key.") == 0){
+				// key.<action>=<name>: the action a word, the name short
+				const size_t eq = v.find('=');
+				if(eq != ss_::npos && eq > 4 && v.size() - eq - 1 <= 32){
+					const ss_ action = v.substr(4, eq - 4);
+					bool word = true;
+					for(char c : action)
+						if(!isalnum((unsigned char)c) && c != '_')
+							word = false;
+					if(word)
+						keys.push_back({action, v.substr(eq + 1)});
+				}
 			} else if(!v.empty() && v.size() <= 4096)
 				paths.push_back(v);
 		}
-		write_settings(paths, mode);
-		log_i(MODULE, "settings: %zu import paths and render_mode %s "
-				"written to %s", paths.size(), cs(mode), cs(settings_path()));
+		write_settings(paths, mode, keys);
+		log_i(MODULE, "settings: %zu import paths, render_mode %s and %zu "
+				"key bindings written to %s", paths.size(), cs(mode),
+				keys.size(), cs(settings_path()));
 		send_settings(packet.sender);
 	}
 

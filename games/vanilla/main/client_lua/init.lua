@@ -110,47 +110,16 @@ end
 -- reads cannot drift apart. Luanti's own defaults, and the F5 line below
 -- lists them. `name` is what a player is shown, because a key constant is
 -- not something to put in front of one.
-local BINDINGS = {
-	{action = "forward", key = magic.KEY_W, name = "W", what = "Walk forward"},
-	{action = "back", key = magic.KEY_S, name = "S", what = "Walk back"},
-	{action = "left", key = magic.KEY_A, name = "A", what = "Walk left"},
-	{action = "right", key = magic.KEY_D, name = "D", what = "Walk right"},
-	{action = "jump", key = magic.KEY_SPACE, name = "Space",
-			what = "Jump, and up while flying"},
-	{action = "sneak", key = magic.KEY_LSHIFT, name = "Shift",
-			what = "Sneak, and down while flying"},
-	{action = "fast", key = magic.KEY_LCTRL, name = "Ctrl", what = "Move fast"},
-	{action = "fly", key = magic.KEY_K, name = "K", what = "Fly on and off"},
-	{action = "noclip", key = magic.KEY_H, name = "H",
-			what = "Through walls on and off"},
-	{action = "hotbar", first = magic.KEY_1, last = magic.KEY_9,
-			name = "1 - 9", what = "Pick a hotbar slot"},
-	{action = "chat", key = magic.KEY_T, name = "T",
-			what = "Say something - a line starting with / is a command"},
-	{action = "inventory", key = magic.KEY_I, name = "I", what = "Inventory"},
-	{action = "drop", key = magic.KEY_Q, name = "Q",
-			what = "Drop what is held - with Ctrl, one of it"},
-	{action = "mouse", key = magic.KEY_TAB, name = "Tab",
-			what = "The mouse in the world or on the screen"},
-	{action = "hud", key = magic.KEY_F1, name = "F1",
-			what = "The HUD on and off"},
-	{action = "chatlog", key = magic.KEY_F2, name = "F2",
-			what = "The chat log on and off"},
-	{action = "detail", key = magic.KEY_F5, name = "F5",
-			what = "The line of detail on and off"},
-	{action = "menu", key = magic.KEY_ESCAPE, name = "Escape",
-			what = "The pause menu, or close what is open"},
-	-- Listed for the player's sake; the code for these is the mouse
-	-- handling rather than a key lookup
-	{action = "dig", name = "Left mouse", what = "Dig"},
-	{action = "place", name = "Right mouse", what = "Place, or use"},
-	{action = "wield", name = "Mouse wheel", what = "Pick a hotbar slot"},
-}
-
-local BIND = {}
-for _, b in ipairs(BINDINGS) do
-	BIND[b.action] = b
-end
+-- The bindings and their editor live in keys.lua ([KEY_BINDINGS]); the
+-- table here is that one, so a rebound key is what key_down() reads
+local keys = (function(ok, err, m)
+	if not ok or type(m) ~= "table" then
+		error("vanilla: could not load keys.lua: " .. tostring(err))
+	end
+	return m
+end)(buildat.run_script_file("main/keys.lua"))
+local BINDINGS = keys.BINDINGS
+local BIND = keys.BIND
 
 local function key_down(action)
 	local b = BIND[action]
@@ -3298,33 +3267,16 @@ local function pause_spec()
 			"button[0.4,3.2;5.2,0.8;leave;Leave the game]"
 end
 
--- Every binding, in two columns, out of the same table the code reads, so a
--- key cannot be in the code and missing from the list. A label's text is
--- split on commas and semicolons by the formspec grammar, so BINDINGS keeps
--- them out.
-local function keys_spec()
-	local half = math.ceil(#BINDINGS / 2)
-	local out = {"size[12," .. tostring(1.5 + half * 0.6) .. "]",
-			"label[0.2,0.2;Key bindings]"}
-	for i, b in ipairs(BINDINGS) do
-		local first = i <= half
-		local x = first and 0.3 or 6.2
-		local row = first and (i - 1) or (i - half - 1)
-		local y = 0.9 + row * 0.6
-		out[#out + 1] = "label[" .. x .. "," .. y .. ";" .. b.name .. "]"
-		out[#out + 1] = "label[" .. (x + 1.8) .. "," .. y .. ";" ..
-				b.what .. "]"
-	end
-	out[#out + 1] = "button[4.8," .. tostring(0.7 + half * 0.6) ..
-			";2.4,0.8;back;Back]"
-	return table.concat(out)
-end
-
 local menu_fields
 
 menu_fields = function(fields)
 	if fields.keys then
-		luanti.show_local_form(keys_spec(), menu_fields)
+		-- The editor, the same screen the launcher's settings draw; the
+		-- pause menu comes back when it is left
+		luanti.close_form()
+		keys.draw(function()
+			luanti.show_local_form(pause_spec(), menu_fields)
+		end)
 	elseif fields.back then
 		luanti.show_local_form(pause_spec(), menu_fields)
 	elseif fields.leave then
@@ -3484,6 +3436,7 @@ end)(buildat.run_script_file("main/scan.lua"))({
 	player_pos = function() return player.x, player.y, player.z end,
 	wield = function() return hotbar_stacks[wield_index] end,
 	hotbar = function() return hotbar_stacks end,
+	keys = function() return BINDINGS end,
 	log = log,
 })
 
@@ -4059,5 +4012,11 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			frame_peak.skyvis_us - sky_cube.us
 end)
 
+-- The settings, for the key rows in them ([KEY_BINDINGS]); the same
+-- packet answers the pause menu's editor after a save
+buildat.sub_packet("main:settings", function(data)
+	keys.apply(cereal.binary_input(data, {"array", "string"}))
+end)
+buildat.send_packet("main:get_settings", "")
 log:info("vanilla client ready")
 -- vim: set noet ts=4 sw=4:

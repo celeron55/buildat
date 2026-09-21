@@ -133,6 +133,16 @@ return function(ctx)
 				"scan %s: self at %.1f,%.1f,%.1f yaw %.1f pitch %.1f fov %.1f hp ? wield %s hotbar %s",
 				label, px, py, pz, yaw0, pitch0, fov0,
 				buildat.dump(ctx.wield() or ""), table.concat(hot, " | "))
+		-- The key bindings as they stand, action=key, the rebound ones
+		-- marked ([KEY_BINDINGS])
+		local keys = {}
+		for _, b in ipairs(ctx.keys()) do
+			if b.default_key ~= nil then
+				keys[#keys + 1] = b.action .. "=" .. b.name ..
+						(b.key ~= b.default_key and "*" or "")
+			end
+		end
+		lines[#lines + 1] = "scan " .. label .. ": keys " .. table.concat(keys, " ")
 		-- The frame the rectangles are in, and the UI root it is read off
 		local lw, lh = buildat.logical_size()
 		lines[#lines + 1] = string.format("scan %s: frame %dx%d root %dx%d ui_scale %.3f",

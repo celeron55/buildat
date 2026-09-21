@@ -1833,6 +1833,10 @@ function M.define(dst, util)
 					self:SetMouseMode(mode)
 				end),
 			GetKeyDown = util.self_function("GetKeyDown", {"boolean"}, {"Input", "number"}),
+			-- A key's name and back, for a bindings file a person can read
+			-- ([KEY_BINDINGS])
+			GetKeyName = util.self_function("GetKeyName", {"string"}, {"Input", "number"}),
+			GetKeyFromName = util.self_function("GetKeyFromName", {"number"}, {"Input", "string"}),
 			GetKeyPress = util.self_function("GetKeyPress", {"boolean"}, {"Input", "number"}),
 			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),
 			-- Whether a mouse button is held, which the click events do not

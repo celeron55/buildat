@@ -100,6 +100,15 @@ local draw_import_games
 local draw_import_worlds
 -- And the settings screen, drawn from the server's main:settings
 local draw_settings
+-- The key bindings editor, shared with the game's pause menu, and
+-- whether it is the screen up now
+local keys_open = false
+local keys_editor = (function(ok, err, m)
+	if not ok or type(m) ~= "table" then
+		error("vanilla menu: could not load keys.lua: " .. tostring(err))
+	end
+	return m
+end)(buildat.run_script_file("main/keys.lua"))
 -- ContentDB's games ([CONTENTDB]): the server fetches, this asks and draws
 local ask_contentdb, draw_contentdb
 local contentdb_query = ""
@@ -343,13 +352,18 @@ end
 -- variable) are the server's and not in the list.
 function draw_settings(paths)
 	local menu = import_menu("Luanti settings")
-	-- The render mode rides in the list as "render_mode=<mode>"
+	-- The render mode rides in the list as "render_mode=<mode>", and the
+	-- key bindings as "key.<action>=<name>" rows ([KEY_BINDINGS]), which
+	-- keys.lua reads and the editor writes; both go back with the paths
 	local mode = "pbr"
 	local kept = {}
+	local key_rows = {}
 	for _, p in ipairs(paths) do
 		local m = p:match("^render_mode=(.*)$")
 		if m then
 			mode = m
+		elseif p:match("^key%.") then
+			key_rows[#key_rows + 1] = p
 		else
 			kept[#kept + 1] = p
 		end
@@ -358,9 +372,32 @@ function draw_settings(paths)
 	local function send(list)
 		waiting("Saving...")
 		list[#list + 1] = "render_mode=" .. mode
+		for _, r in ipairs(key_rows) do
+			list[#list + 1] = r
+		end
 		buildat.send_packet("main:set_settings",
 				cereal.binary_output(list, {"array", "string"}))
 	end
+	-- The key bindings editor, keys.lua's screen; the server's answer to
+	-- its save draws this screen again, so back comes here with the rows
+	menu:add("Key bindings...", function()
+		local all = {}
+		for _, p in ipairs(paths) do
+			all[#all + 1] = p
+		end
+		all[#all + 1] = "render_mode=" .. mode
+		for _, r in ipairs(key_rows) do
+			all[#all + 1] = r
+		end
+		keys_editor.apply(all)
+		close()
+		keys_open = true
+		keys_editor.draw(function()
+			keys_open = false
+			buildat.send_packet("main:get_settings", "")
+			waiting("Loading settings...")
+		end)
+	end)
 	-- The mode a session draws in, unless BUILDAT_LUANTI_PBR says
 	-- otherwise ([RENDER_MODES]); the current one marked
 	local modes = menu.window:CreateChild("Text")
@@ -702,7 +739,14 @@ buildat.sub_packet("main:settings", function(data)
 	if done then
 		return
 	end
-	draw_settings(cereal.binary_input(data, {"array", "string"}))
+	local list = cereal.binary_input(data, {"array", "string"})
+	-- The editor's own save comes back here: its rows, not a screen
+	-- over it
+	if keys_open then
+		keys_editor.apply(list)
+		return
+	end
+	draw_settings(list)
 end)
 
 -- What the server is doing while the game loads: 220 mods take minutes and
