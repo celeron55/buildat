@@ -272,6 +272,16 @@ struct CTCPSocket: public TCPSocket
 		int val = 1;
 		setsockopt(fd_client, SOL_SOCKET, SO_REUSEADDR, (const char*)&val,
 				sizeof(val));
+		// A small send buffer, so that what waits for a slow peer waits in
+		// the network module's queue, where a LatestOnly packet can go
+		// ahead of it ([NET_CHANNELS]) -- not in the kernel, where the
+		// autotuned 4 MB is minutes at a lossy link's rate and nothing
+		// passes it. simplified: 64 KB a round trip caps a peer at some
+		// 800 kB/s over 80 ms; a transport with its own window ([TRANSPORT])
+		// lifts this.
+		int sndbuf = 64 * 1024;
+		setsockopt(fd_client, SOL_SOCKET, SO_SNDBUF, (const char*)&sndbuf,
+				sizeof(sndbuf));
 
 		m_fd = fd_client;
 		return true;
@@ -284,6 +294,49 @@ struct CTCPSocket: public TCPSocket
 			std::cerr<<"send: "<<strerror(errno)<<std::endl;
 			return false;
 		}
+		return true;
+	}
+	bool set_nonblocking(bool nonblocking)
+	{
+		if(m_fd == -1)
+			return false;
+#ifdef _WIN32
+		u_long on = nonblocking ? 1 : 0;
+		return ioctlsocket(m_fd, FIONBIO, &on) == 0;
+#else
+		int flags = fcntl(m_fd, F_GETFL, 0);
+		if(flags == -1)
+			return false;
+		if(nonblocking)
+			flags |= O_NONBLOCK;
+		else
+			flags &= ~O_NONBLOCK;
+		return fcntl(m_fd, F_SETFL, flags) == 0;
+#endif
+	}
+	// What fits, and how much that was. A socket whose buffer is full is not
+	// an error: nothing goes, `sent` is zero and the caller keeps the rest.
+	bool send_some(const ss_ &data, size_t offset, size_t *sent)
+	{
+		*sent = 0;
+		if(m_fd == -1)
+			return false;
+		if(offset >= data.size())
+			return true;
+		ssize_t n = send(m_fd, &data[offset], data.size() - offset, 0);
+		if(n < 0){
+#ifdef _WIN32
+			// Winsock says "would block" its own way, and errno says nothing
+			if(WSAGetLastError() == WSAEWOULDBLOCK)
+				return true;
+#else
+			if(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+				return true;
+#endif
+			std::cerr<<"send: "<<strerror(errno)<<std::endl;
+			return false;
+		}
+		*sent = (size_t)n;
 		return true;
 	}
 	bool wait_data(int timeout_us)
@@ -350,6 +403,13 @@ TCPSocket* createTCPSocket(int fd)
 	return new CTCPSocket(fd);
 }
 
+// Whether something accepts on the address, within 50 ms: a non-blocking
+// connect and a select on it. A blocking connect here stalled the
+// launcher's waiting screen, which asks every frame -- Winsock retries a
+// SYN to a closed port for about a second, and behind the firewall's
+// first-run prompt the connect timeout -- so the screen froze and the
+// client never came back ([WIN8_START]). A port that is not listening
+// yet answers "no" inside the 50 ms on every platform.
 bool probe_connect(const ss_ &address, const ss_ &port)
 {
 	struct addrinfo hints;
@@ -366,8 +426,35 @@ bool probe_connect(const ss_ &address, const ss_ &port)
 		int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if(fd == -1)
 			continue;
-		if(connect(fd, res->ai_addr, res->ai_addrlen) == 0)
+#ifdef _WIN32
+		u_long on = 1;
+		ioctlsocket(fd, FIONBIO, &on);
+#else
+		fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+#endif
+		int r = connect(fd, res->ai_addr, res->ai_addrlen);
+		if(r == 0){
 			ok = true;
+		} else {
+#ifdef _WIN32
+			const bool pending = WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+			const bool pending = errno == EINPROGRESS;
+#endif
+			if(pending){
+				fd_set wfds;
+				FD_ZERO(&wfds);
+				FD_SET(fd, &wfds);
+				struct timeval tv = {0, 50000};
+				if(select(fd + 1, NULL, &wfds, NULL, &tv) > 0){
+					int soerr = 0;
+					socklen_t len = sizeof(soerr);
+					if(getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&soerr,
+							&len) == 0 && soerr == 0)
+						ok = true;
+				}
+			}
+		}
 		closesocket(fd);
 		if(ok)
 			break;

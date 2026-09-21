@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "rccpp.h"
+#include <fstream>
 #include "core/log.h"
 #include "interface/server.h"
 #include "interface/process.h"
@@ -132,9 +133,39 @@ struct CCompiler: public Compiler
 					interface::process::get_environment_variable("PATH");
 			log_d(MODULE, "Using PATH=%s", cs(exec_opts.env["PATH"]));
 		}
+		// GCC wants TMPDIR, TMP or TEMP for its temporary files and, given
+		// none, falls back to C:\WINDOWS\, which a desktop refuses -- the
+		// first module build of the 0.3.0 archive failed on it ([WIN_TMP]).
+		// The compiler inherits the desktop's environment now; a desktop
+		// that sets none gets a tmp/ beside the out path (the cache).
+		if(interface::process::get_environment_variable("TEMP").empty() &&
+				interface::process::get_environment_variable("TMP").empty() &&
+				interface::process::get_environment_variable("TMPDIR").empty()){
+			const ss_ tmp = interface::fs::strip_file_name(out_path) + "/tmp";
+			interface::fs::create_directories(tmp);
+			exec_opts.env["TEMP"] = tmp;
+			exec_opts.env["TMP"] = tmp;
+			log_i(MODULE, "No TEMP in the environment; the compiler gets %s",
+					cs(tmp));
+		}
 #endif
+		// What the compiler said goes to a file beside the output, and
+		// into the log at warning when the build failed: a box with no
+		// console had "Failed to build module" and nothing else
+		// ([WIN8_START] 9)
+		exec_opts.output_path = out_path + ".compile.log";
 		int exit_status = interface::process::shell_exec(command, exec_opts);
-
+		if(exit_status != 0){
+			log_w(MODULE, "Compile failed (exit %i): %s", exit_status,
+					cs(command));
+			std::ifstream f(exec_opts.output_path);
+			ss_ line;
+			int n = 0;
+			while(std::getline(f, line) && n++ < 80)
+				log_w(MODULE, "  %s", cs(line));
+			if(n >= 80)
+				log_w(MODULE, "  ... (the rest in %s)", cs(exec_opts.output_path));
+		}
 		return exit_status == 0;
 	}
 

@@ -15,6 +15,9 @@
 #include "Uniforms.glsl"
 #include "Samplers.glsl"
 #include "Transform.glsl"
+// SkyVis.glsl is not included any more: this shader dims by a scalar and has
+// no use for a direction. See the note beside cSkyOutside below, and
+// [CAVE_SKY]'s correction in doc/plan/rendering_plan.md.
 
 varying vec3 vTexCoord;
 
@@ -29,6 +32,12 @@ uniform float cStarFade;
 // hold a star, and what colour; and how much of the sky the clouds cover.
 uniform float cSunSize;
 uniform float cSunOverexposure;
+// The sun as a disc at its radiance, for the pbr path: E0 of the hour over
+// the disc's solid angle, in the sun's colour for the elevation, which is
+// what the path trace draws (Nishita's disc, clipped white at every hour)
+// and what the sky cube then carries into the water. Zero (unset) keeps
+// Luanti's square at texture brightness, which the parity modes want.
+uniform vec3 cSunRadiance;
 uniform float cMoonSize;
 uniform float cStarDensity;
 uniform vec3 cStarColor;
@@ -45,6 +54,41 @@ uniform float cMoonTextured;
 // game says nodes a second and the client fudges it, because these clouds
 // are not a layer at a height; see CLOUD_WIND below for what a node comes to.
 uniform vec2 cCloudWind;
+
+// **What a player who cannot see the sky is under.** Luanti's `indoors`
+// colour, already multiplied by how light it is, and whether the game let
+// this happen at all -- its `auto_dim_skybox`, 1 for yes and 0 for no.
+//
+// The value it is mixed by is the sky visibility cube the client already
+// keeps, per direction: a seam is a place where the rasteriser shows sky
+// where the voxel data says rock, so the cube is near zero there **by
+// construction** and the hole goes dark without anything having to detect
+// it. At a tunnel mouth the mouth stays bright and the rock beside it does
+// not. See [CAVE_SKY] in doc/plan/rendering_plan.md.
+//
+// Both read as zero for a material that sets neither, which is a sky that
+// is never dimmed -- the right answer for a client that knows nothing about
+// this.
+uniform vec3 cSkyIndoors;
+uniform float cSkyAutoDim;
+// The gradient's shape: 0 is Luanti's, the horizon colour spread up the dome
+// by the square root; 1 is the path trace's at 13:00, the horizon's band
+// kept to the lowest part of the dome and the top colour holding above it
+// (render over the sea, elevation 17 to 2 degrees: the top's share 0.90,
+// 0.71, 0.36, 0.09, 0.01 -- a smoothstep of sin elevation over 0 to
+// 0.38). Set on the pbr path, whose sky is the lighting's number
+// ([PBR_FIT] term 1); the parity modes keep Luanti's. Unset reads as 0.
+uniform float cSkyPhysical;
+// On the physical path the game's cloud colour is a reflectance and these
+// are what lights it ([CLOUD_LIGHT]): the sun's share, albedo * E_sun *
+// k_sun * facing / pi, and the sky's, albedo * sky_mean / pi, both in the
+// sky's radiance units. The thin edge of a cloud lets the sun through and
+// the thick middle does not, so the sun's share thins with the density.
+uniform vec3 cCloudSun;
+uniform vec3 cCloudSky;
+// How much sky the camera can see, as one number: 0 in a cave, 1 anywhere
+// that is not one. See [CAVE_SKY]'s correction in doc/plan/rendering_plan.md.
+uniform float cSkyOutside;
 
 // How far below the horizon the sky darkens into the ground haze
 const float HAZE_DEPTH = 0.25;
@@ -175,6 +219,20 @@ void PS()
     vec3 color = d.y < 0.0 ?
             mix(cSkyHorizon, cSkyHorizon * 0.55, min(1.0, -d.y / HAZE_DEPTH)) :
             mix(cSkyHorizon, cSkyTop, sqrt(d.y));
+    if(cSkyPhysical > 0.5 && d.y >= 0.0){
+        // Brightness and hue on their own curves: the render's horizon
+        // band brightens over the lowest 20 degrees but stays blue until
+        // the last few -- the top's share of the hue is 0.05 at the
+        // horizon, 0.7 at 3 degrees, 0.9 at 9 (B/R 1.0, 1.2, 2.3 against
+        // a top of 3.4); one weight for both went white too early.
+        const vec3 LUM = vec3(0.2126, 0.7152, 0.0722);
+        float lum_h = max(dot(cSkyHorizon, LUM), 1e-6);
+        float lum_t = max(dot(cSkyTop, LUM), 1e-6);
+        float lum = mix(lum_h, lum_t, smoothstep(0.0, 0.38, d.y));
+        vec3 hue = mix(cSkyHorizon / lum_h, cSkyTop / lum_t,
+                1.0 - exp(-d.y / 0.09));
+        color = hue * lum;
+    }
 
     // The band the sun paints around itself along the horizon, which is what
     // makes dawn and dusk read as dawn and dusk. Strongest when the sun is
@@ -225,14 +283,23 @@ void PS()
         float into = clamp((density - threshold) / CLOUD_EDGE, 0.0, 1.0);
         float cover = into * cCloudAlpha *
                 smoothstep(CLOUD_HORIZON, CLOUD_FADE, d.y);
-        color = mix(color, cCloudColor, cover);
+        vec3 cloud = cSkyPhysical > 0.5 ?
+                cCloudSky + cCloudSun * (1.0 - 0.5 * into) : cCloudColor;
+        color = mix(color, cloud, cover);
     }
 
     // The sun and the moon, over the clouds: they are the two things up there
     // that are not behind them. The sun goes the colour of the tint as it
     // comes down to the horizon, which is where that colour belongs; higher
     // up it is its own.
-    if(cSunSize > 0.0){
+    if(cSunSize > 0.0 && dot(cSunRadiance, vec3(1.0)) > 0.0){
+        // A disc, not the square, at the radiance the client says
+        vec3 body = Body(d, sun, cSunSize);
+        vec2 at = (body.yz - 0.5) * cSunSize * 2.0;
+        float cover = body.x * (1.0 - smoothstep(cSunSize - BODY_EDGE,
+                cSunSize + BODY_EDGE, length(at)));
+        color = mix(color, cSunRadiance, cover);
+    } else if(cSunSize > 0.0){
         vec3 body = Body(d, sun, cSunSize);
         vec3 sun_color = mix(SUN_COLOR, cSunTint * 1.6, low);
         float cover = body.x;
@@ -257,6 +324,24 @@ void PS()
         }
         color = mix(color, moon_color, cover);
     }
+
+    // And whether the camera can see the sky at all. **A scalar, not a
+    // direction.** Mixing per direction -- which this did -- draws a halo
+    // around every occluder: the visibility cube is camera-local and thirty
+    // degrees to a cell while the sky is at infinity, so a cell whose ray
+    // hits a tree darkens the real sky just past that tree's silhouette, in
+    // a blob the size of a cell. The cube is right for reflections and for
+    // the ambient a surface receives, which are properties of a point on a
+    // surface; the sky is not a surface.
+    //
+    // cSkyOutside is one for anything less than fully enclosed, so the sky
+    // is drawn as it is unless the camera is in a cave -- which is Luanti's
+    // own shape, Sky::update() taking a scalar and a sunlight_seen bool.
+    // Mixed once at the end rather than per layer: it takes the sun, the
+    // moon and the stars with it, which is what stops a body blazing through
+    // a seam in a cave roof.
+    if(cSkyAutoDim > 0.0)
+        color = mix(cSkyIndoors, color, cSkyOutside);
 
     gl_FragColor = vec4(color, 1.0);
 }

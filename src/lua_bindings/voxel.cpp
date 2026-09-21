@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "core/log.h"
 #include "interface/voxel.h"
+#include "interface/atlas.h"
 #include "interface/voxel_selector.h"
 #include "lua_bindings/util.h"
 #include "lua_bindings/luabind_util.h"
@@ -10,6 +11,7 @@
 #include <luabind/adopt_policy.hpp>
 #include <luabind/object.hpp>
 #include <tolua++.h>
+#include <sstream>
 #include <Vector2.h>
 #define MODULE "lua_bindings"
 
@@ -444,6 +446,71 @@ static ss_ vreg_dump_format(VoxelRegistry &reg)
 	return reg.get_format().dump();
 }
 
+// Which type a voxel is under this registry's format, which is the only
+// thing that knows where the id is in the word. VoxelInstance's own id is
+// the legacy layout and is wrong for every world that says otherwise -- a
+// client asking what it is pointing at has to ask here.
+static uint32_t vreg_id_of(VoxelRegistry &reg, const interface::VoxelInstance &v)
+{
+	return reg.get_format().id_of(v.data);
+}
+
+// The two light nibbles of a voxel, 0..15 each, under the format: what the
+// held item is lit by is the light where the player stands ([WIELD_MESH])
+static uint32_t vreg_light_sky_of(VoxelRegistry &reg, const interface::VoxelInstance &v)
+{
+	const interface::VoxelFormat &f = reg.get_format();
+	return f.light_sky.bound() ? f.light_sky.get(v.data) : 15;
+}
+static uint32_t vreg_light_lamp_of(VoxelRegistry &reg, const interface::VoxelInstance &v)
+{
+	const interface::VoxelFormat &f = reg.get_format();
+	return f.light_lamp.bound() ? f.light_lamp.get(v.data) : 0;
+}
+
+// By value rather than through VoxelRegistry::get()'s const reference, which
+// luabind will not bind a Lua number to: a number is a temporary and there
+// is nothing for the reference to point at
+static const interface::VoxelDefinition* vreg_get_by_id(VoxelRegistry &reg,
+		uint32_t id)
+{
+	return reg.get((interface::VoxelTypeId)id);
+}
+
+// describe_lights(atlas_reg) -> JSON: every atlas segment a light-emitting
+// voxel's faces draw, with the voxel's light_source (1..15), for a mesh
+// dump's reader -- the path trace gives those tiles an emission
+// ([LAMP_REF]). Main thread only, since the cache is built with the atlas.
+static ss_ vreg_describe_lights(VoxelRegistry &reg, sp_<AtlasRegistry> atlas_reg)
+{
+	std::ostringstream os;
+	os<<"[";
+	bool first = true;
+	const size_t n = reg.get_count();
+	for(size_t id = 1; id <= n; id++){
+		const interface::VoxelDefinition *def =
+				reg.get((interface::VoxelTypeId)id);
+		if(!def || def->light_source == 0)
+			continue;
+		const interface::CachedVoxelDefinition *c = reg.get_cached(
+				(interface::VoxelTypeId)id, atlas_reg.get());
+		if(!c)
+			continue;
+		for(size_t face = 0; face < 6; face++){
+			const interface::AtlasSegmentReference &ref = c->textures[face];
+			if(ref.atlas_id == interface::ATLAS_UNDEFINED)
+				continue;
+			os<<(first ? "\n" : ",\n")<<"{\"atlas\":"<<ref.atlas_id
+					<<",\"segment\":"<<ref.segment_id<<",\"light\":"
+					<<(int)def->light_source<<",\"node\":\""
+					<<def->name.block_name<<"\"}";
+			first = false;
+		}
+	}
+	os<<"\n]\n";
+	return os.str();
+}
+
 // vdef.variants: what the voxel's param does to how it is drawn, as an array
 // of variants. One is
 //
@@ -635,8 +702,19 @@ void init_voxel(lua_State *L)
 			.def_readwrite("shape_lit_from_above",
 					&VoxelDefinition::shape_lit_from_above)
 			.def_readwrite("translucent", &VoxelDefinition::translucent)
+			.def_readwrite("alpha_masked", &VoxelDefinition::alpha_masked)
 			.def_readwrite("shape_group", &VoxelDefinition::shape_group)
 			.def_readwrite("is_liquid", &VoxelDefinition::is_liquid)
+			.def_readwrite("climbable", &VoxelDefinition::climbable)
+			.def_readwrite("move_resistance",
+					&VoxelDefinition::move_resistance)
+			.def_readwrite("bouncy", &VoxelDefinition::bouncy)
+			.def_readwrite("slippery", &VoxelDefinition::slippery)
+			.def_readwrite("disable_jump", &VoxelDefinition::disable_jump)
+			.def_readwrite("disable_descend",
+					&VoxelDefinition::disable_descend)
+			.def_readwrite("swimmable", &VoxelDefinition::swimmable)
+			.def_readwrite("pointable", &VoxelDefinition::pointable)
 			.def_readwrite("liquid_top", &VoxelDefinition::liquid_top)
 			.def_readwrite("connect_group", &VoxelDefinition::connect_group)
 			.def_readwrite("connect_mask", &VoxelDefinition::connect_mask)
@@ -654,8 +732,9 @@ void init_voxel(lua_State *L)
 		,
 		class_<VoxelRegistry, bases<>, sp_<VoxelRegistry>>("VoxelRegistry")
 			.def("add_voxel", &VoxelRegistry::add_voxel)
-			.def("get_by_id", (const VoxelDefinition*(VoxelRegistry::*)
-					(const VoxelTypeId&)) &VoxelRegistry::get)
+			.def("get_count", &VoxelRegistry::get_count)
+			.def("get_by_id", &vreg_get_by_id)
+			.def("describe_lights", &vreg_describe_lights)
 			.def("get_by_name", (const VoxelDefinition*(VoxelRegistry::*)
 					(const VoxelName&)) &VoxelRegistry::get)
 			.def("serialize", (ss_(VoxelRegistry::*) ())
@@ -665,6 +744,9 @@ void init_voxel(lua_State *L)
 			.def("set_format", &vreg_set_format)
 			.def("set_look_rules", &vreg_set_look_rules)
 			.def("dump_format", &vreg_dump_format)
+			.def("id_of", &vreg_id_of)
+			.def("light_sky_of", &vreg_light_sky_of)
+			.def("light_lamp_of", &vreg_light_lamp_of)
 		,
 		def("__buildat_createVoxelRegistry", &createVoxelRegistry)
 	];

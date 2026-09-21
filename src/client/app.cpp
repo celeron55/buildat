@@ -10,6 +10,8 @@
 #include "lua_bindings/util.h"
 #include "lua_bindings/replicate.h"
 #include "interface/fs.h"
+#include <sys/stat.h>
+#include <ctime>
 #include "interface/os.h"
 #include "interface/process.h"
 #include "interface/tcpsocket.h"
@@ -17,6 +19,11 @@
 #include "interface/thread_pool.h"
 #include <cctype>
 #include <algorithm>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <deque>
+#include <fstream>
 #include <c55/getopt.h>
 #include <c55/os.h>
 #include <Application.h>
@@ -37,13 +44,24 @@
 #include <Viewport.h>
 #include <Camera.h>
 #include <Renderer.h>
+#include <Audio.h>
+#include <RenderSurface.h>
+#include <Texture2D.h>
+#include <zlib.h>
+#include <VertexBuffer.h>
+#include <Geometry.h>
+#include <BorderImage.h>
 #include <Octree.h>
 #include <FileSystem.h>
 #include <PhysicsWorld.h>
 #include <DebugRenderer.h>
 #include <Profiler.h>
 #include <UI.h>
+#include <CustomGeometry.h>
+#include <Node.h>
+#include <Camera.h>
 #include <SDL/SDL.h>
+#include <ctime>
 extern "C" {
 #include <lua.h>
 #include <lauxlib.h>
@@ -55,6 +73,11 @@ extern "C" {
 #ifndef _WIN32
 #include <unistd.h>
 #include <limits.h>
+#endif
+// windows.h, which SDL and Urho3D pull in above, does #define interface
+// struct, and interface is this tree's namespace
+#ifdef interface
+	#undef interface
 #endif
 #define MODULE "__app"
 namespace magic = Urho3D;
@@ -81,6 +104,14 @@ static const float LOOK_FIRST_GUESS_DEG_PER_PX = 0.15f;
 static const int LOOK_FLIP_FRAMES = 4;
 static const int LOOK_STILL_FRAMES = 30;
 static const int LOOK_MAX_FRAMES = 300;
+// And how an axis that is never going to arrive is told from one that is
+// still on its way: how much closer it has to get to count as getting
+// closer, and how many frames it may fail to. A pitch clamp answers every
+// push away from it and none towards it, so the sign flipping above
+// oscillates against one forever -- what settles it is that the error stops
+// shrinking.
+static const float LOOK_PROGRESS_DEG = 0.05f;
+static const int LOOK_NO_PROGRESS_FRAMES = 30;
 
 // One axis of the aiming loop: what it has learned about how a pixel of mouse
 // movement turns this game's camera, and whether the camera has stopped
@@ -93,6 +124,12 @@ struct LookAxis
 	int pushed = 0;
 	int stall = 0;
 	int flips = 0;
+	// How close this axis has been to where it is wanted, and for how many
+	// frames it has not got closer: that is what says a clamped axis has
+	// arrived as far as it ever will. The flips alone cannot -- a push away
+	// from a limit moves, which clears them.
+	float best_err = 1e9f;
+	int no_progress = 0;
 	bool stuck = false;
 	bool moved_ever = false;
 
@@ -105,7 +142,22 @@ struct LookAxis
 		pushed = 0;
 		stall = 0;
 		flips = 0;
+		best_err = 1e9f;
+		no_progress = 0;
 		stuck = false;
+	}
+
+	// Called once a frame with how far this axis still has to go
+	void progress(float err)
+	{
+		const float e = fabsf(err);
+		if(e < best_err - LOOK_PROGRESS_DEG){
+			best_err = e;
+			no_progress = 0;
+			return;
+		}
+		if(++no_progress >= LOOK_NO_PROGRESS_FRAMES)
+			stuck = true;
 	}
 
 	void observe(float delta)
@@ -116,7 +168,6 @@ struct LookAxis
 			deg_per_px = delta / (float)pushed;
 			stall = 0;
 			flips = 0;
-			stuck = false;
 			moved_ever = true;
 			return;
 		}
@@ -134,9 +185,135 @@ struct LookAxis
 extern client::Config g_client_config;
 extern volatile sig_atomic_t g_shutdown_signal;
 
-static ss_ window_state_path()
+static ss_ preferences_path()
 {
-	return g_client_config.get<ss_>("cache_path")+"/window.json";
+	return g_client_config.get<ss_>("user_path")+"/preferences.json";
+}
+
+namespace app {
+
+// Every preference -o and preferences.json can carry is listed here once, so
+// that the flag and the file cannot drift apart.
+bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
+{
+	size_t i = 0;
+	while(i < s.size()){
+		size_t comma = s.find(',', i);
+		if(comma == ss_::npos)
+			comma = s.size();
+		ss_ item = s.substr(i, comma - i);
+		i = comma + 1;
+		if(item.empty())
+			continue;
+		size_t eq = item.find('=');
+		if(eq == ss_::npos){
+			*error = "\""+item+"\": expected key=value";
+			return false;
+		}
+		ss_ key = item.substr(0, eq);
+		ss_ value = item.substr(eq + 1);
+		char *end = nullptr;
+		double v = strtod(value.c_str(), &end);
+		if(value.empty() || *end != '\0'){
+			*error = key+": \""+value+"\" is not a number";
+			return false;
+		}
+		bool in_range = true;
+		if(key == "render_scale"){
+			// Below 2 is undersampling, which is the point; above it is
+			// supersampling, which the same code path gives away for free
+			in_range = (v >= 0.1 && v <= 2.0);
+			opt->graphics.render_scale = (float)v;
+		} else if(key == "vsync"){
+			opt->graphics.vsync = (v != 0);
+		} else if(key == "max_fps"){
+			in_range = (v >= 0 && v <= 1000);
+			opt->graphics.max_fps = (int)v;
+		} else if(key == "multisampling"){
+			in_range = (v == 1 || v == 2 || v == 4 || v == 8 || v == 16);
+			opt->graphics.multisampling = (int)v;
+		} else if(key == "sound_volume"){
+			in_range = (v >= 0.0 && v <= 1.0);
+			opt->sound_volume = (float)v;
+		} else if(key == "sound_mute"){
+			opt->sound_mute = (v != 0);
+		} else {
+			*error = "unknown preference \""+key+"\"";
+			return false;
+		}
+		if(!in_range){
+			*error = key+": "+value+" is out of range";
+			return false;
+		}
+	}
+	return true;
+}
+
+}
+
+static void check_parse_preference_options()
+{
+	app::Options o;
+	ss_ err;
+	if(!app::parse_preference_options(
+			"render_scale=0.5,vsync=0,sound_mute=1", &o, &err))
+		throw Exception("parse_preference_options: "+err);
+	if(o.graphics.render_scale != 0.5f || o.graphics.vsync || !o.sound_mute)
+		throw Exception("parse_preference_options: wrong values");
+	// What an item does not name is left alone
+	if(o.graphics.max_fps != app::Options().graphics.max_fps)
+		throw Exception("parse_preference_options: clobbered max_fps");
+	if(app::parse_preference_options("render_scale", &o, &err))
+		throw Exception("parse_preference_options: took a bare key");
+	if(app::parse_preference_options("render_scale=0.5x", &o, &err))
+		throw Exception("parse_preference_options: took a non-number");
+	if(app::parse_preference_options("render_scale=9", &o, &err))
+		throw Exception("parse_preference_options: took an out-of-range value");
+	if(app::parse_preference_options("multisampling=3", &o, &err))
+		throw Exception("parse_preference_options: took a bad sample count");
+	if(app::parse_preference_options("nonesuch=1", &o, &err))
+		throw Exception("parse_preference_options: took an unknown key");
+}
+
+// Rounded, and never zero: a window can be dragged small enough that a low
+// scale would otherwise ask for a zero-pixel texture.
+static int scaled_length(int px, float scale)
+{
+	int v = (int)(px * scale + 0.5f);
+	return v < 1 ? 1 : v;
+}
+
+// A viewport rect stays in window pixels from the game's point of view, so
+// this is the only place the scale is applied to one. IntRect::ZERO means the
+// whole target and has to stay that way.
+static magic::IntRect scaled_rect(const magic::IntRect &r, float scale)
+{
+	if(r == magic::IntRect::ZERO)
+		return r;
+	return magic::IntRect(
+			(int)(r.left_ * scale + 0.5f),
+			(int)(r.top_ * scale + 0.5f),
+			(int)(r.right_ * scale + 0.5f),
+			(int)(r.bottom_ * scale + 0.5f));
+}
+
+static void check_scaled_viewport_size()
+{
+	if(scaled_length(1280, 0.5f) != 640 || scaled_length(720, 0.5f) != 360)
+		throw Exception("scaled_length: even");
+	if(scaled_length(721, 0.5f) != 361)
+		throw Exception("scaled_length: rounding");
+	if(scaled_length(4, 0.1f) != 1)
+		throw Exception("scaled_length: minimum of one pixel");
+	if(scaled_length(1280, 1.5f) != 1920)
+		throw Exception("scaled_length: above one");
+	// games/bomber_drone's second viewport: the same factor, so the two
+	// halves still meet
+	magic::IntRect r = scaled_rect(magic::IntRect(0, 360, 1280, 720), 0.5f);
+	if(r.left_ != 0 || r.top_ != 180 || r.right_ != 640 || r.bottom_ != 360)
+		throw Exception("scaled_rect: rect");
+	if(scaled_rect(magic::IntRect::ZERO, 0.5f) != magic::IntRect::ZERO)
+		throw Exception("scaled_rect: whole target");
 }
 
 static bool desktop_size(int *w, int *h)
@@ -225,12 +402,53 @@ static bool window_is_maximized(magic::Graphics *g)
 	return (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED) != 0;
 }
 
-static bool load_window_state(int desk_w, int desk_h, app::GraphicsOptions *opt)
+// Reads the saved preferences into *opt. A missing field keeps its default,
+// so a file written by an older build is read by a newer one; a field that is
+// present but out of range drops the whole set back to the defaults, because
+// a file that has been edited into nonsense is better answered with something
+// known than with half of it. The return value is about the window geometry
+// alone: it is the one thing that has somewhere else to come from.
+static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 {
 	json::json_error_t err;
-	json::Value o = json::load_file(window_state_path().c_str(), &err);
+	json::Value o = json::load_file(preferences_path().c_str(), &err);
 	if(!o.is_object())
 		return false;
+
+	ss_ pref_err;
+	const json::Value &jrs = o.get("render_scale");
+	const json::Value &jvs = o.get("vsync");
+	const json::Value &jmf = o.get("max_fps");
+	const json::Value &jms = o.get("multisampling");
+	const json::Value &jsv = o.get("sound_volume");
+	const json::Value &jsm = o.get("sound_mute");
+	// Through the same parser as -o, so that the range checks are written
+	// once and a hand-edited file is refused the same way a flag is
+	ss_ items;
+	if(jrs.is_number())
+		items += ss_()+(items.empty()?"":",")+"render_scale="+ftos(jrs.as_number());
+	if(jvs.is_boolean())
+		items += ss_()+(items.empty()?"":",")+"vsync="+(jvs.as_boolean()?"1":"0");
+	if(jmf.is_integer())
+		items += ss_()+(items.empty()?"":",")+"max_fps="+itos(jmf.as_integer());
+	if(jms.is_integer())
+		items += ss_()+(items.empty()?"":",")+"multisampling="+itos(jms.as_integer());
+	if(jsv.is_number())
+		items += ss_()+(items.empty()?"":",")+"sound_volume="+ftos(jsv.as_number());
+	if(jsm.is_boolean())
+		items += ss_()+(items.empty()?"":",")+"sound_mute="+(jsm.as_boolean()?"1":"0");
+	if(!items.empty()){
+		app::Options parsed = *opt;
+		if(!app::parse_preference_options(items, &parsed, &pref_err))
+			log_w(MODULE, "%s: %s; using defaults",
+					cs(preferences_path()), cs(pref_err));
+		else
+			*opt = parsed;
+	}
+
+	// -w said what the size is, so the file does not get to
+	if(opt->graphics.size_forced)
+		return true;
 	const json::Value &jw = o.get("width");
 	const json::Value &jh = o.get("height");
 	if(!jw.is_integer() || !jh.is_integer())
@@ -239,30 +457,40 @@ static bool load_window_state(int desk_w, int desk_h, app::GraphicsOptions *opt)
 	int rh = (int)jh.as_integer();
 	if(rw < MIN_WINDOW_W || rh < MIN_WINDOW_H || rw > desk_w || rh > desk_h)
 		return false;
-	opt->window_w = rw;
-	opt->window_h = rh;
+	opt->graphics.window_w = rw;
+	opt->graphics.window_h = rh;
 	const json::Value &jm = o.get("maximized");
 	const json::Value &jf = o.get("fullscreen");
-	opt->maximized = jm.is_boolean() && jm.as_boolean();
-	opt->fullscreen = jf.is_boolean() && jf.as_boolean();
+	opt->graphics.maximized = jm.is_boolean() && jm.as_boolean();
+	opt->graphics.fullscreen = jf.is_boolean() && jf.as_boolean();
 	return true;
 }
 
-static void save_window_state(const app::GraphicsOptions &opt)
+static void save_preferences(const app::Options &opt)
 {
-	if(opt.size_forced)
+	// Nothing that came from the command line is remembered: -w's size, -o's
+	// preferences, and a -c run's whole set of them
+	if(opt.preferences_disabled || !opt.preference_overrides.empty() ||
+			opt.graphics.size_forced)
 		return;
-	if(opt.window_w < MIN_WINDOW_W || opt.window_h < MIN_WINDOW_H)
+	if(opt.graphics.window_w < MIN_WINDOW_W ||
+			opt.graphics.window_h < MIN_WINDOW_H)
 		return;
 	json::Value o = json::object();
-	o.set("width", opt.window_w);
-	o.set("height", opt.window_h);
-	o.set("maximized", opt.maximized);
-	o.set("fullscreen", opt.fullscreen);
-	o.save_file(window_state_path().c_str());
+	o.set("width", opt.graphics.window_w);
+	o.set("height", opt.graphics.window_h);
+	o.set("maximized", opt.graphics.maximized);
+	o.set("fullscreen", opt.graphics.fullscreen);
+	o.set("render_scale", opt.graphics.render_scale);
+	o.set("vsync", opt.graphics.vsync);
+	o.set("max_fps", opt.graphics.max_fps);
+	o.set("multisampling", opt.graphics.multisampling);
+	o.set("sound_volume", opt.sound_volume);
+	o.set("sound_mute", opt.sound_mute);
+	o.save_file(preferences_path().c_str());
 }
 
-static void resolve_window_size(app::GraphicsOptions *opt)
+static void resolve_preferences(app::Options *opt)
 {
 	int desk_w = 0;
 	int desk_h = 0;
@@ -270,9 +498,14 @@ static void resolve_window_size(app::GraphicsOptions *opt)
 		desk_w = 1920;
 		desk_h = 1080;
 	}
-	if(load_window_state(desk_w, desk_h, opt))
-		return;
-	pick_default_window_size(desk_w, desk_h, &opt->window_w, &opt->window_h);
+	// -w says what the size is, so nothing else has to; -c reads no file at
+	// all, and then the size can only come from the default
+	bool size_ok = opt->graphics.size_forced;
+	if(!opt->preferences_disabled && load_preferences(desk_w, desk_h, opt))
+		size_ok = true;
+	if(!size_ok)
+		pick_default_window_size(desk_w, desk_h,
+				&opt->graphics.window_w, &opt->graphics.window_h);
 }
 
 static bool valid_game_name(const ss_ &name)
@@ -290,6 +523,12 @@ static bool valid_game_name(const ss_ &name)
 static interface::process::Handle g_local_server;
 // Port the local server was told to listen on ("" if none was started)
 static ss_ g_local_server_port;
+// The local server's log, tailed for its STATUS lines ([START_PROGRESS])
+static ss_ g_local_server_log;
+static size_t g_local_server_log_offset = 0;
+static bool g_local_server_listening = false;
+static int64_t g_local_server_started_s = 0;
+static ss_ g_local_server_status;
 
 // simplified: A free port is picked by probing; a race with another process
 // grabbing it in between is possible but harmless for a local game (the server
@@ -458,6 +697,15 @@ public:
 			// NOTE: Path safety is checked by magic::FileSystem
 			return;
 		}
+		// Announced but not here yet -- a cold cache with the media on its
+		// way ([FIRST_RUN]): the name stays as it is, so cache:Exists()
+		// says no and a GetResource fails on the name rather than on a
+		// path in the cache, and whoever asked asks again later
+		if(!interface::fs::path_exists(path)){
+			log_v(MODULE, "Resource route access: %s (not arrived yet)",
+					name.CString());
+			return;
+		}
 		// Cache files are stored as a bare hash. Urho Sound (and some
 		// other loaders) pick the decoder from the File path extension.
 		magic::String ext = magic::GetExtension(name);
@@ -488,6 +736,105 @@ public:
 struct CApp: public App, public magic::Application
 {
 	sp_<client::State> m_state;
+	// dump_meshes(): the textures written so far this session, by the
+	// Texture2D they were read back from, so that eight viewpoints of one
+	// world read the atlas back once and not eight times -- the read-back
+	// and the PNG encode were 96% of a dump, and a dump longer than 30 s
+	// has the server drop the client as stalled
+	sm_<magic::Texture2D*, ss_> m_dumped_textures;
+	// The PNG encoding of a dump's textures, off the main thread: sixty
+	// atlas pages of 2048^2 took a minute to encode on it, which is
+	// longer than the server waits for a client that answers nothing, and
+	// the frames the client owes are the main thread's. One worker for
+	// the session with a queue, never joined between dumps -- a join
+	// before the second dump was the same minute on the main thread --
+	// only at shutdown. A texture is queued once a session (see
+	// m_dumped_textures), so a later dump never rewrites a file the
+	// worker is still on.
+	std::thread m_texture_writer;
+	std::mutex m_texture_mutex;
+	std::condition_variable m_texture_cv;
+	std::deque<std::pair<ss_, magic::SharedPtr<magic::Image>>> m_texture_queue;
+	bool m_texture_stop = false;
+	void queue_textures(sv_<std::pair<ss_, magic::SharedPtr<magic::Image>>> &items)
+	{
+		{
+			std::lock_guard<std::mutex> lock(m_texture_mutex);
+			for(auto &item : items)
+				m_texture_queue.push_back(item);
+		}
+		if(!m_texture_writer.joinable()){
+			m_texture_writer = std::thread([this](){
+				for(;;){
+					std::pair<ss_, magic::SharedPtr<magic::Image>> item;
+					{
+						std::unique_lock<std::mutex> lock(m_texture_mutex);
+						m_texture_cv.wait(lock, [this](){
+							return m_texture_stop || !m_texture_queue.empty();
+						});
+						if(m_texture_queue.empty())
+							return;
+						item = m_texture_queue.front();
+						m_texture_queue.pop_front();
+					}
+					const int64_t t0 = interface::os::time_us();
+					write_dump_texture(item.first, item.second);
+					log_v(MODULE, "dump_meshes: wrote %s in %.1f s",
+							cs(item.first),
+							(interface::os::time_us() - t0) / 1e6);
+				}
+			});
+		}
+		m_texture_cv.notify_one();
+	}
+	// A map's PNG, and for the two whose alpha is a channel of its own --
+	// the spec map's spots, the normal map's static spots -- the alpha
+	// forced opaque and the channel written beside it as <stem>_spots.png
+	// or <stem>_static_spots.png: a viewer composited the used tiles
+	// transparent over black and the map looked empty when it was not.
+	// [SPEC_DUMP_ALPHA]
+	static void write_dump_texture(const ss_ &path,
+			magic::SharedPtr<magic::Image> img)
+	{
+		const bool spec = path.size() > 9 &&
+				path.compare(path.size() - 9, 9, "_spec.png") == 0;
+		const bool normal = path.size() > 11 &&
+				path.compare(path.size() - 11, 11, "_normal.png") == 0;
+		if((!spec && !normal) || img->GetComponents() != 4){
+			img->SavePNG(magic::String(path.c_str()));
+			return;
+		}
+		const int w = img->GetWidth(), h = img->GetHeight();
+		const unsigned char *src = img->GetData();
+		magic::SharedPtr<magic::Image> opaque(new magic::Image(img->GetContext()));
+		magic::SharedPtr<magic::Image> chan(new magic::Image(img->GetContext()));
+		opaque->SetSize(w, h, 4);
+		chan->SetSize(w, h, 4);
+		unsigned char *o = opaque->GetData(), *c = chan->GetData();
+		for(int i = 0; i < w * h; i++){
+			o[i * 4] = src[i * 4];
+			o[i * 4 + 1] = src[i * 4 + 1];
+			o[i * 4 + 2] = src[i * 4 + 2];
+			o[i * 4 + 3] = 255;
+			c[i * 4] = c[i * 4 + 1] = c[i * 4 + 2] = src[i * 4 + 3];
+			c[i * 4 + 3] = 255;
+		}
+		opaque->SavePNG(magic::String(path.c_str()));
+		const ss_ stem = path.substr(0, path.size() - (spec ? 9 : 11));
+		chan->SavePNG(magic::String((stem + (spec ? "_spots.png" :
+				"_static_spots.png")).c_str()));
+	}
+
+	void join_texture_writer()
+	{
+		{
+			std::lock_guard<std::mutex> lock(m_texture_mutex);
+			m_texture_stop = true;
+		}
+		m_texture_cv.notify_one();
+		if(m_texture_writer.joinable())
+			m_texture_writer.join();
+	}
 	BuildatResourceRouter *m_router;
 	magic::LuaScript *m_script;
 	lua_State *L;
@@ -505,6 +852,28 @@ struct CApp: public App, public magic::Application
 	int64_t m_command_wait_until_us = 0;
 	ss_ m_pending_screenshot;
 	bool m_command_seq_active = false;
+	// The logical size a scripted client keeps whatever the window does
+	// ([SEQ_FIXED_SIZE]): the -w size. The world renders into a texture of
+	// it, the UI lays out at it, and both are shown scaled and letterboxed
+	// in the window; the scan, the mouse and the screenshots are in it.
+	int m_logical_w = 0;
+	int m_logical_h = 0;
+	// How the logical frame sits in the window: scale and offset, in pixels
+	float m_logical_scale = 1.f;
+	int m_logical_ox = 0;
+	int m_logical_oy = 0;
+	bool logical_mode() const { return m_command_seq_active && m_logical_w > 0; }
+	void update_logical_placement()
+	{
+		magic::Graphics *g = GetSubsystem<magic::Graphics>();
+		if(!g || !logical_mode())
+			return;
+		float sx = (float)g->GetWidth() / (float)m_logical_w;
+		float sy = (float)g->GetHeight() / (float)m_logical_h;
+		m_logical_scale = sx < sy ? sx : sy;
+		m_logical_ox = (int)((g->GetWidth() - m_logical_w * m_logical_scale) / 2);
+		m_logical_oy = (int)((g->GetHeight() - m_logical_h * m_logical_scale) / 2);
+	}
 	// -c - : commands arrive from standard input while the client runs, and
 	// the run ends at end of input rather than when the list is used up
 	bool m_command_seq_stdin = false;
@@ -531,6 +900,14 @@ struct CApp: public App, public magic::Application
 	magic::SharedPtr<magic::Scene> m_scene;
 	magic::SharedPtr<magic::Node> m_camera_node;
 
+	// What set_preferred_viewports() was last given, and the rects the game
+	// gave them in -- in window pixels, so that the scale can be applied
+	// again from scratch when the window changes size
+	sv_<magic::SharedPtr<magic::Viewport>> m_preferred_viewports;
+	sv_<magic::IntRect> m_preferred_rects;
+	magic::SharedPtr<magic::Texture2D> m_preferred_texture;
+	magic::SharedPtr<magic::BorderImage> m_preferred_image;
+
 	sp_<interface::thread_pool::ThreadPool> m_thread_pool;
 
 	CApp(magic::Context *context, const Options &options):
@@ -543,13 +920,36 @@ struct CApp: public App, public magic::Application
 	{
 		log_v(MODULE, "constructor()");
 		check_pick_default_window_size();
-		if(m_options.graphics.window_w <= 0 || m_options.graphics.window_h <= 0){
-			resolve_window_size(&m_options.graphics);
+		check_parse_preference_options();
+		check_scaled_viewport_size();
+		// A -c run is on the built-in defaults, and muted: nothing captures
+		// audio, and a driven run playing a game's music through the
+		// developer's speakers is a small recurring annoyance with no upside
+		m_options.preferences_disabled =
+				g_client_config.get<bool>("command_seq_enabled");
+		if(m_options.preferences_disabled)
+			m_options.sound_mute = true;
+		resolve_preferences(&m_options);
+		if(!m_options.preference_overrides.empty()){
+			// Already accepted once in main(), where a bad -o is a usage
+			// error rather than a startup failure
+			ss_ err;
+			if(!parse_preference_options(m_options.preference_overrides,
+					&m_options, &err))
+				throw AppStartupError("-o: "+err);
 		}
 		if(m_options.graphics.size_forced){
 			m_options.graphics.fullscreen = false;
 			m_options.graphics.maximized = false;
 		}
+		log_v(MODULE, "preferences: render_scale=%s vsync=%i max_fps=%i"
+				" multisampling=%i sound_volume=%s sound_mute=%i",
+				cs(ftos(m_options.graphics.render_scale)),
+				m_options.graphics.vsync ? 1 : 0,
+				m_options.graphics.max_fps,
+				m_options.graphics.multisampling,
+				cs(ftos(m_options.sound_volume)),
+				m_options.sound_mute ? 1 : 0);
 		m_restore_maximized = m_options.graphics.maximized;
 		log_v(MODULE, "window size: %ix%i maximized=%i fullscreen=%i",
 				m_options.graphics.window_w, m_options.graphics.window_h,
@@ -562,6 +962,11 @@ struct CApp: public App, public magic::Application
 			g_client_config.get<ss_>("share_path")+"/client/data",
 			g_client_config.get<ss_>("cache_path")+"/tmp",
 			g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
+			// The launch grid's icons: <name>/launcher/<icon>.png and a
+			// game's icon.png, resolved by the menu on the trusted side
+			// ([LAUNCH_GRID]). The same exposure as extensions above.
+			g_client_config.get<ss_>("share_path")+"/games",
+			g_client_config.get<ss_>("share_path")+"/builtin",
 			g_client_config.get<ss_>("urho3d_path")+"/bin/CoreData",
 			g_client_config.get<ss_>("urho3d_path")+"/bin/Data",
 		};
@@ -582,6 +987,10 @@ struct CApp: public App, public magic::Application
 
 		// Useful for saving stuff for inspection when debugging
 		magic_fs->RegisterPath("/tmp");
+		// Where dump_meshes() writes its albedo textures through Urho's
+		// own Image::SavePNG; the .obj beside them goes through fopen
+		magic_fs->RegisterPath(interface::fs::get_absolute_path(
+				g_client_config.get<ss_>("user_path")+"/meshdumps").c_str());
 
 		// Set Urho3D engine parameters
 		engineParameters_["WindowTitle"] = "Buildat Client";
@@ -618,10 +1027,12 @@ struct CApp: public App, public magic::Application
 				URHO3D_HANDLER(CApp, on_end_rendering));
 		SubscribeToEvent(magic::E_KEYDOWN, URHO3D_HANDLER(CApp, on_keydown));
 		SubscribeToEvent(magic::E_SCREENMODE, URHO3D_HANDLER(CApp, on_screenmode));
+		SubscribeToEvent(magic::E_INPUTFOCUS, URHO3D_HANDLER(CApp, on_inputfocus));
 		SubscribeToEvent(magic::E_LOGMESSAGE, URHO3D_HANDLER(CApp, on_logmessage));
 
 		// Default to not grabbing the mouse
 		magic::Input *magic_input = GetSubsystem<magic::Input>();
+		magic_input->SetMouseChangeReason("the client's start");
 		magic_input->SetMouseVisible(true);
 
 		// Default to auto-loading resources as they are modified
@@ -633,6 +1044,7 @@ struct CApp: public App, public magic::Application
 
 	~CApp()
 	{
+		client::command_seq::finish_screenshots();
 		stop_local_server();
 	}
 
@@ -655,6 +1067,7 @@ struct CApp: public App, public magic::Application
 	void shutdown()
 	{
 		log_v(MODULE, "shutdown()");
+		join_texture_writer();
 		// Whatever is running has one last chance to close what it opened.
 		// A network client that vanishes without saying goodbye is left on
 		// the server until it times out, and the next client to connect
@@ -669,7 +1082,7 @@ struct CApp: public App, public magic::Application
 			m_options.graphics.fullscreen = g->GetFullscreen();
 			if(!m_options.graphics.fullscreen)
 				m_options.graphics.maximized = window_is_maximized(g);
-			save_window_state(m_options.graphics);
+			save_preferences(m_options);
 		}
 
 		magic::Engine *engine = GetSubsystem<magic::Engine>();
@@ -692,6 +1105,42 @@ struct CApp: public App, public magic::Application
 		}
 	}
 
+	// When the connection went, if a local server this client started
+	// might be what went with it; see lost_connection() and on_update()
+	int64_t m_lost_connection_us = 0;
+
+	void lost_connection()
+	{
+		if(g_local_server.valid() && !g_local_server_log.empty()){
+			// The socket closes before the process is gone -- a crash
+			// writes its backtrace first -- so the verdict waits a moment
+			m_lost_connection_us = get_timeofday_us();
+			return;
+		}
+		shutdown();
+	}
+
+	void check_lost_connection()
+	{
+		if(m_lost_connection_us == 0)
+			return;
+		if(!interface::process::is_running(g_local_server)){
+			m_lost_connection_us = 0;
+			// The dialog closes the client; the frozen view stays behind
+			// it, and a client with no menu extension loaded gets the
+			// plain shutdown
+			if(run_script_no_sandbox(
+					"local m = require('buildat/extension/launch_menu')\n"
+					"m.show_dead_server('The server exited', "
+					"function() __buildat_disconnect() end)\n"))
+				return;
+			shutdown();
+		} else if(get_timeofday_us() - m_lost_connection_us > 2000000){
+			m_lost_connection_us = 0;
+			shutdown();
+		}
+	}
+
 	bool run_script_no_sandbox(const ss_ &script)
 	{
 		log_v(MODULE, "run_script_no_sandbox():\n%s", cs(script));
@@ -710,6 +1159,8 @@ struct CApp: public App, public magic::Application
 	void handle_packet(const ss_ &name, const ss_ &data)
 	{
 		log_v(MODULE, "handle_packet(): %s", cs(name));
+		magic::AutoProfileBlock profiler_block(
+				GetSubsystem<magic::Profiler>(), "Buildat|handle_packet");
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_handle_packet");
 		lua_pushlstring(L, name.c_str(), name.size());
@@ -767,9 +1218,12 @@ struct CApp: public App, public magic::Application
 			if(cfg > 0)
 				s = (float)cfg;
 			else {
-				int short_side = g->GetWidth();
-				if(g->GetHeight() < short_side)
-					short_side = g->GetHeight();
+				// From the logical size in a scripted client, so that the
+				// layout does not move with the window ([SEQ_FIXED_SIZE])
+				int short_side = logical_mode() ? m_logical_w : g->GetWidth();
+				int other = logical_mode() ? m_logical_h : g->GetHeight();
+				if(other < short_side)
+					short_side = other;
 				s = (float)short_side / UI_REF_SHORT;
 				if(s < 0.01f)
 					s = 0.01f;
@@ -782,6 +1236,25 @@ struct CApp: public App, public magic::Application
 				}
 			}
 		}
+		if(logical_mode()){
+			// The root stays the logical size over the game's own UI scale,
+			// drawn at that scale times the window's, and sits in the
+			// letterbox
+			update_logical_placement();
+			// Urho divides the custom size by the scale for the root, so
+			// the custom size is the letterboxed frame in pixels and the
+			// root comes out at the logical size over the game's scale
+			ui->SetCustomSize((int)(m_logical_w * m_logical_scale + 0.5f),
+					(int)(m_logical_h * m_logical_scale + 0.5f));
+			ui->SetScale(s * m_logical_scale);
+			ui->GetRoot()->SetPosition(
+					(int)(m_logical_ox / (s * m_logical_scale)),
+					(int)(m_logical_oy / (s * m_logical_scale)));
+			log_i(MODULE, "UI scale %g at logical %ix%i in %ix%i (x%g at %i,%i)",
+					s, m_logical_w, m_logical_h, g->GetWidth(), g->GetHeight(),
+					m_logical_scale, m_logical_ox, m_logical_oy);
+			return;
+		}
 		ui->SetScale(s);
 		log_i(MODULE, "UI scale %g (%ix%i)", s, g->GetWidth(), g->GetHeight());
 	}
@@ -792,12 +1265,15 @@ struct CApp: public App, public magic::Application
 
 		apply_ui_scale();
 
+		GetSubsystem<magic::Engine>()->SetMaxFps(m_options.graphics.max_fps);
+		apply_sound_preferences();
+
 		if(!m_options.graphics.fullscreen && m_restore_maximized){
 			magic::Graphics *g = GetSubsystem<magic::Graphics>();
 			if(g){
 				g->Maximize();
 				m_options.graphics.maximized = true;
-				save_window_state(m_options.graphics);
+				save_preferences(m_options);
 			}
 			m_restore_maximized = false;
 		}
@@ -817,7 +1293,7 @@ struct CApp: public App, public magic::Application
 		lua_bindings::init(L);
 
 #define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, lua_bindings::guarded<l_##name>); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
 
@@ -825,19 +1301,32 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(disconnect)
 		DEF_BUILDAT_FUNC(list_games)
 		DEF_BUILDAT_FUNC(start_local_server)
+		DEF_BUILDAT_FUNC(list_launchers)
+		DEF_BUILDAT_FUNC(list_installed_games)
 		DEF_BUILDAT_FUNC(stop_local_server)
 		DEF_BUILDAT_FUNC(request_stop_local_server)
 		DEF_BUILDAT_FUNC(force_kill_local_server)
 		DEF_BUILDAT_FUNC(local_server_ready)
 		DEF_BUILDAT_FUNC(local_server_running)
 		DEF_BUILDAT_FUNC(local_server_port)
+		DEF_BUILDAT_FUNC(local_server_status)
+		DEF_BUILDAT_FUNC(local_server_log_tail)
 		DEF_BUILDAT_FUNC(send_packet);
+		DEF_BUILDAT_FUNC(take_screenshot)
+		DEF_BUILDAT_FUNC(dump_meshes)
 		DEF_BUILDAT_FUNC(get_file_path)
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(set_ui_scale)
 		DEF_BUILDAT_FUNC(get_ui_scale)
+		DEF_BUILDAT_FUNC(logical_size)
+		DEF_BUILDAT_FUNC(get_preferred_render_scale)
+		DEF_BUILDAT_FUNC(get_preference)
+		DEF_BUILDAT_FUNC(set_preference)
+		DEF_BUILDAT_FUNC(list_preferences)
+		DEF_BUILDAT_FUNC(get_env)
+		DEF_BUILDAT_FUNC(is_scripted)
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
@@ -862,12 +1351,19 @@ struct CApp: public App, public magic::Application
 		// Launch menu if requested
 		if(g_client_config.get<bool>("boot_to_menu")){
 			ss_ extname = g_client_config.get<ss_>("menu_extension_name");
+			// -a kind/name/id: the menu boots and runs that one action of
+			// its grid ([LAUNCH_GRID]); the string goes in quoted, and it
+			// is a path's shape or nothing
+			ss_ action = g_client_config.get<ss_>("launch_action");
+			for(char c : action)
+				if(!(isalnum((unsigned char)c) || c == '_' || c == '-' || c == '/'))
+					action = "";
 			ss_ script = ss_() +
 					"local m = require('buildat/extension/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"
 					"    error('Failed to load extension "+extname+"')\n"
 					"end\n"
-					"m.boot()\n";
+					"m.boot("+(action.empty() ? ss_("") : "'"+action+"'")+")\n";
 			if(!run_script_no_sandbox(script)){
 				throw AppStartupError(ss_()+
 						"Failed to load and run extension "+extname);
@@ -888,6 +1384,10 @@ struct CApp: public App, public magic::Application
 			m_command_seq_stdin =
 					g_client_config.get<bool>("command_seq_stdin");
 			m_command_seq_active = true;
+			m_logical_w = m_options.graphics.window_w;
+			m_logical_h = m_options.graphics.window_h;
+			apply_ui_scale();
+			apply_preferred_viewports();
 			// Urho3D toggles fullscreen on alt+enter. A driven run injects
 			// plenty of enters, and SDL's modifier state can have alt in it
 			// from an alt+tab the window never saw the release of, which
@@ -934,33 +1434,12 @@ struct CApp: public App, public magic::Application
 		shutdown();
 	}
 
-	// Game code may SetMouseVisible(false) / grab. Do not actually capture
-	// the OS mouse; injected mouse_move is relative (GetMouseMove) and does
-	// not need a cursor position.
-	void command_seq_keep_mouse_free()
-	{
-		if(!m_command_seq_active)
-			return;
-		magic::Input *input = GetSubsystem<magic::Input>();
-		if(!input)
-			return;
-		bool changed = false;
-		if(input->GetMouseMode() == magic::MM_RELATIVE ||
-				input->GetMouseMode() == magic::MM_WRAP){
-			input->SetMouseMode(magic::MM_ABSOLUTE);
-			changed = true;
-		}
-		if(!input->IsMouseVisible()){
-			input->SetMouseVisible(true);
-			changed = true;
-		}
-		if(input->IsMouseGrabbed()){
-			input->SetMouseGrabbed(false);
-			changed = true;
-		}
-		if(changed)
-			client::command_seq::absorb_mouse_move_suppression(input);
-	}
+	// A scripted client never hides or captures the cursor: the Input
+	// wrapper in extensions/urho3d/safe_classes.lua refuses those calls
+	// while is_scripted(). Undoing a hide after the fact was what warped
+	// the desktop cursor to the window's corner -- Urho's re-show restores
+	// a position sampled while the cursor was hidden. See [SCRIPTED_CURSOR]
+	// in doc/plan/miscellaneous_plan.md.
 
 	// Where the camera of the first viewport points: yaw from +Z towards +X
 	// and pitch upwards, both in degrees. False when there is no camera --
@@ -968,9 +1447,13 @@ struct CApp: public App, public magic::Application
 	bool camera_angles(float *yaw, float *pitch)
 	{
 		auto *renderer = GetSubsystem<magic::Renderer>();
-		if(!renderer || renderer->GetNumViewports() < 1)
-			return false;
-		magic::Viewport *viewport = renderer->GetViewport(0);
+		magic::Viewport *viewport = nullptr;
+		// The game's viewports are on the offscreen texture under a render
+		// scale or in logical mode, and the renderer then has none
+		if(!m_preferred_viewports.empty())
+			viewport = m_preferred_viewports[0];
+		else if(renderer && renderer->GetNumViewports() >= 1)
+			viewport = renderer->GetViewport(0);
 		if(!viewport)
 			return false;
 		magic::Camera *camera = viewport->GetCamera();
@@ -1071,6 +1554,11 @@ struct CApp: public App, public magic::Application
 				0.75f * fabsf(m_look_y.deg_per_px));
 		float err_yaw = wrap_degrees((float)c.yaw - yaw);
 		float err_pitch = (float)c.pitch - pitch;
+		// Is each axis still getting closer? An axis against a limit is not,
+		// however it is pushed, and that is what ends the command instead of
+		// its frame budget.
+		m_look_x.progress(err_yaw);
+		m_look_y.progress(err_pitch);
 		// An axis that has moved and then stopped answering in either
 		// direction is against a limit the game keeps -- a pitch clamp, most
 		// of the time -- and is as arrived as it is going to get
@@ -1140,7 +1628,10 @@ struct CApp: public App, public magic::Application
 			ok = client::command_seq::inject_key(input, c.s, true, true, &err);
 			break;
 		case Type::MousePos:
-			ok = client::command_seq::inject_mouse_pos(input, c.x, c.y, &err);
+			ok = client::command_seq::inject_mouse_pos(input,
+					logical_mode() ? (int)(m_logical_ox + c.x * m_logical_scale) : c.x,
+					logical_mode() ? (int)(m_logical_oy + c.y * m_logical_scale) : c.y,
+					&err);
 			break;
 		case Type::MouseMove:
 			ok = client::command_seq::inject_mouse_move(input, c.x, c.y, &err);
@@ -1162,6 +1653,16 @@ struct CApp: public App, public magic::Application
 			break;
 		case Type::Text:
 			ok = client::command_seq::inject_text(input, c.s, &err);
+			break;
+		case Type::Event:
+			{
+				// Sent now, in the sequence's own frame; the receiver
+				// answers in the log, which is what a test reads
+				magic::VariantMap data;
+				data["Param"] = magic::String(c.param.c_str());
+				SendEvent(magic::StringHash(
+						magic::String(("command_seq:"+c.s).c_str())), data);
+			}
 			break;
 		case Type::Quit:
 		case Type::Delay:
@@ -1257,6 +1758,7 @@ struct CApp: public App, public magic::Application
 		/*magic::AutoProfileBlock profiler_block(
 				GetSubsystem<magic::Profiler>(), "App::on_update");*/
 
+		check_lost_connection();
 		if(g_shutdown_signal != 0 && !m_shutdown_signal_handled){
 			m_shutdown_signal_handled = true;
 			// SIGINT leaves a "^C" on the terminal to write past
@@ -1266,8 +1768,14 @@ struct CApp: public App, public magic::Application
 					g_shutdown_signal == SIGINT ? "SIGINT" : "SIGTERM");
 			shutdown();
 		}
-		if(m_state)
+		if(m_state){
+			// Under a block of its own: the network's packets and the Lua
+			// they run land here, and a frame that goes into them showed
+			// as an Update with nothing in it ([FRAME_PEAK])
+			magic::AutoProfileBlock profiler_block(
+					GetSubsystem<magic::Profiler>(), "Buildat|State::update");
 			m_state->update();
+		}
 
 		{
 			magic::AutoProfileBlock profiler_block(
@@ -1286,7 +1794,6 @@ struct CApp: public App, public magic::Application
 
 	void on_begin_frame(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
-		command_seq_keep_mouse_free();
 		command_seq_tick();
 	}
 
@@ -1305,8 +1812,11 @@ struct CApp: public App, public magic::Application
 		ss_ path = m_pending_screenshot;
 		m_pending_screenshot.clear();
 		ss_ err;
+		update_logical_placement();
 		if(!client::command_seq::save_screenshot(
-				GetSubsystem<magic::Graphics>(), path, &err))
+				GetSubsystem<magic::Graphics>(), path, &err,
+				logical_mode() ? m_logical_w : 0, logical_mode() ? m_logical_h : 0,
+				m_logical_ox, m_logical_oy, m_logical_scale))
 			command_seq_fail(err);
 	}
 
@@ -1328,7 +1838,7 @@ struct CApp: public App, public magic::Application
 				m_options.graphics.apply(magic_graphics);
 			}
 		}
-		if(key == Urho3D::KEY_F10){
+		if(key == Urho3D::KEY_F12 && (event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL)){
 			ss_ extname = "sandbox_test";
 			ss_ script = ss_() +
 					"local m = require('buildat/extension/"+extname+"')\n"
@@ -1347,6 +1857,184 @@ struct CApp: public App, public magic::Application
 		if(key == Urho3D::KEY_F8){
 			m_draw_debug_geometry = !m_draw_debug_geometry;
 		}
+	}
+
+	void set_preferred_viewports(const sv_<magic::Viewport*> &viewports)
+	{
+		m_preferred_viewports.clear();
+		m_preferred_rects.clear();
+		for(magic::Viewport *vp : viewports){
+			m_preferred_viewports.push_back(magic::SharedPtr<magic::Viewport>(vp));
+			m_preferred_rects.push_back(vp->GetRect());
+		}
+		apply_preferred_viewports();
+	}
+
+	float get_preferred_render_scale()
+	{
+		return m_options.graphics.render_scale;
+	}
+
+	// The user's render_scale reaching viewports the games made themselves:
+	// they go onto an offscreen texture of the asked-for size, and that
+	// texture is drawn under the UI. Urho3D draws the UI to the backbuffer
+	// after the viewports, so the UI is never undersampled.
+	void apply_preferred_viewports()
+	{
+		magic::Renderer *renderer = GetSubsystem<magic::Renderer>();
+		magic::Graphics *graphics = GetSubsystem<magic::Graphics>();
+		if(!renderer || !graphics)
+			return;
+		unsigned n = m_preferred_viewports.size();
+		float scale = m_options.graphics.render_scale;
+		// 1.0 is a bypass and not a scale of one: no texture, no blit, the
+		// frame the client draws when nothing asked for anything -- except
+		// in the scripted client, whose world always goes onto a texture of
+		// the logical size ([SEQ_FIXED_SIZE])
+		if(scale > 0.999f && scale < 1.001f && !logical_mode()){
+			drop_preferred_texture();
+			renderer->SetNumViewports(n);
+			for(unsigned i = 0; i < n; i++){
+				m_preferred_viewports[i]->SetRect(m_preferred_rects[i]);
+				renderer->SetViewport(i, m_preferred_viewports[i]);
+			}
+			return;
+		}
+		if(n == 0){
+			// Teardown has to leave nothing behind: a stale texture under
+			// the UI is last frame's world, still on the screen
+			drop_preferred_texture();
+			renderer->SetNumViewports(0);
+			return;
+		}
+
+		int tw = scaled_length(graphics->GetWidth(), scale);
+		int th = scaled_length(graphics->GetHeight(), scale);
+		// The rects the game gave are in the window it saw; in logical
+		// mode they are taken as fractions of it onto the logical frame
+		float rx = 1.f, ry = 1.f;
+		if(logical_mode()){
+			tw = m_logical_w;
+			th = m_logical_h;
+			scale = 1.f;
+			rx = (float)m_logical_w / (float)graphics->GetWidth();
+			ry = (float)m_logical_h / (float)graphics->GetHeight();
+		}
+		if(!m_preferred_texture || m_preferred_texture->GetWidth() != tw ||
+				m_preferred_texture->GetHeight() != th){
+			m_preferred_texture = new magic::Texture2D(context_);
+			m_preferred_texture->SetSize(tw, th,
+					magic::Graphics::GetRGBFormat(), magic::TEXTURE_RENDERTARGET);
+			m_preferred_texture->SetFilterMode(magic::FILTER_BILINEAR);
+		}
+		magic::RenderSurface *surface = m_preferred_texture->GetRenderSurface();
+		if(!surface){
+			log_w(MODULE, "set_preferred_viewports(): no render surface;"
+					" drawing at native resolution");
+			drop_preferred_texture();
+			renderer->SetNumViewports(n);
+			for(unsigned i = 0; i < n; i++)
+				renderer->SetViewport(i, m_preferred_viewports[i]);
+			return;
+		}
+		surface->SetNumViewports(n);
+		for(unsigned i = 0; i < n; i++){
+			magic::IntRect r = scaled_rect(m_preferred_rects[i], scale);
+			if(logical_mode()){
+				const magic::IntRect &p = m_preferred_rects[i];
+				r = magic::IntRect((int)(p.left_ * rx), (int)(p.top_ * ry),
+						(int)(p.right_ * rx), (int)(p.bottom_ * ry));
+				if(n == 1)
+					r = magic::IntRect(0, 0, tw, th);
+			}
+			m_preferred_viewports[i]->SetRect(r);
+			surface->SetViewport(i, m_preferred_viewports[i]);
+		}
+		surface->SetUpdateMode(magic::SURFACE_UPDATEALWAYS);
+		renderer->SetNumViewports(0);
+
+		magic::UI *ui = GetSubsystem<magic::UI>();
+		if(!ui)
+			return;
+		if(!m_preferred_image){
+			m_preferred_image = new magic::BorderImage(context_);
+			m_preferred_image->SetName("buildat_preferred_viewports");
+			// Under whatever UI the game has, and never in the way of it:
+			// a disabled element takes no input
+			m_preferred_image->SetPriority(-10000);
+			m_preferred_image->SetEnabled(false);
+			ui->GetRoot()->AddChild(m_preferred_image);
+		}
+		m_preferred_image->SetTexture(m_preferred_texture);
+		m_preferred_image->SetImageRect(magic::IntRect(0, 0, tw, th));
+		// UI coordinates, which the UI scale has already divided down
+		m_preferred_image->SetPosition(0, 0);
+		m_preferred_image->SetSize(ui->GetRoot()->GetSize());
+	}
+
+	void drop_preferred_texture()
+	{
+		if(m_preferred_image){
+			m_preferred_image->Remove();
+			m_preferred_image.Reset();
+		}
+		if(m_preferred_texture){
+			magic::RenderSurface *surface =
+					m_preferred_texture->GetRenderSurface();
+			if(surface)
+				surface->SetNumViewports(0);
+			m_preferred_texture.Reset();
+		}
+	}
+
+	// Urho3D multiplies a sound type's gain by the "Master" one
+	// (Audio::GetSoundSourceMasterGain()), so setting the master here scales
+	// every sound in every game, under whatever mixing the game does of its
+	// own. The sandbox refuses "Master" to sandboxed code, which is what
+	// makes this enforcement rather than a default.
+	// What a changed preference does now rather than at the next start. Each
+	// one is applied only when it actually changed: setting a screen mode
+	// that is already the screen mode still costs a mode change.
+	void apply_changed_preferences(const app::Options &before)
+	{
+		const GraphicsOptions &g = m_options.graphics;
+		const GraphicsOptions &b = before.graphics;
+		if(m_options.sound_volume != before.sound_volume ||
+				m_options.sound_mute != before.sound_mute)
+			apply_sound_preferences();
+		if(g.max_fps != b.max_fps){
+			if(magic::Engine *e = GetSubsystem<magic::Engine>())
+				e->SetMaxFps(g.max_fps);
+		}
+		if(g.vsync != b.vsync || g.multisampling != b.multisampling){
+			if(magic::Graphics *gr = GetSubsystem<magic::Graphics>())
+				m_options.graphics.apply(gr);
+		}
+		if(g.render_scale != b.render_scale)
+			apply_preferred_viewports();
+	}
+
+	void apply_sound_preferences()
+	{
+		magic::Audio *audio = GetSubsystem<magic::Audio>();
+		if(!audio)
+			return;
+		audio->SetMasterGain("Master",
+				m_options.sound_mute ? 0.0f : m_options.sound_volume);
+	}
+
+	// With the cursor hidden, Urho3D on Linux hands the focus back only on
+	// a click inside the window, and drops it again the same frame if the
+	// WM has not given the window SDL's input focus. A client that stops
+	// taking the mouse looks like that; this is the line that says so
+	// (doc/plan/luanti_module_history.md, [MOUSE_FOCUS_LOST]).
+	// The reason and the state before it are Urho3D's line (Input.cpp,
+	// [FOCUS_LOG]); this adds what only the client knows
+	void on_inputfocus(magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		log_i(MODULE, "input focus %s; a command sequence %s",
+				event_data["Focus"].GetBool() ? "gained" : "lost",
+				m_command_seq_active ? "is running" : "is not running");
 	}
 
 	void on_screenmode(magic::StringHash event_type, magic::VariantMap &event_data)
@@ -1375,8 +2063,11 @@ struct CApp: public App, public magic::Application
 				m_options.graphics.window_w, m_options.graphics.window_h,
 				m_options.graphics.maximized ? 1 : 0,
 				m_options.graphics.fullscreen ? 1 : 0);
-		save_window_state(m_options.graphics);
+		save_preferences(m_options);
 		apply_ui_scale();
+		// The offscreen texture is a fraction of the window, so a new window
+		// size is a new texture
+		apply_preferred_viewports();
 	}
 
 	void on_logmessage(magic::StringHash event_type, magic::VariantMap &event_data)
@@ -1388,7 +2079,13 @@ struct CApp: public App, public magic::Application
 		if(magic_level == magic::LOG_DEBUG)
 			c55_level = CORE_DEBUG;
 		else if(magic_level == magic::LOG_INFO)
-			c55_level = CORE_VERBOSE;
+			// Urho3D's INFO is chatter, except the input lines this tree
+			// added to it ([FOCUS_LOG]): a lost mouse is read from a log
+			// at info
+			// (the message carries Urho's "INFO: " prefix)
+			c55_level = (message.find("INFO: input ") != ss_::npos ||
+					message.find("INFO: mouse ") != ss_::npos) ?
+					CORE_INFO : CORE_VERBOSE;
 		else if(magic_level == magic::LOG_WARNING)
 			c55_level = CORE_WARNING;
 		else if(magic_level == magic::LOG_ERROR)
@@ -1415,6 +2112,71 @@ struct CApp: public App, public magic::Application
 		else
 			lua_pushstring(L, error.c_str());
 		return 2;
+	}
+
+	// list_launchers() -> {{kind = "game"|"builtin"|"extension", name, path},
+	// ...}: every games/<name>, builtin/<name> and extensions/<name> in the
+	// tree, with whether it ships launcher/init.lua as `launcher = true`.
+	// Nothing else is scanned -- not a save, not a Luanti game's mods. The
+	// menu draws the launch grid from this and runs the launcher files in
+	// the sandbox ([LAUNCH_GRID]).
+	static int l_list_launchers(lua_State *L)
+	{
+		const ss_ share = g_client_config.get<ss_>("share_path");
+		const struct { const char *kind; const char *dir; } kinds[] = {
+			{"game", "games"}, {"builtin", "builtin"},
+			{"extension", "extensions"}};
+		lua_newtable(L);
+		int i = 1;
+		for(const auto &k : kinds){
+			const ss_ dir = share+"/"+k.dir;
+			auto nodes = interface::fs::list_directory(dir);
+			sv_<ss_> names;
+			for(const auto &n : nodes)
+				if(n.is_directory && valid_game_name(n.name))
+					names.push_back(n.name);
+			std::sort(names.begin(), names.end());
+			for(const ss_ &name : names){
+				const ss_ path = interface::fs::get_absolute_path(dir+"/"+name);
+				lua_newtable(L);
+				lua_pushstring(L, k.kind);
+				lua_setfield(L, -2, "kind");
+				lua_pushstring(L, name.c_str());
+				lua_setfield(L, -2, "name");
+				lua_pushstring(L, path.c_str());
+				lua_setfield(L, -2, "path");
+				lua_pushboolean(L, interface::fs::path_exists(
+						path+"/launcher/init.lua"));
+				lua_setfield(L, -2, "launcher");
+				lua_rawseti(L, -2, i++);
+			}
+		}
+		return 1;
+	}
+
+	// list_installed_games(family) -> {name, ...}: the directory names
+	// under <user>/<family>/games, for a launcher file that offers a tile
+	// per installed game of another engine's family -- "luanti" is
+	// user/luanti/games. In the sandbox: read-only, names only, and only
+	// that one directory shape ([LAUNCH_GRID]).
+	static int l_list_installed_games(lua_State *L)
+	{
+		const ss_ family = lua_bindings::lua_tocppstring(L, 1);
+		if(!valid_game_name(family))
+			return luaL_error(L, "list_installed_games(): bad family");
+		const ss_ dir = g_client_config.get<ss_>("user_path")+"/"+family+"/games";
+		sv_<ss_> names;
+		for(const auto &n : interface::fs::list_directory(dir))
+			if(n.is_directory && valid_game_name(n.name))
+				names.push_back(n.name);
+		std::sort(names.begin(), names.end());
+		lua_newtable(L);
+		int i = 1;
+		for(const ss_ &name : names){
+			lua_pushstring(L, name.c_str());
+			lua_rawseti(L, -2, i++);
+		}
+		return 1;
 	}
 
 	// list_games() -> {{name=, size=}, ...}
@@ -1444,10 +2206,15 @@ struct CApp: public App, public magic::Application
 		return 1;
 	}
 
-	// start_local_server(game: string) -> status: bool, error: string or nil
+	// start_local_server(game: string [, launch: string]) -> status: bool,
+	// error: string or nil. launch is what an untrusted launcher asked for,
+	// key=value a line, handed to the server as -u ([LAUNCH_GRID]); never
+	// the environment, since a sandboxed script choosing a child's
+	// environment is a breach.
 	static int l_start_local_server(lua_State *L)
 	{
 		ss_ game = lua_bindings::lua_tocppstring(L, 1);
+		ss_ launch = lua_isstring(L, 2) ? lua_bindings::lua_tocppstring(L, 2) : "";
 		if(!valid_game_name(game)){
 			lua_pushboolean(L, false);
 			lua_pushstring(L, "Invalid game name");
@@ -1476,12 +2243,87 @@ struct CApp: public App, public magic::Application
 			lua_pushstring(L, "buildat_server not found");
 			return 2;
 		}
+#ifndef _WIN32
+		// The server compiles a game's modules as it loads them, and on
+		// Linux the compiler is the system's ([PACKAGING]): said here, in
+		// the dialog, rather than as a server that exits at once
+		if(interface::process::shell_exec("c++ --version >/dev/null 2>&1") != 0){
+			lua_pushboolean(L, false);
+			lua_pushstring(L, "No C++ compiler (c++) found in PATH.\n"
+					"buildat compiles a game's modules as it loads them.\n"
+					"Debian, Ubuntu:  sudo apt install build-essential\n"
+					"Fedora:  sudo dnf install gcc-c++");
+			return 2;
+		}
+#endif
 
 		game_path = interface::fs::get_absolute_path(game_path);
 		g_local_server_port = pick_free_local_port();
 		log_i(MODULE, "Starting local server on port %s", cs(g_local_server_port));
-		g_local_server = interface::process::start(
-				server_path, {"-m", game_path, "-P", g_local_server_port});
+		sv_<ss_> args{"-m", game_path, "-P", g_local_server_port,
+				// The client's own paths, so that a client started on other
+				// paths than the build's (-D, -C, the same letters both sides: a test on empty ones,
+				// [FIRST_RUN]) has its server on the same
+				"-D", g_client_config.get<ss_>("user_path"),
+				"-C", g_client_config.get<ss_>("cache_path")};
+		// The server the client starts writes beside the client's own log
+		// when there is one: half of what a bug report is about happens over
+		// there, and -L asked for a log of the session. Not the same file --
+		// a line here is several fprintf calls and log_no_nl leaves one
+		// unfinished on purpose, so two processes appending to one file
+		// splice each other's halves.
+		// And always one ([START_PROGRESS]): a player's client has no
+		// -L, and its server then logged nowhere -- nothing to read after
+		// a failed start, and nothing for the waiting screen to tail.
+		// cache/local_server_<port>.log at info, truncated per start;
+		// the port tells several clients' servers from one tree apart.
+		// The server's log beside the client's: <log>_server.<ext>, and
+		// the client's is absolute by now (boot::autodetect::open_log), so
+		// the child finds it wherever it starts ([WIN8_START]: a relative
+		// path resolved against the child's cwd, which on one box was
+		// nowhere -- "Invalid file handle. Error is 3"). The previous one
+		// is rotated to _1 beside it, as the client's own is. With the
+		// client on its default log that is cache/buildat_server.log.
+		// The server's log beside the client's -L: <log>_server.<ext>,
+		// absolute by now (boot::autodetect::open_log), so the child finds
+		// it wherever it starts ([WIN8_START]: a relative path resolved
+		// against the child's cwd, which on one box was nowhere --
+		// "Invalid file handle. Error is 3"). Rotation is the server's
+		// own (open_log, the same for every path). With no -L the server
+		// defaults to <cache>/buildat_server.log by itself.
+		const ss_ log_file = g_client_config.get<ss_>("log_file");
+		if(!log_file.empty()){
+			const size_t slash = log_file.find_last_of("/\\");
+			const size_t dot = log_file.find_last_of('.');
+			const bool has_ext = dot != ss_::npos &&
+					(slash == ss_::npos || dot > slash);
+			g_local_server_log = (has_ext ? log_file.substr(0, dot) : log_file)+
+					"_server"+(has_ext ? log_file.substr(dot) : ss_());
+			args.push_back("-L");
+			args.push_back(g_local_server_log);
+			args.push_back("-l");
+			args.push_back(itos(log_get_max_level()));
+		} else {
+			g_local_server_log = g_client_config.get<ss_>("cache_path")+
+					"/buildat_server.log";
+		}
+		g_local_server_log_offset = 0;
+		g_local_server_listening = false;
+		g_local_server_started_s = (int64_t)time(NULL);
+		g_local_server_status.clear();
+		log_i(MODULE, "server log: %s", cs(g_local_server_log));
+		// And whether that server restarts a module when its source
+		// changes, which is off unless this client was asked for it
+		if(g_client_config.get<bool>("reload_modules"))
+			args.push_back("-R");
+		if(!launch.empty()){
+			args.push_back("-u");
+			args.push_back(launch);
+		}
+		// Started in the root, whatever the client's cwd: from bin/ (a
+		// click on the exe) every path it forms would be off by one
+		g_local_server = interface::process::start(server_path, args,
+				g_client_config.get<ss_>("root_path"));
 		if(!g_local_server.valid()){
 			lua_pushboolean(L, false);
 			lua_pushstring(L, "Failed to start server");
@@ -1512,6 +2354,25 @@ struct CApp: public App, public magic::Application
 		return 0;
 	}
 
+	// logical_size() -> w, h: the frame a scan's and a sequence's pixels
+	// are in -- the -w size in a scripted client ([SEQ_FIXED_SIZE]), the
+	// window otherwise
+	static int l_logical_size(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		magic::Graphics *g = self->GetSubsystem<magic::Graphics>();
+		if(self->logical_mode()){
+			lua_pushinteger(L, self->m_logical_w);
+			lua_pushinteger(L, self->m_logical_h);
+		} else {
+			lua_pushinteger(L, g ? g->GetWidth() : 0);
+			lua_pushinteger(L, g ? g->GetHeight() : 0);
+		}
+		return 2;
+	}
+
 	// get_ui_scale() -> number
 	static int l_get_ui_scale(lua_State *L)
 	{
@@ -1520,6 +2381,129 @@ struct CApp: public App, public magic::Application
 		lua_pop(L, 1);
 		magic::UI *ui = self->GetSubsystem<magic::UI>();
 		lua_pushnumber(L, ui ? ui->GetScale() : 1.0);
+		return 1;
+	}
+
+	// get_preferred_render_scale() -> number
+	static int l_get_preferred_render_scale(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		lua_pushnumber(L, self->m_options.graphics.render_scale);
+		return 1;
+	}
+
+	// The preferences a screen can show and change. Their values live in
+	// app::Options and the C++ side is what parses, range checks and
+	// persists them, so a screen is a page of widgets over these two calls
+	// and knows nothing about the file.
+	static const char** preference_names()
+	{
+		static const char *names[7] = {"render_scale", "vsync", "max_fps",
+				"multisampling", "sound_volume", "sound_mute", nullptr};
+		return names;
+	}
+
+	// get_preference(name) -> number or boolean, or nil for a name there is
+	// no preference by
+	static int l_get_preference(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ name = luaL_checkstring(L, 1);
+		const app::Options &o = self->m_options;
+		if(name == "render_scale")
+			lua_pushnumber(L, o.graphics.render_scale);
+		else if(name == "vsync")
+			lua_pushboolean(L, o.graphics.vsync);
+		else if(name == "max_fps")
+			lua_pushinteger(L, o.graphics.max_fps);
+		else if(name == "multisampling")
+			lua_pushinteger(L, o.graphics.multisampling);
+		else if(name == "sound_volume")
+			lua_pushnumber(L, o.sound_volume);
+		else if(name == "sound_mute")
+			lua_pushboolean(L, o.sound_mute);
+		else
+			lua_pushnil(L);
+		return 1;
+	}
+
+	// set_preference(name, value) -> true, or false and why
+	//
+	// Through the same parser -o and the preferences file go through, so a
+	// range check is written once and a screen cannot set something a flag
+	// could not. What it changes takes effect now and is persisted, unless
+	// this run was told not to remember anything -- a -o run, a -c run --
+	// in which case it still takes effect and save_preferences() declines.
+	static int l_set_preference(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ name = luaL_checkstring(L, 1);
+		ss_ value;
+		if(lua_isboolean(L, 2))
+			value = lua_toboolean(L, 2) ? "1" : "0";
+		else
+			value = luaL_checkstring(L, 2);
+
+		app::Options parsed = self->m_options;
+		ss_ err;
+		if(!app::parse_preference_options(name+"="+value, &parsed, &err)){
+			lua_pushboolean(L, 0);
+			lua_pushstring(L, err.c_str());
+			return 2;
+		}
+		const app::Options before = self->m_options;
+		self->m_options = parsed;
+		self->apply_changed_preferences(before);
+		save_preferences(self->m_options);
+		lua_pushboolean(L, 1);
+		return 1;
+	}
+
+	// get_env(name) -> the environment variable, or nil when unset or when
+	// the name does not start with BUILDAT_. A knob a harness sets on the
+	// client's process, the way extensions/luanti_client reads its own
+	// outside the sandbox; the prefix is the fence, so a game cannot read
+	// the user's environment through this.
+	static int l_get_env(lua_State *L)
+	{
+		const ss_ name = luaL_checkstring(L, 1);
+		if(name.compare(0, 8, "BUILDAT_") != 0){
+			lua_pushnil(L);
+			return 1;
+		}
+		const char *v = getenv(name.c_str());
+		if(v)
+			lua_pushstring(L, v);
+		else
+			lua_pushnil(L);
+		return 1;
+	}
+
+	// is_scripted() -> true when a command sequence drives this client
+	static int l_is_scripted(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		lua_pushboolean(L, self->m_command_seq_active);
+		return 1;
+	}
+
+	// list_preferences() -> {name, ...}
+	static int l_list_preferences(lua_State *L)
+	{
+		const char **names = preference_names();
+		lua_newtable(L);
+		for(int i = 0; names[i]; i++){
+			lua_pushstring(L, names[i]);
+			lua_rawseti(L, -2, i + 1);
+		}
 		return 1;
 	}
 
@@ -1537,7 +2521,41 @@ struct CApp: public App, public magic::Application
 		return 0;
 	}
 
-	// local_server_ready() -> bool
+	// The local server's log from where the last read left off, for its
+	// "STATUS ..." lines; "STATUS Listening" is the one readiness reads
+	static void tail_local_server_log()
+	{
+		if(g_local_server_log.empty())
+			return;
+		// Not the run before: a default log is rotated away by the child
+		// when it starts, and until then the file here is the old one,
+		// with an old "Listening" in it
+		struct stat st;
+		if(stat(g_local_server_log.c_str(), &st) != 0 ||
+				(int64_t)st.st_mtime < g_local_server_started_s)
+			return;
+		std::ifstream f(g_local_server_log, std::ios::binary);
+		if(!f.good())
+			return;
+		f.seekg(g_local_server_log_offset);
+		ss_ line;
+		while(std::getline(f, line)){
+			g_local_server_log_offset += line.size() + 1;
+			const size_t at = line.find("STATUS ");
+			if(at != ss_::npos){
+				g_local_server_status = line.substr(at + 7);
+				if(g_local_server_status == "Listening")
+					g_local_server_listening = true;
+			}
+		}
+	}
+
+	// local_server_ready() -> bool: the server runs and has logged that it
+	// listens. Read from its log rather than by connecting to it: a probe
+	// connect was a peer to the server, one that vanished before it said
+	// anything, and the server warned about it twice per start
+	// ([WIN8_START] 11). A server started by somebody else (the pidfile's)
+	// has no log here and is probed.
 	static int l_local_server_ready(lua_State *L)
 	{
 		adopt_pidfile();
@@ -1545,9 +2563,52 @@ struct CApp: public App, public magic::Application
 			lua_pushboolean(L, false);
 			return 1;
 		}
-		lua_pushboolean(L, interface::probe_connect("127.0.0.1",
-				g_local_server_port));
+		if(g_local_server_log.empty()){
+			lua_pushboolean(L, interface::probe_connect("127.0.0.1",
+					g_local_server_port));
+			return 1;
+		}
+		tail_local_server_log();
+		lua_pushboolean(L, g_local_server_listening);
 		return 1;
+	}
+
+	// local_server_status() -> string or nil: the last "STATUS ..." line
+	// the local server logged, read from where the last call left off
+	static int l_local_server_status(lua_State *L)
+	{
+		tail_local_server_log();
+		if(g_local_server_status.empty())
+			lua_pushnil(L);
+		else
+			lua_pushstring(L, g_local_server_status.c_str());
+		return 1;
+	}
+
+	// local_server_log_tail(lines) -> path, text: the local server's log
+	// file and its last lines, for a dialog about a server that died
+	static int l_local_server_log_tail(lua_State *L)
+	{
+		const int want = luaL_optinteger(L, 1, 20);
+		lua_pushstring(L, g_local_server_log.c_str());
+		std::ifstream f(g_local_server_log, std::ios::binary);
+		std::deque<ss_> lines;
+		ss_ line;
+		while(f.good() && std::getline(f, line)){
+			// The dialog does not wrap, and a file list can be a
+			// thousand characters: the line's start is the part that
+			// says what it was
+			if(line.size() > 160)
+				line = line.substr(0, 157) + "...";
+			lines.push_back(line);
+			if((int)lines.size() > want)
+				lines.pop_front();
+		}
+		ss_ text;
+		for(const ss_ &l : lines)
+			text += l + "\n";
+		lua_pushstring(L, text.c_str());
+		return 2;
 	}
 
 	// local_server_port() -> string
@@ -1693,6 +2754,11 @@ struct CApp: public App, public magic::Application
 			lua_pushlstring(L, path.c_str(), path.size());
 			return 1;
 		}
+		if(name == "user"){
+			ss_ path = g_client_config.get<ss_>("user_path");
+			lua_pushlstring(L, path.c_str(), path.size());
+			return 1;
+		}
 		if(name == "tmp"){
 			ss_ path = g_client_config.get<ss_>("cache_path")+"/tmp";
 			lua_pushlstring(L, path.c_str(), path.size());
@@ -1700,6 +2766,286 @@ struct CApp: public App, public magic::Application
 		}
 		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
 		return 0;
+	}
+
+	// take_screenshot() -> the file name it was saved under, or nil and why
+	// not.
+	//
+	// **Safe, and this is the argument for it.** The caller says when, and
+	// nothing else: the client picks the directory -- <user>/screenshots --
+	// and the name, the date and the time it was taken. Sandboxed
+	// code cannot choose a path, cannot read what it wrote, and cannot
+	// overwrite an existing shot. What it can do is fill a directory with
+	// pictures of the screen, which is what the screenshot key already does
+	// and what a game the user is running can reasonably ask for -- a
+	// comparison harness photographing itself is the case this was added
+	// for; see [ONE_CYCLE] in doc/plan/rendering_plan.md.
+	//
+	// The file lands at the end of the frame, not inside this call: the
+	// buffer is only whole once the frame is drawn, which is why the command
+	// sequence's screenshot goes through the same pending slot. The name is
+	// reserved by then, so it is the right one to report.
+	static int l_take_screenshot(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+
+		// One pending shot at a time: the command sequence uses the same
+		// slot, and overwriting it would drop somebody else's picture
+		if(!self->m_pending_screenshot.empty()){
+			lua_pushnil(L);
+			lua_pushstring(L, "a screenshot is already pending");
+			return 2;
+		}
+		const ss_ dir = g_client_config.get<ss_>("user_path")+"/screenshots";
+		const ss_ name = client::command_seq::screenshot_name(dir);
+		self->m_pending_screenshot = dir+"/"+name;
+		lua_pushlstring(L, name.c_str(), name.size());
+		return 1;
+	}
+
+	// dump_meshes([atlas_json]) -> the file name it was saved under, or nil
+	// and why not. The optional string is written as <stem>_atlas.json
+	// beside the dump: the atlas registry's own account of which resource
+	// owns which tile, which the caller has and this does not.
+	//
+	// Same sandbox rule as take_screenshot(): the caller says when, the
+	// client picks <user>/meshdumps and a dated name. Writes the scene's
+	// CustomGeometry as one .obj in world space -- the meshes the client
+	// already built, not a second voxel dump. For [PATH_TRACE_REF].
+	static int l_dump_meshes(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		if(!self->m_scene){
+			lua_pushnil(L);
+			lua_pushstring(L, "no scene");
+			return 2;
+		}
+
+		const ss_ dir = g_client_config.get<ss_>("user_path")+"/meshdumps";
+		if(!interface::fs::create_directories(dir)){
+			lua_pushnil(L);
+			lua_pushstring(L, "cannot create meshdumps");
+			return 2;
+		}
+		char stamp[32] = {};
+		const time_t t = time(nullptr);
+		struct tm tmv;
+#ifdef _WIN32
+		localtime_s(&tmv, &t);
+#else
+		localtime_r(&t, &tmv);
+#endif
+		strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &tmv);
+		// Gzipped as it is written: the raw text of a RANGE=150 dump is
+		// ~800 MB and writing it held this thread past the server's
+		// 30 s stall limit; through zlib at level 1 it is a sixth of that.
+		ss_ name = ss_("meshdump_")+stamp+".obj.gz";
+		for(int i = 2; i < 1000 &&
+				interface::fs::path_exists(dir+"/"+name); i++)
+			name = ss_("meshdump_")+stamp+"_"+itos(i)+".obj.gz";
+		const ss_ path = dir+"/"+name;
+		// The atlas account the caller hands over, written beside the dump
+		// once the textures below are named: its last object is
+		// "textures", the read-back file of each atlas texture by address
+		const ss_ atlas_json = lua_isstring(L, 1) ? ss_(lua_tostring(L, 1)) : "";
+
+		gzFile f = gzopen(path.c_str(), "wb1");
+		if(!f){
+			lua_pushnil(L);
+			lua_pushstring(L, "cannot write dump");
+			return 2;
+		}
+		// A gzprintf a line is what took a minute on ten million verts,
+		// which is past the server's stall limit; a megabyte at a time
+		// through gzwrite is seconds
+		ss_ buf;
+		buf.reserve(1 << 20);
+		char line[256];
+		auto put = [&](int n){
+			if(n > 0)
+				buf.append(line, (size_t)n);
+			if(buf.size() >= (1 << 20) - 256){
+				gzwrite(f, buf.data(), (unsigned)buf.size());
+				buf.clear();
+			}
+		};
+
+		magic::PODVector<magic::Camera*> cams;
+		self->m_scene->GetComponents<magic::Camera>(cams, true);
+		if(!cams.Empty() && cams[0]->GetNode()){
+			magic::Node *cn = cams[0]->GetNode();
+			const magic::Vector3 p = cn->GetWorldPosition();
+			const magic::Vector3 d = cn->GetWorldDirection();
+			put(snprintf(line, sizeof line, "# camera_pos %g %g %g\n# camera_dir %g %g %g\n",
+					p.x_, p.y_, p.z_, d.x_, d.y_, d.z_));
+		}
+
+		// The albedo: each batch's diffuse texture, read back once a session
+		// and saved beside the dump as meshdump_texN.png, named by usemtl
+		// so the render can put it on. The atlas is a handful of textures
+		// for a whole world, which is why the read-back is keyed by texture
+		// and not by batch or by dump.
+		sm_<magic::Texture2D*, ss_> &tex_names = self->m_dumped_textures;
+		// What this dump reads back, encoded and written on a thread of its
+		// own once the .obj is out: the read-back is the GPU's and quick,
+		// the encoding is what took a minute
+		sv_<std::pair<ss_, magic::SharedPtr<magic::Image>>> to_write;
+		auto material_of = [&](magic::Material *mat) -> ss_ {
+			if(!mat)
+				return "";
+			magic::Texture2D *tex = dynamic_cast<magic::Texture2D*>(
+					mat->GetTexture(magic::TU_DIFFUSE));
+			if(!tex)
+				return "";
+			auto it = tex_names.find(tex);
+			if(it != tex_names.end())
+				return it->second;
+			// Named by the session's count, not the dump's, so a texture
+			// written for an earlier dump is the same file for this one
+			const ss_ stem = "meshdump_tex"+itos(tex_names.size());
+			const ss_ png = stem+".png";
+			magic::SharedPtr<magic::Image> img = tex->GetImage();
+			if(img)
+				to_write.push_back(std::make_pair(dir+"/"+png, img));
+			// The material maps the pbr shader reads beside the albedo --
+			// the atlas's derived normal (spots in alpha) and surface
+			// (roughness, spec strength, translucency, spots) -- as
+			// <stem>_normal.png and <stem>_spec.png when the material has
+			// them. [PT_MATERIALS]
+			const struct { magic::TextureUnit unit; const char *suffix; }
+					maps[] = {{magic::TU_NORMAL, "_normal"},
+					{magic::TU_SPECULAR, "_spec"}};
+			for(const auto &m : maps){
+				magic::Texture2D *t2 = dynamic_cast<magic::Texture2D*>(
+						mat->GetTexture(m.unit));
+				magic::SharedPtr<magic::Image> mi = t2 ? t2->GetImage() :
+						magic::SharedPtr<magic::Image>();
+				if(mi)
+					to_write.push_back(std::make_pair(
+							dir+"/"+stem+m.suffix+".png", mi));
+			}
+			tex_names[tex] = png;
+			return png;
+		};
+		auto write_atlas_json = [&](){
+			if(atlas_json.empty())
+				return;
+			ss_ j = atlas_json;
+			// Into the top-level object: replace its closing brace
+			size_t end = j.rfind('}');
+			if(end == ss_::npos)
+				return;
+			std::ostringstream os;
+			os<<", \"textures\": {";
+			bool first = true;
+			for(const auto &p : tex_names){
+				os<<(first ? "\n" : ",\n")<<"\""<<(uintptr_t)p.first<<"\": \""
+						<<p.second<<"\"";
+				first = false;
+			}
+			os<<"\n}}\n";
+			j = j.substr(0, end) + os.str();
+			FILE *af = fopen((dir+"/"+name.substr(0, name.size() - 7)+
+					"_atlas.json").c_str(), "w");
+			if(af){
+				fwrite(j.data(), 1, j.size(), af);
+				fclose(af);
+			}
+		};
+
+		magic::PODVector<magic::CustomGeometry*> geoms;
+		self->m_scene->GetComponents<magic::CustomGeometry>(geoms, true);
+		const int64_t t_start = interface::os::time_us();
+		int64_t t_tex = 0;
+		unsigned vbase = 1;
+		unsigned ngeom = 0, nvert = 0, ntri = 0;
+		magic::Vector3 eye(0, 0, 0);
+		float far_clip = 1e9f; // not "far": a Windows macro
+		if(!cams.Empty() && cams[0]->GetNode()){
+			eye = cams[0]->GetNode()->GetWorldPosition();
+			far_clip = cams[0]->GetFarClip();
+		}
+		for(unsigned gi = 0; gi < geoms.Size(); gi++){
+			magic::CustomGeometry *cg = geoms[gi];
+			magic::Node *node = cg->GetNode();
+			if(!node)
+				continue;
+			// The dump is what the picture shows: skip chunks outside the
+			// viewing range. +64 is one voxelworld section.
+			if((node->GetWorldPosition() - eye).Length() > far_clip + 64.f)
+				continue;
+			const magic::Matrix3x4 &wt = node->GetWorldTransform();
+			magic::Vector<magic::PODVector<magic::CustomGeometryVertex>>
+					&batches = cg->GetVertices();
+			for(unsigned b = 0; b < batches.Size(); b++){
+				const magic::PODVector<magic::CustomGeometryVertex> &vs =
+						batches[b];
+				if(vs.Size() < 3)
+					continue;
+				ngeom++;
+				magic::Geometry *geom = cg->GetLodGeometry(b, 0);
+				magic::VertexBuffer *vb = geom ? geom->GetVertexBuffer(0) : nullptr;
+				const bool has_tangent = vb &&
+						(vb->GetElementMask() & magic::MASK_TANGENT);
+				const int64_t t0 = interface::os::time_us();
+				const ss_ mname = material_of(cg->GetMaterial(b));
+				t_tex += interface::os::time_us() - t0;
+				put(snprintf(line, sizeof line, "o geom_%u_%u\nusemtl %s\n", gi, b,
+						mname.c_str()));
+				for(unsigned i = 0; i < vs.Size(); i++){
+					const magic::Vector3 wp = wt * vs[i].position_;
+					// The tint, as the OBJ vertex colour after the position:
+					// an albedo multiplier, which is what the shader does
+					// with it. It is the 5-6-5 in the tangent's x
+					// (pack_tint565 in impl/mesh.cpp) and only when the
+					// buffer declares a tangent -- the mesher writes one
+					// only for a format with a surface modifier, and for a
+					// Luanti world the field is unwritten memory. White
+					// otherwise. The vertex colour is the light and stays
+					// out: Cycles makes its own; VoxeLibre's palette
+					// colours are baked into atlas tiles and never a tint.
+					float tr = 1.f, tg = 1.f, tb = 1.f;
+					if(has_tangent){
+						const unsigned t = (unsigned)(vs[i].tangent_.x_ + 0.5f);
+						if(t > 0 && t < 65536){
+							tr = (t >> 11) / 31.f;
+							tg = ((t >> 5) & 63) / 63.f;
+							tb = (t & 31) / 31.f;
+						}
+					}
+					// No vn: the render takes the normal from the winding
+					put(snprintf(line, sizeof line, "v %g %g %g %g %g %g\nvt %g %g\n",
+							wp.x_, wp.y_, wp.z_, tr, tg, tb,
+							vs[i].texCoord_.x_, vs[i].texCoord_.y_));
+				}
+				for(unsigned i = 0; i + 2 < vs.Size(); i += 3){
+					const unsigned a = vbase + i;
+					put(snprintf(line, sizeof line, "f %u/%u %u/%u %u/%u\n",
+							a, a, a+1, a+1, a+2, a+2));
+					ntri++;
+				}
+				vbase += vs.Size();
+				nvert += vs.Size();
+			}
+		}
+		if(!buf.empty())
+			gzwrite(f, buf.data(), (unsigned)buf.size());
+		gzclose(f);
+		write_atlas_json();
+		if(!to_write.empty())
+			self->queue_textures(to_write);
+		log_i(MODULE, "dump_meshes %s: %u geoms, %u verts, %u tris in %.1f s, "
+				"%.1f s of it reading textures back; %zu textures being "
+				"written behind it",
+				cs(name), ngeom, nvert, ntri,
+				(interface::os::time_us() - t_start) / 1e6, t_tex / 1e6,
+				to_write.size());
+		lua_pushlstring(L, name.c_str(), name.size());
+		return 1;
 	}
 
 	// extension_path(name: string)

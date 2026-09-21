@@ -307,7 +307,7 @@ static int l_cereal_binary_output(lua_State *L)
 void init_cereal(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
 	DEF_BUILDAT_FUNC(cereal_binary_input)
