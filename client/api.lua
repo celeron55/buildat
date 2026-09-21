@@ -203,6 +203,9 @@ buildat.safe.SpatialUpdateQueue = function()
 		peek_next_fw = function(self, ...)
 			return internal:peek_next_fw(...)
 		end,
+		peek_next_value = function(self, ...)
+			return internal:peek_next_value(...)
+		end,
 		get_length = function(self, ...)
 			return internal:get_length(...)
 		end,

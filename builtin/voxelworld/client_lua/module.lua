@@ -41,6 +41,8 @@ function M.allow_streaming()
 	end
 end
 
+local stuck_checked_us, stuck_undrawn, stuck_seconds, stuck_said = 0, -1, 0, false
+local stuck_pops = {n = 0, distinct = 0, seen = {}}
 local UPDATE_TIME_FRACTION = 0.10
 local MESH_BUDGET_CAP_US = 15000
 -- And a floor: a tenth of the last frame is half a millisecond on an idle
@@ -605,12 +607,81 @@ function sub_events()
 		-- rest of the processing
 		node_update_queue:update(max_handling_time_us / 50 + 1)
 
+		-- The count of undrawn chunks within 2 of the camera not moving
+		-- for two seconds while the queue holds anything names the front
+		-- and what popped ([MISSING_CHUNK]): a queue that pops nothing, one
+		-- that pops the same chunk over and over, and one busy with far
+		-- chunks while the near ones never come up freeze the settle line
+		-- the same way and this tells them apart. Once a second; the count
+		-- is 125 lookups.
+		if current_us - stuck_checked_us >= 1000000 then
+			stuck_checked_us = current_us
+			local undrawn = M.undrawn_around(camera_p, 2)
+			if undrawn > 0 and undrawn == stuck_undrawn and
+					(node_update_queue:get_length() > 0 or
+					node_update_queue:is_sorting()) then
+				stuck_seconds = stuck_seconds + 1
+			else
+				stuck_seconds, stuck_said = 0, false
+			end
+			stuck_undrawn = undrawn
+			if stuck_seconds >= 2 and not stuck_said then
+				stuck_said = true
+				local f0 = node_update_queue:peek_next_f()
+				local v = node_update_queue:peek_next_value()
+				local last = stuck_pops.last
+				-- The nearest undrawn chunk, by node
+				local near_id, near_d = "-", -1
+				local c0 = M.get_chunk_position(camera_p)
+				if c0 then
+					for dz = -2, 2 do for dy = -2, 2 do for dx = -2, 2 do
+						local cp = buildat.Vector3(c0.x + dx, c0.y + dy, c0.z + dz)
+						if not M.is_chunk_drawn(cp) then
+							local node = M.get_static_node(cp)
+							local d = node and (node:GetWorldPosition() -
+									camera_p):Length() or -1
+							if near_d < 0 or (d >= 0 and d < near_d) then
+								near_id, near_d = node and node:GetID() or "none", d
+							end
+						end
+					end end end
+				end
+				log:warning(string.format("mesh queue: %d undrawn within 2 " ..
+						"for %d s: %d queued, sorting %s, front f=%s fw=%s %s " ..
+						"node %s; %d pops in the window, %d distinct, last %s " ..
+						"node %s f=%s at %.0f; nearest undrawn node %s at %.0f; " ..
+						"camera %.0f,%.0f,%.0f", undrawn, stuck_seconds,
+						node_update_queue:get_length(),
+						tostring(node_update_queue:is_sorting()),
+						tostring(f0), tostring(node_update_queue:peek_next_fw()),
+						v and v.type or "-", tostring(v and v.node_id or "-"),
+						stuck_pops.n, stuck_pops.distinct,
+						last and last.type or "-",
+						tostring(last and last.node_id or "-"),
+						tostring(last and last.f or "-"), last and last.d or -1,
+						tostring(near_id), near_d,
+						camera_p.x, camera_p.y, camera_p.z))
+			end
+			if stuck_seconds == 0 then
+				stuck_pops = {n = 0, distinct = 0, seen = {}}
+			end
+		end
+
 		for i = 1, 10 do -- Usually there is time only for a few
 			local f = node_update_queue:peek_next_f()
 			local fw = node_update_queue:peek_next_fw()
 			local did_update = false
 			if f and f <= 1.0 then
 				local node_update = node_update_queue:get()
+				stuck_pops.n = stuck_pops.n + 1
+				local pnode = replicate.main_scene:GetNode(node_update.node_id)
+				stuck_pops.last = {type = node_update.type,
+						node_id = node_update.node_id, f = math.floor(f*100)/100,
+						d = pnode and (pnode:GetWorldPosition() - camera_p):Length()}
+				if not stuck_pops.seen[node_update.node_id] then
+					stuck_pops.seen[node_update.node_id] = true
+					stuck_pops.distinct = stuck_pops.distinct + 1
+				end
 				local node = replicate.main_scene:GetNode(node_update.node_id)
 				if node then
 					log:debug("Node update #"..

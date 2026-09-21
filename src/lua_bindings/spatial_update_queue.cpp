@@ -345,6 +345,20 @@ struct LuaSUQ
 		o->internal.pop();
 		return 1;
 	}
+	// The front item without popping it ([MISSING_CHUNK]: a queue that
+	// pops nothing while chunks are undrawn names what it holds)
+	static int l_peek_next_value(lua_State *L){
+		LuaSUQ *o = internal_checkobject(L, 1);
+		if(o->internal.empty())
+			return 0;
+		SpatialUpdateQueue::Value &value = o->internal.get_value();
+		lua_newtable(L);
+		lua_pushstring(L, value.type.c_str());
+		lua_setfield(L, -2, "type");
+		lua_pushinteger(L, value.node_id);
+		lua_setfield(L, -2, "node_id");
+		return 1;
+	}
 	static int l_peek_next_f(lua_State *L){
 		LuaSUQ *o = internal_checkobject(L, 1);
 		if(o->internal.empty())
@@ -414,6 +428,7 @@ struct LuaSUQ
 		DEF_METHOD(get);
 		DEF_METHOD(peek_next_f);
 		DEF_METHOD(peek_next_fw);
+		DEF_METHOD(peek_next_value);
 		DEF_METHOD(get_length);
 		DEF_METHOD(is_sorting);
 
