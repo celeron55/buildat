@@ -124,9 +124,11 @@ xinput9_1_0.dll dwmapi.dll "
 			t && /^$/ {t=0}' >> "$into"
 	done < <(find "$dir/"*/bin "$dir/"*/cache -iname '*.dll' 2>/dev/null)
 	local dup
-	dup=$(awk 'NR==FNR {r[$1]=$2; next} ($1 in r) {print $1": "$2" (the runtime\x27s, "r[$1]")"}' "$runtime" "$own_exports" | sort | head -20)
+	# C++-mangled ones (_Z...) are template instantiations the same in
+	# every image, the ODR's business; a plain C symbol is the runtime's
+	dup=$(awk 'NR==FNR {r[$1]=$2; next} ($1 in r) && $1 !~ /^_Z/ {print $1": "$2" (the runtime\x27s, "r[$1]")"}' "$runtime" "$own_exports" | sort | head -20)
 	if [ -n "$dup" ]; then
-		echo "import check: a runtime's symbol exported by the archive's own DLL, a runtime linked into it ($(awk 'NR==FNR {r[$1]; next} ($1 in r)' "$runtime" "$own_exports" | wc -l) of them; the first 20):" >&2
+		echo "import check: a runtime's symbol exported by the archive's own DLL, a runtime linked into it ($(awk 'NR==FNR {r[$1]; next} ($1 in r) && $1 !~ /^_Z/' "$runtime" "$own_exports" | wc -l) of them; the first 20):" >&2
 		echo "$dup" | sed 's/^/  /' >&2
 		bad=1
 	fi
