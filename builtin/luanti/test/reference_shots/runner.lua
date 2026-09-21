@@ -135,6 +135,14 @@ end
 -- it have three ways of being configured and none of a file. See
 -- [PROBE_CYCLE] in doc/plan/rendering_plan.md.
 local function states_of(seed)
+	local picked = rawget(_G, "REFSHOT_STATES")
+	if picked then
+		local out = {}
+		for v, h in picked:gmatch("(%d+):(%d+)") do
+			out[#out + 1] = {view = tonumber(v), hour = h, weather = "none"}
+		end
+		return out
+	end
 	if rawget(_G, "REFSHOT_PROBE") then
 		return REFSET.probe_states
 	end

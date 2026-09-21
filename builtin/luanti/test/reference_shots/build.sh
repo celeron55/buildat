@@ -39,6 +39,8 @@ esac
 	[ -n "${KEEP:-}" ] && echo 'rawset(_G, "REFSHOT_KEEP", true)'
 	[ -n "${CLOUDS:-}" ] && echo 'rawset(_G, "REFSHOT_CLOUDS", true)'
 	[ -n "${CYCLES:-}" ] && echo "rawset(_G, \"REFSHOT_CYCLES\", $CYCLES)"
+	# STATES="3:0545,5:0200": those states alone, in that order (a ladder)
+	[ -n "${STATES:-}" ] && echo "rawset(_G, \"REFSHOT_STATES\", \"$STATES\")"
 	cat "$me/set.lua" "$me/runner.lua"
 } > "$dir/fixture.lua"
 cp "$dir/fixture.lua" "$dir/refviews/init.lua"
