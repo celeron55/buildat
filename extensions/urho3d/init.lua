@@ -456,17 +456,37 @@ function Unsafe.SubscribeToEvent(x, y, z)
 	return global_callback_name
 end
 
--- Capture follows focus, not keys ([FOCUS_LOG] 4). The game says what it
--- wants through SetMouseVisible (hide_wanted); the window losing input
--- focus -- alt-tab, another window, the WM -- frees the cursor for it,
--- and the focus coming back hides and captures it again when the game
--- still wants that. The handlers this replaces freed the cursor on Alt
--- down and recaptured on a click while free: a click after a focus
--- regained through a move or a resize never reached the recapture
--- (Urho drops button events while its inputFocus_ is false), and the
--- cursor stayed free over a world that thought the mouse was in it, for
--- good. SDL frees the cursor for the WM's alt-tab on its own once the
--- window loses focus, so nothing has to happen on the key.
+-- The mouse's capture, three ways ([FOCUS_LOG] 4). The game says what it
+-- wants through SetMouseVisible (hide_wanted); these keep it so across
+-- the window manager:
+-- * Alt down frees the cursor (ungrab, visible) so alt+tab reaches the
+--   WM -- a captured window has the keyboard grabbed too, and without
+--   this alt+tab never leaves the game (the playtest of 19:40);
+-- * focus lost frees it, focus regained hides and captures it again;
+-- * a click while it is free -- a stray Alt, no switch -- captures it.
+-- What made the mouse stay free for good was none of these: the game's
+-- own mouse key is Tab, and alt+tab handed the Tab to the client first.
+Safe.SubscribeToEvent("KeyDown", function(_, event_data)
+	if not mouse.hide_wanted then
+		return
+	end
+	local key = event_data:GetInt("Key")
+	if key == KEY_ALT or key == KEY_LALT or key == KEY_RALT then
+		input:SetMouseChangeReason("alt down")
+		input:SetMouseMode(MM_FREE)
+		input:SetMouseVisible(true)
+	end
+end)
+Safe.SubscribeToEvent("MouseButtonDown", function()
+	if not mouse.hide_wanted then
+		return
+	end
+	if input:GetMouseMode() == MM_FREE then
+		input:SetMouseChangeReason("a click while free")
+		input:SetMouseMode(MM_ABSOLUTE)
+		input:SetMouseVisible(false)
+	end
+end)
 Safe.SubscribeToEvent("InputFocus", function(_, event_data)
 	if not mouse.hide_wanted then
 		return
