@@ -1361,6 +1361,15 @@ def main():
             held = expect(s)
             if held:
                 failed_in_row = 0
+                mem["craft_waited"] = False
+            elif expect_name.startswith("craft_") and not mem.get("craft_waited"):
+                # A craft's answer is the server's, and a slow step
+                # ([FLOOD_STEP]: 2-4 s under a fresh world's flood) lands
+                # it after this scan: once more before it is judged
+                say("turn %d: %s not yet; the scan again" % (turn, expect_name))
+                mem["craft_waited"] = True
+                time.sleep(1.5)
+                continue
             elif expect_name in ("place_table", "place_furnace"):
                 # Nor this: no room where it was tried; room is made when
                 # hemmed in, another heading otherwise
@@ -1391,6 +1400,7 @@ def main():
                 say("turn %d: the item was not reached; given up" % turn)
                 mem.setdefault("given_up", {})[mem.get("last_item")] = turn
             else:
+                mem["craft_waited"] = False
                 failed_in_row += 1
                 say("turn %d: %s's expectation did not hold (%d in a row)" %
                     (turn, expect_name, failed_in_row))

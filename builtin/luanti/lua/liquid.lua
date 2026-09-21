@@ -334,8 +334,11 @@ end
 -- scan (the driven first run's crafts, 2026-09-22). A cut pass is
 -- followed by the next one sooner than liquid_update, so the queue
 -- drains at the same rate in shorter steps.
--- simplified: a fixed 250 ms; a setting when a game wants it.
-local PASS_US = 250000
+-- Measured 2026-09-22 (seed 5 VoxeLibre, no client): the decisions are
+-- a third of a pass and the writes after them two thirds -- 15 000
+-- nodes, 600 ms -- so the loop's cut is at a third of the step wanted.
+-- simplified: a fixed 100 ms; a setting when a game wants it.
+local PASS_US = 100000
 local cut_short = false
 
 local function transform(loop_max)
@@ -351,7 +354,7 @@ local function transform(loop_max)
 	-- the one above it already water
 	while head <= tail and loops < loop_max do
 		loops = loops + 1
-		if loops % 256 == 0 and core.get_us_time() - t0 > PASS_US then
+		if loops % 64 == 0 and core.get_us_time() - t0 > PASS_US then
 			cut_short = true
 			break
 		end
@@ -450,7 +453,13 @@ function core.__step_liquids(dtime)
 	if loop_max <= 0 then
 		return 0
 	end
+	local t0 = core.get_us_time()
 	local n = transform(loop_max)
+	local pass_us = core.get_us_time() - t0
+	if pass_us > 500000 then
+		core.log("warning", string.format("liquids: a pass of %d nodes took %d ms%s",
+				n, pass_us / 1000, cut_short and " (cut)" or ""))
+	end
 	if cut_short then
 		due = math.min(due, 0.25)
 	end

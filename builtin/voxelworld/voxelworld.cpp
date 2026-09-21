@@ -3587,7 +3587,19 @@ struct CInstance: public voxelworld::Instance
 		std::vector<LightNode> &spread = st.spread;
 		std::vector<pv::Vector3DInt32> &blockers = st.blockers;
 
-		for(const SkylightSeed &seed : seeds){
+		for(size_t si = 0; si < seeds.size(); si++){
+			// The seeds are the slow half under a flood ([FLOOD_STEP]: a
+			// liquid pass's 11 806 seeds took 1.9 s with 1210 spread --
+			// each one scattered over the sea, its chunk's buffer loaded
+			// for it); over the deadline the rest go back to the front of
+			// the queue and this returns unfinished, the next call's first
+			if((si & 63) == 63 && over()){
+				m_light_seeds[field].insert(m_light_seeds[field].begin(),
+						seeds.begin() + si, seeds.end());
+				st.seeds_n -= seeds.size() - si;
+				return false;
+			}
+			const SkylightSeed &seed = seeds[si];
 			VoxelInstance v = light_get(seed.p);
 			bool now_transparent = transmits_light_at(seed.p);
 			// A handful of seeds is a player's dig: said one by one, so a
@@ -3994,9 +4006,21 @@ struct CInstance: public voxelworld::Instance
 		// under its own budget: finishing it here made the slicing moot,
 		// since every access ends here ([STEP_SLICE]). Seeds from writes
 		// made meanwhile wait on the end of that flood, a few ticks.
-		if(!m_relight_pending)
-			update_skylight();
-		else
+		// Under a budget ([FLOOD_STEP]): a liquid pass's thousands of
+		// writes seeded a flood of 330 000 voxels that took 1.6 s of the
+		// step. What the budget leaves is a pending relight with no
+		// blockers of its own, carried on by relight_stale() under the
+		// tick's budget as a section's deferred relight is; the light of
+		// those writes lags a few ticks, the step does not.
+		static const int64_t COMMIT_LIGHT_BUDGET_US = 50000;
+		if(!m_relight_pending){
+			if(!update_skylight_until(t0 + COMMIT_LIGHT_BUDGET_US)){
+				m_relight_blockers.clear();
+				m_relight_finish_f = 0;
+				m_relight_finish_i = 0;
+				m_relight_pending = true;
+			}
+		} else
 			update_skylight_now();
 		const int64_t t_light = interface::os::time_us();
 
