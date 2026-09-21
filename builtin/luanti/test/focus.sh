@@ -49,14 +49,24 @@ for i in $(seq 1 10); do
 	xdotool windowminimize "$win"; sleep 1
 	xdotool windowactivate --sync "$win" 2>/dev/null; sleep 1
 done
-sleep 1
+# And an alt+tab as the keys, to this window: the Tab under Alt reaches
+# the client before the window manager acts, and it must not be taken
+# as the game's mouse key (which is Tab)
+xdotool keydown --window "$win" alt; sleep 0.2
+xdotool key --window "$win" Tab; sleep 0.2
+xdotool keyup --window "$win" alt; sleep 1
+xdotool windowminimize "$win"; sleep 1
+xdotool windowactivate --sync "$win" 2>/dev/null; sleep 1
 kill "$pid" 2>/dev/null
 lost=$(grep -ac "mouse visible (focus lost)" "$tmp/cli.log")
 regained=$(grep -ac "mouse hidden (focus regained)" "$tmp/cli.log")
 last=$(grep -a "mouse hidden\|mouse visible" "$tmp/cli.log" | tail -1 | sed 's/^.*Urho3D INFO: //')
 echo "focus: lost $lost, regained $regained; last: $last"
 echo "logs in $tmp"
-if [ "$regained" -ge 10 ] && [ "$last" = "mouse hidden (focus regained)" ]; then
+mouse_key=$(grep -ac "mouse visible (the mouse key)" "$tmp/cli.log")
+echo "focus: the mouse key under alt+tab freed the mouse $mouse_key times"
+if [ "$regained" -ge 11 ] && [ "$mouse_key" = 0 ] &&
+		[ "$last" = "mouse hidden (focus regained)" ]; then
 	echo PASS
 else
 	echo FAIL

@@ -3790,7 +3790,14 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	elseif key == BIND.chat.key then
 		chat_wanted = true
 	elseif key == BIND.mouse.key then
-		set_mouse_in_world(not mouse_in_world, "the mouse key")
+		-- Not under Alt: alt+tab delivers the Tab to the client before the
+		-- window manager takes it, and the game freed its own mouse on
+		-- every alt-tab out, so nothing wanted it back after ([FOCUS_LOG],
+		-- the playtest of 2026-09-21 18:54)
+		if not (magic.input:GetKeyDown(magic.KEY_LALT) or
+				magic.input:GetKeyDown(magic.KEY_RALT)) then
+			set_mouse_in_world(not mouse_in_world, "the mouse key")
+		end
 	elseif key == BIND.drop.key then
 		-- Luanti's own drop key: the whole stack, and one of it with the
 		-- key that means "one" everywhere else here. The server takes it
