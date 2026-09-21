@@ -510,6 +510,9 @@ function core.__result_wear(uses, initial_wear)
 	return wear_normal
 end
 
+-- The same, under the API's name (lua_api.md "Helper functions")
+core.get_tool_wear_after_use = core.__result_wear
+
 function Stack:add_wear_by_uses(uses)
 	self:add_wear(core.__result_wear(uses, self.wear))
 end

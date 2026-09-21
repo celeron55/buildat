@@ -2166,7 +2166,6 @@ local STUBS_NIL = {
 	-- The players and the objects are in lua/entity.lua
 	-- Inventory, craft, metadata (M4); the recipes are in lua/craft.lua
 	"register_craft_raw",
-	"get_tool_wear_after_use",
 	-- Chat, HUD, sound, particles (M4, M5)
 	"send_join_message",
 	"send_leave_message",

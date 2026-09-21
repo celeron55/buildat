@@ -148,6 +148,8 @@ check("itemstack", function()
 	assert(uses_until_gone(1) == 1, "a tool of one use")
 	assert(uses_until_gone(10) == 10, "a tool of ten uses")
 	assert(uses_until_gone(130) == 130, "a tool of a hundred and thirty")
+	assert(core.get_tool_wear_after_use(130) == 504, "the API's name")
+	assert(core.get_tool_wear_after_use(0) == 0, "infinite uses")
 end)
 
 check("inventory", function()
