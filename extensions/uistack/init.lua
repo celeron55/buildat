@@ -168,6 +168,12 @@ M.safe.UIStack = M.UIStack
 
 M.main = M.safe.UIStack(magic.ui.root)
 M.safe.main = M.main
+-- Set by whoever answers `event scan` for the world (vanilla's scan.lua),
+-- so the menu's answer below stands aside once it is there
+M.world_scan = false
+function M.safe.set_world_scan(on)
+	M.world_scan = on and true or false
+end
 
 -- `event scan <res> <label>` on a menu screen ([FIRST_RUN]): the screen on
 -- top of the main stack by its name, every element under it with its
@@ -179,7 +185,17 @@ M.safe.main = M.main
 do
 	magic.SubscribeToEvent("command_seq:scan", function(event_type, event_data)
 		local top = M.main.stack[#M.main.stack]
-		if top == nil or top:GetNumChildren() == 0 then
+		-- The stack's placeholder while a game runs has no children and
+		-- the world's scan answers then; between two screens the top is
+		-- empty for a moment too, and that gets an answer of its name
+		-- alone, so a driver's read does not time out on the gap
+		if top == nil then
+			return
+		end
+		-- The launcher's placeholder while a game runs: the world's scan
+		-- answers once vanilla's client half is up, and until then this
+		-- does, with the name alone, so a scan in the gap is not lost
+		if top:GetName():find("game is running", 1, true) and M.world_scan then
 			return
 		end
 		-- Required here and not above: ui_utils requires this file

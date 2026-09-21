@@ -873,6 +873,13 @@ struct Module: public interface::Module, public luanti::Interface
 	// the resource name each is composed under. The client is what composes
 	// them; this is what it is sent when it asks.
 	sm_<ss_, ss_> m_texmods;
+	// Peers that asked for the texture modifiers while the game's media
+	// was still on its way to them: the launcher's own client is
+	// connected before the game is chosen, so the media is announced
+	// after the join and composing over it fails until it has arrived
+	// ([FIRST_RUN]). Answered on client_file:files_transmitted.
+	std::set<network::PeerInfo::Id> m_texmods_waiting;
+	std::set<network::PeerInfo::Id> m_files_transmitted;
 	// Whether the save has node metadata in it, so that a world that has
 	// none does not get a blob written for it every shutdown
 	bool m_had_node_meta = false;
@@ -1044,6 +1051,7 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t("voxelworld:section_unloaded"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_texmods"));
+		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_item_images"));
 		m_server->sub_event(this, Event::t(
@@ -1081,6 +1089,8 @@ struct Module: public interface::Module, public luanti::Interface
 				voxelworld::SectionUnloaded)
 		EVENT_TYPEN("network:packet_received/luanti:get_texmods",
 				on_get_texmods, network::Packet)
+		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
+				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/luanti:get_item_images",
 				on_get_item_images, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_object_props",
@@ -2226,7 +2236,25 @@ struct Module: public interface::Module, public luanti::Interface
 	// The client half asks for these once it has loaded, rather than being
 	// sent them when it connects: a packet that arrives before the script
 	// that subscribes to it has nowhere to go.
+	void on_files_transmitted(const client_file::FilesTransmitted &event)
+	{
+		m_files_transmitted.insert(event.recipient);
+		if(m_texmods_waiting.erase(event.recipient))
+			send_texmods(event.recipient);
+	}
+
 	void on_get_texmods(const network::Packet &packet)
+	{
+		// A batch of media announced since this peer's last
+		// files_transmitted is still on its way: the answer waits for it
+		if(!m_files_transmitted.count(packet.sender)){
+			m_texmods_waiting.insert(packet.sender);
+			return;
+		}
+		send_texmods(packet.sender);
+	}
+
+	void send_texmods(network::PeerInfo::Id peer)
 	{
 		sv_<ss_> flat;
 		flat.reserve(m_texmods.size() * 2);
@@ -2240,9 +2268,9 @@ struct Module: public interface::Module, public luanti::Interface
 			ar(flat);
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(packet.sender, "luanti:texmods", os.str());
+			inetwork->send(peer, "luanti:texmods", os.str());
 		});
-		log_v(MODULE, "C%zu: %zu texture modifiers", (size_t)packet.sender,
+		log_v(MODULE, "C%zu: %zu texture modifiers", (size_t)peer,
 				m_texmods.size());
 	}
 
@@ -4879,10 +4907,17 @@ struct Module: public interface::Module, public luanti::Interface
 		return text.substr(q1 + 1, q2 - q1 - 1);
 	}
 
+	// Luanti's own base textures -- blank.png, heart.png, bubble.png,
+	// what a game's HUD asks the engine for: the copy under the module
+	// (textures/base, with its licence), or the user's own if they put
+	// one at user/luanti/textures/base/pack, which wins
 	ss_ base_textures_path()
 	{
-		return m_server->get_config().get<ss_>("user_path")+
+		const ss_ user = m_server->get_config().get<ss_>("user_path")+
 				"/luanti/textures/base/pack";
+		if(interface::fs::path_exists(user))
+			return user;
+		return module_path()+"/textures/base/pack";
 	}
 
 	void serve_game_media(const ss_ &game_path)
@@ -4910,9 +4945,18 @@ struct Module: public interface::Module, public luanti::Interface
 		sm_<ss_, ss_> files;
 		for(const ss_ &dir : dirs)
 			collect_files(dir, files, 0);
+		// One announce for the lot: a client already connected (the
+		// launcher's own, [FIRST_RUN]) fetches them as one batch
+		sv_<std::pair<ss_, ss_>> name_paths;
+		name_paths.reserve(files.size());
+		for(const auto &pair : files)
+			name_paths.push_back(std::make_pair(
+					media_resource_name(pair.first), pair.second));
+		// Every connected peer has this batch on its way now, and its
+		// texture modifiers wait for the batch's files_transmitted
+		m_files_transmitted.clear();
 		client_file::access(m_server, [&](client_file::Interface *i){
-			for(const auto &pair : files)
-				i->add_file_path(media_resource_name(pair.first), pair.second);
+			i->add_file_paths(name_paths);
 		});
 		for(const auto &pair : files)
 			m_served_media[pair.first] = pair.second;

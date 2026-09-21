@@ -693,6 +693,15 @@ public:
 			// NOTE: Path safety is checked by magic::FileSystem
 			return;
 		}
+		// Announced but not here yet -- a cold cache with the media on its
+		// way ([FIRST_RUN]): the name stays as it is, so cache:Exists()
+		// says no and a GetResource fails on the name rather than on a
+		// path in the cache, and whoever asked asks again later
+		if(!interface::fs::path_exists(path)){
+			log_v(MODULE, "Resource route access: %s (not arrived yet)",
+					name.CString());
+			return;
+		}
 		// Cache files are stored as a bare hash. Urho Sound (and some
 		// other loaders) pick the decoder from the File path extension.
 		magic::String ext = magic::GetExtension(name);
@@ -2239,7 +2248,12 @@ struct CApp: public App, public magic::Application
 		game_path = interface::fs::get_absolute_path(game_path);
 		g_local_server_port = pick_free_local_port();
 		log_i(MODULE, "Starting local server on port %s", cs(g_local_server_port));
-		sv_<ss_> args{"-m", game_path, "-P", g_local_server_port};
+		sv_<ss_> args{"-m", game_path, "-P", g_local_server_port,
+				// The client's own paths, so that a client started on other
+				// paths than the build's (-D, -C, the same letters both sides: a test on empty ones,
+				// [FIRST_RUN]) has its server on the same
+				"-D", g_client_config.get<ss_>("user_path"),
+				"-C", g_client_config.get<ss_>("cache_path")};
 		// The server the client starts writes beside the client's own log
 		// when there is one: half of what a bug report is about happens over
 		// there, and -L asked for a log of the session. Not the same file --

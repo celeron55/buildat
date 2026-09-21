@@ -564,7 +564,15 @@ struct CInstance: public voxelworld::Instance
 		const voxelworld::LoadPoint &lp = pit->second;
 		int radius = lp.load_xz;
 		auto rit = m_peer_send_radius.find(peer);
-		if(rit != m_peer_send_radius.end() && rit->second < radius)
+		// A peer that has not said how much it wants wants nothing yet:
+		// the client says 0 until its game's textures are composed
+		// ([TEXMOD_RACE]), and a "0" sent before this module knew the
+		// peer (the launcher's client joins before the world exists) was
+		// dropped, so the world streamed and was meshed with no textures
+		// ([FIRST_RUN]). It says its distance again when ready.
+		if(rit == m_peer_send_radius.end())
+			return false;
+		if(rit->second < radius)
 			radius = rit->second;
 		pv::Vector3DInt16 sp = container_coord16(it->second,
 				m_section_size_chunks);

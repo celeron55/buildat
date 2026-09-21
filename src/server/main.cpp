@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
 
 	std::string module_path;
 
-	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:wRu:";
+	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:wRu:x:";
 	const char usagefmt[1400] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -88,11 +88,13 @@ int main(int argc, char *argv[])
 			"  -i [interface_path]  Specify path to interface headers\n"
 			"  -S [share_path]      Specify path to share/\n"
 			"  -D [user_path]       Specify user/ path (saves live here)\n"
+			"  -C [cache_path]      Specify cache/ path (compiled modules, the\n"
+			"                       runtime build under it); the client's -C\n"
 			"  -U [urho3d_path]     Specify Urho3D path\n"
 			"  -c [command]         Set compiler command\n"
 			"  -l [integer]         Set maximum log level (0...5)\n"
 			"  -L [log file path]   Append log to a specified file\n"
-			"  -C [module_name]     Skip compiling specified module\n"
+			"  -x [module_name]     Skip compiling specified module\n"
 			"  -A [address]         Set listening address (default any4)\n"
 			"  -P [port]            Set network port (default 29500)\n"
 			"  -w                   Watch served files and push changes to\n"
@@ -143,6 +145,10 @@ int main(int argc, char *argv[])
 			log_i(MODULE, "config.user_path: %s", c55_optarg);
 			config.set("user_path", c55_optarg);
 			break;
+		case 'C':
+			log_i(MODULE, "config.cache_path: %s", c55_optarg);
+			config.set("cache_path", c55_optarg);
+			break;
 		case 'U':
 			log_i(MODULE, "config.urho3d_path: %s", c55_optarg);
 			config.set("urho3d_path", c55_optarg);
@@ -171,7 +177,7 @@ int main(int argc, char *argv[])
 		case 'L':
 			log_set_file(c55_optarg);
 			break;
-		case 'C':
+		case 'x':
 			log_i(MODULE, "config.skip_compiling_modules += %s",
 					c55_optarg);
 			{

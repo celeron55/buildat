@@ -342,7 +342,10 @@ struct Module: public interface::Module, public client_file::Interface
 
 	// content is what the file holds now and is only there to be hashed; it
 	// is kept only when there is no path to read it from again.
-	void set_file(const ss_ &name, const ss_ &content, const ss_ &path)
+	// announce: false leaves the telling to the caller (add_file_paths),
+	// which does it once for many; the return is whether anything changed
+	bool set_file(const ss_ &name, const ss_ &content, const ss_ &path,
+			bool announce = true)
 	{
 		ss_ hash = interface::sha1::calculate(content);
 
@@ -351,7 +354,7 @@ struct Module: public interface::Module, public client_file::Interface
 				it->second->path == path){
 			log_d(MODULE, "File stayed the same: %s: %s", cs(name),
 					cs(interface::sha1::hex(hash)));
-			return;
+			return false;
 		}
 
 		if(path.empty()){
@@ -368,13 +371,53 @@ struct Module: public interface::Module, public client_file::Interface
 		// Tell the connected clients, which is what makes an edited file
 		// reach a running client. One entry in the same packet the whole set
 		// goes out in at connect.
+		if(!announce)
+			return true;
 		sv_<std::tuple<ss_, ss_>> files{std::tuple<ss_, ss_>(name, hash)};
+		announce_to_all(files);
+		return true;
+	}
+
+	// A batch announced after connect ends with client_file:files_transmitted
+	// for the peer, as the connect's does, so a module can hold what
+	// needs the files until they are in (luanti's texture modifiers)
+	void announce_to_all(const sv_<std::tuple<ss_, ss_>> &files,
+			bool tell_when_done = false)
+	{
 		sv_<network::PeerInfo::Id> peers;
 		network::access(m_server, [&](network::Interface *inetwork){
 			peers = inetwork->list_peers();
 		});
-		for(const network::PeerInfo::Id &peer : peers)
+		for(const network::PeerInfo::Id &peer : peers){
 			announce_files(peer, files);
+			if(tell_when_done){
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(peer,
+							"core:tell_after_all_files_transferred", "");
+				});
+			}
+		}
+	}
+
+	// simplified: no file watch on these (watch_client_files is a
+	// development switch, and a game's media is not what it is for)
+	void add_file_paths(const sv_<std::pair<ss_, ss_>> &name_paths)
+	{
+		sv_<std::tuple<ss_, ss_>> changed;
+		for(const auto &np : name_paths){
+			ss_ content;
+			if(!read_whole_file(np.second, content)){
+				log_w(MODULE, "client_file::add_file_paths(): Couldn't open "
+						"\"%s\" from \"%s\"", cs(np.first), cs(np.second));
+				continue;
+			}
+			if(set_file(np.first, content, np.second, false))
+				changed.push_back(std::tuple<ss_, ss_>(np.first,
+						m_files[np.first]->hash));
+			m_server->add_file_path(np.first, np.second);
+		}
+		if(!changed.empty())
+			announce_to_all(changed, true);
 	}
 
 	void add_file_content(const ss_ &name, const ss_ &content)

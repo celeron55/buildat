@@ -182,6 +182,12 @@ static void load_source(magic::Context *context, const ss_ &name,
 		Canvas &dst)
 {
 	auto *cache = context->GetSubsystem<magic::ResourceCache>();
+	// Exists() first: GetResource() logs an ERROR for a file that is not
+	// there, and on a cold cache the media is on its way ([FIRST_RUN]);
+	// the throw below is the caller's to handle, as it already is
+	if(!cache->Exists(name.c_str()) &&
+			cache->GetExistingResource<magic::Image>(name.c_str()) == nullptr)
+		throw Exception("compose_image(): \""+name+"\" is not here");
 	magic::Image *img = cache->GetResource<magic::Image>(name.c_str());
 	if(img == nullptr)
 		throw Exception("compose_image(): could not load \""+name+"\"");

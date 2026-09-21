@@ -714,7 +714,9 @@ local function parse_stack(str)
 end
 
 local function game_texture(resource)
-	if not resource then
+	if not resource or not magic.cache:Exists(resource) then
+		-- Not there (yet): a cold cache has the media on its way, and the
+		-- sky packet that named it comes again once it has arrived
 		return nil
 	end
 	local tex = magic.cache:GetResource("Texture2D", resource)
@@ -733,7 +735,9 @@ end
 local body_picture_name, body_picture = {}, {}
 
 local function body_picture_of(slot, name)
-	if name ~= body_picture_name[slot] then
+	-- A picture not there yet (a cold cache) is asked for again next
+	-- time, which is the next sky packet or hour
+	if name ~= body_picture_name[slot] or body_picture[slot] == nil then
 		body_picture_name[slot] = name
 		body_picture[slot] = game_texture(luanti.texture(name))
 	end

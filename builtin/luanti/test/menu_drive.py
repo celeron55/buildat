@@ -22,6 +22,9 @@ UI_RE = re.compile(
     r"(?: image \"(.*?)\")?(?: (hidden))?$")
 
 SCREEN_TIMEOUT_S = 90
+# A wait -- a compile of every module on empty paths, a download -- may
+# take longer, and the still-pair check is what watches it move
+WAIT_TIMEOUT_S = 600
 # The rule held through the run ([FIRST_RUN]): a shot every this many
 # seconds, and each must differ from the last unless the screen is
 # waiting for input
@@ -75,6 +78,47 @@ class Screen:
         if self.focus is not None and self.focus[0] == "LineEdit":
             return True
         return any(e[0] in ("Button", "LineEdit") and e[3] > 0 for e in self.ui)
+
+
+# What in a log is a failure the user would have seen or felt, checked
+# after every scan over the client's log and the local server's (user,
+# 2026-09-21): an error line from any module (the log's own level column,
+# " E " after the timestamp, so a mod's chatter at info does not count),
+# a crash, a disconnect not asked for. The words are for what the level
+# misses.
+LOG_BAD = re.compile(
+    rb"^\S+ \d+ [\d:.]+ E |Unhandled page fault|Segmentation fault|"
+    rb"Disconnected from server|the server closed the connection|"
+    rb"Command sequence failed|Build failed|error in |traceback", re.I)
+# Lines the pattern would take and should not
+LOG_OK = re.compile(rb"error_icon|error_screenshot|is a stub")
+
+
+class LogWatch:
+    """Tails the client's log and, once it names one, the local
+    server's; the first bad line ends the run."""
+    def __init__(self, cli_log, say):
+        self.say = say
+        self.logs = {cli_log: 0}   # path -> bytes read
+
+    def check(self):
+        for path in list(self.logs):
+            try:
+                with open(path, "rb") as f:
+                    f.seek(self.logs[path])
+                    data = f.read()
+            except OSError:
+                continue
+            self.logs[path] += len(data)
+            for line in data.splitlines():
+                m = re.search(rb"server log: (\S+)", line)
+                if m and m.group(1).decode() not in self.logs:
+                    self.logs[m.group(1).decode()] = 0
+                if LOG_BAD.search(line) and not LOG_OK.search(line):
+                    self.say("FAILED log: %s: %s" % (
+                        os.path.basename(path), line.decode("utf-8", "replace").strip()[:200]))
+                    return False
+        return True
 
 
 class Still:
@@ -140,18 +184,23 @@ def type_into(write, e, text):
     write("delay 150")
 
 
-def run(write, read_block, say, seed, game="mineclone2", save_name="menu_run", mode="world", out=None):
+def run(write, read_block, say, seed, game="mineclone2", save_name="menu_run", mode="world", out=None, cli_log=None):
     """Drive from wherever the client is to a world; True when the world's
     scan answers, False with a FAILED line said otherwise."""
     t_screen = time.time()
     last_name = None
     n = 0
     still = Still(write, say, out)
+    watch = LogWatch(cli_log, say) if cli_log else None
+    searched = False
+    installed = False
     while True:
         n += 1
         label = "m%d" % n
         write("event scan 8 %s" % label)
         lines, took = read_block(label)
+        if watch and not watch.check():
+            return False
         if lines is None:
             say("FAILED menu: no scan block on screen %s" % last_name)
             return False
@@ -165,23 +214,58 @@ def run(write, read_block, say, seed, game="mineclone2", save_name="menu_run", m
             say("menu: screen %s" % (s.name or "?"))
             last_name = s.name
             t_screen = time.time()
-        elif time.time() - t_screen > SCREEN_TIMEOUT_S:
-            say("FAILED menu: screen %s did not change in %d s" % (s.name, SCREEN_TIMEOUT_S))
-            return False
         name = s.name or ""
+        waiting = name.endswith("starting_local_server") or name.endswith("waiting") \
+            or name.endswith("stopping_old_server") or "game is running" in name
+        limit = WAIT_TIMEOUT_S if waiting else SCREEN_TIMEOUT_S
+        if s.name == last_name and time.time() - t_screen > limit:
+            say("FAILED menu: screen %s did not change in %d s" % (s.name, limit))
+            return False
         acted = False
         if name.endswith("boot") or name.endswith("local_game"):
             # The launcher's grid ([LAUNCH_GRID]): a tile per Luanti game
-            # by its title, or ContentDB's when the game is not there
+            # by its title, or ContentDB's when the game is not there yet
             e = s.find(TITLES.get(game, game), "Text")
             if e is None:
-                say("FAILED menu: no tile for %s on the grid (ContentDB is the next rung)" % game)
+                e = s.find("ContentDB", "Text")
+            if e is None:
+                say("FAILED menu: neither %s nor ContentDB on the grid" % game)
                 return False
             click(write, e)
             acted = True
-        elif name.endswith("starting_local_server") or name.endswith("waiting") \
-                or name.endswith("stopping_old_server"):
-            pass  # a wait, and the still-pair check is what watches it
+        elif waiting:
+            pass  # the still-pair check is what watches it
+        elif "vanilla menu: ContentDB" in name:
+            # The game's Install row, or the search for it first; once
+            # installed, back to the saves list, whose rules make the world
+            e = s.find("Install  " + TITLES.get(game, game), "Text")
+            if installed:
+                e = s.find("< back", "Text")
+                if e:
+                    click(write, e)
+                    acted = True
+            elif e:
+                click(write, e)
+                installed = True
+                acted = True
+            elif s.edits() and not searched:
+                type_into(write, s.edits()[0], TITLES.get(game, game))
+                e = s.find("Search", "Text")
+                if e:
+                    click(write, e)
+                searched = True
+                acted = True
+            else:
+                say("FAILED menu: %s is not in ContentDB's list" % game)
+                return False
+        elif name.endswith("show_message_dialog"):
+            # A dialog is the run's failure line, whatever it says (user,
+            # 2026-09-21): the first run has no step that asks a question,
+            # so a dialog is an error or a failure the user saw, and
+            # pressing Ok and trying again is not a pass
+            said = " ".join(e[5] for e in s.ui if e[0] == "Text" and e[5] not in ("", "Ok"))
+            say("FAILED menu: a dialog: %s" % said)
+            return False
         elif "vanilla menu: saves" in name:
             # "New world..." when a game's tile opened the list, "New
             # save..." from the plain menu

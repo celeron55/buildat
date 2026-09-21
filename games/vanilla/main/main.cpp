@@ -1516,19 +1516,24 @@ struct Module: public interface::Module
 
 	// The same dialog for something that went right, which is not a warning
 	// in the log and is otherwise the same thing
+	// A message is news -- a game installed, a world imported -- shown
+	// over the list it changed; an error is a dialog the user has to
+	// close ([FIRST_RUN]: a driven run fails on any dialog, so news is
+	// not one)
 	void menu_message(network::PeerInfo::Id peer, const ss_ &message)
 	{
 		log_i(MODULE, "%s", cs(message));
-		send_menu_message(peer, message);
+		send_menu_message(peer, message, "main:menu_message");
 	}
 
 	void menu_error(network::PeerInfo::Id peer, const ss_ &message)
 	{
 		log_w(MODULE, "%s", cs(message));
-		send_menu_message(peer, message);
+		send_menu_message(peer, message, "main:menu_error");
 	}
 
-	void send_menu_message(network::PeerInfo::Id peer, const ss_ &message)
+	void send_menu_message(network::PeerInfo::Id peer, const ss_ &message,
+			const ss_ &packet = "main:menu_error")
 	{
 		if(peer == 0)
 			return;
@@ -1540,7 +1545,7 @@ struct Module: public interface::Module
 			ar(values);
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "main:menu_error", os.str());
+			inetwork->send(peer, packet, os.str());
 		});
 	}
 
@@ -1845,7 +1850,11 @@ struct Module: public interface::Module
 	}
 };
 
-const char *Module::CONTENTDB = "https://content.luanti.org";
+// BUILDAT_CONTENTDB_URL: a mirror in a test ([FIRST_RUN]: a directory
+// served by python3 -m http.server, made by util/contentdb_mirror.sh),
+// since the real one over the network in a daily run is a flake
+const char *Module::CONTENTDB = getenv("BUILDAT_CONTENTDB_URL") ?
+		getenv("BUILDAT_CONTENTDB_URL") : "https://content.luanti.org";
 
 extern "C" {
 	BUILDAT_EXPORT void* createModule_main(interface::Server *server){

@@ -1012,8 +1012,22 @@ function M.define(dst, util)
 				local saved_path = util.resave_file(resource_name)
 				-- Note: saved_path is ignored
 				--]]
+				-- Nil, and no error in the log, for what is not there: a
+				-- game's texture asked for before its media arrived on a
+				-- cold cache is not an error, it is later, and the caller
+				-- asks again ([FIRST_RUN]; Urho3D's own GetResource logs
+				-- an ERROR for a missing file). A resource already loaded
+				-- is found whatever the file's fate.
+				if not cache:Exists(unsafe_resource_name) and
+						not cache:GetExistingResource(resource_type, unsafe_resource_name) then
+					return nil
+				end
 				local res = cache:GetResource(resource_type, unsafe_resource_name)
 				return util.wrap_instance(resource_type, res)
+			end),
+			Exists = util.wrap_function({"ResourceCache", "string"},
+			function(self, unsafe_resource_name)
+				return cache:Exists(unsafe_resource_name)
 			end),
 		},
 	})

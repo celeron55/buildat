@@ -77,6 +77,15 @@ local function waiting(message)
 	text:SetStyleAuto()
 	text:SetText(message)
 	waiting_text = text
+	-- And the seconds under it, so the screen moves while the user can
+	-- only wait ([FIRST_RUN]: a screen still for 4 s fails the driven
+	-- first run); the message itself moves only when the server says
+	local secs = menu.window:CreateChild("Text")
+	secs:SetStyleAuto()
+	local t0 = buildat.get_time_us()
+	root:SubscribeToStackEvent("Update", function()
+		secs:SetText(math.floor((buildat.get_time_us() - t0) / 1000000) .. " s")
+	end)
 end
 
 -- A save is a button, and a new one is a game chosen and then named --
@@ -713,6 +722,15 @@ buildat.sub_packet("main:progress", function(data)
 	else
 		waiting(line)
 	end
+end)
+
+-- News, not an error: the list it changed is asked for again and the
+-- line shown over it for a moment
+buildat.sub_packet("main:menu_message", function(data)
+	local message = cereal.binary_input(data, {"array", "string"})[1]
+	log:info("menu: " .. tostring(message))
+	buildat.send_packet("main:get_saves", "")
+	ui_utils.show_notification(tostring(message), 4.0)
 end)
 
 buildat.sub_packet("main:menu_error", function(data)

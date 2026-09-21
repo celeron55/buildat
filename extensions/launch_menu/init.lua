@@ -204,10 +204,12 @@ local function show_starting(game)
 				last_status, last_status_at = line, now
 			end
 		end
-		if last_status then
-			local secs = math.floor((now - last_status_at) / 1000000)
-			stage.text = last_status..(secs >= 10 and ("  "..secs.." s") or "")
-		end
+		-- The seconds since the stage began, always: a screen that sits
+		-- still while the user can only wait is the failure [FIRST_RUN]'s
+		-- run looks for, and before the server's first status line
+		-- there was nothing here to move
+		local secs = math.floor((now - last_status_at) / 1000000)
+		stage.text = (last_status or "Waiting for the server").."  "..secs.." s"
 		-- Not a fixed wait: a fresh compile of every module can outlast
 		-- one on a slow machine. A hang is no new status line for 120 s.
 		if now - last_status_at > 120 * 1000000 then

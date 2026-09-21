@@ -29,6 +29,11 @@ namespace client_file
 		// watch per directory, which is for developing a game and not for
 		// serving one.
 		virtual void add_file_path(const ss_ &name, const ss_ &path) = 0;
+		// Many at once, announced to the connected clients in one packet:
+		// a game's thousands of media files added one by one reached a
+		// client already connected as thousands of announce, request and
+		// transfer round trips ([FIRST_RUN])
+		virtual void add_file_paths(const sv_<std::pair<ss_, ss_>> &name_paths) = 0;
 	};
 
 	inline bool access(interface::Server *server,

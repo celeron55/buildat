@@ -1291,7 +1291,7 @@ def main():
         seed = int(sys.argv[5]) if len(sys.argv) > 5 else 5
         if not menu_drive.run(write, read_block, say, seed,
                               save_name="menu_run_%d" % seed,
-                              mode=os.environ["MENU_RUN"], out=out):
+                              mode=os.environ["MENU_RUN"], out=out, cli_log=log):
             write("delay 500", "quit")
             return
     mem = {}

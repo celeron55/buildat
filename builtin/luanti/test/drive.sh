@@ -43,7 +43,10 @@ fi
 [ -n "${KEEP_SAVE:-}" ] || rm -rf "../user/games/vanilla/saves/$save"
 port=$(( 29800 + (SEED % 90) ))
 srv=""; cli=""; drv=""; netsim=""
-trap 'kill "$drv" 2>/dev/null; kill "$cli" 2>/dev/null; kill "${netsim:-}" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
+# The run's temp dir goes with it: 200 MB of game and cache a run, and
+# an interrupted run's would stay ([FIRST_RUN]; /tmp filled once)
+tmp=""
+trap 'kill "$drv" 2>/dev/null; kill "$cli" 2>/dev/null; kill "${netsim:-}" 2>/dev/null; kill "${mirror:-}" 2>/dev/null; kill -INT "$srv" 2>/dev/null; [ -n "$tmp" ] && rm -rf "$tmp"' EXIT
 # MENU_RUN=world|full ([FIRST_RUN]): no server here -- the client starts
 # in the launch menu and starts its own, and drive.py's menu rules
 # (menu_drive.py) take it to a new VoxeLibre world with this seed before
@@ -52,10 +55,31 @@ trap 'kill "$drv" 2>/dev/null; kill "$cli" 2>/dev/null; kill "${netsim:-}" 2>/de
 # and the run makes a new world in it (the save menu_run_<seed>, cleared
 # here first). full: empty user and cache directories and ContentDB
 # installs the game -- the next rung; it runs as world until then.
+menu_env=""
+mirror=""
+cold=""
 if [ -n "${MENU_RUN:-}" ]; then
 	srv=""
 	START_WAIT="${START_WAIT:-8}"
 	rm -rf "../user/games/vanilla/saves/menu_run_$SEED"
+	if [ "$MENU_RUN" = full ]; then
+		# Empty user and cache directories, given to the client (-D, -C)
+		# and by it to the server it starts, and ContentDB as a mirror of
+		# the installed game served from a directory of the run's own
+		tmp=$(mktemp -d /tmp/buildat_menu_run.XXXXXX)
+		mkdir -p "$tmp/data" "$tmp/cache" "$tmp/mirror"
+		"$here/util/contentdb_mirror.sh" "$tmp/mirror" \
+			"$here/user/luanti/games/$GAME" Wuzzy "$GAME" VoxeLibre >/dev/null
+		# A mirror left by an interrupted run answers 404 from a deleted
+		# directory; exec, so the trap's kill reaches python itself
+		pkill -f "http.server $((port + 200))" 2>/dev/null || true
+		(cd "$tmp/mirror" && exec python3 -m http.server $((port + 200)) > "$out/mirror.log" 2>&1) &
+		mirror=$!
+		sleep 1
+		menu_env="env BUILDAT_CONTENTDB_URL=http://localhost:$((port + 200))"
+		cold="-D $tmp/data -C $tmp/cache"
+		echo "empty paths under $tmp, the mirror on port $((port + 200))"
+	fi
 else
 { echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
@@ -93,13 +117,12 @@ fi
 # COLD=1: the client starts with an empty cache of its own, so every file
 # the server has is fetched at join ([PLAYER_POS_RACE]: the race is between
 # that bulk and the first player_pos)
-cold=""
 if [ -n "${COLD:-}" ]; then
 	rm -rf "$out/cache"; cold="-C $out/cache"
 fi
 server_arg="-s localhost:$cport"
 [ -n "${MENU_RUN:-}" ] && server_arg=""
-bin/buildat $server_arg -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" $cold \
+$menu_env bin/buildat $server_arg -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" $cold \
 	-c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
 cli=$!
@@ -159,7 +182,14 @@ else
 	for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 fi
 
-. "$me/verdict.sh"
+# The fuzz verdict reads the fixture's ticks and the frame peaks of a
+# scripted client, neither of which a menu run has; its verdict is
+# drive.py's lines below
+if [ -z "${MENU_RUN:-}" ]; then
+	. "$me/verdict.sh"
+else
+	status=0
+fi
 grep "^drive: FAILED" "$out/drive.log" | sed 's/^drive: /FAIL: drive: /' >&2
 grep -q "^drive: FAILED" "$out/drive.log" && status=1
 grep "^drive: GOAL" "$out/drive.log" | sed 's/^drive: //'

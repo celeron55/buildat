@@ -110,6 +110,8 @@ return function(ctx)
 		log:info(table.concat(lines, "\n"))
 	end)
 
+	-- The menu's scan (extensions/uistack) stands aside from here on
+	require("buildat/extension/uistack").set_world_scan(true)
 	magic.SubscribeToEvent("command_seq:scan", function(event_type, event_data)
 		local param = event_data:GetString("Param") or ""
 		local res, label = param:match("^(%d+)%s*(%S*)")
