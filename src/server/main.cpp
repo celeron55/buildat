@@ -173,9 +173,12 @@ int main(int argc, char *argv[])
 			break;
 		case 'l':
 			log_set_max_level(atoi(c55_optarg));
+			config.set("log_level_given", true);
 			break;
 		case 'L':
-			log_set_file(c55_optarg);
+			// Opened once the paths are settled (boot::autodetect::open_log),
+			// absolute against the cwd; kept here until then
+			config.set("log_file", c55_optarg);
 			break;
 		case 'x':
 			log_i(MODULE, "config.skip_compiling_modules += %s",
@@ -208,6 +211,7 @@ int main(int argc, char *argv[])
 
 	if(!boot::autodetect::detect_server_paths(config))
 		return 1;
+	boot::autodetect::open_log(config, "buildat_server", argv[0]);
 
 	if(!config.check_paths()){
 		return 1;

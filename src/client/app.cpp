@@ -2273,29 +2273,35 @@ struct CApp: public App, public magic::Application
 		// a failed start, and nothing for the waiting screen to tail.
 		// cache/local_server_<port>.log at info, truncated per start;
 		// the port tells several clients' servers from one tree apart.
+		// The server's log beside the client's: <log>_server.<ext>, and
+		// the client's is absolute by now (boot::autodetect::open_log), so
+		// the child finds it wherever it starts ([WIN8_START]: a relative
+		// path resolved against the child's cwd, which on one box was
+		// nowhere -- "Invalid file handle. Error is 3"). The previous one
+		// is rotated to _1 beside it, as the client's own is. With the
+		// client on its default log that is cache/buildat_server.log.
+		// The server's log beside the client's -L: <log>_server.<ext>,
+		// absolute by now (boot::autodetect::open_log), so the child finds
+		// it wherever it starts ([WIN8_START]: a relative path resolved
+		// against the child's cwd, which on one box was nowhere --
+		// "Invalid file handle. Error is 3"). Rotation is the server's
+		// own (open_log, the same for every path). With no -L the server
+		// defaults to <cache>/buildat_server.log by itself.
 		const ss_ log_file = g_client_config.get<ss_>("log_file");
 		if(!log_file.empty()){
-			// Before the extension of the file name, which is the last dot
-			// in the name and not in the path: "tmp/v1.2/log" has a dot in a
-			// directory and comes out "tmp/v1.2/log_server"
-			const size_t slash = log_file.find_last_of('/');
+			const size_t slash = log_file.find_last_of("/\\");
 			const size_t dot = log_file.find_last_of('.');
-			g_local_server_log = (dot != ss_::npos &&
-					(slash == ss_::npos || dot > slash)) ?
-					log_file.substr(0, dot)+"_server"+log_file.substr(dot) :
-					log_file+"_server";
+			const bool has_ext = dot != ss_::npos &&
+					(slash == ss_::npos || dot > slash);
+			g_local_server_log = (has_ext ? log_file.substr(0, dot) : log_file)+
+					"_server"+(has_ext ? log_file.substr(dot) : ss_());
 			args.push_back("-L");
 			args.push_back(g_local_server_log);
 			args.push_back("-l");
 			args.push_back(itos(log_get_max_level()));
 		} else {
 			g_local_server_log = g_client_config.get<ss_>("cache_path")+
-					"/local_server_"+g_local_server_port+".log";
-			std::ofstream(g_local_server_log, std::ios::trunc);
-			args.push_back("-L");
-			args.push_back(g_local_server_log);
-			args.push_back("-l");
-			args.push_back("3");
+					"/buildat_server.log";
 		}
 		g_local_server_log_offset = 0;
 		g_local_server_status.clear();
@@ -2308,7 +2314,10 @@ struct CApp: public App, public magic::Application
 			args.push_back("-u");
 			args.push_back(launch);
 		}
-		g_local_server = interface::process::start(server_path, args);
+		// Started in the root, whatever the client's cwd: from bin/ (a
+		// click on the exe) every path it forms would be off by one
+		g_local_server = interface::process::start(server_path, args,
+				g_client_config.get<ss_>("root_path"));
 		if(!g_local_server.valid()){
 			lua_pushboolean(L, false);
 			lua_pushstring(L, "Failed to start server");

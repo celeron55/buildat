@@ -403,6 +403,13 @@ TCPSocket* createTCPSocket(int fd)
 	return new CTCPSocket(fd);
 }
 
+// Whether something accepts on the address, within 50 ms: a non-blocking
+// connect and a select on it. A blocking connect here stalled the
+// launcher's waiting screen, which asks every frame -- Winsock retries a
+// SYN to a closed port for about a second, and behind the firewall's
+// first-run prompt the connect timeout -- so the screen froze and the
+// client never came back ([WIN8_START]). A port that is not listening
+// yet answers "no" inside the 50 ms on every platform.
 bool probe_connect(const ss_ &address, const ss_ &port)
 {
 	struct addrinfo hints;
@@ -419,8 +426,35 @@ bool probe_connect(const ss_ &address, const ss_ &port)
 		int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if(fd == -1)
 			continue;
-		if(connect(fd, res->ai_addr, res->ai_addrlen) == 0)
+#ifdef _WIN32
+		u_long on = 1;
+		ioctlsocket(fd, FIONBIO, &on);
+#else
+		fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+#endif
+		int r = connect(fd, res->ai_addr, res->ai_addrlen);
+		if(r == 0){
 			ok = true;
+		} else {
+#ifdef _WIN32
+			const bool pending = WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+			const bool pending = errno == EINPROGRESS;
+#endif
+			if(pending){
+				fd_set wfds;
+				FD_ZERO(&wfds);
+				FD_SET(fd, &wfds);
+				struct timeval tv = {0, 50000};
+				if(select(fd + 1, NULL, &wfds, NULL, &tv) > 0){
+					int soerr = 0;
+					socklen_t len = sizeof(soerr);
+					if(getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&soerr,
+							&len) == 0 && soerr == 0)
+						ok = true;
+				}
+			}
+		}
 		closesocket(fd);
 		if(ok)
 			break;

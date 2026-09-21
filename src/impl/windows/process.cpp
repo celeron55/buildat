@@ -105,7 +105,7 @@ bool Handle::valid() const
 	return impl != 0;
 }
 
-Handle start(const ss_ &path, const sv_<ss_> &args)
+Handle start(const ss_ &path, const sv_<ss_> &args, const ss_ &cwd)
 {
 	Handle h;
 	ss_ cmd = "\"" + path + "\"";
@@ -125,7 +125,7 @@ Handle start(const ss_ &path, const sv_<ss_> &args)
 			path.c_str(),
 			command_c,
 			NULL, NULL, false, 0,
-			NULL, NULL, &si, &pi)){
+			NULL, cwd.empty() ? NULL : cwd.c_str(), &si, &pi)){
 		log_w(MODULE, "start(\"%s\"): CreateProcess failed: %s",
 				cs(path), cs(format_last_error()));
 		return h;

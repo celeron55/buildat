@@ -2,6 +2,8 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "boot/autodetect.h"
 #include "core/log.h"
+#include <cstdio>
+#include <algorithm>
 #include "interface/os.h"
 #include "interface/fs.h"
 #include "interface/process.h"
@@ -321,6 +323,11 @@ static bool detect_paths(core::Config &config, const sv_<ss_> &roots,
 
 	log_v(MODULE, "%s detected: [%s]", description, cs(root));
 	set_default_subpaths(config, defs, root);
+	// The root itself, kept: what a child process is started in, and what
+	// the log's first lines name ([WIN8_START])
+	if(ss_(description).find("root") != ss_::npos &&
+			config.get<ss_>("root_path").empty())
+		config.set("root_path", root);
 	return true;
 }
 
@@ -533,6 +540,55 @@ bool check_client_paths(const core::Config &config, bool log_issues)
 	if(!check_paths(config, client_urho3d_paths, log_issues))
 		ok = false;
 	return ok;
+}
+
+ss_ open_log(core::Config &config, const ss_ &name, const ss_ &exe)
+{
+	ss_ path = config.get<ss_>("log_file");
+	const ss_ cwd = interface::fs::get_cwd();
+	const bool given = !path.empty();
+	if(!given){
+		const ss_ cache = config.get<ss_>("cache_path");
+		if(!cache.empty()){
+			interface::fs::create_directories(cache);
+			path = cache+"/"+name+".log";
+		}
+	} else {
+		// The one cwd-relative thing, made absolute here so that a child
+		// given the same directory finds it
+		path = interface::fs::get_absolute_path(path);
+	}
+	if(!path.empty()){
+		// The run before, kept as <stem>_1<ext>: a report is the current
+		// logs and the ones before, and nothing balloons. For the given
+		// path too, so a client's -L and the server's beside it rotate
+		// the same way.
+		const size_t slash = path.find_last_of("/\\");
+		const size_t dot = path.find_last_of('.');
+		const bool has_ext = dot != ss_::npos &&
+				(slash == ss_::npos || dot > slash);
+		const ss_ old = (has_ext ? path.substr(0, dot) : path)+"_1"+
+				(has_ext ? path.substr(dot) : ss_());
+		std::remove(old.c_str());
+		std::rename(path.c_str(), old.c_str());
+		// The default tees: the terminal and a harness reading the stream
+		// keep what they had; a given -L is the file alone, with stderr
+		// into it for a crash's backtrace
+		log_set_file(path.c_str(), !given);
+		// At info unless -l asked for more (the terminal's default is
+		// verbose, which balloons a file over a session)
+		if(!given && !config.get<bool>("log_level_given"))
+			log_set_max_level(CORE_INFO);
+	}
+	// Kept as given (empty for the default): a client passes its server
+	// a log beside its own -L and nothing beside the default, which the
+	// server then defaults on its own
+	config.set("log_file", given ? path : ss_());
+	config.set("log_path", path);
+	log_i(MODULE, "%s: exe %s, root %s, cwd %s, log %s", cs(name), cs(exe),
+			cs(config.get<ss_>("root_path")), cs(cwd),
+			path.empty() ? "none" : cs(path));
+	return path;
 }
 
 bool detect_server_paths(core::Config &config)

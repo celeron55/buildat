@@ -15,6 +15,10 @@ Config::Config()
 	set_default("interface_path", "");
 	set_default("share_path", "");
 	set_default("cache_path", "");
+	set_default("root_path", "");
+	set_default("log_file", "");
+	set_default("log_level_given", false);
+	set_default("log_path", "");
 	set_default("user_path", "");
 	set_default("urho3d_path", "");
 	set_default("compiler_command", "");

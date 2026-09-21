@@ -142,11 +142,12 @@ int main(int argc, char *argv[])
 			break;
 		case 'l':
 			log_set_max_level(atoi(c55_optarg));
+			config.set("log_level_given", true);
 			break;
 		case 'L':
-			log_set_file(c55_optarg);
-			// Kept, so that a local server started later can be given a log
-			// file beside this one; see l_start_local_server() in app.cpp
+			// Opened once the paths are settled (boot::autodetect::open_log),
+			// absolute against the cwd; and a local server started later is
+			// given a log beside it (l_start_local_server() in app.cpp)
 			config.set("log_file", c55_optarg);
 			break;
 		case 'm':
@@ -244,6 +245,7 @@ int main(int argc, char *argv[])
 
 	if(!boot::autodetect::detect_client_paths(config))
 		return 1;
+	boot::autodetect::open_log(config, "buildat", argv[0]);
 
 	if(!config.check_paths()){
 		return 1;

@@ -22,7 +22,11 @@ namespace interface
 			bool valid() const;
 		};
 
-		Handle start(const std::string &path, const sv_<ss_> &args);
+		// cwd: the child's working directory, or the parent's when empty
+		// ([WIN8_START]: a server started from bin/ formed its paths from
+		// there)
+		Handle start(const std::string &path, const sv_<ss_> &args,
+				const ss_ &cwd = "");
 		// SIGTERM (or equivalent). Does not wait. Handle stays valid until
 		// the process exits or kill_force() is used.
 		void request_terminate(Handle &h);
