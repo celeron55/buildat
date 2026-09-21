@@ -535,6 +535,12 @@ local OWN_DEFAULTS = {
 	["creative_mode"] = "false",
 	["enable_damage"] = "true",
 	["profiler.load"] = "false",
+	-- The liquid pass's budget a second: Luanti's 100000 runs on a thread
+	-- of its own, this one on the server's step, where 100000 nodes of
+	-- an ocean flooding its caves after a join were steps of 0.3 s
+	-- ([LIQUID_FLOW]); a fifth of it spreads the same flood over five
+	-- times as long
+	["liquid_loop_max"] = "20000",
 	["max_block_generate_distance"] = "10",
 	["language"] = "",
 	["debug_log_level"] = "action",
