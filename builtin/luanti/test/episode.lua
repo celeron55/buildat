@@ -58,6 +58,14 @@ end
 local function freeze()
 	core.settings:set("time_speed", "0")
 	core.settings:set("mobs_spawn", "false")
+	-- The dirt reaches six: a click straight down from the pool's top
+	-- has the floor 4.6 away, past a hand's four (VoxeLibre's hand is
+	-- mcl_meshhand's, per player, so the hand itself is not the one to
+	-- override) ([POINTABLE])
+	local d = node_named("dirt")
+	if d then
+		core.override_item(d, {range = 6})
+	end
 	for i = #core.registered_abms, 1, -1 do
 		core.registered_abms[i] = nil
 	end
@@ -167,12 +175,23 @@ local function census(player)
 	table.sort(olist)
 	local out = "nodes=" .. table.concat(parts, ",") .. " inv=" ..
 			table.concat(inv, ",") .. " objs=" .. table.concat(olist, ",")
-	if POOL[NAME] then
+	if SWIMMING[NAME] then
 		-- Where the body ended, a tenth of a node coarse, and the breath:
 		-- the pool episodes' measure
 		local p = player:get_pos()
 		out = out .. string.format(" y=%.1f breath=%d", p.y - ORIGIN.y,
 				player:get_breath())
+	end
+	if NAME == "seaplace" then
+		-- Where the dirt landed, relative to the pool's floor
+		local at = {}
+		for y = 1, 5 do
+			local n = core.get_node({x = ORIGIN.x, y = ORIGIN.y + y, z = ORIGIN.z}).name
+			if n == dirt then
+				at[#at + 1] = tostring(y)
+			end
+		end
+		out = out .. " dirt_at=" .. table.concat(at, ",")
 	end
 	if NAME == "pour" or NAME == "flood" then
 		-- How far the poured source spread: the flowing nodes by level
@@ -333,7 +352,7 @@ core.register_on_joinplayer(function(player)
 		-- a node under the surface for sink and swim, four above it for
 		-- the fall in
 		local drop = NAME == "fall" and 8 or (SWIMMING[NAME] and 2 or
-				(NAME == "seaplace" and 5 or 1))
+				(NAME == "seaplace" and 3.5 or 1))
 		player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
 		local ent = some_entity()
 		if ent then
@@ -341,12 +360,35 @@ core.register_on_joinplayer(function(player)
 					z = ORIGIN.z}, ent)
 		end
 		core.log("action", "episode: state " .. NAME .. " dirt=" ..
-				tostring(dirt) .. " entity=" .. tostring(ent))
-		-- A second for the client to receive the stamp before it acts
-		core.after(1, function()
-			-- Re-aimed, since the client had a say about the look
+				tostring(dirt) .. " entity=" .. tostring(ent) ..
+				(water and (" water=" .. water .. " pointable=" ..
+				tostring(core.registered_nodes[water].pointable)) or ""))
+		-- Three seconds for the client to receive the stamp before it
+		-- acts: the module's client had the pre-stamp air under its ray a
+		-- second after the write
+		core.after(3, function()
+			-- Re-aimed, since the client had a say about the look; and
+			-- re-put, since a client that got the place before the
+			-- gravity override fell for a moment (the module's objects
+			-- lane and its physics packet are two lanes)
 			player:set_look_horizontal(0)
 			player:set_look_vertical(math.pi / 2)
+			if not SWIMMING[NAME] then
+				player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
+			end
+			if NAME == "seaplace" then
+				-- Held over the pool: VoxeLibre's playerphysics rewrites
+				-- the override every step, so gravity 0 does not hold and
+				-- the body would sink into what it is placing on
+				local hold
+				hold = function()
+					if player:is_player() then
+						player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
+						core.after(0.5, hold)
+					end
+				end
+				hold()
+			end
 			core.log("action", "episode: ready " .. NAME)
 			if NAME == "pour" then
 				-- The game's water source on the platform's middle; the

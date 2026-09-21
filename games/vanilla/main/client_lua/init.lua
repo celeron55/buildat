@@ -3713,6 +3713,8 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 		return
 	end
 	if pointed_p == nil then
+		log:info(string.format("click at nothing: reach %.1f",
+				math.min(POINT_RANGE, luanti.dig_range(wield_index))))
 		return
 	end
 	-- The left button is the dig, and it is held rather than clicked:

@@ -825,7 +825,14 @@ local function show_client(host, port, name, password, mode)
 			for _, def in pairs(defs) do
 				node_by_name[def.name] = def
 			end
+			local through, blocking = 0, 0
+			for _, def in pairs(defs) do
+				if def.pointable == 0 then through = through + 1 end
+				if def.pointable == 2 then blocking = blocking + 1 end
+			end
 			add_line(count.." node definitions")
+			log:info(count.." node definitions, "..through..
+					" the ray goes through, "..blocking.." block it")
 			registry_stale = true
 			-- Starts the fallback clock: a server that never announces its
 			-- media must not leave the loading panel up forever
@@ -2239,6 +2246,23 @@ local function show_client(host, port, name, password, mode)
 				end
 				open_form(spec, "", "nodemeta", pointed_under)
 				return
+			end
+			-- Not into the player's own space, as Game::nodePlacement
+			-- refuses: a walkable node that would land in the body's box
+			-- -- into under when that is buildable_to, else into above --
+			-- is not placed, and the server trusts the client on this
+			-- ([POINTABLE])
+			local held = wielded()
+			local hdef = held and node_by_name and node_by_name[held.name]
+			if hdef and hdef.walkable then
+				local udef = node_def_at(pointed_under)
+				local at = (udef and udef.buildable_to) and pointed_under or
+						pointed_above
+				if at[1] + 0.5 > avatar.x - 0.3 and at[1] - 0.5 < avatar.x + 0.3 and
+						at[2] + 0.5 > avatar.y and at[2] - 0.5 < avatar.y + 1.75 and
+						at[3] + 0.5 > avatar.z - 0.3 and at[3] - 0.5 < avatar.z + 0.3 then
+					return
+				end
 			end
 			client:interact(luanti.INTERACT_PLACE, wield_index - 1,
 					{under = pointed_under, above = pointed_above})

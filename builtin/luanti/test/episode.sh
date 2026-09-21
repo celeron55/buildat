@@ -87,10 +87,15 @@ trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 # Wait for ready, write the action into the client, wait for the census.
 # The client's stdin is a fifo the runner holds open; closing it is what
 # ends the client. Both waits are bounded by the emerge time seen so far.
-drive() {   # log fifo -> the census line, or nothing
-	local log="$1" fifo="$2" i
+# And the client's own readiness: the extension builds its voxel registry
+# for seconds after it joins (its pointable table is not there until
+# then), so its line is waited for too; the module's client says "vanilla
+# client ready".
+drive() {   # log fifo clilog cliready -> the census line, or nothing
+	local log="$1" fifo="$2" clilog="$3" cliready="$4" i
 	for i in $(seq 1 240); do
-		grep -aq "episode: ready\|episode: FAILED" "$log" && break
+		grep -aq "episode: ready\|episode: FAILED" "$log" &&
+				grep -aq "$cliready" "$clilog" && break
 		kill -0 "$cli" 2>/dev/null || break
 		sleep 1
 	done
@@ -149,7 +154,8 @@ BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ep \
 	-c - < "$fifo" > "$out/extension_cli.log" 2>&1 &
 cli=$!
 exec 3>"$fifo"
-luanti_census=$(drive "$out/luanti_srv.log" "$fifo")
+luanti_census=$(drive "$out/luanti_srv.log" "$fifo" "$out/extension_cli.log" \
+	"voxel types have their own textures")
 exec 3>&-
 kill "$cli" 2>/dev/null; sleep 1
 kill "$srv" 2>/dev/null
@@ -178,7 +184,8 @@ bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c - < "$fifo" \
 	> "$out/module_cli.log" 2>&1 &
 cli=$!
 exec 3>"$fifo"
-module_census=$(drive "$out/module_srv.log" "$fifo")
+module_census=$(drive "$out/module_srv.log" "$fifo" "$out/module_cli.log" \
+	"vanilla client ready")
 exec 3>&-
 kill "$cli" 2>/dev/null; sleep 1
 kill -INT "$srv" 2>/dev/null
