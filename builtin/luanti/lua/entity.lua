@@ -340,6 +340,15 @@ function ObjectRef:punch(puncher, time_from_last_punch, tool_capabilities, dir)
 	-- that draws a damage number reads that argument and not the hit points
 	local hit = core.get_hit_params(o.armor_groups, tool_capabilities,
 			time_from_last_punch)
+	-- The punch_operable group turns a bare-hand punch into a use, not a
+	-- hit: Luanti's getPunchDamage() skips the damage when the wielded
+	-- item's name is empty (and only then -- its FIXME says non-tool items
+	-- should count too, but they do not)
+	if (tonumber(o.armor_groups and o.armor_groups.punch_operable) or 0) > 0
+			and puncher and puncher.get_wielded_item
+			and puncher:get_wielded_item():get_name() == "" then
+		hit = {hp = 0, wear = 0}
+	end
 	local handled = false
 	if o.le and o.le.on_punch then
 		handled = o.le:on_punch(puncher, time_from_last_punch,
