@@ -44,6 +44,19 @@ fi
 port=$(( 29800 + (SEED % 90) ))
 srv=""; cli=""; drv=""; netsim=""
 trap 'kill "$drv" 2>/dev/null; kill "$cli" 2>/dev/null; kill "${netsim:-}" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
+# MENU_RUN=world|full ([FIRST_RUN]): no server here -- the client starts
+# in the launch menu and starts its own, and drive.py's menu rules
+# (menu_drive.py) take it to a new VoxeLibre world with this seed before
+# the world rules run; the world is not the fixture's then, and the goal
+# is read from the client's scans alone. world: VoxeLibre is installed
+# and the run makes a new world in it (the save menu_run_<seed>, cleared
+# here first). full: empty user and cache directories and ContentDB
+# installs the game -- the next rung; it runs as world until then.
+if [ -n "${MENU_RUN:-}" ]; then
+	srv=""
+	START_WAIT="${START_WAIT:-8}"
+	rm -rf "../user/games/vanilla/saves/menu_run_$SEED"
+else
 { echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
@@ -58,6 +71,7 @@ done
 sleep 5
 srv=$(pgrep -x buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; tail -3 "$out/srv.log" >&2; exit 1; }
+fi
 
 # The client reads the fifo, and its run ends at the fifo's end: this
 # shell holds a writing end open for the whole run, drive.py opens its
@@ -83,7 +97,9 @@ cold=""
 if [ -n "${COLD:-}" ]; then
 	rm -rf "$out/cache"; cold="-C $out/cache"
 fi
-bin/buildat -s "localhost:$cport" -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" $cold \
+server_arg="-s localhost:$cport"
+[ -n "${MENU_RUN:-}" ] && server_arg=""
+bin/buildat $server_arg -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" $cold \
 	-c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
 cli=$!
@@ -103,7 +119,7 @@ for i in $(seq 1 "$START_WAIT"); do
 done
 drv=
 if kill -0 "$cli" 2>/dev/null; then
-	python3 "$me/drive.py" "$out/cli.log" "$fifo" "$MINUTES" "$out" "$SEED" $GOAL \
+	MENU_RUN="${MENU_RUN:-}" python3 "$me/drive.py" "$out/cli.log" "$fifo" "$MINUTES" "$out" "$SEED" $GOAL \
 		> "$out/drive.log" 2>&1 &
 	drv=$!
 else
@@ -131,8 +147,17 @@ fi
 [ -n "$drv" ] && wait "$drv" 2>/dev/null
 exec 3>&-
 sleep 2
-kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+if [ -n "${MENU_RUN:-}" ]; then
+	# The client's own server: it ends with the client; its log is the
+	# verdict's srv.log
+	for i in $(seq 1 30); do pgrep -x buildat_server >/dev/null || break; sleep 1; done
+	pkill -INT -x buildat_server 2>/dev/null || true
+	local_log=$(grep -o "server log: .*" "$out/cli.log" | head -1 | sed 's/server log: //')
+	cp "$local_log" "$out/srv.log" 2>/dev/null || : > "$out/srv.log"
+else
+	kill -INT "$srv" 2>/dev/null
+	for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+fi
 
 . "$me/verdict.sh"
 grep "^drive: FAILED" "$out/drive.log" | sed 's/^drive: /FAIL: drive: /' >&2

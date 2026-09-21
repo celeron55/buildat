@@ -1284,6 +1284,16 @@ def main():
     goal = max(1, min(goal, max(GOALS)))
     t0 = time.time()
     fifo = open(fifo_path, "w")
+    # MENU_RUN ([FIRST_RUN]): the client was started with no server and
+    # sits in the launch menu; the menu rules take it to a world first
+    if os.environ.get("MENU_RUN"):
+        import menu_drive
+        seed = int(sys.argv[5]) if len(sys.argv) > 5 else 5
+        if not menu_drive.run(write, read_block, say, seed,
+                              save_name="menu_run_%d" % seed,
+                              mode=os.environ["MENU_RUN"]):
+            write("delay 500", "quit")
+            return
     mem = {}
     expect = None
     expect_name = None
