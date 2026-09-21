@@ -1706,8 +1706,8 @@ struct Module: public interface::Module, public luanti::Interface
 					GENERATE_RADIUS_XZ, GENERATE_RADIUS_Y, peer));
 		}
 		// A forceloaded section is a point with no radius at all
-		for(uint64_t k : m_forceloaded){
-			const pv::Vector3DInt16 sp = section_from_key(k);
+		for(const auto &pair : m_forceloaded){
+			const pv::Vector3DInt16 sp = section_from_key(pair.first);
 			points.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
 					(int32_t)sp.getX() * m_section_size.getX(),
 					(int32_t)sp.getY() * m_section_size.getY(),
@@ -1750,7 +1750,11 @@ struct Module: public interface::Module, public luanti::Interface
 	// builtin's forceloading.lua keeps the ones that are not transient in
 	// force_loaded.txt beside the world and asks for them again when it
 	// loads, which is where Luanti keeps them too.
-	set_<uint64_t> m_forceloaded;
+	// Section key -> how many holds: a game's forceload_block() per
+	// mapblock (VoxeLibre makes and frees thousands) and the map check's
+	// pin share this, and one owner's free took the other's hold with it
+	// (the check read its room out of an unloaded section, 2026-09-21)
+	sm_<uint64_t, int> m_forceloaded;
 
 	static uint64_t section_key(const pv::Vector3DInt16 &p)
 	{
@@ -1779,10 +1783,13 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		const uint64_t key = section_key(
 				self->section_of(pv::Vector3DInt32(x, y, z)));
-		if(wanted)
-			self->m_forceloaded.insert(key);
-		else
-			self->m_forceloaded.erase(key);
+		if(wanted){
+			self->m_forceloaded[key]++;
+		} else {
+			auto it = self->m_forceloaded.find(key);
+			if(it != self->m_forceloaded.end() && --it->second <= 0)
+				self->m_forceloaded.erase(it);
+		}
 		log_v(MODULE, "forceload: %zu sections kept",
 				self->m_forceloaded.size());
 		// The points are pushed once a step; this only says what they are
@@ -3068,8 +3075,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_check_sections = check_map_sections();
 		for(const pv::Vector3DInt16 &sp : m_check_sections){
 			const uint64_t k = section_key(sp);
-			if(m_forceloaded.insert(k).second)
-				m_check_pinned.push_back(k);
+			m_forceloaded[k]++;
+			m_check_pinned.push_back(k);
 		}
 		update_load_points();
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
@@ -3121,8 +3128,11 @@ struct Module: public interface::Module, public luanti::Interface
 
 	void unpin_check_map()
 	{
-		for(uint64_t k : m_check_pinned)
-			m_forceloaded.erase(k);
+		for(uint64_t k : m_check_pinned){
+			auto it = m_forceloaded.find(k);
+			if(it != m_forceloaded.end() && --it->second <= 0)
+				m_forceloaded.erase(it);
+		}
 		m_check_pinned.clear();
 		update_load_points();
 	}
