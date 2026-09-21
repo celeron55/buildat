@@ -1057,6 +1057,13 @@ if __luanti_nest_2d then
 			"and it is sx by sy by sz")
 end
 
+-- Luanti's older spellings, still in the API and in games (score's mapgen
+-- calls get3dMap_flat)
+NoiseMap.get2dMap = NoiseMap.get_2d_map
+NoiseMap.get3dMap = NoiseMap.get_3d_map
+NoiseMap.get2dMap_flat = NoiseMap.get_2d_map_flat
+NoiseMap.get3dMap_flat = NoiseMap.get_3d_map_flat
+
 function NoiseMap:calc_2d_map(pos)
 	self:get_2d_map_flat(pos)
 end
