@@ -1,7 +1,7 @@
 #!/bin/bash
 # [NET_SIM]'s table, one cell: N driven runs (drive.sh, seed 5, GOAL 3,
 # 10 min) with or without the proxy, one line each appended to the table
-# under local/options_for_NET_SIM/: whether the goal was met and when, the
+# under local/options_for_NET_SIM/ (its logs in a directory beside): whether the goal was met and when, the
 # worst wait behind the wire the server logged, and whether the client
 # was disconnected.
 #
@@ -26,4 +26,9 @@ for i in $(seq 1 "$n"); do
 	worst=$(grep -o "five seconds [0-9]* ms" "$log/srv.log" | awk '{ if ($3 > w) w = $3 } END { print w + 0 }')
 	gone=$(grep -c "FAILED disconnected" "$log/drive.log")
 	echo "cell=[$cell] seed=5 run=$i wall=${wall}s ${goal:-no verdict} worst_wait=${worst} ms disconnected=$gone" | tee -a "$table"
+	# The run's logs kept beside the table, since drive.sh overwrites its own
+	keep="$out/$(date +%F_%H%M)_$(echo "$cell" | tr -c 'a-z0-9\n' '_')"
+	mkdir -p "$keep"
+	cp "$log/drive.log" "$log/cli.log" "$log/srv.log" "$keep/" 2>/dev/null
+	[ -f "$log/netsim.log" ] && cp "$log/netsim.log" "$keep/"
 done
