@@ -116,9 +116,16 @@ local function stamp()
 	vm:write_to_map()
 end
 
+-- The flood episode's cave, found by find_flood_spot(): the column dug
+-- (x, z), the sea floor's y, the cave's top y, and the box counted
+local flood = nil
+
 local function census(player)
 	local p1 = vector.subtract(ORIGIN, 3)
 	local p2 = vector.add(ORIGIN, 3)
+	if flood then
+		p1, p2 = flood.p1, flood.p2
+	end
 	local names = {}
 	for x = p1.x, p2.x do
 		for y = p1.y, p2.y do
@@ -164,7 +171,7 @@ local function census(player)
 		out = out .. string.format(" y=%.1f breath=%d", p.y - ORIGIN.y,
 				player:get_breath())
 	end
-	if NAME == "pour" then
+	if NAME == "pour" or NAME == "flood" then
 		-- How far the poured source spread: the flowing nodes by level
 		-- ([LIQUID_FLOW])
 		local levels = {}
@@ -191,8 +198,98 @@ local function census(player)
 	return out
 end
 
+-- The first column, x then z outward from the origin, where the sea
+-- stands over ground with a cave under it within 24 nodes: the sea floor
+-- (the first non-water under the water) and, under it, an air run at
+-- least 3 tall whose floor is stone or the like. Both engines run it on
+-- the same seed and find the same column. Nil when there is none.
+local function find_flood_spot()
+	local water_top = 62
+	for r = 0, 30 do
+		for x = -r, r do
+			for z = -r, r do
+				if math.max(math.abs(x), math.abs(z)) == r then
+					local n = core.get_node({x = x, y = water_top, z = z}).name
+					if n == water then
+						-- Down to the floor
+						local y = water_top
+						while core.get_node({x = x, y = y, z = z}).name == water and
+								y > 0 do
+							y = y - 1
+						end
+						local floor_y = y
+						-- And on down, through ground, to an air run
+						local yy = floor_y - 1
+						while yy > floor_y - 24 do
+							local name = core.get_node({x = x, y = yy, z = z}).name
+							if name == "air" then
+								local top = yy
+								while core.get_node({x = x, y = yy - 1, z = z}).name == "air" do
+									yy = yy - 1
+								end
+								if top - yy >= 2 then
+									return {x = x, z = z, floor_y = floor_y,
+											cave_top = top, cave_bottom = yy}
+								end
+							end
+							yy = yy - 1
+						end
+					end
+				end
+			end
+		end
+	end
+	return nil
+end
+
 core.register_on_joinplayer(function(player)
 	core.after(3, function()
+		if NAME == "flood" then
+			-- No stage: the world's own sea and cave. The area is emerged
+			-- first, then the spot found and the player put over it.
+			for name, def in pairs(core.registered_nodes) do
+				if def.drawtype == "liquid" and name:find("water", 1, true) and
+						(water == nil or name < water) then
+					water = name
+				end
+			end
+			core.emerge_area({x = -34, y = 20, z = -34}, {x = 34, y = 70, z = 34},
+					function(blockpos, action, remaining)
+				if remaining > 0 then
+					return
+				end
+				local spot = find_flood_spot()
+				if not spot then
+					core.log("action", "episode: FAILED no sea over a cave within 30")
+					return
+				end
+				flood = spot
+				flood.p1 = {x = spot.x - 6, y = spot.cave_bottom - 2, z = spot.z - 6}
+				flood.p2 = {x = spot.x + 6, y = spot.floor_y, z = spot.z + 6}
+				ORIGIN = {x = spot.x, y = spot.floor_y, z = spot.z}
+				core.log("action", string.format(
+						"episode: flood spot %d,%d: sea floor y=%d, cave y=%d..%d",
+						spot.x, spot.z, spot.floor_y, spot.cave_top, spot.cave_bottom))
+				player:set_physics_override({gravity = 0})
+				for id, _ in pairs(player:hud_get_all()) do
+					player:hud_remove(id)
+				end
+				player:set_pos({x = spot.x, y = 64, z = spot.z})
+				core.log("action", "episode: state flood")
+				core.after(1, function()
+					core.log("action", "episode: ready " .. NAME)
+					-- The column from the sea floor down into the cave, dug
+					for y = spot.floor_y, spot.cave_top, -1 do
+						core.set_node({x = spot.x, y = y, z = spot.z}, {name = "air"})
+					end
+					core.after(SECONDS, function()
+						core.log("action", "episode: census " .. NAME .. " " ..
+								census(player))
+					end)
+				end)
+			end)
+			return
+		end
 		stamp()
 		player:get_inventory():set_list("main", {})
 		if NAME == "place" then

@@ -59,7 +59,11 @@ pour)
 	# Nothing pressed: the fixture puts a water source on the platform at
 	# ready and the census counts what it flowed to, by level
 	{ echo "look 0 -89"; } > "$out/cmds.txt" ;;
-*) echo "unknown episode $EPISODE (dig, place, sink, swim, fall, dive, pour)" >&2; exit 2 ;;
+flood)
+	# Nothing pressed: the fixture digs from the sea floor into the cave
+	# under it on seed 1 and the census counts the cave's water by level
+	{ echo "look 0 -89"; } > "$out/cmds.txt" ;;
+*) echo "unknown episode $EPISODE (dig, place, sink, swim, fall, dive, pour, flood)" >&2; exit 2 ;;
 esac
 
 { echo "rawset(_G, \"EPISODE_NAME\", \"$EPISODE\")"
