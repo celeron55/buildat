@@ -3296,7 +3296,12 @@ struct Module: public interface::Module, public luanti::Interface
 	static void add_plant_quads(sv_<interface::VoxelQuad> &out, float scale,
 			float base = -0.5f, uint8_t tile = 0)
 	{
-		const float r = 0.5f * scale;
+		// Each quad is visual_scale wide and turned 45 degrees, as
+		// official's drawPlantlike has it (vertices at +-BS/2 * scale
+		// before the turn), so its reach along an axis is that over
+		// sqrt(2): a cross from corner to corner was 41 % too wide at
+		// every scale ([PLANT_SIZE])
+		const float r = 0.5f * scale * 0.70710678f;
 		const float y0 = base;
 		const float y1 = base + scale;
 		auto quad = [&](float ax, float az, float bx, float bz){
