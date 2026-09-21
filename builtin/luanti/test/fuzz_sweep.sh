@@ -25,10 +25,12 @@ table="$sweep/table.md"
 # eighty minutes of walk
 if [ -z "${RUNS:-}" ]; then
 	RUNS=""
-	for s in $(seq 1 7); do RUNS="$RUNS mineclone2:$s:5"; done
-	RUNS="$RUNS mineclone2:1:20"
+	# Seeds 2-8, not 1-7: v7's seed 1 is a sea with sheer mountains in
+	# every game, and its drownings are the seed (user, 2026-09-22)
+	for s in $(seq 2 8); do RUNS="$RUNS mineclone2:$s:5"; done
+	RUNS="$RUNS mineclone2:5:20"
 	for g in devtest minetest_game nodecore repixture exile; do
-		RUNS="$RUNS $g:1:5"
+		RUNS="$RUNS $g:5:5"
 	done
 fi
 

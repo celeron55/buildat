@@ -19,7 +19,11 @@
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-SEED="${SEED:-1}"
+# Seed 1 is no playtest world under mapgen v7, whatever the game: a sea at
+# the spawn, sheer mountains, no trees (user, 2026-09-22); it is kept for
+# [LIQUID_FLOW]'s sea-over-cave test only. So 5, the driver's proven seed.
+SEED="${SEED:-5}"
+[ "$SEED" = 1 ] && echo "seed 1: a sea with sheer mountains under mapgen v7; a drowning here is the seed, not a finding" >&2
 MINUTES="${MINUTES:-3}"
 GAME="${GAME:-mineclone2}"
 out="$here/local/fuzz/$SEED"
