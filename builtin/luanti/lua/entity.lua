@@ -1034,6 +1034,11 @@ local PHYSICS_FIELDS = {"speed", "jump", "gravity", "sneak", "sneak_glitch",
 		"liquid_fluidity", "liquid_fluidity_smooth", "liquid_sink",
 		"acceleration_default", "acceleration_air", "acceleration_fast"}
 
+local MOVEMENT_FIELDS = {"acceleration_default", "acceleration_air",
+		"acceleration_fast", "speed_walk", "speed_crouch", "speed_fast",
+		"speed_climb", "speed_jump", "liquid_fluidity",
+		"liquid_fluidity_smooth", "liquid_sink", "gravity"}
+
 local function send_physics(o)
 	if not (o and o.player_name and __luanti_send_physics) then
 		return
@@ -1046,6 +1051,18 @@ local function send_physics(o)
 		end
 		flat[#flat + 1] = k
 		flat[#flat + 1] = tostring(tonumber(v) or 1)
+	end
+	-- And the constants themselves, the game's movement_* settings (its
+	-- minetest.conf is in the defaults), which is what TOCLIENT_MOVEMENT
+	-- carries: VoxeLibre's liquid_sink is 23 against the client's 10
+	-- ([WATER_PARITY]). Only the ones set; the client keeps its own for
+	-- the rest.
+	for _, k in ipairs(MOVEMENT_FIELDS) do
+		local v = core.settings and core.settings:get("movement_" .. k)
+		if tonumber(v) then
+			flat[#flat + 1] = "movement_" .. k
+			flat[#flat + 1] = tostring(tonumber(v))
+		end
 	end
 	__luanti_send_physics(o.player_name, flat)
 end

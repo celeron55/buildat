@@ -1391,6 +1391,7 @@ function M.new(magic, buildat, log, options)
 	-- arrived and everything but air is solid; see is_solid().
 	self.node_solid = nil
 	self.node_liquid = {}
+	self.node_resistance = {}
 	-- The screen tint of the node the camera is in, per node id; see
 	-- post_effect_at(). Only the nodes that have one are in here.
 	self.node_post_effect = {}
@@ -2093,6 +2094,12 @@ function M.new(magic, buildat, log, options)
 	function self:is_liquid(x, y, z)
 		local id = self:node_at(x, y, z)
 		return id ~= nil and self.node_liquid[id] == true
+	end
+
+	-- The node's move_resistance, 0 where there is no node yet
+	function self:resistance_at(x, y, z)
+		local id = self:node_at(x, y, z)
+		return (id ~= nil and self.node_resistance[id]) or 0
 	end
 
 	-- Whether a ray stops at a node. Air does not stop one and neither does
@@ -4281,6 +4288,7 @@ function M.new(magic, buildat, log, options)
 		local collision = {}
 		local solid = {}
 		local liquid = {}
+		local resistance = {}
 		local post_effect = {}
 		local selection = {}
 		local pointable = {}
@@ -4328,8 +4336,10 @@ function M.new(magic, buildat, log, options)
 			-- stops a ray without being pointed at. Those two values are
 			-- that way round because they used to be a boolean.
 			pointable[id] = def.pointable ~= 0
-			liquid[id] = def.liquid_type ~= nil and
-					def.liquid_type ~= NODEDEF_LIQUID_NONE
+			-- What a body swims in is the node's liquid_move_physics, as
+			-- LocalPlayer has it; a game sets it either way
+			liquid[id] = def.liquid_move_physics == true
+			resistance[id] = def.move_resistance or 0
 			if def.post_effect_color and def.post_effect_color.a > 0 then
 				post_effect[id] = def.post_effect_color
 			end
@@ -4444,6 +4454,7 @@ function M.new(magic, buildat, log, options)
 			self.node_collision = collision
 			self.node_solid = solid
 			self.node_liquid = liquid
+			self.node_resistance = resistance
 			self.node_post_effect = post_effect
 			self.node_selection = selection
 			self.node_pointable = pointable

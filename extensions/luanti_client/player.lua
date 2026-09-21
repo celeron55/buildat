@@ -237,6 +237,14 @@ end
 -- groups_at(x, y, z) says what standing on the node does: a table (or
 -- anything indexable) with bouncy, slippery, disable_jump and
 -- disable_descend, Luanti's groups of those names, or nil. Optional.
+local function copy_movement()
+	local t = {}
+	for k, v in pairs(M.DEFAULT_MOVEMENT) do
+		t[k] = v
+	end
+	return t
+end
+
 function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 	local self = {
 		x = 0, y = 0, z = 0,
@@ -257,7 +265,8 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		-- privileges will pull them back with its movement checks
 		fly = false,
 		noclip = false,
-		movement = M.DEFAULT_MOVEMENT,
+		-- A copy: the game's constants are written into it when they arrive
+		movement = copy_movement(),
 		-- What a mod has done to how this player moves: Luanti's
 		-- physics_override, which multiplies rather than replaces. Ones
 		-- until the server says otherwise; see M.sub_physics in the

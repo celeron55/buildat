@@ -44,8 +44,9 @@ sink)
 	# far in EPISODE_SECONDS, and what the breath is by then
 	{ echo "look 0 0"; } > "$out/cmds.txt" ;;
 swim)
-	# Jump held: swimming up against the sink, out at the surface
-	{ echo "look 0 0"; echo "keydown Space"; echo "delay 6000"; echo "keyup Space"; } > "$out/cmds.txt" ;;
+	# Jump held through the census: swimming up against the sink, held
+	# at the surface
+	{ echo "look 0 0"; echo "keydown Space"; echo "delay 30000"; echo "keyup Space"; } > "$out/cmds.txt" ;;
 *) echo "unknown episode $EPISODE (dig, place, sink, swim)" >&2; exit 2 ;;
 esac
 
@@ -101,7 +102,12 @@ server_announce = false
 EOF
 cp "$out/fixture.lua" "$work/worldmods/episode/init.lua"
 printf 'name = episode\n' > "$work/worldmods/episode/mod.conf"
-{ echo "fixed_map_seed = 1"; echo "time_speed = 0"
+# Damage off on the official side only: with it on, VoxeLibre's vl_hudbars
+# is active and its globalstep indexes the HUD layers the fixture removed
+# (init.lua:99, hud_get nil), and the server dies before the census. The
+# module keeps its default (on), so the breath column compares nothing:
+# official counts breath only under damage.
+{ echo "fixed_map_seed = 1"; echo "time_speed = 0"; echo "enable_damage = false"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
 port=30030
 ( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \

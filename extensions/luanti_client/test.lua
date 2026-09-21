@@ -479,6 +479,9 @@ local function write_node(name, drawtype, tile_names, flags, animation, opts)
 	w:string("")       -- node_dig_prediction
 	w:u8(0)            -- leveled_max
 	w:u8(opts.alpha_mode or 2) -- ALPHAMODE_OPAQUE unless the test says
+	if opts.move_resistance then -- the >= 5.5 tail, when the test has one
+		w:u8(opts.move_resistance):u8(opts.liquid_move_physics and 1 or 0)
+	end
 	return w:data()
 end
 
@@ -523,7 +526,8 @@ local nodes = {
 			"water.png", "water.png", "water.png"}, 1, "vertical",
 			{walkable = false, liquid_type = 2, drowning = 1,
 			liquid_source = "test:water", palette = "water_palette.png",
-			post_effect_color = {a = 64, r = 100, g = 100, b = 200}})},
+			post_effect_color = {a = 64, r = 100, g = 100, b = 200},
+			move_resistance = 3, liquid_move_physics = true})},
 	-- A node the game asked to be blended rather than masked
 	{14, write_node("test:glass", 0, {"glass.png", "glass.png", "glass.png",
 			"glass.png", "glass.png", "glass.png"}, 0, nil,
@@ -564,6 +568,12 @@ assert(defs[7].alpha_mode == 2, "nodedef: alpha_mode is "..
 		tostring(defs[7].alpha_mode))
 assert(defs[14].alpha_mode == 0, "nodedef: blended alpha_mode is "..
 		tostring(defs[14] and defs[14].alpha_mode))
+-- The 5.5 tail read when there, and its defaults when not: a liquid without
+-- the tail swims, a stone does not
+assert(defs[7].move_resistance == 0 and defs[7].liquid_move_physics == false,
+		"nodedef: stone's defaults")
+assert(defs[11].move_resistance == 3 and defs[11].liquid_move_physics == true,
+		"nodedef: water's tail")
 assert(defs[7].groups.cracky == 3 and
 		defs[7].groups.oddly_breakable_by_hand == -1, "nodedef: groups")
 -- The flags on test:grass add a colour, a scale and an align style after the

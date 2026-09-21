@@ -2077,7 +2077,18 @@ end)
 -- the server. It multiplies the constants above rather than replacing them,
 -- so speed boots, low gravity and a jump curse are these numbers arriving.
 luanti.sub_physics(function(p)
-	player.override = p
+	-- The game's movement constants ride along as movement_<name>; the
+	-- rest is the override that multiplies them
+	local override = {}
+	for k, v in pairs(p) do
+		local name = k:match("^movement_(.*)$")
+		if name then
+			player.movement[name] = v
+		else
+			override[k] = v
+		end
+	end
+	player.override = override
 	-- Old move is not supported (decided 2026-09-19, [PLAYER_PHYSICS]):
 	-- a game that asks for it gets new move and this line
 	if p.new_move == 0 then

@@ -874,7 +874,9 @@ local function show_client(host, port, name, password, mode)
 		-- stands still until the ground under them is there.
 		local avatar = player.new(
 				function(x, y, z) return view:is_solid(x, y, z) end,
-				function(x, y, z) return view:is_liquid(x, y, z) end)
+				function(x, y, z) return view:is_liquid(x, y, z) end,
+				nil,
+				function(x, y, z) return view:resistance_at(x, y, z) end)
 		client.on_movement = function(m)
 			avatar.movement = m
 			add_line("The game's movement constants arrived")
