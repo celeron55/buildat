@@ -55,7 +55,11 @@ dive)
 	# Sneak held through the census: swimming down, and where the body is
 	# held against the floor
 	{ echo "look 0 0"; echo "keydown Shift"; echo "delay 30000"; echo "keyup Shift"; } > "$out/cmds.txt" ;;
-*) echo "unknown episode $EPISODE (dig, place, sink, swim, fall, dive)" >&2; exit 2 ;;
+pour)
+	# Nothing pressed: the fixture puts a water source on the platform at
+	# ready and the census counts what it flowed to, by level
+	{ echo "look 0 -89"; } > "$out/cmds.txt" ;;
+*) echo "unknown episode $EPISODE (dig, place, sink, swim, fall, dive, pour)" >&2; exit 2 ;;
 esac
 
 { echo "rawset(_G, \"EPISODE_NAME\", \"$EPISODE\")"

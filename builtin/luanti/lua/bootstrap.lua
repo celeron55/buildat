@@ -2145,7 +2145,7 @@ local STUBS_NIL = {
 	-- get_loaded_blocks, get_active_blocks, get_loadable_blocks and
 	-- compare_block_status are below
 	-- line_of_sight and raycast are in lua/raycast.lua
-	"find_path", "transforming_liquid_add",
+	"find_path",
 	"get_node_max_level", "get_node_level", "set_node_level", "add_node_level",
 	"fix_light",
 	-- get_heat, get_humidity, get_biome_data, get_biome_id and
@@ -2752,9 +2752,13 @@ end
 -- changed. The write itself is the C function; this is the one place that
 -- sees all of them, so it is the one place that has to remember.
 local __set_node_raw = __luanti_set_node
+core.__set_node_raw = __set_node_raw
 
 local function __set_node(x, y, z, id, param1, param2)
 	core.__note_block_changed(x, y, z)
+	-- And the liquid transform's queue: this node and the six beside it
+	-- ([LIQUID_FLOW], lua/liquid.lua)
+	core.__liquid_node_written(x, y, z)
 	return __set_node_raw(x, y, z, id, param1, param2)
 end
 local __get_node = __luanti_get_node
@@ -5144,6 +5148,8 @@ function core.__step(dtime)
 	mark("lbms")
 	run_abms(dtime)
 	mark("abms")
+	core.__step_liquids(dtime)
+	mark("liquids")
 	local total = (core.get_us_time() - t0) / 1000000
 	local longest, longest_phase = 0, ""
 	for _, part in ipairs(parts) do
@@ -5267,6 +5273,7 @@ dofile(module_path .. "/lua/colorspec.lua")
 dofile(module_path .. "/lua/png.lua")
 dofile(module_path .. "/lua/misc.lua")
 dofile(module_path .. "/lua/entity.lua")
+dofile(module_path .. "/lua/liquid.lua")
 dofile(module_path .. "/lua/craft.lua")
 dofile(module_path .. "/lua/json.lua")
 dofile(module_path .. "/lua/objmesh.lua")

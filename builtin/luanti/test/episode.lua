@@ -71,6 +71,8 @@ end
 core.register_on_mods_loaded(freeze)
 
 local dirt = nil
+-- The game's water source, by name
+local water = nil
 local function stamp()
 	dirt = node_named("dirt")
 	local air = core.get_content_id("air")
@@ -89,17 +91,16 @@ local function stamp()
 			data[area:index(ORIGIN.x + x, ORIGIN.y, ORIGIN.z + z)] = cid
 		end
 	end
+	for name, def in pairs(core.registered_nodes) do
+		if def.drawtype == "liquid" and name:find("water", 1, true) and
+				(water == nil or name < water) then
+			water = name
+		end
+	end
 	if POOL[NAME] then
 		-- A pool three deep with dirt walls, the platform its floor, the
 		-- game's own water source ([WATER_PARITY]): what the player's body
 		-- does in it is what is compared
-		local water = nil
-		for name, def in pairs(core.registered_nodes) do
-			if def.drawtype == "liquid" and name:find("water", 1, true) and
-					(water == nil or name < water) then
-				water = name
-			end
-		end
 		local wid = core.get_content_id(water)
 		for x = -2, 2 do
 			for z = -2, 2 do
@@ -163,6 +164,30 @@ local function census(player)
 		out = out .. string.format(" y=%.1f breath=%d", p.y - ORIGIN.y,
 				player:get_breath())
 	end
+	if NAME == "pour" then
+		-- How far the poured source spread: the flowing nodes by level
+		-- ([LIQUID_FLOW])
+		local levels = {}
+		for x = p1.x, p2.x do
+			for y = p1.y, p2.y do
+				for z = p1.z, p2.z do
+					local n = core.get_node({x = x, y = y, z = z})
+					local def = core.registered_nodes[n.name]
+					if def and def.liquidtype == "flowing" then
+						local l = n.param2 % 8
+						levels[l] = (levels[l] or 0) + 1
+					end
+				end
+			end
+		end
+		local parts = {}
+		for l = 7, 0, -1 do
+			if levels[l] then
+				parts[#parts + 1] = l .. ":" .. levels[l]
+			end
+		end
+		out = out .. " levels=" .. table.concat(parts, ",")
+	end
 	return out
 end
 
@@ -206,6 +231,12 @@ core.register_on_joinplayer(function(player)
 			player:set_look_horizontal(0)
 			player:set_look_vertical(math.pi / 2)
 			core.log("action", "episode: ready " .. NAME)
+			if NAME == "pour" then
+				-- The game's water source on the platform's middle; the
+				-- census counts what it spread to ([LIQUID_FLOW])
+				core.set_node({x = ORIGIN.x, y = ORIGIN.y + 1, z = ORIGIN.z},
+						{name = water})
+			end
 			core.after(SECONDS, function()
 				if not player:is_player() then
 					core.log("action", "episode: FAILED the player left " ..
