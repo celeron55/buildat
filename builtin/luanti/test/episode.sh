@@ -97,12 +97,11 @@ auth_backend = sqlite3
 mod_storage_backend = sqlite3
 world_name = episode
 creative_mode = false
-enable_damage = false
 server_announce = false
 EOF
 cp "$out/fixture.lua" "$work/worldmods/episode/init.lua"
 printf 'name = episode\n' > "$work/worldmods/episode/mod.conf"
-{ echo "fixed_map_seed = 1"; echo "time_speed = 0"; echo "enable_damage = false"
+{ echo "fixed_map_seed = 1"; echo "time_speed = 0"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
 port=30030
 ( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
