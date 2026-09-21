@@ -80,7 +80,7 @@ check_imports() {
 	# on msvcrt -- a DLL importing them brings a second C runtime into the
 	# process, which is what 0.3.1's libcurl did
 	local own=" kernel32.dll user32.dll gdi32.dll advapi32.dll shell32.dll \
-ole32.dll oleaut32.dll ws2_32.dll opengl32.dll winmm.dll dbghelp.dll \
+ole32.dll oleaut32.dll ws2_32.dll wsock32.dll opengl32.dll winmm.dll dbghelp.dll \
 imm32.dll version.dll setupapi.dll crypt32.dll bcrypt.dll secur32.dll \
 iphlpapi.dll msvcrt.dll comdlg32.dll shlwapi.dll uuid.dll rpcrt4.dll \
 wldap32.dll normaliz.dll ntdll.dll psapi.dll userenv.dll cfgmgr32.dll \
