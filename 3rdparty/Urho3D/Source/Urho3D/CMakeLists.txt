@@ -319,6 +319,12 @@ if (IOS OR TVOS)
     set (EXCLUDE_FROM_ALL EXCLUDE_FROM_ALL)
 endif ()
 setup_library (${URHO3D_LIB_TYPE} ${EXCLUDE_FROM_ALL})
+# buildat: the DLL exports everything under MinGW, the way the Linux .so
+# does -- buildat calls SDL and LuaJIT through the engine's library, and
+# those carry no URHO3D_API of their own
+if (MINGW AND URHO3D_LIB_TYPE STREQUAL SHARED)
+    set_target_properties (${TARGET_NAME} PROPERTIES LINK_FLAGS "-Wl,--export-all-symbols")
+endif ()
 if (NOT ANDROID AND NOT WEB)
     file (READ .soversion SOVERSION)
     string (STRIP ${SOVERSION} SOVERSION)

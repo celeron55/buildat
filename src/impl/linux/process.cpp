@@ -39,7 +39,7 @@ bool Handle::valid() const
 	return impl > 0;
 }
 
-Handle start(const ss_ &path, const sv_<ss_> &args)
+Handle start(const ss_ &path, const sv_<ss_> &args, const ss_ &cwd)
 {
 	Handle h;
 	pid_t pid = fork();
@@ -54,6 +54,8 @@ Handle start(const ss_ &path, const sv_<ss_> &args)
 		if(getppid() == 1)
 			_exit(1);
 #endif
+		if(!cwd.empty() && chdir(cwd.c_str()) != 0)
+			_exit(126);
 		std::vector<char*> argv;
 		argv.push_back(const_cast<char*>(path.c_str()));
 		for(const ss_ &a : args)
@@ -65,7 +67,11 @@ Handle start(const ss_ &path, const sv_<ss_> &args)
 	}
 	setpgid(pid, pid);
 	h.impl = pid;
-	log_i(MODULE, "Started pid %i: %s", (int)pid, cs(path));
+	ss_ shown = path;
+	for(const ss_ &a : args)
+		shown += " " + a;
+	log_i(MODULE, "Started pid %i: %s%s", (int)pid, cs(shown),
+			cwd.empty() ? "" : cs(" (in " + cwd + ")"));
 	return h;
 }
 
@@ -119,13 +125,14 @@ bool is_running(const Handle &h)
 	if(!h.valid())
 		return false;
 	pid_t pid = (pid_t)h.impl;
+	// Reaped here, or a child that has exited stays a zombie that
+	// kill(pid, 0) still finds: a crashed local server read as running
+	// for as long as the client lived ([START_PROGRESS])
+	if(waitpid(pid, nullptr, WNOHANG) == pid)
+		return false;
 	if(kill(pid, 0) == 0)
 		return true;
-	if(errno == ESRCH){
-		waitpid(pid, nullptr, WNOHANG);
-		return false;
-	}
-	return true;
+	return errno != ESRCH;
 }
 
 void terminate(Handle &h)

@@ -25,8 +25,12 @@ namespace boot
 				std::locale::global(std::locale(std::locale(""), "C",
 						std::locale::numeric));
 			} catch(std::runtime_error &e){
-				// Can happen on Wine
+				// mingw's std::locale("") throws on every Windows, and the
+				// line was noise in front of a real fault's ([WIN8_START]);
+				// setlocale() below is what the number formatting needs
+#ifndef _WIN32
 				fprintf(stderr, "Failed to set numeric C++ locale\n");
+#endif
 			}
 			setlocale(LC_NUMERIC, "C");
 
