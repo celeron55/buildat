@@ -980,9 +980,16 @@ function M.new(magic, buildat, log, ctx)
 				end
 			elseif name == "tablecolumns" then
 				columns = parse_columns(e.fields)
-			elseif name == "label" or name == "textarea" then
+			elseif name == "label" or name == "textarea" or
+					name == "vertlabel" then
 				local x, y = at(e, 1)
-				local text = name == "label" and e.fields[2] or e.fields[5]
+				local text = name == "textarea" and e.fields[5] or e.fields[2]
+				if name == "vertlabel" and text then
+					-- Luanti's own: the label with a line break after each
+					-- character (guiFormSpecMenu.cpp parseVertLabel)
+					text = text:gsub("[%z\1-\127\194-\244][\128-\191]*",
+							"%0\n"):gsub("\n$", "")
+				end
 				-- label[X,Y;W,H;label] as well as label[X,Y;label]. The
 				-- sized form is the one style_type[label;halign=...] has a
 				-- box to align inside, and it is what the builtin's death
