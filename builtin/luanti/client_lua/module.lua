@@ -504,8 +504,11 @@ local function build_model(node, quads, textures)
 	local materials = {}
 	for i = 1, #order do
 		local material = magic.Material.new()
+		-- A cut-out with the depth write on ([OBJECT_MESH]): alpha
+		-- blending without it painted a hat layer's texels over the head
+		-- behind them and turned skirts inside-out
 		material:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/DiffUnlitAlpha.xml"))
+				"luanti_client/res/LuantiUnlitMask.xml"))
 		local tex = object_texture(textures[order[i]] or textures[1] or "")
 		if tex then
 			material:SetTexture(magic.TU_DIFFUSE, tex)

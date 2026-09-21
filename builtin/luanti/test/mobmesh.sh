@@ -37,7 +37,7 @@ delay 2000
 screenshot $out/mobs.png
 event scan
 delay 12000
-look_dir 2.5 -0.3 4
+look_dir 2.5 0.2 1
 delay 1500
 screenshot $out/zombie_side.png
 event scan
