@@ -199,12 +199,73 @@ end
 -- Name, count and wear, split on single spaces the way Luanti reads them --
 -- so " 3" is three of the empty item and not one of an item called 3, and a
 -- name with something after it that is not a number keeps the name
+-- An itemstring's fourth field is the metadata, as Luanti writes it: a
+-- quoted string of \1key\2value\3 pairs (ItemStackMetadata::serialize),
+-- with the quotes and backslashes escaped; the older form is a bare
+-- quoted string that is the description. Without it a worn tool's name,
+-- a written book or an enchanted item lost its meta at every save, since
+-- inventories are stored as itemstrings ([FEATURE_SWEEP] 2026-09-21).
+local function unquote(s)
+	if string.sub(s, 1, 1) ~= '"' then
+		return nil
+	end
+	local out = {}
+	local i = 2
+	while i <= #s do
+		local c = string.sub(s, i, i)
+		if c == "\\" then
+			out[#out + 1] = string.sub(s, i + 1, i + 1)
+			i = i + 2
+		elseif c == '"' then
+			break
+		else
+			out[#out + 1] = c
+			i = i + 1
+		end
+	end
+	return table.concat(out)
+end
+
+local function quote(s)
+	return '"' .. string.gsub(s, '[\\"]', "\\%0") .. '"'
+end
+
+local function meta_from_string(s)
+	local fields = {}
+	if string.sub(s, 1, 1) == "\1" then
+		-- \1key\2value\3 per pair
+		for k, v in string.gmatch(s, "\1([^\2]*)\2([^\3]*)\3") do
+			fields[k] = v
+		end
+	elseif s ~= "" then
+		fields.description = s
+	end
+	return fields
+end
+
+local function meta_to_string(fields)
+	local keys = {}
+	for k in pairs(fields) do
+		keys[#keys + 1] = k
+	end
+	if #keys == 0 then
+		return nil
+	end
+	table.sort(keys)
+	local out = {}
+	for _, k in ipairs(keys) do
+		out[#out + 1] = "\1" .. k .. "\2" .. tostring(fields[k]) .. "\3"
+	end
+	return table.concat(out)
+end
+
 local function parse_itemstring(s)
 	if s == "" then
 		return "", 0, 0
 	end
 	local parts = {}
 	local start = 1
+	local meta = nil
 	while true do
 		local i = string.find(s, " ", start, true)
 		if i == nil then
@@ -213,11 +274,15 @@ local function parse_itemstring(s)
 		end
 		parts[#parts + 1] = string.sub(s, start, i - 1)
 		start = i + 1
+		if #parts == 3 and string.sub(s, start, start) == '"' then
+			meta = unquote(string.sub(s, start))
+			break
+		end
 	end
 	local name = parts[1] or ""
 	local count = parts[2] and (tonumber(parts[2]) or 1) or 1
 	local wear = parts[3] and (tonumber(parts[3]) or 0) or 0
-	return name, count, wear
+	return name, count, wear, meta and meta_from_string(meta) or nil
 end
 
 local function new_stack(name, count, wear, meta_fields)
@@ -240,8 +305,8 @@ function ItemStack(from)
 		return new_stack("", 0, 0)
 	end
 	if type(from) == "string" then
-		local name, count, wear = parse_itemstring(from)
-		return new_stack(name, count, wear)
+		local name, count, wear, meta = parse_itemstring(from)
+		return new_stack(name, count, wear, meta)
 	end
 	if getmetatable(from) == Stack then
 		return new_stack(from.name, from.count, from.wear,
@@ -346,12 +411,16 @@ function Stack:to_string()
 	if self:is_empty() then
 		return ""
 	end
+	local meta = meta_to_string(self.meta.fields)
 	local out = self.name
-	if self.count ~= 1 or self.wear ~= 0 then
+	if self.count ~= 1 or self.wear ~= 0 or meta then
 		out = out .. " " .. self.count
 	end
-	if self.wear ~= 0 then
+	if self.wear ~= 0 or meta then
 		out = out .. " " .. self.wear
+	end
+	if meta then
+		out = out .. " " .. quote(meta)
 	end
 	return out
 end

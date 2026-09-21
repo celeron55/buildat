@@ -85,6 +85,19 @@ check("itemstack", function()
 	local s = ItemStack("test:thing 4")
 	assert(s:get_name() == "test:thing" and s:get_count() == 4)
 	assert(s:to_string() == "test:thing 4")
+	-- The metadata field, Luanti's own form and the round trip
+	local m = ItemStack("test:pick 1 21323 \"\1description\2My worn out pick\3\"")
+	assert(m:get_wear() == 21323, m:get_wear())
+	assert(m:get_meta():get_string("description") == "My worn out pick",
+			m:get_meta():get_string("description"))
+	assert(ItemStack(m:to_string()):get_meta():get_string("description") ==
+			"My worn out pick", m:to_string())
+	assert(ItemStack("test:book 1 0 \"plain desc\""):get_meta():get_string("description") ==
+			"plain desc")
+	local q = ItemStack("test:thing")
+	q:get_meta():set_string("k", 'a "quoted" \\ value')
+	assert(ItemStack(q:to_string()):get_meta():get_string("k") == 'a "quoted" \\ value',
+			q:to_string())
 	assert(s:get_stack_max() == 10 and s:get_free_space() == 6)
 	assert(s:get_description() == "A thing")
 
