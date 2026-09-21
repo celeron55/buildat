@@ -2863,7 +2863,7 @@ function core.fix_light(pos1, pos2)
 	local x2, y2, z2 = to_pos(pos2)
 	__get_node(x1, y1, z1) -- flushes the writes before the relight
 	__luanti_relight(math.min(x1, x2), math.min(y1, y2), math.min(z1, z2),
-			math.max(x1, x2), math.max(y1, y2), math.max(z1, z2))
+			math.max(x1, x2), math.max(y1, y2), math.max(z1, z2), true)
 	return true
 end
 

@@ -5811,7 +5811,7 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
-	// __luanti_relight(x0, y0, z0, x1, y1, z1): work the light out again in
+	// __luanti_relight(x0, y0, z0, x1, y1, z1[, now]): work the light out again in
 	// the sections this box touches. A mod's mapgen writes a chunk of
 	// terrain with no light in it and then asks Luanti to light it, which is
 	// VoxelManip:calc_lighting(); this is that call's other half.
@@ -5832,7 +5832,10 @@ struct Module: public interface::Module, public luanti::Interface
 		// Later, under the tick's budget, not inside the mod's own step
 		// ([STEP_SLICE]); a relight asked for by a fixture that reads the
 		// light back at once wants BUILDAT_LUANTI_RELIGHT_NOW=1
-		static const bool now = getenv("BUILDAT_LUANTI_RELIGHT_NOW") != nullptr;
+		// The seventh argument true is core.fix_light: Luanti's is done
+		// when it returns, and its callers read the light back at once
+		static const bool now_env = getenv("BUILDAT_LUANTI_RELIGHT_NOW") != nullptr;
+		const bool now = now_env || lua_toboolean(L, 7);
 		voxelworld::access(self->m_server, self->m_scene,
 				[&](voxelworld::Instance *world){
 			if(now)
