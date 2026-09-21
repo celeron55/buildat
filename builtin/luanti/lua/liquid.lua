@@ -335,11 +335,19 @@ end
 -- followed by the next one sooner than liquid_update, so the queue
 -- drains at the same rate in shorter steps.
 -- Measured 2026-09-22 (seed 5 VoxeLibre, no client): the decisions are
--- a third of a pass and the writes after them two thirds -- 15 000
--- nodes, 600 ms -- so the loop's cut is at a third of the step wanted.
--- simplified: a fixed 100 ms; a setting when a game wants it.
-local PASS_US = 100000
+-- a sixth of a pass; the rest is the game's on_liquid_transformed over
+-- every changed node (VoxeLibre's palette fix, 40 us a node: 12 000
+-- nodes, 540 ms), which cannot be cut once the nodes are decided. So the
+-- loop is cut where the time so far plus what the last pass paid per
+-- changed node, times the nodes changed so far, reaches PASS_US.
+-- simplified: a fixed 250 ms; a setting when a game wants it.
+local PASS_US = 250000
 local cut_short = false
+local per_changed_us = 40
+-- When the writes, the falling checks and the callbacks began, for the
+-- slow-pass line
+local pass_t = {0, 0, 0}
+local pass_n_changed = 0
 
 local function transform(loop_max)
 	local loops = 0
@@ -354,7 +362,8 @@ local function transform(loop_max)
 	-- the one above it already water
 	while head <= tail and loops < loop_max do
 		loops = loops + 1
-		if loops % 64 == 0 and core.get_us_time() - t0 > PASS_US then
+		if loops % 64 == 0 and (core.get_us_time() - t0) +
+				#changed * per_changed_us > PASS_US then
 			cut_short = true
 			break
 		end
@@ -390,6 +399,7 @@ local function transform(loop_max)
 		end
 	end
 	-- The pass's writes, each position's last decision
+	pass_t[1] = core.get_us_time()
 	for _, w in ipairs(pending_list) do
 		local last = pending[key(w[1], w[2], w[3])]
 		core.__note_block_changed(last[1], last[2], last[3])
@@ -399,11 +409,14 @@ local function transform(loop_max)
 	for _, p in ipairs(must_reflow) do
 		push(p[1], p[2], p[3])
 	end
+	pass_t[2] = core.get_us_time()
+	pass_n_changed = #changed
 	if core.check_for_falling then
 		for _, p in ipairs(falling) do
 			core.check_for_falling(p)
 		end
 	end
+	pass_t[3] = core.get_us_time()
 	if #changed > 0 and core.registered_on_liquid_transformed then
 		for _, f in ipairs(core.registered_on_liquid_transformed) do
 			f(changed, {})
@@ -456,9 +469,17 @@ function core.__step_liquids(dtime)
 	local t0 = core.get_us_time()
 	local n = transform(loop_max)
 	local pass_us = core.get_us_time() - t0
+	if pass_n_changed > 100 then
+		per_changed_us = math.max(1, math.min(1000,
+				(core.get_us_time() - pass_t[1]) / pass_n_changed))
+	end
 	if pass_us > 500000 then
-		core.log("warning", string.format("liquids: a pass of %d nodes took %d ms%s",
-				n, pass_us / 1000, cut_short and " (cut)" or ""))
+		local t1 = core.get_us_time()
+		core.log("warning", string.format("liquids: a pass of %d nodes took %d ms%s: " ..
+				"decisions %d, writes %d, falling %d, callbacks %d",
+				n, pass_us / 1000, cut_short and " (cut)" or "",
+				(pass_t[1] - t0) / 1000, (pass_t[2] - pass_t[1]) / 1000,
+				(pass_t[3] - pass_t[2]) / 1000, (t1 - pass_t[3]) / 1000))
 	end
 	if cut_short then
 		due = math.min(due, 0.25)
