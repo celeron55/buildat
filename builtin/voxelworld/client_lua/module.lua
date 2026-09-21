@@ -43,6 +43,12 @@ end
 
 local UPDATE_TIME_FRACTION = 0.10
 local MESH_BUDGET_CAP_US = 15000
+-- And a floor: a tenth of the last frame is half a millisecond on an idle
+-- client at 200 fps, one mesh a frame at most, and the faster the client
+-- the less it meshed a second -- a reference shot at range 200 had 2300
+-- chunks queued at 14 a second and its 90 s ran out ([MISSING_CHUNK]'s
+-- "never drew", 2026-09-21). Five milliseconds a frame keeps 60 fps.
+local MESH_BUDGET_FLOOR_US = 5000
 
 local LOD_THRESHOLD = 0.2
 -- How the update queue orders what it has: it sorts by distance divided by
@@ -572,8 +578,9 @@ function sub_events()
 		-- frame buy a long budget, and the join's first frames meshed ten
 		-- dense chunks in one frame -- 1.3 s ([FRAME_PEAK]'s mesh row).
 		-- The worst frame is now one chunk's mesh over the cap.
-		local max_handling_time_us = math.min(
-				last_outer_frame_us * UPDATE_TIME_FRACTION, MESH_BUDGET_CAP_US)
+		local max_handling_time_us = math.min(math.max(
+				last_outer_frame_us * UPDATE_TIME_FRACTION, MESH_BUDGET_FLOOR_US),
+				MESH_BUDGET_CAP_US)
 		local stop_at_us = current_us + max_handling_time_us
 
 		-- A chunk that changed and has still not been drawn again after two

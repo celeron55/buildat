@@ -168,7 +168,7 @@ mkdir -p "$out"
 } > "$out/taken.txt"
 from=$(wc -l < "$tmp/srv.log")
 BUILDAT_LUANTI_PBR="$mode" \
-bin/buildat -s "localhost:$port" -w "${REFSHOT_W}x$REFSHOT_H" -l 3 -c @"$tmp/cmds.txt" \
+bin/buildat -s "localhost:$port" -w "${REFSHOT_W}x$REFSHOT_H" -l "${CLIENT_LOG_LEVEL:-3}" -c @"$tmp/cmds.txt" \
 	> "$tmp/cli_$mode.log" 2>&1 &
 cli=$!
 since() { tail -n +"$((from + 1))" "$tmp/srv.log"; }
