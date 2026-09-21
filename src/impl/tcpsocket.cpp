@@ -272,6 +272,16 @@ struct CTCPSocket: public TCPSocket
 		int val = 1;
 		setsockopt(fd_client, SOL_SOCKET, SO_REUSEADDR, (const char*)&val,
 				sizeof(val));
+		// A small send buffer, so that what waits for a slow peer waits in
+		// the network module's queue, where a LatestOnly packet can go
+		// ahead of it ([NET_CHANNELS]) -- not in the kernel, where the
+		// autotuned 4 MB is minutes at a lossy link's rate and nothing
+		// passes it. simplified: 64 KB a round trip caps a peer at some
+		// 800 kB/s over 80 ms; a transport with its own window ([TRANSPORT])
+		// lifts this.
+		int sndbuf = 64 * 1024;
+		setsockopt(fd_client, SOL_SOCKET, SO_SNDBUF, (const char*)&sndbuf,
+				sizeof(sndbuf));
 
 		m_fd = fd_client;
 		return true;

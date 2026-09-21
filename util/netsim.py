@@ -14,7 +14,7 @@
 #
 # It lies only about TCP's congestion window, which the cap stands in
 # for. Hundred-odd lines, asyncio, nothing else.
-import argparse, asyncio, random, sys, time
+import argparse, asyncio, random, socket, sys, time
 
 RTO_MS = 200
 CHUNK = 4096
@@ -97,6 +97,12 @@ async def serve(args):
     async def on_client(cr, cw):
         try:
             sr, sw = await asyncio.open_connection(host, int(port))
+            # Small receive buffers on both legs, so the link holds one
+            # chunk and not the kernel's megabytes: a lossy link with big
+            # buffers is a latency of minutes, which is not what is modelled
+            for w in (cw, sw):
+                w.get_extra_info("socket").setsockopt(
+                    socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024)
         except OSError as e:
             print("netsim: cannot reach %s: %s" % (args.to, e), file=sys.stderr)
             cw.close()

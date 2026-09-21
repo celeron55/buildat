@@ -1893,10 +1893,36 @@ function M.sub_time(f)
 	end
 end
 
+-- How long the clock packet waited on the way down ([NET_CHANNELS]): the
+-- server stamps it, the two clocks differ by a constant, so the wait is
+-- the excess over the smallest (received - sent) seen; the worst per
+-- five seconds is logged, as the server logs main:where's on the way up
+local time_age = {base = nil, worst = 0, from = 0}
+
 buildat.sub_packet("luanti:time", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	M.time_of_day = tonumber(values[1]) or 0
 	M.time_speed = tonumber(values[2]) or 72
+	local sent = tonumber(values[3])
+	if sent then
+		local now = buildat.get_time_us()
+		local d = now - sent
+		if time_age.base == nil or d < time_age.base then
+			time_age.base = d
+		end
+		local age = d - time_age.base
+		if age > time_age.worst then
+			time_age.worst = age
+		end
+		if time_age.from == 0 then
+			time_age.from = now
+		elseif now - time_age.from >= 5000000 then
+			log:info(string.format("time: the worst wait behind the wire " ..
+					"down in five seconds %d ms", math.floor(time_age.worst / 1000)))
+			time_age.worst = 0
+			time_age.from = now
+		end
+	end
 	for _, f in ipairs(time_subs) do
 		f(M.time_of_day, M.time_speed)
 	end

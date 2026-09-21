@@ -64,7 +64,12 @@ struct Peer
 	// they were sent, and ahead of them the LatestOnly ones by name, one
 	// per name, the newest ([NET_CHANNELS]). out_buf is what is being
 	// written now; a packet moves into it when it drains.
-	std::deque<std::pair<ss_, ss_>> out_queue; // name, packet
+	struct Queued {
+		ss_ name;
+		ss_ packet;
+		bool payload; // a droppable payload, not a definition
+	};
+	std::deque<Queued> out_queue;
 	std::deque<std::pair<ss_, ss_>> out_latest; // name, packet
 	// LatestOnly names with packets still in the ordered queue, and how
 	// many: the definition and the first payload go ordered (send_u), and
@@ -98,8 +103,8 @@ struct Peer
 			out_buf = std::move(out_latest.front().second);
 			out_latest.pop_front();
 		} else if(!out_queue.empty()){
-			out_buf = std::move(out_queue.front().second);
-			auto f = ordered_first.find(out_queue.front().first);
+			out_buf = std::move(out_queue.front().packet);
+			auto f = ordered_first.find(out_queue.front().name);
 			if(f != ordered_first.end() && --f->second == 0)
 				ordered_first.erase(f);
 			out_queue.pop_front();
@@ -110,13 +115,19 @@ struct Peer
 	}
 	// A LatestOnly name's payload replaces an unsent one in the lane. Its
 	// definition (the undroppable packet the stream writes ahead of the
-	// first payload) goes ordered, and so does every payload while any
-	// ordered packet of the name is still queued: at join the queue holds
-	// the client's module files and the scene, and a placement in the lane
-	// overtook them and was read before the client's luanti half had
-	// subscribed -- dropped, never resent ([PLAYER_POS_RACE]).
+	// first payload) goes ordered, and so does the first payload: at join
+	// the queue holds the client's module files, and a placement in the
+	// lane overtook them and was read before the client's luanti half had
+	// subscribed -- dropped, never resent ([PLAYER_POS_RACE]). While they
+	// are queued a newer payload takes the queued one's place -- its spot
+	// behind the modules, not the back of the queue: appended behind the
+	// newest chunks it never caught up over a slow link (the clock waited
+	// 200 s at join over 2 % loss). one_piece: the packet is a single
+	// fragment, so a replacement is one entry; a fragmented payload of a
+	// LatestOnly name goes ordered whole (simplified: none of the three
+	// LatestOnly names fragments in practice).
 	void enqueue(const ss_ &name, const ss_ &packet, bool latest_only,
-			bool droppable)
+			bool droppable, bool one_piece)
 	{
 		if(latest_only && droppable && !ordered_first.count(name)){
 			for(auto &pair : out_latest){
@@ -129,7 +140,17 @@ struct Peer
 			}
 			out_latest.push_back(std::make_pair(name, packet));
 		} else {
-			out_queue.push_back(std::make_pair(name, packet));
+			if(latest_only && droppable && one_piece){
+				for(Queued &q : out_queue){
+					if(q.name == name && q.payload){
+						out_queued_bytes -= q.packet.size();
+						out_queued_bytes += packet.size();
+						q.packet = packet;
+						return;
+					}
+				}
+			}
+			out_queue.push_back(Queued{name, packet, droppable});
 			if(latest_only)
 				ordered_first[name]++;
 		}
@@ -471,7 +492,8 @@ struct Module: public interface::Module, public network::Interface
 				dropping = true;
 				return;
 			}
-			peer.enqueue(name, packet_data, latest_only, droppable);
+			peer.enqueue(name, packet_data, latest_only, droppable,
+					data.size() <= interface::PacketStream::FRAGMENT_BYTES);
 		});
 		// The common case is a peer that is keeping up, and then this writes
 		// the packet and leaves nothing behind

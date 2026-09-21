@@ -5785,6 +5785,12 @@ struct Module: public interface::Module, public luanti::Interface
 					(double)luaL_checknumber(L, i));
 			flat.push_back(buf);
 		}
+		// And when it was sent, the server's clock in microseconds, so
+		// the client can read how long the packet waited behind bulk on
+		// the way down ([NET_CHANNELS]; the up direction is main:where's)
+		char stamp[32];
+		snprintf(stamp, sizeof stamp, "%lld", (long long)interface::os::time_us());
+		flat.push_back(stamp);
 		sv_<ss_> names;
 		for(const auto &pair : self->m_player_peers)
 			names.push_back(pair.first);
