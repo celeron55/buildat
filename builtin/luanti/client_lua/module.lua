@@ -1053,8 +1053,14 @@ local function place_object(id, v, i)
 		node.scale = magic.Vector3(v[i + 4], v[i + 5], v[i + 6])
 	end
 	-- Luanti's rotation is radians and Urho's euler is degrees; a billboard
-	-- turns with the camera and does not care
-	node.rotation = magic.Quaternion(0, math.deg(v[i + 7]), 0)
+	-- turns with the camera and does not care. Luanti's object rotation is
+	-- roll (Z), then pitch (X), then yaw (Y), which is the order Urho's
+	-- euler composes in.
+	-- simplified: the pitch's and roll's signs are taken as the yaw's,
+	-- which draws right; whether Luanti's right-handed object rotation
+	-- flips them is not checked against a shot yet.
+	node.rotation = magic.Quaternion(math.deg(v[i + 8]), math.deg(v[i + 7]),
+			math.deg(v[i + 9]))
 end
 
 buildat.sub_packet("luanti:objects", function(data)
@@ -1065,7 +1071,7 @@ buildat.sub_packet("luanti:objects", function(data)
 	local v = cereal.binary_input(data, {"array", "double"})
 	local t1 = buildat.get_time_us()
 	local seen = {}
-	local STRIDE = 8
+	local STRIDE = 10
 	local i = 1
 	object_build_left_us = OBJECT_BUILD_BUDGET_US
 	objects_deferred = 0

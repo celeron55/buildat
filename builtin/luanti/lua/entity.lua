@@ -3458,6 +3458,10 @@ local function show_objects()
 			v[#v + 1] = sy
 			v[#v + 1] = sz
 			v[#v + 1] = o.rot and o.rot.y or 0
+			-- Pitch and roll too: a minecart shakes, a fish tilts, a
+			-- dead mob lies down (lua_api.md "Coordinate System")
+			v[#v + 1] = o.rot and o.rot.x or 0
+			v[#v + 1] = o.rot and o.rot.z or 0
 			local kind, texture, detail = appearance_of(o)
 			detail = detail or ""
 			-- Whether a ray may hit it: Luanti's pointable. VoxeLibre's
