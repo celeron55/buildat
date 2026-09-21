@@ -473,34 +473,16 @@ end
 -- The quads of one model, grouped by the material they wear, on a node of
 -- their own. Both windings, because a model's is not something to rely on.
 local function build_model(node, quads, textures)
-	local by_group = {}
+	-- The geometry is built in the engine (one geometry per tile, both
+	-- windings), which answers the tiles in geometry order: a skeleton
+	-- built quad by quad from here was 250 ms of sandbox calls, and a
+	-- posed model is one build per frame ([OBJECT_MESH] step 1)
+	local tiles = buildat.set_quad_geometry(node, quads)
 	local order = {}
-	for _, q in ipairs(quads) do
-		local g = q.tile + 1
-		if by_group[g] == nil then
-			by_group[g] = {}
-			order[#order + 1] = g
-		end
-		local into = by_group[g]
-		into[#into + 1] = q
+	for i = 1, #tiles do
+		order[i] = tiles[i] + 1
 	end
-	table.sort(order)
-	local cg = node:CreateComponent("CustomGeometry")
-	cg:SetNumGeometries(#order)
-	for i = 1, #order do
-		cg:BeginGeometry(i - 1, magic.TRIANGLE_LIST)
-		for _, q in ipairs(by_group[order[i]]) do
-			for _, c in ipairs({1, 2, 3, 1, 3, 4, 1, 3, 2, 1, 4, 3}) do
-				local o = (c - 1) * 3
-				cg:DefineVertex(magic.Vector3(q.p[o + 1], q.p[o + 2],
-						q.p[o + 3]))
-				cg:DefineTexCoord(magic.Vector2(q.uv[(c - 1) * 2 + 1],
-						q.uv[(c - 1) * 2 + 2]))
-			end
-		end
-	end
-	cg:Commit()
-	cg.castShadows = false
+	local cg = node:GetComponent("CustomGeometry")
 	local materials = {}
 	for i = 1, #order do
 		local material = magic.Material.new()
@@ -837,14 +819,22 @@ local function parse_look(kind, texture, detail)
 	look.mesh = parts[1]
 	look.size = {1, 1, 1}
 	local i = 1
+	local anim = {}
 	for n in string.gmatch(parts[2] or "", "[^,]+") do
 		if i <= 3 then
 			look.size[i] = tonumber(n) or 1
 		else
-			-- The fourth number is the frame the model is posed at
-			look.frame = tonumber(n)
+			-- The fourth number is the frame the model is posed at; the
+			-- fifth to seventh the animation's last frame, its speed and
+			-- whether it loops ([OBJECT_MESH] step 1)
+			anim[i - 3] = tonumber(n)
 		end
 		i = i + 1
+	end
+	look.frame = anim[1]
+	if anim[1] and anim[2] and anim[2] > anim[1] and (anim[3] or 0) > 0 then
+		look.anim = {first = anim[1], last = anim[2], speed = anim[3],
+				loop = anim[4] ~= 0}
 	end
 	look.textures = {}
 	for j = 3, #parts do
@@ -972,6 +962,48 @@ buildat.sub_packet("luanti:model", function(data)
 	end
 end)
 
+-- The frame an animated object is at, into its look: the pose asked for
+-- is the frame the clock has reached, sampled at up to POSE_RATE poses a
+-- second of animation so that a walk is a handful of poses rather than
+-- one per frame -- each pose is a model asked of the server and a
+-- template built once. The node is rebuilt from the pose's template
+-- by object_node() when the frame changed and its pose has arrived; until
+-- it arrives the last pose stays. Official blends bones per frame; this
+-- steps through poses ([OBJECT_MESH] step 1).
+-- simplified: a pose per sampled frame; the upgrade is the bones and the
+-- keys through Urho3D's AnimatedModel, one build per model.
+local POSE_RATE = 8
+local anim_clock = {}
+local function animate_object(id)
+	local look = object_looks[id]
+	local a = look and look.anim
+	if not a then
+		anim_clock[id] = nil
+		return
+	end
+	local now = buildat.get_time_us() / 1000000
+	local started = anim_clock[id]
+	if not started then
+		started = now
+		anim_clock[id] = now
+	end
+	local length = a.last - a.first + 1
+	local at = (now - started) * a.speed
+	if a.loop then
+		at = at % length
+	elseif at >= length - 1 then
+		at = length - 1
+	end
+	local step = math.max(1, math.floor(a.speed / POSE_RATE + 0.5))
+	local frame = a.first + math.floor(at / step) * step
+	if frame ~= look.frame then
+		want_model(look.mesh, frame)
+		if models[model_key(look.mesh, frame)] then
+			look.frame = frame
+		end
+	end
+end
+
 -- Where one object is now, out of the eight numbers the server sends for
 -- each: the id, the middle of its collision box, the box itself, and its
 -- yaw.
@@ -990,6 +1022,7 @@ local function place_object(id, v, i)
 		end
 		return
 	end
+	animate_object(id)
 	local node = object_node(id)
 	if node == nil then
 		-- Out of this packet's budget; the next one places it
@@ -1051,6 +1084,7 @@ buildat.sub_packet("luanti:objects", function(data)
 			have.node:Remove()
 			object_nodes[id] = nil
 			object_looks[id] = nil
+			anim_clock[id] = nil
 		end
 	end
 end)

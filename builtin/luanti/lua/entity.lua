@@ -3265,7 +3265,10 @@ local function appearance_of(o)
 				tostring(v.x or v[1] or 1) .. "," ..
 				tostring(v.y or v[2] or 1) .. "," ..
 				tostring(v.z or v[3] or v.x or v[1] or 1) ..
-				(o.animation and ("," .. tostring(o.animation.x)) or "")}
+				(o.animation and ("," .. tostring(o.animation.x) .. "," ..
+						tostring(o.animation.y) .. "," ..
+						tostring(o.animation.speed) .. "," ..
+						(o.animation.loop and "1" or "0")) or "")}
 		for _, t in ipairs(textures) do
 			detail[#detail + 1] = t
 		end

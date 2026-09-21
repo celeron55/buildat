@@ -325,6 +325,17 @@ function buildat.safe.set_voxel_lod_geometry(lod, safe_node, safe_buffer, ...)
 	__buildat_set_voxel_lod_geometry(lod, node, buffer, ...)
 end
 
+function buildat.safe.set_quad_geometry(safe_node, quads)
+	if not getmetatable(safe_node) or
+			getmetatable(safe_node).type_name ~= "Node" then
+		error("node is not a sandboxed Node instance")
+	end
+	if type(quads) ~= "table" then
+		error("quads is not a table")
+	end
+	return __buildat_set_quad_geometry(getmetatable(safe_node).unsafe, quads)
+end
+
 function buildat.safe.clear_voxel_geometry(safe_node)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then

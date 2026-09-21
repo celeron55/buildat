@@ -15,6 +15,7 @@
 #include <StaticModel.h>
 #include <Model.h>
 #include <CustomGeometry.h>
+#include <algorithm>
 #include <CollisionShape.h>
 #include <RigidBody.h>
 #define MODULE "lua_bindings"
@@ -673,10 +674,64 @@ ss_ column_heights(const luabind::object &buffer_o,
 	return ss_((const char*)h.data(), h.size() * sizeof(int16_t));
 }
 
+// set_quad_geometry(node, quads) -> {tile, ...}: a model's quads -- a Lua
+// list of {tile=, p={12 numbers}, uv={8 numbers}} -- as the node's
+// CustomGeometry, one geometry per distinct tile in ascending tile order
+// (the answer says which tile each geometry is), both windings of every
+// quad. In C++ because a VoxeLibre skeleton was 250 ms of sandbox calls
+// built quad by quad from Lua, and a posed model is one build per frame
+// ([OBJECT_MESH] step 1).
+luabind::object set_quad_geometry(const luabind::object &node_o,
+		const luabind::object &quads)
+{
+	lua_State *L = node_o.interpreter();
+	GET_TOLUA_STUFF(node, 1, Node);
+	struct Quad { int tile; float p[12]; float uv[8]; };
+	sv_<Quad> all;
+	for(luabind::iterator it(quads), end; it != end; ++it){
+		luabind::object q = *it;
+		Quad quad;
+		quad.tile = luabind::object_cast<int>(q["tile"]);
+		luabind::object p = q["p"], uv = q["uv"];
+		for(int i = 0; i < 12; i++)
+			quad.p[i] = luabind::object_cast<float>(p[i + 1]);
+		for(int i = 0; i < 8; i++)
+			quad.uv[i] = luabind::object_cast<float>(uv[i + 1]);
+		all.push_back(quad);
+	}
+	sv_<int> tiles;
+	for(const Quad &q : all)
+		if(std::find(tiles.begin(), tiles.end(), q.tile) == tiles.end())
+			tiles.push_back(q.tile);
+	std::sort(tiles.begin(), tiles.end());
+	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
+	cg->SetNumGeometries(tiles.size());
+	static const int corners[12] = {0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2};
+	for(size_t g = 0; g < tiles.size(); g++){
+		cg->BeginGeometry(g, TRIANGLE_LIST);
+		for(const Quad &q : all){
+			if(q.tile != tiles[g])
+				continue;
+			for(int c : corners){
+				cg->DefineVertex(Vector3(q.p[c * 3], q.p[c * 3 + 1],
+						q.p[c * 3 + 2]));
+				cg->DefineTexCoord(Vector2(q.uv[c * 2], q.uv[c * 2 + 1]));
+			}
+		}
+	}
+	cg->Commit();
+	cg->SetCastShadows(false);
+	luabind::object out = luabind::newtable(L);
+	for(size_t i = 0; i < tiles.size(); i++)
+		out[i + 1] = tiles[i];
+	return out;
+}
+
 void init_mesh(lua_State *L)
 {
 	using namespace luabind;
 	module(L)[
+			LUABIND_FUNC(set_quad_geometry),
 			LUABIND_FUNC(column_heights),
 			LUABIND_FUNC(set_simple_voxel_model),
 			LUABIND_FUNC(set_8bit_voxel_geometry),
