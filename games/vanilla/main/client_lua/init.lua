@@ -2392,11 +2392,17 @@ local function status_lines(level)
 	-- The server's longest step, held and decayed: what a click has been
 	-- waiting on lately. See [STEP_PEAK] in doc/plan/performance_plan.md.
 	-- Latest/peak in whole milliseconds ([STATUS_MS])
-	local step = string.format("step: %d/%d ms",
-			(info.step_latest or 0) * 1000, (info.step_peak or 0) * 1000)
+	-- Padded to three digits so the row does not bounce: "step:  8/877
+	-- ms", "step:453/1422ms" -- the number takes the space and the "ms"
+	-- one when it needs it, the colon and the slash still delimit
+	local ms = function(latest, peak)
+		local a, b = string.format("%3d", latest * 1000),
+				string.format("%-3d", peak * 1000)
+		return a .. "/" .. b .. (#b > 3 and "ms" or " ms")
+	end
+	local step = "step:" .. ms(info.step_latest or 0, info.step_peak or 0)
 	-- And the client's longest frame beside it ([FRAME_PEAK])
-	local frame = string.format("frame: %d/%d ms",
-			(frame_peak.wall or 0) * 1000, frame_peak.s * 1000)
+	local frame = "frame:" .. ms(frame_peak.wall or 0, frame_peak.s)
 	if level == 1 then
 		return "buildat | " .. game .. " | " .. rmode .. " | " .. step ..
 				" | " .. frame .. " | " .. place
