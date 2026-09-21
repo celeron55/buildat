@@ -20,6 +20,8 @@
 
 local NAME = rawget(_G, "EPISODE_NAME") or "dig"
 local SECONDS = tonumber(rawget(_G, "EPISODE_SECONDS")) or 20
+-- The episodes in the pool, where gravity stays on and the census reads y
+local POOL = {sink = true, swim = true, fall = true}
 local ORIGIN = {x = 0, y = 120, z = 0}
 
 -- The first registered node whose name says what it is: a game's dirt
@@ -87,7 +89,7 @@ local function stamp()
 			data[area:index(ORIGIN.x + x, ORIGIN.y, ORIGIN.z + z)] = cid
 		end
 	end
-	if NAME == "sink" or NAME == "swim" then
+	if POOL[NAME] then
 		-- A pool three deep with dirt walls, the platform its floor, the
 		-- game's own water source ([WATER_PARITY]): what the player's body
 		-- does in it is what is compared
@@ -154,7 +156,7 @@ local function census(player)
 	table.sort(olist)
 	local out = "nodes=" .. table.concat(parts, ",") .. " inv=" ..
 			table.concat(inv, ",") .. " objs=" .. table.concat(olist, ",")
-	if NAME == "sink" or NAME == "swim" then
+	if POOL[NAME] then
 		-- Where the body ended, a tenth of a node coarse, and the breath:
 		-- the pool episodes' measure
 		local p = player:get_pos()
@@ -175,7 +177,7 @@ core.register_on_joinplayer(function(player)
 					ItemStack(dirt .. " 10"))
 		end
 		-- Gravity stays on in the pool: sinking is the measure
-		if NAME ~= "sink" and NAME ~= "swim" then
+		if not POOL[NAME] then
 			player:set_physics_override({gravity = 0})
 		end
 		for id, _ in pairs(player:hud_get_all()) do
@@ -187,7 +189,9 @@ core.register_on_joinplayer(function(player)
 		player:set_look_vertical(math.pi / 2)
 		-- In the pool's middle, a node under the surface, for the pool
 		-- episodes; on the platform otherwise
-		local drop = (NAME == "sink" or NAME == "swim") and 2 or 1
+		-- a node under the surface for sink and swim, four above it for
+		-- the fall in
+		local drop = NAME == "fall" and 8 or (POOL[NAME] and 2 or 1)
 		player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
 		local ent = some_entity()
 		if ent then
