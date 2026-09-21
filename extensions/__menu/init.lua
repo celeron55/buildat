@@ -45,7 +45,7 @@ local ENTRY_HEIGHT = 160
 -- launch_action is -a's kind/name/id: the grid is drawn and that one
 -- action is run on top of it, the way picking its tile would
 function M.boot(launch_action)
-	local root = uistack.main:push("boot")
+	local root = uistack.main:push({desc = "boot"})
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/boot_style.xml")
 	root.defaultStyle = style

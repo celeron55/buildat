@@ -2,6 +2,7 @@
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("ui_utils")
 local magic = require("buildat/extension/urho3d").safe
+local dump = buildat.dump
 local uistack = require("buildat/extension/uistack")
 local M = {safe = {}}
 
@@ -460,6 +461,72 @@ function M.safe.show_notification(text, duration_s)
 				notification = nil
 			end
 		end)
+	end
+end
+
+
+-- The half of `event scan` that reads the UI ([SCAN_EVENT], [FIRST_RUN]):
+-- every element under one, with its kind, its rectangle in window pixels
+-- and its text or image, one line each under the label. A form in the
+-- world and a menu screen give the same lines, so a driver reads both
+-- the same way.
+--
+-- Every rectangle is in window pixels, the coordinates mouse_pos takes:
+-- Urho's UI is laid out in its own units, the window's pixels over
+-- ui:GetScale(), and one conversion here beats every reader knowing
+-- which space a line is in. Clipped to the window, so that the centre of
+-- what is left is a valid mouse position.
+function M.safe.scan_pixels(x, y, w, h)
+	-- The frame's pixels over the root's units: the logical frame in
+	-- a scripted client, whatever the window is ([SEQ_FIXED_SIZE])
+	local ww, wh = buildat.logical_size()
+	local k = ww / math.max(1, magic.ui.root.width)
+	local x0 = math.max(0, math.floor(x * k))
+	local y0 = math.max(0, math.floor(y * k))
+	local x1 = math.min(ww, math.floor((x + w) * k))
+	local y1 = math.min(wh, math.floor((y + h) * k))
+	return x0, y0, math.max(0, x1 - x0), math.max(0, y1 - y0)
+end
+
+function M.safe.scan_ui(label, element, depth, out)
+	local ok, n = pcall(function() return element:GetNumChildren() end)
+	if not ok then
+		return
+	end
+	for i = 0, n - 1 do
+		local child = element:GetChild(i)
+		if child then
+			local kind = child:GetTypeName()
+			local at = child.screenPosition
+			local x, y, w, h = M.safe.scan_pixels(at.x, at.y, child.width, child.height)
+			local line = string.format("scan %s: ui %s%s at %d,%d size %dx%d",
+					label, string.rep("  ", depth), kind, x, y, w, h)
+			if kind == "Text" or kind == "LineEdit" then
+				local okt, text = pcall(function()
+					return child.GetText and child:GetText() or child.text
+				end)
+				if okt and text then
+					line = line .. " text " .. dump(text)
+				end
+			end
+			if kind == "BorderImage" or kind == "Sprite" or
+					kind == "Button" then
+				local okt, name = pcall(function()
+					local tex = child.texture
+					return tex and tex.name or nil
+				end)
+				if okt and name and name ~= "" then
+					line = line .. " image " .. dump(name)
+				elseif not okt then
+					line = line .. " image ? (" .. tostring(name) .. ")"
+				end
+			end
+			if child.visible == false then
+				line = line .. " hidden"
+			end
+			out[#out + 1] = line
+			M.safe.scan_ui(label, child, depth + 1, out)
+		end
 	end
 end
 

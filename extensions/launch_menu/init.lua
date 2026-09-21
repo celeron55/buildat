@@ -371,7 +371,7 @@ end
 -- keyboard selection and no icons to load, and it is one call away if the
 -- icon menu ever needs replacing.
 function M.boot_plain()
-	local root = uistack.main:push("boot")
+	local root = uistack.main:push({desc = "boot"})
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
 	root.defaultStyle = style

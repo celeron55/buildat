@@ -70,7 +70,7 @@ end
 
 local function waiting(message)
 	close()
-	root = uistack.main:push({desc = "vanilla menu"})
+	root = uistack.main:push({desc = "vanilla menu: waiting"})
 	local menu = ui_utils.vertical_menu(root, {min_width = 420})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	local text = menu.window:CreateChild("Text")
@@ -178,7 +178,7 @@ end
 function draw(saves, save_games)
 	last_saves, last_save_games = saves, save_games
 	close()
-	root = uistack.main:push({desc = "vanilla menu"})
+	root = uistack.main:push({desc = "vanilla menu: saves"})
 	local menu = ui_utils.vertical_menu(root, {min_width = 420})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 
@@ -312,7 +312,7 @@ end
 -- found with a line each, and both can go back to the save list.
 local function import_menu(title)
 	close()
-	root = uistack.main:push({desc = "vanilla menu"})
+	root = uistack.main:push({desc = "vanilla menu: " .. title})
 	local menu = ui_utils.vertical_menu(root, {min_width = 420})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	local text = menu.window:CreateChild("Text")

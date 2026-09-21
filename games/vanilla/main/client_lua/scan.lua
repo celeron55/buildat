@@ -20,22 +20,10 @@ local STEP = 0.25
 return function(ctx)
 	local log = ctx.log
 
-	-- Every rectangle here is in window pixels, the coordinates mouse_pos
-	-- takes: Urho's UI is laid out in its own units, the window's pixels
-	-- over ui:GetScale(), and one conversion here beats every reader
-	-- knowing which space a line is in. Clipped to the window, so that
-	-- the centre of what is left is a valid mouse position.
-	local function pixels(x, y, w, h)
-		-- The frame's pixels over the root's units: the logical frame in
-		-- a scripted client, whatever the window is ([SEQ_FIXED_SIZE])
-		local ww, wh = buildat.logical_size()
-		local k = ww / math.max(1, magic.ui.root.width)
-		local x0 = math.max(0, math.floor(x * k))
-		local y0 = math.max(0, math.floor(y * k))
-		local x1 = math.min(ww, math.floor((x + w) * k))
-		local y1 = math.min(wh, math.floor((y + h) * k))
-		return x0, y0, math.max(0, x1 - x0), math.max(0, y1 - y0)
-	end
+	-- The rectangles and the UI walk are ui_utils' ([FIRST_RUN]: the menus
+	-- give the same lines)
+	local ui_utils = require("buildat/extension/ui_utils")
+	local pixels, ui = ui_utils.scan_pixels, ui_utils.scan_ui
 
 	local function ray(p0, dir)
 		local last = nil
@@ -59,45 +47,6 @@ return function(ctx)
 			end
 		end
 		return nil, nil, nil, through
-	end
-
-	local function ui(label, element, depth, out)
-		local ok, n = pcall(function() return element:GetNumChildren() end)
-		if not ok then
-			return
-		end
-		for i = 0, n - 1 do
-			local child = element:GetChild(i)
-			if child then
-				local kind = child:GetTypeName()
-				local at = child.screenPosition
-				local x, y, w, h = pixels(at.x, at.y, child.width, child.height)
-				local line = string.format("scan %s: ui %s%s at %d,%d size %dx%d",
-						label, string.rep("  ", depth), kind, x, y, w, h)
-				if kind == "Text" or kind == "LineEdit" then
-					local okt, text = pcall(function()
-						return child.GetText and child:GetText() or child.text
-					end)
-					if okt and text then
-						line = line .. " text " .. buildat.dump(text)
-					end
-				end
-				if kind == "BorderImage" or kind == "Sprite" or
-						kind == "Button" then
-					local okt, name = pcall(function()
-						local tex = child.texture
-						return tex and tex.name or nil
-					end)
-					if okt and name and name ~= "" then
-						line = line .. " image " .. buildat.dump(name)
-					elseif not okt then
-						line = line .. " image ? (" .. tostring(name) .. ")"
-					end
-				end
-				out[#out + 1] = line
-				ui(label, child, depth + 1, out)
-			end
-		end
 	end
 
 	-- `event scan_volume <radius> <label>`: the voxels around the player,
