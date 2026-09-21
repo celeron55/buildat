@@ -66,7 +66,10 @@ int log_get_max_level()
 void log_set_file(const char *path, bool tee_)
 {
 	log_mutex.lock();
-	file = fopen(path, "a");
+	// Binary, so that a Windows log is the same bytes as a Linux one: in
+	// text mode msvcrt writes \r\n and a reader of the file sees a \r on
+	// every line ([WIN8_START] 12)
+	file = fopen(path, "ab");
 	tee = tee_;
 	if(file){
 		fprintf(stderr, "Opened log file \"%s\"\n", path);

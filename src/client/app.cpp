@@ -2541,6 +2541,10 @@ struct CApp: public App, public magic::Application
 		ss_ line;
 		while(std::getline(f, line)){
 			g_local_server_log_offset += line.size() + 1;
+			// A log written on Windows ends its lines in \r\n, and the
+			// status read as "Listening\r" never matched ([WIN8_START] 12)
+			if(!line.empty() && line[line.size() - 1] == '\r')
+				line.erase(line.size() - 1);
 			const size_t at = line.find("STATUS ");
 			if(at != ss_::npos){
 				g_local_server_status = line.substr(at + 7);
@@ -2595,6 +2599,8 @@ struct CApp: public App, public magic::Application
 		std::deque<ss_> lines;
 		ss_ line;
 		while(f.good() && std::getline(f, line)){
+			if(!line.empty() && line[line.size() - 1] == '\r')
+				line.erase(line.size() - 1);
 			// The dialog does not wrap, and a file list can be a
 			// thousand characters: the line's start is the part that
 			// says what it was

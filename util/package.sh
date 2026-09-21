@@ -147,12 +147,17 @@ smoke_test_wine() {
 	# With TEMP and TMP unset, as a desktop with nothing set ([WIN_TMP]);
 	# Wine gives its own from the registry, so this proves less than a
 	# desktop does, and the desktop is the done-when
+	rm -f "$unpacked"/cache/rccpp_build/client_file*
 	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		"$wine" bin/buildat_server.exe -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
 	wait_for_vanilla "$dir/srv.log" "$srv" "smoke test under Wine" || {
 		kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null || true; exit 1; }
+	if ! grep -q "STATUS Compiling client_file" "$dir/srv.log"; then
+		echo "smoke test under Wine: the shipped compiler built nothing (client_file was taken out of the cache)" >&2
+		"$wine"server -k 2>/dev/null || true; exit 1
+	fi
 	# And the client, on the virtual display through Wine's GL, which is
 	# software rendering; what it has to have done is what the Linux smoke
 	# asks: joined, drawn a chunk, run its commands to the end
@@ -241,6 +246,18 @@ make_one() {
 		# To stderr: this function's stdout is the archive's path
 		echo "toolchain:" >&2; sed 's/^/  /' "$stage/bin/TOOLCHAIN" >&2
 	fi
+	# The builtin modules compiled into the archive ([PRECOMPILED]): a
+	# portable archive carries its cache, and a module's output is named
+	# by the sha1 of its source, includes and flags, so a cache filled
+	# here is used as is on the box -- a cold start was 114 s of
+	# compiling there. The staged tree's own server, on the shipped
+	# compiler (under Wine for the Windows one), with games/vanilla and
+	# the minimal game, until it listens; then everything but
+	# rccpp_build/ goes out of the cache again. The smoke keeps the
+	# compiler's proof by building one module (see there).
+	case "$name" in
+		*portable*|*win64*) prebuild_modules "$stage" "$name" >&2 || return 1 ;;
+	esac
 	case "$name" in
 		*win64*)
 			(cd "$stage/.." && rm -f "$out/$name.zip" && zip -qr "$out/$name.zip" "$name")
@@ -249,6 +266,60 @@ make_one() {
 			tar -C "$stage/.." -czf "$out/$name.tar.gz" "$name"
 			echo "$out/$name.tar.gz" ;;
 	esac
+}
+
+prebuild_modules() {
+	local stage="$1" name="$2"
+	local port=$(( 29700 + (RANDOM % 90) ))
+	local log="$stage/../prebuild-$name.log"
+	local srv wine=""
+	case "$name" in
+		*win64*)
+			if ! command -v wine64 >/dev/null 2>&1 && ! command -v wine >/dev/null 2>&1; then
+				echo "prebuild: no wine here; the Windows archive ships no compiled modules"
+				return 0
+			fi
+			wine=$(command -v wine64 || command -v wine)
+			export WINEDEBUG=-all WINEPREFIX="$stage/../wine-prebuild"
+			(cd "$stage" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
+				"$wine" bin/buildat_server.exe -m games/vanilla -P "$port" -l 3 > "$log" 2>&1) &
+			;;
+		*)
+			(cd "$stage" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
+				bin/buildat_server -m games/vanilla -P "$port" -l 3 > "$log" 2>&1) &
+			;;
+	esac
+	srv=$!
+	echo "prebuild: compiling the builtin modules into the archive's cache ($log)"
+	if ! wait_for_line "$log" "$srv" "Listening at" 900; then
+		echo "prebuild: the server did not listen; its log's end:"
+		tail -20 "$log"
+		kill -9 "$srv" 2>/dev/null
+		return 1
+	fi
+	if grep -q "Failed to build module" "$log"; then
+		echo "prebuild: a module failed to build:"; grep "Failed to build" "$log"
+		kill -9 "$srv" 2>/dev/null
+		return 1
+	fi
+	kill -INT "$srv" 2>/dev/null || true
+	local i
+	for i in $(seq 1 30); do
+		kill -0 "$srv" 2>/dev/null || break
+		sleep 1
+	done
+	kill -9 "$srv" 2>/dev/null || true; wait "$srv" 2>/dev/null || true
+	[ -n "$wine" ] && { "$wine"server -k 2>/dev/null || true; rm -rf "$stage/../wine-prebuild"; }
+	# Only the built modules stay: no logs, no compile output, no save
+	find "$stage/cache" -mindepth 1 -maxdepth 1 ! -name rccpp_build -exec rm -rf {} +
+	rm -f "$stage"/cache/rccpp_build/*.compile.log
+	rm -rf "$stage/user/games/vanilla/saves/prebuild"
+	rm -f "$stage"/user/luanti/launcher.json
+	local n
+	n=$(ls "$stage"/cache/rccpp_build/ 2>/dev/null | grep -c "\.\(so\|dll\)$" || true)
+	echo "prebuild: $n modules in the archive's cache"
+	[ "$n" -gt 0 ] || { echo "prebuild: nothing was built"; return 1; }
+	return 0
 }
 
 # What both smoke tests wait for from the server ([WIN_MAPGEN_BUILD]):
@@ -372,6 +443,9 @@ smoke_test() {
 	unpacked=$(ls -d "$dir"/*/ | head -1)
 	local port=$(( 29600 + (RANDOM % 90) ))
 	echo "smoke test in $unpacked"
+	# The compiler's proof with a prebuilt cache ([PRECOMPILED]): one
+	# module's output taken out, so the start has to build it
+	rm -f "$unpacked"/cache/rccpp_build/client_file*
 	(cd "$unpacked" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		bin/buildat_server -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
@@ -381,6 +455,10 @@ smoke_test() {
 	# joins once the server listens and the world is there
 	wait_for_vanilla "$dir/srv.log" "$srv" "smoke test" || {
 		kill -9 "$srv" 2>/dev/null; exit 1; }
+	if ! grep -q "STATUS Compiling client_file" "$dir/srv.log"; then
+		echo "smoke test: the shipped compiler built nothing (client_file was taken out of the cache)" >&2
+		kill -9 "$srv" 2>/dev/null; exit 1
+	fi
 	sleep 5
 	printf 'delay 25000\nscreenshot %s/shot.png\nquit\n' "$dir" > "$dir/cmds.txt"
 	# Software GL where there is no GPU (the container); harmless with one
