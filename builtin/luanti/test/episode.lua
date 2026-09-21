@@ -21,7 +21,7 @@
 local NAME = rawget(_G, "EPISODE_NAME") or "dig"
 local SECONDS = tonumber(rawget(_G, "EPISODE_SECONDS")) or 20
 -- The episodes in the pool, where gravity stays on and the census reads y
-local POOL = {sink = true, swim = true, fall = true}
+local POOL = {sink = true, swim = true, fall = true, dive = true}
 local ORIGIN = {x = 0, y = 120, z = 0}
 
 -- The first registered node whose name says what it is: a game's dirt

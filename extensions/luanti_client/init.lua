@@ -143,8 +143,9 @@ local BINDINGS = {
 	{action = "left", key = KEY_A, name = "A", what = "Walk left"},
 	{action = "right", key = KEY_D, name = "D", what = "Walk right"},
 	{action = "jump", key = KEY_SPACE, name = "Space", what = "Jump"},
-	{action = "sneak", key = KEY_CTRL, name = "Ctrl", what = "Sneak"},
-	{action = "fast", key = KEY_SHIFT, name = "Shift", what = "Move fast"},
+	-- The same keys as games/vanilla's, so one scripted episode drives both
+	{action = "sneak", key = KEY_SHIFT, name = "Shift", what = "Sneak"},
+	{action = "fast", key = KEY_CTRL, name = "Ctrl", what = "Move fast"},
 	{action = "fly", key = KEY_K, name = "K", what = "Fly on and off"},
 	{action = "noclip", key = KEY_H, name = "H",
 			what = "Through walls on and off"},

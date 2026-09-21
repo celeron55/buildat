@@ -51,7 +51,11 @@ fall)
 	# Nothing pressed, from four nodes above the surface: the fall into
 	# the water, its entry and where the body is by the census
 	{ echo "look 0 0"; } > "$out/cmds.txt" ;;
-*) echo "unknown episode $EPISODE (dig, place, sink, swim, fall)" >&2; exit 2 ;;
+dive)
+	# Sneak held through the census: swimming down, and where the body is
+	# held against the floor
+	{ echo "look 0 0"; echo "keydown Shift"; echo "delay 30000"; echo "keyup Shift"; } > "$out/cmds.txt" ;;
+*) echo "unknown episode $EPISODE (dig, place, sink, swim, fall, dive)" >&2; exit 2 ;;
 esac
 
 { echo "rawset(_G, \"EPISODE_NAME\", \"$EPISODE\")"
