@@ -6451,7 +6451,11 @@ struct Module: public interface::Module, public luanti::Interface
 		// the quads under the right key
 		const ss_ frame_s = asked.size() > 1 ? asked[1] : "";
 		const float frame = frame_s.empty() ? -1.0f : (float)atof(frame_s.c_str());
-		sv_<ss_> flat{name, frame_s};
+		// The quads as doubles, 21 a quad -- the tile, four corners, four
+		// texture coordinates -- after the name and the frame: as strings
+		// a pose was 40 KB and 80 ms of the client's Lua to read, and a
+		// walking mob is one pose after another ([OBJECT_MESH] step 1)
+		sv_<double> nums;
 		{
 			interface::MutexScope ms(m_lua_mutex);
 			// Scale 1: an object's model is scaled by its visual_size,
@@ -6459,35 +6463,27 @@ struct Module: public interface::Module, public luanti::Interface
 			// for two objects of one kind
 			const sv_<interface::VoxelQuad> quads = mesh_quads(name, 1.0f,
 					frame);
-			flat.reserve(2 + quads.size() * 21);
-			char buf[32];
+			nums.reserve(quads.size() * 21);
 			for(const interface::VoxelQuad &q : quads){
-				snprintf(buf, sizeof buf, "%d", (int)q.tile);
-				flat.push_back(buf);
-				for(size_t c = 0; c < 4; c++){
-					for(size_t k = 0; k < 3; k++){
-						snprintf(buf, sizeof buf, "%g", q.p[c][k]);
-						flat.push_back(buf);
-					}
-				}
-				for(size_t c = 0; c < 4; c++){
-					for(size_t k = 0; k < 2; k++){
-						snprintf(buf, sizeof buf, "%g", q.uv[c][k]);
-						flat.push_back(buf);
-					}
-				}
+				nums.push_back((double)q.tile);
+				for(size_t c = 0; c < 4; c++)
+					for(size_t k = 0; k < 3; k++)
+						nums.push_back(q.p[c][k]);
+				for(size_t c = 0; c < 4; c++)
+					for(size_t k = 0; k < 2; k++)
+						nums.push_back(q.uv[c][k]);
 			}
 		}
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
-			ar(flat);
+			ar(name, frame_s, nums);
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(packet.sender, "luanti:model", os.str());
 		});
 		log_v(MODULE, "C%zu: model \"%s\": %zu quads", (size_t)packet.sender,
-				cs(name), (flat.size() - 1) / 21);
+				cs(name), nums.size() / 21);
 	}
 
 	// How long a dig takes and how far a tool reaches, which the client

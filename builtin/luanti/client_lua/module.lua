@@ -920,21 +920,27 @@ end)
 local form_model_arrived
 
 buildat.sub_packet("luanti:model", function(data)
-	local values = cereal.binary_input(data, {"array", "string"})
-	local name = values[1]
-	if name == nil then
+	local values = cereal.binary_input(data, {"object",
+		{"name", "string"},
+		{"frame", "string"},
+		{"nums", {"array", "double"}},
+	})
+	local name = values.name
+	if name == nil or name == "" then
 		return
 	end
-	-- The frame it was asked posed at rides second; the quads follow
-	name = model_key(name, tonumber(values[2]))
+	-- The frame it was asked posed at rides second; the quads follow as
+	-- 21 numbers each
+	name = model_key(name, tonumber(values.frame))
+	local nums = values.nums
 	local quads = {}
-	for i = 3, #values - 20, 21 do
-		local q = {tile = tonumber(values[i]) or 0, p = {}, uv = {}}
+	for i = 1, #nums - 20, 21 do
+		local q = {tile = nums[i], p = {}, uv = {}}
 		for j = 1, 12 do
-			q.p[j] = tonumber(values[i + j]) or 0
+			q.p[j] = nums[i + j]
 		end
 		for j = 1, 8 do
-			q.uv[j] = tonumber(values[i + 12 + j]) or 0
+			q.uv[j] = nums[i + 12 + j]
 		end
 		quads[#quads + 1] = q
 	end
