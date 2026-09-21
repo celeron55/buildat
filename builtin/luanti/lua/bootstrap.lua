@@ -2157,7 +2157,6 @@ local STUBS_NIL = {
 	-- compare_block_status are below
 	-- line_of_sight and raycast are in lua/raycast.lua
 	"find_path",
-	"get_node_max_level", "get_node_level", "set_node_level", "add_node_level",
 	"fix_light",
 	-- get_heat, get_humidity, get_biome_data, get_biome_id and
 	-- get_biome_name are above core.__mapgen_biomes()
@@ -2855,6 +2854,86 @@ end
 -- as the server runs and no longer. Worth knowing before building on it.
 
 local node_meta = {}
+
+-- A node's level: MapNode::getLevel and friends in official's mapnode.cpp
+-- -- a source is 8, a flowing liquid its param2's low three bits, a
+-- leveled node its param2's low seven, else the definition's leveled
+-- (capped by leveled_max); set_node_level answers the rest that did not
+-- fit, as official does ([FEATURE_SWEEP], nodecore reaches these)
+local LEVELED_MASK = 127
+local function level_def(pos)
+	local node = core.get_node(pos)
+	return node, core.registered_nodes[node.name] or {}
+end
+
+function core.get_node_max_level(pos)
+	local _, def = level_def(pos)
+	if def.liquidtype == "flowing" or def.paramtype2 == "flowingliquid" then
+		return 7
+	end
+	if (def.leveled and def.leveled ~= 0) or def.paramtype2 == "leveled" then
+		return def.leveled_max or 127
+	end
+	return 0
+end
+
+function core.get_node_level(pos)
+	local node, def = level_def(pos)
+	if def.liquidtype == "source" then
+		return 8
+	end
+	if def.paramtype2 == "flowingliquid" or def.liquidtype == "flowing" then
+		return node.param2 % 8
+	end
+	if def.paramtype2 == "leveled" then
+		local level = node.param2 % 128
+		if level ~= 0 then
+			return level
+		end
+	end
+	local leveled = def.leveled or 0
+	local max = def.leveled_max or 127
+	return leveled > max and max or leveled
+end
+
+function core.set_node_level(pos, level)
+	level = math.floor(tonumber(level) or 1)
+	local node, def = level_def(pos)
+	local rest = 0
+	if def.paramtype2 == "flowingliquid" or def.liquidtype == "flowing" or
+			def.liquidtype == "source" then
+		if level <= 0 then
+			core.set_node(pos, {name = "air"})
+			return 0
+		end
+		if level >= 8 then
+			rest = level - 8
+			core.set_node(pos, {name = def.liquid_alternative_source or node.name,
+					param1 = node.param1, param2 = 0})
+		else
+			core.set_node(pos, {name = def.liquid_alternative_flowing or node.name,
+					param1 = node.param1,
+					param2 = level % 8 + (node.param2 - node.param2 % 8)})
+		end
+	elseif def.paramtype2 == "leveled" then
+		local max = def.leveled_max or 127
+		if level < 0 then
+			rest = level
+			level = 0
+		elseif level > max then
+			rest = level - max
+			level = max
+		end
+		core.set_node(pos, {name = node.name, param1 = node.param1,
+				param2 = level % 128 + (node.param2 - node.param2 % 128)})
+	end
+	return rest
+end
+
+function core.add_node_level(pos, level)
+	return core.set_node_level(pos, core.get_node_level(pos) +
+			math.floor(tonumber(level) or 1))
+end
 
 local function pos_key(x, y, z)
 	return x .. "," .. y .. "," .. z

@@ -289,22 +289,30 @@ local pitch = 0
 -- Whether the mouse turns the player's head or points at the screen. In the
 -- world while playing, on the screen while a form is open or Tab says so.
 local mouse_in_world = false
-
--- reason: a word for the log ([FOCUS_LOG]), which is where a lost mouse
--- is read from
-local function set_mouse_in_world(enable, reason)
-	mouse_in_world = enable
-	magic.input:SetMouseVisible(not enable, reason or "set_mouse_in_world")
-end
+local set_mouse_in_world
 
 -- A form is clicked with the pointer, so while one is open the mouse is on
--- the screen and not in the world, and it goes back where it was when the
--- form goes. **Which form it is does not matter**: the server opens one by
--- itself -- a sign, a chest, /help -- and the keys here are not in it, so
--- the state is followed rather than set at the places that open one.
+-- the screen and not in the world, and it goes back where it was wanted
+-- when the form goes. **Which form it is does not matter**: the server
+-- opens one by itself -- a sign, a chest, /help -- and the keys here are
+-- not in it, so the state is followed rather than set at the places that
+-- open one. What is wanted is kept apart from what is: a placement that
+-- asks for the world while a form is open (nodecore opens one at the
+-- join) gets it when the form closes, rather than the form's close
+-- putting back what was before it opened.
 do
 	local was_open = false
-	local before = false
+	local wanted = false
+	-- reason: a word for the log ([FOCUS_LOG]), which is where a lost
+	-- mouse is read from
+	set_mouse_in_world = function(enable, reason)
+		wanted = enable
+		if enable and luanti.form_open() then
+			return
+		end
+		mouse_in_world = enable
+		magic.input:SetMouseVisible(not enable, reason or "set_mouse_in_world")
+	end
 	magic.SubscribeToEvent("Update", function()
 		local open = luanti.form_open()
 		if open == was_open then
@@ -312,10 +320,11 @@ do
 		end
 		was_open = open
 		if open then
-			before = mouse_in_world
-			set_mouse_in_world(false, "a form opened")
+			mouse_in_world = false
+			magic.input:SetMouseVisible(true, "a form opened")
 		else
-			set_mouse_in_world(before, "the form closed")
+			mouse_in_world = wanted
+			magic.input:SetMouseVisible(not wanted, "the form closed")
 		end
 	end)
 end
@@ -3285,7 +3294,11 @@ menu_fields = function(fields)
 		-- The editor, the same screen the launcher's settings draw; the
 		-- pause menu comes back when it is left
 		luanti.close_form()
+		-- The mouse on the screen for the editor, and back in the world
+		-- when the pause menu returns (its own form takes it again)
+		set_mouse_in_world(false, "the key bindings")
 		keys.draw(function()
+			set_mouse_in_world(true, "the key bindings closed")
 			luanti.show_local_form(pause_spec(), menu_fields)
 		end)
 	elseif fields.back then
