@@ -2157,7 +2157,6 @@ local STUBS_NIL = {
 	-- compare_block_status are below
 	-- line_of_sight and raycast are in lua/raycast.lua
 	"find_path",
-	"fix_light",
 	-- get_heat, get_humidity, get_biome_data, get_biome_id and
 	-- get_biome_name are above core.__mapgen_biomes()
 	"get_meta", "get_node_metadata",
@@ -2854,6 +2853,19 @@ end
 -- as the server runs and no longer. Worth knowing before building on it.
 
 local node_meta = {}
+
+-- core.fix_light(pos1, pos2) -> true: the light in the box worked out again
+-- now, ahead of the tick's own relight queue (which a flooding ocean keeps
+-- long); Luanti's is the same call over the map. The write buffer first,
+-- so what was just set is what is lit.
+function core.fix_light(pos1, pos2)
+	local x1, y1, z1 = to_pos(pos1)
+	local x2, y2, z2 = to_pos(pos2)
+	__get_node(x1, y1, z1) -- flushes the writes before the relight
+	__luanti_relight(math.min(x1, x2), math.min(y1, y2), math.min(z1, z2),
+			math.max(x1, x2), math.max(y1, y2), math.max(z1, z2))
+	return true
+end
 
 -- A node's level: MapNode::getLevel and friends in official's mapnode.cpp
 -- -- a source is 8, a flowing liquid its param2's low three bits, a

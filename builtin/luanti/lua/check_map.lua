@@ -521,8 +521,10 @@ local function check_light()
 	local beside = {x = LIGHT_AT.x + 1, y = LIGHT_AT.y, z = LIGHT_AT.z}
 	local further = {x = LIGHT_AT.x + 2, y = LIGHT_AT.y + 1, z = LIGHT_AT.z}
 	-- The room's relight is a tick's work under the tick's budget, and
-	-- the liquids flooding a fresh world's caves keep that queue busy
-	-- ([LIQUID_FLOW]): a few steps, as for the lamp below
+	-- the liquids flooding a fresh world's caves keep that queue long
+	-- ([LIQUID_FLOW]): the room's box relit now, then a few steps for
+	-- what the flood may still carry into it
+	core.fix_light(LIGHT_MIN, LIGHT_MAX)
 	local dark = core.get_node_light(beside)
 	for _ = 1, 50 do
 		if dark ~= nil and dark == 0 then
