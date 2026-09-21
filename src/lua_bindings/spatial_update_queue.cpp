@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "lua_bindings/util.h"
 #include "core/log.h"
+#include "interface/os.h"
 #include <tolua++.h>
 #include <Vector3.h>
 #include <cassert>
@@ -68,6 +69,8 @@ struct SpatialUpdateQueue
 
 	Vector3 m_p;
 	Vector3 m_queue_oldest_p;
+	int64_t m_sort_started_us = 0;
+	bool m_sort_moved = false;
 	Queue m_queue;
 	// Iterators into m_queue by value, so that an item can be found and
 	// replaced without walking the queue
@@ -106,13 +109,29 @@ struct SpatialUpdateQueue
 		// stale for good when the camera settled back where the sort
 		// began ([MISSING_CHUNK]: a chunk 39 away queued as 466 away,
 		// its f from the viewpoint before the teleport, never due).
-		if((m_p - m_queue_oldest_p).Length() > 20){
+		// -- but not every frame: a camera in free fall (the box with no
+		// ground under the player, [WIN_WORLD]) moved 20 in a few frames,
+		// and a sort of 3500 items at a hundred a frame restarted before
+		// it ever finished, so nothing was ever due. A sort in progress
+		// runs for at least a second; the move is seen when it is done.
+		// A move seen during that second is remembered, and the sort is
+		// done again once drained even when the camera has settled back
+		// where it began (the vp5 bounce, [MISSING_CHUNK]).
+		const int64_t now = interface::os::time_us();
+		const bool moved = (m_p - m_queue_oldest_p).Length() > 20;
+		if(moved && !m_old_queue.empty() && now - m_sort_started_us <= 1000000){
+			m_sort_moved = true;
+			return;
+		}
+		if(moved || (m_sort_moved && m_old_queue.empty())){
 			m_old_queue.reserve(m_old_queue.size() + m_queue.size());
 			for(auto &pair : m_queue)
 				m_old_queue.push_back(pair.second);
 			m_queue.clear();
 			m_index.clear();
 			m_queue_oldest_p = m_p;
+			m_sort_started_us = now;
+			m_sort_moved = false;
 		}
 	}
 
@@ -299,8 +318,11 @@ static void self_check()
 		assert(q.get_length() == 2);
 		assert(q.get_value().node_id == 2); // Now the near one
 	}
-	// A move in the middle of a sort restarts it: what was re-put against
-	// the position the sort began at is re-put again ([MISSING_CHUNK])
+	// A move in the middle of a sort does not restart it within the
+	// sort's first second (a falling camera restarted it every few
+	// frames, [WIN_WORLD]); once the old queue is drained the move is
+	// seen and the re-put against the old position is re-put again
+	// ([MISSING_CHUNK])
 	{
 		SpatialUpdateQueue q;
 		q.set_p(Vector3(0, 0, 0));
@@ -311,11 +333,15 @@ static void self_check()
 		q.set_p(Vector3(500, 0, 0));
 		q.update(1); // One re-put against 500
 		assert(q.get_length() == 1);
-		q.set_p(Vector3(0, 0, 0)); // Back, mid-sort
-		assert(q.empty()); // The one re-put is waiting again
+		q.set_p(Vector3(0, 0, 0)); // Back, mid-sort: the sort goes on
+		assert(q.get_length() == 1);
+		q.update(10); // Drained, against 500 -- and 0 for the rest
+		assert(q.get_length() == 2);
+		q.set_p(Vector3(500, 0, 0)); // Settled where the sort began: the
+		assert(q.empty());           // move seen meanwhile is still a sort
 		q.update(10);
 		assert(q.get_length() == 2);
-		assert(q.get_value().node_id == 1); // Near again, and due
+		assert(q.get_value().node_id == 2); // The near one at 500, and due
 		assert(q.get_f() <= 1.0f);
 	}
 }

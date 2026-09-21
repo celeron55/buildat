@@ -192,6 +192,17 @@ else
 fi
 grep "^drive: FAILED" "$out/drive.log" | sed 's/^drive: /FAIL: drive: /' >&2
 grep -q "^drive: FAILED" "$out/drive.log" && status=1
+# The chunks around the player must get drawn ([WIN_WORLD]): the client's
+# settle line, once a second while anything is queued, must not read the
+# same "N undrawn within 2" above zero for thirty lines running. Not "to
+# mesh": that count holds every chunk's LOD trigger for good and reads
+# thousands on an idle client by design.
+frozen=$(grep -a "settle: .* undrawn within 2" "$out/cli.log" | sed 's/.*, \([0-9]*\) undrawn within 2.*/\1/' |
+	awk '$1 > 0 && $1 == last {run++; if (run >= 30 && !said) {print $1; said=1}} $1 != last {run=1; last=$1}')
+if [ -n "$frozen" ]; then
+	echo "FAIL: $frozen chunks around the player stayed undrawn for thirty seconds" >&2
+	status=1
+fi
 grep "^drive: GOAL" "$out/drive.log" | sed 's/^drive: //'
 grep -q "^drive: GOAL .* not met" "$out/drive.log" && status=1
 echo "turns: $(grep -c "^drive: turn .* rule" "$out/drive.log"), rules: $(
