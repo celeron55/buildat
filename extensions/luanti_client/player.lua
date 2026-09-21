@@ -251,6 +251,7 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		vx = 0, vy = 0, vz = 0,
 		on_ground = false,
 		in_liquid = false,
+		in_liquid_stable = false,
 		-- Whether a ladder or a vine is holding the player up; see
 		-- is_climbable and the vertical part of update()
 		climbing = false,
@@ -321,6 +322,12 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		local ly = self.y + (self.in_liquid and 0.1 or 0.5)
 		local lny = math.floor(ly + 0.5)
 		self.in_liquid = is_liquid ~= nil and is_liquid(nx, lny, nz) or false
+		-- And the stable one, the node at the feet: what the sneak, the
+		-- crouch speed and the slip read, so that a body standing in
+		-- shallow water descends by sneak and walks at the walk
+		self.in_liquid_stable = is_liquid ~= nil and
+				is_liquid(nx, math.floor(self.y + 0.5), nz) or false
+		local wet = self.in_liquid or self.in_liquid_stable
 		-- A ladder is climbed from the node half a node above the feet or
 		-- the one a fifth below them, which is how a player on the bottom
 		-- rung holds on and how the top of one is left
@@ -357,7 +364,7 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		local speed = m.speed_walk * (ov.speed_walk or 1)
 		if wish.fast then
 			speed = m.speed_fast * (ov.speed_fast or 1)
-		elseif wish.sneak and not free_move and not self.in_liquid and
+		elseif wish.sneak and not free_move and not wet and
 				(ov.sneak or 1) ~= 0 then
 			speed = m.speed_crouch * (ov.speed_crouch or 1)
 		end
@@ -398,7 +405,7 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		-- Ice: the horizontal acceleration, towards a key and towards a
 		-- stop alike, is a fraction 1/(slippery+1), twice as slippery
 		-- with no key held (LocalPlayer::getSlipFactor)
-		if slippery >= 1 and not free_move and not self.in_liquid then
+		if slippery >= 1 and not free_move and not wet then
 			if len == 0 then
 				slippery = slippery * 2
 			end
@@ -447,6 +454,10 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			elseif wish.sneak and not wish.jump and not no_descend then
 				target_v, swimming = -speed, true
 			end
+		elseif self.in_liquid_stable and wish.sneak and not wish.jump and
+				not no_descend then
+			-- Feet in it, the read above it out: the sneak still descends
+			target_v, swimming = -speed, true
 		end
 		if target_v ~= nil then
 			self.vy = approach(self.vy, target_v, max_v)
