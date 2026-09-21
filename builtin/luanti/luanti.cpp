@@ -978,6 +978,9 @@ struct Module: public interface::Module, public luanti::Interface
 	bool m_glass_edge_materials_exhausted = false;
 	// See rail_connect_group()
 	sm_<int, uint8_t> m_rail_connect_groups;
+	// The same ids for a "connected" node box's groups, by the group's
+	// name ("fence", "pane"); rails and these share the 31
+	sm_<ss_, uint8_t> m_named_connect_groups;
 	uint32_t m_next_rail_connect_group = FENCE_CONNECT_GROUP + 1;
 	bool m_rail_connect_groups_exhausted = false;
 	// See liquid_shape_group()
@@ -3975,6 +3978,23 @@ struct Module: public interface::Module, public luanti::Interface
 	// One family per raillike group, because a rail reaches the rails of its
 	// own group and no others. Fences have group 1; a connect group is five
 	// bits of a thirty-two bit mask, so there are thirty-one left.
+	uint8_t named_connect_group(const ss_ &name)
+	{
+		auto it = m_named_connect_groups.find(name);
+		if(it != m_named_connect_groups.end())
+			return it->second;
+		uint8_t id = 32;
+		if(m_next_rail_connect_group <= 32){
+			id = (uint8_t)m_next_rail_connect_group++;
+		} else if(!m_rail_connect_groups_exhausted){
+			m_rail_connect_groups_exhausted = true;
+			log_w(MODULE, "More than 31 connect groups; the rest share one "
+					"and connect to each other");
+		}
+		m_named_connect_groups[name] = id;
+		return id;
+	}
+
 	uint8_t rail_connect_group(int raillike_group)
 	{
 		auto it = m_rail_connect_groups.find(raillike_group);
@@ -4363,6 +4383,10 @@ struct Module: public interface::Module, public luanti::Interface
 			table_six_numbers(L, "tile_frames", tile_aspect);
 			sv_<float> boxes;
 			table_numbers(L, "node_box", boxes);
+			sv_<float> connected_boxes;
+			table_numbers(L, "node_box_connected", connected_boxes);
+			const ss_ connects = table_string(L, "node_box_connects");
+			const ss_ own_groups = table_string(L, "node_box_groups");
 			ss_ facing = table_string(L, "facing");
 			ss_ overlay_tile = table_string(L, "overlay_tile");
 			ss_ liquid_group = table_string(L, "liquid_group");
@@ -4426,6 +4450,45 @@ struct Module: public interface::Module, public luanti::Interface
 					add_box_quads(shape, boxes[b], boxes[b + 1], boxes[b + 2],
 							boxes[b + 3], boxes[b + 4], boxes[b + 5]);
 				}
+			} else if(drawtype == "nodebox" && connected_boxes.size() >= 7){
+				// A "connected" box: the fixed part, and a set per side
+				// drawn when the neighbour there is one of its connects_to
+				// groups or solid -- the fence's own rule with the game's
+				// boxes. Its own group is the first of its connects_to it
+				// belongs to, so a fence reaches fences and a pane panes.
+				// simplified: a target group whose nodes are not solid and
+				// were not registered as connected boxes themselves (a
+				// fence gate) is not reached; connects_to is read as
+				// "any solid" for the rest.
+				for(size_t b = 0; b + 6 < connected_boxes.size(); b += 7){
+					const size_t first = shape.size();
+					add_box_quads(shape, connected_boxes[b + 1],
+							connected_boxes[b + 2], connected_boxes[b + 3],
+							connected_boxes[b + 4], connected_boxes[b + 5],
+							connected_boxes[b + 6]);
+					const uint8_t tag = (uint8_t)connected_boxes[b];
+					if(tag != 0)
+						for(size_t i = first; i < shape.size(); i++)
+							shape[i].connect_dir = tag;
+				}
+				sv_<ss_> targets;
+				{
+					std::istringstream is(connects);
+					ss_ g;
+					while(std::getline(is, g, ';'))
+						if(!g.empty())
+							targets.push_back(g);
+				}
+				for(const ss_ &g : targets){
+					const uint8_t id = named_connect_group(g);
+					connect_mask |= 1u << (id - 1);
+					if(connect_group == 0 && (";" + own_groups + ";").find(
+							";" + g + ";") != ss_::npos)
+						connect_group = id;
+				}
+				if(connect_group == 0 && !targets.empty())
+					connect_group = named_connect_group(targets[0]);
+				connect_to_solid = true;
 			} else if(drawtype == "plantlike"){
 				add_plant_quads(shape, visual_scale > 0.0f ? visual_scale : 1.0f);
 				double_sided = true;

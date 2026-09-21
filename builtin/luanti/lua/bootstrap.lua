@@ -1602,34 +1602,97 @@ local PALETTED_PARAMTYPE2 = {
 	colorwallmounted = true, colordegrotate = true,
 }
 
+-- A box list flattened: six numbers a box, with a tag ahead of each when
+-- one is asked for
+local function flatten_boxes(boxes, out, tag)
+	if type(boxes) ~= "table" then
+		return
+	end
+	-- One box is six numbers; several is a list of those
+	if type(boxes[1]) == "number" then
+		boxes = {boxes}
+	end
+	for _, box in ipairs(boxes) do
+		if type(box) == "table" and #box >= 6 then
+			local ok = true
+			for i = 1, 6 do
+				if type(box[i]) ~= "number" then
+					ok = false
+				end
+			end
+			if ok then
+				if tag then
+					out[#out + 1] = tag
+				end
+				for i = 1, 6 do
+					out[#out + 1] = box[i]
+				end
+			end
+		end
+	end
+end
+
 local function node_boxes(def)
 	local nb = def and def.node_box
 	if type(nb) ~= "table" or nb.type ~= "fixed" then
 		return nil
 	end
-	local fixed = nb.fixed
-	if type(fixed) ~= "table" then
+	local out = {}
+	flatten_boxes(nb.fixed, out)
+	if #out == 0 then
 		return nil
 	end
-	-- One box is six numbers; several is a list of those
-	if type(fixed[1]) == "number" then
-		fixed = {fixed}
+	return out
+end
+
+-- A "connected" node box, as the mesher's tagged quads: the fixed boxes
+-- untagged, and each connect_* set tagged with the direction it needs a
+-- neighbour in -- the same tag a fence's bars carry (1 +y, 2 -y, 3 +x, 4
+-- -x, 5 +z, 6 -z; Luanti's front is -z and its left -x). Seven numbers a
+-- box. simplified: the disconnected_* boxes, drawn where a side has
+-- nothing, are left out; VoxeLibre's fences, panes and chorus have none.
+local CONNECTED_TAGS = {connect_top = 1, connect_bottom = 2,
+		connect_right = 3, connect_left = 4, connect_back = 5, connect_front = 6}
+
+local function node_boxes_connected(def)
+	local nb = def and def.node_box
+	if type(nb) ~= "table" or nb.type ~= "connected" then
+		return nil
 	end
 	local out = {}
-	for _, box in ipairs(fixed) do
-		if type(box) == "table" and #box >= 6 then
-			for i = 1, 6 do
-				if type(box[i]) ~= "number" then
-					return nil
-				end
-				out[#out + 1] = box[i]
-			end
-		end
+	flatten_boxes(nb.fixed, out, 0)
+	for key, tag in pairs(CONNECTED_TAGS) do
+		flatten_boxes(nb[key], out, tag)
 	end
 	if #out == 0 then
 		return nil
 	end
 	return out
+end
+
+-- What it connects to and what it is, for the mesher's connect groups:
+-- the "group:x" entries of connects_to, and the node's own groups, each
+-- list as one string
+local function group_names(list)
+	local out = {}
+	for _, name in ipairs(list or {}) do
+		local g = type(name) == "string" and name:match("^group:(.+)$")
+		if g then
+			out[#out + 1] = g
+		end
+	end
+	return table.concat(out, ";")
+end
+
+local function own_group_names(def)
+	local out = {}
+	for g, v in pairs(def and def.groups or {}) do
+		if (tonumber(v) or 0) > 0 then
+			out[#out + 1] = g
+		end
+	end
+	table.sort(out)
+	return table.concat(out, ";")
 end
 
 -- How a node's texture alpha is meant to be used, which Luanti spells three
@@ -1747,6 +1810,12 @@ function core.__voxel_defs()
 			-- sixteen frames at once
 			tile_frames = tile_frame_aspects(six_tile_defs(def, is_liquid)),
 			node_box = (drawtype == "nodebox") and node_boxes(def) or nil,
+			node_box_connected = (drawtype == "nodebox") and
+					node_boxes_connected(def) or nil,
+			node_box_connects = (drawtype == "nodebox") and
+					group_names(def and def.connects_to) or nil,
+			node_box_groups = (drawtype == "nodebox") and
+					own_group_names(def) or nil,
 			visual_scale = (def and def.visual_scale) or 1.0,
 			-- What says two liquid nodes are the same liquid: a water source
 			-- and a flowing water both name the source. Luanti pairs them

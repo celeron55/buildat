@@ -13,7 +13,27 @@ core.register_on_joinplayer(function(player)
 		-- same whatever the world put at the spawn; the player at its
 		-- west end looking east at the mobs
 		local p = player:get_pos()
-		local base = {x = math.floor(p.x), y = math.floor(p.y) + 12, z = math.floor(p.z)}
+		-- The first height over the spawn where the whole stage and three
+		-- above it are air: a forest's canopy and a hill are what a fixed
+		-- height ran into
+		local base = {x = math.floor(p.x), y = math.floor(p.y) + 4, z = math.floor(p.z)}
+		for y = base.y, base.y + 60 do
+			local clear = true
+			for dz = -6, 6 do
+				for dx = -8, 6 do
+					for dy = -1, 3 do
+						if core.get_node({x = base.x + dx, y = y + dy,
+								z = base.z + dz}).name ~= "air" then
+							clear = false
+						end
+					end
+				end
+			end
+			if clear then
+				base.y = y
+				break
+			end
+		end
 		for dz = -6, 6 do
 			for dx = -8, 6 do
 				core.set_node({x = base.x + dx, y = base.y - 1, z = base.z + dz},
