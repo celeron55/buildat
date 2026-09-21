@@ -477,6 +477,12 @@ void Input::Update()
 #else
     if (!touchEmulation_ && !emscriptenPointerLock_ && (graphics_->GetExternalWindow() || (!mouseVisible_ && inputFocus_ && (flags & SDL_WINDOW_MOUSE_FOCUS))))
 #endif
+    // buildat: skipped while the scripted client's virtual mouse is in
+    // charge (SetVirtualMousePosition): GetMousePosition() then never
+    // moves, and this overwrote the motion its injected events had
+    // accumulated with zero every frame -- a look that moved nothing after
+    // the first mouse_pos, once relative mode was off for want of focus.
+    if (!virtualMouse_)
     {
         const IntVector2 mousePosition = GetMousePosition();
         mouseMove_ = mousePosition - lastMousePosition_;
@@ -1377,6 +1383,9 @@ IntVector2 Input::GetMousePosition() const
     if (!initialized_)
         return ret;
 
+    if (virtualMouse_)
+        return virtualMousePosition_;
+
     SDL_GetMouseState(&ret.x_, &ret.y_);
     ret.x_ = (int)(ret.x_ * inputScale_.x_);
     ret.y_ = (int)(ret.y_ * inputScale_.y_);
@@ -1795,7 +1804,24 @@ void Input::SetMousePosition(const IntVector2& position)
     if (!graphics_)
         return;
 
+    if (virtualMouse_)
+    {
+        virtualMousePosition_ = position;
+        return;
+    }
+
     SDL_WarpMouseInWindow(graphics_->GetWindow(), (int)(position.x_ / inputScale_.x_), (int)(position.y_ / inputScale_.y_));
+}
+
+void Input::SetVirtualMousePosition(const IntVector2& position)
+{
+    virtualMouse_ = true;
+    virtualMousePosition_ = position;
+}
+
+void Input::ClearVirtualMousePosition()
+{
+    virtualMouse_ = false;
 }
 
 void Input::CenterMousePosition()
@@ -1941,7 +1967,14 @@ void Input::HandleSDLEvent(void* sdlEvent)
 
     case SDL_MOUSEMOTION:
 #ifndef __EMSCRIPTEN__
-        if ((sdlMouseRelative_ || mouseVisible_ || mouseMode_ == MM_FREE) && !touchEmulation_)
+        // buildat: a motion pushed by the scripted client (its "which" is
+        // its own id, see command_seq.cpp) counts whatever the relative
+        // mode says. SDL turns relative mode off while the window has no
+        // input focus, which under a WM that never gave it one -- a test
+        // display, a client started behind another window -- left the
+        // scripted look moving nothing while the mouse was hidden.
+        if ((sdlMouseRelative_ || mouseVisible_ || mouseMode_ == MM_FREE ||
+             evt.motion.which == 0x42554944u) && !touchEmulation_)
 #else
         if ((mouseVisible_ || emscriptenPointerLock_ || mouseMode_ == MM_FREE) && !touchEmulation_)
 #endif
