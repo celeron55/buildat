@@ -2101,12 +2101,22 @@ function core.__use_node(playername, under, above, sneak)
 	-- Luanti's own client does before it asks the server to place anything
 	local meta = core.get_meta(under)
 	local spec = meta and meta:get_string("formspec") or ""
-	if spec ~= "" and not sneak then
-		show_node_formspec(playername, under, spec)
-		return true
-	end
 	local pointed = {type = "node", under = under, above = above}
 	local wielded = ref:get_wielded_item()
+	if spec ~= "" and not sneak then
+		show_node_formspec(playername, under, spec)
+		-- "on_rightclick callbacks are called anyway" (Game::nodePlacement):
+		-- the node's own handler runs beside the form, and nothing is placed
+		local n = core.get_node(under)
+		local d = n and core.registered_nodes[n.name]
+		if d and d.on_rightclick then
+			local left = d.on_rightclick(under, n, ref, wielded, pointed)
+			if left ~= nil then
+				ref:set_wielded_item(left)
+			end
+		end
+		return true
+	end
 	-- Not into the player's own space: Luanti's client refuses a placement
 	-- whose walkable node would collide with the player (Game::nodePlacement)
 	-- and the server trusts it; this client sends every click and the
