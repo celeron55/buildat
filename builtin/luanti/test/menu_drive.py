@@ -242,7 +242,13 @@ def run(write, read_block, say, seed, game="mineclone2", save_name="menu_run", m
         elif "vanilla menu: ContentDB" in name:
             # The game's Install row, or the search for it first; once
             # installed, back to the saves list, whose rules make the world
-            e = s.find("Install  " + TITLES.get(game, game), "Text")
+            # The game's row: its title text, and the Install button on
+            # the same line ([CONTENTDB_LIST])
+            e = s.find(TITLES.get(game, game), "Text")
+            if e is not None:
+                same_row = [b for b in s.ui if b[0] == "Text" and b[5] == "Install"
+                            and abs(b[2] - e[2]) < 60 and b[3] > 0]
+                e = same_row[0] if same_row else None
             if installed:
                 e = s.find("< back", "Text")
                 if e:

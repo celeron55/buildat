@@ -15,8 +15,10 @@ set -eu
 dir="$1"; game="$2"; author="$3"; name="$4"; title="$5"
 mkdir -p "$dir/api/packages/$author/$name/releases" "$dir/files"
 cat > "$dir/api/packages/index.html" <<JSON
-[{"author": "$author", "name": "$name", "title": "$title", "short_description": "a mirror's copy", "thumbnail": ""}]
+[{"author": "$author", "name": "$name", "title": "$title", "short_description": "a mirror's copy", "thumbnail": "/files/$name.png"}]
 JSON
+# The picture the row shows ([CONTENTDB_LIST]): the game's own, or the logo
+cp "$(ls "$game"/screenshot.png "$game"/menu/icon.png "$(dirname "$0")/../client/data/buildat_logo.png" 2>/dev/null | head -1)" "$dir/files/$name.png"
 cat > "$dir/api/packages/$author/$name/releases/index.html" <<JSON
 [{"url": "/files/$name.zip", "title": "mirror"}]
 JSON

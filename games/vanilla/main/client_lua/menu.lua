@@ -511,6 +511,10 @@ function ask_contentdb(query)
 			cereal.binary_output({query}, {"array", "string"}))
 end
 
+-- The pictures the rows wait for, by client file name; the server names
+-- each as it lands and the row asks the cache until it is there
+local pictures = {}
+
 function draw_contentdb(flat)
 	local menu = import_menu("ContentDB: games" ..
 			(contentdb_query ~= "" and (" matching \"" .. contentdb_query .. "\"") or ""))
@@ -522,24 +526,103 @@ function draw_contentdb(flat)
 	menu:add("Search", function()
 		ask_contentdb((edit:GetText():gsub("^%s+", ""):gsub("%s+$", "")))
 	end)
+	-- A row a game in a list that scrolls ([CONTENTDB_LIST]): the picture,
+	-- the title and author over the description, left-aligned and
+	-- wrapped, and Install at the right. The Install buttons are the
+	-- menu's own, so the arrows and Enter walk them; the wheel scrolls.
+	-- simplified: the arrows do not scroll the list to the selected row.
+	local list = menu.window:CreateChild("ListView")
+	list:SetStyleAuto()
+	list:SetFixedSize(860, 620)
+	pictures = {}
 	local n = 0
 	for i = 1, #flat - 4, 5 do
 		local author, name, title, desc = flat[i], flat[i + 1], flat[i + 2], flat[i + 3]
 		n = n + 1
-		menu:add("Install  " .. title .. "  by " .. author ..
-				(desc ~= "" and ("  -- " .. desc) or ""), function()
+		local row = list.contentElement:CreateChild("UIElement")
+		row:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(4, 4, 4, 4))
+		row:SetFixedWidth(820)
+		local pic = row:CreateChild("Sprite")
+		pic:SetFixedSize(96, 64)
+		pic.color = magic.Color(0.3, 0.3, 0.3)
+		pictures["contentdb/" .. author .. "_" .. name .. ".png"] = pic
+		local block = row:CreateChild("UIElement")
+		block:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+		block:SetFixedWidth(580)
+		local head = block:CreateChild("Text")
+		head:SetStyleAuto()
+		head:SetText(title .. "  by " .. author)
+		head:SetTextAlignment(magic.HA_LEFT)
+		if desc ~= "" then
+			local body = block:CreateChild("Text")
+			body:SetStyleAuto()
+			body:SetFixedWidth(580)
+			body:SetWordwrap(true)
+			body:SetText(desc)
+			body:SetTextAlignment(magic.HA_LEFT)
+		end
+		-- In a cell of its own: the row's layout stretches a child to the
+		-- picture's 64, and a button that tall draws its word at its top;
+		-- the cell is stretched instead and the button sits in its middle
+		local cell = row:CreateChild("UIElement")
+		cell:SetFixedWidth(100)
+		local button = cell:CreateChild("Button")
+		button:SetStyleAuto()
+		button:SetName("Button")
+		button:SetLayout(magic.LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+		button:SetFixedSize(100, 28)
+		button:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+		local label = button:CreateChild("Text")
+		label:SetName("ButtonText")
+		label:SetStyleAuto()
+		label:SetText("Install")
+		label:SetTextAlignment(magic.HA_CENTER)
+		menu:add(button, function()
 			waiting("Fetching " .. name .. "...")
 			buildat.send_packet("main:contentdb_install",
 					cereal.binary_output({author, name}, {"array", "string"}))
 		end)
+		list:AddItem(row)
 	end
 	if n == 0 then
 		local none = menu.window:CreateChild("Text")
 		none:SetStyleAuto()
 		none:SetText("Nothing found")
 	end
+	-- The pictures as they land: the file is announced before it has
+	-- crossed, so a name is asked for each frame until the cache has it
+	local pending = {}
+	local pending_n = 0
+	root:SubscribeToStackEvent("Update", function()
+		if pending_n == 0 then
+			return
+		end
+		for file, pic in pairs(pending) do
+			local tex = magic.cache:GetResource("Texture2D", file)
+			if tex then
+				pic:SetTexture(tex)
+				pic.color = magic.Color(1, 1, 1)
+				pending[file] = nil
+				pending_n = pending_n - 1
+			end
+		end
+	end)
+	pictures.__add = function(file)
+		local pic = pictures[file]
+		if pic and not pending[file] then
+			pending[file] = pic
+			pending_n = pending_n + 1
+		end
+	end
 	back_to_saves(menu)
 end
+
+buildat.sub_packet("main:contentdb_picture", function(data)
+	local file = cereal.binary_input(data, {"array", "string"})[1]
+	if file and pictures.__add then
+		pictures.__add(file)
+	end
+end)
 
 -- A new save, in the two steps importing a world already takes: which game,
 -- and then what to call it. The name field is on the second screen with the

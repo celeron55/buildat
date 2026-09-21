@@ -52,6 +52,12 @@ static bool tee = false;
 
 void log_init()
 {
+	// A line at a time to stderr: unbuffered, a long message goes out in
+	// pieces and another writer to the same stream (Urho3D's own log) lands
+	// in the middle of a line, which a reader parsing the log then trips
+	// on -- the driven run's scan block, 2026-09-22
+	static char stderr_buf[8192];
+	setvbuf(stderr, stderr_buf, _IOLBF, sizeof stderr_buf);
 }
 
 void log_set_max_level(int level)

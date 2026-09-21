@@ -823,10 +823,10 @@ struct Module: public interface::Module
 	// extracts it under luanti/games/<name>, the way an import lands.
 	static const char *CONTENTDB;
 	struct Job : public interface::ThreadedThing {
-		enum Kind { LIST, INSTALL } kind;
+		enum Kind { LIST, INSTALL, PICTURE } kind;
 		network::PeerInfo::Id peer;
-		ss_ q; // LIST: the query; INSTALL: author/name
-		ss_ name; // INSTALL: the game's directory
+		ss_ q; // LIST: the query; INSTALL: author/name; PICTURE: the url
+		ss_ name; // INSTALL: the game's directory; PICTURE: the client file
 		ss_ zip_path, into_dir;
 		ss_ result, error;
 		std::atomic<uint64_t> got{0}, total{0};
@@ -842,6 +842,11 @@ struct Module: public interface::Module
 					result = interface::http_get(ss_(CONTENTDB)+
 							"/api/packages/?type=game&limit=20&sort=downloads"
 							"&order=desc&q="+q);
+				} else if(kind == PICTURE){
+					// A picture already fetched is not fetched again; the
+					// cache path is the download's ([CONTENTDB_LIST])
+					if(!interface::fs::path_exists(zip_path))
+						interface::http_download(q, zip_path);
 				} else {
 					const ss_ rel = interface::http_get(ss_(CONTENTDB)+
 							"/api/packages/"+q+"/releases/");
@@ -1003,6 +1008,13 @@ struct Module: public interface::Module
 						" bytes") : cs("error: "+job->error));
 				continue;
 			}
+			if(!job->error.empty() && job->kind == Job::PICTURE){
+				// A picture that does not come leaves its placeholder
+				log_v(MODULE, "contentdb: no picture %s: %s", cs(job->name),
+						cs(job->error));
+				interface::fs::remove_all(job->zip_path);
+				continue;
+			}
 			if(!job->error.empty()){
 				menu_error(job->peer, (job->kind == Job::LIST ?
 						"ContentDB: " : "Installing "+job->name+" failed: ")+
@@ -1011,6 +1023,22 @@ struct Module: public interface::Module
 			}
 			if(job->kind == Job::LIST){
 				send_contentdb_list(job->peer, job->result);
+				continue;
+			}
+			if(job->kind == Job::PICTURE){
+				// The file to every client, the name to the one that asked:
+				// its row asks the cache for it until it has arrived
+				client_file::access(m_server, [&](client_file::Interface *i){
+					i->add_file_path(job->name, job->zip_path);
+				});
+				std::ostringstream os(std::ios::binary);
+				{
+					cereal::PortableBinaryOutputArchive ar(os);
+					ar(sv_<ss_>{job->name});
+				}
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(job->peer, "main:contentdb_picture", os.str());
+				});
 				continue;
 			}
 			// The zip's one top-level directory is the game; renamed into
@@ -1075,6 +1103,33 @@ struct Module: public interface::Module
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "main:contentdb_list", os.str());
 		});
+		// The pictures after the list, one job each, so a slow one holds
+		// nothing but its own row ([CONTENTDB_LIST]); on the wire the row
+		// names its picture "contentdb/<author>_<name>.png"
+		const ss_ cache = m_server->get_config().get<ss_>("cache_path")+
+				"/luanti/contentdb";
+		interface::fs::create_directories(cache);
+		for(size_t i = 0; i + 4 < flat.size(); i += 5){
+			ss_ url = flat[i + 4];
+			if(url.empty())
+				continue;
+			if(url[0] == '/')
+				url = ss_(CONTENTDB)+url;
+			bool word = true;
+			for(const ss_ *v : {&flat[i], &flat[i + 1]})
+				for(char c : *v)
+					if(!isalnum((unsigned char)c) && c != '_' && c != '-')
+						word = false;
+			if(!word)
+				continue;
+			Job *job = new Job();
+			job->kind = Job::PICTURE;
+			job->peer = peer;
+			job->q = url;
+			job->name = "contentdb/"+flat[i]+"_"+flat[i + 1]+".png";
+			job->zip_path = cache+"/"+flat[i]+"_"+flat[i + 1]+".png";
+			start_job(job);
+		}
 	}
 
 	void on_get_settings(const network::Packet &packet)

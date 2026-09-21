@@ -164,6 +164,11 @@ def parse(lines):
         if m:
             y, z, x0 = int(m.group(1)), int(m.group(2)), int(m.group(3))
             for i, tok in enumerate(m.group(4).split()):
+                # A token that is not a number is another writer's line
+                # landing inside this one (Urho3D's own log shares the
+                # client's stderr); the voxel is unknown, not the run lost
+                if not tok.isdigit():
+                    break
                 s.voxels[(x0 + i, y, z)] = s.voxel_names.get(int(tok), "air") if tok != "0" else "air"
             continue
         m = re.match(r"object (\S+) (\S+) at (-?[\d.]+),(-?[\d.]+),(-?[\d.]+) d=([\d.]+) "
