@@ -1796,6 +1796,11 @@ function core.__voxel_defs()
 			-- is thick without any game saying so.
 			move_resistance = (def and (def.move_resistance or
 					def.liquid_viscosity)) or 0,
+			-- What the player is in: Luanti's liquid_move_physics, which
+			-- defaults to "it is a liquid" and a game may set either way
+			-- ([WATER_PARITY])
+			swimmable = (def and def.liquid_move_physics ~= nil) and
+					(def.liquid_move_physics and true or false) or is_liquid,
 			-- What standing on it does to the player: the groups of the
 			-- same names, read by the client's physics ([PLAYER_PHYSICS])
 			bouncy = (def and def.groups and def.groups.bouncy) or 0,

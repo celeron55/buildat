@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 18;
+		uint8_t version = 19;
 		archive(
 				version,
 				v.name,
@@ -122,6 +122,11 @@ namespace interface
 		// client's physics reads ([PLAYER_PHYSICS])
 		if(version >= 18){
 			archive(v.bouncy, v.slippery, v.disable_jump, v.disable_descend);
+		}
+		// Version 19 added liquid_move_physics, what the player is in
+		// ([WATER_PARITY])
+		if(version >= 19){
+			archive(v.swimmable);
 		}
 	}
 

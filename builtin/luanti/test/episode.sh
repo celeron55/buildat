@@ -39,7 +39,14 @@ place)
 	# there for this episode), one placed on the platform by a right
 	# click straight down: the census gains a dirt and the stack loses one
 	{ echo "look 0 -89"; echo "mouse_click right"; } > "$out/cmds.txt" ;;
-*) echo "unknown episode $EPISODE (dig, place)" >&2; exit 2 ;;
+sink)
+	# Nothing pressed: the body sinks in the pool and the census says how
+	# far in EPISODE_SECONDS, and what the breath is by then
+	{ echo "look 0 0"; } > "$out/cmds.txt" ;;
+swim)
+	# Jump held: swimming up against the sink, out at the surface
+	{ echo "look 0 0"; echo "keydown Space"; echo "delay 6000"; echo "keyup Space"; } > "$out/cmds.txt" ;;
+*) echo "unknown episode $EPISODE (dig, place, sink, swim)" >&2; exit 2 ;;
 esac
 
 { echo "rawset(_G, \"EPISODE_NAME\", \"$EPISODE\")"

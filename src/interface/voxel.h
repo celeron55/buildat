@@ -268,6 +268,11 @@ namespace interface
 		uint8_t slippery = 0;
 		bool disable_jump = false;
 		bool disable_descend = false;
+		// What a player is in when standing in this: Luanti's
+		// liquid_move_physics, which defaults to "it is a liquid" and a
+		// game may set either way -- a swimmable non-liquid, a liquid
+		// walked through ([WATER_PARITY]). is_liquid stays the drawing.
+		bool swimmable = false;
 		// Which family of connecting voxels this one belongs to, 1...32, or
 		// 0 for one nothing reaches out to; and which families this one
 		// reaches out to, as a bit per family. A fence and its gates are one
@@ -375,6 +380,8 @@ namespace interface
 		bool climbable = false;
 		// Copied from the definition; see VoxelDefinition::move_resistance
 		uint8_t move_resistance = 0;
+		// Copied from the definition; see VoxelDefinition::swimmable
+		bool swimmable = false;
 		uint8_t connect_group = 0;
 		uint32_t connect_mask = 0;
 		bool connect_to_solid = false;

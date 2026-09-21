@@ -713,6 +713,7 @@ void init_voxel(lua_State *L)
 			.def_readwrite("disable_jump", &VoxelDefinition::disable_jump)
 			.def_readwrite("disable_descend",
 					&VoxelDefinition::disable_descend)
+			.def_readwrite("swimmable", &VoxelDefinition::swimmable)
 			.def_readwrite("liquid_top", &VoxelDefinition::liquid_top)
 			.def_readwrite("connect_group", &VoxelDefinition::connect_group)
 			.def_readwrite("connect_mask", &VoxelDefinition::connect_mask)

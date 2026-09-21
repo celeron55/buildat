@@ -1988,7 +1988,20 @@ end
 -- code that paints the water over the screen: the camera knew it was
 -- underwater and the body did not.
 local function node_is_liquid(x, y, z)
-	return voxel_liquid_at(buildat.Vector3(x, y, z)) ~= nil
+	-- What the player is in is the node's liquid_move_physics, not
+	-- whether it is drawn as a liquid ([WATER_PARITY]: official's
+	-- LocalPlayer reads that flag, which a game sets either way)
+	local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+	if v == nil then
+		return false
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local id = reg:id_of(v)
+	if id == 0 then
+		return false
+	end
+	local def = reg:get_by_id(id)
+	return def ~= nil and def.swimmable == true
 end
 
 -- And what holds the player up instead of letting them fall: a ladder, a

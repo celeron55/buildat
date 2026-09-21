@@ -87,6 +87,28 @@ local function stamp()
 			data[area:index(ORIGIN.x + x, ORIGIN.y, ORIGIN.z + z)] = cid
 		end
 	end
+	if NAME == "sink" or NAME == "swim" then
+		-- A pool three deep with dirt walls, the platform its floor, the
+		-- game's own water source ([WATER_PARITY]): what the player's body
+		-- does in it is what is compared
+		local water = nil
+		for name, def in pairs(core.registered_nodes) do
+			if def.drawtype == "liquid" and name:find("water", 1, true) and
+					(water == nil or name < water) then
+				water = name
+			end
+		end
+		local wid = core.get_content_id(water)
+		for x = -2, 2 do
+			for z = -2, 2 do
+				for y = 1, 3 do
+					local edge = (x == -2 or x == 2 or z == -2 or z == 2)
+					data[area:index(ORIGIN.x + x, ORIGIN.y + y, ORIGIN.z + z)] =
+							edge and cid or wid
+				end
+			end
+		end
+	end
 	vm:set_data(data)
 	vm:write_to_map()
 end
@@ -130,8 +152,16 @@ local function census(player)
 		olist[#olist + 1] = n .. ":" .. c
 	end
 	table.sort(olist)
-	return "nodes=" .. table.concat(parts, ",") .. " inv=" ..
+	local out = "nodes=" .. table.concat(parts, ",") .. " inv=" ..
 			table.concat(inv, ",") .. " objs=" .. table.concat(olist, ",")
+	if NAME == "sink" or NAME == "swim" then
+		-- Where the body ended, a tenth of a node coarse, and the breath:
+		-- the pool episodes' measure
+		local p = player:get_pos()
+		out = out .. string.format(" y=%.1f breath=%d", p.y - ORIGIN.y,
+				player:get_breath())
+	end
+	return out
 end
 
 core.register_on_joinplayer(function(player)
@@ -144,7 +174,10 @@ core.register_on_joinplayer(function(player)
 			player:get_inventory():set_stack("main", 1,
 					ItemStack(dirt .. " 10"))
 		end
-		player:set_physics_override({gravity = 0})
+		-- Gravity stays on in the pool: sinking is the measure
+		if NAME ~= "sink" and NAME ~= "swim" then
+			player:set_physics_override({gravity = 0})
+		end
 		for id, _ in pairs(player:hud_get_all()) do
 			player:hud_remove(id)
 		end
@@ -152,7 +185,10 @@ core.register_on_joinplayer(function(player)
 				breathbar = false, crosshair = false, minimap = false})
 		player:set_look_horizontal(0)
 		player:set_look_vertical(math.pi / 2)
-		player:set_pos({x = ORIGIN.x, y = ORIGIN.y + 1, z = ORIGIN.z})
+		-- In the pool's middle, a node under the surface, for the pool
+		-- episodes; on the platform otherwise
+		local drop = (NAME == "sink" or NAME == "swim") and 2 or 1
+		player:set_pos({x = ORIGIN.x, y = ORIGIN.y + drop, z = ORIGIN.z})
 		local ent = some_entity()
 		if ent then
 			core.add_entity({x = ORIGIN.x + 2, y = ORIGIN.y + 1,
