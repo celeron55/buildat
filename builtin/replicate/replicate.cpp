@@ -202,6 +202,13 @@ struct Module: public interface::Module, public replicate::Interface
 		int64_t prepare_us = 0;
 		m_collecting_sends = true;
 
+		// Every peer's backlog in one hop, before the pass (see the note
+		// at PendingSend on hops)
+		sm_<PeerId, size_t> pending;
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &pair: m_peers)
+				pending[pair.first] = inetwork->pending_bytes(pair.first);
+		});
 		int64_t t_inside = 0;
 		main_context::access(m_server, [&](main_context::Interface *imc)
 		{
@@ -218,6 +225,24 @@ struct Module: public interface::Module, public replicate::Interface
 				if(!scene){
 					log_w(MODULE, "sync_changes(): Scene %p not found",
 							ps.scene_ref);
+					continue;
+				}
+				// Backpressure ([NET_CHANNELS]): a peer with this much
+				// already waiting for its socket gets nothing more this
+				// tick; its nodes stay dirty and go when it has drained.
+				// Over a lossy link the world's chunks were queued as one
+				// burst, and everything behind them waited its length.
+				static const size_t PEER_BACKLOG_BYTES = 512 * 1024;
+				if(pending[ps.peer_id] > PEER_BACKLOG_BYTES){
+					// Said once every five seconds a peer is held
+					static int64_t said_us = 0;
+					if(t0 - said_us > 5000000){
+						said_us = t0;
+						log_v(MODULE, "peer %i held: %zu bytes behind its "
+								"socket, %u nodes dirty", ps.peer_id,
+								pending[ps.peer_id],
+								ps.scene_state.dirtyNodes_.Size());
+					}
 					continue;
 				}
 

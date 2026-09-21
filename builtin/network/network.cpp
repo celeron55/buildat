@@ -579,6 +579,12 @@ struct Module: public interface::Module, public network::Interface
 		return result;
 	}
 
+	size_t pending_bytes(PeerInfo::Id peer)
+	{
+		auto it = m_peers.find(peer);
+		return it == m_peers.end() ? 0 : it->second.out_pending();
+	}
+
 	void* get_interface()
 	{
 		return dynamic_cast<Interface*>(this);

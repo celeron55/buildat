@@ -73,6 +73,11 @@ namespace network
 		virtual void send(PeerInfo::Id recipient, const ss_ &name,
 				const ss_ &data) = 0;
 		virtual sv_<PeerInfo::Id> list_peers() = 0;
+		// How many bytes wait in front of a peer's socket, so a producer
+		// of bulk can hold back while a slow peer drains ([NET_CHANNELS]):
+		// what is queued keeps its place, and what is not yet sent is
+		// not yet stale
+		virtual size_t pending_bytes(PeerInfo::Id peer) = 0;
 		// max_queue_bytes is what Drop and Disconnect measure against, and
 		// grace_us how long Disconnect lets a peer stay over it. Buffer
 		// ignores both.
