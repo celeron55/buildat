@@ -662,7 +662,8 @@ struct Module: public interface::Module
 	{
 		return luanti_path()+"/launcher.json";
 	}
-	ss_ read_render_mode()
+	// One string value of launcher.json's top level, or "" when absent
+	ss_ read_setting(const ss_ &key)
 	{
 		std::ifstream f(settings_path());
 		if(!f.good())
@@ -676,11 +677,27 @@ struct Module: public interface::Module
 			return "";
 		sajson::value root = doc.get_root();
 		for(size_t i = 0; i < root.get_length(); i++){
-			if(root.get_object_key(i).as_string() == "render_mode" &&
+			if(root.get_object_key(i).as_string() == key &&
 					root.get_object_value(i).get_type() == sajson::TYPE_STRING)
 				return root.get_object_value(i).as_string();
 		}
 		return "";
+	}
+	ss_ read_render_mode()
+	{
+		return read_setting("render_mode");
+	}
+	// The viewing range ([VIEW_RANGE]): "view_range": "<n>", 120 when
+	// absent so a new install bets on no strong computer; 20..4000 as
+	// official's
+	ss_ read_view_range()
+	{
+		// BUILDAT_VIEW_RANGE for one run: the reference shooters set their
+		// range this way, over whatever the user's launcher.json says
+		const char *env = getenv("BUILDAT_VIEW_RANGE");
+		const ss_ v = env ? ss_(env) : read_setting("view_range");
+		const int n = atoi(v.c_str());
+		return (n >= 20 && n <= 4000) ? itos(n) : ss_("120");
 	}
 	// The key bindings ([KEY_BINDINGS]): launcher.json's "keys" object,
 	// action to key name, as "key.<action>=<name>" rows of the list
@@ -760,11 +777,12 @@ struct Module: public interface::Module
 		f << '"';
 	}
 	void write_settings(const sv_<ss_> &paths, const ss_ &mode,
-			const sv_<std::pair<ss_, ss_>> &keys)
+			const sv_<std::pair<ss_, ss_>> &keys, const ss_ &view_range)
 	{
 		interface::fs::create_directories(luanti_path());
 		std::ofstream f(settings_path(), std::ios::trunc);
-		f << "{\"render_mode\": \"" << mode << "\", \"import_paths\": [";
+		f << "{\"render_mode\": \"" << mode << "\", \"view_range\": \""
+				<< view_range << "\", \"import_paths\": [";
 		for(size_t i = 0; i < paths.size(); i++){
 			f << (i ? ", " : "");
 			write_json_string(f, paths[i]);
@@ -788,6 +806,7 @@ struct Module: public interface::Module
 			sv_<ss_> list = read_import_paths();
 			ss_ mode = read_render_mode();
 			list.push_back("render_mode="+(mode.empty() ? ss_("pbr") : mode));
+			list.push_back("view_range="+read_view_range());
 			for(const ss_ &row : read_key_rows())
 				list.push_back(row);
 			ar(list);
@@ -1078,11 +1097,16 @@ struct Module: public interface::Module
 		sv_<ss_> paths;
 		sv_<std::pair<ss_, ss_>> keys;
 		ss_ mode = "pbr";
+		ss_ view_range = "120";
 		for(const ss_ &v : values){
 			if(v.compare(0, 12, "render_mode=") == 0){
 				const ss_ m = v.substr(12);
 				if(m == "unlit" || m == "shadows" || m == "pbr")
 					mode = m;
+			} else if(v.compare(0, 11, "view_range=") == 0){
+				const int n = atoi(v.c_str() + 11);
+				if(n >= 20 && n <= 4000)
+					view_range = itos(n);
 			} else if(v.compare(0, 4, "key.") == 0){
 				// key.<action>=<name>: the action a word, the name short
 				const size_t eq = v.find('=');
@@ -1098,10 +1122,10 @@ struct Module: public interface::Module
 			} else if(!v.empty() && v.size() <= 4096)
 				paths.push_back(v);
 		}
-		write_settings(paths, mode, keys);
-		log_i(MODULE, "settings: %zu import paths, render_mode %s and %zu "
-				"key bindings written to %s", paths.size(), cs(mode),
-				keys.size(), cs(settings_path()));
+		write_settings(paths, mode, keys, view_range);
+		log_i(MODULE, "settings: %zu import paths, render_mode %s, view_range "
+				"%s and %zu key bindings written to %s", paths.size(), cs(mode),
+				cs(view_range), keys.size(), cs(settings_path()));
 		send_settings(packet.sender);
 	}
 

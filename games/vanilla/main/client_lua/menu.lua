@@ -381,12 +381,16 @@ function draw_settings(paths)
 	-- key bindings as "key.<action>=<name>" rows ([KEY_BINDINGS]), which
 	-- keys.lua reads and the editor writes; both go back with the paths
 	local mode = "pbr"
+	local view_range = "120"
 	local kept = {}
 	local key_rows = {}
 	for _, p in ipairs(paths) do
 		local m = p:match("^render_mode=(.*)$")
+		local r = p:match("^view_range=(%d+)$")
 		if m then
 			mode = m
+		elseif r then
+			view_range = r
 		elseif p:match("^key%.") then
 			key_rows[#key_rows + 1] = p
 		else
@@ -397,6 +401,7 @@ function draw_settings(paths)
 	local function send(list)
 		waiting("Saving...")
 		list[#list + 1] = "render_mode=" .. mode
+		list[#list + 1] = "view_range=" .. view_range
 		for _, r in ipairs(key_rows) do
 			list[#list + 1] = r
 		end
@@ -411,6 +416,7 @@ function draw_settings(paths)
 			all[#all + 1] = p
 		end
 		all[#all + 1] = "render_mode=" .. mode
+		all[#all + 1] = "view_range=" .. view_range
 		for _, r in ipairs(key_rows) do
 			all[#all + 1] = r
 		end
@@ -431,6 +437,25 @@ function draw_settings(paths)
 	for _, m in ipairs({"pbr", "shadows", "unlit"}) do
 		menu:add((m == mode and "[x] " or "[ ] ") .. m, function()
 			mode = m
+			local list = {}
+			for _, p in ipairs(paths) do
+				list[#list + 1] = p
+			end
+			send(list)
+		end)
+	end
+	-- The viewing range ([VIEW_RANGE]): how far the server sends, the
+	-- client meshes and the camera draws; 120 unless set, so a new
+	-- install does not bet on a strong computer. Applied at once in a
+	-- running world, and to the next one.
+	-- simplified: the five picks; a number field for the rest when
+	-- somebody wants 90.
+	local range_text = menu.window:CreateChild("Text")
+	range_text:SetStyleAuto()
+	range_text:SetText("View range, in nodes (farther is slower):")
+	for _, r in ipairs({"60", "120", "200", "300", "400"}) do
+		menu:add((r == view_range and "[x] " or "[ ] ") .. r, function()
+			view_range = r
 			local list = {}
 			for _, p in ipairs(paths) do
 				list[#list + 1] = p

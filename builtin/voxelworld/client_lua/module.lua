@@ -41,6 +41,16 @@ function M.allow_streaming()
 	end
 end
 
+-- The distance changed by the game (a viewing range setting): sent at
+-- once when the world is already being sent, else when it may be
+function M.set_send_distance(n)
+	M.send_distance = n
+	if init_seen and M.streaming_allowed then
+		buildat.send_packet("voxelworld:set_send_distance",
+				tostring(math.floor(M.send_distance)))
+	end
+end
+
 local stuck_checked_us, stuck_undrawn, stuck_seconds, stuck_said = 0, -1, 0, false
 local stuck_pops = {n = 0, distinct = 0, seen = {}}
 local UPDATE_TIME_FRACTION = 0.10

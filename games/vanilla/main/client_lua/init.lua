@@ -28,6 +28,10 @@ luanti.set_scene(scene)
 -- Seen from outside itself, so nothing drops to a reduced LOD, and nothing
 -- here walks on anything
 voxelworld.lod_distance = 1000
+-- What is asked of the server until the settings say ([VIEW_RANGE]): the
+-- same 120 as the setting's default, so the answer's arrival changes
+-- nothing on a fresh install
+voxelworld.send_distance = 120
 -- The terrain's horizon into every chunk's mesh, and the vertex alpha
 -- packed with it; the shader reads it so ([PBR_FIT] 2c)
 voxelworld.horizon = true
@@ -72,7 +76,8 @@ local CAMERA_DISTANCE = 34
 -- (BASE_FOV = 72): the two are compared frame against frame, and nothing in
 -- a frame lines up while the cameras see different amounts of the world
 local CAMERA_FOV = 72
-local FAR_CLIP = 400
+-- The viewing range's default ([VIEW_RANGE]); the setting replaces it
+local FAR_CLIP = 120
 local VIEW_DIR = {x = -0.7, y = -0.55, z = -0.7}
 
 local MOUSE_SENSITIVITY = 0.15
@@ -1120,6 +1125,29 @@ end
 -- What the last sky update worked out, for the line of detail
 local sky_now = {height = 0, day = 0}
 
+-- The camera's far clip and the fog from the viewing range ([VIEW_RANGE],
+-- FAR_CLIP) and the game's sky. Luanti's fog_distance is not a fog knob
+-- but an upper bound on the client's viewing range, and the settled rule
+-- is that a game may lower it and never raise it -- see [SKY_KNOBS].
+-- Negative gives it back.
+function sky_now.apply_far(sky)
+	local far = FAR_CLIP
+	if sky.fog_distance and sky.fog_distance >= 0 then
+		far = math.min(FAR_CLIP, sky.fog_distance)
+	end
+	sky_now.far_clip = far
+	if camera then
+		camera.farClip = far
+	end
+	-- fog_start is a fraction of that range and not a distance; without one
+	-- it is where extensions/luanti_client's starts
+	if zone then
+		zone.fogStart = far * (sky.fog_start or 0.7)
+		zone.fogEnd = far
+	end
+end
+
+
 -- **Registered after sky_now**, which it writes to: a closure made before
 -- that local exists closes over a global of the same name instead, and the
 -- handler then dies on its first line with nothing switched -- which is
@@ -1227,6 +1255,21 @@ end)
 local underwater = false
 -- What the game said its sky is, as luanti.sub_sky() gives it
 local game_sky = {}
+
+-- The viewing range, the Luanti settings' view_range row: what the server
+-- sends, what is meshed and what the camera draws are all this far; the
+-- game's sky may still lower it. Changed live, the server drops what is
+-- beyond and the client with it.
+function sky_now.set_range(n)
+	n = tonumber(n)
+	if not n or n < 20 or n > 4000 or n == FAR_CLIP then
+		return
+	end
+	FAR_CLIP = n
+	voxelworld.set_send_distance(n)
+	sky_now.apply_far(game_sky)
+	log:info("view range: " .. n)
+end
 
 -- Luanti's indoors colour, the game's own or its default #646464, at a
 -- brightness: what a direction that cannot see the sky is drawn as, and
@@ -1840,23 +1883,7 @@ luanti.sub_sky(function(sky)
 	if sky.horizon then
 		DAY_FOG = magic.Color(sky.horizon.r, sky.horizon.g, sky.horizon.b)
 	end
-	-- Luanti's fog_distance is not a fog knob but an upper bound on the
-	-- client's viewing range, and the settled rule is that a game may lower
-	-- it and never raise it -- see [SKY_KNOBS]. Negative gives it back.
-	local far = FAR_CLIP
-	if sky.fog_distance and sky.fog_distance >= 0 then
-		far = math.min(FAR_CLIP, sky.fog_distance)
-	end
-	sky_now.far_clip = far
-	if camera then
-		camera.farClip = far
-	end
-	-- fog_start is a fraction of that range and not a distance; without one
-	-- it is where extensions/luanti_client's starts
-	if zone then
-		zone.fogStart = far * (sky.fog_start or 0.7)
-		zone.fogEnd = far
-	end
+	sky_now.apply_far(sky)
 	-- A skybox sky has no gradient to take a fog colour from, so Luanti fogs
 	-- it with base_color; a plain sky's base_color is already the sky itself
 	if sky.type == "skybox" and sky.base_color and not sky.fog_color then
@@ -4097,7 +4124,14 @@ end)
 -- The settings, for the key rows in them ([KEY_BINDINGS]); the same
 -- packet answers the pause menu's editor after a save
 buildat.sub_packet("main:settings", function(data)
-	keys.apply(cereal.binary_input(data, {"array", "string"}))
+	local list = cereal.binary_input(data, {"array", "string"})
+	keys.apply(list)
+	for _, row in ipairs(list) do
+		local n = row:match("^view_range=(%d+)$")
+		if n then
+			sky_now.set_range(n)
+		end
+	end
 end)
 buildat.send_packet("main:get_settings", "")
 log:info("vanilla client ready")
