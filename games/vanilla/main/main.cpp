@@ -23,6 +23,7 @@
 #include "storage/api.h"
 #include <cstdlib>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <algorithm>
 #include <cereal/archives/portable_binary.hpp>
@@ -68,6 +69,7 @@ struct Module: public interface::Module
 	// does.
 	luanti::SceneReference m_scene = nullptr;
 	sv_<network::PeerInfo::Id> m_waiting_peers;
+	std::set<network::PeerInfo::Id> m_shown_world;
 	// Which client took the name BUILDAT_LUANTI_NAME asked for, if any;
 	// see player_name_of()
 	network::PeerInfo::Id m_named_peer = 0;
@@ -224,6 +226,7 @@ struct Module: public interface::Module
 
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
+		m_shown_world.erase(old_client.info.id);
 		if(!m_scene)
 			return;
 		luanti::access(m_server, [&](luanti::Interface *i){
@@ -1551,6 +1554,12 @@ struct Module: public interface::Module
 
 	void show_world_to(network::PeerInfo::Id peer)
 	{
+		// Once per peer: files_transmitted comes again after every batch
+		// of files announced (the game's media, once the world is up),
+		// and a second showing initialised the peer's world twice
+		// ("on_ready(): already ready", [FIRST_RUN])
+		if(!m_shown_world.insert(peer).second)
+			return;
 		network::access(m_server, [&](network::Interface *inetwork){
 			// The menu takes itself away first: it is a script of its own
 			// and has no other way of knowing that it is done with

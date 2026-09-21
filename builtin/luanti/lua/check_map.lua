@@ -528,7 +528,18 @@ local function check_light()
 
 	if lamp then
 		core.set_node(LIGHT_AT, {name = lamp})
+		-- The lamp's flood is voxelworld's at the write's commit, and a
+		-- section whose light is stale takes it in the relight a tick
+		-- later ([DIG_LIGHT]); a few steps, until the neighbour is lit
+		-- or it plainly is not
 		local near = core.get_node_light(beside)
+		for _ = 1, 50 do
+			if near ~= nil and near >= level - 1 then
+				break
+			end
+			core.__step(0.01)
+			near = core.get_node_light(beside)
+		end
 		local far = core.get_node_light(further)
 		if near == nil or near < level - 1 then
 			error("check_map: " .. lamp .. " lights " .. level ..

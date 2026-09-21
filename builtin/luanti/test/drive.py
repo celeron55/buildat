@@ -1286,6 +1286,7 @@ def main():
     fifo = open(fifo_path, "w")
     # MENU_RUN ([FIRST_RUN]): the client was started with no server and
     # sits in the launch menu; the menu rules take it to a world first
+    watch = None
     if os.environ.get("MENU_RUN"):
         import menu_drive
         seed = int(sys.argv[5]) if len(sys.argv) > 5 else 5
@@ -1294,6 +1295,11 @@ def main():
                               mode=os.environ["MENU_RUN"], out=out, cli_log=log):
             write("delay 500", "quit")
             return
+        # And the same watch over the world phase: an error line or a
+        # disconnect ends the run there too ([FIRST_RUN]). The still-pair
+        # rule does not apply once the player is in control.
+        watch = menu_drive.LogWatch(log, say)
+        watch.check()
     mem = {}
     expect = None
     expect_name = None
@@ -1327,6 +1333,8 @@ def main():
             lines = vlines + lines
         if disconnected:
             say("FAILED disconnected: the client's connection is gone at turn %d" % turn)
+            break
+        if watch is not None and not watch.check():
             break
         if lines is None:
             say("turn %d: no scan block in %.1f s" % (turn, took))
