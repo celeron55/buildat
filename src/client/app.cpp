@@ -2577,7 +2577,14 @@ struct CApp: public App, public magic::Application
 			return 1;
 		}
 		tail_local_server_log();
-		lua_pushboolean(L, g_local_server_listening);
+		// And the port itself, once the log says so: a "Listening" read
+		// off a log the previous run left (the box's first ContentDB try,
+		// 2026-09-21: the client then connected to a server still
+		// loading and sat in the connect for good) is not a server. The
+		// non-blocking probe is a peer to the server for a moment, which
+		// is the price of not trusting a file.
+		lua_pushboolean(L, g_local_server_listening &&
+				interface::probe_connect("127.0.0.1", g_local_server_port));
 		return 1;
 	}
 

@@ -109,6 +109,55 @@ struct CTCPSocket: public TCPSocket
 		}
 		return true;
 	}
+	static bool connect_with_timeout(int fd, const struct sockaddr *addr,
+			socklen_t addrlen, int timeout_ms)
+	{
+#ifdef _WIN32
+		u_long on = 1;
+		ioctlsocket(fd, FIONBIO, &on);
+#else
+		const int flags = fcntl(fd, F_GETFL, 0);
+		fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+		bool ok = false;
+		int r = connect(fd, addr, addrlen);
+		if(r == 0){
+			ok = true;
+		} else {
+#ifdef _WIN32
+			const bool pending = WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+			const bool pending = errno == EINPROGRESS;
+#endif
+			if(pending){
+				fd_set wfds;
+				FD_ZERO(&wfds);
+				FD_SET(fd, &wfds);
+				struct timeval tv = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
+				if(select(fd + 1, NULL, &wfds, NULL, &tv) > 0){
+					int soerr = 0;
+					socklen_t len = sizeof(soerr);
+					if(getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&soerr,
+							&len) == 0 && soerr == 0)
+						ok = true;
+					else
+						std::cerr<<"connect: error "<<soerr<<std::endl;
+				} else {
+					std::cerr<<"connect: no answer in "<<timeout_ms<<" ms"<<std::endl;
+				}
+			} else {
+				std::cerr<<"connect: "<<strerror(errno)<<std::endl;
+			}
+		}
+#ifdef _WIN32
+		on = 0;
+		ioctlsocket(fd, FIONBIO, &on);
+#else
+		fcntl(fd, F_SETFL, flags);
+#endif
+		return ok;
+	}
+
 	bool connect_fd(const ss_ &address, const ss_ &port)
 	{
 		close_fd();
@@ -144,8 +193,16 @@ struct CTCPSocket: public TCPSocket
 				std::cerr<<"socket: "<<strerror(errno)<<std::endl;
 				continue;
 			}
-			if(connect(try_fd, res->ai_addr, res->ai_addrlen) == -1){
-				std::cerr<<"connect: "<<strerror(errno)<<std::endl;
+			// A connect with a ceiling, not a blocking one: the client's
+			// main thread sat in Winsock's connect for good when it
+			// connected to a local server that was not yet listening (the
+			// box's dump, 2026-09-21 -- the waiting screen had read a
+			// stale "Listening"); on Windows a SYN to a closed port is
+			// retried for seconds, and nothing in the frame loop ran.
+			// Non-blocking, a select of five seconds, then blocking again
+			// for the stream the socket is used as ([WIN8_START] 14).
+			if(!connect_with_timeout(try_fd, res->ai_addr, res->ai_addrlen,
+					5000)){
 				closesocket(try_fd);
 				continue;
 			}
