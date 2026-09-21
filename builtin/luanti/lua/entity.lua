@@ -983,7 +983,17 @@ function PlayerRef:get_wielded_item()
 	if not o then
 		return ItemStack()
 	end
-	return o.inventory:get_stack("main", o.wield_index)
+	local selected = o.inventory:get_stack("main", o.wield_index)
+	-- An empty hand is the "hand" list's first item when a game keeps one
+	-- (Player::getWieldedItem; VoxeLibre's mcl_meshhand puts its hand
+	-- there with the hand's own tool_capabilities and range)
+	if selected:get_name() == "" and o.inventory:get_size("hand") > 0 then
+		local hand = o.inventory:get_stack("hand", 1)
+		if not hand:is_empty() then
+			return hand
+		end
+	end
+	return selected
 end
 
 function PlayerRef:set_wielded_item(item)
