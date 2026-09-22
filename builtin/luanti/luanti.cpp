@@ -1893,8 +1893,21 @@ struct Module: public interface::Module, public luanti::Interface
 			log_d(MODULE, "Flushed %zu node writes", n);
 	}
 
+	RegionMap *m_region_map = nullptr;
+	void set_region_map(RegionMap *map)
+	{
+		m_region_map = map;
+	}
+
 	void buffer_node_write(int32_t x, int32_t y, int32_t z, uint32_t word)
 	{
+		// A body's voxel ([BODY_INTERACT]): written straight to its owner,
+		// which is not the map and has no buffer to land in
+		if(y >= REGION_Y){
+			if(m_region_map)
+				m_region_map->set(x, y, z, word);
+			return;
+		}
 		PendingNode node;
 		node.x = x;
 		node.y = y;
@@ -1927,6 +1940,13 @@ struct Module: public interface::Module, public luanti::Interface
 		auto it = m_node_writes.find(pos_key(x, y, z));
 		if(it != m_node_writes.end())
 			return it->second.word;
+		// A body's voxel ([BODY_INTERACT]), or ignore where no body is
+		if(y >= REGION_Y){
+			uint32_t word = 0;
+			if(m_region_map && m_region_map->get(x, y, z, word))
+				return word;
+			return 0;
+		}
 		// Before the world exists -- the mods are loading -- everything
 		// else is ignore; the buffer above still answers, which is what
 		// a mod's own load-time check of set_node and place_node reads

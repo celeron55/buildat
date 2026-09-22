@@ -111,9 +111,30 @@ function carve(player)
 	core.log("action", string.format("hill: top %d at (%d, %d); cavern y=%d..%d, roof %s",
 			best, bx, bz, best - 5, best - 3, roof))
 end
+-- The body's voxels as positions ([BODY_INTERACT]): region 0 starts at
+-- y = 1000000; its (2, 1, 2) is in the first body's middle. Read,
+-- dug with set_node, read again, eight seconds after the player's dig.
+local probe_at = nil
 core.register_on_dignode(function(pos, node, digger)
 	core.log("action", "hill: dug " .. node.name .. " at " ..
 			core.pos_to_string(pos))
+	if digger and digger:is_player() and probe_at == nil then
+		probe_at = core.get_us_time() + 8000000
+	end
+end)
+core.register_on_mods_loaded(function()
+	core.register_globalstep(function()
+		if probe_at and core.get_us_time() >= probe_at then
+			probe_at = nil
+			local p = {x = 2, y = 1000001, z = 2}
+			local before = core.get_node(p).name
+			core.set_node(p, {name = "air"})
+			core.log("action", "hill: region 0 (2, 1, 2) was " .. before ..
+					", set to air, reads " .. core.get_node(p).name ..
+					"; (2, 2, 2) reads " ..
+					core.get_node({x = 2, y = 1000002, z = 2}).name)
+		end
+	end)
 end)
 LUA
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
@@ -135,7 +156,7 @@ event scan_volume 6 t0
 mouse_down left
 delay 4000
 mouse_up left
-delay 10000
+delay 14000
 event scan_volume 6 after
 screenshot $out/hill_after.png
 delay 500

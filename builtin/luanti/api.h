@@ -32,8 +32,31 @@ namespace luanti
 		GameLoaded(SceneReference scene): scene(scene){}
 	};
 
+	// Nodes that are not the map's ([BODY_INTERACT]): a body that came off
+	// the world keeps its voxels in the same coordinate space, in a region
+	// far outside the map's bounds -- stacked in Y from REGION_Y, a
+	// REGION_STRIDE apart -- so that a position in it is an ordinary
+	// position to every mod. A module that owns such bodies gives the
+	// luanti module one of these, and get_node()/set_node() at a position
+	// past REGION_Y ask it instead of the map. Outside every body a
+	// region position reads as ignore (get() false) and a write is
+	// dropped. The words are the luanti voxel format's (id, the light
+	// nibbles, param2).
+	static const int32_t REGION_Y = 1000000;
+	static const int32_t REGION_STRIDE = 4096;
+	struct RegionMap
+	{
+		virtual ~RegionMap(){}
+		virtual bool get(int32_t x, int32_t y, int32_t z, uint32_t &word) = 0;
+		virtual bool set(int32_t x, int32_t y, int32_t z, uint32_t word) = 0;
+	};
+
 	struct Interface
 	{
+		// The region map above, or nullptr for none; the owner keeps it
+		// alive and unsets it before it goes
+		virtual void set_region_map(RegionMap *map) = 0;
+
 		// Load Luanti's builtin and the game's mods, and run them. The game
 		// is a directory with a game.conf, under user_path/luanti and not in
 		// anyone's Luanti install.

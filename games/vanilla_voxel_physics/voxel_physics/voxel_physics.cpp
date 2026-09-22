@@ -35,6 +35,7 @@
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
+#include <map>
 #include <sstream>
 #include <chrono>
 #include <cmath>
@@ -160,6 +161,13 @@ struct Module: public interface::Module
 		m_server(server)
 	{}
 
+	~Module()
+	{
+		luanti::access(m_server, [&](luanti::Interface *i){
+			i->set_region_map(nullptr);
+		});
+	}
+
 	void init()
 	{
 		m_server->sub_event(this, Event::t("luanti:game_loaded"));
@@ -168,6 +176,10 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:packet_received/main:place"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("voxelworld:node_volume_updated"));
+		m_regions.m = this;
+		luanti::access(m_server, [&](luanti::Interface *i){
+			i->set_region_map(&m_regions);
+		});
 		// Before the game runs: the luanti module keeps the chunk until
 		// then and runs it with the builtin, so the function is there when
 		// the game has loaded
@@ -548,19 +560,21 @@ struct Module: public interface::Module
 					std::max(hi.getY(), p.getY()), std::max(hi.getZ(), p.getZ()));
 		}
 		pv::Vector3DInt32 size = hi - lo + pv::Vector3DInt32(1, 1, 1);
-		interface::VoxelVolume volume(pv::Region(pv::Vector3DInt32(-1, -1, -1),
-				size), world->get_voxel_reg()->get_format().planes);
+		sp_<interface::VoxelVolume> volume(new interface::VoxelVolume(
+				pv::Region(pv::Vector3DInt32(-1, -1, -1), size),
+				world->get_voxel_reg()->get_format().planes));
+		m_format = world->get_voxel_reg()->get_format();
 		float mass = 0;
 		for(const pv::Vector3DInt32 &p : voxels){
 			VoxelSample v = world->get_sample(p, true);
 			set_state(v, SUPPORT_MAX, 0);
-			volume.set_sample_at(p.getX() - lo.getX(), p.getY() - lo.getY(),
+			volume->set_sample_at(p.getX() - lo.getX(), p.getY() - lo.getY(),
 					p.getZ() - lo.getZ(), v);
 			mass += props_of(id_of(world, v)).density;
 			world->set_voxel(p, VoxelInstance(CONTENT_AIR), true);
 			mark_changed(p);
 		}
-		ss_ data = interface::serialize_volume_compressed(volume);
+		ss_ data = interface::serialize_volume_compressed(*volume);
 		m_bodies++;
 		log_i(MODULE, "body %zu: %zu voxels from " PV3I_FORMAT " to "
 				PV3I_FORMAT ", mass %.0f", m_bodies, voxels.size(),
@@ -568,16 +582,129 @@ struct Module: public interface::Module
 		// The node a few ticks later: the terrain's collision shapes are
 		// rebuilt after the chunk's commit, and a body made on the same
 		// tick sat in the roof's old boxes and never moved (2026-09-22)
-		m_queued_bodies.push_back(QueuedBody{3, lo, data, mass, voxels});
+		m_queued_bodies.push_back(QueuedBody{3, lo, size, data, mass, voxels,
+				volume});
 	}
+
+	// A body that came off the world, and where its voxels live for the
+	// game's Lua ([BODY_INTERACT]): region k is the box from
+	// (0, REGION_Y + k * REGION_STRIDE, 0), a body voxel's position is
+	// base + local, and the luanti module's get_node()/set_node() there
+	// come to get()/set() below. The volume is the one the node's
+	// voxel_body_data was made from, with its one-voxel border, so local
+	// (0, 0, 0) is the body's first voxel.
+	struct Body
+	{
+		int k = 0;
+		uint node_id = 0;
+		pv::Vector3DInt32 size;
+		up_<interface::VoxelVolume> volume;
+	};
+	std::map<int, Body> m_body_by_k;
+	int m_next_k = 0;
+
+	Body* body_at(int32_t x, int32_t y, int32_t z, pv::Vector3DInt32 *local)
+	{
+		if(y < luanti::REGION_Y)
+			return nullptr;
+		int k = (y - luanti::REGION_Y) / luanti::REGION_STRIDE;
+		auto it = m_body_by_k.find(k);
+		if(it == m_body_by_k.end())
+			return nullptr;
+		Body &b = it->second;
+		pv::Vector3DInt32 l(x, y - luanti::REGION_Y - k * luanti::REGION_STRIDE, z);
+		if(l.getX() < 0 || l.getY() < 0 || l.getZ() < 0 ||
+				l.getX() >= b.size.getX() || l.getY() >= b.size.getY() ||
+				l.getZ() >= b.size.getZ())
+			return nullptr;
+		*local = l;
+		return &b;
+	}
+
+	struct Regions: public luanti::RegionMap
+	{
+		Module *m;
+		bool get(int32_t x, int32_t y, int32_t z, uint32_t &word)
+		{
+			pv::Vector3DInt32 l;
+			Body *b = m->body_at(x, y, z, &l);
+			if(!b)
+				return false;
+			word = b->volume->sample_at(l).planes[0];
+			return true;
+		}
+		bool set(int32_t x, int32_t y, int32_t z, uint32_t word)
+		{
+			pv::Vector3DInt32 l;
+			Body *b = m->body_at(x, y, z, &l);
+			if(!b)
+				return false;
+			VoxelSample v = b->volume->sample_at(l);
+			v.planes[0] = word;
+			b->volume->set_sample_at(l.getX(), l.getY(), l.getZ(), v);
+			m->rebuild_body(*b);
+			return true;
+		}
+	} m_regions;
+
+	// The node's mesh data and its shapes after a voxel of the body
+	// changed: the whole volume again, and a box per voxel left. A body
+	// with nothing left goes. simplified: a body cut in two stays one
+	// body.
+	void rebuild_body(Body &b)
+	{
+		ss_ data = interface::serialize_volume_compressed(*b.volume);
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->check_scene(m_scene);
+			Node *n = scene->GetNode(b.node_id);
+			if(!n)
+				return;
+			n->SetVar(StringHash("voxel_body_data"), Variant(
+					PODVector<uint8_t>((const uint8_t*)data.c_str(),
+					data.size())));
+			PODVector<CollisionShape*> shapes;
+			n->GetComponents<CollisionShape>(shapes);
+			for(CollisionShape *s : shapes)
+				s->Remove();
+			size_t left = 0;
+			float mass = 0;
+			const interface::VoxelFormat &f = voxel_format();
+			for(int z = 0; z < b.size.getZ(); z++)
+			for(int y = 0; y < b.size.getY(); y++)
+			for(int x = 0; x < b.size.getX(); x++){
+				uint32_t id = f.id_of(b.volume->sample_at(x, y, z).planes[0]);
+				if(!props_of(id).structural)
+					continue;
+				CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
+				shape->SetBox(Vector3::ONE, Vector3(x + 0.5f, y + 0.5f, z + 0.5f));
+				left++;
+				mass += props_of(id).density;
+			}
+			RigidBody *body = n->GetComponent<RigidBody>();
+			if(left == 0){
+				log_i(MODULE, "body %d: nothing left; gone", b.k);
+				n->Remove();
+				m_body_by_k.erase(b.k);
+				return;
+			}
+			if(body)
+				body->SetMass(mass > 0 ? mass : 1.0f);
+			log_v(MODULE, "body %d rebuilt: %zu voxels", b.k, left);
+		});
+	}
+
+	interface::VoxelFormat m_format;
+	const interface::VoxelFormat& voxel_format() { return m_format; }
 
 	struct QueuedBody
 	{
 		int ticks;
 		pv::Vector3DInt32 lo;
+		pv::Vector3DInt32 size;
 		ss_ data;
 		float mass;
 		std::vector<pv::Vector3DInt32> voxels;
+		sp_<interface::VoxelVolume> volume;
 	};
 	std::vector<QueuedBody> m_queued_bodies;
 
@@ -599,6 +726,18 @@ struct Module: public interface::Module
 			body->SetFriction(0.8f);
 			body->SetMass(mass > 0 ? mass : 1.0f);
 			m_body_nodes.push_back(n->GetID());
+			// Its region, for the game's Lua ([BODY_INTERACT])
+			Body &rec = m_body_by_k[m_next_k];
+			rec.k = m_next_k++;
+			rec.node_id = n->GetID();
+			rec.size = b.size;
+			rec.volume.reset(new interface::VoxelVolume(*b.volume));
+			n->SetVar(StringHash("voxel_body_region"), Variant((int)rec.k));
+			log_i(MODULE, "body node %u is region %d: its voxels at "
+					"(0..%d, %d..%d, 0..%d)", n->GetID(), rec.k,
+					b.size.getX() - 1, luanti::REGION_Y + rec.k * luanti::REGION_STRIDE,
+					luanti::REGION_Y + rec.k * luanti::REGION_STRIDE + b.size.getY() - 1,
+					b.size.getZ() - 1);
 			for(const pv::Vector3DInt32 &p : voxels){
 				CollisionShape *shape = n->CreateComponent<CollisionShape>(LOCAL);
 				shape->SetBox(Vector3::ONE, Vector3(
