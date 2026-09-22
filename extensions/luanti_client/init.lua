@@ -2314,7 +2314,9 @@ local function show_client(host, port, name, password, mode)
 				if lx >= b.x and lx < b.x + b.w and
 						ly >= b.y and ly < b.y + b.h then
 					local fields = form_fields()
-					fields[b.name] = ""
+					-- A hypertext's action says which one it was; a button
+					-- says only that it was pressed ([FORMSPEC_SCROLL])
+					fields[b.name] = b.value or ""
 					if b.exit then
 						fields.quit = "true"
 					end

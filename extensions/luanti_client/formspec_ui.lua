@@ -961,6 +961,48 @@ function M.new(magic, buildat, log, ctx)
 				if x and w then
 					draw_table(e, x, y, w, h)
 				end
+			elseif name == "hypertext" then
+				-- hypertext[X,Y;W,H;name;text]: the text with its tags
+				-- taken out, wrapped in the box, and each <action ...>
+				-- run as a button under it ([FORMSPEC_SCROLL]). Clicking
+				-- one sends the element's name with "action:<the action's
+				-- name>", which is what Luanti's own client sends.
+				--
+				-- simplified: no styling from the tags -- no colour, size,
+				-- bold, italic, image or table -- and the actions are
+				-- gathered under the text rather than staying inline where
+				-- they were written.
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				local hname = e.fields[3]
+				local raw = formspec.unescape(e.raw[4] or "")
+				if x and w then
+					local actions = {}
+					-- <action name=foo>label</action>, and the older
+					-- <action name=foo> with no closing tag
+					for aname, atext in raw:gmatch(
+							"<action%s+name=([%w_]+)%s*>(.-)</action>") do
+						actions[#actions + 1] = {name = aname,
+								text = atext:gsub("<[^>]*>", "")}
+					end
+					local text = raw:gsub("<[^>]*>", "")
+					text = formspec.strip_escapes(text)
+					local t = label(window, x + 2, y + 2, w - 4, text, 12)
+					t:SetWordwrap(true)
+					local by = y + h
+					for i = #actions, 1, -1 do
+						local a = actions[i]
+						by = by - 20
+						box(window, x + 2, by, w - 4, 18,
+								magic.Color(0.3, 0.3, 0.38, 0.9))
+						local at_ = label(window, x + 6, by + 1, w - 12,
+								a.text ~= "" and a.text or a.name, 12)
+						at_:SetTextAlignment(1)
+						buttons[#buttons + 1] = {name = hname,
+								value = "action:"..a.name,
+								x = x + 2, y = by, w = w - 4, h = 18}
+					end
+				end
 			elseif name == "scrollbaroptions" then
 				-- scrollbaroptions[opt=value;...]: what the next scrollbar's
 				-- range is. Only max is read; the steps are how far a key
