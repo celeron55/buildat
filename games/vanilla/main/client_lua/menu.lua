@@ -184,6 +184,9 @@ local function add_filter(menu, filter, total, shown, on_change)
 	end
 	local edit = menu.window:CreateChild("LineEdit")
 	edit:SetStyleAuto()
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	edit.textCopyable = true
+	edit.textSelectable = true
 	edit.minHeight = 26
 	edit.enabled = true
 	edit:SetText(filter)
@@ -658,6 +661,9 @@ function draw_settings(paths)
 	end
 	local edit = menu.window:CreateChild("LineEdit")
 	edit:SetStyleAuto()
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	edit.textCopyable = true
+	edit.textSelectable = true
 	edit.minHeight = 26
 	edit.enabled = true
 	edit:SetText("")
@@ -699,6 +705,9 @@ function draw_contentdb(flat)
 			(contentdb_query ~= "" and (" matching \"" .. contentdb_query .. "\"") or ""))
 	local edit = menu.window:CreateChild("LineEdit")
 	edit:SetStyleAuto()
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	edit.textCopyable = true
+	edit.textSelectable = true
 	edit.minHeight = 26
 	edit.enabled = true
 	edit:SetText(contentdb_query)
@@ -806,16 +815,44 @@ end)
 -- A new save, in the two steps importing a world already takes: which game,
 -- and then what to call it. The name field is on the second screen with the
 -- game it is for, rather than above a column of one button per game.
-function draw_new_save_name(gameid)
+-- The mapgens Luanti ships, official's default first ([NEW_WORLD_FORM]):
+-- what the world is made of is a choice made once, when it is made, and a
+-- world made with the wrong one is a world made again.
+--
+-- simplified: a constant rather than core.get_mapgen_names(), which is the
+-- engine's answer and there is no engine running while the menu is up. The
+-- upgrade path is the luanti module answering a main:get_mapgens packet.
+local MAPGENS = {"v7", "v5", "valleys", "carpathian", "flat", "fractal",
+		"v6", "singlenode"}
+
+-- What the screen was holding when a create failed, so that a name already
+-- taken does not throw the rest away ([NEW_WORLD_FORM]); nil when no create
+-- is outstanding
+local creating = nil
+
+function draw_new_save_name(gameid, state)
+	state = state or {}
 	local menu = import_menu("New save, playing " .. gameid)
+	-- Why the last create did not happen, on the screen rather than in a
+	-- dialog: a dialog closes the screen and the name, the seed and the
+	-- toggles go with it
+	if state.error then
+		local why = menu.window:CreateChild("Text")
+		why:SetStyleAuto()
+		why:SetText(state.error)
+		why.color = magic.Color(1, 0.5, 0.5)
+	end
 	local text = menu.window:CreateChild("Text")
 	text:SetStyleAuto()
 	text:SetText("named:")
 	local edit = menu.window:CreateChild("LineEdit")
 	edit:SetStyleAuto()
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	edit.textCopyable = true
+	edit.textSelectable = true
 	edit.minHeight = 26
 	edit.enabled = true
-	edit:SetText("world")
+	edit:SetText(state.name or "world")
 	-- The seed, beside the name: empty is a random one; a number is
 	-- Luanti's fixed_map_seed for this world ([FIRST_RUN]: the driven
 	-- first run types the seed it knows how to play)
@@ -824,12 +861,16 @@ function draw_new_save_name(gameid)
 	seed_text:SetText("seed (empty for a random one):")
 	local seed_edit = menu.window:CreateChild("LineEdit")
 	seed_edit:SetStyleAuto()
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	seed_edit.textCopyable = true
+	seed_edit.textSelectable = true
 	seed_edit.minHeight = 26
 	seed_edit.enabled = true
-	seed_edit:SetText("")
+	seed_edit:SetText(state.seed or "")
 	-- The new world's two world.mt flags, official's defaults
 	-- ([WORLD_LIST]); the buttons say their state
-	local flags = {creative_mode = false, enable_damage = true}
+	local flags = state.flags or
+			{creative_mode = false, enable_damage = true}
 	for _, f in ipairs({{"creative_mode", "Creative mode"},
 			{"enable_damage", "Enable damage"}}) do
 		local b
@@ -838,20 +879,43 @@ function draw_new_save_name(gameid)
 			b:GetChild("ButtonText"):SetText((flags[f[1]] and "[x] " or "[ ] ") .. f[2])
 		end)
 	end
+	-- Which mapgen, one button each with the picked one marked: the same
+	-- shape as the flags above, and the sandbox has no dropdown
+	local mapgen = state.mapgen or MAPGENS[1]
+	local mapgen_buttons = {}
+	for _, name in ipairs(MAPGENS) do
+		local b
+		b = menu:add((mapgen == name and "[x] " or "[ ] ") .. "mapgen " ..
+				name, function()
+			mapgen = name
+			for other, ob in pairs(mapgen_buttons) do
+				ob:GetChild("ButtonText"):SetText(
+						(mapgen == other and "[x] " or "[ ] ") ..
+						"mapgen " .. other)
+			end
+		end)
+		mapgen_buttons[name] = b
+	end
 	menu:add("Create and play", function()
 		local name = edit:GetText()
 		local seed = seed_edit:GetText()
+		-- Kept, so that a create the server refuses comes back to this
+		-- screen with what was typed still in it
+		creating = {gameid = gameid, name = name, seed = seed,
+				mapgen = mapgen, flags = flags}
 		waiting("Creating " .. name .. "...")
 		buildat.send_packet("main:create",
 				cereal.binary_output({name, gameid, seed,
 				flags.creative_mode and "true" or "false",
-				flags.enable_damage and "true" or "false"},
+				flags.enable_damage and "true" or "false", mapgen},
 				{"array", "string"}))
 	end)
 	menu:add("< back", function()
 		draw_new_game()
 	end)
 	magic.input:SetMouseVisible(true, "a menu screen")
+	-- The focus in the name, which is the field an error is usually about
+	magic.ui:SetFocusElement(edit)
 end
 
 function draw_new_game()
@@ -943,6 +1007,9 @@ local function draw_import_world_name(world)
 	text:SetText("as a save named:")
 	local edit = menu.window:CreateChild("LineEdit")
 	edit:SetStyleAuto()
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	edit.textCopyable = true
+	edit.textSelectable = true
 	edit.minHeight = 26
 	edit.enabled = true
 	edit:SetText(world[1])
@@ -1148,6 +1215,17 @@ end)
 buildat.sub_packet("main:menu_error", function(data)
 	local message = cereal.binary_input(data, {"array", "string"})[1]
 	log:warning("menu: " .. tostring(message))
+	-- A create that did not happen goes back to the screen it came from
+	-- with the name, the seed, the toggles and the mapgen still in it
+	-- ([NEW_WORLD_FORM]): a dialog here would close the screen and throw
+	-- all of it away
+	if creating then
+		local state = creating
+		creating = nil
+		state.error = tostring(message)
+		draw_new_save_name(state.gameid, state)
+		return
+	end
 	-- The list is asked for again once the dialog is gone, not while it is
 	-- up: the dialog is on top of the menu in the UI stack, and drawing the
 	-- menu again takes the menu's own root out from under it
@@ -1158,6 +1236,7 @@ end)
 
 -- The world is up and main/init.lua is what draws from here on
 buildat.sub_packet("main:menu_done", function()
+	creating = nil
 	log:info("menu: done; the world is up")
 	done = true
 	waiting_text = nil

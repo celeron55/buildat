@@ -166,6 +166,9 @@ local function ask_user(uri, entry, on_answer, suggested)
 
 	local edit = window:CreateChild("LineEdit")
 	edit:SetStyleAuto()
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	edit.textCopyable = true
+	edit.textSelectable = true
 	edit.minHeight = 24
 	edit.minWidth = 380
 	edit:SetText((entry and entry.description ~= "" and entry.description) or

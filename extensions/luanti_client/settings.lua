@@ -163,6 +163,9 @@ function M.show()
 		text.text = label
 		local edit = menu.window:CreateChild("LineEdit")
 		edit:SetStyleAuto()
+		-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+		edit.textCopyable = true
+		edit.textSelectable = true
 		edit:SetFixedHeight(26)
 		edit.minWidth = 300
 		edit:SetText(value or "")

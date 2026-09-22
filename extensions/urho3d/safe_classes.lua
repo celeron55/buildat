@@ -1509,6 +1509,13 @@ function M.define(dst, util)
 			-- typed, as its code point; 0 shows the text itself
 			echoCharacter = util.simple_property("number"),
 			maxLength = util.simple_property("number"),
+			-- Whether Ctrl+C and Ctrl+V work in the field, which Urho3D
+			-- does itself and which nothing here turned on
+			-- ([NEW_WORLD_FORM]): a friend's seed can be pasted in. The
+			-- clipboard is the user's own and the field is the user's own,
+			-- so this moves nothing the user did not ask to move.
+			textCopyable = util.simple_property("boolean"),
+			textSelectable = util.simple_property("boolean"),
 		},
 	})
 

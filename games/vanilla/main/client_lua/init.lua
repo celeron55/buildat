@@ -2499,6 +2499,9 @@ local function open_chat()
 		return
 	end
 	chat_input = magic.ui.root:CreateChild("LineEdit")
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	chat_input.textCopyable = true
+	chat_input.textSelectable = true
 	chat_input.defaultStyle = CHAT_STYLE
 	chat_input:SetStyleAuto()
 	chat_input.horizontalAlignment = magic.HA_LEFT

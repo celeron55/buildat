@@ -1227,6 +1227,9 @@ function M.new(magic, buildat, log, ctx)
 					-- typed into; it is drawn dark with light text in it,
 					-- which is what Luanti's own field looks like
 					local edit = window:CreateChild("LineEdit")
+					-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+					edit.textCopyable = true
+					edit.textSelectable = true
 					if ctx.style then
 						edit.defaultStyle = ctx.style
 					end

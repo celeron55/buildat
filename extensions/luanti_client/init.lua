@@ -262,6 +262,9 @@ local function labeled_edit(parent, label, value)
 	text.text = label
 	local edit = parent:CreateChild("LineEdit")
 	edit:SetStyleAuto()
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	edit.textCopyable = true
+	edit.textSelectable = true
 	-- Fixed, not min: a column beside a tall list would stretch it
 	edit:SetFixedHeight(26)
 	edit.minWidth = 300
@@ -3264,6 +3267,9 @@ local function show_client(host, port, name, password, mode)
 			caption.color = magic.Color(0.8, 0.8, 0.85)
 
 			chat_input = chat_window:CreateChild("LineEdit")
+			-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+			chat_input.textCopyable = true
+			chat_input.textSelectable = true
 			chat_input.defaultStyle = style
 			chat_input:SetStyleAuto()
 			chat_input:SetPosition(12, 30)

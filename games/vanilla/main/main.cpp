@@ -1892,6 +1892,19 @@ struct Module: public interface::Module
 		start_world(gameid, name, packet.sender);
 	}
 
+	// The mapgens Luanti ships. A world's mg_name comes from the menu, so
+	// it is checked against this before it is written into world.mt
+	// ([NEW_WORLD_FORM]).
+	static bool is_mapgen_name(const ss_ &name)
+	{
+		for(const char *n : {"v7", "v5", "valleys", "carpathian", "flat",
+				"fractal", "v6", "singlenode"}){
+			if(name == n)
+				return true;
+		}
+		return false;
+	}
+
 	void on_create(const network::Packet &packet)
 	{
 		sv_<ss_> values;
@@ -1942,6 +1955,13 @@ struct Module: public interface::Module
 					std::map<ss_, ss_> set;
 					set["creative_mode"] = values[3] == "true" ? "true" : "false";
 					set["enable_damage"] = values[4] == "true" ? "true" : "false";
+					// The sixth is which mapgen the world is made with
+					// ([NEW_WORLD_FORM]), written before the first load
+					// because a world is made with one mapgen once. Only
+					// a name out of the list the menu offers, because
+					// this goes into the world's own settings file.
+					if(values.size() > 5 && is_mapgen_name(values[5]))
+						set["mg_name"] = values[5];
 					write_world_mt(save->path()+"/luanti/world.mt", set);
 				}
 				istorage->close(save);

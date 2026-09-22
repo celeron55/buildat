@@ -82,6 +82,9 @@ local function make_labeled_edit(parent, label, value, width)
 	text.text = label
 	local edit = parent:CreateChild("LineEdit")
 	edit:SetStyleAuto()
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	edit.textCopyable = true
+	edit.textSelectable = true
 	-- Fixed, not min: a column beside a tall list would stretch it
 	edit:SetFixedHeight(26)
 	edit.minWidth = width or 300
