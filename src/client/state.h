@@ -24,6 +24,10 @@ namespace client
 		virtual ss_ get_file_path(const ss_ &name, ss_ *dst_file_hash = NULL) = 0;
 		// Throws exception if not found
 		virtual ss_ get_file_content(const ss_ &name) = 0;
+		// The connection dropped and the state made ready for another: a
+		// menu-only connection left for the launcher ([MENU_CONTEXT]); what
+		// the sandbox kept is client/sandbox.lua's __buildat_reset_sandbox
+		virtual void reset() = 0;
 	};
 
 	State* createState(sp_<app::App> app);

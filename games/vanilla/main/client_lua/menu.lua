@@ -388,6 +388,11 @@ function draw(saves, save_games)
 	under:add("Import a world from Luanti...", function()
 		ask_for_imports("worlds")
 	end)
+	-- Back to the launcher's grid ([MENU_CONTEXT]); a client that came
+	-- straight to this server leaves it instead
+	under:add("< back to the launcher", function()
+		buildat.leave()
+	end)
 
 	-- The right column: the glance, the flags, Play and Delete
 	panel = {lines = {}, flags = {}}

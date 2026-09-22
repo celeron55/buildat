@@ -102,6 +102,19 @@ struct CState: public State
 		setup_packet_handlers();
 	}
 
+	void reset()
+	{
+		log_i(MODULE, "client::State: reset for another connection");
+		m_socket = sp_<interface::TCPSocket>(interface::createTCPSocket());
+		m_socket_buffer.clear();
+		m_packet_stream = interface::PacketStream();
+		m_file_hashes.clear();
+		m_waiting_files.clear();
+		m_tell_after_all_files_transferred_requested = false;
+		m_connected = false;
+		m_disconnected = false;
+	}
+
 	void update()
 	{
 		if(m_disconnected)

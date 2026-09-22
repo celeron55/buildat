@@ -183,7 +183,10 @@ UnsubscribeFromEvent = nil
 
 local sandbox_callback_to_global_function_name = {}
 local next_sandbox_global_function_i = 1
-local global_event_mux = {} -- event_type -> { {name=, fn=}, ... }
+local global_event_mux = {} -- event_type -> { {name=, fn=, sandbox=}, ... }
+-- Set around add_global_event_handler() by a subscription made from the
+-- sandbox; see caller_in_sandbox()
+local from_sandbox = false
 local global_event_mux_installed = {}
 
 local function add_global_event_handler(event_type, cb_name, fn)
@@ -221,7 +224,24 @@ local function add_global_event_handler(event_type, cb_name, fn)
 		urho_SubscribeToEvent(event_type, mux_name)
 		global_event_mux_installed[event_type] = true
 	end
-	table.insert(global_event_mux[event_type], {name = cb_name, fn = fn})
+	table.insert(global_event_mux[event_type], {name = cb_name, fn = fn,
+			sandbox = from_sandbox})
+end
+
+-- Every global handler a sandboxed script subscribed, dropped; the
+-- object-specific ones go with their objects
+local function drop_sandbox_handlers()
+	local n = 0
+	for event_type, list in pairs(global_event_mux) do
+		for i = #list, 1, -1 do
+			if list[i].sandbox then
+				table.remove(list, i)
+				n = n + 1
+			end
+		end
+	end
+	log:info("drop_sandbox_handlers(): "..n.." handlers dropped")
+	return n
 end
 
 local function remove_global_event_handler(event_type, cb_name)
@@ -238,6 +258,12 @@ end
 
 function Safe.SubscribeToEvent(x, y, z)
 	log:debug("Safe.SubscribeToEvent("..dump(x)..", "..dump(y)..", "..dump(z)..")")
+	-- Whether the subscriber is sandboxed game code: its environment's
+	-- buildat says so ([MENU_CONTEXT] drops those handlers on leaving)
+	local caller_env = getfenv(2)
+	local subscriber_in_sandbox = type(caller_env) == "table" and
+			type(caller_env.buildat) == "table" and
+			caller_env.buildat.is_in_sandbox == true
 	local object = x
 	local sub_event_type = y
 	local callback = z
@@ -344,8 +370,10 @@ function Safe.SubscribeToEvent(x, y, z)
 		local unsafe_object = getmetatable(object).unsafe
 		urho_SubscribeToEvent(unsafe_object, sub_event_type, global_callback_name)
 	else
+		from_sandbox = subscriber_in_sandbox
 		add_global_event_handler(sub_event_type, global_callback_name,
 				_G[global_callback_name])
+		from_sandbox = false
 	end
 	log:debug("-> global_callback_name="..dump(global_callback_name))
 	return global_callback_name
@@ -755,6 +783,7 @@ end
 --
 
 local M = {}
+M.drop_sandbox_handlers = drop_sandbox_handlers
 M.safe = Safe
 M.unsafe = Unsafe
 

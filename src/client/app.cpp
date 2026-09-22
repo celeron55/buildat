@@ -1353,6 +1353,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(list_preferences)
 		DEF_BUILDAT_FUNC(get_env)
 		DEF_BUILDAT_FUNC(is_scripted)
+		DEF_BUILDAT_FUNC(leave_to_menu)
 		DEF_BUILDAT_FUNC(http_get)
 		DEF_BUILDAT_FUNC(http_poll)
 
@@ -2751,6 +2752,30 @@ struct CApp: public App, public magic::Application
 	}
 
 	// disconnect()
+	// leave_to_menu(): a menu-only connection left for the launcher without
+	// exiting the client ([MENU_CONTEXT]): the local server stopped, the
+	// state made ready for another connection, and the sandbox's leavings
+	// dropped (client/sandbox.lua). The UI stack is the launcher's to pop.
+	static int l_leave_to_menu(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		log_i(MODULE, "leave_to_menu()");
+		// The quit path's stop, which terminates, waits for the port and
+		// reaps the child (request_stop alone leaves a zombie that reads
+		// as a running server); a menu-only server is gone in a second
+		stop_local_server();
+		self->m_state->reset();
+		self->m_lost_connection_us = 0;
+		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_reset_sandbox");
+		if(lua_isfunction(L, -1))
+			error_logging_pcall(L, 0, 0);
+		else
+			lua_pop(L, 1);
+		return 0;
+	}
+
 	static int l_disconnect(lua_State *L)
 	{
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");

@@ -26,6 +26,11 @@ function __buildat_handle_packet(name, data)
 	end
 end
 
+-- Every handler dropped: a menu-only connection left ([MENU_CONTEXT])
+function __buildat_reset_packet_subs()
+	packet_subs = {}
+end
+
 function buildat.sub_packet(name, cb)
 	packet_subs[name] = cb
 end

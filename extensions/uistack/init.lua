@@ -137,6 +137,20 @@ function M.UIStack(root)
 		last_stack_with_pushed_element = self
 		return element
 	end
+	-- Everything above `root` popped, top down, root itself included when
+	-- inclusive; the launcher leaving a menu-only game ([MENU_CONTEXT])
+	function self:pop_to(root, inclusive)
+		while #self.stack > 0 do
+			local top = self.stack[#self.stack]
+			if top == root and not inclusive then
+				return
+			end
+			self:pop(top)
+			if top == root then
+				return
+			end
+		end
+	end
 	function self:pop(current_top_root)
 		if type(self) ~= 'table' or not self.is_ui_stack then
 			error("self is not an instance of UIStack")

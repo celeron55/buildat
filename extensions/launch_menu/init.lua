@@ -89,11 +89,30 @@ local function make_labeled_edit(parent, label, value, width)
 	return edit
 end
 
+-- The placeholder under a running game's screens; leave_game() pops the
+-- stack down through it
+local game_root = nil
+
+-- A menu-only connection left for the launcher ([MENU_CONTEXT]): the
+-- client drops the connection, the server and the sandbox's leavings
+-- (__buildat_leave_to_menu), and the stack comes back to the grid
+local function leave_game()
+	if not game_root then
+		return
+	end
+	__buildat_leave_to_menu()
+	-- Down to the grid, the stack's first screen: the starting screen
+	-- and the placeholder above it go with the game's own
+	uistack.main:pop_to(uistack.main.stack[1], false)
+	game_root = nil
+	magic.input:SetMouseVisible(true, "back to the launcher")
+end
+
 local function connect_or_show_error(address)
 	local ok, err = buildat.connect_server(address)
 	if ok then
 		log:info("connect_server() ok")
-		uistack.main:push({desc="empty (game is running)"})
+		game_root = uistack.main:push({desc="empty (game is running)"})
 		magic.ui:SetFocusElement(nil)
 	else
 		log:info("connect_server() failed")
@@ -393,6 +412,7 @@ M.show_connect_to_server = show_connect_to_server
 -- And starting a game by name, which is what a tile on the launch grid
 -- ends in ([LAUNCH_GRID]); the same screens as picking it from the list
 M.start_local_game = start_local_game
+M.leave_game = leave_game
 -- And the same two for the sandboxed launcher file ([LAUNCH_GRID]): each
 -- pushes a trusted screen and comes back, and takes nothing from the caller
 M.safe = {

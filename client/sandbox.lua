@@ -96,6 +96,33 @@ __buildat_sandbox_environment.require = function(name)
 	error("require: \""..name.."\" not found in sandbox")
 end
 
+-- What a connection's sandboxed scripts left behind, dropped, so that a
+-- menu-only connection can be left for the launcher without exiting the
+-- client ([MENU_CONTEXT]): the packet handlers, the module halves'
+-- require cache, the event mux's sandbox handlers, and the replicated
+-- scene's children (the game's camera, zone, sky). The UI stack is the
+-- launcher's to pop. simplified: what the module halves put in C++ --
+-- composed textures, the voxel registry -- stays; a new connection
+-- replaces it by name.
+function __buildat_reset_sandbox()
+	__buildat_reset_packet_subs()
+	for name, _ in pairs(package.loaded) do
+		if string.match(name, '^buildat/module/') then
+			package.loaded[name] = nil
+		end
+	end
+	__buildat_reset_modules()
+	local urho3d = package.loaded["buildat/extension/urho3d"]
+	if urho3d and urho3d.drop_sandbox_handlers then
+		urho3d.drop_sandbox_handlers()
+	end
+	local replicate = package.loaded["buildat/extension/replicate"]
+	if replicate and replicate.reset then
+		replicate.reset()
+	end
+	log:info("__buildat_reset_sandbox(): done")
+end
+
 --
 -- Sandbox environment debugging
 --

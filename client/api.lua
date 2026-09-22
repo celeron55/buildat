@@ -86,6 +86,17 @@ buildat.read_image        = __buildat_read_image
 buildat.get_env           = __buildat_get_env
 
 buildat.safe.disconnect    = __buildat_disconnect
+-- leave(): back to the launcher's grid when there is one under the game
+-- ([MENU_CONTEXT]: the game's own menu offers it), else what disconnect
+-- does -- a client started straight into a server has nothing to go back to
+buildat.safe.leave = function()
+	local launch_menu = package.loaded["buildat/extension/launch_menu"]
+	if launch_menu and launch_menu.leave_game then
+		launch_menu.leave_game()
+	else
+		__buildat_disconnect()
+	end
+end
 -- The one preference a game may set ([BOX_FIXES] b): the player's ear.
 -- Official's pause menu has mute and volume, and that is where a player
 -- reaches for them. get_sound() -> mute, volume; set_sound(mute, volume)
