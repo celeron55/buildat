@@ -40,6 +40,7 @@ local luanti_hud = dofile(path.."/hud.lua")
 -- On the HUD module's table rather than a local of its own: the connect
 -- callback below is at Lua's 60-upvalue line ([EXT_HUD_PARITY])
 luanti_hud.minimap = dofile(path.."/res/minimap.lua")
+luanti_hud.hotbar = dofile(path.."/res/hotbar.lua")
 local sounds = dofile(path.."/sounds.lua")
 local formspec = dofile(path.."/formspec.lua")
 local formspec_ui = dofile(path.."/formspec_ui.lua")
@@ -1767,9 +1768,43 @@ local function show_client(host, port, name, password, mode)
 
 		local held = nil
 
-		-- The hotbar and the health bar, remade when what they show changes
+		-- The health bar, remade when what it shows changes; the hotbar
+		-- beside it is the row both clients share ([EXT_HOTBAR]) and keeps
+		-- its own elements
 		local hud = nil
 		local hud_key = nil
+		local hotbar_look = nil
+		local hotbar_row = luanti_hud.hotbar.new{
+			magic = magic, buildat = buildat, log = log,
+			white = magic.cache:GetResource("Texture2D",
+					"luanti_client/res/white.png"),
+			font = magic.cache:GetResource("Font", buildat.font_mono),
+			texture = function(name)
+				if not name or name == "" then
+					return nil
+				end
+				local resource = media_texture(name)
+				local tex = resource and
+						magic.cache:GetResource("Texture2D", resource)
+				if tex then
+					tex.filterMode = magic.FILTER_NEAREST
+				end
+				return tex
+			end,
+			stack = function(stack)
+				if not stack or stack.count == 0 then
+					return nil, nil, nil
+				end
+				local resource = item_image(stack.name)
+				local tex = resource and
+						magic.cache:GetResource("Texture2D", resource)
+				if tex then
+					tex.filterMode = magic.FILTER_NEAREST
+				end
+				return tex, stack.count > 1 and tostring(stack.count) or "",
+						stack.name
+			end,
+		}
 
 		-- The game's own HUD: what the server said is on the screen, the
 		-- element holding it, and whether that has to be built again. The
@@ -1903,12 +1938,34 @@ local function show_client(host, port, name, password, mode)
 			if game_hud_stale or size ~= game_hud_size then
 				game_hud_stale = false
 				game_hud_size = size
+
 				if game_hud then
 					game_hud:Remove()
 				end
 				local missing
-				game_hud, missing = ui:hud_elements(ui_root, hud_elements,
-						ui_root.width, ui_root.height)
+				local images
+				-- What a screen pixel is in this UI's units, which is what
+				-- Luanti multiplies a HUD element's sizes and offsets by
+				-- ([EXT_HOTBAR])
+				game_hud, missing, images = ui:hud_elements(ui_root,
+						hud_elements, ui_root.width, ui_root.height,
+						ui_root.width / math.max(1, buildat.logical_size() or
+						magic.graphics.width))
+				-- The lowest of the game's own image elements, which for a
+				-- game that draws its hotbar's background itself is that
+				-- background; the check reads it against the row
+				-- ([EXT_HOTBAR])
+				local low = nil
+				for _, im in ipairs(images) do
+					if not low or im.y + im.h > low.y + low.h then
+						low = im
+					end
+				end
+				if low then
+					log:info("hud image lowest: \""..tostring(low.name)..
+							"\" at "..low.x..","..low.y.." "..low.w.."x"..
+							low.h)
+				end
 				if not game_hud_missing and next(missing) then
 					game_hud_missing = true
 					local names = {}
@@ -1921,27 +1978,24 @@ local function show_client(host, port, name, password, mode)
 			end
 			game_hud.visible = on
 
-			-- simplified: the hotbar flag takes this client's own hotbar
-			-- away and the health bar goes with it, because the two are one
-			-- element here. A game that turns off the hotbar and keeps the
-			-- health bar is not one this has met.
-			if not on or not luanti_hud.has_flag(hud_flags,
-					luanti_hud.FLAG.hotbar) then
-				if hud then
-					hud:Remove()
-					hud = nil
-					hud_key = nil
-				end
-				return
-			end
+			local show_hotbar = on and luanti_hud.has_flag(hud_flags,
+					luanti_hud.FLAG.hotbar)
 			local list = inv and inv.main or nil
-			local healthbar = luanti_hud.has_flag(hud_flags,
+			local healthbar = on and luanti_hud.has_flag(hud_flags,
 					luanti_hud.FLAG.healthbar)
+			-- The game's own two pictures for the row, which is what makes
+			-- it look like the game's rather than like nothing
+			-- ([EXT_HOTBAR]); a game that sends neither gets Luanti's own
+			-- per-slot squares, as official does.
+			local params = client.hud_params or {}
+			local count = params[luanti_hud.PARAM_HOTBAR_ITEMCOUNT] or
+					HOTBAR_SLOTS
 			local key = tostring(wield_index).."/"..tostring(client.hp)..
-					"/"..tostring(healthbar)
-			-- What is in the slots, as a string, so that the bar is only
-			-- built again when it would look different
-			for i = 1, HOTBAR_SLOTS do
+					"/"..tostring(healthbar).."/"..tostring(show_hotbar)..
+					"/"..tostring(count).."/"..size
+			-- What is in the slots, as a string, so that the row is only
+			-- drawn again when it would look different
+			for i = 1, count do
 				local stack = list and list.items[i] or nil
 				key = key.."|"..(stack and
 						(stack.name.." "..stack.count) or "")
@@ -1950,12 +2004,45 @@ local function show_client(host, port, name, password, mode)
 				return
 			end
 			hud_key = key
+			hotbar_row:relayout()
+			-- Said once per look, which is what a driven check reads: where
+			-- the row landed against the game's own bars ([EXT_HOTBAR])
+			local look = count.."/"..tostring(params[
+					luanti_hud.PARAM_HOTBAR_IMAGE]).."/"..tostring(params[
+					luanti_hud.PARAM_HOTBAR_SELECTED_IMAGE]).."/"..size
+			if look ~= hotbar_look then
+				hotbar_look = look
+				local _, _, slot, margin = hotbar_row:metrics()
+				log:info("hotbar: "..count.." slots, image \""..
+						tostring(params[luanti_hud.PARAM_HOTBAR_IMAGE])..
+						"\", marker \""..tostring(params[
+						luanti_hud.PARAM_HOTBAR_SELECTED_IMAGE])..
+						"\", row "..math.floor(
+						(ui_root.width - count * slot) / 2)..","..
+						(ui_root.height - margin - slot).." "..
+						(count * slot).."x"..slot.." in "..size)
+			end
+			hotbar_row:draw{
+				list = list and list.items or {},
+				wield = wield_index, count = count, shown = show_hotbar,
+				image = params[luanti_hud.PARAM_HOTBAR_IMAGE],
+				selected_image =
+						params[luanti_hud.PARAM_HOTBAR_SELECTED_IMAGE],
+			}
 			if hud then
 				hud:Remove()
+				hud = nil
 			end
-			hud = ui:hud(ui_root, list, HOTBAR_SLOTS, wield_index,
-					healthbar and client.hp or nil, 20,
-					ui_root.width, ui_root.height)
+			if healthbar and show_hotbar and client.hp then
+				-- Just above the row, which is where a game that draws its
+				-- own bars against official's hotbar expects the space to
+				-- be taken
+				local _, _, slot, margin = hotbar_row:metrics()
+				local width = count * slot
+				hud = ui:health_bar(ui_root, client.hp, 20,
+						math.floor((ui_root.width - width) / 2),
+						ui_root.height - margin - slot, width, slot)
+			end
 		end
 
 		-- The escape handler a form with fields in it needs, kept so that a

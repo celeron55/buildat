@@ -349,7 +349,11 @@ function M.new(magic, buildat, log, ctx)
 	-- hotbar want the slots this client already draws its own way. A text
 	-- element of several lines is one block aligned as a whole, where Luanti
 	-- aligns each line on its own.
-	function self:hud_elements(root, elements, screen_w, screen_h)
+	function self:hud_elements(root, elements, screen_w, screen_h, scale)
+		-- What a screen pixel is in this UI's units: Luanti's own
+		-- m_scale_factor, which every size and offset below is multiplied
+		-- by ([EXT_HOTBAR])
+		hud.scale_factor = scale or 1
 		local holder = root:CreateChild("UIElement")
 		if ctx.style then
 			holder.defaultStyle = ctx.style

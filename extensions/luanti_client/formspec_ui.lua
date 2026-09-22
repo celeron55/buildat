@@ -249,50 +249,30 @@ function M.new(magic, buildat, log, ctx)
 		end
 	end
 
-	-- The hotbar and the health bar, which are not a formspec at all: the
-	-- game describes them as HUD elements and this draws the two of them a
-	-- player needs to see, out of the inventory and the hit points.
+	-- The health bar, which is not a formspec at all: the game describes it
+	-- as a HUD element and this draws the one a player needs to see, out of
+	-- the hit points. The hotbar beside it is luanti/hotbar.lua, the row
+	-- both Luanti clients share ([EXT_HOTBAR]).
 	--
-	-- simplified: not the game's own HUD. This server sends a hundred HUD
-	-- elements -- its own hearts, its bubbles, its armour bar, its crosshair
-	-- -- and none of them are drawn; what is drawn is a hotbar of the first
-	-- slots of the player's main list and a bar for the hit points. The
-	-- upgrade path is HUDADD and its friends.
+	-- simplified: not the game's own healthbar element -- its hearts, its
+	-- bubbles, its armour bar are drawn by hud_elements() only as far as
+	-- statbars go, and this is what is left when the game has none.
 	--
-	-- Returns the element it all went under, for the caller to take away
-	-- again when it changes.
-	function self:hud(root, list, count, wield, hp, hp_max, screen_w,
-			screen_h)
+	-- x0, y0 and width are where the hotbar's row is; the bar sits just
+	-- above it. Returns the element it went under, for the caller to take
+	-- away again when it changes.
+	function self:health_bar(root, hp, hp_max, x0, y0, width, slot)
 		local holder = root:CreateChild("UIElement")
 		if ctx.style then
 			holder.defaultStyle = ctx.style
 		end
-		local slot = math.floor(math.min(screen_w, screen_h) / 15)
-		local step = math.floor(slot * 1.1)
-		local width = step * count
-		local x0 = math.floor((screen_w - width) / 2)
-		local y0 = screen_h - slot - math.floor(slot * 0.5)
-
-		for i = 1, count do
-			local x = x0 + (i - 1) * step
-			local stack = list and list.items[i] or nil
-			-- The wielded slot is the lighter one, which is how a hotbar
-			-- says which it is
-			box(holder, x, y0, slot, slot, i == wield and
-					magic.Color(0.9, 0.9, 0.9, 0.55) or
-					magic.Color(0, 0, 0, 0.45))
-			draw_stack(holder, x, y0, slot, stack)
-		end
-
-		if hp and hp_max and hp_max > 0 then
-			local bar_h = math.max(3, math.floor(slot * 0.14))
-			local y = y0 - bar_h - 4
-			box(holder, x0, y, width, bar_h, magic.Color(0, 0, 0, 0.5))
-			local filled = math.floor(width * math.min(hp, hp_max) / hp_max)
-			if filled > 0 then
-				box(holder, x0, y, filled, bar_h,
-						magic.Color(0.85, 0.15, 0.15, 0.9))
-			end
+		local bar_h = math.max(3, math.floor(slot * 0.14))
+		local y = y0 - bar_h - 4
+		box(holder, x0, y, width, bar_h, magic.Color(0, 0, 0, 0.5))
+		local filled = math.floor(width * math.min(hp, hp_max) / hp_max)
+		if filled > 0 then
+			box(holder, x0, y, filled, bar_h,
+					magic.Color(0.85, 0.15, 0.15, 0.9))
 		end
 		return holder
 	end
@@ -305,8 +285,10 @@ function M.new(magic, buildat, log, ctx)
 	-- The HUD the server describes, as one element holding all of it.
 	--
 	-- elements is hud.lua's elements keyed by id. What comes back is the
-	-- holder and a count per element type that is not drawn, so that the
-	-- caller can say once what is missing.
+	-- holder, a count per element type that is not drawn so that the caller
+	-- can say once what is missing, and where each image element landed --
+	-- a game draws its hotbar's background as one of those and it has to
+	-- sit against the row ([EXT_HOTBAR]).
 	--
 	-- simplified: images, text and statbars are drawn, which is what this
 	-- game's hundred elements nearly all are. A waypoint and an image
@@ -315,7 +297,11 @@ function M.new(magic, buildat, log, ctx)
 	-- hotbar want the slots this client already draws its own way. A text
 	-- element of several lines is one block aligned as a whole, where Luanti
 	-- aligns each line on its own.
-	function self:hud_elements(root, elements, screen_w, screen_h)
+	function self:hud_elements(root, elements, screen_w, screen_h, scale)
+		-- What a screen pixel is in this UI's units: Luanti's own
+		-- m_scale_factor, which every size and offset below is multiplied
+		-- by ([EXT_HOTBAR])
+		hud.scale_factor = scale or 1
 		local holder = root:CreateChild("UIElement")
 		if ctx.style then
 			holder.defaultStyle = ctx.style
@@ -337,6 +323,7 @@ function M.new(magic, buildat, log, ctx)
 		end)
 
 		local skipped = {}
+		local images = {}
 		for _, entry in ipairs(order) do
 			local e = entry.e
 			if e.type == hud.ELEM.IMAGE then
@@ -350,7 +337,17 @@ function M.new(magic, buildat, log, ctx)
 						el:SetPosition(math.floor(x), math.floor(y))
 						el.size = magic.IntVector2(w, h)
 						el.texture = tex
+						-- Said outright ([ITEM_TILED]): while the rect is
+						-- zero Urho spans the element's width in texels,
+						-- and a bar drawn wider than its file tiled
+						if tex.width > 0 then
+							el.imageRect = magic.IntRect(0, 0, tex.width,
+									tex.height)
+						end
 						el.priority = next_priority()
+						images[#images + 1] = {name = e.text,
+								x = math.floor(x), y = math.floor(y),
+								w = w, h = h}
 					end
 				end
 			elseif e.type == hud.ELEM.TEXT then
@@ -393,7 +390,7 @@ function M.new(magic, buildat, log, ctx)
 				skipped[e.type] = (skipped[e.type] or 0) + 1
 			end
 		end
-		return holder, skipped
+		return holder, skipped, images
 	end
 
 	-- show(root, elements, layout, screen_w, screen_h)

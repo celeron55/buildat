@@ -650,24 +650,6 @@ crosshair:SetPosition(0, 0)
 -- ones past the count are hidden, because the number changes when a game
 -- says so and rebuilding them would be the same slots again.
 local HOTBAR_MAX = 32
--- Luanti's own numbers, out of Hud::readScalingSetting() and
--- Hud::drawItems(): a slot's picture is 48 screen pixels times the display
--- density and the user's hud_scaling, its padding is a twelfth of that, and
--- a slot is the picture with padding on both sides. **The window size is not
--- in it**: the hotbar is a fixed size on the screen and does not grow with
--- the window.
---
--- This UI is not in screen pixels -- magic.ui.root is 1920 wide on a 1280
--- window -- so the 48 is converted, which is what keeps the row the same
--- number of screen pixels Luanti would have drawn.
-local HOTBAR_IMAGE_SIZE = 48
--- hud_hotbar_max_width's default. Past this share of the window the row
--- splits in two, the first half above the second, which is what a game that
--- asks for a lot of slots hits.
---
--- simplified: the setting itself is the game's and does not cross to the
--- client yet, so this is Luanti's default rather than what the game said.
-local HOTBAR_MAX_WIDTH = 1.0
 local WHITE = luanti.texture("[fill:1x1:#ffffffff")
 
 -- Luanti's own m_scale_factor, which every size and offset a HUD element
@@ -685,32 +667,18 @@ local function hud_scale()
 	return magic.ui.root.width / math.max(1, fw or magic.graphics.width)
 end
 
--- The three numbers everything below is drawn from, in this UI's units
-local function hotbar_metrics()
-	local per_pixel = hud_scale()
-	local imagesize = math.floor(HOTBAR_IMAGE_SIZE * per_pixel + 0.5)
-	local padding = math.floor(imagesize / 12)
-	-- And how far above the bottom of the screen it sits: Luanti's default
-	-- hotbar element is at (0.5, 1) with an offset of four scaled pixels
-	local margin = math.floor(4 * per_pixel + 0.5)
-	return imagesize, padding, imagesize + padding * 2, margin
-end
+-- The row itself is luanti/hotbar.lua, the drawing both Luanti clients
+-- share ([EXT_HOTBAR]); this file feeds it and keeps what is drawn beside
+-- it. metrics is its three numbers, for the rest of the HUD; SLOT is a
+-- slot's size, for the line of text that sits a slot and a bit above it.
+local hotbar_ui = nil
+local hotbar_metrics = nil
+-- Defined below, where the picture cache is; the hotbar's own texture
+-- lookup is this and it is made before it
+local hotbar_picture = nil
+local SLOT = 0
 
--- A slot's size, for what is drawn beside the hotbar rather than in it:
--- the line of text above it sits a slot and a bit higher
-local SLOT
-do
-	local _, _, slot_size = hotbar_metrics()
-	SLOT = slot_size
-end
-
-local hotbar = {}
 local hotbar_stacks = {}
-local hotbar_bg = nil
--- The element the whole hotbar hangs off, and how far forward it is drawn
--- against the rest of what this client puts on the UI root
-local hotbar_root = nil
-local HOTBAR_PRIORITY = 10
 local hotbar_shown = true
 local wield_index = 1
 
@@ -757,64 +725,37 @@ local function body_picture_of(slot, name)
 	return body_picture[slot]
 end
 
+-- The row both clients share, fed with this client's own idea of what a
+-- hotbar picture and an item stack look like
+hotbar_ui = (function(ok, err, lib)
+	if not ok or type(lib) ~= "table" then
+		log:warning("hotbar.lua: " .. tostring(err))
+		return nil
+	end
+	return lib.new{
+		magic = magic, buildat = buildat, log = log,
+		max = HOTBAR_MAX, white = game_texture(WHITE),
+		font = magic.cache:GetResource("Font", buildat.font_mono),
+		texture = function(name)
+			return hotbar_picture(name)
+		end,
+		stack = function(stack)
+			local resource, count_text, name = luanti.stack_look(stack)
+			return resource and game_texture(resource) or nil,
+					count_text, name
+		end,
+	}
+end)(buildat.run_script_file("luanti/hotbar.lua"))
+
+hotbar_metrics = function()
+	if not hotbar_ui then
+		return 48, 4, 56, 4
+	end
+	return hotbar_ui:metrics()
+end
 do
-	local white = game_texture(WHITE)
-	-- The whole hotbar hangs off one element of its own, screen-sized so
-	-- that a centred or bottom-aligned child of it lands where it would
-	-- have landed on the UI root. Everything in it says outright how far
-	-- forward it is drawn ([HOTBAR_LAYERS]): the order used to be the
-	-- order the elements were made in as children of the UI root, and a
-	-- screen pushed or popped, or a re-layout, reordered them -- the
-	-- marker behind the background in one slot and in front in the next.
-	hotbar_root = magic.ui.root:CreateChild("UIElement")
-	hotbar_root:SetPosition(0, 0)
-	hotbar_root.size = magic.IntVector2(magic.ui.root.width,
-			magic.ui.root.height)
-	hotbar_root.priority = HOTBAR_PRIORITY
-	-- One per row, because Luanti draws the hotbar image once per row
-	-- rather than once per slot; behind the slots by priority
-	hotbar_bg = {}
-	for r = 1, 2 do
-		local bg = hotbar_root:CreateChild("BorderImage")
-		bg.priority = 0
-		bg.horizontalAlignment = magic.HA_CENTER
-		bg.verticalAlignment = magic.VA_BOTTOM
-		bg.blendMode = magic.BLEND_ALPHA
-		bg.visible = false
-		hotbar_bg[r] = bg
-	end
-	for i = 1, HOTBAR_MAX do
-		local frame = hotbar_root:CreateChild("BorderImage")
-		frame.priority = 1
-		if white then
-			frame.texture = white
-		end
-		-- What a slot wears when the game has given no hotbar image, which
-		-- is Luanti's own fallback: half-transparent black, per slot
-		frame.color = magic.Color(0, 0, 0, 0.5)
-		frame.horizontalAlignment = magic.HA_CENTER
-		frame.verticalAlignment = magic.VA_BOTTOM
-		frame.visible = false
-		-- The game's own mark for the slot in hand, under the item the way
-		-- Luanti draws it; see hud_set_hotbar_selected_image()
-		local marker = frame:CreateChild("BorderImage")
-		marker.blendMode = magic.BLEND_ALPHA
-		marker.visible = false
-		marker.priority = 0
-		local image = frame:CreateChild("BorderImage")
-		image.visible = false
-		image.priority = 1
-		local count = frame:CreateChild("Text")
-		count.priority = 2
-		count:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 12)
-		count:SetTextEffect(magic.TE_SHADOW)
-		count.effectColor = magic.Color(0, 0, 0, 0.9)
-		count.horizontalAlignment = magic.HA_RIGHT
-		count.verticalAlignment = magic.VA_BOTTOM
-		count:SetPosition(-3, -2)
-		hotbar[i] = {frame = frame, image = image, count = count,
-				marker = marker}
-	end
+	local _, _, slot_size = hotbar_metrics()
+	SLOT = slot_size
 end
 
 -- What is in hand, drawn in front of the camera the way Luanti draws it: a
@@ -993,7 +934,7 @@ local function draw_wielded(item_name, stack)
 end
 
 
-local function hotbar_picture(name)
+function hotbar_picture(name)
 	if name == nil then
 		return nil
 	end
@@ -1007,98 +948,12 @@ end
 
 local function draw_hotbar()
 	local shown = luanti.hotbar or {}
-	local n = math.max(1, math.min(HOTBAR_MAX, shown.count or 8))
-	local imagesize, padding, slot_size, margin = hotbar_metrics()
-	-- Luanti splits the row in two when it would be wider than this share
-	-- of the window, the first half above the second
-	local upper = 0
-	if (n * slot_size) / magic.ui.root.width > HOTBAR_MAX_WIDTH then
-		upper = math.floor(n / 2)
-	end
-	local rows = {
-		{first = upper + 1, last = n, y = 0},
-		{first = 1, last = upper, y = imagesize + padding},
-	}
-	-- The picture the game puts behind a row, half a padding proud of it on
-	-- every side, which is where Luanti's own hud.cpp puts it -- one image
-	-- stretched over the row rather than one per slot
-	local bg = hotbar_picture(shown.image)
-	local selected = hotbar_picture(shown.selected_image)
-	local at_row, at_x = {}, {}
-	for r, row in ipairs(rows) do
-		local count = row.last - row.first + 1
-		local row_width = count * slot_size
-		local element = hotbar_bg[r]
-		if bg and count > 0 then
-			element.texture = bg
-			element.size = magic.IntVector2(
-					math.floor(row_width + padding),
-					math.floor(slot_size + padding))
-			-- Half a padding proud of the slots on every side, which is
-			-- what hud.cpp draws it as
-			element:SetPosition(0,
-					-math.floor(margin + row.y - padding / 2))
-		end
-		element.visible = hotbar_shown and bg ~= nil and count > 0
-		for i = row.first, row.last do
-			at_row[i] = row
-			-- A centred element's position is where its own centre goes,
-			-- so the half slot is what puts the row's left edge on the
-			-- left edge of the picture behind it
-			at_x[i] = math.floor(-row_width / 2 +
-					(i - row.first) * slot_size + slot_size / 2)
-		end
-	end
-	for i = 1, HOTBAR_MAX do
-		local slot = hotbar[i]
-		slot.frame.visible = hotbar_shown and i <= n
-		if i <= n then
-			slot.frame.size = magic.IntVector2(slot_size, slot_size)
-			slot.frame:SetPosition(at_x[i], -(margin + at_row[i].y))
-			-- The game's mark is the item's own square grown by two
-			-- paddings on every side, which is bigger than the slot: see
-			-- drawItem() in Luanti's hud.cpp
-			slot.marker:SetPosition(-padding, -padding)
-			slot.marker.size = magic.IntVector2(
-					imagesize + padding * 4, imagesize + padding * 4)
-			slot.image:SetPosition(padding, padding)
-			slot.image.size = magic.IntVector2(imagesize, imagesize)
-		end
-		-- The stack's own look when its metadata gives it one
-		-- ([ITEM_META_LOOK]); the name is still what the tooltip reads
-		local resource, count_text, name = luanti.stack_look(hotbar_stacks[i])
-		local tex = resource and game_texture(resource)
-		-- Assigned only when there is one: the sandbox takes a Texture and
-		-- not a nil, and an empty slot is an image that is not drawn
-		-- The rect said outright ([ITEM_TILED]): while it is zero Urho
-		-- spans the element's width in texels, and a texture that had no
-		-- size at assignment tiled sixteen pickaxes to a slot
-		if tex then
-			slot.image.texture = tex
-			if tex.width > 0 then
-				slot.image.imageRect = magic.IntRect(0, 0, tex.width, tex.height)
-			elseif not hotbar_pictures["size:" .. tostring(tex.name)] then
-				hotbar_pictures["size:" .. tostring(tex.name)] = true
-				log:info("picture " .. tostring(tex.name) ..
-						" has no size yet at assignment ([ITEM_TILED])")
-			end
-		end
-		slot.image.visible = tex ~= nil and tex.width > 0
-		-- Luanti's own per-slot background, which is what a game that names
-		-- no hotbar image gets; a game that names one has it behind the
-		-- whole row instead, so the slots themselves are not drawn
-		local marked = i == wield_index
-		slot.frame.color = (name and tex == nil) and
-				magic.Color(0.5, 0.3, 0.5, 0.75) or
-				magic.Color(0, 0, 0, bg and 0 or 0.5)
-		if marked and selected == nil then
-			slot.frame.color = magic.Color(0.9, 0.9, 0.7, 0.55)
-		end
-		if selected then
-			slot.marker.texture = selected
-		end
-		slot.marker.visible = marked and selected ~= nil
-		slot.count:SetText(count_text or "")
+	if hotbar_ui then
+		hotbar_ui:draw{
+			list = hotbar_stacks, wield = wield_index,
+			count = shown.count or 8, shown = hotbar_shown,
+			image = shown.image, selected_image = shown.selected_image,
+		}
 	end
 	local name = parse_stack(hotbar_stacks[wield_index])
 	wielded_text:SetText(name or "")
@@ -4435,8 +4290,8 @@ end)
 -- player picks ([HOTBAR_LAYERS]).
 magic.SubscribeToEvent("ScreenMode", function()
 	local w, h = magic.ui.root.width, magic.ui.root.height
-	if hotbar_root then
-		hotbar_root.size = magic.IntVector2(w, h)
+	if hotbar_ui then
+		hotbar_ui:relayout()
 	end
 	if hud_root then
 		hud_root.size = magic.IntVector2(w, h)
