@@ -134,26 +134,40 @@ $menu_env bin/buildat $server_arg -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" $cold 
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
 cli=$!
 exec 3> "$fifo"
-# The first forty seconds are the world loading around the player, as in
-# the fuzz walk; four minutes over a capped link, where VoxeLibre's
-# media and first chunks take that long ([NET_SIM]; simplified: a wait,
-# where the driver could read the world's arrival off its first scans)
-START_WAIT="${START_WAIT:-$([ -n "${NETSIM:-}" ] && echo 240 || echo 40)}"
-echo "delay $((START_WAIT * 1000))" >&3
+# The world loading around the player is waited for, not guessed
+# ([START_WAIT]): the client logs the placement and then the settle
+# line once the near chunks are drawn, and the sequence holds on each
+# (wait_log) with START_WAIT as the ceiling -- 60 s, 300 over a capped
+# link ([NET_SIM]) -- after which the run fails as one whose world did
+# not settle. Two seconds of grace after.
+START_WAIT="${START_WAIT:-$([ -n "${NETSIM:-}" ] && echo 300 || echo 60)}"
+echo "wait_log $((START_WAIT * 1000)) the server put the player" >&3
+echo "wait_log $((START_WAIT * 1000)) 0 undrawn within 2" >&3
+echo "delay 2000" >&3
 # A client that leaves during the wait -- disconnected, crashed -- ends
 # the run there (user, 2026-09-21): a driver started after it would open
-# the fifo for a reader that is gone and wait for nothing
-for i in $(seq 1 "$START_WAIT"); do
+# the fifo for a reader that is gone and wait for nothing. The wait is
+# over when the client says the settle line was seen, or not seen.
+settled=0
+for i in $(seq 1 $((START_WAIT * 2 + 10))); do
 	kill -0 "$cli" 2>/dev/null || break
+	if grep -aq 'wait_log: "0 undrawn within 2" seen' "$out/cli.log"; then
+		settled=1; sleep 2; break
+	fi
+	if grep -aq 'wait_log: "0 undrawn within 2" not seen\|wait_log: "the server put the player" not seen' "$out/cli.log"; then
+		break
+	fi
 	sleep 1
 done
+settle_fail=""
+[ "$settled" = 1 ] || settle_fail="FAIL: the world did not settle in $START_WAIT s"
 drv=
-if kill -0 "$cli" 2>/dev/null; then
+if kill -0 "$cli" 2>/dev/null && [ "$settled" = 1 ]; then
 	MENU_RUN="${MENU_RUN:-}" python3 "$me/drive.py" "$out/cli.log" "$fifo" "$MINUTES" "$out" "$SEED" $GOAL \
 		> "$out/drive.log" 2>&1 &
 	drv=$!
 else
-	echo "drive: FAILED disconnected: the client left during the start wait" > "$out/drive.log"
+	echo "drive: FAILED disconnected: the client left, or the world did not settle, during the start wait" > "$out/drive.log"
 fi
 
 limit=$((MINUTES * 60 + 300))
@@ -199,6 +213,7 @@ else
 fi
 grep "^drive: FAILED" "$out/drive.log" | sed 's/^drive: /FAIL: drive: /' >&2
 grep -q "^drive: FAILED" "$out/drive.log" && status=1
+if [ -n "$settle_fail" ]; then echo "$settle_fail" >&2; status=1; fi
 # The chunks around the player must get drawn ([WIN_WORLD]): the client's
 # settle line, once a second while anything is queued, must not read the
 # same "N undrawn within 2" above zero for thirty lines running. Not "to

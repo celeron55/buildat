@@ -32,6 +32,11 @@ namespace command_seq
 		// on the client with the rest of the line as its Param, for any
 		// client Lua to handle ([CMD_EVENT])
 		Event,
+		// wait_log <ms> <text>: the sequence held until the client's own
+		// log has a line containing the text, or the time passes (a log
+		// line says so and the sequence goes on) -- a wait for a screen or
+		// a moment instead of a guessed delay ([START_WAIT])
+		WaitLog,
 	};
 
 	struct Command

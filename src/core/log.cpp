@@ -7,6 +7,8 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <deque>
+#include <string>
 #include <cstdlib>
 #include <ctime>
 #include <cstring>
@@ -248,6 +250,46 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 	fprintf(f, "\n");
 }*/
 
+// The last lines, kept for a command sequence's wait_log ([START_WAIT]):
+// a scripted client's output is a pipe it cannot read back, so what it
+// waits for is remembered here. A few hundred, formatted without the
+// time and the system; a wait says how many had gone by when it began.
+static const size_t RECENT_MAX = 400;
+static std::deque<std::string> recent_lines;
+static long long recent_count = 0;
+
+static void remember_line(const char *fmt, va_list va_args)
+{
+	char buf[1024];
+	va_list copy;
+	va_copy(copy, va_args);
+	vsnprintf(buf, sizeof buf, fmt, copy);
+	va_end(copy);
+	recent_lines.push_back(buf);
+	if(recent_lines.size() > RECENT_MAX)
+		recent_lines.pop_front();
+	recent_count++;
+}
+
+long long log_line_count()
+{
+	interface::MutexScope ms(log_mutex);
+	return recent_count;
+}
+
+bool log_lines_since_contain(long long since, const char *text)
+{
+	interface::MutexScope ms(log_mutex);
+	long long first = recent_count - (long long)recent_lines.size();
+	size_t i = 0;
+	for(const std::string &line : recent_lines){
+		if(first + (long long)i >= since && line.find(text) != std::string::npos)
+			return true;
+		i++;
+	}
+	return false;
+}
+
 void log_(int level, const char *sys, const char *fmt, ...)
 {
 	if(level > max_level){ // Fast path
@@ -258,6 +300,9 @@ void log_(int level, const char *sys, const char *fmt, ...)
 	va_start(va_args, fmt);
 	print(level, sys, fmt, va_args);
 	log_nl_nolock();
+	va_end(va_args);
+	va_start(va_args, fmt);
+	remember_line(fmt, va_args);
 	va_end(va_args);
 }
 

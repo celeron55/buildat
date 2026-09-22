@@ -208,6 +208,13 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			c.type = Type::Delay;
 			if(!parse_i64(rest, &c.n) || c.n < 0)
 				return fail("delay <ms> (non-negative integer)");
+		} else if(cmd == "wait_log"){
+			c.type = Type::WaitLog;
+			ss_ ms, text;
+			split_cmd(rest, &ms, &text);
+			if(!parse_i64(ms, &c.n) || c.n < 0 || text.empty())
+				return fail("wait_log <ms> <text>");
+			c.s = text;
 		} else if(cmd == "screenshot"){
 			c.type = Type::Screenshot;
 			c.s = rest;
@@ -426,6 +433,8 @@ ss_ dump_command(const Command &c)
 	switch(c.type){
 	case Type::Delay:
 		return "delay "+itos(c.n);
+	case Type::WaitLog:
+		return "wait_log "+itos(c.n)+" "+c.s;
 	case Type::Screenshot:
 		return "screenshot "+c.s;
 	case Type::Event:

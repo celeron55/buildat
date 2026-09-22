@@ -19,6 +19,11 @@ int log_get_max_level();
 void log_set_file(const char *path, bool tee = false);
 void log_close();
 
+// The recent lines, for a wait on one ([START_WAIT]): how many have gone
+// by, and whether one since that count holds the text
+long long log_line_count();
+bool log_lines_since_contain(long long since, const char *text);
+
 // Try to stop using malloc() and other heavyweight interfaces. Call when
 // SIGSEGV or SIGABRT occurs to make the program much more likely to be able to
 // print out the necessary errors.

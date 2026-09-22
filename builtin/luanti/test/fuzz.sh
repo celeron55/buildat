@@ -39,10 +39,14 @@ save="buildat_test_fuzz_$SEED"
 # close the inventory. awk's rand() is seeded, so the file is the seed's.
 # A screenshot every thirty seconds of walk, and the mouse is never moved
 # in absolute terms -- look sets the aim, which is all the fixture reads.
-# The first forty seconds are the world loading around the player.
-awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" 'BEGIN {
+# The world loading around the player is waited for ([START_WAIT]): the
+# placement, then the settle line, START_WAIT the ceiling (60 s).
+START_WAIT="${START_WAIT:-60}"
+awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" -v wait="$((START_WAIT * 1000))" 'BEGIN {
 	srand(seed)
-	print "delay 40000"
+	print "wait_log " wait " the server put the player"
+	print "wait_log " wait " 0 undrawn within 2"
+	print "delay 2000"
 	t = 0; shot = 0; yaw = 0
 	while (t < secs) {
 		r = rand()

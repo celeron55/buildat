@@ -125,7 +125,9 @@ sleep 5
 srv=$(pgrep -x buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
 cat > "$out/cmds.txt" <<CMDS
-delay 20000
+wait_log 60000 the server put the player
+wait_log 60000 0 undrawn within 2
+delay 2000
 look_dir 2 0.5 2
 delay 300
 event scan_volume 6 t0

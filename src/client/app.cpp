@@ -878,6 +878,9 @@ struct CApp: public App, public magic::Application
 	sv_<client::command_seq::Command> m_commands;
 	size_t m_command_index = 0;
 	int64_t m_command_wait_until_us = 0;
+	// wait_log: the log's line count when the wait began, -1 for none
+	long long m_wait_log_since = -1;
+	int64_t m_wait_log_until_us = 0;
 	ss_ m_pending_screenshot;
 	bool m_command_seq_active = false;
 	// The logical size a scripted client keeps whatever the window does
@@ -1758,6 +1761,23 @@ struct CApp: public App, public magic::Application
 				m_command_wait_until_us = now + c.n * 1000;
 				m_command_index++;
 				return;
+			}
+			if(c.type == Type::WaitLog){
+				if(m_wait_log_since < 0){
+					m_wait_log_since = log_line_count();
+					m_wait_log_until_us = now + c.n * 1000;
+				}
+				if(log_lines_since_contain(m_wait_log_since, c.s.c_str())){
+					log_i(MODULE, "wait_log: \"%s\" seen", cs(c.s));
+				} else if(now < m_wait_log_until_us){
+					return;
+				} else {
+					log_w(MODULE, "wait_log: \"%s\" not seen in %s ms; on",
+							cs(c.s), cs(itos(c.n)));
+				}
+				m_wait_log_since = -1;
+				m_command_index++;
+				continue;
 			}
 			if(c.type == Type::Screenshot){
 				m_pending_screenshot = c.s;

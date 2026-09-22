@@ -42,7 +42,8 @@ srv=$(pgrep -x luanti-refshots | head -1)
 [ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
 trap 'kill "$srv" 2>/dev/null' EXIT
 cat > "$out/cmds.txt" <<CMDS
-delay 45000
+wait_log 90000 voxel types have their own textures
+delay 3000
 look_dir 0 -0.1 1
 delay 1500
 screenshot $out/first.png

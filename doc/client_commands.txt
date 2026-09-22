@@ -68,6 +68,14 @@ Commands
 delay <ms>
     Wait this many milliseconds before the next command. Game keeps running.
 
+wait_log <ms> <text>
+    Hold the sequence until the client's own log has a line containing the
+    text, or the time passes; either way a log line says so and the sequence
+    goes on. A wait for a screen or a moment instead of a guessed delay:
+    "wait_log 60000 the server put the player" and then "wait_log 60000 0
+    undrawn within 2" is the world being playable; "wait_log 90000 voxel
+    types have their own textures" the same for the luanti_client extension.
+
 screenshot <path>
     Write a PNG of the current framebuffer. Parent directories are created.
     Path may be relative to the working directory.
