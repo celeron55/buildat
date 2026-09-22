@@ -426,6 +426,11 @@ M.show_connect_to_server = show_connect_to_server
 -- ends in ([LAUNCH_GRID]); the same screens as picking it from the list
 M.start_local_game = start_local_game
 M.leave_game = leave_game
+-- Whether a game is running under the menu's screens ([MENU_ERRORS]
+-- reads it: a dialog before a join, a notice line in a game)
+function M.in_game()
+	return game_root ~= nil
+end
 -- And the same two for the sandboxed launcher file ([LAUNCH_GRID]): each
 -- pushes a trusted screen and comes back, and takes nothing from the caller
 M.safe = {

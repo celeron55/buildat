@@ -357,6 +357,40 @@ local message_handle = nil
 -- on_close is optional and is called when the dialog goes away, however it
 -- goes: what wants it is a message that is the last thing before something
 -- else has to happen, like a client quitting after it says why.
+-- A line at the top of the screen for a few seconds, taking nothing --
+-- not the mouse, not the focus: what an error in a game's form callback
+-- is shown as ([MENU_ERRORS])
+local notices = {}
+function M.safe.show_notice(text)
+	local t = magic.ui.root:CreateChild("Text")
+	t.defaultStyle = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	t:SetStyleAuto()
+	t.text = tostring(text)
+	t.color = magic.Color(1, 0.6, 0.5)
+	t:SetAlignment(HA_CENTER, VA_TOP)
+	t:SetPosition(0, 40 + 24 * #notices)
+	t.priority = 1000
+	notices[#notices + 1] = {element = t, until_us = buildat.get_time_us() + 6000000}
+	if #notices == 1 then
+		local sub
+		sub = magic.SubscribeToEvent("Update", function()
+			local now = buildat.get_time_us()
+			local kept = {}
+			for _, n in ipairs(notices) do
+				if now >= n.until_us then
+					n.element:Remove()
+				else
+					kept[#kept + 1] = n
+				end
+			end
+			notices = kept
+			if #notices == 0 then
+				magic.UnsubscribeFromEvent("Update", sub)
+			end
+		end)
+	end
+end
+
 function M.safe.show_message_dialog(message, on_close)
 	-- Don't stack multiple dialogs
 	if message_handle then

@@ -208,11 +208,49 @@ local function run_function_in_sandbox(untrusted_function, sandbox)
 	return status, err, retval
 end
 
+-- A caught error shown, not only logged ([MENU_ERRORS]): before a world
+-- is joined -- the launch menu and every screen on the stack -- a dialog
+-- with the message's first line and "the log has the rest", the screen
+-- it happened on left as it is; in a game a notice line, since a form's
+-- callback erroring must not take the mouse. One per distinct message
+-- a minute, so a per-frame error is one dialog and a log full. The
+-- box's Connect died in its pcall and the screen just went back
+-- (2026-09-22).
+local reported_at = {}
+function __buildat_report_error(err)
+	local first = tostring(err):match("^[^\n]*") or tostring(err)
+	local now = os.time()
+	if reported_at[first] and now - reported_at[first] < 60 then
+		return
+	end
+	reported_at[first] = now
+	local ui_utils = package.loaded["buildat/extension/ui_utils"] or
+			__buildat_require_extension("ui_utils")
+	if type(ui_utils) ~= "table" or type(ui_utils.safe) ~= "table" then
+		return
+	end
+	local launch_menu = package.loaded["buildat/extension/launch_menu"]
+	local in_game = launch_menu and launch_menu.in_game and launch_menu.in_game()
+	local shown = first .. "\n\n(the log has the rest)"
+	log:info("error shown "..(in_game and "as a notice" or "in a dialog")..": "..first)
+	if in_game then
+		if ui_utils.safe.show_notice then
+			ui_utils.safe.show_notice(first)
+		end
+	elseif ui_utils.safe.show_message_dialog then
+		ui_utils.safe.show_message_dialog(shown)
+	end
+end
+
 function __buildat_run_function_in_sandbox(untrusted_function)
 	local status, err, retval = run_function_in_sandbox(
 			untrusted_function, __buildat_sandbox_environment)
 	if status == false then
 		log:error("Failed to run function:\n"..err)
+		local ok, why = pcall(__buildat_report_error, err)
+		if not ok then
+			log:warning("the error could not be shown: "..tostring(why))
+		end
 	end
 	return status, err, retval
 end
@@ -233,6 +271,10 @@ function __buildat_run_code_in_sandbox(untrusted_code, chunkname)
 			untrusted_code, __buildat_sandbox_environment, chunkname)
 	if status == false then
 		log:error("Failed to run script:\n"..err)
+		local ok, why = pcall(__buildat_report_error, err)
+		if not ok then
+			log:warning("the error could not be shown: "..tostring(why))
+		end
 	end
 	return status, err, retval
 end
