@@ -2026,6 +2026,23 @@ struct Module: public interface::Module, public luanti::Interface
 		// a section, cost VoxeLibre's world generation a third.
 		const size_t volume = (size_t)(x1 - x0 + 1) * (size_t)(y1 - y0 + 1) *
 				(size_t)(z1 - z0 + 1);
+		// A box in a body's region ([BODY_INTERACT]) is read voxel by
+		// voxel off the body's owner; the map has nothing there. A box
+		// across the line reads as ignore above it.
+		if(y0 >= REGION_Y){
+			out.assign(volume, 0);
+			if(!m_region_map)
+				return;
+			size_t i = 0;
+			for(int32_t z = z0; z <= z1; z++)
+			for(int32_t y = y0; y <= y1; y++)
+			for(int32_t x = x0; x <= x1; x++, i++){
+				uint32_t word = 0;
+				if(m_region_map->get(x, y, z, word))
+					out[i] = word;
+			}
+			return;
+		}
 		if(volume > 4096)
 			flush_node_writes();
 		read_region_uncached(x0, y0, z0, x1, y1, z1, out);
@@ -5535,6 +5552,18 @@ struct Module: public interface::Module, public luanti::Interface
 				f.param.set(word, param2 & 0xff);
 			}
 			words[i] = word;
+		}
+		// A box in a body's region ([BODY_INTERACT]): the body's owner
+		// takes the words voxel by voxel; the map has nothing there
+		if(p[1] >= REGION_Y){
+			if(self->m_region_map){
+				i = 0;
+				for(int32_t z = p[2]; z <= p[5]; z++)
+				for(int32_t y = p[1]; y <= p[4]; y++)
+				for(int32_t x = p[0]; x <= p[3]; x++, i++)
+					self->m_region_map->set(x, y, z, words[i]);
+			}
+			return 0;
 		}
 		interface::VoxelVolume vol(pv::Region(
 				pv::Vector3DInt32(p[0], p[1], p[2]),

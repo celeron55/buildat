@@ -84,6 +84,24 @@ core.register_on_mods_loaded(function()
 	core.register_globalstep(function()
 		if report_at and core.get_us_time() >= report_at then
 			report_at = nil
+			-- A region read over the body ([BODY_INTERACT]): the box of
+			-- region 0, and a VoxelManip of it that puts one more air in
+			local found = core.find_nodes_in_area({x = 0, y = 1000000, z = 0},
+					{x = 20, y = 1000020, z = 20}, {dirt})
+			core.log("action", "beam: region 0 holds " .. #found .. " " .. dirt)
+			if #found > 0 then
+				local p1, p2 = found[1], found[1]
+				local vm = VoxelManip(p1, p2)
+				local data = vm:get_data()
+				core.log("action", "beam: vmanip reads " ..
+						core.get_name_from_content_id(data[1]) .. " at " ..
+						core.pos_to_string(found[1]))
+				data[1] = core.get_content_id("air")
+				vm:set_data(data)
+				vm:write_to_map()
+				core.log("action", "beam: after the vmanip write it reads " ..
+						core.get_node(found[1]).name)
+			end
 			for _, obj in ipairs(core.get_objects_inside_radius(ORIGIN, 12)) do
 				local e = obj:get_luaentity()
 				if e and e.name == "__builtin:item" then

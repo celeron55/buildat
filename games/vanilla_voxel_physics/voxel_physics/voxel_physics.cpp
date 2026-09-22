@@ -35,6 +35,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <map>
+#include <set>
 #include <sstream>
 #include <chrono>
 #include <cmath>
@@ -635,7 +636,9 @@ struct Module: public interface::Module
 			VoxelSample v = b->volume->sample_at(l);
 			v.planes[0] = word;
 			b->volume->set_sample_at(l.getX(), l.getY(), l.getZ(), v);
-			m->rebuild_body(*b);
+			// Rebuilt on the tick, once for every write of the tick: a
+			// VoxelManip over a body is a write per voxel
+			m->m_dirty_bodies.insert(b->k);
 			return true;
 		}
 		bool to_world(float x, float y, float z, float &wx, float &wy, float &wz)
@@ -734,6 +737,18 @@ struct Module: public interface::Module
 		m_changed_bodies.push_back(b.node_id);
 	}
 	sv_<uint> m_changed_bodies;
+	std::set<int> m_dirty_bodies;
+
+	void rebuild_dirty_bodies()
+	{
+		std::set<int> dirty;
+		dirty.swap(m_dirty_bodies);
+		for(int k : dirty){
+			auto it = m_body_by_k.find(k);
+			if(it != m_body_by_k.end())
+				rebuild_body(it->second);
+		}
+	}
 
 	void send_body_changes()
 	{
@@ -948,6 +963,7 @@ struct Module: public interface::Module
 	{
 		if(m_scene == nullptr)
 			return;
+		rebuild_dirty_bodies();
 		send_body_changes();
 		for(size_t i = 0; i < m_queued_bodies.size();){
 			if(--m_queued_bodies[i].ticks > 0){
