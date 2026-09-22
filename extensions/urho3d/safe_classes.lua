@@ -271,6 +271,73 @@ function M.define(dst, util)
 	-- Whole-number coordinates, which is what a voxel world counts in.
 	-- Added 2026-09-15 with the Math batch of [URHO_SWEEP]; arithmetic draws
 	-- nothing and reaches nothing, which is the policy's clearest yes.
+	-- A node's transform as one value ([URHO_SWEEP], Math): built from a
+	-- translation, a rotation and a scale, taken apart the same way,
+	-- applied to a Vector3, composed and inverted. After Vector3 and
+	-- Quaternion, whose wrappers it names.
+	util.wc("Matrix3x4", {
+		unsafe_constructor = util.wrap_function({{"Vector3", "__nil"},
+				{"Quaternion", "__nil"}, {"number", "Vector3", "__nil"}},
+		function(translation, rotation, scale)
+			if translation == nil then
+				return util.wrap_instance("Matrix3x4", Matrix3x4())
+			end
+			return util.wrap_instance("Matrix3x4",
+					Matrix3x4(translation, rotation, scale or 1.0))
+		end),
+		instance = {
+			Translation = util.wrap_function({"Matrix3x4"}, function(self)
+				return util.wrap_instance("Vector3", self:Translation())
+			end),
+			Rotation = util.wrap_function({"Matrix3x4"}, function(self)
+				return util.wrap_instance("Quaternion", self:Rotation())
+			end),
+			Scale = util.wrap_function({"Matrix3x4"}, function(self)
+				return util.wrap_instance("Vector3", self:Scale())
+			end),
+			Inverse = util.wrap_function({"Matrix3x4"}, function(self)
+				return util.wrap_instance("Matrix3x4", self:Inverse())
+			end),
+			SetTranslation = util.self_function("SetTranslation", {},
+					{"Matrix3x4", "Vector3"}),
+			SetScale = util.self_function("SetScale", {},
+					{"Matrix3x4", {"number", "Vector3"}}),
+			ToString = util.self_function("ToString", {"string"},
+					{"Matrix3x4"}),
+		},
+		instance_meta = {
+			__mul = util.wrap_function({"Matrix3x4",
+					{"Vector3", "Matrix3x4", "number"}},
+			function(self, other)
+				-- The unwrapped values arrive here: a Vector3 is the one
+				-- with an x, a number a number, the rest a Matrix3x4
+				local r = self * other
+				if type(other) ~= "number" and other.x ~= nil then
+					return util.wrap_instance("Vector3", r)
+				end
+				return util.wrap_instance("Matrix3x4", r)
+			end),
+			__eq = util.wrap_function({"Matrix3x4", "Matrix3x4"},
+			function(self, other)
+				return (self == other)
+			end),
+		},
+		properties = {
+			m00 = util.simple_property("number"),
+			m01 = util.simple_property("number"),
+			m02 = util.simple_property("number"),
+			m03 = util.simple_property("number"),
+			m10 = util.simple_property("number"),
+			m11 = util.simple_property("number"),
+			m12 = util.simple_property("number"),
+			m13 = util.simple_property("number"),
+			m20 = util.simple_property("number"),
+			m21 = util.simple_property("number"),
+			m22 = util.simple_property("number"),
+			m23 = util.simple_property("number"),
+		},
+	})
+
 	util.wc("IntVector3", {
 		unsafe_constructor = util.wrap_function({"number", "number", "number"},
 		function(x, y, z)
@@ -852,6 +919,8 @@ function M.define(dst, util)
 			end,
 		},
 		instance = {
+			SetTransform = util.self_function("SetTransform", {},
+					{"Node", "Matrix3x4"}),
 			CreateChild = util.wrap_function({"Node", "string",
 					{"number", "__nil"}},
 				function(self, name, mode)
@@ -964,6 +1033,10 @@ function M.define(dst, util)
 			worldPosition = util.simple_property(dst.Vector3),
 			enabled = util.simple_property("boolean"),
 			rotation = util.simple_property(dst.Quaternion),
+			-- Read-only in tolua, as its worldTransform; SetTransform() is
+			-- the write
+			transform = util.simple_property(dst.Matrix3x4),
+			worldTransform = util.simple_property(dst.Matrix3x4),
 		},
 	})
 

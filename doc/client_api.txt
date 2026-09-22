@@ -1440,11 +1440,12 @@ magic.M_MIN_UNSIGNED:
 magic.M_PI: 
 magic.M_RADTODEG: 
 magic.Material: Clone, SetShaderParameter, SetTechnique, SetTexture, cullMode, new
+magic.Matrix3x4: Inverse, Rotation, Scale, SetScale, SetTranslation, ToString, Translation, m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23
 magic.Menu: SetAccelerator, ShowPopup, acceleratorKey, acceleratorQualifiers, popup, popupOffset, showPopup
 magic.Model: 
 magic.NUM_FRUSTUM_PLANES: 
 magic.NUM_FRUSTUM_VERTICES: 
-magic.Node: Clone, CreateChild, CreateComponent, GetChild, GetComponent, GetID, GetName, GetNumChildren, GetRotation, GetVar, GetWorldDirection, GetWorldPosition, LookAt, Pitch, Remove, RemoveChild, Roll, Rotate, SetEnabled, SetScale, SetVar, Translate, Yaw, component, direction, enabled, new, position, rotation, scale, worldDirection, worldPosition
+magic.Node: Clone, CreateChild, CreateComponent, GetChild, GetComponent, GetID, GetName, GetNumChildren, GetRotation, GetVar, GetWorldDirection, GetWorldPosition, LookAt, Pitch, Remove, RemoveChild, Roll, Rotate, SetEnabled, SetScale, SetTransform, SetVar, Translate, Yaw, component, direction, enabled, new, position, rotation, scale, transform, worldDirection, worldPosition, worldTransform
 magic.OP_DECR: 
 magic.OP_INCR: 
 magic.OP_KEEP: 
