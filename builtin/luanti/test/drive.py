@@ -1365,13 +1365,14 @@ def main():
             held = expect(s)
             if held:
                 failed_in_row = 0
-                mem["craft_waited"] = False
-            elif expect_name.startswith("craft_") and not mem.get("craft_waited"):
+                mem["craft_waited"] = 0
+            elif expect_name.startswith("craft_") and mem.get("craft_waited", 0) < 2:
                 # A craft's answer is the server's, and a slow step
                 # ([FLOOD_STEP]: 2-4 s under a fresh world's flood) lands
-                # it after this scan: once more before it is judged
+                # it after this scan: twice more before it is judged (once
+                # was not enough at 0.5 s steps, 2026-09-22)
                 say("turn %d: %s not yet; the scan again" % (turn, expect_name))
-                mem["craft_waited"] = True
+                mem["craft_waited"] = mem.get("craft_waited", 0) + 1
                 time.sleep(1.5)
                 continue
             elif expect_name in ("place_table", "place_furnace"):
@@ -1404,7 +1405,13 @@ def main():
                 say("turn %d: the item was not reached; given up" % turn)
                 mem.setdefault("given_up", {})[mem.get("last_item")] = turn
             else:
-                mem["craft_waited"] = False
+                mem["craft_waited"] = 0
+                # Of the same rule: a plank craft that lagged and a stick
+                # craft that lagged were read as one rule failing twice
+                # (2026-09-22)
+                if mem.get("failed_rule") != expect_name:
+                    failed_in_row = 0
+                mem["failed_rule"] = expect_name
                 failed_in_row += 1
                 say("turn %d: %s's expectation did not hold (%d in a row)" %
                     (turn, expect_name, failed_in_row))
