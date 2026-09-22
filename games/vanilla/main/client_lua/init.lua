@@ -2971,58 +2971,29 @@ local function draw_hud_compass(e)
 			e = e, tex = tex, w = w, h = h, dir = dir}
 end
 
--- Luanti's minimap element: the world around the player, from above.
--- Urho3D's View3D is what makes one possible at all -- a UI element that
--- renders a scene into a texture of its own size -- and what it renders is
--- the world itself rather than a picture built out of what the client
--- knows: an orthographic camera over the player, looking down, on the scene
--- that is already there.
---
--- simplified: north is up and the zoom is fixed, which is Luanti's surface
--- mode without its rotation. Its radar mode is a slice at the player's own
--- height, which is this camera's near and far clip and nothing else, and
--- nothing has asked for it.
-local MINIMAP_HZ = 4
--- How much of the world is in it, top to bottom
-local MINIMAP_NODES = 64
--- How far over the player the camera sits, which is what it can see down
--- through: a player under a mountain sees the mountain
-local MINIMAP_HEIGHT = 120
+-- Luanti's minimap element: the world around the player, from above --
+-- the module both Luanti clients share, luanti_client/res/minimap.lua,
+-- served as luanti/minimap.lua ([EXT_HUD_PARITY]). Official's V walks its
+-- modes; on sky_now, since the file is at Lua's 200-local line.
 local minimaps = {}
-local minimap_timer = 0
--- Official's V ([VIEW_KEYS]): off, the surface at three sizes, the radar
--- at three -- minimap.cpp's modes. The radar is a thin slice at the
--- player's height, seen from just above it; the surface is the world
--- from high up.
--- simplified: the radar shows the tops of the nodes at the player's level
--- rather than official's air-or-not scan; north stays up.
-sky_now.MINIMAP_MODES = {
-	{label = "Minimap hidden", nodes = 0},
-	{label = "Minimap in surface mode, Zoom x4", nodes = 64},
-	{label = "Minimap in surface mode, Zoom x2", nodes = 128},
-	{label = "Minimap in surface mode, Zoom x1", nodes = 256},
-	{label = "Minimap in radar mode, Zoom x4", nodes = 64, radar = true},
-	{label = "Minimap in radar mode, Zoom x2", nodes = 128, radar = true},
-	{label = "Minimap in radar mode, Zoom x1", nodes = 256, radar = true},
-}
+sky_now.minimap = (function(ok, err, lib)
+	if not ok or type(lib) ~= "table" then
+		log:warning("minimap.lua: " .. tostring(err))
+		return nil
+	end
+	return lib
+end)(buildat.run_script_file("luanti/minimap.lua"))
 sky_now.minimap_mode = 2
--- On sky_now: the file is at Lua's 200-local line
 function sky_now.apply_minimap_mode()
-	local mode = sky_now.MINIMAP_MODES[sky_now.minimap_mode]
 	for _, m in ipairs(minimaps) do
-		m.view.visible = mode.nodes > 0
-		if mode.nodes > 0 then
-			m.camera:GetComponent("Camera").orthoSize = mode.nodes
-			m.camera:GetComponent("Camera").farClip = mode.radar and 3 or MINIMAP_HEIGHT * 4
-			m.height = mode.radar and 1.5 or MINIMAP_HEIGHT
-		end
+		m:set_mode(sky_now.minimap_mode)
 	end
 end
 
 local function draw_hud_minimap(e)
 	-- A game that has turned the minimap off does not get one from its own
 	-- element either, which is Luanti's rule for this kind
-	if not luanti.hud_flag("minimap") then
+	if not luanti.hud_flag("minimap") or not sky_now.minimap then
 		return
 	end
 	local w, h = parse_v2(e.size, 128, 128)
@@ -3042,28 +3013,10 @@ local function draw_hud_minimap(e)
 	if w <= 0 or h <= 0 then
 		return
 	end
-	local view = hud_root:CreateChild("View3D")
-	view.size = magic.IntVector2(w, h)
-	-- A picture of the world costs a second pass over the world, so it is
-	-- drawn a few times a second rather than every frame
-	view.autoUpdate = false
-	local node = scene:CreateChild("minimap_camera")
-	local cam = node:CreateComponent("Camera")
-	cam.orthographic = true
-	cam.orthoSize = MINIMAP_NODES
-	cam.nearClip = 0.5
-	cam.farClip = MINIMAP_HEIGHT * 4
-	node.direction = magic.Vector3(0, -1, 0)
-	-- Not the element's own scene: this one is the world's and has to
-	-- outlive every form and HUD there is
-	view:SetView(scene, cam, false)
-	-- And drawn the way the world is drawn: the window's own render path
-	-- carries the tonemap, and an HDR scene without it is white
-	if world_render_path then
-		view:GetViewport().renderPath = world_render_path:Clone()
-	end
-	hud_place(view, e, w, h)
-	minimaps[#minimaps + 1] = {view = view, camera = node, height = MINIMAP_HEIGHT}
+	local m = sky_now.minimap.new{magic = magic, scene = scene,
+			parent = hud_root, render_path = world_render_path, w = w, h = h}
+	hud_place(m.view, e, w, h)
+	minimaps[#minimaps + 1] = m
 	sky_now.apply_minimap_mode()
 end
 
@@ -3074,15 +3027,7 @@ local function follow_minimaps(dt)
 	end
 	local p = camera_node.worldPosition
 	for _, m in ipairs(minimaps) do
-		m.camera.position = magic.Vector3(p.x, p.y + m.height, p.z)
-	end
-	minimap_timer = minimap_timer + dt
-	if minimap_timer < 1 / MINIMAP_HZ then
-		return
-	end
-	minimap_timer = 0
-	for _, m in ipairs(minimaps) do
-		m.view:QueueUpdate()
+		m:follow(p, dt)
 	end
 end
 
@@ -4007,9 +3952,9 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	elseif key == BIND.noclip.key then
 		keys.toggle_mode("noclip", "Noclip mode")
 	elseif key == BIND.minimap.key then
-		sky_now.minimap_mode = sky_now.minimap_mode % #sky_now.MINIMAP_MODES + 1
+		sky_now.minimap_mode = sky_now.minimap_mode % #sky_now.minimap.MODES + 1
 		sky_now.apply_minimap_mode()
-		luanti.chat_local(sky_now.MINIMAP_MODES[sky_now.minimap_mode].label)
+		luanti.chat_local(sky_now.minimap.MODES[sky_now.minimap_mode].label)
 	elseif key == BIND.fog.key then
 		-- Official's fog toggle (F3, [VIEW_KEYS]): the fog pushed past
 		-- the far clip, and back to the sky's rule

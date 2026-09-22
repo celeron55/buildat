@@ -37,6 +37,9 @@ local inventory = dofile(path.."/inventory.lua")
 local objmesh = dofile(path.."/objmesh.lua")
 local b3dmesh = dofile(path.."/b3dmesh.lua")
 local luanti_hud = dofile(path.."/hud.lua")
+-- On the HUD module's table rather than a local of its own: the connect
+-- callback below is at Lua's 60-upvalue line ([EXT_HUD_PARITY])
+luanti_hud.minimap = dofile(path.."/res/minimap.lua")
 local sounds = dofile(path.."/sounds.lua")
 local formspec = dofile(path.."/formspec.lua")
 local formspec_ui = dofile(path.."/formspec_ui.lua")
@@ -162,6 +165,7 @@ local BINDINGS = {
 	{action = "zoom", key = KEY_Z, name = "Z",
 			what = "Zoom while held (the zoom privilege)"},
 	{action = "fog", key = KEY_F3, name = "F3", what = "Fog on and off"},
+	{action = "minimap", key = KEY_V, name = "V", what = "Minimap modes"},
 	{action = "screenshot", key = KEY_F12, name = "F12",
 			what = "A screenshot (the engine's)"},
 	{action = "profiler", key = KEY_F6, name = "F6",
@@ -394,7 +398,10 @@ local function show_client(host, port, name, password, mode)
 	-- read them presses F5 like anyone else.
 	local show_hud = true
 	local show_chat = true
-	local show_debug = false
+	-- F5's levels, as the module's ([EXT_HUD_PARITY]): 0 nothing, 1 the
+	-- one-line row (the mode and where the player is, in official's
+	-- words), 2 the whole block
+	local show_debug = 0
 
 	local lines = {"Luanti: "..host..":"..port}
 	local function add_line(text)
@@ -833,6 +840,22 @@ local function show_client(host, port, name, password, mode)
 				if loading_panel then
 					loading_panel:Remove()
 					loading_panel = nil
+				end
+				-- The minimap at the top right, official's own whether or
+				-- not the game adds one, under the minimap HUD flag; V
+				-- walks its modes ([EXT_HUD_PARITY]). The shared module,
+				-- over this client's scene; on `view` for the local line.
+				if not view.minimap then
+					local size = math.floor(128 * magic.ui.root.width /
+							math.max(1, buildat.logical_size() or
+							magic.graphics.width))
+					view.minimap = luanti_hud.minimap.new{magic = magic,
+							scene = view.scene, parent = magic.ui.root,
+							render_path = view.viewport.renderPath,
+							w = size, h = size,
+							height = math.floor(SETTINGS.view_range * 0.6)}
+					view.minimap.view:SetAlignment(HA_RIGHT, VA_TOP)
+					view.minimap.view:SetPosition(-10, 10)
 				end
 				-- A node whose texture expression cannot be built stays a
 				-- placeholder, and this is the only thing that says why
@@ -1805,7 +1828,7 @@ local function show_client(host, port, name, password, mode)
 			chat_text.visible = show_chat and
 					luanti_hud.has_flag(hud_flags, luanti_hud.FLAG.chat)
 			local chat_y = 8
-			if show_debug then
+			if show_debug > 0 then
 				chat_y = 8 + status_text.height + 8
 			end
 			if chat_y ~= chat_at_y then
@@ -2456,6 +2479,23 @@ local function show_client(host, port, name, password, mode)
 			local reflections = sky_vis and string.format(
 					" | sky %.2f up over %d blocks", sky_vis, sky_blocks) or ""
 
+			-- Level 1 is one line and stays one line, as the module's:
+			-- what makes a picture a picture of what it claims to be.
+			-- Official's yaw is counter-clockwise from +Z and its pitch
+			-- positive looking up; the words are the module's.
+			if show_debug == 1 then
+				local yaw = (360 - (client.yaw or 0)) % 360
+				local cardinal = (yaw >= 45 and yaw < 135) and "West -X" or
+						(yaw >= 135 and yaw < 225) and "South -Z" or
+						(yaw >= 225 and yaw < 315) and "East +X" or "North +Z"
+				status_text.text = string.format(
+						"luanti_client | %s:%d | %s | %s%s | (%.1f, %.1f, %.1f)"..
+						" | yaw: %.1f\194\176 %s | pitch: %.1f\194\176",
+						host, port, SETTINGS.mode, client.state, condition,
+						avatar.x, avatar.y, avatar.z, yaw, cardinal,
+						-(client.pitch or 0))
+				return
+			end
 			-- Two lines rather than one: one line of this does not fit on a
 			-- screen and what runs off the edge is the half that changes
 			status_text.text = table.concat(lines, "\n").."\n"..
@@ -2890,6 +2930,12 @@ local function show_client(host, port, name, password, mode)
 			-- has arrived looks far away, and a dropped block is one the
 			-- server will not send again
 			view:update(dtime, client.state == "ready" and DROP_DISTANCE or nil)
+			if view.minimap then
+				view.minimap.view.visible = show_hud and not loading and
+						luanti_hud.has_flag(hud_flags, luanti_hud.FLAG.minimap)
+						and luanti_hud.minimap.MODES[view.minimap.mode].nodes > 0
+				view.minimap:follow(view.camera_node.worldPosition, dtime)
+			end
 
 			-- Media requests go out a batch a frame, and the registry is
 			-- rebuilt once what was asked for has arrived
@@ -3222,6 +3268,10 @@ local function show_client(host, port, name, password, mode)
 			info_text:Remove()
 			tint_panel:Remove()
 			status_text:Remove()
+			if view.minimap then
+				view.minimap:destroy()
+				view.minimap = nil
+			end
 			if loading_panel then
 				loading_panel:Remove()
 				loading_panel = nil
@@ -3424,8 +3474,11 @@ local function show_client(host, port, name, password, mode)
 				show_chat = not show_chat
 			end
 			if key == BIND.debug.key then
-				show_debug = not show_debug
-				status_text.visible = show_debug
+				show_debug = (show_debug + 1) % 3
+				status_text.visible = show_debug > 0
+			end
+			if key == BIND.minimap.key and view.minimap then
+				add_chat(view.minimap:next_mode())
 			end
 			if key == BIND.noclip.key then
 				avatar.noclip = not avatar.noclip
