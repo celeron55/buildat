@@ -3486,6 +3486,9 @@ end
 -- the voxel definition's own name is the node's name, because that is what
 -- built the registry
 local function node_name_at(p)
+	if p.y >= luanti.REGION_Y then
+		return luanti.body_node_name(p)
+	end
 	local v = voxelworld.get_static_voxel(p)
 	if v == nil then
 		return nil
@@ -3635,7 +3638,7 @@ local function set_crack(p, resource)
 		return
 	end
 	local node = crack_node_for(resource)
-	node.position = magic.Vector3.from_buildat(p)
+	node.position = magic.Vector3.from_buildat(luanti.body_world(p) or p)
 	node.enabled = true
 	crack_worn = resource
 end
@@ -4129,8 +4132,24 @@ function frame_peak.update(dt)
 	end
 
 	pointed_p, pointed_above = find_pointed_voxel()
+	-- A body that came off the world, when the ray reaches it first
+	-- ([BODY_INTERACT]): its voxel's region position stands in for the
+	-- map's, and the dig and the place below send it as they send any
+	do
+		local eye = camera_node.worldPosition
+		local dir = camera_node.worldDirection
+		local reach = pointed_p and (buildat.Vector3(eye.x, eye.y, eye.z) -
+				pointed_p):length() or
+				math.min(POINT_RANGE, luanti.dig_range(wield_index))
+		local bp, babove = luanti.pointed_body(eye.x, eye.y, eye.z,
+				dir.x, dir.y, dir.z, reach)
+		if bp then
+			pointed_p, pointed_above = bp, babove
+		end
+	end
 	if pointed_p then
-		pointed_node.position = magic.Vector3.from_buildat(pointed_p)
+		pointed_node.position = magic.Vector3.from_buildat(
+				luanti.body_world(pointed_p) or pointed_p)
 		pointed_node.enabled = true
 	else
 		pointed_node.enabled = false

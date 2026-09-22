@@ -1,8 +1,10 @@
 #!/bin/bash
 # [VOXEL_PHYSICS_SAMPLE]: a beam of dirt on one pillar, the pillar's top
-# dug by the client -- the beam comes off as one body and falls. The
-# server's body line and where the body node ends up are the reading;
-# the log is under local/voxel_physics/.
+# dug by the client -- the beam comes off as one body and falls; then the
+# client looks at the fallen beam and digs a voxel of it, by its region
+# position ([BODY_INTERACT]). The server's body lines, where the body node
+# ends up and the dig on it are the reading; the log is under
+# local/voxel_physics/.
 #
 #   GAME=mineclone2 games/vanilla_voxel_physics/test/beam.sh
 set -u
@@ -95,6 +97,14 @@ screenshot $out/after.png
 look_dir -1 -0.1 -0.3
 delay 1000
 screenshot $out/body.png
+look_dir 0.2 0.35 1
+delay 500
+event scan
+mouse_down left
+delay 2500
+mouse_up left
+delay 2000
+screenshot $out/body_dug.png
 delay 500
 quit
 CMDS
@@ -103,5 +113,9 @@ bin/buildat -s localhost:29780 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
 sleep 2
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-grep "beam:\|voxel_ph" "$out/srv.log" | grep -v "sim: " | sed 's/.*I [a-z_]* *: //' | tail -12
+grep "beam:\|voxel_ph" "$out/srv.log" | grep -v "sim: " | sed 's/.*I [a-z_]* *: //' | tail -14
+# The dig on the body ([BODY_INTERACT]): the client points at the fallen
+# beam and digs one of its voxels by its region position
+grep "pointing at\|dug (" "$out/cli.log" | tail -3 | sed 's/.*I [a-z_]* *: //'
+grep "region\|rebuilt" "$out/srv.log" | sed 's/.*[IV] [a-z_]* *: //' | tail -3
 grep "body\|voxel_physics" "$out/cli.log" | sed 's/.*I [a-z_]* *: //' | tail -5

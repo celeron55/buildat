@@ -4,7 +4,6 @@
 		{"module": "luanti"},
 		{"module": "voxelworld"},
 		{"module": "main_context"},
-		{"module": "network"},
-		{"module": "client_file"}
+		{"module": "network"}
 	]
 }

@@ -26,7 +26,6 @@
 #include "voxelworld/api.h"
 #include "main_context/api.h"
 #include "network/api.h"
-#include "client_file/api.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <Scene.h>
 #include <Node.h>
@@ -143,7 +142,6 @@ struct Module: public interface::Module
 	int m_state_plane = -1;
 	pv::Vector3DInt16 m_chunk_size = pv::Vector3DInt16(16, 16, 16);
 	std::vector<Props> m_props; // By content id
-	std::unordered_set<size_t> m_shown; // Peers the client half was run on
 
 	// The relaxation's queue and its scratch, as undermine's
 	std::deque<pv::Vector3DInt32> m_dirty;
@@ -174,7 +172,6 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("network:packet_received/main:dig"));
 		m_server->sub_event(this, Event::t("network:packet_received/main:place"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("voxelworld:node_volume_updated"));
 		m_regions.m = this;
 		luanti::access(m_server, [&](luanti::Interface *i){
@@ -199,8 +196,6 @@ struct Module: public interface::Module
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:place", on_place,
 				network::Packet)
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
 		EVENT_TYPEN("voxelworld:node_volume_updated", on_node_volume_updated,
 				voxelworld::NodeVolumeUpdated)
 	}
@@ -240,18 +235,6 @@ struct Module: public interface::Module
 			structural++;
 		}
 		log_i(MODULE, "%zu node types take part in the physics", structural);
-	}
-
-	// The client half, after the game's own: main:init.lua has the
-	// registries and the scene by then, and this draws the bodies
-	void on_files_transmitted(const client_file::FilesTransmitted &event)
-	{
-		if(!m_shown.insert(event.recipient).second)
-			return;
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(event.recipient, "core:run_script",
-					"buildat.run_script_file(\"voxel_physics/init.lua\")");
-		});
 	}
 
 	// The player's changes are what wake the sim. Kept until the chunk
@@ -691,6 +674,31 @@ struct Module: public interface::Module
 				body->SetMass(mass > 0 ? mass : 1.0f);
 			log_v(MODULE, "body %d rebuilt: %zu voxels", b.k, left);
 		});
+		// The clients mesh it again: the var replicates on the next
+		// network frame, and the packet says which node to look at. Sent
+		// from the tick: this runs under the dig's own packet handler,
+		// where the network module is not to be entered again.
+		m_changed_bodies.push_back(b.node_id);
+	}
+	sv_<uint> m_changed_bodies;
+
+	void send_body_changes()
+	{
+		if(m_changed_bodies.empty())
+			return;
+		sv_<uint> ids;
+		ids.swap(m_changed_bodies);
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(uint id : ids){
+				std::ostringstream os(std::ios::binary);
+				{
+					cereal::PortableBinaryOutputArchive ar(os);
+					ar((int32_t)id);
+				}
+				for(network::PeerInfo::Id peer : inetwork->list_peers())
+					inetwork->send(peer, "luanti:body_changed", os.str());
+			}
+		});
 	}
 
 	interface::VoxelFormat m_format;
@@ -770,6 +778,7 @@ struct Module: public interface::Module
 	{
 		if(m_scene == nullptr)
 			return;
+		send_body_changes();
 		for(size_t i = 0; i < m_queued_bodies.size();){
 			if(--m_queued_bodies[i].ticks > 0){
 				i++;
