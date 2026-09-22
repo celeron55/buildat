@@ -1763,9 +1763,11 @@ function M.new(magic, buildat, log, options)
 		-- is rebuilt from the block the next time it is wanted
 		vis_volumes_drop(key)
 		local node = block.node
+		-- The seventh is the horizon the vanilla client packs into its
+		-- meshes ([PBR_FIT] 2c); none here, and luabind wants every argument
 		buildat.set_voxel_geometry(node, data, self.voxel_reg,
 				self.atlas_reg, self.use_skylight,
-				function() apply_technique(node) end)
+				function() apply_technique(node) end, "")
 		self.last_mesh_us = buildat.get_time_us() - t0
 		-- The worst single block of the frame, for the slow-frame line: one
 		-- block that costs ten times what the others do is a different
@@ -4646,9 +4648,9 @@ function M.new(magic, buildat, log, options)
 	-- that one is negated. Getting either sense wrong is not just a mirrored
 	-- view: the server sends the blocks it thinks the player can see, so it
 	-- would send the ones the player is looking away from.
-	function self:set_camera(x, y, z, pitch, yaw)
+	function self:set_camera(x, y, z, pitch, yaw, roll)
 		camera_node.position = magic.Vector3(x, y, z)
-		camera_node.rotation = magic.Quaternion(pitch or 0, -(yaw or 0), 0)
+		camera_node.rotation = magic.Quaternion(pitch or 0, -(yaw or 0), roll or 0)
 		-- Kept for the light refresh, which only asks for blocks near enough
 		-- to be worth a resend; see refresh_wanted()
 		camera_at = {x, y, z}

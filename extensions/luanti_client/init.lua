@@ -19,6 +19,10 @@ local path = __buildat_extension_path("luanti_client")
 local srp = dofile(path.."/srp.lua")
 local engine_test = dofile(path.."/engine_test.lua")
 local luanti = dofile(path.."/client.lua")
+-- View bobbing as official's ([VIEW_BOB]), the module both clients share;
+-- BUILDAT_VIEW_BOBBING is the amount for a run (the shooters' 0), 1 else
+local camera_motion = dofile(path.."/res/camera_motion.lua")
+local VIEW_BOBBING = tonumber(os.getenv("BUILDAT_VIEW_BOBBING") or "") or 1
 local world = dofile(path.."/world.lua")
 local nodedef = dofile(path.."/nodedef.lua")
 local media = dofile(path.."/media.lua")
@@ -742,6 +746,10 @@ local function show_client(host, port, name, password, mode)
 		local pointed_object = nil
 		local dig = nil
 		local digging = false
+		-- The bob's state for this session; the extension draws no hand, so
+		-- only the camera's offset and roll are used of what it answers
+		local motion = camera_motion.new()
+		motion.amount = VIEW_BOBBING
 		-- Time left before the held dig button hits a pointed object again;
 		-- Luanti's object_hit_delay
 		local hit_wait = 0
@@ -2471,7 +2479,22 @@ local function show_client(host, port, name, password, mode)
 			local x, y, z = avatar:update(dtime, wish)
 			client:set_position(x, y, z, pitch, yaw)
 			client:set_motion(avatar.vx, avatar.vy, avatar.vz, keys)
-			view:set_camera(x, y + player.EYE_HEIGHT, z, pitch, yaw)
+			local speed_xz = math.sqrt(avatar.vx * avatar.vx + avatar.vz * avatar.vz)
+			local m = motion:update(dtime, {
+				walking = speed_xz > 1 and avatar.on_ground,
+				swimming = avatar.in_liquid and
+						(speed_xz > 1 or math.abs(avatar.vy) > 1),
+				climbing = avatar.climbing and math.abs(avatar.vy) > 1,
+				flying = avatar.fly_active or avatar.fly,
+				speed = math.sqrt(speed_xz * speed_xz + avatar.vy * avatar.vy),
+				digging = digging,
+			})
+			-- Sideways along the camera's right, and up; Luanti's yaw is
+			-- counterclockwise from +Z seen from above
+			local ry = math.rad(yaw)
+			view:set_camera(x + m.offset[1] * math.cos(ry),
+					y + player.EYE_HEIGHT + m.offset[2],
+					z + m.offset[1] * math.sin(ry), pitch, yaw, math.deg(m.roll))
 		end
 
 		-- Set once the session is over -- the server said no, the connection

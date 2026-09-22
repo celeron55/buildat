@@ -997,10 +997,24 @@ function PlayerRef:get_wielded_item()
 	if not o then
 		return ItemStack()
 	end
+	-- The selected slot, empty or not: Luanti's Lua get_wielded_item asks
+	-- for the selected item only (l_object.cpp), and the "hand" list is
+	-- the C++ dig's and punch's business -- see PlayerRef:get_hand_item;
+	-- the dig episode's census read the hand here where official read
+	-- nothing (2026-09-22)
+	return o.inventory:get_stack("main", o.wield_index)
+end
+
+-- What the punch and the dig hit with: the selected item, or the "hand"
+-- list's first when the slot is empty and a game keeps one
+-- (Player::getWieldedItem with a hand; VoxeLibre's mcl_meshhand puts its
+-- hand there with its own tool_capabilities and range)
+function PlayerRef:get_hand_item()
+	local o = state_of(self)
+	if not o then
+		return ItemStack()
+	end
 	local selected = o.inventory:get_stack("main", o.wield_index)
-	-- An empty hand is the "hand" list's first item when a game keeps one
-	-- (Player::getWieldedItem; VoxeLibre's mcl_meshhand puts its hand
-	-- there with the hand's own tool_capabilities and range)
 	if selected:get_name() == "" and o.inventory:get_size("hand") > 0 then
 		local hand = o.inventory:get_stack("hand", 1)
 		if not hand:is_empty() then
@@ -2089,7 +2103,8 @@ function core.__punch_object(playername, id)
 	if ref == nil or puncher == nil then
 		return false
 	end
-	local wielded = puncher:get_wielded_item()
+	local wielded = puncher.get_hand_item and puncher:get_hand_item() or
+			puncher:get_wielded_item()
 	local caps = wielded:get_tool_capabilities()
 	local now = core.get_us_time() / 1000000
 	-- A first punch is worth a whole interval, which is what Luanti's own
