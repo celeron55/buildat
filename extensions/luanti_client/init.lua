@@ -2013,6 +2013,7 @@ local function show_client(host, port, name, password, mode)
 		-- A form the server closed or replaced is not the player closing it,
 		-- and gets no quit.
 		local function close_form(quit)
+			uistack.set_scan_extra(nil)
 			if not form then
 				return
 			end
@@ -2068,6 +2069,10 @@ local function show_client(host, port, name, password, mode)
 			local h = ui_root.height
 			local layout = formspec.layout(size, real, w, h)
 			form.drawn = ui:show(ui_root, elements, layout, w, h, form.state)
+			-- A form is drawn on the UI root and not on this session's own
+			-- screen, so a scan of the stack does not reach it; this is
+			-- what a driven run reads the form's elements through
+			uistack.set_scan_extra(form.drawn.window)
 			local typeable = false
 			for _, f in ipairs(form.drawn.fields) do
 				if f.edit then
@@ -2328,6 +2333,22 @@ local function show_client(host, port, name, password, mode)
 			for _, t in ipairs(form.drawn.taps) do
 				if lx >= t.x and lx < t.x + t.w and
 						ly >= t.y and ly < t.y + t.h then
+					-- A dropdown's own two taps ([FORMSPEC_SCROLL]): the
+					-- box opens and closes the list and sends nothing, an
+					-- item in it is the choice
+					if t.open then
+						form.state.dropdown_open =
+								form.state.dropdown_open ~= t.name and
+								t.name or nil
+						form_stale = true
+						return
+					end
+					if t.pick then
+						form.state.dropdown = form.state.dropdown or {}
+						form.state.dropdown[t.name] = t.pick
+						form.state.dropdown_open = nil
+						form_stale = true
+					end
 					local fields = form_fields()
 					fields[t.name] = t.value
 					if t.check then

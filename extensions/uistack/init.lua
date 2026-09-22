@@ -185,6 +185,16 @@ M.safe.main = M.main
 -- Set by whoever answers `event scan` for the world (vanilla's scan.lua),
 -- so the menu's answer below stands aside once it is there
 M.world_scan = false
+-- An element outside the stack that a scan should walk too: a client that
+-- draws its world UI on the UI root rather than on its screen (the Luanti
+-- client extension's forms) puts its window here while it is up, so a
+-- driven run can find what is on the screen ([FORMSPEC_SCROLL]'s check
+-- wanted the form's own elements)
+M.scan_extra = nil
+function M.set_scan_extra(element)
+	M.scan_extra = element
+end
+M.safe.set_scan_extra = M.set_scan_extra
 function M.safe.set_world_scan(on)
 	M.world_scan = on and true or false
 end
@@ -232,6 +242,12 @@ do
 		lines[#lines + 1] = string.format("scan %s: mouse %s", label,
 				magic.input.mouseVisible and "visible" or "hidden")
 		ui_utils.scan_ui(label, top, 1, lines)
+		if M.scan_extra then
+			local ok = pcall(ui_utils.scan_ui, label, M.scan_extra, 1, lines)
+			if not ok then
+				M.scan_extra = nil
+			end
+		end
 		local focus = magic.ui.focusElement
 		if focus then
 			local at = focus.screenPosition
