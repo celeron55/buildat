@@ -84,8 +84,20 @@ px = list(crop.getdata())
 red = sum(1 for r, g, b in px if r > 110 and g < 80 and b < 80)
 share = 100.0 * red / len(px)
 print("the hotbar strip is %.2f %% red" % share)
-print("PASS: the stack's own colour is what is drawn" if share > 1.0
-      else "FAIL: nothing in the hotbar is coloured")
+# The overlay: slot 7 is a dirt with a stone picture over it and slot 5 is
+# a plain one, so the two slots cannot read the same. The row is centred
+# and eight slots wide at this window, which is what the columns are.
+row = im.crop((int(w * 0.32), h - 62, int(w * 0.68), h - 8))
+sw = row.size[0] // 8
+def slot(i):
+    return list(row.crop(((i - 1) * sw, 0, i * sw, row.size[1])).getdata())
+a5, a7 = slot(5), slot(7)
+diff = sum(abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2])
+           for p, q in zip(a5, a7)) / (3.0 * len(a5))
+print("slots 5 and 7 differ by %.1f levels" % diff)
+ok = share > 1.0 and diff > 5
+print("PASS: the stack's own colour and its overlay are what is drawn" if ok
+      else "FAIL: red %.2f %%, slots 5 and 7 %.1f levels apart" % (share, diff))
 PYIN
 status=$?
 exec 3>&-

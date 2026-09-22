@@ -2317,6 +2317,10 @@ function M.stack_texture(stack)
 	if meta.color and meta.color ~= "" then
 		expr = expr .. "^[multiply:" .. meta.color
 	end
+	-- And a picture over it, which is what an overlay is
+	if meta.inventory_overlay and meta.inventory_overlay ~= "" then
+		expr = expr .. "^" .. meta.inventory_overlay
+	end
 	return texture_of(expr) or M.item_texture(stack.name)
 end
 
@@ -2345,20 +2349,42 @@ function M.wield_look(str)
 	if expr == nil or expr == "" then
 		return nil, stack.name
 	end
+	-- The colour, and a picture over it, on each face of a node's cube or
+	-- on the flat picture
+	local add = ""
 	if meta.color and meta.color ~= "" then
-		local mul = "^[multiply:" .. meta.color
+		add = add .. "^[multiply:" .. meta.color
+	end
+	if meta.wield_overlay and meta.wield_overlay ~= "" then
+		add = add .. "^" .. meta.wield_overlay
+	end
+	if add ~= "" then
 		if string.sub(expr, 1, #CUBE_MARK) == CUBE_MARK then
 			local faces = {}
 			for part in string.gmatch(
 					string.sub(expr, #CUBE_MARK + 1), "[^\1]+") do
-				faces[#faces + 1] = part .. mul
+				faces[#faces + 1] = part .. add
 			end
 			expr = CUBE_MARK .. table.concat(faces, "\1")
 		else
-			expr = expr .. mul
+			expr = expr .. add
 		end
 	end
-	return expr, stack.name .. "\1" .. expr
+	-- wield_scale is how much bigger the hand holds it; a vector as
+	-- "x,y,z" or one number for all three
+	local sx, sy, sz = nil, nil, nil
+	if meta.wield_scale and meta.wield_scale ~= "" then
+		local a1, b1, c1 = string.match(meta.wield_scale,
+				"^%s*([%d.%-]+)%s*,%s*([%d.%-]+)%s*,%s*([%d.%-]+)%s*$")
+		if a1 then
+			sx, sy, sz = tonumber(a1), tonumber(b1), tonumber(c1)
+		else
+			local one = tonumber(meta.wield_scale)
+			sx, sy, sz = one, one, one
+		end
+	end
+	return expr, stack.name .. "\1" .. expr .. "\1" ..
+			tostring(meta.wield_scale or ""), sx, sy, sz
 end
 
 -- The whole of a stack's look from its itemstring, for a client that keeps

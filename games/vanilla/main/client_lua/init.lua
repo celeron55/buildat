@@ -935,7 +935,7 @@ local function draw_wielded(item_name, stack)
 		WIELD.show(false)
 		return
 	end
-	local expr, key = luanti.wield_look(stack)
+	local expr, key, sx, sy, sz = luanti.wield_look(stack)
 	key = key or item_name
 	local shape = wield_shapes[key]
 	if shape == nil then
@@ -961,14 +961,17 @@ local function draw_wielded(item_name, stack)
 			-- a node's cube and a picture's slab are official's sizes
 			local sc = #resources == 3 and WIELD.node_scale or
 					WIELD.extruded_scale
-			holder.scale = magic.Vector3(sc, sc, sc)
+			-- And what the stack asked the hand to hold it at, over that
+			-- ([ITEM_META_LOOK]'s wield_scale)
+			holder.scale = magic.Vector3(sc * (sx or 1), sc * (sy or sx or 1),
+					sc * (sz or sx or 1))
 			shape = {node = holder, materials = materials}
 		end
 		wield_shapes[key] = shape
 	end
 	for name, sh in pairs(wield_shapes) do
 		if sh then
-			sh.node.enabled = (name == item_name)
+			sh.node.enabled = (name == key)
 		end
 	end
 	if shape then
