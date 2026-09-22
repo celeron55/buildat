@@ -5465,6 +5465,15 @@ function core.__step(dtime)
 	emerge_detail.ids, emerge_detail.asked = 0, 0
 	emerge_detail.callbacks, emerge_detail.n_callbacks = 0, 0
 	emerge_detail.worst, emerge_detail.worst_mod = 0, ""
+	core.__advance_clock(dtime)
+end
+
+-- The clock alone, dtime seconds on: what check_map rolls a whole day
+-- with. Rolled through __step it handed every mod's globalstep a day at
+-- once -- nodecore's own game clock drifted 1200 s from get_gametime()
+-- and warned (2026-09-22), and every timer built on core.after fired --
+-- and the clock was then put back while the mods' accumulators were not.
+function core.__advance_clock(dtime)
 	game_time = game_time + dtime
 	local speed = tonumber(core.settings:get("time_speed")) or 72
 	local day_seconds = 24 * 60 * 60

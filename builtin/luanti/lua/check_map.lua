@@ -67,7 +67,10 @@ local function check_clock()
 		core.log("verbose", "check_map: the clock is pinned; not stepped")
 		return
 	end
-	core.__step(24 * 60 * 60 / speed)
+	-- The clock only: a whole day through __step handed the mods'
+	-- globalsteps and timers the day too, and they kept it after the
+	-- clock was put back
+	core.__advance_clock(24 * 60 * 60 / speed)
 	if math.abs(core.get_timeofday() - 0.25) > 1e-3 then
 		error("check_map: a whole day did not come back to the same hour: " ..
 				tostring(core.get_timeofday()))
