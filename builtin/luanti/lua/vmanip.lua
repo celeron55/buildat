@@ -21,6 +21,9 @@
 local VoxelManipRef = {}
 VoxelManipRef.__index = VoxelManipRef
 
+-- Set while the on_generated callbacks run; see update_liquids()
+local in_on_generated = false
+
 local function to_xyz(p)
 	if p == nil then
 		return nil
@@ -154,6 +157,10 @@ function VoxelManipRef:write_to_map(light)
 		self.relight = nil
 		__luanti_relight(r.x1, r.y1, r.z1, r.x2, r.y2, r.z2)
 	end
+	if self.liquids_pending then
+		self.liquids_pending = nil
+		self:update_liquids()
+	end
 end
 
 function VoxelManipRef:was_modified()
@@ -186,8 +193,7 @@ function VoxelManipRef:calc_lighting(p1, p2, propagate_shadow)
 end
 
 -- simplified: set_lighting() does write what it is told, because a mod that
--- fills a cave with its own value means it; update_liquids() is
--- voxelworld's job and the engine's.
+-- fills a cave with its own value means it.
 
 function VoxelManipRef:set_lighting(light, p1, p2)
 	if type(light) ~= "table" or self.emin == nil then
@@ -213,7 +219,25 @@ function VoxelManipRef:set_lighting(light, p1, p2)
 	self.modified = true
 end
 
+-- The liquids in the box queued to flow, which is what Luanti's does for
+-- the liquid nodes a mod wrote: the map's own edge scan over the box,
+-- once the data is in the map -- now if it is, else after the next
+-- write_to_map()
 function VoxelManipRef:update_liquids()
+	if self.emin == nil then
+		return
+	end
+	if self.modified then
+		self.liquids_pending = true
+		return
+	end
+	-- Inside on_generated the chunk's own scan follows the callbacks
+	-- (core.__run_on_generated); VoxeLibre calls this on every chunk
+	if in_on_generated then
+		return
+	end
+	core.__liquid_scan_generated(self.emin.x, self.emin.y, self.emin.z,
+			self.emax.x, self.emax.y, self.emax.z)
 end
 
 function VoxelManipRef:update_map()
@@ -343,7 +367,13 @@ local run_on_generated_mods
 function core.__run_on_generated(x0, y0, z0, x1, y1, z1, blockseed)
 	local callbacks = core.registered_on_generateds
 	if callbacks ~= nil and #callbacks > 0 then
-		run_on_generated_mods(callbacks, x0, y0, z0, x1, y1, z1, blockseed)
+		in_on_generated = true
+		local ok, err = pcall(run_on_generated_mods, callbacks,
+				x0, y0, z0, x1, y1, z1, blockseed)
+		in_on_generated = false
+		if not ok then
+			error(err, 0)
+		end
 	end
 	-- After the mods' writes: the liquids that have somewhere to flow are
 	-- queued, as the mapgen's own would be ([LIQUID_FLOW], lua/liquid.lua)
