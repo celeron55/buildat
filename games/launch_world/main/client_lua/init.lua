@@ -22,20 +22,23 @@ local kept = {}
 
 -- The classic raytrace floor, built rather than loaded: a 2x2 checker is
 -- the one texture the look actually needs
-local function checker_texture(size, a, b)
+-- The classic raytrace floor, built rather than loaded. squares is how
+-- many across the image, since Plane.mdl's UVs run 0..1 over the whole
+-- plane: at one square per half of it the floor is two grey rectangles,
+-- not a checkerboard.
+local function checker_texture(size, squares, a, b, filter)
 	local image = magic.Image:new()
 	assert(image:SetSize(size, size, 3), "Image:SetSize")
-	local half = size / 2
+	local cell = size / squares
 	for y = 0, size - 1 do
 		for x = 0, size - 1 do
-			local dark = ((x < half) ~= (y < half))
+			local dark = (math.floor(x / cell) + math.floor(y / cell)) % 2 == 1
 			image:SetPixel(x, y, dark and a or b)
 		end
 	end
 	local texture = magic.Texture2D:new()
 	assert(texture:SetData(image), "Texture2D:SetData")
-	-- Pixel art, not a smoothed gradient: FILTER_NEAREST keeps the edge
-	texture.filterMode = magic.FILTER_NEAREST
+	texture.filterMode = filter or magic.FILTER_NEAREST
 	kept[#kept + 1] = image
 	kept[#kept + 1] = texture
 	return texture
@@ -44,16 +47,14 @@ end
 -- Urho3D's PBR techniques, on the client's own render path -- no render
 -- path control needed, and none of the preferred-viewport machinery is in
 -- the way. What they do want is PBR_INTENSITY below.
--- simplified: a diffuse colour and a specular colour, not the metallic and
--- roughness the PBR shaders also read, and no material maps at all. The
--- material library is step 3 of the work and this room is step 1.
--- Metals again, now that the zone has a probe to reflect: a PBR metal
--- reflects its surroundings and nothing else, which is why these were
--- polished dielectrics while there were no surroundings.
+-- simplified: a diffuse colour, a roughness and a metalness, and no
+-- material maps at all. The library of generated maps is the ornament
+-- generator's work, further down the list.
 local function material(colour, roughness, metallic, texture)
 	local m = magic.Material:new()
 	local t = magic.cache:GetResource("Technique",
-			texture and "Techniques/PBR/PBRDiff.xml" or "Techniques/PBR/PBRNoTexture.xml")
+			texture and "Techniques/PBR/PBRDiff.xml" or
+			"Techniques/PBR/PBRNoTexture.xml")
 	assert(t ~= nil, "the technique loaded")
 	m:SetTechnique(0, t)
 	if texture then m:SetTexture(magic.TU_DIFFUSE, texture) end
@@ -74,8 +75,8 @@ local zone = zone_node:CreateComponent("Zone")
 zone.boundingBox = magic.BoundingBox(-200, 200)
 zone.ambientColor = magic.Color(0.01, 0.01, 0.015, 1)
 zone.fogColor = magic.Color(0, 0, 0, 1)
-zone.fogStart = 14
-zone.fogEnd = 34
+zone.fogStart = 26
+zone.fogEnd = 64
 
 local function part(model, pos, scale, mat)
 	local node = scene:CreateChild("part")
@@ -92,42 +93,98 @@ local chrome = material(magic.Color(0.92, 0.94, 0.97, 1), 0.06, 1.0)
 local machined = material(magic.Color(0.55, 0.57, 0.62, 1), 0.34, 1.0)
 local stone = material(magic.Color(0.26, 0.26, 0.29, 1), 0.85, 0.0)
 
--- The floor, and the checker on it
-local floor_mat = material(magic.Color(1, 1, 1, 1), 0.45, 0.0,
-		checker_texture(64, magic.Color(0.06, 0.06, 0.08, 1),
-		magic.Color(0.55, 0.56, 0.60, 1)))
-part("Plane", magic.Vector3(0, 0, 0), magic.Vector3(24, 1, 24), floor_mat)
+-- An unlit material draws at its own colour whatever the light does,
+-- which is what an orb that *is* the light needs; it also lands in the
+-- probe, so the chrome has something bright to reflect.
+local function glow(colour)
+	local m = magic.Material:new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTextureUnlit.xml"))
+	m:SetShaderParameter("MatDiffColor", colour)
+	kept[#kept + 1] = m
+	return m
+end
 
--- The tomb's mass: three walls of stacked tiers, symmetric, with the
--- fourth side left open to the horizon. Ornament is a for loop.
-for _, side in ipairs({{0, -9, 0}, {-9, 0, 90}, {9, 0, 90}}) do
-	for tier = 0, 2 do
-		local w = 18 - tier * 2
-		local h = 1.6
-		local y = 0.8 + tier * h
-		local node = part("Box", magic.Vector3(side[1], y, side[2]),
-				magic.Vector3(side[3] == 90 and 1.2 or w, h,
-				side[3] == 90 and w or 1.2), stone)
+-- The floor: a checkerboard in perspective is half the classic raytrace
+-- picture, and in the reference frame it carries the reflections of
+-- everything standing on it
+local floor_mat = material(magic.Color(1, 1, 1, 1), 0.18, 0.0,
+		checker_texture(256, 20, magic.Color(0.04, 0.04, 0.05, 1),
+		magic.Color(0.62, 0.63, 0.66, 1), magic.FILTER_TRILINEAR))
+part("Plane", magic.Vector3(0, 0, 0), magic.Vector3(40, 1, 40), floor_mat)
+
+-- The architecture: six bays of stacked slabs across the back, each with
+-- an orb wedged behind it. **The composition rule** (user), read off the
+-- reference frame and against the evenly-lit set that was rejected:
+-- every view has a light source occluded by something -- so the orb sits
+-- behind its bay and the stone silhouettes against it.
+local BAYS = 6
+local BAY_W = 6.4          -- metres between bay centres
+local BAY_X0 = -(BAYS - 1) * 6.4 / 2
+local SLAB = {h = 1.15, d = 1.6}
+-- Where each bay's orb sits, as the tier it glows through: the tiers
+-- differ bay to bay so the wall is not a row of identical holes
+local BAY_TIER = {2, 4, 1, 3, 5, 2}
+local orb_places = {}
+for b = 1, BAYS do
+	local x = BAY_X0 + (b - 1) * BAY_W
+	-- The pillar: stacked slabs, each a little narrower than the one
+	-- under it, which is the tomb read and is a loop rather than a model
+	for tier = 0, 5 do
+		local w = 4.4 - tier * 0.45
+		local y = SLAB.h / 2 + tier * (SLAB.h + 0.12)
+		if tier == BAY_TIER[b] then
+			-- The tier the orb glows through: two posts and a gap
+			for _, side in ipairs({-1, 1}) do
+				part("Box", magic.Vector3(x + side * (w / 2 - 0.55), y, -8),
+						magic.Vector3(1.1, SLAB.h, SLAB.d), stone)
+			end
+			orb_places[#orb_places + 1] = {x = x, y = y, z = -9.6}
+		else
+			part("Box", magic.Vector3(x, y, -8),
+					magic.Vector3(w, SLAB.h, SLAB.d), stone)
+		end
 	end
+	-- A lintel across the top of the bay, deeper than the stack, so the
+	-- wall has a front plane as well as a back one
+	part("Box", magic.Vector3(x, 6.0 + SLAB.h, -7.2),
+			magic.Vector3(BAY_W - 0.5, 0.5, 2.6), machined)
+end
+-- And the back wall itself, so the orbs glow out of something rather
+-- than out of the void
+part("Box", magic.Vector3(0, 4.5, -11.2),
+		magic.Vector3(BAYS * BAY_W + 6, 13.0, 0.8), stone)
+
+-- The orbs. Warm is what you own; the palette's own entry says which
+-- colour each carries, and the light at it is what lights the room.
+local orb_mats = {}
+for i, o in ipairs(orb_places) do
+	orb_mats[i] = glow(magic.Color(1, 1, 1, 1))
+	local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
+			magic.Vector3(1.7, 1.7, 1.7), orb_mats[i])
+	node:GetComponent("StaticModel").castShadows = false
 end
 
--- The chrome the classic raytrace scene is for: a sphere and a torus under
--- a sharp point light give one continuous sweeping highlight, which is the
--- whole look
-part("Sphere", magic.Vector3(-2.6, 1.4, 0), magic.Vector3(2.4, 2.4, 2.4), chrome)
-part("Torus", magic.Vector3(2.8, 1.0, -0.6), magic.Vector3(3.0, 3.0, 3.0), chrome)
-part("Cylinder", magic.Vector3(0.2, 1.3, 3.2), magic.Vector3(1.0, 2.6, 1.0),
-		machined)
--- A plinth: three stacked boxes is a sarcophagus
-for tier = 0, 2 do
-	part("Box", magic.Vector3(0, 0.15 + tier * 0.3, 0),
-			magic.Vector3(9 - tier * 1.4, 0.3, 6 - tier * 1.0), stone)
-end
--- A ring of twelve, because repetition is what reads as ornate
-for i = 0, 11 do
-	local a = i * math.pi / 6
-	part("Box", magic.Vector3(math.cos(a) * 7.2, 0.25, math.sin(a) * 7.2),
-			magic.Vector3(0.5, 0.5, 0.5), machined)
+-- The foreground: ten shipped primitives on the checkerboard, the chrome
+-- ones doing what a perfect sphere under a sharp light does
+local PROPS = {
+	{"Sphere", -8.0, 1.05, -1.0, 2.1, "chrome"},
+	{"Sphere", -4.2, 0.80, 1.8, 1.6, "chrome"},
+	{"Sphere", 0.6, 1.20, -2.4, 2.4, "chrome"},
+	{"Sphere", 5.2, 0.90, 1.0, 1.8, "chrome"},
+	{"Sphere", 9.0, 1.30, -1.6, 2.6, "chrome"},
+	{"Cone", -6.0, 1.05, 2.6, 2.1, "machined"},
+	{"Cylinder", 3.0, 1.00, 3.4, 2.0, "machined"},
+	{"Torus", -1.6, 0.45, 3.0, 2.2, "chrome"},
+	{"Pyramid", 7.2, 0.90, 3.2, 1.8, "stone"},
+	-- Not Dome.mdl: it is Urho3D's skydome and at any scale it arches
+	-- over the whole room
+	{"Pyramid", -10.4, 0.85, 2.2, 1.7, "machined"},
+}
+local MATS = {chrome = chrome, machined = machined, stone = stone}
+for _, o in ipairs(PROPS) do
+	part(o[1], magic.Vector3(o[2], o[3], o[4]),
+			magic.Vector3(o[5], o[5], o[5]), MATS[o[6]])
 end
 
 -- The ten lights are the experiment. Their places are the room's and do
@@ -136,80 +193,72 @@ end
 -- (every readout is a real light source), 7-8 the structure's own glow,
 -- 9 the one amber thing that wants you, 10 the horizon through the
 -- opening.
-local LIGHT_PLACES = {
-	{-5.0, 5.2, -4.0}, {5.0, 5.0, 4.5},
-	{-8.0, 2.2, 3.0}, {8.0, 2.2, -3.0}, {-8.0, 2.2, -5.0}, {8.0, 2.2, 5.5},
-	{0.0, 4.4, -8.0}, {0.0, 1.0, 0.0},
-	{2.8, 2.6, 4.6},
-	{0.0, 3.0, 16.0},
-}
+-- The first six lights are the orbs -- each sits inside its own sphere,
+-- so what lights the room is the thing you can see lighting it. The last
+-- four are fill: two low at the sides and two picking out the
+-- foreground, which is what keeps the chrome from being a black ball
+-- with one highlight.
+local LIGHT_PLACES = {}
+for i, o in ipairs(orb_places) do
+	LIGHT_PLACES[i] = {o.x, o.y, o.z}
+end
+LIGHT_PLACES[#LIGHT_PLACES + 1] = {-11.0, 1.6, 2.0}
+LIGHT_PLACES[#LIGHT_PLACES + 1] = {11.0, 1.6, 2.0}
+LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, 5.5, 6.0}
+LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, 1.2, 10.0}
 local CYAN = {0.15, 0.85, 1.0}
 local PURPLE = {0.55, 0.20, 0.95}
 local AMBER = {1.0, 0.62, 0.12}
 local WARM = {1.0, 0.72, 0.45}
 local COLD_WHITE = {0.72, 0.85, 1.0}
 
--- {colour, intensity, range}
+-- {colour, intensity, range}. The first six are the orbs, in the order
+-- the bays were built; the last four are fill. A preset says only what
+-- colour each is, how bright and how far.
+local function preset_lights(orb, fill, orb_i, fill_i)
+	local l = {}
+	for i = 1, 6 do
+		l[i] = {orb, orb_i, 17}
+	end
+	l[7] = {fill, fill_i, 11}
+	l[8] = {fill, fill_i, 11}
+	l[9] = {fill, fill_i * 0.7, 13}
+	l[10] = {fill, fill_i * 0.5, 10}
+	return l
+end
+
 local PRESETS = {
 	{
+		-- The reference frame's own scheme and the plan's proposal: warm
+		-- orbs beyond a cold room, so the stone silhouettes against them
+		-- and the eye goes to the light rather than to the wall
 		name = "cold_in_warm_out",
-		-- The proposal: cold inside, warm outside. The room is a tomb full
-		-- of machines and cold is what dead-but-powered looks like; the
-		-- warm horizon is the one thing not under the player's control.
-		lights = {
-			{COLD_WHITE, 1.10, 16}, {CYAN, 0.55, 14},
-			{CYAN, 0.45, 6}, {CYAN, 0.45, 6}, {CYAN, 0.30, 6}, {CYAN, 0.30, 6},
-			{PURPLE, 0.35, 10}, {PURPLE, 0.25, 7},
-			{AMBER, 0.70, 7},
-			{WARM, 0.55, 40},
-		},
+		lights = preset_lights(WARM, CYAN, 4.0, 0.30),
 	},
 	{
+		-- The mirror, to see what was given up
 		name = "warm_in_cold_out",
-		-- The mirror, to see what was given up: a warm interior reads cosy,
-		-- which is what the tavern was thrown out for
-		lights = {
-			{WARM, 1.10, 16}, {AMBER, 0.55, 14},
-			{AMBER, 0.45, 6}, {AMBER, 0.45, 6}, {WARM, 0.30, 6}, {WARM, 0.30, 6},
-			{AMBER, 0.35, 10}, {AMBER, 0.25, 7},
-			{CYAN, 0.70, 7},
-			{COLD_WHITE, 0.55, 40},
-		},
+		lights = preset_lights(CYAN, AMBER, 4.0, 0.30),
 	},
 	{
+		-- No warm anywhere: whether the room needs a warm point at all
 		name = "all_cold",
-		-- No warm anywhere, so the question "does the room need a warm
-		-- point at all" gets its own picture
-		lights = {
-			{COLD_WHITE, 1.10, 16}, {CYAN, 0.55, 14},
-			{CYAN, 0.45, 6}, {CYAN, 0.45, 6}, {CYAN, 0.30, 6}, {CYAN, 0.30, 6},
-			{PURPLE, 0.35, 10}, {PURPLE, 0.25, 7},
-			{CYAN, 0.70, 7},
-			{CYAN, 0.55, 40},
-		},
+		lights = preset_lights(COLD_WHITE, CYAN, 4.0, 0.30),
 	},
 	{
+		-- Deliberately wrong, and the useful one: every colour loud, the
+		-- purple as bright as the cyan, nothing scarce
 		name = "wrong",
-		-- Deliberately wrong, and it is the useful one: every colour bright,
-		-- purple as loud as the cyan, amber everywhere instead of scarce.
-		-- This is what the scheme collapses into if the rules are dropped.
-		lights = {
-			{PURPLE, 1.20, 20}, {AMBER, 1.20, 20},
-			{AMBER, 1.00, 12}, {PURPLE, 1.00, 12}, {AMBER, 1.00, 12},
-			{PURPLE, 1.00, 12},
-			{{0.2, 1.0, 0.3}, 1.00, 16}, {AMBER, 1.00, 12},
-			{AMBER, 1.20, 14},
-			{{1.0, 0.2, 0.6}, 1.00, 40},
-		},
+		lights = preset_lights(PURPLE, AMBER, 5.0, 1.6),
 	},
 }
 
 -- Urho3D's PBR shaders want a light an order of magnitude brighter than
 -- the non-PBR ones for the same picture: their falloff is physical and
 -- brightness is radiant intensity, not a 0..1 dimmer. A preset's numbers
--- below are relative to each other, and this is the one place the scale
--- lives. Getting this wrong is what made PBR look like it did not work at
--- all -- the room came out black and the render path got the blame.
+-- above are relative to each other, and this is the one place the scale
+-- lives. Getting this wrong is what made PBR look like it did not work
+-- at all -- the room came out black and the render path got the blame.
 local PBR_INTENSITY = 25
 
 local lights = {}
@@ -233,6 +282,13 @@ local function set_preset(n)
 	for i, light in ipairs(lights) do
 		local e = preset.lights[i]
 		light.color = magic.Color(e[1][1], e[1][2], e[1][3], 1)
+		-- An orb is its own light made visible, so it wears the colour it
+		-- casts, well above 1 so it reads as a source and not as a pale
+		-- ball -- and so the probe carries it to the chrome
+		if orb_mats[i] then
+			orb_mats[i]:SetShaderParameter("MatDiffColor",
+					magic.Color(e[1][1] * 3.0, e[1][2] * 3.0, e[1][3] * 3.0, 1))
+		end
 		light.brightness = e[2] * PBR_INTENSITY
 		light.range = e[3]
 	end
@@ -246,8 +302,8 @@ end
 -- the open side behind the camera, the chrome and the plinth in frame
 local camera_node = scene:CreateChild("Camera")
 camera_node:CreateComponent("Camera")
-camera_node.position = magic.Vector3(0.6, 3.4, 11.0)
-camera_node:LookAt(magic.Vector3(0, 1.4, 0))
+camera_node.position = magic.Vector3(0.0, 2.75, 15.5)
+camera_node:LookAt(magic.Vector3(0, 1.45, -6.0))
 -- [LAUNCH_WORLD] step 2: the reflection probe, which is a prerequisite
 -- and not an upgrade -- a PBR metal reflects its surroundings and nothing
 -- else, so with no environment it is black but for its highlight, and
@@ -298,7 +354,7 @@ local function reflection_probe(at)
 	zone.zoneTexture = cube
 	return cube
 end
-reflection_probe(magic.Vector3(0, 2.4, 0))
+reflection_probe(magic.Vector3(0, 2.0, 0.0))
 
 -- The first frames, not the first: at boot the materials and the
 -- generated textures are not on the GPU yet and a probe taken then is a
