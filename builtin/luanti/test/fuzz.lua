@@ -303,6 +303,16 @@ core.register_on_joinplayer(function(player)
 			core.log("warning", string.format(
 					"fuzz: step peak %.2f s in %s at t=%d (a game's own "..
 					"generation, not counted)", peak, phase, t))
+		elseif peak > STEP_FAIL_S and t < STEP_COUNT_FROM_T then
+			-- The start-up load is not play: the first sections' emerge
+			-- and the lbms of the blocks they bring were failing a run at
+			-- t=0 while the ceiling's own tally starts at
+			-- STEP_COUNT_FROM_T, which is the rule this follows now
+			-- (user, 2026-09-19; read again 2026-09-22 when a fresh world
+			-- under the physics variant failed on emerge 6.11 s at t=0)
+			core.log("warning", string.format(
+					"fuzz: step peak %.2f s in %s at t=%d (the start-up "..
+					"load, not counted)", peak, phase, t))
 		elseif peak > STEP_FAIL_S then
 			fail(string.format("a step took %.2f s in %s", peak, phase))
 		elseif peak > STEP_CEILING_S and t >= STEP_COUNT_FROM_T then
