@@ -1057,8 +1057,10 @@ local function draw_hotbar()
 			slot.image:SetPosition(padding, padding)
 			slot.image.size = magic.IntVector2(imagesize, imagesize)
 		end
-		local name, count = parse_stack(hotbar_stacks[i])
-		local tex = name and game_texture(luanti.item_texture(name))
+		-- The stack's own look when its metadata gives it one
+		-- ([ITEM_META_LOOK]); the name is still what the tooltip reads
+		local resource, count_text, name = luanti.stack_look(hotbar_stacks[i])
+		local tex = resource and game_texture(resource)
 		-- Assigned only when there is one: the sandbox takes a Texture and
 		-- not a nil, and an empty slot is an image that is not drawn
 		-- The rect said outright ([ITEM_TILED]): while it is zero Urho
@@ -1089,7 +1091,7 @@ local function draw_hotbar()
 			slot.marker.texture = selected
 		end
 		slot.marker.visible = marked and selected ~= nil
-		slot.count:SetText((count and count > 1) and tostring(count) or "")
+		slot.count:SetText(count_text or "")
 	end
 	local name = parse_stack(hotbar_stacks[wield_index])
 	wielded_text:SetText(name or "")

@@ -1,0 +1,18 @@
+-- [ITEM_META_LOOK]: a stack coloured by its own metadata, and one whose
+-- count is drawn from a meta key
+core.register_on_joinplayer(function(player)
+	core.after(4, function()
+		local inv = player:get_inventory()
+		local red = ItemStack("basenodes:dirt 1")
+		local m = red:get_meta()
+		m:set_string("color", "#ff0000")
+		inv:set_stack("main", 1, red)
+		local many = ItemStack("basenodes:dirt 1")
+		local m2 = many:get_meta()
+		m2:set_string("count_meta", "uses")
+		m2:set_string("uses", "42")
+		inv:set_stack("main", 3, many)
+		inv:set_stack("main", 5, "basenodes:dirt 7")
+		core.log("action", "itemmeta: the stacks are set")
+	end)
+end)

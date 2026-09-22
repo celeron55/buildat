@@ -2267,6 +2267,22 @@ end
 local imageless = {}
 
 -- "basenodes:stone 7" -> {name = "basenodes:stone", count = 7}
+-- A stack's own metadata, which rides in the itemstring after the wear as
+-- "\1key\2value\3" pairs (classes.lua's meta_to_string) -- a stack that
+-- was coloured or given a picture of its own by a mod says so there
+-- ([ITEM_META_LOOK])
+local function parse_stack_meta(str)
+	if not string.find(str, "\1", 1, true) then
+		return nil
+	end
+	local fields = nil
+	for k, v in string.gmatch(str, "\1([^\2]*)\2([^\3]*)\3") do
+		fields = fields or {}
+		fields[k] = v
+	end
+	return fields
+end
+
 local function parse_stack(str)
 	if str == nil or str == "" then
 		return nil
@@ -2275,7 +2291,59 @@ local function parse_stack(str)
 	if name == nil or name == "" then
 		return nil
 	end
-	return {name = name, count = tonumber(count) or 1}
+	return {name = name, count = tonumber(count) or 1,
+			meta = parse_stack_meta(str)}
+end
+
+-- What a stack looks like: its item's picture, or what its own metadata
+-- says instead -- inventory_image in place of it, color multiplied into it
+-- ([ITEM_META_LOOK]). palette_index is not read: the palette is the
+-- server's and is not sent.
+function M.stack_texture(stack)
+	if stack == nil then
+		return nil
+	end
+	local meta = stack.meta
+	if meta == nil then
+		return M.item_texture(stack.name)
+	end
+	local expr = meta.inventory_image
+	if expr == nil or expr == "" then
+		expr = item_images[stack.name]
+	end
+	if expr == nil or expr == "" then
+		return M.item_texture(stack.name)
+	end
+	if meta.color and meta.color ~= "" then
+		expr = expr .. "^[multiply:" .. meta.color
+	end
+	return texture_of(expr) or M.item_texture(stack.name)
+end
+
+-- The whole of a stack's look from its itemstring, for a client that keeps
+-- its own hotbar: the texture, what the count should read, and the name
+function M.stack_look(str)
+	local stack = parse_stack(str)
+	if stack == nil then
+		return nil
+	end
+	return M.stack_texture(stack), M.stack_count_text(stack), stack.name
+end
+
+-- And what the count under it says: count_meta names the meta key whose
+-- value is drawn in place of the number
+function M.stack_count_text(stack)
+	if stack == nil then
+		return nil
+	end
+	local meta = stack.meta
+	if meta and meta.count_meta and meta[meta.count_meta] then
+		return tostring(meta[meta.count_meta])
+	end
+	if stack.count and stack.count > 1 then
+		return tostring(stack.count)
+	end
+	return nil
 end
 
 --
@@ -2532,13 +2600,19 @@ local function make_ui()
 	end
 	ui = formspec_ui.new(magic, buildat, log, {
 		texture = texture_of,
-		item_image = function(item_name)
-			local resource = texture_of(item_images[item_name])
+		-- A stack rather than a name when there is one: its own metadata
+		-- may put another picture or a colour on it ([ITEM_META_LOOK])
+		item_image = function(item_name, stack)
+			local resource = stack and stack.meta and M.stack_texture(stack)
+					or texture_of(item_images[item_name])
 			if not resource and not imageless[item_name] then
 				imageless[item_name] = true
 				log:info("item: no image for \"" .. item_name .. "\"")
 			end
 			return resource
+		end,
+		stack_count_text = function(stack)
+			return M.stack_count_text(stack)
 		end,
 		-- The player's own lists, the node the form is about --
 		-- "current_name" and "context" are that node, and a nodemeta:

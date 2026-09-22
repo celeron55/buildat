@@ -217,7 +217,7 @@ function M.new(magic, buildat, log, ctx)
 
 	-- An item stack in a slot: what it looks like, and how many
 	local function draw_stack(parent, x, y, size, stack)
-		local resource = stack and ctx.item_image(stack.name)
+		local resource = stack and ctx.item_image(stack.name, stack)
 		if resource then
 			local e = parent:CreateChild("BorderImage")
 			e:SetPosition(math.floor(x + size * 0.1),
@@ -235,9 +235,14 @@ function M.new(magic, buildat, log, ctx)
 			box(parent, x + size * 0.3, y + size * 0.3, size * 0.4,
 					size * 0.4, magic.Color(0.8, 0.4, 0.8, 0.8))
 		end
-		if stack and stack.count > 1 then
+		-- The number, or what the stack's count_meta names instead
+		-- ([ITEM_META_LOOK])
+		local count_text = ctx.stack_count_text and
+				ctx.stack_count_text(stack) or
+				(stack and stack.count > 1 and tostring(stack.count) or nil)
+		if count_text then
 			local t = label(parent, x + size * 0.05, y + size * 0.55,
-					size * 0.9, tostring(stack.count),
+					size * 0.9, count_text,
 					math.max(8, math.floor(size * 0.32)))
 			t:SetTextAlignment(2) -- HA_RIGHT
 		end
