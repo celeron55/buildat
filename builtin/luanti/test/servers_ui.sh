@@ -9,12 +9,12 @@
 #   builtin/luanti/test/servers_ui.sh
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "/tmp/buildat_servers_ui.XXXXXX")
 out="$here/local/servers_ui"; mkdir -p "$out"
 cd "$here/Build"
 addr=../user/network_addresses.csv
 [ -f "$addr" ] && cp "$addr" "$tmp/addresses.bak"
-trap 'if [ -f "$tmp/addresses.bak" ]; then cp "$tmp/addresses.bak" "$addr"; fi' EXIT
+trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; if [ -f "$tmp/addresses.bak" ]; then cp "$tmp/addresses.bak" "$addr"; fi' EXIT
 run() {   # module-flag... -- runs one client with the python driver on stdin
 	local fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 	bin/buildat -w 1280x720 -l 3 -c - "$@" < "$fifo" 2>&1 \

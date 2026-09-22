@@ -9,7 +9,7 @@
 #   builtin/luanti/test/world_ui.sh
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "/tmp/buildat_world_ui.XXXXXX")
 out="$here/local/world_ui"; mkdir -p "$out"
 cd "$here/Build"
 SAVE="${SAVE:-buildat_test_sprites}"
@@ -17,7 +17,7 @@ save=../user/games/vanilla/saves/$SAVE
 [ -d "$save" ] || { echo "FAIL: no save $SAVE; a drive or fixture run makes one" >&2; exit 1; }
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
-trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; pkill -INT -x buildat_server 2>/dev/null' EXIT
+trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; pkill -INT -x buildat_server 2>/dev/null' EXIT
 bin/buildat -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
 cli=$!

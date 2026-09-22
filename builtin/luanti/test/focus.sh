@@ -10,11 +10,11 @@
 # Wants an X display and xdotool; the window is found by the client's pid.
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "/tmp/buildat_focus.XXXXXX")
 cd "$here/Build"
 rm -rf ../user/games/vanilla/saves/buildat_test_focus
 srv=""; cli=""
-trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
+trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 port=$(( 29500 + (RANDOM % 90) ))
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_focus \
 	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" 2>&1 \

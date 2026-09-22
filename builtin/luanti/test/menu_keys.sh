@@ -20,8 +20,8 @@
 # field blinks its caret and that is not the selection moving.
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+tmp=$(mktemp -d "/tmp/buildat_menu_keys.XXXXXX")
+trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; rm -rf "$tmp"' EXIT
 cd "$here/Build"
 { echo "delay 6000"; echo "screenshot $tmp/a.png"; echo "delay 500"
 	echo "keypress DOWN"; echo "delay 800"; echo "screenshot $tmp/b.png"

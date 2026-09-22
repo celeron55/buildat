@@ -39,6 +39,11 @@ fi
 version="$version-$hash"
 jobs="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 root="$here/Build/package"
+# Every temporary directory this makes, removed when the script ends
+# however it ends ([TMP_HYGIENE]: 589 smoke directories held 4.7 GB of
+# /tmp); KEEP_TMP=1 keeps them and says where
+PKG_TMP_DIRS=""
+trap 'if [ -n "${KEEP_TMP:-}" ]; then echo "kept:$PKG_TMP_DIRS" >&2; else rm -rf $PKG_TMP_DIRS; fi' EXIT
 out="$root/out"
 mkdir -p "$out"
 
@@ -73,7 +78,8 @@ check_imports() {
 	objdump=$(command -v x86_64-w64-mingw32-objdump || command -v objdump) || {
 		echo "import check: no objdump here; not run"; return 0; }
 	local dir
-	dir=$(mktemp -d)
+	dir=$(mktemp -d "/tmp/buildat_package_check_imports.XXXXXX")
+	PKG_TMP_DIRS="$PKG_TMP_DIRS $dir"
 	unzip -q "$archive" -d "$dir" || { echo "import check: cannot unzip $archive" >&2; exit 1; }
 	# Windows' own, lower case; the api-ms-win-* set by prefix, except the
 	# api-ms-win-crt-* ones: those are the UCRT, and this archive is built
@@ -151,7 +157,8 @@ smoke_test_wine() {
 	local wine
 	wine=$(command -v wine64 || command -v wine)
 	local dir
-	dir=$(mktemp -d)
+	dir=$(mktemp -d "/tmp/buildat_package_smoke_test_wine.XXXXXX")
+	PKG_TMP_DIRS="$PKG_TMP_DIRS $dir"
 	(cd "$dir" && unzip -q "$archive")
 	local unpacked
 	unpacked=$(ls -d "$dir"/*/ | head -1)
@@ -345,7 +352,8 @@ smoke_test_wine_luanti() {
 	local wine
 	wine=$(command -v wine64 || command -v wine)
 	local dir
-	dir=$(mktemp -d)
+	dir=$(mktemp -d "/tmp/buildat_package_smoke_test_wine_luanti.XXXXXX")
+	PKG_TMP_DIRS="$PKG_TMP_DIRS $dir"
 	(cd "$dir" && unzip -q "$archive")
 	local unpacked
 	unpacked=$(ls -d "$dir"/*/ | head -1)
@@ -543,7 +551,8 @@ wait_for_vanilla() {
 smoke_test() {
 	local archive="$1"
 	local dir
-	dir=$(mktemp -d)
+	dir=$(mktemp -d "/tmp/buildat_package_smoke_test.XXXXXX")
+	PKG_TMP_DIRS="$PKG_TMP_DIRS $dir"
 	tar -C "$dir" -xzf "$archive"
 	local unpacked
 	unpacked=$(ls -d "$dir"/*/ | head -1)

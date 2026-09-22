@@ -7,11 +7,11 @@
 #   builtin/luanti/test/ext_connect_fail.sh
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "/tmp/buildat_ext_connect_fail.XXXXXX")
 cd "$here/Build"
 file=../user/luanti_client/settings.json
 [ -f "$file" ] && cp "$file" "$tmp/settings.bak"
-trap 'if [ -f "$tmp/settings.bak" ]; then cp "$tmp/settings.bak" "$file"; else rm -f "$file"; fi' EXIT
+trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; if [ -f "$tmp/settings.bak" ]; then cp "$tmp/settings.bak" "$file"; else rm -f "$file"; fi' EXIT
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 bin/buildat -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &

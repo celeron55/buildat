@@ -8,7 +8,7 @@
 #   builtin/luanti/test/leave_ui.sh
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "/tmp/buildat_leave_ui.XXXXXX")
 cd "$here/Build"
 # A server of an earlier run still shutting down would be read as this
 # run's; wait for it
@@ -16,7 +16,7 @@ for i in $(seq 1 60); do pgrep -x buildat_server >/dev/null || break; sleep 1; d
 pgrep -x buildat_server >/dev/null && { echo "FAIL: a buildat_server is running" >&2; exit 2; }
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
-trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; pkill -INT -x buildat_server 2>/dev/null' EXIT
+trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; pkill -INT -x buildat_server 2>/dev/null' EXIT
 bin/buildat -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
 cli=$!

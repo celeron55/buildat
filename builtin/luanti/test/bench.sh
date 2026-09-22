@@ -4,11 +4,11 @@
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "/tmp/buildat_bench.XXXXXX")
 cd "$here/Build"
 rm -rf ../user/games/vanilla/saves/buildat_test_bench
 srv=""; cli=""
-trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
+trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 port=$(( 29500 + (RANDOM % 90) ))
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_bench \
 	BUILDAT_LUANTI_LUA="$me/bench.lua" \

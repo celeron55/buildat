@@ -11,11 +11,11 @@
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "/tmp/buildat_fly.XXXXXX")
 cd "$here/Build"
 rm -rf ../user/games/vanilla/saves/buildat_test_fly
 srv=""; cli=""
-trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
+trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 port=$(( 29500 + (RANDOM % 90) ))
 cat > "$tmp/fixture.lua" <<'LUA'
 -- fly.sh's server half: twenty seconds after the join, the player's fly

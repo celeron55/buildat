@@ -7,13 +7,14 @@
 #   builtin/luanti/test/keys.sh
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "/tmp/buildat_keys.XXXXXX")
 cd "$here/Build"
 settings=../user/luanti/settings.json
 mkdir -p ../user/luanti
 [ -f "$settings" ] && cp "$settings" "$tmp/settings.json.bak"
 trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null;
-	if [ -f "$tmp/settings.json.bak" ]; then cp "$tmp/settings.json.bak" "$settings"; else rm -f "$settings"; fi' EXIT
+	if [ -f "$tmp/settings.json.bak" ]; then cp "$tmp/settings.json.bak" "$settings"; else rm -f "$settings"; fi;
+	[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"' EXIT
 echo '{"render_mode": "pbr", "import_paths": [], "keys": {"forward": "U"}}' > "$settings"
 rm -rf ../user/games/vanilla/saves/buildat_test_keys
 srv=""; cli=""

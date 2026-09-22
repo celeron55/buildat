@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <cstring>
 #include <cstdarg>
@@ -45,6 +46,13 @@ static std::atomic_int current_level(0);
 static std::atomic_int max_level(CORE_INFO);
 
 static FILE *file = NULL;
+// The log's path and how much has gone into it, for the cap below: at
+// LOG_CAP_BYTES the file is moved to <path>_1 and started again, so a
+// forgotten -l 5 cannot fill a tmpfs (the verbose server log reached
+// 1.5 GB in eight minutes; [TMP_HYGIENE])
+static char log_path_kept[4096] = "";
+static std::atomic<long long> log_written(0);
+static long long LOG_CAP_BYTES = 512LL * 1024 * 1024; // BUILDAT_LOG_CAP_BYTES
 // The file beside stderr rather than instead of it: the default log
 // ([WIN8_START]), where the terminal and a harness reading the stream
 // keep what they had
@@ -90,6 +98,11 @@ void log_set_file(const char *path, bool tee_)
 	file = fopen(path, "ab");
 	tee = tee_;
 	if(file){
+		snprintf(log_path_kept, sizeof log_path_kept, "%s", path);
+		if(getenv("BUILDAT_LOG_CAP_BYTES"))
+			LOG_CAP_BYTES = atoll(getenv("BUILDAT_LOG_CAP_BYTES"));
+		long pos = ftell(file);
+		log_written = pos > 0 ? pos : 0;
 		fprintf(stderr, "Opened log file \"%s\"\n", path);
 		// And stderr into the same file: a crash's backtrace is written
 		// there by the signal handler, and a local server a client
@@ -195,8 +208,28 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 	if(file){
 		va_list copy;
 		va_copy(copy, va_args);
-		vfprintf(file, fmt, copy);
+		int n = vfprintf(file, fmt, copy);
 		va_end(copy);
+		if(n > 0 && (log_written += n) >= LOG_CAP_BYTES && log_path_kept[0]){
+			// Rotated: the file so far to _1 (the one before it gone), and
+			// this one opened again empty
+			fflush(file);
+			fclose(file);
+			char rotated[4200];
+			snprintf(rotated, sizeof rotated, "%s_1", log_path_kept);
+			remove(rotated);
+			rename(log_path_kept, rotated);
+			file = fopen(log_path_kept, "ab");
+			log_written = 0;
+			if(file){
+				if(!tee){
+					fflush(stderr);
+					dup2(fileno(file), 2);
+				}
+				fprintf(file, "log rotated at %lld bytes; the rest is in %s\n",
+						LOG_CAP_BYTES, rotated);
+			}
+		}
 	}
 	if(!file || tee)
 		vfprintf(stderr, fmt, va_args);

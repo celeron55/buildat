@@ -35,8 +35,8 @@ across="${4:-6}"
 save="${5:-bench_worldgen}"
 build="$root/Build"
 saves="$root/user/games/vanilla/saves"
-out="$(mktemp -d)"
-trap 'rm -rf "$out"' EXIT
+out="$(mktemp -d /tmp/buildat_bench_worldgen.XXXXXX)"
+trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $out" >&2 || rm -rf "$out"' EXIT
 
 if [ ! -x "$build/bin/buildat_server" ]; then
 	echo "no server at $build/bin/buildat_server" >&2

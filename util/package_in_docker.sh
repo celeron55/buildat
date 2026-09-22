@@ -27,7 +27,8 @@ mkdir -p "$out"
 docker build -t "$image" "$here/util/docker/$target"
 # The tree as committed, including the bundled Urho3D and the other
 # 3rdparty sources; anything uncommitted is not in a release
-tarball=$(mktemp)
+tarball=$(mktemp /tmp/buildat_package_in_docker.XXXXXX)
+trap 'rm -f "$tarball"' EXIT
 git -C "$here" archive --format=tar HEAD > "$tarball"
 # The archive has no .git, so the hash of what it holds goes in by name
 hash=$(git -C "$here" rev-parse --short HEAD)
