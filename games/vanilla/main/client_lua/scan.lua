@@ -191,9 +191,16 @@ return function(ctx)
 						tostring(e.item or e.number or 0), rect)
 			end
 		end
-		-- The crosshair, by the same march the dig uses
+		-- The crosshair, by the same march the dig uses; a fallen body's
+		-- voxel says so, with its region position ([BODY_INTERACT])
 		local hit = ctx.pointed()
-		if hit then
+		if hit and hit.y >= luanti.REGION_Y then
+			local w = luanti.body_world(hit)
+			lines[#lines + 1] = string.format(
+					"scan %s: crosshair body voxel %s at %d,%d,%d (world %.1f,%.1f,%.1f)",
+					label, ctx.node_name_at(hit) or "?", hit.x, hit.y, hit.z,
+					w and w.x or 0, w and w.y or 0, w and w.z or 0)
+		elseif hit then
 			lines[#lines + 1] = string.format("scan %s: crosshair %s at %d,%d,%d",
 					label, ctx.node_name_at(hit) or "?", hit.x, hit.y, hit.z)
 		else
@@ -242,7 +249,15 @@ return function(ctx)
 		local function dot(a, b)
 			return a.x * b.x + a.y * b.y + a.z * b.z
 		end
-		for _, o in ipairs(luanti.objects()) do
+		-- The objects, and the fallen bodies as objects with them: a body
+		-- is listed by its node id and its centre, so the driver can walk
+		-- to one and point at it
+		local listed = luanti.objects()
+		for _, b in ipairs(luanti.bodies()) do
+			listed[#listed + 1] = {id = "body" .. b.id, label = "voxel body",
+					x = b.x, y = b.y, z = b.z}
+		end
+		for _, o in ipairs(listed) do
 			local d = buildat.Vector3(o.x, o.y, o.z) - p0
 			local depth = dot(d, fwd)
 			if depth > 0.1 and depth <= RANGE then

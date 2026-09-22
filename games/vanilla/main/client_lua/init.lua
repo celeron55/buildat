@@ -3507,7 +3507,7 @@ end
 end)(buildat.run_script_file("main/scan.lua"))({
 	camera_node = function() return camera_node end,
 	view = function() return yaw, pitch, (camera and camera.fov) or CAMERA_FOV end,
-	pointed = find_pointed_voxel,
+	pointed = function() return pointed_p end, -- the frame's, bodies included
 	node_name_at = node_name_at,
 	voxel_is_solid = voxel_is_solid,
 	dig_range = function() return math.min(POINT_RANGE, luanti.dig_range(wield_index)) end,
