@@ -1343,6 +1343,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_file_path)
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_path)
+		DEF_BUILDAT_FUNC(create_directories)
 		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(set_ui_scale)
 		DEF_BUILDAT_FUNC(get_ui_scale)
@@ -2930,6 +2931,18 @@ struct CApp: public App, public magic::Application
 		}
 		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
 		return 0;
+	}
+
+	// create_directories(path) -> bool: the directory and its parents, for
+	// trusted Lua keeping a file of its own under the user path (the
+	// extension's settings made its directory with a shell's mkdir, which
+	// Windows has no such of; [BOX_PLAYTEST_2] 1). Unsafe: not in the
+	// sandbox, where a path is not a thing a game gets to name.
+	static int l_create_directories(lua_State *L)
+	{
+		ss_ path = lua_bindings::lua_tocppstring(L, 1);
+		lua_pushboolean(L, interface::fs::create_directories(path));
+		return 1;
 	}
 
 	// take_screenshot() -> the file name it was saved under, or nil and why

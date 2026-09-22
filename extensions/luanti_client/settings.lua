@@ -59,7 +59,12 @@ function M.load()
 end
 
 function M.save(settings)
-	os.execute("mkdir -p '"..dir.."'")
+	-- Through the engine, not a shell: mkdir -p is no Windows command,
+	-- and the settings never saved on the box ([BOX_PLAYTEST_2] 1)
+	if not buildat.create_directories(dir) then
+		log:warning("cannot make "..dir)
+		return false
+	end
 	local f = io.open(path, "wb")
 	if not f then
 		log:warning("cannot write "..path)

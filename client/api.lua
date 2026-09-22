@@ -84,6 +84,7 @@ buildat.compose_image     = __buildat_compose_image
 -- whoever has to look at them rather than draw them.
 buildat.read_image        = __buildat_read_image
 buildat.get_env           = __buildat_get_env
+buildat.create_directories = __buildat_create_directories -- unsafe only
 
 buildat.safe.disconnect    = __buildat_disconnect
 -- leave(): back to the launcher's grid when there is one under the game
