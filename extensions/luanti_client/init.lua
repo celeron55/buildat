@@ -19,10 +19,14 @@ local path = __buildat_extension_path("luanti_client")
 local srp = dofile(path.."/srp.lua")
 local engine_test = dofile(path.."/engine_test.lua")
 local luanti = dofile(path.."/client.lua")
+-- The extension's settings file ([EXT_SETTINGS]); the BUILDAT_* variables
+-- below stay one-run overrides
+local settings = dofile(path.."/settings.lua")
+local SETTINGS = settings.load()
 -- View bobbing as official's ([VIEW_BOB]), the module both clients share;
 -- BUILDAT_VIEW_BOBBING is the amount for a run (the shooters' 0), 1 else
 local camera_motion = dofile(path.."/res/camera_motion.lua")
-local VIEW_BOBBING = tonumber(os.getenv("BUILDAT_VIEW_BOBBING") or "") or 1
+local VIEW_BOBBING = tonumber(os.getenv("BUILDAT_VIEW_BOBBING") or "") or SETTINGS.view_bobbing
 local world = dofile(path.."/world.lua")
 local nodedef = dofile(path.."/nodedef.lua")
 local media = dofile(path.."/media.lua")
@@ -41,8 +45,8 @@ local M = {safe = nil}
 
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat -c ...),
 -- which cannot easily clear a text field
-local DEFAULT_ADDRESS = os.getenv("BUILDAT_LUANTI_ADDRESS") or "localhost:30000"
-local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or "buildat"
+local DEFAULT_ADDRESS = os.getenv("BUILDAT_LUANTI_ADDRESS") or SETTINGS.address
+local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or SETTINGS.name
 -- The PBR checkbox's starting state. A scripted run has to hit the box by
 -- pixel coordinates otherwise, and a miss looks like the shader not working
 -- rather than like a missed click.
@@ -54,7 +58,9 @@ local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or "buildat"
 -- [RENDER_MODES] in doc/plan/rendering_plan.md.
 local DEFAULT_MODE = (function()
 	local v = os.getenv("BUILDAT_LUANTI_PBR") or ""
-	if v == "" or v == "0" then
+	if v == "" then
+		return SETTINGS.mode
+	elseif v == "0" then
 		return "unlit"
 	elseif v == "1" then
 		return "pbr"
@@ -69,7 +75,7 @@ end)()
 -- How far the camera sees, and how far out blocks are kept, in nodes. The
 -- client asks the server for blocks by the same distance; see
 -- WANTED_RANGE_BLOCKS in client.lua.
-local FAR_CLIP = 240
+local FAR_CLIP = SETTINGS.view_range
 local DROP_DISTANCE = 260
 -- Degrees of look per pixel of mouse movement
 local MOUSE_SENSITIVITY = 0.15
@@ -3447,6 +3453,11 @@ show_connect_dialog = function(address, name)
 			magic.UnsubscribeFromEvent("KeyDown", escape_cb)
 			escape_cb = nil
 		end
+		-- The address and the name kept for next time ([EXT_SETTINGS])
+		local kept = settings.load()
+		kept.address = address_edit:GetText()
+		kept.name = name
+		settings.save(kept)
 		uistack.main:pop(root)
 		show_client(host, port, name, password_edit:GetText(),
 				pbr_check.checked and "pbr" or
@@ -3642,6 +3653,10 @@ end
 function M.on_untrusted_launch(request)
 	local params = type(request) == "table" and
 			type(request.params) == "table" and request.params or {}
+	if params.menu == "settings" then
+		settings.show()
+		return
+	end
 	local address = type(params.address) == "string" and
 			#params.address <= 256 and params.address or nil
 	local name = type(params.name) == "string" and #params.name <= 64 and

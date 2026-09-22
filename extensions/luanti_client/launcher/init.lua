@@ -12,5 +12,13 @@ return function(ctx)
 			icon = "luanti.png", order = 20,
 			description = "Connect this client to a Luanti server",
 			run = function() ctx.launch{extension = "luanti_client"} end},
+		-- The client's own settings ([EXT_SETTINGS]): a trusted screen on
+		-- the stack, no server behind it
+		{id = "settings", label = "Luanti client settings",
+			icon = "luanti.png", order = 191,
+			description = "Render mode, view range, view bobbing, name",
+			run = function()
+				ctx.launch{extension = "luanti_client", params = {menu = "settings"}}
+			end},
 	}
 end
