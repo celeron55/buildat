@@ -2659,14 +2659,28 @@ end
 -- simplified: the style field -- bold, italic, monospace -- is not read.
 -- Everything here is drawn in the one monospace font the client has, and
 -- bold and italic want font files it does not ship.
+-- The size a HUD text element is drawn at. Luanti multiplies its own
+-- default font size by the element's size.X when that is set
+-- (`hud.cpp`, HUD_ELEM_TEXT), so this is what a game's `size = {x = 2}`
+-- comes to ([UI_PARITY]).
+--
+-- simplified: the style field -- mono, bold, italic -- is not read. This
+-- draws everything in the mono font already, and the sandbox has one font
+-- per name rather than a face with weights.
+local HUD_FONT = 15
+
 local function draw_hud_text(e)
 	local base = hud_colour(e.number)
 	local block = hud_root:CreateChild("UIElement")
 	local w, h = 0, 0
+	local size = HUD_FONT
+	if e.size and (e.size[1] or 0) > 0 then
+		size = math.floor(HUD_FONT * e.size[1])
+	end
 	for line in (tostring(e.text or "") .. "\n"):gmatch("([^\n]*)\n") do
-		local lw, lh = draw_text_line(block, line, 0, h, base, 15)
+		local lw, lh = draw_text_line(block, line, 0, h, base, size)
 		w = math.max(w, lw)
-		h = h + (lh > 0 and lh or 15)
+		h = h + (lh > 0 and lh or size)
 	end
 	block.size = magic.IntVector2(math.floor(w), math.floor(h))
 	hud_place(block, e, w, h)

@@ -30,6 +30,21 @@ core.register_on_joinplayer(function(player)
 		})
 		core.log("action", "hud text check: four lines added")
 
+		-- And what size.X does to it ([UI_PARITY]): Luanti multiplies its
+		-- own default font size by it, so the second of these is three
+		-- times the first. The same word in both, so a scan can measure
+		-- them against each other.
+		for i, scale in ipairs({1, 3}) do
+			player:hud_add({
+				hud_elem_type = "text",
+				position = {x = 0.2, y = 0.2 + 0.2 * i},
+				alignment = {x = 1, y = 0},
+				number = 0xFFFFFF,
+				size = {x = scale, y = 0},
+				text = "sized" .. scale,
+			})
+		end
+
 		-- Where align puts an element, which is the half of this that is
 		-- easy to get backwards: all three are anchored on the middle of
 		-- the screen, and align is what slides each one off it. Luanti's
