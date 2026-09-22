@@ -979,6 +979,12 @@ local function show_client(host, port, name, password, mode)
 		end
 
 		client.on_itemdef = function(data)
+			-- The first of the game's content, which is the join having
+			-- gone through: the name it went through with is kept for the
+			-- server ([BOX_PLAYTEST_2] 4)
+			if not got_content then
+				settings.remember_server_name(host, port, name)
+			end
 			got_content = true
 			local items, count = itemdef.parse(luanti.serialize, data, log,
 					client.protocol_version)
@@ -3632,6 +3638,10 @@ show_connect_dialog = function(address, name)
 	local list = ui_utils.server_list(left, {width = 520, height = 420},
 			function(row, second)
 		address_edit:SetText(row.address)
+		-- The name last used on that server ([BOX_PLAYTEST_2] 4)
+		if row.player_name and row.player_name ~= "" then
+			name_edit:SetText(row.player_name)
+		end
 		if second then
 			connect()
 		end
@@ -3660,7 +3670,8 @@ show_connect_dialog = function(address, name)
 				if host and e.accepted then
 					rows[#rows + 1] = {name = host .. ":" .. port,
 							address = host .. ":" .. port,
-							line = e.description ~= "" and e.description or nil}
+							line = e.description ~= "" and e.description or nil,
+							player_name = e.name}
 				end
 			end
 			status.text = #rows == 0 and "No servers used yet" or ""

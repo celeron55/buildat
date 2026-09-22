@@ -47,7 +47,9 @@ local notified = {}
 
 local csv = dofile(__buildat_extension_path("network").."/csv.lua")
 
--- uri -> {accepted=, uri=, description=, created=, last_attempt=}
+-- uri -> {accepted=, uri=, description=, created=, last_attempt=, name=}
+-- name is the player name last used on that server ([BOX_PLAYTEST_2] 4),
+-- "" for none; a row written before the column has none.
 local function load_store()
 	local entries = {}
 	local file = io.open(store_path, "r")
@@ -64,6 +66,7 @@ local function load_store()
 					description = f[3] or "",
 					created = tonumber(f[4]) or 0,
 					last_attempt = tonumber(f[5]) or 0,
+					name = f[6] or "",
 				}
 			end
 		end
@@ -83,7 +86,7 @@ local function save_store(entries)
 		log:error("Cannot write "..store_path..": "..tostring(err))
 		return
 	end
-	file:write("accepted,address,description,created,last_attempt\n")
+	file:write("accepted,address,description,created,last_attempt,name\n")
 	for _, uri in ipairs(uris) do
 		local e = entries[uri]
 		file:write(table.concat({
@@ -92,6 +95,7 @@ local function save_store(entries)
 			csv.quote(e.description),
 			csv.quote(math.floor(e.created)),
 			csv.quote(math.floor(e.last_attempt)),
+			csv.quote(e.name or ""),
 		}, ",").."\n")
 	end
 	file:close()
@@ -497,10 +501,26 @@ function M.safe.known_addresses()
 	for uri, e in pairs(load_store()) do
 		out[#out + 1] = {uri = uri, description = e.description or "",
 				created = e.created or 0, last_attempt = e.last_attempt or 0,
-				accepted = e.accepted and true or false}
+				accepted = e.accepted and true or false, name = e.name or ""}
 	end
 	table.sort(out, function(a, b) return a.last_attempt > b.last_attempt end)
 	return out
+end
+
+-- set_address_name(uri, name): the player name used on a server, kept on
+-- its row for the next connect screen; a uri with no row is ignored
+function M.safe.set_address_name(uri, name)
+	if type(uri) ~= "string" or type(name) ~= "string" or #name > 64 then
+		return false
+	end
+	local entries = load_store()
+	local e = entries[uri]
+	if not e then
+		return false
+	end
+	e.name = name
+	save_store(entries)
+	return true
 end
 
 -- parse_json(text) -> table or nil, error: the module's own reader
@@ -527,6 +547,7 @@ M.udp_connect = M.safe.udp_connect
 M.gettime = M.safe.gettime
 M.http_get = M.safe.http_get
 M.known_addresses = M.safe.known_addresses
+M.set_address_name = M.safe.set_address_name
 M.parse_json = M.safe.parse_json
 
 return M

@@ -33,8 +33,22 @@ end
 local dir = __buildat_get_path("user").."/luanti_client"
 local path = dir.."/settings.json"
 
+-- The initial player name is made up once, two words ([BOX_PLAYTEST_2]
+-- 4): every player called "buildat" on a public server is a name taken
+local ADJECTIVES = {"quiet", "bright", "swift", "mossy", "amber", "brave",
+		"clever", "dusty", "eager", "gentle", "hardy", "jolly", "keen", "lucky",
+		"merry", "nimble", "plain", "rusty", "sunny", "witty"}
+local NOUNS = {"otter", "heron", "badger", "finch", "lynx", "marten", "newt",
+		"osprey", "pike", "raven", "stoat", "tern", "vole", "wren", "beaver",
+		"crane", "dace", "elk", "fox", "grouse"}
+local function random_name()
+	math.randomseed(os.time())
+	return ADJECTIVES[math.random(#ADJECTIVES)] .. "-" ..
+			NOUNS[math.random(#NOUNS)]
+end
+
 M.DEFAULTS = {mode = "unlit", view_range = 120, view_bobbing = 1,
-		name = "buildat", address = "localhost:30000", keys = {}}
+		name = random_name(), address = "localhost:30000", keys = {}}
 
 -- The bindings table, for the screen's "Key bindings..." row; init.lua
 -- sets it
@@ -116,6 +130,16 @@ function M.show_keys(bindings, on_back)
 				M.save(s)
 			end,
 			on_back = on_back or function() end}
+end
+
+-- The name a join went through with, kept on the server's row in the
+-- network extension's address store ([BOX_PLAYTEST_2] 4); the connect
+-- screen fills it in when that server is picked again. Here rather than
+-- in init.lua's session callback, which is at Lua's 60-upvalue line.
+function M.remember_server_name(host, port, name)
+	local uri = "udp://" .. host .. ":" .. port
+	local ok = require("buildat/extension/network").set_address_name(uri, name)
+	log:info("player name " .. name .. (ok and " kept for " or " not kept for ") .. uri)
 end
 
 local MODES = {"unlit", "shadows", "pbr"}
