@@ -852,6 +852,24 @@ function M.define(dst, util)
 
 	util.wc("Texture2D", {
 		inherited_from_by_wrapper = dst.Texture,
+		class = {
+			new = function()
+				return util.wrap_instance("Texture2D", Texture2D:new())
+			end,
+		},
+		instance = {
+			-- A texture filled from an Image the script built itself, which
+			-- is how a program with no texture files of its own gets one
+			-- ([LAUNCH_WORLD]). Urho3D keeps the Image for a device reset,
+			-- so this survives a mode change where a hand-filled
+			-- Texture2D::SetData(level, x, y, ...) does not; see
+			-- [BOX_PLAYTEST_3] (1).
+			SetData = util.self_function("SetData", {"boolean"},
+					{"Texture2D", "Image", {"boolean", "__nil"}}),
+			SetSize = util.self_function("SetSize", {"boolean"},
+					{"Texture2D", "number", "number", "number",
+					{"number", "__nil"}}),
+		},
 	})
 
 	-- Declared here rather than next to Drawable: its ramp property needs
