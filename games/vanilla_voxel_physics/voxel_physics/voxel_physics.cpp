@@ -686,9 +686,15 @@ struct Module: public interface::Module
 	}
 
 	// The node's mesh data and its shapes after a voxel of the body
-	// changed: the whole volume again, and a box per voxel left. A body
-	// with nothing left goes. simplified: a body cut in two stays one
-	// body.
+	// changed: the pieces it is in now (split_body takes every one but
+	// the largest into a body of its own), the whole volume again, and
+	// a box per voxel left. A body with nothing left goes.
+	//
+	// The support relaxation is the world's and does not run inside a
+	// body: a body is held together by being connected, not by standing
+	// on anything, so what the sim would say of a voxel in free fall is
+	// what the connectivity above already says. A node placed on a body
+	// stays on it.
 	void rebuild_body(Body &b)
 	{
 		main_context::access(m_server, [&](main_context::Interface *imc){
