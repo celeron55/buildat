@@ -103,14 +103,21 @@ for _ in range(2):
     write("mouse_pos %d %d" % (bar[1] + bar[3] // 2,
                                bar[2] + int(bar[4] * 0.75)),
           "delay 200", "mouse_click left", "delay 700")
+# And the wheel over the container itself
+boxes = [e for e in els if e[0] == "UIElement" and e[3] > 150 and e[4] > 80]
+if boxes:
+    b = boxes[0]
+    write("mouse_pos %d %d" % (b[1] + b[3] // 2, b[2] + b[4] // 2),
+          "delay 300", "mouse_wheel -1", "delay 900")
 els = scan()
 after = rows(els)
 print("row 1 at y=%s before, y=%s after" % (before.get("row 1"),
                                             after.get("row 1")))
 got = [l for l in open(srv, "rb").read().decode("utf-8", "replace").splitlines()
        if "scroll: fields bar=" in l]
-print("the server received " + (got[-1].split("scroll: fields ")[-1]
-                                if got else "nothing"))
+print("the server received " + (", ".join(
+        l.split("scroll: fields ")[-1] for l in got[-3:]) if got
+        else "nothing"))
 moved = (before.get("row 1") is not None and
          after.get("row 1") is not None and
          before["row 1"] - after["row 1"] > 20)

@@ -3308,6 +3308,29 @@ local function show_client(host, port, name, password, mode)
 					if not form or not form.drawn then
 						return
 					end
+					-- Over a scroll_container the wheel is that
+					-- container's ([FORMSPEC_SCROLL])
+					if mouse_at and form.drawn.scrolls then
+						local lx = mouse_at[1] - form.drawn.origin[1]
+						local ly = mouse_at[2] - form.drawn.origin[2]
+						for _, c in ipairs(form.drawn.scrolls) do
+							if c.bar and lx >= c.x and lx < c.x + c.w and
+									ly >= c.y and ly < c.y + c.h then
+								form.state.scroll = form.state.scroll or {}
+								local v = (form.state.scroll[c.bar] or 0) -
+										event_data:GetInt("Wheel") * 100
+								v = math.max(0, math.min(1000, v))
+								if v ~= (form.state.scroll[c.bar] or 0) then
+									form.state.scroll[c.bar] = v
+									form_stale = true
+									local fields = form_fields()
+									fields[c.bar] = "CHG:"..v
+									send_form_fields(fields)
+								end
+								return
+							end
+						end
+					end
 					local t = form.drawn.tables[1]
 					if not t or t.count <= t.visible then
 						return

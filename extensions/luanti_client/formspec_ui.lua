@@ -798,6 +798,8 @@ function M.new(magic, buildat, log, ctx)
 		end
 
 		local scroll_boxes = {}
+		-- The containers as rectangles, for the wheel over one
+		local scrolls = {}
 		-- What the next scrollbar's range is; scrollbaroptions[] sets it and
 		-- Luanti's default is 0..1000
 		local bar_max = 1000
@@ -1133,8 +1135,10 @@ function M.new(magic, buildat, log, ctx)
 					-- The value is in the bar's own units and the factor is
 					-- formspec units per one of them
 					scroll_boxes[e.scroll_id] = {element = el, x = x, y = y,
+							w = w, h = h, bar = bar, vertical = vertical,
 							dx = vertical and 0 or -moved,
 							dy = vertical and -moved or 0}
+					scrolls[#scrolls + 1] = scroll_boxes[e.scroll_id]
 				end
 			elseif name == "dropdown" then
 				-- dropdown[X,Y;W;name;item1,item2,...;selected;index event]
@@ -1323,6 +1327,7 @@ function M.new(magic, buildat, log, ctx)
 		return {window = window, origin = {ox, oy},
 				size = {layout.width, layout.height}, slots = slots,
 				buttons = buttons, fields = fields, tables = tables,
+				scrolls = scrolls,
 				taps = taps, tooltips = tooltips,
 				close_on_enter = close_on_enter}
 	end

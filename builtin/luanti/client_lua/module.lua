@@ -2803,6 +2803,38 @@ local function show_form(formname, spec, at, handler)
 	draw_form()
 end
 
+-- The wheel over a scroll_container pages its bar ([FORMSPEC_SCROLL]):
+-- the client that owns the mouse calls this while a form is open, since
+-- the wheel is the hotbar's otherwise. delta is Urho3D's -- one notch up
+-- is 1 -- and up scrolls towards the top of the container.
+function M.form_wheel(delta)
+	if not form or not form.drawn or not form.drawn.scrolls or
+			not mouse_at then
+		return false
+	end
+	-- The containers are in the form's own coordinates, as a click is
+	local x = mouse_at[1] - form.drawn.origin[1]
+	local y = mouse_at[2] - form.drawn.origin[2]
+	for _, c in ipairs(form.drawn.scrolls) do
+		if c.bar and x >= c.x and x < c.x + c.w and
+				y >= c.y and y < c.y + c.h then
+			form.state.scroll = form.state.scroll or {}
+			local step = 100
+			local v = (form.state.scroll[c.bar] or 0) - delta * step
+			v = math.max(0, math.min(1000, v))
+			if v ~= (form.state.scroll[c.bar] or 0) then
+				form.state.scroll[c.bar] = v
+				draw_form()
+				local fields = form_fields()
+				fields[c.bar] = "CHG:"..v
+				send_fields(fields)
+			end
+			return true
+		end
+	end
+	return false
+end
+
 -- form_open() -> whether a form is on the screen, so that whoever else is
 -- reading the mouse leaves it alone while one is
 function M.form_open()

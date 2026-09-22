@@ -3887,7 +3887,13 @@ end)
 
 -- The wheel picks a hotbar slot, which is what it does in Luanti
 magic.SubscribeToEvent("MouseWheel", function(event_type, event_data)
-	if luanti.form_open() or chat_input then
+	if luanti.form_open() then
+		-- Over a scroll_container the wheel is that container's
+		-- ([FORMSPEC_SCROLL]); anywhere else in a form it is nobody's
+		luanti.form_wheel(event_data:GetInt("Wheel"))
+		return
+	end
+	if chat_input then
 		return
 	end
 	set_wield(wield_index - event_data:GetInt("Wheel"))
