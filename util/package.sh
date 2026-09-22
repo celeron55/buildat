@@ -355,8 +355,9 @@ smoke_test_wine_luanti() {
 	export WINEDEBUG=-all WINEPREFIX="$dir/wine"
 	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://Z:$dir/nowhere" \
-		"$wine" bin/buildat_server.exe -m games/vanilla -P "$port" -l 3 > "$dir/srv.log" 2>&1) &
+		"$wine" bin/buildat_server.exe -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
+	# -l 4, as the full smoke: the section line it waits for is logged there
 	wait_for_vanilla "$dir/srv.log" "$srv" "luanti-only smoke under Wine" || {
 		kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null || true; exit 1; }
 	if ! grep -q "No C++ compiler found: this archive ships none" "$dir/srv.log"; then
