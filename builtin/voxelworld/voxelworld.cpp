@@ -3311,6 +3311,25 @@ struct CInstance: public voxelworld::Instance
 		return def ? def->light_source : 0;
 	}
 
+	// Whether the sunlight column goes on through the voxel undiminished,
+	// which is Luanti's sunlight_propagates and not the same question as
+	// whether light gets past at all ([WATER_LIGHT]): water lets light
+	// through a level at a time in every direction, the column included, so
+	// a pool ten deep is not lit like its surface. A voxel with nothing in
+	// it propagates by being nothing; anything else says so, which is what
+	// transmits_light carries (luanti.cpp registers it from the game's
+	// sunlight_propagates). A shaped voxel leaves its edges empty so that
+	// its neighbours draw their faces, and that is what used to answer this.
+	bool voxel_propagates_sunlight(const interface::VoxelSample &v)
+	{
+		if(is_undefined(VoxelInstance(v.planes[0])))
+			return false;
+		const interface::CachedVoxelDefinition *def = cached_of(v);
+		if(def == nullptr)
+			return false;
+		return def->fully_empty || def->transmits_light;
+	}
+
 	bool voxel_transmits_light(const interface::VoxelSample &v)
 	{
 		if(is_undefined(VoxelInstance(v.planes[0])))
@@ -3524,6 +3543,18 @@ struct CInstance: public voxelworld::Instance
 		if(buf == nullptr)
 			return false;
 		return voxel_transmits_light(
+				buf->volume->sample_at(light_local_p(p, chunk_p)));
+	}
+
+	// See voxel_propagates_sunlight(): asked of the voxel the column is
+	// about to enter
+	bool propagates_sunlight_at(const pv::Vector3DInt32 &p)
+	{
+		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		ChunkBuffer *buf = light_buffer(chunk_p);
+		if(buf == nullptr)
+			return false;
+		return voxel_propagates_sunlight(
 				buf->volume->sample_at(light_local_p(p, chunk_p)));
 	}
 
@@ -3780,7 +3811,7 @@ struct CInstance: public voxelworld::Instance
 					continue;
 				bool lit_from_above = (field == LIGHT_SKY &&
 						k == LIGHT_DOWN && node.level == flood_max() &&
-						nl == flood_max());
+						nl == flood_max() && propagates_sunlight_at(n));
 				if(nl < node.level || lit_from_above){
 					light_set(n, nv, 0);
 					unlight.push_back(LightNode{n, nl});
@@ -3826,7 +3857,8 @@ struct CInstance: public voxelworld::Instance
 					continue;
 				}
 				uint8_t target = (field == LIGHT_SKY &&
-						k == LIGHT_DOWN && node.level == flood_max()) ?
+						k == LIGHT_DOWN && node.level == flood_max() &&
+						propagates_sunlight_at(n)) ?
 						flood_max() : node.level - 1;
 				if(target > flood_get(nv)){
 					light_set(n, nv, target);
