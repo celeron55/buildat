@@ -369,8 +369,17 @@ function sub_events()
 
 
 	local function queue_initial_node_update(node)
-		node_update_queue:put(node:GetWorldPosition(),
-				INITIAL_GEOMETRY_NEAR_WEIGHT, M.camera_far_clip * 1.2,
+		-- A chunk arriving beside the player weighs as a changed one:
+		-- at the initial weight its first draw sorted behind the
+		-- flood's far changed chunks and the sky chunks two over the
+		-- player stayed undrawn for a minute ([WIN_WORLD] c, 2026-09-22)
+		local p = node:GetWorldPosition()
+		local weight = INITIAL_GEOMETRY_NEAR_WEIGHT
+		if M.chunk_size_voxels and (p - camera_p):Length() <
+				5 * M.chunk_size_voxels.x then
+			weight = MODIFIED_GEOMETRY_NEAR_WEIGHT
+		end
+		node_update_queue:put(p, weight, M.camera_far_clip * 1.2,
 				nil, nil, {
 			type = "geometry",
 			current_lod = 0,

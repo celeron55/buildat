@@ -88,7 +88,7 @@ if [ -n "${MENU_RUN:-}" ]; then
 		echo "empty paths under $tmp, the mirror on port $((port + 200))"
 	fi
 else
-{ echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
+{ echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; echo "rawset(_G, \"FUZZ_DRIVEN\", true)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
 	bin/buildat_server -m "../games/$GAME_DIR" -D ../user -P "$port" \

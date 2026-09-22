@@ -201,8 +201,11 @@ core.register_on_joinplayer(function(player)
 			dead_since = nil
 		end
 		-- After a minute a random walk has gone somewhere; a player who
-		-- has not is a client whose keys never arrived ([HELD_KEY_FLAKE])
-		if t == 60 and moved < 5 then
+		-- has not is a client whose keys never arrived ([HELD_KEY_FLAKE]).
+		-- Not for a driven run (FUZZ_DRIVEN): the driver crafts its
+		-- first minute at a tree beside the spawn and has stuck rules of
+		-- its own (2026-09-22, a GOAL 2 run standing on 237,10,236)
+		if t == 60 and moved < 5 and not rawget(_G, "FUZZ_DRIVEN") then
 			fail("the player did not move in a minute")
 		end
 		-- And a still minute later on, alive, is a walk that something
