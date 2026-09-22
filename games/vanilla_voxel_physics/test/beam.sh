@@ -1,10 +1,10 @@
 #!/bin/bash
 # [VOXEL_PHYSICS_SAMPLE]: a beam of dirt on one pillar, the pillar's top
 # dug by the client -- the beam comes off as one body and falls; then the
-# client looks at the fallen beam and digs a voxel of it, by its region
-# position ([BODY_INTERACT]). The server's body lines, where the body node
-# ends up and the dig on it are the reading; the log is under
-# local/voxel_physics/.
+# client looks at the fallen beam, digs a voxel of it and places a dirt on
+# it, by their region positions ([BODY_INTERACT]). The server's body
+# lines, where the body node ends up, the dig and the place on it are the
+# reading; the log is under local/voxel_physics/.
 #
 #   GAME=mineclone2 games/vanilla_voxel_physics/test/beam.sh
 set -u
@@ -65,6 +65,9 @@ core.register_on_joinplayer(function(player)
 	vm:set_data(data)
 	vm:write_to_map()
 	player:set_pos({x = ORIGIN.x, y = ORIGIN.y + 1, z = ORIGIN.z})
+	-- Dirt in hand, for the place on the fallen beam ([BODY_INTERACT])
+	player:get_inventory():set_stack("main", 1, dirt .. " 10")
+	player:set_wield_index(1)
 	core.log("action", "beam: stamped with " .. dirt)
 end)
 core.register_on_dignode(function(pos, node, digger)
@@ -100,6 +103,9 @@ screenshot $out/body.png
 look_dir 0.2 0.35 1
 delay 500
 event scan
+mouse_click right
+delay 2000
+screenshot $out/body_placed.png
 mouse_down left
 delay 2500
 mouse_up left
@@ -117,5 +123,5 @@ grep "beam:\|voxel_ph" "$out/srv.log" | grep -v "sim: " | sed 's/.*I [a-z_]* *: 
 # The dig on the body ([BODY_INTERACT]): the client points at the fallen
 # beam and digs one of its voxels by its region position
 grep "pointing at\|dug (" "$out/cli.log" | tail -3 | sed 's/.*I [a-z_]* *: //'
-grep "region\|rebuilt" "$out/srv.log" | sed 's/.*[IV] [a-z_]* *: //' | tail -3
+grep "region\|rebuilt\|places node" "$out/srv.log" | sed 's/.*[IV] [a-z_]* *: //' | tail -5
 grep "body\|voxel_physics" "$out/cli.log" | sed 's/.*I [a-z_]* *: //' | tail -5

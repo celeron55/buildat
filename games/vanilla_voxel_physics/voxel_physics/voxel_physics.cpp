@@ -80,6 +80,11 @@ static const size_t SIM_PER_TICK = 2048;
 // again on the next tick
 static const size_t BODY_MAX_VOXELS = 4096;
 static const uint16_t CONTENT_AIR = 2;
+// A body's volume has this much air around its voxels, so a node can be
+// placed on a body ([BODY_INTERACT]): a write into the margin is a body
+// voxel like any other. A body's local origin is its lowest voxel less
+// the margin; simplified: a place past the margin is dropped.
+static const int BODY_MARGIN = 4;
 
 // What the heuristics decided about a node; see the Lua below
 struct Props
@@ -542,6 +547,8 @@ struct Module: public interface::Module
 			hi = pv::Vector3DInt32(std::max(hi.getX(), p.getX()),
 					std::max(hi.getY(), p.getY()), std::max(hi.getZ(), p.getZ()));
 		}
+		lo = lo - pv::Vector3DInt32(BODY_MARGIN, BODY_MARGIN, BODY_MARGIN);
+		hi = hi + pv::Vector3DInt32(BODY_MARGIN, BODY_MARGIN, BODY_MARGIN);
 		pv::Vector3DInt32 size = hi - lo + pv::Vector3DInt32(1, 1, 1);
 		sp_<interface::VoxelVolume> volume(new interface::VoxelVolume(
 				pv::Region(pv::Vector3DInt32(-1, -1, -1), size),
@@ -557,6 +564,7 @@ struct Module: public interface::Module
 			world->set_voxel(p, VoxelInstance(CONTENT_AIR), true);
 			mark_changed(p);
 		}
+		fill_margin_with_air(*volume, size);
 		ss_ data = interface::serialize_volume_compressed(*volume);
 		m_bodies++;
 		log_i(MODULE, "body %zu: %zu voxels from " PV3I_FORMAT " to "
@@ -631,6 +639,26 @@ struct Module: public interface::Module
 			return true;
 		}
 	} m_regions;
+
+	// The margin around a body's voxels is air, not ignore: a mod placing
+	// on a body asks get_node_or_nil() about the place first, and ignore
+	// there is "unloaded"
+	void fill_margin_with_air(interface::VoxelVolume &volume,
+			const pv::Vector3DInt32 &size)
+	{
+		const interface::VoxelFormat &f = voxel_format();
+		uint32_t air = 0;
+		f.id.set(air, CONTENT_AIR);
+		for(int z = 0; z < size.getZ(); z++)
+		for(int y = 0; y < size.getY(); y++)
+		for(int x = 0; x < size.getX(); x++){
+			VoxelSample v = volume.sample_at(x, y, z);
+			if(f.id_of(v.planes[0]) == interface::VOXELTYPEID_UNDEFINED){
+				v.planes[0] = air;
+				volume.set_sample_at(x, y, z, v);
+			}
+		}
+	}
 
 	// The node's mesh data and its shapes after a voxel of the body
 	// changed: the whole volume again, and a box per voxel left. A body
@@ -839,6 +867,8 @@ struct Module: public interface::Module
 				hi = pv::Vector3DInt32(std::max(hi.getX(), p.getX()),
 						std::max(hi.getY(), p.getY()), std::max(hi.getZ(), p.getZ()));
 			}
+			lo = lo - pv::Vector3DInt32(BODY_MARGIN, BODY_MARGIN, BODY_MARGIN);
+			hi = hi + pv::Vector3DInt32(BODY_MARGIN, BODY_MARGIN, BODY_MARGIN);
 			pv::Vector3DInt32 size = hi - lo + pv::Vector3DInt32(1, 1, 1);
 			sp_<interface::VoxelVolume> volume(new interface::VoxelVolume(
 					pv::Region(pv::Vector3DInt32(-1, -1, -1), size),
@@ -857,6 +887,7 @@ struct Module: public interface::Module
 				b.volume->set_sample_at(p.getX(), p.getY(), p.getZ(), air);
 				voxels.push_back(p - lo);
 			}
+			fill_margin_with_air(*volume, size);
 			QueuedBody q;
 			q.ticks = 1; q.lo = pv::Vector3DInt32(0, 0, 0); q.size = size;
 			q.data = interface::serialize_volume_compressed(*volume);
