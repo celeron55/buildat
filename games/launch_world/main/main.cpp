@@ -128,7 +128,11 @@ static interface::VoxelInstance voxel_at(int x, int y, int z)
 			if(tier == Room::bay_tier(b) && x > bx - w + 2 && x < bx + w - 2 &&
 					z > Room::BAY_Z - Room::BAY_DEPTH - Room::NICHE_DEPTH)
 				return g_ids.air;
-			return g_ids.dark;
+			// **Pale, not dark.** A niche of dark voxels swallows its own
+			// orb: nothing bounces off its walls and out through the
+			// opening, which is where the reference frame's lit stone
+			// comes from.
+			return g_ids.stone;
 		}
 	}
 	return g_ids.air;

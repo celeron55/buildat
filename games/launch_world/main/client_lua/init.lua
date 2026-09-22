@@ -354,7 +354,10 @@ end
 -- with one highlight.
 local LIGHT_PLACES = {}
 for i, o in ipairs(orb_places) do
-	LIGHT_PLACES[i] = {o.x, o.y, o.z}
+	-- A voxel forward of the orb, towards the opening: the orb is the
+	-- thing you see and the light is what gets out of the niche, and a
+	-- source at the very back of a recess mostly lights its own back
+	LIGHT_PLACES[i] = {o.x, o.y, o.z + 1.2 * VOXEL_M}
 end
 -- **The fill lives in the foreground, not on the wall.** Matching the
 -- reference frame's histogram with a long-range flood got the numbers
@@ -367,6 +370,16 @@ LIGHT_PLACES[#LIGHT_PLACES + 1] = {-10.0, 1.3, 7.5}
 LIGHT_PLACES[#LIGHT_PLACES + 1] = {10.0, 1.3, 7.5}
 LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, 4.2, 11.0}
 LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, 1.0, 14.0}
+-- **A wash per bay**, standing for the light that leaves a niche,
+-- bounces off the floor and comes back onto the stone around the
+-- opening -- which is where the reference frame's lit wall comes from
+-- and which nothing in a direct-light room does by itself. It wears the
+-- orb's own colour at a quarter strength, so it is that orb's spill and
+-- not a new source, and it sits in front of the wall where a bounce
+-- would be.
+for i, o in ipairs(orb_places) do
+	LIGHT_PLACES[#LIGHT_PLACES + 1] = {o.x, o.y * 0.55, o.z + 4.4}
+end
 local CYAN = {0.15, 0.85, 1.0}
 local PURPLE = {0.55, 0.20, 0.95}
 local AMBER = {1.0, 0.62, 0.12}
@@ -380,6 +393,9 @@ local function preset_lights(orb, fill, orb_i, fill_i)
 	local l = {}
 	for i = 1, 6 do
 		l[i] = {orb, orb_i, 20 * U}
+	end
+	for i = 1, 6 do
+		l[10 + i] = {orb, orb_i * 0.22, 9 * U}
 	end
 	l[7] = {fill, fill_i, 15 * U}
 	l[8] = {fill, fill_i, 15 * U}
@@ -443,7 +459,8 @@ local function set_preset(n)
 	for i, light in ipairs(lights) do
 		local e = preset.lights[i]
 		light.color = magic.Color(e[1][1], e[1][2], e[1][3], 1)
-		if ORBS[i] and ORBS[i].empty then
+		local spec = ORBS[i] or ORBS[i - 10]
+		if spec and spec.empty then
 			-- An empty niche is a dark one, and the one amber thing in
 			-- the room is allowed to be the invitation to fill it
 			light.color = magic.Color(1.0, 0.62, 0.12, 1)
@@ -453,10 +470,10 @@ local function set_preset(n)
 		-- ball -- and so the probe carries it to the chrome
 		if orb_mats[i] then
 			orb_mats[i]:SetShaderParameter("MatDiffColor",
-					magic.Color(e[1][1] * 1.7, e[1][2] * 1.7, e[1][3] * 1.7, 1))
+					magic.Color(e[1][1] * 1.15, e[1][2] * 1.15, e[1][3] * 1.15, 1))
 		end
 		light.brightness = e[2] * PBR_INTENSITY *
-				((ORBS[i] and ORBS[i].empty) and 0.22 or 1.0)
+				((spec and spec.empty) and 0.22 or 1.0)
 		light.range = e[3]
 	end
 	if label then
