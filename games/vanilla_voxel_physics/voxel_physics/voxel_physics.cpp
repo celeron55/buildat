@@ -95,9 +95,10 @@ struct Props
 // digs as says roughly what it is made of. cracky is rock, choppy timber,
 // crumbly dirt or sand (sand and gravel span nothing), snappy and leaves
 // hang and weigh nothing, unbreakable is the bedrock role; what walks
-// through -- air, liquids, plants -- takes no part. simplified: the
-// per-game override table the plan names is not here yet; VoxeLibre's
-// groups read well enough for the first playtest.
+// through -- air, liquids, plants -- takes no part. VoxeLibre digs by
+// tool instead of by material -- pickaxey, shovely, axey -- and those
+// read the same way. simplified: the per-game override table the plan
+// names is not here yet.
 static const char *PROPS_LUA = R"LUA(
 function core.__voxel_physics_props()
 	local out = {}
@@ -111,11 +112,11 @@ function core.__voxel_physics_props()
 			rec = {0, 15, 0, 255}
 		elseif g.snappy or g.leaves or g.leafdecay then
 			rec = {1, 2, 0, 10}
-		elseif g.cracky then
+		elseif g.cracky or g.pickaxey then
 			rec = {1, 6, 3, 200}
-		elseif g.choppy then
+		elseif g.choppy or g.axey then
 			rec = {1, 8, 1, 30}
-		elseif g.crumbly then
+		elseif g.crumbly or g.shovely then
 			if g.falling_node or name:find("sand", 1, true) or
 					name:find("gravel", 1, true) then
 				rec = {1, 0, 2, 40}
@@ -139,6 +140,7 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 	SceneReference m_scene = nullptr;
 	int m_state_plane = -1;
+	pv::Vector3DInt16 m_chunk_size = pv::Vector3DInt16(16, 16, 16);
 	std::vector<Props> m_props; // By content id
 	std::unordered_set<size_t> m_shown; // Peers the client half was run on
 
@@ -200,6 +202,7 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_scene,
 				[&](voxelworld::Instance *world){
 			m_state_plane = world->get_voxel_reg()->add_plane(STATE_PLANE, 8);
+			m_chunk_size = world->get_chunk_size_voxels();
 			log_i(MODULE, "%s is plane %i: %s", STATE_PLANE, m_state_plane,
 					cs(world->get_voxel_reg()->get_format().dump()));
 		});
@@ -250,10 +253,7 @@ struct Module: public interface::Module
 	{
 		if(!event.is_static_chunk || m_pending.empty() || m_scene == nullptr)
 			return;
-		pv::Vector3DInt16 cs(16, 16, 16);
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
-			cs = world->get_chunk_size_voxels();
-		});
+		const pv::Vector3DInt16 &cs = m_chunk_size;
 		sv_<pv::Vector3DInt32> left;
 		for(const pv::Vector3DInt32 &p : m_pending){
 			pv::Vector3DInt32 c(
@@ -561,6 +561,32 @@ struct Module: public interface::Module
 			mark_changed(p);
 		}
 		ss_ data = interface::serialize_volume_compressed(volume);
+		m_bodies++;
+		log_i(MODULE, "body %zu: %zu voxels from " PV3I_FORMAT " to "
+				PV3I_FORMAT ", mass %.0f", m_bodies, voxels.size(),
+				PV3I_PARAMS(lo), PV3I_PARAMS(hi), mass);
+		// The node a few ticks later: the terrain's collision shapes are
+		// rebuilt after the chunk's commit, and a body made on the same
+		// tick sat in the roof's old boxes and never moved (2026-09-22)
+		m_queued_bodies.push_back(QueuedBody{3, lo, data, mass, voxels});
+	}
+
+	struct QueuedBody
+	{
+		int ticks;
+		pv::Vector3DInt32 lo;
+		ss_ data;
+		float mass;
+		std::vector<pv::Vector3DInt32> voxels;
+	};
+	std::vector<QueuedBody> m_queued_bodies;
+
+	void spawn_body(const QueuedBody &b)
+	{
+		const pv::Vector3DInt32 &lo = b.lo;
+		const ss_ &data = b.data;
+		float mass = b.mass;
+		const std::vector<pv::Vector3DInt32> &voxels = b.voxels;
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Scene *scene = imc->check_scene(m_scene);
 			Node *n = scene->CreateChild("VoxelBody");
@@ -580,10 +606,6 @@ struct Module: public interface::Module
 						p.getZ() - lo.getZ() + 0.5f));
 			}
 		});
-		m_bodies++;
-		log_i(MODULE, "body %zu: %zu voxels from " PV3I_FORMAT " to "
-				PV3I_FORMAT ", mass %.0f", m_bodies, voxels.size(),
-				PV3I_PARAMS(lo), PV3I_PARAMS(hi), mass);
 	}
 
 	void step_failing(voxelworld::Instance *world)
@@ -609,6 +631,14 @@ struct Module: public interface::Module
 	{
 		if(m_scene == nullptr)
 			return;
+		for(size_t i = 0; i < m_queued_bodies.size();){
+			if(--m_queued_bodies[i].ticks > 0){
+				i++;
+				continue;
+			}
+			spawn_body(m_queued_bodies[i]);
+			m_queued_bodies.erase(m_queued_bodies.begin() + i);
+		}
 		// Where the bodies are, now and then: the reading a playtest wants
 		if(++m_ticks % 100 == 0 && !m_body_nodes.empty()){
 			main_context::access(m_server, [&](main_context::Interface *imc){

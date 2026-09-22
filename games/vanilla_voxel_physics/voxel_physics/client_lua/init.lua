@@ -9,6 +9,7 @@
 local log = buildat.Logger("voxel_physics")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
+local voxel_shading = require("buildat/module/voxel_shading")
 
 local function setup_body(node)
 	local data = node:GetVar("voxel_body_data"):GetBuffer()
@@ -18,11 +19,15 @@ local function setup_body(node)
 		log:warning("body " .. node:GetID() .. ": no registry yet")
 		return
 	end
-	-- simplified: lit flat -- the world's material callbacks (skylight,
-	-- the shader's parameters) are main/init.lua's own and not reachable
-	-- from here
-	buildat.set_voxel_geometry(node, data, voxel_reg, atlas_reg, false,
-			function() end, nil)
+	-- Lit the way a chunk is: the mesher bakes the light the voxels
+	-- carried in the world, and voxel_shading's materials over it, which
+	-- is the callback voxelworld hands a chunk. simplified: no horizon
+	-- map, so a body under the sky wears the shadow it had where it
+	-- came from
+	buildat.set_voxel_geometry(node, data, voxel_reg, atlas_reg,
+			voxelworld.use_skylight, function()
+		voxel_shading.apply_to_node(node)
+	end, nil)
 	log:info("body " .. node:GetID() .. " meshed")
 end
 
