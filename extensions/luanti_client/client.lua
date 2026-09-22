@@ -138,6 +138,7 @@ local TOCLIENT = {
 	TIME_OF_DAY    = 0x29,
 	MOVE_PLAYER    = 0x34,
 	MOVEMENT       = 0x45,
+	CAMERA         = 0x48,
 	MEDIA          = 0x38,
 	NODEDEF        = 0x3A,
 	ANNOUNCE_MEDIA = 0x3C,
@@ -703,6 +704,13 @@ function M.new(socket, options, log)
 		end
 	end
 
+	-- TOCLIENT_CAMERA: which camera modes the key may reach -- 0 any, 1
+	-- first, 2 third, 3 third front ([THIRD_PERSON])
+	self.camera_mode_allowed = 0
+	handlers[TOCLIENT.CAMERA] = function(r)
+		self.camera_mode_allowed = r:u8()
+	end
+
 	handlers[TOCLIENT.HUDADD] = function(r)
 		local id, e = hud.read_add(r, self.protocol_version)
 		self.hud_elements[id] = e
@@ -887,6 +895,18 @@ function M.new(socket, options, log)
 			sky.night_sky = read_color(r)
 			sky.night_horizon = read_color(r)
 			sky.indoors = read_color(r)
+		end
+		-- The tail Luanti 5.9+ appends; an older server's packet ends here.
+		-- fog_start is what the reference fixture turns the fog off with
+		-- (0.99: see builtin/luanti/test/reference_shots/runner.lua), so it is read as of 2026-09-17.
+		if r:remaining() >= 4 + 2 + 4 + 4 then
+			sky.body_orbit_tilt = r:f32()
+			sky.fog_distance = r:s16()
+			sky.fog_start = r:f32()
+			sky.fog_color = read_color(r)
+		end
+		if r:remaining() >= 1 then
+			sky.auto_dim_skybox = r:u8() ~= 0
 		end
 		if self.on_sky then
 			self.on_sky(sky)

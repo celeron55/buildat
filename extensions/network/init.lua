@@ -5,7 +5,7 @@
 -- TCP and UDP sockets for scripts, with the user in the loop: the first
 -- connection or datagram to an address in a week needs the user to accept the
 -- address and name it. Answers are remembered in
--- cache/network_addresses.csv.
+-- user/network_addresses.csv.
 --
 --   local socket = require("buildat/extension/network")
 --   socket.udp_connect("localhost", 30001, function(sock, err)
@@ -34,7 +34,7 @@ local M = {safe = {}}
 
 local ACCEPTANCE_VALID_S = 7 * 24 * 3600
 
-local store_path = __buildat_get_path("cache").."/network_addresses.csv"
+local store_path = __buildat_get_path("user").."/network_addresses.csv"
 
 -- Addresses this session has already notified about
 local notified = {}
@@ -47,7 +47,9 @@ local notified = {}
 
 local csv = dofile(__buildat_extension_path("network").."/csv.lua")
 
--- uri -> {accepted=, uri=, description=, created=, last_attempt=}
+-- uri -> {accepted=, uri=, description=, created=, last_attempt=, name=}
+-- name is the player name last used on that server ([BOX_PLAYTEST_2] 4),
+-- "" for none; a row written before the column has none.
 local function load_store()
 	local entries = {}
 	local file = io.open(store_path, "r")
@@ -64,6 +66,7 @@ local function load_store()
 					description = f[3] or "",
 					created = tonumber(f[4]) or 0,
 					last_attempt = tonumber(f[5]) or 0,
+					name = f[6] or "",
 				}
 			end
 		end
@@ -83,7 +86,7 @@ local function save_store(entries)
 		log:error("Cannot write "..store_path..": "..tostring(err))
 		return
 	end
-	file:write("accepted,address,description,created,last_attempt\n")
+	file:write("accepted,address,description,created,last_attempt,name\n")
 	for _, uri in ipairs(uris) do
 		local e = entries[uri]
 		file:write(table.concat({
@@ -92,6 +95,7 @@ local function save_store(entries)
 			csv.quote(e.description),
 			csv.quote(math.floor(e.created)),
 			csv.quote(math.floor(e.last_attempt)),
+			csv.quote(e.name or ""),
 		}, ",").."\n")
 	end
 	file:close()
@@ -179,6 +183,7 @@ local function ask_user(uri, entry, on_answer)
 	menu:on_key(function(key)
 		if key == KEY_ESCAPE then
 			answer(false)
+			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)
 end
@@ -433,6 +438,106 @@ function M.safe.udp_connect(host, port, cb)
 	connect(true, host, port, cb)
 end
 
+-- http_get(url, cb): the body of a GET over HTTPS, cb(body) or
+-- cb(nil, error), asked of the user through the same dialog and file as a
+-- socket is -- the uri is the url's scheme and host ([SERVER_LIST]:
+-- Luanti's official server list). Fetched on a thread in the client
+-- (__buildat_http_get); read back on Update.
+local http_pending = {}
+local http_polling = false
+local function http_start(url, cb)
+	local id = __buildat_http_get(url)
+	http_pending[id] = cb
+	if not http_polling then
+		http_polling = true
+		magic.SubscribeToEvent("Update", function()
+			for jid, callback in pairs(http_pending) do
+				local ok, body = __buildat_http_poll(jid)
+				if ok ~= nil then
+					http_pending[jid] = nil
+					if ok then
+						callback(body)
+					else
+						callback(nil, body)
+					end
+				end
+			end
+		end)
+	end
+end
+
+function M.safe.http_get(url, cb)
+	if type(url) ~= "string" or type(cb) ~= "function" then
+		error("network: http_get(url: string, cb: function)")
+	end
+	local scheme, host = url:match("^(https?)://([^/:]+)")
+	if not scheme then
+		cb(nil, "not an http(s) url: "..url)
+		return
+	end
+	local uri = scheme.."://"..host
+	local entry = load_store()[uri]
+	if entry and entry.accepted and
+			os.time() - entry.last_attempt < ACCEPTANCE_VALID_S then
+		touch_entry(uri)
+		http_start(url, cb)
+		return
+	end
+	log:info("Asking the user about "..uri)
+	ask_user(uri, entry, function(accepted, description)
+		store_answer(uri, accepted, description, entry)
+		if not accepted then
+			cb(nil, "Declined by user: "..uri)
+			return
+		end
+		http_start(url, cb)
+	end)
+end
+
+-- The addresses this client has used, for a list to pick from: the
+-- store's entries as {uri, description, created, last_attempt, accepted},
+-- the last used first
+function M.safe.known_addresses()
+	local out = {}
+	for uri, e in pairs(load_store()) do
+		out[#out + 1] = {uri = uri, description = e.description or "",
+				created = e.created or 0, last_attempt = e.last_attempt or 0,
+				accepted = e.accepted and true or false, name = e.name or ""}
+	end
+	table.sort(out, function(a, b) return a.last_attempt > b.last_attempt end)
+	return out
+end
+
+-- set_address_name(uri, name): the player name used on a server, kept on
+-- its row for the next connect screen; a uri with no row is ignored
+function M.safe.set_address_name(uri, name)
+	if type(uri) ~= "string" or type(name) ~= "string" or #name > 64 then
+		return false
+	end
+	local entries = load_store()
+	local e = entries[uri]
+	if not e then
+		return false
+	end
+	e.name = name
+	save_store(entries)
+	return true
+end
+
+-- parse_json(text) -> table or nil, error: the module's own reader
+-- (json.lua beside this file), which defines onto a `core` table
+local parse_json
+do
+	local saved = rawget(_G, "core")
+	rawset(_G, "core", {log = function(_, message) log:warning(message) end})
+	dofile(__buildat_extension_path("network").."/json.lua")
+	parse_json = core.parse_json
+	rawset(_G, "core", saved)
+end
+function M.safe.parse_json(text)
+	return parse_json(text, nil, true)
+end
+
 -- LuaSocket's socket.gettime()
 function M.safe.gettime()
 	return buildat.get_time_us() / 1000000
@@ -441,6 +546,10 @@ end
 M.tcp_connect = M.safe.tcp_connect
 M.udp_connect = M.safe.udp_connect
 M.gettime = M.safe.gettime
+M.http_get = M.safe.http_get
+M.known_addresses = M.safe.known_addresses
+M.set_address_name = M.safe.set_address_name
+M.parse_json = M.safe.parse_json
 
 return M
 -- vim: set noet ts=4 sw=4:

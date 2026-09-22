@@ -17,7 +17,7 @@
 -- to the length of N. The name in x is lowercase (that is how the verifier was
 -- made), the one in M is as the player typed it.
 --
--- M.self_test() checks all of this against vectors from util/srp_reference.py.
+-- M.self_test() checks all of this against vectors from extensions/luanti_client/test/srp_reference.py.
 
 local bignum = buildat.bignum
 local H = buildat.sha256

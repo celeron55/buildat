@@ -14,6 +14,15 @@ exits after the sequence finishes (exit status 1 if a command fails).
 -w WxH runs windowed at a fixed size without changing the size the client
 remembers between runs. Use it for anything that compares images between runs.
 
+-c ignores user/settings.json entirely and runs on the built-in defaults,
+so a preference someone left at render_scale=0.5 can never change what a
+screenshot looks like, and a run never writes the file. A -c run is also muted
+unless -o says otherwise: nothing captures audio, and a driven run playing a
+game's music through whoever's speakers is a small recurring annoyance with no
+upside. -o still wins, which is how a preference itself gets tested:
+
+    $ bin/buildat -s localhost -w 1600x900 -o render_scale=0.5 -c @check.txt
+
 @path reads the commands from a file. Empty lines and lines starting with # are
 ignored.
 
@@ -73,7 +82,7 @@ keypress <key>
     keydown / delay / keyup to hold a key across frames (movement).
 
 mouse_pos <x> <y>
-    Move the visible cursor to window pixel coordinates (backbuffer). For UI.
+    Set the client's mouse position to window pixel coordinates (backbuffer). For UI.
 
 mouse_move <dx> <dy>
     Relative motion in pixels (GetMouseMove). Use this to look around. Does
@@ -109,6 +118,39 @@ look_dir <x> <y> <z>
 
 text <string>
     SDL text input (UI text fields). Rest of the line is the string.
+
+event <name> [param]
+    Send the Urho3D event command_seq:<name> on the client, with the rest of
+    the line as its string field Param, at this point in the sequence. Any
+    client Lua may subscribe to it (the command_seq: prefix is on the
+    sandbox's safe list); the runner knows nothing of the names. The reply,
+    if any, is a line in the log, which is what a test reads.
+
+    The receivers in games/vanilla's client (builtin/luanti):
+
+    event scan <resolution> <label>
+        Logs, under `scan <label>:` lines and ending in `scan <label>: end`,
+        what the client sees: a `self` line (position, yaw, pitch, hp, the
+        wielded item, the hotbar), the eye voxel's `light sky`/`lamp`, one
+        `hud` line per HUD element with its rectangle, the crosshair's hit,
+        a <resolution>x<resolution> grid of bins with the voxel each bin's
+        ray hits within ten voxels (and what it passed through), one
+        `object` line per object on the screen with its screen position,
+        and every element of an open form with its text, image and
+        rectangle. All rectangles are in window pixels, the coordinates
+        mouse_pos takes. A screenshot in the same sequence line pairs with
+        it; drive.py reads the block after every turn.
+
+    event scan_volume <radius> <label> [light]
+        Logs the voxels in a cube of that radius around the player, one
+        row per column, as names -- or the light nibbles with `light` --
+        which drive.py keeps as its map.
+
+    event status_text <text>
+        Shows the text at the top right of the screen in the harness's
+        pale yellow, replacing the previous one; an empty text clears it.
+        drive.py writes the rule it is about to act on, so a person
+        watching the run sees what it is attempting.
 
 quit
     Stop the sequence early. The client always exits at the end of -c anyway.
