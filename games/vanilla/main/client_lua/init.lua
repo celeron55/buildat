@@ -1162,8 +1162,15 @@ function sky_now.apply_far(sky)
 	-- fog_start is a fraction of that range and not a distance; without one
 	-- it is where extensions/luanti_client's starts
 	if zone then
-		zone.fogStart = far * (sky.fog_start or 0.7)
-		zone.fogEnd = far
+		if sky_now.fog_off then
+			-- Off: past the far clip, so nothing fades (official's fog
+			-- toggle draws to the range without the fade)
+			zone.fogStart = far * 10
+			zone.fogEnd = far * 10 + 1
+		else
+			zone.fogStart = far * (sky.fog_start or 0.7)
+			zone.fogEnd = far
+		end
 	end
 end
 
@@ -3897,6 +3904,12 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		keys.toggle_mode("fast", "Fast mode")
 	elseif key == BIND.noclip.key then
 		keys.toggle_mode("noclip", "Noclip mode")
+	elseif key == BIND.fog.key then
+		-- Official's fog toggle (F3, [VIEW_KEYS]): the fog pushed past
+		-- the far clip, and back to the sky's rule
+		sky_now.fog_off = not sky_now.fog_off
+		sky_now.apply_far(game_sky)
+		luanti.chat_local(sky_now.fog_off and "Fog disabled" or "Fog enabled")
 	elseif key == BIND.camera.key then
 		-- Official's camera mode key ([THIRD_PERSON]): first person,
 		-- third from behind, third from the front; a game's
@@ -3992,6 +4005,11 @@ local function control_bits()
 	end
 	if magic.input:GetMouseButtonDown(magic.MOUSEB_RIGHT) then
 		bits = bits + CONTROL_PLACE
+	end
+	-- zoom, the tenth bit ([VIEW_KEYS]): official's Z, behind the zoom
+	-- privilege, which the server hands out with the rest
+	if key_down("zoom") and (luanti.physics().zoom_fov or 0) > 0 then
+		bits = bits + 512 -- CONTROL_ZOOM, over the 200-local line
 	end
 	return bits
 end
@@ -4183,6 +4201,22 @@ function frame_peak.update(dt)
 		if b then
 			wield_node.position = magic.Vector3(b.x + m.hand[1] / WIELD.shrink,
 					b.y + m.hand[2] / WIELD.shrink, b.z + m.hand[3] / WIELD.shrink)
+		end
+	end
+	-- Zoom while Z is held ([VIEW_KEYS]): the player's zoom_fov property
+	-- when a game set one (official's: 0 off, 15 in creative), back on
+	-- release
+	if camera then
+		local zoom_fov = luanti.physics().zoom_fov or 0
+		local zooming = key_down("zoom") and zoom_fov > 0 and
+				mouse_in_world and not luanti.form_open()
+		if zooming ~= WIELD.zooming then
+			WIELD.zooming = zooming
+			local c = luanti.camera()
+			local base = (c.fov and c.fov > 0) and
+					(c.is_multiplier and (CAMERA_FOV * c.fov) or c.fov) or CAMERA_FOV
+			camera.fov = zooming and zoom_fov or base
+			WIELD.place(camera.fov)
 		end
 	end
 	if WIELD.camera_mode ~= 1 then

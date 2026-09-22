@@ -51,6 +51,17 @@ M.BINDINGS = {
 			what = "Sound muted or not"},
 	{action = "camera", key = magic.KEY_C, name = "C",
 			what = "Camera: first person, behind, in front"},
+	{action = "zoom", key = magic.KEY_Z, name = "Z",
+			what = "Zoom while held (the zoom privilege)"},
+	{action = "fog", key = magic.KEY_F3, name = "F3",
+			what = "Fog on and off"},
+	-- The engine's own, listed for the player and not rebindable here
+	{action = "screenshot", key = magic.KEY_F12, name = "F12", engine = true,
+			what = "A screenshot (the engine's)"},
+	{action = "profiler", key = magic.KEY_F6, name = "F6", engine = true,
+			what = "The engine's profiler on and off"},
+	{action = "fullscreen", key = magic.KEY_F11, name = "F11", engine = true,
+			what = "Fullscreen on and off (the engine's)"},
 	{action = "hud", key = magic.KEY_F1, name = "F1",
 			what = "The HUD on and off"},
 	{action = "chatlog", key = magic.KEY_F2, name = "F2",
@@ -74,7 +85,7 @@ for _, b in ipairs(M.BINDINGS) do
 end
 
 local function bindable(b)
-	return b.default_key ~= nil
+	return b.default_key ~= nil and not b.engine
 end
 
 -- The settings list as last sent by the server, so that the editor sends

@@ -268,6 +268,9 @@ end
 local PROPERTY_VECTOR2 = {spritediv = true, initial_sprite_basepos = true}
 local PROPERTY_VECTOR3 = {visual_size = true}
 
+-- Defined with the physics further down; set_properties sends on a
+-- zoom_fov change
+local send_physics
 function ObjectRef:set_properties(props)
 	local o = state_of(self)
 	if not o or type(props) ~= "table" then
@@ -290,6 +293,11 @@ function ObjectRef:set_properties(props)
 	end
 	if o.player_name then
 		player_event(o, "properties_changed")
+		-- zoom_fov rides the physics packet ([VIEW_KEYS]): official gates
+		-- the zoom key on it (0 off, 15 in creative)
+		if props.zoom_fov ~= nil then
+			send_physics(o)
+		end
 	end
 end
 
@@ -1086,7 +1094,7 @@ local MOVEMENT_FIELDS = {"acceleration_default", "acceleration_air",
 		"speed_climb", "speed_jump", "liquid_fluidity",
 		"liquid_fluidity_smooth", "liquid_sink", "gravity"}
 
-local function send_physics(o)
+send_physics = function(o)
 	if not (o and o.player_name and __luanti_send_physics) then
 		return
 	end
@@ -1111,6 +1119,8 @@ local function send_physics(o)
 			flat[#flat + 1] = tostring(tonumber(v))
 		end
 	end
+	flat[#flat + 1] = "zoom_fov"
+	flat[#flat + 1] = tostring(tonumber(o.props and o.props.zoom_fov) or 0)
 	__luanti_send_physics(o.player_name, flat)
 end
 

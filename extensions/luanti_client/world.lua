@@ -836,7 +836,32 @@ function M.new(magic, buildat, log, options)
 
 	-- set_fov(fov, is_multiplier, transition_time), out of TOCLIENT_FOV. A
 	-- fov of zero means back to the client's own.
+	-- Zoom ([VIEW_KEYS]): official's zoom_fov, 15 degrees, while held;
+	-- the server's last fov is kept on self (the function is at the
+	-- 200-local line) so a zoom's end goes back to it
+	function self:set_zoom(on, zoom_fov)
+		if on then
+			fov_step = nil
+			camera.fov = zoom_fov or 15
+		else
+			local f = self.fov_server or {}
+			self:set_fov(f.fov, f.is_multiplier, 0)
+		end
+	end
+
+	-- Fog off ([VIEW_KEYS]'s F3): the fog pushed past the far clip
+	function self:set_fog(on)
+		if not on then
+			zone.fogStart = far_clip * 10
+			zone.fogEnd = far_clip * 10 + 1
+		else
+			zone.fogStart = far_clip * 0.7
+			zone.fogEnd = far_clip
+		end
+	end
+
 	function self:set_fov(fov, is_multiplier, transition_time)
+		self.fov_server = {fov = fov, is_multiplier = is_multiplier}
 		local want = BASE_FOV
 		if fov and fov > 0 then
 			want = is_multiplier and BASE_FOV * fov or fov

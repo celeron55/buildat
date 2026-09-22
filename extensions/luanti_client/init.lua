@@ -153,6 +153,15 @@ local BINDINGS = {
 	{action = "fly", key = KEY_K, name = "K", what = "Fly on and off"},
 	{action = "camera", key = KEY_C, name = "C",
 			what = "Camera: first person, behind, in front"},
+	{action = "zoom", key = KEY_Z, name = "Z",
+			what = "Zoom while held (the zoom privilege)"},
+	{action = "fog", key = KEY_F3, name = "F3", what = "Fog on and off"},
+	{action = "screenshot", key = KEY_F12, name = "F12",
+			what = "A screenshot (the engine's)"},
+	{action = "profiler", key = KEY_F6, name = "F6",
+			what = "The engine's profiler on and off"},
+	{action = "fullscreen", key = KEY_F11, name = "F11",
+			what = "Fullscreen on and off (the engine's)"},
 	{action = "noclip", key = KEY_H, name = "H",
 			what = "Through walls on and off"},
 	{action = "chat", key = KEY_T, name = "T", what = "Say something"},
@@ -750,6 +759,8 @@ local function show_client(host, port, name, password, mode)
 		local digging = false
 		-- 1 first person, 2 third from behind, 3 third from the front
 		local camera_mode = 1
+		local zoom_held = false
+		local fog_on = true
 		-- The bob's state for this session; the extension draws no hand, so
 		-- only the camera's offset and roll are used of what it answers
 		local motion = camera_motion.new()
@@ -2485,6 +2496,23 @@ local function show_client(host, port, name, password, mode)
 			if wish.jump then keys = keys + luanti.KEY_JUMP end
 			if wish.sneak then keys = keys + luanti.KEY_SNEAK end
 			if wish.fast then keys = keys + luanti.KEY_AUX1 end
+			-- Zoom while Z is held, behind the zoom privilege
+			-- ([VIEW_KEYS]): the control bit goes to the server, the fov
+			-- to the camera
+			-- gated by the player's own zoom_fov property as official is
+			-- (0 off, 15 in creative)
+			local zoom_fov = 0
+			for _, obj in pairs(world_objects) do
+				if obj.is_self and obj.props then
+					zoom_fov = obj.props.zoom_fov or 0
+				end
+			end
+			local zooming = down("zoom") and zoom_fov > 0
+			if zooming then keys = keys + luanti.KEY_ZOOM end
+			if zooming ~= zoom_held then
+				zoom_held = zooming
+				view:set_zoom(zooming, zoom_fov)
+			end
 
 			local x, y, z = avatar:update(dtime, wish)
 			client:set_position(x, y, z, pitch, yaw)
@@ -3249,6 +3277,11 @@ local function show_client(host, port, name, password, mode)
 			-- third from behind, third from the front, under the server's
 			-- TOCLIENT_CAMERA restriction; the own model is drawn in the
 			-- third views and taken back out in first
+			if key == BIND.fog.key then
+				fog_on = not fog_on
+				view:set_fog(fog_on)
+				add_chat(fog_on and "Fog enabled" or "Fog disabled")
+			end
 			if key == BIND.camera.key then
 				local allowed = client.camera_mode_allowed or 0
 				local next_mode = camera_mode % 3 + 1

@@ -2053,6 +2053,8 @@ end)
 -- A line the client says to itself, in the chat as official's client
 -- puts its own notes ("Fly mode enabled")
 function M.chat_local(line)
+	-- In the log too: what a key said is what a driven run reads
+	log:info("chat (local): " .. tostring(line))
 	M.chat_lines[#M.chat_lines + 1] = line
 	M.chat_raw[#M.chat_raw + 1] = line
 	for _, f in ipairs(chat_subs) do

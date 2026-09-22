@@ -24,6 +24,9 @@ core.register_on_joinplayer(function(player)
 		player:set_pos({x = base.x, y = base.y + 0.5, z = base.z})
 		player:set_look_horizontal(0)
 		player:set_look_vertical(0)
+		-- The zoom key wants a zoom_fov ([VIEW_KEYS]); official's creative
+		-- default
+		player:set_properties({zoom_fov = 15})
 		core.log("action", "camera: the floor and the wall are placed")
 	end)
 end)

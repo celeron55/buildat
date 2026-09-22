@@ -1882,9 +1882,21 @@ struct CApp: public App, public magic::Application
 				log_e(MODULE, "Failed to load and run extension %s", cs(extname));
 			}
 		}
-		if(key == Urho3D::KEY_F9){
+		// F6 as official's profiler key beside the F9 this always had
+		// ([VIEW_KEYS]); the engine's DebugHud is the profiler there is
+		if(key == Urho3D::KEY_F9 || key == Urho3D::KEY_F6){
 			magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
 			dhud->ToggleAll();
+		}
+		// F12 alone: a screenshot under <user>/screenshots, as official's
+		// ([VIEW_KEYS]); Ctrl+F12 stays the sandbox test's
+		if(key == Urho3D::KEY_F12 && !(event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL)){
+			if(m_pending_screenshot.empty()){
+				const ss_ dir = g_client_config.get<ss_>("user_path")+"/screenshots";
+				const ss_ name = client::command_seq::screenshot_name(dir);
+				m_pending_screenshot = dir+"/"+name;
+				log_i(MODULE, "F12: screenshot %s", cs(name));
+			}
 		}
 		if(key == Urho3D::KEY_F8){
 			m_draw_debug_geometry = !m_draw_debug_geometry;

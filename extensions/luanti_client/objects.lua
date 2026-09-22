@@ -79,7 +79,7 @@ function M.read_properties(r)
 	props.glow = r:u8()
 	props.breath_max = r:u16()
 	props.eye_height = r:f32()
-	r:f32() -- zoom_fov
+	props.zoom_fov = r:f32()
 	props.use_texture_alpha = r:u8() ~= 0
 	return props
 end
