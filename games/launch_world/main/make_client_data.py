@@ -19,13 +19,17 @@ import zlib
 
 SIZE = 16
 
+# The reference frame's stone is pale and cool and its checkerboard is
+# black against near-white; the first pass at these was warm, dark and
+# noisy, and at a room's distance the noise read as static rather than as
+# surface (2026-09-23).
 TILES = {
 	# name: (r, g, b) at the top of the tile, and at the bottom, so a face
 	# has some gradient in it rather than being one flat patch
-	"stone": ((78, 78, 86), (58, 58, 66)),
-	"dark": ((34, 34, 40), (24, 24, 30)),
-	"floor_light": ((168, 170, 176), (150, 152, 158)),
-	"floor_dark": ((26, 26, 32), (18, 18, 24)),
+	"stone": ((132, 137, 148), (112, 117, 128)),
+	"dark": ((44, 46, 52), (32, 34, 39)),
+	"floor_light": ((226, 228, 232), (206, 208, 214)),
+	"floor_dark": ((14, 14, 18), (9, 9, 12)),
 }
 
 
@@ -34,7 +38,11 @@ def png(path, rows):
 	def chunk(tag, data):
 		c = struct.pack(">I", len(data)) + tag + data
 		return c + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
-	head = struct.pack(">IIBBBBB", SIZE, SIZE, 8, 2, 0, 0, 0)
+	# Colour type 6, RGBA: an RGB tile leaves the atlas's alpha to
+	# whatever it was, and a masked voxel technique then discards pixels
+	# at random -- which is what the wall's speckle turned out to be
+	# (2026-09-23)
+	head = struct.pack(">IIBBBBB", SIZE, SIZE, 8, 6, 0, 0, 0)
 	with open(path, "wb") as f:
 		f.write(b"\x89PNG\r\n\x1a\n")
 		f.write(chunk(b"IHDR", head))
@@ -47,16 +55,21 @@ def main():
 			"client_data")
 	os.makedirs(here, exist_ok=True)
 	for name, (top, bottom) in TILES.items():
+		# **Flat, with no gradient either.** A 16x16 tile on a 45 cm face
+		# seen from fifteen metres is well under a pixel across, so any
+		# variation inside it aliases into speckle -- the wall read as
+		# static until both the noise and the top-to-bottom gradient came
+		# out (2026-09-23). What gives a face its shading is the mesher's
+		# own AO and the lights, which is where it belongs.
 		rows = []
 		for y in range(SIZE):
-			t = y / float(SIZE - 1)
-			c = [int(top[i] + (bottom[i] - top[i]) * t) for i in range(3)]
-			# A little texel noise, deterministic, so a face is not a
-			# perfectly flat colour under a sharp light
+			c = [int((top[i] + bottom[i]) / 2) for i in range(3)]
+			# Flat, on purpose: a per-texel wobble reads as surface up
+			# close and as static across a room, and this room is looked
+			# at across a room
 			row = []
 			for x in range(SIZE):
-				n = ((x * 7 + y * 13) % 5) - 2
-				row += [max(0, min(255, v + n)) for v in c]
+				row += c + [255]
 			rows.append(row)
 		png(os.path.join(here, name + ".png"), rows)
 		print("wrote", name + ".png")

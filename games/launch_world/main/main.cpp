@@ -251,7 +251,7 @@ struct Module: public interface::Module
 			interface::VoxelRegistry *reg = world->get_voxel_reg();
 			g_ids.air = add_voxel(reg, "air", "", false, true);
 			g_ids.stone = add_voxel(reg, "stone", "main/stone.png",
-					true, false, 0.85f, 0.25f, 0.6f);
+					true, false, 0.85f, 0.0f, 0.0f);
 			g_ids.dark = add_voxel(reg, "dark", "main/dark.png",
 					true, false, 0.95f, 0.1f, 0.4f);
 			// The checkerboard: the light squares are polished, which is
@@ -260,7 +260,7 @@ struct Module: public interface::Module
 					"main/floor_light.png", true, false, 0.18f, 1.0f, 0.2f);
 			g_ids.floor_dark = add_voxel(reg, "floor_dark",
 					"main/floor_dark.png", true, false, 0.22f, 1.0f, 0.2f);
-			world->set_skylight_enabled(false);
+			world->set_skylight_enabled(true);
 		});
 
 		worldgen::access(m_server, m_main_scene,

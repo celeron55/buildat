@@ -24,9 +24,14 @@ local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 voxelworld.allow_streaming()
--- No sky and no day: nothing in this room is lit by anything but the
--- orbs, so there is no skylight to flood
-voxelworld.use_skylight = false
+-- **The skylight flood is on, even though this room has no sky.** With
+-- it off the light nibbles are never written and the shader reads
+-- whatever they were: at 45 cm a face is two or three pixels across a
+-- room away, so per-voxel rubbish looks exactly like per-pixel noise,
+-- and the wall came out as static (2026-09-23). On, the flood writes
+-- nought everywhere the sky cannot reach -- which is everywhere in
+-- here -- and the wall is a wall.
+voxelworld.use_skylight = true
 -- The voxels are drawn by builtin/voxel_shading's technique set, which is
 -- what voxelworld's client half asks for; without it the room's shell is
 -- there and black
@@ -308,18 +313,16 @@ end
 -- The foreground: ten shipped primitives on the checkerboard, the chrome
 -- ones doing what a perfect sphere under a sharp light does
 local PROPS = {
-	{"Sphere", -8.0, 1.05, -1.0, 2.1, "chrome"},
-	{"Sphere", -4.2, 0.80, 1.8, 1.6, "chrome"},
-	{"Sphere", 0.6, 1.20, -2.4, 2.4, "chrome"},
-	{"Sphere", 5.2, 0.90, 1.0, 1.8, "chrome"},
-	{"Sphere", 9.0, 1.30, -1.6, 2.6, "chrome"},
-	{"Cone", -6.0, 1.05, 2.6, 2.1, "machined"},
-	{"Cylinder", 3.0, 1.00, 3.4, 2.0, "machined"},
-	{"Torus", -1.6, 0.45, 3.0, 2.2, "chrome"},
-	{"Pyramid", 7.2, 0.90, 3.2, 1.8, "stone"},
-	-- Not Dome.mdl: it is Urho3D's skydome and at any scale it arches
-	-- over the whole room
-	{"Pyramid", -10.4, 0.85, 2.2, 1.7, "machined"},
+	{"Sphere", -9.4, 1.55, 3.4, 3.1, "chrome"},
+	{"Sphere", -4.6, 1.15, 6.0, 2.3, "chrome"},
+	{"Sphere", 0.8, 1.55, 1.8, 3.1, "chrome"},
+	{"Sphere", 5.8, 1.30, 5.2, 2.6, "chrome"},
+	{"Sphere", 10.6, 1.60, 0.8, 3.2, "chrome"},
+	{"Cone", -7.0, 1.35, 5.6, 2.7, "machined"},
+	{"Cylinder", 3.6, 1.25, 6.4, 2.5, "machined"},
+	{"Torus", -2.2, 0.60, 6.6, 2.6, "chrome"},
+	{"Pyramid", 8.4, 1.15, 6.2, 2.3, "stone"},
+	{"Pyramid", -12.0, 1.10, 4.8, 2.2, "machined"},
 }
 local MATS = {chrome = chrome, machined = machined, stone = stone}
 for _, o in ipairs(PROPS) do
@@ -358,7 +361,7 @@ local COLD_WHITE = {0.72, 0.85, 1.0}
 local function preset_lights(orb, fill, orb_i, fill_i)
 	local l = {}
 	for i = 1, 6 do
-		l[i] = {orb, orb_i, 17 * U}
+		l[i] = {orb, orb_i, 20 * U}
 	end
 	l[7] = {fill, fill_i, 11 * U}
 	l[8] = {fill, fill_i, 11 * U}
@@ -373,23 +376,23 @@ local PRESETS = {
 		-- orbs beyond a cold room, so the stone silhouettes against them
 		-- and the eye goes to the light rather than to the wall
 		name = "cold_in_warm_out",
-		lights = preset_lights(WARM, CYAN, 4.0, 0.30),
+		lights = preset_lights(WARM, CYAN, 5.5, 0.75),
 	},
 	{
 		-- The mirror, to see what was given up
 		name = "warm_in_cold_out",
-		lights = preset_lights(CYAN, AMBER, 4.0, 0.30),
+		lights = preset_lights(CYAN, AMBER, 5.5, 0.75),
 	},
 	{
 		-- No warm anywhere: whether the room needs a warm point at all
 		name = "all_cold",
-		lights = preset_lights(COLD_WHITE, CYAN, 4.0, 0.30),
+		lights = preset_lights(COLD_WHITE, CYAN, 5.5, 0.75),
 	},
 	{
 		-- Deliberately wrong, and the useful one: every colour loud, the
 		-- purple as bright as the cyan, nothing scarce
 		name = "wrong",
-		lights = preset_lights(PURPLE, AMBER, 5.0, 1.6),
+		lights = preset_lights(PURPLE, AMBER, 6.5, 1.8),
 	},
 }
 
@@ -409,7 +412,7 @@ for i, place in ipairs(LIGHT_PLACES) do
 	light.lightType = magic.LIGHT_POINT
 	-- A handful of sharp point lights with hard shadows; only the key pair
 	-- casts, because a shadow map each is the one real cost here
-	light.castShadows = (i <= 2)
+	light.castShadows = false
 	light.shadowBias = magic.BiasParameters(0.00025, 0.5)
 	lights[i] = light
 end
@@ -532,8 +535,14 @@ magic.SubscribeToEvent("Update", "handle_probe_update")
 
 local viewport = magic.Viewport:new(scene,
 		camera_node:GetComponent("Camera"))
--- voxelworld streams around the camera, which in this room never moves
-voxelworld.set_camera(camera_node)
+-- **No tonemap, so nothing may be brighter than white but a source.**
+-- Urho3D's AutoExposure and Tonemap appended to the client's own render
+-- path draw a black frame -- they want a buffer chain the default path
+-- does not carry -- so the room is lit to fit in the range instead: the
+-- orbs clip to white, which is what a source should do, and the wall
+-- behind them stops short of it. Getting this wrong reads as per-pixel
+-- speckle on the wall rather than as a bright wall, because red and
+-- green pin at 255 while blue still moves (2026-09-23).
 magic.set_preferred_viewports({viewport})
 
 -- The name of the preset in the corner, so a picture says which it is
