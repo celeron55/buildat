@@ -6264,6 +6264,17 @@ struct Module: public interface::Module, public luanti::Interface
 	}
 
 	// A line of chat to one player, or to everyone when the name is empty
+	// __luanti_request_shutdown(message): the server stops, the message in
+	// its reason; core.request_shutdown's delay and reconnect are Lua's
+	static int l_request_shutdown(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t len = 0;
+		const char *p = luaL_optlstring(L, 1, "", &len);
+		self->m_server->shutdown(0, "a mod asked: "+ss_(p ? p : "", len));
+		return 0;
+	}
+
 	static int l_send_chat(lua_State *L)
 	{
 		Module *self = module_of(L);
@@ -8147,6 +8158,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_sky", l_send_sky);
 		set_global_cfunction("__luanti_send_time", l_send_time);
 		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
+		set_global_cfunction("__luanti_request_shutdown", l_request_shutdown);
 		set_global_cfunction("__luanti_player_formspec", l_player_formspec);
 		set_global_cfunction("__luanti_send_node_inventory",
 				l_send_node_inventory);

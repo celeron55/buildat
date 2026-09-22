@@ -2183,8 +2183,8 @@ local STUBS_NIL = {
 	"kick_player", "disconnect_player", "ban_player", "unban_player_or_ip",
 	"get_ban_list", "get_ban_description",
 	-- The server itself
-	"request_shutdown", "cancel_shutdown_requests", "get_server_status",
-	"get_server_uptime", "get_server_max_lag", "get_worldpath_nocreate",
+	"cancel_shutdown_requests", "get_server_status",
+	"get_server_max_lag", "get_worldpath_nocreate",
 	"get_mod_data", "set_mod_data", "get_mod_data_path",
 	-- Not in this at all: HTTP, IPC, the async environment, mod channels,
 	-- SSCSM, translations beyond passing strings through
@@ -5456,6 +5456,32 @@ function core.check_password_entry(name, entry, password)
 		return false
 	end
 	return core.get_password_hash(name, password) == entry
+end
+
+-- core.request_shutdown([message, [reconnect, [delay]]]): the server
+-- stops after delay seconds (now for none or a negative), the players
+-- told the message as chat first. A world of one launcher: the launcher
+-- shows its menu when its server goes.
+-- simplified: reconnect is not offered; there is one server to go back to.
+function core.request_shutdown(message, reconnect, delay)
+	local function go()
+		if message and message ~= "" then
+			core.chat_send_all("*** Server shutting down: " .. tostring(message))
+		end
+		__luanti_request_shutdown(tostring(message or ""))
+	end
+	delay = tonumber(delay) or 0
+	if delay > 0 then
+		core.after(delay, go)
+	else
+		go()
+	end
+end
+
+-- Seconds since the module came up, a number
+local up_since_us = core.get_us_time()
+function core.get_server_uptime()
+	return (core.get_us_time() - up_since_us) / 1000000
 end
 
 function core.get_player_privs(name)
