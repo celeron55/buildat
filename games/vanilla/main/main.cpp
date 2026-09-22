@@ -924,6 +924,19 @@ struct Module: public interface::Module
 	// The viewing range ([VIEW_RANGE]): "view_range": "<n>", 120 when
 	// absent so a new install bets on no strong computer; 20..4000 as
 	// official's
+	// view_bobbing_amount ([VIEW_BOB]): 1 unless set, 0 off; BUILDAT_VIEW_BOBBING
+	// for one run, which is how the reference shooters keep their probes still
+	ss_ read_view_bobbing()
+	{
+		const char *env = getenv("BUILDAT_VIEW_BOBBING");
+		const ss_ v = env ? ss_(env) : read_setting("view_bobbing_amount");
+		const double n = atof(v.c_str());
+		if(v.empty() || n < 0 || n > 7.9)
+			return "1";
+		char buf[16];
+		snprintf(buf, sizeof buf, "%g", n);
+		return buf;
+	}
 	ss_ read_view_range()
 	{
 		// BUILDAT_VIEW_RANGE for one run: the reference shooters set their
@@ -1011,12 +1024,14 @@ struct Module: public interface::Module
 		f << '"';
 	}
 	void write_settings(const sv_<ss_> &paths, const ss_ &mode,
-			const sv_<std::pair<ss_, ss_>> &keys, const ss_ &view_range)
+			const sv_<std::pair<ss_, ss_>> &keys, const ss_ &view_range,
+			const ss_ &view_bobbing)
 	{
 		interface::fs::create_directories(luanti_path());
 		std::ofstream f(settings_path(), std::ios::trunc);
 		f << "{\"render_mode\": \"" << mode << "\", \"view_range\": \""
-				<< view_range << "\", \"import_paths\": [";
+				<< view_range << "\", \"view_bobbing_amount\": \""
+				<< view_bobbing << "\", \"import_paths\": [";
 		for(size_t i = 0; i < paths.size(); i++){
 			f << (i ? ", " : "");
 			write_json_string(f, paths[i]);
@@ -1041,6 +1056,7 @@ struct Module: public interface::Module
 			ss_ mode = read_render_mode();
 			list.push_back("render_mode="+(mode.empty() ? ss_("pbr") : mode));
 			list.push_back("view_range="+read_view_range());
+			list.push_back("view_bobbing_amount="+read_view_bobbing());
 			for(const ss_ &row : read_key_rows())
 				list.push_back(row);
 			ar(list);
@@ -1387,7 +1403,17 @@ struct Module: public interface::Module
 		sv_<std::pair<ss_, ss_>> keys;
 		ss_ mode = "pbr";
 		ss_ view_range = "120";
+		ss_ view_bobbing = "1";
 		for(const ss_ &v : values){
+			if(v.compare(0, 20, "view_bobbing_amount=") == 0){
+				const double n = atof(v.c_str() + 20);
+				if(n >= 0 && n <= 7.9){
+					char buf[16];
+					snprintf(buf, sizeof buf, "%g", n);
+					view_bobbing = buf;
+				}
+				continue;
+			}
 			if(v.compare(0, 12, "render_mode=") == 0){
 				const ss_ m = v.substr(12);
 				if(m == "unlit" || m == "shadows" || m == "pbr")
@@ -1411,7 +1437,7 @@ struct Module: public interface::Module
 			} else if(!v.empty() && v.size() <= 4096)
 				paths.push_back(v);
 		}
-		write_settings(paths, mode, keys, view_range);
+		write_settings(paths, mode, keys, view_range, view_bobbing);
 		log_i(MODULE, "settings: %zu import paths, render_mode %s, view_range "
 				"%s and %zu key bindings written to %s", paths.size(), cs(mode),
 				cs(view_range), keys.size(), cs(settings_path()));

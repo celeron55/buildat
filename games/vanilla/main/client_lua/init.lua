@@ -837,14 +837,26 @@ WIELD.extruded_scale = 40 / 10 / WIELD.shrink
 WIELD.node_scale = 30 / 10 / WIELD.shrink
 function WIELD.place(fov)
 	local wield_k = math.tan(math.rad(fov / 2)) / math.tan(math.rad(36))
-	wield_node.position = magic.Vector3(5.5 / WIELD.shrink * wield_k,
-			-3.5 / WIELD.shrink * wield_k, 6.5 / WIELD.shrink)
+	WIELD.base = {x = 5.5 / WIELD.shrink * wield_k,
+			y = -3.5 / WIELD.shrink * wield_k, z = 6.5 / WIELD.shrink}
+	wield_node.position = magic.Vector3(WIELD.base.x, WIELD.base.y, WIELD.base.z)
 	wield_node.rotation = magic.Quaternion(-100, magic.Vector3(0, 0, 1)) *
 			magic.Quaternion(120, magic.Vector3(0, 1, 0)) *
 			magic.Quaternion(-100, magic.Vector3(1, 0, 0))
 	wield_node.scale = magic.Vector3(wield_k, wield_k, wield_k)
 end
 WIELD.place(CAMERA_FOV)
+-- View bobbing and the hand's motion, official's ([VIEW_BOB]): the shared
+-- module under luanti_client/res; the setting view_bobbing_amount comes
+-- with main:settings (1 unless set; 0 is off, as official's)
+WIELD.motion = (function(ok, err, lib)
+	if not ok then
+		log:warning("camera_motion.lua: " .. tostring(err))
+		return nil
+	end
+	return lib.new()
+end)(buildat.run_script_file("luanti/camera_motion.lua"))
+WIELD.last_wield_index = nil
 wield_node:GetChild("box").scale = magic.Vector3(WIELD.node_scale, WIELD.node_scale,
 		WIELD.node_scale)
 -- A node's enabled does not reach its children (Urho's SetEnabled is
@@ -4105,6 +4117,45 @@ function frame_peak.update(dt)
 			player.y + player_physics.EYE_HEIGHT + eye_offset.y,
 			player.z + eye_offset.z)
 	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
+	if WIELD.motion then
+		local speed_xz = math.sqrt(player.vx * player.vx + player.vz * player.vz)
+		local flying = player.fly_active or player.fly
+		local m = WIELD.motion:update(dt, {
+			walking = speed_xz > 1 and player.on_ground,
+			swimming = player.in_liquid and (speed_xz > 1 or math.abs(player.vy) > 1),
+			climbing = player.climbing and math.abs(player.vy) > 1,
+			flying = flying,
+			speed = math.sqrt(speed_xz * speed_xz + player.vy * player.vy),
+			digging = dig ~= nil and dig.time ~= nil,
+			dig_anim = dig and dig.time and dig.time > 0 and
+					(dig.elapsed / dig.time) or 0,
+			wield_changed = WIELD.last_wield_index ~= nil and
+					WIELD.last_wield_index ~= wield_index,
+		})
+		WIELD.last_wield_index = wield_index
+		if WIELD.motion.state == 1 and not WIELD.bob_said then
+			WIELD.bob_said = true
+			log:info(string.format("view bobbing: started at %.1f nodes/s, amount %g",
+					speed_xz, WIELD.motion.amount))
+		end
+		if m.roll ~= 0 or m.offset[1] ~= 0 or m.offset[2] ~= 0 then
+			camera_node.rotation = magic.Quaternion(pitch, yaw, math.deg(m.roll))
+			-- Sideways along the camera's right (the yaw turned a quarter),
+			-- and straight up: official adds its bobvec before the pitch
+			local ry = math.rad(yaw)
+			camera_node.position = magic.Vector3(
+					player.x + eye_offset.x + m.offset[1] * math.cos(ry),
+					player.y + player_physics.EYE_HEIGHT + eye_offset.y + m.offset[2],
+					player.z + eye_offset.z - m.offset[1] * math.sin(ry))
+		end
+		-- The hand's offset in the wield node's own scale: official's
+		-- units are the node's tenth, and the node is a twenty-sixth
+		local b = WIELD.base
+		if b then
+			wield_node.position = magic.Vector3(b.x + m.hand[1] / WIELD.shrink,
+					b.y + m.hand[2] / WIELD.shrink, b.z + m.hand[3] / WIELD.shrink)
+		end
+	end
 	place_waypoints()
 	turn_compasses()
 	follow_minimaps(dt)
@@ -4130,6 +4181,10 @@ buildat.sub_packet("main:settings", function(data)
 		local n = row:match("^view_range=(%d+)$")
 		if n then
 			sky_now.set_range(n)
+		end
+		local bob = row:match("^view_bobbing_amount=([%d.]+)$")
+		if bob and WIELD.motion then
+			WIELD.motion.amount = tonumber(bob) or 1
 		end
 	end
 end)

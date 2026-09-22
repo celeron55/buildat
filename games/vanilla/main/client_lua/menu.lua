@@ -538,15 +538,19 @@ function draw_settings(paths)
 	-- keys.lua reads and the editor writes; both go back with the paths
 	local mode = "pbr"
 	local view_range = "120"
+	local view_bobbing = "1"
 	local kept = {}
 	local key_rows = {}
 	for _, p in ipairs(paths) do
 		local m = p:match("^render_mode=(.*)$")
 		local r = p:match("^view_range=(%d+)$")
+		local b = p:match("^view_bobbing_amount=([%d.]+)$")
 		if m then
 			mode = m
 		elseif r then
 			view_range = r
+		elseif b then
+			view_bobbing = b
 		elseif p:match("^key%.") then
 			key_rows[#key_rows + 1] = p
 		else
@@ -558,6 +562,7 @@ function draw_settings(paths)
 		waiting("Saving...")
 		list[#list + 1] = "render_mode=" .. mode
 		list[#list + 1] = "view_range=" .. view_range
+		list[#list + 1] = "view_bobbing_amount=" .. view_bobbing
 		for _, r in ipairs(key_rows) do
 			list[#list + 1] = r
 		end
@@ -573,6 +578,7 @@ function draw_settings(paths)
 		end
 		all[#all + 1] = "render_mode=" .. mode
 		all[#all + 1] = "view_range=" .. view_range
+		all[#all + 1] = "view_bobbing_amount=" .. view_bobbing
 		for _, r in ipairs(key_rows) do
 			all[#all + 1] = r
 		end
@@ -619,6 +625,17 @@ function draw_settings(paths)
 			send(list)
 		end)
 	end
+	-- View bobbing ([VIEW_BOB]): official's view_bobbing_amount, 1 or off
+	-- simplified: on or off; the amount when somebody wants 0.5
+	menu:add((view_bobbing ~= "0" and "[x] " or "[ ] ") .. "View bobbing",
+			function()
+		view_bobbing = view_bobbing ~= "0" and "0" or "1"
+		local list = {}
+		for _, p in ipairs(paths) do
+			list[#list + 1] = p
+		end
+		send(list)
+	end)
 	local text = menu.window:CreateChild("Text")
 	text:SetStyleAuto()
 	text:SetText("Import search paths, besides ~/.luanti and ~/.minetest:")
