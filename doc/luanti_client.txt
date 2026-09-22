@@ -309,7 +309,7 @@ through Urho3D, so the blending, the eight symmetries, the scaling and the
 colour arithmetic are checked pixel by pixel.
 
 srp.lua has self_test(), which init.lua runs at boot; its vectors come from
-util/srp_reference.py, which does SRP-6a separately in Python.
+extensions/luanti_client/test/srp_reference.py, which does SRP-6a separately in Python.
 
 Both login paths have been run against a real Luanti server: registering a new
 player (FIRST_SRP) and logging in as one the server knows (SRP), and the

@@ -11,16 +11,6 @@ to follow the one defined here in every detail, do it carefully.
 If something is found to be missing from this document, such additions shall be
 made.
 
-util/codestyle.sh:
-A code formatting script. Always run before committing. It handles most
-whitespace issues. Requires Uncrustify (http://uncrustify.sourceforge.net/).
-
-Commit your changes temporarily before running the script, as it will not save
-any kind of backups of the files.
-
-If something seems wrong or weird, use the -a flag to enable annotations in code
-to check if the script knows what it's doing or not.
-
 Identifiers:
 - Class and struct names are CamelCase,
 - All function names are lowercase_with_underscores,

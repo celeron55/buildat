@@ -1,7 +1,7 @@
 #!/bin/bash
 # Does the client's own menu answer the keyboard?
 #
-#   util/menu_keys.sh
+#   builtin/luanti/test/menu_keys.sh
 #
 # Run from anywhere; it needs Build/bin/buildat and nothing else -- no
 # server, because the launch menu is what the client shows when it is
@@ -19,7 +19,7 @@
 # The pictures are compared by how many pixels differ, because a focused
 # field blinks its caret and that is not the selection moving.
 set -u
-here=$(cd "$(dirname "$0")/.." && pwd)
+here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cd "$here/Build"

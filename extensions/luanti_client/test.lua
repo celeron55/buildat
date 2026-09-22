@@ -8,7 +8,7 @@
 --   $ lua extensions/luanti_client/test.lua
 --
 -- The parts that need the engine are checked elsewhere: srp.lua has
--- self_test() (run at boot, vectors from util/srp_reference.py), and the whole
+-- self_test() (run at boot, vectors from extensions/luanti_client/test/srp_reference.py), and the whole
 -- thing gets checked by logging into a Luanti server.
 
 local dir = arg[0]:match("^(.*)/[^/]*$") or "."
