@@ -134,11 +134,16 @@ const float STAR_GRID = 102.0;
 // How bright a star is drawn, against the colour the game gave them. Less than
 // the colour says, because the moon is the bright thing in a night sky and a
 // star drawn at its own colour comes out brighter than the moon does.
-const float STAR_BRIGHTNESS = 0.65;
+// A tenth of what it was ([STARS], user 2026-09-22: half the size and a
+// tenth as bright).
+const float STAR_BRIGHTNESS = 0.065;
+// How much of its cell a star fills, about the cell's centre: half its
+// width, so a quarter of the cell's area
+const float STAR_SIZE = 0.5;
 
 // Which cell of that a direction falls in: the face it points at, and where on
-// the face it lands
-vec3 StarCell(vec3 s)
+// the face it lands; frac_out is where within the cell, 0..1 each way
+vec3 StarCell(vec3 s, out vec2 frac_out)
 {
     vec3 a = abs(s);
     vec2 uv;
@@ -153,7 +158,9 @@ vec3 StarCell(vec3 s)
         uv = s.xy / a.z;
         face = s.z > 0.0 ? 4.0 : 5.0;
     }
-    return vec3(floor(uv * STAR_GRID), face);
+    vec2 scaled = uv * STAR_GRID;
+    frac_out = fract(scaled);
+    return vec3(floor(scaled), face);
 }
 
 float SkyHash(vec2 p)
@@ -257,10 +264,14 @@ void PS()
         // that, so it is the rotation. Stars rise and set with it.
         vec3 turned = vec3(d.x * sun.x + d.y * sun.y,
             d.y * sun.x - d.x * sun.y, d.z);
-        vec3 cell = StarCell(turned);
+        vec2 within;
+        vec3 cell = StarCell(turned, within);
         vec2 key = cell.xy + cell.z * 71.0;
         float pick = SkyHash(key);
-        if(pick < cStarDensity){
+        // Only the middle of the cell is the star; the same count and
+        // places at half the size
+        vec2 off = abs(within - 0.5);
+        if(pick < cStarDensity && max(off.x, off.y) < STAR_SIZE * 0.5){
             float twinkle = 0.55 + 0.45 * SkyHash(key + 7.0);
             color += cStarColor * twinkle * cStarFade * STAR_BRIGHTNESS *
                     smoothstep(-0.05, 0.15, d.y);
