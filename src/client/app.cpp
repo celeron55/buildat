@@ -195,12 +195,12 @@ static int g_server_log_level_pref = 3;
 
 static ss_ preferences_path()
 {
-	return g_client_config.get<ss_>("user_path")+"/preferences.json";
+	return g_client_config.get<ss_>("user_path")+"/settings.json";
 }
 
 namespace app {
 
-// Every preference -o and preferences.json can carry is listed here once, so
+// Every preference -o and settings.json can carry is listed here once, so
 // that the flag and the file cannot drift apart.
 bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 {

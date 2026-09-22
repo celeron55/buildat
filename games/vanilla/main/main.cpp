@@ -894,9 +894,9 @@ struct Module: public interface::Module
 	// strings, the mode as a "render_mode=<mode>" entry after the paths.
 	ss_ settings_path()
 	{
-		return luanti_path()+"/launcher.json";
+		return luanti_path()+"/settings.json";
 	}
-	// One string value of launcher.json's top level, or "" when absent
+	// One string value of settings.json's top level, or "" when absent
 	ss_ read_setting(const ss_ &key)
 	{
 		std::ifstream f(settings_path());
@@ -940,13 +940,13 @@ struct Module: public interface::Module
 	ss_ read_view_range()
 	{
 		// BUILDAT_VIEW_RANGE for one run: the reference shooters set their
-		// range this way, over whatever the user's launcher.json says
+		// range this way, over whatever the user's settings.json says
 		const char *env = getenv("BUILDAT_VIEW_RANGE");
 		const ss_ v = env ? ss_(env) : read_setting("view_range");
 		const int n = atoi(v.c_str());
 		return (n >= 20 && n <= 4000) ? itos(n) : ss_("120");
 	}
-	// The key bindings ([KEY_BINDINGS]): launcher.json's "keys" object,
+	// The key bindings ([KEY_BINDINGS]): settings.json's "keys" object,
 	// action to key name, as "key.<action>=<name>" rows of the list
 	sv_<ss_> read_key_rows()
 	{
@@ -1489,7 +1489,7 @@ struct Module: public interface::Module
 		// The settings' paths first, the variable as an additional source
 		// for the shell and the runners
 		for(const ss_ &path : read_import_paths())
-			add(path, "launcher.json");
+			add(path, "settings.json");
 		const char *extra = getenv("LUANTI_EXTRA_IMPORT_PATH");
 		if(extra && extra[0]){
 			// Several, separated the way every other path variable does it

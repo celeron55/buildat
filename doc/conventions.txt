@@ -109,7 +109,7 @@ Directory structure
 ├── games       << Games that can be run using buildat_server -m <path>
 ├── doc         << This documentation; doc/plan is the plan and its history
 ├── user        << The user's data: saves, imported Luanti games and worlds,
-│                  preferences -- never in git
+│                  engine settings -- never in git
 ├── local       << Runs' outputs: fuzz and driven runs, reference shots,
 │                  options filed for the user -- never in git
 └── util        << Development utilities: packaging, the squash push, benches

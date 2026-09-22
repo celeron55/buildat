@@ -67,7 +67,7 @@ buildat.get_preferred_render_scale() -> number
 - magic.set_preferred_viewports() is what applies it; this is for a game that
   wants to know, to show it on a settings screen of its own or to size
   something of its own to match.
-- See "Client preferences" below.
+- See "Engine settings" below.
 
 buildat.font_sans, buildat.font_mono -> resource names of the two fonts
 
@@ -229,7 +229,7 @@ buildat.bignum
 buildat.list_preferences() -> {name, ...}
 buildat.get_preference(name) -> number or boolean, nil for an unknown name
 buildat.set_preference(name, value) -> true, or false and why
-- The preferences under "Client preferences" below. The C++ side is the
+- The settings under "Engine settings" below. The C++ side is the
   authority: set_preference() parses and range checks a value through the same
   code -o goes through, applies what takes effect now -- the sound gain, the
   frame limiter, vsync and MSAA, the render scale -- and persists the rest.
@@ -344,7 +344,7 @@ in the sandbox -- a property missing from the whitelist makes a feature
 silently do nothing, which is why util/whitelist_sweep.py exists.
 
 What is refused, and why:
-- Audio:SetMasterGain("Master") -- the user's volume, see "Client preferences"
+- Audio:SetMasterGain("Master") -- the user's volume, see "Engine settings"
 - Renderer:SetViewport() and its siblings -- magic.set_preferred_viewports()
   is the way, so the user's render scale applies
 - Anything that reaches a file path, the environment or another process;
@@ -416,10 +416,10 @@ magic.set_preferred_viewports({viewport, ...})
   costs, the game owns what is in it. That is the deal, not a gap to be closed
   later.
 
-Client preferences
-------------------
+Engine settings
+---------------
 What the user sets once and every game honours: how much the frame costs and
-how loud it is, never what the art is. Kept in user/preferences.json, and
+how loud it is, never what the art is. Kept in user/settings.json, and
 overridden for one run by -o (see README.md).
 
     render_scale    3D viewports drawn at this fraction of the window size;

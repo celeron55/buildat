@@ -94,15 +94,15 @@ Debug keys, in any game:
 * F9: on-screen profiler, render and resource stats
 * Ctrl+F12: sandbox test extension
 
-Preferences
------------
+Engine settings
+---------------
 
 What the user sets once and every game honours: `render_scale` (3D viewports
 drawn at a fraction of the window size, with the UI left at native
 resolution), `vsync`, `max_fps`, `multisampling`, `sound_volume` and
-`sound_mute`. They live in `user/preferences.json` beside the remembered
-window size, and there is no screen for them yet -- edit the file, or set them
-for one run with `-o`, which is not written back:
+`sound_mute`. They live in `user/settings.json` beside the remembered
+window size; the launch grid's "Engine settings" tile edits them, or set
+them for one run with `-o`, which is not written back:
 
     $ bin/buildat -o render_scale=0.5,vsync=0,sound_mute=1
 

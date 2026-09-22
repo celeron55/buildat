@@ -1049,6 +1049,28 @@ struct Module: public interface::Module, public luanti::Interface
 			lua_close(m_lua);
 	}
 
+	// The Lua the two Luanti clients share, from the extension's res,
+	// served under the module's own client namespace so a game's client
+	// half runs it by name ([VIEW_BOB]: camera_motion.lua; [EXT_SETTINGS]:
+	// key_editor.lua; [EXT_HUD_PARITY]: minimap.lua). At start rather
+	// than with a game's media: a menu-only connection (the settings
+	// screen, [MENU_CONTEXT]) runs no game and draws the key editor.
+	void serve_shared_lua()
+	{
+		const ss_ shared = m_server->get_config().get<ss_>("share_path")+
+				"/extensions/luanti_client/res";
+		for(const char *name : {"camera_motion.lua", "key_editor.lua",
+				"minimap.lua"}){
+			const ss_ path = shared+"/"+name;
+			if(interface::fs::path_exists(path)){
+				client_file::access(m_server, [&](client_file::Interface *i){
+					i->add_file_path(ss_("luanti/")+name, path);
+				});
+			} else
+				log_w(MODULE, "shared client Lua not found: %s", cs(path));
+		}
+	}
+
 	void init()
 	{
 		m_server->sub_event(this, Event::t("core:start"));
@@ -1124,6 +1146,7 @@ struct Module: public interface::Module, public luanti::Interface
 
 	void on_start()
 	{
+		serve_shared_lua();
 		// What may go ahead of the queue and replace its own stale copy
 		// ([NET_CHANNELS]): the player's own position, the clock, and the
 		// objects -- whose packet is the whole list every time (the
@@ -5000,13 +5023,13 @@ struct Module: public interface::Module, public luanti::Interface
 	// the user does is put the pack in buildat's own directory, which is the
 	// same rule the games follow -- see games/vanilla.
 	// The render mode the launcher game's settings screen wrote
-	// (games/vanilla's launcher.json in the user path), "" when
+	// (games/vanilla's settings.json in the user path), "" when
 	// there is none. Read here with no JSON parser: the file is the
 	// game's own, one line, and the key's value is a bare word.
 	ss_ settings_render_mode()
 	{
 		std::ifstream f(m_server->get_config().get<ss_>("user_path")+
-				"/luanti/launcher.json");
+				"/luanti/settings.json");
 		if(!f.good())
 			return "";
 		std::stringstream ss;
@@ -5077,22 +5100,6 @@ struct Module: public interface::Module, public luanti::Interface
 			m_served_media[pair.first] = pair.second;
 		log_i(MODULE, "%zu media files from %zu directories under %s",
 				files.size(), dirs.size(), cs(game_path));
-		// The Lua the two Luanti clients share, from the extension's res,
-		// served under the module's own client namespace so a game's
-		// client half runs it by name ([VIEW_BOB]: camera_motion.lua;
-		// [EXT_SETTINGS]: key_editor.lua; [EXT_HUD_PARITY]: minimap.lua)
-		const ss_ shared = m_server->get_config().get<ss_>("share_path")+
-				"/extensions/luanti_client/res";
-		for(const char *name : {"camera_motion.lua", "key_editor.lua",
-				"minimap.lua"}){
-			const ss_ path = shared+"/"+name;
-			if(interface::fs::path_exists(path)){
-				client_file::access(m_server, [&](client_file::Interface *i){
-					i->add_file_path(ss_("luanti/")+name, path);
-				});
-			} else
-				log_w(MODULE, "shared client Lua not found: %s", cs(path));
-		}
 	}
 
 	// A mod is a directory with a textures/ or a models/ in it, and a modpack
@@ -6661,7 +6668,7 @@ struct Module: public interface::Module, public luanti::Interface
 		ss_ m = !asked_mode.empty() ? asked_mode :
 				(mode != nullptr) ? ss_(mode) : ss_("");
 		// Neither side saying: the launcher game's setting
-		// (user/luanti/launcher.json, its "render_mode"; [LAUNCH_GRID])
+		// (user/luanti/settings.json, its "render_mode"; [LAUNCH_GRID])
 		if(m.empty())
 			m = settings_render_mode();
 		if(m == "0")

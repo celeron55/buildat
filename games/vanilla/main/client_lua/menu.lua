@@ -528,7 +528,7 @@ local function back_to_saves(menu, screen)
 end
 
 -- The launcher's settings ([LAUNCH_GRID]): the import search paths, a list
--- to add to and remove from, kept by the server in user/luanti/launcher.json
+-- to add to and remove from, kept by the server in user/luanti/settings.json
 -- and sent whole each way. The defaults (~/.luanti, ~/.minetest and the
 -- variable) are the server's and not in the list.
 function draw_settings(paths)

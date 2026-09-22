@@ -1,19 +1,19 @@
 #!/bin/bash
-# [KEY_BINDINGS]: a rebound key walks the player. user/luanti/launcher.json
+# [KEY_BINDINGS]: a rebound key walks the player. user/luanti/settings.json
 # holds key.forward=U; a devtest client joins, holds U for three seconds,
 # and the scan's position has to have moved; the scan's keys line has to
-# say forward=U*. The launcher.json is put back after. Prints PASS or FAIL.
+# say forward=U*. The settings.json is put back after. Prints PASS or FAIL.
 #
 #   builtin/luanti/test/keys.sh
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d)
 cd "$here/Build"
-settings=../user/luanti/launcher.json
+settings=../user/luanti/settings.json
 mkdir -p ../user/luanti
-[ -f "$settings" ] && cp "$settings" "$tmp/launcher.json.bak"
+[ -f "$settings" ] && cp "$settings" "$tmp/settings.json.bak"
 trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null;
-	if [ -f "$tmp/launcher.json.bak" ]; then cp "$tmp/launcher.json.bak" "$settings"; else rm -f "$settings"; fi' EXIT
+	if [ -f "$tmp/settings.json.bak" ]; then cp "$tmp/settings.json.bak" "$settings"; else rm -f "$settings"; fi' EXIT
 echo '{"render_mode": "pbr", "import_paths": [], "keys": {"forward": "U"}}' > "$settings"
 rm -rf ../user/games/vanilla/saves/buildat_test_keys
 srv=""; cli=""

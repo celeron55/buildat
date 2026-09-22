@@ -8,7 +8,7 @@
 -- init.lua reads it -- so a key cannot be bound here and missed there.
 -- What differs from the defaults is kept as "key.<action>=<key name>" rows
 -- in the launcher's settings list, which the server keeps in
--- user/luanti/launcher.json and sends whole as main:settings; the client
+-- user/luanti/settings.json and sends whole as main:settings; the client
 -- applies the rows when they arrive and the editor sends the whole list
 -- back through main:set_settings. Key names are Urho3D's, so the file is
 -- readable; the mouse's buttons and wheel are not bindable.

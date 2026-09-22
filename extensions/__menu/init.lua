@@ -161,7 +161,7 @@ function M.boot(launch_action)
 
 	-- What the user sets once and every game honours; not a launch, so
 	-- the menu's own rather than a tile from the tree
-	add("__menu/res/icon_preferences.png", "Preferences", preferences.show,
+	add("__menu/res/icon_preferences.png", "Engine settings", preferences.show,
 			"What every game honours: the window, the sound, the mouse.")
 	-- And every launch action the tree offers, in the grid's order
 	local actions = launch_grid.actions(log)

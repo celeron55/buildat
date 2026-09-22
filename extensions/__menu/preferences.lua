@@ -153,7 +153,7 @@ function M.show()
 
 	local title = menu.window:CreateChild("Text")
 	title:SetStyleAuto()
-	title.text = "Preferences"
+	title.text = "Engine settings"
 	title:SetFontSize(20)
 
 	for _, pref in ipairs(PREFERENCES) do

@@ -3,7 +3,7 @@
 # "Luanti settings", "Key bindings...", the forward row picked and U
 # pressed, the row then says U; "Defaults" puts W back. Read through the
 # UI scan, as menu_drive.py reads screens. Prints PASS or FAIL; the
-# launcher.json is put back after.
+# settings.json is put back after.
 #
 #   builtin/luanti/test/keys_ui.sh
 set -u
@@ -11,13 +11,13 @@ here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
 cd "$here/Build"
-settings=../user/luanti/launcher.json
+settings=../user/luanti/settings.json
 mkdir -p ../user/luanti
-[ -f "$settings" ] && cp "$settings" "$tmp/launcher.json.bak"
+[ -f "$settings" ] && cp "$settings" "$tmp/settings.json.bak"
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
 trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; pkill -INT -x buildat_server 2>/dev/null;
-	if [ -f "$tmp/launcher.json.bak" ]; then cp "$tmp/launcher.json.bak" "$settings"; else rm -f "$settings"; fi' EXIT
+	if [ -f "$tmp/settings.json.bak" ]; then cp "$tmp/settings.json.bak" "$settings"; else rm -f "$settings"; fi' EXIT
 bin/buildat -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
 cli=$!
@@ -62,12 +62,17 @@ def fail(why):
 time.sleep(8)
 els = scan("a")
 if not els: fail("no menu scan")
-b = find(els, "settings")
+b = find(els, "Luanti settings")
 if not b: fail("no settings button; saw " + ", ".join(e[5] for e in els)[:300])
 click(b)
-els = scan("b")
-b = els and find(els, "Key bindings")
-if not b: fail("no Key bindings row")
+# The game's server starts behind the tile: scanned until its screen is up
+b = None
+for i in range(20):
+    els = scan("b%d" % i)
+    b = els and find(els, "Key bindings")
+    if b: break
+    time.sleep(2)
+if not b: fail("no Key bindings row; saw " + ", ".join(e[5] for e in els or [])[:200])
 click(b)
 els = scan("c")
 row = els and find(els, "Walk forward")
