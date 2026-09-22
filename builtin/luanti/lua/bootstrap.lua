@@ -84,8 +84,12 @@ core.get_us_time = __luanti_get_us_time
 --
 -- What cannot be papered over this way is `goto`, which pmb_core uses and
 -- 5.1 has no syntax for at all. See section 10, [LUAJIT].
+-- The runtime's own, for the module's hot loops: the wrapper below is a
+-- Lua call and two compares per roll, which was a fifth of the module's
+-- Lua time under VoxeLibre's ABMs (the profile of 2026-09-22)
+local raw_random = math.random
 do
-	local random = math.random
+	local random = raw_random
 	-- What luaL_checkint takes
 	local INT_MAX = 2147483647
 	function math.random(m, n)
@@ -4997,14 +5001,19 @@ local function run_abm(abm, hits, from, until_us)
 	local chance = abm.chance or 1
 	local min_y = abm.min_y or -32768
 	local max_y = abm.max_y or 32767
+	local clock = 0
 	for i = from or 1, #hits, 3 do
-		if i % 192 == 1 and i > 1 and until_us and
-				core.get_us_time() >= until_us then
-			return i
+		-- The clock every 64 hits, not every hit
+		clock = clock + 1
+		if clock == 64 then
+			clock = 0
+			if until_us and core.get_us_time() >= until_us then
+				return i
+			end
 		end
 		local y = hits[i + 1]
 		if y >= min_y and y <= max_y and
-				(chance <= 1 or math.random(chance) == 1) then
+				(chance <= 1 or raw_random(chance) == 1) then
 			local pos = {x = hits[i], y = y, z = hits[i + 2]}
 			if abm_neighbors_ok(abm, pos) then
 				core.set_last_run_mod(abm.mod_origin)
