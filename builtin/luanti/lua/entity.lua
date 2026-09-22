@@ -1819,7 +1819,30 @@ local function send_camera(o)
 		tostring(tonumber(eye.x) or 0),
 		tostring(tonumber(eye.y) or 0),
 		tostring(tonumber(eye.z) or 0),
+		-- The seventh: which camera modes the player may reach
+		-- ([THIRD_PERSON]); "any" unless a game said
+		(o.camera and o.camera.mode) or "any",
 	})
+end
+
+-- set_camera({mode = "any" | "first" | "third" | "third_front"}) and
+-- get_camera(): Luanti's TOCLIENT_CAMERA, the restriction on what the
+-- camera key may cycle to ([THIRD_PERSON])
+function PlayerRef:set_camera(params)
+	local o = state_of(self)
+	if not o or type(params) ~= "table" then
+		return
+	end
+	o.camera = o.camera or {}
+	if params.mode ~= nil then
+		o.camera.mode = tostring(params.mode)
+	end
+	send_camera(o)
+end
+
+function PlayerRef:get_camera()
+	local o = state_of(self)
+	return {mode = (o and o.camera and o.camera.mode) or "any"}
 end
 
 -- fov 0 is "the client's own"; is_multiplier makes it a factor of that

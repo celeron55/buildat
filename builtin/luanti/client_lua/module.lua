@@ -1026,8 +1026,15 @@ end
 -- Where one object is now, out of the eight numbers the server sends for
 -- each: the id, the middle of its collision box, the box itself, and its
 -- yaw.
+-- Whether the player's own object is drawn: the third-person views want
+-- it, the first-person view has the camera inside it ([THIRD_PERSON])
+M.draw_self = false
+function M.set_draw_self(on)
+	M.draw_self = on and true or false
+end
+
 local function place_object(id, v, i)
-	if id == M.self_id then
+	if id == M.self_id and not M.draw_self then
 		-- The player's own object is not drawn: the camera is inside it, so
 		-- what a game's own player model comes to is a column of itself up
 		-- the middle of the screen. Luanti's client leaves it out of a
@@ -1832,6 +1839,8 @@ buildat.sub_packet("luanti:camera", function(data)
 		transition = tonumber(v[3]) or 0,
 		eye = {x = tonumber(v[4]) or 0, y = tonumber(v[5]) or 0,
 				z = tonumber(v[6]) or 0},
+		-- Which modes the camera key may reach ([THIRD_PERSON])
+		mode = v[7] or "any",
 	}
 	log:info("luanti:camera: fov " .. camera.fov ..
 			(camera.is_multiplier and " (multiplier)" or "") ..

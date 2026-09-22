@@ -49,6 +49,8 @@ M.BINDINGS = {
 			what = "The mouse: in the world, on the screen"},
 	{action = "mute", key = magic.KEY_M, name = "M",
 			what = "Sound muted or not"},
+	{action = "camera", key = magic.KEY_C, name = "C",
+			what = "Camera: first person, behind, in front"},
 	{action = "hud", key = magic.KEY_F1, name = "F1",
 			what = "The HUD on and off"},
 	{action = "chatlog", key = magic.KEY_F2, name = "F2",

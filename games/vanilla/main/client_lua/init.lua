@@ -857,12 +857,18 @@ WIELD.motion = (function(ok, err, lib)
 	return lib.new()
 end)(buildat.run_script_file("luanti/camera_motion.lua"))
 WIELD.last_wield_index = nil
+-- 1 first person, 2 third from behind, 3 third from the front
+WIELD.camera_mode = 1
 wield_node:GetChild("box").scale = magic.Vector3(WIELD.node_scale, WIELD.node_scale,
 		WIELD.node_scale)
 -- A node's enabled does not reach its children (Urho's SetEnabled is
 -- not deep): the box's child node and the shapes are switched with it,
 -- or an empty hand drew the box black in every picture (2026-09-20)
 function WIELD.show(on)
+	-- What is wanted is kept apart from what is drawn: the third-person
+	-- views hide the hand, and first person puts back what was wanted
+	WIELD.shown_wanted = on
+	on = on and WIELD.camera_mode == 1
 	wield_node.enabled = on
 	if not on then
 		for i = 0, wield_node:GetNumChildren() - 1 do
@@ -936,7 +942,8 @@ local function draw_wielded(item_name)
 	end
 	if shape then
 		wield_node:GetChild("box").enabled = false
-		wield_node.enabled = true
+		WIELD.shown_wanted = true
+		wield_node.enabled = WIELD.camera_mode == 1
 		return
 	end
 	-- No shape: the box wearing one face of the picture, as before
@@ -947,7 +954,8 @@ local function draw_wielded(item_name)
 	end
 	wield_material:SetTexture(magic.TU_DIFFUSE, tex)
 	wield_node:GetChild("box").enabled = true
-	wield_node.enabled = true
+	WIELD.shown_wanted = true
+	wield_node.enabled = WIELD.camera_mode == 1
 end
 
 
@@ -3889,6 +3897,27 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		keys.toggle_mode("fast", "Fast mode")
 	elseif key == BIND.noclip.key then
 		keys.toggle_mode("noclip", "Noclip mode")
+	elseif key == BIND.camera.key then
+		-- Official's camera mode key ([THIRD_PERSON]): first person,
+		-- third from behind, third from the front; a game's
+		-- set_camera{mode = "first"} keeps it in first
+		local allowed = luanti.camera().mode or "any"
+		local modes = {"first", "third", "third_front"}
+		local next_mode = WIELD.camera_mode % 3 + 1
+		if allowed ~= "any" then
+			for i, m in ipairs(modes) do
+				if m == allowed then next_mode = i end
+			end
+		end
+		WIELD.camera_mode = next_mode
+		luanti.set_draw_self(next_mode ~= 1)
+		if next_mode == 1 then
+			wield_node.enabled = WIELD.shown_wanted == true
+		else
+			wield_node.enabled = false
+		end
+		luanti.chat_local(({"First person view", "Third person view",
+				"Third person view (front)"})[next_mode])
 	elseif key == BIND.mute.key then
 		-- Official's mute key ([BOX_FIXES] b)
 		local mute, volume = buildat.get_sound()
@@ -4154,6 +4183,39 @@ function frame_peak.update(dt)
 		if b then
 			wield_node.position = magic.Vector3(b.x + m.hand[1] / WIELD.shrink,
 					b.y + m.hand[2] / WIELD.shrink, b.z + m.hand[3] / WIELD.shrink)
+		end
+	end
+	if WIELD.camera_mode ~= 1 then
+		-- Third person, official's Camera::update: back along the look
+		-- (or ahead of it, turned round) up to 2.75 nodes, a fifth up,
+		-- the height following the look past 1.2 nodes, and half a node
+		-- short of any walkable node on the way so the camera never sits
+		-- inside a wall
+		local eye = camera_node.position
+		local ry, rp = math.rad(yaw), math.rad(pitch)
+		local dx = math.sin(ry) * math.cos(rp)
+		local dy = -math.sin(rp)
+		local dz = math.cos(ry) * math.cos(rp)
+		if WIELD.camera_mode == 3 then
+			dx, dy, dz = -dx, -dy, -dz
+		end
+		local cx, cy, cz = eye.x, eye.y + 0.2, eye.z
+		for i = 10, 27 do
+			local t = i / 10
+			cx = eye.x - dx * t
+			cz = eye.z - dz * t
+			if i > 12 then
+				cy = eye.y - dy * t
+			end
+			if node_stops(math.floor(cx + 0.5), math.floor(cy + 0.5),
+					math.floor(cz + 0.5)) then
+				cx, cy, cz = cx + dx * 0.5, cy + dy * 0.5, cz + dz * 0.5
+				break
+			end
+		end
+		camera_node.position = magic.Vector3(cx, cy, cz)
+		if WIELD.camera_mode == 3 then
+			camera_node.rotation = magic.Quaternion(-pitch, yaw + 180, 0)
 		end
 	end
 	place_waypoints()
