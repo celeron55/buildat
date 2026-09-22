@@ -26,6 +26,9 @@ SEED="${SEED:-5}"
 [ "$SEED" = 1 ] && echo "seed 1: a sea with sheer mountains under mapgen v7; a drowning here is the seed, not a finding" >&2
 MINUTES="${MINUTES:-10}"
 GAME="${GAME:-mineclone2}"
+# The buildat game the server runs: vanilla, or a variant of it
+# ([GAME_BASE]) -- GAME_DIR=vanilla_voxel_physics
+GAME_DIR="${GAME_DIR:-vanilla}"
 GOAL="${GOAL:-}"
 out="$here/local/drive/$SEED"
 mkdir -p "$out"
@@ -44,7 +47,7 @@ if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 fi
 # KEEP_SAVE=1 rejoins the run before's world: the player is a returning
 # one, placed at join ([PLAYER_POS_RACE])
-[ -n "${KEEP_SAVE:-}" ] || rm -rf "../user/games/vanilla/saves/$save"
+[ -n "${KEEP_SAVE:-}" ] || rm -rf "../user/games/$GAME_DIR/saves/$save"
 port=$(( 29800 + (SEED % 90) ))
 srv=""; cli=""; drv=""; netsim=""
 # The run's temp dir goes with it: 200 MB of game and cache a run, and
@@ -88,7 +91,7 @@ else
 { echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" \
+	bin/buildat_server -m "../games/$GAME_DIR" -D ../user -P "$port" \
 	-l "${LOG_LEVEL:-4}" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do
