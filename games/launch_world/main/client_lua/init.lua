@@ -123,6 +123,10 @@ scene = replicate.main_scene
 local zone_node = scene:CreateChild("Zone")
 local zone = zone_node:CreateComponent("Zone")
 zone.boundingBox = magic.BoundingBox(-200, 200)
+-- **Nought, and it has to be**: the voxel shader multiplies the zone's
+-- ambient by the skylight share, which in a sealed room is nought
+-- everywhere, so raising this moves nothing at all. What stands for the
+-- bounce is the pair of directional lights below.
 zone.ambientColor = magic.Color(0.01, 0.01, 0.015, 1)
 zone.fogColor = magic.Color(0, 0, 0, 1)
 zone.fogStart = 26 * U
@@ -336,6 +340,13 @@ end
 -- (every readout is a real light source), 7-8 the structure's own glow,
 -- 9 the one amber thing that wants you, 10 the horizon through the
 -- opening.
+-- **The bounce has to be point lights.** A directional one does almost
+-- nothing in here: the voxel shader gates the sun by the skylight
+-- nibble, which is what keeps a cave out of the sun, and this room's
+-- nibble is nought everywhere. Eight times the brightness moved the
+-- wall by three levels. So the fill below is point lights with long
+-- ranges and low strength, spread through the room, which is the only
+-- lever a sealed voxel room has.
 -- The first six lights are the orbs -- each sits inside its own sphere,
 -- so what lights the room is the thing you can see lighting it. The last
 -- four are fill: two low at the sides and two picking out the
@@ -345,10 +356,17 @@ local LIGHT_PLACES = {}
 for i, o in ipairs(orb_places) do
 	LIGHT_PLACES[i] = {o.x, o.y, o.z}
 end
-LIGHT_PLACES[#LIGHT_PLACES + 1] = {-11.0, 1.6, 2.0}
-LIGHT_PLACES[#LIGHT_PLACES + 1] = {11.0, 1.6, 2.0}
-LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, 5.5, 6.0}
-LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, 1.2, 10.0}
+-- **The fill lives in the foreground, not on the wall.** Matching the
+-- reference frame's histogram with a long-range flood got the numbers
+-- right and the picture wrong: the stone went evenly lit and stopped
+-- silhouetting against the orbs, which is the whole composition. What
+-- the reference is bright with is a lit floor and lit chrome in front
+-- of dark stone, so the fill sits low and forward and falls off before
+-- it reaches the bays.
+LIGHT_PLACES[#LIGHT_PLACES + 1] = {-10.0, 1.3, 7.5}
+LIGHT_PLACES[#LIGHT_PLACES + 1] = {10.0, 1.3, 7.5}
+LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, 4.2, 11.0}
+LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, 1.0, 14.0}
 local CYAN = {0.15, 0.85, 1.0}
 local PURPLE = {0.55, 0.20, 0.95}
 local AMBER = {1.0, 0.62, 0.12}
@@ -363,10 +381,10 @@ local function preset_lights(orb, fill, orb_i, fill_i)
 	for i = 1, 6 do
 		l[i] = {orb, orb_i, 20 * U}
 	end
-	l[7] = {fill, fill_i, 11 * U}
-	l[8] = {fill, fill_i, 11 * U}
-	l[9] = {fill, fill_i * 0.7, 13 * U}
-	l[10] = {fill, fill_i * 0.5, 10 * U}
+	l[7] = {fill, fill_i, 15 * U}
+	l[8] = {fill, fill_i, 15 * U}
+	l[9] = {fill, fill_i * 0.8, 17 * U}
+	l[10] = {fill, fill_i * 0.7, 16 * U}
 	return l
 end
 
@@ -376,23 +394,23 @@ local PRESETS = {
 		-- orbs beyond a cold room, so the stone silhouettes against them
 		-- and the eye goes to the light rather than to the wall
 		name = "cold_in_warm_out",
-		lights = preset_lights(WARM, CYAN, 5.5, 0.75),
+		lights = preset_lights(WARM, COLD_WHITE, 5.5, 1.5),
 	},
 	{
 		-- The mirror, to see what was given up
 		name = "warm_in_cold_out",
-		lights = preset_lights(CYAN, AMBER, 5.5, 0.75),
+		lights = preset_lights(CYAN, AMBER, 5.5, 1.5),
 	},
 	{
 		-- No warm anywhere: whether the room needs a warm point at all
 		name = "all_cold",
-		lights = preset_lights(COLD_WHITE, CYAN, 5.5, 0.75),
+		lights = preset_lights(COLD_WHITE, CYAN, 5.5, 1.5),
 	},
 	{
 		-- Deliberately wrong, and the useful one: every colour loud, the
 		-- purple as bright as the cyan, nothing scarce
 		name = "wrong",
-		lights = preset_lights(PURPLE, AMBER, 6.5, 1.8),
+		lights = preset_lights(PURPLE, AMBER, 6.5, 3.0),
 	},
 }
 
@@ -435,7 +453,7 @@ local function set_preset(n)
 		-- ball -- and so the probe carries it to the chrome
 		if orb_mats[i] then
 			orb_mats[i]:SetShaderParameter("MatDiffColor",
-					magic.Color(e[1][1] * 3.0, e[1][2] * 3.0, e[1][3] * 3.0, 1))
+					magic.Color(e[1][1] * 1.7, e[1][2] * 1.7, e[1][3] * 1.7, 1))
 		end
 		light.brightness = e[2] * PBR_INTENSITY *
 				((ORBS[i] and ORBS[i].empty) and 0.22 or 1.0)

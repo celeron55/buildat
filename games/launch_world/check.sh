@@ -169,7 +169,11 @@ for y in range(0, h - 60, 30):
 			best, bx, by = m, x, y
 print("the probe moves a 60x60 block by %.2f of a level at its most, "
 		"at %d,%d" % (best, bx, by))
-probe_ok = best > 10.0
+# 5, not 10: once the room has fill light in it the chrome is lit
+# directly as well as by reflection, so the probe's share of a sphere is
+# smaller than it was in a room lit only by six orbs (8.92 against the
+# old 10, 2026-09-23). What is asserted is still that it is visible.
+probe_ok = best > 5.0
 print("PASS: the probe reaches the metals" if probe_ok
 		else "FAIL: the probe changes nothing on a metal")
 
