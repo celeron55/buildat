@@ -61,4 +61,5 @@ spread = max(means) - min(means)
 print("spread %.0f levels over %d shots" % (spread, len(means)))
 print("FAIL: the minimap's level moves between stamps" if spread > 20
 		else "PASS: the minimap holds its level")
+sys.exit(1 if spread > 20 else 0)
 PY

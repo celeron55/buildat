@@ -200,4 +200,4 @@ fi
 if [ "$luanti_census" != "$module_census" ]; then
 	echo "FAIL: the censuses differ" >&2; exit 1
 fi
-echo "same"
+echo "PASS: the two censuses are the same"

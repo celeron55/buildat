@@ -52,3 +52,5 @@ last=$(grep -a "fuzz: t=" "$out/srv.log" | tail -1 | sed 's/^.*fuzz: //')
 echo "seed $SEED, $MINUTES min: ${last:-no ticks}"
 echo "client frame: ${worst:-no frame peak lines}"
 echo "logs and pictures in $out"
+# The run's own verdict, which every line above only reported
+exit "$status"

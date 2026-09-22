@@ -64,4 +64,5 @@ share = 100.0 * mag / len(px)
 print("the floor is %.1f %% magenta" % share)
 print("PASS: the pack's texture is what the world wears" if share > 20
 		else "FAIL: the pack did not reach the world")
+sys.exit(0 if share > 20 else 1)
 PY

@@ -95,4 +95,5 @@ for name in shots:
 # pixel-identical; what a shuffled layer does is tens of levels, not ones
 print("FAIL: the hotbar is drawn differently after a screen change" if worst > 8
 		else "PASS: the same hotbar in all %d shots" % (len(shots) + 1))
+sys.exit(1 if worst > 8 else 0)
 PY

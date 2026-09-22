@@ -72,4 +72,5 @@ if echo "$shown" | grep -q "as a notice"; then
 	echo "PASS: the error under a session is a notice line"
 else
 	echo "FAIL: the error under a session was not a notice"
+	exit 1
 fi

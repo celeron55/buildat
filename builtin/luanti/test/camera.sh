@@ -9,6 +9,7 @@
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
+. "$me/lib.sh"
 out="$here/local/camera"
 mkdir -p "$out"
 save=buildat_test_camera
@@ -141,15 +142,20 @@ dark = sum(1 for v in patch if v < 75) / float(len(patch))
 shoulder = len(sys.argv) > 2 and sys.argv[2] != ""
 print("the crosshair's patch is %.0f%% model (centred reads 93, over the "
 		"shoulder about 50)" % (dark * 100))
+view_ok = (dark < 0.7) if shoulder else (dark > 0.8)
 if shoulder:
-	print("PASS: the crosshair points past the model" if dark < 0.7
+	print("PASS: the crosshair points past the model" if view_ok
 			else "FAIL: the model still covers the crosshair")
 else:
 	print("PASS: the centred view puts the model under the crosshair"
-			if dark > 0.8 else "FAIL: the centred view is not centred")
-print("PASS: the back view's pitch follows the look"
-		if r["behind_up"][0] > r["behind_up"][1] and r["behind_down"][0] < r["behind_down"][1]
+			if view_ok else "FAIL: the centred view is not centred")
+pitch_ok = (r["behind_up"][0] > r["behind_up"][1] and
+		r["behind_down"][0] < r["behind_down"][1])
+print("PASS: the back view's pitch follows the look" if pitch_ok
 		else "FAIL: the back view's pitch is inverted")
+sys.exit(0 if (pitch_ok and view_ok) else 1)
 PY
+verdict_keep
 grep "person view\|camera:\| E " "$out/cli.log" | sed 's/.*: //'
 ls "$out"/*.png
+verdict_exit
