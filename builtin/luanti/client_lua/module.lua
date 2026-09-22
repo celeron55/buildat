@@ -2980,6 +2980,26 @@ local function close_form(quit)
 	make_ui():tooltip(magic.ui.root, nil)
 end
 
+-- Pressing enter in a field sends the form the way a button does, with
+-- which field it was among the fields; Luanti's own client calls them
+-- key_enter and key_enter_field, and a game's search box is what reads
+-- them ([FORM_ENTER]). field_close_on_enter[name;false] keeps the form
+-- open, which is what a search wants.
+local function field_entered(name)
+	local fields = form_fields()
+	fields.key_enter = "true"
+	fields.key_enter_field = name
+	local closes = (form.drawn.close_on_enter or {})[name] ~= false
+	if closes then
+		fields.quit = "true"
+	end
+	log:verbose("form: enter in \""..tostring(name).."\"")
+	send_fields(fields)
+	if closes then
+		close_form(false)
+	end
+end
+
 local function draw_form()
 	if form.drawn then
 		form.drawn.window:Remove()
@@ -2993,6 +3013,14 @@ local function draw_form()
 	local w, h = root.width, root.height
 	local layout = formspec.layout(size, real, w, h)
 	form.drawn = make_ui():show(root, elements, layout, w, h, form.state)
+	for _, f in ipairs(form.drawn.fields or {}) do
+		if f.edit then
+			local name = f.name
+			magic.SubscribeToEvent(f.edit, "TextFinished", function()
+				field_entered(name)
+			end)
+		end
+	end
 	local t2 = buildat.get_time_us()
 	-- A slow draw says where it went: the first open of a game's
 	-- inventory was 3.5 s in one frame in the fuzz campaign
