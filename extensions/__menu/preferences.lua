@@ -147,6 +147,7 @@ function M.show()
 		on_key = function(key)
 			if key == KEY_ESCAPE then
 				uistack.main:pop(root)
+				return true -- taken; the menu's own Escape = Back stands down
 			end
 		end,
 	})

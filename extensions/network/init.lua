@@ -183,6 +183,7 @@ local function ask_user(uri, entry, on_answer)
 	menu:on_key(function(key)
 		if key == KEY_ESCAPE then
 			answer(false)
+			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)
 end

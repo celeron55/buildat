@@ -77,6 +77,22 @@ local function button_menu_nav(root)
 		return self
 	end
 
+	-- The item that is the way back, by its label: "< back", "Back",
+	-- "Cancel", "< back to the launcher" and the like -- what Escape
+	-- presses. nil for a screen with none.
+	function nav:back_item()
+		for _, item in ipairs(items) do
+			local text = item.button:GetChild("ButtonText")
+			local label = text and text.text or ""
+			label = label:lower()
+			if label:sub(1, 1) == "<" or label == "back" or label == "cancel" or
+					label == "ok" or label == "close" then
+				return item
+			end
+		end
+		return nil
+	end
+
 	-- What being the selected item looks like, for a menu whose buttons draw
 	-- more than their own style: an icon menu dims what is not selected. The
 	-- callback gets (button, selected, index) for every item whenever the
@@ -110,11 +126,25 @@ local function button_menu_nav(root)
 		-- Enter off on every menu in the tree, this client's own first
 		-- screen included. What stands the menu down is the focus being in
 		-- a field that is being typed into.
+		-- Escape is Back on every menu screen, typing or not
+		-- ([BOX_PLAYTEST_2] 6, 7; the rule is in doc/conventions.txt):
+		-- the item labelled as the way back is pressed, when the screen
+		-- has one; a screen's own handler sees the key first and may
+		-- take it (a capture's cancel), by returning true
+		-- The screen's own handler first, for every key: true means it
+		-- took it (a key capture takes the arrows too)
+		if on_other_key and on_other_key(key) == true then
+			return
+		end
+		if key == KEY_ESCAPE and magic.input:GetKeyPress(key) then
+			local back = nav:back_item()
+			if back then
+				back.action()
+				return
+			end
+		end
 		local focus = magic.ui.focusElement
 		if focus ~= nil and focus:GetTypeName() == "LineEdit" then
-			if on_other_key then
-				on_other_key(key)
-			end
 			return
 		end
 		-- Left and right as well as up and down, because a menu can be a row
@@ -132,8 +162,6 @@ local function button_menu_nav(root)
 					buildat.get_time_us() - born_us > 200000 then
 				items[selected].action()
 			end
-		elseif on_other_key then
-			on_other_key(key)
 		end
 	end)
 

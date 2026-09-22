@@ -213,6 +213,7 @@ local function show_connect_to_server()
 		local key = event_data:GetInt("Key")
 		if key == KEY_ESCAPE then
 			uistack.main:pop(root)
+			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)
 end
@@ -287,6 +288,7 @@ local function show_starting(game)
 			done = true
 			buildat.request_stop_local_server()
 			uistack.main:pop(root)
+			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)
 end
@@ -347,6 +349,7 @@ local function show_waiting_for_old_server(game, launch)
 		if key == KEY_ESCAPE then
 			done = true
 			uistack.main:pop(root)
+			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)
 end
@@ -393,6 +396,7 @@ local function show_local_game()
 	menu:on_key(function(key)
 		if key == KEY_ESCAPE then
 			uistack.main:pop(root)
+			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)
 end
@@ -463,6 +467,7 @@ function M.boot_plain()
 	menu:on_key(function(key)
 		if key == KEY_ESCAPE then
 			engine:Exit()
+			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)
 end

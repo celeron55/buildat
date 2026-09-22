@@ -90,11 +90,12 @@ write("keypress Backspace", "delay 300")
 els = scan("g")
 row = els and find(els, "Walk forward")
 if not row or not row[5].startswith("W"): fail("the default did not come back: %r" % (row and row[5]))
-click(find(els, "< back"))
+# Escape is Back on both screens ([BOX_PLAYTEST_2] 6, 7): out of the
+# editor to the settings screen, out of that to the grid
+write("keypress Escape", "delay 300")
 els = scan("h")
-if not (els and find(els, "Render mode")): fail("not back on the settings screen")
-b = find(els, "Back")
-click(b)
+if not (els and find(els, "Render mode")): fail("Escape did not leave the editor for the settings screen")
+write("keypress Escape", "delay 300")
 els = scan("d")
 if not (els and find(els, "Luanti client settings") and not find(els, "Render mode (next")):
     fail("not back on the grid")

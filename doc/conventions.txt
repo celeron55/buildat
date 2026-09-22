@@ -153,3 +153,16 @@ Urho3D's namespace should generally be aliased to be "magic".
 
 The bundled copy is patched. See urho3d_fork.txt before updating it.
 
+
+Menu screens
+------------
+
+Escape is Back, on every screen the launcher and the games draw: what the
+screen's "< back", "Back", "Cancel" or "Ok" button does, Escape does,
+whether or not a text field has the focus. The one place it is is
+ui_utils.bind_button_menu (extensions/ui_utils), which every vertical_menu
+and grid goes through: it presses the item labelled as the way back. A
+screen with a capture of its own (the key editor listening for a key)
+takes Escape first by returning true from its on_key handler, and Escape
+is then that capture's cancel. A screen never adds a second Escape handler
+that pops itself -- with the menu's own, that was the pop twice.

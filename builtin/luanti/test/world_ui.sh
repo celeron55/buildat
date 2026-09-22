@@ -108,7 +108,12 @@ c = els and find(els, "Creative mode")
 if not c or not c[5].startswith("[ ]"): fail("the untick did not show: " + str(c and c[5]))
 time.sleep(0.5)
 if flag("creative_mode") != "false": fail("world.mt not put back")
-print("PASS (creative_mode was %s before; false now)" % before)
+# Escape on the world screen is Back to the grid ([BOX_PLAYTEST_2] 6)
+write("keypress Escape", "delay 500")
+els = scan("esc")
+if not (els and find(els, "Luanti settings") and not find(els, "Creative mode")):
+    fail("Escape did not leave the world screen for the grid; saw " + ", ".join(e[5] for e in els or [])[:200])
+print("PASS (creative_mode was %s before; false now; Escape back to the grid)" % before)
 write("quit")
 PY
 status=$?

@@ -1080,6 +1080,10 @@ struct Module: public interface::Module
 		ss_ zip_path, into_dir;
 		ss_ result, error;
 		std::atomic<uint64_t> got{0}, total{0};
+		// INSTALL: 0 downloading, 1 unpacking, 2 installing -- the screen
+		// says which, since the unpack of a big game is seconds of nothing
+		// at "100 %" otherwise ([BOX_PLAYTEST_2] 5)
+		std::atomic<int> phase{0};
 		std::atomic<bool> done{false};
 		interface::Thread *thread = nullptr;
 		void run(interface::Thread *) override
@@ -1107,8 +1111,10 @@ struct Module: public interface::Module
 							[&](uint64_t g, uint64_t t){
 						got = g; total = t; return true;
 					});
+					phase = 1;
 					interface::fs::remove_all(into_dir);
 					interface::zip_extract(zip_path, into_dir);
+					phase = 2;
 					interface::fs::remove_all(zip_path);
 				}
 			} catch(std::exception &e){
@@ -1239,7 +1245,11 @@ struct Module: public interface::Module
 		for(size_t i = 0; i < m_contentdb_jobs.size(); ){
 			Job *job = m_contentdb_jobs[i];
 			if(!job->done){
-				if(job->kind == Job::INSTALL && job->total > 0){
+				if(job->kind == Job::INSTALL && job->phase == 1)
+					send_progress(job->peer, "Unpacking "+job->name+"...");
+				else if(job->kind == Job::INSTALL && job->phase == 2)
+					send_progress(job->peer, "Installing "+job->name+"...");
+				else if(job->kind == Job::INSTALL && job->total > 0){
 					send_progress(job->peer, "Downloading "+job->name+": "+
 							itos(job->got * 100 / job->total)+"%");
 				}

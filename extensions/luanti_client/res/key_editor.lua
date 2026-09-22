@@ -126,12 +126,14 @@ function M.draw(o)
 	end}
 	local nav = ui_utils.bind_button_menu(root, items)
 	nav:set_columns(2)
-	-- The key while a row listens, before the menu's own navigation gets it
-	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
+	-- The key while a row listens, through the menu's own handler (which
+	-- sees it before its navigation and its Escape = Back; true takes
+	-- the key). Outside a capture Escape is Back, as on every screen
+	-- ([BOX_PLAYTEST_2] 7).
+	nav:on_key(function(key)
 		if listening == nil then
-			return
+			return false
 		end
-		local key = event_data:GetInt("Key")
 		local b = listening
 		listening = nil
 		if key == magic.KEY_ESCAPE then
@@ -147,6 +149,7 @@ function M.draw(o)
 			end
 		end
 		refresh()
+		return true
 	end)
 	refresh()
 	magic.input:SetMouseVisible(true, "the key bindings")
