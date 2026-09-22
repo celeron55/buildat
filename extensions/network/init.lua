@@ -525,6 +525,9 @@ end
 M.tcp_connect = M.safe.tcp_connect
 M.udp_connect = M.safe.udp_connect
 M.gettime = M.safe.gettime
+M.http_get = M.safe.http_get
+M.known_addresses = M.safe.known_addresses
+M.parse_json = M.safe.parse_json
 
 return M
 -- vim: set noet ts=4 sw=4:

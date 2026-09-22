@@ -228,7 +228,8 @@ local function labeled_edit(parent, label, value)
 	text.text = label
 	local edit = parent:CreateChild("LineEdit")
 	edit:SetStyleAuto()
-	edit.minHeight = 24
+	-- Fixed, not min: a column beside a tall list would stretch it
+	edit:SetFixedHeight(26)
 	edit.minWidth = 300
 	edit:SetText(value or "")
 	return edit
@@ -3250,11 +3251,23 @@ show_connect_dialog = function(address, name)
 			"XMLFile", "__menu/res/main_style.xml")
 
 	local menu = ui_utils.vertical_menu(root, {min_width = 300})
-	local window = menu.window
+	local outer = menu.window
 
-	local title = window:CreateChild("Text")
+	local title = outer:CreateChild("Text")
 	title:SetStyleAuto()
 	title.text = "Connect to a Luanti server"
+
+	-- Two columns ([SERVER_LIST]): a list of servers on the left -- the
+	-- addresses this client has used, or Luanti's official list -- and the
+	-- fields on the right; a pick fills the address, a second pick connects
+	local columns = outer:CreateChild("UIElement")
+	columns:SetLayout(LM_HORIZONTAL, 16, magic.IntRect(0, 0, 0, 0))
+	local left = columns:CreateChild("UIElement")
+	left:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+	left:SetFixedWidth(520)
+	local window = columns:CreateChild("UIElement")
+	window:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+	window:SetFixedWidth(320)
 
 	local address_edit = labeled_edit(window, "Address",
 			address or DEFAULT_ADDRESS)
@@ -3323,6 +3336,124 @@ show_connect_dialog = function(address, name)
 
 	menu:add("Connect", connect)
 	menu:add("Cancel", cancel)
+
+	-- The left column: the source row, a filter, the list
+	local sources = left:CreateChild("UIElement")
+	sources:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
+	local source_buttons = {}
+	local filter_edit = labeled_edit(left, "Filter", "")
+	local list = ui_utils.server_list(left, {width = 520, height = 420},
+			function(row, second)
+		address_edit:SetText(row.address)
+		if second then
+			connect()
+		end
+	end)
+	local source = "recent"
+	local official_rows = nil
+	local status = left:CreateChild("Text")
+	status:SetStyleAuto()
+	local function matches(row, filter)
+		local hay = (row.name .. " " .. (row.line or "") .. " " .. row.address):lower()
+		for word in filter:lower():gmatch("%S+") do
+			if not hay:find(word, 1, true) then
+				return false
+			end
+		end
+		return true
+	end
+	local function show()
+		for name, b in pairs(source_buttons) do
+			b.selected = (name == source)
+		end
+		local rows = {}
+		if source == "recent" then
+			for _, e in ipairs(network.known_addresses()) do
+				local host, port = e.uri:match("^%a+://(.-):(%d+)$")
+				if host and e.accepted then
+					rows[#rows + 1] = {name = host .. ":" .. port,
+							address = host .. ":" .. port,
+							line = e.description ~= "" and e.description or nil}
+				end
+			end
+			status.text = #rows == 0 and "No servers used yet" or ""
+		else
+			rows = official_rows or {}
+			status.text = official_rows and (#rows .. " servers") or "Fetching the list..."
+		end
+		local filter = filter_edit:GetText()
+		if filter ~= "" then
+			local kept = {}
+			for _, r in ipairs(rows) do
+				if matches(r, filter) then
+					kept[#kept + 1] = r
+				end
+			end
+			rows = kept
+		end
+		list:set_rows(rows)
+	end
+	-- Luanti's official list, fetched on each open of it: name, address
+	-- and port, players of max, the description under; the flags as words
+	local function fetch_official()
+		official_rows = nil
+		show()
+		network.http_get("https://servers.luanti.org/list", function(body, err)
+			if not body then
+				status.text = "The list did not come: " .. tostring(err)
+				official_rows = {}
+				show()
+				return
+			end
+			local data = network.parse_json(body)
+			local rows = {}
+			for _, srv in ipairs(data and data.list or {}) do
+				local flags = {}
+				if srv.creative then flags[#flags + 1] = "creative" end
+				if srv.damage then flags[#flags + 1] = "damage" end
+				if srv.pvp then flags[#flags + 1] = "pvp" end
+				local addr = tostring(srv.address or "") .. ":" .. tostring(srv.port or 30000)
+				rows[#rows + 1] = {
+					name = string.format("%s   %s   %s/%s", tostring(srv.name or addr),
+							addr, tostring(srv.clients or 0), tostring(srv.clients_max or "?")),
+					address = addr,
+					-- Two lines of it; the whole is the server's own page
+					line = tostring(srv.description or ""):sub(1, 150) ..
+							(#tostring(srv.description or "") > 150 and "..." or "") ..
+							(#flags > 0 and ("  [" .. table.concat(flags, ", ") .. "]") or "") ..
+							(srv.version and ("  " .. srv.version) or ""),
+				}
+			end
+			official_rows = rows
+			show()
+		end)
+	end
+	local function source_button(name, label)
+		local b = source_buttons[name]
+		b = sources:CreateChild("Button")
+		b:SetStyleAuto()
+		b:SetName("Button")
+		b:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+		b:SetFixedSize(250, 26)
+		local t = b:CreateChild("Text")
+		t:SetName("ButtonText")
+		t:SetStyleAuto()
+		t.text = label
+		t:SetTextAlignment(HA_CENTER)
+		magic.SubscribeToEvent(b, "Released", function()
+			source = name
+			if name == "official" then
+				fetch_official()
+			else
+				show()
+			end
+		end)
+		source_buttons[name] = b
+	end
+	source_button("recent", "Servers used")
+	source_button("official", "Official list")
+	magic.SubscribeToEvent(filter_edit, "TextFinished", function() show() end)
+	show()
 
 	-- Escape cancels. A plain subscription rather than the stack's own,
 	-- because a LineEdit with the focus swallows the key and a stack handler

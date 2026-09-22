@@ -5,6 +5,7 @@ local log = buildat.Logger("extension/launch_menu")
 local magic = require("buildat/extension/urho3d").safe
 local uistack = require("buildat/extension/uistack")
 local ui_utils = require("buildat/extension/ui_utils").safe
+local network = require("buildat/extension/network").safe
 local M = {safe = nil}
 
 local function show_error(message)
@@ -81,7 +82,8 @@ local function make_labeled_edit(parent, label, value, width)
 	text.text = label
 	local edit = parent:CreateChild("LineEdit")
 	edit:SetStyleAuto()
-	edit.minHeight = 24
+	-- Fixed, not min: a column beside a tall list would stretch it
+	edit:SetFixedHeight(26)
 	edit.minWidth = width or 300
 	edit:SetText(value)
 	return edit
@@ -106,16 +108,51 @@ local function show_connect_to_server()
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
 	root.defaultStyle = style
 
-	local window = root:CreateChild("Window")
-	window:SetStyleAuto()
-	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
-	window:SetAlignment(HA_LEFT, VA_CENTER)
+	local outer = root:CreateChild("Window")
+	outer:SetStyleAuto()
+	outer:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
+	outer:SetAlignment(HA_LEFT, VA_CENTER)
+
+	-- Two columns ([SERVER_LIST]): the addresses this client has used on
+	-- the left (the network extension's file), the fields on the right; a
+	-- pick fills them, a second pick connects
+	local columns = outer:CreateChild("UIElement")
+	columns:SetLayout(LM_HORIZONTAL, 16, magic.IntRect(0, 0, 0, 0))
+	local left = columns:CreateChild("UIElement")
+	left:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+	left:SetFixedWidth(440)
+	local window = columns:CreateChild("UIElement")
+	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 
 	local address_edit = make_labeled_edit(window, "Address", "localhost")
 	local port_edit = make_labeled_edit(window, "Port (optional)", "29500")
 	address_edit:SetFocus(true)
+	local do_connect
+	local used = left:CreateChild("Text")
+	used:SetStyleAuto()
+	used.text = "Servers used:"
+	local list = ui_utils.server_list(left, {width = 440, height = 300},
+			function(row, second)
+		address_edit:SetText(row.host)
+		port_edit:SetText(row.port)
+		if second then
+			do_connect()
+		end
+	end)
+	local rows = {}
+	for _, e in ipairs(network.known_addresses()) do
+		local host, port = e.uri:match("^%a+://(.-):(%d+)$")
+		if host and e.accepted then
+			rows[#rows + 1] = {name = host .. ":" .. port, host = host, port = port,
+					line = e.description ~= "" and e.description or nil}
+		end
+	end
+	if #rows == 0 then
+		used.text = "No servers used yet"
+	end
+	list:set_rows(rows)
 
-	local function do_connect()
+	do_connect = function()
 		local host = address_edit:GetText()
 		local port = port_edit:GetText()
 		if host == "" then
@@ -144,6 +181,8 @@ local function show_connect_to_server()
 	end)
 
 	local back_button = make_button(window, "Back")
+	-- Fixed: the column beside the list would stretch the last button
+	back_button:SetFixedHeight(26)
 	magic.SubscribeToEvent(back_button, "Released",
 	function(self, event_type, event_data)
 		uistack.main:pop(root)

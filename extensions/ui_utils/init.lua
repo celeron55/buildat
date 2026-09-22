@@ -273,6 +273,57 @@ function M.safe.add_paged(menu, items, options)
 	return pages, page
 end
 
+-- A list of servers (or anything with a name and a line under it) in a
+-- ListView, rows as buttons with their text left-aligned ([SERVER_LIST],
+-- the shape [CONTENTDB_LIST]'s rows have):
+--
+--   local list = ui_utils.server_list(parent, {width = 520, height = 480},
+--       function(row, second) ... end)
+--   list:set_rows({{name = , line = , data = }, ...})
+--
+-- on_pick(row, second) is called on a click, second true when the same
+-- row was picked again within a second -- a double-click, or Enter on it.
+-- set_rows() replaces what is shown; the caller filters before it.
+function M.safe.server_list(parent, options, on_pick)
+	options = options or {}
+	local view = parent:CreateChild("ListView")
+	view:SetStyleAuto()
+	view:SetFixedSize(options.width or 520, options.height or 480)
+	local list = {view = view}
+	local last_name, last_us = nil, 0
+	function list:set_rows(rows)
+		view:RemoveAllItems()
+		for _, row in ipairs(rows) do
+			local b = view.contentElement:CreateChild("Button")
+			b:SetStyleAuto()
+			b:SetName("Button")
+			b:SetLayout(LM_VERTICAL, 2, magic.IntRect(8, 4, 8, 4))
+			b:SetFixedWidth((options.width or 520) - 40)
+			local name = b:CreateChild("Text")
+			name:SetName("ButtonText")
+			name:SetStyleAuto()
+			name.text = row.name or ""
+			name:SetTextAlignment(HA_LEFT)
+			if row.line and row.line ~= "" then
+				local line = b:CreateChild("Text")
+				line:SetStyleAuto()
+				line.text = row.line
+				line:SetTextAlignment(HA_LEFT)
+				line:SetFixedWidth((options.width or 520) - 56)
+				line:SetWordwrap(true)
+			end
+			magic.SubscribeToEvent(b, "Released", function()
+				local now = buildat.get_time_us()
+				local second = (last_name == row.name and now - last_us < 1000000)
+				last_name, last_us = row.name, now
+				on_pick(row, second)
+			end)
+			view:AddItem(b)
+		end
+	end
+	return list
+end
+
 local message_handle = nil
 
 -- on_close is optional and is called when the dialog goes away, however it
