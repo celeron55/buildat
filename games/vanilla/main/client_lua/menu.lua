@@ -539,13 +539,17 @@ function draw_settings(paths)
 	local mode = "pbr"
 	local view_range = "120"
 	local view_bobbing = "1"
+	local shoulder = "0"
 	local kept = {}
 	local key_rows = {}
 	for _, p in ipairs(paths) do
 		local m = p:match("^render_mode=(.*)$")
 		local r = p:match("^view_range=(%d+)$")
 		local b = p:match("^view_bobbing_amount=([%d.]+)$")
-		if m then
+		local sh = p:match("^third_person_shoulder=([01])$")
+		if sh then
+			shoulder = sh
+		elseif m then
 			mode = m
 		elseif r then
 			view_range = r
@@ -563,6 +567,7 @@ function draw_settings(paths)
 		list[#list + 1] = "render_mode=" .. mode
 		list[#list + 1] = "view_range=" .. view_range
 		list[#list + 1] = "view_bobbing_amount=" .. view_bobbing
+		list[#list + 1] = "third_person_shoulder=" .. shoulder
 		for _, r in ipairs(key_rows) do
 			list[#list + 1] = r
 		end
@@ -579,6 +584,7 @@ function draw_settings(paths)
 		all[#all + 1] = "render_mode=" .. mode
 		all[#all + 1] = "view_range=" .. view_range
 		all[#all + 1] = "view_bobbing_amount=" .. view_bobbing
+		all[#all + 1] = "third_person_shoulder=" .. shoulder
 		for _, r in ipairs(key_rows) do
 			all[#all + 1] = r
 		end

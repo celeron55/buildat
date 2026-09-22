@@ -1025,13 +1025,14 @@ struct Module: public interface::Module
 	}
 	void write_settings(const sv_<ss_> &paths, const ss_ &mode,
 			const sv_<std::pair<ss_, ss_>> &keys, const ss_ &view_range,
-			const ss_ &view_bobbing)
+			const ss_ &view_bobbing, const ss_ &shoulder)
 	{
 		interface::fs::create_directories(luanti_path());
 		std::ofstream f(settings_path(), std::ios::trunc);
 		f << "{\"render_mode\": \"" << mode << "\", \"view_range\": \""
 				<< view_range << "\", \"view_bobbing_amount\": \""
-				<< view_bobbing << "\", \"import_paths\": [";
+				<< view_bobbing << "\", \"third_person_shoulder\": \""
+				<< shoulder << "\", \"import_paths\": [";
 		for(size_t i = 0; i < paths.size(); i++){
 			f << (i ? ", " : "");
 			write_json_string(f, paths[i]);
@@ -1057,6 +1058,10 @@ struct Module: public interface::Module
 			list.push_back("render_mode="+(mode.empty() ? ss_("pbr") : mode));
 			list.push_back("view_range="+read_view_range());
 			list.push_back("view_bobbing_amount="+read_view_bobbing());
+			// The back view centred or over the shoulder ([OVER_SHOULDER])
+			list.push_back("third_person_shoulder="+
+					(read_setting("third_person_shoulder") == "1" ?
+					ss_("1") : ss_("0")));
 			for(const ss_ &row : read_key_rows())
 				list.push_back(row);
 			ar(list);
@@ -1414,7 +1419,12 @@ struct Module: public interface::Module
 		ss_ mode = "pbr";
 		ss_ view_range = "120";
 		ss_ view_bobbing = "1";
+		ss_ shoulder = "0";
 		for(const ss_ &v : values){
+			if(v.compare(0, 22, "third_person_shoulder=") == 0){
+				shoulder = v.substr(22) == "1" ? "1" : "0";
+				continue;
+			}
 			if(v.compare(0, 20, "view_bobbing_amount=") == 0){
 				const double n = atof(v.c_str() + 20);
 				if(n >= 0 && n <= 7.9){
@@ -1447,7 +1457,7 @@ struct Module: public interface::Module
 			} else if(!v.empty() && v.size() <= 4096)
 				paths.push_back(v);
 		}
-		write_settings(paths, mode, keys, view_range, view_bobbing);
+		write_settings(paths, mode, keys, view_range, view_bobbing, shoulder);
 		log_i(MODULE, "settings: %zu import paths, render_mode %s, view_range "
 				"%s and %zu key bindings written to %s", paths.size(), cs(mode),
 				cs(view_range), keys.size(), cs(settings_path()));

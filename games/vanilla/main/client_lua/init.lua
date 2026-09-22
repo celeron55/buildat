@@ -853,6 +853,9 @@ end)(buildat.run_script_file("luanti/camera_motion.lua"))
 WIELD.last_wield_index = nil
 -- 1 first person, 2 third from behind, 3 third from the front
 WIELD.camera_mode = 1
+-- The back view centred, or over the shoulder ([OVER_SHOULDER]); a taste,
+-- so the Luanti settings screen has the knob
+WIELD.shoulder = false
 wield_node:GetChild("box").scale = magic.Vector3(WIELD.node_scale, WIELD.node_scale,
 		WIELD.node_scale)
 -- A node's enabled does not reach its children (Urho's SetEnabled is
@@ -4323,6 +4326,18 @@ function frame_peak.update(dt)
 				break
 			end
 		end
+		-- Over the shoulder, when the player asked for it
+		-- ([OVER_SHOULDER]): the eye a little to the right and up, the
+		-- camera still looking along the player's own look, so the
+		-- crosshair stays the pointing ray's -- the ray itself leaves
+		-- the player's eye and does not move. The back view only: in
+		-- front the model is what is being looked at.
+		if WIELD.shoulder and WIELD.camera_mode == 2 then
+			local rr = math.rad(yaw + 90)
+			cx = cx + math.sin(rr) * 0.4
+			cz = cz + math.cos(rr) * 0.4
+			cy = cy + 0.15
+		end
 		camera_node.position = magic.Vector3(cx, cy, cz)
 		if WIELD.camera_mode == 3 then
 			camera_node.rotation = magic.Quaternion(-pitch, yaw + 180, 0)
@@ -4357,6 +4372,11 @@ buildat.sub_packet("main:settings", function(data)
 		local bob = row:match("^view_bobbing_amount=([%d.]+)$")
 		if bob and WIELD.motion then
 			WIELD.motion.amount = tonumber(bob) or 1
+		end
+		-- The back view centred or over the shoulder ([OVER_SHOULDER])
+		local shoulder = row:match("^third_person_shoulder=([01])$")
+		if shoulder then
+			WIELD.shoulder = shoulder == "1"
 		end
 	end
 end)

@@ -48,6 +48,9 @@ screenshot $out/behind_up.png
 look_dir 0 -0.8 1
 delay 1200
 screenshot $out/behind_down.png
+look_dir 0 -0.1 1
+delay 1200
+screenshot $out/behind_centred.png
 keypress C
 delay 1500
 screenshot $out/front.png
@@ -75,6 +78,14 @@ for n in ("behind_up", "behind_down"):
 			statistics.mean(list(im.crop((0, 2 * h // 3, w, h)).getdata())))
 print("behind, looking up: top %.0f bottom %.0f; down: top %.0f bottom %.0f" %
 		(r["behind_up"][0], r["behind_up"][1], r["behind_down"][0], r["behind_down"][1]))
+# And where the model is in the frame: centred it covers the crosshair,
+# over the shoulder it does not ([OVER_SHOULDER]; the setting's row in
+# user/luanti/settings.json says which this run drew)
+im = Image.open("%s/behind_centred.png" % out).convert("L")
+w, h = im.size
+mid = statistics.mean(list(im.crop((w // 2 - 24, h // 2 - 24, w // 2 + 24,
+		h // 2 + 24)).getdata()))
+print("the crosshair's patch reads %.0f (the model is dark, the world is not)" % mid)
 print("PASS: the back view's pitch follows the look"
 		if r["behind_up"][0] > r["behind_up"][1] and r["behind_down"][0] < r["behind_down"][1]
 		else "FAIL: the back view's pitch is inverted")
