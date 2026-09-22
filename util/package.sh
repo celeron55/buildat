@@ -308,7 +308,7 @@ make_one() {
 # and the full stage's compiled modules copied in
 make_luanti_only() {
 	local full="$1" name="$2"; shift 2
-	local build="$root/build/$full"
+	local build="$root/build-$full"
 	local stage="$root/stage/$name"
 	rm -rf "$stage"; mkdir -p "$stage"
 	# The full build's own arguments again with the option: a bare
