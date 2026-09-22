@@ -4,6 +4,14 @@
 --
 -- What a node's surface is made of, guessed from its definition.
 --
+-- **Both Luanti clients read this one file** ([VOXEL_MATERIALS] in
+-- doc/plan/rendering_plan.md): the extension with the definition its
+-- nodedef.lua parsed off the wire, builtin/luanti with the definition the
+-- game registered, through core.__voxel_defs() in its bootstrap.lua. The
+-- two spell a drawtype differently -- a number on the wire, a name in a
+-- mod -- and both spellings are taken below; what else is read (name,
+-- groups, waving, light_source) is spelled the same on both sides.
+--
 -- The atlas derives a normal map and a spec map from six numbers per texture
 -- segment (see src/interface/atlas.h), and the PBR voxel shader reads them.
 -- Luanti says nothing about any of them: a node definition knows its drawtype,
@@ -46,6 +54,15 @@ local DRAWTYPE_PLANTLIKE_ROOTED = 17
 
 local NODEDEF_ALPHAMODE_BLEND = 0
 
+-- The same drawtypes by the name a mod registers them under
+local DRAWTYPE_BY_NAME = {
+	normal = 0, airlike = 1, liquid = 2, flowingliquid = 3, glasslike = 4,
+	allfaces = 5, allfaces_optional = 6, torchlike = 7, signlike = 8,
+	plantlike = 9, fencelike = 10, raillike = 11, nodebox = 12,
+	glasslike_framed = 13, firelike = 14, glasslike_framed_optional = 15,
+	mesh = 16, plantlike_rooted = 17,
+}
+
 -- What everything is before anything is known about it: a painted texture with
 -- a wide, weak highlight, which is what these textures are painted as
 local DEFAULT = {
@@ -61,7 +78,7 @@ local DEFAULT = {
 -- nodes carry no groups worth reading are common enough that this is worth the
 -- dozen patterns; the groups win where there are any.
 local BY_NAME = {
-	{"water", {roughness = 0.25, spec_strength = 0.9, bumpiness = 0,
+	{"water", {roughness = 0.35, spec_strength = 0.9, bumpiness = 0,
 			spots = 0.05}},
 	{"lava", {roughness = 0.6, spec_strength = 0.3, bumpiness = 0.2}},
 	{"ice", {roughness = 0.10, spec_strength = 1.0, bumpiness = 0.1,
@@ -83,6 +100,24 @@ local BY_NAME = {
 	{"sand", {roughness = 1.0, spec_strength = 0.15, bumpiness = 0.6,
 			static_spots = 0.04}},
 	{"ore", {static_spots = 0.05, spec_strength = 0.5, roughness = 0.6}},
+	-- Curated for VoxeLibre, whose names the patterns above miss
+	-- ([VOXEL_MATERIALS] layer 3): what it is made of, by name, kept here
+	-- and never in the game. Argued with from pictures, not from a
+	-- table; the numbers are first cuts in the same scale as the rest.
+	{"stone_with_", {static_spots = 0.05, spec_strength = 0.5,
+			roughness = 0.6}},           -- its ores: coal, iron, redstone...
+	{"obsidian", {roughness = 0.2, spec_strength = 0.8, bumpiness = 0.15}},
+	{"quartz", {roughness = 0.35, spec_strength = 0.6, bumpiness = 0.1}},
+	{"prismarine", {roughness = 0.4, spec_strength = 0.5, bumpiness = 0.2,
+			static_spots = 0.04}},
+	{"slime", {roughness = 0.3, spec_strength = 0.7, bumpiness = 0}},
+	{"honey", {roughness = 0.3, spec_strength = 0.7, bumpiness = 0}},
+	{"emerald", {roughness = 0.15, spec_strength = 0.9, static_spots = 0.06}},
+	{"lapis", {roughness = 0.5, spec_strength = 0.4, bumpiness = 0.2}},
+	{"wool", {roughness = 1.0, spec_strength = 0.05, bumpiness = 0.3}},
+	{"carpet", {roughness = 1.0, spec_strength = 0.05, bumpiness = 0.3}},
+	{"clay", {roughness = 0.95, spec_strength = 0.1, bumpiness = 0.2}},
+	{"mud", {roughness = 0.6, spec_strength = 0.3, bumpiness = 0.4}},
 }
 
 local function copy(t)
@@ -107,7 +142,13 @@ function M.for_node(def)
 		return copy(nil)
 	end
 	local drawtype = def.drawtype or 0
-	local blend = def.alpha_mode == NODEDEF_ALPHAMODE_BLEND
+	if type(drawtype) == "string" then
+		drawtype = DRAWTYPE_BY_NAME[drawtype] or 0
+	end
+	-- alpha_mode is the wire's; blend is what bootstrap.lua worked out
+	-- from use_texture_alpha, the rule being its own
+	local blend = def.alpha_mode == NODEDEF_ALPHAMODE_BLEND or
+			def.blend == true
 	local out
 
 	if drawtype == DRAWTYPE_LIQUID or drawtype == DRAWTYPE_FLOWINGLIQUID then
@@ -121,7 +162,10 @@ function M.for_node(def)
 			drawtype == DRAWTYPE_ALLFACES_OPTIONAL then
 		-- Leaves and plants: lit from behind as much as from in front, which
 		-- is the whole of what makes a canopy read as a canopy
-		out = copy({roughness = 0.8, spec_strength = 0.25, bumpiness = 0.2,
+		-- Rough and barely specular ([PBR_FIT] tuning, 2026-09-18): with
+		-- a Cook-Torrance lobe in the light pass the canopy's cards at
+		-- 0.8 / 0.25 read 0.72 of the render's saturation
+		out = copy({roughness = 0.95, spec_strength = 0.12, bumpiness = 0.2,
 				translucency = 0.12, spots = 0.03})
 	elseif drawtype == DRAWTYPE_GLASSLIKE or
 			drawtype == DRAWTYPE_GLASSLIKE_FRAMED or
@@ -205,6 +249,21 @@ do
 			"surface: glass")
 	local plain = M.for_node(nil)
 	assert(plain.roughness == 0.95 and plain.spots == 0, "surface: default")
+	-- The curated VoxeLibre names land: an ore by its stone_with_ name,
+	-- wool matte
+	local ore = M.for_node({name = "mcl_core:stone_with_iron", drawtype = 0,
+			groups = {cracky = 3}})
+	assert(ore.static_spots > 0, "surface: VoxeLibre ore")
+	local wool = M.for_node({name = "mcl_wool:red", drawtype = 0})
+	assert(wool.spec_strength < 0.1, "surface: wool")
+	-- The module's spelling comes out the same as the wire's
+	local named = M.for_node({name = "default:water_source",
+			drawtype = "liquid"})
+	assert(named.spots == water.spots and named.roughness == water.roughness,
+			"surface: drawtype by name")
+	local pane = M.for_node({name = "xpanes:pane", drawtype = "nodebox",
+			blend = true})
+	assert(pane.roughness < 0.2, "surface: blend by flag")
 end
 
 return M

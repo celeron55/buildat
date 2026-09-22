@@ -38,8 +38,8 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelVariant &v)
 	{
-		uint8_t version = 1;
-		archive(version, v.shape, v.color, v.liquid_top);
+		uint8_t version = 2;
+		archive(version, v.shape, v.color, v.liquid_top, v.textures);
 		for(size_t i = 0; i < 6; i++)
 			archive(v.tile_order[i], v.tile_turns[i]);
 	}
@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 12;
+		uint8_t version = 20;
 		archive(
 				version,
 				v.name,
@@ -91,6 +91,46 @@ namespace interface
 		// above its own
 		if(version >= 12){
 			archive(v.shape_lit_from_above);
+		}
+		// Version 13 split "light gets past this" out of the edge material
+		if(version >= 13){
+			archive(v.transmits_light);
+		}
+		// Version 14 added the alpha-masked class, which is drawn with the
+		// solid world and cut out by its texture
+		if(version >= 14){
+			archive(v.alpha_masked);
+		}
+		// Version 15 added the ladder flag, which only the client's own
+		// physics reads
+		if(version >= 15){
+			archive(v.climbable);
+		}
+		// Version 16 added how much a voxel holds a body back, which the
+		// same physics reads
+		if(version >= 16){
+			archive(v.move_resistance);
+		}
+		// Version 17 added the light a voxel makes of its own, which a
+		// client's mesh dump names for the path trace to emit from
+		// ([LAMP_REF]); the server's flood had it, the client's registry
+		// read it as zero
+		if(version >= 17){
+			archive(v.light_source);
+		}
+		// Version 18 added the standing node's physics groups, which the
+		// client's physics reads ([PLAYER_PHYSICS])
+		if(version >= 18){
+			archive(v.bouncy, v.slippery, v.disable_jump, v.disable_descend);
+		}
+		// Version 19 added liquid_move_physics, what the player is in
+		// ([WATER_PARITY])
+		if(version >= 19){
+			archive(v.swimmable);
+		}
+		// Version 20 added pointable, what the ray stops at ([POINTABLE])
+		if(version >= 20){
+			archive(v.pointable);
 		}
 	}
 

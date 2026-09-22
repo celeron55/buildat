@@ -1035,7 +1035,19 @@ function M.new(magic, buildat, log, ctx)
 		end
 		for _, f in ipairs(fields) do
 			if f.name == focus_name and f.edit then
-				f.edit:SetFocus(true)
+				-- On the next frame, not this one: the key that opened
+				-- the form is a KeyDown followed by its TextInput in the
+				-- same frame, and a field focused now takes the letter
+				-- (the inventory key typed into the search field;
+				-- [BOX_PLAYTEST_2] 8). Official swallows the key the
+				-- same way.
+				local edit = f.edit
+				local sub
+				sub = magic.SubscribeToEvent("Update", function()
+					magic.UnsubscribeFromEvent("Update", sub)
+					-- A form closed within the frame has no field left
+					pcall(function() edit:SetFocus(true) end)
+				end)
 			end
 		end
 		-- A tooltip on a named element goes where that element ended up

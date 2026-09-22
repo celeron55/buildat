@@ -1,0 +1,113 @@
+#!/bin/bash
+# [BOX_PLAYTEST_2] (2): the "Play on a Luanti server" tile from the grid,
+# a connect to an address nothing answers at: the failure must be said in
+# a dialog and OK must return to the connect screen, not the grid and not
+# the desktop. Prints PASS or FAIL.
+#
+#   builtin/luanti/test/ext_connect_fail.sh
+set -u
+here=$(cd "$(dirname "$0")/../../.." && pwd)
+tmp=$(mktemp -d "/tmp/buildat_ext_connect_fail.XXXXXX")
+cd "$here/Build"
+file=../user/luanti_client/settings.json
+[ -f "$file" ] && cp "$file" "$tmp/settings.bak"
+trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; if [ -f "$tmp/settings.bak" ]; then cp "$tmp/settings.bak" "$file"; else rm -f "$file"; fi' EXIT
+fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
+bin/buildat -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
+	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
+cli=$!
+exec 3> "$fifo"
+python3 - "$tmp/cli.log" "$fifo" "$file" <<'PY'
+import re, sys, time, json
+log, fifo, path = sys.argv[1:4]
+w = open(fifo, "w")
+seen = 0
+def write(*cmds):
+    for c in cmds:
+        w.write(c + "\n")
+    w.flush()
+UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+) text "(.*)"')
+def scan(label):
+    global seen
+    write("delay 800", "event scan " + label)
+    t0 = time.time()
+    while time.time() - t0 < 30:
+        data = open(log, "rb").read()[seen:].decode("utf-8", "replace")
+        if "scan %s: done" % label in data:
+            seen = len(open(log, "rb").read())
+            els = []
+            for line in data.splitlines():
+                m = UI.search(line)
+                if m and ("scan %s:" % label) in line:
+                    els.append((m.group(1), int(m.group(2)), int(m.group(3)),
+                                int(m.group(4)), int(m.group(5)), m.group(6)))
+            return els
+        time.sleep(0.3)
+    return None
+def find(els, word):
+    for e in els:
+        if word.lower() in e[5].lower() and e[3] > 0:
+            return e
+    return None
+def click(e):
+    write("mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2), "delay 150",
+          "mouse_click left", "delay 500")
+def fail(why):
+    print("FAIL: " + why); write("quit"); sys.exit(1)
+time.sleep(8)
+els = scan("a")
+if not els: fail("no menu scan")
+tiles = [e for e in els if "play on a luanti server" in e[5].lower() and e[3] > 0]
+if not tiles: fail("no connect tile; saw " + ", ".join(e[5] for e in els)[:300])
+click(max(tiles, key=lambda e: e[2]))
+addr = None
+for i in range(5):
+    els = scan("b%d" % i)
+    addr = [e for e in els if e[0] == "LineEdit" and ":" in e[5]] if els else None
+    if addr: break
+    time.sleep(1)
+if not addr: fail("no address field; saw " + ", ".join(e[5] for e in els or [])[:300])
+click(addr[0])
+write("keypress End", *(["keypress Backspace"] * 40))
+write("text 127.0.0.1:1", "delay 300")
+b = [e for e in els if e[5] == "Connect" and e[3] > 0]
+if not b: fail("no Connect button")
+click(b[0])
+# The login to nothing times out; the dialog must say so, and OK must go
+# back to the connect screen rather than the grid
+seen_dialog = None
+for i in range(40):
+    els = scan("c%d" % i)
+    # The network permission dialog of a scripted run
+    a = els and find(els, "Accept")
+    if a:
+        # The description field is the caller's ([NET_DESC]): filled in
+        # before the user types anything
+        desc = [e for e in els if e[0] == "LineEdit" and "Luanti server at" in e[5]]
+        if not desc:
+            fail("the permission dialog's description is not the caller's; saw " +
+                 ", ".join("%s %r" % (e[0], e[5]) for e in els if e[0] == "LineEdit")[:200])
+        print("dialog description: " + desc[0][5])
+        click(a)
+        continue
+    # The dialog's text runs over two lines, which the scan's one-line
+    # reader does not carry; its Ok button, with no address field left,
+    # is the dialog, and the reason is read off the log
+    seen_dialog = els and find(els, "Ok") and not [e for e in els if e[0] == "LineEdit"]
+    if seen_dialog: break
+    time.sleep(2)
+if not seen_dialog: fail("no failure dialog in 80 s; saw " + ", ".join(e[5] for e in els or [])[:400])
+reason = [l for l in open(log, "rb").read().decode("utf-8", "replace").splitlines() if "Session ended:" in l or "Could not connect" in l]
+print("dialog: " + (reason[-1].split(": ", 2)[-1] if reason else "?"))
+ok = find(els, "Ok")
+if not ok: fail("no Ok on the dialog")
+click(ok)
+els = scan("d")
+if not (els and [e for e in els if e[0] == "LineEdit" and ":" in e[5]]):
+    fail("OK did not return to the connect screen; saw " + ", ".join(e[5] for e in els or [])[:300])
+print("PASS: the failure shown, back on the connect screen")
+write("quit")
+PY
+status=$?
+exec 3>&-
+exit $status

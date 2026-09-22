@@ -29,8 +29,8 @@ __buildat_sandbox_environment = {
 		len = string.len, lower = string.lower, match = string.match,
 		rep = string.rep, reverse = string.reverse, sub = string.sub,
 		upper = string.upper },
-	table = { insert = table.insert, maxn = table.maxn, remove = table.remove,
-		sort = table.sort },
+	table = { concat = table.concat, insert = table.insert,
+		maxn = table.maxn, remove = table.remove, sort = table.sort },
 	math = { abs = math.abs, acos = math.acos, asin = math.asin,
 		atan = math.atan, atan2 = math.atan2, ceil = math.ceil, cos = math.cos,
 		cosh = math.cosh, deg = math.deg, exp = math.exp, floor = math.floor,
@@ -46,43 +46,81 @@ __buildat_sandbox_environment = {
 -- Sandbox require
 --
 
+-- Two namespaces are loadable from inside the sandbox and nothing else is:
+-- an extension's safe interface, and a module's client half.
+--
+-- **package.loaded is not a whitelist and must never be searched by name**,
+-- which is what this used to do before looking at either namespace. It
+-- holds every standard library the host state has -- so require("os")
+-- handed the sandbox os.execute, require("io") handed it io.open,
+-- require("package") handed it loadlib and require("_G") handed it
+-- loadstring, none of which are anywhere near the sandbox environment
+-- itself. A server's client Lua runs in here, so that was the server
+-- running what it liked on the machine of everyone who connected to it.
+-- Each namespace looks in package.loaded under its own full name, which is
+-- what it was written under.
 __buildat_sandbox_environment.require = function(name)
 	log:debug("require(\""..name.."\")")
-	-- Check loaded modules
-	if package.loaded[name] then
-		local loaded = package.loaded[name]
-		if type(loaded) == 'table' and type(loaded.safe) == 'table' then
-			return loaded.safe
-		end
-		return loaded
-	end
 	-- Allow loading extensions
 	local m = string.match(name, '^buildat/extension/([a-zA-Z0-9_]+)$')
 	if m then
-		local unsafe = __buildat_require_extension(m)
+		local unsafe = package.loaded[name]
 		if unsafe == nil then
-			error("require: Cannot load extension: \""..m.."\"")
+			unsafe = __buildat_require_extension(m)
+			if unsafe == nil then
+				error("require: Cannot load extension: \""..m.."\"")
+			end
+			package.loaded[name] = unsafe
+			log:verbose("Loaded extension \""..name.."\"")
 		end
-		package.loaded[name] = unsafe
-		if type(unsafe.safe) ~= 'table' then
+		if type(unsafe) ~= 'table' or type(unsafe.safe) ~= 'table' then
 			error("require: \""..name.."\" didn't return safe interface")
 		end
-		log:verbose("Loaded extension \""..name.."\"")
 		return unsafe.safe
 	end
 	-- Allow loading the client-side parts of modules
 	local m = string.match(name, '^buildat/module/([a-zA-Z0-9_]+)$')
 	if m then
-		local interface = __buildat_require_module(m)
+		local interface = package.loaded[name]
 		if interface == nil then
-			error("require: Cannot load module: \""..m.."\"")
+			interface = __buildat_require_module(m)
+			if interface == nil then
+				error("require: Cannot load module: \""..m.."\"")
+			end
+			package.loaded[name] = interface
+			log:verbose("Loaded module \""..name.."\"")
 		end
-		package.loaded[name] = interface
-		log:verbose("Loaded module \""..name.."\"")
 		return interface
 	end
 	-- Disallow loading anything else
 	error("require: \""..name.."\" not found in sandbox")
+end
+
+-- What a connection's sandboxed scripts left behind, dropped, so that a
+-- menu-only connection can be left for the launcher without exiting the
+-- client ([MENU_CONTEXT]): the packet handlers, the module halves'
+-- require cache, the event mux's sandbox handlers, and the replicated
+-- scene's children (the game's camera, zone, sky). The UI stack is the
+-- launcher's to pop. simplified: what the module halves put in C++ --
+-- composed textures, the voxel registry -- stays; a new connection
+-- replaces it by name.
+function __buildat_reset_sandbox()
+	__buildat_reset_packet_subs()
+	for name, _ in pairs(package.loaded) do
+		if string.match(name, '^buildat/module/') then
+			package.loaded[name] = nil
+		end
+	end
+	__buildat_reset_modules()
+	local urho3d = package.loaded["buildat/extension/urho3d"]
+	if urho3d and urho3d.drop_sandbox_handlers then
+		urho3d.drop_sandbox_handlers()
+	end
+	local replicate = package.loaded["buildat/extension/replicate"]
+	if replicate and replicate.reset then
+		replicate.reset()
+	end
+	log:info("__buildat_reset_sandbox(): done")
 end
 
 --
@@ -170,11 +208,52 @@ local function run_function_in_sandbox(untrusted_function, sandbox)
 	return status, err, retval
 end
 
+-- A caught error shown, not only logged ([MENU_ERRORS]): before a world
+-- is joined -- the launch menu and every screen on the stack -- a dialog
+-- with the message's first line and "the log has the rest", the screen
+-- it happened on left as it is; in a game a notice line, since a form's
+-- callback erroring must not take the mouse. One per distinct message
+-- a minute, so a per-frame error is one dialog and a log full. The
+-- box's Connect died in its pcall and the screen just went back
+-- (2026-09-22).
+local reported_at = {}
+function __buildat_report_error(err)
+	local first = tostring(err):match("^[^\n]*") or tostring(err)
+	local now = os.time()
+	if reported_at[first] and now - reported_at[first] < 60 then
+		return
+	end
+	reported_at[first] = now
+	local ui_utils = package.loaded["buildat/extension/ui_utils"] or
+			__buildat_require_extension("ui_utils")
+	if type(ui_utils) ~= "table" or type(ui_utils.safe) ~= "table" then
+		return
+	end
+	local launch_menu = package.loaded["buildat/extension/launch_menu"]
+	-- A game the launcher started, or a client that says a world is up on
+	-- its own screens (luanti_client's session)
+	local in_game = (launch_menu and launch_menu.in_game and
+			launch_menu.in_game()) or ui_utils.in_game == true
+	local shown = first .. "\n\n(the log has the rest)"
+	log:info("error shown "..(in_game and "as a notice" or "in a dialog")..": "..first)
+	if in_game then
+		if ui_utils.safe.show_notice then
+			ui_utils.safe.show_notice(first)
+		end
+	elseif ui_utils.safe.show_message_dialog then
+		ui_utils.safe.show_message_dialog(shown)
+	end
+end
+
 function __buildat_run_function_in_sandbox(untrusted_function)
 	local status, err, retval = run_function_in_sandbox(
 			untrusted_function, __buildat_sandbox_environment)
 	if status == false then
 		log:error("Failed to run function:\n"..err)
+		local ok, why = pcall(__buildat_report_error, err)
+		if not ok then
+			log:warning("the error could not be shown: "..tostring(why))
+		end
 	end
 	return status, err, retval
 end
@@ -195,6 +274,10 @@ function __buildat_run_code_in_sandbox(untrusted_code, chunkname)
 			untrusted_code, __buildat_sandbox_environment, chunkname)
 	if status == false then
 		log:error("Failed to run script:\n"..err)
+		local ok, why = pcall(__buildat_report_error, err)
+		if not ok then
+			log:warning("the error could not be shown: "..tostring(why))
+		end
 	end
 	return status, err, retval
 end

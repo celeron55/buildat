@@ -228,6 +228,22 @@ void VS()
     // when nothing sets it, so voxel_shading pushes it every frame.
     uniform float cSpecEmphasis;
 
+    // How much light is on the sky the cube map holds. The cube map is baked
+    // at noon, so a reflection at night is a reflection of the day's sky;
+    // dimming it is most of the way to the right thing, and a second cube
+    // map or one rendered as the day goes is the rest. One is the daylight
+    // it was baked in, and voxel_shading pushes it beside the emphasis.
+    uniform float cSkyLight;
+
+    // And what colour that sky is now. The cube map holds the noon sky, so
+    // a reflection at night is the day's blue however far it is dimmed; this
+    // moves the sample towards the colour the game says its sky is at this
+    // hour, keeping the brightness the cube gives it so that the shape of
+    // the reflection survives. The amount is zero for a material that says
+    // nothing, which is the cube map as it was baked.
+    uniform vec3 cSkyTint;
+    uniform float cSkyTintAmount;
+
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
     // A material whose own roughness is already below this cannot glint, so
     // water is given a duller base than a still pond would have
@@ -665,11 +681,15 @@ void PS()
             // ever wanted.
             vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb *
                 GetSkyVisibility(reflectDir);
+            if(cSkyTintAmount > 0.0){
+                float sky_luma = dot(cube, vec3(0.299, 0.587, 0.114));
+                cube = mix(cube, cSkyTint * sky_luma, cSkyTintAmount);
+            }
             // Scaled by how much sky the surface itself sees as well as by
             // how much is visible along the reflection: the cube map answers
             // for the direction, the vertex color for the place.
             finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
-                vSkyVisibility * cSpecEmphasis;
+                vSkyVisibility * cSpecEmphasis * cSkyLight;
         #endif
 
         #ifdef ENVCUBEMAP
