@@ -1,6 +1,7 @@
 #!/bin/bash
 # [EXT_SETTINGS]: the "Luanti client settings" tile, driven -- the render
-# mode row cycled once and the file read back, then Back to the grid. The
+# mode row cycled once and the file read back, the key editor's forward
+# row rebound to Y and read back and put back, then Back to the grid. The
 # settings file is put back after. Prints PASS or FAIL.
 #
 #   builtin/luanti/test/ext_settings.sh
@@ -70,12 +71,34 @@ if not row or row[5] == before: fail("the mode did not cycle: %r -> %r" % (befor
 time.sleep(0.5)
 data = json.load(open(path))
 if data.get("mode") not in row[5]: fail("the file says %r, the row %r" % (data.get("mode"), row[5]))
+# The key editor: the forward row rebound to Y, read back, and the
+# default put back with Backspace
+click(find(els, "Key bindings"))
+els = scan("e")
+row = els and find(els, "Walk forward")
+if not row: fail("no key editor; saw " + ", ".join(e[5] for e in els or [])[:300])
+click(row)
+write("keypress Y", "delay 300")
+els = scan("f")
+row = els and find(els, "Walk forward")
+if not row or not row[5].startswith("Y"): fail("the forward key did not rebind: %r" % (row and row[5]))
+time.sleep(0.5)
+keys = json.load(open(path)).get("keys", {})
+if keys.get("forward") != "Y": fail("the file's keys say %r" % keys)
+click(row)
+write("keypress Backspace", "delay 300")
+els = scan("g")
+row = els and find(els, "Walk forward")
+if not row or not row[5].startswith("W"): fail("the default did not come back: %r" % (row and row[5]))
+click(find(els, "< back"))
+els = scan("h")
+if not (els and find(els, "Render mode")): fail("not back on the settings screen")
 b = find(els, "Back")
 click(b)
 els = scan("d")
 if not (els and find(els, "Luanti client settings") and not find(els, "Render mode (next")):
     fail("not back on the grid")
-print("PASS: mode %s in %s" % (data["mode"], path))
+print("PASS: mode %s in %s; forward rebound to Y and back" % (data["mode"], path))
 write("quit")
 PY
 status=$?

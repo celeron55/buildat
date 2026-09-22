@@ -9,8 +9,9 @@
 -- harness (init.lua reads those first). The screen is show(), a trusted
 -- menu on the UI stack: back pops it, no server behind it.
 --
--- simplified: the key bindings stay init.lua's table; the editor shared
--- with vanilla's keys.lua is the next step.
+-- The key bindings are init.lua's table; what differs from its defaults is
+-- the "keys" map here (action -> Urho3D key name), applied at load, and
+-- the editor is the one games/vanilla shares (res/key_editor.lua).
 
 local M = {}
 
@@ -33,12 +34,16 @@ local dir = __buildat_get_path("user").."/luanti_client"
 local path = dir.."/settings.json"
 
 M.DEFAULTS = {mode = "unlit", view_range = 120, view_bobbing = 1,
-		name = "buildat", address = "localhost:30000"}
+		name = "buildat", address = "localhost:30000", keys = {}}
+
+-- The bindings table, for the screen's "Key bindings..." row; init.lua
+-- sets it
+M.bindings = nil
 
 function M.load()
 	local out = {}
 	for k, v in pairs(M.DEFAULTS) do
-		out[k] = v
+		out[k] = type(v) == "table" and {} or v
 	end
 	local f = io.open(path, "rb")
 	if f then
@@ -63,6 +68,49 @@ function M.save(settings)
 	f:write(json.write(settings, true))
 	f:close()
 	return true
+end
+
+-- The saved names applied to the bindings table: a name that is no key
+-- here leaves the default
+function M.apply_keys(bindings)
+	local keys = M.load().keys
+	local changed = 0
+	for _, b in ipairs(bindings) do
+		if b.default_key ~= nil then
+			local name = keys[b.action]
+			local key = type(name) == "string" and
+					magic.input:GetKeyFromName(name) or 0
+			if key ~= 0 then
+				b.key, b.name = key, name
+				changed = changed + 1
+			else
+				b.key, b.name = b.default_key, b.default_name
+			end
+		end
+	end
+	if changed > 0 then
+		log:info(changed.." key bindings from the settings")
+	end
+end
+
+-- The shared editor over the bindings table; a change writes the map of
+-- what differs from the defaults. on_back is what the back row does.
+function M.show_keys(bindings, on_back)
+	local editor = dofile(__buildat_extension_path("luanti_client")..
+			"/res/key_editor.lua")
+	return editor.draw{magic = magic, uistack = uistack, ui_utils = ui_utils,
+			bindings = bindings,
+			save = function()
+				local s = M.load()
+				s.keys = {}
+				for _, b in ipairs(bindings) do
+					if b.default_key ~= nil and b.key ~= b.default_key then
+						s.keys[b.action] = b.name
+					end
+				end
+				M.save(s)
+			end,
+			on_back = on_back or function() end}
 end
 
 local MODES = {"unlit", "shadows", "pbr"}
@@ -124,6 +172,12 @@ function M.show()
 		save()
 	end)
 	redraw_rows()
+	if M.bindings then
+		menu:add("Key bindings...", function()
+			save()
+			M.show_keys(M.bindings)
+		end)
+	end
 	menu:add("Save", save)
 	menu:add("Back", function()
 		save()

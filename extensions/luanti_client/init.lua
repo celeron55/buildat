@@ -199,7 +199,13 @@ local cancel_exits = true
 local BIND = {}
 for _, b in ipairs(BINDINGS) do
 	BIND[b.action] = b
+	b.default_key = b.key
+	b.default_name = b.name
 end
+-- What the settings say instead ([EXT_SETTINGS]), and the table for
+-- the settings screen's editor
+settings.apply_keys(BINDINGS)
+settings.bindings = BINDINGS
 local media_root_added = false
 
 -- Luanti's day/night ratio, from its daynightratio.h: 0.175 at night, 1.0 in
@@ -3241,12 +3247,13 @@ local function show_client(host, port, name, password, mode)
 			uistack.main:pop(root)
 		end
 
-		-- The pause menu, and the key list it opens. Both are formspecs
-		-- drawn by this client's own formspec code rather than dialogs built
-		-- by hand: the only thing that differs from a game's form is where
-		-- the buttons go, and a local form's fields reach a function here
-		-- instead of the server. Escape closes whichever of the two is up,
-		-- because that is what close_form already does.
+		-- The pause menu: a formspec drawn by this client's own formspec
+		-- code rather than a dialog built by hand: the only thing that
+		-- differs from a game's form is where the buttons go, and a local
+		-- form's fields reach a function here instead of the server.
+		-- Escape closes it, because that is what close_form already does.
+		-- The key bindings and the settings it opens are screens on the
+		-- UI stack ([EXT_SETTINGS]).
 		local sound_muted = false
 
 		local function pause_spec()
@@ -3255,35 +3262,15 @@ local function show_client(host, port, name, password, mode)
 			-- back to the game is a key nobody was told about is a menu that
 			-- traps people. button_exit closes the form by itself, which is
 			-- exactly what continuing is.
-			return "size[6,5.8]"..
+			return "size[6,6.9]"..
 					"label[0.2,0.2;Paused]"..
 					"button_exit[0.4,1.0;5.2,0.8;btn_continue;"..
 					"Continue playing]"..
 					"button[0.4,2.1;5.2,0.8;btn_sound;"..
 					(sound_muted and "Unmute sound" or "Mute sound").."]"..
 					"button[0.4,3.2;5.2,0.8;btn_keys;Key bindings]"..
-					"button[0.4,4.3;5.2,0.8;btn_exit;Exit]"
-		end
-
-		-- Every binding this client has, in two columns, out of the same
-		-- table the code reads. A label's text is split on commas and
-		-- semicolons by the formspec grammar, so BINDINGS keeps them out.
-		local function keys_spec()
-			local half = math.ceil(#BINDINGS / 2)
-			local out = {"size[12,"..tostring(1.5 + half * 0.6).."]",
-					"label[0.2,0.2;Key bindings]"}
-			for i, b in ipairs(BINDINGS) do
-				local first = i <= half
-				local x = first and 0.3 or 6.2
-				local row = first and (i - 1) or (i - half - 1)
-				local y = 0.9 + row * 0.6
-				out[#out + 1] = "label["..x..","..y..";"..b.name.."]"
-				out[#out + 1] = "label["..(x + 1.8)..","..y..";"..
-						b.what.."]"
-			end
-			out[#out + 1] = "button[4.8,"..tostring(0.7 + half * 0.6)..
-					";2.4,0.8;btn_back;Back]"
-			return table.concat(out)
+					"button[0.4,4.3;5.2,0.8;btn_settings;Settings...]"..
+					"button[0.4,5.4;5.2,0.8;btn_exit;Exit]"
 		end
 
 		local menu_fields
@@ -3297,7 +3284,13 @@ local function show_client(host, port, name, password, mode)
 				-- drawn again rather than left saying the wrong thing
 				open_local_form(pause_spec(), menu_fields)
 			elseif fields.btn_keys then
-				open_local_form(keys_spec(), menu_fields)
+				-- The shared editor ([EXT_SETTINGS]) on the UI stack, over
+				-- the closed form; back reopens the menu
+				close_form()
+				settings.show_keys(BINDINGS, open_pause_menu)
+			elseif fields.btn_settings then
+				close_form()
+				settings.show()
 			elseif fields.btn_back then
 				open_local_form(pause_spec(), menu_fields)
 			elseif fields.btn_exit then

@@ -147,138 +147,18 @@ local function save()
 			cereal.binary_output(list_with_keys(), {"array", "string"}))
 end
 
--- The editor: a row per action with its key's name and what it does; a row
--- picked (click, or arrows and Enter) says "Press a key...", and the next
--- key down binds it -- Escape leaves it, Backspace puts the default back.
--- A key bound on two rows shows red on both, and the later bind stands.
--- "Defaults" puts every default back. Every change is saved at once.
--- on_back is what the back row does: the settings screen, or the pause
--- menu.
+-- The editor is the one both clients share, luanti_client/res/key_editor.lua,
+-- served by the module as luanti/key_editor.lua; on_back is what the back
+-- row does: the settings screen, or the pause menu
 function M.draw(on_back)
-	local root = uistack.main:push({desc = "vanilla keys"})
-	root.defaultStyle = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
-	local window = root:CreateChild("Window")
-	window:SetStyleAuto()
-	window:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(10, 10, 10, 10))
-	window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-	local title = window:CreateChild("Text")
-	title:SetStyleAuto()
-	title:SetText("Key bindings")
-	local hint = window:CreateChild("Text")
-	hint:SetStyleAuto()
-	hint:SetText("Pick a row and press a key. Escape leaves it, Backspace puts the default back.")
-	-- Two columns, so that the rows fit a 720 window ([BOX_FIXES] a): the
-	-- buttons interleave left, right, left... which is the order the
-	-- grid nav walks with two columns
-	local columns = window:CreateChild("UIElement")
-	columns:SetLayout(magic.LM_HORIZONTAL, 12, magic.IntRect(0, 0, 0, 0))
-	local col = {}
-	for c = 1, 2 do
-		col[c] = columns:CreateChild("UIElement")
-		col[c]:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	local ok, err, editor = buildat.run_script_file("luanti/key_editor.lua")
+	if not ok or type(editor) ~= "table" then
+		log:warning("key_editor.lua: " .. tostring(err))
+		return nil
 	end
-	local function make_button(parent, label)
-		local button = parent:CreateChild("Button")
-		button:SetStyleAuto()
-		button:SetName("Button")
-		button:SetLayout(magic.LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
-		button.minHeight = 24
-		button.minWidth = 380
-		local text = button:CreateChild("Text")
-		text:SetName("ButtonText")
-		text:SetStyleAuto()
-		text.text = label
-		text:SetTextAlignment(magic.HA_LEFT)
-		return button
-	end
-	local rows = {}
-	local items = {}
-	local listening = nil
-	local function label_of(b)
-		return string.format("%-8s  %s", b.name, b.what)
-	end
-	local function refresh()
-		local seen = {}
-		for _, b in ipairs(M.BINDINGS) do
-			if bindable(b) then
-				seen[b.key] = (seen[b.key] or 0) + 1
-			end
-		end
-		for _, r in ipairs(rows) do
-			local text = r.button:GetChild("ButtonText")
-			if text then
-				if listening == r.b then
-					text.text = "Press a key...   " .. r.b.what
-				else
-					text.text = label_of(r.b)
-				end
-				local twice = bindable(r.b) and seen[r.b.key] and seen[r.b.key] > 1
-				text.color = twice and magic.Color(1, 0.35, 0.35) or magic.Color(1, 1, 1)
-			end
-		end
-	end
-	for i, b in ipairs(M.BINDINGS) do
-		local button = make_button(col[(i - 1) % 2 + 1], label_of(b))
-		rows[#rows + 1] = {b = b, button = button}
-		items[#items + 1] = {button, function()
-			if bindable(b) then
-				listening = b
-				refresh()
-			end
-		end}
-	end
-	-- An odd count leaves the right column a row short; the two rows
-	-- under the columns are a row of their own each, so the nav's index
-	-- arithmetic stays on the grid: a blank fills the gap
-	if #M.BINDINGS % 2 == 1 then
-		local blank = col[2]:CreateChild("UIElement")
-		blank.minHeight = 24
-	end
-	local bottom = window:CreateChild("UIElement")
-	bottom:SetLayout(magic.LM_HORIZONTAL, 12, magic.IntRect(0, 0, 0, 0))
-	local defaults = make_button(bottom, "Defaults")
-	items[#items + 1] = {defaults, function()
-		for _, b in ipairs(M.BINDINGS) do
-			if bindable(b) then
-				b.key, b.name = b.default_key, b.default_name
-			end
-		end
-		listening = nil
-		refresh()
-		save()
-	end}
-	local back = make_button(bottom, "< back")
-	items[#items + 1] = {back, function()
-		uistack.main:pop(root)
-		on_back()
-	end}
-	local nav = ui_utils.bind_button_menu(root, items)
-	nav:set_columns(2)
-	-- The key while a row listens, before the menu's own navigation gets it
-	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-		if listening == nil then
-			return
-		end
-		local key = event_data:GetInt("Key")
-		local b = listening
-		listening = nil
-		if key == magic.KEY_ESCAPE then
-			-- Leaves the row as it was
-		elseif key == magic.KEY_BACKSPACE then
-			b.key, b.name = b.default_key, b.default_name
-			save()
-		else
-			local name = magic.input:GetKeyName(key)
-			if name ~= nil and name ~= "" then
-				b.key, b.name = key, name
-				save()
-			end
-		end
-		refresh()
-	end)
-	refresh()
-	magic.input:SetMouseVisible(true, "the key bindings")
-	return root
+	return editor.draw{magic = magic, uistack = uistack, ui_utils = ui_utils,
+			bindings = M.BINDINGS, bindable = bindable, save = save,
+			on_back = on_back}
 end
 
 return M

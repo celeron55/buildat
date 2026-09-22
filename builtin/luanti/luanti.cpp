@@ -5079,10 +5079,11 @@ struct Module: public interface::Module, public luanti::Interface
 				files.size(), dirs.size(), cs(game_path));
 		// The Lua the two Luanti clients share, from the extension's res,
 		// served under the module's own client namespace so a game's
-		// client half runs it by name ([VIEW_BOB]: camera_motion.lua)
+		// client half runs it by name ([VIEW_BOB]: camera_motion.lua;
+		// [EXT_SETTINGS]: key_editor.lua)
 		const ss_ shared = m_server->get_config().get<ss_>("share_path")+
 				"/extensions/luanti_client/res";
-		for(const char *name : {"camera_motion.lua"}){
+		for(const char *name : {"camera_motion.lua", "key_editor.lua"}){
 			const ss_ path = shared+"/"+name;
 			if(interface::fs::path_exists(path)){
 				client_file::access(m_server, [&](client_file::Interface *i){
