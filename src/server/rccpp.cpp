@@ -98,6 +98,13 @@ struct CCompiler: public Compiler
 	bool compile(const std::string &in_path, const std::string &out_path,
 			const ss_ &extra_cxxflags, const ss_ &extra_ldflags)
 	{
+		if(m_compiler_command.empty()){
+			// [LUANTI_BUILD]: the archive without a compiler
+			log_e(MODULE, "%s: this archive ships no compiler; a game with C++ "
+					"modules that are not prebuilt needs the full one",
+					cs(in_path));
+			return false;
+		}
 		ss_ command = m_compiler_command;
 		// Without an -O flag gcc defaults to -O0, which for a voxel module is
 		// the difference between an array access and a function call per

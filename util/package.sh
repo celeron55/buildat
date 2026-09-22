@@ -303,6 +303,73 @@ make_one() {
 	esac
 }
 
+# The Luanti-only archive out of the full one's build tree and stage:
+# a reconfigure with BUILDAT_LUANTI_ONLY, an install to its own stage,
+# and the full stage's compiled modules copied in
+make_luanti_only() {
+	local full="$1" name="$2"
+	local build="$root/build/$full"
+	local stage="$root/stage/$name"
+	rm -rf "$stage"; mkdir -p "$stage"
+	(cd "$build" && cmake . -DBUILDAT_LUANTI_ONLY=TRUE > cmake-luanti.log 2>&1) || {
+		echo "configure (luanti only) failed; see $build/cmake-luanti.log" >&2; exit 1; }
+	(cd "$build" && cmake --install . --prefix "$stage" > install-luanti.log 2>&1) || {
+		echo "install (luanti only) failed; see $build/install-luanti.log" >&2; exit 1; }
+	# The full archive's option back, so a later install of it is the full one
+	(cd "$build" && cmake . -DBUILDAT_LUANTI_ONLY=FALSE > /dev/null 2>&1) || true
+	[ -d "$stage/compiler" ] && { echo "luanti only: compiler/ is in the archive" >&2; exit 1; }
+	[ -d "$stage/games/digger" ] && { echo "luanti only: games/digger is in the archive" >&2; exit 1; }
+	if [ -d "$root/stage/$full/cache/rccpp_build" ]; then
+		mkdir -p "$stage/cache"
+		cp -r "$root/stage/$full/cache/rccpp_build" "$stage/cache/"
+	else
+		echo "luanti only: the full stage has no prebuilt modules; the archive cannot start a game" >&2
+	fi
+	cp "$root/stage/$full/bin/TOOLCHAIN" "$stage/bin/" 2>/dev/null || true
+	(cd "$stage/.." && rm -f "$out/$name.zip" && zip -qr "$out/$name.zip" "$name")
+	echo "$out/$name.zip"
+}
+
+# The Luanti-only archive's smoke ([LUANTI_BUILD]): vanilla with the
+# minimal game comes up on the prebuilt modules, the compiler is absent
+# and the log says so
+smoke_test_wine_luanti() {
+	local archive="$1"
+	if ! command -v wine64 >/dev/null 2>&1 && ! command -v wine >/dev/null 2>&1; then
+		echo "luanti-only smoke under Wine: no wine here; not run"
+		return 0
+	fi
+	local wine
+	wine=$(command -v wine64 || command -v wine)
+	local dir
+	dir=$(mktemp -d)
+	(cd "$dir" && unzip -q "$archive")
+	local unpacked
+	unpacked=$(ls -d "$dir"/*/ | head -1)
+	[ -d "$unpacked/compiler" ] && { echo "luanti-only smoke: compiler/ is present" >&2; exit 1; }
+	local port=$(( 29600 + (RANDOM % 90) ))
+	echo "luanti-only smoke under Wine in $unpacked"
+	export WINEDEBUG=-all WINEPREFIX="$dir/wine"
+	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
+		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://Z:$dir/nowhere" \
+		"$wine" bin/buildat_server.exe -m games/vanilla -P "$port" -l 3 > "$dir/srv.log" 2>&1) &
+	local srv=$!
+	wait_for_vanilla "$dir/srv.log" "$srv" "luanti-only smoke under Wine" || {
+		kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null || true; exit 1; }
+	if ! grep -q "No C++ compiler found: this archive ships none" "$dir/srv.log"; then
+		echo "luanti-only smoke under Wine: the no-compiler line is not in the log" >&2
+		"$wine"server -k 2>/dev/null || true; exit 1
+	fi
+	if grep -q "STATUS Compiling" "$dir/srv.log"; then
+		echo "luanti-only smoke under Wine: something compiled, with no compiler?" >&2
+		"$wine"server -k 2>/dev/null || true; exit 1
+	fi
+	"$wine"server -k 2>/dev/null || true
+	wait "$srv" 2>/dev/null || true
+	echo "luanti-only smoke under Wine: ok (vanilla up on the prebuilt modules, no compiler)"
+	rm -rf "$dir"
+}
+
 prebuild_modules() {
 	local stage="$1" name="$2"
 	local port=$(( 29700 + (RANDOM % 90) ))
@@ -585,6 +652,14 @@ windows)
 		echo "archive: $b"
 		check_imports "$b"
 	fi
+	# The "Luanti only" archive ([LUANTI_BUILD]): the same build tree
+	# installed again with BUILDAT_LUANTI_ONLY (games/vanilla alone, no
+	# compiler), and the modules the full archive's prebuild compiled
+	# copied into its cache, since it cannot compile them itself
+	c=$(make_luanti_only "buildat-$version-win64" "buildat-$version-win64-luanti")
+	echo "archive: $c"
+	check_imports "$c"
+	smoke_test_wine_luanti "$c"
 	;;
 *)
 	echo "unknown target $target" >&2; exit 2 ;;

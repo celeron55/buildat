@@ -437,8 +437,16 @@ static bool detect_compiler_bin_paths(core::Config &config)
 		// system's ([PACKAGING]); the Windows archive carries its own under
 		// compiler/, so there this is a broken archive
 #ifdef _WIN32
-		log_e(MODULE, "No C++ compiler found: the archive's compiler/ "
-				"directory is missing or damaged");
+		// The "Luanti only" archive ships no compiler on purpose
+		// ([LUANTI_BUILD]): its modules are prebuilt into its cache, and
+		// the server starts; a compile it then needs fails with the line
+		// rccpp prints. The full archive with compiler/ missing reads the
+		// same, and that line says what to do.
+		log_w(MODULE, "No C++ compiler found: this archive ships none (or "
+				"its compiler/ directory is missing); a game whose modules "
+				"are not prebuilt cannot be started with it");
+		config.set("compiler_command", "");
+		return true;
 #else
 		log_e(MODULE, "No C++ compiler (c++) found in PATH. buildat compiles "
 				"a game's modules as it loads them; install one first:\n"

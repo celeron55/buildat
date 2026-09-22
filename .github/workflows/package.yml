@@ -43,6 +43,13 @@ jobs:
           name: windows-archive
           path: Build/package/out/*-win64.zip
           if-no-files-found: error
+      # The "Luanti only" archive ([LUANTI_BUILD]): games/vanilla and no
+      # compiler, a third of the full one; the release lists it
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-luanti-archive
+          path: Build/package/out/*-win64-luanti.zip
+          if-no-files-found: error
       # The runtime variants ([WIN_DLL_INIT]), artifacts and not the
       # release's: the one that answers the desktop becomes the packaging
       - uses: actions/upload-artifact@v4
@@ -73,6 +80,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: windows-archive
+          path: out
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-luanti-archive
           path: out
       - uses: softprops/action-gh-release@v2
         with:

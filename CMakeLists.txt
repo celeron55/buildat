@@ -572,7 +572,17 @@ endif()
 if(BUILD_SERVER)
 	install(TARGETS ${SERVER_EXE_NAME} DESTINATION "${DST_BIN}")
 	install(DIRECTORY "${CMAKE_SOURCE_DIR}/builtin" DESTINATION "${DST_SHARE}")
-	install(DIRECTORY "${CMAKE_SOURCE_DIR}/games" DESTINATION "${DST_SHARE}")
+	# BUILDAT_LUANTI_ONLY ([LUANTI_BUILD]): the "Luanti only" archive --
+	# games/vanilla and no other game, and no compiler; its modules come
+	# prebuilt in its cache (util/package.sh copies them from the full
+	# archive's stage). A reconfigure of the same build tree, not a
+	# rebuild: the option only changes what is installed.
+	option(BUILDAT_LUANTI_ONLY "Install games/vanilla alone and no compiler" FALSE)
+	if(BUILDAT_LUANTI_ONLY)
+		install(DIRECTORY "${CMAKE_SOURCE_DIR}/games/vanilla" DESTINATION "${DST_SHARE}/games")
+	else()
+		install(DIRECTORY "${CMAKE_SOURCE_DIR}/games" DESTINATION "${DST_SHARE}")
+	endif()
 	install(DIRECTORY "${CMAKE_SOURCE_DIR}/src" DESTINATION "${DST_SHARE}")
 	install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/cereal/include" DESTINATION "${DST_SHARE}/3rdparty/cereal")
 	install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/polyvox/library/PolyVoxCore/include" DESTINATION "${DST_SHARE}/3rdparty/polyvox/library/PolyVoxCore")
@@ -596,7 +606,7 @@ if(BUILD_SERVER)
 			message(FATAL_ERROR \"copying Urho3D's include tree dereferenced failed\")
 		endif()
 	")
-	if(WIN32 AND BUILDAT_SHIP_COMPILER)
+	if(WIN32 AND BUILDAT_SHIP_COMPILER AND NOT BUILDAT_LUANTI_ONLY)
 		# What a C++ compile and link of a module needs and nothing else:
 		# the whole distribution is 760 MB with clang, gdb and doxygen in
 		# it. The driver finds cc1plus and the crt objects relative to
