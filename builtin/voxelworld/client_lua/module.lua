@@ -146,6 +146,15 @@ local queue_modified_node_update
 -- see section 3 of doc/plan/master_plan.md. Declared up here because the
 -- loop that reads it is written before the function that writes it.
 local modified_queued_us = {}
+-- When a chunk that changed was last drawn again, and the ones held back
+-- because that was under a second ago (node id -> when they are due): a
+-- flood's passes change the same chunks four times a second, and each
+-- change re-meshed each chunk ([FLOOD_STEP] c). One mesh per chunk per
+-- second while that goes on; a client's own predicted write is prompt
+-- (set_static_voxel), as its dig should look.
+local modified_drawn_us = {}
+local modified_held = {}
+local MODIFIED_COALESCE_US = 1000000
 -- And which of those have been complained about, so that one that is never
 -- drawn again says so once rather than every frame
 local modified_warned = {}
@@ -616,6 +625,16 @@ function sub_events()
 		-- seconds: said once each, because "never" and "late" are different
 		-- faults and only this tells them apart. See section 3 of
 		-- doc/plan/master_plan.md.
+		-- The held-back changes whose second is up
+		for node_id, due_us in pairs(modified_held) do
+			if current_us >= due_us then
+				modified_held[node_id] = nil
+				local node = replicate.main_scene:GetNode(node_id)
+				if node then
+					queue_modified_node_update(node, true)
+				end
+			end
+		end
 		for node_id, queued_us in pairs(modified_queued_us) do
 			if not modified_warned[node_id] then
 				local waited = (current_us - queued_us) / 1000000
@@ -737,6 +756,8 @@ function sub_events()
 						if queued_us then
 							modified_queued_us[node_update.node_id] = nil
 							modified_warned[node_update.node_id] = nil
+							modified_drawn_us[node_update.node_id] =
+									buildat.get_time_us()
 							local waited = (buildat.get_time_us() -
 									queued_us) / 1000000
 							if waited >= 1.0 then
@@ -820,6 +841,8 @@ function sub_events()
 	replicate.sub_sync_node_removed(function(node, node_id)
 		node_volume_cache[node_id] = nil
 		horizon_meshed_us[node_id] = nil
+		modified_drawn_us[node_id] = nil
+		modified_held[node_id] = nil
 		if node and M.chunk_size_voxels then
 			local p = node:GetWorldPosition()
 			local chunk_p = buildat.Vector3(p):div_components(
@@ -872,11 +895,23 @@ function M.get_chunk_position(voxel_p)
 	return chunk_p, in_chunk_p
 end
 
-function queue_modified_node_update(node)
+function queue_modified_node_update(node, prompt)
 	if not node_update_queue then
 		return
 	end
-	modified_queued_us[node:GetID()] = buildat.get_time_us()
+	local id = node:GetID()
+	local now = buildat.get_time_us()
+	if not prompt and not modified_queued_us[id] then
+		local drawn = modified_drawn_us[id]
+		if drawn and now - drawn < MODIFIED_COALESCE_US then
+			if not modified_held[id] then
+				modified_held[id] = drawn + MODIFIED_COALESCE_US
+			end
+			return
+		end
+	end
+	modified_held[id] = nil
+	modified_queued_us[id] = now
 	node_update_queue:put(node:GetWorldPosition(),
 			MODIFIED_GEOMETRY_NEAR_WEIGHT, M.camera_far_clip * 1.2,
 			nil, nil, {
@@ -1197,7 +1232,7 @@ function M.set_static_voxel(x, y, z, v)
 	pred.after = volume:serialize()
 	predicted[id] = pred
 	buildat.set_voxel_data(node, pred.after)
-	queue_modified_node_update(node)
+	queue_modified_node_update(node, true)
 	return true
 end
 
