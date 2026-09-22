@@ -195,6 +195,18 @@ namespace luanti
 
 		// The scene the map is in, or null until luanti:game_loaded
 		virtual SceneReference get_scene() = 0;
+
+		// core.<name>() called and its result read as a list of strings:
+		// how a module beside this one asks the game's Lua a question of
+		// its own -- a function it registered through load_lua() -- once
+		// the game is loaded. Empty on an error, which is logged.
+		virtual sv_<ss_> call_string_list(const ss_ &name) = 0;
+
+		// Whether the map's chunks get server-side collision shapes
+		// (voxelworld's physics_enabled): off, since nothing of the game's
+		// own collides on the server; a module that drops rigid bodies onto
+		// the terrain asks before run_game() ([VOXEL_PHYSICS_SAMPLE]).
+		virtual void set_server_physics(bool on) = 0;
 	};
 
 	inline bool access(interface::Server *server,

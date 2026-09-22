@@ -2,6 +2,9 @@
 	"dependencies": [
 		{"module": "main"},
 		{"module": "luanti"},
-		{"module": "voxelworld"}
+		{"module": "voxelworld"},
+		{"module": "main_context"},
+		{"module": "network"},
+		{"module": "client_file"}
 	]
 }

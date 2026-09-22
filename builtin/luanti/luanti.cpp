@@ -2137,7 +2137,7 @@ struct Module: public interface::Module, public luanti::Interface
 		// the only nodes in it are the ones a mod places. The region is the
 		// map's limits; what is loaded of it is what the load points keep.
 		voxelworld::access(m_server, [&](voxelworld::Interface *iv){
-			iv->create_instance(m_scene, m_section_region);
+			iv->create_instance(m_scene, m_section_region, m_server_physics);
 		});
 
 		// Before voxelworld's first tick, which is when a world that has
@@ -8437,6 +8437,17 @@ struct Module: public interface::Module, public luanti::Interface
 				"{x = "+itos(ux)+", y = "+itos(uy)+", z = "+itos(uz)+"}, "
 				"{x = "+itos(ax)+", y = "+itos(ay)+", z = "+itos(az)+"}, "+
 				(sneak ? "true" : "false")+")");
+	}
+
+	sv_<ss_> call_string_list(const ss_ &name)
+	{
+		return string_list_from_lua(name.c_str());
+	}
+
+	bool m_server_physics = false;
+	void set_server_physics(bool on)
+	{
+		m_server_physics = on;
 	}
 
 	SceneReference get_scene()
