@@ -48,7 +48,8 @@ local function random_name()
 end
 
 M.DEFAULTS = {mode = "unlit", view_range = 120, view_bobbing = 1,
-		name = random_name(), address = "localhost:30000", keys = {}}
+		shoulder = 0, name = random_name(), address = "localhost:30000",
+		keys = {}}
 
 -- The bindings table, for the screen's "Key bindings..." row; init.lua
 -- sets it
@@ -181,6 +182,9 @@ function M.show()
 		rows.range:GetChild("ButtonText"):SetText("View range (next session): "..s.view_range)
 		rows.bob:GetChild("ButtonText"):SetText("View bobbing: "..
 				(s.view_bobbing ~= 0 and "on" or "off"))
+		rows.shoulder:GetChild("ButtonText"):SetText(
+				"Third person: "..(s.shoulder ~= 0 and "over the shoulder"
+				or "centred"))
 	end
 	local function save()
 		s.name = name_edit:GetText()
@@ -198,6 +202,10 @@ function M.show()
 	end)
 	rows.bob = menu:add("", function()
 		s.view_bobbing = s.view_bobbing ~= 0 and 0 or 1
+		save()
+	end)
+	rows.shoulder = menu:add("", function()
+		s.shoulder = s.shoulder ~= 0 and 0 or 1
 		save()
 	end)
 	redraw_rows()

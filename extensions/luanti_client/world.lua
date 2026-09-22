@@ -3202,14 +3202,29 @@ function M.new(magic, buildat, log, options)
 	-- standing still at any one time, so what has not moved is left alone.
 	-- The light an object is drawn in only changes when it moves or when the
 	-- day does.
+	-- Where the player's own model stands and which way it faces while a
+	-- third-person view is on ([BOX_PLAYTEST_4] 4, 5): the client's own
+	-- feet and look, since the server's echo of them is a round trip old
+	-- and its yaw is never the local player's. Set by init.lua per frame.
+	self.self_pose = nil
+
 	function self:place_objects(objects, dtime)
 		for id, obj in pairs(objects) do
 			local entry = object_nodes[id]
-			if entry and obj.position then
-				local x = obj.position[1]
-				local y = obj.position[2]
-				local z = obj.position[3]
+			-- The player's own object carries no position from the server
+			-- (it is the client's own), so it is placed from self_pose
+			-- alone ([BOX_PLAYTEST_4] 4, 5): before that it stood wherever
+			-- it was built -- at the camera -- and filled a third-person
+			-- frame with itself
+			if entry and (obj.position or (obj.is_self and self.self_pose)) then
+				local p = obj.position or {0, 0, 0}
+				local x, y, z = p[1], p[2], p[3]
 				local yaw = obj.yaw or 0
+				if obj.is_self and self.self_pose then
+					x, y, z = self.self_pose[1], self.self_pose[2],
+							self.self_pose[3]
+					yaw = -self.self_pose[4]
+				end
 				if x ~= entry.at_x or y ~= entry.at_y or z ~= entry.at_z then
 					entry.at_x, entry.at_y, entry.at_z = x, y, z
 					entry.node.position = magic.Vector3(x,

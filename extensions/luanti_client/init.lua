@@ -2720,6 +2720,9 @@ local function show_client(host, port, name, password, mode)
 			local cz = z + m.offset[1] * math.sin(ry)
 			local cpitch, cyaw = pitch, yaw
 			if camera_mode ~= 1 then
+				-- The own model at the player's own feet, turned with the
+				-- look ([BOX_PLAYTEST_4] 4, 5)
+				view.self_pose = {x, y, z, yaw}
 				-- Third person, official's Camera::update: back along the
 				-- look (or ahead, turned round) up to 2.75 nodes, a fifth
 				-- up, the height following the look past 1.2, half a node
@@ -2740,8 +2743,16 @@ local function show_client(host, port, name, password, mode)
 					if i > 12 then
 						cy = ey - dy * t
 					end
-					if view:is_solid(math.floor(cx + 0.5), math.floor(cy + 0.5),
-							math.floor(cz + 0.5)) then
+					-- A block this client does not hold yet is not a wall:
+					-- is_solid() answers "solid" for one, which behind a
+					-- player who has just joined stopped the camera a node
+					-- back and filled the frame with their own model
+					-- ([BOX_PLAYTEST_4] 3's "wonky"). Official's camera
+					-- reads its own map the same way.
+					local bx, by, bz = math.floor(cx + 0.5),
+							math.floor(cy + 0.5), math.floor(cz + 0.5)
+					if view:node_at(bx, by, bz) ~= nil and
+							view:is_solid(bx, by, bz) then
 						cx, cy, cz = cx + dx * 0.5, cy + dy * 0.5, cz + dz * 0.5
 						break
 					end
@@ -2749,6 +2760,16 @@ local function show_client(host, port, name, password, mode)
 				if camera_mode == 3 then
 					cpitch, cyaw = -pitch, yaw + 180
 				end
+			end
+			-- Over the shoulder when the settings say so ([OVER_SHOULDER]):
+			-- the eye to the right and a little up, the look and the
+			-- pointing ray unchanged. Luanti's yaw is counterclockwise
+			-- from +z, so the right is yaw - 90.
+			if camera_mode == 2 and SETTINGS.shoulder ~= 0 then
+				local rr = math.rad(yaw - 90)
+				cx = cx - math.sin(rr) * 0.4
+				cz = cz + math.cos(rr) * 0.4
+				cy = cy + 0.15
 			end
 			view:set_camera(cx, cy, cz, cpitch, cyaw, m.roll)
 		end
