@@ -345,9 +345,17 @@ local PASS_US = 250000
 -- And a ceiling on the changed nodes themselves, whatever the estimate
 -- says: the callbacks are paid after the loop, so the first big pass of a
 -- run -- before there is an estimate at all -- had nothing to stop it and
--- ran 833 ms of them ([FLOOD_STEP], under a client, where a changed
--- node costs about 200 us: 1200 of them is a quarter of a second)
-local CHANGED_MAX = 1200
+-- ran 833 ms of them ([FLOOD_STEP]).
+--
+-- **What a changed node costs is the game's, and VoxeLibre's is dearer
+-- than this was set from**: a first-run drive's first big pass changed
+-- 1216 nodes and paid 878 ms of callbacks for them -- 720 us each, where
+-- 1200 was chosen against 200. The ceiling only ever binds the first pass
+-- or two, since the estimate below takes over as soon as there is one, so
+-- it is set for the dear case: 400 at 720 us is under 300 ms, and a game
+-- whose callbacks are cheap loses nothing but a pass or two of latency
+-- while the estimate rises.
+local CHANGED_MAX = 400
 local cut_short = false
 local per_changed_us = 40
 -- When the writes, the falling checks and the callbacks began, for the
@@ -489,10 +497,12 @@ function core.__step_liquids(dtime)
 	if pass_us > 500000 then
 		local t1 = core.get_us_time()
 		core.log("warning", string.format("liquids: a pass of %d nodes took %d ms%s: " ..
-				"decisions %d, writes %d, falling %d, callbacks %d",
+				"decisions %d, writes %d, falling %d, callbacks %d " ..
+				"(%d changed at %d us each)",
 				n, pass_us / 1000, cut_short and " (cut)" or "",
 				(pass_t[1] - t0) / 1000, (pass_t[2] - pass_t[1]) / 1000,
-				(pass_t[3] - pass_t[2]) / 1000, (t1 - pass_t[3]) / 1000))
+				(pass_t[3] - pass_t[2]) / 1000, (t1 - pass_t[3]) / 1000,
+				pass_n_changed, per_changed_us))
 	end
 	if cut_short then
 		due = math.min(due, 0.25)
