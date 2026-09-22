@@ -17,6 +17,28 @@ if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
 rm -rf "../user/games/vanilla/saves/$save"
+# SHOULDER=1 runs with the back view over the shoulder ([OVER_SHOULDER]).
+# The client takes it from the settings the module pushes at join, not
+# from a key, so it goes into the same file the settings screen writes --
+# which is the user's own, hence the copy back on the way out.
+settings="$here/user/luanti/settings.json"
+if [ -n "${SHOULDER:-}" ]; then
+	# The backup's path is fixed here and not left to $out, which is
+	# reassigned two lines down: a trap body in single quotes expands at
+	# exit, so it looked for the copy in the directory that did not have
+	# it and the user's own settings kept the flag (2026-09-22)
+	bak="$out/settings.json.bak"
+	cp "$settings" "$bak"
+	trap "cp '$bak' '$settings'" EXIT
+	python3 - "$settings" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["third_person_shoulder"] = "1"
+json.dump(d, open(p, "w"))
+PY
+	out="$out/shoulder"; mkdir -p "$out"; rm -f "$out"/*.png
+fi
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/camera.lua" \
 	bin/buildat_server -m ../games/vanilla -D ../user -P 29778 \
@@ -91,7 +113,7 @@ for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 grep -aE "self model at|camera at" "$out/cli.log" | sed 's/.*: scan/scan/'
 # The back view's pitch follows the look ([BOX_PLAYTEST_4] 3): looking up
 # the sky is the top of the frame, looking down the ground is the bottom
-python3 - "$out" <<'PY'
+python3 - "$out" "${SHOULDER:-}" <<'PY'
 import sys, statistics
 from PIL import Image
 out = sys.argv[1]
@@ -106,11 +128,25 @@ print("behind, looking up: top %.0f bottom %.0f; down: top %.0f bottom %.0f" %
 # And where the model is in the frame: centred it covers the crosshair,
 # over the shoulder it does not ([OVER_SHOULDER]; the setting's row in
 # user/luanti/settings.json says which this run drew)
-im = Image.open("%s/behind_centred.png" % out).convert("L")
+# Which view this run drew ([OVER_SHOULDER]): the patch at the crosshair
+# on the open stage, and how much of it is the model rather than the
+# world. The share is what to read and not the mean -- the mean moves
+# with whatever ground is behind, and read 131 one run and 94 the next
+# on the same view, where the share held at about a half (2026-09-22).
+im = Image.open("%s/open_behind.png" % out).convert("L")
 w, h = im.size
-mid = statistics.mean(list(im.crop((w // 2 - 24, h // 2 - 24, w // 2 + 24,
-		h // 2 + 24)).getdata()))
-print("the crosshair's patch reads %.0f (the model is dark, the world is not)" % mid)
+patch = list(im.crop((w // 2 - 24, h // 2 - 24, w // 2 + 24,
+		h // 2 + 24)).getdata())
+dark = sum(1 for v in patch if v < 75) / float(len(patch))
+shoulder = len(sys.argv) > 2 and sys.argv[2] != ""
+print("the crosshair's patch is %.0f%% model (centred reads 93, over the "
+		"shoulder about 50)" % (dark * 100))
+if shoulder:
+	print("PASS: the crosshair points past the model" if dark < 0.7
+			else "FAIL: the model still covers the crosshair")
+else:
+	print("PASS: the centred view puts the model under the crosshair"
+			if dark > 0.8 else "FAIL: the centred view is not centred")
 print("PASS: the back view's pitch follows the look"
 		if r["behind_up"][0] > r["behind_up"][1] and r["behind_down"][0] < r["behind_down"][1]
 		else "FAIL: the back view's pitch is inverted")
