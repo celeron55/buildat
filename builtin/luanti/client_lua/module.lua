@@ -2161,8 +2161,8 @@ end
 -- given node's CustomGeometry, one geometry per texture, and returns the
 -- textures' resource names in geometry order, or nil for an item with no
 -- picture. The mesh is a unit across; the caller scales it.
-function M.wield_geometry(node, item_name)
-	local expr = item_images[item_name]
+function M.wield_geometry(node, item_name, expr_override)
+	local expr = expr_override or item_images[item_name]
 	if expr == nil then
 		return nil
 	end
@@ -2318,6 +2318,47 @@ function M.stack_texture(stack)
 		expr = expr .. "^[multiply:" .. meta.color
 	end
 	return texture_of(expr) or M.item_texture(stack.name)
+end
+
+-- What the hand should hold, from a stack's itemstring: the image
+-- expression its metadata asks for -- wield_image before inventory_image,
+-- the colour multiplied into either, and into each face of a node's little
+-- cube so that a coloured node is still a cube ([ITEM_META_LOOK]) -- or nil
+-- for a stack whose look is its item's. The second value is what a caller
+-- should key its cache by, since two stacks of one item may differ.
+function M.wield_look(str)
+	local stack = parse_stack(str)
+	if stack == nil then
+		return nil, nil
+	end
+	local meta = stack.meta
+	if meta == nil then
+		return nil, stack.name
+	end
+	local expr = meta.wield_image
+	if expr == nil or expr == "" then
+		expr = meta.inventory_image
+	end
+	if expr == nil or expr == "" then
+		expr = item_images[stack.name]
+	end
+	if expr == nil or expr == "" then
+		return nil, stack.name
+	end
+	if meta.color and meta.color ~= "" then
+		local mul = "^[multiply:" .. meta.color
+		if string.sub(expr, 1, #CUBE_MARK) == CUBE_MARK then
+			local faces = {}
+			for part in string.gmatch(
+					string.sub(expr, #CUBE_MARK + 1), "[^\1]+") do
+				faces[#faces + 1] = part .. mul
+			end
+			expr = CUBE_MARK .. table.concat(faces, "\1")
+		else
+			expr = expr .. mul
+		end
+	end
+	return expr, stack.name .. "\1" .. expr
 end
 
 -- The whole of a stack's look from its itemstring, for a client that keeps

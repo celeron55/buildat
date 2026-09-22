@@ -62,6 +62,8 @@ while time.time() - t0 < 120:
     time.sleep(1)
 time.sleep(4)
 lines = scan()
+# Slot 1 in hand, which is where the hand's own picture is read
+write("keypress 1", "delay 800")
 write("screenshot " + sys.argv[1].replace("cli.log", "hotbar.png"), "delay 600")
 time.sleep(1.5)
 hot = [l for l in lines or [] if "hotbar" in l]
@@ -72,6 +74,12 @@ from PIL import Image
 im = Image.open(sys.argv[1].replace("cli.log", "hotbar.png")).convert("RGB")
 w, h = im.size
 crop = im.crop((w // 3, h - h // 8, 2 * w // 3, h))
+# And the hand, which is drawn at the bottom right of the frame
+hand = im.crop((int(w * 0.62), int(h * 0.55), int(w * 0.95), int(h * 0.95)))
+hpx = list(hand.getdata())
+hred = sum(1 for r, g, b in hpx if r > 110 and g < 80 and b < 80)
+# Said, not asserted: what the hand holds is not always in the frame
+print("the hand's corner is %.2f %% red" % (100.0 * hred / len(hpx)))
 px = list(crop.getdata())
 red = sum(1 for r, g, b in px if r > 110 and g < 80 and b < 80)
 share = 100.0 * red / len(px)

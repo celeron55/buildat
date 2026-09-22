@@ -926,17 +926,21 @@ local hotbar_pictures = {}
 -- item the module has no shape for.
 -- (the shapes live on hotbar_pictures under a marker key: this file is
 -- at Lua's 200 locals)
-local function draw_wielded(item_name)
+-- stack is the itemstring, since what the hand holds may be a stack's own
+-- picture rather than its item's ([ITEM_META_LOOK])
+local function draw_wielded(item_name, stack)
 	hotbar_pictures["\1shapes"] = hotbar_pictures["\1shapes"] or {}
 	local wield_shapes = hotbar_pictures["\1shapes"]
 	if item_name == nil or not luanti.hud_flag("wielditem") then
 		WIELD.show(false)
 		return
 	end
-	local shape = wield_shapes[item_name]
+	local expr, key = luanti.wield_look(stack)
+	key = key or item_name
+	local shape = wield_shapes[key]
 	if shape == nil then
 		local holder = wield_node:CreateChild("shape")
-		local resources = luanti.wield_geometry(holder, item_name)
+		local resources = luanti.wield_geometry(holder, item_name, expr)
 		if resources == nil then
 			holder:Remove()
 			shape = false
@@ -960,7 +964,7 @@ local function draw_wielded(item_name)
 			holder.scale = magic.Vector3(sc, sc, sc)
 			shape = {node = holder, materials = materials}
 		end
-		wield_shapes[item_name] = shape
+		wield_shapes[key] = shape
 	end
 	for name, sh in pairs(wield_shapes) do
 		if sh then
@@ -1095,7 +1099,7 @@ local function draw_hotbar()
 	end
 	local name = parse_stack(hotbar_stacks[wield_index])
 	wielded_text:SetText(name or "")
-	draw_wielded(name)
+	draw_wielded(name, hotbar_stacks[wield_index])
 end
 
 -- Set once the HUD is built: a HUD element that draws a list of the player's
