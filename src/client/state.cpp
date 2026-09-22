@@ -22,6 +22,8 @@
 #include <cstring>
 #include <fstream>
 #include <deque>
+#include <thread>
+#include <atomic>
 
 #ifdef _WIN32
 	#ifndef WIN32_LEAN_AND_MEAN
@@ -87,6 +89,13 @@ struct CState: public State
 	bool m_connected = false;
 	// Set once the connection is gone; see lost_connection()
 	bool m_disconnected = false;
+	// The connect running on a worker ([BOX_PLAYTEST_2] 12). The thread
+	// touches m_socket and nothing else of this, and the main thread keeps
+	// off the socket while m_connect_result says 0; the result is stored
+	// last, so a main thread that reads it as done sees the error with it.
+	std::thread m_connect_thread;
+	std::atomic<int> m_connect_result{0};
+	ss_ m_connect_error;
 	sm_<ss_, std::function<void(const ss_ &, const ss_ &)>> m_packet_handlers;
 
 	CState(sp_<app::App> app):
@@ -102,9 +111,50 @@ struct CState: public State
 		setup_packet_handlers();
 	}
 
+	~CState()
+	{
+		if(m_connect_thread.joinable())
+			m_connect_thread.join();
+	}
+
+	// The connect on a worker, so that the frame loop carries on
+	// ([BOX_PLAYTEST_2] 12)
+	void connect_start(const ss_ &address)
+	{
+		if(m_connect_result.load() != 0 || m_connect_thread.joinable()){
+			log_w(MODULE, "connect_start(): one is already running");
+			return;
+		}
+		m_connect_error = "";
+		m_connect_thread = std::thread([this, address](){
+			ss_ error;
+			const bool ok = connect(address, &error);
+			// The error first, the result last: a main thread that reads
+			// the result as done has the error already written
+			m_connect_error = ok ? ss_() : error;
+			m_connect_result.store(ok ? 1 : -1);
+		});
+	}
+
+	int connect_poll(ss_ *error)
+	{
+		const int r = m_connect_result.load();
+		if(r == 0)
+			return 0;
+		if(m_connect_thread.joinable())
+			m_connect_thread.join();
+		if(error)
+			*error = m_connect_error;
+		return r;
+	}
+
 	void reset()
 	{
 		log_i(MODULE, "client::State: reset for another connection");
+		if(m_connect_thread.joinable())
+			m_connect_thread.join();
+		m_connect_result.store(0);
+		m_connect_error = "";
 		m_socket = sp_<interface::TCPSocket>(interface::createTCPSocket());
 		m_socket_buffer.clear();
 		m_packet_stream = interface::PacketStream();
@@ -118,6 +168,9 @@ struct CState: public State
 	void update()
 	{
 		if(m_disconnected)
+			return;
+		// The worker owns the socket while a connect runs
+		if(m_connect_result.load() == 0 && m_connect_thread.joinable())
 			return;
 		if(m_socket->wait_data(0)){
 			read_socket();

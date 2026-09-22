@@ -4,6 +4,11 @@
 local log = buildat.Logger("__client/api")
 
 buildat.connect_server    = __buildat_connect_server
+-- The connect on a worker, polled from a frame handler: the blocking one
+-- froze the waiting screen for as long as the connect took
+-- ([BOX_PLAYTEST_2] 12)
+buildat.connect_server_start = __buildat_connect_server_start
+buildat.connect_server_poll  = __buildat_connect_server_poll
 buildat.list_games        = __buildat_list_games
 -- list_launchers() -> {{kind, name, path, launcher = bool}, ...}: every
 -- game, builtin and extension in the tree, for the launch grid

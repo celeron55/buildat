@@ -1329,6 +1329,8 @@ struct CApp: public App, public magic::Application
 }
 
 		DEF_BUILDAT_FUNC(connect_server)
+		DEF_BUILDAT_FUNC(connect_server_start)
+		DEF_BUILDAT_FUNC(connect_server_poll)
 		DEF_BUILDAT_FUNC(disconnect)
 		DEF_BUILDAT_FUNC(list_games)
 		DEF_BUILDAT_FUNC(start_local_server)
@@ -2194,6 +2196,38 @@ struct CApp: public App, public magic::Application
 			lua_pushnil(L);
 		else
 			lua_pushstring(L, error.c_str());
+		return 2;
+	}
+
+	// connect_server_start(address: string): the same connect on a worker,
+	// so that the frame keeps drawing while it runs ([BOX_PLAYTEST_2] 12).
+	// connect_server_poll() is what says how it went.
+	static int l_connect_server_start(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+
+		ss_ address = lua_bindings::lua_tocppstring(L, 1);
+		self->m_state->connect_start(address);
+		return 0;
+	}
+
+	// connect_server_poll() -> status: "pending"|"ok"|"failed",
+	// error: string or nil
+	static int l_connect_server_poll(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+
+		ss_ error;
+		const int r = self->m_state->connect_poll(&error);
+		lua_pushstring(L, r == 0 ? "pending" : (r > 0 ? "ok" : "failed"));
+		if(r < 0)
+			lua_pushstring(L, error.c_str());
+		else
+			lua_pushnil(L);
 		return 2;
 	}
 

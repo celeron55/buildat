@@ -113,16 +113,47 @@ local function leave_game()
 	require("buildat/extension/__menu").boot()
 end
 
+-- The connect runs on a worker and this screen polls it
+-- ([BOX_PLAYTEST_2] 12): the blocking connect ran on the main thread, so
+-- the client drew nothing for as long as it took -- seconds on the box,
+-- with the screen frozen on whatever it had last drawn and the watchdog
+-- catching the main thread inside the connect's own select.
 local function connect_or_show_error(address)
-	local ok, err = buildat.connect_server(address)
-	if ok then
-		log:info("connect_server() ok")
-		game_root = uistack.main:push({desc="empty (game is running)"})
-		magic.ui:SetFocusElement(nil)
-	else
-		log:info("connect_server() failed")
-		show_error(err)
-	end
+	buildat.connect_server_start(address)
+	local root = uistack.main:push({desc="connecting"})
+	root.defaultStyle = magic.cache:GetResource("XMLFile",
+			"__menu/res/main_style.xml")
+	local window = root:CreateChild("Window")
+	window:SetStyleAuto()
+	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
+	window:SetAlignment(HA_LEFT, VA_CENTER)
+	local status = window:CreateChild("Text")
+	status:SetStyleAuto()
+	status.text = "Connecting to "..address.."..."
+	local t0 = buildat.get_time_us()
+	local done = false
+	root:SubscribeToStackEvent("Update", function()
+		if done then
+			return
+		end
+		local state, err = buildat.connect_server_poll()
+		if state == "pending" then
+			-- The seconds, so that the screen says it is still going
+			status.text = "Connecting to "..address.."...  "..
+					math.floor((buildat.get_time_us() - t0) / 1000000).." s"
+			return
+		end
+		done = true
+		uistack.main:pop(root)
+		if state == "ok" then
+			log:info("connect_server() ok")
+			game_root = uistack.main:push({desc="empty (game is running)"})
+			magic.ui:SetFocusElement(nil)
+		else
+			log:info("connect_server() failed")
+			show_error(err)
+		end
+	end)
 end
 
 local function show_connect_to_server()
