@@ -13,7 +13,9 @@
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
+. "$me/fullscreen_gate.sh"
 out="$here/local/pause_screens"; mkdir -p "$out"
+rm -f "$out"/*.png
 luanti=~/projects/luanti
 bin=${LUANTI_BIN:-$luanti/bin/luanti-refshots}
 if pgrep -x buildat >/dev/null || pgrep -x luanti-refshots >/dev/null; then
@@ -74,12 +76,7 @@ delay 1000
 keypress Escape
 delay 1000
 screenshot $out/before_f11.png
-keypress F11
-delay 4000
-screenshot $out/fullscreen.png
-keypress F11
-delay 4000
-screenshot $out/after_f11.png
+$(fullscreen_section "$out")
 delay 500
 quit
 CMDS
@@ -103,9 +100,13 @@ import sys, statistics
 from PIL import Image
 out = sys.argv[1]
 means = {}
+import os
 for n in ("before_f11", "fullscreen", "after_f11"):
+	path = "%s/%s.png" % (out, n)
+	if n != "before_f11" and not os.path.exists(path):
+		continue  # the fullscreen toggle was not asked for
 	try:
-		im = Image.open("%s/%s.png" % (out, n)).convert("L")
+		im = Image.open(path).convert("L")
 	except Exception as e:
 		print("FAIL: no %s shot: %s" % (n, e)); sys.exit(1)
 	# The world, not the sky: the lower half, where the ground is
@@ -115,5 +116,8 @@ for n in ("before_f11", "fullscreen", "after_f11"):
 print("frame means: " + ", ".join("%s %.0f" % (k, v) for k, v in means.items()))
 if min(means.values()) < 25:
 	print("FAIL: the world went black across a screen mode change"); sys.exit(1)
-print("PASS: the world is drawn before, in and after fullscreen")
+if len(means) < 3:
+	print("(the fullscreen toggle was skipped; FULLSCREEN=1 asks for it)")
+print("PASS: the world is drawn before, in and after fullscreen"
+		if len(means) == 3 else "PASS: the world is drawn")
 PY

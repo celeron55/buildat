@@ -1,15 +1,21 @@
 #!/bin/bash
 # [VIEW_KEYS]: F3 (fog), Z held (zoom) and F12 (the engine's screenshot)
 # driven on camera.lua's stage: local/viewkeys/plain.png, nofog.png,
-# zoom.png and back.png; then V through the minimap's modes: map_x2.png,
-# map_x1.png, radar_x4.png, map_off.png. Prints the chat and log lines the keys made.
+# zoom.png and back.png; then V through the minimap's modes, which start
+# hidden ([MINIMAP_OFF]): map_x4.png, map_x2.png, map_x1.png,
+# radar_x4.png and back to map_off.png. Prints the chat and log lines the
+# keys made.
 #
 #   builtin/luanti/test/viewkeys.sh
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
+. "$me/fullscreen_gate.sh"
 out="$here/local/viewkeys"
 mkdir -p "$out"
+# Last run's pictures are not this run's: a skipped fullscreen toggle left
+# the old fullscreen.png in place and the check read it as fresh
+rm -f "$out"/*.png
 save=buildat_test_viewkeys
 cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
@@ -30,9 +36,13 @@ srv=$(pgrep -x buildat_server | head -1)
 cat > "$out/cmds.txt" <<CMDS
 wait_log 60000 the server put the player
 wait_log 60000 0 undrawn within 2
-delay 2000
+# "0 undrawn" is the mesher's count, not the frame: the first picture is
+# the one the fullscreen check compares against, and taken two seconds
+# after that line it came out at a frame mean of 19 against the usual 109
+# (2026-09-22)
+delay 8000
 look_dir 0 -0.1 1
-delay 1500
+delay 2000
 screenshot $out/plain.png
 keypress F3
 delay 1500
@@ -48,6 +58,9 @@ keypress F12
 delay 1500
 keypress V
 delay 1200
+screenshot $out/map_x4.png
+keypress V
+delay 1200
 screenshot $out/map_x2.png
 keypress V
 delay 1200
@@ -60,12 +73,7 @@ keypress V
 keypress V
 delay 1200
 screenshot $out/map_off.png
-keypress F11
-delay 4000
-screenshot $out/fullscreen.png
-keypress F11
-delay 4000
-screenshot $out/after_f11.png
+$(fullscreen_section "$out")
 delay 500
 quit
 CMDS
@@ -85,10 +93,47 @@ from PIL import Image
 out = sys.argv[1]
 means = {}
 for n in ("plain", "fullscreen", "after_f11"):
-	im = Image.open("%s/%s.png" % (out, n)).convert("L")
+	try:
+		im = Image.open("%s/%s.png" % (out, n)).convert("L")
+	except IOError:
+		continue  # the fullscreen half was not asked for
 	w, h = im.size
 	means[n] = statistics.mean(list(im.crop((0, h // 2, w, h)).getdata()))
 print("frame means: " + ", ".join("%s %.0f" % (k, v) for k, v in means.items()))
-print("FAIL: the world went black across a screen mode change" if min(means.values()) < 25
-		else "PASS: drawn before, in and after fullscreen")
+drawn = min(means.values()) >= 25
+if len(means) < 3:
+	print("(the fullscreen toggle was skipped; FULLSCREEN=1 asks for it)")
+elif not drawn:
+	print("FAIL: the world went black across a screen mode change")
+else:
+	print("PASS: drawn before, in and after fullscreen")
+
+# [MINIMAP_OFF]: a fresh run draws no minimap and the first V brings up
+# surface mode. What says the starting mode exactly is the label the key
+# prints -- V advances by one, so "surface mode, Zoom x4" out of the first
+# press means the run started hidden. The pixels then only have to show
+# that the map appeared: comparing two frames taken seconds apart cannot
+# say more than that, since the sky behind the corner moves between them.
+def corner(n):
+	im = Image.open("%s/%s.png" % (out, n)).convert("L")
+	w, h = im.size
+	return list(im.crop((w - 210, 10, w - 10, 210)).getdata())
+
+def apart(a, b):
+	return sum(abs(p - q) for p, q in zip(a, b)) / float(len(a))
+
+labels = []
+for line in open("%s/cli.log" % out, errors="ignore"):
+	i = line.find("Minimap ")
+	if i >= 0:
+		labels.append(line[i:].strip())
+first = labels[0] if labels else "(none)"
+appeared = apart(corner("plain"), corner("map_x4"))
+print("the first V said %r; the minimap corner moved %.2f of a level" %
+		(first, appeared))
+hidden_at_start = (first == "Minimap in surface mode, Zoom x4" and
+		appeared > 5.0 and labels[-1] == "Minimap hidden")
+print("PASS: the minimap is off until V is pressed" if hidden_at_start
+		else "FAIL: the minimap is drawn before it is asked for")
+sys.exit(0 if (drawn and hidden_at_start) else 1)
 PY

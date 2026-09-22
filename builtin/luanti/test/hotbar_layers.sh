@@ -8,8 +8,10 @@
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
+. "$me/fullscreen_gate.sh"
 out="$here/local/hotbar_layers"
 mkdir -p "$out"
+rm -f "$out"/*.png
 save=buildat_test_hotbar_layers
 cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
@@ -52,10 +54,7 @@ srv=$(pgrep -x buildat_server | head -1)
 	done
 	echo "delay 1000"
 	echo "screenshot $out/after_pause.png"
-	echo "keypress F11"; echo "delay 4000"
-	echo "screenshot $out/fullscreen.png"
-	echo "keypress F11"; echo "delay 4000"
-	echo "screenshot $out/after_f11.png"
+	fullscreen_section "$out"
 	echo "delay 500"
 	echo "quit"
 } > "$out/cmds.txt"
@@ -78,7 +77,14 @@ def strip(name):
 base = strip("start")
 print("hotbar strip %dx%d" % base.size)
 worst = 0
-for name in ("after_pause", "fullscreen", "after_f11"):
+import os
+shots = ["after_pause"]
+for name in ("fullscreen", "after_f11"):
+	if os.path.exists("%s/%s.png" % (out, name)):
+		shots.append(name)
+	else:
+		print("(%s was skipped; FULLSCREEN=1 asks for the toggle)" % name)
+for name in shots:
 	im = strip(name).resize(base.size)
 	a, b = list(base.getdata()), list(im.getdata())
 	diff = sum(abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2])
@@ -88,5 +94,5 @@ for name in ("after_pause", "fullscreen", "after_f11"):
 # A fullscreen shot is the same hotbar at another resolution, so it is never
 # pixel-identical; what a shuffled layer does is tens of levels, not ones
 print("FAIL: the hotbar is drawn differently after a screen change" if worst > 8
-		else "PASS: the same hotbar in all four shots")
+		else "PASS: the same hotbar in all %d shots" % (len(shots) + 1))
 PY

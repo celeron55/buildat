@@ -46,7 +46,12 @@ M.MODES = {
 function M.new(o)
 	local magic = o.magic
 	local HEIGHT = o.height or HEIGHT
-	local m = {mode = 2, height = HEIGHT, timer = 0}
+	-- Hidden until V is pressed ([MINIMAP_OFF]): it is screen a player did
+	-- not ask for, and a stamp of the world every few seconds for
+	-- something most of a first session never looks at. Mode 1 already
+	-- does all of it -- the element is built and the draw is skipped
+	-- while nodes is 0 -- so this is the starting mode and nothing else.
+	local m = {mode = 1, height = HEIGHT, timer = 0}
 	local view = o.parent:CreateChild("View3D")
 	view.size = magic.IntVector2(o.w, o.h)
 	-- A picture of the world costs a second pass over the world, so it is

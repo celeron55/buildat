@@ -2921,7 +2921,7 @@ sky_now.minimap = (function(ok, err, lib)
 	end
 	return lib
 end)(buildat.run_script_file("luanti/minimap.lua"))
-sky_now.minimap_mode = 2
+sky_now.minimap_mode = 1  -- hidden until V; see [MINIMAP_OFF]
 function sky_now.apply_minimap_mode()
 	for _, m in ipairs(minimaps) do
 		m:set_mode(sky_now.minimap_mode)
