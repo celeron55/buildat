@@ -534,6 +534,80 @@ label.horizontalAlignment = magic.HA_LEFT
 label.verticalAlignment = magic.VA_BOTTOM
 label:SetPosition(8, -8)
 
+-- **The version, as a readout rather than as text on a HUD**
+-- ([BOX_PLAYTEST_4]'s complaint answered with geometry): a seven-segment
+-- display standing on the floor at spawn, its lit segments unlit-bright
+-- and its dark ones just visible, the way a VFD's unlit segments are. It
+-- is a real light source, as every readout in this room is.
+local SEG_ON = {
+	["0"] = "abcdef", ["1"] = "bc", ["2"] = "abdeg", ["3"] = "abcdg",
+	["4"] = "bcfg", ["5"] = "acdfg", ["6"] = "acdefg", ["7"] = "abc",
+	["8"] = "abcdefg", ["9"] = "abcdfg", ["-"] = "g", ["."] = "p",
+	-- The letters a version string can carry, in the shapes a
+	-- seven-segment display has for them
+	["b"] = "cdefg", ["d"] = "bcdeg", ["a"] = "abcefg", ["e"] = "adefg",
+	["f"] = "aefg", ["c"] = "adef", ["r"] = "eg", ["t"] = "defg",
+	["v"] = "cde", ["o"] = "cdeg", ["n"] = "ceg", ["i"] = "e",
+	["g"] = "acdfg", ["l"] = "def", ["p"] = "abefg", ["u"] = "cde",
+}
+-- Each segment as {x, y, w, h} in a digit's own box, 1 wide and 2 high
+local SEG_BOX = {
+	a = {0.5, 1.90, 0.76, 0.16}, g = {0.5, 1.00, 0.76, 0.16},
+	d = {0.5, 0.10, 0.76, 0.16}, f = {0.10, 1.47, 0.16, 0.70},
+	b = {0.90, 1.47, 0.16, 0.70}, e = {0.10, 0.53, 0.16, 0.70},
+	c = {0.90, 0.53, 0.16, 0.70}, p = {1.02, 0.10, 0.16, 0.16},
+}
+
+local function readout(text, at, scale, colour)
+	local lit = glow(magic.Color(colour.r * 2.5, colour.g * 2.5,
+			colour.b * 2.5, 1))
+	-- What an unlit segment is: the same shape, barely there, so the
+	-- display reads as a device with digits in it rather than as floating
+	-- strokes
+	local dim = glow(magic.Color(colour.r * 0.10, colour.g * 0.10,
+			colour.b * 0.10, 1))
+	local x = at.x
+	for i = 1, #text do
+		local ch = text:sub(i, i)
+		local on = SEG_ON[ch] or ""
+		if ch ~= "." then
+			-- The face the digit is cut out of, which is what makes the
+			-- dark segments read
+			part("Box", magic.Vector3(x + 0.5 * scale, at.y + scale,
+					at.z - 0.06 * scale),
+					magic.Vector3(1.24 * scale, 2.24 * scale, 0.10 * scale),
+					machined)
+		end
+		for seg, b in pairs(SEG_BOX) do
+			if (seg == "p") == (ch == ".") then
+				part("Box", magic.Vector3(x + b[1] * scale,
+						at.y + b[2] * scale, at.z),
+						magic.Vector3(b[3] * scale, b[4] * scale,
+						0.10 * scale),
+						on:find(seg, 1, true) and lit or dim)
+			end
+		end
+		-- Leftwards in x, which is rightwards on screen: the camera looks
+		-- down -Z and Urho3D is left-handed, so a string advancing +x
+		-- reads back to front
+		x = x - (ch == "." and 0.40 or 1.30) * scale
+	end
+	-- A readout that lights what is around it, which is the whole reason
+	-- they are objects here and not a HUD
+	local node = scene:CreateChild("readout_light")
+	node.position = V(at.x - #text * 0.6 * scale, at.y + scale, at.z + 0.6)
+	local light = node:CreateComponent("Light")
+	light.lightType = magic.LIGHT_POINT
+	light.color = colour
+	light.brightness = 0.9 * PBR_INTENSITY
+	light.range = 5 * U
+	light.castShadows = false
+end
+
+-- Standing at spawn, low and to the left, turned a little out of the wall
+readout("b" .. buildat.version(), {x = 4.4, y = 0.25, z = 6.8}, 0.34,
+		magic.Color(0.15, 0.85, 1.0, 1))
+
 -- **The orb turns to face whoever approaches** (user), and the name is
 -- over the one being pointed at only -- not always on, which is what
 -- keeps the room from being a label wall.
