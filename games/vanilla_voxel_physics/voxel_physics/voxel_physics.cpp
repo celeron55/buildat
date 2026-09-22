@@ -565,8 +565,10 @@ struct Module: public interface::Module
 		// The node a few ticks later: the terrain's collision shapes are
 		// rebuilt after the chunk's commit, and a body made on the same
 		// tick sat in the roof's old boxes and never moved (2026-09-22)
-		m_queued_bodies.push_back(QueuedBody{3, lo, size, data, mass, voxels,
-				volume});
+		QueuedBody q;
+		q.ticks = 3; q.lo = lo; q.size = size; q.data = data; q.mass = mass;
+		q.voxels = voxels; q.volume = volume;
+		m_queued_bodies.push_back(q);
 	}
 
 	// A body that came off the world, and where its voxels live for the
@@ -636,12 +638,13 @@ struct Module: public interface::Module
 	// body.
 	void rebuild_body(Body &b)
 	{
-		ss_ data = interface::serialize_volume_compressed(*b.volume);
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Scene *scene = imc->check_scene(m_scene);
 			Node *n = scene->GetNode(b.node_id);
 			if(!n)
 				return;
+			split_body(b, n);
+			ss_ data = interface::serialize_volume_compressed(*b.volume);
 			n->SetVar(StringHash("voxel_body_data"), Variant(
 					PODVector<uint8_t>((const uint8_t*)data.c_str(),
 					data.size())));
@@ -713,6 +716,13 @@ struct Module: public interface::Module
 		float mass;
 		std::vector<pv::Vector3DInt32> voxels;
 		sp_<interface::VoxelVolume> volume;
+		// A part cut off another body ([BODY_INTERACT]'s split): placed
+		// where it was in that body's frame, moving as it moved, rather
+		// than at lo
+		bool placed = false;
+		Vector3 position;
+		Quaternion rotation;
+		Vector3 velocity;
 	};
 	std::vector<QueuedBody> m_queued_bodies;
 
@@ -725,14 +735,20 @@ struct Module: public interface::Module
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Scene *scene = imc->check_scene(m_scene);
 			Node *n = scene->CreateChild("VoxelBody");
-			n->SetPosition(Vector3(lo.getX() - 0.5f, lo.getY() - 0.5f,
-					lo.getZ() - 0.5f));
+			if(b.placed){
+				n->SetPosition(b.position);
+				n->SetRotation(b.rotation);
+			} else
+				n->SetPosition(Vector3(lo.getX() - 0.5f, lo.getY() - 0.5f,
+						lo.getZ() - 0.5f));
 			n->SetVar(StringHash("voxel_body_data"), Variant(
 					PODVector<uint8_t>((const uint8_t*)data.c_str(),
 					data.size())));
 			RigidBody *body = n->CreateComponent<RigidBody>(LOCAL);
 			body->SetFriction(0.8f);
 			body->SetMass(mass > 0 ? mass : 1.0f);
+			if(b.placed)
+				body->SetLinearVelocity(b.velocity);
 			m_body_nodes.push_back(n->GetID());
 			// Its region, for the game's Lua ([BODY_INTERACT])
 			Body &rec = m_body_by_k[m_next_k];
@@ -753,6 +769,107 @@ struct Module: public interface::Module
 						p.getZ() - lo.getZ() + 0.5f));
 			}
 		});
+	}
+
+	// The connected pieces of a body's solid voxels, in its local grid:
+	// what a body cut through is made of after the cut
+	std::vector<std::vector<pv::Vector3DInt32>> body_pieces(const Body &b)
+	{
+		const interface::VoxelFormat &f = voxel_format();
+		auto solid = [&](int x, int y, int z){
+			if(x < 0 || y < 0 || z < 0 || x >= b.size.getX() ||
+					y >= b.size.getY() || z >= b.size.getZ())
+				return false;
+			return props_of(f.id_of(b.volume->sample_at(x, y, z).planes[0])).structural;
+		};
+		std::vector<std::vector<pv::Vector3DInt32>> pieces;
+		std::unordered_set<int64_t> seen;
+		static const int OFF[6][3] = {
+			{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1},
+		};
+		for(int z = 0; z < b.size.getZ(); z++)
+		for(int y = 0; y < b.size.getY(); y++)
+		for(int x = 0; x < b.size.getX(); x++){
+			pv::Vector3DInt32 start(x, y, z);
+			if(!solid(x, y, z) || !seen.insert(pos_key(start)).second)
+				continue;
+			std::vector<pv::Vector3DInt32> piece;
+			std::deque<pv::Vector3DInt32> queue;
+			queue.push_back(start);
+			while(!queue.empty()){
+				pv::Vector3DInt32 p = queue.front();
+				queue.pop_front();
+				piece.push_back(p);
+				for(size_t k = 0; k < 6; k++){
+					pv::Vector3DInt32 n(p.getX() + OFF[k][0], p.getY() + OFF[k][1],
+							p.getZ() + OFF[k][2]);
+					if(solid(n.getX(), n.getY(), n.getZ()) &&
+							seen.insert(pos_key(n)).second)
+						queue.push_back(n);
+				}
+			}
+			pieces.push_back(piece);
+		}
+		return pieces;
+	}
+
+	// A body cut in two is two bodies: every piece but the largest is
+	// taken out of this body's volume into a body of its own, placed
+	// where the piece was in this body's frame and moving as it moved.
+	// Called under main_context with the body's node.
+	void split_body(Body &b, Node *n)
+	{
+		std::vector<std::vector<pv::Vector3DInt32>> pieces = body_pieces(b);
+		if(pieces.size() < 2)
+			return;
+		size_t largest = 0;
+		for(size_t i = 1; i < pieces.size(); i++)
+			if(pieces[i].size() > pieces[largest].size())
+				largest = i;
+		const interface::VoxelFormat &f = voxel_format();
+		RigidBody *rb = n->GetComponent<RigidBody>();
+		for(size_t i = 0; i < pieces.size(); i++){
+			if(i == largest)
+				continue;
+			const std::vector<pv::Vector3DInt32> &piece = pieces[i];
+			pv::Vector3DInt32 lo = piece[0], hi = piece[0];
+			for(const pv::Vector3DInt32 &p : piece){
+				lo = pv::Vector3DInt32(std::min(lo.getX(), p.getX()),
+						std::min(lo.getY(), p.getY()), std::min(lo.getZ(), p.getZ()));
+				hi = pv::Vector3DInt32(std::max(hi.getX(), p.getX()),
+						std::max(hi.getY(), p.getY()), std::max(hi.getZ(), p.getZ()));
+			}
+			pv::Vector3DInt32 size = hi - lo + pv::Vector3DInt32(1, 1, 1);
+			sp_<interface::VoxelVolume> volume(new interface::VoxelVolume(
+					pv::Region(pv::Vector3DInt32(-1, -1, -1), size),
+					f.planes));
+			float mass = 0;
+			std::vector<pv::Vector3DInt32> voxels;
+			for(const pv::Vector3DInt32 &p : piece){
+				VoxelSample v = b.volume->sample_at(p);
+				volume->set_sample_at(p.getX() - lo.getX(), p.getY() - lo.getY(),
+						p.getZ() - lo.getZ(), v);
+				mass += props_of(f.id_of(v.planes[0])).density;
+				// Out of this body: air where it was
+				VoxelSample air = v;
+				air.planes[0] = 0;
+				f.id.set(air.planes[0], CONTENT_AIR);
+				b.volume->set_sample_at(p.getX(), p.getY(), p.getZ(), air);
+				voxels.push_back(p - lo);
+			}
+			QueuedBody q;
+			q.ticks = 1; q.lo = pv::Vector3DInt32(0, 0, 0); q.size = size;
+			q.data = interface::serialize_volume_compressed(*volume);
+			q.mass = mass; q.voxels = voxels; q.volume = volume;
+			q.placed = true;
+			q.position = n->GetWorldTransform() * Vector3(
+					(float)lo.getX(), (float)lo.getY(), (float)lo.getZ());
+			q.rotation = n->GetWorldRotation();
+			q.velocity = rb ? rb->GetLinearVelocity() : Vector3::ZERO;
+			m_queued_bodies.push_back(q);
+			log_i(MODULE, "body %d: a piece of %zu voxels comes off", b.k,
+					piece.size());
+		}
 	}
 
 	void step_failing(voxelworld::Instance *world)
