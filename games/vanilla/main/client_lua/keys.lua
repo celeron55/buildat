@@ -55,6 +55,8 @@ M.BINDINGS = {
 			what = "Zoom while held (the zoom privilege)"},
 	{action = "fog", key = magic.KEY_F3, name = "F3",
 			what = "Fog on and off"},
+	{action = "minimap", key = magic.KEY_V, name = "V",
+			what = "Minimap: off, surface, radar, three sizes each"},
 	-- The engine's own, listed for the player and not rebindable here
 	{action = "screenshot", key = magic.KEY_F12, name = "F12", engine = true,
 			what = "A screenshot (the engine's)"},

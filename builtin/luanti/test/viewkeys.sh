@@ -1,7 +1,8 @@
 #!/bin/bash
 # [VIEW_KEYS]: F3 (fog), Z held (zoom) and F12 (the engine's screenshot)
 # driven on camera.lua's stage: local/viewkeys/plain.png, nofog.png,
-# zoom.png and back.png. Prints the chat and log lines the keys made.
+# zoom.png and back.png; then V through the minimap's modes: map_x2.png,
+# map_x1.png, radar_x4.png, map_off.png. Prints the chat and log lines the keys made.
 #
 #   builtin/luanti/test/viewkeys.sh
 set -u
@@ -43,6 +44,20 @@ delay 800
 screenshot $out/back.png
 keypress F12
 delay 1500
+keypress V
+delay 1200
+screenshot $out/map_x2.png
+keypress V
+delay 1200
+screenshot $out/map_x1.png
+keypress V
+delay 1200
+screenshot $out/radar_x4.png
+keypress V
+keypress V
+keypress V
+delay 1200
+screenshot $out/map_off.png
 quit
 CMDS
 bin/buildat -s localhost:29778 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 \

@@ -2990,6 +2990,34 @@ local MINIMAP_NODES = 64
 local MINIMAP_HEIGHT = 120
 local minimaps = {}
 local minimap_timer = 0
+-- Official's V ([VIEW_KEYS]): off, the surface at three sizes, the radar
+-- at three -- minimap.cpp's modes. The radar is a thin slice at the
+-- player's height, seen from just above it; the surface is the world
+-- from high up.
+-- simplified: the radar shows the tops of the nodes at the player's level
+-- rather than official's air-or-not scan; north stays up.
+sky_now.MINIMAP_MODES = {
+	{label = "Minimap hidden", nodes = 0},
+	{label = "Minimap in surface mode, Zoom x4", nodes = 64},
+	{label = "Minimap in surface mode, Zoom x2", nodes = 128},
+	{label = "Minimap in surface mode, Zoom x1", nodes = 256},
+	{label = "Minimap in radar mode, Zoom x4", nodes = 64, radar = true},
+	{label = "Minimap in radar mode, Zoom x2", nodes = 128, radar = true},
+	{label = "Minimap in radar mode, Zoom x1", nodes = 256, radar = true},
+}
+sky_now.minimap_mode = 2
+-- On sky_now: the file is at Lua's 200-local line
+function sky_now.apply_minimap_mode()
+	local mode = sky_now.MINIMAP_MODES[sky_now.minimap_mode]
+	for _, m in ipairs(minimaps) do
+		m.view.visible = mode.nodes > 0
+		if mode.nodes > 0 then
+			m.camera:GetComponent("Camera").orthoSize = mode.nodes
+			m.camera:GetComponent("Camera").farClip = mode.radar and 3 or MINIMAP_HEIGHT * 4
+			m.height = mode.radar and 1.5 or MINIMAP_HEIGHT
+		end
+	end
+end
 
 local function draw_hud_minimap(e)
 	-- A game that has turned the minimap off does not get one from its own
@@ -3035,7 +3063,8 @@ local function draw_hud_minimap(e)
 		view:GetViewport().renderPath = world_render_path:Clone()
 	end
 	hud_place(view, e, w, h)
-	minimaps[#minimaps + 1] = {view = view, camera = node}
+	minimaps[#minimaps + 1] = {view = view, camera = node, height = MINIMAP_HEIGHT}
+	sky_now.apply_minimap_mode()
 end
 
 -- Over the player, and drawn again a few times a second
@@ -3045,7 +3074,7 @@ local function follow_minimaps(dt)
 	end
 	local p = camera_node.worldPosition
 	for _, m in ipairs(minimaps) do
-		m.camera.position = magic.Vector3(p.x, p.y + MINIMAP_HEIGHT, p.z)
+		m.camera.position = magic.Vector3(p.x, p.y + m.height, p.z)
 	end
 	minimap_timer = minimap_timer + dt
 	if minimap_timer < 1 / MINIMAP_HZ then
@@ -3284,6 +3313,14 @@ local function draw_hud(elements, flags)
 			log:info("the game asked for a \"" .. kind ..
 					"\" HUD element, which is not drawn")
 		end
+	end
+	-- Official's own minimap ([VIEW_KEYS]): the engine draws one at the
+	-- top right whether or not the game adds a minimap element, under the
+	-- minimap HUD flag, and V walks its modes; here the same element as a
+	-- game's, 128 Luanti pixels, hidden while the mode is "off"
+	if #minimaps == 0 and hud_shown and luanti.hud_flag("minimap") then
+		draw_hud_minimap({pos = "1,0", offset = "-10,10", align = "-1,1",
+				size = "128,128"})
 	end
 end
 
@@ -3904,6 +3941,10 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		keys.toggle_mode("fast", "Fast mode")
 	elseif key == BIND.noclip.key then
 		keys.toggle_mode("noclip", "Noclip mode")
+	elseif key == BIND.minimap.key then
+		sky_now.minimap_mode = sky_now.minimap_mode % #sky_now.MINIMAP_MODES + 1
+		sky_now.apply_minimap_mode()
+		luanti.chat_local(sky_now.MINIMAP_MODES[sky_now.minimap_mode].label)
 	elseif key == BIND.fog.key then
 		-- Official's fog toggle (F3, [VIEW_KEYS]): the fog pushed past
 		-- the far clip, and back to the sky's rule
