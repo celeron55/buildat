@@ -4,7 +4,7 @@
 --
 -- View bobbing and the wield hand's motion as official Luanti has them
 -- (src/client/camera.cpp), one module for both Luanti clients
--- ([VIEW_BOB]). Everything is in nodes and radians; official's numbers
+-- ([VIEW_BOB]). Everything is in nodes and degrees; official's numbers
 -- are in BS units (ten to the node) and are divided here once.
 --
 --   local motion = camera_motion.new()
@@ -12,7 +12,7 @@
 --   local m = motion:update(dt, {walking =, swimming =, climbing =,
 --       flying =, speed = <nodes/s>, digging = <bool>, wield_changed = <bool>})
 --   m.offset  = {x, y, z}          -- the camera's, in the camera's own axes
---   m.roll    = radians            -- the camera's roll
+--   m.roll    = degrees            -- the camera's roll
 --   m.hand    = {x, y, z}          -- the hand's offset from its rest, nodes
 --
 -- simplified: the arm's inertia on the look (official's addArmInertia,
@@ -79,6 +79,10 @@ function M.update(self, dt, s)
 		-- official's bobvec, BS units: (0.3 * bobdir * sin, -0.28 * tmp^2, 0)
 		out.offset = {0.03 * bobdir * math.sin(bobfrac * math.pi) * self.amount,
 				-0.028 * bobtmp * bobtmp * self.amount, 0}
+		-- Degrees: official hands this to Irrlicht's rotateXYBy, which
+		-- takes degrees, so the roll is under a tenth of one. Read as
+		-- radians and converted, it was fifty times that -- the bob
+		-- "ten times too strong" on the box ([BOX_PLAYTEST_2] 10).
 		out.roll = -0.03 * bobdir * bobtmp * math.pi * self.amount
 	end
 
@@ -124,7 +128,7 @@ do
 		rolled = math.max(rolled, math.abs(r.roll))
 	end
 	assert(lowest < -0.02 and lowest > -0.03, "the bob dips about 0.028: " .. lowest)
-	assert(rolled > 0.05 and rolled < 0.1, "the roll about 0.09 rad: " .. rolled)
+	assert(rolled > 0.05 and rolled < 0.1, "the roll under a tenth of a degree: " .. rolled)
 	for _ = 1, 120 do
 		m:update(0.016, {walking = false, speed = 0})
 	end

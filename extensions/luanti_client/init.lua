@@ -2726,7 +2726,7 @@ local function show_client(host, port, name, password, mode)
 					cpitch, cyaw = -pitch, yaw + 180
 				end
 			end
-			view:set_camera(cx, cy, cz, cpitch, cyaw, math.deg(m.roll))
+			view:set_camera(cx, cy, cz, cpitch, cyaw, m.roll)
 		end
 
 		-- Set once the session is over -- the server said no, the connection

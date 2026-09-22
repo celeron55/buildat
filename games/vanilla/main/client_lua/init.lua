@@ -4256,7 +4256,7 @@ function frame_peak.update(dt)
 					speed_xz, WIELD.motion.amount))
 		end
 		if m.roll ~= 0 or m.offset[1] ~= 0 or m.offset[2] ~= 0 then
-			camera_node.rotation = magic.Quaternion(pitch, yaw, math.deg(m.roll))
+			camera_node.rotation = magic.Quaternion(pitch, yaw, m.roll)
 			-- Sideways along the camera's right (the yaw turned a quarter),
 			-- and straight up: official adds its bobvec before the pitch
 			local ry = math.rad(yaw)
