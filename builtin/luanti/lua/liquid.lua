@@ -342,6 +342,12 @@ end
 -- changed node, times the nodes changed so far, reaches PASS_US.
 -- simplified: a fixed 250 ms; a setting when a game wants it.
 local PASS_US = 250000
+-- And a ceiling on the changed nodes themselves, whatever the estimate
+-- says: the callbacks are paid after the loop, so the first big pass of a
+-- run -- before there is an estimate at all -- had nothing to stop it and
+-- ran 833 ms of them ([FLOOD_STEP], under a client, where a changed
+-- node costs about 200 us: 1200 of them is a quarter of a second)
+local CHANGED_MAX = 1200
 local cut_short = false
 local per_changed_us = 40
 -- When the writes, the falling checks and the callbacks began, for the
@@ -362,8 +368,9 @@ local function transform(loop_max)
 	-- the one above it already water
 	while head <= tail and loops < loop_max do
 		loops = loops + 1
-		if loops % 64 == 0 and (core.get_us_time() - t0) +
-				#changed * per_changed_us > PASS_US then
+		if loops % 64 == 0 and ((core.get_us_time() - t0) +
+				#changed * per_changed_us > PASS_US or
+				#changed >= CHANGED_MAX) then
 			cut_short = true
 			break
 		end
@@ -470,8 +477,14 @@ function core.__step_liquids(dtime)
 	local n = transform(loop_max)
 	local pass_us = core.get_us_time() - t0
 	if pass_n_changed > 100 then
-		per_changed_us = math.max(1, math.min(1000,
+		local measured = math.max(1, math.min(1000,
 				(core.get_us_time() - pass_t[1]) / pass_n_changed))
+		-- The higher of the two, decayed: under a client the callbacks
+		-- cost three times what they do standalone, and a single cheap
+		-- pass used to drop the estimate far enough that the next one ran
+		-- 900 ms of callbacks before anything could stop it. Rising is
+		-- immediate, falling takes a few passes ([FLOOD_STEP]).
+		per_changed_us = math.max(measured, per_changed_us * 0.8)
 	end
 	if pass_us > 500000 then
 		local t1 = core.get_us_time()
