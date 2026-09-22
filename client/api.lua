@@ -85,6 +85,7 @@ buildat.compose_image     = __buildat_compose_image
 buildat.read_image        = __buildat_read_image
 buildat.get_env           = __buildat_get_env
 buildat.create_directories = __buildat_create_directories -- unsafe only
+buildat.set_watchdog_seconds = __buildat_set_watchdog_seconds -- unsafe only
 
 buildat.safe.disconnect    = __buildat_disconnect
 -- leave(): back to the launcher's grid when there is one under the game

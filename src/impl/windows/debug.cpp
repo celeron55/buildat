@@ -232,9 +232,10 @@ void init_signal_handlers(const SigConfig &config)
 void watchdog_alive(int stall_seconds)
 {
 	g_watched_alive_us = (LONG64)GetTickCount64() * 1000;
+	// Every call, so a screen may lower it for its own stay
+	g_watchdog_stall_s = stall_seconds;
 	if(g_watched_thread)
 		return;
-	g_watchdog_stall_s = stall_seconds;
 	DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
 			GetCurrentProcess(), &g_watched_thread, 0, FALSE,
 			DUPLICATE_SAME_ACCESS);

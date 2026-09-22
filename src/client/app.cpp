@@ -549,6 +549,8 @@ static bool valid_game_name(const ss_ &name)
 static interface::process::Handle g_local_server;
 // Port the local server was told to listen on ("" if none was started)
 static ss_ g_local_server_port;
+// The watchdog's stall, in seconds; a screen may lower it ([BOX_PLAYTEST_2] 12)
+static int g_watchdog_seconds = 10;
 // The local server's log, tailed for its STATUS lines ([START_PROGRESS])
 static ss_ g_local_server_log;
 static size_t g_local_server_log_offset = 0;
@@ -1344,6 +1346,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(create_directories)
+		DEF_BUILDAT_FUNC(set_watchdog_seconds)
 		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(set_ui_scale)
 		DEF_BUILDAT_FUNC(get_ui_scale)
@@ -1789,8 +1792,12 @@ struct CApp: public App, public magic::Application
 	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
 		// A frame: the watchdog hears it, and logs this thread's stack
-		// when none comes for ten seconds ([WIN8_START] 14)
-		interface::debug::watchdog_alive(10);
+		// when none comes for ten seconds ([WIN8_START] 14) -- or for
+		// what a screen asked (the starting screen asks for two: its
+		// counter froze for seconds on the box while the server loaded
+		// worldgen, and the stack says what this thread was doing;
+		// [BOX_PLAYTEST_2] 12)
+		interface::debug::watchdog_alive(g_watchdog_seconds);
 		/*magic::AutoProfileBlock profiler_block(
 				GetSubsystem<magic::Profiler>(), "App::on_update");*/
 
@@ -2930,6 +2937,15 @@ struct CApp: public App, public magic::Application
 			return 1;
 		}
 		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
+		return 0;
+	}
+
+	// set_watchdog_seconds(n): how long without a frame before the
+	// watchdog logs this thread's stack; 0 puts the default (10) back
+	static int l_set_watchdog_seconds(lua_State *L)
+	{
+		int n = (int)luaL_optinteger(L, 1, 0);
+		g_watchdog_seconds = n > 0 ? n : 10;
 		return 0;
 	}
 

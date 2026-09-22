@@ -242,8 +242,15 @@ local function show_starting(game)
 	local t0 = buildat.get_time_us()
 	local last_status, last_status_at, last_poll = nil, t0, 0
 	local done = false
+	-- While this screen is up a frame that stalls two seconds is logged
+	-- with this thread's stack: the counter froze on the box while the
+	-- server loaded worldgen and luanti_mapgen, and the client does
+	-- nothing for the server then ([BOX_PLAYTEST_2] 12). Put back with
+	-- the screen. The frame's own phase word is in the log too.
+	buildat.set_watchdog_seconds(2)
 	root:SubscribeToStackEvent("Update", function(event_type, event_data)
 		if done then
+			buildat.set_watchdog_seconds(0)
 			return
 		end
 		if buildat.local_server_ready() then

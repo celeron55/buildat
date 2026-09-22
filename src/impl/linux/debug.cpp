@@ -441,9 +441,10 @@ static void *watchdog_main(void*)
 void watchdog_alive(int stall_seconds)
 {
 	g_watched_alive_us = watchdog_now_us();
+	// Every call, so a screen may lower it for its own stay
+	g_watchdog_stall_s = stall_seconds;
 	if(g_watchdog_started.exchange(true))
 		return;
-	g_watchdog_stall_s = stall_seconds;
 	g_watched_thread = pthread_self();
 	struct sigaction sa;
 	memset(&sa, 0, sizeof sa);
