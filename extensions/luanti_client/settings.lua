@@ -49,7 +49,9 @@ end
 
 M.DEFAULTS = {mode = "unlit", view_range = 120, view_bobbing = 1,
 		shoulder = 0, name = random_name(), address = "localhost:30000",
-		keys = {}}
+		-- What was typed in the server list's filter last time: a player
+		-- filters for the same server every time ([BOX_PLAYTEST_2] 13b)
+		server_filter = "", keys = {}}
 
 -- The bindings table, for the screen's "Key bindings..." row; init.lua
 -- sets it

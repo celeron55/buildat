@@ -3679,7 +3679,9 @@ show_connect_dialog = function(address, name)
 	local sources = left:CreateChild("UIElement")
 	sources:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
 	local source_buttons = {}
-	local filter_edit = labeled_edit(left, "Filter", "")
+	-- The filter is put back as it was left ([BOX_PLAYTEST_2] 13b)
+	local filter_edit = labeled_edit(left, "Filter",
+			SETTINGS.server_filter or "")
 	local list = ui_utils.server_list(left, {width = 520, height = 420},
 			function(row, second)
 		address_edit:SetText(row.address)
@@ -3795,7 +3797,14 @@ show_connect_dialog = function(address, name)
 	end
 	source_button("recent", "Servers used")
 	source_button("official", "Official list")
-	magic.SubscribeToEvent(filter_edit, "TextFinished", function() show() end)
+	magic.SubscribeToEvent(filter_edit, "TextFinished", function()
+		show()
+		-- Kept for the next time this screen opens
+		local kept = settings.load()
+		kept.server_filter = filter_edit:GetText()
+		SETTINGS.server_filter = kept.server_filter
+		settings.save(kept)
+	end)
 	show()
 
 	-- Escape cancels. A plain subscription rather than the stack's own,
