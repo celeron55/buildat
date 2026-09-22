@@ -2942,6 +2942,21 @@ function M.click(x, y, button)
 	-- way Luanti's own client sends one
 	for _, t in ipairs(form.drawn.taps) do
 		if inside(t) then
+			-- A dropdown's own two taps ([FORMSPEC_SCROLL]): the box opens
+			-- and closes the list and sends nothing, an item in the list
+			-- is the choice and sends the form back with it
+			if t.open then
+				form.state.dropdown_open =
+						form.state.dropdown_open ~= t.name and t.name or nil
+				draw_form()
+				return true
+			end
+			if t.pick then
+				form.state.dropdown = form.state.dropdown or {}
+				form.state.dropdown[t.name] = t.pick
+				form.state.dropdown_open = nil
+				draw_form()
+			end
 			local fields = form_fields()
 			fields[t.name] = t.value
 			if t.check then

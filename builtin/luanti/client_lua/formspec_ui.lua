@@ -978,6 +978,66 @@ function M.new(magic, buildat, log, ctx)
 				if x and w then
 					draw_table(e, x, y, w, h)
 				end
+			elseif name == "dropdown" then
+				-- dropdown[X,Y;W;name;item1,item2,...;selected;index event]
+				-- and the newer form with W,H. Drawn as the chosen item in
+				-- a box; a click opens the list under it and a click in
+				-- that picks ([FORMSPEC_SCROLL]).
+				--
+				-- simplified: the list is drawn over whatever is under it
+				-- without a shadow, and it is as tall as it needs to be
+				-- rather than scrolling at some number of items.
+				local x, y = at(e, 1)
+				local sized = formspec.parse_v2(e.fields[2]) ~= nil
+				local w, h
+				if sized then
+					w, h = geometry(e, 2)
+				else
+					-- The old form gives a width in formspec units and no
+					-- height; Luanti's own is a button's height
+					w = (tonumber(e.fields[2]) or 0) * layout.scale[1]
+					h = layout.imgsize * 15 / 13 * 0.35
+				end
+				local i0 = sized and 3 or 3
+				local dname = e.fields[i0]
+				local items = {}
+				for _, it in ipairs(formspec.split(e.raw[i0 + 1] or "", ",")) do
+					items[#items + 1] = formspec.strip_escapes(
+							formspec.unescape(it))
+				end
+				local index_event = tostring(e.fields[i0 + 3] or "") == "true"
+				if x and w and dname then
+					state.dropdown = state.dropdown or {}
+					local chosen = state.dropdown[dname] or
+							tonumber(e.fields[i0 + 2]) or 1
+					if chosen < 1 or chosen > #items then
+						chosen = 1
+					end
+					state.dropdown[dname] = chosen
+					local text = items[chosen] or ""
+					box(window, x, y, w, h,
+							magic.Color(0.2, 0.2, 0.25, 0.9))
+					label(window, x + 4, y + h / 2 - 8, w - 20, text, 12)
+					label(window, x + w - 14, y + h / 2 - 8, 12, "v", 12)
+					-- Its value rides with every submit, as a field's does
+					fields[#fields + 1] = {name = dname, x = x, y = y,
+							w = w, h = h,
+							value = index_event and tostring(chosen) or text}
+					taps[#taps + 1] = {name = dname, open = true,
+							x = x, y = y, w = w, h = h}
+					if state.dropdown_open == dname then
+						for i, it in ipairs(items) do
+							local iy = y + h * i
+							box(window, x, iy, w, h, i == chosen and
+									magic.Color(0.35, 0.35, 0.5, 0.95) or
+									magic.Color(0.15, 0.15, 0.2, 0.95))
+							label(window, x + 4, iy + h / 2 - 8, w - 8, it, 12)
+							taps[#taps + 1] = {name = dname, pick = i,
+									x = x, y = iy, w = w, h = h,
+									value = index_event and tostring(i) or it}
+						end
+					end
+				end
 			elseif name == "tablecolumns" then
 				columns = parse_columns(e.fields)
 			elseif name == "label" or name == "textarea" or
