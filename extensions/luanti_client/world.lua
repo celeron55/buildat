@@ -517,17 +517,20 @@ function M.new(magic, buildat, log, options)
 	-- the sky it reflects.
 	-- shadows differs from unlit in one file: LuantiVoxelUnlit adds a light
 	-- pass that multiplies by the shadow factor and writes nothing else.
-	-- Water is unshadowed in both, VoxelUnlitAlpha having no light pass.
+	-- Water is shadowed on the shadows path as the module's is, through
+	-- LuantiVoxelUnlitAlpha's multiplied light pass ([PARITY_LEFTOVERS]);
+	-- unlit's VoxelUnlitAlpha has no light pass.
 	local opaque_name = "luanti_client/res/VoxelUnlit.xml"
+	local alpha_name = "luanti_client/res/VoxelUnlitAlpha.xml"
 	if pbr then
 		opaque_name = "luanti_client/res/PBRVoxel.xml"
+		alpha_name = "luanti_client/res/PBRVoxelAlpha.xml"
 	elseif mode == "shadows" then
 		opaque_name = "luanti_client/res/LuantiVoxelUnlit.xml"
+		alpha_name = "luanti_client/res/LuantiVoxelUnlitAlpha.xml"
 	end
 	local technique = magic.cache:GetResource("Technique", opaque_name)
-	local alpha_technique = magic.cache:GetResource("Technique", pbr and
-			"luanti_client/res/PBRVoxelAlpha.xml" or
-			"luanti_client/res/VoxelUnlitAlpha.xml")
+	local alpha_technique = magic.cache:GetResource("Technique", alpha_name)
 	local sky_cube = nil
 	if pbr then
 		-- What the reflections are of: the sky as it is drawn, rendered
