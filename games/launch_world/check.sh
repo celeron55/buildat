@@ -33,6 +33,24 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 		echo "screenshot $out/$n-$name.png"
 		n=$((n + 1))
 	done
+	# The dissolve: the bay of the orb being pointed at opens, and closes
+	# again. What is checked is that the wall moves and comes back --
+	# states being configurations of one scene, the closed picture has to
+	# be the picture it was.
+	echo "keypress 1"
+	echo "delay 800"
+	echo "screenshot $out/dissolve-closed.png"
+	# A screenshot lands a frame or two after the command, so the next
+	# key has to wait or it is in the picture (2026-09-23)
+	echo "delay 600"
+	echo "keypress Return"
+	echo "delay 1600"
+	echo "screenshot $out/dissolve-open.png"
+	echo "delay 600"
+	echo "keypress Backspace"
+	echo "delay 2200"
+	echo "screenshot $out/dissolve-closed-again.png"
+	echo "delay 600"
 	# And the first preset again with the reflection probe taken off the
 	# zone, which is what says the probe reaches the metals
 	echo "keypress 1"
@@ -111,5 +129,23 @@ print("the probe moves a 60x60 block by %.2f of a level at its most, "
 probe_ok = best > 10.0
 print("PASS: the probe reaches the metals" if probe_ok
 		else "FAIL: the probe changes nothing on a metal")
-sys.exit(0 if (ok and probe_ok) else 1)
+
+# The dissolve: the wall has to move, and the closed picture has to be
+# the picture it was
+def mean_of(name):
+	im = Image.open("%s/%s.png" % (out, name)).convert("L")
+	d = list(im.getdata())
+	return im, d
+
+closed, dc = mean_of("dissolve-closed")
+opened, do = mean_of("dissolve-open")
+again, da = mean_of("dissolve-closed-again")
+moved = sum(abs(p - q) for p, q in zip(dc, do)) / float(len(dc))
+back = sum(abs(p - q) for p, q in zip(dc, da)) / float(len(dc))
+print("the dissolve moves the frame by %.2f of a level and comes back "
+		"to within %.2f" % (moved, back))
+dissolve_ok = moved > 2.0 and back < moved / 3.0
+print("PASS: a bay opens and closes again" if dissolve_ok
+		else "FAIL: the dissolve does not open, or does not come back")
+sys.exit(0 if (ok and probe_ok and dissolve_ok) else 1)
 PY

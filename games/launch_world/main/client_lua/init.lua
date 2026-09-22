@@ -219,8 +219,12 @@ local ORBS = {
 	{name = "mine.example.net", warm = false},
 }
 local orb_places = {}
+-- Every slab, with the bay it belongs to: the dissolve needs to know
+-- which wall is coming apart
+local bay_slabs = {}
 for b = 1, BAYS do
 	local x = BAY_X0 + (b - 1) * BAY_W
+	bay_slabs[b] = {}
 	-- The pillar: stacked slabs, each a little narrower than the one
 	-- under it, which is the tomb read and is a loop rather than a model
 	for tier = 0, 5 do
@@ -230,18 +234,21 @@ for b = 1, BAYS do
 		if tier == BAY_TIER[b] then
 			-- The tier the orb glows through: two posts and a gap
 			for _, side in ipairs({-1, 1}) do
-				part("Box", magic.Vector3(x + side * (w / 2 - 0.55), y, -8),
+				bay_slabs[b][#bay_slabs[b] + 1] = part("Box",
+						magic.Vector3(x + side * (w / 2 - 0.55), y, -8),
 						magic.Vector3(1.1, SLAB.h, SLAB.d), face)
 			end
 			orb_places[#orb_places + 1] = {x = x, y = y, z = -9.6}
 		else
-			part("Box", magic.Vector3(x, y, -8),
+			bay_slabs[b][#bay_slabs[b] + 1] = part("Box",
+					magic.Vector3(x, y, -8),
 					magic.Vector3(w, SLAB.h, SLAB.d), face)
 		end
 	end
 	-- A lintel across the top of the bay, deeper than the stack, so the
 	-- wall has a front plane as well as a back one
-	part("Box", magic.Vector3(x, 6.0 + SLAB.h, -7.2),
+	bay_slabs[b][#bay_slabs[b] + 1] = part("Box",
+			magic.Vector3(x, 6.0 + SLAB.h, -7.2),
 			magic.Vector3(BAY_W - 0.5, 0.5, 2.6), meander_mat)
 end
 -- And the back wall itself, so the orbs glow out of something rather
@@ -566,6 +573,86 @@ function handle_synth_update()
 end
 magic.SubscribeToEvent("Update", "handle_synth_update")
 
+-- **The dissolve**: a bay un-builds into flying slabs, and it is the
+-- only transition there is. States are configurations of one scene, not
+-- screens with a camera parked in each, so a bay is a number in 0..1 and
+-- every slab's place is read off it -- which makes it reversible,
+-- interruptible and free of keyframes.
+--
+-- Where a slab goes is decided once from its own index, so the wall
+-- comes apart the same way every time; a wall that scatters differently
+-- on each open reads as noise rather than as a mechanism.
+local DISSOLVE_SECONDS = 0.9
+local bay_state = {}
+for b = 1, BAYS do
+	bay_state[b] = {t = 0, target = 0, slabs = {}}
+	for i, node in ipairs(bay_slabs[b] or {}) do
+		-- The numbers, not the Vector3: Node's position property hands
+		-- back a reference to the node's own vector, so a "home" kept as
+		-- that object follows the slab as it flies and the close lerps
+		-- towards where it already is -- the bay opened and never shut
+		-- (2026-09-23). Same trap as a const Vector3& property.
+		local p = node.position
+		local home = {x = p.x, y = p.y, z = p.z}
+		-- Outward from the bay's middle, upward with the tier, and a
+		-- little towards the viewer: the wall opens rather than explodes
+		local dir = ((i % 2 == 0) and 1 or -1)
+		bay_state[b].slabs[i] = {
+			node = node,
+			home = home,
+			away = {x = home.x + dir * (2.5 + i * 0.35),
+					y = home.y + 1.2 + i * 0.28,
+					z = home.z + 2.2 + (i % 3) * 0.6},
+			-- The tumble as three angles rather than a quaternion to
+			-- slerp towards: Quaternion:Slerp is not on the sandbox's
+			-- whitelist, and scaling the eulers is the same picture for
+			-- a slab that turns twenty degrees
+			spin = {i * 11 % 40 - 20, i * 27 % 60 - 30, i * 17 % 50 - 25},
+		}
+	end
+end
+
+local function ease(t)
+	-- Slow at both ends, which is what makes a heavy slab read as heavy
+	return t * t * (3 - 2 * t)
+end
+
+function dissolve_bay(b, open)
+	local st = bay_state[b]
+	if st then
+		st.target = open and 1 or 0
+	end
+end
+
+function handle_dissolve_update(event_type, event_data)
+	local dt = event_data:GetFloat("TimeStep")
+	for b = 1, BAYS do
+		local st = bay_state[b]
+		if st.t ~= st.target then
+			local was = st.t
+			local step = dt / DISSOLVE_SECONDS
+			if st.target > st.t then
+				st.t = math.min(st.target, st.t + step)
+			else
+				st.t = math.max(st.target, st.t - step)
+			end
+			local e = ease(st.t)
+			for _, sl in ipairs(st.slabs) do
+				sl.node.position = magic.Vector3(
+						sl.home.x + (sl.away.x - sl.home.x) * e,
+						sl.home.y + (sl.away.y - sl.home.y) * e,
+						sl.home.z + (sl.away.z - sl.home.z) * e)
+				sl.node.rotation = magic.Quaternion(sl.spin[1] * e,
+						sl.spin[2] * e, sl.spin[3] * e)
+			end
+			if st.t == st.target and was ~= st.target then
+				log:info("dissolve: bay " .. b .. " settled at " .. st.t)
+			end
+		end
+	end
+end
+magic.SubscribeToEvent("Update", "handle_dissolve_update")
+
 set_preset(1)
 
 function handle_keydown(event_type, event_data)
@@ -582,6 +669,15 @@ function handle_keydown(event_type, event_data)
 	-- shoots the same frame with and without it: a metal with nothing to
 	-- reflect is black but for its highlight, and that difference is the
 	-- whole of what the probe is for
+	-- Return opens the bay of the orb being pointed at, which is the
+	-- only transition the room has; Backspace closes it again
+	if key == magic.KEY_RETURN and pointed_orb > 0 then
+		dissolve_bay(pointed_orb, true)
+		log:info("dissolve: bay " .. pointed_orb .. " opening")
+	elseif key == magic.KEY_BACKSPACE and pointed_orb > 0 then
+		dissolve_bay(pointed_orb, false)
+		log:info("dissolve: bay " .. pointed_orb .. " closing")
+	end
 	if key == magic.KEY_P then
 		probe_on = not probe_on
 		zone.zoneTexture = probe_on and kept.probe or kept.dark_probe
