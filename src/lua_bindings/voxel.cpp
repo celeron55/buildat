@@ -455,6 +455,19 @@ static uint32_t vreg_id_of(VoxelRegistry &reg, const interface::VoxelInstance &v
 	return reg.get_format().id_of(v.data);
 }
 
+// The same voxel with another type id and everything else -- its light, its
+// param -- as it was: what a client writes where it predicts a dig or a
+// place ([PREDICTION]), so the hole is lit the way the server will light it
+static interface::VoxelInstance vreg_with_id(VoxelRegistry &reg,
+		const interface::VoxelInstance &v, uint32_t id)
+{
+	interface::VoxelInstance out = v;
+	const interface::VoxelFormat &f = reg.get_format();
+	if(f.id.bound())
+		f.id.set(out.data, id);
+	return out;
+}
+
 // The two light nibbles of a voxel, 0..15 each, under the format: what the
 // held item is lit by is the light where the player stands ([WIELD_MESH])
 static uint32_t vreg_light_sky_of(VoxelRegistry &reg, const interface::VoxelInstance &v)
@@ -745,6 +758,7 @@ void init_voxel(lua_State *L)
 			.def("set_look_rules", &vreg_set_look_rules)
 			.def("dump_format", &vreg_dump_format)
 			.def("id_of", &vreg_id_of)
+			.def("with_id", &vreg_with_id)
 			.def("light_sky_of", &vreg_light_sky_of)
 			.def("light_lamp_of", &vreg_light_lamp_of)
 		,

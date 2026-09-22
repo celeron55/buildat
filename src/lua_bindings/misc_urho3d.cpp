@@ -203,6 +203,39 @@ static int l_set_preferred_viewports(lua_State *L)
 	return 0;
 }
 
+// set_voxel_data(node, data: string)
+// A chunk node's buildat_voxel_data from a string, which is what a volume
+// serializes to; the mesher reads the var and a string has no way into a
+// Variant from the sandbox. For a client's predicted dig or place
+// ([PREDICTION]); the server's replication of the var overwrites it.
+static int l_set_voxel_data(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(node, 1, Node);
+	size_t len = 0;
+	const char *data = lua_tolstring(L, 2, &len);
+	if(!data)
+		throw Exception("set_voxel_data: data must be a string");
+	node->SetVar(StringHash("buildat_voxel_data"), Variant(
+			PODVector<uint8_t>((const uint8_t*)data, len)));
+	return 0;
+}
+
+// get_voxel_data(node) -> string, or nil for a node without the var
+static int l_get_voxel_data(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(node, 1, Node);
+	const Variant &var = node->GetVar(StringHash("buildat_voxel_data"));
+	if(var.GetType() != VAR_BUFFER){
+		lua_pushnil(L);
+		return 1;
+	}
+	const PODVector<uint8_t> &buf = var.GetBuffer();
+	lua_pushlstring(L, buf.Size() ? (const char*)&buf[0] : "", buf.Size());
+	return 1;
+}
+
 void init_misc_urho3d(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
@@ -215,6 +248,8 @@ void init_misc_urho3d(lua_State *L)
 	DEF_BUILDAT_FUNC(add_resource_dir);
 	DEF_BUILDAT_FUNC(render_scene_to_texture);
 	DEF_BUILDAT_FUNC(set_preferred_viewports);
+	DEF_BUILDAT_FUNC(set_voxel_data);
+	DEF_BUILDAT_FUNC(get_voxel_data);
 }
 
 } // namespace lua_bindingss

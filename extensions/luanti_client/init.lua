@@ -1286,6 +1286,77 @@ local function show_client(host, port, name, password, mode)
 			return id and node_defs and node_defs[id] or nil
 		end
 
+		-- The id a node name has here, for a predicted write. Air is not in
+		-- the definitions the server sends; its id is the protocol's
+		local function node_id_of(name)
+			if name == "air" then
+				return 126 -- CONTENT_AIR
+			end
+			local def = node_by_name[name]
+			return def and def.id or nil
+		end
+
+		-- Dig prediction ([PREDICTION]): the node becomes its definition's
+		-- node_dig_prediction the moment the dig completes (air unless the
+		-- definition names another, "" for none), and the server's update
+		-- overwrites whatever this got wrong -- official's Game::handleDigging
+		local function predict_dig(p)
+			local def = node_def_at(p)
+			if not def then
+				return
+			end
+			local want = def.node_dig_prediction
+			if want == nil then
+				want = "air"
+			end
+			if want == "" then
+				return
+			end
+			local id = node_id_of(want)
+			if id then
+				view:set_node(p[1], p[2], p[3], id, nil, 0)
+				log:info(string.format("predicted %s at (%d, %d, %d)", want,
+						p[1], p[2], p[3]))
+			end
+		end
+
+		-- Placement prediction: the wielded item's node_placement_prediction
+		-- into above (or under when buildable_to), unless the pointed node
+		-- takes the click (rightclickable and no sneak) or the item says ""
+		-- (a custom on_place). simplified: only a node with no facedir or
+		-- wallmounted paramtype2 is predicted; the others wait for the
+		-- server's answer with the param2 it works out.
+		local function predict_place(pointed_under, pointed_above, sneak)
+			local held = wielded()
+			local idef = held and item_defs and item_defs[held.name]
+			local want = idef and idef.node_placement_prediction
+			if want == nil then
+				want = node_by_name[held and held.name or ""] and held.name or ""
+			end
+			if want == "" then
+				return
+			end
+			local udef = node_def_at(pointed_under)
+			if udef and udef.rightclickable and not sneak then
+				return
+			end
+			local def = node_by_name[want]
+			if not def or def.id == nil then
+				return
+			end
+			-- ContentParamType2: 3 facedir, 4 wallmounted, 9 and 10 their
+			-- coloured kinds, 13 and 14 the 4dir ones
+			local pt2 = def.param_type_2 or 0
+			if pt2 == 3 or pt2 == 4 or pt2 == 9 or pt2 == 10 or pt2 == 13 or
+					pt2 == 14 then
+				return
+			end
+			local at = (udef and udef.buildable_to) and pointed_under or pointed_above
+			view:set_node(at[1], at[2], at[3], def.id, nil, 0)
+			log:info(string.format("predicted %s at (%d, %d, %d)", want,
+					at[1], at[2], at[3]))
+		end
+
 		-- The pointing ray, and what holding the dig button does to what it
 		-- finds. Luanti's server wants a START_DIGGING at a node before a
 		-- DIGGING_COMPLETED for it, and no sooner than the dig would have
@@ -1438,6 +1509,7 @@ local function show_client(host, port, name, password, mode)
 						wield_index - 1, {under = dig.under,
 						above = dig.above})
 				dig.done = true
+				predict_dig(dig.under)
 			end
 			update_crack()
 		end
@@ -2302,6 +2374,8 @@ local function show_client(host, port, name, password, mode)
 			end
 			client:interact(luanti.INTERACT_PLACE, wield_index - 1,
 					{under = pointed_under, above = pointed_above})
+			predict_place(pointed_under, pointed_above,
+					magic.input:GetKeyDown(BIND.sneak.key))
 		end
 
 		-- The bottom line is remade every frame; everything above it is the

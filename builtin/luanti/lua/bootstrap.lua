@@ -4311,6 +4311,17 @@ end
 --   i <name> <range> <short description> <full_punch_interval>
 --      <group>:<maxlevel>:<uses>:<rating>=<time>,<rating>=<time> ...
 --   n <name> <group>=<rating>,<group>=<rating>
+--   d <name> <node_placement_prediction> <node_dig_prediction> <flags>
+--
+-- The d record is what a client predicts with ([PREDICTION]): the item's
+-- placement prediction (Luanti's default, the item's own node for a node
+-- and nothing for the rest), the node's dig prediction ("air" unless the
+-- definition says otherwise) and flags among "r" (has on_rightclick,
+-- which a click without sneak uses instead of placing), "b" (buildable_to,
+-- placed into rather than against), "p" (a paramtype2 the placement
+-- works out from the look, which is left to the server) and "w"
+-- (walkable, which is not predicted into the player's own box). Items whose
+-- record would say nothing -- no node, no prediction -- have none.
 --
 -- An item with no tool_capabilities has an empty fourth field and no
 -- groupcap fields after it, which is what says it has none: the hand's are
@@ -4363,6 +4374,28 @@ function core.__dig_props()
 			end
 		end
 		out[#out + 1] = table.concat(fields, "\t")
+	end
+	local placed_param2 = {facedir = true, wallmounted = true,
+			colorfacedir = true, colorwallmounted = true, ["4dir"] = true,
+			color4dir = true}
+	for name, def in pairs(core.registered_items) do
+		local node = core.registered_nodes[name]
+		local place = def.node_placement_prediction
+		if place == nil then
+			place = node and name or ""
+		end
+		if node or place ~= "" then
+			local flags = ""
+			if node and node.on_rightclick then flags = flags .. "r" end
+			if node and node.buildable_to then flags = flags .. "b" end
+			if node and placed_param2[node.paramtype2] then
+				flags = flags .. "p"
+			end
+			if node and node.walkable ~= false then flags = flags .. "w" end
+			out[#out + 1] = "d\t" .. name .. "\t" .. dig_field(place) .. "\t" ..
+					dig_field(node and node.node_dig_prediction or "air") ..
+					"\t" .. flags
+		end
 	end
 	for name, def in pairs(core.registered_nodes) do
 		local groups = def.groups
@@ -4494,7 +4527,15 @@ function core.__dig_node(pos, digger)
 	if node.name == "ignore" then
 		return false
 	end
-	return core.node_dig(pos, node, digger) and true or false
+	local dug = core.node_dig(pos, node, digger) and true or false
+	-- The node as it is now goes back to the clients whatever happened,
+	-- so a client that predicted the dig ([PREDICTION]) is put right when
+	-- the dig was refused: written unchanged, the chunk is committed and
+	-- sent again (Luanti's server sends the node back the same way)
+	if digger then
+		core.swap_node(pos, core.get_node(pos))
+	end
+	return dug
 end
 
 function core.dig_node(pos)

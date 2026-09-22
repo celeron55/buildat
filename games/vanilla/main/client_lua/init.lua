@@ -3714,10 +3714,51 @@ local function update_crack()
 	set_crack(dig.p, crack_texture(index))
 end
 
+-- A node this client writes ahead of the server's answer ([PREDICTION]):
+-- Luanti's client does the same and lets the server's update overwrite it,
+-- which comes whatever the server made of the dig or place -- see
+-- core.__dig_node() and core.__use_node() in the module. The voxel keeps
+-- its light and param; the id is what changes. Voxel ids are content ids,
+-- and the registry names them by node name. On WIELD for Lua's 200-local
+-- limit; WIELD.predict_ids is node name -> voxel id.
+WIELD.predict_ids = {count = -1}
+function WIELD.predict_node(p, name)
+	local reg = voxelworld.get_voxel_registry()
+	if reg == nil or name == "" then
+		return
+	end
+	local ids = WIELD.predict_ids
+	if ids.count ~= reg:get_count() then
+		ids = {count = reg:get_count()}
+		for i = 1, ids.count do
+			local def = reg:get_by_id(i)
+			if def then
+				ids[def.name.block_name] = i
+			end
+		end
+		WIELD.predict_ids = ids
+	end
+	local id = ids[name]
+	if id == nil then
+		return
+	end
+	local v = voxelworld.get_static_voxel(p)
+	if v == nil or reg:id_of(v) == 0 then
+		return
+	end
+	voxelworld.set_static_voxel(p, reg:with_id(v, id))
+	log:info(string.format("predicted %s at (%d, %d, %d)", name,
+			p.x, p.y, p.z))
+end
+
 local function dig_packet(name, p)
 	buildat.send_packet(name, cereal.binary_output({
 		p = voxel_packet_value(p),
 	}, {"object", {"p", VOXEL_PACKET_TYPE}}))
+	if name == "main:dig" and dig and dig.name then
+		local pr = luanti.prediction(dig.name)
+		WIELD.predict_node(voxel_packet_value(p), pr and pr.dig or "air")
+	end
 	-- Which chunk the dug voxel is in, and which node draws it. The client
 	-- says when a chunk that changed waits to be drawn again and names it by
 	-- node id (see builtin/voxelworld's client half), and this is the line
@@ -3825,16 +3866,40 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	-- otherwise, which is the server's to decide
 	-- Shift is Luanti's sneak: held, it means build against the node rather
 	-- than use it, which is the only way to put something on top of a chest
+	local under = voxel_packet_value(pointed_p)
+	local above = voxel_packet_value(pointed_above or pointed_p)
+	local sneak = magic.input:GetKeyDown(magic.KEY_LSHIFT) or
+			magic.input:GetKeyDown(magic.KEY_RSHIFT)
 	buildat.send_packet("main:place", cereal.binary_output({
-		under = voxel_packet_value(pointed_p),
-		above = voxel_packet_value(pointed_above or pointed_p),
-		sneak = (magic.input:GetKeyDown(magic.KEY_LSHIFT) or
-				magic.input:GetKeyDown(magic.KEY_RSHIFT)) and 1 or 0,
+		under = under,
+		above = above,
+		sneak = sneak and 1 or 0,
 	}, {"object",
 		{"under", VOXEL_PACKET_TYPE},
 		{"above", VOXEL_PACKET_TYPE},
 		{"sneak", "byte"},
 	}))
+	-- The placement predicted, by Luanti's client's rules
+	-- (Game::nodePlacement): the wielded item's node_placement_prediction
+	-- into above, or into under when that is buildable_to; not when the
+	-- pointed node takes the click (on_rightclick, no sneak), the item
+	-- predicts nothing, or a walkable node would land in the player's
+	-- own box (which the server refuses; core.__use_node). simplified:
+	-- a node whose param2 the placement works out from the look
+	-- (facedir, wallmounted) waits for the server; what it needs is the
+	-- module's placement arithmetic on this side.
+	local held = parse_stack(hotbar_stacks[wield_index])
+	local pr = held and luanti.prediction(held)
+	local upr = luanti.prediction(node_name_at(pointed_p) or "")
+	local at = (upr and upr.buildable_to) and under or above
+	local in_body = pr and pr.walkable and
+			at.x + 0.5 > player.x - 0.3 and at.x - 0.5 < player.x + 0.3 and
+			at.y + 0.5 > player.y and at.y - 0.5 < player.y + 1.75 and
+			at.z + 0.5 > player.z - 0.3 and at.z - 0.5 < player.z + 0.3
+	if pr and pr.place ~= "" and not pr.placed_param2 and not in_body and
+			not (upr and upr.rightclick and not sneak) then
+		WIELD.predict_node(at, pr.place)
+	end
 end)
 
 -- The wheel picks a hotbar slot, which is what it does in Luanti

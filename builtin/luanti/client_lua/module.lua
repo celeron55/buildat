@@ -2269,6 +2269,9 @@ local node_groups = {}
 -- The colour a node paints over the screen while the camera is in it,
 -- {a, r, g, b} in 0..255, by node name; a "p" record of luanti:dig_props
 local node_post_effect = {}
+-- What a client predicts the server will do with a dig or a place of the
+-- named item ([PREDICTION]); a "d" record of luanti:dig_props
+local predictions = {}
 
 local function split_tab(s)
 	local fields = {}
@@ -2369,6 +2372,13 @@ end
 -- post_effect_of(node_name) -> {a, r, g, b} in 0..255, or nil: what
 -- Luanti's renderPostFx() paints over the screen with the camera in the
 -- node. Water and lava in every game; nothing in most nodes.
+-- The prediction record of an item or node, or nil for one with none:
+-- {place = node name or "", dig = node name or "", rightclick, buildable_to,
+-- placed_param2, walkable}. See core.__dig_props().
+function M.prediction(name)
+	return predictions[name]
+end
+
 function M.post_effect_of(node_name)
 	return node_post_effect[node_name]
 end
@@ -2985,7 +2995,7 @@ end)
 
 buildat.sub_packet("luanti:dig_props", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
-	local items, nodes = 0, 0
+	local items, nodes, preds = 0, 0, 0
 	for i = 1, #values do
 		local fields = split_tab(values[i])
 		if fields[1] == "i" then
@@ -2994,6 +3004,17 @@ buildat.sub_packet("luanti:dig_props", function(data)
 		elseif fields[1] == "n" then
 			parse_node_record(fields)
 			nodes = nodes + 1
+		elseif fields[1] == "d" then
+			preds = preds + 1
+			local flags = fields[5] or ""
+			predictions[fields[2]] = {
+				place = fields[3] or "",
+				dig = fields[4] or "air",
+				rightclick = string.find(flags, "r", 1, true) ~= nil,
+				buildable_to = string.find(flags, "b", 1, true) ~= nil,
+				placed_param2 = string.find(flags, "p", 1, true) ~= nil,
+				walkable = string.find(flags, "w", 1, true) ~= nil,
+			}
 		elseif fields[1] == "p" then
 			local c = {}
 			for v in string.gmatch(fields[3] or "", "[^,]+") do
@@ -3004,7 +3025,7 @@ buildat.sub_packet("luanti:dig_props", function(data)
 		end
 	end
 	log:info("luanti:dig_props: " .. items .. " items, " .. nodes ..
-			" nodes with groups")
+			" nodes with groups, " .. preds .. " predictions")
 end)
 
 buildat.sub_packet("luanti:item_images", function(data)

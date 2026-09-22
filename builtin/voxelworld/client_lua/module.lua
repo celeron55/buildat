@@ -133,6 +133,10 @@ local material_update_cbs = {} -- function(node)
 local node_volume_cache = {} -- {node_id: {volume:, last_access_us:}}
 -- Set up by sub_events(), which is what runs once the world is there
 local node_update_queue = nil
+-- node id -> {before =, after =}: the voxel data a predicted write
+-- replaced and what it wrote, until the server answers; see
+-- M.set_static_voxel()
+local predicted = {}
 -- Defined further down, next to remesh_all(), and used before that
 local queue_modified_node_update
 
@@ -378,6 +382,19 @@ function sub_events()
 		log:info("voxelworld:node_volume_updated: "..dump(values))
 		node_volume_cache[values.node_id] = nil -- Clear cache
 		local node = replicate.main_scene:GetNode(values.node_id)
+		-- The server's answer to a predicted write ([PREDICTION]): a
+		-- chunk it changed comes replicated with its new data, and one it
+		-- did not -- the dig or place was refused -- is not replicated at
+		-- all, the attribute being what it was. So a chunk still holding
+		-- the predicted data goes back to what it held before; a real
+		-- change that has not arrived yet overwrites that when it does.
+		local pred = node and predicted[values.node_id]
+		if pred then
+			predicted[values.node_id] = nil
+			if buildat.get_voxel_data(node) == pred.after then
+				buildat.set_voxel_data(node, pred.before)
+			end
+		end
 		if node and not node:GetVar("buildat_voxel_data"):IsEmpty() then
 			note_horizon(node, true)
 		end
@@ -1148,15 +1165,40 @@ function M.get_static_voxel_plane(p, plane)
 	return volume:get_plane_at(plane, in_chunk_p.x, in_chunk_p.y, in_chunk_p.z)
 end
 
--- TODO
--- NOTE: This does not synchronize the voxel to the server, because games have
---       to implement their own mechanisms for disallowing cheating
+-- A voxel written on this client alone: the chunk's cached volume, its node
+-- var (what the mesher reads), and the chunk queued to be drawn and to
+-- collide again; (x, y, z, v) or (p, v). Nothing goes to the server --
+-- this is for what a game
+-- predicts the server will do ([PREDICTION]), and the server's next update
+-- of the chunk overwrites it. Returns whether there was a chunk to write.
 function M.set_static_voxel(x, y, z, v)
 	if type(x) == "table" then
+		v = y
 		z = x.z
 		y = x.y
 		x = x.x
 	end
+	local chunk_p, in_chunk_p = M.get_chunk_position(
+			buildat.Vector3(x, y, z))
+	if chunk_p == nil then
+		return false
+	end
+	local node = M.get_static_node(chunk_p)
+	if node == nil then
+		return false
+	end
+	local volume = M.get_volume(node)
+	if volume == nil then
+		return false
+	end
+	volume:set_voxel_at(in_chunk_p.x, in_chunk_p.y, in_chunk_p.z, v)
+	local id = node:GetID()
+	local pred = predicted[id] or {before = buildat.get_voxel_data(node)}
+	pred.after = volume:serialize()
+	predicted[id] = pred
+	buildat.set_voxel_data(node, pred.after)
+	queue_modified_node_update(node)
+	return true
 end
 
 function send_get_section(p)

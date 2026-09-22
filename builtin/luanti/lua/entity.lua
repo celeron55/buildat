@@ -2155,7 +2155,25 @@ function core.__punch_object(playername, id)
 	return true
 end
 
+-- The two nodes a place touches go back to the clients whatever came of
+-- it, so a client that predicted the placement ([PREDICTION]) is put right
+-- when the server refused it: written unchanged, the chunks are committed
+-- and sent again, which is what Luanti's server does after a placement
+-- of an item with a prediction
 function core.__use_node(playername, under, above, sneak)
+	local r = core.__use_node_inner(playername, under, above, sneak)
+	local n = core.get_node(above)
+	if n.name ~= "ignore" then
+		core.swap_node(above, n)
+	end
+	n = core.get_node(under)
+	if n.name ~= "ignore" then
+		core.swap_node(under, n)
+	end
+	return r
+end
+
+function core.__use_node_inner(playername, under, above, sneak)
 	local id = players[playername]
 	local ref = id and core.object_refs[id]
 	if not ref then

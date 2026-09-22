@@ -320,6 +320,28 @@ function buildat.safe.set_voxel_geometry(safe_node, safe_buffer, ...)
 	__buildat_set_voxel_geometry(node, buffer, ...)
 end
 
+-- set_voxel_data(node, data): a chunk node's voxel data from a serialized
+-- volume, for a predicted dig or place; see src/lua_bindings/misc_urho3d.cpp
+function buildat.safe.set_voxel_data(safe_node, data)
+	if not getmetatable(safe_node) or
+			getmetatable(safe_node).type_name ~= "Node" then
+		error("node is not a sandboxed Node instance")
+	end
+	if type(data) ~= "string" then
+		error("data is not a string")
+	end
+	__buildat_set_voxel_data(getmetatable(safe_node).unsafe, data)
+end
+
+-- get_voxel_data(node) -> string: the same var as it is
+function buildat.safe.get_voxel_data(safe_node)
+	if not getmetatable(safe_node) or
+			getmetatable(safe_node).type_name ~= "Node" then
+		error("node is not a sandboxed Node instance")
+	end
+	return __buildat_get_voxel_data(getmetatable(safe_node).unsafe)
+end
+
 -- column_heights(buffer, voxel_reg) -> string; see src/lua_bindings/mesh.cpp
 function buildat.safe.column_heights(safe_buffer, ...)
 	local buffer

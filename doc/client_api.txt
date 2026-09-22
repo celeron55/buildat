@@ -136,6 +136,11 @@ buildat.clear_voxel_physics_boxes(node)
 buildat.set_simple_voxel_model(node, w, h, d, buffer)
 buildat.set_8bit_voxel_geometry(node, w, h, d, buffer, ...)
 - The old fixed-format paths, kept for the small games
+buildat.set_voxel_data(node, data)
+buildat.get_voxel_data(node) -> string or nil
+- A chunk node's buildat_voxel_data var as a string, which is what a
+  volume serializes to: for a client writing a voxel ahead of the server
+  (voxelworld.set_static_voxel); the server's replication overwrites it
 buildat.column_heights(volume_data, voxel_reg) -> string
 - The local y of each column's highest solid non-cutout voxel, w*d int16 in
   [z][x] order; what a horizon map is built from

@@ -290,7 +290,7 @@ local function read_node(r)
 	end
 	r:u8()  -- legacy_facedir_simple
 	r:u8()  -- legacy_wallmounted
-	r:string() -- node_dig_prediction
+	def.node_dig_prediction = r:string()
 	r:u8()  -- leveled_max
 
 	-- How the node's own texture alpha is meant to be used. Luanti's
@@ -342,6 +342,7 @@ function M.parse(serialize, data, log)
 		local wrapper = serialize.reader(inner:string())
 		local ok, def = pcall(read_node, wrapper)
 		if ok then
+			def.id = id
 			defs[id] = def
 		else
 			failed = failed + 1
