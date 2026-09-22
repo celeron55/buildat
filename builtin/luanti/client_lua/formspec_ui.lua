@@ -832,8 +832,10 @@ function M.new(magic, buildat, log, ctx)
 		self.kind_us = {}
 		local kind_us = self.kind_us
 		local scroll_boxes = {}
-		-- The containers as rectangles, for the wheel over one
+		-- The containers as rectangles, for the wheel over one, and the
+		-- scrollbars for dragging their thumbs
 		local scrolls = {}
+		local bars = {}
 		-- What the next scrollbar's range is; scrollbaroptions[] sets it and
 		-- Luanti's default is 0..1000
 		local bar_max = 1000
@@ -1124,6 +1126,9 @@ function M.new(magic, buildat, log, ctx)
 					local step = math.max(1, math.floor(max / 10))
 					box(window, x, y, w, h,
 							magic.Color(0.1, 0.1, 0.12, 0.9))
+					-- The bar as a rectangle, for dragging its thumb
+					bars[#bars + 1] = {name = bar, x = x, y = y, w = w,
+							h = h, vertical = vertical, max = max}
 					local frac = math.max(0, math.min(1, v / max))
 					if vertical then
 						local th = h / 5
@@ -1418,7 +1423,7 @@ function M.new(magic, buildat, log, ctx)
 		return {window = window, origin = {ox, oy},
 				size = {layout.width, layout.height}, slots = slots,
 				buttons = buttons, fields = fields, tables = tables,
-				scrolls = scrolls,
+				scrolls = scrolls, bars = bars,
 				taps = taps, tooltips = tooltips,
 				close_on_enter = close_on_enter}
 	end

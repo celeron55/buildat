@@ -3909,8 +3909,11 @@ magic.SubscribeToEvent("MouseMove", function(event_type, event_data)
 		scale = 1
 	end
 	local rp = magic.ui.root.position
+	-- The button state goes with it: a scrollbar's thumb is dragged while
+	-- it is held ([FORMSPEC_SCROLL])
 	luanti.hover(math.floor(event_data:GetInt("X") / scale) - rp.x,
-			math.floor(event_data:GetInt("Y") / scale) - rp.y)
+			math.floor(event_data:GetInt("Y") / scale) - rp.y,
+			magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT))
 end)
 
 -- Where a click landed, which MouseButtonDown does not say. A form is the

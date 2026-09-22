@@ -92,6 +92,13 @@ for _ in range(2):
     write("mouse_pos %d %d" % (bar[1] + bar[3] // 2,
                                bar[2] + int(bar[4] * 0.75)),
           "delay 200", "mouse_click left", "delay 700")
+# And the thumb dragged to the top of the trough, which is the third way
+write("mouse_pos %d %d" % (bar[1] + bar[3] // 2, bar[2] + int(bar[4] * 0.9)),
+      "delay 200", "mouse_down left", "delay 200")
+for f in (0.6, 0.3, 0.05):
+    write("mouse_pos %d %d" % (bar[1] + bar[3] // 2, bar[2] + int(bar[4] * f)),
+          "delay 200")
+write("mouse_up left", "delay 700")
 # And the wheel over the container itself, which is the other way in:
 # the box is the UIElement the rows are children of
 boxes = [e for e in els if e[0] == "UIElement" and e[3] > 150 and e[4] > 80]

@@ -2647,12 +2647,51 @@ local tooltip_wait = 0
 -- Where the mouse is, in the UI's own coordinates -- the ones a click
 -- arrives in. Called while a form is open; nil when the mouse is not on the
 -- screen at all.
-function M.hover(x, y)
+-- hover(x, y, held): where the cursor is, and whether the left button is
+-- down. A form is drawn again from here only while a scrollbar's thumb is
+-- being dragged ([FORMSPEC_SCROLL]); everything else reads mouse_at when it
+-- is asked to.
+function M.hover(x, y, held)
 	if x == nil then
 		mouse_at = nil
 		return
 	end
 	mouse_at = {x, y}
+	if held then
+		M.form_drag(x, y)
+	end
+end
+
+-- The left button held over a scrollbar sets its value from where the
+-- cursor is, which is what dragging its thumb is
+function M.form_drag(x, y)
+	if not form or not form.drawn or not form.drawn.bars then
+		return false
+	end
+	local lx = x - form.drawn.origin[1]
+	local ly = y - form.drawn.origin[2]
+	for _, b in ipairs(form.drawn.bars) do
+		if lx >= b.x and lx < b.x + b.w and
+				ly >= b.y and ly < b.y + b.h then
+			local frac
+			if b.vertical then
+				frac = (ly - b.y) / math.max(1, b.h)
+			else
+				frac = (lx - b.x) / math.max(1, b.w)
+			end
+			local v = math.floor(math.max(0, math.min(1, frac)) * b.max)
+			form.state.scroll = form.state.scroll or {}
+			if v ~= (form.state.scroll[b.name] or 0) then
+				form.state.scroll[b.name] = v
+				draw_form()
+				local fields = form_fields()
+				fields[b.name] = "CHG:"..v
+				send_fields(fields)
+			end
+			return true
+		end
+	end
+	return false
 end
 
 -- What Luanti's own client shows over an inventory slot: the item's

@@ -3287,6 +3287,33 @@ local function show_client(host, port, name, password, mode)
 						math.floor(event_data:GetInt("X") / scale),
 						math.floor(event_data:GetInt("Y") / scale),
 					}
+					-- A scrollbar's thumb is dragged while the button is
+					-- held over it ([FORMSPEC_SCROLL])
+					if form and form.drawn and form.drawn.bars and
+							magic.input:GetMouseButtonDown(
+							magic.MOUSEB_LEFT) then
+						local lx = mouse_at[1] - form.drawn.origin[1]
+						local ly = mouse_at[2] - form.drawn.origin[2]
+						for _, b in ipairs(form.drawn.bars) do
+							if lx >= b.x and lx < b.x + b.w and
+									ly >= b.y and ly < b.y + b.h then
+								local frac = b.vertical and
+										(ly - b.y) / math.max(1, b.h) or
+										(lx - b.x) / math.max(1, b.w)
+								local v = math.floor(math.max(0,
+										math.min(1, frac)) * b.max)
+								form.state.scroll = form.state.scroll or {}
+								if v ~= (form.state.scroll[b.name] or 0) then
+									form.state.scroll[b.name] = v
+									form_stale = true
+									local fields = form_fields()
+									fields[b.name] = "CHG:"..v
+									send_form_fields(fields)
+								end
+								break
+							end
+						end
+					end
 				end)
 
 		-- Where a click landed, which MouseButtonDown does not say
