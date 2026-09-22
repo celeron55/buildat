@@ -1399,15 +1399,21 @@ function core.__mapgen_decorations()
 					index_of[name] = index
 				end
 				out.ids[i] = index
-				-- Luanti's own defaults: always placed, and "force" is the
-				-- high bit of the same byte
-				out.param1[i] = node.prob or node.param1 or 127
+				-- A table's prob is 0-255 and the byte is half of it, with
+				-- force_place as the byte's high bit (read_schematic_def:
+				-- `param1 >>= 1`, then the flag); 255 handed on whole read
+				-- as always-and-force, and every such node was placed over
+				-- whatever stood there (2026-09-22)
+				local prob = node.param1 or node.prob or 255
+				out.param1[i] = math.floor(math.min(255, prob) / 2) +
+						(node.force_place and 128 or 0)
 				out.param2[i] = node.param2 or 0
 			end
 			out.yslice_prob = {}
 			for _, slice in ipairs(sch.yslice_prob or {}) do
 				if slice.ypos ~= nil then
-					out.yslice_prob[slice.ypos + 1] = slice.prob or 127
+					out.yslice_prob[slice.ypos + 1] =
+							math.floor(math.min(255, slice.prob or 255) / 2)
 				end
 			end
 		end
@@ -2466,7 +2472,8 @@ local function read_mts(path)
 			prob = str:byte(i)
 			i = i + 1
 		end
-		yslice_prob[#yslice_prob + 1] = {ypos = y, prob = prob}
+		-- Twice the file's byte, as Luanti's read_schematic hands it out
+		yslice_prob[#yslice_prob + 1] = {ypos = y, prob = (prob % 128) * 2}
 	end
 	local n_names = be16(str, i)
 	i = i + 2
@@ -2535,9 +2542,104 @@ function core.read_schematic(schematic, options)
 	return out
 end
 
--- Only the "lua" format, which is the one a mod parses back; the .mts
--- writer is not here
+-- The bytes of a .mts for a {size, yslice_prob, data} table: read_mts's
+-- layout backwards (version 4, a prob byte per y slice, the names, then
+-- the deflated ids, param1s and param2s)
+local function write_mts(t)
+	local function u16(n)
+		return string.char(math.floor(n / 256) % 256, n % 256)
+	end
+	local sx, sy, sz = t.size.x, t.size.y, t.size.z
+	local n = sx * sy * sz
+	local out = {"MTSM", u16(4), u16(sx), u16(sy), u16(sz)}
+	local slice = {}
+	for _, v in ipairs(t.yslice_prob or {}) do
+		slice[v.ypos] = v.prob
+	end
+	for y = 0, sy - 1 do
+		local p = slice[y]
+		out[#out + 1] = string.char(p == nil and PROB_ALWAYS or
+				math.min(PROB_ALWAYS, math.floor(p / 2)))
+	end
+	local names, ids = {}, {}
+	local id_bytes, p1_bytes, p2_bytes = {}, {}, {}
+	for k = 1, n do
+		local v = t.data[k] or {name = "air"}
+		local name = v.name or "air"
+		local id = ids[name]
+		if id == nil then
+			id = #names
+			names[#names + 1] = name
+			ids[name] = id
+		end
+		id_bytes[k] = u16(id)
+		local prob = v.prob == nil and 255 or v.prob
+		local p1 = prob >= 255 and PROB_ALWAYS or math.floor(prob / 2)
+		if v.force_place then
+			p1 = p1 + FORCE_PLACE
+		end
+		p1_bytes[k] = string.char(p1)
+		p2_bytes[k] = string.char((v.param2 or 0) % 256)
+	end
+	out[#out + 1] = u16(#names)
+	for _, name in ipairs(names) do
+		out[#out + 1] = u16(#name) .. name
+	end
+	out[#out + 1] = core.compress(table.concat(id_bytes) ..
+			table.concat(p1_bytes) .. table.concat(p2_bytes), "deflate")
+	return table.concat(out)
+end
+
+-- core.create_schematic(p1, p2, probability_list, filename, slice_prob_list):
+-- the box of the map as a .mts file, each listed node's prob (0-255, with
+-- 128 added for a per-node force place, which is the file's own byte) and
+-- each listed y slice's; true when written
+function core.create_schematic(p1, p2, probability_list, filename, slice_prob_list)
+	local function xyz(p)
+		return math.floor(p.x), math.floor(p.y), math.floor(p.z)
+	end
+	local x1, y1, z1 = xyz(p1)
+	local x2, y2, z2 = xyz(p2)
+	x1, x2 = math.min(x1, x2), math.max(x1, x2)
+	y1, y2 = math.min(y1, y2), math.max(y1, y2)
+	z1, z2 = math.min(z1, z2), math.max(z1, z2)
+	local probs = {}
+	for _, e in ipairs(probability_list or {}) do
+		local x, y, z = xyz(e.pos)
+		if x >= x1 and x <= x2 and y >= y1 and y <= y2 and z >= z1 and z <= z2 then
+			probs[(z - z1) * (y2 - y1 + 1) * (x2 - x1 + 1) +
+					(y - y1) * (x2 - x1 + 1) + (x - x1) + 1] = e.prob
+		end
+	end
+	local data = {}
+	for z = z1, z2 do
+		for y = y1, y2 do
+			for x = x1, x2 do
+				local node = core.get_node({x = x, y = y, z = z})
+				local k = #data + 1
+				local p = probs[k]
+				data[k] = {name = node.name, param2 = node.param2,
+						prob = p and (p % 128) * 2 or 255,
+						force_place = p ~= nil and p >= 128}
+			end
+		end
+	end
+	local yslice_prob = {}
+	for _, e in ipairs(slice_prob_list or {}) do
+		yslice_prob[#yslice_prob + 1] = {ypos = e.ypos, prob = e.prob}
+	end
+	return core.safe_file_write(filename, write_mts({
+			size = {x = x2 - x1 + 1, y = y2 - y1 + 1, z = z2 - z1 + 1},
+			yslice_prob = yslice_prob, data = data}))
+end
+
+-- The "lua" format, which is the one a mod parses back, and "mts", the
+-- file's bytes
 function core.serialize_schematic(schematic, format, options)
+	if format == "mts" then
+		local t = core.read_schematic(schematic)
+		return t and write_mts(t) or nil
+	end
 	if format ~= "lua" then
 		return nil
 	end
@@ -2641,7 +2743,8 @@ local function blit_schematic(sch, pos, rotation, replacements,
 	for y = 0, sy - 1 do
 		local slice = t.yslice_prob[y + 1]
 		local sprob = slice and slice.prob or 255
-		if sprob == PROB_ALWAYS then
+		-- 254 is what the file's always-byte reads out as, twice 0x7F
+		if sprob == PROB_ALWAYS or sprob >= 254 then
 			sprob = 255
 		end
 		if sprob >= 255 or sprob > math.random(1, 255) then
@@ -2650,7 +2753,7 @@ local function blit_schematic(sch, pos, rotation, replacements,
 				for x = 0, ex - 1 do
 					local node = t.data[i + 1]
 					local prob = node and (node.prob or 255) or 0
-					if prob == PROB_ALWAYS then
+					if prob == PROB_ALWAYS or prob >= 254 then
 						prob = 255
 					end
 					if node and prob > 0 and node.name ~= "ignore" and
@@ -2714,7 +2817,6 @@ function core.place_schematic_on_vmanip(vmanip, pos, schematic, rotation,
 			end)
 end
 
-stub("create_schematic", nil)
 
 --
 -- The map
