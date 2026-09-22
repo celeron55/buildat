@@ -10,6 +10,7 @@
 #include "luanti_mapgen/api.h"
 #include "worldgen/api.h"
 #include "core/log.h"
+#include <unordered_map>
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -845,14 +846,30 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 		const BiomeGenOriginal *bg =
 				(const BiomeGenOriginal*)m_emerge->biomegen;
 		const v3s16 p((s16)x, (s16)y, (s16)z);
-		Biome *b = bg->calcBiomeAtPoint(p);
+		// The heat and the humidity are 2D noise, so a column's are kept:
+		// VoxeLibre asks per grass node in its on_generated (its palette
+		// index), which was a quarter of the module's Lua time on a fresh
+		// world (2026-09-22), and Luanti's own answer -- the biome, then
+		// the heat and the humidity again -- is five noise evaluations a
+		// call. Bounded; cleared when full.
+		const int64_t key = ((int64_t)(x & 0xffffffff) << 32) |
+				(uint32_t)z;
+		auto it = m_column_noise.find(key);
+		if(it == m_column_noise.end()){
+			if(m_column_noise.size() >= 65536)
+				m_column_noise.clear();
+			it = m_column_noise.emplace(key, std::make_pair(
+					bg->calcHeatAtPoint(p), bg->calcHumidityAtPoint(p))).first;
+		}
+		heat_out = it->second.first;
+		humidity_out = it->second.second;
+		Biome *b = bg->calcBiomeFromNoise(heat_out, humidity_out, p);
 		if(b == nullptr)
 			return false;
 		index_out = (size_t)b->index;
-		heat_out = bg->calcHeatAtPoint(p);
-		humidity_out = bg->calcHumidityAtPoint(p);
 		return true;
 	}
+	std::unordered_map<int64_t, std::pair<float, float>> m_column_noise;
 
 	// Out of the mapgen's noise, touching no map and generating nothing.
 	// Luanti's own spawn search asks this first and only then looks at the
