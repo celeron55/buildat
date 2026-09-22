@@ -245,7 +245,8 @@ M.texture = texture_of
 -- set will not photograph a state until this is true.
 local texmods_done = false
 
-buildat.sub_packet("luanti:texmods", function(data)
+-- The same table from a packet or from the served file
+local function texmods_from_data(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	local n = 0
 	local failed = 0
@@ -280,6 +281,10 @@ buildat.sub_packet("luanti:texmods", function(data)
 	if n > 0 or failed > 0 then
 		voxelworld.remesh_all()
 	end
+end
+
+buildat.sub_packet("luanti:texmods", function(data)
+	texmods_from_data(data)
 end)
 
 --
@@ -3145,6 +3150,21 @@ buildat.sub_packet("luanti:world_info", function(data)
 		f(world_info)
 	end
 end)
+
+-- The texture modifiers are served as a file as well ([BLOCKED_MODULE]):
+-- the module that answers the packet below can be held for half a minute by
+-- a slow mapgen -- realtest's sections were 29.6 s each and this client drew
+-- 840 missing textures -- while client_file has a queue of its own and the
+-- file is here by the time this runs. The request stays for what a game adds
+-- later, and the handler skips what is composed already.
+do
+	local blob = buildat.get_file_content and
+			buildat.get_file_content("luanti_data/texmods.bin")
+	if blob then
+		log:info("luanti:texmods: from the served file, " .. #blob .. " bytes")
+		texmods_from_data(blob)
+	end
+end
 
 -- Asked for rather than sent, because a packet that arrives before the
 -- script that subscribes to it has nowhere to go

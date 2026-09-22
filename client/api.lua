@@ -118,6 +118,17 @@ buildat.safe.set_sound = function(mute, volume)
 	end
 	return __buildat_set_preference("sound_volume", tostring(volume))
 end
+-- The bytes of a file the server served, or nil ([BLOCKED_MODULE]): a
+-- module that is busy answers no packet, and client_file is a module of its
+-- own, so a table served as a file reaches the client anyway. The sandbox
+-- already runs a served file as code (run_script_file); reading one's bytes
+-- is no wider than that.
+buildat.safe.get_file_content = function(name)
+	if type(name) ~= "string" then
+		return nil
+	end
+	return __buildat_get_file_content(name)
+end
 buildat.safe.set_ui_scale  = __buildat_set_ui_scale
 buildat.safe.get_ui_scale  = __buildat_get_ui_scale
 buildat.safe.logical_size  = __buildat_logical_size

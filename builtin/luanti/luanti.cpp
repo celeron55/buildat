@@ -2229,6 +2229,9 @@ struct Module: public interface::Module, public luanti::Interface
 			world->set_save(m_save, "main");
 			m_section_size = world->get_section_size_voxels();
 		});
+		// The texture modifiers are known once the registry is built, and
+		// they go out as a file as well as on request ([BLOCKED_MODULE])
+		serve_texmods_file();
 		// A section is what this world generates at a time, which is what
 		// core.get_mapgen_chunksize() answers with
 		set_global_string("__luanti_section_size",
@@ -2342,7 +2345,9 @@ struct Module: public interface::Module, public luanti::Interface
 		send_texmods(packet.sender);
 	}
 
-	void send_texmods(network::PeerInfo::Id peer)
+	// The same flat array the packet carries: a resource name and the
+	// expression it is for, in pairs
+	ss_ texmods_blob()
 	{
 		sv_<ss_> flat;
 		flat.reserve(m_texmods.size() * 2);
@@ -2355,6 +2360,31 @@ struct Module: public interface::Module, public luanti::Interface
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(flat);
 		}
+		return os.str();
+	}
+
+	// And as a file, served by client_file ([BLOCKED_MODULE]): this module
+	// answers nothing while a slow mapgen holds it -- realtest's sections
+	// were 29.6 s each and the client drew 840 missing textures -- and
+	// client_file is a module of its own with a queue of its own, so a file
+	// reaches the client whatever this one is doing. The client reads it
+	// before it asks, and the packet stays for what is added later.
+	void serve_texmods_file()
+	{
+		if(m_texmods.empty())
+			return;
+		const ss_ blob = texmods_blob();
+		client_file::access(m_server, [&](client_file::Interface *ifile){
+			ifile->add_file_content("luanti_data/texmods.bin", blob);
+		});
+		log_v(MODULE, "%zu texture modifiers served as a file",
+				m_texmods.size());
+	}
+
+	void send_texmods(network::PeerInfo::Id peer)
+	{
+		std::ostringstream os(std::ios::binary);
+		os << texmods_blob();
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "luanti:texmods", os.str());
 		});
