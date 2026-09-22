@@ -1442,6 +1442,7 @@ struct CApp: public App, public magic::Application
 		m_command_seq_failed = true;
 		m_command_seq_active = false;
 		client::command_seq::inhibit_real_input(false);
+		client::command_seq::release_held_keys();
 		client::command_seq::release_forced_focus(
 				GetSubsystem<magic::Input>());
 		shutdown();
@@ -1458,6 +1459,7 @@ struct CApp: public App, public magic::Application
 		log_i(MODULE, "Command sequence complete");
 		m_command_seq_active = false;
 		client::command_seq::inhibit_real_input(false);
+		client::command_seq::release_held_keys();
 		client::command_seq::release_forced_focus(
 				GetSubsystem<magic::Input>());
 		shutdown();
@@ -1731,6 +1733,7 @@ struct CApp: public App, public magic::Application
 		using client::command_seq::Type;
 		if(!m_command_seq_active)
 			return;
+		client::command_seq::reassert_held_keys(GetSubsystem<magic::Input>());
 		if(!m_pending_screenshot.empty())
 			return;
 		if(m_command_seq_stdin)

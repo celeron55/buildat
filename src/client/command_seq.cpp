@@ -27,6 +27,7 @@
 #include <climits>
 #include <fcntl.h>
 #include <unistd.h>
+#include <map>
 #define MODULE "cmdseq"
 namespace magic = Urho3D;
 
@@ -638,6 +639,16 @@ static bool push_key(magic::Input *input, int key, bool down, ss_ *error)
 	return true;
 }
 
+// The keys a sequence holds (keydown without its keyup), so that a key
+// Urho's input has dropped can be pressed again: Input::ResetState()
+// clears every key on a focus change, and a scripted run's held key
+// read as not held one run in ten with nothing downstream to say why
+// ([HELD_KEY_FLAKE]). reassert_held_keys() runs every frame.
+// A key is only pressed again once Urho has read it as down: the event
+// a keydown pushes is read on the next frame, and a second KeyDown before
+// that would be a second press (a toggle key toggled back).
+static std::map<int, bool> g_held_keys; // key -> seen down
+
 bool inject_key(magic::Input *input, const ss_ &name, bool down, bool up_too,
 		ss_ *error)
 {
@@ -650,7 +661,35 @@ bool inject_key(magic::Input *input, const ss_ &name, bool down, bool up_too,
 		return false;
 	if(up_too && !push_key(input, key, false, error))
 		return false;
+	if(down && !up_too)
+		g_held_keys[key] = false;
+	else
+		g_held_keys.erase(key);
 	return true;
+}
+
+void reassert_held_keys(magic::Input *input)
+{
+	for(auto &held : g_held_keys){
+		int key = held.first;
+		if(input->GetKeyDown(key)){
+			held.second = true;
+			continue;
+		}
+		if(!held.second)
+			continue;
+		ss_ error;
+		if(push_key(input, key, true, &error)){
+			held.second = false;
+			log_w(MODULE, "held key %s read as not held; pressed again",
+					cs(ss_(SDL_GetKeyName((SDL_Keycode)key))));
+		}
+	}
+}
+
+void release_held_keys()
+{
+	g_held_keys.clear();
 }
 
 static bool push_mouse_button(magic::Input *input, int sdl_button, bool down,

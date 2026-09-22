@@ -75,6 +75,10 @@ namespace command_seq
 	// Urho3D accept injected input while the window has none.
 	void show_window(Urho3D::Graphics *graphics, Urho3D::Input *input);
 	void release_forced_focus(Urho3D::Input *input);
+	// A held key Urho's input dropped is pressed again; once a frame
+	// while a sequence runs ([HELD_KEY_FLAKE])
+	void reassert_held_keys(Urho3D::Input *input);
+	void release_held_keys();
 	bool inject_key(Urho3D::Input *input, const ss_ &name, bool down,
 			bool up_too, ss_ *error);
 	bool inject_mouse_button(Urho3D::Input *input, int sdl_button, bool down,
