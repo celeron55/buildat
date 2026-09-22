@@ -5183,12 +5183,40 @@ struct Module: public interface::Module, public luanti::Interface
 		return module_path()+"/textures/base/pack";
 	}
 
+	// The player's own texture packs: every directory under
+	// user/luanti/texture_packs, by name. They go in front of everything
+	// else, because first-one-wins is the rule below and a pack's whole
+	// point is to override what the game ships -- including the LabPBR
+	// sidecars the atlas reads ([VOXEL_MATERIALS] layer 2, whose upgrade
+	// path this is: a pack put its maps among a game's mods until now).
+	void collect_texture_packs(sv_<ss_> &dirs)
+	{
+		const ss_ root = m_server->get_config().get<ss_>("user_path")+
+				"/luanti/texture_packs";
+		if(!interface::fs::path_exists(root))
+			return;
+		sv_<ss_> names;
+		for(const interface::fs::Node &n :
+				interface::fs::list_directory(root)){
+			if(n.name == "." || n.name == ".." || !n.is_directory)
+				continue;
+			names.push_back(n.name);
+		}
+		std::sort(names.begin(), names.end());
+		for(const ss_ &name : names){
+			dirs.push_back(root+"/"+name);
+			log_i(MODULE, "texture pack: %s", cs(name));
+		}
+	}
+
 	void serve_game_media(const ss_ &game_path)
 	{
 		// Luanti's directories, in Luanti's order (src/server/mods.cpp)
 		static const sv_<ss_> wanted = {"textures", "sounds", "media",
 				"models", "locale", "fonts"};
 		sv_<ss_> dirs;
+		// The player's packs first: what they hold wins
+		collect_texture_packs(dirs);
 		// The game's own textures/, beside its mods' (src/server.cpp)
 		if(interface::fs::path_exists(game_path+"/textures"))
 			dirs.push_back(game_path+"/textures");
