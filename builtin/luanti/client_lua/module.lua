@@ -3350,6 +3350,17 @@ function M.body_world(p)
 	return buildat.Vector3(w.x, w.y, w.z)
 end
 
+-- Every body's centre in the world, for a run that wants to look at one
+function M.bodies()
+	local out = {}
+	for _, b in pairs(body_nodes) do
+		local c = b.node.worldTransform * magic.Vector3(b.size.x / 2,
+				b.size.y / 2, b.size.z / 2)
+		out[#out + 1] = {x = c.x, y = c.y, z = c.z, id = b.node:GetID()}
+	end
+	return out
+end
+
 -- The node name at a region position, as node_name_at() answers for the
 -- map's own
 function M.body_node_name(p)

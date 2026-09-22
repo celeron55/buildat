@@ -5617,6 +5617,24 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// __luanti_region_to_world(x, y, z) -> wx, wy, wz, or nil: a body's
+	// region position as the world point it is drawn at ([BODY_INTERACT])
+	static int l_region_to_world(lua_State *L)
+	{
+		Module *self = module_of(L);
+		float x = (float)luaL_checknumber(L, 1);
+		float y = (float)luaL_checknumber(L, 2);
+		float z = (float)luaL_checknumber(L, 3);
+		float wx, wy, wz;
+		if(!self->m_region_map || y < REGION_Y ||
+				!self->m_region_map->to_world(x, y, z, wx, wy, wz))
+			return 0;
+		lua_pushnumber(L, wx);
+		lua_pushnumber(L, wy);
+		lua_pushnumber(L, wz);
+		return 3;
+	}
+
 	// get_node(x, y, z) -> id, param1, param2
 	static int l_get_node(lua_State *L)
 	{
@@ -8158,6 +8176,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_refshot_mark", l_refshot_mark);
 		set_global_cfunction("__luanti_set_node", l_set_node);
 		set_global_cfunction("__luanti_get_node", l_get_node);
+		set_global_cfunction("__luanti_region_to_world", l_region_to_world);
 		set_global_cfunction("__luanti_get_region", l_get_region);
 		set_global_cfunction("__luanti_get_region_data", l_get_region_data);
 		set_global_cfunction("__luanti_set_region_data", l_set_region_data);

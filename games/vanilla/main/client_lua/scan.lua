@@ -59,6 +59,25 @@ return function(ctx)
 	-- the client holds for each voxel, `-` where none is loaded
 	-- ([DIG_LIGHT]: what the mesher lights the faces by, beside the
 	-- server's own reading).
+	-- `event look_body`: the view turned to the nearest fallen body's
+	-- centre ([BODY_INTERACT]'s runs: where a body lands is physics')
+	magic.SubscribeToEvent("command_seq:look_body", function(event_type, event_data)
+		local px, py, pz = ctx.player_pos()
+		local best, best_d = nil, nil
+		for _, b in ipairs(luanti.bodies()) do
+			local d = (b.x - px) ^ 2 + (b.y - py) ^ 2 + (b.z - pz) ^ 2
+			if best_d == nil or d < best_d then
+				best, best_d = b, d
+			end
+		end
+		if best then
+			ctx.look_at(best.x, best.y, best.z)
+			log:info(string.format("look_body: at %.1f, %.1f, %.1f", best.x, best.y, best.z))
+		else
+			log:info("look_body: no body")
+		end
+	end)
+
 	magic.SubscribeToEvent("command_seq:scan_volume", function(event_type, event_data)
 		local param = event_data:GetString("Param") or ""
 		local r, label, extra = param:match("^(%d+)%s*(%S*)%s*(%S*)")

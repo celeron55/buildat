@@ -49,6 +49,11 @@ namespace luanti
 		virtual ~RegionMap(){}
 		virtual bool get(int32_t x, int32_t y, int32_t z, uint32_t &word) = 0;
 		virtual bool set(int32_t x, int32_t y, int32_t z, uint32_t word) = 0;
+		// Where a region position is in the world, through the body's
+		// transform: what add_item(), add_entity(), a particle or a sound
+		// at a body's voxel means. False outside every body.
+		virtual bool to_world(float x, float y, float z,
+				float &wx, float &wy, float &wz) = 0;
 	};
 
 	struct Interface

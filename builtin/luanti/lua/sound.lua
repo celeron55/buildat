@@ -91,6 +91,8 @@ function core.sound_play(spec, parameters, ephemeral)
 			x, y, z = p.x, p.y, p.z
 		end
 	elseif type(parameters.pos) == "table" then
+		-- A body's region position is where the body is ([BODY_INTERACT])
+		parameters.pos = core.__region_to_world_pos(parameters.pos)
 		location = "pos"
 		x = number_or(parameters.pos.x, 0)
 		y = number_or(parameters.pos.y, 0)

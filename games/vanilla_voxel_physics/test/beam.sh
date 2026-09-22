@@ -70,9 +70,29 @@ core.register_on_joinplayer(function(player)
 	player:set_wield_index(1)
 	core.log("action", "beam: stamped with " .. dirt)
 end)
+-- Where a body's dig dropped its item ([BODY_INTERACT]): in the world by
+-- the body, not a million nodes up
+local report_at = nil
 core.register_on_dignode(function(pos, node, digger)
 	core.log("action", "beam: dug " .. node.name .. " at " ..
 			core.pos_to_string(pos))
+	if pos.y >= 1000000 then
+		report_at = core.get_us_time() + 1500000
+	end
+end)
+core.register_on_mods_loaded(function()
+	core.register_globalstep(function()
+		if report_at and core.get_us_time() >= report_at then
+			report_at = nil
+			for _, obj in ipairs(core.get_objects_inside_radius(ORIGIN, 12)) do
+				local e = obj:get_luaentity()
+				if e and e.name == "__builtin:item" then
+					core.log("action", "beam: item " .. e.itemstring .. " at " ..
+							core.pos_to_string(vector.round(obj:get_pos())))
+				end
+			end
+		end
+	end)
 end)
 LUA
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
@@ -100,7 +120,7 @@ screenshot $out/after.png
 look_dir -1 -0.1 -0.3
 delay 1000
 screenshot $out/body.png
-look_dir 0.2 0.35 1
+event look_body
 delay 500
 event scan
 mouse_click right
@@ -119,7 +139,7 @@ bin/buildat -s localhost:29780 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
 sleep 2
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-grep "beam:\|voxel_ph" "$out/srv.log" | grep -v "sim: " | sed 's/.*I [a-z_]* *: //' | tail -14
+grep "beam:\|voxel_ph" "$out/srv.log" | grep -v "sim: " | sed 's/.*I [a-z_]* *: //' | tail -16
 # The dig on the body ([BODY_INTERACT]): the client points at the fallen
 # beam and digs one of its voxels by its region position
 grep "pointing at\|dug (" "$out/cli.log" | tail -3 | sed 's/.*I [a-z_]* *: //'

@@ -638,6 +638,28 @@ struct Module: public interface::Module
 			m->rebuild_body(*b);
 			return true;
 		}
+		bool to_world(float x, float y, float z, float &wx, float &wy, float &wz)
+		{
+			pv::Vector3DInt32 l;
+			Body *b = m->body_at((int32_t)std::floor(x), (int32_t)std::floor(y),
+					(int32_t)std::floor(z), &l);
+			if(!b)
+				return false;
+			// The fraction kept: a drop at the voxel's centre stays there
+			float base_y = (float)(luanti::REGION_Y + b->k * luanti::REGION_STRIDE);
+			Vector3 local(x, y - base_y, z);
+			bool ok = false;
+			main_context::access(m->m_server, [&](main_context::Interface *imc){
+				Scene *scene = imc->check_scene(m->m_scene);
+				Node *n = scene->GetNode(b->node_id);
+				if(!n)
+					return;
+				Vector3 w = n->GetWorldTransform() * local;
+				wx = w.x_; wy = w.y_; wz = w.z_;
+				ok = true;
+			});
+			return ok;
+		}
 	} m_regions;
 
 	// The margin around a body's voxels is air, not ignore: a mod placing

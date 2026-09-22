@@ -642,7 +642,22 @@ function ObjectRef:get_observers() return nil end
 -- The map of them
 --
 
+-- A position in a body's region ([BODY_INTERACT]) is where the body's
+-- voxel is drawn: an object added there -- a dug node's drop, a mob -- is
+-- in the world, not a million nodes up
+local function world_pos(pos)
+	if type(pos) == "table" and (tonumber(pos.y) or 0) >= 1000000 then
+		local wx, wy, wz = __luanti_region_to_world(pos.x, pos.y, pos.z)
+		if wx then
+			return {x = wx, y = wy, z = wz}
+		end
+	end
+	return pos
+end
+core.__region_to_world_pos = world_pos
+
 function core.add_entity(pos, name, staticdata)
+	pos = world_pos(pos)
 	local proto = core.registered_entities[name]
 	if proto == nil then
 		core.log("error", "add_entity(): no entity called " .. tostring(name))
@@ -718,6 +733,7 @@ end
 -- own l_add_item answers with nil for: a typo in a mod would otherwise put
 -- an entity in the world holding nothing anybody can name.
 function core.add_item(pos, item)
+	pos = world_pos(pos)
 	local stack = ItemStack(item)
 	if stack:is_empty() or not stack:is_known() then
 		return nil

@@ -3511,6 +3511,12 @@ end)(buildat.run_script_file("main/scan.lua"))({
 	node_name_at = node_name_at,
 	voxel_is_solid = voxel_is_solid,
 	dig_range = function() return math.min(POINT_RANGE, luanti.dig_range(wield_index)) end,
+	-- The view turned to a world point, for `event look_body`: a fallen
+	-- body lands where physics put it, which no script knows beforehand
+	look_at = function(x, y, z)
+		local eye = camera_node.worldPosition
+		yaw, pitch = angles_from_dir({x = x - eye.x, y = y - eye.y, z = z - eye.z})
+	end,
 	chat_text = function() return chat_input and chat_input:GetText() end,
 	hud_rect = function(e)
 		local el = e.__placed

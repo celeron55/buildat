@@ -192,6 +192,15 @@ function core.add_particlespawner(def)
 	if type(def) ~= "table" then
 		return nil
 	end
+	if type(def.pos) == "table" and def.pos.y ~= nil then
+		def.pos = core.__region_to_world_pos(def.pos)
+	end
+	if type(def.minpos) == "table" then
+		def.minpos = core.__region_to_world_pos(def.minpos)
+	end
+	if type(def.maxpos) == "table" then
+		def.maxpos = core.__region_to_world_pos(def.maxpos)
+	end
 	local pos_min, pos_max = range_v3(def, "pos", 0)
 	local vel_min, vel_max = range_v3(def, "vel", 0)
 	local acc_min, acc_max = range_v3(def, "acc", 0)
@@ -227,7 +236,8 @@ function core.add_particle(def)
 	if type(def) ~= "table" then
 		return
 	end
-	local pos = to_v3(def.pos, 0)
+	-- A body's region position is where the body is ([BODY_INTERACT])
+	local pos = to_v3(core.__region_to_world_pos(def.pos), 0)
 	local vel = to_v3(def.velocity or def.vel, 0)
 	local acc = to_v3(def.acceleration or def.acc, 0)
 	local exptime = number_or(def.expirationtime, 1)
