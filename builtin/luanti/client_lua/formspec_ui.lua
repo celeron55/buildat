@@ -34,7 +34,7 @@ local IGNORED = {
 	listring = true, listcolors = true, style = true, style_type = true,
 	field_enter_after_edit = true,
 	no_prepend = true, bgcolor = true,
-	scrollbaroptions = true, allow_close = true, position = true,
+	allow_close = true, position = true,
 	tableoptions = true,
 	anchor = true, padding = true, ["scroll_container_end"] = true,
 }
@@ -758,13 +758,22 @@ function M.new(magic, buildat, log, ctx)
 					scroll = scroll, rows = on_screen}
 		end
 
+		-- The scroll_container being drawn into, if any: what is inside one
+		-- is a child of its clipped element, so its coordinates are that
+		-- element's and they ride the scrollbar ([FORMSPEC_SCROLL])
+		local in_scroll = nil
 		local function at(e, field_i)
 			local pos = formspec.parse_v2(e.fields[field_i])
 			if not pos then
 				return nil
 			end
-			return (pos[1] + e.at[1]) * layout.scale[1] + layout.origin[1],
-					(pos[2] + e.at[2]) * layout.scale[2] + layout.origin[2]
+			local x = (pos[1] + e.at[1]) * layout.scale[1] + layout.origin[1]
+			local y = (pos[2] + e.at[2]) * layout.scale[2] + layout.origin[2]
+			if in_scroll then
+				return x - in_scroll.x + in_scroll.dx,
+						y - in_scroll.y + in_scroll.dy
+			end
+			return x, y
 		end
 
 		local function geometry(e, field_i)
@@ -822,9 +831,18 @@ function M.new(magic, buildat, log, ctx)
 		-- elements and 8 ms of pictures, and this says where the rest went
 		self.kind_us = {}
 		local kind_us = self.kind_us
+		local scroll_boxes = {}
+		-- What the next scrollbar's range is; scrollbaroptions[] sets it and
+		-- Luanti's default is 0..1000
+		local bar_max = 1000
+		local form_window = window
 		for _, e in ipairs(elements) do
 			local name = e.name
 			local te = buildat.get_time_us()
+			-- Inside a scroll_container: drawn into its clipped element,
+			-- and at() answers in that element's coordinates
+			in_scroll = e.scroll and scroll_boxes[e.scroll] or nil
+			window = in_scroll and in_scroll.element or form_window
 			if IGNORED[name] then
 				-- Nothing to draw
 			elseif name == "background" or name == "background9" then
@@ -977,6 +995,90 @@ function M.new(magic, buildat, log, ctx)
 				local w, h = geometry(e, 2)
 				if x and w then
 					draw_table(e, x, y, w, h)
+				end
+			elseif name == "scrollbaroptions" then
+				-- scrollbaroptions[opt=value;...]: what the next scrollbar's
+				-- range is. Only max is read; the steps are how far a key
+				-- or a wheel moves one, and neither drives a bar here.
+				for _, f in ipairs(e.fields) do
+					local k, v = tostring(f):match("^%s*(%w+)%s*=%s*(.+)$")
+					if k == "max" then
+						bar_max = tonumber(v) or bar_max
+					end
+				end
+			elseif name == "scrollbar" then
+				-- scrollbar[X,Y;W,H;orientation;name;value]: a trough with
+				-- a thumb in it. A click in the trough pages by a tenth of
+				-- the range towards where it was clicked, and the value
+				-- goes back as "CHG:<value>", which is what Luanti's own
+				-- client sends ([FORMSPEC_SCROLL]).
+				--
+				-- simplified: the thumb is a fixed fifth of the trough and
+				-- is not dragged -- the range a scrollbaroptions[] names is
+				-- not read either, so the range is Luanti's default 0..1000
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				local vertical = tostring(e.fields[3] or "vertical")
+						:lower() ~= "horizontal"
+				local bar = e.fields[4]
+				if x and w and bar then
+					state.scroll = state.scroll or {}
+					local v = state.scroll[bar] or tonumber(e.fields[5]) or 0
+					state.scroll[bar] = v
+					-- Luanti's own default range, unless a
+					-- scrollbaroptions[] in front of this one said another
+					local max = bar_max
+					local step = math.max(1, math.floor(max / 10))
+					box(window, x, y, w, h,
+							magic.Color(0.1, 0.1, 0.12, 0.9))
+					local frac = math.max(0, math.min(1, v / max))
+					if vertical then
+						local th = h / 5
+						box(window, x + 1, y + (h - th) * frac, w - 2, th,
+								magic.Color(0.45, 0.45, 0.55, 0.95))
+						taps[#taps + 1] = {name = bar, scroll = -step,
+								x = x, y = y, w = w, h = h / 2,
+								value = "CHG:"..math.max(0, v - step)}
+						taps[#taps + 1] = {name = bar, scroll = step,
+								x = x, y = y + h / 2, w = w, h = h / 2,
+								value = "CHG:"..math.min(max, v + step)}
+					else
+						local tw = w / 5
+						box(window, x + (w - tw) * frac, y + 1, tw, h - 2,
+								magic.Color(0.45, 0.45, 0.55, 0.95))
+						taps[#taps + 1] = {name = bar, scroll = -step,
+								x = x, y = y, w = w / 2, h = h,
+								value = "CHG:"..math.max(0, v - step)}
+						taps[#taps + 1] = {name = bar, scroll = step,
+								x = x + w / 2, y = y, w = w / 2, h = h,
+								value = "CHG:"..math.min(max, v + step)}
+					end
+				end
+			elseif name == "scroll_container" then
+				-- scroll_container[X,Y;W,H;scrollbar name;orientation;
+				-- factor]: a box that clips what is drawn in it, moved by
+				-- the scrollbar of that name ([FORMSPEC_SCROLL]). The
+				-- factor is in formspec units per scrollbar unit; Luanti's
+				-- own default is 0.1.
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				local bar = e.fields[3]
+				local vertical = tostring(e.fields[4] or "vertical")
+						:lower() ~= "horizontal"
+				local factor = tonumber(e.fields[5]) or 0.1
+				if x and w then
+					local el = window:CreateChild("UIElement")
+					el:SetPosition(math.floor(x), math.floor(y))
+					el.size = magic.IntVector2(math.floor(w), math.floor(h))
+					el.clipChildren = true
+					state.scroll = state.scroll or {}
+					local v = state.scroll[bar] or 0
+					local moved = v * factor * layout.scale[vertical and 2 or 1]
+					-- The value is in the bar's own units and the factor is
+					-- formspec units per one of them
+					scroll_boxes[e.scroll_id] = {element = el, x = x, y = y,
+							dx = vertical and 0 or -moved,
+							dy = vertical and -moved or 0}
 				end
 			elseif name == "dropdown" then
 				-- dropdown[X,Y;W;name;item1,item2,...;selected;index event]
@@ -1216,6 +1318,8 @@ function M.new(magic, buildat, log, ctx)
 				end
 			end
 		end
+		-- The loop above points `window` at whatever it was drawing into
+		window = form_window
 		return {window = window, origin = {ox, oy},
 				size = {layout.width, layout.height}, slots = slots,
 				buttons = buttons, fields = fields, tables = tables,

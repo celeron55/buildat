@@ -378,6 +378,11 @@ function M.parse(spec)
 	local real = nil
 	local offset = {0, 0}
 	local stack = {}
+	-- Which scroll_container an element is inside, and how many there have
+	-- been; nil for the form itself
+	local scroll_now = nil
+	local scroll_stack = {}
+	local scrolls = 0
 	local i = 1
 	while i <= #spec do
 		-- An element is a name, then its fields in brackets
@@ -434,9 +439,29 @@ function M.parse(spec)
 					offset[2] + (v and v[2] or 0)}
 		elseif name == "container_end" then
 			offset = table.remove(stack) or {0, 0}
+		elseif name == "scroll_container" then
+			-- Like a container, and the element itself is kept: the client
+			-- draws a clipped box for it and what is inside rides its
+			-- scrollbar ([FORMSPEC_SCROLL]). Everything between this and
+			-- its end is marked with the box's number.
+			local v = M.parse_v2(fields[1] or "")
+			scrolls = scrolls + 1
+			elements[#elements + 1] = {
+				name = name, fields = fields, raw = raw, at = offset,
+				scroll_id = scrolls, scroll = scroll_now,
+			}
+			stack[#stack + 1] = offset
+			scroll_stack[#scroll_stack + 1] = scroll_now
+			scroll_now = scrolls
+			offset = {offset[1] + (v and v[1] or 0),
+					offset[2] + (v and v[2] or 0)}
+		elseif name == "scroll_container_end" then
+			offset = table.remove(stack) or {0, 0}
+			scroll_now = table.remove(scroll_stack)
 		else
 			elements[#elements + 1] = {
 				name = name, fields = fields, raw = raw, at = offset,
+				scroll = scroll_now,
 			}
 		end
 	end
