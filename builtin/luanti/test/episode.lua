@@ -168,6 +168,19 @@ local function census(player)
 			objs[n] = (objs[n] or 0) + 1
 		end
 	end
+	-- Every object of the world with where it is and what it hangs on,
+	-- for reading a census that differs ([DIG_PARITY]); the player's
+	-- own position beside
+	local where = {}
+	for _, obj in ipairs(core.get_objects_inside_radius(ORIGIN, 1000)) do
+		local le = obj:get_luaentity()
+		local p = obj:get_pos()
+		local parent = obj.get_attach and obj:get_attach() or nil
+		where[#where + 1] = string.format("%s@%.1f,%.1f,%.1f%s",
+				obj:is_player() and "player" or (le and le.name or "?"),
+				p.x, p.y, p.z, parent and "(attached)" or "")
+	end
+	core.log("action", "episode: objects " .. table.concat(where, " "))
 	local olist = {}
 	for n, c in pairs(objs) do
 		olist[#olist + 1] = n .. ":" .. c
