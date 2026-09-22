@@ -2179,7 +2179,6 @@ local STUBS_NIL = {
 	-- three particle calls in lua/particles.lua
 	"hud_replace_builtin",
 	-- Auth and privileges (M4)
-	"get_password_hash", "check_password_entry",
 	"set_player_privs", "auth_reload",
 	"kick_player", "disconnect_player", "ban_player", "unban_player_or_ip",
 	"get_ban_list", "get_ban_description",
@@ -5435,6 +5434,30 @@ end
 -- Luanti's own singleplayer means by the term -- its server hands out every
 -- privilege there, rather than the give_to_singleplayer ones, which is why
 -- /time works in singleplayer and not on a server. See is_singleplayer().
+-- Luanti's legacy password hash, translate_password(): base64 of the sha1
+-- of the name and the password run together; empty for an empty
+-- password. The vendored auth handler makes an entry with it when a
+-- privilege is set for a name that has none yet (set_privileges).
+function core.get_password_hash(name, raw_password)
+	name, raw_password = tostring(name or ""), tostring(raw_password or "")
+	if raw_password == "" then
+		return ""
+	end
+	return core.encode_base64(core.sha1(name .. raw_password, true))
+end
+
+-- simplified: the legacy hash only. Luanti's SRP entries ("#1#salt#
+-- verifier") are what its own network handshake makes, and this server's
+-- clients do not log in with a password, so none are ever made here;
+-- one from an imported world answers false.
+function core.check_password_entry(name, entry, password)
+	entry = tostring(entry or "")
+	if entry:sub(1, 1) == "#" then
+		return false
+	end
+	return core.get_password_hash(name, password) == entry
+end
+
 function core.get_player_privs(name)
 	if core.is_singleplayer() then
 		local all = {}
