@@ -1031,8 +1031,14 @@ local function fuzzy(query, name)
 	return score
 end
 
+-- What the prompt can find: the orbs, and the terminal, which is the
+-- one thing in the room that is not one
 local function best_match(query)
 	local best, best_score = nil, nil
+	local term = fuzzy(query, "settings terminal contentdb")
+	if term then
+		best, best_score = "terminal", term
+	end
 	for i, o in ipairs(ORBS) do
 		local sc = fuzzy(query, o.name)
 		if sc and (best_score == nil or sc < best_score) then
@@ -1042,6 +1048,118 @@ local function best_match(query)
 	return best
 end
 
+local function match_name(b)
+	return b == "terminal" and "settings / ContentDB" or
+			(b and ORBS[b] and ORBS[b].name)
+end
+
+-- **The terminal**: settings and the ContentDB listing are a thing you
+-- walk to and sit at, and what is drawn on it is an ordinary
+-- information-dense widget at full readable density. The rule that
+-- keeps the whole room from being a circus (the brief): **physical to
+-- find, flat to read, never a 3D prop pretending to be a scrollbar.**
+--
+-- So the console is geometry -- a plinth, an angled screen, a keyboard
+-- ledge -- and the moment the camera is square-on to it the panel that
+-- appears is flat UI with rows of text in it.
+local TERMINAL = {x = -7.4, y = 0.0, z = 6.2}
+do
+	local t = TERMINAL
+	part("Box", magic.Vector3(t.x, t.y + 0.45, t.z),
+			magic.Vector3(3.0, 0.9, 1.7), stone)
+	part("Box", magic.Vector3(t.x, t.y + 0.95, t.z + 0.55),
+			magic.Vector3(2.6, 0.12, 0.7), machined)
+	-- The screen: dark glass in a housing, which is what it is when
+	-- nobody is sitting at it
+	part("Box", magic.Vector3(t.x, t.y + 1.75, t.z - 0.42),
+			magic.Vector3(2.8, 1.7, 0.22), machined)
+	part("Box", magic.Vector3(t.x, t.y + 1.75, t.z - 0.30),
+			magic.Vector3(2.5, 1.45, 0.06),
+			glow(magic.Color(0.03, 0.10, 0.13, 1)))
+end
+
+-- The flat half. Hidden until the camera is at the desk; nothing here
+-- pretends to be an object.
+local panel = magic.ui.root:CreateChild("BorderImage")
+panel.visible = false
+panel.priority = 50
+panel.horizontalAlignment = magic.HA_CENTER
+panel.verticalAlignment = magic.VA_CENTER
+panel.color = magic.Color(0.02, 0.05, 0.07, 0.94)
+-- A flat white texel to tint: an image element with no texture draws
+-- nothing at all
+panel.texture = checker_texture(2, 1, magic.Color(1, 1, 1, 1),
+		magic.Color(1, 1, 1, 1))
+panel.imageRect = magic.IntRect(0, 0, 2, 2)
+-- **After the texture**: an image element takes its texture's size when
+-- one is set, so a size asked for first is thrown away and the panel
+-- comes out two pixels across
+panel.size = magic.IntVector2(760, 420)
+
+local function panel_row(y, left, right, colour)
+	local t = panel:CreateChild("Text")
+	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 17)
+	t:SetPosition(26, y)
+	t:SetColor(colour or magic.Color(0.62, 0.86, 0.95, 1))
+	t.text = string.format("%-26s %s", left, right)
+	return t
+end
+
+local panel_rows = {}
+local function draw_panel()
+	for _, t in ipairs(panel_rows) do
+		t:Remove()
+	end
+	panel_rows = {}
+	local y = 18
+	local function row(l, r, c)
+		panel_rows[#panel_rows + 1] = panel_row(y, l, r, c)
+		y = y + 24
+	end
+	row("SETTINGS", "", magic.Color(1, 1, 1, 1))
+	row("palette", PRESETS[current].name .. "  (F1-F4)")
+	row("reflection probe", probe_on and "on  (P)" or "off  (P)")
+	row("voxel", string.format("%.2f m, %d bays", VOXEL_M, BAYS))
+	row("ornament", "generated at boot, no files")
+	row("sound", "synthesised, " .. #orb_nodes .. " drone voices")
+	y = y + 14
+	row("CONTENTDB", "", magic.Color(1, 1, 1, 1))
+	for i, o in ipairs(ORBS) do
+		if o.empty then
+			row("(empty slot " .. i .. ")", "pick a game to install",
+					magic.Color(1.0, 0.72, 0.30, 1))
+		else
+			row(o.name, o.warm and "installed" or
+					("server" .. (o.ping and (", " .. o.ping .. " ms") or
+					", no answer")))
+		end
+	end
+	y = y + 14
+	row("", "Escape leaves the desk", magic.Color(0.45, 0.6, 0.66, 1))
+end
+
+terminal_open = false
+local function sit_at_terminal()
+	terminal_open = true
+	draw_panel()
+	panel.visible = true
+	-- Square-on and close, which is what "the camera snaps flat onto it"
+	-- has to mean for a screen to be readable
+	fly_to({x = TERMINAL.x, y = TERMINAL.y + 1.75, z = TERMINAL.z + 2.6},
+			{x = TERMINAL.x, y = TERMINAL.y + 1.75, z = TERMINAL.z - 0.3})
+	log:info("terminal: sat down")
+end
+
+local function leave_terminal()
+	if not terminal_open then
+		return false
+	end
+	terminal_open = false
+	panel.visible = false
+	log:info("terminal: stood up")
+	return true
+end
+
 local function show_prompt()
 	if prompt_str == "" then
 		prompt_text.text = prompt_open and "type a name" or ""
@@ -1049,13 +1167,17 @@ local function show_prompt()
 	end
 	local b = best_match(prompt_str)
 	prompt_text.text = "> " .. prompt_str ..
-			(b and ("   -- " .. ORBS[b].name) or "   -- no match")
+			(b and ("   -- " .. match_name(b)) or "   -- no match")
 end
 
 -- Launching, in this room, is the bay coming apart and the camera going
 -- in: there is nothing behind it to run yet, and the transition is the
 -- content.
 local function launch(b)
+	if b == "terminal" then
+		sit_at_terminal()
+		return
+	end
 	if not b or not orb_places[b] then
 		return
 	end
@@ -1083,6 +1205,10 @@ function prompt_key(key)
 		prompt_open = false
 		prompt_str = ""
 		show_prompt()
+		if leave_terminal() then
+			fly_to(HOME_FROM, HOME_AT)
+			return true
+		end
 		-- Escape from the room's own view is the way back out of a launch
 		fly_to(HOME_FROM, HOME_AT)
 		for b = 1, BAYS do

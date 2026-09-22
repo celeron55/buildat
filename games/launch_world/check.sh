@@ -69,6 +69,19 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "delay 2600"
 	echo "screenshot $out/back-home.png"
 	echo "delay 600"
+	# The terminal: found by name like anything else, the camera square
+	# on to it and the panel flat over it
+	echo "keypress S"
+	echo "keypress E"
+	echo "keypress T"
+	echo "delay 400"
+	echo "keypress Return"
+	echo "delay 2400"
+	echo "screenshot $out/terminal.png"
+	echo "delay 400"
+	echo "keypress Escape"
+	echo "delay 2600"
+	echo "delay 600"
 	# And the first preset again with the reflection probe taken off the
 	# zone, which is what says the probe reaches the metals
 	echo "keypress F1"
@@ -192,5 +205,24 @@ typing_ok = flew > 8.0 and came_back < flew / 2.0
 print("PASS: typing a name flies the camera in, and Escape flies it out"
 		if typing_ok else
 		"FAIL: the typing path does not launch, or does not come back")
-sys.exit(0 if (ok and probe_ok and dissolve_ok and typing_ok) else 1)
+
+# The terminal: what says it is readable is that the panel covers the
+# middle of the frame and has text's contrast in it, not the room's
+term, dt = mean_of("terminal")
+w, h = term.size
+mid = term.crop((w // 2 - 320, h // 2 - 170, w // 2 + 320, h // 2 + 170))
+# Text is a few per cent of a panel's area, so a percentile lands on
+# the background whatever the rows say: what is counted is how many
+# pixels are text-bright against a panel that is dark
+px = sorted(mid.getdata())
+n = len(px)
+dark = px[int(n * 0.30)]
+bright = sum(1 for v in px if v > 120)
+print("the terminal panel is %d at its third and has %d text-bright "
+		"pixels" % (dark, bright))
+terminal_ok = dark < 40 and bright > 1500
+print("PASS: the terminal is flat, dark and readable" if terminal_ok
+		else "FAIL: the terminal panel is not on screen")
+sys.exit(0 if (ok and probe_ok and dissolve_ok and typing_ok and
+		terminal_ok) else 1)
 PY
