@@ -20,6 +20,11 @@ local ok_orn, err_orn, ornament = buildat.run_script_file("main/ornament.lua")
 if not ok_orn or type(ornament) ~= "table" then
 	error("ornament.lua: " .. tostring(err_orn))
 end
+-- The room's sound, synthesised; see synth.lua
+local ok_syn, err_syn, synth = buildat.run_script_file("main/synth.lua")
+if not ok_syn or type(synth) ~= "table" then
+	error("synth.lua: " .. tostring(err_syn))
+end
 
 -- Held at module scope: a Lua-owned Image, Texture2D or Material is freed
 -- when the last Lua reference goes, whatever is drawing with it
@@ -546,6 +551,20 @@ function handle_orb_update()
 	end
 end
 magic.SubscribeToEvent("Update", "handle_orb_update")
+
+-- The room's bed. One source on one stream, topped up every frame; the
+-- number of orbs alight is the number of drone voices, so what the room
+-- hums is the list of games ([LAUNCH_WORLD]'s own reason for generating
+-- the audio rather than looping a file).
+log:info(synth.self_check(magic))
+local bed = synth.new(magic, log)
+bed:set_voices(#orb_nodes)
+bed:play(scene:CreateChild("sound"))
+kept.bed = bed
+function handle_synth_update()
+	bed:update()
+end
+magic.SubscribeToEvent("Update", "handle_synth_update")
 
 set_preset(1)
 

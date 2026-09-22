@@ -46,16 +46,21 @@ bin/buildat -s localhost:29795 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-grep -aE "palette preset|ornament ok" "$out/cli.log" |
+grep -aE "palette preset|ornament ok|synth ok" "$out/cli.log" |
 	sed 's/.*launch_w[a-z]*: //'
 # The ornament generator asserts its own patterns as it builds them
 # (ornament.lua's self_check); a generator that quietly returned a flat
 # field would pass an eye on a dark slab and fail there
-if ! grep -aq "ornament ok" "$out/cli.log"; then
-	echo "FAIL: the ornament generator did not pass its own check"
-	grep -aiE "error|assert" "$out/cli.log" | tail -3
-	exit 1
-fi
+for what in "ornament" "synth"; do
+	if ! grep -aq "$what ok" "$out/cli.log"; then
+		echo "FAIL: the $what did not pass its own check"
+		grep -aiE "error|assert" "$out/cli.log" | tail -3
+		exit 1
+	fi
+done
+# A -c run is muted, so what can be checked here is the data path and the
+# pattern, which is what the two self-checks assert; whether it sounds
+# like anything is a listen.
 python3 - "$out" <<'PY'
 import sys, os, itertools
 from PIL import Image, ImageChops
