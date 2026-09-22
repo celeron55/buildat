@@ -294,7 +294,16 @@ core.register_on_joinplayer(function(player)
 		-- The worst step of the last second, not the decaying peak: the
 		-- peak counted one step eighty times as it came down
 		local peak, phase = core.get_server_step_worst()
-		if peak > STEP_FAIL_S then
+		-- A game's own generation is not this engine's to answer for
+		-- ([MAPGEN_STEP]): VoxeLibre's on_generated runs 0.2-3.9 s a
+		-- section of its own Lua -- timed to the mod, the bindings under
+		-- it milliseconds -- and it is a server-thread callback on
+		-- official as well. It is counted and said, never a FAIL.
+		if peak > STEP_CEILING_S and (phase or ""):match("^on_generated") then
+			core.log("warning", string.format(
+					"fuzz: step peak %.2f s in %s at t=%d (a game's own "..
+					"generation, not counted)", peak, phase, t))
+		elseif peak > STEP_FAIL_S then
 			fail(string.format("a step took %.2f s in %s", peak, phase))
 		elseif peak > STEP_CEILING_S and t >= STEP_COUNT_FROM_T then
 			core.log("warning", string.format(
