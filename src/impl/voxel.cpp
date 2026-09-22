@@ -414,6 +414,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.swimmable = def.swimmable;
 		cache.pointable = def.pointable;
 		cache.liquid_top = def.liquid_top;
+		cache.liquid_is_source = def.liquid_is_source;
 		cache.connect_group = def.connect_group;
 		cache.connect_mask = def.connect_mask;
 		cache.connect_to_solid = def.connect_to_solid;

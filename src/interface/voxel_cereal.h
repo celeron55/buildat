@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 20;
+		uint8_t version = 21;
 		archive(
 				version,
 				v.name,
@@ -131,6 +131,11 @@ namespace interface
 		// Version 20 added pointable, what the ray stops at ([POINTABLE])
 		if(version >= 20){
 			archive(v.pointable);
+		}
+		// Version 21 added whether a liquid is its source, which the
+		// mesher's corner rule reads ([WATER_LIGHT] 3)
+		if(version >= 21){
+			archive(v.liquid_is_source);
 		}
 	}
 

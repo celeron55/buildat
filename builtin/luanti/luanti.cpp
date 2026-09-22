@@ -5081,6 +5081,7 @@ struct Module: public interface::Module, public luanti::Interface
 			}
 			if(!liquid_group.empty()){
 				vdef.is_liquid = true;
+				vdef.liquid_is_source = (drawtype == "liquid");
 				vdef.shape_group = liquid_shape_group(liquid_group);
 				vdef.liquid_top = 0.5f;
 				// param2's low three bits are the level; the rest of it is

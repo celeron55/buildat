@@ -1470,6 +1470,19 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			use_skylight, translucent_result, masked_result, horizon);
 }
 
+// [WATER_LIGHT] 3: BUILDAT_LIQUID_CORNER_AVG=1 averages a source column in
+// with the flowing ones instead of answering the corner with it, which is
+// what this did before. It is here so that liquid_shore.sh can read the
+// same shore both ways in one run of the world.
+static bool liquid_corner_avg()
+{
+	static const bool v = [](){
+		const char *s = getenv("BUILDAT_LIQUID_CORNER_AVG");
+		return s != nullptr && s[0] != '\0';
+	}();
+	return v;
+}
+
 // How high a liquid's surface stands at one corner of a voxel: the average
 // of the surfaces of the up to four liquid columns that meet there. This is
 // Luanti's getCornerLevel, and what it is for is a surface that runs
@@ -1504,12 +1517,18 @@ static float liquid_corner_top(VoxelVolume &volume,
 		if(cdef == nullptr)
 			continue;
 		if(cdef->is_liquid && cdef->shape_group == def->shape_group){
-			// How high this column stands is its own param's business, the
-			// same as the voxel being meshed: Luanti puts a flowing liquid's
-			// level in param2. A column with no level -- a source -- is
-			// full height and says so for the whole corner, Luanti's
-			// getCornerLevel() rule ([LIQUID_SURFACE]); the mean is of the
-			// flowing columns alone.
+			// A source stands full height and says so for the whole corner,
+			// without being averaged in: Luanti's getCornerLevel() returns
+			// there and then ("Source always has the full height"). A
+			// source whose param2 is something else -- VoxeLibre's water
+			// carries its palette index there -- used to be read as a
+			// variant and averaged with the flow beside it, and the shore
+			// sagged into the flow ([WATER_LIGHT] 3).
+			if(cdef->liquid_is_source && !liquid_corner_avg())
+				return 0.5f;
+			// How high a flowing column stands is its own param's business:
+			// Luanti puts the level in param2. The mean is of the flowing
+			// columns alone.
 			const interface::VoxelVariant *cvar = fmt.param.bound() ?
 					cdef->variant(fmt.param.get(cv)) : nullptr;
 			if(!cvar)

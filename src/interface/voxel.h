@@ -249,6 +249,12 @@ namespace interface
 		// getCornerLevel, and it is the one thing here the mesher works out
 		// per voxel instead of per definition.
 		bool is_liquid = false;
+		// Whether this is the liquid's source rather than one of its
+		// flowing levels ([WATER_LIGHT] 3). Luanti's getCornerLevel()
+		// answers a corner that any source touches with the full height of
+		// the voxel, without averaging: a shore where a flow meets a pool
+		// stands level with the pool, it does not sag into the flow.
+		bool liquid_is_source = false;
 		float liquid_top = 0.5f;
 		// A ladder, a vine, a rope: something a player holds on to instead
 		// of falling past. Luanti's own climbable, and the client's physics
@@ -380,6 +386,8 @@ namespace interface
 		bool alpha_masked = false;
 		uint8_t shape_group = 0;
 		bool is_liquid = false;
+		// Copied from the definition; see VoxelDefinition::liquid_is_source
+		bool liquid_is_source = false;
 		float liquid_top = 0.5f;
 		// Copied from the definition; see VoxelDefinition::climbable
 		bool climbable = false;
