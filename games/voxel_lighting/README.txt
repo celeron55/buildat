@@ -70,6 +70,14 @@ bark is not that shiny. Spots ignore spec_strength and reflect at full
 strength, which is the whole point of it: rock can be dull everywhere except at
 its crystalline facets, which is not something a single roughness could say.
 
+Rock and dirt take their facets from static_spots, and the number is 0.25 rather
+than the 0.04 they carried while the shader spotted every material that named
+none: a quarter of the cells, which is a sprinkle rather than a crunch. 1.0 is
+what the old behaviour amounted to and it reads as noise on the dirt; 0.04 is
+not visible at all. The check images move by 465 to 868 RMSE between 0.04 and
+0.25 where two runs of the same code differ by 0 to 29, so this is a change the
+check sees easily.
+
 bumpiness is the other half of how busy a surface looks, and the one that is
 easy to mistake for gloss. It breaks the light up across the texture, diffuse
 as much as specular, so a surface with a high one reads as grainy whether or
@@ -488,6 +496,12 @@ rendering change against the previous run:
 the images come out the same size whatever the window was left at last time.
 It also shoots both benchmark edits, so a run is: all seven views of the scene
 as generated, then three of them after the shaft and after the slab.
+
+The same run at -o render_scale=0.5 and at 1.0 is the check that the client's
+undersampling preference is doing what it should: the same scene, one softer,
+and the UI text equally sharp in both. This game is a good one for it because
+it renders in HDR with a tonemap appended to the render path, which is what
+the preference must not disturb.
 
 NOTE: the server reads client_lua and client_data once at startup, so restart
 it after editing init.lua, the shader or a cube map, or the client will be

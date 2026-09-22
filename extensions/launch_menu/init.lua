@@ -5,6 +5,7 @@ local log = buildat.Logger("extension/launch_menu")
 local magic = require("buildat/extension/urho3d").safe
 local uistack = require("buildat/extension/uistack")
 local ui_utils = require("buildat/extension/ui_utils").safe
+local network = require("buildat/extension/network").safe
 local M = {safe = nil}
 
 local function show_error(message)
@@ -81,7 +82,8 @@ local function make_labeled_edit(parent, label, value, width)
 	text.text = label
 	local edit = parent:CreateChild("LineEdit")
 	edit:SetStyleAuto()
-	edit.minHeight = 24
+	-- Fixed, not min: a column beside a tall list would stretch it
+	edit:SetFixedHeight(26)
 	edit.minWidth = width or 300
 	edit:SetText(value)
 	return edit
@@ -106,16 +108,51 @@ local function show_connect_to_server()
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
 	root.defaultStyle = style
 
-	local window = root:CreateChild("Window")
-	window:SetStyleAuto()
-	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
-	window:SetAlignment(HA_LEFT, VA_CENTER)
+	local outer = root:CreateChild("Window")
+	outer:SetStyleAuto()
+	outer:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
+	outer:SetAlignment(HA_LEFT, VA_CENTER)
+
+	-- Two columns ([SERVER_LIST]): the addresses this client has used on
+	-- the left (the network extension's file), the fields on the right; a
+	-- pick fills them, a second pick connects
+	local columns = outer:CreateChild("UIElement")
+	columns:SetLayout(LM_HORIZONTAL, 16, magic.IntRect(0, 0, 0, 0))
+	local left = columns:CreateChild("UIElement")
+	left:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+	left:SetFixedWidth(440)
+	local window = columns:CreateChild("UIElement")
+	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 
 	local address_edit = make_labeled_edit(window, "Address", "localhost")
 	local port_edit = make_labeled_edit(window, "Port (optional)", "29500")
 	address_edit:SetFocus(true)
+	local do_connect
+	local used = left:CreateChild("Text")
+	used:SetStyleAuto()
+	used.text = "Servers used:"
+	local list = ui_utils.server_list(left, {width = 440, height = 300},
+			function(row, second)
+		address_edit:SetText(row.host)
+		port_edit:SetText(row.port)
+		if second then
+			do_connect()
+		end
+	end)
+	local rows = {}
+	for _, e in ipairs(network.known_addresses()) do
+		local host, port = e.uri:match("^%a+://(.-):(%d+)$")
+		if host and e.accepted then
+			rows[#rows + 1] = {name = host .. ":" .. port, host = host, port = port,
+					line = e.description ~= "" and e.description or nil}
+		end
+	end
+	if #rows == 0 then
+		used.text = "No servers used yet"
+	end
+	list:set_rows(rows)
 
-	local function do_connect()
+	do_connect = function()
 		local host = address_edit:GetText()
 		local port = port_edit:GetText()
 		if host == "" then
@@ -144,6 +181,8 @@ local function show_connect_to_server()
 	end)
 
 	local back_button = make_button(window, "Back")
+	-- Fixed: the column beside the list would stretch the last button
+	back_button:SetFixedHeight(26)
 	magic.SubscribeToEvent(back_button, "Released",
 	function(self, event_type, event_data)
 		uistack.main:pop(root)
@@ -171,8 +210,15 @@ local function show_starting(game)
 	local status = window:CreateChild("Text")
 	status:SetStyleAuto()
 	status.text = "Starting "..game.."..."
+	-- What the server says it is doing, off the STATUS lines of its log
+	-- ([START_PROGRESS]): a first start compiles fourteen modules behind
+	-- this screen, and this is what makes that read as progress
+	local stage = window:CreateChild("Text")
+	stage:SetStyleAuto()
+	stage.text = ""
 
 	local t0 = buildat.get_time_us()
+	local last_status, last_status_at, last_poll = nil, t0, 0
 	local done = false
 	root:SubscribeToStackEvent("Update", function(event_type, event_data)
 		if done then
@@ -185,15 +231,32 @@ local function show_starting(game)
 		end
 		if not buildat.local_server_running() then
 			done = true
-			show_error("Server exited")
 			uistack.main:pop(root)
+			M.show_dead_server("The server exited while starting")
 			return
 		end
-		if buildat.get_time_us() - t0 > 90 * 1000000 then
+		local now = buildat.get_time_us()
+		if now - last_poll > 250000 then
+			last_poll = now
+			local line = buildat.local_server_status()
+			if line ~= last_status then
+				last_status, last_status_at = line, now
+			end
+		end
+		-- The seconds since the stage began, always: a screen that sits
+		-- still while the user can only wait is the failure [FIRST_RUN]'s
+		-- run looks for, and before the server's first status line
+		-- there was nothing here to move
+		local secs = math.floor((now - last_status_at) / 1000000)
+		stage.text = (last_status or "Waiting for the server").."  "..secs.." s"
+		-- Not a fixed wait: a fresh compile of every module can outlast
+		-- one on a slow machine. A hang is no new status line for 120 s.
+		if now - last_status_at > 120 * 1000000 then
 			done = true
 			buildat.request_stop_local_server()
-			show_error("Server did not start")
 			uistack.main:pop(root)
+			show_error("Server did not start: no progress for 120 s"..
+					(last_status and (", last at \""..last_status.."\"") or ""))
 		end
 	end)
 
@@ -207,8 +270,8 @@ local function show_starting(game)
 	end)
 end
 
-local function do_start_local_game(game)
-	local ok, err = buildat.start_local_server(game)
+local function do_start_local_game(game, launch)
+	local ok, err = buildat.start_local_server(game, launch)
 	if not ok then
 		show_error(err)
 		return
@@ -216,7 +279,7 @@ local function do_start_local_game(game)
 	show_starting(game)
 end
 
-local function show_waiting_for_old_server(game)
+local function show_waiting_for_old_server(game, launch)
 	local root = uistack.main:push({desc="stopping_old_server"})
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
@@ -240,7 +303,7 @@ local function show_waiting_for_old_server(game)
 		if not buildat.local_server_running() then
 			done = true
 			uistack.main:pop(root)
-			do_start_local_game(game)
+			do_start_local_game(game, launch)
 			return
 		end
 		if buildat.get_time_us() - t0 > 10 * 1000000 then
@@ -251,7 +314,7 @@ local function show_waiting_for_old_server(game)
 				"It may be saving. Force kill it?",
 				function()
 					buildat.force_kill_local_server()
-					do_start_local_game(game)
+					do_start_local_game(game, launch)
 				end,
 				function()
 				end)
@@ -267,13 +330,13 @@ local function show_waiting_for_old_server(game)
 	end)
 end
 
-local function start_local_game(game)
+local function start_local_game(game, launch)
 	buildat.request_stop_local_server()
 	if not buildat.local_server_running() then
-		do_start_local_game(game)
+		do_start_local_game(game, launch)
 		return
 	end
-	show_waiting_for_old_server(game)
+	show_waiting_for_old_server(game, launch)
 end
 
 local function show_local_game()
@@ -316,8 +379,26 @@ end
 -- The two things this extension knows how to do, for the launch menu to put
 -- in front of a player: the list of local games, and connecting to a remote
 -- server. Both push a screen of their own and come back on their own.
+-- A local server that died: the last lines of its log and where the
+-- whole of it is, so a crash's backtrace is on the screen and not just
+-- gone ([START_PROGRESS]). on_close runs when the dialog is closed.
+function M.show_dead_server(title, on_close)
+	local path, tail = buildat.local_server_log_tail(20)
+	ui_utils.show_message_dialog(title.."\n\n"..tail..
+			"\nThe full log is at "..path, on_close)
+end
+
 M.show_local_game = show_local_game
 M.show_connect_to_server = show_connect_to_server
+-- And starting a game by name, which is what a tile on the launch grid
+-- ends in ([LAUNCH_GRID]); the same screens as picking it from the list
+M.start_local_game = start_local_game
+-- And the same two for the sandboxed launcher file ([LAUNCH_GRID]): each
+-- pushes a trusted screen and comes back, and takes nothing from the caller
+M.safe = {
+	show_local_game = function() show_local_game() end,
+	show_connect_to_server = function() show_connect_to_server() end,
+}
 
 -- Kept so that `-m launch_menu` still starts something: the launch menu
 -- itself is extensions/__menu, which is what the client boots by default.
@@ -331,7 +412,7 @@ end
 -- keyboard selection and no icons to load, and it is one call away if the
 -- icon menu ever needs replacing.
 function M.boot_plain()
-	local root = uistack.main:push("boot")
+	local root = uistack.main:push({desc = "boot"})
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
 	root.defaultStyle = style

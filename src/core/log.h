@@ -15,7 +15,8 @@ void log_init();
 
 void log_set_max_level(int level);
 int log_get_max_level();
-void log_set_file(const char *path);
+// tee: the file beside stderr rather than instead of it (the default log)
+void log_set_file(const char *path, bool tee = false);
 void log_close();
 
 // Try to stop using malloc() and other heavyweight interfaces. Call when
