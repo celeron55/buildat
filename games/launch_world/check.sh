@@ -48,7 +48,9 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "screenshot $out/dissolve-open.png"
 	echo "delay 600"
 	echo "keypress Backspace"
-	echo "delay 2200"
+	# The cubes land in 0.9 s, but the voxels coming back have to be
+	# remeshed and relit before the picture is the picture it was
+	echo "delay 5000"
 	echo "screenshot $out/dissolve-closed-again.png"
 	echo "delay 600"
 	# And the first preset again with the reflection probe taken off the

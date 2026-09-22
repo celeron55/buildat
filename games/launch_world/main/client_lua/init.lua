@@ -259,7 +259,12 @@ local ORBS = {
 	{name = "Undermine", warm = true},
 	{name = "Digger", warm = true},
 	{name = "buildat.example.org", warm = false, ping = 38},
-	{name = "Aggregate", warm = true},
+	-- **Chekhov's empty shelf**: a bay with nothing in it, which is what
+	-- says there is room for another game and is the way to ContentDB.
+	-- The cartridge rack the earlier draft had is gone -- "the orbs are
+	-- the games" settled that, and a rack beside them would be the same
+	-- list twice.
+	{name = "install a game", warm = true, empty = true},
 	{name = "mine.example.net", warm = false, ping = 210},
 }
 local function bay_width(tier) return 10 - tier end
@@ -285,11 +290,19 @@ log:info("bays " .. BAYS .. " " .. SLAB_H .. " " .. BAY_Z .. " " ..
 local orb_mats = {}
 local orb_nodes = {}
 for i, o in ipairs(orb_places) do
-	orb_mats[i] = glow(magic.Color(1, 1, 1, 1), ORBS[i] and ORBS[i].name)
-	local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-			magic.Vector3(1.7, 1.7, 1.7), orb_mats[i])
-	node:GetComponent("StaticModel").castShadows = false
-	orb_nodes[i] = node
+	local spec = ORBS[i]
+	if spec and spec.empty then
+		-- Nothing in the niche but the ring that would hold something,
+		-- dim: an empty socket reads as empty, not as broken
+		part("Torus", magic.Vector3(o.x, o.y, o.z),
+				magic.Vector3(1.9, 1.9, 1.9), machined)
+	else
+		orb_mats[i] = glow(magic.Color(1, 1, 1, 1), spec and spec.name)
+		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
+				magic.Vector3(1.7, 1.7, 1.7), orb_mats[i])
+		node:GetComponent("StaticModel").castShadows = false
+		orb_nodes[i] = node
+	end
 end
 
 -- The foreground: ten shipped primitives on the checkerboard, the chrome
@@ -409,6 +422,11 @@ local function set_preset(n)
 	for i, light in ipairs(lights) do
 		local e = preset.lights[i]
 		light.color = magic.Color(e[1][1], e[1][2], e[1][3], 1)
+		if ORBS[i] and ORBS[i].empty then
+			-- An empty niche is a dark one, and the one amber thing in
+			-- the room is allowed to be the invitation to fill it
+			light.color = magic.Color(1.0, 0.62, 0.12, 1)
+		end
 		-- An orb is its own light made visible, so it wears the colour it
 		-- casts, well above 1 so it reads as a source and not as a pale
 		-- ball -- and so the probe carries it to the chrome
@@ -416,7 +434,8 @@ local function set_preset(n)
 			orb_mats[i]:SetShaderParameter("MatDiffColor",
 					magic.Color(e[1][1] * 3.0, e[1][2] * 3.0, e[1][3] * 3.0, 1))
 		end
-		light.brightness = e[2] * PBR_INTENSITY
+		light.brightness = e[2] * PBR_INTENSITY *
+				((ORBS[i] and ORBS[i].empty) and 0.22 or 1.0)
 		light.range = e[3]
 	end
 	if label then
@@ -705,20 +724,26 @@ name_text.faceCameraMode = magic.FC_ROTATE_Y
 pointed_orb = 0
 function handle_orb_update()
 	local best, best_dot = 0, -1
-	for i, node in ipairs(orb_nodes) do
-		local p = node.position
-		local dx, dy, dz = p.x - view_from.x, p.y - view_from.y,
-				p.z - view_from.z
-		local l = math.sqrt(dx * dx + dy * dy + dz * dz)
-		local dot = (dx * view_dir.x + dy * view_dir.y + dz * view_dir.z) / l
-		if dot > best_dot then
-			best, best_dot = i, dot
+	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
+	-- stops at it, which would hide every orb past the empty one
+	for i = 1, #orb_places do
+		local node = orb_nodes[i]
+		if node then
+			local p = node.position
+			local dx, dy, dz = p.x - view_from.x, p.y - view_from.y,
+					p.z - view_from.z
+			local l = math.sqrt(dx * dx + dy * dy + dz * dz)
+			local dot = (dx * view_dir.x + dy * view_dir.y +
+					dz * view_dir.z) / l
+			if dot > best_dot then
+				best, best_dot = i, dot
+			end
+			-- Present the face: the mark sits in the middle of the
+			-- sphere's UVs, which Sphere.mdl puts on -Z, so the orb looks
+			-- away from the viewer to show it to them
+			node:LookAt(magic.Vector3(view_from.x * 2 - p.x,
+					view_from.y * 2 - p.y, view_from.z * 2 - p.z))
 		end
-		-- Present the face: the mark sits in the middle of the sphere's
-		-- UVs, which Sphere.mdl puts on -Z, so the orb looks away from
-		-- the viewer to show it to them
-		node:LookAt(magic.Vector3(view_from.x * 2 - p.x,
-				view_from.y * 2 - p.y, view_from.z * 2 - p.z))
 	end
 	if best ~= pointed_orb then
 		pointed_orb = best
@@ -865,6 +890,63 @@ function handle_dissolve_update(event_type, event_data)
 	end
 end
 magic.SubscribeToEvent("Update", "handle_dissolve_update")
+
+-- **The loading reel**: it turns because the frame genuinely turns, and
+-- it turns while a bay is coming apart -- which in this room is what
+-- loading is. Honest only now that the connect is off the main thread
+-- ([BOX_PLAYTEST_2] (12)): a reel that freezes when the client stalls is
+-- a reel that lies.
+local reel_nodes = {}
+do
+	local x, y, z = 7.0, 2.35, 5.6
+	part("Box", magic.Vector3(x, y - 1.2, z),
+			magic.Vector3(2.6, 0.3, 1.4), machined)
+	for i, dx in ipairs({-0.72, 0.72}) do
+		local hub = part("Cylinder", magic.Vector3(x + dx, y, z),
+				magic.Vector3(1.0, 0.22, 1.0), chrome)
+		-- Lying on its side, so it reads as a reel and not as a drum
+		hub.rotation = magic.Quaternion(90, 0, 0)
+		-- A spoke across the hub, so that a turning reel is visibly
+		-- turning. It is its own node turned in place rather than a
+		-- child of the hub: Node's parent is not on the whitelist, and a
+		-- spoke centred on the hub needs nothing more than its own
+		-- rotation anyway.
+		local spoke = part("Box", magic.Vector3(x + dx, y, z),
+				magic.Vector3(1.5, 0.1, 0.16), machined)
+		reel_nodes[i] = {hub = hub, spoke = spoke}
+	end
+end
+
+reel_angle = 0
+function handle_reel_update(event_type, event_data)
+	local dt = event_data:GetFloat("TimeStep")
+	local busy = false
+	for b = 1, BAYS do
+		if bay_state[b] and bay_state[b].t ~= bay_state[b].target then
+			busy = true
+		end
+	end
+	if not busy then
+		-- **It parks.** Otherwise the spokes stop wherever they were and
+		-- the room's state is no longer a function of the bays alone --
+		-- a bay shut again would come back to a different picture, which
+		-- is the one thing the dissolve's own check is about.
+		if reel_angle ~= 0 then
+			reel_angle = 0
+			for _, r in ipairs(reel_nodes) do
+				r.spoke.rotation = magic.Quaternion(0, 0, 0)
+			end
+		end
+		return
+	end
+	reel_angle = (reel_angle + dt * 220) % 360
+	for i, r in ipairs(reel_nodes) do
+		r.spoke.rotation = magic.Quaternion(0,
+				reel_angle * (i == 1 and 1 or -1), 0)
+	end
+end
+magic.SubscribeToEvent("Update", "handle_reel_update")
+
 
 set_preset(1)
 
