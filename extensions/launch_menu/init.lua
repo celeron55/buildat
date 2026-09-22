@@ -101,11 +101,13 @@ local function leave_game()
 		return
 	end
 	__buildat_leave_to_menu()
-	-- Down to the grid, the stack's first screen: the starting screen
-	-- and the placeholder above it go with the game's own
-	uistack.main:pop_to(uistack.main.stack[1], false)
+	-- Down through the grid, the stack's first screen -- the starting
+	-- screen and the placeholder go with the game's own -- and the grid
+	-- drawn again: a game installed from ContentDB is a new tile
+	uistack.main:pop_to(uistack.main.stack[1], true)
 	game_root = nil
 	magic.input:SetMouseVisible(true, "back to the launcher")
+	require("buildat/extension/__menu").boot()
 end
 
 local function connect_or_show_error(address)

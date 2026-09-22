@@ -41,6 +41,11 @@ local menu_wanted = nil
 -- worlds ("worlds:<gameid>"): the list shows that game's saves and New
 -- save is that game's ([LAUNCH_GRID])
 local menu_game = nil
+-- Which screen the launch asked for, kept: the tile that opened the
+-- settings or ContentDB is a submenu of the launcher ([MENU_CONTEXT]), so
+-- that screen's back goes to the grid, not to a save list nobody asked
+-- for. A launch for a game's worlds goes back through the world screen.
+local launched_for = nil
 buildat.sub_packet("main:menu", function(data)
 	local game = data:match("^worlds:(.+)$")
 	if game then
@@ -48,6 +53,7 @@ buildat.sub_packet("main:menu", function(data)
 		menu_wanted = nil
 	else
 		menu_wanted = data
+		launched_for = data
 	end
 end)
 local import_page = 1
@@ -508,10 +514,16 @@ local function import_menu(title)
 	return menu
 end
 
-local function back_to_saves(menu)
-	menu:add("< back", function()
-		draw(last_saves, last_save_games)
-	end)
+local function back_to_saves(menu, screen)
+	if screen and launched_for == screen then
+		menu:add("< back to the launcher", function()
+			buildat.leave()
+		end)
+	else
+		menu:add("< back", function()
+			draw(last_saves, last_save_games)
+		end)
+	end
 	magic.input:SetMouseVisible(true, "a menu screen")
 end
 
@@ -639,7 +651,7 @@ function draw_settings(paths)
 		list[#list + 1] = path
 		send(list)
 	end)
-	back_to_saves(menu)
+	back_to_saves(menu, "settings")
 end
 
 -- ContentDB's games, fetched by the server ([CONTENTDB]): a search field,
@@ -758,7 +770,7 @@ function draw_contentdb(flat)
 			pending_n = pending_n + 1
 		end
 	end
-	back_to_saves(menu)
+	back_to_saves(menu, "contentdb")
 end
 
 buildat.sub_packet("main:contentdb_picture", function(data)
@@ -894,7 +906,7 @@ function draw_import_games()
 			draw_import_games()
 		end,
 	})
-	back_to_saves(menu)
+	back_to_saves(menu, "import_game")
 end
 
 -- A world becomes a save rather than being copied, so what this asks for on
@@ -961,7 +973,7 @@ function draw_import_worlds()
 			draw_import_worlds()
 		end,
 	})
-	back_to_saves(menu)
+	back_to_saves(menu, "import_world")
 end
 
 

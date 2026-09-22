@@ -80,7 +80,11 @@ def read_block(label):
             data = f.read()
         if data:
             buf += data
-            if b"Disconnected from server" in data or b"SIGTERM; shutting down" in data:
+            # A server stopped by the client on leaving a menu screen for
+            # the launcher ([MENU_CONTEXT]) is not a lost connection
+            left = b"leave_to_menu()" in buf
+            if b"Disconnected from server" in data or \
+                    (b"SIGTERM; shutting down" in data and not left):
                 disconnected = True
                 seen = start + len(buf)
                 return None, time.time() - t0
