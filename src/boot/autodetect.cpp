@@ -533,7 +533,11 @@ bool check_server_paths(const core::Config &config, bool log_issues)
 	bool ok = true;
 	if(!check_paths(config, server_paths, log_issues))
 		ok = false;
-	if(!check_paths(config, compiler_bin_paths, log_issues))
+	// An empty compiler_command is the archive without a compiler
+	// ([LUANTI_BUILD]), which detect_compiler_bin_paths() let through;
+	// checked again here it would stop the server after all
+	if(config.get<ss_>("compiler_command") != "" &&
+			!check_paths(config, compiler_bin_paths, log_issues))
 		ok = false;
 	if(!check_paths(config, server_urho3d_paths, log_issues))
 		ok = false;
