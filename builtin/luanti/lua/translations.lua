@@ -138,12 +138,10 @@ end
 -- Flat because that is what the packet is, and because a game's whole
 -- translation for one language is a few thousand strings at most -- the
 -- files for every other language are never read.
-function core.__translations()
-	local langs = languages()
-	if #langs == 0 then
-		return {}
-	end
-	local by_domain = {}
+-- The .tr files for these languages, as by_domain[domain][key] = value;
+-- files and entries counted for the caller's line
+local function read_languages(langs, by_domain)
+	local files, entries = 0, 0
 	local files, entries = 0, 0
 	for _, dir in ipairs(locale_dirs()) do
 		for _, file in ipairs(core.get_dir_list(dir, false) or {}) do
@@ -164,6 +162,16 @@ function core.__translations()
 			end
 		end
 	end
+	return files, entries
+end
+
+function core.__translations()
+	local langs = languages()
+	if #langs == 0 then
+		return {}
+	end
+	local by_domain = {}
+	local files, entries = read_languages(langs, by_domain)
 	local flat = {}
 	for domain, strings in pairs(by_domain) do
 		for key, value in pairs(strings) do
@@ -175,6 +183,37 @@ function core.__translations()
 	core.log("action", "translations: " .. entries .. " strings in " ..
 			files .. " files for " .. table.concat(langs, ", "))
 	return flat
+end
+
+-- core.get_translated_string(lang_code, s): the string with its markup
+-- resolved the way the client would for that language -- a game sorts or
+-- filters by it (VoxeLibre's creative inventory search and craft guide,
+-- devtest's chest of everything). The resolver is the client's own
+-- (client_lua/formspec.lua, self-contained), loaded here once; a
+-- language's files are read on the first ask and kept.
+local translator = nil
+local read_for = {}
+function core.get_translated_string(lang_code, s)
+	if translator == nil then
+		translator = dofile(__luanti_module_path .. "/client_lua/formspec.lua")
+	end
+	local lang = tostring(lang_code or ""):gsub("[.@].*$", "")
+	if lang == "" or lang == "C" or lang == "POSIX" then
+		lang = "en"
+	end
+	local by_domain = read_for[lang]
+	if by_domain == nil then
+		by_domain = {}
+		local langs = {lang}
+		local short = lang:match("^(%a+)")
+		if short and short ~= lang then
+			langs[#langs + 1] = short
+		end
+		read_languages(langs, by_domain)
+		read_for[lang] = by_domain
+	end
+	translator.set_translations(by_domain)
+	return translator.translate(tostring(s or ""))
 end
 
 do
