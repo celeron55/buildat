@@ -246,6 +246,21 @@ M.texture = texture_of
 local texmods_done = false
 
 -- The same table from a packet or from the served file
+-- A table this client is handed at startup: served as a file by
+-- client_file and answered on request by the luanti module
+-- ([BLOCKED_MODULE]). The file is read as soon as the handler is known --
+-- the module may be inside a mapgen handler for half a minute and answer
+-- nothing in that time -- and the packet is still subscribed to, for what a
+-- game adds while it runs.
+local function startup_packet(name, file, fn)
+	buildat.sub_packet(name, fn)
+	local blob = buildat.get_file_content and buildat.get_file_content(file)
+	if blob then
+		log:info(name .. ": from the served file, " .. #blob .. " bytes")
+		fn(blob)
+	end
+end
+
 local function texmods_from_data(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	local n = 0
@@ -924,7 +939,7 @@ function M.object_label(id)
 	return (tostring(t or have.drawn_as or "?"):gsub("[%s|]", "_"))
 end
 
-buildat.sub_packet("luanti:object_props", function(data)
+startup_packet("luanti:object_props", "luanti_data/object_props.bin", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	for i = 1, #values - 4, 5 do
 		object_looks[values[i]] = parse_look(values[i + 1], values[i + 2],
@@ -3034,7 +3049,7 @@ buildat.sub_packet("luanti:player_formspec", function(data)
 	player_spec = values[1] or ""
 end)
 
-buildat.sub_packet("luanti:dig_props", function(data)
+startup_packet("luanti:dig_props", "luanti_data/dig_props.bin", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	local items, nodes, preds = 0, 0, 0
 	for i = 1, #values do
@@ -3069,7 +3084,7 @@ buildat.sub_packet("luanti:dig_props", function(data)
 			" nodes with groups, " .. preds .. " predictions")
 end)
 
-buildat.sub_packet("luanti:item_images", function(data)
+startup_packet("luanti:item_images", "luanti_data/item_images.bin", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	local n = 0
 	for i = 1, #values - 1, 2 do
@@ -3112,7 +3127,7 @@ end
 -- domain, key, value repeating. Everything a game writes carries a marker
 -- where a translatable string went in, and this end is where they are
 -- looked up -- see formspec.lua's M.translate().
-buildat.sub_packet("luanti:translations", function(data)
+startup_packet("luanti:translations", "luanti_data/translations.bin", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	local by_domain = {}
 	local n = 0

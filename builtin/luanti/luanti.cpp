@@ -884,6 +884,9 @@ struct Module: public interface::Module, public luanti::Interface
 	// the resource name each is composed under. The client is what composes
 	// them; this is what it is sent when it asks.
 	sm_<ss_, ss_> m_texmods;
+	// Seconds until the startup tables are served as files a second time;
+	// see the tick
+	float m_startup_files_wait = 5.0f;
 	// Peers that asked for the texture modifiers while the game's media
 	// was still on its way to them: the launcher's own client is
 	// connected before the game is chosen, so the media is announced
@@ -1632,6 +1635,16 @@ struct Module: public interface::Module, public luanti::Interface
 		if(dtime > MAX_STEP_S)
 			dtime = MAX_STEP_S;
 		m_step_accum = 0.0f;
+		// The startup tables once more, a few seconds in: a game's entity
+		// looks are not all registered when the voxel registry is built
+		// (VoxeLibre had ten of them after and none at it), and a file
+		// that is there before the next client connects is the point
+		// ([BLOCKED_MODULE])
+		if(m_startup_files_wait > 0.0f){
+			m_startup_files_wait -= dtime;
+			if(m_startup_files_wait <= 0.0f)
+				serve_startup_tables();
+		}
 		// Other players' digs and the loader's unloads land between steps
 		drop_read_cache();
 		// The relights the mapgen mods' writes asked for, one or two a tick
@@ -2229,9 +2242,9 @@ struct Module: public interface::Module, public luanti::Interface
 			world->set_save(m_save, "main");
 			m_section_size = world->get_section_size_voxels();
 		});
-		// The texture modifiers are known once the registry is built, and
-		// they go out as a file as well as on request ([BLOCKED_MODULE])
-		serve_texmods_file();
+		// The startup tables are known once the registry is built, and they
+		// go out as files as well as on request ([BLOCKED_MODULE])
+		serve_startup_tables();
 		// A section is what this world generates at a time, which is what
 		// core.get_mapgen_chunksize() answers with
 		set_global_string("__luanti_section_size",
@@ -2379,6 +2392,41 @@ struct Module: public interface::Module, public luanti::Interface
 		});
 		log_v(MODULE, "%zu texture modifiers served as a file",
 				m_texmods.size());
+	}
+
+	// The same for the tables the client's other startup requests read:
+	// each is built at mod load and the request only reads it, so none of
+	// them has any business waiting behind a mapgen ([BLOCKED_MODULE]).
+	// The requests stay -- a game may add to a table while it runs.
+	void serve_lua_table_file(const char *lua_fn, const ss_ &file_name,
+			const char *what)
+	{
+		sv_<ss_> flat = string_list_from_lua(lua_fn);
+		if(flat.empty())
+			return;
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		const ss_ blob = os.str();
+		client_file::access(m_server, [&](client_file::Interface *ifile){
+			ifile->add_file_content(file_name, blob);
+		});
+		log_v(MODULE, "%zu %s served as a file", flat.size(), what);
+	}
+
+	void serve_startup_tables()
+	{
+		serve_texmods_file();
+		serve_lua_table_file("__object_appearances",
+				"luanti_data/object_props.bin", "object look fields");
+		serve_lua_table_file("__dig_props", "luanti_data/dig_props.bin",
+				"dig prop records");
+		serve_lua_table_file("__translations",
+				"luanti_data/translations.bin", "translated strings");
+		serve_lua_table_file("__item_images", "luanti_data/item_images.bin",
+				"item image fields");
 	}
 
 	void send_texmods(network::PeerInfo::Id peer)
