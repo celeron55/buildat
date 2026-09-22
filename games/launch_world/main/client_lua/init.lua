@@ -41,27 +41,29 @@ local function checker_texture(size, a, b)
 	return texture
 end
 
--- simplified: Urho3D's forward techniques and a specular colour, not the
--- PBR ones. The PBR techniques draw black in this client: they want a
--- render path with a PBR pass and the default one has none, and setting
--- the viewport's renderPath to a clone loaded from
--- RenderPaths/PBRDeferred.xml did not change the picture either. The
--- palette does not depend on which it is -- what colour is where, how
--- bright and how far is the question -- but the materials step does, and
--- the upgrade path is that render path, found and set, before the
--- material library is written ([LAUNCH_WORLD] step 3).
--- spec is {r, g, b, power}: a high power is a small hard highlight, which
--- is the classic raytrace chrome.
-local function material(colour, spec, texture)
+-- Urho3D's PBR techniques, on the client's own render path -- no render
+-- path control needed, and none of the preferred-viewport machinery is in
+-- the way. What they do want is PBR_INTENSITY below.
+-- simplified: a diffuse colour and a specular colour, not the metallic and
+-- roughness the PBR shaders also read, and no material maps at all. The
+-- material library is step 3 of the work and this room is step 1.
+-- Polished dielectrics, not metals: a PBR metal reflects its surroundings
+-- and nothing else, and with no IBL cubemap in the zone there are no
+-- surroundings, so metallic 1 comes out black but for the highlight. A
+-- low roughness at metallic 0 is the classic raytrace chrome here -- one
+-- continuous sweeping highlight off a sphere under a sharp point light,
+-- over an albedo that is still lit. An IBL probe is the upgrade, and it
+-- belongs with the material library rather than with the palette.
+local function material(colour, roughness, metallic, texture)
 	local m = magic.Material:new()
 	local t = magic.cache:GetResource("Technique",
-			texture and "Techniques/Diff.xml" or "Techniques/NoTexture.xml")
+			texture and "Techniques/PBR/PBRDiff.xml" or "Techniques/PBR/PBRNoTexture.xml")
 	assert(t ~= nil, "the technique loaded")
 	m:SetTechnique(0, t)
 	if texture then m:SetTexture(magic.TU_DIFFUSE, texture) end
 	m:SetShaderParameter("MatDiffColor", colour)
-	m:SetShaderParameter("MatSpecColor", magic.Color(spec[1], spec[2],
-			spec[3], spec[4]))
+	m:SetShaderParameter("Roughness", roughness)
+	m:SetShaderParameter("Metallic", metallic)
 	kept[#kept + 1] = m
 	return m
 end
@@ -90,12 +92,12 @@ local function part(model, pos, scale, mat)
 	return node
 end
 
-local chrome = material(magic.Color(0.10, 0.11, 0.13, 1), {1.0, 1.0, 1.0, 96})
-local machined = material(magic.Color(0.22, 0.23, 0.26, 1), {0.6, 0.62, 0.68, 24})
-local stone = material(magic.Color(0.26, 0.26, 0.29, 1), {0.06, 0.06, 0.07, 6})
+local chrome = material(magic.Color(0.82, 0.85, 0.90, 1), 0.08, 0.0)
+local machined = material(magic.Color(0.38, 0.40, 0.45, 1), 0.35, 0.0)
+local stone = material(magic.Color(0.26, 0.26, 0.29, 1), 0.85, 0.0)
 
 -- The floor, and the checker on it
-local floor_mat = material(magic.Color(1, 1, 1, 1), {0.35, 0.36, 0.4, 40},
+local floor_mat = material(magic.Color(1, 1, 1, 1), 0.45, 0.0,
 		checker_texture(64, magic.Color(0.06, 0.06, 0.08, 1),
 		magic.Color(0.55, 0.56, 0.60, 1)))
 part("Plane", magic.Vector3(0, 0, 0), magic.Vector3(24, 1, 24), floor_mat)
@@ -206,6 +208,14 @@ local PRESETS = {
 	},
 }
 
+-- Urho3D's PBR shaders want a light an order of magnitude brighter than
+-- the non-PBR ones for the same picture: their falloff is physical and
+-- brightness is radiant intensity, not a 0..1 dimmer. A preset's numbers
+-- below are relative to each other, and this is the one place the scale
+-- lives. Getting this wrong is what made PBR look like it did not work at
+-- all -- the room came out black and the render path got the blame.
+local PBR_INTENSITY = 25
+
 local lights = {}
 for i, place in ipairs(LIGHT_PLACES) do
 	local node = scene:CreateChild("light")
@@ -227,7 +237,7 @@ local function set_preset(n)
 	for i, light in ipairs(lights) do
 		local e = preset.lights[i]
 		light.color = magic.Color(e[1][1], e[1][2], e[1][3], 1)
-		light.brightness = e[2]
+		light.brightness = e[2] * PBR_INTENSITY
 		light.range = e[3]
 	end
 	if label then
