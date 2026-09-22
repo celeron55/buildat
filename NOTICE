@@ -1,34 +1,145 @@
-============================================================
-|| BUILDAT - EXTEND THE SHIT OUT OF YOUR ASS              ||
-|| Made by Perttu "celeron55" Ahola <celeron55@gmail.com> ||
-============================================================
+Buildat
+Copyright 2014-2026 Perttu Ahola <celeron55@gmail.com> and the Buildat
+contributors.
 
- _____
-< omg >
- -----
-        \   ^__^
-         \  (oo)\_______
-            (__)\       )\/\
-                ||----w |
-                ||     ||
+This product is licensed under the Apache License, Version 2.0. The full
+terms, and the parts that are under other terms, are in LICENSE.
+
+This file is the attribution notice of section 4(d) of that license: if you
+redistribute Buildat or a work derived from it, in source or in binary form,
+a readable copy of this file goes with it.
 
 
- _____
- < omg >
-  -----
-          \   ^__^
-                   \  (oo)\_______
-                               (__)\       )\/\
-                                               ||----w |
-                                                               ||     ||
+Code from elsewhere, distributed with Buildat
+---------------------------------------------------------------------------
+Each of these keeps its own license text in its own directory; that text, not
+this summary, is the license.
+
+Urho3D 1.7.1 -- 3rdparty/Urho3D
+  Copyright (c) 2008-2017 the Urho3D project. MIT.
+  Full text: 3rdparty/Urho3D/LICENSE
+  Urho3D itself carries further libraries -- SDL, FreeType, Bullet, Box2D,
+  Lua, LuaJIT, toluapp, Recast/Detour, PugiXml, rapidjson, STB, WebP, kNet,
+  Civetweb, LZ4, GLEW, MojoShader, Mustache, StanHull, LibCpuId, ik, JO,
+  tinygltf -- each under its own permissive license, all of them collected
+  in 3rdparty/Urho3D/Source/ThirdParty/LICENSES. Urho3D's bundled data has
+  its own notices: the Anonymous Pro and Blue Highway fonts are under the
+  SIL Open Font License (3rdparty/Urho3D/bin/Data/Fonts/OFL.txt), and the
+  models, textures and UI art come from the Urho3D project under the terms
+  above.
+
+luabind-deboostified -- 3rdparty/luabind-deboostified
+  Copyright (c) 2003 Daniel Wallin and Arvid Norberg. MIT.
+  Full text: 3rdparty/luabind-deboostified/LICENSE
+
+cereal 1.0.0 -- 3rdparty/cereal
+  Copyright (c) 2014 Randolph Voorhies, Shane Grant. BSD 3-Clause.
+  Full text: 3rdparty/cereal/LICENSE
+
+PolyVox 0.2.1 -- 3rdparty/polyvox
+  Copyright (c) 2005-2012 David Williams and Matthew Williams. zlib.
+  Full text: 3rdparty/polyvox/LICENSE.TXT
+
+zlib 1.2.8 -- 3rdparty/zlib
+  Copyright (C) 1995-2013 Jean-loup Gailly and Mark Adler. zlib.
+  Full text: 3rdparty/zlib/README
+
+Zstandard 1.5.7 -- 3rdparty/zstd
+  Copyright (c) Meta Platforms, Inc. and affiliates. Dual BSD 3-Clause /
+  GPLv2; Buildat takes it under the BSD terms.
+  Full text: 3rdparty/zstd/LICENSE
+
+smallsha1 -- 3rdparty/smallsha1
+  Copyright (c) 2011 Micael Hildenborg. BSD 3-Clause.
+  Full text: the header of 3rdparty/smallsha1/smallsha1.h
+
+SQLite 3.50.2 -- 3rdparty/sqlite
+  In the public domain. https://sqlite.org/copyright.html
+
+c55lib -- 3rdparty/c55lib
+  Copyright 2014 Perttu Ahola <celeron55@gmail.com>. Apache-2.0, the same
+  terms as Buildat; it lives under 3rdparty because it is maintained apart.
+
+Noise -- src/interface/noise.h, src/impl/noise.cpp
+  Copyright 2010-2014 Perttu Ahola <celeron55@gmail.com>
+  Copyright 2010-2013 kwolekr, Ryan Kwolek <kwolekr@minetest.net>
+  BSD 2-Clause. Full text: the header of src/interface/noise.h
 
 
- _____
-  < omg >
-    -----
-              \   ^__^
-                                 \  (oo)\_______
-                                                                (__)\       )\/\
-                                                                                                               ||----w |
-                                                                                                                                                                              ||     ||
+Luanti, loaded as a separate module
+---------------------------------------------------------------------------
+builtin/luanti/vendor/ holds part of Luanti's own Lua layer, taken from
+https://github.com/luanti-org/luanti at commit befadef8 (2026-09-05). What
+was taken and what was left out: builtin/luanti/vendor/README.txt
 
+  Luanti
+  Copyright (C) 2010-2024 celeron55, Perttu Ahola <celeron55@gmail.com>
+  and contributors (see source file comments and the version control log)
+
+  This program is free software; you can redistribute it and/or modify
+  it under the terms of the GNU Lesser General Public License as published
+  by the Free Software Foundation; either version 2.1 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Lesser General Public License for more details.
+
+  You should have received a copy of the GNU Lesser General Public License
+  along with this program; if not, see <https://www.gnu.org/licenses/>.
+
+  Full text: builtin/luanti/COPYING.LESSER
+
+Luanti states that once, in the LICENSE.txt at the root of its own tree; the
+Lua files themselves carry no per-file header. So the statement above, and
+COPYING.LESSER beside the vendored tree, are how it travels with this copy.
+
+One vendored file is under other terms and says so in itself:
+vendor/builtin/common/serialize.lua is MIT, from appgurueu's modlib
+(https://github.com/appgurueu/modlib, luon.lua).
+
+No Luanti media is here. Luanti's textures and sounds are CC BY-SA, with
+their authors listed in Luanti's own LICENSE.txt, and none of them are
+copied into Buildat; a Luanti server sends a client its own.
+
+The vendored code is not part of buildat_server and is not linked into it. A
+Buildat module is compiled at run time into its own shared object and
+dlopened, so the LGPL code lives in builtin/luanti's object alone, and it is
+distributed as the Lua source it is. See doc/luanti_module.txt.
+
+extensions/luanti_client is written for Buildat and is Apache-2.0. It speaks
+Luanti's network protocol, and the constants in it that agree with Luanti's
+-- which tile of a node faces which way, what the colour names mean -- are
+the facts of that interface, which a client needs in order to talk to a
+server at all.
+
+
+Fonts and images
+---------------------------------------------------------------------------
+client/data/Fonts/Overpass-Regular.ttf
+client/data/Fonts/OverpassMono-Regular.ttf
+  Copyright 2021 The Overpass Project Authors. SIL Open Font License 1.1.
+  Full text: client/data/Fonts/OFL.txt
+
+client/data/buildat_logo.png
+  Copyright Perttu Ahola <celeron55@gmail.com>.
+  Creative Commons Attribution-ShareAlike 3.0 Unported.
+
+
+Modified copies
+---------------------------------------------------------------------------
+Buildat carries changed copies of some of the above, and says so where the
+copy lives: 3rdparty/Urho3D/Urho3D_version.txt lists what was stripped from
+Urho3D 1.7.1 and what was changed in it, and
+3rdparty/polyvox/polyvox_version.txt does the same for PolyVox. The vendored
+Luanti tree is unmodified; if a file in it is ever changed, it says so at the
+top of itself.
+
+
+Names
+---------------------------------------------------------------------------
+Nothing here grants the use of anyone's trade names or trademarks; section 6
+of the Apache License says as much. Buildat is not affiliated with, endorsed
+by, or a product of the Urho3D project or the Luanti project. Those names
+appear here only to say where code came from and what Buildat talks to.

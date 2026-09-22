@@ -1,0 +1,7 @@
+{
+	"dependencies": [
+		{"module": "main"},
+		{"module": "luanti"},
+		{"module": "voxelworld"}
+	]
+}

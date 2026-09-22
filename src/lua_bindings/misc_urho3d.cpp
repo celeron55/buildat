@@ -56,6 +56,28 @@ static int l_profiler_block_begin(lua_State *L)
 	return 0;
 }
 
+// profiler_data(max_depth) -> string: Urho3D's profiler table for the
+// interval since the last call (a block's average and max per frame), which
+// is what says where a frame went when the script's own marks do not
+// ([FRAME_PEAK]). Each call starts the next interval.
+static int l_profiler_data(lua_State *L)
+{
+	int max_depth = luaL_optinteger(L, 1, 3);
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	Context *context = buildat_app->get_scene()->GetContext();
+
+	Profiler *profiler = context->GetSubsystem<magic::Profiler>();
+	if(!profiler)
+		return 0;
+	magic::String data = profiler->PrintData(false, false, max_depth);
+	profiler->BeginInterval();
+	lua_pushstring(L, data.CString());
+	return 1;
+}
+
 static int l_profiler_block_end(lua_State *L)
 {
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
@@ -82,9 +104,8 @@ static int l_profiler_block_end(lua_State *L)
 static int l_add_resource_dir(lua_State *L)
 {
 	ss_ path = interface::fs::get_absolute_path(lua_checkcppstring(L, 1));
-	ss_ cache_path = interface::fs::get_absolute_path(
-			g_client_config.get<ss_>("cache_path"));
-	if(path.substr(0, cache_path.size()) != cache_path)
+	if(!interface::fs::is_inside_path(path,
+			g_client_config.get<ss_>("cache_path")))
 		return luaL_error(L, "add_resource_dir(): \"%s\" is not under the "
 				"cache path", path.c_str());
 	if(!interface::fs::path_exists(path))
@@ -157,16 +178,78 @@ static int l_render_scene_to_texture(lua_State *L)
 	return 1;
 }
 
+// set_preferred_viewports({viewport, ...}). An empty table is teardown.
+// The engine draws these at the user's render_scale; see
+// CApp::apply_preferred_viewports() in src/client/app.cpp.
+static int l_set_preferred_viewports(lua_State *L)
+{
+	tolua_Error tolua_err;
+	if(!lua_istable(L, 1))
+		return luaL_error(L, "set_preferred_viewports(): expected a table");
+
+	sv_<Viewport*> viewports;
+	size_t n = lua_objlen(L, 1);
+	for(size_t i = 1; i <= n; i++){
+		lua_rawgeti(L, 1, i);
+		GET_TOLUA_STUFF(viewport, -1, Viewport);
+		lua_pop(L, 1);
+		viewports.push_back(viewport);
+	}
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	buildat_app->set_preferred_viewports(viewports);
+	return 0;
+}
+
+// set_voxel_data(node, data: string)
+// A chunk node's buildat_voxel_data from a string, which is what a volume
+// serializes to; the mesher reads the var and a string has no way into a
+// Variant from the sandbox. For a client's predicted dig or place
+// ([PREDICTION]); the server's replication of the var overwrites it.
+static int l_set_voxel_data(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(node, 1, Node);
+	size_t len = 0;
+	const char *data = lua_tolstring(L, 2, &len);
+	if(!data)
+		throw Exception("set_voxel_data: data must be a string");
+	node->SetVar(StringHash("buildat_voxel_data"), Variant(
+			PODVector<uint8_t>((const uint8_t*)data, len)));
+	return 0;
+}
+
+// get_voxel_data(node) -> string, or nil for a node without the var
+static int l_get_voxel_data(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(node, 1, Node);
+	const Variant &var = node->GetVar(StringHash("buildat_voxel_data"));
+	if(var.GetType() != VAR_BUFFER){
+		lua_pushnil(L);
+		return 1;
+	}
+	const PODVector<uint8_t> &buf = var.GetBuffer();
+	lua_pushlstring(L, buf.Size() ? (const char*)&buf[0] : "", buf.Size());
+	return 1;
+}
+
 void init_misc_urho3d(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
 	DEF_BUILDAT_FUNC(profiler_block_begin);
 	DEF_BUILDAT_FUNC(profiler_block_end);
+	DEF_BUILDAT_FUNC(profiler_data);
 	DEF_BUILDAT_FUNC(add_resource_dir);
 	DEF_BUILDAT_FUNC(render_scene_to_texture);
+	DEF_BUILDAT_FUNC(set_preferred_viewports);
+	DEF_BUILDAT_FUNC(set_voxel_data);
+	DEF_BUILDAT_FUNC(get_voxel_data);
 }
 
 } // namespace lua_bindingss
