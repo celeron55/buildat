@@ -65,11 +65,12 @@ end
 -- visual_scale, so a plant shorter than a node stands on its floor.
 function M.plant_quads(scale, out)
 	out = out or {}
+	-- Official's drawPlantlike: each quad visual_scale wide, turned 45
+	-- degrees, as tall as it is wide and not clamped to the node's top
+	-- ([PLANT_SIZE]; corner to corner it was 41 % too wide, and a tall
+	-- plant was cut at the node's top)
 	local h = -0.5 + (scale or 1) * 1.0
-	if h > 0.5 then
-		h = 0.5
-	end
-	local d = 0.5
+	local d = 0.5 * (scale or 1) * 0.70710678
 	-- Along +X+Z, and along +X-Z
 	out[#out + 1] = {tile = 1,
 			p = {-d, h, -d, d, h, d, d, -0.5, d, -d, -0.5, -d},
