@@ -33,6 +33,13 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 		echo "screenshot $out/$n-$name.png"
 		n=$((n + 1))
 	done
+	# And the first preset again with the reflection probe taken off the
+	# zone, which is what says the probe reaches the metals
+	echo "keypress 1"
+	echo "delay 800"
+	echo "keypress P"
+	echo "delay 800"
+	echo "screenshot $out/1-cold_in_warm_out-noprobe.png"
 	echo "delay 500"
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -s localhost:29795 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 |
@@ -44,7 +51,8 @@ python3 - "$out" <<'PY'
 import sys, os, itertools
 from PIL import Image, ImageChops
 out = sys.argv[1]
-shots = sorted(f for f in os.listdir(out) if f.endswith(".png"))
+shots = sorted(f for f in os.listdir(out)
+		if f.endswith(".png") and "noprobe" not in f)
 if len(shots) != 4:
 	print("FAIL: %d pictures, wanted 4" % len(shots)); sys.exit(1)
 ims = {}
@@ -64,5 +72,21 @@ print("the closest two presets are %.2f of a level apart" % worst)
 ok = worst > 1.0
 print("PASS: the four presets are four pictures" if ok
 		else "FAIL: two presets look the same")
-sys.exit(0 if ok else 1)
+
+# The probe: the chrome sphere with it and without it. What is asserted
+# is that the metal *sees* the room -- not which way it goes, because
+# that is the room's business: this room is dark, so reflecting it makes
+# the sphere darker, and a cubemap that is not bound at all reads bright
+# rather than black (2.18 against 30.75, 2026-09-22). Once the orbs are
+# in, the same crop will go the other way.
+a = Image.open("%s/1-cold_in_warm_out.png" % out).convert("L")
+b = Image.open("%s/1-cold_in_warm_out-noprobe.png" % out).convert("L")
+box = (790, 300, 890, 380)
+ma = sum(a.crop(box).getdata()) / float(100 * 80)
+mb = sum(b.crop(box).getdata()) / float(100 * 80)
+print("the chrome sphere reads %.2f with the probe and %.2f without" % (ma, mb))
+probe_ok = abs(ma - mb) > 5.0
+print("PASS: the probe reaches the metals" if probe_ok
+		else "FAIL: the probe changes nothing on a metal")
+sys.exit(0 if (ok and probe_ok) else 1)
 PY

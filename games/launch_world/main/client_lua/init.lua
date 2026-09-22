@@ -47,13 +47,9 @@ end
 -- simplified: a diffuse colour and a specular colour, not the metallic and
 -- roughness the PBR shaders also read, and no material maps at all. The
 -- material library is step 3 of the work and this room is step 1.
--- Polished dielectrics, not metals: a PBR metal reflects its surroundings
--- and nothing else, and with no IBL cubemap in the zone there are no
--- surroundings, so metallic 1 comes out black but for the highlight. A
--- low roughness at metallic 0 is the classic raytrace chrome here -- one
--- continuous sweeping highlight off a sphere under a sharp point light,
--- over an albedo that is still lit. An IBL probe is the upgrade, and it
--- belongs with the material library rather than with the palette.
+-- Metals again, now that the zone has a probe to reflect: a PBR metal
+-- reflects its surroundings and nothing else, which is why these were
+-- polished dielectrics while there were no surroundings.
 local function material(colour, roughness, metallic, texture)
 	local m = magic.Material:new()
 	local t = magic.cache:GetResource("Technique",
@@ -92,8 +88,8 @@ local function part(model, pos, scale, mat)
 	return node
 end
 
-local chrome = material(magic.Color(0.82, 0.85, 0.90, 1), 0.08, 0.0)
-local machined = material(magic.Color(0.38, 0.40, 0.45, 1), 0.35, 0.0)
+local chrome = material(magic.Color(0.92, 0.94, 0.97, 1), 0.06, 1.0)
+local machined = material(magic.Color(0.55, 0.57, 0.62, 1), 0.34, 1.0)
 local stone = material(magic.Color(0.26, 0.26, 0.29, 1), 0.85, 0.0)
 
 -- The floor, and the checker on it
@@ -252,6 +248,73 @@ local camera_node = scene:CreateChild("Camera")
 camera_node:CreateComponent("Camera")
 camera_node.position = magic.Vector3(0.6, 3.4, 11.0)
 camera_node:LookAt(magic.Vector3(0, 1.4, 0))
+-- [LAUNCH_WORLD] step 2: the reflection probe, which is a prerequisite
+-- and not an upgrade -- a PBR metal reflects its surroundings and nothing
+-- else, so with no environment it is black but for its highlight, and
+-- half the reference frame is reflections.
+--
+-- The room is static: no mapgen, no day, nothing that moves the light. So
+-- the environment is rendered once into a cubemap and hung on the zone,
+-- and that is the whole feature. Float16, because what a probe carries is
+-- radiance and the emissive orbs are well above 1.
+--
+-- simplified: one probe for the whole room, at a point named by hand, so
+-- a reflection is right where the probe is and progressively wrong away
+-- from it. The upgrade is a probe per bay with the nearest chosen per
+-- object, which Urho3D will not do for us.
+local PROBE_SIZE = 256
+-- Urho3D's cube faces in its own order (+X, -X, +Y, -Y, +Z, -Z), as the
+-- pitch and yaw a camera needs to look down each
+local PROBE_FACES = {
+	{0, 90}, {0, -90}, {-90, 0}, {90, 0}, {0, 0}, {0, 180},
+}
+local probe_surfaces = {}
+probe_on = true
+local function reflection_probe(at)
+	local cube = magic.TextureCube:new()
+	assert(cube:SetSize(PROBE_SIZE, magic.Graphics.GetRGBAFloat16Format(),
+			magic.TEXTURE_RENDERTARGET), "the probe's cubemap")
+	cube.filterMode = magic.FILTER_BILINEAR
+	kept.probe = cube
+	for i, a in ipairs(PROBE_FACES) do
+		local node = scene:CreateChild("probe_face")
+		node.position = at
+		node.rotation = magic.Quaternion(a[1], a[2], 0)
+		local cam = node:CreateComponent("Camera")
+		cam.fov = 90
+		cam.aspectRatio = 1
+		cam.nearClip = 0.05
+		cam.farClip = 120
+		local vp = magic.Viewport:new(scene, cam)
+		local surface = cube:GetRenderSurface(i - 1)
+		surface:SetViewport(0, vp)
+		-- Drawn when asked rather than every frame: six more views a frame
+		-- for a room that does not change is exactly the kind of cost this
+		-- whole thing is a showcase of leaving out
+		surface.updateMode = magic.SURFACE_MANUALUPDATE
+		probe_surfaces[i] = surface
+		kept[#kept + 1] = vp
+	end
+	zone.zoneTexture = cube
+	return cube
+end
+reflection_probe(magic.Vector3(0, 2.4, 0))
+
+-- The first frames, not the first: at boot the materials and the
+-- generated textures are not on the GPU yet and a probe taken then is a
+-- picture of nothing. Cheap to ask a few times and then stop.
+local probe_frames = 0
+function handle_probe_update()
+	if probe_frames > 90 then
+		return
+	end
+	probe_frames = probe_frames + 1
+	for _, s in ipairs(probe_surfaces) do
+		s:QueueUpdate()
+	end
+end
+magic.SubscribeToEvent("Update", "handle_probe_update")
+
 local viewport = magic.Viewport:new(scene,
 		camera_node:GetComponent("Camera"))
 magic.set_preferred_viewports({viewport})
@@ -274,6 +337,15 @@ function handle_keydown(event_type, event_data)
 		if key == magic["KEY_" .. n] then
 			set_preset(n)
 		end
+	end
+	-- P takes the probe off the zone and puts it back, which is how a run
+	-- shoots the same frame with and without it: a metal with nothing to
+	-- reflect is black but for its highlight, and that difference is the
+	-- whole of what the probe is for
+	if key == magic.KEY_P then
+		probe_on = not probe_on
+		zone.zoneTexture = probe_on and kept.probe or nil
+		log:info("reflection probe " .. (probe_on and "on" or "off"))
 	end
 end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")
