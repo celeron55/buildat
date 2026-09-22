@@ -249,6 +249,17 @@ return function(ctx)
 		local function dot(a, b)
 			return a.x * b.x + a.y * b.y + a.z * b.z
 		end
+		-- The player's own object while it is drawn (the third-person
+		-- views): where its model stands and which way it faces, against
+		-- the player's own feet and look ([BOX_PLAYTEST_4] 4, 5)
+		local own = luanti.self_object()
+		if own then
+			local fx, fy, fz = ctx.player_pos()
+			lines[#lines + 1] = string.format(
+					"scan %s: self model at %.2f,%.2f,%.2f yaw %.1f;"..
+					" feet %.2f,%.2f,%.2f look %.1f", label,
+					own.x, own.y, own.z, own.yaw, fx, fy, fz, (ctx.view()))
+		end
 		-- The objects, and the fallen bodies as objects with them: a body
 		-- is listed by its node id and its centre, so the driver can walk
 		-- to one and point at it

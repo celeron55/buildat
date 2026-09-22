@@ -1056,6 +1056,10 @@ local function place_object(id, v, i)
 	end
 	node.position = magic.Vector3(v[i + 1], v[i + 2], v[i + 3])
 	local have = object_nodes[id]
+	-- The player's own model is the client's to place: see set_self_pose
+	if id == M.self_id and self_pose then
+		node.position = magic.Vector3(self_pose.x, self_pose.y, self_pose.z)
+	end
 	-- What the object collides with, which is what is aimed at: a model is
 	-- drawn at its own size and that is not the same box -- a mob authored
 	-- small is a mob nobody could hit. See M.pointed_object().
@@ -1081,6 +1085,9 @@ local function place_object(id, v, i)
 	-- flips them is not checked against a shot yet.
 	node.rotation = magic.Quaternion(math.deg(v[i + 8]), math.deg(v[i + 7]),
 			math.deg(v[i + 9]))
+	if id == M.self_id and self_pose then
+		node.rotation = magic.Quaternion(0, self_pose.yaw, 0)
+	end
 end
 
 buildat.sub_packet("luanti:objects", function(data)
@@ -2808,6 +2815,35 @@ end
 -- Every object the client has a node for, but the player's own, with
 -- where it is: the scan projects them into the frame and lists the ones
 -- on the screen ([SCAN_EVENT]); a bin's ray misses most items
+-- Where the player's own model stands and which way it faces, set by
+-- the game's client half every frame while a third-person view is on
+-- ([BOX_PLAYTEST_4] 4, 5): the client knows its own feet and its own
+-- look, where the server's echo of them is a round trip old and is the
+-- position the player *reported* -- on the box the model floated about
+-- a node above the ground and never turned. Official's client draws its
+-- own model from its LocalPlayer the same way.
+local self_pose = nil
+function M.set_self_pose(x, y, z, yaw)
+	self_pose = {x = x, y = y, z = z, yaw = yaw}
+	local have = object_nodes[M.self_id]
+	if have and M.draw_self then
+		have.node.position = magic.Vector3(x, y, z)
+		have.node.rotation = magic.Quaternion(0, yaw, 0)
+	end
+end
+
+-- The player's own object, when it is drawn: where its node is and
+-- which way it faces, for a run reading a third-person shot
+-- ([BOX_PLAYTEST_4] 4, 5)
+function M.self_object()
+	local have = object_nodes[M.self_id]
+	if have == nil then
+		return nil
+	end
+	local p = have.node.position
+	return {x = p.x, y = p.y, z = p.z, yaw = have.node.rotation:YawAngle()}
+end
+
 function M.objects()
 	local out = {}
 	for id, have in pairs(object_nodes) do

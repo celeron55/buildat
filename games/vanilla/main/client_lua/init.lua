@@ -2462,24 +2462,26 @@ local function status_lines(level)
 	local step = "step:" .. ms(info.step_latest or 0, info.step_peak or 0)
 	-- And the client's longest frame beside it ([FRAME_PEAK])
 	local frame = "frame:" .. ms(frame_peak.wall or 0, frame_peak.s)
+	-- The build, so that one look at a shot says which it is
+	-- ([BOX_PLAYTEST_4] 1): b/<version>, where "buildat" stood
+	local first = "b/" .. buildat.version() .. " | " .. game .. " | " ..
+			rmode .. " | " .. step .. " | " .. frame .. " | " .. place
 	if level == 1 then
-		return "buildat | " .. game .. " | " .. rmode .. " | " .. step ..
-				" | " .. frame .. " | " .. place
+		return first
 	end
+	-- **Level 2's first line is level 1's, exactly** ([BOX_PLAYTEST_4] 2):
+	-- the levels differ in what follows, so a number read at one level is
+	-- the number at the other. The engine's own version went with it: it
+	-- says nothing about this build.
 	local blocks = {
+		first,
 		string.format(
-			"buildat | game: %s | %s | %s | FPS: %.0f" ..
-			" | dtime jitter: %.1f%% | view range: %d | %s%s | %s%s",
-			game, rmode,
-			info.version ~= "" and info.version or "Luanti ?",
-			-- what the camera is actually drawing to, which a game may have
-			-- lowered through its sky's fog_distance, and not the ceiling
-			fps, jitter, sky_now.far_clip or FAR_CLIP, step,
+			"FPS: %.0f | dtime jitter: %.1f%% | view range: %d%s%s",
+			fps, jitter, sky_now.far_clip or FAR_CLIP,
 			(info.step_peak_phase or "") ~= "" and
-					(" (" .. info.step_peak_phase .. ")") or "",
-			frame, frame_peak.phase ~= "" and
-					(" (" .. frame_peak.phase .. ")") or ""),
-		place,
+					(" | step " .. info.step_peak_phase) or "",
+			frame_peak.phase ~= "" and
+					(" | frame " .. frame_peak.phase) or ""),
 		string.format(
 			"%s | fov %.0f | speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s",
 			-- What the camera is actually at, not what this game asked
@@ -4290,6 +4292,10 @@ function frame_peak.update(dt)
 		end
 	end
 	if WIELD.camera_mode ~= 1 then
+		-- The own model at the player's own feet, turned with the look
+		-- ([BOX_PLAYTEST_4] 4, 5): the server's echo is a round trip old
+		-- and its yaw is never the local player's
+		luanti.set_self_pose(player.x, player.y, player.z, yaw)
 		-- Third person, official's Camera::update: back along the look
 		-- (or ahead of it, turned round) up to 2.75 nodes, a fifth up,
 		-- the height following the look past 1.2 nodes, and half a node

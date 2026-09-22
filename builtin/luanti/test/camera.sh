@@ -31,12 +31,23 @@ cat > "$out/cmds.txt" <<CMDS
 wait_log 60000 the server put the player
 wait_log 60000 0 undrawn within 2
 delay 2000
-look_dir 0 -0.1 1
+look_dir 0 -0.6 1
 delay 1500
 screenshot $out/first.png
 keypress C
 delay 1500
 screenshot $out/behind.png
+event scan
+look_dir 1 -0.3 0
+delay 1200
+event scan
+screenshot $out/behind_turned.png
+look_dir 0 0.8 1
+delay 1200
+screenshot $out/behind_up.png
+look_dir 0 -0.8 1
+delay 1200
+screenshot $out/behind_down.png
 keypress C
 delay 1500
 screenshot $out/front.png
@@ -49,5 +60,24 @@ bin/buildat -s localhost:29778 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 \
 sleep 2
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+grep -a "self model at" "$out/cli.log" | sed 's/.*: scan/scan/'
+# The back view's pitch follows the look ([BOX_PLAYTEST_4] 3): looking up
+# the sky is the top of the frame, looking down the ground is the bottom
+python3 - "$out" <<'PY'
+import sys, statistics
+from PIL import Image
+out = sys.argv[1]
+r = {}
+for n in ("behind_up", "behind_down"):
+	im = Image.open("%s/%s.png" % (out, n)).convert("L")
+	w, h = im.size
+	r[n] = (statistics.mean(list(im.crop((0, 0, w, h // 3)).getdata())),
+			statistics.mean(list(im.crop((0, 2 * h // 3, w, h)).getdata())))
+print("behind, looking up: top %.0f bottom %.0f; down: top %.0f bottom %.0f" %
+		(r["behind_up"][0], r["behind_up"][1], r["behind_down"][0], r["behind_down"][1]))
+print("PASS: the back view's pitch follows the look"
+		if r["behind_up"][0] > r["behind_up"][1] and r["behind_down"][0] < r["behind_down"][1]
+		else "FAIL: the back view's pitch is inverted")
+PY
 grep "person view\|camera:\| E " "$out/cli.log" | sed 's/.*: //'
 ls "$out"/*.png
