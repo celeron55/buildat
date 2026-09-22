@@ -2343,6 +2343,14 @@ local function show_client(host, port, name, password, mode)
 						form_stale = true
 						return
 					end
+					if t.scroll then
+						-- A scrollbar's trough, paged ([FORMSPEC_SCROLL])
+						form.state.scroll = form.state.scroll or {}
+						local v = (form.state.scroll[t.name] or 0) + t.scroll
+						form.state.scroll[t.name] =
+								math.max(0, math.min(1000, v))
+						form_stale = true
+					end
 					if t.pick then
 						form.state.dropdown = form.state.dropdown or {}
 						form.state.dropdown[t.name] = t.pick
