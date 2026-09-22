@@ -159,10 +159,16 @@ for i in $(seq 1 $((START_WAIT * 2 + 10))); do
 	fi
 	sleep 1
 done
+# A menu run has no world to settle yet: the client starts in the launch
+# menu and the driver's own menu rules are what make one, so the start wait
+# above can only time out there. The gate is the client still being alive.
 settle_fail=""
-[ "$settled" = 1 ] || settle_fail="FAIL: the world did not settle in $START_WAIT s"
+if [ -z "${MENU_RUN:-}" ] && [ "$settled" != 1 ]; then
+	settle_fail="FAIL: the world did not settle in $START_WAIT s"
+fi
 drv=
-if kill -0 "$cli" 2>/dev/null && [ "$settled" = 1 ]; then
+if kill -0 "$cli" 2>/dev/null &&
+		{ [ "$settled" = 1 ] || [ -n "${MENU_RUN:-}" ]; }; then
 	MENU_RUN="${MENU_RUN:-}" python3 "$me/drive.py" "$out/cli.log" "$fifo" "$MINUTES" "$out" "$SEED" $GOAL \
 		> "$out/drive.log" 2>&1 &
 	drv=$!
