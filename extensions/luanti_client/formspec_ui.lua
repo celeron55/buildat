@@ -961,6 +961,55 @@ function M.new(magic, buildat, log, ctx)
 				if x and w then
 					draw_table(e, x, y, w, h)
 				end
+			elseif name == "animated_image" then
+				-- animated_image[X,Y;W,H;name;texture;frame count;frame
+				-- duration;frame start]: the texture is a vertical strip
+				-- of frames and this draws one of them ([FORMSPEC_SCROLL]).
+				--
+				-- simplified: the frame stands still -- the one the element
+				-- names as its start, or the first -- where Luanti runs
+				-- through them at the duration it gives.
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				local frames = math.max(1, math.floor(
+						tonumber(e.fields[6]) or 1))
+				local first = math.max(1, math.min(frames,
+						math.floor(tonumber(e.fields[8]) or 1)))
+				if x and w then
+					local el = image(window, x, y, w, h, e.fields[4])
+					if el and frames > 1 and el.texture and
+							el.texture.height > 0 then
+						local fh = math.floor(el.texture.height / frames)
+						el.imageRect = magic.IntRect(0, fh * (first - 1),
+								el.texture.width, fh * first)
+					end
+				end
+			elseif name == "button_url" or name == "button_url_exit" then
+				-- button_url[X,Y;W,H;name;label;url]: a button that says
+				-- where it would take the player. **The client does not
+				-- open it**: a form from a server is not something this
+				-- client hands to a browser, and Luanti asks the player
+				-- first for the same reason. The url is drawn under the
+				-- label and the press goes back as a button's does, so a
+				-- game that reacts to it still works.
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				if x and w then
+					box(window, x, y, w, h,
+							magic.Color(0.35, 0.35, 0.42, 0.9))
+					local t = label(window, x + 4, y + 2, w - 8,
+							formspec.strip_escapes(e.fields[4] or ""), 12)
+					t:SetTextAlignment(1)
+					local url = formspec.strip_escapes(e.fields[5] or "")
+					if url ~= "" and h > 22 then
+						local u = label(window, x + 4, y + h - 16, w - 8,
+								url, 10, magic.Color(0.7, 0.75, 0.9))
+						u:SetTextAlignment(1)
+					end
+					buttons[#buttons + 1] = {name = e.fields[3],
+							x = x, y = y, w = w, h = h,
+							exit = name:sub(-5) == "_exit"}
+				end
 			elseif name == "hypertext" then
 				-- hypertext[X,Y;W,H;name;text]: the text with its tags
 				-- taken out, wrapped in the box, and each <action ...>
