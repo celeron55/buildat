@@ -2673,9 +2673,13 @@ local function draw_hud_text(e)
 	local base = hud_colour(e.number)
 	local block = hud_root:CreateChild("UIElement")
 	local w, h = 0, 0
+	-- The module's HUD elements carry their fields as the strings the
+	-- packet sent, the same as pos, offset and align: parse_v2, not an
+	-- array
 	local size = HUD_FONT
-	if e.size and (e.size[1] or 0) > 0 then
-		size = math.floor(HUD_FONT * e.size[1])
+	local sx = parse_v2(e.size, 0, 0)
+	if sx > 0 then
+		size = math.floor(HUD_FONT * sx)
 	end
 	for line in (tostring(e.text or "") .. "\n"):gmatch("([^\n]*)\n") do
 		local lw, lh = draw_text_line(block, line, 0, h, base, size)

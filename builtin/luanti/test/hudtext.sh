@@ -39,15 +39,15 @@ python3 - "$out/cli.log" <<'PY'
 import re, sys
 log = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
 found = {}
-for m in re.finditer(r'ui Text at (-?\d+),(-?\d+) size (\d+)x(\d+) '
-		r'text "(sized\d)"', log):
-	found[m.group(5)] = (int(m.group(3)), int(m.group(4)))
+for m in re.finditer(r'hud text "(sized\d)" size "([^"]*)" at (-?\d+),(-?\d+) '
+		r'size (\d+)x(\d+)', log):
+	found[m.group(1)] = (int(m.group(5)), int(m.group(6)), m.group(2))
 if len(found) < 2:
 	print("FAIL: the scan found %s" % sorted(found))
 	sys.exit(1)
 one, three = found["sized1"], found["sized3"]
-print("size 1 drew %dx%d, size 3 drew %dx%d" % (one[0], one[1],
-		three[0], three[1]))
+print("size %r drew %dx%d, size %r drew %dx%d" % (one[2], one[0], one[1],
+		three[2], three[0], three[1]))
 ratio = three[1] / float(one[1])
 print("three times the size is %.2f times the height" % ratio)
 ok = 2.5 < ratio < 3.5

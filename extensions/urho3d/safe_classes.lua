@@ -1318,7 +1318,15 @@ function M.define(dst, util)
 					"RemoveAllChildren", {}, {"UIElement"}),
 			SetName = util.self_function("SetName", {}, {"UIElement", "string"}),
 			SetText = util.self_function("SetText", {}, {"UIElement", "string"}),
-			SetFont = util.self_function("SetFont", {}, {"UIElement", "Font"}),
+			-- Text::SetFont(Font*, float size), and **the size is the
+			-- argument that was missing**: without it in the signature the
+			-- sandbox dropped it and every caller drew at Urho3D's own
+			-- DEFAULT_FONT_SIZE of 12, whatever it asked for -- thirty-four
+			-- call sites across the tree, and a HUD text element's size.X
+			-- could not work at all ([UI_PARITY]). Text3D's entry has had
+			-- it all along. Optional, as the binding has it.
+			SetFont = util.self_function("SetFont", {},
+					{"UIElement", "Font", {"number", "__nil"}}),
 			SetPosition = util.self_function(
 					"SetPosition", {}, {"UIElement", "number", "number"}),
 			SetStyleAuto = util.self_function("SetStyleAuto", {}, {"UIElement"}),

@@ -189,6 +189,20 @@ return function(ctx)
 				lines[#lines + 1] = string.format("scan %s: hud statbar %s %s/%s%s",
 						label, buildat.dump(e.text or ""), tostring(e.number or 0),
 						tostring(e.item or e.number or 0), rect)
+			elseif e.type == "text" then
+				-- What a game's own HUD text was drawn as, which is how a
+				-- driven run reads its size ([UI_PARITY]: size.X multiplies
+				-- the font, hudtext.sh)
+				local rect = ""
+				local rx, ry, rw, rh = ctx.hud_rect(e)
+				if rx then
+					rx, ry, rw, rh = pixels(rx, ry, rw, rh)
+					rect = string.format(" at %d,%d size %dx%d", rx, ry, rw, rh)
+				end
+				lines[#lines + 1] = string.format(
+						"scan %s: hud text %s size %s%s", label,
+						buildat.dump(e.text or ""),
+						buildat.dump(e.size or ""), rect)
 			end
 		end
 		-- The crosshair, by the same march the dig uses; a fallen body's
