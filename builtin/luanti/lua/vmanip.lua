@@ -293,10 +293,17 @@ function core.get_mapgen_object(name)
 		-- mapgen made something it was asked about in.
 		return mapgen_gennotify or {}
 	end
-	-- heightmap, biomemap, heatmap and humiditymap are the mapgen's own
-	-- workings, and singlenode has none of them. Luanti answers nil for an
-	-- object the running mapgen does not produce, which is what a mod
-	-- checks for.
+	-- The mapgen's own workings over the section's columns, x fastest
+	-- then z, 1-based, the biomes by their index (core.get_biome_name):
+	-- what the generator left for this section (luanti.cpp
+	-- set_global_maps, taken once). Luanti answers nil for an object
+	-- the running mapgen does not produce -- singlenode has none --
+	-- which is what a mod checks for.
+	if name == "heightmap" or name == "biomemap" or name == "heatmap" or
+			name == "humiditymap" then
+		local maps = mapgen_vm and __luanti_mapgen_maps
+		return maps and maps[name] or nil
+	end
 	return nil
 end
 

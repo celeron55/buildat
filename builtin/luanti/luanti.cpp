@@ -2996,9 +2996,15 @@ struct Module: public interface::Module, public luanti::Interface
 		const int32_t z0 = (int32_t)section_p.getZ() * sz;
 		// Taken before the lock, because it is another module's answer
 		const ss_ gennotify = gennotify_of(section_p);
+		luanti_mapgen::SectionMaps maps;
+		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
+			im->take_maps(section_p.getX(), section_p.getY(),
+					section_p.getZ(), maps);
+		});
 		{
 			interface::MutexScope ms(m_lua_mutex);
 			set_global_string("__luanti_gennotify", gennotify);
+			set_global_maps(maps);
 		}
 		char buf[256];
 		snprintf(buf, sizeof buf,
@@ -3059,6 +3065,53 @@ struct Module: public interface::Module, public luanti::Interface
 			out += " "+itos(e.x)+" "+itos(e.y)+" "+itos(e.z)+"\n";
 		}
 		return out;
+	}
+
+	// __luanti_mapgen_maps = {size_x, size_z, heightmap = {...}, biomemap,
+	// heatmap, humiditymap}: the section's maps as Lua arrays, x fastest
+	// then z, 1-based; a map the mapgen did not make is absent, and the
+	// whole table nil when there are none
+	void set_global_maps(const luanti_mapgen::SectionMaps &maps)
+	{
+		lua_State *L = m_lua;
+		if(maps.heightmap.empty() && maps.biomemap.empty()){
+			lua_pushnil(L);
+			lua_setglobal(L, "__luanti_mapgen_maps");
+			return;
+		}
+		lua_newtable(L);
+		lua_pushinteger(L, maps.size_x);
+		lua_setfield(L, -2, "size_x");
+		lua_pushinteger(L, maps.size_z);
+		lua_setfield(L, -2, "size_z");
+		auto push_ints = [&](const char *name, const int16_t *p16,
+				const uint16_t *pu16, size_t n){
+			if(n == 0)
+				return;
+			lua_createtable(L, (int)n, 0);
+			for(size_t i = 0; i < n; i++){
+				lua_pushinteger(L, p16 ? (int)p16[i] : (int)pu16[i]);
+				lua_rawseti(L, -2, (int)i + 1);
+			}
+			lua_setfield(L, -2, name);
+		};
+		auto push_floats = [&](const char *name, const sv_<float> &v){
+			if(v.empty())
+				return;
+			lua_createtable(L, (int)v.size(), 0);
+			for(size_t i = 0; i < v.size(); i++){
+				lua_pushnumber(L, v[i]);
+				lua_rawseti(L, -2, (int)i + 1);
+			}
+			lua_setfield(L, -2, name);
+		};
+		push_ints("heightmap", maps.heightmap.data(), nullptr,
+				maps.heightmap.size());
+		push_ints("biomemap", nullptr, maps.biomemap.data(),
+				maps.biomemap.size());
+		push_floats("heatmap", maps.heatmap);
+		push_floats("humiditymap", maps.humidmap);
+		lua_setglobal(L, "__luanti_mapgen_maps");
 	}
 
 	// Luanti's get_blockseed2, which is what a mapgen's randomness starts

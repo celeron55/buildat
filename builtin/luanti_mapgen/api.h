@@ -230,6 +230,19 @@ namespace luanti_mapgen
 		int32_t x = 0, y = 0, z = 0;
 	};
 
+	// What the generator worked out over a section's columns, x fastest
+	// then z, size_x * size_z each: the surface height, the biome index
+	// (Params::biomes' numbering, 0 the default), the heat and the
+	// humidity. Empty vectors for what the running mapgen does not make.
+	// core.get_mapgen_object("heightmap") and the three beside it.
+	struct SectionMaps
+	{
+		int32_t size_x = 0, size_z = 0;
+		sv_<int16_t> heightmap;
+		sv_<uint16_t> biomemap;
+		sv_<float> heatmap, humidmap;
+	};
+
 	// A biome lookup that can be held and asked outside access(): the
 	// query generator behind biome_at() is the asker's own -- nothing in
 	// this module's thread touches it -- and its noise functions are
@@ -286,6 +299,9 @@ namespace luanti_mapgen
 		// kept for a section no flag was on for.
 		virtual void take_gennotify(int section_x, int section_y,
 				int section_z, sv_<GennotifyEvent> &out) = 0;
+		// The section's maps the same way, once
+		virtual void take_maps(int section_x, int section_y,
+				int section_z, SectionMaps &out) = 0;
 	};
 
 	inline bool access(interface::Server *server,

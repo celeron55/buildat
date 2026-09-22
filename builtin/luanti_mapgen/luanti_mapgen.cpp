@@ -249,12 +249,15 @@ static Rotation rotation_of(const ss_ &name)
 // Where a generator leaves what it was asked to report, because it runs in
 // worldgen's thread and the module that answers for it is elsewhere. One
 // per module, shared with every generator it makes.
-struct GennotifyStore
+// A section's output left for the module to take: its gennotify events,
+// and its maps (SectionStore<SectionMaps>)
+template<class T>
+struct SectionStore
 {
 	interface::Mutex mutex;
 	// Push back, take from anywhere: a section is generated once and its
 	// events are taken once, so this is short unless nobody is taking them
-	sv_<std::pair<int64_t, sv_<GennotifyEvent>>> sections;
+	sv_<std::pair<int64_t, T>> sections;
 	// What is kept when nobody takes them, which is what a game that asks
 	// to be told and then never looks does. Luanti drops them the same way
 	// -- the emerge thread's events go with the chunk.
@@ -266,7 +269,7 @@ struct GennotifyStore
 				(int64_t)(uint16_t)z;
 	}
 
-	void put(int64_t key, sv_<GennotifyEvent> &&events)
+	void put(int64_t key, T &&events)
 	{
 		interface::MutexScope ms(mutex);
 		for(auto &pair : sections){
@@ -280,7 +283,7 @@ struct GennotifyStore
 		sections.push_back(std::make_pair(key, std::move(events)));
 	}
 
-	void take(int64_t key, sv_<GennotifyEvent> &out)
+	void take(int64_t key, T &out)
 	{
 		interface::MutexScope ms(mutex);
 		for(size_t i = 0; i < sections.size(); i++){
@@ -292,6 +295,8 @@ struct GennotifyStore
 		}
 	}
 };
+typedef SectionStore<sv_<GennotifyEvent>> GennotifyStore;
+typedef SectionStore<SectionMaps> MapsStore;
 
 // One of Luanti's own mapgens, generating into the volume worldgen hands
 // over. Everything it needs was given to it when the world was made: the
@@ -321,13 +326,16 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 	// Where what this made goes for the module to pick up, and the key it
 	// goes under; null when the game asked to be told about nothing
 	sp_<GennotifyStore> m_gennotify;
+	sp_<MapsStore> m_maps;
 	// The game's own number for each decoration the manager holds; see the
 	// decoration loop
 	sv_<size_t> m_deco_source_of_index;
 
 	VendoredGenerator(const Params &params, int section_size,
-			sp_<GennotifyStore> gennotify = nullptr)
+			sp_<GennotifyStore> gennotify = nullptr,
+			sp_<MapsStore> maps = nullptr)
 	{
+		m_maps = maps;
 		// A mapgen writes air and reads back what it wrote, and it does that
 		// through the constants in mapnode.h rather than through a name. So
 		// the three the module reserves have to be those three numbers.
@@ -913,6 +921,31 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 					section_p.getY(), section_p.getZ()), std::move(out));
 		}
 
+		// The section's maps, for get_mapgen_object("heightmap") and its
+		// three: VoxeLibre sets its grass and foliage palettes off the
+		// biomemap at generation and its villages read the heightmap
+		if(m_maps){
+			SectionMaps maps;
+			const v3s16 &cs = m_mapgen->csize;
+			maps.size_x = cs.X;
+			maps.size_z = cs.Z;
+			const size_t n = (size_t)cs.X * (size_t)cs.Z;
+			if(m_mapgen->heightmap)
+				maps.heightmap.assign(m_mapgen->heightmap,
+						m_mapgen->heightmap + n);
+			if(m_mapgen->biomemap)
+				maps.biomemap.assign(m_mapgen->biomemap,
+						m_mapgen->biomemap + n);
+			BiomeGenOriginal *bg =
+					dynamic_cast<BiomeGenOriginal*>(m_mapgen->biomegen);
+			if(bg && bg->heatmap)
+				maps.heatmap.assign(bg->heatmap, bg->heatmap + n);
+			if(bg && bg->humidmap)
+				maps.humidmap.assign(bg->humidmap, bg->humidmap + n);
+			m_maps->put(MapsStore::key_of(section_p.getX(),
+					section_p.getY(), section_p.getZ()), std::move(maps));
+		}
+
 		// And into the volume, which is the same box in the same order:
 		// what a MapNode holds is what VoxelFormat::luanti() binds
 		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
@@ -1065,7 +1098,13 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 			return new SinglenodeGenerator(params.singlenode_word);
 		}
 		return new VendoredGenerator(params, (int)params.section_size,
-				m_gennotify);
+				m_gennotify, m_maps);
+	}
+	sp_<MapsStore> m_maps = sp_<MapsStore>(new MapsStore());
+	void take_maps(int section_x, int section_y, int section_z,
+			SectionMaps &out)
+	{
+		m_maps->take(MapsStore::key_of(section_x, section_y, section_z), out);
 	}
 
 	// What the generators have made and were asked to report; see
