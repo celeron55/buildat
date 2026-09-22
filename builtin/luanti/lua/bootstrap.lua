@@ -819,6 +819,20 @@ end
 -- texture name, the way "\1cube\1" already marks a cube in an item image.
 local PALETTE_MARK = "\1pal\1"
 
+-- What a node's own colour multiplies a tile by, as the expression tail that
+-- goes where PALETTE_MARK is -- empty for a node that has a palette (the
+-- palette's own colour goes there instead), no colour, or a white one.
+local function node_multiply(def)
+	if def == nil or def.color == nil or def.palette ~= nil then
+		return ""
+	end
+	local c = core.colorspec_to_colorstring(def.color)
+	if c == nil or c:sub(1, 7):upper() == "#FFFFFF" then
+		return ""
+	end
+	return "^[multiply:" .. c:sub(1, 7)
+end
+
 -- A tile as the expression it is: its own colour multiplied in if it has one,
 -- and otherwise a mark where the node's palette colour belongs.
 local function tile_name_of(t)
@@ -1800,6 +1814,14 @@ function core.__voxel_defs()
 			name = name or ("unknown_" .. id),
 			drawtype = drawtype,
 			sunlight = sunlight and true or false,
+			-- What a node's own `color` multiplies its tiles by. Luanti
+			-- applies it to any layer that has no colour of its own, the
+			-- same as a palette's colour, and a node has one or the other:
+			-- VoxeLibre's water source is tinted by its palette and its
+			-- flowing water by this, so without it the flow was drawn
+			-- untinted and read twice as bright as the pool beside it
+			-- ([WATER_LIGHT] 2).
+			node_mul = node_multiply(def),
 			-- Only airlike is nothing at all standing there; a glass pane
 			-- that light passes through is still something
 			empty = (drawtype == "airlike"),

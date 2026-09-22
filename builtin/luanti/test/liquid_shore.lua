@@ -50,14 +50,15 @@ core.register_on_joinplayer(function(player)
 		for dx = -8, 8 do
 			set(dx, 0, 0, FLOWING, 3)
 		end
-		-- Just above the water on the dry side, looking across the
-		-- waterline: the flowing row and the pool behind it are then the
-		-- same surface at the same angle, which is what makes the shore's
-		-- shape and the two rows' brightness both readable
-		player:set_pos({x = base.x + 0.5, y = base.y + 1.2,
-				z = base.z - 3.0})
+		-- Over the waterline and well above it: from here a look straight
+		-- down has the flowing row under the eye and the pool just beyond
+		-- it, both flat-on and both near, which is the only way their
+		-- brightness can be compared ([WATER_LIGHT] 2); a shallower look
+		-- from the same place is the shore itself.
+		player:set_pos({x = base.x + 0.5, y = base.y + 5.0,
+				z = base.z + 0.5})
 		player:set_look_horizontal(0)
-		player:set_look_vertical(math.rad(12))
+		player:set_look_vertical(math.rad(89))
 		core.log("action", "liquid_shore: the pool is placed")
 		-- Not before the light has settled: a section's relight is
 		-- deferred and runs under a budget, and a shot taken while it is

@@ -44,6 +44,14 @@ shoot() { # <tag> <env>
 		# server's light settled
 		echo "wait_log 120000 0 undrawn within 2"
 		echo "delay 8000"
+		# Straight down: the flowing row under the eye, the pool just
+		# beyond it, both flat-on and both near
+		echo "look 0 -89"
+		echo "delay 1500"
+		echo "screenshot $out/top_$1.png"
+		# And across the shore, which is where the corner rule would show
+		echo "look 0 -25"
+		echo "delay 1500"
 		echo "screenshot $out/$1.png"
 		echo "delay 500"
 		echo "quit"; } > "$out/cmds_$1.txt"
@@ -79,17 +87,26 @@ print("the shore's band: level %.2f (%.1f %% water), averaged %.2f (%.1f %%)"
 		% (a, ab, b, bb))
 print("the two shots differ by %.2f levels and %.1f points of water" %
 		(abs(a - b), abs(ab - bb)))
-# And what [WATER_LIGHT] 2 asks: the flowing row against the pool beside it
-# in the same shot, both flat-on and lit the same
-w, h = ia.size
-pool = mean(ia, (w // 3, h // 2 - 120, 2 * w // 3, h // 2 - 60))
-flow = mean(ia, (w // 3, h // 2 - 40, 2 * w // 3, h // 2 + 10))
-print("flat-on: the pool reads %.1f and the flowing row %.1f, %.1f apart"
-		% (pool, flow, flow - pool))
+# And what [WATER_LIGHT] 2 asks, off the shot taken straight down: the
+# flowing row is the band under the eye and the pool the band beyond it,
+# both flat-on and both near, so nothing but the two nodes differs
+it = Image.open("%s/top_level.png" % out).convert("RGB")
+w, h = it.size
+# The boundary runs a little below the middle of the frame: the pool is
+# what is beyond it and the flowing row what is this side of it
+flow = mean(it, (w // 3, h // 2 + 30, 2 * w // 3, h // 2 + 80))
+pool = mean(it, (w // 3, h // 2 - 190, 2 * w // 3, h // 2 - 130))
+print("straight down: the pool reads %.1f and the flowing row %.1f, "
+		"%.1f apart" % (pool, flow, flow - pool))
+# [WATER_LIGHT] 2: the two are the same water in the same light seen the
+# same way, so what is left between them is the game's own art -- a flow
+# twice the pool's brightness is a tint that did not reach it
+near = abs(flow - pool) < 0.25 * pool
 same = abs(a - b) < 0.5 and abs(ab - bb) < 0.5
-print("PASS: the shore is the same either way, which is what this stage "
-		"can say about the corner rule" if same else
-		"FAIL: the two rules draw a different shore here (%.2f apart)" %
-		abs(a - b))
-sys.exit(0 if same else 1)
+ok = same and near
+print("PASS: the shore is the same either way and the flowing row is the "
+		"pool's own colour" if ok else
+		"FAIL: shore %.2f apart, flow and pool %.1f apart" % (
+		abs(a - b), abs(flow - pool)))
+sys.exit(0 if ok else 1)
 PY

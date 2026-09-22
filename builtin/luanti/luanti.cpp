@@ -4650,6 +4650,9 @@ struct Module: public interface::Module, public luanti::Interface
 			}
 			ss_ name = table_string(L, "name");
 			bool sunlight = table_boolean(L, "sunlight");
+			// What the node's own colour multiplies its tiles by, where a
+			// paletted node's slot colour would go ([WATER_LIGHT] 2)
+			const ss_ node_mul = table_string(L, "node_mul");
 			bool alpha_blend = table_boolean(L, "alpha_blend");
 			bool alpha_clip = table_boolean(L, "alpha_clip");
 			bool empty = table_boolean(L, "empty");
@@ -4898,12 +4901,13 @@ struct Module: public interface::Module, public luanti::Interface
 				if(empty)
 					continue;
 				ss_ texture = has_tiles ?
-						texture_of_tile(with_palette(tiles[f], "")) : "";
+						texture_of_tile(with_palette(tiles[f], node_mul)) : "";
 				if(!texture.empty()){
 					face_textures[f] = texture;
 					if(tile_aspect[f] > 0.0f)
 						face_frames[f] = tile_frame_count(
-								with_palette(tiles[f], ""), tile_aspect[f]);
+								with_palette(tiles[f], node_mul),
+								tile_aspect[f]);
 				} else {
 					face_textures[f] = fallback;
 					any_fallback = true;
@@ -4914,7 +4918,7 @@ struct Module: public interface::Module, public luanti::Interface
 			ss_ overlay_texture;
 			if(!overlay_tile.empty() && !fallback.empty()){
 				overlay_texture = texture_of_tile(
-						with_palette(overlay_tile, ""));
+						with_palette(overlay_tile, node_mul));
 				if(overlay_texture.empty()){
 					overlay_texture = fallback;
 					any_fallback = true;
