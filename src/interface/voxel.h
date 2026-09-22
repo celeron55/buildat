@@ -738,6 +738,18 @@ namespace interface
 		virtual const VoxelFormat& get_format() = 0;
 		virtual void set_format(const VoxelFormat &format) = 0;
 
+		// A named plane of a module's own appended to the format, whatever
+		// module set the format and whenever it does: the plane is added
+		// now and again to every format set_format() is given after this,
+		// so a variant's module can ask before the base game has said what
+		// its cut is ([GAME_BASE]). Nothing bound reads it -- it is the
+		// module's bits, read and written by name through the sample API.
+		// A chunk takes the plane on the first time it is written after
+		// this, so it is allowed after the world exists; a plane of that
+		// name already there (of the same width) is left as it is. Returns
+		// the plane's index.
+		virtual int add_plane(const ss_ &name, uint8_t bits) = 0;
+
 		// How a voxel's definition is found; see VoxelSelector in
 		// interface/voxel_selector.h. The default is the id role of the
 		// format, which is what every game in this tree does.

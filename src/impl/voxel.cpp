@@ -62,6 +62,8 @@ struct CVoxelRegistry: public VoxelRegistry
 	sd_<CachedVoxelDefinition> m_cached_defs;
 	sm_<VoxelName, VoxelTypeId> m_name_to_id;
 	VoxelFormat m_format = VoxelFormat::legacy();
+	// What add_plane() was asked for, appended again to every format set
+	sv_<VoxelPlane> m_added_planes;
 	// How a voxel's definition is found; the default is the id role
 	VoxelSelector m_look;
 	bool m_is_dirty = false;
@@ -162,9 +164,41 @@ struct CVoxelRegistry: public VoxelRegistry
 					itos(m_defs.size() - 1)+" voxels have already been "
 					"added under "+m_format.dump());
 		m_format = format;
+		for(const VoxelPlane &p : m_added_planes)
+			append_plane(p);
 		m_is_dirty = true;
 		log_v(MODULE, "CVoxelRegistry::set_format(): %s",
 				cs(m_format.dump()));
+	}
+
+	// Under the lock
+	int append_plane(const VoxelPlane &p)
+	{
+		int i = m_format.plane_of_name(p.name);
+		if(i >= 0){
+			if(m_format.planes[i].bits != p.bits)
+				throw Exception(ss_()+"add_plane(): \""+p.name+"\" is "+
+						itos(m_format.planes[i].bits)+" bits already, not "+
+						itos(p.bits));
+			return i;
+		}
+		VoxelFormat f = m_format;
+		f.planes.push_back(p);
+		ss_ why;
+		if(!f.validate(&why))
+			throw Exception(ss_()+"add_plane(): "+why);
+		m_format = f;
+		return (int)m_format.planes.size() - 1;
+	}
+
+	int add_plane(const ss_ &name, uint8_t bits)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_added_planes.push_back(VoxelPlane(name, bits));
+		int i = append_plane(m_added_planes.back());
+		m_is_dirty = true;
+		log_v(MODULE, "CVoxelRegistry::add_plane(): %s", cs(m_format.dump()));
+		return i;
 	}
 
 	const VoxelSelector& get_look_selector()

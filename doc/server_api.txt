@@ -248,7 +248,11 @@ builtin, the modules' interfaces
 
 builtin/loader/api.h -- loader::Interface: activate(), get_module_info(name).
 The first module; it reads meta.json files, resolves the order and loads
-the rest; on -R it reloads a module whose sources changed.
+the rest; on -R it reloads a module whose sources changed. A game whose
+__loader/meta.json has "base": "<game>" is a variant of that sibling
+game: the base's modules load as the variant's own, a module directory in
+both is the variant's, and the variant is its own game everywhere else
+(its tile, its saves). games/vanilla_voxel_physics is one.
 
 builtin/main_context/api.h -- main_context::Interface: the server-side
 Urho3D context and its scenes. get_context(), create_scene() ->
