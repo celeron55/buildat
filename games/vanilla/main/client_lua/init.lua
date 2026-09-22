@@ -575,6 +575,16 @@ do
 	-- saw it) -- since the HDR frame is fifty times the sky at the sun
 	-- and only the meter brings that down.
 	world_render_path = rp:Clone()
+	-- The clone's meter adapts in one step rather than at the frame's rate
+	-- ([BOX_PLAYTEST_2] 9b): the stamp is drawn a few times a second, not
+	-- every frame, so a rate meant for frames gave the clone's meter one
+	-- step per stamp and it hunted -- the minimap cycling from white to
+	-- right about every fifteen seconds. At this rate each stamp is
+	-- exposed on its own content and the level does not drift between
+	-- stamps. (The frame's own adapted level lives in a 1x1 render target
+	-- and is not readable here, which is why this meters rather than
+	-- copies.)
+	world_render_path:SetShaderParameter("AutoExposureAdaptRate", 1000000)
 end
 
 
