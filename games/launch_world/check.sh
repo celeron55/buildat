@@ -84,19 +84,26 @@ ok = worst > 1.0
 print("PASS: the four presets are four pictures" if ok
 		else "FAIL: two presets look the same")
 
-# The probe: the chrome sphere with it and without it. What is asserted
-# is that the metal *sees* the room -- not which way it goes, because
-# that is the room's business: this room is dark, so reflecting it makes
-# the sphere darker, and a cubemap that is not bound at all reads bright
-# rather than black (2.18 against 30.75, 2026-09-22). Once the orbs are
-# in, the same crop will go the other way.
+# The probe: the same frame with it and with an environment of nothing
+# in its place. What is asserted is that some part of the picture moves a
+# lot -- the search is over blocks rather than a fixed crop, because the
+# room gets recomposed and a crop that was on a mirror ends up on a wall
+# (it read 61.4 against 60.4 on a sphere's dark side while another block
+# moved 86 levels, 2026-09-23).
 a = Image.open("%s/1-cold_in_warm_out.png" % out).convert("L")
 b = Image.open("%s/1-cold_in_warm_out-noprobe.png" % out).convert("L")
-box = (790, 300, 890, 380)
-ma = sum(a.crop(box).getdata()) / float(100 * 80)
-mb = sum(b.crop(box).getdata()) / float(100 * 80)
-print("the chrome sphere reads %.2f with the probe and %.2f without" % (ma, mb))
-probe_ok = abs(ma - mb) > 5.0
+pa, pb = a.load(), b.load()
+w, h = a.size
+best, bx, by = 0.0, 0, 0
+for y in range(0, h - 60, 30):
+	for x in range(0, w - 60, 30):
+		m = sum(abs(pa[xx, yy] - pb[xx, yy])
+				for yy in range(y, y + 60) for xx in range(x, x + 60)) / 3600.0
+		if m > best:
+			best, bx, by = m, x, y
+print("the probe moves a 60x60 block by %.2f of a level at its most, "
+		"at %d,%d" % (best, bx, by))
+probe_ok = best > 10.0
 print("PASS: the probe reaches the metals" if probe_ok
 		else "FAIL: the probe changes nothing on a metal")
 sys.exit(0 if (ok and probe_ok) else 1)

@@ -127,10 +127,33 @@ end
 -- An unlit material draws at its own colour whatever the light does,
 -- which is what an orb that *is* the light needs; it also lands in the
 -- probe, so the chrome has something bright to reflect.
-local function glow(colour)
+--
+-- **The mark is a hole in the glow, not a picture on it** (user): the
+-- texture multiplies the orb's own colour, so where the mark is the
+-- light is not -- a silhouette inside the light, the way a lantern's
+-- cut-out works, rather than a sticker fighting the emission.
+local function glow(colour, mark)
 	local m = magic.Material:new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			mark and "Techniques/DiffUnlit.xml" or
 			"Techniques/NoTextureUnlit.xml"))
+	if mark then
+		local f = ornament.mark(64, ornament.seed_of(mark))
+		local image = magic.Image:new()
+		assert(image:SetSize(f.size, f.size, 3), "the mark")
+		for y = 0, f.size - 1 do
+			for x = 0, f.size - 1 do
+				local v = ornament.at(f, x, y)
+				image:SetPixel(x, y, magic.Color(v, v, v, 1))
+			end
+		end
+		local t = magic.Texture2D:new()
+		assert(t:SetData(image), "the mark's texture")
+		t.filterMode = magic.FILTER_BILINEAR
+		m:SetTexture(magic.TU_DIFFUSE, t)
+		kept[#kept + 1] = image
+		kept[#kept + 1] = t
+	end
 	m:SetShaderParameter("MatDiffColor", colour)
 	kept[#kept + 1] = m
 	return m
@@ -179,6 +202,17 @@ local SLAB = {h = 1.15, d = 1.6}
 -- Where each bay's orb sits, as the tier it glows through: the tiers
 -- differ bay to bay so the wall is not a row of identical holes
 local BAY_TIER = {2, 4, 1, 3, 5, 2}
+-- **The orbs are the games** (user): warm is what you own, cold is a
+-- server you can reach. The name is what a mark is generated from and
+-- what Text3D says over the one being pointed at.
+local ORBS = {
+	{name = "Vanilla", warm = true},
+	{name = "Undermine", warm = true},
+	{name = "Digger", warm = true},
+	{name = "buildat.example.org", warm = false},
+	{name = "Aggregate", warm = true},
+	{name = "mine.example.net", warm = false},
+}
 local orb_places = {}
 for b = 1, BAYS do
 	local x = BAY_X0 + (b - 1) * BAY_W
@@ -213,11 +247,13 @@ part("Box", magic.Vector3(0, 4.5, -11.2),
 -- The orbs. Warm is what you own; the palette's own entry says which
 -- colour each carries, and the light at it is what lights the room.
 local orb_mats = {}
+local orb_nodes = {}
 for i, o in ipairs(orb_places) do
-	orb_mats[i] = glow(magic.Color(1, 1, 1, 1))
+	orb_mats[i] = glow(magic.Color(1, 1, 1, 1), ORBS[i] and ORBS[i].name)
 	local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
 			magic.Vector3(1.7, 1.7, 1.7), orb_mats[i])
 	node:GetComponent("StaticModel").castShadows = false
+	orb_nodes[i] = node
 end
 
 -- The foreground: ten shipped primitives on the checkerboard, the chrome
@@ -407,6 +443,20 @@ local function reflection_probe(at)
 		kept[#kept + 1] = vp
 	end
 	zone.zoneTexture = cube
+	-- What the zone wears when the probe is taken away: an environment of
+	-- nothing, rather than no environment at all. The property will not
+	-- take nil, and an unbound cubemap reads bright rather than black.
+	local dark = magic.TextureCube:new()
+	assert(dark:SetSize(4, magic.Graphics.GetRGBAFloat16Format(), 0),
+			"the empty environment")
+	local black = magic.Image:new()
+	assert(black:SetSize(4, 4, 3), "the empty environment's face")
+	black:Clear(magic.Color(0, 0, 0, 1))
+	for face = 0, 5 do
+		dark:SetData(face, black)
+	end
+	kept.dark_probe = dark
+	kept[#kept + 1] = black
 	return cube
 end
 reflection_probe(magic.Vector3(0, 2.0, 0.0))
@@ -437,6 +487,66 @@ label.horizontalAlignment = magic.HA_LEFT
 label.verticalAlignment = magic.VA_BOTTOM
 label:SetPosition(8, -8)
 
+-- **The orb turns to face whoever approaches** (user), and the name is
+-- over the one being pointed at only -- not always on, which is what
+-- keeps the room from being a label wall.
+--
+-- simplified: the turn snaps rather than slerping, which is invisible
+-- while the camera is fixed and wants a slerp the moment it moves; and
+-- "pointed at" is the smallest angle to the view direction, which is
+-- the crosshair's own ray as long as the crosshair is the screen's
+-- middle.
+local view_from = magic.Vector3(0.0, 2.75, 15.5)
+local view_at = magic.Vector3(0, 1.45, -6.0)
+local view_dir = magic.Vector3(view_at.x - view_from.x,
+		view_at.y - view_from.y, view_at.z - view_from.z)
+do
+	local l = math.sqrt(view_dir.x ^ 2 + view_dir.y ^ 2 + view_dir.z ^ 2)
+	view_dir = magic.Vector3(view_dir.x / l, view_dir.y / l, view_dir.z / l)
+end
+
+local name_node = scene:CreateChild("orb_name")
+local name_text = name_node:CreateComponent("Text3D")
+name_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 36)
+name_text:SetColor(magic.Color(1, 1, 1, 1))
+name_text:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+name_text.text = ""
+-- The ceiling is the font ([TRANSLATION_FONT]): Latin-1 and Cyrillic, so
+-- a CJK name does not draw and whoever widens the font settles this too
+name_text.faceCameraMode = magic.FC_ROTATE_Y
+
+pointed_orb = 0
+function handle_orb_update()
+	local best, best_dot = 0, -1
+	for i, node in ipairs(orb_nodes) do
+		local p = node.position
+		local dx, dy, dz = p.x - view_from.x, p.y - view_from.y,
+				p.z - view_from.z
+		local l = math.sqrt(dx * dx + dy * dy + dz * dz)
+		local dot = (dx * view_dir.x + dy * view_dir.y + dz * view_dir.z) / l
+		if dot > best_dot then
+			best, best_dot = i, dot
+		end
+		-- Present the face: the mark sits in the middle of the sphere's
+		-- UVs, which Sphere.mdl puts on -Z, so the orb looks away from
+		-- the viewer to show it to them
+		node:LookAt(magic.Vector3(view_from.x * 2 - p.x,
+				view_from.y * 2 - p.y, view_from.z * 2 - p.z))
+	end
+	if best ~= pointed_orb then
+		pointed_orb = best
+		local o = ORBS[best]
+		name_text.text = o and o.name or ""
+		log:info("pointing at orb " .. best .. ": " ..
+				(o and o.name or "?"))
+	end
+	if best > 0 then
+		local p = orb_nodes[best].position
+		name_node.position = magic.Vector3(p.x, p.y + 1.6, p.z)
+	end
+end
+magic.SubscribeToEvent("Update", "handle_orb_update")
+
 set_preset(1)
 
 function handle_keydown(event_type, event_data)
@@ -455,7 +565,7 @@ function handle_keydown(event_type, event_data)
 	-- whole of what the probe is for
 	if key == magic.KEY_P then
 		probe_on = not probe_on
-		zone.zoneTexture = probe_on and kept.probe or nil
+		zone.zoneTexture = probe_on and kept.probe or kept.dark_probe
 		log:info("reflection probe " .. (probe_on and "on" or "off"))
 	end
 end

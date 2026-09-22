@@ -39,6 +39,7 @@ function M.seed_of(text)
 end
 
 -- A field is a flat array of size*size numbers in 0..1, indexed from 1
+-- (declared before the patterns, which all build one)
 local function field(size, v)
 	local f = {size = size}
 	for i = 1, size * size do
@@ -207,6 +208,46 @@ function M.sigil(size, seed, depth)
 		end
 	end
 	return h, inlay
+end
+
+-- **A mark for an orb**: the same recursion as a sigil, but kept to the
+-- middle of the texture and mirrored left-to-right only, so that on
+-- Sphere.mdl's spherical UVs it reads as one mark on one face rather
+-- than a pattern wrapped round the ball. White is the orb's own light;
+-- the mark is the hole cut in it.
+--
+-- simplified: generated from the name rather than taken from the
+-- launchable's own icon (`M.launch = {title, icon, run}`), because this
+-- room has no launchables in it yet. The upgrade is drawing the icon
+-- into the same middle region, which changes nothing else.
+function M.mark(size, seed)
+	local f = field(size, 1)
+	local r = rng(seed)
+	local m0, m1 = math.floor(size * 0.30), math.floor(size * 0.70)
+	local n = m1 - m0
+	local function carve(x0, y0, w, d)
+		if w < 3 then
+			return
+		end
+		if d <= 0 or r() < 0.34 then
+			box(f, x0, y0, w, w, 0)
+			return
+		end
+		local h = math.floor(w / 2)
+		for _, q in ipairs({{0, 0}, {h, 0}, {0, h}, {h, h}}) do
+			if r() < 0.66 then
+				carve(x0 + q[1], y0 + q[2], h, d - 1)
+			end
+		end
+	end
+	carve(m0, m0, math.floor(n / 2), 3)
+	-- One mirror, so it is a mark and not noise
+	for y = m0, m1 - 1 do
+		for x = m0, m0 + math.floor(n / 2) - 1 do
+			put(f, m1 - 1 - (x - m0), y, at(f, x, y))
+		end
+	end
+	return f
 end
 
 -- The maps, derived and not authored.
