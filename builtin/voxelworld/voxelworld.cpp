@@ -798,8 +798,21 @@ struct CInstance: public voxelworld::Instance
 				on_get_section, network::Packet)*/
 	}
 
+	// How long one tick may spend building chunks' collision boxes; see
+	// the loop that reads it
+	static const int64_t PHYSICS_BUDGET_US = 100000;
+
 	void on_tick(const interface::TickEvent &event)
 	{
+		// Where a long tick went ([BLOCKED_MODULE]): this tick holds
+		// main_context while it runs and replicate, the relight and a
+		// game's own module queue behind it -- 1.9 s of it under a world
+		// being generated and walked. The phases are timed so the next
+		// reading names one instead of the tick.
+		const int64_t tick_t0 = interface::os::time_us();
+		int64_t t_announce = 0, t_initial = 0, t_stream = 0, t_scene = 0,
+				t_unload = 0;
+		size_t physics_nodes = 0;
 		// What the commits since the last tick wrote, told to replicate and
 		// the clients in one go. It is here rather than at the end of the
 		// commit because a commit runs inside whatever module asked for
@@ -807,6 +820,7 @@ struct CInstance: public voxelworld::Instance
 		// network -- so a mod writing a node used to wait for both, once
 		// per node. Now it waits for neither, and the tick pays once.
 		announce_committed_nodes();
+		t_announce = interface::os::time_us() - tick_t0;
 
 		if(m_initial_sections_pending){
 			// A world that streams says where it wants sections; the region
@@ -817,10 +831,13 @@ struct CInstance: public voxelworld::Instance
 				m_initial_sections_pending = false;
 		}
 
+		t_initial = interface::os::time_us() - tick_t0 - t_announce;
+
 		// Every fourth tick: often enough that a running player stays ahead
 		// of the edge, seldom enough that the work is not the tick
 		if(m_streaming && ((m_stream_tick++) % 4) == 0)
 			stream_pass();
+		t_stream = interface::os::time_us() - tick_t0 - t_announce - t_initial;
 
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Scene *scene = imc->find_scene(m_scene_ref);
@@ -833,10 +850,24 @@ struct CInstance: public voxelworld::Instance
 
 			// Update node collision boxes
 			if(!m_nodes_needing_physics_update.empty()){
+				physics_nodes = m_nodes_needing_physics_update.size();
 				log_v(MODULE, "Updating physics of %zu nodes",
-						m_nodes_needing_physics_update.size());
+						physics_nodes);
 			}
+			// A chunk's collision boxes are 50-70 ms of deserializing its
+			// volume and building a box per solid voxel, and this holds
+			// main_context while it runs: forty of them in a tick was 1.8 s
+			// with replicate, the relight and a game's own module waiting
+			// behind it ([BLOCKED_MODULE]). At most PHYSICS_BUDGET_US of
+			// them a tick; the rest keep their place in the queue and the
+			// chunk they are for is without its boxes for a tick or two.
+			const int64_t physics_t0 = interface::os::time_us();
+			size_t physics_done = 0;
 			for(QueuedNodePhysicsUpdate &update: m_nodes_needing_physics_update){
+				if(physics_done > 0 && interface::os::time_us() - physics_t0 >
+						PHYSICS_BUDGET_US)
+					break;
+				physics_done++;
 				uint node_id = update.node_id;
 				Node *n = scene->GetNode(node_id);
 				if(!n){
@@ -854,14 +885,35 @@ struct CInstance: public voxelworld::Instance
 				interface::mesh::set_voxel_physics_boxes(n, context, *volume,
 						m_voxel_reg.get());
 			}
-			m_nodes_needing_physics_update.clear();
+			m_nodes_needing_physics_update.erase(
+					m_nodes_needing_physics_update.begin(),
+					m_nodes_needing_physics_update.begin() + physics_done);
+			if(!m_nodes_needing_physics_update.empty())
+				log_v(MODULE, "Node physics: %zu done, %zu left for the next "
+						"tick", physics_done,
+						m_nodes_needing_physics_update.size());
 		});
+
+		t_scene = interface::os::time_us() - tick_t0 - t_announce - t_initial -
+				t_stream;
 
 		// Unload stuff if needed
 		maintain_maximum_buffer_limit();
+		t_unload = interface::os::time_us() - tick_t0 - t_announce -
+				t_initial - t_stream - t_scene;
 
 		// Send updated voxel registry if needed
 		send_voxel_registry_if_dirty();
+		const int64_t tick_us = interface::os::time_us() - tick_t0;
+		if(tick_us > 100000)
+			log_w(MODULE, "on_tick(): %i ms -- announce %i, initial %i, "
+					"stream %i, the scene %i (%zu nodes' physics), unload %i, "
+					"the registry %i", (int)(tick_us / 1000),
+					(int)(t_announce / 1000), (int)(t_initial / 1000),
+					(int)(t_stream / 1000), (int)(t_scene / 1000),
+					physics_nodes, (int)(t_unload / 1000),
+					(int)((tick_us - t_announce - t_initial - t_stream -
+					t_scene - t_unload) / 1000));
 	}
 
 	void on_peer_joined_scene(const replicate::PeerJoinedScene &event)
