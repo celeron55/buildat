@@ -3200,6 +3200,9 @@ local function box_blocker(pos, box, i, dir)
 	return best
 end
 
+local TRACE_OBJECT = os.getenv and os.getenv("BUILDAT_LUANTI_TRACE_OBJECT") or nil
+if TRACE_OBJECT == "" then TRACE_OBJECT = nil end
+
 local AXIS_MIN = {x = 1, y = 2, z = 3}
 local AXIS_MAX = {x = 4, y = 5, z = 6}
 
@@ -3336,6 +3339,15 @@ local function step_object(o, dtime)
 		move_axis(o, "x", dx, box, moveresult)
 		move_axis(o, "z", dz, box, moveresult)
 		move_axis(o, "y", dy, box, moveresult)
+		-- BUILDAT_LUANTI_TRACE_OBJECT=<entity name>: every step of every
+		-- object of that name, for reading a fall that stops ([DIG_PARITY])
+		if TRACE_OBJECT and o.le and o.le.name == TRACE_OBJECT then
+			core.log("warning", string.format(
+					"trace %s: pos %.3f,%.3f,%.3f vel %.2f,%.2f,%.2f acc %.1f ground %s hits %d dt %.3f active %s",
+					TRACE_OBJECT, o.pos.x, o.pos.y, o.pos.z, o.vel.x, o.vel.y,
+					o.vel.z, o.acc.y, tostring(moveresult.touching_ground),
+					#moveresult.collisions, dtime, tostring(core.__is_active(o.pos))))
+		end
 	else
 		o.pos = {x = o.pos.x + dx, y = o.pos.y + dy, z = o.pos.z + dz}
 	end

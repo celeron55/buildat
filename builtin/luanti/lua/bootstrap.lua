@@ -5335,7 +5335,12 @@ function core.__step(dtime)
 	core.__forget_loaded_boxes()
 	run_globalsteps(dtime)
 	mark("globalsteps")
-	core.__step_objects(dtime)
+	-- The objects' physics never integrates more than half a second at
+	-- once, whatever the step: the map check's day-long step for the
+	-- clock (1200 s) sent every item and mob fifteen million nodes down
+	-- in one go, and VoxeLibre's items remove themselves out of the world
+	-- ([DIG_PARITY], test/fall.lua). Luanti's own step is clamped too.
+	core.__step_objects(math.min(dtime, 0.5))
 	mark("objects")
 	step_emerge(dtime)
 	mark("emerge")
