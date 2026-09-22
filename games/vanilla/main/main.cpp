@@ -22,6 +22,9 @@
 #include "client_file/api.h"
 #include "storage/api.h"
 #include <cstdlib>
+#include <sys/stat.h>
+#include <ctime>
+#include <map>
 #include <fstream>
 #include <cctype>
 #include <utility>
@@ -122,6 +125,12 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:open"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:save_info"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:set_world_flags"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:delete"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:create"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:get_imports"));
@@ -166,6 +175,12 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/main:place", on_place,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_saves", on_get_saves,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:save_info", on_save_info,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:set_world_flags",
+				on_set_world_flags, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:delete", on_delete,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:open", on_open,
 				network::Packet)
@@ -619,6 +634,225 @@ struct Module: public interface::Module
 			istorage->close(save);
 		});
 		return gameid;
+	}
+
+	// world.mt's lines as key -> value; a missing file is empty
+	static std::map<ss_, ss_> read_world_mt(const ss_ &path)
+	{
+		std::map<ss_, ss_> out;
+		std::ifstream f(path);
+		ss_ line;
+		while(std::getline(f, line)){
+			const size_t eq = line.find('=');
+			if(eq == ss_::npos)
+				continue;
+			ss_ k = line.substr(0, eq), v = line.substr(eq + 1);
+			auto trim = [](ss_ &t){
+				while(!t.empty() && isspace((unsigned char)t.back())) t.pop_back();
+				size_t i = 0;
+				while(i < t.size() && isspace((unsigned char)t[i])) i++;
+				t = t.substr(i);
+			};
+			trim(k); trim(v);
+			if(!k.empty())
+				out[k] = v;
+		}
+		return out;
+	}
+	// The file written back with these keys set, the other lines kept
+	static void write_world_mt(const ss_ &path, const std::map<ss_, ss_> &set)
+	{
+		std::map<ss_, ss_> all = read_world_mt(path);
+		for(const auto &kv : set)
+			all[kv.first] = kv.second;
+		interface::fs::create_directories(interface::fs::strip_file_name(path));
+		std::ofstream f(path, std::ios::trunc);
+		for(const auto &kv : all)
+			f << kv.first << " = " << kv.second << "\n";
+	}
+
+	// main:save_info <name>: what a save answers at a glance, as a flat
+	// list of key, value pairs ([WORLD_LIST]) -- one open, a few keys, one
+	// count. The section count is voxelworld's "main/s<x>,<y>,<z>/generated"
+	// keys; the size the directory's.
+	void on_save_info(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:save_info: %s", e.what());
+			return;
+		}
+		if(values.empty())
+			return;
+		const ss_ name = values[0];
+		sv_<ss_> flat{"name", name};
+		storage::access(m_server, [&](storage::Interface *istorage){
+			storage::Save *save = istorage->open(name);
+			if(!save)
+				return;
+			ss_ gameid, seed, mg_name, clock, created;
+			save->store("main")->get("gameid", gameid);
+			save->store("main")->get("created", created);
+			storage::Store *lu = save->store("luanti");
+			lu->get("seed", seed);
+			lu->get("mg_name", mg_name);
+			lu->get("clock", clock);
+			const size_t sections =
+					save->store("voxelworld")->list("main/s").size();
+			const ss_ path = save->path();
+			istorage->close(save);
+			flat.push_back("game"); flat.push_back(gameid);
+			const ss_ game_path = find_game(gameid);
+			flat.push_back("title");
+			flat.push_back(game_path.empty() ? gameid : read_game_title(game_path));
+			flat.push_back("seed"); flat.push_back(seed);
+			flat.push_back("mapgen"); flat.push_back(mg_name);
+			if(clock.size() > 1){
+				try {
+					std::istringstream is(clock, std::ios::binary);
+					cereal::PortableBinaryInputArchive ar(is);
+					uint8_t version = 0; double tod = 0, gt = 0; int32_t days = 0;
+					ar(version, tod, gt, days);
+					flat.push_back("day"); flat.push_back(itos(days));
+					char buf[16];
+					snprintf(buf, sizeof buf, "%02d:%02d", (int)(tod * 24) % 24,
+							(int)(tod * 24 * 60) % 60);
+					flat.push_back("time"); flat.push_back(buf);
+					// As text: the sandbox has no os.date and no clock
+					char played[32];
+					if(gt >= 3600)
+						snprintf(played, sizeof played, "%.1f h", gt / 3600);
+					else
+						snprintf(played, sizeof played, "%d min", (int)(gt / 60));
+					flat.push_back("played"); flat.push_back(played);
+				} catch(std::exception &){}
+			}
+			flat.push_back("sections"); flat.push_back(itos((int64_t)sections));
+			flat.push_back("bytes");
+			flat.push_back(itos((int64_t)interface::fs::directory_tree_size(path)));
+			struct stat st;
+			auto date_of = [](time_t t){
+				char buf[32];
+				strftime(buf, sizeof buf, "%Y-%m-%d %H:%M", localtime(&t));
+				return ss_(buf);
+			};
+			if(stat((path+"/save.sqlite").c_str(), &st) == 0){
+				flat.push_back("played_at"); flat.push_back(date_of(st.st_mtime));
+			}
+			// The save's own "created" from on_create; a save from before
+			// it has the oldest of its files' times, which a rewritten
+			// world.mt or database moves (a directory's ctime is its last
+			// change on Linux, not its birth)
+			if(!created.empty()){
+				flat.push_back("created_at");
+				flat.push_back(date_of((time_t)atoll(created.c_str())));
+			} else if(stat((path+"/save.sqlite").c_str(), &st) == 0){
+				time_t oldest = st.st_ctime;
+				for(const interface::fs::Node &n :
+						interface::fs::list_directory(path)){
+					struct stat s2;
+					if(stat((path+"/"+n.name).c_str(), &s2) == 0 &&
+							s2.st_mtime < oldest)
+						oldest = s2.st_mtime;
+				}
+				flat.push_back("created_at"); flat.push_back(date_of(oldest));
+			}
+			const std::map<ss_, ss_> mt = read_world_mt(path+"/luanti/world.mt");
+			auto flag = [&](const char *key, const char *dflt){
+				auto it = mt.find(key);
+				flat.push_back(key);
+				flat.push_back(it == mt.end() ? ss_(dflt) : it->second);
+			};
+			flag("creative_mode", "false");
+			flag("enable_damage", "true");
+		});
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "main:save_info", os.str());
+		});
+	}
+
+	// main:set_world_flags <name> <creative_mode> <enable_damage>: into the
+	// save's world.mt, which core.settings reads when the world loads
+	void on_set_world_flags(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:set_world_flags: %s", e.what());
+			return;
+		}
+		if(values.size() < 3)
+			return;
+		ss_ path;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			storage::Save *save = istorage->open(values[0]);
+			if(save){
+				path = save->path();
+				istorage->close(save);
+			}
+		});
+		if(path.empty())
+			return;
+		std::map<ss_, ss_> set;
+		set["creative_mode"] = values[1] == "true" ? "true" : "false";
+		set["enable_damage"] = values[2] == "true" ? "true" : "false";
+		write_world_mt(path+"/luanti/world.mt", set);
+		log_i(MODULE, "%s: creative_mode %s, enable_damage %s", cs(values[0]),
+				cs(set["creative_mode"]), cs(set["enable_damage"]));
+		on_save_info(packet); // the panel re-reads
+	}
+
+	// main:delete <name>: the save's directory moved to saves/trash/<name>-
+	// <date>, not removed; the list is sent again
+	void on_delete(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:delete: %s", e.what());
+			return;
+		}
+		if(values.empty())
+			return;
+		ss_ path;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			storage::Save *save = istorage->open(values[0]);
+			if(save){
+				path = save->path();
+				istorage->close(save);
+			}
+		});
+		if(path.empty()){
+			menu_error(packet.sender, "There is no save called "+values[0]);
+			return;
+		}
+		const ss_ trash = interface::fs::strip_file_name(path)+"/trash";
+		interface::fs::create_directories(trash);
+		time_t now = time(NULL);
+		char date[32];
+		strftime(date, sizeof date, "%Y-%m-%d_%H%M%S", localtime(&now));
+		const ss_ to = trash+"/"+values[0]+"-"+date;
+		if(rename(path.c_str(), to.c_str()) != 0){
+			menu_error(packet.sender, "Could not move "+path+" to "+to);
+			return;
+		}
+		log_i(MODULE, "Save %s moved to %s", cs(values[0]), cs(to));
+		menu_message(packet.sender, values[0]+" moved to the trash");
 	}
 
 	sv_<ss_> list_games()
@@ -1648,11 +1882,21 @@ struct Module: public interface::Module
 			save = istorage->create(name);
 			if(save){
 				save->store("main")->set("gameid", gameid);
+				save->store("main")->set("created", itos((int64_t)time(NULL)));
 				if(!seed.empty()){
 					const ss_ dir = save->path()+"/luanti";
 					interface::fs::create_directories(dir);
 					std::ofstream f(dir+"/world.mt", std::ios::app);
 					f<<"fixed_map_seed = "<<seed<<"\n";
+				}
+				// The fourth and fifth are the new world's Creative mode
+				// and Enable damage ([WORLD_LIST]); official's defaults
+				// when absent
+				if(values.size() > 4){
+					std::map<ss_, ss_> set;
+					set["creative_mode"] = values[3] == "true" ? "true" : "false";
+					set["enable_damage"] = values[4] == "true" ? "true" : "false";
+					write_world_mt(save->path()+"/luanti/world.mt", set);
 				}
 				istorage->close(save);
 			}

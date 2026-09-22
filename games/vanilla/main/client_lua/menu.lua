@@ -218,6 +218,40 @@ do
 	assert(#filtered(items, "nothing") == 0, "filter: no match is no rows")
 end
 
+-- The save the world screen has selected, and the panel's texts, filled
+-- by the main:save_info answer ([WORLD_LIST])
+local selected_save = nil
+local panel = nil
+
+-- A menu button under any parent, registered with the menu's keyboard
+-- walk: the same shape ui_utils' menu:add(label) makes on its own window
+local function button_on(menu, parent, label, action, width)
+	local b = parent:CreateChild("Button")
+	b:SetStyleAuto()
+	b:SetName("Button")
+	b:SetLayout(magic.LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+	-- A fixed height, not the column's share of what is left: a vertical
+	-- layout stretches an unfixed child
+	b:SetFixedHeight(28)
+	if width then
+		b:SetFixedWidth(width)
+	end
+	local t = b:CreateChild("Text")
+	t:SetName("ButtonText")
+	t:SetStyleAuto()
+	t:SetText(label)
+	t:SetTextAlignment(magic.HA_CENTER)
+	menu:add(b, action)
+	return b
+end
+
+-- The world screen in two columns: the saves on the left as a list that
+-- scrolls, the selected one's glance, its two world.mt flags, Play and
+-- Delete on the right. A row's click selects it and asks the server for
+-- the glance; a second click (or Enter on it) plays.
+-- simplified: a row shows the name and the game, not when it was last
+-- played -- that is in the panel, read on select; official's Configure,
+-- Host and Announce are not here.
 function draw(saves, save_games)
 	last_saves, last_save_games = saves, save_games
 	close()
@@ -230,8 +264,17 @@ function draw(saves, save_games)
 	title:SetText(menu_game and (menu_game .. ": which world?") or
 			"vanilla: which save?")
 
-	-- Every save, twelve at a time, newest first: the server sorts them by
-	-- when each was last played
+	local columns = menu.window:CreateChild("UIElement")
+	columns:SetLayout(magic.LM_HORIZONTAL, 16, magic.IntRect(0, 0, 0, 0))
+	local left = columns:CreateChild("UIElement")
+	left:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(0, 0, 0, 0))
+	left:SetFixedWidth(520)
+	local right = columns:CreateChild("UIElement")
+	right:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(0, 0, 0, 0))
+	right:SetFixedWidth(420)
+
+	-- Every save, newest first: the server sorts them by when each was
+	-- last played
 	local items = {}
 	for i, name in ipairs(saves) do
 		local gameid = save_games[i]
@@ -251,31 +294,76 @@ function draw(saves, save_games)
 			-- and saying so is more use than hiding it
 			label = label .. "  -- no such game"
 		end
-		items[#items + 1] = {label = label, action = function()
-			waiting("Opening " .. name .. "...")
-			buildat.send_packet("main:open",
-					cereal.binary_output({name}, {"array", "string"}))
-		end}
+		items[#items + 1] = {label = label, name = name}
 		::next_save::
 	end
 	local shown = filtered(items, save_filter)
-	add_filter(menu, save_filter, #items, #shown, function(text)
+	add_filter({window = left}, save_filter, #items, #shown, function(text)
 		save_filter = text
-		page = 1
 		draw(saves, save_games)
 	end)
-	ui_utils.add_paged(menu, shown, {
-		page = page,
-		per_page = 12,
-		redraw = function(new_page)
-			page = new_page
-			draw(saves, save_games)
-		end,
-	})
+	local list = left:CreateChild("ListView")
+	list:SetStyleAuto()
+	list:SetFixedSize(520, 520)
+	if selected_save then
+		local still = false
+		for _, item in ipairs(shown) do
+			if item.name == selected_save then
+				still = true
+			end
+		end
+		if not still then
+			selected_save = nil
+		end
+	end
+	local row_buttons = {}
+	local function select(name)
+		selected_save = name
+		for n, b in pairs(row_buttons) do
+			b.selected = (n == name)
+		end
+		buildat.send_packet("main:save_info",
+				cereal.binary_output({name}, {"array", "string"}))
+	end
+	local function play(name)
+		waiting("Opening " .. name .. "...")
+		buildat.send_packet("main:open",
+				cereal.binary_output({name}, {"array", "string"}))
+	end
+	for _, item in ipairs(shown) do
+		local row = list.contentElement:CreateChild("Button")
+		row:SetStyleAuto()
+		row:SetName("Button")
+		row:SetLayout(magic.LM_VERTICAL, 10, magic.IntRect(8, 0, 8, 0))
+		row:SetFixedWidth(496)
+		row.minHeight = 28
+		local text = row:CreateChild("Text")
+		text:SetName("ButtonText")
+		text:SetStyleAuto()
+		text:SetText(item.label)
+		text:SetTextAlignment(magic.HA_LEFT)
+		row_buttons[item.name] = row
+		menu:add(row, function()
+			if selected_save == item.name then
+				play(item.name)
+			else
+				select(item.name)
+			end
+		end)
+		list:AddItem(row)
+	end
+	if #shown == 0 then
+		local none = left:CreateChild("Text")
+		none:SetStyleAuto()
+		none:SetText(#items == 0 and "No saves yet" or "Nothing matches")
+	end
 
 	-- One button rather than one per game: which game is a choice, and it
 	-- goes on the same screen as the name it is being given
-	menu:add(menu_game and "New world..." or "New save...", function()
+	local under = {add = function(_, label, action)
+		return button_on(menu, left, label, action, 520)
+	end}
+	under:add(menu_game and "New world..." or "New save...", function()
 		if menu_game then
 			draw_new_save_name(menu_game)
 			return
@@ -294,12 +382,63 @@ function draw(saves, save_games)
 		waiting("Looking in your Luanti installation...")
 		buildat.send_packet("main:get_imports", "")
 	end
-	menu:add("Import a game from Luanti...", function()
+	under:add("Import a game from Luanti...", function()
 		ask_for_imports("games")
 	end)
-	menu:add("Import a world from Luanti...", function()
+	under:add("Import a world from Luanti...", function()
 		ask_for_imports("worlds")
 	end)
+
+	-- The right column: the glance, the flags, Play and Delete
+	panel = {lines = {}, flags = {}}
+	local head = right:CreateChild("Text")
+	head:SetStyleAuto()
+	head:SetText(selected_save or "Pick a world on the left")
+	panel.head = head
+	for k = 1, 7 do
+		local line = right:CreateChild("Text")
+		line:SetStyleAuto()
+		line:SetText("")
+		line:SetTextAlignment(magic.HA_LEFT)
+		panel.lines[k] = line
+	end
+	local function flag_row(key, label)
+		local b = button_on(menu, right, "[ ] " .. label, function()
+			if not selected_save or panel.flags[key] == nil then
+				return
+			end
+			local f = panel.flags
+			f[key] = not f[key]
+			buildat.send_packet("main:set_world_flags",
+					cereal.binary_output({selected_save,
+					f.creative_mode and "true" or "false",
+					f.enable_damage and "true" or "false"}, {"array", "string"}))
+		end, 420)
+		panel[key] = {button = b, label = label}
+	end
+	flag_row("creative_mode", "Creative mode")
+	flag_row("enable_damage", "Enable damage")
+	button_on(menu, right, "Play", function()
+		if selected_save then
+			play(selected_save)
+		end
+	end, 420)
+	button_on(menu, right, "Delete...", function()
+		local name = selected_save
+		if not name then
+			return
+		end
+		ui_utils.show_confirm_dialog("Move the world \"" .. name ..
+				"\" to the trash?", function()
+			selected_save = nil
+			waiting("Moving " .. name .. " to the trash...")
+			buildat.send_packet("main:delete",
+					cereal.binary_output({name}, {"array", "string"}))
+		end, function() end)
+	end, 420)
+	if selected_save then
+		select(selected_save)
+	end
 
 	magic.input:SetMouseVisible(true, "a menu screen")
 
@@ -648,12 +787,25 @@ function draw_new_save_name(gameid)
 	seed_edit.minHeight = 26
 	seed_edit.enabled = true
 	seed_edit:SetText("")
+	-- The new world's two world.mt flags, official's defaults
+	-- ([WORLD_LIST]); the buttons say their state
+	local flags = {creative_mode = false, enable_damage = true}
+	for _, f in ipairs({{"creative_mode", "Creative mode"},
+			{"enable_damage", "Enable damage"}}) do
+		local b
+		b = menu:add((flags[f[1]] and "[x] " or "[ ] ") .. f[2], function()
+			flags[f[1]] = not flags[f[1]]
+			b:GetChild("ButtonText"):SetText((flags[f[1]] and "[x] " or "[ ] ") .. f[2])
+		end)
+	end
 	menu:add("Create and play", function()
 		local name = edit:GetText()
 		local seed = seed_edit:GetText()
 		waiting("Creating " .. name .. "...")
 		buildat.send_packet("main:create",
-				cereal.binary_output({name, gameid, seed},
+				cereal.binary_output({name, gameid, seed,
+				flags.creative_mode and "true" or "false",
+				flags.enable_damage and "true" or "false"},
 				{"array", "string"}))
 	end)
 	menu:add("< back", function()
@@ -807,6 +959,53 @@ function draw_import_worlds()
 	back_to_saves(menu)
 end
 
+
+-- The selected save's glance, into the panel; the flags' buttons say
+-- their state
+buildat.sub_packet("main:save_info", function(data)
+	if done or not panel then
+		return
+	end
+	local values = cereal.binary_input(data, {"array", "string"})
+	local info = {}
+	for i = 1, #values - 1, 2 do
+		info[values[i]] = values[i + 1]
+	end
+	if info.name ~= selected_save then
+		return
+	end
+	panel.head:SetText(info.name .. (info.title and info.title ~= "" and
+			("  --  " .. info.title) or ""))
+	local lines = {}
+	if info.mapgen and info.mapgen ~= "" or info.seed and info.seed ~= "" then
+		lines[#lines + 1] = "mapgen " .. (info.mapgen ~= "" and info.mapgen or "?") ..
+				", seed " .. (info.seed or "?")
+	end
+	if info.day then
+		lines[#lines + 1] = "day " .. info.day .. ", " .. (info.time or "") ..
+				"; " .. (info.played or "?") .. " played"
+	end
+	if info.created_at then
+		lines[#lines + 1] = "created " .. info.created_at
+	end
+	if info.played_at then
+		lines[#lines + 1] = "last played " .. info.played_at
+	end
+	local sections = tonumber(info.sections) or 0
+	lines[#lines + 1] = "explored: " .. sections .. " sections, " ..
+			math.floor(math.sqrt(sections) * 64 + 0.5) .. " nodes across"
+	lines[#lines + 1] = format_bytes(tonumber(info.bytes) or 0) .. " on disk"
+	for k, line in ipairs(panel.lines) do
+		line:SetText(lines[k] or "")
+	end
+	panel.flags.creative_mode = info.creative_mode == "true"
+	panel.flags.enable_damage = info.enable_damage == "true"
+	for _, key in ipairs({"creative_mode", "enable_damage"}) do
+		local b = panel[key]
+		b.button:GetChild("ButtonText"):SetText((panel.flags[key] and "[x] " or
+				"[ ] ") .. b.label)
+	end
+end)
 
 buildat.sub_packet("main:saves", function(data)
 	if done then

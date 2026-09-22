@@ -18,6 +18,11 @@ local M = {safe = {}}
 local function button_menu_nav(root)
 	local items = {}
 	local selected = 1
+	-- When this menu came up: the Enter that finished a filter field on the
+	-- screen before this one arrives here too, in the same frame, and
+	-- pressed whichever button was first ([WORLD_LIST]: the world screen's
+	-- filter opened "New world..."); a key older than the menu is not its
+	local born_us = buildat.get_time_us()
 	local on_other_key = nil
 	local on_change = nil
 
@@ -123,7 +128,8 @@ local function button_menu_nav(root)
 		elseif key == KEY_DOWN then
 			select_i(selected + columns)
 		elseif key == KEY_RETURN or key == KEY_RETURN2 or key == KEY_KP_ENTER then
-			if magic.input:GetKeyPress(key) and items[selected] then
+			if magic.input:GetKeyPress(key) and items[selected] and
+					buildat.get_time_us() - born_us > 200000 then
 				items[selected].action()
 			end
 		elseif on_other_key then
