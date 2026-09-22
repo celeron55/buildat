@@ -307,16 +307,19 @@ make_one() {
 # a reconfigure with BUILDAT_LUANTI_ONLY, an install to its own stage,
 # and the full stage's compiled modules copied in
 make_luanti_only() {
-	local full="$1" name="$2"
+	local full="$1" name="$2"; shift 2
 	local build="$root/build/$full"
 	local stage="$root/stage/$name"
 	rm -rf "$stage"; mkdir -p "$stage"
-	(cd "$build" && cmake . -DBUILDAT_LUANTI_ONLY=TRUE > cmake-luanti.log 2>&1) || {
-		echo "configure (luanti only) failed; see $build/cmake-luanti.log" >&2; exit 1; }
+	# The full build's own arguments again with the option: a bare
+	# reconfigure of a cross build lost its toolchain in the container
+	(cd "$build" && cmake "$here" "$@" -DBUILDAT_LUANTI_ONLY=TRUE > cmake-luanti.log 2>&1) || {
+		echo "configure (luanti only) failed; see $build/cmake-luanti.log:" >&2
+		tail -20 "$build/cmake-luanti.log" >&2; exit 1; }
 	(cd "$build" && cmake --install . --prefix "$stage" > install-luanti.log 2>&1) || {
 		echo "install (luanti only) failed; see $build/install-luanti.log" >&2; exit 1; }
 	# The full archive's option back, so a later install of it is the full one
-	(cd "$build" && cmake . -DBUILDAT_LUANTI_ONLY=FALSE > /dev/null 2>&1) || true
+	(cd "$build" && cmake "$here" "$@" -DBUILDAT_LUANTI_ONLY=FALSE > /dev/null 2>&1) || true
 	[ -d "$stage/compiler" ] && { echo "luanti only: compiler/ is in the archive" >&2; exit 1; }
 	[ -d "$stage/games/digger" ] && { echo "luanti only: games/digger is in the archive" >&2; exit 1; }
 	if [ -d "$root/stage/$full/cache/rccpp_build" ]; then
@@ -656,7 +659,8 @@ windows)
 	# installed again with BUILDAT_LUANTI_ONLY (games/vanilla alone, no
 	# compiler), and the modules the full archive's prebuild compiled
 	# copied into its cache, since it cannot compile them itself
-	c=$(make_luanti_only "buildat-$version-win64" "buildat-$version-win64-luanti")
+	c=$(make_luanti_only "buildat-$version-win64" "buildat-$version-win64-luanti" \
+		-DCMAKE_BUILD_TYPE=Release "${win_args[@]}")
 	echo "archive: $c"
 	check_imports "$c"
 	smoke_test_wine_luanti "$c"
