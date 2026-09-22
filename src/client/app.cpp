@@ -18,6 +18,9 @@
 #include "interface/tcpsocket.h"
 #include "interface/voxel.h"
 #include "interface/thread_pool.h"
+#include "interface/http.h"
+#include <map>
+#include <atomic>
 #include <cctype>
 #include <algorithm>
 #include <thread>
@@ -1350,6 +1353,8 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(list_preferences)
 		DEF_BUILDAT_FUNC(get_env)
 		DEF_BUILDAT_FUNC(is_scripted)
+		DEF_BUILDAT_FUNC(http_get)
+		DEF_BUILDAT_FUNC(http_poll)
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
@@ -2513,6 +2518,69 @@ struct CApp: public App, public magic::Application
 	// client's process, the way extensions/luanti_client reads its own
 	// outside the sandbox; the prefix is the fence, so a game cannot read
 	// the user's environment through this.
+	// HTTP for the extension environment ([SERVER_LIST]: Luanti's official
+	// server list): __buildat_http_get(url) starts a fetch on a thread of
+	// its own and answers a job id; __buildat_http_poll(id) answers nil
+	// while it runs, then (true, body) or (false, error) once, and forgets
+	// the job. Who may fetch what is the network extension's question,
+	// which gates this behind its permission dialog the way it gates a
+	// socket; the sandbox never sees these two names.
+	struct HttpJob {
+		std::thread thread;
+		std::atomic<bool> done{false};
+		bool ok = false;
+		ss_ result;
+	};
+	std::map<int, sp_<HttpJob>> m_http_jobs;
+	int m_http_next_id = 1;
+
+	static int l_http_get(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ url = luaL_checkstring(L, 1);
+		sp_<HttpJob> job(new HttpJob());
+		const int id = self->m_http_next_id++;
+		self->m_http_jobs[id] = job;
+		HttpJob *j = job.get();
+		j->thread = std::thread([j, url](){
+			try {
+				j->result = interface::http_get(url);
+				j->ok = true;
+			} catch(std::exception &e){
+				j->result = e.what();
+			}
+			j->done = true;
+		});
+		lua_pushinteger(L, id);
+		return 1;
+	}
+
+	static int l_http_poll(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const int id = (int)luaL_checkinteger(L, 1);
+		auto it = self->m_http_jobs.find(id);
+		if(it == self->m_http_jobs.end()){
+			lua_pushboolean(L, false);
+			lua_pushstring(L, "no such fetch");
+			return 2;
+		}
+		if(!it->second->done){
+			lua_pushnil(L);
+			return 1;
+		}
+		sp_<HttpJob> job = it->second;
+		self->m_http_jobs.erase(it);
+		job->thread.join();
+		lua_pushboolean(L, job->ok);
+		lua_pushlstring(L, job->result.c_str(), job->result.size());
+		return 2;
+	}
+
 	static int l_get_env(lua_State *L)
 	{
 		const ss_ name = luaL_checkstring(L, 1);

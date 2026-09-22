@@ -433,6 +433,90 @@ function M.safe.udp_connect(host, port, cb)
 	connect(true, host, port, cb)
 end
 
+-- http_get(url, cb): the body of a GET over HTTPS, cb(body) or
+-- cb(nil, error), asked of the user through the same dialog and file as a
+-- socket is -- the uri is the url's scheme and host ([SERVER_LIST]:
+-- Luanti's official server list). Fetched on a thread in the client
+-- (__buildat_http_get); read back on Update.
+local http_pending = {}
+local http_polling = false
+local function http_start(url, cb)
+	local id = __buildat_http_get(url)
+	http_pending[id] = cb
+	if not http_polling then
+		http_polling = true
+		magic.SubscribeToEvent("Update", function()
+			for jid, callback in pairs(http_pending) do
+				local ok, body = __buildat_http_poll(jid)
+				if ok ~= nil then
+					http_pending[jid] = nil
+					if ok then
+						callback(body)
+					else
+						callback(nil, body)
+					end
+				end
+			end
+		end)
+	end
+end
+
+function M.safe.http_get(url, cb)
+	if type(url) ~= "string" or type(cb) ~= "function" then
+		error("network: http_get(url: string, cb: function)")
+	end
+	local scheme, host = url:match("^(https?)://([^/:]+)")
+	if not scheme then
+		cb(nil, "not an http(s) url: "..url)
+		return
+	end
+	local uri = scheme.."://"..host
+	local entry = load_store()[uri]
+	if entry and entry.accepted and
+			os.time() - entry.last_attempt < ACCEPTANCE_VALID_S then
+		touch_entry(uri)
+		http_start(url, cb)
+		return
+	end
+	log:info("Asking the user about "..uri)
+	ask_user(uri, entry, function(accepted, description)
+		store_answer(uri, accepted, description, entry)
+		if not accepted then
+			cb(nil, "Declined by user: "..uri)
+			return
+		end
+		http_start(url, cb)
+	end)
+end
+
+-- The addresses this client has used, for a list to pick from: the
+-- store's entries as {uri, description, created, last_attempt, accepted},
+-- the last used first
+function M.safe.known_addresses()
+	local out = {}
+	for uri, e in pairs(load_store()) do
+		out[#out + 1] = {uri = uri, description = e.description or "",
+				created = e.created or 0, last_attempt = e.last_attempt or 0,
+				accepted = e.accepted and true or false}
+	end
+	table.sort(out, function(a, b) return a.last_attempt > b.last_attempt end)
+	return out
+end
+
+-- parse_json(text) -> table or nil, error: the module's own reader
+-- (json.lua beside this file), which defines onto a `core` table
+local parse_json
+do
+	local saved = rawget(_G, "core")
+	rawset(_G, "core", {log = function(_, message) log:warning(message) end})
+	dofile(__buildat_extension_path("network").."/json.lua")
+	parse_json = core.parse_json
+	rawset(_G, "core", saved)
+end
+function M.safe.parse_json(text)
+	return parse_json(text, nil, true)
+end
+
 -- LuaSocket's socket.gettime()
 function M.safe.gettime()
 	return buildat.get_time_us() / 1000000
