@@ -258,7 +258,6 @@ PHYS.MOON_COLOR = magic.Color(0.55, 0.68, 1.0)
 -- Reassigned when a game says what its horizon is; see sub_sky below
 local DAY_FOG = magic.Color(0.60, 0.72, 0.88)
 local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
-local EXPOSURE_BIAS = 1.6
 -- [PT_EXPOSURE]: the pbr path meters its exposure by Urho3D's
 -- AutoExposure.xml -- log-average luminance as the key, clamped to the
 -- range, the frame scaled by middle grey over it -- which is the rule the
@@ -531,8 +530,7 @@ do
 	rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0, 0.03))
 	-- No bias on top of the meter: the meter owns the level and a bias is
 	-- a second exposure that pushes the lit parts up the curve's shoulder
-	-- ([PBR_FIT] term 4). EXPOSURE_BIAS stays the minimap's, which is not
-	-- metered.
+	-- ([PBR_FIT] term 4). The minimap draws through a clone of this.
 	rp:SetShaderParameter("TonemapExposureBias", 1.0)
 	-- Uncharted2's white point: 2, the grade's ladder's pick (user,
 	-- 2026-09-21, [PBR_GRADE]; Urho's own is 4.0); the shoulder is the
@@ -569,18 +567,14 @@ do
 		AUTO_EXPOSURE.lum_range = {k, k}
 		rp:SetShaderParameter("AutoExposureLumRange", magic.Vector2(k, k))
 	end
-	-- What a second view of the same world is drawn with -- the minimap.
-	-- The tonemap is not optional: the world is rendered in HDR and an
-	-- eight-bit picture of it without one is white. The bloom is, and it is
-	-- left out: a picture the size of a stamp has nothing to bloom.
-	world_render_path = base:Clone()
-	world_render_path:Append(magic.cache:GetResource("XMLFile",
-			"PostProcess/Tonemap.xml"))
-	world_render_path:Append(magic.cache:GetResource("XMLFile",
-			"PostProcess/GammaCorrection.xml"))
-	world_render_path:SetEnabled("TonemapReinhardEq3", false)
-	world_render_path:SetEnabled("TonemapUncharted2", true)
-	world_render_path:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
+	-- What a second view of the same world is drawn with -- the minimap:
+	-- the frame's own path, meter and curve and all, on a clone whose
+	-- adaptation target is its own. A stamp path of its own with a fixed
+	-- bias (1.6, no meter) was white over a noon world -- the minimap
+	-- "oversaturated" on the box ([BOX_PLAYTEST_2] 9; [EXT_HUD_PARITY]
+	-- saw it) -- since the HDR frame is fifty times the sky at the sun
+	-- and only the meter brings that down.
+	world_render_path = rp:Clone()
 end
 
 
