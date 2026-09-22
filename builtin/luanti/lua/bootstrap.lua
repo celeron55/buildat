@@ -4880,10 +4880,16 @@ end
 
 function core.__is_active(pos)
 	local boxes = core.__active_boxes_now()
+	-- The node the position is in: a box is node corners, and node 0
+	-- spans -0.5..0.5, so an object at x -0.06 is in node 0 and not past
+	-- the box's edge. Read as past it, a dropped item that drifted a
+	-- tenth over a section's edge stopped for good ([DIG_PARITY]).
+	local x, y, z = math.floor(pos.x + 0.5), math.floor(pos.y + 0.5),
+			math.floor(pos.z + 0.5)
 	for i = 1, #boxes do
 		local b = boxes[i]
-		if pos.x >= b[1] and pos.y >= b[2] and pos.z >= b[3] and
-				pos.x <= b[4] and pos.y <= b[5] and pos.z <= b[6] then
+		if x >= b[1] and y >= b[2] and z >= b[3] and
+				x <= b[4] and y <= b[5] and z <= b[6] then
 			return true
 		end
 	end

@@ -22,12 +22,28 @@ core.register_on_mods_loaded(function()
 				local q = o:get_pos()
 				seen[#seen + 1] = string.format("%s@%.1f", (o:get_luaentity() or {}).name or "?", q.y)
 			end
+			local boxes = core.__active_boxes_now()
+			local ys = {}
+			for _, b in ipairs(boxes) do
+				if b[2] == 64 then
+					ys[#ys + 1] = b[1] .. "," .. b[3]
+				end
+			end
+			table.sort(ys)
+			core.log("warning", "fallcheck: active sections at y 64..127, by x,z corner: " .. table.concat(ys, " "))
 			core.log("warning", string.format("fallcheck: t=%.2f y=%s at_item=%s active=%s loaded=%d objs=%s", t,
 					p and string.format("%.2f", p.y) or "gone",
 					p and core.get_node(p).name or "-", p and tostring(core.__is_active(p)) or "-",
 					#core.get_loaded_blocks(), table.concat(seen, " "),
 					core.get_node({x = 0, y = 119, z = 0}).name, core.get_node(O).name, ""))
-			if t < 3 then core.after(0.25, watch) end
+			if t < 3 then
+				core.after(0.25, watch)
+			else
+				-- The check: three seconds on, the item is well below the
+				-- platform; it rested in the hole before ([DIG_PARITY])
+				assert(p and p.y < 100, "fallcheck: the item did not fall through")
+				core.log("warning", "fallcheck: ok")
+			end
 		end
 		watch()
 	end)
