@@ -15,7 +15,7 @@ cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
-bin/buildat_server -m ../games/launch_world -D ../user -P 29795 -l 3 2>&1 |
+bin/buildat_server -m ../games/launch_world -D ../user -P 29795 -l ${SRVLOG:-3} 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 60); do
 	grep -q "Server::start\|Mods loaded" "$out/srv.log" 2>/dev/null && break

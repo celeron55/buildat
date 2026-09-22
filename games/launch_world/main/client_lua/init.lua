@@ -15,6 +15,22 @@
 -- what a preset does to the eye.
 local log = buildat.Logger("launch_world")
 local magic = require("buildat/extension/urho3d")
+-- **The room's shell is a voxelworld at 45 cm** (user's call): the floor
+-- the checkerboard is made of and the mass the room is cut out of come
+-- from the server's own table, not from primitives. What hands it over is
+-- more than a mesh -- the AO, the light nibbles and voxel removal for the
+-- dissolve are voxelworld's, and none of them would be worth writing
+-- again here.
+local replicate = require("buildat/extension/replicate")
+local voxelworld = require("buildat/module/voxelworld")
+voxelworld.allow_streaming()
+-- No sky and no day: nothing in this room is lit by anything but the
+-- orbs, so there is no skylight to flood
+voxelworld.use_skylight = false
+-- The voxels are drawn by builtin/voxel_shading's technique set, which is
+-- what voxelworld's client half asks for; without it the room's shell is
+-- there and black
+local voxel_shading = require("buildat/module/voxel_shading")
 -- The ornament generator and the maps it feeds; see ornament.lua
 local ok_orn, err_orn, ornament = buildat.run_script_file("main/ornament.lua")
 if not ok_orn or type(ornament) ~= "table" then
@@ -29,6 +45,21 @@ end
 -- Held at module scope: a Lua-owned Image, Texture2D or Material is freed
 -- when the last Lua reference goes, whatever is drawing with it
 local kept = {}
+
+-- **The room is authored in metres and lives on a 45 cm grid** (user's
+-- reading of the reference frame: the eye sits at the centre of the
+-- fourth stacked slab, which is 3.5 voxels to a 1.6 m eye). So one unit
+-- of the scene is one voxel, and everything written below in metres is
+-- multiplied by this on its way in -- which is what lets the numbers stay
+-- readable while the voxelworld gets the grid it wants.
+local VOXEL_M = 0.45
+local U = 1 / VOXEL_M
+
+-- Metres to units, for the places that do not go through part()
+local function V(x, y, z)
+	return magic.Vector3(x * U, y * U, z * U)
+end
+
 
 -- The classic raytrace floor, built rather than loaded: a 2x2 checker is
 -- the one texture the look actually needs
@@ -75,8 +106,12 @@ local function material(colour, roughness, metallic, texture)
 	return m
 end
 
-scene = magic.Scene()
-scene:CreateComponent("Octree")
+-- **The server's scene, not one of our own**: the voxelworld's sections
+-- are nodes in the replicated scene, so anything that wants to be in the
+-- same room as them has to be in it too. A scene made here would draw
+-- the primitives and leave the room's shell in a scene nobody looks at,
+-- which is exactly what it did (2026-09-23).
+scene = replicate.main_scene
 
 -- Ambient near zero: nothing in this room is lit by "the environment",
 -- everything is lit by a source you can point at
@@ -85,13 +120,13 @@ local zone = zone_node:CreateComponent("Zone")
 zone.boundingBox = magic.BoundingBox(-200, 200)
 zone.ambientColor = magic.Color(0.01, 0.01, 0.015, 1)
 zone.fogColor = magic.Color(0, 0, 0, 1)
-zone.fogStart = 26
-zone.fogEnd = 64
+zone.fogStart = 26 * U
+zone.fogEnd = 64 * U
 
 local function part(model, pos, scale, mat)
 	local node = scene:CreateChild("part")
-	node.position = pos
-	node.scale = scale
+	node.position = magic.Vector3(pos.x * U, pos.y * U, pos.z * U)
+	node.scale = magic.Vector3(scale.x * U, scale.y * U, scale.z * U)
 	local object = node:CreateComponent("StaticModel")
 	object.model = magic.cache:GetResource("Model", "Models/" .. model .. ".mdl")
 	object.material = mat
@@ -193,7 +228,7 @@ local sigil_mat = ornamented(sigil_h, sigil_i,
 local floor_mat = material(magic.Color(1, 1, 1, 1), 0.18, 0.0,
 		checker_texture(256, 20, magic.Color(0.04, 0.04, 0.05, 1),
 		magic.Color(0.62, 0.63, 0.66, 1), magic.FILTER_TRILINEAR))
-part("Plane", magic.Vector3(0, 0, 0), magic.Vector3(40, 1, 40), floor_mat)
+-- (the floor is the voxelworld's checkerboard now)
 
 -- The architecture: six bays of stacked slabs across the back, each with
 -- an orb wedged behind it. **The composition rule** (user), read off the
@@ -251,10 +286,8 @@ for b = 1, BAYS do
 			magic.Vector3(x, 6.0 + SLAB.h, -7.2),
 			magic.Vector3(BAY_W - 0.5, 0.5, 2.6), meander_mat)
 end
--- And the back wall itself, so the orbs glow out of something rather
--- than out of the void
-part("Box", magic.Vector3(0, 4.5, -11.2),
-		magic.Vector3(BAYS * BAY_W + 6, 13.0, 0.8), stone)
+-- (the mass the room is cut out of is the voxelworld's now, so there is
+-- no back wall here)
 
 -- The orbs. Warm is what you own; the palette's own entry says which
 -- colour each carries, and the light at it is what lights the room.
@@ -321,12 +354,12 @@ local COLD_WHITE = {0.72, 0.85, 1.0}
 local function preset_lights(orb, fill, orb_i, fill_i)
 	local l = {}
 	for i = 1, 6 do
-		l[i] = {orb, orb_i, 17}
+		l[i] = {orb, orb_i, 17 * U}
 	end
-	l[7] = {fill, fill_i, 11}
-	l[8] = {fill, fill_i, 11}
-	l[9] = {fill, fill_i * 0.7, 13}
-	l[10] = {fill, fill_i * 0.5, 10}
+	l[7] = {fill, fill_i, 11 * U}
+	l[8] = {fill, fill_i, 11 * U}
+	l[9] = {fill, fill_i * 0.7, 13 * U}
+	l[10] = {fill, fill_i * 0.5, 10 * U}
 	return l
 end
 
@@ -367,7 +400,7 @@ local PBR_INTENSITY = 25
 local lights = {}
 for i, place in ipairs(LIGHT_PLACES) do
 	local node = scene:CreateChild("light")
-	node.position = magic.Vector3(place[1], place[2], place[3])
+	node.position = V(place[1], place[2], place[3])
 	local light = node:CreateComponent("Light")
 	light.lightType = magic.LIGHT_POINT
 	-- A handful of sharp point lights with hard shadows; only the key pair
@@ -405,8 +438,8 @@ end
 -- the open side behind the camera, the chrome and the plinth in frame
 local camera_node = scene:CreateChild("Camera")
 camera_node:CreateComponent("Camera")
-camera_node.position = magic.Vector3(0.0, 2.75, 15.5)
-camera_node:LookAt(magic.Vector3(0, 1.45, -6.0))
+camera_node.position = V(0.0, 2.75, 15.5)
+camera_node:LookAt(V(0, 1.45, -6.0))
 -- [LAUNCH_WORLD] step 2: the reflection probe, which is a prerequisite
 -- and not an upgrade -- a PBR metal reflects its surroundings and nothing
 -- else, so with no environment it is black but for its highlight, and
@@ -442,8 +475,8 @@ local function reflection_probe(at)
 		local cam = node:CreateComponent("Camera")
 		cam.fov = 90
 		cam.aspectRatio = 1
-		cam.nearClip = 0.05
-		cam.farClip = 120
+		cam.nearClip = 0.05 * U
+		cam.farClip = 120 * U
 		local vp = magic.Viewport:new(scene, cam)
 		local surface = cube:GetRenderSurface(i - 1)
 		surface:SetViewport(0, vp)
@@ -471,7 +504,7 @@ local function reflection_probe(at)
 	kept[#kept + 1] = black
 	return cube
 end
-reflection_probe(magic.Vector3(0, 2.0, 0.0))
+reflection_probe(V(0, 2.0, 0.0))
 
 -- The first frames, not the first: at boot the materials and the
 -- generated textures are not on the GPU yet and a probe taken then is a
@@ -490,6 +523,8 @@ magic.SubscribeToEvent("Update", "handle_probe_update")
 
 local viewport = magic.Viewport:new(scene,
 		camera_node:GetComponent("Camera"))
+-- voxelworld streams around the camera, which in this room never moves
+voxelworld.set_camera(camera_node)
 magic.set_preferred_viewports({viewport})
 
 -- The name of the preset in the corner, so a picture says which it is
@@ -508,8 +543,8 @@ label:SetPosition(8, -8)
 -- "pointed at" is the smallest angle to the view direction, which is
 -- the crosshair's own ray as long as the crosshair is the screen's
 -- middle.
-local view_from = magic.Vector3(0.0, 2.75, 15.5)
-local view_at = magic.Vector3(0, 1.45, -6.0)
+local view_from = V(0.0, 2.75, 15.5)
+local view_at = V(0, 1.45, -6.0)
 local view_dir = magic.Vector3(view_at.x - view_from.x,
 		view_at.y - view_from.y, view_at.z - view_from.z)
 do
@@ -554,7 +589,7 @@ function handle_orb_update()
 	end
 	if best > 0 then
 		local p = orb_nodes[best].position
-		name_node.position = magic.Vector3(p.x, p.y + 1.6, p.z)
+		name_node.position = magic.Vector3(p.x, p.y + 1.6 * U, p.z)
 	end
 end
 magic.SubscribeToEvent("Update", "handle_orb_update")
@@ -600,9 +635,9 @@ for b = 1, BAYS do
 		bay_state[b].slabs[i] = {
 			node = node,
 			home = home,
-			away = {x = home.x + dir * (2.5 + i * 0.35),
-					y = home.y + 1.2 + i * 0.28,
-					z = home.z + 2.2 + (i % 3) * 0.6},
+			away = {x = home.x + dir * (2.5 + i * 0.35) * U,
+					y = home.y + (1.2 + i * 0.28) * U,
+					z = home.z + (2.2 + (i % 3) * 0.6) * U},
 			-- The tumble as three angles rather than a quaternion to
 			-- slerp towards: Quaternion:Slerp is not on the sandbox's
 			-- whitelist, and scaling the eulers is the same picture for
