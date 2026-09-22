@@ -133,6 +133,11 @@ buildat.set_voxel_lod_geometry(lod, node, volume_data, ...)
 buildat.clear_voxel_geometry(node)
 buildat.set_voxel_physics_boxes(node, volume_data, voxel_reg [, ...])
 buildat.clear_voxel_physics_boxes(node)
+buildat.set_quad_geometry(node, quads) -> {tile, ...}
+- A model's quads -- {tile=, p={12 numbers}, uv={8 numbers}} each -- as the
+  node's CustomGeometry, one geometry per distinct tile in ascending tile
+  order (the answer says which tile each geometry is), both windings of
+  every quad; a posed model is one build per frame ([OBJECT_MESH])
 buildat.set_simple_voxel_model(node, w, h, d, buffer)
 buildat.set_8bit_voxel_geometry(node, w, h, d, buffer, ...)
 - The old fixed-format paths, kept for the small games
@@ -262,6 +267,9 @@ sandbox.make_global(table)
 buildat.disconnect()
 - If connected from the menu, quit to the menu (the client state is reset by
   restarting it); if connected from the command line, close the client
+buildat.leave()
+- Back to the launcher's grid when there is one under the game
+  ([MENU_CONTEXT]), else what disconnect() does
 
 buildat.get_cache_path() -> string
 - The directory add_resource_dir() and compose_image() work under. The share
@@ -1047,7 +1055,7 @@ magic.BT_DYNAMIC:
 magic.BT_KINEMATIC: 
 magic.BT_STATIC: 
 magic.BiasParameters: 
-magic.Billboard: color, enabled, position, rotation, size
+magic.Billboard: color, enabled, position, rotation, size, uv
 magic.BillboardSet: Commit, GetBillboard, b, faceCameraMode, material, numBillboards, relative, sorted
 magic.BorderImage: blendMode, border, hoverOffset, imageBorder, imageRect, texture, tiled
 magic.BoundingBox: 
@@ -1240,7 +1248,7 @@ magic.IM_SPLINE:
 magic.INSIDE: 
 magic.INTERSECTS: 
 magic.Image: Clear, FlipHorizontal, FlipVertical, GetPixel, Resize, SetPixel, SetSize, components, compressed, height, new, width
-magic.Input: GetKeyDown, GetKeyPress, GetMouseButtonDown, GetMouseMove, SetMouseMode, SetMouseVisible, mode
+magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, SetMouseMode, SetMouseVisible, mode
 magic.IntRect: bottom, left, right, top
 magic.IntVector2: x, y
 magic.IntVector3: Length, from_buildat, x, y, z
@@ -1492,7 +1500,7 @@ magic.RenderPathCommand: RemoveShaderParameter, SetShaderParameter, enabled, pas
 magic.RenderSurface: QueueUpdate, SetViewport, updateMode
 magic.Renderer: GetViewport, HDRRendering, SetViewport, drawShadows, numViewports, ret, shadowMapSize, shadowQuality
 magic.Resource: name
-magic.ResourceCache: GetResource, res, resource_name, resource_type, saved_path
+magic.ResourceCache: Exists, GetResource, res, resource_name, resource_type, saved_path
 magic.RibbonTrail: emitting, endColor, endScale, lifetime, material, sorted, startColor, startScale, trailType, vertexDistance, width
 magic.RigidBody: ApplyForce, ApplyImpulse, angularDamping, angularFactor, angularVelocity, collisionEventMode, collisionLayer, collisionMask, friction, gravityOverride, kinematic, linearDamping, linearVelocity, mass, restitution, useGravity
 magic.SCANCODE_0: 
@@ -1805,7 +1813,7 @@ magic.TU_NORMAL:
 magic.TU_NORMALBUFFER: 
 magic.TU_SPECULAR: 
 magic.Technique: 
-magic.Text: SetFontSize, SetTextAlignment, SetTextEffect, effectColor, text
+magic.Text: SetFontSize, SetTextAlignment, SetTextEffect, SetWordwrap, effectColor, text
 magic.Text3D: SetAlignment, SetColor, SetFont, effectColor, effectStrokeThickness, faceCameraMode, fixedScreenSize, fontSize, material, opacity, text, textEffect, width, wordwrap
 magic.Texture: filterMode, height, width
 magic.Texture2D: 
@@ -1864,10 +1872,10 @@ magic constants: ADDRESS_BORDER, ADDRESS_CLAMP, ADDRESS_MIRROR, ADDRESS_WRAP, AN
 extension.cereal: binary_input, binary_output
 extension.launch_menu: show_connect_to_server, show_local_game
 extension.magic_sandbox: class
-extension.network: gettime, tcp_connect, udp_connect
+extension.network: gettime, http_get, known_addresses, parse_json, tcp_connect, udp_connect
 extension.replicate: main_scene, sub_sync_node_added, sub_sync_node_removed
 extension.skycube: new
 extension.test: f
-extension.ui_utils: add_paged, bind_button_menu, show_confirm_dialog, show_message_dialog, show_notification, vertical_menu
-extension.uistack: UIStack, main
+extension.ui_utils: add_paged, bind_button_menu, scan_pixels, scan_ui, server_list, show_confirm_dialog, show_message_dialog, show_notification, vertical_menu
+extension.uistack: UIStack, main, set_world_scan
 ---- end of the generated listing ----

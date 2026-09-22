@@ -275,6 +275,16 @@ texmod.lua      Luanti's texture modifier language, as compose_image()
 world.lua       The scene: a node per map block, with buildat's voxel mesher
                 on it, and the voxel registry the node definitions build
 engine_test.lua Checks of the engine primitives, run at boot
+settings.lua    The client's own settings in <user>/luanti_client/settings.json
+                (render mode, view range, view bobbing, name, address, the
+                rebound keys) and their screen; the BUILDAT_* environment
+                variables stay one-run overrides
+res/*.lua       The Lua both Luanti clients share, dofile'd here and served
+                by builtin/luanti as luanti/<name> to games/vanilla's client
+                half: camera_motion.lua (view bobbing and the hand's
+                motion), key_editor.lua (the key bindings screen),
+                minimap.lua (official's minimap and its V modes over the
+                scene)
 init.lua        The connect dialog and the status screen
 
 The engine side of this is nothing Luanti-specific: sockets (extension/network),

@@ -154,7 +154,12 @@ Luanti's. The client half (builtin/luanti/client_lua and games/vanilla's
 client) draws the world in three modes -- unlit and shadows, held to
 official Luanti's pictures of the same world, and pbr, held to a path
 trace of it (doc/plan/rendering_plan.md, [RENDER_MODES]) -- with Luanti's
-HUD, forms, inventory, hotbar, wield item, particles, sounds and sky.
+HUD, forms, inventory, hotbar, wield item, particles, sounds and sky. It
+times a dig for itself and predicts a dig and a placement the way
+official's client does (the node changes on the click's frame; the
+server's answer overwrites it, and a refusal is a resend of the node),
+out of luanti:dig_props -- the groups, the tool capabilities and the
+prediction strings core.__dig_props() sends once.
 
 The plain game around it is games/vanilla: a launch grid tile per
 installed game, worlds, imports from ~/.luanti, ContentDB, settings.
@@ -162,7 +167,8 @@ installed game, worlds, imports from ~/.luanti, ContentDB, settings.
 What it is checked by: the fixtures in builtin/luanti/test/*.lua (one
 feature each, run against a server with BUILDAT_LUANTI_LUA), the fuzz run
 (test/fuzz.sh: a seeded random walk with invariants asserted on the server),
-the driven run (test/drive.sh: the ladder above, ended at a goal rung), the
+the driven run (test/drive.sh: the ladder above, ended at a goal rung;
+both runners take GAME_DIR=<game> for a variant of vanilla), the
 reference shots (test/reference_shots/: the three modes against official
 Luanti and the path trace, read by probes.sh), and util/bench_worldgen.sh.
 The findings and the state of each are in doc/plan/luanti_module_plan.md.
