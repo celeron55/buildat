@@ -46,13 +46,24 @@ bin/buildat -s localhost:29795 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-grep -a "palette preset" "$out/cli.log" | sed 's/.*launch_world: //'
+grep -aE "palette preset|ornament ok" "$out/cli.log" |
+	sed 's/.*launch_w[a-z]*: //'
+# The ornament generator asserts its own patterns as it builds them
+# (ornament.lua's self_check); a generator that quietly returned a flat
+# field would pass an eye on a dark slab and fail there
+if ! grep -aq "ornament ok" "$out/cli.log"; then
+	echo "FAIL: the ornament generator did not pass its own check"
+	grep -aiE "error|assert" "$out/cli.log" | tail -3
+	exit 1
+fi
 python3 - "$out" <<'PY'
 import sys, os, itertools
 from PIL import Image, ImageChops
 out = sys.argv[1]
+# The numbered presets only: the directory also keeps the shot the plan
+# points at and whatever else has been left in it
 shots = sorted(f for f in os.listdir(out)
-		if f.endswith(".png") and "noprobe" not in f)
+		if f.endswith(".png") and "noprobe" not in f and f[0].isdigit())
 if len(shots) != 4:
 	print("FAIL: %d pictures, wanted 4" % len(shots)); sys.exit(1)
 ims = {}

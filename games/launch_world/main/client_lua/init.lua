@@ -15,6 +15,11 @@
 -- what a preset does to the eye.
 local log = buildat.Logger("launch_world")
 local magic = require("buildat/extension/urho3d")
+-- The ornament generator and the maps it feeds; see ornament.lua
+local ok_orn, err_orn, ornament = buildat.run_script_file("main/ornament.lua")
+if not ok_orn or type(ornament) ~= "table" then
+	error("ornament.lua: " .. tostring(err_orn))
+end
 
 -- Held at module scope: a Lua-owned Image, Texture2D or Material is freed
 -- when the last Lua reference goes, whatever is drawing with it
@@ -93,6 +98,32 @@ local chrome = material(magic.Color(0.92, 0.94, 0.97, 1), 0.06, 1.0)
 local machined = material(magic.Color(0.55, 0.57, 0.62, 1), 0.34, 1.0)
 local stone = material(magic.Color(0.26, 0.26, 0.29, 1), 0.85, 0.0)
 
+-- A material wearing a generated height field: the ornament is the
+-- texture and not the geometry, which is what lets the room sit on a
+-- 45 cm grid and still carry a meander ([LAUNCH_WORLD]'s own reading of
+-- the reference frame).
+local ORN_SIZE = 128
+local function ornamented(h, inlay, opts)
+	local diff, norm = ornament.maps(magic, h, inlay, opts)
+	local dt, nt = magic.Texture2D:new(), magic.Texture2D:new()
+	assert(dt:SetData(diff), "the ornament's albedo")
+	assert(nt:SetData(norm), "the ornament's normal")
+	kept[#kept + 1] = diff
+	kept[#kept + 1] = norm
+	kept[#kept + 1] = dt
+	kept[#kept + 1] = nt
+	local m = magic.Material:new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/PBR/PBRDiffNormal.xml"))
+	m:SetTexture(magic.TU_DIFFUSE, dt)
+	m:SetTexture(magic.TU_NORMAL, nt)
+	m:SetShaderParameter("MatDiffColor", magic.Color(1, 1, 1, 1))
+	m:SetShaderParameter("Roughness", (opts or {}).roughness or 0.75)
+	m:SetShaderParameter("Metallic", (opts or {}).metallic or 0.0)
+	kept[#kept + 1] = m
+	return m
+end
+
 -- An unlit material draws at its own colour whatever the light does,
 -- which is what an orb that *is* the light needs; it also lands in the
 -- probe, so the chrome has something bright to reflect.
@@ -104,6 +135,29 @@ local function glow(colour)
 	kept[#kept + 1] = m
 	return m
 end
+
+-- **Three generated materials**, which with the plain stone is what the
+-- reference frame is made of: a meander for the frieze courses, a socket
+-- field for the perforated blocks, and a sigil for the one slab that
+-- stands for a server's own mark. Built once at boot -- a SetPixel a
+-- texel is fine there and hopeless per frame, which is what keeps this
+-- honest by construction.
+log:info(ornament.self_check(ORN_SIZE))
+local meander_h, meander_i = ornament.meander(ORN_SIZE, {units = 3, depth = 2})
+local meander_mat = ornamented(meander_h, meander_i,
+		{base = magic.Color(0.34, 0.35, 0.38, 1),
+		inlay = magic.Color(0.17, 0.10, 0.22, 1), roughness = 0.70})
+local socket_h, socket_i = ornament.sockets(ORN_SIZE,
+		{cells = 3, depth = 2, seed = 7})
+local socket_mat = ornamented(socket_h, socket_i,
+		{base = magic.Color(0.24, 0.25, 0.28, 1),
+		inlay = magic.Color(0.05, 0.05, 0.06, 1), roughness = 0.85})
+local sigil_h, sigil_i = ornament.sigil(ORN_SIZE,
+		ornament.seed_of("buildat.example.org:30000"), 4)
+local sigil_mat = ornamented(sigil_h, sigil_i,
+		{base = magic.Color(0.28, 0.29, 0.33, 1),
+		inlay = magic.Color(0.10, 0.34, 0.42, 1), roughness = 0.55,
+		metallic = 0.6})
 
 -- The floor: a checkerboard in perspective is half the classic raytrace
 -- picture, and in the reference frame it carries the reflections of
@@ -133,22 +187,23 @@ for b = 1, BAYS do
 	for tier = 0, 5 do
 		local w = 4.4 - tier * 0.45
 		local y = SLAB.h / 2 + tier * (SLAB.h + 0.12)
+		local face = (b == 4) and sigil_mat or socket_mat
 		if tier == BAY_TIER[b] then
 			-- The tier the orb glows through: two posts and a gap
 			for _, side in ipairs({-1, 1}) do
 				part("Box", magic.Vector3(x + side * (w / 2 - 0.55), y, -8),
-						magic.Vector3(1.1, SLAB.h, SLAB.d), stone)
+						magic.Vector3(1.1, SLAB.h, SLAB.d), face)
 			end
 			orb_places[#orb_places + 1] = {x = x, y = y, z = -9.6}
 		else
 			part("Box", magic.Vector3(x, y, -8),
-					magic.Vector3(w, SLAB.h, SLAB.d), stone)
+					magic.Vector3(w, SLAB.h, SLAB.d), face)
 		end
 	end
 	-- A lintel across the top of the bay, deeper than the stack, so the
 	-- wall has a front plane as well as a back one
 	part("Box", magic.Vector3(x, 6.0 + SLAB.h, -7.2),
-			magic.Vector3(BAY_W - 0.5, 0.5, 2.6), machined)
+			magic.Vector3(BAY_W - 0.5, 0.5, 2.6), meander_mat)
 end
 -- And the back wall itself, so the orbs glow out of something rather
 -- than out of the void
