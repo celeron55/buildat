@@ -4151,6 +4151,14 @@ function M.new(magic, buildat, log, options)
 	-- What the light and the time are now. Nothing is drawn from here: the
 	-- sky is drawn every frame by apply_daylight(), easing towards whatever
 	-- this last said, which is what makes the day pass rather than step.
+	-- Where the sun is, as the sine of its elevation: what the pre-dawn
+	-- light is measured against ([DAWN_LIGHT]), asked for by the code that
+	-- decides the day factor
+	function self:sun_height(time_of_day)
+		local _, y = sun_direction(time_of_day)
+		return y
+	end
+
 	function self:set_daylight(factor, time_of_day)
 		daylight = factor
 		daylight_time = time_of_day or daylight_time

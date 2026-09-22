@@ -1522,6 +1522,21 @@ local function update_sky(dt)
 	-- than a switch -- unless the game says what the light is whatever the
 	-- hour, which is what a dimension of its own is made of
 	local day = math.max(0, math.min(1, (height + 0.15) / 0.3))
+	-- And the hour before the sun itself ([DAWN_LIGHT]): the halo is drawn
+	-- from the sun's direction and is up well before the disc, while this
+	-- ramp is zero until the sun is within half an hour of the horizon --
+	-- so 4:00-5:00 read as a bright halo over black ground under a night
+	-- sky, and 19:00-20:00 the same. A term that rises with the sun from
+	-- about -18 degrees (where the stretched day puts 4:00) to the horizon
+	-- and is nothing above it, peaking near official's own ratio at
+	-- daybreak, so those two windows gain light and colour and no probed
+	-- hour outside them moves: 02:00 (-54 degrees) and 20:30 (-27) are
+	-- below it and 05:45 (+10) is above.
+	--
+	-- This is art and not astronomy, the way Luanti's own ratio is: a dark
+	-- dawn is dull to play in. luanti_client's half of it is in
+	-- daynight_ratio().
+	day = math.max(day, luanti_sky.predawn(height))
 	if luanti.day_night_override then
 		day = luanti.day_night_override
 	end

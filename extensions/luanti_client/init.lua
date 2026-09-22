@@ -223,10 +223,35 @@ local DAYNIGHT_RAMP = {
 	{5375, 0.500}, {5625, 0.675}, {5875, 0.875}, {6125, 1.000},
 }
 
+-- The light the sky has before the sun is up ([DAWN_LIGHT]): Luanti's ramp
+-- above sits at its 0.175 floor until 4:22, while the halo is drawn from the
+-- sun's direction and is up well before that -- 4:00-5:00 read as a bright
+-- halo over black ground, and 19:00-20:00 the same. Zero below -18 degrees
+-- (where the stretched day puts 4:00), 0.3 at the horizon and nothing above
+-- it, where the ramp is larger anyway. games/vanilla's half is
+-- luanti_sky.predawn(); the two clients keep their own copies of this the
+-- way they keep their own of everything else drawn twice.
+local PREDAWN_LOW = -0.309
+local PREDAWN_PEAK = 0.3
+
+local function predawn(height)
+	if not height or height >= 0 or height <= PREDAWN_LOW then
+		return 0
+	end
+	-- BUILDAT_LUANTI_NO_PREDAWN=1 turns it off, which is how dawn_light.sh
+	-- reads the same hours with and without it
+	local off = buildat.get_env("BUILDAT_LUANTI_NO_PREDAWN")
+	if off and off ~= "" then
+		return 0
+	end
+
+	return PREDAWN_PEAK * (height - PREDAWN_LOW) / -PREDAWN_LOW
+end
+
 -- override is what a server said the light is whatever the time is, or nil.
 -- BUILDAT_LUANTI_FORCE_DAY wins over it: a scripted run asked for daylight
 -- and a game that overrides the ratio underground would take it away again.
-local function daynight_ratio(time_of_day, override)
+local function daynight_ratio(time_of_day, override, height)
 	-- A scripted run cannot wait for morning, and a screenshot of the world
 	-- at night says little about how it looks
 	-- An environment variable that is set but empty is a variable that is
@@ -243,17 +268,20 @@ local function daynight_ratio(time_of_day, override)
 	if t > 12000 then
 		t = 24000 - t
 	end
+	local ratio = 1.0
 	if t <= DAYNIGHT_RAMP[2][1] then
-		return DAYNIGHT_RAMP[1][2]
-	end
-	for i = 2, #DAYNIGHT_RAMP do
-		if DAYNIGHT_RAMP[i][1] > t then
-			local a, b = DAYNIGHT_RAMP[i - 1], DAYNIGHT_RAMP[i]
-			local f = (t - a[1]) / (b[1] - a[1])
-			return a[2] + f * (b[2] - a[2])
+		ratio = DAYNIGHT_RAMP[1][2]
+	else
+		for i = 2, #DAYNIGHT_RAMP do
+			if DAYNIGHT_RAMP[i][1] > t then
+				local a, b = DAYNIGHT_RAMP[i - 1], DAYNIGHT_RAMP[i]
+				local f = (t - a[1]) / (b[1] - a[1])
+				ratio = a[2] + f * (b[2] - a[2])
+				break
+			end
 		end
 	end
-	return 1.0
+	return math.max(ratio, predawn(height))
 end
 
 local function labeled_edit(parent, label, value)
@@ -3130,7 +3158,8 @@ local function show_client(host, port, name, password, mode)
 				-- which is how a game lights another dimension; the sun
 				-- still goes where the time says, as it does in Luanti.
 				view:set_daylight(daynight_ratio(time_of_day,
-						client.day_night_override), time_of_day)
+						client.day_night_override,
+						view:sun_height(time_of_day)), time_of_day)
 			end
 			-- Nothing is dropped until the server has said where the player
 			-- is: until then the camera is at the origin and everything that

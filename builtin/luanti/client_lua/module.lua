@@ -2065,6 +2065,10 @@ buildat.sub_packet("luanti:chat", function(data)
 	-- is a job for whoever brings the .tr files across.
 	local raw = values[1] or ""
 	local line = formspec.strip_escapes(raw)
+	-- In the log, as a line the client says to itself is: what a game says
+	-- is what a driven run reads, and it is the one thing a fixture can
+	-- put in the client's own log
+	log:info("chat: " .. line)
 	M.chat_lines[#M.chat_lines + 1] = line
 	M.chat_raw[#M.chat_raw + 1] = raw
 	-- A log nobody trims grows for as long as the session lasts

@@ -212,6 +212,43 @@ function M.sun_direction(t, tilt)
 	return x, y, z
 end
 
+-- The light the sky has before the sun is up ([DAWN_LIGHT]), as a day
+-- factor: zero below PREDAWN_LOW, PREDAWN_PEAK at the horizon, and nothing
+-- at all above it, where the day's own ramp is larger anyway and takes over
+-- without a step. height is the sine of the sun's elevation.
+--
+-- -18 degrees is where the stretched day puts 4:00, which is where the user
+-- saw a bright halo over black ground; the peak is official's
+-- time_to_daynight_ratio around daybreak (0.25 at 4:52, 0.35 at 5:07).
+local PREDAWN_LOW = -0.309
+local PREDAWN_PEAK = 0.3
+
+function M.predawn(height)
+	if height >= 0 or height <= PREDAWN_LOW then
+		return 0
+	end
+	-- BUILDAT_LUANTI_NO_PREDAWN=1 turns it off, which is how dawn_light.sh
+	-- reads the same hours with and without it
+	local off = buildat.get_env("BUILDAT_LUANTI_NO_PREDAWN")
+	if off and off ~= "" then
+		return 0
+	end
+
+	return PREDAWN_PEAK * (height - PREDAWN_LOW) / -PREDAWN_LOW
+end
+
+if not (buildat.get_env("BUILDAT_LUANTI_NO_PREDAWN") or ""):find("%S") then
+	assert(M.predawn(0.2) == 0 and M.predawn(-0.5) == 0,
+			"nothing above the horizon and nothing before it begins")
+	assert(math.abs(M.predawn(-0.0001) - PREDAWN_PEAK) < 0.001,
+			"and it peaks at the horizon")
+	-- Where it hands over: the day's own ramp is the larger of the two from
+	-- about -6 degrees up, so nothing steps at the crossing
+	local ramp = function(h) return math.max(0, math.min(1, (h + 0.15) / 0.3)) end
+	assert(ramp(-0.05) > M.predawn(-0.05), "the day's ramp wins near the horizon")
+	assert(ramp(-0.25) < M.predawn(-0.25), "and this one before it")
+end
+
 -- What the schedule has to hold, which is the extension's own check: the two
 -- never leave the sky empty between them, the moon is out of the way by the
 -- time the sun is worth anything, and the clock agrees with where the sun
