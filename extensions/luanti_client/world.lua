@@ -3224,6 +3224,8 @@ function M.new(magic, buildat, log, options)
 					x, y, z = self.self_pose[1], self.self_pose[2],
 							self.self_pose[3]
 					yaw = -self.self_pose[4]
+					-- Marked so that camera_report() can find it
+					entry.is_self_node = true
 				end
 				if x ~= entry.at_x or y ~= entry.at_y or z ~= entry.at_z then
 					entry.at_x, entry.at_y, entry.at_z = x, y, z
@@ -4703,7 +4705,44 @@ function M.new(magic, buildat, log, options)
 	-- that one is negated. Getting either sense wrong is not just a mirrored
 	-- view: the server sends the blocks it thinks the player can see, so it
 	-- would send the ones the player is looking away from.
+	-- What set_camera() last placed, for camera_report()
+	local camera_placed = nil
+
+	-- Where the camera and the player's own model actually are, as the
+	-- frame was drawn: [OVER_SHOULDER]'s open reading, which is that the
+	-- model's feet land in the shot as if the camera were nearer than the
+	-- setback loop's own last value. Said on demand rather than per frame,
+	-- and read beside the shot.
+	function self:camera_report()
+		-- What set_camera() was last given rather than what the node
+		-- reads back: a Quaternion's pitch and yaw are not on the
+		-- sandbox's whitelist, and these are the numbers that placed it
+		local c = camera_placed or {}
+		local out = string.format(
+				"camera at %.2f,%.2f,%.2f pitch %.1f yaw %.1f fov %.1f",
+				c[1] or 0, c[2] or 0, c[3] or 0, c[4] or 0, c[5] or 0,
+				camera and camera.fov or 0)
+		local p = {x = c[1] or 0, y = c[2] or 0, z = c[3] or 0}
+		local pose = self.self_pose
+		if pose then
+			local dx, dy, dz = p.x - pose[1], p.y - pose[2], p.z - pose[3]
+			out = out .. string.format(
+					"; feet %.2f,%.2f,%.2f, %.2f from the eye",
+					pose[1], pose[2], pose[3],
+					math.sqrt(dx * dx + dy * dy + dz * dz))
+		end
+		for _, entry in pairs(object_nodes) do
+			if entry.is_self_node then
+				local q = entry.node.position
+				out = out .. string.format("; own node at %.2f,%.2f,%.2f",
+						q.x, q.y, q.z)
+			end
+		end
+		return out
+	end
+
 	function self:set_camera(x, y, z, pitch, yaw, roll)
+		camera_placed = {x, y, z, pitch or 0, yaw or 0}
 		camera_node.position = magic.Vector3(x, y, z)
 		camera_node.rotation = magic.Quaternion(pitch or 0, -(yaw or 0), roll or 0)
 		-- Kept for the light refresh, which only asks for blocks near enough

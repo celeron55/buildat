@@ -1797,6 +1797,15 @@ local function show_client(host, port, name, password, mode)
 			end,
 		})
 
+		-- `event scan` beside a screenshot says where the camera and the
+		-- player's own model were when the frame was drawn
+		-- ([OVER_SHOULDER]'s open reading: the model's feet land as if the
+		-- camera were nearer than the setback loop's last value, and the
+		-- two have to be read in the same frame before anything moves)
+		magic.SubscribeToEvent("command_seq:scan", function()
+			log:info(view:camera_report())
+		end)
+
 		local held = nil
 
 		-- The health bar, remade when what it shows changes; the hotbar

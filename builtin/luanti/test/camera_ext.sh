@@ -49,6 +49,8 @@ delay 1500
 screenshot $out/first.png
 keypress C
 delay 1500
+event scan cam
+delay 300
 screenshot $out/behind.png
 keypress C
 delay 1500
@@ -64,4 +66,7 @@ BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=cam \
 kill "$srv" 2>/dev/null
 for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 grep -a "person view\|E " "$out/extension_cli.log" | sed 's/.*: //' | head -5
+# [OVER_SHOULDER]'s open reading: where the camera and the model were in the
+# frame the back view was shot in, said by the client itself
+grep -a "camera at " "$out/extension_cli.log" | sed 's/.*: camera at/camera at/' | tail -1
 ls "$out"/*.png
