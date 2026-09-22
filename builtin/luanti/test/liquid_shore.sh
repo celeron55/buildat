@@ -1,10 +1,18 @@
 #!/bin/bash
-# [WATER_LIGHT] 3: the shore where a flow meets a pool. Luanti's
+# [WATER_LIGHT]: the shore where a flow meets a pool, in a world of a fixed
+# seed at a fixed place, shot once as the code stands and once with
+# BUILDAT_LIQUID_CORNER_AVG=1 (the corner rule before ce2a4eaf).
+#
+# **The two shots agree, and that is what this asserts.** Luanti's
 # getCornerLevel() answers a corner that any source touches with the full
-# height of the voxel; this used to average the source in with the flow, and
-# the shore sagged into it. The same pool is shot twice -- once as it is and
-# once with BUILDAT_LIQUID_CORNER_AVG=1, which puts the averaging back --
-# and the waterline's band is read in each.
+# height of the voxel and returns there; the averaging it replaced only ever
+# differed where a source carries a variant of its own, and no game
+# installed here gives its water one -- so the rule is a parity guard with
+# nothing in this stage to show for it. A difference here means something
+# else moved.
+#
+# What it also prints is the reading [WATER_LIGHT] 2 is about: the flowing
+# row against the pool beside it, the same surface at the same angle.
 #
 #   builtin/luanti/test/liquid_shore.sh
 set -u
@@ -31,8 +39,14 @@ srv=$(pgrep -x buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 shoot() { # <tag> <env>
-	printf 'wait_log 180000 chat: liquid_shore: ready\ndelay 6000\nscreenshot %s/%s.png\ndelay 500\nquit\n' \
-		"$out" "$1" > "$out/cmds_$1.txt"
+	{ echo "wait_log 180000 chat: liquid_shore: ready"
+		# And the client's own world drawn before the shot, not only the
+		# server's light settled
+		echo "wait_log 120000 0 undrawn within 2"
+		echo "delay 8000"
+		echo "screenshot $out/$1.png"
+		echo "delay 500"
+		echo "quit"; } > "$out/cmds_$1.txt"
 	env $2 bin/buildat -s localhost:29788 -w 1280x720 -l 3 \
 		-c @"$out/cmds_$1.txt" 2>&1 |
 		sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli_$1.log"
@@ -46,12 +60,16 @@ python3 - "$out" <<'PY'
 import sys
 from PIL import Image
 out = sys.argv[1]
+def mean(im, box):
+	d = list(im.crop(box).getdata())
+	return sum(sum(p) for p in d) / (3.0 * len(d))
 def band(name):
 	im = Image.open("%s/%s.png" % (out, name)).convert("RGB")
 	w, h = im.size
-	# The waterline runs across the middle of the frame; the flowing row is
-	# the band just below it
-	box = (w // 4, h // 2 - 40, 3 * w // 4, h // 2 + 60)
+	# Looking straight down over the waterline: the pool runs away from the
+	# eye and the flowing row is the strip nearest it, so the two are the
+	# halves above and below the middle of the frame
+	box = (w // 3, h // 2 - 70, 2 * w // 3, h // 2 + 10)
 	d = list(im.crop(box).getdata())
 	blue = sum(1 for p in d if p[2] > p[0] + 12 and p[2] > 40)
 	return sum(sum(p) for p in d) / (3.0 * len(d)), 100.0 * blue / len(d), im
@@ -61,9 +79,17 @@ print("the shore's band: level %.2f (%.1f %% water), averaged %.2f (%.1f %%)"
 		% (a, ab, b, bb))
 print("the two shots differ by %.2f levels and %.1f points of water" %
 		(abs(a - b), abs(ab - bb)))
-moved = abs(a - b) > 0.5 or abs(ab - bb) > 0.5
-print("PASS: the source's corner is what the shore stands at, and the "
-		"averaging draws it differently" if moved else
-		"FAIL: the two rules draw the same shore")
-sys.exit(0 if moved else 1)
+# And what [WATER_LIGHT] 2 asks: the flowing row against the pool beside it
+# in the same shot, both flat-on and lit the same
+w, h = ia.size
+pool = mean(ia, (w // 3, h // 2 - 120, 2 * w // 3, h // 2 - 60))
+flow = mean(ia, (w // 3, h // 2 - 40, 2 * w // 3, h // 2 + 10))
+print("flat-on: the pool reads %.1f and the flowing row %.1f, %.1f apart"
+		% (pool, flow, flow - pool))
+same = abs(a - b) < 0.5 and abs(ab - bb) < 0.5
+print("PASS: the shore is the same either way, which is what this stage "
+		"can say about the corner rule" if same else
+		"FAIL: the two rules draw a different shore here (%.2f apart)" %
+		abs(a - b))
+sys.exit(0 if same else 1)
 PY

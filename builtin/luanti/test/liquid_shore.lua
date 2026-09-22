@@ -17,6 +17,11 @@ local function names()
 			"basenodes:stone"
 end
 
+-- The same world every run: the platform is at a fixed place, and what is
+-- around it is the seed's ([FUZZ_SEED]'s way of saying it). This runs
+-- before the module reads the seed.
+core.settings:set("fixed_map_seed", "5")
+
 core.register_on_joinplayer(function(player)
 	core.settings:set("time_speed", "0")
 	core.set_timeofday(0.5)
@@ -45,7 +50,10 @@ core.register_on_joinplayer(function(player)
 		for dx = -8, 8 do
 			set(dx, 0, 0, FLOWING, 3)
 		end
-		-- Just above the water, looking along +z across the waterline
+		-- Just above the water on the dry side, looking across the
+		-- waterline: the flowing row and the pool behind it are then the
+		-- same surface at the same angle, which is what makes the shore's
+		-- shape and the two rows' brightness both readable
 		player:set_pos({x = base.x + 0.5, y = base.y + 1.2,
 				z = base.z - 3.0})
 		player:set_look_horizontal(0)
