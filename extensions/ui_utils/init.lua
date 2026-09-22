@@ -361,6 +361,17 @@ local message_handle = nil
 -- not the mouse, not the focus: what an error in a game's form callback
 -- is shown as ([MENU_ERRORS])
 local notices = {}
+-- Whether a world is up on the screen ([MENU_ERRORS]): a caught error is a
+-- dialog before a join and a notice line in a game, and the launcher's own
+-- game is not the only kind -- luanti_client's session runs on the menu's
+-- screens and a dialog there takes the mouse from the player. A client says
+-- so here; client/sandbox.lua reads it.
+M.in_game = false
+
+function M.safe.set_in_game(on)
+	M.in_game = on and true or false
+end
+
 function M.safe.show_notice(text)
 	local t = magic.ui.root:CreateChild("Text")
 	t.defaultStyle = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")

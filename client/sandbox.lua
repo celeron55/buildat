@@ -230,7 +230,10 @@ function __buildat_report_error(err)
 		return
 	end
 	local launch_menu = package.loaded["buildat/extension/launch_menu"]
-	local in_game = launch_menu and launch_menu.in_game and launch_menu.in_game()
+	-- A game the launcher started, or a client that says a world is up on
+	-- its own screens (luanti_client's session)
+	local in_game = (launch_menu and launch_menu.in_game and
+			launch_menu.in_game()) or ui_utils.in_game == true
 	local shown = first .. "\n\n(the log has the rest)"
 	log:info("error shown "..(in_game and "as a notice" or "in a dialog")..": "..first)
 	if in_game then

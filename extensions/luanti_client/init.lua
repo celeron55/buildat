@@ -288,6 +288,12 @@ local show_connect_dialog
 -- dialog, where it is chosen, and world.lua for what it changes
 local function show_client(host, port, name, password, mode)
 	local root = uistack.main:push({desc="luanti_client"})
+	-- A world is on the screen from here on: a caught error is a notice
+	-- line rather than a dialog, which under a session would take the
+	-- mouse from the player ([MENU_ERRORS])
+	if ui_utils.set_in_game then
+		ui_utils.set_in_game(true)
+	end
 	-- Held rather than read back off the element: the sandbox hands out no
 	-- resource it did not just wrap
 	local style = magic.cache:GetResource(
@@ -3330,6 +3336,9 @@ local function show_client(host, port, name, password, mode)
 				return
 			end
 			left = true
+			if ui_utils.set_in_game then
+				ui_utils.set_in_game(false)
+			end
 			magic.UnsubscribeFromEvent("Update", update_cb)
 			magic.UnsubscribeFromEvent("MouseButtonDown", mouse_down_cb)
 			magic.UnsubscribeFromEvent("MouseButtonUp", mouse_up_cb)
