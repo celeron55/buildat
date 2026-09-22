@@ -697,6 +697,10 @@ end
 local hotbar = {}
 local hotbar_stacks = {}
 local hotbar_bg = nil
+-- The element the whole hotbar hangs off, and how far forward it is drawn
+-- against the rest of what this client puts on the UI root
+local hotbar_root = nil
+local HOTBAR_PRIORITY = 10
 local hotbar_shown = true
 local wield_index = 1
 
@@ -745,12 +749,24 @@ end
 
 do
 	local white = game_texture(WHITE)
-	-- Built before the slots so that they are behind them: a UI element's
-	-- children are drawn in the order they were made. One per row, because
-	-- Luanti draws the hotbar image once per row rather than once per slot.
+	-- The whole hotbar hangs off one element of its own, screen-sized so
+	-- that a centred or bottom-aligned child of it lands where it would
+	-- have landed on the UI root. Everything in it says outright how far
+	-- forward it is drawn ([HOTBAR_LAYERS]): the order used to be the
+	-- order the elements were made in as children of the UI root, and a
+	-- screen pushed or popped, or a re-layout, reordered them -- the
+	-- marker behind the background in one slot and in front in the next.
+	hotbar_root = magic.ui.root:CreateChild("UIElement")
+	hotbar_root:SetPosition(0, 0)
+	hotbar_root.size = magic.IntVector2(magic.ui.root.width,
+			magic.ui.root.height)
+	hotbar_root.priority = HOTBAR_PRIORITY
+	-- One per row, because Luanti draws the hotbar image once per row
+	-- rather than once per slot; behind the slots by priority
 	hotbar_bg = {}
 	for r = 1, 2 do
-		local bg = magic.ui.root:CreateChild("BorderImage")
+		local bg = hotbar_root:CreateChild("BorderImage")
+		bg.priority = 0
 		bg.horizontalAlignment = magic.HA_CENTER
 		bg.verticalAlignment = magic.VA_BOTTOM
 		bg.blendMode = magic.BLEND_ALPHA
@@ -758,7 +774,8 @@ do
 		hotbar_bg[r] = bg
 	end
 	for i = 1, HOTBAR_MAX do
-		local frame = magic.ui.root:CreateChild("BorderImage")
+		local frame = hotbar_root:CreateChild("BorderImage")
+		frame.priority = 1
 		if white then
 			frame.texture = white
 		end
@@ -773,9 +790,12 @@ do
 		local marker = frame:CreateChild("BorderImage")
 		marker.blendMode = magic.BLEND_ALPHA
 		marker.visible = false
+		marker.priority = 0
 		local image = frame:CreateChild("BorderImage")
 		image.visible = false
+		image.priority = 1
 		local count = frame:CreateChild("Text")
+		count.priority = 2
 		count:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 12)
 		count:SetTextEffect(magic.TE_SHADOW)
 		count.effectColor = magic.Color(0, 0, 0, 0.9)
@@ -4380,6 +4400,22 @@ buildat.sub_packet("main:settings", function(data)
 		end
 	end
 end)
+-- A window that changed size -- fullscreen toggled, the window dragged --
+-- leaves the screen-sized containers the wrong size, and what is centred or
+-- bottom-aligned inside them lands wherever that size says. Both are put
+-- right here and the hotbar drawn again, rather than at the next slot the
+-- player picks ([HOTBAR_LAYERS]).
+magic.SubscribeToEvent("ScreenMode", function()
+	local w, h = magic.ui.root.width, magic.ui.root.height
+	if hotbar_root then
+		hotbar_root.size = magic.IntVector2(w, h)
+	end
+	if hud_root then
+		hud_root.size = magic.IntVector2(w, h)
+	end
+	draw_hotbar()
+end)
+
 buildat.send_packet("main:get_settings", "")
 log:info("vanilla client ready")
 -- vim: set noet ts=4 sw=4:
