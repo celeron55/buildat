@@ -151,6 +151,8 @@ local BINDINGS = {
 	{action = "sneak", key = KEY_SHIFT, name = "Shift", what = "Sneak"},
 	{action = "fast", key = KEY_CTRL, name = "Ctrl", what = "Move fast"},
 	{action = "fly", key = KEY_K, name = "K", what = "Fly on and off"},
+	{action = "camera", key = KEY_C, name = "C",
+			what = "Camera: first person, behind, in front"},
 	{action = "noclip", key = KEY_H, name = "H",
 			what = "Through walls on and off"},
 	{action = "chat", key = KEY_T, name = "T", what = "Say something"},
@@ -746,6 +748,8 @@ local function show_client(host, port, name, password, mode)
 		local pointed_object = nil
 		local dig = nil
 		local digging = false
+		-- 1 first person, 2 third from behind, 3 third from the front
+		local camera_mode = 1
 		-- The bob's state for this session; the extension draws no hand, so
 		-- only the camera's offset and roll are used of what it answers
 		local motion = camera_motion.new()
@@ -1052,8 +1056,9 @@ local function show_client(host, port, name, password, mode)
 				object_head = object_head + 1
 				object_queued[id] = nil
 				local obj = world_objects[id]
-				-- Gone again, or the player's own: nothing to draw
-				if obj and not obj.is_self then
+				-- Gone again, or the player's own in first person: nothing
+				-- to draw
+				if obj and (not obj.is_self or camera_mode ~= 1) then
 					local t1 = buildat.get_time_us()
 					view:set_object(obj, object_resource)
 					built = built + 1
@@ -1137,7 +1142,7 @@ local function show_client(host, port, name, password, mode)
 				-- the object over; the rest still arrive
 				return
 			end
-			if obj.visual_stale and not obj.is_self then
+			if obj.visual_stale and (not obj.is_self or camera_mode ~= 1) then
 				queue_object(id)
 			end
 		end
@@ -2497,9 +2502,42 @@ local function show_client(host, port, name, password, mode)
 			-- Sideways along the camera's right, and up; Luanti's yaw is
 			-- counterclockwise from +Z seen from above
 			local ry = math.rad(yaw)
-			view:set_camera(x + m.offset[1] * math.cos(ry),
-					y + player.EYE_HEIGHT + m.offset[2],
-					z + m.offset[1] * math.sin(ry), pitch, yaw, math.deg(m.roll))
+			local cx = x + m.offset[1] * math.cos(ry)
+			local cy = y + player.EYE_HEIGHT + m.offset[2]
+			local cz = z + m.offset[1] * math.sin(ry)
+			local cpitch, cyaw = pitch, yaw
+			if camera_mode ~= 1 then
+				-- Third person, official's Camera::update: back along the
+				-- look (or ahead, turned round) up to 2.75 nodes, a fifth
+				-- up, the height following the look past 1.2, half a node
+				-- short of a solid node. Luanti's yaw is counterclockwise
+				-- from +z: the look is (-sin yaw, -sin pitch, cos yaw)
+				local rp = math.rad(pitch)
+				local dx, dy, dz = -math.sin(ry) * math.cos(rp), -math.sin(rp),
+						math.cos(ry) * math.cos(rp)
+				if camera_mode == 3 then
+					dx, dy, dz = -dx, -dy, -dz
+				end
+				local ex, ey, ez = cx, cy, cz
+				cy = ey + 0.2
+				for i = 10, 27 do
+					local t = i / 10
+					cx = ex - dx * t
+					cz = ez - dz * t
+					if i > 12 then
+						cy = ey - dy * t
+					end
+					if view:is_solid(math.floor(cx + 0.5), math.floor(cy + 0.5),
+							math.floor(cz + 0.5)) then
+						cx, cy, cz = cx + dx * 0.5, cy + dy * 0.5, cz + dz * 0.5
+						break
+					end
+				end
+				if camera_mode == 3 then
+					cpitch, cyaw = -pitch, yaw + 180
+				end
+			end
+			view:set_camera(cx, cy, cz, cpitch, cyaw, math.deg(m.roll))
 		end
 
 		-- Set once the session is over -- the server said no, the connection
@@ -2683,6 +2721,17 @@ local function show_client(host, port, name, password, mode)
 			for id, obj in pairs(world_objects) do
 				if obj.visual_stale and not obj.is_self then
 					queue_object(id)
+				end
+			end
+			-- The player's own object, drawn in the third-person views: the server
+			-- sends no position for it, so it stands where the avatar is, turned
+			-- the way the player looks ([THIRD_PERSON])
+			if camera_mode ~= 1 then
+				for _, obj in pairs(world_objects) do
+					if obj.is_self then
+						obj.position = {avatar.x, avatar.y, avatar.z}
+						obj.yaw = client.yaw
+					end
 				end
 			end
 			view:place_objects(world_objects, dtime)
@@ -3196,6 +3245,29 @@ local function show_client(host, port, name, password, mode)
 			-- Luanti's own keys for these, out of BINDINGS at the top of
 			-- this file. A server that does not give the player the fly and
 			-- noclip privileges pulls them back.
+			-- Official's camera mode key ([THIRD_PERSON]): first person,
+			-- third from behind, third from the front, under the server's
+			-- TOCLIENT_CAMERA restriction; the own model is drawn in the
+			-- third views and taken back out in first
+			if key == BIND.camera.key then
+				local allowed = client.camera_mode_allowed or 0
+				local next_mode = camera_mode % 3 + 1
+				if allowed ~= 0 then
+					next_mode = allowed
+				end
+				camera_mode = next_mode
+				for id, obj in pairs(world_objects) do
+					if obj.is_self then
+						if camera_mode == 1 then
+							view:remove_object(id)
+						else
+							queue_object(id)
+						end
+					end
+				end
+				add_chat(({"First person view", "Third person view",
+						"Third person view (front)"})[camera_mode])
+			end
 			if key == BIND.fly.key then
 				-- The server's own movement check pulls a player without
 				-- the privilege back; saying so is the whole difference

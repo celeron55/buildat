@@ -138,6 +138,7 @@ local TOCLIENT = {
 	TIME_OF_DAY    = 0x29,
 	MOVE_PLAYER    = 0x34,
 	MOVEMENT       = 0x45,
+	CAMERA         = 0x48,
 	MEDIA          = 0x38,
 	NODEDEF        = 0x3A,
 	ANNOUNCE_MEDIA = 0x3C,
@@ -701,6 +702,13 @@ function M.new(socket, options, log)
 		if self.on_hud then
 			self.on_hud(self.hud_elements, self.hud_flags, self.hud_params)
 		end
+	end
+
+	-- TOCLIENT_CAMERA: which camera modes the key may reach -- 0 any, 1
+	-- first, 2 third, 3 third front ([THIRD_PERSON])
+	self.camera_mode_allowed = 0
+	handlers[TOCLIENT.CAMERA] = function(r)
+		self.camera_mode_allowed = r:u8()
 	end
 
 	handlers[TOCLIENT.HUDADD] = function(r)
