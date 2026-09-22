@@ -640,6 +640,11 @@ local function make_object_node(look)
 		if b then
 			b.size = magic.Vector2(0.5, 0.5)
 			b.enabled = true
+			if look.frame then
+				local dx, dy, fx, fy = look.frame[1], look.frame[2],
+						look.frame[3], look.frame[4]
+				b.uv = magic.Rect(fx / dx, fy / dy, (fx + 1) / dx, (fy + 1) / dy)
+			end
 		end
 		set:Commit()
 		return node, {material}
@@ -804,6 +809,14 @@ end
 -- lua/entity.lua.
 local function parse_look(kind, texture, detail)
 	local look = {kind = kind, texture = texture}
+	if kind == "sprite" and detail ~= nil and detail:sub(1, 1) == "\2" then
+		-- A sheet's division and the frame shown: dx,dy,fx,fy
+		local dx, dy, fx, fy = detail:match("^\2(%d+),(%d+),(%-?%d+),(%-?%d+)$")
+		if dx then
+			look.frame = {tonumber(dx), tonumber(dy), tonumber(fx), tonumber(fy)}
+		end
+		return look
+	end
 	if kind == "sprite" and detail ~= nil and detail ~= "" then
 		-- A sprite of an item lying about: the detail is the item's name
 		look.item = detail

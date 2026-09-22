@@ -2084,6 +2084,8 @@ function M.define(dst, util)
 		properties = {
 			position = util.simple_property(dst.Vector3),
 			size = util.simple_property(dst.Vector2),
+			-- The part of the texture drawn, 0..1: a sprite sheet's frame
+			uv = util.simple_property(dst.Rect),
 			color = util.simple_property(dst.Color),
 			rotation = util.simple_property("number"),
 			enabled = util.simple_property("boolean"),

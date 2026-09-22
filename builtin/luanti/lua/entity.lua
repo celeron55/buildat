@@ -420,12 +420,26 @@ end
 -- looks, and nothing draws it yet. They answer rather than being missing,
 -- because a mod that sets a texture and carries on should carry on.
 for _, name in ipairs({
-	"set_texture_mod", "set_sprite",
+	"set_texture_mod",
 	"set_animation_frame_speed",
 	"set_nametag_attributes", "set_observers",
 	"set_local_animation",
 }) do
 	ObjectRef[name] = function() end
+end
+
+-- Which frame of its sheet a sprite shows: the start frame is kept and
+-- reaches the client with the look (a burning mob's flame, an XP orb's
+-- colour, devtest's armour phases). simplified: the first frame only;
+-- num_frames and framelength would step it on the client, as the model's
+-- animation would ([OBJECT_ANIM]); select_x_by_camera is not read.
+function ObjectRef:set_sprite(start_frame, num_frames, framelength, select_x_by_camera)
+	local o = state_of(self)
+	if o then
+		local f = start_frame or {x = 0, y = 0}
+		o.sprite = {x = math.floor(tonumber(f.x) or 0),
+				y = math.floor(tonumber(f.y) or 0)}
+	end
 end
 
 -- The animation is kept and its first frame reaches the client with the
@@ -3372,7 +3386,16 @@ local function appearance_of(o)
 		return "mesh", textures[1] or "", table.concat(detail, "\1")
 	end
 	if visual == "sprite" or visual == "upright_sprite" then
-		return "sprite", textures[1] or ""
+		-- The sheet's division and the frame shown, behind a \2 so the
+		-- client tells it from an item's name
+		local div = props.spritediv or {}
+		local dx, dy = math.max(1, div.x or 1), math.max(1, div.y or 1)
+		local f = o.sprite or props.initial_sprite_basepos or {}
+		local detail = ""
+		if dx > 1 or dy > 1 then
+			detail = "\2" .. dx .. "," .. dy .. "," .. (f.x or 0) .. "," .. (f.y or 0)
+		end
+		return "sprite", textures[1] or "", detail
 	end
 	if visual == "wielditem" or visual == "item" then
 		-- What the item looks like in an inventory is what it looks like
