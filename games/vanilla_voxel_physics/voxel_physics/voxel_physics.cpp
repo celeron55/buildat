@@ -77,6 +77,9 @@ static const int LOAD_DEPTH = 32;
 // (decided, 2026-09-22)
 static const int SUPPORTED_BELOW_Y = -60;
 static const size_t SIM_PER_TICK = 2048;
+// And how long one tick's relaxation may hold voxelworld; everything else
+// in the server waits behind that lock
+static const int64_t SIM_BUDGET_US = 20000;
 // The most voxels one body takes with it; what is left over is looked at
 // again on the next tick
 static const size_t BODY_MAX_VOXELS = 4096;
@@ -997,24 +1000,41 @@ struct Module: public interface::Module
 			return;
 		auto t0 = std::chrono::steady_clock::now();
 		size_t done = 0;
+		int64_t loop_us = 0, flush_us = 0;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			auto t_in = std::chrono::steady_clock::now();
+			// The world is locked here and everything else waits behind it
+			// -- the module's own relight read as a step of a second
+			// ([MAPGEN_STEP]) -- so the relaxation runs to a deadline as
+			// well as to a count, and what is left is the next tick's
 			while(!m_dirty.empty() && done < SIM_PER_TICK){
+				if((done & 15) == 15 && std::chrono::duration_cast<
+						std::chrono::microseconds>(
+						std::chrono::steady_clock::now() - t_in).count() >
+						SIM_BUDGET_US)
+					break;
 				pv::Vector3DInt32 p = m_dirty.front();
 				m_dirty.pop_front();
 				m_dirty_set.erase(pos_key(p));
 				update_voxel(world, p);
 				done++;
 			}
+			loop_us = std::chrono::duration_cast<std::chrono::microseconds>(
+					std::chrono::steady_clock::now() - t_in).count();
 			flush_scratch(world);
 			// Once the front has settled: a body is cut out of what the
 			// whole relaxation says, not half of it
 			if(m_dirty.empty())
 				step_failing(world);
+			flush_us = std::chrono::duration_cast<std::chrono::microseconds>(
+					std::chrono::steady_clock::now() - t_in).count() - loop_us;
 		});
-		log_v(MODULE, "sim: %zu done in %i us, %zu dirty, %zu failing, "
-				"%zu bodies", done, (int)std::chrono::duration_cast<
+		log_v(MODULE, "sim: %zu done in %i us (the relaxation %i, the flush "
+				"and the bodies %i), %zu dirty, %zu failing, %zu bodies",
+				done, (int)std::chrono::duration_cast<
 				std::chrono::microseconds>(
 				std::chrono::steady_clock::now() - t0).count(),
+				(int)loop_us, (int)flush_us,
 				m_dirty.size(), m_failing.size(), m_bodies);
 	}
 };
