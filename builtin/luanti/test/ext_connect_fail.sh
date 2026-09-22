@@ -81,6 +81,13 @@ for i in range(40):
     # The network permission dialog of a scripted run
     a = els and find(els, "Accept")
     if a:
+        # The description field is the caller's ([NET_DESC]): filled in
+        # before the user types anything
+        desc = [e for e in els if e[0] == "LineEdit" and "Luanti server at" in e[5]]
+        if not desc:
+            fail("the permission dialog's description is not the caller's; saw " +
+                 ", ".join("%s %r" % (e[0], e[5]) for e in els if e[0] == "LineEdit")[:200])
+        print("dialog description: " + desc[0][5])
         click(a)
         continue
     # The dialog's text runs over two lines, which the scan's one-line

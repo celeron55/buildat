@@ -132,8 +132,12 @@ local function format_time(t)
 	return os.date("%Y-%m-%d %H:%M", t)
 end
 
--- on_answer(accepted: boolean, description: string)
-local function ask_user(uri, entry, on_answer)
+-- on_answer(accepted: boolean, description: string). suggested is the
+-- caller's own description ([NET_DESC]): the field starts with it --
+-- what the caller is asking for is what the caller knows -- editable,
+-- and the accept or the decline is still the user's. An entry's own
+-- description wins: that is what the user left there.
+local function ask_user(uri, entry, on_answer, suggested)
 	local root = uistack.main:push({desc="network permission dialog"})
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "__menu/res/main_style.xml")
@@ -164,7 +168,8 @@ local function ask_user(uri, entry, on_answer)
 	edit:SetStyleAuto()
 	edit.minHeight = 24
 	edit.minWidth = 380
-	edit:SetText(entry and entry.description or "")
+	edit:SetText((entry and entry.description ~= "" and entry.description) or
+			suggested or "")
 	edit:SetFocus(true)
 
 	local answered = false
@@ -407,10 +412,12 @@ end
 
 -- cb(socket, error): socket is nil if the connection was not made or the user
 -- declined the address
-local function connect(is_udp, host, port, cb)
+local function connect(is_udp, host, port, cb, options)
 	if type(host) ~= "string" or not tonumber(port) or type(cb) ~= "function" then
 		error("network: connect(host: string, port: number, cb: function)")
 	end
+	local suggested = type(options) == "table" and
+			type(options.description) == "string" and options.description or nil
 	local uri = (is_udp and "udp://" or "tcp://")..host..":"..port
 	local entry = load_store()[uri]
 	if entry and entry.accepted and
@@ -427,15 +434,15 @@ local function connect(is_udp, host, port, cb)
 			return
 		end
 		open_socket(is_udp, host, port, cb)
-	end)
+	end, suggested)
 end
 
-function M.safe.tcp_connect(host, port, cb)
-	connect(false, host, port, cb)
+function M.safe.tcp_connect(host, port, cb, options)
+	connect(false, host, port, cb, options)
 end
 
-function M.safe.udp_connect(host, port, cb)
-	connect(true, host, port, cb)
+function M.safe.udp_connect(host, port, cb, options)
+	connect(true, host, port, cb, options)
 end
 
 -- http_get(url, cb): the body of a GET over HTTPS, cb(body) or
@@ -466,7 +473,7 @@ local function http_start(url, cb)
 	end
 end
 
-function M.safe.http_get(url, cb)
+function M.safe.http_get(url, cb, options)
 	if type(url) ~= "string" or type(cb) ~= "function" then
 		error("network: http_get(url: string, cb: function)")
 	end
@@ -491,7 +498,7 @@ function M.safe.http_get(url, cb)
 			return
 		end
 		http_start(url, cb)
-	end)
+	end, type(options) == "table" and options.description or nil)
 end
 
 -- The addresses this client has used, for a list to pick from: the

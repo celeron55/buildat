@@ -443,6 +443,8 @@ local function show_client(host, port, name, password, mode)
 
 	add_line("Asking to connect...")
 
+	-- What this connection is for, for the permission dialog's field
+	-- ([NET_DESC]): the caller knows, the user still decides
 	network.udp_connect(host, port, function(socket, err)
 		if not socket then
 			add_line(tostring(err), true)
@@ -3561,7 +3563,7 @@ local function show_client(host, port, name, password, mode)
 				end
 			end
 		end)
-	end)
+	end, {description = "Luanti server at "..host..":"..port})
 end
 
 -- address and name are what to start the fields with; without them the
@@ -3746,7 +3748,7 @@ show_connect_dialog = function(address, name)
 			end
 			official_rows = rows
 			show()
-		end)
+		end, {description = "Luanti's official server list"})
 	end
 	local function source_button(name, label)
 		local b = source_buttons[name]
