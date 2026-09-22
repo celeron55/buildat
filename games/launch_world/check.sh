@@ -28,7 +28,7 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 { echo "delay 5000"
 	n=1
 	for name in $names; do
-		echo "keypress $n"
+		echo "keypress F$n"
 		echo "delay 800"
 		echo "screenshot $out/$n-$name.png"
 		n=$((n + 1))
@@ -37,7 +37,7 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	# again. What is checked is that the wall moves and comes back --
 	# states being configurations of one scene, the closed picture has to
 	# be the picture it was.
-	echo "keypress 1"
+	echo "keypress F1"
 	echo "delay 800"
 	echo "screenshot $out/dissolve-closed.png"
 	# A screenshot lands a frame or two after the command, so the next
@@ -53,9 +53,25 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "delay 5000"
 	echo "screenshot $out/dissolve-closed-again.png"
 	echo "delay 600"
+	# The typing path: three letters fuzzy-match a name, Enter launches
+	# it and the camera flies in; Escape brings the room back
+	echo "keypress U"
+	echo "keypress N"
+	echo "keypress D"
+	echo "delay 600"
+	echo "screenshot $out/typed.png"
+	echo "delay 400"
+	echo "keypress Return"
+	echo "delay 2200"
+	echo "screenshot $out/launched.png"
+	echo "delay 400"
+	echo "keypress Escape"
+	echo "delay 2600"
+	echo "screenshot $out/back-home.png"
+	echo "delay 600"
 	# And the first preset again with the reflection probe taken off the
 	# zone, which is what says the probe reaches the metals
-	echo "keypress 1"
+	echo "keypress F1"
 	echo "delay 800"
 	echo "keypress P"
 	echo "delay 800"
@@ -161,5 +177,20 @@ print("the dissolve moves the frame by %.2f of a level and comes back "
 dissolve_ok = moved > 2.0 and back < moved / 3.0
 print("PASS: a bay opens and closes again" if dissolve_ok
 		else "FAIL: the dissolve does not open, or does not come back")
-sys.exit(0 if (ok and probe_ok and dissolve_ok) else 1)
+
+# The typing path: the prompt has to show the match it found, the launch
+# has to move the camera, and Escape has to bring the room back to the
+# picture it was
+typed, _ = mean_of("typed")
+launched, dl = mean_of("launched")
+home, dh = mean_of("back-home")
+flew = sum(abs(p - q) for p, q in zip(dc, dl)) / float(len(dc))
+came_back = sum(abs(p - q) for p, q in zip(dc, dh)) / float(len(dc))
+print("the launch moves the frame by %.2f of a level and Escape comes "
+		"back to within %.2f" % (flew, came_back))
+typing_ok = flew > 8.0 and came_back < flew / 2.0
+print("PASS: typing a name flies the camera in, and Escape flies it out"
+		if typing_ok else
+		"FAIL: the typing path does not launch, or does not come back")
+sys.exit(0 if (ok and probe_ok and dissolve_ok and typing_ok) else 1)
 PY

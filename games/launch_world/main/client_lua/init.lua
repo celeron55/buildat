@@ -448,8 +448,7 @@ end
 -- the open side behind the camera, the chrome and the plinth in frame
 local camera_node = scene:CreateChild("Camera")
 camera_node:CreateComponent("Camera")
-camera_node.position = V(0.0, 2.75, 15.5)
-camera_node:LookAt(V(0, 1.45, -6.0))
+-- placed from the camera state below, once it exists
 -- [LAUNCH_WORLD] step 2: the reflection probe, which is a prerequisite
 -- and not an upgrade -- a PBR metal reflects its surroundings and nothing
 -- else, so with no environment it is black but for its highlight, and
@@ -702,14 +701,58 @@ readout("b" .. buildat.version(), {x = 4.4, y = 0.25, z = 6.8}, 0.34,
 -- "pointed at" is the smallest angle to the view direction, which is
 -- the crosshair's own ray as long as the crosshair is the screen's
 -- middle.
-local view_from = V(0.0, 2.75, 15.5)
-local view_at = V(0, 1.45, -6.0)
-local view_dir = magic.Vector3(view_at.x - view_from.x,
-		view_at.y - view_from.y, view_at.z - view_from.z)
-do
-	local l = math.sqrt(view_dir.x ^ 2 + view_dir.y ^ 2 + view_dir.z ^ 2)
-	view_dir = magic.Vector3(view_dir.x / l, view_dir.y / l, view_dir.z / l)
+-- **The camera is a state, not a constant**, because the fast path flies
+-- it: where it is and what it looks at are numbers that get lerped, and
+-- the pointing below reads them rather than the two it was set up with.
+-- Copies, not the node's own vectors -- a position property hands back a
+-- reference that follows the node.
+local HOME_FROM = {x = 0.0, y = 2.75, z = 15.5}
+local HOME_AT = {x = 0, y = 1.45, z = -6.0}
+local cam = {
+	from = {x = HOME_FROM.x, y = HOME_FROM.y, z = HOME_FROM.z},
+	at = {x = HOME_AT.x, y = HOME_AT.y, z = HOME_AT.z},
+	to_from = nil, to_at = nil, t = 0,
+}
+local view_from = V(cam.from.x, cam.from.y, cam.from.z)
+local view_dir = magic.Vector3(0, 0, -1)
+
+local function apply_camera()
+	camera_node.position = V(cam.from.x, cam.from.y, cam.from.z)
+	camera_node:LookAt(V(cam.at.x, cam.at.y, cam.at.z))
+	view_from = V(cam.from.x, cam.from.y, cam.from.z)
+	local dx, dy, dz = cam.at.x - cam.from.x, cam.at.y - cam.from.y,
+			cam.at.z - cam.from.z
+	local l = math.sqrt(dx * dx + dy * dy + dz * dz)
+	view_dir = magic.Vector3(dx / l, dy / l, dz / l)
 end
+
+-- **The camera flies to what was picked**, which is how the fast path
+-- teaches the room: someone who typed a name sees where that name lives
+-- on the way in.
+local FLY_SECONDS = 1.3
+local function fly_to(from, at)
+	cam.to_from, cam.to_at, cam.t = from, at, 0
+	cam.was_from = {x = cam.from.x, y = cam.from.y, z = cam.from.z}
+	cam.was_at = {x = cam.at.x, y = cam.at.y, z = cam.at.z}
+end
+
+function handle_camera_update(event_type, event_data)
+	if not cam.to_from then
+		return
+	end
+	cam.t = math.min(1, cam.t + event_data:GetFloat("TimeStep") / FLY_SECONDS)
+	local e = cam.t * cam.t * (3 - 2 * cam.t)
+	for _, k in ipairs({"x", "y", "z"}) do
+		cam.from[k] = cam.was_from[k] + (cam.to_from[k] - cam.was_from[k]) * e
+		cam.at[k] = cam.was_at[k] + (cam.to_at[k] - cam.was_at[k]) * e
+	end
+	apply_camera()
+	if cam.t >= 1 then
+		cam.to_from, cam.to_at = nil, nil
+	end
+end
+magic.SubscribeToEvent("Update", "handle_camera_update")
+apply_camera()
 
 local name_node = scene:CreateChild("orb_name")
 local name_text = name_node:CreateComponent("Text3D")
@@ -950,13 +993,151 @@ magic.SubscribeToEvent("Update", "handle_reel_update")
 
 set_preset(1)
 
+-- **The keyboard path, untouched**: typing anywhere opens a one-line
+-- prompt that fuzzy-matches a game or a server, Enter launches it, and
+-- the camera flies to the matching object on the way out so the fast
+-- path teaches the room. Digits pick slots. A returning user never
+-- walks anywhere.
+--
+-- simplified: the prompt is a Text element and the keys are read
+-- straight off KeyDown rather than through a LineEdit -- no style to
+-- load, no focus to take and give back, and a room whose whole point is
+-- how much it leaves out can spell twenty-six letters itself. The
+-- upgrade is a LineEdit the moment anything needs a caret or paste.
+local prompt_text = magic.ui.root:CreateChild("Text")
+prompt_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 26)
+prompt_text.horizontalAlignment = magic.HA_CENTER
+prompt_text.verticalAlignment = magic.VA_BOTTOM
+prompt_text:SetPosition(0, -40)
+prompt_text:SetColor(magic.Color(0.55, 0.95, 1.0, 1))
+prompt_text.text = ""
+prompt_open = false
+prompt_str = ""
+
+-- A subsequence match, which is what "fuzzy" has to mean when the list
+-- is six names: every letter typed appears in order. The best match is
+-- the one whose letters sit closest to the front.
+local function fuzzy(query, name)
+	local q, n = query:lower(), name:lower()
+	local at, score = 1, 0
+	for i = 1, #q do
+		local found = n:find(q:sub(i, i), at, true)
+		if not found then
+			return nil
+		end
+		score = score + found
+		at = found + 1
+	end
+	return score
+end
+
+local function best_match(query)
+	local best, best_score = nil, nil
+	for i, o in ipairs(ORBS) do
+		local sc = fuzzy(query, o.name)
+		if sc and (best_score == nil or sc < best_score) then
+			best, best_score = i, sc
+		end
+	end
+	return best
+end
+
+local function show_prompt()
+	if prompt_str == "" then
+		prompt_text.text = prompt_open and "type a name" or ""
+		return
+	end
+	local b = best_match(prompt_str)
+	prompt_text.text = "> " .. prompt_str ..
+			(b and ("   -- " .. ORBS[b].name) or "   -- no match")
+end
+
+-- Launching, in this room, is the bay coming apart and the camera going
+-- in: there is nothing behind it to run yet, and the transition is the
+-- content.
+local function launch(b)
+	if not b or not orb_places[b] then
+		return
+	end
+	local o = orb_places[b]
+	fly_to({x = o.x, y = o.y + 0.8, z = o.z + 7.0},
+			{x = o.x, y = o.y, z = o.z})
+	dissolve_bay(b, true)
+	log:info("launch: " .. (ORBS[b] and ORBS[b].name or "?") ..
+			" (bay " .. b .. ")")
+end
+
+function prompt_key(key)
+	-- Digits pick the nearest slots, which is the path a returning user
+	-- actually takes
+	for n = 1, BAYS do
+		if key == magic["KEY_" .. n] then
+			prompt_open = false
+			prompt_str = ""
+			show_prompt()
+			launch(n)
+			return true
+		end
+	end
+	if key == magic.KEY_ESCAPE then
+		prompt_open = false
+		prompt_str = ""
+		show_prompt()
+		-- Escape from the room's own view is the way back out of a launch
+		fly_to(HOME_FROM, HOME_AT)
+		for b = 1, BAYS do
+			dissolve_bay(b, false)
+		end
+		return true
+	end
+	if key == magic.KEY_RETURN then
+		if prompt_open then
+			local b = best_match(prompt_str)
+			prompt_open = false
+			prompt_str = ""
+			show_prompt()
+			launch(b)
+			return true
+		end
+		return false
+	end
+	if key == magic.KEY_BACKSPACE and prompt_open then
+		prompt_str = prompt_str:sub(1, #prompt_str - 1)
+		show_prompt()
+		return true
+	end
+	-- Any letter opens the prompt and is its first character
+	for i = 0, 25 do
+		local ch = string.char(97 + i)
+		if key == magic["KEY_" .. ch:upper()] then
+			prompt_open = true
+			prompt_str = prompt_str .. ch
+			show_prompt()
+			return true
+		end
+	end
+	if key == magic.KEY_SPACE and prompt_open then
+		prompt_str = prompt_str .. " "
+		show_prompt()
+		return true
+	end
+	return false
+end
+
 function handle_keydown(event_type, event_data)
 	local key = event_data:GetInt("Key")
+	-- The prompt eats what it wants first, so a name with a "p" in it
+	-- does not toggle the probe halfway through being typed
+	if prompt_key(key) then
+		return
+	end
 	if key == magic.KEY_ESCAPE then
 		buildat.disconnect()
 	end
+	-- The palette presets are on F1 to F4: the digits are the room's
+	-- own, for picking a slot without walking to it
 	for n = 1, #PRESETS do
-		if key == magic["KEY_" .. n] then
+		if key == magic["KEY_F" .. n] then
 			set_preset(n)
 		end
 	end

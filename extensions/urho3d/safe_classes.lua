@@ -1439,6 +1439,10 @@ function M.define(dst, util)
 					"SetTextAlignment", {}, {"UIElement", "number"}),
 			SetFontSize = util.self_function(
 					"SetFontSize", {}, {"Text", "number"}),
+			-- The whole text's colour. Text3D has had this; Text had no
+			-- way to set one at all, so every label drew in the style's
+			-- default ([WHITELIST_POLICY]: plainly safe).
+			SetColor = util.self_function("SetColor", {}, {"Text", "Color"}),
 			-- A shadow or an outline under the letters, which is what makes
 			-- text over a world readable: a HUD over snow or sand is white
 			-- on white without it. effectColor is what it is drawn with.
