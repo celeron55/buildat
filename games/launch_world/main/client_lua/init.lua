@@ -249,9 +249,9 @@ local ORBS = {
 	{name = "Vanilla", warm = true},
 	{name = "Undermine", warm = true},
 	{name = "Digger", warm = true},
-	{name = "buildat.example.org", warm = false},
+	{name = "buildat.example.org", warm = false, ping = 38},
 	{name = "Aggregate", warm = true},
-	{name = "mine.example.net", warm = false},
+	{name = "mine.example.net", warm = false, ping = 210},
 }
 local orb_places = {}
 -- Every slab, with the bay it belongs to: the dissolve needs to know
@@ -533,6 +533,81 @@ label:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 14)
 label.horizontalAlignment = magic.HA_LEFT
 label.verticalAlignment = magic.VA_BOTTOM
 label:SetPosition(8, -8)
+
+-- **The servers are a patch bay** (the brief): a port each, the name
+-- above it, the most recently used nearest spawn, **the ping as the
+-- blink rate of its link LED** and a dead host unlit. A server list
+-- genuinely *is* a set of connections, which is why this mapping is the
+-- honest one rather than a list pinned to a wall.
+--
+-- simplified: the ports are the server orbs' own entries, with a ping
+-- written beside them, because nothing in this room talks to a network
+-- yet. The upgrade is the launcher's own list and its pings, which is
+-- the same table with another source.
+local PATCH = {}
+for _, o in ipairs(ORBS) do
+	if not o.warm then
+		PATCH[#PATCH + 1] = o
+	end
+end
+-- One dead host, because "unlit" has to be visible to mean anything
+PATCH[#PATCH + 1] = {name = "gone.example.com", warm = false, ping = nil}
+
+local patch_leds = {}
+do
+	-- Along the room's right-hand side as the camera sees it, which is
+	-- +x: the bay faces the middle, so a port is read side-on from spawn
+	-- and square-on by whoever walks to it
+	local x0, y0, z0 = 8.2, 0.0, 4.2
+	local pitch = 2.2
+	-- The rack the ports are set into
+	part("Box", magic.Vector3(x0, 1.7, z0 - #PATCH * pitch / 2 + pitch / 2),
+			magic.Vector3(0.7, 3.6, #PATCH * pitch), machined)
+	for i, srv in ipairs(PATCH) do
+		local z = z0 - (i - 1) * pitch
+		-- The port itself: a recess with a ring round it, which is a
+		-- socket in the language of stacked boxes
+		part("Box", magic.Vector3(x0 - 0.42, 1.9, z),
+				magic.Vector3(0.18, 1.1, 1.1), stone)
+		part("Cylinder", magic.Vector3(x0 - 0.52, 1.9, z),
+				magic.Vector3(0.62, 0.16, 0.62), chrome)
+		-- The link LED, which is the whole readout: lit and blinking for
+		-- a live host, dark for one that does not answer
+		local led_mat = glow(magic.Color(0, 0, 0, 1))
+		part("Box", magic.Vector3(x0 - 0.56, 1.05, z),
+				magic.Vector3(0.12, 0.16, 0.34), led_mat)
+		patch_leds[i] = {mat = led_mat, ping = srv.ping}
+		-- The name above the port, always on here: a patch bay is read by
+		-- walking along it, and three labels is not a label wall
+		local label = scene:CreateChild("port_name")
+		label.position = V(x0 - 0.7, 2.75, z)
+		local t = label:CreateComponent("Text3D")
+		t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 30)
+		t:SetColor(srv.ping and magic.Color(0.55, 0.75, 0.85, 1) or
+				magic.Color(0.32, 0.30, 0.30, 1))
+		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		t.text = srv.name
+		t.faceCameraMode = magic.FC_ROTATE_Y
+	end
+end
+
+-- The blink: a live port's LED is on for a moment once every ping's
+-- worth of milliseconds, so a near server flickers quickly and a far one
+-- pulses. Nothing here polls anything; the rate is the reading.
+patch_t = 0
+function handle_patch_update(event_type, event_data)
+	patch_t = patch_t + event_data:GetFloat("TimeStep")
+	for _, led in ipairs(patch_leds) do
+		local on = false
+		if led.ping then
+			local period = led.ping / 1000
+			on = (patch_t % period) < period * 0.35
+		end
+		led.mat:SetShaderParameter("MatDiffColor", on and
+				magic.Color(0.4, 2.6, 3.0, 1) or magic.Color(0.02, 0.06, 0.07, 1))
+	end
+end
+magic.SubscribeToEvent("Update", "handle_patch_update")
 
 -- **The version, as a readout rather than as text on a HUD**
 -- ([BOX_PLAYTEST_4]'s complaint answered with geometry): a seven-segment
