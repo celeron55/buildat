@@ -1885,6 +1885,11 @@ function M.define(dst, util)
 	-- See [SCRIPTED_CURSOR] in doc/plan/miscellaneous_plan.md.
 	local scripted = __buildat_is_scripted()
 	util.wc("Input", {
+		properties = {
+			-- Read-only here: the setter is SetMouseVisible above, which
+			-- logs why and stands down in a scripted run
+			mouseVisible = util.simple_property("boolean"),
+		},
 		instance = {
 			-- The second argument is a word for the log ([FOCUS_LOG]): what
 			-- asked for the cursor to change
@@ -1909,6 +1914,8 @@ function M.define(dst, util)
 					self:SetMouseMode(mode)
 				end),
 			GetKeyDown = util.self_function("GetKeyDown", {"boolean"}, {"Input", "number"}),
+			IsMouseVisible = util.self_function("IsMouseVisible", {"boolean"},
+					{"Input"}),
 			-- A key's name and back, for a bindings file a person can read
 			-- ([KEY_BINDINGS])
 			GetKeyName = util.self_function("GetKeyName", {"string"}, {"Input", "number"}),

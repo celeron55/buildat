@@ -226,6 +226,11 @@ do
 		lines[#lines + 1] = string.format("scan %s: frame %dx%d root %dx%d ui_scale %.3f",
 				label, lw, lh, magic.ui.root.width, magic.ui.root.height,
 				magic.ui:GetScale() or 0)
+		-- Whether the cursor is the player's to point with: a screen over
+		-- a game must show it and must not have the view under it
+		-- ([BOX_PLAYTEST_3] 2)
+		lines[#lines + 1] = string.format("scan %s: mouse %s", label,
+				magic.input.mouseVisible and "visible" or "hidden")
 		ui_utils.scan_ui(label, top, 1, lines)
 		local focus = magic.ui.focusElement
 		if focus then

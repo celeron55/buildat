@@ -792,6 +792,7 @@ local function show_client(host, port, name, password, mode)
 		local prepend = ""
 		local detached = {}
 		local form = nil
+		local screen_was_above = false -- a stack screen over the session
 		local form_stale = false
 
 		-- Pointing, digging and placing
@@ -2611,8 +2612,20 @@ local function show_client(host, port, name, password, mode)
 				avatar:set_position(p.x, p.y, p.z)
 			end
 			-- A form or a chat line takes the mouse and the keys; the player
-			-- stands still rather than walking blind behind it
-			if form or chat_input then
+			-- stands still rather than walking blind behind it. So does a
+			-- screen on the UI stack over the session's own -- the pause
+			-- menu's settings and key screens -- with the cursor shown and
+			-- free while one is up: on the box the view turned under them
+			-- and the cursor vanished ([BOX_PLAYTEST_3] 2).
+			local screen_above = uistack.main.stack[#uistack.main.stack] ~= root
+			if screen_above ~= screen_was_above then
+				screen_was_above = screen_above
+				if not form and not chat_input then
+					magic.input:SetMouseVisible(screen_above,
+							screen_above and "a screen over the game" or nil)
+				end
+			end
+			if form or chat_input or screen_above then
 				client:set_position(avatar.x, avatar.y, avatar.z)
 				client:set_motion(0, 0, 0, 0)
 				return
