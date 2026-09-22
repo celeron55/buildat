@@ -1697,6 +1697,15 @@ local function update_sky(dt)
 				PHYS.ground.r * (sun * sc.r + c.r * k),
 				PHYS.ground.g * (sun * sc.g + c.g * k),
 				PHYS.ground.b * (sun * sc.b + c.b * k))
+		-- [CAVE_AO]: BUILDAT_CAVE_AO_FLOOR=<f> puts a constant light under
+		-- the ambient so a cave at both nibbles nought keeps its corners.
+		-- The same at every hour, which is what [DARK_INVARIANT] needs;
+		-- nought unless it is asked for, so no game's look moves. The
+		-- ladder the user picks a value off is
+		-- local/options_for_CAVE_AO/.
+		local floor_f = tonumber(
+				buildat.get_env("BUILDAT_CAVE_AO_FLOOR") or "") or 0
+		voxel_shading.set_cave_ambient(floor_f, floor_f, floor_f)
 		local abl = buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""
 		if abl:find("amb") then zone.ambientColor = magic.Color(0, 0, 0) end
 		if abl:find("bounce") then voxel_shading.set_bounce_light(0, 0, 0) end

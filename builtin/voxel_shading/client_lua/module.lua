@@ -278,6 +278,9 @@ local bounce_light = magic.Vector3(0, 0, 0)
 -- see M.set_lamp_light(). Unset (nil) is the plain path's white.
 local translucency_gain = 1.0
 local lamp_light = magic.Vector3(1, 1, 1)
+-- [CAVE_AO]: what a cave is never darker than, in the ambient's units and
+-- the same at every hour. Nothing until a client sets it.
+local cave_ambient = magic.Vector3(0, 0, 0)
 -- And the ground's radiance, for the lower hemisphere; see M.set_ground_light()
 local ground_light = magic.Vector3(0, 0, 0)
 -- Whether the mesher packs the vertex alpha; see M.set_packed_sky()
@@ -668,6 +671,7 @@ local function push_sky_vis()
 				command:SetShaderParameter("BounceLight", bounce_light)
 				command:SetShaderParameter("GroundLight", ground_light)
 				command:SetShaderParameter("LampLight", lamp_light)
+				command:SetShaderParameter("CaveAmbient", cave_ambient)
 				command:SetShaderParameter("TranslucencyGain", translucency_gain)
 			end
 		end
@@ -681,6 +685,7 @@ local function push_sky_vis()
 	render_path:SetShaderParameter("BounceLight", bounce_light)
 	render_path:SetShaderParameter("GroundLight", ground_light)
 	render_path:SetShaderParameter("LampLight", lamp_light)
+	render_path:SetShaderParameter("CaveAmbient", cave_ambient)
 	render_path:SetShaderParameter("TranslucencyGain", translucency_gain)
 end
 
@@ -730,6 +735,15 @@ end
 -- sets it from the fit, BUILDAT_LUANTI_TRANSLUCENCY overrides
 function M.set_translucency_gain(k)
 	translucency_gain = math.max(0, k)
+	declare_countdown = 0
+end
+
+-- A light of the place rather than of the sky: a constant floor under the
+-- ambient so that the corner table and the hemisphere rays still shape a
+-- face where both nibbles are nought. Not scaled by the hour, which is
+-- what keeps [DARK_INVARIANT] -- see cCaveAmbient in PBRVoxel.glsl.
+function M.set_cave_ambient(r, g, b)
+	cave_ambient = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
 	declare_countdown = 0
 end
 

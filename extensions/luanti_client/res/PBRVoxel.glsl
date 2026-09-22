@@ -122,6 +122,19 @@ uniform vec3 cBounceLight;
 // radiance. Set by voxel_shading.set_lamp_light(); the plain path's vertex
 // rgb is already the light and does not read this.
 uniform vec3 cLampLight;
+// [CAVE_AO]: a light of the place itself, not of the sky -- a constant a
+// cave is never darker than, so the corner table and the hemisphere rays
+// have something to shape where both nibbles are nought and the picture
+// would otherwise be one flat black. It takes the local shade like every
+// other ambient term, which is the whole point of it.
+//
+// **Constant on purpose, and not scaled by cBounceLight**: the bounce
+// follows the hour, and a floor that follows the hour is exactly what
+// [DARK_INVARIANT] forbids in a place no ray reaches. This one is the
+// same at noon and at midnight, so it gives a sealed cave its edges back
+// without giving it the sun. Nought unless a client sets it
+// (voxel_shading.set_cave_ambient), so no game's look moves by default.
+uniform vec3 cCaveAmbient;
 // The transmitted light's level ([PBR_FIT] 3b); 1.0 is Lambert through
 // the leaf's colour squared
 uniform float cTranslucencyGain;
@@ -430,7 +443,8 @@ void VS()
                 cBounceLight * (0.15 + 1.0 * sky.x) *
                     (1.0 - ShapeSkylight(sky.x)) * shade +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *
-                    (ShapeSkylight(sky.x) * groundSeen + interior);
+                    (ShapeSkylight(sky.x) * groundSeen + interior) +
+                cCaveAmbient * shade;
         #endif
         vSkyVisibility = ShapeSkylight(SkyOfAlpha(iColor.a).x);
 
