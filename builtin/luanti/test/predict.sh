@@ -111,7 +111,7 @@ look_dir 1 -1 0
 delay 300
 event scan_volume 2 t0
 mouse_click right
-delay 100
+delay 40
 event scan_volume 2 place_now
 delay 2000
 event scan_volume 2 place_after
@@ -125,7 +125,7 @@ event scan_volume 2 dig_after
 look_dir 1 -1 0
 delay 300
 mouse_click right
-delay 100
+delay 40
 event scan_volume 2 refused_place_now
 delay 2000
 event scan_volume 2 refused_place_after

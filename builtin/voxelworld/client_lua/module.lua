@@ -399,9 +399,28 @@ function sub_events()
 		-- change that has not arrived yet overwrites that when it does.
 		local pred = node and predicted[values.node_id]
 		if pred then
-			predicted[values.node_id] = nil
-			if buildat.get_voxel_data(node) == pred.after then
-				buildat.set_voxel_data(node, pred.before)
+			-- The server's data, or what the chunk held before the
+			-- predictions when the server did not replicate (a refusal)
+			local data = buildat.get_voxel_data(node)
+			if data == pred.after then
+				data = pred.before
+			end
+			-- This answer is the oldest change's; the ones after it are
+			-- not in it yet and go back on top ([BOX_PLAYTEST_2] 11)
+			table.remove(pred.writes, 1)
+			if #pred.writes > 0 then
+				local volume = buildat.deserialize_volume(data)
+				for _, w in ipairs(pred.writes) do
+					volume:set_voxel_at(w[1], w[2], w[3], w[4])
+				end
+				pred.before = data
+				pred.after = volume:serialize()
+				buildat.set_voxel_data(node, pred.after)
+			else
+				predicted[values.node_id] = nil
+				if data ~= buildat.get_voxel_data(node) then
+					buildat.set_voxel_data(node, data)
+				end
 			end
 		end
 		if node and not node:GetVar("buildat_voxel_data"):IsEmpty() then
@@ -1228,7 +1247,14 @@ function M.set_static_voxel(x, y, z, v)
 	end
 	volume:set_voxel_at(in_chunk_p.x, in_chunk_p.y, in_chunk_p.z, v)
 	local id = node:GetID()
-	local pred = predicted[id] or {before = buildat.get_voxel_data(node)}
+	local pred = predicted[id] or
+			{before = buildat.get_voxel_data(node), writes = {}}
+	-- Kept until the server has answered it: a second change to the
+	-- chunk before the first's answer would be undone by that answer
+	-- ([BOX_PLAYTEST_2] 11) -- so the answer has the changes it does not
+	-- carry yet written on top of it, until their own answers come
+	pred.writes[#pred.writes + 1] = {in_chunk_p.x, in_chunk_p.y,
+			in_chunk_p.z, v}
 	pred.after = volume:serialize()
 	predicted[id] = pred
 	buildat.set_voxel_data(node, pred.after)
