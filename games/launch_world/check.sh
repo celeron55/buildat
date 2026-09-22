@@ -69,6 +69,18 @@ grep -aE "palette preset|ornament ok|synth ok" "$out/cli.log" |
 # The ornament generator asserts its own patterns as it builds them
 # (ornament.lua's self_check); a generator that quietly returned a flat
 # field would pass an eye on a dark slab and fail there
+# The bay numbers live in main.cpp and in init.lua -- the room is carved
+# on one side and the orbs are placed on the other -- so a run compares
+# the two lists and fails if they have drifted
+srv_bays=$(grep -a "launch_world: bays " "$out/srv.log" | head -1 |
+	sed 's/.*launch_world: bays //')
+cli_bays=$(grep -a "launch_w.*: bays " "$out/cli.log" | head -1 |
+	sed 's/.*: bays //')
+echo "bays, server: ${srv_bays:-(none)}"
+if [ "$srv_bays" != "$cli_bays" ]; then
+	echo "FAIL: the client's bays are '$cli_bays'"
+	exit 1
+fi
 for what in "ornament" "synth"; do
 	if ! grep -aq "$what ok" "$out/cli.log"; then
 		echo "FAIL: the $what did not pass its own check"

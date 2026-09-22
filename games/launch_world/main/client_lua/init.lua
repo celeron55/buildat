@@ -230,18 +230,27 @@ local floor_mat = material(magic.Color(1, 1, 1, 1), 0.18, 0.0,
 		magic.Color(0.62, 0.63, 0.66, 1), magic.FILTER_TRILINEAR))
 -- (the floor is the voxelworld's checkerboard now)
 
--- The architecture: six bays of stacked slabs across the back, each with
--- an orb wedged behind it. **The composition rule** (user), read off the
--- reference frame and against the evenly-lit set that was rejected:
--- every view has a light source occluded by something -- so the orb sits
--- behind its bay and the stone silhouettes against it.
+-- **The architecture is the voxelworld's now** (see main.cpp's Room):
+-- six bays of stacked slabs across the back, each with one tier left
+-- open and a niche behind it for an orb to glow out of. **The
+-- composition rule** (user), read off the reference frame and against
+-- the evenly-lit set that was rejected: every view has a light source
+-- occluded by something -- so the orb sits in the niche and the stone
+-- silhouettes against it.
+--
+-- These six numbers are the server's, written twice: the room is carved
+-- there and the orbs are placed here. The check compares the two lists
+-- and fails if they ever drift, which is cheaper than the packet round
+-- trip the single copy would need before anything can be built.
 local BAYS = 6
-local BAY_W = 6.4          -- metres between bay centres
-local BAY_X0 = -(BAYS - 1) * 6.4 / 2
-local SLAB = {h = 1.15, d = 1.6}
--- Where each bay's orb sits, as the tier it glows through: the tiers
--- differ bay to bay so the wall is not a row of identical holes
-local BAY_TIER = {2, 4, 1, 3, 5, 2}
+local BAY_SPACING = 14        -- voxels between bay centres
+local SLAB_H = 3              -- voxels in one slab course
+local BAY_Z = -18             -- the stacks' front face, in voxels
+local BAY_DEPTH = 4
+local NICHE_DEPTH = 3
+local BAY_TIER = {2, 4, 1, 3, 5, 2}   -- 0-based, as the server has them
+local function bay_x(i) return (i - 3) * BAY_SPACING - 7 end
+
 -- **The orbs are the games** (user): warm is what you own, cold is a
 -- server you can reach. The name is what a mark is generated from and
 -- what Text3D says over the one being pointed at.
@@ -253,41 +262,23 @@ local ORBS = {
 	{name = "Aggregate", warm = true},
 	{name = "mine.example.net", warm = false, ping = 210},
 }
+local function bay_width(tier) return 10 - tier end
+
 local orb_places = {}
--- Every slab, with the bay it belongs to: the dissolve needs to know
--- which wall is coming apart
-local bay_slabs = {}
+local bay_desc = {}
 for b = 1, BAYS do
-	local x = BAY_X0 + (b - 1) * BAY_W
-	bay_slabs[b] = {}
-	-- The pillar: stacked slabs, each a little narrower than the one
-	-- under it, which is the tomb read and is a loop rather than a model
-	for tier = 0, 5 do
-		local w = 4.4 - tier * 0.45
-		local y = SLAB.h / 2 + tier * (SLAB.h + 0.12)
-		local face = (b == 4) and sigil_mat or socket_mat
-		if tier == BAY_TIER[b] then
-			-- The tier the orb glows through: two posts and a gap
-			for _, side in ipairs({-1, 1}) do
-				bay_slabs[b][#bay_slabs[b] + 1] = part("Box",
-						magic.Vector3(x + side * (w / 2 - 0.55), y, -8),
-						magic.Vector3(1.1, SLAB.h, SLAB.d), face)
-			end
-			orb_places[#orb_places + 1] = {x = x, y = y, z = -9.6}
-		else
-			bay_slabs[b][#bay_slabs[b] + 1] = part("Box",
-					magic.Vector3(x, y, -8),
-					magic.Vector3(w, SLAB.h, SLAB.d), face)
-		end
-	end
-	-- A lintel across the top of the bay, deeper than the stack, so the
-	-- wall has a front plane as well as a back one
-	bay_slabs[b][#bay_slabs[b] + 1] = part("Box",
-			magic.Vector3(x, 6.0 + SLAB.h, -7.2),
-			magic.Vector3(BAY_W - 0.5, 0.5, 2.6), meander_mat)
+	local tier = BAY_TIER[b]
+	orb_places[b] = {
+		x = bay_x(b) * VOXEL_M,
+		y = (tier * SLAB_H + SLAB_H / 2) * VOXEL_M,
+		z = (BAY_Z - BAY_DEPTH - 1) * VOXEL_M,
+	}
+	bay_desc[#bay_desc + 1] = string.format("%d %d %d", bay_x(b), tier,
+			bay_width(tier))
 end
--- (the mass the room is cut out of is the voxelworld's now, so there is
--- no back wall here)
+log:info("bays " .. BAYS .. " " .. SLAB_H .. " " .. BAY_Z .. " " ..
+		BAY_DEPTH .. " " .. NICHE_DEPTH .. " " ..
+		table.concat(bay_desc, " "))
 
 -- The orbs. Warm is what you own; the palette's own entry says which
 -- colour each carries, and the light at it is what lights the room.
@@ -758,42 +749,71 @@ end
 magic.SubscribeToEvent("Update", "handle_synth_update")
 
 -- **The dissolve**: a bay un-builds into flying slabs, and it is the
--- only transition there is. States are configurations of one scene, not
--- screens with a camera parked in each, so a bay is a number in 0..1 and
--- every slab's place is read off it -- which makes it reversible,
--- interruptible and free of keyframes.
+-- only transition there is. The voxels stop being there -- the server is
+-- told, and puts them back from the room's own description when the bay
+-- shuts -- and what flies is a cube per voxel that was on the bay's
+-- face, made here and thrown away when it lands.
 --
--- Where a slab goes is decided once from its own index, so the wall
--- comes apart the same way every time; a wall that scatters differently
--- on each open reads as noise rather than as a mechanism.
+-- States are configurations of one scene, not screens with a camera
+-- parked in each, so a bay is a number in 0..1 and every cube's place is
+-- read off it: reversible, interruptible, no keyframes. Where a cube
+-- goes is decided once from its own index, since a wall that scatters
+-- differently each time reads as noise rather than as a mechanism.
+--
+-- simplified: only the bay's front plane flies, which is 378 cubes at
+-- the widest instead of fifteen hundred, and is the face anyone is
+-- looking at. The upgrade is the whole depth, and a budget.
 local DISSOLVE_SECONDS = 0.9
 local bay_state = {}
 for b = 1, BAYS do
 	bay_state[b] = {t = 0, target = 0, slabs = {}}
-	for i, node in ipairs(bay_slabs[b] or {}) do
-		-- The numbers, not the Vector3: Node's position property hands
-		-- back a reference to the node's own vector, so a "home" kept as
-		-- that object follows the slab as it flies and the close lerps
-		-- towards where it already is -- the bay opened and never shut
-		-- (2026-09-23). Same trap as a const Vector3& property.
-		local p = node.position
-		local home = {x = p.x, y = p.y, z = p.z}
-		-- Outward from the bay's middle, upward with the tier, and a
-		-- little towards the viewer: the wall opens rather than explodes
-		local dir = ((i % 2 == 0) and 1 or -1)
-		bay_state[b].slabs[i] = {
-			node = node,
-			home = home,
-			away = {x = home.x + dir * (2.5 + i * 0.35) * U,
-					y = home.y + (1.2 + i * 0.28) * U,
-					z = home.z + (2.2 + (i % 3) * 0.6) * U},
-			-- The tumble as three angles rather than a quaternion to
-			-- slerp towards: Quaternion:Slerp is not on the sandbox's
-			-- whitelist, and scaling the eulers is the same picture for
-			-- a slab that turns twenty degrees
-			spin = {i * 11 % 40 - 20, i * 27 % 60 - 30, i * 17 % 50 - 25},
-		}
+end
+
+local function build_flying(b)
+	local st = bay_state[b]
+	if #st.slabs > 0 then
+		return
 	end
+	local tier = BAY_TIER[b]
+	local w = bay_width(tier)
+	local x0 = bay_x(b)
+	local i = 0
+	for x = x0 - w, x0 + w do
+		for y = 0, BAYS * SLAB_H - 1 do
+			local v = voxelworld.get_static_voxel(
+					buildat.Vector3(x, y, BAY_Z))
+			if v and v.id >= 2 then
+				i = i + 1
+				local node = part("Box",
+						magic.Vector3(x * VOXEL_M, (y + 0.5) * VOXEL_M,
+						BAY_Z * VOXEL_M),
+						magic.Vector3(VOXEL_M, VOXEL_M, VOXEL_M), stone)
+				local pos = node.position
+				local dir = ((i % 2 == 0) and 1 or -1)
+				st.slabs[i] = {
+					node = node,
+					-- The numbers, not the Vector3: a position property
+					-- hands back the node's own vector, so a home kept as
+					-- that object follows the cube as it flies
+					home = {x = pos.x, y = pos.y, z = pos.z},
+					away = {x = pos.x + dir * (2.0 + (i % 7) * 0.5) * U,
+							y = pos.y + (1.0 + (i % 5) * 0.4) * U,
+							z = pos.z + (1.8 + (i % 3) * 0.7) * U},
+					spin = {i * 11 % 40 - 20, i * 27 % 60 - 30,
+							i * 17 % 50 - 25},
+				}
+			end
+		end
+	end
+	log:info("dissolve: bay " .. b .. " has " .. i .. " cubes to fly")
+end
+
+local function drop_flying(b)
+	local st = bay_state[b]
+	for _, sl in ipairs(st.slabs) do
+		sl.node:Remove()
+	end
+	st.slabs = {}
 end
 
 local function ease(t)
@@ -803,9 +823,16 @@ end
 
 function dissolve_bay(b, open)
 	local st = bay_state[b]
-	if st then
-		st.target = open and 1 or 0
+	if not st or (st.target == (open and 1 or 0)) then
+		return
 	end
+	if open then
+		-- The cubes are made from the voxels that are there, and only
+		-- then are the voxels taken away
+		build_flying(b)
+		buildat.send_packet("main:dissolve", (b - 1) .. " 1")
+	end
+	st.target = open and 1 or 0
 end
 
 function handle_dissolve_update(event_type, event_data)
@@ -813,7 +840,6 @@ function handle_dissolve_update(event_type, event_data)
 	for b = 1, BAYS do
 		local st = bay_state[b]
 		if st.t ~= st.target then
-			local was = st.t
 			local step = dt / DISSOLVE_SECONDS
 			if st.target > st.t then
 				st.t = math.min(st.target, st.t + step)
@@ -829,8 +855,11 @@ function handle_dissolve_update(event_type, event_data)
 				sl.node.rotation = magic.Quaternion(sl.spin[1] * e,
 						sl.spin[2] * e, sl.spin[3] * e)
 			end
-			if st.t == st.target and was ~= st.target then
-				log:info("dissolve: bay " .. b .. " settled at " .. st.t)
+			if st.t == 0 and st.target == 0 then
+				-- Landed: the voxels come back and the cubes go
+				buildat.send_packet("main:dissolve", (b - 1) .. " 0")
+				drop_flying(b)
+				log:info("dissolve: bay " .. b .. " rebuilt")
 			end
 		end
 	end
