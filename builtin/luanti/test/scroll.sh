@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [FORMSPEC_SCROLL]: a formspec scroll is drawn, opens on a click and
 # sends the item that was picked. The fixture shows a form with
 # scroll[...;alpha,beta,gamma;1]; the client finds the box by its text,

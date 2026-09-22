@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [OBJECT_MESH] step 0: mobmesh.lua's server beside a client that looks at
 # the mobs and shoots them. Prints the mobs' properties from the
 # server's log and the model lines from the client's; the shot is

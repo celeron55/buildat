@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: long
 # [AUTO_PLAYTEST] part 2: a compared episode. episode.lua builds one state
 # on official Luanti's server and on this module, the client does one
 # scripted thing, and the census the fixture logs is diffed between the

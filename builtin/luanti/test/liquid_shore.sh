@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [WATER_LIGHT]: the shore where a flow meets a pool, in a world of a fixed
 # seed at a fixed place, shot once as the code stands and once with
 # BUILDAT_LIQUID_CORNER_AVG=1 (the corner rule before ce2a4eaf).

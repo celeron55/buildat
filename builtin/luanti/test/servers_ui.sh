@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [SERVER_LIST]: the two connect screens, driven -- the launch menu's
 # "Connect to server" shot with the used addresses on the left; then the
 # luanti_client's dialog, "Official list" picked, the permission dialog

@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [PREDICTION]: the vanilla client writes a dug or placed node before the
 # server answers, and the server's answer overwrites it. A player on the
 # episode fixture's platform, dirt in hand, clicking on the platform

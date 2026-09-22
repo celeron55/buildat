@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [DARK_INVARIANT]'s two probe pairs. The fixture carves a sealed room deep
 # inside stone -- no opening, no ray from any surface in it reaches the sky
 # -- and a second room of the same shape with a corridor and a shaft out to

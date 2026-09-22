@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [FORMSPEC_SCROLL]: the same scroll check as scroll.sh, for
 # extensions/luanti_client against official Luanti's server: twelve rows in
 # a container three units tall, the bar paged twice, the rows read before

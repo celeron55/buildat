@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [BOX_PLAYTEST_2] (2): the "Play on a Luanti server" tile from the grid,
 # a connect to an address nothing answers at: the failure must be said in
 # a dialog and OK must return to the connect screen, not the grid and not

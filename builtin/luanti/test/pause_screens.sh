@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [BOX_PLAYTEST_3] (2): the pause menu's settings screen over the game --
 # the cursor must be visible and the view must not turn under it. The
 # scan's "mouse" line and the yaw in the status row are the reading.

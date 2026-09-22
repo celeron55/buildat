@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [THIRD_PERSON]: the extension client's camera key against official
 # Luanti's server, the three views shot: local/camera_ext/first.png,
 # behind.png, front.png; the stage is camera.lua's as a worldmod. Needs the

@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [FORMSPEC_SCROLL]: the same hypertext check as hypertext.sh, for
 # extensions/luanti_client against official Luanti's server: the text with
 # its tags taken out and its <action> clicked.

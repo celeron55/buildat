@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [NEW_WORLD_FORM]: the new-world screen. A name that is already taken
 # leaves the screen standing with the name, the seed and the toggles as
 # they were, the seed is copied out of its field and pasted into the name

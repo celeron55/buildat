@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [WATER_LIGHT]: how far the sky's light travels along water in a roofed
 # passage. The fixture builds a tunnel with one opening to the sky and a
 # water run under it, and reads every node of the run; official diminishes

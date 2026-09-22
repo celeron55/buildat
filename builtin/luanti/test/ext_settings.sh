@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [EXT_SETTINGS]: the "Luanti client settings" tile, driven -- the render
 # mode row cycled once and the file read back, the key editor's forward
 # row rebound to Y and read back and put back, then Back to the grid. The

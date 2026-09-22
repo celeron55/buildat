@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [MAPGEN_STEP]: where a fresh world's on_generated time goes, by mod. A
 # VoxeLibre world is generated around a player for a couple of minutes and
 # the module's running totals are read out of the server's log -- the worst

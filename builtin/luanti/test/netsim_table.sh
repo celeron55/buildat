@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [NET_SIM]'s table, one cell: N driven runs (drive.sh, seed 5, GOAL 3,
 # 10 min) with or without the proxy, one line each appended to the table
 # under local/options_for_NET_SIM/ (its logs in a directory beside): whether the goal was met and when, the

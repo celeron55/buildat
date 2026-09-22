@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: long
 # [FUZZ_SWEEP]: the campaign, one fuzz.sh run after another, each run's
 # directory kept whole under local/fuzz_sweep/<game>_<seed>_<min>/ and one
 # row per run appended to local/fuzz_sweep/table.md in the module plan's

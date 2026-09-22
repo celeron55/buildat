@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [VIEW_KEYS]: F3 (fog), Z held (zoom) and F12 (the engine's screenshot)
 # driven on camera.lua's stage: local/viewkeys/plain.png, nofog.png,
 # zoom.png and back.png; then V through the minimap's modes, which start

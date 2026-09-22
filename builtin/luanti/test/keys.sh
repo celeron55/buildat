@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [KEY_BINDINGS]: a rebound key walks the player. user/luanti/settings.json
 # holds key.forward=U; a devtest client joins, holds U for three seconds,
 # and the scan's position has to have moved; the scan's keys line has to

@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [FORM_ENTER]: enter in a formspec field sends the form with key_enter and
 # key_enter_field, and field_close_on_enter[q;false] keeps it open -- which
 # is what a game's creative search is. The fixture's form filters four rows

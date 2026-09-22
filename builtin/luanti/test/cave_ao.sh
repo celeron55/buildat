@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [CAVE_AO]: one picture of a cave chamber whose nibbles are both nought,
 # at whatever floor under the ambient is asked for. The ladder the user
 # picks off is made by running this once per value:

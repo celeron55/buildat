@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [VOXEL_MATERIALS] layer 2's upgrade path: a texture pack under
 # user/luanti/texture_packs wins over what the game ships. The runner writes
 # a pack of one magenta stone texture, stands the player on camera.lua's

@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [UI_PARITY]: a HUD text element's size.X multiplies the font, as Luanti's
 # hud.cpp does it (`font_size *= e->size.X`). The fixture adds the same word
 # at size 1 and size 3 and the scan measures what was drawn.

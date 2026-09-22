@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [KEY_BINDINGS]: the editor screen, driven -- the launcher's menu, its
 # "Luanti settings", "Key bindings...", the forward row picked and U
 # pressed, the row then says U; "Defaults" puts W back. Read through the

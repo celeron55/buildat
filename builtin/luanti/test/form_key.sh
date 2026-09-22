@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [BOX_PLAYTEST_2] (8): the key that opens a form must not type into the
 # field the form focuses. VoxeLibre's creative inventory (I) focuses its
 # search field; after the press the field must be empty. A real key is a

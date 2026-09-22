@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [BOX_PLAYTEST_2] (12): the connect runs on a worker, so the frame keeps
 # drawing while it waits. The client is pointed at a blackholed address
 # (192.0.2.1, TEST-NET-1: the SYNs go nowhere and the connect sits for its

@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [FORM_ENTER]: the same enter check as form_enter.sh, for
 # extensions/luanti_client against official Luanti's server -- the same
 # worldmod, the same four rows filtered on Enter. Needs the Luanti checkout

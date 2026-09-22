@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [MENU_KEYS]: the launch menu's keyboard. The client is started with no
 # server, because the launch menu is what it shows when it has nothing to
 # connect to.

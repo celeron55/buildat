@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [FLY_MODES]: the three modes as official has them, driven. A devtest
 # world (the singleplayer holds every privilege): K, then Space held for
 # two seconds, and the player is up in the air; the fixture then revokes

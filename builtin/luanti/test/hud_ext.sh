@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [EXT_HUD_PARITY]: the extension client's minimap and F5 keys against official
 # Luanti's server: the minimap at the top right in surface mode, V three
 # times to the radar, and F5's two levels, shot under local/hud_ext/; the

@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: long
 # [AUTO_PLAYTEST] part 1: a fuzz run. A fresh world, a client that walks at
 # random for MINUTES from a seeded RNG, and fuzz.lua asserting invariants on
 # the server once a second. The runner reads both logs afterwards.

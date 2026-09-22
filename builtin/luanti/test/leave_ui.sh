@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: full
 # [MENU_CONTEXT]: leaving a menu-only game for the launcher, driven -- the
 # VoxeLibre tile opens the world screen (a local server behind it), "< back
 # to the launcher" returns to the grid with the client still up and the

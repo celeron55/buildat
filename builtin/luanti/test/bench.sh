@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: long
 # devtest's /bench_* commands through bench.lua, with a client connected;
 # prints the bench lines. See [LUAJIT] in doc/plan/performance_plan.md.
 set -u

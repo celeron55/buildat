@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: long
 # [SCAN_DRIVE]: a driven run. The same server and fixture as fuzz.sh, the
 # client on its stdin (a fifo), and drive.py choosing every act from what
 # `event scan` shows. The verdict is the fuzz run's, verbatim (verdict.sh),

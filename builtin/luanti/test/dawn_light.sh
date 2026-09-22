@@ -1,4 +1,5 @@
 #!/bin/bash
+# tier: quick
 # [DAWN_LIGHT]: the hour before the sun. At 4:00-5:00 (and 19:00-20:00) the
 # halo is up while the day ramp is still zero, so the ground was black under
 # a night sky with a bright halo in it. The same nine hours are shot twice --
