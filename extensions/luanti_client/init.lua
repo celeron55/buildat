@@ -1127,6 +1127,11 @@ local function show_client(host, port, name, password, mode)
 			end
 			local r = luanti.serialize.reader(data)
 			local ok, err = pcall(objects.apply_message, obj, r)
+			-- The local player's own override goes to the avatar's physics
+			if ok and obj.is_self and obj.physics_override and avatar then
+				avatar.override = obj.physics_override
+				obj.physics_override = nil
+			end
 			if not ok then
 				-- One message this does not understand is not worth losing
 				-- the object over; the rest still arrive

@@ -25,6 +25,7 @@ M.CMD_SET_SPRITE = 3
 M.CMD_PUNCHED = 4
 M.CMD_UPDATE_ARMOR_GROUPS = 5
 M.CMD_SET_ANIMATION = 6
+M.CMD_SET_PHYSICS_OVERRIDE = 9
 
 local PROPERTIES_VERSION = 4
 
@@ -111,6 +112,28 @@ function M.apply_message(obj, r)
 	elseif cmd == M.CMD_SET_TEXTURE_MOD then
 		obj.texture_mod = r:string()
 		obj.visual_stale = true
+	elseif cmd == M.CMD_SET_PHYSICS_OVERRIDE then
+		-- A mod's physics_override for the player this object is
+		-- (PlayerSAO::getPropertyPacket's AO_CMD_SET_PHYSICS_OVERRIDE):
+		-- the three multipliers, then the three flags as "not", then the
+		-- rest (5.9+); the player's physics multiplies by them. The
+		-- fixture's gravity 0 held nowhere here, and a game's speed
+		-- potion did nothing ([DIG_PARITY], 2026-09-22).
+		local ov = {speed = r:f32(), jump = r:f32(), gravity = r:f32()}
+		if r:remaining() >= 3 then
+			ov.sneak = r:u8() == 0 and 1 or 0
+			ov.sneak_glitch = r:u8() == 0 and 1 or 0
+			ov.new_move = r:u8() == 0
+		end
+		if r:remaining() >= 4 * 5 then
+			ov.speed_climb = r:f32(); ov.speed_crouch = r:f32()
+			ov.liquid_fluidity = r:f32(); ov.liquid_fluidity_smooth = r:f32()
+			ov.liquid_sink = r:f32()
+		end
+		if r:remaining() >= 4 * 2 then
+			ov.acceleration_default = r:f32(); ov.acceleration_air = r:f32()
+		end
+		obj.physics_override = ov
 	end
 end
 
