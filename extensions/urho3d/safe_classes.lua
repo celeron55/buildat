@@ -27,6 +27,10 @@ function M.define(dst, util)
 			-- whatever length the uniform declares
 			WriteFloat = util.self_function(
 					"WriteFloat", {"boolean"}, {"VectorBuffer", "number"}),
+			-- One 16-bit PCM sample; a block of these is what a
+			-- BufferedSoundStream is fed ([LAUNCH_WORLD]'s synth)
+			WriteShort = util.self_function(
+					"WriteShort", {"boolean"}, {"VectorBuffer", "number"}),
 			Clear = util.self_function(
 					"Clear", {}, {"VectorBuffer"}),
 			GetSize = util.self_function(
@@ -2129,11 +2133,55 @@ function M.define(dst, util)
 		},
 	})
 
+	-- A stream of samples a script makes itself, rather than a Sound loaded
+	-- from a file: the mixer thread asks the stream for data as it plays
+	-- and the script tops it up ahead of the playhead. See [LAUNCH_WORLD],
+	-- whose whole audio is synthesised and has no assets at all.
+	util.wc("SoundStream", {
+		instance = {
+			SetFormat = util.self_function("SetFormat", {},
+					{"SoundStream", "number", "boolean", "boolean"}),
+		},
+		properties = {
+			-- Whether playback stops when the stream runs dry; false (the
+			-- default) leaves it playing silence, which is what a stream
+			-- that is topped up every frame wants -- an underrun is a gap,
+			-- not the end of the sound
+			stopAtEnd = util.simple_property("boolean"),
+			sampleSize = util.simple_property("number"),
+			frequency = util.simple_property("number"),
+		},
+	})
+
+	util.wc("BufferedSoundStream", {
+		inherited_from_by_wrapper = dst.SoundStream,
+		class = {
+			new = function()
+				return util.wrap_instance("BufferedSoundStream",
+						BufferedSoundStream:new())
+			end,
+		},
+		instance = {
+			-- A VectorBuffer of samples rather than a string: tolua puts a
+			-- Lua string through const char*, so the first zero byte in a
+			-- block of PCM would end it
+			AddData = util.self_function("AddData", {},
+					{"BufferedSoundStream", "VectorBuffer"}),
+			Clear = util.self_function("Clear", {}, {"BufferedSoundStream"}),
+		},
+		properties = {
+			-- How far ahead of the playhead the buffer is filled, which is
+			-- what a script tops up against
+			bufferLength = util.simple_property("number"),
+			bufferNumBytes = util.simple_property("number"),
+		},
+	})
+
 	util.wc("SoundSource", {
 		inherited_from_by_wrapper = dst.Component,
 		instance = {
 			Play = util.self_function(
-					"Play", {}, {"SoundSource", "Sound"}),
+					"Play", {}, {"SoundSource", {"Sound", "SoundStream"}}),
 			Stop = util.self_function("Stop", {}, {"SoundSource"}),
 		},
 		properties = {

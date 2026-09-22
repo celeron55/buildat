@@ -1,6 +1,6 @@
 #!/bin/bash
-# games/uitest: the client sandbox's UI and the procedural texture path
-# ([LAUNCH_WORLD]'s whitelist bill). The game's client_lua asserts as it
+# games/uitest: the client sandbox's UI, and the procedural texture and
+# sound paths ([LAUNCH_WORLD]'s whitelist bill). The game's client_lua asserts as it
 # loads, so what this does is run it and read whether the assert line came
 # out; a whitelist entry that goes missing raises in the sandbox instead.
 #
@@ -27,13 +27,15 @@ bin/buildat -s localhost:29793 -w 640x480 -l 3 -c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-if grep -aq "procedural texture ok" "$out/cli.log"; then
-	grep -a "procedural texture ok" "$out/cli.log" | sed 's/.*uitest: //'
-else
-	echo "FAIL: the procedural texture check did not run"
-	grep -aiE "error|assert|raised" "$out/cli.log" | tail -5
-	exit 1
-fi
+for what in texture sound; do
+	if grep -aq "procedural $what ok" "$out/cli.log"; then
+		grep -a "procedural $what ok" "$out/cli.log" | sed 's/.*uitest: //'
+	else
+		echo "FAIL: the procedural $what check did not run"
+		grep -aiE "error|assert|raised" "$out/cli.log" | tail -5
+		exit 1
+	fi
+done
 # And it is on screen: the swatch's corner is not the background
 python3 - "$out/uitest.png" <<'PY'
 import sys

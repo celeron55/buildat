@@ -59,6 +59,43 @@ local function check_procedural_texture(parent)
 			" image into a Texture2D, on a BorderImage and a Material")
 end
 
+-- A sound the program makes itself, with no audio file anywhere: samples
+-- written into a VectorBuffer, handed to a BufferedSoundStream and played
+-- by a SoundSource ([LAUNCH_WORLD], whose audio is synthesised and has no
+-- assets). Asserted rather than listened to, since a scripted run has no
+-- ears; what it proves is that the block reaches the stream.
+local function check_procedural_sound()
+	local RATE = 22050
+	local SAMPLES = math.floor(RATE / 4)  -- a quarter of a second
+	local stream = magic.BufferedSoundStream:new()
+	stream:SetFormat(RATE, true, false)  -- 16-bit, mono
+	-- An underrun is a gap in the sound, not the end of it: the stream
+	-- stays open and the script tops it up
+	stream.stopAtEnd = false
+	local buffer = magic.VectorBuffer:new()
+	for i = 0, SAMPLES - 1 do
+		local v = math.sin(i * 2 * math.pi * 440 / RATE) * 12000
+		buffer:WriteShort(math.floor(v))
+	end
+	assert(buffer:GetSize() == SAMPLES * 2, "two bytes a sample, got " ..
+			buffer:GetSize() .. " for " .. SAMPLES)
+	stream:AddData(buffer)
+	assert(stream.bufferNumBytes == buffer:GetSize(),
+			"the stream took the block")
+	-- A SoundSource is a Component, so it wants a node; uitest has no
+	-- scene of its own and one node in one scene is the whole of it
+	kept.sound_scene = magic.Scene()
+	local node = kept.sound_scene:CreateChild("sound")
+	local source = node:CreateComponent("SoundSource")
+	source.gain = 0.0  -- a scripted run should not make a noise
+	source:Play(stream)
+	kept.stream, kept.source = stream, source
+	log:info(string.format(
+			"procedural sound ok: %d bytes, %.2f s buffered, playing %s",
+			stream.bufferNumBytes, stream.bufferLength,
+			tostring(source.playing)))
+end
+
 function show_stuff()
 	local root = ui_stack:push({desc="uitest root"})
 	root.defaultStyle = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
@@ -79,6 +116,7 @@ function show_stuff()
 end
 
 show_stuff()
+check_procedural_sound()
 
 
 function handle_keydown(event_type, event_data)
