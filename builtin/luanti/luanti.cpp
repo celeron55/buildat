@@ -1639,22 +1639,32 @@ struct Module: public interface::Module, public luanti::Interface
 		if(m_scene){
 			const int64_t t0 = interface::os::time_us();
 			size_t left = 0;
+			int64_t t_in = 0;
 			voxelworld::access(m_server, m_scene,
 					[&](voxelworld::Instance *world){
+				t_in = interface::os::time_us();
 				left = world->relight_stale(RELIGHT_BUDGET_US,
 						RELIGHT_NEAR_BUDGET_US);
 			});
 			const int64_t took = interface::os::time_us() - t0;
+			// What of it was waiting for voxelworld rather than lighting:
+			// the relight's own budget is 20 ms (100 near) and a step of a
+			// second in "relight" is another module holding the world --
+			// the physics variant's does. A phase of its own says so
+			// rather than reading as this one's cost ([MAPGEN_STEP]).
+			const int64_t waited = t_in > t0 ? t_in - t0 : 0;
 			if(took > 1000){
 				drop_read_cache();
 				char buf[96];
 				snprintf(buf, sizeof buf,
-						"core.__note_phase(\"relight\", %f)",
+						"core.__note_phase(\"%s\", %f)",
+						waited * 2 > took ? "relight_wait" : "relight",
 						(double)took / 1000000.0);
 				run_chunk_string(buf, "relight");
-				if(left > 0)
-					log_v(MODULE, "relight: %i ms, %zu sections still stale",
-							(int)(took / 1000), left);
+				if(left > 0 || waited > 100000)
+					log_v(MODULE, "relight: %i ms (%i waiting for "
+							"voxelworld), %zu sections still stale",
+							(int)(took / 1000), (int)(waited / 1000), left);
 			}
 		}
 		update_load_points();
