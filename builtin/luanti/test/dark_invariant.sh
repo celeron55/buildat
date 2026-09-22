@@ -12,7 +12,8 @@
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-out="$here/local/dark_invariant${ABLATE:+_$ABLATE}"; mkdir -p "$out"
+out="$here/local/dark_invariant${ABLATE:+_$ABLATE}${BUILDAT_SKY_REACH:+_reach$BUILDAT_SKY_REACH}"
+mkdir -p "$out"
 save=buildat_test_dark
 ABLATE="${ABLATE:-}"
 cd "$here/Build"

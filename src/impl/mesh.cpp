@@ -551,6 +551,14 @@ static const float AO_LEVELS[4] = {1.0f, 0.72f, 0.52f, 0.38f};
 // shaded face fell to 0.37 of the render for a corner at 1.2, so the
 // cave corner's 1.5 (cave_ao 0.49 against 0.128) is not this table's.
 static const float AO_LEVELS_PBR[4] = {1.0f, 0.55f, 0.20f, 0.10f};
+// How far a hemisphere ray is walked to ask whether a surface under the
+// terrain reaches the sky at all; 0 turns the term off. See [DARK_INVARIANT]
+// and face_vertex_colors() below.
+static const int SKY_REACH = []{
+	const char *s = getenv("BUILDAT_SKY_REACH");
+	int v = s ? atoi(s) : 0;
+	return v < 0 ? 0 : (v > 64 ? 64 : v);
+}();
 static const bool PBR_MODE = getenv("BUILDAT_LUANTI_PBR") != nullptr && (
 		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr" ||
 		ss_(getenv("BUILDAT_LUANTI_PBR")) == "1" ||
@@ -903,27 +911,36 @@ static void face_vertex_colors(VoxelVolume &volume,
 	// shaded probes read at a third of official's ([PARITY_LEFTOVERS],
 	// 2026-09-21: stone 18 against 61, the cave floor 23 against 46).
 	static const int HEMI_REACH = 4;
-	float hemi = 1.0f;
-	if(horizon || SHADOW_KINDS){
-		const pv::Vector3DInt32 ni((int)std::round(n.getX()),
-				(int)std::round(n.getY()), (int)std::round(n.getZ()));
-		const pv::Vector3DInt32 dirs[9] = {
-			ni, ni + u, ni - u, ni + v, ni - v,
-			ni + u + v, ni + u - v, ni - u + v, ni - u - v,
-		};
+	const pv::Vector3DInt32 ni((int)std::round(n.getX()),
+			(int)std::round(n.getY()), (int)std::round(n.getZ()));
+	const pv::Vector3DInt32 dirs[9] = {
+		ni, ni + u, ni - u, ni + v, ni - v,
+		ni + u + v, ni + u - v, ni - u + v, ni - u - v,
+	};
+	// unknown_blocks: a voxel the meshed volume has no data for stops the
+	// ray instead of letting it through. The shade's own rays (four voxels,
+	// inside the padding) never meet one and keep the old answer; the long
+	// walk below leaves the volume often, and there "no data" has to read
+	// as "not sky" or a sealed room at a chunk's edge is lit through the
+	// seam ([DARK_INVARIANT]: the left half of the sealed shot, 2026-09-22).
+	auto open_fraction = [&](int reach, bool unknown_blocks){
 		int open = 0;
 		for(const pv::Vector3DInt32 &d : dirs){
 			bool blocked = false;
 			pv::Vector3DInt32 p = front_p;
-			for(int k = 0; k < HEMI_REACH && !blocked; k++){
+			for(int k = 0; k < reach && !blocked; k++){
 				p += d;
-				blocked = occludes_sky(volume, voxel_reg, fmt, p);
+				blocked = (unknown_blocks && fmt.undefined(volume.sample_at(p))) ||
+						occludes_sky(volume, voxel_reg, fmt, p);
 			}
 			if(!blocked)
 				open++;
 		}
-		hemi = (float)open / 9.0f;
-	}
+		return (float)open / 9.0f;
+	};
+	float hemi = 1.0f;
+	if(horizon || SHADOW_KINDS)
+		hemi = open_fraction(HEMI_REACH, false);
 	// And the terrain beyond the chunk, out of the horizon map: the voxel
 	// in front, in world coordinates. The volume's lower corner is the
 	// chunk's origin less its padding, and the map's origin says where
@@ -949,6 +966,29 @@ static void face_vertex_colors(VoxelVolume &volume,
 			under = h != HORIZON_NONE && h > wy;
 		}
 	}
+
+	// [DARK_INVARIANT]: how much of the face's hemisphere still reaches the
+	// sky, asked over a long walk rather than the shade's four voxels. The
+	// bounce floor in the shader stands for the light the four-bit nibble
+	// cannot carry into a cave, and it follows the hour -- so a sealed room
+	// at noon is lit as if outside. The rule the item states is that where
+	// no ray reaches the sky, nothing the sky does may reach the surface;
+	// the sky's three terms in the shader (the bounce, the ground and the
+	// interior) all take the local shade in b, so multiplying b by this is
+	// the whole of it and no shader reads a new channel. Asked only where
+	// the flood's nibble is nought, which is the invariant's own domain and
+	// the only place the floor is the whole of the light; a face in the open
+	// that happens to sit at nibble nought finds the sky along its rays and
+	// reads one, so nothing above ground moves.
+	// simplified: a ray that walks out of the meshed volume counts as
+	// reaching the sky, which errs towards today's look at a chunk's edge;
+	// the upgrade is the horizon map consulted where the volume ends.
+	// Off (0) unless BUILDAT_SKY_REACH says how far to walk, because which
+	// length is right moves every cave in the game and is the user's pick
+	// off an options_for_DARK_INVARIANT/ sheet.
+	float sky_reach = 1.0f;
+	if(SKY_REACH > 0 && sky_f <= 0.0f)
+		sky_reach = open_fraction(SKY_REACH, true);
 
 	for(size_t i = 0; i < 4; i++){
 		pv::Vector3DFloat d = quad[i] - centre;
@@ -1010,7 +1050,8 @@ static void face_vertex_colors(VoxelVolume &volume,
 			float local_ao = ao * hemi;
 			if(local_ao < SHADE_FLOOR)
 				local_ao = SHADE_FLOOR;
-			float local = local_ao * FACE_SHADE[face_id] / 1.15f;
+			float local = local_ao * FACE_SHADE[face_id] / 1.15f *
+					sky_reach;
 			out[i] = Color(lamp_shade, under ? 0.0f : terrain,
 					local > 1.0f ? 1.0f : local,
 					sky_alpha(sky_f, sky_shade, true)).ToUInt();
