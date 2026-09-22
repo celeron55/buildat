@@ -725,9 +725,18 @@ function M.define(dst, util)
 		properties = {
 			nearClip = util.simple_property("number"),
 			farClip = util.simple_property("number"),
+			-- Urho3D's fov is the vertical one (Camera::UpdateProjection
+			-- puts 1/tan(fov/2) on the Y axis and derives X from the
+			-- aspect), which is what Luanti's own fov setting is too
 			fov = util.simple_property("number"),
 			orthographic = util.simple_property("boolean"),
 			orthoSize = util.simple_property("number"),
+			-- What the viewport's shape is, which is the other half of
+			-- reading a frame's geometry: a script that works out how
+			-- much of a node a screen pixel is needs both ([URHO_SWEEP],
+			-- wanted 2026-09-22 while reading a third-person shot)
+			aspectRatio = util.simple_property("number"),
+			zoom = util.simple_property("number"),
 		},
 	})
 
