@@ -197,7 +197,9 @@ local BINDINGS = {
 -- Whether cancelling the connect dialog quits the client: it does when this
 -- extension is the client's whole reason for running, and does not when
 -- buildat's menu is underneath. See M.boot() and M.launch.
-local cancel_exits = true
+-- On SETTINGS rather than a local of its own: the session's callbacks
+-- are at Lua's 60-upvalue line
+SETTINGS.cancel_exits = true
 
 -- action -> the entry, for the code that asks "which key is this?"
 local BIND = {}
@@ -403,8 +405,35 @@ local function show_client(host, port, name, password, mode)
 	-- words), 2 the whole block
 	local show_debug = 0
 
+	-- A connect that fails before there is a session: said in a dialog
+	-- and back to the connect screen, as a session that fails later is
+	-- ([BOX_PLAYTEST_2] 2) -- a line in the corner of a screen nothing
+	-- else happens on told nobody. Reached through add_line(text, true)
+	-- rather than by name: the connect callback below is at Lua's
+	-- 60-upvalue line.
+	local function connect_failed(err)
+		log:warning("Could not connect to "..host..":"..port..": "..
+				tostring(err))
+		chat_text:Remove()
+		info_text:Remove()
+		tint_panel:Remove()
+		status_text:Remove()
+		if loading_panel then
+			loading_panel:Remove()
+			loading_panel = nil
+		end
+		uistack.main:pop(root)
+		ui_utils.show_message_dialog("Could not connect to "..host..":"..
+				port..": "..tostring(err), function()
+			show_connect_dialog(host..":"..port, name)
+		end)
+	end
+
 	local lines = {"Luanti: "..host..":"..port}
-	local function add_line(text)
+	local function add_line(text, fatal)
+		if fatal then
+			return connect_failed(text)
+		end
 		lines[#lines + 1] = text
 		while #lines > 10 do
 			table.remove(lines, 2) -- Keep the address line
@@ -416,7 +445,7 @@ local function show_client(host, port, name, password, mode)
 
 	network.udp_connect(host, port, function(socket, err)
 		if not socket then
-			add_line("Could not connect: "..tostring(err))
+			add_line(tostring(err), true)
 			return
 		end
 		local client = luanti.new(socket, {
@@ -3345,9 +3374,12 @@ local function show_client(host, port, name, password, mode)
 				open_local_form(pause_spec(), menu_fields)
 			elseif fields.btn_exit then
 				-- The disconnect goes out and the window closes, which is
-				-- the same path the window's own close button takes
+				-- the same path the window's own close button takes; from
+				-- buildat's menu the grid underneath is what is left
 				leave()
-				engine:Exit()
+				if SETTINGS.cancel_exits then
+					engine:Exit()
+				end
 			end
 		end
 
@@ -3373,7 +3405,10 @@ local function show_client(host, port, name, password, mode)
 			log:info("Session ended: "..(text:gsub("\n", " ")))
 			leave()
 			ui_utils.show_message_dialog(text, function()
-				if got_content then
+				-- Launched from buildat's menu the grid is underneath, and
+				-- closing the client over it would be leaving the launcher
+				-- for a server's refusal ([BOX_PLAYTEST_2] 2)
+				if got_content and SETTINGS.cancel_exits then
 					engine:Exit()
 				else
 					-- Nothing of the game ever arrived, so this was the
@@ -3533,23 +3568,12 @@ show_connect_dialog = function(address, name)
 	local name_edit = labeled_edit(window, "Player name", name or DEFAULT_NAME)
 	local password_edit = labeled_edit(window, "Password", "")
 
-	-- Picked before anything loads and fixed for the session: the atlas's
-	-- normal and surface maps have to be on from the first texture it builds,
-	-- and building them is most of what the media takes. What it buys is in
-	-- res/PBRVoxel.xml.
-	local pbr_row = window:CreateChild("UIElement")
-	pbr_row:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
-	pbr_row.minHeight = 24
-	local pbr_check = pbr_row:CreateChild("CheckBox")
-	pbr_check:SetStyleAuto()
-	local pbr_label = pbr_row:CreateChild("Text")
-	pbr_label:SetStyleAuto()
-	pbr_label.text = "Enable PBR (slower to load)"
-	-- A checkbox says two things and there are three modes, so it says the
-	-- one it always said: pbr or not. The other two are named by the
-	-- environment variable, which is what a scripted run uses anyway; a mode
-	-- picker in this dialog waits until somebody wants one by hand.
-	pbr_check.checked = DEFAULT_MODE == "pbr"
+	-- The render mode is the settings screen's ([BOX_PLAYTEST_2] 3), fixed
+	-- for the session before anything loads: the atlas's normal and
+	-- surface maps have to be on from the first texture it builds. The
+	-- checkbox that was here read its element after the screen was popped
+	-- and threw, so the connect never started and the grid was what was
+	-- left, with no word why (finding 2).
 	-- The password is the field a second try is most likely about, and it is
 	-- the one that is not filled in
 	if address then
@@ -3578,10 +3602,9 @@ show_connect_dialog = function(address, name)
 		kept.address = address_edit:GetText()
 		kept.name = name
 		settings.save(kept)
+		local password = password_edit:GetText()
 		uistack.main:pop(root)
-		show_client(host, port, name, password_edit:GetText(),
-				pbr_check.checked and "pbr" or
-				(DEFAULT_MODE == "pbr" and "unlit" or DEFAULT_MODE))
+		show_client(host, port, name, password, DEFAULT_MODE)
 	end
 
 	local function cancel()
@@ -3593,7 +3616,7 @@ show_connect_dialog = function(address, name)
 		-- Launched on its own there is nothing to go back to, so cancelling
 		-- is quitting; launched from buildat's menu, that menu is what is
 		-- underneath and cancelling belongs to it. See M.launch below.
-		if cancel_exits then
+		if SETTINGS.cancel_exits then
 			engine:Exit()
 		end
 	end
@@ -3743,7 +3766,7 @@ end
 -- Launched as the client's whole reason for running: `buildat -m
 -- luanti_client`, where cancelling the dialog quits.
 function M.boot()
-	cancel_exits = true
+	SETTINGS.cancel_exits = true
 	self_tests()
 	-- A scripted run has nothing to click, and the dialog's focus is in a
 	-- LineEdit that swallows Return. BUILDAT_LUANTI_CONNECT goes straight in
@@ -3781,7 +3804,7 @@ function M.on_untrusted_launch(request)
 			#params.address <= 256 and params.address or nil
 	local name = type(params.name) == "string" and #params.name <= 64 and
 			params.name or nil
-	cancel_exits = false
+	SETTINGS.cancel_exits = false
 	self_tests()
 	show_connect_dialog(address, name)
 end
