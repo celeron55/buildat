@@ -1,7 +1,8 @@
 #!/bin/bash
 # [THIRD_PERSON]: the camera key cycled through the three views and each
 # shot: local/camera/first.png, behind.png, front.png. The stage is
-# camera.lua's floor with a wall two nodes behind the player. Prints the
+# camera.lua's floor with a wall two nodes behind the player, and then a
+# second floor with nothing behind them at all. Prints the
 # chat lines the client logged for the modes.
 #
 #   builtin/luanti/test/camera.sh
@@ -50,10 +51,34 @@ delay 1200
 screenshot $out/behind_down.png
 look_dir 0 -0.1 1
 delay 1200
+event scan
 screenshot $out/behind_centred.png
 keypress C
 delay 1500
 screenshot $out/front.png
+keypress C
+delay 800
+# And the same back view on a floor with nothing behind the player, which
+# is what says how the third-person camera frames them when no wall is
+# pulling it in ([OVER_SHOULDER]). The stage is asked for by chat so it
+# cannot land in the middle of the shots above.
+keypress T
+delay 800
+text open
+keypress Return
+wait_log 30000 chat: camera: the open stage is ready
+delay 2500
+look_dir 0 -0.1 1
+delay 1200
+event scan
+screenshot $out/open_first.png
+keypress C
+delay 1500
+look_dir 0 -0.1 1
+delay 1200
+event scan
+screenshot $out/open_behind.png
+keypress C
 keypress C
 delay 500
 quit
@@ -63,7 +88,7 @@ bin/buildat -s localhost:29778 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 \
 sleep 2
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-grep -a "self model at" "$out/cli.log" | sed 's/.*: scan/scan/'
+grep -aE "self model at|camera at" "$out/cli.log" | sed 's/.*: scan/scan/'
 # The back view's pitch follows the look ([BOX_PLAYTEST_4] 3): looking up
 # the sky is the top of the frame, looking down the ground is the bottom
 python3 - "$out" <<'PY'

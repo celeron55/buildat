@@ -273,6 +273,15 @@ return function(ctx)
 					"scan %s: self model at %.2f,%.2f,%.2f yaw %.1f;"..
 					" feet %.2f,%.2f,%.2f look %.1f", label,
 					own.x, own.y, own.z, own.yaw, fx, fy, fz, (ctx.view()))
+			-- And where the camera ended up, which is what says whether a
+			-- third-person view was pulled in by a wall behind the player
+			-- or is drawing at its own distance ([OVER_SHOULDER])
+			local dx, dy, dz = p0.x - fx, p0.y - fy, p0.z - fz
+			local _, _, cam_fov = ctx.view()
+			lines[#lines + 1] = string.format(
+					"scan %s: camera at %.2f,%.2f,%.2f, %.2f nodes from the"..
+					" feet, fov %.1f", label, p0.x, p0.y, p0.z,
+					math.sqrt(dx * dx + dy * dy + dz * dz), cam_fov)
 		end
 		-- The objects, and the fallen bodies as objects with them: a body
 		-- is listed by its node id and its centre, so the driver can walk
