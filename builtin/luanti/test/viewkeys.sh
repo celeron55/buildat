@@ -60,6 +60,13 @@ keypress V
 keypress V
 delay 1200
 screenshot $out/map_off.png
+keypress F11
+delay 4000
+screenshot $out/fullscreen.png
+keypress F11
+delay 4000
+screenshot $out/after_f11.png
+delay 500
 quit
 CMDS
 bin/buildat -s localhost:29778 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 \
@@ -69,3 +76,19 @@ kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 grep "chat (local)\|F12: screenshot\| E " "$out/cli.log" | sed 's/.*: //'
 ls "$out"/*.png
+# F11 twice: the world drawn in and after fullscreen ([BOX_PLAYTEST_3] 1;
+# the extension's atlas is filled by hand, vanilla's is voxelworld's,
+# which already restores -- this is the check that says so)
+python3 - "$out" <<'PY'
+import sys, statistics
+from PIL import Image
+out = sys.argv[1]
+means = {}
+for n in ("plain", "fullscreen", "after_f11"):
+	im = Image.open("%s/%s.png" % (out, n)).convert("L")
+	w, h = im.size
+	means[n] = statistics.mean(list(im.crop((0, h // 2, w, h)).getdata()))
+print("frame means: " + ", ".join("%s %.0f" % (k, v) for k, v in means.items()))
+print("FAIL: the world went black across a screen mode change" if min(means.values()) < 25
+		else "PASS: drawn before, in and after fullscreen")
+PY

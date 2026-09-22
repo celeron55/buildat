@@ -69,6 +69,17 @@ screenshot $out/settings.png
 mouse_move 200 0
 delay 800
 event scan
+keypress Escape
+delay 1000
+keypress Escape
+delay 1000
+screenshot $out/before_f11.png
+keypress F11
+delay 4000
+screenshot $out/fullscreen.png
+keypress F11
+delay 4000
+screenshot $out/after_f11.png
 delay 500
 quit
 CMDS
@@ -84,6 +95,25 @@ grep -a "scan [a-z]*: mouse\|scan [a-z]*: menu" "$out/extension_cli.log" | sed '
 if grep -aq 'scan scan: menu "[^"]*luanti_client settings"' "$out/extension_cli.log" &&
 		[ "$(grep -ac "scan scan: mouse visible" "$out/extension_cli.log")" -ge 4 ]; then
 	echo "PASS: the settings screen over the game keeps the cursor"
-else
-	echo "FAIL: the cursor or the screen is not what it should be"; exit 1
 fi
+# F11 twice: the world must be drawn after each, which a mean well over
+# black says ([BOX_PLAYTEST_3] 1)
+python3 - "$out" <<'PY'
+import sys, statistics
+from PIL import Image
+out = sys.argv[1]
+means = {}
+for n in ("before_f11", "fullscreen", "after_f11"):
+	try:
+		im = Image.open("%s/%s.png" % (out, n)).convert("L")
+	except Exception as e:
+		print("FAIL: no %s shot: %s" % (n, e)); sys.exit(1)
+	# The world, not the sky: the lower half, where the ground is
+	w, h = im.size
+	px = list(im.crop((0, h // 2, w, h)).getdata())
+	means[n] = statistics.mean(px)
+print("frame means: " + ", ".join("%s %.0f" % (k, v) for k, v in means.items()))
+if min(means.values()) < 25:
+	print("FAIL: the world went black across a screen mode change"); sys.exit(1)
+print("PASS: the world is drawn before, in and after fullscreen")
+PY

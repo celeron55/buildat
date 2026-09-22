@@ -4555,6 +4555,10 @@ function M.new(magic, buildat, log, options)
 	-- session -- and the first blocks it sends are the ones around the
 	-- player, which is exactly where a hole is worst.
 	function self:update(dtime, drop_distance)
+		-- A device reset -- a change of screen mode on Windows -- loses
+		-- what was filled by hand; the registry puts its Images back
+		-- ([BOX_PLAYTEST_3] 1)
+		self.atlas_reg:update()
 		-- Every frame, because easing towards a target is what it is for
 		if daylight then
 			apply_daylight(dtime)

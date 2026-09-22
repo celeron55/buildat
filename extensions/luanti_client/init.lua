@@ -899,11 +899,20 @@ local function show_client(host, port, name, password, mode)
 		-- The atlas textures the world is drawn with are filled in by hand
 		-- rather than loaded from a file, and Urho3D can only bring back
 		-- what it loaded: a change of screen mode takes the GL context with
-		-- it and the world comes back black. Building the registry again is
-		-- what fills them.
+		-- it and the world comes back black.
+		--
+		-- The atlas registry keeps the Image every segment was written
+		-- into and puts it back when the texture says its data is lost
+		-- (`AtlasRegistry::update()`, which voxelworld's client half calls
+		-- every frame); this client never called it and rebuilt the whole
+		-- registry on ScreenMode instead -- which on the box left the
+		-- world black going into fullscreen and, in pbr, for good coming
+		-- out of it, the rebuild filling textures the materials no longer
+		-- drew with ([BOX_PLAYTEST_3] 1). The rebuild is gone; the
+		-- per-frame update is in view:update().
 		local screen_mode_cb = magic.SubscribeToEvent("ScreenMode",
 				function()
-					registry_stale = true
+					log:info("screen mode changed; the atlas restores itself")
 				end)
 
 		client.on_nodedef = function(data)
