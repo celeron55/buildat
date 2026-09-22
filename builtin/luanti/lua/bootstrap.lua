@@ -4301,6 +4301,23 @@ function core.__item_images()
 	return out
 end
 
+-- core.__item_palettes() -> {item name, palette texture, ...}
+--
+-- Which palette an item's definition names, for a stack that carries a
+-- palette_index of its own ([ITEM_META_LOOK]): the client reads the colour
+-- out of the picture itself, since the palette is media it already has.
+function core.__item_palettes()
+	local out = {}
+	for name, def in pairs(core.registered_items) do
+		if name ~= "" and type(def.palette) == "string" and
+				def.palette ~= "" then
+			out[#out + 1] = name
+			out[#out + 1] = def.palette
+		end
+	end
+	return out
+end
+
 -- core.__dig_props() -> {record, record, ...}
 --
 -- What a client needs to work a dig out for itself: how long it takes, how

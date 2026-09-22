@@ -95,9 +95,16 @@ a5, a7 = slot(5), slot(7)
 diff = sum(abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2])
            for p, q in zip(a5, a7)) / (3.0 * len(a5))
 print("slots 5 and 7 differ by %.1f levels" % diff)
-ok = share > 1.0 and diff > 5
-print("PASS: the stack's own colour and its overlay are what is drawn" if ok
-      else "FAIL: red %.2f %%, slots 5 and 7 %.1f levels apart" % (share, diff))
+# And the palette: slot 6 is a plain testnodes:color and slot 8 the same
+# item with palette_index 200 on the stack, so the two cannot read alike
+a6, a8 = slot(6), slot(8)
+pdiff = sum(abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2])
+            for p, q in zip(a6, a8)) / (3.0 * len(a6))
+print("slots 6 and 8 differ by %.1f levels" % pdiff)
+ok = share > 1.0 and diff > 5 and pdiff > 5
+print("PASS: the colour, the overlay and the palette are what is drawn" if ok
+      else "FAIL: red %.2f %%, overlay %.1f, palette %.1f" % (
+          share, diff, pdiff))
 PYIN
 status=$?
 exec 3>&-

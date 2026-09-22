@@ -1091,6 +1091,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_item_images"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:get_item_palettes"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_object_props"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_dig_props"));
@@ -1129,6 +1131,8 @@ struct Module: public interface::Module, public luanti::Interface
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/luanti:get_item_images",
 				on_get_item_images, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:get_item_palettes",
+				on_get_item_palettes, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_object_props",
 				on_get_object_props, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_dig_props",
@@ -2427,6 +2431,8 @@ struct Module: public interface::Module, public luanti::Interface
 				"luanti_data/translations.bin", "translated strings");
 		serve_lua_table_file("__item_images", "luanti_data/item_images.bin",
 				"item image fields");
+		serve_lua_table_file("__item_palettes",
+				"luanti_data/item_palettes.bin", "item palettes");
 	}
 
 	void send_texmods(network::PeerInfo::Id peer)
@@ -6945,6 +6951,21 @@ struct Module: public interface::Module, public luanti::Interface
 	// tiles rather than as the little cube Luanti draws. The upgrade path is
 	// sending the three tiles a cube shows and shearing them client-side,
 	// which extensions/luanti_client does.
+	void on_get_item_palettes(const network::Packet &packet)
+	{
+		sv_<ss_> flat = string_list_from_lua("__item_palettes");
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "luanti:item_palettes", os.str());
+		});
+		log_v(MODULE, "C%zu: %zu item palettes", (size_t)packet.sender,
+				flat.size() / 2);
+	}
+
 	void on_get_item_images(const network::Packet &packet)
 	{
 		sv_<ss_> flat;

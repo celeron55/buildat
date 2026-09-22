@@ -2117,6 +2117,9 @@ end
 
 -- item name -> the expression it is drawn as; see core.__item_images()
 local item_images = {}
+-- Which palette an item's definition names ([ITEM_META_LOOK]): a stack with
+-- a palette_index of its own is coloured by reading that picture
+local item_palettes = {}
 
 local item_image_subs = {}
 
@@ -2295,6 +2298,71 @@ local function parse_stack(str)
 			meta = parse_stack_meta(str)}
 end
 
+-- The colour a palette gives at an index, as "#rrggbb": the palette is a
+-- picture of N colours, read left to right and then down, and Luanti
+-- stretches it over the 256 index values ([ITEM_META_LOOK])
+local palette_colors = {}
+local function palette_color(palette, index)
+	local key = palette .. "\1" .. tostring(index)
+	local got = palette_colors[key]
+	if got ~= nil then
+		return got or nil
+	end
+	local resource = texture_of(palette)
+	local img = resource and magic.cache:GetResource("Image", resource)
+	if img == nil or img.width == 0 or img.height == 0 then
+		palette_colors[key] = false
+		return nil
+	end
+	local n = img.width * img.height
+	local at = math.floor(index * n / 256)
+	if at >= n then
+		at = n - 1
+	end
+	local c = img:GetPixel(at % img.width, math.floor(at / img.width))
+	local hex = string.format("#%02x%02x%02x",
+			math.floor(math.max(0, math.min(1, c.r)) * 255 + 0.5),
+			math.floor(math.max(0, math.min(1, c.g)) * 255 + 0.5),
+			math.floor(math.max(0, math.min(1, c.b)) * 255 + 0.5))
+	palette_colors[key] = hex
+	return hex
+end
+
+-- What a stack's metadata says its colour is: its own `color`, or the
+-- colour its item's palette gives at `palette_index`
+local function meta_color(stack)
+	local meta = stack.meta
+	if meta == nil then
+		return nil
+	end
+	if meta.color and meta.color ~= "" then
+		return meta.color
+	end
+	local index = tonumber(meta.palette_index)
+	local palette = index and item_palettes[stack.name]
+	if palette then
+		return palette_color(palette, math.max(0, math.min(255, index)))
+	end
+	return nil
+end
+
+-- A texmod added to an expression: to each face of a node's little cube,
+-- which is this client's own form and not a texmod, or to the picture
+local function add_to_expr(expr, add)
+	if add == "" then
+		return expr
+	end
+	if string.sub(expr, 1, #CUBE_MARK) == CUBE_MARK then
+		local faces = {}
+		for part in string.gmatch(
+				string.sub(expr, #CUBE_MARK + 1), "[^\1]+") do
+			faces[#faces + 1] = part .. add
+		end
+		return CUBE_MARK .. table.concat(faces, "\1")
+	end
+	return expr .. add
+end
+
 -- What a stack looks like: its item's picture, or what its own metadata
 -- says instead -- inventory_image in place of it, color multiplied into it
 -- ([ITEM_META_LOOK]). palette_index is not read: the palette is the
@@ -2314,13 +2382,16 @@ function M.stack_texture(stack)
 	if expr == nil or expr == "" then
 		return M.item_texture(stack.name)
 	end
-	if meta.color and meta.color ~= "" then
-		expr = expr .. "^[multiply:" .. meta.color
+	local add = ""
+	local color = meta_color(stack)
+	if color then
+		add = add .. "^[multiply:" .. color
 	end
 	-- And a picture over it, which is what an overlay is
 	if meta.inventory_overlay and meta.inventory_overlay ~= "" then
-		expr = expr .. "^" .. meta.inventory_overlay
+		add = add .. "^" .. meta.inventory_overlay
 	end
+	expr = add_to_expr(expr, add)
 	return texture_of(expr) or M.item_texture(stack.name)
 end
 
@@ -2352,24 +2423,14 @@ function M.wield_look(str)
 	-- The colour, and a picture over it, on each face of a node's cube or
 	-- on the flat picture
 	local add = ""
-	if meta.color and meta.color ~= "" then
-		add = add .. "^[multiply:" .. meta.color
+	local color = meta_color(stack)
+	if color then
+		add = add .. "^[multiply:" .. color
 	end
 	if meta.wield_overlay and meta.wield_overlay ~= "" then
 		add = add .. "^" .. meta.wield_overlay
 	end
-	if add ~= "" then
-		if string.sub(expr, 1, #CUBE_MARK) == CUBE_MARK then
-			local faces = {}
-			for part in string.gmatch(
-					string.sub(expr, #CUBE_MARK + 1), "[^\1]+") do
-				faces[#faces + 1] = part .. add
-			end
-			expr = CUBE_MARK .. table.concat(faces, "\1")
-		else
-			expr = expr .. add
-		end
-	end
+	expr = add_to_expr(expr, add)
 	-- wield_scale is how much bigger the hand holds it; a vector as
 	-- "x,y,z" or one number for all three
 	local sx, sy, sz = nil, nil, nil
@@ -3319,6 +3380,17 @@ startup_packet("luanti:dig_props", "luanti_data/dig_props.bin", function(data)
 	log:info("luanti:dig_props: " .. items .. " items, " .. nodes ..
 			" nodes with groups, " .. preds .. " predictions")
 end)
+
+startup_packet("luanti:item_palettes", "luanti_data/item_palettes.bin",
+		function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	for i = 1, #values - 1, 2 do
+		item_palettes[values[i]] = values[i + 1]
+	end
+	log:info("luanti:item_palettes: " .. math.floor(#values / 2) ..
+			" items have one")
+end)
+buildat.send_packet("luanti:get_item_palettes", "")
 
 startup_packet("luanti:item_images", "luanti_data/item_images.bin", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
