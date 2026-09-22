@@ -431,10 +431,11 @@ for _, name in ipairs({
 	"set_texture_mod",
 	"set_animation_frame_speed",
 	"set_nametag_attributes", "set_observers",
-	"set_local_animation",
+	"set_local_animation", -- an entity's; a player's is PlayerRef's below
 }) do
 	ObjectRef[name] = function() end
 end
+
 
 -- Which frame of its sheet a sprite shows: the start frame is kept and
 -- reaches the client with the look (a burning mob's flame, an XP orb's
@@ -1138,6 +1139,39 @@ send_physics = function(o)
 	flat[#flat + 1] = "zoom_fov"
 	flat[#flat + 1] = tostring(tonumber(o.props and o.props.zoom_fov) or 0)
 	__luanti_send_physics(o.player_name, flat)
+end
+
+-- The player's own model's frames -- idle, walk, dig, walk while digging
+-- -- and their speed, kept and answered as Luanti's are (lua_api.md,
+-- set_local_animation; the defaults are Luanti's). simplified: kept, not
+-- sent -- nothing here animates a model yet ([OBJECT_ANIM]); when the
+-- client draws the player's own model in third person animated, this is
+-- what it reads, the way set_physics_override's table reaches it.
+local function v2(t, x, y)
+	if type(t) == "table" then
+		return {x = tonumber(t.x) or x, y = tonumber(t.y) or y}
+	end
+	return {x = x, y = y}
+end
+function PlayerRef:set_local_animation(idle, walk, dig, walk_while_dig, frame_speed)
+	local o = state_of(self)
+	if not o then
+		return
+	end
+	o.local_animation = {
+		idle = v2(idle, 1, 1), walk = v2(walk, 1, 1), dig = v2(dig, 1, 1),
+		walk_while_dig = v2(walk_while_dig, 1, 1),
+		frame_speed = tonumber(frame_speed) or 30,
+	}
+end
+function PlayerRef:get_local_animation()
+	local o = state_of(self)
+	local a = o and o.local_animation or {idle = {x = 1, y = 1},
+			walk = {x = 1, y = 1}, dig = {x = 1, y = 1},
+			walk_while_dig = {x = 1, y = 1}, frame_speed = 30}
+	return {x = a.idle.x, y = a.idle.y}, {x = a.walk.x, y = a.walk.y},
+			{x = a.dig.x, y = a.dig.y},
+			{x = a.walk_while_dig.x, y = a.walk_while_dig.y}, a.frame_speed
 end
 
 function PlayerRef:get_physics_override()
