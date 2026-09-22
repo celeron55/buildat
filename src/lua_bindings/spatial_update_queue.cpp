@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "lua_bindings/util.h"
 #include "core/log.h"
+#include "interface/os.h"
 #include <tolua++.h>
 #include <Vector3.h>
 #include <cassert>
@@ -10,7 +11,7 @@
 #define MODULE "lua_bindings"
 
 #define DEF_METHOD(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setfield(L, -2, #name); \
 }
 
@@ -68,6 +69,8 @@ struct SpatialUpdateQueue
 
 	Vector3 m_p;
 	Vector3 m_queue_oldest_p;
+	int64_t m_sort_started_us = 0;
+	bool m_sort_moved = false;
 	Queue m_queue;
 	// Iterators into m_queue by value, so that an item can be found and
 	// replaced without walking the queue
@@ -99,13 +102,36 @@ struct SpatialUpdateQueue
 	void set_p(const Vector3 &p)
 	{
 		m_p = p;
-		if(m_old_queue.empty() && (m_p - m_queue_oldest_p).Length() > 20){
-			m_old_queue.reserve(m_queue.size());
+		// A move of over 20 from where the queue was last sorted for
+		// re-puts everything -- also in the middle of a sort: the items
+		// re-put so far were put against a position now far away, and
+		// a sort that only started on an empty old queue left them
+		// stale for good when the camera settled back where the sort
+		// began ([MISSING_CHUNK]: a chunk 39 away queued as 466 away,
+		// its f from the viewpoint before the teleport, never due).
+		// -- but not every frame: a camera in free fall (the box with no
+		// ground under the player, [WIN_WORLD]) moved 20 in a few frames,
+		// and a sort of 3500 items at a hundred a frame restarted before
+		// it ever finished, so nothing was ever due. A sort in progress
+		// runs for at least a second; the move is seen when it is done.
+		// A move seen during that second is remembered, and the sort is
+		// done again once drained even when the camera has settled back
+		// where it began (the vp5 bounce, [MISSING_CHUNK]).
+		const int64_t now = interface::os::time_us();
+		const bool moved = (m_p - m_queue_oldest_p).Length() > 20;
+		if(moved && !m_old_queue.empty() && now - m_sort_started_us <= 1000000){
+			m_sort_moved = true;
+			return;
+		}
+		if(moved || (m_sort_moved && m_old_queue.empty())){
+			m_old_queue.reserve(m_old_queue.size() + m_queue.size());
 			for(auto &pair : m_queue)
 				m_old_queue.push_back(pair.second);
 			m_queue.clear();
 			m_index.clear();
 			m_queue_oldest_p = m_p;
+			m_sort_started_us = now;
+			m_sort_moved = false;
 		}
 	}
 
@@ -172,6 +198,14 @@ struct SpatialUpdateQueue
 		return m_queue.empty();
 	}
 
+	// The item for a value, or nullptr: what a chunk that never comes up
+	// is waiting as ([MISSING_CHUNK]). Not the ones mid-sort.
+	const Item* find(const Value &value)
+	{
+		auto it = m_index.find(value);
+		return it == m_index.end() ? nullptr : &it->second->second;
+	}
+
 	void pop()
 	{
 		if(m_queue.empty())
@@ -205,6 +239,14 @@ struct SpatialUpdateQueue
 	size_t get_length()
 	{
 		return m_queue.size();
+	}
+
+	// True while a move of the reference point has the items waiting to be
+	// re-put, spread over frames by update(): the head of m_queue says
+	// nothing about what is due until this is false
+	bool is_sorting()
+	{
+		return !m_old_queue.empty();
 	}
 };
 
@@ -276,6 +318,32 @@ static void self_check()
 		assert(q.get_length() == 2);
 		assert(q.get_value().node_id == 2); // Now the near one
 	}
+	// A move in the middle of a sort does not restart it within the
+	// sort's first second (a falling camera restarted it every few
+	// frames, [WIN_WORLD]); once the old queue is drained the move is
+	// seen and the re-put against the old position is re-put again
+	// ([MISSING_CHUNK])
+	{
+		SpatialUpdateQueue q;
+		q.set_p(Vector3(0, 0, 0));
+		q.put(Vector3(0, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 1));
+		q.put(Vector3(500, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 2));
+		q.set_p(Vector3(500, 0, 0));
+		q.update(1); // One re-put against 500
+		assert(q.get_length() == 1);
+		q.set_p(Vector3(0, 0, 0)); // Back, mid-sort: the sort goes on
+		assert(q.get_length() == 1);
+		q.update(10); // Drained, against 500 -- and 0 for the rest
+		assert(q.get_length() == 2);
+		q.set_p(Vector3(500, 0, 0)); // Settled where the sort began: the
+		assert(q.empty());           // move seen meanwhile is still a sort
+		q.update(10);
+		assert(q.get_length() == 2);
+		assert(q.get_value().node_id == 2); // The near one at 500, and due
+		assert(q.get_f() <= 1.0f);
+	}
 }
 
 struct LuaSUQ
@@ -337,6 +405,38 @@ struct LuaSUQ
 		o->internal.pop();
 		return 1;
 	}
+	// The front item without popping it ([MISSING_CHUNK]: a queue that
+	// pops nothing while chunks are undrawn names what it holds)
+	static int l_peek_next_value(lua_State *L){
+		LuaSUQ *o = internal_checkobject(L, 1);
+		if(o->internal.empty())
+			return 0;
+		SpatialUpdateQueue::Value &value = o->internal.get_value();
+		lua_newtable(L);
+		lua_pushstring(L, value.type.c_str());
+		lua_setfield(L, -2, "type");
+		lua_pushinteger(L, value.node_id);
+		lua_setfield(L, -2, "node_id");
+		return 1;
+	}
+	// find(type, node_id) -> f, fw, px, py, pz (the position the item was
+	// put with), or nil when the queue holds no such item (mid-sort ones
+	// included)
+	static int l_find(lua_State *L){
+		LuaSUQ *o = internal_checkobject(L, 1);
+		SpatialUpdateQueue::Value value;
+		value.type = luaL_checkstring(L, 2);
+		value.node_id = luaL_checkinteger(L, 3);
+		const SpatialUpdateQueue::Item *item = o->internal.find(value);
+		if(!item)
+			return 0;
+		lua_pushnumber(L, item->f);
+		lua_pushnumber(L, item->fw);
+		lua_pushnumber(L, item->p.x_);
+		lua_pushnumber(L, item->p.y_);
+		lua_pushnumber(L, item->p.z_);
+		return 5;
+	}
 	static int l_peek_next_f(lua_State *L){
 		LuaSUQ *o = internal_checkobject(L, 1);
 		if(o->internal.empty())
@@ -351,6 +451,11 @@ struct LuaSUQ
 			return 0;
 		float v = o->internal.get_fw();
 		lua_pushnumber(L, v);
+		return 1;
+	}
+	static int l_is_sorting(lua_State *L){
+		LuaSUQ *o = internal_checkobject(L, 1);
+		lua_pushboolean(L, o->internal.is_sorting());
 		return 1;
 	}
 	static int l_get_length(lua_State *L){
@@ -401,7 +506,10 @@ struct LuaSUQ
 		DEF_METHOD(get);
 		DEF_METHOD(peek_next_f);
 		DEF_METHOD(peek_next_fw);
+		DEF_METHOD(peek_next_value);
+		DEF_METHOD(find);
 		DEF_METHOD(get_length);
+		DEF_METHOD(is_sorting);
 
 		// drop method_table_L
 		lua_pop(L, 1);
@@ -416,7 +524,7 @@ static int l_SpatialUpdateQueue(lua_State *L)
 void init_spatial_update_queue(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
 	self_check();

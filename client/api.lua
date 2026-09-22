@@ -5,6 +5,13 @@ local log = buildat.Logger("__client/api")
 
 buildat.connect_server    = __buildat_connect_server
 buildat.list_games        = __buildat_list_games
+-- list_launchers() -> {{kind, name, path, launcher = bool}, ...}: every
+-- game, builtin and extension in the tree, for the launch grid
+buildat.list_launchers    = __buildat_list_launchers
+-- list_installed_games(family) -> {name, ...} under <user>/<family>/games;
+-- names only, and in the sandbox too, for a launcher file's tiles
+buildat.list_installed_games = __buildat_list_installed_games
+buildat.safe.list_installed_games = __buildat_list_installed_games
 buildat.start_local_server = __buildat_start_local_server
 buildat.stop_local_server = __buildat_stop_local_server
 buildat.request_stop_local_server = __buildat_request_stop_local_server
@@ -12,8 +19,13 @@ buildat.force_kill_local_server = __buildat_force_kill_local_server
 buildat.local_server_ready = __buildat_local_server_ready
 buildat.local_server_port = __buildat_local_server_port
 buildat.local_server_running = __buildat_local_server_running
+-- The last STATUS line of the local server's log, and its tail for a
+-- dialog about one that died ([START_PROGRESS])
+buildat.local_server_status = __buildat_local_server_status
+buildat.local_server_log_tail = __buildat_local_server_log_tail
 buildat.extension_path    = __buildat_extension_path
 buildat.get_time_us       = __buildat_get_time_us
+buildat.version           = __buildat_version
 buildat.sha1              = __buildat_sha1
 buildat.sha256            = __buildat_sha256
 buildat.hex               = __buildat_hex
@@ -33,6 +45,22 @@ buildat.bignum = {
 }
 buildat.set_ui_scale      = __buildat_set_ui_scale
 buildat.get_ui_scale      = __buildat_get_ui_scale
+buildat.logical_size      = __buildat_logical_size
+-- The fraction of the window size the user asked 3D viewports to be rendered
+-- at. magic.set_preferred_viewports() applies it; this is for a game that
+-- wants to know. 1.0 means no scaling at all.
+buildat.get_preferred_render_scale = __buildat_get_preferred_render_scale
+-- The preferences the user sets once and every game honours. The C++ side is
+-- the authority: it parses and range checks a value through the same code -o
+-- goes through, applies what takes effect now, and persists the rest. A
+-- screen over these is a page of widgets that knows nothing about the file.
+--
+-- list_preferences() -> {name, ...}
+-- get_preference(name) -> number or boolean, nil for a name there is none by
+-- set_preference(name, value) -> true, or false and why
+buildat.list_preferences  = __buildat_list_preferences
+buildat.get_preference    = __buildat_get_preference
+buildat.set_preference    = __buildat_set_preference
 buildat.font_sans         = "Fonts/Overpass-Regular.ttf"
 buildat.font_mono         = "Fonts/OverpassMono-Regular.ttf"
 buildat.SpatialUpdateQueue = __buildat_SpatialUpdateQueue
@@ -40,19 +68,62 @@ buildat.pack_voxel_volume = __buildat_pack_voxel_volume
 -- add_resource_dir(path) -> bool. Only under the cache path; Urho3D's own Lua
 -- bindings do not have this.
 buildat.add_resource_dir  = __buildat_add_resource_dir
+-- take_screenshot() -> the file name it was saved under, or nil and why not.
+-- Into <user>/screenshots, named by the date and the time; see
+-- l_take_screenshot() in src/client/app.cpp for why this is in the sandbox.
+buildat.take_screenshot   = __buildat_take_screenshot
+-- dump_meshes([atlas_json]) -> the file name, or nil and why not. Same sandbox rule
+-- as take_screenshot: into <user>/meshdumps, named by the date. The
+-- scene's CustomGeometry in world space, which is what the client already
+-- drew. See l_dump_meshes() in src/client/app.cpp.
+buildat.dump_meshes       = __buildat_dump_meshes
 -- compose_image(args) -> w, h. Raster operations over an RGBA canvas, saved as
 -- a PNG under the cache path. See doc/client_api.txt.
 buildat.compose_image     = __buildat_compose_image
 -- read_image(resource_name) -> w, h, rgba. The pixels of an image, for
 -- whoever has to look at them rather than draw them.
 buildat.read_image        = __buildat_read_image
+buildat.get_env           = __buildat_get_env
 
 buildat.safe.disconnect    = __buildat_disconnect
+-- leave(): back to the launcher's grid when there is one under the game
+-- ([MENU_CONTEXT]: the game's own menu offers it), else what disconnect
+-- does -- a client started straight into a server has nothing to go back to
+buildat.safe.leave = function()
+	local launch_menu = package.loaded["buildat/extension/launch_menu"]
+	if launch_menu and launch_menu.leave_game then
+		launch_menu.leave_game()
+	else
+		__buildat_disconnect()
+	end
+end
+-- The one preference a game may set ([BOX_FIXES] b): the player's ear.
+-- Official's pause menu has mute and volume, and that is where a player
+-- reaches for them. get_sound() -> mute, volume; set_sound(mute, volume)
+-- -> true, or false and why. The rest of the preferences stay the
+-- launcher's.
+buildat.safe.get_sound = function()
+	return __buildat_get_preference("sound_mute") == true,
+			__buildat_get_preference("sound_volume") or 1
+end
+buildat.safe.set_sound = function(mute, volume)
+	if type(mute) ~= "boolean" or type(volume) ~= "number" then
+		return false, "set_sound(mute, volume): a boolean and a number"
+	end
+	local ok, err = __buildat_set_preference("sound_mute", mute)
+	if not ok then
+		return false, err
+	end
+	return __buildat_set_preference("sound_volume", tostring(volume))
+end
 buildat.safe.set_ui_scale  = __buildat_set_ui_scale
 buildat.safe.get_ui_scale  = __buildat_get_ui_scale
+buildat.safe.logical_size  = __buildat_logical_size
+buildat.safe.get_preferred_render_scale = __buildat_get_preferred_render_scale
 buildat.safe.font_sans     = buildat.font_sans
 buildat.safe.font_mono     = buildat.font_mono
 buildat.safe.get_time_us   = __buildat_get_time_us
+buildat.safe.version       = __buildat_version
 buildat.safe.sha1          = __buildat_sha1
 buildat.safe.sha256        = __buildat_sha256
 buildat.safe.hex           = __buildat_hex
@@ -60,6 +131,7 @@ buildat.safe.compress      = __buildat_compress
 buildat.safe.decompress    = __buildat_decompress
 buildat.safe.profiler_block_begin = __buildat_profiler_block_begin
 buildat.safe.profiler_block_end   = __buildat_profiler_block_end
+buildat.safe.profiler_data        = __buildat_profiler_data
 buildat.safe.VoxelName            = __buildat_VoxelName
 buildat.safe.AtlasSegmentDefinition = __buildat_AtlasSegmentDefinition
 buildat.safe.VoxelDefinition      = __buildat_VoxelDefinition
@@ -90,6 +162,37 @@ buildat.safe.cast_voxel_rays_collect  = __buildat_cast_voxel_rays_collect
 -- write_floats(vector_buffer, values): the values into the buffer as floats,
 -- replacing what was in it
 buildat.safe.write_floats             = __buildat_write_floats
+-- add_resource_dir(path) and compose_image(args), in the sandbox as they
+-- are (decided 2026-09-13). What they give sandboxed code is "write files
+-- under the cache and make them loadable", which a server can already do
+-- through client_file -- it ships whatever files it likes into the same
+-- cache -- so this adds no power that was not already there. What it does
+-- do is make the cache-path check in each of them load-bearing rather than
+-- a sanity check: anything added beside them writes under the cache or it
+-- does not go in the sandbox. See doc/plan/luanti_module_plan.md, "what a
+-- module's client half is allowed to do".
+buildat.safe.add_resource_dir         = __buildat_add_resource_dir
+buildat.safe.compose_image            = __buildat_compose_image
+-- take_screenshot() -> the name of the file it went into, or nil and why
+-- not. **The caller says when and nothing else**: the client picks the
+-- directory and the name, so sandboxed code cannot choose a path, cannot
+-- read what it wrote and cannot overwrite an existing shot. What it can do
+-- is fill <user>/screenshots, which is what the screenshot key already does.
+-- The file lands at the end of the frame; the name is reserved before this
+-- returns. See l_take_screenshot() in src/client/app.cpp.
+buildat.safe.take_screenshot          = __buildat_take_screenshot
+buildat.safe.dump_meshes              = __buildat_dump_meshes
+-- get_env(name) -> the variable, or nil. Only BUILDAT_-prefixed names, so a
+-- server's Lua cannot read the user's environment; what it is for is a knob
+-- a harness sets on the client's process, such as the rendering mode. See
+-- l_get_env() in src/client/app.cpp.
+buildat.safe.get_env                  = __buildat_get_env
+-- get_cache_path() -> the directory those two work in. The share and user
+-- paths stay out of the sandbox; this is here because writing a file under
+-- the cache means knowing where the cache is.
+buildat.safe.get_cache_path           = function()
+	return __buildat_get_path("cache")
+end
 -- What stopped a ray cast by cast_voxel_rays(); see its comment in
 -- src/lua_bindings/voxel_volume.cpp
 buildat.safe.VOXEL_RAY = {
@@ -130,8 +233,17 @@ buildat.safe.SpatialUpdateQueue = function()
 		peek_next_fw = function(self, ...)
 			return internal:peek_next_fw(...)
 		end,
+		peek_next_value = function(self, ...)
+			return internal:peek_next_value(...)
+		end,
+		find = function(self, ...)
+			return internal:find(...)
+		end,
 		get_length = function(self, ...)
 			return internal:get_length(...)
+		end,
+		is_sorting = function(self)
+			return internal:is_sorting()
 		end,
 		set_p = function(self, safe_p)
 			if not getmetatable(safe_p) or
@@ -208,6 +320,21 @@ function buildat.safe.set_voxel_geometry(safe_node, safe_buffer, ...)
 	__buildat_set_voxel_geometry(node, buffer, ...)
 end
 
+-- column_heights(buffer, voxel_reg) -> string; see src/lua_bindings/mesh.cpp
+function buildat.safe.column_heights(safe_buffer, ...)
+	local buffer
+	if type(safe_buffer) == 'string' then
+		buffer = safe_buffer
+	else
+		if not getmetatable(safe_buffer) or
+				getmetatable(safe_buffer).type_name ~= "VectorBuffer" then
+			error("safe_buffer is not a sandboxed VectorBuffer instance")
+		end
+		buffer = getmetatable(safe_buffer).unsafe
+	end
+	return __buildat_column_heights(buffer, ...)
+end
+
 function buildat.safe.set_voxel_lod_geometry(lod, safe_node, safe_buffer, ...)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then
@@ -226,6 +353,17 @@ function buildat.safe.set_voxel_lod_geometry(lod, safe_node, safe_buffer, ...)
 		buffer = getmetatable(safe_buffer).unsafe
 	end
 	__buildat_set_voxel_lod_geometry(lod, node, buffer, ...)
+end
+
+function buildat.safe.set_quad_geometry(safe_node, quads)
+	if not getmetatable(safe_node) or
+			getmetatable(safe_node).type_name ~= "Node" then
+		error("node is not a sandboxed Node instance")
+	end
+	if type(quads) ~= "table" then
+		error("quads is not a table")
+	end
+	return __buildat_set_quad_geometry(getmetatable(safe_node).unsafe, quads)
 end
 
 function buildat.safe.clear_voxel_geometry(safe_node)
