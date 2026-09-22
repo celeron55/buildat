@@ -95,6 +95,12 @@ buildat.add_resource_dir(path) -> bool
   cache path; a resource dir is readable by everything the client draws.
 buildat.compose_image(args) -> width, height
 buildat.get_cache_path() -> string (sandbox only, see below)
+buildat.create_directories(path) -> bool (unsafe Lua only)
+- The directory and its parents, for trusted Lua keeping a file of its own
+  under the user path; a path is not a thing a game gets to name
+buildat.set_watchdog_seconds(n) (unsafe Lua only)
+- How long without a frame before the watchdog logs this thread's stack;
+  0 puts the default (10) back. A screen that waits lowers it
 - In the sandbox as they are (decided 2026-09-13): what they give sandboxed
   code is "write files under the cache and make them loadable", which a server
   can already do through client_file. The cache-path check in each is
@@ -523,10 +529,15 @@ differs from LuaSocket:
 - socket:address() is not LuaSocket's; it is the address as the user accepted
   it, for showing in a UI
 
-tcp_connect(host: string, port: number, cb: function)
-udp_connect(host: string, port: number, cb: function)
+tcp_connect(host: string, port: number, cb: function [, options])
+udp_connect(host: string, port: number, cb: function [, options])
 - cb(socket, error) is called once the user has answered; socket is nil if the
-  connection was not made or the user declined
+  connection was not made or the user declined. options.description fills the
+  permission dialog's description field, editable, the answer still the
+  user's ([NET_DESC]); http_get takes the same.
+set_address_name(uri, name)
+- The player name last used on that server, kept on its row for the next
+  connect screen ([BOX_PLAYTEST_2] 4)
 
 gettime() -> seconds
 
@@ -555,6 +566,9 @@ show_message_dialog(message [, on_close])
 - A modal dialog with an Ok button; a second call while one is up appends to
   it. Escape closes it.
 show_confirm_dialog(message, on_yes, on_no)
+show_notice(text)
+- A line at the top of the screen for six seconds, taking neither the mouse
+  nor the focus: what a caught error is shown as in a game ([MENU_ERRORS])
 show_notification(text, duration_s)
 - A small non-modal notice in the top right corner, gone after duration_s
   (2 seconds by default)
@@ -1248,7 +1262,7 @@ magic.IM_SPLINE:
 magic.INSIDE: 
 magic.INTERSECTS: 
 magic.Image: Clear, FlipHorizontal, FlipVertical, GetPixel, Resize, SetPixel, SetSize, components, compressed, height, new, width
-magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, SetMouseMode, SetMouseVisible, mode
+magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, IsMouseVisible, SetMouseMode, SetMouseVisible, mode, mouseVisible
 magic.IntRect: bottom, left, right, top
 magic.IntVector2: x, y
 magic.IntVector3: Length, from_buildat, x, y, z
@@ -1873,10 +1887,10 @@ magic constants: ADDRESS_BORDER, ADDRESS_CLAMP, ADDRESS_MIRROR, ADDRESS_WRAP, AN
 extension.cereal: binary_input, binary_output
 extension.launch_menu: show_connect_to_server, show_local_game
 extension.magic_sandbox: class
-extension.network: gettime, http_get, known_addresses, parse_json, tcp_connect, udp_connect
+extension.network: gettime, http_get, known_addresses, parse_json, set_address_name, tcp_connect, udp_connect
 extension.replicate: main_scene, sub_sync_node_added, sub_sync_node_removed
 extension.skycube: new
 extension.test: f
-extension.ui_utils: add_paged, bind_button_menu, scan_pixels, scan_ui, server_list, show_confirm_dialog, show_message_dialog, show_notification, vertical_menu
+extension.ui_utils: add_paged, bind_button_menu, scan_pixels, scan_ui, server_list, show_confirm_dialog, show_message_dialog, show_notice, show_notification, vertical_menu
 extension.uistack: UIStack, main, set_world_scan
 ---- end of the generated listing ----
