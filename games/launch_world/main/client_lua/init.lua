@@ -667,6 +667,19 @@ do
 	-- tree lights an HDR scene with point lights.
 	local want = buildat.get_env("BUILDAT_LAUNCH_TONEMAP") or "Tonemap"
 	local hdr = (buildat.get_env("BUILDAT_LAUNCH_HDR") or "") ~= ""
+	-- BUILDAT_LAUNCH_SUN adds one directional light, to settle whether
+	-- it is point lights in particular that the HDR path drops
+	if (buildat.get_env("BUILDAT_LAUNCH_SUN") or "") ~= "" then
+		local node = scene:CreateChild("sun")
+		node.direction = magic.Vector3(-0.4, -0.8, 0.45)
+		local sun = node:CreateComponent("Light")
+		sun.lightType = magic.LIGHT_DIRECTIONAL
+		sun.color = magic.Color(1, 0.95, 0.85, 1)
+		sun.brightness = 1.4
+		sun.castShadows = false
+		kept[#kept + 1] = sun
+		log:info("tonemap: a directional light added")
+	end
 	if want ~= "" or hdr then
 		-- HDR on its own, so it can be told apart from the effects
 		magic.renderer.HDRRendering = hdr
