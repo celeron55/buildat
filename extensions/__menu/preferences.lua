@@ -202,6 +202,38 @@ function M.show()
 		end
 	end
 
+	-- **Which launch UI this is** ([LAUNCH_SANDBOX]'s slot, and
+	-- [TWO_AUDIENCES]: switching is one action from either side, and the
+	-- room's pause dialog already has it going the other way). The
+	-- listing is read from the extensions that ship a `launch_ui.txt`,
+	-- not by running them.
+	local uis = api.list_launch_uis and api.list_launch_uis() or {}
+	if #uis > 1 then
+		local now = api.get_preference("launch_ui") or "__menu"
+		local at = 1
+		for i, e in ipairs(uis) do
+			if e.name == now then at = i end
+		end
+		local button, text = make_row(menu.window, "Launch UI")
+		local function relabel()
+			text.text = "Launch UI: " .. uis[at].title
+		end
+		menu:add(button, function()
+			at = at % #uis + 1
+			relabel()
+			-- **Picking it is switching to it**: set_launch_ui remembers
+			-- the choice and boots that extension, so a menu that offers
+			-- the room and then makes you restart is a menu that does not
+			-- offer it.
+			local ok, err = api.set_launch_ui(uis[at].name)
+			if not ok then
+				log:warning("launch_ui: " .. tostring(err))
+				ui_utils.show_message_dialog("Launch UI: " .. tostring(err))
+			end
+		end)
+		relabel()
+	end
+
 	menu:add("Back", function()
 		uistack.main:pop(root)
 	end)

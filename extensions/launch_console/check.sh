@@ -23,6 +23,13 @@ fi
 	echo "delay 400"
 	echo "keypress Return"
 	echo "delay 600"
+	# **The slot, asked from inside the sandbox**: a launch UI can list
+	# the others, which is what the menu's own switch is built on, and
+	# the console is where anyone can check that by typing
+	echo "text #buildat.list_launch_uis()"
+	echo "delay 400"
+	echo "keypress Return"
+	echo "delay 600"
 	echo "screenshot $out/console.png"
 	echo "delay 300"
 	echo "quit"; } > "$out/cmds.txt"
@@ -51,6 +58,13 @@ if [ "${doc:-0}" -lt 1000 ]; then
 fi
 if [ "$typed" -lt 1 ]; then
 	echo "FAIL: a line typed at the console did not run"
+	exit 1
+fi
+uis=$(grep -a "console: #buildat.list_launch_uis() = " "$out/cli.log" |
+	head -1 | sed 's/.*= //')
+echo "the sandbox can see $uis launch UIs"
+if [ -z "$uis" ] || [ "$uis" -lt 3 ]; then
+	echo "FAIL: a launch UI cannot list the others (${uis:-none})"
 	exit 1
 fi
 # vim: set noet ts=4 sw=4:
