@@ -104,7 +104,7 @@ fi
 	# And one left behind, for the second run below to find
 	echo "mouse_click right"
 	echo "delay 700"
-	echo "keypress Tab"
+	echo "event mode menu"
 	echo "delay 600"
 	# **A server is connected to, and says so when it cannot be.**
 	# "localhost" is always in the list and nothing listens on its port
@@ -121,9 +121,7 @@ fi
 	echo "delay 400"
 	echo "keypress Escape"
 	echo "delay 1500"
-	# **Escape pops a level**, so it left menu mode as well as the
-	# connect; Tab comes back for the arrows below
-	echo "keypress Tab"
+	echo "event mode menu"
 	echo "delay 600"
 	# **The arrows browse the room** with the prompt empty: along a row
 	# and between the rows, the wall first and the floor's ranks after
@@ -135,7 +133,7 @@ fi
 	echo "delay 400"
 	# Back to the standing place, so every frame below has the same
 	# viewpoint as the one Escape returns to
-	echo "keypress Escape"
+	echo "event mode fps"
 	echo "delay 1800"
 	# **The room is never static** -- the era reference's own rule, and
 	# the reason every comparison below freezes it first. Two frames a
@@ -157,6 +155,19 @@ fi
 	# opens that one, every run.
 	echo "keypress F1"
 	echo "delay 800"
+	# **Menu mode first, and before the reference picture**: every
+	# Escape above pops back to walking, and in FPS these three letters
+	# are movement and Return opens the desk -- which is what this step
+	# was doing for a while, with the assertion passing on the
+	# terminal's own arrival. The closed picture has to be taken in the
+	# mode the reopened one will be, or "it comes back" compares two
+	# cameras (2026-09-23).
+	# **The mode is said, not guessed** ([CMD_EVENT]): menu mode at the
+	# standing place, which is also where the reopened picture is taken
+	# from -- the player walked to the wall to dig, and a reference
+	# frame from there compares two cameras rather than two walls.
+	echo "event mode menu"
+	echo "delay 1800"
 	echo "screenshot $out/dissolve-closed.png"
 	# A screenshot lands a frame or two after the command, so the next
 	# key has to wait or it is in the picture (2026-09-23)
@@ -186,6 +197,8 @@ fi
 	# (2026-09-23). What is being checked here is the prompt, the flight
 	# and the way back, and the empty pocket exercises all three with
 	# nothing to start.
+	echo "event mode menu"
+	echo "delay 600"
 	echo "keypress I"
 	echo "keypress N"
 	echo "keypress S"
@@ -201,11 +214,9 @@ fi
 	echo "screenshot $out/back-home.png"
 	echo "delay 600"
 	# The terminal: found by name like anything else, the camera square
-	# on to it and the panel flat over it. **Menu mode first**: in FPS
-	# the letters are movement, so "set" would walk the player backwards
-	# and pick a sphere up instead of typing.
-	echo "keypress Tab"
-	echo "delay 500"
+	# on to it and the panel flat over it.
+	echo "event mode menu"
+	echo "delay 600"
 	echo "keypress S"
 	echo "keypress E"
 	echo "keypress T"
@@ -268,12 +279,10 @@ fi
 	# program: in FPS with nothing left to pop, Escape comes up with it;
 	# Escape again takes it away.
 	#
-	# **Escape pops one level in this room**, so a sequence has to know
-	# which level it is on: the terminal step above typed in menu mode
-	# and the Escape that left the desk did not pop it, so this one pops
-	# menu -> walking and the next is the one that pauses.
-	echo "keypress Escape"
-	echo "delay 700"
+	# **The mode is said** ([CMD_EVENT]), so the Escape below is the one
+	# that pauses rather than the one that pops a level.
+	echo "event mode fps"
+	echo "delay 900"
 	echo "keypress Escape"
 	echo "delay 700"
 	echo "screenshot $out/paused.png"
@@ -372,6 +381,18 @@ if [ "$changes" -lt 2 ] || [ "$first" = "$last" ]; then
 	echo "FAIL: the terminal's rows do not change anything"
 	exit 1
 fi
+
+# **Each step of the sequence says it did its own thing**, so a mode
+# that drifted cannot pass on another step's picture: the dissolve was
+# typing into FPS for a while and its assertion was satisfied by the
+# terminal opening instead (2026-09-23).
+for want in "dissolve: bay" "launch: " "terminal: sat down"; do
+	if ! grep -aq "launch_w.*: $want" "$out/cli.log"; then
+		echo "FAIL: the sequence never got to \"$want\" -- a step typed" \
+				"into the wrong mode"
+		exit 1
+	fi
+done
 
 conn=$(grep -a "launch_w.*: connect: " "$out/cli.log" | head -1 |
 	sed 's/.*launch_w[a-z]*: //')

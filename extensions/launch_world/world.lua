@@ -2407,9 +2407,14 @@ function pick_up(i)
 	-- A copy under the camera: the one in the room is switched off
 	-- rather than reparented, which keeps its place for putting down
 	local held = camera_node:CreateChild("held")
-	held.position = magic.Vector3(0.70, -0.30 - (#carried) * 0.10,
-			2.4 + (#carried) * 0.40)
-	held.scale = magic.Vector3(sc.x * 0.34, sc.y * 0.34, sc.z * 0.34)
+	-- **Held, not pressed against the lens** (2026-09-23): at 2.4 units
+	-- and a third of its size the sphere filled the corner and was cut
+	-- off by the frame's edge. Further out and smaller is a thing in a
+	-- hand; the stack walks further out again so the second one is
+	-- behind the first rather than inside it.
+	held.position = magic.Vector3(0.85, -0.52 - (#carried) * 0.06,
+			3.3 + (#carried) * 0.45)
+	held.scale = magic.Vector3(sc.x * 0.26, sc.y * 0.26, sc.z * 0.26)
 	local o = held:CreateComponent("StaticModel")
 	o.model = magic.cache:GetResource("Model", "Models/Sphere.mdl")
 	o.material = node:GetComponent("StaticModel").material
@@ -3702,6 +3707,41 @@ function handle_keydown(event_type, event_data)
 	end
 end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")
+
+-- **What a scripted run says instead of guessing at Tab** ([CMD_EVENT]:
+-- `event mode menu`). Tab is a toggle and Escape pops a level, so a
+-- sequence of forty keys has to carry the room's mode in its head, and
+-- a step that guesses wrong types into the other mode and its assertion
+-- passes on whatever that did -- which is how the dissolve's check came
+-- to be satisfied by the terminal opening (2026-09-23). This says it
+-- outright. It is not a debug hook: the launcher's own state is what a
+-- driven run drives.
+function handle_seq_mode(event_type, event_data)
+	local want = event_data:GetString("Param")
+	if want ~= "fps" and want ~= "menu" then
+		log:warning("event mode: \"" .. tostring(want) .. "\" is not a mode")
+		return
+	end
+	-- Everything over the room goes first, so the mode is the mode
+	leave_terminal()
+	close_pause()
+	if prompt_open or prompt_str ~= "" then
+		prompt_open = false
+		prompt_str = ""
+		show_prompt()
+	end
+	for b = 1, BAYS do
+		if bay_state[b] and bay_state[b].target ~= 0 then
+			dissolve_bay(b, false)
+		end
+	end
+	fps.x, fps.y, fps.z = HOME_FROM.x, FPS_EYE, HOME_FROM.z
+	fps.yaw, fps.pitch = 180.0, 6.0
+	set_mode(want)
+	fly_to(HOME_FROM, HOME_AT)
+	log:info("event mode: " .. want .. ", at the standing place")
+end
+magic.SubscribeToEvent("command_seq:mode", "handle_seq_mode")
 
 -- **Into a game and back out of it** ([MENU_CONTEXT], the launcher
 -- plan's step 6). The room is never torn down: it keeps standing behind
