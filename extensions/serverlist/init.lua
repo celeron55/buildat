@@ -1,0 +1,132 @@
+-- Buildat: extensions/serverlist/init.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+--
+-- **A fetched serverlist as launch actions** ([LAUNCH_WORLD] step 5's
+-- last piece, [SERVER_LIST]). The launch grid is built at boot and a
+-- fetch is not, so the rows a launcher file offers are **the last
+-- fetch's**, kept in a file of this extension's own; asking for them
+-- starts a fetch that rewrites it for the next boot.
+--
+-- **It changes nothing in `luanti_client`**, which is frozen: that
+-- extension's `on_untrusted_launch` already takes an `address`, so a
+-- launch action can hand it a server and it opens its connect dialog on
+-- one. This is the source of the list and nothing else.
+--
+-- The fetch goes through `network.http_get`, which asks the user about
+-- the host the first time as it does for a socket -- a launcher that
+-- reached the network without asking would be the wrong kind of quiet.
+local log = buildat.Logger("serverlist")
+local M = {safe = {}}
+local network = require("buildat/extension/network")
+
+-- The list this client knows: Luanti's official one is a row in the
+-- client's own address store, which is where the uri comes from rather
+-- than from a constant here. BUILDAT_SERVERLIST_URL overrides it, which
+-- is what the check serves its own list on.
+local DEFAULT_URL = "https://servers.luanti.org"
+local CACHE = __buildat_get_path("user") .. "/serverlist.csv"
+-- simplified: twelve, which is what a launcher's floor or grid has room
+-- for; the list has hundreds and a launcher that drew them all would be
+-- the list it is replacing. Ordered by players, so the twelve are the
+-- ones with somebody on them.
+local MAX = 12
+
+local function list_url()
+	local env = buildat.get_env and buildat.get_env("BUILDAT_SERVERLIST_URL")
+	if env and env ~= "" then
+		return env
+	end
+	for _, a in ipairs(network.known_addresses()) do
+		if a.uri:sub(1, 5) == "https" then
+			return a.uri
+		end
+	end
+	return DEFAULT_URL
+end
+
+-- One row a line: address|name|players. A file a person can read and
+-- delete, as the room's own save is.
+local function read_cache()
+	local rows = {}
+	local f = io.open(CACHE, "rb")
+	if not f then
+		return rows
+	end
+	for line in f:read("*a"):gmatch("[^\r\n]+") do
+		local address, name, players = line:match("^(.-)|(.-)|(%d+)$")
+		if address and address ~= "" and #rows < MAX then
+			rows[#rows + 1] = {address = address, name = name,
+				players = tonumber(players)}
+		end
+	end
+	f:close()
+	return rows
+end
+
+local function write_cache(rows)
+	local out = {}
+	for _, r in ipairs(rows) do
+		-- A name with a bar or a newline in it would make a second row
+		out[#out + 1] = string.format("%s|%s|%d", r.address,
+				tostring(r.name):gsub("[|\r\n]", " "), r.players or 0)
+	end
+	local f = io.open(CACHE, "wb")
+	if not f then
+		log:warning("cannot write " .. CACHE)
+		return
+	end
+	f:write(table.concat(out, "\n"))
+	f:close()
+	log:info(#rows .. " servers cached in " .. CACHE)
+end
+
+local fetching = false
+local function fetch()
+	if fetching then return end
+	fetching = true
+	local url = list_url()
+	network.http_get(url .. "/list", function(body, err)
+		fetching = false
+		if not body then
+			log:warning("the list did not come: " .. tostring(err))
+			return
+		end
+		local data = network.parse_json(body)
+		local rows = {}
+		for _, sv in ipairs(data and data.list or {}) do
+			local address = tostring(sv.address or "")
+			if address ~= "" then
+				rows[#rows + 1] = {
+					address = address .. ":" .. tostring(sv.port or 30000),
+					name = tostring(sv.name or address),
+					-- **The player count is the significance**
+					-- ([LAUNCH_SIGNIFY]: a server's is the player count
+					-- the last time it was played on), which is what a
+					-- launch UI ranks and scales by
+					players = tonumber(sv.clients) or 0,
+				}
+			end
+		end
+		table.sort(rows, function(a, b) return a.players > b.players end)
+		while #rows > MAX do table.remove(rows) end
+		write_cache(rows)
+	end, {description = "the server list"})
+end
+
+-- The rows a launcher file draws: the last fetch's, as plain data
+function M.safe.servers()
+	local out = {}
+	for i, r in ipairs(read_cache()) do
+		out[i] = {address = r.address, name = r.name, players = r.players}
+	end
+	return out
+end
+
+-- Asking for the rows is what starts the next fetch: an extension nobody
+-- loads costs nothing, and one that is loaded is one whose list is being
+-- looked at
+fetch()
+
+return M
+-- vim: set noet ts=4 sw=4:

@@ -124,6 +124,10 @@ end
 -- one that is not the player's own says so where its name is read out.
 -- The localhost row is not an example: it is a real thing to try, and
 -- the check needs one server it can name and fail to reach.
+local real_servers = 0
+for _, a in ipairs(FLOOR_ACTIONS) do
+	if a.category == "server" then real_servers = real_servers + 1 end
+end
 local SERVERS_MOCK = {
 	{name = "buildat.example.org", address = "buildat.example.org:29797"},
 	{name = "drift.example.net", address = "drift.example.net:29797"},
@@ -144,7 +148,11 @@ for _, sv in ipairs(SERVERS_MOCK) do
 	-- **The last one is always there**: a client with ten addresses of
 	-- its own gets none of the padding otherwise, and the check needs
 	-- one server it can name and fail to reach
-	if not had and (#SERVERS < 10 or sv.always) then
+	-- **The padding stands down when there are real ones** (2026-09-24):
+	-- a fetched serverlist arrives as launch actions of category
+	-- "server", and a floor with real servers on it has no business
+	-- carrying invented hostnames beside them.
+	if not had and ((#SERVERS + real_servers < 10) or sv.always) then
 		sv.example = not sv.always
 		SERVERS[#SERVERS + 1] = sv
 	end
@@ -153,7 +161,8 @@ do
 	local ex = 0
 	for _, sv in ipairs(SERVERS) do if sv.example then ex = ex + 1 end end
 	log:info("servers: " .. #SERVERS .. " on the floor, " .. ex ..
-			" of them saying they are examples")
+			" of them saying they are examples, " .. real_servers ..
+			" off a fetched list")
 end
 room.set_pockets(#GAMES)
 log:info("contents: " .. (#GAMES - 1) .. " games, " .. #FLOOR_ACTIONS ..
@@ -812,20 +821,30 @@ local function mark_texture(mark, icon, one_bit, invert)
 		end
 	end
 	if not image then
-		local f = ornament.mark(64, ornament.seed_of(mark))
-		local gen = magic.Image:new()
-		assert(gen:SetSize(f.size, f.size, 3), "the mark")
-		for y = 0, f.size - 1 do
-			for x = 0, f.size - 1 do
-				local v = ornament.at(f, x, y)
-				if one_bit then
-					v = v > ONE_BIT_AT and 1.0 or 0.0
+		-- **An empty mark is not a mark** (2026-09-24): some seeds draw
+		-- a figure that survives neither the one-bit cut nor the
+		-- shrink, and a fetched serverlist is where it showed -- one
+		-- server in twelve came up blank. So the seed is walked until
+		-- something is on it, which keeps the mark a function of the
+		-- name without letting the name draw nothing.
+		local seed = ornament.seed_of(mark)
+		for try = 0, 3 do
+			local f = ornament.mark(64, seed + try * 7919)
+			local gen = magic.Image:new()
+			assert(gen:SetSize(f.size, f.size, 3), "the mark")
+			for y = 0, f.size - 1 do
+				for x = 0, f.size - 1 do
+					local v = ornament.at(f, x, y)
+					if one_bit then
+						v = v > ONE_BIT_AT and 1.0 or 0.0
+					end
+					gen:SetPixel(x, y, magic.Color(v, v, v, 1))
 				end
-				gen:SetPixel(x, y, magic.Color(v, v, v, 1))
 			end
+			kept[#kept + 1] = gen
+			image = mark_image(gen, one_bit, invert)
+			if (last_mark_ink or 0) > 0 then break end
 		end
-		kept[#kept + 1] = gen
-		image = mark_image(gen, one_bit, invert)
 	end
 	local t = magic.Texture2D:new()
 	assert(t:SetData(image), "the mark's texture")
@@ -1048,8 +1067,14 @@ local FLOOR_ROWS = {-4.0, -0.5, 3.0, 6.5, 10.0}
 for i, a in ipairs(FLOOR_ACTIONS) do
 	local col = FLOOR_COLS[(i - 1) % #FLOOR_COLS + 1]
 	local row = FLOOR_ROWS[math.floor((i - 1) / #FLOOR_COLS) % #FLOOR_ROWS + 1]
+	-- **A server the grid offers is a mirror too** ([LAUNCH_SIGNIFY]:
+	-- the category says what kind of thing it is). The fetched list
+	-- arrives this way -- an action with an address behind it -- and it
+	-- should look like the servers the client already knew rather than
+	-- like a launch action that happens to be one.
 	local o = {name = a.name, icon = a.icon, key = a.key,
 		kind = a.kind, description = a.description, floor = true,
+		server = (a.category == "server") or nil,
 		category = a.category, significance = a.significance}
 	ORBS[#ORBS + 1] = o
 	orb_places[#orb_places + 1] = {x = col,
