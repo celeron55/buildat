@@ -1366,6 +1366,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(start_local_server)
 		DEF_BUILDAT_FUNC(list_launchers)
 		DEF_BUILDAT_FUNC(list_installed_games)
+		DEF_BUILDAT_FUNC(list_saves)
 		DEF_BUILDAT_FUNC(stop_local_server)
 		DEF_BUILDAT_FUNC(request_stop_local_server)
 		DEF_BUILDAT_FUNC(force_kill_local_server)
@@ -2321,6 +2322,75 @@ struct CApp: public App, public magic::Application
 		int i = 1;
 		for(const ss_ &name : names){
 			lua_pushstring(L, name.c_str());
+			lua_rawseti(L, -2, i++);
+		}
+		return 1;
+	}
+
+	// list_saves([game]) -> {{game =, name =, modified =}, ...}: every
+	// save under <user>/games/<game>/saves/<name>/save.sqlite, newest
+	// first, for the whole tree or for one game. That path is the
+	// storage module's own (builtin/storage/storage.cpp), and it is
+	// enumerated here rather than asked of a server because a launcher
+	// has no server to ask -- which is what [LAUNCH_WORLD] wanted it
+	// for: a save is a thing on its floor, listed beside its games.
+	//
+	// Read-only, names only, and only that one directory shape, as
+	// list_installed_games() is.
+	// The three lines builtin/storage keeps for itself; one caller here
+	// does not earn a place in the fs interface
+	static int64_t save_modified_us(const ss_ &path)
+	{
+		struct stat st;
+		if(stat(path.c_str(), &st) != 0)
+			return 0;
+		return (int64_t)st.st_mtime * 1000000;
+	}
+
+	static int l_list_saves(lua_State *L)
+	{
+		ss_ only_game;
+		if(lua_gettop(L) >= 1 && !lua_isnil(L, 1)){
+			only_game = lua_bindings::lua_tocppstring(L, 1);
+			if(!valid_game_name(only_game))
+				return luaL_error(L, "list_saves(): bad game name");
+		}
+		const ss_ games = g_client_config.get<ss_>("user_path")+"/games";
+		struct Row { ss_ game, name; int64_t modified; };
+		sv_<Row> rows;
+		for(const auto &g : interface::fs::list_directory(games)){
+			if(!g.is_directory || !valid_game_name(g.name))
+				continue;
+			if(only_game != "" && g.name != only_game)
+				continue;
+			const ss_ dir = games+"/"+g.name+"/saves";
+			for(const auto &n : interface::fs::list_directory(dir)){
+				if(!n.is_directory || !valid_game_name(n.name))
+					continue;
+				const ss_ db = dir+"/"+n.name+"/save.sqlite";
+				if(!interface::fs::path_exists(db))
+					continue;
+				rows.push_back(Row{g.name, n.name,
+						save_modified_us(db)});
+			}
+		}
+		// The one played last is the one most likely wanted next, which
+		// is the order the vanilla menu puts them in
+		std::sort(rows.begin(), rows.end(), [](const Row &a, const Row &b){
+			if(a.modified != b.modified)
+				return a.modified > b.modified;
+			return a.name < b.name;
+		});
+		lua_newtable(L);
+		int i = 1;
+		for(const Row &r : rows){
+			lua_newtable(L);
+			lua_pushstring(L, r.game.c_str());
+			lua_setfield(L, -2, "game");
+			lua_pushstring(L, r.name.c_str());
+			lua_setfield(L, -2, "name");
+			lua_pushnumber(L, (double)r.modified);
+			lua_setfield(L, -2, "modified");
 			lua_rawseti(L, -2, i++);
 		}
 		return 1;

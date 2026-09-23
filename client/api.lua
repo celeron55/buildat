@@ -10,6 +10,10 @@ buildat.connect_server    = __buildat_connect_server
 buildat.connect_server_start = __buildat_connect_server_start
 buildat.connect_server_poll  = __buildat_connect_server_poll
 buildat.list_games        = __buildat_list_games
+-- list_saves([game]) -> {{game=, name=, modified=}, ...}, newest first.
+-- The saves on disk, enumerated without a server, since a launcher has
+-- none to ask ([LAUNCH_WORLD]).
+buildat.list_saves        = __buildat_list_saves
 -- list_launchers() -> {{kind, name, path, launcher = bool}, ...}: every
 -- game, builtin and extension in the tree, for the launch grid
 buildat.list_launchers    = __buildat_list_launchers

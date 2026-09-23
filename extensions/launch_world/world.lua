@@ -36,12 +36,28 @@ for _, a in ipairs(launch_grid.actions(log)) do
 		FLOOR_ACTIONS[#FLOOR_ACTIONS + 1] = o
 	end
 end
+-- **The saves are on the floor, smaller** (user): "save", not "world",
+-- which is a Luanti-ism -- saves being universal in buildat. They come
+-- from buildat.list_saves(), which enumerates them off the disk rather
+-- than asking a server, there being none to ask.
+--
+-- simplified: the newest twelve. This tree has sixty-odd, most of them a
+-- test run's, and a floor with sixty spheres on it is a worse list than
+-- the one this room is replacing. Newest first is the order that makes a
+-- cap sensible; the rest wait on the room learning to hold more than it
+-- can show, which is the same open question the wall has.
+local SAVES = {}
+for _, sv in ipairs(buildat.list_saves()) do
+	if #SAVES >= 12 then break end
+	SAVES[#SAVES + 1] = sv
+end
+
 -- **Chekhov's empty pocket**, last: a pocket with nothing in it is what
 -- says there is room for another game, and it is the way to ContentDB
 GAMES[#GAMES + 1] = {name = "install a game", warm = true, empty = true}
 room.set_pockets(#GAMES)
 log:info("contents: " .. (#GAMES - 1) .. " games, " .. #FLOOR_ACTIONS ..
-		" other launch actions")
+		" other launch actions, " .. #SAVES .. " saves")
 for _, a in ipairs(FLOOR_ACTIONS) do
 	log:info("  floor: " .. a.kind .. " " .. a.name)
 end
@@ -548,6 +564,18 @@ for i, a in ipairs(FLOOR_ACTIONS) do
 	orb_places[#orb_places + 1] = {x = col, y = 0.34, z = row}
 end
 
+-- **A save is a white sphere too, smaller** (user), and it stands in
+-- front of the launch actions: a save is a thing the player made and the
+-- actions are the tree's, so the player's own are nearer to hand.
+local SAVE_COLS = {-11.0, -7.5, -4.0, 4.0, 7.5, 11.0}
+for i, sv in ipairs(SAVES) do
+	local col = SAVE_COLS[(i - 1) % #SAVE_COLS + 1]
+	local row = 13.0 - math.floor((i - 1) / #SAVE_COLS) * 3.2
+	ORBS[#ORBS + 1] = {name = sv.name, game = sv.game, save = true,
+		floor = true, search = sv.name .. " " .. sv.game}
+	orb_places[#orb_places + 1] = {x = col, y = 0.22, z = row}
+end
+
 -- **The ornament, on primitives in front of the voxels.** The bays are
 -- voxel mass and the ornament is a generated texture, and the two cannot
 -- meet: a voxel's tile is loaded by resource name out of Urho3D's
@@ -574,6 +602,13 @@ for i, o in ipairs(orb_places) do
 		-- dim: an empty socket reads as empty, not as broken
 		part("Torus", magic.Vector3(o.x, o.y, o.z),
 				magic.Vector3(1.4, 1.4, 1.4), machined)
+	elseif spec and spec.save then
+		-- Smaller, because it is one save of one game rather than a
+		-- thing to launch on its own
+		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
+				magic.Vector3(0.9, 0.9, 0.9), white)
+		node:GetComponent("StaticModel").castShadows = true
+		orb_nodes[i] = node
 	elseif spec and spec.floor then
 		-- **A glossy white sphere** (user): not a source, so it takes
 		-- the room's light rather than making any, and it is told apart
@@ -1592,7 +1627,7 @@ local function best_match(query)
 		best, best_score = "terminal", term
 	end
 	for i, o in ipairs(ORBS) do
-		local sc = fuzzy(query, o.name)
+		local sc = fuzzy(query, o.search or o.name)
 		if sc and (best_score == nil or sc < best_score) then
 			best, best_score = i, sc
 		end
@@ -1601,8 +1636,11 @@ local function best_match(query)
 end
 
 local function match_name(b)
-	return b == "terminal" and "settings / ContentDB" or
-			(b and ORBS[b] and ORBS[b].name)
+	if b == "terminal" then return "settings / ContentDB" end
+	local o = b and ORBS[b]
+	if not o then return nil end
+	-- A save says whose it is: two games may both have a "world"
+	return o.save and (o.name .. "  (" .. o.game .. ")") or o.name
 end
 
 -- **The terminal**: settings and the ContentDB listing are a thing you
@@ -1749,6 +1787,16 @@ local function launch(b)
 	-- somewhere else takes it there mid-flight.
 	if ORBS[b] and ORBS[b].run then
 		ORBS[b].run()
+	elseif ORBS[b] and ORBS[b].save then
+		-- **A save cannot be opened by name yet**, and saying so is
+		-- better than flying to it and doing nothing: ctx.launch carries
+		-- params, but the launch grid refuses them for a game target
+		-- because a server has no door for them ("untrusted_launch" in
+		-- its config is the plan). That door is what the save spheres
+		-- wait on; see [LAUNCH_WORLD] step 6.
+		log:warning("launch: " .. ORBS[b].name .. " of " ..
+				ORBS[b].game .. ": opening a save by name waits on " ..
+				"ctx.launch params reaching a game")
 	end
 end
 
