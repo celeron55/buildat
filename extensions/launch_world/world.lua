@@ -755,6 +755,13 @@ for i = 1, BAYS do
 	LIGHT_PLACES[i] = {o.x, o.y, o.z}
 end
 LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, OVERHEAD_Y * VOXEL_M, 2.0}
+-- **A cool fill, low and forward** -- the one thing standing in for the
+-- bounce a path trace gets free. Without it the shadows go to nothing
+-- once the light from above casts: the room's median came to 23 against
+-- the reference frame's 38, and its blue to 58 against 68. It lights the
+-- floor and the chrome and falls off before the wall, so the stone keeps
+-- silhouetting against the orbs, which is the composition.
+LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, 1.6, 7.0}
 
 -- The palette's roles, from the plan: cyan is live and connected, purple
 -- is structure and never state, amber is the one thing that wants you,
@@ -792,9 +799,10 @@ local function preset_lights(orb, sky, orb_i, sky_i)
 		-- being geometry -- an orb behind the wall's plane gives its
 		-- outward face nothing whatever the range is. **A pick, and
 		-- the user's to overrule.**
-		l[i] = {orb, orb_i, 9 * U}
+		l[i] = {orb, orb_i, 7 * U}
 	end
 	l[BAYS + 1] = {sky, sky_i, 17 * U}
+	l[BAYS + 2] = {sky, sky_i * 0.60, 16 * U}
 	return l
 end
 
@@ -805,8 +813,8 @@ local PRESETS = {
 		name = "cold_in_warm_out",
 		-- The two the probe sheet sweeps; see probe_sheet.sh
 	lights = preset_lights(WARM, COLD_WHITE,
-			tonumber(buildat.get_env("BUILDAT_LAUNCH_ORB") or "") or 9.0,
-			tonumber(buildat.get_env("BUILDAT_LAUNCH_SKY") or "") or 1.6),
+			tonumber(buildat.get_env("BUILDAT_LAUNCH_ORB") or "") or 6.5,
+			tonumber(buildat.get_env("BUILDAT_LAUNCH_SKY") or "") or 2.0),
 	},
 	{
 		name = "warm_in_cold_out",
@@ -844,11 +852,29 @@ for i, place in ipairs(LIGHT_PLACES) do
 	local node = scene:CreateChild("light")
 	node.position = V(place[1], place[2], place[3])
 	local light = node:CreateComponent("Light")
-	light.lightType = magic.LIGHT_POINT
-	-- A handful of sharp point lights with hard shadows; only the key pair
-	-- casts, because a shadow map each is the one real cost here
-	light.castShadows = false
-	light.shadowBias = magic.BiasParameters(0.00025, 0.5)
+	-- **The whole shadow budget goes to the light from above** (this
+	-- plan's own rule), and it had none: every light in the room was
+	-- `castShadows = false`, so the wall's relief threw nothing and the
+	-- deep insets could not read black while lit. That is where the
+	-- room's dark mass went -- its median came to 72 against the
+	-- reference frame's 38 (2026-09-23).
+	--
+	-- A spot rather than a point, because a point wants a cube shadow
+	-- map for six faces of which one is ever looked at, and because an
+	-- opening overhead throws light down and not sideways.
+	local overhead = (i == #LIGHT_PLACES - 1)
+	light.lightType = overhead and magic.LIGHT_SPOT or magic.LIGHT_POINT
+	if overhead then
+		node.direction = magic.Vector3(0, -1, 0.12)
+		light.fov = 140
+		light.castShadows = true
+		light.shadowBias = magic.BiasParameters(0.00006, 0.6)
+	else
+		-- The orbs stay plain point lights: no cube shadow maps and no
+		-- cones, the pocket's own contrast line being geometry
+		light.castShadows = false
+		light.shadowBias = magic.BiasParameters(0.00025, 0.5)
+	end
 	lights[i] = light
 	light_nodes[i] = node
 end
