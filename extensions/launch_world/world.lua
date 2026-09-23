@@ -2743,6 +2743,13 @@ function handle_idle_update(event_type, event_data)
 			drop_hint()
 		end
 	end
+	if notice_left > 0 then
+		notice_left = notice_left - dt_any
+		if notice_left <= 0 then
+			notice_text.text = ""
+			notice_left = 0
+		end
+	end
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if in_game or console_open then return end
@@ -2756,18 +2763,25 @@ function handle_idle_update(event_type, event_data)
 	if not attracting and not terminal_open and not cam.to_from and
 			mode ~= "fps" and idle_quiet > ATTRACT_AFTER then
 		attracting = true
+		drop_hint()
 		log:info("attract: the room is showing itself off")
 	end
 	if attracting then
 		local a = idle_quiet - ATTRACT_AFTER
-		-- A sweep along the bays and back, low and slow, looking at the
-		-- wall the orbs are in
-		local sway = math.sin(a * 0.22)
-		cam.from.x = HOME_FROM.x + sway * 9.0
-		cam.from.y = HOME_FROM.y + math.sin(a * 0.15) * 0.8
-		cam.from.z = HOME_FROM.z - 3.0 + math.cos(a * 0.22) * 2.0
-		cam.at.x = HOME_AT.x + sway * 4.0
-		cam.at.y = HOME_AT.y + 0.6
+		-- **A sweep down the open corridor, not through the
+		-- furniture** (2026-09-23: the old sweep went nine units either
+		-- way and spent half its time inside the floor's spheres, which
+		-- are lit from behind and read as black blobs filling the
+		-- frame). The middle of the floor is left open by design --
+		-- it is the corridor to the wall -- so the sweep stays in it
+		-- and moves toward the wall and back instead, which is the
+		-- view the room was composed for.
+		local sway = math.sin(a * 0.17)
+		cam.from.x = HOME_FROM.x + sway * 3.5
+		cam.from.y = HOME_FROM.y + 1.1 + math.sin(a * 0.13) * 0.7
+		cam.from.z = HOME_FROM.z - 1.0 + math.cos(a * 0.17) * 5.0
+		cam.at.x = HOME_AT.x + sway * 1.5
+		cam.at.y = HOME_AT.y + 0.9
 		cam.at.z = HOME_AT.z
 		apply_camera()
 	end
@@ -2893,6 +2907,9 @@ prompt_str = ""
 ornament_on = true
 -- How long the opening hint has left, in seconds; zero once it is gone
 hint_left = 0
+-- And the same for a notice, which is not the hint: one is taken away
+-- by the player moving, the other by having been read
+notice_left = 0
 
 -- **One line the room says things on**, above the prompt: connecting,
 -- and why a connection did not happen. A dialog would take the mouse
@@ -2906,8 +2923,15 @@ notice_text.verticalAlignment = magic.VA_BOTTOM
 notice_text:SetPosition(0, -80)
 notice_text:SetColor(magic.Color(1.0, 0.82, 0.45, 1))
 notice_text.text = ""
+-- **A notice says something and then stops saying it** (2026-09-23: a
+-- "Connect failed" from minutes earlier was still on the screen while
+-- the room showed itself off). Twelve seconds is long enough to read a
+-- line and short enough that it is gone before the room is looked at
+-- again; a wait says the same thing every frame it is still waiting.
+local NOTICE_SECONDS = 12
 function notice(text)
 	notice_text.text = text or ""
+	notice_left = (text ~= nil and text ~= "") and NOTICE_SECONDS or 0
 	hint_left = 0
 end
 
@@ -3546,6 +3570,9 @@ function handle_keydown(event_type, event_data)
 	if key == magic.KEY_F8 then
 		attracting = true
 		idle_quiet = ATTRACT_AFTER
+		-- Nobody is being told which keys to press while the room is
+		-- showing itself off
+		drop_hint()
 		log:info("attract: the room is showing itself off")
 		return
 	end
