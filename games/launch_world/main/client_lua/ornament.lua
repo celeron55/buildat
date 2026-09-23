@@ -250,6 +250,45 @@ function M.mark(size, seed)
 	return f
 end
 
+-- **The wall's own material**: one knobby monotonous field over the
+-- whole wall, with rectangles inset to various depths until some read
+-- black. It is a height field like the others, and it is meant to be
+-- seen across many voxels at once -- which is what uv_scale is for
+-- ([WORLD_UV]); at one voxel per repeat it is a grid of identical
+-- stamps, which is what the wall looked like before.
+function M.wall(size, seed)
+	local h = field(size, 0.62)
+	local inlay = field(size)
+	local r = rng(seed)
+	-- The knobble: small raised lumps everywhere, dense enough to read as
+	-- a surface rather than as marks
+	for _ = 1, size * size / 26 do
+		local x, y = r(size) - 1, r(size) - 1
+		local w = 2 + r(3)
+		for dy = 0, w - 1 do
+			for dx = 0, w - 1 do
+				put(h, (x + dx) % size, (y + dy) % size, 0.62 + r() * 0.38)
+			end
+		end
+	end
+	-- And the insets: rectangles cut to various depths, a few of them all
+	-- the way down
+	for _ = 1, 14 do
+		local w = 4 + r(math.floor(size / 5))
+		local t = 3 + r(math.floor(size / 6))
+		local x, y = r(size) - 1, r(size) - 1
+		local depth = r() < 0.25 and 0 or 0.10 + r() * 0.34
+		for dy = 0, t - 1 do
+			for dx = 0, w - 1 do
+				put(h, (x + dx) % size, (y + dy) % size, depth)
+				put(inlay, (x + dx) % size, (y + dy) % size,
+						depth < 0.05 and 1 or 0)
+			end
+		end
+	end
+	return h, inlay
+end
+
 -- The maps, derived and not authored.
 --
 -- simplified: the relief goes into the **albedo** as a shade as well as

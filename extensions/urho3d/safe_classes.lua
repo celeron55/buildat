@@ -1104,6 +1104,30 @@ function M.define(dst, util)
 
 	util.wc("ResourceCache", {
 		instance = {
+			-- **A resource the game built itself, under a name the engine
+			-- can load it by** -- which is the only way a generated
+			-- texture reaches a voxel atlas, since a tile is loaded by
+			-- resource name ([WORLD_UV], [LAUNCH_WORLD]).
+			--
+			-- **The name is forced into "generated/"**, which is the
+			-- whole of the sandbox question: a script that could name any
+			-- resource could shadow one the engine or another module
+			-- loads -- a technique, a style, another game's texture. It
+			-- can only shadow its own.
+			AddManualResource = util.wrap_function(
+				{"ResourceCache", {"Image", "Texture2D", "Resource"},
+					"string"},
+				function(self, resource, name)
+					if type(name) ~= "string" or name == "" or
+							name:find("[^%w%._%-/]") or name:find("%.%.") then
+						error("AddManualResource(): a name may only be "..
+								"letters, digits, dot, dash, underscore "..
+								"and slash")
+					end
+					return self:AddManualResource(resource,
+							"generated/"..name)
+				end
+			),
 			GetResource = util.wrap_function({"ResourceCache", "string", "string"},
 			function(self, resource_type, unsafe_resource_name)
 				--[[

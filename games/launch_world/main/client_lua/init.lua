@@ -23,7 +23,6 @@ local magic = require("buildat/extension/urho3d")
 -- again here.
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
-voxelworld.allow_streaming()
 -- **The skylight flood is on, even though this room has no sky.** With
 -- it off the light nibbles are never written and the shader reads
 -- whatever they were: at 45 cm a face is two or three pixels across a
@@ -41,6 +40,39 @@ local ok_orn, err_orn, ornament = buildat.run_script_file("main/ornament.lua")
 if not ok_orn or type(ornament) ~= "table" then
 	error("ornament.lua: " .. tostring(err_orn))
 end
+-- **The voxel tiles are generated here and registered by name**, which
+-- is the only way a generated picture reaches a voxel atlas: a tile is
+-- loaded out of the resource cache by the name the voxel definition
+-- gives, and this puts one there under it. The plan's rule is that the
+-- generator and its seed are the source and the picture is a build
+-- artefact, never committed -- so this is where the wall's material
+-- comes from.
+--
+-- **Before allow_streaming()**, or a chunk is meshed before its texture
+-- exists and is drawn without it ([TEXMOD_RACE], which is what that
+-- gate is for).
+tiles = {}
+local function register_tile(name, h, inlay, opts)
+	local diff = ornament.maps(magic, h, inlay, opts)
+	assert(magic.cache:AddManualResource(diff, name),
+			"the generated tile went into the cache")
+	-- Held: a resource the cache has is the cache's, but the wrapper is
+	-- this script's and the Image would go with it. Its own table,
+	-- because the tiles are registered before the world may stream and
+	-- that is earlier than anything else here is built.
+	tiles[#tiles + 1] = diff
+	log:info("tile: generated/" .. name)
+end
+
+do
+	local wh, wi = ornament.wall(128, ornament.seed_of("launch_world wall"))
+	register_tile("wall.png", wh, wi,
+			{base = magic.Color(0.52, 0.53, 0.57, 1),
+			inlay = magic.Color(0.05, 0.05, 0.06, 1), relief = 0.9,
+			strength = 4})
+end
+voxelworld.allow_streaming()
+
 -- The room's sound, synthesised; see synth.lua
 local ok_syn, err_syn, synth = buildat.run_script_file("main/synth.lua")
 if not ok_syn or type(synth) ~= "table" then
