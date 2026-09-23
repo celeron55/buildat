@@ -244,8 +244,15 @@ if grep -aq "Crash: SIG" "$out/cli.log"; then
 			"$(grep -a "Crash: SIG" "$out/cli.log" | head -1)"
 	exit 1
 fi
-grep -aE "palette preset|ornament ok|synth ok" "$out/cli.log" |
+grep -aE "palette preset|ornament ok|synth ok|orb sizes" "$out/cli.log" |
 	sed 's/.*launch_w[a-z]*: //'
+# **An orb is as big as its game**: a tree with more than one game has to
+# spread them, or the size is saying nothing
+sizes=$(grep -a "launch_w.*: orb sizes: " "$out/cli.log" | head -1)
+if ! echo "$sizes" | grep -q "1.20 to 1.80"; then
+	echo "FAIL: the orbs are not sized by their games -- $sizes"
+	exit 1
+fi
 # The ornament generator asserts its own patterns as it builds them
 # (ornament.lua's self_check); a generator that quietly returned a flat
 # field would pass an eye on a dark slab and fail there

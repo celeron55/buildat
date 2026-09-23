@@ -30,7 +30,7 @@ local launch_grid = dofile(buildat.extension_path("__menu") ..
 local GAMES, FLOOR_ACTIONS = {}, {}
 for _, a in ipairs(launch_grid.actions(log)) do
 	local o = {name = a.label, icon = a.icon, run = a.run, kind = a.kind,
-		description = a.description}
+		description = a.description, from = a.from}
 	if a.kind == "game" then
 		GAMES[#GAMES + 1] = o
 	else
@@ -670,6 +670,34 @@ local BAY_Z = room.BAY_Z
 local function bay_x(i) return room.bay_x(i - 1) end
 local function bay_y(i) return room.bay_y(i - 1) end
 
+-- **An orb is as big as its game** (the plan: 1.2 to 1.8 voxels across,
+-- from the game's own size). `list_games()` answers a directory tree's
+-- bytes, and on a linear scale every game here sits at the bottom -- one
+-- is a hundred times another -- so it is the log that is spread across
+-- the range. A tree with one game gets the middle.
+local ORB_MIN, ORB_MAX = 1.2, 1.8
+local game_across = {}
+do
+	local sizes, lo, hi = {}, nil, nil
+	for _, g in ipairs(buildat.list_games() or {}) do
+		local v = math.log((tonumber(g.size) or 0) + 1)
+		sizes[g.name] = v
+		lo = (lo == nil or v < lo) and v or lo
+		hi = (hi == nil or v > hi) and v or hi
+	end
+	for name, v in pairs(sizes) do
+		local t = (hi and lo and hi > lo) and (v - lo) / (hi - lo) or 0.5
+		game_across[name] = ORB_MIN + t * (ORB_MAX - ORB_MIN)
+	end
+end
+
+-- The orb's own size, by the game the launcher action came from; the
+-- middle of the range for anything that is not a game in the tree
+local function orb_across(spec)
+	local n = spec and spec.from and spec.from:match("^game/(.+)$")
+	return (n and game_across[n]) or (ORB_MIN + ORB_MAX) / 2
+end
+
 -- **The orbs are the games** (user): warm is what you own, cold is a
 -- server you can reach. The name is what Text3D says over the one being
 -- pointed at, and a game's own icon is its mark -- generated from the
@@ -703,6 +731,16 @@ for b = 1, BAYS do
 end
 log:info("bays " .. BAYS .. " " .. BAY_Z .. " " ..
 		table.concat(bay_desc, " "))
+do
+	local lo, hi, n = nil, nil, 0
+	for _, v in pairs(game_across) do
+		n = n + 1
+		lo = (lo == nil or v < lo) and v or lo
+		hi = (hi == nil or v > hi) and v or hi
+	end
+	log:info(string.format("orb sizes: %d games, %.2f to %.2f voxels",
+			n, lo or 0, hi or 0))
+end
 
 -- **The floor's own things** (user): a launch action that is not a game
 -- is a glossy white sphere, and it stands on the floor rather than in a
@@ -848,10 +886,8 @@ for i, o in ipairs(orb_places) do
 	else
 		orb_mats[i] = glow(magic.Color(1, 1, 1, 1), spec and spec.name,
 				spec and spec.icon)
-		-- simplified: one size. The plan wants 1.2 to 1.8 voxels by the
-		-- game's own size, which list_games() answers.
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-				across(1.5), orb_mats[i])
+				across(orb_across(spec)), orb_mats[i])
 		node:GetComponent("StaticModel").castShadows = false
 		orb_nodes[i] = node
 	end
