@@ -127,8 +127,43 @@ local KIND_ORDER = {menu = 0, game = 1, builtin = 2, extension = 3}
 
 -- Every action the tree offers, checked and in the grid's order: explicit
 -- order first, then by kind -- games, builtins, extensions -- then label
+-- **What a launch action says about itself** ([LAUNCH_SIGNIFY]): the
+-- category is what kind of thing it is -- an **open set**, so a launch
+-- UI that meets one it does not know draws its default rather than
+-- failing -- and the significance is a non-negative number it may rank
+-- and scale by, comparable **within** a category and nowhere else.
+-- Absent means "no opinion" and is never an error, since most sources
+-- have no view.
+--
+-- A launcher file may say both; what it does not say is defaulted here:
+-- a game is a `game` of its own installed size, and everything else is
+-- an `action` with no opinion. So the size a launch UI already draws
+-- games by comes from the action rather than from the UI guessing which
+-- game an action came from.
+local function significance_of(a, source, game_sizes)
+	local n = tonumber(a.significance)
+	if n == nil and source.kind == "game" then
+		n = game_sizes[source.name]
+	end
+	if n == nil or n < 0 then
+		return nil
+	end
+	return n
+end
+
+local function category_of(a)
+	if type(a.category) == "string" and a.category:match("^[%w_]+$") then
+		return a.category
+	end
+	return nil
+end
+
 function M.actions(log)
 	local out = {}
+	local game_sizes = {}
+	for _, g in ipairs(buildat.list_games() or {}) do
+		game_sizes[g.name] = tonumber(g.size)
+	end
 	for _, source in ipairs(buildat.list_launchers()) do
 		local actions, from = nil, source.kind.."/"..source.name
 		-- One rule: a directory is on the grid if it has launcher/init.lua.
@@ -165,6 +200,9 @@ function M.actions(log)
 							a.description or nil,
 					order = tonumber(a.order),
 					kind = source.kind, from = from,
+					category = category_of(a) or
+							(source.kind == "game" and "game" or "action"),
+					significance = significance_of(a, source, game_sizes),
 					run = function()
 						local ok, err = pcall(run)
 						if not ok then

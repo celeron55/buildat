@@ -454,13 +454,6 @@ if [ -z "$hums" ]; then
 	exit 1
 fi
 
-# **An orb is as big as its game**: a tree with more than one game has to
-# spread them, or the size is saying nothing
-sizes=$(grep -a "launch_w.*: orb sizes: " "$out/cli.log" | head -1)
-if ! echo "$sizes" | grep -q "1.20 to 1.80"; then
-	echo "FAIL: the orbs are not sized by their games -- $sizes"
-	exit 1
-fi
 # The ornament generator asserts its own patterns as it builds them
 # (ornament.lua's self_check); a generator that quietly returned a flat
 # field would pass an eye on a dark slab and fail there
@@ -521,6 +514,34 @@ if [ "$inks" -lt 3 ] || [ "$blank" -gt 0 ]; then
 	echo "FAIL: the orbs share a mark, or one of them has none"
 	exit 1
 fi
+
+# **Every orb about two voxels across** ([LAUNCH_SIGNIFY]): the sizes
+# come from what a launch action says about itself, ranked within its
+# own category, so a server is no longer the largest thing in the room
+# for want of anything saying otherwise. The band is asserted, and that
+# more than one category answered -- a room where nothing had an
+# opinion would draw every orb the same and still look right.
+sizes=$(grep -a "launch_w.*: orb sizes: " "$out/cli.log" | head -1 |
+	sed 's/.*orb sizes: //')
+echo "orb sizes: ${sizes:-(none)}"
+band=$(echo "$sizes" | sed -n 's/.*, \([0-9.]*\) to \([0-9.]*\) voxels.*/\1 \2/p')
+ranked=$(echo "$sizes" | sed -n 's/.*ranked within //p')
+if [ -z "$band" ] || [ "$ranked" = "nothing" ]; then
+	echo "FAIL: the room does not size its orbs by what they say about" \
+			"themselves"
+	exit 1
+fi
+python3 - "$band" <<'PYSZ' || exit 1
+import sys
+lo, hi = (float(v) for v in sys.argv[1].split())
+if not (1.6 <= lo <= hi <= 2.4):
+	print("FAIL: an orb is outside the band around two voxels: %.2f to %.2f"
+			% (lo, hi))
+	raise SystemExit(1)
+if hi - lo < 0.1:
+	print("FAIL: every orb is the same size -- nothing is ranked")
+	raise SystemExit(1)
+PYSZ
 
 walked=$(grep -ac "launch_w.*: prompt: match [0-9]* of " "$out/cli.log")
 matched=$(grep -a "launch_w.*: prompt: \"tes\" matches " "$out/cli.log" |

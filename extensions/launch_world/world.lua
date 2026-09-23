@@ -56,9 +56,14 @@ local room = api.run_extension_file("room.lua")
 -- trusted side, where it is looked up rather than called across.
 local GAMES, FLOOR_ACTIONS = {}, {}
 for _, a in ipairs(api.launch_actions()) do
+	-- **The action says what it is and how much it matters**
+	-- ([LAUNCH_SIGNIFY]), rather than the room guessing from where the
+	-- entry came from. The category is an open set, so one this room has
+	-- no orb for draws the default.
 	local o = {name = a.label, icon = a.icon, key = a.key, kind = a.kind,
-		description = a.description, from = a.from}
-	if a.kind == "game" then
+		description = a.description, from = a.from,
+		category = a.category or "action", significance = a.significance}
+	if o.category == "game" then
 		GAMES[#GAMES + 1] = o
 	else
 		FLOOR_ACTIONS[#FLOOR_ACTIONS + 1] = o
@@ -898,27 +903,67 @@ local function bay_y(i) return room.bay_y(i - 1) end
 -- bytes, and on a linear scale every game here sits at the bottom -- one
 -- is a hundred times another -- so it is the log that is spread across
 -- the range. A tree with one game gets the middle.
-local ORB_MIN, ORB_MAX = 1.2, 1.8
-local game_across = {}
-do
-	local sizes, lo, hi = {}, nil, nil
-	for _, g in ipairs(api.list_games() or {}) do
-		local v = math.log((tonumber(g.size) or 0) + 1)
-		sizes[g.name] = v
-		lo = (lo == nil or v < lo) and v or lo
-		hi = (hi == nil or v > hi) and v or hi
-	end
-	for name, v in pairs(sizes) do
-		local t = (hi and lo and hi > lo) and (v - lo) / (hi - lo) or 0.5
-		game_across[name] = ORB_MIN + t * (ORB_MAX - ORB_MIN)
+-- **Every orb about 2.0 voxels across** (user, [LAUNCH_SIGNIFY]), moved
+-- mildly from there by whatever the thing says about itself -- so the
+-- kinds are told apart by **material**, as this plan has always said,
+-- and size is a small signal rather than the loud one it was: a server
+-- was 3.4 voxels where a save was 0.9 and no size for a server had ever
+-- been planned.
+--
+-- **Normalised within a category and nowhere else**: bytes against a
+-- player count against a date are not comparable, so each category's own
+-- significances are spread across the band and a category with one
+-- member, or with none that say anything, sits in the middle. The log
+-- stays because one game is a hundred times another.
+-- One table rather than five names: this chunk is at Lua's limit of 200
+-- locals and the room has more to say than that ([LAUNCH_WORLD]).
+local sig = {MIN = 1.7, MAX = 2.3, range = {}}
+sig.MID = (sig.MIN + sig.MAX) / 2
+
+-- Told what a category's significances are; may be told nothing, which
+-- is what "no opinion" comes to
+function sig.note(category, n)
+	if type(n) ~= "number" or n < 0 then return end
+	local v = math.log(n + 1)
+	local r = sig.range[category]
+	if not r then
+		sig.range[category] = {lo = v, hi = v}
+	else
+		r.lo = math.min(r.lo, v)
+		r.hi = math.max(r.hi, v)
 	end
 end
 
--- The orb's own size, by the game the launcher action came from; the
--- middle of the range for anything that is not a game in the tree
+-- The orb's own size: the band's middle for anything with no opinion,
+-- which includes every category this room has never heard of
 local function orb_across(spec)
-	local n = spec and spec.from and spec.from:match("^game/(.+)$")
-	return (n and game_across[n]) or (ORB_MIN + ORB_MAX) / 2
+	local n = spec and tonumber(spec.significance)
+	local r = spec and sig.range[spec.category or "action"]
+	if not n or n < 0 or not r or r.hi <= r.lo then
+		return sig.MID
+	end
+	local t = (math.log(n + 1) - r.lo) / (r.hi - r.lo)
+	return sig.MIN + t * (sig.MAX - sig.MIN)
+end
+
+-- What each category has to say, before anything asks for a size: the
+-- band is spread over the significances that are there, and a category
+-- where nothing has an opinion keeps the middle.
+for _, o in ipairs(GAMES) do sig.note("game", o.significance) end
+for _, o in ipairs(FLOOR_ACTIONS) do
+	sig.note(o.category or "action", o.significance)
+end
+for _, sv in ipairs(SERVERS) do sig.note("server", sv.players) end
+-- A save's significance is its recency ([LAUNCH_SIGNIFY]), measured
+-- against the oldest of the ones listed: the list is newest first, so
+-- the last is the floor to measure from. Nothing to compare against
+-- means no opinion.
+sig.save_epoch = #SAVES > 1 and tonumber(SAVES[#SAVES].modified) or nil
+if sig.save_epoch then
+	for _, sv in ipairs(SAVES) do
+		sig.note("save",
+				math.max(0, (tonumber(sv.modified) or 0) - sig.save_epoch))
+	end
 end
 
 -- **The orbs are the games** (user): warm is what you own, cold is a
@@ -954,16 +999,6 @@ for b = 1, BAYS do
 end
 log:info("bays " .. BAYS .. " " .. BAY_Z .. " " ..
 		table.concat(bay_desc, " "))
-do
-	local lo, hi, n = nil, nil, 0
-	for _, v in pairs(game_across) do
-		n = n + 1
-		lo = (lo == nil or v < lo) and v or lo
-		hi = (hi == nil or v > hi) and v or hi
-	end
-	log:info(string.format("orb sizes: %d games, %.2f to %.2f voxels",
-			n, lo or 0, hi or 0))
-end
 
 -- **The floor's own things** (user): a launch action that is not a game
 -- is a glossy white sphere, and it stands on the floor rather than in a
@@ -984,15 +1019,20 @@ local FLOOR_ROWS = {-4.0, -0.5, 3.0, 6.5, 10.0}
 for i, a in ipairs(FLOOR_ACTIONS) do
 	local col = FLOOR_COLS[(i - 1) % #FLOOR_COLS + 1]
 	local row = FLOOR_ROWS[math.floor((i - 1) / #FLOOR_COLS) % #FLOOR_ROWS + 1]
-	ORBS[#ORBS + 1] = {name = a.name, icon = a.icon, key = a.key,
-		kind = a.kind, description = a.description, floor = true}
-	orb_places[#orb_places + 1] = {x = col, y = 1.4 * VOXEL_M / 2, z = row}
+	local o = {name = a.name, icon = a.icon, key = a.key,
+		kind = a.kind, description = a.description, floor = true,
+		category = a.category, significance = a.significance}
+	ORBS[#ORBS + 1] = o
+	orb_places[#orb_places + 1] = {x = col,
+		y = orb_across(o) * VOXEL_M / 2, z = row}
 end
 
--- A server is bigger than a game's orb: the reference frame's chrome is
--- the largest thing standing on its floor
-local SERVER_ACROSS = 3.4
-
+-- **No size of its own any more** ([LAUNCH_SIGNIFY]): a server was 3.4
+-- voxels across because the reference frame's chrome was the largest
+-- thing on its floor, which said "a server matters most" and was never
+-- planned. It is a mirror at the band's middle now, and what would move
+-- it is the player count remembered from the last visit -- a field
+-- beside the address, which nothing writes yet.
 -- **A server is a mirror, and it stands where the room's chrome used to
 -- be.** Those spheres were the reference frame's own furniture standing
 -- in for something; this is the something.
@@ -1000,11 +1040,13 @@ local SERVER_COLS = {-14.0, -9.5, -5.0, 5.0, 9.5, 14.0}
 for i, sv in ipairs(SERVERS) do
 	local col = SERVER_COLS[(i - 1) % #SERVER_COLS + 1]
 	local row = 0.5 + math.floor((i - 1) / #SERVER_COLS) * 4.5
-	ORBS[#ORBS + 1] = {name = sv.name, address = sv.address, server = true,
-		description = sv.address, floor = true,
+	local o = {name = sv.name, address = sv.address, server = true,
+		description = sv.address, floor = true, category = "server",
+		significance = sv.players,
 		search = sv.name .. " " .. sv.address}
-	orb_places[#orb_places + 1] = {x = col, y = SERVER_ACROSS * VOXEL_M / 2,
-		z = row}
+	ORBS[#ORBS + 1] = o
+	orb_places[#orb_places + 1] = {x = col,
+		y = orb_across(o) * VOXEL_M / 2, z = row}
 end
 
 -- **A save is a white sphere too, smaller** (user), and it stands in
@@ -1014,10 +1056,35 @@ local SAVE_COLS = {-11.0, -7.5, -4.0, 4.0, 7.5, 11.0}
 for i, sv in ipairs(SAVES) do
 	local col = SAVE_COLS[(i - 1) % #SAVE_COLS + 1]
 	local row = 13.0 - math.floor((i - 1) / #SAVE_COLS) * 3.2
-	ORBS[#ORBS + 1] = {name = sv.name, game = sv.game, save = true,
+	local o = {name = sv.name, game = sv.game, save = true,
 		description = "save of " .. sv.game, floor = true,
+		category = "save",
+		-- Its recency, against the oldest of the ones listed: the list
+		-- is newest first, so the last one is the floor to measure from
+		significance = sig.save_epoch and
+				math.max(0, (tonumber(sv.modified) or 0) - sig.save_epoch) or nil,
 		search = sv.name .. " " .. sv.game}
-	orb_places[#orb_places + 1] = {x = col, y = 0.9 * VOXEL_M / 2, z = row}
+	ORBS[#ORBS + 1] = o
+	orb_places[#orb_places + 1] = {x = col,
+		y = orb_across(o) * VOXEL_M / 2, z = row}
+end
+
+do
+	local lo, hi, n = nil, nil, 0
+	for _, o in ipairs(ORBS) do
+		if not o.empty then
+			local v = orb_across(o)
+			n = n + 1
+			lo = (lo == nil or v < lo) and v or lo
+			hi = (hi == nil or v > hi) and v or hi
+		end
+	end
+	local cats = {}
+	for c in pairs(sig.range) do cats[#cats + 1] = c end
+	table.sort(cats)
+	log:info(string.format("orb sizes: %d orbs, %.2f to %.2f voxels, "..
+			"ranked within %s", n, lo or 0, hi or 0,
+			#cats > 0 and table.concat(cats, ", ") or "nothing"))
 end
 
 -- **The ornament, on primitives in front of the voxels.** The bays are
@@ -1085,7 +1152,7 @@ for i, o in ipairs(orb_places) do
 		-- **A mirror**: a server is a thing you can see the room in,
 		-- which is the whole of why the reflection probe is here
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-				across(SERVER_ACROSS),
+				across(orb_across(spec)),
 				etched(0.92, 0.94, 0.97, 0.06, 1.0, spec.name) or chrome)
 		node:GetComponent("StaticModel").castShadows = true
 		orb_nodes[i] = node
@@ -1093,7 +1160,7 @@ for i, o in ipairs(orb_places) do
 		-- Smaller, because it is one save of one game rather than a
 		-- thing to launch on its own
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-				across(0.9),
+				across(orb_across(spec)),
 				etched(0.86, 0.87, 0.89, 0.12, 0.0, spec.name) or white)
 		node:GetComponent("StaticModel").castShadows = true
 		orb_nodes[i] = node
@@ -1102,7 +1169,7 @@ for i, o in ipairs(orb_places) do
 		-- the room's light rather than making any, and it is told apart
 		-- from a server's chrome by being white rather than a mirror
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-				across(1.4),
+				across(orb_across(spec)),
 				etched(0.86, 0.87, 0.89, 0.12, 0.0, spec.name, spec.icon) or
 				white)
 		node:GetComponent("StaticModel").castShadows = true
@@ -3313,7 +3380,11 @@ notice_left = 0
 -- and stop the room; this does not. simplified: the line stays until
 -- something else is said -- there is no timeout, since the only things
 -- said so far are a wait and its outcome.
-local notice_text = room_ui_child("Text")
+-- A global, as `notice_left` beside it is: the frame handler that
+-- clears the notice is defined further up this file and a local here
+-- would be nil from there -- which it was, and the clearing raised
+-- (2026-09-24)
+notice_text = room_ui_child("Text")
 notice_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 20)
 notice_text.horizontalAlignment = magic.HA_CENTER
 notice_text.verticalAlignment = magic.VA_BOTTOM

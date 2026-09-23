@@ -142,7 +142,12 @@ buildat.safe.launch_actions = function()
 		launch_runs[key] = a.run
 		out[i] = {key = key, id = a.id, label = a.label, icon = a.icon,
 			kind = a.kind, from = a.from, description = a.description,
-			order = a.order}
+			order = a.order,
+			-- What the action says about itself ([LAUNCH_SIGNIFY]): the
+			-- category is an open set and the significance a number to
+			-- rank and scale by within one. Both are plain data and both
+			-- may be absent.
+			category = a.category, significance = a.significance}
 	end
 	return out
 end
