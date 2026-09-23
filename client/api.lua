@@ -235,6 +235,77 @@ buildat.safe.leave_to_menu = __buildat_leave_to_menu
 -- whose mouse it is ([BOX_PLAYTEST_3])
 buildat.safe.is_scripted = __buildat_is_scripted
 
+-- **The client's preferences, against a fixed key set**: the names are
+-- `list_preferences()`'s and nothing else, which is what keeps this a
+-- verb rather than a capability. The values live in `app::Options` and
+-- the C++ side parses, range checks and persists them, so a launcher is
+-- a page of widgets over these three calls and knows nothing about the
+-- file. A name outside the list is refused here rather than reaching
+-- the parser, which also reads a log level the sandbox has no business
+-- with.
+local function a_preference(name)
+	if type(name) ~= "string" then
+		return false
+	end
+	for _, k in ipairs(__buildat_list_preferences()) do
+		if k == name then
+			return true
+		end
+	end
+	return false
+end
+buildat.safe.list_preferences = __buildat_list_preferences
+buildat.safe.get_preference = function(name)
+	if not a_preference(name) then
+		return nil
+	end
+	return __buildat_get_preference(name)
+end
+buildat.safe.set_preference = function(name, value)
+	if not a_preference(name) then
+		return false, "set_preference: no preference by that name"
+	end
+	if type(value) ~= "boolean" and type(value) ~= "string" and
+			type(value) ~= "number" then
+		return false, "set_preference(name, value): a boolean, a number " ..
+				"or a string"
+	end
+	if type(value) == "number" then
+		value = tostring(value)
+	end
+	return __buildat_set_preference(name, value)
+end
+
+-- **A launch extension's own second file** ([LAUNCH_SANDBOX]). Nothing
+-- in the sandbox could load one: `require` reaches another extension's
+-- safe interface and a module's client half, and an extension's own
+-- files are neither -- so a launch UI of any size had to be one chunk,
+-- or reach for `dofile` and a path. This runs one named file of the
+-- calling launch extension in the sandbox and answers what it returned,
+-- which is what `dofile` was being used for.
+--
+-- A name is one file, `.lua`, and not a path: a launcher runs its own
+-- code and nobody else's.
+buildat.safe.run_extension_file = function(name)
+	if type(name) ~= "string" or not name:match("^[%w_%-]+%.lua$") then
+		return nil, "run_extension_file(name): one .lua file, not a path"
+	end
+	local who = __buildat_menu_extension_name or "launch_menu"
+	local path = __buildat_extension_path(who) .. "/" .. name
+	local f = io.open(path, "rb")
+	if not f then
+		return nil, "run_extension_file: no " .. name .. " in " .. who
+	end
+	local code = f:read("*a")
+	f:close()
+	local status, err, ret = __buildat_run_code_in_sandbox(code,
+			who .. "/" .. name)
+	if not status then
+		return nil, err
+	end
+	return ret
+end
+
 -- The two read-only enumerations a launcher draws its room from
 buildat.safe.list_games = __buildat_list_games
 buildat.safe.list_saves = __buildat_list_saves

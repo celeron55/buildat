@@ -13,9 +13,24 @@
 --
 -- Run it with `Build/bin/buildat -m launch_world`.
 local log = buildat.Logger("launch_world")
+
+-- **The room's debug knobs** (`BUILDAT_LAUNCH_*`), through one reader.
+-- Reading the client's environment is a trusted reach and not one a
+-- launch extension gets ([LAUNCH_SANDBOX]): sandboxed, this answers
+-- nothing and every knob falls back to its default, which is what a
+-- player sees in any case. The knobs are for the checks and for the
+-- next person measuring this room.
+local function env(name)
+	if not buildat.get_env then
+		return ""
+	end
+	return buildat.get_env(name) or ""
+end
 local magic = require("buildat/extension/urho3d").safe
-local EXT = buildat.extension_path("launch_world")
-local room = dofile(EXT .. "/room.lua")
+-- **Its own files through the safe verb** ([LAUNCH_SANDBOX]): a
+-- sandboxed extension cannot dofile a path, and a launch UI of any size
+-- is more than one chunk.
+local room = buildat.safe.run_extension_file("room.lua")
 
 -- **What the room holds is what the tree offers.** Every launcher/init.lua
 -- in games/, builtin/ and extensions/, run in the sandbox and checked, is
@@ -127,7 +142,7 @@ for _, a in ipairs(FLOOR_ACTIONS) do
 end
 
 -- The ornament generator and the maps it feeds; see ornament.lua
-local ornament = dofile(EXT .. "/ornament.lua")
+local ornament = buildat.safe.run_extension_file("ornament.lua")
 -- **The voxel tiles are generated here and registered by name**, which
 -- is the only way a generated picture reaches a voxel atlas: a tile is
 -- loaded out of the resource cache by the name the voxel definition
@@ -189,7 +204,7 @@ do
 end
 
 -- The room's sound, synthesised; see synth.lua
-local synth = dofile(EXT .. "/synth.lua")
+local synth = buildat.safe.run_extension_file("synth.lua")
 
 -- Held at module scope: a Lua-owned Image, Texture2D or Material is freed
 -- when the last Lua reference goes, whatever is drawing with it
@@ -245,7 +260,7 @@ local function material(colour, roughness, metallic, texture)
 	-- BUILDAT_LAUNCH_NOPBR=1 puts the stock non-PBR techniques on
 	-- instead, which is the last thing between a scene that lights in
 	-- HDR here and one that does not
-	local pbr = (buildat.get_env("BUILDAT_LAUNCH_NOPBR") or "") == ""
+	local pbr = env("BUILDAT_LAUNCH_NOPBR") == ""
 	local t = magic.cache:GetResource("Technique",
 			pbr and (texture and "Techniques/PBR/PBRDiff.xml" or
 			"Techniques/PBR/PBRNoTexture.xml") or
@@ -881,7 +896,7 @@ end
 -- own orange, lit by whatever the room is lit by. What a picture of it
 -- says is where the tonemap has put each of them -- whether the white
 -- has saturated and whether the dark has gone to nothing.
-if (buildat.get_env("BUILDAT_LAUNCH_PROBEBOX") or "") ~= "" then
+if env("BUILDAT_LAUNCH_PROBEBOX") ~= "" then
 	local PATCHES = {
 		{0.90, 0.90, 0.90}, {0.50, 0.50, 0.50}, {0.18, 0.18, 0.18},
 		{0.04, 0.04, 0.04}, {1.00, 0.55, 0.20},
@@ -1110,8 +1125,8 @@ local PRESETS = {
 		name = "cold_in_warm_out",
 		-- The two the probe sheet sweeps; see probe_sheet.sh
 	lights = preset_lights(WARM, COLD_WHITE,
-			tonumber(buildat.get_env("BUILDAT_LAUNCH_ORB") or "") or 16.0,
-			tonumber(buildat.get_env("BUILDAT_LAUNCH_SKY") or "") or 2.2),
+			tonumber(env("BUILDAT_LAUNCH_ORB")) or 16.0,
+			tonumber(env("BUILDAT_LAUNCH_SKY")) or 2.2),
 	},
 	{
 		name = "warm_in_cold_out",
@@ -1273,7 +1288,7 @@ local function reflection_probe(at)
 	-- simplified: an emissive orb clips to white where it is reflected,
 	-- since eight bits cannot carry it. The upgrade is the float cube
 	-- back, once [PBR_HDR] is repaired.
-	local fmt = (buildat.get_env("BUILDAT_LAUNCH_PROBEF") or "") ~= "" and
+	local fmt = env("BUILDAT_LAUNCH_PROBEF") ~= "" and
 			magic.Graphics.GetRGBAFloat16Format() or
 			magic.Graphics.GetRGBAFormat()
 	assert(cube:SetSize(PROBE_SIZE, fmt,
@@ -1325,7 +1340,7 @@ local probe_frames = 0
 function handle_probe_update()
 	-- The room stands down while a game is up ([MENU_CONTEXT])
 	if in_game then return end
-	if (buildat.get_env("BUILDAT_LAUNCH_NORENDERPROBE") or "") ~= "" then
+	if env("BUILDAT_LAUNCH_NORENDERPROBE") ~= "" then
 		return
 	end
 	if probe_frames > 90 then
@@ -1391,16 +1406,17 @@ function apply_room_path(vp)
 	-- one by points. That is where the next look starts, and it is a
 	-- client-wide question rather than this room's: nothing else in the
 	-- tree lights an HDR scene with point lights.
-	local want = buildat.get_env("BUILDAT_LAUNCH_TONEMAP") or "Tonemap"
+	local want = env("BUILDAT_LAUNCH_TONEMAP")
+	if want == "" then want = "Tonemap" end
 	-- **HDR is on** (user, 2026-09-23: a float target is non-negotiable
 	-- here). A renderer that clips every radiance at 1.0 before the
 	-- tonemap measures a clamp rather than light, and a source then
 	-- cannot be brighter than a fully-lit wall. BUILDAT_LAUNCH_NOHDR=1
 	-- goes back to LDR, which is what the two can be compared with.
-	local hdr = (buildat.get_env("BUILDAT_LAUNCH_NOHDR") or "") == ""
+	local hdr = env("BUILDAT_LAUNCH_NOHDR") == ""
 	-- BUILDAT_LAUNCH_SUN adds one directional light, to settle whether
 	-- it is point lights in particular that the HDR path drops
-	if (buildat.get_env("BUILDAT_LAUNCH_SUN") or "") ~= "" then
+	if env("BUILDAT_LAUNCH_SUN") ~= "" then
 		local node = scene:CreateChild("sun")
 		node.direction = magic.Vector3(-0.4, -0.8, 0.45)
 		local sun = node:CreateComponent("Light")
@@ -1438,9 +1454,9 @@ function apply_room_path(vp)
 		rp:SetEnabled("TonemapReinhardEq3", false)
 		rp:SetEnabled("TonemapUncharted2", true)
 		rp:SetShaderParameter("TonemapExposureBias",
-				tonumber(buildat.get_env("BUILDAT_LAUNCH_BIAS") or "") or 1.15)
+				tonumber(env("BUILDAT_LAUNCH_BIAS")) or 1.15)
 		rp:SetShaderParameter("TonemapMaxWhite",
-				tonumber(buildat.get_env("BUILDAT_LAUNCH_WHITE") or "") or 1.15)
+				tonumber(env("BUILDAT_LAUNCH_WHITE")) or 1.15)
 		rp:SetShaderParameter("AutoExposureAdaptRate", 2.0)
 		rp:SetShaderParameter("AutoExposureLumRange",
 				magic.Vector2(0.06, 2.0))
@@ -2600,7 +2616,7 @@ end
 -- waiting: a short timer for the check's sake would fire between the
 -- check's own keys and eat the next one, which is exactly what it did.
 local ATTRACT_AFTER = tonumber(
-		buildat.get_env("BUILDAT_LAUNCH_ATTRACT") or "") or 14
+		env("BUILDAT_LAUNCH_ATTRACT")) or 14
 idle_quiet = 0
 attracting = false
 
@@ -3000,7 +3016,7 @@ end
 local panel_rows = {}
 -- **The terminal is where a setting is changed, not where it is shown**
 -- ([LAUNCH_WORLD] step 9). The rows are the client's own preferences --
--- `buildat.list_preferences()`, whose values live in app::Options and
+-- `buildat.safe.list_preferences()`, whose values live in app::Options and
 -- whose C++ side parses, range checks and persists them, so this is a
 -- page of rows over two calls and knows nothing about the file -- plus
 -- the room's own two toggles, which are the room's and not the client's.
@@ -3015,7 +3031,7 @@ local STEPS = {
 	sound_volume = {0.0, 1.0, 0.05, "%.2f"},
 }
 local settings = {}
-for _, name in ipairs(buildat.list_preferences()) do
+for _, name in ipairs(buildat.safe.list_preferences()) do
 	settings[#settings + 1] = {pref = name}
 end
 -- The room's own, which no preference file knows about
@@ -3026,7 +3042,7 @@ local sel = 1
 
 local function setting_value(sg)
 	if sg.pref then
-		local v = buildat.get_preference(sg.pref)
+		local v = buildat.safe.get_preference(sg.pref)
 		if type(v) == "boolean" then return v and "on" or "off" end
 		local st = STEPS[sg.pref]
 		return st and string.format(st[4], v) or tostring(v)
@@ -3047,19 +3063,19 @@ end
 -- steps within the range the C++ side would clamp it to anyway
 local function setting_change(sg, dir)
 	if sg.pref then
-		local v = buildat.get_preference(sg.pref)
+		local v = buildat.safe.get_preference(sg.pref)
 		if type(v) == "boolean" then
-			local ok, err = buildat.set_preference(sg.pref, not v)
+			local ok, err = buildat.safe.set_preference(sg.pref, not v)
 			if not ok then log:warning("setting: " .. tostring(err)) end
 		else
 			local st = STEPS[sg.pref]
 			if not st then return end
 			local nv = math.max(st[1], math.min(st[2], v + dir * st[3]))
-			local ok, err = buildat.set_preference(sg.pref, tostring(nv))
+			local ok, err = buildat.safe.set_preference(sg.pref, tostring(nv))
 			if not ok then log:warning("setting: " .. tostring(err)) end
 		end
 		log:info("setting: " .. sg.pref .. " = " ..
-				tostring(buildat.get_preference(sg.pref)))
+				tostring(buildat.safe.get_preference(sg.pref)))
 		return
 	end
 	if sg.room == "palette" then

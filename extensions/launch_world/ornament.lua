@@ -12,6 +12,17 @@
 -- Nothing here is loaded from a file: the room's whole point is how much
 -- a program can leave out, and a texture is a few hundred lines of Lua
 -- against a few megabytes of PNG.
+-- Its own, rather than world.lua's: a file run on its own has no
+-- globals of the room's ([LAUNCH_SANDBOX]'s run_extension_file).
+-- **require answers the safe interface inside the sandbox and the whole
+-- extension outside it**, which is the one difference the two contexts
+-- have that a file like this can see. Asked by something the safe half
+-- has, because it raises on a name it does not know rather than
+-- answering nil -- so `urho3d.safe` is not a question that can be put
+-- to it.
+local urho3d = require("buildat/extension/urho3d")
+local magic = urho3d.Vector3 and urho3d or urho3d.safe
+
 local M = {}
 
 -- A generator with its own state, because the sandbox shares math.random

@@ -22,6 +22,17 @@
 -- simplified: no mini-notation parser -- a pattern is a Lua table of
 -- steps, which reads fine. The parser is the upgrade if a pattern ever
 -- gets long enough to want one.
+-- Its own, rather than world.lua's: a file run on its own has no
+-- globals of the room's ([LAUNCH_SANDBOX]'s run_extension_file).
+-- **require answers the safe interface inside the sandbox and the whole
+-- extension outside it**, which is the one difference the two contexts
+-- have that a file like this can see. Asked by something the safe half
+-- has, because it raises on a name it does not know rather than
+-- answering nil -- so `urho3d.safe` is not a question that can be put
+-- to it.
+local urho3d = require("buildat/extension/urho3d")
+local magic = urho3d.Vector3 and urho3d or urho3d.safe
+
 local M = {}
 
 local RATE = 22050

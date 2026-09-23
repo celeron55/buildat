@@ -429,7 +429,13 @@ end
 
 if ... == nil then
 	assert(M.self_check())
-	print("room.lua: ok, " .. M.W .. "x" .. M.H .. "x" .. M.D .. " voxels")
+	-- **A sandbox has no print** ([LAUNCH_SANDBOX]: the room loads its
+	-- own files through a verb now, which runs them in the sandbox), and
+	-- the line is for a person running this under plain `lua` anyway
+	if print then
+		print("room.lua: ok, " .. M.W .. "x" .. M.H .. "x" .. M.D ..
+				" voxels")
+	end
 end
 
 return M
