@@ -114,11 +114,20 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "delay 5000"
 	echo "screenshot $out/dissolve-closed-again.png"
 	echo "delay 600"
-	# The typing path: three letters fuzzy-match a name, Enter launches
-	# it and the camera flies in; Escape brings the room back
-	echo "keypress U"
+	# The typing path: three letters fuzzy-match a name, Enter takes it
+	# and the camera flies in; Escape brings the room back.
+	#
+	# **The empty pocket, not a game.** This typed "und" and launched
+	# undermine for real: a local server that has to compile its modules
+	# first, and when that ran long the connect failed and the game's own
+	# Escape exited the client -- taking the other 55 commands of this
+	# sequence with it, so half the assertions below read missing files
+	# (2026-09-23). What is being checked here is the prompt, the flight
+	# and the way back, and the empty pocket exercises all three with
+	# nothing to start.
+	echo "keypress I"
 	echo "keypress N"
-	echo "keypress D"
+	echo "keypress S"
 	echo "delay 600"
 	echo "screenshot $out/typed.png"
 	echo "delay 400"

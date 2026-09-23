@@ -1321,12 +1321,23 @@ local function blocked(x, y, z)
 	return false
 end
 
+-- **A scripted run never touches the mouse.** The whitelist stands down
+-- on hiding the cursor and on MM_RELATIVE in one ([SCRIPTED_CURSOR]),
+-- but a check shares a desk with the person whose mouse it is and the
+-- room should not be asking at all (user, 2026-09-23: "I can't use my
+-- mouse during your tests"). Asked each time: at load a command
+-- sequence is not up yet.
+local function mouse_for(fps_now, reason)
+	if __buildat_is_scripted and __buildat_is_scripted() then return end
+	magic.input:SetMouseVisible(not fps_now, reason)
+	magic.input:SetMouseMode(fps_now and magic.MM_RELATIVE or
+			magic.MM_ABSOLUTE)
+end
+
 local function set_mode(m)
 	mode = m
 	local fps_now = (m == "fps")
-	magic.input:SetMouseVisible(not fps_now, "launch_world: " .. m .. " mode")
-	magic.input:SetMouseMode(fps_now and magic.MM_RELATIVE or
-			magic.MM_ABSOLUTE)
+	mouse_for(fps_now, "launch_world: " .. m .. " mode")
 	if fps_now then
 		-- Walking starts from wherever the camera was left, so a mode
 		-- change is not a teleport
@@ -2588,8 +2599,7 @@ local function open_pause()
 	draw_pause()
 	pause_panel.visible = true
 	-- The mouse comes back while the dialog is up, whatever mode it is
-	magic.input:SetMouseVisible(true, "launch_world: paused")
-	magic.input:SetMouseMode(magic.MM_ABSOLUTE)
+	mouse_for(false, "launch_world: paused")
 	log:info("pause: open")
 end
 local function close_pause()
