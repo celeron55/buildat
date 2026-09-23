@@ -694,6 +694,17 @@ fi
 
 picked=$(grep -ac "launch_w.*: carry: picked up" "$out/cli.log")
 putdown=$(grep -ac "launch_w.*: carry: put down" "$out/cli.log")
+# **A sphere rests on what it is put on** (user): a carried orb used to
+# be let go at arm's length and hang there at eye height. The room says
+# what height it came to rest at, in voxels, and the standing eye is
+# 3.56 of them -- so anything at or above that is floating.
+resty=$(grep -a "launch_w.*: carry: put down .* at y " "$out/cli.log" |
+	head -1 | sed -n 's/.* at y \([0-9.-]*\),.*/\1/p')
+echo "the orb was put down at y ${resty:-(nothing)} voxels"
+if [ -z "$resty" ] || [ "$(python3 -c "print(1 if float('${resty:-9}') < 3.2 else 0)")" != "1" ]; then
+	echo "FAIL: a sphere put down floats instead of resting on the floor"
+	exit 1
+fi
 echo "the player carried $picked spheres and put down $putdown"
 if [ "$picked" -lt 1 ] || [ "$putdown" -lt 1 ]; then
 	echo "FAIL: E picks nothing up, or right click puts nothing down"

@@ -2847,6 +2847,32 @@ function place_carried()
 		y = view_from.y + view_dir.y * 4
 		z = view_from.z + view_dir.z * 4
 	end
+	-- **A sphere rests on what it is put on** (user, 2026-09-23: a
+	-- glowing orb put down on the floor floats at eye height). The
+	-- generator stands the floor's own spheres their own radius above
+	-- it, and a carried one should land the same way: settle the point
+	-- down onto the first solid voxel under it and sit the sphere's
+	-- underside on that face.
+	--
+	-- Nothing under it -- put down over a hole, or into a pocket's air
+	-- from below -- leaves the point where the crosshair was, which is
+	-- what "at arm's length" was for.
+	do
+		local r = (c.scale and c.scale.y or 1.0) / 2
+		local vx, vz = voxel_of(x), voxel_of(z)
+		local vy = voxel_of(y)
+		for k = 0, 24 do
+			-- room.voxel_at takes voxel indices; solid_at beside it
+			-- takes metres, and the position here is in voxels
+			if room.voxel_at(vx, vy - k, vz) ~= room.id.air then
+				-- The top face of that voxel, in the same units the
+				-- position is in: a voxel centred on its index is half a
+				-- voxel deep either way
+				y = (vy - k) + 0.5 + r
+				break
+			end
+		end
+	end
 	c.node.position = magic.Vector3(x, y, z)
 	c.node.scale = c.scale
 	c.node.enabled = true
@@ -2866,8 +2892,8 @@ function place_carried()
 	-- installed
 	moved[c.orb.name] = {x = x, y = y, z = z}
 	write_save()
-	log:info("carry: put down " .. c.orb.name .. ", " .. #carried ..
-			" in hand")
+	log:info(string.format("carry: put down %s at y %.2f, %d in hand",
+			c.orb.name, y, #carried))
 	return true
 end
 
