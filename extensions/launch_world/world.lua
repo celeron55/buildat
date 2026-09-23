@@ -2337,6 +2337,93 @@ local function fuzzy(query, name)
 	return score
 end
 
+-- **Browsing the room with the arrows** (user, 2026-09-23): with the
+-- prompt empty they walk the world in the pockets' own grid directions
+-- rather than a flattened list, because the spatial layout is the thing
+-- being browsed and a player who learnt where something is by looking
+-- should reach it by pressing toward it.
+--
+-- The grid is read off the things themselves: a row is everything at
+-- much the same depth, rows ordered from the wall forward, and within a
+-- row they go left to right. So it is the room's own layout and not a
+-- second description of it.
+local browse_rows = {}
+do
+	-- **The wall is one row**, whatever a pocket's own depth is -- a
+	-- mouth stands where the slabs put it, so the pockets differ by a
+	-- voxel or two and a bucket by depth split them up. Then the floor,
+	-- its ranks in the order they stand, nearest the wall first.
+	local wall = {}
+	for i = 1, BAYS do
+		if orb_places[i] then wall[#wall + 1] = {i = i, x = orb_places[i].x} end
+	end
+	table.sort(wall, function(a, b) return a.x < b.x end)
+	local row = {}
+	for _, e in ipairs(wall) do row[#row + 1] = e.i end
+	if #row > 0 then browse_rows[1] = row end
+
+	local by_z = {}
+	for i = BAYS + 1, #orb_places do
+		local o = orb_places[i]
+		if o and orb_nodes[i] then
+			local key = math.floor(o.z + 0.5)
+			by_z[key] = by_z[key] or {}
+			table.insert(by_z[key], {i = i, x = o.x})
+		end
+	end
+	local keys = {}
+	for k in pairs(by_z) do keys[#keys + 1] = k end
+	table.sort(keys)
+	for _, k in ipairs(keys) do
+		local r = by_z[k]
+		table.sort(r, function(a, b) return a.x < b.x end)
+		local out = {}
+		for _, e in ipairs(r) do out[#out + 1] = e.i end
+		browse_rows[#browse_rows + 1] = out
+	end
+end
+browsed = 0
+local browse_row, browse_col = 1, 1
+
+local function browse_show()
+	local row = browse_rows[browse_row]
+	if not row then return end
+	browse_col = math.max(1, math.min(#row, browse_col))
+	browsed = row[browse_col]
+	local o = ORBS[browsed]
+	name_text.text = o and o.name:upper():gsub("(.)", "%1 "):gsub(" $", "")
+			or ""
+	if orb_nodes[browsed] then
+		local p = orb_nodes[browsed].position
+		name_node.position = magic.Vector3(p.x, p.y + 2.6 * U, p.z + 1.5)
+	end
+	log:info("browse: row " .. browse_row .. " of " .. #browse_rows ..
+			", " .. (o and o.name or "?"))
+end
+
+-- Returns true when the key was the browser's
+function browse_key(key)
+	if mode ~= "menu" or prompt_open or terminal_open or pause_open then
+		return false
+	end
+	local row = browse_rows[browse_row]
+	if key == magic.KEY_LEFT then
+		browse_col = browse_col - 1
+		if browse_col < 1 then browse_col = #row end
+	elseif key == magic.KEY_RIGHT then
+		browse_col = browse_col + 1
+		if browse_col > #row then browse_col = 1 end
+	elseif key == magic.KEY_UP then
+		browse_row = browse_row > 1 and browse_row - 1 or #browse_rows
+	elseif key == magic.KEY_DOWN then
+		browse_row = browse_row < #browse_rows and browse_row + 1 or 1
+	else
+		return false
+	end
+	browse_show()
+	return true
+end
+
 -- What the prompt can find: the orbs, and the terminal, which is the
 -- one thing in the room that is not one
 local function best_match(query)
@@ -2832,6 +2919,10 @@ function handle_keydown(event_type, event_data)
 			end
 			return
 		end
+	elseif browse_key(key) then
+		-- The arrows browse while the prompt is empty; with text in it
+		-- they are the prompt's own, which is what prompt_key does
+		return
 	elseif prompt_key(key) then
 		-- The prompt eats what it wants first, so a name with a "p" in
 		-- it does not toggle the probe halfway through being typed
@@ -2851,6 +2942,13 @@ function handle_keydown(event_type, event_data)
 	-- the frame rather than on anything the probe did.: a metal with nothing to
 	-- reflect is black but for its highlight, and that difference is the
 	-- whole of what the probe is for
+	-- **Enter launches, always** (user): the browsed thing when the
+	-- prompt is empty, the match when it is not -- one key for "do the
+	-- thing" and no rule to remember. prompt_key takes the second case.
+	if key == magic.KEY_RETURN and mode == "menu" and browsed > 0 then
+		launch(browsed)
+		return
+	end
 	-- Return opens the bay of the orb being pointed at, which is the
 	-- only transition the room has; Backspace closes it again
 	if key == magic.KEY_RETURN and pointed_orb > 0 then
@@ -2903,5 +3001,8 @@ magic.ui:SetFocusElement(nil)
 -- refuses it, which is [BOX_PLAYTEST_3]'s own rule -- so a check drives
 -- the keys and the camera stands still.
 set_mode("fps")
+-- The browser starts on the first thing in the first row, so menu mode
+-- has a selection the moment it is entered
+browse_show()
 
 -- vim: set noet ts=4 sw=4:

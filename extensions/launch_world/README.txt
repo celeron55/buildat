@@ -60,10 +60,12 @@ FPS mode:
 
 Menu mode:
 
+    arrows      browse the room: along the wall, then the floor's ranks
+    Return      take what is browsed -- or, with text in the prompt,
+                what it matched: the bay comes apart and the camera
+                flies in
     (type)      any letter opens a one-line prompt that fuzzy-matches a
                 game, a launch action or a save by name
-    Return      launch what the prompt matched: the bay comes apart and
-                the camera flies in
     1-9         pick a slot without typing
 
 Both:
@@ -149,6 +151,7 @@ line is a thing that has been seen to fail:
     placing and digging do something       -- and write the save
     E picks up and right click puts down
     the terminal changes a setting         -- and changes it back
+    the arrows browse the room's own grid
     a second client reads the save back    -- voxels and a moved sphere
 
 What the player changed is a diff against the generated room, in

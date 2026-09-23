@@ -74,6 +74,14 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "delay 700"
 	echo "keypress Tab"
 	echo "delay 600"
+	# **The arrows browse the room** with the prompt empty: along a row
+	# and between the rows, the wall first and the floor's ranks after
+	echo "keypress Right"
+	echo "delay 250"
+	echo "keypress Down"
+	echo "delay 250"
+	echo "keypress Left"
+	echo "delay 400"
 	# Back to the standing place, so every frame below has the same
 	# viewpoint as the one Escape returns to
 	echo "keypress Escape"
@@ -94,21 +102,30 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 		echo "screenshot $out/$n-$name.png"
 		n=$((n + 1))
 	done
-	# The dissolve: the bay of the orb being pointed at opens, and closes
-	# again. What is checked is that the wall moves and comes back --
-	# states being configurations of one scene, the closed picture has to
-	# be the picture it was.
+	# The dissolve: a bay opens and closes again. What is checked is that
+	# the wall moves and comes back -- states being configurations of one
+	# scene, the closed picture has to be the picture it was.
+	#
+	# **Through the prompt, not through Enter alone.** Enter takes what
+	# is browsed now ("Enter launches, always"), and what is browsed is
+	# whatever the arrows above left selected -- which may be a game with
+	# a server to start. Three letters name the empty pocket and Enter
+	# opens that one, every run.
 	echo "keypress F1"
 	echo "delay 800"
 	echo "screenshot $out/dissolve-closed.png"
 	# A screenshot lands a frame or two after the command, so the next
 	# key has to wait or it is in the picture (2026-09-23)
 	echo "delay 600"
+	echo "keypress I"
+	echo "keypress N"
+	echo "keypress S"
+	echo "delay 300"
 	echo "keypress Return"
 	echo "delay 1600"
 	echo "screenshot $out/dissolve-open.png"
 	echo "delay 600"
-	echo "keypress Backspace"
+	echo "keypress Escape"
 	# The cubes land in 0.9 s, but the voxels coming back have to be
 	# remeshed and relit before the picture is the picture it was
 	echo "delay 5000"
@@ -235,6 +252,17 @@ grep -a "launch_w.*: bays " "$out/cli.log" | head -1 | sed 's/.*: //'
 # **The player's own voxels**: one placed, one dug, and the save written
 # both times. The save is a diff against a generated room, so a room that
 # forgot it would look exactly the same.
+# **The arrows walk the room's own grid**: a row along the wall and the
+# floor's ranks after it, read off where the things are rather than off a
+# second list. Four different things for four presses.
+browsed=$(grep -a "launch_w.*: browse: " "$out/cli.log" | sed 's/.*browse: //' |
+	sort -u | wc -l)
+echo "the arrows browsed $browsed different places"
+if [ "$browsed" -lt 3 ]; then
+	echo "FAIL: the arrows do not browse the room"
+	exit 1
+fi
+
 # **The terminal changes a setting**, rather than showing one
 changes=$(grep -a "launch_w.*: setting: " "$out/cli.log" | wc -l)
 first=$(grep -a "launch_w.*: setting: " "$out/cli.log" | head -1 | sed 's/.*setting: //')
