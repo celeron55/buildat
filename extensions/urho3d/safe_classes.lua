@@ -1960,19 +1960,29 @@ function M.define(dst, util)
 	-- nothing; the person whose desktop the run shares keeps their cursor,
 	-- which the re-show after a hide used to warp to the window's corner.
 	-- See [SCRIPTED_CURSOR] in doc/plan/miscellaneous_plan.md.
-	local scripted = __buildat_is_scripted()
+	-- **Asked each time, not once at load.** It was read here while the
+	-- extensions loaded, which is before a command sequence is up, so
+	-- every guard below read false and a scripted run took the cursor
+	-- anyway (user, 2026-09-23).
+	local function scripted_now()
+		return __buildat_is_scripted()
+	end
 	util.wc("Input", {
 		properties = {
-			-- Read-only here: the setter is SetMouseVisible above, which
-			-- logs why and stands down in a scripted run
-			mouseVisible = util.simple_property("boolean"),
+			-- **Read-only, and now actually so**: the setter is
+			-- SetMouseVisible above, which logs why the cursor changed
+			-- and stands down in a scripted run. As a plain property it
+			-- was writable, so game code could take the cursor past both
+			-- rules -- and did, off a desk the run was sharing with the
+			-- person whose mouse it is (user, 2026-09-23).
+			mouseVisible = util.read_only_property("boolean"),
 		},
 		instance = {
 			-- The second argument is a word for the log ([FOCUS_LOG]): what
 			-- asked for the cursor to change
 			SetMouseVisible = util.wrap_function({"Input", "boolean", {"string", "__nil"}},
 				function(self, enable, reason)
-					if scripted and not enable then
+					if scripted_now() and not enable then
 						return
 					end
 					-- Left false in a scripted run, so init.lua's
@@ -1985,7 +1995,8 @@ function M.define(dst, util)
 				end),
 			SetMouseMode = util.wrap_function({"Input", "number"},
 				function(self, mode)
-					if scripted and (mode == MM_RELATIVE or mode == MM_WRAP) then
+					if scripted_now() and
+							(mode == MM_RELATIVE or mode == MM_WRAP) then
 						return
 					end
 					self:SetMouseMode(mode)

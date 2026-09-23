@@ -27,6 +27,17 @@ function __buildat_require_extension(name)
 	return interface
 end
 
+-- An extension that is already loaded, or nil -- **without loading it**,
+-- which is what asking for the launcher must not do. The table above is
+-- the only record of a loaded extension: `require` puts nothing in
+-- `package.loaded` for these names, so every
+-- `package.loaded["buildat/extension/..."]` in the tree read nil and the
+-- code behind it never ran (found 2026-09-23 by [LAUNCH_WORLD], which
+-- wanted the same lookup for its own name).
+function __buildat_loaded_extension(name)
+	return loaded_extensions[name]
+end
+
 -- Don't use package.loaders because for whatever reason it doesn't work in the
 -- Windows version at least in Wine
 -- TODO: Was that due to the table indexing bug which was fixed by using LuaJIT

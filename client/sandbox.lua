@@ -112,11 +112,16 @@ function __buildat_reset_sandbox()
 		end
 	end
 	__buildat_reset_modules()
-	local urho3d = package.loaded["buildat/extension/urho3d"]
+	-- **These two never ran**: an extension is not in package.loaded --
+	-- the loader keeps its own table -- so both lookups read nil from
+	-- the day they were written (found 2026-09-23 by [LAUNCH_WORLD]).
+	-- __buildat_loaded_extension() is the table's own reader, and it
+	-- does not load an extension that is not up.
+	local urho3d = __buildat_loaded_extension("urho3d")
 	if urho3d and urho3d.drop_sandbox_handlers then
 		urho3d.drop_sandbox_handlers()
 	end
-	local replicate = package.loaded["buildat/extension/replicate"]
+	local replicate = __buildat_loaded_extension("replicate")
 	if replicate and replicate.reset then
 		replicate.reset()
 	end
@@ -224,16 +229,17 @@ function __buildat_report_error(err)
 		return
 	end
 	reported_at[first] = now
-	local ui_utils = package.loaded["buildat/extension/ui_utils"] or
+	local ui_utils = __buildat_loaded_extension("ui_utils") or
 			__buildat_require_extension("ui_utils")
 	if type(ui_utils) ~= "table" or type(ui_utils.safe) ~= "table" then
 		return
 	end
-	local launch_menu = package.loaded["buildat/extension/launch_menu"]
 	-- A game the launcher started, or a client that says a world is up on
-	-- its own screens (luanti_client's session)
-	local in_game = (launch_menu and launch_menu.in_game and
-			launch_menu.in_game()) or ui_utils.in_game == true
+	-- its own screens (luanti_client's session). Whichever extension is
+	-- the launcher, not launch_menu by name (buildat.menu_extension).
+	local menu = buildat.menu_extension and buildat.menu_extension()
+	local in_game = (menu and menu.in_game and menu.in_game()) or
+			ui_utils.in_game == true
 	local shown = first .. "\n\n(the log has the rest)"
 	log:info("error shown "..(in_game and "as a notice" or "in a dialog")..": "..first)
 	if in_game then

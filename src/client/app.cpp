@@ -1190,8 +1190,17 @@ struct CApp: public App, public magic::Application
 			// The dialog closes the client; the frozen view stays behind
 			// it, and a client with no menu extension loaded gets the
 			// plain shutdown
+			const ss_ menu =
+					g_client_config.get<ss_>("menu_extension_name");
 			if(run_script_no_sandbox(
-					"local m = require('buildat/extension/launch_menu')\n"
+					"local m = buildat.menu_extension and "
+					"buildat.menu_extension()\n"
+					"if not m or not m.show_dead_server then\n"
+					"    m = require('buildat/extension/"+menu+"')\n"
+					"end\n"
+					"if not m or not m.show_dead_server then\n"
+					"    error('the launcher cannot show a dead server')\n"
+					"end\n"
 					"m.show_dead_server('The server exited', "
 					"function() __buildat_disconnect() end)\n"))
 				return;
@@ -1416,6 +1425,26 @@ struct CApp: public App, public magic::Application
 			lua_pop(L, 1);
 			throw AppStartupError("Could not initialize Lua environment");
 		}
+
+		// **Which extension is the launcher**, for the places that have to
+		// go back to it: leaving a game, a server that exited, and
+		// whether a game is running under it. They named launch_menu,
+		// which is wrong the moment the client is booted with another one
+		// (-m launch_world). client/api.lua reads this.
+		{
+			const ss_ &name =
+					g_client_config.get<ss_>("menu_extension_name");
+			lua_pushstring(L, name.c_str());
+			lua_setglobal(L, "__buildat_menu_extension_name");
+		}
+
+		// **A run is scripted from before the launcher boots**, not from
+		// when the sequence starts stepping. It was set below, after the
+		// menu extension had already loaded and taken the cursor --
+		// which is what [SCRIPTED_CURSOR] exists to stop, and both its
+		// guards read this flag (user, 2026-09-23: "I can't use my
+		// mouse during your tests").
+		m_command_seq_active = g_client_config.get<bool>("command_seq_enabled");
 
 		// Launch menu if requested
 		if(g_client_config.get<bool>("boot_to_menu")){

@@ -97,13 +97,22 @@ buildat.create_directories = __buildat_create_directories -- unsafe only
 buildat.set_watchdog_seconds = __buildat_set_watchdog_seconds -- unsafe only
 
 buildat.safe.disconnect    = __buildat_disconnect
+-- **The extension this client was booted with as its launcher**, which
+-- is -m's argument and launch_menu by default. What asks is whatever has
+-- to go back to the launcher; those places named launch_menu outright,
+-- which is wrong the moment the client is booted with another one.
+-- Loaded only if it already is: this never boots a launcher by itself.
+function buildat.menu_extension()
+	local name = __buildat_menu_extension_name or "launch_menu"
+	return __buildat_loaded_extension(name)
+end
 -- leave(): back to the launcher's grid when there is one under the game
 -- ([MENU_CONTEXT]: the game's own menu offers it), else what disconnect
 -- does -- a client started straight into a server has nothing to go back to
 buildat.safe.leave = function()
-	local launch_menu = package.loaded["buildat/extension/launch_menu"]
-	if launch_menu and launch_menu.leave_game then
-		launch_menu.leave_game()
+	local m = buildat.menu_extension()
+	if m and m.leave_game then
+		m.leave_game()
 	else
 		__buildat_disconnect()
 	end

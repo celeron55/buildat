@@ -123,6 +123,18 @@ local function simple_property(valid_types)
 	}
 end
 
+-- A property that can be read and not written: the sandbox's __newindex
+-- says so by name. What wants it is a property whose setter has a rule
+-- attached -- Input.mouseVisible's, which logs why the cursor changed
+-- and stands down in a scripted run.
+local function read_only_property(valid_types)
+	return {
+		get = function(current_value)
+			return magic_sandbox.unsafe_to_safe(current_value, valid_types)
+		end,
+	}
+end
+
 for _, name in ipairs(safe_globals) do
 	local v = _G[name]
 	if v == nil then
@@ -155,6 +167,7 @@ safe_classes.define(Safe, {
 	wrap_function = wrap_function,
 	self_function = self_function,
 	simple_property = simple_property,
+	read_only_property = read_only_property,
 	check_safe_resource_name = Unsafe.check_safe_resource_name,
 	mouse = mouse,
 	--resave_file = Unsafe.resave_file,
