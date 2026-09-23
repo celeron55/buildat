@@ -1939,7 +1939,21 @@ readout("b" .. api.version(), {x = 9.0, y = 0.25, z = -1.0}, 0.34,
 -- was: this stood at 2.75 m and 21 m back, so every voxel read 1.7
 -- times too small. 1.6 m it is, and close enough to reach the pockets,
 -- whose floors are at Y 0 to 3.
-local HOME_FROM = {x = 0.0, y = 1.6, z = 14.0}
+-- BUILDAT_LAUNCH_STAND=<metres> moves the standing place along z, which
+-- is how the fov and the stand get read together ([LAUNCH_WORLD]: "change
+-- the two together and read the look once") rather than argued about
+local HOME_FROM = {x = 0.0, y = 1.6,
+-- **Eight metres, read 2026-09-24** with the 72 degree fov, the two
+-- together as this plan asked. At fourteen the wall was a strip across
+-- a frame of floor (mean 40, 90th 138); at eight it is the subject and
+-- every rank of floor spheres is still in the frame, which is the
+-- composition's own lower bound; at six the middle ranks leave. The
+-- numbers moved toward the reference frame's with it -- mean 40 to 54
+-- against 61, the 90th 138 to 227 against 172 -- and what is left over
+-- the reference is the floor: its light squares are the brightest
+-- surface in the room and they clip, which is where the 90th and the
+-- white share come from, not from the sources.
+	z = tonumber(env("BUILDAT_LAUNCH_STAND")) or 8.0}
 local HOME_AT = {x = 0, y = 1.1, z = -6.0}
 -- **The pitch the standing place looks at**, worked out from the two
 -- above rather than picked: a flight ends looking at HOME_AT and the
