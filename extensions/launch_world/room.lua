@@ -37,20 +37,29 @@ M.BAY_Z = -18
 M.INSET_IN = 4          -- the deepest an inset goes
 M.BAYS = 6
 M.BAY_SPACING = 14
--- **About thirty slabs** -- the reference frame's parts list says about
--- thirty, and the plan's open question says thirty stands until it is
--- said otherwise.
-M.SLABS = 30
--- A slab's x and y across the wall, in voxels
-M.SLAB_MIN, M.SLAB_MAX = 4, 10
--- **How far one stands out, which is not its size.** The plan's "x and z
--- sizes vary from 4 to 10" is the slab's own extent; its z is its depth
--- into the mass and cannot be seen, the stone behind the nominal surface
--- being the same stone. Read as a protrusion instead, 4 to 10 builds a
--- heap of boxes rather than a wall -- which is the same reading that was
--- tuned away once before (2026-09-23) and came back the moment the
--- number was taken literally. So the relief is 1 to 4.
-M.SLAB_OUT_MIN, M.SLAB_OUT_MAX = 1, 4
+-- **Sixty slabs** (user, 2026-09-23: double the amount). The reference
+-- frame's parts list said about thirty and this plan's open question
+-- said thirty stands until it was said otherwise. It has been said.
+M.SLABS = 60
+-- **A slab is horizontal** (user, 2026-09-23: the slabs read vertical
+-- and they are meant to read horizontal). The plan gives **x and z** as
+-- 4 to 10 voxels and says nothing about y, and the master plan says
+-- what y is: "slabs almost half a metre thick -- one voxel at the
+-- grid". So a slab is **wide across the wall, thin in height, and deep
+-- out of it** -- a shelf, a lintel -- and not a block.
+--
+-- Read as "x and y are 4 to 10" it was square or upright, which is what
+-- the eye saw; and with that shape a deep protrusion read as a heap of
+-- boxes, which is why the relief had been tuned down to 1 to 4. A thin
+-- slab standing 4 to 10 out is a different thing entirely.
+M.SLAB_MIN, M.SLAB_MAX = 4, 10            -- across, in voxels
+-- **One tall, for now** (user, 2026-09-23), which is the master plan's
+-- "almost half a metre thick -- one voxel at the grid" taken at its
+-- word. The range stays so that two is a constant away; whatever it
+-- holds must stay under the narrowest slab's width, or a slab can come
+-- out square and read as the upright thing it is not meant to be.
+M.SLAB_THIN_MIN, M.SLAB_THIN_MAX = 1, 1   -- and how thick it is
+M.SLAB_OUT_MIN, M.SLAB_OUT_MAX = 3, 8     -- and how far it stands out
 
 -- The middle of a pocket across the wall
 function M.bay_x(b)
@@ -108,7 +117,8 @@ for i = 1, M.SLABS do
 	local h2 = hash2(i, 2, 22)
 	local span = M.SLAB_MAX - M.SLAB_MIN + 1
 	local sx = M.SLAB_MIN + math.floor(h1 / 8) % span
-	local sy = M.SLAB_MIN + math.floor(h1 / 4096) % span
+	local sy = M.SLAB_THIN_MIN + math.floor(h1 / 4096) %
+			(M.SLAB_THIN_MAX - M.SLAB_THIN_MIN + 1)
 	local x0 = M.X_MIN + h2 % (M.X_MAX - M.X_MIN - sx + 1)
 	local y0 = math.floor(h2 / 2048) % (M.Y_TOP - sy + 1)
 	M.slabs[i] = {x0 = x0, x1 = x0 + sx - 1, y0 = y0, y1 = y0 + sy - 1,
@@ -345,9 +355,11 @@ function M.self_check()
 	for i = 1, #M.slabs do
 		local s = M.slabs[i]
 		local sx, sy = s.x1 - s.x0 + 1, s.y1 - s.y0 + 1
-		assert(sx >= M.SLAB_MIN and sx <= M.SLAB_MAX and
-				sy >= M.SLAB_MIN and sy <= M.SLAB_MAX,
-				"slab " .. i .. " is " .. sx .. "x" .. sy)
+		assert(sx >= M.SLAB_MIN and sx <= M.SLAB_MAX,
+				"slab " .. i .. " is " .. sx .. " across")
+		assert(sy >= M.SLAB_THIN_MIN and sy <= M.SLAB_THIN_MAX,
+				"slab " .. i .. " is " .. sy .. " thick")
+		assert(sx > sy, "slab " .. i .. " is wider than it is thick")
 		assert(s.x0 >= M.X_MIN and s.x1 <= M.X_MAX and s.y0 >= 0 and
 				s.y1 <= M.Y_TOP, "slab " .. i .. " is on the wall")
 	end

@@ -31,7 +31,6 @@ cd "$here/Build"
 if pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
-names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 { echo "delay 5000"
 	# **It starts in FPS mode**, so the walking is checked first and then
 	# Tab goes to menu mode, where the prompt and the digits live. A held
@@ -95,13 +94,6 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "delay 400"
 	echo "keypress F7"
 	echo "delay 800"
-	n=1
-	for name in $names; do
-		echo "keypress F$n"
-		echo "delay 800"
-		echo "screenshot $out/$n-$name.png"
-		n=$((n + 1))
-	done
 	# The dissolve: a bay opens and closes again. What is checked is that
 	# the wall moves and comes back -- states being configurations of one
 	# scene, the closed picture has to be the picture it was.
@@ -194,13 +186,14 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "delay 400"
 	echo "keypress F6"
 	echo "delay 2200"
-	# And the first preset again with the reflection probe taken off the
-	# zone, which is what says the probe reaches the metals
-	echo "keypress F1"
-	echo "delay 800"
+	# The room as it is, and then the same frame with the reflection
+	# probe taken off the zone, which is what says the probe reaches the
+	# metals
+	echo "screenshot $out/room.png"
+	echo "delay 400"
 	echo "keypress F5"
 	echo "delay 800"
-	echo "screenshot $out/1-cold_in_warm_out-noprobe.png"
+	echo "screenshot $out/room-noprobe.png"
 	# The attract mode: left alone the room shows itself off. The drift
 	# is unfrozen for it and BUILDAT_LAUNCH_ATTRACT makes the wait short.
 	echo "keypress F7"
@@ -352,53 +345,19 @@ def world(im):
 	w, h = im.size
 	return im.crop((0, 0, w, h - HUD_STRIP))
 out = sys.argv[1]
-# The numbered presets only: the directory also keeps the shot the plan
-# points at and whatever else has been left in it
-shots = sorted(f for f in os.listdir(out)
-		if f.endswith(".png") and "noprobe" not in f and f[0].isdigit())
-if len(shots) != 4:
-	print("FAIL: %d pictures, wanted 4" % len(shots)); sys.exit(1)
-ims = {}
-for f in shots:
-	im = world(Image.open(os.path.join(out, f)).convert("RGB"))
-	d = list(im.getdata())
-	n = float(len(d))
-	ims[f] = (im, tuple(sum(p[i] for p in d) / n for i in range(3)))
-	print("%-28s mean rgb %5.1f %5.1f %5.1f" % ((f,) + ims[f][1]))
-worst = 255.0
-for a, b in itertools.combinations(shots, 2):
-	d = ImageChops.difference(ims[a][0], ims[b][0])
-	px = list(d.getdata())
-	mean = sum(sum(p) for p in px) / (3.0 * len(px))
-	worst = min(worst, mean)
-print("the closest two presets are %.2f of a level apart" % worst)
-# 4, not 1: with the label out of the comparison the closest two
-# presets are 11 levels apart, and 1 was low enough that the label's own
-# text changing between them would have carried the check on its own
-ok = worst > 4.0
-print("PASS: the four presets are four pictures" if ok
-		else "FAIL: two presets look the same")
-
-# **The four in one picture**, because the pick is the user's and four
-# files in a directory is four looks where one sheet is one.
-sheet_w = 640
-sheet = Image.new("RGB", (sheet_w * 2, int(sheet_w * 0.5625) * 2 + 4),
-		(0, 0, 0))
-for i, f in enumerate(shots):
-	im = ims[f][0].resize((sheet_w, int(sheet_w * 0.5625)))
-	sheet.paste(im, ((i % 2) * sheet_w,
-			(i // 2) * (int(sheet_w * 0.5625) + 4)))
-sheet.save("%s/presets_sheet.png" % out)
-print("the four presets in one picture: %s/presets_sheet.png" % out)
-
+# **The palette comparison is gone** (user, 2026-09-23: the right
+# colours are already known). This shot four presets from one viewpoint
+# and asserted they differed, which was how the palette was to be picked;
+# it is picked. The presets are still in the room, on F1 to F4 and in the
+# terminal's rows.
 # The probe: the same frame with it and with an environment of nothing
 # in its place. What is asserted is that some part of the picture moves a
 # lot -- the search is over blocks rather than a fixed crop, because the
 # room gets recomposed and a crop that was on a mirror ends up on a wall
 # (it read 61.4 against 60.4 on a sphere's dark side while another block
 # moved 86 levels, 2026-09-23).
-a = world(Image.open("%s/1-cold_in_warm_out.png" % out).convert("L"))
-b = world(Image.open("%s/1-cold_in_warm_out-noprobe.png" % out).convert("L"))
+a = world(Image.open("%s/room.png" % out).convert("L"))
+b = world(Image.open("%s/room-noprobe.png" % out).convert("L"))
 pa, pb = a.load(), b.load()
 w, h = a.size
 best, bx, by = 0.0, 0, 0
@@ -530,7 +489,7 @@ print("PASS: the generated ornament is on something" if ornament_ok
 # at a standing eye they are half a per cent of it, and the 99th then
 # reads the wall (128) however bright the sources are -- it measured the
 # composition, not the range (2026-09-23).
-shot = sorted(Image.open("%s/1-cold_in_warm_out.png" % out)
+shot = sorted(Image.open("%s/room.png" % out)
 		.convert("L").crop((0, 0, 1280, 720 - HUD_STRIP)).getdata())
 top = shot[int(len(shot) * 0.999)]
 lit = sum(1 for v in shot if v >= 248) / float(len(shot))
@@ -539,7 +498,7 @@ print("the room's 99.9th percentile is %d and %.2f%% of it is a source"
 hdr_ok = top >= 240 and lit > 0.002
 print("PASS: a source is brighter than a lit wall" if hdr_ok
 		else "FAIL: the picture clips before its shoulder -- HDR is off")
-every = (ok and probe_ok and dissolve_ok and typing_ok and terminal_ok
+every = (probe_ok and dissolve_ok and typing_ok and terminal_ok
 		and ornament_ok and drift_ok and attract_ok and hdr_ok and walk_ok
 		and pause_ok)
 # The one line a machine reads, after the ones a person does
