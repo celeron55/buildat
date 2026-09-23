@@ -42,6 +42,9 @@ GAMES[#GAMES + 1] = {name = "install a game", warm = true, empty = true}
 room.set_pockets(#GAMES)
 log:info("contents: " .. (#GAMES - 1) .. " games, " .. #FLOOR_ACTIONS ..
 		" other launch actions")
+for _, a in ipairs(FLOOR_ACTIONS) do
+	log:info("  floor: " .. a.kind .. " " .. a.name)
+end
 
 -- The ornament generator and the maps it feeds; see ornament.lua
 local ornament = dofile(EXT .. "/ornament.lua")
@@ -377,6 +380,9 @@ end
 local chrome = material(magic.Color(0.92, 0.94, 0.97, 1), 0.06, 1.0)
 local machined = material(magic.Color(0.55, 0.57, 0.62, 1), 0.34, 1.0)
 local stone = material(magic.Color(0.26, 0.26, 0.29, 1), 0.85, 0.0)
+-- A launch action that is not a game: glossy and white, a dielectric
+-- rather than a metal, so it reads as neither an orb nor a server
+local white = material(magic.Color(0.86, 0.87, 0.89, 1), 0.12, 0.0)
 
 -- A material wearing a generated height field: the ornament is the
 -- texture and not the geometry, which is what lets the room sit on a
@@ -501,11 +507,6 @@ for b = 1, BAYS do
 	-- face has the orb behind it, so N dot L is negative there and the
 	-- face takes nothing from it, while every face inside the pocket
 	-- looks at the orb and lights all round.
-	-- **An orb finds its own place in its pocket** (user, 2026-09-23):
-	-- per axis, it centres itself where the walls are close and
-	-- otherwise keeps back from the one it would touch. The margin has a
-	-- lighting reason as well as a visual one -- a point light at no
-	-- distance from a face burns it white.
 	-- **An orb finds its own place** (user, 2026-09-23): per axis it
 	-- centres itself where the walls are close and otherwise keeps a
 	-- margin off the one it would touch. At 2 to 4 voxels across, every
@@ -523,6 +524,29 @@ for b = 1, BAYS do
 end
 log:info("bays " .. BAYS .. " " .. BAY_Z .. " " ..
 		table.concat(bay_desc, " "))
+
+-- **The floor's own things** (user): a launch action that is not a game
+-- is a glossy white sphere, and it stands on the floor rather than in a
+-- pocket. The wall holds the games; the floor holds everything else that
+-- launches, which in this tree is mostly Luanti's installed games.
+--
+-- **They are laid out and not scattered**, in two blocks flanking the
+-- way to the wall: the room's answer to sorting a list is that the
+-- player moves them around, and a heap is a worse starting point than a
+-- grid. The middle is left open, because anything standing there stands
+-- in front of the pockets the room is lit by.
+--
+-- simplified: the layout is fixed and the player cannot move them yet.
+-- Moving them is step 8, with the save diff that would remember it.
+local FLOOR_COLS = {-13.0, -9.0, -5.0, 5.0, 9.0, 13.0}
+local FLOOR_ROWS = {-4.0, -0.5, 3.0, 6.5, 10.0}
+for i, a in ipairs(FLOOR_ACTIONS) do
+	local col = FLOOR_COLS[(i - 1) % #FLOOR_COLS + 1]
+	local row = FLOOR_ROWS[math.floor((i - 1) / #FLOOR_COLS) % #FLOOR_ROWS + 1]
+	ORBS[#ORBS + 1] = {name = a.name, icon = a.icon, run = a.run,
+		kind = a.kind, floor = true}
+	orb_places[#orb_places + 1] = {x = col, y = 0.34, z = row}
+end
 
 -- **The ornament, on primitives in front of the voxels.** The bays are
 -- voxel mass and the ornament is a generated texture, and the two cannot
@@ -550,6 +574,14 @@ for i, o in ipairs(orb_places) do
 		-- dim: an empty socket reads as empty, not as broken
 		part("Torus", magic.Vector3(o.x, o.y, o.z),
 				magic.Vector3(1.4, 1.4, 1.4), machined)
+	elseif spec and spec.floor then
+		-- **A glossy white sphere** (user): not a source, so it takes
+		-- the room's light rather than making any, and it is told apart
+		-- from a server's chrome by being white rather than a mirror
+		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
+				magic.Vector3(1.4, 1.4, 1.4), white)
+		node:GetComponent("StaticModel").castShadows = true
+		orb_nodes[i] = node
 	else
 		orb_mats[i] = glow(magic.Color(1, 1, 1, 1), spec and spec.name,
 				spec and spec.icon)
@@ -624,8 +656,12 @@ end
 -- its plane, so N dot L is negative there and it takes nothing, while
 -- every face inside the pocket looks at the orb.
 local OVERHEAD_Y = 18         -- voxels above the floor, per the plan's 16-20
+-- **The pockets' orbs and nothing else**: a thing on the floor is a
+-- glossy white sphere and takes the room's light rather than making any,
+-- so the sources are the games and the opening overhead
 local LIGHT_PLACES = {}
-for i, o in ipairs(orb_places) do
+for i = 1, BAYS do
+	local o = orb_places[i]
 	LIGHT_PLACES[i] = {o.x, o.y, o.z}
 end
 LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, OVERHEAD_Y * VOXEL_M, 2.0}
@@ -715,7 +751,7 @@ local function set_preset(n)
 	for i, light in ipairs(lights) do
 		local e = preset.lights[i]
 		light.color = magic.Color(e[1][1], e[1][2], e[1][3], 1)
-		local spec = ORBS[i] or ORBS[i - 10]
+		local spec = ORBS[i]
 		if spec and spec.empty then
 			-- An empty niche is a dark one, and the one amber thing in
 			-- the room is allowed to be the invitation to fill it
@@ -1329,6 +1365,8 @@ local function ease(t)
 end
 
 function dissolve_bay(b, open)
+	-- Only a pocket comes apart; a thing on the floor has no wall to
+	-- take away from in front of it
 	local st = bay_state[b]
 	if not st or (st.target == (open and 1 or 0)) then
 		return

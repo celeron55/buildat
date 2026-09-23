@@ -141,6 +141,19 @@ grep -aE "palette preset|ornament ok|synth ok" "$out/cli.log" |
 # second copy on a server
 grep -a "launch_w.*: room " "$out/cli.log" | head -1 | sed 's/.*: //'
 grep -a "launch_w.*: bays " "$out/cli.log" | head -1 | sed 's/.*: //'
+# **The room holds what the tree offers**, not a list written here: the
+# pockets are the launch grid's games and the floor is everything else
+# that launches. A room that found nothing would still draw, and would
+# still pass every picture check above.
+contents=$(grep -a "launch_w.*: contents: " "$out/cli.log" | head -1 |
+	sed 's/.*contents: //')
+echo "contents: ${contents:-(none)}"
+games=$(echo "$contents" | sed -n 's/^\([0-9]*\) games.*/\1/p')
+floor=$(echo "$contents" | sed -n 's/.* \([0-9]*\) other.*/\1/p')
+if [ "${games:-0}" -lt 1 ] || [ "${floor:-0}" -lt 1 ]; then
+	echo "FAIL: the room found no launch actions in the tree"
+	exit 1
+fi
 # The orb being pointed at says its name; it was drawn inside the stone
 # above its niche for a while, which is the kind of thing a log line
 # does not catch and a shot does
