@@ -1164,7 +1164,9 @@ local PBR_INTENSITY = 25
 
 -- Shadows on, and a map big enough for a wall of relief: they are
 -- required rather than optional here ([LAUNCH_WORLD]'s wall)
-magic.renderer.drawShadows = true
+-- BUILDAT_LAUNCH_NOSHADOW=1 turns them off, which is how [PBR_HDR]
+-- asked whether the shadow maps were what a float probe breaks
+magic.renderer.drawShadows = (env("BUILDAT_LAUNCH_NOSHADOW") == "")
 -- **1024, not 2048.** Eleven shadow-casting lights -- ten cube maps for
 -- the orbs and the spot overhead -- at 2048 dropped the frame rate far
 -- enough that the walker's own dt clamp halved its speed, and a timed
