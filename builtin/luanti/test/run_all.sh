@@ -1,0 +1,72 @@
+#!/bin/bash
+# Runs every runner of a tier, one at a time, and says what each did
+# ([CI_RUNS] (2)). The tier is named in the runner itself, on a
+# "# tier:" line near the top:
+#
+#   quick  needs no downloaded game -- what a push runs
+#   full   wants the game media (mineclone2, VoxeLibre)
+#   long   the fuzz, the drives, the reference shots
+#
+#   builtin/luanti/test/run_all.sh quick
+#   builtin/luanti/test/run_all.sh full --list
+#   ONLY='keys.*|focus' builtin/luanti/test/run_all.sh quick
+#
+# The exit status is the run's: 0 if every runner passed or skipped, 1 if
+# any failed. A runner is never retried -- a check run three times and
+# taken at its best is how a real fault becomes a known flake
+# ([CI_RUNS] (6)); a known flake is marked "# flaky:" in the runner and
+# is run and reported but does not decide the status.
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+tier="${1:-quick}"
+list_only=""
+[ "${2:-}" = "--list" ] && list_only=1
+out="$here/../../../local/run_all"
+mkdir -p "$out"
+runners=""
+for f in "$here"/*.sh; do
+	name=$(basename "$f")
+	case "$name" in lib.sh|contract.sh|fullscreen_gate.sh|run_all.sh) continue;; esac
+	t=$(sed -n 's/^# tier: *//p' "$f" | head -1)
+	[ "$t" = "$tier" ] || continue
+	[ -n "${ONLY:-}" ] && { echo "$name" | grep -qE "$ONLY" || continue; }
+	runners="$runners $name"
+done
+if [ -n "$list_only" ]; then
+	for r in $runners; do echo "$r"; done
+	exit 0
+fi
+pass=0; fail=0; skip=0; flaky=0
+failed_names=""
+started=$(date +%s)
+for name in $runners; do
+	printf '%-28s ' "$name"
+	log="$out/${name%.sh}.log"
+	t0=$(date +%s)
+	"$here/$name" > "$log" 2>&1
+	rc=$?
+	t1=$(date +%s)
+	verdict=$(grep -aE "^(PASS|FAIL|SKIP):" "$log" | tail -1)
+	known_flaky=$(grep -c "^# flaky:" "$here/$name")
+	case "$rc" in
+	0) pass=$((pass + 1)); state=pass ;;
+	# 77 is the contract's "could not run"; 2 is what the runners have
+	# always used for "a server or client is already up", which is the
+	# same thing said the old way
+	77|2) skip=$((skip + 1)); state=skip ;;
+	*) if [ "$known_flaky" -gt 0 ]; then
+			flaky=$((flaky + 1)); state=flaky
+		else
+			fail=$((fail + 1)); state=FAIL
+			failed_names="$failed_names $name"
+		fi ;;
+	esac
+	printf '%-6s %4ss  %s\n' "$state" "$((t1 - t0))" "${verdict:-(no verdict line)}"
+done
+echo "---"
+echo "$pass passed, $fail failed, $skip skipped, $flaky known-flaky, in $(( $(date +%s) - started ))s"
+[ -n "$failed_names" ] && echo "failed:$failed_names"
+echo "logs in $out"
+[ "$fail" -eq 0 ] && echo "PASS: the $tier tier is green" ||
+	echo "FAIL: $fail runners of the $tier tier failed"
+exit $([ "$fail" -eq 0 ] && echo 0 || echo 1)

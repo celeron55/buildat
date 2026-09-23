@@ -319,6 +319,18 @@ if (IOS OR TVOS)
     set (EXCLUDE_FROM_ALL EXCLUDE_FROM_ALL)
 endif ()
 setup_library (${URHO3D_LIB_TYPE} ${EXCLUDE_FROM_ALL})
+# buildat: the DLL exports everything under MinGW, the way the Linux .so
+# does -- buildat calls SDL and LuaJIT through the engine's library, and
+# those carry no URHO3D_API of their own
+# -- but not the static runtimes linked into it: with winpthreads
+# inside the DLL and exported, buildat's own DLL resolved pthread_once
+# to that copy, which had never run its init and called a null pointer
+# (ContentDB on the box, 2026-09-22, [WIN8_START] 16). Only what the
+# engine and its bundled third parties define is exported.
+if (MINGW AND URHO3D_LIB_TYPE STREQUAL SHARED)
+    set_target_properties (${TARGET_NAME} PROPERTIES LINK_FLAGS
+        "-Wl,--export-all-symbols -Wl,--exclude-libs,libwinpthread.a:libpthread.a:libgcc.a:libgcc_eh.a:libstdc++.a:libmingwex.a:libmingw32.a:libmsvcrt.a:libkernel32.a:libuser32.a")
+endif ()
 if (NOT ANDROID AND NOT WEB)
     file (READ .soversion SOVERSION)
     string (STRIP ${SOVERSION} SOVERSION)

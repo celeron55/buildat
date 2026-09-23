@@ -41,6 +41,7 @@ function M.UIStack(root)
 
 		local is_in_sandbox = getfenv(2).buildat.is_in_sandbox
 
+		if type(options) == "string" then options = {desc = options} end
 		options = options or {}
 		if #self.stack >= 1 then
 			local top = self.stack[#self.stack]
@@ -48,8 +49,11 @@ function M.UIStack(root)
 		end
 		local element_name =
 				self.stack_name.."_"..#self.stack.."."..self.element_name_i
-		if options.description then
-			element_name = element_name..": "..options.description
+		-- desc is what every caller passes; description was the name here
+		-- and no push ever carried one
+		local description = options.description or options.desc
+		if description then
+			element_name = element_name..": "..description
 		end
 		log:verbose("UIStack:push(): "..dump(element_name))
 
@@ -133,6 +137,20 @@ function M.UIStack(root)
 		last_stack_with_pushed_element = self
 		return element
 	end
+	-- Everything above `root` popped, top down, root itself included when
+	-- inclusive; the launcher leaving a menu-only game ([MENU_CONTEXT])
+	function self:pop_to(root, inclusive)
+		while #self.stack > 0 do
+			local top = self.stack[#self.stack]
+			if top == root and not inclusive then
+				return
+			end
+			self:pop(top)
+			if top == root then
+				return
+			end
+		end
+	end
 	function self:pop(current_top_root)
 		if type(self) ~= 'table' or not self.is_ui_stack then
 			error("self is not an instance of UIStack")
@@ -164,6 +182,87 @@ M.safe.UIStack = M.UIStack
 
 M.main = M.safe.UIStack(magic.ui.root)
 M.safe.main = M.main
+-- Set by whoever answers `event scan` for the world (vanilla's scan.lua),
+-- so the menu's answer below stands aside once it is there
+M.world_scan = false
+-- An element outside the stack that a scan should walk too: a client that
+-- draws its world UI on the UI root rather than on its screen (the Luanti
+-- client extension's forms) puts its window here while it is up, so a
+-- driven run can find what is on the screen ([FORMSPEC_SCROLL]'s check
+-- wanted the form's own elements)
+M.scan_extra = nil
+function M.set_scan_extra(element)
+	M.scan_extra = element
+end
+M.safe.set_scan_extra = M.set_scan_extra
+function M.safe.set_world_scan(on)
+	M.world_scan = on and true or false
+end
+
+-- `event scan <res> <label>` on a menu screen ([FIRST_RUN]): the screen on
+-- top of the main stack by its name, every element under it with its
+-- rectangle and text (ui_utils.scan_ui, the lines a form gives), and
+-- which element has the focus -- a field being typed into is "waiting
+-- for input" to a driver. The world's own scan (vanilla's scan.lua)
+-- answers the same event with the world; an empty top -- the stack's
+-- placeholder while a game runs -- gives nothing here.
+do
+	magic.SubscribeToEvent("command_seq:scan", function(event_type, event_data)
+		local top = M.main.stack[#M.main.stack]
+		-- The stack's placeholder while a game runs has no children and
+		-- the world's scan answers then; between two screens the top is
+		-- empty for a moment too, and that gets an answer of its name
+		-- alone, so a driver's read does not time out on the gap
+		if top == nil then
+			return
+		end
+		-- The launcher's placeholder while a game runs: the world's scan
+		-- answers once vanilla's client half is up, and until then this
+		-- does, with the name alone, so a scan in the gap is not lost
+		if top:GetName():find("game is running", 1, true) and M.world_scan then
+			return
+		end
+		-- Required here and not above: ui_utils requires this file
+		local ui_utils = require("buildat/extension/ui_utils").safe
+		local param = event_data:GetString("Param") or ""
+		local _, label = param:match("^(%d*)%s*(%S*)")
+		if label == nil or label == "" then
+			label = "scan"
+		end
+		local lines = {}
+		lines[#lines + 1] = string.format("scan %s: menu %s", label,
+				dump(top:GetName()))
+		local lw, lh = buildat.logical_size()
+		lines[#lines + 1] = string.format("scan %s: frame %dx%d root %dx%d ui_scale %.3f",
+				label, lw, lh, magic.ui.root.width, magic.ui.root.height,
+				magic.ui:GetScale() or 0)
+		-- Whether the cursor is the player's to point with: a screen over
+		-- a game must show it and must not have the view under it
+		-- ([BOX_PLAYTEST_3] 2)
+		lines[#lines + 1] = string.format("scan %s: mouse %s", label,
+				magic.input.mouseVisible and "visible" or "hidden")
+		ui_utils.scan_ui(label, top, 1, lines)
+		if M.scan_extra then
+			local ok = pcall(ui_utils.scan_ui, label, M.scan_extra, 1, lines)
+			if not ok then
+				M.scan_extra = nil
+			end
+		end
+		local focus = magic.ui.focusElement
+		if focus then
+			local at = focus.screenPosition
+			local x, y, w, h = ui_utils.scan_pixels(at.x, at.y, focus.width, focus.height)
+			local text = ""
+			pcall(function() text = focus:GetText() end)
+			lines[#lines + 1] = string.format("scan %s: focus %s at %d,%d size %dx%d text %s",
+					label, focus:GetTypeName(), x, y, w, h, dump(text))
+		else
+			lines[#lines + 1] = string.format("scan %s: focus none", label)
+		end
+		lines[#lines + 1] = string.format("scan %s: done, %d lines", label, #lines)
+		log:info(table.concat(lines, "\n"))
+	end)
+end
 
 return M
 -- vim: set noet ts=4 sw=4:

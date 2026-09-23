@@ -16,19 +16,19 @@ local magic = require("buildat/extension/urho3d").safe
 local uistack = require("buildat/extension/uistack")
 local ui_utils = require("buildat/extension/ui_utils").safe
 local launch_menu = require("buildat/extension/launch_menu")
+local preferences = dofile(buildat.extension_path("__menu").."/preferences.lua")
 local M = {safe = nil}
 
--- The extensions this menu offers as things to launch, in the order they are
--- shown. An extension named here says for itself what it is called, what it
--- looks like and what launching it does, in an M.launch table; see
--- doc/design.txt, "Launchable extensions".
---
--- The list is written here rather than found by looking: requiring every
--- extension in the tree to ask whether it is launchable would run all of
--- their loading code to build a menu.
-local LAUNCHABLE = {
-	"luanti_client",
-}
+-- The launch grid ([LAUNCH_GRID]): the tiles come from the tree, any number
+-- from every games/*, builtin/* and extensions/* that ships
+-- launcher/init.lua, found by buildat.list_launchers() and run in the
+-- sandbox -- module client-Lua trust, since the file is on the way into a
+-- game and a whole-server sandbox is only as good as the least-trusted code
+-- on that path. A file that errors, returns a non-table or an action with
+-- no label or run is one warning naming it, and the rest of the grid draws.
+-- The one way out of a file is ctx.launch, below, whose params cross as
+-- plain data and whose target is entered through on_untrusted_launch().
+local launch_grid = dofile(buildat.extension_path("__menu").."/launch_grid.lua")
 
 local DIM = 0.55
 
@@ -42,8 +42,10 @@ local ENTRY_SPACING = 24
 -- enough for; a row with nothing laying it out does not work it out itself
 local ENTRY_HEIGHT = 160
 
-function M.boot()
-	local root = uistack.main:push("boot")
+-- launch_action is -a's kind/name/id: the grid is drawn and that one
+-- action is run on top of it, the way picking its tile would
+function M.boot(launch_action)
+	local root = uistack.main:push({desc = "boot"})
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/boot_style.xml")
 	root.defaultStyle = style
@@ -74,6 +76,18 @@ function M.boot()
 	logo:SetFixedSize(160, 160)
 	logo:SetAlignment(HA_CENTER, VA_TOP)
 
+	-- What this is, top left, small ([VERSION]): the version and the hash
+	-- of the tree it was built from, "-dirty" when that was nobody's commit
+	-- The first child of the menu's own layout: the stack's root is a
+	-- horizontal layout that argues with anything placed by hand
+	local version, hash = buildat.version()
+	local label = layout:CreateChild("Text")
+	label:SetStyleAuto()
+	label.text = version .. " " .. hash
+	label:SetFontSize(11)
+	label.color = magic.Color(0.6, 0.6, 0.6)
+	label:SetTextAlignment(HA_LEFT)
+
 	local title = layout:CreateChild("Text")
 	title:SetStyleAuto()
 	title.text = "Buildat"
@@ -81,8 +95,15 @@ function M.boot()
 	title:SetTextAlignment(HA_CENTER)
 	title.color = magic.Color(0.867, 0.867, 0.867)
 
+	-- The grid, inside a viewport that is as tall as the window allows
+	-- and clips the rest: a grid of more lines than fit scrolls by the
+	-- selection, below
+	local viewport = layout:CreateChild("UIElement")
+	viewport:SetAlignment(HA_LEFT, VA_TOP)
+	viewport.clipChildren = true
+	viewport.enabled = true
 	-- The entries side by side, because there are several of them
-	local row = layout:CreateChild("UIElement")
+	local row = viewport:CreateChild("UIElement")
 	-- HA_LEFT rather than HA_CENTER: inside a layout the alignment only says
 	-- which border to apply, and the row is made exactly as wide as its
 	-- entries below, so the left border is what lines it up with the rest
@@ -129,43 +150,90 @@ function M.boot()
 	end
 
 	local items = {}
-	local function add(icon, text, action)
+	local function add(icon, text, action, description)
 		items[#items + 1] = {button = menu_entry(icon, text),
+				label = text, description = description,
 				action = function()
 					log:info("Menu entry: "..dump(text))
 					action()
 				end}
 	end
 
-	add("__menu/res/icon_local.png", "Local game",
-			launch_menu.show_local_game)
-	add("__menu/res/icon_network.png", "Connect to server",
-			launch_menu.show_connect_to_server)
-
-	-- And an entry for every extension that says it can be launched
-	for _, name in ipairs(LAUNCHABLE) do
-		local ok, ext = pcall(require, "buildat/extension/"..name)
-		local launch = ok and type(ext) == 'table' and ext.launch or nil
-		if not launch or type(launch.run) ~= 'function' then
-			-- A menu that cannot be drawn because one extension is missing
-			-- or broken is worse than a menu with one entry fewer
-			log:warning("Launchable extension "..dump(name)..
-					" has no M.launch: "..
-					(ok and "loaded" or dump(ext)))
-		else
-			add(launch.icon, launch.title or name, launch.run)
-		end
+	-- What the user sets once and every game honours; not a launch, so
+	-- the menu's own rather than a tile from the tree
+	add("__menu/res/icon_preferences.png", "Engine settings", preferences.show,
+			"What every game honours: the window, the sound, the mouse.")
+	-- And every launch action the tree offers, in the grid's order
+	local actions = launch_grid.actions(log)
+	for _, action in ipairs(actions) do
+		add(action.icon, action.label, action.run, action.description)
 	end
 
-	-- Now that the entries are known: each in its place, and the row exactly
-	-- as wide as they are, so that the layout's own border lines it up with
-	-- the title above
+	-- The selected entry's name and description, to the right of the logo
+	-- in the logo's row ([LAUNCH_DESC]): the label on the first line,
+	-- larger, the description under it, wrapping to the window's right
+	-- edge; set as the selection moves, by keys or by the mouse, and
+	-- cleared when nothing is selected
+	local DESC_MARGIN = 24
+	local desc_x = math.floor(magic.ui.root.width / 2) + 80 + DESC_MARGIN
+	local desc_w = math.max(100, magic.ui.root.width - desc_x - DESC_MARGIN)
+	local desc_name = logo_holder:CreateChild("Text")
+	desc_name:SetStyleAuto()
+	desc_name:SetFontSize(22)
+	desc_name:SetPosition(desc_x, 40)
+	desc_name:SetFixedWidth(desc_w)
+	desc_name.color = magic.Color(0.867, 0.867, 0.867)
+	local desc_text = logo_holder:CreateChild("Text")
+	desc_text:SetStyleAuto()
+	desc_text:SetFontSize(14)
+	desc_text:SetPosition(desc_x, 72)
+	desc_text:SetFixedWidth(desc_w)
+	desc_text:SetWordwrap(true)
+	desc_text.color = magic.Color(0.7, 0.7, 0.7)
+	local function show_description(item)
+		desc_name.text = item and item.label or ""
+		desc_text.text = item and item.description or ""
+	end
+
+	-- Now that the entries are known: a grid wrapping by the window's
+	-- width and the row exactly as wide as its columns, so that the
+	-- layout's own border lines it up with the title above
+	local columns = math.max(1, math.min(#items, math.floor(
+			(magic.ui.root.width - 2 * 20 + ENTRY_SPACING) /
+			(ENTRY_WIDTH + ENTRY_SPACING))))
 	for i, item in ipairs(items) do
-		item.button:SetPosition((i - 1) * (ENTRY_WIDTH + ENTRY_SPACING), 0)
+		local col = (i - 1) % columns
+		local line = math.floor((i - 1) / columns)
+		item.button:SetPosition(col * (ENTRY_WIDTH + ENTRY_SPACING),
+				line * (ENTRY_HEIGHT + ENTRY_SPACING))
 	end
-	row:SetFixedWidth(#items * ENTRY_WIDTH +
-			math.max(0, #items - 1) * ENTRY_SPACING)
-	row:SetFixedHeight(ENTRY_HEIGHT)
+	local lines = math.ceil(#items / columns)
+	local grid_w = columns * ENTRY_WIDTH +
+			math.max(0, columns - 1) * ENTRY_SPACING
+	local grid_h = lines * ENTRY_HEIGHT +
+			math.max(0, lines - 1) * ENTRY_SPACING
+	row:SetFixedWidth(grid_w)
+	row:SetFixedHeight(grid_h)
+	-- What the window leaves for the grid under the logo and the title,
+	-- in whole lines; the viewport is that tall and the row moves inside
+	-- it so the selected line is always in view
+	local line_step = ENTRY_HEIGHT + ENTRY_SPACING
+	local room = magic.ui.root.height - 2 * 20 - 160 - 16 - 40 - 16
+	local visible_lines = math.max(1, math.min(lines,
+			math.floor((room + ENTRY_SPACING) / line_step)))
+	viewport:SetFixedWidth(grid_w)
+	viewport:SetFixedHeight(visible_lines * ENTRY_HEIGHT +
+			math.max(0, visible_lines - 1) * ENTRY_SPACING)
+	local first_line = 0
+	local function scroll_to(i)
+		local line = math.floor((i - 1) / columns)
+		if line < first_line then
+			first_line = line
+		elseif line >= first_line + visible_lines then
+			first_line = line - visible_lines + 1
+		end
+		row:SetPosition(0, -first_line * line_step)
+	end
 
 	-- launch_menu's keyboard selection, which is worth having here: up and
 	-- down, left and right, enter, and the mouse moving the same selection
@@ -175,11 +243,34 @@ function M.boot()
 			engine:Exit()
 		end
 	end)
-	nav:on_change(function(button, selected)
+	nav:set_columns(columns)
+	nav:on_change(function(button, selected, index)
 		local c = selected and 1 or DIM
 		button:GetChild("ButtonImage").color = magic.Color(c, c, c)
 		button:GetChild("ButtonText").color = magic.Color(c, c, c)
+		if selected and index then
+			scroll_to(index)
+			show_description(items[index])
+		elseif not selected and index and desc_name.text == items[index].label then
+			show_description(nil)
+		end
 	end)
+
+	if launch_action then
+		local found = nil
+		for _, action in ipairs(actions) do
+			if action.from.."/"..tostring(action.id) == launch_action then
+				found = action
+			end
+		end
+		if found then
+			log:info("Launch action: "..launch_action)
+			found.run()
+		else
+			log:warning("Launch action "..dump(launch_action)..
+					" is not on the grid")
+		end
+	end
 end
 
 return M

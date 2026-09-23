@@ -1,5 +1,9 @@
-Reasons for not doing certain things
-====================================
+Decisions against, and why
+==========================
+Things that were considered and not done, so the question is not reopened
+by accident. The plan's own "not this" notes are beside the items they
+belong to.
+
 Why not use protobuf?
 - It would suck for modules because it has many moving parts
 
@@ -17,4 +21,17 @@ Why not allow making arbitrary number of instances of any module?
   would crash if one crashes.
 - Instead there should be easy mechanisms for launching new server processes at
   runtime, and routing clients to different processes.
+
+Luanti features left out on purpose, not to be added
+-----------------------------------------------------
+Official Luanti's client has these; buildat's two Luanti clients do
+not, and the decision (user, 2026-09-22) is that they stay out. A
+game that needs one is a game that needs official.
+
+- Cinematic mode (F8, the smoothed camera).
+- Pitch move (the fly mode that follows the pitch).
+- Autoforward (the toggled forward key).
+- Block bounds (the mapblock outline overlay).
+- New profiler features of any kind: the engine's own DebugHud on F6
+  is the whole of it.
 

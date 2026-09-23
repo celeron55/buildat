@@ -209,13 +209,21 @@ function M.color_of(number)
 			number % 256, a
 end
 
+-- Luanti's own m_scale_factor: the user's hud_scaling times the display
+-- density, which every size and offset a HUD element carries is multiplied
+-- by. The client sets it once, because what a screen pixel is is the
+-- client's to know; without it a game's own hotbar background is drawn at
+-- its file's size and the row it was meant to sit against is not
+-- ([EXT_HOTBAR]).
+M.scale_factor = 1
+
 -- How big an image element is drawn: a positive scale multiplies the image's
 -- own size and a negative one is a percentage of the screen. Luanti's
 -- drawLuaElements does the same.
 function M.image_size(e, screen_w, screen_h, image_w, image_h)
-	local w = e.scale[1] >= 0 and image_w * e.scale[1] or
+	local w = e.scale[1] >= 0 and image_w * e.scale[1] * M.scale_factor or
 			screen_w * (-e.scale[1] / 100)
-	local h = e.scale[2] >= 0 and image_h * e.scale[2] or
+	local h = e.scale[2] >= 0 and image_h * e.scale[2] * M.scale_factor or
 			screen_h * (-e.scale[2] / 100)
 	return math.floor(w), math.floor(h)
 end
@@ -226,9 +234,9 @@ end
 -- centres it on the point. offset is pixels on top of that.
 function M.place(e, screen_w, screen_h, w, h)
 	local x = math.floor(e.pos[1] * screen_w) +
-			(e.align[1] - 1) * w / 2 + e.offset[1]
+			(e.align[1] - 1) * w / 2 + e.offset[1] * M.scale_factor
 	local y = math.floor(e.pos[2] * screen_h) +
-			(e.align[2] - 1) * h / 2 + e.offset[2]
+			(e.align[2] - 1) * h / 2 + e.offset[2] * M.scale_factor
 	return math.floor(x), math.floor(y)
 end
 
@@ -253,8 +261,8 @@ local STATBAR_STEP = {
 -- image's own, and has_bg says whether the element named a background
 -- texture, without which Luanti draws no maximum at all.
 function M.statbar_icons(e, screen_w, screen_h, image_w, image_h, has_bg)
-	local w = e.size[1] > 0 and e.size[1] or image_w
-	local h = e.size[2] > 0 and e.size[2] or image_h
+	local w = (e.size[1] > 0 and e.size[1] or image_w) * M.scale_factor
+	local h = (e.size[2] > 0 and e.size[2] or image_h) * M.scale_factor
 	local step = STATBAR_STEP[e.dir] or STATBAR_STEP[0]
 	local x0, y0 = M.place(e, screen_w, screen_h, 0, 0)
 	local out = {}

@@ -33,7 +33,7 @@ local IGNORED = {
 	listring = true, listcolors = true, style = true, style_type = true,
 	field_enter_after_edit = true,
 	no_prepend = true, bgcolor = true,
-	scrollbaroptions = true, allow_close = true, position = true,
+	allow_close = true, position = true,
 	tableoptions = true,
 	anchor = true, padding = true, ["scroll_container_end"] = true,
 }
@@ -249,50 +249,30 @@ function M.new(magic, buildat, log, ctx)
 		end
 	end
 
-	-- The hotbar and the health bar, which are not a formspec at all: the
-	-- game describes them as HUD elements and this draws the two of them a
-	-- player needs to see, out of the inventory and the hit points.
+	-- The health bar, which is not a formspec at all: the game describes it
+	-- as a HUD element and this draws the one a player needs to see, out of
+	-- the hit points. The hotbar beside it is luanti/hotbar.lua, the row
+	-- both Luanti clients share ([EXT_HOTBAR]).
 	--
-	-- simplified: not the game's own HUD. This server sends a hundred HUD
-	-- elements -- its own hearts, its bubbles, its armour bar, its crosshair
-	-- -- and none of them are drawn; what is drawn is a hotbar of the first
-	-- slots of the player's main list and a bar for the hit points. The
-	-- upgrade path is HUDADD and its friends.
+	-- simplified: not the game's own healthbar element -- its hearts, its
+	-- bubbles, its armour bar are drawn by hud_elements() only as far as
+	-- statbars go, and this is what is left when the game has none.
 	--
-	-- Returns the element it all went under, for the caller to take away
-	-- again when it changes.
-	function self:hud(root, list, count, wield, hp, hp_max, screen_w,
-			screen_h)
+	-- x0, y0 and width are where the hotbar's row is; the bar sits just
+	-- above it. Returns the element it went under, for the caller to take
+	-- away again when it changes.
+	function self:health_bar(root, hp, hp_max, x0, y0, width, slot)
 		local holder = root:CreateChild("UIElement")
 		if ctx.style then
 			holder.defaultStyle = ctx.style
 		end
-		local slot = math.floor(math.min(screen_w, screen_h) / 15)
-		local step = math.floor(slot * 1.1)
-		local width = step * count
-		local x0 = math.floor((screen_w - width) / 2)
-		local y0 = screen_h - slot - math.floor(slot * 0.5)
-
-		for i = 1, count do
-			local x = x0 + (i - 1) * step
-			local stack = list and list.items[i] or nil
-			-- The wielded slot is the lighter one, which is how a hotbar
-			-- says which it is
-			box(holder, x, y0, slot, slot, i == wield and
-					magic.Color(0.9, 0.9, 0.9, 0.55) or
-					magic.Color(0, 0, 0, 0.45))
-			draw_stack(holder, x, y0, slot, stack)
-		end
-
-		if hp and hp_max and hp_max > 0 then
-			local bar_h = math.max(3, math.floor(slot * 0.14))
-			local y = y0 - bar_h - 4
-			box(holder, x0, y, width, bar_h, magic.Color(0, 0, 0, 0.5))
-			local filled = math.floor(width * math.min(hp, hp_max) / hp_max)
-			if filled > 0 then
-				box(holder, x0, y, filled, bar_h,
-						magic.Color(0.85, 0.15, 0.15, 0.9))
-			end
+		local bar_h = math.max(3, math.floor(slot * 0.14))
+		local y = y0 - bar_h - 4
+		box(holder, x0, y, width, bar_h, magic.Color(0, 0, 0, 0.5))
+		local filled = math.floor(width * math.min(hp, hp_max) / hp_max)
+		if filled > 0 then
+			box(holder, x0, y, filled, bar_h,
+					magic.Color(0.85, 0.15, 0.15, 0.9))
 		end
 		return holder
 	end
@@ -305,8 +285,10 @@ function M.new(magic, buildat, log, ctx)
 	-- The HUD the server describes, as one element holding all of it.
 	--
 	-- elements is hud.lua's elements keyed by id. What comes back is the
-	-- holder and a count per element type that is not drawn, so that the
-	-- caller can say once what is missing.
+	-- holder, a count per element type that is not drawn so that the caller
+	-- can say once what is missing, and where each image element landed --
+	-- a game draws its hotbar's background as one of those and it has to
+	-- sit against the row ([EXT_HOTBAR]).
 	--
 	-- simplified: images, text and statbars are drawn, which is what this
 	-- game's hundred elements nearly all are. A waypoint and an image
@@ -315,7 +297,11 @@ function M.new(magic, buildat, log, ctx)
 	-- hotbar want the slots this client already draws its own way. A text
 	-- element of several lines is one block aligned as a whole, where Luanti
 	-- aligns each line on its own.
-	function self:hud_elements(root, elements, screen_w, screen_h)
+	function self:hud_elements(root, elements, screen_w, screen_h, scale)
+		-- What a screen pixel is in this UI's units: Luanti's own
+		-- m_scale_factor, which every size and offset below is multiplied
+		-- by ([EXT_HOTBAR])
+		hud.scale_factor = scale or 1
 		local holder = root:CreateChild("UIElement")
 		if ctx.style then
 			holder.defaultStyle = ctx.style
@@ -337,6 +323,7 @@ function M.new(magic, buildat, log, ctx)
 		end)
 
 		local skipped = {}
+		local images = {}
 		for _, entry in ipairs(order) do
 			local e = entry.e
 			if e.type == hud.ELEM.IMAGE then
@@ -350,7 +337,17 @@ function M.new(magic, buildat, log, ctx)
 						el:SetPosition(math.floor(x), math.floor(y))
 						el.size = magic.IntVector2(w, h)
 						el.texture = tex
+						-- Said outright ([ITEM_TILED]): while the rect is
+						-- zero Urho spans the element's width in texels,
+						-- and a bar drawn wider than its file tiled
+						if tex.width > 0 then
+							el.imageRect = magic.IntRect(0, 0, tex.width,
+									tex.height)
+						end
 						el.priority = next_priority()
+						images[#images + 1] = {name = e.text,
+								x = math.floor(x), y = math.floor(y),
+								w = w, h = h}
 					end
 				end
 			elseif e.type == hud.ELEM.TEXT then
@@ -393,7 +390,7 @@ function M.new(magic, buildat, log, ctx)
 				skipped[e.type] = (skipped[e.type] or 0) + 1
 			end
 		end
-		return holder, skipped
+		return holder, skipped, images
 	end
 
 	-- show(root, elements, layout, screen_w, screen_h)
@@ -729,13 +726,22 @@ function M.new(magic, buildat, log, ctx)
 					scroll = scroll, rows = on_screen}
 		end
 
+		-- The scroll_container being drawn into, if any: what is inside one
+		-- is a child of its clipped element, so its coordinates are that
+		-- element's and they ride the scrollbar ([FORMSPEC_SCROLL])
+		local in_scroll = nil
 		local function at(e, field_i)
 			local pos = formspec.parse_v2(e.fields[field_i])
 			if not pos then
 				return nil
 			end
-			return (pos[1] + e.at[1]) * layout.scale[1] + layout.origin[1],
-					(pos[2] + e.at[2]) * layout.scale[2] + layout.origin[2]
+			local x = (pos[1] + e.at[1]) * layout.scale[1] + layout.origin[1]
+			local y = (pos[2] + e.at[2]) * layout.scale[2] + layout.origin[2]
+			if in_scroll then
+				return x - in_scroll.x + in_scroll.dx,
+						y - in_scroll.y + in_scroll.dy
+			end
+			return x, y
 		end
 
 		local function geometry(e, field_i)
@@ -788,8 +794,21 @@ function M.new(magic, buildat, log, ctx)
 			end
 		end
 
+		local scroll_boxes = {}
+		-- The containers as rectangles, for the wheel over one, and the
+		-- scrollbars for dragging their thumbs
+		local scrolls = {}
+		local bars = {}
+		-- What the next scrollbar's range is; scrollbaroptions[] sets it and
+		-- Luanti's default is 0..1000
+		local bar_max = 1000
+		local form_window = window
 		for _, e in ipairs(elements) do
 			local name = e.name
+			-- Inside a scroll_container: drawn into its clipped element,
+			-- and at() answers in that element's coordinates
+			in_scroll = e.scroll and scroll_boxes[e.scroll] or nil
+			window = in_scroll and in_scroll.element or form_window
 			if IGNORED[name] then
 				-- Nothing to draw
 			elseif name == "background" or name == "background9" then
@@ -943,6 +962,243 @@ function M.new(magic, buildat, log, ctx)
 				if x and w then
 					draw_table(e, x, y, w, h)
 				end
+			elseif name == "animated_image" then
+				-- animated_image[X,Y;W,H;name;texture;frame count;frame
+				-- duration;frame start]: the texture is a vertical strip
+				-- of frames and this draws one of them ([FORMSPEC_SCROLL]).
+				--
+				-- simplified: the frame stands still -- the one the element
+				-- names as its start, or the first -- where Luanti runs
+				-- through them at the duration it gives.
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				local frames = math.max(1, math.floor(
+						tonumber(e.fields[6]) or 1))
+				local first = math.max(1, math.min(frames,
+						math.floor(tonumber(e.fields[8]) or 1)))
+				if x and w then
+					local el = image(window, x, y, w, h, e.fields[4])
+					if el and frames > 1 and el.texture and
+							el.texture.height > 0 then
+						local fh = math.floor(el.texture.height / frames)
+						el.imageRect = magic.IntRect(0, fh * (first - 1),
+								el.texture.width, fh * first)
+					end
+				end
+			elseif name == "button_url" or name == "button_url_exit" then
+				-- button_url[X,Y;W,H;name;label;url]: a button that says
+				-- where it would take the player. **The client does not
+				-- open it**: a form from a server is not something this
+				-- client hands to a browser, and Luanti asks the player
+				-- first for the same reason. The url is drawn under the
+				-- label and the press goes back as a button's does, so a
+				-- game that reacts to it still works.
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				if x and w then
+					box(window, x, y, w, h,
+							magic.Color(0.35, 0.35, 0.42, 0.9))
+					local t = label(window, x + 4, y + 2, w - 8,
+							formspec.strip_escapes(e.fields[4] or ""), 12)
+					t:SetTextAlignment(1)
+					local url = formspec.strip_escapes(e.fields[5] or "")
+					if url ~= "" and h > 22 then
+						local u = label(window, x + 4, y + h - 16, w - 8,
+								url, 10, magic.Color(0.7, 0.75, 0.9))
+						u:SetTextAlignment(1)
+					end
+					buttons[#buttons + 1] = {name = e.fields[3],
+							x = x, y = y, w = w, h = h,
+							exit = name:sub(-5) == "_exit"}
+				end
+			elseif name == "hypertext" then
+				-- hypertext[X,Y;W,H;name;text]: the text with its tags
+				-- taken out, wrapped in the box, and each <action ...>
+				-- run as a button under it ([FORMSPEC_SCROLL]). Clicking
+				-- one sends the element's name with "action:<the action's
+				-- name>", which is what Luanti's own client sends.
+				--
+				-- simplified: no styling from the tags -- no colour, size,
+				-- bold, italic, image or table -- and the actions are
+				-- gathered under the text rather than staying inline where
+				-- they were written.
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				local hname = e.fields[3]
+				local raw = formspec.unescape(e.raw[4] or "")
+				if x and w then
+					local actions = {}
+					-- <action name=foo>label</action>, and the older
+					-- <action name=foo> with no closing tag
+					for aname, atext in raw:gmatch(
+							"<action%s+name=([%w_]+)%s*>(.-)</action>") do
+						actions[#actions + 1] = {name = aname,
+								text = atext:gsub("<[^>]*>", "")}
+					end
+					local text = raw:gsub("<[^>]*>", "")
+					text = formspec.strip_escapes(text)
+					local t = label(window, x + 2, y + 2, w - 4, text, 12)
+					t:SetWordwrap(true)
+					local by = y + h
+					for i = #actions, 1, -1 do
+						local a = actions[i]
+						by = by - 20
+						box(window, x + 2, by, w - 4, 18,
+								magic.Color(0.3, 0.3, 0.38, 0.9))
+						local at_ = label(window, x + 6, by + 1, w - 12,
+								a.text ~= "" and a.text or a.name, 12)
+						at_:SetTextAlignment(1)
+						buttons[#buttons + 1] = {name = hname,
+								value = "action:"..a.name,
+								x = x + 2, y = by, w = w - 4, h = 18}
+					end
+				end
+			elseif name == "scrollbaroptions" then
+				-- scrollbaroptions[opt=value;...]: what the next scrollbar's
+				-- range is. Only max is read; the steps are how far a key
+				-- or a wheel moves one, and neither drives a bar here.
+				for _, f in ipairs(e.fields) do
+					local k, v = tostring(f):match("^%s*(%w+)%s*=%s*(.+)$")
+					if k == "max" then
+						bar_max = tonumber(v) or bar_max
+					end
+				end
+			elseif name == "scrollbar" then
+				-- scrollbar[X,Y;W,H;orientation;name;value]: a trough with
+				-- a thumb in it. A click in the trough pages by a tenth of
+				-- the range towards where it was clicked, and the value
+				-- goes back as "CHG:<value>", which is what Luanti's own
+				-- client sends ([FORMSPEC_SCROLL]).
+				--
+				-- simplified: the thumb is a fixed fifth of the trough and
+				-- is not dragged -- the range a scrollbaroptions[] names is
+				-- not read either, so the range is Luanti's default 0..1000
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				local vertical = tostring(e.fields[3] or "vertical")
+						:lower() ~= "horizontal"
+				local bar = e.fields[4]
+				if x and w and bar then
+					state.scroll = state.scroll or {}
+					local v = state.scroll[bar] or tonumber(e.fields[5]) or 0
+					state.scroll[bar] = v
+					-- Luanti's own default range, unless a
+					-- scrollbaroptions[] in front of this one said another
+					local max = bar_max
+					local step = math.max(1, math.floor(max / 10))
+					box(window, x, y, w, h,
+							magic.Color(0.1, 0.1, 0.12, 0.9))
+					-- The bar as a rectangle, for dragging its thumb
+					bars[#bars + 1] = {name = bar, x = x, y = y, w = w,
+							h = h, vertical = vertical, max = max}
+					local frac = math.max(0, math.min(1, v / max))
+					if vertical then
+						local th = h / 5
+						box(window, x + 1, y + (h - th) * frac, w - 2, th,
+								magic.Color(0.45, 0.45, 0.55, 0.95))
+						taps[#taps + 1] = {name = bar, scroll = -step,
+								x = x, y = y, w = w, h = h / 2,
+								value = "CHG:"..math.max(0, v - step)}
+						taps[#taps + 1] = {name = bar, scroll = step,
+								x = x, y = y + h / 2, w = w, h = h / 2,
+								value = "CHG:"..math.min(max, v + step)}
+					else
+						local tw = w / 5
+						box(window, x + (w - tw) * frac, y + 1, tw, h - 2,
+								magic.Color(0.45, 0.45, 0.55, 0.95))
+						taps[#taps + 1] = {name = bar, scroll = -step,
+								x = x, y = y, w = w / 2, h = h,
+								value = "CHG:"..math.max(0, v - step)}
+						taps[#taps + 1] = {name = bar, scroll = step,
+								x = x + w / 2, y = y, w = w / 2, h = h,
+								value = "CHG:"..math.min(max, v + step)}
+					end
+				end
+			elseif name == "scroll_container" then
+				-- scroll_container[X,Y;W,H;scrollbar name;orientation;
+				-- factor]: a box that clips what is drawn in it, moved by
+				-- the scrollbar of that name ([FORMSPEC_SCROLL]). The
+				-- factor is in formspec units per scrollbar unit; Luanti's
+				-- own default is 0.1.
+				local x, y = at(e, 1)
+				local w, h = geometry(e, 2)
+				local bar = e.fields[3]
+				local vertical = tostring(e.fields[4] or "vertical")
+						:lower() ~= "horizontal"
+				local factor = tonumber(e.fields[5]) or 0.1
+				if x and w then
+					local el = window:CreateChild("UIElement")
+					el:SetPosition(math.floor(x), math.floor(y))
+					el.size = magic.IntVector2(math.floor(w), math.floor(h))
+					el.clipChildren = true
+					state.scroll = state.scroll or {}
+					local v = state.scroll[bar] or 0
+					local moved = v * factor * layout.scale[vertical and 2 or 1]
+					-- The value is in the bar's own units and the factor is
+					-- formspec units per one of them
+					scroll_boxes[e.scroll_id] = {element = el, x = x, y = y,
+							w = w, h = h, bar = bar, vertical = vertical,
+							dx = vertical and 0 or -moved,
+							dy = vertical and -moved or 0}
+					scrolls[#scrolls + 1] = scroll_boxes[e.scroll_id]
+				end
+			elseif name == "dropdown" then
+				-- dropdown[X,Y;W;name;item1,item2,...;selected;index event]
+				-- and the newer form with W,H; the module's client draws it
+				-- the same way ([FORMSPEC_SCROLL]). A click on the box opens
+				-- the list under it, a click on an item is the choice.
+				--
+				-- simplified: the list is drawn over whatever is under it
+				-- and is as tall as it needs to be, where Luanti scrolls a
+				-- long one.
+				local x, y = at(e, 1)
+				local sized = formspec.parse_v2(e.fields[2]) ~= nil
+				local w, h
+				if sized then
+					w, h = geometry(e, 2)
+				else
+					w = (tonumber(e.fields[2]) or 0) * layout.scale[1]
+					h = layout.imgsize * 15 / 13 * 0.35
+				end
+				local dname = e.fields[3]
+				local items = {}
+				for _, it in ipairs(formspec.split(e.raw[4] or "", ",")) do
+					items[#items + 1] = formspec.strip_escapes(
+							formspec.unescape(it))
+				end
+				local index_event = tostring(e.fields[6] or "") == "true"
+				if x and w and dname then
+					state.dropdown = state.dropdown or {}
+					local chosen = state.dropdown[dname] or
+							tonumber(e.fields[5]) or 1
+					if chosen < 1 or chosen > #items then
+						chosen = 1
+					end
+					state.dropdown[dname] = chosen
+					box(window, x, y, w, h,
+							magic.Color(0.2, 0.2, 0.25, 0.9))
+					label(window, x + 4, y + h / 2 - 8, w - 20,
+							items[chosen] or "", 12)
+					label(window, x + w - 14, y + h / 2 - 8, 12, "v", 12)
+					fields[#fields + 1] = {name = dname, x = x, y = y,
+							w = w, h = h,
+							value = index_event and tostring(chosen) or
+									(items[chosen] or "")}
+					taps[#taps + 1] = {name = dname, open = true,
+							value = "", x = x, y = y, w = w, h = h}
+					if state.dropdown_open == dname then
+						for i, it in ipairs(items) do
+							local iy = y + h * i
+							box(window, x, iy, w, h, i == chosen and
+									magic.Color(0.35, 0.35, 0.5, 0.95) or
+									magic.Color(0.15, 0.15, 0.2, 0.95))
+							label(window, x + 4, iy + h / 2 - 8, w - 8, it, 12)
+							taps[#taps + 1] = {name = dname, pick = i,
+									x = x, y = iy, w = w, h = h,
+									value = index_event and tostring(i) or it}
+						end
+					end
+				end
 			elseif name == "tablecolumns" then
 				columns = parse_columns(e.fields)
 			elseif name == "label" or name == "textarea" then
@@ -971,6 +1227,9 @@ function M.new(magic, buildat, log, ctx)
 					-- typed into; it is drawn dark with light text in it,
 					-- which is what Luanti's own field looks like
 					local edit = window:CreateChild("LineEdit")
+					-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+					edit.textCopyable = true
+					edit.textSelectable = true
 					if ctx.style then
 						edit.defaultStyle = ctx.style
 					end
@@ -1035,7 +1294,19 @@ function M.new(magic, buildat, log, ctx)
 		end
 		for _, f in ipairs(fields) do
 			if f.name == focus_name and f.edit then
-				f.edit:SetFocus(true)
+				-- On the next frame, not this one: the key that opened
+				-- the form is a KeyDown followed by its TextInput in the
+				-- same frame, and a field focused now takes the letter
+				-- (the inventory key typed into the search field;
+				-- [BOX_PLAYTEST_2] 8). Official swallows the key the
+				-- same way.
+				local edit = f.edit
+				local sub
+				sub = magic.SubscribeToEvent("Update", function()
+					magic.UnsubscribeFromEvent("Update", sub)
+					-- A form closed within the frame has no field left
+					pcall(function() edit:SetFocus(true) end)
+				end)
 			end
 		end
 		-- A tooltip on a named element goes where that element ended up
@@ -1056,9 +1327,12 @@ function M.new(magic, buildat, log, ctx)
 				end
 			end
 		end
+		-- The loop above points `window` at whatever it was drawing into
+		window = form_window
 		return {window = window, origin = {ox, oy},
 				size = {layout.width, layout.height}, slots = slots,
 				buttons = buttons, fields = fields, tables = tables,
+				scrolls = scrolls, bars = bars,
 				taps = taps, tooltips = tooltips,
 				close_on_enter = close_on_enter}
 	end
