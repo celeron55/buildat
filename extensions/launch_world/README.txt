@@ -24,6 +24,12 @@ or the whole check, which drives it and reads the frames:
 
     extensions/launch_world/check.sh
 
+and, for judging the exposure by looking rather than by argument, a
+sheet of the room across the light from above and the tonemap's white
+point, with the probe box standing in it:
+
+    extensions/launch_world/probe_sheet.sh
+
 **There is no server.** The room is an extension rather than a game
 because the room *is* the launcher: starting a game is ctx.launch on the
 trusted side, which a game's own sandbox cannot call. The voxels are
@@ -101,6 +107,15 @@ Environment
                              before the tonemap measures a clamp rather
                              than light
     BUILDAT_LAUNCH_SUN       add a directional light
+    BUILDAT_LAUNCH_SKY       how bright the cold light from above is
+                             (1.6), and BUILDAT_LAUNCH_ORB the orbs
+    BUILDAT_LAUNCH_WHITE     the tonemap's white point (1.15) -- where
+                             the curve reaches 255, and what held the
+                             floor at 165 however much light was in the
+                             room
+    BUILDAT_LAUNCH_PROBEBOX  stand a probe box of known albedos in the
+                             room: 90, 50, 18 and 4 per cent grey and
+                             the orb's own orange
     BUILDAT_LAUNCH_PROBEF    a float16 reflection probe, which loses the
                              frame's red and green under HDR -- see
                              [PBR_HDR]

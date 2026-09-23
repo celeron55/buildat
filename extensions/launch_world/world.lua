@@ -96,16 +96,15 @@ end
 
 do
 	local wh, wi = ornament.wall(128, ornament.seed_of("launch_world wall"))
-	-- **Matte cut stone with warm mineral in it.** The patches were a
-	-- shade off the base and the room came out 69 per cent cool pixels
-	-- against the reference frame's 30, with a fifth of the reference
-	-- warm and a fifteenth of this one: the reference's warmth is not
-	-- all light, a good deal of it is rust-coloured stone standing
-	-- among the cold. "Large patches of mineral variation" is where
-	-- that lives, so the mineral is warm and the base stays cold.
+	-- **Medium grey stone, and the orange is the light's** (user,
+	-- 2026-09-23). The mineral patches were rust for a while, which put
+	-- the reference frame's warmth in the albedo -- and that is not
+	-- where it comes from: the reference's stone is grey and what makes
+	-- it orange is what is shining on it. So the base is a medium grey
+	-- and the patches are a shade off it in value rather than in hue.
 	register_tile("wall.png", wh, wi,
-			{base = magic.Color(0.52, 0.50, 0.48, 1),
-			inlay = magic.Color(0.52, 0.31, 0.19, 1), relief = 0.35,
+			{base = magic.Color(0.50, 0.50, 0.50, 1),
+			inlay = magic.Color(0.41, 0.41, 0.42, 1), relief = 0.35,
 			strength = 2})
 end
 do
@@ -209,8 +208,11 @@ do
 	for i = 1, 16 * 16 do flat[i] = 0 end
 	register_tile("floor_light.png", flat, flat,
 			{base = magic.Color(0.72, 0.73, 0.76, 1), relief = 0})
+	-- Near-black, which is what makes the checkerboard read as the
+	-- reference's does: its median is 38 against a 90th of 171, and a
+	-- dark tile at 0.10 lit from above is not dark
 	register_tile("floor_dark.png", flat, flat,
-			{base = magic.Color(0.10, 0.10, 0.12, 1), relief = 0})
+			{base = magic.Color(0.045, 0.045, 0.055, 1), relief = 0})
 	register_tile("dark.png", flat, flat,
 			{base = magic.Color(0.05, 0.05, 0.06, 1), relief = 0})
 end
@@ -619,10 +621,37 @@ local function across(voxels)
 	return magic.Vector3(m, m, m)
 end
 
+-- **A probe box of known albedos** (BUILDAT_LAUNCH_PROBEBOX=1), for
+-- judging the exposure rather than arguing about it: five matte patches
+-- standing in the room at 90, 50, 18 and 4 per cent grey and the orb's
+-- own orange, lit by whatever the room is lit by. What a picture of it
+-- says is where the tonemap has put each of them -- whether the white
+-- has saturated and whether the dark has gone to nothing.
+if (buildat.get_env("BUILDAT_LAUNCH_PROBEBOX") or "") ~= "" then
+	local PATCHES = {
+		{0.90, 0.90, 0.90}, {0.50, 0.50, 0.50}, {0.18, 0.18, 0.18},
+		{0.04, 0.04, 0.04}, {1.00, 0.55, 0.20},
+	}
+	-- **Behind the overhead light, not in front of it.** At z = 6 m the
+	-- patches faced the camera and the light was behind them, so every
+	-- one of them read black whatever the exposure was: a probe that
+	-- cannot be lit measures nothing.
+	for i, c in ipairs(PATCHES) do
+		local m = material(magic.Color(c[1], c[2], c[3], 1), 0.65, 0.0)
+		part("Box", {x = -3.6 + (i - 1) * 1.5, y = 0.7, z = -1.5},
+				{x = 1.2, y = 1.2, z = 0.4}, m)
+	end
+	log:info("probe box: five patches, 90/50/18/4 per cent grey and the orange")
+end
+
 -- The orbs. Warm is what you own; the palette's own entry says which
 -- colour each carries, and the light at it is what lights the room.
 local orb_mats = {}
 local orb_nodes = {}
+-- An orb out of its pocket is not a source: which ones those are, and
+-- what each one's lit colour was, so it can be handed back
+orb_dim = {}
+orb_bright = {}
 for i, o in ipairs(orb_places) do
 	local spec = ORBS[i]
 	if spec and spec.empty then
@@ -733,8 +762,16 @@ LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, OVERHEAD_Y * VOXEL_M, 2.0}
 local CYAN = {0.15, 0.85, 1.0}
 local PURPLE = {0.55, 0.20, 0.95}
 local AMBER = {1.0, 0.62, 0.12}
-local WARM = {1.0, 0.72, 0.45}
-local COLD_WHITE = {0.72, 0.85, 1.0}
+-- **The orb's own orange** (user, 2026-09-23): the glow reads white in
+-- the middle only because it saturates on brightness -- the emissive is
+-- well above 1 -- and what it throws on the stone is this. A paler warm
+-- (1.0, 0.72, 0.45) lit the room beige; the reference's stone goes
+-- properly orange where a glow reaches it.
+local WARM = {1.0, 0.55, 0.20}
+-- **Mildly cold, not blue** (user, 2026-09-23). At (0.72, 0.85, 1.0)
+-- the light from above painted half the room blue -- 48 per cent cool
+-- pixels against the reference frame's 30.
+local COLD_WHITE = {0.86, 0.91, 1.0}
 
 -- {colour, intensity, range}. The six orbs, then the overhead opening.
 local function preset_lights(orb, sky, orb_i, sky_i)
@@ -755,9 +792,9 @@ local function preset_lights(orb, sky, orb_i, sky_i)
 		-- being geometry -- an orb behind the wall's plane gives its
 		-- outward face nothing whatever the range is. **A pick, and
 		-- the user's to overrule.**
-		l[i] = {orb, orb_i, 8 * U}
+		l[i] = {orb, orb_i, 9 * U}
 	end
-	l[BAYS + 1] = {sky, sky_i, 60 * U}
+	l[BAYS + 1] = {sky, sky_i, 17 * U}
 	return l
 end
 
@@ -766,7 +803,10 @@ local PRESETS = {
 		-- The reference frame's own scheme: warm orbs in the wall, cold
 		-- light from outside it
 		name = "cold_in_warm_out",
-		lights = preset_lights(WARM, COLD_WHITE, 13.0, 1.15),
+		-- The two the probe sheet sweeps; see probe_sheet.sh
+	lights = preset_lights(WARM, COLD_WHITE,
+			tonumber(buildat.get_env("BUILDAT_LAUNCH_ORB") or "") or 9.0,
+			tonumber(buildat.get_env("BUILDAT_LAUNCH_SKY") or "") or 1.6),
 	},
 	{
 		name = "warm_in_cold_out",
@@ -831,8 +871,16 @@ local function set_preset(n)
 		-- casts, well above 1 so it reads as a source and not as a pale
 		-- ball -- and so the probe carries it to the chrome
 		if orb_mats[i] then
+			-- **The orb reads white because it saturates, not because it
+			-- is white** (user, 2026-09-23): its emissive is far above
+			-- 1, so the middle clips and only the falloff at its edge
+			-- shows the colour it casts. That is separate from how much
+			-- orange it throws on the stone, which is the light below.
+			local bright = magic.Color(e[1][1] * 7.0, e[1][2] * 7.0,
+					e[1][3] * 7.0, 1)
+			orb_bright[i] = bright
 			orb_mats[i]:SetShaderParameter("MatDiffColor",
-					magic.Color(e[1][1] * 3.4, e[1][2] * 3.4, e[1][3] * 3.4, 1))
+					orb_dim[i] and magic.Color(0.30, 0.30, 0.32, 1) or bright)
 		end
 		light.brightness = e[2] * PBR_INTENSITY *
 				((spec and spec.empty) and 0.22 or 1.0)
@@ -1042,9 +1090,9 @@ do
 		rp:SetEnabled("TonemapReinhardEq3", false)
 		rp:SetEnabled("TonemapUncharted2", true)
 		rp:SetShaderParameter("TonemapExposureBias",
-				tonumber(buildat.get_env("BUILDAT_LAUNCH_BIAS") or "") or 1.30)
+				tonumber(buildat.get_env("BUILDAT_LAUNCH_BIAS") or "") or 1.15)
 		rp:SetShaderParameter("TonemapMaxWhite",
-				tonumber(buildat.get_env("BUILDAT_LAUNCH_WHITE") or "") or 1.8)
+				tonumber(buildat.get_env("BUILDAT_LAUNCH_WHITE") or "") or 1.15)
 		rp:SetShaderParameter("AutoExposureAdaptRate", 2.0)
 		rp:SetShaderParameter("AutoExposureLumRange",
 				magic.Vector2(0.06, 2.0))
@@ -1207,7 +1255,7 @@ local function readout(text, at, scale, colour)
 		-- Leftwards in x, which is rightwards on screen: the camera looks
 		-- down -Z and Urho3D is left-handed, so a string advancing +x
 		-- reads back to front
-		x = x - (ch == "." and 0.40 or 1.30) * scale
+		x = x - (ch == "." and 0.40 or 1.15) * scale
 	end
 	-- A readout that lights what is around it, which is the whole reason
 	-- they are objects here and not a HUD
@@ -1892,8 +1940,31 @@ function place_carried()
 	c.node.position = magic.Vector3(x, y, z)
 	c.node.scale = c.scale
 	c.node.enabled = true
+	-- **An orb glows in its pocket and nowhere else** (user,
+	-- 2026-09-23: the orbs on the floor should not glow, just reflect).
+	-- A game put down on the floor is a sphere that takes the room's
+	-- light like the launch actions do; carried back into its pocket it
+	-- is a source again. The pocket is part of what a game's orb is.
+	local p = room.pockets[c.index]
+	local home = p and x >= p.x0 - 1 and x <= p.x0 + p.sx and
+			y >= p.y0 - 1 and y <= p.y0 + p.sy and
+			z <= p.mouth + 1 and z >= p.mouth - p.sz - 1
 	if light_nodes[c.index] then
-		light_nodes[c.index].position = magic.Vector3(x, y, z)
+		light_nodes[c.index].enabled = home and true or false
+		if home then
+			light_nodes[c.index].position = magic.Vector3(x, y, z)
+		end
+	end
+	-- **Its own material dimmed, not a different material.** Swapping
+	-- the material on a live StaticModel is the crash this tree already
+	-- knows about -- Material.cpp reads freed memory a frame or two
+	-- later -- so what changes is a shader parameter on the material it
+	-- already has.
+	orb_dim[c.index] = not home
+	if orb_mats[c.index] then
+		orb_mats[c.index]:SetShaderParameter("MatDiffColor",
+				home and orb_bright[c.index] or
+				magic.Color(0.30, 0.30, 0.32, 1))
 	end
 	orb_nodes[c.index] = c.node
 	orb_places[c.index] = {x = x * VOXEL_M, y = y * VOXEL_M, z = z * VOXEL_M}
