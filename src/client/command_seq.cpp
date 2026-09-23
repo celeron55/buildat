@@ -593,6 +593,17 @@ void inhibit_real_input(bool enable)
 // including an injected one, so a mouse_move issued after the game toggled the
 // mouse would silently do nothing. Feed it one pixel of motion to swallow
 // instead. It is dropped by definition, so it moves nothing.
+// The motion asked for, waiting for the top of the next frame
+static magic::IntVector2 g_pending_mouse_move(0, 0);
+
+void apply_pending_mouse_move(magic::Input *input)
+{
+	if(g_pending_mouse_move == magic::IntVector2::ZERO)
+		return;
+	input->AddMouseMove(g_pending_mouse_move.x_, g_pending_mouse_move.y_);
+	g_pending_mouse_move = magic::IntVector2::ZERO;
+}
+
 void absorb_mouse_move_suppression(magic::Input *input)
 {
 	SDL_Event e;
@@ -759,18 +770,26 @@ bool inject_mouse_pos(magic::Input *input, int x, int y, ss_ *error)
 
 bool inject_mouse_move(magic::Input *input, int dx, int dy, ss_ *error)
 {
-	// Relative only. No warp: captured look has no persistent cursor position.
-	SDL_Event e;
-	memset(&e, 0, sizeof(e));
-	e.type = SDL_MOUSEMOTION;
-	e.motion.windowID = window_id(input);
-	e.motion.which = INJECTED_MOUSE_ID;
-	e.motion.xrel = dx;
-	e.motion.yrel = dy;
-	if(SDL_PushEvent(&e) != 1){
-		*error = "SDL_PushEvent failed";
-		return false;
-	}
+	// **Into the accumulator, and not through the SDL queue at all.**
+	// mouse_move is for the look, which reads GetMouseMove(), and the
+	// queue served it badly: the first motion of a run vanished between
+	// the push and Urho3D -- it never reached HandleSDLEvent, never
+	// accumulated and was dropped by no suppression -- so every sequence
+	// lost its first mouse_move and a scripted look began one command
+	// late (2026-09-23). Pushing it as well as adding it counted it
+	// twice on the frames where it did arrive. mouse_pos is what a UI
+	// wants, and it still goes through the queue.
+	//
+	// Relative only. No warp: captured look has no persistent cursor
+	// position.
+	// Held for the top of the next frame: Urho3D clears the accumulator
+	// at the start of every frame, so a delta added while commands are
+	// being stepped is seen by a handler only if that handler happens to
+	// run later in the same frame -- and whether it does is subscription
+	// order. Applied a frame later it is seen by all of them, always.
+	g_pending_mouse_move += magic::IntVector2(dx, dy);
+	(void)input;
+	(void)error;
 	return true;
 }
 

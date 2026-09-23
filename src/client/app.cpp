@@ -1493,6 +1493,15 @@ struct CApp: public App, public magic::Application
 			// sequence -- and a screen mode change loses what was uploaded
 			// to the GPU by hand, so the world comes back black.
 			GetSubsystem<magic::Input>()->SetToggleFullscreen(false);
+			// **The first injected mouse motion of a run was swallowed**
+			// and a scripted look started one command late: whatever
+			// takes it, it takes what arrives in that first frame, so
+			// the absorbing motion has to be a frame earlier than any
+			// real one rather than pushed beside it. That is what
+			// absorb_mouse_move_suppression() is for, and it had never
+			// been called at all (2026-09-23).
+			client::command_seq::absorb_mouse_move_suppression(
+					GetSubsystem<magic::Input>());
 			client::command_seq::inhibit_real_input(true);
 			client::command_seq::show_window(GetSubsystem<magic::Graphics>(),
 					GetSubsystem<magic::Input>());
@@ -1880,6 +1889,10 @@ struct CApp: public App, public magic::Application
 		// worldgen, and the stack says what this thread was doing;
 		// [BOX_PLAYTEST_2] 12)
 		interface::debug::watchdog_alive(g_watchdog_seconds);
+		// Before anything reads it: a scripted mouse_move's delta lands
+		// at the top of the frame after the one that asked for it
+		client::command_seq::apply_pending_mouse_move(
+				GetSubsystem<magic::Input>());
 		/*magic::AutoProfileBlock profiler_block(
 				GetSubsystem<magic::Profiler>(), "App::on_update");*/
 

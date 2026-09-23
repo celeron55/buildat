@@ -75,6 +75,9 @@ namespace command_seq
 	// Feed Urho3D the one mouse motion it drops after a mouse state change,
 	// so that the next injected mouse_move is not the one that gets eaten.
 	void absorb_mouse_move_suppression(Urho3D::Input *input);
+	// The motion a mouse_move asked for, applied at the top of a frame
+	// so that every handler in it sees the same thing
+	void apply_pending_mouse_move(Urho3D::Input *input);
 
 	// Map the window without raising it or taking input focus, and make
 	// Urho3D accept injected input while the window has none.

@@ -308,6 +308,18 @@ public:
 
     /// Treat the window as having input focus whether or not the OS gives it any. For injecting input into a window that must not steal focus from whatever the user is doing.
     void SetForceInputFocus(bool enable) { forceInputFocus_ = enable; }
+    /// buildat: add relative mouse motion straight into this frame's
+    /// accumulator, for a scripted run's look. An SDL_MOUSEMOTION pushed
+    /// into the queue can be flushed out of it again before Urho ever
+    /// sees it -- which silently lost a sequence's first mouse_move --
+    /// and a scripted look wants the motion to be exactly what was asked
+    /// for, not whatever survived.
+    void AddMouseMove(int dx, int dy)
+    {
+        mouseMove_.x_ += dx;
+        mouseMove_.y_ += dy;
+        mouseMoveScaled_ = false;
+    }
 
     /// Return whether input focus is being forced.
     bool GetForceInputFocus() const { return forceInputFocus_; }
