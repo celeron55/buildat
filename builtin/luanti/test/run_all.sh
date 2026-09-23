@@ -23,12 +23,22 @@ list_only=""
 [ "${2:-}" = "--list" ] && list_only=1
 out="$here/../../../local/run_all"
 mkdir -p "$out"
+# **Every runner in the tree, not only this directory's** ([CI_RUNS]:
+# "every drive and run on CI"). The harness lives here for historical
+# reasons; a check under extensions/ or games/ that names a tier is run
+# the same way. A runner is named by its path from the root, so the two
+# kinds are told apart in the output and in the log names.
+root=$(cd "$here/../../.." && pwd)
 runners=""
-for f in "$here"/*.sh; do
-	name=$(basename "$f")
-	case "$name" in lib.sh|contract.sh|fullscreen_gate.sh|run_all.sh) continue;; esac
+for f in "$here"/*.sh "$root"/extensions/*/check.sh "$root"/games/*/check.sh; do
+	[ -f "$f" ] || continue
+	case "$(basename "$f")" in
+	lib.sh|contract.sh|fullscreen_gate.sh|run_all.sh) continue;;
+	esac
 	t=$(sed -n 's/^# tier: *//p' "$f" | head -1)
 	[ "$t" = "$tier" ] || continue
+	name=${f#"$root"/}
+	case "$f" in "$here"/*) name=$(basename "$f");; esac
 	[ -n "${ONLY:-}" ] && { echo "$name" | grep -qE "$ONLY" || continue; }
 	runners="$runners $name"
 done
@@ -40,14 +50,16 @@ pass=0; fail=0; skip=0; flaky=0
 failed_names=""
 started=$(date +%s)
 for name in $runners; do
-	printf '%-28s ' "$name"
-	log="$out/${name%.sh}.log"
+	printf '%-34s ' "$name"
+	log="$out/$(echo "${name%.sh}" | tr / _).log"
+	path="$here/$name"
+	[ -f "$path" ] || path="$root/$name"
 	t0=$(date +%s)
-	"$here/$name" > "$log" 2>&1
+	"$path" > "$log" 2>&1
 	rc=$?
 	t1=$(date +%s)
 	verdict=$(grep -aE "^(PASS|FAIL|SKIP):" "$log" | tail -1)
-	known_flaky=$(grep -c "^# flaky:" "$here/$name")
+	known_flaky=$(grep -c "^# flaky:" "$path")
 	case "$rc" in
 	0) pass=$((pass + 1)); state=pass ;;
 	# 77 is the contract's "could not run"; 2 is what the runners have

@@ -7,15 +7,25 @@
 # light with the fault written inside it. Exit 1 if any runner is like
 # that, so CI can hold the line once they are all fixed.
 #
+# **Every runner run_all.sh runs**, not only this directory's: a check
+# under extensions/ or games/ that names a tier is held to the same
+# contract.
+#
 #   builtin/luanti/test/contract.sh
 set -u
 cd "$(dirname "$0")"
 python3 - <<'PY'
-import os, re, sys
+import os, re, sys, glob
 bad = []
 quiet = []
-for name in sorted(f for f in os.listdir(".") if f.endswith(".sh")):
-	if name in ("lib.sh", "contract.sh", "fullscreen_gate.sh"):
+root = os.path.abspath("../../..")
+paths = sorted(f for f in os.listdir(".") if f.endswith(".sh"))
+paths += sorted(p for p in glob.glob(root + "/extensions/*/check.sh") +
+		glob.glob(root + "/games/*/check.sh")
+		if re.search(r"^# tier: ", open(p, errors="ignore").read(), re.M))
+for name in paths:
+	if os.path.basename(name) in ("lib.sh", "contract.sh",
+			"fullscreen_gate.sh", "run_all.sh"):
 		continue
 	src = open(name, errors="ignore").read()
 	if "FAIL:" not in src and "echo FAIL" not in src:

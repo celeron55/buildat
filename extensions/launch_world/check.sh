@@ -9,6 +9,11 @@
 # client alone with -m launch_world.
 #
 #   extensions/launch_world/check.sh
+#
+# tier: quick
+#
+# It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0
+# passed, 1 failed, 2 could not run, and a last line saying which.
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/options_for_LAUNCH_WORLD"; mkdir -p "$out"
@@ -24,7 +29,7 @@ rm -f "$here/user/launch_world/room.txt"
 lua "$here/extensions/launch_world/room.lua" || exit 1
 cd "$here/Build"
 if pgrep -x buildat >/dev/null; then
-	echo "a buildat client is already running" >&2; exit 2
+	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 { echo "delay 5000"
@@ -493,7 +498,11 @@ print("the room's 99.9th percentile is %d and %.2f%% of it is a source"
 hdr_ok = top >= 240 and lit > 0.002
 print("PASS: a source is brighter than a lit wall" if hdr_ok
 		else "FAIL: the picture clips before its shoulder -- HDR is off")
-sys.exit(0 if (ok and probe_ok and dissolve_ok and typing_ok and
-		terminal_ok and ornament_ok and drift_ok and attract_ok and
-		hdr_ok and walk_ok and pause_ok) else 1)
+every = (ok and probe_ok and dissolve_ok and typing_ok and terminal_ok
+		and ornament_ok and drift_ok and attract_ok and hdr_ok and walk_ok
+		and pause_ok)
+# The one line a machine reads, after the ones a person does
+print("PASS: the room is what it says it is" if every
+		else "FAIL: the room is not what it says it is")
+sys.exit(0 if every else 1)
 PY
