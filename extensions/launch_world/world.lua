@@ -278,10 +278,12 @@ room.id.placed = add_voxel("placed", "generated/column.png", true,
 column_id = room.id.column
 -- The checkerboard: the light squares are polished, which is what puts
 -- the room's reflection in the floor
+-- Polished: a reflective floor is half the reference frame, and what it
+-- reflects is the probe's cube map -- the room itself
 room.id.floor_light = add_voxel("floor_light", "generated/floor_light.png",
-		true, 0.18, 1.0, 0.2)
+		true, 0.07, 1.0, 0.15)
 room.id.floor_dark = add_voxel("floor_dark", "generated/floor_dark.png",
-		true, 0.22, 1.0, 0.2)
+		true, 0.09, 1.0, 0.15)
 
 -- **The room in chunks across x**, so that a dissolve re-meshes the one
 -- or two the bay touches rather than the whole room. Each chunk is told
@@ -296,6 +298,30 @@ room.id.floor_dark = add_voxel("floor_dark", "generated/floor_dark.png",
 local VOXEL_TECHNIQUE = magic.cache:GetResource("Technique",
 		"voxel_shading/PBRVoxel.xml")
 assert(VOXEL_TECHNIQUE, "voxel_shading/PBRVoxel.xml is in the cache")
+-- **What makes the voxels reflect.** `PBRVoxel` has image-based lighting
+-- (VOXELIBL), and it is gated three ways -- by a table of how much sky is
+-- visible along a direction, by how much light is on that sky, and by a
+-- specular emphasis -- all of which `builtin/voxel_shading`'s module.lua
+-- keeps up to date for a world with a sky. This room has no server and no
+-- module, so all three read zero and the floor reflected nothing while the
+-- chrome spheres, on stock PBR, reflected the room (user, 2026-09-23:
+-- can the floor be reflective too).
+--
+-- **The sky is visible in every direction here**, because what the cube
+-- map holds is not a sky but the room itself: the reflection probe. So
+-- the table is filled with ones -- six faces of six by six cells, packed
+-- four to a vec4 -- and the other two are 1.
+local SKYVIS_CELLS = 6
+local sky_vis_buffer = magic.VectorBuffer:new()
+do
+	local ones = {}
+	for i = 1, 6 * SKYVIS_CELLS * SKYVIS_CELLS do
+		ones[i] = 1.0
+	end
+	buildat.safe.write_floats(sky_vis_buffer, ones)
+end
+local SKY_VIS = magic.Variant(sky_vis_buffer)
+
 local function apply_technique(node)
 	local cg = node:GetComponent("CustomGeometry")
 	local i = 0
@@ -307,6 +333,18 @@ local function apply_technique(node)
 		-- the shadow-kind diagnostic is off
 		m:SetShaderParameter("PackedSky", 0.0)
 		m:SetShaderParameter("ShadowKinds", 0.0)
+		-- The three that let the reflection through
+		m:SetShaderParameter("SkyVis", SKY_VIS)
+		m:SetShaderParameter("SkyLight", 1.0)
+		m:SetShaderParameter("SpecEmphasis", 1.0)
+		-- And the terms this room has none of: no sky to tint, no
+		-- bounce or ground or lamp light, nothing translucent
+		m:SetShaderParameter("SkyTintAmount", 0.0)
+		m:SetShaderParameter("BounceLight", 0.0)
+		m:SetShaderParameter("GroundLight", 0.0)
+		m:SetShaderParameter("LampLight", 0.0)
+		m:SetShaderParameter("CaveAmbient", 0.0)
+		m:SetShaderParameter("TranslucencyGain", 0.0)
 		i = i + 1
 	end
 end
