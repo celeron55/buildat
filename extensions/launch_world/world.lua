@@ -1446,9 +1446,19 @@ local function reflection_probe(at)
 	-- not a number as well.
 	--
 	-- simplified: one level means a rough surface reflects as sharply
-	-- as a mirror. The upgrade is a filtered chain -- render the six
-	-- faces, then blur each level from the one below -- which Urho3D
-	-- will not do for a texture nobody calls glGenerateMipmap on.
+	-- as a mirror. **Measured 2026-09-24, and it is the format rather
+	-- than the chain**: Urho3D does regenerate a render target's levels
+	-- by itself (`Graphics::SetRenderTarget` marks them dirty, the bind
+	-- calls glGenerateMipmap), and with the chain left on an eight-bit
+	-- probe draws the room with its rough surfaces blurred and its
+	-- mirrors intact -- mean 90.4 against the one level's 91.0. The
+	-- same chain on the float16 probe takes every reflection black:
+	-- the levels come back as the shader's NaN guard sees them, so
+	-- **this driver does not generate them for a float16 cube**. The
+	-- upgrade is therefore a format the driver will filter, or six
+	-- faces blurred by hand into the levels -- not a call that is
+	-- missing. BUILDAT_LAUNCH_PROBEMIPS=1 is how that gets measured
+	-- again rather than argued about.
 	--
 	-- BUILDAT_LAUNCH_PROBE8=1 goes back to eight bits, which is what
 	-- the two were compared with.
@@ -1462,7 +1472,11 @@ local function reflection_probe(at)
 	-- eight bits, and in float16 a NaN, which the shader then adds to
 	-- the frame and takes the room black. A method, not a property:
 	-- Urho3D's `levels` is read-only and a write to it goes nowhere.
-	cube:SetNumLevels(1)
+	-- BUILDAT_LAUNCH_PROBEMIPS=1 leaves the chain on, which is how the
+	-- upgrade above gets measured rather than argued about
+	if env("BUILDAT_LAUNCH_PROBEMIPS") == "" then
+		cube:SetNumLevels(1)
+	end
 	assert(cube:SetSize(PROBE_SIZE, fmt,
 			magic.TEXTURE_RENDERTARGET), "the probe's cubemap")
 	cube.filterMode = magic.FILTER_BILINEAR
