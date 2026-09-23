@@ -320,8 +320,18 @@ do
 	-- surface is the finish in the voxel definition, not a picture
 	local flat = {size = 16}
 	for i = 1, 16 * 16 do flat[i] = 0 end
+	-- **The floor is the one surface the look reading still argues
+	-- with** (2026-09-24): its light squares are the brightest thing in
+	-- the room and they clip near the camera, which is where the 90th
+	-- percentile and the white share sit over the reference frame's.
+	-- What to do about it is the user's eye, so both halves of it are a
+	-- knob rather than a decision: BUILDAT_LAUNCH_FLOOR_VALUE scales the
+	-- light square's value and BUILDAT_LAUNCH_FLOOR_GLOSS its roughness
+	-- (lower is glossier). floor_sheet.sh draws the options.
+	local fv = tonumber(env("BUILDAT_LAUNCH_FLOOR_VALUE")) or 1.0
 	register_tile("floor_light.png", flat, flat,
-			{base = magic.Color(0.72, 0.73, 0.76, 1), relief = 0})
+			{base = magic.Color(0.72 * fv, 0.73 * fv, 0.76 * fv, 1),
+				relief = 0})
 	-- Near-black, which is what makes the checkerboard read as the
 	-- reference's does: its median is 38 against a 90th of 171, and a
 	-- dark tile at 0.10 lit from above is not dark
@@ -397,10 +407,14 @@ column_id = room.id.column
 -- the room's reflection in the floor
 -- Polished: a reflective floor is half the reference frame, and what it
 -- reflects is the probe's cube map -- the room itself
+-- The floor's gloss, the other half of the knob above: the two squares
+-- keep their two hundredths of difference, so what moves is the finish
+-- and not the pattern
+local fg = tonumber(env("BUILDAT_LAUNCH_FLOOR_GLOSS")) or 0.07
 room.id.floor_light = add_voxel("floor_light", "generated/floor_light.png",
-		true, 0.07, 1.0, 0.15)
+		true, fg, 1.0, 0.15)
 room.id.floor_dark = add_voxel("floor_dark", "generated/floor_dark.png",
-		true, 0.09, 1.0, 0.15)
+		true, fg + 0.02, 1.0, 0.15)
 
 -- **The room in chunks across x**, so that a dissolve re-meshes the one
 -- or two the bay touches rather than the whole room. Each chunk is told
