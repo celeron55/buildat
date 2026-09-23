@@ -540,6 +540,37 @@ end
 -- The two read-only enumerations a launcher draws its room from
 buildat.safe.list_games = __buildat_list_games
 buildat.safe.list_saves = __buildat_list_saves
+-- launch_save(game, name): open one of them. A save is the player's own
+-- and the launch grid has no tile for it, so this is the one launch a
+-- launcher asks for by name rather than by key ([LAUNCH_WORLD]: a save
+-- is a sphere on the room's floor).
+--
+-- The pair has to be one list_saves() answers, so what reaches the
+-- server's -u is a save that is on the disk and nothing a sandbox
+-- composed. From there it is the grid's own path for a game with
+-- params: the game starts and reads "save=<name>" as it would a packet.
+buildat.safe.launch_save = function(game, name)
+	if type(game) ~= "string" or type(name) ~= "string" then
+		return false, "launch_save(game, name): two strings"
+	end
+	local found = false
+	for _, sv in ipairs(__buildat_list_saves(game)) do
+		if sv.name == name then
+			found = true
+			break
+		end
+	end
+	if not found then
+		return false, "launch_save(" .. game .. ", " .. name ..
+				"): no such save"
+	end
+	local m = require("buildat/extension/launch_menu")
+	if type(m) ~= "table" or type(m.start_local_game) ~= "function" then
+		return false, "launch_save(): no launch_menu to start " .. game
+	end
+	m.start_local_game(game, "save=" .. name)
+	return true
+end
 -- Whether the client has a local server up, which is how a launcher
 -- knows a launch action started a game rather than opening a screen
 buildat.safe.local_server_running = __buildat_local_server_running

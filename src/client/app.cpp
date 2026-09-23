@@ -2744,8 +2744,15 @@ struct CApp: public App, public magic::Application
 				// The client's own paths, so that a client started on other
 				// paths than the build's (-D, -C, the same letters both sides: a test on empty ones,
 				// [FIRST_RUN]) has its server on the same
-				"-D", g_client_config.get<ss_>("user_path"),
-				"-C", g_client_config.get<ss_>("cache_path")};
+				// Absolute, as the log path below is and for the same
+				// reason: the child's cwd is not this process's, and a
+				// relative -D then names a directory beside the tree
+				// rather than the tree's own -- the server made its saves
+				// somewhere the client never looks (2026-09-24)
+				"-D", interface::fs::get_absolute_path(
+						g_client_config.get<ss_>("user_path")),
+				"-C", interface::fs::get_absolute_path(
+						g_client_config.get<ss_>("cache_path"))};
 		// The server the client starts writes beside the client's own log
 		// when there is one: half of what a bug report is about happens over
 		// there, and -L asked for a log of the session. Not the same file --

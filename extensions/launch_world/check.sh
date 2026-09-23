@@ -636,6 +636,55 @@ if [ -z "$read_back" ] || [ "${put:-0}" -lt 1 ]; then
 	exit 1
 fi
 
+# **A save opens by name, end to end** ([LAUNCH_WORLD]: the saves are the
+# floor's, and a save is the one launch the grid has no tile for). This
+# had only ever been demonstrated as far as the desk's data allowed: every
+# save here old enough to try has an empty save.sqlite, so the server
+# answered "save X does not say which game it needs" and the round trip
+# was never run. The check makes its own save instead of hoping for one.
+save=zz_launch_world_test
+rm -rf "$here/user/games/vanilla/saves/$save"
+port=31879
+BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE="$save" \
+	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" -l 3 \
+	> "$out/save_server.log" 2>&1 &
+maker=$!
+for i in $(seq 1 90); do
+	grep -aq "Mods loaded" "$out/save_server.log" 2>/dev/null && break
+	sleep 1
+done
+kill "$maker" 2>/dev/null; wait "$maker" 2>/dev/null
+if ! grep -aq "Running world $save (game devtest)" "$out/save_server.log"; then
+	echo "SKIP: could not make a save to open (no devtest?)" >&2
+	tail -3 "$out/save_server.log" >&2
+	exit 2
+fi
+# Two letters name it and nothing else in the room, Enter opens it, and
+# what is asserted is the far end: the server the room started took the
+# save's own path and drew no menu on the way.
+{ echo "delay 6000"; echo "event mode menu"; echo "delay 600"
+	echo "keypress Z"; echo "keypress Z"
+	echo "delay 400"; echo "keypress Return"
+	# Ten seconds: the server says it opened the save about a second
+	# after the launch, and the rest of a world coming up is devtest's
+	# business, not this check's
+	echo "delay 10000"; echo "quit"; } > "$out/cmds_save.txt"
+rm -f "$out/save_cli.log" "$out/save_cli_server.log"
+# A client that entered a game does not always get to its own quit
+# quickly; the tier's minute is not spent waiting for one that will not
+timeout 120 bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
+	-L "$out/save_cli.log" -c @"$out/cmds_save.txt" > /dev/null 2>&1
+asked=$(grep -ac "launch_w.*: launch: save $save of vanilla" "$out/save_cli.log")
+opened=$(grep -ac "untrusted_launch: opening save $save" "$out/save_cli_server.log")
+echo "the save orb asked $asked times, the server opened it $opened times"
+rm -rf "$here/user/games/vanilla/saves/$save"
+if [ "$asked" -lt 1 ] || [ "$opened" -lt 1 ]; then
+	echo "FAIL: a save on the floor does not open its own game by name"
+	grep -a "launch_w.*: launch: " "$out/save_cli.log" | tail -3
+	tail -3 "$out/save_cli_server.log" 2>/dev/null
+	exit 1
+fi
+
 contents=$(grep -a "launch_w.*: contents: " "$out/cli.log" | head -1 |
 	sed 's/.*contents: //')
 echo "contents: ${contents:-(none)}"

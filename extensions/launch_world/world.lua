@@ -4042,13 +4042,12 @@ function launch(b)
 		-- simplified: a game that reads no `save` key starts as it
 		-- normally would, which is what vanilla did before it read one.
 		local o = ORBS[b]
-		local m = require("buildat/extension/launch_menu")
-		if m and m.start_local_game then
-			log:info("launch: save " .. o.name .. " of " .. o.game)
-			m.start_local_game(o.game, "save=" .. o.name)
+		log:info("launch: save " .. o.name .. " of " .. o.game)
+		local ok, why = api.launch_save(o.game, o.name)
+		if ok then
 			entered_game()
 		else
-			log:warning("launch: no launch_menu to start " .. o.game)
+			log:warning("launch: " .. tostring(why))
 		end
 	end
 end
