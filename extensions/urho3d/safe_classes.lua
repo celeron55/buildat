@@ -878,13 +878,19 @@ function M.define(dst, util)
 			-- What wants it is pixel art, which is what a Luanti game's
 			-- textures are: smoothing them is wrong at every size.
 			filterMode = util.simple_property("number"),
-			-- **How many mip levels**, 0 being the whole chain. A render
-			-- target's chain is not generated unless something does it,
-			-- and sampling a level nobody wrote is undefined -- which in
-			-- eight bits is a wrong colour and in float16 is a NaN
-			-- ([PBR_HDR], 2026-09-23). A one-level render target is what
-			-- a reflection probe wants until it filters its own chain.
-			numLevels = util.simple_property("number"),
+		},
+		instance = {
+			-- **How many mip levels**, 0 being the whole chain, and it
+			-- is a method rather than a property: Urho3D's `levels` is
+			-- read-only and a write to it goes nowhere at all
+			-- ([PBR_HDR], 2026-09-23 -- a probe asked for one level for
+			-- an afternoon and had a full chain the whole time). Set it
+			-- before SetSize. A render target's chain is not generated
+			-- unless something generates it, and sampling a level
+			-- nobody wrote is undefined: in eight bits a wrong colour,
+			-- in float16 a NaN.
+			SetNumLevels = util.self_function("SetNumLevels", {},
+					{"Texture", "number"}),
 		},
 	})
 

@@ -1289,32 +1289,36 @@ local probe_surfaces = {}
 probe_on = true
 local function reflection_probe(at)
 	local cube = magic.TextureCube:new()
-	-- **Eight bits, and now for one reason rather than two**
-	-- ([PBR_HDR], half fixed 2026-09-23). A float16 zone cube used to
-	-- take the whole room black: it hands back a value that is not a
-	-- number, the voxel shader *added* it to the frame, and every
-	-- additive light pass after that added to a NaN, so every lit
-	-- surface went black and only the unlit things drew. The shader
-	-- refuses a sample that is not a number now, and the room draws
-	-- with a float cube -- **but its content is still wrong**: the
-	-- chrome and the props are stock PBR techniques, they read the same
-	-- cube without a guard, and they come out black mirrors. So eight
-	-- bits stays the default until the cube's content is fixed.
+	-- **A float16 cube, which is what a reflection is** ([PBR_HDR],
+	-- fixed 2026-09-23): eight bits could not carry an orb that is
+	-- twenty times white, so every source clipped to a flat white disc
+	-- in every reflection. What kept this in eight bits for a day was
+	-- **the mip chain above**: a render-target cube is given the whole
+	-- chain and only level 0 is ever rendered into, so a rough surface
+	-- sampled a level nobody wrote -- a wrong colour in eight bits, and
+	-- in float16 a NaN, which this shader *adds* to the frame, and
+	-- every additive light pass after it adds to a NaN. One level fixes
+	-- it at the source and the voxel shader refuses a sample that is
+	-- not a number as well.
 	--
-	-- simplified: an emissive orb clips to white where it is reflected,
-	-- since eight bits cannot carry it.
+	-- simplified: one level means a rough surface reflects as sharply
+	-- as a mirror. The upgrade is a filtered chain -- render the six
+	-- faces, then blur each level from the one below -- which Urho3D
+	-- will not do for a texture nobody calls glGenerateMipmap on.
 	--
-	-- BUILDAT_LAUNCH_PROBEF=1 is the float cube, for the next look at
-	-- [PBR_HDR].
-	local fmt = env("BUILDAT_LAUNCH_PROBEF") ~= "" and
-			magic.Graphics.GetRGBAFloat16Format() or
-			magic.Graphics.GetRGBAFormat()
-	-- **One level, not a chain nobody writes** ([PBR_HDR]): a render
-	-- target cube is given the full mip chain by default and only level
-	-- 0 is ever rendered into, so every sample above it reads memory
-	-- nobody wrote -- a wrong colour in eight bits and a NaN in float16,
-	-- and a NaN reflection turns every lit pixel black.
-	cube.numLevels = 1
+	-- BUILDAT_LAUNCH_PROBE8=1 goes back to eight bits, which is what
+	-- the two were compared with.
+	local fmt = env("BUILDAT_LAUNCH_PROBE8") ~= "" and
+			magic.Graphics.GetRGBAFormat() or
+			magic.Graphics.GetRGBAFloat16Format()
+	-- **One level, not a chain nobody writes** ([PBR_HDR], and this is
+	-- the whole fault): a render target cube is given the full mip
+	-- chain by default and only level 0 is ever rendered into, so every
+	-- sample above it reads memory nobody wrote -- a wrong colour in
+	-- eight bits, and in float16 a NaN, which the shader then adds to
+	-- the frame and takes the room black. A method, not a property:
+	-- Urho3D's `levels` is read-only and a write to it goes nowhere.
+	cube:SetNumLevels(1)
 	assert(cube:SetSize(PROBE_SIZE, fmt,
 			magic.TEXTURE_RENDERTARGET), "the probe's cubemap")
 	cube.filterMode = magic.FILTER_BILINEAR
@@ -1343,6 +1347,7 @@ local function reflection_probe(at)
 	-- nothing, rather than no environment at all. The property will not
 	-- take nil, and an unbound cubemap reads bright rather than black.
 	local dark = magic.TextureCube:new()
+	dark:SetNumLevels(1)
 	assert(dark:SetSize(4, magic.Graphics.GetRGBAFloat16Format(), 0),
 			"the empty environment")
 	local black = magic.Image:new()
