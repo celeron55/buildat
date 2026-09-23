@@ -32,6 +32,24 @@ if pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 
+# **The floor's example servers say they are examples** ([TWO_AUDIENCES]:
+# a first-time player learns what the room is by trying one, and nine
+# invented hostnames that read as joinable teach the wrong thing). This
+# desk's client has ten addresses of its own, so none of the padding
+# shows here -- the assertion needs a client with no history, which is
+# an empty user path of its own.
+mkdir -p "$out/emptyuser"
+{ echo "delay 4000"; echo "quit"; } > "$out/cmds_cold.txt"
+examples=$(bin/buildat -m launch_world -D "$out/emptyuser" -w 640x360 -l 3 \
+	-c @"$out/cmds_cold.txt" 2>&1 | sed -e 's/\x1b\[[0-9;]*m//g' |
+	grep -a "launch_w.*: servers: .* on the floor" | head -1 |
+	sed -n 's/.*floor, \([0-9]*\) of them saying.*/\1/p')
+echo "a client with no history draws ${examples:-0} example servers"
+if [ "${examples:-0}" -lt 1 ]; then
+	echo "FAIL: the floor's made-up servers do not say they are examples"
+	exit 1
+fi
+
 # **The room is a launch UI the setting can name** ([LAUNCH_SANDBOX]:
 # the launch UI is a slot). Two short runs before the long one: the
 # preference picks the room, and a name that is not there falls back to

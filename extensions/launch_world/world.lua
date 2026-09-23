@@ -117,6 +117,13 @@ do
 	end
 	log:info("servers: " .. #SERVERS .. " of the client's own")
 end
+-- **And they say they are examples** ([TWO_AUDIENCES]: the audience for
+-- this room is someone meeting buildat for the first time). Nine
+-- invented hostnames standing on the floor read as servers to join, and
+-- a first-time player learns what the room is by trying one -- so each
+-- one that is not the player's own says so where its name is read out.
+-- The localhost row is not an example: it is a real thing to try, and
+-- the check needs one server it can name and fail to reach.
 local SERVERS_MOCK = {
 	{name = "buildat.example.org", address = "buildat.example.org:29797"},
 	{name = "drift.example.net", address = "drift.example.net:29797"},
@@ -138,8 +145,15 @@ for _, sv in ipairs(SERVERS_MOCK) do
 	-- its own gets none of the padding otherwise, and the check needs
 	-- one server it can name and fail to reach
 	if not had and (#SERVERS < 10 or sv.always) then
+		sv.example = not sv.always
 		SERVERS[#SERVERS + 1] = sv
 	end
+end
+do
+	local ex = 0
+	for _, sv in ipairs(SERVERS) do if sv.example then ex = ex + 1 end end
+	log:info("servers: " .. #SERVERS .. " on the floor, " .. ex ..
+			" of them saying they are examples")
 end
 room.set_pockets(#GAMES)
 log:info("contents: " .. (#GAMES - 1) .. " games, " .. #FLOOR_ACTIONS ..
@@ -1041,7 +1055,9 @@ for i, sv in ipairs(SERVERS) do
 	local col = SERVER_COLS[(i - 1) % #SERVER_COLS + 1]
 	local row = 0.5 + math.floor((i - 1) / #SERVER_COLS) * 4.5
 	local o = {name = sv.name, address = sv.address, server = true,
-		description = sv.address, floor = true, category = "server",
+		description = sv.address ..
+				(sv.example and "   (an example, not a server)" or ""),
+		floor = true, category = "server",
 		significance = sv.players,
 		search = sv.name .. " " .. sv.address}
 	ORBS[#ORBS + 1] = o
