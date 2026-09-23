@@ -200,6 +200,23 @@ function M.define(dst, util)
 					return util.wrap_instance("Vector3", self:EulerAngles())
 				end
 			),
+			-- **Turning smoothly rather than snapping**: pure maths on
+			-- two rotations, and the only way a sandboxed scene can
+			-- interpolate one ([LAUNCH_WORLD]'s orbs turn to face
+			-- whoever walks past)
+			Slerp = util.wrap_function({"Quaternion", "Quaternion", "number"},
+				function(self, other, t)
+					return util.wrap_instance("Quaternion",
+							self:Slerp(other, t))
+				end
+			),
+			Nlerp = util.wrap_function({"Quaternion", "Quaternion", "number",
+					{"boolean", "__nil"}},
+				function(self, other, t, shortest)
+					return util.wrap_instance("Quaternion",
+							self:Nlerp(other, t, shortest and true or false))
+				end
+			),
 		},
 		instance_meta = {
 			__mul = util.wrap_function({"Quaternion", {"number", "Quaternion"}},

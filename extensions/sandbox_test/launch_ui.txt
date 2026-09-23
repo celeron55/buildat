@@ -1,3 +1,4 @@
 Hostile launch UI (a test)
 Spends its boot trying to reach past the launch verbs; draws nothing.
 sandboxed
+hidden

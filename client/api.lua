@@ -469,11 +469,25 @@ buildat.safe.list_launch_uis = function()
 		if e.kind == "extension" and type(e.path) == "string" then
 			local f = io.open(e.path .. "/launch_ui.txt", "rb")
 			if f then
-				local title = f:read("*l")
+				local text = f:read("*a")
 				f:close()
-				out[#out + 1] = {name = e.name,
-						title = (title ~= nil and title ~= "") and title or
-						e.name}
+				local title = text:match("^([^\r\n]*)")
+				-- **"hidden" keeps it out of the list, not out of the
+				-- slot**: a launch UI that exists to be tested is still
+				-- selectable by name (`-m`, or the preference), and a
+				-- person picking a launcher should not be offered one
+				-- whose whole job is to try to break out of the sandbox.
+				local hidden = false
+				for line in text:gmatch("[^\r\n]+") do
+					if line:match("^%s*hidden%s*$") then
+						hidden = true
+					end
+				end
+				if not hidden then
+					out[#out + 1] = {name = e.name,
+							title = (title ~= nil and title ~= "") and
+							title or e.name}
+				end
 			end
 		end
 	end

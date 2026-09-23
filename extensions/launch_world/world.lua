@@ -832,8 +832,9 @@ end
 -- grid. The middle is left open, because anything standing there stands
 -- in front of the pockets the room is lit by.
 --
--- simplified: the layout is fixed and the player cannot move them yet.
--- Moving them is step 8, with the save diff that would remember it.
+-- The layout is where they start, not where they stay: E picks one up
+-- and right click puts it down, and the save remembers where the player
+-- left it ([LAUNCH_WORLD] step 8).
 local FLOOR_COLS = {-13.0, -9.0, -5.0, 5.0, 9.0, 13.0}
 local FLOOR_ROWS = {-4.0, -0.5, 3.0, 6.5, 10.0}
 for i, a in ipairs(FLOOR_ACTIONS) do
@@ -1657,9 +1658,8 @@ readout("b" .. api.version(), {x = 9.0, y = 0.25, z = -1.0}, 0.34,
 -- over the one being pointed at only -- not always on, which is what
 -- keeps the room from being a label wall.
 --
--- simplified: the turn snaps rather than slerping, which is invisible
--- while the camera is fixed and wants a slerp the moment it moves; and
--- "pointed at" is the smallest angle to the view direction, which is
+-- simplified: "pointed at" is the smallest angle to the view direction,
+-- which is
 -- the crosshair's own ray as long as the crosshair is the screen's
 -- middle.
 -- **The camera is a state, not a constant**, because the fast path flies
@@ -2261,10 +2261,14 @@ local orb_base_scale = {}
 -- Walking up to a sphere means the crosshair has to be on it, not merely
 -- nearest to it: about ten degrees, which is a sphere at arm's length
 local POINT_DOT = 0.985
-function handle_orb_update()
+-- A node nobody draws, borrowed for the arithmetic of "which way is
+-- that": LookAt writes a rotation and nothing else builds one
+local turner = scene:CreateChild("turner")
+function handle_orb_update(event_type, event_data)
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if in_game or console_open then return end
+	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
 	local best, best_dot = 0, -1
 	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
 	-- stops at it, which would hide every orb past the empty one
@@ -2282,9 +2286,21 @@ function handle_orb_update()
 			end
 			-- Present the face: the mark sits in the middle of the
 			-- sphere's UVs, which Sphere.mdl puts on -Z, so the orb looks
-			-- away from the viewer to show it to them
-			node:LookAt(magic.Vector3(view_from.x * 2 - p.x,
+			-- away from the viewer to show it to them.
+			--
+			-- **And it turns rather than snapping** (the note that stood
+			-- here said a snap is invisible while the camera is fixed
+			-- and wants a slerp the moment it moves -- the camera walks
+			-- now). The scratch node is where the target rotation comes
+			-- from: LookAt is the only way to build one, and reading it
+			-- off a node nobody draws costs nothing.
+			turner.position = p
+			turner:LookAt(magic.Vector3(view_from.x * 2 - p.x,
 					view_from.y * 2 - p.y, view_from.z * 2 - p.z))
+			-- Frame-rate independent: the same fraction of the way there
+			-- every second, whatever the frame took
+			node.rotation = node.rotation:Slerp(turner.rotation,
+					1 - math.exp(-7.0 * dt))
 		end
 	end
 	-- In FPS the crosshair is the pointer, so a sphere off to the side is
