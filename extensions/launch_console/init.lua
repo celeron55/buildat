@@ -103,6 +103,16 @@ local function open(opts)
 	-- 1900 lines of plain text want; the search moves the view rather
 	-- than re-laying anything out.
 	local lines = api_lines()
+	-- Where each line starts in the joined text, so a match can be
+	-- pointed at rather than merely scrolled to
+	local line_at = {}
+	do
+		local at = 0
+		for i, line in ipairs(lines) do
+			line_at[i] = at
+			at = at + #line + 1
+		end
+	end
 	-- **A field is dark with light text, like the rest of the column**
 	-- (playtest, 2026-09-23: "the text fields are unreadable"). Urho3D's
 	-- default style paints a light LineEdit, and the text in it is this
@@ -171,14 +181,16 @@ local function open(opts)
 		view.scrollPanel.clipChildren = true
 	end
 	local doc = left:CreateChild("Text")
+	doc:SetSelectionColor(magic.Color(0.30, 0.42, 0.16, 1))
 	doc:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
 	doc:SetColor(magic.Color(0.78, 0.82, 0.88, 1))
 	doc.text = table.concat(lines, "\n")
-	-- simplified: the document is read, not copied out of. Urho3D's Text
-	-- has no selection of its own -- textCopyable is a LineEdit's -- so
-	-- copying a line out wants either a LineEdit per line or a
-	-- selection this does not have. The console's own answers are
-	-- copyable the same way: they are not.
+	-- simplified: the document is read, not copied out of. A `Text`
+	-- does have a selection -- it is what the search's match is drawn
+	-- with below -- but it is set from code and not dragged with a
+	-- mouse, and `textCopyable` is a `LineEdit`'s. Copying a line out
+	-- wants either a LineEdit per line or a selection that follows the
+	-- pointer. The console's own answers are the same.
 	view.contentElement = doc
 
 	-- Which line the view is on, so a match can be scrolled to: a Text's
@@ -198,15 +210,22 @@ local function open(opts)
 		for step = 1, n do
 			local i = back and (from - step) or (from + step)
 			i = ((i - 1) % n) + 1
-			if lines[i]:lower():find(q, 1, true) then
+			local col = lines[i]:lower():find(q, 1, true)
+			if col then
 				found_at = i
 				show_line(i)
+				-- **The match is pointed at, not only scrolled to**
+				-- (user): a line in the middle of a screenful is not
+				-- an answer until something says which one it is.
+				doc:SetSelection(line_at[i] + col - 1, #q)
 				hint.text = "line " .. i .. " of " .. n
-				log:info("console: search " .. q .. " -> line " .. i)
+				log:info("console: search " .. q .. " -> line " .. i ..
+						" column " .. col)
 				return
 			end
 		end
 		hint.text = "no line has " .. q
+		doc:ClearSelection()
 		log:info("console: search " .. q .. " -> nothing")
 	end
 
@@ -292,11 +311,16 @@ local function open(opts)
 		-- run does not have, and which is one more thing to know than a
 		-- two-column screen should ask for.
 		if key == magic.KEY_TAB then
+			-- **Tab lands in the console when neither field has the
+			-- keyboard** (user): the console is the one you came for,
+			-- and one more Tab reaches the search. That is the whole of
+			-- working this screen without a mouse.
 			local at = magic.ui.focusElement
-			local is_search = at and at:GetName() == "console_search"
-			magic.ui:SetFocusElement(is_search and input or search)
+			local who = at and at:GetName() or ""
+			local to = (who == "console_input") and search or input
+			magic.ui:SetFocusElement(to)
 			log:info("console: the keyboard is in the " ..
-					(is_search and "console" or "search"))
+					(to == input and "console" or "search"))
 			return
 		end
 		if key ~= magic.KEY_RETURN and key ~= magic.KEY_KP_ENTER then

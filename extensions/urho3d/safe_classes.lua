@@ -1507,6 +1507,16 @@ function M.define(dst, util)
 			-- way to set one at all, so every label drew in the style's
 			-- default ([WHITELIST_POLICY]: plainly safe).
 			SetColor = util.self_function("SetColor", {}, {"Text", "Color"}),
+			-- **A Text does have a selection** -- it is what a LineEdit's
+			-- own is drawn with -- and nothing could reach it, so a
+			-- screen showing a document had no way to point at the line
+			-- it had just found ([LAUNCH_CONSOLE], 2026-09-23)
+			SetSelection = util.self_function("SetSelection", {},
+					{"Text", "number", {"number", "__nil"}}),
+			ClearSelection = util.self_function("ClearSelection", {},
+					{"Text"}),
+			SetSelectionColor = util.self_function("SetSelectionColor", {},
+					{"Text", "Color"}),
 			-- A shadow or an outline under the letters, which is what makes
 			-- text over a world readable: a HUD over snow or sand is white
 			-- on white without it. effectColor is what it is drawn with.

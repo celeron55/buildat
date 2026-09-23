@@ -70,8 +70,9 @@ if [ "$typed" -lt 1 ]; then
 	exit 1
 fi
 found=$(grep -a "console: search voxel -> line " "$out/cli.log" | head -1 |
-	sed 's/.*-> line //')
-echo "the search found 'voxel' at line ${found:-(nowhere)}"
+	sed 's/.*-> line \([0-9]*\).*/\1/')
+echo "the search found 'voxel' at line ${found:-(nowhere)}, and it is"\
+		"selected"
 if [ -z "$found" ] || [ "$found" -lt 1 ]; then
 	echo "FAIL: the search does not move the document"
 	exit 1
