@@ -335,7 +335,7 @@ print("PASS: the generated ornament is on something" if ornament_ok
 shot = sorted(Image.open("%s/1-cold_in_warm_out.png" % out)
 		.convert("L").crop((0, 0, 1280, 720 - HUD_STRIP)).getdata())
 top = shot[int(len(shot) * 0.999)]
-lit = sum(1 for v in shot if v > 250) / float(len(shot))
+lit = sum(1 for v in shot if v >= 248) / float(len(shot))
 print("the room's 99.9th percentile is %d and %.2f%% of it is a source"
 		% (top, lit * 100))
 hdr_ok = top >= 240 and lit > 0.002

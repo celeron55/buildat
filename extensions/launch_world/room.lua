@@ -44,7 +44,11 @@ M.SLAB_MIN, M.SLAB_MAX = 4, 10
 -- number was taken literally. So the relief is 1 to 4.
 M.SLAB_OUT_MIN, M.SLAB_OUT_MAX = 1, 4
 
-function M.bay_x(b) return (b - 2) * M.BAY_SPACING - 7 end
+-- The middle of a pocket across the wall
+function M.bay_x(b)
+	local p = M.pockets[b + 1]
+	return p.x0 + math.floor(p.sx / 2)
+end
 
 -- Lua 5.1 has no bitwise operators and its numbers are doubles, so the
 -- hash below does its own xor and keeps every product inside the 53 bits
@@ -108,21 +112,12 @@ M.SLAB_OUT = M.SLAB_OUT_MAX     -- the furthest any slab comes out
 -- **The pockets, in the numbers the user gave 2026-09-23.** A pocket's
 -- floor is at Y 0 to 3 and no higher, because the player reaches into
 -- these; it is usually 3x3x3 with a 2 or a 4 turning up in any dimension.
+--
+-- **How many there are is how many things there are to put in them**,
+-- which is why M.set_pockets() below is a function and not a table: the
+-- room's contents are the tree's launch actions, and world.lua says how
+-- many it found. The default is here so that this file runs on its own.
 M.pockets = {}
-for b = 0, M.BAYS - 1 do
-	local h = hash2(b, 7, 33)
-	-- 3 usually, 2 or 4 now and then: five draws, one of each end
-	local function dim(shift)
-		local d = math.floor(h / shift) % 5
-		if d == 0 then return 2 end
-		if d == 4 then return 4 end
-		return 3
-	end
-	local sx, sy, sz = dim(1), dim(8), dim(64)
-	local y0 = math.floor(h / 512) % 4
-	M.pockets[b + 1] = {x0 = M.bay_x(b) - math.floor(sx / 2), y0 = y0,
-		sx = sx, sy = sy, sz = sz}
-end
 
 -- The middle of a pocket, which is where its orb hangs
 function M.bay_y(b)
@@ -134,7 +129,8 @@ end
 -- rectangles cut back into whatever is left -- which is where the wall's
 -- interest comes from, rather than from putting different things on it.
 local face_cache = {}
-local function slab_face(x, y)
+local slab_face
+function slab_face(x, y)
 	local out = 0
 	for i = 1, #M.slabs do
 		local s = M.slabs[i]
@@ -174,15 +170,43 @@ function M.face_z(x, y)
 	return z
 end
 
--- **A pocket has one mouth, not a mouth per column.** Taking the face at
--- each (x, y) sheared the pocket wherever a slab covered half of it, and
--- a sheared hole does not read as a pocket. So the mouth is the face at
--- the pocket's own middle, settled once.
-for b = 1, M.BAYS do
-	local p = M.pockets[b]
-	p.mouth = slab_face(p.x0 + math.floor(p.sx / 2),
-			p.y0 + math.floor(p.sy / 2))
+-- **The pockets, one per thing the room holds.** Called before build(),
+-- with however many launch actions the tree offered.
+function M.set_pockets(n)
+	M.BAYS = n
+	M.pockets = {}
+	-- Spread across the wall with a margin at each end, so the outermost
+	-- pocket is not cut by the corner
+	local span = (M.X_MAX - M.X_MIN - 12) / n
+	for b = 0, n - 1 do
+		local h = hash2(b, 7, 33)
+		-- 3 usually, 2 or 4 now and then: five draws, one of each end
+		local function dim(shift)
+			local d = math.floor(h / shift) % 5
+			if d == 0 then return 2 end
+			if d == 4 then return 4 end
+			return 3
+		end
+		local sx, sy, sz = dim(1), dim(8), dim(64)
+		local y0 = math.floor(h / 512) % 4
+		local cx = math.floor(M.X_MIN + 6 + (b + 0.5) * span)
+		M.pockets[b + 1] = {x0 = cx - math.floor(sx / 2), y0 = y0,
+			sx = sx, sy = sy, sz = sz}
+	end
+	-- **A pocket has one mouth, not a mouth per column.** Taking the
+	-- face at each (x, y) sheared the pocket wherever a slab covered
+	-- half of it, and a sheared hole does not read as a pocket. So the
+	-- mouth is the face at the pocket's own middle, settled once. The
+	-- face cache goes with it: face_z() answers the surround of these.
+	for b = 1, n do
+		local p = M.pockets[b]
+		p.mouth = slab_face(p.x0 + math.floor(p.sx / 2),
+				p.y0 + math.floor(p.sy / 2))
+	end
+	face_cache = {}
+	return M.pockets
 end
+M.set_pockets(M.BAYS)
 
 -- Whether (x, y, z) is inside a pocket, and whether it is one of the side
 -- columns that carry the ornament
@@ -317,6 +341,15 @@ function M.self_check()
 			"a checker square is two voxels")
 	local rows = M.build()
 	assert(#rows == M.H * M.D, "one row a (y, z): " .. #rows)
+	-- The pockets follow the count they are given, and they still fit
+	M.set_pockets(11)
+	assert(#M.pockets == 11, "eleven things, eleven pockets")
+	for b = 1, 11 do
+		local p = M.pockets[b]
+		assert(p.x0 - 1 >= M.X_MIN and p.x0 + p.sx <= M.X_MAX,
+				"pocket " .. b .. " and its columns are on the wall")
+	end
+	M.set_pockets(M.BAYS)
 	assert(#rows[1] == M.W, "a row is the room across: " .. #rows[1])
 	assert(M.row_index(M.OY, M.OZ) == 1, "the first row is the first row")
 	return true

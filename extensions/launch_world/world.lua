@@ -17,6 +17,32 @@ local magic = require("buildat/extension/urho3d").safe
 local EXT = buildat.extension_path("launch_world")
 local room = dofile(EXT .. "/room.lua")
 
+-- **What the room holds is what the tree offers.** Every launcher/init.lua
+-- in games/, builtin/ and extensions/, run in the sandbox and checked, is
+-- what the launch grid draws its tiles from ([LAUNCH_GRID]); this room
+-- draws the same list as orbs. A game goes in a pocket, anything else
+-- that launches stands on the floor.
+--
+-- Read before the room is built, because how many pockets the wall has is
+-- how many things there are to put in them.
+local launch_grid = dofile(buildat.extension_path("__menu") ..
+		"/launch_grid.lua")
+local GAMES, FLOOR_ACTIONS = {}, {}
+for _, a in ipairs(launch_grid.actions(log)) do
+	local o = {name = a.label, icon = a.icon, run = a.run, kind = a.kind}
+	if a.kind == "game" then
+		GAMES[#GAMES + 1] = o
+	else
+		FLOOR_ACTIONS[#FLOOR_ACTIONS + 1] = o
+	end
+end
+-- **Chekhov's empty pocket**, last: a pocket with nothing in it is what
+-- says there is room for another game, and it is the way to ContentDB
+GAMES[#GAMES + 1] = {name = "install a game", warm = true, empty = true}
+room.set_pockets(#GAMES)
+log:info("contents: " .. (#GAMES - 1) .. " games, " .. #FLOOR_ACTIONS ..
+		" other launch actions")
+
 -- The ornament generator and the maps it feeds; see ornament.lua
 local ornament = dofile(EXT .. "/ornament.lua")
 -- **The voxel tiles are generated here and registered by name**, which
@@ -209,6 +235,8 @@ room.id.dark = add_voxel("dark", "generated/dark.png", true, 0.95, 0.1, 0.4)
 -- The pockets' side columns, which are the one place the ornament goes
 room.id.column = add_voxel("column", "generated/column.png", true,
 		0.70, 0.20, 0.9, 4)
+-- Kept, because the ornament toggle puts plain stone in its place
+column_id = room.id.column
 -- The checkerboard: the light squares are polished, which is what puts
 -- the room's reflection in the floor
 room.id.floor_light = add_voxel("floor_light", "generated/floor_light.png",
@@ -245,7 +273,7 @@ local function apply_technique(node)
 end
 
 local CHUNK = 16
-local rows = room.build()
+rows = room.build()
 local chunk_nodes = {}
 local function mesh_chunk(c)
 	local x0 = c * CHUNK
@@ -276,6 +304,16 @@ end
 local CHUNKS = math.ceil(room.W / CHUNK)
 for c = 0, CHUNKS - 1 do
 	mesh_chunk(c)
+end
+
+-- The whole room again from room.lua's description: what wants it is the
+-- ornament toggle, which changes what a voxel is rather than what is
+-- drawn over it
+function rebuild_room()
+	rows = room.build()
+	for c = 0, CHUNKS - 1 do
+		mesh_chunk(c)
+	end
 end
 log:info("room: " .. room.W .. "x" .. room.H .. "x" .. room.D ..
 		" voxels of 45 cm in " .. CHUNKS .. " chunks")
@@ -386,12 +424,19 @@ end
 -- texture multiplies the orb's own colour, so where the mark is the
 -- light is not -- a silhouette inside the light, the way a lantern's
 -- cut-out works, rather than a sticker fighting the emission.
-local function glow(colour, mark)
+local function glow(colour, mark, icon)
 	local m = magic.Material:new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
 			mark and "Techniques/DiffUnlit.xml" or
 			"Techniques/NoTextureUnlit.xml"))
-	if mark then
+	if mark and icon and magic.cache:Exists(icon) then
+		-- **A game's own icon is its mark** (the launcher plan's step 5):
+		-- the launch grid resolves an icon to a resource name on the
+		-- trusted side, and a game that ships one has said what it looks
+		-- like better than a hash of its name can
+		m:SetTexture(magic.TU_DIFFUSE,
+				magic.cache:GetResource("Texture2D", icon))
+	elseif mark then
 		local f = ornament.mark(64, ornament.seed_of(mark))
 		local image = magic.Image:new()
 		assert(image:SetSize(f.size, f.size, 3), "the mark")
@@ -443,18 +488,10 @@ local function bay_x(i) return room.bay_x(i - 1) end
 local function bay_y(i) return room.bay_y(i - 1) end
 
 -- **The orbs are the games** (user): warm is what you own, cold is a
--- server you can reach. The name is what a mark is generated from and
--- what Text3D says over the one being pointed at.
-local ORBS = {
-	{name = "Vanilla", warm = true},
-	{name = "Undermine", warm = true},
-	{name = "Digger", warm = true},
-	{name = "buildat.example.org", warm = false, ping = 38},
-	-- Chekhov's empty shelf: a pocket with nothing in it, which is what
-	-- says there is room for another game and is the way to ContentDB
-	{name = "install a game", warm = true, empty = true},
-	{name = "mine.example.net", warm = false, ping = 210},
-}
+-- server you can reach. The name is what Text3D says over the one being
+-- pointed at, and a game's own icon is its mark -- generated from the
+-- name only where a game ships none.
+local ORBS = GAMES
 
 local orb_places = {}
 local bay_desc = {}
@@ -514,7 +551,8 @@ for i, o in ipairs(orb_places) do
 		part("Torus", magic.Vector3(o.x, o.y, o.z),
 				magic.Vector3(1.4, 1.4, 1.4), machined)
 	else
-		orb_mats[i] = glow(magic.Color(1, 1, 1, 1), spec and spec.name)
+		orb_mats[i] = glow(magic.Color(1, 1, 1, 1), spec and spec.name,
+				spec and spec.icon)
 		-- simplified: one size. The plan wants 1.2 to 1.8 voxels by the
 		-- game's own size, which list_games() answers -- that arrives
 		-- with the real contents, step 5 of the remaining order.
@@ -604,7 +642,7 @@ local COLD_WHITE = {0.72, 0.85, 1.0}
 -- {colour, intensity, range}. The six orbs, then the overhead opening.
 local function preset_lights(orb, sky, orb_i, sky_i)
 	local l = {}
-	for i = 1, 6 do
+	for i = 1, BAYS do
 		-- Tight, so an orb's light dies before it reaches the sideways
 		-- faces of the neighbouring slabs, which can see into a
 		-- neighbour's pocket -- the one leak the normal does not cover,
@@ -617,7 +655,7 @@ local function preset_lights(orb, sky, orb_i, sky_i)
 		-- 11 voxels it lit warm blotches the width of the wall.
 		l[i] = {orb, orb_i, 4 * U}
 	end
-	l[7] = {sky, sky_i, 60 * U}
+	l[BAYS + 1] = {sky, sky_i, 60 * U}
 	return l
 end
 
@@ -1666,12 +1704,21 @@ local function launch(b)
 	dissolve_bay(b, true)
 	log:info("launch: " .. (ORBS[b] and ORBS[b].name or "?") ..
 			" (bay " .. b .. ")")
+	-- **And it launches.** The action came out of the launch grid, which
+	-- is the one door a launcher file has; running it here is running it
+	-- there. simplified: the camera flies in and the bay opens first,
+	-- and nothing waits for either -- a launch that takes the client
+	-- somewhere else takes it there mid-flight.
+	if ORBS[b] and ORBS[b].run then
+		ORBS[b].run()
+	end
 end
 
 function prompt_key(key)
 	-- Digits pick the nearest slots, which is the path a returning user
-	-- actually takes
-	for n = 1, BAYS do
+	-- actually takes. There are nine of them and the room may hold more
+	-- than nine things; past that, typing the name is the way.
+	for n = 1, math.min(BAYS, 9) do
 		if key == magic["KEY_" .. n] then
 			prompt_open = false
 			prompt_str = ""
@@ -1796,11 +1843,15 @@ function handle_keydown(event_type, event_data)
 		log:info("idle drift " .. (still and "frozen" or "running"))
 	end
 	if key == magic.KEY_F6 then
+		-- **The ornament is on the pockets' columns and nowhere else**,
+		-- so stripping it is making those voxels plain stone and meshing
+		-- the room again. It used to enable and disable a pair of frieze
+		-- nodes, and those went when the wall became voxels: the toggle
+		-- did nothing at all for a day and the check passed on the
+		-- room's own drift (2026-09-23).
 		ornament_on = not ornament_on
-		for _, f in ipairs(frieze_nodes) do
-			f[1].enabled = ornament_on
-			f[2].enabled = not ornament_on
-		end
+		room.id.column = ornament_on and column_id or room.id.stone
+		rebuild_room()
 		log:info("ornament " .. (ornament_on and "on" or "off"))
 	end
 	if key == magic.KEY_F5 then
