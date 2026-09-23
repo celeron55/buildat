@@ -254,6 +254,12 @@ room.id.dark = add_voxel("dark", "generated/dark.png", true, 0.95, 0.1, 0.4)
 -- The pockets' side columns, which are the one place the ornament goes
 room.id.column = add_voxel("column", "generated/column.png", true,
 		0.70, 0.20, 0.9, 4)
+-- **The one voxel the player may place** ([LAUNCH_WORLD] step 8): the
+-- ornamented stone, so a placed voxel is told from the room's own at a
+-- glance -- which matters, the room's own being the one thing that
+-- cannot be dug
+room.id.placed = add_voxel("placed", "generated/column.png", true,
+		0.70, 0.20, 0.9, 4)
 -- Kept, because the ornament toggle puts plain stone in its place
 column_id = room.id.column
 -- The checkerboard: the light squares are polished, which is what puts
@@ -1346,6 +1352,246 @@ function handle_fps_update(event_type, event_data)
 	apply_camera()
 end
 magic.SubscribeToEvent("Update", "handle_fps_update")
+
+-- **Digging and placing** ([LAUNCH_WORLD] step 8). The room is generated
+-- and the player's voxels are a diff against it, which is the whole
+-- save: room.placed is the only thing in here that is not a function of
+-- (x, y, z).
+--
+-- **No pointing indication means no interaction** (user): a placed voxel
+-- wears a wireframe and the room's own stone wears nothing, because it
+-- cannot be dug -- the absence of the box says so before the click does.
+local REACH = 5.0              -- metres
+local DIG_SECONDS = 1.0
+local SAVE_DIR = __buildat_get_path("user") .. "/launch_world"
+local SAVE_PATH = SAVE_DIR .. "/room.txt"
+
+-- The player's own voxels, read at boot. One key a line, which is a file
+-- a person can read and delete.
+do
+	local f = io.open(SAVE_PATH, "rb")
+	if f then
+		local n = 0
+		for line in f:lines() do
+			local x, y, z = line:match("^(-?%d+),(-?%d+),(-?%d+)$")
+			if x then
+				room.placed[room.key(tonumber(x), tonumber(y), tonumber(z))] = true
+				n = n + 1
+			end
+		end
+		f:close()
+		log:info("save: " .. n .. " placed voxels read")
+	end
+end
+
+local save_dirty = false
+local function write_save()
+	buildat.create_directories(SAVE_DIR)
+	local f = io.open(SAVE_PATH, "wb")
+	if not f then
+		log:warning("save: could not write " .. SAVE_PATH)
+		return
+	end
+	local keys = {}
+	for k, v in pairs(room.placed) do
+		if v then keys[#keys + 1] = k end
+	end
+	table.sort(keys)
+	f:write(table.concat(keys, "\n"))
+	f:close()
+	log:info("save: " .. #keys .. " placed voxels written")
+end
+
+-- The voxel the crosshair is on, and the empty one in front of it. A
+-- march in small steps rather than a proper DDA: the reach is eleven
+-- voxels and this is a room, not a renderer.
+local function ray_voxel()
+	-- **view_from is already in voxels**: one scene unit is one voxel,
+	-- and apply_camera() multiplies the camera's metres on the way in
+	local px, py, pz = view_from.x, view_from.y, view_from.z
+	local lx, ly, lz
+	local t = 0
+	while t <= REACH / VOXEL_M do
+		local x = math.floor(px + view_dir.x * t)
+		local y = math.floor(py + view_dir.y * t)
+		local z = math.floor(pz + view_dir.z * t)
+		if x ~= lx or y ~= ly or z ~= lz then
+			if room.voxel_at(x, y, z) ~= room.id.air then
+				return x, y, z, lx, ly, lz
+			end
+			lx, ly, lz = x, y, z
+		end
+		t = t + 0.08
+	end
+	return nil
+end
+
+-- The selection box, one wireframe cube moved about
+local wire = scene:CreateChild("wireframe")
+wire.scale = magic.Vector3(1.02, 1.02, 1.02)
+do
+	local o = wire:CreateComponent("StaticModel")
+	o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+	local m = material(magic.Color(1.0, 0.85, 0.5, 1), 1.0, 0.0)
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTextureUnlit.xml"))
+	m.fillMode = magic.FILL_WIREFRAME
+	o.material = m
+	o.castShadows = false
+	wire.enabled = false
+end
+
+-- One voxel prised out of its slot: the lift is the progress, as it is
+-- for a sphere, and at a second it goes
+local lift = scene:CreateChild("lifted")
+do
+	local o = lift:CreateComponent("StaticModel")
+	o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+	o.material = material(magic.Color(0.46, 0.47, 0.52, 1), 0.7, 0.0)
+	o.castShadows = false
+	lift.enabled = false
+end
+
+-- **Which way it dislodges** (user): upwards by preference, sideways if
+-- the voxel above is taken, downwards if that is taken too -- and among
+-- the sideways ones the free neighbour most across the view, never the
+-- one straight at the camera, since a voxel moving at the eye reads as a
+-- zoom rather than as a movement.
+local SIDES = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}}
+local function dislodge_dir(x, y, z)
+	if room.voxel_at(x, y + 1, z) == room.id.air then
+		return 0, 1, 0
+	end
+	local best, best_across = nil, -1
+	for _, d in ipairs(SIDES) do
+		if room.voxel_at(x + d[1], y, z + d[3]) == room.id.air then
+			-- Most perpendicular to the view, and never toward it
+			local toward = d[1] * view_dir.x + d[3] * view_dir.z
+			local across = 1 - math.abs(toward)
+			if toward > -0.4 and across > best_across then
+				best, best_across = d, across
+			end
+		end
+	end
+	if best then return best[1], 0, best[3] end
+	if room.voxel_at(x, y - 1, z) == room.id.air then
+		return 0, -1, 0
+	end
+	return 0, 1, 0
+end
+
+-- The dust a dug voxel becomes: boxes falling ballistically in Lua,
+-- since nothing here needs them to collide, each on its own randomly
+-- drawn lifetime so they do not blink out together. Capped, so digging
+-- quickly does not accumulate them.
+local MAX_MOTES = 60
+local motes = {}
+local function burst(x, y, z)
+	for _ = 1, 8 do
+		if #motes >= MAX_MOTES then break end
+		local n = scene:CreateChild("mote")
+		n.position = magic.Vector3((x + math.random()) ,
+				(y + math.random()), (z + math.random()))
+		n.scale = magic.Vector3(0.22, 0.22, 0.22)
+		local o = n:CreateComponent("StaticModel")
+		o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+		o.material = stone
+		o.castShadows = false
+		-- In voxels a second, the scene's own unit
+		motes[#motes + 1] = {node = n, vx = (math.random() - 0.5) * 6,
+			vy = math.random() * 6, vz = (math.random() - 0.5) * 6,
+			life = 1.5 + math.random() * 2.5}
+	end
+end
+
+pointed_voxel = nil
+local hold_t = 0
+function handle_dig_update(event_type, event_data)
+	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
+	-- The motes fall whatever the mode is
+	for i = #motes, 1, -1 do
+		local m = motes[i]
+		m.life = m.life - dt
+		m.vy = m.vy - 31.0 * dt
+		local p = m.node.position
+		local y = p.y + m.vy * dt
+		if y < 0.11 then y, m.vy = 0.11, -m.vy * 0.25 end
+		m.node.position = magic.Vector3(p.x + m.vx * dt, y, p.z + m.vz * dt)
+		if m.life <= 0 then
+			m.node:Remove()
+			table.remove(motes, i)
+		end
+	end
+	if mode ~= "fps" or terminal_open or pause_open then
+		wire.enabled = false
+		lift.enabled = false
+		return
+	end
+	local x, y, z, ex, ey, ez = ray_voxel()
+	local mine = x and room.placed[room.key(x, y, z)]
+	pointed_voxel = mine and {x, y, z, ex, ey, ez} or
+			(x and {nil, nil, nil, ex, ey, ez} or nil)
+	wire.enabled = mine and true or false
+	if mine then
+		wire.position = magic.Vector3(x + 0.5, y + 0.5, z + 0.5)
+	end
+	-- The hold: a second, the same second a sphere takes
+	if mine and magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+		hold_t = hold_t + dt
+		local e = math.min(1, hold_t / DIG_SECONDS)
+		local dx, dy, dz = dislodge_dir(x, y, z)
+		lift.enabled = true
+		lift.position = magic.Vector3(x + 0.5 + dx * e * 0.5,
+				y + 0.5 + dy * e * 0.5, z + 0.5 + dz * e * 0.5)
+		if hold_t >= DIG_SECONDS then
+			hold_t = 0
+			lift.enabled = false
+			room.placed[room.key(x, y, z)] = nil
+			rewrite_box(x, x, y, y, z, z, false)
+			burst(x, y, z)
+			save_dirty = true
+			log:info("dig: " .. room.key(x, y, z))
+		end
+	else
+		-- Released early: it settles back into its slot
+		hold_t = 0
+		lift.enabled = false
+	end
+	if save_dirty and hold_t == 0 then
+		save_dirty = false
+		write_save()
+	end
+end
+magic.SubscribeToEvent("Update", "handle_dig_update")
+
+-- Right click places one, into the empty voxel in front of what is
+-- pointed at. simplified: the held stack takes precedence once spheres
+-- can be carried, and stone is what is left when the hands are free.
+function place_voxel()
+	local pv = pointed_voxel
+	if not pv or not pv[4] then return end
+	local x, y, z = pv[4], pv[5], pv[6]
+	if room.voxel_at(x, y, z) ~= room.id.air then return end
+	-- Not inside the player, who has no body to be pushed out of one
+	local px = math.floor(cam.from.x / VOXEL_M)
+	local pz = math.floor(cam.from.z / VOXEL_M)
+	local py = math.floor((cam.from.y - 1.6) / VOXEL_M)
+	if x == px and z == pz and (y == py or y == py + 1 or y == py + 2) then
+		return
+	end
+	room.placed[room.key(x, y, z)] = true
+	rewrite_box(x, x, y, y, z, z, false)
+	write_save()
+	log:info("place: " .. room.key(x, y, z))
+end
+
+function handle_mousedown(event_type, event_data)
+	if mode ~= "fps" or terminal_open or pause_open then return end
+	if event_data:GetInt("Button") == magic.MOUSEB_RIGHT then
+		place_voxel()
+	end
+end
+magic.SubscribeToEvent("MouseButtonDown", "handle_mousedown")
 apply_camera()
 
 local name_node = scene:CreateChild("orb_name")

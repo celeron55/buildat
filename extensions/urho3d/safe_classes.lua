@@ -837,6 +837,9 @@ function M.define(dst, util)
 			-- seen from the inside is entirely back-facing, so a skybox
 			-- with the default culling draws nothing at all.
 			cullMode = util.simple_property("number"),
+			-- FILL_WIREFRAME draws a selection box the way every voxel
+			-- game draws one, without twelve thin boxes to move about
+			fillMode = util.simple_property("number"),
 		},
 	})
 

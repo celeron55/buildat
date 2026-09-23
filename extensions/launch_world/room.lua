@@ -228,12 +228,25 @@ end
 -- The ids the data bytes are, filled in by world.lua once the registry is
 -- built. One table so the description below reads as it did in C.
 M.id = {air = 0, stone = 0, dark = 0, floor_light = 0, floor_dark = 0,
-	column = 0}
+	column = 0, placed = 0}
+
+-- **The player's diff against the generated room** ([LAUNCH_WORLD] step
+-- 8): the room is a function of (x, y, z) and this is the only thing
+-- that is not, which is what makes it the whole save. A key is here when
+-- the player put a voxel there, and false when they dug one of their own
+-- out again -- there being nothing else they can dig.
+M.placed = {}
+function M.key(x, y, z)
+	return x .. "," .. y .. "," .. z
+end
 
 -- What is at a voxel. The build and the dissolve's own restore both read
 -- this, so there is one description of the room and not two.
 function M.voxel_at(x, y, z)
 	local id = M.id
+	if M.placed[M.key(x, y, z)] then
+		return id.placed
+	end
 	local outside = x < M.X_MIN or x > M.X_MAX or z < M.Z_MIN or z > M.Z_MAX
 	if y <= M.FLOOR_TOP and y >= M.FLOOR_BOTTOM and not outside then
 		-- Two voxels a square: at 45 cm one voxel a square is a fine

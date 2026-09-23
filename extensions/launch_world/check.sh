@@ -16,6 +16,8 @@ out="$here/local/options_for_LAUNCH_WORLD"; mkdir -p "$out"
 # through a run and every check still reported PASS, off the shots left
 # behind by the run before (2026-09-23).
 rm -f "$out"/*.png
+# The player's own voxels are a save, so a run starts from none
+rm -f "$here/user/launch_world/room.txt"
 # The room's description asserts itself first: it is a function of
 # (x, y, z), and a wall with no slabs in it fails here rather than in a
 # picture nobody reads
@@ -38,6 +40,23 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "delay 600"
 	echo "screenshot $out/fps-walked.png"
 	echo "delay 400"
+	# **Placing and digging**: walk up to the wall, put one of the
+	# player's own voxels on it and prise it out again. The room's own
+	# stone has no wireframe and cannot be dug, so what is dug here is
+	# what was just placed.
+	echo "keydown W"
+	echo "delay 3600"
+	echo "keyup W"
+	echo "delay 700"
+	echo "mouse_click right"
+	echo "delay 700"
+	echo "mouse_down left"
+	echo "delay 1500"
+	echo "mouse_up left"
+	echo "delay 900"
+	# And one left behind, for the second run below to find
+	echo "mouse_click right"
+	echo "delay 700"
 	echo "keypress Tab"
 	echo "delay 600"
 	# Back to the standing place, so every frame below has the same
@@ -176,6 +195,33 @@ grep -a "launch_w.*: bays " "$out/cli.log" | head -1 | sed 's/.*: //'
 # pockets are the launch grid's games and the floor is everything else
 # that launches. A room that found nothing would still draw, and would
 # still pass every picture check above.
+# **The player's own voxels**: one placed, one dug, and the save written
+# both times. The save is a diff against a generated room, so a room that
+# forgot it would look exactly the same.
+placed=$(grep -ac "launch_w.*: place: " "$out/cli.log")
+dug=$(grep -ac "launch_w.*: dig: " "$out/cli.log")
+wrote=$(grep -ac "launch_w.*: save: .* written" "$out/cli.log")
+echo "the player placed $placed voxels, dug $dug, and the save was written $wrote times"
+if [ "$placed" -lt 2 ] || [ "$dug" -lt 1 ] || [ "$wrote" -lt 3 ]; then
+	echo "FAIL: placing or digging did nothing"
+	exit 1
+fi
+
+# **And it survives a restart**, which is the whole point of a diff
+# against a generated room: a second client, booted and closed, has to
+# find the voxel the first one left.
+{ echo "delay 2500"; echo "quit"; } > "$out/cmds2.txt"
+bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
+	-c @"$out/cmds2.txt" 2>&1 |
+	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli2.log"
+read_back=$(grep -a "launch_w.*: save: .* read" "$out/cli2.log" | head -1 |
+	sed 's/.*save: //')
+echo "a second client read back: ${read_back:-(nothing)}"
+if [ -z "$read_back" ]; then
+	echo "FAIL: the room forgot what the player placed"
+	exit 1
+fi
+
 contents=$(grep -a "launch_w.*: contents: " "$out/cli.log" | head -1 |
 	sed 's/.*contents: //')
 echo "contents: ${contents:-(none)}"
