@@ -282,6 +282,25 @@ fi
 	echo "delay 700"
 	echo "screenshot $out/unpaused.png"
 	echo "delay 400"
+	# **The developer console, over the room** ([LAUNCH_CONSOLE] offers
+	# its screen and the room takes it): the pause dialog's third item,
+	# a line typed at it, and Escape to put the room back.
+	echo "keypress Escape"
+	echo "delay 600"
+	echo "keypress Down"
+	echo "keypress Down"
+	echo "delay 300"
+	echo "keypress Return"
+	echo "delay 1200"
+	echo "screenshot $out/room-console.png"
+	echo "delay 300"
+	echo "text buildat.version()"
+	echo "delay 300"
+	echo "keypress Return"
+	echo "delay 600"
+	echo "keypress Escape"
+	echo "delay 1200"
+	echo "delay 400"
 	# **A hold on a game's sphere launches it** (the playtest's first
 	# finding: it looped and started nothing). Last of all, because it
 	# starts a server and takes the client into the game.
@@ -359,6 +378,15 @@ conn=$(grep -a "launch_w.*: connect: " "$out/cli.log" | head -1 |
 echo "a server was asked for: ${conn:-(nothing)}"
 if [ -z "$conn" ]; then
 	echo "FAIL: Enter on a server does not connect to it"
+	exit 1
+fi
+
+console=$(grep -ac "launch_w.*: console: over the room" "$out/cli.log")
+console_ran=$(grep -ac "launch_c.*: console: buildat.version() = " "$out/cli.log")
+console_shut=$(grep -ac "launch_c.*: console: closed" "$out/cli.log")
+echo "the console opened $console times, ran a line $console_ran, closed $console_shut"
+if [ "$console" -lt 1 ] || [ "$console_ran" -lt 1 ] || [ "$console_shut" -lt 1 ]; then
+	echo "FAIL: the room's developer console does not open, run or close"
 	exit 1
 fi
 

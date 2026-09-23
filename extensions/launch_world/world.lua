@@ -1348,8 +1348,9 @@ reflection_probe(V(0, 2.0, 0.0))
 -- picture of nothing. Cheap to ask a few times and then stop.
 local probe_frames = 0
 function handle_probe_update()
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	if env("BUILDAT_LAUNCH_NORENDERPROBE") ~= "" then
 		return
 	end
@@ -1559,8 +1560,9 @@ end
 -- pulses. Nothing here polls anything; the rate is the reading.
 patch_t = 0
 function handle_patch_update(event_type, event_data)
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	patch_t = patch_t + event_data:GetFloat("TimeStep")
 	for _, led in ipairs(patch_leds) do
 		-- Blinking at the ping's rate when something has measured one,
@@ -1702,8 +1704,9 @@ local function fly_to(from, at)
 end
 
 function handle_camera_update(event_type, event_data)
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	if not cam.to_from then
 		return
 	end
@@ -1795,8 +1798,9 @@ local function set_mode(m)
 end
 
 function handle_fps_update(event_type, event_data)
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	if mode ~= "fps" or cam.to_from or terminal_open then
 		return
 	end
@@ -2095,8 +2099,9 @@ local orb_home = {}
 -- The sphere a hold started on, until the button comes up
 orb_holding = nil
 function handle_dig_update(event_type, event_data)
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
 	-- The motes fall whatever the mode is
 	for i = #motes, 1, -1 do
@@ -2253,8 +2258,9 @@ local orb_base_scale = {}
 -- nearest to it: about ten degrees, which is a sphere at arm's length
 local POINT_DOT = 0.985
 function handle_orb_update()
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	local best, best_dot = 0, -1
 	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
 	-- stops at it, which would hide every orb past the empty one
@@ -2432,8 +2438,9 @@ function place_voxel()
 end
 
 function handle_mousedown(event_type, event_data)
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	if mode ~= "fps" or terminal_open or pause_open then return end
 	if event_data:GetInt("Button") == magic.MOUSEB_RIGHT then
 		if not place_carried() then
@@ -2456,8 +2463,9 @@ bed:set_voices(#orb_nodes)
 bed:play(scene:CreateChild("sound"))
 kept.bed = bed
 function handle_synth_update()
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	bed:update()
 end
 magic.SubscribeToEvent("Update", "handle_synth_update")
@@ -2569,8 +2577,9 @@ function dissolve_bay(b, open)
 end
 
 function handle_dissolve_update(event_type, event_data)
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	local dt = event_data:GetFloat("TimeStep")
 	for b = 1, BAYS do
 		local st = bay_state[b]
@@ -2670,8 +2679,9 @@ end
 
 function handle_idle_update(event_type, event_data)
 	connect_poll(event_data:GetFloat("TimeStep"))
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	if still then
 		return
 	end
@@ -2742,8 +2752,9 @@ end
 
 reel_angle = 0
 function handle_reel_update(event_type, event_data)
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	local dt = event_data:GetFloat("TimeStep")
 	local busy = false
 	for b = 1, BAYS do
@@ -3178,6 +3189,24 @@ local PAUSE_ITEMS = {
 			notice(tostring(why))
 		end
 	end},
+	{"Developer console", function()
+		-- **The console offers its screen and the room takes it**
+		-- ([LAUNCH_CONSOLE]): the room's handlers stand down while it
+		-- is up, the same standing down a game gets. The dialog has
+		-- already closed itself by the time this runs.
+		local c = require("buildat/extension/launch_console")
+		c = c.show and c or c.safe
+		if not c or not c.show then
+			notice("the console extension is not here")
+			return
+		end
+		console_open = true
+		log:info("console: over the room")
+		c.show(function()
+			console_open = false
+			set_mode(mode)
+		end)
+	end},
 	{"Leave buildat", function() api.disconnect() end},
 }
 local pause_panel = room_ui_child("BorderImage")
@@ -3415,8 +3444,9 @@ function handle_keydown(event_type, event_data)
 		leave_game()
 		return
 	end
-	-- The room stands down while a game is up ([MENU_CONTEXT])
-	if in_game then return end
+	-- The room stands down while a game, or a console, is over it
+	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
+	if in_game or console_open then return end
 	-- F8 starts the attract mode; any other key ends it and brings the
 	-- camera home, the room being in use again
 	if key == magic.KEY_F8 then
@@ -3594,6 +3624,9 @@ magic.SubscribeToEvent("KeyDown", "handle_keydown")
 -- reset segfaults, and the room's cloned render path has to go on the
 -- new one or it draws black with HDR on.
 in_game = false
+-- The developer console, drawn over the room by launch_console and
+-- taken away again by its own Escape ([LAUNCH_CONSOLE] offers it)
+console_open = false
 
 function entered_game()
 	if in_game then return end

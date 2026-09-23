@@ -51,14 +51,21 @@ local function api_lines()
 	return out
 end
 
-function M.boot(action)
-	if action then
-		log:warning("launch_console: -a " .. tostring(action) ..
-				" is not something a console launches")
-	end
+-- **The screen, which is either the whole launch UI or a panel over
+-- another one** ([LAUNCH_CONSOLE]: it offers itself to the others, so
+-- the room gets a developer console for free). `opts.on_close` makes it
+-- the second kind: Escape calls it instead of quitting, and everything
+-- drawn goes under one element the closer removes.
+local function open(opts)
+	opts = opts or {}
 	local root = magic.ui.root
-	local w = root.width
-	local h = root.height
+	if opts.on_close then
+		root = magic.ui.root:CreateChild("UIElement")
+		root:SetFixedSize(magic.ui.root.width, magic.ui.root.height)
+		root.priority = 100
+	end
+	local w = magic.ui.root.width
+	local h = magic.ui.root.height
 	local half = math.floor(w / 2)
 
 	-- **A flat white texel to tint**: an image element with no texture
@@ -222,7 +229,16 @@ function M.boot(action)
 	launch_console_key = function(event_type, event_data)
 		local key = event_data:GetInt("Key")
 		if key == magic.KEY_ESCAPE then
-			api.quit()
+			if opts.on_close then
+				magic.UnsubscribeFromEvent("KeyDown",
+						"launch_console_key")
+				root:Remove()
+				magic.ui:SetFocusElement(nil)
+				log:info("console: closed")
+				opts.on_close()
+			else
+				api.quit()
+			end
 			return
 		end
 		if key ~= magic.KEY_RETURN and key ~= magic.KEY_KP_ENTER then
@@ -262,6 +278,26 @@ function M.boot(action)
 	log:info("console: " .. #lines .. " lines of the API document, " ..
 			"and a sandbox to type into")
 end
+
+function M.boot(action)
+	if action then
+		log:warning("launch_console: -a " .. tostring(action) ..
+				" is not something a console launches")
+	end
+	open()
+end
+
+-- **Offered to the other launch UIs**, which is what gives a room its
+-- developer console: `show{on_close = f}` draws the same two columns
+-- over whatever is there and Escape takes them away again. The caller
+-- stands its own handlers down while it is up -- this takes the
+-- keyboard, not the events.
+M.safe = {
+	show = function(on_close)
+		open({on_close = type(on_close) == "function" and on_close or
+				function() end})
+	end,
+}
 
 return M
 -- vim: set noet ts=4 sw=4:
