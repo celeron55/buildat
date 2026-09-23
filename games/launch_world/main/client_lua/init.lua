@@ -625,14 +625,54 @@ magic.SubscribeToEvent("Update", "handle_probe_update")
 
 local viewport = magic.Viewport:new(scene,
 		camera_node:GetComponent("Camera"))
--- **No tonemap, so nothing may be brighter than white but a source.**
--- Urho3D's AutoExposure and Tonemap appended to the client's own render
--- path draw a black frame -- they want a buffer chain the default path
--- does not carry -- so the room is lit to fit in the range instead: the
--- orbs clip to white, which is what a source should do, and the wall
--- behind them stops short of it. Getting this wrong reads as per-pixel
--- speckle on the wall rather than as a bright wall, because red and
--- green pin at 255 while blue still moves (2026-09-23).
+-- **The tonemap**, which is the last thing between this room and the
+-- reference frame: a path trace rolls its highlights off and a frame
+-- with none can only clip them (3.58 per cent of this one is pure
+-- white against the reference's 0.31).
+--
+-- **It does not work yet, and the hook is left here because the next
+-- attempt should not start from nothing.** BUILDAT_LAUNCH_TONEMAP names
+-- which of Urho3D's own post-process effects to append, comma
+-- separated. What is known:
+--   * all three together draw a black frame, and so does Tonemap alone
+--     (mean 1 of 255), so it is not AutoExposure or BloomHDR
+--   * Tonemap.xml is not missing its parameters -- it declares
+--     TonemapExposureBias itself, so the "unset reads as zero" rule is
+--     not the cause
+--   * every command in it reads the texture named "viewport" and writes
+--     it back, and this game's scene goes through
+--     set_preferred_viewports(), which renders it to an offscreen
+--     texture of its own. That is the first thing to suspect: the
+--     effect is reading a viewport the scene was never drawn into.
+-- The room is lit to fit in the range meanwhile, so the orbs clip to
+-- white -- which is what a source should do -- and the wall stops short
+-- of it.
+do
+	local want = buildat.get_env("BUILDAT_LAUNCH_TONEMAP") or ""
+	if want ~= "" then
+		magic.renderer.HDRRendering = true
+		local rp = viewport.renderPath:Clone()
+		for fx in want:gmatch("[^,]+") do
+			local xml = magic.cache:GetResource("XMLFile",
+					"PostProcess/" .. fx .. ".xml")
+			if xml then
+				local before = rp:GetNumCommands()
+				rp:Append(xml)
+				log:info("tonemap: " .. fx .. " added " ..
+						(rp:GetNumCommands() - before) .. " commands")
+			else
+				log:warning("tonemap: no PostProcess/" .. fx .. ".xml")
+			end
+		end
+		rp:SetShaderParameter("AutoExposureAdaptRate", 2.0)
+		rp:SetShaderParameter("AutoExposureLumRange",
+				magic.Vector2(0.06, 2.0))
+		rp:SetShaderParameter("AutoExposureMiddleGrey", 0.12)
+		viewport.renderPath = rp
+		log:info("tonemap: " .. want .. ", " .. rp:GetNumCommands() ..
+				" commands, HDR on")
+	end
+end
 magic.set_preferred_viewports({viewport})
 
 -- The name of the preset in the corner, so a picture says which it is
