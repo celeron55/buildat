@@ -465,23 +465,23 @@ local PRESETS = {
 		-- orbs beyond a cold room, so the stone silhouettes against them
 		-- and the eye goes to the light rather than to the wall
 		name = "cold_in_warm_out",
-		lights = preset_lights(WARM, COLD_WHITE, 5.5, 1.5),
+		lights = preset_lights(WARM, COLD_WHITE, 9.0, 2.5),
 	},
 	{
 		-- The mirror, to see what was given up
 		name = "warm_in_cold_out",
-		lights = preset_lights(CYAN, AMBER, 5.5, 1.5),
+		lights = preset_lights(CYAN, AMBER, 9.0, 2.5),
 	},
 	{
 		-- No warm anywhere: whether the room needs a warm point at all
 		name = "all_cold",
-		lights = preset_lights(COLD_WHITE, CYAN, 5.5, 1.5),
+		lights = preset_lights(COLD_WHITE, CYAN, 9.0, 2.5),
 	},
 	{
 		-- Deliberately wrong, and the useful one: every colour loud, the
 		-- purple as bright as the cyan, nothing scarce
 		name = "wrong",
-		lights = preset_lights(PURPLE, AMBER, 6.5, 3.0),
+		lights = preset_lights(PURPLE, AMBER, 10.5, 4.5),
 	},
 }
 
@@ -525,7 +525,7 @@ local function set_preset(n)
 		-- ball -- and so the probe carries it to the chrome
 		if orb_mats[i] then
 			orb_mats[i]:SetShaderParameter("MatDiffColor",
-					magic.Color(e[1][1] * 1.15, e[1][2] * 1.15, e[1][3] * 1.15, 1))
+					magic.Color(e[1][1] * 3.4, e[1][2] * 3.4, e[1][3] * 3.4, 1))
 		end
 		light.brightness = e[2] * PBR_INTENSITY *
 				((spec and spec.empty) and 0.22 or 1.0)
@@ -648,9 +648,18 @@ local viewport = magic.Viewport:new(scene,
 -- white -- which is what a source should do -- and the wall stops short
 -- of it.
 do
-	local want = buildat.get_env("BUILDAT_LAUNCH_TONEMAP") or ""
-	if want ~= "" then
-		magic.renderer.HDRRendering = true
+	-- **On by default, and without HDR.** Urho3D's Tonemap works append-
+	-- ed to the client's own render path; what drew a black frame was
+	-- `HDRRendering`, on its own and with no effect appended at all
+	-- (mean 2 of 255). So the room is tonemapped in LDR: the highlights
+	-- roll off instead of clipping, which took the pure-white share from
+	-- 3.58 per cent to nothing.
+	local want = buildat.get_env("BUILDAT_LAUNCH_TONEMAP") or "Tonemap"
+	local hdr = (buildat.get_env("BUILDAT_LAUNCH_HDR") or "") ~= ""
+	if want ~= "" or hdr then
+		-- HDR on its own, so it can be told apart from the effects
+		magic.renderer.HDRRendering = hdr
+		log:info("tonemap: HDR " .. tostring(hdr))
 		local rp = viewport.renderPath:Clone()
 		for fx in want:gmatch("[^,]+") do
 			local xml = magic.cache:GetResource("XMLFile",
@@ -664,16 +673,41 @@ do
 				log:warning("tonemap: no PostProcess/" .. fx .. ".xml")
 			end
 		end
+		-- **Uncharted2, not Reinhard.** Tonemap.xml ships three curves
+		-- with the Reinhard one enabled; Reinhard lifts the blacks and
+		-- caps the highlights, which is the opposite of the reference
+		-- frame's deep blacks and bright sources (its median is 38 and
+		-- its 99th 252; Reinhard at a bias that reached 80 put the 99th
+		-- at 184). The filmic curve keeps the toe low and rolls the
+		-- shoulder off.
+		rp:SetEnabled("TonemapReinhardEq3", false)
+		rp:SetEnabled("TonemapUncharted2", true)
+		rp:SetShaderParameter("TonemapExposureBias",
+				tonumber(buildat.get_env("BUILDAT_LAUNCH_BIAS") or "") or 1.05)
+		rp:SetShaderParameter("TonemapMaxWhite",
+				tonumber(buildat.get_env("BUILDAT_LAUNCH_WHITE") or "") or 1.8)
 		rp:SetShaderParameter("AutoExposureAdaptRate", 2.0)
 		rp:SetShaderParameter("AutoExposureLumRange",
 				magic.Vector2(0.06, 2.0))
 		rp:SetShaderParameter("AutoExposureMiddleGrey", 0.12)
 		viewport.renderPath = rp
+		-- The suspicion under test: set_preferred_viewports() renders the
+		-- scene to an offscreen texture, and the effect reads the one
+		-- named "viewport". BUILDAT_LAUNCH_RAWVIEW puts the scene on the
+		-- renderer's own viewport instead, which is the same picture
+		-- without that indirection.
+		if (buildat.get_env("BUILDAT_LAUNCH_RAWVIEW") or "") ~= "" then
+			magic.renderer:SetViewport(0, viewport)
+			tonemap_raw = true
+			log:info("tonemap: on the renderer's own viewport")
+		end
 		log:info("tonemap: " .. want .. ", " .. rp:GetNumCommands() ..
 				" commands, HDR on")
 	end
 end
-magic.set_preferred_viewports({viewport})
+if not tonemap_raw then
+	magic.set_preferred_viewports({viewport})
+end
 
 -- The name of the preset in the corner, so a picture says which it is
 label = magic.ui.root:CreateChild("Text")
