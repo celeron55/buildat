@@ -405,6 +405,7 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.sag_extent = def.sag_extent;
 		cache.shape_double_sided = def.shape_double_sided;
 		cache.shape_lit_from_above = def.shape_lit_from_above;
+		cache.uv_scale = def.uv_scale < 1 ? 1 : def.uv_scale;
 		cache.translucent = def.translucent;
 		cache.alpha_masked = def.alpha_masked;
 		cache.shape_group = def.shape_group;

@@ -1474,6 +1474,56 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				}
 			}
 		}
+		// **[WORLD_UV]: a texture that spans more than one voxel.** A face
+		// repeats its texture once per voxel, so a feature larger than a
+		// voxel cannot exist and a big wall reads as a grid of identical
+		// stamps. At uv_scale > 1 a face takes its own slice of the
+		// repeat from where the voxel sits in the world, and the voxel
+		// beside it takes the next one, so the picture crosses them.
+		//
+		// The wrap falls on a voxel boundary and never inside a quad, so
+		// the coordinates stay inside this segment's own rect and the
+		// atlas is untouched.
+		//
+		// simplified: it needs the chunk's world position, which the
+		// mesher only has out of the horizon map, so a client that passes
+		// none keeps one texture per voxel. The upgrade is the origin as
+		// an argument of its own.
+		AtlasSegmentCache sliced;
+		const AtlasSegmentCache *useg = aseg;
+		const int uvn = voxel_def0->uv_scale < 1 ? 1 : voxel_def0->uv_scale;
+		if(uvn > 1 && horizon != nullptr){
+			const pv::Vector3DInt32 uvp = face_back_pos(volume, quad, n);
+			const pv::Vector3DInt32 uvlc =
+					volume.getEnclosingRegion().getLowerCorner();
+			const int wx = horizon->origin_x + HORIZON_PAD +
+					(uvp.getX() - uvlc.getX() - 1);
+			const int wy = horizon->origin_y + (uvp.getY() - uvlc.getY() - 1);
+			const int wz = horizon->origin_z + HORIZON_PAD +
+					(uvp.getZ() - uvlc.getZ() - 1);
+			auto wrap = [uvn](int v){ return ((v % uvn) + uvn) % uvn; };
+			int ui, vi;
+			if(n.getY() != 0.0f){
+				ui = wrap(wx);
+				vi = wrap(wz);
+			} else if(n.getX() != 0.0f){
+				ui = wrap(wz);
+				// The segment's v grows downwards, so a voxel higher in
+				// the world takes a slice further up the texture
+				vi = uvn - 1 - wrap(wy);
+			} else {
+				ui = wrap(wx);
+				vi = uvn - 1 - wrap(wy);
+			}
+			sliced = *aseg;
+			const float du = (aseg->coord1.x_ - aseg->coord0.x_) / (float)uvn;
+			const float dv = (aseg->coord1.y_ - aseg->coord0.y_) / (float)uvn;
+			sliced.coord0.x_ = aseg->coord0.x_ + du * (float)ui;
+			sliced.coord1.x_ = sliced.coord0.x_ + du;
+			sliced.coord0.y_ = aseg->coord0.y_ + dv * (float)vi;
+			sliced.coord1.y_ = sliced.coord0.y_ + dv;
+			useg = &sliced;
+		}
 		// Go through indices of the face and mangle vertices according to them
 		// into the temporary vertex buffer
 		size_t pv_index_i0 = pv_face_i * 6;
@@ -1495,8 +1545,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			tg_vert.normal_.z_ = pv_vert.normal.getZ();
 			// Figure out texture coordinates
 			size_t pv_vertex_i1 = pv_vertex_i - pv_vertex_i0;
-			assign_txcoords(pv_vertex_i1, aseg, tg_vert);
-			turn_txcoord(aseg, variant ? variant->tile_turns[face_id] :
+			assign_txcoords(pv_vertex_i1, useg, tg_vert);
+			turn_txcoord(useg, variant ? variant->tile_turns[face_id] :
 					voxel_def0->tile_turns[face_id], tg_vert);
 			tg_vert.color_ = corner_colors[pv_vertex_i1];
 			if(fmt.n_surface != 0){

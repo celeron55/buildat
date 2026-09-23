@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 21;
+		uint8_t version = 22;
 		archive(
 				version,
 				v.name,
@@ -136,6 +136,11 @@ namespace interface
 		// mesher's corner rule reads ([WATER_LIGHT] 3)
 		if(version >= 21){
 			archive(v.liquid_is_source);
+		}
+		// Version 22 added how many voxels a texture spans before it
+		// repeats ([WORLD_UV])
+		if(version >= 22){
+			archive(v.uv_scale);
 		}
 	}
 

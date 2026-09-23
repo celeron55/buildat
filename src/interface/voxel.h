@@ -149,6 +149,18 @@ namespace interface
 		// texture is shared with the cube that is not turned, so the turn
 		// belongs to the face rather than to the atlas segment.
 		uint8_t tile_turns[6] = {};
+		// **How many voxels a texture spans before it repeats** ([WORLD_UV]).
+		// A voxel face repeats its texture once per voxel, so a feature
+		// larger than one voxel cannot exist and a big surface reads as a
+		// grid of identical stamps. At 1 -- which is every voxel that says
+		// nothing -- nothing changes. Above it, a face takes its own slice
+		// of the repeat from where the voxel is in the world, and the
+		// neighbour continues the sequence.
+		//
+		// It costs nothing in the atlas: the wrap falls on a voxel boundary
+		// and never inside a quad, so a face's coordinates stay inside its
+		// own segment rect.
+		uint8_t uv_scale = 1;
 		// Other properties
 		ss_ handler_module;
 		FaceDrawType face_draw_type = FaceDrawType::ON_EDGE;
@@ -385,6 +397,8 @@ namespace interface
 		// Copied from the definition; see VoxelDefinition::alpha_masked
 		bool alpha_masked = false;
 		uint8_t shape_group = 0;
+		// [WORLD_UV]; see VoxelDefinition::uv_scale
+		uint8_t uv_scale = 1;
 		bool is_liquid = false;
 		// Copied from the definition; see VoxelDefinition::liquid_is_source
 		bool liquid_is_source = false;
