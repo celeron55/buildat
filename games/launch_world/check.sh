@@ -215,6 +215,18 @@ ok = worst > 4.0
 print("PASS: the four presets are four pictures" if ok
 		else "FAIL: two presets look the same")
 
+# **The four in one picture**, because the pick is the user's and four
+# files in a directory is four looks where one sheet is one.
+sheet_w = 640
+sheet = Image.new("RGB", (sheet_w * 2, int(sheet_w * 0.5625) * 2 + 4),
+		(0, 0, 0))
+for i, f in enumerate(shots):
+	im = ims[f][0].resize((sheet_w, int(sheet_w * 0.5625)))
+	sheet.paste(im, ((i % 2) * sheet_w,
+			(i // 2) * (int(sheet_w * 0.5625) + 4)))
+sheet.save("%s/presets_sheet.png" % out)
+print("the four presets in one picture: %s/presets_sheet.png" % out)
+
 # The probe: the same frame with it and with an environment of nothing
 # in its place. What is asserted is that some part of the picture moves a
 # lot -- the search is over blocks rather than a fixed crop, because the

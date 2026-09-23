@@ -36,7 +36,9 @@ Keys
     Escape      leave: fly back to the standing place, shut every bay,
                 stand up from the terminal
     F1-F4       the four palette presets ([LAUNCH_WORLD]'s own
-                experiment; the pick is the user's)
+                experiment; the pick is the user's, and check.sh leaves
+                all four in one picture at
+                local/options_for_LAUNCH_WORLD/presets_sheet.png)
     F5          the reflection probe off and on
     F6          the generated ornament off and on
     F7          freeze the idle drift, which is what the checks need
