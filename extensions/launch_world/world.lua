@@ -1798,6 +1798,8 @@ local function set_mode(m)
 end
 
 function handle_fps_update(event_type, event_data)
+	-- A backdrop takes no input ([TWO_AUDIENCES]' composition)
+	if backdrop then return end
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if in_game or console_open then return end
@@ -2099,6 +2101,8 @@ local orb_home = {}
 -- The sphere a hold started on, until the button comes up
 orb_holding = nil
 function handle_dig_update(event_type, event_data)
+	-- A backdrop takes no input ([TWO_AUDIENCES]' composition)
+	if backdrop then return end
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if in_game or console_open then return end
@@ -2438,6 +2442,8 @@ function place_voxel()
 end
 
 function handle_mousedown(event_type, event_data)
+	-- A backdrop takes no input ([TWO_AUDIENCES]' composition)
+	if backdrop then return end
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if in_game or console_open then return end
@@ -3432,6 +3438,8 @@ function prompt_key(key)
 end
 
 function handle_keydown(event_type, event_data)
+	-- A backdrop takes no input ([TWO_AUDIENCES]' composition)
+	if backdrop then return end
 	local key = event_data:GetInt("Key")
 	-- **The launcher's own way back**, which works whatever the game
 	-- does with the keyboard: a game leaves through `buildat.leave()`
@@ -3627,6 +3635,25 @@ in_game = false
 -- The developer console, drawn over the room by launch_console and
 -- taken away again by its own Escape ([LAUNCH_CONSOLE] offers it)
 console_open = false
+-- **The room as somebody else's backdrop** ([TWO_AUDIENCES]' third
+-- option: the menu stacked over the room in attract mode). It draws
+-- and drifts and shows itself off; it takes no key, no mouse and no
+-- mouse capture, because every one of those belongs to the screen in
+-- front of it.
+backdrop = false
+
+function be_backdrop()
+	backdrop = true
+	-- Its own UI goes: a prompt, a crosshair and a preset label belong
+	-- to a room somebody is using, not to a view behind a menu
+	for _, e in ipairs(room_ui) do
+		e.visible = false
+	end
+	mode = "menu"
+	attracting = true
+	idle_quiet = ATTRACT_AFTER
+	log:info("room: a backdrop for somebody else's screen")
+end
 
 function entered_game()
 	if in_game then return end
@@ -3678,6 +3705,7 @@ return {
 	entered_game = entered_game,
 	leave_game = leave_game,
 	in_game = function() return in_game end,
+	be_backdrop = be_backdrop,
 }
 
 -- vim: set noet ts=4 sw=4:

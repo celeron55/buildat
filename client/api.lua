@@ -167,12 +167,31 @@ end
 -- and the size is capped because a slot anybody can fill is a slot
 -- anybody can fill a disk from.
 local STORAGE_MAX = 4 * 1024 * 1024
+
+-- **Which extension is asking**, taken from the caller's chunk name
+-- rather than from which launch UI the client booted. The two are the
+-- same until one launch UI composes another ([TWO_AUDIENCES]' third
+-- option): then the global says the composer and the code running says
+-- the composed, and a room borrowed as a backdrop would read and write
+-- the composer's storage and load the composer's files. Every chunk
+-- these verbs can be called from is named "<extension>/<file>" by the
+-- loader that ran it, which is what this reads.
+local function calling_extension(level)
+	local info = debug.getinfo(level or 3, "S")
+	local src = info and info.source or ""
+	local name = src:match("^@?([%w_]+)/")
+	if name then
+		return name
+	end
+	return __buildat_menu_extension_name or "launch_menu"
+end
+
 local function storage_path(name)
 	if type(name) ~= "string" or not name:match("^[%w_%-%.]+$") or
 			name:find("%.%.") then
 		return nil, "storage: a name of letters, digits, _ - and ."
 	end
-	local who = __buildat_menu_extension_name or "launch_menu"
+	local who = calling_extension(4)
 	if not who:match("^[%w_]+$") then
 		return nil, "storage: the launch extension has an odd name"
 	end
@@ -290,7 +309,7 @@ buildat.safe.run_extension_file = function(name)
 	if type(name) ~= "string" or not name:match("^[%w_%-]+%.lua$") then
 		return nil, "run_extension_file(name): one .lua file, not a path"
 	end
-	local who = __buildat_menu_extension_name or "launch_menu"
+	local who = calling_extension()
 	local path = __buildat_extension_path(who) .. "/" .. name
 	local f = io.open(path, "rb")
 	if not f then
@@ -354,6 +373,62 @@ buildat.safe.client_api_text = function()
 	local text = f:read("*a")
 	f:close()
 	return text
+end
+
+-- **One launch UI running another over it** ([TWO_AUDIENCES]' third
+-- option: the room in attract mode with the menu stacked on it). The
+-- composed one is booted exactly as the client boots a launch UI --
+-- sandboxed if its `launch_ui.txt` asks -- and `action` is the string
+-- its `boot()` takes, which is how a room is asked for a backdrop
+-- rather than a game.
+--
+-- **Only the listed ones**, so this names no code that is not already a
+-- launch UI, and a launch UI cannot compose itself.
+buildat.safe.compose_launch_ui = function(name, action)
+	if type(name) ~= "string" then
+		return false, "compose_launch_ui(name): a string"
+	end
+	if action ~= nil and (type(action) ~= "string" or
+			not action:match("^[%w_/%-]*$")) then
+		return false, "compose_launch_ui: an action is a plain name"
+	end
+	if name == calling_extension() then
+		return false, "compose_launch_ui: a launch UI cannot compose itself"
+	end
+	local found = false
+	for _, e in ipairs(buildat.safe.list_launch_uis()) do
+		if e.name == name then
+			found = true
+		end
+	end
+	if not found then
+		return false, "compose_launch_ui: no launch UI called " .. name
+	end
+	local m
+	if buildat.launch_ui_sandboxed(name) then
+		local f = io.open(__buildat_extension_path(name) .. "/init.lua", "rb")
+		if not f then
+			return false, "compose_launch_ui: no init.lua in " .. name
+		end
+		local code = f:read("*a")
+		f:close()
+		-- The chunk is named after the extension, which is what the
+		-- verbs above read to know whose files and whose storage they
+		-- are being asked for
+		local ok, err, ret = __buildat_run_code_in_sandbox(code,
+				name .. "/init.lua")
+		if not ok then
+			return false, err
+		end
+		m = ret
+	else
+		m = __buildat_require_extension(name)
+	end
+	if type(m) ~= "table" or type(m.boot) ~= "function" then
+		return false, "compose_launch_ui: " .. name .. " has no boot()"
+	end
+	m.boot(action)
+	return true
 end
 
 -- **Quitting**, which is a launch UI's own verb ([LAUNCH_SANDBOX]): the

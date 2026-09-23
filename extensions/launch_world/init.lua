@@ -14,10 +14,13 @@ local log = buildat.Logger("launch_world")
 local M = {}
 
 function M.boot(action)
-	-- simplified: the launch grid's one-action boot (-a kind/name/id) is
-	-- not wired up yet; it arrives with the real contents, step 5 of the
-	-- launcher plan's remaining order.
-	if action then
+	-- **"backdrop" is the room behind somebody else's screen**
+	-- ([TWO_AUDIENCES]' third option): it draws and drifts and takes no
+	-- input, which is what a launch UI composing it wants. Anything
+	-- else is the launch grid's one-action boot (-a kind/name/id), not
+	-- wired up yet.
+	local backdrop = (action == "backdrop")
+	if action and not backdrop then
 		log:warning("launch_world: -a " .. tostring(action) ..
 				" is not handled yet")
 	end
@@ -30,6 +33,9 @@ function M.boot(action)
 		M.entered_game = room.entered_game
 		M.leave_game = room.leave_game
 		M.in_game = room.in_game
+		if backdrop and room.be_backdrop then
+			room.be_backdrop()
+		end
 	end
 end
 
