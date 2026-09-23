@@ -2450,6 +2450,34 @@ desc_text.text = ""
 desc_text.faceCameraMode = magic.FC_ROTATE_Y
 
 pointed_orb = 0
+-- How near the pointer counts as on an orb, as a fraction of the screen
+local POINT_RADIUS = 0.055
+
+-- **Which orb is at a point on the screen** (the third playtest's rule,
+-- carried from the dialog's rows to the room itself): by where each orb
+-- lands on the screen rather than by a ray, which is a projection the
+-- camera does anyway and no new reach for a sandbox.
+function orb_at(fx, fy)
+	local cam_c = camera_node:GetComponent("Camera")
+	local near, near_d = 0, POINT_RADIUS
+	for i = 1, #orb_places do
+		local node = orb_nodes[i]
+		if node then
+			local sp = cam_c:WorldToScreenPoint(node.position)
+			-- Behind the camera projects to nonsense; the room is in
+			-- front of it and everything else is not worth a ray
+			if sp.x > -0.2 and sp.x < 1.2 and sp.y > -0.2 and
+					sp.y < 1.2 then
+				local dx, dy = sp.x - fx, sp.y - fy
+				local d = math.sqrt(dx * dx + dy * dy)
+				if d < near_d then
+					near, near_d = i, d
+				end
+			end
+		end
+	end
+	return near
+end
 -- **The step change is the indicator** (user): a sphere is lit and is a
 -- sphere, so it says "selected" in its own vocabulary rather than in a
 -- wireframe's -- and it is a discrete jump, not a fade, so it reads the
@@ -2507,6 +2535,7 @@ function handle_orb_update(event_type, event_data)
 	if mode == "fps" and best_dot < POINT_DOT then
 		best = 0
 	end
+
 	if best ~= pointed_orb then
 		-- The step, in both directions
 		local was = orb_nodes[pointed_orb]
@@ -2692,6 +2721,32 @@ function handle_mousedown(event_type, event_data)
 	end
 end
 magic.SubscribeToEvent("MouseButtonDown", "handle_mousedown")
+
+-- simplified: the pointer is read where it is clicked, not followed.
+-- `MouseMove` never fires for a pointer put somewhere by a command
+-- sequence -- the UI polls the cursor instead, which is why hovering a
+-- dialog's row works and this did not -- so an orb lights up when it is
+-- clicked rather than when the mouse crosses it. Following the pointer
+-- wants the cursor's own position, which the whitelist does not offer.
+
+-- **A click on an orb launches it**, which is what Enter does to the
+-- one being pointed at: the room's own menu, answering the mouse the
+-- way its dialogs do.
+function handle_orb_click(event_type, event_data)
+	if backdrop or in_game or console_open then return end
+	if mode ~= "menu" or terminal_open or pause_open or prompt_open then
+		return
+	end
+	if event_data:GetInt("Button") ~= magic.MOUSEB_LEFT then return end
+	local w = math.max(1, magic.ui.root.width)
+	local h = math.max(1, magic.ui.root.height)
+	local b = orb_at(event_data:GetInt("X") / w, event_data:GetInt("Y") / h)
+	if b > 0 then
+		log:info("click: " .. (ORBS[b] and ORBS[b].name or "?"))
+		launch(b)
+	end
+end
+magic.SubscribeToEvent("UIMouseClick", "handle_orb_click")
 apply_camera()
 
 

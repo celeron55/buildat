@@ -418,6 +418,20 @@ fi
 	echo "delay 2500"
 	echo "screenshot $out/back-from-game.png"
 	echo "delay 400"
+	# **And an orb answers the mouse** (the third playtest's rule, in
+	# the room rather than in a dialog): a click on one launches it, the
+	# way Enter launches what is browsed. Last, because it starts
+	# something -- the same reason the hold above is last.
+	# **Tab, not the mode event**: the room answering a key at all after
+	# a game is half of what this step proves -- its own handlers used
+	# to go with the game's ([LAUNCH_SANDBOX]'s reset dropped every
+	# sandboxed handler, and the room is sandboxed now)
+	echo "keypress Tab"
+	echo "delay 1800"
+	echo "mouse_pos 300 420"
+	echo "delay 400"
+	echo "mouse_click left"
+	echo "delay 1200"
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -m launch_world -D ../user -w 1280x720 -l 3 \
 	-c @"$out/cmds.txt" 2>&1 |
@@ -522,6 +536,14 @@ conn=$(grep -a "launch_w.*: connect: " "$out/cli.log" | head -1 |
 echo "a server was asked for: ${conn:-(nothing)}"
 if [ -z "$conn" ]; then
 	echo "FAIL: Enter on a server does not connect to it"
+	exit 1
+fi
+
+clicked=$(grep -a "launch_w.*: click: " "$out/cli.log" | head -1 |
+	sed 's/.*click: //')
+echo "a click on an orb took ${clicked:-(nothing)}"
+if [ -z "$clicked" ]; then
+	echo "FAIL: clicking an orb does nothing"
 	exit 1
 fi
 

@@ -200,6 +200,21 @@ local global_event_mux = {} -- event_type -> { {name=, fn=, sandbox=}, ... }
 -- Set around add_global_event_handler() by a subscription made from the
 -- sandbox; see caller_in_sandbox()
 local from_sandbox = false
+-- **Which extension subscribed**, taken from its chunk name, so that
+-- leaving a game can drop the game's handlers without dropping the
+-- launcher's -- which are sandboxed too now ([LAUNCH_SANDBOX]), and
+-- were going with them: after a return the room drew and answered
+-- nothing (2026-09-23).
+local from_sandbox_owner = nil
+local function sandbox_owner()
+	for level = 2, 6 do
+		local info = debug.getinfo(level, "S")
+		if not info then break end
+		local name = (info.source or ""):match("^@?([%w_]+)/[%w_%-%.]+$")
+		if name then return name end
+	end
+	return nil
+end
 local global_event_mux_installed = {}
 
 local function add_global_event_handler(event_type, cb_name, fn)
@@ -238,16 +253,19 @@ local function add_global_event_handler(event_type, cb_name, fn)
 		global_event_mux_installed[event_type] = true
 	end
 	table.insert(global_event_mux[event_type], {name = cb_name, fn = fn,
-			sandbox = from_sandbox})
+			sandbox = from_sandbox, owner = from_sandbox_owner})
 end
 
 -- Every global handler a sandboxed script subscribed, dropped; the
 -- object-specific ones go with their objects
-local function drop_sandbox_handlers()
+-- `keep` is an extension whose handlers are not a game's -- the launch
+-- UI's, which has to still be there when the game is gone
+local function drop_sandbox_handlers(keep)
 	local n = 0
 	for event_type, list in pairs(global_event_mux) do
 		for i = #list, 1, -1 do
-			if list[i].sandbox then
+			if list[i].sandbox and
+					not (keep and list[i].owner == keep) then
 				table.remove(list, i)
 				n = n + 1
 			end
@@ -384,9 +402,10 @@ function Safe.SubscribeToEvent(x, y, z)
 		urho_SubscribeToEvent(unsafe_object, sub_event_type, global_callback_name)
 	else
 		from_sandbox = subscriber_in_sandbox
+		from_sandbox_owner = subscriber_in_sandbox and sandbox_owner() or nil
 		add_global_event_handler(sub_event_type, global_callback_name,
 				_G[global_callback_name])
-		from_sandbox = false
+		from_sandbox, from_sandbox_owner = false, nil
 	end
 	log:debug("-> global_callback_name="..dump(global_callback_name))
 	return global_callback_name

@@ -119,7 +119,10 @@ function __buildat_reset_sandbox()
 	-- does not load an extension that is not up.
 	local urho3d = __buildat_loaded_extension("urho3d")
 	if urho3d and urho3d.drop_sandbox_handlers then
-		urho3d.drop_sandbox_handlers()
+		-- **The launch UI's own handlers stay**: it is sandboxed code
+		-- too now ([LAUNCH_SANDBOX]), and dropping them left the room
+		-- drawing and answering nothing after a game (2026-09-23)
+		urho3d.drop_sandbox_handlers(__buildat_menu_extension_name)
 	end
 	local replicate = __buildat_loaded_extension("replicate")
 	if replicate and replicate.reset then
