@@ -64,6 +64,12 @@ fi
 	echo "delay 700"
 	echo "mouse_click right"
 	echo "delay 700"
+	# **A dig let go of inside the second puts the voxel back**, so this
+	# short hold has to leave the count where it was
+	echo "mouse_down left"
+	echo "delay 300"
+	echo "mouse_up left"
+	echo "delay 600"
 	echo "mouse_down left"
 	echo "delay 1500"
 	echo "mouse_up left"
@@ -283,6 +289,15 @@ wrote=$(grep -ac "launch_w.*: save: .* written" "$out/cli.log")
 echo "the player placed $placed voxels, dug $dug, and the save was written $wrote times"
 if [ "$placed" -lt 2 ] || [ "$dug" -lt 1 ] || [ "$wrote" -lt 3 ]; then
 	echo "FAIL: placing or digging did nothing"
+	exit 1
+fi
+# **Exactly what the sequence asks for, and nothing more.** Two right
+# clicks place and one hold digs; the third right click puts a carried
+# sphere down and must not leave a voxel behind it, and the short hold
+# above must not dig. Both were bugs (user, 2026-09-23).
+if [ "$placed" -ne 2 ] || [ "$dug" -ne 1 ]; then
+	echo "FAIL: putting a sphere down also placed a voxel," \
+			"or a dig let go of early still dug"
 	exit 1
 fi
 

@@ -1833,14 +1833,40 @@ do
 end
 
 -- One voxel prised out of its slot: the lift is the progress, as it is
--- for a sphere, and at a second it goes
+-- for a sphere, and at a second it goes.
+--
+-- **It is the voxel, not a stand-in** (user, 2026-09-23: the animation
+-- intersected the voxel and wore a different material). A box with a
+-- flat grey material read as a second object sliding through the first;
+-- this is one voxel put through the same mesher, with the same atlas and
+-- the same technique, meshed at the index it came from so [WORLD_UV]
+-- gives it the slice of the pattern it had in the wall.
 local lift = scene:CreateChild("lifted")
-do
-	local o = lift:CreateComponent("StaticModel")
-	o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
-	o.material = material(magic.Color(0.46, 0.47, 0.52, 1), 0.7, 0.0)
-	o.castShadows = false
+lift.enabled = false
+-- Which voxel is out of the room and riding the lift, if any, and the
+-- way it dislodges: {x, y, z, dx, dy, dz}. How long it has been held is
+-- here with it, since stop_dig() below clears both.
+local digging = nil
+local hold_t = 0
+local function mesh_lift(x, y, z)
+	buildat.safe.set_8bit_voxel_geometry(lift, 1, 1, 1,
+			string.char(room.id.placed), voxel_reg, atlas_reg, x, y, z)
+	apply_technique(lift)
+	lift:GetComponent("CustomGeometry").castShadows = false
+end
+
+-- Let go inside the second, or walk into a menu mid-hold, and the voxel
+-- goes back where it was: nothing is lost by starting a dig and
+-- stopping. Called on every frame that is not digging, so it does
+-- nothing unless there is something out of the room.
+local function stop_dig()
+	hold_t = 0
 	lift.enabled = false
+	if not digging then return end
+	local d = digging
+	digging = nil
+	room.placed[room.key(d[1], d[2], d[3])] = true
+	rewrite_box(d[1], d[1], d[2], d[2], d[3], d[3], false)
 end
 
 -- **Which way it dislodges** (user): upwards by preference, sideways if
@@ -1896,7 +1922,6 @@ local function burst(x, y, z)
 end
 
 pointed_voxel = nil
-local hold_t = 0
 -- Where a lifted sphere came from, so an early release settles it back
 local orb_home = {}
 function handle_dig_update(event_type, event_data)
@@ -1917,7 +1942,7 @@ function handle_dig_update(event_type, event_data)
 	end
 	if mode ~= "fps" or terminal_open or pause_open then
 		wire.enabled = false
-		lift.enabled = false
+		stop_dig()
 		return
 	end
 	local x, y, z, ex, ey, ez = ray_voxel()
@@ -1954,7 +1979,7 @@ function handle_dig_update(event_type, event_data)
 			launch(pointed_orb)
 		end
 		wire.enabled = false
-		lift.enabled = false
+		stop_dig()
 		return
 	end
 	if orb_home[pointed_orb] then
@@ -1964,27 +1989,33 @@ function handle_dig_update(event_type, event_data)
 		orb_home[pointed_orb] = nil
 		hold_t = 0
 	end
-	-- The hold: a second, the same second a sphere takes
-	if mine and magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+	-- The hold: a second, the same second a sphere takes. The voxel
+	-- leaves the room the moment it starts and the lift stands where it
+	-- stood, so there is one cube throughout rather than two in the same
+	-- place; letting go inside the second puts it back.
+	if (mine or digging) and magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+		if not digging then
+			digging = {x, y, z, dislodge_dir(x, y, z)}
+			room.placed[room.key(x, y, z)] = nil
+			rewrite_box(x, x, y, y, z, z, false)
+			mesh_lift(x, y, z)
+		end
+		local dg = digging
 		hold_t = hold_t + dt
 		local e = math.min(1, hold_t / DIG_SECONDS)
-		local dx, dy, dz = dislodge_dir(x, y, z)
 		lift.enabled = true
-		lift.position = magic.Vector3(x + dx * e * 0.5,
-				y + dy * e * 0.5, z + dz * e * 0.5)
+		lift.position = at_voxel(dg[1] + dg[4] * e * 0.5,
+				dg[2] + dg[5] * e * 0.5, dg[3] + dg[6] * e * 0.5)
 		if hold_t >= DIG_SECONDS then
 			hold_t = 0
 			lift.enabled = false
-			room.placed[room.key(x, y, z)] = nil
-			rewrite_box(x, x, y, y, z, z, false)
-			burst(x, y, z)
+			digging = nil
+			burst(dg[1], dg[2], dg[3])
 			save_dirty = true
-			log:info("dig: " .. room.key(x, y, z))
+			log:info("dig: " .. room.key(dg[1], dg[2], dg[3]))
 		end
 	else
-		-- Released early: it settles back into its slot
-		hold_t = 0
-		lift.enabled = false
+		stop_dig()
 	end
 	if save_dirty and hold_t == 0 then
 		save_dirty = false
@@ -1993,37 +2024,6 @@ function handle_dig_update(event_type, event_data)
 end
 magic.SubscribeToEvent("Update", "handle_dig_update")
 
--- Right click places one, into the empty voxel in front of what is
--- pointed at -- or the top of the held stack, which takes precedence:
--- stone is what is left when the hands are free.
-function place_voxel()
-	local pv = pointed_voxel
-	if not pv or not pv[4] then return end
-	local x, y, z = pv[4], pv[5], pv[6]
-	if room.voxel_at(x, y, z) ~= room.id.air then return end
-	-- Not inside the player, who has no body to be pushed out of one
-	local px = voxel_of(cam.from.x / VOXEL_M)
-	local pz = voxel_of(cam.from.z / VOXEL_M)
-	local py = voxel_of((cam.from.y - 1.6) / VOXEL_M)
-	if x == px and z == pz and (y == py or y == py + 1 or y == py + 2) then
-		return
-	end
-	room.placed[room.key(x, y, z)] = true
-	rewrite_box(x, x, y, y, z, z, false)
-	write_save()
-	log:info("place: " .. room.key(x, y, z))
-end
-
-function handle_mousedown(event_type, event_data)
-	if mode ~= "fps" or terminal_open or pause_open then return end
-	if event_data:GetInt("Button") == magic.MOUSEB_RIGHT then
-		if not place_carried() then
-			place_voxel()
-		end
-	end
-end
-magic.SubscribeToEvent("MouseButtonDown", "handle_mousedown")
-apply_camera()
 
 local name_node = scene:CreateChild("orb_name")
 local name_text = name_node:CreateComponent("Text3D")
@@ -2230,93 +2230,6 @@ function handle_mousedown(event_type, event_data)
 end
 magic.SubscribeToEvent("MouseButtonDown", "handle_mousedown")
 apply_camera()
-
-local name_node = scene:CreateChild("orb_name")
-local name_text = name_node:CreateComponent("Text3D")
--- **Typography as graphic design**, which is what that era did with a
--- name: huge letterforms and wide tracking, not a centred column of
--- small labels. There is no tracking setting on a Text3D, so the
--- spacing is spaces -- which is how it was done then too.
-name_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 64)
-name_text:SetColor(magic.Color(1, 1, 1, 1))
-name_text:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-name_text.text = ""
--- The ceiling is the font ([TRANSLATION_FONT]): Latin-1 and Cyrillic, so
--- a CJK name does not draw and whoever widens the font settles this too
-name_text.faceCameraMode = magic.FC_ROTATE_Y
-
-pointed_orb = 0
--- **The step change is the indicator** (user): a sphere is lit and is a
--- sphere, so it says "selected" in its own vocabulary rather than in a
--- wireframe's -- and it is a discrete jump, not a fade, so it reads the
--- instant the crosshair crosses it.
-local ORB_STEP = 1.18
-local orb_base_scale = {}
--- Walking up to a sphere means the crosshair has to be on it, not merely
--- nearest to it: about ten degrees, which is a sphere at arm's length
-local POINT_DOT = 0.985
-function handle_orb_update()
-	local best, best_dot = 0, -1
-	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
-	-- stops at it, which would hide every orb past the empty one
-	for i = 1, #orb_places do
-		local node = orb_nodes[i]
-		if node then
-			local p = node.position
-			local dx, dy, dz = p.x - view_from.x, p.y - view_from.y,
-					p.z - view_from.z
-			local l = math.sqrt(dx * dx + dy * dy + dz * dz)
-			local dot = (dx * view_dir.x + dy * view_dir.y +
-					dz * view_dir.z) / l
-			if dot > best_dot then
-				best, best_dot = i, dot
-			end
-			-- Present the face: the mark sits in the middle of the
-			-- sphere's UVs, which Sphere.mdl puts on -Z, so the orb looks
-			-- away from the viewer to show it to them
-			node:LookAt(magic.Vector3(view_from.x * 2 - p.x,
-					view_from.y * 2 - p.y, view_from.z * 2 - p.z))
-		end
-	end
-	-- In FPS the crosshair is the pointer, so a sphere off to the side is
-	-- not pointed at; in menu mode the camera is flown to look at what
-	-- was chosen, and the nearest to the middle is the answer
-	if mode == "fps" and best_dot < POINT_DOT then
-		best = 0
-	end
-	if best ~= pointed_orb then
-		-- The step, in both directions
-		local was = orb_nodes[pointed_orb]
-		if was and orb_base_scale[pointed_orb] then
-			was.scale = orb_base_scale[pointed_orb]
-		end
-		local now = orb_nodes[best]
-		if now then
-			if not orb_base_scale[best] then
-				local sc = now.scale
-				orb_base_scale[best] = magic.Vector3(sc.x, sc.y, sc.z)
-			end
-			local b = orb_base_scale[best]
-			now.scale = magic.Vector3(b.x * ORB_STEP, b.y * ORB_STEP,
-					b.z * ORB_STEP)
-		end
-		pointed_orb = best
-		local o = ORBS[best]
-		name_text.text = o and o.name:upper():gsub("(.)", "%1 "):gsub(" $", "")
-				or ""
-		log:info("pointing at orb " .. best .. ": " ..
-				(o and o.name or "?"))
-	end
-	carry_draw()
-	if best > 0 then
-		local p = orb_nodes[best].position
-		-- In front of the wall, not above the orb: the orb sits in a
-		-- niche and anything above it is inside the stone
-		name_node.position = magic.Vector3(p.x, p.y + 2.6 * U,
-				(BAY_Z + 2.5) * VOXEL_M * U)
-	end
-end
-magic.SubscribeToEvent("Update", "handle_orb_update")
 
 
 
