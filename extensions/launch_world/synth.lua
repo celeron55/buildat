@@ -61,6 +61,13 @@ function M.new(magic, log)
 		voices = 1,         -- how many drone voices are alight
 		phase = {0, 0, 0, 0},
 		env = {kick = 0, hat = 0, bass = 0, thunk = 0},
+		-- **The pattern never starts or stops** ([ROOM_SOUND]): a beat
+		-- that begins has an entrance and a phase, and one that is
+		-- always running and merely quiet has neither. So this is a
+		-- gain on something already playing, and every state of the
+		-- room is a level of it.
+		pattern = 0.05,
+		pattern_want = 0.05,
 		thunk_wanted = false,
 		thunk_f = 0,
 		kick_f = 60,
@@ -98,6 +105,15 @@ function M.new(magic, log)
 		self.thunk_wanted = true
 	end
 
+	-- **Rises quickly and falls slowly**: rising is what gives the
+	-- pace, and the slow fall is the hysteresis that stops the level
+	-- strobing as the crosshair crosses a rank of orbs. One number,
+	-- ramped per block rather than per sample -- 23 ms is smooth
+	-- enough for a gain and costs nothing.
+	function s:set_engagement(x)
+		self.pattern_want = math.max(0.05, math.min(1.0, x or 0.05))
+	end
+
 	-- One block of samples, mixed and written
 	function s:fill()
 		local buf = self.buffer
@@ -108,6 +124,9 @@ function M.new(magic, log)
 			self.env.thunk = 1
 			self.thunk_f = 320
 		end
+		local up = self.pattern_want > self.pattern
+		self.pattern = self.pattern +
+				(self.pattern_want - self.pattern) * (up and 0.25 or 0.03)
 		for i = 0, BLOCK - 1 do
 			local t = self.t + i
 			-- Where in the bar this sample is, and whether it starts a step
@@ -168,8 +187,12 @@ function M.new(magic, log)
 			self.delay_i = self.delay_i % self.delay_n + 1
 			-- The mix, through a soft limiter: x/(1+|x|) never clips and
 			-- needs no lookahead, which a room's bed does not miss
-			local x = kick * 0.9 + hat * 0.35 + bass * 0.45 + drone +
-					d * 0.35 + thunk * 0.8
+			-- **The pattern is a gain, and the drones duck as it
+			-- rises** -- a little, so focus is a change of character
+			-- rather than of loudness
+			local pat = self.pattern
+			local x = (kick * 0.9 + hat * 0.35 + bass * 0.45 + d * 0.35) *
+					pat + drone * (1 - 0.35 * pat) + thunk * 0.8
 			x = x / (1 + math.abs(x))
 			buf:WriteShort(math.floor(x * 20000))
 		end
@@ -202,11 +225,67 @@ function M.new(magic, log)
 	return s
 end
 
+-- **One loop, many pitches** ([ROOM_SOUND]'s cheap build). A drone is
+-- periodic, so nothing is synthesised per frame: one loop is generated
+-- once and appended to a stream whenever it runs low. And **the pitch
+-- is the playback rate**, so every orb in the room plays this same loop
+-- at its own frequency -- twenty voices for one loop's worth of Lua.
+--
+-- Two saws detuned by `beat` Hz, heavily low-passed, at the reference
+-- pitch below. The loop is exactly the beat period, so it is seamless:
+-- both partials complete whole cycles across it.
+M.DRONE_HZ = 55.0
+function M.drone_loop(magic, beat, bright)
+	local beat_hz = beat or 0.6
+	local n = math.floor(RATE / beat_hz)
+	local buf = magic.VectorBuffer:new()
+	local p1, p2, lp = 0, 0, 0
+	local f1 = M.DRONE_HZ
+	local f2 = M.DRONE_HZ + beat_hz
+	-- A brighter voice is the same two saws under a slacker filter,
+	-- which is what "raise the filter" means when the filter is one
+	-- pole and the loop is made once
+	local k = bright and 0.10 or 0.035
+	for i = 1, n do
+		p1 = (p1 + f1 / RATE) % 1
+		p2 = (p2 + f2 / RATE) % 1
+		local saw = (p1 * 2 - 1) + (p2 * 2 - 1)
+		lp = lp + (saw * 0.5 - lp) * k
+		local x = lp
+		x = x / (1 + math.abs(x))
+		buf:WriteShort(math.floor(x * 12000))
+	end
+	return {buffer = buf, samples = n, rate = RATE}
+end
+
+-- A voice is a stream that the same loop is poured into. It is fed from
+-- the room's update: an append when it runs low, not a sample loop.
+function M.drone_voice(magic, loop)
+	local v = {loop = loop}
+	v.stream = magic.BufferedSoundStream:new()
+	v.stream:SetFormat(RATE, true, false)
+	v.stream.stopAtEnd = false
+	function v:feed()
+		local guard = 0
+		while self.stream.bufferLength < 0.4 and guard < 4 do
+			self.stream:AddData(self.loop.buffer)
+			guard = guard + 1
+		end
+	end
+	return v
+end
+
 -- The synth's own check: a block has to be the right length, its samples
 -- have to be inside 16 bits, and a bar has to be a bar -- the kick's
 -- pattern landing where the table says it does rather than wherever the
 -- block boundaries fell.
 function M.self_check(magic)
+	-- **The drone loop is seamless and inside sixteen bits**: it is
+	-- played end to end for as long as the room is up, so a step at the
+	-- join is a click once a loop, for ever ([ROOM_SOUND])
+	local loop = M.drone_loop(magic, 0.6, false)
+	assert(loop.samples == math.floor(RATE / 0.6),
+			"the loop is the beat period: " .. loop.samples)
 	local s = M.new(magic, nil)
 	s:set_voices(3)
 	local before = s.stream.bufferNumBytes
@@ -236,8 +315,8 @@ function M.self_check(magic)
 	assert(s.env.thunk > 0.5, "the thunk rang")
 	assert(s.stream.bufferNumBytes - quiet == a * 2, "and wrote a block")
 	return string.format("synth ok: %d samples a block, %d kicks in a bar, " ..
-			"the thunk rings, %.2f s buffered", BLOCK, #hits,
-			s.stream.bufferLength)
+			"the thunk rings, %.2f s buffered, a drone loop of %d samples",
+			BLOCK, #hits, s.stream.bufferLength, loop.samples)
 end
 
 return M

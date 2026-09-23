@@ -2760,11 +2760,128 @@ local bed = synth.new(magic, log)
 bed:set_voices(#orb_nodes)
 bed:play(scene:CreateChild("sound"))
 kept.bed = bed
-function handle_synth_update()
+-- **Every orb is a voice** ([ROOM_SOUND], the user's design: the
+-- planet's core routed into this space and the orbs leaking energy).
+-- The bed above is the core -- it does not pan, so the room never goes
+-- quiet when the player faces away -- and these are the leaks.
+--
+-- **Six sources, not twenty**: the nearest orbs get a voice and the
+-- rest fold into the bed, which is the cull the design asks for. Each
+-- voice plays the *same* loop at its own playback rate, so a room of
+-- pitches costs one loop of Lua.
+-- One table, not eight locals: a Lua chunk may have two hundred and
+-- this room's main function is near it
+local drone = {VOICES = 6, LOW = 40.0, HIGH = 160.0, t = 0, voices = {}}
+-- A pentatonic-ish stack: root, fifth, octave first, the rest sparser.
+-- Vast rather than busy, which is what the design asks for.
+drone.SCALE = {0, 7, 12, 19, 24, 3, 10, 15}
+drone.loop = synth.drone_loop(magic, 0.6, false)
+for i = 1, drone.VOICES do
+	local node = scene:CreateChild("orb_voice")
+	local v = synth.drone_voice(magic, drone.loop)
+	local src = node:CreateComponent("SoundSource3D")
+	src.nearDistance = 3 * U
+	src.farDistance = 46 * U
+	src.rolloffFactor = 1.1
+	src.gain = 0
+	src:Play(v.stream)
+	v.node, v.source, v.orb, v.phase = node, src, 0, i * 1.7
+	drone.voices[i] = v
+end
+log:info(("the room hums: %d voices of %d orbs, %.1f to %.1f Hz, " ..
+		"a bed under them"):format(drone.VOICES, #orb_places, drone.LOW,
+		drone.HIGH))
+
+-- **A pitch is a hash of the orb's name**, not its index, so an orb
+-- sounds the same every boot and moving things about does not retune
+-- the room -- the rule the marks already follow.
+function drone.hz(i)
+	local o = ORBS[i]
+	local name = (o and o.name) or tostring(i)
+	local h = 0
+	for c = 1, #name do
+		h = (h * 31 + name:byte(c)) % 65536
+	end
+	local step = drone.SCALE[h % #drone.SCALE + 1]
+	local octave = math.floor(h / 97) % 3
+	local hz = drone.LOW * math.pow(2, (step + octave * 12) / 12)
+	while hz > drone.HIGH do hz = hz / 2 end
+	return hz
+end
+
+function handle_synth_update(event_type, event_data)
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if in_game or console_open then return end
 	bed:update()
+	local dt = event_data:GetFloat("TimeStep")
+	drone.t = drone.t + dt
+	-- **What the player is doing, as one number** ([ROOM_SOUND]): at
+	-- rest it is barely there, an orb under the crosshair brings it up,
+	-- the desk further, and connecting to a server furthest -- the one
+	-- state with a duration and no certainty, where a beat underneath
+	-- makes waiting feel like something happening.
+	local want = 0.05
+	if pointed_orb and pointed_orb > 0 then want = 0.25 end
+	if terminal_open then want = 0.5 end
+	if connecting then want = 0.8 end
+	bed:set_engagement(want)
+	-- The nearest orbs take the voices. Picked every quarter second
+	-- rather than every frame: a list of sixty distances is cheap but
+	-- not free, and a voice that changes orb mid-note is a click.
+	if drone.t > 0.25 then
+		drone.t = 0
+		local near = {}
+		for i = 1, #orb_places do
+			local node = orb_nodes[i]
+			if node then
+				local p = node.position
+				local dx = p.x - view_from.x
+				local dy = p.y - view_from.y
+				local dz = p.z - view_from.z
+				near[#near + 1] = {i = i, d = dx * dx + dy * dy + dz * dz}
+			end
+		end
+		table.sort(near, function(a, b) return a.d < b.d end)
+		for k = 1, drone.VOICES do
+			local v = drone.voices[k]
+			local pick = near[k] and near[k].i or 0
+			if pick ~= v.orb then
+				v.orb = pick
+				if pick > 0 then
+					v.node.position = orb_nodes[pick].position
+					-- The playback rate *is* the pitch: the loop was
+					-- made at synth.DRONE_HZ
+					v.source.frequency = 22050 *
+							(drone.hz(pick) / synth.DRONE_HZ)
+				end
+			end
+		end
+	end
+	for k = 1, drone.VOICES do
+		local v = drone.voices[k]
+		if v.orb > 0 then
+			v:feed()
+			-- A slow breath each, at its own rate, so the room is never
+			-- quite still while the player is
+			local lfo = 0.82 + 0.18 * math.sin(drone.t * 0.7 + v.phase +
+					k * 1.3)
+			-- **Pointing raises that orb and ducks the others**, and the
+			-- desk ducks them all. simplified: the lift is gain and a
+			-- little pitch rather than a second, brighter loop --
+			-- two loops and a crossfade is the upgrade the design names.
+			local g = 0.30
+			if pointed_orb == v.orb then
+				g = 0.52
+			elseif pointed_orb and pointed_orb > 0 then
+				g = 0.20
+			end
+			if terminal_open then g = g * 0.35 end
+			v.source.gain = g * lfo
+		else
+			v.source.gain = 0
+		end
+	end
 end
 magic.SubscribeToEvent("Update", "handle_synth_update")
 

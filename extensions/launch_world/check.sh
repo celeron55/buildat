@@ -442,8 +442,18 @@ if grep -aq "Crash: SIG" "$out/cli.log"; then
 			"$(grep -a "Crash: SIG" "$out/cli.log" | head -1)"
 	exit 1
 fi
-grep -aE "palette preset|ornament ok|synth ok|orb sizes" "$out/cli.log" |
+grep -aE "palette preset|ornament ok|synth ok|orb sizes|the room hums" "$out/cli.log" |
 	sed 's/.*launch_w[a-z]*: //'
+# **The room hums, and the pattern answers what the player is doing**
+# ([ROOM_SOUND]): six voices take the nearest orbs and the beat rises
+# from barely-there when something is being looked at.
+hums=$(grep -a "launch_w.*: the room hums" "$out/cli.log" | head -1 |
+	sed 's/.*launch_w[a-z]*: //')
+if [ -z "$hums" ]; then
+	echo "FAIL: the room says nothing about its own sound"
+	exit 1
+fi
+
 # **An orb is as big as its game**: a tree with more than one game has to
 # spread them, or the size is saying nothing
 sizes=$(grep -a "launch_w.*: orb sizes: " "$out/cli.log" | head -1)
