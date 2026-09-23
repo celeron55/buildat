@@ -406,6 +406,18 @@ if [ "$held" -ne 1 ]; then
 	exit 1
 fi
 
+# **The opening hint**, which is the room's whole answer to a first-time
+# user who does not know it is a first-person game: one line, and the
+# first step takes it away again. A line that stayed would be a HUD.
+hint_up=$(grep -ac "launch_w.*: hint: the three keys" "$out/cli.log")
+hint_gone=$(grep -ac "launch_w.*: hint: taken away" "$out/cli.log")
+echo "the hint was shown $hint_up and taken away $hint_gone"
+if [ "$hint_up" -lt 1 ] || [ "$hint_gone" -lt 1 ]; then
+	echo "FAIL: the hint does not appear, or does not leave when the" \
+			"player moves"
+	exit 1
+fi
+
 picked=$(grep -ac "launch_w.*: carry: picked up" "$out/cli.log")
 putdown=$(grep -ac "launch_w.*: carry: put down" "$out/cli.log")
 echo "the player carried $picked spheres and put down $putdown"

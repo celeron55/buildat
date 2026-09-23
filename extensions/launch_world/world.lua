@@ -1826,6 +1826,13 @@ function handle_fps_update(event_type, event_data)
 	end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
 	local mm = magic.input:GetMouseMove()
+	if hint_left > 0 and (mm.x ~= 0 or mm.y ~= 0 or
+			magic.input:GetKeyDown(magic.KEY_W) or
+			magic.input:GetKeyDown(magic.KEY_A) or
+			magic.input:GetKeyDown(magic.KEY_S) or
+			magic.input:GetKeyDown(magic.KEY_D)) then
+		drop_hint()
+	end
 	fps.yaw = fps.yaw + mm.x * LOOK_SPEED
 	fps.pitch = math.max(-85, math.min(85, fps.pitch + mm.y * LOOK_SPEED))
 	-- **The arrows turn too**, which is an accessibility basic rather
@@ -2723,7 +2730,14 @@ local function connect_poll(dt)
 end
 
 function handle_idle_update(event_type, event_data)
-	connect_poll(event_data:GetFloat("TimeStep"))
+	local dt_any = event_data:GetFloat("TimeStep")
+	connect_poll(dt_any)
+	if hint_left > 0 then
+		hint_left = hint_left - dt_any
+		if hint_left <= 0 then
+			drop_hint()
+		end
+	end
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if in_game or console_open then return end
@@ -2872,6 +2886,8 @@ prompt_text.text = ""
 prompt_open = false
 prompt_str = ""
 ornament_on = true
+-- How long the opening hint has left, in seconds; zero once it is gone
+hint_left = 0
 
 -- **One line the room says things on**, above the prompt: connecting,
 -- and why a connection did not happen. A dialog would take the mouse
@@ -2887,6 +2903,32 @@ notice_text:SetColor(magic.Color(1.0, 0.82, 0.45, 1))
 notice_text.text = ""
 function notice(text)
 	notice_text.text = text or ""
+	hint_left = 0
+end
+
+-- **One line, and it leaves when the player moves** (the gate on this
+-- room becoming the default is whether a first-time user meets it and
+-- stays, and the room tells nobody how to walk). Not a HUD: it is the
+-- notice line the room already has, it says the three keys, and the
+-- first step or the first key takes it away -- so it is gone before it
+-- can become furniture, and a player who already knows never reads it.
+-- simplified: it says nothing about digging, carrying or the desk.
+-- Those are for the player who is still there a minute later, and the
+-- room is what teaches them.
+local HINT = "W A S D  to walk   -   Tab for the list   -   " ..
+		"Escape for the way out"
+local HINT_SECONDS = 20
+function show_hint()
+	notice_text.text = HINT
+	hint_left = HINT_SECONDS
+	log:info("hint: the three keys, until the player uses one")
+end
+function drop_hint()
+	if hint_left > 0 and notice_text.text == HINT then
+		notice_text.text = ""
+		log:info("hint: taken away")
+	end
+	hint_left = 0
 end
 
 -- A subsequence match, which is what "fuzzy" has to mean when the list
@@ -3737,6 +3779,7 @@ set_mode("fps")
 -- The browser starts on the first thing in the first row, so menu mode
 -- has a selection the moment it is entered
 browse_show()
+show_hint()
 
 -- **What the client asks a launcher for** ([MENU_CONTEXT]): init.lua
 -- hands these on as the extension's own.
