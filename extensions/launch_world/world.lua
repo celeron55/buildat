@@ -390,19 +390,15 @@ local function apply_technique(node)
 end
 
 -- **Where a voxel is, in the scene: on its own index.** A voxel spans
--- [v - 0.5, v + 0.5], so turning an index into a position adds nothing
--- -- and every place that added half a voxel was half a voxel out
--- (user, 2026-09-23: the box and the voxel render about half a voxel
--- apart on each axis, the slide starts half a voxel out on all three,
--- and the placement threshold is off by the same). One place for it
--- now, and one for the inverse.
+-- [v - 0.5, v + 0.5], and everything else in the room -- the orbs, the
+-- lights, a pocket's mouth -- is already placed at a plain index, so
+-- this is the convention and the mesher's block is what was moved to
+-- meet it (see mesh_chunk). One place for it, and one for the inverse.
 local function at_voxel(x, y, z)
 	return magic.Vector3(x, y, z)
 end
 
--- And back: which voxel a point in the scene is in. The nearest index,
--- not the one below it -- flooring is what put the placement threshold
--- half a voxel off, which shows on a floor in both horizontal axes.
+-- And back: which voxel a point in the scene is in: the nearest index.
 local function voxel_of(p)
 	return math.floor(p + 0.5)
 end
@@ -427,14 +423,41 @@ local function mesh_chunk(c)
 		-- the block's middle rather than to its corner. The half is the
 		-- voxel's own: a voxel v fills [v, v + 1), which is what makes
 		-- the floor's top face the room's metre zero.
-		node.position = magic.Vector3(room.OX + x0 + w / 2 + 0.5,
-				room.OY + room.H / 2 + 0.5, room.OZ + room.D / 2 + 0.5)
+		-- **A whole voxel short of where the arithmetic says.** Measured
+		-- rather than derived, after three wrong guesses at the box's
+		-- end: with the node at OX + x0 + w/2 + 0.5, a 16-wide chunk of
+		-- indices -47..-32 reported a world bounding box of -46.5..-30.5,
+		-- so the mesher centres voxel i on i + 1. PolyVox's cubic
+		-- extractor puts voxel i's far corner at pv = i + 1 and the
+		-- mesher's pv - w/2 - 0.5 takes off only half of it. Moving the
+		-- block instead of the box keeps the stone on the same indices
+		-- as everything else in the room.
+		node.position = magic.Vector3(room.OX + x0 + w / 2 - 0.5,
+				room.OY + room.H / 2 - 0.5, room.OZ + room.D / 2 - 0.5)
 		chunk_nodes[c] = node
 	end
 	buildat.safe.set_8bit_voxel_geometry(node, w, room.H, room.D,
 			table.concat(data), voxel_reg, atlas_reg,
 			room.OX + x0, room.OY, room.OZ)
 	apply_technique(node)
+	-- **The check that settles it**: the block's own bounding box against
+	-- the indices it was built from. A voxel spans half a unit each side
+	-- of its index, so the block spans half a unit outside its first and
+	-- last. This is what three guesses at the selection box's position
+	-- could not tell apart.
+	if c == 0 then
+		local bb = node:GetComponent("CustomGeometry").worldBoundingBox
+		local want = {room.OX + x0 - 0.5, room.OY - 0.5, room.OZ - 0.5}
+		local got = {bb.min.x, bb.min.y, bb.min.z}
+		for i = 1, 3 do
+			assert(math.abs(got[i] - want[i]) < 0.01,
+					("the meshed block starts at %.2f, not %.2f, on axis %d")
+					:format(got[i], want[i], i))
+		end
+		log:info(("chunk 0 sits on its indices: %.2f %.2f %.2f .. " ..
+				"%.2f %.2f %.2f"):format(bb.min.x, bb.min.y, bb.min.z,
+				bb.max.x, bb.max.y, bb.max.z))
+	end
 end
 local CHUNKS = math.ceil(room.W / CHUNK)
 for c = 0, CHUNKS - 1 do

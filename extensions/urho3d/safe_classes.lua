@@ -600,6 +600,10 @@ function M.define(dst, util)
 		instance_meta = {
 		},
 		properties = {
+			-- Read to settle where a mesher actually put its geometry,
+			-- which no amount of reading the offsets settled
+			min = util.simple_property(dst.Vector3),
+			max = util.simple_property(dst.Vector3),
 		},
 	})
 
@@ -678,6 +682,9 @@ function M.define(dst, util)
 			-- Urho3D has this on Drawable, so a billboard set has it as
 			-- much as a static model does
 			castShadows = util.simple_property("boolean"),
+			-- Where the thing ended up, in the scene: the one way to ask
+			-- a mesher what it built without reading its offsets
+			worldBoundingBox = util.simple_property(dst.BoundingBox),
 		},
 	})
 
