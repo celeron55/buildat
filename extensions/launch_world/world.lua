@@ -1250,6 +1250,102 @@ function handle_camera_update(event_type, event_data)
 	end
 end
 magic.SubscribeToEvent("Update", "handle_camera_update")
+
+-- **Two control modes, and it starts in the immersive one** (user,
+-- 2026-09-23). Menu mode is what was built -- the prompt, the digits,
+-- the camera flying to what was picked. FPS mode is the standing player
+-- the scale rule is about, who walks up to a pocket and reaches into it.
+-- Tab toggles, and the mouse is captured in FPS and free in menu.
+--
+-- **The pick, and the plan records it as undecided**: two parallel modes
+-- under Tab, not menu mode stacked over FPS with Escape popping back. A
+-- toggle is one keystroke between equals and is what the user described;
+-- the stack wants `uistack` and a playtest to choose it.
+local FPS_EYE = 1.6           -- metres, the standing eye the room is judged from
+local FPS_SPEED = 4.2
+local FPS_GRAVITY = 18.0
+local FPS_JUMP = 5.0
+local LOOK_SPEED = 0.12
+terminal_open = false
+mode = "fps"
+local fps = {x = HOME_FROM.x, y = FPS_EYE, z = HOME_FROM.z,
+	-- Urho3D's yaw 0 looks down +z and the wall is at -z
+	yaw = 180.0, pitch = 6.0, vy = 0.0}
+
+-- The room's own voxels are the collision: there is no physics here and
+-- no body, just the description in room.lua asked whether a point is
+-- stone. simplified: the player is a column half a metre across and the
+-- floor is flat at y = 0, which is true of this room and of no other.
+local PLAYER_R = 0.25
+local function solid_at(x, y, z)
+	return room.voxel_at(math.floor(x / VOXEL_M), math.floor(y / VOXEL_M),
+			math.floor(z / VOXEL_M)) ~= room.id.air
+end
+local function blocked(x, y, z)
+	for _, dx in ipairs({-PLAYER_R, PLAYER_R}) do
+		for _, dz in ipairs({-PLAYER_R, PLAYER_R}) do
+			-- Knee, waist and head, which is what stops a player walking
+			-- into a slab that starts above the floor
+			for _, dy in ipairs({0.3, 0.9, y - 0.1 > 1.5 and 1.5 or 0.9}) do
+				if solid_at(x + dx, y - FPS_EYE + dy, z + dz) then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
+local function set_mode(m)
+	mode = m
+	local fps_now = (m == "fps")
+	magic.input:SetMouseVisible(not fps_now, "launch_world: " .. m .. " mode")
+	magic.input:SetMouseMode(fps_now and magic.MM_RELATIVE or
+			magic.MM_ABSOLUTE)
+	if fps_now then
+		-- Walking starts from wherever the camera was left, so a mode
+		-- change is not a teleport
+		fps.x, fps.y, fps.z = cam.from.x, FPS_EYE, cam.from.z
+	end
+	log:info("mode: " .. m)
+end
+
+function handle_fps_update(event_type, event_data)
+	if mode ~= "fps" or cam.to_from or terminal_open then
+		return
+	end
+	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
+	local mm = magic.input:GetMouseMove()
+	fps.yaw = fps.yaw + mm.x * LOOK_SPEED
+	fps.pitch = math.max(-85, math.min(85, fps.pitch + mm.y * LOOK_SPEED))
+	local sy, cy = math.sin(math.rad(fps.yaw)), math.cos(math.rad(fps.yaw))
+	local dx, dz = 0, 0
+	local function held(k) return magic.input:GetKeyDown(k) end
+	if held(magic.KEY_W) then dx, dz = dx + sy, dz + cy end
+	if held(magic.KEY_S) then dx, dz = dx - sy, dz - cy end
+	if held(magic.KEY_D) then dx, dz = dx + cy, dz - sy end
+	if held(magic.KEY_A) then dx, dz = dx - cy, dz + sy end
+	local l = math.sqrt(dx * dx + dz * dz)
+	if l > 0 then
+		dx, dz = dx / l * FPS_SPEED * dt, dz / l * FPS_SPEED * dt
+		-- One axis at a time, so a wall slides rather than stops
+		if not blocked(fps.x + dx, fps.y, fps.z) then fps.x = fps.x + dx end
+		if not blocked(fps.x, fps.y, fps.z + dz) then fps.z = fps.z + dz end
+	end
+	if held(magic.KEY_SPACE) and fps.y <= FPS_EYE + 0.001 then
+		fps.vy = FPS_JUMP
+	end
+	fps.vy = fps.vy - FPS_GRAVITY * dt
+	fps.y = fps.y + fps.vy * dt
+	if fps.y < FPS_EYE then fps.y, fps.vy = FPS_EYE, 0 end
+	cam.from.x, cam.from.y, cam.from.z = fps.x, fps.y, fps.z
+	local cp = math.cos(math.rad(fps.pitch))
+	cam.at.x = fps.x + sy * cp
+	cam.at.y = fps.y - math.sin(math.rad(fps.pitch))
+	cam.at.z = fps.z + cy * cp
+	apply_camera()
+end
+magic.SubscribeToEvent("Update", "handle_fps_update")
 apply_camera()
 
 local name_node = scene:CreateChild("orb_name")
@@ -1498,8 +1594,10 @@ function handle_idle_update(event_type, event_data)
 	end
 	local dt = event_data:GetFloat("TimeStep")
 	idle_quiet = idle_quiet + dt
+	-- Not while somebody is walking: the room shows itself off when it is
+	-- left alone, and FPS mode is a player standing in it
 	if not attracting and not terminal_open and not cam.to_from and
-			idle_quiet > ATTRACT_AFTER then
+			mode ~= "fps" and idle_quiet > ATTRACT_AFTER then
 		attracting = true
 		log:info("attract: the room is showing itself off")
 	end
@@ -1746,7 +1844,94 @@ local function draw_panel()
 	row("", "Escape leaves the desk", magic.Color(0.45, 0.6, 0.66, 1))
 end
 
-terminal_open = false
+-- **The pause dialog, in both modes** (user, 2026-09-23): the room's
+-- only way out of the program, and it needs one more than a game does --
+-- a game has the launcher to go back to, and this *is* the launcher.
+-- Two lines, chosen with up and down and taken with Enter.
+--
+-- simplified: it is the terminal's own panel machinery rather than a
+-- styled dialog, because a style is a resource to load and a focus to
+-- take and give back, and this has two rows.
+local PAUSE_ITEMS = {
+	{"Back to the room", nil},
+	{"Switch to the old menu", function()
+		-- launch_menu is still selectable, which is the plan's own
+		-- promise: the room is an alternative and never a replacement
+		local ok, m = pcall(require, "buildat/extension/launch_menu")
+		if ok and type(m) == "table" and type(m.boot) == "function" then
+			m.boot()
+		else
+			log:warning("pause: launch_menu did not load")
+		end
+	end},
+	{"Leave buildat", function() __buildat_disconnect() end},
+}
+local pause_panel = magic.ui.root:CreateChild("BorderImage")
+pause_panel.visible = false
+pause_panel.priority = 60
+pause_panel.horizontalAlignment = magic.HA_CENTER
+pause_panel.verticalAlignment = magic.VA_CENTER
+pause_panel.color = magic.Color(0.02, 0.05, 0.07, 0.96)
+pause_panel.texture = checker_texture(2, 1, magic.Color(1, 1, 1, 1),
+		magic.Color(1, 1, 1, 1))
+pause_panel.imageRect = magic.IntRect(0, 0, 2, 2)
+pause_panel.size = magic.IntVector2(420, 190)
+local pause_rows = {}
+for i = 1, #PAUSE_ITEMS do
+	local t = pause_panel:CreateChild("Text")
+	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 20)
+	t:SetPosition(34, 22 + (i - 1) * 48)
+	pause_rows[i] = t
+end
+pause_open = false
+local pause_sel = 1
+local function draw_pause()
+	for i, item in ipairs(PAUSE_ITEMS) do
+		pause_rows[i].text = (i == pause_sel and "> " or "  ") .. item[1]
+		pause_rows[i]:SetColor(i == pause_sel and
+				magic.Color(1.0, 0.72, 0.45, 1) or
+				magic.Color(0.55, 0.62, 0.68, 1))
+	end
+end
+local function open_pause()
+	pause_open = true
+	pause_sel = 1
+	draw_pause()
+	pause_panel.visible = true
+	-- The mouse comes back while the dialog is up, whatever mode it is
+	magic.input:SetMouseVisible(true, "launch_world: paused")
+	magic.input:SetMouseMode(magic.MM_ABSOLUTE)
+	log:info("pause: open")
+end
+local function close_pause()
+	if not pause_open then return false end
+	pause_open = false
+	pause_panel.visible = false
+	set_mode(mode)
+	log:info("pause: closed")
+	return true
+end
+-- Returns true when the key was the dialog's
+function pause_key(key)
+	if not pause_open then return false end
+	if key == magic.KEY_UP then
+		pause_sel = pause_sel > 1 and pause_sel - 1 or #PAUSE_ITEMS
+	elseif key == magic.KEY_DOWN then
+		pause_sel = pause_sel < #PAUSE_ITEMS and pause_sel + 1 or 1
+	elseif key == magic.KEY_ESCAPE then
+		close_pause()
+	elseif key == magic.KEY_RETURN then
+		local run = PAUSE_ITEMS[pause_sel][2]
+		close_pause()
+		if run then run() end
+		return true
+	else
+		return true    -- the dialog eats everything while it is up
+	end
+	draw_pause()
+	return true
+end
+
 local function sit_at_terminal()
 	terminal_open = true
 	draw_panel()
@@ -1832,19 +2017,8 @@ function prompt_key(key)
 		end
 	end
 	if key == magic.KEY_ESCAPE then
-		prompt_open = false
-		prompt_str = ""
-		show_prompt()
-		if leave_terminal() then
-			fly_to(HOME_FROM, HOME_AT)
-			return true
-		end
-		-- Escape from the room's own view is the way back out of a launch
-		fly_to(HOME_FROM, HOME_AT)
-		for b = 1, BAYS do
-			dissolve_bay(b, false)
-		end
-		return true
+		-- Escape is handled once, for both modes, in handle_keydown
+		return false
 	end
 	if key == magic.KEY_RETURN then
 		if prompt_open then
@@ -1897,16 +2071,61 @@ function handle_keydown(event_type, event_data)
 		log:info("attract: back to the standing place")
 		return
 	end
-	-- The prompt eats what it wants first, so a name with a "p" in it
-	-- does not toggle the probe halfway through being typed
-	if prompt_key(key) then
+	-- The pause dialog is over everything while it is up
+	if pause_key(key) then
 		return
 	end
+	-- **Escape is the way back, and the pause dialog when there is
+	-- nothing to go back from**: out of the terminal, out of a bay, back
+	-- to the standing place -- and only then the dialog, which is the
+	-- room's own way out of the program.
 	if key == magic.KEY_ESCAPE then
-		-- simplified: the room's only way out is out of the program. The
-		-- pause dialog with "switch to launch_menu" is step 7 of the
-		-- launcher plan's remaining order.
-		__buildat_disconnect()
+		if leave_terminal() then
+			fly_to(HOME_FROM, HOME_AT)
+			return
+		end
+		local backed = false
+		for b = 1, BAYS do
+			if bay_state[b] and bay_state[b].target ~= 0 then
+				dissolve_bay(b, false)
+				backed = true
+			end
+		end
+		if prompt_open or prompt_str ~= "" then
+			prompt_open = false
+			prompt_str = ""
+			show_prompt()
+			backed = true
+		end
+		if backed or mode == "menu" then
+			fly_to(HOME_FROM, HOME_AT)
+			return
+		end
+		open_pause()
+		return
+	end
+	-- **Tab toggles the two modes**, and is the only key that means the
+	-- same thing in both
+	if key == magic.KEY_TAB then
+		set_mode(mode == "fps" and "menu" or "fps")
+		return
+	end
+	-- **In FPS mode the letters are movement**, so the prompt is menu
+	-- mode's alone -- which is the same collision the checks found from
+	-- the other side when the prompt ate the probe's key. Enter and
+	-- Backspace both go to the terminal here: one way out that always
+	-- works, which matters most in the mode a player lands in.
+	if mode == "fps" then
+		if key == magic.KEY_RETURN or key == magic.KEY_BACKSPACE then
+			if not leave_terminal() then
+				sit_at_terminal()
+			end
+			return
+		end
+	elseif prompt_key(key) then
+		-- The prompt eats what it wants first, so a name with a "p" in
+		-- it does not toggle the probe halfway through being typed
+		return
 	end
 	-- The palette presets are on F1 to F4: the digits are the room's
 	-- own, for picking a slot without walking to it
@@ -1968,5 +2187,11 @@ end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")
 
 magic.ui:SetFocusElement(nil)
+
+-- **It starts in FPS mode**: the first impression is the room, not a
+-- list. A scripted run cannot take the mouse relative -- the whitelist
+-- refuses it, which is [BOX_PLAYTEST_3]'s own rule -- so a check drives
+-- the keys and the camera stands still.
+set_mode("fps")
 
 -- vim: set noet ts=4 sw=4:

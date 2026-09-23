@@ -36,13 +36,32 @@ lights, and the dissolve is a rewrite of the block and a re-mesh.
 Keys
 ----
 
+It starts in FPS mode, where you walk; Tab goes to menu mode, where you
+type. The mouse is captured in FPS and free in menu.
+
+    Tab         swap the two modes
+
+FPS mode:
+
+    W A S D     walk, mouse looks
+    Space       jump
+    Return      the terminal, and back out of it
+    Backspace   the same -- one way out that always works
+
+Menu mode:
+
     (type)      any letter opens a one-line prompt that fuzzy-matches a
-                game or a server by name; the match is shown as you type
+                game, a launch action or a save by name
     Return      launch what the prompt matched: the bay comes apart and
                 the camera flies in
-    1-6         pick a slot without typing
-    Escape      leave: fly back to the standing place, shut every bay,
-                stand up from the terminal
+    1-9         pick a slot without typing
+
+Both:
+
+    Escape      the way back -- stand up from the terminal, shut a bay,
+                fly to the standing place -- and, with nothing left to
+                go back from, the pause dialog: back to the room, switch
+                to the old menu, or leave buildat
     F1-F4       the four palette presets ([LAUNCH_WORLD]'s own
                 experiment; the pick is the user's, and check.sh leaves
                 all four in one picture at
@@ -110,7 +129,10 @@ line is a thing that has been seen to fail:
     nothing in the room is static          -- the era's own rule
     the room shows itself off when left alone
     the generated ornament is on something -- it once was not
-    the room has a top end                 -- 99th percentile in HDR
+    FPS mode walks                         -- it is the mode you land in
+    Escape pauses and Escape comes back
+    a source is brighter than a lit wall   -- the top end, in HDR
+    the room found launch actions at all   -- not a list written here
 
 Two of them exist because a feature drew nothing for a day while its own
 log line said otherwise, and two more were passing on the HUD's text

@@ -26,6 +26,24 @@ if pgrep -x buildat >/dev/null; then
 fi
 names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 { echo "delay 5000"
+	# **It starts in FPS mode**, so the walking is checked first and then
+	# Tab goes to menu mode, where the prompt and the digits live. A held
+	# key needs keydown/delay/keyup; keypress is one frame and moves
+	# nothing.
+	echo "screenshot $out/fps-stood.png"
+	echo "delay 400"
+	echo "keydown W"
+	echo "delay 1400"
+	echo "keyup W"
+	echo "delay 600"
+	echo "screenshot $out/fps-walked.png"
+	echo "delay 400"
+	echo "keypress Tab"
+	echo "delay 600"
+	# Back to the standing place, so every frame below has the same
+	# viewpoint as the one Escape returns to
+	echo "keypress Escape"
+	echo "delay 1800"
 	# **The room is never static** -- the era reference's own rule, and
 	# the reason every comparison below freezes it first. Two frames a
 	# second apart, then F7.
@@ -121,6 +139,19 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "delay 2400"
 	echo "screenshot $out/attract-back.png"
 	echo "delay 500"
+	# **The pause dialog**, which is the room's own way out of the
+	# program: Tab back to FPS, where Escape has nothing to cancel, and
+	# it comes up; Escape again takes it away
+	echo "keypress Tab"
+	echo "delay 600"
+	echo "keypress Escape"
+	echo "delay 700"
+	echo "screenshot $out/paused.png"
+	echo "delay 400"
+	echo "keypress Escape"
+	echo "delay 700"
+	echo "screenshot $out/unpaused.png"
+	echo "delay 400"
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -m launch_world -D ../user -w 1280x720 -l 3 \
 	-c @"$out/cmds.txt" 2>&1 |
@@ -305,6 +336,27 @@ terminal_ok = dark < 40 and bright > 1500
 print("PASS: the terminal is flat, dark and readable" if terminal_ok
 		else "FAIL: the terminal panel is not on screen")
 
+# **The two control modes**: walking has to move the room, and it is
+# the mode the player lands in
+stood, ds = mean_of("fps-stood")
+walked, dw = mean_of("fps-walked")
+walk = sum(abs(p - q) for p, q in zip(ds, dw)) / float(len(ds))
+print("walking forward moves the frame by %.2f of a level" % walk)
+walk_ok = walk > 3.0
+print("PASS: FPS mode walks" if walk_ok
+		else "FAIL: holding W moves nothing -- the room does not start in FPS")
+
+# **The pause dialog**: it has to appear over the room and go away
+# again. A room whose only way out is killing the process is not a
+# launcher.
+paused, dpa = mean_of("paused")
+unpaused, dup = mean_of("unpaused")
+came_up = sum(abs(p - q) for p, q in zip(dpa, dup)) / float(len(dpa))
+print("the pause dialog moves the frame by %.2f of a level" % came_up)
+pause_ok = came_up > 1.0
+print("PASS: Escape pauses and Escape comes back" if pause_ok
+		else "FAIL: no pause dialog")
+
 # The drift: two frames a second apart, before anything was frozen
 drift_a, da2 = mean_of("drift-a")
 drift_b, db2 = mean_of("drift-b")
@@ -356,5 +408,5 @@ print("PASS: a source is brighter than a lit wall" if hdr_ok
 		else "FAIL: the picture clips before its shoulder -- HDR is off")
 sys.exit(0 if (ok and probe_ok and dissolve_ok and typing_ok and
 		terminal_ok and ornament_ok and drift_ok and attract_ok and
-		hdr_ok) else 1)
+		hdr_ok and walk_ok and pause_ok) else 1)
 PY
