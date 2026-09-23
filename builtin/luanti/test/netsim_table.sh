@@ -1,5 +1,9 @@
 #!/bin/bash
-# tier: quick
+# **Not in a tier**: this is a tool rather than a check. It takes a cell
+# as its first argument and drives runs of ten minutes each, so a tier
+# that calls it with no arguments gets "$1: unbound variable" and a
+# failure in no seconds -- which is what the quick tier had been
+# reporting (2026-09-23).
 # [NET_SIM]'s table, one cell: N driven runs (drive.sh, seed 5, GOAL 3,
 # 10 min) with or without the proxy, one line each appended to the table
 # under local/options_for_NET_SIM/ (its logs in a directory beside): whether the goal was met and when, the
