@@ -389,18 +389,22 @@ local function apply_technique(node)
 	end
 end
 
--- **Where a voxel is, in the scene.** Voxel v spans [v, v + 1], so its
--- centre is half a voxel past its index. One place for it, because it
--- was written out by hand at four call sites and the selection box got
--- it wrong (user, 2026-09-23: the box is off from the voxels).
+-- **Where a voxel is, in the scene: on its own index.** A voxel spans
+-- [v - 0.5, v + 0.5], so turning an index into a position adds nothing
+-- -- and every place that added half a voxel was half a voxel out
+-- (user, 2026-09-23: the box and the voxel render about half a voxel
+-- apart on each axis, the slide starts half a voxel out on all three,
+-- and the placement threshold is off by the same). One place for it
+-- now, and one for the inverse.
 local function at_voxel(x, y, z)
-	return magic.Vector3(x + 0.5, y + 0.5, z + 0.5)
+	return magic.Vector3(x, y, z)
 end
 
--- And back: which voxel a point in the scene is inside. Voxel v spans
--- [v, v + 1], so this is the plain floor of the coordinate.
+-- And back: which voxel a point in the scene is in. The nearest index,
+-- not the one below it -- flooring is what put the placement threshold
+-- half a voxel off, which shows on a floor in both horizontal axes.
 local function voxel_of(p)
-	return math.floor(p)
+	return math.floor(p + 0.5)
 end
 
 local CHUNK = 16
@@ -642,10 +646,12 @@ for b = 1, BAYS do
 	-- and the margin has a lighting reason as well as a visual one, a
 	-- point light at no distance from a face burning it white.
 	local p = room.pockets[b]
+	-- The middle of the indices the pocket covers: x0 .. x0 + sx - 1 is
+	-- centred on x0 + (sx - 1) / 2, a voxel being centred on its index
 	orb_places[b] = {
-		x = (p.x0 + p.sx / 2) * VOXEL_M,
-		y = (p.y0 + p.sy / 2) * VOXEL_M,
-		z = (p.mouth - p.sz / 2 + 0.5) * VOXEL_M,
+		x = (p.x0 + (p.sx - 1) / 2) * VOXEL_M,
+		y = (p.y0 + (p.sy - 1) / 2) * VOXEL_M,
+		z = (p.mouth - (p.sz - 1) / 2) * VOXEL_M,
 	}
 	bay_desc[#bay_desc + 1] = string.format("%d %d %d %d%d%d", p.x0, p.y0,
 			p.mouth, p.sx, p.sy, p.sz)
@@ -871,9 +877,9 @@ do
 	kept[#kept + 1] = m
 	local node = scene:CreateChild("opening")
 	node.position = magic.Vector3(
-			(room.OPEN_X0 + room.OPEN_X1 + 1) / 2,
+			(room.OPEN_X0 + room.OPEN_X1) / 2,
 			room.Y_TOP + 0.5,
-			(room.OPEN_Z0 + room.OPEN_Z1 + 1) / 2)
+			(room.OPEN_Z0 + room.OPEN_Z1) / 2)
 	node.scale = magic.Vector3(room.OPEN_X1 - room.OPEN_X0 + 1, 0.3,
 			room.OPEN_Z1 - room.OPEN_Z0 + 1)
 	local o = node:CreateComponent("StaticModel")
@@ -1558,11 +1564,9 @@ local fps = {x = HOME_FROM.x, y = FPS_EYE, z = HOME_FROM.z,
 -- floor is flat at y = 0, which is true of this room and of no other.
 local PLAYER_R = 0.25
 local function solid_at(x, y, z)
-	-- Metres in, and the same off-by-one the ray had: a point is in the
-	-- voxel whose index is the floor plus one
-	return room.voxel_at(math.floor(x / VOXEL_M),
-			math.floor(y / VOXEL_M),
-			math.floor(z / VOXEL_M)) ~= room.id.air
+	-- Metres in, and the same rounding the ray uses
+	return room.voxel_at(voxel_of(x / VOXEL_M), voxel_of(y / VOXEL_M),
+			voxel_of(z / VOXEL_M)) ~= room.id.air
 end
 local function blocked(x, y, z)
 	for _, dx in ipairs({-PLAYER_R, PLAYER_R}) do
@@ -1854,8 +1858,8 @@ local function burst(x, y, z)
 	for _ = 1, 8 do
 		if #motes >= MAX_MOTES then break end
 		local n = scene:CreateChild("mote")
-		n.position = magic.Vector3(x + math.random(),
-				y + math.random(), z + math.random())
+		n.position = magic.Vector3(x - 0.5 + math.random(),
+				y - 0.5 + math.random(), z - 0.5 + math.random())
 		n.scale = magic.Vector3(0.22, 0.22, 0.22)
 		local o = n:CreateComponent("StaticModel")
 		o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
@@ -1943,8 +1947,8 @@ function handle_dig_update(event_type, event_data)
 		local e = math.min(1, hold_t / DIG_SECONDS)
 		local dx, dy, dz = dislodge_dir(x, y, z)
 		lift.enabled = true
-		lift.position = magic.Vector3(x + 0.5 + dx * e * 0.5,
-				y + 0.5 + dy * e * 0.5, z + 0.5 + dz * e * 0.5)
+		lift.position = magic.Vector3(x + dx * e * 0.5,
+				y + dy * e * 0.5, z + dz * e * 0.5)
 		if hold_t >= DIG_SECONDS then
 			hold_t = 0
 			lift.enabled = false
@@ -1975,9 +1979,9 @@ function place_voxel()
 	local x, y, z = pv[4], pv[5], pv[6]
 	if room.voxel_at(x, y, z) ~= room.id.air then return end
 	-- Not inside the player, who has no body to be pushed out of one
-	local px = math.floor(cam.from.x / VOXEL_M)
-	local pz = math.floor(cam.from.z / VOXEL_M)
-	local py = math.floor((cam.from.y - 1.6) / VOXEL_M)
+	local px = voxel_of(cam.from.x / VOXEL_M)
+	local pz = voxel_of(cam.from.z / VOXEL_M)
+	local py = voxel_of((cam.from.y - 1.6) / VOXEL_M)
 	if x == px and z == pz and (y == py or y == py + 1 or y == py + 2) then
 		return
 	end
@@ -2181,9 +2185,9 @@ function place_voxel()
 	local x, y, z = pv[4], pv[5], pv[6]
 	if room.voxel_at(x, y, z) ~= room.id.air then return end
 	-- Not inside the player, who has no body to be pushed out of one
-	local px = math.floor(cam.from.x / VOXEL_M)
-	local pz = math.floor(cam.from.z / VOXEL_M)
-	local py = math.floor((cam.from.y - 1.6) / VOXEL_M)
+	local px = voxel_of(cam.from.x / VOXEL_M)
+	local pz = voxel_of(cam.from.z / VOXEL_M)
+	local py = voxel_of((cam.from.y - 1.6) / VOXEL_M)
 	if x == px and z == pz and (y == py or y == py + 1 or y == py + 2) then
 		return
 	end
@@ -2361,7 +2365,7 @@ local function build_flying(b)
 			if v then
 				i = i + 1
 				local node = part("Box",
-						magic.Vector3(x * VOXEL_M, (y + 0.5) * VOXEL_M,
+						magic.Vector3(x * VOXEL_M, y * VOXEL_M,
 						vz * VOXEL_M),
 						magic.Vector3(VOXEL_M, VOXEL_M, VOXEL_M), stone)
 				local pos = node.position
