@@ -49,7 +49,9 @@ function M.new(magic, log)
 		t = 0,              -- samples generated since the start
 		voices = 1,         -- how many drone voices are alight
 		phase = {0, 0, 0, 0},
-		env = {kick = 0, hat = 0, bass = 0},
+		env = {kick = 0, hat = 0, bass = 0, thunk = 0},
+		thunk_wanted = false,
+		thunk_f = 0,
 		kick_f = 60,
 		bass_f = 55,
 		lp = 0,
@@ -74,11 +76,27 @@ function M.new(magic, log)
 		return self.noise / 1073741823.5 - 1
 	end
 
+	-- **The selection thunk**: the era's menus answered a choice with a
+	-- sound that felt like a switch closing, and this room has a synth
+	-- already, so it costs an envelope rather than an asset.
+	--
+	-- simplified: it lands at the start of the next block, so it is up
+	-- to the buffer's length late -- 0.2 s. The upgrade is a shorter
+	-- buffer, or writing it into the block already queued.
+	function s:thunk()
+		self.thunk_wanted = true
+	end
+
 	-- One block of samples, mixed and written
 	function s:fill()
 		local buf = self.buffer
 		buf:Clear()
 		local step_len = RATE * CYCLE / STEPS
+		if self.thunk_wanted then
+			self.thunk_wanted = false
+			self.env.thunk = 1
+			self.thunk_f = 320
+		end
 		for i = 0, BLOCK - 1 do
 			local t = self.t + i
 			-- Where in the bar this sample is, and whether it starts a step
@@ -125,6 +143,13 @@ function M.new(magic, log)
 				drone = drone + math.sin(self.phase[2 + v] * 6.2831853)
 			end
 			drone = drone * 0.06 * math.min(self.voices, 6) / 6
+			-- The thunk: a short body falling fast, with a click on the
+			-- front of it -- a switch closing rather than a note
+			self.thunk_f = 58 + (self.thunk_f - 58) * 0.9986
+			self.phase[4] = (self.phase[4] + self.thunk_f / RATE) % 1
+			local thunk = (math.sin(self.phase[4] * 6.2831853) * 0.7 +
+					(self.env.thunk > 0.82 and n * 0.5 or 0)) * self.env.thunk
+			self.env.thunk = self.env.thunk * 0.9990
 			-- One delay line, on everything but the kick
 			local d = self.delay[self.delay_i]
 			local wet = hat * 0.5 + bass * 0.3
@@ -132,7 +157,8 @@ function M.new(magic, log)
 			self.delay_i = self.delay_i % self.delay_n + 1
 			-- The mix, through a soft limiter: x/(1+|x|) never clips and
 			-- needs no lookahead, which a room's bed does not miss
-			local x = kick * 0.9 + hat * 0.35 + bass * 0.45 + drone + d * 0.35
+			local x = kick * 0.9 + hat * 0.35 + bass * 0.45 + drone +
+					d * 0.35 + thunk * 0.8
 			x = x / (1 + math.abs(x))
 			buf:WriteShort(math.floor(x * 20000))
 		end
@@ -190,8 +216,17 @@ function M.self_check(magic)
 		last = s.env.kick
 	end
 	assert(#hits >= 2, "the kick fires " .. #hits .. " times in a bar")
+	-- And the thunk: asking for one has to change what comes out
+	local quiet = s.stream.bufferNumBytes
+	s:fill()
+	local a = s.stream.bufferNumBytes - quiet
+	s:thunk()
+	s:fill()
+	assert(s.env.thunk > 0.5, "the thunk rang")
+	assert(s.stream.bufferNumBytes - quiet == a * 2, "and wrote a block")
 	return string.format("synth ok: %d samples a block, %d kicks in a bar, " ..
-			"%.2f s buffered", BLOCK, #hits, s.stream.bufferLength)
+			"the thunk rings, %.2f s buffered", BLOCK, #hits,
+			s.stream.bufferLength)
 end
 
 return M

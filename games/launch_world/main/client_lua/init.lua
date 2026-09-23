@@ -962,7 +962,11 @@ apply_camera()
 
 local name_node = scene:CreateChild("orb_name")
 local name_text = name_node:CreateComponent("Text3D")
-name_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 36)
+-- **Typography as graphic design**, which is what that era did with a
+-- name: huge letterforms and wide tracking, not a centred column of
+-- small labels. There is no tracking setting on a Text3D, so the
+-- spacing is spaces -- which is how it was done then too.
+name_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 64)
 name_text:SetColor(magic.Color(1, 1, 1, 1))
 name_text:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 name_text.text = ""
@@ -997,13 +1001,17 @@ function handle_orb_update()
 	if best ~= pointed_orb then
 		pointed_orb = best
 		local o = ORBS[best]
-		name_text.text = o and o.name or ""
+		name_text.text = o and o.name:upper():gsub("(.)", "%1 "):gsub(" $", "")
+				or ""
 		log:info("pointing at orb " .. best .. ": " ..
 				(o and o.name or "?"))
 	end
 	if best > 0 then
 		local p = orb_nodes[best].position
-		name_node.position = magic.Vector3(p.x, p.y + 1.6 * U, p.z)
+		-- In front of the wall, not above the orb: the orb sits in a
+		-- niche and anything above it is inside the stone
+		name_node.position = magic.Vector3(p.x, p.y + 2.6 * U,
+				(BAY_Z + 2.5) * VOXEL_M * U)
 	end
 end
 magic.SubscribeToEvent("Update", "handle_orb_update")
@@ -1455,6 +1463,9 @@ end
 -- in: there is nothing behind it to run yet, and the transition is the
 -- content.
 local function launch(b)
+	if kept.bed then
+		kept.bed:thunk()
+	end
 	if b == "terminal" then
 		sit_at_terminal()
 		return
@@ -1585,6 +1596,11 @@ function handle_keydown(event_type, event_data)
 	-- made: the bays carried the meander until they became voxels, and
 	-- then the materials sat in the file drawing nothing. So a run
 	-- shoots the frame with the friezes plain and asserts it changed.
+	if key == magic.KEY_RETURN or key == magic.KEY_ESCAPE then
+		if kept.bed then
+			kept.bed:thunk()
+		end
+	end
 	if key == magic.KEY_F7 then
 		still = not still
 		log:info("idle drift " .. (still and "frozen" or "running"))

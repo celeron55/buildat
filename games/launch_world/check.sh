@@ -154,6 +154,14 @@ if [ "$srv_bays" != "$cli_bays" ]; then
 	echo "FAIL: the client's bays are '$cli_bays'"
 	exit 1
 fi
+# The orb being pointed at says its name; it was drawn inside the stone
+# above its niche for a while, which is the kind of thing a log line
+# does not catch and a shot does
+if ! grep -aq "pointing at orb" "$out/cli.log"; then
+	echo "FAIL: no orb is ever pointed at"
+	exit 1
+fi
+grep -a "pointing at orb" "$out/cli.log" | head -1 | sed 's/.*launch_w[a-z]*: //'
 for what in "ornament" "synth"; do
 	if ! grep -aq "$what ok" "$out/cli.log"; then
 		echo "FAIL: the $what did not pass its own check"
