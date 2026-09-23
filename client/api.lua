@@ -313,6 +313,49 @@ end
 -- The launch UI that was asked for and did not load, or nil: what the
 -- one that did load tells the user, so a setting cannot quietly do
 -- nothing
+-- **Evaluating a line of Lua, in the caller's own environment**
+-- ([LAUNCH_CONSOLE]). A console whose lines each ran in a fresh
+-- environment would teach something that does not transfer: `local x`
+-- on one line and `x` on the next has to mean what it means everywhere
+-- else. So the chunk is loaded here and given `getfenv(2)` -- the
+-- sandbox wrapper of whoever called -- which is the same environment
+-- the caller's own code runs in and no wider.
+--
+-- **Bytecode is refused**, as `run_code_in_sandbox` refuses it: a chunk
+-- beginning with byte 27 is how a string-eval escapes a LuaJIT sandbox.
+buildat.safe.eval = function(code, chunkname)
+	if type(code) ~= "string" then
+		return false, "eval(code): a string"
+	end
+	if code:byte(1) == 27 then
+		return false, "binary bytecode prohibited"
+	end
+	if type(chunkname) ~= "string" then
+		chunkname = "=eval"
+	end
+	local f, err = loadstring(code, chunkname)
+	if not f then
+		return false, err
+	end
+	setfenv(f, getfenv(2))
+	local r = {pcall(f)}
+	local ok = table.remove(r, 1)
+	return ok, unpack(r)
+end
+-- **The API document**, for a launch UI that shows it beside a console
+-- ([LAUNCH_CONSOLE]). One named file of the client's own documentation,
+-- read-only; not a way to read files.
+buildat.safe.client_api_text = function()
+	local f = io.open(__buildat_get_path("share") .. "/doc/client_api.txt",
+			"rb")
+	if not f then
+		return nil
+	end
+	local text = f:read("*a")
+	f:close()
+	return text
+end
+
 -- **Quitting**, which is a launch UI's own verb ([LAUNCH_SANDBOX]): the
 -- client shuts down. It is `disconnect()` under another name -- with no
 -- connection to drop, dropping it is what leaving is -- and a launcher

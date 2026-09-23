@@ -1573,6 +1573,13 @@ function M.define(dst, util)
 	util.wc("LineEdit", {
 		inherited_from_by_wrapper = dst.BorderImage,
 		properties = {
+			-- **What is in the field**, which nothing could read: a
+			-- sandboxed screen could make a text field and never learn
+			-- what was typed into it ([LAUNCH_CONSOLE] found this). The
+			-- field is the user's own and its contents are what they
+			-- just typed into this program.
+			text = util.simple_property("string"),
+			cursorPosition = util.simple_property("number"),
 			-- The character a password field shows instead of what was
 			-- typed, as its code point; 0 shows the text itself
 			echoCharacter = util.simple_property("number"),
