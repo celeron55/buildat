@@ -660,7 +660,103 @@ end
 -- on a white or a chrome one. Generated from the name where the thing
 -- ships no icon of its own.
 marks_own = 0
-local function mark_texture(mark, icon)
+-- **The whole mark, not the middle of it** (user, 2026-09-23: only the
+-- centre of a logo shows, because the sphere's UV region crops the tile
+-- it is drawn on). The picture is drawn into the middle half of its
+-- tile and the rest is left as "no mark", so what the orb carries is
+-- the logo entire.
+local MARK_SIZE = 128
+-- How many pixels of the last mark were the mark, which is what says a
+-- thing has one at all and that two things do not share it
+last_mark_ink = 0
+-- **And one bit, not a shade, where the mark cuts a glow** (user, and
+-- the arithmetic agrees): a glowing orb's emissive is multiplied by 26
+-- so that its smallest channel clears saturation, and a masked pixel
+-- only comes back out of white if its mask falls below about 1/26 --
+-- four per cent. Anything greyer than that still saturates, so on a
+-- glowing orb the mark is nought where it cuts and one where it does
+-- not. The threshold is luminance, and **alpha decides first**: most
+-- icons are cut-outs, and a transparent pixel is background whatever
+-- colour it is.
+local ONE_BIT_AT = 0.5
+-- **Which pixels are the mark**: a cut-out says so with its alpha, and
+-- the plan's rule is alpha first. But an icon that is white lines on
+-- transparency -- the buildat logo, and most of this tree's -- has
+-- *luminance* 1 everywhere it is drawn, so a luminance threshold makes
+-- it vanish. So: if the picture has transparency at all, the shape is
+-- its alpha; if it does not, the shape is its dark ink.
+local function bit_of(c, cutout)
+	if cutout then
+		return c.a >= 0.5
+	end
+	return (c.r * 0.299 + c.g * 0.587 + c.b * 0.114) < ONE_BIT_AT
+end
+
+local function is_cutout(src)
+	local w, h = src.width, src.height
+	local clear = 0
+	for y = 0, 7 do
+		for x = 0, 7 do
+			local c = src:GetPixel(math.floor(x * w / 8),
+					math.floor(y * h / 8))
+			if c.a < 0.5 then clear = clear + 1 end
+		end
+	end
+	return clear >= 4
+end
+
+-- `invert` swaps what the bit means, because the two slots want
+-- opposite polarity: a glow **mask** keeps the light where it is one
+-- and cuts it where it is nought, and a **roughness** map leaves the
+-- surface where it is nought and roughens it where it is one. The same
+-- picture, read from either end.
+local function mark_image(src, one_bit, invert)
+	local img = magic.Image:new()
+	assert(img:SetSize(MARK_SIZE, MARK_SIZE, 3), "the mark's tile")
+	local bg = invert and 0.0 or 1.0
+	img:Clear(magic.Color(bg, bg, bg, 1))
+	local inner = math.floor(MARK_SIZE / 2)
+	local off = math.floor((MARK_SIZE - inner) / 2)
+	local sw, sh = src.width, src.height
+	if sw < 1 or sh < 1 then return img end
+	local cutout = is_cutout(src)
+	local ink = 0
+	for y = 0, inner - 1 do
+		for x = 0, inner - 1 do
+			local c = src:GetPixel(math.floor(x * sw / inner),
+					math.floor(y * sh / inner))
+			if one_bit then
+				-- Nought where the mark is, one where it is not: on a
+				-- glowing orb that is the difference between a hole in
+				-- the light and a pixel that still saturates
+				local on = bit_of(c, cutout)
+				if on then ink = ink + 1 end
+				local v = on and (invert and 1.0 or 0.0) or bg
+				img:SetPixel(off + x, off + y, magic.Color(v, v, v, 1))
+			else
+				if bit_of(c, cutout) then ink = ink + 1 end
+				img:SetPixel(off + x, off + y,
+						c.a < 0.5 and magic.Color(1, 1, 1, 1) or c)
+			end
+		end
+	end
+	last_mark_ink = ink
+	return img
+end
+
+-- A flat white texel, for a material whose picture is in another slot
+local function white_texture()
+	if kept.white_tex then return kept.white_tex end
+	local img = magic.Image:new()
+	img:SetSize(2, 2, 3)
+	img:Clear(magic.Color(1, 1, 1, 1))
+	local t = magic.Texture2D:new()
+	t:SetData(img)
+	kept.white_img, kept.white_tex = img, t
+	return t
+end
+
+local function mark_texture(mark, icon, one_bit, invert)
 	if not mark then return nil end
 	-- **The grid's fallback is not a mark.** `launch_grid` hands out
 	-- `buildat_logo.png` for anything whose launcher names no icon, and
@@ -670,28 +766,40 @@ local function mark_texture(mark, icon)
 	if icon == "buildat_logo.png" then
 		icon = nil
 	end
+	local image
 	if icon and magic.cache:Exists(icon) then
 		marks_own = (marks_own or 0) + 1
 		-- **A game's own icon is its mark** (the launcher plan's step 5):
 		-- the launch grid resolves an icon to a resource name on the
 		-- trusted side, and a game that ships one has said what it looks
 		-- like better than a hash of its name can
-		return magic.cache:GetResource("Texture2D", icon)
-	end
-	local f = ornament.mark(64, ornament.seed_of(mark))
-	local image = magic.Image:new()
-	assert(image:SetSize(f.size, f.size, 3), "the mark")
-	for y = 0, f.size - 1 do
-		for x = 0, f.size - 1 do
-			local v = ornament.at(f, x, y)
-			image:SetPixel(x, y, magic.Color(v, v, v, 1))
+		local src = magic.cache:GetResource("Image", icon)
+		if src then
+			image = mark_image(src, one_bit, invert)
 		end
+	end
+	if not image then
+		local f = ornament.mark(64, ornament.seed_of(mark))
+		local gen = magic.Image:new()
+		assert(gen:SetSize(f.size, f.size, 3), "the mark")
+		for y = 0, f.size - 1 do
+			for x = 0, f.size - 1 do
+				local v = ornament.at(f, x, y)
+				if one_bit then
+					v = v > ONE_BIT_AT and 1.0 or 0.0
+				end
+				gen:SetPixel(x, y, magic.Color(v, v, v, 1))
+			end
+		end
+		kept[#kept + 1] = gen
+		image = mark_image(gen, one_bit, invert)
 	end
 	local t = magic.Texture2D:new()
 	assert(t:SetData(image), "the mark's texture")
 	t.filterMode = magic.FILTER_BILINEAR
 	kept[#kept + 1] = image
 	kept[#kept + 1] = t
+	log:info("mark: " .. tostring(mark) .. " ink " .. last_mark_ink)
 	return t
 end
 
@@ -702,7 +810,42 @@ end
 -- roughness change, which means the mark in the technique's spec slot
 -- and a second generated image; this reads as an etch at a glance and
 -- costs one texture.
+-- **The options round** ([LAUNCH_WORLD]'s mark, 2026-09-23), and it is
+-- about the white and the chrome orbs only -- a glowing one needs the
+-- one-bit mark whatever is picked, since nothing greyer survives an
+-- emissive of 26.
+--
+--   A (BUILDAT_LAUNCH_MARK=A, the default): the icon in full colour in
+--     the diffuse, padded so the whole of it shows -- a coloured
+--     picture suspended in a glass marble.
+--   B (BUILDAT_LAUNCH_MARK=B): the same logo as one bit in the
+--     **roughness**, which is what an etch is: the surface takes the
+--     light differently where the mark is, rather than wearing a
+--     picture of it. `sSpecMap.r` adds to roughness in Urho3D's
+--     metallic-roughness shader, so the mark's 0 leaves the mirror and
+--     its 1 makes that patch matte.
+local function mark_option()
+	return (env("BUILDAT_LAUNCH_MARK") == "B") and "B" or "A"
+end
+
 local function etched(r, g, b, roughness, metallic, mark, icon)
+	if mark_option() == "B" then
+		white_texture()
+		local t = mark_texture(mark, icon, true, true)
+		if not t then return nil end
+		local m = magic.Material:new()
+		m:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/PBR/PBRMetallicRoughDiffSpec.xml"))
+		-- The mark is the rough patch: its one is added to roughness,
+		-- its nought leaves the surface as the material says
+		m:SetTexture(magic.TU_DIFFUSE, kept.white_tex)
+		m:SetTexture(magic.TU_SPECULAR, t)
+		m:SetShaderParameter("MatDiffColor", magic.Color(r, g, b, 1))
+		m:SetShaderParameter("Roughness", roughness)
+		m:SetShaderParameter("Metallic", metallic)
+		kept[#kept + 1] = m
+		return m
+	end
 	local t = mark_texture(mark, icon)
 	if not t then return nil end
 	return material(magic.Color(r, g, b, 1), roughness, metallic, t)
@@ -710,7 +853,8 @@ end
 
 local function glow(colour, mark, icon)
 	local m = magic.Material:new()
-	local t = mark_texture(mark, icon)
+	-- One bit: nothing else survives an emissive multiplied by 26
+	local t = mark_texture(mark, icon, true)
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
 			t and "Techniques/DiffUnlit.xml" or
 			"Techniques/NoTextureUnlit.xml"))

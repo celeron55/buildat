@@ -102,6 +102,13 @@ fi
 	echo "delay 3600"
 	echo "keyup W"
 	echo "delay 700"
+	# **Look at the floor first**: flush against the wall the ray starts
+	# inside the stone, so there is no empty voxel in front of what is
+	# pointed at and nothing to place against -- which is what the
+	# standing pitch changing by a few degrees did to this step
+	# (2026-09-23). Twenty degrees down is the floor a step ahead.
+	echo "look 180 -20"
+	echo "delay 500"
 	echo "mouse_click right"
 	echo "delay 700"
 	# **A dig let go of inside the second puts the voxel back**, so this
@@ -459,6 +466,19 @@ for want in "dissolve: bay" "launch: " "terminal: sat down"; do
 		exit 1
 	fi
 done
+
+# **Every orb has a mark and they are not all the same one** (the
+# playtests asked for this three times and no check covered it): the
+# room says how many pixels of each mark are the mark, so an empty one
+# and a shared one are both visible from the log.
+inks=$(grep -a "launch_w.*: mark: " "$out/cli.log" | sed 's/.*ink //' |
+	sort -u | wc -l)
+blank=$(grep -ac "launch_w.*: mark: .* ink 0$" "$out/cli.log")
+echo "the room drew marks of $inks different weights, $blank of them empty"
+if [ "$inks" -lt 3 ] || [ "$blank" -gt 0 ]; then
+	echo "FAIL: the orbs share a mark, or one of them has none"
+	exit 1
+fi
 
 walked=$(grep -ac "launch_w.*: prompt: match [0-9]* of " "$out/cli.log")
 matched=$(grep -a "launch_w.*: prompt: \"tes\" matches " "$out/cli.log" |
