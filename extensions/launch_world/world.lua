@@ -1028,18 +1028,28 @@ label:SetPosition(8, -8)
 -- genuinely *is* a set of connections, which is why this mapping is the
 -- honest one rather than a list pinned to a wall.
 --
--- simplified: the ports are the server orbs' own entries, with a ping
--- written beside them, because nothing in this room talks to a network
--- yet. The upgrade is the launcher's own list and its pings, which is
--- the same table with another source.
+-- **The list is the client's own now**: network.known_addresses() is
+-- every address this client has used, last used first, which is what
+-- "the most recently used nearest spawn" asks for. A serverlist URL is
+-- not a server, so the https ones are left out.
+--
+-- simplified: **nothing pings**, so the LED is lit for an address the
+-- player accepted and dark for one they did not, and it does not blink.
+-- A rate invented out of a timestamp would read as a measurement and
+-- would not be one. The blink below is kept for when something measures
+-- a round trip.
+local network = require("buildat/extension/network").safe
 local PATCH = {}
-for _, o in ipairs(ORBS) do
-	if not o.warm then
-		PATCH[#PATCH + 1] = o
+for _, a in ipairs(network.known_addresses()) do
+	if #PATCH < 8 and a.uri:sub(1, 4) ~= "http" then
+		PATCH[#PATCH + 1] = {name = a.name ~= "" and a.name or a.uri,
+			uri = a.uri, live = a.accepted}
 	end
 end
--- One dead host, because "unlit" has to be visible to mean anything
-PATCH[#PATCH + 1] = {name = "gone.example.com", warm = false, ping = nil}
+if #PATCH == 0 then
+	-- A bay with no ports is not a bay; an empty one says so
+	PATCH[1] = {name = "no server yet", live = false}
+end
 
 local patch_leds = {}
 do
@@ -1064,14 +1074,14 @@ do
 		local led_mat = glow(magic.Color(0, 0, 0, 1))
 		part("Box", magic.Vector3(x0 - 0.56, 1.05, z),
 				magic.Vector3(0.12, 0.16, 0.34), led_mat)
-		patch_leds[i] = {mat = led_mat, ping = srv.ping}
+		patch_leds[i] = {mat = led_mat, live = srv.live, ping = srv.ping}
 		-- The name above the port, always on here: a patch bay is read by
 		-- walking along it, and three labels is not a label wall
 		local label = scene:CreateChild("port_name")
 		label.position = V(x0 - 0.7, 2.75, z)
 		local t = label:CreateComponent("Text3D")
 		t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 30)
-		t:SetColor(srv.ping and magic.Color(0.55, 0.75, 0.85, 1) or
+		t:SetColor(srv.live and magic.Color(0.55, 0.75, 0.85, 1) or
 				magic.Color(0.32, 0.30, 0.30, 1))
 		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 		t.text = srv.name
@@ -1086,7 +1096,10 @@ patch_t = 0
 function handle_patch_update(event_type, event_data)
 	patch_t = patch_t + event_data:GetFloat("TimeStep")
 	for _, led in ipairs(patch_leds) do
-		local on = false
+		-- Blinking at the ping's rate when something has measured one,
+		-- steady when the address is merely one the player accepted,
+		-- dark when it is not
+		local on = led.live
 		if led.ping then
 			local period = led.ping / 1000
 			on = (patch_t % period) < period * 0.35
@@ -1714,14 +1727,19 @@ local function draw_panel()
 	row("sound", "synthesised, " .. #orb_nodes .. " drone voices")
 	y = y + 14
 	row("CONTENTDB", "", magic.Color(1, 1, 1, 1))
+	-- What the room holds, as rows: the pockets' games, then the floor's
+	-- launch actions and saves. The terminal is the one place a list is
+	-- a list, which is what makes it the way out for a player who does
+	-- not yet know what the room is.
 	for i, o in ipairs(ORBS) do
 		if o.empty then
 			row("(empty slot " .. i .. ")", "pick a game to install",
 					magic.Color(1.0, 0.72, 0.30, 1))
+		elseif o.save then
+			row(o.name, "save of " .. o.game)
 		else
-			row(o.name, o.warm and "installed" or
-					("server" .. (o.ping and (", " .. o.ping .. " ms") or
-					", no answer")))
+			row(o.name, o.kind == "game" and "game" or
+					(o.kind or "") .. " launch action")
 		end
 	end
 	y = y + 14
