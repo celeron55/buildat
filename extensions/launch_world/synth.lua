@@ -59,8 +59,9 @@ function M.new(magic, log)
 		log = log,
 		t = 0,              -- samples generated since the start
 		voices = 1,         -- how many drone voices are alight
-		phase = {0, 0, 0, 0},
-		env = {kick = 0, hat = 0, bass = 0, thunk = 0},
+		phase = {0, 0, 0, 0, 0},
+		env = {kick = 0, hat = 0, bass = 0, thunk = 0, beep = 0},
+		beep_wanted = false,
 		-- **The pattern never starts or stops** ([ROOM_SOUND]): a beat
 		-- that begins has an entrance and a phase, and one that is
 		-- always running and merely quiet has neither. So this is a
@@ -105,6 +106,15 @@ function M.new(magic, log)
 		self.thunk_wanted = true
 	end
 
+	-- **The desk answers with a short hollow beep** ([ROOM_SOUND]).
+	-- Hollow is odd harmonics, which is a pulse wave -- a square is the
+	-- cheapest one -- and it is pitched to the drones' own root two
+	-- octaves up, so it belongs to the room rather than arriving from
+	-- somewhere else. Short, with a fast decay.
+	function s:beep()
+		self.beep_wanted = true
+	end
+
 	-- **Rises quickly and falls slowly**: rising is what gives the
 	-- pace, and the slow fall is the hysteresis that stops the level
 	-- strobing as the crosshair crosses a rank of orbs. One number,
@@ -123,6 +133,10 @@ function M.new(magic, log)
 			self.thunk_wanted = false
 			self.env.thunk = 1
 			self.thunk_f = 320
+		end
+		if self.beep_wanted then
+			self.beep_wanted = false
+			self.env.beep = 1
 		end
 		local up = self.pattern_want > self.pattern
 		self.pattern = self.pattern +
@@ -167,9 +181,15 @@ function M.new(magic, log)
 			-- The drone: one detuned pair per voice alight, which is what
 			-- makes the room's hum the list of games
 			local drone = 0
+			-- **The bed is the core, and it is low**: the orbs carry
+			-- the room's pitches now ([ROOM_SOUND]), so what is left
+			-- here is the thing underneath them that does not pan --
+			-- two sines a beat apart, an octave below the drones'
+			-- root, so the room never goes quiet when the player faces
+			-- away from the wall
 			for v = 1, math.min(self.voices, 2) do
 				self.phase[2 + v] = (self.phase[2 + v] +
-						(82.5 + v * 0.7) / RATE) % 1
+						(M.DRONE_HZ / 2 + v * 0.35) / RATE) % 1
 				drone = drone + math.sin(self.phase[2 + v] * 6.2831853)
 			end
 			drone = drone * 0.06 * math.min(self.voices, 6) / 6
@@ -180,6 +200,11 @@ function M.new(magic, log)
 			local thunk = (math.sin(self.phase[4] * 6.2831853) * 0.7 +
 					(self.env.thunk > 0.82 and n * 0.5 or 0)) * self.env.thunk
 			self.env.thunk = self.env.thunk * 0.9990
+			-- The beep: a square at the root two octaves up, gone in a
+			-- tenth of a second
+			self.phase[5] = (self.phase[5] + M.DRONE_HZ * 4 / RATE) % 1
+			local beep = (self.phase[5] < 0.5 and 1 or -1) * self.env.beep
+			self.env.beep = self.env.beep * 0.9985
 			-- One delay line, on everything but the kick
 			local d = self.delay[self.delay_i]
 			local wet = hat * 0.5 + bass * 0.3
@@ -192,7 +217,8 @@ function M.new(magic, log)
 			-- rather than of loudness
 			local pat = self.pattern
 			local x = (kick * 0.9 + hat * 0.35 + bass * 0.45 + d * 0.35) *
-					pat + drone * (1 - 0.35 * pat) + thunk * 0.8
+					pat + drone * (1 - 0.35 * pat) + thunk * 0.8 +
+					beep * 0.22
 			x = x / (1 + math.abs(x))
 			buf:WriteShort(math.floor(x * 20000))
 		end
@@ -294,6 +320,14 @@ function M.self_check(magic)
 	assert(added == BLOCK * 2, "a block is " .. added .. " bytes")
 	-- A whole bar, block by block, watching where the kick's envelope
 	-- jumps: those are the steps the pattern has a kick on
+	-- **The beep is short and it is odd harmonics**: a square at the
+	-- root two octaves up, gone inside a fifth of a second, which is
+	-- what "hollow" and "short" mean in samples ([ROOM_SOUND])
+	local before = s.env.beep
+	s:beep()
+	s:fill()
+	assert(before == 0 and s.env.beep > 0 and s.env.beep < 0.6,
+			"the beep rings and decays: " .. tostring(s.env.beep))
 	local hits = {}
 	local last = 0
 	local blocks = math.ceil(RATE * CYCLE / BLOCK)

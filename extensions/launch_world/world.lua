@@ -2877,7 +2877,12 @@ function handle_synth_update(event_type, event_data)
 				g = 0.20
 			end
 			if terminal_open then g = g * 0.35 end
-			v.source.gain = g * lfo
+			-- **The duck is ramped, not switched** ([ROOM_SOUND]: about
+			-- 150 ms, or it clicks). One pole per frame, which is the
+			-- same ramp whatever the frame rate is doing.
+			local k = 1 - math.exp(-dt / 0.15)
+			v.gain = (v.gain or 0) + (g - (v.gain or 0)) * k
+			v.source.gain = v.gain * lfo
 		else
 			v.source.gain = 0
 		end
@@ -3832,6 +3837,8 @@ end
 
 local function sit_at_terminal()
 	terminal_open = true
+	-- The desk's own answer, and the orbs duck under it ([ROOM_SOUND])
+	if kept.bed and kept.bed.beep then kept.bed:beep() end
 	draw_panel()
 	panel.visible = true
 	-- Square-on and close, which is what "the camera snaps flat onto it"
