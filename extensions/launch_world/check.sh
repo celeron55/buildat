@@ -296,10 +296,18 @@ fi
 	# that pauses rather than the one that pops a level.
 	echo "event mode fps"
 	echo "delay 900"
+	echo "screenshot $out/prepause.png"
+	echo "delay 400"
 	echo "keypress Escape"
 	echo "delay 700"
 	echo "screenshot $out/paused.png"
 	echo "delay 400"
+	# **The mouse does not turn the camera while a screen is up**
+	# (user, 2026-09-23: the pause menu turned it into yaw and pitch).
+	# A quarter turn's worth of movement, and the frame behind the
+	# dialog has to be the frame it was.
+	echo "mouse_move 220 40"
+	echo "delay 500"
 	echo "keypress Escape"
 	echo "delay 700"
 	echo "screenshot $out/unpaused.png"
@@ -587,6 +595,20 @@ dissolve_ok = moved > 2.0 and back < moved / 3.0
 print("PASS: a bay opens and closes again" if dissolve_ok
 		else "FAIL: the dissolve does not open, or does not come back")
 
+# **A screen on the stack takes the mouse**: with the pause dialog up,
+# 220 pixels of mouse movement must not turn the camera, so the frame
+# after it closes is the frame before it opened -- within the room's own
+# drift, which is a few levels a second and is what the two seconds
+# between these shots allow for.
+before_pause, dbp = mean_of("prepause")
+after_pause, dap = mean_of("unpaused")
+turned = sum(abs(p - q) for p, q in zip(dbp, dap)) / float(len(dbp))
+print("the mouse under the pause dialog moved the frame by %.2f of a "
+		"level" % turned)
+look_ok = turned < 8.0
+print("PASS: a screen on the stack takes the mouse" if look_ok
+		else "FAIL: the mouse still turns the camera under a menu")
+
 # The typing path: the prompt has to show the match it found, the launch
 # has to move the camera, and Escape has to bring the room back to the
 # picture it was
@@ -692,7 +714,7 @@ print("PASS: a source is brighter than a lit wall" if hdr_ok
 		else "FAIL: the picture clips before its shoulder -- HDR is off")
 every = (probe_ok and dissolve_ok and typing_ok and terminal_ok
 		and ornament_ok and drift_ok and attract_ok and hdr_ok and walk_ok
-		and pause_ok)
+		and pause_ok and look_ok)
 # The one line a machine reads, after the ones a person does
 print("PASS: the room is what it says it is" if every
 		else "FAIL: the room is not what it says it is")

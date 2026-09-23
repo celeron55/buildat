@@ -1693,6 +1693,14 @@ readout("b" .. api.version(), {x = 9.0, y = 0.25, z = -1.0}, 0.34,
 -- whose floors are at Y 0 to 3.
 local HOME_FROM = {x = 0.0, y = 1.6, z = 14.0}
 local HOME_AT = {x = 0, y = 1.1, z = -6.0}
+-- **The pitch the standing place looks at**, worked out from the two
+-- above rather than picked: a flight ends looking at HOME_AT and the
+-- walk then applies its own pitch, so a pitch that disagrees with the
+-- flight makes the camera jump the moment the flight hands over --
+-- which read as "the pause menu moves the camera" (2026-09-23), the
+-- dialog being the first thing after a flight that takes a picture.
+local HOME_PITCH = math.deg(math.atan2(HOME_FROM.y - HOME_AT.y,
+		math.abs(HOME_AT.z - HOME_FROM.z)))
 local cam = {
 	from = {x = HOME_FROM.x, y = HOME_FROM.y, z = HOME_FROM.z},
 	at = {x = HOME_AT.x, y = HOME_AT.y, z = HOME_AT.z},
@@ -1763,7 +1771,7 @@ terminal_open = false
 mode = "fps"
 local fps = {x = HOME_FROM.x, y = FPS_EYE, z = HOME_FROM.z,
 	-- Urho3D's yaw 0 looks down +z and the wall is at -z
-	yaw = 180.0, pitch = 6.0, vy = 0.0}
+	yaw = 180.0, pitch = HOME_PITCH, vy = 0.0}
 
 -- The room's own voxels are the collision: there is no physics here and
 -- no body, just the description in room.lua asked whether a point is
@@ -1821,7 +1829,15 @@ function handle_fps_update(event_type, event_data)
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if in_game or console_open then return end
-	if mode ~= "fps" or cam.to_from or terminal_open then
+	-- **The camera stays still while a screen is up -- any screen**
+	-- (user, 2026-09-23: the pause menu turned the mouse into yaw and
+	-- pitch). The rule is not "is something drawn over the scene": a
+	-- crosshair, a notice and an orb's name are overlays and they are
+	-- there on purpose. It is **is a screen on the stack** -- the pause
+	-- dialog, the desk, the console -- and this room's answer to the
+	-- same fault [BOX_PLAYTEST_3] found in the Luanti client, where the
+	-- look ran under the settings and key screens.
+	if mode ~= "fps" or cam.to_from or terminal_open or pause_open then
 		return
 	end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
@@ -2373,8 +2389,21 @@ function handle_orb_update(event_type, event_data)
 		-- frame). Text3D is geometry and is occluded like any.
 		local z = ORBS[best] and ORBS[best].floor and p.z or
 				(BAY_Z + room.SLAB_OUT + 1.5) * VOXEL_M * U
-		name_node.position = magic.Vector3(p.x, p.y + 1.5 * U, z)
-		desc_node.position = magic.Vector3(p.x, p.y + 1.0 * U, z)
+		-- **A name that is right at a distance is a wall at arm's
+		-- length** (user, 2026-09-23): it reads well from far off and
+		-- down to about twelve voxels, and nearer than that it grew
+		-- until it ran off the top of the screen. Inside twelve, the
+		-- size and the height above the orb come down with the
+		-- distance -- half at six, which is what the user asked for and
+		-- what `d / 12` gives. Beyond twelve nothing changes.
+		local dx, dy, dz = p.x - view_from.x, p.y - view_from.y,
+				p.z - view_from.z
+		local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+		local k = math.min(1, d / 12)
+		name_node.scale = magic.Vector3(k, k, k)
+		desc_node.scale = magic.Vector3(k, k, k)
+		name_node.position = magic.Vector3(p.x, p.y + 1.5 * U * k, z)
+		desc_node.position = magic.Vector3(p.x, p.y + 1.0 * U * k, z)
 	end
 end
 magic.SubscribeToEvent("Update", "handle_orb_update")
@@ -3630,7 +3659,7 @@ function handle_keydown(event_type, event_data)
 			-- popping out of a pocket the browser flew into would
 			-- otherwise stand the player inside the wall
 			fps.x, fps.y, fps.z = HOME_FROM.x, FPS_EYE, HOME_FROM.z
-			fps.yaw, fps.pitch = 180.0, 6.0
+			fps.yaw, fps.pitch = 180.0, HOME_PITCH
 			fly_to(HOME_FROM, HOME_AT)
 			return
 		end
@@ -3763,7 +3792,7 @@ function handle_seq_mode(event_type, event_data)
 		end
 	end
 	fps.x, fps.y, fps.z = HOME_FROM.x, FPS_EYE, HOME_FROM.z
-	fps.yaw, fps.pitch = 180.0, 6.0
+	fps.yaw, fps.pitch = 180.0, HOME_PITCH
 	set_mode(want)
 	fly_to(HOME_FROM, HOME_AT)
 	log:info("event mode: " .. want .. ", at the standing place")
