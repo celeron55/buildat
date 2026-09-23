@@ -55,9 +55,33 @@ end
 -- **Chekhov's empty pocket**, last: a pocket with nothing in it is what
 -- says there is room for another game, and it is the way to ContentDB
 GAMES[#GAMES + 1] = {name = "install a game", warm = true, empty = true}
+
+-- **The servers** (user, 2026-09-23: three kinds of sphere -- glowing,
+-- white polished, mirror -- and the mirrors are the servers). A server
+-- is a reflective chrome sphere standing on the floor, which is the
+-- plan's own mapping.
+--
+-- simplified: a mock-up list. What belongs here is the client's own
+-- addresses and a fetched serverlist -- `network.known_addresses()` is
+-- already what the patch bay's ports are -- but the room wants a
+-- roomful to look at before that is worth wiring, and a serverlist
+-- fetch is [CONTENTDB]-shaped work of its own.
+local SERVERS = {
+	{name = "buildat.example.org", address = "buildat.example.org:29797"},
+	{name = "drift.example.net", address = "drift.example.net:29797"},
+	{name = "the long night", address = "night.example.org:29797"},
+	{name = "quarry", address = "quarry.example.net:29797"},
+	{name = "mine.example.net", address = "mine.example.net:29797"},
+	{name = "kiln", address = "kiln.example.org:29797"},
+	{name = "far shore", address = "shore.example.net:29797"},
+	{name = "the commons", address = "commons.example.org:29797"},
+	{name = "scrapyard", address = "scrap.example.net:29797"},
+	{name = "localhost", address = "127.0.0.1:29797"},
+}
 room.set_pockets(#GAMES)
 log:info("contents: " .. (#GAMES - 1) .. " games, " .. #FLOOR_ACTIONS ..
-		" other launch actions, " .. #SAVES .. " saves")
+		" other launch actions, " .. #SAVES .. " saves, " .. #SERVERS ..
+		" servers")
 -- The one that installs a game, for the terminal's ContentDB row: the
 -- tree has no extensions/contentdb, so what there is is an import action
 install_action = nil
@@ -638,6 +662,23 @@ for i, a in ipairs(FLOOR_ACTIONS) do
 	orb_places[#orb_places + 1] = {x = col, y = 1.4 * VOXEL_M / 2, z = row}
 end
 
+-- A server is bigger than a game's orb: the reference frame's chrome is
+-- the largest thing standing on its floor
+local SERVER_ACROSS = 3.4
+
+-- **A server is a mirror, and it stands where the room's chrome used to
+-- be.** Those spheres were the reference frame's own furniture standing
+-- in for something; this is the something.
+local SERVER_COLS = {-14.0, -9.5, -5.0, 5.0, 9.5, 14.0}
+for i, sv in ipairs(SERVERS) do
+	local col = SERVER_COLS[(i - 1) % #SERVER_COLS + 1]
+	local row = 0.5 + math.floor((i - 1) / #SERVER_COLS) * 4.5
+	ORBS[#ORBS + 1] = {name = sv.name, address = sv.address, server = true,
+		floor = true, search = sv.name .. " " .. sv.address}
+	orb_places[#orb_places + 1] = {x = col, y = SERVER_ACROSS * VOXEL_M / 2,
+		z = row}
+end
+
 -- **A save is a white sphere too, smaller** (user), and it stands in
 -- front of the launch actions: a save is a thing the player made and the
 -- actions are the tree's, so the player's own are nearer to hand.
@@ -711,6 +752,13 @@ for i, o in ipairs(orb_places) do
 		-- Nothing in the niche but the ring that would hold something,
 		-- dim: an empty socket reads as empty, not as broken
 		part("Torus", magic.Vector3(o.x, o.y, o.z), across(1.4), machined)
+	elseif spec and spec.server then
+		-- **A mirror**: a server is a thing you can see the room in,
+		-- which is the whole of why the reflection probe is here
+		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
+				across(SERVER_ACROSS), chrome)
+		node:GetComponent("StaticModel").castShadows = true
+		orb_nodes[i] = node
 	elseif spec and spec.save then
 		-- Smaller, because it is one save of one game rather than a
 		-- thing to launch on its own
@@ -740,6 +788,10 @@ end
 
 -- The foreground: ten shipped primitives on the checkerboard, the chrome
 -- ones doing what a perfect sphere under a sharp light does
+-- **What is left of the reference frame's furniture.** Its five chrome
+-- spheres are the room's servers now, which is what they were standing
+-- in for; these are the shapes that are not spheres.
+--
 -- **The floor's own things, out of the way of the wall.** A server and a
 -- launch action stand on the floor, and the pockets are at Y 0 to 3 --
 -- knee to chest -- so anything in the middle of the floor stands in
@@ -748,11 +800,6 @@ end
 -- The check's own 99th percentile catches this, having read 110 against
 -- 253 the moment the eye came down to standing height (2026-09-23).
 local PROPS = {
-	{"Sphere", -7.4, 1.55, 6.4, 3.1, "chrome"},
-	{"Sphere", -3.6, 1.15, 9.4, 2.3, "chrome"},
-	{"Sphere", 4.8, 1.55, 7.0, 3.1, "chrome"},
-	{"Sphere", 9.2, 1.30, 9.8, 2.6, "chrome"},
-	{"Sphere", -11.2, 1.60, 4.0, 3.2, "chrome"},
 	{"Cone", -9.0, 1.35, 9.2, 2.7, "machined"},
 	{"Cylinder", 11.4, 1.25, 5.0, 2.5, "machined"},
 	{"Torus", 1.6, 0.60, 10.2, 2.6, "chrome"},
@@ -2971,6 +3018,14 @@ function launch(b)
 	-- somewhere else takes it there mid-flight.
 	if ORBS[b] and ORBS[b].run then
 		ORBS[b].run()
+	elseif ORBS[b] and ORBS[b].server then
+		-- simplified: the addresses are a mock-up, so there is nothing
+		-- to connect to. What goes here is buildat.connect_server_start
+		-- on a real list -- network.known_addresses() and a fetched
+		-- serverlist -- and it wants the connecting screen's own
+		-- polling, which is launch_menu's.
+		log:info("launch: server " .. ORBS[b].name .. " at " ..
+				ORBS[b].address .. " (the list is a mock-up)")
 	elseif ORBS[b] and ORBS[b].save then
 		-- **A save opens by name.** The launcher starts the save's own
 		-- game with "save=<name>" through the server's -u, which is the
