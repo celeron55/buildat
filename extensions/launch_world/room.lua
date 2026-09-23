@@ -25,6 +25,14 @@ M.Y_TOP = 26
 -- cut into the mass, and rectangles inset to various depths until some
 -- read black. Its nominal surface is BAY_Z; everything else is measured
 -- from there.
+-- **The opening overhead** ([LAUNCH_WORLD]: "a big square opening or
+-- emitter overhead, about 16 to 20 voxels above the floor"). It was a
+-- light with no geometry, so a mirror had nothing to reflect but the
+-- soft pool it cast -- the user, 2026-09-23: the reflective spheres
+-- should show a sharp bright square at the ceiling.
+M.OPEN_X0, M.OPEN_X1 = -9, 9
+M.OPEN_Z0, M.OPEN_Z1 = -4, 12
+
 M.BAY_Z = -18
 M.INSET_IN = 4          -- the deepest an inset goes
 M.BAYS = 6
@@ -270,7 +278,15 @@ function M.voxel_at(x, y, z)
 		if b and bc then return id.column end
 		return id.stone
 	end
-	if y > M.Y_TOP then return id.stone end
+	if y > M.Y_TOP then
+		-- The square is cut right through: what is above the room is
+		-- outside it
+		if x >= M.OPEN_X0 and x <= M.OPEN_X1 and
+				z >= M.OPEN_Z0 and z <= M.OPEN_Z1 then
+			return id.air
+		end
+		return id.stone
+	end
 	return id.air
 end
 
@@ -348,6 +364,10 @@ function M.self_check()
 				M.voxel_at(p.x0 + p.sx, y, z) == M.id.column,
 				"bay " .. b .. " has an ornamented column down each side")
 	end
+	assert(M.voxel_at(0, M.Y_TOP + 2, 4) == M.id.air,
+			"the opening is cut through the ceiling")
+	assert(M.voxel_at(M.OPEN_X1 + 2, M.Y_TOP + 2, 4) == M.id.stone,
+			"and the ceiling beside it is not")
 	assert(M.voxel_at(0, -1, 0) ~= M.voxel_at(2, -1, 0), "the floor checkers")
 	assert(M.voxel_at(0, -1, 0) == M.voxel_at(1, -1, 1) or
 			M.voxel_at(0, -1, 0) == M.voxel_at(0, -1, 1),

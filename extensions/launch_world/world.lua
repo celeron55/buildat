@@ -745,7 +745,33 @@ end
 -- own contrast line is free: the wall's outward face has the orb behind
 -- its plane, so N dot L is negative there and it takes nothing, while
 -- every face inside the pocket looks at the orb.
-local OVERHEAD_Y = 18         -- voxels above the floor, per the plan's 16-20
+-- **The opening's own emitter**, filling the square cut through the
+-- ceiling: unlit and far above 1, so it clips to white and a mirror
+-- shows a sharp bright square where the light comes from. A light casts
+-- nothing a reflection can see; only a surface does.
+do
+	local m = magic.Material:new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTextureUnlit.xml"))
+	m:SetShaderParameter("MatDiffColor", magic.Color(5.2, 5.6, 6.4, 1))
+	kept[#kept + 1] = m
+	local node = scene:CreateChild("opening")
+	node.position = magic.Vector3(
+			(room.OPEN_X0 + room.OPEN_X1 + 1) / 2,
+			room.Y_TOP + 0.5,
+			(room.OPEN_Z0 + room.OPEN_Z1 + 1) / 2)
+	node.scale = magic.Vector3(room.OPEN_X1 - room.OPEN_X0 + 1, 0.3,
+			room.OPEN_Z1 - room.OPEN_Z0 + 1)
+	local o = node:CreateComponent("StaticModel")
+	o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+	o.material = m
+	o.castShadows = false
+	log:info("the opening: " .. (room.OPEN_X1 - room.OPEN_X0 + 1) .. "x" ..
+			(room.OPEN_Z1 - room.OPEN_Z0 + 1) .. " voxels at the ceiling")
+end
+
+-- The light sits just under the opening, which is where it would be
+local OVERHEAD_Y = 25         -- voxels above the floor
 -- **The pockets' orbs and nothing else**: a thing on the floor is a
 -- glossy white sphere and takes the room's light rather than making any,
 -- so the sources are the games and the opening overhead
