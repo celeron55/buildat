@@ -11,6 +11,10 @@
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/options_for_LAUNCH_WORLD"; mkdir -p "$out"
+# **Last run's pictures are not this run's.** The client crashed halfway
+# through a run and every check still reported PASS, off the shots left
+# behind by the run before (2026-09-23).
+rm -f "$out"/*.png
 cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
@@ -107,10 +111,30 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "keypress F5"
 	echo "delay 800"
 	echo "screenshot $out/1-cold_in_warm_out-noprobe.png"
+	# The attract mode: left alone the room shows itself off. The drift
+	# is unfrozen for it and BUILDAT_LAUNCH_ATTRACT makes the wait short.
+	echo "keypress F7"
+	echo "delay 600"
+	echo "screenshot $out/attract-home.png"
+	echo "delay 400"
+	echo "keypress F8"
+	echo "delay 5000"
+	echo "screenshot $out/attract-away.png"
+	echo "delay 400"
+	echo "keypress Space"
+	echo "delay 2400"
+	echo "screenshot $out/attract-back.png"
 	echo "delay 500"
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -s localhost:29795 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+# And the client has to have got to the end of the sequence
+if grep -aq "Crash: SIG" "$out/cli.log"; then
+	echo "FAIL: the client crashed --" \
+			"$(grep -a "Crash: SIG" "$out/cli.log" | head -1)"
+	kill -INT "$srv" 2>/dev/null
+	exit 1
+fi
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 grep -aE "palette preset|ornament ok|synth ok" "$out/cli.log" |
@@ -270,6 +294,19 @@ drift_ok = drift > 0.20
 print("PASS: nothing in the room is static" if drift_ok
 		else "FAIL: the room is a still frame")
 
+# The attract mode: the camera has to leave its standing place when the
+# room is left alone, and come back when it is touched
+ah, dah = mean_of("attract-home")
+aw, daw = mean_of("attract-away")
+ab, dab = mean_of("attract-back")
+went = sum(abs(p - q) for p, q in zip(dah, daw)) / float(len(dah))
+came = sum(abs(p - q) for p, q in zip(dah, dab)) / float(len(dah))
+print("the attract mode moves the frame by %.2f of a level and a key "
+		"brings it back to within %.2f" % (went, came))
+attract_ok = went > 10.0 and came < went / 2.0
+print("PASS: the room shows itself off when left alone" if attract_ok
+		else "FAIL: the attract mode does not run, or does not come back")
+
 # The ornament: the friezes stripped to plain stone have to change the
 # frame, or the generated maps are not reaching anything
 plain, dp = mean_of("no-ornament")
@@ -280,5 +317,5 @@ ornament_ok = ornamented > 1.5
 print("PASS: the generated ornament is on something" if ornament_ok
 		else "FAIL: nothing in the room wears the generated maps")
 sys.exit(0 if (ok and probe_ok and dissolve_ok and typing_ok and
-		terminal_ok and ornament_ok and drift_ok) else 1)
+		terminal_ok and ornament_ok and drift_ok and attract_ok) else 1)
 PY

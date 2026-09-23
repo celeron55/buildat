@@ -317,6 +317,18 @@ log:info("bays " .. BAYS .. " " .. SLAB_H .. " " .. BAY_Z .. " " ..
 -- socket field, standing a little proud of the wall the way a course of
 -- dressed stone stands proud of rubble.
 frieze_nodes = {}
+-- **Two nodes, not two materials.** Putting a material back on a model
+-- later reads freed memory -- a Material in this sandbox lives only
+-- while the engine holds it, and a Lua table holding the wrapper is not
+-- enough (SIGSEGV in RefCounted::AddRef under StaticModel::SetMaterial,
+-- which is what F6 did the first time it was written). So each frieze
+-- is built twice, ornamented and plain, and the toggle enables one.
+local function frieze(pos, scale, mat)
+	local a = part("Box", pos, scale, mat)
+	local b = part("Box", pos, scale, stone)
+	b.enabled = false
+	frieze_nodes[#frieze_nodes + 1] = {a, b}
+end
 do
 	local z = (BAY_Z + 0.55) * VOXEL_M
 	for b = 1, BAYS do
@@ -324,29 +336,24 @@ do
 		local tier = BAY_TIER[b]
 		local w = bay_width(tier) * VOXEL_M * 2
 		-- The frieze over the opening, and its answer below it
-		frieze_nodes[#frieze_nodes + 1] = {part("Box", magic.Vector3(x,
-				(tier * SLAB_H + SLAB_H + 0.6) * VOXEL_M, z),
-				magic.Vector3(w, 1.05, 0.30), meander_mat), meander_mat}
-		frieze_nodes[#frieze_nodes + 1] = {part("Box", magic.Vector3(x,
-				(tier * SLAB_H - 0.7) * VOXEL_M, z),
-				magic.Vector3(w, 0.75, 0.30), meander_mat), meander_mat}
+		frieze(magic.Vector3(x, (tier * SLAB_H + SLAB_H + 0.6) * VOXEL_M, z),
+				magic.Vector3(w, 1.05, 0.30), meander_mat)
+		frieze(magic.Vector3(x, (tier * SLAB_H - 0.7) * VOXEL_M, z),
+				magic.Vector3(w, 0.75, 0.30), meander_mat)
 		-- The jambs: the socket field, which is the perforated block of
 		-- the reference frame, down each side of the opening
 		for _, side in ipairs({-1, 1}) do
-			local jamb = b == 4 and sigil_mat or socket_mat
-			frieze_nodes[#frieze_nodes + 1] = {part("Box",
-					magic.Vector3(x + side * w * 0.42,
+			frieze(magic.Vector3(x + side * w * 0.42,
 					(tier * SLAB_H + SLAB_H / 2) * VOXEL_M, z),
 					magic.Vector3(w * 0.16, SLAB_H * VOXEL_M * 1.5, 0.28),
-					jamb), jamb}
+					b == 4 and sigil_mat or socket_mat)
 		end
 	end
 	-- And one long course across the whole wall, above the bays, which is
 	-- what makes the room read as built rather than as cut
-	frieze_nodes[#frieze_nodes + 1] = {part("Box",
-			magic.Vector3(0, 19.5 * VOXEL_M, z),
+	frieze(magic.Vector3(0, 19.5 * VOXEL_M, z),
 			magic.Vector3(BAYS * BAY_SPACING * VOXEL_M, 1.35, 0.26),
-			meander_mat), meander_mat}
+			meander_mat)
 end
 
 -- The orbs. Warm is what you own; the palette's own entry says which
@@ -1149,11 +1156,48 @@ for i, o in ipairs(orb_places) do
 	idle_bob[i] = {node = orb_nodes[i], y = o.y, phase = i * 1.7}
 end
 
+-- **The attract mode**: left alone, the room shows itself off. The
+-- camera leaves its standing place and drifts along the bays, and the
+-- first key press brings it back -- which is the era's own habit and
+-- costs a sine.
+--
+-- simplified: one path, a slow sweep across the room and back, rather
+-- than a tour of the objects. A tour wants the objects to say where
+-- they are, which they will when there is a launcher behind them.
+-- Long enough that it never fires while the room is being used, and
+-- **F8 starts it at once**, which is how a run gets at it without
+-- waiting: a short timer for the check's sake would fire between the
+-- check's own keys and eat the next one, which is exactly what it did.
+local ATTRACT_AFTER = tonumber(
+		buildat.get_env("BUILDAT_LAUNCH_ATTRACT") or "") or 14
+idle_quiet = 0
+attracting = false
+
 function handle_idle_update(event_type, event_data)
 	if still then
 		return
 	end
-	idle_t = idle_t + event_data:GetFloat("TimeStep")
+	local dt = event_data:GetFloat("TimeStep")
+	idle_quiet = idle_quiet + dt
+	if not attracting and not terminal_open and not cam.to_from and
+			idle_quiet > ATTRACT_AFTER then
+		attracting = true
+		log:info("attract: the room is showing itself off")
+	end
+	if attracting then
+		local a = idle_quiet - ATTRACT_AFTER
+		-- A sweep along the bays and back, low and slow, looking at the
+		-- wall the orbs are in
+		local sway = math.sin(a * 0.22)
+		cam.from.x = HOME_FROM.x + sway * 9.0
+		cam.from.y = HOME_FROM.y + math.sin(a * 0.15) * 0.8
+		cam.from.z = HOME_FROM.z - 3.0 + math.cos(a * 0.22) * 2.0
+		cam.at.x = HOME_AT.x + sway * 4.0
+		cam.at.y = HOME_AT.y + 0.6
+		cam.at.z = HOME_AT.z
+		apply_camera()
+	end
+	idle_t = idle_t + dt
 	for _, b in ipairs(idle_bob) do
 		if b.node then
 			local p = b.node.position
@@ -1489,6 +1533,21 @@ end
 
 function handle_keydown(event_type, event_data)
 	local key = event_data:GetInt("Key")
+	-- F8 starts the attract mode; any other key ends it and brings the
+	-- camera home, the room being in use again
+	if key == magic.KEY_F8 then
+		attracting = true
+		idle_quiet = ATTRACT_AFTER
+		log:info("attract: the room is showing itself off")
+		return
+	end
+	idle_quiet = 0
+	if attracting then
+		attracting = false
+		fly_to(HOME_FROM, HOME_AT)
+		log:info("attract: back to the standing place")
+		return
+	end
 	-- The prompt eats what it wants first, so a name with a "p" in it
 	-- does not toggle the probe halfway through being typed
 	if prompt_key(key) then
@@ -1533,8 +1592,8 @@ function handle_keydown(event_type, event_data)
 	if key == magic.KEY_F6 then
 		ornament_on = not ornament_on
 		for _, f in ipairs(frieze_nodes) do
-			f[1]:GetComponent("StaticModel").material =
-					ornament_on and f[2] or stone
+			f[1].enabled = ornament_on
+			f[2].enabled = not ornament_on
 		end
 		log:info("ornament " .. (ornament_on and "on" or "off"))
 	end
