@@ -2349,8 +2349,13 @@ function handle_orb_update(event_type, event_data)
 		-- label used to stand whichever orb was pointed at. A sphere in
 		-- a niche has stone above it, so that one keeps the wall's
 		-- plane in z and only the height is its own.
+		-- **Clear of the wall's own relief**, not two voxels off the
+		-- wall's plane: a slab stands out as far as room.SLAB_OUT, so a
+		-- label at the plane is drawn inside the stone and reads as a
+		-- name written on a block (2026-09-23, the room's own first
+		-- frame). Text3D is geometry and is occluded like any.
 		local z = ORBS[best] and ORBS[best].floor and p.z or
-				(BAY_Z + 2.5) * VOXEL_M * U
+				(BAY_Z + room.SLAB_OUT + 1.5) * VOXEL_M * U
 		name_node.position = magic.Vector3(p.x, p.y + 1.5 * U, z)
 		desc_node.position = magic.Vector3(p.x, p.y + 1.0 * U, z)
 	end
