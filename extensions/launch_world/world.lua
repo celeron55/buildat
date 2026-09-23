@@ -2231,6 +2231,13 @@ do
 				moved[name] = {x = tonumber(mx), y = tonumber(my),
 					z = tonumber(mz)}
 				n = n + 1
+			elseif line:match("^!sound ") then
+				-- The room's own levels, kept where its voxels are
+				local a, b = line:match("^!sound ([%d%.]+) ([%d%.]+)$")
+				if a then
+					saved_sound = {tonumber(a), tonumber(b)}
+					n = n + 1
+				end
 			elseif line:match("^!fov %d+$") then
 				-- The room's own setting, kept where its voxels are
 				fov = tonumber(line:match("(%d+)"))
@@ -2260,6 +2267,13 @@ do
 	end
 end
 
+-- **The room's own sound levels**, a global table rather than a field of
+-- the drone below: the save is written by a function defined long before
+-- the drone exists, and reaching forward for it wrote nothing and said
+-- nothing (2026-09-24). [ROOM_SOUND] wants these moved by ear, so they
+-- are two rows on the terminal and two numbers in the room's save.
+levels = {orbs = 1.0, bed = 0.6}
+
 local save_dirty = false
 local function write_save()
 	local keys = {}
@@ -2276,6 +2290,8 @@ local function write_save()
 				m.x, m.y, m.z)
 	end
 	keys[#keys + 1] = string.format("!fov %d", fov)
+	keys[#keys + 1] = string.format("!sound %.2f %.2f", levels.orbs,
+			levels.bed)
 	local ok, why = api.storage_write(SAVE_NAME,
 			table.concat(keys, "\n"))
 	if not ok then
@@ -2459,6 +2475,14 @@ function handle_dig_update(event_type, event_data)
 			m.node:Remove()
 			table.remove(motes, i)
 		end
+	end
+	-- The save is flushed before the early return, not after it: the
+	-- terminal's own rows set it dirty, and in menu mode this handler
+	-- used to leave without writing -- so a level or a fov changed at
+	-- the desk lived until the next dig and no longer (2026-09-24)
+	if save_dirty and hold_t == 0 then
+		save_dirty = false
+		write_save()
 	end
 	if mode ~= "fps" or terminal_open or pause_open then
 		wire.enabled = false
@@ -2982,7 +3006,18 @@ kept.bed = bed
 -- pitches costs one loop of Lua.
 -- One table, not eight locals: a Lua chunk may have two hundred and
 -- this room's main function is near it
-local drone = {VOICES = 6, LOW = 40.0, HIGH = 160.0, t = 0, voices = {}}
+local drone = {VOICES = 6, LOW = 40.0, HIGH = 160.0, t = 0, voices = {},
+	}
+-- What the save said, if it said anything
+if saved_sound then
+	levels.orbs = saved_sound[1] or levels.orbs
+	levels.bed = saved_sound[2] or levels.bed
+end
+if kept.bed and kept.bed.source then
+	kept.bed.source.gain = levels.bed
+end
+log:info(string.format("sound: the orbs at %.2f, the bed at %.2f",
+		levels.orbs, levels.bed))
 -- A pentatonic-ish stack: root, fifth, octave first, the rest sparser.
 -- Vast rather than busy, which is what the design asks for.
 drone.SCALE = {0, 7, 12, 19, 24, 3, 10, 15}
@@ -3093,9 +3128,9 @@ function handle_synth_update(event_type, event_data)
 			local lfo = 0.82 + 0.18 * math.sin(drone.t * 0.7 + v.phase +
 					k * 1.3)
 			-- **Pointing raises that orb and ducks the others**, and the
-			-- desk ducks them all. simplified: the lift is gain and a
-			-- little pitch rather than a second, brighter loop --
-			-- two loops and a crossfade is the upgrade the design names.
+			-- desk ducks them all. The lift is a crossfade to the
+			-- brighter loop as well as a gain, which is what the design
+			-- asks for: a change of colour rather than of loudness.
 			local g = 0.30
 			local want_lit = 0
 			if pointed_orb == v.orb then
@@ -3111,8 +3146,8 @@ function handle_synth_update(event_type, event_data)
 			local k = 1 - math.exp(-dt / 0.15)
 			v.gain = v.gain + (g - v.gain) * k
 			v.lit = v.lit + (want_lit - v.lit) * k
-			v.dark.source.gain = v.gain * lfo * (1 - v.lit)
-			v.lit_voice.source.gain = v.gain * lfo * v.lit
+			v.dark.source.gain = v.gain * lfo * (1 - v.lit) * levels.orbs
+			v.lit_voice.source.gain = v.gain * lfo * v.lit * levels.orbs
 		else
 			v.dark.source.gain = 0
 			v.lit_voice.source.gain = 0
@@ -3814,6 +3849,8 @@ end
 settings[#settings + 1] = {room = "palette"}
 settings[#settings + 1] = {room = "probe"}
 settings[#settings + 1] = {room = "fov"}
+settings[#settings + 1] = {room = "drone"}
+settings[#settings + 1] = {room = "bed"}
 settings[#settings + 1] = {room = "contentdb"}
 sel = 1
 
@@ -3827,6 +3864,12 @@ local function setting_value(sg)
 	if sg.room == "palette" then return PRESETS[current].name end
 	if sg.room == "probe" then return probe_on and "on" or "off" end
 	if sg.room == "fov" then return tostring(fov) .. " degrees" end
+	if sg.room == "drone" then
+		return string.format("%.2f", levels.orbs)
+	end
+	if sg.room == "bed" then
+		return string.format("%.2f", levels.bed)
+	end
 	return "install a game"
 end
 
@@ -3835,6 +3878,8 @@ local function setting_label(sg)
 	if sg.room == "palette" then return "palette" end
 	if sg.room == "probe" then return "reflection probe" end
 	if sg.room == "fov" then return "field of view" end
+	if sg.room == "drone" then return "the orbs' level" end
+	if sg.room == "bed" then return "the bed's level" end
 	return "contentdb"
 end
 
@@ -3865,6 +3910,17 @@ setting_change = function(sg, dir)
 		camera_node:GetComponent("Camera").fov = fov
 		save_dirty = true
 		log:info("setting: fov = " .. fov)
+	elseif sg.room == "drone" or sg.room == "bed" then
+		-- A twentieth at a time, and never past one: there is no master
+		-- limiter under these ([ROOM_SOUND])
+		local key = sg.room == "drone" and "orbs" or "bed"
+		levels[key] = math.max(0, math.min(1.0, levels[key] + dir * 0.05))
+		if sg.room == "bed" and kept.bed and kept.bed.source then
+			kept.bed.source.gain = levels.bed
+		end
+		save_dirty = true
+		log:info(string.format("setting: %s level = %.2f", sg.room,
+				levels[key]))
 	elseif sg.room == "probe" then
 		probe_on = not probe_on
 		zone.zoneTexture = probe_on and kept.probe or kept.dark_probe

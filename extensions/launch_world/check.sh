@@ -50,6 +50,25 @@ if [ "${examples:-0}" -lt 1 ]; then
 	exit 1
 fi
 
+# **The room's sound levels are the room's, and they are kept**
+# ([ROOM_SOUND]: the design is to be played against and iterated on by
+# ear, which wants the levels reachable without an edit). Two rows on
+# the terminal, two numbers in the room's own save; a written save is
+# read back here, which is the half a listening session depends on.
+mkdir -p "$out/tieruser/launch_world"
+printf '!sound 0.40 0.30\n' > "$out/tieruser/launch_world/room.txt"
+{ echo "delay 4000"; echo "quit"; } > "$out/cmds_snd.txt"
+bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
+	-L "$out/snd.log" -c @"$out/cmds_snd.txt" > /dev/null 2>&1
+snd=$(grep -a "launch_w.*: sound: the orbs at " "$out/snd.log" | head -1 |
+	sed 's/.*sound: //')
+echo "a saved room came up with $snd"
+rm -f "$out/tieruser/launch_world/room.txt"
+if [ "$snd" != "the orbs at 0.40, the bed at 0.30" ]; then
+	echo "FAIL: the room does not keep the levels it was left at"
+	exit 1
+fi
+
 # **A tight target wins over a generous one** (user): an orb in front of
 # the player is what they want -- unless they are pointing at a voxel
 # they placed, and then they want the voxel. The room's contents are the
