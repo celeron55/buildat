@@ -60,6 +60,9 @@ Environment
                              was shown not to be about light types
     BUILDAT_LAUNCH_ATTRACT   seconds of quiet before the attract mode
                              starts (14)
+    BUILDAT_LAUNCH_OWNSCENE  draw a scene of this client's own making
+                             rather than the replicated one -- no voxels
+                             in it; a diagnostic for the HDR question
 
 What is where
 -------------

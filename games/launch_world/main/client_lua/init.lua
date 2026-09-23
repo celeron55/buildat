@@ -116,7 +116,18 @@ end
 -- same room as them has to be in it too. A scene made here would draw
 -- the primitives and leave the room's shell in a scene nobody looks at,
 -- which is exactly what it did (2026-09-23).
+-- BUILDAT_LAUNCH_OWNSCENE=1 draws a scene of this client's own making
+-- instead of the replicated one -- no voxels in it, so only the
+-- primitives, which is enough to ask whether the replicated scene is
+-- what the HDR path cannot light. games/voxel_lighting makes its own
+-- scene and renders in HDR perfectly well, and that is the last
+-- structural difference between the two.
 scene = replicate.main_scene
+if (buildat.get_env("BUILDAT_LAUNCH_OWNSCENE") or "") ~= "" then
+	scene = magic.Scene()
+	scene:CreateComponent("Octree")
+	log:info("scene: this client's own, not the replicated one")
+end
 
 -- Ambient near zero: nothing in this room is lit by "the environment",
 -- everything is lit by a source you can point at
