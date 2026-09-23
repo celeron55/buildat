@@ -52,7 +52,20 @@ if [ "$sandboxed" -lt 1 ]; then
 	echo "FAIL: launch_world no longer asks to be run in the sandbox"
 	exit 1
 fi
+# **And a launcher that cannot be left with no launcher** ([MENU_FALLBACK]):
+# with the chosen one missing *and* the fallback failing, the client says
+# so in its own window and keeps running -- it used to abort, which is
+# the one failure a slot anybody can fill must not have.
+last=$(BUILDAT_TEST_NO_LAUNCHER=1 bin/buildat -D ../user -w 640x360 -l 3 \
+	-o launch_ui=nosuchthing -c @"$out/cmds_slot.txt" 2>&1 |
+	sed -e 's/\x1b\[[0-9;]*m//g' |
+	grep -acE "could not start a launch UI|Crash: SIG")
 echo "the slot: picked by name $slot, fell back to the menu $back, sandboxed"
+if [ "$last" -ne 1 ]; then
+	echo "FAIL: with no launcher at all the client does not say so," \
+			"or it crashes"
+	exit 1
+fi
 if [ "$slot" -lt 1 ] || [ "$back" -lt 1 ]; then
 	echo "FAIL: the launch UI setting does not pick the room," \
 			"or a missing one does not fall back to the menu"

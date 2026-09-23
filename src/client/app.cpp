@@ -61,6 +61,8 @@
 #include <DebugRenderer.h>
 #include <Profiler.h>
 #include <UI.h>
+#include <Text.h>
+#include <Font.h>
 #include <CustomGeometry.h>
 #include <Node.h>
 #include <Camera.h>
@@ -1535,27 +1537,94 @@ struct CApp: public App, public magic::Application
 				// that came with the client is what a missing or
 				// raising one falls back to, and the log says which
 				// was asked for ([LAUNCH_SANDBOX]).
-				if(extname == "__menu"){
-					throw AppStartupError(ss_()+
-							"Failed to load and run extension "+extname);
+				bool tried_fallback = false;
+				if(extname != "__menu"){
+					log_w(MODULE, "launch UI \"%s\" did not load; falling"
+							" back to __menu", cs(extname));
+					m_launch_ui_fell_back = extname;
+					lua_pushstring(L, "__menu");
+					lua_setglobal(L, "__buildat_menu_extension_name");
+					ss_ fallback = ss_() +
+							"local m = require('buildat/extension/__menu')\n"
+							"if type(m) ~= 'table' then\n"
+							"    error('Failed to load extension __menu')\n"
+							"end\n"
+							"m.boot()\n";
+					// **The fallback is caught too, which is the whole
+					// promise**: a Lua error in the runner becomes a C++
+					// exception, and nothing caught it here -- so the one
+					// case this code exists for, a launch UI that raises,
+					// terminated the client instead of falling back
+					// ([MENU_FALLBACK], 2026-09-23).
+					bool ok2 = false;
+					try {
+						// BUILDAT_TEST_NO_LAUNCHER=1 makes the fallback
+						// fail, which is the only way to drive the last
+						// resort without breaking __menu on disk: the
+						// promise it keeps is worth a check of its own
+						if(getenv("BUILDAT_TEST_NO_LAUNCHER"))
+							throw Exception("BUILDAT_TEST_NO_LAUNCHER");
+						ok2 = run_script_no_sandbox(fallback);
+					} catch(std::exception &e2){
+						log_e(MODULE, "the fallback launch UI __menu"
+								" raised: %s", e2.what());
+						ok2 = false;
+					}
+					tried_fallback = true;
+					if(ok2){
+						log_i(MODULE, "the launch UI is __menu, not \"%s\"",
+								cs(extname));
+						goto launch_ui_done;
+					}
 				}
-				log_w(MODULE, "launch UI \"%s\" did not load; falling back"
-						" to __menu", cs(extname));
-				m_launch_ui_fell_back = extname;
-				lua_pushstring(L, "__menu");
-				lua_setglobal(L, "__buildat_menu_extension_name");
-				ss_ fallback = ss_() +
-						"local m = require('buildat/extension/__menu')\n"
-						"if type(m) ~= 'table' then\n"
-						"    error('Failed to load extension __menu')\n"
-						"end\n"
-						"m.boot()\n";
-				if(!run_script_no_sandbox(fallback)){
-					throw AppStartupError(
-							"Failed to load and run extension __menu");
+				// **A last resort that is not Lua**: there is nothing
+				// left to draw a screen with, so it is the operating
+				// system's own box, and it says how to pick another.
+				{
+					ss_ msg = ss_() +
+							"buildat could not start a launch UI.\n\n"
+							"Asked for: " + extname + "\n" +
+							(tried_fallback ?
+							"The built-in menu (__menu) raised as well.\n" :
+							"") +
+							"\nStart it with another one:\n"
+							"    buildat -m launch_menu\n"
+							"or take launch_ui out of settings.json.\n\n"
+							"The log has the error.";
+					log_e(MODULE, "%s", cs(msg));
+					// **In the client's own window, not a box from the
+					// window manager** (user, 2026-09-23: "that dialog
+					// comes up as a different WM window"). A separate
+					// window steals the desktop's focus, which is the
+					// same intrusion as taking the screen or the
+					// keyboard. This is Urho3D's own UI from C++ --
+					// there is no Lua left to draw with, but the engine
+					// is up -- and the client keeps running so the
+					// message can be read.
+					magic::UI *ui = GetSubsystem<magic::UI>();
+					magic::ResourceCache *rc =
+							GetSubsystem<magic::ResourceCache>();
+					if(ui && ui->GetRoot() && rc){
+						magic::Text *t =
+								ui->GetRoot()->CreateChild<magic::Text>();
+						magic::Font *font = rc->GetResource<magic::Font>(
+								"Fonts/OverpassMono-Regular.ttf");
+						if(!font)
+							font = rc->GetResource<magic::Font>(
+									"Fonts/Anonymous Pro.ttf");
+						if(font)
+							t->SetFont(font, 15);
+						t->SetText(msg.c_str());
+						t->SetColor(magic::Color(1.0f, 0.85f, 0.6f));
+						t->SetTextAlignment(magic::HA_CENTER);
+						t->SetAlignment(magic::HA_CENTER, magic::VA_CENTER);
+					}
+					// **And the rest of Start() still runs**: a client
+					// that returned here had no command sequence set up
+					// either, so a driven run hung with nothing to
+					// quit it (2026-09-23).
 				}
-				log_i(MODULE, "the launch UI is __menu, not \"%s\"",
-						cs(extname));
+				launch_ui_done: ;
 			}
 		}
 

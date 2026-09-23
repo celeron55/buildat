@@ -179,7 +179,20 @@ local STORAGE_MAX = 4 * 1024 * 1024
 local function calling_extension(level)
 	local info = debug.getinfo(level or 3, "S")
 	local src = info and info.source or ""
-	local name = src:match("^@?([%w_]+)/")
+	-- **A sandboxed chunk** is named `<extension>/<file>` by the loader
+	-- that ran it
+	local name = src:match("^@?([%w_]+)/[%w_%-%.]+$")
+	if name then
+		return name
+	end
+	-- **And a trusted one is a path on disk**, which is what an
+	-- extension required by another extension is -- `launch_menu`
+	-- requires `__menu`, whose own `run_extension_file("preferences.
+	-- lua")` then looked in launch_menu's directory, found nothing,
+	-- answered nil, and the client aborted eighty lines later
+	-- ([MENU_FALLBACK], 2026-09-23). The same fault the composition
+	-- found, in the other direction.
+	name = src:match("[/\\]extensions[/\\]([%w_]+)[/\\]")
 	if name then
 		return name
 	end
@@ -313,7 +326,10 @@ buildat.safe.run_extension_file = function(name)
 	local path = __buildat_extension_path(who) .. "/" .. name
 	local f = io.open(path, "rb")
 	if not f then
-		return nil, "run_extension_file: no " .. name .. " in " .. who
+		-- **Raised, not answered nil**: every caller would otherwise
+		-- write the same assert, and a nil indexed eighty lines later
+		-- names the symptom instead of the cause ([MENU_FALLBACK])
+		error("run_extension_file: no " .. name .. " in " .. who, 2)
 	end
 	local code = f:read("*a")
 	f:close()
