@@ -3,7 +3,14 @@
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("sandbox_test")
 local dump = buildat.dump
-local try_exploit = dofile(buildat.extension_path("sandbox_test").."/try_exploit.lua")
+-- **This extension loads on both sides now** ([LAUNCH_SANDBOX]): it is
+-- also the hostile launch UI, and a launch UI that asks to be
+-- sandboxed has its init.lua run in the sandbox, where there is no
+-- dofile and no extension_path. The trusted half is what Ctrl+F12
+-- runs; the sandboxed half is M.boot() at the end of this file.
+local trusted = (dofile ~= nil and buildat.extension_path ~= nil)
+local try_exploit = trusted and
+		dofile(buildat.extension_path("sandbox_test").."/try_exploit.lua") or nil
 local M = {}
 
 local function get_file_content(path)
@@ -75,7 +82,23 @@ function M.check_value(value)
 	log:debug("sandbox_test.check_value()")
 	try_exploit.search_single_value(value)
 end
-__buildat_sandbox_debug_check_value_sub(M.check_value)
+if trusted then
+	__buildat_sandbox_debug_check_value_sub(M.check_value)
+end
+
+-- **The hostile launch UI** ([LAUNCH_SANDBOX]'s done-when): selected
+-- like any other -- `-m sandbox_test`, or the `launch_ui` preference --
+-- and it spends its boot trying to reach past the verbs instead of
+-- drawing anything. What it could reach is one log line, which is what
+-- extensions/sandbox_test/check.sh reads.
+function M.boot(action)
+	local attack = buildat.run_extension_file("launch_attack.lua")
+	if type(attack) ~= "table" then
+		log:error("sandbox_test: launch_attack.lua did not load")
+		return
+	end
+	attack.run()
+end
 
 local is_active = false
 
