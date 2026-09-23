@@ -94,6 +94,10 @@ fi
 	echo "delay 400"
 	echo "keypress Escape"
 	echo "delay 1500"
+	# **Escape pops a level**, so it left menu mode as well as the
+	# connect; Tab comes back for the arrows below
+	echo "keypress Tab"
+	echo "delay 600"
 	# **The arrows browse the room** with the prompt empty: along a row
 	# and between the rows, the wall first and the floor's ranks after
 	echo "keypress Right"
@@ -170,7 +174,11 @@ fi
 	echo "screenshot $out/back-home.png"
 	echo "delay 600"
 	# The terminal: found by name like anything else, the camera square
-	# on to it and the panel flat over it
+	# on to it and the panel flat over it. **Menu mode first**: in FPS
+	# the letters are movement, so "set" would walk the player backwards
+	# and pick a sphere up instead of typing.
+	echo "keypress Tab"
+	echo "delay 500"
 	echo "keypress S"
 	echo "keypress E"
 	echo "keypress T"
@@ -230,10 +238,15 @@ fi
 	echo "screenshot $out/attract-back.png"
 	echo "delay 500"
 	# **The pause dialog**, which is the room's own way out of the
-	# program: Tab back to FPS, where Escape has nothing to cancel, and
-	# it comes up; Escape again takes it away
-	echo "keypress Tab"
-	echo "delay 600"
+	# program: in FPS with nothing left to pop, Escape comes up with it;
+	# Escape again takes it away.
+	#
+	# **Escape pops one level in this room**, so a sequence has to know
+	# which level it is on: the terminal step above typed in menu mode
+	# and the Escape that left the desk did not pop it, so this one pops
+	# menu -> walking and the next is the one that pauses.
+	echo "keypress Escape"
+	echo "delay 700"
 	echo "keypress Escape"
 	echo "delay 700"
 	echo "screenshot $out/paused.png"

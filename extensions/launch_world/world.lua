@@ -1715,10 +1715,13 @@ magic.SubscribeToEvent("Update", "handle_camera_update")
 -- the scale rule is about, who walks up to a pocket and reaches into it.
 -- Tab toggles, and the mouse is captured in FPS and free in menu.
 --
--- **The pick, and the plan records it as undecided**: two parallel modes
--- under Tab, not menu mode stacked over FPS with Escape popping back. A
--- toggle is one keystroke between equals and is what the user described;
--- the stack wants `uistack` and a playtest to choose it.
+-- **Both, in the end**: Tab is the one keystroke straight between the
+-- two, and **Escape pops one level** -- a screen, then browsing, then
+-- back to walking -- which is the stack's rule without the stack
+-- (the plan, 2026-09-23). The playtest that was to choose between them
+-- is what the third launch option argued out: if `launch_menu` sits
+-- over the room as a screen, then menu mode over FPS mode is the same
+-- machinery one depth down.
 local FPS_EYE = 1.6           -- metres, the standing eye the room is judged from
 local FPS_SPEED = 4.2
 local FPS_GRAVITY = 18.0
@@ -3448,7 +3451,23 @@ function handle_keydown(event_type, event_data)
 			show_prompt()
 			backed = true
 		end
-		if backed or mode == "menu" then
+		if backed then
+			fly_to(HOME_FROM, HOME_AT)
+			return
+		end
+		-- **Escape pops one level, and it is one rule for all three**
+		-- (the plan, 2026-09-23, arguing the stack): out of a screen,
+		-- out of browsing, and back to walking -- and only with nothing
+		-- left to pop is it the way out of the program. Tab stays the
+		-- one keystroke straight between the two modes, so nothing is
+		-- taken away from the toggle the user asked for.
+		if mode == "menu" then
+			set_mode("fps")
+			-- The standing place, not wherever the camera was flown to:
+			-- popping out of a pocket the browser flew into would
+			-- otherwise stand the player inside the wall
+			fps.x, fps.y, fps.z = HOME_FROM.x, FPS_EYE, HOME_FROM.z
+			fps.yaw, fps.pitch = 180.0, 6.0
 			fly_to(HOME_FROM, HOME_AT)
 			return
 		end
