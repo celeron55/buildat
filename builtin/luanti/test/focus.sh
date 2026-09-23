@@ -8,8 +8,26 @@
 #
 #   builtin/luanti/test/focus.sh
 #
-# Wants an X display and xdotool; the window is found by the client's pid.
+# Wants a display of its own and xdotool; the window is found by the
+# client's pid. See the skip below: it is not run on a display in use.
 set -u
+# **Never on a display someone is using** (user, 2026-09-23: this check
+# injected alt+Tab into the session they were working in). It minimizes
+# windows, activates them and sends keys through the X server, and no
+# amount of --window keeps that to itself -- a window manager grabs
+# alt+Tab globally, and an activate steals focus from whatever the
+# person was typing in. So it runs on a display of its own and skips
+# otherwise: BUILDAT_FOCUS_DISPLAY=:N names an Xephyr or Xvfb started
+# for it, and BUILDAT_FOCUS_X11=1 says the session is nobody's.
+if [ -n "${BUILDAT_FOCUS_DISPLAY:-}" ]; then
+	export DISPLAY="$BUILDAT_FOCUS_DISPLAY"
+elif [ -z "${BUILDAT_FOCUS_X11:-}" ]; then
+	echo "SKIP: focus.sh drives a real X session (alt+Tab, minimize," \
+			"activate); give it a display of its own with" \
+			"BUILDAT_FOCUS_DISPLAY=:N, or say the session is nobody's" \
+			"with BUILDAT_FOCUS_X11=1"
+	exit 77
+fi
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_focus.XXXXXX")
 cd "$here/Build"

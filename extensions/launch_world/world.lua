@@ -631,9 +631,19 @@ end
 -- emission on a glowing orb, and the same picture darkens into an etch
 -- on a white or a chrome one. Generated from the name where the thing
 -- ships no icon of its own.
+marks_own = 0
 local function mark_texture(mark, icon)
 	if not mark then return nil end
+	-- **The grid's fallback is not a mark.** `launch_grid` hands out
+	-- `buildat_logo.png` for anything whose launcher names no icon, and
+	-- in a tree where most do not that is one logo worn by nine orbs.
+	-- A picture generated from the name tells them apart, which is the
+	-- whole job of a mark.
+	if icon == "buildat_logo.png" then
+		icon = nil
+	end
 	if icon and magic.cache:Exists(icon) then
+		marks_own = (marks_own or 0) + 1
 		-- **A game's own icon is its mark** (the launcher plan's step 5):
 		-- the launch grid resolves an icon to a resource name on the
 		-- trusted side, and a game that ships one has said what it looks
@@ -933,6 +943,9 @@ for i, o in ipairs(orb_places) do
 		orb_nodes[i] = node
 	end
 end
+
+log:info("marks: " .. marks_own .. " of the room's own icons, the rest " ..
+		"generated from the name")
 
 -- The foreground: ten shipped primitives on the checkerboard, the chrome
 -- ones doing what a perfect sphere under a sharp light does
