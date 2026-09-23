@@ -1302,6 +1302,12 @@ local function reflection_probe(at)
 	local fmt = env("BUILDAT_LAUNCH_PROBEF") ~= "" and
 			magic.Graphics.GetRGBAFloat16Format() or
 			magic.Graphics.GetRGBAFormat()
+	-- **One level, not a chain nobody writes** ([PBR_HDR]): a render
+	-- target cube is given the full mip chain by default and only level
+	-- 0 is ever rendered into, so every sample above it reads memory
+	-- nobody wrote -- a wrong colour in eight bits and a NaN in float16,
+	-- and a NaN reflection turns every lit pixel black.
+	cube.numLevels = 1
 	assert(cube:SetSize(PROBE_SIZE, fmt,
 			magic.TEXTURE_RENDERTARGET), "the probe's cubemap")
 	cube.filterMode = magic.FILTER_BILINEAR
