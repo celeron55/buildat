@@ -62,10 +62,11 @@ Environment
                              default; "" for none
     BUILDAT_LAUNCH_BIAS      the tonemap's exposure bias (1.05)
     BUILDAT_LAUNCH_WHITE     its white point (1.8)
-    BUILDAT_LAUNCH_HDR       turn HDR rendering on. **It draws only the
-                             unlit materials** -- see the plan
-    BUILDAT_LAUNCH_SUN       add a directional light, which is how that
-                             was shown not to be about light types
+    BUILDAT_LAUNCH_NOHDR     go back to LDR rendering. HDR is on: a
+                             renderer that clips every radiance at 1.0
+                             before the tonemap measures a clamp rather
+                             than light
+    BUILDAT_LAUNCH_SUN       add a directional light
     BUILDAT_LAUNCH_ATTRACT   seconds of quiet before the attract mode
                              starts (14)
     BUILDAT_LAUNCH_NOPBR     put the stock non-PBR techniques on the
@@ -109,6 +110,7 @@ line is a thing that has been seen to fail:
     nothing in the room is static          -- the era's own rule
     the room shows itself off when left alone
     the generated ornament is on something -- it once was not
+    the room has a top end                 -- 99th percentile in HDR
 
 Two of them exist because a feature drew nothing for a day while its own
 log line said otherwise, and two more were passing on the HUD's text
@@ -119,25 +121,15 @@ than reading the pictures the run before left behind.
 Known, and not this room's to fix
 ---------------------------------
 
-**Urho3D's stock PBR techniques do not light under HDR in this build.**
-With BUILDAT_LAUNCH_HDR=1 the orbs and the readout draw and everything
-lit by a light does not, whatever the light type -- but add
-BUILDAT_LAUNCH_NOPBR=1, which swaps the primitives onto the stock
-non-PBR techniques, and the same scene with the same effects lights
-(blown out, since the lights are tuned for PBR's scale). games/voxel_lighting renders in HDR with the
-same three effects appended in the same order. Ruled out so far: the
-effects and their order, their curve parameters, the light type,
-set_preferred_viewports (the renderer's own viewport draws the same
-black) and the order of registering the viewport against setting
-HDRRendering -- voxel_lighting registers first and so does this now,
-with no change. Until then the room is tonemapped in LDR, which
-costs it the top of its range: against the reference frame's mean 67,
-median 38, 90th 171, 99th 252 and 0.31 per cent pure white, it reads
-60 / 38 / 173 / 175 / 0.00.
+**A float16 cube map on a zone costs the frame its red and green with
+HDR rendering on.** A pixel that reads 60 71 89 in LDR reads 0 0 111,
+and one keypress separates the readings: F5 takes the probe off the zone
+and the same HDR frame is correct. The same cube map in eight bits is
+correct too, which is why the probe is RGBA8 here -- at the cost of an
+emissive orb clipping where it is reflected. See [PBR_HDR].
 
-**Generated ornament cannot reach a voxel.** A voxel's tile is loaded by
-resource name out of Urho3D's ResourceCache, and AddManualResource is not
-in Urho3D's Lua bindings at all. So the meander and the socket field are
-on primitives standing proud of the voxel wall, and the voxel tiles are
-flat colours. Binding that call is small, and a sandbox policy question:
-a script that can name any resource can shadow one.
+**Urho3D's stock PBR techniques do light under HDR.** That was this
+room's own earlier reading and it was wrong: what was dark was the
+reflection probe above, and a PBR metal with no environment is black but
+for its highlight whether the target is float or not -- which the LDR
+run with the probe off shows just as well.

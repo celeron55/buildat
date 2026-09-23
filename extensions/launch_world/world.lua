@@ -708,7 +708,19 @@ local probe_surfaces = {}
 probe_on = true
 local function reflection_probe(at)
 	local cube = magic.TextureCube:new()
-	assert(cube:SetSize(PROBE_SIZE, magic.Graphics.GetRGBAFloat16Format(),
+	-- **RGBA8, not float16, and that is not a preference** ([PBR_HDR]):
+	-- a float16 cube map on the zone with HDR rendering on costs the
+	-- frame its red and green -- a pixel that reads 60 71 89 in LDR
+	-- reads 0 0 111 -- and the same cube in eight bits renders the room
+	-- correctly in HDR. One keypress separates the two readings, F5
+	-- being the probe's own toggle. A float cube is the right thing and
+	-- the client-wide fault is filed; until it is fixed, HDR on the
+	-- frame is worth more than radiance in the reflections.
+	--
+	-- simplified: an emissive orb clips to white where it is reflected,
+	-- since eight bits cannot carry it. The upgrade is the float cube
+	-- back, once [PBR_HDR] is repaired.
+	assert(cube:SetSize(PROBE_SIZE, magic.Graphics.GetRGBAFormat(),
 			magic.TEXTURE_RENDERTARGET), "the probe's cubemap")
 	cube.filterMode = magic.FILTER_BILINEAR
 	kept.probe = cube
@@ -813,7 +825,12 @@ do
 	-- client-wide question rather than this room's: nothing else in the
 	-- tree lights an HDR scene with point lights.
 	local want = buildat.get_env("BUILDAT_LAUNCH_TONEMAP") or "Tonemap"
-	local hdr = (buildat.get_env("BUILDAT_LAUNCH_HDR") or "") ~= ""
+	-- **HDR is on** (user, 2026-09-23: a float target is non-negotiable
+	-- here). A renderer that clips every radiance at 1.0 before the
+	-- tonemap measures a clamp rather than light, and a source then
+	-- cannot be brighter than a fully-lit wall. BUILDAT_LAUNCH_NOHDR=1
+	-- goes back to LDR, which is what the two can be compared with.
+	local hdr = (buildat.get_env("BUILDAT_LAUNCH_NOHDR") or "") == ""
 	-- BUILDAT_LAUNCH_SUN adds one directional light, to settle whether
 	-- it is point lights in particular that the HDR path drops
 	if (buildat.get_env("BUILDAT_LAUNCH_SUN") or "") ~= "" then
