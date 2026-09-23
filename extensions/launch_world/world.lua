@@ -1624,6 +1624,13 @@ function handle_probe_update()
 end
 magic.SubscribeToEvent("Update", "handle_probe_update")
 
+-- **The field of view** (user, 2026-09-23: it is quite small; try 72,
+-- which is Luanti's and fits tight spaces and mouse look) -- **and a
+-- setting of the room's**, since it is a taste. A global: the terminal's
+-- row and the save both reach it, and this chunk is at Lua's local
+-- limit.
+fov = 72
+camera_node:GetComponent("Camera").fov = fov
 local viewport = magic.Viewport:new(scene,
 		camera_node:GetComponent("Camera"))
 -- **The viewport is registered before the render path is touched**,
@@ -2192,6 +2199,10 @@ do
 				moved[name] = {x = tonumber(mx), y = tonumber(my),
 					z = tonumber(mz)}
 				n = n + 1
+			elseif line:match("^!fov %d+$") then
+				-- The room's own setting, kept where its voxels are
+				fov = tonumber(line:match("(%d+)"))
+				n = n + 1
 			end
 		end
 		-- The spheres are already placed by the time this is read, so a
@@ -2232,6 +2243,7 @@ local function write_save()
 		keys[#keys + 1] = string.format("@%s %.3f %.3f %.3f", name,
 				m.x, m.y, m.z)
 	end
+	keys[#keys + 1] = string.format("!fov %d", fov)
 	local ok, why = api.storage_write(SAVE_NAME,
 			table.concat(keys, "\n"))
 	if not ok then
@@ -3699,6 +3711,7 @@ end
 -- The room's own, which no preference file knows about
 settings[#settings + 1] = {room = "palette"}
 settings[#settings + 1] = {room = "probe"}
+settings[#settings + 1] = {room = "fov"}
 settings[#settings + 1] = {room = "contentdb"}
 sel = 1
 
@@ -3711,6 +3724,7 @@ local function setting_value(sg)
 	end
 	if sg.room == "palette" then return PRESETS[current].name end
 	if sg.room == "probe" then return probe_on and "on" or "off" end
+	if sg.room == "fov" then return tostring(fov) .. " degrees" end
 	return "install a game"
 end
 
@@ -3718,6 +3732,7 @@ local function setting_label(sg)
 	if sg.pref then return sg.pref:gsub("_", " ") end
 	if sg.room == "palette" then return "palette" end
 	if sg.room == "probe" then return "reflection probe" end
+	if sg.room == "fov" then return "field of view" end
 	return "contentdb"
 end
 
@@ -3742,6 +3757,12 @@ setting_change = function(sg, dir)
 	end
 	if sg.room == "palette" then
 		set_preset((current - 1 + dir) % #PRESETS + 1)
+	elseif sg.room == "fov" then
+		-- Luanti's own range, and the room is judged from a standing eye
+		fov = math.max(60, math.min(100, fov + dir * 2))
+		camera_node:GetComponent("Camera").fov = fov
+		save_dirty = true
+		log:info("setting: fov = " .. fov)
 	elseif sg.room == "probe" then
 		probe_on = not probe_on
 		zone.zoneTexture = probe_on and kept.probe or kept.dark_probe

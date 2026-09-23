@@ -127,6 +127,80 @@ for i = 1, M.SLABS do
 end
 M.SLAB_OUT = M.SLAB_OUT_MAX     -- the furthest any slab comes out
 
+-- **The other three walls exist too** (user, 2026-09-23: only the wall
+-- the player faces was generated, and the rest were one flat plane of
+-- stone). They are the same stone with the same slabs and insets and
+-- **no pockets** -- the bays belong to the wall that has them, and these
+-- are the dark mass the room's light-on-dark contrast is made of.
+--
+-- **Each seeded by its own name**, which is the trick the ornament
+-- generator already uses, so they are not rotated copies of the front
+-- wall or of each other.
+--
+-- A side wall's slabs are laid out along the axis it runs in -- z for
+-- the two sides, x for the back -- and stand *into* the room from a
+-- nominal face a little inside the boundary, so an inset has somewhere
+-- to cut back to. Outside the boundary is solid stone either way.
+M.SIDE_IN = 3           -- how far the nominal side face stands inward
+M.side_slabs = {}
+local function name_salt(name)
+	local h = 0
+	for i = 1, #name do
+		h = (h * 31 + string.byte(name, i)) % 4294967296
+	end
+	return h
+end
+for _, name in ipairs({"left", "right", "back"}) do
+	local salt = name_salt(name)
+	local list = {}
+	for i = 1, M.SLABS do
+		local h1 = hash2(i, 1, salt % 100000 + 11)
+		local h2 = hash2(i, 2, salt % 100000 + 22)
+		local span = M.SLAB_MAX - M.SLAB_MIN + 1
+		local su = M.SLAB_MIN + math.floor(h1 / 8) % span
+		local sy = M.SLAB_THIN_MIN + math.floor(h1 / 4096) %
+				(M.SLAB_THIN_MAX - M.SLAB_THIN_MIN + 1)
+		-- Along the wall's own axis, in the room's coordinates; the
+		-- range is the widest either axis has, and what falls outside a
+		-- shorter wall simply never matches
+		local u0 = M.X_MIN + h2 % (M.X_MAX - M.X_MIN - su + 1)
+		local y0 = math.floor(h2 / 2048) % (M.Y_TOP - sy + 1)
+		list[i] = {u0 = u0, u1 = u0 + su - 1, y0 = y0, y1 = y0 + sy - 1,
+			out = M.SLAB_OUT_MIN + math.floor(h1 / 1048576) %
+					(M.SLAB_OUT_MAX - M.SLAB_OUT_MIN + 1)}
+	end
+	M.side_slabs[name] = {list = list, salt = salt}
+end
+
+-- How far a side wall stands into the room at (u, y): the nominal face
+-- plus its slabs, less its insets, and never less than nothing -- a wall
+-- that receded past the boundary would open a hole into the stone
+-- outside.
+local side_cache = {}
+function M.side_in(name, u, y)
+	local key = name .. ":" .. u .. ":" .. y
+	local c = side_cache[key]
+	if c then return c end
+	local w = M.side_slabs[name]
+	local out = 0
+	for i = 1, #w.list do
+		local sl = w.list[i]
+		if u >= sl.u0 and u <= sl.u1 and y >= sl.y0 and y <= sl.y1 and
+				sl.out > out then
+			out = sl.out
+		end
+	end
+	local c3 = hash2(floor_div(u + 2, 6), floor_div(y + 1, 6),
+			w.salt % 100000 + 3)
+	if c3 % 16 < 2 then
+		out = out - (1 + math.floor(c3 / 16) % M.INSET_IN)
+	end
+	local d = M.SIDE_IN + out
+	if d < 0 then d = 0 end
+	side_cache[key] = d
+	return d
+end
+
 -- **The pockets, in the numbers the user gave 2026-09-23.** A pocket's
 -- floor is at Y 0 to 3 and no higher, because the player reaches into
 -- these; it is usually 3x3x3 with a 2 or a 4 turning up in any dimension.
@@ -295,6 +369,15 @@ function M.voxel_at(x, y, z)
 		if z == face and face > M.BAY_Z then return id.frieze end
 		return id.stone
 	end
+	-- **The three walls that are not the one with the pockets**: mass
+	-- standing in from each boundary by its own relief. Decided after
+	-- the pocket wall, which wins where they meet at a corner -- its
+	-- frieze and its columns are what the room is read by.
+	if y >= 0 and y <= M.Y_TOP then
+		if x - M.X_MIN < M.side_in("left", z, y) then return id.stone end
+		if M.X_MAX - x < M.side_in("right", z, y) then return id.stone end
+		if M.Z_MAX - z < M.side_in("back", x, y) then return id.stone end
+	end
 	if y > M.Y_TOP then
 		-- The square is cut right through: what is above the room is
 		-- outside it
@@ -422,6 +505,22 @@ function M.self_check()
 				"pocket " .. b .. " and its columns are on the wall")
 	end
 	M.set_pockets(M.BAYS)
+	-- **The other three walls have relief of their own**, and are not
+	-- copies of each other: each one's depth has to vary along it, and
+	-- the three have to disagree somewhere
+	local depths = {}
+	for _, name in ipairs({"left", "right", "back"}) do
+		local lo, hi = nil, nil
+		for u = M.X_MIN, M.X_MAX do
+			local d = M.side_in(name, u, 4)
+			lo = (lo == nil or d < lo) and d or lo
+			hi = (hi == nil or d > hi) and d or hi
+		end
+		assert(hi > lo, "the " .. name .. " wall is flat")
+		depths[name] = hi .. ":" .. lo
+	end
+	assert(depths.left ~= depths.right or depths.left ~= depths.back,
+			"the three walls are the same wall")
 	assert(#rows[1] == M.W, "a row is the room across: " .. #rows[1])
 	assert(M.row_index(M.OY, M.OZ) == 1, "the first row is the first row")
 	return true
