@@ -90,6 +90,12 @@ local function open(opts)
 		e:SetFixedSize(width, h)
 		return e
 	end
+	-- **A default style, or SetStyleAuto does nothing at all**: it looks
+	-- a style up on the element's root, and an element whose root has
+	-- none is left exactly as it was -- which is why the scroll view
+	-- had no panel to clip with and the document drew over the hint.
+	root.defaultStyle = magic.cache:GetResource("XMLFile",
+			"UI/DefaultStyle.xml")
 	local left = panel(0, half, magic.Color(0.06, 0.07, 0.09, 1))
 	local right = panel(half, w - half, magic.Color(0.03, 0.04, 0.05, 1))
 
@@ -97,24 +103,61 @@ local function open(opts)
 	-- 1900 lines of plain text want; the search moves the view rather
 	-- than re-laying anything out.
 	local lines = api_lines()
-	local search = left:CreateChild("LineEdit")
-	search:SetStyleAuto()
-	search:SetPosition(MARGIN, MARGIN)
-	search:SetFixedSize(half - 2 * MARGIN - 250, 22)
-	search.textCopyable = true
-	search.textSelectable = true
+	-- **A field is dark with light text, like the rest of the column**
+	-- (playtest, 2026-09-23: "the text fields are unreadable"). Urho3D's
+	-- default style paints a light LineEdit, and the text in it is this
+	-- console's own white -- white on white until something is selected.
+	-- Built without SetStyleAuto, the way the ScrollView beside it
+	-- already is, with a cursor of its own since the style is what draws
+	-- one.
+	local function field(parent, x, y, w)
+		local e = parent:CreateChild("LineEdit")
+		e.texture = white_tex
+		e.imageRect = magic.IntRect(0, 0, 2, 2)
+		e.color = magic.Color(0.13, 0.15, 0.18, 1)
+		e:SetPosition(x, y)
+		e:SetFixedSize(w, 22)
+		e.textCopyable = true
+		e.textSelectable = true
+		local t = e.textElement
+		if t then
+			t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
+			t:SetColor(magic.Color(0.92, 0.95, 1.0, 1))
+			t:SetPosition(4, 3)
+		end
+		local cur = e.cursor
+		if cur then
+			cur.texture = white_tex
+			cur.imageRect = magic.IntRect(0, 0, 2, 2)
+			cur.color = magic.Color(0.95, 0.85, 0.35, 1)
+			cur:SetFixedSize(2, 16)
+		end
+		return e
+	end
+	local search = field(left, MARGIN, MARGIN, half - 2 * MARGIN)
+	search:SetName("console_search")
+	-- **Its own line, under the field** (playtest: the hint was cut off
+	-- after "search: Enter next, Shi"). It was placed beside a field
+	-- that was wider than the room left for it, with no width of its
+	-- own, so it ran past the column and was clipped -- and a label cut
+	-- off in the middle of explaining the controls is worse than none.
 	local hint = left:CreateChild("Text")
 	hint:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
-	hint:SetPosition(half - 2 * MARGIN - 240, MARGIN + 4)
+	hint:SetPosition(MARGIN, MARGIN + 26)
+	hint:SetFixedWidth(half - 2 * MARGIN)
 	hint:SetColor(magic.Color(0.55, 0.60, 0.68, 1))
-	hint.text = "search: Enter next, Shift+Enter back"
+	hint.text = "Tab moves the keyboard; in here Enter finds the next, " ..
+			"Shift+Enter the one before"
 
 	local view = left:CreateChild("ScrollView")
-	-- **No SetStyleAuto**: the default style paints a light panel over
-	-- the dark column, and this view is driven by the search rather
-	-- than by its bars
-	view:SetPosition(MARGIN, MARGIN + 30)
-	view:SetFixedSize(half - 2 * MARGIN, h - MARGIN * 2 - 30)
+	-- **The style gives it a panel that clips**, which is what a scroll
+	-- view is for: without one the document drew over the hint above it
+	-- and off both ends of the column, however the panel was sized and
+	-- told to clip by hand. The style's own light colour is painted
+	-- over below.
+	view:SetStyleAuto()
+	view:SetPosition(MARGIN, MARGIN + 54)
+	view:SetFixedSize(half - 2 * MARGIN, h - MARGIN * 2 - 54)
 	-- **The view's own panel is what was drawing white**: a ScrollView
 	-- makes a BorderImage to clip its content in, and one with no
 	-- texture is a white quad over the column whatever the column is
@@ -122,6 +165,10 @@ local function open(opts)
 		view.scrollPanel.texture = white_tex
 		view.scrollPanel.imageRect = magic.IntRect(0, 0, 2, 2)
 		view.scrollPanel.color = magic.Color(0.06, 0.07, 0.09, 1)
+		-- **And it clips**, which the default style would have done: a
+		-- scrolled document drew over the hint above it and off the top
+		-- of the column
+		view.scrollPanel.clipChildren = true
 	end
 	local doc = left:CreateChild("Text")
 	doc:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
@@ -155,10 +202,12 @@ local function open(opts)
 				found_at = i
 				show_line(i)
 				hint.text = "line " .. i .. " of " .. n
+				log:info("console: search " .. q .. " -> line " .. i)
 				return
 			end
 		end
 		hint.text = "no line has " .. q
+		log:info("console: search " .. q .. " -> nothing")
 	end
 
 	-- **Right: the console.** What was typed and what came back, oldest
@@ -175,12 +224,8 @@ local function open(opts)
 	out:SetColor(magic.Color(0.80, 0.86, 0.92, 1))
 	out:SetWordwrap(true)
 	out.text = table.concat(out_lines, "\n")
-	local input = right:CreateChild("LineEdit")
-	input:SetStyleAuto()
-	input:SetPosition(MARGIN, h - 30)
-	input:SetFixedSize(w - half - 2 * MARGIN, 22)
-	input.textCopyable = true
-	input.textSelectable = true
+	local input = field(right, MARGIN, h - 30, w - half - 2 * MARGIN)
+	input:SetName("console_input")
 
 	local MAX_LINES = math.max(4, math.floor((h - 60) / (FONT + 4)))
 	local function say(text)
@@ -241,11 +286,31 @@ local function open(opts)
 			end
 			return
 		end
+		-- **Tab moves the keyboard between the two columns**: the
+		-- console has the keyboard at boot, and without this the search
+		-- field can only be reached with the mouse -- which a scripted
+		-- run does not have, and which is one more thing to know than a
+		-- two-column screen should ask for.
+		if key == magic.KEY_TAB then
+			local at = magic.ui.focusElement
+			local is_search = at and at:GetName() == "console_search"
+			magic.ui:SetFocusElement(is_search and input or search)
+			log:info("console: the keyboard is in the " ..
+					(is_search and "console" or "search"))
+			return
+		end
 		if key ~= magic.KEY_RETURN and key ~= magic.KEY_KP_ENTER then
 			return
 		end
-		-- Whichever field has the keyboard is what Enter means
-		if magic.ui.focusElement == search then
+		-- **Whichever field has the keyboard is what Enter means**, asked
+		-- by name (playtest: the search did nothing). `focusElement`
+		-- hands back a **fresh wrapper table** each time it is read, so
+		-- comparing it to the element is comparing two different Lua
+		-- tables and is always false -- the search could never be
+		-- reached however well it was focused.
+		local focused = magic.ui.focusElement
+		local who = focused and focused:GetName() or ""
+		if who == "console_search" then
 			local back = magic.input:GetKeyDown(magic.KEY_SHIFT) or
 					magic.input:GetKeyDown(magic.KEY_LSHIFT)
 			find(found_at, back)

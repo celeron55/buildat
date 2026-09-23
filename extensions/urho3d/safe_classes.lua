@@ -1610,6 +1610,14 @@ function M.define(dst, util)
 			-- just typed into this program.
 			text = util.simple_property("string"),
 			cursorPosition = util.simple_property("number"),
+			-- **The two elements a field is made of**, read-only, so a
+			-- screen can give a field a font and a colour of its own:
+			-- without them the only way to a readable field is Urho3D's
+			-- default style, which paints it light and leaves the text
+			-- whatever the screen set ([LAUNCH_CONSOLE]'s playtest --
+			-- white on white until something was selected)
+			textElement = {get = util.simple_property(dst.Text).get},
+			cursor = {get = util.simple_property(dst.BorderImage).get},
 			-- The character a password field shows instead of what was
 			-- typed, as its code point; 0 shows the text itself
 			echoCharacter = util.simple_property("number"),

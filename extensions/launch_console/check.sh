@@ -30,6 +30,15 @@ fi
 	echo "delay 400"
 	echo "keypress Return"
 	echo "delay 600"
+	# **The search on the left**, which a playtest found did nothing:
+	# Tab moves the keyboard into it, a term is typed, and Enter has to
+	# move the view to a line that has it.
+	echo "keypress Tab"
+	echo "delay 300"
+	echo "text voxel"
+	echo "delay 300"
+	echo "keypress Return"
+	echo "delay 600"
 	echo "screenshot $out/console.png"
 	echo "delay 300"
 	echo "quit"; } > "$out/cmds.txt"
@@ -60,6 +69,14 @@ if [ "$typed" -lt 1 ]; then
 	echo "FAIL: a line typed at the console did not run"
 	exit 1
 fi
+found=$(grep -a "console: search voxel -> line " "$out/cli.log" | head -1 |
+	sed 's/.*-> line //')
+echo "the search found 'voxel' at line ${found:-(nowhere)}"
+if [ -z "$found" ] || [ "$found" -lt 1 ]; then
+	echo "FAIL: the search does not move the document"
+	exit 1
+fi
+
 uis=$(grep -a "console: #buildat.list_launch_uis() = " "$out/cli.log" |
 	head -1 | sed 's/.*= //')
 echo "the sandbox can see $uis launch UIs"
