@@ -2031,6 +2031,24 @@ magic.SubscribeToEvent("Update", "handle_camera_update")
 -- over the room as a screen, then menu mode over FPS mode is the same
 -- machinery one depth down.
 local FPS_EYE = 1.6           -- metres, the standing eye the room is judged from
+
+-- One floor orb said out loud, with where it stands: the tie-break
+-- between a placed voxel and an orb can only be driven by a run that
+-- knows where an orb is, and the room's contents are the tree's rather
+-- than a fixture's ([LAUNCH_WORLD]: a tight target wins over a
+-- generous one).
+for i = 1, #orb_places do
+	if ORBS[i] and ORBS[i].floor and orb_places[i] then
+		local o = orb_places[i]
+		-- With the standing place beside it, so a run needs no constant
+		-- of this room's to aim at the orb
+		log:info(string.format("orb sample: %s at %.2f %.2f %.2f from " ..
+				"%.2f %.2f %.2f", ORBS[i].name, o.x * U, o.y * U, o.z * U,
+				HOME_FROM.x * U, FPS_EYE * U, HOME_FROM.z * U))
+		break
+	end
+end
+
 local FPS_SPEED = 4.2
 local FPS_GRAVITY = 18.0
 local FPS_JUMP = 5.0
@@ -2681,6 +2699,24 @@ function handle_orb_update(event_type, event_data)
 	-- not pointed at; in menu mode the camera is flown to look at what
 	-- was chosen, and the nearest to the middle is the answer
 	if mode == "fps" and best_dot < POINT_DOT then
+		best = 0
+	end
+	-- **A tight target wins over a generous one** (user, 2026-09-23):
+	-- an orb in front of the player means they want it -- **unless they
+	-- are pointing at a player-placed voxel**, in which case they want
+	-- the voxel. The tight class holds only those today, and this is
+	-- the whole of the rule; the orb's volume can be as large as it
+	-- likes because of it.
+	--
+	-- pointed_voxel is this frame's, the dig handler having run first,
+	-- and it names a placed voxel only when the crosshair is on one
+	-- within reach.
+	if best > 0 and mode == "fps" and pointed_voxel and pointed_voxel[1] then
+		if pointed_orb ~= 0 then
+			log:info("pointing: the voxel at " ..
+					room.key(pointed_voxel[1], pointed_voxel[2],
+							pointed_voxel[3]) .. " wins over orb " .. best)
+		end
 		best = 0
 	end
 

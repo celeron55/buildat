@@ -50,6 +50,65 @@ if [ "${examples:-0}" -lt 1 ]; then
 	exit 1
 fi
 
+# **A tight target wins over a generous one** (user): an orb in front of
+# the player is what they want -- unless they are pointing at a voxel
+# they placed, and then they want the voxel. The room's contents are the
+# tree's, so the run is aimed off what the room says about itself: one
+# floor orb and where it stands, and a placed voxel written into the
+# room's own save on the line between the two. The same look one way and
+# the other settles it -- through the voxel, the voxel wins; over it, the
+# orb does.
+mkdir -p "$out/tieruser/launch_world"
+{ echo "delay 4000"; echo "quit"; } > "$out/cmds_tier0.txt"
+bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
+	-L "$out/tier0.log" -c @"$out/cmds_tier0.txt" > /dev/null 2>&1
+sample=$(grep -a "launch_w.*: orb sample: " "$out/tier0.log" | head -1 |
+	sed 's/.*orb sample: //')
+if [ -z "$sample" ]; then
+	echo "FAIL: the room names no floor orb to aim at"
+	exit 1
+fi
+python3 - "$sample" "$out/tieruser/launch_world/room.txt" "$out/aim.txt" <<'PYAIM' || exit 1
+import math, sys
+# "<name> at x y z from sx sy sz", in voxels
+text = sys.argv[1]
+at = text.split(" at ")[1]
+o, st = at.split(" from ")
+ox, oy, oz = (float(v) for v in o.split())
+sx, sy, sz = (float(v) for v in st.split())
+dx, dy, dz = ox - sx, oy - sy, oz - sz
+d = math.sqrt(dx * dx + dy * dy + dz * dz)
+# Urho3D's forward at a yaw is (sin, 0, cos); pitch is negative upward
+# here, which is what the room's own look command takes
+yaw = math.degrees(math.atan2(dx, dz)) % 360.0
+pitch = math.degrees(math.atan2(-dy, math.sqrt(dx * dx + dz * dz)))
+# On the line, inside the five metres the player can reach: six voxels
+t = 6.0 / d
+vx = round(sx + dx * t)
+vy = round(sy + dy * t)
+vz = round(sz + dz * t)
+open(sys.argv[2], "w").write("%d,%d,%d\n" % (vx, vy, vz))
+# The two looks: through the voxel, and a little over it
+open(sys.argv[3], "w").write("%.2f %.2f %.2f\n" % (yaw, pitch, pitch - 8.0))
+print("aiming at the orb: yaw %.1f pitch %.1f, a placed voxel at %d,%d,%d"
+		% (yaw, pitch, vx, vy, vz))
+PYAIM
+read -r tyaw tpitch tover < "$out/aim.txt"
+{ echo "delay 5000"; echo "look $tyaw $tpitch"; echo "delay 1500"
+	echo "look $tyaw $tover"; echo "delay 1500"; echo "quit"
+	} > "$out/cmds_tier.txt"
+bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
+	-L "$out/tier.log" -c @"$out/cmds_tier.txt" > /dev/null 2>&1
+wins=$(grep -ac "launch_w.*: pointing: the voxel at .* wins over orb" "$out/tier.log")
+takes=$(grep -ac "launch_w.*: pointing at orb .*(up its column)" "$out/tier.log")
+echo "the voxel won $wins times and the orb was taken over it $takes times"
+rm -f "$out/tieruser/launch_world/room.txt"
+if [ "$wins" -lt 1 ] || [ "$takes" -lt 1 ]; then
+	echo "FAIL: a placed voxel does not win over the orb behind it," \
+			"or winning it costs the orb beside it"
+	exit 1
+fi
+
 # **The room is a launch UI the setting can name** ([LAUNCH_SANDBOX]:
 # the launch UI is a slot). Two short runs before the long one: the
 # preference picks the room, and a name that is not there falls back to
