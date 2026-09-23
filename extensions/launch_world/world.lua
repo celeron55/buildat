@@ -3331,13 +3331,50 @@ panel.imageRect = magic.IntRect(0, 0, 2, 2)
 -- comes out two pixels across
 panel.size = magic.IntVector2(760, 420)
 
-local function panel_row(y, left, right, colour)
-	local t = panel:CreateChild("Text")
+-- Forward: the rows redraw themselves when the mouse picks one, and a
+-- click changes the setting the row stands for
+local draw_panel, setting_change, settings, sel
+-- **The desk's rows answer the mouse too** (the rule: every menu this
+-- room draws). A row that stands for a setting is a `Button` under its
+-- text -- hovering selects it and a click changes it, which is what
+-- left and right do from the keyboard -- and a row that is only a
+-- heading stays a `Text`, since there is nothing to point at.
+local function panel_row(y, left, right, colour, which)
+	local holder = panel
+	local b
+	if which then
+		b = panel:CreateChild("Button")
+		b:SetPosition(18, y - 4)
+		b:SetFixedSize(724, 24)
+		-- **One white texel, made once**: a texture per row per redraw
+		-- is an upload per frame the panel changes, and the first one
+		-- after a device reset -- which changing multisampling is --
+		-- fails outright (2026-09-23)
+		b.texture = white_texture()
+		b.imageRect = magic.IntRect(0, 0, 2, 2)
+		b.color = magic.Color(0.05, 0.11, 0.14, 1)
+		b.enabled = true
+		holder = b
+		magic.SubscribeToEvent(b, "HoverBegin", function()
+			if terminal_open then
+				sel = which
+				draw_panel()
+			end
+		end)
+		magic.SubscribeToEvent(b, "Released", function()
+			if terminal_open then
+				sel = which
+				setting_change(settings[which], 1)
+				draw_panel()
+			end
+		end)
+	end
+	local t = holder:CreateChild("Text")
 	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 17)
-	t:SetPosition(26, y)
+	t:SetPosition(which and 8 or 26, which and 3 or y)
 	t:SetColor(colour or magic.Color(0.62, 0.86, 0.95, 1))
 	t.text = string.format("%-26s %s", left, right)
-	return t
+	return b or t
 end
 
 local panel_rows = {}
@@ -3357,7 +3394,7 @@ local STEPS = {
 	multisampling = {1, 16, 1, "%d"},
 	sound_volume = {0.0, 1.0, 0.05, "%.2f"},
 }
-local settings = {}
+settings = {}
 for _, name in ipairs(api.list_preferences()) do
 	settings[#settings + 1] = {pref = name}
 end
@@ -3365,7 +3402,7 @@ end
 settings[#settings + 1] = {room = "palette"}
 settings[#settings + 1] = {room = "probe"}
 settings[#settings + 1] = {room = "contentdb"}
-local sel = 1
+sel = 1
 
 local function setting_value(sg)
 	if sg.pref then
@@ -3388,7 +3425,7 @@ end
 
 -- Left and right change the selected row; a boolean flips and a number
 -- steps within the range the C++ side would clamp it to anyway
-local function setting_change(sg, dir)
+setting_change = function(sg, dir)
 	if sg.pref then
 		local v = api.get_preference(sg.pref)
 		if type(v) == "boolean" then
@@ -3414,21 +3451,23 @@ local function setting_change(sg, dir)
 	end
 end
 
-local function draw_panel()
+panel.enabled = true
+-- Forward-declared above, where the rows learned to be hovered
+draw_panel = function()
 	for _, t in ipairs(panel_rows) do
 		t:Remove()
 	end
 	panel_rows = {}
 	local y = 18
-	local function row(l, r, c)
-		panel_rows[#panel_rows + 1] = panel_row(y, l, r, c)
+	local function row(l, r, c, which)
+		panel_rows[#panel_rows + 1] = panel_row(y, l, r, c, which)
 		y = y + 24
 	end
 	row("SETTINGS", "up/down, left/right to change", magic.Color(1, 1, 1, 1))
 	for i, sg in ipairs(settings) do
 		local mark = (i == sel) and "> " or "  "
 		row(mark .. setting_label(sg), setting_value(sg),
-				(i == sel) and magic.Color(1.0, 0.72, 0.45, 1) or nil)
+				(i == sel) and magic.Color(1.0, 0.72, 0.45, 1) or nil, i)
 	end
 	y = y + 14
 	row("", "the room holds " .. #ORBS .. " things; Escape leaves the desk",
@@ -3520,22 +3559,65 @@ pause_panel.color = magic.Color(0.02, 0.05, 0.07, 0.96)
 pause_panel.texture = checker_texture(2, 1, magic.Color(1, 1, 1, 1),
 		magic.Color(1, 1, 1, 1))
 pause_panel.imageRect = magic.IntRect(0, 0, 2, 2)
-pause_panel.size = magic.IntVector2(420, 190)
-local pause_rows = {}
+pause_panel.size = magic.IntVector2(420, 210)
+-- **An element Urho3D has not been told is enabled is not hit by the
+-- mouse, and neither is anything inside it** -- which is why the rows
+-- below answered the keyboard only
+pause_panel.enabled = true
+-- **Every menu this room draws answers the mouse as well as the
+-- keyboard** (user, 2026-09-23: a row could not be hovered or
+-- clicked). A row is a `Button` rather than a `Text` -- a Text is not
+-- hit-testable -- **without `SetStyleAuto()`**, which would paint
+-- Urho3D's light default over a dark panel, so the row carries the
+-- panel's own colours. **Hovering sets the selection**, so the two
+-- ways drive one cursor rather than two, and the keyboard still works
+-- with no mouse near it.
+local pause_rows, pause_buttons = {}, {}
+pause_sel = 1
+-- Forward: both are defined with the dialog's keys, below the rows
+local draw_pause, close_pause
+local function pause_pick(i)
+	pause_sel = i
+	draw_pause()
+end
 for i = 1, #PAUSE_ITEMS do
-	local t = pause_panel:CreateChild("Text")
+	local b = pause_panel:CreateChild("Button")
+	b:SetPosition(24, 14 + (i - 1) * 48)
+	b:SetFixedSize(372, 40)
+	b.texture = white_texture()
+	b.imageRect = magic.IntRect(0, 0, 2, 2)
+	b.color = magic.Color(0.05, 0.09, 0.12, 1)
+	b.enabled = true
+	local t = b:CreateChild("Text")
 	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 20)
-	t:SetPosition(34, 22 + (i - 1) * 48)
+	t:SetPosition(10, 8)
 	pause_rows[i] = t
+	pause_buttons[i] = b
+	magic.SubscribeToEvent(b, "HoverBegin", function()
+		if pause_open then pause_pick(i) end
+	end)
+	magic.SubscribeToEvent(b, "Released", function()
+		if not pause_open then return end
+		pause_pick(i)
+		local run = PAUSE_ITEMS[i][2]
+		close_pause()
+		if run then run() end
+		log:info("pause: clicked " .. PAUSE_ITEMS[i][1])
+	end)
 end
 pause_open = false
-local pause_sel = 1
-local function draw_pause()
+-- (declared above, where the rows learned to be clicked)
+draw_pause = function()
 	for i, item in ipairs(PAUSE_ITEMS) do
 		pause_rows[i].text = (i == pause_sel and "> " or "  ") .. item[1]
 		pause_rows[i]:SetColor(i == pause_sel and
 				magic.Color(1.0, 0.72, 0.45, 1) or
 				magic.Color(0.55, 0.62, 0.68, 1))
+		if pause_buttons[i] then
+			pause_buttons[i].color = i == pause_sel and
+					magic.Color(0.12, 0.18, 0.22, 1) or
+					magic.Color(0.05, 0.09, 0.12, 1)
+		end
 	end
 end
 local function open_pause()
@@ -3547,7 +3629,7 @@ local function open_pause()
 	mouse_for(false, "launch_world: paused")
 	log:info("pause: open")
 end
-local function close_pause()
+close_pause = function()
 	if not pause_open then return false end
 	pause_open = false
 	pause_panel.visible = false

@@ -312,12 +312,30 @@ fi
 	# **The mouse does not turn the camera while a screen is up**
 	# (user, 2026-09-23: the pause menu turned it into yaw and pitch).
 	# A quarter turn's worth of movement, and the frame behind the
-	# dialog has to be the frame it was.
+	# dialog has to be the frame it was. **This goes first**, before
+	# anything that moves the pointer: once the dialog is gone the
+	# mouse turns the camera again, which is the point of it.
 	echo "mouse_move 220 40"
 	echo "delay 500"
 	echo "keypress Escape"
 	echo "delay 700"
 	echo "screenshot $out/unpaused.png"
+	echo "delay 400"
+	# **And the dialog answers the mouse** (the third playtest, 1):
+	# hovering a row selects it, and a click on the first row is "back
+	# to the room", which closes the dialog. Every menu this room draws
+	# has to do both; the desk's rows are the same machinery.
+	echo "keypress Escape"
+	echo "delay 700"
+	echo "mouse_pos 640 400"
+	echo "delay 600"
+	echo "screenshot $out/pause-hover.png"
+	echo "delay 300"
+	echo "mouse_pos 640 290"
+	echo "delay 400"
+	echo "mouse_click left"
+	echo "delay 700"
+	echo "screenshot $out/pause-clicked.png"
 	echo "delay 400"
 	# **The search walks its matches and the camera follows** (the
 	# second playtest, 5 and 6): a term with many matches, then the
@@ -702,6 +720,22 @@ print("PASS: the search walks its matches and the camera follows"
 # after it closes is the frame before it opened -- within the room's own
 # drift, which is a few levels a second and is what the two seconds
 # between these shots allow for.
+# **The dialog's rows answer the mouse**: hovering one moves the
+# selection, and clicking "back to the room" closes the dialog -- so the
+# hovered picture differs from the plain one, and the clicked picture
+# has no dialog in it
+paused_plain, dpp = mean_of("paused")
+hovered, dho = mean_of("pause-hover")
+clicked, dcl = mean_of("pause-clicked")
+hover_moved = sum(abs(p - q) for p, q in zip(dpp, dho)) / float(len(dpp))
+closed = sum(abs(p - q) for p, q in zip(dpp, dcl)) / float(len(dpp))
+print("hovering a row changed the dialog by %.2f, and clicking one "
+		"changed the frame by %.2f" % (hover_moved, closed))
+mouse_menu_ok = hover_moved > 0.05 and closed > 1.0
+print("PASS: the dialog answers the mouse as well as the keyboard"
+		if mouse_menu_ok
+		else "FAIL: hovering or clicking a row does nothing")
+
 before_pause, dbp = mean_of("prepause")
 after_pause, dap = mean_of("unpaused")
 turned = sum(abs(p - q) for p, q in zip(dbp, dap)) / float(len(dbp))
@@ -816,7 +850,7 @@ print("PASS: a source is brighter than a lit wall" if hdr_ok
 		else "FAIL: the picture clips before its shoulder -- HDR is off")
 every = (probe_ok and dissolve_ok and typing_ok and terminal_ok
 		and ornament_ok and drift_ok and attract_ok and hdr_ok and walk_ok
-		and pause_ok and look_ok and search_ok)
+		and pause_ok and look_ok and search_ok and mouse_menu_ok)
 # The one line a machine reads, after the ones a person does
 print("PASS: the room is what it says it is" if every
 		else "FAIL: the room is not what it says it is")
