@@ -312,6 +312,27 @@ fi
 	echo "delay 700"
 	echo "screenshot $out/unpaused.png"
 	echo "delay 400"
+	# **The search walks its matches and the camera follows** (the
+	# second playtest, 5 and 6): a term with many matches, then the
+	# arrows, and each one has to be a different picture.
+	echo "event mode menu"
+	echo "delay 600"
+	echo "keypress T"
+	echo "keypress E"
+	echo "keypress S"
+	echo "delay 1200"
+	echo "screenshot $out/search1.png"
+	echo "delay 400"
+	echo "keypress Down"
+	echo "delay 1000"
+	echo "screenshot $out/search2.png"
+	echo "delay 400"
+	echo "keypress Down"
+	echo "delay 1000"
+	echo "screenshot $out/search3.png"
+	echo "delay 400"
+	echo "event mode fps"
+	echo "delay 900"
 	# **Menu mode's furniture is menu mode's** (the second playtest, 3
 	# and 4): a term in the prompt, Tab away, and nothing of the search
 	# is on screen in FPS -- and Tab back finds the term again.
@@ -438,6 +459,16 @@ for want in "dissolve: bay" "launch: " "terminal: sat down"; do
 		exit 1
 	fi
 done
+
+walked=$(grep -ac "launch_w.*: prompt: match [0-9]* of " "$out/cli.log")
+matched=$(grep -a "launch_w.*: prompt: \"tes\" matches " "$out/cli.log" |
+	head -1 | sed 's/.*matches \([0-9]*\).*/\1/')
+echo "the search found ${matched:-0} matches and the arrows walked $walked"
+if [ "${matched:-0}" -lt 3 ] || [ "$walked" -lt 2 ]; then
+	echo "FAIL: the search does not find several matches, or the arrows" \
+			"do not walk them"
+	exit 1
+fi
 
 hidden=$(grep -ac "launch_w.*: prompt: hidden with the mode" "$out/cli.log")
 backagain=$(grep -ac "launch_w.*: prompt: back, \"dig\"" "$out/cli.log")
@@ -628,6 +659,24 @@ dissolve_ok = moved > 2.0 and back < moved / 3.0
 print("PASS: a bay opens and closes again" if dissolve_ok
 		else "FAIL: the dissolve does not open, or does not come back")
 
+# **And the camera goes to each match**: three pictures of three
+# different places, so the arrows are not just relabelling a line
+s1, d1 = mean_of("search1")
+s2, d2 = mean_of("search2")
+s3, d3 = mean_of("search3")
+hop1 = sum(abs(p - q) for p, q in zip(d1, d2)) / float(len(d1))
+hop2 = sum(abs(p - q) for p, q in zip(d2, d3)) / float(len(d2))
+print("the search's arrows moved the camera by %.2f and %.2f of a level"
+		% (hop1, hop2))
+# Six, where the room's own drift over the same second and a half is
+# three to five: a hop between two dark corners of the room moves fewer
+# levels than one across the lit wall, and 7.8 was a real move read by
+# an insensitive measure (2026-09-23)
+search_ok = hop1 > 6.0 and hop2 > 6.0
+print("PASS: the search walks its matches and the camera follows"
+		if search_ok
+		else "FAIL: the arrows do not move the camera between matches")
+
 # **A screen on the stack takes the mouse**: with the pause dialog up,
 # 220 pixels of mouse movement must not turn the camera, so the frame
 # after it closes is the frame before it opened -- within the room's own
@@ -747,7 +796,7 @@ print("PASS: a source is brighter than a lit wall" if hdr_ok
 		else "FAIL: the picture clips before its shoulder -- HDR is off")
 every = (probe_ok and dissolve_ok and typing_ok and terminal_ok
 		and ornament_ok and drift_ok and attract_ok and hdr_ok and walk_ok
-		and pause_ok and look_ok)
+		and pause_ok and look_ok and search_ok)
 # The one line a machine reads, after the ones a person does
 print("PASS: the room is what it says it is" if every
 		else "FAIL: the room is not what it says it is")

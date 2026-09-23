@@ -1723,8 +1723,13 @@ end
 -- teaches the room: someone who typed a name sees where that name lives
 -- on the way in.
 local FLY_SECONDS = 1.3
-local function fly_to(from, at)
+-- **A search hop is swift** (user, 2026-09-23): a launch's flight is a
+-- stately arrival, and walking a list of matches with the arrows wants
+-- to keep up with the keys rather than queue behind them
+local HOP_SECONDS = 0.45
+local function fly_to(from, at, seconds)
 	cam.to_from, cam.to_at, cam.t = from, at, 0
+	cam.fly_seconds = seconds or FLY_SECONDS
 	cam.was_from = {x = cam.from.x, y = cam.from.y, z = cam.from.z}
 	cam.was_at = {x = cam.at.x, y = cam.at.y, z = cam.at.z}
 end
@@ -1736,7 +1741,8 @@ function handle_camera_update(event_type, event_data)
 	if not cam.to_from then
 		return
 	end
-	cam.t = math.min(1, cam.t + event_data:GetFloat("TimeStep") / FLY_SECONDS)
+	cam.t = math.min(1, cam.t + event_data:GetFloat("TimeStep") /
+			(cam.fly_seconds or FLY_SECONDS))
 	local e = cam.t * cam.t * (3 - 2 * cam.t)
 	for _, k in ipairs({"x", "y", "z"}) do
 		cam.from[k] = cam.was_from[k] + (cam.to_from[k] - cam.was_from[k]) * e
@@ -3474,14 +3480,92 @@ mode_changed = function(fps_now)
 	end
 end
 
+-- **Every match, not the best one** (user, 2026-09-23: a term like
+-- "test" matches many saves on this desk, and a search that names one
+-- of them hides most of its answer). Sorted the way the prompt sorted
+-- its single answer: the lower the fuzzy score, the earlier the
+-- letters sit in the name.
+local function matches_for(query)
+	local out = {}
+	local term = fuzzy(query, "settings terminal contentdb")
+	if term then
+		out[#out + 1] = {i = "terminal", score = term}
+	end
+	for i, o in ipairs(ORBS) do
+		local sc = fuzzy(query, o.search or o.name)
+		if sc then
+			out[#out + 1] = {i = i, score = sc}
+		end
+	end
+	table.sort(out, function(a, b)
+		if a.score ~= b.score then return a.score < b.score end
+		return tostring(a.i) < tostring(b.i)
+	end)
+	return out
+end
+
+-- Which of them the prompt is on: the term's own results, walked with
+-- up and down, and what Enter launches
+match_list, match_at = {}, 1
+
+-- **The camera goes to what is browsed** (user): until it does, "what
+-- is browsed" is a word rather than a place, and Enter launching it is
+-- a leap of faith. A swift hop rather than a launch's flight.
+local function show_match(i)
+	local b = match_list[i] and match_list[i].i
+	if not b or b == "terminal" then
+		return
+	end
+	local o = orb_places[b]
+	if not o then return end
+	-- **From above and in front**, which is the one direction the room
+	-- is not crowded in: at eye height the floor is full of spheres a
+	-- metre and a half tall, and a launch's own framing -- seven metres
+	-- straight back -- put the camera inside a server for a match on
+	-- the floor (2026-09-23). Three metres up clears everything and
+	-- still shows what the orb is standing among.
+	fly_to({x = o.x, y = o.y + 3.0, z = o.z + 4.5},
+			{x = o.x, y = o.y, z = o.z}, HOP_SECONDS)
+end
+
 function show_prompt()
 	if prompt_str == "" then
 		prompt_text.text = prompt_open and "type a name" or ""
 		return
 	end
-	local b = best_match(prompt_str)
+	local b = match_list[match_at] and match_list[match_at].i
+	local where = #match_list > 1 and
+			("   [" .. match_at .. " of " .. #match_list .. "]") or ""
 	prompt_text.text = "> " .. prompt_str ..
-			(b and ("   -- " .. match_name(b)) or "   -- no match")
+			(b and ("   -- " .. match_name(b) .. where) or "   -- no match")
+end
+
+-- The term changed: its results are new, and the camera goes to the
+-- first of them
+function prompt_changed()
+	match_list = prompt_str ~= "" and matches_for(prompt_str) or {}
+	match_at = 1
+	show_prompt()
+	if #match_list > 0 then
+		show_match(1)
+		log:info("prompt: \"" .. prompt_str .. "\" matches " ..
+				#match_list .. ", showing " ..
+				tostring(match_name(match_list[1].i)))
+	end
+end
+
+-- Up and down walk the results, each a hop of the camera; left and
+-- right stay the cursor's, which is the decision already made
+function prompt_walk(by)
+	if #match_list < 2 then return false end
+	match_at = match_at + by
+	if match_at < 1 then match_at = #match_list end
+	if match_at > #match_list then match_at = 1 end
+	show_prompt()
+	show_match(match_at)
+	log:info("prompt: match " .. match_at .. " of " .. #match_list ..
+			", " .. tostring(match_name(match_list[match_at].i)))
+	return true
 end
 
 -- Launching, in this room, is the bay coming apart and the camera going
@@ -3555,7 +3639,7 @@ function prompt_key(key)
 		for n = 0, 9 do
 			if key == magic["KEY_" .. n] then
 				prompt_str = prompt_str .. tostring(n)
-				show_prompt()
+				prompt_changed()
 				return true
 			end
 		end
@@ -3578,18 +3662,32 @@ function prompt_key(key)
 	end
 	if key == magic.KEY_RETURN then
 		if prompt_open then
-			local b = best_match(prompt_str)
+			-- **What is browsed**, which is the match the arrows walked
+			-- to and not the best one, now that the camera is on it
+			local b = match_list[match_at] and match_list[match_at].i or
+					best_match(prompt_str)
 			prompt_open = false
 			prompt_str = ""
+			match_list, match_at = {}, 1
 			show_prompt()
 			launch(b)
 			return true
 		end
 		return false
 	end
+	-- **Up and down walk the results** with text in the prompt, each one
+	-- a hop of the camera; left and right stay the cursor's
+	if prompt_open and prompt_str ~= "" then
+		if key == magic.KEY_UP then
+			return prompt_walk(-1)
+		end
+		if key == magic.KEY_DOWN then
+			return prompt_walk(1)
+		end
+	end
 	if key == magic.KEY_BACKSPACE and prompt_open then
 		prompt_str = prompt_str:sub(1, #prompt_str - 1)
-		show_prompt()
+		prompt_changed()
 		return true
 	end
 	-- Any letter opens the prompt and is its first character
@@ -3598,13 +3696,13 @@ function prompt_key(key)
 		if key == magic["KEY_" .. ch:upper()] then
 			prompt_open = true
 			prompt_str = prompt_str .. ch
-			show_prompt()
+			prompt_changed()
 			return true
 		end
 	end
 	if key == magic.KEY_SPACE and prompt_open then
 		prompt_str = prompt_str .. " "
-		show_prompt()
+		prompt_changed()
 		return true
 	end
 	return false
