@@ -134,6 +134,19 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "keypress Return"
 	echo "delay 2400"
 	echo "screenshot $out/terminal.png"
+	# **A setting changed and changed back.** A -w run never writes the
+	# preferences file (save_preferences stands down when the size is
+	# forced), so this asserts the change, not the file -- and the
+	# user's own settings are safe from a check.
+	echo "delay 300"
+	echo "keypress Down"
+	echo "delay 200"
+	echo "keypress Right"
+	echo "delay 400"
+	echo "screenshot $out/terminal-changed.png"
+	echo "delay 300"
+	echo "keypress Right"
+	echo "delay 400"
 	echo "delay 400"
 	echo "keypress Escape"
 	echo "delay 2600"
@@ -208,6 +221,16 @@ grep -a "launch_w.*: bays " "$out/cli.log" | head -1 | sed 's/.*: //'
 # **The player's own voxels**: one placed, one dug, and the save written
 # both times. The save is a diff against a generated room, so a room that
 # forgot it would look exactly the same.
+# **The terminal changes a setting**, rather than showing one
+changes=$(grep -a "launch_w.*: setting: " "$out/cli.log" | wc -l)
+first=$(grep -a "launch_w.*: setting: " "$out/cli.log" | head -1 | sed 's/.*setting: //')
+last=$(grep -a "launch_w.*: setting: " "$out/cli.log" | tail -1 | sed 's/.*setting: //')
+echo "the terminal changed $changes settings: $first then $last"
+if [ "$changes" -lt 2 ] || [ "$first" = "$last" ]; then
+	echo "FAIL: the terminal's rows do not change anything"
+	exit 1
+fi
+
 picked=$(grep -ac "launch_w.*: carry: picked up" "$out/cli.log")
 putdown=$(grep -ac "launch_w.*: carry: put down" "$out/cli.log")
 echo "the player carried $picked spheres and put down $putdown"

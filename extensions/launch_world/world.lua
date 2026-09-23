@@ -58,8 +58,15 @@ GAMES[#GAMES + 1] = {name = "install a game", warm = true, empty = true}
 room.set_pockets(#GAMES)
 log:info("contents: " .. (#GAMES - 1) .. " games, " .. #FLOOR_ACTIONS ..
 		" other launch actions, " .. #SAVES .. " saves")
+-- The one that installs a game, for the terminal's ContentDB row: the
+-- tree has no extensions/contentdb, so what there is is an import action
+install_action = nil
 for _, a in ipairs(FLOOR_ACTIONS) do
-	log:info("  floor: " .. a.kind .. " " .. a.name)
+	if a.name:lower():find("import a game") or
+			a.name:lower():find("install") then
+		install_action = a
+		break
+	end
 end
 
 -- The ornament generator and the maps it feeds; see ornament.lua
@@ -2352,6 +2359,79 @@ local function panel_row(y, left, right, colour)
 end
 
 local panel_rows = {}
+-- **The terminal is where a setting is changed, not where it is shown**
+-- ([LAUNCH_WORLD] step 9). The rows are the client's own preferences --
+-- `buildat.list_preferences()`, whose values live in app::Options and
+-- whose C++ side parses, range checks and persists them, so this is a
+-- page of rows over two calls and knows nothing about the file -- plus
+-- the room's own two toggles, which are the room's and not the client's.
+--
+-- simplified: one page. There are eight rows and the panel holds
+-- seventeen; a room with more settings than that wants scrolling, and
+-- this one does not have them.
+local STEPS = {
+	render_scale = {0.5, 2.0, 0.1, "%.2f"},
+	max_fps = {0, 480, 10, "%d"},
+	multisampling = {1, 16, 1, "%d"},
+	sound_volume = {0.0, 1.0, 0.05, "%.2f"},
+}
+local settings = {}
+for _, name in ipairs(buildat.list_preferences()) do
+	settings[#settings + 1] = {pref = name}
+end
+-- The room's own, which no preference file knows about
+settings[#settings + 1] = {room = "palette"}
+settings[#settings + 1] = {room = "probe"}
+settings[#settings + 1] = {room = "contentdb"}
+local sel = 1
+
+local function setting_value(sg)
+	if sg.pref then
+		local v = buildat.get_preference(sg.pref)
+		if type(v) == "boolean" then return v and "on" or "off" end
+		local st = STEPS[sg.pref]
+		return st and string.format(st[4], v) or tostring(v)
+	end
+	if sg.room == "palette" then return PRESETS[current].name end
+	if sg.room == "probe" then return probe_on and "on" or "off" end
+	return "install a game"
+end
+
+local function setting_label(sg)
+	if sg.pref then return sg.pref:gsub("_", " ") end
+	if sg.room == "palette" then return "palette" end
+	if sg.room == "probe" then return "reflection probe" end
+	return "contentdb"
+end
+
+-- Left and right change the selected row; a boolean flips and a number
+-- steps within the range the C++ side would clamp it to anyway
+local function setting_change(sg, dir)
+	if sg.pref then
+		local v = buildat.get_preference(sg.pref)
+		if type(v) == "boolean" then
+			local ok, err = buildat.set_preference(sg.pref, not v)
+			if not ok then log:warning("setting: " .. tostring(err)) end
+		else
+			local st = STEPS[sg.pref]
+			if not st then return end
+			local nv = math.max(st[1], math.min(st[2], v + dir * st[3]))
+			local ok, err = buildat.set_preference(sg.pref, tostring(nv))
+			if not ok then log:warning("setting: " .. tostring(err)) end
+		end
+		log:info("setting: " .. sg.pref .. " = " ..
+				tostring(buildat.get_preference(sg.pref)))
+		return
+	end
+	if sg.room == "palette" then
+		set_preset((current - 1 + dir) % #PRESETS + 1)
+	elseif sg.room == "probe" then
+		probe_on = not probe_on
+		zone.zoneTexture = probe_on and kept.probe or kept.dark_probe
+		log:info("reflection probe " .. (probe_on and "on" or "off"))
+	end
+end
+
 local function draw_panel()
 	for _, t in ipairs(panel_rows) do
 		t:Remove()
@@ -2362,31 +2442,50 @@ local function draw_panel()
 		panel_rows[#panel_rows + 1] = panel_row(y, l, r, c)
 		y = y + 24
 	end
-	row("SETTINGS", "", magic.Color(1, 1, 1, 1))
-	row("palette", PRESETS[current].name .. "  (F1-F4)")
-	row("reflection probe", probe_on and "on  (P)" or "off  (P)")
-	row("voxel", string.format("%.2f m, %d bays", VOXEL_M, BAYS))
-	row("ornament", "generated at boot, no files")
-	row("sound", "synthesised, " .. #orb_nodes .. " drone voices")
-	y = y + 14
-	row("CONTENTDB", "", magic.Color(1, 1, 1, 1))
-	-- What the room holds, as rows: the pockets' games, then the floor's
-	-- launch actions and saves. The terminal is the one place a list is
-	-- a list, which is what makes it the way out for a player who does
-	-- not yet know what the room is.
-	for i, o in ipairs(ORBS) do
-		if o.empty then
-			row("(empty slot " .. i .. ")", "pick a game to install",
-					magic.Color(1.0, 0.72, 0.30, 1))
-		elseif o.save then
-			row(o.name, "save of " .. o.game)
-		else
-			row(o.name, o.kind == "game" and "game" or
-					(o.kind or "") .. " launch action")
-		end
+	row("SETTINGS", "up/down, left/right to change", magic.Color(1, 1, 1, 1))
+	for i, sg in ipairs(settings) do
+		local mark = (i == sel) and "> " or "  "
+		row(mark .. setting_label(sg), setting_value(sg),
+				(i == sel) and magic.Color(1.0, 0.72, 0.45, 1) or nil)
 	end
 	y = y + 14
-	row("", "Escape leaves the desk", magic.Color(0.45, 0.6, 0.66, 1))
+	row("", "the room holds " .. #ORBS .. " things; Escape leaves the desk",
+			magic.Color(0.45, 0.6, 0.66, 1))
+end
+
+-- Returns true when the key was the terminal's
+function terminal_key(key)
+	if not terminal_open then return false end
+	if key == magic.KEY_UP then
+		sel = sel > 1 and sel - 1 or #settings
+	elseif key == magic.KEY_DOWN then
+		sel = sel < #settings and sel + 1 or 1
+	elseif key == magic.KEY_LEFT then
+		setting_change(settings[sel], -1)
+	elseif key == magic.KEY_RIGHT then
+		setting_change(settings[sel], 1)
+	elseif key == magic.KEY_RETURN then
+		if settings[sel].room == "contentdb" then
+			-- **A game found, installed and launched without touching
+			-- another screen** is what step 9 asks for; what the tree
+			-- has today is builtin/luanti's own import action, and
+			-- there is no extensions/contentdb to enter. So this runs
+			-- the install action the launch grid offered, and says so
+			-- when the tree offers none.
+			local a = install_action
+			if a then
+				log:info("contentdb: running " .. a.name)
+				a.run()
+			else
+				log:warning("contentdb: the tree offers no install action")
+			end
+		end
+		return true
+	else
+		return true    -- the desk eats everything while you are sitting at it
+	end
+	draw_panel()
+	return true
 end
 
 -- **The pause dialog, in both modes** (user, 2026-09-23): the room's
@@ -2619,6 +2718,11 @@ function handle_keydown(event_type, event_data)
 	end
 	-- The pause dialog is over everything while it is up
 	if pause_key(key) then
+		return
+	end
+	-- Then the desk, which eats the arrows and Enter while it is open;
+	-- Escape below stands you up
+	if key ~= magic.KEY_ESCAPE and terminal_key(key) then
 		return
 	end
 	-- **Escape is the way back, and the pause dialog when there is

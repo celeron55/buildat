@@ -81,7 +81,10 @@ Both:
     F7          freeze the idle drift, which is what the checks need
     F8          start the attract mode at once
 
-Type "set" and press Return to sit at the terminal.
+Type "set" and press Return to sit at the terminal -- or, in FPS mode,
+press Return anywhere. At the desk, up and down walk the rows and left
+and right change them: the client's own preferences, then the room's
+palette and reflection probe. Escape stands up.
 
 Environment
 -----------
@@ -145,6 +148,7 @@ line is a thing that has been seen to fail:
     the room found launch actions at all   -- not a list written here
     placing and digging do something       -- and write the save
     E picks up and right click puts down
+    the terminal changes a setting         -- and changes it back
     a second client reads the save back    -- the diff survives a restart
 
 The player's voxels are a diff against the generated room, in
