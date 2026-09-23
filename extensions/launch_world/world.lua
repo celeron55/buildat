@@ -839,10 +839,11 @@ end
 -- **The etch** (user, 2026-09-23: the orbs should have the mark; a dummy
 -- one will do): the same picture on a white or a chrome orb, where it
 -- darkens the surface instead of cutting a hole in the light.
--- simplified: it is the diffuse map, not the roughness. The plan wants a
--- roughness change, which means the mark in the technique's spec slot
--- and a second generated image; this reads as an etch at a glance and
--- costs one texture.
+-- simplified: **option A** is the diffuse map, not the roughness, which
+-- reads as an etch at a glance and costs one texture. Option B, the
+-- roughness change the plan asks about, is built and is what
+-- BUILDAT_LAUNCH_MARK=B draws; which of the two the room wears by
+-- default is the user's pick, off mark_sheet.sh's own sheet.
 -- **The options round** ([LAUNCH_WORLD]'s mark, 2026-09-23), and it is
 -- about the white and the chrome orbs only -- a glowing one needs the
 -- one-bit mark whatever is picked, since nothing greyer survives an
@@ -1938,10 +1939,12 @@ readout("b" .. api.version(), {x = 9.0, y = 0.25, z = -1.0}, 0.34,
 -- over the one being pointed at only -- not always on, which is what
 -- keeps the room from being a label wall.
 --
--- simplified: "pointed at" is the smallest angle to the view direction,
--- which is
--- the crosshair's own ray as long as the crosshair is the screen's
--- middle.
+-- "Pointed at" is the smallest angle to the view direction -- the
+-- crosshair's own ray, as long as the crosshair is the screen's middle
+-- -- taken against the best point up the orb's own column rather than
+-- against its centre, and losing to a player-placed voxel under the
+-- crosshair ([LAUNCH_WORLD]: the selection volume is not the drawn
+-- volume, and a tight target wins over a generous one).
 -- **The camera is a state, not a constant**, because the fast path flies
 -- it: where it is and what it looks at are numbers that get lerped, and
 -- the pointing below reads them rather than the two it was set up with.
