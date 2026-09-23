@@ -101,6 +101,13 @@ Environment
                              before the tonemap measures a clamp rather
                              than light
     BUILDAT_LAUNCH_SUN       add a directional light
+    BUILDAT_LAUNCH_PROBEF    a float16 reflection probe, which loses the
+                             frame's red and green under HDR -- see
+                             [PBR_HDR]
+    BUILDAT_LAUNCH_NORENDERPROBE
+                             bind the probe's cube map without ever
+                             rendering into it, which is how the two
+                             halves of that fault were told apart
     BUILDAT_LAUNCH_ATTRACT   seconds of quiet before the attract mode
                              starts (14)
     BUILDAT_LAUNCH_NOPBR     put the stock non-PBR techniques on the

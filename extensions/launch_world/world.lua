@@ -96,11 +96,16 @@ end
 
 do
 	local wh, wi = ornament.wall(128, ornament.seed_of("launch_world wall"))
-	-- Matte cut stone, and the mineral patches a shade off it rather than
-	-- a colour: what varies is the mineral, not the paint
+	-- **Matte cut stone with warm mineral in it.** The patches were a
+	-- shade off the base and the room came out 69 per cent cool pixels
+	-- against the reference frame's 30, with a fifth of the reference
+	-- warm and a fifteenth of this one: the reference's warmth is not
+	-- all light, a good deal of it is rust-coloured stone standing
+	-- among the cold. "Large patches of mineral variation" is where
+	-- that lives, so the mineral is warm and the base stays cold.
 	register_tile("wall.png", wh, wi,
-			{base = magic.Color(0.50, 0.51, 0.55, 1),
-			inlay = magic.Color(0.40, 0.42, 0.40, 1), relief = 0.35,
+			{base = magic.Color(0.52, 0.50, 0.48, 1),
+			inlay = magic.Color(0.52, 0.31, 0.19, 1), relief = 0.35,
 			strength = 2})
 end
 do
@@ -739,13 +744,18 @@ local function preset_lights(orb, sky, orb_i, sky_i)
 		-- faces of the neighbouring slabs, which can see into a
 		-- neighbour's pocket -- the one leak the normal does not cover,
 		-- and a range is cheaper than a shadow map
-		-- **Tight, and tighter now the pockets are** (user's fourth
-		-- condition): an orb's light has to die before it reaches the
-		-- sideways faces of neighbouring slabs, which can see into a
-		-- neighbour's pocket -- the one leak the wall's own normal does
-		-- not cover, and a range is cheaper than a cube shadow map. At
-		-- 11 voxels it lit warm blotches the width of the wall.
-		l[i] = {orb, orb_i, 4 * U}
+		-- **Eight voxels, which is a change to this plan's fourth
+		-- condition** -- that an orb's light should die before it
+		-- reaches a neighbour's pocket. At four it died inside its own,
+		-- and the room came out 68 per cent cool pixels against the
+		-- reference frame's 30 with a twentieth of its warmth. **The
+		-- reference's warm floods**: its glows spill across whole
+		-- faces of stone, and that is where its colour comes from. The
+		-- contrast line the condition is really about is still free,
+		-- being geometry -- an orb behind the wall's plane gives its
+		-- outward face nothing whatever the range is. **A pick, and
+		-- the user's to overrule.**
+		l[i] = {orb, orb_i, 8 * U}
 	end
 	l[BAYS + 1] = {sky, sky_i, 60 * U}
 	return l
@@ -756,7 +766,7 @@ local PRESETS = {
 		-- The reference frame's own scheme: warm orbs in the wall, cold
 		-- light from outside it
 		name = "cold_in_warm_out",
-		lights = preset_lights(WARM, COLD_WHITE, 7.0, 1.6),
+		lights = preset_lights(WARM, COLD_WHITE, 13.0, 1.15),
 	},
 	{
 		name = "warm_in_cold_out",
@@ -875,7 +885,10 @@ local function reflection_probe(at)
 	-- simplified: an emissive orb clips to white where it is reflected,
 	-- since eight bits cannot carry it. The upgrade is the float cube
 	-- back, once [PBR_HDR] is repaired.
-	assert(cube:SetSize(PROBE_SIZE, magic.Graphics.GetRGBAFormat(),
+	local fmt = (buildat.get_env("BUILDAT_LAUNCH_PROBEF") or "") ~= "" and
+			magic.Graphics.GetRGBAFloat16Format() or
+			magic.Graphics.GetRGBAFormat()
+	assert(cube:SetSize(PROBE_SIZE, fmt,
 			magic.TEXTURE_RENDERTARGET), "the probe's cubemap")
 	cube.filterMode = magic.FILTER_BILINEAR
 	kept.probe = cube
@@ -922,6 +935,9 @@ reflection_probe(V(0, 2.0, 0.0))
 -- picture of nothing. Cheap to ask a few times and then stop.
 local probe_frames = 0
 function handle_probe_update()
+	if (buildat.get_env("BUILDAT_LAUNCH_NORENDERPROBE") or "") ~= "" then
+		return
+	end
 	if probe_frames > 90 then
 		return
 	end
@@ -1026,7 +1042,7 @@ do
 		rp:SetEnabled("TonemapReinhardEq3", false)
 		rp:SetEnabled("TonemapUncharted2", true)
 		rp:SetShaderParameter("TonemapExposureBias",
-				tonumber(buildat.get_env("BUILDAT_LAUNCH_BIAS") or "") or 1.05)
+				tonumber(buildat.get_env("BUILDAT_LAUNCH_BIAS") or "") or 1.30)
 		rp:SetShaderParameter("TonemapMaxWhite",
 				tonumber(buildat.get_env("BUILDAT_LAUNCH_WHITE") or "") or 1.8)
 		rp:SetShaderParameter("AutoExposureAdaptRate", 2.0)
