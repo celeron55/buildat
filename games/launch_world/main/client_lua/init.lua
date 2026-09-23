@@ -169,6 +169,18 @@ local function ornamented(h, inlay, opts)
 	m:SetShaderParameter("MatDiffColor", magic.Color(1, 1, 1, 1))
 	m:SetShaderParameter("Roughness", (opts or {}).roughness or 0.75)
 	m:SetShaderParameter("Metallic", (opts or {}).metallic or 0.0)
+	-- **The frieze has to tile.** A Box's UVs run 0..1 over a face, so
+	-- one 128-texel meander stretched across nine metres of frieze is
+	-- four metres a unit and reads as a plain band. Urho3D's UOffset and
+	-- VOffset are the scale, as a Vector4 whose x and y are the tiling.
+	local uv = (opts or {}).uv
+	if uv then
+		-- A Color, not a Vector4: the sandbox's SetShaderParameter takes
+		-- no Vector4, and a Color carries the same four floats into the
+		-- same uniform
+		m:SetShaderParameter("UOffset", magic.Color(uv[1], 0, 0, 0))
+		m:SetShaderParameter("VOffset", magic.Color(0, uv[2], 0, 0))
+	end
 	kept[#kept + 1] = m
 	return m
 end
@@ -217,19 +229,21 @@ end
 log:info(ornament.self_check(ORN_SIZE))
 local meander_h, meander_i = ornament.meander(ORN_SIZE, {units = 3, depth = 2})
 local meander_mat = ornamented(meander_h, meander_i,
-		{base = magic.Color(0.34, 0.35, 0.38, 1),
-		inlay = magic.Color(0.17, 0.10, 0.22, 1), roughness = 0.70})
+		{base = magic.Color(0.52, 0.54, 0.58, 1),
+		inlay = magic.Color(0.20, 0.21, 0.26, 1), roughness = 0.70,
+		relief = 0.85, strength = 5, uv = {7, 1}})
 local socket_h, socket_i = ornament.sockets(ORN_SIZE,
 		{cells = 3, depth = 2, seed = 7})
 local socket_mat = ornamented(socket_h, socket_i,
-		{base = magic.Color(0.24, 0.25, 0.28, 1),
-		inlay = magic.Color(0.05, 0.05, 0.06, 1), roughness = 0.85})
+		{base = magic.Color(0.40, 0.42, 0.46, 1),
+		inlay = magic.Color(0.04, 0.04, 0.05, 1), roughness = 0.85,
+		relief = 0.85, strength = 5, uv = {1, 2}})
 local sigil_h, sigil_i = ornament.sigil(ORN_SIZE,
 		ornament.seed_of("buildat.example.org:30000"), 4)
 local sigil_mat = ornamented(sigil_h, sigil_i,
-		{base = magic.Color(0.28, 0.29, 0.33, 1),
-		inlay = magic.Color(0.10, 0.34, 0.42, 1), roughness = 0.55,
-		metallic = 0.6})
+		{base = magic.Color(0.42, 0.44, 0.50, 1),
+		inlay = magic.Color(0.08, 0.30, 0.38, 1), roughness = 0.55,
+		metallic = 0.6, relief = 0.85, strength = 5, uv = {1, 2}})
 
 -- The floor: a checkerboard in perspective is half the classic raytrace
 -- picture, and in the reference frame it carries the reflections of
@@ -293,6 +307,41 @@ end
 log:info("bays " .. BAYS .. " " .. SLAB_H .. " " .. BAY_Z .. " " ..
 		BAY_DEPTH .. " " .. NICHE_DEPTH .. " " ..
 		table.concat(bay_desc, " "))
+
+-- **The ornament, on primitives in front of the voxels.** The bays are
+-- voxel mass and the ornament is a generated texture, and the two cannot
+-- meet: a voxel's tile is loaded by resource name out of Urho3D's
+-- ResourceCache and there is no way to put a generated Image in there.
+-- So the friezes are what the plan's own "three representations, each
+-- where it is better" asks for -- boxes carrying the meander and the
+-- socket field, standing a little proud of the wall the way a course of
+-- dressed stone stands proud of rubble.
+do
+	local z = (BAY_Z + 0.55) * VOXEL_M
+	for b = 1, BAYS do
+		local x = bay_x(b) * VOXEL_M
+		local tier = BAY_TIER[b]
+		local w = bay_width(tier) * VOXEL_M * 2
+		-- The frieze over the opening, and its answer below it
+		part("Box", magic.Vector3(x, (tier * SLAB_H + SLAB_H + 0.6) * VOXEL_M,
+				z), magic.Vector3(w, 1.05, 0.30), meander_mat)
+		part("Box", magic.Vector3(x, (tier * SLAB_H - 0.7) * VOXEL_M, z),
+				magic.Vector3(w, 0.75, 0.30), meander_mat)
+		-- The jambs: the socket field, which is the perforated block of
+		-- the reference frame, down each side of the opening
+		for _, side in ipairs({-1, 1}) do
+			part("Box", magic.Vector3(x + side * w * 0.42,
+					(tier * SLAB_H + SLAB_H / 2) * VOXEL_M, z),
+					magic.Vector3(w * 0.16, SLAB_H * VOXEL_M * 1.5, 0.28),
+					b == 4 and sigil_mat or socket_mat)
+		end
+	end
+	-- And one long course across the whole wall, above the bays, which is
+	-- what makes the room read as built rather than as cut
+	part("Box", magic.Vector3(0, 19.5 * VOXEL_M, z),
+			magic.Vector3(BAYS * BAY_SPACING * VOXEL_M, 1.35, 0.26),
+			meander_mat)
+end
 
 -- The orbs. Warm is what you own; the palette's own entry says which
 -- colour each carries, and the light at it is what lights the room.
