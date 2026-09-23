@@ -2618,20 +2618,45 @@ function handle_orb_update(event_type, event_data)
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if in_game or console_open then return end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
-	local best, best_dot = 0, -1
+	local best, best_dot, best_up = 0, -1, false
 	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
 	-- stops at it, which would hide every orb past the empty one
 	for i = 1, #orb_places do
 		local node = orb_nodes[i]
 		if node then
 			local p = node.position
-			local dx, dy, dz = p.x - view_from.x, p.y - view_from.y,
-					p.z - view_from.z
-			local l = math.sqrt(dx * dx + dy * dy + dz * dz)
-			local dot = (dx * view_dir.x + dy * view_dir.y +
-					dz * view_dir.z) / l
+			-- **The selection volume is not the drawn volume** (user,
+			-- 2026-09-23): close to a floor orb a player points *over*
+			-- it, since that is where the horizon sits comfortably, and
+			-- the crosshair left it. So the thing is pointed at
+			-- anywhere up its own column -- its footprint extruded from
+			-- where it stands to eye height -- and the best point on
+			-- that column answers rather than its centre.
+			--
+			-- Five samples up the column rather than a closest-point
+			-- solve: the column is at most three voxels tall and this
+			-- runs once an orb a frame.
+			local top = p.y
+			if ORBS[i] and ORBS[i].floor then
+				-- The eye in scene units: a node's position is voxels and
+				-- FPS_EYE is metres ([LAUNCH_WORLD]: part() multiplies
+				-- metres by U on the way in)
+				top = math.max(p.y, FPS_EYE * U)
+			end
+			local dot, up = -1, false
+			for k = 0, 4 do
+				local y = p.y + (top - p.y) * (k / 4)
+				local dx, dy, dz = p.x - view_from.x, y - view_from.y,
+						p.z - view_from.z
+				local l = math.sqrt(dx * dx + dy * dy + dz * dz)
+				local d = (dx * view_dir.x + dy * view_dir.y +
+						dz * view_dir.z) / l
+				if d > dot then
+					dot, up = d, k > 0
+				end
+			end
 			if dot > best_dot then
-				best, best_dot = i, dot
+				best, best_dot, best_up = i, dot, up
 			end
 			-- Present the face: the mark sits in the middle of the
 			-- sphere's UVs, which Sphere.mdl puts on -Z, so the orb looks
@@ -2681,7 +2706,8 @@ function handle_orb_update(event_type, event_data)
 				or ""
 		desc_text.text = (o and o.description) or ""
 		log:info("pointing at orb " .. best .. ": " ..
-				(o and o.name or "?"))
+				(o and o.name or "?") ..
+				(best_up and " (up its column)" or ""))
 	end
 	carry_draw()
 	if best > 0 then

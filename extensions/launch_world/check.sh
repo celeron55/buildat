@@ -784,6 +784,16 @@ if ! grep -aq "pointing at orb" "$out/cli.log"; then
 	echo "FAIL: no orb is ever pointed at"
 	exit 1
 fi
+# **And the selection volume is not the drawn volume** (user): close to a
+# floor orb the player points over it, which is where the horizon sits,
+# and the crosshair used to leave it. The room says when it answered up
+# an orb's column rather than at its middle.
+column=$(grep -ac "pointing at orb .*(up its column)" "$out/cli.log")
+echo "the crosshair took an orb up its column $column times"
+if [ "$column" -lt 1 ]; then
+	echo "FAIL: pointing over a floor orb loses it"
+	exit 1
+fi
 grep -a "pointing at orb" "$out/cli.log" | head -1 | sed 's/.*launch_w[a-z]*: //'
 for what in "ornament" "synth"; do
 	if ! grep -aq "$what ok" "$out/cli.log"; then
