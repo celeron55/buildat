@@ -306,6 +306,58 @@ buildat.safe.run_extension_file = function(name)
 	return ret
 end
 
+-- **The launch UIs this client has**, listed without running one:
+-- an extension says it is one by shipping `launch_ui.txt`, whose first
+-- line is its name for a person. Listing by loading would mean running
+-- every candidate, which is the opposite of what a slot is for.
+-- The launch UI that was asked for and did not load, or nil: what the
+-- one that did load tells the user, so a setting cannot quietly do
+-- nothing
+buildat.safe.launch_ui_fell_back = __buildat_launch_ui_fell_back
+buildat.safe.list_launch_uis = function()
+	local out = {}
+	for _, e in ipairs(__buildat_list_launchers()) do
+		if e.kind == "extension" and type(e.path) == "string" then
+			local f = io.open(e.path .. "/launch_ui.txt", "rb")
+			if f then
+				local title = f:read("*l")
+				f:close()
+				out[#out + 1] = {name = e.name,
+						title = (title ~= nil and title ~= "") and title or
+						e.name}
+			end
+		end
+	end
+	table.sort(out, function(a, b) return a.name < b.name end)
+	return out
+end
+-- **Switching the launch UI**: the name is remembered and the extension
+-- is booted now, so the switch is one action rather than a restart. A
+-- name that is not one of the listed ones is refused here -- the
+-- preference would take it, but a slot is picked from what there is.
+buildat.safe.set_launch_ui = function(name)
+	local found = nil
+	for _, e in ipairs(buildat.safe.list_launch_uis()) do
+		if e.name == name then
+			found = e
+		end
+	end
+	if not found then
+		return false, "set_launch_ui: no launch UI called " .. tostring(name)
+	end
+	local ok, err = __buildat_set_preference("launch_ui", name)
+	if not ok then
+		return false, err
+	end
+	local m = __buildat_require_extension(name)
+	if type(m) ~= "table" or type(m.boot) ~= "function" then
+		return false, "set_launch_ui: " .. name .. " has no boot()"
+	end
+	__buildat_menu_extension_name = name
+	m.boot()
+	return true
+end
+
 -- The two read-only enumerations a launcher draws its room from
 buildat.safe.list_games = __buildat_list_games
 buildat.safe.list_saves = __buildat_list_saves

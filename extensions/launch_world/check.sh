@@ -31,6 +31,24 @@ cd "$here/Build"
 if pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
+
+# **The room is a launch UI the setting can name** ([LAUNCH_SANDBOX]:
+# the launch UI is a slot). Two short runs before the long one: the
+# preference picks the room, and a name that is not there falls back to
+# the menu rather than leaving the client with no launcher. -o is used
+# so that a check never writes the user's preferences.
+{ echo "delay 2500"; echo "quit"; } > "$out/cmds_slot.txt"
+slot=$(bin/buildat -D ../user -w 640x360 -l 3 -o launch_ui=launch_world 	-c @"$out/cmds_slot.txt" 2>&1 |
+	sed -e 's/\x1b\[[0-9;]*m//g' | grep -ac "launch_w.*: contents: ")
+back=$(bin/buildat -D ../user -w 640x360 -l 3 -o launch_ui=nosuchthing 	-c @"$out/cmds_slot.txt" 2>&1 |
+	sed -e 's/\x1b\[[0-9;]*m//g' |
+	grep -ac "the launch UI is __menu")
+echo "the slot: picked by name $slot, fell back to the menu $back"
+if [ "$slot" -lt 1 ] || [ "$back" -lt 1 ]; then
+	echo "FAIL: the launch UI setting does not pick the room," \
+			"or a missing one does not fall back to the menu"
+	exit 1
+fi
 { echo "delay 5000"
 	# **It starts in FPS mode**, so the walking is checked first and then
 	# Tab goes to menu mode, where the prompt and the digits live. A held

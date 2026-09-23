@@ -3156,14 +3156,15 @@ end
 -- take and give back, and this has two rows.
 local PAUSE_ITEMS = {
 	{"Back to the room", nil},
-	{"Switch to the old menu", function()
-		-- launch_menu is still selectable, which is the plan's own
-		-- promise: the room is an alternative and never a replacement
-		local ok, m = pcall(require, "buildat/extension/launch_menu")
-		if ok and type(m) == "table" and type(m.boot) == "function" then
-			m.boot()
-		else
-			log:warning("pause: launch_menu did not load")
+	{"Switch to the menu", function()
+		-- **The slot, through its verb** ([LAUNCH_SANDBOX]): the choice
+		-- is remembered as a preference and the other UI is booted now,
+		-- so switching is one action from either side ([TWO_AUDIENCES])
+		-- rather than a flag and a restart.
+		local ok, why = buildat.safe.set_launch_ui("__menu")
+		if not ok then
+			log:warning("pause: " .. tostring(why))
+			notice(tostring(why))
 		end
 	end},
 	{"Leave buildat", function() buildat.safe.disconnect() end},

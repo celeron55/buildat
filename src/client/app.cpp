@@ -220,6 +220,21 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 		}
 		ss_ key = item.substr(0, eq);
 		ss_ value = item.substr(eq + 1);
+		// **The launch UI is a name, not a number**: it is an
+		// extension's directory name, so letters, digits and
+		// underscores and nothing that could be a path
+		if(key == "launch_ui"){
+			bool ok = !value.empty() && value.size() <= 64;
+			for(char c : value)
+				if(!(isalnum((unsigned char)c) || c == '_'))
+					ok = false;
+			if(!ok){
+				*error = "launch_ui: \""+value+"\" is not an extension name";
+				return false;
+			}
+			opt->launch_ui = value;
+			continue;
+		}
 		char *end = nullptr;
 		double v = strtod(value.c_str(), &end);
 		if(value.empty() || *end != '\0'){
@@ -436,6 +451,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jms = o.get("multisampling");
 	const json::Value &jsv = o.get("sound_volume");
 	const json::Value &jsm = o.get("sound_mute");
+	const json::Value &jui = o.get("launch_ui");
 	const json::Value &jll = o.get("log_level");
 	const json::Value &jsl = o.get("server_log_level");
 	// Through the same parser as -o, so that the range checks are written
@@ -457,6 +473,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 		items += ss_()+(items.empty()?"":",")+"sound_volume="+ftos(jsv.as_number());
 	if(jsm.is_boolean())
 		items += ss_()+(items.empty()?"":",")+"sound_mute="+(jsm.as_boolean()?"1":"0");
+	if(jui.is_string())
+		items += ss_()+(items.empty()?"":",")+"launch_ui="+jui.as_string();
 	if(!items.empty()){
 		app::Options parsed = *opt;
 		if(!app::parse_preference_options(items, &parsed, &pref_err))
@@ -509,6 +527,7 @@ static void save_preferences(const app::Options &opt)
 	o.set("sound_mute", opt.sound_mute);
 	o.set("log_level", opt.log_level);
 	o.set("server_log_level", opt.server_log_level);
+	o.set("launch_ui", opt.launch_ui);
 	o.save_file(preferences_path().c_str());
 }
 
@@ -981,6 +1000,9 @@ struct CApp: public App, public magic::Application
 	// are remembered when a connection starts, and the way back removes
 	// the difference.
 	sv_<magic::SharedPtr<magic::UIElement>> m_menu_ui_children;
+	// The launch UI that was asked for and did not load, so that the one
+	// that did can say why it is not the one the setting names
+	ss_ m_launch_ui_fell_back;
 
 	sp_<interface::thread_pool::ThreadPool> m_thread_pool;
 
@@ -1413,6 +1435,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_preference)
 		DEF_BUILDAT_FUNC(set_preference)
 		DEF_BUILDAT_FUNC(list_preferences)
+		DEF_BUILDAT_FUNC(launch_ui_fell_back)
 		DEF_BUILDAT_FUNC(get_env)
 		DEF_BUILDAT_FUNC(is_scripted)
 		DEF_BUILDAT_FUNC(leave_to_menu)
@@ -1445,8 +1468,7 @@ struct CApp: public App, public magic::Application
 		// which is wrong the moment the client is booted with another one
 		// (-m launch_world). client/api.lua reads this.
 		{
-			const ss_ &name =
-					g_client_config.get<ss_>("menu_extension_name");
+			const ss_ name = launch_ui_name();
 			lua_pushstring(L, name.c_str());
 			lua_setglobal(L, "__buildat_menu_extension_name");
 		}
@@ -1461,7 +1483,7 @@ struct CApp: public App, public magic::Application
 
 		// Launch menu if requested
 		if(g_client_config.get<bool>("boot_to_menu")){
-			ss_ extname = g_client_config.get<ss_>("menu_extension_name");
+			ss_ extname = launch_ui_name();
 			// -a kind/name/id: the menu boots and runs that one action of
 			// its grid ([LAUNCH_GRID]); the string goes in quoted, and it
 			// is a path's shape or nothing
@@ -1475,9 +1497,45 @@ struct CApp: public App, public magic::Application
 					"    error('Failed to load extension "+extname+"')\n"
 					"end\n"
 					"m.boot("+(action.empty() ? ss_("") : "'"+action+"'")+")\n";
-			if(!run_script_no_sandbox(script)){
-				throw AppStartupError(ss_()+
-						"Failed to load and run extension "+extname);
+			// **A launch UI that raises is a launch UI that did not
+			// load**: the runner turns a Lua error into an exception,
+			// so a raising one would otherwise take the client with it
+			// rather than falling back.
+			bool booted = false;
+			try {
+				booted = run_script_no_sandbox(script);
+			} catch(std::exception &e){
+				log_w(MODULE, "launch UI \"%s\" raised: %s",
+						cs(extname), e.what());
+				booted = false;
+			}
+			if(!booted){
+				// **A user cannot be left with no launcher**, which is
+				// what a slot anybody can fill has to promise: the one
+				// that came with the client is what a missing or
+				// raising one falls back to, and the log says which
+				// was asked for ([LAUNCH_SANDBOX]).
+				if(extname == "__menu"){
+					throw AppStartupError(ss_()+
+							"Failed to load and run extension "+extname);
+				}
+				log_w(MODULE, "launch UI \"%s\" did not load; falling back"
+						" to __menu", cs(extname));
+				m_launch_ui_fell_back = extname;
+				lua_pushstring(L, "__menu");
+				lua_setglobal(L, "__buildat_menu_extension_name");
+				ss_ fallback = ss_() +
+						"local m = require('buildat/extension/__menu')\n"
+						"if type(m) ~= 'table' then\n"
+						"    error('Failed to load extension __menu')\n"
+						"end\n"
+						"m.boot()\n";
+				if(!run_script_no_sandbox(fallback)){
+					throw AppStartupError(
+							"Failed to load and run extension __menu");
+				}
+				log_i(MODULE, "the launch UI is __menu, not \"%s\"",
+						cs(extname));
 			}
 		}
 
@@ -2065,6 +2123,20 @@ struct CApp: public App, public magic::Application
 		}
 		m_menu_ui_children.clear();
 		log_i(MODULE, "forget_game_ui(): %u elements removed", removed);
+	}
+
+	// **Which extension is the launch UI** ([LAUNCH_SANDBOX]: a slot an
+	// extension fills, not a setting with three values). `-m` wins for
+	// the run it is given on; otherwise it is the saved preference,
+	// which defaults to `__menu`.
+	ss_ launch_ui_name()
+	{
+		const ss_ named = g_client_config.get<ss_>("menu_extension_name");
+		if(named != "__menu")
+			return named;
+		if(m_options.launch_ui.empty())
+			return "__menu";
+		return m_options.launch_ui;
 	}
 
 	void set_preferred_viewports(const sv_<magic::Viewport*> &viewports)
@@ -2724,9 +2796,26 @@ struct CApp: public App, public magic::Application
 	// and knows nothing about the file.
 	static const char** preference_names()
 	{
-		static const char *names[7] = {"render_scale", "vsync", "max_fps",
-				"multisampling", "sound_volume", "sound_mute", nullptr};
+		static const char *names[8] = {"render_scale", "vsync", "max_fps",
+				"multisampling", "sound_volume", "sound_mute", "launch_ui",
+				nullptr};
 		return names;
+	}
+
+	// launch_ui_fell_back() -> the name of the launch UI that was asked
+	// for and did not load, or nil. What the one that did load says to
+	// the user, so a setting that quietly does nothing is not a thing
+	// this slot can do ([LAUNCH_SANDBOX]).
+	static int l_launch_ui_fell_back(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		if(self->m_launch_ui_fell_back.empty())
+			lua_pushnil(L);
+		else
+			lua_pushstring(L, self->m_launch_ui_fell_back.c_str());
+		return 1;
 	}
 
 	// get_preference(name) -> number or boolean, or nil for a name there is
@@ -2750,6 +2839,8 @@ struct CApp: public App, public magic::Application
 			lua_pushnumber(L, o.sound_volume);
 		else if(name == "sound_mute")
 			lua_pushboolean(L, o.sound_mute);
+		else if(name == "launch_ui")
+			lua_pushstring(L, o.launch_ui.c_str());
 		else if(name == "log_level")
 			lua_pushinteger(L, o.log_level);
 		else if(name == "server_log_level")

@@ -77,6 +77,12 @@ namespace app
 		// -c: the saved file is neither read nor written, so that a
 		// preference someone left behind cannot change a screenshot
 		bool preferences_disabled = false;
+		// **Which extension is the launch UI** ([LAUNCH_SANDBOX]: the
+		// launch UI is a slot rather than a setting with three values).
+		// An extension's directory name; -m wins for that run, and a
+		// name that does not load falls back to __menu, since a user
+		// with no launcher has no way to fix the setting.
+		ss_ launch_ui = "__menu";
 	};
 
 	// Parses "k=v[,k=v...]" on top of whatever *opt already holds. Returns

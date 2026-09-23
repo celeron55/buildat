@@ -256,6 +256,17 @@ function M.boot(launch_action)
 		end
 	end)
 
+	-- **The setting said another launch UI and it did not load**, so
+	-- this one says so rather than leaving the player wondering why
+	-- their choice did nothing ([LAUNCH_SANDBOX]'s fallback)
+	local fell_back = buildat.safe.launch_ui_fell_back and
+			buildat.safe.launch_ui_fell_back()
+	if fell_back then
+		ui_utils.show_message_dialog("The launch UI \"" .. fell_back ..
+				"\" did not load, so this is the menu.\n\n" ..
+				"The log has the error.")
+	end
+
 	if launch_action then
 		local found = nil
 		for _, action in ipairs(actions) do

@@ -1,0 +1,2 @@
+The launch menu
+The plain grid of tiles: pick a thing, it starts.
