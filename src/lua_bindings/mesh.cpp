@@ -83,7 +83,8 @@ void set_simple_voxel_model(const luabind::object &node_o,
 
 void set_8bit_voxel_geometry(const luabind::object &node_o,
 		int w, int h, int d, const luabind::object &buffer_o,
-		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg)
+		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
+		int ox, int oy, int oz)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -111,8 +112,11 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 
 	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 
+	// Where this block's (0, 0, 0) sits in the world, which is what a
+	// voxel of uv_scale > 1 takes its slice of the repeat from ([WORLD_UV])
 	interface::mesh::set_8bit_voxel_geometry(cg, context, w, h, d, data,
-			voxel_reg.get(), atlas_reg.get());
+			voxel_reg.get(), atlas_reg.get(),
+			PolyVox::Vector3DInt32(ox, oy, oz));
 
 	cg->SetOccluder(true);
 	cg->SetCastShadows(true);

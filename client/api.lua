@@ -298,7 +298,12 @@ function buildat.safe.set_simple_voxel_model(safe_node, w, h, d, safe_buffer)
 	__buildat_set_simple_voxel_model(node, w, h, d, buffer)
 end
 
-function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer, ...)
+-- voxel_reg, atlas_reg, and then where this block's (0, 0, 0) sits in the
+-- world, which is what a voxel of uv_scale > 1 takes its slice of the
+-- repeat from ([WORLD_UV]). No origin is the old behaviour, the block
+-- standing at the world's own zero.
+function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer,
+		voxel_reg, atlas_reg, ox, oy, oz)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
@@ -315,7 +320,8 @@ function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer, .
 		end
 		buffer = getmetatable(safe_buffer).unsafe
 	end
-	__buildat_set_8bit_voxel_geometry(node, w, h, d, buffer, ...)
+	__buildat_set_8bit_voxel_geometry(node, w, h, d, buffer,
+			voxel_reg, atlas_reg, ox or 0, oy or 0, oz or 0)
 end
 
 function buildat.safe.set_voxel_geometry(safe_node, safe_buffer, ...)

@@ -710,15 +710,45 @@ public:
 		m_client = client;
 	}
 
+	// **A builtin module's client_data, with no server to send it.** A
+	// module publishes its client_data as <module>/<path> and the client
+	// gets it over the wire; an extension that wants the same shaders --
+	// extensions/launch_world wants voxel_shading's -- has no server to
+	// get them from. So a name nobody has announced is looked for under
+	// builtin/<module>/client_data/ before it is given up on.
+	ss_ builtin_client_data(const ss_ &orig)
+	{
+		size_t slash = orig.find('/');
+		if(slash == ss_::npos || slash == 0)
+			return "";
+		// A name is a resource name and never a path out of the tree
+		if(orig.find("..") != ss_::npos)
+			return "";
+		ss_ path = g_client_config.get<ss_>("share_path")+"/builtin/"+
+				orig.substr(0, slash)+"/client_data/"+orig.substr(slash + 1);
+		if(!interface::fs::path_exists(path))
+			return "";
+		return path;
+	}
+
 	void Route(magic::String &name, magic::ResourceRequest requestType)
 	{
 		if(!m_client){
+			ss_ builtin = builtin_client_data(ss_(name.CString()));
+			if(builtin != ""){
+				log_v(MODULE, "Resource route access: %s -> %s (builtin)",
+						name.CString(), cs(builtin));
+				name = builtin.c_str();
+				return;
+			}
 			log_w(MODULE, "Resource route access: %s (client not initialized)",
 					name.CString());
 			return;
 		}
 		ss_ orig(name.CString());
 		ss_ path = m_client->get_file_path(orig);
+		if(path == "")
+			path = builtin_client_data(orig);
 		if(path == ""){
 			log_v(MODULE, "Resource route access: %s (assuming local file)",
 					name.CString());

@@ -704,6 +704,7 @@ void init_voxel(lua_State *L)
 			.def_readwrite("edge_material_id", &VoxelDefinition::edge_material_id)
 			.def_readwrite("physically_solid", &VoxelDefinition::physically_solid)
 			.def_readwrite("fully_empty", &VoxelDefinition::fully_empty)
+			.def_readwrite("uv_scale", &VoxelDefinition::uv_scale)
 			.property("shape", &vdef_get_shape, &vdef_set_shape)
 			.property("shape_masked", &vdef_get_shape_masked,
 					&vdef_set_shape_masked)

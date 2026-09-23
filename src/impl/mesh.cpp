@@ -269,7 +269,8 @@ Model* create_8bit_voxel_physics_model(Context *context,
 // Set custom geometry from 8-bit voxel data, using a voxel registry
 void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 		int w, int h, int d, const ss_ &source_data,
-		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg)
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+		const pv::Vector3DInt32 &uv_origin)
 {
 	if(w < 0 || h < 0 || d < 0)
 		throw Exception("Negative dimension");
@@ -301,7 +302,8 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 		}
 	}
 
-	return set_voxel_geometry(cg, context, volume, voxel_reg, atlas_reg, true);
+	return set_voxel_geometry(cg, context, volume, voxel_reg, atlas_reg, true,
+			&uv_origin);
 }
 
 template<typename VoxelType>
@@ -1271,7 +1273,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		bool use_skylight,
 		sm_<uint, TemporaryGeometry> *translucent_result,
 		sm_<uint, TemporaryGeometry> *masked_result,
-		const HorizonMap *horizon)
+		const HorizonMap *horizon,
+		const pv::Vector3DInt32 *uv_origin)
 {
 	const VoxelFmt fmt(voxel_reg);
 	IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg);
@@ -1485,22 +1488,24 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		// the coordinates stay inside this segment's own rect and the
 		// atlas is untouched.
 		//
-		// simplified: it needs the chunk's world position, which the
-		// mesher only has out of the horizon map, so a client that passes
-		// none keeps one texture per voxel. The upgrade is the origin as
-		// an argument of its own.
+		// The world position comes from the horizon map when the mesher is
+		// a world's, and from uv_origin when it is one block standing on
+		// its own -- the client-side mesh call, which has no horizon.
 		AtlasSegmentCache sliced;
 		const AtlasSegmentCache *useg = aseg;
 		const int uvn = voxel_def0->uv_scale < 1 ? 1 : voxel_def0->uv_scale;
-		if(uvn > 1 && horizon != nullptr){
+		if(uvn > 1 && (horizon != nullptr || uv_origin != nullptr)){
 			const pv::Vector3DInt32 uvp = face_back_pos(volume, quad, n);
 			const pv::Vector3DInt32 uvlc =
 					volume.getEnclosingRegion().getLowerCorner();
-			const int wx = horizon->origin_x + HORIZON_PAD +
-					(uvp.getX() - uvlc.getX() - 1);
-			const int wy = horizon->origin_y + (uvp.getY() - uvlc.getY() - 1);
-			const int wz = horizon->origin_z + HORIZON_PAD +
-					(uvp.getZ() - uvlc.getZ() - 1);
+			const int ox = horizon ? horizon->origin_x + HORIZON_PAD :
+					uv_origin->getX();
+			const int oy = horizon ? horizon->origin_y : uv_origin->getY();
+			const int oz = horizon ? horizon->origin_z + HORIZON_PAD :
+					uv_origin->getZ();
+			const int wx = ox + (uvp.getX() - uvlc.getX() - 1);
+			const int wy = oy + (uvp.getY() - uvlc.getY() - 1);
+			const int wz = oz + (uvp.getZ() - uvlc.getZ() - 1);
 			auto wrap = [uvn](int v){ return ((v % uvn) + uvn) % uvn; };
 			int ui, vi;
 			if(n.getY() != 0.0f){
@@ -2101,13 +2106,13 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-		bool use_skylight)
+		bool use_skylight, const pv::Vector3DInt32 *uv_origin)
 {
 	preload_textures(volume, voxel_reg, atlas_reg);
 
 	sm_<uint, TemporaryGeometry> temp_geoms;
 	generate_voxel_geometry(temp_geoms, volume, voxel_reg, atlas_reg,
-			use_skylight);
+			use_skylight, nullptr, nullptr, nullptr, uv_origin);
 
 	set_voxel_geometry(cg, context, temp_geoms, atlas_reg);
 }

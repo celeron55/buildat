@@ -33,10 +33,14 @@ namespace interface
 				int w, int h, int d, const ss_ &source_data,
 				VoxelRegistry *voxel_reg);
 
-		// Set custom geometry from 8-bit voxel data, using a voxel registry
+		// Set custom geometry from 8-bit voxel data, using a voxel registry.
+		// uv_origin is where this block's (0, 0, 0) sits in the world, which
+		// is what a voxel of uv_scale > 1 takes its slice of the repeat from
+		// ([WORLD_UV]); without it every voxel gets the whole texture.
 		void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 				int w, int h, int d, const ss_ &source_data,
-				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				const pv::Vector3DInt32 &uv_origin = pv::Vector3DInt32(0, 0, 0));
 
 		// Create a model from voxel volume, using a voxel registry, without
 		// textures or normals, based on the physically_solid flag.
@@ -155,7 +159,8 @@ namespace interface
 				bool use_skylight = false,
 				sm_<uint, TemporaryGeometry> *translucent_result = nullptr,
 				sm_<uint, TemporaryGeometry> *masked_result = nullptr,
-				const HorizonMap *horizon = nullptr);
+				const HorizonMap *horizon = nullptr,
+				const pv::Vector3DInt32 *uv_origin = nullptr);
 
 		// A chunk's column heights for a HorizonMap: the local y of the
 		// highest voxel with an edge material that is not a cutout, per
@@ -174,7 +179,8 @@ namespace interface
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-				bool use_skylight = false);
+				bool use_skylight = false,
+				const pv::Vector3DInt32 *uv_origin = nullptr);
 
 		// Voxel LOD geometry generation (lod=1 -> 1:1, lod=3 -> 1:3)
 
