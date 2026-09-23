@@ -681,6 +681,19 @@ void PS()
             // ever wanted.
             vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb *
                 GetSkyVisibility(reflectDir);
+            // **A reflection is a colour, never a NaN** ([PBR_HDR]). A
+            // float16 zone cube can hand back a value that is not a
+            // number, and this term is *added* to the frame: one NaN
+            // here makes the pixel NaN, every additive light pass after
+            // it adds to NaN, and the surface goes black -- which is
+            // what "a float probe unlights the room" was. Comparisons
+            // against NaN are false, so this is written as a test that
+            // only a real number passes.
+            if(!(cube.r >= 0.0 && cube.r < 1.0e6 &&
+                    cube.g >= 0.0 && cube.g < 1.0e6 &&
+                    cube.b >= 0.0 && cube.b < 1.0e6)){
+                cube = vec3(0.0);
+            }
             if(cSkyTintAmount > 0.0){
                 float sky_luma = dot(cube, vec3(0.299, 0.587, 0.114));
                 cube = mix(cube, cSkyTint * sky_luma, cSkyTintAmount);

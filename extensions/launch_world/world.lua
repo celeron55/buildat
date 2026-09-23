@@ -1289,18 +1289,23 @@ local probe_surfaces = {}
 probe_on = true
 local function reflection_probe(at)
 	local cube = magic.TextureCube:new()
-	-- **RGBA8, not float16, and that is not a preference** ([PBR_HDR]):
-	-- a float16 cube map on the zone with HDR rendering on costs the
-	-- frame its red and green -- a pixel that reads 60 71 89 in LDR
-	-- reads 0 0 111 -- and the same cube in eight bits renders the room
-	-- correctly in HDR. One keypress separates the two readings, F5
-	-- being the probe's own toggle. A float cube is the right thing and
-	-- the client-wide fault is filed; until it is fixed, HDR on the
-	-- frame is worth more than radiance in the reflections.
+	-- **Eight bits, and now for one reason rather than two**
+	-- ([PBR_HDR], half fixed 2026-09-23). A float16 zone cube used to
+	-- take the whole room black: it hands back a value that is not a
+	-- number, the voxel shader *added* it to the frame, and every
+	-- additive light pass after that added to a NaN, so every lit
+	-- surface went black and only the unlit things drew. The shader
+	-- refuses a sample that is not a number now, and the room draws
+	-- with a float cube -- **but its content is still wrong**: the
+	-- chrome and the props are stock PBR techniques, they read the same
+	-- cube without a guard, and they come out black mirrors. So eight
+	-- bits stays the default until the cube's content is fixed.
 	--
 	-- simplified: an emissive orb clips to white where it is reflected,
-	-- since eight bits cannot carry it. The upgrade is the float cube
-	-- back, once [PBR_HDR] is repaired.
+	-- since eight bits cannot carry it.
+	--
+	-- BUILDAT_LAUNCH_PROBEF=1 is the float cube, for the next look at
+	-- [PBR_HDR].
 	local fmt = env("BUILDAT_LAUNCH_PROBEF") ~= "" and
 			magic.Graphics.GetRGBAFloat16Format() or
 			magic.Graphics.GetRGBAFormat()
