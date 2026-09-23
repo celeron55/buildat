@@ -134,6 +134,18 @@ done
 python3 - "$out" <<'PY'
 import sys, os, itertools
 from PIL import Image, ImageChops
+
+# **The world, not the HUD.** Every check here compares whole frames, so
+# anything that changes any pixel can satisfy one -- and the preset
+# label and the typing prompt both live along the bottom and both change
+# with what is being checked. Two checks were already passing on the
+# prompt's own text (2026-09-23), so the comparisons take the frame
+# above the strip and nothing else.
+HUD_STRIP = 70
+
+def world(im):
+	w, h = im.size
+	return im.crop((0, 0, w, h - HUD_STRIP))
 out = sys.argv[1]
 # The numbered presets only: the directory also keeps the shot the plan
 # points at and whatever else has been left in it
@@ -143,7 +155,7 @@ if len(shots) != 4:
 	print("FAIL: %d pictures, wanted 4" % len(shots)); sys.exit(1)
 ims = {}
 for f in shots:
-	im = Image.open(os.path.join(out, f)).convert("RGB")
+	im = world(Image.open(os.path.join(out, f)).convert("RGB"))
 	d = list(im.getdata())
 	n = float(len(d))
 	ims[f] = (im, tuple(sum(p[i] for p in d) / n for i in range(3)))
@@ -155,7 +167,10 @@ for a, b in itertools.combinations(shots, 2):
 	mean = sum(sum(p) for p in px) / (3.0 * len(px))
 	worst = min(worst, mean)
 print("the closest two presets are %.2f of a level apart" % worst)
-ok = worst > 1.0
+# 4, not 1: with the label out of the comparison the closest two
+# presets are 11 levels apart, and 1 was low enough that the label's own
+# text changing between them would have carried the check on its own
+ok = worst > 4.0
 print("PASS: the four presets are four pictures" if ok
 		else "FAIL: two presets look the same")
 
@@ -165,8 +180,8 @@ print("PASS: the four presets are four pictures" if ok
 # room gets recomposed and a crop that was on a mirror ends up on a wall
 # (it read 61.4 against 60.4 on a sphere's dark side while another block
 # moved 86 levels, 2026-09-23).
-a = Image.open("%s/1-cold_in_warm_out.png" % out).convert("L")
-b = Image.open("%s/1-cold_in_warm_out-noprobe.png" % out).convert("L")
+a = world(Image.open("%s/1-cold_in_warm_out.png" % out).convert("L"))
+b = world(Image.open("%s/1-cold_in_warm_out-noprobe.png" % out).convert("L"))
 pa, pb = a.load(), b.load()
 w, h = a.size
 best, bx, by = 0.0, 0, 0
@@ -190,9 +205,8 @@ print("PASS: the probe reaches the metals" if probe_ok
 # The dissolve: the wall has to move, and the closed picture has to be
 # the picture it was
 def mean_of(name):
-	im = Image.open("%s/%s.png" % (out, name)).convert("L")
-	d = list(im.getdata())
-	return im, d
+	im = world(Image.open("%s/%s.png" % (out, name)).convert("L"))
+	return im, list(im.getdata())
 
 closed, dc = mean_of("dissolve-closed")
 opened, do = mean_of("dissolve-open")
