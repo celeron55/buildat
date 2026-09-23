@@ -29,7 +29,8 @@ local launch_grid = dofile(buildat.extension_path("__menu") ..
 		"/launch_grid.lua")
 local GAMES, FLOOR_ACTIONS = {}, {}
 for _, a in ipairs(launch_grid.actions(log)) do
-	local o = {name = a.label, icon = a.icon, run = a.run, kind = a.kind}
+	local o = {name = a.label, icon = a.icon, run = a.run, kind = a.kind,
+		description = a.description}
 	if a.kind == "game" then
 		GAMES[#GAMES + 1] = o
 	else
@@ -585,35 +586,56 @@ end
 -- texture multiplies the orb's own colour, so where the mark is the
 -- light is not -- a silhouette inside the light, the way a lantern's
 -- cut-out works, rather than a sticker fighting the emission.
-local function glow(colour, mark, icon)
-	local m = magic.Material:new()
-	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			mark and "Techniques/DiffUnlit.xml" or
-			"Techniques/NoTextureUnlit.xml"))
-	if mark and icon and magic.cache:Exists(icon) then
+-- **One texture, three materials** (the plan): the mark masks the
+-- emission on a glowing orb, and the same picture darkens into an etch
+-- on a white or a chrome one. Generated from the name where the thing
+-- ships no icon of its own.
+local function mark_texture(mark, icon)
+	if not mark then return nil end
+	if icon and magic.cache:Exists(icon) then
 		-- **A game's own icon is its mark** (the launcher plan's step 5):
 		-- the launch grid resolves an icon to a resource name on the
 		-- trusted side, and a game that ships one has said what it looks
 		-- like better than a hash of its name can
-		m:SetTexture(magic.TU_DIFFUSE,
-				magic.cache:GetResource("Texture2D", icon))
-	elseif mark then
-		local f = ornament.mark(64, ornament.seed_of(mark))
-		local image = magic.Image:new()
-		assert(image:SetSize(f.size, f.size, 3), "the mark")
-		for y = 0, f.size - 1 do
-			for x = 0, f.size - 1 do
-				local v = ornament.at(f, x, y)
-				image:SetPixel(x, y, magic.Color(v, v, v, 1))
-			end
-		end
-		local t = magic.Texture2D:new()
-		assert(t:SetData(image), "the mark's texture")
-		t.filterMode = magic.FILTER_BILINEAR
-		m:SetTexture(magic.TU_DIFFUSE, t)
-		kept[#kept + 1] = image
-		kept[#kept + 1] = t
+		return magic.cache:GetResource("Texture2D", icon)
 	end
+	local f = ornament.mark(64, ornament.seed_of(mark))
+	local image = magic.Image:new()
+	assert(image:SetSize(f.size, f.size, 3), "the mark")
+	for y = 0, f.size - 1 do
+		for x = 0, f.size - 1 do
+			local v = ornament.at(f, x, y)
+			image:SetPixel(x, y, magic.Color(v, v, v, 1))
+		end
+	end
+	local t = magic.Texture2D:new()
+	assert(t:SetData(image), "the mark's texture")
+	t.filterMode = magic.FILTER_BILINEAR
+	kept[#kept + 1] = image
+	kept[#kept + 1] = t
+	return t
+end
+
+-- **The etch** (user, 2026-09-23: the orbs should have the mark; a dummy
+-- one will do): the same picture on a white or a chrome orb, where it
+-- darkens the surface instead of cutting a hole in the light.
+-- simplified: it is the diffuse map, not the roughness. The plan wants a
+-- roughness change, which means the mark in the technique's spec slot
+-- and a second generated image; this reads as an etch at a glance and
+-- costs one texture.
+local function etched(r, g, b, roughness, metallic, mark, icon)
+	local t = mark_texture(mark, icon)
+	if not t then return nil end
+	return material(magic.Color(r, g, b, 1), roughness, metallic, t)
+end
+
+local function glow(colour, mark, icon)
+	local m = magic.Material:new()
+	local t = mark_texture(mark, icon)
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			t and "Techniques/DiffUnlit.xml" or
+			"Techniques/NoTextureUnlit.xml"))
+	if t then m:SetTexture(magic.TU_DIFFUSE, t) end
 	m:SetShaderParameter("MatDiffColor", colour)
 	kept[#kept + 1] = m
 	return m
@@ -701,7 +723,7 @@ for i, a in ipairs(FLOOR_ACTIONS) do
 	local col = FLOOR_COLS[(i - 1) % #FLOOR_COLS + 1]
 	local row = FLOOR_ROWS[math.floor((i - 1) / #FLOOR_COLS) % #FLOOR_ROWS + 1]
 	ORBS[#ORBS + 1] = {name = a.name, icon = a.icon, run = a.run,
-		kind = a.kind, floor = true}
+		kind = a.kind, description = a.description, floor = true}
 	orb_places[#orb_places + 1] = {x = col, y = 1.4 * VOXEL_M / 2, z = row}
 end
 
@@ -717,7 +739,8 @@ for i, sv in ipairs(SERVERS) do
 	local col = SERVER_COLS[(i - 1) % #SERVER_COLS + 1]
 	local row = 0.5 + math.floor((i - 1) / #SERVER_COLS) * 4.5
 	ORBS[#ORBS + 1] = {name = sv.name, address = sv.address, server = true,
-		floor = true, search = sv.name .. " " .. sv.address}
+		description = sv.address, floor = true,
+		search = sv.name .. " " .. sv.address}
 	orb_places[#orb_places + 1] = {x = col, y = SERVER_ACROSS * VOXEL_M / 2,
 		z = row}
 end
@@ -730,7 +753,8 @@ for i, sv in ipairs(SAVES) do
 	local col = SAVE_COLS[(i - 1) % #SAVE_COLS + 1]
 	local row = 13.0 - math.floor((i - 1) / #SAVE_COLS) * 3.2
 	ORBS[#ORBS + 1] = {name = sv.name, game = sv.game, save = true,
-		floor = true, search = sv.name .. " " .. sv.game}
+		description = "save of " .. sv.game, floor = true,
+		search = sv.name .. " " .. sv.game}
 	orb_places[#orb_places + 1] = {x = col, y = 0.9 * VOXEL_M / 2, z = row}
 end
 
@@ -799,14 +823,16 @@ for i, o in ipairs(orb_places) do
 		-- **A mirror**: a server is a thing you can see the room in,
 		-- which is the whole of why the reflection probe is here
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-				across(SERVER_ACROSS), chrome)
+				across(SERVER_ACROSS),
+				etched(0.92, 0.94, 0.97, 0.06, 1.0, spec.name) or chrome)
 		node:GetComponent("StaticModel").castShadows = true
 		orb_nodes[i] = node
 	elseif spec and spec.save then
 		-- Smaller, because it is one save of one game rather than a
 		-- thing to launch on its own
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-				across(0.9), white)
+				across(0.9),
+				etched(0.86, 0.87, 0.89, 0.12, 0.0, spec.name) or white)
 		node:GetComponent("StaticModel").castShadows = true
 		orb_nodes[i] = node
 	elseif spec and spec.floor then
@@ -814,7 +840,9 @@ for i, o in ipairs(orb_places) do
 		-- the room's light rather than making any, and it is told apart
 		-- from a server's chrome by being white rather than a mirror
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-				across(1.4), white)
+				across(1.4),
+				etched(0.86, 0.87, 0.89, 0.12, 0.0, spec.name, spec.icon) or
+				white)
 		node:GetComponent("StaticModel").castShadows = true
 		orb_nodes[i] = node
 	else
@@ -845,7 +873,6 @@ end
 local PROPS = {
 	{"Cone", -9.0, 1.35, 9.2, 2.7, "machined"},
 	{"Cylinder", 11.4, 1.25, 5.0, 2.5, "machined"},
-	{"Torus", 1.6, 0.60, 10.2, 2.6, "chrome"},
 	{"Pyramid", 13.8, 1.15, 8.4, 2.3, "stone"},
 	{"Pyramid", -13.0, 1.10, 10.6, 2.2, "machined"},
 }
@@ -1844,10 +1871,15 @@ end
 local lift = scene:CreateChild("lifted")
 lift.enabled = false
 -- Which voxel is out of the room and riding the lift, if any, and the
--- way it dislodges: {x, y, z, dx, dy, dz}. How long it has been held is
--- here with it, since stop_dig() below clears both.
+-- way it dislodges: {x, y, z, dx, dy, dz}
 local digging = nil
 local hold_t = 0
+-- **One hold, one launch** (user, 2026-09-23: holding on a game's
+-- sphere looped the animation and started nothing). A hold that reaches
+-- its second is spent, and the button has to come up before the next
+-- one begins -- otherwise the frame after a launch starts the same
+-- launch again.
+local left_spent = false
 local function mesh_lift(x, y, z)
 	buildat.safe.set_8bit_voxel_geometry(lift, 1, 1, 1,
 			string.char(room.id.placed), voxel_reg, atlas_reg, x, y, z)
@@ -1860,7 +1892,6 @@ end
 -- stopping. Called on every frame that is not digging, so it does
 -- nothing unless there is something out of the room.
 local function stop_dig()
-	hold_t = 0
 	lift.enabled = false
 	if not digging then return end
 	local d = digging
@@ -1924,6 +1955,8 @@ end
 pointed_voxel = nil
 -- Where a lifted sphere came from, so an early release settles it back
 local orb_home = {}
+-- The sphere a hold started on, until the button comes up
+orb_holding = nil
 function handle_dig_update(event_type, event_data)
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
 	-- The motes fall whatever the mode is
@@ -1957,16 +1990,32 @@ function handle_dig_update(event_type, event_data)
 	-- (user): the lift *is* the progress -- no bar, no ring -- and it is
 	-- "pulling one forward is launching it" made literal. Releasing
 	-- early settles it back, as a dug voxel settles back into its slot.
-	if pointed_orb > 0 and orb_nodes[pointed_orb] and
-			magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+	local left_down = magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT)
+	if not left_down then
+		left_spent = false
+	end
+	local holding = left_down and not left_spent
+	if not holding then
+		hold_t = 0
+	end
+	-- **The sphere the hold started on** is the one that launches: it
+	-- moves toward the player as it is pulled, which is enough to hand
+	-- the crosshair to its neighbour halfway through
+	if not holding then
+		orb_holding = nil
+	elseif orb_holding == nil and pointed_orb > 0 then
+		orb_holding = pointed_orb
+	end
+	local ob = orb_holding
+	if ob and ob > 0 and orb_nodes[ob] and holding then
 		hold_t = hold_t + dt
 		local e = math.min(1, hold_t / DIG_SECONDS)
-		local n = orb_nodes[pointed_orb]
-		if not orb_home[pointed_orb] then
+		local n = orb_nodes[ob]
+		if not orb_home[ob] then
 			local p = n.position
-			orb_home[pointed_orb] = {p.x, p.y, p.z}
+			orb_home[ob] = {p.x, p.y, p.z}
 		end
-		local h = orb_home[pointed_orb]
+		local h = orb_home[ob]
 		-- Toward the player, which is what "pulled forward" means from
 		-- inside the room
 		n.position = magic.Vector3(h[1] - view_dir.x * e * 1.6,
@@ -1974,26 +2023,28 @@ function handle_dig_update(event_type, event_data)
 				h[3] - view_dir.z * e * 1.6)
 		if hold_t >= DIG_SECONDS then
 			hold_t = 0
+			left_spent = true
 			n.position = magic.Vector3(h[1], h[2], h[3])
-			orb_home[pointed_orb] = nil
-			launch(pointed_orb)
+			orb_home[ob] = nil
+			log:info("hold: launching " ..
+					(ORBS[ob] and ORBS[ob].name or "?"))
+			launch(ob)
 		end
 		wire.enabled = false
 		stop_dig()
 		return
 	end
-	if orb_home[pointed_orb] then
-		local n = orb_nodes[pointed_orb]
-		local h = orb_home[pointed_orb]
+	for i, h in pairs(orb_home) do
+		local n = orb_nodes[i]
 		if n then n.position = magic.Vector3(h[1], h[2], h[3]) end
-		orb_home[pointed_orb] = nil
+		orb_home[i] = nil
 		hold_t = 0
 	end
 	-- The hold: a second, the same second a sphere takes. The voxel
 	-- leaves the room the moment it starts and the lift stands where it
 	-- stood, so there is one cube throughout rather than two in the same
 	-- place; letting go inside the second puts it back.
-	if (mine or digging) and magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+	if (mine or digging) and holding then
 		if not digging then
 			digging = {x, y, z, dislodge_dir(x, y, z)}
 			room.placed[room.key(x, y, z)] = nil
@@ -2008,6 +2059,7 @@ function handle_dig_update(event_type, event_data)
 				dg[2] + dg[5] * e * 0.5, dg[3] + dg[6] * e * 0.5)
 		if hold_t >= DIG_SECONDS then
 			hold_t = 0
+			left_spent = true
 			lift.enabled = false
 			digging = nil
 			burst(dg[1], dg[2], dg[3])
@@ -2038,6 +2090,18 @@ name_text.text = ""
 -- The ceiling is the font ([TRANSLATION_FONT]): Latin-1 and Cyrillic, so
 -- a CJK name does not draw and whoever widens the font settles this too
 name_text.faceCameraMode = magic.FC_ROTATE_Y
+
+-- **What the launcher said about it, under its name** (user, 2026-09-23:
+-- the description does not really show up, and it should be fairly
+-- close, above the orb). Small and unspaced, so it reads as a caption to
+-- the name rather than as a second title.
+local desc_node = scene:CreateChild("orb_desc")
+local desc_text = desc_node:CreateComponent("Text3D")
+desc_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 28)
+desc_text:SetColor(magic.Color(0.80, 0.84, 0.90, 1))
+desc_text:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+desc_text.text = ""
+desc_text.faceCameraMode = magic.FC_ROTATE_Y
 
 pointed_orb = 0
 -- **The step change is the indicator** (user): a sphere is lit and is a
@@ -2098,16 +2162,22 @@ function handle_orb_update()
 		local o = ORBS[best]
 		name_text.text = o and o.name:upper():gsub("(.)", "%1 "):gsub(" $", "")
 				or ""
+		desc_text.text = (o and o.description) or ""
 		log:info("pointing at orb " .. best .. ": " ..
 				(o and o.name or "?"))
 	end
 	carry_draw()
 	if best > 0 then
 		local p = orb_nodes[best].position
-		-- In front of the wall, not above the orb: the orb sits in a
-		-- niche and anything above it is inside the stone
-		name_node.position = magic.Vector3(p.x, p.y + 2.6 * U,
-				(BAY_Z + 2.5) * VOXEL_M * U)
+		-- **Close, and above it** (user): over the orb it belongs to
+		-- rather than off at the wall's plane, which is where every
+		-- label used to stand whichever orb was pointed at. A sphere in
+		-- a niche has stone above it, so that one keeps the wall's
+		-- plane in z and only the height is its own.
+		local z = ORBS[best] and ORBS[best].floor and p.z or
+				(BAY_Z + 2.5) * VOXEL_M * U
+		name_node.position = magic.Vector3(p.x, p.y + 1.5 * U, z)
+		desc_node.position = magic.Vector3(p.x, p.y + 1.0 * U, z)
 	end
 end
 magic.SubscribeToEvent("Update", "handle_orb_update")
@@ -2699,9 +2769,22 @@ end
 -- So the console is geometry -- a plinth, an angled screen, a keyboard
 -- ledge -- and the moment the camera is square-on to it the panel that
 -- appears is flat UI with rows of text in it.
+-- **In the middle of the torus** (user, 2026-09-23: the torus was
+-- unplanned, but the terminal could sit in it). The ring was one of the
+-- reference frame's leftover primitives standing on the floor with
+-- nothing to do; a chrome ring around the desk gives it a job and gives
+-- the desk the thing that makes it findable from across the room. The
+-- desk keeps its own corner rather than taking the ring's place in the
+-- middle: a seven-metre ring in the corridor to the wall stands in
+-- front of the lights the room is lit by, which the check read as the
+-- room going still and dark (drift 5.6 to 0.9 of a level).
 local TERMINAL = {x = -7.4, y = 0.0, z = 6.2}
 do
 	local t = TERMINAL
+	-- Wide enough that the desk stands inside it and the seat the camera
+	-- takes is inside it too, rather than behind the tube
+	part("Torus", magic.Vector3(t.x, t.y + 0.40, t.z),
+			magic.Vector3(7.0, 7.0, 7.0), chrome)
 	part("Box", magic.Vector3(t.x, t.y + 0.45, t.z),
 			magic.Vector3(3.0, 0.9, 1.7), stone)
 	part("Box", magic.Vector3(t.x, t.y + 0.95, t.z + 0.55),

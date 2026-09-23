@@ -227,6 +227,13 @@ fi
 	echo "delay 700"
 	echo "screenshot $out/unpaused.png"
 	echo "delay 400"
+	# **A hold on a game's sphere launches it** (the playtest's first
+	# finding: it looped and started nothing). Last of all, because it
+	# starts a server and takes the client into the game.
+	echo "mouse_down left"
+	echo "delay 1400"
+	echo "mouse_up left"
+	echo "delay 1200"
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -m launch_world -D ../user -w 1280x720 -l 3 \
 	-c @"$out/cmds.txt" 2>&1 |
@@ -272,6 +279,13 @@ last=$(grep -a "launch_w.*: setting: " "$out/cli.log" | tail -1 | sed 's/.*setti
 echo "the terminal changed $changes settings: $first then $last"
 if [ "$changes" -lt 2 ] || [ "$first" = "$last" ]; then
 	echo "FAIL: the terminal's rows do not change anything"
+	exit 1
+fi
+
+held=$(grep -ac "launch_w.*: hold: launching " "$out/cli.log")
+echo "a hold on a sphere launched $held times"
+if [ "$held" -ne 1 ]; then
+	echo "FAIL: holding on a game's sphere launched $held times, not once"
 	exit 1
 fi
 
