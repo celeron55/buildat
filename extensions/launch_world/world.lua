@@ -1811,6 +1811,10 @@ local function mouse_for(fps_now, reason)
 			magic.MM_ABSOLUTE)
 end
 
+-- **What a mode change does to menu mode's own furniture**, filled in
+-- where the prompt and the browser are made, hundreds of lines below --
+-- everything it touches is a local down there
+local mode_changed
 local function set_mode(m)
 	mode = m
 	local fps_now = (m == "fps")
@@ -1819,6 +1823,9 @@ local function set_mode(m)
 		-- Walking starts from wherever the camera was left, so a mode
 		-- change is not a teleport
 		fps.x, fps.y, fps.z = cam.from.x, FPS_EYE, cam.from.z
+	end
+	if mode_changed then
+		mode_changed(fps_now)
 	end
 	log:info("mode: " .. m)
 end
@@ -3054,7 +3061,7 @@ end
 browsed = 0
 local browse_row, browse_col = 1, 1
 
-local function browse_show()
+function browse_show()
 	local row = browse_rows[browse_row]
 	if not row then return end
 	browse_col = math.max(1, math.min(#row, browse_col))
@@ -3440,7 +3447,34 @@ local function leave_terminal()
 	return true
 end
 
-local function show_prompt()
+-- **Menu mode's furniture belongs to menu mode** (user, 2026-09-23: the
+-- prompt, a live search term and its results all stayed on screen in
+-- FPS, where there is no search). It is **hidden, not thrown away**:
+-- the term is still there, and Tab back finds it again with its match.
+-- The orb's name and description follow the crosshair in FPS, so they
+-- are cleared and the next frame's pointing writes them --
+-- `pointed_orb = -1` is "whatever is pointed at now, say it again".
+mode_changed = function(fps_now)
+	if fps_now then
+		prompt_text.text = ""
+		name_text.text = ""
+		desc_text.text = ""
+		pointed_orb = -1
+		if prompt_str ~= "" then
+			log:info("prompt: hidden with the mode, keeping \"" ..
+					prompt_str .. "\"")
+		end
+	else
+		show_prompt()
+		if prompt_str == "" then
+			browse_show()
+		else
+			log:info("prompt: back, \"" .. prompt_str .. "\"")
+		end
+	end
+end
+
+function show_prompt()
 	if prompt_str == "" then
 		prompt_text.text = prompt_open and "type a name" or ""
 		return

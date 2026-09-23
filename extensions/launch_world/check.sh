@@ -312,6 +312,30 @@ fi
 	echo "delay 700"
 	echo "screenshot $out/unpaused.png"
 	echo "delay 400"
+	# **Menu mode's furniture is menu mode's** (the second playtest, 3
+	# and 4): a term in the prompt, Tab away, and nothing of the search
+	# is on screen in FPS -- and Tab back finds the term again.
+	echo "event mode menu"
+	echo "delay 600"
+	echo "keypress D"
+	echo "keypress I"
+	echo "keypress G"
+	echo "delay 400"
+	echo "screenshot $out/term-menu.png"
+	echo "delay 300"
+	echo "keypress Tab"
+	echo "delay 700"
+	echo "screenshot $out/term-fps.png"
+	echo "delay 300"
+	echo "keypress Tab"
+	echo "delay 700"
+	echo "screenshot $out/term-back.png"
+	echo "delay 400"
+	# **Not Escape**: with a term in the prompt Escape clears the term
+	# and stays in menu mode, so the console's own Escape below would
+	# pop the mode instead of opening the dialog
+	echo "event mode fps"
+	echo "delay 900"
 	# **The developer console, over the room** ([LAUNCH_CONSOLE] offers
 	# its screen and the room takes it): the pause dialog's third item,
 	# a line typed at it, and Escape to put the room back.
@@ -414,6 +438,15 @@ for want in "dissolve: bay" "launch: " "terminal: sat down"; do
 		exit 1
 	fi
 done
+
+hidden=$(grep -ac "launch_w.*: prompt: hidden with the mode" "$out/cli.log")
+backagain=$(grep -ac "launch_w.*: prompt: back, \"dig\"" "$out/cli.log")
+echo "the search term was hidden $hidden and came back $backagain"
+if [ "$hidden" -lt 1 ] || [ "$backagain" -lt 1 ]; then
+	echo "FAIL: the prompt does not hide with the mode, or does not" \
+			"come back with its term"
+	exit 1
+fi
 
 conn=$(grep -a "launch_w.*: connect: " "$out/cli.log" | head -1 |
 	sed 's/.*launch_w[a-z]*: //')
