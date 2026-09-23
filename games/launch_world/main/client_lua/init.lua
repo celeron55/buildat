@@ -634,6 +634,11 @@ magic.SubscribeToEvent("Update", "handle_probe_update")
 
 local viewport = magic.Viewport:new(scene,
 		camera_node:GetComponent("Camera"))
+-- **The viewport is registered before the render path is touched**,
+-- which is the order games/voxel_lighting uses and the last difference
+-- between the two that was left to try.
+magic.set_preferred_viewports({viewport})
+
 -- **The tonemap**, which is the last thing between this room and the
 -- reference frame: a path trace rolls its highlights off and a frame
 -- with none can only clip them (3.58 per cent of this one is pure
@@ -724,23 +729,11 @@ do
 				magic.Vector2(0.06, 2.0))
 		rp:SetShaderParameter("AutoExposureMiddleGrey", 0.12)
 		viewport.renderPath = rp
-		-- The suspicion under test: set_preferred_viewports() renders the
-		-- scene to an offscreen texture, and the effect reads the one
-		-- named "viewport". BUILDAT_LAUNCH_RAWVIEW puts the scene on the
-		-- renderer's own viewport instead, which is the same picture
-		-- without that indirection.
-		if (buildat.get_env("BUILDAT_LAUNCH_RAWVIEW") or "") ~= "" then
-			magic.renderer:SetViewport(0, viewport)
-			tonemap_raw = true
-			log:info("tonemap: on the renderer's own viewport")
-		end
 		log:info("tonemap: " .. want .. ", " .. rp:GetNumCommands() ..
 				" commands, HDR on")
 	end
 end
-if not tonemap_raw then
-	magic.set_preferred_viewports({viewport})
-end
+
 
 -- The name of the preset in the corner, so a picture says which it is
 label = magic.ui.root:CreateChild("Text")

@@ -104,8 +104,12 @@ Known, and not this room's to fix
 **HDR draws only the unlit materials.** With BUILDAT_LAUNCH_HDR=1 the
 orbs and the readout draw and everything lit by a light does not,
 whatever the light type. games/voxel_lighting renders in HDR with the
-same three effects appended in the same order, so the difference is in
-how its scene is set up. Until then the room is tonemapped in LDR, which
+same three effects appended in the same order. Ruled out so far: the
+effects and their order, their curve parameters, the light type,
+set_preferred_viewports (the renderer's own viewport draws the same
+black) and the order of registering the viewport against setting
+HDRRendering -- voxel_lighting registers first and so does this now,
+with no change. Until then the room is tonemapped in LDR, which
 costs it the top of its range: against the reference frame's mean 67,
 median 38, 90th 171, 99th 252 and 0.31 per cent pure white, it reads
 60 / 38 / 173 / 175 / 0.00.
