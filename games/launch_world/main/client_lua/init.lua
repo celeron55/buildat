@@ -66,9 +66,21 @@ end
 
 do
 	local wh, wi = ornament.wall(128, ornament.seed_of("launch_world wall"))
+	-- Matte cut stone, and the mineral patches a shade off it rather than
+	-- a colour: what varies is the mineral, not the paint
 	register_tile("wall.png", wh, wi,
-			{base = magic.Color(0.52, 0.53, 0.57, 1),
-			inlay = magic.Color(0.05, 0.05, 0.06, 1), relief = 0.9,
+			{base = magic.Color(0.50, 0.51, 0.55, 1),
+			inlay = magic.Color(0.40, 0.42, 0.40, 1), relief = 0.35,
+			strength = 2})
+end
+do
+	-- The pockets' side columns, which are the one place the ornament
+	-- goes now that the wall is one material ([LAUNCH_WORLD]: "the
+	-- ornament is on its side columns and nowhere else")
+	local ch, ci = ornament.meander(128, {units = 2, depth = 2})
+	register_tile("column.png", ch, ci,
+			{base = magic.Color(0.46, 0.47, 0.52, 1),
+			inlay = magic.Color(0.22, 0.20, 0.26, 1), relief = 0.8,
 			strength = 4})
 end
 voxelworld.allow_streaming()
@@ -269,30 +281,11 @@ local function glow(colour, mark)
 	return m
 end
 
--- **Three generated materials**, which with the plain stone is what the
--- reference frame is made of: a meander for the frieze courses, a socket
--- field for the perforated blocks, and a sigil for the one slab that
--- stands for a server's own mark. Built once at boot -- a SetPixel a
--- texel is fine there and hopeless per frame, which is what keeps this
--- honest by construction.
+-- The ornament generator's own check, which runs whatever wears its
+-- output: the patterns are asserted as patterns here and the wall and
+-- the columns wear them as voxel tiles, registered at the top of this
+-- file.
 log:info(ornament.self_check(ORN_SIZE))
-local meander_h, meander_i = ornament.meander(ORN_SIZE, {units = 3, depth = 2})
-local meander_mat = ornamented(meander_h, meander_i,
-		{base = magic.Color(0.52, 0.54, 0.58, 1),
-		inlay = magic.Color(0.20, 0.21, 0.26, 1), roughness = 0.70,
-		relief = 0.85, strength = 5, uv = {7, 1}})
-local socket_h, socket_i = ornament.sockets(ORN_SIZE,
-		{cells = 3, depth = 2, seed = 7})
-local socket_mat = ornamented(socket_h, socket_i,
-		{base = magic.Color(0.40, 0.42, 0.46, 1),
-		inlay = magic.Color(0.04, 0.04, 0.05, 1), roughness = 0.85,
-		relief = 0.85, strength = 5, uv = {1, 2}})
-local sigil_h, sigil_i = ornament.sigil(ORN_SIZE,
-		ornament.seed_of("buildat.example.org:30000"), 4)
-local sigil_mat = ornamented(sigil_h, sigil_i,
-		{base = magic.Color(0.42, 0.44, 0.50, 1),
-		inlay = magic.Color(0.08, 0.30, 0.38, 1), roughness = 0.55,
-		metallic = 0.6, relief = 0.85, strength = 5, uv = {1, 2}})
 
 -- The floor: a checkerboard in perspective is half the classic raytrace
 -- picture, and in the reference frame it carries the reflections of
@@ -315,13 +308,14 @@ local floor_mat = material(magic.Color(1, 1, 1, 1), 0.18, 0.0,
 -- and fails if they ever drift, which is cheaper than the packet round
 -- trip the single copy would need before anything can be built.
 local BAYS = 6
-local BAY_SPACING = 14        -- voxels between bay centres
-local SLAB_H = 3              -- voxels in one slab course
-local BAY_Z = -18             -- the stacks' front face, in voxels
-local BAY_DEPTH = 4
-local NICHE_DEPTH = 3
+local BAY_SPACING = 14        -- voxels between pocket centres
+local SLAB_H = 3
+local BAY_Z = -18             -- the wall's nominal surface, in voxels
+local POCKET = 8              -- a pocket is about twice the orb across
+local POCKET_DEPTH = 8
 local BAY_TIER = {2, 4, 1, 3, 5, 2}   -- 0-based, as the server has them
 local function bay_x(i) return (i - 3) * BAY_SPACING - 7 end
+local function bay_y(i) return BAY_TIER[i] * SLAB_H + math.floor(SLAB_H / 2) + 4 end
 
 -- **The orbs are the games** (user): warm is what you own, cold is a
 -- server you can reach. The name is what a mark is generated from and
@@ -331,30 +325,30 @@ local ORBS = {
 	{name = "Undermine", warm = true},
 	{name = "Digger", warm = true},
 	{name = "buildat.example.org", warm = false, ping = 38},
-	-- **Chekhov's empty shelf**: a bay with nothing in it, which is what
-	-- says there is room for another game and is the way to ContentDB.
-	-- The cartridge rack the earlier draft had is gone -- "the orbs are
-	-- the games" settled that, and a rack beside them would be the same
-	-- list twice.
+	-- Chekhov's empty shelf: a pocket with nothing in it, which is what
+	-- says there is room for another game and is the way to ContentDB
 	{name = "install a game", warm = true, empty = true},
 	{name = "mine.example.net", warm = false, ping = 210},
 }
-local function bay_width(tier) return 10 - tier end
 
 local orb_places = {}
 local bay_desc = {}
 for b = 1, BAYS do
-	local tier = BAY_TIER[b]
+	-- **Wholly behind the wall's plane**, which is what makes the
+	-- pocket's contrast line free: every point of the wall's outward
+	-- face has the orb behind it, so N dot L is negative there and the
+	-- face takes nothing from it, while every face inside the pocket
+	-- looks at the orb and lights all round.
 	orb_places[b] = {
 		x = bay_x(b) * VOXEL_M,
-		y = (tier * SLAB_H + SLAB_H / 2) * VOXEL_M,
-		z = (BAY_Z - BAY_DEPTH - 1) * VOXEL_M,
+		y = bay_y(b) * VOXEL_M,
+		z = (BAY_Z - POCKET_DEPTH / 2) * VOXEL_M,
 	}
-	bay_desc[#bay_desc + 1] = string.format("%d %d %d", bay_x(b), tier,
-			bay_width(tier))
+	bay_desc[#bay_desc + 1] = string.format("%d %d %d", bay_x(b),
+			BAY_TIER[b], bay_y(b))
 end
 log:info("bays " .. BAYS .. " " .. SLAB_H .. " " .. BAY_Z .. " " ..
-		BAY_DEPTH .. " " .. NICHE_DEPTH .. " " ..
+		POCKET .. " " .. POCKET_DEPTH .. " " ..
 		table.concat(bay_desc, " "))
 
 -- **The ornament, on primitives in front of the voxels.** The bays are
@@ -365,45 +359,12 @@ log:info("bays " .. BAYS .. " " .. SLAB_H .. " " .. BAY_Z .. " " ..
 -- where it is better" asks for -- boxes carrying the meander and the
 -- socket field, standing a little proud of the wall the way a course of
 -- dressed stone stands proud of rubble.
+-- **No friezes.** They were the ornament's home while the wall was a
+-- flat plane with a balcony per orb; the wall the reference actually has
+-- is one material with the ornament on the pockets' side columns and
+-- nowhere else, and those are voxels wearing a generated tile. What used
+-- to stand proud of the wall here is the wall's own relief now.
 frieze_nodes = {}
--- **Two nodes, not two materials.** Putting a material back on a model
--- later reads freed memory -- a Material in this sandbox lives only
--- while the engine holds it, and a Lua table holding the wrapper is not
--- enough (SIGSEGV in RefCounted::AddRef under StaticModel::SetMaterial,
--- which is what F6 did the first time it was written). So each frieze
--- is built twice, ornamented and plain, and the toggle enables one.
-local function frieze(pos, scale, mat)
-	local a = part("Box", pos, scale, mat)
-	local b = part("Box", pos, scale, stone)
-	b.enabled = false
-	frieze_nodes[#frieze_nodes + 1] = {a, b}
-end
-do
-	local z = (BAY_Z + 0.55) * VOXEL_M
-	for b = 1, BAYS do
-		local x = bay_x(b) * VOXEL_M
-		local tier = BAY_TIER[b]
-		local w = bay_width(tier) * VOXEL_M * 2
-		-- The frieze over the opening, and its answer below it
-		frieze(magic.Vector3(x, (tier * SLAB_H + SLAB_H + 0.6) * VOXEL_M, z),
-				magic.Vector3(w, 1.05, 0.30), meander_mat)
-		frieze(magic.Vector3(x, (tier * SLAB_H - 0.7) * VOXEL_M, z),
-				magic.Vector3(w, 0.75, 0.30), meander_mat)
-		-- The jambs: the socket field, which is the perforated block of
-		-- the reference frame, down each side of the opening
-		for _, side in ipairs({-1, 1}) do
-			frieze(magic.Vector3(x + side * w * 0.42,
-					(tier * SLAB_H + SLAB_H / 2) * VOXEL_M, z),
-					magic.Vector3(w * 0.16, SLAB_H * VOXEL_M * 1.5, 0.28),
-					b == 4 and sigil_mat or socket_mat)
-		end
-	end
-	-- And one long course across the whole wall, above the bays, which is
-	-- what makes the room read as built rather than as cut
-	frieze(magic.Vector3(0, 19.5 * VOXEL_M, z),
-			magic.Vector3(BAYS * BAY_SPACING * VOXEL_M, 1.35, 0.26),
-			meander_mat)
-end
 
 -- The orbs. Warm is what you own; the palette's own entry says which
 -- colour each carries, and the light at it is what lights the room.
@@ -465,81 +426,67 @@ end
 -- four are fill: two low at the sides and two picking out the
 -- foreground, which is what keeps the chrome from being a black ball
 -- with one highlight.
+-- **The room's light, as the wall's own reading has it**: cold, from a
+-- big square opening overhead, and the orbs. Nothing else -- the fill
+-- and the per-bay washes that lit the old flat wall are gone, because
+-- they re-light the very surface the pocket's contrast line depends on.
+--
+-- **The whole shadow budget goes to the overhead light**, which is the
+-- one doing the dramatic work on the wall's relief: without it the deep
+-- insets cannot read black while lit. The orbs are plain point lights
+-- with a tight range -- no cube shadow maps and no cones. The pocket's
+-- own contrast line is free: the wall's outward face has the orb behind
+-- its plane, so N dot L is negative there and it takes nothing, while
+-- every face inside the pocket looks at the orb.
+local OVERHEAD_Y = 18         -- voxels above the floor, per the plan's 16-20
 local LIGHT_PLACES = {}
 for i, o in ipairs(orb_places) do
-	-- A voxel forward of the orb, towards the opening: the orb is the
-	-- thing you see and the light is what gets out of the niche, and a
-	-- source at the very back of a recess mostly lights its own back
-	LIGHT_PLACES[i] = {o.x, o.y, o.z + 1.2 * VOXEL_M}
+	LIGHT_PLACES[i] = {o.x, o.y, o.z}
 end
--- **The fill lives in the foreground, not on the wall.** Matching the
--- reference frame's histogram with a long-range flood got the numbers
--- right and the picture wrong: the stone went evenly lit and stopped
--- silhouetting against the orbs, which is the whole composition. What
--- the reference is bright with is a lit floor and lit chrome in front
--- of dark stone, so the fill sits low and forward and falls off before
--- it reaches the bays.
-LIGHT_PLACES[#LIGHT_PLACES + 1] = {-10.0, 1.3, 7.5}
-LIGHT_PLACES[#LIGHT_PLACES + 1] = {10.0, 1.3, 7.5}
-LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, 4.2, 11.0}
-LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, 1.0, 14.0}
--- **A wash per bay**, standing for the light that leaves a niche,
--- bounces off the floor and comes back onto the stone around the
--- opening -- which is where the reference frame's lit wall comes from
--- and which nothing in a direct-light room does by itself. It wears the
--- orb's own colour at a quarter strength, so it is that orb's spill and
--- not a new source, and it sits in front of the wall where a bounce
--- would be.
-for i, o in ipairs(orb_places) do
-	LIGHT_PLACES[#LIGHT_PLACES + 1] = {o.x, o.y * 0.55, o.z + 4.4}
-end
+LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, OVERHEAD_Y * VOXEL_M, 2.0}
+
+-- The palette's roles, from the plan: cyan is live and connected, purple
+-- is structure and never state, amber is the one thing that wants you,
+-- and the warm horizon is the world outside and not yours.
 local CYAN = {0.15, 0.85, 1.0}
 local PURPLE = {0.55, 0.20, 0.95}
 local AMBER = {1.0, 0.62, 0.12}
 local WARM = {1.0, 0.72, 0.45}
 local COLD_WHITE = {0.72, 0.85, 1.0}
 
--- {colour, intensity, range}. The first six are the orbs, in the order
--- the bays were built; the last four are fill. A preset says only what
--- colour each is, how bright and how far.
-local function preset_lights(orb, fill, orb_i, fill_i)
+-- {colour, intensity, range}. The six orbs, then the overhead opening.
+local function preset_lights(orb, sky, orb_i, sky_i)
 	local l = {}
 	for i = 1, 6 do
-		l[i] = {orb, orb_i, 20 * U}
+		-- Tight, so an orb's light dies before it reaches the sideways
+		-- faces of the neighbouring slabs, which can see into a
+		-- neighbour's pocket -- the one leak the normal does not cover,
+		-- and a range is cheaper than a shadow map
+		l[i] = {orb, orb_i, 11 * U}
 	end
-	for i = 1, 6 do
-		l[10 + i] = {orb, orb_i * 0.22, 9 * U}
-	end
-	l[7] = {fill, fill_i, 15 * U}
-	l[8] = {fill, fill_i, 15 * U}
-	l[9] = {fill, fill_i * 0.8, 17 * U}
-	l[10] = {fill, fill_i * 0.7, 16 * U}
+	l[7] = {sky, sky_i, 60 * U}
 	return l
 end
 
 local PRESETS = {
 	{
-		-- The reference frame's own scheme and the plan's proposal: warm
-		-- orbs beyond a cold room, so the stone silhouettes against them
-		-- and the eye goes to the light rather than to the wall
+		-- The reference frame's own scheme: warm orbs in the wall, cold
+		-- light from outside it
 		name = "cold_in_warm_out",
-		lights = preset_lights(WARM, COLD_WHITE, 9.0, 2.5),
+		lights = preset_lights(WARM, COLD_WHITE, 7.0, 1.6),
 	},
 	{
-		-- The mirror, to see what was given up
 		name = "warm_in_cold_out",
-		lights = preset_lights(CYAN, AMBER, 9.0, 2.5),
+		lights = preset_lights(CYAN, AMBER, 7.0, 1.6),
 	},
 	{
-		-- No warm anywhere: whether the room needs a warm point at all
 		name = "all_cold",
-		lights = preset_lights(COLD_WHITE, CYAN, 9.0, 2.5),
+		lights = preset_lights(COLD_WHITE, CYAN, 7.0, 1.6),
 	},
 	{
-		-- Deliberately wrong, and the useful one: every colour loud, the
-		-- purple as bright as the cyan, nothing scarce
+		-- Deliberately wrong, and the useful one
 		name = "wrong",
-		lights = preset_lights(PURPLE, AMBER, 10.5, 4.5),
+		lights = preset_lights(PURPLE, AMBER, 8.0, 3.0),
 	},
 }
 
@@ -550,6 +497,11 @@ local PRESETS = {
 -- lives. Getting this wrong is what made PBR look like it did not work
 -- at all -- the room came out black and the render path got the blame.
 local PBR_INTENSITY = 25
+
+-- Shadows on, and a map big enough for a wall of relief: they are
+-- required rather than optional here ([LAUNCH_WORLD]'s wall)
+magic.renderer.drawShadows = true
+magic.renderer.shadowMapSize = 2048
 
 local lights = {}
 for i, place in ipairs(LIGHT_PLACES) do
@@ -1098,19 +1050,27 @@ local function build_flying(b)
 	if #st.slabs > 0 then
 		return
 	end
-	local tier = BAY_TIER[b]
-	local w = bay_width(tier)
-	local x0 = bay_x(b)
+	local x0, y0 = bay_x(b), bay_y(b)
 	local i = 0
-	for x = x0 - w, x0 + w do
-		for y = 0, BAYS * SLAB_H - 1 do
-			local v = voxelworld.get_static_voxel(
-					buildat.Vector3(x, y, BAY_Z))
+	-- The pocket's own mouth and the wall around it, which is what comes
+	-- apart; the face stands wherever the slabs put it, so a column of
+	-- voxels is walked until one is found
+	for x = x0 - POCKET, x0 + POCKET do
+		for y = y0 - POCKET, y0 + POCKET do
+			local v, vz = nil, nil
+			for z = BAY_Z + 4, BAY_Z - 6, -1 do
+				local s = voxelworld.get_static_voxel(
+						buildat.Vector3(x, y, z))
+				if s and s.id >= 2 then
+					v, vz = s, z
+					break
+				end
+			end
 			if v and v.id >= 2 then
 				i = i + 1
 				local node = part("Box",
 						magic.Vector3(x * VOXEL_M, (y + 0.5) * VOXEL_M,
-						BAY_Z * VOXEL_M),
+						vz * VOXEL_M),
 						magic.Vector3(VOXEL_M, VOXEL_M, VOXEL_M), stone)
 				local pos = node.position
 				local dir = ((i % 2 == 0) and 1 or -1)

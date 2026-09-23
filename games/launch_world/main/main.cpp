@@ -43,28 +43,100 @@ struct Room
 	static const int Y_TOP = 26;
 	static const int WALL = 4;
 
-	// **The bays**, which are the room's own architecture: six stacks of
-	// slabs across the back, each with one tier left open and a niche
-	// behind it for an orb to glow out of. The client is told these
-	// numbers rather than keeping a copy (see send_bays), so the room is
-	// described in one place.
+	// **The wall, as the reference actually has it.** Not a balcony per
+	// orb on a flat plane: slabs protruding at random amounts, orbs in
+	// generous pockets cut into the mass, and rectangles inset to
+	// various depths until some read black. Its nominal surface is
+	// BAY_Z; everything else is measured from there.
+	static const int BAY_Z = -18;
+	static const int SLAB_OUT = 4;        // the furthest a slab comes out
+	static const int INSET_IN = 4;        // the deepest an inset goes
 	static const int BAYS = 6;
-	static const int BAY_SPACING = 14;    // voxels between bay centres
-	static const int BAY_Z = -18;         // the stacks' front face
-	static const int BAY_DEPTH = 4;
-	static const int SLAB_H = 3;          // voxels in one slab course
+	static const int BAY_SPACING = 14;
+	static const int SLAB_H = 3;
 	static const int TIERS = 6;
-	static const int NICHE_DEPTH = 3;
+	// A pocket is about twice the orb across in every direction: the orb
+	// is 1.7 units, which is under four voxels, so eight is twice it
+	static const int POCKET = 8;
+	static const int POCKET_DEPTH = 8;
 
 	static int bay_x(int b) { return (b - (BAYS - 1) / 2) * BAY_SPACING - 7; }
-	// Which tier each bay leaves open; the tiers differ bay to bay so the
-	// wall is not a row of identical holes
 	static int bay_tier(int b)
 	{
 		static const int t[BAYS] = {2, 4, 1, 3, 5, 2};
 		return t[b];
 	}
-	static int bay_width(int tier) { return 10 - tier; }
+	// The middle of a pocket, which is where its orb hangs
+	static int bay_y(int b) { return bay_tier(b) * SLAB_H + SLAB_H / 2 + 4; }
+
+	// A hash with no state, so the wall is the same every boot and the
+	// server and the client agree without either being told
+	static uint32_t hash2(int a, int b, uint32_t salt)
+	{
+		uint32_t h = (uint32_t)(a * 73856093) ^ (uint32_t)(b * 19349663) ^
+				(salt * 83492791);
+		h ^= h >> 13;
+		h *= 0x5bd1e995u;
+		h ^= h >> 15;
+		return h;
+	}
+
+	// **How far the wall's face stands at (x, y).** Two grids of
+	// different periods are taken together so the slabs do not fall on a
+	// rhythm, and a third cuts rectangles back into whatever is left --
+	// which is where the wall's interest comes from, rather than from
+	// putting different things on it.
+	static int face_z(int x, int y)
+	{
+		int out = 0;
+		// Slabs: cells of 9 and 13 voxels, most of them flush, a quarter
+		// standing out by one to three. Two periods so the standing ones
+		// do not fall on a rhythm; tuned down from "every cell, by up to
+		// four" which read as rubble rather than as a wall (2026-09-23).
+		const uint32_t a = hash2(floor_div(x, 9), floor_div(y, 9), 1);
+		const uint32_t b = hash2(floor_div(x + 4, 13), floor_div(y + 6, 13), 2);
+		if((a & 7) < 2)
+			out = 1 + (int)((a >> 4) % 3);
+		if((b & 7) < 2){
+			const int bo = 1 + (int)((b >> 4) % 2);
+			if(bo > out)
+				out = bo;
+		}
+		// Insets: rectangles cut back, rare and deep, some of them deep
+		// enough to read black once the overhead light is the only thing
+		// reaching them
+		const uint32_t c = hash2(floor_div(x + 2, 6), floor_div(y + 1, 6), 3);
+		if((c & 15) < 2)
+			out -= 1 + (int)((c >> 4) % INSET_IN);
+		return BAY_Z + out;
+	}
+
+	static int floor_div(int a, int b)
+	{
+		return a >= 0 ? a / b : -(((-a) + b - 1) / b);
+	}
+
+	// Whether (x, y, z) is inside a pocket, and whether it is one of the
+	// side columns that carry the ornament
+	static bool in_pocket(int x, int y, int z, bool *column)
+	{
+		for(int b = 0; b < BAYS; b++){
+			const int cx = bay_x(b), cy = bay_y(b);
+			if(x < cx - POCKET / 2 || x > cx + POCKET / 2)
+				continue;
+			if(y < cy - POCKET / 2 || y > cy + POCKET / 2)
+				continue;
+			const int mouth = face_z(x, y);
+			if(z > mouth || z < mouth - POCKET_DEPTH)
+				continue;
+			// The two voxels down each side of the mouth are the columns
+			if(column != nullptr)
+				*column = (x <= cx - POCKET / 2 + 1 ||
+						x >= cx + POCKET / 2 - 1);
+			return true;
+		}
+		return false;
+	}
 };
 
 struct VoxelIds
@@ -74,6 +146,7 @@ struct VoxelIds
 	interface::VoxelInstance dark = interface::VoxelInstance(0);
 	interface::VoxelInstance floor_light = interface::VoxelInstance(0);
 	interface::VoxelInstance floor_dark = interface::VoxelInstance(0);
+	interface::VoxelInstance column = interface::VoxelInstance(0);
 };
 static VoxelIds g_ids;
 
@@ -95,45 +168,21 @@ static interface::VoxelInstance voxel_at(int x, int y, int z)
 		return g_ids.dark;
 	if(outside && y <= Room::Y_TOP + Room::WALL)
 		return g_ids.stone;
-	// The bays
-	if(y >= 0 && z <= Room::BAY_Z && z > Room::BAY_Z - Room::BAY_DEPTH){
-		for(int b = 0; b < Room::BAYS; b++){
-			const int bx = Room::bay_x(b);
-			const int tier = y / Room::SLAB_H;
-			if(tier >= Room::TIERS)
-				break;
-			const int w = Room::bay_width(tier);
-			if(x < bx - w || x > bx + w)
-				continue;
-			if(tier == Room::bay_tier(b)){
-				// The open tier: two posts and a gap between them, which
-				// is what the orb is seen through
-				if(x > bx - w + 2 && x < bx + w - 2)
-					return g_ids.air;
-			}
-			return g_ids.stone;
-		}
-	}
-	// **The niche**: the recess behind an open tier, so the orb sits in
-	// something rather than floating behind a wall. Its back and sides
-	// are solid and its inside is air.
-	if(y >= 0 && z <= Room::BAY_Z - Room::BAY_DEPTH &&
-			z > Room::BAY_Z - Room::BAY_DEPTH - Room::NICHE_DEPTH - 1){
-		for(int b = 0; b < Room::BAYS; b++){
-			const int bx = Room::bay_x(b);
-			const int tier = y / Room::SLAB_H;
-			const int w = Room::bay_width(Room::bay_tier(b));
-			if(x < bx - w || x > bx + w)
-				continue;
-			if(tier == Room::bay_tier(b) && x > bx - w + 2 && x < bx + w - 2 &&
-					z > Room::BAY_Z - Room::BAY_DEPTH - Room::NICHE_DEPTH)
-				return g_ids.air;
-			// **Pale, not dark.** A niche of dark voxels swallows its own
-			// orb: nothing bounces off its walls and out through the
-			// opening, which is where the reference frame's lit stone
-			// comes from.
-			return g_ids.stone;
-		}
+	// **The wall**: one mass whose face stands wherever face_z() says,
+	// with pockets cut into it. The same material lines a pocket -- it
+	// is a hole in the wall and not a differently finished box -- and
+	// the ornament is on the side columns of its mouth and nowhere else.
+	if(y >= 0 && y <= Room::Y_TOP && z <= Room::face_z(x, y)){
+		bool column = false;
+		if(Room::in_pocket(x, y, z, &column))
+			return g_ids.air;
+		// A voxel beside a pocket's mouth is one of its columns
+		bool c2 = false;
+		if(Room::in_pocket(x - 1, y, z, &c2) && c2)
+			return g_ids.column;
+		if(Room::in_pocket(x + 1, y, z, &c2) && c2)
+			return g_ids.column;
+		return g_ids.stone;
 	}
 	return g_ids.air;
 }
@@ -267,6 +316,10 @@ struct Module: public interface::Module
 					true, false, 0.85f, 0.10f, 0.7f, 8);
 			g_ids.dark = add_voxel(reg, "dark", "main/dark.png",
 					true, false, 0.95f, 0.1f, 0.4f);
+			// The pockets' side columns, which are the one place the
+			// ornament goes; also generated by the client
+			g_ids.column = add_voxel(reg, "column", "generated/column.png",
+					true, false, 0.70f, 0.20f, 0.9f, 4);
 			// The checkerboard: the light squares are polished, which is
 			// what puts the room's reflection in the floor
 			g_ids.floor_light = add_voxel(reg, "floor_light",
@@ -302,10 +355,10 @@ struct Module: public interface::Module
 	{
 		std::ostringstream os;
 		os << Room::BAYS << " " << Room::SLAB_H << " " << Room::BAY_Z << " "
-				<< Room::BAY_DEPTH << " " << Room::NICHE_DEPTH;
+				<< Room::POCKET << " " << Room::POCKET_DEPTH;
 		for(int b = 0; b < Room::BAYS; b++){
 			os << " " << Room::bay_x(b) << " " << Room::bay_tier(b)
-					<< " " << Room::bay_width(Room::bay_tier(b));
+					<< " " << Room::bay_y(b);
 		}
 		return os.str();
 	}
@@ -322,16 +375,19 @@ struct Module: public interface::Module
 			return;
 		if(bay < 0 || bay >= Room::BAYS)
 			return;
+		// The pocket's own box, which is what comes apart: the mouth
+		// stands wherever the slabs around it put it, so the sweep goes
+		// from the deepest a face can be to the furthest it can stand
 		const int bx = Room::bay_x(bay);
-		const int tier = Room::bay_tier(bay);
-		const int w = Room::bay_width(tier);
+		const int by = Room::bay_y(bay);
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
 		{
-			for(int z = Room::BAY_Z - Room::BAY_DEPTH + 1;
-					z <= Room::BAY_Z; z++){
-				for(int y = 0; y < Room::TIERS * Room::SLAB_H; y++){
-					for(int x = bx - w; x <= bx + w; x++){
+			for(int x = bx - Room::POCKET; x <= bx + Room::POCKET; x++){
+				for(int y = by - Room::POCKET; y <= by + Room::POCKET; y++){
+					for(int z = Room::BAY_Z - Room::POCKET_DEPTH -
+							Room::INSET_IN;
+							z <= Room::BAY_Z + Room::SLAB_OUT; z++){
 						const pv::Vector3DInt32 p(x, y, z);
 						world->set_voxel(p, open ? g_ids.air :
 								voxel_at(x, y, z), true);

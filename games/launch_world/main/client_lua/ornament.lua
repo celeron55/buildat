@@ -250,41 +250,81 @@ function M.mark(size, seed)
 	return f
 end
 
--- **The wall's own material**: one knobby monotonous field over the
--- whole wall, with rectangles inset to various depths until some read
--- black. It is a height field like the others, and it is meant to be
--- seen across many voxels at once -- which is what uv_scale is for
--- ([WORLD_UV]); at one voxel per repeat it is a grid of identical
--- stamps, which is what the wall looked like before.
-function M.wall(size, seed)
-	local h = field(size, 0.62)
-	local inlay = field(size)
+-- **The wall's own material** (user, 2026-09-22): a matte finished,
+-- clean cut stone surface with large patches of mineral variation. Not
+-- rough and not carved -- the "knobby" of the first reading is the
+-- coursing of the cut blocks, not a bumpy texture. So the height field
+-- is flat but for the block seams, and the only real variation is slow,
+-- large-scale mineral blotching in the albedo.
+--
+-- It is meant to be seen across many voxels at once, which is what
+-- uv_scale is for ([WORLD_UV]): at one repeat per voxel a patch larger
+-- than 45 cm cannot exist and the biggest surface in the room reads as
+-- a grid of identical stamps.
+--
+-- simplified: the blotches are one octave of value noise. Two or three
+-- would break up the remaining regularity; one is enough to tell
+-- whether the wall reads as stone, which is what it is for now.
+local function value_noise(size, cells, r)
+	-- A coarse grid of random values, read back bilinearly: slow, large
+	-- patches rather than texel noise
+	local g = {}
+	for i = 0, (cells + 1) * (cells + 1) - 1 do
+		g[i] = r()
+	end
+	local function at_cell(cx, cy)
+		return g[(cy % (cells + 1)) * (cells + 1) + (cx % (cells + 1))]
+	end
+	local f = field(size)
+	local step = size / cells
+	for y = 0, size - 1 do
+		for x = 0, size - 1 do
+			local fx, fy = x / step, y / step
+			local x0, y0 = math.floor(fx), math.floor(fy)
+			local tx, ty = fx - x0, fy - y0
+			-- Smoothstep, so the patches have no grid in their edges
+			tx = tx * tx * (3 - 2 * tx)
+			ty = ty * ty * (3 - 2 * ty)
+			local a = at_cell(x0, y0) + (at_cell(x0 + 1, y0) -
+					at_cell(x0, y0)) * tx
+			local b = at_cell(x0, y0 + 1) + (at_cell(x0 + 1, y0 + 1) -
+					at_cell(x0, y0 + 1)) * tx
+			put(f, x, y, a + (b - a) * ty)
+		end
+	end
+	return f
+end
+
+function M.wall(size, seed, opts)
+	opts = opts or {}
 	local r = rng(seed)
-	-- The knobble: small raised lumps everywhere, dense enough to read as
-	-- a surface rather than as marks
-	for _ = 1, size * size / 26 do
-		local x, y = r(size) - 1, r(size) - 1
-		local w = 2 + r(3)
-		for dy = 0, w - 1 do
-			for dx = 0, w - 1 do
-				put(h, (x + dx) % size, (y + dy) % size, 0.62 + r() * 0.38)
+	-- The coursing: horizontal beds every course_h texels, and the
+	-- vertical joints offset by half a block course to course, which is
+	-- what dressed stone does and what keeps the seams from lining up
+	local h = field(size, 0.72)
+	local course = opts.course or math.floor(size / 6)
+	local block = opts.block or math.floor(size / 3)
+	for y = 0, size - 1 do
+		local row = math.floor(y / course)
+		local bed = (y % course) == 0
+		for x = 0, size - 1 do
+			local jx = (x + (row % 2) * math.floor(block / 2)) % block
+			if bed or jx == 0 then
+				-- A seam is a narrow recess, which is all the relief
+				-- this surface has
+				put(h, x, y, 0.30)
 			end
 		end
 	end
-	-- And the insets: rectangles cut to various depths, a few of them all
-	-- the way down
-	for _ = 1, 14 do
-		local w = 4 + r(math.floor(size / 5))
-		local t = 3 + r(math.floor(size / 6))
-		local x, y = r(size) - 1, r(size) - 1
-		local depth = r() < 0.25 and 0 or 0.10 + r() * 0.34
-		for dy = 0, t - 1 do
-			for dx = 0, w - 1 do
-				put(h, (x + dx) % size, (y + dy) % size, depth)
-				put(inlay, (x + dx) % size, (y + dy) % size,
-						depth < 0.05 and 1 or 0)
-			end
-		end
+	-- The mineral patches, in the albedo only: the inlay mask carries
+	-- them and maps() tints by it
+	local blotch = value_noise(size, opts.cells or 4, r)
+	local inlay = field(size)
+	for i = 1, size * size do
+		-- A patch is where the noise is high, with a soft edge so it
+		-- reads as mineral rather than as a stain
+		local v = blotch[i]
+		inlay[i] = v > 0.58 and math.min(1, (v - 0.58) * 3.2) or 0
 	end
 	return h, inlay
 end
