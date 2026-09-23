@@ -2775,22 +2775,35 @@ local drone = {VOICES = 6, LOW = 40.0, HIGH = 160.0, t = 0, voices = {}}
 -- A pentatonic-ish stack: root, fifth, octave first, the rest sparser.
 -- Vast rather than busy, which is what the design asks for.
 drone.SCALE = {0, 7, 12, 19, 24, 3, 10, 15}
+-- **Two loops, dark and bright, and pointing crossfades between them**
+-- ([ROOM_SOUND]: raise the filter by crossfading rather than filtering
+-- live). Both are the same two saws through the same one pole -- the
+-- bright one's filter is simply slacker -- so they are the same note
+-- and the fade is a change of colour rather than of pitch. Two sources
+-- a voice, one node: they are the same place in the room.
 drone.loop = synth.drone_loop(magic, 0.6, false)
+drone.bright = synth.drone_loop(magic, 0.6, true)
 for i = 1, drone.VOICES do
 	local node = scene:CreateChild("orb_voice")
-	local v = synth.drone_voice(magic, drone.loop)
-	local src = node:CreateComponent("SoundSource3D")
-	src.nearDistance = 3 * U
-	src.farDistance = 46 * U
-	src.rolloffFactor = 1.1
-	src.gain = 0
-	src:Play(v.stream)
-	v.node, v.source, v.orb, v.phase = node, src, 0, i * 1.7
+	local v = {node = node, orb = 0, phase = i * 1.7, gain = 0, lit = 0}
+	local function source_for(loop)
+		local voice = synth.drone_voice(magic, loop)
+		local src = node:CreateComponent("SoundSource3D")
+		src.nearDistance = 3 * U
+		src.farDistance = 46 * U
+		src.rolloffFactor = 1.1
+		src.gain = 0
+		src:Play(voice.stream)
+		voice.source = src
+		return voice
+	end
+	v.dark = source_for(drone.loop)
+	v.lit_voice = source_for(drone.bright)
 	drone.voices[i] = v
 end
 log:info(("the room hums: %d voices of %d orbs, %.1f to %.1f Hz, " ..
-		"a bed under them"):format(drone.VOICES, #orb_places, drone.LOW,
-		drone.HIGH))
+		"dark and bright loops, a bed under them"):format(drone.VOICES,
+		#orb_places, drone.LOW, drone.HIGH))
 
 -- **A pitch is a hash of the orb's name**, not its index, so an orb
 -- sounds the same every boot and moving things about does not retune
@@ -2850,10 +2863,11 @@ function handle_synth_update(event_type, event_data)
 				v.orb = pick
 				if pick > 0 then
 					v.node.position = orb_nodes[pick].position
-					-- The playback rate *is* the pitch: the loop was
+					-- The playback rate *is* the pitch: both loops were
 					-- made at synth.DRONE_HZ
-					v.source.frequency = 22050 *
-							(drone.hz(pick) / synth.DRONE_HZ)
+					local f = 22050 * (drone.hz(pick) / synth.DRONE_HZ)
+					v.dark.source.frequency = f
+					v.lit_voice.source.frequency = f
 				end
 			end
 		end
@@ -2861,7 +2875,8 @@ function handle_synth_update(event_type, event_data)
 	for k = 1, drone.VOICES do
 		local v = drone.voices[k]
 		if v.orb > 0 then
-			v:feed()
+			v.dark:feed()
+			v.lit_voice:feed()
 			-- A slow breath each, at its own rate, so the room is never
 			-- quite still while the player is
 			local lfo = 0.82 + 0.18 * math.sin(drone.t * 0.7 + v.phase +
@@ -2871,20 +2886,25 @@ function handle_synth_update(event_type, event_data)
 			-- little pitch rather than a second, brighter loop --
 			-- two loops and a crossfade is the upgrade the design names.
 			local g = 0.30
+			local want_lit = 0
 			if pointed_orb == v.orb then
-				g = 0.52
+				g, want_lit = 0.52, 1
 			elseif pointed_orb and pointed_orb > 0 then
 				g = 0.20
 			end
 			if terminal_open then g = g * 0.35 end
 			-- **The duck is ramped, not switched** ([ROOM_SOUND]: about
 			-- 150 ms, or it clicks). One pole per frame, which is the
-			-- same ramp whatever the frame rate is doing.
+			-- same ramp whatever the frame rate is doing, and the
+			-- crossfade rides the same ramp.
 			local k = 1 - math.exp(-dt / 0.15)
-			v.gain = (v.gain or 0) + (g - (v.gain or 0)) * k
-			v.source.gain = v.gain * lfo
+			v.gain = v.gain + (g - v.gain) * k
+			v.lit = v.lit + (want_lit - v.lit) * k
+			v.dark.source.gain = v.gain * lfo * (1 - v.lit)
+			v.lit_voice.source.gain = v.gain * lfo * v.lit
 		else
-			v.source.gain = 0
+			v.dark.source.gain = 0
+			v.lit_voice.source.gain = 0
 		end
 	end
 end
