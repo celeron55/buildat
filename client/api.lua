@@ -117,6 +117,131 @@ buildat.safe.leave = function()
 		__buildat_disconnect()
 	end
 end
+--
+-- **The launch UI's own verbs** ([LAUNCH_SANDBOX]). A launch extension
+-- is a slot anybody can fill, so it has to be able to run in the
+-- sandbox every game runs in -- and the rule that keeps this small is
+-- that **the trusted side owns the verbs and the sandbox owns the
+-- drawing**. Each of these does one nameable thing; none is a general
+-- capability, because every addition here is attack surface for every
+-- game as well.
+--
+-- launch_actions() -> the launch grid's tiles as plain data: no
+-- functions, no paths to open, and the `key` is what launch() takes.
+-- The list itself is built by sandboxed launcher files behind
+-- `ctx.launch` already ([LAUNCH_GRID]), so this is one step further
+-- out, not a new reach.
+local launch_runs = {}
+buildat.safe.launch_actions = function()
+	local grid = dofile(buildat.extension_path("__menu") ..
+			"/launch_grid.lua")
+	local out = {}
+	launch_runs = {}
+	for i, a in ipairs(grid.actions(log)) do
+		local key = tostring(a.from) .. "/" .. tostring(a.id or i)
+		launch_runs[key] = a.run
+		out[i] = {key = key, id = a.id, label = a.label, icon = a.icon,
+			kind = a.kind, from = a.from, description = a.description,
+			order = a.order}
+	end
+	return out
+end
+-- launch(key): run one of them. The key is looked up in the table the
+-- trusted side built, so a sandbox cannot name anything that is not on
+-- the grid, and it never hands a function across.
+buildat.safe.launch = function(key)
+	if type(key) ~= "string" then
+		return false, "launch(key): a string from launch_actions()"
+	end
+	local run = launch_runs[key]
+	if not run then
+		return false, "launch(" .. key .. "): no such action"
+	end
+	run()
+	return true
+end
+-- **Its own persistent storage**, one directory per launch extension
+-- under the user path: `storage_read(name)` and `storage_write(name,
+-- data)`. A name is one file, not a path -- no slashes, no dots on
+-- their own -- so a launcher writes where it is put and nowhere else,
+-- and the size is capped because a slot anybody can fill is a slot
+-- anybody can fill a disk from.
+local STORAGE_MAX = 4 * 1024 * 1024
+local function storage_path(name)
+	if type(name) ~= "string" or not name:match("^[%w_%-%.]+$") or
+			name:find("%.%.") then
+		return nil, "storage: a name of letters, digits, _ - and ."
+	end
+	local who = __buildat_menu_extension_name or "launch_menu"
+	if not who:match("^[%w_]+$") then
+		return nil, "storage: the launch extension has an odd name"
+	end
+	return __buildat_get_path("user") .. "/" .. who .. "/" .. name,
+			__buildat_get_path("user") .. "/" .. who
+end
+buildat.safe.storage_read = function(name)
+	local path = storage_path(name)
+	if not path then
+		return nil
+	end
+	local f = io.open(path, "rb")
+	if not f then
+		return nil
+	end
+	local data = f:read("*a")
+	f:close()
+	return data
+end
+buildat.safe.storage_write = function(name, data)
+	local path, dir = storage_path(name)
+	if not path then
+		return false, dir
+	end
+	if type(data) ~= "string" then
+		return false, "storage_write(name, data): data is a string"
+	end
+	if #data > STORAGE_MAX then
+		return false, "storage_write: " .. #data .. " bytes is over the " ..
+				STORAGE_MAX .. " a launcher may keep"
+	end
+	__buildat_create_directories(dir)
+	local f = io.open(path, "wb")
+	if not f then
+		return false, "storage_write: could not open " .. name
+	end
+	f:write(data)
+	f:close()
+	return true
+end
+
+-- **Connecting to a server**, which a launcher does on a worker and
+-- polls from a frame handler: the blocking one freezes the frame for as
+-- long as it takes ([BOX_PLAYTEST_2] 12). An address is a string and
+-- the client is what parses it.
+buildat.safe.connect_start = function(address)
+	if type(address) ~= "string" or #address > 256 then
+		return false, "connect_start(address): a string"
+	end
+	__buildat_connect_server_start(address)
+	return true
+end
+buildat.safe.connect_poll = __buildat_connect_server_poll
+-- **Back to the launcher from a game** ([MENU_CONTEXT]): the connection
+-- dropped, the local server stopped and the sandbox's leavings cleared.
+-- The launcher's own screens are its business; this is the client half.
+buildat.safe.leave_to_menu = __buildat_leave_to_menu
+-- Whether this client is driven by a command sequence, which a launcher
+-- asks before taking the mouse: a check shares a desk with the person
+-- whose mouse it is ([BOX_PLAYTEST_3])
+buildat.safe.is_scripted = __buildat_is_scripted
+
+-- The two read-only enumerations a launcher draws its room from
+buildat.safe.list_games = __buildat_list_games
+buildat.safe.list_saves = __buildat_list_saves
+-- Whether the client has a local server up, which is how a launcher
+-- knows a launch action started a game rather than opening a screen
+buildat.safe.local_server_running = __buildat_local_server_running
+
 -- The one preference a game may set ([BOX_FIXES] b): the player's ear.
 -- Official's pause menu has mute and volume, and that is where a player
 -- reaches for them. get_sound() -> mute, volume; set_sound(mute, volume)

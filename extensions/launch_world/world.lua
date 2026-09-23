@@ -25,11 +25,14 @@ local room = dofile(EXT .. "/room.lua")
 --
 -- Read before the room is built, because how many pockets the wall has is
 -- how many things there are to put in them.
-local launch_grid = dofile(buildat.extension_path("__menu") ..
-		"/launch_grid.lua")
+-- **Through the safe verb, not the trusted file** ([LAUNCH_SANDBOX]:
+-- the room is written against the sandboxed API while it still runs
+-- trusted, so the switch is a switch). `launch_actions()` answers plain
+-- data and a key; `buildat.safe.launch(key)` is what runs one, on the
+-- trusted side, where it is looked up rather than called across.
 local GAMES, FLOOR_ACTIONS = {}, {}
-for _, a in ipairs(launch_grid.actions(log)) do
-	local o = {name = a.label, icon = a.icon, run = a.run, kind = a.kind,
+for _, a in ipairs(buildat.safe.launch_actions()) do
+	local o = {name = a.label, icon = a.icon, key = a.key, kind = a.kind,
 		description = a.description, from = a.from}
 	if a.kind == "game" then
 		GAMES[#GAMES + 1] = o
@@ -39,7 +42,7 @@ for _, a in ipairs(launch_grid.actions(log)) do
 end
 -- **The saves are on the floor, smaller** (user): "save", not "world",
 -- which is a Luanti-ism -- saves being universal in buildat. They come
--- from buildat.list_saves(), which enumerates them off the disk rather
+-- from buildat.safe.list_saves(), which enumerates them off the disk rather
 -- than asking a server, there being none to ask.
 --
 -- simplified: the newest twelve. This tree has sixty-odd, most of them a
@@ -48,7 +51,7 @@ end
 -- cap sensible; the rest wait on the room learning to hold more than it
 -- can show, which is the same open question the wall has.
 local SAVES = {}
-for _, sv in ipairs(buildat.list_saves()) do
+for _, sv in ipairs(buildat.safe.list_saves()) do
 	if #SAVES >= 12 then break end
 	SAVES[#SAVES + 1] = sv
 end
@@ -730,7 +733,7 @@ local ORB_MIN, ORB_MAX = 1.2, 1.8
 local game_across = {}
 do
 	local sizes, lo, hi = {}, nil, nil
-	for _, g in ipairs(buildat.list_games() or {}) do
+	for _, g in ipairs(buildat.safe.list_games() or {}) do
 		local v = math.log((tonumber(g.size) or 0) + 1)
 		sizes[g.name] = v
 		lo = (lo == nil or v < lo) and v or lo
@@ -811,7 +814,7 @@ local FLOOR_ROWS = {-4.0, -0.5, 3.0, 6.5, 10.0}
 for i, a in ipairs(FLOOR_ACTIONS) do
 	local col = FLOOR_COLS[(i - 1) % #FLOOR_COLS + 1]
 	local row = FLOOR_ROWS[math.floor((i - 1) / #FLOOR_COLS) % #FLOOR_ROWS + 1]
-	ORBS[#ORBS + 1] = {name = a.name, icon = a.icon, run = a.run,
+	ORBS[#ORBS + 1] = {name = a.name, icon = a.icon, key = a.key,
 		kind = a.kind, description = a.description, floor = true}
 	orb_places[#orb_places + 1] = {x = col, y = 1.4 * VOXEL_M / 2, z = row}
 end
@@ -1618,7 +1621,7 @@ local function readout(text, at, scale, colour)
 end
 
 -- Standing at spawn, low and to the left, turned a little out of the wall
-readout("b" .. buildat.version(), {x = 9.0, y = 0.25, z = -1.0}, 0.34,
+readout("b" .. buildat.safe.version(), {x = 9.0, y = 0.25, z = -1.0}, 0.34,
 		magic.Color(0.15, 0.85, 1.0, 1))
 
 -- **The orb turns to face whoever approaches** (user), and the name is
@@ -1743,7 +1746,7 @@ end
 -- mouse during your tests"). Asked each time: at load a command
 -- sequence is not up yet.
 local function mouse_for(fps_now, reason)
-	if __buildat_is_scripted and __buildat_is_scripted() then return end
+	if buildat.safe.is_scripted() then return end
 	magic.input:SetMouseVisible(not fps_now, reason)
 	magic.input:SetMouseMode(fps_now and magic.MM_RELATIVE or
 			magic.MM_ABSOLUTE)
@@ -1829,8 +1832,10 @@ magic.SubscribeToEvent("Update", "handle_fps_update")
 -- cannot be dug -- the absence of the box says so before the click does.
 local REACH = 5.0              -- metres
 local DIG_SECONDS = 1.0
-local SAVE_DIR = __buildat_get_path("user") .. "/launch_world"
-local SAVE_PATH = SAVE_DIR .. "/room.txt"
+-- **The launcher's own storage** ([LAUNCH_SANDBOX]): one name, and the
+-- client puts it under this launch extension's directory. The room used
+-- to build the path itself and open it.
+local SAVE_NAME = "room.txt"
 
 -- **And where the player moved a sphere to.** The room's own layout is
 -- generated, so a sphere that has not been moved is not in the file at
@@ -1842,10 +1847,10 @@ moved = {}
 -- The player's own voxels and moved spheres, read at boot. One row a
 -- line, which is a file a person can read and delete.
 do
-	local f = io.open(SAVE_PATH, "rb")
-	if f then
+	local text = buildat.safe.storage_read(SAVE_NAME)
+	if text then
 		local n = 0
-		for line in f:lines() do
+		for line in text:gmatch("[^\n]+") do
 			local x, y, z = line:match("^(-?%d+),(-?%d+),(-?%d+)$")
 			local name, mx, my, mz =
 					line:match("^@(.-) (-?[%d%.]+) (-?[%d%.]+) (-?[%d%.]+)$")
@@ -1858,7 +1863,6 @@ do
 				n = n + 1
 			end
 		end
-		f:close()
 		-- The spheres are already placed by the time this is read, so a
 		-- remembered one is moved rather than placed there: the room's
 		-- own layout is what a sphere has until the player touches it
@@ -1884,12 +1888,6 @@ end
 
 local save_dirty = false
 local function write_save()
-	buildat.create_directories(SAVE_DIR)
-	local f = io.open(SAVE_PATH, "wb")
-	if not f then
-		log:warning("save: could not write " .. SAVE_PATH)
-		return
-	end
 	local keys = {}
 	for k, v in pairs(room.placed) do
 		if v then keys[#keys + 1] = k end
@@ -1903,8 +1901,12 @@ local function write_save()
 		keys[#keys + 1] = string.format("@%s %.3f %.3f %.3f", name,
 				m.x, m.y, m.z)
 	end
-	f:write(table.concat(keys, "\n"))
-	f:close()
+	local ok, why = buildat.safe.storage_write(SAVE_NAME,
+			table.concat(keys, "\n"))
+	if not ok then
+		log:warning("save: " .. tostring(why))
+		return
+	end
 	log:info("save: " .. #keys .. " rows written")
 end
 
@@ -2610,7 +2612,7 @@ attracting = false
 connecting = nil
 function connect_to(name, address)
 	if connecting then return end
-	buildat.connect_server_start(address)
+	buildat.safe.connect_start(address)
 	connecting = {name = name, address = address, t = 0}
 	notice("connecting to " .. name .. " ...")
 	log:info("connect: " .. name .. " at " .. address)
@@ -2619,7 +2621,7 @@ end
 local function connect_poll(dt)
 	if not connecting then return end
 	connecting.t = connecting.t + dt
-	local status, err = buildat.connect_server_poll()
+	local status, err = buildat.safe.connect_poll()
 	if status == "ok" then
 		log:info("connect: " .. connecting.name .. " ok after " ..
 				string.format("%.1f s", connecting.t))
@@ -3112,7 +3114,7 @@ function terminal_key(key)
 			local a = install_action
 			if a then
 				log:info("contentdb: running " .. a.name)
-				a.run()
+				buildat.safe.launch(a.key)
 			else
 				log:warning("contentdb: the tree offers no install action")
 			end
@@ -3145,7 +3147,7 @@ local PAUSE_ITEMS = {
 			log:warning("pause: launch_menu did not load")
 		end
 	end},
-	{"Leave buildat", function() __buildat_disconnect() end},
+	{"Leave buildat", function() buildat.safe.disconnect() end},
 }
 local pause_panel = room_ui_child("BorderImage")
 pause_panel.visible = false
@@ -3269,13 +3271,17 @@ function launch(b)
 	-- there. simplified: the camera flies in and the bay opens first,
 	-- and nothing waits for either -- a launch that takes the client
 	-- somewhere else takes it there mid-flight.
-	if ORBS[b] and ORBS[b].run then
-		ORBS[b].run()
+	if ORBS[b] and ORBS[b].key then
+		local ok, why = buildat.safe.launch(ORBS[b].key)
+		if not ok then
+			log:warning("launch: " .. tostring(why))
+			notice(tostring(why))
+		end
 		-- **A run that started a game takes the room down with it.** Not
 		-- every launch action is a game -- a launcher file can put
 		-- anything on the grid -- so the room asks whether a server came
 		-- up rather than assuming one did.
-		if buildat.local_server_running and buildat.local_server_running() then
+		if buildat.safe.local_server_running() then
 			entered_game()
 		end
 	elseif ORBS[b] and ORBS[b].server then
@@ -3534,7 +3540,7 @@ magic.SubscribeToEvent("KeyDown", "handle_keydown")
 -- **Into a game and back out of it** ([MENU_CONTEXT], the launcher
 -- plan's step 6). The room is never torn down: it keeps standing behind
 -- the game, its handlers stand down, its own UI goes away, and the way
--- back is the client's `__buildat_leave_to_menu()` plus a viewport.
+-- back is the client's `buildat.safe.leave_to_menu()` plus a viewport.
 --
 -- **A fresh Viewport, not the one the room booted with**: handing the
 -- old wrapper back to `set_preferred_viewports()` after the sandbox
@@ -3554,7 +3560,7 @@ end
 
 function leave_game()
 	if not in_game then return false end
-	__buildat_leave_to_menu()
+	buildat.safe.leave_to_menu()
 	in_game = false
 	local vp = magic.Viewport:new(scene,
 			camera_node:GetComponent("Camera"))
