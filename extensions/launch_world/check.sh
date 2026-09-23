@@ -233,7 +233,17 @@ fi
 	echo "mouse_down left"
 	echo "delay 1400"
 	echo "mouse_up left"
-	echo "delay 1200"
+	echo "delay 9000"
+	echo "screenshot $out/in-game.png"
+	# **And back out of it** ([MENU_CONTEXT]): the room stands behind the
+	# game the whole time, so the way back is the client's own
+	# leave_to_menu plus a viewport. F10 is the room's key for it; a game
+	# with a menu leaves through buildat.leave(), and this tree has one.
+	echo "delay 400"
+	echo "keypress F10"
+	echo "delay 2500"
+	echo "screenshot $out/back-from-game.png"
+	echo "delay 400"
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -m launch_world -D ../user -w 1280x720 -l 3 \
 	-c @"$out/cmds.txt" 2>&1 |
@@ -286,6 +296,15 @@ last=$(grep -a "launch_w.*: setting: " "$out/cli.log" | tail -1 | sed 's/.*setti
 echo "the terminal changed $changes settings: $first then $last"
 if [ "$changes" -lt 2 ] || [ "$first" = "$last" ]; then
 	echo "FAIL: the terminal's rows do not change anything"
+	exit 1
+fi
+
+back=$(grep -ac "launch_w.*: game: back in the room" "$out/cli.log")
+swept=$(grep -a "forget_game_ui" "$out/cli.log" | tail -1 |
+	sed 's/.*forget_game_ui(): //')
+echo "leaving the game swept ${swept:-nothing}"
+if [ "$back" -lt 1 ]; then
+	echo "FAIL: the room does not come back from a game"
 	exit 1
 fi
 

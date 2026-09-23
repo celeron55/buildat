@@ -404,6 +404,18 @@ local function voxel_of(p)
 	return math.floor(p + 0.5)
 end
 
+-- **Everything the room puts on ui.root, in one list.** A game's own
+-- screens come up over the room and the room's must go away while they
+-- are there -- and come back after ([MENU_CONTEXT]). The client sweeps
+-- the game's elements off on the way back; these are the room's, and it
+-- hides and shows them itself.
+room_ui = {}
+local function room_ui_child(kind)
+	local e = magic.ui.root:CreateChild(kind)
+	room_ui[#room_ui + 1] = e
+	return e
+end
+
 local CHUNK = 16
 rows = room.build()
 local chunk_nodes = {}
@@ -1266,6 +1278,8 @@ reflection_probe(V(0, 2.0, 0.0))
 -- picture of nothing. Cheap to ask a few times and then stop.
 local probe_frames = 0
 function handle_probe_update()
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	if (buildat.get_env("BUILDAT_LAUNCH_NORENDERPROBE") or "") ~= "" then
 		return
 	end
@@ -1308,7 +1322,13 @@ magic.set_preferred_viewports({viewport})
 -- The room is lit to fit in the range meanwhile, so the orbs clip to
 -- white -- which is what a source should do -- and the wall stops short
 -- of it.
-do
+-- **Built again on the way back from a game, not kept.** The cloned
+-- path belongs to whatever viewport holds it: keeping the wrapper in a
+-- global and putting it on a fresh Viewport handed Urho3D a freed
+-- RenderPath, and the first frame after the game segfaulted in
+-- View::Define with a null renderPath_ (2026-09-23). Rebuilding it
+-- costs one clone.
+function apply_room_path(vp)
 	-- **On by default, and without HDR.** Urho3D's Tonemap works
 	-- appended to the client's own render path; what draws a black frame
 	-- is `HDRRendering`. So the room is tonemapped in LDR: the
@@ -1350,7 +1370,7 @@ do
 		-- HDR on its own, so it can be told apart from the effects
 		magic.renderer.HDRRendering = hdr
 		log:info("tonemap: HDR " .. tostring(hdr))
-		local rp = viewport.renderPath:Clone()
+		local rp = vp.renderPath:Clone()
 		for fx in want:gmatch("[^,]+") do
 			local xml = magic.cache:GetResource("XMLFile",
 					"PostProcess/" .. fx .. ".xml")
@@ -1380,15 +1400,16 @@ do
 		rp:SetShaderParameter("AutoExposureLumRange",
 				magic.Vector2(0.06, 2.0))
 		rp:SetShaderParameter("AutoExposureMiddleGrey", 0.12)
-		viewport.renderPath = rp
+		vp.renderPath = rp
 		log:info("tonemap: " .. want .. ", " .. rp:GetNumCommands() ..
 				" commands, HDR on")
 	end
 end
+apply_room_path(viewport)
 
 
 -- The name of the preset in the corner, so a picture says which it is
-label = magic.ui.root:CreateChild("Text")
+label = room_ui_child("Text")
 label:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 14)
 label.horizontalAlignment = magic.HA_LEFT
 label.verticalAlignment = magic.VA_BOTTOM
@@ -1466,6 +1487,8 @@ end
 -- pulses. Nothing here polls anything; the rate is the reading.
 patch_t = 0
 function handle_patch_update(event_type, event_data)
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	patch_t = patch_t + event_data:GetFloat("TimeStep")
 	for _, led in ipairs(patch_leds) do
 		-- Blinking at the ping's rate when something has measured one,
@@ -1607,6 +1630,8 @@ local function fly_to(from, at)
 end
 
 function handle_camera_update(event_type, event_data)
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	if not cam.to_from then
 		return
 	end
@@ -1695,6 +1720,8 @@ local function set_mode(m)
 end
 
 function handle_fps_update(event_type, event_data)
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	if mode ~= "fps" or cam.to_from or terminal_open then
 		return
 	end
@@ -1994,6 +2021,8 @@ local orb_home = {}
 -- The sphere a hold started on, until the button comes up
 orb_holding = nil
 function handle_dig_update(event_type, event_data)
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
 	-- The motes fall whatever the mode is
 	for i = #motes, 1, -1 do
@@ -2150,6 +2179,8 @@ local orb_base_scale = {}
 -- nearest to it: about ten degrees, which is a sphere at arm's length
 local POINT_DOT = 0.985
 function handle_orb_update()
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	local best, best_dot = 0, -1
 	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
 	-- stops at it, which would hide every orb past the empty one
@@ -2327,6 +2358,8 @@ function place_voxel()
 end
 
 function handle_mousedown(event_type, event_data)
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	if mode ~= "fps" or terminal_open or pause_open then return end
 	if event_data:GetInt("Button") == magic.MOUSEB_RIGHT then
 		if not place_carried() then
@@ -2349,6 +2382,8 @@ bed:set_voices(#orb_nodes)
 bed:play(scene:CreateChild("sound"))
 kept.bed = bed
 function handle_synth_update()
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	bed:update()
 end
 magic.SubscribeToEvent("Update", "handle_synth_update")
@@ -2460,6 +2495,8 @@ function dissolve_bay(b, open)
 end
 
 function handle_dissolve_update(event_type, event_data)
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	local dt = event_data:GetFloat("TimeStep")
 	for b = 1, BAYS do
 		local st = bay_state[b]
@@ -2524,6 +2561,8 @@ idle_quiet = 0
 attracting = false
 
 function handle_idle_update(event_type, event_data)
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	if still then
 		return
 	end
@@ -2594,6 +2633,8 @@ end
 
 reel_angle = 0
 function handle_reel_update(event_type, event_data)
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	local dt = event_data:GetFloat("TimeStep")
 	local busy = false
 	for b = 1, BAYS do
@@ -2642,7 +2683,7 @@ set_preset(1)
 -- bars rather than a texture: it needs no resource.
 do
 	local function bar(w, h)
-		local e = magic.ui.root:CreateChild("BorderImage")
+		local e = room_ui_child("BorderImage")
 		e.texture = checker_texture(2, 1, magic.Color(1, 1, 1, 1),
 				magic.Color(1, 1, 1, 1))
 		e.imageRect = magic.IntRect(0, 0, 2, 2)
@@ -2656,7 +2697,7 @@ do
 	crosshair = {bar(9, 1), bar(1, 9)}
 end
 
-local prompt_text = magic.ui.root:CreateChild("Text")
+local prompt_text = room_ui_child("Text")
 prompt_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 26)
 prompt_text.horizontalAlignment = magic.HA_CENTER
 prompt_text.verticalAlignment = magic.VA_BOTTOM
@@ -2836,7 +2877,7 @@ end
 
 -- The flat half. Hidden until the camera is at the desk; nothing here
 -- pretends to be an object.
-local panel = magic.ui.root:CreateChild("BorderImage")
+local panel = room_ui_child("BorderImage")
 panel.visible = false
 panel.priority = 50
 panel.horizontalAlignment = magic.HA_CENTER
@@ -3013,7 +3054,7 @@ local PAUSE_ITEMS = {
 	end},
 	{"Leave buildat", function() __buildat_disconnect() end},
 }
-local pause_panel = magic.ui.root:CreateChild("BorderImage")
+local pause_panel = room_ui_child("BorderImage")
 pause_panel.visible = false
 pause_panel.priority = 60
 pause_panel.horizontalAlignment = magic.HA_CENTER
@@ -3137,6 +3178,13 @@ function launch(b)
 	-- somewhere else takes it there mid-flight.
 	if ORBS[b] and ORBS[b].run then
 		ORBS[b].run()
+		-- **A run that started a game takes the room down with it.** Not
+		-- every launch action is a game -- a launcher file can put
+		-- anything on the grid -- so the room asks whether a server came
+		-- up rather than assuming one did.
+		if buildat.local_server_running and buildat.local_server_running() then
+			entered_game()
+		end
 	elseif ORBS[b] and ORBS[b].server then
 		-- simplified: the addresses are a mock-up, so there is nothing
 		-- to connect to. What goes here is buildat.connect_server_start
@@ -3157,8 +3205,7 @@ function launch(b)
 		if m and m.start_local_game then
 			log:info("launch: save " .. o.name .. " of " .. o.game)
 			m.start_local_game(o.game, "save=" .. o.name)
-			local me = buildat.menu_extension()
-			if me and me.entered_game then me.entered_game() end
+			entered_game()
 		else
 			log:warning("launch: no launch_menu to start " .. o.game)
 		end
@@ -3218,6 +3265,19 @@ end
 
 function handle_keydown(event_type, event_data)
 	local key = event_data:GetInt("Key")
+	-- **The launcher's own way back**, which works whatever the game
+	-- does with the keyboard: a game leaves through `buildat.leave()`
+	-- from its own menu, and a game with no menu -- most of this tree --
+	-- would otherwise have no way back at all. F9 is a pick; it is also
+	-- what the check drives, there being one game in the tree whose
+	-- menu offers leaving. F10 because the rest are taken: F6 and F9 are
+	-- the client's profiler, F11 is fullscreen and F12 a screenshot.
+	if in_game and key == magic.KEY_F10 then
+		leave_game()
+		return
+	end
+	-- The room stands down while a game is up ([MENU_CONTEXT])
+	if in_game then return end
 	-- F8 starts the attract mode; any other key ends it and brings the
 	-- camera home, the room being in use again
 	if key == magic.KEY_F8 then
@@ -3369,6 +3429,50 @@ function handle_keydown(event_type, event_data)
 end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")
 
+-- **Into a game and back out of it** ([MENU_CONTEXT], the launcher
+-- plan's step 6). The room is never torn down: it keeps standing behind
+-- the game, its handlers stand down, its own UI goes away, and the way
+-- back is the client's `__buildat_leave_to_menu()` plus a viewport.
+--
+-- **A fresh Viewport, not the one the room booted with**: handing the
+-- old wrapper back to `set_preferred_viewports()` after the sandbox
+-- reset segfaults, and the room's cloned render path has to go on the
+-- new one or it draws black with HDR on.
+in_game = false
+
+function entered_game()
+	if in_game then return end
+	in_game = true
+	for _, e in ipairs(room_ui) do
+		e.visible = false
+	end
+	attracting = false
+	log:info("game: the room stands down")
+end
+
+function leave_game()
+	if not in_game then return false end
+	__buildat_leave_to_menu()
+	in_game = false
+	local vp = magic.Viewport:new(scene,
+			camera_node:GetComponent("Camera"))
+	apply_room_path(vp)
+	magic.set_preferred_viewports({vp})
+	viewport = vp
+	for _, e in ipairs(room_ui) do
+		e.visible = true
+	end
+	panel.visible = false
+	pause_panel.visible = false
+	terminal_open = false
+	pause_open = false
+	-- Back to the room's own mode, which takes the mouse the way the
+	-- room takes it rather than the way the game left it
+	set_mode(mode)
+	log:info("game: back in the room")
+	return true
+end
+
 magic.ui:SetFocusElement(nil)
 
 -- **It starts in FPS mode**: the first impression is the room, not a
@@ -3379,5 +3483,13 @@ set_mode("fps")
 -- The browser starts on the first thing in the first row, so menu mode
 -- has a selection the moment it is entered
 browse_show()
+
+-- **What the client asks a launcher for** ([MENU_CONTEXT]): init.lua
+-- hands these on as the extension's own.
+return {
+	entered_game = entered_game,
+	leave_game = leave_game,
+	in_game = function() return in_game end,
+}
 
 -- vim: set noet ts=4 sw=4:

@@ -969,6 +969,19 @@ struct CApp: public App, public magic::Application
 	magic::SharedPtr<magic::Texture2D> m_preferred_texture;
 	magic::SharedPtr<magic::BorderImage> m_preferred_image;
 
+	// **What the launcher's UI was before a game was started**
+	// ([MENU_CONTEXT]). A game's client half puts its HUD straight on
+	// ui.root and nothing of it is named or removed, so the way back to
+	// the launcher has to take it off -- and it cannot do that by
+	// sweeping ui.root, because the client's own image is a child of it
+	// too: the world's texture is drawn through
+	// "buildat_preferred_viewports", and sweeping ui.root blind takes
+	// the world off the screen and leaves a black frame (which is what
+	// the first attempt found, 2026-09-23). So the launcher's children
+	// are remembered when a connection starts, and the way back removes
+	// the difference.
+	sv_<magic::SharedPtr<magic::UIElement>> m_menu_ui_children;
+
 	sp_<interface::thread_pool::ThreadPool> m_thread_pool;
 
 	CApp(magic::Context *context, const Options &options):
@@ -2009,6 +2022,51 @@ struct CApp: public App, public magic::Application
 		}
 	}
 
+	void remember_menu_ui()
+	{
+		m_menu_ui_children.clear();
+		magic::UI *ui = GetSubsystem<magic::UI>();
+		if(!ui || !ui->GetRoot())
+			return;
+		const magic::Vector<magic::SharedPtr<magic::UIElement>> &cs =
+				ui->GetRoot()->GetChildren();
+		for(unsigned i = 0; i < cs.Size(); i++)
+			m_menu_ui_children.push_back(cs[i]);
+		log_v(MODULE, "remember_menu_ui(): %zu elements",
+				m_menu_ui_children.size());
+	}
+
+	// Everything a game put on ui.root, and nothing the launcher or the
+	// client owns. The client's own image is kept whether or not it was
+	// there when the connection started -- it carries the world.
+	void forget_game_ui()
+	{
+		magic::UI *ui = GetSubsystem<magic::UI>();
+		if(!ui || !ui->GetRoot())
+			return;
+		magic::Vector<magic::SharedPtr<magic::UIElement>> cs =
+				ui->GetRoot()->GetChildren();
+		unsigned removed = 0;
+		for(unsigned i = 0; i < cs.Size(); i++){
+			magic::UIElement *e = cs[i];
+			if(!e || e == m_preferred_image)
+				continue;
+			bool theirs = true;
+			for(const auto &k : m_menu_ui_children){
+				if(k == e){
+					theirs = false;
+					break;
+				}
+			}
+			if(theirs){
+				e->Remove();
+				removed++;
+			}
+		}
+		m_menu_ui_children.clear();
+		log_i(MODULE, "forget_game_ui(): %u elements removed", removed);
+	}
+
 	void set_preferred_viewports(const sv_<magic::Viewport*> &viewports)
 	{
 		m_preferred_viewports.clear();
@@ -2262,6 +2320,7 @@ struct CApp: public App, public magic::Application
 
 		ss_ address = lua_bindings::lua_tocppstring(L, 1);
 
+		self->remember_menu_ui();
 		ss_ error;
 		bool ok = self->m_state->connect(address, &error);
 		lua_pushboolean(L, ok);
@@ -2282,6 +2341,7 @@ struct CApp: public App, public magic::Application
 		lua_pop(L, 1);
 
 		ss_ address = lua_bindings::lua_tocppstring(L, 1);
+		self->remember_menu_ui();
 		self->m_state->connect_start(address);
 		return 0;
 	}
@@ -2987,6 +3047,7 @@ struct CApp: public App, public magic::Application
 		stop_local_server();
 		self->m_state->reset();
 		self->m_lost_connection_us = 0;
+		self->forget_game_ui();
 		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_reset_sandbox");
 		if(lua_isfunction(L, -1))
 			error_logging_pcall(L, 0, 0);
