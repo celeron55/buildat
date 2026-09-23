@@ -427,27 +427,20 @@ local floor_mat = material(magic.Color(1, 1, 1, 1), 0.18, 0.0,
 		magic.Color(0.62, 0.63, 0.66, 1), magic.FILTER_TRILINEAR))
 -- (the floor is the voxelworld's checkerboard now)
 
--- **The architecture is the voxelworld's now** (see main.cpp's Room):
--- six bays of stacked slabs across the back, each with one tier left
--- open and a niche behind it for an orb to glow out of. **The
--- composition rule** (user), read off the reference frame and against
--- the evenly-lit set that was rejected: every view has a light source
--- occluded by something -- so the orb sits in the niche and the stone
--- silhouettes against it.
+-- **The architecture is the room's, and described once.** room.lua holds
+-- the wall, its slabs, its insets and the pockets; nothing here keeps a
+-- second copy of those numbers to drift from them, which is what the
+-- extension move bought -- the game had them in main.cpp and again here,
+-- and the check compared the two lists.
 --
--- These six numbers are the server's, written twice: the room is carved
--- there and the orbs are placed here. The check compares the two lists
--- and fails if they ever drift, which is cheaper than the packet round
--- trip the single copy would need before anything can be built.
-local BAYS = 6
-local BAY_SPACING = 14        -- voxels between pocket centres
-local SLAB_H = 3
-local BAY_Z = -18             -- the wall's nominal surface, in voxels
-local POCKET = 8              -- a pocket is about twice the orb across
-local POCKET_DEPTH = 8
-local BAY_TIER = {2, 4, 1, 3, 5, 2}   -- 0-based, as the server has them
-local function bay_x(i) return (i - 3) * BAY_SPACING - 7 end
-local function bay_y(i) return BAY_TIER[i] * SLAB_H + math.floor(SLAB_H / 2) + 4 end
+-- **The composition rule** (user), read off the reference frame and
+-- against the evenly-lit set that was rejected: every view has a light
+-- source occluded by something -- so the orb sits in its pocket and the
+-- stone silhouettes against it.
+local BAYS = room.BAYS
+local BAY_Z = room.BAY_Z
+local function bay_x(i) return room.bay_x(i - 1) end
+local function bay_y(i) return room.bay_y(i - 1) end
 
 -- **The orbs are the games** (user): warm is what you own, cold is a
 -- server you can reach. The name is what a mark is generated from and
@@ -471,16 +464,27 @@ for b = 1, BAYS do
 	-- face has the orb behind it, so N dot L is negative there and the
 	-- face takes nothing from it, while every face inside the pocket
 	-- looks at the orb and lights all round.
+	-- **An orb finds its own place in its pocket** (user, 2026-09-23):
+	-- per axis, it centres itself where the walls are close and
+	-- otherwise keeps back from the one it would touch. The margin has a
+	-- lighting reason as well as a visual one -- a point light at no
+	-- distance from a face burns it white.
+	-- **An orb finds its own place** (user, 2026-09-23): per axis it
+	-- centres itself where the walls are close and otherwise keeps a
+	-- margin off the one it would touch. At 2 to 4 voxels across, every
+	-- pocket here is the close case, so the middle is both answers --
+	-- and the margin has a lighting reason as well as a visual one, a
+	-- point light at no distance from a face burning it white.
+	local p = room.pockets[b]
 	orb_places[b] = {
-		x = bay_x(b) * VOXEL_M,
-		y = bay_y(b) * VOXEL_M,
-		z = (BAY_Z - POCKET_DEPTH / 2) * VOXEL_M,
+		x = (p.x0 + p.sx / 2) * VOXEL_M,
+		y = (p.y0 + p.sy / 2) * VOXEL_M,
+		z = (p.mouth - p.sz / 2 + 0.5) * VOXEL_M,
 	}
-	bay_desc[#bay_desc + 1] = string.format("%d %d %d", bay_x(b),
-			BAY_TIER[b], bay_y(b))
+	bay_desc[#bay_desc + 1] = string.format("%d %d %d %d%d%d", p.x0, p.y0,
+			p.mouth, p.sx, p.sy, p.sz)
 end
-log:info("bays " .. BAYS .. " " .. SLAB_H .. " " .. BAY_Z .. " " ..
-		POCKET .. " " .. POCKET_DEPTH .. " " ..
+log:info("bays " .. BAYS .. " " .. BAY_Z .. " " ..
 		table.concat(bay_desc, " "))
 
 -- **The ornament, on primitives in front of the voxels.** The bays are
@@ -508,11 +512,14 @@ for i, o in ipairs(orb_places) do
 		-- Nothing in the niche but the ring that would hold something,
 		-- dim: an empty socket reads as empty, not as broken
 		part("Torus", magic.Vector3(o.x, o.y, o.z),
-				magic.Vector3(1.9, 1.9, 1.9), machined)
+				magic.Vector3(1.4, 1.4, 1.4), machined)
 	else
 		orb_mats[i] = glow(magic.Color(1, 1, 1, 1), spec and spec.name)
+		-- simplified: one size. The plan wants 1.2 to 1.8 voxels by the
+		-- game's own size, which list_games() answers -- that arrives
+		-- with the real contents, step 5 of the remaining order.
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-				magic.Vector3(1.7, 1.7, 1.7), orb_mats[i])
+				magic.Vector3(1.5, 1.5, 1.5), orb_mats[i])
 		node:GetComponent("StaticModel").castShadows = false
 		orb_nodes[i] = node
 	end
@@ -520,18 +527,26 @@ end
 
 -- The foreground: ten shipped primitives on the checkerboard, the chrome
 -- ones doing what a perfect sphere under a sharp light does
+-- **The floor's own things, out of the way of the wall.** A server and a
+-- launch action stand on the floor, and the pockets are at Y 0 to 3 --
+-- knee to chest -- so anything in the middle of the floor stands in
+-- front of the lights the room is lit by. They frame the view instead:
+-- wide in x, near the eye in z, and the corridor to the wall left open.
+-- The check's own 99th percentile catches this, having read 110 against
+-- 253 the moment the eye came down to standing height (2026-09-23).
 local PROPS = {
-	{"Sphere", -9.4, 1.55, 3.4, 3.1, "chrome"},
-	{"Sphere", -4.6, 1.15, 6.0, 2.3, "chrome"},
-	{"Sphere", 0.8, 1.55, 1.8, 3.1, "chrome"},
-	{"Sphere", 5.8, 1.30, 5.2, 2.6, "chrome"},
-	{"Sphere", 10.6, 1.60, 0.8, 3.2, "chrome"},
-	{"Cone", -7.0, 1.35, 5.6, 2.7, "machined"},
-	{"Cylinder", 3.6, 1.25, 6.4, 2.5, "machined"},
-	{"Torus", -2.2, 0.60, 6.6, 2.6, "chrome"},
-	{"Pyramid", 8.4, 1.15, 6.2, 2.3, "stone"},
-	{"Pyramid", -12.0, 1.10, 4.8, 2.2, "machined"},
+	{"Sphere", -7.4, 1.55, 6.4, 3.1, "chrome"},
+	{"Sphere", -3.6, 1.15, 9.4, 2.3, "chrome"},
+	{"Sphere", 4.8, 1.55, 7.0, 3.1, "chrome"},
+	{"Sphere", 9.2, 1.30, 9.8, 2.6, "chrome"},
+	{"Sphere", -11.2, 1.60, 4.0, 3.2, "chrome"},
+	{"Cone", -9.0, 1.35, 9.2, 2.7, "machined"},
+	{"Cylinder", 11.4, 1.25, 5.0, 2.5, "machined"},
+	{"Torus", 1.6, 0.60, 10.2, 2.6, "chrome"},
+	{"Pyramid", 13.8, 1.15, 8.4, 2.3, "stone"},
+	{"Pyramid", -13.0, 1.10, 10.6, 2.2, "machined"},
 }
+
 local MATS = {chrome = chrome, machined = machined, stone = stone}
 prop_nodes = {}
 for _, o in ipairs(PROPS) do
@@ -594,7 +609,13 @@ local function preset_lights(orb, sky, orb_i, sky_i)
 		-- faces of the neighbouring slabs, which can see into a
 		-- neighbour's pocket -- the one leak the normal does not cover,
 		-- and a range is cheaper than a shadow map
-		l[i] = {orb, orb_i, 11 * U}
+		-- **Tight, and tighter now the pockets are** (user's fourth
+		-- condition): an orb's light has to die before it reaches the
+		-- sideways faces of neighbouring slabs, which can see into a
+		-- neighbour's pocket -- the one leak the wall's own normal does
+		-- not cover, and a range is cheaper than a cube shadow map. At
+		-- 11 voxels it lit warm blotches the width of the wall.
+		l[i] = {orb, orb_i, 4 * U}
 	end
 	l[7] = {sky, sky_i, 60 * U}
 	return l
@@ -1038,7 +1059,7 @@ local function readout(text, at, scale, colour)
 end
 
 -- Standing at spawn, low and to the left, turned a little out of the wall
-readout("b" .. buildat.version(), {x = 4.4, y = 0.25, z = 6.8}, 0.34,
+readout("b" .. buildat.version(), {x = 9.0, y = 0.25, z = -1.0}, 0.34,
 		magic.Color(0.15, 0.85, 1.0, 1))
 
 -- **The orb turns to face whoever approaches** (user), and the name is
@@ -1055,8 +1076,14 @@ readout("b" .. buildat.version(), {x = 4.4, y = 0.25, z = 6.8}, 0.34,
 -- the pointing below reads them rather than the two it was set up with.
 -- Copies, not the node's own vectors -- a position property hands back a
 -- reference that follows the node.
-local HOME_FROM = {x = 0.0, y = 2.75, z = 15.5}
-local HOME_AT = {x = 0, y = 1.45, z = -6.0}
+-- **A standing eye, and the room is judged from nowhere else** (user,
+-- 2026-09-23: the options renders read as too small a voxel against the
+-- eye). The grid was not the fault -- 45 cm as asked -- the viewpoint
+-- was: this stood at 2.75 m and 21 m back, so every voxel read 1.7
+-- times too small. 1.6 m it is, and close enough to reach the pockets,
+-- whose floors are at Y 0 to 3.
+local HOME_FROM = {x = 0.0, y = 1.6, z = 14.0}
+local HOME_AT = {x = 0, y = 1.1, z = -6.0}
 local cam = {
 	from = {x = HOME_FROM.x, y = HOME_FROM.y, z = HOME_FROM.z},
 	at = {x = HOME_AT.x, y = HOME_AT.y, z = HOME_AT.z},
@@ -1199,9 +1226,9 @@ end
 -- a face can be to the furthest it can stand.
 local function dissolve_voxels(b, open)
 	local bx, by = bay_x(b), bay_y(b)
-	rewrite_box(bx - POCKET, bx + POCKET, by - POCKET, by + POCKET,
-			BAY_Z - POCKET_DEPTH - room.INSET_IN, BAY_Z + room.SLAB_OUT,
-			open)
+	local p = room.pockets[b]
+	rewrite_box(p.x0 - 2, p.x0 + p.sx + 1, p.y0 - 2, p.y0 + p.sy + 1,
+			p.mouth - p.sz - 2, p.mouth + 2, open)
 end
 
 local function build_flying(b)
@@ -1209,15 +1236,15 @@ local function build_flying(b)
 	if #st.slabs > 0 then
 		return
 	end
-	local x0, y0 = bay_x(b), bay_y(b)
+	local p = room.pockets[b]
 	local i = 0
 	-- The pocket's own mouth and the wall around it, which is what comes
 	-- apart; the face stands wherever the slabs put it, so a column of
 	-- voxels is walked until one is found
-	for x = x0 - POCKET, x0 + POCKET do
-		for y = y0 - POCKET, y0 + POCKET do
+	for x = p.x0 - 2, p.x0 + p.sx + 1 do
+		for y = p.y0 - 2, p.y0 + p.sy + 1 do
 			local v, vz = nil, nil
-			for z = BAY_Z + 4, BAY_Z - 6, -1 do
+			for z = p.mouth + 2, p.mouth - p.sz - 2, -1 do
 				local id = room.voxel_at(x, y, z)
 				if id ~= room.id.air then
 					v, vz = id, z

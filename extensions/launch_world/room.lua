@@ -21,28 +21,30 @@ M.Z_MIN, M.Z_MAX = -30, 44
 M.Y_TOP = 26
 
 -- **The wall, as the reference actually has it.** Not a balcony per orb
--- on a flat plane: slabs protruding at random amounts, orbs in generous
--- pockets cut into the mass, and rectangles inset to various depths until
--- some read black. Its nominal surface is BAY_Z; everything else is
--- measured from there.
+-- on a flat plane: slabs protruding at random amounts, orbs in pockets
+-- cut into the mass, and rectangles inset to various depths until some
+-- read black. Its nominal surface is BAY_Z; everything else is measured
+-- from there.
 M.BAY_Z = -18
-M.SLAB_OUT = 4          -- the furthest a slab comes out
 M.INSET_IN = 4          -- the deepest an inset goes
 M.BAYS = 6
 M.BAY_SPACING = 14
-M.SLAB_H = 3
--- A pocket is about twice the orb across in every direction: the orb is
--- 1.7 units, which is under four voxels, so eight is twice it
-M.POCKET = 8
-M.POCKET_DEPTH = 8
-M.BAY_TIER = {2, 4, 1, 3, 5, 2}   -- 0-based bay index, as it always was
+-- **About thirty slabs** -- the reference frame's parts list says about
+-- thirty, and the plan's open question says thirty stands until it is
+-- said otherwise.
+M.SLABS = 30
+-- A slab's x and y across the wall, in voxels
+M.SLAB_MIN, M.SLAB_MAX = 4, 10
+-- **How far one stands out, which is not its size.** The plan's "x and z
+-- sizes vary from 4 to 10" is the slab's own extent; its z is its depth
+-- into the mass and cannot be seen, the stone behind the nominal surface
+-- being the same stone. Read as a protrusion instead, 4 to 10 builds a
+-- heap of boxes rather than a wall -- which is the same reading that was
+-- tuned away once before (2026-09-23) and came back the moment the
+-- number was taken literally. So the relief is 1 to 4.
+M.SLAB_OUT_MIN, M.SLAB_OUT_MAX = 1, 4
 
 function M.bay_x(b) return (b - 2) * M.BAY_SPACING - 7 end
-function M.bay_tier(b) return M.BAY_TIER[b + 1] end
--- The middle of a pocket, which is where its orb hangs
-function M.bay_y(b)
-	return M.bay_tier(b) * M.SLAB_H + math.floor(M.SLAB_H / 2) + 4
-end
 
 -- Lua 5.1 has no bitwise operators and its numbers are doubles, so the
 -- hash below does its own xor and keeps every product inside the 53 bits
@@ -79,29 +81,67 @@ local function floor_div(a, b)
 	return math.floor(a / b)
 end
 
--- **How far the wall's face stands at (x, y).** Two grids of different
--- periods are taken together so the slabs do not fall on a rhythm, and a
--- third cuts rectangles back into whatever is left -- which is where the
--- wall's interest comes from, rather than from putting different things
--- on it.
-local face_cache = {}
-function M.face_z(x, y)
-	local key = (x + 128) * 4096 + (y + 128)
-	local c = face_cache[key]
-	if c then return c end
-	local out = 0
-	-- Slabs: cells of 9 and 13 voxels, most of them flush, a quarter
-	-- standing out by one to three. Two periods so the standing ones do
-	-- not fall on a rhythm; tuned down from "every cell, by up to four"
-	-- which read as rubble rather than as a wall (2026-09-23).
-	local a = hash2(floor_div(x, 9), floor_div(y, 9), 1)
-	local b = hash2(floor_div(x + 4, 13), floor_div(y + 6, 13), 2)
-	if a % 8 < 2 then
-		out = 1 + math.floor(a / 16) % 3
+-- **The slabs, as a list rather than as a grid.** A grid of cells gave
+-- every slab the cell's own size, and the plan wants x and y varying
+-- from 4 to 10 voxels with no rhythm at all; thirty rectangles placed by
+-- the hash do that and are what the reference's parts list counts.
+--
+-- A slab's depth into the wall is not in the list because it cannot be
+-- seen: the mass behind the nominal surface is the same stone, so what a
+-- slab is, to the eye, is the rectangle it covers and how far it stands
+-- out of it.
+M.slabs = {}
+for i = 1, M.SLABS do
+	local h1 = hash2(i, 1, 11)
+	local h2 = hash2(i, 2, 22)
+	local span = M.SLAB_MAX - M.SLAB_MIN + 1
+	local sx = M.SLAB_MIN + math.floor(h1 / 8) % span
+	local sy = M.SLAB_MIN + math.floor(h1 / 4096) % span
+	local x0 = M.X_MIN + h2 % (M.X_MAX - M.X_MIN - sx + 1)
+	local y0 = math.floor(h2 / 2048) % (M.Y_TOP - sy + 1)
+	M.slabs[i] = {x0 = x0, x1 = x0 + sx - 1, y0 = y0, y1 = y0 + sy - 1,
+		out = M.SLAB_OUT_MIN + math.floor(h1 / 1048576) %
+				(M.SLAB_OUT_MAX - M.SLAB_OUT_MIN + 1)}
+end
+M.SLAB_OUT = M.SLAB_OUT_MAX     -- the furthest any slab comes out
+
+-- **The pockets, in the numbers the user gave 2026-09-23.** A pocket's
+-- floor is at Y 0 to 3 and no higher, because the player reaches into
+-- these; it is usually 3x3x3 with a 2 or a 4 turning up in any dimension.
+M.pockets = {}
+for b = 0, M.BAYS - 1 do
+	local h = hash2(b, 7, 33)
+	-- 3 usually, 2 or 4 now and then: five draws, one of each end
+	local function dim(shift)
+		local d = math.floor(h / shift) % 5
+		if d == 0 then return 2 end
+		if d == 4 then return 4 end
+		return 3
 	end
-	if b % 8 < 2 then
-		local bo = 1 + math.floor(b / 16) % 2
-		if bo > out then out = bo end
+	local sx, sy, sz = dim(1), dim(8), dim(64)
+	local y0 = math.floor(h / 512) % 4
+	M.pockets[b + 1] = {x0 = M.bay_x(b) - math.floor(sx / 2), y0 = y0,
+		sx = sx, sy = sy, sz = sz}
+end
+
+-- The middle of a pocket, which is where its orb hangs
+function M.bay_y(b)
+	local p = M.pockets[b + 1]
+	return p.y0 + math.floor(p.sy / 2)
+end
+
+-- **How far the wall's face stands at (x, y).** The slabs above, and
+-- rectangles cut back into whatever is left -- which is where the wall's
+-- interest comes from, rather than from putting different things on it.
+local face_cache = {}
+local function slab_face(x, y)
+	local out = 0
+	for i = 1, #M.slabs do
+		local s = M.slabs[i]
+		if x >= s.x0 and x <= s.x1 and y >= s.y0 and y <= s.y1 and
+				s.out > out then
+			out = s.out
+		end
 	end
 	-- Insets: rectangles cut back, rare and deep, some of them deep
 	-- enough to read black once the overhead light is the only thing
@@ -110,23 +150,51 @@ function M.face_z(x, y)
 	if c3 % 16 < 2 then
 		out = out - (1 + math.floor(c3 / 16) % M.INSET_IN)
 	end
-	local z = M.BAY_Z + out
+	return M.BAY_Z + out
+end
+
+function M.face_z(x, y)
+	local key = (x + 128) * 4096 + (y + 128)
+	local c = face_cache[key]
+	if c then return c end
+	local z = slab_face(x, y)
+	-- **A pocket gets a surround.** Where the wall beside a mouth stands
+	-- behind it, there is nothing for the mouth's column to be cut from
+	-- and the pocket opens sideways into the room instead of being a
+	-- hole. So the frame one voxel around a pocket comes forward to the
+	-- mouth, which is also what makes the ornamented columns exist.
+	for b = 1, M.BAYS do
+		local p = M.pockets[b]
+		if p.mouth and x >= p.x0 - 1 and x <= p.x0 + p.sx and
+				y >= p.y0 - 1 and y <= p.y0 + p.sy and z < p.mouth then
+			z = p.mouth
+		end
+	end
 	face_cache[key] = z
 	return z
+end
+
+-- **A pocket has one mouth, not a mouth per column.** Taking the face at
+-- each (x, y) sheared the pocket wherever a slab covered half of it, and
+-- a sheared hole does not read as a pocket. So the mouth is the face at
+-- the pocket's own middle, settled once.
+for b = 1, M.BAYS do
+	local p = M.pockets[b]
+	p.mouth = slab_face(p.x0 + math.floor(p.sx / 2),
+			p.y0 + math.floor(p.sy / 2))
 end
 
 -- Whether (x, y, z) is inside a pocket, and whether it is one of the side
 -- columns that carry the ornament
 function M.in_pocket(x, y, z)
-	for b = 0, M.BAYS - 1 do
-		local cx, cy = M.bay_x(b), M.bay_y(b)
-		if x >= cx - M.POCKET / 2 and x <= cx + M.POCKET / 2 and
-				y >= cy - M.POCKET / 2 and y <= cy + M.POCKET / 2 then
-			local mouth = M.face_z(x, y)
-			if z <= mouth and z >= mouth - M.POCKET_DEPTH then
-				-- The two voxels down each side of the mouth are the columns
-				return true, (x <= cx - M.POCKET / 2 + 1 or
-						x >= cx + M.POCKET / 2 - 1)
+	for b = 1, M.BAYS do
+		local p = M.pockets[b]
+		if x >= p.x0 and x < p.x0 + p.sx and
+				y >= p.y0 and y < p.y0 + p.sy then
+			local mouth = p.mouth
+			if z <= mouth and z > mouth - p.sz then
+				-- The voxel down each side of the mouth is its column
+				return true, (x == p.x0 or x == p.x0 + p.sx - 1)
 			end
 		end
 	end
@@ -216,15 +284,32 @@ function M.self_check()
 			if o > out_max then out_max = o end
 		end
 	end
-	assert(out_max > 0 and out_max <= M.SLAB_OUT, "slabs stand out: " .. out_max)
-	assert(out_min < 0 and out_min >= -M.INSET_IN, "insets cut in: " .. out_min)
-	for b = 0, M.BAYS - 1 do
-		local x, y = M.bay_x(b), M.bay_y(b)
-		local z = M.face_z(x, y) - 2
+	assert(out_max >= M.SLAB_OUT_MIN and out_max <= M.SLAB_OUT_MAX,
+			"slabs stand out: " .. out_max)
+	assert(out_min < 0 and out_min >= -M.INSET_IN - M.SLAB_OUT_MAX,
+			"insets cut in: " .. out_min)
+	assert(#M.slabs == M.SLABS, "thirty slabs")
+	for i = 1, #M.slabs do
+		local s = M.slabs[i]
+		local sx, sy = s.x1 - s.x0 + 1, s.y1 - s.y0 + 1
+		assert(sx >= M.SLAB_MIN and sx <= M.SLAB_MAX and
+				sy >= M.SLAB_MIN and sy <= M.SLAB_MAX,
+				"slab " .. i .. " is " .. sx .. "x" .. sy)
+		assert(s.x0 >= M.X_MIN and s.x1 <= M.X_MAX and s.y0 >= 0 and
+				s.y1 <= M.Y_TOP, "slab " .. i .. " is on the wall")
+	end
+	for b = 1, M.BAYS do
+		local p = M.pockets[b]
+		assert(p.y0 >= 0 and p.y0 <= 3, "a pocket's floor is at Y 0 to 3")
+		for _, d in ipairs({p.sx, p.sy, p.sz}) do
+			assert(d >= 2 and d <= 4, "a pocket is 2 to 4 voxels")
+		end
+		local x, y = M.bay_x(b - 1), M.bay_y(b - 1)
+		local z = p.mouth - 1
 		assert(M.voxel_at(x, y, z) == M.id.air, "bay " .. b .. " has a pocket")
-		local edge = x - M.POCKET / 2 - 1
-		assert(M.voxel_at(edge, y, z) == M.id.column,
-				"bay " .. b .. " has an ornamented column beside its mouth")
+		assert(M.voxel_at(p.x0 - 1, y, z) == M.id.column and
+				M.voxel_at(p.x0 + p.sx, y, z) == M.id.column,
+				"bay " .. b .. " has an ornamented column down each side")
 	end
 	assert(M.voxel_at(0, -1, 0) ~= M.voxel_at(2, -1, 0), "the floor checkers")
 	assert(M.voxel_at(0, -1, 0) == M.voxel_at(1, -1, 1) or

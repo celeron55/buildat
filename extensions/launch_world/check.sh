@@ -325,14 +325,21 @@ print("PASS: the generated ornament is on something" if ornament_ok
 		else "FAIL: nothing in the room wears the generated maps")
 # **The top of the picture** ([PBR_HDR]): a renderer that clips every
 # radiance at 1.0 before the tonemap has nothing above its shoulder to
-# roll off, and the room then reads a 99th percentile of about 175 where
-# the reference frames read 252 to 255. In HDR it reaches them.
+# roll off, and a source then cannot be brighter than a fully-lit wall.
+#
+# **The 99.9th and not the 99th.** The 99th was the measure while the
+# orbs were 8-voxel pockets filling much of the frame; at 3 voxels and
+# at a standing eye they are half a per cent of it, and the 99th then
+# reads the wall (128) however bright the sources are -- it measured the
+# composition, not the range (2026-09-23).
 shot = sorted(Image.open("%s/1-cold_in_warm_out.png" % out)
 		.convert("L").crop((0, 0, 1280, 720 - HUD_STRIP)).getdata())
-p99 = shot[int(len(shot) * 0.99)]
-print("the room's 99th percentile is %d, against the reference's 252" % p99)
-hdr_ok = p99 >= 240
-print("PASS: the room has a top end" if hdr_ok
+top = shot[int(len(shot) * 0.999)]
+lit = sum(1 for v in shot if v > 250) / float(len(shot))
+print("the room's 99.9th percentile is %d and %.2f%% of it is a source"
+		% (top, lit * 100))
+hdr_ok = top >= 240 and lit > 0.002
+print("PASS: a source is brighter than a lit wall" if hdr_ok
 		else "FAIL: the picture clips before its shoulder -- HDR is off")
 sys.exit(0 if (ok and probe_ok and dissolve_ok and typing_ok and
 		terminal_ok and ornament_ok and drift_ok and attract_ok and
