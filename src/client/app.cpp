@@ -1491,12 +1491,32 @@ struct CApp: public App, public magic::Application
 			for(char c : action)
 				if(!(isalnum((unsigned char)c) || c == '_' || c == '-' || c == '/'))
 					action = "";
+			// **A launch UI that asks to be sandboxed is run in the
+			// sandbox** ([LAUNCH_SANDBOX]): its own init.lua goes
+			// through run_extension_file, which is the same door its
+			// other files use, and what it gets is `buildat.safe` under
+			// the name `buildat` -- the API every game has and nothing
+			// else. A launch UI that does not ask for it is loaded the
+			// way it always was, so the two kinds can live side by side
+			// while the rest are moved over.
+			const ss_ arg = action.empty() ? ss_("") : "'"+action+"'";
 			ss_ script = ss_() +
-					"local m = require('buildat/extension/"+extname+"')\n"
-					"if type(m) ~= 'table' then\n"
-					"    error('Failed to load extension "+extname+"')\n"
-					"end\n"
-					"m.boot("+(action.empty() ? ss_("") : "'"+action+"'")+")\n";
+					"if buildat.launch_ui_sandboxed('"+extname+"') then\n"
+					"    local ok, err = __buildat_run_code_in_sandbox(\n"
+					"        \"local m = buildat.run_extension_file('init.lua')\\n\"\n"
+					"        ..\"if type(m) ~= 'table' or type(m.boot) ~= 'function' then\\n\"\n"
+					"        ..\"    error('"+extname+" has no boot()')\\n\"\n"
+					"        ..\"end\\n\"\n"
+					"        ..\"m.boot("+arg+")\\n\",\n"
+					"        '"+extname+"/init.lua')\n"
+					"    if not ok then error(err) end\n"
+					"else\n"
+					"    local m = require('buildat/extension/"+extname+"')\n"
+					"    if type(m) ~= 'table' then\n"
+					"        error('Failed to load extension "+extname+"')\n"
+					"    end\n"
+					"    m.boot("+arg+")\n"
+					"end\n";
 			// **A launch UI that raises is a launch UI that did not
 			// load**: the runner turns a Lua error into an exception,
 			// so a raising one would otherwise take the client with it

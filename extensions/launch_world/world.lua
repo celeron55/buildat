@@ -12,6 +12,11 @@
 -- block and a re-mesh rather than voxel removal on a server.
 --
 -- Run it with `Build/bin/buildat -m launch_world`.
+-- **The safe API under one name, whichever side this runs on**
+-- ([LAUNCH_SANDBOX]): inside the sandbox `buildat` *is* the safe table,
+-- and outside it the safe half is `buildat.safe`. The room calls
+-- nothing else, which is what makes the switch a switch.
+local api = buildat.safe or buildat
 local log = buildat.Logger("launch_world")
 
 -- **The room's debug knobs** (`BUILDAT_LAUNCH_*`), through one reader.
@@ -26,11 +31,15 @@ local function env(name)
 	end
 	return buildat.get_env(name) or ""
 end
-local magic = require("buildat/extension/urho3d").safe
+-- require answers the safe interface inside the sandbox and the whole
+-- extension outside it; the safe table raises on a name it does not
+-- know, so it is asked with something it has
+local urho3d = require("buildat/extension/urho3d")
+local magic = urho3d.Vector3 and urho3d or urho3d.safe
 -- **Its own files through the safe verb** ([LAUNCH_SANDBOX]): a
 -- sandboxed extension cannot dofile a path, and a launch UI of any size
 -- is more than one chunk.
-local room = buildat.safe.run_extension_file("room.lua")
+local room = api.run_extension_file("room.lua")
 
 -- **What the room holds is what the tree offers.** Every launcher/init.lua
 -- in games/, builtin/ and extensions/, run in the sandbox and checked, is
@@ -43,10 +52,10 @@ local room = buildat.safe.run_extension_file("room.lua")
 -- **Through the safe verb, not the trusted file** ([LAUNCH_SANDBOX]:
 -- the room is written against the sandboxed API while it still runs
 -- trusted, so the switch is a switch). `launch_actions()` answers plain
--- data and a key; `buildat.safe.launch(key)` is what runs one, on the
+-- data and a key; `api.launch(key)` is what runs one, on the
 -- trusted side, where it is looked up rather than called across.
 local GAMES, FLOOR_ACTIONS = {}, {}
-for _, a in ipairs(buildat.safe.launch_actions()) do
+for _, a in ipairs(api.launch_actions()) do
 	local o = {name = a.label, icon = a.icon, key = a.key, kind = a.kind,
 		description = a.description, from = a.from}
 	if a.kind == "game" then
@@ -57,7 +66,7 @@ for _, a in ipairs(buildat.safe.launch_actions()) do
 end
 -- **The saves are on the floor, smaller** (user): "save", not "world",
 -- which is a Luanti-ism -- saves being universal in buildat. They come
--- from buildat.safe.list_saves(), which enumerates them off the disk rather
+-- from api.list_saves(), which enumerates them off the disk rather
 -- than asking a server, there being none to ask.
 --
 -- simplified: the newest twelve. This tree has sixty-odd, most of them a
@@ -66,7 +75,7 @@ end
 -- cap sensible; the rest wait on the room learning to hold more than it
 -- can show, which is the same open question the wall has.
 local SAVES = {}
-for _, sv in ipairs(buildat.safe.list_saves()) do
+for _, sv in ipairs(api.list_saves()) do
 	if #SAVES >= 12 then break end
 	SAVES[#SAVES + 1] = sv
 end
@@ -91,7 +100,8 @@ GAMES[#GAMES + 1] = {name = "install a game", warm = true, empty = true}
 -- fetch replaces the padding and nothing else.
 local SERVERS = {}
 do
-	local net = require("buildat/extension/network").safe
+	local net = require("buildat/extension/network")
+	net = net.known_addresses and net or net.safe
 	for _, a in ipairs(net.known_addresses()) do
 		-- simplified: ten, the most recently used first, which is what
 		-- the floor has room for without becoming a heap
@@ -142,7 +152,7 @@ for _, a in ipairs(FLOOR_ACTIONS) do
 end
 
 -- The ornament generator and the maps it feeds; see ornament.lua
-local ornament = buildat.safe.run_extension_file("ornament.lua")
+local ornament = api.run_extension_file("ornament.lua")
 -- **The voxel tiles are generated here and registered by name**, which
 -- is the only way a generated picture reaches a voxel atlas: a tile is
 -- loaded out of the resource cache by the name the voxel definition
@@ -204,7 +214,7 @@ do
 end
 
 -- The room's sound, synthesised; see synth.lua
-local synth = buildat.safe.run_extension_file("synth.lua")
+local synth = api.run_extension_file("synth.lua")
 
 -- Held at module scope: a Lua-owned Image, Texture2D or Material is freed
 -- when the last Lua reference goes, whatever is drawing with it
@@ -305,11 +315,11 @@ end
 -- **The voxel registry, in the order room.lua's ids are read back from.**
 -- The atlas takes the normal and roughness maps off each tile's own
 -- luminance, so what is set here is the finish and not a picture.
-local voxel_reg = buildat.safe.createVoxelRegistry()
-local atlas_reg = buildat.safe.createAtlasRegistry()
+local voxel_reg = api.createVoxelRegistry()
+local atlas_reg = api.createAtlasRegistry()
 local function add_voxel(name, texture, solid, roughness, spec_strength,
 		bumpiness, uv_scale)
-	local vdef = buildat.safe.VoxelDefinition()
+	local vdef = api.VoxelDefinition()
 	vdef.name.block_name = name
 	vdef.name.segment_x = 0
 	vdef.name.segment_y = 0
@@ -319,7 +329,7 @@ local function add_voxel(name, texture, solid, roughness, spec_strength,
 	vdef.handler_module = ""
 	local textures = {}
 	for i = 1, 6 do
-		local seg = buildat.safe.AtlasSegmentDefinition()
+		local seg = api.AtlasSegmentDefinition()
 		seg.resource_name = texture or ""
 		seg.total_segments = magic.IntVector2(texture and 1 or 0,
 				texture and 1 or 0)
@@ -334,8 +344,8 @@ local function add_voxel(name, texture, solid, roughness, spec_strength,
 	end
 	vdef.textures = textures
 	vdef.edge_material_id = solid and
-			buildat.safe.VoxelDefinition.EDGEMATERIALID_GROUND or
-			buildat.safe.VoxelDefinition.EDGEMATERIALID_EMPTY
+			api.VoxelDefinition.EDGEMATERIALID_GROUND or
+			api.VoxelDefinition.EDGEMATERIALID_EMPTY
 	vdef.physically_solid = solid
 	vdef.fully_empty = not solid
 	-- How many voxels this voxel's texture spans before it repeats
@@ -406,7 +416,7 @@ do
 	for i = 1, 6 * SKYVIS_CELLS * SKYVIS_CELLS do
 		ones[i] = 1.0
 	end
-	buildat.safe.write_floats(sky_vis_buffer, ones)
+	api.write_floats(sky_vis_buffer, ones)
 end
 local SKY_VIS = magic.Variant(sky_vis_buffer)
 
@@ -496,7 +506,7 @@ local function mesh_chunk(c)
 				room.OY + room.H / 2 - 0.5, room.OZ + room.D / 2 - 0.5)
 		chunk_nodes[c] = node
 	end
-	buildat.safe.set_8bit_voxel_geometry(node, w, room.H, room.D,
+	api.set_8bit_voxel_geometry(node, w, room.H, room.D,
 			table.concat(data), voxel_reg, atlas_reg,
 			room.OX + x0, room.OY, room.OZ)
 	apply_technique(node)
@@ -748,7 +758,7 @@ local ORB_MIN, ORB_MAX = 1.2, 1.8
 local game_across = {}
 do
 	local sizes, lo, hi = {}, nil, nil
-	for _, g in ipairs(buildat.safe.list_games() or {}) do
+	for _, g in ipairs(api.list_games() or {}) do
 		local v = math.log((tonumber(g.size) or 0) + 1)
 		sizes[g.name] = v
 		lo = (lo == nil or v < lo) and v or lo
@@ -1492,7 +1502,8 @@ label:SetPosition(8, -8)
 -- A rate invented out of a timestamp would read as a measurement and
 -- would not be one. The blink below is kept for when something measures
 -- a round trip.
-local network = require("buildat/extension/network").safe
+local network = require("buildat/extension/network")
+network = network.known_addresses and network or network.safe
 local PATCH = {}
 for _, a in ipairs(network.known_addresses()) do
 	if #PATCH < 8 and a.uri:sub(1, 4) ~= "http" then
@@ -1637,7 +1648,7 @@ local function readout(text, at, scale, colour)
 end
 
 -- Standing at spawn, low and to the left, turned a little out of the wall
-readout("b" .. buildat.safe.version(), {x = 9.0, y = 0.25, z = -1.0}, 0.34,
+readout("b" .. api.version(), {x = 9.0, y = 0.25, z = -1.0}, 0.34,
 		magic.Color(0.15, 0.85, 1.0, 1))
 
 -- **The orb turns to face whoever approaches** (user), and the name is
@@ -1765,7 +1776,7 @@ end
 -- mouse during your tests"). Asked each time: at load a command
 -- sequence is not up yet.
 local function mouse_for(fps_now, reason)
-	if buildat.safe.is_scripted() then return end
+	if api.is_scripted() then return end
 	magic.input:SetMouseVisible(not fps_now, reason)
 	magic.input:SetMouseMode(fps_now and magic.MM_RELATIVE or
 			magic.MM_ABSOLUTE)
@@ -1866,7 +1877,7 @@ moved = {}
 -- The player's own voxels and moved spheres, read at boot. One row a
 -- line, which is a file a person can read and delete.
 do
-	local text = buildat.safe.storage_read(SAVE_NAME)
+	local text = api.storage_read(SAVE_NAME)
 	if text then
 		local n = 0
 		for line in text:gmatch("[^\n]+") do
@@ -1920,7 +1931,7 @@ local function write_save()
 		keys[#keys + 1] = string.format("@%s %.3f %.3f %.3f", name,
 				m.x, m.y, m.z)
 	end
-	local ok, why = buildat.safe.storage_write(SAVE_NAME,
+	local ok, why = api.storage_write(SAVE_NAME,
 			table.concat(keys, "\n"))
 	if not ok then
 		log:warning("save: " .. tostring(why))
@@ -2007,7 +2018,7 @@ local hold_t = 0
 -- launch again.
 local left_spent = false
 local function mesh_lift(x, y, z)
-	buildat.safe.set_8bit_voxel_geometry(lift, 1, 1, 1,
+	api.set_8bit_voxel_geometry(lift, 1, 1, 1,
 			string.char(room.id.placed), voxel_reg, atlas_reg, x, y, z)
 	apply_technique(lift)
 	lift:GetComponent("CustomGeometry").castShadows = false
@@ -2631,7 +2642,7 @@ attracting = false
 connecting = nil
 function connect_to(name, address)
 	if connecting then return end
-	buildat.safe.connect_start(address)
+	api.connect_start(address)
 	connecting = {name = name, address = address, t = 0}
 	notice("connecting to " .. name .. " ...")
 	log:info("connect: " .. name .. " at " .. address)
@@ -2640,7 +2651,7 @@ end
 local function connect_poll(dt)
 	if not connecting then return end
 	connecting.t = connecting.t + dt
-	local status, err = buildat.safe.connect_poll()
+	local status, err = api.connect_poll()
 	if status == "ok" then
 		log:info("connect: " .. connecting.name .. " ok after " ..
 				string.format("%.1f s", connecting.t))
@@ -3019,7 +3030,7 @@ end
 local panel_rows = {}
 -- **The terminal is where a setting is changed, not where it is shown**
 -- ([LAUNCH_WORLD] step 9). The rows are the client's own preferences --
--- `buildat.safe.list_preferences()`, whose values live in app::Options and
+-- `api.list_preferences()`, whose values live in app::Options and
 -- whose C++ side parses, range checks and persists them, so this is a
 -- page of rows over two calls and knows nothing about the file -- plus
 -- the room's own two toggles, which are the room's and not the client's.
@@ -3034,7 +3045,7 @@ local STEPS = {
 	sound_volume = {0.0, 1.0, 0.05, "%.2f"},
 }
 local settings = {}
-for _, name in ipairs(buildat.safe.list_preferences()) do
+for _, name in ipairs(api.list_preferences()) do
 	settings[#settings + 1] = {pref = name}
 end
 -- The room's own, which no preference file knows about
@@ -3045,7 +3056,7 @@ local sel = 1
 
 local function setting_value(sg)
 	if sg.pref then
-		local v = buildat.safe.get_preference(sg.pref)
+		local v = api.get_preference(sg.pref)
 		if type(v) == "boolean" then return v and "on" or "off" end
 		local st = STEPS[sg.pref]
 		return st and string.format(st[4], v) or tostring(v)
@@ -3066,19 +3077,19 @@ end
 -- steps within the range the C++ side would clamp it to anyway
 local function setting_change(sg, dir)
 	if sg.pref then
-		local v = buildat.safe.get_preference(sg.pref)
+		local v = api.get_preference(sg.pref)
 		if type(v) == "boolean" then
-			local ok, err = buildat.safe.set_preference(sg.pref, not v)
+			local ok, err = api.set_preference(sg.pref, not v)
 			if not ok then log:warning("setting: " .. tostring(err)) end
 		else
 			local st = STEPS[sg.pref]
 			if not st then return end
 			local nv = math.max(st[1], math.min(st[2], v + dir * st[3]))
-			local ok, err = buildat.safe.set_preference(sg.pref, tostring(nv))
+			local ok, err = api.set_preference(sg.pref, tostring(nv))
 			if not ok then log:warning("setting: " .. tostring(err)) end
 		end
 		log:info("setting: " .. sg.pref .. " = " ..
-				tostring(buildat.safe.get_preference(sg.pref)))
+				tostring(api.get_preference(sg.pref)))
 		return
 	end
 	if sg.room == "palette" then
@@ -3133,7 +3144,7 @@ function terminal_key(key)
 			local a = install_action
 			if a then
 				log:info("contentdb: running " .. a.name)
-				buildat.safe.launch(a.key)
+				api.launch(a.key)
 			else
 				log:warning("contentdb: the tree offers no install action")
 			end
@@ -3161,13 +3172,13 @@ local PAUSE_ITEMS = {
 		-- is remembered as a preference and the other UI is booted now,
 		-- so switching is one action from either side ([TWO_AUDIENCES])
 		-- rather than a flag and a restart.
-		local ok, why = buildat.safe.set_launch_ui("__menu")
+		local ok, why = api.set_launch_ui("__menu")
 		if not ok then
 			log:warning("pause: " .. tostring(why))
 			notice(tostring(why))
 		end
 	end},
-	{"Leave buildat", function() buildat.safe.disconnect() end},
+	{"Leave buildat", function() api.disconnect() end},
 }
 local pause_panel = room_ui_child("BorderImage")
 pause_panel.visible = false
@@ -3292,7 +3303,7 @@ function launch(b)
 	-- and nothing waits for either -- a launch that takes the client
 	-- somewhere else takes it there mid-flight.
 	if ORBS[b] and ORBS[b].key then
-		local ok, why = buildat.safe.launch(ORBS[b].key)
+		local ok, why = api.launch(ORBS[b].key)
 		if not ok then
 			log:warning("launch: " .. tostring(why))
 			notice(tostring(why))
@@ -3301,7 +3312,7 @@ function launch(b)
 		-- every launch action is a game -- a launcher file can put
 		-- anything on the grid -- so the room asks whether a server came
 		-- up rather than assuming one did.
-		if buildat.safe.local_server_running() then
+		if api.local_server_running() then
 			entered_game()
 		end
 	elseif ORBS[b] and ORBS[b].server then
@@ -3576,7 +3587,7 @@ magic.SubscribeToEvent("KeyDown", "handle_keydown")
 -- **Into a game and back out of it** ([MENU_CONTEXT], the launcher
 -- plan's step 6). The room is never torn down: it keeps standing behind
 -- the game, its handlers stand down, its own UI goes away, and the way
--- back is the client's `buildat.safe.leave_to_menu()` plus a viewport.
+-- back is the client's `api.leave_to_menu()` plus a viewport.
 --
 -- **A fresh Viewport, not the one the room booted with**: handing the
 -- old wrapper back to `set_preferred_viewports()` after the sandbox
@@ -3596,7 +3607,7 @@ end
 
 function leave_game()
 	if not in_game then return false end
-	buildat.safe.leave_to_menu()
+	api.leave_to_menu()
 	in_game = false
 	local vp = magic.Viewport:new(scene,
 			camera_node:GetComponent("Camera"))

@@ -7,6 +7,9 @@
 -- calls to boot a menu extension. It is an extension rather than a game
 -- because the room *is* the launcher: starting a game is `ctx.launch` on
 -- the trusted side, which a game's own sandbox cannot reach.
+-- The safe API under one name, whichever side this runs on: inside the
+-- sandbox `buildat` is the safe table itself ([LAUNCH_SANDBOX])
+local api = buildat.safe or buildat
 local log = buildat.Logger("launch_world")
 local M = {}
 
@@ -22,8 +25,7 @@ function M.boot(action)
 	-- hands back the three the client and a game's own menu call --
 	-- `buildat.leave()` goes through `leave_game`, and [MENU_ERRORS]
 	-- reads `in_game` to choose a dialog or a notice.
-	local room = dofile(buildat.extension_path("launch_world") ..
-			"/world.lua")
+	local room = api.run_extension_file("world.lua")
 	if type(room) == "table" then
 		M.entered_game = room.entered_game
 		M.leave_game = room.leave_game
@@ -36,7 +38,8 @@ end
 -- screen and not just gone ([START_PROGRESS]).
 function M.show_dead_server(title, on_close)
 	local ui_utils = require("buildat/extension/ui_utils")
-	local path, tail = buildat.local_server_log_tail(20)
+	ui_utils = ui_utils.safe or ui_utils
+	local path, tail = api.local_server_log_tail(20)
 	ui_utils.show_message_dialog(title .. "\n\n" .. tail ..
 			"\nThe full log is at " .. path, on_close)
 end

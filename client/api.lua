@@ -314,6 +314,30 @@ end
 -- one that did load tells the user, so a setting cannot quietly do
 -- nothing
 buildat.safe.launch_ui_fell_back = __buildat_launch_ui_fell_back
+-- The tail of a local server's log and where the whole of it is, for a
+-- launcher's dialog about one that died ([START_PROGRESS]). Read-only,
+-- and the path is the client's own.
+buildat.safe.local_server_log_tail = __buildat_local_server_log_tail
+-- Whether a launch UI asks to be run in the sandbox: a "sandboxed" line
+-- in its launch_ui.txt ([LAUNCH_SANDBOX]). Trusted, and read by the
+-- client's boot rather than by anything in the sandbox.
+function buildat.launch_ui_sandboxed(name)
+	if type(name) ~= "string" or not name:match("^[%w_]+$") then
+		return false
+	end
+	local f = io.open(__buildat_extension_path(name) .. "/launch_ui.txt", "rb")
+	if not f then
+		return false
+	end
+	local text = f:read("*a")
+	f:close()
+	for line in text:gmatch("[^\r\n]+") do
+		if line:match("^%s*sandboxed%s*$") then
+			return true
+		end
+	end
+	return false
+end
 buildat.safe.list_launch_uis = function()
 	local out = {}
 	for _, e in ipairs(__buildat_list_launchers()) do

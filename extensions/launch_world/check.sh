@@ -43,7 +43,16 @@ slot=$(bin/buildat -D ../user -w 640x360 -l 3 -o launch_ui=launch_world 	-c @"$o
 back=$(bin/buildat -D ../user -w 640x360 -l 3 -o launch_ui=nosuchthing 	-c @"$out/cmds_slot.txt" 2>&1 |
 	sed -e 's/\x1b\[[0-9;]*m//g' |
 	grep -ac "the launch UI is __menu")
-echo "the slot: picked by name $slot, fell back to the menu $back"
+# **And the room runs in the sandbox** ([LAUNCH_SANDBOX]), which is what
+# its launch_ui.txt asks for: the marker is what the client reads, so a
+# room that quietly went back to running trusted would still pass every
+# assertion below. This is the one that would not.
+sandboxed=$(grep -c "^sandboxed$" "$here/extensions/launch_world/launch_ui.txt")
+if [ "$sandboxed" -lt 1 ]; then
+	echo "FAIL: launch_world no longer asks to be run in the sandbox"
+	exit 1
+fi
+echo "the slot: picked by name $slot, fell back to the menu $back, sandboxed"
 if [ "$slot" -lt 1 ] || [ "$back" -lt 1 ]; then
 	echo "FAIL: the launch UI setting does not pick the room," \
 			"or a missing one does not fall back to the menu"
