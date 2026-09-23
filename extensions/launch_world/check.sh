@@ -34,6 +34,16 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	# nothing.
 	echo "screenshot $out/fps-stood.png"
 	echo "delay 400"
+	# **Carrying**: the orb the crosshair is already on comes into the
+	# hand with E and goes back down with right click. A scripted run
+	# cannot aim with the mouse -- SetMouseVisible(false) stands down in
+	# one, so GetMouseMove reads zero -- which is why the arrows turn.
+	echo "keypress E"
+	echo "delay 500"
+	echo "screenshot $out/carried.png"
+	echo "delay 300"
+	echo "mouse_click right"
+	echo "delay 500"
 	echo "keydown W"
 	echo "delay 1400"
 	echo "keyup W"
@@ -198,6 +208,14 @@ grep -a "launch_w.*: bays " "$out/cli.log" | head -1 | sed 's/.*: //'
 # **The player's own voxels**: one placed, one dug, and the save written
 # both times. The save is a diff against a generated room, so a room that
 # forgot it would look exactly the same.
+picked=$(grep -ac "launch_w.*: carry: picked up" "$out/cli.log")
+putdown=$(grep -ac "launch_w.*: carry: put down" "$out/cli.log")
+echo "the player carried $picked spheres and put down $putdown"
+if [ "$picked" -lt 1 ] || [ "$putdown" -lt 1 ]; then
+	echo "FAIL: E picks nothing up, or right click puts nothing down"
+	exit 1
+fi
+
 placed=$(grep -ac "launch_w.*: place: " "$out/cli.log")
 dug=$(grep -ac "launch_w.*: dig: " "$out/cli.log")
 wrote=$(grep -ac "launch_w.*: save: .* written" "$out/cli.log")

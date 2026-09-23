@@ -567,7 +567,7 @@ for i, a in ipairs(FLOOR_ACTIONS) do
 	local row = FLOOR_ROWS[math.floor((i - 1) / #FLOOR_COLS) % #FLOOR_ROWS + 1]
 	ORBS[#ORBS + 1] = {name = a.name, icon = a.icon, run = a.run,
 		kind = a.kind, floor = true}
-	orb_places[#orb_places + 1] = {x = col, y = 0.34, z = row}
+	orb_places[#orb_places + 1] = {x = col, y = 1.4 * VOXEL_M / 2, z = row}
 end
 
 -- **A save is a white sphere too, smaller** (user), and it stands in
@@ -579,7 +579,7 @@ for i, sv in ipairs(SAVES) do
 	local row = 13.0 - math.floor((i - 1) / #SAVE_COLS) * 3.2
 	ORBS[#ORBS + 1] = {name = sv.name, game = sv.game, save = true,
 		floor = true, search = sv.name .. " " .. sv.game}
-	orb_places[#orb_places + 1] = {x = col, y = 0.22, z = row}
+	orb_places[#orb_places + 1] = {x = col, y = 0.9 * VOXEL_M / 2, z = row}
 end
 
 -- **The ornament, on primitives in front of the voxels.** The bays are
@@ -597,6 +597,16 @@ end
 -- to stand proud of the wall here is the wall's own relief now.
 frieze_nodes = {}
 
+-- **A size in voxels, through part()'s metres.** part() takes metres and
+-- multiplies by U on the way in, so a sphere asked for at "1.5" came out
+-- 1.5 / 0.45 = 3.3 voxels across -- twice what the plan asks for, and
+-- the floor's spheres were half-buried because their centres were set
+-- for the size they were meant to be (user, 2026-09-23).
+local function across(voxels)
+	local m = voxels * VOXEL_M
+	return magic.Vector3(m, m, m)
+end
+
 -- The orbs. Warm is what you own; the palette's own entry says which
 -- colour each carries, and the light at it is what lights the room.
 local orb_mats = {}
@@ -606,13 +616,12 @@ for i, o in ipairs(orb_places) do
 	if spec and spec.empty then
 		-- Nothing in the niche but the ring that would hold something,
 		-- dim: an empty socket reads as empty, not as broken
-		part("Torus", magic.Vector3(o.x, o.y, o.z),
-				magic.Vector3(1.4, 1.4, 1.4), machined)
+		part("Torus", magic.Vector3(o.x, o.y, o.z), across(1.4), machined)
 	elseif spec and spec.save then
 		-- Smaller, because it is one save of one game rather than a
 		-- thing to launch on its own
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-				magic.Vector3(0.9, 0.9, 0.9), white)
+				across(0.9), white)
 		node:GetComponent("StaticModel").castShadows = true
 		orb_nodes[i] = node
 	elseif spec and spec.floor then
@@ -620,17 +629,16 @@ for i, o in ipairs(orb_places) do
 		-- the room's light rather than making any, and it is told apart
 		-- from a server's chrome by being white rather than a mirror
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-				magic.Vector3(1.4, 1.4, 1.4), white)
+				across(1.4), white)
 		node:GetComponent("StaticModel").castShadows = true
 		orb_nodes[i] = node
 	else
 		orb_mats[i] = glow(magic.Color(1, 1, 1, 1), spec and spec.name,
 				spec and spec.icon)
 		-- simplified: one size. The plan wants 1.2 to 1.8 voxels by the
-		-- game's own size, which list_games() answers -- that arrives
-		-- with the real contents, step 5 of the remaining order.
+		-- game's own size, which list_games() answers.
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
-				magic.Vector3(1.5, 1.5, 1.5), orb_mats[i])
+				across(1.5), orb_mats[i])
 		node:GetComponent("StaticModel").castShadows = false
 		orb_nodes[i] = node
 	end
@@ -772,6 +780,9 @@ magic.renderer.drawShadows = true
 magic.renderer.shadowMapSize = 2048
 
 local lights = {}
+-- Kept so a carried orb's light can follow it: an orb is its own light
+-- made visible, and a handful of them should light the hand
+light_nodes = {}
 for i, place in ipairs(LIGHT_PLACES) do
 	local node = scene:CreateChild("light")
 	node.position = V(place[1], place[2], place[3])
@@ -782,6 +793,7 @@ for i, place in ipairs(LIGHT_PLACES) do
 	light.castShadows = false
 	light.shadowBias = magic.BiasParameters(0.00025, 0.5)
 	lights[i] = light
+	light_nodes[i] = node
 end
 
 local current = 0
@@ -1324,6 +1336,25 @@ function handle_fps_update(event_type, event_data)
 	local mm = magic.input:GetMouseMove()
 	fps.yaw = fps.yaw + mm.x * LOOK_SPEED
 	fps.pitch = math.max(-85, math.min(85, fps.pitch + mm.y * LOOK_SPEED))
+	-- **The arrows turn too**, which is an accessibility basic rather
+	-- than a convenience: a player without a mouse, or one whose mouse
+	-- cannot be captured, can still look. The arrows are menu mode's
+	-- and free here. It is also the only way a scripted run can aim --
+	-- SetMouseVisible(false) stands down in one ([SCRIPTED_CURSOR]), so
+	-- Urho3D accumulates no relative motion and GetMouseMove reads zero.
+	local TURN = 90.0
+	if magic.input:GetKeyDown(magic.KEY_LEFT) then
+		fps.yaw = fps.yaw - TURN * dt
+	end
+	if magic.input:GetKeyDown(magic.KEY_RIGHT) then
+		fps.yaw = fps.yaw + TURN * dt
+	end
+	if magic.input:GetKeyDown(magic.KEY_UP) then
+		fps.pitch = math.max(-85, fps.pitch - TURN * dt)
+	end
+	if magic.input:GetKeyDown(magic.KEY_DOWN) then
+		fps.pitch = math.min(85, fps.pitch + TURN * dt)
+	end
 	local sy, cy = math.sin(math.rad(fps.yaw)), math.cos(math.rad(fps.yaw))
 	local dx, dz = 0, 0
 	local function held(k) return magic.input:GetKeyDown(k) end
@@ -1506,6 +1537,8 @@ end
 
 pointed_voxel = nil
 local hold_t = 0
+-- Where a lifted sphere came from, so an early release settles it back
+local orb_home = {}
 function handle_dig_update(event_type, event_data)
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
 	-- The motes fall whatever the mode is
@@ -1534,6 +1567,42 @@ function handle_dig_update(event_type, event_data)
 	wire.enabled = mine and true or false
 	if mine then
 		wire.position = magic.Vector3(x + 0.5, y + 0.5, z + 0.5)
+	end
+	-- **Left held on a sphere lifts it, and at a second it launches**
+	-- (user): the lift *is* the progress -- no bar, no ring -- and it is
+	-- "pulling one forward is launching it" made literal. Releasing
+	-- early settles it back, as a dug voxel settles back into its slot.
+	if pointed_orb > 0 and orb_nodes[pointed_orb] and
+			magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+		hold_t = hold_t + dt
+		local e = math.min(1, hold_t / DIG_SECONDS)
+		local n = orb_nodes[pointed_orb]
+		if not orb_home[pointed_orb] then
+			local p = n.position
+			orb_home[pointed_orb] = {p.x, p.y, p.z}
+		end
+		local h = orb_home[pointed_orb]
+		-- Toward the player, which is what "pulled forward" means from
+		-- inside the room
+		n.position = magic.Vector3(h[1] - view_dir.x * e * 1.6,
+				h[2] - view_dir.y * e * 1.6 + e * 0.6,
+				h[3] - view_dir.z * e * 1.6)
+		if hold_t >= DIG_SECONDS then
+			hold_t = 0
+			n.position = magic.Vector3(h[1], h[2], h[3])
+			orb_home[pointed_orb] = nil
+			launch(pointed_orb)
+		end
+		wire.enabled = false
+		lift.enabled = false
+		return
+	end
+	if orb_home[pointed_orb] then
+		local n = orb_nodes[pointed_orb]
+		local h = orb_home[pointed_orb]
+		if n then n.position = magic.Vector3(h[1], h[2], h[3]) end
+		orb_home[pointed_orb] = nil
+		hold_t = 0
 	end
 	-- The hold: a second, the same second a sphere takes
 	if mine and magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
@@ -1565,8 +1634,8 @@ end
 magic.SubscribeToEvent("Update", "handle_dig_update")
 
 -- Right click places one, into the empty voxel in front of what is
--- pointed at. simplified: the held stack takes precedence once spheres
--- can be carried, and stone is what is left when the hands are free.
+-- pointed at -- or the top of the held stack, which takes precedence:
+-- stone is what is left when the hands are free.
 function place_voxel()
 	local pv = pointed_voxel
 	if not pv or not pv[4] then return end
@@ -1588,7 +1657,9 @@ end
 function handle_mousedown(event_type, event_data)
 	if mode ~= "fps" or terminal_open or pause_open then return end
 	if event_data:GetInt("Button") == magic.MOUSEB_RIGHT then
-		place_voxel()
+		if not place_carried() then
+			place_voxel()
+		end
 	end
 end
 magic.SubscribeToEvent("MouseButtonDown", "handle_mousedown")
@@ -1609,6 +1680,15 @@ name_text.text = ""
 name_text.faceCameraMode = magic.FC_ROTATE_Y
 
 pointed_orb = 0
+-- **The step change is the indicator** (user): a sphere is lit and is a
+-- sphere, so it says "selected" in its own vocabulary rather than in a
+-- wireframe's -- and it is a discrete jump, not a fade, so it reads the
+-- instant the crosshair crosses it.
+local ORB_STEP = 1.18
+local orb_base_scale = {}
+-- Walking up to a sphere means the crosshair has to be on it, not merely
+-- nearest to it: about ten degrees, which is a sphere at arm's length
+local POINT_DOT = 0.985
 function handle_orb_update()
 	local best, best_dot = 0, -1
 	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
@@ -1632,7 +1712,28 @@ function handle_orb_update()
 					view_from.y * 2 - p.y, view_from.z * 2 - p.z))
 		end
 	end
+	-- In FPS the crosshair is the pointer, so a sphere off to the side is
+	-- not pointed at; in menu mode the camera is flown to look at what
+	-- was chosen, and the nearest to the middle is the answer
+	if mode == "fps" and best_dot < POINT_DOT then
+		best = 0
+	end
 	if best ~= pointed_orb then
+		-- The step, in both directions
+		local was = orb_nodes[pointed_orb]
+		if was and orb_base_scale[pointed_orb] then
+			was.scale = orb_base_scale[pointed_orb]
+		end
+		local now = orb_nodes[best]
+		if now then
+			if not orb_base_scale[best] then
+				local sc = now.scale
+				orb_base_scale[best] = magic.Vector3(sc.x, sc.y, sc.z)
+			end
+			local b = orb_base_scale[best]
+			now.scale = magic.Vector3(b.x * ORB_STEP, b.y * ORB_STEP,
+					b.z * ORB_STEP)
+		end
 		pointed_orb = best
 		local o = ORBS[best]
 		name_text.text = o and o.name:upper():gsub("(.)", "%1 "):gsub(" $", "")
@@ -1640,6 +1741,7 @@ function handle_orb_update()
 		log:info("pointing at orb " .. best .. ": " ..
 				(o and o.name or "?"))
 	end
+	carry_draw()
 	if best > 0 then
 		local p = orb_nodes[best].position
 		-- In front of the wall, not above the orb: the orb sits in a
@@ -1649,6 +1751,203 @@ function handle_orb_update()
 	end
 end
 magic.SubscribeToEvent("Update", "handle_orb_update")
+
+-- **The player carries spheres, and that is the only inventory** (user):
+-- E picks one up, any number can be carried, it is one mixed stack, and
+-- right click places the top. It is drawn as spheres held around the
+-- centre of the right half of the screen -- a held thing in the world
+-- rather than a panel of slots, which is how it stays off the HUD.
+carried = {}
+-- **Held under the camera, not placed in front of it.** A hand-computed
+-- offset from view_from and view_dir kept landing off the bottom of the
+-- frame whatever the arithmetic said, so the held sphere is a child of
+-- the camera node and its local position is what it looks like: right,
+-- down, forward, in the camera's own axes.
+function carry_draw()
+	for i, c in ipairs(carried) do
+		if light_nodes[c.index] then
+			light_nodes[c.index].position = c.held.worldPosition
+		end
+	end
+end
+
+function pick_up(i)
+	local node = orb_nodes[i]
+	if not node or not ORBS[i] or ORBS[i].empty then
+		return
+	end
+	local sc = orb_base_scale[i] or node.scale
+	-- A copy under the camera: the one in the room is switched off
+	-- rather than reparented, which keeps its place for putting down
+	local held = camera_node:CreateChild("held")
+	held.position = magic.Vector3(0.70, -0.30 - (#carried) * 0.10,
+			2.4 + (#carried) * 0.40)
+	held.scale = magic.Vector3(sc.x * 0.34, sc.y * 0.34, sc.z * 0.34)
+	local o = held:CreateComponent("StaticModel")
+	o.model = magic.cache:GetResource("Model", "Models/Sphere.mdl")
+	o.material = node:GetComponent("StaticModel").material
+	o.castShadows = false
+	node.enabled = false
+	carried[#carried + 1] = {node = node, held = held, orb = ORBS[i],
+		index = i, scale = magic.Vector3(sc.x, sc.y, sc.z)}
+	orb_nodes[i] = nil
+	orb_base_scale[i] = nil
+	pointed_orb = 0
+	name_text.text = ""
+	log:info("carry: picked up " .. ORBS[i].name .. ", " .. #carried ..
+			" in hand")
+end
+
+-- **Placing pops the top**, and the last thing picked up is the first
+-- put down
+function place_carried()
+	local c = table.remove(carried)
+	if not c then return false end
+	c.held:Remove()
+	local pv = pointed_voxel
+	-- Where the crosshair is, a little out of the surface, or at arm's
+	-- length when it is pointing at nothing
+	local x, y, z
+	if pv and pv[4] then
+		x, y, z = pv[4] + 0.5, pv[5] + 0.5, pv[6] + 0.5
+	else
+		x = view_from.x + view_dir.x * 4
+		y = view_from.y + view_dir.y * 4
+		z = view_from.z + view_dir.z * 4
+	end
+	c.node.position = magic.Vector3(x, y, z)
+	c.node.scale = c.scale
+	c.node.enabled = true
+	if light_nodes[c.index] then
+		light_nodes[c.index].position = magic.Vector3(x, y, z)
+	end
+	orb_nodes[c.index] = c.node
+	orb_places[c.index] = {x = x * VOXEL_M, y = y * VOXEL_M, z = z * VOXEL_M}
+	log:info("carry: put down " .. c.orb.name .. ", " .. #carried ..
+			" in hand")
+	return true
+end
+
+-- Right click places one, into the empty voxel in front of what is
+-- pointed at -- or the top of the held stack, which takes precedence:
+-- stone is what is left when the hands are free.
+function place_voxel()
+	local pv = pointed_voxel
+	if not pv or not pv[4] then return end
+	local x, y, z = pv[4], pv[5], pv[6]
+	if room.voxel_at(x, y, z) ~= room.id.air then return end
+	-- Not inside the player, who has no body to be pushed out of one
+	local px = math.floor(cam.from.x / VOXEL_M)
+	local pz = math.floor(cam.from.z / VOXEL_M)
+	local py = math.floor((cam.from.y - 1.6) / VOXEL_M)
+	if x == px and z == pz and (y == py or y == py + 1 or y == py + 2) then
+		return
+	end
+	room.placed[room.key(x, y, z)] = true
+	rewrite_box(x, x, y, y, z, z, false)
+	write_save()
+	log:info("place: " .. room.key(x, y, z))
+end
+
+function handle_mousedown(event_type, event_data)
+	if mode ~= "fps" or terminal_open or pause_open then return end
+	if event_data:GetInt("Button") == magic.MOUSEB_RIGHT then
+		if not place_carried() then
+			place_voxel()
+		end
+	end
+end
+magic.SubscribeToEvent("MouseButtonDown", "handle_mousedown")
+apply_camera()
+
+local name_node = scene:CreateChild("orb_name")
+local name_text = name_node:CreateComponent("Text3D")
+-- **Typography as graphic design**, which is what that era did with a
+-- name: huge letterforms and wide tracking, not a centred column of
+-- small labels. There is no tracking setting on a Text3D, so the
+-- spacing is spaces -- which is how it was done then too.
+name_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 64)
+name_text:SetColor(magic.Color(1, 1, 1, 1))
+name_text:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+name_text.text = ""
+-- The ceiling is the font ([TRANSLATION_FONT]): Latin-1 and Cyrillic, so
+-- a CJK name does not draw and whoever widens the font settles this too
+name_text.faceCameraMode = magic.FC_ROTATE_Y
+
+pointed_orb = 0
+-- **The step change is the indicator** (user): a sphere is lit and is a
+-- sphere, so it says "selected" in its own vocabulary rather than in a
+-- wireframe's -- and it is a discrete jump, not a fade, so it reads the
+-- instant the crosshair crosses it.
+local ORB_STEP = 1.18
+local orb_base_scale = {}
+-- Walking up to a sphere means the crosshair has to be on it, not merely
+-- nearest to it: about ten degrees, which is a sphere at arm's length
+local POINT_DOT = 0.985
+function handle_orb_update()
+	local best, best_dot = 0, -1
+	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
+	-- stops at it, which would hide every orb past the empty one
+	for i = 1, #orb_places do
+		local node = orb_nodes[i]
+		if node then
+			local p = node.position
+			local dx, dy, dz = p.x - view_from.x, p.y - view_from.y,
+					p.z - view_from.z
+			local l = math.sqrt(dx * dx + dy * dy + dz * dz)
+			local dot = (dx * view_dir.x + dy * view_dir.y +
+					dz * view_dir.z) / l
+			if dot > best_dot then
+				best, best_dot = i, dot
+			end
+			-- Present the face: the mark sits in the middle of the
+			-- sphere's UVs, which Sphere.mdl puts on -Z, so the orb looks
+			-- away from the viewer to show it to them
+			node:LookAt(magic.Vector3(view_from.x * 2 - p.x,
+					view_from.y * 2 - p.y, view_from.z * 2 - p.z))
+		end
+	end
+	-- In FPS the crosshair is the pointer, so a sphere off to the side is
+	-- not pointed at; in menu mode the camera is flown to look at what
+	-- was chosen, and the nearest to the middle is the answer
+	if mode == "fps" and best_dot < POINT_DOT then
+		best = 0
+	end
+	if best ~= pointed_orb then
+		-- The step, in both directions
+		local was = orb_nodes[pointed_orb]
+		if was and orb_base_scale[pointed_orb] then
+			was.scale = orb_base_scale[pointed_orb]
+		end
+		local now = orb_nodes[best]
+		if now then
+			if not orb_base_scale[best] then
+				local sc = now.scale
+				orb_base_scale[best] = magic.Vector3(sc.x, sc.y, sc.z)
+			end
+			local b = orb_base_scale[best]
+			now.scale = magic.Vector3(b.x * ORB_STEP, b.y * ORB_STEP,
+					b.z * ORB_STEP)
+		end
+		pointed_orb = best
+		local o = ORBS[best]
+		name_text.text = o and o.name:upper():gsub("(.)", "%1 "):gsub(" $", "")
+				or ""
+		log:info("pointing at orb " .. best .. ": " ..
+				(o and o.name or "?"))
+	end
+	carry_draw()
+	if best > 0 then
+		local p = orb_nodes[best].position
+		-- In front of the wall, not above the orb: the orb sits in a
+		-- niche and anything above it is inside the stone
+		name_node.position = magic.Vector3(p.x, p.y + 2.6 * U,
+				(BAY_Z + 2.5) * VOXEL_M * U)
+	end
+end
+magic.SubscribeToEvent("Update", "handle_orb_update")
+
+
 
 -- The room's bed. One source on one stream, topped up every frame; the
 -- number of orbs alight is the number of drone voices, so what the room
@@ -2212,7 +2511,8 @@ end
 -- Launching, in this room, is the bay coming apart and the camera going
 -- in: there is nothing behind it to run yet, and the transition is the
 -- content.
-local function launch(b)
+-- Global: the FPS hold below is in a handler defined above this
+function launch(b)
 	if kept.bed then
 		kept.bed:thunk()
 	end
@@ -2348,6 +2648,11 @@ function handle_keydown(event_type, event_data)
 			return
 		end
 		open_pause()
+		return
+	end
+	-- **E picks a sphere up**, which is the only inventory there is
+	if key == magic.KEY_E and mode == "fps" and pointed_orb > 0 then
+		pick_up(pointed_orb)
 		return
 	end
 	-- **Tab toggles the two modes**, and is the only key that means the

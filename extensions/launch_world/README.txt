@@ -46,10 +46,15 @@ FPS mode:
     W A S D     walk, mouse looks
     Space       jump
     right click place one of your own voxels against what you point at
-    left hold   prise one of your own out: it lifts for a second and
-                then breaks into dust. The room's own stone wears no
-                wireframe and cannot be dug -- no pointing indication
-                means no interaction
+    left hold   on one of your own voxels, prise it out: it lifts for a
+                second and then breaks into dust. On a sphere, it lifts
+                toward you and launches at a second. The room's own
+                stone wears no wireframe and cannot be dug -- no
+                pointing indication means no interaction
+    E           pick the sphere you are pointing at up; any number, one
+                mixed stack, held in the right of the view
+    right click place the top of the stack, or a voxel when it is empty
+    arrows      turn, for a player without a mouse
     Return      the terminal, and back out of it
     Backspace   the same -- one way out that always works
 
@@ -139,6 +144,7 @@ line is a thing that has been seen to fail:
     a source is brighter than a lit wall   -- the top end, in HDR
     the room found launch actions at all   -- not a list written here
     placing and digging do something       -- and write the save
+    E picks up and right click puts down
     a second client reads the save back    -- the diff survives a restart
 
 The player's voxels are a diff against the generated room, in
