@@ -6,7 +6,7 @@
 --
 -- doc/plan/client_preferences_plan.md built the preferences and made every
 -- game honour them, but until this nothing set them except a file and -o.
--- The C++ side stays the authority -- buildat.set_preference() parses and
+-- The C++ side stays the authority -- api.set_preference() parses and
 -- range checks a value through the same code -o goes through, applies what
 -- takes effect now, and persists the rest -- so this file is a page of
 -- widgets that knows nothing about the file and cannot set a value a flag
@@ -16,10 +16,24 @@
 -- Cycling rather than a slider because the keyboard navigation this menu
 -- already has moves up and down a list of buttons, and a slider inside one
 -- would need a second kind of focus for one screen's sake.
+-- Run by the menu's own verb, so it loads on either side
+-- ([LAUNCH_SANDBOX]): `require` answers an extension's safe half inside
+-- the sandbox and the whole extension outside it, and the safe half
+-- raises on a name it does not have rather than answering nil
+local api = buildat.safe or buildat
 local log = buildat.Logger("extension/__menu/preferences")
-local magic = require("buildat/extension/urho3d").safe
+local urho3d = require("buildat/extension/urho3d")
+local magic = urho3d.Vector3 and urho3d or urho3d.safe
 local uistack = require("buildat/extension/uistack")
-local ui_utils = require("buildat/extension/ui_utils").safe
+uistack = uistack.main and uistack or uistack.safe
+local ui_utils = require("buildat/extension/ui_utils")
+ui_utils = ui_utils.bind_button_menu and ui_utils or ui_utils.safe
+
+-- **The constants are globals in trusted Lua and fields of the safe
+-- table in the sandbox**, so they are named once here and the code
+-- below reads the same on both sides ([LAUNCH_SANDBOX])
+local HA_CENTER, KEY_ESCAPE, LM_VERTICAL =
+		magic.HA_CENTER, magic.KEY_ESCAPE, magic.LM_VERTICAL
 
 local M = {}
 
@@ -158,7 +172,7 @@ function M.show()
 	title:SetFontSize(20)
 
 	for _, pref in ipairs(PREFERENCES) do
-		local value = buildat.get_preference(pref.name)
+		local value = api.get_preference(pref.name)
 		if value == nil then
 			-- A build whose preferences this one does not have: leave the
 			-- row out rather than showing a control that does nothing
@@ -172,7 +186,7 @@ function M.show()
 			end
 			menu:add(button, function()
 				index = index % #pref.values + 1
-				local ok, err = buildat.set_preference(pref.name,
+				local ok, err = api.set_preference(pref.name,
 						pref.values[index])
 				if not ok then
 					-- Cannot happen with the values above, and saying so is

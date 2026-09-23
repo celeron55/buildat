@@ -10,13 +10,29 @@
 -- through `buildat_client -m launch_menu`. There is one binary now and one
 -- menu: this one, with launch_menu's local-game and connect-to-server
 -- screens behind it and its keyboard selection under it.
+-- **This menu runs in the sandbox** ([LAUNCH_SANDBOX]), which is what
+-- its launch_ui.txt asks for. Three shapes come with that: the safe API
+-- is `buildat` itself here and `buildat.safe` outside, `require`
+-- answers an extension's safe half inside and the whole extension
+-- outside, and a file of its own is loaded by a verb rather than by
+-- `dofile` and a path.
+local api = buildat.safe or buildat
 local log = buildat.Logger("extension/__menu")
-local dump = buildat.dump
-local magic = require("buildat/extension/urho3d").safe
+local dump = api.dump
+local urho3d = require("buildat/extension/urho3d")
+local magic = urho3d.Vector3 and urho3d or urho3d.safe
 local uistack = require("buildat/extension/uistack")
-local ui_utils = require("buildat/extension/ui_utils").safe
+uistack = uistack.main and uistack or uistack.safe
+local ui_utils = require("buildat/extension/ui_utils")
+ui_utils = ui_utils.bind_button_menu and ui_utils or ui_utils.safe
 local launch_menu = require("buildat/extension/launch_menu")
-local preferences = dofile(buildat.extension_path("__menu").."/preferences.lua")
+local preferences = api.run_extension_file("preferences.lua")
+-- **The constants are globals in trusted Lua and fields of the safe
+-- table in the sandbox**, so they are named once here and the code
+-- below reads the same on both sides ([LAUNCH_SANDBOX])
+local FILTER_NEAREST, HA_CENTER, HA_LEFT, KEY_ESCAPE, LM_VERTICAL, VA_CENTER, VA_TOP =
+		magic.FILTER_NEAREST, magic.HA_CENTER, magic.HA_LEFT, magic.KEY_ESCAPE, magic.LM_VERTICAL, magic.VA_CENTER, magic.VA_TOP
+
 local M = {safe = nil}
 
 -- The launch grid ([LAUNCH_GRID]): the tiles come from the tree, any number
@@ -28,7 +44,9 @@ local M = {safe = nil}
 -- no label or run is one warning naming it, and the rest of the grid draws.
 -- The one way out of a file is ctx.launch, below, whose params cross as
 -- plain data and whose target is entered through on_untrusted_launch().
-local launch_grid = dofile(buildat.extension_path("__menu").."/launch_grid.lua")
+-- **The grid comes through the verb**, not through the trusted file:
+-- `launch_actions()` answers the same tiles as plain data with a key,
+-- and `launch(key)` is what runs one ([LAUNCH_SANDBOX]).
 
 local DIM = 0.55
 
@@ -80,7 +98,7 @@ function M.boot(launch_action)
 	-- of the tree it was built from, "-dirty" when that was nobody's commit
 	-- The first child of the menu's own layout: the stack's root is a
 	-- horizontal layout that argues with anything placed by hand
-	local version, hash = buildat.version()
+	local version, hash = api.version()
 	local label = layout:CreateChild("Text")
 	label:SetStyleAuto()
 	label.text = version .. " " .. hash
@@ -164,9 +182,14 @@ function M.boot(launch_action)
 	add("__menu/res/icon_preferences.png", "Engine settings", preferences.show,
 			"What every game honours: the window, the sound, the mouse.")
 	-- And every launch action the tree offers, in the grid's order
-	local actions = launch_grid.actions(log)
+	local actions = api.launch_actions()
 	for _, action in ipairs(actions) do
-		add(action.icon, action.label, action.run, action.description)
+		add(action.icon, action.label, function()
+			local ok, why = api.launch(action.key)
+			if not ok then
+				log:warning("__menu: "..tostring(why))
+			end
+		end, action.description)
 	end
 
 	-- The selected entry's name and description, to the right of the logo
@@ -240,7 +263,7 @@ function M.boot(launch_action)
 	local nav = ui_utils.bind_button_menu(root, items, function(key)
 		if key == KEY_ESCAPE then
 			log:info("KEY_ESCAPE pressed at top level")
-			engine:Exit()
+			api.quit()
 		end
 	end)
 	nav:set_columns(columns)
@@ -259,8 +282,7 @@ function M.boot(launch_action)
 	-- **The setting said another launch UI and it did not load**, so
 	-- this one says so rather than leaving the player wondering why
 	-- their choice did nothing ([LAUNCH_SANDBOX]'s fallback)
-	local fell_back = buildat.safe.launch_ui_fell_back and
-			buildat.safe.launch_ui_fell_back()
+	local fell_back = api.launch_ui_fell_back and api.launch_ui_fell_back()
 	if fell_back then
 		ui_utils.show_message_dialog("The launch UI \"" .. fell_back ..
 				"\" did not load, so this is the menu.\n\n" ..
@@ -270,13 +292,14 @@ function M.boot(launch_action)
 	if launch_action then
 		local found = nil
 		for _, action in ipairs(actions) do
-			if action.from.."/"..tostring(action.id) == launch_action then
+			if action.key == launch_action or
+					action.from.."/"..tostring(action.id) == launch_action then
 				found = action
 			end
 		end
 		if found then
 			log:info("Launch action: "..launch_action)
-			found.run()
+			api.launch(found.key)
 		else
 			log:warning("Launch action "..dump(launch_action)..
 					" is not on the grid")

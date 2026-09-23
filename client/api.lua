@@ -313,6 +313,13 @@ end
 -- The launch UI that was asked for and did not load, or nil: what the
 -- one that did load tells the user, so a setting cannot quietly do
 -- nothing
+-- **Quitting**, which is a launch UI's own verb ([LAUNCH_SANDBOX]): the
+-- client shuts down. It is `disconnect()` under another name -- with no
+-- connection to drop, dropping it is what leaving is -- and a launcher
+-- calling `engine:Exit()` is reaching for the engine to do it.
+buildat.safe.quit = function()
+	__buildat_disconnect()
+end
 buildat.safe.launch_ui_fell_back = __buildat_launch_ui_fell_back
 -- The tail of a local server's log and where the whole of it is, for a
 -- launcher's dialog about one that died ([START_PROGRESS]). Read-only,
