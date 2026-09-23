@@ -575,6 +575,26 @@ struct Module: public interface::Module
 	// array of strings can carry.
 	void on_get_saves(const network::Packet &packet)
 	{
+		// **A launch that named a save opens it and never draws a menu**
+		// ([LAUNCH_WORLD]: a save opened through ctx.launch's params).
+		// The launcher hands "save=<name>" to the server's -u, which is
+		// the same door "menu" and "luanti_game" come through, and the
+		// save says itself which game it needs.
+		{
+			ss_ save = launch_param("save");
+			if(save != ""){
+				ss_ gameid = gameid_of_save(save);
+				if(gameid == ""){
+					log_w(MODULE, "untrusted_launch: save %s does not say"
+							" which game it needs", cs(save));
+				} else {
+					log_i(MODULE, "untrusted_launch: opening save %s",
+							cs(save));
+					start_world(gameid, save, packet.sender);
+					return;
+				}
+			}
+		}
 		// A launch that asked for one of the menu's screens -- import_game,
 		// import_world -- says so before the lists, and the client opens
 		// that screen over them ([LAUNCH_GRID])

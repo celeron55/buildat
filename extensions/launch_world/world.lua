@@ -2975,15 +2975,22 @@ function launch(b)
 	if ORBS[b] and ORBS[b].run then
 		ORBS[b].run()
 	elseif ORBS[b] and ORBS[b].save then
-		-- **A save cannot be opened by name yet**, and saying so is
-		-- better than flying to it and doing nothing: ctx.launch carries
-		-- params, but the launch grid refuses them for a game target
-		-- because a server has no door for them ("untrusted_launch" in
-		-- its config is the plan). That door is what the save spheres
-		-- wait on; see [LAUNCH_WORLD] step 6.
-		log:warning("launch: " .. ORBS[b].name .. " of " ..
-				ORBS[b].game .. ": opening a save by name waits on " ..
-				"ctx.launch params reaching a game")
+		-- **A save opens by name.** The launcher starts the save's own
+		-- game with "save=<name>" through the server's -u, which is the
+		-- same door "menu" and "luanti_game" come through; the game
+		-- reads it and opens that save instead of drawing its menu.
+		-- simplified: a game that reads no `save` key starts as it
+		-- normally would, which is what vanilla did before it read one.
+		local o = ORBS[b]
+		local m = require("buildat/extension/launch_menu")
+		if m and m.start_local_game then
+			log:info("launch: save " .. o.name .. " of " .. o.game)
+			m.start_local_game(o.game, "save=" .. o.name)
+			local me = buildat.menu_extension()
+			if me and me.entered_game then me.entered_game() end
+		else
+			log:warning("launch: no launch_menu to start " .. o.game)
+		end
 	end
 end
 
