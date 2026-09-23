@@ -98,9 +98,15 @@ end
 -- generator's work, further down the list.
 local function material(colour, roughness, metallic, texture)
 	local m = magic.Material:new()
+	-- BUILDAT_LAUNCH_NOPBR=1 puts the stock non-PBR techniques on
+	-- instead, which is the last thing between a scene that lights in
+	-- HDR here and one that does not
+	local pbr = (buildat.get_env("BUILDAT_LAUNCH_NOPBR") or "") == ""
 	local t = magic.cache:GetResource("Technique",
-			texture and "Techniques/PBR/PBRDiff.xml" or
-			"Techniques/PBR/PBRNoTexture.xml")
+			pbr and (texture and "Techniques/PBR/PBRDiff.xml" or
+			"Techniques/PBR/PBRNoTexture.xml") or
+			(texture and "Techniques/Diff.xml" or
+			"Techniques/NoTexture.xml"))
 	assert(t ~= nil, "the technique loaded")
 	m:SetTechnique(0, t)
 	if texture then m:SetTexture(magic.TU_DIFFUSE, texture) end

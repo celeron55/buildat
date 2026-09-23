@@ -63,6 +63,9 @@ Environment
     BUILDAT_LAUNCH_OWNSCENE  draw a scene of this client's own making
                              rather than the replicated one -- no voxels
                              in it; a diagnostic for the HDR question
+    BUILDAT_LAUNCH_NOPBR     put the stock non-PBR techniques on the
+                             primitives; with HDR on, this is what
+                             lights when the PBR ones do not
 
 What is where
 -------------
@@ -106,9 +109,12 @@ than reading the pictures the run before left behind.
 Known, and not this room's to fix
 ---------------------------------
 
-**HDR draws only the unlit materials.** With BUILDAT_LAUNCH_HDR=1 the
-orbs and the readout draw and everything lit by a light does not,
-whatever the light type. games/voxel_lighting renders in HDR with the
+**Urho3D's stock PBR techniques do not light under HDR in this build.**
+With BUILDAT_LAUNCH_HDR=1 the orbs and the readout draw and everything
+lit by a light does not, whatever the light type -- but add
+BUILDAT_LAUNCH_NOPBR=1, which swaps the primitives onto the stock
+non-PBR techniques, and the same scene with the same effects lights
+(blown out, since the lights are tuned for PBR's scale). games/voxel_lighting renders in HDR with the
 same three effects appended in the same order. Ruled out so far: the
 effects and their order, their curve parameters, the light type,
 set_preferred_viewports (the renderer's own viewport draws the same
