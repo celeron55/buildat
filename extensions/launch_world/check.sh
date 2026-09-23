@@ -79,6 +79,21 @@ fi
 	echo "delay 700"
 	echo "keypress Tab"
 	echo "delay 600"
+	# **A server is connected to, and says so when it cannot be.**
+	# "localhost" is always in the list and nothing listens on its port
+	# in a check run, so this is the failure path: a notice line, the
+	# room still standing, no dialog and no crash.
+	echo "keypress H"
+	echo "keypress O"
+	echo "keypress S"
+	echo "keypress T"
+	echo "delay 400"
+	echo "keypress Return"
+	echo "delay 2500"
+	echo "screenshot $out/connect-failed.png"
+	echo "delay 400"
+	echo "keypress Escape"
+	echo "delay 1500"
 	# **The arrows browse the room** with the prompt empty: along a row
 	# and between the rows, the wall first and the floor's ranks after
 	echo "keypress Right"
@@ -296,6 +311,14 @@ last=$(grep -a "launch_w.*: setting: " "$out/cli.log" | tail -1 | sed 's/.*setti
 echo "the terminal changed $changes settings: $first then $last"
 if [ "$changes" -lt 2 ] || [ "$first" = "$last" ]; then
 	echo "FAIL: the terminal's rows do not change anything"
+	exit 1
+fi
+
+conn=$(grep -a "launch_w.*: connect: " "$out/cli.log" | head -1 |
+	sed 's/.*launch_w[a-z]*: //')
+echo "a server was asked for: ${conn:-(nothing)}"
+if [ -z "$conn" ]; then
+	echo "FAIL: Enter on a server does not connect to it"
 	exit 1
 fi
 

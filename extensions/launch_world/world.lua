@@ -62,12 +62,29 @@ GAMES[#GAMES + 1] = {name = "install a game", warm = true, empty = true}
 -- is a reflective chrome sphere standing on the floor, which is the
 -- plan's own mapping.
 --
--- simplified: a mock-up list. What belongs here is the client's own
--- addresses and a fetched serverlist -- `network.known_addresses()` is
--- already what the patch bay's ports are -- but the room wants a
--- roomful to look at before that is worth wiring, and a serverlist
--- fetch is [CONTENTDB]-shaped work of its own.
-local SERVERS = {
+-- **The client's own addresses first**: `network.known_addresses()` is
+-- every address this client has used, last used first, and a
+-- serverlist URL is not a server so the https ones are left out. The
+-- mock-up below fills the floor out behind them.
+--
+-- simplified: the rest of the list is made up, because a fetched
+-- serverlist is [CONTENTDB]-shaped work of its own and a room with two
+-- spheres on the floor shows nothing about a room full of them. A real
+-- fetch replaces the padding and nothing else.
+local SERVERS = {}
+do
+	local net = require("buildat/extension/network").safe
+	for _, a in ipairs(net.known_addresses()) do
+		-- simplified: ten, the most recently used first, which is what
+		-- the floor has room for without becoming a heap
+		if a.uri:sub(1, 4) ~= "http" and #SERVERS < 10 then
+			SERVERS[#SERVERS + 1] = {
+				name = a.name ~= "" and a.name or a.uri, address = a.uri}
+		end
+	end
+	log:info("servers: " .. #SERVERS .. " of the client's own")
+end
+local SERVERS_MOCK = {
 	{name = "buildat.example.org", address = "buildat.example.org:29797"},
 	{name = "drift.example.net", address = "drift.example.net:29797"},
 	{name = "the long night", address = "night.example.org:29797"},
@@ -77,8 +94,20 @@ local SERVERS = {
 	{name = "far shore", address = "shore.example.net:29797"},
 	{name = "the commons", address = "commons.example.org:29797"},
 	{name = "scrapyard", address = "scrap.example.net:29797"},
-	{name = "localhost", address = "127.0.0.1:29797"},
+	{name = "localhost", address = "127.0.0.1:29797", always = true},
 }
+for _, sv in ipairs(SERVERS_MOCK) do
+	local had = false
+	for _, e in ipairs(SERVERS) do
+		if e.address == sv.address then had = true break end
+	end
+	-- **The last one is always there**: a client with ten addresses of
+	-- its own gets none of the padding otherwise, and the check needs
+	-- one server it can name and fail to reach
+	if not had and (#SERVERS < 10 or sv.always) then
+		SERVERS[#SERVERS + 1] = sv
+	end
+end
 room.set_pockets(#GAMES)
 log:info("contents: " .. (#GAMES - 1) .. " games, " .. #FLOOR_ACTIONS ..
 		" other launch actions, " .. #SAVES .. " saves, " .. #SERVERS ..
@@ -2560,7 +2589,42 @@ local ATTRACT_AFTER = tonumber(
 idle_quiet = 0
 attracting = false
 
+-- **Connecting is a wait, and the room says so** (the launcher plan's
+-- step 6: it wants the connecting screen's own polling). The connect
+-- runs on a worker -- a blocking one freezes the frame for as long as
+-- it takes -- so this asks once a frame and the notice line says where
+-- it got to. There is no screen to push: the room is the screen.
+connecting = nil
+function connect_to(name, address)
+	if connecting then return end
+	buildat.connect_server_start(address)
+	connecting = {name = name, address = address, t = 0}
+	notice("connecting to " .. name .. " ...")
+	log:info("connect: " .. name .. " at " .. address)
+end
+
+local function connect_poll(dt)
+	if not connecting then return end
+	connecting.t = connecting.t + dt
+	local status, err = buildat.connect_server_poll()
+	if status == "ok" then
+		log:info("connect: " .. connecting.name .. " ok after " ..
+				string.format("%.1f s", connecting.t))
+		notice("")
+		connecting = nil
+		entered_game()
+	elseif status == "failed" then
+		-- The room stays up and says what happened, rather than a
+		-- dialog: a server that is not there is an ordinary thing
+		log:warning("connect: " .. connecting.name .. " failed: " ..
+				tostring(err))
+		notice(connecting.name .. ": " .. (err or "could not connect"))
+		connecting = nil
+	end
+end
+
 function handle_idle_update(event_type, event_data)
+	connect_poll(event_data:GetFloat("TimeStep"))
 	-- The room stands down while a game is up ([MENU_CONTEXT])
 	if in_game then return end
 	if still then
@@ -2707,6 +2771,22 @@ prompt_text.text = ""
 prompt_open = false
 prompt_str = ""
 ornament_on = true
+
+-- **One line the room says things on**, above the prompt: connecting,
+-- and why a connection did not happen. A dialog would take the mouse
+-- and stop the room; this does not. simplified: the line stays until
+-- something else is said -- there is no timeout, since the only things
+-- said so far are a wait and its outcome.
+local notice_text = room_ui_child("Text")
+notice_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 20)
+notice_text.horizontalAlignment = magic.HA_CENTER
+notice_text.verticalAlignment = magic.VA_BOTTOM
+notice_text:SetPosition(0, -80)
+notice_text:SetColor(magic.Color(1.0, 0.82, 0.45, 1))
+notice_text.text = ""
+function notice(text)
+	notice_text.text = text or ""
+end
 
 -- A subsequence match, which is what "fuzzy" has to mean when the list
 -- is six names: every letter typed appears in order. The best match is
@@ -3186,13 +3266,7 @@ function launch(b)
 			entered_game()
 		end
 	elseif ORBS[b] and ORBS[b].server then
-		-- simplified: the addresses are a mock-up, so there is nothing
-		-- to connect to. What goes here is buildat.connect_server_start
-		-- on a real list -- network.known_addresses() and a fetched
-		-- serverlist -- and it wants the connecting screen's own
-		-- polling, which is launch_menu's.
-		log:info("launch: server " .. ORBS[b].name .. " at " ..
-				ORBS[b].address .. " (the list is a mock-up)")
+		connect_to(ORBS[b].name, ORBS[b].address)
 	elseif ORBS[b] and ORBS[b].save then
 		-- **A save opens by name.** The launcher starts the save's own
 		-- game with "save=<name>" through the server's -u, which is the
@@ -3213,6 +3287,21 @@ function launch(b)
 end
 
 function prompt_key(key)
+	-- **A digit inside an open query is a character**, not a shortcut:
+	-- a server is named by its address where the client has no name for
+	-- it, and "127.0.0.1" cannot be typed otherwise. The match is a
+	-- subsequence, so the dots need no key of their own -- Urho3D's Lua
+	-- has no KEY_PERIOD anyway. With the prompt closed they stay the
+	-- shortcuts.
+	if prompt_open then
+		for n = 0, 9 do
+			if key == magic["KEY_" .. n] then
+				prompt_str = prompt_str .. tostring(n)
+				show_prompt()
+				return true
+			end
+		end
+	end
 	-- Digits pick the nearest slots, which is the path a returning user
 	-- actually takes. There are nine of them and the room may hold more
 	-- than nine things; past that, typing the name is the way.
