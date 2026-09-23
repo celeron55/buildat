@@ -246,7 +246,7 @@ end
 -- The ids the data bytes are, filled in by world.lua once the registry is
 -- built. One table so the description below reads as it did in C.
 M.id = {air = 0, stone = 0, dark = 0, floor_light = 0, floor_dark = 0,
-	column = 0, placed = 0}
+	column = 0, placed = 0, frieze = 0}
 
 -- **The player's diff against the generated room** ([LAUNCH_WORLD] step
 -- 8): the room is a function of (x, y, z) and this is the only thing
@@ -279,13 +279,20 @@ function M.voxel_at(x, y, z)
 	-- with pockets cut into it. The same material lines a pocket -- it is
 	-- a hole in the wall and not a differently finished box -- and the
 	-- ornament is on the side columns of its mouth and nowhere else.
-	if y >= 0 and y <= M.Y_TOP and z <= M.face_z(x, y) then
+	local face = (y >= 0 and y <= M.Y_TOP) and M.face_z(x, y) or nil
+	if face and z <= face then
 		if M.in_pocket(x, y, z) then return id.air end
 		-- A voxel beside a pocket's mouth is one of its columns
 		local a, ac = M.in_pocket(x - 1, y, z)
 		if a and ac then return id.column end
 		local b, bc = M.in_pocket(x + 1, y, z)
 		if b and bc then return id.column end
+		-- **The slab's own edge wears the frieze.** A slab is one voxel
+		-- tall, so the strip a player sees is its outermost voxel, and
+		-- that is where the ornament goes; the mass behind it is plain
+		-- stone. A voxel is that edge when it is the front of a face
+		-- that stands proud of the wall's nominal surface.
+		if z == face and face > M.BAY_Z then return id.frieze end
 		return id.stone
 	end
 	if y > M.Y_TOP then
@@ -337,7 +344,7 @@ end
 -- the code assumes. Run it with `lua extensions/launch_world/room.lua`.
 function M.self_check()
 	M.id = {air = 1, stone = 2, dark = 3, floor_light = 4, floor_dark = 5,
-		column = 6}
+		column = 6, frieze = 7, placed = 8}
 	assert(M.face_z(3, 4) == M.face_z(3, 4), "the wall is the same twice")
 	local out_min, out_max = 99, -99
 	for x = M.X_MIN, M.X_MAX do
@@ -375,6 +382,26 @@ function M.self_check()
 		assert(M.voxel_at(p.x0 - 1, y, z) == M.id.column and
 				M.voxel_at(p.x0 + p.sx, y, z) == M.id.column,
 				"bay " .. b .. " has an ornamented column down each side")
+	end
+	do
+		-- Somewhere on the wall a slab stands proud, and its outermost
+		-- voxel is the frieze while the one behind it is not
+		local found = false
+		for x = M.X_MIN, M.X_MAX do
+			for y = 0, M.Y_TOP do
+				local f = M.face_z(x, y)
+				if f > M.BAY_Z and not M.in_pocket(x, y, f) then
+					assert(M.voxel_at(x, y, f) == M.id.frieze,
+							"a slab's edge wears the frieze")
+					assert(M.voxel_at(x, y, f - 1) == M.id.stone,
+							"and the stone behind it does not")
+					found = true
+					break
+				end
+			end
+			if found then break end
+		end
+		assert(found, "some slab stands proud of the wall")
 	end
 	assert(M.voxel_at(0, M.Y_TOP + 2, 4) == M.id.air,
 			"the opening is cut through the ceiling")

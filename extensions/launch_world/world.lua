@@ -108,6 +108,19 @@ do
 			strength = 2})
 end
 do
+	-- **The frieze along a slab's edge.** A slab is one voxel tall, so
+	-- the strip a player sees is one voxel high: the motif has to fill
+	-- the tile and the tile has to be one voxel across, or the edge
+	-- shows whichever quarter of a pattern its own height lands on. So
+	-- one unit, no rules above or below it -- they fall outside a tile
+	-- the band fills -- and uv_scale 1, which is one motif every 45 cm.
+	local fh, fi = ornament.meander(96, {units = 1, depth = 2, band_y = 0.0})
+	register_tile("frieze.png", fh, fi,
+			{base = magic.Color(0.50, 0.50, 0.50, 1),
+			inlay = magic.Color(0.36, 0.36, 0.38, 1), relief = 0.85,
+			strength = 5})
+end
+do
 	-- The pockets' side columns, which are the one place the ornament
 	-- goes now that the wall is one material ([LAUNCH_WORLD]: "the
 	-- ornament is on its side columns and nowhere else")
@@ -274,6 +287,9 @@ room.id.column = add_voxel("column", "generated/column.png", true,
 -- cannot be dug
 room.id.placed = add_voxel("placed", "generated/column.png", true,
 		0.70, 0.20, 0.9, 4)
+-- A slab's own edge, one motif a voxel
+room.id.frieze = add_voxel("frieze", "generated/frieze.png", true,
+		0.78, 0.16, 0.85, 1)
 -- Kept, because the ornament toggle puts plain stone in its place
 column_id = room.id.column
 -- The checkerboard: the light squares are polished, which is what puts
@@ -688,7 +704,6 @@ local orb_mats = {}
 local orb_nodes = {}
 -- An orb out of its pocket is not a source: which ones those are, and
 -- what each one's lit colour was, so it can be handed back
-orb_dim = {}
 orb_bright = {}
 for i, o in ipairs(orb_places) do
 	local spec = ORBS[i]
@@ -989,8 +1004,7 @@ local function set_preset(n)
 			local bright = magic.Color(e[1][1] * 7.0, e[1][2] * 7.0,
 					e[1][3] * 7.0, 1)
 			orb_bright[i] = bright
-			orb_mats[i]:SetShaderParameter("MatDiffColor",
-					orb_dim[i] and magic.Color(0.30, 0.30, 0.32, 1) or bright)
+			orb_mats[i]:SetShaderParameter("MatDiffColor", bright)
 		end
 		light.brightness = e[2] * PBR_INTENSITY *
 				((spec and spec.empty) and 0.22 or 1.0)
@@ -2050,31 +2064,14 @@ function place_carried()
 	c.node.position = magic.Vector3(x, y, z)
 	c.node.scale = c.scale
 	c.node.enabled = true
-	-- **An orb glows in its pocket and nowhere else** (user,
-	-- 2026-09-23: the orbs on the floor should not glow, just reflect).
-	-- A game put down on the floor is a sphere that takes the room's
-	-- light like the launch actions do; carried back into its pocket it
-	-- is a source again. The pocket is part of what a game's orb is.
-	local p = room.pockets[c.index]
-	local home = p and x >= p.x0 - 1 and x <= p.x0 + p.sx and
-			y >= p.y0 - 1 and y <= p.y0 + p.sy and
-			z <= p.mouth + 1 and z >= p.mouth - p.sz - 1
+	-- **A game's orb glows wherever it is put down** (user,
+	-- 2026-09-23). "The orbs on the floor should not glow, just
+	-- reflect" is about the floor's *own* spheres -- the launch actions
+	-- and the saves, which are plain white and never were sources -- and
+	-- not about a game carried out of its pocket. An orb is its own
+	-- light made visible, so its light comes with it.
 	if light_nodes[c.index] then
-		light_nodes[c.index].enabled = home and true or false
-		if home then
-			light_nodes[c.index].position = magic.Vector3(x, y, z)
-		end
-	end
-	-- **Its own material dimmed, not a different material.** Swapping
-	-- the material on a live StaticModel is the crash this tree already
-	-- knows about -- Material.cpp reads freed memory a frame or two
-	-- later -- so what changes is a shader parameter on the material it
-	-- already has.
-	orb_dim[c.index] = not home
-	if orb_mats[c.index] then
-		orb_mats[c.index]:SetShaderParameter("MatDiffColor",
-				home and orb_bright[c.index] or
-				magic.Color(0.30, 0.30, 0.32, 1))
+		light_nodes[c.index].position = magic.Vector3(x, y, z)
 	end
 	orb_nodes[c.index] = c.node
 	orb_places[c.index] = {x = x * VOXEL_M, y = y * VOXEL_M, z = z * VOXEL_M}
