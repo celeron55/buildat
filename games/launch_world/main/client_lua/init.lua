@@ -316,6 +316,7 @@ log:info("bays " .. BAYS .. " " .. SLAB_H .. " " .. BAY_Z .. " " ..
 -- where it is better" asks for -- boxes carrying the meander and the
 -- socket field, standing a little proud of the wall the way a course of
 -- dressed stone stands proud of rubble.
+frieze_nodes = {}
 do
 	local z = (BAY_Z + 0.55) * VOXEL_M
 	for b = 1, BAYS do
@@ -323,24 +324,29 @@ do
 		local tier = BAY_TIER[b]
 		local w = bay_width(tier) * VOXEL_M * 2
 		-- The frieze over the opening, and its answer below it
-		part("Box", magic.Vector3(x, (tier * SLAB_H + SLAB_H + 0.6) * VOXEL_M,
-				z), magic.Vector3(w, 1.05, 0.30), meander_mat)
-		part("Box", magic.Vector3(x, (tier * SLAB_H - 0.7) * VOXEL_M, z),
-				magic.Vector3(w, 0.75, 0.30), meander_mat)
+		frieze_nodes[#frieze_nodes + 1] = {part("Box", magic.Vector3(x,
+				(tier * SLAB_H + SLAB_H + 0.6) * VOXEL_M, z),
+				magic.Vector3(w, 1.05, 0.30), meander_mat), meander_mat}
+		frieze_nodes[#frieze_nodes + 1] = {part("Box", magic.Vector3(x,
+				(tier * SLAB_H - 0.7) * VOXEL_M, z),
+				magic.Vector3(w, 0.75, 0.30), meander_mat), meander_mat}
 		-- The jambs: the socket field, which is the perforated block of
 		-- the reference frame, down each side of the opening
 		for _, side in ipairs({-1, 1}) do
-			part("Box", magic.Vector3(x + side * w * 0.42,
+			local jamb = b == 4 and sigil_mat or socket_mat
+			frieze_nodes[#frieze_nodes + 1] = {part("Box",
+					magic.Vector3(x + side * w * 0.42,
 					(tier * SLAB_H + SLAB_H / 2) * VOXEL_M, z),
 					magic.Vector3(w * 0.16, SLAB_H * VOXEL_M * 1.5, 0.28),
-					b == 4 and sigil_mat or socket_mat)
+					jamb), jamb}
 		end
 	end
 	-- And one long course across the whole wall, above the bays, which is
 	-- what makes the room read as built rather than as cut
-	part("Box", magic.Vector3(0, 19.5 * VOXEL_M, z),
+	frieze_nodes[#frieze_nodes + 1] = {part("Box",
+			magic.Vector3(0, 19.5 * VOXEL_M, z),
 			magic.Vector3(BAYS * BAY_SPACING * VOXEL_M, 1.35, 0.26),
-			meander_mat)
+			meander_mat), meander_mat}
 end
 
 -- The orbs. Warm is what you own; the palette's own entry says which
@@ -1106,6 +1112,7 @@ prompt_text:SetColor(magic.Color(0.55, 0.95, 1.0, 1))
 prompt_text.text = ""
 prompt_open = false
 prompt_str = ""
+ornament_on = true
 
 -- A subsequence match, which is what "fuzzy" has to mean when the list
 -- is six names: every letter typed appears in order. The best match is
@@ -1360,8 +1367,11 @@ function handle_keydown(event_type, event_data)
 			set_preset(n)
 		end
 	end
-	-- P takes the probe off the zone and puts it back, which is how a run
-	-- shoots the same frame with and without it: a metal with nothing to
+	-- **F5** takes the probe off the zone and puts it back, which is how
+	-- a run shoots the same frame with and without it. A letter would be
+	-- eaten by the prompt -- and was: for a day the probe's own check
+	-- was passing on the prompt text "> p" appearing at the bottom of
+	-- the frame rather than on anything the probe did.: a metal with nothing to
 	-- reflect is black but for its highlight, and that difference is the
 	-- whole of what the probe is for
 	-- Return opens the bay of the orb being pointed at, which is the
@@ -1373,10 +1383,25 @@ function handle_keydown(event_type, event_data)
 		dissolve_bay(pointed_orb, false)
 		log:info("dissolve: bay " .. pointed_orb .. " closing")
 	end
-	if key == magic.KEY_P then
+	-- **F6 strips the ornament**, and not a letter: the prompt eats
+	-- every letter before the room sees it, which is what it is for. The generator has its own check and it
+	-- passed for a whole day while nothing in the room wore what it
+	-- made: the bays carried the meander until they became voxels, and
+	-- then the materials sat in the file drawing nothing. So a run
+	-- shoots the frame with the friezes plain and asserts it changed.
+	if key == magic.KEY_F6 then
+		ornament_on = not ornament_on
+		for _, f in ipairs(frieze_nodes) do
+			f[1]:GetComponent("StaticModel").material =
+					ornament_on and f[2] or stone
+		end
+		log:info("ornament " .. (ornament_on and "on" or "off"))
+	end
+	if key == magic.KEY_F5 then
 		probe_on = not probe_on
 		zone.zoneTexture = probe_on and kept.probe or kept.dark_probe
 		log:info("reflection probe " .. (probe_on and "on" or "off"))
+		return
 	end
 end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")

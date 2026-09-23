@@ -82,11 +82,20 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	echo "keypress Escape"
 	echo "delay 2600"
 	echo "delay 600"
+	# The ornament, stripped: the friezes go plain and the frame has to
+	# change. The generator's own check passed for a day while nothing in
+	# the room wore what it made.
+	echo "keypress F6"
+	echo "delay 900"
+	echo "screenshot $out/no-ornament.png"
+	echo "delay 400"
+	echo "keypress F6"
+	echo "delay 900"
 	# And the first preset again with the reflection probe taken off the
 	# zone, which is what says the probe reaches the metals
 	echo "keypress F1"
 	echo "delay 800"
-	echo "keypress P"
+	echo "keypress F5"
 	echo "delay 800"
 	echo "screenshot $out/1-cold_in_warm_out-noprobe.png"
 	echo "delay 500"
@@ -169,11 +178,12 @@ for y in range(0, h - 60, 30):
 			best, bx, by = m, x, y
 print("the probe moves a 60x60 block by %.2f of a level at its most, "
 		"at %d,%d" % (best, bx, by))
-# 5, not 10: once the room has fill light in it the chrome is lit
-# directly as well as by reflection, so the probe's share of a sphere is
-# smaller than it was in a room lit only by six orbs (8.92 against the
-# old 10, 2026-09-23). What is asserted is still that it is visible.
-probe_ok = best > 5.0
+# **15.** The threshold went down to 5 on a reading of 8.92 that was not
+# the probe at all: the key that toggles it was a letter, the prompt ate
+# it, and what moved was the prompt's own text at the bottom of the
+# frame. On a function key the probe moves a sphere by 46 levels
+# (2026-09-23).
+probe_ok = best > 15.0
 print("PASS: the probe reaches the metals" if probe_ok
 		else "FAIL: the probe changes nothing on a metal")
 
@@ -227,6 +237,16 @@ print("the terminal panel is %d at its third and has %d text-bright "
 terminal_ok = dark < 40 and bright > 1500
 print("PASS: the terminal is flat, dark and readable" if terminal_ok
 		else "FAIL: the terminal panel is not on screen")
+
+# The ornament: the friezes stripped to plain stone have to change the
+# frame, or the generated maps are not reaching anything
+plain, dp = mean_of("no-ornament")
+ornamented = sum(abs(p - q) for p, q in zip(dc, dp)) / float(len(dc))
+print("stripping the ornament moves the frame by %.2f of a level"
+		% ornamented)
+ornament_ok = ornamented > 1.5
+print("PASS: the generated ornament is on something" if ornament_ok
+		else "FAIL: nothing in the room wears the generated maps")
 sys.exit(0 if (ok and probe_ok and dissolve_ok and typing_ok and
-		terminal_ok) else 1)
+		terminal_ok and ornament_ok) else 1)
 PY
