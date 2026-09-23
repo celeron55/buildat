@@ -798,9 +798,11 @@ local AMBER = {1.0, 0.62, 0.12}
 -- **The orb's own orange** (user, 2026-09-23): the glow reads white in
 -- the middle only because it saturates on brightness -- the emissive is
 -- well above 1 -- and what it throws on the stone is this. A paler warm
--- (1.0, 0.72, 0.45) lit the room beige; the reference's stone goes
--- properly orange where a glow reaches it.
-local WARM = {1.0, 0.55, 0.20}
+-- (1.0, 0.72, 0.45) lit the room beige; (1.0, 0.55, 0.20) read yellow
+-- against the reference frame. It wants to be **further toward red than
+-- it looks like it should**, because the middle of every glow is
+-- clipped white and only the falloff carries the hue.
+local WARM = {1.0, 0.24, 0.06}
 -- **Mildly cold, not blue** (user, 2026-09-23). At (0.72, 0.85, 1.0)
 -- the light from above painted half the room blue -- 48 per cent cool
 -- pixels against the reference frame's 30.
