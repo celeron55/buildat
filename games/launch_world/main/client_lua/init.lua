@@ -648,12 +648,23 @@ local viewport = magic.Viewport:new(scene,
 -- white -- which is what a source should do -- and the wall stops short
 -- of it.
 do
-	-- **On by default, and without HDR.** Urho3D's Tonemap works append-
-	-- ed to the client's own render path; what drew a black frame was
-	-- `HDRRendering`, on its own and with no effect appended at all
-	-- (mean 2 of 255). So the room is tonemapped in LDR: the highlights
-	-- roll off instead of clipping, which took the pure-white share from
-	-- 3.58 per cent to nothing.
+	-- **On by default, and without HDR.** Urho3D's Tonemap works
+	-- appended to the client's own render path; what draws a black frame
+	-- is `HDRRendering`. So the room is tonemapped in LDR: the
+	-- highlights roll off instead of clipping, which took the pure-white
+	-- share from 3.58 per cent to nothing.
+	--
+	-- **What HDR does here, exactly** (BUILDAT_LAUNCH_HDR=1 to see it):
+	-- the frame is not black, it is *only the unlit materials* -- the
+	-- orbs and the readout draw and everything lit by a point light does
+	-- not. Brighten the shot six times and that is what is in it. So the
+	-- light passes are not reaching the HDR buffer, and the base pass
+	-- is. games/voxel_lighting renders in HDR with the same three
+	-- effects appended in the same order, and the difference that is
+	-- left is that its scene is lit by a **directional** light and this
+	-- one by points. That is where the next look starts, and it is a
+	-- client-wide question rather than this room's: nothing else in the
+	-- tree lights an HDR scene with point lights.
 	local want = buildat.get_env("BUILDAT_LAUNCH_TONEMAP") or "Tonemap"
 	local hdr = (buildat.get_env("BUILDAT_LAUNCH_HDR") or "") ~= ""
 	if want ~= "" or hdr then
