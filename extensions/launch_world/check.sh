@@ -675,6 +675,50 @@ if [ -z "$read_back" ] || [ "${put:-0}" -lt 1 ]; then
 	exit 1
 fi
 
+# **And ContentDB opens from the room** ([LAUNCH_WORLD]'s version one
+# asks for it, and nothing was checking it). The room's job is to get a
+# player there: the action is the launch grid's, vanilla starts with
+# menu=contentdb and draws its games screen with a row to install.
+#
+# **Against a mirror of this tree's own**, the one [FIRST_RUN] uses, so
+# the check neither needs the network nor asks content.luanti.org for a
+# listing on every run. Without one the screen is an error dialog, so
+# this would otherwise be a check that fails when the tree is offline.
+cdb_game=$(ls "$here/user/luanti/games" 2>/dev/null | head -1)
+if [ -z "$cdb_game" ]; then
+	echo "SKIP: no installed Luanti game to mirror for ContentDB" >&2
+	exit 2
+fi
+rm -rf "$out/cdb_mirror"; mkdir -p "$out/cdb_mirror"
+"$here/util/contentdb_mirror.sh" "$out/cdb_mirror" \
+	"$here/user/luanti/games/$cdb_game" Wuzzy "$cdb_game" "$cdb_game" \
+	> /dev/null || { echo "SKIP: no ContentDB mirror" >&2; exit 2; }
+pkill -f "http.server 30211" 2>/dev/null || true
+(cd "$out/cdb_mirror" && exec python3 -m http.server 30211 \
+	> "$out/cdb_mirror.log" 2>&1) &
+mirror=$!
+sleep 1
+{ echo "delay 6000"; echo "event mode menu"; echo "delay 600"
+	for k in C O N T E N T D B; do echo "keypress $k"; done
+	echo "delay 400"; echo "keypress Return"
+	echo "delay 25000"; echo "event scan 8 cdb"
+	echo "delay 2000"; echo "quit"; } > "$out/cmds_cdb.txt"
+rm -f "$out/cdb_cli.log" "$out/cdb_cli_server.log"
+BUILDAT_CONTENTDB_URL=http://localhost:30211 \
+	timeout 150 bin/buildat -m launch_world -D ../user -w 960x540 -l 3 \
+	-L "$out/cdb_cli.log" -c @"$out/cmds_cdb.txt" > /dev/null 2>&1
+kill "$mirror" 2>/dev/null; wait "$mirror" 2>/dev/null
+asked=$(grep -ac "launch_w.*: launch: ContentDB" "$out/cdb_cli.log")
+drew=$(grep -ac 'scan cdb: .*text "ContentDB: games"' "$out/cdb_cli.log")
+rows=$(grep -ac 'scan cdb: .*text "Install"' "$out/cdb_cli.log")
+echo "the room asked for ContentDB $asked times; the screen drew $drew" \
+		"with $rows rows to install"
+if [ "$asked" -lt 1 ] || [ "$drew" -lt 1 ] || [ "$rows" -lt 1 ]; then
+	echo "FAIL: ContentDB does not open from the room"
+	grep -a "launch_w.*: launch: " "$out/cdb_cli.log" | tail -3
+	exit 1
+fi
+
 # **A save opens by name, end to end** ([LAUNCH_WORLD]: the saves are the
 # floor's, and a save is the one launch the grid has no tile for). This
 # had only ever been demonstrated as far as the desk's data allowed: every
