@@ -260,11 +260,12 @@ fi
 bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
 	-c @"$out/cmds2.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli2.log"
-read_back=$(grep -a "launch_w.*: save: .* read" "$out/cli2.log" | head -1 |
-	sed 's/.*save: //')
+read_back=$(grep -a "launch_w.*: save: .* rows read" "$out/cli2.log" |
+	head -1 | sed 's/.*save: //')
 echo "a second client read back: ${read_back:-(nothing)}"
-if [ -z "$read_back" ]; then
-	echo "FAIL: the room forgot what the player placed"
+put=$(echo "$read_back" | sed -n 's/.*, \([0-9]*\) spheres put back.*/\1/p')
+if [ -z "$read_back" ] || [ "${put:-0}" -lt 1 ]; then
+	echo "FAIL: the room forgot what the player placed or moved"
 	exit 1
 fi
 

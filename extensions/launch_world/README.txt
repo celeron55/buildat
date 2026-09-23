@@ -149,11 +149,13 @@ line is a thing that has been seen to fail:
     placing and digging do something       -- and write the save
     E picks up and right click puts down
     the terminal changes a setting         -- and changes it back
-    a second client reads the save back    -- the diff survives a restart
+    a second client reads the save back    -- voxels and a moved sphere
 
-The player's voxels are a diff against the generated room, in
-user/launch_world/room.txt -- one "x,y,z" a line, a file a person can
-read and delete.
+What the player changed is a diff against the generated room, in
+user/launch_world/room.txt: a voxel they placed is "x,y,z" on a line and
+a sphere they moved is "@<name> x y z", by name rather than by index,
+since installing a game changes the order of the list. A file a person
+can read and delete.
 
 Two of them exist because a feature drew nothing for a day while its own
 log line said otherwise, and two more were passing on the HUD's text

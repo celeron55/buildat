@@ -1404,21 +1404,53 @@ local DIG_SECONDS = 1.0
 local SAVE_DIR = __buildat_get_path("user") .. "/launch_world"
 local SAVE_PATH = SAVE_DIR .. "/room.txt"
 
--- The player's own voxels, read at boot. One key a line, which is a file
--- a person can read and delete.
+-- **And where the player moved a sphere to.** The room's own layout is
+-- generated, so a sphere that has not been moved is not in the file at
+-- all; a line is "@<name> x y z" and the name is the thing's own, since
+-- the tree's list can change order between boots and an index cannot
+-- survive a game being installed.
+moved = {}
+
+-- The player's own voxels and moved spheres, read at boot. One row a
+-- line, which is a file a person can read and delete.
 do
 	local f = io.open(SAVE_PATH, "rb")
 	if f then
 		local n = 0
 		for line in f:lines() do
 			local x, y, z = line:match("^(-?%d+),(-?%d+),(-?%d+)$")
+			local name, mx, my, mz =
+					line:match("^@(.-) (-?[%d%.]+) (-?[%d%.]+) (-?[%d%.]+)$")
 			if x then
 				room.placed[room.key(tonumber(x), tonumber(y), tonumber(z))] = true
+				n = n + 1
+			elseif name then
+				moved[name] = {x = tonumber(mx), y = tonumber(my),
+					z = tonumber(mz)}
 				n = n + 1
 			end
 		end
 		f:close()
-		log:info("save: " .. n .. " placed voxels read")
+		-- The spheres are already placed by the time this is read, so a
+		-- remembered one is moved rather than placed there: the room's
+		-- own layout is what a sphere has until the player touches it
+		local put = 0
+		for name, m in pairs(moved) do
+			for i, o in ipairs(ORBS) do
+				if o.name == name and orb_nodes[i] then
+					orb_nodes[i].position = magic.Vector3(m.x, m.y, m.z)
+					if light_nodes[i] then
+						light_nodes[i].position = magic.Vector3(m.x, m.y, m.z)
+					end
+					orb_places[i] = {x = m.x * VOXEL_M, y = m.y * VOXEL_M,
+						z = m.z * VOXEL_M}
+					put = put + 1
+					break
+				end
+			end
+		end
+		log:info("save: " .. n .. " rows read, " .. put ..
+				" spheres put back where the player left them")
 	end
 end
 
@@ -1435,9 +1467,17 @@ local function write_save()
 		if v then keys[#keys + 1] = k end
 	end
 	table.sort(keys)
+	local names = {}
+	for name in pairs(moved) do names[#names + 1] = name end
+	table.sort(names)
+	for _, name in ipairs(names) do
+		local m = moved[name]
+		keys[#keys + 1] = string.format("@%s %.3f %.3f %.3f", name,
+				m.x, m.y, m.z)
+	end
 	f:write(table.concat(keys, "\n"))
 	f:close()
-	log:info("save: " .. #keys .. " placed voxels written")
+	log:info("save: " .. #keys .. " rows written")
 end
 
 -- The voxel the crosshair is on, and the empty one in front of it. A
@@ -1830,6 +1870,11 @@ function place_carried()
 	end
 	orb_nodes[c.index] = c.node
 	orb_places[c.index] = {x = x * VOXEL_M, y = y * VOXEL_M, z = z * VOXEL_M}
+	-- Where the player left it, by name: the tree's list can change
+	-- order between boots and an index cannot survive a game being
+	-- installed
+	moved[c.orb.name] = {x = x, y = y, z = z}
+	write_save()
 	log:info("carry: put down " .. c.orb.name .. ", " .. #carried ..
 			" in hand")
 	return true
