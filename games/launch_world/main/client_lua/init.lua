@@ -384,8 +384,10 @@ local PROPS = {
 	{"Pyramid", -12.0, 1.10, 4.8, 2.2, "machined"},
 }
 local MATS = {chrome = chrome, machined = machined, stone = stone}
+prop_nodes = {}
 for _, o in ipairs(PROPS) do
-	part(o[1], magic.Vector3(o[2], o[3], o[4]),
+	prop_nodes[#prop_nodes + 1] = part(o[1],
+			magic.Vector3(o[2], o[3], o[4]),
 			magic.Vector3(o[5], o[5], o[5]), MATS[o[6]])
 end
 
@@ -1131,6 +1133,43 @@ function handle_dissolve_update(event_type, event_data)
 end
 magic.SubscribeToEvent("Update", "handle_dissolve_update")
 
+-- **Nothing is ever static.** The era this room refers to treated a
+-- still frame as a bug: idle rotation, breathing, drift. So the orbs
+-- breathe on their own clocks and the loose chrome turns, slowly enough
+-- that it reads as the room being alive rather than as animation.
+--
+-- **F7 freezes it**, which is what the checks use: every comparison
+-- here is between two frames and a room that drifts has no two frames
+-- alike. The freeze is the exception that proves the rule, and the
+-- runner asserts the drift is there before turning it off.
+still = false
+idle_t = 0
+local idle_bob = {}
+for i, o in ipairs(orb_places) do
+	idle_bob[i] = {node = orb_nodes[i], y = o.y, phase = i * 1.7}
+end
+
+function handle_idle_update(event_type, event_data)
+	if still then
+		return
+	end
+	idle_t = idle_t + event_data:GetFloat("TimeStep")
+	for _, b in ipairs(idle_bob) do
+		if b.node then
+			local p = b.node.position
+			b.node.position = magic.Vector3(p.x,
+					(b.y + math.sin(idle_t * 0.7 + b.phase) * 0.09) * U, p.z)
+		end
+	end
+	-- The loose chrome turns, each at its own rate: a sphere turning is
+	-- only visible in what it reflects, which is exactly the point of
+	-- putting a checkerboard under it
+	for i, n in ipairs(prop_nodes) do
+		n.rotation = magic.Quaternion(0, idle_t * (4 + i * 1.3) % 360, 0)
+	end
+end
+magic.SubscribeToEvent("Update", "handle_idle_update")
+
 -- **The loading reel**: it turns because the frame genuinely turns, and
 -- it turns while a bay is coming apart -- which in this room is what
 -- loading is. Honest only now that the connect is off the main thread
@@ -1487,6 +1526,10 @@ function handle_keydown(event_type, event_data)
 	-- made: the bays carried the meander until they became voxels, and
 	-- then the materials sat in the file drawing nothing. So a run
 	-- shoots the frame with the friezes plain and asserts it changed.
+	if key == magic.KEY_F7 then
+		still = not still
+		log:info("idle drift " .. (still and "frozen" or "running"))
+	end
 	if key == magic.KEY_F6 then
 		ornament_on = not ornament_on
 		for _, f in ipairs(frieze_nodes) do

@@ -26,6 +26,15 @@ srv=$(pgrep -x buildat_server | head -1)
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 { echo "delay 5000"
+	# **The room is never static** -- the era reference's own rule, and
+	# the reason every comparison below freezes it first. Two frames a
+	# second apart, then F7.
+	echo "screenshot $out/drift-a.png"
+	echo "delay 1200"
+	echo "screenshot $out/drift-b.png"
+	echo "delay 400"
+	echo "keypress F7"
+	echo "delay 800"
 	n=1
 	for name in $names; do
 		echo "keypress F$n"
@@ -252,6 +261,15 @@ terminal_ok = dark < 40 and bright > 1500
 print("PASS: the terminal is flat, dark and readable" if terminal_ok
 		else "FAIL: the terminal panel is not on screen")
 
+# The drift: two frames a second apart, before anything was frozen
+drift_a, da2 = mean_of("drift-a")
+drift_b, db2 = mean_of("drift-b")
+drift = sum(abs(p - q) for p, q in zip(da2, db2)) / float(len(da2))
+print("the room drifts by %.2f of a level in a second" % drift)
+drift_ok = drift > 0.20
+print("PASS: nothing in the room is static" if drift_ok
+		else "FAIL: the room is a still frame")
+
 # The ornament: the friezes stripped to plain stone have to change the
 # frame, or the generated maps are not reaching anything
 plain, dp = mean_of("no-ornament")
@@ -262,5 +280,5 @@ ornament_ok = ornamented > 1.5
 print("PASS: the generated ornament is on something" if ornament_ok
 		else "FAIL: nothing in the room wears the generated maps")
 sys.exit(0 if (ok and probe_ok and dissolve_ok and typing_ok and
-		terminal_ok and ornament_ok) else 1)
+		terminal_ok and ornament_ok and drift_ok) else 1)
 PY
