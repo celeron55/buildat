@@ -389,6 +389,20 @@ local function apply_technique(node)
 	end
 end
 
+-- **Where a voxel is, in the scene.** Voxel v spans [v, v + 1], so its
+-- centre is half a voxel past its index. One place for it, because it
+-- was written out by hand at four call sites and the selection box got
+-- it wrong (user, 2026-09-23: the box is off from the voxels).
+local function at_voxel(x, y, z)
+	return magic.Vector3(x + 0.5, y + 0.5, z + 0.5)
+end
+
+-- And back: which voxel a point in the scene is inside. Voxel v spans
+-- [v, v + 1], so this is the plain floor of the coordinate.
+local function voxel_of(p)
+	return math.floor(p)
+end
+
 local CHUNK = 16
 rows = room.build()
 local chunk_nodes = {}
@@ -1048,8 +1062,14 @@ local function set_preset(n)
 			-- 1, so the middle clips and only the falloff at its edge
 			-- shows the colour it casts. That is separate from how much
 			-- orange it throws on the stone, which is the light below.
-			local bright = magic.Color(e[1][1] * 7.0, e[1][2] * 7.0,
-					e[1][3] * 7.0, 1)
+			--
+			-- **And the multiplier has to clear the *smallest* channel.**
+			-- At seven the orange's blue was 0.42 and never came near
+			-- saturation, so the middle stayed orange and the orb read
+			-- as a flame rather than as a lamp (user, 2026-09-23). At
+			-- twenty-six the blue clears 1.5 and the core goes white.
+			local bright = magic.Color(e[1][1] * 26.0, e[1][2] * 26.0,
+					e[1][3] * 26.0, 1)
 			orb_bright[i] = bright
 			orb_mats[i]:SetShaderParameter("MatDiffColor", bright)
 		end
@@ -1538,7 +1558,10 @@ local fps = {x = HOME_FROM.x, y = FPS_EYE, z = HOME_FROM.z,
 -- floor is flat at y = 0, which is true of this room and of no other.
 local PLAYER_R = 0.25
 local function solid_at(x, y, z)
-	return room.voxel_at(math.floor(x / VOXEL_M), math.floor(y / VOXEL_M),
+	-- Metres in, and the same off-by-one the ray had: a point is in the
+	-- voxel whose index is the floor plus one
+	return room.voxel_at(math.floor(x / VOXEL_M),
+			math.floor(y / VOXEL_M),
 			math.floor(z / VOXEL_M)) ~= room.id.air
 end
 local function blocked(x, y, z)
@@ -1736,9 +1759,9 @@ local function ray_voxel()
 	local lx, ly, lz
 	local t = 0
 	while t <= REACH / VOXEL_M do
-		local x = math.floor(px + view_dir.x * t)
-		local y = math.floor(py + view_dir.y * t)
-		local z = math.floor(pz + view_dir.z * t)
+		local x = voxel_of(px + view_dir.x * t)
+		local y = voxel_of(py + view_dir.y * t)
+		local z = voxel_of(pz + view_dir.z * t)
 		if x ~= lx or y ~= ly or z ~= lz then
 			if room.voxel_at(x, y, z) ~= room.id.air then
 				return x, y, z, lx, ly, lz
@@ -1752,7 +1775,9 @@ end
 
 -- The selection box, one wireframe cube moved about
 local wire = scene:CreateChild("wireframe")
-wire.scale = magic.Vector3(1.02, 1.02, 1.02)
+-- Wide enough that its lines are outside the voxel's own faces; at 1.02
+-- the box was inside the cube and invisible
+wire.scale = magic.Vector3(1.04, 1.04, 1.04)
 do
 	local o = wire:CreateComponent("StaticModel")
 	o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
@@ -1763,6 +1788,21 @@ do
 	o.material = m
 	o.castShadows = false
 	wire.enabled = false
+end
+
+-- A second candidate box, for settling where a voxel actually is
+wire2 = scene:CreateChild("wireframe2")
+wire2.scale = magic.Vector3(0.8, 0.8, 0.8)
+do
+	local o = wire2:CreateComponent("StaticModel")
+	o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+	local m = material(magic.Color(0.3, 1.0, 0.4, 1), 1.0, 0.0)
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTextureUnlit.xml"))
+	m.fillMode = magic.FILL_WIREFRAME
+	o.material = m
+	o.castShadows = false
+	wire2.enabled = false
 end
 
 -- One voxel prised out of its slot: the lift is the progress, as it is
@@ -1814,8 +1854,8 @@ local function burst(x, y, z)
 	for _ = 1, 8 do
 		if #motes >= MAX_MOTES then break end
 		local n = scene:CreateChild("mote")
-		n.position = magic.Vector3((x + math.random()) ,
-				(y + math.random()), (z + math.random()))
+		n.position = magic.Vector3(x + math.random(),
+				y + math.random(), z + math.random())
 		n.scale = magic.Vector3(0.22, 0.22, 0.22)
 		local o = n:CreateComponent("StaticModel")
 		o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
@@ -1859,7 +1899,7 @@ function handle_dig_update(event_type, event_data)
 			(x and {nil, nil, nil, ex, ey, ez} or nil)
 	wire.enabled = mine and true or false
 	if mine then
-		wire.position = magic.Vector3(x + 0.5, y + 0.5, z + 0.5)
+		wire.position = at_voxel(x, y, z)
 	end
 	-- **Left held on a sphere lifts it, and at a second it launches**
 	-- (user): the lift *is* the progress -- no bar, no ring -- and it is
@@ -2550,6 +2590,26 @@ set_preset(1)
 -- load, no focus to take and give back, and a room whose whole point is
 -- how much it leaves out can spell twenty-six letters itself. The
 -- upgrade is a LineEdit the moment anything needs a caret or paste.
+-- **A crosshair, thin and white and small** (user, 2026-09-23). FPS
+-- mode aims with it -- placing, digging, picking a sphere up -- and
+-- without one a player is guessing where the middle is. Two one-pixel
+-- bars rather than a texture: it needs no resource.
+do
+	local function bar(w, h)
+		local e = magic.ui.root:CreateChild("BorderImage")
+		e.texture = checker_texture(2, 1, magic.Color(1, 1, 1, 1),
+				magic.Color(1, 1, 1, 1))
+		e.imageRect = magic.IntRect(0, 0, 2, 2)
+		e.size = magic.IntVector2(w, h)
+		e.horizontalAlignment = magic.HA_CENTER
+		e.verticalAlignment = magic.VA_CENTER
+		e.color = magic.Color(1, 1, 1, 0.7)
+		e.priority = 40
+		return e
+	end
+	crosshair = {bar(9, 1), bar(1, 9)}
+end
+
 local prompt_text = magic.ui.root:CreateChild("Text")
 prompt_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 26)
 prompt_text.horizontalAlignment = magic.HA_CENTER
