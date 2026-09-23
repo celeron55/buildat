@@ -825,10 +825,16 @@ local function preset_lights(orb, sky, orb_i, sky_i)
 		-- being geometry -- an orb behind the wall's plane gives its
 		-- outward face nothing whatever the range is. **A pick, and
 		-- the user's to overrule.**
-		l[i] = {orb, orb_i, 7 * U}
+		l[i] = {orb, orb_i, 11 * U}
 	end
 	l[BAYS + 1] = {sky, sky_i, 17 * U}
-	l[BAYS + 2] = {sky, sky_i * 0.60, 16 * U}
+	-- **Bluer than the light it stands in for.** What a fill replaces
+	-- here is the bounce a path trace gets free, and in a room lit from
+	-- a cold opening the bounce is colder than the source; the room read
+	-- 21 per cent cool pixels against the reference frame's 30 with the
+	-- fill the same colour as the opening.
+	l[BAYS + 2] = {{sky[1] * 0.50, sky[2] * 0.76, sky[3]},
+		sky_i * 0.72, 16 * U}
 	return l
 end
 
@@ -839,8 +845,8 @@ local PRESETS = {
 		name = "cold_in_warm_out",
 		-- The two the probe sheet sweeps; see probe_sheet.sh
 	lights = preset_lights(WARM, COLD_WHITE,
-			tonumber(buildat.get_env("BUILDAT_LAUNCH_ORB") or "") or 6.5,
-			tonumber(buildat.get_env("BUILDAT_LAUNCH_SKY") or "") or 2.0),
+			tonumber(buildat.get_env("BUILDAT_LAUNCH_ORB") or "") or 16.0,
+			tonumber(buildat.get_env("BUILDAT_LAUNCH_SKY") or "") or 2.2),
 	},
 	{
 		name = "warm_in_cold_out",
@@ -868,7 +874,11 @@ local PBR_INTENSITY = 25
 -- Shadows on, and a map big enough for a wall of relief: they are
 -- required rather than optional here ([LAUNCH_WORLD]'s wall)
 magic.renderer.drawShadows = true
-magic.renderer.shadowMapSize = 2048
+-- **1024, not 2048.** Eleven shadow-casting lights -- ten cube maps for
+-- the orbs and the spot overhead -- at 2048 dropped the frame rate far
+-- enough that the walker's own dt clamp halved its speed, and a timed
+-- walk in a check stopped reaching the wall (2026-09-23).
+magic.renderer.shadowMapSize = 1024
 
 local lights = {}
 -- Kept so a carried orb's light can follow it: an orb is its own light
@@ -896,10 +906,18 @@ for i, place in ipairs(LIGHT_PLACES) do
 		light.castShadows = true
 		light.shadowBias = magic.BiasParameters(0.00006, 0.6)
 	else
-		-- The orbs stay plain point lights: no cube shadow maps and no
-		-- cones, the pocket's own contrast line being geometry
-		light.castShadows = false
-		light.shadowBias = magic.BiasParameters(0.00025, 0.5)
+		-- **The pocket's walls have to contain its orb** (user,
+		-- 2026-09-23: the leak onto the surrounding wall ruins the
+		-- look). Geometry alone does not do it -- the wall's outward
+		-- face is safe, being behind the orb, but every slab standing
+		-- proud of it has sideways faces that see straight into the
+		-- pocket, which is the leak this plan's fourth condition names
+		-- and a range cannot close. So the orbs cast after all: a cube
+		-- shadow map each, which is what "the whole shadow budget goes
+		-- to the overhead light" was avoiding, and the room is static
+		-- enough to afford it.
+		light.castShadows = true
+		light.shadowBias = magic.BiasParameters(0.00012, 0.55)
 	end
 	lights[i] = light
 	light_nodes[i] = node

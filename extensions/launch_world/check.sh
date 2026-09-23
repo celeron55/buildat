@@ -185,12 +185,15 @@ names="cold_in_warm_out warm_in_cold_out all_cold wrong"
 	# The ornament, stripped: the friezes go plain and the frame has to
 	# change. The generator's own check passed for a day while nothing in
 	# the room wore what it made.
+	# **F6 re-meshes the whole room**, the ornament being voxels now, and
+	# a shot 900 ms later sometimes landed before the mesh did -- which
+	# read as "nothing wears the generated maps" (2026-09-23)
 	echo "keypress F6"
-	echo "delay 900"
+	echo "delay 2200"
 	echo "screenshot $out/no-ornament.png"
 	echo "delay 400"
 	echo "keypress F6"
-	echo "delay 900"
+	echo "delay 2200"
 	# And the first preset again with the reflection probe taken off the
 	# zone, which is what says the probe reaches the metals
 	echo "keypress F1"
