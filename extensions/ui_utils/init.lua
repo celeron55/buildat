@@ -405,11 +405,20 @@ end
 function M.safe.show_message_dialog(message, on_close)
 	-- Don't stack multiple dialogs
 	if message_handle then
-		message_handle.append(message)
-		-- The newest caller is the one whose message is at the bottom of the
-		-- dialog, so its on_close is the one that runs
-		message_handle.on_close = on_close or message_handle.on_close
-		return
+		-- **A dialog can go without being closed** (2026-09-25): a
+		-- sandbox reset, or a stack popped from elsewhere, takes its
+		-- elements with it and leaves this handle pointing at a removed
+		-- Text -- which raises on the next append, in trusted code,
+		-- where it ends the client. Then it is not a dialog to add to,
+		-- and a new one is drawn instead.
+		if pcall(message_handle.append, message) then
+			-- The newest caller is the one whose message is at the
+			-- bottom of the dialog, so its on_close is the one that runs
+			message_handle.on_close = on_close or message_handle.on_close
+			return
+		end
+		log:warning("show_message_dialog: the last dialog is gone; a new one")
+		message_handle = nil
 	end
 
 	local root = uistack.main:push({desc="show_message_dialog"})

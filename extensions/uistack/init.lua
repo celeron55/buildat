@@ -22,6 +22,13 @@ local ui_stack_name_i = 1  -- For generating a unique name for each stack
 local last_stack_with_pushed_element = nil
 
 -- Root can be a sandboxed or non-sandboxed element
+-- Whether a wrapper's element has been removed under it: magic_sandbox
+-- marks every wrapper of a removed UIElement, and reaching one raises
+local function element_gone(e)
+	local m = getmetatable(e)
+	return m == nil or m.dead ~= nil
+end
+
 function M.UIStack(root)
 	if not getmetatable(root) or not getmetatable(root).unsafe then
 		error("UIStack can only be used with a sandboxed root")
@@ -43,6 +50,16 @@ function M.UIStack(root)
 
 		if type(options) == "string" then options = {desc = options} end
 		options = options or {}
+		-- **An entry whose element has gone is dropped** ([LEAVE_POP]):
+		-- a sandbox reset removes the elements under the stack's
+		-- entries, and reaching one of them raises ([UI_UAF]'s guard,
+		-- which is right). Hiding a dead top on the way to drawing a
+		-- new screen ended the client (2026-09-25, the exploit hunt's
+		-- own result dialog).
+		while #self.stack >= 1 and element_gone(self.stack[#self.stack]) do
+			table.remove(self.stack)
+			log:warning("UIStack:push(): an element below was already gone")
+		end
 		if #self.stack >= 1 then
 			local top = self.stack[#self.stack]
 			top:SetVisible(false)
@@ -167,16 +184,13 @@ function M.UIStack(root)
 		-- pop then never runs and the player is left with a button that
 		-- does nothing. A removed element needs no unsubscribing and no
 		-- reparenting; it needs taking off the stack.
-		if getmetatable(self.stack[#self.stack]) and
-				getmetatable(self.stack[#self.stack]).dead then
+		if element_gone(self.stack[#self.stack]) then
 			table.remove(self.stack)
 			log:warning("UIStack:pop(): the top element was already gone")
-			if #self.stack >= 1 then
+			if #self.stack >= 1 and not element_gone(self.stack[#self.stack]) then
 				local below = self.stack[#self.stack]
-				if not (getmetatable(below) and getmetatable(below).dead) then
-					below:SetVisible(true)
-					below:SetFocus(true)
-				end
+				below:SetVisible(true)
+				below:SetFocus(true)
 			end
 			return
 		end
