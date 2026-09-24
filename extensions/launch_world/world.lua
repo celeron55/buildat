@@ -83,6 +83,12 @@ for _, a in ipairs(api.launch_actions()) do
 	if o.category == "game" then
 		GAMES[#GAMES + 1] = o
 	else
+		-- **Everything in this table is on the floor by definition**
+		-- ([FLOOR_FLAG]): the flag was set only on the games that spill
+		-- off the wall, so an action on the floor was not the glossy
+		-- white sphere it should be and the check's own aim line was
+		-- never logged for it.
+		o.floor = true
 		FLOOR_ACTIONS[#FLOOR_ACTIONS + 1] = o
 	end
 end
