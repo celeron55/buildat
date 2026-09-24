@@ -5,6 +5,7 @@
 #   extensions/serverlist/check.sh
 #
 # tier: quick
+# cost: 31s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 #
 # A list of this check's own is served on a port of its own, so nothing
 # here asks content or servers.luanti.org for anything. What is asserted

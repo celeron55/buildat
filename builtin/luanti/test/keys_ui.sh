@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# cost: 16s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [KEY_BINDINGS]: the editor screen, driven -- the launcher's menu, its
 # "Luanti settings", "Key bindings...", the forward row picked and U
 # pressed, the row then says U; "Defaults" puts W back. Read through the

@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# cost: 47s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [TWO_AUDIENCES]' third option: the menu stacked over the room in
 # attract mode. What is asserted is that both halves came up, that the
 # *menu* has the input while the room is behind it, and that the room

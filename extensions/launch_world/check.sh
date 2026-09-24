@@ -11,6 +11,7 @@
 #   extensions/launch_world/check.sh
 #
 # tier: quick
+# cost: 392s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 #
 # It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0
 # passed, 1 failed, 2 could not run, and a last line saying which.

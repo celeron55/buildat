@@ -1,5 +1,7 @@
 #!/bin/bash
 # tier: quick
+# cost: 3s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
+# covers: client/sandbox.lua extensions/urho3d/** src/lua_bindings/**
 # [LAUNCH_SANDBOX]: **the hostile launch UI**. The launch UI is a slot
 # anybody can fill, so what has to be true is that what fills it cannot
 # reach past the verbs. extensions/sandbox_test is a launch UI that

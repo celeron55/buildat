@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# cost: 195s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [UI_PARITY]: a HUD text element's size.X multiplies the font, as Luanti's
 # hud.cpp does it (`font_size *= e->size.X`). The fixture adds the same word
 # at size 1 and size 3 and the scan measures what was drawn.

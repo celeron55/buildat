@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# cost: 243s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [DAWN_LIGHT]: the hour before the sun. At 4:00-5:00 (and 19:00-20:00) the
 # halo is up while the day ramp is still zero, so the ground was black under
 # a night sky with a bright halo in it. The same nine hours are shot twice --

@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# cost: 16s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [BOX_PLAYTEST_2] (2): the "Play on a Luanti server" tile from the grid,
 # a connect to an address nothing answers at: the failure must be said in
 # a dialog and OK must return to the connect screen, not the grid and not

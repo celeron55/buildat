@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# cost: 26s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [BOX_PLAYTEST_2] (13b): the server list's filter text is kept. The
 # luanti_client's "Play on a Luanti server" dialog is opened, "mine" typed
 # into the filter, the settings file read back, and the dialog opened again

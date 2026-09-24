@@ -12,6 +12,25 @@
 #   builtin/luanti/test/run_all.sh full --list
 #   ONLY='keys.*|focus' builtin/luanti/test/run_all.sh quick
 #
+# **--changed [range] is the regular check** ([SMOKE_PICK]): it takes
+# what git says changed and runs the cheapest runners that cover it,
+# which is one runner under a minute for most commits. The whole tier
+# is what a push runs.
+#
+#   builtin/luanti/test/run_all.sh --changed
+#   builtin/luanti/test/run_all.sh --changed origin/dev..HEAD --list
+#
+# **What a runner covers is where it lives**, so most of them say
+# nothing: a check under extensions/<x>/ covers extensions/<x>/**, one
+# under games/<g>/ covers games/<g>/**, and one in this directory
+# covers builtin/luanti/**. A "# covers:" line *adds* paths a runner
+# also proves -- the client's own sources, mostly -- and only the
+# runners that prove something outside their own tree carry one. A
+# central table of paths to runners would be a second place to forget.
+# **What a runner costs** is measured: every run appends its seconds to
+# local/run_all/costs, and a "# cost:" line seeds one that has never
+# run here. An unknown runner is assumed to cost a minute.
+#
 # The exit status is the run's: 0 if every runner passed or skipped, 1 if
 # any failed. A runner is never retried -- a check run three times and
 # taken at its best is how a real fault becomes a known flake
@@ -21,7 +40,15 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 tier="${1:-quick}"
 list_only=""
-[ "${2:-}" = "--list" ] && list_only=1
+changed_range=""
+changed=""
+if [ "$tier" = "--changed" ]; then
+	changed=1
+	tier="${TIER:-quick}"
+	changed_range="${2:-}"
+	[ "$changed_range" = "--list" ] && changed_range=""
+fi
+for a in "$@"; do [ "$a" = "--list" ] && list_only=1; done
 out="$here/../../../local/run_all"
 mkdir -p "$out"
 # **Every runner in the tree, not only this directory's** ([CI_RUNS]:
@@ -43,6 +70,77 @@ for f in "$here"/*.sh "$root"/extensions/*/check.sh "$root"/games/*/check.sh; do
 	[ -n "${ONLY:-}" ] && { echo "$name" | grep -qE "$ONLY" || continue; }
 	runners="$runners $name"
 done
+costs="$out/costs"
+# What a runner covers: where it lives, plus whatever its own header
+# adds. "**" is written for readability and is a plain glob here --
+# a shell case pattern's * crosses directories already.
+covers_of() {   # $1 path, $2 name
+	sed -n 's/^# covers: *//p' "$1" | tr ' ' '\n'
+	case "$2" in
+	extensions/*/check.sh|games/*/check.sh) echo "${2%/check.sh}/**" ;;
+	*) echo "builtin/luanti/**" ;;
+	esac
+}
+# What it costs: the last measured run, else its own seed, else a minute
+cost_of() {   # $1 path, $2 name
+	c=$(grep -a "^$2 " "$costs" 2>/dev/null | tail -1 | awk '{print $2}')
+	[ -n "$c" ] || c=$(sed -n 's/^# cost: *\([0-9]*\).*/\1/p' "$1" | head -1)
+	echo "${c:-60}"
+}
+if [ -n "$changed" ]; then
+	# **The cheapest runner for each changed file**, and their union is
+	# the set: a greedy answer, and the one a person would give. A file
+	# nothing covers is reported rather than quietly dropped.
+	files=$(git -C "$root" diff --name-only ${changed_range:-HEAD} 2>/dev/null)
+	[ -n "$files" ] || files=$(git -C "$root" diff --name-only HEAD~1 HEAD)
+	picked=""
+	uncovered=""
+	# **No globbing while the patterns are handled**: "**" in a covers
+	# line would otherwise be expanded against the directory it names
+	# the moment it leaves a command substitution
+	set -f
+	for f in $files; do
+		best=""; best_cost=999999
+		for name in $runners; do
+			path="$here/$name"; [ -f "$path" ] || path="$root/$name"
+			for pat in $(covers_of "$path" "$name"); do
+				pat=$(echo "$pat" | sed 's/\*\*/*/g')
+				# shellcheck disable=SC2254
+				case "$f" in
+				$pat)
+					c=$(cost_of "$path" "$name")
+					if [ "$c" -lt "$best_cost" ]; then best=$name; best_cost=$c; fi
+					;;
+				esac
+			done
+		done
+		if [ -n "$best" ]; then
+			echo "$picked" | grep -qx "$best" || picked="$picked
+$best"
+		else
+			uncovered="$uncovered $f"
+		fi
+	done
+	set +f
+	picked=$(echo "$picked" | grep -v '^$' | sort -u)
+	if [ -z "$picked" ]; then
+		# **Nothing matched**, so the named chain runs instead of the
+		# whole tier: a cold client, the room drawn behind a menu, a
+		# game started and left. It is a name and not a computed answer.
+		picked="${SMOKE_FALLBACK:-extensions/launch_menu_attract/check.sh}"
+		echo "nothing the runners cover changed; the named chain instead"
+	fi
+	[ -n "$uncovered" ] && echo "covered by nothing:$uncovered"
+	runners=$picked
+	total=0
+	for name in $runners; do
+		path="$here/$name"; [ -f "$path" ] || path="$root/$name"
+		total=$((total + $(cost_of "$path" "$name")))
+	done
+	echo "$(echo "$runners" | wc -w) runners, about ${total}s"
+	[ "$total" -gt "${BUDGET:-60}" ] &&
+		echo "(over the ${BUDGET:-60}s budget; the diff touches that much)"
+fi
 if [ -n "$list_only" ]; then
 	for r in $runners; do echo "$r"; done
 	exit 0
@@ -100,11 +198,14 @@ for name in $runners; do
 		fi ;;
 	esac
 	printf '%-6s %4ss  %s\n' "$state" "$((t1 - t0))" "${verdict:-(no verdict line)}"
+	# What it cost here, for the next --changed pick
+	echo "$name $((t1 - t0))" >> "$costs"
 done
 echo "---"
 echo "$pass passed, $fail failed, $skip skipped, $flaky known-flaky, in $(( $(date +%s) - started ))s"
 [ -n "$failed_names" ] && echo "failed:$failed_names"
 echo "logs in $out"
-[ "$fail" -eq 0 ] && echo "PASS: the $tier tier is green" ||
-	echo "FAIL: $fail runners of the $tier tier failed"
+what=$([ -n "$changed" ] && echo "set the diff picked" || echo "$tier tier")
+[ "$fail" -eq 0 ] && echo "PASS: the $what is green" ||
+	echo "FAIL: $fail runners of the $what failed"
 exit $([ "$fail" -eq 0 ] && echo 0 || echo 1)

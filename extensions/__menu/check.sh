@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# cost: 104s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [MENU_FALLBACK]: **every launch UI boots**. Nothing started
 # `launch_menu` in any check, so the quick tier signed off version one
 # while `-m launch_menu` was aborting the client (user, 2026-09-23) --
