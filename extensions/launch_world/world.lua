@@ -3061,6 +3061,9 @@ lift.enabled = false
 -- way it dislodges: {x, y, z, dx, dy, dz}
 local digging = nil
 local hold_t = 0
+-- When the hold began ([LAUNCH_WORLD], 2026-09-24); file-scope state,
+-- this chunk being at Lua's limit of 200 locals
+hold_started_us = nil
 -- **One hold, one launch** (user, 2026-09-23: holding on a game's
 -- sphere looped the animation and started nothing). A hold that reaches
 -- its second is spent, and the button has to come up before the next
@@ -3151,6 +3154,16 @@ function handle_dig_update(event_type, event_data)
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if held_was or held_by_others() then return end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
+	-- **A hold is a second of the player's time, not ten frames of it**
+	-- (2026-09-24): a frame's TimeStep is clamped by the engine at
+	-- 1/min_fps -- a tenth of a second -- so on a machine drawing a
+	-- frame a second a held button counted a tenth of what it was held
+	-- for, and a dig or a launch took ten seconds of real holding.
+	-- Under llvmpipe neither could be done at all, and the room's check
+	-- read it as "the hold started nothing". So the hold has a clock of
+	-- its own: wall time since the frame before, which is what the
+	-- player is actually measuring out.
+	local now_us = buildat.get_time_us()
 	-- The motes fall whatever the mode is
 	for i = #motes, 1, -1 do
 		local m = motes[i]
@@ -3197,6 +3210,7 @@ function handle_dig_update(event_type, event_data)
 	local holding = left_down and not left_spent
 	if not holding then
 		hold_t = 0
+		hold_started_us = nil
 	end
 	-- **The sphere the hold started on** is the one that launches: it
 	-- moves toward the player as it is pulled, which is enough to hand
@@ -3208,7 +3222,8 @@ function handle_dig_update(event_type, event_data)
 	end
 	local ob = orb_holding
 	if ob and ob > 0 and orb_nodes[ob] and holding then
-		hold_t = hold_t + dt
+		hold_started_us = hold_started_us or now_us
+		hold_t = (now_us - hold_started_us) / 1000000
 		local e = math.min(1, hold_t / DIG_SECONDS)
 		local n = orb_nodes[ob]
 		if not orb_home[ob] then
@@ -3223,6 +3238,7 @@ function handle_dig_update(event_type, event_data)
 				h[3] - view_dir.z * e * 1.6)
 		if hold_t >= DIG_SECONDS then
 			hold_t = 0
+			hold_started_us = nil
 			left_spent = true
 			n.position = magic.Vector3(h[1], h[2], h[3])
 			orb_home[ob] = nil
@@ -3239,6 +3255,7 @@ function handle_dig_update(event_type, event_data)
 		if n then n.position = magic.Vector3(h[1], h[2], h[3]) end
 		orb_home[i] = nil
 		hold_t = 0
+		hold_started_us = nil
 	end
 	-- The hold: a second, the same second a sphere takes. The voxel
 	-- leaves the room the moment it starts and the lift stands where it
@@ -3252,13 +3269,15 @@ function handle_dig_update(event_type, event_data)
 			mesh_lift(x, y, z)
 		end
 		local dg = digging
-		hold_t = hold_t + dt
+		hold_started_us = hold_started_us or now_us
+		hold_t = (now_us - hold_started_us) / 1000000
 		local e = math.min(1, hold_t / DIG_SECONDS)
 		lift.enabled = true
 		lift.position = at_voxel(dg[1] + dg[4] * e * 0.5,
 				dg[2] + dg[5] * e * 0.5, dg[3] + dg[6] * e * 0.5)
 		if hold_t >= DIG_SECONDS then
 			hold_t = 0
+			hold_started_us = nil
 			left_spent = true
 			lift.enabled = false
 			digging = nil
