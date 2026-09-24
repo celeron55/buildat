@@ -215,16 +215,32 @@ function M.show()
 			if e.name == now then at = i end
 		end
 		local button, text = make_row(menu.window, "Launch UI")
+		local take, take_text = make_row(menu.window, "Launch UI")
+		-- **Looking is not taking** (user, 2026-09-24): the row used to
+		-- boot each option as it stepped onto it, and one of the steps
+		-- is a bare console -- at which point there is no menu left and
+		-- no way back for anyone who does not know
+		-- `buildat.set_launch_ui("__menu")`. A cycling row cannot show
+		-- the next option without taking it, and taking this one
+		-- destroys the row; so the row cycles a **candidate** and the
+		-- one under it takes it. Switching is still one action from
+		-- either side ([TWO_AUDIENCES]) -- the action is "use it".
 		local function relabel()
+			local same = uis[at].name == now
+			-- The row is 320 wide and a title plus a suffix runs past
+			-- it, so which one is in use is the second row's to say
 			text.text = "Launch UI: " .. uis[at].title
+			take_text.text = same and "This one is in use" or
+					("Use " .. uis[at].title)
 		end
 		menu:add(button, function()
 			at = at % #uis + 1
 			relabel()
-			-- **Picking it is switching to it**: set_launch_ui remembers
-			-- the choice and boots that extension, so a menu that offers
-			-- the room and then makes you restart is a menu that does not
-			-- offer it.
+		end)
+		menu:add(take, function()
+			if uis[at].name == now then
+				return
+			end
 			local ok, err = api.set_launch_ui(uis[at].name)
 			if not ok then
 				log:warning("launch_ui: " .. tostring(err))

@@ -195,6 +195,14 @@ def m_dither(lum, alpha):
     return (v < 0.5) & (alpha >= 0.5)
 
 
+def m_outline_or_dither(lum, alpha):
+    """The union of the two that fail in opposite directions: the
+    outline is a shape with nothing inside it, the dither is tone with
+    no shape. Together, a readable silhouette whose large flat areas
+    carry some value."""
+    return m_outline(lum, alpha) | m_dither(lum, alpha)
+
+
 METHODS = [
     ("alpha", m_alpha),
     ("luminance 0.5", m_luminance),
@@ -204,6 +212,7 @@ METHODS = [
     ("outline", m_outline),
     ("alpha or Otsu", m_alpha_or_otsu),
     ("dither", m_dither),
+    ("outline|dither", m_outline_or_dither),
 ]
 
 
