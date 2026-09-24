@@ -2859,21 +2859,17 @@ function handle_fps_update(event_type, event_data)
 	-- dialog, the desk, the console -- and this room's answer to the
 	-- same fault [BOX_PLAYTEST_3] found in the Luanti client, where the
 	-- look ran under the settings and key screens.
-	if mode ~= "fps" or cam.to_from or terminal_open or pause_open then
-		return
-	end
-	-- **The walk is paid for in the player's time, not in frames**
-	-- ([LAUNCH_WORLD], 2026-09-24): the engine clamps a frame's
-	-- TimeStep at a tenth of a second, so on a machine drawing a frame
-	-- a second the player covered a tenth of the ground they asked for
-	-- -- four seconds of held W moved them a step, and a drive that
-	-- walks to the wall and digs it aimed at something out of reach.
-	-- Wall time since the last frame, and the movement below is taken
-	-- in slices of at most a tenth of it so a long frame never steps
-	-- through a wall.
+	-- **The clock is read before the gate, not after it** (2026-09-25):
+	-- the walk is paid for in wall time, so a gate that returns without
+	-- reading it leaves the whole time it was closed for sitting in the
+	-- next dt -- a camera flying home with W held walked the player
+	-- into the wall the moment it landed.
 	local now_us = buildat.get_time_us()
 	local dt = fps_last_us and (now_us - fps_last_us) / 1000000 or 0
 	fps_last_us = now_us
+	if mode ~= "fps" or cam.to_from or terminal_open or pause_open then
+		return
+	end
 	-- Two seconds of catch-up at most: a frame that took longer than
 	-- that is a stall, and a player does not want a stall walked out
 	dt = math.min(2.0, dt)
@@ -3776,7 +3772,13 @@ end
 -- stone is what is left when the hands are free.
 function place_voxel()
 	local pv = pointed_voxel
-	if not pv or not pv[4] then return end
+	-- Said out loud: "nothing happened" is the hardest thing to read out
+	-- of a drive's log afterwards, and the ray finding no face is the
+	-- usual reason -- standing flush against stone is one
+	if not pv or not pv[4] then
+		log:info("place: nothing to place against")
+		return
+	end
 	local x, y, z = pv[4], pv[5], pv[6]
 	if room.voxel_at(x, y, z) ~= room.id.air then return end
 	-- Nothing is put into a pocket, whether it holds an orb or not
@@ -4416,6 +4418,11 @@ notice_text.text = ""
 -- again; a wait says the same thing every frame it is still waiting.
 local NOTICE_SECONDS = 12
 function notice(text)
+	-- **Something to say takes the hint's place**, and the hint is over
+	-- when it does: the line is one line, so a notice over it ends the
+	-- hint as surely as the first step does, and it is said once here
+	-- rather than being lost between the two
+	drop_hint()
 	notice_text.text = text or ""
 	notice_left = (text ~= nil and text ~= "") and NOTICE_SECONDS or 0
 	hint_left = 0
@@ -4439,8 +4446,12 @@ function show_hint()
 	log:info("hint: the three keys, until the player uses one")
 end
 function drop_hint()
-	if hint_left > 0 and notice_text.text == HINT then
-		notice_text.text = ""
+	if hint_left > 0 then
+		-- The text only if it is still the hint's: a notice calls this
+		-- on its way to writing its own line
+		if notice_text.text == HINT then
+			notice_text.text = ""
+		end
 		log:info("hint: taken away")
 	end
 	hint_left = 0
@@ -5568,9 +5579,15 @@ function handle_seq_mode(event_type, event_data)
 			dissolve_bay(b, false)
 		end
 	end
+	-- **After the mode, not before it** (2026-09-25): `set_mode` starts
+	-- the walk from wherever the camera was left, so a mode change is
+	-- not a teleport -- and setting the standing place first meant this
+	-- event, whose whole job is to be one, put the player back wherever
+	-- they had walked to. A drive that walked to the wall and asked for
+	-- the standing place dug at the wall.
+	set_mode(want)
 	fps.x, fps.y, fps.z = HOME_FROM.x, FPS_EYE, HOME_FROM.z
 	fps.yaw, fps.pitch = 180.0, HOME_PITCH
-	set_mode(want)
 	fly_to(HOME_FROM, HOME_AT)
 	log:info("event mode: " .. want .. ", at the standing place")
 end

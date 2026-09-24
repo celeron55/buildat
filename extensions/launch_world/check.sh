@@ -234,23 +234,31 @@ fi
 	# key needs keydown/delay/keyup; keypress is one frame and moves
 	# nothing.
 	echo "screenshot $out/fps-stood.png"
-	echo "delay 400"
-	# **Carrying**: the orb the crosshair is already on comes into the
-	# hand with E and goes back down with right click. A scripted run
-	# cannot aim with the mouse -- SetMouseVisible(false) stands down in
-	# one, so GetMouseMove reads zero -- which is why the arrows turn.
+	echo "wait_log 20000 Wrote screenshot $out/fps-stood.png"
+	# **Carrying**: an orb the crosshair is on comes into the hand with E
+	# and goes back down with right click. A scripted run cannot aim with
+	# the mouse -- SetMouseVisible(false) stands down in one, so
+	# GetMouseMove reads zero -- which is why the look is said outright.
+	# **A floor orb, not the one straight ahead** ([POCKETS_ROUND]: a
+	# glowing orb in a pocket is stonework and does not come out), so the
+	# aim is the one worked out off the room's own orb sample above.
+	echo "look $tyaw $tpitch"
+	echo "delay 600"
 	echo "keypress E"
 	echo "delay 500"
 	echo "screenshot $out/carried.png"
-	echo "delay 300"
+	echo "wait_log 20000 Wrote screenshot $out/carried.png"
 	echo "mouse_click right"
 	echo "delay 500"
+	# Back to the standing place, the walk below being measured from it
+	echo "event mode fps"
+	echo "delay 900"
 	echo "keydown W"
 	echo "delay 1400"
 	echo "keyup W"
 	echo "delay 600"
 	echo "screenshot $out/fps-walked.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/fps-walked.png"
 	# **Placing and digging**: walk up to the wall, put one of the
 	# player's own voxels on it and prise it out again. The room's own
 	# stone has no wireframe and cannot be dug, so what is dug here is
@@ -279,7 +287,11 @@ fi
 	echo "delay 700"
 	echo "keyup W"
 	echo "delay 600"
-	echo "look 180 -50"
+	# **Steeply down, so the floor is what is hit** and not the wall's
+	# own base: the pockets fill the middle of the faced wall now
+	# ([POCKETS_ROUND]) and a shallower aim placed into one, which the
+	# room refuses. Thirty to eighty degrees all place on the floor.
+	echo "look 180 -70"
 	echo "delay 500"
 	echo "mouse_click right"
 	echo "delay 700"
@@ -316,7 +328,7 @@ fi
 	echo "keypress Return"
 	echo "delay 2500"
 	echo "screenshot $out/connect-failed.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/connect-failed.png"
 	echo "keypress Escape"
 	echo "delay 1500"
 	echo "event mode menu"
@@ -337,9 +349,9 @@ fi
 	# the reason every comparison below freezes it first. Two frames a
 	# second apart, then F7.
 	echo "screenshot $out/drift-a.png"
-	echo "delay 1200"
+	echo "wait_log 20000 Wrote screenshot $out/drift-a.png"
 	echo "screenshot $out/drift-b.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/drift-b.png"
 	echo "keypress F7"
 	echo "delay 800"
 	# The dissolve: a bay opens and closes again. What is checked is that
@@ -377,7 +389,7 @@ fi
 	echo "keypress Return"
 	echo "delay 1600"
 	echo "screenshot $out/dissolve-open.png"
-	echo "delay 600"
+	echo "wait_log 20000 Wrote screenshot $out/dissolve-open.png"
 	echo "keypress Escape"
 	# The cubes land in 0.9 s, but the voxels coming back have to be
 	# remeshed and relit before the picture is the picture it was.
@@ -388,7 +400,7 @@ fi
 	# not come back" (2026-09-24, my own doing).
 	echo "delay 5000"
 	echo "screenshot $out/dissolve-closed-again.png"
-	echo "delay 600"
+	echo "wait_log 20000 Wrote screenshot $out/dissolve-closed-again.png"
 	# The typing path: three letters fuzzy-match a name, Enter takes it
 	# and the camera flies in; Escape brings the room back.
 	#
@@ -407,15 +419,15 @@ fi
 	echo "keypress S"
 	echo "delay 600"
 	echo "screenshot $out/typed.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/typed.png"
 	echo "keypress Return"
 	echo "delay 2200"
 	echo "screenshot $out/launched.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/launched.png"
 	echo "keypress Escape"
 	echo "delay 2600"
 	echo "screenshot $out/back-home.png"
-	echo "delay 600"
+	echo "wait_log 20000 Wrote screenshot $out/back-home.png"
 	# The terminal: found by name like anything else, the camera square
 	# on to it and the panel flat over it.
 	echo "event mode menu"
@@ -437,7 +449,7 @@ fi
 	echo "keypress Right"
 	echo "delay 400"
 	echo "screenshot $out/terminal-changed.png"
-	echo "delay 300"
+	echo "wait_log 20000 Wrote screenshot $out/terminal-changed.png"
 	echo "keypress Right"
 	echo "delay 400"
 	echo "delay 400"
@@ -453,14 +465,14 @@ fi
 	echo "keypress F6"
 	echo "delay 2200"
 	echo "screenshot $out/no-ornament.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/no-ornament.png"
 	echo "keypress F6"
 	echo "delay 2200"
 	# The room as it is, and then the same frame with the reflection
 	# probe taken off the zone, which is what says the probe reaches the
 	# metals
 	echo "screenshot $out/room.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/room.png"
 	echo "keypress F5"
 	echo "delay 800"
 	echo "screenshot $out/room-noprobe.png"
@@ -477,15 +489,15 @@ fi
 	echo "event mode menu"
 	echo "delay 1500"
 	echo "screenshot $out/attract-home.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/attract-home.png"
 	echo "keypress F8"
 	echo "delay 5000"
 	echo "screenshot $out/attract-away.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/attract-away.png"
 	echo "keypress Space"
 	echo "delay 2400"
 	echo "screenshot $out/attract-back.png"
-	echo "delay 500"
+	echo "wait_log 20000 Wrote screenshot $out/attract-back.png"
 	# **The pause dialog**, which is the room's own way out of the
 	# program: in FPS with nothing left to pop, Escape comes up with it;
 	# Escape again takes it away.
@@ -495,11 +507,11 @@ fi
 	echo "event mode fps"
 	echo "delay 900"
 	echo "screenshot $out/prepause.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/prepause.png"
 	echo "keypress Escape"
 	echo "delay 700"
 	echo "screenshot $out/paused.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/paused.png"
 	# **The mouse does not turn the camera while a screen is up**
 	# (user, 2026-09-23: the pause menu turned it into yaw and pitch).
 	# A quarter turn's worth of movement, and the frame behind the
@@ -511,7 +523,7 @@ fi
 	echo "keypress Escape"
 	echo "delay 700"
 	echo "screenshot $out/unpaused.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/unpaused.png"
 	# **And the dialog answers the mouse** (the third playtest, 1):
 	# hovering a row selects it, and a click on the first row is "back
 	# to the room", which closes the dialog. Every menu this room draws
@@ -521,13 +533,13 @@ fi
 	echo "mouse_pos 640 400"
 	echo "delay 600"
 	echo "screenshot $out/pause-hover.png"
-	echo "delay 300"
+	echo "wait_log 20000 Wrote screenshot $out/pause-hover.png"
 	echo "mouse_pos 640 290"
 	echo "delay 400"
 	echo "mouse_click left"
 	echo "delay 700"
 	echo "screenshot $out/pause-clicked.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/pause-clicked.png"
 	# **The search walks its matches and the camera follows** (the
 	# second playtest, 5 and 6): a term with many matches, then the
 	# arrows, and each one has to be a different picture.
@@ -538,15 +550,15 @@ fi
 	echo "keypress S"
 	echo "delay 1200"
 	echo "screenshot $out/search1.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/search1.png"
 	echo "keypress Down"
 	echo "delay 1000"
 	echo "screenshot $out/search2.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/search2.png"
 	echo "keypress Down"
 	echo "delay 1000"
 	echo "screenshot $out/search3.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/search3.png"
 	echo "event mode fps"
 	echo "delay 900"
 	# **Menu mode's furniture is menu mode's** (the second playtest, 3
@@ -559,15 +571,15 @@ fi
 	echo "keypress G"
 	echo "delay 400"
 	echo "screenshot $out/term-menu.png"
-	echo "delay 300"
+	echo "wait_log 20000 Wrote screenshot $out/term-menu.png"
 	echo "keypress Tab"
 	echo "delay 700"
 	echo "screenshot $out/term-fps.png"
-	echo "delay 300"
+	echo "wait_log 20000 Wrote screenshot $out/term-fps.png"
 	echo "keypress Tab"
 	echo "delay 700"
 	echo "screenshot $out/term-back.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/term-back.png"
 	# **Not Escape**: with a term in the prompt Escape clears the term
 	# and stays in menu mode, so the console's own Escape below would
 	# pop the mode instead of opening the dialog
@@ -584,7 +596,7 @@ fi
 	echo "keypress Return"
 	echo "delay 1200"
 	echo "screenshot $out/room-console.png"
-	echo "delay 300"
+	echo "wait_log 20000 Wrote screenshot $out/room-console.png"
 	echo "text buildat.version()"
 	echo "delay 300"
 	echo "keypress Return"
@@ -630,7 +642,7 @@ fi
 	echo "wait_log 30000 game: back in the room"
 	echo "delay 1500"
 	echo "screenshot $out/back-from-game.png"
-	echo "delay 400"
+	echo "wait_log 20000 Wrote screenshot $out/back-from-game.png"
 	fi
 	# **And an orb answers the mouse** (the third playtest's rule, in
 	# the room rather than in a dialog): a click on one launches it, the
@@ -1021,7 +1033,8 @@ pkill -f "http.server 30211" 2>/dev/null || true
 	> "$out/cdb_mirror.log" 2>&1) &
 mirror=$!
 sleep 1
-{ echo "delay 6000"; echo "event mode menu"; echo "delay 600"
+{ echo "wait_log_any 60000 the room hums"; echo "delay 600"
+	echo "event mode menu"; echo "delay 600"
 	for k in C O N T E N T D B; do echo "keypress $k"; done
 	echo "delay 400"; echo "keypress Return"
 	# **Wait for the game to say it has the list, not for a guess**: the
@@ -1039,8 +1052,10 @@ sleep 1
 	# assertion below rather than passing quietly.
 	echo "delay 1200"; echo "mouse_pos 480 457"
 	echo "delay 300"; echo "mouse_click left"
-	echo "delay 6000"
-	echo "delay 2000"; echo "quit"; } > "$out/cmds_cdb.txt"
+	# The room says when it has the screen again, which is what the six
+	# seconds here were waiting for
+	echo "wait_log 30000 game: back in the room"
+	echo "delay 1500"; echo "quit"; } > "$out/cmds_cdb.txt"
 rm -f "$out/cdb_cli.log" "$out/cdb_cli_server.log"
 BUILDAT_CONTENTDB_URL=http://localhost:30211 \
 	timeout 150 bin/buildat -m launch_world -D ../user -w 960x540 -l 3 \
@@ -1101,22 +1116,27 @@ from PIL import Image
 out = sys.argv[1]
 
 def dark_share(path):
-	"""**A mark is a dark line on a lit ball**, and that is what to
-	measure. The earlier reading was colourfulness, because the mark
-	was then a game's own logo in the diffuse and its colours were the
-	signal; since a shared icon counts as no icon (2026-09-24) most
-	orbs wear the room's generated sigil, which is one bit cut into the
-	emission -- black on white, no colour at all, and a colour test
-	reads it as nothing.
+	"""**A mark is the dimmer part of a lit ball**, and that is what to
+	measure -- against the ball's own brightness rather than against a
+	fixed level. The earlier reading was colourfulness, because the
+	mark was then a game's own logo in the diffuse; then it was pixels
+	under 120, because the mark cut the emission to black. It does not
+	any more: [GLOW_MARK] settled at 0.04 of the emissive left under
+	it, which reads as a darker orange and never comes near 120.
 
-	So: how much of the disc is dark. The ball is the bright part of
-	the crop and the mark is what is dark inside it.
+	So: the share of the disc that is dimmer than the disc's own
+	brightest. That survives the cut moving, which it does with the
+	emissive multiplier.
 	"""
-	im = Image.open(path).convert("L")
+	im = Image.open(path).convert("RGB")
 	w, h = im.size
 	cx, cy = w // 2, int(h * 0.52)
 	px = list(im.crop((cx - 60, cy - 60, cx + 60, cy + 60)).getdata())
-	return 100.0 * sum(1 for p in px if p < 120) / float(len(px))
+	lum = sorted(0.3 * r + 0.6 * g + 0.1 * b for r, g, b in px)
+	bright = lum[int(len(lum) * 0.95)]
+	if bright <= 0:
+		return 0.0
+	return 100.0 * sum(1 for v in lum if v < bright * 0.8) / float(len(lum))
 
 own = "%s/mark_face_own.png" % out
 turned = "%s/mark_face_0.png" % out
@@ -1127,7 +1147,7 @@ for p in (own, turned):
 a, b = dark_share(own), dark_share(turned)
 print("the disc is %.1f%% dark with the mark presented, and %.1f%% with "
 		"it a quarter out" % (a, b))
-# Measured 35.1 against 0.0 in this room; the bar is the gap
+# Measured 36.1 against 0.0 in this room; the bar is the gap
 ok = a > 12.0 and b < a * 0.5
 if not ok:
 	print("FAIL: the orb does not present its mark" if a <= 6.0 else
@@ -1173,13 +1193,15 @@ fi
 # Two letters name it and nothing else in the room, Enter opens it, and
 # what is asserted is the far end: the server the room started took the
 # save's own path and drew no menu on the way.
-{ echo "delay 6000"; echo "event mode menu"; echo "delay 600"
+{ echo "wait_log_any 60000 the room hums"; echo "delay 600"
+	echo "event mode menu"; echo "delay 600"
 	echo "keypress Z"; echo "keypress Z"; echo "keypress A"
 	echo "delay 400"; echo "keypress Return"
-	# Ten seconds: the server says it opened the save about a second
-	# after the launch, and the rest of a world coming up is devtest's
-	# business, not this check's
-	echo "delay 10000"; echo "quit"; } > "$out/cmds_save.txt"
+	# **The room says when the game has the view**, which is what the ten
+	# seconds here were waiting for; the rest of a world coming up is
+	# devtest's business, not this check's
+	echo "wait_log 40000 game: the room stands down"
+	echo "delay 1500"; echo "quit"; } > "$out/cmds_save.txt"
 rm -f "$out/save_cli.log" "$out/save_cli_server.log"
 # A client that entered a game does not always get to its own quit
 # quickly; the tier's minute is not spent waiting for one that will not
@@ -1189,10 +1211,12 @@ timeout 120 bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
 # is about what is drawn, not about what can be reached, and a client
 # with 239 saves that can open twelve of them has lost the rest. With
 # the cap at nothing, every save is the prompt's to find.
-{ echo "delay 6000"; echo "event mode menu"; echo "delay 600"
+{ echo "wait_log_any 60000 the room hums"; echo "delay 600"
+	echo "event mode menu"; echo "delay 600"
 	echo "keypress Z"; echo "keypress Z"; echo "keypress A"
 	echo "delay 400"; echo "keypress Return"
-	echo "delay 10000"; echo "quit"; } > "$out/cmds_hidden.txt"
+	echo "wait_log 40000 game: the room stands down"
+	echo "delay 1500"; echo "quit"; } > "$out/cmds_hidden.txt"
 rm -f "$out/hidden_cli.log" "$out/hidden_cli_server.log"
 BUILDAT_LAUNCH_SAVES=0 timeout 120 bin/buildat -m launch_world -D ../user \
 	-w 640x400 -l 3 -L "$out/hidden_cli.log" \
