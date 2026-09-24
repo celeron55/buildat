@@ -3655,6 +3655,15 @@ function pick_up(i)
 	if not node or not ORBS[i] or ORBS[i].empty then
 		return
 	end
+	-- **The pockets are stonework and the floor is where things move**
+	-- (user, 2026-09-24, [POCKETS_ROUND]): a game is part of the wall,
+	-- not a piece the player arranges. Saves and servers stand on the
+	-- floor and are the things that can be carried.
+	if not ORBS[i].floor then
+		notice(ORBS[i].name .. " is part of the wall")
+		log:info("carry: " .. ORBS[i].name .. " is stonework, not a piece")
+		return
+	end
 	local sc = orb_base_scale[i] or node.scale
 	-- A copy under the camera: the one in the room is switched off
 	-- rather than reparented, which keeps its place for putting down
@@ -3685,10 +3694,18 @@ end
 -- **Placing pops the top**, and the last thing picked up is the first
 -- put down
 function place_carried()
-	local c = table.remove(carried)
+	local c = carried[#carried]
 	if not c then return false end
-	c.held:Remove()
 	local pv = pointed_voxel
+	-- Nothing goes into a pocket ([POCKETS_ROUND]), and the orb stays in
+	-- the hand rather than falling somewhere else: the click was about
+	-- the carried thing, so it is taken either way
+	if pv and pv[4] and room.in_pocket(pv[4], pv[5], pv[6]) then
+		notice("nothing goes into a pocket")
+		return true
+	end
+	table.remove(carried)
+	c.held:Remove()
 	-- Where the crosshair is, a little out of the surface, or at arm's
 	-- length when it is pointing at nothing
 	local x, y, z
@@ -3757,6 +3774,13 @@ function place_voxel()
 	if not pv or not pv[4] then return end
 	local x, y, z = pv[4], pv[5], pv[6]
 	if room.voxel_at(x, y, z) ~= room.id.air then return end
+	-- Nothing is put into a pocket, whether it holds an orb or not
+	-- ([POCKETS_ROUND]): a pocket is not a shelf with a free slot
+	if room.in_pocket(x, y, z) then
+		notice("nothing goes into a pocket")
+		log:info("place: " .. room.key(x, y, z) .. " is in a pocket")
+		return
+	end
 	-- Not inside the player, who has no body to be pushed out of one
 	local px = voxel_of(cam.from.x / VOXEL_M)
 	local pz = voxel_of(cam.from.z / VOXEL_M)
