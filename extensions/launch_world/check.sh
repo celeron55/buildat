@@ -57,8 +57,13 @@ fi
 # read back here, which is the half a listening session depends on.
 mkdir -p "$out/tieruser/launch_world"
 printf '!sound 0.40 0.30\n' > "$out/tieruser/launch_world/room.txt"
+# **Every client run is under a timeout** (2026-09-24): a client can
+# hang in X11_ShowWindow waiting for the window manager to map its
+# window -- seen here on a `delay 2500; quit` sequence that sat for
+# twenty-two minutes -- and a check that waits forever on the desk's
+# own weather is a check nobody can read.
 { echo "delay 4000"; echo "quit"; } > "$out/cmds_snd.txt"
-bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
+timeout 120 bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
 	-L "$out/snd.log" -c @"$out/cmds_snd.txt" > /dev/null 2>&1
 snd=$(grep -a "launch_w.*: sound: the orbs at " "$out/snd.log" | head -1 |
 	sed 's/.*sound: //')
@@ -79,7 +84,7 @@ fi
 # orb does.
 mkdir -p "$out/tieruser/launch_world"
 { echo "delay 4000"; echo "quit"; } > "$out/cmds_tier0.txt"
-bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
+timeout 120 bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
 	-L "$out/tier0.log" -c @"$out/cmds_tier0.txt" > /dev/null 2>&1
 sample=$(grep -a "launch_w.*: orb sample: " "$out/tier0.log" | head -1 |
 	sed 's/.*orb sample: //')
@@ -116,7 +121,7 @@ read -r tyaw tpitch tover < "$out/aim.txt"
 { echo "delay 5000"; echo "look $tyaw $tpitch"; echo "delay 1500"
 	echo "look $tyaw $tover"; echo "delay 1500"; echo "quit"
 	} > "$out/cmds_tier.txt"
-bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
+timeout 120 bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
 	-L "$out/tier.log" -c @"$out/cmds_tier.txt" > /dev/null 2>&1
 wins=$(grep -ac "launch_w.*: pointing: the voxel at .* wins over orb" "$out/tier.log")
 takes=$(grep -ac "launch_w.*: pointing at orb .*(up its column)" "$out/tier.log")
@@ -537,7 +542,7 @@ fi
 	echo "mouse_click left"
 	echo "delay 1200"
 	echo "quit"; } > "$out/cmds.txt"
-bin/buildat -m launch_world -D ../user -w 1280x720 -l 3 \
+timeout 600 bin/buildat -m launch_world -D ../user -w 1280x720 -l 3 \
 	-c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 # And the client has to have got to the end of the sequence
@@ -786,7 +791,7 @@ fi
 # against a generated room: a second client, booted and closed, has to
 # find the voxel the first one left.
 { echo "delay 2500"; echo "quit"; } > "$out/cmds2.txt"
-bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
+timeout 180 bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
 	-c @"$out/cmds2.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli2.log"
 read_back=$(grep -a "launch_w.*: save: .* rows read" "$out/cli2.log" |
