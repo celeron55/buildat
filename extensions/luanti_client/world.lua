@@ -2195,7 +2195,11 @@ function M.new(magic, buildat, log, options)
 		for id, obj in pairs(objects) do
 			local props = obj.props
 			local pointable = props and props.pointable or 0
+			-- An object riding on a bone is not drawn ([OVER_SHOULDER]),
+			-- and what is not drawn is not pointed at either: the wieldview
+			-- at a player's feet took every punch aimed past it
 			if obj.position and pointable ~= 0 and not obj.is_self and
+					not obj.attached_to and
 					props.is_visible ~= false and
 					props.selection_min and props.selection_max then
 				local lo = {

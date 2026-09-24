@@ -26,6 +26,7 @@ M.CMD_SET_SPRITE = 3
 M.CMD_PUNCHED = 4
 M.CMD_UPDATE_ARMOR_GROUPS = 5
 M.CMD_SET_ANIMATION = 6
+M.CMD_ATTACH_TO = 8
 M.CMD_SET_PHYSICS_OVERRIDE = 9
 
 local PROPERTIES_VERSION = 4
@@ -112,6 +113,22 @@ function M.apply_message(obj, r)
 		end
 	elseif cmd == M.CMD_SET_TEXTURE_MOD then
 		obj.texture_mod = r:string()
+		obj.visual_stale = true
+	elseif cmd == M.CMD_ATTACH_TO then
+		-- **What rides on something else** (AO_CMD_ATTACH_TO): the parent
+		-- object, the bone of its model, and the offset in that bone's
+		-- frame. Nothing here follows a bone -- a b3d skeleton's bones are
+		-- not reachable from this side -- so an attached object has no
+		-- position this can compute, and its own last one is wrong:
+		-- VoxeLibre's wieldview then rides at its player's feet rather
+		-- than in the hand, which is what the box saw ([OVER_SHOULDER]).
+		-- Luanti puts it in the hand or not at all, so this takes the
+		-- second: parent 0 detaches and the object is drawn again.
+		local parent = r:s16()
+		obj.attach_bone = r:string()
+		obj.attached_to = parent ~= 0 and parent or nil
+		-- Both ways round: attaching takes the drawn object away and
+		-- detaching brings it back, and both go through the same queue
 		obj.visual_stale = true
 	elseif cmd == M.CMD_SET_PHYSICS_OVERRIDE then
 		-- A mod's physics_override for the player this object is

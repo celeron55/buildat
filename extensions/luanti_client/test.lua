@@ -1390,6 +1390,24 @@ objects.interpolate({obj}, 1.0)
 assert(math.abs(obj.position[1] - -319) < 1e-3,
 		"objects: it did not arrive, at "..obj.position[1])
 
+-- Attached to a bone: parent and bone are read, and what rides on
+-- something else is marked so nothing draws it at its own position
+-- ([OVER_SHOULDER])
+local att = serialize.writer()
+att:u8(objects.CMD_ATTACH_TO)
+att:s16(7) -- the parent object
+att:string("Arm_Right")
+att:v3f(0, 0, 0)  -- position in the bone's frame
+att:v3f(0, 0, 0)  -- rotation
+att:u8(1)         -- force_visible
+objects.apply_message(obj, serialize.reader(att:data()))
+assert(obj.attached_to == 7, "objects: the parent it rides on")
+assert(obj.attach_bone == "Arm_Right", "objects: the bone")
+local det = serialize.writer():u8(objects.CMD_ATTACH_TO):s16(0)
+		:string(""):v3f(0, 0, 0):v3f(0, 0, 0):u8(1):data()
+objects.apply_message(obj, serialize.reader(det))
+assert(obj.attached_to == nil, "objects: detaching brings it back")
+
 -- A message this does not implement leaves the object alone
 local unknown = serialize.writer():u8(objects.CMD_SET_ANIMATION)
 		:raw(string.rep("\0", 20)):data()

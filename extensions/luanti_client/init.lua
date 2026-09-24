@@ -1188,9 +1188,13 @@ local function show_client(host, port, name, password, mode)
 				object_head = object_head + 1
 				object_queued[id] = nil
 				local obj = world_objects[id]
-				-- Gone again, or the player's own in first person: nothing
-				-- to draw
-				if obj and (not obj.is_self or camera_mode ~= 1) then
+				-- Gone again, the player's own in first person, or riding
+				-- on a bone this cannot follow ([OVER_SHOULDER]: an
+				-- attached object drawn at its own position lands at the
+				-- player's feet): nothing to draw
+				if obj and obj.attached_to then
+					view:remove_object(id)
+				elseif obj and (not obj.is_self or camera_mode ~= 1) then
 					local t1 = buildat.get_time_us()
 					view:set_object(obj, object_resource)
 					built = built + 1
