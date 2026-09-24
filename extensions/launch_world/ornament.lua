@@ -49,11 +49,18 @@ function M.seed_of(text)
 	return h
 end
 
--- A field is a flat array of size*size numbers in 0..1, indexed from 1
--- (declared before the patterns, which all build one)
-local function field(size, v)
-	local f = {size = size}
-	for i = 1, size * size do
+-- A field is a flat array of w*h numbers in 0..1, indexed from 1
+-- (declared before the patterns, which all build one).
+--
+-- **Width and height, not one size** ([SIGIL_ROUND], 2026-09-24: a run
+-- of eight tiles is a strip eight times wider than it is tall, and
+-- every one of these carried a single `size` for both axes). `size`
+-- stays as the width, because everything that asks a square field for
+-- its size means that; `rows` is the height.
+local function field(size, v, rows)
+	local h = rows or size
+	local f = {size = size, rows = h}
+	for i = 1, size * h do
 		f[i] = v or 0
 	end
 	return f
@@ -61,7 +68,7 @@ end
 M.field = field
 
 local function at(f, x, y)
-	if x < 0 or y < 0 or x >= f.size or y >= f.size then
+	if x < 0 or y < 0 or x >= f.size or y >= (f.rows or f.size) then
 		return 0
 	end
 	return f[y * f.size + x + 1]
@@ -69,11 +76,14 @@ end
 M.at = at
 
 local function put(f, x, y, v)
-	if x < 0 or y < 0 or x >= f.size or y >= f.size then
+	if x < 0 or y < 0 or x >= f.size or y >= (f.rows or f.size) then
 		return
 	end
 	f[y * f.size + x + 1] = v
 end
+-- Exported beside at() and box(): a caller building a strip out of
+-- tiles writes into a field of its own ([SIGIL_ROUND])
+M.put = put
 
 local function box(f, x0, y0, w, h, v)
 	for y = y0, y0 + h - 1 do
@@ -850,28 +860,60 @@ end
 function M.maps(magic, h, inlay, opts)
 	opts = opts or {}
 	local size = h.size
+	-- A strip is wider than it is tall ([SIGIL_ROUND]); a square field
+	-- says nothing and is its own height
+	local rows = h.rows or size
 	local base = opts.base or magic.Color(0.30, 0.30, 0.33, 1)
 	local tint = opts.inlay or magic.Color(0.34, 0.16, 0.42, 1)
 	local relief = opts.relief or 0.45
 	local diff = magic.Image:new()
-	assert(diff:SetSize(size, size, 3), "Image:SetSize")
 	local norm = magic.Image:new()
-	assert(norm:SetSize(size, size, 3), "Image:SetSize")
-	for y = 0, size - 1 do
+	-- **Built as bytes and handed over once** ([ROOM_BOOT], 2026-09-24):
+	-- a 128-pixel tile is sixteen thousand pixels and the room makes
+	-- three of them before it can mesh, each written twice -- the
+	-- albedo and the normal -- a pixel at a time through the sandbox.
+	-- image_set_data takes the whole buffer; where it is missing (this
+	-- file runs under plain lua for its own sheets) the old path stays.
+	local bulk = magic.image_set_data ~= nil
+	local dpx, npx = {}, {}
+	if not bulk then
+		assert(diff:SetSize(size, rows, 3), "Image:SetSize")
+		assert(norm:SetSize(size, rows, 3), "Image:SetSize")
+	end
+	local function byte(v)
+		v = math.floor(v * 255)
+		if v < 0 then v = 0 elseif v > 255 then v = 255 end
+		return v
+	end
+	for y = 0, rows - 1 do
 		for x = 0, size - 1 do
 			-- The normal, by Sobel on the height
 			local nx = (at(h, x - 1, y) - at(h, x + 1, y)) * (opts.strength or 3)
 			local ny = (at(h, x, y - 1) - at(h, x, y + 1)) * (opts.strength or 3)
 			local l = math.sqrt(nx * nx + ny * ny + 1)
-			norm:SetPixel(x, y, magic.Color(nx / l * 0.5 + 0.5,
-					ny / l * 0.5 + 0.5, 1 / l * 0.5 + 0.5, 1))
+			if bulk then
+				npx[#npx + 1] = string.char(byte(nx / l * 0.5 + 0.5),
+						byte(ny / l * 0.5 + 0.5), byte(1 / l * 0.5 + 0.5))
+			else
+				norm:SetPixel(x, y, magic.Color(nx / l * 0.5 + 0.5,
+						ny / l * 0.5 + 0.5, 1 / l * 0.5 + 0.5, 1))
+			end
 			-- The albedo: the base, tinted where the inlay is, shaded by
 			-- the relief as if lit from the upper left
 			local c = at(inlay, x, y) > 0.5 and tint or base
 			local s = 1 - relief + relief * (0.5 + 0.5 * (nx - ny) / l +
 					0.35 * at(h, x, y))
-			diff:SetPixel(x, y, magic.Color(c.r * s, c.g * s, c.b * s, 1))
+			if bulk then
+				dpx[#dpx + 1] = string.char(byte(c.r * s), byte(c.g * s),
+						byte(c.b * s))
+			else
+				diff:SetPixel(x, y, magic.Color(c.r * s, c.g * s, c.b * s, 1))
+			end
 		end
+	end
+	if bulk then
+		magic.image_set_data(diff, size, rows, 3, table.concat(dpx))
+		magic.image_set_data(norm, size, rows, 3, table.concat(npx))
 	end
 	return diff, norm
 end

@@ -425,6 +425,16 @@ Safe.render_scene_to_texture = wrap_function({"Scene", "Node", "number",
 			scene, camera_node, w, h))
 end)
 
+-- **A whole image in one call** ([ROOM_BOOT]): the bytes are w * h *
+-- components of them, row by row from the top left, and for four
+-- components that is R, G, B, A. A generated tile written a pixel at a
+-- time is four thousand crossings of the sandbox; this is one.
+Safe.image_set_data = wrap_function({"Image", "number", "number", "number",
+		"string"}, function(image, w, h, components, data)
+	-- wrap_function has already unwrapped the Image
+	__buildat_image_set_data(image, w, h, components, data)
+end)
+
 -- The viewports the user's graphics preferences are applied to, as against
 -- the raw renderer:SetViewport() ones which are drawn the way the game says
 -- and nothing else. Use this instead of renderer:SetViewport(): the engine

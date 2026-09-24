@@ -2124,6 +2124,14 @@ function M.define(dst, util)
 					{"Image", "number", "number", "number"}),
 			SetPixel = util.self_function("SetPixel", {},
 					{"Image", "number", "number", "Color"}),
+			-- **The same write without a Colour** ([ROOM_BOOT],
+			-- 2026-09-24): a generated tile is four thousand pixels and
+			-- the room draws seventy of them at boot, so a Colour an
+			-- object a pixel is a quarter of a million allocations
+			-- nobody looks at. The integer is 0xAABBGGRR, which is what
+			-- Urho3D's Color::ToUInt() packs.
+			SetPixelInt = util.self_function("SetPixelInt", {},
+					{"Image", "number", "number", "number"}),
 			GetPixel = util.self_function("GetPixel", {dst.Color},
 					{"Image", "number", "number"}),
 			-- Scaled rather than cropped, which is what a cube map face

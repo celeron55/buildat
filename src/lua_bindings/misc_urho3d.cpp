@@ -8,6 +8,7 @@
 #include <tolua++.h>
 #include <Context.h>
 #include <Scene.h>
+#include <Image.h>
 #include <Profiler.h>
 #include <ResourceCache.h>
 #include <Camera.h>
@@ -221,6 +222,36 @@ static int l_set_voxel_data(lua_State *L)
 	return 0;
 }
 
+// image_set_data(image, w, h, components, data: string)
+// **A generated tile in one call** ([ROOM_BOOT], 2026-09-24): the room
+// draws seventy marks at boot and each was four thousand wrapped
+// SetPixel calls -- a quarter of a million crossings of the sandbox for
+// pictures that are built in Lua and never read back. Image::SetData
+// takes the whole buffer, and a Lua string is already one; it is not in
+// Urho3D's own .pkg, so it is bound here rather than regenerated there.
+// components is 1 to 4: luminance, luminance and alpha, rgb, rgba.
+static int l_image_set_data(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(image, 1, Image);
+	int w = lua_tointeger(L, 2);
+	int h = lua_tointeger(L, 3);
+	int comps = lua_tointeger(L, 4);
+	size_t len = 0;
+	const char *data = lua_tolstring(L, 5, &len);
+	if(!data)
+		throw Exception("image_set_data: data must be a string");
+	if(w < 1 || h < 1 || comps < 1 || comps > 4)
+		throw Exception("image_set_data: w, h >= 1 and components 1..4");
+	if(len != (size_t)w * (size_t)h * (size_t)comps)
+		throw Exception("image_set_data: the string is not w * h * "
+				"components bytes");
+	if(!image->SetSize(w, h, comps))
+		throw Exception("image_set_data: SetSize failed");
+	image->SetData((const unsigned char*)data);
+	return 0;
+}
+
 // get_voxel_data(node) -> string, or nil for a node without the var
 static int l_get_voxel_data(lua_State *L)
 {
@@ -250,6 +281,7 @@ void init_misc_urho3d(lua_State *L)
 	DEF_BUILDAT_FUNC(set_preferred_viewports);
 	DEF_BUILDAT_FUNC(set_voxel_data);
 	DEF_BUILDAT_FUNC(get_voxel_data);
+	DEF_BUILDAT_FUNC(image_set_data);
 }
 
 } // namespace lua_bindingss

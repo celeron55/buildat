@@ -751,6 +751,28 @@ if [ "$console" -lt 1 ] || [ "$console_ran" -lt 1 ] || [ "$console_shut" -lt 1 ]
 	echo "FAIL: the room's developer console does not open, run or close"
 	exit 1
 fi
+# **And the room is up in under two seconds** ([ROOM_BOOT], 2026-09-24:
+# eight seconds of black window is what a first run of buildat looked
+# like, and 6.46 s of it was seventy orb marks at 92 ms each). The
+# measurement is the one the fault was found with: the gap between the
+# room's first line and its last mark. The bar here is three seconds
+# rather than two, against a desk that is busy with something else --
+# what this catches is a return to seconds, not a tenth of drift.
+boot=$(grep -a "I launch_w" "$out/cli.log" | awk '
+	{ split($3, t, ":"); s = t[1] * 3600 + t[2] * 60 + t[3] }
+	NR == 1 { first = s }
+	/mark: / { last = s }
+	END { if (first != "" && last != "") printf "%.2f", last - first;
+			else printf "-1" }')
+echo "the room was up in $boot s (its first line to its last mark)"
+case "$boot" in
+-1) echo "note: the room said nothing to measure";;
+*) if [ "${boot%%.*}" -ge 3 ] 2>/dev/null; then
+		echo "FAIL: the room takes $boot s to build itself; it was 1.5"
+		exit 1
+	fi;;
+esac
+
 # **And the room can be heard** ([NO_SOUND], 2026-09-24): every sound
 # here is a SoundSource3D and positional audio with no listener is
 # silent without being an error -- the room had no listener at all and
@@ -882,7 +904,12 @@ fi
 # **And it survives a restart**, which is the whole point of a diff
 # against a generated room: a second client, booted and closed, has to
 # find the voxel the first one left.
-{ echo "delay 2500"; echo "quit"; } > "$out/cmds2.txt"
+# **Wait for the room to say what it read**, not for two and a half
+# seconds: the room takes about eleven to build itself here and the
+# save line comes with it, so a fixed wait reads an empty log on a
+# slower moment (2026-09-24)
+{ echo "wait_log_any 90000 save: "; echo "delay 800"; echo "quit"
+	} > "$out/cmds2.txt"
 timeout 180 bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
 	-c @"$out/cmds2.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli2.log"
@@ -921,7 +948,11 @@ sleep 1
 { echo "delay 6000"; echo "event mode menu"; echo "delay 600"
 	for k in C O N T E N T D B; do echo "keypress $k"; done
 	echo "delay 400"; echo "keypress Return"
-	echo "delay 25000"; echo "event scan 8 cdb"
+	# **Wait for the game to say it has the list, not for a guess**: the
+	# server behind this screen took thirty-three seconds to listen on
+	# one run here, where the wait was twenty-five (2026-09-24)
+	echo "wait_log 90000 vanilla : menu:"
+	echo "delay 2500"; echo "event scan 8 cdb"
 	# **And the game's own way back reaches the room** ([MENU_CONTEXT]:
 	# a game's menu offers "back to the launcher", and `buildat.leave()`
 	# is what it calls). A sandboxed launch UI is not in the trusted

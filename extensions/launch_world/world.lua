@@ -295,14 +295,29 @@ do
 	-- which is what a tile one voxel across can show -- the run that
 	-- repeats every eight voxels waits on per-axis `uv_scale`, and
 	-- pinning the cycle costs a sigil its beat and nothing else.
+	-- **The whole run in one texture** ([SIGIL_ROUND], 2026-09-24): the
+	-- band's period is `cycle * hold` voxels, and with `uv_scale` across
+	-- and `uv_scale_v` up the wall can show a strip that long and one
+	-- voxel tall. Every tile of the run is drawn side by side into one
+	-- field, which is what the per-axis wrap then walks along.
 	local fstyle = ornament.band_style(ornament.seed_of("launch_world frieze"))
-	fstyle.cycle = 1
 	fstyle.band_height = 1.0
-	local fh = ornament.band(96, fstyle, 0)
+	frieze_run = fstyle.cycle * fstyle.hold
+	local fh = ornament.field(96 * frieze_run, 0, 96)
+	for t = 0, frieze_run - 1 do
+		local tile = ornament.band(96, fstyle, t)
+		for y = 0, 95 do
+			for x = 0, 95 do
+				ornament.put(fh, t * 96 + x, y, ornament.at(tile, x, y))
+			end
+		end
+	end
 	-- The inlay is the band's own field: what is carved is what takes
 	-- the second material, where the meander set a rectangle around a
 	-- figure that filled it
 	local fi = fh
+	log:info(("frieze: %s, %d voxels of run, one voxel tall"):format(
+			fstyle.kind, frieze_run))
 	register_tile("frieze.png", fh, fi,
 			{base = magic.Color(0.50, 0.50, 0.50, 1),
 			inlay = magic.Color(0.36, 0.36, 0.38, 1), relief = 0.85,
@@ -442,7 +457,7 @@ end
 local voxel_reg = api.createVoxelRegistry()
 local atlas_reg = api.createAtlasRegistry()
 local function add_voxel(name, texture, solid, roughness, spec_strength,
-		bumpiness, uv_scale)
+		bumpiness, uv_scale, uv_scale_v)
 	local vdef = api.VoxelDefinition()
 	vdef.name.block_name = name
 	vdef.name.segment_x = 0
@@ -475,6 +490,10 @@ local function add_voxel(name, texture, solid, roughness, spec_strength,
 	-- How many voxels this voxel's texture spans before it repeats
 	-- ([WORLD_UV]); 1 is one stamp a voxel, as it always was
 	vdef.uv_scale = uv_scale or 1
+	-- And how many it spans upwards ([SIGIL_ROUND]): a frieze is a long
+	-- strip one voxel tall, so it is eight across and one up. Nought is
+	-- "the same as across", which is every voxel that does not say
+	vdef.uv_scale_v = uv_scale_v or 0
 	return voxel_reg:add_voxel(vdef)
 end
 
@@ -494,8 +513,10 @@ room.id.column = add_voxel("column", "generated/column.png", true,
 room.id.placed = add_voxel("placed", "generated/column.png", true,
 		0.70, 0.20, 0.9, 4)
 -- A slab's own edge, one motif a voxel
+-- Eight voxels of frieze across and one up ([SIGIL_ROUND]); the run's
+-- own length is whatever the style's cycle came out at
 room.id.frieze = add_voxel("frieze", "generated/frieze.png", true,
-		0.78, 0.16, 0.85, 1)
+		0.78, 0.16, 0.85, frieze_run, 1)
 -- Kept, because the ornament toggle puts plain stone in its place
 column_id = room.id.column
 -- The checkerboard: the light squares are polished, which is what puts
@@ -906,6 +927,19 @@ last_mark_ink = 0
 local ONE_BIT = {AT = 0.5, FACE_YAW = 270, INK = 0.16, T_LO = 0.02,
 		T_HI = 0.60, T_STEP = 0.01}
 
+-- **A pixel as an integer, not as a Colour** ([ROOM_BOOT], 2026-09-24):
+-- Urho3D's SetPixelInt takes 0xAABBGGRR, which is what Color::ToUInt()
+-- packs, and a generated tile is four thousand pixels with seventy of
+-- them at boot -- a quarter of a million objects nobody ever looks at.
+function ONE_BIT.rgb(r, g, b)
+	local function q(v)
+		v = math.floor(v * 255)
+		if v < 0 then v = 0 elseif v > 255 then v = 255 end
+		return v
+	end
+	return 255 * 16777216 + q(b) * 65536 + q(g) * 256 + q(r)
+end
+
 -- **The one-bit transform, settled** ([MARK_ONEBIT], user 2026-09-24):
 -- the logo comes down to the tile's own size first, and what is marked
 -- is **where the picture changes** rather than which side of it is ink
@@ -1078,16 +1112,81 @@ end
 -- changes, which on a sigil means its outline alone -- and a sigil
 -- that fails the transform's ink target would come back as "no mark"
 -- and leave the orb bare, which is what it was the answer to.
+-- **`src` is an `Image` or one of ornament.lua's own fields**
+-- ([ROOM_BOOT], 2026-09-24): the generated path had its figure in Lua
+-- already, wrote it into an `Image` a pixel at a time and had this read
+-- the same square straight back out -- four thousand `SetPixel`, four
+-- thousand `GetPixel` and eight thousand wrapped calls an orb, seventy
+-- times over, for a picture that never left the process. A field is
+-- read directly.
 local function mark_image(src, one_bit, invert, slot, generated)
 	local img = magic.Image:new()
-	assert(img:SetSize(MARK_SIZE, MARK_SIZE, 3), "the mark's tile")
+	-- **The tile is built as bytes and handed over once** ([ROOM_BOOT],
+	-- 2026-09-24): seventy marks at four thousand SetPixel calls each
+	-- was a quarter of a million crossings of the sandbox and six
+	-- seconds of black window. `rows` is the tile, row by row, three
+	-- bytes a pixel; image_set_data takes the whole of it.
 	local bg = invert and 0.0 or 1.0
-	img:Clear(magic.Color(bg, bg, bg, 1))
+	local bgb = string.char(math.floor(bg * 255)):rep(3)
+	-- The drawn square and where it sits, declared before the two
+	-- helpers below read them
 	local inner = math.floor(MARK_SIZE / 2)
 	local off = math.floor((MARK_SIZE - inner) / 2)
-	local sw, sh = src.width, src.height
-	if sw < 1 or sh < 1 then return img end
-	local cutout = is_cutout(src)
+	-- **Row by row, not pixel by pixel**: the tile is mostly background
+	-- and only its middle square is drawn, so the rows outside that are
+	-- one string each and the rows inside are the left pad, the square
+	-- and the right pad. Sixteen thousand little strings a tile was
+	-- most of what was left of the boot ([ROOM_BOOT]).
+	local px = {}
+	local function q(v)
+		v = math.floor(v * 255)
+		if v < 0 then v = 0 elseif v > 255 then v = 255 end
+		return v
+	end
+	local function set(x, y, r, g, b)
+		px[y * MARK_SIZE + x + 1] = string.char(q(r), q(g), q(b))
+	end
+	-- The one-bit path has two possible pixels: the mark and the ground
+	local function triple(v)
+		if slot == "rough" then return string.char(q(v), 0, 0) end
+		if slot == "metal" then return string.char(0, q(v), 0) end
+		return string.char(q(v), q(v), q(v))
+	end
+	local byte_on = triple(invert and 1.0 or 0.0)
+	local byte_off = triple(bg)
+	-- The drawn band is known rather than searched for: only the middle
+	-- square is ever written, so the rows outside it are one string and
+	-- the rows inside are two pads around their own cells
+	local function tile_bytes()
+		local out, blank = {}, bgb:rep(MARK_SIZE)
+		local lpad, rpad = bgb:rep(off), bgb:rep(MARK_SIZE - off - inner)
+		for y = 0, MARK_SIZE - 1 do
+			if y < off or y >= off + inner then
+				out[#out + 1] = blank
+			else
+				local row = {}
+				for x = 0, inner - 1 do
+					row[x + 1] = px[y * MARK_SIZE + off + x + 1] or bgb
+				end
+				out[#out + 1] = lpad .. table.concat(row) .. rpad
+			end
+		end
+		return table.concat(out)
+	end
+	-- **The caller says which it is**, and it cannot be asked: the
+	-- sandbox raises on a property an Image does not have rather than
+	-- answering nil, so `src.size` on a picture is an error and not a
+	-- test. `generated` is the generated path, and the generated path
+	-- is the one that hands over a field.
+	local from_field = generated == true
+	local sw = from_field and src.size or src.width
+	local sh = from_field and (src.rows or src.size) or src.height
+	if sw < 1 or sh < 1 then
+		magic.image_set_data(img, MARK_SIZE, MARK_SIZE, 3, tile_bytes())
+		return img
+	end
+	-- A generated field is grey and opaque; only a picture has alpha
+	local cutout = (not from_field) and is_cutout(src) or false
 	local ink = 0
 	-- One pass of the settled transform for the whole tile
 	-- ([MARK_ONEBIT]); the diffuse path below reads the picture itself
@@ -1106,8 +1205,11 @@ local function mark_image(src, one_bit, invert, slot, generated)
 	end
 	for y = 0, inner - 1 do
 		for x = 0, inner - 1 do
-			local c = src:GetPixel(math.floor(x * sw / inner),
-					math.floor(y * sh / inner))
+			local sx = math.floor(x * sw / inner)
+			local sy = math.floor(y * sh / inner)
+			-- A field's value is its own height; a picture's is a Colour
+			local fv = from_field and ornament.at(src, sx, sy) or nil
+			local c = (not from_field) and src:GetPixel(sx, sy) or nil
 			if one_bit then
 				-- Nought where the mark is, one where it is not: on a
 				-- glowing orb that is the difference between a hole in
@@ -1115,11 +1217,17 @@ local function mark_image(src, one_bit, invert, slot, generated)
 				local on
 				if bits then
 					on = bits[y * inner + x]
+				elseif from_field then
+					-- The carved part of a height field is the mark
+					on = fv <= ONE_BIT.AT
 				else
 					on = bit_of(c, cutout)
 				end
 				if on then ink = ink + 1 end
 				local v = on and (invert and 1.0 or 0.0) or bg
+				-- One of two bytes, not a string built per pixel
+				px[(off + y) * MARK_SIZE + off + x + 1] =
+						on and byte_on or byte_off
 				-- **Red is roughness, green is metalness** in Urho3D's
 				-- metallic-roughness map (`PBRLitSolid`: `sSpecMap.r`
 				-- adds to roughness and `.g` to metalness). A grey mark
@@ -1138,21 +1246,22 @@ local function mark_image(src, one_bit, invert, slot, generated)
 				-- metal and reads as dull grey against it. A grey
 				-- pixel would drive both at once, which is what made
 				-- B's etch a black disc on a white ball.
-				if slot == "rough" then
-					img:SetPixel(off + x, off + y, magic.Color(v, 0, 0, 1))
-				elseif slot == "metal" then
-					img:SetPixel(off + x, off + y, magic.Color(0, v, 0, 1))
-				else
-					img:SetPixel(off + x, off + y, magic.Color(v, v, v, 1))
-				end
+				-- (the pixel is written above, from the two bytes)
+			elseif from_field then
+				if fv <= ONE_BIT.AT then ink = ink + 1 end
+				set(off + x, off + y, fv, fv, fv)
 			else
 				if bit_of(c, cutout) then ink = ink + 1 end
-				img:SetPixel(off + x, off + y,
-						c.a < 0.5 and magic.Color(1, 1, 1, 1) or c)
+				if c.a < 0.5 then
+					set(off + x, off + y, 1, 1, 1)
+				else
+					set(off + x, off + y, c.r, c.g, c.b)
+				end
 			end
 		end
 	end
 	last_mark_ink = ink
+	magic.image_set_data(img, MARK_SIZE, MARK_SIZE, 3, tile_bytes())
 	return img
 end
 
@@ -1199,20 +1308,11 @@ local function mark_texture(mark, icon, one_bit, invert, slot)
 		-- name without letting the name draw nothing.
 		local seed = ornament.seed_of(mark)
 		for try = 0, 3 do
+			-- Straight from the generator to the tile ([ROOM_BOOT]): the
+			-- Image in between cost eight thousand wrapped calls an orb
+			-- and carried nothing this does not already have
 			local f = ornament.mark(64, seed + try * 7919)
-			local gen = magic.Image:new()
-			assert(gen:SetSize(f.size, f.size, 3), "the mark")
-			for y = 0, f.size - 1 do
-				for x = 0, f.size - 1 do
-					local v = ornament.at(f, x, y)
-					if one_bit then
-						v = v > ONE_BIT.AT and 1.0 or 0.0
-					end
-					gen:SetPixel(x, y, magic.Color(v, v, v, 1))
-				end
-			end
-			kept[#kept + 1] = gen
-			image = mark_image(gen, one_bit, invert, slot, true)
+			image = mark_image(f, one_bit, invert, slot, true)
 			if (last_mark_ink or 0) > 0 then break end
 		end
 	end
