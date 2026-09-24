@@ -1519,7 +1519,7 @@ local floor_mat = material(magic.Color(1, 1, 1, 1), 0.18, 0.0,
 -- stone silhouettes against it.
 local BAYS = room.BAYS
 local BAY_Z = room.BAY_Z
-local function bay_x(i) return room.bay_x(i - 1) end
+local function bay_u(i) return room.bay_u(i - 1) end
 local function bay_y(i) return room.bay_y(i - 1) end
 
 -- **An orb is as big as its game** (the plan: 1.2 to 1.8 voxels across,
@@ -1611,15 +1611,20 @@ for b = 1, BAYS do
 	-- and the margin has a lighting reason as well as a visual one, a
 	-- point light at no distance from a face burning it white.
 	local p = room.pockets[b]
-	-- The middle of the indices the pocket covers: x0 .. x0 + sx - 1 is
-	-- centred on x0 + (sx - 1) / 2, a voxel being centred on its index
+	-- The middle of the indices the pocket covers, in its own wall's
+	-- frame ([POCKETS_ROUND]): u0 .. u0 + su - 1 is centred on
+	-- u0 + (su - 1) / 2, a voxel being centred on its index, and the
+	-- depth runs from the mouth into the stone
+	local mu = p.u0 + (p.su - 1) / 2
+	local mn = p.mouth + room.WALL_IN[p.wall] * (p.sd - 1) / 2
+	local ox, _, oz = room.wall_xyz(p.wall, mu, 0, mn)
 	orb_places[b] = {
-		x = (p.x0 + (p.sx - 1) / 2) * VOXEL_M,
+		x = ox * VOXEL_M,
 		y = (p.y0 + (p.sy - 1) / 2) * VOXEL_M,
-		z = (p.mouth - (p.sz - 1) / 2) * VOXEL_M,
+		z = oz * VOXEL_M,
 	}
-	bay_desc[#bay_desc + 1] = string.format("%d %d %d %d%d%d", p.x0, p.y0,
-			p.mouth, p.sx, p.sy, p.sz)
+	bay_desc[#bay_desc + 1] = string.format("%s %d %d %d %d%d%d",
+			p.wall:sub(1, 1), p.u0, p.y0, p.mouth, p.su, p.sy, p.sd)
 end
 log:info("bays " .. BAYS .. " " .. BAY_Z .. " " ..
 		table.concat(bay_desc, " "))
@@ -4060,11 +4065,24 @@ end
 -- The pocket's own box, which is what comes apart: the mouth stands
 -- wherever the slabs around it put it, so the sweep goes from the deepest
 -- a face can be to the furthest it can stand.
-local function dissolve_voxels(b, open)
-	local bx, by = bay_x(b), bay_y(b)
+-- The pocket's box in room coordinates: the mouth and the wall around
+-- it, from two voxels out in front of the face to two behind its back,
+-- asked in the pocket's own wall's frame
+local function bay_box(b)
 	local p = room.pockets[b]
-	rewrite_box(p.x0 - 2, p.x0 + p.sx + 1, p.y0 - 2, p.y0 + p.sy + 1,
-			p.mouth - p.sz - 2, p.mouth + 2, open)
+	local into = room.WALL_IN[p.wall]
+	local x0, _, z0 = room.wall_xyz(p.wall, p.u0 - 2, 0,
+			p.mouth - into * 2)
+	local x1, _, z1 = room.wall_xyz(p.wall, p.u0 + p.su + 1, 0,
+			p.mouth + into * (p.sd + 2))
+	return math.min(x0, x1), math.max(x0, x1),
+			p.y0 - 2, p.y0 + p.sy + 1,
+			math.min(z0, z1), math.max(z0, z1)
+end
+
+local function dissolve_voxels(b, open)
+	local x0, x1, y0, y1, z0, z1 = bay_box(b)
+	rewrite_box(x0, x1, y0, y1, z0, z1, open)
 end
 
 local function build_flying(b)
@@ -4074,36 +4092,48 @@ local function build_flying(b)
 	end
 	local p = room.pockets[b]
 	local i = 0
+	local into = room.WALL_IN[p.wall]
 	-- The pocket's own mouth and the wall around it, which is what comes
 	-- apart; the face stands wherever the slabs put it, so a column of
-	-- voxels is walked until one is found
-	for x = p.x0 - 2, p.x0 + p.sx + 1 do
+	-- voxels is walked into the wall until one is found -- "into" being
+	-- the pocket's own wall's direction ([POCKETS_ROUND])
+	for u = p.u0 - 2, p.u0 + p.su + 1 do
 		for y = p.y0 - 2, p.y0 + p.sy + 1 do
-			local v, vz = nil, nil
-			for z = p.mouth + 2, p.mouth - p.sz - 2, -1 do
+			local v, vx, vz = nil, nil, nil
+			for k = -2, p.sd + 2 do
+				local x, _, z = room.wall_xyz(p.wall, u, y,
+						p.mouth + into * k)
 				local id = room.voxel_at(x, y, z)
 				if id ~= room.id.air then
-					v, vz = id, z
+					v, vx, vz = id, x, z
 					break
 				end
 			end
 			if v then
 				i = i + 1
 				local node = part("Box",
-						magic.Vector3(x * VOXEL_M, y * VOXEL_M,
+						magic.Vector3(vx * VOXEL_M, y * VOXEL_M,
 						vz * VOXEL_M),
 						magic.Vector3(VOXEL_M, VOXEL_M, VOXEL_M), stone)
 				local pos = node.position
 				local dir = ((i % 2 == 0) and 1 or -1)
+				-- Away is along the wall and out of it, which is the
+				-- same pair of directions whichever wall it is
+				local du = dir * (2.0 + (i % 7) * 0.5) * U
+				local dn = -into * (1.8 + (i % 3) * 0.7) * U
+				local ax, az = pos.x + du, pos.z + dn
+				if room.WALL_U[p.wall] ~= "x" then
+					ax, az = pos.x + dn, pos.z + du
+				end
 				st.slabs[i] = {
 					node = node,
 					-- The numbers, not the Vector3: a position property
 					-- hands back the node's own vector, so a home kept as
 					-- that object follows the cube as it flies
 					home = {x = pos.x, y = pos.y, z = pos.z},
-					away = {x = pos.x + dir * (2.0 + (i % 7) * 0.5) * U,
+					away = {x = ax,
 							y = pos.y + (1.0 + (i % 5) * 0.4) * U,
-							z = pos.z + (1.8 + (i % 3) * 0.7) * U},
+							z = az},
 					spin = {i * 11 % 40 - 20, i * 27 % 60 - 30,
 							i * 17 % 50 - 25},
 				}
@@ -5067,6 +5097,19 @@ end
 -- up and down, and what Enter launches
 match_list, match_at = {}, 1
 
+-- **Which way is out of the wall an orb sits in** ([POCKETS_ROUND]): a
+-- pocket on a side wall is looked at from the side, and one behind the
+-- player from behind. A thing on the floor has no wall and is looked at
+-- from +z, which is the way the room is entered.
+function orb_out(b)
+	local p = type(b) == "number" and room.pockets[b] or nil
+	if not p then return 0, 1 end
+	if room.WALL_U[p.wall] == "x" then
+		return 0, -room.WALL_IN[p.wall]
+	end
+	return -room.WALL_IN[p.wall], 0
+end
+
 -- **The camera goes to what is browsed** (user): until it does, "what
 -- is browsed" is a word rather than a place, and Enter launching it is
 -- a leap of faith. A swift hop rather than a launch's flight.
@@ -5090,7 +5133,9 @@ local function show_match(i)
 	-- is how the mark's options sheet gets close enough to judge a
 	-- picture on a sphere.
 	local back = tonumber(env("BUILDAT_LAUNCH_HOP")) or 4.5
-	fly_to({x = o.x, y = o.y + back * 0.67, z = o.z + back},
+	local ox, oz = orb_out(b)
+	fly_to({x = o.x + ox * back, y = o.y + back * 0.67,
+			z = o.z + oz * back},
 			{x = o.x, y = o.y, z = o.z}, HOP_SECONDS)
 end
 
@@ -5176,7 +5221,8 @@ function launch(b)
 		return
 	end
 	local o = orb_places[b]
-	fly_to({x = o.x, y = o.y + 0.8, z = o.z + 7.0},
+	local ox, oz = orb_out(b)
+	fly_to({x = o.x + ox * 7.0, y = o.y + 0.8, z = o.z + oz * 7.0},
 			{x = o.x, y = o.y, z = o.z})
 	dissolve_bay(b, true)
 	log:info("launch: " .. (ORBS[b] and ORBS[b].name or "?") ..
