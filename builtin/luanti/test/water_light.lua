@@ -75,8 +75,9 @@ local function read(tag)
 	local def = core.registered_nodes["basenodes:water_source"] or {}
 	rows[#rows + 1] = "sunlight_propagates=" ..
 			tostring(def.sunlight_propagates)
-	core.log("action", "water_light: " .. tag .. " " ..
-			table.concat(rows, " "))
+	local line = table.concat(rows, " ")
+	core.log("action", "water_light: " .. tag .. " " .. line)
+	return line
 end
 
 core.register_on_joinplayer(function(player)
@@ -91,16 +92,41 @@ core.register_on_joinplayer(function(player)
 		end
 		core.log("action", "water_light: built at " .. base.x .. "," ..
 				base.y .. "," .. base.z)
-		-- Twice, because a section's relight is deferred and runs under a
-		-- budget: the two readings agreeing is what says the flood has
-		-- finished with it
-		core.after(15, function()
-			read("first")
-			core.after(20, function()
-				read("second")
+		-- **Read until two agree, rather than twice and hope.** A
+		-- section's relight is deferred and runs under a budget, and
+		-- the water is still spreading for a while after it is placed
+		-- -- so the two readings agreeing is what says the world has
+		-- finished moving. Taking exactly two of them made that a race
+		-- with the desk: on a busy one the second still caught water
+		-- flowing into the shaft and the run failed with the light
+		-- blamed for it (2026-09-24). Up to eight tries, ten seconds
+		-- apart; a light that never settles still fails, which is the
+		-- assertion this was always making.
+		local last, tries = nil, 0
+		local function settle()
+			tries = tries + 1
+			local now = read("try" .. tries)
+			if last and now == last then
+				core.log("action", "water_light: settled after " ..
+						tries .. " readings")
+				core.log("action", "water_light: first " .. now)
+				core.log("action", "water_light: second " .. now)
 				core.log("action", "water_light: done")
 				core.chat_send_all("water_light: done")
-			end)
-		end)
+				return
+			end
+			last = now
+			if tries >= 8 then
+				core.log("action", "water_light: never settled")
+				core.log("action", "water_light: first " ..
+						tostring(last))
+				core.log("action", "water_light: second " .. now .. " x")
+				core.log("action", "water_light: done")
+				core.chat_send_all("water_light: done")
+				return
+			end
+			core.after(10, settle)
+		end
+		core.after(12, settle)
 	end)
 end)
