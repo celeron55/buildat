@@ -826,6 +826,94 @@ if [ "$back" -lt 1 ] || [ "$lost" -gt 0 ]; then
 	exit 1
 fi
 
+# **The mark is on the face, not at the limb** ([LAUNCH_WORLD]'s mark
+# round failed twice on presentation rather than on the mark: once with
+# every orb turned away, once with the sphere a quarter out, and both
+# times the sheets showed nothing and the fault took a person to spot).
+# So this is the assertion that ends that class: fly to an orb the way
+# the room's own search does, and read **the middle of its disc against
+# the ring around it**. A mark presented on the face darkens the middle;
+# a mark at the limb leaves it the colour of the ball.
+#
+# The control is the same frame with the presentation turned a quarter
+# out, which is exactly the fault that shipped -- so the check knows the
+# difference between "a mark is there" and "the sphere is shaded".
+for yaw in own 0; do
+	extra=""
+	[ "$yaw" = "0" ] && extra="BUILDAT_LAUNCH_FACE_YAW=0"
+	{ echo "delay 5000"; echo "event mode menu"; echo "delay 700"
+		for c in I M P O R T; do echo "keypress $c"; done
+		echo "delay 2600"
+		echo "screenshot $out/mark_face_$yaw.png"
+		echo "delay 400"; echo "quit"; } > "$out/cmds_face_$yaw.txt"
+	env $extra BUILDAT_LAUNCH_HOP=2.0 bin/buildat -m launch_world \
+		-D "$out/emptyuser" -w 1280x720 -l 3 \
+		-c @"$out/cmds_face_$yaw.txt" > /dev/null 2>&1
+done
+python3 - "$out" <<'PYMARK'
+import sys, os
+from PIL import Image
+
+out = sys.argv[1]
+
+def colourfulness(im):
+	# **A mark is told by its colour, not by its brightness**: the icon
+	# is green and brown on a ball the room's light blows to white, so
+	# the luminance of the middle says nothing (measured: -0.9 of a
+	# level with the mark square on the face). What the mark does is
+	# put colour where the ball has none.
+	px = list(im.getdata())
+	return sum(max(p) - min(p) for p in px) / float(len(px))
+
+def middle_against_ring(path):
+	im = Image.open(path).convert("RGB")
+	w, h = im.size
+	cx, cy = w // 2, int(h * 0.52)
+	centre = colourfulness(im.crop((cx - 38, cy - 38, cx + 38, cy + 38)))
+	ring = colourfulness(im.crop((cx - 110, cy - 110, cx + 110, cy + 110)))
+	return centre / max(ring, 0.01)
+
+own = "%s/mark_face_own.png" % out
+turned = "%s/mark_face_0.png" % out
+for p in (own, turned):
+	if not os.path.exists(p):
+		print("FAIL: the mark's face was not shot (%s)" % p)
+		raise SystemExit(1)
+a, b = middle_against_ring(own), middle_against_ring(turned)
+print("the middle of the disc carries %.2f times the ring's colour with "
+		"the mark presented, and %.2f with it a quarter out" % (a, b))
+ok = a > 1.2 and b < 0.6
+if not ok:
+	print("FAIL: the orb does not present its mark" if a <= 1.2 else
+			"FAIL: the control carries a mark where there should be none")
+raise SystemExit(0 if ok else 1)
+PYMARK' || exit 1
+import sys, os
+from PIL import Image, ImageStat
+out = sys.argv[1]
+def middle_against_ring(path):
+	im = Image.open(path).convert("RGB")
+	w, h = im.size
+	cx, cy = w // 2, int(h * 0.52)
+	c = ImageStat.Stat(im.crop((cx - 38, cy - 38, cx + 38, cy + 38))).mean[0]
+	r = ImageStat.Stat(im.crop((cx - 110, cy - 110, cx + 110, cy + 110))).mean[0]
+	return abs(c - r)
+own = "%s/mark_face_own.png" % out
+turned = "%s/mark_face_0.png" % out
+for p in (own, turned):
+	if not os.path.exists(p):
+		print("FAIL: the mark's face was not shot (%s)" % p)
+		raise SystemExit(1)
+a, b = middle_against_ring(own), middle_against_ring(turned)
+print("the mark on the face moves the middle of the disc by %.1f of a "
+		"level, and a quarter turn out by %.1f" % (a, b))
+ok = a > 20.0 and b < 15.0
+if not ok:
+	print("FAIL: the orb does not present its mark" if a <= 20.0 else
+			"FAIL: the control shows a mark where there should be none")
+raise SystemExit(0 if ok else 1)
+PYMARK
+
 # **A save opens by name, end to end** ([LAUNCH_WORLD]: the saves are the
 # floor's, and a save is the one launch the grid has no tile for). This
 # had only ever been demonstrated as far as the desk's data allowed: every
