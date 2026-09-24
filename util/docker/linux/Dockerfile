@@ -3,6 +3,11 @@
 # here runs on newer distros; the build dependencies README.md names, and
 # what util/package.sh's smoke test needs -- a virtual display for the
 # client, ImageMagick to read its screenshot, zip and tar for the archives.
+# And what the checks need ([CI_RUNS]): python3 with PIL, which is how a
+# runner reads the frames it shot, and lua, which is how a room asserts
+# its own description before a client is started -- without them half
+# the quick tier failed in two seconds with "command not found", which
+# is what the first run of util/checks_in_docker.sh said (2026-09-24).
 # Nothing of the host's tree is built here: util/package_in_docker.sh hands
 # the container a git archive of the commit and takes the archives back.
 # Pinned ([WIN_DLL_INIT]): the base image by digest and the packages from
@@ -20,5 +25,7 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
 	libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev \
 	libcurl4-openssl-dev \
 	xvfb xauth libgl1-mesa-dri imagemagick zip tar gzip \
+	python3 python3-pil lua5.1 \
+	&& ln -sf /usr/bin/lua5.1 /usr/local/bin/lua \
 	&& rm -rf /var/lib/apt/lists/*
 WORKDIR /work
