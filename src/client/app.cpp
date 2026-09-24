@@ -2014,9 +2014,12 @@ struct CApp: public App, public magic::Application
 				m_command_index++;
 				return;
 			}
-			if(c.type == Type::WaitLog){
+			if(c.type == Type::WaitLog || c.type == Type::WaitLogAny){
 				if(m_wait_log_since < 0){
-					m_wait_log_since = log_line_count();
+					// WaitLogAny looks back over the whole run; WaitLog
+					// waits for the next line after it starts
+					m_wait_log_since = c.type == Type::WaitLogAny ? 0 :
+							log_line_count();
 					m_wait_log_until_us = now + c.n * 1000;
 				}
 				if(log_lines_since_contain(m_wait_log_since, c.s.c_str())){

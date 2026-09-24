@@ -118,7 +118,8 @@ print("aiming at the orb: yaw %.1f pitch %.1f, a placed voxel at %d,%d,%d"
 		% (yaw, pitch, vx, vy, vz))
 PYAIM
 read -r tyaw tpitch tover < "$out/aim.txt"
-{ echo "wait_log 90000 the room hums"; echo "delay 800"
+{ echo "wait_log_any 90000 the room hums"
+	echo "delay 800"
 	echo "look $tyaw $tpitch"; echo "delay 1500"
 	echo "look $tyaw $tover"; echo "delay 1500"; echo "quit"
 	} > "$out/cmds_tier.txt"
@@ -173,7 +174,13 @@ if [ "$slot" -lt 1 ] || [ "$back" -lt 1 ]; then
 			"or a missing one does not fall back to the menu"
 	exit 1
 fi
-{ echo "wait_log 90000 the room hums"
+# **wait_log_any, not wait_log**: the room says it is humming once, at
+# the end of a boot that takes eleven seconds here, and the sequence
+# starts before that -- but by twenty milliseconds either way. A wait
+# that only sees what comes after it then sat out its ninety seconds
+# and every step ran that much late (2026-09-24). wait_log_any counts
+# the line wherever it appeared in the run.
+{ echo "wait_log_any 90000 the room hums"
 	echo "delay 1200"
 	# **It starts in FPS mode**, so the walking is checked first and then
 	# Tab goes to menu mode, where the prompt and the digits live. A held
@@ -306,7 +313,7 @@ fi
 	echo "keypress Escape"
 	# The cubes land in 0.9 s, but the voxels coming back have to be
 	# remeshed and relit before the picture is the picture it was
-	echo "wait_log 90000 the room hums"
+	echo "wait_log_any 90000 the room hums"
 	echo "delay 1200"
 	echo "screenshot $out/dissolve-closed-again.png"
 	echo "delay 600"

@@ -37,6 +37,14 @@ namespace command_seq
 		// line says so and the sequence goes on) -- a wait for a screen or
 		// a moment instead of a guessed delay ([START_WAIT])
 		WaitLog,
+		// **Whether the line has appeared at all in this run**, where
+		// WaitLog waits for the next one after it starts. A launch UI
+		// that says it is ready while the sequence is still being read
+		// says it once, and a wait that only sees what comes after it
+		// then sits out its whole timeout ([LAUNCH_WORLD], 2026-09-24:
+		// the room's "hums" came twenty milliseconds early and every
+		// drive ran ninety seconds late).
+		WaitLogAny,
 	};
 
 	struct Command

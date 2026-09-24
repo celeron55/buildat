@@ -215,6 +215,13 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			if(!parse_i64(ms, &c.n) || c.n < 0 || text.empty())
 				return fail("wait_log <ms> <text>");
 			c.s = text;
+		} else if(cmd == "wait_log_any"){
+			c.type = Type::WaitLogAny;
+			ss_ ms, text;
+			split_cmd(rest, &ms, &text);
+			if(!parse_i64(ms, &c.n) || c.n < 0 || text.empty())
+				return fail("wait_log_any <ms> <text>");
+			c.s = text;
 		} else if(cmd == "screenshot"){
 			c.type = Type::Screenshot;
 			c.s = rest;
