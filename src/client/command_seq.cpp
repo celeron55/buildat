@@ -442,6 +442,8 @@ ss_ dump_command(const Command &c)
 		return "delay "+itos(c.n);
 	case Type::WaitLog:
 		return "wait_log "+itos(c.n)+" "+c.s;
+	case Type::WaitLogAny:
+		return "wait_log_any "+itos(c.n)+" "+c.s;
 	case Type::Screenshot:
 		return "screenshot "+c.s;
 	case Type::Event:
@@ -676,6 +678,17 @@ static bool push_key(magic::Input *input, int key, bool down, ss_ *error)
 // that would be a second press (a toggle key toggled back).
 static std::map<int, bool> g_held_keys; // key -> seen down
 
+// The buttons a sequence holds, the same way g_held_keys holds its keys
+// and for the same reason: Input::ResetState() clears the mouse buttons
+// as well as the keys, and a hold that spans a focus change comes back
+// with the button up. A hold on a sphere in the launcher room is a
+// second and a half of held button, and it read as no button at all in
+// a container (2026-09-24). Urho's mask is 1 << (SDL button - 1).
+static std::map<int, bool> g_held_buttons; // sdl button -> seen down
+
+static bool push_mouse_button(magic::Input *input, int sdl_button,
+		bool down, ss_ *error);
+
 bool inject_key(magic::Input *input, const ss_ &name, bool down, bool up_too,
 		ss_ *error)
 {
@@ -712,11 +725,33 @@ void reassert_held_keys(magic::Input *input)
 					cs(ss_(SDL_GetKeyName((SDL_Keycode)key))));
 		}
 	}
+	for(auto &held : g_held_buttons){
+		int button = held.first;
+		if(input->GetMouseButtonDown(1 << (button - 1))){
+			held.second = true;
+			continue;
+		}
+		if(!held.second)
+			continue;
+		ss_ error;
+		if(push_mouse_button(input, button, true, &error)){
+			held.second = false;
+			log_w(MODULE, "held mouse button %i read as not held; "
+					"pressed again", button);
+		}
+	}
+}
+
+bool button_held_unseen(int sdl_button)
+{
+	auto it = g_held_buttons.find(sdl_button);
+	return it != g_held_buttons.end() && !it->second;
 }
 
 void release_held_keys()
 {
 	g_held_keys.clear();
+	g_held_buttons.clear();
 }
 
 static bool push_mouse_button(magic::Input *input, int sdl_button, bool down,
@@ -747,6 +782,10 @@ bool inject_mouse_button(magic::Input *input, int sdl_button, bool down,
 		return false;
 	if(up_too && !push_mouse_button(input, sdl_button, false, error))
 		return false;
+	if(down && !up_too)
+		g_held_buttons[sdl_button] = false;
+	else
+		g_held_buttons.erase(sdl_button);
 	return true;
 }
 

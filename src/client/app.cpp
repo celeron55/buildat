@@ -1018,6 +1018,8 @@ struct CApp: public App, public magic::Application
 	// What the command log line has already been written for, so that a
 	// command that takes several frames is announced once
 	int m_command_logged_index = -1;
+	// Frames a mouse_up has waited for its own down to be read
+	int m_mouse_up_frames = 0;
 	bool m_look_running = false;
 	LookAxis m_look_x;
 	LookAxis m_look_y;
@@ -1983,6 +1985,22 @@ struct CApp: public App, public magic::Application
 					input, c.x, true, false, &err);
 			break;
 		case Type::MouseUp:
+			// **A hold nothing saw is not a hold** ([SEQ_HOLD_FRAME],
+			// 2026-09-24): a client under llvmpipe in a container draws
+			// about a frame a second, so the down and the up of a
+			// 1.4-second hold landed in one SDL_PollEvent and the button
+			// was never down on any frame a script could read. Whatever
+			// polls GetMouseButtonDown -- the launcher room's dig and
+			// its launch among them -- saw nothing at all. The up waits
+			// for the frame that reads the down, bounded so a button
+			// that never arrives ends the run instead of hanging it.
+			if(client::command_seq::button_held_unseen(c.x)){
+				if(++m_mouse_up_frames < 600)
+					return false;
+				log_w(MODULE, "mouse_up: the button was never read as "
+						"down in 600 frames; letting go anyway");
+			}
+			m_mouse_up_frames = 0;
 			ok = client::command_seq::inject_mouse_button(
 					input, c.x, false, false, &err);
 			break;

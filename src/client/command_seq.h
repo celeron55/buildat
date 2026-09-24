@@ -95,6 +95,10 @@ namespace command_seq
 	// while a sequence runs ([HELD_KEY_FLAKE])
 	void reassert_held_keys(Urho3D::Input *input);
 	void release_held_keys();
+	// True while a mouse_down has been pushed and no frame has read
+	// the button as down yet: a mouse_up that goes out before that
+	// frame is a hold nothing ever saw ([SEQ_HOLD_FRAME])
+	bool button_held_unseen(int sdl_button);
 	bool inject_key(Urho3D::Input *input, const ss_ &name, bool down,
 			bool up_too, ss_ *error);
 	bool inject_mouse_button(Urho3D::Input *input, int sdl_button, bool down,
