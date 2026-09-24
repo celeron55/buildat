@@ -558,6 +558,15 @@ fi
 	# finding: it looped and started nothing). Last of all, because it
 	# starts a server and takes the client into the game.
 	if [ "${games_installed:-0}" -gt 0 ]; then
+	# **Home first, and in FPS mode** (2026-09-24): fourteen seconds of
+	# quiet starts the attract mode and the camera leaves the standing
+	# place, so on a machine where the steps above take longer than
+	# this desk's the hold landed on nothing at all -- which read as "a
+	# hold started nothing" and was the room flying about. The event
+	# puts it back and resets the idle clock, and it is what the drive
+	# uses everywhere else it needs a known viewpoint.
+	echo "event mode fps"
+	echo "delay 1500"
 	echo "mouse_down left"
 	echo "delay 1400"
 	echo "mouse_up left"
