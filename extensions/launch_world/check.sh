@@ -521,7 +521,10 @@ fi
 	# not enough, and F10 went before the game had started, so the room
 	# was asked to come back from a game it had not gone into yet
 	# (2026-09-24, the first container run of the quick tier).
-	echo "wait_log 40000 game: the room stands down"
+	# Two minutes: starting a game is starting a server and loading a
+	# world, and in a container that took fifty seconds where this desk
+	# takes five
+	echo "wait_log 150000 game: the room stands down"
 	echo "delay 2000"
 	echo "screenshot $out/in-game.png"
 	# **And back out of it** ([MENU_CONTEXT]): the room stands behind the
@@ -530,7 +533,8 @@ fi
 	# with a menu leaves through buildat.leave(), and this tree has one.
 	echo "delay 400"
 	echo "keypress F10"
-	echo "delay 2500"
+	echo "wait_log 30000 game: back in the room"
+	echo "delay 1500"
 	echo "screenshot $out/back-from-game.png"
 	echo "delay 400"
 	# **And an orb answers the mouse** (the third playtest's rule, in
