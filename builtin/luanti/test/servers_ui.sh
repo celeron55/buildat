@@ -19,7 +19,13 @@ addr=../user/network_addresses.csv
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; if [ -f "$tmp/addresses.bak" ]; then cp "$tmp/addresses.bak" "$addr"; fi' EXIT
 run() {   # module-flag... -- runs one client with the python driver on stdin
 	local fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
-	bin/buildat -w 1280x720 -l 3 -c - "$@" < "$fifo" 2>&1 \
+# **The grid by name, not by preference** (2026-09-24): this drives
+# the launch menu's own screens, and a desk whose `launch_ui` is set
+# to something else -- the room, the console -- booted that instead
+# and the scan found no tiles. `-m __menu` asks for the thing the
+# check is about ([MENU_FALLBACK]: a launcher nobody drives is a
+# launcher nobody notices breaking).
+	bin/buildat -m __menu -w 1280x720 -l 3 -c - "$@" < "$fifo" 2>&1 \
 		| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
 	local cli=$!
 	exec 3> "$fifo"
