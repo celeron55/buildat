@@ -175,7 +175,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		if free_look then
 			set_free_look(false)
 		else
-			buildat.disconnect()
+			buildat.leave()
 		end
 	end
 end)

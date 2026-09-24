@@ -3316,7 +3316,7 @@ menu_fields = function(fields)
 	elseif fields.back then
 		luanti.show_local_form(pause_spec(), menu_fields)
 	elseif fields.leave then
-		buildat.disconnect()
+		buildat.leave()
 	end
 end
 

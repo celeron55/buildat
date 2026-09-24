@@ -1004,7 +1004,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	end
 	if key == magic.KEY_ESCAPE then
 		log:info("KEY_ESCAPE pressed")
-		buildat.disconnect()
+		buildat.leave()
 	end
 	if key == magic.KEY_B then
 		open_structure_menu()

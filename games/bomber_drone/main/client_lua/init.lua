@@ -533,7 +533,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		return
 	end
 	if key == magic.KEY_ESCAPE then
-		buildat.disconnect()
+		buildat.leave()
 	elseif key == KEY_MOTOR then
 		motor_on = not motor_on
 	elseif key == magic.KEY_SPACE then

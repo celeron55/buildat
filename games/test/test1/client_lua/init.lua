@@ -196,7 +196,7 @@ function handle_keydown(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	if key == magic.KEY_ESCAPE then
 		log:info("KEY_ESCAPE pressed")
-		buildat.disconnect()
+		buildat.leave()
 	end
 end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")

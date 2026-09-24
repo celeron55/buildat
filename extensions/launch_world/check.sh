@@ -597,7 +597,7 @@ fi
 	echo "mouse_up left"
 	# **Wait for the launch rather than guessing at it**: on a slow
 	# machine -- a container under llvmpipe is one -- nine seconds was
-	# not enough, and F10 went before the game had started, so the room
+	# not enough, and the key went before the game had started, so the room
 	# was asked to come back from a game it had not gone into yet
 	# (2026-09-24, the first container run of the quick tier).
 	# Two minutes: starting a game is starting a server and loading a
@@ -608,10 +608,12 @@ fi
 	echo "screenshot $out/in-game.png"
 	# **And back out of it** ([MENU_CONTEXT]): the room stands behind the
 	# game the whole time, so the way back is the client's own
-	# leave_to_menu plus a viewport. F10 is the room's key for it; a game
-	# with a menu leaves through buildat.leave(), and this tree has one.
+	# leave_to_menu plus a viewport. Escape is what drives it -- the
+	# game's own key, which every game in the tree binds to
+	# buildat.leave() ([NO_WAY_BACK]); the room has no key of its own
+	# for leaving a game any more.
 	echo "delay 400"
-	echo "keypress F10"
+	echo "keypress Escape"
 	echo "wait_log 30000 game: back in the room"
 	echo "delay 1500"
 	echo "screenshot $out/back-from-game.png"
@@ -1203,9 +1205,10 @@ echo "the save orb asked $asked times, the server opened it $opened times"
 # on the second, which the client draws over the loading world. The
 # branch fires once now, and an automatic launch logs rather than
 # reaching menu_error at all.
+# awk rather than bc, which the packaging image does not carry
 dialog=$(grep -ac "A world is already starting" \
 	"$out/save_cli_server.log" "$out/hidden_cli_server.log" 2>/dev/null |
-	sed 's/.*://' | paste -sd+ | bc)
+	sed 's/.*://' | awk '{n += $1} END {print n + 0}')
 echo "\"already starting\" said to the client: ${dialog:-0} times"
 rm -rf "$here/user/games/vanilla/saves/$save"
 if [ "${dialog:-0}" -gt 0 ]; then

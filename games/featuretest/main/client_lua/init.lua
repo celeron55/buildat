@@ -259,7 +259,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	if key == magic.KEY_ESCAPE then
 		log:info("KEY_ESCAPE pressed")
-		buildat.disconnect()
+		buildat.leave()
 	end
 end)
 -- vim: set noet ts=4 sw=4:

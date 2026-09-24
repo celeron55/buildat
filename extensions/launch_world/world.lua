@@ -5274,17 +5274,13 @@ function handle_keydown(event_type, event_data)
 	-- A backdrop takes no input ([TWO_AUDIENCES]' composition)
 	if backdrop then return end
 	local key = event_data:GetInt("Key")
-	-- **The launcher's own way back**, which works whatever the game
-	-- does with the keyboard: a game leaves through `buildat.leave()`
-	-- from its own menu, and a game with no menu -- most of this tree --
-	-- would otherwise have no way back at all. F9 is a pick; it is also
-	-- what the check drives, there being one game in the tree whose
-	-- menu offers leaving. F10 because the rest are taken: F6 and F9 are
-	-- the client's profiler, F11 is fullscreen and F12 a screenshot.
-	if in_game and key == magic.KEY_F10 then
-		leave_game()
-		return
-	end
+	-- **The way out of a game is the game's own** ([NO_WAY_BACK], user
+	-- 2026-09-24): every game leaves through `buildat.leave()`, which
+	-- comes back here when there is a launcher under it. The room used
+	-- to bind F10 to rescue players from games that dropped the client
+	-- instead; the launcher should not have to rig anything up to make
+	-- games behave, and `leave_game()` is still the door -- the client
+	-- calls it through the launch interface.
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if held_was or held_by_others() then return end
