@@ -174,6 +174,13 @@ if [ "$slot" -lt 1 ] || [ "$back" -lt 1 ]; then
 			"or a missing one does not fall back to the menu"
 	exit 1
 fi
+# **A game to go into** ([CI_RUNS]): the hold starts whichever game the
+# mouse is on, and a machine with none installed has nothing to start --
+# in a container the hold itself landed three minutes after the mouse
+# let go, which is a frame rate rather than a fault. Where there is no
+# game, the drive leaves that block out and the assertions below say so.
+games_installed=$(ls "$here/user/luanti/games" 2>/dev/null | wc -l)
+
 # **wait_log_any, not wait_log**: the room says it is humming once, at
 # the end of a boot that takes eleven seconds here, and the sequence
 # starts before that -- but by twenty milliseconds either way. A wait
@@ -523,6 +530,7 @@ fi
 	# **A hold on a game's sphere launches it** (the playtest's first
 	# finding: it looped and started nothing). Last of all, because it
 	# starts a server and takes the client into the game.
+	if [ "${games_installed:-0}" -gt 0 ]; then
 	echo "mouse_down left"
 	echo "delay 1400"
 	echo "mouse_up left"
@@ -547,6 +555,7 @@ fi
 	echo "delay 1500"
 	echo "screenshot $out/back-from-game.png"
 	echo "delay 400"
+	fi
 	# **And an orb answers the mouse** (the third playtest's rule, in
 	# the room rather than in a dialog): a click on one launches it, the
 	# way Enter launches what is browsed. Last, because it starts
@@ -771,7 +780,12 @@ if [ "$went" -ge 1 ] && [ "$back" -lt 1 ]; then
 	exit 1
 fi
 if [ "$went" -lt 1 ]; then
-	echo "note: no game started here, so coming back was not checked"
+	if [ "${games_installed:-0}" -gt 0 ]; then
+		echo "FAIL: a hold on a game's sphere started nothing"
+		exit 1
+	fi
+	echo "note: no game is installed here, so the hold and the way back"\
+		"were not driven"
 fi
 
 # **A hold launches once** -- the playtest's first finding was that it
