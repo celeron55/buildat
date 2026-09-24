@@ -32,11 +32,25 @@ if pgrep -x buildat >/dev/null; then
 fi
 { echo "delay 5000"; echo "screenshot $out/RUN.png"; echo "delay 500"
 	echo "quit"; } > "$out/cmds.txt"
+# **The room as the reference frame has it** (user, 2026-09-24): no
+# launch actions, no saves, no servers and no save read, so the wall is
+# lit by the light from above and the orbs in their pockets rather than
+# by a game somebody left standing on the floor.
+#
+# **And the probe that lets the finish matter**: with one mip level a
+# rough surface reflects as sharply as a mirror, so the gloss knob moved
+# the picture six tenths of a level and the round could not be judged
+# (user, 2026-09-24). An eight-bit cube takes a mip chain -- the float16
+# one blacks every primitive that reflects it, its own shader having no
+# guard against what the levels hold -- so the finish is shot on that
+# one. What it costs is the top of a source inside a reflection, which
+# is [PBR_HDR]'s own trade and is the user's to make.
+bare="BUILDAT_LAUNCH_BARE=1 BUILDAT_LAUNCH_PROBE8=1 BUILDAT_LAUNCH_PROBEMIPS=1"
 for v in 1.00 0.80 0.60 0.45; do
-	for g in 0.07 0.25; do
+	for g in 0.07 0.40; do
 		name="v${v}_g${g}"
 		sed "s#RUN#$name#" "$out/cmds.txt" > "$out/cmds_$name.txt"
-		BUILDAT_LAUNCH_FLOOR_VALUE=$v BUILDAT_LAUNCH_FLOOR_GLOSS=$g \
+		env $bare BUILDAT_LAUNCH_FLOOR_VALUE=$v BUILDAT_LAUNCH_FLOOR_GLOSS=$g \
 			bin/buildat -m launch_world -D "$out/emptyuser" \
 			-w 1280x720 -l 3 -c @"$out/cmds_$name.txt" > /dev/null 2>&1
 	done
@@ -59,7 +73,7 @@ def read(path):
 rows = []
 print("%-14s %6s %6s %6s %7s" % ("floor", "mean", "med", "90th", "white%"))
 for v in ("1.00", "0.80", "0.60", "0.45"):
-	for g in ("0.07", "0.25"):
+	for g in ("0.07", "0.40"):
 		p = "%s/v%s_g%s.png" % (out, v, g)
 		if not os.path.exists(p):
 			continue
@@ -69,7 +83,23 @@ for v in ("1.00", "0.80", "0.60", "0.45"):
 if os.path.exists(ref):
 	print("%-14s %6.1f %6d %6d %7.2f" % ("(reference)", *read(ref)))
 if rows:
-	shots = [Image.open(p).convert("RGB") for _, _, p in rows]
+	from PIL import ImageDraw, ImageFont
+	shots = []
+	for v, g, p in rows:
+		im = Image.open(p).convert("RGB")
+		# **Say which candidate each tile is** ([USER_INPUT]: candidates
+		# are named so the answer can be a name). The room's own label in
+		# the corner is the palette preset, which is not what varies here.
+		d = ImageDraw.Draw(im)
+		label = "value %s   gloss %s" % (v, g)
+		try:
+			font = ImageFont.truetype(
+					"/usr/share/fonts/liberation-mono/LiberationMono-Bold.ttf", 34)
+		except Exception:
+			font = ImageFont.load_default()
+		d.rectangle((0, 0, 470, 54), fill=(0, 0, 0))
+		d.text((14, 8), label, fill=(255, 220, 120), font=font)
+		shots.append(im)
 	w, h = shots[0].size
 	cols, n = 2, len(shots)
 	sheet = Image.new("RGB", (w * cols + 8, ((n + 1) // cols) * (h + 8)),
@@ -79,6 +109,6 @@ if rows:
 	sheet = sheet.resize((sheet.size[0] // 3, sheet.size[1] // 3),
 			Image.LANCZOS)
 	sheet.save("%s/sheet.png" % out)
-	print("the sheet: %s/sheet.png -- rows are the values, "
-			"the left column is glossy and the right is matt" % out)
+	print("the sheet: %s/sheet.png -- every tile says its own two "
+			"numbers, the left column glossy and the right matt" % out)
 PY

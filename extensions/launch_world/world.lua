@@ -1679,7 +1679,9 @@ local function reflection_probe(at)
 	-- the two were compared with.
 	local fmt = env("BUILDAT_LAUNCH_PROBE8") ~= "" and
 			magic.Graphics.GetRGBAFormat() or
-			magic.Graphics.GetRGBAFloat16Format()
+			(env("BUILDAT_LAUNCH_PROBE32") ~= "" and
+				magic.Graphics.GetRGBAFloat32Format() or
+				magic.Graphics.GetRGBAFloat16Format())
 	-- **One level, not a chain nobody writes** ([PBR_HDR], and this is
 	-- the whole fault): a render target cube is given the full mip
 	-- chain by default and only level 0 is ever rendered into, so every
