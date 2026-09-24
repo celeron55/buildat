@@ -147,7 +147,15 @@ local function connect_or_show_error(address)
 		uistack.main:pop(root)
 		if state == "ok" then
 			log:info("connect_server() ok")
-			game_root = uistack.main:push({desc="empty (game is running)"})
+			-- **The placeholder goes on the stack only when this menu
+			-- is the screen** ([LEAVE_POP], 2026-09-25): under another
+			-- launch UI -- the room -- this menu is the machinery a
+			-- launch runs through and nothing pops what it pushes, so
+			-- the entry outlived the game and the reset that took its
+			-- element with it. `false` still says a game is running.
+			game_root = (__buildat_menu_extension_name or "launch_menu")
+					== "launch_menu" and
+					uistack.main:push({desc="empty (game is running)"}) or false
 			magic.ui:SetFocusElement(nil)
 		else
 			log:info("connect_server() failed")

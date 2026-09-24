@@ -159,6 +159,27 @@ function M.UIStack(root)
 		if self.stack[#self.stack] ~= current_top_root then
 			error("UIStack:pop(): Wrong current_top_root")
 		end
+		-- **An entry whose element has gone is dropped, not raised on**
+		-- ([LEAVE_POP], 2026-09-25): a sandbox reset removes the
+		-- elements under the stack's entries, and reaching one from the
+		-- sandbox afterwards raises ([UI_UAF]'s guard, which is right
+		-- and stays) -- inside a leave_game, where everything after the
+		-- pop then never runs and the player is left with a button that
+		-- does nothing. A removed element needs no unsubscribing and no
+		-- reparenting; it needs taking off the stack.
+		if getmetatable(self.stack[#self.stack]) and
+				getmetatable(self.stack[#self.stack]).dead then
+			table.remove(self.stack)
+			log:warning("UIStack:pop(): the top element was already gone")
+			if #self.stack >= 1 then
+				local below = self.stack[#self.stack]
+				if not (getmetatable(below) and getmetatable(below).dead) then
+					below:SetVisible(true)
+					below:SetFocus(true)
+				end
+			end
+			return
+		end
 		local top = table.remove(self.stack)
 		log:verbose("UIStack:pop(): "..dump(top:GetName()))
 		for _, sub in ipairs(top.event_subscriptions) do
