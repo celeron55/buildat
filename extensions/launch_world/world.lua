@@ -500,9 +500,15 @@ room.id.floor_dark = add_voxel("floor_dark", "generated/floor_dark.png",
 -- falls back to builtin/<module>/client_data for a name nobody announced;
 -- the mesher itself sets no technique, and a node without one is
 -- invisible rather than unlit (2026-09-23).
+-- **The room's own variant of the voxel technique** ([LAUNCH_WORLD],
+-- 2026-09-24): the same shading with VOXELROOMPROBE compiled in, which
+-- is the answer to "is this cube map the sky, or this room?" -- the
+-- parallax correction on and the sky-visibility gating off. A game with
+-- a sky keeps the plain one, whose shader has none of it, which is what
+-- keeps [LOOK_CHECK]'s rule satisfiable rather than argued about.
 local VOXEL_TECHNIQUE = magic.cache:GetResource("Technique",
-		"voxel_shading/PBRVoxel.xml")
-assert(VOXEL_TECHNIQUE, "voxel_shading/PBRVoxel.xml is in the cache")
+		"voxel_shading/PBRVoxelRoom.xml")
+assert(VOXEL_TECHNIQUE, "voxel_shading/PBRVoxelRoom.xml is in the cache")
 -- **What makes the voxels reflect.** `PBRVoxel` has image-based lighting
 -- (VOXELIBL), and it is gated three ways -- by a table of how much sky is
 -- visible along a direction, by how much light is on that sky, and by a
@@ -561,6 +567,18 @@ local function apply_technique(node)
 		-- field of view. The shader follows the reflected ray to the
 		-- box and looks up the hit point instead; these three are what
 		-- it needs, in the scene's own units.
+		-- **Something to reflect with** (2026-09-24): `PBRVoxel` builds
+		-- its specular colour as `0.08 * specStrength * cMatSpecColor`,
+		-- and Urho3D's default for `MatSpecColor` is **black** -- so
+		-- every voxel material the mesher hands over reflects with a
+		-- specular colour of zero and all that is left of the
+		-- image-based term is the sliver `METALNESS_FLOOR` leaves
+		-- (measured: 0.02 to 0.04 where the other factors are 1).
+		-- White is what the shader's own 0.08 expects, and it is the
+		-- **atlas** that says which voxel is polished: the floor's
+		-- tiles carry a spec_strength of 1 and the stone 0.10, so this
+		-- makes the floor a dielectric mirror and leaves the wall matte.
+		m:SetShaderParameter("MatSpecColor", magic.Color(1, 1, 1, 1))
 		m:SetShaderParameter("ProbeBox", 1.0)
 		m:SetShaderParameter("ProbePos", probe_box.at)
 		m:SetShaderParameter("ProbeBoxMin", probe_box.min)
@@ -741,7 +759,17 @@ local machined = material(magic.Color(0.55, 0.57, 0.62, 1), 0.34, 1.0)
 local stone = material(magic.Color(0.26, 0.26, 0.29, 1), 0.85, 0.0)
 -- A launch action that is not a game: glossy and white, a dielectric
 -- rather than a metal, so it reads as neither an orb nor a server
-local white = material(magic.Color(0.86, 0.87, 0.89, 1), 0.12, 0.0)
+-- **The white spheres are grey** (user, 2026-09-24: the blow-out is bad
+-- for the mark's visibility). At 0.86 they sit 20 to 47 per cent
+-- saturated in the room's own light, and a picture on a surface that is
+-- at 255 over a third of itself is a picture half erased. The albedo is
+-- what buys the headroom, and **a grey ball among dark stone still
+-- reads as white** -- white is relative and there is nothing brighter
+-- beside it to argue with. 0.6 is the starting pick, moved by eye;
+-- BUILDAT_LAUNCH_WHITE_V is the knob for moving it.
+local WHITE_V = tonumber(env("BUILDAT_LAUNCH_WHITE_V")) or 0.60
+local white = material(magic.Color(WHITE_V, WHITE_V * 1.01, WHITE_V * 1.03, 1),
+		0.12, 0.0)
 
 -- A material wearing a generated height field: the ornament is the
 -- texture and not the geometry, which is what lets the room sit on a
@@ -1309,7 +1337,8 @@ for i, o in ipairs(orb_places) do
 		-- thing to launch on its own
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
 				across(orb_across(spec)),
-				etched(0.86, 0.87, 0.89, 0.12, 0.0, spec.name) or white)
+				etched(WHITE_V, WHITE_V * 1.01, WHITE_V * 1.03, 0.12, 0.0,
+					spec.name) or white)
 		node:GetComponent("StaticModel").castShadows = true
 		orb_nodes[i] = node
 	elseif spec and spec.floor and not spec.game_orb then
@@ -1318,7 +1347,8 @@ for i, o in ipairs(orb_places) do
 		-- from a server's chrome by being white rather than a mirror
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
 				across(orb_across(spec)),
-				etched(0.86, 0.87, 0.89, 0.12, 0.0, spec.name, spec.icon) or
+				etched(WHITE_V, WHITE_V * 1.01, WHITE_V * 1.03, 0.12, 0.0,
+					spec.name, spec.icon) or
 				white)
 		node:GetComponent("StaticModel").castShadows = true
 		orb_nodes[i] = node

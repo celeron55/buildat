@@ -45,21 +45,43 @@ fi
 # guard against what the levels hold -- so the finish is shot on that
 # one. What it costs is the top of a source inside a reflection, which
 # is [PBR_HDR]'s own trade and is the user's to make.
-bare="BUILDAT_LAUNCH_BARE=1 BUILDAT_LAUNCH_PROBE8=1 BUILDAT_LAUNCH_PROBEMIPS=1"
+probe="BUILDAT_LAUNCH_PROBE8=1 BUILDAT_LAUNCH_PROBEMIPS=1"
+# **The two axes want two rooms** (user, 2026-09-24), so this is two
+# sheets rather than a grid:
+#
+# - **The value axis** is about how bright the floor is against the
+#   wall, and a game standing on the floor lights that wall from below
+#   -- so it is shot **bare**, in the composition the reference frame
+#   has, at one finish.
+# - **The gloss axis** is about how crisply the floor returns *the
+#   things standing on it*, and bare removes them all: what made
+#   old1/refl.png read as a mirror at a glance was the torus and the
+#   chrome spheres in it. So the finish is shot in the **populated**
+#   room, at one value.
+VALUE_AT="${VALUE_AT:-0.60}"
+GLOSS_AT="${GLOSS_AT:-0.07}"
 for v in 1.00 0.80 0.60 0.45; do
-	for g in 0.07 0.40; do
-		name="v${v}_g${g}"
-		sed "s#RUN#$name#" "$out/cmds.txt" > "$out/cmds_$name.txt"
-		env $bare BUILDAT_LAUNCH_FLOOR_VALUE=$v BUILDAT_LAUNCH_FLOOR_GLOSS=$g \
-			bin/buildat -m launch_world -D "$out/emptyuser" \
-			-w 1280x720 -l 3 -c @"$out/cmds_$name.txt" > /dev/null 2>&1
-	done
+	name="value_$v"
+	sed "s#RUN#$name#" "$out/cmds.txt" > "$out/cmds_$name.txt"
+	env $probe BUILDAT_LAUNCH_BARE=1 BUILDAT_LAUNCH_FLOOR_VALUE=$v \
+		BUILDAT_LAUNCH_FLOOR_GLOSS=$GLOSS_AT \
+		bin/buildat -m launch_world -D "$out/emptyuser" \
+		-w 1280x720 -l 3 -c @"$out/cmds_$name.txt" > /dev/null 2>&1
 done
-python3 - "$out" "$here/local/launch_world_reference/images/fps-stood.png" <<'PY'
+for g in 0.04 0.10 0.25 0.45; do
+	name="gloss_$g"
+	sed "s#RUN#$name#" "$out/cmds.txt" > "$out/cmds_$name.txt"
+	env $probe BUILDAT_LAUNCH_FLOOR_VALUE=$VALUE_AT \
+		BUILDAT_LAUNCH_FLOOR_GLOSS=$g \
+		bin/buildat -m launch_world -D "$out/emptyuser" \
+		-w 1280x720 -l 3 -c @"$out/cmds_$name.txt" > /dev/null 2>&1
+done
+python3 - "$out" "$here/local/launch_world_reference/images/fps-stood.png" \
+		"$VALUE_AT" "$GLOSS_AT" <<'PY'
 import sys, os
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
-out, ref = sys.argv[1], sys.argv[2]
+out, ref, value_at, gloss_at = sys.argv[1:5]
 HUD = 70
 
 def read(path):
@@ -70,45 +92,47 @@ def read(path):
 	return (sum(d) / float(n), d[n // 2], d[int(n * 0.90)],
 			100.0 * sum(1 for v in d if v >= 254) / n)
 
-rows = []
-print("%-14s %6s %6s %6s %7s" % ("floor", "mean", "med", "90th", "white%"))
-for v in ("1.00", "0.80", "0.60", "0.45"):
-	for g in ("0.07", "0.40"):
-		p = "%s/v%s_g%s.png" % (out, v, g)
+def a_font():
+	try:
+		return ImageFont.truetype(
+				"/usr/share/fonts/liberation-mono/LiberationMono-Bold.ttf", 34)
+	except Exception:
+		return ImageFont.load_default()
+
+def sheet(rows, name, title):
+	tiles = []
+	print("%-32s %6s %6s %6s %7s" % (title, "mean", "med", "90th", "white%"))
+	for label, p in rows:
 		if not os.path.exists(p):
 			continue
-		rows.append((v, g, p))
-		print("%-14s %6.1f %6d %6d %7.2f" % ("value %s gloss %s" % (v, g),
-				*read(p)))
-if os.path.exists(ref):
-	print("%-14s %6.1f %6d %6d %7.2f" % ("(reference)", *read(ref)))
-if rows:
-	from PIL import ImageDraw, ImageFont
-	shots = []
-	for v, g, p in rows:
+		print("%-32s %6.1f %6d %6d %7.2f" % (label, read(p)[0], read(p)[1],
+				read(p)[2], read(p)[3]))
 		im = Image.open(p).convert("RGB")
-		# **Say which candidate each tile is** ([USER_INPUT]: candidates
-		# are named so the answer can be a name). The room's own label in
-		# the corner is the palette preset, which is not what varies here.
 		d = ImageDraw.Draw(im)
-		label = "value %s   gloss %s" % (v, g)
-		try:
-			font = ImageFont.truetype(
-					"/usr/share/fonts/liberation-mono/LiberationMono-Bold.ttf", 34)
-		except Exception:
-			font = ImageFont.load_default()
-		d.rectangle((0, 0, 470, 54), fill=(0, 0, 0))
-		d.text((14, 8), label, fill=(255, 220, 120), font=font)
-		shots.append(im)
-	w, h = shots[0].size
-	cols, n = 2, len(shots)
-	sheet = Image.new("RGB", (w * cols + 8, ((n + 1) // cols) * (h + 8)),
+		d.rectangle((0, 0, 660, 54), fill=(0, 0, 0))
+		d.text((14, 8), label, fill=(255, 220, 120), font=a_font())
+		tiles.append(im)
+	if os.path.exists(ref):
+		r = read(ref)
+		print("%-32s %6.1f %6d %6d %7.2f" % ("(the reference frame)", r[0],
+				r[1], r[2], r[3]))
+	if not tiles:
+		return
+	w, h = tiles[0].size
+	cols = 2
+	sh = Image.new("RGB", (w * cols + 8, ((len(tiles) + 1) // cols) * (h + 8)),
 			(0, 0, 0))
-	for i, im in enumerate(shots):
-		sheet.paste(im, ((i % cols) * (w + 8), (i // cols) * (h + 8)))
-	sheet = sheet.resize((sheet.size[0] // 3, sheet.size[1] // 3),
-			Image.LANCZOS)
-	sheet.save("%s/sheet.png" % out)
-	print("the sheet: %s/sheet.png -- every tile says its own two "
-			"numbers, the left column glossy and the right matt" % out)
+	for i, im in enumerate(tiles):
+		sh.paste(im, ((i % cols) * (w + 8), (i // cols) * (h + 8)))
+	sh = sh.resize((sh.size[0] // 3, sh.size[1] // 3), Image.LANCZOS)
+	sh.save("%s/%s" % (out, name))
+	print("    -> %s/%s" % (out, name))
+	print("")
+
+sheet([("value %s   (gloss %s, bare)" % (v, gloss_at),
+		"%s/value_%s.png" % (out, v)) for v in ("1.00", "0.80", "0.60", "0.45")],
+		"sheet_value.png", "the value, in the reference's own room")
+sheet([("gloss %s   (value %s, populated)" % (g, value_at),
+		"%s/gloss_%s.png" % (out, g)) for g in ("0.04", "0.10", "0.25", "0.45")],
+		"sheet_gloss.png", "the finish, with the room's things on it")
 PY
