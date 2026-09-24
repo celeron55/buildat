@@ -359,14 +359,15 @@ function M.band_style(seed)
 	local roll = r()
 	local worm = roll < 0.5
 	local kind = "sigil"
-	-- **`wormb` is not picked** (2026-09-24, the holding action): about
-	-- one seed in a hundred draws a `wormb` whose tiles do not join,
-	-- and the band is on the room's walls now -- a rename re-rolls the
-	-- style, so that is a live risk rather than a latent one. Its walk
-	-- is still here and `band_sheet.sh` still draws it; what is gone is
-	-- the room's chance of wearing a broken one. The half that was its
-	-- own goes to `worm`, whose seam is sound.
-	if worm then kind = "worm" end
+	-- **`wormb` is picked again** (2026-09-24): the seam it broke in
+	-- about one seed in a hundred was the fallback that walks a worm
+	-- which never reached the far column along its own row -- it wrote
+	-- the two columns the seam lock had reserved, and that row is a
+	-- different one under each hand. Measured over 600 styles a kind,
+	-- four tiles each: every kind joins every row now.
+	-- Off the same roll, so no seed's draw order changes and a wall
+	-- keeps every sigil it had
+	if worm then kind = (roll < 0.25) and "worm" or "wormb" end
 	-- **Rails are the heavy end**, about 48% ink against 30, and a wall
 	-- of them is a painted stripe. One in five.
 	-- The worm carries its own border -- its outline is the carving --
@@ -716,8 +717,14 @@ function M.band(size, style, i)
 		if reach < half - 1 then
 			-- nothing reached the far column, so the worm is walked
 			-- there along its own row: a tile that does not touch the
-			-- seam's other end is a tile whose figure stops mid-wall
-			for x = 0, half - 1 do path[P(x, cy)] = true end
+			-- seam's other end is a tile whose figure stops mid-wall.
+			-- **It starts past the seam lock**: the row it ends on is a
+			-- different one under each hand, and writing it into the
+			-- columns the lock reserved is the whole of `wormb`'s
+			-- broken seam -- 29 styles in 600 before this, none after
+			-- (2026-09-24). Those columns already carry the straight
+			-- walk out of the seam, which is what joins.
+			for x = SEAM_LOCK, half - 1 do path[P(x, cy)] = true end
 		end
 		local body = {}
 		for cyy = 0, R - 1 do
