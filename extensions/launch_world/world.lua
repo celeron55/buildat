@@ -2678,6 +2678,9 @@ local FPS_JUMP = 5.0
 local LOOK_SPEED = 0.12
 terminal_open = false
 mode = "fps"
+-- When the walk last counted its time ([LAUNCH_WORLD], 2026-09-24);
+-- file-scope state, this chunk being at Lua's limit of 200 locals
+fps_last_us = nil
 local fps = {x = HOME_FROM.x, y = FPS_EYE, z = HOME_FROM.z,
 	-- Urho3D's yaw 0 looks down +z and the wall is at -z
 	yaw = 180.0, pitch = HOME_PITCH, vy = 0.0}
@@ -2818,7 +2821,21 @@ function handle_fps_update(event_type, event_data)
 	if mode ~= "fps" or cam.to_from or terminal_open or pause_open then
 		return
 	end
-	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
+	-- **The walk is paid for in the player's time, not in frames**
+	-- ([LAUNCH_WORLD], 2026-09-24): the engine clamps a frame's
+	-- TimeStep at a tenth of a second, so on a machine drawing a frame
+	-- a second the player covered a tenth of the ground they asked for
+	-- -- four seconds of held W moved them a step, and a drive that
+	-- walks to the wall and digs it aimed at something out of reach.
+	-- Wall time since the last frame, and the movement below is taken
+	-- in slices of at most a tenth of it so a long frame never steps
+	-- through a wall.
+	local now_us = buildat.get_time_us()
+	local dt = fps_last_us and (now_us - fps_last_us) / 1000000 or 0
+	fps_last_us = now_us
+	-- Two seconds of catch-up at most: a frame that took longer than
+	-- that is a stall, and a player does not want a stall walked out
+	dt = math.min(2.0, dt)
 	local mm = magic.input:GetMouseMove()
 	if hint_left > 0 and (mm.x ~= 0 or mm.y ~= 0 or
 			magic.input:GetKeyDown(magic.KEY_W) or
@@ -2857,17 +2874,29 @@ function handle_fps_update(event_type, event_data)
 	if held(magic.KEY_A) then dx, dz = dx - cy, dz + sy end
 	local l = math.sqrt(dx * dx + dz * dz)
 	if l > 0 then
-		dx, dz = dx / l * FPS_SPEED * dt, dz / l * FPS_SPEED * dt
-		-- One axis at a time, so a wall slides rather than stops
-		if not blocked(fps.x + dx, fps.y, fps.z) then fps.x = fps.x + dx end
-		if not blocked(fps.x, fps.y, fps.z + dz) then fps.z = fps.z + dz end
+		dx, dz = dx / l, dz / l
 	end
-	if held(magic.KEY_SPACE) and fps.y <= FPS_EYE + 0.001 then
-		fps.vy = FPS_JUMP
+	-- **In slices**: the step is checked against the wall at its end
+	-- and nowhere in between, so a step the size of a long frame walks
+	-- through the stone. A tenth of a second is the step the room was
+	-- written against.
+	local left = dt
+	while left > 0 do
+		local step = math.min(0.1, left)
+		left = left - step
+		if l > 0 then
+			local mx, mz = dx * FPS_SPEED * step, dz * FPS_SPEED * step
+			-- One axis at a time, so a wall slides rather than stops
+			if not blocked(fps.x + mx, fps.y, fps.z) then fps.x = fps.x + mx end
+			if not blocked(fps.x, fps.y, fps.z + mz) then fps.z = fps.z + mz end
+		end
+		if held(magic.KEY_SPACE) and fps.y <= FPS_EYE + 0.001 then
+			fps.vy = FPS_JUMP
+		end
+		fps.vy = fps.vy - FPS_GRAVITY * step
+		fps.y = fps.y + fps.vy * step
+		if fps.y < FPS_EYE then fps.y, fps.vy = FPS_EYE, 0 end
 	end
-	fps.vy = fps.vy - FPS_GRAVITY * dt
-	fps.y = fps.y + fps.vy * dt
-	if fps.y < FPS_EYE then fps.y, fps.vy = FPS_EYE, 0 end
 	cam.from.x, cam.from.y, cam.from.z = fps.x, fps.y, fps.z
 	local cp = math.cos(math.rad(fps.pitch))
 	cam.at.x = fps.x + sy * cp
