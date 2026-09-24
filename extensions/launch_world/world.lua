@@ -2768,6 +2768,17 @@ held_was = false
 -- desk and a flight are the room's, and it keeps the keyboard for them
 -- -- they stop the look where they are read. This is only about
 -- somebody else's screen.
+-- **The stack knows what is on the screen and the room does not push to
+-- it** ([MENU_STUCK], user 2026-09-24: a game's ContentDB menu was still
+-- on the screen while the room had taken the input back -- Escape opened
+-- the room's pause dialog over it and typing went to both). The room
+-- draws straight on `ui.root`, so anything on the main stack is somebody
+-- else's screen, including one that outlived the game that pushed it.
+-- Asking the stack is what the five flags below cannot do: they describe
+-- every way a screen can arrive and no way one can linger.
+room_stack = require("buildat/extension/uistack")
+room_stack = room_stack.safe or room_stack
+
 -- **Whether another screen is actually on top of the room**
 -- ([LAUNCH_FROZEN], user 2026-09-24: a launch froze the dissolve at its
 -- first frame). The room's animations stand down for a game, a console,
@@ -2777,6 +2788,10 @@ held_was = false
 -- which is the other question: whether the player is steering the room.
 function screen_taken()
 	if in_game or console_open or backdrop then
+		return true
+	end
+	local st = room_stack and room_stack.main and room_stack.main.stack
+	if st and #st > 0 then
 		return true
 	end
 	local who = api.launch_ui_name and api.launch_ui_name() or nil
@@ -5602,6 +5617,21 @@ end
 function leave_game()
 	launching = false
 	if not in_game then return false end
+	-- **The screens under the game go with it** ([MENU_STUCK], user
+	-- 2026-09-24): the launcher composed under the room pushes a
+	-- placeholder when it starts a game and pops it in its own
+	-- leave_game, which is not the one that runs when the room is the
+	-- launcher -- so a game's menu, and the placeholder under it, stayed
+	-- on the screen while the room took the input back. The room pushes
+	-- nothing itself, so the stack is empty when the room owns the
+	-- screen alone, and `screen_taken()` above is what reads that.
+	-- **Before the client's leave**, which removes the elements under
+	-- the stack's entries: popping after it reaches a UIElement that is
+	-- already gone, and the sandbox raises on it.
+	local st = room_stack and room_stack.main
+	if st and #st.stack > 0 then
+		st:pop_to(st.stack[1], true)
+	end
 	api.leave_to_menu()
 	in_game = false
 	local vp = magic.Viewport:new(scene,

@@ -55,6 +55,11 @@ fi
 	echo "wait_log 20000 game: back in the room"
 	echo "delay 500"
 	echo "screenshot $out/back.png"
+	# **And the room is moving again**: nothing in it is ever static, so
+	# two frames apart say whether coming back left a screen on top of
+	# it ([MENU_STUCK]) or an animation stood down ([LAUNCH_FROZEN])
+	echo "delay 700"
+	echo "screenshot $out/back2.png"
 	echo "quit"
 	} > "$out/cmds.txt"
 run_client 40 "$out/cli.log" timeout 240 bin/buildat -m launch_world \
@@ -83,13 +88,18 @@ def px(name):
 a, b = px("stood.png"), px("walked.png")
 if a is None or b is None:
 	sys.exit(1)
-hist = ImageChops.difference(a, b).histogram()
-moved = sum(i * n for i, n in enumerate(hist)) / float(a.width * a.height)
+def moved_between(x, y):
+	if x is None or y is None:
+		return 0.0
+	hist = ImageChops.difference(x, y).histogram()
+	return sum(i * n for i, n in enumerate(hist)) / float(x.width * x.height)
+moved = moved_between(a, b)
 lit = sum(i * n for i, n in enumerate(a.histogram())) / float(a.width * a.height)
-print("the room is lit to %.1f of a level and walking moved it by %.1f"
-		% (lit, moved))
+drift = moved_between(px("back.png"), px("back2.png"))
+print("the room is lit to %.1f of a level, walking moved it by %.1f, and "
+		"it drifts by %.1f after a game" % (lit, moved, drift))
 # A black window is 0 either way; a frozen one moves by nothing
-sys.exit(0 if lit > 5.0 and moved > 1.0 else 1)
+sys.exit(0 if lit > 5.0 and moved > 1.0 and drift > 0.5 else 1)
 PY
 verdict_keep
 if [ "$verdict_rc" -ne 0 ] || [ "$raised" -gt 0 ] ||
