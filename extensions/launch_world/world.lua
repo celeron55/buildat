@@ -2450,9 +2450,10 @@ end
 -- pulses. Nothing here polls anything; the rate is the reading.
 patch_t = 0
 function handle_patch_update(event_type, event_data)
-	-- The room stands down while a game, or a console, is over it
-	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if held_was or held_by_others() then return end
+	-- **An animation stands down for a screen on top of the room and
+	-- not for a launch** ([LAUNCH_FROZEN]): the launch is seconds of
+	-- this room's own movement
+	if screen_taken() then return end
 	patch_t = patch_t + event_data:GetFloat("TimeStep")
 	for _, led in ipairs(patch_leds) do
 		-- Blinking at the ping's rate when something has measured one,
@@ -2622,9 +2623,10 @@ local function fly_to(from, at, seconds)
 end
 
 function handle_camera_update(event_type, event_data)
-	-- The room stands down while a game, or a console, is over it
-	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if held_was or held_by_others() then return end
+	-- **An animation stands down for a screen on top of the room and
+	-- not for a launch** ([LAUNCH_FROZEN]): the launch is seconds of
+	-- this room's own movement
+	if screen_taken() then return end
 	if not cam.to_from then
 		return
 	end
@@ -2766,6 +2768,21 @@ held_was = false
 -- desk and a flight are the room's, and it keeps the keyboard for them
 -- -- they stop the look where they are read. This is only about
 -- somebody else's screen.
+-- **Whether another screen is actually on top of the room**
+-- ([LAUNCH_FROZEN], user 2026-09-24: a launch froze the dissolve at its
+-- first frame). The room's animations stand down for a game, a console,
+-- a backdrop or another launch UI -- and explicitly not for
+-- `launching`, which is the room's own seconds of animation between the
+-- hold and the game. Input stands down on `held_by_others()` below,
+-- which is the other question: whether the player is steering the room.
+function screen_taken()
+	if in_game or console_open or backdrop then
+		return true
+	end
+	local who = api.launch_ui_name and api.launch_ui_name() or nil
+	return who ~= nil and who ~= "launch_world"
+end
+
 function held_by_others()
 	-- `launching` is the input half of `in_game`: the launch has
 	-- committed and the player is not steering the room any more, but
@@ -2773,11 +2790,7 @@ function held_by_others()
 	-- 2026-09-24: it stood down at the first moment of a sequence that
 	-- runs for seconds and the player watched the rest of it with
 	-- nothing to look at)
-	if in_game or launching or console_open or backdrop then
-		return true
-	end
-	local who = api.launch_ui_name and api.launch_ui_name() or nil
-	return who ~= nil and who ~= "launch_world"
+	return launching or screen_taken()
 end
 
 -- The last answer, so the handing over happens once rather than every
@@ -3406,9 +3419,10 @@ local POINT_DOT = 0.985
 -- that": LookAt writes a rotation and nothing else builds one
 local turner = scene:CreateChild("turner")
 function handle_orb_update(event_type, event_data)
-	-- The room stands down while a game, or a console, is over it
-	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if held_was or held_by_others() then return end
+	-- **An animation stands down for a screen on top of the room and
+	-- not for a launch** ([LAUNCH_FROZEN]): the launch is seconds of
+	-- this room's own movement
+	if screen_taken() then return end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
 	local best, best_dot, best_up = 0, -1, false
 	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
@@ -4055,9 +4069,10 @@ function dissolve_bay(b, open)
 end
 
 function handle_dissolve_update(event_type, event_data)
-	-- The room stands down while a game, or a console, is over it
-	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if held_was or held_by_others() then return end
+	-- **An animation stands down for a screen on top of the room and
+	-- not for a launch** ([LAUNCH_FROZEN]): the launch is seconds of
+	-- this room's own movement
+	if screen_taken() then return end
 	local dt = event_data:GetFloat("TimeStep")
 	for b = 1, BAYS do
 		local st = bay_state[b]
