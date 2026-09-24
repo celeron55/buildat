@@ -840,7 +840,16 @@ last_mark_ink = 0
 -- not. The threshold is luminance, and **alpha decides first**: most
 -- icons are cut-outs, and a transparent pixel is background whatever
 -- colour it is.
-local ONE_BIT_AT = 0.5
+-- The luminance an icon's own picture is cut at, and -- for a mark
+-- generated from a name -- **how much of it is the mark**: the darkest
+-- fifth of the picture, which is a legible glyph at the size a sphere
+-- gives it and not so much that the orb stops reading as a light. One
+-- table, since this chunk is at Lua's limit of 200 locals.
+-- The luminance a mark's picture is cut at, and the quarter turn
+-- between "-Z at the viewer" and "the middle of the UV map at the
+-- viewer", measured on Sphere.mdl (see the turn below). One table,
+-- since this chunk is at Lua's limit of 200 locals.
+local ONE_BIT = {AT = 0.5, FACE_YAW = 270}
 -- **Which pixels are the mark**: a cut-out says so with its alpha, and
 -- the plan's rule is alpha first. But an icon that is white lines on
 -- transparency -- the buildat logo, and most of this tree's -- has
@@ -851,7 +860,7 @@ local function bit_of(c, cutout)
 	if cutout then
 		return c.a >= 0.5
 	end
-	return (c.r * 0.299 + c.g * 0.587 + c.b * 0.114) < ONE_BIT_AT
+	return (c.r * 0.299 + c.g * 0.587 + c.b * 0.114) < ONE_BIT.AT
 end
 
 local function is_cutout(src)
@@ -956,7 +965,7 @@ local function mark_texture(mark, icon, one_bit, invert)
 				for x = 0, f.size - 1 do
 					local v = ornament.at(f, x, y)
 					if one_bit then
-						v = v > ONE_BIT_AT and 1.0 or 0.0
+						v = v > ONE_BIT.AT and 1.0 or 0.0
 					end
 					gen:SetPixel(x, y, magic.Color(v, v, v, 1))
 				end
@@ -2885,7 +2894,21 @@ function handle_orb_update(event_type, event_data)
 					view_from.y * 2 - p.y, view_from.z * 2 - p.z))
 			-- Frame-rate independent: the same fraction of the way there
 			-- every second, whatever the frame took
-			node.rotation = node.rotation:Slerp(turner.rotation,
+			-- **Where the middle of the UV map actually is** (user,
+			-- 2026-09-24: the mark sits off to the left as if the
+			-- sphere were turned a quarter). Aiming -Z at the viewer
+			-- assumed the mark's middle lives there; it does not.
+			-- Measured by turning every orb through 0, 90, 180 and 270
+			-- degrees and looking: at **270** the icon is centred on
+			-- the face, at the other three it is at the limb or behind.
+			-- So the middle of `Sphere.mdl`'s UVs is a quarter turn
+			-- round from -Z, and this is that quarter -- named, so the
+			-- next model is a new measurement rather than a mystery.
+			-- BUILDAT_LAUNCH_FACE_YAW is how it gets measured again.
+			local extra = tonumber(env("BUILDAT_LAUNCH_FACE_YAW")) or
+					ONE_BIT.FACE_YAW
+			node.rotation = node.rotation:Slerp(
+					turner.rotation * magic.Quaternion(0, extra, 0),
 					1 - math.exp(-7.0 * dt))
 		end
 	end
