@@ -4479,11 +4479,23 @@ do
 	-- mouth stands where the slabs put it, so the pockets differ by a
 	-- voxel or two and a bucket by depth split them up. Then the floor,
 	-- its ranks in the order they stand, nearest the wall first.
+	-- **The wall's row is walked wall by wall** ([POCKETS_ROUND]): the
+	-- pockets are on four of them now, so "along the wall" is the
+	-- allocation's own order -- the faced wall first, then the sides,
+	-- then the one behind -- and within a wall the way it runs.
+	local wall_rank = {}
+	for k, w in ipairs(room.WALL_ORDER) do wall_rank[w] = k end
 	local wall = {}
 	for i = 1, BAYS do
-		if orb_places[i] then wall[#wall + 1] = {i = i, x = orb_places[i].x} end
+		local p = room.pockets[i]
+		if orb_places[i] and p then
+			wall[#wall + 1] = {i = i, w = wall_rank[p.wall] or 9, u = p.u0}
+		end
 	end
-	table.sort(wall, function(a, b) return a.x < b.x end)
+	table.sort(wall, function(a, b)
+		if a.w ~= b.w then return a.w < b.w end
+		return a.u < b.u
+	end)
 	local row = {}
 	for _, e in ipairs(wall) do row[#row + 1] = e.i end
 	if #row > 0 then browse_rows[1] = row end
