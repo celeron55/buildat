@@ -68,7 +68,22 @@ for v in 1.00 0.80 0.60 0.45; do
 		bin/buildat -m launch_world -D "$out/emptyuser" \
 		-w 1280x720 -l 3 -c @"$out/cmds_$name.txt" > /dev/null 2>&1
 done
-for g in 0.04 0.10 0.25 0.45; do
+# **The second axis: how much the floor reflects at all** (user,
+# 2026-09-24). A dielectric returns about four per cent straight on
+# whatever its roughness -- what mirrors a wet road is Fresnel at a
+# grazing angle -- so what is missing underfoot is reflectance rather
+# than smoothness. This is a multiplier on the specular colour, 1 being
+# the eight per cent the shader assumes; above 1 it is no longer a
+# physical dielectric, which is why it is a pick.
+for sp in 1 2 4 8; do
+	name="spec_$sp"
+	sed "s#RUN#$name#" "$out/cmds.txt" > "$out/cmds_$name.txt"
+	env $probe BUILDAT_LAUNCH_FLOOR_VALUE=$VALUE_AT \
+		BUILDAT_LAUNCH_FLOOR_GLOSS=0.04 BUILDAT_LAUNCH_FLOOR_SPEC=$sp \
+		bin/buildat -m launch_world -D "$out/emptyuser" \
+		-w 1280x720 -l 3 -c @"$out/cmds_$name.txt" > /dev/null 2>&1
+done
+for g in 0.02 0.04 0.10 0.25; do
 	name="gloss_$g"
 	sed "s#RUN#$name#" "$out/cmds.txt" > "$out/cmds_$name.txt"
 	env $probe BUILDAT_LAUNCH_FLOOR_VALUE=$VALUE_AT \
@@ -133,6 +148,9 @@ sheet([("value %s   (gloss %s, bare)" % (v, gloss_at),
 		"%s/value_%s.png" % (out, v)) for v in ("1.00", "0.80", "0.60", "0.45")],
 		"sheet_value.png", "the value, in the reference's own room")
 sheet([("gloss %s   (value %s, populated)" % (g, value_at),
-		"%s/gloss_%s.png" % (out, g)) for g in ("0.04", "0.10", "0.25", "0.45")],
+		"%s/gloss_%s.png" % (out, g)) for g in ("0.02", "0.04", "0.10", "0.25")],
 		"sheet_gloss.png", "the finish, with the room's things on it")
+sheet([("reflectance x%s   (value %s, gloss 0.04)" % (sp, value_at),
+		"%s/spec_%s.png" % (out, sp)) for sp in ("1", "2", "4", "8")],
+		"sheet_spec.png", "how much the floor returns at all")
 PY

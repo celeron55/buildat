@@ -542,6 +542,10 @@ local SKY_VIS = magic.Variant(sky_vis_buffer)
 -- reflected ray leaves the room.
 -- One table, not three names: this chunk is at Lua's limit of 200 locals
 local probe_box = {
+	-- How much the floor reflects: a multiplier on the specular colour
+	-- the room hands its voxels, 1 being the dielectric eight per cent
+	-- the shader assumes ([LAUNCH_WORLD]'s floor round, second axis)
+	spec = tonumber(env("BUILDAT_LAUNCH_FLOOR_SPEC")) or 1.0,
 	at = magic.Vector3(0, 2.0 * U, 0),
 	min = magic.Vector3(room.X_MIN - 1, room.FLOOR_TOP, room.Z_MIN - 1),
 	max = magic.Vector3(room.X_MAX + 1, room.Y_TOP + 1, room.Z_MAX + 1),
@@ -578,7 +582,21 @@ local function apply_technique(node)
 		-- **atlas** that says which voxel is polished: the floor's
 		-- tiles carry a spec_strength of 1 and the stone 0.10, so this
 		-- makes the floor a dielectric mirror and leaves the wall matte.
-		m:SetShaderParameter("MatSpecColor", magic.Color(1, 1, 1, 1))
+		-- **And how much of a mirror it is** (user, 2026-09-24: none of
+		-- the glosses shot are enough). A dielectric reflects about
+		-- four per cent straight on whatever its roughness -- what
+		-- mirrors a wet road is Fresnel at a grazing angle -- so the
+		-- missing quantity underfoot is **reflectance, not
+		-- smoothness**. The shader's `0.08 * specStrength *
+		-- cMatSpecColor` says where to put it, and because
+		-- `specStrength` is per texel from the atlas, scaling this
+		-- moves the **floor** (1.0) and barely touches the stone
+		-- (0.10). Above one it is no longer a physical dielectric,
+		-- which is the pick rather than the fix: a mirror floor with no
+		-- diffuse reads as glass rather than stone.
+		m:SetShaderParameter("MatSpecColor",
+				magic.Color(probe_box.spec, probe_box.spec,
+					probe_box.spec, 1))
 		m:SetShaderParameter("ProbeBox", 1.0)
 		m:SetShaderParameter("ProbePos", probe_box.at)
 		m:SetShaderParameter("ProbeBoxMin", probe_box.min)
