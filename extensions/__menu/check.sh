@@ -30,7 +30,11 @@ for f in "$here"/extensions/*/launch_ui.txt; do
 done
 bad=0
 for n in $names; do
-	bin/buildat -m "$n" -D ../user -w 640x360 -l 3 \
+	# **Under a timeout** (2026-09-24, twice in one hour): a client can
+	# hang in X11_ShowWindow waiting for the window manager to map its
+	# window, and a boot check that waits forever on the desk's weather
+	# reports nothing at all
+	timeout 90 bin/buildat -m "$n" -D ../user -w 640x360 -l 3 \
 		-c @"$out/cmds.txt" 2>&1 |
 		sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/$n.log"
 	why=""
@@ -63,7 +67,7 @@ echo "$(echo "$names" | wc -w) launch UIs booted, $bad of them badly"
 	echo "mouse_pos 639 608"; echo "delay 300"; echo "mouse_click left"
 	echo "delay 6000"; echo "event scan 8 b"
 	echo "delay 2000"; echo "quit"; } > "$out/cmds_back.txt"
-bin/buildat -o launch_ui=__menu -a game/vanilla/contentdb -D ../user 	-w 1280x720 -l 3 -L "$out/back.log" -c @"$out/cmds_back.txt" 	> /dev/null 2>&1
+timeout 180 bin/buildat -o launch_ui=__menu -a game/vanilla/contentdb -D ../user 	-w 1280x720 -l 3 -L "$out/back.log" -c @"$out/cmds_back.txt" 	> /dev/null 2>&1
 grid=$(grep -ac "back to the grid" "$out/back.log")
 lost=$(grep -ac "leave: no launcher to go back to" "$out/back.log")
 alive=$(grep -ac "scan b: ui" "$out/back.log")
@@ -86,7 +90,7 @@ fi
 	echo "keypress Escape"; echo "delay 1500"; echo "quit"; } \
 	> "$out/cmds_console.txt"
 rm -f "$out/console.log"
-bin/buildat -m __menu -D ../user -w 1024x640 -l 3 \
+timeout 120 bin/buildat -m __menu -D ../user -w 1024x640 -l 3 \
 	-L "$out/console.log" -c @"$out/cmds_console.txt" > /dev/null 2>&1
 copened=$(grep -ac "console: .* lines of the API document" "$out/console.log")
 cclosed=$(grep -ac "console: closed" "$out/console.log")

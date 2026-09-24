@@ -1023,13 +1023,32 @@ X11_ShowWindow(_THIS, SDL_Window * window)
     SDL_WindowData *data = (SDL_WindowData *) window->driverdata;
     Display *display = data->videodata->display;
     XEvent event;
+    Uint32 deadline;
 
     if (!X11_IsWindowMapped(_this, window)) {
         X11_XMapRaised(display, data->xwindow);
-        /* Blocking wait for "MapNotify" event.
-         * We use X11_XIfEvent because pXWindowEvent takes a mask rather than a type,
-         * and XCheckTypedWindowEvent doesn't block */
-        X11_XIfEvent(display, &event, &isMapNotify, (XPointer)&data->xwindow);
+        /* Wait for "MapNotify", but not forever. A window manager is free
+           not to map a window it has placed on a workspace nobody is
+           looking at, and this wait was unbounded -- so a client started
+           while its workspace was elsewhere sat in here for as long as
+           that lasted, with two log lines out and no frame. Seen twice in
+           one hour on the desk this is developed on, and a window that is
+           mapped later is mapped anyway; nothing below needs it to have
+           happened yet.
+           XIfEvent is still the right call when the event does arrive --
+           XWindowEvent takes a mask rather than a type -- so the bounded
+           version is XCheckIfEvent in a loop with a deadline. */
+        deadline = SDL_GetTicks() + 2000;
+        for (;;) {
+            if (X11_XCheckIfEvent(display, &event, &isMapNotify,
+                                  (XPointer)&data->xwindow)) {
+                break;
+            }
+            if (SDL_TICKS_PASSED(SDL_GetTicks(), deadline)) {
+                break;
+            }
+            SDL_Delay(5);
+        }
         X11_XFlush(display);
     }
 
