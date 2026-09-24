@@ -251,13 +251,22 @@ fi
 	# pointed at and nothing to place against -- which is what the
 	# standing pitch changing by a few degrees did to this step
 	# (2026-09-23).
-	# **Steeply down, not twenty degrees** (2026-09-24): at twenty the
-	# floor is 4.7 m ahead and the reach is 5, so the step depended on
-	# the walk above having covered its ground -- and walking is paid
-	# for in frames, so in a container the player had barely moved and
-	# the ray landed past what can be touched. At forty-five it is the
-	# floor a metre or two ahead of wherever the player got to.
-	echo "look 180 -45"
+	# **From a known spot, not from wherever the walk ended**
+	# (2026-09-24): the step used to place and dig where the walk above
+	# had left the player, and a walk ends somewhere different on every
+	# machine -- flush against a wall on a slow one, where the ray lands
+	# on stone at head height and there is nothing to place. So the
+	# event puts the player back at the standing place, one short step
+	# clears the orbs standing around it, and fifty degrees down is the
+	# floor in front of them. Measured over the whole band: from there
+	# every pitch from thirty to eighty places on the floor.
+	echo "event mode fps"
+	echo "delay 1200"
+	echo "keydown W"
+	echo "delay 700"
+	echo "keyup W"
+	echo "delay 600"
+	echo "look 180 -50"
 	echo "delay 500"
 	echo "mouse_click right"
 	echo "delay 700"
@@ -267,8 +276,14 @@ fi
 	echo "delay 300"
 	echo "mouse_up left"
 	echo "delay 600"
+	# **Three seconds for a one-second dig** (2026-09-24): the dig ends
+	# on the frame that finds the button a second down, and a machine
+	# drawing a frame a second has few frames to offer -- 1.5 s of hold
+	# was one or two of them and it caught neither. A long hold costs
+	# this desk nothing: the dig ends at its second and the rest of the
+	# hold is spent.
 	echo "mouse_down left"
-	echo "delay 1500"
+	echo "delay 3000"
 	echo "mouse_up left"
 	echo "delay 900"
 	# And one left behind, for the second run below to find
@@ -612,12 +627,16 @@ fi
 	# sandboxed handler, and the room is sandboxed now)
 	echo "keypress Tab"
 	echo "delay 1800"
-	# **The middle of the screen, not a pixel off the layout**
-	# (2026-09-24): menu mode flies the camera to what is browsed, so
-	# whatever is browsed is in the middle of the frame -- where a fixed
-	# pixel was an orb only while the room held the number of orbs it
-	# held the day the number was written down, and a save made by this
-	# check's own launch moves every one of them.
+	# **An orb the room was asked for, in the middle of the screen**
+	# (2026-09-24): a fixed pixel was an orb only while the room held
+	# the number of orbs it held the day the pixel was written down --
+	# and this check's own launches add saves, which move every one of
+	# them. Browsing flies the camera to a *row*, which need not put an
+	# orb under the middle; typing a name flies it to that orb and
+	# stops in front of it, which is what the mark sheet uses to frame
+	# one.
+	for c in D I G G E R; do echo "keypress $c"; done
+	echo "delay 2600"
 	echo "mouse_pos 640 360"
 	echo "delay 400"
 	echo "mouse_click left"

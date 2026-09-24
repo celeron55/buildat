@@ -10,6 +10,7 @@
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
+. "$me/lib.sh"
 out="$here/local/hudtext"; mkdir -p "$out"
 save=buildat_test_hudtext
 cd "$here/Build"
@@ -34,8 +35,10 @@ trap 'kill -INT "$srv" 2>/dev/null' EXIT
 	echo "event scan"
 	echo "delay 1500"
 	echo "quit"; } > "$out/cmds.txt"
-bin/buildat -s localhost:29791 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+# A run that has stopped logging is taken down rather than waited out
+run_client 60 "$out/cli.log" bin/buildat -s localhost:29791 -w 1280x720 \
+	-l 3 -c @"$out/cmds.txt"
+sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli.log"
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 python3 - "$out/cli.log" <<'PY'
