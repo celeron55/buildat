@@ -102,9 +102,38 @@ buildat.safe.disconnect    = __buildat_disconnect
 -- to go back to the launcher; those places named launch_menu outright,
 -- which is wrong the moment the client is booted with another one.
 -- Loaded only if it already is: this never boots a launcher by itself.
+-- **A sandboxed launch UI is not in the trusted table of loaded
+-- extensions** ([LAUNCH_SANDBOX]): its init.lua is run through the
+-- sandbox's own loader, so `__buildat_loaded_extension` answers nil for
+-- it and every caller that asked for the launcher got nothing. What
+-- that cost: a game's own "back to the launcher" fell through to a
+-- plain disconnect, and the client sat with no server and no room --
+-- [FIRST_RUN]'s ContentDB run has been failing on exactly that
+-- (2026-09-24). So a sandboxed launch UI hands its interface over as it
+-- boots, and this is where it is kept.
+local launch_ui_interface = nil
+-- The three the client and a game's own menu call ([MENU_CONTEXT]);
+-- anything else in the table is ignored rather than refused, since a
+-- launch UI's module is its own and may hold whatever it likes.
+local LAUNCH_INTERFACE = {entered_game = true, leave_game = true,
+	in_game = true, show_dead_server = true}
+buildat.safe.provide_launch_interface = function(t)
+	if type(t) ~= "table" then
+		return false, "provide_launch_interface(t): a table"
+	end
+	local out = {}
+	for name in pairs(LAUNCH_INTERFACE) do
+		if type(t[name]) == "function" then
+			out[name] = t[name]
+		end
+	end
+	launch_ui_interface = out
+	return true
+end
+
 function buildat.menu_extension()
 	local name = __buildat_menu_extension_name or "launch_menu"
-	return __buildat_loaded_extension(name)
+	return __buildat_loaded_extension(name) or launch_ui_interface
 end
 -- leave(): back to the launcher's grid when there is one under the game
 -- ([MENU_CONTEXT]: the game's own menu offers it), else what disconnect
@@ -114,6 +143,15 @@ buildat.safe.leave = function()
 	if m and m.leave_game then
 		m.leave_game()
 	else
+		-- **Said out loud, because the quiet version of this is a dead
+		-- client**: with no launcher to go back to, leaving a game is a
+		-- disconnect and whatever drew the game is gone with it. That is
+		-- right for a client started straight into a server and wrong
+		-- for one booted with a launcher, so which it was is worth a
+		-- line in the log rather than a guess afterwards.
+		log:info("leave: no launcher to go back to (" ..
+				tostring(__buildat_menu_extension_name) ..
+				"); disconnecting")
 		__buildat_disconnect()
 	end
 end

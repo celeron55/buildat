@@ -791,6 +791,17 @@ sleep 1
 	for k in C O N T E N T D B; do echo "keypress $k"; done
 	echo "delay 400"; echo "keypress Return"
 	echo "delay 25000"; echo "event scan 8 cdb"
+	# **And the game's own way back reaches the room** ([MENU_CONTEXT]:
+	# a game's menu offers "back to the launcher", and `buildat.leave()`
+	# is what it calls). A sandboxed launch UI is not in the trusted
+	# table of loaded extensions, so that call found no launcher and
+	# disconnected into nothing -- the client sat with no server and no
+	# room (2026-09-24). The row is at the bottom of vanilla's menu
+	# panel, which at this window size puts it here; a miss fails the
+	# assertion below rather than passing quietly.
+	echo "delay 1200"; echo "mouse_pos 480 457"
+	echo "delay 300"; echo "mouse_click left"
+	echo "delay 6000"
 	echo "delay 2000"; echo "quit"; } > "$out/cmds_cdb.txt"
 rm -f "$out/cdb_cli.log" "$out/cdb_cli_server.log"
 BUILDAT_CONTENTDB_URL=http://localhost:30211 \
@@ -800,11 +811,18 @@ kill "$mirror" 2>/dev/null; wait "$mirror" 2>/dev/null
 asked=$(grep -ac "launch_w.*: launch: ContentDB" "$out/cdb_cli.log")
 drew=$(grep -ac 'scan cdb: .*text "ContentDB: games"' "$out/cdb_cli.log")
 rows=$(grep -ac 'scan cdb: .*text "Install"' "$out/cdb_cli.log")
+back=$(grep -ac "launch_w.*: game: back in the room" "$out/cdb_cli.log")
+lost=$(grep -ac "leave: no launcher to go back to" "$out/cdb_cli.log")
 echo "the room asked for ContentDB $asked times; the screen drew $drew" \
-		"with $rows rows to install"
+		"with $rows rows to install, and came back $back times"
 if [ "$asked" -lt 1 ] || [ "$drew" -lt 1 ] || [ "$rows" -lt 1 ]; then
 	echo "FAIL: ContentDB does not open from the room"
 	grep -a "launch_w.*: launch: " "$out/cdb_cli.log" | tail -3
+	exit 1
+fi
+if [ "$back" -lt 1 ] || [ "$lost" -gt 0 ]; then
+	echo "FAIL: a game's own way back does not reach the room -- it" \
+			"disconnects into nothing"
 	exit 1
 fi
 

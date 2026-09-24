@@ -1509,7 +1509,13 @@ struct CApp: public App, public magic::Application
 					"        ..\"if type(m) ~= 'table' or type(m.boot) ~= 'function' then\\n\"\n"
 					"        ..\"    error('"+extname+" has no boot()')\\n\"\n"
 					"        ..\"end\\n\"\n"
-					"        ..\"m.boot("+arg+")\\n\",\n"
+					"        ..\"m.boot("+arg+")\\n\"\n"
+					// **And it hands its interface over**: a sandboxed
+					// launch UI is not in the trusted table of loaded
+					// extensions, so without this a game's own "back to
+					// the launcher" finds no launcher and disconnects
+					// instead ([LAUNCH_SANDBOX], 2026-09-24)
+					"        ..\"buildat.provide_launch_interface(m)\\n\",\n"
 					"        '"+extname+"/init.lua')\n"
 					"    if not ok then error(err) end\n"
 					"else\n"
