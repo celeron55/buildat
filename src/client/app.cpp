@@ -1516,6 +1516,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(leave_to_menu)
 		DEF_BUILDAT_FUNC(http_get)
 		DEF_BUILDAT_FUNC(http_poll)
+		DEF_BUILDAT_FUNC(parse_json)
 
 		// Create a scene that will be synchronized from the server
 		m_scene = new magic::Scene(context_);
@@ -3141,6 +3142,86 @@ struct CApp: public App, public magic::Application
 	};
 	std::map<int, sp_<HttpJob>> m_http_jobs;
 	int m_http_next_id = 1;
+
+	// **JSON for the sandbox** ([URHO_SWEEP], 2026-09-25): a game that
+	// fetched a body with `network.http_get` had no way to read it, and
+	// Urho3D's own JSONValue is not the answer -- its GetRoot() hands
+	// Lua a pointer into the file, which dangles the moment the file is
+	// collected. The parse is the client's own (core/json.h, sajson) and
+	// what comes back is **plain Lua**: tables, strings, numbers and
+	// booleans, so nothing holds a C++ object and no lifetime crosses
+	// the sandbox.
+	//
+	// null becomes nil, which in an array leaves a hole -- said in
+	// client_api.txt, because a length that stops early is otherwise a
+	// puzzle. A document deeper than this nests no further.
+	static const int JSON_MAX_DEPTH = 64;
+	static void push_json(lua_State *L, const json::Value &v, int depth)
+	{
+		if(depth > JSON_MAX_DEPTH){
+			lua_pushnil(L);
+			return;
+		}
+		switch(v.get_type()){
+		case json::Value::T_BOOL:
+			lua_pushboolean(L, v.as_boolean());
+			break;
+		case json::Value::T_INT:
+			lua_pushnumber(L, (lua_Number)v.as_integer());
+			break;
+		case json::Value::T_FLOAT:
+			lua_pushnumber(L, (lua_Number)v.as_real());
+			break;
+		case json::Value::T_STRING:
+			lua_pushstring(L, v.as_cstring());
+			break;
+		case json::Value::T_ARRAY: {
+			lua_newtable(L);
+			const unsigned int n = v.size();
+			for(unsigned int i = 0; i < n; i++){
+				push_json(L, v.at(i), depth + 1);
+				lua_rawseti(L, -2, (int)i + 1);
+			}
+			break;
+		}
+		case json::Value::T_OBJECT: {
+			lua_newtable(L);
+			for(json::Iterator it(v); it.valid(); it.next()){
+				push_json(L, it.value(), depth + 1);
+				lua_setfield(L, -2, it.ckey());
+			}
+			break;
+		}
+		default:
+			lua_pushnil(L);
+			break;
+		}
+	}
+
+	// parse_json(text) -> value, or nil and why not
+	static int l_parse_json(lua_State *L)
+	{
+		size_t len = 0;
+		const char *text = luaL_checklstring(L, 1, &len);
+		// A trust boundary: the body came off the network. sajson holds
+		// the whole document in memory and the copy here doubles it, so
+		// the size is capped rather than left to the fetch's own limits.
+		if(len > 8u * 1024 * 1024){
+			lua_pushnil(L);
+			lua_pushstring(L, "parse_json: over 8 MB");
+			return 2;
+		}
+		json::json_error_t err;
+		const json::Value v = json::load_string(text, &err);
+		if(v.get_type() == json::Value::T_UNDEFINED){
+			lua_pushnil(L);
+			lua_pushfstring(L, "parse_json: %s (line %d, column %d)",
+					err.text, err.line, err.column);
+			return 2;
+		}
+		push_json(L, v, 0);
+		return 1;
+	}
 
 	static int l_http_get(lua_State *L)
 	{

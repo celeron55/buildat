@@ -101,4 +101,20 @@ do
 	log:info("wrapped: a cursor shape came off a game's own image")
 end
 
+-- buildat.parse_json (2026-09-25): the shapes a fetched body arrives in
+do
+	local v = buildat.parse_json(
+			'{"a": 1, "b": [true, "two", 3.5], "c": {"d": null}}')
+	assert(type(v) == "table", "an object is a table")
+	assert(v.a == 1, "a number")
+	assert(type(v.b) == "table" and #v.b == 3, "an array is a list")
+	assert(v.b[1] == true and v.b[2] == "two" and
+			math.abs(v.b[3] - 3.5) < 1e-9, "the array's three values")
+	assert(type(v.c) == "table" and v.c.d == nil, "null is nothing")
+	local bad, why = buildat.parse_json("{not json")
+	assert(bad == nil and type(why) == "string", "a bad document says so")
+	assert(buildat.parse_json("[]") ~= nil, "an empty array parses")
+	log:info("wrapped: json parses to plain Lua, and says no to rubbish")
+end
+
 return true

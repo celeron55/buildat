@@ -473,6 +473,17 @@ UnsubscribeFromEvent(event_name, callback)
   so a handler unsubscribed by the name its own file calls it by used to match
   nothing and go on firing over a screen it had already removed.
 
+buildat.parse_json(text) -> value, or nil and why not
+- JSON to plain Lua: objects become tables keyed by their names, arrays
+  become lists from 1, and strings, numbers and booleans are themselves. What
+  a game fetches with network.http_get is what this is for.
+- A JSON null becomes nil, so an array with nulls in it has holes and # stops
+  at the first one. A document nests 64 deep at most, and 8 MB is refused.
+- Urho3D's own JSONFile and JSONValue are not on the whitelist: their getters
+  answer references into the parent document, which dangle when it is
+  collected. This copies instead, so nothing the sandbox holds is a C++
+  object.
+
 DebugRenderer, through scene:CreateComponent("DebugRenderer")
 - A game's own debug geometry: AddLine, AddTriangle, AddCross, AddCircle,
   AddSphere, AddBoundingBox and AddNode, each taking a Color and an optional

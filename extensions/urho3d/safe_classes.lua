@@ -1056,6 +1056,11 @@ function M.define(dst, util)
 					"ToString", {"string"}, {"XMLFile"}),
 		},
 	})
+	-- refused: JSONFile -- its GetRoot() hands Lua a pointer into the file
+	-- rather than a copy, so the value dangles when the file is collected;
+	-- buildat.parse_json() is the JSON here and answers plain Lua
+	-- refused: JSONValue -- the same lifetime, one level down: Get(key)
+	-- answers a reference into its parent, and a game wants a table anyway
 	-- refused: Localization -- the engine's own string table, loaded from a
 	-- JSON resource by language; buildat's translations are the Luanti
 	-- module's ([TRANSLATIONS]) and a game's own strings are its own

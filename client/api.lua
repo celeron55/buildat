@@ -306,6 +306,19 @@ buildat.safe.connect_start = function(address)
 	__buildat_connect_server_start(address)
 	return true
 end
+-- **JSON, because a body fetched is a body to read** ([URHO_SWEEP],
+-- 2026-09-25): `network.http_get` hands a game a string and the sandbox
+-- had nothing to parse it with. The answer is plain Lua -- tables,
+-- strings, numbers, booleans -- parsed by the client's own reader, so
+-- nothing holds a C++ object. A JSON null becomes nil, which in an
+-- array leaves a hole; a document nests 64 deep at most.
+-- parse_json(text) -> value, or nil and why not
+buildat.safe.parse_json = function(text)
+	if type(text) ~= "string" then
+		return nil, "parse_json(text): a string"
+	end
+	return __buildat_parse_json(text)
+end
 buildat.safe.connect_poll = __buildat_connect_server_poll
 -- **Back to the launcher from a game** ([MENU_CONTEXT]): the connection
 -- dropped, the local server stopped and the sandbox's leavings cleared.
