@@ -41,6 +41,14 @@ fi
 	echo "delay 600"
 	echo "screenshot $out/console.png"
 	echo "delay 300"
+	# **And the line the search found copies out** (this screen's
+	# done-when: text copies out of the document). A `Text` has a
+	# selection and no copy of its own, so Ctrl+C takes the line the
+	# selection is on -- the unit a person reading an API wants.
+	echo "keydown CTRL"
+	echo "keypress C"
+	echo "keyup CTRL"
+	echo "delay 400"
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -m launch_console -D ../user -w 1280x720 -l 3 \
 	-c @"$out/cmds.txt" 2>&1 |
@@ -55,6 +63,13 @@ evalline=$(grep -a "launch_c.*: console: eval " "$out/cli.log" | head -1 |
 doc=$(grep -a "launch_c.*: console: [0-9]* lines" "$out/cli.log" | head -1 |
 	sed -n 's/.*console: \([0-9]*\) lines.*/\1/p')
 typed=$(grep -ac "launch_c.*: console: buildat.version() = " "$out/cli.log")
+copied=$(grep -a "launch_c.*: console: copied [0-9]* characters" "$out/cli.log" |
+	head -1 | sed -n 's/.*copied \([0-9]*\) characters.*/\1/p')
+echo "Ctrl+C put ${copied:-0} characters on the clipboard"
+if [ "${copied:-0}" -lt 1 ]; then
+	echo "FAIL: the line the search found does not copy out"
+	exit 1
+fi
 echo "${evalline:-(eval said nothing)}"
 echo "the document is ${doc:-0} lines, and a typed line ran $typed times"
 if [ -z "$evalline" ] || echo "$evalline" | grep -q FAILED; then

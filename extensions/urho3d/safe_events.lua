@@ -17,6 +17,11 @@ return {
 		Key = {variant = "Int", safe = "number"},
 		-- True when this is a key repeat rather than a fresh press
 		Repeat = {variant = "Bool", safe = "boolean"},
+		-- Which modifiers were held: shift 1, ctrl 2, alt 4, summed.
+		-- A shortcut wants this rather than the two control keys' own
+		-- states, and it says nothing the key itself does not
+		-- ([LAUNCH_CONSOLE]: Ctrl+C copies the line it is pointing at).
+		Qualifiers = {variant = "Int", safe = "number"},
 	},
 	KeyUp = {
 		Key = {variant = "Int", safe = "number"},

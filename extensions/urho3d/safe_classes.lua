@@ -1998,6 +1998,24 @@ function M.define(dst, util)
 				end),
 			GetScale = util.self_function(
 					"GetScale", {"number"}, {"UI"}),
+			-- **Putting text on the clipboard, and never taking it off**
+			-- ([LAUNCH_CONSOLE]: the document copies out, and a seed or
+			-- an address pastes in). Writing is the user's own action --
+			-- they selected the text and pressed the key -- while
+			-- *reading* the clipboard is a capability of its own: what
+			-- is on it is whatever the user last copied anywhere, which
+			-- is a password as often as anything, and a sandbox that can
+			-- read it can send it. So `SetClipboardText` is here and
+			-- `GetClipboardText` is deliberately not, nor a property
+			-- that would read as one.
+			SetClipboardText = util.self_function(
+					"SetClipboardText", {}, {"UI", "string"}),
+			-- Whether Urho3D's own Ctrl+C and Ctrl+V in a LineEdit go
+			-- through the OS clipboard rather than a copy of its own.
+			-- The paste is read by the C++ side into the field the user
+			-- has focused; nothing of it reaches this sandbox.
+			SetUseSystemClipboard = util.self_function(
+					"SetUseSystemClipboard", {}, {"UI", "boolean"}),
 		},
 		properties = {
 			root = util.simple_property(dst.UIElement),

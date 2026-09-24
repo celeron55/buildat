@@ -201,6 +201,8 @@ local function open(opts)
 				math.max(0, (i - 1) * row_h - 40))
 	end
 	local found_at = 0
+	-- The line the search is pointing at, which is what Ctrl+C takes
+	local found_line = nil
 	local function find(from, back)
 		local q = search.text:lower()
 		if q == "" then
@@ -218,6 +220,9 @@ local function open(opts)
 				-- (user): a line in the middle of a screenful is not
 				-- an answer until something says which one it is.
 				doc:SetSelection(line_at[i] + col - 1, #q)
+				-- What Ctrl+C would take: the line the match is on,
+				-- which is the unit a person reading an API wants
+				found_line = lines[i]
 				hint.text = "line " .. i .. " of " .. n
 				log:info("console: search " .. q .. " -> line " .. i ..
 						" column " .. col)
@@ -286,6 +291,13 @@ local function open(opts)
 		log:info("console: " .. line .. " = " .. answer)
 	end
 
+	-- **Ctrl+C and Ctrl+V reach the OS clipboard**, not a copy of
+	-- Urho3D's own ([LAUNCH_CONSOLE]'s done-when: text pastes into the
+	-- console from the OS). Urho3D reads the paste on the C++ side into
+	-- the field the user has focused; nothing of the clipboard reaches
+	-- this sandbox, which is why the safe API offers the write and not
+	-- the read.
+	magic.ui:SetUseSystemClipboard(true)
 	magic.ui:SetFocusElement(input)
 	-- **Declared at the top of the file, assigned here**: the sandbox
 	-- refuses a global first assigned from inside a function, and
@@ -321,6 +333,28 @@ local function open(opts)
 			magic.ui:SetFocusElement(to)
 			log:info("console: the keyboard is in the " ..
 					(to == input and "console" or "search"))
+			return
+		end
+		-- **Ctrl+C takes the line the search is pointing at**
+		-- ([LAUNCH_CONSOLE]'s done-when: text copies out of the
+		-- document). A `Text` has a selection and no copy of its own,
+		-- and the selection here is always a search hit, so the line it
+		-- is on is what goes to the clipboard -- the unit a person
+		-- reading an API actually wants, rather than the three words
+		-- they typed.
+		-- The qualifier off the event rather than the key state: Urho3D
+		-- names the two control keys separately and the event already
+		-- says which modifiers were down (QUAL_SHIFT 1, QUAL_CTRL 2,
+		-- QUAL_ALT 4; Lua 5.1 has no bitwise operators)
+		local qual = event_data:GetInt("Qualifiers") or 0
+		local ctrl = math.floor(qual / 2) % 2 == 1
+		if key == magic.KEY_C and ctrl then
+			if found_line and found_line ~= "" then
+				magic.ui:SetClipboardText(found_line)
+				hint.text = "copied the line"
+				log:info("console: copied " .. #found_line ..
+						" characters to the clipboard")
+			end
 			return
 		end
 		if key ~= magic.KEY_RETURN and key ~= magic.KEY_KP_ENTER then
