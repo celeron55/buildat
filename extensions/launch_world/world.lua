@@ -4277,64 +4277,6 @@ function handle_idle_update(event_type, event_data)
 end
 magic.SubscribeToEvent("Update", "handle_idle_update")
 
--- **The loading reel**: it turns because the frame genuinely turns, and
--- it turns while a bay is coming apart -- which in this room is what
--- loading is. Honest only now that the connect is off the main thread
--- ([BOX_PLAYTEST_2] (12)): a reel that freezes when the client stalls is
--- a reel that lies.
-local reel_nodes = {}
-do
-	local x, y, z = 7.0, 2.35, 5.6
-	part("Box", magic.Vector3(x, y - 1.2, z),
-			magic.Vector3(2.6, 0.3, 1.4), machined)
-	for i, dx in ipairs({-0.72, 0.72}) do
-		local hub = part("Cylinder", magic.Vector3(x + dx, y, z),
-				magic.Vector3(1.0, 0.22, 1.0), chrome)
-		-- Lying on its side, so it reads as a reel and not as a drum
-		hub.rotation = magic.Quaternion(90, 0, 0)
-		-- A spoke across the hub, so that a turning reel is visibly
-		-- turning. It is its own node turned in place rather than a
-		-- child of the hub: Node's parent is not on the whitelist, and a
-		-- spoke centred on the hub needs nothing more than its own
-		-- rotation anyway.
-		local spoke = part("Box", magic.Vector3(x + dx, y, z),
-				magic.Vector3(1.5, 0.1, 0.16), machined)
-		reel_nodes[i] = {hub = hub, spoke = spoke}
-	end
-end
-
-reel_angle = 0
-function handle_reel_update(event_type, event_data)
-	-- The room stands down while a game, or a console, is over it
-	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if held_was or held_by_others() then return end
-	local dt = event_data:GetFloat("TimeStep")
-	local busy = false
-	for b = 1, BAYS do
-		if bay_state[b] and bay_state[b].t ~= bay_state[b].target then
-			busy = true
-		end
-	end
-	if not busy then
-		-- **It parks.** Otherwise the spokes stop wherever they were and
-		-- the room's state is no longer a function of the bays alone --
-		-- a bay shut again would come back to a different picture, which
-		-- is the one thing the dissolve's own check is about.
-		if reel_angle ~= 0 then
-			reel_angle = 0
-			for _, r in ipairs(reel_nodes) do
-				r.spoke.rotation = magic.Quaternion(0, 0, 0)
-			end
-		end
-		return
-	end
-	reel_angle = (reel_angle + dt * 220) % 360
-	for i, r in ipairs(reel_nodes) do
-		r.spoke.rotation = magic.Quaternion(0,
-				reel_angle * (i == 1 and 1 or -1), 0)
-	end
-end
-magic.SubscribeToEvent("Update", "handle_reel_update")
 
 
 set_preset(1)
