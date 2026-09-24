@@ -235,6 +235,12 @@ fi
 	# nothing.
 	echo "screenshot $out/fps-stood.png"
 	echo "wait_log 20000 Wrote screenshot $out/fps-stood.png"
+	# **A glowing orb stays in its pocket** ([POCKETS_ROUND]: the
+	# pockets are stonework and the floor is where things move). The
+	# crosshair at the standing place is on a pocketed orb, so E here
+	# has to refuse it -- the carrying below takes a floor orb instead.
+	echo "keypress E"
+	echo "delay 400"
 	# **Carrying**: an orb the crosshair is on comes into the hand with E
 	# and goes back down with right click. A scripted run cannot aim with
 	# the mouse -- SetMouseVisible(false) stands down in one, so
@@ -962,7 +968,14 @@ if [ -z "$resty" ] || [ "$(python3 -c "print(1 if float('${resty:-9}') < 3.2 els
 	echo "FAIL: a sphere put down floats instead of resting on the floor"
 	exit 1
 fi
-echo "the player carried $picked spheres and put down $putdown"
+stone=$(grep -ac "launch_w.*: carry: .* is stonework, not a piece" \
+	"$out/cli.log")
+echo "the player carried $picked spheres and put down $putdown," \
+		"and was refused a pocketed one $stone times"
+if [ "$stone" -lt 1 ]; then
+	echo "FAIL: a glowing orb can be taken out of its pocket"
+	exit 1
+fi
 if [ "$picked" -lt 1 ] || [ "$putdown" -lt 1 ]; then
 	echo "FAIL: E picks nothing up, or right click puts nothing down"
 	exit 1
