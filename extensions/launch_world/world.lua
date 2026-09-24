@@ -289,7 +289,20 @@ do
 	-- shows whichever quarter of a pattern its own height lands on. So
 	-- one unit, no rules above or below it -- they fall outside a tile
 	-- the band fills -- and uv_scale 1, which is one motif every 45 cm.
-	local fh, fi = ornament.meander(96, {units = 1, depth = 2, band_y = 0.0})
+	-- **The band, not the meander** ([SIGIL_ROUND], 2026-09-24): one
+	-- seed answers a whole frieze, in three kinds, where the meander
+	-- drew one figure for every wall in every room. **At period one**,
+	-- which is what a tile one voxel across can show -- the run that
+	-- repeats every eight voxels waits on per-axis `uv_scale`, and
+	-- pinning the cycle costs a sigil its beat and nothing else.
+	local fstyle = ornament.band_style(ornament.seed_of("launch_world frieze"))
+	fstyle.cycle = 1
+	fstyle.band_height = 1.0
+	local fh = ornament.band(96, fstyle, 0)
+	-- The inlay is the band's own field: what is carved is what takes
+	-- the second material, where the meander set a rectangle around a
+	-- figure that filled it
+	local fi = fh
 	register_tile("frieze.png", fh, fi,
 			{base = magic.Color(0.50, 0.50, 0.50, 1),
 			inlay = magic.Color(0.36, 0.36, 0.38, 1), relief = 0.85,
@@ -299,7 +312,10 @@ do
 	-- The pockets' side columns, which are the one place the ornament
 	-- goes now that the wall is one material ([LAUNCH_WORLD]: "the
 	-- ornament is on its side columns and nowhere else")
-	local ch, ci = ornament.meander(128, {units = 2, depth = 2})
+	local cstyle = ornament.band_style(ornament.seed_of("launch_world column"))
+	cstyle.cycle = 1
+	local ch = ornament.band(128, cstyle, 0)
+	local ci = ch
 	register_tile("column.png", ch, ci,
 			{base = magic.Color(0.46, 0.47, 0.52, 1),
 			inlay = magic.Color(0.22, 0.20, 0.26, 1), relief = 0.8,
@@ -2574,7 +2590,13 @@ held_was = false
 -- -- they stop the look where they are read. This is only about
 -- somebody else's screen.
 function held_by_others()
-	if in_game or console_open or backdrop then
+	-- `launching` is the input half of `in_game`: the launch has
+	-- committed and the player is not steering the room any more, but
+	-- the room is still what is on the screen ([LAUNCH_WORLD],
+	-- 2026-09-24: it stood down at the first moment of a sequence that
+	-- runs for seconds and the player watched the rest of it with
+	-- nothing to look at)
+	if in_game or launching or console_open or backdrop then
 		return true
 	end
 	local who = api.launch_ui_name and api.launch_ui_name() or nil
@@ -2606,6 +2628,9 @@ end
 function handle_fps_update(event_type, event_data)
 	-- A backdrop takes no input ([TWO_AUDIENCES]' composition)
 	if backdrop then return end
+	-- A launch in flight: the room draws on until the game takes the
+	-- view, and this is what notices that it has
+	launch_watch()
 	-- **The one gate, asked once a frame** ([LAUNCH_WORLD]: whatever
 	-- holds the screen owns the input). This is the asking; every other
 	-- handler below reads the answer it left.
@@ -3596,11 +3621,26 @@ function drone.hz(i)
 end
 
 function handle_synth_update(event_type, event_data)
-	-- The room stands down while a game, or a console, is over it
-	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if held_was or held_by_others() then return end
-	bed:update()
+	-- **The room hums on through a launch** ([LAUNCH_WORLD],
+	-- 2026-09-24): the input goes when the launch commits, but the
+	-- room is still what the player is looking at until the game draws,
+	-- and a wait that goes silent at its first moment feels switched
+	-- off rather than continuous. So the sound follows *in_game*, not
+	-- the input gate -- and when the room does go, the drone **fades**.
 	local dt = event_data:GetFloat("TimeStep")
+	local want_sound = (in_game or console_open or backdrop) and 0 or 1
+	sound_fade = sound_fade + (want_sound - sound_fade) *
+			(1 - math.exp(-dt / 0.35))
+	if want_sound == 0 and sound_fade < 0.01 then
+		for _, v in ipairs(drone.voices) do
+			v.dark.source.gain = 0
+			v.lit_voice.source.gain = 0
+		end
+		kept.bed.source.gain = 0
+		return
+	end
+	bed:update()
+	kept.bed.source.gain = levels.bed * sound_fade
 	drone.t = drone.t + dt
 	-- **What the player is doing, as one number** ([ROOM_SOUND]): at
 	-- rest it is barely there, an orb under the crosshair brings it up,
@@ -3673,8 +3713,10 @@ function handle_synth_update(event_type, event_data)
 			local k = 1 - math.exp(-dt / 0.15)
 			v.gain = v.gain + (g - v.gain) * k
 			v.lit = v.lit + (want_lit - v.lit) * k
-			v.dark.source.gain = v.gain * lfo * (1 - v.lit) * levels.orbs
-			v.lit_voice.source.gain = v.gain * lfo * v.lit * levels.orbs
+			v.dark.source.gain = v.gain * lfo * (1 - v.lit) * levels.orbs *
+					sound_fade
+			v.lit_voice.source.gain = v.gain * lfo * v.lit * levels.orbs *
+					sound_fade
 		else
 			v.dark.source.gain = 0
 			v.lit_voice.source.gain = 0
@@ -5238,6 +5280,27 @@ magic.SubscribeToEvent("command_seq:mode", "handle_seq_mode")
 -- reset segfaults, and the room's cloned render path has to go on the
 -- new one or it draws black with HDR on.
 in_game = false
+-- **The launch has committed and the game is not on screen yet**: the
+-- room gives up the input at once and keeps drawing and humming until
+-- something else takes the view -- which is `set_preferred_viewports`,
+-- so the count that call keeps is what says so -- or until the wait
+-- runs out and a launch that never drew stops holding the room open.
+launching = false
+-- How much of the room's own sound is playing: one at rest, ramped to
+-- nought when the room leaves the screen so the drone fades rather
+-- than cuts ([LAUNCH_WORLD], 2026-09-24)
+sound_fade = 1
+launch_started_us = 0
+launch_viewports = 0
+-- **How long the room draws on without the game taking the view.**
+-- A game that comes up into a world takes a viewport within a second
+-- or two of its client Lua running, and the room goes then. A game
+-- that draws **its own menu first** takes no viewport at all -- it is
+-- UI over whatever is behind it -- so this ceiling is what stops the
+-- room from humming behind that menu; twelve seconds is long enough
+-- for a local server to start and short enough not to be a second
+-- wait of its own.
+LAUNCH_WAIT_S = 12
 -- The developer console, drawn over the room by launch_console and
 -- taken away again by its own Escape ([LAUNCH_CONSOLE] offers it)
 console_open = false
@@ -5261,17 +5324,49 @@ function be_backdrop()
 	log:info("room: a backdrop for somebody else's screen")
 end
 
+-- **The launch committed**: the input goes, the room's own furniture
+-- goes -- a prompt and a crosshair belong to a room somebody is using
+-- -- and the room keeps drawing and sounding. What it is waiting for
+-- is the game's own view.
 function entered_game()
-	if in_game then return end
-	in_game = true
+	if in_game or launching then return end
+	launching = true
+	launch_started_us = buildat.get_time_us()
+	launch_viewports = magic.viewport_generation and
+			magic.viewport_generation() or 0
 	for _, e in ipairs(room_ui) do
 		e.visible = false
 	end
 	attracting = false
-	log:info("game: the room stands down")
+	log:info("game: the launch has the input; the room keeps drawing")
+end
+
+-- The room is not on the screen any more: stop drawing it, and let the
+-- drone fade rather than cut, the point being that the wait feels
+-- continuous rather than switched off.
+function stand_down(why)
+	if in_game then return end
+	in_game = true
+	launching = false
+	log:info("game: the room stands down (" .. why .. ")")
+end
+
+-- Asked once a frame while a launch is in flight; see LAUNCH_WAIT_S
+function launch_watch()
+	if not launching then return end
+	local now = magic.viewport_generation and magic.viewport_generation() or 0
+	if now ~= launch_viewports then
+		stand_down("the game has the view")
+		return
+	end
+	if buildat.get_time_us() - launch_started_us >
+			LAUNCH_WAIT_S * 1000000 then
+		stand_down("nothing drew in " .. LAUNCH_WAIT_S .. " s")
+	end
 end
 
 function leave_game()
+	launching = false
 	if not in_game then return false end
 	api.leave_to_menu()
 	in_game = false

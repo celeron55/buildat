@@ -450,6 +450,16 @@ function Safe.set_preferred_viewports(viewports)
 	__buildat_set_preferred_viewports(unsafe)
 end
 
+-- **Who has the screen** ([LAUNCH_WORLD], 2026-09-24: the room stands
+-- down too early). A launcher that keeps drawing while a game loads has
+-- to know when the game actually takes the view, and taking the view is
+-- set_preferred_viewports. **The count is the client's**, not this
+-- file's: each sandbox gets its own copy of this extension, so a game
+-- bumping a count here is not something the launcher's copy can see.
+function Safe.viewport_generation()
+	return __buildat_viewport_generation()
+end
+
 --
 -- Unsafe interface
 --

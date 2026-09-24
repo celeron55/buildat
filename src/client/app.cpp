@@ -985,6 +985,9 @@ struct CApp: public App, public magic::Application
 	// What set_preferred_viewports() was last given, and the rects the game
 	// gave them in -- in window pixels, so that the scale can be applied
 	// again from scratch when the window changes size
+	// Bumped by set_preferred_viewports(); read through
+	// buildat.viewport_generation() by a launcher waiting for a game
+	int m_viewport_generation = 0;
 	sv_<magic::SharedPtr<magic::Viewport>> m_preferred_viewports;
 	sv_<magic::IntRect> m_preferred_rects;
 	magic::SharedPtr<magic::Texture2D> m_preferred_texture;
@@ -1449,6 +1452,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_ui_scale)
 		DEF_BUILDAT_FUNC(logical_size)
 		DEF_BUILDAT_FUNC(get_preferred_render_scale)
+		DEF_BUILDAT_FUNC(viewport_generation)
 		DEF_BUILDAT_FUNC(get_preference)
 		DEF_BUILDAT_FUNC(set_preference)
 		DEF_BUILDAT_FUNC(list_preferences)
@@ -2254,6 +2258,14 @@ struct CApp: public App, public magic::Application
 
 	void set_preferred_viewports(const sv_<magic::Viewport*> &viewports)
 	{
+		// **Who has the screen** ([LAUNCH_WORLD], 2026-09-24: the room
+		// stands down too early). Taking the view is this call, and a
+		// launcher that keeps drawing while a game loads has to know
+		// when the game has actually taken it. The count lives here
+		// rather than in extensions/urho3d because each sandbox has its
+		// own copy of that file: a game bumping its own count is not
+		// something the launcher's copy can see.
+		m_viewport_generation++;
 		m_preferred_viewports.clear();
 		m_preferred_rects.clear();
 		for(magic::Viewport *vp : viewports){
@@ -2897,6 +2909,20 @@ struct CApp: public App, public magic::Application
 		lua_pop(L, 1);
 		magic::UI *ui = self->GetSubsystem<magic::UI>();
 		lua_pushnumber(L, ui ? ui->GetScale() : 1.0);
+		return 1;
+	}
+
+	// viewport_generation() -> number: how many times anybody has set
+	// the preferred viewports in this run ([LAUNCH_WORLD]). A launch UI
+	// records it when a launch commits and watches for it to change,
+	// which is the game taking the screen; sandbox-safe, and a number
+	// rather than a callback because the reader asks once a frame.
+	static int l_viewport_generation(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		lua_pushinteger(L, self->m_viewport_generation);
 		return 1;
 	}
 
