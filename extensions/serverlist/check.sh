@@ -19,7 +19,8 @@
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/serverlist_check"; mkdir -p "$out"
-rm -rf "$out/user" "$out/list"; mkdir -p "$out/user" "$out/list"
+rm -rf "$out/user" "$out/list" "$out/quietuser"
+mkdir -p "$out/user" "$out/list" "$out/quietuser"
 port=30778
 cd "$here/Build"
 if pgrep -x buildat >/dev/null; then
@@ -38,6 +39,22 @@ JSON
 # quiet. The store is the client's own file.
 printf 'accepted,address,description,created,last_attempt,name\n"true","http://localhost","a check'"'"'s own server list","1790000000","1790000000",""\n' \
 	> "$out/user/network_addresses.csv"
+# **And a client that has not said yes fetches nothing at boot**: a
+# launcher that put a permission dialog in front of a first-time user
+# before they asked for anything would be answering a question nobody
+# posed. The list's own launch action is where the asking happens.
+{ echo "delay 6000"; echo "quit"; } > "$out/cmds_quiet.txt"
+BUILDAT_SERVERLIST_URL=http://localhost:$port \
+	timeout 90 bin/buildat -m launch_world -D "$out/quietuser" -w 640x360 \
+	-l 3 -L "$out/quiet.log" -c @"$out/cmds_quiet.txt" > /dev/null 2>&1
+quiet=$(grep -ac "serverli.*not fetching .* until asked to" "$out/quiet.log")
+asked=$(grep -ac "Asking the user about" "$out/quiet.log")
+echo "a client with no answer on file: $quiet held off, $asked dialogs"
+if [ "$quiet" -lt 1 ] || [ "$asked" -gt 0 ]; then
+	echo "FAIL: the serverlist asks a first-time user about the network" \
+			"before anyone asked it for a list"
+	exit 1
+fi
 pkill -f "http.server $port" 2>/dev/null || true
 (cd "$out/list" && exec python3 -m http.server $port > "$out/http.log" 2>&1) &
 mirror=$!

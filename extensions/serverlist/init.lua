@@ -81,11 +81,32 @@ local function write_cache(rows)
 	log:info(#rows .. " servers cached in " .. CACHE)
 end
 
+-- **Whether this client has already said yes to that host.** A launcher
+-- that put a permission dialog in front of a first-time user before
+-- they had asked for anything would be answering a question nobody
+-- posed ([TWO_AUDIENCES]: the room's first frame is the point of it).
+-- So a boot fetches only where the answer is already on file, and
+-- asking is what the list's own launch action is for.
+local function accepted(url)
+	local uri = url:match("^(https?://[^/:]+)")
+	for _, a in ipairs(network.known_addresses()) do
+		if a.uri == uri then
+			return a.accepted
+		end
+	end
+	return false
+end
+
 local fetching = false
-local function fetch()
+local function fetch(ask)
 	if fetching then return end
-	fetching = true
 	local url = list_url()
+	if not ask and not accepted(url) then
+		log:info("not fetching " .. url .. " until asked to: this client" ..
+				" has not said yes to it")
+		return
+	end
+	fetching = true
 	network.http_get(url .. "/list", function(body, err)
 		fetching = false
 		if not body then
@@ -123,10 +144,17 @@ function M.safe.servers()
 	return out
 end
 
--- Asking for the rows is what starts the next fetch: an extension nobody
--- loads costs nothing, and one that is loaded is one whose list is being
--- looked at
-fetch()
+-- **Fetching it now, and saying so**: the launch action a launcher file
+-- offers beside the rows, for the first list and for a fresher one.
+-- This is the call that may ask the user about the host.
+function M.safe.refresh()
+	fetch(true)
+end
+
+-- Loading this extension starts a fetch where the host is already
+-- accepted, so the rows a launcher draws are the last list this client
+-- was given rather than the first one it ever saw
+fetch(false)
 
 return M
 -- vim: set noet ts=4 sw=4:

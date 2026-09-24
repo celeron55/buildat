@@ -26,6 +26,17 @@ return function(ctx)
 			end,
 		}
 	end
+	-- **The list is fetched because somebody asked**, which is also the
+	-- only place the network permission is put in front of a player:
+	-- this action is what a room with no rows yet offers instead of them
+	out[#out + 1] = {
+		id = "refresh",
+		label = #out > 0 and "Fetch the server list again" or
+				"Fetch the server list",
+		order = 299,
+		description = "Ask the list this client knows for its servers",
+		run = function() sl.refresh() end,
+	}
 	return out
 end
 -- vim: set noet ts=4 sw=4:

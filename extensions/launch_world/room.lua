@@ -264,7 +264,21 @@ end
 
 -- **The pockets, one per thing the room holds.** Called before build(),
 -- with however many launch actions the tree offered.
+-- **How many pockets the wall can hold** ([LAUNCH_WORLD]: nine fit
+-- across 93 voxels and thirty would not, and ContentDB can install a
+-- game at any time). A pocket is at most four voxels across and wants a
+-- column of wall either side, so six voxels apiece is what fits between
+-- the margins -- and what does not fit stands on the floor instead,
+-- which is the room's own answer for everything that is not in the
+-- wall. Asking for more than this is not an error: it is answered with
+-- what the wall can do.
+function M.max_pockets()
+	return math.max(1, math.floor((M.X_MAX - M.X_MIN - 12) / 6))
+end
+
+-- Answers how many it made, which may be fewer than it was asked for
 function M.set_pockets(n)
+	n = math.max(1, math.min(n, M.max_pockets()))
 	M.BAYS = n
 	M.pockets = {}
 	-- Spread across the wall with a margin at each end, so the outermost
@@ -296,7 +310,7 @@ function M.set_pockets(n)
 				p.y0 + math.floor(p.sy / 2))
 	end
 	face_cache = {}
-	return M.pockets
+	return n
 end
 M.set_pockets(M.BAYS)
 
@@ -503,6 +517,23 @@ function M.self_check()
 		local p = M.pockets[b]
 		assert(p.x0 - 1 >= M.X_MIN and p.x0 + p.sx <= M.X_MAX,
 				"pocket " .. b .. " and its columns are on the wall")
+	end
+	-- **More things than the wall can hold** is answered, not broken:
+	-- the pockets that are made still fit and do not overlap, and the
+	-- count says how many the room may put in the wall
+	do
+		local made = M.set_pockets(200)
+		assert(made == M.max_pockets(), "the wall says what it can hold")
+		for b = 1, made do
+			local p = M.pockets[b]
+			assert(p.x0 - 1 >= M.X_MIN and p.x0 + p.sx <= M.X_MAX,
+					"pocket " .. b .. " is on the wall")
+			if b > 1 then
+				local q = M.pockets[b - 1]
+				assert(p.x0 > q.x0 + q.sx,
+						"pocket " .. b .. " overlaps the one before it")
+			end
+		end
 	end
 	M.set_pockets(M.BAYS)
 	-- **The other three walls have relief of their own**, and are not

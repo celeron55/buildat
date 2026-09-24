@@ -164,7 +164,37 @@ do
 			" of them saying they are examples, " .. real_servers ..
 			" off a fetched list")
 end
-room.set_pockets(#GAMES)
+-- **More games than the wall can hold stand on the floor** (the open
+-- question this plan named: nine pockets fit across the wall and
+-- ContentDB can install a game at any time). The wall answers what it
+-- can hold and the rest go where everything that is not in the wall
+-- goes -- still glowing, since a game is a game wherever it is, which
+-- is what a game carried out of its pocket and put down already looks
+-- like. The empty pocket stays last, being the way to ContentDB.
+do
+	-- BUILDAT_LAUNCH_POCKETS=<n> holds the wall to fewer than it could,
+	-- which is how the spill is driven on a tree with nine games rather
+	-- than waited for until somebody installs twenty
+	local want = tonumber(env("BUILDAT_LAUNCH_POCKETS")) or #GAMES
+	local made = room.set_pockets(math.min(#GAMES, want))
+	if made < #GAMES then
+		local spill = {}
+		-- The empty pocket is the last of GAMES and keeps its place
+		local empty = table.remove(GAMES)
+		while #GAMES > made - 1 do
+			table.insert(spill, 1, table.remove(GAMES))
+		end
+		GAMES[#GAMES + 1] = empty
+		for _, g in ipairs(spill) do
+			g.floor = true
+			g.game_orb = true
+			table.insert(FLOOR_ACTIONS, 1, g)
+		end
+		log:info("the wall holds " .. made .. " of " ..
+				(#GAMES + #spill - 1) .. " games; " .. #spill ..
+				" stand on the floor")
+	end
+end
 log:info("contents: " .. (#GAMES - 1) .. " games, " .. #FLOOR_ACTIONS ..
 		" other launch actions, " .. #SAVES .. " saves, " .. #SERVERS ..
 		" servers")
@@ -1220,7 +1250,7 @@ for i, o in ipairs(orb_places) do
 				etched(0.86, 0.87, 0.89, 0.12, 0.0, spec.name) or white)
 		node:GetComponent("StaticModel").castShadows = true
 		orb_nodes[i] = node
-	elseif spec and spec.floor then
+	elseif spec and spec.floor and not spec.game_orb then
 		-- **A glossy white sphere** (user): not a source, so it takes
 		-- the room's light rather than making any, and it is told apart
 		-- from a server's chrome by being white rather than a mirror
