@@ -118,7 +118,8 @@ print("aiming at the orb: yaw %.1f pitch %.1f, a placed voxel at %d,%d,%d"
 		% (yaw, pitch, vx, vy, vz))
 PYAIM
 read -r tyaw tpitch tover < "$out/aim.txt"
-{ echo "delay 5000"; echo "look $tyaw $tpitch"; echo "delay 1500"
+{ echo "wait_log 90000 the room hums"; echo "delay 800"
+	echo "look $tyaw $tpitch"; echo "delay 1500"
 	echo "look $tyaw $tover"; echo "delay 1500"; echo "quit"
 	} > "$out/cmds_tier.txt"
 timeout 120 bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
@@ -172,7 +173,8 @@ if [ "$slot" -lt 1 ] || [ "$back" -lt 1 ]; then
 			"or a missing one does not fall back to the menu"
 	exit 1
 fi
-{ echo "delay 5000"
+{ echo "wait_log 90000 the room hums"
+	echo "delay 1200"
 	# **It starts in FPS mode**, so the walking is checked first and then
 	# Tab goes to menu mode, where the prompt and the digits live. A held
 	# key needs keydown/delay/keyup; keypress is one frame and moves
@@ -304,7 +306,8 @@ fi
 	echo "keypress Escape"
 	# The cubes land in 0.9 s, but the voxels coming back have to be
 	# remeshed and relit before the picture is the picture it was
-	echo "delay 5000"
+	echo "wait_log 90000 the room hums"
+	echo "delay 1200"
 	echo "screenshot $out/dissolve-closed-again.png"
 	echo "delay 600"
 	# The typing path: three letters fuzzy-match a name, Enter takes it
