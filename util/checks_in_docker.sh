@@ -24,8 +24,15 @@ trap 'rm -f "$tarball"' EXIT
 git -C "$here" archive --format=tar HEAD > "$tarball"
 # BUILDAT_CI: a timing is a row and never a verdict on a machine whose
 # speed nobody chose (builtin/luanti/test/verdict.sh)
+# The game media the full and long tiers want, from the host rather
+# than fetched again per run ([CI_RUNS] (4)): util/media_fetch.sh fills
+# it, and CI caches it keyed on the release ids that script prints
+media="${BUILDAT_MEDIA_DIR:-$here/user/luanti}"
+mount_media=""
+[ -d "$media/games" ] && mount_media="-v $media:/work/buildat/user/luanti:z"
 docker run --rm -i \
 	-v "$out:/out:z" \
+	$mount_media \
 	-e "BUILDAT_CI=1" \
 	-e "JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}" \
 	"$image" bash -c "
