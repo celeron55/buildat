@@ -1268,6 +1268,21 @@ struct CApp: public App, public magic::Application
 		log_v(MODULE, "handle_packet(): %s", cs(name));
 		magic::AutoProfileBlock profiler_block(
 				GetSubsystem<magic::Profiler>(), "Buildat|handle_packet");
+		// **Which packet** ([PACKET_STALL]): the block above covers the
+		// whole Lua dispatch and names nothing, and the worst frame on
+		// the box is one packet -- so a nested block per packet type is
+		// what tells an expensive handler from a burst of cheap ones.
+		// Urho3D keeps the name pointer rather than the string, so the
+		// names are interned here and outlive every block made from
+		// them; the set of packet types is defined on the wire and does
+		// not grow with traffic.
+		static sm_<ss_, ss_> block_names;
+		auto bn = block_names.find(name);
+		if(bn == block_names.end())
+			bn = block_names.insert(std::make_pair(name,
+					ss_("Buildat|packet:")+name)).first;
+		magic::AutoProfileBlock type_block(
+				GetSubsystem<magic::Profiler>(), bn->second.c_str());
 
 		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_handle_packet");
 		lua_pushlstring(L, name.c_str(), name.size());

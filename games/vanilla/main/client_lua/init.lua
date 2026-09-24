@@ -2231,8 +2231,11 @@ function frame_peak.note(dt)
 				buildat.profiler_data and
 				(frame_peak.table_at or 0) + 5 < buildat.get_time_us() / 1e6 then
 			frame_peak.table_at = buildat.get_time_us() / 1e6
+			-- Depth 5, not 4: the per-packet-type block
+			-- ("Buildat|packet:<name>", [PACKET_STALL]) sits one under
+			-- handle_packet, and naming the packet is the whole point
 			log:debug("profiler at that frame:\n" ..
-					(buildat.profiler_data(4) or ""))
+					(buildat.profiler_data(5) or ""))
 		end
 	end
 	-- How the world settles around a placed player, once a second while

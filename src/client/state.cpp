@@ -11,6 +11,7 @@
 #include "interface/compress.h"
 #include "lua_bindings/replicate.h"
 #include <c55/string_util.h>
+#include <c55/os.h> // get_timeofday_us()
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
@@ -337,7 +338,25 @@ struct CState: public State
 
 	void setup_packet_handlers();
 
+	// **A handler that eats the frame says so, by name**
+	// ([PACKET_STALL]): the worst frame on the box is one packet and the
+	// profile block over the Lua dispatch names none of them. Five
+	// milliseconds is a third of a frame at 60 -- under it nothing is
+	// worth a line, over it the name and the byte count are what say
+	// which handler to take off the frame.
+	static const int64_t SLOW_PACKET_US = 5000;
+
 	void handle_packet(const ss_ &packet_name, const ss_ &data)
+	{
+		int64_t t0 = get_timeofday_us();
+		handle_packet_(packet_name, data);
+		int64_t took = get_timeofday_us() - t0;
+		if(took >= SLOW_PACKET_US)
+			log_w(MODULE, "slow packet: %s took %i ms (%zu bytes)",
+					cs(packet_name), (int)(took / 1000), data.size());
+	}
+
+	void handle_packet_(const ss_ &packet_name, const ss_ &data)
 	{
 		auto it = m_packet_handlers.find(packet_name);
 		if(it == m_packet_handlers.end()){
