@@ -381,6 +381,14 @@ fi
 	# is unfrozen for it and BUILDAT_LAUNCH_ATTRACT makes the wait short.
 	echo "keypress F7"
 	echo "delay 600"
+	# **Where the camera is, said rather than assumed** (2026-09-24):
+	# this step compares "home" against "back from the attract mode",
+	# and the room flies back to the standing place -- so if the shot
+	# called home was taken anywhere else, the two differ by the flight
+	# and the step fails on its own setup. Every step before this one
+	# leaves the camera somewhere of its own.
+	echo "event mode menu"
+	echo "delay 1500"
 	echo "screenshot $out/attract-home.png"
 	echo "delay 400"
 	echo "keypress F8"

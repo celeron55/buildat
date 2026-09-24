@@ -4374,6 +4374,16 @@ local function sit_at_terminal()
 	-- has to mean for a screen to be readable
 	fly_to({x = TERMINAL.x, y = TERMINAL.y + 1.75, z = TERMINAL.z + 2.6},
 			{x = TERMINAL.x, y = TERMINAL.y + 1.75, z = TERMINAL.z - 0.3})
+	-- **Sitting down ends the search.** The prompt kept its term while
+	-- the desk was open, and up and down then walked the *matches*
+	-- instead of the rows -- flying the camera away from the desk it
+	-- had just sat at. It passed the check for as long as the term had
+	-- one match and broke the moment the room held more things
+	-- (2026-09-24: a fetched serverlist). A term is a way of getting
+	-- somewhere; once you are there it is spent.
+	prompt_str = ""
+	prompt_open = false
+	show_prompt()
 	log:info("terminal: sat down")
 end
 
