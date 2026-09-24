@@ -2927,6 +2927,17 @@ name_text.text = ""
 -- The ceiling is the font ([TRANSLATION_FONT]): Latin-1 and Cyrillic, so
 -- a CJK name does not draw and whoever widens the font settles this too
 name_text.faceCameraMode = magic.FC_ROTATE_Y
+-- **Through the stone is not settled** (user, 2026-09-24: an orb in a
+-- pocket shows no label). A Text3D is geometry and is occluded like
+-- any, and the material route was tried: a technique of Urho3D's own
+-- default Text3D material (Text/Text, alpha, no depth write) plus
+-- `depthtest="always"`, handed to `name_text.material`. **It draws the
+-- name dark red and half-eaten** -- Urho3D builds that material in C++
+-- per batch and a custom one leaves that path -- so it is worse than
+-- the occlusion it fixes and is not here. The measurement and the next
+-- thing to try (the name as the room's own UI text, projected to the
+-- orb, which is an overlay and cannot be occluded at all) are in the
+-- launcher plan.
 
 -- **What the launcher said about it, under its name** (user, 2026-09-23:
 -- the description does not really show up, and it should be fairly

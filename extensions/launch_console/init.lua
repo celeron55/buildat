@@ -150,7 +150,10 @@ local function open(opts)
 		end
 		return e
 	end
-	local search = field(left, MARGIN, MARGIN, half - 2 * MARGIN)
+	-- **At the bottom of its column, as the console's input is** (user,
+	-- 2026-09-24): the eye should not travel to the top of the screen
+	-- to type and back down to read what it found.
+	local search = field(left, MARGIN, h - 30, half - 2 * MARGIN)
 	search:SetName("console_search")
 	-- **Its own line, under the field** (playtest: the hint was cut off
 	-- after "search: Enter next, Shi"). It was placed beside a field
@@ -159,7 +162,7 @@ local function open(opts)
 	-- off in the middle of explaining the controls is worse than none.
 	local hint = left:CreateChild("Text")
 	hint:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
-	hint:SetPosition(MARGIN, MARGIN + 26)
+	hint:SetPosition(MARGIN, h - 54)
 	hint:SetFixedWidth(half - 2 * MARGIN)
 	hint:SetColor(magic.Color(0.55, 0.60, 0.68, 1))
 	hint.text = "Tab moves the keyboard; in here Enter finds the next, " ..
@@ -178,8 +181,8 @@ local function open(opts)
 	-- document rather than back in the console. The two fields are the
 	-- only things here worth the keyboard.
 	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
-	view:SetPosition(MARGIN, MARGIN + 54)
-	view:SetFixedSize(half - 2 * MARGIN, h - MARGIN * 2 - 54)
+	view:SetPosition(MARGIN, MARGIN)
+	view:SetFixedSize(half - 2 * MARGIN, h - MARGIN - 64)
 	-- **The view's own panel is what was drawing white**: a ScrollView
 	-- makes a BorderImage to clip its content in, and one with no
 	-- texture is a white quad over the column whatever the column is
