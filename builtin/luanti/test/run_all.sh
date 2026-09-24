@@ -58,7 +58,11 @@ mkdir -p "$out"
 # kinds are told apart in the output and in the log names.
 root=$(cd "$here/../../.." && pwd)
 runners=""
-for f in "$here"/*.sh "$root"/extensions/*/check.sh "$root"/games/*/check.sh; do
+# **core.sh beside a check.sh** is the cheap runner an edit runs
+# ([CHECK_COST]): where the full one is dear, its tree carries a second
+# one, and --changed picks whichever is cheaper for what changed
+for f in "$here"/*.sh "$root"/extensions/*/check.sh "$root"/extensions/*/core.sh \
+		"$root"/games/*/check.sh; do
 	[ -f "$f" ] || continue
 	case "$(basename "$f")" in
 	lib.sh|contract.sh|fullscreen_gate.sh|run_all.sh) continue;;
@@ -77,7 +81,7 @@ costs="$out/costs"
 covers_of() {   # $1 path, $2 name
 	sed -n 's/^# covers: *//p' "$1" | tr ' ' '\n'
 	case "$2" in
-	extensions/*/check.sh|games/*/check.sh) echo "${2%/check.sh}/**" ;;
+	extensions/*/*.sh|games/*/*.sh) echo "${2%/*}/**" ;;
 	*) echo "builtin/luanti/**" ;;
 	esac
 }
