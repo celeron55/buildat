@@ -785,6 +785,16 @@ texture as the top of one that is not turned, turned with the voxel -- so the
 turn belongs to the face rather than to the atlas segment, which is shared.
 A shape's quads carry their own texture coordinates and are not affected.
 
+vdef.uv_scale is how many voxels one repeat of the texture spans across a
+face ([WORLD_UV]): 1 is one repeat per voxel, and at more than 1 the mesher
+takes the phase of the repeat from where the voxel is in the world, so a
+neighbour continues the sequence rather than starting again. vdef.uv_scale_v
+is the same upwards, and nought means "the same as uv_scale" -- which is the
+square case and every definition written before it. A frieze eight voxels
+across and one tall wants uv_scale = 8 and uv_scale_v = 1; with one number
+for both axes a slab's edge showed one eighth of the texture's height, chosen
+by where the slab sat in the world.
+
 vdef.variants says what a voxel's param does to how it is drawn, for a
 format that binds one. It is an array of variants, and a variant claims the
 param values it applies to:
