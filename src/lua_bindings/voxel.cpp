@@ -705,6 +705,9 @@ void init_voxel(lua_State *L)
 			.def_readwrite("physically_solid", &VoxelDefinition::physically_solid)
 			.def_readwrite("fully_empty", &VoxelDefinition::fully_empty)
 			.def_readwrite("uv_scale", &VoxelDefinition::uv_scale)
+			// Across and up ([SIGIL_ROUND]); nought is "the same as
+			// uv_scale", which is every definition that does not say
+			.def_readwrite("uv_scale_v", &VoxelDefinition::uv_scale_v)
 			.property("shape", &vdef_get_shape, &vdef_set_shape)
 			.property("shape_masked", &vdef_get_shape_masked,
 					&vdef_set_shape_masked)

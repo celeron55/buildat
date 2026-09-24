@@ -406,6 +406,10 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.shape_double_sided = def.shape_double_sided;
 		cache.shape_lit_from_above = def.shape_lit_from_above;
 		cache.uv_scale = def.uv_scale < 1 ? 1 : def.uv_scale;
+		// Nought is "the same as across", which is every definition
+		// written before the two axes were told apart ([SIGIL_ROUND])
+		cache.uv_scale_v = def.uv_scale_v < 1 ? cache.uv_scale :
+				def.uv_scale_v;
 		cache.translucent = def.translucent;
 		cache.alpha_masked = def.alpha_masked;
 		cache.shape_group = def.shape_group;

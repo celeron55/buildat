@@ -1493,8 +1493,14 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		// its own -- the client-side mesh call, which has no horizon.
 		AtlasSegmentCache sliced;
 		const AtlasSegmentCache *useg = aseg;
+		// **Across and up are two numbers** ([SIGIL_ROUND], 2026-09-24):
+		// a frieze along a wall is eight voxels across and one tall, and
+		// wrapping both axes with one number made a slab's edge show one
+		// eighth of the texture's height, picked by where the slab sat.
 		const int uvn = voxel_def0->uv_scale < 1 ? 1 : voxel_def0->uv_scale;
-		if(uvn > 1 && (horizon != nullptr || uv_origin != nullptr)){
+		const int uvm = voxel_def0->uv_scale_v < 1 ? uvn :
+				voxel_def0->uv_scale_v;
+		if((uvn > 1 || uvm > 1) && (horizon != nullptr || uv_origin != nullptr)){
 			const pv::Vector3DInt32 uvp = face_back_pos(volume, quad, n);
 			const pv::Vector3DInt32 uvlc =
 					volume.getEnclosingRegion().getLowerCorner();
@@ -1506,23 +1512,25 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			const int wx = ox + (uvp.getX() - uvlc.getX() - 1);
 			const int wy = oy + (uvp.getY() - uvlc.getY() - 1);
 			const int wz = oz + (uvp.getZ() - uvlc.getZ() - 1);
-			auto wrap = [uvn](int v){ return ((v % uvn) + uvn) % uvn; };
+			auto wrap = [](int v, int m){ return ((v % m) + m) % m; };
 			int ui, vi;
 			if(n.getY() != 0.0f){
-				ui = wrap(wx);
-				vi = wrap(wz);
+				// A floor or a ceiling: the two axes are both across the
+				// world, so the second number is the depth one
+				ui = wrap(wx, uvn);
+				vi = wrap(wz, uvm);
 			} else if(n.getX() != 0.0f){
-				ui = wrap(wz);
+				ui = wrap(wz, uvn);
 				// The segment's v grows downwards, so a voxel higher in
 				// the world takes a slice further up the texture
-				vi = uvn - 1 - wrap(wy);
+				vi = uvm - 1 - wrap(wy, uvm);
 			} else {
-				ui = wrap(wx);
-				vi = uvn - 1 - wrap(wy);
+				ui = wrap(wx, uvn);
+				vi = uvm - 1 - wrap(wy, uvm);
 			}
 			sliced = *aseg;
 			const float du = (aseg->coord1.x_ - aseg->coord0.x_) / (float)uvn;
-			const float dv = (aseg->coord1.y_ - aseg->coord0.y_) / (float)uvn;
+			const float dv = (aseg->coord1.y_ - aseg->coord0.y_) / (float)uvm;
 			sliced.coord0.x_ = aseg->coord0.x_ + du * (float)ui;
 			sliced.coord1.x_ = sliced.coord0.x_ + du;
 			sliced.coord0.y_ = aseg->coord0.y_ + dv * (float)vi;

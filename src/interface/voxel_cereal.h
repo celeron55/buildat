@@ -47,7 +47,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 22;
+		uint8_t version = 23;
 		archive(
 				version,
 				v.name,
@@ -141,6 +141,11 @@ namespace interface
 		// repeats ([WORLD_UV])
 		if(version >= 22){
 			archive(v.uv_scale);
+		}
+		// Version 23 made that per-axis: 22's number is across and this
+		// one is up, nought meaning "the same" ([SIGIL_ROUND])
+		if(version >= 23){
+			archive(v.uv_scale_v);
 		}
 	}
 

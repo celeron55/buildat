@@ -161,6 +161,14 @@ namespace interface
 		// and never inside a quad, so a face's coordinates stay inside its
 		// own segment rect.
 		uint8_t uv_scale = 1;
+		// **How many voxels it spans upwards**, where uv_scale is across
+		// ([SIGIL_ROUND], 2026-09-24: a frieze that runs along a wall is
+		// eight voxels across and one tall, and one number for both axes
+		// made a slab's edge show one eighth of the texture's height,
+		// chosen by where the slab sat in the world). Nought means "the
+		// same as uv_scale", which is every definition written before
+		// this and the square case.
+		uint8_t uv_scale_v = 0;
 		// Other properties
 		ss_ handler_module;
 		FaceDrawType face_draw_type = FaceDrawType::ON_EDGE;
@@ -399,6 +407,9 @@ namespace interface
 		uint8_t shape_group = 0;
 		// [WORLD_UV]; see VoxelDefinition::uv_scale
 		uint8_t uv_scale = 1;
+		// [SIGIL_ROUND]; see VoxelDefinition::uv_scale_v. Nought is "the
+		// same as uv_scale"
+		uint8_t uv_scale_v = 0;
 		bool is_liquid = false;
 		// Copied from the definition; see VoxelDefinition::liquid_is_source
 		bool liquid_is_source = false;
