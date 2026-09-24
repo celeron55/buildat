@@ -690,6 +690,20 @@ if [ "$console" -lt 1 ] || [ "$console_ran" -lt 1 ] || [ "$console_shut" -lt 1 ]
 	echo "FAIL: the room's developer console does not open, run or close"
 	exit 1
 fi
+# **And the room can be heard** ([NO_SOUND], 2026-09-24): every sound
+# here is a SoundSource3D and positional audio with no listener is
+# silent without being an error -- the room had no listener at all and
+# said nothing about it. The line carries the three facts that are each
+# silent when wrong.
+hums=$(grep -a "launch_w.*: the room hums" "$out/cli.log" | tail -1)
+echo "${hums##*: }"
+case "$hums" in
+*"audio playing, listener placed, first voice playing true"*) ;;
+*)
+	echo "FAIL: the room's sound has nowhere to be heard from"
+	exit 1;;
+esac
+
 # **And the room hands the input over while it is up** (user,
 # 2026-09-24: the console opened with the mouse still moving the camera
 # and no cursor). One gate, asked once a frame, and it says both ways.

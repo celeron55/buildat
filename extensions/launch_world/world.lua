@@ -1747,6 +1747,15 @@ end
 -- the open side behind the camera, the chrome and the plinth in frame
 local camera_node = scene:CreateChild("Camera")
 camera_node:CreateComponent("Camera")
+-- **Where the room is heard from** ([NO_SOUND], 2026-09-24): every
+-- sound in here is a `SoundSource3D` and positional audio with no
+-- listener is silent without being an error -- the room played nothing
+-- at all and said nothing about it. The ear goes where the eyes are,
+-- as vanilla and featuretest both put it; how loud it all is stays the
+-- player's own preference.
+if magic.audio then
+	magic.audio.listener = camera_node:CreateComponent("SoundListener")
+end
 -- placed from the camera state below, once it exists
 -- [LAUNCH_WORLD] step 2: the reflection probe, which is a prerequisite
 -- and not an upgrade -- a PBR metal reflects its surroundings and nothing
@@ -3378,9 +3387,19 @@ for i = 1, drone.VOICES do
 	v.lit_voice = source_for(drone.bright)
 	drone.voices[i] = v
 end
+-- **And whether any of it reaches the mixer** ([NO_SOUND]): a stream
+-- that is not playing, an audio subsystem that never opened and a
+-- missing listener are all silent and none of them is an error, so the
+-- three facts go in the log where a check and a person can both read
+-- them.
 log:info(("the room hums: %d voices of %d orbs, %.1f to %.1f Hz, " ..
-		"dark and bright loops, a bed under them"):format(drone.VOICES,
-		#orb_places, drone.LOW, drone.HIGH))
+		"dark and bright loops, a bed under them; audio %s, listener %s, "
+		.. "first voice playing %s"):format(drone.VOICES,
+		#orb_places, drone.LOW, drone.HIGH,
+		magic.audio and (magic.audio.playing and "playing" or "silent")
+				or "missing",
+		(magic.audio and magic.audio.listener) and "placed" or "none",
+		tostring(drone.voices[1].dark.source.playing)))
 
 -- **A pitch is a hash of the orb's name**, not its index, so an orb
 -- sounds the same every boot and moving things about does not retune
