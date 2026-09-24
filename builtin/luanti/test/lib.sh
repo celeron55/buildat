@@ -86,3 +86,23 @@ run_client()
 	done
 	wait "$pid"
 }
+
+# **The last drive's client is not this drive's condition.** A check
+# that runs several clients in a row starts the next one while the last
+# is still shutting down: it holds a port, and it answers -- or stops --
+# the server this run just started, which reads as "the screen never
+# opened". Waits for the tree to go quiet, up to <seconds> (30 by
+# default); 1 if it never did.
+wait_quiet()
+{
+	local s=${1:-30} i=0
+	while pgrep -x buildat >/dev/null || pgrep -x buildat_server >/dev/null; do
+		i=$((i + 1))
+		if [ "$i" -ge "$s" ]; then
+			echo "wait_quiet: a client or server is still up after ${s}s" >&2
+			return 1
+		fi
+		sleep 1
+	done
+	return 0
+}

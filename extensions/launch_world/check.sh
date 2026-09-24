@@ -637,11 +637,19 @@ fi
 	# one.
 	for c in D I G G E R; do echo "keypress $c"; done
 	echo "delay 2600"
+	# **And the prompt out of the way before the click**: the panel the
+	# typing opened is over the middle of the screen, so the click
+	# landed on it and the orb behind it never heard (2026-09-24).
+	# Escape hides the prompt and leaves the camera where the search
+	# flew it.
+	echo "keypress Escape"
+	echo "delay 800"
 	echo "mouse_pos 640 360"
 	echo "delay 400"
 	echo "mouse_click left"
 	echo "delay 1200"
 	echo "quit"; } > "$out/cmds.txt"
+wait_quiet 40 || true
 # **Sixty seconds of silence ends it** (user, 2026-09-24): this drive is
 # six minutes of client and its every step says so in the log -- each
 # command as it runs, and a heartbeat while a wait_log waits -- so a
@@ -981,6 +989,9 @@ fi
 # the check neither needs the network nor asks content.luanti.org for a
 # listing on every run. Without one the screen is an error dialog, so
 # this would otherwise be a check that fails when the tree is offline.
+# The drive before this one ends by launching a game, so its client and
+# its server are on their way out while this one starts
+wait_quiet 40 || true
 cdb_game=$(ls "$here/user/luanti/games" 2>/dev/null | head -1)
 if [ -z "$cdb_game" ]; then
 	echo "SKIP: no installed Luanti game to mirror for ContentDB" >&2
