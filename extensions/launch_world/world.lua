@@ -3355,42 +3355,75 @@ end
 magic.SubscribeToEvent("Update", "handle_dig_update")
 
 
-local name_node = scene:CreateChild("orb_name")
-local name_text = name_node:CreateComponent("Text3D")
+-- **The name is an overlay, not geometry** ([ORB_LABEL], user
+-- 2026-09-24). A `Text3D` over an orb in a pocket is occluded by the
+-- stone in front of it, and the material route to make it draw through
+-- was tried and is worse than the occlusion (it draws the name dark red
+-- and half-eaten: Urho3D builds that material in C++ per batch). The
+-- room already projects every orb to the screen for picking, so the
+-- name and its caption are **the room's own UI text placed at that
+-- point** -- which cannot be occluded at any pocket depth, and takes
+-- the label's half of the floor flag with it: an overlay has no plane
+-- to stand at.
+--
 -- **Typography as graphic design**, which is what that era did with a
 -- name: huge letterforms and wide tracking, not a centred column of
--- small labels. There is no tracking setting on a Text3D, so the
--- spacing is spaces -- which is how it was done then too.
-name_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 64)
+-- small labels. There is no tracking setting, so the spacing is spaces
+-- -- which is how it was done then too.
+-- The ceiling is the font ([TRANSLATION_FONT]): Latin-1 and Cyrillic,
+-- so a CJK name does not draw and whoever widens the font settles this.
+local name_text = room_ui_child("Text")
+name_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 44)
 name_text:SetColor(magic.Color(1, 1, 1, 1))
-name_text:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+name_text.horizontalAlignment = magic.HA_CENTER
+name_text.verticalAlignment = magic.VA_CENTER
+name_text:SetTextAlignment(magic.HA_CENTER)
+name_text.priority = 40
 name_text.text = ""
--- The ceiling is the font ([TRANSLATION_FONT]): Latin-1 and Cyrillic, so
--- a CJK name does not draw and whoever widens the font settles this too
-name_text.faceCameraMode = magic.FC_ROTATE_Y
--- **Through the stone is not settled** (user, 2026-09-24: an orb in a
--- pocket shows no label). A Text3D is geometry and is occluded like
--- any, and the material route was tried: a technique of Urho3D's own
--- default Text3D material (Text/Text, alpha, no depth write) plus
--- `depthtest="always"`, handed to `name_text.material`. **It draws the
--- name dark red and half-eaten** -- Urho3D builds that material in C++
--- per batch and a custom one leaves that path -- so it is worse than
--- the occlusion it fixes and is not here. The measurement and the next
--- thing to try (the name as the room's own UI text, projected to the
--- orb, which is an overlay and cannot be occluded at all) are in the
--- launcher plan.
 
 -- **What the launcher said about it, under its name** (user, 2026-09-23:
 -- the description does not really show up, and it should be fairly
 -- close, above the orb). Small and unspaced, so it reads as a caption to
 -- the name rather than as a second title.
-local desc_node = scene:CreateChild("orb_desc")
-local desc_text = desc_node:CreateComponent("Text3D")
-desc_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 28)
+local desc_text = room_ui_child("Text")
+desc_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 20)
 desc_text:SetColor(magic.Color(0.80, 0.84, 0.90, 1))
-desc_text:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+desc_text.horizontalAlignment = magic.HA_CENTER
+desc_text.verticalAlignment = magic.VA_CENTER
+desc_text:SetTextAlignment(magic.HA_CENTER)
+desc_text.priority = 40
 desc_text.text = ""
-desc_text.faceCameraMode = magic.FC_ROTATE_Y
+
+-- Which orb the label belongs to and how high above it it sits, in
+-- voxels: the two places that say what the label reads say this too,
+-- and the placing below is one function run every frame -- an overlay
+-- has to follow the camera, where geometry stood still by itself.
+label_orb = 0
+label_lift = 1.5
+function label_place()
+	local n = orb_nodes[label_orb or 0]
+	if not n or name_text.text == "" then
+		name_text.visible = false
+		desc_text.visible = false
+		return
+	end
+	local p = n.position
+	local sp = camera_node:GetComponent("Camera"):WorldToScreenPoint(
+			magic.Vector3(p.x, p.y + (label_lift or 1.5) * U, p.z))
+	-- Behind the camera projects to nonsense, and a label half off the
+	-- screen names nothing the player can see
+	local on = sp.x > 0.02 and sp.x < 0.98 and sp.y > 0.0 and sp.y < 1.0
+	name_text.visible = on
+	desc_text.visible = on and desc_text.text ~= ""
+	if not on then
+		return
+	end
+	local lw, lh = buildat.logical_size()
+	local x = math.floor((sp.x - 0.5) * lw)
+	local y = math.floor((sp.y - 0.5) * lh)
+	name_text:SetPosition(x, y - 30)
+	desc_text:SetPosition(x, y + 6)
+end
 
 pointed_orb = 0
 -- How near the pointer counts as on an orb, as a fraction of the screen
@@ -3564,35 +3597,9 @@ function handle_orb_update(event_type, event_data)
 	end
 	carry_draw()
 	if best > 0 then
-		local p = orb_nodes[best].position
-		-- **Close, and above it** (user): over the orb it belongs to
-		-- rather than off at the wall's plane, which is where every
-		-- label used to stand whichever orb was pointed at. A sphere in
-		-- a niche has stone above it, so that one keeps the wall's
-		-- plane in z and only the height is its own.
-		-- **Clear of the wall's own relief**, not two voxels off the
-		-- wall's plane: a slab stands out as far as room.SLAB_OUT, so a
-		-- label at the plane is drawn inside the stone and reads as a
-		-- name written on a block (2026-09-23, the room's own first
-		-- frame). Text3D is geometry and is occluded like any.
-		local z = ORBS[best] and ORBS[best].floor and p.z or
-				(BAY_Z + room.SLAB_OUT + 1.5) * VOXEL_M * U
-		-- **A name that is right at a distance is a wall at arm's
-		-- length** (user, 2026-09-23): it reads well from far off and
-		-- down to about twelve voxels, and nearer than that it grew
-		-- until it ran off the top of the screen. Inside twelve, the
-		-- size and the height above the orb come down with the
-		-- distance -- half at six, which is what the user asked for and
-		-- what `d / 12` gives. Beyond twelve nothing changes.
-		local dx, dy, dz = p.x - view_from.x, p.y - view_from.y,
-				p.z - view_from.z
-		local d = math.sqrt(dx * dx + dy * dy + dz * dz)
-		local k = math.min(1, d / 12)
-		name_node.scale = magic.Vector3(k, k, k)
-		desc_node.scale = magic.Vector3(k, k, k)
-		name_node.position = magic.Vector3(p.x, p.y + 1.5 * U * k, z)
-		desc_node.position = magic.Vector3(p.x, p.y + 1.0 * U * k, z)
+		label_orb, label_lift = best, 1.5
 	end
+	label_place()
 end
 magic.SubscribeToEvent("Update", "handle_orb_update")
 
@@ -4488,10 +4495,8 @@ function browse_show()
 	local o = ORBS[browsed]
 	name_text.text = o and o.name:upper():gsub("(.)", "%1 "):gsub(" $", "")
 			or ""
-	if orb_nodes[browsed] then
-		local p = orb_nodes[browsed].position
-		name_node.position = magic.Vector3(p.x, p.y + 2.6 * U, p.z + 1.5)
-	end
+	label_orb, label_lift = browsed, 2.6
+	label_place()
 	log:info("browse: row " .. browse_row .. " of " .. #browse_rows ..
 			", " .. (o and o.name or "?"))
 end
