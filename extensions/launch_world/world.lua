@@ -1868,7 +1868,7 @@ local probe_frames = 0
 function handle_probe_update()
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	if env("BUILDAT_LAUNCH_NORENDERPROBE") ~= "" then
 		return
 	end
@@ -2087,7 +2087,7 @@ patch_t = 0
 function handle_patch_update(event_type, event_data)
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	patch_t = patch_t + event_data:GetFloat("TimeStep")
 	for _, led in ipairs(patch_leds) do
 		-- Blinking at the ping's rate when something has measured one,
@@ -2259,7 +2259,7 @@ end
 function handle_camera_update(event_type, event_data)
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	if not cam.to_from then
 		return
 	end
@@ -2376,12 +2376,65 @@ local function set_mode(m)
 	log:info("mode: " .. m)
 end
 
+-- Whether somebody else held the screen last frame ([LAUNCH_WORLD]'s
+-- one gate): a global because this file is at Lua's 200-local limit,
+-- and **declared here rather than beside the other room state at the
+-- end of the file** -- the Update handler is subscribed a thousand
+-- lines above that and fires while the chunk is still building the
+-- room, where the sandbox refuses an undeclared global.
+held_was = false
+
+-- **One gate, asked once a frame** ([LAUNCH_WORLD], 2026-09-24:
+-- "whatever holds the screen owns the input"). Three faults of this
+-- shape in three days -- the pause dialog looking with the mouse, the
+-- console opened over the room keeping the room's Tab, and "switch to
+-- the menu" leaving the camera on the mouse with no cursor -- because
+-- every feature remembered its own condition and none of them knew
+-- about a launch UI booted over this one. `set_launch_ui` leaves the
+-- room running underneath, so the room asks whose screen it is rather
+-- than being told.
+--
+-- What is *not* in here: the room's own screens. The pause dialog, the
+-- desk and a flight are the room's, and it keeps the keyboard for them
+-- -- they stop the look where they are read. This is only about
+-- somebody else's screen.
+function held_by_others()
+	if in_game or console_open or backdrop then
+		return true
+	end
+	local who = api.launch_ui_name and api.launch_ui_name() or nil
+	return who ~= nil and who ~= "launch_world"
+end
+
+-- The last answer, so the handing over happens once rather than every
+-- frame: the mouse goes back to the cursor when somebody else takes the
+-- screen, and comes back to the room's own mode when the room has it
+-- again. `held_was` is a global beside the other room state, this file
+-- being at Lua's 200-local limit.
+function hand_over_if_needed()
+	local held = held_by_others()
+	if held == held_was then
+		return held
+	end
+	held_was = held
+	if held then
+		log:info("input: handed to whatever holds the screen")
+		mouse_for(false, "launch_world: somebody else's screen")
+	else
+		log:info("input: the room has the screen again")
+		set_mode(mode)
+	end
+	return held
+end
+
+
 function handle_fps_update(event_type, event_data)
 	-- A backdrop takes no input ([TWO_AUDIENCES]' composition)
 	if backdrop then return end
-	-- The room stands down while a game, or a console, is over it
-	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	-- **The one gate, asked once a frame** ([LAUNCH_WORLD]: whatever
+	-- holds the screen owns the input). This is the asking; every other
+	-- handler below reads the answer it left.
+	if hand_over_if_needed() then return end
 	-- **The camera stays still while a screen is up -- any screen**
 	-- (user, 2026-09-23: the pause menu turned the mouse into yaw and
 	-- pitch). The rule is not "is something drawn over the scene": a
@@ -2724,7 +2777,7 @@ function handle_dig_update(event_type, event_data)
 	if backdrop then return end
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
 	-- The motes fall whatever the mode is
 	for i = #motes, 1, -1 do
@@ -2922,7 +2975,7 @@ local turner = scene:CreateChild("turner")
 function handle_orb_update(event_type, event_data)
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
 	local best, best_dot, best_up = 0, -1, false
 	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
@@ -3225,7 +3278,7 @@ function handle_mousedown(event_type, event_data)
 	if backdrop then return end
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	if mode ~= "fps" or terminal_open or pause_open then return end
 	if event_data:GetInt("Button") == magic.MOUSEB_RIGHT then
 		if not place_carried() then
@@ -3246,7 +3299,7 @@ magic.SubscribeToEvent("MouseButtonDown", "handle_mousedown")
 -- one being pointed at: the room's own menu, answering the mouse the
 -- way its dialogs do.
 function handle_orb_click(event_type, event_data)
-	if backdrop or in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	if mode ~= "menu" or terminal_open or pause_open or prompt_open then
 		return
 	end
@@ -3349,7 +3402,7 @@ end
 function handle_synth_update(event_type, event_data)
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	bed:update()
 	local dt = event_data:GetFloat("TimeStep")
 	drone.t = drone.t + dt
@@ -3543,7 +3596,7 @@ end
 function handle_dissolve_update(event_type, event_data)
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	local dt = event_data:GetFloat("TimeStep")
 	for b = 1, BAYS do
 		local st = bay_state[b]
@@ -3659,7 +3712,7 @@ function handle_idle_update(event_type, event_data)
 	end
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	if still then
 		return
 	end
@@ -3739,7 +3792,7 @@ reel_angle = 0
 function handle_reel_update(event_type, event_data)
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	local dt = event_data:GetFloat("TimeStep")
 	local busy = false
 	for b = 1, BAYS do
@@ -4773,7 +4826,7 @@ function handle_keydown(event_type, event_data)
 	end
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if in_game or console_open then return end
+	if held_was or held_by_others() then return end
 	-- F8 starts the attract mode; any other key ends it and brings the
 	-- camera home, the room being in use again
 	if key == magic.KEY_F8 then

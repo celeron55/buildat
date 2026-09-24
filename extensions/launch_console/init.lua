@@ -58,12 +58,18 @@ end
 -- drawn goes under one element the closer removes.
 local function open(opts)
 	opts = opts or {}
-	local root = magic.ui.root
-	if opts.on_close then
-		root = magic.ui.root:CreateChild("UIElement")
-		root:SetFixedSize(magic.ui.root.width, magic.ui.root.height)
-		root.priority = 100
-	end
+	-- **One element of its own, always** -- not only when it is drawn
+	-- over somebody else's screen. Urho3D cycles Tab between the
+	-- focusable elements of one top-level element (`UI.cpp:1741`), and
+	-- that is the console's two fields exactly when they share this
+	-- root; built straight on `ui.root` the two panels were two top
+	-- levels and Tab did nothing, which is why this screen had a Tab of
+	-- its own -- and why that one lost a fight with Urho3D's as soon as
+	-- the console was opened over the room ([LAUNCH_WORLD], 2026-09-24:
+	-- whatever holds the screen owns the input).
+	local root = magic.ui.root:CreateChild("UIElement")
+	root:SetFixedSize(magic.ui.root.width, magic.ui.root.height)
+	root.priority = 100
 	local w = magic.ui.root.width
 	local h = magic.ui.root.height
 	local half = math.floor(w / 2)
@@ -166,6 +172,12 @@ local function open(opts)
 	-- told to clip by hand. The style's own light colour is painted
 	-- over below.
 	view:SetStyleAuto()
+	-- **Out of Tab's way**: Urho3D cycles the focus through every
+	-- focusable element under this screen's root, and a styled
+	-- ScrollView is one of them -- so the second Tab landed on the
+	-- document rather than back in the console. The two fields are the
+	-- only things here worth the keyboard.
+	view:SetFocusMode(magic.FM_NOTFOCUSABLE)
 	view:SetPosition(MARGIN, MARGIN + 54)
 	view:SetFixedSize(half - 2 * MARGIN, h - MARGIN * 2 - 54)
 	-- **The view's own panel is what was drawing white**: a ScrollView
@@ -317,24 +329,13 @@ local function open(opts)
 			end
 			return
 		end
-		-- **Tab moves the keyboard between the two columns**: the
-		-- console has the keyboard at boot, and without this the search
-		-- field can only be reached with the mouse -- which a scripted
-		-- run does not have, and which is one more thing to know than a
-		-- two-column screen should ask for.
-		if key == magic.KEY_TAB then
-			-- **Tab lands in the console when neither field has the
-			-- keyboard** (user): the console is the one you came for,
-			-- and one more Tab reaches the search. That is the whole of
-			-- working this screen without a mouse.
-			local at = magic.ui.focusElement
-			local who = at and at:GetName() or ""
-			local to = (who == "console_input") and search or input
-			magic.ui:SetFocusElement(to)
-			log:info("console: the keyboard is in the " ..
-					(to == input and "console" or "search"))
-			return
-		end
+		-- **Tab moves the keyboard between the two columns**, and it is
+		-- Urho3D's own: both fields sit under one top-level element, so
+		-- `UI::HandleKeyDown` cycles between them and Shift+Tab goes
+		-- back. A Tab of this screen's own used to do it and was undone
+		-- by Urho3D's in the same frame whenever the console had a root
+		-- of its own -- two handlers for one key, of which only one
+		-- can be last.
 		-- **Ctrl+C takes the line the search is pointing at**
 		-- ([LAUNCH_CONSOLE]'s done-when: text copies out of the
 		-- document). A `Text` has a selection and no copy of its own,

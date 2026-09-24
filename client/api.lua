@@ -509,6 +509,16 @@ buildat.safe.quit = function()
 	__buildat_disconnect()
 end
 buildat.safe.launch_ui_fell_back = __buildat_launch_ui_fell_back
+
+-- **Whose screen it is now**: the launch UI the client last booted or
+-- was set to. A launch UI that is still running under another one --
+-- `set_launch_ui` boots the new one over the old, and the old one's
+-- handlers are still subscribed -- asks this to know that it no longer
+-- holds the screen, and hands the input back ([LAUNCH_WORLD], 2026-09-24:
+-- whatever holds the screen owns the input).
+buildat.safe.launch_ui_name = function()
+	return __buildat_menu_extension_name or "launch_menu"
+end
 -- The tail of a local server's log and where the whole of it is, for a
 -- launcher's dialog about one that died ([START_PROGRESS]). Read-only,
 -- and the path is the client's own.

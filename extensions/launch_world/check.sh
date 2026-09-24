@@ -690,6 +690,18 @@ if [ "$console" -lt 1 ] || [ "$console_ran" -lt 1 ] || [ "$console_shut" -lt 1 ]
 	echo "FAIL: the room's developer console does not open, run or close"
 	exit 1
 fi
+# **And the room hands the input over while it is up** (user,
+# 2026-09-24: the console opened with the mouse still moving the camera
+# and no cursor). One gate, asked once a frame, and it says both ways.
+gave=$(grep -ac "launch_w.*: input: handed to whatever holds the screen" \
+	"$out/cli.log")
+took=$(grep -ac "launch_w.*: input: the room has the screen again" \
+	"$out/cli.log")
+echo "the room handed the input over $gave times and took it back $took"
+if [ "$gave" -lt 1 ] || [ "$took" -lt 1 ]; then
+	echo "FAIL: the room keeps the mouse while somebody else holds the screen"
+	exit 1
+fi
 
 back=$(grep -ac "launch_w.*: game: back in the room" "$out/cli.log")
 swept=$(grep -a "forget_game_ui" "$out/cli.log" | tail -1 |

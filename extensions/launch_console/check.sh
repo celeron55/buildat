@@ -49,10 +49,29 @@ fi
 	echo "keypress C"
 	echo "keyup CTRL"
 	echo "delay 400"
+	# **And Tab comes back to the console** ([LAUNCH_WORLD], 2026-09-24:
+	# whatever holds the screen owns the input). Tab is Urho3D's own
+	# focus cycle now, which is what works whether this screen was
+	# booted or drawn over a room; a line evaluated after a second Tab
+	# is what says the keyboard came back rather than landing on the
+	# document.
+	echo "keypress Tab"
+	echo "delay 300"
+	echo "text 7*6"
+	echo "delay 200"
+	echo "keypress Return"
+	echo "delay 500"
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -m launch_console -D ../user -w 1280x720 -l 3 \
 	-c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+back=$(grep -ac "console: 7\*6 = 42" "$out/cli.log")
+echo "the keyboard came back to the console $back times"
+if [ "$back" -lt 1 ]; then
+	echo "FAIL: Tab does not come back from the search to the console"
+	grep -a "console: " "$out/cli.log" | tail -3
+	exit 1
+fi
 if grep -aq "Crash: SIG" "$out/cli.log"; then
 	echo "FAIL: the client crashed --" \
 			"$(grep -a "Crash: SIG" "$out/cli.log" | head -1)"
