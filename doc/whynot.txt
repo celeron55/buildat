@@ -35,3 +35,22 @@ game that needs one is a game that needs official.
 - New profiler features of any kind: the engine's own DebugHud on F6
   is the whole of it.
 
+
+The launcher room's discarded pieces, not to be rebuilt
+-------------------------------------------------------
+Taken out of `extensions/launch_world` on purpose (user, 2026-09-24 and
+2026-09-25). Each was built, looked at, and decided against.
+
+- The loading reel: two chrome hubs with a spoke across each, turning
+  while a bay came apart. A discarded idea rather than a thing waiting
+  for its turn. The dissolve is the piece worth reusing -- a bay
+  un-builds into a flying cube per voxel, reversible and interruptible
+  with no keyframes -- and it belongs to activation, which `launch()`
+  is the one door for.
+- Opening a bay by hand: Return on a pointed orb opened its pocket and
+  Backspace closed it. It was unreachable from either mode, and a
+  player who wants a pocket open wants what is in it launched -- the
+  bay opening is the launch's own animation.
+- The room's own key for leaving a game (F10). A game leaves through
+  `buildat.leave()`, and the launcher does not rig anything up to make
+  games behave.

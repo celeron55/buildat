@@ -466,6 +466,13 @@ SubscribeToEvent(object, event_name, callback)
 - Return value: name of the generated global callback, for
   UnsubscribeFromEvent(event_name, callback_name).
 
+UnsubscribeFromEvent(event_name, callback)
+- callback: the name SubscribeToEvent returned, a function, or the name of a
+  global function in the caller's own sandbox environment -- the same three
+  things the subscribe takes. A subscription is stored under a generated name,
+  so a handler unsubscribed by the name its own file calls it by used to match
+  nothing and go on firing over a screen it had already removed.
+
 magic.render_scene_to_texture(scene, camera_node, w, h) -> Texture2D
 - A scene drawn into a texture instead of into the window. What wants it is a
   thumbnail: a voxel volume or a model seen on its own, on a button, which is
@@ -679,6 +686,13 @@ uistack.UIStack(root) -> a stack of its own
 - :push({desc = "..."}) -> root element; :pop(root) (the top, or it raises);
   root:SubscribeToStackEvent(event_name, callback) subscribes for as long as
   the root is on the stack.
+- :pop() of an entry whose element has already been removed -- a sandbox reset
+  takes the elements under the stack's entries -- drops the entry and carries
+  on rather than raising on a dead UIElement, so a leave that meets one still
+  reaches what comes after it.
+- stack -> the entries, innermost first: what is on the screen. A launch UI
+  that draws straight on magic.ui.root and pushes nothing reads "somebody
+  else's screen is up" off #uistack.main.stack.
 
 skycube
 -------
