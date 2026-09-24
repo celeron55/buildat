@@ -50,7 +50,16 @@ shoot() { # <tag> <extra env>
 	done
 	echo "delay 500" >> "$cmds"
 	echo "quit" >> "$cmds"
-	env $2 bin/buildat -s localhost:29786 -w 640x480 -l 3 \
+	# **The meter settled rather than waited for** (2026-09-24): the
+	# adaptation runs on the frame's TimeStep, which the engine clamps
+	# at a tenth of a second, so three seconds of delay is three
+	# frames' worth of adaptation on a machine drawing a frame a second
+	# and thirty times that here. The shots came out darker in a
+	# container and the window's gain read half of this desk's. At this
+	# rate each frame is exposed on its own key, which is the value the
+	# delay was waiting for.
+	env BUILDAT_LUANTI_ADAPT=1000000 $2 bin/buildat -s localhost:29786 \
+		-w 640x480 -l 3 \
 		-c @"$cmds" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' \
 		> "$out/cli_$tag.log"
 }

@@ -536,17 +536,22 @@ do
 	-- 2026-09-21, [PBR_GRADE]; Urho's own is 4.0); the shoulder is the
 	-- curve's own
 	rp:SetShaderParameter("TonemapMaxWhite", 2.0)
-	rp:SetShaderParameter("AutoExposureAdaptRate", AUTO_EXPOSURE.adapt_rate)
 	-- BUILDAT_LUANTI_KEY=<lum> pins the metered key by closing the range on
 	-- it, so an ablation's frames are comparable in absolute terms: with
 	-- the key free, a term turned off re-exposes everything else
 	local key = tonumber(buildat.get_env("BUILDAT_LUANTI_KEY") or "")
 	if key then AUTO_EXPOSURE.lum_range = {key, key} end
 	-- BUILDAT_LUANTI_ADAPT=<rate>: the adaptation rate, for a run that
-	-- asks whether the meter had settled
+	-- asks whether the meter had settled. **Read before the rate is set
+	-- on the path**, or it reached the shader only after an
+	-- exposure_reset put it back (2026-09-24) -- so a run asking for an
+	-- instant meter got the default 0.6 and a picture of whatever the
+	-- adaptation had reached by then, which on a slow machine is a
+	-- different picture.
 	AUTO_EXPOSURE.adapt_rate = tonumber(
 			buildat.get_env("BUILDAT_LUANTI_ADAPT") or "") or
 			AUTO_EXPOSURE.adapt_rate
+	rp:SetShaderParameter("AutoExposureAdaptRate", AUTO_EXPOSURE.adapt_rate)
 	rp:SetShaderParameter("AutoExposureLumRange",
 			magic.Vector2(AUTO_EXPOSURE.lum_range[1],
 			AUTO_EXPOSURE.lum_range[2]))
