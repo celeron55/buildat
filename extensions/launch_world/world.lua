@@ -5631,8 +5631,15 @@ function launch_watch()
 end
 
 function leave_game()
+	-- **A launch that has not finished is still something to leave**
+	-- ([LEAVE_POP], 2026-09-25): a menu launched from an orb -- ContentDB
+	-- -- never takes the viewport, so the room stands down on
+	-- LAUNCH_WAIT_S's timeout, and "back to the launcher" pressed before
+	-- that found `in_game` false and did nothing. Which is also why it
+	-- worked by luck: wait long enough and the same button works.
+	local was = in_game or launching
 	launching = false
-	if not in_game then return false end
+	if not was then return false end
 	-- **The screens under the game go with it** ([MENU_STUCK], user
 	-- 2026-09-24): the launcher composed under the room pushes a
 	-- placeholder when it starts a game and pops it in its own
