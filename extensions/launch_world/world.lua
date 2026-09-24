@@ -3507,23 +3507,34 @@ function handle_orb_update(event_type, event_data)
 			-- Five samples up the column rather than a closest-point
 			-- solve: the column is at most three voxels tall and this
 			-- runs once an orb a frame.
-			local top = p.y
+			--
+			-- **From the orb's bottom, not from its middle**
+			-- ([POINT_LOW], user 2026-09-25: a sphere's selection box
+			-- was above the sphere). The samples ran from `p.y` up, so
+			-- the lower half of every orb was outside the volume that
+			-- selects it -- worst up close, where a two-voxel orb at
+			-- five voxels subtends twenty degrees against a tolerance
+			-- of about ten, which is the distance a player reaches
+			-- from. The radius is what the orb was drawn at.
+			local r = 0.5 * orb_across(ORBS[i])
+			local bottom = p.y - r
+			local top = p.y + r
 			if ORBS[i] and ORBS[i].floor then
 				-- The eye in scene units: a node's position is voxels and
 				-- FPS_EYE is metres ([LAUNCH_WORLD]: part() multiplies
 				-- metres by U on the way in)
-				top = math.max(p.y, FPS_EYE * U)
+				top = math.max(top, FPS_EYE * U)
 			end
 			local dot, up = -1, false
 			for k = 0, 4 do
-				local y = p.y + (top - p.y) * (k / 4)
+				local y = bottom + (top - bottom) * (k / 4)
 				local dx, dy, dz = p.x - view_from.x, y - view_from.y,
 						p.z - view_from.z
 				local l = math.sqrt(dx * dx + dy * dy + dz * dz)
 				local d = (dx * view_dir.x + dy * view_dir.y +
 						dz * view_dir.z) / l
 				if d > dot then
-					dot, up = d, k > 0
+					dot, up = d, y > p.y
 				end
 			end
 			if dot > best_dot then
