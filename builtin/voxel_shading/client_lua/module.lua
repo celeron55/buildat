@@ -321,6 +321,14 @@ function M.apply_to_node(node)
 		m:SetTechnique(0, technique)
 		m:SetShaderParameter("PackedSky", packed_sky)
 		m:SetShaderParameter("ShadowKinds", shadow_kinds)
+		-- **A parameter a material never sets is not zero** ([LOOK_CHECK]
+		-- says so, and 2026-09-24 paid for it): the parallax correction
+		-- [LAUNCH_WORLD] wants for a cube map that holds a room -- rather
+		-- than a sky, which is at infinity and needs none -- is off for a
+		-- world with a sky, and saying so here is what keeps it off.
+		-- Without this line voxel_lighting's pond and cave mouths moved
+		-- by ten times their own run-to-run noise.
+		m:SetShaderParameter("ProbeBox", 0.0)
 	end)
 	-- The faces of the world's translucent voxels, which the mesher puts on a
 	-- child node of their own so that Urho3D sorts them against the other
@@ -336,6 +344,7 @@ function M.apply_to_node(node)
 					techniques.alpha)
 			m:SetShaderParameter("PackedSky", packed_sky)
 			m:SetShaderParameter("ShadowKinds", shadow_kinds)
+			m:SetShaderParameter("ProbeBox", 0.0)
 		end)
 	end
 	-- And the alpha-masked ones, which are solid world with the holes in
@@ -349,6 +358,7 @@ function M.apply_to_node(node)
 					techniques.masked)
 			m:SetShaderParameter("PackedSky", packed_sky)
 			m:SetShaderParameter("ShadowKinds", shadow_kinds)
+			m:SetShaderParameter("ProbeBox", 0.0)
 		end)
 	end
 end
@@ -673,6 +683,10 @@ local function push_sky_vis()
 				command:SetShaderParameter("LampLight", lamp_light)
 				command:SetShaderParameter("CaveAmbient", cave_ambient)
 				command:SetShaderParameter("TranslucencyGain", translucency_gain)
+				-- Off for a world with a sky, and said every frame like
+				-- the rest: a cube map at infinity wants no parallax
+				-- ([LAUNCH_WORLD]'s room is the one that does)
+				command:SetShaderParameter("ProbeBox", 0.0)
 			end
 		end
 		return
@@ -687,6 +701,7 @@ local function push_sky_vis()
 	render_path:SetShaderParameter("LampLight", lamp_light)
 	render_path:SetShaderParameter("CaveAmbient", cave_ambient)
 	render_path:SetShaderParameter("TranslucencyGain", translucency_gain)
+	render_path:SetShaderParameter("ProbeBox", 0.0)
 end
 
 -- How much of the sky is visible overhead: 1 out in the open, towards 0

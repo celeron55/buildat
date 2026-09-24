@@ -174,6 +174,24 @@ for _, sv in ipairs(SERVERS_MOCK) do
 		SERVERS[#SERVERS + 1] = sv
 	end
 end
+-- **The room as the reference frame has it** (user, 2026-09-24): the
+-- reference has the glowing orbs in their pockets only, with the wall
+-- lit by the light from above -- while this room's floor carries the
+-- launch actions, the saves and the servers, and a game the player
+-- moved out of its pocket stands among them throwing its own light at
+-- the wall. That is the room working; it is not the picture a look
+-- reading or an options sheet should be taken from, because the wall
+-- is then lit by something the reference does not have.
+--
+-- BUILDAT_LAUNCH_BARE=1 leaves the floor empty: the wall, its pockets,
+-- the terminal and nothing else.
+if env("BUILDAT_LAUNCH_BARE") ~= "" then
+	local dropped = #FLOOR_ACTIONS + #SERVERS + #SAVES
+	FLOOR_ACTIONS, SERVERS, SAVES = {}, {}, {}
+	log:info("bare: the floor is empty, " .. dropped ..
+			" things left out of it")
+end
+
 do
 	local ex = 0
 	for _, sv in ipairs(SERVERS) do if sv.example then ex = ex + 1 end end
@@ -509,6 +527,20 @@ do
 end
 local SKY_VIS = magic.Variant(sky_vis_buffer)
 
+-- **The probe's own point and the box the room fills**, in scene units
+-- (one unit is one voxel). The floor is wide and flat and the probe is a
+-- point two metres up in the middle of the room, so without this the
+-- floor reflects the room as seen from there -- which is what "the
+-- reflection has the wrong field of view" looks like. The box is the
+-- room's own extent, a voxel outside each face, which is where a
+-- reflected ray leaves the room.
+-- One table, not three names: this chunk is at Lua's limit of 200 locals
+local probe_box = {
+	at = magic.Vector3(0, 2.0 * U, 0),
+	min = magic.Vector3(room.X_MIN - 1, room.FLOOR_TOP, room.Z_MIN - 1),
+	max = magic.Vector3(room.X_MAX + 1, room.Y_TOP + 1, room.Z_MAX + 1),
+}
+
 local function apply_technique(node)
 	local cg = node:GetComponent("CustomGeometry")
 	local i = 0
@@ -520,6 +552,19 @@ local function apply_technique(node)
 		-- the shadow-kind diagnostic is off
 		m:SetShaderParameter("PackedSky", 0.0)
 		m:SetShaderParameter("ShadowKinds", 0.0)
+		-- **Where the probe stands and the box it holds** (user,
+		-- 2026-09-24: "the reflection might have the wrong FOV"). A
+		-- cube map is the room seen from one point, and a floor
+		-- reflecting it without correction shows the room as seen from
+		-- that point rather than from the floor -- objects at the
+		-- wrong size and in the wrong place, which reads as a wrong
+		-- field of view. The shader follows the reflected ray to the
+		-- box and looks up the hit point instead; these three are what
+		-- it needs, in the scene's own units.
+		m:SetShaderParameter("ProbeBox", 1.0)
+		m:SetShaderParameter("ProbePos", probe_box.at)
+		m:SetShaderParameter("ProbeBoxMin", probe_box.min)
+		m:SetShaderParameter("ProbeBoxMax", probe_box.max)
 		-- The three that let the reflection through
 		m:SetShaderParameter("SkyVis", SKY_VIS)
 		m:SetShaderParameter("SkyLight", 1.0)
@@ -2306,7 +2351,11 @@ moved = {}
 -- The player's own voxels and moved spheres, read at boot. One row a
 -- line, which is a file a person can read and delete.
 do
-	local text = api.storage_read(SAVE_NAME)
+	-- BUILDAT_LAUNCH_BARE=1 reads no save either: what a look reading
+	-- compares against the reference is the room as it is generated,
+	-- not the room as somebody left it
+	local text = env("BUILDAT_LAUNCH_BARE") == "" and
+			api.storage_read(SAVE_NAME) or nil
 	if text then
 		local n = 0
 		for line in text:gmatch("[^\n]+") do
