@@ -980,6 +980,8 @@ struct CApp: public App, public magic::Application
 	// wait_log: the log's line count when the wait began, -1 for none
 	long long m_wait_log_since = -1;
 	int64_t m_wait_log_until_us = 0;
+	// When the wait last said it was still waiting
+	int64_t m_wait_log_said_us = 0;
 	ss_ m_pending_screenshot;
 	bool m_command_seq_active = false;
 	// The logical size a scripted client keeps whatever the window does
@@ -2095,6 +2097,22 @@ struct CApp: public App, public magic::Application
 				if(log_lines_since_contain(m_wait_log_since, c.s.c_str())){
 					log_i(MODULE, "wait_log: \"%s\" seen", cs(c.s));
 				} else if(now < m_wait_log_until_us){
+					// **A wait says it is waiting**, every ten seconds:
+					// a run that has stopped saying anything is how a
+					// harness tells a stuck client from a patient one,
+					// and a wait of two minutes was two minutes of
+					// silence indistinguishable from a wedge
+					// **Without the text it is waiting for**: the line
+					// would otherwise be a line containing that text,
+					// and the wait would see its own heartbeat and go
+					// on (2026-09-24). The command's own line above
+					// says what it waits for.
+					if(now >= m_wait_log_said_us + 10000000){
+						m_wait_log_said_us = now;
+						log_i(MODULE, "wait_log: still waiting, %s s left",
+								cs(itos((int)((m_wait_log_until_us - now) /
+								1000000))));
+					}
 					return;
 				} else {
 					log_w(MODULE, "wait_log: \"%s\" not seen in %s ms; on",

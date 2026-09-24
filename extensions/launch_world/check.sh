@@ -17,6 +17,9 @@
 # passed, 1 failed, 2 could not run, and a last line saying which.
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
+# run_client: a drive that has stopped logging is taken down rather than
+# waited out (user, 2026-09-24)
+. "$here/builtin/luanti/test/lib.sh"
 out="$here/local/options_for_LAUNCH_WORLD"; mkdir -p "$out"
 # **Last run's pictures are not this run's.** The client crashed halfway
 # through a run and every check still reported PASS, off the shots left
@@ -247,8 +250,14 @@ fi
 	# inside the stone, so there is no empty voxel in front of what is
 	# pointed at and nothing to place against -- which is what the
 	# standing pitch changing by a few degrees did to this step
-	# (2026-09-23). Twenty degrees down is the floor a step ahead.
-	echo "look 180 -20"
+	# (2026-09-23).
+	# **Steeply down, not twenty degrees** (2026-09-24): at twenty the
+	# floor is 4.7 m ahead and the reach is 5, so the step depended on
+	# the walk above having covered its ground -- and walking is paid
+	# for in frames, so in a container the player had barely moved and
+	# the ray landed past what can be touched. At forty-five it is the
+	# floor a metre or two ahead of wherever the player got to.
+	echo "look 180 -45"
 	echo "delay 500"
 	echo "mouse_click right"
 	echo "delay 700"
@@ -603,14 +612,26 @@ fi
 	# sandboxed handler, and the room is sandboxed now)
 	echo "keypress Tab"
 	echo "delay 1800"
-	echo "mouse_pos 300 420"
+	# **The middle of the screen, not a pixel off the layout**
+	# (2026-09-24): menu mode flies the camera to what is browsed, so
+	# whatever is browsed is in the middle of the frame -- where a fixed
+	# pixel was an orb only while the room held the number of orbs it
+	# held the day the number was written down, and a save made by this
+	# check's own launch moves every one of them.
+	echo "mouse_pos 640 360"
 	echo "delay 400"
 	echo "mouse_click left"
 	echo "delay 1200"
 	echo "quit"; } > "$out/cmds.txt"
-timeout 600 bin/buildat -m launch_world -D ../user -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+# **Sixty seconds of silence ends it** (user, 2026-09-24): this drive is
+# six minutes of client and its every step says so in the log -- each
+# command as it runs, and a heartbeat while a wait_log waits -- so a
+# minute with nothing in the log is a client that is not coming back,
+# and waiting out the rest of the ten is ten minutes to learn what a
+# minute already said.
+run_client 60 "$out/cli.log" timeout 600 bin/buildat -m launch_world \
+	-D ../user -w 1280x720 -l 3 -c @"$out/cmds.txt"
+sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli.log"
 # And the client has to have got to the end of the sequence
 if grep -aq "Crash: SIG" "$out/cli.log"; then
 	echo "FAIL: the client crashed --" \
