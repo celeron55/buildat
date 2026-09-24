@@ -126,6 +126,12 @@ mouse_up <button>
 mouse_click <button>
     Buttons: left, middle, right (or 1, 2, 3). click is down+up same frame.
 
+    A mouse_up waits for the frame that read its own down, so a hold is a
+    hold of frames and not of milliseconds: on a client drawing a frame a
+    second, a 1.4-second hold otherwise put its down and its up into one
+    event poll and nothing polling the button ever saw it down. A held
+    button the input dropped is pressed again, as a held key is.
+
 mouse_wheel <delta>
     Wheel ticks. Positive is away from the user.
 
