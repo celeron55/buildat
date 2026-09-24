@@ -1003,8 +1003,14 @@ fi
 for yaw in own 0; do
 	extra=""
 	[ "$yaw" = "0" ] && extra="BUILDAT_LAUNCH_FACE_YAW=0"
-	{ echo "delay 5000"; echo "event mode menu"; echo "delay 700"
-		for c in I M P O R T; do echo "keypress $c"; done
+	# **A glowing orb**, because the measurement below is how much of
+	# the disc is dark: a chrome sphere is dark all over and says
+	# nothing, and this room -- a client with no history -- has no
+	# logo-marked orb in it at all, every one of its twenty-five
+	# wearing the room's own sigil.
+	{ echo "wait_log_any 90000 the room hums"; echo "delay 1000"
+		echo "event mode menu"; echo "delay 700"
+		for c in D I G G; do echo "keypress $c"; echo "delay 120"; done
 		echo "delay 2600"
 		echo "screenshot $out/mark_face_$yaw.png"
 		echo "delay 400"; echo "quit"; } > "$out/cmds_face_$yaw.txt"
@@ -1018,22 +1024,23 @@ from PIL import Image
 
 out = sys.argv[1]
 
-def colourfulness(im):
-	# **A mark is told by its colour, not by its brightness**: the icon
-	# is green and brown on a ball the room's light blows to white, so
-	# the luminance of the middle says nothing (measured: -0.9 of a
-	# level with the mark square on the face). What the mark does is
-	# put colour where the ball has none.
-	px = list(im.getdata())
-	return sum(max(p) - min(p) for p in px) / float(len(px))
+def dark_share(path):
+	"""**A mark is a dark line on a lit ball**, and that is what to
+	measure. The earlier reading was colourfulness, because the mark
+	was then a game's own logo in the diffuse and its colours were the
+	signal; since a shared icon counts as no icon (2026-09-24) most
+	orbs wear the room's generated sigil, which is one bit cut into the
+	emission -- black on white, no colour at all, and a colour test
+	reads it as nothing.
 
-def middle_against_ring(path):
-	im = Image.open(path).convert("RGB")
+	So: how much of the disc is dark. The ball is the bright part of
+	the crop and the mark is what is dark inside it.
+	"""
+	im = Image.open(path).convert("L")
 	w, h = im.size
 	cx, cy = w // 2, int(h * 0.52)
-	centre = colourfulness(im.crop((cx - 38, cy - 38, cx + 38, cy + 38)))
-	ring = colourfulness(im.crop((cx - 110, cy - 110, cx + 110, cy + 110)))
-	return centre / max(ring, 0.01)
+	px = list(im.crop((cx - 60, cy - 60, cx + 60, cy + 60)).getdata())
+	return 100.0 * sum(1 for p in px if p < 120) / float(len(px))
 
 own = "%s/mark_face_own.png" % out
 turned = "%s/mark_face_0.png" % out
@@ -1041,13 +1048,14 @@ for p in (own, turned):
 	if not os.path.exists(p):
 		print("FAIL: the mark's face was not shot (%s)" % p)
 		raise SystemExit(1)
-a, b = middle_against_ring(own), middle_against_ring(turned)
-print("the middle of the disc carries %.2f times the ring's colour with "
-		"the mark presented, and %.2f with it a quarter out" % (a, b))
-ok = a > 1.2 and b < 0.6
+a, b = dark_share(own), dark_share(turned)
+print("the disc is %.1f%% dark with the mark presented, and %.1f%% with "
+		"it a quarter out" % (a, b))
+# Measured 35.1 against 0.0 in this room; the bar is the gap
+ok = a > 12.0 and b < a * 0.5
 if not ok:
-	print("FAIL: the orb does not present its mark" if a <= 1.2 else
-			"FAIL: the control carries a mark where there should be none")
+	print("FAIL: the orb does not present its mark" if a <= 6.0 else
+			"FAIL: the control shows as much mark as the presentation")
 raise SystemExit(0 if ok else 1)
 PYMARK
 

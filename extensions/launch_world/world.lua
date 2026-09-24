@@ -55,6 +55,23 @@ local room = api.run_extension_file("room.lua")
 -- data and a key; `api.launch(key)` is what runs one, on the
 -- trusted side, where it is looked up rather than called across.
 local GAMES, FLOOR_ACTIONS = {}, {}
+-- **An icon two things share is not a mark** (2026-09-24): the Luanti
+-- launcher gives every entry it offers `icon = "luanti.png"`, so
+-- VoxeLibre, devtest, realtest, "Import a game" and twenty more all
+-- drew the same picture -- and a mark's whole job is to tell one orb
+-- from another. Counted here and read where the mark is made: an icon
+-- worn by more than one falls through to the name-seeded sigil, which
+-- is what an orb with no icon already gets.
+shared_icons = {}
+do
+	local seen = {}
+	for _, a in ipairs(api.launch_actions()) do
+		if a.icon then
+			seen[a.icon] = (seen[a.icon] or 0) + 1
+			if seen[a.icon] > 1 then shared_icons[a.icon] = true end
+		end
+	end
+end
 for _, a in ipairs(api.launch_actions()) do
 	-- **The action says what it is and how much it matters**
 	-- ([LAUNCH_SIGNIFY]), rather than the room guessing from where the
@@ -1279,12 +1296,13 @@ end
 
 local function mark_texture(mark, icon, one_bit, invert, slot)
 	if not mark then return nil end
-	-- **The grid's fallback is not a mark.** `launch_grid` hands out
-	-- `buildat_logo.png` for anything whose launcher names no icon, and
-	-- in a tree where most do not that is one logo worn by nine orbs.
-	-- A picture generated from the name tells them apart, which is the
-	-- whole job of a mark.
-	if icon == "buildat_logo.png" then
+	-- **The grid's fallback is not a mark, and neither is an icon two
+	-- things share.** `launch_grid` hands out `buildat_logo.png` for
+	-- anything whose launcher names no icon, and the Luanti launcher
+	-- hands out `luanti.png` for every game it offers -- one picture
+	-- worn by twenty-three orbs. A picture generated from the name
+	-- tells them apart, which is the whole job of a mark.
+	if icon == "buildat_logo.png" or shared_icons[icon] then
 		icon = nil
 	end
 	local image

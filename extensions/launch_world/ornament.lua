@@ -359,7 +359,14 @@ function M.band_style(seed)
 	local roll = r()
 	local worm = roll < 0.5
 	local kind = "sigil"
-	if worm then kind = (roll < 0.25) and "worm" or "wormb" end
+	-- **`wormb` is not picked** (2026-09-24, the holding action): about
+	-- one seed in a hundred draws a `wormb` whose tiles do not join,
+	-- and the band is on the room's walls now -- a rename re-rolls the
+	-- style, so that is a live risk rather than a latent one. Its walk
+	-- is still here and `band_sheet.sh` still draws it; what is gone is
+	-- the room's chance of wearing a broken one. The half that was its
+	-- own goes to `worm`, whose seam is sound.
+	if worm then kind = "worm" end
 	-- **Rails are the heavy end**, about 48% ink against 30, and a wall
 	-- of them is a painted stripe. One in five.
 	-- The worm carries its own border -- its outline is the carving --
