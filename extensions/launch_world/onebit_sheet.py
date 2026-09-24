@@ -9,6 +9,23 @@ etch in a white sphere's roughness -- and how a *logo* becomes that bit
 is the pick this sheet is for. No engine: the transforms are here, over
 the logos this tree ships, and the sheet is a picture.
 
+**The round is settled** (2026-09-24): the mark is the largest
+per-channel colour difference to a drawn neighbour, above a threshold
+searched for an ink share of MARK_INK, unioned with the alpha
+silhouette. That is the first column, and the sheet is now a record of
+why rather than a menu -- the columns beside it are the choices that
+were made and the reasons they were made, so that each is not asked
+again:
+
+  lum auto    -- the same search over brightness: what colour buys.
+  outline     -- one fixed threshold: a dirt cube as a bare hexagon,
+                 which is why the threshold is searched.
+  alpha       -- the cut-out, and the blob a coloured logo becomes.
+  luminance   -- the polarity trap: the buildat logo is luminance 1
+                 everywhere it is drawn, and vanishes.
+  outline|dither -- tone bought with four times the ink; rejected as
+                 noise with a shape around it at this size.
+
 Rows are the logos, the first column is the original and each further
 column is a method. **Judged at the size the sphere gives it**: the
 mark is about 64 texels on an orb, so every method is applied to a
@@ -58,11 +75,52 @@ def load(path):
     return im.resize((SIZE, SIZE), Image.LANCZOS)
 
 
+# The picture the colour methods need, kept beside the row being drawn
+# rather than threaded through ten method signatures that do not want it.
+CURRENT_RGB = None
+
+
 def parts(im):
+    global CURRENT_RGB
     a = np.asarray(im, dtype=np.float32) / 255.0
     rgb, alpha = a[..., :3], a[..., 3]
+    CURRENT_RGB = rgb
     lum = rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114
     return lum, alpha
+
+
+def colour_distance(alpha):
+    """**A feature is a colour difference, not a brightness one** (user,
+    2026-09-24). Two patches can differ in hue or in saturation at the
+    same brightness and still be the strongest thing in a logo -- a
+    ContentDB icon's coloured corner markers against grey are exactly
+    that, and a luminance gradient is blind to them by construction.
+
+    **The largest single-channel difference**, over the four
+    neighbours. It was drawn against CIE dE76 in Lab and five other
+    metrics (`outline_cheap.png`) and agrees with Lab on every logo
+    this tree ships; it wins the row that separates them, and it is
+    three subtractions rather than a colour space the room would have
+    to carry.
+
+    **The reason a crude metric can stand in here**: the threshold is
+    searched for an ink share rather than fixed, so a metric only has
+    to rank edges in roughly the same order -- the search divides its
+    absolute scale out. Luminance still could not, because it does not
+    rank a coloured marker low, it scores it at zero.
+
+    Taken among drawn pixels only: an undrawn neighbour contributes
+    nothing rather than black, or a cut-out's own edge is the strongest
+    feature in the picture and every line-art icon comes out fat.
+    """
+    drawn = alpha >= 0.5
+    g = np.zeros(drawn.shape, dtype=np.float32)
+    for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        near = np.roll(np.roll(CURRENT_RGB, dy, 0), dx, 1)
+        d = np.abs(CURRENT_RGB - near).max(axis=-1)
+        g = np.fmax(g, np.where(drawn & np.roll(np.roll(drawn, dy, 0), dx, 1),
+                d, 0.0))
+    return np.where(drawn, g, 0.0)
 
 
 def as_tile(mask, name):
@@ -89,67 +147,12 @@ def m_luminance(lum, alpha):
     return (lum < 0.5) & (alpha >= 0.5)
 
 
-def otsu(values):
-    hist, edges = np.histogram(values, bins=64, range=(0.0, 1.0))
-    total = values.size
-    if total == 0:
-        return 0.5
-    w0 = np.cumsum(hist)
-    w1 = total - w0
-    mids = (edges[:-1] + edges[1:]) / 2.0
-    s0 = np.cumsum(hist * mids)
-    s1 = s0[-1] - s0
-    with np.errstate(invalid="ignore", divide="ignore"):
-        m0 = np.where(w0 > 0, s0 / np.maximum(w0, 1), 0)
-        m1 = np.where(w1 > 0, s1 / np.maximum(w1, 1), 0)
-        between = w0 * w1 * (m0 - m1) ** 2
-    return float(mids[int(np.argmax(between))])
 
-
-def m_otsu(lum, alpha):
-    """The threshold out of the histogram, so no magic number -- and
-    the polarity from which side has less of the picture, since a mark
-    is the smaller part."""
-    drawn = alpha >= 0.5
-    vals = lum[drawn]
-    if vals.size == 0:
-        return np.zeros_like(lum, dtype=bool)
-    t = otsu(vals)
-    dark = (lum < t) & drawn
-    light = (lum >= t) & drawn
-    return dark if dark.sum() <= light.sum() else light
-
-
-def m_darkest_fifth(lum, alpha):
-    """A percentile -- what the room does today. Same polarity trap as
-    the fixed cut."""
-    drawn = alpha >= 0.5
-    vals = lum[drawn]
-    if vals.size == 0:
-        return np.zeros_like(lum, dtype=bool)
-    t = float(np.percentile(vals, 20.0))
-    return (lum <= t) & drawn
-
-
-def m_adaptive(lum, alpha):
-    """The mean of a neighbourhood, which keeps detail in an unevenly
-    lit picture. A box blur by summed area, radius four."""
-    r = 4
-    pad = np.pad(lum, r, mode="edge")
-    acc = pad.cumsum(0).cumsum(1)
-    acc = np.pad(acc, ((1, 0), (1, 0)))
-    n = 2 * r + 1
-    y, x = np.mgrid[0:lum.shape[0], 0:lum.shape[1]]
-    y0, x0 = y, x
-    y1, x1 = y + n, x + n
-    local = (acc[y1, x1] - acc[y0, x1] - acc[y1, x0] + acc[y0, x0]) / (n * n)
-    return (lum < local - 0.02) & (alpha >= 0.5)
-
-
-def m_outline(lum, alpha):
+def m_outline(lum, alpha, t=0.15):
     """A morphological gradient: any logo becomes a line drawing, which
     is the most *etched* of the lot and does not care whether the ink
-    is light or dark."""
+    is light or dark. `t` is swept by m_outline_auto rather than
+    chosen; the default is only what the first sheet was drawn with."""
     v = np.where(alpha >= 0.5, lum, 0.0)
     pad = np.pad(v, 1, mode="edge")
     hi = np.maximum.reduce([pad[:-2, 1:-1], pad[2:, 1:-1],
@@ -162,15 +165,73 @@ def m_outline(lum, alpha):
             a[1:-1, 2:], alpha])
     alo = np.minimum.reduce([a[:-2, 1:-1], a[2:, 1:-1], a[1:-1, :-2],
             a[1:-1, 2:], alpha])
-    return (edge > 0.15) | ((ahi - alo) > 0.5)
+    return (edge > t) | ((ahi - alo) > 0.5)
 
 
-def m_alpha_or_otsu(lum, alpha):
-    """Alpha where there is any, else Otsu -- the room's current rule
-    stated properly."""
-    if float(alpha.min()) < 0.5:
-        return m_alpha(lum, alpha)
-    return m_otsu(lum, alpha)
+MARK_INK = 0.16    # how much of the mark is ink, the quantity held still
+
+
+def m_outline_colour(lum, alpha, t=0.15):
+    """The outline over the colour distance instead of the luminance
+    one. The alpha silhouette is the same second term."""
+    g = colour_distance(alpha)
+    a = np.pad(alpha, 1, mode="edge")
+    ahi = np.maximum.reduce([a[:-2, 1:-1], a[2:, 1:-1], a[1:-1, :-2],
+            a[1:-1, 2:], alpha])
+    alo = np.minimum.reduce([a[:-2, 1:-1], a[2:, 1:-1], a[1:-1, :-2],
+            a[1:-1, 2:], alpha])
+    return (g > t) | ((ahi - alo) > 0.5)
+
+
+def m_outline_luminance_auto(lum, alpha):
+    """**The same search over a brightness difference**, kept as the
+    column that shows what colour buys: a ContentDB icon's coloured
+    corner markers against grey come out faint and partial here and
+    clean beside it, because luminance does not rank them low -- it
+    scores them at zero."""
+    best = None
+    for t in np.arange(0.02, 0.61, 0.01):
+        mask = m_outline(lum, alpha, float(t))
+        d = abs(float(mask.mean()) - MARK_INK)
+        if best is None or d <= best[0]:
+            best = (d, mask)
+    return best[1]
+
+
+def m_outline_auto(lum, alpha):
+    """**The reference, and the pick** (user, 2026-09-24): the colour
+    outline with its threshold searched rather than chosen. What is constant is
+    how much of the sphere the mark covers -- a person reads that from
+    across the room -- so `t` is whatever lands nearest MARK_INK. A
+    fixed threshold cannot serve both a flat icon and a photograph:
+    0.15 reduces a dirt cube to a bare hexagon, and 0.04 turns a
+    ContentDB thumbnail into 48% ink.
+
+    Ties go to the higher `t`, the sparser mark being the safer one.
+    The target is an aim and not a guarantee: half of these logos are
+    line art on transparency whose mark comes entirely from the alpha
+    term, and no threshold moves them at all.
+    """
+    best = None
+    for t in np.arange(0.02, 0.61, 0.01):
+        mask = m_outline_colour(lum, alpha, float(t))
+        d = abs(float(mask.mean()) - MARK_INK)
+        if best is None or d <= best[0]:
+            best = (d, mask, float(mask.mean()))
+    # A picture with no contrast has no edges, and the search runs to
+    # the end of its range chasing a target it cannot reach. The
+    # cut-out is the only other mark available -- but only when there
+    # is a cut-out: on a fully opaque thumbnail alpha is the whole
+    # tile, which is a black sphere rather than a mark, and worse than
+    # the specks it replaced.
+    if best[2] < MARK_INK * 0.4:
+        cut = m_alpha(lum, alpha)
+        if float(cut.mean()) < 0.45:
+            return cut
+        # Neither works: this logo has no mark in it, and the room's
+        # generated sigil is what such a game should get.
+    return best[1]
+
 
 
 def m_dither(lum, alpha):
@@ -203,17 +264,21 @@ def m_outline_or_dither(lum, alpha):
     return m_outline(lum, alpha) | m_dither(lum, alpha)
 
 
+# **The reference column comes first**, beside the original: every
+# future round is judged against the best so far, not against nothing.
 METHODS = [
+    # **The settled transform comes first**, beside the original: every
+    # future round is judged against it rather than against nothing.
+    ("auto %d%%" % (MARK_INK * 100), m_outline_auto),
+    # The rest are here to hold the round's decisions, not as choices.
+    # Each one is a question somebody will otherwise ask again.
+    ("lum auto %d%%" % (MARK_INK * 100), m_outline_luminance_auto),
+    ("outline .15", m_outline),
     ("alpha", m_alpha),
-    ("luminance 0.5", m_luminance),
-    ("Otsu", m_otsu),
-    ("darkest fifth", m_darkest_fifth),
-    ("adaptive", m_adaptive),
-    ("outline", m_outline),
-    ("alpha or Otsu", m_alpha_or_otsu),
-    ("dither", m_dither),
-    ("outline|dither", m_outline_or_dither),
+    ("luminance .5", m_luminance),
+    ("outl|dither", m_outline_or_dither),
 ]
+
 
 
 def main():
