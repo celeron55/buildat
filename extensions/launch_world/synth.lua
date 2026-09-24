@@ -121,7 +121,10 @@ function M.new(magic, log)
 	-- ramped per block rather than per sample -- 23 ms is smooth
 	-- enough for a gain and costs nothing.
 	function s:set_engagement(x)
-		self.pattern_want = math.max(0.05, math.min(1.0, x or 0.05))
+		-- **Nought is a level** ([ROOM_SOUND], 2026-09-24: the bed goes
+		-- away when nobody is doing anything). The floor used to be
+		-- 0.05, so an empty room still had a beat under it.
+		self.pattern_want = math.max(0, math.min(1.0, x or 0))
 	end
 
 	-- One block of samples, mixed and written
@@ -216,8 +219,18 @@ function M.new(magic, log)
 			-- rises** -- a little, so focus is a change of character
 			-- rather than of loudness
 			local pat = self.pattern
+			-- **The bed's own drone falls with the pattern, and only at
+			-- the bottom** ([ROOM_SOUND]): the beat is multiplied by
+			-- `pat` already, but the drone is not, and it *rises* as
+			-- `pat` falls -- at idle it would be the only thing left
+			-- and louder than it is now. A plain `* pat` would make the
+			-- room quieter at every level, which is a remix nobody
+			-- asked for; this reaches full by the pointing step, so
+			-- every level a player can be at sounds as it did and only
+			-- the empty room changes. The duck below stays as it is.
+			local up = math.min(1, pat / 0.25)
 			local x = (kick * 0.9 + hat * 0.35 + bass * 0.45 + d * 0.35) *
-					pat + drone * (1 - 0.35 * pat) + thunk * 0.8 +
+					pat + drone * up * (1 - 0.35 * pat) + thunk * 0.8 +
 					beep * 0.22
 			x = x / (1 + math.abs(x))
 			buf:WriteShort(math.floor(x * 20000))

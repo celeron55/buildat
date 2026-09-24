@@ -3747,7 +3747,8 @@ function handle_synth_update(event_type, event_data)
 	-- the desk further, and connecting to a server furthest -- the one
 	-- state with a duration and no certainty, where a beat underneath
 	-- makes waiting feel like something happening.
-	local want = 0.05
+	-- Nought at rest: an empty room is quiet ([ROOM_SOUND], 2026-09-24)
+	local want = 0
 	if pointed_orb and pointed_orb > 0 then want = 0.25 end
 	if terminal_open then want = 0.5 end
 	if connecting then want = 0.8 end
