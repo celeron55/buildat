@@ -117,17 +117,23 @@ local launch_ui_interface = nil
 -- launch UI's module is its own and may hold whatever it likes.
 local LAUNCH_INTERFACE = {entered_game = true, leave_game = true,
 	in_game = true, show_dead_server = true}
+-- **Merged, not replaced**, because a launch UI may be a composition
+-- ([TWO_AUDIENCES]: the menu over the room). The composing extension's
+-- own module usually has none of these -- it boots two others and that
+-- is all -- so a replace would wipe what the composed ones gave and
+-- leave the same dead client this was written to fix. Last one with a
+-- function wins, which is the menu over the room: the menu is what a
+-- game is launched from, so the menu is what it comes back to.
 buildat.safe.provide_launch_interface = function(t)
 	if type(t) ~= "table" then
 		return false, "provide_launch_interface(t): a table"
 	end
-	local out = {}
+	launch_ui_interface = launch_ui_interface or {}
 	for name in pairs(LAUNCH_INTERFACE) do
 		if type(t[name]) == "function" then
-			out[name] = t[name]
+			launch_ui_interface[name] = t[name]
 		end
 	end
-	launch_ui_interface = out
 	return true
 end
 
@@ -487,6 +493,11 @@ buildat.safe.compose_launch_ui = function(name, action)
 		return false, "compose_launch_ui: " .. name .. " has no boot()"
 	end
 	m.boot(action)
+	-- A composed launch UI answers the client the same way a booted one
+	-- does ([MENU_CONTEXT]): leaving a game, a dead server, whether a
+	-- game is running. Without this a game launched from the menu of a
+	-- composition could not be left.
+	buildat.safe.provide_launch_interface(m)
 	return true
 end
 

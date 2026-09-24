@@ -53,6 +53,34 @@ if [ "$roomkeys" -gt 1 ]; then
 	echo "FAIL: the room answered $roomkeys keys while it was a backdrop"
 	exit 1
 fi
+# **And a game launched from the composition can be left** -- which is
+# not free, and nearly was not there: the composing extension's own
+# module has none of the three the client asks a launcher for (it boots
+# two others and that is all), so handing it over as the interface
+# would wipe what the menu gave and leave a client with no server and
+# no menu. They merge, last function wins, and the menu over the room
+# is what a game comes back to (2026-09-24).
+{ echo "delay 25000"; echo "event scan 8 a"; echo "delay 1000"
+	# The row at the bottom of vanilla's menu panel, at this window size
+	echo "mouse_pos 639 608"; echo "delay 300"; echo "mouse_click left"
+	echo "delay 6000"; echo "event scan 8 b"
+	echo "delay 2000"; echo "quit"; } > "$out/cmds_back.txt"
+rm -f "$out/back.log" "$out/back_server.log"
+bin/buildat -o launch_ui=launch_menu_attract -a game/vanilla/contentdb \
+	-D ../user -w 1280x720 -l 3 -L "$out/back.log" \
+	-c @"$out/cmds_back.txt" > /dev/null 2>&1
+grid=$(grep -ac "back to the grid" "$out/back.log")
+lost=$(grep -ac "leave: no launcher to go back to" "$out/back.log")
+alive=$(grep -ac "scan b: ui" "$out/back.log")
+echo "a game launched from the composition: back to the grid $grid times," \
+		"$alive elements drawn after it"
+if [ "$grid" -lt 1 ] || [ "$lost" -gt 0 ] || [ "$alive" -lt 10 ]; then
+	echo "FAIL: a game launched from the composition cannot be left"
+	grep -a "leave:" "$out/back.log" | head -2
+	exit 1
+fi
+
 # vim: set noet ts=4 sw=4:
-echo "PASS: the menu takes the input and the room is the view behind it"
+echo "PASS: the menu takes the input, the room is the view behind it," \
+		"and a game can be left"
 exit 0
