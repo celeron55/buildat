@@ -3,13 +3,15 @@ launch_world
 
 An alternative launch UX: the room you start in. The client starts in a
 small hand-authored room and walks out of it into a game -- the games are
-warm orbs wedged in niches, the servers are a patch bay, every readout is
-a real light source and nothing is on a HUD. An *alternative* to
-launch_menu, never a replacement, and its point is the opposite of a
+warm orbs wedged in niches, the servers are mirrors on the floor, every
+readout is a real light source and nothing is on a HUD. An *alternative*
+to launch_menu, never a replacement, and its point is the opposite of a
 feature tour: a showcase of how much a buildat program can leave out.
-There is no server, no mapgen, no streaming, no sky, no day or night, no
-entities and no persistence -- the room is generated from a table every
-boot and nothing is saved.
+There is no server, no mapgen, no streaming, no sky, no day or night and
+no entities -- the room is generated from a table every boot. The one
+thing it does keep is what the player changed: the voxels they placed,
+the spheres they moved, the field of view and the sound levels, as a
+diff against the generated room.
 
 The design, the reference frame it is built against and the reasoning
 behind every number here are in doc/plan/launcher_plan.md under
@@ -29,6 +31,12 @@ sheet of the room across the light from above and the tonemap's white
 point, with the probe box standing in it:
 
     extensions/launch_world/probe_sheet.sh
+
+and the two options rounds that are waiting on somebody's eye -- the
+orb's mark, and the floor's value and finish:
+
+    extensions/launch_world/mark_sheet.sh
+    extensions/launch_world/floor_sheet.sh
 
 **There is no server.** The room is an extension rather than a game
 because the room *is* the launcher: starting a game is ctx.launch on the
@@ -92,7 +100,11 @@ Both:
 Type "set" and press Return to sit at the terminal -- or, in FPS mode,
 press Return anywhere. At the desk, up and down walk the rows and left
 and right change them: the client's own preferences, then the room's
-palette and reflection probe. Escape stands up.
+own -- the palette, the reflection probe, the field of view, and the
+levels of the orbs and of the bed under them, which is where the sound
+is meant to be tuned by ear. The room's rows are kept in its own save,
+not in the client's preferences, because they are its taste rather than
+the client's. Escape stands up.
 
 Environment
 -----------
@@ -101,7 +113,8 @@ Environment
                              append, comma separated. "Tonemap" by
                              default; "" for none
     BUILDAT_LAUNCH_BIAS      the tonemap's exposure bias (1.05)
-    BUILDAT_LAUNCH_WHITE     its white point (1.8)
+    BUILDAT_LAUNCH_WHITE     its white point -- where the curve reaches
+                             255
     BUILDAT_LAUNCH_NOHDR     go back to LDR rendering. HDR is on: a
                              renderer that clips every radiance at 1.0
                              before the tonemap measures a clamp rather
@@ -109,25 +122,51 @@ Environment
     BUILDAT_LAUNCH_SUN       add a directional light
     BUILDAT_LAUNCH_SKY       how bright the cold light from above is
                              (1.6), and BUILDAT_LAUNCH_ORB the orbs
-    BUILDAT_LAUNCH_WHITE     the tonemap's white point (1.15) -- where
-                             the curve reaches 255, and what held the
-                             floor at 165 however much light was in the
-                             room
+    BUILDAT_LAUNCH_NOSHADOW  the lights without their shadow maps
     BUILDAT_LAUNCH_PROBEBOX  stand a probe box of known albedos in the
                              room: 90, 50, 18 and 4 per cent grey and
                              the orb's own orange
-    BUILDAT_LAUNCH_PROBEF    a float16 reflection probe, which loses the
-                             frame's red and green under HDR -- see
-                             [PBR_HDR]
+    BUILDAT_LAUNCH_PROBE8    an eight-bit reflection probe instead of
+                             the float16 one, which is what the two were
+                             compared with ([PBR_HDR])
+    BUILDAT_LAUNCH_PROBEMIPS leave the probe's mip chain on. The
+                             eight-bit probe then blurs its rough
+                             surfaces correctly; the float16 one takes
+                             every reflection black, which is what says
+                             the chain is a format question and not a
+                             missing call
     BUILDAT_LAUNCH_NORENDERPROBE
                              bind the probe's cube map without ever
                              rendering into it, which is how the two
                              halves of that fault were told apart
+    BUILDAT_LAUNCH_MARK      A or B, the orb's mark: the icon in the
+                             diffuse, or one bit in the roughness.
+                             mark_sheet.sh draws both
+    BUILDAT_LAUNCH_FLOOR_VALUE
+                             scale the floor's light squares. They are
+                             the brightest surface in the room and they
+                             clip; floor_sheet.sh draws four values
+    BUILDAT_LAUNCH_FLOOR_GLOSS
+                             their roughness (0.07), lower being
+                             glossier
+    BUILDAT_LAUNCH_STAND     where the player stands, in metres from the
+                             room's middle (8). Read together with the
+                             field of view and nothing else
+    BUILDAT_LAUNCH_POCKETS   hold the wall to fewer pockets than it
+                             could take, which is how the spill onto the
+                             floor is looked at on a tree with nine
+                             games
+    BUILDAT_LAUNCH_SAVES     how many saves stand on the floor (12). The
+                             rest are still the prompt's to find, and
+                             this is how that path is driven
     BUILDAT_LAUNCH_ATTRACT   seconds of quiet before the attract mode
                              starts (14)
     BUILDAT_LAUNCH_NOPBR     put the stock non-PBR techniques on the
                              primitives; with HDR on, this is what
                              lights when the PBR ones do not
+    BUILDAT_SERVERLIST_URL   the serverlist extension's list, for a
+                             check's own rather than the one this client
+                             knows
 
 What is where
 -------------
@@ -137,8 +176,8 @@ What is where
     room.lua                 the room: voxel_at() over a table of
                              numbers, at 45 cm a voxel. The floor's
                              checkerboard, the mass the room is cut out
-                             of, the wall's slabs and insets and the six
-                             pockets all come out of it, and the build
+                             of, the wall's slabs and insets, the three other
+                             walls and the pockets all come out of it, and the build
                              and the dissolve's restore both read it --
                              so the room is described once. Run it with
                              lua for its own check
@@ -175,12 +214,24 @@ line is a thing that has been seen to fail:
     the terminal changes a setting         -- and changes it back
     the arrows browse the room's own grid
     a second client reads the save back    -- voxels and a moved sphere
+    a save opens by name                   -- the floor's, and one past
+                                              the floor's cap
+    ContentDB opens from the room          -- against a local mirror
+    the orbs are sized within their kind   -- and none wears an empty
+                                              mark
+    a placed voxel wins over the orb       -- and an orb is pointed at
+                                              anywhere up its column
+    a sphere put down rests on the floor
+    the floor's made-up servers say so     -- on a client with no
+                                              history of its own
+    every launch UI this tree ships boots  -- extensions/__menu/check.sh
 
 What the player changed is a diff against the generated room, in
-user/launch_world/room.txt: a voxel they placed is "x,y,z" on a line and
-a sphere they moved is "@<name> x y z", by name rather than by index,
-since installing a game changes the order of the list. A file a person
-can read and delete.
+user/launch_world/room.txt: a voxel they placed is "x,y,z" on a line, a
+sphere they moved is "@<name> x y z" -- by name rather than by index,
+since installing a game changes the order of the list -- and the room's
+own settings are "!fov <degrees>" and "!sound <orbs> <bed>". A file a
+person can read and delete.
 
 Two of them exist because a feature drew nothing for a day while its own
 log line said otherwise, and two more were passing on the HUD's text
@@ -188,15 +239,25 @@ rather than on what they named. The comparisons take the frame above the
 bottom strip for that reason, and the runner fails on a crash rather
 than reading the pictures the run before left behind.
 
-Known, and not this room's to fix
+What was known and is not any more
 ---------------------------------
 
-**A float16 cube map on a zone costs the frame its red and green with
-HDR rendering on.** A pixel that reads 60 71 89 in LDR reads 0 0 111,
-and one keypress separates the readings: F5 takes the probe off the zone
-and the same HDR frame is correct. The same cube map in eight bits is
-correct too, which is why the probe is RGBA8 here -- at the cost of an
-emissive orb clipping where it is reflected. See [PBR_HDR].
+**A float16 cube map on a zone costing the frame its red and green with
+HDR rendering on** was [PBR_HDR], and it is fixed: a render-target cube
+is given the whole mip chain and only level 0 is ever written, so every
+sample above it read memory nobody wrote -- a wrong colour in eight
+bits and a NaN in float16, which the shader then added to the frame.
+The probe asks for one level (`SetNumLevels(1)`, a method: Urho3D's
+`levels` is read-only and the property write this file once described
+went nowhere) and the voxel shader refuses a sample that is not a
+number. The probe is float16 again, so a reflection carries radiance
+instead of clipping.
+
+**What one level costs**: a rough surface reflects as sharply as a
+mirror. The chain is not a missing call -- Urho3D regenerates a render
+target's levels by itself -- it is the format: this driver does not
+generate them for a float16 cube. `BUILDAT_LAUNCH_PROBEMIPS=1` is how
+that gets measured again.
 
 **Urho3D's stock PBR techniques do light under HDR.** That was this
 room's own earlier reading and it was wrong: what was dark was the
