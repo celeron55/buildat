@@ -307,5 +307,48 @@ function M.boot(launch_action)
 	end
 end
 
+-- **What the client asks a launcher for** ([MENU_CONTEXT]): a game's
+-- own menu offers "back to the launcher" and calls `buildat.leave()`,
+-- which comes here. This grid had none of these, so that call found
+-- nothing and fell through to a plain disconnect -- the client sat with
+-- no server and no menu, which is what [FIRST_RUN] had been failing on
+-- since ContentDB's install was driven (2026-09-24).
+--
+-- The screens a game is started through are launch_menu's, pushed onto
+-- the same stack this grid is on, so leaving is the stack coming back
+-- down to the grid -- as launch_menu's own leave_game does.
+local in_a_game = false
+
+function M.entered_game()
+	in_a_game = true
+end
+
+function M.in_game()
+	return in_a_game
+end
+
+function M.leave_game()
+	if not in_a_game and not api.local_server_running() then
+		return false
+	end
+	-- **The stack comes down before the sweep, not after it.** The
+	-- screens over the grid are the game's own -- vanilla's menu pushes
+	-- onto this same stack -- and `leave_to_menu` takes the game's
+	-- elements with it, so popping afterwards is popping things that
+	-- are already gone ("UIElement ... was removed", 2026-09-24).
+	if uistack.main.stack[1] then
+		pcall(function()
+			uistack.main:pop_to(uistack.main.stack[1], true)
+		end)
+	end
+	-- The connection, the server and the sandbox's leavings
+	api.leave_to_menu()
+	in_a_game = false
+	magic.input:SetMouseVisible(true, "back to the launcher")
+	M.boot()
+	log:info("back to the grid")
+	return true
+end
+
 return M
 -- vim: set noet ts=4 sw=4:
