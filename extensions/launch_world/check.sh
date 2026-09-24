@@ -181,6 +181,29 @@ fi
 # game, the drive leaves that block out and the assertions below say so.
 games_installed=$(ls "$here/user/luanti/games" 2>/dev/null | wc -l)
 
+# **The modules are compiled before any drive starts.** A server whose
+# rccpp cache is cold spends seven seconds compiling `main`, and in this
+# check -- and only in this check -- that compile is killed: the raw
+# wait status is 15, a SIGTERM to its process group, and no client logs
+# sending one. The drive then reports "ContentDB does not open" for a
+# server that never came up. That fault is its own item; warming the
+# cache here keeps it from being reported as something else.
+if [ ! -f "$here/cache/rccpp_build/main.so" ] ||
+		[ "$here/games/vanilla/main/main.cpp" -nt \
+		"$here/cache/rccpp_build/main.so" ]; then
+	echo "warming the module cache (a cold compile is seven seconds)"
+	BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=zz_warm \
+		bin/buildat_server -m ../games/vanilla -D ../user -P 31877 -l 3 \
+		> "$out/warm.log" 2>&1 &
+	warm=$!
+	for i in $(seq 1 120); do
+		grep -aq "STATUS Listening\|Running world" "$out/warm.log" && break
+		sleep 1
+	done
+	kill -9 "$warm" 2>/dev/null; wait "$warm" 2>/dev/null
+	rm -rf "$here/user/games/vanilla/saves/zz_warm"
+fi
+
 # **wait_log_any, not wait_log**: the room says it is humming once, at
 # the end of a boot that takes eleven seconds here, and the sequence
 # starts before that -- but by twenty milliseconds either way. A wait

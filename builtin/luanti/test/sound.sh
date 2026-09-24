@@ -1,10 +1,9 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# [NO_SOUND]: **does a sound the server asks for reach the speakers**.
-# Nothing in this tree could hear, so a room that placed no listener
-# played into nowhere for as long as it took somebody to notice, and
-# the question "is devtest silent too" could only be answered by ear.
+# [NO_SOUND] / [ROOM_SOUND]: **does a sound the server asks for reach
+# the mixer**. Nothing in this tree could hear, so a room that placed no
+# listener played into nowhere until somebody noticed.
 #
 #   builtin/luanti/test/sound.sh
 #
@@ -13,26 +12,28 @@
 # packet -- digging and placing are played client-side by official
 # Luanti and this tree does not implement them at all.
 #
-# **The measurement is the client's own PipeWire stream**, not the
-# desk's speakers: pw-record on the node buildat writes into, and what
-# is asserted is that the samples are not all zero. Nothing is played
-# out loud that was not already going to be.
+# **No device is opened at all** (the user's rule, 2026-09-24: no
+# default script may put audio on the system's actual hardware; only
+# when asked, and only for that run). SDL_AUDIODRIVER=disk with
+# SDL_DISKAUDIOFILE writes the mix to a file instead -- SDL's disk
+# driver is compiled in here -- so there is nothing to leak to the
+# speakers, nothing to race another check for the sink, and nothing
+# that needs PipeWire running, which is what also makes this work in
+# the packaging container.
 #
-# **-o sound_mute=0**: a -c run is muted on purpose (app.cpp:1028,
-# "a driven run playing a game's music through the developer's
-# speakers"), so a check that wants to hear has to say so.
+# **SDL_DISKAUDIODELAY stays unset**: at 0 the mixer runs flat out and
+# writes 1.4 GB in nine seconds; unset, it writes in real time.
+#
+# **-o sound_mute=0**: a -c run is muted on purpose (app.cpp:1028, "a
+# driven run playing a game's music through the developer's speakers"),
+# and with the disk driver there are no speakers to play through.
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-. "$me/lib.sh" 2>/dev/null || true
 out="$here/local/sound"; mkdir -p "$out"
 save=buildat_test_sound
 port=31998
 cd "$here/Build"
-command -v pw-record >/dev/null || {
-	echo "SKIP: no pw-record; this measures the client's own audio stream" >&2
-	exit 77; }
-command -v pw-dump >/dev/null || { echo "SKIP: no pw-dump" >&2; exit 77; }
 [ -d "$here/user/luanti/games/devtest" ] || {
 	echo "SKIP: devtest is not installed" >&2; exit 77; }
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
@@ -52,44 +53,44 @@ if ! grep -aq "Running world" "$out/srv.log"; then
 	echo "SKIP: the world did not come up"; kill -9 "$srv" 2>/dev/null; exit 77
 fi
 { echo "delay 90000"; echo "quit"; } > "$out/cmds.txt"
-timeout 200 bin/buildat -s localhost:"$port" -D ../user -o sound_mute=0 \
+rm -f "$out/mix.raw"
+SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE="$out/mix.raw" \
+	timeout 200 bin/buildat -s localhost:"$port" -D ../user -o sound_mute=0 \
 	-w 640x400 -l 3 -L "$out/cli.log" -c @"$out/cmds.txt" > /dev/null 2>&1 &
 cli=$!
 # The join is a minute of world loading away; the fixture then asks
-# every four seconds, so the capture only has to land inside that
+# every four seconds, so the measurement only has to land inside that
 for i in $(seq 1 150); do
 	grep -aq "sound check: three asked" "$out/srv.log" && break
 	sleep 1
 done
-node=$(pw-dump 2>/dev/null | python3 -c '
-import json, sys
-for o in json.load(sys.stdin):
-    p = o.get("info", {}).get("props", {})
-    if p.get("media.class") == "Stream/Output/Audio" and \
-            "buildat" in str(p.get("node.name", "")).lower():
-        print(o["id"]); break')
-peak=0
-if [ -n "$node" ]; then
-	timeout 12 pw-record --target "$node" "$out/cap.wav" >/dev/null 2>&1
-	peak=$(python3 - "$out/cap.wav" <<'PY'
-import sys, wave, array
+sleep 6
+# **The tail of the mix, not the whole of it**: the client's first
+# seconds are silent while it loads, and averaging those in is how a
+# level gets read as nothing ([ROOM_SOUND]). A peak needs no rate or
+# channel count to be right -- the file is raw 16-bit.
+peak=$(python3 - "$out/mix.raw" <<'PYEOF'
+import sys, array, os
+WINDOW = 4 * 1024 * 1024
 try:
-    w = wave.open(sys.argv[1])
-    a = array.array("h")
-    a.frombytes(w.readframes(w.getnframes()))
+    n = os.path.getsize(sys.argv[1])
+    take = min(n, WINDOW) // 2 * 2
+    with open(sys.argv[1], "rb") as f:
+        f.seek(n - take)
+        a = array.array("h")
+        a.frombytes(f.read(take))
     print(max(max(a), -min(a)) if a else 0)
 except Exception:
     print(0)
-PY
+PYEOF
 )
-fi
 kill -9 "$cli" 2>/dev/null; wait "$cli" 2>/dev/null
 kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
 rm -rf "$here/user/games/vanilla/saves/$save"
 asked=$(grep -ac "sound check: three asked" "$out/srv.log")
-echo "the server asked $asked times; the client's own stream peaked at $peak"
-if [ -z "$node" ]; then
-	echo "SKIP: the client opened no audio stream to measure"
+echo "the server asked $asked times; the mix peaked at ${peak:-0}"
+if [ ! -s "$out/mix.raw" ]; then
+	echo "SKIP: the client wrote no mix; this SDL has no disk driver"
 	exit 77
 fi
 if [ "$asked" -lt 1 ]; then
@@ -100,4 +101,4 @@ if [ "${peak:-0}" -lt 200 ]; then
 	echo "FAIL: a sound the server asked for came out as silence"
 	exit 1
 fi
-echo "PASS: a sound the server asks for reaches the client's audio stream"
+echo "PASS: a sound the server asks for reaches the client's mixer"
