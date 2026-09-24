@@ -411,8 +411,24 @@ function Safe.SubscribeToEvent(x, y, z)
 	return global_callback_name
 end
 
+-- **What is subscribed by name unsubscribes by the same name.**
+-- SubscribeToEvent stores the handler under a generated global name and
+-- hands that name back, so an unsubscribe given what Urho3D's own API
+-- takes -- a function, or the name of one in the caller's environment --
+-- matched nothing and the handler went on firing over a screen it had
+-- already removed (2026-09-24: the console's Escape handler, after the
+-- console was closed).
 function Safe.UnsubscribeFromEvent(sub_event_type, cb_name)
 	log:debug("Safe.UnsubscribeFromEvent("..dump(sub_event_type)..", "..dump(cb_name)..")")
+	local cb = cb_name
+	if type(cb) == "string" then
+		local caller_environment = getfenv(2)
+		cb = type(caller_environment) == "table" and
+				caller_environment[cb_name] or nil
+	end
+	if type(cb) == "function" then
+		cb_name = sandbox_callback_to_global_function_name[cb] or cb_name
+	end
 	remove_global_event_handler(sub_event_type, cb_name)
 end
 

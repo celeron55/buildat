@@ -122,6 +122,14 @@ struct CState: public State
 	// ([BOX_PLAYTEST_2] 12)
 	void connect_start(const ss_ &address)
 	{
+		// **A failed connect leaves nothing connected**, so it is not a
+		// state to stay in: the result sits at -1 after the caller has
+		// read it, and every later attempt was refused as "one is
+		// already running" -- so a launcher could start nothing at all
+		// after one server that was not there (2026-09-24, the room
+		// launching a game after a failed connect to localhost).
+		if(m_connect_result.load() < 0 && !m_connected)
+			reset();
 		if(m_connect_result.load() != 0 || m_connect_thread.joinable()){
 			log_w(MODULE, "connect_start(): one is already running");
 			return;
