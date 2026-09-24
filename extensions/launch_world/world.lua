@@ -944,12 +944,14 @@ last_mark_ink = 0
 local ONE_BIT = {AT = 0.5, FACE_YAW = 270, INK = 0.16, T_LO = 0.02,
 		T_HI = 0.60, T_STEP = 0.01,
 		-- **What survives under the mark on a glowing orb**
-		-- ([GLOW_MARK]), stated as the emissive fraction and not as a
-		-- brightness: the emissive is multiplied by 26, so a masked pixel
-		-- only comes out of saturation below about 0.04 and a knob scaled
-		-- 0 to 1 would invite turning the mark off. 0 is a hole in the
-		-- light.
-		CUT = tonumber(env("BUILDAT_LAUNCH_GLOW_CUT")) or 0,
+		-- ([GLOW_MARK], picked off the sheet 2026-09-24), stated as the
+		-- emissive fraction and not as a brightness: the emissive is
+		-- multiplied by 26, so a masked pixel only comes out of
+		-- saturation below about 1/26. 0.04 is the top of that band --
+		-- the faintest mark that still reads, and a darker orange
+		-- rather than a hole in the light. It moves with the
+		-- multiplier: one over it.
+		CUT = tonumber(env("BUILDAT_LAUNCH_GLOW_CUT")) or 0.04,
 		-- The figure: the mask itself, or its boundary alone
 		-- (BUILDAT_LAUNCH_MARK_FIGURE=outline)
 		FIG = env("BUILDAT_LAUNCH_MARK_FIGURE")}
