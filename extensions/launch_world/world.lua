@@ -3418,11 +3418,22 @@ function label_place()
 	if not on then
 		return
 	end
+	-- **Bounded to the window** (user, 2026-09-25): a name is wider
+	-- than the orb it is over -- much wider, spaced out as it is -- so
+	-- an orb near an edge had its last letters off the screen. Centred
+	-- alignment makes the offsets from the middle, so the limit is half
+	-- the window less half the text and a margin.
 	local lw, lh = buildat.logical_size()
-	local x = math.floor((sp.x - 0.5) * lw)
-	local y = math.floor((sp.y - 0.5) * lh)
-	name_text:SetPosition(x, y - 30)
-	desc_text:SetPosition(x, y + 6)
+	local function bounded(e, x, y)
+		local mx = math.max(0, lw / 2 - e.width / 2 - 8)
+		local my = math.max(0, lh / 2 - e.height / 2 - 8)
+		e:SetPosition(math.floor(math.max(-mx, math.min(mx, x))),
+				math.floor(math.max(-my, math.min(my, y))))
+	end
+	local x = (sp.x - 0.5) * lw
+	local y = (sp.y - 0.5) * lh
+	bounded(name_text, x, y - 30)
+	bounded(desc_text, x, y + 6)
 end
 
 pointed_orb = 0
