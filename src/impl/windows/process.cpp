@@ -215,6 +215,22 @@ void terminate(Handle &h)
 	kill_force(h);
 }
 
+// **Reap it if it has already gone** ([QUIT_STALL]): there are no
+// zombies to reap here -- the handle itself signals when the process
+// exits -- so this is is_running()'s answer with the handle cleared,
+// which is what a caller stopping a server a frame at a time wants.
+bool reap(Handle &h)
+{
+	if(!h.valid())
+		return true;
+	if(WaitForSingleObject((HANDLE)h.impl, 0) == WAIT_OBJECT_0){
+		CloseHandle((HANDLE)h.impl);
+		h.impl = 0;
+		return true;
+	}
+	return false;
+}
+
 bool is_running(const Handle &h)
 {
 	if(!h.valid())

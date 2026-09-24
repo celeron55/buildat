@@ -342,9 +342,13 @@ fi
 	echo "delay 600"
 	echo "keypress Escape"
 	# The cubes land in 0.9 s, but the voxels coming back have to be
-	# remeshed and relit before the picture is the picture it was
-	echo "wait_log_any 90000 the room hums"
-	echo "delay 1200"
+	# remeshed and relit before the picture is the picture it was.
+	# **A wait, not a wait_log**: this one is in the middle of a drive,
+	# and the room says nothing when a dissolve has finished coming
+	# back -- waiting for a line it printed at boot returns at once and
+	# shoots the frame mid-rebuild, which reads as "the dissolve does
+	# not come back" (2026-09-24, my own doing).
+	echo "delay 5000"
 	echo "screenshot $out/dissolve-closed-again.png"
 	echo "delay 600"
 	# The typing path: three letters fuzzy-match a name, Enter takes it

@@ -691,6 +691,54 @@ static void force_kill_local_server()
 }
 
 // Quit path: SIGTERM, wait 10s, SIGKILL. No dialog (window is closing).
+// **Stopping the server is a wait, and a wait on the frame is a freeze**
+// ([QUIT_STALL], 2026-09-24): terminate() sends SIGTERM and then sleeps
+// up to ten seconds waiting to reap, and stop_local_server() then probes
+// the port for two more -- twelve seconds of a main thread that is
+// reached from a Lua UI handler, so the window is dead to the
+// compositor while it sleeps and the watchdog says "no frame for 2 s".
+//
+// The Lua side asks for this instead: SIGTERM now, and the reaping and
+// the force-kill happen a frame at a time in on_update(). The blocking
+// one below is kept for the quit path, where there are no more frames
+// to do it in.
+static bool g_stopping_server = false;
+static int64_t g_stopping_since_us = 0;
+
+static void begin_stop_local_server()
+{
+	adopt_pidfile();
+	if(!g_local_server.valid())
+		return;
+	log_i(MODULE, "Stopping local server (across frames)");
+	interface::process::request_terminate(g_local_server);
+	g_stopping_server = true;
+	g_stopping_since_us = get_timeofday_us();
+}
+
+// One frame's worth of that wait; returns true while it is still going
+static bool step_stop_local_server()
+{
+	if(!g_stopping_server)
+		return false;
+	if(interface::process::reap(g_local_server) ||
+			!interface::process::is_running(g_local_server)){
+		g_stopping_server = false;
+		g_local_server.impl = 0;
+		clear_pidfile();
+		log_i(MODULE, "Local server stopped");
+		return false;
+	}
+	if(get_timeofday_us() - g_stopping_since_us > 10000000){
+		log_w(MODULE, "Local server did not stop in 10 s; killing");
+		interface::process::kill_force(g_local_server);
+		g_stopping_server = false;
+		clear_pidfile();
+		return false;
+	}
+	return true;
+}
+
 static void stop_local_server()
 {
 	adopt_pidfile();
@@ -2077,6 +2125,9 @@ struct CApp: public App, public magic::Application
 		// worldgen, and the stack says what this thread was doing;
 		// [BOX_PLAYTEST_2] 12)
 		interface::debug::watchdog_alive(g_watchdog_seconds);
+		// A local server on its way out is reaped here rather than in
+		// whoever asked for it to go ([QUIT_STALL])
+		step_stop_local_server();
 		// Before anything reads it: a scripted mouse_move's delta lands
 		// at the top of the frame after the one that asked for it
 		client::command_seq::apply_pending_mouse_move(
@@ -2866,7 +2917,9 @@ struct CApp: public App, public magic::Application
 	// stop_local_server()
 	static int l_stop_local_server(lua_State *L)
 	{
-		stop_local_server();
+		// Across frames ([QUIT_STALL]): the blocking one froze the
+		// window for up to twelve seconds when a UI handler called it
+		begin_stop_local_server();
 		return 0;
 	}
 
@@ -3278,10 +3331,14 @@ struct CApp: public App, public magic::Application
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 		log_i(MODULE, "leave_to_menu()");
-		// The quit path's stop, which terminates, waits for the port and
-		// reaps the child (request_stop alone leaves a zombie that reads
-		// as a running server); a menu-only server is gone in a second
-		stop_local_server();
+		// **Across frames** ([QUIT_STALL], 2026-09-24): this is called
+		// from a Lua UI handler -- it is what "quitting a game" runs --
+		// and the blocking stop sleeps up to twelve seconds inside it,
+		// with the window dead to the compositor for all of them. The
+		// SIGTERM goes now and on_update() reaps the child and
+		// force-kills it if it will not go; a menu-only server is gone
+		// in a second anyway.
+		begin_stop_local_server();
 		self->m_state->reset();
 		self->m_lost_connection_us = 0;
 		self->forget_game_ui();

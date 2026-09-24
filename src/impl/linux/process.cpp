@@ -145,6 +145,13 @@ bool is_running(const Handle &h)
 	return errno != ESRCH;
 }
 
+bool reap(Handle &h)
+{
+	if(!h.valid())
+		return true;
+	return reap_dead(h);
+}
+
 void terminate(Handle &h)
 {
 	if(!h.valid())

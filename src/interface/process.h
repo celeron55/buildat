@@ -38,6 +38,13 @@ namespace interface
 		// request_terminate, wait up to 10s, then kill_force.
 		void terminate(Handle &h);
 		bool is_running(const Handle &h);
+		// **Reap it if it has already gone**, without waiting for it:
+		// true when the handle is now invalid, which is what a caller
+		// stopping a server a frame at a time asks each frame
+		// ([QUIT_STALL]). A child that has exited but not been reaped
+		// still answers kill(pid, 0), so is_running() alone reads a
+		// zombie as a running server.
+		bool reap(Handle &h);
 	}
 }
 // vim: set noet ts=4 sw=4:
