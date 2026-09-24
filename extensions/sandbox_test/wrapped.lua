@@ -54,4 +54,51 @@ do
 	log:info("wrapped: " .. n .. " elements under <" .. root:GetName() .. ">")
 end
 
+-- DebugRenderer (2026-09-25): a scene of this file's own, the component
+-- on it, and the shapes a game draws with -- what is asserted is that
+-- each call reaches the engine and comes back, the drawing itself being
+-- a frame's business and nobody's to read here
+do
+	local scene = magic.Scene()
+	scene:CreateComponent("Octree")
+	local dbg = scene:CreateComponent("DebugRenderer")
+	assert(dbg, "the scene takes a DebugRenderer")
+	dbg:SetLineAntiAlias(true)
+	local a, b = magic.Vector3(0, 0, 0), magic.Vector3(1, 2, 3)
+	local white = magic.Color(1, 1, 1, 1)
+	dbg:AddLine(a, b, white)
+	dbg:AddTriangle(a, b, magic.Vector3(0, 1, 0), white, false)
+	dbg:AddCross(b, 0.5, white)
+	dbg:AddCircle(a, magic.Vector3(0, 1, 0), 2.0, white)
+	dbg:AddSphere(magic.Sphere(b, 1.5), white)
+	dbg:AddBoundingBox(magic.BoundingBox(a, b), white)
+	dbg:AddNode(scene:CreateChild("marked"), 1.0, true)
+	log:info("wrapped: the debug renderer took every shape")
+end
+
+-- Cursor:DefineShape (2026-09-25): a game's own cursor art, which was
+-- off the whitelist only because Image was. The cursor made here is
+-- never given to the UI, so nothing on the screen changes.
+do
+	-- **Out of the resource cache, not built here**: an Image the
+	-- sandbox made is owned by Lua, and DefineShape hands it to a
+	-- SharedPtr that frees it under the collector -- a segfault in
+	-- RefCounted (2026-09-25). A game's cursor is a file it ships.
+	local img = magic.cache:GetResource("Image", "__menu/res/icon_local.png")
+	assert(img, "the image is in the cache")
+	local c = magic.ui.root:CreateChild("Cursor")
+	c:DefineShape("Normal", img, magic.IntRect(0, 0, 16, 16),
+			magic.IntVector2(0, 0))
+	-- And an image the sandbox made is refused rather than crashing
+	local own = magic.Image:new()
+	assert(own:SetSize(4, 4, 4), "a four by four image")
+	local ok = pcall(function()
+		c:DefineShape("Normal", own, magic.IntRect(0, 0, 4, 4),
+				magic.IntVector2(0, 0))
+	end)
+	assert(not ok, "an image built in the sandbox is refused")
+	c:Remove()
+	log:info("wrapped: a cursor shape came off a game's own image")
+end
+
 return true

@@ -1388,8 +1388,53 @@ function M.define(dst, util)
 		},
 	})
 
+	-- **A game draws its own debug geometry** ([URHO_SWEEP]): lines, a
+	-- box round what is pointed at, a sphere where a ray landed. It is
+	-- a component on the scene -- scene:CreateComponent("DebugRenderer")
+	-- -- and what it is given each frame is drawn by
+	-- renderer:DrawDebugGeometry() and then forgotten, so nothing here
+	-- outlives a frame. It draws and reaches nothing.
+	util.wc("DebugRenderer", {
+		inherited_from_by_wrapper = dst.Component,
+		instance = {
+			-- Which camera it is drawn for; the renderer does this
+			-- itself for the viewport it draws, and a game that draws
+			-- into its own viewport says it here
+			SetView = util.self_function("SetView", {},
+					{"DebugRenderer", "Camera"}),
+			SetLineAntiAlias = util.self_function("SetLineAntiAlias", {},
+					{"DebugRenderer", "boolean"}),
+			AddLine = util.self_function("AddLine", {},
+					{"DebugRenderer", "Vector3", "Vector3", "Color",
+					{"boolean", "__nil"}}),
+			AddTriangle = util.self_function("AddTriangle", {},
+					{"DebugRenderer", "Vector3", "Vector3", "Vector3",
+					"Color", {"boolean", "__nil"}}),
+			AddNode = util.self_function("AddNode", {},
+					{"DebugRenderer", "Node", {"number", "__nil"},
+					{"boolean", "__nil"}}),
+			AddBoundingBox = util.self_function("AddBoundingBox", {},
+					{"DebugRenderer", "BoundingBox", "Color",
+					{"boolean", "__nil"}, {"boolean", "__nil"}}),
+			AddSphere = util.self_function("AddSphere", {},
+					{"DebugRenderer", "Sphere", "Color",
+					{"boolean", "__nil"}}),
+			AddCircle = util.self_function("AddCircle", {},
+					{"DebugRenderer", "Vector3", "Vector3", "number",
+					"Color", {"number", "__nil"}, {"boolean", "__nil"}}),
+			AddCross = util.self_function("AddCross", {},
+					{"DebugRenderer", "Vector3", "number", "Color",
+					{"boolean", "__nil"}}),
+		},
+	})
+
 	util.wc("Renderer", {
 		instance = {
+			-- What the scene's DebugRenderer was given this frame, drawn
+			-- ([URHO_SWEEP]): a game calls this from its own post-render
+			-- handler, the engine does it for the debug HUD it owns
+			DrawDebugGeometry = util.self_function("DrawDebugGeometry", {},
+					{"Renderer", {"boolean", "__nil"}}),
 			SetViewport = util.wrap_function({"Renderer", "number", "Viewport"},
 				function(self, index, viewport)
 					self:SetViewport(index, viewport)
@@ -1979,6 +2024,30 @@ function M.define(dst, util)
 	-- because it takes an Image and images are not on this whitelist yet.
 	util.wc("Cursor", {
 		inherited_from_by_wrapper = dst.BorderImage,
+		instance = {
+			-- **A game's own cursor art** ([URHO_SWEEP]): the shape is
+			-- Urho3D's own name for one ("Normal", "ResizeVertical",
+			-- ...), and what draws it is the game's Image, a rectangle
+			-- of it and the hot spot. It was off the whitelist only
+			-- because Image was, which it is not any more.
+			DefineShape = util.wrap_function({"Cursor", "string", "Image",
+					"IntRect", "IntVector2"},
+				function(self, shape, image, rect, hotspot)
+					-- **The image comes out of the resource cache**: Urho3D
+					-- hands it to a SharedPtr, which frees an Image the
+					-- sandbox owns from under the collector -- a segfault
+					-- in RefCounted rather than an error (2026-09-25,
+					-- found by the exercise in sandbox_test). A cached
+					-- resource has a name; one built here does not, and
+					-- that is the difference this can see.
+					if image.name == "" then
+						error("Cursor:DefineShape(): the image has to come " ..
+								"from the resource cache", 2)
+					end
+					self:DefineShape(shape, image, rect, hotspot)
+				end
+			),
+		},
 		properties = {
 			shape = util.simple_property("string"),
 			-- The system's own arrow instead of the style's, which is a

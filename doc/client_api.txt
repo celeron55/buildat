@@ -473,6 +473,21 @@ UnsubscribeFromEvent(event_name, callback)
   so a handler unsubscribed by the name its own file calls it by used to match
   nothing and go on firing over a screen it had already removed.
 
+DebugRenderer, through scene:CreateComponent("DebugRenderer")
+- A game's own debug geometry: AddLine, AddTriangle, AddCross, AddCircle,
+  AddSphere, AddBoundingBox and AddNode, each taking a Color and an optional
+  depth test. What it is given is drawn by renderer:DrawDebugGeometry([depth])
+  and then forgotten, so nothing survives the frame it was added in. SetView
+  says which camera it is drawn for, which the renderer does itself for the
+  viewport it draws.
+
+Cursor:DefineShape(shape, image, rect, hot_spot)
+- A game's own cursor art, for a Cursor element of its own. The shape is
+  Urho3D's name for one ("Normal", "ResizeVertical", ...).
+- The image has to come out of the resource cache: Urho3D hands it to a
+  SharedPtr, which would free an image the sandbox built from under the
+  collector. An image with no name is refused for that reason.
+
 XMLFile:GetRoot([name]) -> XMLElement, XMLFile:ToString([indentation])
 - A game's own XML, read: the file comes out of the resource cache like any
   other media (magic.cache:GetResource("XMLFile", "mygame/data.xml")), and the
@@ -1279,7 +1294,7 @@ magic.CheckBox: checked
 magic.CollisionShape: SetBox, SetCapsule, SetCone, SetCylinder, SetSphere, SetStaticPlane
 magic.Color: a, b, g, r
 magic.Component: enabled
-magic.Cursor: shape, useSystemShapes
+magic.Cursor: DefineShape, shape, useSystemShapes
 magic.CustomGeometry: BeginGeometry, Commit, DefineColor, DefineNormal, DefineTexCoord, DefineVertex, GetMaterial, SetMaterial, SetNumGeometries, dynamic, material
 magic.DD_DISABLED: 
 magic.DD_SOURCE: 
@@ -1309,6 +1324,7 @@ magic.DRAWABLE_GEOMETRY:
 magic.DRAWABLE_GEOMETRY2D: 
 magic.DRAWABLE_LIGHT: 
 magic.DRAWABLE_ZONE: 
+magic.DebugRenderer: AddBoundingBox, AddCircle, AddCross, AddLine, AddNode, AddSphere, AddTriangle, SetLineAntiAlias, SetView
 magic.Drawable: castShadows, worldBoundingBox
 magic.DropDownList: AddItem, GetItem, InsertItem, RemoveAllItems, RemoveItem, SetSelection, listView, numItems, placeholder, placeholderText, resizePopup, selectedItem, selection
 magic.ELEMENT_BLENDINDICES: 
@@ -1635,7 +1651,7 @@ magic.Rect: max, min
 magic.RenderPath: Append, Clone, GetCommand, GetNumCommands, Load, SetEnabled, SetShaderParameter, ToggleEnabled
 magic.RenderPathCommand: RemoveShaderParameter, SetShaderParameter, enabled, pass, type
 magic.RenderSurface: QueueUpdate, SetViewport, updateMode
-magic.Renderer: GetViewport, HDRRendering, SetViewport, drawShadows, numViewports, ret, shadowMapSize, shadowQuality
+magic.Renderer: DrawDebugGeometry, GetViewport, HDRRendering, SetViewport, drawShadows, numViewports, ret, shadowMapSize, shadowQuality
 magic.Resource: name
 magic.ResourceCache: AddManualResource, Exists, GetResource, name, res, resource_name, resource_type, saved_path
 magic.RibbonTrail: emitting, endColor, endScale, lifetime, material, sorted, startColor, startScale, trailType, vertexDistance, width

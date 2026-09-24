@@ -105,13 +105,19 @@ function M.boot(action)
 	-- It ran only behind Ctrl+F12 before, which no check presses.
 	-- This boot is sandboxed code itself, so the file is run through the
 	-- sandbox's own verb rather than read off the disk
-	local ok, why = pcall(function()
+	-- **The file's own answer, not the call's**: a sandboxed file that
+	-- raises is caught inside run_extension_file, which then answers nil
+	-- and an error -- so a pcall around it says "fine" about a file that
+	-- failed every assertion in it (2026-09-25). wrapped.lua ends with
+	-- `return true`, and that is what is read.
+	local ok, ret = pcall(function()
 		return buildat.run_extension_file("wrapped.lua")
 	end)
-	if ok then
+	if ok and ret == true then
 		log:info("launch sandbox: the safe tests passed")
 	else
-		log:error("launch sandbox: the safe tests failed: " .. tostring(why))
+		log:error("launch sandbox: the safe tests failed (" ..
+				tostring(ret) .. "); the raise is in the lines above")
 	end
 end
 
