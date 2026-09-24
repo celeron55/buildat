@@ -919,7 +919,7 @@ end
 -- and cuts it where it is nought, and a **roughness** map leaves the
 -- surface where it is nought and roughens it where it is one. The same
 -- picture, read from either end.
-local function mark_image(src, one_bit, invert, rough_only)
+local function mark_image(src, one_bit, invert, slot)
 	local img = magic.Image:new()
 	assert(img:SetSize(MARK_SIZE, MARK_SIZE, 3), "the mark's tile")
 	local bg = invert and 0.0 or 1.0
@@ -949,8 +949,20 @@ local function mark_image(src, one_bit, invert, rough_only)
 				-- sphere is a black disc, since a metal has no diffuse
 				-- (2026-09-24). Written into red alone it is what it
 				-- says: the same surface, rougher where the mark is.
-				if rough_only then
+				-- **One texture, three channels** (user, 2026-09-24),
+				-- each surface marked in the slot it can show:
+				-- `rough` puts the mark in **red**, which Urho3D's
+				-- metallic-roughness map adds to roughness; `metal`
+				-- puts it in **green**, which adds to metalness -- and
+				-- there it is the *ground* that is one and the mark
+				-- that is nought, so a patch of a mirror stops being
+				-- metal and reads as dull grey against it. A grey
+				-- pixel would drive both at once, which is what made
+				-- B's etch a black disc on a white ball.
+				if slot == "rough" then
 					img:SetPixel(off + x, off + y, magic.Color(v, 0, 0, 1))
+				elseif slot == "metal" then
+					img:SetPixel(off + x, off + y, magic.Color(0, v, 0, 1))
 				else
 					img:SetPixel(off + x, off + y, magic.Color(v, v, v, 1))
 				end
@@ -977,7 +989,7 @@ local function white_texture()
 	return t
 end
 
-local function mark_texture(mark, icon, one_bit, invert, rough_only)
+local function mark_texture(mark, icon, one_bit, invert, slot)
 	if not mark then return nil end
 	-- **The grid's fallback is not a mark.** `launch_grid` hands out
 	-- `buildat_logo.png` for anything whose launcher names no icon, and
@@ -996,7 +1008,7 @@ local function mark_texture(mark, icon, one_bit, invert, rough_only)
 		-- like better than a hash of its name can
 		local src = magic.cache:GetResource("Image", icon)
 		if src then
-			image = mark_image(src, one_bit, invert, rough_only)
+			image = mark_image(src, one_bit, invert, slot)
 		end
 	end
 	if not image then
@@ -1021,7 +1033,7 @@ local function mark_texture(mark, icon, one_bit, invert, rough_only)
 				end
 			end
 			kept[#kept + 1] = gen
-			image = mark_image(gen, one_bit, invert, rough_only)
+			image = mark_image(gen, one_bit, invert, slot)
 			if (last_mark_ink or 0) > 0 then break end
 		end
 	end
@@ -1061,9 +1073,32 @@ local function mark_option()
 end
 
 local function etched(r, g, b, roughness, metallic, mark, icon)
+	-- **A chrome sphere is marked in its metalness** (user, 2026-09-24,
+	-- closing the round): neither a picture in the diffuse nor a mark in
+	-- the roughness touches a `metallic 1.0` surface visibly -- a metal
+	-- has no diffuse term, and a rougher mirror is still a mirror. A
+	-- patch that **stops being metal** does: it reads as dull grey
+	-- against the reflection. The map's green channel carries it, one
+	-- outside the mark and nought inside, with the material's own
+	-- metalness at nought so the texture is the whole of it.
+	if metallic > 0.5 then
+		white_texture()
+		local t = mark_texture(mark, icon, true, false, "metal")
+		if not t then return nil end
+		local m = magic.Material:new()
+		m:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/PBR/PBRMetallicRoughDiffSpec.xml"))
+		m:SetTexture(magic.TU_DIFFUSE, kept.white_tex)
+		m:SetTexture(magic.TU_SPECULAR, t)
+		m:SetShaderParameter("MatDiffColor", magic.Color(r, g, b, 1))
+		m:SetShaderParameter("Roughness", roughness)
+		m:SetShaderParameter("Metallic", 0.0)
+		kept[#kept + 1] = m
+		return m
+	end
 	if mark_option() == "B" then
 		white_texture()
-		local t = mark_texture(mark, icon, true, true, true)
+		local t = mark_texture(mark, icon, true, true, "rough")
 		if not t then return nil end
 		local m = magic.Material:new()
 		m:SetTechnique(0, magic.cache:GetResource("Technique",
