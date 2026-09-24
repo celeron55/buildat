@@ -5513,15 +5513,12 @@ function handle_keydown(event_type, event_data)
 		launch(browsed)
 		return
 	end
-	-- Return opens the bay of the orb being pointed at, which is the
-	-- only transition the room has; Backspace closes it again
-	if key == magic.KEY_RETURN and pointed_orb > 0 then
-		dissolve_bay(pointed_orb, true)
-		log:info("dissolve: bay " .. pointed_orb .. " opening")
-	elseif key == magic.KEY_BACKSPACE and pointed_orb > 0 then
-		dissolve_bay(pointed_orb, false)
-		log:info("dissolve: bay " .. pointed_orb .. " closing")
-	end
+	-- **Opening a bay by hand is gone** ([LAUNCH_FROZEN], 2026-09-25).
+	-- It was unreachable: in FPS mode Return and Backspace go to the
+	-- terminal and that branch returns first, and in menu mode Return
+	-- launches what is browsed, checked above. What is left of it is
+	-- the rule -- **the dissolve belongs to activation, however it is
+	-- done**, and `launch()` is the one door that starts one.
 	-- **F6 strips the ornament**, and not a letter: the prompt eats
 	-- every letter before the room sees it, which is what it is for. The generator has its own check and it
 	-- passed for a whole day while nothing in the room wore what it
