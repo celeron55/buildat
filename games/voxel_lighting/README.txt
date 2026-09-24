@@ -11,6 +11,16 @@ this size. A cave is carved into it with a sphere swept along the camera's
 view direction, yawed 20 degrees so it does not run straight away from the
 camera.
 
+Checking it
+-----------
+
+check.sh runs the views of check.txt and compares them against the reference
+run in local/voxel_lighting/ref/, printing each view's RMSE; check.sh --accept
+makes the current run the reference. Two runs of the same code sit under about
+12 here and the bar is 30, while a change that moved the lighting measured 72
+to 868 ([CHECK_BASELINE]). check.txt is still there to be driven by hand when
+what is wanted is a person's eye rather than a number.
+
 Lighting
 --------
 
