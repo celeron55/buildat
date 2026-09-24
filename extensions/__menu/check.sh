@@ -49,10 +49,34 @@ for n in $names; do
 	fi
 done
 echo "$(echo "$names" | wc -w) launch UIs booted, $bad of them badly"
+
+# **And the grid can be left.** A launcher that cannot be gone back to
+# leaves a client with no server and no menu, and nothing short of
+# [FIRST_RUN]'s twenty minutes was driving it: `__menu` had no
+# `leave_game` at all, so a game started from the default launcher was
+# a one-way trip (2026-09-24). This boots the grid straight into a
+# game's own screen (-a runs one launch action), clicks that screen's
+# "< back to the launcher", and asks the client to describe itself
+# afterwards -- a dead client answers nothing.
+{ echo "delay 25000"; echo "event scan 8 a"; echo "delay 1500"
+	# The row at the bottom of vanilla's menu panel, at this window size
+	echo "mouse_pos 639 608"; echo "delay 300"; echo "mouse_click left"
+	echo "delay 6000"; echo "event scan 8 b"
+	echo "delay 2000"; echo "quit"; } > "$out/cmds_back.txt"
+bin/buildat -o launch_ui=__menu -a game/vanilla/contentdb -D ../user 	-w 1280x720 -l 3 -L "$out/back.log" -c @"$out/cmds_back.txt" 	> /dev/null 2>&1
+grid=$(grep -ac "back to the grid" "$out/back.log")
+lost=$(grep -ac "leave: no launcher to go back to" "$out/back.log")
+alive=$(grep -ac "scan b: ui" "$out/back.log")
+echo "leaving a game: back to the grid $grid times, $alive elements" 		"drawn after it"
+if [ "$grid" -lt 1 ] || [ "$lost" -gt 0 ] || [ "$alive" -lt 10 ]; then
+	echo "FAIL: a game started from the grid cannot be left -- the client" 			"is left with no server and no menu"
+	grep -a "leave:\|Failed to run function" "$out/back.log" | head -3
+	exit 1
+fi
 if [ "$bad" -gt 0 ]; then
 	echo "FAIL: a launch UI does not start"
 	exit 1
 fi
 # vim: set noet ts=4 sw=4:
-echo "PASS: every launch UI this tree ships starts"
+echo "PASS: every launch UI this tree ships starts, and a game can be left"
 exit 0
