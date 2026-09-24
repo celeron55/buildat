@@ -1,0 +1,47 @@
+# [CI_RUNS] (5): the checks, run the one way they are run --
+# util/checks_in_docker.sh, the packaging image, Xvfb -- beside the
+# archives. On a push the quick tier, which is the bar for a commit; on
+# a schedule the full and long tiers on the branch's tip; on a tag the
+# quick tier, so a release is never cut over a red one. Every run's
+# local/ is an artifact, if: always(), because a failure that cannot be
+# read is a failure that gets ignored.
+name: checks
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  schedule:
+    # nightly, 03:17 UTC -- off the hour, where the queue is shorter
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+jobs:
+  quick:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The quick tier
+        run: JOBS=$(nproc) util/checks_in_docker.sh quick
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quick-run
+          path: Build/checks/out/
+          if-no-files-found: ignore
+  nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tier: [full, long]
+    steps:
+      - uses: actions/checkout@v4
+      - name: The ${{ matrix.tier }} tier
+        run: JOBS=$(nproc) util/checks_in_docker.sh ${{ matrix.tier }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.tier }}-run
+          path: Build/checks/out/
+          if-no-files-found: ignore

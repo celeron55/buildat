@@ -999,7 +999,23 @@ fi
 asked=$(grep -ac "launch_w.*: launch: save $save of vanilla" "$out/save_cli.log")
 opened=$(grep -ac "untrusted_launch: opening save $save" "$out/save_cli_server.log")
 echo "the save orb asked $asked times, the server opened it $opened times"
+# **And no dialog over a world that started fine** (user, 2026-09-24):
+# main:get_saves arrives more than once, so the save branch used to open
+# the save on the first packet and answer "A world is already starting"
+# on the second, which the client draws over the loading world. The
+# branch fires once now, and an automatic launch logs rather than
+# reaching menu_error at all.
+dialog=$(grep -ac "A world is already starting" \
+	"$out/save_cli_server.log" "$out/hidden_cli_server.log" 2>/dev/null |
+	sed 's/.*://' | paste -sd+ | bc)
+echo "\"already starting\" said to the client: ${dialog:-0} times"
 rm -rf "$here/user/games/vanilla/saves/$save"
+if [ "${dialog:-0}" -gt 0 ]; then
+	echo "FAIL: opening a save by name puts a dialog over the world"
+	grep -a "already starting\|opening save " "$out/save_cli_server.log" |
+		tail -4
+	exit 1
+fi
 if [ "$asked" -lt 1 ] || [ "$opened" -lt 1 ]; then
 	echo "FAIL: a save on the floor does not open its own game by name"
 	grep -a "launch_w.*: launch: " "$out/save_cli.log" | tail -3

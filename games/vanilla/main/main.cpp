@@ -105,6 +105,10 @@ struct Module: public interface::Module
 	// A world runs once: what a second choice would be is a second Luanti
 	// environment in one server, which is not what the module is
 	bool m_starting = false;
+	// The launch param's save is opened by the first main:get_saves packet
+	// and by no later one: vanilla's client sends that packet more than
+	// once, and a repeat is not a user asking twice
+	bool m_launched_param_save = false;
 
 	void init()
 	{
@@ -582,6 +586,8 @@ struct Module: public interface::Module
 		// save says itself which game it needs.
 		{
 			ss_ save = launch_param("save");
+			if(save != "" && m_launched_param_save)
+				return;
 			if(save != ""){
 				ss_ gameid = gameid_of_save(save);
 				if(gameid == ""){
@@ -590,7 +596,8 @@ struct Module: public interface::Module
 				} else {
 					log_i(MODULE, "untrusted_launch: opening save %s",
 							cs(save));
-					start_world(gameid, save, packet.sender);
+					m_launched_param_save = true;
+					start_world(gameid, save, packet.sender, "", true);
 					return;
 				}
 			}
@@ -2238,11 +2245,19 @@ struct Module: public interface::Module
 	// Runs the game in the save, or says why it cannot. peer is who asked,
 	// for the saying; zero is nobody, and then a failure is fatal because
 	// nothing was there to ask.
+	// automatic is a launch nobody clicked: it logs where a user's own
+	// second click would be told, so a fault of this shape does not reach
+	// the client as a dialog over a world that is loading fine
 	void start_world(const ss_ &gameid, const ss_ &world_name,
-			network::PeerInfo::Id peer, const ss_ &import_world_from = "")
+			network::PeerInfo::Id peer, const ss_ &import_world_from = "",
+			bool automatic = false)
 	{
 		if(m_starting){
-			menu_error(peer, "A world is already starting");
+			if(automatic)
+				log_i(MODULE, "start_world: %s is already starting",
+						cs(world_name));
+			else
+				menu_error(peer, "A world is already starting");
 			return;
 		}
 		ss_ game_path = find_game(gameid);
