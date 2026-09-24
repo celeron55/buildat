@@ -887,7 +887,144 @@ last_mark_ink = 0
 -- between "-Z at the viewer" and "the middle of the UV map at the
 -- viewer", measured on Sphere.mdl (see the turn below). One table,
 -- since this chunk is at Lua's limit of 200 locals.
-local ONE_BIT = {AT = 0.5, FACE_YAW = 270}
+local ONE_BIT = {AT = 0.5, FACE_YAW = 270, INK = 0.16, T_LO = 0.02,
+		T_HI = 0.60, T_STEP = 0.01}
+
+-- **The one-bit transform, settled** ([MARK_ONEBIT], user 2026-09-24):
+-- the logo comes down to the tile's own size first, and what is marked
+-- is **where the picture changes** rather than which side of it is ink
+-- -- so a logo of white lines on transparency cannot vanish the way it
+-- did under a luminance cut, and a coloured logo does not come out as
+-- the blob an alpha cut makes of it.
+--
+-- A feature is the **largest per-channel colour difference** to a drawn
+-- neighbour: two patches can differ in hue at one brightness and be the
+-- strongest thing in a picture, which luminance scores at zero rather
+-- than low. Taken among drawn pixels only -- an undrawn neighbour would
+-- make a cut-out's own edge the strongest feature and every line-art
+-- icon fat.
+--
+-- The threshold is **searched, not chosen**: what a person reads across
+-- the room is how much of the sphere the mark covers, so `t` is
+-- whatever lands nearest ONE_BIT.INK, ties to the higher one (the
+-- sparser mark is the safer). No fixed number serves both a flat icon
+-- and a photograph. The search is over a histogram rather than over the
+-- picture once per threshold, this being boot time and seventy orbs.
+--
+-- The mask is that union with the **alpha silhouette**, and when
+-- nothing reaches the target the cut-out is the only other mark there
+-- is -- but only when there is one: on an opaque thumbnail alpha is the
+-- whole tile, which is a black sphere and worse than the specks it
+-- replaces. Then the picture has no mark in it, and a game whose logo
+-- has none gets the room's generated sigil.
+function ONE_BIT.mask(src, n)
+	local sw, sh = src.width, src.height
+	local r, g, b, a = {}, {}, {}, {}
+	-- **Down first, then decide**: the picture is judged at the size the
+	-- sphere gives it. A box average rather than a point sample, since
+	-- a 128-pixel icon read at every other pixel aliases its own lines
+	-- away and the feature field is then noise; the reference sheet
+	-- resizes with Lanczos and the two land within two points of ink on
+	-- every logo this tree ships.
+	local k = math.floor(sw / n)
+	if k < 1 then k = 1 elseif k > 4 then k = 4 end
+	for y = 0, n - 1 do
+		for x = 0, n - 1 do
+			local sx, sy = math.floor(x * sw / n), math.floor(y * sh / n)
+			local cr, cg, cb, ca, m = 0, 0, 0, 0, 0
+			for oy = 0, k - 1 do
+				for ox = 0, k - 1 do
+					if sx + ox < sw and sy + oy < sh then
+						local c = src:GetPixel(sx + ox, sy + oy)
+						cr, cg, cb, ca = cr + c.r, cg + c.g, cb + c.b, ca + c.a
+						m = m + 1
+					end
+				end
+			end
+			local i = y * n + x
+			r[i], g[i], b[i], a[i] = cr / m, cg / m, cb / m, ca / m
+		end
+	end
+	local feature, edge, buckets = {}, {}, {}
+	local nb = math.floor((ONE_BIT.T_HI - ONE_BIT.T_LO) / ONE_BIT.T_STEP) + 1
+	for i = 1, nb do buckets[i] = 0 end
+	local edges, drawn_n = 0, 0
+	for y = 0, n - 1 do
+		for x = 0, n - 1 do
+			local i = y * n + x
+			local drawn = a[i] >= 0.5
+			if drawn then drawn_n = drawn_n + 1 end
+			local best, ahi, alo = 0.0, a[i], a[i]
+			for k = 1, 4 do
+				local nx = x + (k == 3 and -1 or (k == 4 and 1 or 0))
+				local ny = y + (k == 1 and -1 or (k == 2 and 1 or 0))
+				if nx >= 0 and nx < n and ny >= 0 and ny < n then
+					local j = ny * n + nx
+					if a[j] > ahi then ahi = a[j] end
+					if a[j] < alo then alo = a[j] end
+					if drawn and a[j] >= 0.5 then
+						local d = math.abs(r[i] - r[j])
+						local dg = math.abs(g[i] - g[j])
+						local db = math.abs(b[i] - b[j])
+						if dg > d then d = dg end
+						if db > d then d = db end
+						if d > best then best = d end
+					end
+				end
+			end
+			feature[i] = best
+			edge[i] = (ahi - alo) > 0.5
+			if edge[i] then
+				edges = edges + 1
+			else
+				-- Which thresholds this pixel is still ink at: the
+				-- bucket it falls in and every one below it
+				local k = math.floor((best - ONE_BIT.T_LO) / ONE_BIT.T_STEP)
+				if k >= nb then k = nb - 1 end
+				if k >= 0 then buckets[k + 1] = buckets[k + 1] + 1 end
+			end
+		end
+	end
+	local total = n * n
+	local above, best_t, best_d = 0, ONE_BIT.T_LO, nil
+	for k = nb, 1, -1 do
+		above = above + buckets[k]
+		local t = ONE_BIT.T_LO + (k - 1) * ONE_BIT.T_STEP
+		local d = math.abs((edges + above) / total - ONE_BIT.INK)
+		-- Walking down from the highest threshold, `<` keeps the higher
+		-- one on a tie
+		if best_d == nil or d < best_d then
+			best_d, best_t = d, t
+		end
+	end
+	local share = 0
+	local mask = {}
+	for i = 0, total - 1 do
+		mask[i] = edge[i] or feature[i] > best_t
+		if mask[i] then share = share + 1 end
+	end
+	-- How this tile was arrived at, for the log: the fallbacks below
+	-- overwrite it
+	ONE_BIT.last = ("%dpx t %.2f"):format(sw, best_t)
+	if share / total < ONE_BIT.INK * 0.4 then
+		if drawn_n / total < 0.45 then
+			for i = 0, total - 1 do
+				mask[i] = a[i] >= 0.5
+			end
+			share = drawn_n
+			ONE_BIT.last = ("%dpx cut-out"):format(sw)
+		else
+			-- Neither the edges nor a cut-out: **this picture has no
+			-- mark in it**, and the room's generated sigil is what such
+			-- a game gets. Saying so is the caller's cue -- an alpha
+			-- cut on an opaque thumbnail is the whole tile, a black
+			-- sphere, and worse than the specks it would replace.
+			ONE_BIT.last = ("%dpx none"):format(sw)
+			return nil, 0
+		end
+	end
+	return mask, share
+end
 -- **Which pixels are the mark**: a cut-out says so with its alpha, and
 -- the plan's rule is alpha first. But an icon that is white lines on
 -- transparency -- the buildat logo, and most of this tree's -- has
@@ -919,7 +1056,13 @@ end
 -- and cuts it where it is nought, and a **roughness** map leaves the
 -- surface where it is nought and roughens it where it is one. The same
 -- picture, read from either end.
-local function mark_image(src, one_bit, invert, slot)
+-- `generated` says the picture is the room's own sigil rather than a
+-- game's logo: a height field already cut to black and white, whose
+-- ink *is* the mark. The settled transform marks where a picture
+-- changes, which on a sigil means its outline alone -- and a sigil
+-- that fails the transform's ink target would come back as "no mark"
+-- and leave the orb bare, which is what it was the answer to.
+local function mark_image(src, one_bit, invert, slot, generated)
 	local img = magic.Image:new()
 	assert(img:SetSize(MARK_SIZE, MARK_SIZE, 3), "the mark's tile")
 	local bg = invert and 0.0 or 1.0
@@ -930,6 +1073,21 @@ local function mark_image(src, one_bit, invert, slot)
 	if sw < 1 or sh < 1 then return img end
 	local cutout = is_cutout(src)
 	local ink = 0
+	-- One pass of the settled transform for the whole tile
+	-- ([MARK_ONEBIT]); the diffuse path below reads the picture itself
+	local bits = nil
+	ONE_BIT.last = nil
+	if one_bit and not generated then
+		bits = ONE_BIT.mask(src, inner)
+	end
+	if one_bit and not generated and bits == nil then
+		-- **No mark in this picture**, so no picture: nil is what sends
+		-- the caller to the room's generated sigil. A blank tile would
+		-- be taken for a mark and worn as one -- twenty-nine orbs came
+		-- up wearing nothing at all before this said so (2026-09-24)
+		last_mark_ink = 0
+		return nil
+	end
 	for y = 0, inner - 1 do
 		for x = 0, inner - 1 do
 			local c = src:GetPixel(math.floor(x * sw / inner),
@@ -938,7 +1096,12 @@ local function mark_image(src, one_bit, invert, slot)
 				-- Nought where the mark is, one where it is not: on a
 				-- glowing orb that is the difference between a hole in
 				-- the light and a pixel that still saturates
-				local on = bit_of(c, cutout)
+				local on
+				if bits then
+					on = bits[y * inner + x]
+				else
+					on = bit_of(c, cutout)
+				end
 				if on then ink = ink + 1 end
 				local v = on and (invert and 1.0 or 0.0) or bg
 				-- **Red is roughness, green is metalness** in Urho3D's
@@ -1033,7 +1196,7 @@ local function mark_texture(mark, icon, one_bit, invert, slot)
 				end
 			end
 			kept[#kept + 1] = gen
-			image = mark_image(gen, one_bit, invert, slot)
+			image = mark_image(gen, one_bit, invert, slot, true)
 			if (last_mark_ink or 0) > 0 then break end
 		end
 	end
@@ -1042,7 +1205,10 @@ local function mark_texture(mark, icon, one_bit, invert, slot)
 	t.filterMode = magic.FILTER_BILINEAR
 	kept[#kept + 1] = image
 	kept[#kept + 1] = t
-	log:info("mark: " .. tostring(mark) .. " ink " .. last_mark_ink)
+	-- The ink count is what the round is judged on, and how the tile
+	-- was arrived at is what says why a count is odd ([MARK_ONEBIT])
+	log:info("mark: " .. tostring(mark) .. " ink " .. last_mark_ink ..
+			" (" .. tostring(ONE_BIT.last or "generated") .. ")")
 	return t
 end
 
