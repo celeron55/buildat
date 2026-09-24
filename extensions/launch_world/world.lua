@@ -942,7 +942,35 @@ last_mark_ink = 0
 -- viewer", measured on Sphere.mdl (see the turn below). One table,
 -- since this chunk is at Lua's limit of 200 locals.
 local ONE_BIT = {AT = 0.5, FACE_YAW = 270, INK = 0.16, T_LO = 0.02,
-		T_HI = 0.60, T_STEP = 0.01}
+		T_HI = 0.60, T_STEP = 0.01,
+		-- **What survives under the mark on a glowing orb**
+		-- ([GLOW_MARK]), stated as the emissive fraction and not as a
+		-- brightness: the emissive is multiplied by 26, so a masked pixel
+		-- only comes out of saturation below about 0.04 and a knob scaled
+		-- 0 to 1 would invite turning the mark off. 0 is a hole in the
+		-- light.
+		CUT = tonumber(env("BUILDAT_LAUNCH_GLOW_CUT")) or 0,
+		-- The figure: the mask itself, or its boundary alone
+		-- (BUILDAT_LAUNCH_MARK_FIGURE=outline)
+		FIG = env("BUILDAT_LAUNCH_MARK_FIGURE")}
+
+-- **The boundary of a mask** ([GLOW_MARK]): on a glowing orb a solid
+-- mark is a hole punched in the light and an outline is a drawing left
+-- on it. A pixel stays on when any of its four neighbours is off, and
+-- what is outside the square counts as off. On ONE_BIT rather than a
+-- local of its own -- this chunk is at Lua's limit of 200.
+function ONE_BIT.outline(bits, n)
+	local out = {}
+	for y = 0, n - 1 do
+		for x = 0, n - 1 do
+			local i = y * n + x
+			out[i] = bits[i] and (x == 0 or y == 0 or x == n - 1 or
+					y == n - 1 or not bits[i - 1] or not bits[i + 1] or
+					not bits[i - n] or not bits[i + n]) or false
+		end
+	end
+	return out
+end
 
 -- **A pixel as an integer, not as a Colour** ([ROOM_BOOT], 2026-09-24):
 -- Urho3D's SetPixelInt takes 0xAABBGGRR, which is what Color::ToUInt()
@@ -1169,7 +1197,10 @@ local function mark_image(src, one_bit, invert, slot, generated)
 		if slot == "metal" then return string.char(0, q(v), 0) end
 		return string.char(q(v), q(v), q(v))
 	end
-	local byte_on = triple(invert and 1.0 or 0.0)
+	-- The glow slot is the only one whose mark goes through the
+	-- emissive cut, so [GLOW_MARK]'s lightness is read here alone
+	local byte_on = triple(slot == "glow" and ONE_BIT.CUT or
+			(invert and 1.0 or 0.0))
 	local byte_off = triple(bg)
 	-- The drawn band is known rather than searched for: only the middle
 	-- square is ever written, so the rows outside it are one string and
@@ -1219,6 +1250,29 @@ local function mark_image(src, one_bit, invert, slot, generated)
 		-- up wearing nothing at all before this said so (2026-09-24)
 		last_mark_ink = 0
 		return nil
+	end
+	-- **The figure, on the glowing orbs alone** ([GLOW_MARK]): the
+	-- outline is a question about a mark that cuts a light, and the
+	-- other two surfaces wear the mask itself. The generated path has
+	-- its bits in the loop below, so they are gathered first here.
+	if one_bit and slot == "glow" and ONE_BIT.FIG == "outline" then
+		if not bits then
+			bits = {}
+			for y = 0, inner - 1 do
+				for x = 0, inner - 1 do
+					local sx = math.floor(x * sw / inner)
+					local sy = math.floor(y * sh / inner)
+					if from_field then
+						bits[y * inner + x] =
+								ornament.at(src, sx, sy) <= ONE_BIT.AT
+					else
+						bits[y * inner + x] =
+								bit_of(src:GetPixel(sx, sy), cutout)
+					end
+				end
+			end
+		end
+		bits = ONE_BIT.outline(bits, inner)
 	end
 	for y = 0, inner - 1 do
 		for x = 0, inner - 1 do
@@ -1421,7 +1475,7 @@ end
 local function glow(colour, mark, icon)
 	local m = magic.Material:new()
 	-- One bit: nothing else survives an emissive multiplied by 26
-	local t = mark_texture(mark, icon, true)
+	local t = mark_texture(mark, icon, true, false, "glow")
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
 			t and "Techniques/DiffUnlit.xml" or
 			"Techniques/NoTextureUnlit.xml"))
