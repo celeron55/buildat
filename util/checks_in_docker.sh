@@ -17,7 +17,14 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 tier="${1:-quick}"
 image="buildat-package-linux"
 out="$here/Build/checks/out"
-rm -rf "$out"; mkdir -p "$out"
+# **What the container wrote belongs to the host** ([CI_RUNS]): docker
+# runs as root, so last run's artifacts are root-owned and this rm
+# fails -- the run below chowns /out on its way out for that reason.
+# Failing here rather than on a half-cleared directory.
+rm -rf "$out" 2>/dev/null || {
+	echo "cannot clear $out; it holds files this user does not own" >&2
+	exit 2; }
+mkdir -p "$out"
 docker build -t "$image" "$here/util/docker/linux"
 tarball=$(mktemp /tmp/buildat_checks_in_docker.XXXXXX)
 trap 'rm -f "$tarball"' EXIT
@@ -40,13 +47,16 @@ docker run --rm -i \
 		mkdir -p /work/buildat && cd /work/buildat && tar -xf - &&
 		mkdir -p Build && cd Build &&
 		cmake .. -DCMAKE_BUILD_TYPE=Release > cmake.log 2>&1 ||
-			{ tail -20 cmake.log; cp cmake.log /out/; exit 2; }
+			{ tail -20 cmake.log; cp cmake.log /out/
+			  chown -R $(id -u):$(id -g) /out 2>/dev/null || true; exit 2; }
 		cmake --build . -j \$JOBS > build.log 2>&1 ||
-			{ tail -40 build.log; cp build.log /out/; exit 2; }
+			{ tail -40 build.log; cp build.log /out/
+			  chown -R $(id -u):$(id -g) /out 2>/dev/null || true; exit 2; }
 		cd /work/buildat
 		status=0
 		xvfb-run -a -s '-screen 0 1280x720x24' \
 			builtin/luanti/test/run_all.sh $tier || status=\$?
 		cp -r local/. /out/ 2>/dev/null || true
+		chown -R $(id -u):$(id -g) /out 2>/dev/null || true
 		exit \$status
 	" < "$tarball"
