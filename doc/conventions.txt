@@ -114,6 +114,33 @@ Directory structure
 │                  options filed for the user -- never in git
 └── util        << Development utilities: packaging, the squash push, benches
 
+Checks
+------
+A check is one shell script that runs the thing and decides for itself.
+builtin/luanti/test/lib.sh carries the contract: exit 0 passed, 1 failed, 77
+could not run, and the last line is "PASS: ", "FAIL: " or "SKIP: " with what
+was actually measured in it. A check that prints a failure and exits 0 is the
+fault this contract exists for.
+
+Four header lines say the rest, and only the first is required:
+
+  # tier: quick        quick (no downloaded game, what a push runs), full
+                       (wants the game media), long (fuzz, drives, shots)
+  # cost: 24s          a seed; local/run_all/costs is measured per machine
+  # covers: <paths>    what it proves OUTSIDE its own tree; where it lives
+                       is covered already -- extensions/<x>/check.sh covers
+                       extensions/<x>/**
+  # flaky: <why>       run and reported, but it does not decide the status
+
+builtin/luanti/test/run_all.sh <tier> runs a tier; --changed [range] runs the
+cheapest runners that cover what git says changed, which is the regular check.
+A runner is never retried: a check run three times and taken at its best is
+how a real fault becomes a known flake.
+
+Under BUILDAT_CI=1 a timing is a row and never a verdict -- what CI asserts is
+behaviour, since a threshold argued against a desk's GPU fails every run under
+llvmpipe and teaches everyone to ignore the result.
+
 Commit messages
 ---------------
 Present tense, describing what the commit leaves in the tree rather than the
