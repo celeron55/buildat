@@ -1079,6 +1079,63 @@ if [ "$back" -lt 1 ] || [ "$lost" -gt 0 ]; then
 	exit 1
 fi
 
+# **A pocket on a side wall is a pocket like any other**
+# ([POCKETS_ROUND]'s done-when: an orb in a pocket on each wall opens its
+# bay and is flown to). This tree has nine games and the faced wall holds
+# thirteen, so the other walls are reached by widening the pitch rather
+# than by waiting for somebody to install thirty games:
+# BUILDAT_LAUNCH_PITCH=24 leaves each wall room for two or three.
+#
+# The wall row is browsed in the allocation's own order -- the faced wall
+# first -- so the fourth step along it is on a side wall, and Enter
+# launches what is browsed.
+{ echo "wait_log_any 90000 the room hums"; echo "delay 900"
+	echo "event mode menu"; echo "delay 700"
+	echo "keypress Right"; echo "delay 250"
+	echo "keypress Right"; echo "delay 250"
+	echo "keypress Right"; echo "delay 700"
+	echo "screenshot $out/side-pocket.png"
+	echo "wait_log 20000 Wrote screenshot $out/side-pocket.png"
+	echo "keypress Return"
+	echo "wait_log 120000 game: the room stands down"
+	echo "delay 1200"
+	echo "keypress Escape"
+	echo "wait_log 30000 game: back in the room"
+	echo "delay 800"; echo "quit"; } > "$out/cmds_side.txt"
+wait_quiet 40 || true
+BUILDAT_LAUNCH_PITCH=24 run_client 60 "$out/side_cli.log" \
+	timeout 300 bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
+	-c @"$out/cmds_side.txt" > /dev/null 2>&1
+sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/side_cli.log"
+# The bays line says which wall each pocket is on: "f"ront, "l"eft,
+# "r"ight or "b"ack, then its place along that wall
+bays=$(grep -a "launch_w.*: bays " "$out/side_cli.log" | head -1 |
+	sed 's/.*bays //')
+walls=$(echo "$bays" | tr ' ' '\n' | grep -c "^[flrb]$")
+kinds=$(echo "$bays" | tr ' ' '\n' | grep "^[flrb]$" | sort -u | tr -d '\n')
+opened=$(grep -a "launch_w.*: dissolve: bay " "$out/side_cli.log" | head -1 |
+	sed 's/.*dissolve: bay \([0-9]*\).*/\1/')
+side=""
+if [ -n "$opened" ]; then
+	side=$(echo "$bays" | tr ' ' '\n' | grep "^[flrb]$" |
+		sed -n "${opened}p")
+fi
+stood=$(grep -ac "launch_w.*: game: the room stands down" "$out/side_cli.log")
+came=$(grep -ac "launch_w.*: game: back in the room" "$out/side_cli.log")
+echo "the pockets are spread over the walls \"$kinds\" ($walls of them);" \
+		"bay ${opened:-none} on the \"${side:-?}\" wall opened, the game" \
+		"started $stood and was left $came times"
+if [ "${#kinds}" -lt 3 ]; then
+	echo "FAIL: the pockets do not reach the other walls"
+	exit 1
+fi
+if [ -z "$side" ] || [ "$side" = "f" ] || [ "$stood" -lt 1 ] ||
+		[ "$came" -lt 1 ]; then
+	echo "FAIL: an orb in a pocket on a side wall does not launch," \
+			"or the room does not come back from it"
+	exit 1
+fi
+
 # **The mark is on the face, not at the limb** ([LAUNCH_WORLD]'s mark
 # round failed twice on presentation rather than on the mark: once with
 # every orb turned away, once with the sphere a quarter out, and both

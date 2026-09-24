@@ -232,7 +232,13 @@ end
 do
 	-- BUILDAT_LAUNCH_POCKETS=<n> holds the wall to fewer than it could,
 	-- which is how the spill is driven on a tree with nine games rather
-	-- than waited for until somebody installs twenty
+	-- than waited for until somebody installs twenty.
+	-- **BUILDAT_LAUNCH_PITCH=<voxels> widens the spacing**, which is how
+	-- the other walls are driven ([POCKETS_ROUND]): each wall holds
+	-- (its span - 12) / pitch, so a wide pitch reaches the side walls
+	-- with the games this tree has instead of waiting for forty of them
+	room.POCKET_PITCH = tonumber(env("BUILDAT_LAUNCH_PITCH")) or
+			room.POCKET_PITCH
 	local want = tonumber(env("BUILDAT_LAUNCH_POCKETS")) or #GAMES
 	local made = room.set_pockets(math.min(#GAMES, want))
 	if made < #GAMES then
