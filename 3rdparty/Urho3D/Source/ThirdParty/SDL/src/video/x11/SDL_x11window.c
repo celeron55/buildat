@@ -1026,7 +1026,25 @@ X11_ShowWindow(_THIS, SDL_Window * window)
     Uint32 deadline;
 
     if (!X11_IsWindowMapped(_this, window)) {
-        X11_XMapRaised(display, data->xwindow);
+        /* buildat: a window that was not asked for does not take the
+           focus. A driven run maps a window on whatever session it is
+           started from -- a check's fifteen clients took the desk's
+           focus fifteen times -- and EWMH's way of saying "the user did
+           not ask for this" is _NET_WM_USER_TIME = 0 before the map,
+           which a compliant window manager reads as do-not-activate.
+           Mapped without raising, for the same reason. The hint is set
+           by the client when it runs a command sequence; a client
+           somebody started themselves maps as it always did. */
+        if (SDL_GetHintBoolean("BUILDAT_WINDOW_NO_ACTIVATION", SDL_FALSE)) {
+            long no_user_time = 0;
+            X11_XChangeProperty(display, data->xwindow,
+                                data->videodata->_NET_WM_USER_TIME,
+                                XA_CARDINAL, 32, PropModeReplace,
+                                (unsigned char *)&no_user_time, 1);
+            X11_XMapWindow(display, data->xwindow);
+        } else {
+            X11_XMapRaised(display, data->xwindow);
+        }
         /* Wait for "MapNotify", but not forever. A window manager is free
            not to map a window it has placed on a workspace nobody is
            looking at, and this wait was unbounded -- so a client started

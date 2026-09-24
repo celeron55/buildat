@@ -68,6 +68,18 @@ Commands
 delay <ms>
     Wait this many milliseconds before the next command. Game keeps running.
 
+A driven client is a window the desk did not ask for, and says so: its
+WM_CLASS is "buildat-scripted" where a client somebody opened is
+"buildat", its title is "Buildat Client (scripted)", and it maps
+without raising and with _NET_WM_USER_TIME = 0, which a window manager
+reads as do-not-activate. So a run does not take the focus of whatever
+the desk is doing, and a window manager can put it somewhere else --
+in icewm's winoptions:
+
+    buildat-scripted.buildat-scripted.workspace: 3
+
+SDL_VIDEO_X11_WMCLASS set by the caller is left alone.
+
 wait_log <ms> <text>
     Hold the sequence until the client's own log has a line containing the
     text, or the time passes; either way a log line says so and the sequence

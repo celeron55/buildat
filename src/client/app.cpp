@@ -1146,7 +1146,9 @@ struct CApp: public App, public magic::Application
 				g_client_config.get<ss_>("user_path")+"/meshdumps").c_str());
 
 		// Set Urho3D engine parameters
-		engineParameters_["WindowTitle"] = "Buildat Client";
+		engineParameters_["WindowTitle"] =
+				g_client_config.get<bool>("command_seq_enabled") ?
+				"Buildat Client (scripted)" : "Buildat Client";
 		engineParameters_["Headless"] = false;
 		engineParameters_["ResourcePaths"] = resource_paths_s.c_str();
 		engineParameters_["AutoloadPaths"] = "";

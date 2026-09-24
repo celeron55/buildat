@@ -229,6 +229,20 @@ int main(int argc, char *argv[])
 			log_i(MODULE, "config.command_seq: %zu commands", parsed.size());
 			config.set("command_seq", text);
 			config.set("command_seq_enabled", true);
+			// **A driven run's window says what it is** (user,
+			// 2026-09-24): a check maps its client on whatever session
+			// it is started from, and a window manager can put it out
+			// of the way -- another workspace, no focus -- but only if
+			// it can tell that window from one somebody opened.
+			// icewm's winoptions matches WM_CLASS, which SDL takes
+			// from SDL_VIDEO_X11_WMCLASS and otherwise from the
+			// program name: a normal client is "buildat" and a driven
+			// one is "buildat-scripted". **Here, not in App::Setup()**:
+			// SDL reads it when the video subsystem starts, and the
+			// default window size asks SDL for the desktop's before
+			// that. A value the caller set is left alone.
+			if(getenv("SDL_VIDEO_X11_WMCLASS") == NULL)
+				setenv("SDL_VIDEO_X11_WMCLASS", "buildat-scripted", 1);
 			break;
 		}
 		case 'R':

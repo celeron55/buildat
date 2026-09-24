@@ -633,6 +633,15 @@ void absorb_mouse_move_suppression(magic::Input *input)
 // instead; see Input::SetForceInputFocus.
 void show_window(magic::Graphics *graphics, magic::Input *input)
 {
+	// **A driven window does not take the desk's focus** (user,
+	// 2026-09-24: a check "popping up the window open and closed and
+	// open repeatedly, taking my input focus away from what I'm
+	// doing"). The vendored SDL reads this hint when it maps a window
+	// and, with it set, says _NET_WM_USER_TIME = 0 first -- EWMH for
+	// "the user did not ask for this window" -- and maps without
+	// raising. A client somebody started themselves is unaffected:
+	// this is only ever set for a command sequence.
+	SDL_SetHint("BUILDAT_WINDOW_NO_ACTIVATION", "1");
 	if(graphics){
 		SDL_Window *w = graphics->GetWindow();
 		if(w)
