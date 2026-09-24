@@ -388,9 +388,24 @@ function M.voxel_at(x, y, z)
 	-- the pocket wall, which wins where they meet at a corner -- its
 	-- frieze and its columns are what the room is read by.
 	if y >= 0 and y <= M.Y_TOP then
-		if x - M.X_MIN < M.side_in("left", z, y) then return id.stone end
-		if M.X_MAX - x < M.side_in("right", z, y) then return id.stone end
-		if M.Z_MAX - z < M.side_in("back", x, y) then return id.stone end
+		-- **Their slabs wear the frieze too** (user, 2026-09-24: the
+		-- other walls' slabs have no ornament on their sides). The rule
+		-- is the pocket wall's: the outermost voxel of a face that
+		-- stands proud of the wall's nominal plane is the strip a
+		-- player sees, and that is where the ornament goes. `side_in`
+		-- is SIDE_IN plus the slab, less an inset, so a face is proud
+		-- when it stands further in than the nominal SIDE_IN.
+		local function side_voxel(d, into)
+			if d >= into then return nil end
+			if d == into - 1 and into > M.SIDE_IN then return id.frieze end
+			return id.stone
+		end
+		local v = side_voxel(x - M.X_MIN, M.side_in("left", z, y))
+		if v then return v end
+		v = side_voxel(M.X_MAX - x, M.side_in("right", z, y))
+		if v then return v end
+		v = side_voxel(M.Z_MAX - z, M.side_in("back", x, y))
+		if v then return v end
 	end
 	if y > M.Y_TOP then
 		-- The square is cut right through: what is above the room is
@@ -499,6 +514,32 @@ function M.self_check()
 			if found then break end
 		end
 		assert(found, "some slab stands proud of the wall")
+	end
+	do
+		-- **And the other three walls wear it as well** (user,
+		-- 2026-09-24: their slabs had no ornament on their sides). The
+		-- left wall's face is SIDE_IN plus its slab, so the voxel at
+		-- the face of a proud one is the frieze and the voxel behind it
+		-- is stone.
+		-- Past the pocket wall's own face: that wall is one mass at
+		-- every z in front of it and wins where they meet
+		local found = false
+		for z = M.Z_MIN + 1, M.Z_MAX - 1 do
+			for y = 0, M.Y_TOP do
+				local into = M.side_in("left", z, y)
+				local x = M.X_MIN + into - 1
+				if into > M.SIDE_IN and z > M.face_z(x, y) then
+					assert(M.voxel_at(x, y, z) == M.id.frieze,
+							"a side wall's slab wears the frieze")
+					assert(M.voxel_at(x - 1, y, z) == M.id.stone,
+							"and the stone behind it does not")
+					found = true
+					break
+				end
+			end
+			if found then break end
+		end
+		assert(found, "some slab of a side wall stands proud")
 	end
 	assert(M.voxel_at(0, M.Y_TOP + 2, 4) == M.id.air,
 			"the opening is cut through the ceiling")
