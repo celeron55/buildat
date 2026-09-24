@@ -80,10 +80,27 @@ end
 -- cap sensible; the rest wait on the room learning to hold more than it
 -- can show, which is the same open question the wall has.
 local SAVES = {}
+-- **The cap is about what is drawn, not about what can be reached**
+-- (2026-09-24): a floor with 239 spheres on it is a worse list than the
+-- one this room replaces, but a save this client has and cannot open by
+-- name is a launcher that lost it. So the ones past the cap are
+-- remembered here and the prompt finds them -- typed, they launch like
+-- any other, and nothing is drawn for them until the player moves one.
+-- A global: the search is a long way below this and the chunk is at
+-- Lua's limit of locals.
+unshown_saves = {}
 for _, sv in ipairs(api.list_saves()) do
-	if #SAVES >= 12 then break end
-	SAVES[#SAVES + 1] = sv
+	-- BUILDAT_LAUNCH_SAVES=<n> is the cap, for looking at a floor with
+	-- fewer on it and for driving the prompt's own path to the rest
+	if #SAVES >= (tonumber(env("BUILDAT_LAUNCH_SAVES")) or 12) then
+		unshown_saves[#unshown_saves + 1] = {name = sv.name, game = sv.game}
+	else
+		SAVES[#SAVES + 1] = sv
+	end
 end
+
+log:info("saves: " .. #SAVES .. " on the floor, " .. #unshown_saves ..
+		" more reachable by name")
 
 -- **Chekhov's empty pocket**, last: a pocket with nothing in it is what
 -- says there is room for another game, and it is the way to ContentDB
@@ -3788,6 +3805,12 @@ end
 
 local function match_name(b)
 	if b == "terminal" then return "settings / ContentDB" end
+	if type(b) == "string" then
+		local game, name = b:match("^save:(.-)/(.+)$")
+		if name then
+			return name .. "  (" .. game .. ", not on the floor)"
+		end
+	end
 	local o = b and ORBS[b]
 	if not o then return nil end
 	-- A save says whose it is: two games may both have a "world"
@@ -4274,6 +4297,23 @@ local function matches_for(query)
 			out[#out + 1] = {i = i, score = sc}
 		end
 	end
+	-- The saves the floor has no room for: named like the terminal is,
+	-- by a string rather than by an orb index, since there is no orb.
+	--
+	-- **Only from the start of the name**, and this is why: a
+	-- subsequence match against two hundred saves fills the results
+	-- with things that have no place in the room, and walking them with
+	-- the arrows leaves the camera sitting still -- which is the one
+	-- thing the search was fixed for ("until the camera follows, what
+	-- is browsed is a word rather than a place"). Typing a save's name
+	-- still finds it; typing three letters browses the room.
+	local low = query:lower()
+	for _, sv in ipairs(unshown_saves or {}) do
+		if sv.name:lower():sub(1, #low) == low then
+			out[#out + 1] = {i = "save:" .. sv.game .. "/" .. sv.name,
+				score = #sv.name - #low}
+		end
+	end
 	table.sort(out, function(a, b)
 		if a.score ~= b.score then return a.score < b.score end
 		return tostring(a.i) < tostring(b.i)
@@ -4290,7 +4330,8 @@ match_list, match_at = {}, 1
 -- a leap of faith. A swift hop rather than a launch's flight.
 local function show_match(i)
 	local b = match_list[i] and match_list[i].i
-	if not b or b == "terminal" then
+	-- Nothing to fly to for the terminal or for a save with no orb
+	if not b or type(b) == "string" then
 		return
 	end
 	local o = orb_places[b]
@@ -4325,9 +4366,19 @@ function prompt_changed()
 	show_prompt()
 	if #match_list > 0 then
 		show_match(1)
+		-- How many of them are saves the floor has no room for: a
+		-- launcher that cannot reach what the client has is worse than
+		-- one that draws less of it, so this is the number that says
+		-- the cap costs nothing
+		local hidden = 0
+		for _, m in ipairs(match_list) do
+			if type(m.i) == "string" and m.i:sub(1, 5) == "save:" then
+				hidden = hidden + 1
+			end
+		end
 		log:info("prompt: \"" .. prompt_str .. "\" matches " ..
-				#match_list .. ", showing " ..
-				tostring(match_name(match_list[1].i)))
+				#match_list .. " (" .. hidden .. " not on the floor)" ..
+				", showing " .. tostring(match_name(match_list[1].i)))
 	end
 end
 
@@ -4355,6 +4406,22 @@ function launch(b)
 	end
 	if b == "terminal" then
 		sit_at_terminal()
+		return
+	end
+	if type(b) == "string" then
+		-- A save the floor has no room for, found by the prompt: it
+		-- opens by name like the ones standing on the floor do
+		local game, name = b:match("^save:(.-)/(.+)$")
+		if name then
+			log:info("launch: save " .. name .. " of " .. game ..
+					" (not on the floor)")
+			local ok, why = api.launch_save(game, name)
+			if ok then
+				entered_game()
+			else
+				log:warning("launch: " .. tostring(why))
+			end
+		end
 		return
 	end
 	if not b or not orb_places[b] then

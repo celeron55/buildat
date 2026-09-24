@@ -814,18 +814,30 @@ fi
 # save here old enough to try has an empty save.sqlite, so the server
 # answered "save X does not say which game it needs" and the round trip
 # was never run. The check makes its own save instead of hoping for one.
-save=zz_launch_world_test
+# The name starts with three letters nothing else here does: the prompt
+# finds a save by the start of its name, and this desk has other saves
+# beginning "zz" from a session's own driving
+save=zza_launch_world_test
 rm -rf "$here/user/games/vanilla/saves/$save"
 port=31879
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE="$save" \
 	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" -l 3 \
 	> "$out/save_server.log" 2>&1 &
 maker=$!
+# What this run is for is the save's own record of which game it needs,
+# which is written as the world starts -- so that line is what it waits
+# for rather than the whole load
 for i in $(seq 1 90); do
-	grep -aq "Mods loaded" "$out/save_server.log" 2>/dev/null && break
+	grep -aq "Running world $save " "$out/save_server.log" 2>/dev/null && break
 	sleep 1
 done
-kill "$maker" 2>/dev/null; wait "$maker" 2>/dev/null
+# **SIGKILL, and it is not laziness**: asked to shut down this early the
+# server aborts inside its own shutdown ("corrupted size vs. prev_size",
+# 2026-09-24) and sits in the crash handler, which hung this check for
+# half an hour. The save is on disk by now and nothing here needs a
+# clean exit; the abort itself wants chasing where the server is, not
+# worked around by waiting longer.
+kill -9 "$maker" 2>/dev/null; wait "$maker" 2>/dev/null
 if ! grep -aq "Running world $save (game devtest)" "$out/save_server.log"; then
 	echo "SKIP: could not make a save to open (no devtest?)" >&2
 	tail -3 "$out/save_server.log" >&2
@@ -835,7 +847,7 @@ fi
 # what is asserted is the far end: the server the room started took the
 # save's own path and drew no menu on the way.
 { echo "delay 6000"; echo "event mode menu"; echo "delay 600"
-	echo "keypress Z"; echo "keypress Z"
+	echo "keypress Z"; echo "keypress Z"; echo "keypress A"
 	echo "delay 400"; echo "keypress Return"
 	# Ten seconds: the server says it opened the save about a second
 	# after the launch, and the rest of a world coming up is devtest's
@@ -846,6 +858,30 @@ rm -f "$out/save_cli.log" "$out/save_cli_server.log"
 # quickly; the tier's minute is not spent waiting for one that will not
 timeout 120 bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
 	-L "$out/save_cli.log" -c @"$out/cmds_save.txt" > /dev/null 2>&1
+# **And a save the floor has no room for opens the same way**: the cap
+# is about what is drawn, not about what can be reached, and a client
+# with 239 saves that can open twelve of them has lost the rest. With
+# the cap at nothing, every save is the prompt's to find.
+{ echo "delay 6000"; echo "event mode menu"; echo "delay 600"
+	echo "keypress Z"; echo "keypress Z"; echo "keypress A"
+	echo "delay 400"; echo "keypress Return"
+	echo "delay 10000"; echo "quit"; } > "$out/cmds_hidden.txt"
+rm -f "$out/hidden_cli.log" "$out/hidden_cli_server.log"
+BUILDAT_LAUNCH_SAVES=0 timeout 120 bin/buildat -m launch_world -D ../user \
+	-w 640x400 -l 3 -L "$out/hidden_cli.log" \
+	-c @"$out/cmds_hidden.txt" > /dev/null 2>&1
+hidden=$(grep -ac "launch_w.*: launch: save $save of vanilla (not on the floor)" \
+	"$out/hidden_cli.log")
+hopened=$(grep -ac "untrusted_launch: opening save $save" \
+	"$out/hidden_cli_server.log")
+echo "a save the floor does not show: asked $hidden, opened $hopened"
+if [ "$hidden" -lt 1 ] || [ "$hopened" -lt 1 ]; then
+	echo "FAIL: a save past the floor's cap cannot be opened by name"
+	grep -a "launch_w.*: saves: \|launch_w.*: launch: " "$out/hidden_cli.log" |
+		tail -3
+	exit 1
+fi
+
 asked=$(grep -ac "launch_w.*: launch: save $save of vanilla" "$out/save_cli.log")
 opened=$(grep -ac "untrusted_launch: opening save $save" "$out/save_cli_server.log")
 echo "the save orb asked $asked times, the server opened it $opened times"
