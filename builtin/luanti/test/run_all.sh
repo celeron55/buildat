@@ -59,6 +59,31 @@ for name in $runners; do
 	"$path" > "$log" 2>&1
 	rc=$?
 	t1=$(date +%s)
+	# **A runner's leavings are not the next runner's condition.** Every
+	# runner refuses to start while a client or a server is up, and one
+	# that exits while its own client is still shutting down makes the
+	# next one skip -- seven of the eight skips in the first container
+	# run of this tier were that, which reads as "not run here" and is
+	# really "run too soon after the last". So: wait for the tree to be
+	# quiet, and take down what this tier itself started, which is
+	# anything younger than the tier. A client somebody else is using is
+	# older than that and is left alone ([CI_RUNS] (6): a flake is
+	# quarantined, not papered over -- this is neither, it is the
+	# harness cleaning up after itself).
+	for w in $(seq 1 30); do
+		pgrep -x buildat >/dev/null || pgrep -x buildat_server >/dev/null ||
+			break
+		sleep 1
+	done
+	for p in $(pgrep -x buildat) $(pgrep -x buildat_server); do
+		age=$(ps -o etimes= -p "$p" 2>/dev/null | tr -d ' ')
+		[ -n "$age" ] || continue
+		if [ "$age" -lt "$((t1 - started + 60))" ]; then
+			echo "  (the tier's own $p was still up after $name; taken down)" \
+				>> "$log"
+			kill -9 "$p" 2>/dev/null
+		fi
+	done
 	verdict=$(grep -aE "^(PASS|FAIL|SKIP):" "$log" | tail -1)
 	known_flaky=$(grep -c "^# flaky:" "$path")
 	case "$rc" in
