@@ -858,7 +858,7 @@ for yaw in own 0; do
 		-D "$out/emptyuser" -w 1280x720 -l 3 \
 		-c @"$out/cmds_face_$yaw.txt" > /dev/null 2>&1
 done
-python3 - "$out" <<'PYMARK'
+python3 - "$out" <<'PYMARK' || exit 1
 import sys, os
 from PIL import Image
 
@@ -894,31 +894,6 @@ ok = a > 1.2 and b < 0.6
 if not ok:
 	print("FAIL: the orb does not present its mark" if a <= 1.2 else
 			"FAIL: the control carries a mark where there should be none")
-raise SystemExit(0 if ok else 1)
-PYMARK' || exit 1
-import sys, os
-from PIL import Image, ImageStat
-out = sys.argv[1]
-def middle_against_ring(path):
-	im = Image.open(path).convert("RGB")
-	w, h = im.size
-	cx, cy = w // 2, int(h * 0.52)
-	c = ImageStat.Stat(im.crop((cx - 38, cy - 38, cx + 38, cy + 38))).mean[0]
-	r = ImageStat.Stat(im.crop((cx - 110, cy - 110, cx + 110, cy + 110))).mean[0]
-	return abs(c - r)
-own = "%s/mark_face_own.png" % out
-turned = "%s/mark_face_0.png" % out
-for p in (own, turned):
-	if not os.path.exists(p):
-		print("FAIL: the mark's face was not shot (%s)" % p)
-		raise SystemExit(1)
-a, b = middle_against_ring(own), middle_against_ring(turned)
-print("the mark on the face moves the middle of the disc by %.1f of a "
-		"level, and a quarter turn out by %.1f" % (a, b))
-ok = a > 20.0 and b < 15.0
-if not ok:
-	print("FAIL: the orb does not present its mark" if a <= 20.0 else
-			"FAIL: the control shows a mark where there should be none")
 raise SystemExit(0 if ok else 1)
 PYMARK
 
