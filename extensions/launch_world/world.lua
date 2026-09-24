@@ -4423,7 +4423,13 @@ local function show_match(i)
 	-- straight back -- put the camera inside a server for a match on
 	-- the floor (2026-09-23). Three metres up clears everything and
 	-- still shows what the orb is standing among.
-	fly_to({x = o.x, y = o.y + 3.0, z = o.z + 4.5},
+	-- **How far back the hop stops**, which is a portrait distance for
+	-- the orb: three up and four and a half back reads as "this one,
+	-- and here is where it lives". BUILDAT_LAUNCH_HOP moves it, which
+	-- is how the mark's options sheet gets close enough to judge a
+	-- picture on a sphere.
+	local back = tonumber(env("BUILDAT_LAUNCH_HOP")) or 4.5
+	fly_to({x = o.x, y = o.y + back * 0.67, z = o.z + back},
 			{x = o.x, y = o.y, z = o.z}, HOP_SECONDS)
 end
 
