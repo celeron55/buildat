@@ -107,6 +107,20 @@ core.register_on_joinplayer(function(player)
 		local function settle()
 			tries = tries + 1
 			local now = read("try" .. tries)
+			-- **All dark is not a reading** (2026-09-24, the first
+			-- container run of the quick tier): on a machine slow
+			-- enough that nothing has been lit yet, two zero readings
+			-- agree with each other and the check fails with the light
+			-- blamed for a world that had not got there. The shaft is
+			-- open to the sky by construction, so a zero at the top is
+			-- the world not being ready rather than an answer.
+			if now:match("water0=%d+/0") then
+				last = nil
+				if tries < 8 then
+					core.after(10, settle)
+					return
+				end
+			end
 			if last and now == last then
 				core.log("action", "water_light: settled after " ..
 						tries .. " readings")

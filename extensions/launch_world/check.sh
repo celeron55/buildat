@@ -516,7 +516,13 @@ fi
 	echo "mouse_down left"
 	echo "delay 1400"
 	echo "mouse_up left"
-	echo "delay 9000"
+	# **Wait for the launch rather than guessing at it**: on a slow
+	# machine -- a container under llvmpipe is one -- nine seconds was
+	# not enough, and F10 went before the game had started, so the room
+	# was asked to come back from a game it had not gone into yet
+	# (2026-09-24, the first container run of the quick tier).
+	echo "wait_log 40000 game: the room stands down"
+	echo "delay 2000"
 	echo "screenshot $out/in-game.png"
 	# **And back out of it** ([MENU_CONTEXT]): the room stands behind the
 	# game the whole time, so the way back is the client's own
