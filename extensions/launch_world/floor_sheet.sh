@@ -30,7 +30,10 @@ cd "$here/Build"
 if pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
-{ echo "delay 5000"; echo "screenshot $out/RUN.png"; echo "delay 500"
+# **Wait for the probe** (user, 2026-09-24): it renders its ninety
+# frames after the room comes up, and a sheet shot before it has settled
+# shows differences that are not the knob's.
+{ echo "delay 9000"; echo "screenshot $out/RUN.png"; echo "delay 500"
 	echo "quit"; } > "$out/cmds.txt"
 # **The room as the reference frame has it** (user, 2026-09-24): no
 # launch actions, no saves, no servers and no save read, so the wall is

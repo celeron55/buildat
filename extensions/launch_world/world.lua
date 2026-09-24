@@ -402,7 +402,12 @@ do
 	-- knob rather than a decision: BUILDAT_LAUNCH_FLOOR_VALUE scales the
 	-- light square's value and BUILDAT_LAUNCH_FLOOR_GLOSS its roughness
 	-- (lower is glossier). floor_sheet.sh draws the options.
-	local fv = tonumber(env("BUILDAT_LAUNCH_FLOOR_VALUE")) or 1.0
+	-- **0.60 is the pick** (user, 2026-09-24, off the three-sheet
+	-- round): at 1.00 the light squares were 47 per cent saturated and
+	-- washed the reflection off; at 0.60 nothing clips and the floor
+	-- reads as stone rather than as paper. The default is the number
+	-- somebody looked at, not a flag over a number nobody chose.
+	local fv = tonumber(env("BUILDAT_LAUNCH_FLOOR_VALUE")) or 0.60
 	register_tile("floor_light.png", flat, flat,
 			{base = magic.Color(0.72 * fv, 0.73 * fv, 0.76 * fv, 1),
 				relief = 0})
@@ -484,7 +489,18 @@ column_id = room.id.column
 -- The floor's gloss, the other half of the knob above: the two squares
 -- keep their two hundredths of difference, so what moves is the finish
 -- and not the pattern
-local fg = tonumber(env("BUILDAT_LAUNCH_FLOOR_GLOSS")) or 0.07
+-- **The finish, and what this knob really does** (measured 2026-09-24):
+-- roughness picks a **mip level** of the reflection probe through
+-- `GetMipFromRoughness`, so it moves in steps and has as many distinct
+-- values as the probe has levels -- **one**, while the room's probe is
+-- the float16 cube [PBR_HDR] settled on, which this driver will not
+-- filter a chain for. Shot against a mip chain it has a handful:
+-- 0.02 and 0.04 came out byte-identical and the rest of the range
+-- differed by under two levels of 255. So this is the surface's
+-- roughness for the lights, and **not** a blur knob for the
+-- reflection; a knob that did less than it said cost two afternoons
+-- here already.
+local fg = tonumber(env("BUILDAT_LAUNCH_FLOOR_GLOSS")) or 0.04
 room.id.floor_light = add_voxel("floor_light", "generated/floor_light.png",
 		true, fg, 1.0, 0.15)
 room.id.floor_dark = add_voxel("floor_dark", "generated/floor_dark.png",
@@ -545,6 +561,10 @@ local probe_box = {
 	-- How much the floor reflects: a multiplier on the specular colour
 	-- the room hands its voxels, 1 being the dielectric eight per cent
 	-- the shader assumes ([LAUNCH_WORLD]'s floor round, second axis)
+	-- 1.0 is the dielectric eight per cent the shader assumes and is
+	-- what the round was judged at. **Above 1 is not a physical
+	-- dielectric** -- it is a floor lying about its own material, which
+	-- may still be the right look and is a pick rather than a fix.
 	spec = tonumber(env("BUILDAT_LAUNCH_FLOOR_SPEC")) or 1.0,
 	at = magic.Vector3(0, 2.0 * U, 0),
 	min = magic.Vector3(room.X_MIN - 1, room.FLOOR_TOP, room.Z_MIN - 1),
