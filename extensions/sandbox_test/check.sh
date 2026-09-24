@@ -29,6 +29,16 @@ if grep -aq "Crash: SIG" "$out/cli.log"; then
 			"$(grep -a "Crash: SIG" "$out/cli.log" | head -1)"
 	exit 1
 fi
+# **And what the whitelist does let through works** ([URHO_SWEEP]): the
+# same boot runs tests/safe.lua, so a class wrapped and silently doing
+# nothing is a failure here rather than a surprise in a game
+safe=$(grep -ac "launch sandbox: the safe tests passed" "$out/cli.log")
+if [ "$safe" -lt 1 ]; then
+	echo "FAIL: the safe tests did not pass --" \
+			"$(grep -a "safe.lua\|the safe tests" "$out/cli.log" | tail -2 |
+				tr '\n' ' ')"
+	exit 1
+fi
 line=$(grep -a "launch sandbox: .* reaches tried" "$out/cli.log" | tail -1 |
 	sed 's/.*sandbox_[a-z]*: //')
 echo "${line:-(the hostile launch UI said nothing)}"

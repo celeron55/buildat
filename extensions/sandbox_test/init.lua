@@ -98,6 +98,21 @@ function M.boot(action)
 		return
 	end
 	attack.run()
+	-- **The whitelist's other half**, in the same boot ([URHO_SWEEP]):
+	-- the attack says what cannot be reached, and `tests/safe.lua` says
+	-- that what was wrapped works -- a class added to the whitelist and
+	-- silently doing nothing is the fault that sweep exists to avoid.
+	-- It ran only behind Ctrl+F12 before, which no check presses.
+	-- This boot is sandboxed code itself, so the file is run through the
+	-- sandbox's own verb rather than read off the disk
+	local ok, why = pcall(function()
+		return buildat.run_extension_file("wrapped.lua")
+	end)
+	if ok then
+		log:info("launch sandbox: the safe tests passed")
+	else
+		log:error("launch sandbox: the safe tests failed: " .. tostring(why))
+	end
 end
 
 local is_active = false

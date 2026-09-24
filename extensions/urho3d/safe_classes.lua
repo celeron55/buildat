@@ -960,9 +960,108 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Resource,
 	})
 
+	-- **A game reads its own XML** ([URHO_SWEEP]): an XMLFile comes out
+	-- of the resource cache, which is how a game's own media arrives,
+	-- and this is what walks it. The reading half only -- the setters
+	-- build a document that has nowhere to go, `XMLFile:Save()` taking
+	-- a path on the user's disk, and `FromString` rewrites a file the
+	-- cache may be handing to somebody else.
+	util.wc("XMLElement", {
+		instance = {
+			IsNull = util.self_function(
+					"IsNull", {"boolean"}, {"XMLElement"}),
+			NotNull = util.self_function(
+					"NotNull", {"boolean"}, {"XMLElement"}),
+			GetName = util.self_function(
+					"GetName", {"string"}, {"XMLElement"}),
+			GetValue = util.self_function(
+					"GetValue", {"string"}, {"XMLElement"}),
+			HasChild = util.self_function(
+					"HasChild", {"boolean"}, {"XMLElement", "string"}),
+			HasAttribute = util.self_function(
+					"HasAttribute", {"boolean"}, {"XMLElement", "string"}),
+			GetNumAttributes = util.self_function(
+					"GetNumAttributes", {"number"}, {"XMLElement"}),
+			GetAttribute = util.self_function(
+					"GetAttribute", {"string"}, {"XMLElement", "string"}),
+			GetBool = util.self_function(
+					"GetBool", {"boolean"}, {"XMLElement", "string"}),
+			GetInt = util.self_function(
+					"GetInt", {"number"}, {"XMLElement", "string"}),
+			GetUInt = util.self_function(
+					"GetUInt", {"number"}, {"XMLElement", "string"}),
+			GetFloat = util.self_function(
+					"GetFloat", {"number"}, {"XMLElement", "string"}),
+			GetDouble = util.self_function(
+					"GetDouble", {"number"}, {"XMLElement", "string"}),
+			-- The ones that hand back another wrapped thing: an element,
+			-- or one of the maths types an attribute can be written as
+			GetChild = util.wrap_function({"XMLElement", {"string", "__nil"}},
+				function(self, name)
+					return util.wrap_instance("XMLElement",
+							self:GetChild(name or ""))
+				end
+			),
+			GetNext = util.wrap_function({"XMLElement", {"string", "__nil"}},
+				function(self, name)
+					return util.wrap_instance("XMLElement",
+							self:GetNext(name or ""))
+				end
+			),
+			GetParent = util.wrap_function({"XMLElement"},
+				function(self)
+					return util.wrap_instance("XMLElement", self:GetParent())
+				end
+			),
+			GetFile = util.wrap_function({"XMLElement"},
+				function(self)
+					return util.wrap_instance("XMLFile", self:GetFile())
+				end
+			),
+			GetVector2 = util.wrap_function({"XMLElement", "string"},
+				function(self, name)
+					return util.wrap_instance("Vector2", self:GetVector2(name))
+				end
+			),
+			GetVector3 = util.wrap_function({"XMLElement", "string"},
+				function(self, name)
+					return util.wrap_instance("Vector3", self:GetVector3(name))
+				end
+			),
+			GetColor = util.wrap_function({"XMLElement", "string"},
+				function(self, name)
+					return util.wrap_instance("Color", self:GetColor(name))
+				end
+			),
+			GetIntVector2 = util.wrap_function({"XMLElement", "string"},
+				function(self, name)
+					return util.wrap_instance("IntVector2",
+							self:GetIntVector2(name))
+				end
+			),
+		},
+	})
+
 	util.wc("XMLFile", {
 		inherited_from_by_wrapper = dst.Resource,
+		instance = {
+			-- The document's root, by name or whatever is there
+			GetRoot = util.wrap_function({"XMLFile", {"string", "__nil"}},
+				function(self, name)
+					return util.wrap_instance("XMLElement",
+							self:GetRoot(name or ""))
+				end
+			),
+			ToString = util.self_function(
+					"ToString", {"string"}, {"XMLFile"}),
+		},
 	})
+	-- refused: Localization -- the engine's own string table, loaded from a
+	-- JSON resource by language; buildat's translations are the Luanti
+	-- module's ([TRANSLATIONS]) and a game's own strings are its own
+	-- refused: ResourceWithMetadata -- a resource's metadata by name, which
+	-- is the engine's own bookkeeping; a game's data belongs in the game's
+	-- own files
 
 	-- Drawable, which is what Urho3D says it is; it used to say Octree here,
 	-- which gave it the octree's query methods and none of a drawable's
