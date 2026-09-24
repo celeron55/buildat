@@ -380,7 +380,7 @@ interface/packet_stream.h: PacketType, UnknownPacketReceived, OutgoingPacketType
 interface/polyvox_cereal.h: save, load
 interface/polyvox_numeric.h: container_coord, container_coord16
 interface/polyvox_std.h: operator, dump, os
-interface/process.h: get_environment_variable, ExecOptions, shell_exec, Handle, valid, start, request_terminate, kill_force, terminate, is_running
+interface/process.h: get_environment_variable, ExecOptions, shell_exec, Handle, valid, start, request_terminate, kill_force, terminate, is_running, reap
 interface/select_handler.h: SelectHandler, check, timeval
 interface/semaphore.h: Semaphore, wait, wait_us, timespec, post
 interface/server.h: ServerConfig, TickEvent, ModuleModifiedEvent, ModuleLoadedEvent, ModuleUnloadedEvent, Server, ~Server, shutdown, load_module, set_module_count, unload_module, reload_module, get_modules_path, get_builtin_modules_path, get_module_path, has_module, get_loaded_modules, access_module, sub_event, emit_event, tmp_store_data, tmp_restore_data, add_file_path, get_file_path, get_config, get_game_id, access_thread_pool
