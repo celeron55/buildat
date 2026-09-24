@@ -881,7 +881,7 @@ end
 -- and cuts it where it is nought, and a **roughness** map leaves the
 -- surface where it is nought and roughens it where it is one. The same
 -- picture, read from either end.
-local function mark_image(src, one_bit, invert)
+local function mark_image(src, one_bit, invert, rough_only)
 	local img = magic.Image:new()
 	assert(img:SetSize(MARK_SIZE, MARK_SIZE, 3), "the mark's tile")
 	local bg = invert and 0.0 or 1.0
@@ -903,7 +903,19 @@ local function mark_image(src, one_bit, invert)
 				local on = bit_of(c, cutout)
 				if on then ink = ink + 1 end
 				local v = on and (invert and 1.0 or 0.0) or bg
-				img:SetPixel(off + x, off + y, magic.Color(v, v, v, 1))
+				-- **Red is roughness, green is metalness** in Urho3D's
+				-- metallic-roughness map (`PBRLitSolid`: `sSpecMap.r`
+				-- adds to roughness and `.g` to metalness). A grey mark
+				-- therefore pushes *both*, and option B's etch turned
+				-- its patch into rough **metal** -- which on a white
+				-- sphere is a black disc, since a metal has no diffuse
+				-- (2026-09-24). Written into red alone it is what it
+				-- says: the same surface, rougher where the mark is.
+				if rough_only then
+					img:SetPixel(off + x, off + y, magic.Color(v, 0, 0, 1))
+				else
+					img:SetPixel(off + x, off + y, magic.Color(v, v, v, 1))
+				end
 			else
 				if bit_of(c, cutout) then ink = ink + 1 end
 				img:SetPixel(off + x, off + y,
@@ -927,7 +939,7 @@ local function white_texture()
 	return t
 end
 
-local function mark_texture(mark, icon, one_bit, invert)
+local function mark_texture(mark, icon, one_bit, invert, rough_only)
 	if not mark then return nil end
 	-- **The grid's fallback is not a mark.** `launch_grid` hands out
 	-- `buildat_logo.png` for anything whose launcher names no icon, and
@@ -946,7 +958,7 @@ local function mark_texture(mark, icon, one_bit, invert)
 		-- like better than a hash of its name can
 		local src = magic.cache:GetResource("Image", icon)
 		if src then
-			image = mark_image(src, one_bit, invert)
+			image = mark_image(src, one_bit, invert, rough_only)
 		end
 	end
 	if not image then
@@ -971,7 +983,7 @@ local function mark_texture(mark, icon, one_bit, invert)
 				end
 			end
 			kept[#kept + 1] = gen
-			image = mark_image(gen, one_bit, invert)
+			image = mark_image(gen, one_bit, invert, rough_only)
 			if (last_mark_ink or 0) > 0 then break end
 		end
 	end
@@ -1013,7 +1025,7 @@ end
 local function etched(r, g, b, roughness, metallic, mark, icon)
 	if mark_option() == "B" then
 		white_texture()
-		local t = mark_texture(mark, icon, true, true)
+		local t = mark_texture(mark, icon, true, true, true)
 		if not t then return nil end
 		local m = magic.Material:new()
 		m:SetTechnique(0, magic.cache:GetResource("Technique",
