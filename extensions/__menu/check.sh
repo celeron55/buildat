@@ -73,6 +73,30 @@ if [ "$grid" -lt 1 ] || [ "$lost" -gt 0 ] || [ "$alive" -lt 10 ]; then
 	grep -a "leave:\|Failed to run function" "$out/back.log" | head -3
 	exit 1
 fi
+# **And the console opens over the grid** ([LAUNCH_CONSOLE] offers its
+# screen to every launch UI, and the room had it first). The selection
+# starts on the first tile, "Engine settings"; one right is the console,
+# Return opens it and Escape hands the grid back.
+# **The pointer goes to a corner first**: a tile under the mouse takes the
+# selection as the grid appears (HoverBegin), and the run then arrowed
+# from whichever game happened to sit in the middle of the window.
+{ echo "delay 600"; echo "mouse_pos 2 2"
+	echo "delay 4000"; echo "keypress Right"; echo "delay 400"
+	echo "keypress Return"; echo "delay 2500"
+	echo "keypress Escape"; echo "delay 1500"; echo "quit"; } \
+	> "$out/cmds_console.txt"
+rm -f "$out/console.log"
+bin/buildat -m __menu -D ../user -w 1024x640 -l 3 \
+	-L "$out/console.log" -c @"$out/cmds_console.txt" > /dev/null 2>&1
+copened=$(grep -ac "console: .* lines of the API document" "$out/console.log")
+cclosed=$(grep -ac "console: closed" "$out/console.log")
+echo "the grid's console opened $copened times, closed $cclosed"
+if [ "$copened" -lt 1 ] || [ "$cclosed" -lt 1 ]; then
+	echo "FAIL: the grid cannot open the developer console"
+	grep -a "Menu entry\|console:" "$out/console.log" | tail -3
+	exit 1
+fi
+
 if [ "$bad" -gt 0 ]; then
 	echo "FAIL: a launch UI does not start"
 	exit 1

@@ -181,6 +181,22 @@ function M.boot(launch_action)
 	-- the menu's own rather than a tile from the tree
 	add("__menu/res/icon_preferences.png", "Engine settings", preferences.show,
 			"What every game honours: the window, the sound, the mouse.")
+	-- **The console offers its screen and the menu takes it too**
+	-- ([LAUNCH_CONSOLE]: it is offered to every launch UI, and the room
+	-- already had it). Not a launch either: it draws over this screen
+	-- and hands it back. The menu's own keys stand down by themselves
+	-- while it is up -- a stack subscription only fires for the element
+	-- with the focus, and the console takes it.
+	local console = require("buildat/extension/launch_console")
+	console = console and (console.show and console or console.safe)
+	if not (console and console.show) then
+		log:warning("__menu: no developer console to offer")
+	end
+	if console and console.show then
+		add("__menu/res/icon_console.png", "Developer console", function()
+			console.show(function() end)
+		end, "A Lua console in the sandbox, with the API document beside it.")
+	end
 	-- And every launch action the tree offers, in the grid's order
 	local actions = api.launch_actions()
 	for _, action in ipairs(actions) do
@@ -191,6 +207,8 @@ function M.boot(launch_action)
 			end
 		end, action.description)
 	end
+
+	log:info("__menu: "..#items.." tiles")
 
 	-- The selected entry's name and description, to the right of the logo
 	-- in the logo's row ([LAUNCH_DESC]): the label on the first line,
