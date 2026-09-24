@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [BOX_PLAYTEST_2] (9b): the minimap's brightness over half a minute. The
 # stamp is drawn a few times a second and its meter used to get one step per

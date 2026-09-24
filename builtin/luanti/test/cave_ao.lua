@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [CAVE_AO]: a chamber deep underground where both nibbles are nought, with
 -- the shapes the complaint is about -- a pillar, a ledge, a recess and the
 -- corners between them. With no light of its own the place is one flat

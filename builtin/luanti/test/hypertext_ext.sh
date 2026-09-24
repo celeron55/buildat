@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [FORMSPEC_SCROLL]: the same hypertext check as hypertext.sh, for
 # extensions/luanti_client against official Luanti's server: the text with

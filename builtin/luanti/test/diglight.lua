@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [DIG_LIGHT]: is the light under a dig right, and on which copy? A pit
 -- one deep beside the player at t=10 (from a few seconds after the join), a
 -- twenty-step stair from it by t=100, the player put at its bottom at

@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [WATER_LIGHT] 3: the stage for liquid_shore.sh -- a pool of source water
 -- with a row of flowing water along its edge and open floor beyond, seen
 -- from just above the waterline. Luanti's getCornerLevel() answers a corner

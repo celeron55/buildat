@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Is a formspec's model[] element drawn?
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=model_form_check \

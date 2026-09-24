@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # Reads every runner under this directory and says which of them cannot
 # fail -- the contract in lib.sh, checked statically ([CI_RUNS] (1)).
 #

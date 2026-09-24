@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: long
 # [AUTO_PLAYTEST] part 2: a compared episode. episode.lua builds one state
 # on official Luanti's server and on this module, the client does one

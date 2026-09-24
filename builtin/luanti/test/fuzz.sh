@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: long
 # [AUTO_PLAYTEST] part 1: a fuzz run. A fresh world, a client that walks at
 # random for MINUTES from a seeded RNG, and fuzz.lua asserting invariants on

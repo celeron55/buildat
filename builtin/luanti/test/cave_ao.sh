@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [CAVE_AO]: one picture of a cave chamber whose nibbles are both nought,
 # at whatever floor under the ambient is asked for. The ladder the user

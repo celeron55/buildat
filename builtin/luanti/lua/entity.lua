@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/entity.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The objects: everything in a Luanti world that is not a node. A mod
 -- registers an entity and adds one to the map, and from then on it is a

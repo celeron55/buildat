@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Do the particles a game spawns reach the player?
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=particle_check \

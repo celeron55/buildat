@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # Runs every runner of a tier, one at a time, and says what each did
 # ([CI_RUNS] (2)). The tier is named in the runner itself, on a
 # "# tier:" line near the top:

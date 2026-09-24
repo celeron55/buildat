@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- A row of icons on the HUD: Luanti's statbar, which is what a game's
 -- health, hunger and breath are drawn as.
 --

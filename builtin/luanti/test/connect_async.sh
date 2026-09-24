@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [BOX_PLAYTEST_2] (12): the connect runs on a worker, so the frame keeps
 # drawing while it waits. The client is pointed at a blackholed address

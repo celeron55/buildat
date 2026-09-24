@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Do the dig props carry what a dig needs?
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=digprops_check \

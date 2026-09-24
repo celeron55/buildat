@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/classes.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The globals Luanti's C API gives a mod that are classes rather than
 -- functions: ItemStack and the random and noise generators. A mod builds

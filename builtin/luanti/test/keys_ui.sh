@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [KEY_BINDINGS]: the editor screen, driven -- the launcher's menu, its
 # "Luanti settings", "Key bindings...", the forward row picked and U

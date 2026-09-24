@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- What a waypoint looks like, which is a thing to look at rather than to
 -- assert: a label over a place in the world with how far away it is, and a
 -- picture over the same place.

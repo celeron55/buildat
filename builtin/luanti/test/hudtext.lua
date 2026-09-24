@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- The colours inside a line of HUD text: core.colorize() writes Luanti's own
 -- markup into it and each piece is drawn in the colour it asks for.
 --

@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- A row of the player's own inventory on the HUD: Luanti's inventory
 -- element, which a game that draws its own hotbar uses.
 --

@@ -1,5 +1,6 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //
 // One Luanti mapblock, as a world's map.sqlite holds it. Read-only and
 // one-shot: this is what the importer reads a Luanti world with, and it

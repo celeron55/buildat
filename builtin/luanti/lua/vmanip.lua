@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/vmanip.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- VoxelManip, and the mapgen seam it is the map half of.
 --

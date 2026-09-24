@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/launcher/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- One tile per Luanti game installed under user/luanti/games -- devtest,
 -- VoxeLibre, whatever is there -- which is why the launch grid asks every

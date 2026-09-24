@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/formspec.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Luanti's formspecs, which are the windows a server puts on the screen: the
 -- player's inventory, a chest, a furnace, whatever a mod asks for.

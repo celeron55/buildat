@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [FORMSPEC_SCROLL]: animated_image and button_url in a form
 core.register_on_joinplayer(function(player)
 	core.after(3, function()

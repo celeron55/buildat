@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [WATER_LIGHT]: a passage dug into the ground with a water run in it, lit
 -- from a shaft, read a node at a time. The one probe the item asks for:
 -- how far the sky's light travels along water and down through it.

@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/bootstrap.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- What Luanti's vendored builtin expects to find already registered when it
 -- starts: in Luanti this is the C API, and here it is this file plus the four

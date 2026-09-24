@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- devtest's /bench_* commands, run for the joining player and logged, for
 -- the LuaJIT before/after table in doc/plan/performance_plan.md [LUAJIT].
 --

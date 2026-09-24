@@ -2,6 +2,7 @@
 # Buildat: builtin/luanti/test/drive.py
 # http://www.apache.org/licenses/LICENSE-2.0
 # Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 #
 # [SCAN_DRIVE]: the player commanded from what the scan shows. A loop of
 # scan, read, act: `event scan` is written to the client's stdin (a fifo

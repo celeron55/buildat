@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- The reference shot set: what is photographed, from where, when. Data and
 -- no behaviour; runner.lua is the behaviour and holds no numbers. build.sh
 -- concatenates the two into the fixture each client runs and reads this

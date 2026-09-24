@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [EXT_SETTINGS]: the "Luanti client settings" tile, driven -- the render
 # mode row cycled once and the file read back, the key editor's forward

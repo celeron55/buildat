@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [FOCUS_LOG]: the mouse's capture follows the window's focus. A client in
 # devtest, the mouse hidden by the first placement; then ten times the

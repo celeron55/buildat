@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- The particles a game spawns
 --
 -- core.add_particle(), core.add_particlespawner() and

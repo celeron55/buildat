@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Is an object hit rather than dug?
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=punch_check \

@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/client.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Luanti's client side of the login, on top of connection.lua:
 --
@@ -37,8 +38,12 @@ local FORMSPEC_API_VERSION = 8
 -- path this implements, where claiming an older one would send it down a
 -- path for a client that no longer exists. The string beside it is what
 -- Luanti puts its full version in, and a server shows it in a player list.
+-- The buildat version goes in it ([LICENSE_DUAL]'s first courtesy), so
+-- an operator reading a player list sees "buildat 0.4.19 luanti_client"
+-- rather than a bare name and knows what is connecting
 local VERSION = {major = 5, minor = 17, patch = 0,
-		hash = "buildat luanti_client"}
+		hash = "buildat "..(buildat.version and buildat.version() or "?")..
+				" luanti_client"}
 
 -- The language the player reads, which a game asks for through
 -- get_player_information().lang_code -- this game's craft guide, creative

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [BOX_PLAYTEST_2] (13b): the server list's filter text is kept. The
 # luanti_client's "Play on a Luanti server" dialog is opened, "mine" typed

@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- What a game says is in its sky: Luanti's set_sun, set_moon and set_stars,
 -- and the colours of the hours in set_sky. Half of this asserts and half of
 -- it is to be looked at.

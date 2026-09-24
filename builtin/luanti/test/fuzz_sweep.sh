@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: long
 # [FUZZ_SWEEP]: the campaign, one fuzz.sh run after another, each run's
 # directory kept whole under local/fuzz_sweep/<game>_<seed>_<min>/ and one

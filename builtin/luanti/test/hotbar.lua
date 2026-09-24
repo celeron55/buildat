@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- What a game says about the client's own hotbar: how many slots, the
 -- picture behind them and the one that marks the slot in hand. Half of this
 -- asserts and half of it is to be looked at.

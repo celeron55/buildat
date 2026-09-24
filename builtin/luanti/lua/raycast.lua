@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/raycast.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- core.raycast(pos1, pos2, objects, liquids, pointabilities): what a ray runs
 -- into, nearest first. A mod uses it for everything a player points at and

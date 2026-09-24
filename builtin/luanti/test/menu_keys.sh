@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [MENU_KEYS]: the launch menu's keyboard. The client is started with no
 # server, because the launch menu is what it shows when it has nothing to

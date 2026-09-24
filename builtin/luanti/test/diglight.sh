@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [DIG_LIGHT]: diglight.lua's server beside a client that reads its own
 # light at t=15 (the pit), t=70 (the stair) and t=115 (its third step, the player put there) -- the scan's eye light

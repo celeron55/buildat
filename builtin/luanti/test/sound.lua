@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Do the sounds a game plays reach the player?
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=sound_check \

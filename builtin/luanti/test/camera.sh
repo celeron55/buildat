@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [THIRD_PERSON]: the camera key cycled through the three views and each
 # shot: local/camera/first.png, behind.png, front.png. The stage is

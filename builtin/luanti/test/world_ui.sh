@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [WORLD_LIST]: the world screen, driven -- the launcher's VoxeLibre tile,
 # the row SAVE (buildat_test_sprites unless given; a test save of this

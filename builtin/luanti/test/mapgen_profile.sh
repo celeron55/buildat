@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [MAPGEN_STEP]: where a fresh world's on_generated time goes, by mod. A
 # VoxeLibre world is generated around a player for a couple of minutes and

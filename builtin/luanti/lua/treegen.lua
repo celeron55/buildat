@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/treegen.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The L-system trees: core.spawn_tree(), core.spawn_tree_on_vmanip() and the
 -- "lsystem" decoration, which are all one generator with three ways in.

@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [FORM_ENTER]: a form with a search field in it -- what the client sends
 -- when enter is pressed in it, and whether the form stays open. The rows
 -- under the field are what the last search answered, so a redraw says the

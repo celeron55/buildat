@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [EXT_HOTBAR]: the extension's hotbar is the row both clients share -- the
 # game's own hotbar_image and hotbar_selected_image on it, as many slots as

@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [DAWN_LIGHT]: the hours the user named, one after another, so that a
 -- client can shoot each of them. The three probed hours are in the list
 -- too: they are what must not move.

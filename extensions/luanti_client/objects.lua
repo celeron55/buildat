@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/objects.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The things in the world that are not nodes: other players, mobs, dropped
 -- items, and whatever else a game's mods put there.

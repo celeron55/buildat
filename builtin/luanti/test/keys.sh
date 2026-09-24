@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [KEY_BINDINGS]: a rebound key walks the player. user/luanti/settings.json
 # holds key.forward=U; a devtest client joins, holds U for three seconds,

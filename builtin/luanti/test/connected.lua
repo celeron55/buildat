@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Are "connected" node boxes drawn with their connections? ([FEATURE_SWEEP]
 -- 2026-09-21: VoxeLibre's fences, panes and chorus plants are this kind)
 --

@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Luanti's compass element, both ways it is drawn: a picture that turns with
 -- the player and a strip that scrolls past.
 --

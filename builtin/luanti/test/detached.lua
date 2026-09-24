@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- A detached inventory, which belongs to nobody: a form shows one, what is
 -- moved in and out of it goes through the callbacks its owner gave it, and
 -- the client draws what is in it.

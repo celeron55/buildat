@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # [OFFICIAL_SHOTS]: the reference shot set's buildat-server half -- the
 # module running the game inside buildat_server, with the launcher in front
 # of it -- against the same world and the same fixture the Luanti-server

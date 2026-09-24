@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # Sourced by the runners that toggle F11.
 #
 # **F11 takes the whole screen and the keyboard focus of whatever X

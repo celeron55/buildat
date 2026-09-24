@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/gltfmesh.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- glTF 2.0, as the quads a voxel's shape is made of -- the same thing
 -- objmesh.lua and b3dmesh.lua hand back, so a node whose drawtype is "mesh"

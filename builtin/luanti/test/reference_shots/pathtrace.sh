@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # [PATH_TRACE_REF]: dump the client's meshes at each viewpoint, render in Cycles.
 set -eu
 here=$(cd "$(dirname "$0")/../../../.." && pwd)

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [FLY_MODES]: the three modes as official has them, driven. A devtest
 # world (the singleplayer holds every privilege): K, then Space held for

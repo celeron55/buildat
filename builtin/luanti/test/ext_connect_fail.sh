@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [BOX_PLAYTEST_2] (2): the "Play on a Luanti server" tile from the grid,
 # a connect to an address nothing answers at: the failure must be said in

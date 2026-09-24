@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [FORMSPEC_SCROLL]: a form with a scroll_container and its scrollbar
 core.register_on_joinplayer(function(player)
 	core.after(3, function()

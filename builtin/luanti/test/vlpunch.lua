@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Does a punched VoxeLibre mob keep its engine hp? Its mobs are immortal to
 -- the engine and keep their own health, and a punch that took a point off
 -- the engine's hp beside it removed the mob at zero -- [PUNCH_VANISH].

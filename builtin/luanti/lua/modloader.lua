@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/modloader.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Finds the game's mods, puts them in dependency order, and runs them.
 --

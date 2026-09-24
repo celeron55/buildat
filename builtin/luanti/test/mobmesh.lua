@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Is a VoxeLibre mob drawn as its model? ([OBJECT_MESH] step 0)
 --
 --   builtin/luanti/test/mobmesh.sh

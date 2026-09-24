@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- The smallest thing that proves the module: a node type, and a floor of it.
 --
 -- A real game would place its terrain from core.register_on_generated, which

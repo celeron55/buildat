@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # [PATH_TRACE_REF] Cycles render of dumps from buildat.dump_meshes().
 # The .obj is Urho/Luanti Y-up world space, with
 #   # camera_pos x y z

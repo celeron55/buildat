@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [AUTO_PLAYTEST] part 2: a compared episode. The same worldmod runs on
 -- official Luanti's server and on this module, builds one well-defined
 -- state with server-side API both have, lets the client do one scripted

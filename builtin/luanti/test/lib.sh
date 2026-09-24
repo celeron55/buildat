@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # The contract every runner under builtin/luanti/test/ keeps, so that a
 # machine can read the result and not only a person ([CI_RUNS] (1)).
 #

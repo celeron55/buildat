@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 """[NEW_WORLD_FORM]: the new-world screen driven -- a name already taken
 leaves it standing with what was typed, a seed pasted with Ctrl+V lands in
 the name field, and the mapgen picked is the one written into world.mt."""

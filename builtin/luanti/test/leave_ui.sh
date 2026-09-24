@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [MENU_CONTEXT]: leaving a menu-only game for the launcher, driven -- the
 # VoxeLibre tile opens the world screen (a local server behind it), "< back

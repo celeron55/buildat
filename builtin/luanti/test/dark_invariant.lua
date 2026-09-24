@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [DARK_INVARIANT]'s two probe pairs, both carved into real terrain at
 -- fixed places in a world of a fixed seed, so the rock around them is the
 -- same every run.

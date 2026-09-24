@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [THIRD_PERSON]: the extension client's camera key against official
 # Luanti's server, the three views shot: local/camera_ext/first.png,

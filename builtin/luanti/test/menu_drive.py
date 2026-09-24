@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 """The driver's menu rules ([FIRST_RUN]): from the launch menu to a world
 through buildat's own screens, by scan, find-by-text, click and type.
 

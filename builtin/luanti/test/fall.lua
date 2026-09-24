@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [DIG_PARITY]: a server-only reading of an item dropped into a one-node
 -- hole in a dirt platform at y 120, its y logged four times a second for
 -- three seconds; no player, so objects are made active everywhere.

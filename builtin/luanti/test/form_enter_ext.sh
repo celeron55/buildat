@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [FORM_ENTER]: the same enter check as form_enter.sh, for
 # extensions/luanti_client against official Luanti's server -- the same

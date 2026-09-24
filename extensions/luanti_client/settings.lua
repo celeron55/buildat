@@ -1,6 +1,7 @@
 -- Buildat: extensions/luanti_client/settings.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The extension's own settings ([EXT_SETTINGS]), in
 -- <user>/luanti_client/settings.json: the render mode, the view range,

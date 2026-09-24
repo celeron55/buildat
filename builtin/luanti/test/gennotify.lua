@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Does the mapgen report what it made?
 --
 -- Run it against devtest, whose v7 world has dungeons and large caves in

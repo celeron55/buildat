@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: long
 # devtest's /bench_* commands through bench.lua, with a client connected;
 # prints the bench lines. See [LUAJIT] in doc/plan/performance_plan.md.

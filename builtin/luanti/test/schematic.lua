@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Does a .mts schematic read and place? read_schematic() parses the file,
 -- serialize_schematic(.., "lua") is what mcl_structures sizes a structure
 -- by, and place_schematic() puts it in the world with its centering flag.

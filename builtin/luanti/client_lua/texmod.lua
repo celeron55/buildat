@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/client_lua/texmod.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Copied verbatim from extensions/luanti_client/texmod.lua, which is where
 -- it was written and where its own history is. It touches no file and no

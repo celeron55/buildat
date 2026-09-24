@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/test.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Checks serialize.lua and connection.lua against a fake socket. Wants no
 -- engine, so:

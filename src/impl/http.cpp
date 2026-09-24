@@ -2,6 +2,7 @@
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 #include "interface/http.h"
 #include "core/log.h"
+#include "core/version.h"
 #include <curl/curl.h>
 #ifdef _WIN32
 	// curl.h brings windows.h in, and windows.h #defines interface, which
@@ -54,7 +55,12 @@ static CURL *easy(const ss_ &url, char *errbuf)
 	curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(c, CURLOPT_MAXREDIRS, 8L);
 	curl_easy_setopt(c, CURLOPT_FAILONERROR, 1L);
-	curl_easy_setopt(c, CURLOPT_USERAGENT, "buildat");
+	// **Who is calling** ([LICENSE_DUAL]'s second courtesy): ContentDB's
+	// and the serverlist's bandwidth is donated, and an operator reading
+	// a log should see a name and a version rather than libcurl's
+	// default. A project URL belongs here the day there is a public one.
+	static const ss_ user_agent = ss_("buildat/")+BUILDAT_VERSION;
+	curl_easy_setopt(c, CURLOPT_USERAGENT, user_agent.c_str());
 	curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 20L);
 	curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1L);
 	curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 60L);

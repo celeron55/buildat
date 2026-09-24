@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: long
 # [FIRST_RUN]: the new user's first hour, driven -- empty user and cache
 # paths, VoxeLibre installed from a ContentDB mirror through the client's

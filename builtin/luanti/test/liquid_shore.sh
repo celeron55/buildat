@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [WATER_LIGHT]: the shore where a flow meets a pool, in a world of a fixed
 # seed at a fixed place, shot once as the code stands and once with

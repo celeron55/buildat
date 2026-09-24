@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [WATER_LIGHT]: how far the sky's light travels along water in a roofed
 # passage. The fixture builds a tunnel with one opening to the sky and a

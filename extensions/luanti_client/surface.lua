@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/surface.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- What a node's surface is made of, guessed from its definition.
 --

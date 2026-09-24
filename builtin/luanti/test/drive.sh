@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: long
 # [SCAN_DRIVE]: a driven run. The same server and fixture as fuzz.sh, the
 # client on its stdin (a fifo), and drive.py choosing every act from what

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # **Not in a tier**: this is a tool rather than a check. It takes a cell
 # as its first argument and drives runs of ten minutes each, so a tier
 # that calls it with no arguments gets "$1: unbound variable" and a

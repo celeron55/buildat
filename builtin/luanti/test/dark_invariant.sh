@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [DARK_INVARIANT]'s two probe pairs. The fixture carves a sealed room deep
 # inside stone -- no opening, no ray from any surface in it reaches the sky

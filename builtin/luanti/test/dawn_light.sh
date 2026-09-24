@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [DAWN_LIGHT]: the hour before the sun. At 4:00-5:00 (and 19:00-20:00) the
 # halo is up while the day ramp is still zero, so the ground was black under

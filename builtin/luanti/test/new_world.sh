@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [NEW_WORLD_FORM]: the new-world screen. A name that is already taken
 # leaves the screen standing with the name, the seed and the toggles as

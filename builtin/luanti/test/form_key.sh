@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [BOX_PLAYTEST_2] (8): the key that opens a form must not type into the
 # field the form focuses. VoxeLibre's creative inventory (I) focuses its

@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/json.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- core.parse_json and core.write_json, which in Luanti are jsoncpp behind a
 -- pair of C functions. A mod uses them for anything that talks to the world

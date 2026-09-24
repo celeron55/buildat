@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [THIRD_PERSON]: the stage for camera.sh -- the player on a stone floor
 -- with a wall two nodes behind them, so the third-person camera from
 -- behind has something to be pulled in by, and open ground ahead for the

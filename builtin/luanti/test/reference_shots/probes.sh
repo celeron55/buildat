@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # The probe table, read out of the reference shots -- what a tuning cycle
 # ends with, so that "did that work" is a command rather than a memory.
 # See [RENDER_MODES] and [GREEN_BIAS] in doc/plan/rendering_plan.md.

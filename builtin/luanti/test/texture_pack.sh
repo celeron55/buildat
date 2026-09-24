@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [VOXEL_MATERIALS] layer 2's upgrade path: a texture pack under
 # user/luanti/texture_packs wins over what the game ships. The runner writes

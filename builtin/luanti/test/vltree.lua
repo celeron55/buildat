@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Does VoxeLibre get its trees? They are schematic decorations placed on
 -- "group:grass_block", and a chunk with grass and no trees is the fault
 -- [NO_TREES] found.

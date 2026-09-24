@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [EXT_HUD_PARITY]: the extension client's minimap and F5 keys against official
 # Luanti's server: the minimap at the top right in surface mode, V three

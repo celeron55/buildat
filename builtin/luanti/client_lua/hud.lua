@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/client_lua/hud.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Copied from extensions/luanti_client/hud.lua, which is where it was written
 -- and where its own history is; edit it there and copy it here, or the other

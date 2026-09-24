@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/check_map.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The one runnable check the map seam leaves behind: a node written, flushed
 -- into voxelworld by the module between the two halves, and read back out of

@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/misc.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The small pure functions of Luanti's API: the ones that are arithmetic on a
 -- string and belong nowhere else. Lua 5.1 has no bit operators, so the
@@ -132,7 +133,9 @@ end
 
 -- Luanti's day/night ratio at a time of day, for a mod doing its own light
 -- arithmetic. The table and the two ends are time_to_daynight_ratio() in
--- daynightratio.h, with smooth on, which is what the Lua call uses; the
+-- daynightratio.h, with smooth on, which is what the Lua call uses --
+-- **transcribed from Luanti's own source rather than reimplemented, so
+-- the table below is Luanti's and LGPL-2.1-or-later** ([LICENSE_DUAL]); the
 -- argument is the 0...1 time core.get_timeofday() returns and what comes
 -- back is the 0...1 ObjectRef:override_day_night_ratio() takes.
 local DAYNIGHT_RAMP = {

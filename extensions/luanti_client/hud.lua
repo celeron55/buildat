@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/hud.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The HUD the server describes: HUDADD, HUDRM, HUDCHANGE, HUD_SET_FLAGS and
 -- HUD_SET_PARAM.

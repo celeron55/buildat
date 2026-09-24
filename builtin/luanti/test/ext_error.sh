@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [MENU_ERRORS]: an error raised inside a session is a notice line and not
 # a dialog -- a dialog under a world takes the mouse from the player. A

@@ -1,5 +1,6 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+// SPDX-License-Identifier: Apache-2.0 OR MIT
 //
 // A Luanti game's own Lua -- its builtin layer and a game's mods -- running
 // inside buildat_server. Luanti's network protocol is nowhere in this; the

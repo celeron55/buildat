@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Colours in what is said: a mod colours a chat line and each piece is drawn
 -- in the colour it asks for.
 --

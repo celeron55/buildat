@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- The reference shot set's viewpoints, hours and weather, for comparing this
 -- module against official Luanti and against extensions/luanti_client.
 --

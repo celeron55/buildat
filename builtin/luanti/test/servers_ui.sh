@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [SERVER_LIST]: the two connect screens, driven -- the launch menu's
 # "Connect to server" shot with the used addresses on the left; then the

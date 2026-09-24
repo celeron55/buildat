@@ -1,6 +1,7 @@
 -- Buildat: extensions/luanti_client/res/hotbar.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Luanti's hotbar, the way both Luanti clients draw it ([EXT_HOTBAR]): the
 -- first slots of the player's main list along the bottom, in the geometry

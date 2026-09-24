@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [ITEM_META_LOOK]: a stack coloured by its own metadata, and one whose
 -- count is drawn from a meta key
 core.register_on_joinplayer(function(player)

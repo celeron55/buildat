@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/liquid.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The liquid transform: ServerMap::transformLiquidsLocal in official's
 -- servermap.cpp, node for node, over the module's node reads and writes.

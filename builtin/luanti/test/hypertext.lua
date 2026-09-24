@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [FORMSPEC_SCROLL]: a form with a hypertext in it, and what the client
 -- sends back when one of its actions is clicked
 core.register_on_joinplayer(function(player)

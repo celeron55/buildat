@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/srp.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The client half of Luanti's login: SRP-6a with SHA-256 and the 2048-bit
 -- group of RFC 5054. The password itself never goes to the server; what does

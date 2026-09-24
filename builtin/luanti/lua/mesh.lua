@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/mesh.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- A node whose drawtype is "mesh" names a model file, and what the voxel
 -- mesher wants of one is the quads it is made of -- the same thing a nodebox

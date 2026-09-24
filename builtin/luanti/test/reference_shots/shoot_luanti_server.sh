@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # [OFFICIAL_SHOTS]: the reference shot set's Luanti-server half, taken by a
 # script rather than by hand. See doc/plan/rendering_plan.md, [REFVIEWS_MOD].
 #

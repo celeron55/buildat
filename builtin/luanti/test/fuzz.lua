@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [AUTO_PLAYTEST] part 1: the server half of a fuzz run. The client walks
 -- at random (fuzz.sh writes the command file from a seed); this asserts
 -- what must hold whatever it does, once a second, and logs one line per

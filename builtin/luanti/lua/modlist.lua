@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/modlist.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- What a mod is and what order mods load in: Luanti's ServerModManager in the
 -- shape Lua makes it. A mod is a directory with an init.lua, a modpack is a

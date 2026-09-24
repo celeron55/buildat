@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- The sounds a game plays
 --
 -- core.sound_play() and the two calls that talk about one afterwards. What

@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- What is actually at a place in the world, which a screenshot cannot say:
 -- the node, its param2, the light on the face above it, and how far the sky
 -- is open over it. No client needed -- the server answers and exits.

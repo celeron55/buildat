@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/lua/colorspec.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Luanti's ColorSpec: "#rgb", "#rgba", "#rrggbb", "#rrggbbaa", one of the
 -- 148 CSS colour names, a {r, g, b, a} table, or a packed ARGB number. The

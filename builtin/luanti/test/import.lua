@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- What an imported Luanti world brought with it besides its nodes: the
 -- entities its blocks were holding, and the timers on its nodes.
 --

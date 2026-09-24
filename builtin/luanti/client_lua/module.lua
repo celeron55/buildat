@@ -1,6 +1,7 @@
 -- Buildat: builtin/luanti/client_lua/module.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The module's client half, and the first piece of it: the textures a
 -- Luanti game names with an expression rather than with a file.

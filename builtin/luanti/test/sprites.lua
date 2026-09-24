@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [FEATURE_SWEEP] set_sprite: an XP orb (VoxeLibre's sheet of fourteen,
 -- one frame shown) and a sheet entity of this fixture's own at frame 2 of
 -- 4 -- the same stage as connected.lua, the shot local/sprites/mobs.png

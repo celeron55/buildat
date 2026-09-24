@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # [FORMSPEC_SCROLL]: a formspec formelems is drawn, opens on a click and
 # sends the item that was picked. The fixture shows a form with

@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- core.get_node_boxes() against Luanti's own rotations, without a world:
 -- the function's span is cut out of lua/bootstrap.lua (between its BEGIN
 -- and END marks) and run over a few made-up nodes.

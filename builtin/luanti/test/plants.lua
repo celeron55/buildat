@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Plantlike shapes ([PLANT_SIZE]): a row of plants on the mobmesh stage,
 -- a flower (the x), a crop at each meshoptions shape and the 1.4x bit,
 -- for a shot against official's drawPlantlike.

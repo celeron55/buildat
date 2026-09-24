@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- Does a dead player come back? set_hp(0) puts the death screen up, and
 -- respawn() is what its button calls: the player is alive, at full
 -- breath, and somewhere -- the spawn, or wherever an on_respawnplayer

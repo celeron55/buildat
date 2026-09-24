@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
 # [REFVIEWS_MOD]: makes every copy the reference set's consumers want, out
 # of the one file that owns each fact. Nothing it writes is committed.
 #
