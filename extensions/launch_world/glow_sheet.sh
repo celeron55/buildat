@@ -79,6 +79,10 @@ except Exception:
 # whole frames is unreadable at any size a sheet can be looked at.
 CROP, CELL = 560, 300
 rows = []
+# **The arithmetic beside the picture**: how much of the orb is dark and
+# how light those pixels are. A knob nobody can see is a knob that does
+# nothing, and the eye cannot tell 0.01 from 0.02 on a sheet.
+print("%-6s %-8s %-4s %6s %8s" % ("cut", "fig", "hop", "dark%", "meanlum"))
 for hop in hops:
 	for fig in figs:
 		cells = []
@@ -89,6 +93,16 @@ for hop in hops:
 				continue
 			im = Image.open(p).convert("RGB")
 			w, h = im.size
+			# The disc alone, at whichever distance it was shot from
+			s = 160 if hop == "2.0" else 70
+			disc = im.crop(((w - s) // 2, (h - s) // 2,
+					(w + s) // 2, (h + s) // 2))
+			lum = [0.299 * r + 0.587 * g + 0.114 * b
+					for r, g, b in disc.getdata()]
+			dark = [v for v in lum if v < 200]
+			print("%-6s %-8s %-4s %6.1f %8.1f" % (cut, fig, hop,
+					100.0 * len(dark) / len(lum),
+					sum(dark) / len(dark) if dark else -1))
 			im = im.crop(((w - CROP) // 2, (h - CROP) // 2,
 					(w + CROP) // 2, (h + CROP) // 2))
 			im = im.resize((CELL, CELL), Image.LANCZOS)
