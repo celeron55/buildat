@@ -45,8 +45,21 @@ worst=$(echo "$frames" | sort -rn | head -1)
 if [ -n "$worst" ]; then
 	echo "$frames" | awk '$1 > 0.05 {n++} END {
 		if (n) printf "warning: %d frame peaks over 50 ms\n", n}' >&2
-	awk -v w="${worst%% *}" 'BEGIN {exit !(w > 0.25)}' &&
-		say "a frame took $worst ([FRAME_PEAK])"
+	# **On CI a timing is a row, never a verdict** ([CI_RUNS] (3)):
+	# these 50 and 250 ms were argued against this desk's GPU, and under
+	# llvmpipe on a runner they would fail every time -- which teaches
+	# everyone to ignore the result, and then a real failure goes by
+	# with it. What CI asserts is behaviour; the number is still
+	# printed, and the machine it was measured on is what decides
+	# whether it means anything.
+	if [ -n "${BUILDAT_CI:-}" ]; then
+		awk -v w="${worst%% *}" 'BEGIN {exit !(w > 0.25)}' &&
+			echo "note: a frame took $worst ([FRAME_PEAK]); not a" \
+					"verdict under BUILDAT_CI" >&2
+	else
+		awk -v w="${worst%% *}" 'BEGIN {exit !(w > 0.25)}' &&
+			say "a frame took $worst ([FRAME_PEAK])"
+	fi
 fi
 last=$(grep -a "fuzz: t=" "$out/srv.log" | tail -1 | sed 's/^.*fuzz: //')
 [ -n "$last" ] || say "the fixture never ticked"

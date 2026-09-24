@@ -30,7 +30,16 @@ local pickup_test_at, dropped_name = nil, nil
 -- second. `over` counts the seconds the peak was over the ceiling, from
 -- STEP_COUNT_FROM_T on: the ceiling is about play, not the start-up
 -- load, whose one emerge spike is accepted (user, 2026-09-19).
-local STEP_CEILING_S, STEP_FAIL_S = 0.25, 1.0
+-- **A timing is a row on CI, never a verdict** ([CI_RUNS] (3)): these
+-- were argued against this desk's hardware, and on a runner -- llvmpipe,
+-- a shared core, a cold cache -- a step over a second says the machine
+-- is slow rather than that the server is wrong. A run that failed every
+-- time would teach everyone to ignore it, and a real fault would go by
+-- with the noise. So under BUILDAT_CI the peak is still printed and
+-- counted; it just stops deciding. What CI asserts is behaviour.
+local ON_CI = os.getenv and os.getenv("BUILDAT_CI") ~= nil and
+		os.getenv("BUILDAT_CI") ~= ""
+local STEP_CEILING_S, STEP_FAIL_S = 0.25, ON_CI and math.huge or 1.0
 local STEP_COUNT_FROM_T = 90
 local over = 0
 -- Deaths, and when the current one began
@@ -315,6 +324,10 @@ core.register_on_joinplayer(function(player)
 					"load, not counted)", peak, phase, t))
 		elseif peak > STEP_FAIL_S then
 			fail(string.format("a step took %.2f s in %s", peak, phase))
+		elseif ON_CI and peak > 1.0 then
+			core.log("warning", string.format(
+					"fuzz: step peak %.2f s in %s at t=%d (BUILDAT_CI: a "..
+					"row, not a verdict)", peak, phase, t))
 		elseif peak > STEP_CEILING_S and t >= STEP_COUNT_FROM_T then
 			core.log("warning", string.format(
 					"fuzz: step peak %.2f s in %s at t=%d", peak, phase, t))
