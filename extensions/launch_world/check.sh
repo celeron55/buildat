@@ -10,7 +10,11 @@
 #
 #   extensions/launch_world/check.sh
 #
-# tier: quick
+# **core.sh beside this is what an edit runs** -- one client, a quarter
+# of a minute, the paths a room edit breaks ([CHECK_COST], user
+# 2026-09-25). This is the whole of it, and it is what a push runs.
+#
+# tier: full
 # cost: 392s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 #
 # It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0
@@ -43,7 +47,8 @@ fi
 # shows here -- the assertion needs a client with no history, which is
 # an empty user path of its own.
 mkdir -p "$out/emptyuser"
-{ echo "delay 4000"; echo "quit"; } > "$out/cmds_cold.txt"
+{ echo "wait_log_any 30000 on the floor"; echo "quit"
+	} > "$out/cmds_cold.txt"
 examples=$(bin/buildat -m launch_world -D "$out/emptyuser" -w 640x360 -l 3 \
 	-c @"$out/cmds_cold.txt" 2>&1 | sed -e 's/\x1b\[[0-9;]*m//g' |
 	grep -a "launch_w.*: servers: .* on the floor" | head -1 |
@@ -66,7 +71,8 @@ printf '!sound 0.40 0.30\n' > "$out/tieruser/launch_world/room.txt"
 # window -- seen here on a `delay 2500; quit` sequence that sat for
 # twenty-two minutes -- and a check that waits forever on the desk's
 # own weather is a check nobody can read.
-{ echo "delay 4000"; echo "quit"; } > "$out/cmds_snd.txt"
+{ echo "wait_log_any 30000 sound: the orbs at"; echo "quit"
+	} > "$out/cmds_snd.txt"
 timeout 120 bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
 	-L "$out/snd.log" -c @"$out/cmds_snd.txt" > /dev/null 2>&1
 snd=$(grep -a "launch_w.*: sound: the orbs at " "$out/snd.log" | head -1 |
@@ -87,7 +93,8 @@ fi
 # the other settles it -- through the voxel, the voxel wins; over it, the
 # orb does.
 mkdir -p "$out/tieruser/launch_world"
-{ echo "delay 4000"; echo "quit"; } > "$out/cmds_tier0.txt"
+{ echo "wait_log_any 30000 orb sample:"; echo "quit"
+	} > "$out/cmds_tier0.txt"
 timeout 120 bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
 	-L "$out/tier0.log" -c @"$out/cmds_tier0.txt" > /dev/null 2>&1
 sample=$(grep -a "launch_w.*: orb sample: " "$out/tier0.log" | head -1 |
@@ -144,11 +151,17 @@ fi
 # preference picks the room, and a name that is not there falls back to
 # the menu rather than leaving the client with no launcher. -o is used
 # so that a check never writes the user's preferences.
-{ echo "delay 2500"; echo "quit"; } > "$out/cmds_slot.txt"
+# Each waits for the line it is read by, and a run that never says it
+# waits out the timeout rather than a delay nobody sized
+{ echo "wait_log_any 30000 contents: "; echo "quit"; } > "$out/cmds_slot.txt"
+{ echo "wait_log_any 30000 the launch UI is __menu"; echo "quit"
+	} > "$out/cmds_back.txt"
+{ echo "wait_log_any 30000 could not start a launch UI"; echo "quit"
+	} > "$out/cmds_nolauncher.txt"
 slot=$(bin/buildat -D ../user -w 640x360 -l 3 -o launch_ui=launch_world 	-c @"$out/cmds_slot.txt" 2>&1 |
 	sed -e 's/\x1b\[[0-9;]*m//g' | grep -ac "launch_w.*: contents: ")
-back=$(bin/buildat -D ../user -w 640x360 -l 3 -o launch_ui=nosuchthing 	-c @"$out/cmds_slot.txt" 2>&1 |
-	sed -e 's/\x1b\[[0-9;]*m//g' |
+back=$(bin/buildat -D ../user -w 640x360 -l 3 -o launch_ui=nosuchthing 	-c @"$out/cmds_back.txt" 2>&1 |
+	sed -e 's/\x1b\[[0-9;]*m//g' | grep -av "wait_log" |
 	grep -ac "the launch UI is __menu")
 # **And the room runs in the sandbox** ([LAUNCH_SANDBOX]), which is what
 # its launch_ui.txt asks for: the marker is what the client reads, so a
@@ -164,8 +177,8 @@ fi
 # so in its own window and keeps running -- it used to abort, which is
 # the one failure a slot anybody can fill must not have.
 last=$(BUILDAT_TEST_NO_LAUNCHER=1 bin/buildat -D ../user -w 640x360 -l 3 \
-	-o launch_ui=nosuchthing -c @"$out/cmds_slot.txt" 2>&1 |
-	sed -e 's/\x1b\[[0-9;]*m//g' |
+	-o launch_ui=nosuchthing -c @"$out/cmds_nolauncher.txt" 2>&1 |
+	sed -e 's/\x1b\[[0-9;]*m//g' | grep -av "wait_log" |
 	grep -acE "could not start a launch UI|Crash: SIG")
 echo "the slot: picked by name $slot, fell back to the menu $back, sandboxed"
 if [ "$last" -ne 1 ]; then

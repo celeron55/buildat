@@ -137,6 +137,17 @@ cheapest runners that cover what git says changed, which is the regular check.
 A runner is never retried: a check run three times and taken at its best is
 how a real fault becomes a known flake.
 
+A change runs the runner that covers it, and the tier is what a push runs.
+Twenty minutes is never the right answer to a one-word change. Where the full
+runner is dear, the tree carries a core one beside it -- one client and well
+under a minute, the paths an edit breaks (extensions/launch_world/core.sh
+against check.sh) -- and that is what an edit runs.
+
+A drive's waits say what they are waiting for, and the line they print is in
+the log the verdict greps: a grep whose pattern the drive also carries counts
+the wait's own line and passes by itself. Filter wait_log out, or grep for the
+line's own source (launch_w:, not the text alone).
+
 Under BUILDAT_CI=1 a timing is a row and never a verdict -- what CI asserts is
 behaviour, since a threshold argued against a desk's GPU fails every run under
 llvmpipe and teaches everyone to ignore the result.
