@@ -327,6 +327,18 @@ function M.in_game()
 	return in_a_game
 end
 
+-- A local server that died: the last lines of its log and where the
+-- whole of it is, so a crash's backtrace is on the screen and not just
+-- gone ([START_PROGRESS]). The client asks the launcher for this when
+-- the server it started goes away, and a launcher that cannot answer
+-- leaves the player with a shutdown and no reason for it -- which is
+-- what the grid did until 2026-09-24.
+function M.show_dead_server(title, on_close)
+	local path, tail = api.local_server_log_tail(20)
+	ui_utils.show_message_dialog(title .. "\n\n" .. tail ..
+			"\nThe full log is at " .. path, on_close)
+end
+
 function M.leave_game()
 	if not in_a_game and not api.local_server_running() then
 		return false

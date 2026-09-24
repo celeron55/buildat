@@ -77,6 +77,52 @@ if [ "$bad" -gt 0 ]; then
 	echo "FAIL: a launch UI does not start"
 	exit 1
 fi
+# **And a server that dies is shown, not swallowed** ([START_PROGRESS]).
+# When the local server goes, the client asks the launcher to say so --
+# the last lines of its log and where the whole of it is, so a crash's
+# backtrace is on the screen rather than gone. That path reads the
+# launcher through the same lookup that had nothing in it for a
+# sandboxed launch UI, so it is worth driving beside the one above.
+{ echo "delay 40000"; echo "event scan 8 d"; echo "delay 3000"
+	echo "quit"; } > "$out/cmds_dead.txt"
+# **Last run's log is not this run's** (2026-09-24: the pid read out of
+# it was the run before's, so the kill took nothing and the assertion
+# failed on a server that was never touched)
+rm -f "$out/dead.log" "$out/dead_server.log"
+bin/buildat -o launch_ui=__menu -a game/vanilla/contentdb -D ../user \
+	-w 1280x720 -l 3 -L "$out/dead.log" -c @"$out/cmds_dead.txt" \
+	> /dev/null 2>&1 &
+client=$!
+# The server the client started, by the pid it logged: pkill would take
+# any server on this desk with it
+srv=""
+for i in $(seq 1 40); do
+	srv=$(grep -a "Started pid [0-9]*: .*buildat_server" "$out/dead.log" 2>/dev/null |
+		tail -1 | sed -n 's/.*Started pid \([0-9]*\):.*/\1/p')
+	[ -n "$srv" ] && break
+	sleep 1
+done
+if [ -n "$srv" ]; then
+	# Twenty seconds after it started is after the screen it serves is
+	# drawn and well before this sequence's own scan: what is being
+	# driven is a server that goes away under a client that is using
+	# it, not one that fails to start
+	sleep 20
+	kill -9 "$srv" 2>/dev/null
+fi
+wait "$client" 2>/dev/null
+said=$(grep -ac 'scan d: .*text "The server exited' "$out/dead.log")
+cannot=$(grep -ac "the launcher cannot show a dead server" "$out/dead.log")
+echo "a server that died (pid ${srv:-none}): the launcher said so" \
+		"$said times"
+if [ -z "$srv" ] || [ "$said" -lt 1 ] || [ "$cannot" -gt 0 ]; then
+	echo "FAIL: a local server that dies is not shown by the launcher"
+	grep -a "cannot show a dead server\|Disconnected" "$out/dead.log" |
+		head -3
+	exit 1
+fi
+
 # vim: set noet ts=4 sw=4:
-echo "PASS: every launch UI this tree ships starts, and a game can be left"
+echo "PASS: every launch UI this tree ships starts, a game can be left," \
+		"and a dead server is shown"
 exit 0
