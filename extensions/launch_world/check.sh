@@ -450,11 +450,13 @@ fi
 	echo "screenshot $out/typed.png"
 	echo "wait_log 20000 Wrote screenshot $out/typed.png"
 	echo "keypress Return"
-	echo "delay 2200"
+	echo "wait_log 20000 camera: landed"
+	echo "delay 400"
 	echo "screenshot $out/launched.png"
 	echo "wait_log 20000 Wrote screenshot $out/launched.png"
 	echo "keypress Escape"
-	echo "delay 2600"
+	echo "wait_log 20000 camera: landed"
+	echo "delay 400"
 	echo "screenshot $out/back-home.png"
 	echo "wait_log 20000 Wrote screenshot $out/back-home.png"
 	# The terminal: found by name like anything else, the camera square
@@ -467,7 +469,8 @@ fi
 	echo "keypress T"
 	echo "delay 400"
 	echo "keypress Return"
-	echo "delay 2400"
+	echo "wait_log 20000 camera: landed"
+	echo "delay 400"
 	echo "screenshot $out/terminal.png"
 	# **A setting changed and changed back.** A -w run never writes the
 	# preferences file (save_preferences stands down when the size is
@@ -484,8 +487,8 @@ fi
 	echo "delay 400"
 	echo "delay 400"
 	echo "keypress Escape"
-	echo "delay 2600"
-	echo "delay 600"
+	echo "wait_log 20000 camera: landed"
+	echo "delay 400"
 	# The ornament, stripped: the friezes go plain and the frame has to
 	# change. The generator's own check passed for a day while nothing in
 	# the room wore what it made.
