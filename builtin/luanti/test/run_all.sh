@@ -133,6 +133,16 @@ $best"
 		fi
 	done
 	set +f
+	# **The always-run ones do not compete, they are appended**: a check
+	# cheap enough to run whatever changed -- the tree's Lua parsing, a
+	# second -- would otherwise be the cheapest runner covering half the
+	# tree and push every deep one out of the pick
+	for name in $runners; do
+		path="$here/$name"; [ -f "$path" ] || path="$root/$name"
+		grep -q "^# always: *yes" "$path" || continue
+		picked="$picked
+$name"
+	done
 	picked=$(echo "$picked" | grep -v '^$' | sort -u)
 	if [ -z "$picked" ]; then
 		# **Nothing matched**, so the named chain runs instead of the

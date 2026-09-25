@@ -13,6 +13,9 @@
 #
 # tier: quick
 # cost: 60s
+# covers: games/digger/**
+# (it launches digger by name and leaves it again, which is that game's
+# client Lua starting, drawing and answering Escape)
 #
 # It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0
 # passed, 1 failed, 2 could not run, and a last line saying which.

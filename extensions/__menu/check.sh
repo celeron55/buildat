@@ -1,8 +1,9 @@
 #!/bin/bash
 # tier: quick
 # cost: 104s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
-# covers: extensions/ui_utils/** extensions/uistack/**
-# (this is the runner that drives both: a game left through the stack, a
+# covers: extensions/ui_utils/** extensions/uistack/** extensions/launch_menu/** games/vanilla/main/client_lua/**
+# (this is the runner that drives them: every launch UI booted by name,
+# launch_menu among them, a game of vanilla's left through the stack, a
 # screen pushed over the grid, and a dead server's dialog)
 # [MENU_FALLBACK]: **every launch UI boots**. Nothing started
 # `launch_menu` in any check, so the quick tier signed off version one
