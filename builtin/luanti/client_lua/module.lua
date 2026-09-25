@@ -3627,6 +3627,12 @@ local refshot_at = nil
 -- The game's client half sets this to snap its exposure adaptation to the
 -- current frame; see the readiness rule below. nil means no exposure.
 M.exposure_reset = nil
+-- The same for the sky-visibility cube: set by the game's client half, called
+-- on the frame the exposure is snapped
+M.sky_vis_snap = nil
+-- Optional: returns one line about what the frame is lit by, logged with the
+-- picture. The game's client half sets it.
+M.refshot_note = nil
 
 buildat.sub_packet("luanti:refshot_mark", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
@@ -3681,10 +3687,29 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		if M.exposure_reset then
 			M.exposure_reset()
 		end
+		-- And the sky-visibility cube with it, for the same reason: it is
+		-- averaged over sweeps and eased into, so after a teleport it is
+		-- still converging from wherever the camera used to be -- a
+		-- viewpoint deep in rock read 0.3 climbing to 0.73 over the frames
+		-- before its picture ([UNDERGROUND_LIGHT], 2026-09-25). The game's
+		-- client half snaps it the way the module's own update(nil) does.
+		if M.sky_vis_snap then
+			M.sky_vis_snap()
+		end
 		return
 	end
 	if refshot_still < 7 then
 		return
+	end
+	-- What the frame was drawn with, in the log beside the picture and in
+	-- the shots' own order: a reading taken from the per-frame code
+	-- instead lands wherever that code last printed, which is not the
+	-- frame the picture is of ([UNDERGROUND_LIGHT]).
+	if M.refshot_note then
+		local note = M.refshot_note()
+		if note then
+			log:info("REFSHOT readings: " .. note)
+		end
 	end
 	local name, err = buildat.take_screenshot()
 	if name == nil then

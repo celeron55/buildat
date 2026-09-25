@@ -72,6 +72,11 @@ voxel_shading.use_technique_set({
 -- Luanti's origin is where its mods build, so that is what the camera frames
 local LOOK_AT = {x = 0, y = 2, z = 0}
 local CAMERA_DISTANCE = 34
+-- [UNDERGROUND_LIGHT]: the cave ambient the last frame was drawn with,
+-- for the reference note beside a picture. A file-scope local, because the
+-- note is defined with the render path and read long before sky_now exists.
+local cave_ambient_now = 0
+
 -- Luanti's own default, and what extensions/luanti_client uses
 -- (BASE_FOV = 72): the two are compared frame against frame, and nothing in
 -- a frame lines up while the cameras see different amounts of the world
@@ -563,6 +568,20 @@ do
 	-- AutoExposure.glsl, kept in a persistent 1x1 target -- lands on the
 	-- frame's own key in one frame at a rate of a million, and the rate
 	-- goes back the frame after. Deterministic, and no wait.
+	-- A reference picture wants the sky-visibility cube converged as well
+	-- as the exposure: both are averaged over time and both are wrong for
+	-- a frame or two after a teleport. update(nil) is the module's own
+	-- snap -- several sweeps at once, averaged as the easing would have.
+	luanti.sky_vis_snap = function()
+		voxel_shading.update(nil)
+	end
+	luanti.refshot_note = function()
+		return string.format(
+				"chamber light %.3f, sky above %.3f, cave ambient %.4f",
+				voxel_shading.chamber_light(),
+				voxel_shading.sky_visibility_above(),
+				cave_ambient_now)
+	end
 	luanti.exposure_reset = function()
 		rp:SetShaderParameter("AutoExposureAdaptRate", 1000000)
 		AUTO_EXPOSURE.reset_frames = 2
@@ -1710,7 +1729,30 @@ local function update_sky(dt)
 		-- local/options_for_CAVE_AO/.
 		local floor_f = tonumber(
 				buildat.get_env("BUILDAT_CAVE_AO_FLOOR") or "") or 0
-		voxel_shading.set_cave_ambient(floor_f, floor_f, floor_f)
+		-- [UNDERGROUND_LIGHT]: and over that floor, what the chamber the
+		-- player is in has by bouncing. BUILDAT_CAVE_LIGHT=<gain> is how
+		-- much of the hour's own bounce light a fully lit chamber gets;
+		-- nought unless it is asked for, so no game's look moves.
+		--
+		-- The reading is the camera's rays, not the face's: the light in
+		-- a cave lit at its far end arrives round a corner, which no face
+		-- can work out for itself, and the player is taken to be in the
+		-- chamber they are looking at (user, 2026-09-25). In the hour's
+		-- own colour, the same c * k the bounce term takes, so the night
+		-- sky lights a cave at night and the day's sky by day without a
+		-- second ramp to keep in step.
+		local cave_gain = tonumber(
+				buildat.get_env("BUILDAT_CAVE_LIGHT") or "") or 0
+		local cave_r, cave_g, cave_b = floor_f, floor_f, floor_f
+		if cave_gain > 0 then
+			local lit = voxel_shading.chamber_light()
+			local w = cave_gain * lit * PHYS.bounce
+			cave_r = cave_r + c.r * k * w
+			cave_g = cave_g + c.g * k * w
+			cave_b = cave_b + c.b * k * w
+		end
+		cave_ambient_now = cave_g
+		voxel_shading.set_cave_ambient(cave_r, cave_g, cave_b)
 		local abl = buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""
 		if abl:find("amb") then zone.ambientColor = magic.Color(0, 0, 0) end
 		if abl:find("bounce") then voxel_shading.set_bounce_light(0, 0, 0) end

@@ -726,6 +726,46 @@ function M.sky_visibility_above()
 	return sum / (ABOVE_LAST - ABOVE_FIRST + 1)
 end
 
+-- How lit the brightest air this chamber shows the camera is: 0 where every
+-- direction ends in rock or in unlit air, towards 1 where some direction ends
+-- in air the daylight reached. What wants it is the light a chamber has by
+-- bouncing -- [UNDERGROUND_LIGHT]: a cave lit at its far end lights all of
+-- itself, and no face can work that out for itself, since the light arrives
+-- round a corner. The cells already carry it: a ray answers nothing if
+-- something solid stopped it and otherwise the skylight of the air it ended
+-- in, which is this question asked in one direction.
+--
+-- **The brightest few cells rather than the brightest one**: a cell is four
+-- jittered rays blended over time, so the single maximum chases its own
+-- sampling, and a lit far end that covers a few degrees still lands in
+-- several cells. Eight of 216 is about a twentieth of the sphere.
+local BEST_CELLS = 8
+
+function M.chamber_light()
+	-- An insertion sort over eight, once a frame, against 216 values: the
+	-- sort is cheaper than a table allocation would be
+	local best = {}
+	for i = 1, BEST_CELLS do
+		best[i] = 0.0
+	end
+	for i = 1, CELL_COUNT do
+		local v = sky_vis[i]
+		if v > best[BEST_CELLS] then
+			local j = BEST_CELLS
+			while j > 1 and best[j - 1] < v do
+				best[j] = best[j - 1]
+				j = j - 1
+			end
+			best[j] = v
+		end
+	end
+	local sum = 0
+	for i = 1, BEST_CELLS do
+		sum = sum + best[i]
+	end
+	return sum / BEST_CELLS
+end
+
 -- How much to multiply the reflected sky by, 1 being what a game renders.
 --
 -- For looking at what this module does rather than at the scene. Most of a
