@@ -3,6 +3,11 @@
 #
 #   util/checks_in_docker.sh quick
 #   util/checks_in_docker.sh full
+#   ONLY='lua_syntax|voxel_lighting' util/checks_in_docker.sh quick
+#
+# ONLY is run_all.sh's own filter, passed through: the build is what a
+# container run costs, so picking a runner out of the tier is how a
+# single runner is looked at in the image without another script.
 #
 # The same image the Linux archives are built in (util/docker/linux), a
 # git archive of HEAD rather than a mount of the working tree, a Release
@@ -41,6 +46,7 @@ docker run --rm -i \
 	-v "$out:/out:z" \
 	$mount_media \
 	-e "BUILDAT_CI=1" \
+	-e "ONLY=${ONLY:-}" \
 	-e "JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}" \
 	"$image" bash -c "
 		set -eu
