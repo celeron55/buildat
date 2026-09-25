@@ -118,9 +118,16 @@ rawset(_G, "REFSET", {
 		[3] = {"0545", "1300", "2030"},
 		[4] = {"0545", "1300", "2030"},
 		[5] = {"1000", "1830", "0200"},
-		[6] = {"1300"},
-		[7] = {"1300"},
-		[8] = {"1300"},
+		-- The cave trio carries 02:00 as well ([UNDERGROUND_LIGHT]): what
+		-- a place with no sky of its own does between the hours is the
+		-- question, and a set with one hour in it cannot answer it --
+		-- every run that asked had to pass STATES by hand. vp9 keeps
+		-- 13:00 alone: it is a dark hole in a *sunlit* meadow, there is
+		-- no meadow at 02:00, and its surface reads day=15, so a second
+		-- hour there measures Luanti's own flood rather than this.
+		[6] = {"0200", "1300"},
+		[7] = {"0200", "1300"},
+		[8] = {"0200", "1300"},
 		[9] = {"1300"},
 		[10] = {"0200", "1300"},
 	},
