@@ -18,7 +18,10 @@
 # decides nothing itself.
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
-out="$here/local/options_for_LAUNCH_WORLD_mark"; mkdir -p "$out"
+# BUILDAT_MARK_OUT names another directory to shoot into, so a re-shoot
+# does not write over a sheet somebody is still looking at
+out="${BUILDAT_MARK_OUT:-$here/local/options_for_LAUNCH_WORLD_mark}"
+mkdir -p "$out"
 cd "$here/Build"
 if pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
@@ -54,9 +57,10 @@ shot() {   # $1 option ("" as shipped), $2 keys to type, $3 tag
 }
 # **The glowing orb first** ([MARK_ONEBIT], 2026-09-24): the settled
 # transform draws a thin outline, and the emission mask is where a thin
-# line has the least room -- it is cut to zero against a multiplier of
-# 26, so if the mark does not read there the answer is line weight and
-# not another transform. Chrome and white follow, each marked in the
+# line has the least room -- the cut is 0.04 of an emissive multiplied
+# by 26 ([GLOW_MARK]), which is the top of the band a mark can read in,
+# so if it does not read there the answer is line weight and not another
+# transform. Chrome and white follow, each marked in the
 # slot it can show.
 #
 # One row, as the room ships, since the A/B question is settled;
@@ -93,7 +97,7 @@ for opt in (os.environ.get("OPTIONS", "").split() or [""]):
 			font = ImageFont.load_default()
 		what = {"A": "A: the icon in the diffuse",
 				"B": "B: one bit in the roughness"}.get(opt,
-				{"glowing": "the emission mask, cut to zero",
+				{"glowing": "the emission mask, cut to 0.04",
 				"chrome": "the mark in the metalness",
 				"white": "the picture in the diffuse",
 				"logo": "a logo's own outline, not a sigil"}[k])
