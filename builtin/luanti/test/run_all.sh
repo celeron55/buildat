@@ -104,6 +104,13 @@ if [ -n "$changed" ]; then
 	# the moment it leaves a command substitution
 	set -f
 	for f in $files; do
+		# **A document is not code and wants no runner** ([SMOKE_PICK]):
+		# doc/ and the plan are read by people, and listing them as
+		# uncovered every time is noise that teaches everyone to skim
+		# the line that also names a source file nothing covers
+		case "$f" in
+		doc/*|*.md|LICENSE*|MIT.txt|CONTRIBUTING*) continue;;
+		esac
 		best=""; best_cost=999999
 		for name in $runners; do
 			path="$here/$name"; [ -f "$path" ] || path="$root/$name"
