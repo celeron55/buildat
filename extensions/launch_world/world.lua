@@ -3385,32 +3385,49 @@ function label_place()
 		return
 	end
 	local p = n.position
+	local ax, ay, az = p.x, p.y + (label_lift or 1.5) * U, p.z
 	local sp = camera_node:GetComponent("Camera"):WorldToScreenPoint(
-			magic.Vector3(p.x, p.y + (label_lift or 1.5) * U, p.z))
-	-- Behind the camera projects to nonsense, and a label half off the
-	-- screen names nothing the player can see
-	local on = sp.x > 0.02 and sp.x < 0.98 and sp.y > 0.0 and sp.y < 1.0
-	name_text.visible = on
-	desc_text.visible = on and desc_text.text ~= ""
-	if not on then
+			magic.Vector3(ax, ay, az))
+	-- **Only behind the camera hides it** (user, 2026-09-25: walk up to
+	-- an orb, look at its middle, and the name went out). Up close the
+	-- point the name hangs from -- a voxel and a half above the orb --
+	-- is off the top of the screen while the orb fills it, and a gate
+	-- on the projection being inside the window took the name away
+	-- exactly when the player was nearest the thing. A point behind the
+	-- camera still has to go: it projects to nonsense, mirrored.
+	local dx, dy, dz = ax - view_from.x, ay - view_from.y, az - view_from.z
+	local ahead = dx * view_dir.x + dy * view_dir.y + dz * view_dir.z > 0
+	name_text.visible = ahead
+	desc_text.visible = ahead and desc_text.text ~= ""
+	if not ahead then
 		return
 	end
 	-- **Bounded to the window** (user, 2026-09-25): a name is wider
 	-- than the orb it is over -- much wider, spaced out as it is -- so
 	-- an orb near an edge had its last letters off the screen. Centred
 	-- alignment makes the offsets from the middle, so the limit is half
-	-- the window less half the text and a margin.
+	-- the window less half the text and a margin. This is also what
+	-- keeps a name on screen when its anchor is not: an orb at arm's
+	-- length hangs its name above the top, and the clamp brings it
+	-- down to the edge rather than taking it away.
 	local lw, lh = buildat.logical_size()
 	local function bounded(e, x, y)
 		local mx = math.max(0, lw / 2 - e.width / 2 - 8)
 		local my = math.max(0, lh / 2 - e.height / 2 - 8)
-		e:SetPosition(math.floor(math.max(-mx, math.min(mx, x))),
-				math.floor(math.max(-my, math.min(my, y))))
+		x = math.max(-mx, math.min(mx, x))
+		y = math.max(-my, math.min(my, y))
+		e:SetPosition(math.floor(x), math.floor(y))
+		return y
 	end
 	local x = (sp.x - 0.5) * lw
 	local y = (sp.y - 0.5) * lh
-	bounded(name_text, x, y - 30)
-	bounded(desc_text, x, y + 6)
+	-- **The caption keeps its place under the name**: both clamped on
+	-- their own, an anchor above the screen pushed each to the same
+	-- edge and the caption came out on top of the title (user,
+	-- 2026-09-25). So the name is clamped and the caption is hung off
+	-- where the name actually landed.
+	local at = bounded(name_text, x, y - 30)
+	bounded(desc_text, x, at + name_text.height / 2 + 4)
 end
 
 pointed_orb = 0
