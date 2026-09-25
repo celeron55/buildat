@@ -14,6 +14,20 @@
 # of a minute, the paths a room edit breaks ([CHECK_COST], user
 # 2026-09-25). This is the whole of it, and it is what a push runs.
 #
+# **Before you run this, it is probably the wrong thing** (user,
+# 2026-09-25, having said it three times). It is twenty minutes, and it
+# is a push's job. A session runs core.sh after touching the room, or
+# writes the six-line drive that aims at what it changed.
+#
+# **And read what it asserts before trusting it about your change.** It
+# checks the presets, the pointing (which orb the crosshair wins), the
+# slot, the saves, the ornament and the sounds. It says **nothing**
+# about whether an orb's name is drawn or where it sits -- a session
+# once ran the whole thing after moving the labels, having already seen
+# a screenshot of them. A check with no assertion about your change
+# proves nothing about your change; run_all.sh selects by path, and a
+# path is not an assertion.
+#
 # tier: full
 # cost: 392s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 #
