@@ -556,6 +556,27 @@ static const float AO_LEVELS[4] = {1.0f, 0.72f, 0.52f, 0.38f};
 // shaded face fell to 0.37 of the render for a corner at 1.2, so the
 // cave corner's 1.5 (cave_ao 0.49 against 0.128) is not this table's.
 static const float AO_LEVELS_PBR[4] = {1.0f, 0.55f, 0.20f, 0.10f};
+// [WATER_LIGHT]: every liquid's surface sits this far under the top of its
+// node. Official draws a source flush as it ships, because
+// enable_waving_water is off; with it on, its vertex shader moves every
+// vertex of a waving liquid by (noise - 1) * water_wave_height * 5 units of
+// ten -- the noise in 0..1, so the liquid sits between nought and half a node
+// down and a quarter on average. **This is that look, static and less** (user,
+// 2026-09-25): an eighth of a node, since a quarter is the room an animation
+// needs and there is no animation; the constant grows with one if it is ever
+// built.
+//
+// Taken off the corners after liquid_corner_top() has measured them, not off
+// the levels it measures: those are compared against half a node to decide
+// which corners a flow reaches, and a sag in them would misread that. Every
+// vertex that sits on the surface follows the corner it stands at, so the
+// sides come with it and nothing gapes at the bottom.
+//
+// **Every liquid, not only what official's waving = 3 would move, and no
+// setting to turn it off**: the sag is the look (user, 2026-09-25). Source
+// and flowing alike, so the flow's own dip still reads against the source.
+static const float LIQUID_SAG = 1.0f / 8.0f;
+
 // How far a hemisphere ray is walked to ask whether a surface under the
 // terrain reaches the sky at all; 0 turns the term off. See [DARK_INVARIANT]
 // and face_vertex_colors() below.
@@ -1989,7 +2010,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 						for(int iz = 0; iz < 2; iz++){
 							corner[ix][iz] = liquid_corner_top(volume,
 									voxel_reg, fmt, x, y, z, def, liquid_top,
-									ix == 0 ? -1 : 1, iz == 0 ? -1 : 1);
+									ix == 0 ? -1 : 1, iz == 0 ? -1 : 1) -
+									LIQUID_SAG;
 						}
 					}
 				}
