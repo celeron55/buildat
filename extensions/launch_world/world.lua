@@ -3518,6 +3518,17 @@ local ORB_STEP = 1.18
 local orb_base_scale = {}
 -- Walking up to a sphere means the crosshair has to be on it, not merely
 -- nearest to it: about ten degrees, which is a sphere at arm's length
+-- **Two ways to be pointed at, and either will do.** The angle alone
+-- was the rule (ten degrees, a dot of 0.985), which is right for an orb
+-- across the room and wrong for one at arm's length, where the
+-- crosshair can sit on the ball and be twenty degrees off its centre.
+-- So an orb also counts as pointed at when the crosshair is **on its
+-- disc** -- the angle in units of its own angular radius, a little over
+-- one. Nothing that was pointable stops being pointable, which matters
+-- because the room's own drives hold the mouse over the floor to dig:
+-- the disc rule alone made a floor orb beside the crosshair the thing
+-- being held, and the hold launched it.
+local POINT_ON = 1.2
 local POINT_DOT = 0.985
 -- A node nobody draws, borrowed for the arithmetic of "which way is
 -- that": LookAt writes a rotation and nothing else builds one
@@ -3543,7 +3554,7 @@ function handle_orb_update(event_type, event_data)
 		return
 	end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
-	local best, best_dot, best_up = 0, -1, false
+	local best, best_score, best_dot, best_up = 0, math.huge, -1, false
 	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
 	-- stops at it, which would hide every orb past the empty one
 	for i = 1, #orb_places do
@@ -3579,7 +3590,16 @@ function handle_orb_update(event_type, event_data)
 				-- metres by U on the way in)
 				top = math.max(top, FPS_EYE * U)
 			end
-			local dot, up = -1, false
+			-- **Measured against the orb's own size, not by the angle
+			-- alone** ([POINT_LOW]'s other half, 2026-09-25): a dot
+			-- says nothing about how big a thing looks, so a distant
+			-- orb a little off the axis beat a near one the crosshair
+			-- was on -- which is how a portrait of one orb came back
+			-- with its neighbour's name over it. The score is the angle
+			-- in units of the orb's own angular radius: under one is
+			-- the crosshair on the disc, and a near orb is forgiven the
+			-- degrees it fills.
+			local score, dot, up = math.huge, -1, false
 			for k = 0, 4 do
 				local y = bottom + (top - bottom) * (k / 4)
 				local dx, dy, dz = p.x - view_from.x, y - view_from.y,
@@ -3587,12 +3607,16 @@ function handle_orb_update(event_type, event_data)
 				local l = math.sqrt(dx * dx + dy * dy + dz * dz)
 				local d = (dx * view_dir.x + dy * view_dir.y +
 						dz * view_dir.z) / l
-				if d > dot then
-					dot, up = d, y > p.y
+				local s = math.huge
+				if d > 0 and r > 0 then
+					s = math.sqrt(math.max(0, 1 - d * d)) * l / r
+				end
+				if s < score then
+					score, dot, up = s, d, y > p.y
 				end
 			end
-			if dot > best_dot then
-				best, best_dot, best_up = i, dot, up
+			if score < best_score then
+				best, best_score, best_dot, best_up = i, score, dot, up
 			end
 			-- Present the face: the mark sits in the middle of the
 			-- sphere's UVs, which Sphere.mdl puts on -Z, so the orb looks
@@ -3630,7 +3654,7 @@ function handle_orb_update(event_type, event_data)
 	-- In FPS the crosshair is the pointer, so a sphere off to the side is
 	-- not pointed at; in menu mode the camera is flown to look at what
 	-- was chosen, and the nearest to the middle is the answer
-	if mode == "fps" and best_dot < POINT_DOT then
+	if mode == "fps" and best_score > POINT_ON and best_dot < POINT_DOT then
 		best = 0
 	end
 	-- **A tight target wins over a generous one** (user, 2026-09-23):
