@@ -419,12 +419,14 @@ fi
 	echo "keypress Escape"
 	# The cubes land in 0.9 s, but the voxels coming back have to be
 	# remeshed and relit before the picture is the picture it was.
-	# **A wait, not a wait_log**: this one is in the middle of a drive,
-	# and the room says nothing when a dissolve has finished coming
-	# back -- waiting for a line it printed at boot returns at once and
-	# shoots the frame mid-rebuild, which reads as "the dissolve does
-	# not come back" (2026-09-24, my own doing).
-	echo "delay 5000"
+	# **The room does say when a bay is back** -- "dissolve: bay N
+	# rebuilt", as the voxels are put back -- so this waits for that and
+	# spends only the remesh after it. (It was a flat five seconds while
+	# nobody had looked for a line; waiting for one the room printed at
+	# boot returns at once and shoots the frame mid-rebuild, which is why
+	# the comment here used to say there was none.)
+	echo "wait_log 20000 rebuilt"
+	echo "delay 900"
 	echo "screenshot $out/dissolve-closed-again.png"
 	echo "wait_log 20000 Wrote screenshot $out/dissolve-closed-again.png"
 	# The typing path: three letters fuzzy-match a name, Enter takes it
@@ -520,11 +522,17 @@ fi
 	echo "screenshot $out/attract-home.png"
 	echo "wait_log 20000 Wrote screenshot $out/attract-home.png"
 	echo "keypress F8"
-	echo "delay 5000"
+	# The sweep says when it starts and which wall it is showing; the
+	# delay after it is the camera's own flight, not a guess at when the
+	# room noticed the key
+	echo "wait_log 20000 attract: showing the"
+	echo "delay 1800"
 	echo "screenshot $out/attract-away.png"
 	echo "wait_log 20000 Wrote screenshot $out/attract-away.png"
 	echo "keypress Space"
-	echo "delay 2400"
+	echo "wait_log 20000 attract: back to the standing place"
+	echo "wait_log 20000 camera: landed"
+	echo "delay 300"
 	echo "screenshot $out/attract-back.png"
 	echo "wait_log 20000 Wrote screenshot $out/attract-back.png"
 	# **The pause dialog**, which is the room's own way out of the
