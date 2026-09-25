@@ -2426,98 +2426,13 @@ label.horizontalAlignment = magic.HA_LEFT
 label.verticalAlignment = magic.VA_BOTTOM
 label:SetPosition(8, -8)
 
--- **The servers are a patch bay** (the brief): a port each, the name
--- above it, the most recently used nearest spawn, **the ping as the
--- blink rate of its link LED** and a dead host unlit. A server list
--- genuinely *is* a set of connections, which is why this mapping is the
--- honest one rather than a list pinned to a wall.
---
--- **The list is the client's own now**: network.known_addresses() is
--- every address this client has used, last used first, which is what
--- "the most recently used nearest spawn" asks for. A serverlist URL is
--- not a server, so the https ones are left out.
---
--- simplified: **nothing pings**, so the LED is lit for an address the
--- player accepted and dark for one they did not, and it does not blink.
--- A rate invented out of a timestamp would read as a measurement and
--- would not be one. The blink below is kept for when something measures
--- a round trip.
-local network = require("buildat/extension/network")
-network = network.known_addresses and network or network.safe
-local PATCH = {}
-for _, a in ipairs(network.known_addresses()) do
-	if #PATCH < 8 and a.uri:sub(1, 4) ~= "http" then
-		PATCH[#PATCH + 1] = {name = a.name ~= "" and a.name or a.uri,
-			uri = a.uri, live = a.accepted}
-	end
-end
-if #PATCH == 0 then
-	-- A bay with no ports is not a bay; an empty one says so
-	PATCH[1] = {name = "no server yet", live = false}
-end
-
-local patch_leds = {}
-do
-	-- Along the room's right-hand side as the camera sees it, which is
-	-- +x: the bay faces the middle, so a port is read side-on from spawn
-	-- and square-on by whoever walks to it
-	local x0, y0, z0 = 8.2, 0.0, 4.2
-	local pitch = 2.2
-	-- The rack the ports are set into
-	part("Box", magic.Vector3(x0, 1.7, z0 - #PATCH * pitch / 2 + pitch / 2),
-			magic.Vector3(0.7, 3.6, #PATCH * pitch), machined)
-	for i, srv in ipairs(PATCH) do
-		local z = z0 - (i - 1) * pitch
-		-- The port itself: a recess with a ring round it, which is a
-		-- socket in the language of stacked boxes
-		part("Box", magic.Vector3(x0 - 0.42, 1.9, z),
-				magic.Vector3(0.18, 1.1, 1.1), stone)
-		part("Cylinder", magic.Vector3(x0 - 0.52, 1.9, z),
-				magic.Vector3(0.62, 0.16, 0.62), chrome)
-		-- The link LED, which is the whole readout: lit and blinking for
-		-- a live host, dark for one that does not answer
-		local led_mat = glow(magic.Color(0, 0, 0, 1))
-		part("Box", magic.Vector3(x0 - 0.56, 1.05, z),
-				magic.Vector3(0.12, 0.16, 0.34), led_mat)
-		patch_leds[i] = {mat = led_mat, live = srv.live, ping = srv.ping}
-		-- The name above the port, always on here: a patch bay is read by
-		-- walking along it, and three labels is not a label wall
-		local label = scene:CreateChild("port_name")
-		label.position = V(x0 - 0.7, 2.75, z)
-		local t = label:CreateComponent("Text3D")
-		t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 30)
-		t:SetColor(srv.live and magic.Color(0.55, 0.75, 0.85, 1) or
-				magic.Color(0.32, 0.30, 0.30, 1))
-		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-		t.text = srv.name
-		t.faceCameraMode = magic.FC_ROTATE_Y
-	end
-end
-
--- The blink: a live port's LED is on for a moment once every ping's
--- worth of milliseconds, so a near server flickers quickly and a far one
--- pulses. Nothing here polls anything; the rate is the reading.
-patch_t = 0
-function handle_patch_update(event_type, event_data)
-	-- **An animation stands down for a screen on top of the room and
-	-- not for a launch** ([LAUNCH_FROZEN]): the launch is seconds of
-	-- this room's own movement
-	if screen_taken() then return end
-	patch_t = patch_t + event_data:GetFloat("TimeStep")
-	for _, led in ipairs(patch_leds) do
-		-- Blinking at the ping's rate when something has measured one,
-		-- steady when the address is merely one the player accepted,
-		-- dark when it is not
-		local on = led.live
-		if led.ping then
-			local period = led.ping / 1000
-			on = (patch_t % period) < period * 0.35
-		end
-		led.mat:SetShaderParameter("MatDiffColor", on and
-				magic.Color(0.4, 2.6, 3.0, 1) or magic.Color(0.02, 0.06, 0.07, 1))
-	end
-end
-magic.SubscribeToEvent("Update", "handle_patch_update")
+-- **There was a patch bay here, and it was removed 2026-09-25** (user):
+-- a rack of server ports standing at x 8.2, forward and to the left of
+-- where the player stands, 0.7 by 3.6 by 2.2 voxels a port -- a wall
+-- once a few addresses were known. It was a second copy of the server
+-- list in wall form: the servers are already orbs on the floor, which
+-- is where they belong, moving pieces being what a save and a server
+-- are. Not to be rebuilt.
 
 -- **The version, as a readout rather than as text on a HUD**
 -- ([BOX_PLAYTEST_4]'s complaint answered with geometry): a seven-segment
