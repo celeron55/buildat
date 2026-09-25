@@ -12,6 +12,7 @@
 #include "lua_bindings/replicate.h"
 #include <c55/string_util.h>
 #include <c55/os.h> // get_timeofday_us()
+#include <cstdlib>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
@@ -181,10 +182,14 @@ struct CState: public State
 		// The worker owns the socket while a connect runs
 		if(m_connect_result.load() == 0 && m_connect_thread.joinable())
 			return;
-		if(m_socket->wait_data(0)){
+		if(m_socket->wait_data(0))
 			read_socket();
+		// **Whether or not anything new arrived** ([PACKET_STALL]): the
+		// drain has a budget now and can leave packets in the buffer, and
+		// a buffer that is only drained when the socket has more to say
+		// would sit on them until the server spoke again.
+		if(!m_socket_buffer.empty())
 			handle_socket_buffer();
-		}
 	}
 
 	// The server is gone. There is nothing to reconnect to and no way to put
@@ -336,7 +341,7 @@ struct CState: public State
 				} catch(std::exception &e){
 					log_w(MODULE, "Exception on handling packet: %s", e.what());
 				}
-			});
+			}, packet_drain_us());
 		} catch(interface::UnknownPacketReceived &e){
 			m_socket_buffer.clear();
 			lost_connection(ss_()+"the server sent something this cannot "
@@ -353,6 +358,23 @@ struct CState: public State
 	// worth a line, over it the name and the byte count are what say
 	// which handler to take off the frame.
 	static const int64_t SLOW_PACKET_US = 5000;
+
+	// **And how long one update may spend on the buffer** ([PACKET_STALL]):
+	// handle_socket_buffer() took every packet the socket had, so a burst
+	// of them -- a world arriving, or the object state that comes several
+	// times a second -- was one frame however many it was. Twenty
+	// milliseconds is a frame at 50 and about a third of what the worst
+	// single packet costs on the box; what is left over waits for the next
+	// update, which now runs whether or not the socket has more to say.
+	// BUILDAT_PACKET_DRAIN_US overrides it and 0 turns the budget off.
+	static int64_t packet_drain_us()
+	{
+		static const int64_t us = []{
+			const char *s = getenv("BUILDAT_PACKET_DRAIN_US");
+			return s ? (int64_t)atoll(s) : (int64_t)20000;
+		}();
+		return us;
+	}
 
 	void handle_packet(const ss_ &packet_name, const ss_ &data)
 	{

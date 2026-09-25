@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/packet_stream.h"
 #include "core/log.h"
+#include <c55/os.h> // get_timeofday_us()
 #define MODULE "__packet_stream"
 
 namespace interface {
@@ -22,8 +23,10 @@ static ss_ hex_of(const char *p, size_t n)
 static void self_check();
 
 void PacketStream::input(std::deque<char> &socket_buffer,
-		std::function<void(const ss_&name, const ss_&data)> cb)
+		std::function<void(const ss_&name, const ss_&data)> cb,
+		int64_t budget_us)
 {
+	const int64_t started_us = budget_us > 0 ? get_timeofday_us() : 0;
 	// Once, on the first stream that reads anything. A plain bool rather
 	// than a function-local static because self_check() calls this.
 	static bool checked = false;
@@ -133,11 +136,18 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 			m_incoming_fragments.erase(id);
 			log_d(MODULE, "<< %s (%zu fragments)", cs(whole_name), count);
 			cb(whole_name, whole);
+			if(budget_us > 0 && get_timeofday_us() - started_us >= budget_us)
+				return;
 			continue;
 		}
 
 		log_d(MODULE, "<< %s", cs(name));
 		cb(name, data);
+		// And the budget, checked after a packet rather than before:
+		// nothing is left half-read, and a single slow handler still gets
+		// its turn -- what this stops is ten of them in one update.
+		if(budget_us > 0 && get_timeofday_us() - started_us >= budget_us)
+			return;
 	}
 }
 

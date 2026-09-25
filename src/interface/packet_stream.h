@@ -102,8 +102,14 @@ namespace interface
 			m_incoming_types.set(1, "core:fragment");
 		}
 
+		// budget_us: stop after a packet whose handling took the total
+		// over this, leaving the rest in socket_buffer for the caller's
+		// next turn; 0 drains everything, which is what it did before
+		// there was a budget ([PACKET_STALL]: one update took every
+		// buffered packet, and one of them can be 80 ms).
 		void input(std::deque<char> &socket_buffer,
-				std::function<void(const ss_&name, const ss_&data)> cb);
+				std::function<void(const ss_&name, const ss_&data)> cb,
+				int64_t budget_us = 0);
 
 		// The callback is told whether what it is given may be thrown away
 		// when a peer is behind: a payload may, and the
