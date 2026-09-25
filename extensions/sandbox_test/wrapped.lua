@@ -104,6 +104,26 @@ do
 	log:info("wrapped: a hinge joins two bodies and says where it is")
 end
 
+-- Skeleton and Bone (2026-09-25, [URHO_SWEEP]'s Graphics batch): an
+-- animated model's rig, which is what hanging a thing off a hand wants
+do
+	local scene = magic.Scene()
+	scene:CreateComponent("Octree")
+	local n = scene:CreateChild("rigged")
+	local am = n:CreateComponent("AnimatedModel")
+	assert(am, "a node takes an AnimatedModel")
+	local sk = am.skeleton
+	assert(sk, "the model hands back a skeleton")
+	-- Without a model there are no bones, and asking is still an answer
+	-- rather than a raise -- which is what a game does on a model whose
+	-- rig it has not read yet
+	assert(sk:GetNumBones() == 0 and sk.numBones == 0,
+			"an empty model has no bones")
+	assert(sk:GetBone("Hand_R") == nil, "and no bone by that name")
+	assert(sk:GetRootBone() == nil, "and no root")
+	log:info("wrapped: a model's skeleton answers about its bones")
+end
+
 -- XMLElement (2026-09-25): a document out of the resource cache walked
 -- -- the root, its children, an attribute and a number
 do

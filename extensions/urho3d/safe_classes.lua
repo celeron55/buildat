@@ -2926,8 +2926,52 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.StaticModel,
 	})
 
+	-- A model's bones ([URHO_SWEEP]'s Graphics batch, 2026-09-25), which
+	-- is what hanging a thing off a hand wants: a Bone carries the scene
+	-- node the skin drives, so a game parents its own node to that node
+	-- and the engine moves it. [OVER_SHOULDER] put the wielded item at
+	-- the player's feet for want of exactly this.
+	--
+	-- simplified: reading, and the node. A bone's offset matrix, its
+	-- bounding shape and the skinning flags are the model's own business
+	-- and no game here sets them.
+	util.wc("Bone", {
+		properties = {
+			name = util.simple_property("string"),
+			parentIndex = util.simple_property("number"),
+			animated = util.simple_property("boolean"),
+			node = util.simple_property(dst.Node),
+		},
+	})
+
+	util.wc("Skeleton", {
+		instance = {
+			GetNumBones = util.self_function("GetNumBones", {"number"},
+					{"Skeleton"}),
+			GetRootBone = util.wrap_function({"Skeleton"}, function(self)
+				return util.wrap_instance("Bone", self:GetRootBone())
+			end),
+			-- By name or by index, which is what Urho3D offers and what a
+			-- game asks with: "Hand_R" from a model's own rig, or a walk
+			-- over the count
+			GetBone = util.wrap_function({"Skeleton", {"string", "number"}},
+			function(self, which)
+				return util.wrap_instance("Bone", self:GetBone(which))
+			end),
+		},
+		properties = {
+			numBones = util.simple_property("number"),
+			rootBone = util.simple_property(dst.Bone),
+		},
+	})
+
 	util.wc("AnimatedModel", {
 		inherited_from_by_wrapper = dst.StaticModel,
+		properties = {
+			-- Readonly in Urho3D and a reference: what comes back follows
+			-- the model, so it is asked for again rather than kept
+			skeleton = util.simple_property(dst.Skeleton),
+		},
 	})
 
 	util.wc("AnimationController", {
