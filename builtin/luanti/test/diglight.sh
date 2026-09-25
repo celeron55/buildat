@@ -76,3 +76,20 @@ kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 grep "diglight:" "$out/srv.log" | sed 's/.*diglight: //' | grep -v "t=[0-9]*[1-46-9] " 
 grep "light sky\|voxel names\|light y=" "$out/cli.log" | sed 's/.*scan /scan /'
+# **The verdict is that the measurement happened**, not what the numbers
+# are: what the light should be at the bottom of a fresh pit is the
+# reading this runner exists to give a person, and a threshold invented
+# here would be a number nobody picked. What can fail without anybody
+# noticing is the drive -- a fixture that never dug, a client that never
+# scanned -- and that is what this says. ([CI_RUNS]'s contract, and
+# run_all.sh reads the last PASS:/FAIL: line.)
+rows=$(grep -ac "diglight: t=" "$out/srv.log")
+scans=$(grep -ac "light sky\|light y=" "$out/cli.log")
+echo "the fixture reported $rows readings and the client scanned $scans times"
+if [ "$rows" -lt 3 ] || [ "$scans" -lt 1 ]; then
+	echo "FAIL: the run did not dig or did not scan, so there is nothing to read"
+	exit 1
+fi
+echo "PASS: the pit and the stair were dug and their light read"
+exit 0
+# vim: set noet ts=4 sw=4:

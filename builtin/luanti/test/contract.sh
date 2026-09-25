@@ -29,7 +29,19 @@ for name in paths:
 			"fullscreen_gate.sh", "run_all.sh"):
 		continue
 	src = open(name, errors="ignore").read()
-	if "FAIL:" not in src and "echo FAIL" not in src:
+	# **A runner's verdict may live in the python beside it** -- new_world.sh
+	# calls new_world.py, which says PASS:/FAIL: and exits on it, and
+	# reading only the shell called that silent (2026-09-25). The sibling
+	# is read for *whether there is a verdict* and nowhere else: the rules
+	# below are about the shell's own shape, and a python's last line is
+	# not the runner's exit status.
+	spoken = src
+	for py in set(re.findall(r"([\w./]+\.py)", src)):
+		cand = os.path.join(os.path.dirname(name) or ".",
+				os.path.basename(py))
+		if os.path.exists(cand):
+			spoken += "\n" + open(cand, errors="ignore").read()
+	if "FAIL:" not in spoken and "echo FAIL" not in spoken:
 		quiet.append(name)
 		continue
 	why = []
