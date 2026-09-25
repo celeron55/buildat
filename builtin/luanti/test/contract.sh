@@ -20,7 +20,13 @@ import os, re, sys, glob
 bad = []
 quiet = []
 root = os.path.abspath("../../..")
-paths = sorted(f for f in os.listdir(".") if f.endswith(".sh"))
+# **A runner is a .sh that names a tier**, here as much as under
+# extensions/ and games/: netsim_table.sh says in its own header that it
+# is a tool and takes arguments, and counting it as a silent runner was
+# this check asking a table generator for a verdict (2026-09-25).
+paths = sorted(f for f in os.listdir(".")
+		if f.endswith(".sh") and
+		re.search(r"^# tier: ", open(f, errors="ignore").read(), re.M))
 paths += sorted(p for p in glob.glob(root + "/extensions/*/check.sh") +
 		glob.glob(root + "/games/*/check.sh")
 		if re.search(r"^# tier: ", open(p, errors="ignore").read(), re.M))

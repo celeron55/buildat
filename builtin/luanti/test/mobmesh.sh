@@ -54,3 +54,19 @@ for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 grep "$FIXTURE:" "$out/srv.log" | sed "s/.*$FIXTURE: //"
 grep "model \"" "$out/srv.log" | sed 's/.*C1: //'
 grep "luanti:model\|scan.*object\|scan.*obj " "$out/cli.log" | sed 's/.*luanti  : //'
+# **The verdict is that the mobs were drawn**, not what they look like
+# ([CI_RUNS]'s contract, 2026-09-25): the picture is the reading this
+# exists to give, and a run where the fixture spawned nothing or the
+# client drew no model is a failure nobody needs to open the picture
+# for. The exit status was the last grep's until now.
+models=$(grep -ac "luanti:model" "$out/cli.log")
+models=${models:-0}
+shot=$(ls "$out"/*.png 2>/dev/null | wc -l)
+echo "the client took $models model lines and $shot pictures"
+if [ "$models" -lt 1 ] || [ "$shot" -lt 1 ]; then
+	echo "FAIL: no mob model reached the client, or nothing was drawn"
+	exit 1
+fi
+echo "PASS: the mobs' models reached the client and the shot was taken"
+exit 0
+# vim: set noet ts=4 sw=4:

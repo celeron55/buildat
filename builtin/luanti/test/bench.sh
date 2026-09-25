@@ -32,3 +32,21 @@ for i in $(seq 1 300); do
 	sleep 2
 done
 grep -a "bench: " "$tmp/srv.log" | sed 's/^.*bench: //'
+# **The verdict is that the bench ran** ([CI_RUNS]'s contract,
+# 2026-09-25): what a number here should be is the reading this exists
+# to give -- a threshold invented here would be a number nobody picked,
+# and one that fails on llvmpipe is what [CI_RUNS] (3) forbids. What can
+# fail unseen is the run: a fixture that never finished, a client that
+# died, a table with no rows.
+rows=$(grep -ac "bench: " "$tmp/srv.log")
+if ! grep -aq "bench: done" "$tmp/srv.log"; then
+	echo "FAIL: the bench did not finish; $rows rows in $tmp/srv.log"
+	exit 1
+fi
+if [ "$rows" -lt 2 ]; then
+	echo "FAIL: the bench finished with nothing to say ($rows rows)"
+	exit 1
+fi
+echo "PASS: the bench ran and wrote $rows rows"
+exit 0
+# vim: set noet ts=4 sw=4:
