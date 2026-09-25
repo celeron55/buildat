@@ -72,3 +72,25 @@ grep -a "person view\|E " "$out/extension_cli.log" | sed 's/.*: //' | head -5
 # frame the back view was shot in, said by the client itself
 grep -a "camera at " "$out/extension_cli.log" | sed 's/.*: camera at/camera at/' | tail -1
 ls "$out"/*.png
+# **The verdict is that the run happened and said nothing angry**
+# ([CI_RUNS]'s contract, 2026-09-25): what these pictures should look
+# like is a person's reading -- that is why they are shot -- but a run
+# that drew none, or a client that logged an error, is a failure nobody
+# had to look at a picture to call. The exit status was `ls`'s until now.
+shots=$(ls "$out"/*.png 2>/dev/null | wc -l)
+# grep -c prints its count and exits 1 when that count is nought, so a
+# "|| echo 0" beside it prints the number twice (2026-09-25)
+errors=$(grep -ac " E " "$out/extension_cli.log" 2>/dev/null)
+errors=${errors:-0}
+echo "the three person views: $shots pictures, $errors error lines"
+if [ "$shots" -lt 1 ]; then
+	echo "FAIL: the run drew no pictures at all"
+	exit 1
+fi
+if [ "$errors" -gt 0 ]; then
+	echo "FAIL: the client logged $errors error lines; see $out/extension_cli.log"
+	exit 1
+fi
+echo "PASS: the run drew $shots pictures and the client logged no error"
+exit 0
+# vim: set noet ts=4 sw=4:

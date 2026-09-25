@@ -67,5 +67,14 @@ last=$(grep -a "fuzz: t=" "$out/srv.log" | tail -1 | sed 's/^.*fuzz: //')
 echo "seed $SEED, $MINUTES min: ${last:-no ticks}"
 echo "client frame: ${worst:-no frame peak lines}"
 echo "logs and pictures in $out"
+# **And one line either way** ([CI_RUNS]'s contract, 2026-09-25): the
+# faults above are said as they are found, but a run that finds none
+# said nothing at all, so run_all.sh read "(no verdict line)" off a
+# green fuzz and a reader had to know that silence was the pass.
+if [ "$status" -eq 0 ]; then
+	echo "PASS: the run finished with no fault of the kinds this watches"
+else
+	echo "FAIL: the run hit one of the faults listed above"
+fi
 # The run's own verdict, which every line above only reported
 exit "$status"

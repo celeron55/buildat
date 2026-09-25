@@ -25,8 +25,10 @@ paths += sorted(p for p in glob.glob(root + "/extensions/*/check.sh") +
 		glob.glob(root + "/games/*/check.sh")
 		if re.search(r"^# tier: ", open(p, errors="ignore").read(), re.M))
 for name in paths:
+	# verdict.sh is sourced by fuzz.sh and drive.sh and sets their status;
+	# it is a fragment like lib.sh and not a runner of its own
 	if os.path.basename(name) in ("lib.sh", "contract.sh",
-			"fullscreen_gate.sh", "run_all.sh"):
+			"fullscreen_gate.sh", "run_all.sh", "verdict.sh"):
 		continue
 	src = open(name, errors="ignore").read()
 	# **A runner's verdict may live in the python beside it** -- new_world.sh
@@ -36,10 +38,12 @@ for name in paths:
 	# below are about the shell's own shape, and a python's last line is
 	# not the runner's exit status.
 	spoken = src
-	for py in set(re.findall(r"([\w./]+\.py)", src)):
+	# ...and in a sibling shell it sources: fuzz.sh and drive.sh both
+	# take their verdict from verdict.sh (2026-09-25)
+	for sib in set(re.findall(r"([\w./]+\.(?:py|sh))", src)):
 		cand = os.path.join(os.path.dirname(name) or ".",
-				os.path.basename(py))
-		if os.path.exists(cand):
+				os.path.basename(sib))
+		if os.path.exists(cand) and os.path.abspath(cand) != os.path.abspath(name):
 			spoken += "\n" + open(cand, errors="ignore").read()
 	if "FAIL:" not in spoken and "echo FAIL" not in spoken:
 		quiet.append(name)
@@ -71,7 +75,10 @@ for name in paths:
 	last = lines[-1].strip() if lines else ""
 	# A runner may end on the line that says it passed, as long as every
 	# way of failing before it left through exit 1
+	# exec replaces this process with another runner's, so that runner's
+	# status is this one's (first_run.sh is drive.sh with a MENU_RUN)
 	ends_on_verdict = (re.fullmatch(r"\w+", last) or last.startswith("exit ")
+			or last.startswith("exec ")
 			or "verdict_exit" in last or last == "fi"
 			or last.endswith("|| exit 1")
 			or (("PASS" in last) and ("exit 1" in src)))
