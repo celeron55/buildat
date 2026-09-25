@@ -1635,6 +1635,38 @@ end
 log:info("bays " .. BAYS .. " " .. BAY_Z .. " " ..
 		table.concat(bay_desc, " "))
 
+-- **The walls the attract sweep shows** ([POCKETS_ROUND]: the pockets
+-- fill the faced wall first and reach round as the tree grows, so a
+-- room whose contents are behind the player hides them from anybody who
+-- does not walk). One entry per wall that holds pockets, in the
+-- allocation's own order, with the middle of what it holds: the sweep
+-- turns to each in turn. A tree that fills one wall -- this one --
+-- gives one entry, and the sweep is the sweep it always was.
+attract_walls = {}
+do
+	local by = {}
+	for b = 1, BAYS do
+		local p, o = room.pockets[b], orb_places[b]
+		if p and o then
+			local e = by[p.wall]
+			if not e then
+				e = {wall = p.wall, x = 0, y = 0, z = 0, n = 0}
+				by[p.wall] = e
+				attract_walls[#attract_walls + 1] = e
+			end
+			e.x, e.y, e.z = e.x + o.x, e.y + o.y, e.z + o.z
+			e.n = e.n + 1
+		end
+	end
+	for _, e in ipairs(attract_walls) do
+		e.x, e.y, e.z = e.x / e.n, e.y / e.n, e.z / e.n
+	end
+	log:info("attract: " .. #attract_walls .. " walls to show")
+end
+-- Where the sweep is looking now, eased toward the wall it is showing
+attract_aim = nil
+attract_shown = nil
+
 -- **The floor's own things** (user): a launch action that is not a game
 -- is a glossy white sphere, and it stands on the floor rather than in a
 -- pocket. The wall holds the games; the floor holds everything else that
@@ -4243,6 +4275,8 @@ end
 -- **F8 starts it at once**, which is how a run gets at it without
 -- waiting: a short timer for the check's sake would fire between the
 -- check's own keys and eat the next one, which is exactly what it did.
+-- How long the sweep spends on one wall before turning to the next
+local ATTRACT_WALL_S = tonumber(env("BUILDAT_LAUNCH_ATTRACT_WALL_S")) or 14
 local ATTRACT_AFTER = tonumber(
 		env("BUILDAT_LAUNCH_ATTRACT")) or 14
 idle_quiet = 0
@@ -4328,9 +4362,31 @@ function handle_idle_update(event_type, event_data)
 		cam.from.x = HOME_FROM.x + sway * 3.5
 		cam.from.y = HOME_FROM.y + 1.1 + math.sin(a * 0.13) * 0.7
 		cam.from.z = HOME_FROM.z - 1.0 + math.cos(a * 0.17) * 5.0
-		cam.at.x = HOME_AT.x + sway * 1.5
-		cam.at.y = HOME_AT.y + 0.9
-		cam.at.z = HOME_AT.z
+		-- **And it turns to each wall that holds something**
+		-- ([POCKETS_ROUND]): the faced wall for the first stretch, then
+		-- the sides, then the wall behind the player -- which is the
+		-- order they fill in, so the sweep shows the room the way it
+		-- grew. With one wall filled it looks where it always looked.
+		local want = {x = HOME_AT.x, y = HOME_AT.y + 0.9, z = HOME_AT.z}
+		if #attract_walls > 0 then
+			local i = math.floor(a / ATTRACT_WALL_S) % #attract_walls + 1
+			local w = attract_walls[i]
+			want.x, want.y, want.z = w.x, w.y + 0.9, w.z
+			if attract_shown ~= w.wall then
+				attract_shown = w.wall
+				log:info("attract: showing the " .. w.wall .. " wall")
+			end
+		end
+		attract_aim = attract_aim or {x = want.x, y = want.y, z = want.z}
+		-- Eased in the player's own time, not in frames: a turn that
+		-- takes a second on this desk takes a second under llvmpipe
+		local k = 1 - math.exp(-dt * 1.2)
+		attract_aim.x = attract_aim.x + (want.x - attract_aim.x) * k
+		attract_aim.y = attract_aim.y + (want.y - attract_aim.y) * k
+		attract_aim.z = attract_aim.z + (want.z - attract_aim.z) * k
+		cam.at.x = attract_aim.x + sway * 1.5
+		cam.at.y = attract_aim.y
+		cam.at.z = attract_aim.z
 		apply_camera()
 	end
 	idle_t = idle_t + dt
@@ -5402,6 +5458,7 @@ function handle_keydown(event_type, event_data)
 	idle_quiet = 0
 	if attracting then
 		attracting = false
+		attract_aim, attract_shown = nil, nil
 		fly_to(HOME_FROM, HOME_AT)
 		log:info("attract: back to the standing place")
 		return
