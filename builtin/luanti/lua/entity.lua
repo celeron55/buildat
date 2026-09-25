@@ -3615,7 +3615,39 @@ local function drawn_pos_of(o, depth)
 	}
 end
 
-local function show_objects()
+-- **How often the whole list goes out** ([PACKET_STALL] (2),
+-- 2026-09-25): every step was several a second of a thousand doubles,
+-- and the client spends 6 to 13 ms on each of them with a herd about.
+-- Ten a second is the cap; a step that changes nothing sends nothing at
+-- all.
+--
+-- **Why the whole list and not a delta**: `luanti:objects` is declared
+-- LatestOnly (`luanti.cpp:1169`), so a queued packet is replaced by a
+-- newer one -- which is safe exactly because every packet is complete.
+-- A delta dropped that way is an update lost for good, so sending less
+-- often is the half of (2) that does not need a second channel.
+local OBJECTS_INTERVAL = 0.1
+local objects_due = 0
+local objects_last = nil
+
+local function same_list(a, b)
+	if b == nil or #a ~= #b then
+		return false
+	end
+	for i = 1, #a do
+		if a[i] ~= b[i] then
+			return false
+		end
+	end
+	return true
+end
+
+local function show_objects(dtime)
+	objects_due = objects_due - (dtime or 0)
+	if objects_due > 0 then
+		return
+	end
+	objects_due = OBJECTS_INTERVAL
 	local v = {}
 	local props_changed = {}
 	for id, o in pairs(objects) do
@@ -3672,6 +3704,11 @@ local function show_objects()
 	if #v == 0 and not anything_shown then
 		return
 	end
+	-- Nothing moved, grew, turned or went: the client has this list
+	if same_list(v, objects_last) then
+		return
+	end
+	objects_last = v
 	anything_shown = #v > 0
 	__show_objects(v)
 end
@@ -3886,7 +3923,7 @@ function core.__step_objects(dtime)
 			step_object(o, dtime)
 		end
 	end
-	show_objects()
+	show_objects(dtime)
 	send_inventories()
 end
 
