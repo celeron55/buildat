@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # cost: 17s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
-# covers: src/client/app.cpp src/client/state.cpp
+# covers: src/client/app.cpp src/client/state.cpp src/impl/packet_stream.cpp src/interface/packet_stream.h
 # [BOX_PLAYTEST_2] (12): the connect runs on a worker, so the frame keeps
 # drawing while it waits. The client is pointed at a blackholed address
 # (192.0.2.1, TEST-NET-1: the SYNs go nowhere and the connect sits for its
