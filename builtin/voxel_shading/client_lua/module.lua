@@ -282,6 +282,7 @@ local lamp_light = magic.Vector3(1, 1, 1)
 -- the same at every hour. Nothing until a client sets it.
 local cave_ambient = magic.Vector3(0, 0, 0)
 local chamber_light_param = 1.0
+local gray_by_light = 0.0
 -- And the ground's radiance, for the lower hemisphere; see M.set_ground_light()
 local ground_light = magic.Vector3(0, 0, 0)
 -- Whether the mesher packs the vertex alpha; see M.set_packed_sky()
@@ -684,6 +685,7 @@ local function push_sky_vis()
 				command:SetShaderParameter("LampLight", lamp_light)
 				command:SetShaderParameter("CaveAmbient", cave_ambient)
 				command:SetShaderParameter("ChamberLight", chamber_light_param)
+				command:SetShaderParameter("GrayByLight", gray_by_light)
 				command:SetShaderParameter("TranslucencyGain", translucency_gain)
 				-- Off for a world with a sky, and said every frame like
 				-- the rest: a cube map at infinity wants no parallax
@@ -703,6 +705,7 @@ local function push_sky_vis()
 	render_path:SetShaderParameter("LampLight", lamp_light)
 	render_path:SetShaderParameter("CaveAmbient", cave_ambient)
 	render_path:SetShaderParameter("ChamberLight", chamber_light_param)
+	render_path:SetShaderParameter("GrayByLight", gray_by_light)
 	render_path:SetShaderParameter("TranslucencyGain", translucency_gain)
 	render_path:SetShaderParameter("ProbeBox", 0.0)
 end
@@ -807,6 +810,15 @@ end
 -- its light. One unless a client sets it, which is what the shader did before.
 function M.set_chamber_light(f)
 	chamber_light_param = math.max(0, f)
+	declare_countdown = 0
+end
+
+-- [NIGHT_GRAY]'s third ladder: show a face gray by the light it gets rather
+-- than by the radiance it gives out -- gray at the cave floor's own level,
+-- coloured a quarter above it. The frame pass does the same job on radiance
+-- and cannot hold the rule across materials. Off unless a client asks.
+function M.set_gray_by_light(on)
+	gray_by_light = on and 1.0 or 0.0
 	declare_countdown = 0
 end
 

@@ -507,7 +507,26 @@ do
 	-- under BUILDAT_LUANTI_LINEAR, where the probes read linear light.
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"luanti_client/res/LuantiNightGray.xml"))
-	rp:SetEnabled("NightGray", buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
+	-- BUILDAT_LUANTI_NIGHT_GRAY="<L0> <L1>" moves the pass's two levels and
+	-- "off" turns the pass off, which is how [NIGHT_GRAY]'s ladders are
+	-- shot; BUILDAT_LUANTI_GRAY_BY_LIGHT=1 puts the gray in the voxel
+	-- shader instead, keyed on the light a face gets rather than on the
+	-- radiance the frame reads.
+	local gray_env = buildat.get_env("BUILDAT_LUANTI_NIGHT_GRAY") or ""
+	local gray_off = gray_env == "off" or
+			buildat.get_env("BUILDAT_LUANTI_GRAY_BY_LIGHT") == "1"
+	rp:SetEnabled("NightGray", not gray_off and
+			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
+	local l0, l1 = gray_env:match("^([%d.]+)%s+([%d.]+)$")
+	if l0 then
+		rp:SetShaderParameter("NightGray",
+				magic.Vector2(tonumber(l0), tonumber(l1)))
+	end
+	-- Under the same gate as the pass: BUILDAT_LUANTI_LINEAR is the probes'
+	-- own frame and a gray in it would corrupt what they read.
+	voxel_shading.set_gray_by_light(
+			buildat.get_env("BUILDAT_LUANTI_GRAY_BY_LIGHT") == "1" and
+			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"luanti_client/res/LuantiAutoExposure.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))

@@ -147,6 +147,15 @@ uniform vec3 cCaveAmbient;
 // (voxel_shading.chamber_light()). **1.0 unless a client sets it**, which is
 // what the term was before this existed, so no game's look moves.
 uniform float cChamberLight;
+// [NIGHT_GRAY]'s third ladder: the gray keyed on **the light a face gets**
+// rather than on the radiance it gives out. The pass over the frame reads
+// light times albedo, so it cannot hold the rule across materials -- snow at
+// the cave floor gives out more than stone lit at three times it -- and the
+// rule the user stated is about the light: a face lit at the floor is gray
+// whatever its albedo, one lit above it is coloured. Full gray at
+// cCaveAmbient's own level and colour whole a quarter above it. 0 leaves this
+// out and the frame pass does the work instead.
+uniform float cGrayByLight;
 // The transmitted light's level ([PBR_FIT] 3b); 1.0 is Lambert through
 // the leaf's colour squared
 uniform float cTranslucencyGain;
@@ -1046,6 +1055,15 @@ void PS()
             finalColor += cMatEmissiveColor;
         #endif
 
+        // [NIGHT_GRAY] by the light rather than the radiance, when asked
+        if(cGrayByLight > 0.5)
+        {
+            const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+            float lightL = dot(vVertexLight, LUMA);
+            float floorL = max(dot(cCaveAmbient, LUMA), 1e-6);
+            float keep = smoothstep(floorL, 1.25 * floorL, lightL);
+            finalColor = mix(vec3(dot(finalColor, LUMA)), finalColor, keep);
+        }
         gl_FragColor = vec4(GetFog(finalColor, fogFactor), diffColor.a);
     #endif
 }
