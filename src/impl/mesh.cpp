@@ -574,6 +574,7 @@ static const int SKY_REACH = []{
 static const bool SKY_REACH_LOG = getenv("BUILDAT_SKY_REACH_LOG") != nullptr;
 static std::atomic<uint64_t> sky_reach_faces[10];
 static std::atomic<uint64_t> sky_reach_stop_solid(0);
+static std::atomic<uint64_t> sky_reach_stop_rock_beyond(0);
 static std::atomic<uint64_t> sky_reach_stop_edge(0);
 
 // Called on every face the term was asked about; prints the tally at most
@@ -607,13 +608,16 @@ static void tally_sky_reach(float open)
 		hist += buf;
 	}
 	uint64_t solid = sky_reach_stop_solid.load(std::memory_order_relaxed);
+	uint64_t beyond = sky_reach_stop_rock_beyond.load(std::memory_order_relaxed);
 	uint64_t edge = sky_reach_stop_edge.load(std::memory_order_relaxed);
-	uint64_t stops = solid + edge;
+	uint64_t stops = solid + beyond + edge;
 	log_i(MODULE, "sky reach %d: %llu faces asked; open %s; of %llu rays "
-			"stopped, %.1f%% on rock and %.1f%% at the edge of the data",
+			"stopped, %.1f%% on rock, %.1f%% under the terrain past the "
+			"volume and %.1f%% where the map says nothing",
 			SKY_REACH, (unsigned long long)total, cs(hist),
 			(unsigned long long)stops,
 			stops ? 100.0 * (double)solid / (double)stops : 0.0,
+			stops ? 100.0 * (double)beyond / (double)stops : 0.0,
 			stops ? 100.0 * (double)edge / (double)stops : 0.0);
 }
 
@@ -981,6 +985,33 @@ static void face_vertex_colors(VoxelVolume &volume,
 	// walk below leaves the volume often, and there "no data" has to read
 	// as "not sky" or a sealed room at a chunk's edge is lit through the
 	// seam ([DARK_INVARIANT]: the left half of the sealed shot, 2026-09-22).
+	// Where a ray leaves the meshed volume, the horizon map answers instead
+	// of the walk ([UNDERGROUND_LIGHT] (d)): the column's terrain height
+	// against the ray's own height says whether it has walked out into the
+	// open air or into the rock next door. Before this, "no data" was read
+	// as "not sky" whatever was there -- necessary, or a sealed room leaks
+	// at the seam, but a volume is one chunk and its padding, so seven rays
+	// in ten stopped at the edge rather than on anything (2026-09-25,
+	// BUILDAT_SKY_REACH_LOG) and every deep face read shut. Returns 1 for
+	// the open air, 0 for rock, -1 where the map has nothing to say and the
+	// old answer stands.
+	const pv::Vector3DInt32 vol_lc = volume.getEnclosingRegion().getLowerCorner();
+	auto horizon_says = [&](const pv::Vector3DInt32 &p) -> int {
+		if(!horizon)
+			return -1;
+		const int wx = horizon->origin_x + HORIZON_PAD +
+				(p.getX() - vol_lc.getX() - 1) * lod;
+		const int wy = horizon->origin_y + (p.getY() - vol_lc.getY() - 1) * lod;
+		const int wz = horizon->origin_z + HORIZON_PAD +
+				(p.getZ() - vol_lc.getZ() - 1) * lod;
+		const int cx = wx - horizon->origin_x, cz = wz - horizon->origin_z;
+		if(cx < 0 || cz < 0 || cx >= HORIZON_SIZE || cz >= HORIZON_SIZE)
+			return -1;
+		const int16_t h = horizon->heights[cz * HORIZON_SIZE + cx];
+		if(h == HORIZON_NONE)
+			return -1;
+		return wy > h ? 1 : 0;
+	};
 	auto open_fraction = [&](int reach, bool unknown_blocks){
 		int open = 0;
 		for(const pv::Vector3DInt32 &d : dirs){
@@ -988,12 +1019,21 @@ static void face_vertex_colors(VoxelVolume &volume,
 			pv::Vector3DInt32 p = front_p;
 			for(int k = 0; k < reach && !blocked; k++){
 				p += d;
-				const bool edge = unknown_blocks &&
-						fmt.undefined(volume.sample_at(p));
-				blocked = edge || occludes_sky(volume, voxel_reg, fmt, p);
+				if(unknown_blocks && fmt.undefined(volume.sample_at(p))){
+					const int says = horizon_says(p);
+					if(says == 1)
+						break; // walked out under the open sky
+					blocked = true;
+					if(SKY_REACH_LOG)
+						(says == 0 ? sky_reach_stop_rock_beyond :
+								sky_reach_stop_edge)
+								.fetch_add(1, std::memory_order_relaxed);
+					continue;
+				}
+				blocked = occludes_sky(volume, voxel_reg, fmt, p);
 				if(blocked && unknown_blocks && SKY_REACH_LOG)
-					(edge ? sky_reach_stop_edge : sky_reach_stop_solid)
-							.fetch_add(1, std::memory_order_relaxed);
+					sky_reach_stop_solid.fetch_add(1,
+							std::memory_order_relaxed);
 			}
 			if(!blocked)
 				open++;
