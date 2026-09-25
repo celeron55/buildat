@@ -154,7 +154,10 @@ uniform float cChamberLight;
 // rule the user stated is about the light: a face lit at the floor is gray
 // whatever its albedo, one lit above it is coloured. Full gray at
 // cCaveAmbient's own level and colour whole a quarter above it. 0 leaves this
-// out and the frame pass does the work instead.
+// out and the frame pass does the work instead. The value is the ramp's top
+// as a multiple of the floor -- 1.25 is the picked width, and widening it is
+// [NIGHT_GRAY]'s fourth ladder, since at 1.25 the transition reads as a band
+// in some frames (user, 2026-09-25).
 uniform float cGrayByLight;
 // The transmitted light's level ([PBR_FIT] 3b); 1.0 is Lambert through
 // the leaf's colour squared
@@ -1056,12 +1059,12 @@ void PS()
         #endif
 
         // [NIGHT_GRAY] by the light rather than the radiance, when asked
-        if(cGrayByLight > 0.5)
+        if(cGrayByLight > 0.0)
         {
             const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
             float lightL = dot(vVertexLight, LUMA);
             float floorL = max(dot(cCaveAmbient, LUMA), 1e-6);
-            float keep = smoothstep(floorL, 1.25 * floorL, lightL);
+            float keep = smoothstep(floorL, cGrayByLight * floorL, lightL);
             finalColor = mix(vec3(dot(finalColor, LUMA)), finalColor, keep);
         }
         gl_FragColor = vec4(GetFog(finalColor, fogFactor), diffColor.a);

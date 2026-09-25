@@ -817,8 +817,10 @@ end
 -- than by the radiance it gives out -- gray at the cave floor's own level,
 -- coloured a quarter above it. The frame pass does the same job on radiance
 -- and cannot hold the rule across materials. Off unless a client asks.
-function M.set_gray_by_light(on)
-	gray_by_light = on and 1.0 or 0.0
+-- top is the ramp's top as a multiple of the floor (1.25 is the picked
+-- width); nil or false turns it off.
+function M.set_gray_by_light(top)
+	gray_by_light = (type(top) == "number" and top > 0) and top or 0.0
 	declare_countdown = 0
 end
 

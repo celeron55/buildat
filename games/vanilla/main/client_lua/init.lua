@@ -512,9 +512,13 @@ do
 	-- shot; BUILDAT_LUANTI_GRAY_BY_LIGHT=1 puts the gray in the voxel
 	-- shader instead, keyed on the light a face gets rather than on the
 	-- radiance the frame reads.
+	-- BUILDAT_LUANTI_GRAY_BY_LIGHT is the ramp's top as a multiple of the
+	-- floor; "1" means the picked 1.25, so the flag reads as a flag.
+	local by_light = tonumber(
+			buildat.get_env("BUILDAT_LUANTI_GRAY_BY_LIGHT") or "")
+	if by_light == 1 then by_light = 1.25 end
 	local gray_env = buildat.get_env("BUILDAT_LUANTI_NIGHT_GRAY") or ""
-	local gray_off = gray_env == "off" or
-			buildat.get_env("BUILDAT_LUANTI_GRAY_BY_LIGHT") == "1"
+	local gray_off = gray_env == "off" or (by_light or 0) > 0
 	rp:SetEnabled("NightGray", not gray_off and
 			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
 	local l0, l1 = gray_env:match("^([%d.]+)%s+([%d.]+)$")
@@ -525,8 +529,7 @@ do
 	-- Under the same gate as the pass: BUILDAT_LUANTI_LINEAR is the probes'
 	-- own frame and a gray in it would corrupt what they read.
 	voxel_shading.set_gray_by_light(
-			buildat.get_env("BUILDAT_LUANTI_GRAY_BY_LIGHT") == "1" and
-			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
+			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1" and by_light)
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"luanti_client/res/LuantiAutoExposure.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
