@@ -258,7 +258,8 @@ fi
 	echo "delay 500"
 	# Back to the standing place, the walk below being measured from it
 	echo "event mode fps"
-	echo "delay 900"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "keydown W"
 	echo "delay 1400"
 	echo "keyup W"
@@ -288,7 +289,8 @@ fi
 	# floor in front of them. Measured over the whole band: from there
 	# every pitch from thirty to eighty places on the floor.
 	echo "event mode fps"
-	echo "delay 1200"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "keydown W"
 	echo "delay 700"
 	echo "keyup W"
@@ -321,7 +323,8 @@ fi
 	echo "mouse_click right"
 	echo "delay 700"
 	echo "event mode menu"
-	echo "delay 600"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	# **A server is connected to, and says so when it cannot be.**
 	# "localhost" is always in the list and nothing listens on its port
 	# in a check run, so this is the failure path: a notice line, the
@@ -338,7 +341,8 @@ fi
 	echo "keypress Escape"
 	echo "delay 1500"
 	echo "event mode menu"
-	echo "delay 600"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	# **The arrows browse the room** with the prompt empty: along a row
 	# and between the rows, the wall first and the floor's ranks after
 	echo "keypress Right"
@@ -350,7 +354,8 @@ fi
 	# Back to the standing place, so every frame below has the same
 	# viewpoint as the one Escape returns to
 	echo "event mode fps"
-	echo "delay 1800"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	# **The room is never static** -- the era reference's own rule, and
 	# the reason every comparison below freezes it first. Two frames a
 	# second apart, then F7.
@@ -383,7 +388,8 @@ fi
 	# from -- the player walked to the wall to dig, and a reference
 	# frame from there compares two cameras rather than two walls.
 	echo "event mode menu"
-	echo "delay 1800"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "screenshot $out/dissolve-closed.png"
 	# A screenshot lands a frame or two after the command, so the next
 	# key has to wait or it is in the picture (2026-09-23)
@@ -419,7 +425,8 @@ fi
 	# and the way back, and the empty pocket exercises all three with
 	# nothing to start.
 	echo "event mode menu"
-	echo "delay 600"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "keypress I"
 	echo "keypress N"
 	echo "keypress S"
@@ -437,7 +444,8 @@ fi
 	# The terminal: found by name like anything else, the camera square
 	# on to it and the panel flat over it.
 	echo "event mode menu"
-	echo "delay 600"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "keypress S"
 	echo "keypress E"
 	echo "keypress T"
@@ -493,7 +501,8 @@ fi
 	# and the step fails on its own setup. Every step before this one
 	# leaves the camera somewhere of its own.
 	echo "event mode menu"
-	echo "delay 1500"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "screenshot $out/attract-home.png"
 	echo "wait_log 20000 Wrote screenshot $out/attract-home.png"
 	echo "keypress F8"
@@ -511,7 +520,8 @@ fi
 	# **The mode is said** ([CMD_EVENT]), so the Escape below is the one
 	# that pauses rather than the one that pops a level.
 	echo "event mode fps"
-	echo "delay 900"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "screenshot $out/prepause.png"
 	echo "wait_log 20000 Wrote screenshot $out/prepause.png"
 	echo "keypress Escape"
@@ -550,11 +560,13 @@ fi
 	# second playtest, 5 and 6): a term with many matches, then the
 	# arrows, and each one has to be a different picture.
 	echo "event mode menu"
-	echo "delay 600"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "keypress T"
 	echo "keypress E"
 	echo "keypress S"
-	echo "delay 1200"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "screenshot $out/search1.png"
 	echo "wait_log 20000 Wrote screenshot $out/search1.png"
 	echo "keypress Down"
@@ -566,12 +578,14 @@ fi
 	echo "screenshot $out/search3.png"
 	echo "wait_log 20000 Wrote screenshot $out/search3.png"
 	echo "event mode fps"
-	echo "delay 900"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	# **Menu mode's furniture is menu mode's** (the second playtest, 3
 	# and 4): a term in the prompt, Tab away, and nothing of the search
 	# is on screen in FPS -- and Tab back finds the term again.
 	echo "event mode menu"
-	echo "delay 600"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "keypress D"
 	echo "keypress I"
 	echo "keypress G"
@@ -590,7 +604,8 @@ fi
 	# and stays in menu mode, so the console's own Escape below would
 	# pop the mode instead of opening the dialog
 	echo "event mode fps"
-	echo "delay 900"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	# **The developer console, over the room** ([LAUNCH_CONSOLE] offers
 	# its screen and the room takes it): the pause dialog's third item,
 	# a line typed at it, and Escape to put the room back.
@@ -600,7 +615,8 @@ fi
 	echo "keypress Down"
 	echo "delay 300"
 	echo "keypress Return"
-	echo "delay 1200"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "screenshot $out/room-console.png"
 	echo "wait_log 20000 Wrote screenshot $out/room-console.png"
 	echo "text buildat.version()"
@@ -622,7 +638,8 @@ fi
 	# puts it back and resets the idle clock, and it is what the drive
 	# uses everywhere else it needs a known viewpoint.
 	echo "event mode fps"
-	echo "delay 1500"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "mouse_down left"
 	echo "delay 1400"
 	echo "mouse_up left"
@@ -669,7 +686,8 @@ fi
 	# stops in front of it, which is what the mark sheet uses to frame
 	# one.
 	for c in D I G G E R; do echo "keypress $c"; done
-	echo "delay 2600"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	# **And the prompt out of the way before the click**: the panel the
 	# typing opened is over the middle of the screen, so the click
 	# landed on it and the orb behind it never heard (2026-09-24).
@@ -1172,7 +1190,8 @@ for yaw in own 0; do
 	{ echo "wait_log_any 90000 the room hums"; echo "delay 1000"
 		echo "event mode menu"; echo "delay 700"
 		for c in D I G G; do echo "keypress $c"; echo "delay 120"; done
-		echo "delay 2600"
+		echo "wait_log 15000 camera: landed"
+		echo "delay 250"
 		echo "screenshot $out/mark_face_$yaw.png"
 		echo "delay 400"; echo "quit"; } > "$out/cmds_face_$yaw.txt"
 	env $extra BUILDAT_LAUNCH_HOP=2.0 bin/buildat -m launch_world \

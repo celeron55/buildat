@@ -2689,6 +2689,11 @@ function handle_camera_update(event_type, event_data)
 	apply_camera()
 	if cam.t >= 1 then
 		cam.to_from, cam.to_at = nil, nil
+		-- **Said once a flight ends** ([CHECK_COST]): a drive that has
+		-- asked the camera to go somewhere waits for this rather than
+		-- guessing at FLY_SECONDS, which is the guess that shot frames
+		-- mid-flight when the room got faster
+		log:info("camera: landed")
 		-- **What is pointed at is said again when the flight lands**
 		-- (2026-09-25): the name over an orb is written when the
 		-- pointed orb changes, and during a fly that is whatever was
