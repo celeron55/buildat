@@ -25,6 +25,9 @@
 #include <RigidBody.h>
 #include <climits>
 #include <cmath>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
 #define MODULE "mesh"
 
 namespace magic = Urho3D;
@@ -561,6 +564,59 @@ static const int SKY_REACH = []{
 	int v = s ? atoi(s) : 0;
 	return v < 0 ? 0 : (v > 64 ? 64 : v);
 }();
+// [UNDERGROUND_LIGHT] (a): what the term actually computed. A picture read
+// backwards cannot tell a face that found the sky from one whose rays ran
+// out of meshed volume -- both draw black -- so BUILDAT_SKY_REACH_LOG=1
+// counts every face the term was asked about: how open its hemisphere came
+// out, and whether the rays that stopped hit rock or the edge of the data.
+// The second number is the one that says whether the walk can see far
+// enough to mean anything, since a volume is one chunk and its padding.
+static const bool SKY_REACH_LOG = getenv("BUILDAT_SKY_REACH_LOG") != nullptr;
+static std::atomic<uint64_t> sky_reach_faces[10];
+static std::atomic<uint64_t> sky_reach_stop_solid(0);
+static std::atomic<uint64_t> sky_reach_stop_edge(0);
+
+// Called on every face the term was asked about; prints the tally at most
+// once every five seconds, from whichever mesher thread gets there first.
+static void tally_sky_reach(float open)
+{
+	int b = (int)(open * 9.0f + 0.5f);
+	sky_reach_faces[b < 0 ? 0 : (b > 9 ? 9 : b)]
+			.fetch_add(1, std::memory_order_relaxed);
+	static std::atomic<int64_t> said_at_ms(0);
+	int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count();
+	int64_t was = said_at_ms.load(std::memory_order_relaxed);
+	if(now - was < 5000)
+		return;
+	if(!said_at_ms.compare_exchange_strong(was, now))
+		return;
+	uint64_t total = 0;
+	for(int i = 0; i < 10; i++)
+		total += sky_reach_faces[i].load(std::memory_order_relaxed);
+	if(total == 0)
+		return;
+	ss_ hist;
+	for(int i = 0; i < 10; i++){
+		uint64_t n = sky_reach_faces[i].load(std::memory_order_relaxed);
+		if(n == 0)
+			continue;
+		char buf[64];
+		snprintf(buf, sizeof buf, "%s%d/9 %.1f%%", hist.empty() ? "" : ", ",
+				i, 100.0 * (double)n / (double)total);
+		hist += buf;
+	}
+	uint64_t solid = sky_reach_stop_solid.load(std::memory_order_relaxed);
+	uint64_t edge = sky_reach_stop_edge.load(std::memory_order_relaxed);
+	uint64_t stops = solid + edge;
+	log_i(MODULE, "sky reach %d: %llu faces asked; open %s; of %llu rays "
+			"stopped, %.1f%% on rock and %.1f%% at the edge of the data",
+			SKY_REACH, (unsigned long long)total, cs(hist),
+			(unsigned long long)stops,
+			stops ? 100.0 * (double)solid / (double)stops : 0.0,
+			stops ? 100.0 * (double)edge / (double)stops : 0.0);
+}
+
 static const bool PBR_MODE = getenv("BUILDAT_LUANTI_PBR") != nullptr && (
 		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr" ||
 		ss_(getenv("BUILDAT_LUANTI_PBR")) == "1" ||
@@ -932,8 +988,12 @@ static void face_vertex_colors(VoxelVolume &volume,
 			pv::Vector3DInt32 p = front_p;
 			for(int k = 0; k < reach && !blocked; k++){
 				p += d;
-				blocked = (unknown_blocks && fmt.undefined(volume.sample_at(p))) ||
-						occludes_sky(volume, voxel_reg, fmt, p);
+				const bool edge = unknown_blocks &&
+						fmt.undefined(volume.sample_at(p));
+				blocked = edge || occludes_sky(volume, voxel_reg, fmt, p);
+				if(blocked && unknown_blocks && SKY_REACH_LOG)
+					(edge ? sky_reach_stop_edge : sky_reach_stop_solid)
+							.fetch_add(1, std::memory_order_relaxed);
 			}
 			if(!blocked)
 				open++;
@@ -989,8 +1049,11 @@ static void face_vertex_colors(VoxelVolume &volume,
 	// length is right moves every cave in the game and is the user's pick
 	// off an options_for_DARK_INVARIANT/ sheet.
 	float sky_reach = 1.0f;
-	if(SKY_REACH > 0 && sky_f <= 0.0f)
+	if(SKY_REACH > 0 && sky_f <= 0.0f){
 		sky_reach = open_fraction(SKY_REACH, true);
+		if(SKY_REACH_LOG)
+			tally_sky_reach(sky_reach);
+	}
 
 	for(size_t i = 0; i < 4; i++){
 		pv::Vector3DFloat d = quad[i] - centre;
