@@ -2279,10 +2279,19 @@ local function reflection_probe(at)
 end
 reflection_probe(V(0, 2.0, 0.0))
 
--- The first frames, not the first: at boot the materials and the
--- generated textures are not on the GPU yet and a probe taken then is a
--- picture of nothing. Cheap to ask a few times and then stop.
-local probe_frames = 0
+-- Not the first frame: at boot the materials and the generated textures
+-- are not on the GPU yet and a probe taken then is a picture of
+-- nothing. A few bakes, spread over the first seconds, and then stop.
+--
+-- **Counted in seconds and not in frames** (2026-09-26): it used to
+-- bake all six faces every frame for the first ninety-one frames, and
+-- six extra views a frame is what made those frames slow -- 100 ms
+-- each, the engine's clamp -- so ninety-one of them took **fifteen
+-- seconds** of a player's time at ten frames a second. The count being
+-- in frames is what made it feed on itself: the slower the bake made
+-- the frame, the longer the bake lasted. Four bakes at 0.15, 0.6, 1.5
+-- and 3 s cover a texture arriving late and cost four frames.
+probe_bakes = {at = {0.15, 0.6, 1.5, 3.0}, next = 1, started = nil}
 function handle_probe_update()
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
@@ -2290,10 +2299,15 @@ function handle_probe_update()
 	if env("BUILDAT_LAUNCH_NORENDERPROBE") ~= "" then
 		return
 	end
-	if probe_frames > 90 then
+	if probe_bakes.next > #probe_bakes.at then
 		return
 	end
-	probe_frames = probe_frames + 1
+	local now = buildat.get_time_us() / 1e6
+	probe_bakes.started = probe_bakes.started or now
+	if now - probe_bakes.started < probe_bakes.at[probe_bakes.next] then
+		return
+	end
+	probe_bakes.next = probe_bakes.next + 1
 	for _, s in ipairs(probe_surfaces) do
 		s:QueueUpdate()
 	end
@@ -2624,6 +2638,63 @@ function handle_camera_update(event_type, event_data)
 	end
 end
 magic.SubscribeToEvent("Update", "handle_camera_update")
+
+-- **What the room's own frames cost** (2026-09-26): the first half
+-- minute after a start reads badly and nothing in the room said so.
+-- The worst frame of each second while the room is young, and after
+-- that only a frame over the ceiling, so a settled room is quiet.
+frame_watch = {worst = 0, worst_at = 0, due = 0, started = nil,
+		said = 0, ceiling = 0.1, young = 45, over = 0, summed = false}
+-- Declared here and filled at the end of the file: the sandbox refuses
+-- an assignment to a global that the main chunk has not made
+frame_trace = {us = {}, due = 0}
+handle_frame_trace = nil
+function handle_frame_watch(event_type, event_data)
+	local dt = event_data:GetFloat("TimeStep")
+	local now = buildat.get_time_us() / 1e6
+	frame_watch.started = frame_watch.started or now
+	local age = now - frame_watch.started
+	if dt > frame_watch.worst then
+		frame_watch.worst, frame_watch.worst_at = dt, age
+	end
+	frame_watch.due = frame_watch.due - dt
+	if frame_watch.due > 0 then
+		return
+	end
+	frame_watch.due = 1.0
+	-- And the engine's own table for a frame that cost this much, at
+	-- most a few times: what a Lua line cannot say is where in the
+	-- engine the time went (the same reading [PACKET_STALL] takes)
+	if frame_watch.worst >= frame_watch.ceiling and frame_watch.said < 3 and
+			buildat.profiler_data then
+		frame_watch.said = frame_watch.said + 1
+		log:info("the frame that cost " ..
+				math.floor(frame_watch.worst * 1000) .. " ms:\n" ..
+				(buildat.profiler_data(4) or ""))
+	end
+	-- Said when a second's worst frame is over the ceiling, and once at
+	-- the end of the young window whatever it was: a settled room is
+	-- quiet and a slow one says so without anybody asking.
+	if frame_watch.worst >= frame_watch.ceiling then
+		log:info(string.format(
+				"frames: at %.0f s the worst of the last second was " ..
+				"%.0f ms (%.0f fps at that rate)", age,
+				frame_watch.worst * 1000,
+				frame_watch.worst > 0 and 1.0 / frame_watch.worst or 0))
+	end
+	if not frame_watch.summed and age >= frame_watch.young then
+		frame_watch.summed = true
+		log:info(string.format(
+				"frames: the first %.0f s had %d seconds whose worst " ..
+				"frame was over %.0f ms", frame_watch.young,
+				frame_watch.over or 0, frame_watch.ceiling * 1000))
+	end
+	if frame_watch.worst >= frame_watch.ceiling then
+		frame_watch.over = (frame_watch.over or 0) + 1
+	end
+	frame_watch.worst = 0
+end
+magic.SubscribeToEvent("Update", "handle_frame_watch")
 
 -- **Two control modes, and it starts in the immersive one** (user,
 -- 2026-09-23). Menu mode is what was built -- the prompt, the digits,
@@ -5823,6 +5894,49 @@ show_hint()
 
 -- **What the client asks a launcher for** ([MENU_CONTEXT]): init.lua
 -- hands these on as the extension's own.
+-- **Where a frame goes, while the room is young** (2026-09-26): each
+-- handler wrapped by name, since the sandbox has no _G to walk. Off
+-- unless BUILDAT_LAUNCH_FRAME_TRACE is set: this is a measurement.
+;(function()
+	if (buildat.get_env("BUILDAT_LAUNCH_FRAME_TRACE") or "") == "" then
+		return
+	end
+	local function timed(name, f)
+		return function(a, b)
+			local t0 = buildat.get_time_us()
+			f(a, b)
+			frame_trace.us[name] = (frame_trace.us[name] or 0) +
+					(buildat.get_time_us() - t0)
+		end
+	end
+	handle_probe_update = timed("probe", handle_probe_update)
+	handle_camera_update = timed("camera", handle_camera_update)
+	handle_fps_update = timed("fps", handle_fps_update)
+	handle_dig_update = timed("dig", handle_dig_update)
+	handle_orb_update = timed("orb", handle_orb_update)
+	handle_synth_update = timed("synth", handle_synth_update)
+	handle_dissolve_update = timed("dissolve", handle_dissolve_update)
+	handle_idle_update = timed("idle", handle_idle_update)
+	handle_frame_trace = function(event_type, event_data)
+		frame_trace.due = frame_trace.due - event_data:GetFloat("TimeStep")
+		if frame_trace.due > 0 then
+			return
+		end
+		frame_trace.due = 1.0
+		local parts = {}
+		for n, us in pairs(frame_trace.us) do
+			if us > 500 then
+				parts[#parts + 1] = string.format("%s %.0f", n, us / 1000)
+			end
+			frame_trace.us[n] = 0
+		end
+		table.sort(parts)
+		log:info("the room's own second, in ms: " ..
+				(#parts > 0 and table.concat(parts, ", ") or "nothing over 1"))
+	end
+	magic.SubscribeToEvent("Update", "handle_frame_trace")
+end)()
+
 return {
 	entered_game = entered_game,
 	leave_game = leave_game,
