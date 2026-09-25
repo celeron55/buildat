@@ -507,18 +507,27 @@ do
 	-- under BUILDAT_LUANTI_LINEAR, where the probes read linear light.
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"luanti_client/res/LuantiNightGray.xml"))
-	-- BUILDAT_LUANTI_NIGHT_GRAY="<L0> <L1>" moves the pass's two levels and
-	-- "off" turns the pass off, which is how [NIGHT_GRAY]'s ladders are
-	-- shot; BUILDAT_LUANTI_GRAY_BY_LIGHT=1 puts the gray in the voxel
-	-- shader instead, keyed on the light a face gets rather than on the
-	-- radiance the frame reads.
-	-- BUILDAT_LUANTI_GRAY_BY_LIGHT is the ramp's top as a multiple of the
-	-- floor; "1" means the picked 1.25, so the flag reads as a flag.
+	-- **[NIGHT_GRAY], as picked**: the gray is the voxel shader's, keyed
+	-- on the light a face gets rather than on the radiance the frame
+	-- reads, full gray at the cave floor's own luminance and colour
+	-- whole at **1.5 times it** (the user's pick off the fourth ladder,
+	-- 2026-09-25, `local/options_for_NIGHT_GRAY/ladder4/`: at 1.25 the
+	-- transition reads as a band, and 1.5 widens it for under a
+	-- hundredth of the lit cave's colour). **And the frame pass goes
+	-- with it here**: it reads light times albedo, so it cannot hold
+	-- the rule across materials -- snow at the floor gives out more
+	-- than stone lit at three times it -- and two grays over one frame
+	-- would compound.
+	--
+	-- BUILDAT_LUANTI_GRAY_BY_LIGHT=<top> moves the ramp's top and 0
+	-- turns the shader's gray off, which is how the ladders are shot;
+	-- BUILDAT_LUANTI_NIGHT_GRAY="<L0> <L1>" moves the frame pass's two
+	-- levels and "off" turns it off. With the shader's gray on, the
+	-- pass is off whatever it says.
 	local by_light = tonumber(
-			buildat.get_env("BUILDAT_LUANTI_GRAY_BY_LIGHT") or "")
-	if by_light == 1 then by_light = 1.25 end
+			buildat.get_env("BUILDAT_LUANTI_GRAY_BY_LIGHT") or "") or 1.5
 	local gray_env = buildat.get_env("BUILDAT_LUANTI_NIGHT_GRAY") or ""
-	local gray_off = gray_env == "off" or (by_light or 0) > 0
+	local gray_off = gray_env == "off" or by_light > 0
 	rp:SetEnabled("NightGray", not gray_off and
 			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
 	local l0, l1 = gray_env:match("^([%d.]+)%s+([%d.]+)$")
