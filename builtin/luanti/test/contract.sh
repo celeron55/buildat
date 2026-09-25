@@ -36,7 +36,10 @@ for name in paths:
 	# A python block that says FAIL: and never leaves a status behind
 	for m in re.finditer(r"python3[^\n]*<<'?(\w+)'?\n(.*?)\n\1\n", src, re.S):
 		body = m.group(2)
-		if "FAIL:" in body and "sys.exit" not in body:
+		# raise SystemExit(1) is the same thing said the other way, and
+		# a python block that ends on it leaves the same status
+		if ("FAIL:" in body and "sys.exit" not in body
+				and "SystemExit" not in body):
 			why.append("a python block prints FAIL: and does not sys.exit")
 	# The shell's own verdict, with no exit anywhere after it
 	for m in re.finditer(r'echo\s+"?FAIL[:\s]', src):
@@ -44,11 +47,15 @@ for name in paths:
 		# exit 1 straight away, a precondition's exit 2, or a status the
 		# runner carries to its own exit at the end
 		if not any(t in rest for t in ("exit 1", "exit $", "exit 2",
-				"status=1", "sys.exit")):
+				"status=1", "sys.exit", "SystemExit")):
 			why.append("a shell FAIL: is not followed by exit 1")
 			break
-	# And whatever the runner ends with is what its status will be
-	lines = [l for l in src.splitlines() if l.strip()]
+	# And whatever the runner ends with is what its status will be.
+	# **Comments are not commands**: most files in this tree end with a
+	# vim modeline, and reading that as the exit status flagged three
+	# runners that exit properly one line above it (2026-09-25).
+	lines = [l for l in src.splitlines()
+			if l.strip() and not l.strip().startswith("#")]
 	last = lines[-1].strip() if lines else ""
 	# A runner may end on the line that says it passed, as long as every
 	# way of failing before it left through exit 1

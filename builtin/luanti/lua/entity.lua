@@ -1154,11 +1154,29 @@ local function v2(t, x, y)
 	end
 	return {x = x, y = y}
 end
+-- **Said once a session** ([DRAW_SETTERS]): a mod that calls a setter
+-- this tree keeps but does not draw gets no warning that nothing
+-- happened, which the second feature sweep called the worst shape a gap
+-- can have. The value is still kept and answered, so a mod that reads it
+-- back sees what it set.
+local said_not_drawn = {}
+local function not_drawn(what, why)
+	if said_not_drawn[what] then
+		return
+	end
+	said_not_drawn[what] = true
+	core.log("warning", what .. ": kept and answered, not drawn -- " .. why)
+end
+
 function PlayerRef:set_local_animation(idle, walk, dig, walk_while_dig, frame_speed)
 	local o = state_of(self)
 	if not o then
 		return
 	end
+	not_drawn("set_local_animation",
+			"nothing here animates a player's own model yet " ..
+			"([OBJECT_ANIM]); the frames are read back by get_local_" ..
+			"animation and will be what the model plays when one is drawn")
 	o.local_animation = {
 		idle = v2(idle, 1, 1), walk = v2(walk, 1, 1), dig = v2(dig, 1, 1),
 		walk_while_dig = v2(walk_while_dig, 1, 1),
@@ -1329,6 +1347,16 @@ function PlayerRef:set_lighting(t)
 		merge_into(o.lighting, LIGHTING_DEFAULT)
 	end
 	merge_into(o.lighting, t)
+	-- Two of its fields reach the client; the rest -- the exposure
+	-- curve, the bloom and the volumetric light -- wait on
+	-- builtin/voxel_shading having the knobs ([DRAW_SETTERS])
+	for k in pairs(t) do
+		if k ~= "saturation" and k ~= "shadows" then
+			not_drawn("set_lighting." .. tostring(k),
+					"only shadows.intensity and saturation reach the " ..
+					"client; the rest wants the shading knobs first")
+		end
+	end
 	send_hud(o, {"lighting",
 			tostring(tonumber(o.lighting.shadows.intensity) or 0),
 			tostring(tonumber(o.lighting.saturation) or 1)})
