@@ -95,6 +95,19 @@ shoot()
 	[ "$n" -ge 14 ]
 }
 
+# **Nothing to compare against is answered before the scene is shot**:
+# a machine with no reference -- every CI run, every fresh clone -- was
+# rendering fourteen views and then skipping, which is half a minute of
+# every run spent on a verdict that was known at the start
+if [ -z "$accept" ] && { [ ! -d "$ref" ] ||
+		[ -z "$(ls "$ref"/*.png 2>/dev/null)" ]; }; then
+	echo "no reference to compare against;" \
+			"take one with $(basename "$0") --accept on a tree whose look" \
+			"you have confirmed"
+	echo "SKIP: there is no reference run on this machine" >&2
+	exit 2
+fi
+
 if ! shoot "$run"; then
 	case $? in
 	2) echo "SKIP: the voxel_lighting server does not start here" >&2
@@ -140,14 +153,6 @@ PYN
 	echo "the reference is this run, at $(cat "$ref/COMMIT" 2>/dev/null)"
 	echo "PASS: the reference is taken, with this machine's noise beside it"
 	exit 0
-fi
-
-if [ ! -d "$ref" ] || [ -z "$(ls "$ref"/*.png 2>/dev/null)" ]; then
-	echo "no reference to compare against;" \
-			"take one with $(basename "$0") --accept on a tree whose look" \
-			"you have confirmed"
-	echo "SKIP: there is no reference run on this machine" >&2
-	exit 2
 fi
 
 python3 - "$run" "$ref" <<'PY'

@@ -30,9 +30,21 @@ cd "$here"
 if ! command -v luac >/dev/null 2>&1; then
 	echo "SKIP: no luac to parse with" >&2; exit 2
 fi
+# **The tree is not always a git checkout**: the packaging image builds
+# from a git archive, where `git ls-files` answers nothing and this
+# would have passed on zero files -- a check that cannot fail
+files=$(git ls-files '*.lua' 2>/dev/null | grep -v "^3rdparty/")
+if [ -z "$files" ]; then
+	files=$(find . -name '*.lua' -not -path './3rdparty/*' \
+		-not -path './local/*' -not -path './tmp/*' -not -path './cache/*' |
+		sed 's|^\./||')
+fi
+if [ -z "$files" ]; then
+	echo "SKIP: no Lua files found to parse" >&2; exit 2
+fi
 n=0
 bad=0
-for f in $(git ls-files '*.lua' | grep -v "^3rdparty/"); do
+for f in $files; do
 	n=$((n + 1))
 	if ! out=$(luac -p "$f" 2>&1); then
 		bad=$((bad + 1))
@@ -40,6 +52,12 @@ for f in $(git ls-files '*.lua' | grep -v "^3rdparty/"); do
 	fi
 done
 echo "$n Lua files in the tree, $bad of them broken"
+# A tree this size has hundreds; a handful means the list came from the
+# wrong place, which is the way this check would go quiet
+if [ "$n" -lt 50 ]; then
+	echo "FAIL: only $n Lua files were found, which is not this tree"
+	exit 1
+fi
 if [ "$bad" -gt 0 ]; then
 	echo "FAIL: a Lua file does not parse"
 	exit 1
