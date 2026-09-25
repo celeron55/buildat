@@ -1,16 +1,32 @@
 #!/bin/bash
-# [SQUASHED_BRANCH]: luanti-module's tree as one commit on top of master,
-# on a branch named for the version and the source hash, pushed to github.
+# [SQUASHED_BRANCH]: the development branch's tree as one commit on top of
+# master, on a branch named for it, the version and the source hash, pushed
+# to github.
 # No history crosses: the branch is master plus one diff, and doc/plan/ --
 # which narrates the history -- is left out of it. A new branch per
 # release; nothing is reset or force-pushed.
 #
-#   util/squash_push.sh            # from a clean checkout of luanti-module
+#   util/squash_push.sh            # from a clean checkout of the dev branch
 #   PUSH=0 util/squash_push.sh     # make the branch, do not push
+#   SRC=dev util/squash_push.sh    # say which branch, when detached
 set -eu
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$here"
-src=luanti-module
+# The source branch is never written down here ([SQUASH_BRANCH_NAME]): it
+# is whatever is checked out, so renaming the development branch carries
+# through by itself. release.sh runs this detached in a throwaway worktree
+# and names the branch in SRC, since a detached HEAD has no name of its own.
+src="${SRC:-$(git rev-parse --abbrev-ref HEAD)}"
+if [ "$src" = HEAD ]; then
+	echo "detached and no SRC given: SRC=<branch> util/squash_push.sh" >&2
+	exit 2
+fi
+if [ "$src" = master ]; then
+	echo "refusing to squash master onto itself" >&2; exit 2
+fi
+if ! git show-ref --verify --quiet "refs/heads/$src"; then
+	echo "no such branch: $src" >&2; exit 2
+fi
 # On the branch, or detached at its tip -- util/release.sh runs this in a
 # throwaway worktree so the main tree's session is not disturbed
 if [ "$(git rev-parse --abbrev-ref HEAD)" != "$src" ] &&
@@ -22,14 +38,14 @@ if ! git diff --quiet HEAD; then
 fi
 v=$(tr -d '[:space:]' < VERSION)
 h=$(git rev-parse --short "$src")
-b="luanti-module-squashed-$v-$h"
+b="$src-squashed-$v-$h"
 if git show-ref --verify --quiet "refs/heads/$b"; then
 	echo "$b exists already; bump VERSION or commit first" >&2; exit 2
 fi
 git branch "$b" master
 git checkout -q "$b"
-# The tree, not the history: everything luanti-module has, on master's tip,
-# and nothing master had that luanti-module has not
+# The tree, not the history: everything the source branch has, on master's
+# tip, and nothing master had that it has not
 git rm -r -q .
 git checkout "$src" -- .
 git rm -r -q --cached doc/plan && rm -rf doc/plan
@@ -37,7 +53,7 @@ git rm -r -q --cached doc/plan && rm -rf doc/plan
 # continuation lines indented) goes with them
 sed -i '/doc\/plan\/master_plan.md/{N;N;d}' README.md
 git add -A
-git commit -q -m "luanti-module at $h, $(date +%F), version $v"
+git commit -q -m "$src at $h, $(date +%F), version $v"
 # And a tag on it, v<version>-<hash>: package.yml fires on the tag and
 # makes a prerelease with the archives ([SQUASH_RELEASE]); a plain
 # v<version> tag placed by hand on a squash is the real release
