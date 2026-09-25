@@ -402,6 +402,183 @@ function M.define(dst, util)
 	-- The fourth component is what a shader parameter and a homogeneous
 	-- coordinate want; Material:SetShaderParameter() already takes the
 	-- others.
+	-- The rest of the matrix family ([URHO_SWEEP]'s Math batch,
+	-- 2026-09-25), after Matrix3x4 because Matrix4 names Matrix3 and both
+	-- name the vectors: **a rotation without a translation (Matrix3), and
+	-- the projective one a shader parameter takes (Matrix4)**, with the
+	-- 2x2 left out because Urho3D does not bind it at all (see the
+	-- refusal above). Arithmetic draws nothing and
+	-- reaches nothing, which is the policy's clearest yes; the elements
+	-- are plain numbers, so they are properties rather than accessors.
+	-- refused: Matrix2 -- Urho3D's own Lua API does not bind it: Matrix2.pkg
+	-- exists but MathLuaAPI.pkg does not include it, so the global is nil
+	-- and a wrapper for it raises on the first call (2026-09-25)
+	util.wc("Matrix3", {
+		unsafe_constructor = util.wrap_function({{"number", "__nil"},
+				{"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"},
+				{"number", "__nil"}, {"number", "__nil"}},
+		function(a, b, c, d, e, f, g, h, i)
+			if a == nil then
+				return util.wrap_instance("Matrix3", Matrix3())
+			end
+			return util.wrap_instance("Matrix3",
+					Matrix3(a, b, c, d, e, f, g, h, i))
+		end),
+		instance = {
+			Scale = util.wrap_function({"Matrix3"}, function(self)
+				return util.wrap_instance("Vector3", self:Scale())
+			end),
+			SetScale = util.self_function("SetScale", {},
+					{"Matrix3", {"number", "Vector3"}}),
+			Scaled = util.wrap_function({"Matrix3", "Vector3"},
+			function(self, scale)
+				return util.wrap_instance("Matrix3", self:Scaled(scale))
+			end),
+			Transpose = util.wrap_function({"Matrix3"}, function(self)
+				return util.wrap_instance("Matrix3", self:Transpose())
+			end),
+			Inverse = util.wrap_function({"Matrix3"}, function(self)
+				return util.wrap_instance("Matrix3", self:Inverse())
+			end),
+			Equals = util.self_function("Equals", {"boolean"},
+					{"Matrix3", "Matrix3"}),
+			ToString = util.self_function("ToString", {"string"},
+					{"Matrix3"}),
+		},
+		instance_meta = {
+			__mul = util.wrap_function({"Matrix3",
+					{"Vector3", "Matrix3", "number"}},
+			function(self, other)
+				local r = self * other
+				if type(other) ~= "number" and other.x ~= nil then
+					return util.wrap_instance("Vector3", r)
+				end
+				return util.wrap_instance("Matrix3", r)
+			end),
+			__add = util.wrap_function({"Matrix3", "Matrix3"},
+			function(self, other)
+				return util.wrap_instance("Matrix3", self + other)
+			end),
+			__sub = util.wrap_function({"Matrix3", "Matrix3"},
+			function(self, other)
+				return util.wrap_instance("Matrix3", self - other)
+			end),
+			__eq = util.wrap_function({"Matrix3", "Matrix3"},
+			function(self, other)
+				return (self == other)
+			end),
+		},
+		properties = {
+			m00 = util.simple_property("number"),
+			m01 = util.simple_property("number"),
+			m02 = util.simple_property("number"),
+			m10 = util.simple_property("number"),
+			m11 = util.simple_property("number"),
+			m12 = util.simple_property("number"),
+			m20 = util.simple_property("number"),
+			m21 = util.simple_property("number"),
+			m22 = util.simple_property("number"),
+		},
+	})
+
+	util.wc("Matrix4", {
+		unsafe_constructor = util.wrap_function({{"number", "Matrix3",
+				"__nil"}, {"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"},
+				{"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"},
+				{"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"}, {"number", "__nil"}},
+		function(a, ...)
+			if a == nil then
+				return util.wrap_instance("Matrix4", Matrix4())
+			end
+			if type(a) ~= "number" then
+				-- A rotation grown to four rows
+				return util.wrap_instance("Matrix4", Matrix4(a))
+			end
+			return util.wrap_instance("Matrix4", Matrix4(a, ...))
+		end),
+		instance = {
+			Translation = util.wrap_function({"Matrix4"}, function(self)
+				return util.wrap_instance("Vector3", self:Translation())
+			end),
+			Rotation = util.wrap_function({"Matrix4"}, function(self)
+				return util.wrap_instance("Quaternion", self:Rotation())
+			end),
+			RotationMatrix = util.wrap_function({"Matrix4"}, function(self)
+				return util.wrap_instance("Matrix3", self:RotationMatrix())
+			end),
+			ToMatrix3 = util.wrap_function({"Matrix4"}, function(self)
+				return util.wrap_instance("Matrix3", self:ToMatrix3())
+			end),
+			Scale = util.wrap_function({"Matrix4"}, function(self)
+				return util.wrap_instance("Vector3", self:Scale())
+			end),
+			Transpose = util.wrap_function({"Matrix4"}, function(self)
+				return util.wrap_instance("Matrix4", self:Transpose())
+			end),
+			Inverse = util.wrap_function({"Matrix4"}, function(self)
+				return util.wrap_instance("Matrix4", self:Inverse())
+			end),
+			SetTranslation = util.self_function("SetTranslation", {},
+					{"Matrix4", "Vector3"}),
+			SetRotation = util.self_function("SetRotation", {},
+					{"Matrix4", "Matrix3"}),
+			SetScale = util.self_function("SetScale", {},
+					{"Matrix4", {"number", "Vector3"}}),
+			Equals = util.self_function("Equals", {"boolean"},
+					{"Matrix4", "Matrix4"}),
+			ToString = util.self_function("ToString", {"string"},
+					{"Matrix4"}),
+		},
+		instance_meta = {
+			__mul = util.wrap_function({"Matrix4",
+					{"Vector3", "Vector4", "Matrix4", "Matrix3x4",
+					"number"}},
+			function(self, other)
+				local r = self * other
+				if type(other) == "number" then
+					return util.wrap_instance("Matrix4", r)
+				end
+				-- The unwrapped values arrive here: a vector is the one
+				-- with an x, and a w tells the four from the three
+				if other.x ~= nil then
+					return util.wrap_instance(
+							other.w ~= nil and "Vector4" or "Vector3", r)
+				end
+				return util.wrap_instance("Matrix4", r)
+			end),
+			__add = util.wrap_function({"Matrix4", "Matrix4"},
+			function(self, other)
+				return util.wrap_instance("Matrix4", self + other)
+			end),
+			__sub = util.wrap_function({"Matrix4", "Matrix4"},
+			function(self, other)
+				return util.wrap_instance("Matrix4", self - other)
+			end),
+			__eq = util.wrap_function({"Matrix4", "Matrix4"},
+			function(self, other)
+				return (self == other)
+			end),
+		},
+		properties = {
+			m00 = util.simple_property("number"),
+			m01 = util.simple_property("number"),
+			m02 = util.simple_property("number"),
+			m03 = util.simple_property("number"),
+			m10 = util.simple_property("number"),
+			m11 = util.simple_property("number"),
+			m12 = util.simple_property("number"),
+			m13 = util.simple_property("number"),
+			m20 = util.simple_property("number"),
+			m21 = util.simple_property("number"),
+			m22 = util.simple_property("number"),
+			m23 = util.simple_property("number"),
+			m30 = util.simple_property("number"),
+			m31 = util.simple_property("number"),
+			m32 = util.simple_property("number"),
+			m33 = util.simple_property("number"),
+		},
+	})
+
 	util.wc("Vector4", {
 		unsafe_constructor = util.wrap_function(
 				{"number", "number", "number", "number"},

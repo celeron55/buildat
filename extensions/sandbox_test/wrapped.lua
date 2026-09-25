@@ -32,6 +32,46 @@ do
 			math.abs(id:Scale().x - 1) < 1e-3)
 end
 
+-- Matrix3 and Matrix4 (2026-09-25, [URHO_SWEEP]'s Math batch): the
+-- rotation without a translation and the projective one a shader
+-- parameter takes -- built, multiplied, transposed, inverted and read
+-- element by element
+do
+	-- A rotation of 90 degrees about Y, written out: +X goes to -Z
+	local r = magic.Matrix3(0, 0, 1,
+			0, 1, 0,
+			-1, 0, 0)
+	local v = r * magic.Vector3(1, 0, 0)
+	assert(math.abs(v.x) < 1e-4 and math.abs(v.z + 1) < 1e-4,
+			"Matrix3 * Vector3: " .. v.x .. ", " .. v.y .. ", " .. v.z)
+	-- A rotation's inverse is its transpose, and the product is identity
+	local id = r * r:Transpose()
+	assert(math.abs(id.m00 - 1) < 1e-4 and math.abs(id.m01) < 1e-4 and
+			math.abs(id.m22 - 1) < 1e-4, "Matrix3 identity: " .. id:ToString())
+	assert(r:Inverse():Equals(r:Transpose()), "a rotation inverts by transpose")
+	assert(math.abs(r:Scaled(magic.Vector3(2, 2, 2)).m02 - 2) < 1e-4)
+
+	-- The four-row one, from the three plus a translation
+	local m = magic.Matrix4(r)
+	m:SetTranslation(magic.Vector3(5, 6, 7))
+	local t = m:Translation()
+	assert(math.abs(t.x - 5) < 1e-4 and math.abs(t.z - 7) < 1e-4)
+	assert(m:ToMatrix3():Equals(r), "the rotation comes back out whole")
+	-- A point through it, and back through its inverse
+	local p = m * magic.Vector3(1, 0, 0)
+	assert(math.abs(p.x - 5) < 1e-3 and math.abs(p.z - 6) < 1e-3,
+			"Matrix4 * Vector3: " .. p.x .. ", " .. p.y .. ", " .. p.z)
+	local back = m:Inverse() * p
+	assert(math.abs(back.x - 1) < 1e-3 and math.abs(back.z) < 1e-3)
+	-- And a Vector4, which is the one a shader parameter is
+	local h = m * magic.Vector4(0, 0, 0, 1)
+	assert(math.abs(h.x - 5) < 1e-3 and math.abs(h.w - 1) < 1e-3,
+			"Matrix4 * Vector4 carries the translation")
+	assert(math.abs(m.m03 - 5) < 1e-4 and math.abs(m.m33 - 1) < 1e-4,
+			"Matrix4 elements: " .. m:ToString())
+	log:info("wrapped: the matrices multiply, transpose and invert")
+end
+
 -- XMLElement (2026-09-25): a document out of the resource cache walked
 -- -- the root, its children, an attribute and a number
 do
