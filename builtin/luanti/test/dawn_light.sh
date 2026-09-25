@@ -59,6 +59,12 @@ shoot() { # <tag> <extra env>
 	# container and the window's gain read half of this desk's. At this
 	# rate each frame is exposed on its own key, which is the value the
 	# delay was waiting for.
+	# **And the three seconds are not only the meter** (tried
+	# 2026-09-25): cut to 600 ms with the adaptation already instant,
+	# the window still gained but the three probed hours moved by 42 to
+	# 63 levels of ground -- so what the rest of that delay buys is the
+	# light itself settling after the fixture moves the clock. It
+	# stays.
 	# A run that has stopped logging is taken down rather than waited out
 	run_client 60 "$out/cli_$tag.log" env BUILDAT_LUANTI_ADAPT=1000000 $2 \
 		bin/buildat -s localhost:29786 -w 640x480 -l 3 -c @"$cmds"
