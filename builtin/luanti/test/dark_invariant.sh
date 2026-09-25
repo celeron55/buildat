@@ -44,10 +44,20 @@ sleep 5
 srv=$(pgrep -x buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
-{ for shot in sealed_0200 sealed_1300 mouth_0200 mouth_1300; do
+# Two pictures of every stop, twenty seconds apart, and the pair has to
+# agree before either is read. The chat line says the server has set the
+# hour and placed the player; it says nothing about the client having the
+# room. With a mapgen backlog of five thousand chunks behind it the first
+# stop was drawn some runs and still black in others six seconds later,
+# and a black frame reads 0.51 of a level against a drawn dark room's
+# 1.43 -- which came out as the sky reaching a sealed room.
+{ echo "wait_log 240000 chat: dark: sealed hour warm"
+	for shot in sealed_0200 sealed_1300 mouth_0200 mouth_1300; do
 		spot=${shot%%_*}; hour=${shot##*_}
 		echo "wait_log 240000 chat: dark: $spot hour $hour"
-		echo "delay 6000"
+		echo "delay 10000"
+		echo "screenshot $out/${shot}_early.png"
+		echo "delay 20000"
 		echo "screenshot $out/$shot.png"
 	done
 	echo "delay 500"
@@ -66,7 +76,20 @@ env ${ABLATE:+BUILDAT_LUANTI_ABLATE=$ABLATE} \
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-grep -a "chat: dark: hour" "$out/cli.log" | sed 's/.*chat: //'
+# Both probes read a wall with no daylight of its own: the sky nibble
+# nought. That is the condition for the term under test to be asked
+# there at all -- where the flood has already put daylight on the
+# surface, the picture says nothing about rays. The other nibble is the
+# artificial one and it is allowed to be anything: it does not follow
+# the hour, and the mapgen's lava reaches the sealed room at 6.
+lit=$(grep -a "chat: dark: .* light " "$out/cli.log" | sed 's/.*chat: //' |
+	grep -v "light 0/")
+if [ -n "$lit" ]; then
+	echo "$lit"
+	echo "FAIL: a probe reads a wall the sky floods directly"
+	exit 1
+fi
+grep -a "chat: dark: .* light " "$out/cli.log" | sed 's/.*chat: //'
 python3 - "$out" <<'PY'
 import sys
 from PIL import Image
@@ -92,8 +115,27 @@ def compare(spot):
 			(spot, ma, mb, mean, worst))
 	return mean, worst
 
+def settled(name):
+	# The same stop nine seconds apart. A stop whose chunks were still
+	# arriving reads a black frame first and a drawn one after, which is
+	# about a level of difference -- the same size as the reading itself.
+	a, b = read(name), read(name + "_early")
+	mean = sum(sum(abs(p[i] - q[i]) for i in range(3)) for p, q in
+			zip(a, b)) / (3.0 * len(a))
+	if mean >= 0.2:
+		print("%-11s was still arriving: its two frames are %.2f of a "
+				"level apart" % (name, mean))
+		return False
+	return True
+
+still = [n for n in ("sealed_0200", "sealed_1300", "mouth_0200",
+		"mouth_1300") if not settled(n)]
 sealed_mean, sealed_worst = compare("sealed")
 mouth_mean, mouth_worst = compare("mouth")
+if still:
+	print("FAIL: the room was not drawn when it was read (%s)" %
+			", ".join(still))
+	sys.exit(1)
 # The sealed pair has to be one picture; the mouthed one has to be two,
 # or a fix that passes the first by killing the ray term passes everything
 # A settled run reads 0.00 of a level and no pixel apart at all. The

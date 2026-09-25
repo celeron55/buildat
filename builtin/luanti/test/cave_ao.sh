@@ -12,10 +12,22 @@
 # The exposure is pinned (BUILDAT_LUANTI_KEY): with the meter free a
 # darker room is simply metered brighter and every floor looks the same,
 # which is the trap [DARK_INVARIANT]'s pair fell into first.
+#
+# ABLATE=bounce turns the shader's hour-following bounce floor off. The
+# chamber's nibbles are both nought and its air touches no shaft, yet at
+# floor 0 it reads 34 of a level: that light is the bounce term, which
+# does not ask the nibble, and it swamps the ladder the floor is meant
+# to be read off (34.1 to 37.3 across 0 to 0.04). With it off the
+# constant floor is the only light in the room, which is the pair
+# [CAVE_AO] wants:
+#
+#   for f in 0 0.04; do FLOOR=$f ABLATE=bounce builtin/luanti/test/cave_ao.sh; done
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 FLOOR="${FLOOR:-0}"
+ABLATE="${ABLATE:-}"
+tag="floor$FLOOR${ABLATE:+_$ABLATE}${BUILDAT_SKY_REACH:+_reach$BUILDAT_SKY_REACH}"
 out="$here/local/options_for_CAVE_AO"; mkdir -p "$out"
 save=buildat_test_caveao
 cd "$here/Build"
@@ -39,22 +51,23 @@ trap 'kill -INT "$srv" 2>/dev/null' EXIT
 { for what in dark torch; do
 		echo "wait_log 240000 chat: cave_ao: ready $what"
 		echo "delay 6000"
-		echo "screenshot $out/${what}_floor$FLOOR${BUILDAT_SKY_REACH:+_reach$BUILDAT_SKY_REACH}.png"
+		echo "screenshot $out/${what}_$tag.png"
 	done
 	echo "delay 500"
 	echo "quit"; } > "$out/cmds.txt"
-BUILDAT_CAVE_AO_FLOOR="$FLOOR" BUILDAT_LUANTI_KEY="${KEY:-0.15}" \
+env ${ABLATE:+BUILDAT_LUANTI_ABLATE=$ABLATE} \
+	BUILDAT_CAVE_AO_FLOOR="$FLOOR" BUILDAT_LUANTI_KEY="${KEY:-0.15}" \
 	bin/buildat -s localhost:29797 -w 640x480 -l 3 -c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 grep -a "chat: cave_ao:" "$out/cli.log" | sed 's/.*chat: //'
-python3 - "$out" "$FLOOR" <<'PY'
-import sys, os
+python3 - "$out" "$tag" <<'PY'
+import sys
 from PIL import Image
-out, floor = sys.argv[1], sys.argv[2]
+out, tag = sys.argv[1], sys.argv[2]
 for what in ("dark", "torch"):
-	im = Image.open("%s/%s_floor%s%s.png" % (out, what, floor, os.environ.get("BUILDAT_SKY_REACH") and "_reach" + os.environ["BUILDAT_SKY_REACH"] or "")).convert("RGB")
+	im = Image.open("%s/%s_%s.png" % (out, what, tag)).convert("RGB")
 	w, h = im.size
 	box = (w // 4, h // 6, 3 * w // 4, 2 * h // 3)
 	d = list(im.crop(box).getdata())
@@ -65,7 +78,7 @@ for what in ("dark", "torch"):
 	# room has none, a room whose corners are shaped has some.
 	lum = sorted(sum(p) / 3.0 for p in d)
 	p10, p90 = lum[int(n * 0.10)], lum[int(n * 0.90)]
-	print("floor %-4s %-5s: mean %6.2f, the crop's 10th to 90th "
+	print("%-22s %-5s: mean %6.2f, the crop's 10th to 90th "
 			"percentile %6.2f to %6.2f, spread %6.2f" %
-			(floor, what, mean, p10, p90, p90 - p10))
+			(tag, what, mean, p10, p90, p90 - p10))
 PY
