@@ -577,7 +577,7 @@ do
 	end
 	luanti.refshot_note = function()
 		return string.format(
-				"chamber light %.3f, sky above %.3f, cave ambient %.4f",
+				"chamber light %.3f, sky above %.3f, applied %.3f",
 				voxel_shading.chamber_light(),
 				voxel_shading.sky_visibility_above(),
 				cave_ambient_now)
@@ -1729,30 +1729,29 @@ local function update_sky(dt)
 		-- local/options_for_CAVE_AO/.
 		local floor_f = tonumber(
 				buildat.get_env("BUILDAT_CAVE_AO_FLOOR") or "") or 0
-		-- [UNDERGROUND_LIGHT]: and over that floor, what the chamber the
-		-- player is in has by bouncing. BUILDAT_CAVE_LIGHT=<gain> is how
-		-- much of the hour's own bounce light a fully lit chamber gets;
-		-- nought unless it is asked for, so no game's look moves.
+		voxel_shading.set_cave_ambient(floor_f, floor_f, floor_f)
+		-- [UNDERGROUND_LIGHT]: and what the bounce term's own floor is
+		-- worth here. That floor is the light a face gets where the
+		-- flood's nibble says nothing reaches it, and it follows the
+		-- hour, so a sealed chamber is lit by the sun it cannot see --
+		-- twenty-one levels of it at vp10. Scaled by how lit the chamber
+		-- the camera is in is, a sealed place stops following the hour
+		-- and a cave lit round a corner keeps its light.
 		--
-		-- The reading is the camera's rays, not the face's: the light in
-		-- a cave lit at its far end arrives round a corner, which no face
-		-- can work out for itself, and the player is taken to be in the
-		-- chamber they are looking at (user, 2026-09-25). In the hour's
-		-- own colour, the same c * k the bounce term takes, so the night
-		-- sky lights a cave at night and the day's sky by day without a
-		-- second ramp to keep in step.
-		local cave_gain = tonumber(
-				buildat.get_env("BUILDAT_CAVE_LIGHT") or "") or 0
-		local cave_r, cave_g, cave_b = floor_f, floor_f, floor_f
-		if cave_gain > 0 then
-			local lit = voxel_shading.chamber_light()
-			local w = cave_gain * lit * PHYS.bounce
-			cave_r = cave_r + c.r * k * w
-			cave_g = cave_g + c.g * k * w
-			cave_b = cave_b + c.b * k * w
+		-- The reading is the camera's rays, not the face's: no face can
+		-- work out what arrives round a corner, and the player is taken
+		-- to be in the chamber they are looking at (user, 2026-09-25).
+		-- BUILDAT_CHAMBER_LIGHT=<gain> asks for it, above 1 to brighten a
+		-- lit chamber; unset leaves the shader's floor whole, which is
+		-- what it was, so no game's look moves.
+		local chamber_gain = tonumber(
+				buildat.get_env("BUILDAT_CHAMBER_LIGHT") or "") or 0
+		local chamber = 1.0
+		if chamber_gain > 0 then
+			chamber = chamber_gain * voxel_shading.chamber_light()
+			voxel_shading.set_chamber_light(chamber)
 		end
-		cave_ambient_now = cave_g
-		voxel_shading.set_cave_ambient(cave_r, cave_g, cave_b)
+		cave_ambient_now = chamber
 		local abl = buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""
 		if abl:find("amb") then zone.ambientColor = magic.Color(0, 0, 0) end
 		if abl:find("bounce") then voxel_shading.set_bounce_light(0, 0, 0) end

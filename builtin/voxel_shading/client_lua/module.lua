@@ -281,6 +281,7 @@ local lamp_light = magic.Vector3(1, 1, 1)
 -- [CAVE_AO]: what a cave is never darker than, in the ambient's units and
 -- the same at every hour. Nothing until a client sets it.
 local cave_ambient = magic.Vector3(0, 0, 0)
+local chamber_light_param = 1.0
 -- And the ground's radiance, for the lower hemisphere; see M.set_ground_light()
 local ground_light = magic.Vector3(0, 0, 0)
 -- Whether the mesher packs the vertex alpha; see M.set_packed_sky()
@@ -682,6 +683,7 @@ local function push_sky_vis()
 				command:SetShaderParameter("GroundLight", ground_light)
 				command:SetShaderParameter("LampLight", lamp_light)
 				command:SetShaderParameter("CaveAmbient", cave_ambient)
+				command:SetShaderParameter("ChamberLight", chamber_light_param)
 				command:SetShaderParameter("TranslucencyGain", translucency_gain)
 				-- Off for a world with a sky, and said every frame like
 				-- the rest: a cube map at infinity wants no parallax
@@ -700,6 +702,7 @@ local function push_sky_vis()
 	render_path:SetShaderParameter("GroundLight", ground_light)
 	render_path:SetShaderParameter("LampLight", lamp_light)
 	render_path:SetShaderParameter("CaveAmbient", cave_ambient)
+	render_path:SetShaderParameter("ChamberLight", chamber_light_param)
 	render_path:SetShaderParameter("TranslucencyGain", translucency_gain)
 	render_path:SetShaderParameter("ProbeBox", 0.0)
 end
@@ -797,6 +800,16 @@ end
 -- ambient so that the corner table and the hemisphere rays still shape a
 -- face where both nibbles are nought. Not scaled by the hour, which is
 -- what keeps [DARK_INVARIANT] -- see cCaveAmbient in PBRVoxel.glsl.
+-- [UNDERGROUND_LIGHT]: how lit the chamber the camera is in is, 0 to 1 and
+-- above 1 to brighten a lit one. It scales the bounce term's floor in the
+-- shader -- the light a face gets where the flood's nibble is nought -- so a
+-- sealed place stops following the hour while a cave lit round a corner keeps
+-- its light. One unless a client sets it, which is what the shader did before.
+function M.set_chamber_light(f)
+	chamber_light_param = math.max(0, f)
+	declare_countdown = 0
+end
+
 function M.set_cave_ambient(r, g, b)
 	cave_ambient = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
 	declare_countdown = 0

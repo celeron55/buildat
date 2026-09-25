@@ -135,6 +135,18 @@ uniform vec3 cLampLight;
 // without giving it the sun. Nought unless a client sets it
 // (voxel_shading.set_cave_ambient), so no game's look moves by default.
 uniform vec3 cCaveAmbient;
+// [UNDERGROUND_LIGHT]: how lit the chamber the camera is in is, 0 where
+// nothing daylit is in sight of it and 1 in a cave whose far end is in the
+// open. The bounce term's own floor -- the light a face gets where the
+// flood's nibble says nothing reaches it -- is scaled by this, so a sealed
+// place stops following the hour while a cave lit round a corner keeps its
+// light. It is per frame and not per face on purpose: bounce light in a
+// chamber is one quantity, no face can work out what arrives round a corner,
+// and a per-face answer costs a remesh an experiment. The client measures it
+// with the same rays it already marches for the reflections
+// (voxel_shading.chamber_light()). **1.0 unless a client sets it**, which is
+// what the term was before this existed, so no game's look moves.
+uniform float cChamberLight;
 // The transmitted light's level ([PBR_FIT] 3b); 1.0 is Lambert through
 // the leaf's colour squared
 uniform float cTranslucencyGain;
@@ -440,7 +452,7 @@ void VS()
             float interior = isPacked ?
                 shade * (1.0 - iColor.g) * n3 * n3 * (1.0 - step(0.97, sky.x)) : 0.0;
             vVertexLight = cShadowKinds > 0.5 ? iColor.rgb : baked +
-                cBounceLight * (0.15 + 1.0 * sky.x) *
+                cBounceLight * (0.15 * cChamberLight + 1.0 * sky.x) *
                     (1.0 - ShapeSkylight(sky.x)) * shade +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *
                     (ShapeSkylight(sky.x) * groundSeen + interior) +
