@@ -161,6 +161,46 @@ Environment
                              this is how that path is driven
     BUILDAT_LAUNCH_ATTRACT   seconds of quiet before the attract mode
                              starts (14)
+    BUILDAT_LAUNCH_ATTRACT_WALL_S
+                             how long the attract sweep spends showing
+                             one wall before it turns to the next (14).
+                             The pockets fill the faced wall first and
+                             reach round as the tree grows, and this is
+                             the sweep that shows them
+    BUILDAT_LAUNCH_PITCH     the spacing between pockets along a wall,
+                             in voxels (6). A wide pitch gives each wall
+                             fewer, which is how the other three are
+                             reached with the games this tree has
+    BUILDAT_LAUNCH_GLOW_CUT  what survives under the mark on a glowing
+                             orb, as the fraction of its emissive (0.04,
+                             picked off the [GLOW_MARK] sheet). The
+                             emissive is multiplied by 26, so the band
+                             a mark can read in is one over that, and
+                             0 is a hole in the light
+    BUILDAT_LAUNCH_MARK_FIGURE
+                             "outline" draws the mark's boundary rather
+                             than the mask
+    BUILDAT_LAUNCH_HOP       how far back the search's hop stops, in
+                             metres (4.5). Two is a portrait distance,
+                             which is what the mark sheets use
+    BUILDAT_LAUNCH_HOP_FLAT  take that hop straight on instead of from
+                             above. Close in, a rising camera leaves a
+                             pocket's own corridor for the slab beside
+                             it; the room's own hop keeps the rise,
+                             which is what reads as "here is where it
+                             lives"
+    BUILDAT_LAUNCH_FACE_YAW  the quarter turn between "-Z at the viewer"
+                             and "the middle of the UV map at the
+                             viewer", for measuring it again
+    BUILDAT_LAUNCH_BARE      leave the floor empty: the wall, its
+                             pockets and nothing else
+    BUILDAT_LAUNCH_HDR       say in the log what HDR is doing here
+    BUILDAT_LAUNCH_WHITE_V   the white sphere's value
+    BUILDAT_LAUNCH_FLOOR_SPEC
+                             the floor's specular level (1.0)
+    BUILDAT_MARK_OUT         mark_sheet.sh shoots into another
+                             directory, so a re-shoot does not write
+                             over a sheet somebody is still looking at
     BUILDAT_LAUNCH_NOPBR     put the stock non-PBR techniques on the
                              primitives; with HDR on, this is what
                              lights when the PBR ones do not
@@ -171,6 +211,12 @@ Environment
 What is where
 -------------
 
+    core.sh                  the check an edit runs: one client, about
+                             fifteen seconds -- the room boots, draws,
+                             walks, launches a game and comes back, and
+                             the log is read for a sandbox error.
+                             check.sh is the whole of it and is what a
+                             push runs ([CHECK_COST])
     init.lua                 the entry the client calls to boot a menu
                              extension; it runs world.lua
     room.lua                 the room: voxel_at() over a table of
