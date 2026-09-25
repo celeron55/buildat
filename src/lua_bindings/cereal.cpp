@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "lua_bindings/util.h"
 #include "core/log.h"
+#include <cstring>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #define MODULE "lua_bindings"
@@ -28,6 +29,51 @@ namespace lua_bindings {
 
 static constexpr auto known_types =
 		"byte, int16_t, int32_t, double, array, unordered_map, object";
+
+// An array's elements all have the one type, and finding that out per element
+// is most of what decoding one costs: a std::string built from the type
+// table, a chain of comparisons against the type names, and a trace call, for
+// every double. The client takes a thousand-element array of object state
+// several times a second and spends 6 to 80 ms a packet on it ([PACKET_STALL],
+// measured 2026-09-25: luanti:objects, 178 seconds of slow packets over a
+// morning's runs, more than every other packet type together). So an array of
+// a scalar type resolves that once and runs a switch.
+enum ScalarType {
+	SCALAR_NONE = 0, SCALAR_BYTE, SCALAR_INT16, SCALAR_INT32,
+	SCALAR_DOUBLE, SCALAR_STRING,
+};
+
+static ScalarType scalar_type_of(lua_State *L, int type_L)
+{
+	if(lua_type(L, type_L) != LUA_TSTRING)
+		return SCALAR_NONE; // a table is a compound type
+	const char *s = lua_tostring(L, type_L);
+	if(s == nullptr)
+		return SCALAR_NONE;
+	if(!strcmp(s, "double")) return SCALAR_DOUBLE;
+	if(!strcmp(s, "string")) return SCALAR_STRING;
+	if(!strcmp(s, "byte")) return SCALAR_BYTE;
+	if(!strcmp(s, "int32_t")) return SCALAR_INT32;
+	if(!strcmp(s, "int16_t")) return SCALAR_INT16;
+	return SCALAR_NONE;
+}
+
+// One value of an already-resolved type, pushed. The same reads in the same
+// order as the general path below, so the two agree byte for byte.
+static void push_scalar(lua_State *L, ScalarType type,
+		cereal::PortableBinaryInputArchive &ar)
+{
+	switch(type){
+	case SCALAR_BYTE: { uchar v; ar(v); lua_pushinteger(L, v); break; }
+	case SCALAR_INT16: { int16_t v; ar(v); lua_pushinteger(L, v); break; }
+	case SCALAR_INT32: { int32_t v; ar(v); lua_pushinteger(L, v); break; }
+	case SCALAR_DOUBLE: { double v; ar(v); lua_pushnumber(L, v); break; }
+	case SCALAR_STRING: {
+		ss_ v; ar(v); lua_pushlstring(L, v.c_str(), v.size()); break; }
+	default:
+		throw Exception("push_scalar(): not a scalar type");
+	}
+}
 
 // Places result value on top of stack
 static void binary_input_read_value(lua_State *L, int type_L,
@@ -91,10 +137,18 @@ static void binary_input_read_value(lua_State *L, int type_L,
 		// Loop through array items
 		uint64_t num_entries;
 		ar(num_entries);
-		for(uint64_t i = 0; i < num_entries; i++){
-			log_t(MODULE, "array[%s]", cs(i));
-			binary_input_read_value(L, array_type_L, ar);
-			lua_rawseti(L, value_result_table_L, i + 1);
+		const ScalarType scalar = scalar_type_of(L, array_type_L);
+		if(scalar != SCALAR_NONE){
+			for(uint64_t i = 0; i < num_entries; i++){
+				push_scalar(L, scalar, ar);
+				lua_rawseti(L, value_result_table_L, i + 1);
+			}
+		} else {
+			for(uint64_t i = 0; i < num_entries; i++){
+				log_t(MODULE, "array[%s]", cs(i));
+				binary_input_read_value(L, array_type_L, ar);
+				lua_rawseti(L, value_result_table_L, i + 1);
+			}
 		}
 		lua_pop(L, 1); // array_type_L
 		// value_result_table_L is left on stack
