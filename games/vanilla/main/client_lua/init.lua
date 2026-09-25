@@ -1732,14 +1732,15 @@ local function update_sky(dt)
 				PHYS.ground.r * (sun * sc.r + c.r * k),
 				PHYS.ground.g * (sun * sc.g + c.g * k),
 				PHYS.ground.b * (sun * sc.b + c.b * k))
-		-- [CAVE_AO]: BUILDAT_CAVE_AO_FLOOR=<f> puts a constant light under
-		-- the ambient so a cave at both nibbles nought keeps its corners.
-		-- The same at every hour, which is what [DARK_INVARIANT] needs;
-		-- nought unless it is asked for, so no game's look moves. The
-		-- ladder the user picks a value off is
-		-- local/options_for_CAVE_AO/.
+		-- [CAVE_AO]: a constant light under the ambient so a cave at both
+		-- nibbles nought keeps its corners. The same at every hour, which
+		-- is what [UNDERGROUND_LIGHT]'s invariant needs. **0.04, picked by
+		-- the user 2026-09-25** off local/options_for_UNDERGROUND_LIGHT/:
+		-- a sealed chamber reads 12.6 levels with 6.3 of spread, so its
+		-- pillar and corners are there, where at nought it is one flat
+		-- black. BUILDAT_CAVE_AO_FLOOR overrides it, 0 turning it off.
 		local floor_f = tonumber(
-				buildat.get_env("BUILDAT_CAVE_AO_FLOOR") or "") or 0
+				buildat.get_env("BUILDAT_CAVE_AO_FLOOR") or "") or 0.04
 		voxel_shading.set_cave_ambient(floor_f, floor_f, floor_f)
 		-- [UNDERGROUND_LIGHT]: and what the bounce term's own floor is
 		-- worth here. That floor is the light a face gets where the
@@ -1752,11 +1753,14 @@ local function update_sky(dt)
 		-- The reading is the camera's rays, not the face's: no face can
 		-- work out what arrives round a corner, and the player is taken
 		-- to be in the chamber they are looking at (user, 2026-09-25).
-		-- BUILDAT_CHAMBER_LIGHT=<gain> asks for it, above 1 to brighten a
-		-- lit chamber; unset leaves the shader's floor whole, which is
-		-- what it was, so no game's look moves.
+		-- **Gain 1, picked by the user 2026-09-25** off the same sheet:
+		-- vp10, which nothing reaches, stops following the hour (21.47 at
+		-- noon against 0.00 at night, both 0.00 now) while vp8, a cave
+		-- lit round a corner, keeps 87% of its daylight.
+		-- BUILDAT_CHAMBER_LIGHT overrides the gain, above 1 to brighten a
+		-- lit chamber and 0 to leave the shader's floor whole.
 		local chamber_gain = tonumber(
-				buildat.get_env("BUILDAT_CHAMBER_LIGHT") or "") or 0
+				buildat.get_env("BUILDAT_CHAMBER_LIGHT") or "") or 1.0
 		local chamber = 1.0
 		if chamber_gain > 0 then
 			chamber = chamber_gain * voxel_shading.chamber_light()
