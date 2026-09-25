@@ -4448,20 +4448,36 @@ function core.__dig_props()
 	-- the module is what knows which files it serves -- and the choice
 	-- per step is the client's.
 	--
-	--   s <name> <gain> <pitch> <file>,<file>,...
+	-- **And what it sounds like dug and placed**, which are the player's
+	-- own two ([NO_SOUND], 2026-09-25): the builtin plays those with
+	-- `exclude_player = the digger`, because official's client plays its
+	-- own -- so without this the one player who did it hears nothing,
+	-- which is what digging in this tree sounded like.
+	--
+	--   s <name> <gain> <pitch> <file>,<file>,...   underfoot
+	--   g <name> <gain> <pitch> <file>,...          dug
+	--   q <name> <gain> <pitch> <file>,...          placed
+	--
+	-- "g" and not "d": "d" is the dig prediction's own record above, and
+	-- a second meaning for it parsed as a prediction with a gain where
+	-- its node name should be (2026-09-25, an hour of "0 with a dug
+	-- sound" while the client read them as predictions).
+	local sound_kinds = {{"s", "footstep"}, {"g", "dug"}, {"q", "place"}}
 	for name, def in pairs(core.registered_nodes) do
-		local spec = type(def.sounds) == "table" and def.sounds.footstep
-		if type(spec) == "string" then
-			spec = {name = spec}
-		end
-		if type(spec) == "table" and type(spec.name) == "string" and
-				spec.name ~= "" and __luanti_sound_files then
-			local files = __luanti_sound_files(spec.name)
-			if type(files) == "table" and #files > 0 then
-				out[#out + 1] = "s\t" .. name .. "\t" ..
-						tostring(tonumber(spec.gain) or 1.0) .. "\t" ..
-						tostring(tonumber(spec.pitch) or 1.0) .. "\t" ..
-						table.concat(files, ",")
+		for _, kind in ipairs(sound_kinds) do
+			local spec = type(def.sounds) == "table" and def.sounds[kind[2]]
+			if type(spec) == "string" then
+				spec = {name = spec}
+			end
+			if type(spec) == "table" and type(spec.name) == "string" and
+					spec.name ~= "" and __luanti_sound_files then
+				local files = __luanti_sound_files(spec.name)
+				if type(files) == "table" and #files > 0 then
+					out[#out + 1] = kind[1] .. "\t" .. name .. "\t" ..
+							tostring(tonumber(spec.gain) or 1.0) .. "\t" ..
+							tostring(tonumber(spec.pitch) or 1.0) .. "\t" ..
+							table.concat(files, ",")
+				end
 			end
 		end
 	end

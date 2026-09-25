@@ -3755,7 +3755,16 @@ local function dig_packet(name, p)
 	}, {"object", {"p", VOXEL_PACKET_TYPE}}))
 	if name == "main:dig" and dig and dig.name then
 		local pr = luanti.prediction(dig.name)
+		local dug_name = node_name_at(p)
 		WIELD.predict_node(voxel_packet_value(p), pr and pr.dig or "air")
+		-- **And the sound of it** ([NO_SOUND], 2026-09-25): the builtin
+		-- plays a dig with the digger excluded, official's own client
+		-- playing its own, so this is the one place the player who dug
+		-- can hear it. **The node's name and not dig.name**, which is
+		-- the wielded item -- the prediction above is keyed by the item
+		-- and the sound by what is being dug -- and read before the
+		-- prediction puts air there.
+		luanti.dig_sound(dug_name, p.x, p.y, p.z)
 	end
 	-- Which chunk the dug voxel is in, and which node draws it. The client
 	-- says when a chunk that changed waits to be drawn again and names it by
@@ -3897,6 +3906,9 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	if pr and pr.place ~= "" and not pr.placed_param2 and not in_body and
 			not (upr and upr.rightclick and not sneak) then
 		WIELD.predict_node(at, pr.place)
+		-- The placed node's own sound, for the same reason the dig's is
+		-- here: item_place excludes the player who placed it
+		luanti.place_sound(pr.place, at.x, at.y, at.z)
 	end
 end)
 

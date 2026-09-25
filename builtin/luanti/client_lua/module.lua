@@ -1246,6 +1246,13 @@ end
 -- this file -- declared here because a local is only in scope after its
 -- declaration and this is what reads it.
 local node_footsteps = {}
+-- And what a node sounds like dug and placed ([NO_SOUND], 2026-09-25).
+-- The builtin plays those two with the digger excluded -- official's own
+-- client plays them for the player who did it -- so these are the
+-- client's to play or nobody's.
+local node_dug = {}
+local node_placed = {}
+local action_sound_n = 0
 local FOOTSTEP_STRIDE = 1.9
 local footstep_at = nil
 local footstep_n = 0
@@ -1290,6 +1297,56 @@ function M.footstep(node_name, x, y, z)
 				file)
 	end
 	return true
+end
+
+-- dig_sound(node_name, x, y, z) / place_sound(...) -> whether one played.
+-- The player's own dig and place, which the server does not send them:
+-- item.lua's node_dig and item_place call sound_play with
+-- exclude_player = the player who did it, since official Luanti's client
+-- plays its own. At the place rather than in the head, unlike a
+-- footstep: a dig is a thing over there.
+local action_said = {}
+
+local function action_sound(which, table_of, node_name, x, y, z)
+	local spec = table_of[node_name or ""]
+	if spec == nil or object_scene == nil then
+		-- Once a node, the way a footstep says it: a game whose nodes
+		-- carry no dug sound is silent on purpose, and one whose do and
+		-- is silent anyway is this record missing or the scene not up
+		local key = which .. ":" .. tostring(node_name)
+		if not action_said[key] then
+			action_said[key] = true
+			log:info("luanti: no " .. which .. " sound for " ..
+					tostring(node_name) ..
+					(object_scene == nil and " (no scene yet)" or ""))
+		end
+		return false
+	end
+	action_sound_n = action_sound_n + 1
+	local file = spec.files[math.random(#spec.files)]
+	play_sound(which .. ":" .. action_sound_n, file, spec.gain, spec.pitch,
+			false, 0, "pos", x, y, z, "0", 32)
+	-- Once a node at info and the rest at debug, as a footstep says it:
+	-- a session digs hundreds of nodes and what a reader wants is which
+	-- kinds have been heard from
+	local key = which .. ":" .. tostring(node_name)
+	if not action_said[key] then
+		action_said[key] = true
+		log:info("luanti: " .. which .. " " .. tostring(node_name) ..
+				": " .. file)
+	else
+		log:debug("luanti: " .. which .. " " .. tostring(node_name) ..
+				": " .. file)
+	end
+	return true
+end
+
+function M.dig_sound(node_name, x, y, z)
+	return action_sound("dug", node_dug, node_name, x, y, z)
+end
+
+function M.place_sound(node_name, x, y, z)
+	return action_sound("place", node_placed, node_name, x, y, z)
 end
 
 -- The fades, the sounds that follow an object, and the nodes of the ones
@@ -3460,6 +3517,21 @@ startup_packet("luanti:dig_props", "luanti_data/dig_props.bin", function(data)
 				placed_param2 = string.find(flags, "p", 1, true) ~= nil,
 				walkable = string.find(flags, "w", 1, true) ~= nil,
 			}
+		elseif fields[1] == "g" or fields[1] == "q" then
+			-- What it sounds like dug and placed, the same shape as the
+			-- footstep's record
+			local files = {}
+			for f in string.gmatch(fields[5] or "", "[^,]+") do
+				files[#files + 1] = f
+			end
+			if #files > 0 then
+				local into = fields[1] == "g" and node_dug or node_placed
+				into[fields[2]] = {
+					gain = tonumber(fields[3]) or 1.0,
+					pitch = tonumber(fields[4]) or 1.0,
+					files = files,
+				}
+			end
 		elseif fields[1] == "s" then
 			-- What the node sounds like underfoot ([NO_SOUND]): the
 			-- gain, the pitch and the files the group resolved to
@@ -3484,9 +3556,13 @@ startup_packet("luanti:dig_props", "luanti_data/dig_props.bin", function(data)
 					g = c[3] or 0, b = c[4] or 0}
 		end
 	end
+	local dug_n, placed_n = 0, 0
+	for _ in pairs(node_dug) do dug_n = dug_n + 1 end
+	for _ in pairs(node_placed) do placed_n = placed_n + 1 end
 	log:info("luanti:dig_props: " .. items .. " items, " .. nodes ..
 			" nodes with groups, " .. preds .. " predictions, " ..
-			footsteps .. " nodes with a footstep")
+			footsteps .. " nodes with a footstep, " .. dug_n ..
+			" with a dug sound and " .. placed_n .. " with a place sound")
 end)
 
 startup_packet("luanti:item_palettes", "luanti_data/item_palettes.bin",
