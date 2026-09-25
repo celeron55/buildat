@@ -2689,6 +2689,14 @@ function handle_camera_update(event_type, event_data)
 	apply_camera()
 	if cam.t >= 1 then
 		cam.to_from, cam.to_at = nil, nil
+		-- **What is pointed at is said again when the flight lands**
+		-- (2026-09-25): the name over an orb is written when the
+		-- pointed orb changes, and during a fly that is whatever was
+		-- briefly nearest the middle on the way past -- so a portrait
+		-- of one orb came back wearing a neighbour's name. -1 is
+		-- "whatever is pointed at now, say it again", the same thing a
+		-- mode change asks for.
+		pointed_orb = -1
 	end
 end
 magic.SubscribeToEvent("Update", "handle_camera_update")
