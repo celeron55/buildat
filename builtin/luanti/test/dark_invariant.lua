@@ -195,10 +195,20 @@ end
 -- arrives between two pictures reads the arrival: the first sealed shot
 -- was twenty-one levels away from its own second shot thirty seconds
 -- later, which is more than anything this fixture measures.
+--
+-- One spot a run, and it is the spot the player is spawned at. The
+-- server can put a player anywhere and the client applies it, but the
+-- command sequence taking the pictures runs minutes behind the server's
+-- schedule while the mesher is saturated -- chat lines four minutes
+-- late, five thousand chunks queued -- so a picture lands against the
+-- wrong stop. Every frame of the runs of 2026-09-25 carried the sealed
+-- room's coordinates, the mouthed pair included. SPOT says which room
+-- this run is about.
+local SPOT = ((os.getenv and os.getenv("BUILDAT_DARK_SPOT")) == "mouth")
+		and "mouth" or "sealed"
 local STOPS = {
-	{"warm", 0.5417, "sealed"},
-	{"0200", 0.0833, "sealed"}, {"1300", 0.5417, "sealed"},
-	{"0200", 0.0833, "mouth"}, {"1300", 0.5417, "mouth"},
+	{"warm", 0.5417, SPOT},
+	{"0200", 0.0833, SPOT}, {"1300", 0.5417, SPOT},
 }
 
 local function place(player, spot)
@@ -281,7 +291,7 @@ core.register_on_joinplayer(function(player)
 			core.chat_send_all("dark: done")
 			return
 		end
-		place(player, "sealed")
+		place(player, SPOT)
 		core.log("action", "dark: the sealed room is at " .. room.x ..
 				"," .. room.y .. "," .. room.z .. ", the mouthed one at " ..
 				mouth.x .. "," .. mouth.y .. "," .. mouth.z)
