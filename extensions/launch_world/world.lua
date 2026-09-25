@@ -3699,7 +3699,8 @@ function handle_orb_update(event_type, event_data)
 		desc_text.text = (o and o.description) or ""
 		log:info("pointing at orb " .. best .. ": " ..
 				(o and o.name or "?") ..
-				(best_up and " (up its column)" or ""))
+				(best_up and " (up its column)" or "") ..
+				string.format(" [%.2f of its disc]", best_score))
 	end
 	carry_draw()
 	if best > 0 then
