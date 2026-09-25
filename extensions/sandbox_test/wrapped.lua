@@ -117,4 +117,52 @@ do
 	log:info("wrapped: json parses to plain Lua, and says no to rubbish")
 end
 
+-- A mesh built from Lua (2026-09-25): one triangle, its vertices and
+-- indices written into VectorBuffers, the geometry and the model made
+-- here and hung on a node -- which is [OBJECT_ANIM]'s road and the fast
+-- way past CustomGeometry's one call per vertex
+do
+	local vb = magic.VertexBuffer:new()
+	assert(vb:SetSize(3, magic.MASK_POSITION + magic.MASK_NORMAL, false),
+			"three vertices of position and normal")
+	local v = magic.VectorBuffer.new()
+	local tri = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}}
+	for _, p in ipairs(tri) do
+		v:WriteFloat(p[1]); v:WriteFloat(p[2]); v:WriteFloat(p[3])
+		v:WriteFloat(0); v:WriteFloat(0); v:WriteFloat(-1)
+	end
+	assert(vb:SetData(v), "the vertices go in")
+	assert(vb.vertexCount == 3, "three vertices: " .. vb.vertexCount)
+
+	local ib = magic.IndexBuffer:new()
+	assert(ib:SetSize(3, false, false), "three 16-bit indices")
+	local iv = magic.VectorBuffer.new()
+	iv:WriteShort(0); iv:WriteShort(1); iv:WriteShort(2)
+	assert(ib:SetData(iv), "the indices go in")
+	assert(ib.indexCount == 3, "three indices: " .. ib.indexCount)
+
+	local geom = magic.Geometry:new()
+	assert(geom:SetNumVertexBuffers(1), "one vertex buffer")
+	assert(geom:SetVertexBuffer(0, vb), "the buffer goes on")
+	geom:SetIndexBuffer(ib)
+	assert(geom:SetDrawRange(magic.TRIANGLE_LIST, 0, 3), "one triangle")
+	assert(geom.indexCount == 3, "the range is three indices")
+
+	local model = magic.Model:new()
+	model:SetNumGeometries(1)
+	assert(model:SetGeometry(0, 0, geom), "the geometry goes in")
+	model:SetBoundingBox(magic.BoundingBox(magic.Vector3(0, 0, 0),
+			magic.Vector3(1, 1, 0)))
+	assert(model:GetNumGeometries() == 1, "one geometry")
+
+	-- And a drawable takes it, which is the whole point
+	local scene = magic.Scene()
+	scene:CreateComponent("Octree")
+	local node = scene:CreateChild("built")
+	local sm = node:CreateComponent("StaticModel")
+	sm.model = model
+	assert(sm.model, "the static model wears what was built")
+	log:info("wrapped: a mesh built from Lua hangs on a node")
+end
+
 return true

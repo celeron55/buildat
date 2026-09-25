@@ -816,8 +816,116 @@ function M.define(dst, util)
 		},
 	})
 
+	-- **A game builds its own mesh** ([URHO_SWEEP], and what
+	-- [OBJECT_ANIM] wants under it): CustomGeometry beside this defines
+	-- a vertex at a time, which is a Lua call per vertex and fine for a
+	-- few hundred; these three take the whole thing at once, as bytes
+	-- in a VectorBuffer. Nothing here reaches a path or the network --
+	-- it is memory a game fills and the GPU draws.
+	--
+	-- The lifetimes hold themselves: a Geometry keeps its buffers, a
+	-- Model keeps its geometries and a StaticModel keeps the Model, all
+	-- by reference count, so the Lua side can drop any of them.
+	util.wc("VertexBuffer", {
+		class = {
+			new = function()
+				return util.wrap_instance("VertexBuffer", VertexBuffer:new())
+			end,
+		},
+		instance = {
+			-- The mask is MASK_POSITION and friends, ored together; the
+			-- data is that many vertices of those elements, in Urho3D's
+			-- own order (position, normal, colour, texcoord...)
+			SetSize = util.self_function("SetSize", {"boolean"},
+					{"VertexBuffer", "number", "number",
+					{"boolean", "__nil"}}),
+			SetData = util.self_function("SetData", {"boolean"},
+					{"VertexBuffer", "VectorBuffer"}),
+			SetShadowed = util.self_function("SetShadowed", {},
+					{"VertexBuffer", "boolean"}),
+		},
+		properties = {
+			vertexCount = {get = util.simple_property("number").get},
+			vertexSize = {get = util.simple_property("number").get},
+			elementMask = {get = util.simple_property("number").get},
+		},
+	})
+
+	util.wc("IndexBuffer", {
+		class = {
+			new = function()
+				return util.wrap_instance("IndexBuffer", IndexBuffer:new())
+			end,
+		},
+		instance = {
+			-- largeIndices is 32-bit indices; 16 bits reach 65536
+			-- vertices and are half the memory
+			SetSize = util.self_function("SetSize", {"boolean"},
+					{"IndexBuffer", "number", "boolean",
+					{"boolean", "__nil"}}),
+			SetData = util.self_function("SetData", {"boolean"},
+					{"IndexBuffer", "VectorBuffer"}),
+			SetShadowed = util.self_function("SetShadowed", {},
+					{"IndexBuffer", "boolean"}),
+		},
+		properties = {
+			indexCount = {get = util.simple_property("number").get},
+			indexSize = {get = util.simple_property("number").get},
+		},
+	})
+
+	util.wc("Geometry", {
+		class = {
+			new = function()
+				return util.wrap_instance("Geometry", Geometry:new())
+			end,
+		},
+		instance = {
+			SetNumVertexBuffers = util.self_function("SetNumVertexBuffers",
+					{"boolean"}, {"Geometry", "number"}),
+			SetVertexBuffer = util.self_function("SetVertexBuffer",
+					{"boolean"}, {"Geometry", "number", "VertexBuffer"}),
+			SetIndexBuffer = util.self_function("SetIndexBuffer", {},
+					{"Geometry", "IndexBuffer"}),
+			-- The type is TRIANGLE_LIST and the rest of Urho3D's own
+			SetDrawRange = util.self_function("SetDrawRange", {"boolean"},
+					{"Geometry", "number", "number", "number",
+					{"boolean", "__nil"}}),
+			SetLodDistance = util.self_function("SetLodDistance", {},
+					{"Geometry", "number"}),
+		},
+		properties = {
+			indexCount = {get = util.simple_property("number").get},
+			vertexCount = {get = util.simple_property("number").get},
+		},
+	})
+
 	util.wc("Model", {
 		inherited_from_by_wrapper = dst.Resource,
+		class = {
+			-- A model built here rather than loaded from a file: what a
+			-- StaticModel's `model` takes, either way
+			new = function()
+				return util.wrap_instance("Model", Model:new())
+			end,
+		},
+		instance = {
+			SetNumGeometries = util.self_function("SetNumGeometries", {},
+					{"Model", "number"}),
+			SetNumGeometryLodLevels = util.self_function(
+					"SetNumGeometryLodLevels", {"boolean"},
+					{"Model", "number", "number"}),
+			SetGeometry = util.self_function("SetGeometry", {"boolean"},
+					{"Model", "number", "number", "Geometry"}),
+			-- **Without this nothing draws**: the box is what the culler
+			-- tests, and a model with an empty one is never in view
+			SetBoundingBox = util.self_function("SetBoundingBox", {},
+					{"Model", "BoundingBox"}),
+			SetGeometryCenter = util.self_function("SetGeometryCenter",
+					{"boolean"}, {"Model", "number", "Vector3"}),
+			GetNumGeometries = util.self_function("GetNumGeometries",
+					{"number"}, {"Model"}),
+		},
 	})
 
 	util.wc("Material", {

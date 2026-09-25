@@ -365,6 +365,15 @@ return {
 	"MAX_VAR_TYPES",
 
 	-- VertexElement
+	-- What a vertex buffer's elements are, as the mask SetSize takes
+	-- ([URHO_SWEEP]): a game building its own mesh says which of these
+	-- its vertices carry
+	"MASK_POSITION",
+	"MASK_NORMAL",
+	"MASK_COLOR",
+	"MASK_TEXCOORD1",
+	"MASK_TEXCOORD2",
+	"MASK_TANGENT",
 	"ELEMENT_POSITION",
 	"ELEMENT_NORMAL",
 	"ELEMENT_COLOR",
