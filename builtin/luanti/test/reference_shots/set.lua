@@ -66,6 +66,13 @@ rawset(_G, "REFSET", {
 		-- the lower half, and the meter's common case -- a dark hole in
 		-- a sunlit meadow -- gets its picture.
 		{pos = {x = 326.73, y = 13.035, z = -302.0}, yaw = 270.0, pitch = -30.0},
+		-- 10 the lower chamber ([UNDERGROUND_LIGHT], the user's spot,
+		-- 2026-09-22): deep enough that it ought to read as sealed --
+		-- no nibble light and no ray that finds the sun -- and a place
+		-- a player could stand, which a fixture's carved box is not.
+		-- Shot at 02:00 as well as 13:00, since what it is for is the
+		-- two being one picture.
+		{pos = {x = 307.0, y = -24.5, z = -308.5}, yaw = 291.4, pitch = -24.1},
 	},
 
 	-- One lamp in the reference ([LAMP_REF]): a light source placed by
@@ -115,6 +122,7 @@ rawset(_G, "REFSET", {
 		[7] = {"1300"},
 		[8] = {"1300"},
 		[9] = {"1300"},
+		[10] = {"0200", "1300"},
 	},
 	-- Rain is the surface set, at 15:00; a cave at 15:00 in rain is not a
 	-- third lighting question

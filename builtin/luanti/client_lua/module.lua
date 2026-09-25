@@ -1131,7 +1131,7 @@ buildat.sub_packet("luanti:objects", function(data)
 	end
 	local t2 = buildat.get_time_us()
 	-- A slow packet says where it went: decoding the doubles, or placing
-	if t2 - t0 >= 30000 or objects_deferred > 0 then
+	if t2 - t0 >= 8000 or objects_deferred > 0 then
 		log:debug(string.format("objects: %d in %.0f ms: decode %.0f ms, " ..
 				"place %.0f ms (built %.0f ms, %d deferred)", #v / STRIDE,
 				(t2 - t0) / 1000, (t1 - t0) / 1000, (t2 - t1) / 1000,
