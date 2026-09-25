@@ -33,10 +33,14 @@ namespace interface
 				int w, int h, int d, const ss_ &source_data,
 				VoxelRegistry *voxel_reg);
 
-		// Set custom geometry from 8-bit voxel data, using a voxel registry
+		// Set custom geometry from 8-bit voxel data, using a voxel registry.
+		// uv_origin is where this block's (0, 0, 0) sits in the world, which
+		// is what a voxel of uv_scale > 1 takes its slice of the repeat from
+		// ([WORLD_UV]); without it every voxel gets the whole texture.
 		void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 				int w, int h, int d, const ss_ &source_data,
-				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				const pv::Vector3DInt32 &uv_origin = pv::Vector3DInt32(0, 0, 0));
 
 		// Create a model from voxel volume, using a voxel registry, without
 		// textures or normals, based on the physically_solid flag.
@@ -127,11 +131,43 @@ namespace interface
 		// drawable so that they can be drawn after the solid world, and so
 		// that the renderer sorts them against the other chunks' by
 		// distance. Left out, everything goes in one geometry as before.
+		//
+		// masked_result is the same arrangement for the voxels the registry
+		// says are alpha masked -- leaves, a plant, anything whose picture
+		// has holes in it. Those are drawn with the solid world and only
+		// want a material of their own, and a material is per drawable.
+		// The terrain's own occlusion of the sky, at the scale the corner
+		// table and a chunk's padding cannot see: the highest solid voxel
+		// of every column in a HORIZON_SIZE-square neighbourhood of the
+		// chunk, world y, HORIZON_NONE where nothing is loaded, laid out
+		// [z][x] from `origin` (the chunk's world origin minus HORIZON_PAD
+		// on x and z; origin_y is the chunk's own). The mesher walks it eight ways from each face and
+		// folds the dome's unobstructed cap into the sky share; a client
+		// that passes none gets the whole dome. See [PBR_FIT] 2c.
+		static const int HORIZON_PAD = 32;
+		static const int HORIZON_SIZE = 32 + 2 * HORIZON_PAD;
+		static const int16_t HORIZON_NONE = -32768;
+		struct HorizonMap
+		{
+			int32_t origin_x = 0, origin_y = 0, origin_z = 0;
+			int16_t heights[HORIZON_SIZE * HORIZON_SIZE];
+		};
+
 		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				bool use_skylight = false,
-				sm_<uint, TemporaryGeometry> *translucent_result = nullptr);
+				sm_<uint, TemporaryGeometry> *translucent_result = nullptr,
+				sm_<uint, TemporaryGeometry> *masked_result = nullptr,
+				const HorizonMap *horizon = nullptr,
+				const pv::Vector3DInt32 *uv_origin = nullptr);
+
+		// A chunk's column heights for a HorizonMap: the local y of the
+		// highest voxel with an edge material that is not a cutout, per
+		// column, HORIZON_NONE where the column has none; w*d int16_t in
+		// [z][x] order over the volume's inside (its padding left out).
+		sv_<int16_t> column_heights(VoxelVolume &volume,
+				VoxelRegistry *voxel_reg);
 
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,
@@ -143,7 +179,8 @@ namespace interface
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-				bool use_skylight = false);
+				bool use_skylight = false,
+				const pv::Vector3DInt32 *uv_origin = nullptr);
 
 		// Voxel LOD geometry generation (lod=1 -> 1:1, lod=3 -> 1:3)
 
@@ -159,7 +196,8 @@ namespace interface
 				sm_<uint, TemporaryGeometry> &result,
 				VoxelVolume &lod_volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-				bool use_skylight = false);
+				bool use_skylight = false,
+				const HorizonMap *horizon = nullptr);
 
 		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,
