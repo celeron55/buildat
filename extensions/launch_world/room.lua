@@ -30,8 +30,14 @@ M.Y_TOP = 26
 -- light with no geometry, so a mirror had nothing to reflect but the
 -- soft pool it cast -- the user, 2026-09-23: the reflective spheres
 -- should show a sharp bright square at the ceiling.
+-- **Centred in the room** (user, 2026-09-25), which is the interior
+-- between the wall faces: x from X_MIN + SIDE_IN - 1 to X_MAX - SIDE_IN
+-- + 1, centred on 0, and z from the pocket wall's BAY_Z to the back
+-- wall's face, centred on 12. It hung eight voxels toward the pocket
+-- wall before, so from the standing place it read as a bright square
+-- ahead rather than as the room's own opening.
 M.OPEN_X0, M.OPEN_X1 = -9, 9
-M.OPEN_Z0, M.OPEN_Z1 = -4, 12
+M.OPEN_Z0, M.OPEN_Z1 = 4, 20
 
 M.BAY_Z = -18
 M.INSET_IN = 4          -- the deepest an inset goes

@@ -1957,7 +1957,11 @@ for i = 1, BAYS do
 	local o = orb_places[i]
 	LIGHT_PLACES[i] = {o.x, o.y, o.z}
 end
-LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, OVERHEAD_Y * VOXEL_M, 2.0}
+-- Under the opening's own middle, which is the room's (user,
+-- 2026-09-25): the square moved and the light that stands in for it
+-- goes with it, or the pool on the floor is not under the hole
+LIGHT_PLACES[#LIGHT_PLACES + 1] = {0.0, OVERHEAD_Y * VOXEL_M,
+		(room.OPEN_Z0 + room.OPEN_Z1) / 2 * VOXEL_M}
 -- **A cool fill, low and forward** -- the one thing standing in for the
 -- bounce a path trace gets free. Without it the shadows go to nothing
 -- once the light from above casts: the room's median came to 23 against
