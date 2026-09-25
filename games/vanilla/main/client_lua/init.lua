@@ -1695,7 +1695,27 @@ local function update_sky(dt)
 		-- multiplies by how much sky the face sees. First cut of the
 		-- two-term ambient ([PBR_FIT] term 2): one colour for the whole
 		-- hemisphere, no ground bounce yet.
+		-- [DAWN_LIGHT]: and the hour before the sun, if it is asked for.
+		-- The term raises the *day factor*, which lights the unlit and
+		-- parity paths and tints the sky's colours; the pbr ambient is
+		-- PHYS.sky(height) and never saw it, so the two dawn windows read
+		-- the same with the term on and off -- 0.14 of a level at 04:30,
+		-- where the day factor quadruples (measured 2026-09-25, the sheet
+		-- is in local/options_for_DAWN_LIGHT/). These are the two ways to
+		-- connect it, for the ladder that picks between them:
+		--   BUILDAT_LUANTI_PREDAWN_MODE=light   the ramp is a share of the
+		--       day's sky in its own right, so 04:30 gets a sixth of it;
+		--   BUILDAT_LUANTI_PREDAWN_MODE=height  the ramp raises the sun
+		--       instead and the one curve answers, which is gentler and
+		--       keeps a single shape for the whole day.
+		-- Unset, the pbr path is what it was and no look moves.
 		local f = PHYS.sky(height)
+		local predawn_mode = buildat.get_env("BUILDAT_LUANTI_PREDAWN_MODE")
+		if predawn_now > 0 and predawn_mode == "light" then
+			f = math.max(f, predawn_now)
+		elseif predawn_now > 0 and predawn_mode == "height" then
+			f = math.max(f, PHYS.sky(height + predawn_now))
+		end
 		-- What a horizontal face receives over pi: the render's grass
 		-- (albedo 0.036) reads 1.50 sunlit at 13:00 and 0.15 in the
 		-- shade at 05:45, which leaves the dome at about the zenith's
