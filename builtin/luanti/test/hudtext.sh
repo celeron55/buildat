@@ -7,6 +7,13 @@
 # at size 1 and size 3 and the scan measures what was drawn.
 #
 #   builtin/luanti/test/hudtext.sh
+#
+# **Its two hundred seconds are devtest's own start**, not delays to
+# trim (looked at 2026-09-25, when [CHECK_COST] went through the tier):
+# the drive carries 5.5 s of `delay` in all, and the rest is the server
+# loading a game and generating a world before the fixture can add a
+# HUD element. The same is true of dawn_light.sh, whose three-second
+# delays were measured and are the light settling.
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
