@@ -527,7 +527,13 @@ do
 	local by_light = tonumber(
 			buildat.get_env("BUILDAT_LUANTI_GRAY_BY_LIGHT") or "") or 1.5
 	local gray_env = buildat.get_env("BUILDAT_LUANTI_NIGHT_GRAY") or ""
-	local gray_off = gray_env == "off" or by_light > 0
+	-- **The pass stays on unless it is asked off** (2026-09-26): taking
+	-- it out of the pbr path took the night with it -- vp4 at 20:30 went
+	-- from a mean of 8 to 109 -- so it is doing something the metered
+	-- exposure depends on, and the two grays do not compound: the
+	-- shader's acts only under the cave floor's own luminance and the
+	-- pass's own range is a hundredth of that.
+	local gray_off = gray_env == "off"
 	rp:SetEnabled("NightGray", not gray_off and
 			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
 	local l0, l1 = gray_env:match("^([%d.]+)%s+([%d.]+)$")
@@ -1790,9 +1796,23 @@ local function update_sky(dt)
 		-- a sealed chamber reads 12.6 levels with 6.3 of spread, so its
 		-- pillar and corners are there, where at nought it is one flat
 		-- black. BUILDAT_CAVE_AO_FLOOR overrides it, 0 turning it off.
+		-- What the camera's own rays say the chamber has, read once: the
+		-- floor below and the bounce term's scale both take it
+		local chamber_read = voxel_shading.chamber_light()
 		local floor_f = tonumber(
 				buildat.get_env("BUILDAT_CAVE_AO_FLOOR") or "") or 0.04
-		voxel_shading.set_cave_ambient(floor_f, floor_f, floor_f)
+		-- **Only where the chamber is dark** (2026-09-25): the floor is
+		-- hour-independent on purpose -- that is what keeps a sealed
+		-- room equal at both hours -- but applied everywhere it lifts
+		-- the open world at night as well, and the meter opens on top
+		-- of that: a re-take of the reference set drew 20:30 as
+		-- daylight, vp4 going from a mean of 8.27 to 114.65. Scaled by
+		-- how unlit the chamber the camera is in is, it is the whole
+		-- floor in a sealed place, nothing under an open sky, and the
+		-- same reading the bounce term's own scale comes from.
+		local dark = 1.0 - math.min(1.0, chamber_read)
+		voxel_shading.set_cave_ambient(floor_f * dark, floor_f * dark,
+				floor_f * dark)
 		-- [UNDERGROUND_LIGHT]: and what the bounce term's own floor is
 		-- worth here. That floor is the light a face gets where the
 		-- flood's nibble says nothing reaches it, and it follows the
@@ -1814,7 +1834,7 @@ local function update_sky(dt)
 				buildat.get_env("BUILDAT_CHAMBER_LIGHT") or "") or 1.0
 		local chamber = 1.0
 		if chamber_gain > 0 then
-			chamber = chamber_gain * voxel_shading.chamber_light()
+			chamber = chamber_gain * chamber_read
 			voxel_shading.set_chamber_light(chamber)
 		end
 		cave_ambient_now = chamber

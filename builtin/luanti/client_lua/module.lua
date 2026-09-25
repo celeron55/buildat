@@ -3756,6 +3756,18 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	-- Three frames, because the head of the queue is momentarily out of
 	-- range between the chunk that finished and the one behind it
 	refshot_still = refshot_still + 1
+	-- **The visibility cube first, the exposure after it** (2026-09-25):
+	-- sharing the exposure's frame cost a re-take its night rows -- vp4
+	-- at 20:30 came out at a mean of 108 against the kept reference's 8
+	-- -- because the snap is several sweeps of ray casting in one frame
+	-- and the meter's two reset frames were spent on it. A frame of its
+	-- own, and the exposure's snap is the last thing before the picture.
+	if refshot_still == 2 then
+		if M.sky_vis_snap then
+			M.sky_vis_snap()
+		end
+		return
+	end
 	if refshot_still < 3 then
 		return
 	end
@@ -3769,15 +3781,6 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	if refshot_still == 3 then
 		if M.exposure_reset then
 			M.exposure_reset()
-		end
-		-- And the sky-visibility cube with it, for the same reason: it is
-		-- averaged over sweeps and eased into, so after a teleport it is
-		-- still converging from wherever the camera used to be -- a
-		-- viewpoint deep in rock read 0.3 climbing to 0.73 over the frames
-		-- before its picture ([UNDERGROUND_LIGHT], 2026-09-25). The game's
-		-- client half snaps it the way the module's own update(nil) does.
-		if M.sky_vis_snap then
-			M.sky_vis_snap()
 		end
 		return
 	end
