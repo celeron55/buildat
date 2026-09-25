@@ -5201,13 +5201,17 @@ match_list, match_at = {}, 1
 -- pocket on a side wall is looked at from the side, and one behind the
 -- player from behind. A thing on the floor has no wall and is looked at
 -- from +z, which is the way the room is entered.
+-- Also **how far out the orb's own mouth is**: an orb in a pocket sits
+-- inside the wall, so a camera told to stand two metres from it stands
+-- inside the stone. A thing on the floor has no mouth to count from.
 function orb_out(b)
 	local p = type(b) == "number" and room.pockets[b] or nil
-	if not p then return 0, 1 end
+	if not p then return 0, 1, 0 end
+	local depth = (p.sd - 1) / 2 * VOXEL_M
 	if room.WALL_U[p.wall] == "x" then
-		return 0, -room.WALL_IN[p.wall]
+		return 0, -room.WALL_IN[p.wall], depth
 	end
-	return -room.WALL_IN[p.wall], 0
+	return -room.WALL_IN[p.wall], 0, depth
 end
 
 -- **The camera goes to what is browsed** (user): until it does, "what
@@ -5233,9 +5237,23 @@ local function show_match(i)
 	-- is how the mark's options sheet gets close enough to judge a
 	-- picture on a sphere.
 	local back = tonumber(env("BUILDAT_LAUNCH_HOP")) or 4.5
-	local ox, oz = orb_out(b)
-	fly_to({x = o.x + ox * back, y = o.y + back * 0.67,
-			z = o.z + oz * back},
+	local ox, oz, depth = orb_out(b)
+	-- **The rise is what makes a hop read as a move** (the plan: three
+	-- up and four and a half back is "this one, and here is where it
+	-- lives"), and it is wrong for a portrait: close in, a camera that
+	-- rises leaves the pocket's own corridor and ends up inside the
+	-- slab beside it -- the mark sheet's fourth tile came back as a
+	-- grey slab filling half the frame (2026-09-25, the pockets being
+	-- packed in the middle of the wall by [POCKETS_ROUND]).
+	-- BUILDAT_LAUNCH_HOP_FLAT is how a sheet asks for the straight-on
+	-- one; the room keeps the view from above, which is also what
+	-- clears the spheres standing around a floor orb.
+	local flat = env("BUILDAT_LAUNCH_HOP_FLAT") ~= ""
+	-- The mouth's own depth is counted in only for the portrait: the
+	-- room's hop is measured from the orb, as it always was
+	local out = flat and (back + depth) or back
+	fly_to({x = o.x + ox * out, y = o.y + (flat and 0 or back * 0.67),
+			z = o.z + oz * out},
 			{x = o.x, y = o.y, z = o.z}, HOP_SECONDS)
 end
 

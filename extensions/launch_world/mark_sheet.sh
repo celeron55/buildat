@@ -50,7 +50,11 @@ shot() {   # $1 option ("" as shipped), $2 keys to type, $3 tag
 	# **A portrait distance**: the room's own hop stops four and a half
 	# back, which frames the orb in its place rather than its face. Two
 	# is where a mark can be judged (2026-09-24).
+	# **Straight on, not from above**: a portrait of a mark, and close
+	# in a camera that rises leaves a pocket's corridor for the slab
+	# beside it (2026-09-25)
 	env ${1:+BUILDAT_LAUNCH_MARK=$1} BUILDAT_LAUNCH_HOP="${HOP:-2.0}" \
+		BUILDAT_LAUNCH_HOP_FLAT=1 \
 		timeout 180 bin/buildat -m launch_world -D "$out/emptyuser" \
 		-w 1280x720 -l 3 -c @"$out/cmds_$1_$3.txt" 2>&1 |
 		sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli_$1_$3.log"

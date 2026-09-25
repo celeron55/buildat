@@ -1185,7 +1185,32 @@ from PIL import Image
 
 out = sys.argv[1]
 
-def dark_share(path):
+def disc_radius(path):
+	"""**How big the ball is in the frame**, walked out from the middle
+	while it stays bright. The camera aims at the orb, so the middle is
+	the orb; what changes is how far back the camera had to stand --
+	a pocket with a slab beside it pushes it back, and a crop of a
+	fixed 120 pixels then holds as much wall as ball and reads the same
+	for a marked orb and a turned one (2026-09-25). Measured on the
+	*control*, whose disc has no mark at its middle to cut the walk
+	short, and used for both.
+	"""
+	im = Image.open(path).convert("L")
+	w, h = im.size
+	cx, cy = w // 2, int(h * 0.52)
+	px = im.load()
+	out = []
+	for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+		d = 0
+		while d < min(w, h) // 2:
+			x, y = cx + dx * d, cy + dy * d
+			if not (0 <= x < w and 0 <= y < h) or px[x, y] < 100:
+				break
+			d += 1
+		out.append(d)
+	return min(out)
+
+def dark_share(path, r):
 	"""**A mark is the dimmer part of a lit ball**, and that is what to
 	measure -- against the ball's own brightness rather than against a
 	fixed level. The earlier reading was colourfulness, because the
@@ -1196,13 +1221,13 @@ def dark_share(path):
 
 	So: the share of the disc that is dimmer than the disc's own
 	brightest. That survives the cut moving, which it does with the
-	emissive multiplier.
+	emissive multiplier, and the disc being any size in the frame.
 	"""
 	im = Image.open(path).convert("RGB")
 	w, h = im.size
 	cx, cy = w // 2, int(h * 0.52)
-	px = list(im.crop((cx - 60, cy - 60, cx + 60, cy + 60)).getdata())
-	lum = sorted(0.3 * r + 0.6 * g + 0.1 * b for r, g, b in px)
+	px = list(im.crop((cx - r, cy - r, cx + r, cy + r)).getdata())
+	lum = sorted(0.3 * r0 + 0.6 * g + 0.1 * b for r0, g, b in px)
 	bright = lum[int(len(lum) * 0.95)]
 	if bright <= 0:
 		return 0.0
@@ -1214,7 +1239,16 @@ for p in (own, turned):
 	if not os.path.exists(p):
 		print("FAIL: the mark's face was not shot (%s)" % p)
 		raise SystemExit(1)
-a, b = dark_share(own), dark_share(turned)
+radius = disc_radius(turned)
+if radius < 12:
+	print("the orb is %d pixels across in the control, which is not a "
+			"framing this can read" % (radius * 2))
+	print("FAIL: the orb was not framed")
+	raise SystemExit(1)
+crop = max(12, int(radius * 0.7))
+print("the disc is %d pixels across; reading its middle %d"
+		% (radius * 2, crop * 2))
+a, b = dark_share(own, crop), dark_share(turned, crop)
 print("the disc is %.1f%% dark with the mark presented, and %.1f%% with "
 		"it a quarter out" % (a, b))
 # Measured 36.1 against 0.0 in this room; the bar is the gap
