@@ -206,6 +206,14 @@ local function place_lamps()
 	if lamps_placed or not REFSET.lamps then
 		return
 	end
+	-- **A probe of the light has to be of the light** ([DARK_INVARIANT]:
+	-- view 8 is where [LAMP_REF]'s glowstone sits, so a run measuring
+	-- the sky term there would measure the lamp instead). NOLAMPS=1.
+	if rawget(_G, "REFSHOT_NOLAMPS") then
+		lamps_placed = true
+		core.log("action", "REFSHOT lamps: not placed (REFSHOT_NOLAMPS)")
+		return
+	end
 	lamps_placed = true
 	for _, lamp in ipairs(REFSET.lamps) do
 		local was = core.get_node_or_nil(lamp.pos)

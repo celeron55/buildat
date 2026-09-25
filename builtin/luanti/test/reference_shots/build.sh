@@ -40,6 +40,10 @@ esac
 	[ -n "${KEEP:-}" ] && echo 'rawset(_G, "REFSHOT_KEEP", true)'
 	[ -n "${CLOUDS:-}" ] && echo 'rawset(_G, "REFSHOT_CLOUDS", true)'
 	[ -n "${CYCLES:-}" ] && echo "rawset(_G, \"REFSHOT_CYCLES\", $CYCLES)"
+	# NOLAMPS=1: the set's lamps are not placed, which [DARK_INVARIANT]'s
+	# probes want -- view 8 is where [LAMP_REF]'s glowstone sits, and a
+	# probe of the sky term there would measure the lamp instead
+	[ -n "${NOLAMPS:-}" ] && echo 'rawset(_G, "REFSHOT_NOLAMPS", true)'
 	# STATES="3:0545,5:0200": those states alone, in that order (a ladder)
 	[ -n "${STATES:-}" ] && echo "rawset(_G, \"REFSHOT_STATES\", \"$STATES\")"
 	cat "$me/set.lua" "$me/runner.lua"
