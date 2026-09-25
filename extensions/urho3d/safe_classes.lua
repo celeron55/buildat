@@ -975,6 +975,43 @@ function M.define(dst, util)
 		},
 	})
 
+	-- What joins two bodies ([URHO_SWEEP]'s Physics batch, 2026-09-25),
+	-- after RigidBody because it names one: a point, a hinge, a slider or
+	-- a cone twist, at a place on each body, with limits. A component on
+	-- a node like any other -- it draws nothing, reads nothing of the
+	-- machine and moves only what the physics already moves -- and what
+	-- wants it first is [VOXEL_PHYSICS_SAMPLE], where a body that comes
+	-- off a hill is otherwise loose in the world.
+	--
+	-- simplified: no Bullet handle and no constraint-space accessors; the
+	-- positions and axes are the ones a game sets from its own nodes.
+	util.wc("Constraint", {
+		inherited_from_by_wrapper = dst.Component,
+		instance = {
+			SetWorldPosition = util.self_function("SetWorldPosition", {},
+					{"Constraint", "Vector3"}),
+			GetWorldPosition = util.wrap_function({"Constraint"},
+			function(self)
+				return util.wrap_instance("Vector3", self:GetWorldPosition())
+			end),
+		},
+		properties = {
+			constraintType = util.simple_property("number"),
+			otherBody = util.simple_property(dst.RigidBody),
+			position = util.simple_property(dst.Vector3),
+			rotation = util.simple_property(dst.Quaternion),
+			axis = util.simple_property(dst.Vector3),
+			otherPosition = util.simple_property(dst.Vector3),
+			otherRotation = util.simple_property(dst.Quaternion),
+			otherAxis = util.simple_property(dst.Vector3),
+			highLimit = util.simple_property(dst.Vector2),
+			lowLimit = util.simple_property(dst.Vector2),
+			erp = util.simple_property("number"),
+			cfm = util.simple_property("number"),
+			disableCollision = util.simple_property("boolean"),
+		},
+	})
+
 	util.wc("CollisionShape", {
 		inherited_from_by_wrapper = dst.Component,
 		instance = {

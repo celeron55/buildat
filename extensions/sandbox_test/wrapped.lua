@@ -72,6 +72,38 @@ do
 	log:info("wrapped: the matrices multiply, transpose and invert")
 end
 
+-- Constraint (2026-09-25, [URHO_SWEEP]'s Physics batch): two bodies in a
+-- scene of this file's own, joined by a hinge, with the places and the
+-- limits read back
+do
+	local scene = magic.Scene()
+	scene:CreateComponent("Octree")
+	assert(scene:CreateComponent("PhysicsWorld"), "the scene takes physics")
+	local a = scene:CreateChild("anchor")
+	local b = scene:CreateChild("swinging")
+	assert(a:CreateComponent("RigidBody") and b:CreateComponent("RigidBody"))
+	local c = b:CreateComponent("Constraint")
+	assert(c, "a node takes a Constraint")
+	c.constraintType = magic.CONSTRAINT_HINGE
+	c.otherBody = a:GetComponent("RigidBody")
+	c.position = magic.Vector3(0, 1, 0)
+	c.axis = magic.Vector3(0, 0, 1)
+	c.lowLimit = magic.Vector2(-45, 0)
+	c.highLimit = magic.Vector2(45, 0)
+	c.disableCollision = true
+	assert(c.constraintType == magic.CONSTRAINT_HINGE, "the hinge is a hinge")
+	assert(c.otherBody ~= nil, "the other body is the anchor's")
+	assert(math.abs(c.position.y - 1) < 1e-4, "the place on the body")
+	assert(math.abs(c.lowLimit.x + 45) < 1e-4 and
+			math.abs(c.highLimit.x - 45) < 1e-4, "the limits")
+	assert(c.disableCollision, "and the pair does not collide with itself")
+	c:SetWorldPosition(magic.Vector3(2, 3, 4))
+	local w = c:GetWorldPosition()
+	assert(math.abs(w.x - 2) < 1e-3 and math.abs(w.z - 4) < 1e-3,
+			"a world place comes back: " .. w.x .. ", " .. w.y .. ", " .. w.z)
+	log:info("wrapped: a hinge joins two bodies and says where it is")
+end
+
 -- XMLElement (2026-09-25): a document out of the resource cache walked
 -- -- the root, its children, an attribute and a number
 do

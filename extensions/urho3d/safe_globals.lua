@@ -877,6 +877,12 @@ return {
     "SHADOWQUALITY_PCF_24BIT",
     "SHADOWQUALITY_VSM",
     "SHADOWQUALITY_BLUR_VSM",
+    -- What a Constraint joins two bodies with ([URHO_SWEEP]'s Physics
+    -- batch, 2026-09-25)
+    "CONSTRAINT_POINT",
+    "CONSTRAINT_HINGE",
+    "CONSTRAINT_SLIDER",
+    "CONSTRAINT_CONETWIST",
     "VO_DISABLE_OCCLUSION",
     "VO_DISABLE_SHADOWS",
     "VO_LOW_MATERIAL_QUALITY",
