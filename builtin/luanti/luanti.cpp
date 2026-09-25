@@ -1933,8 +1933,28 @@ struct Module: public interface::Module, public luanti::Interface
 		// A body's voxel ([BODY_INTERACT]): written straight to its owner,
 		// which is not the map and has no buffer to land in
 		if(y >= REGION_Y){
-			if(m_region_map)
-				m_region_map->set(x, y, z, word);
+			// **And a write with no body under it says so** (2026-09-25):
+			// a body's volume carries four voxels of air around it and a
+			// place past that has nowhere to land, so it was dropped in
+			// silence -- the node simply never appeared, and nothing in
+			// any log said why. Growing the volume is the fix and it is
+			// [BODY_INTERACT]'s own leftover; until then this is the
+			// line that names it. Rate limited: a VoxelManip over a body
+			// is a write per voxel and a mod that misses by one misses
+			// by thousands.
+			if(!m_region_map || !m_region_map->set(x, y, z, word)){
+				// Counted rather than timed: this module has no clock of
+				// its own in scope, and what a reader needs is the first
+				// one and a sense of how many followed
+				static uint64_t dropped = 0;
+				dropped++;
+				if(dropped == 1 || dropped % 1000 == 0){
+					log_w(MODULE, "a write at %i,%i,%i is past every "
+							"body's margin and is dropped (%llu so far)",
+							(int)x, (int)y, (int)z,
+							(unsigned long long)dropped);
+				}
+			}
 			return;
 		}
 		PendingNode node;
