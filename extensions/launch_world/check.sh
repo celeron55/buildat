@@ -349,7 +349,11 @@ fi
 	echo "keypress T"
 	echo "delay 400"
 	echo "keypress Return"
-	echo "delay 2500"
+	# The room says when the attempt has failed ("connect: <name> failed:
+	# ..."), which is what the notice is drawn from, so the wait is on
+	# that rather than on how long a refused connection takes
+	echo "wait_log 20000 failed:"
+	echo "delay 500"
 	echo "screenshot $out/connect-failed.png"
 	echo "wait_log 20000 Wrote screenshot $out/connect-failed.png"
 	echo "keypress Escape"
@@ -494,13 +498,18 @@ fi
 	# the room wore what it made.
 	# **F6 re-meshes the whole room**, the ornament being voxels now, and
 	# a shot 900 ms later sometimes landed before the mesh did -- which
-	# read as "nothing wears the generated maps" (2026-09-23)
+	# read as "nothing wears the generated maps" (2026-09-23). The room
+	# says which way the toggle went once it has rebuilt
+	# (set_8bit_voxel_geometry is done when rebuild_room returns), so the
+	# wait is on that and the delay after it is the frame's.
 	echo "keypress F6"
-	echo "delay 2200"
+	echo "wait_log 15000 ornament off"
+	echo "delay 500"
 	echo "screenshot $out/no-ornament.png"
 	echo "wait_log 20000 Wrote screenshot $out/no-ornament.png"
 	echo "keypress F6"
-	echo "delay 2200"
+	echo "wait_log 15000 ornament on"
+	echo "delay 500"
 	# The room as it is, and then the same frame with the reflection
 	# probe taken off the zone, which is what says the probe reaches the
 	# metals
