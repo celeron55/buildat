@@ -610,6 +610,37 @@ core.register_on_joinplayer(function(player)
 		-- Three seconds: one was photographing the previous state's camera.
 		if not marked and waited_shot >= 3 and view_is_loaded(st.view) then
 			marked = true
+			-- **What the light is on the surface the camera is
+			-- pointed at** ([DARK_INVARIANT]: "a probe that is not at
+			-- nibble nought proves nothing, since the term is not
+			-- asked there"). Not the air the eye sits in -- that is
+			-- lit by whatever reaches it -- but the first solid node
+			-- along the look, which is what the picture is mostly of.
+			-- Said before the shot, so a reader of the set knows which
+			-- pictures are evidence.
+			local yr, pr = math.rad(v.yaw), math.rad(-v.pitch)
+			local dir = {x = math.sin(yr) * math.cos(pr),
+					y = math.sin(pr), z = math.cos(yr) * math.cos(pr)}
+			local to = {x = v.pos.x + dir.x * 30, y = v.pos.y + dir.y * 30,
+					z = v.pos.z + dir.z * 30}
+			local hit = nil
+			for pointed in core.raycast(v.pos, to, false, false) do
+				if pointed.type == "node" then
+					hit = pointed.under
+					break
+				end
+			end
+			if hit then
+				core.log("action", string.format(
+						"REFSHOT nibble %s at %d,%d,%d %s day=%s night=%s",
+						name_of(i), hit.x, hit.y, hit.z,
+						(core.get_node(hit) or {}).name or "?",
+						tostring(core.get_node_light(hit, 0.5)),
+						tostring(core.get_node_light(hit, 0))))
+			else
+				core.log("action", "REFSHOT nibble " .. name_of(i) ..
+						" nothing within thirty nodes")
+			end
 			__luanti_refshot_mark(i, v.pos.x, v.pos.y, v.pos.z,
 					rawget(_G, "REFSHOT_PATHTRACE") and true or false)
 		end
