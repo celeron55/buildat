@@ -1276,6 +1276,19 @@ def rules(s, mem):
 
 
 # What each rung's product is, the ladder's own predicate ([DRIVE_STORY])
+# How long a rung may sit still before the run says so, in turns, and how
+# many failed expectations have to have happened in them. A turn is a
+# second or two, so eighty of them is a couple of minutes of nothing.
+STALL_TURNS = 80
+STALL_FAILS = 6
+
+
+def stalled(mem, turn):
+    """Whether the rung has sat still long enough, with enough failing
+    behind it, to be a finding rather than a slow patch."""
+    return (turn - mem.get("held_turn", turn) >= STALL_TURNS and
+            mem.get("fails_since_progress", 0) >= STALL_FAILS)
+
 GOALS = {
     1: lambda s, mem: have(s, "tree", 1, mem),
     2: lambda s, mem: have(s, "pick_wood", 1, mem),
@@ -1419,6 +1432,7 @@ def main():
                 if failed_in_row >= 2:
                     say("FAILED %s: its expectation failed twice in a row" % expect_name)
                     failed_in_row = 0
+                mem["fails_since_progress"] = mem.get("fails_since_progress", 0) + 1
             expect = None
         if s.pos is None:
             say("turn %d: no self line; waiting" % turn)
@@ -1426,6 +1440,26 @@ def main():
             continue
         if any(sl[0] == "main" for sl in s.slots):
             mem["main"] = [(sl[1], sl[5]) for sl in s.slots if sl[0] == "main"]
+        # **A rung that does not move is a finding, not a grind**
+        # ([VOXEL_PHYSICS_SAMPLE], 2026-09-25): the physics variant's run
+        # cut trees that came off as bodies, so no wood ever reached the
+        # inventory and craft_planks failed 108 times in 136 turns while
+        # the run carried on to its ceiling. What the inventory holds is
+        # the ladder's own progress; unchanged over STALL_TURNS with
+        # expectations failing throughout, the run says so and stops.
+        held = tuple(sorted((it, count_of(st)) for it, st in
+                            (mem.get("main") or []) + list(s.hotbar)
+                            if count_of(st) > 0))
+        if held != mem.get("held_was"):
+            mem["held_was"] = held
+            mem["held_turn"] = turn
+            mem["fails_since_progress"] = 0
+        elif stalled(mem, turn):
+            say("FAILED stalled: rung %d has not moved in %d turns and %d "
+                "expectations failed in them; the last was %s" %
+                (goal, turn - mem["held_turn"],
+                 mem["fails_since_progress"], mem.get("failed_rule")))
+            break
         if GOALS[goal](s, mem):
             say("GOAL %d met at turn %d, t=%d" % (goal, turn, time.time() - t0))
             break
@@ -1651,6 +1685,11 @@ done, 8 lines""".splitlines()
     # The centre bin's ray is near the view direction (half a bin off it)
     d = bin_dir(s, RES // 2, RES // 2)
     assert abs(d[0] - 1) < 0.15 and abs(d[2]) < 0.25, d
+    # The stall watchdog: still and failing is a finding, still and quiet
+    # is a walk across a map, and moving is neither
+    assert not stalled({"held_turn": 0, "fails_since_progress": 99}, 79)
+    assert not stalled({"held_turn": 0, "fails_since_progress": 5}, 500)
+    assert stalled({"held_turn": 10, "fails_since_progress": 6}, 90)
     print("drive.py: ok")
 
 
