@@ -142,6 +142,14 @@ cheapest runners that cover what git says changed, which is the regular check.
 A runner is never retried: a check run three times and taken at its best is
 how a real fault becomes a known flake.
 
+A check is run to learn something, not to perform diligence: a change already
+verified directly -- a probe that drove it, a screenshot of the thing itself,
+a number read out of the log -- does not then run the suite that covers
+neighbouring behaviour. Run the runner for what the change might have broken
+that you did not look at. Watching a twenty-minute suite re-prove what a
+screenshot already showed is the cost the tier exists to avoid (user,
+2026-09-25).
+
 A change runs the runner that covers it, and the tier is what a push runs.
 Twenty minutes is never the right answer to a one-word change. Where the full
 runner is dear, the tree carries a core one beside it -- one client and well

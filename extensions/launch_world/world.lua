@@ -3410,7 +3410,15 @@ function label_place()
 	-- keeps a name on screen when its anchor is not: an orb at arm's
 	-- length hangs its name above the top, and the clamp brings it
 	-- down to the edge rather than taking it away.
-	local lw, lh = buildat.logical_size()
+	-- **The UI's own coordinates, not the window's** (user, 2026-09-25:
+	-- pointing at the sphere's right edge moved the name further left
+	-- than the sphere). A projection is a fraction of the screen and a
+	-- UI element is placed in the root's units, which are the window
+	-- divided by the UI scale -- 1620 wide in a 900-pixel window here.
+	-- Multiplying the fraction by the window's pixels is right only
+	-- where that scale happens to be 1.
+	local lw = math.max(1, magic.ui.root.width)
+	local lh = math.max(1, magic.ui.root.height)
 	local function bounded(e, x, y)
 		local mx = math.max(0, lw / 2 - e.width / 2 - 8)
 		local my = math.max(0, lh / 2 - e.height / 2 - 8)
