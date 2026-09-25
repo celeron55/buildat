@@ -109,5 +109,17 @@ PY
 	wait "$cli" 2>/dev/null
 	return $status
 }
-STAGE=launch run || exit 1
-STAGE=luanti_client run -m luanti_client || exit 1
+STAGE=launch run || {
+	echo "FAIL: the launcher's server list did not come up or could not be picked from"
+	exit 1
+}
+STAGE=luanti_client run -m luanti_client || {
+	echo "FAIL: luanti_client's server list did not come up or could not be picked from"
+	exit 1
+}
+# **The canonical last line** ([CI_RUNS]'s contract): the stages print
+# "PASS (launch)" and "PASS (luanti_client)", which run_all.sh's
+# "^(PASS|FAIL|SKIP):" does not read, so the run had no verdict anybody
+# could see -- the exit status alone (2026-09-25)
+echo "PASS: both clients list servers and a pick fills the address"
+exit 0

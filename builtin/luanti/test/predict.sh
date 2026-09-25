@@ -181,6 +181,15 @@ digs = sum(1 for i, w in enumerate(order) if w == "dig" and i + 1 < len(order) a
 print("digs predicted ahead of the server's answer: %d of 2" % digs)
 if digs != 2:
     bad.append("digs")
-print("PASSED" if not bad and base > 0 else "FAILED: " + ", ".join(
-    k == "digs" and "digs predicted ahead of the answer wanted 2" or "%s wanted %d" % (k, want[k]) for k in bad))
+# **The contract's own words and its own status** ([CI_RUNS] (1)):
+# "PASSED"/"FAILED" is not what run_all.sh reads, so this run had no
+# verdict anybody could see and its exit status was the python's
+# (2026-09-25)
+if bad or base <= 0:
+    print("FAIL: " + (", ".join(
+        k == "digs" and "digs predicted ahead of the answer wanted 2"
+        or "%s wanted %d" % (k, want[k]) for k in bad)
+        or "no dirt in the cube at all, so nothing was measured"))
+    raise SystemExit(1)
+print("PASS: a place and a dig are predicted, and a refusal snaps back")
 PY
