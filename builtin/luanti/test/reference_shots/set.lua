@@ -107,6 +107,12 @@ rawset(_G, "REFSET", {
 		["0545"] = 0.2396, ["1000"] = 0.4167, ["1300"] = 0.5417,
 		["1500"] = 0.6250, ["1830"] = 0.7708, ["2030"] = 0.8542,
 		["0200"] = 0.0833,
+		-- The dawn and dusk windows [DAWN_LIGHT] is about: the hours where
+		-- the sun's halo is up and the ground is still black. Named here so
+		-- a STATES ladder can ask for them; they are in no viewpoint's own
+		-- hours, so the set a run takes by default does not grow.
+		["0400"] = 0.1667, ["0430"] = 0.1875, ["0500"] = 0.2083,
+		["1900"] = 0.7917, ["1930"] = 0.8125, ["2000"] = 0.8333,
 	},
 
 	-- Which hours each viewpoint is shot at, clear. Viewpoint 5 is the snow

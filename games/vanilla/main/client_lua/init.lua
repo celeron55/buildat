@@ -76,6 +76,11 @@ local CAMERA_DISTANCE = 34
 -- for the reference note beside a picture. A file-scope local, because the
 -- note is defined with the render path and read long before sky_now exists.
 local cave_ambient_now = 0
+-- [DAWN_LIGHT]: the sun's height (its elevation's sine) and the day factor
+-- the frame was drawn with, for the same note. Whether the predawn term is
+-- even in its window at an hour is a fact about these two numbers, and a
+-- picture cannot be asked it.
+local sun_height_now, day_factor_now, predawn_now = 0, 0, 0
 
 -- Luanti's own default, and what extensions/luanti_client uses
 -- (BASE_FOV = 72): the two are compared frame against frame, and nothing in
@@ -577,10 +582,14 @@ do
 	end
 	luanti.refshot_note = function()
 		return string.format(
-				"chamber light %.3f, sky above %.3f, applied %.3f",
+				"chamber light %.3f, sky above %.3f, applied %.3f; " ..
+				"sun height %.3f (%.1f deg), day %.3f, predawn %.3f",
 				voxel_shading.chamber_light(),
 				voxel_shading.sky_visibility_above(),
-				cave_ambient_now)
+				cave_ambient_now, sun_height_now,
+				math.deg(math.asin(math.max(-1, math.min(1,
+						sun_height_now)))),
+				day_factor_now, predawn_now)
 	end
 	luanti.exposure_reset = function()
 		rp:SetShaderParameter("AutoExposureAdaptRate", 1000000)
@@ -1560,7 +1569,9 @@ local function update_sky(dt)
 	-- This is art and not astronomy, the way Luanti's own ratio is: a dark
 	-- dawn is dull to play in. luanti_client's half of it is in
 	-- daynight_ratio().
-	day = math.max(day, luanti_sky.predawn(height))
+	predawn_now = luanti_sky.predawn(height)
+	sun_height_now, day_factor_now = height, math.max(day, predawn_now)
+	day = math.max(day, predawn_now)
 	if luanti.day_night_override then
 		day = luanti.day_night_override
 	end
