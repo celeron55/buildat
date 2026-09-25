@@ -6448,6 +6448,38 @@ struct Module: public interface::Module, public luanti::Interface
 		return 1;
 	}
 
+	// __luanti_sound_files(group) -> {file, file, ...}, or nil
+	//
+	// The same lookup as __luanti_sound_file, without the pick: what a
+	// client needs to play a sound of its own off a node's definition
+	// ([NO_SOUND]'s footsteps), since the group is the module's to
+	// resolve and the choice per step is the client's.
+	static int l_sound_files(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t len = 0;
+		const char *p = luaL_checklstring(L, 1, &len);
+		ss_ group(p ? p : "", len);
+		if(group.empty())
+			return 0;
+		sv_<ss_> files;
+		if(self->m_served_media.count(group+".ogg"))
+			files.push_back(group+".ogg");
+		for(char d = '0'; d <= '9'; d++){
+			const ss_ name = group+"."+d+".ogg";
+			if(self->m_served_media.count(name))
+				files.push_back(name);
+		}
+		if(files.empty())
+			return 0;
+		lua_newtable(L);
+		for(size_t i = 0; i < files.size(); i++){
+			lua_pushlstring(L, files[i].c_str(), files[i].size());
+			lua_rawseti(L, -2, (int)i + 1);
+		}
+		return 1;
+	}
+
 	static int l_send_day_night(lua_State *L)
 	{
 		Module *self = module_of(L);
@@ -8384,6 +8416,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_day_night", l_send_day_night);
 		set_global_cfunction("__luanti_send_sound", l_send_sound);
 		set_global_cfunction("__luanti_sound_file", l_sound_file);
+		set_global_cfunction("__luanti_sound_files", l_sound_files);
 		set_global_cfunction("__luanti_add_media", l_add_media);
 		set_global_cfunction("__luanti_lua_profile", l_lua_profile);
 		set_global_cfunction("__luanti_copy_ints", l_copy_ints);

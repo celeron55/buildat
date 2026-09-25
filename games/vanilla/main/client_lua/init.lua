@@ -4195,6 +4195,22 @@ function frame_peak.update(dt)
 			player.y + player_physics.EYE_HEIGHT + eye_offset.y,
 			player.z + eye_offset.z)
 	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
+	-- **Footsteps** ([NO_SOUND]): the module knows what each node sounds
+	-- like underfoot and how far a stride is; this says where the foot
+	-- is and what it is on, which is what official Luanti's engine reads
+	-- off the player for itself
+	if player.on_ground and luanti.footstep then
+		local sx = math.sqrt(player.vx * player.vx + player.vz * player.vz)
+		if sx > 1 then
+			-- The node under the feet, rounded the way Luanti rounds a
+			-- position to a node
+			local fx = math.floor(player.x + 0.5)
+			local fy = math.floor(player.y - 0.5)
+			local fz = math.floor(player.z + 0.5)
+			luanti.footstep(node_name_at({x = fx, y = fy, z = fz}),
+					player.x, player.y, player.z)
+		end
+	end
 	if WIELD.motion then
 		local speed_xz = math.sqrt(player.vx * player.vx + player.vz * player.vz)
 		local flying = player.fly_active or player.fly

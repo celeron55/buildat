@@ -1233,6 +1233,65 @@ local function fade_step(gain, target, step, dtime)
 	return gain, gain == target
 end
 
+-- **A footstep** ([NO_SOUND], 2026-09-25): official Luanti plays these
+-- in the engine off the player's own movement, so nothing on the wire
+-- ever asks for one and a game that never mentions sound still sounds
+-- right. The game says where a foot is and what it is on; this decides
+-- whether that is a step and what it sounds like.
+--
+-- **The stride is a distance, not a timer**: it keeps up with a run,
+-- and a player edging along a ledge does not patter.
+-- What a node sounds like underfoot: name -> {gain, pitch, files}. The
+-- records arrive with the dig properties, which are parsed further down
+-- this file -- declared here because a local is only in scope after its
+-- declaration and this is what reads it.
+local node_footsteps = {}
+local FOOTSTEP_STRIDE = 1.9
+local footstep_at = nil
+local footstep_n = 0
+local footstep_said = {}
+
+-- footstep(node_name, x, y, z) -> whether one was played
+function M.footstep(node_name, x, y, z)
+	local spec = node_footsteps[node_name or ""]
+	if spec == nil or object_scene == nil then
+		-- Said once a node: a game whose nodes carry no footstep is
+		-- silent on purpose, and one whose do and is silent anyway is
+		-- this line missing its record
+		if node_name and not footstep_said[node_name] then
+			footstep_said[node_name] = true
+			log:info("luanti: no footstep for " .. node_name)
+		end
+		return false
+	end
+	if footstep_at then
+		local dx, dz = x - footstep_at.x, z - footstep_at.z
+		if dx * dx + dz * dz < FOOTSTEP_STRIDE * FOOTSTEP_STRIDE then
+			return false
+		end
+	end
+	footstep_at = {x = x, z = z}
+	footstep_n = footstep_n + 1
+	local file = spec.files[math.random(#spec.files)]
+	-- In the player's own head, which is where their own feet are; a
+	-- positioned sound at the player's position is the same thing with
+	-- a distance model in the way
+	play_sound("foot:" .. footstep_n, file, spec.gain, spec.pitch,
+			false, 0, "local", x, y, z, "0", 32)
+	-- Once a node at info and every step at debug: a walk across a
+	-- world is hundreds of steps, and what a reader wants to know is
+	-- which nodes have been heard from
+	if not footstep_said[node_name] then
+		footstep_said[node_name] = true
+		log:info("luanti: footstep on " .. tostring(node_name) .. ": " ..
+				file)
+	else
+		log:debug("luanti: footstep on " .. tostring(node_name) .. ": " ..
+				file)
+	end
+	return true
+end
+
 -- The fades, the sounds that follow an object, and the nodes of the ones
 -- that have finished. The game calls this every frame.
 function M.update_sounds(dtime)
@@ -3381,7 +3440,7 @@ end)
 
 startup_packet("luanti:dig_props", "luanti_data/dig_props.bin", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
-	local items, nodes, preds = 0, 0, 0
+	local items, nodes, preds, footsteps = 0, 0, 0, 0
 	for i = 1, #values do
 		local fields = split_tab(values[i])
 		if fields[1] == "i" then
@@ -3401,6 +3460,21 @@ startup_packet("luanti:dig_props", "luanti_data/dig_props.bin", function(data)
 				placed_param2 = string.find(flags, "p", 1, true) ~= nil,
 				walkable = string.find(flags, "w", 1, true) ~= nil,
 			}
+		elseif fields[1] == "s" then
+			-- What the node sounds like underfoot ([NO_SOUND]): the
+			-- gain, the pitch and the files the group resolved to
+			local files = {}
+			for f in string.gmatch(fields[5] or "", "[^,]+") do
+				files[#files + 1] = f
+			end
+			if #files > 0 then
+				node_footsteps[fields[2]] = {
+					gain = tonumber(fields[3]) or 1.0,
+					pitch = tonumber(fields[4]) or 1.0,
+					files = files,
+				}
+				footsteps = footsteps + 1
+			end
 		elseif fields[1] == "p" then
 			local c = {}
 			for v in string.gmatch(fields[3] or "", "[^,]+") do
@@ -3411,7 +3485,8 @@ startup_packet("luanti:dig_props", "luanti_data/dig_props.bin", function(data)
 		end
 	end
 	log:info("luanti:dig_props: " .. items .. " items, " .. nodes ..
-			" nodes with groups, " .. preds .. " predictions")
+			" nodes with groups, " .. preds .. " predictions, " ..
+			footsteps .. " nodes with a footstep")
 end)
 
 startup_packet("luanti:item_palettes", "luanti_data/item_palettes.bin",

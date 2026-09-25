@@ -9,8 +9,16 @@
 #
 # sound.lua asks for three sounds every four seconds through
 # core.sound_play(), which is the one thing that is unambiguously a
-# packet -- digging and placing are played client-side by official
-# Luanti and this tree does not implement them at all.
+# packet.
+#
+# **Digging and placing do play** (measured 2026-09-25, against this
+# file's own earlier note that they were not implemented at all): the
+# vendored builtin's node_dig and item_place call core.sound_play with
+# the node's `dug` and `place`, and predict.sh's run has the
+# luanti:sound packet to show for it. **Footsteps are the ones official
+# Luanti plays in its engine** off the player's movement, which nothing
+# here did until 2026-09-25; builtin/luanti/test/footstep.sh is that
+# one's check.
 #
 # **No device is opened at all** (the user's rule, 2026-09-24: no
 # default script may put audio on the system's actual hardware; only

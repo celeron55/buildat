@@ -4441,6 +4441,30 @@ function core.__dig_props()
 					"\t" .. flags
 		end
 	end
+	-- **What a node sounds like underfoot** ([NO_SOUND]'s footsteps,
+	-- 2026-09-25): official Luanti plays these in the engine off the
+	-- player's own movement, not from a mod calling sound_play, so the
+	-- client needs the node's own spec. The group is resolved here --
+	-- the module is what knows which files it serves -- and the choice
+	-- per step is the client's.
+	--
+	--   s <name> <gain> <pitch> <file>,<file>,...
+	for name, def in pairs(core.registered_nodes) do
+		local spec = type(def.sounds) == "table" and def.sounds.footstep
+		if type(spec) == "string" then
+			spec = {name = spec}
+		end
+		if type(spec) == "table" and type(spec.name) == "string" and
+				spec.name ~= "" and __luanti_sound_files then
+			local files = __luanti_sound_files(spec.name)
+			if type(files) == "table" and #files > 0 then
+				out[#out + 1] = "s\t" .. name .. "\t" ..
+						tostring(tonumber(spec.gain) or 1.0) .. "\t" ..
+						tostring(tonumber(spec.pitch) or 1.0) .. "\t" ..
+						table.concat(files, ",")
+			end
+		end
+	end
 	for name, def in pairs(core.registered_nodes) do
 		local groups = def.groups
 		if type(groups) == "table" then
