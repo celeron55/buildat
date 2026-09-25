@@ -3527,6 +3527,21 @@ function handle_orb_update(event_type, event_data)
 	-- not for a launch** ([LAUNCH_FROZEN]): the launch is seconds of
 	-- this room's own movement
 	if screen_taken() then return end
+	-- **Nothing is pointed at while the room shows itself off**: the
+	-- sweep is not a player looking at an orb, and the name of whatever
+	-- was under the crosshair when they walked away hung over the
+	-- showcase until they came back (2026-09-25). The same rule the
+	-- hint follows -- nobody is being told anything while this runs.
+	if attracting then
+		if name_text.text ~= "" or desc_text.text ~= "" then
+			name_text.text, desc_text.text = "", ""
+			label_place()
+		end
+		-- "whatever is pointed at now, say it again" for the frame the
+		-- sweep ends on
+		pointed_orb = -1
+		return
+	end
 	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
 	local best, best_dot, best_up = 0, -1, false
 	-- Not ipairs: an empty niche leaves a hole in the list and ipairs
