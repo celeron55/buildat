@@ -372,6 +372,20 @@ local synth = api.run_extension_file("synth.lua")
 -- Held at module scope: a Lua-owned Image, Texture2D or Material is freed
 -- when the last Lua reference goes, whatever is drawing with it
 local kept = {}
+-- **Every texture the room writes rather than loads.** Urho3D brings a
+-- texture back after a change of screen mode by reloading its file, and
+-- these have none -- they are drawn here, pixel by pixel. So the image
+-- each was written from is kept beside it and put back when the context
+-- goes ([BOX_PLAYTEST_3] (1); the voxel atlas has its own registry for
+-- the same reason). Both ends also have to be held: a Lua table is not
+-- a reference to the engine's object.
+kept.written = {}
+function written_texture(texture, image)
+	kept.written[#kept.written + 1] = {texture, image}
+	kept[#kept + 1] = image
+	kept[#kept + 1] = texture
+	return texture
+end
 
 -- **The room is authored in metres and lives on a 45 cm grid** (user's
 -- reading of the reference frame: the eye sits at the centre of the
@@ -407,9 +421,7 @@ local function checker_texture(size, squares, a, b, filter)
 	local texture = magic.Texture2D:new()
 	assert(texture:SetData(image), "Texture2D:SetData")
 	texture.filterMode = filter or magic.FILTER_NEAREST
-	kept[#kept + 1] = image
-	kept[#kept + 1] = texture
-	return texture
+	return written_texture(texture, image)
 end
 
 -- Urho3D's PBR techniques, on the client's own render path -- no render
@@ -934,10 +946,8 @@ local function ornamented(h, inlay, opts)
 	local dt, nt = magic.Texture2D:new(), magic.Texture2D:new()
 	assert(dt:SetData(diff), "the ornament's albedo")
 	assert(nt:SetData(norm), "the ornament's normal")
-	kept[#kept + 1] = diff
-	kept[#kept + 1] = norm
-	kept[#kept + 1] = dt
-	kept[#kept + 1] = nt
+	written_texture(dt, diff)
+	written_texture(nt, norm)
 	local m = magic.Material:new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
 			"Techniques/PBR/PBRDiffNormal.xml"))
@@ -1408,7 +1418,7 @@ local function white_texture()
 	local t = magic.Texture2D:new()
 	t:SetData(img)
 	kept.white_img, kept.white_tex = img, t
-	return t
+	return written_texture(t, img)
 end
 
 local function mark_texture(mark, icon, one_bit, invert, slot)
@@ -1454,8 +1464,7 @@ local function mark_texture(mark, icon, one_bit, invert, slot)
 	local t = magic.Texture2D:new()
 	assert(t:SetData(image), "the mark's texture")
 	t.filterMode = magic.FILTER_BILINEAR
-	kept[#kept + 1] = image
-	kept[#kept + 1] = t
+	written_texture(t, image)
 	-- The ink count is what the round is judged on, and how the tile
 	-- was arrived at is what says why a count is odd ([MARK_ONEBIT])
 	log:info("mark: " .. tostring(mark) .. " ink " .. last_mark_ink ..
@@ -2423,6 +2432,43 @@ function handle_probe_update()
 	end
 end
 magic.SubscribeToEvent("Update", "handle_probe_update")
+
+-- **What a change of screen mode takes with it** ([BOX_PLAYTEST_3] (1),
+-- the same fault the Luanti client had). F11, and anything else that
+-- recreates the window -- multisampling on the desk is one -- destroys
+-- the GL context, and Urho3D can only bring back what it loaded from a
+-- file. The room's textures are not loaded, they are written: the
+-- voxel atlas is filled in by hand and the probe is drawn into. So the
+-- world came back black and unlit.
+--
+-- The atlas registry keeps the Image every segment was written into and
+-- puts it back when the texture says its data is lost; that is
+-- `atlas_reg:update()`, and it is per frame rather than on the event
+-- because the texture is what knows, not the window. (voxelworld's
+-- client half does the same for a game.)
+function handle_device_update()
+	atlas_reg:update()
+end
+magic.SubscribeToEvent("Update", "handle_device_update")
+
+-- The probe has no image to put back -- it is a render target, and what
+-- was in it is gone -- so it is drawn again, by the same two bakes the
+-- boot does and with the same hold on the player.
+magic.SubscribeToEvent("ScreenMode", function()
+	if probe_bake.done then
+		probe_bake.queued = false
+		probe_bake.left = 2
+		probe_bake.done = false
+		probe_bake.started = nil
+		zone.zoneTexture = kept.dark_probe
+		for _, w in ipairs(kept.written) do
+			w[1]:SetData(w[2])
+		end
+		log:info("screen mode changed: the atlas restores itself, " ..
+				#kept.written .. " written textures go back on and the " ..
+				"probe is drawn again")
+	end
+end)
 
 -- **The field of view** (user, 2026-09-23: it is quite small; try 72,
 -- which is Luanti's and fits tight spaces and mouse look) -- **and a
