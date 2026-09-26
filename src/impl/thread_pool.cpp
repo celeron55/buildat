@@ -183,9 +183,23 @@ struct CThreadPool: public ThreadPool
 				post_count++;
 				done = task->post();
 				int64_t t2 = get_timeofday_us();
+				// **A backlog does not buy itself a longer frame**
+				// ([CLIENT_FRAME], user 2026-09-26: re-meshing is not
+				// allowed to make the client feel choppy). This grew by
+				// five milliseconds for every output task over four with
+				// no ceiling, so eight waiting bought a 22 ms frame on
+				// top of whatever else it was doing -- and the client's
+				// own profiler found `Buildat|ThreadPool::post` at 18 ms
+				// in one frame of a 33 ms average, which is a third of a
+				// peak that reads as a hitch. It still grows, so a
+				// backlog drains faster than one at a time, but not past
+				// a quarter of a frame; what is left waits for the next
+				// one, which is what the queue's order is for.
 				int64_t max_t = 2000;
 				if(queue_size > 4)
-					max_t += (queue_size - 4) * 5000;
+					max_t += (queue_size - 4) * 2000;
+				if(max_t > 8000)
+					max_t = 8000;
 				if(t2 - t1 >= max_t){
 					overtime = true;
 					break;
