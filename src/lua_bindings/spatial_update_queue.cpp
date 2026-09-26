@@ -57,89 +57,50 @@ struct SpatialUpdateQueue
 		float near_trigger_d = -1.0f;
 		float far_weight = -1.0f;
 		float far_trigger_d = -1.0f;
+		// **The player did this** (user, 2026-09-26): a change the player
+		// caused -- a dig, a place, the light either moves -- is what they
+		// are waiting to see, and it outranks the world's own churn at the
+		// same distance.
+		bool player = false;
+		// The last scoring, for find() and the peek accessors to report
 		float f = -1.0f;
 		float fw = -1.0f;
 	};
 
-	// Items that are due (f <= 1) come before ones that are not, and among
-	// those the smallest fw is the most important. That is the order the queue
-	// is popped in, so it is the order the map keeps.
-	typedef std::pair<bool, float> Key; // (f > 1.0f, fw)
-	typedef std::multimap<Key, Item> Queue;
-
+	// **The order is read when an item is picked, not when it is put**
+	// (user, 2026-09-26: "the insertion priority can be wrong by the time
+	// it's being processed"). It used to be a multimap keyed at insertion,
+	// with a full re-put of every item whenever the camera had moved more
+	// than 20 units -- a sort of thousands of items at a hundred a frame,
+	// which took a second, could not be restarted inside that second, and
+	// left a chunk 39 away queued as 466 away ([MISSING_CHUNK]). A set and
+	// a scan for the best against the current position has no sort to
+	// restart and no threshold to be wrong inside of.
+	sv_<Item> m_items;
+	// Where each value sits in m_items, so a re-put finds it without a walk
+	std::unordered_map<Value, size_t, ValueHash> m_index;
 	Vector3 m_p;
-	Vector3 m_queue_oldest_p;
-	int64_t m_sort_started_us = 0;
-	bool m_sort_moved = false;
-	Queue m_queue;
-	// Iterators into m_queue by value, so that an item can be found and
-	// replaced without walking the queue
-	std::unordered_map<Value, Queue::iterator, ValueHash> m_index;
-	// Items waiting to be re-put with a new f; a plain stack, because they are
-	// all going to be re-sorted anyway
-	sv_<Item> m_old_queue;
+	// Where the camera looks, for the frustum term; -Z until told otherwise,
+	// which is what leaves the self-check's items on +X unfavoured
+	Vector3 m_dir = Vector3(0, 0, -1);
+	// The best item as of the last scan, and whether that scan still holds
+	size_t m_best = 0;
+	bool m_best_valid = false;
 
-	static Key key_of(const Item &item)
-	{
-		return Key(item.f > 1.0f, item.fw);
-	}
+	// How much being the player's own change, and being in front of them,
+	// are worth. Divisors of fw, which is "smaller is sooner".
+	static constexpr float PLAYER_FW_DIV = 8.0f;
+	static constexpr float VIEW_FW_DIV = 2.0f;
+	// Inside this the camera can be standing on it, and which way it looks
+	// says nothing
+	static constexpr float VIEW_NEAR_D = 16.0f;
 
-	void update(int max_operations)
+	// What an item is worth right now: the same near/far triggers as ever,
+	// then the two factors above.
+	void score(Item &item) const
 	{
-		if(m_old_queue.empty())
-			return;
-		log_d(MODULE, "SpatialUpdateQueue(): Items in old queue: %zu",
-				m_old_queue.size());
-		for(int i = 0; i<max_operations; i++){
-			if(m_old_queue.empty())
-				break;
-			Item item = m_old_queue.back();
-			m_old_queue.pop_back();
-			put_item(item);
-		}
-	}
-
-	void set_p(const Vector3 &p)
-	{
-		m_p = p;
-		// A move of over 20 from where the queue was last sorted for
-		// re-puts everything -- also in the middle of a sort: the items
-		// re-put so far were put against a position now far away, and
-		// a sort that only started on an empty old queue left them
-		// stale for good when the camera settled back where the sort
-		// began ([MISSING_CHUNK]: a chunk 39 away queued as 466 away,
-		// its f from the viewpoint before the teleport, never due).
-		// -- but not every frame: a camera in free fall (the box with no
-		// ground under the player, [WIN_WORLD]) moved 20 in a few frames,
-		// and a sort of 3500 items at a hundred a frame restarted before
-		// it ever finished, so nothing was ever due. A sort in progress
-		// runs for at least a second; the move is seen when it is done.
-		// A move seen during that second is remembered, and the sort is
-		// done again once drained even when the camera has settled back
-		// where it began (the vp5 bounce, [MISSING_CHUNK]).
-		const int64_t now = interface::os::time_us();
-		const bool moved = (m_p - m_queue_oldest_p).Length() > 20;
-		if(moved && !m_old_queue.empty() && now - m_sort_started_us <= 1000000){
-			m_sort_moved = true;
-			return;
-		}
-		if(moved || (m_sort_moved && m_old_queue.empty())){
-			m_old_queue.reserve(m_old_queue.size() + m_queue.size());
-			for(auto &pair : m_queue)
-				m_old_queue.push_back(pair.second);
-			m_queue.clear();
-			m_index.clear();
-			m_queue_oldest_p = m_p;
-			m_sort_started_us = now;
-			m_sort_moved = false;
-		}
-	}
-
-	void put_item(Item &item)
-	{
-		if(item.near_trigger_d == -1.0f && item.far_trigger_d == -1.0f)
-			throw Exception("Item has neither trigger");
-		float d = (item.p - m_p).Length();
+		Vector3 d3 = item.p - m_p;
+		float d = d3.Length();
 		item.f = -1.0f;
 		item.fw = -1.0f;
 		if(item.near_trigger_d != -1.0f){
@@ -162,26 +123,91 @@ struct SpatialUpdateQueue
 		}
 		if(item.f == -1.0f || item.fw == -1.0f)
 			throw Exception("item.f == -1.0f || item.fw == -1.0f");
+		if(item.player)
+			item.fw /= PLAYER_FW_DIV;
+		if(d <= VIEW_NEAR_D ||
+				(d > 0.0001f && d3.DotProduct(m_dir) / d >= 0.5f))
+			item.fw /= VIEW_FW_DIV;
+	}
 
-		// Find old entry; if the old entry is more important, discard the new
-		// one; if the old entry is less important, remove the old entry
+	// Due (f <= 1) before not due, and among those the smallest fw
+	static bool better(const Item &a, const Item &b)
+	{
+		bool a_due = a.f <= 1.0f, b_due = b.f <= 1.0f;
+		if(a_due != b_due)
+			return a_due;
+		return a.fw < b.fw;
+	}
+
+	// One scan a pick; the scores are this moment's
+	void rescan()
+	{
+		if(m_best_valid || m_items.empty())
+			return;
+		for(size_t i = 0; i < m_items.size(); i++)
+			score(m_items[i]);
+		size_t best = 0;
+		for(size_t i = 1; i < m_items.size(); i++){
+			if(better(m_items[i], m_items[best]))
+				best = i;
+		}
+		m_best = best;
+		m_best_valid = true;
+	}
+
+	void update(int max_operations)
+	{
+		// Nothing waits to be re-put any more: see the note on m_items
+		(void)max_operations;
+	}
+
+	void set_p(const Vector3 &p)
+	{
+		if(p != m_p){
+			m_p = p;
+			m_best_valid = false;
+		}
+	}
+
+	void set_dir(const Vector3 &dir)
+	{
+		if(dir != m_dir){
+			m_dir = dir;
+			m_best_valid = false;
+		}
+	}
+
+	void put_item(Item &item)
+	{
+		if(item.near_trigger_d == -1.0f && item.far_trigger_d == -1.0f)
+			throw Exception("Item has neither trigger");
+		score(item);
 		auto index_it = m_index.find(item.value);
 		if(index_it != m_index.end()){
-			if(index_it->second->second.fw < item.fw){
-				// Old item is more important
-				return;
-			}
-			// New item is more important
-			m_queue.erase(index_it->second);
-			m_index.erase(index_it);
+			Item &have = m_items[index_it->second];
+			// The player having asked for it is not forgotten by a later
+			// put that did not come from them
+			item.player = item.player || have.player;
+			score(item);
+			score(have);
+			// The more important of the two stands, as it always has: a
+			// put that is worth less than what is already waiting changes
+			// nothing but the flag above
+			if(better(item, have))
+				have = item;
+			else
+				have.player = item.player;
+			m_best_valid = false;
+			return;
 		}
-
-		m_index[item.value] = m_queue.insert(
-				std::make_pair(key_of(item), item));
+		m_index[item.value] = m_items.size();
+		m_items.push_back(item);
+		m_best_valid = false;
 	}
 
 	void put(const Vector3 &p, float near_weight, float near_trigger_d,
-			float far_weight, float far_trigger_d, const Value &value)
+			float far_weight, float far_trigger_d, const Value &value,
+			bool player = false)
 	{
 		Item item;
 		item.p = p;
@@ -190,63 +216,78 @@ struct SpatialUpdateQueue
 		item.far_weight = far_weight;
 		item.far_trigger_d = far_trigger_d;
 		item.value = value;
+		item.player = player;
 		put_item(item);
 	}
 
 	bool empty()
 	{
-		return m_queue.empty();
+		return m_items.empty();
 	}
 
 	// The item for a value, or nullptr: what a chunk that never comes up
-	// is waiting as ([MISSING_CHUNK]). Not the ones mid-sort.
+	// is waiting as ([MISSING_CHUNK]). Scored as of now.
 	const Item* find(const Value &value)
 	{
 		auto it = m_index.find(value);
-		return it == m_index.end() ? nullptr : &it->second->second;
+		if(it == m_index.end())
+			return nullptr;
+		Item &item = m_items[it->second];
+		score(item);
+		return &item;
 	}
 
 	void pop()
 	{
-		if(m_queue.empty())
+		if(m_items.empty())
 			throw Exception("SpatialUpdateQueue::pop(): Empty");
-		auto it = m_queue.begin();
-		m_index.erase(it->second.value);
-		m_queue.erase(it);
+		rescan();
+		size_t i = m_best;
+		m_index.erase(m_items[i].value);
+		// The last item takes its place, and its index with it
+		size_t last = m_items.size() - 1;
+		if(i != last){
+			m_items[i] = m_items[last];
+			m_index[m_items[i].value] = i;
+		}
+		m_items.pop_back();
+		m_best_valid = false;
 	}
 
 	Value& get_value()
 	{
-		if(m_queue.empty())
+		if(m_items.empty())
 			throw Exception("SpatialUpdateQueue::get_value(): Empty");
-		return m_queue.begin()->second.value;
+		rescan();
+		return m_items[m_best].value;
 	}
 
 	float get_f()
 	{
-		if(m_queue.empty())
+		if(m_items.empty())
 			throw Exception("SpatialUpdateQueue::get_f(): Empty");
-		return m_queue.begin()->second.f;
+		rescan();
+		return m_items[m_best].f;
 	}
 
 	float get_fw()
 	{
-		if(m_queue.empty())
+		if(m_items.empty())
 			throw Exception("SpatialUpdateQueue::get_fw(): Empty");
-		return m_queue.begin()->second.fw;
+		rescan();
+		return m_items[m_best].fw;
 	}
 
 	size_t get_length()
 	{
-		return m_queue.size();
+		return m_items.size();
 	}
 
-	// True while a move of the reference point has the items waiting to be
-	// re-put, spread over frames by update(): the head of m_queue says
-	// nothing about what is due until this is false
+	// There is no sort to be in the middle of any more; kept because the
+	// client asks before it decides that nothing is due
 	bool is_sorting()
 	{
-		return !m_old_queue.empty();
+		return false;
 	}
 };
 
@@ -304,7 +345,9 @@ static void self_check()
 		assert(q.get_length() == 2);
 	}
 
-	// Moving far enough re-puts everything against the new position
+	// **The order follows the camera** (user, 2026-09-26): the same two
+	// items come out in the other order once it has moved, with nothing
+	// re-put and no threshold to cross
 	{
 		SpatialUpdateQueue q;
 		q.set_p(Vector3(0, 0, 0));
@@ -312,37 +355,74 @@ static void self_check()
 				item_value("geometry", 1));
 		q.put(Vector3(500, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
 				item_value("geometry", 2));
+		assert(q.get_value().node_id == 1);
 		q.set_p(Vector3(500, 0, 0));
-		assert(q.empty()); // Everything is waiting to be re-put
-		q.update(10);
-		assert(q.get_length() == 2);
-		assert(q.get_value().node_id == 2); // Now the near one
+		assert(q.get_length() == 2); // Nothing is waiting to be re-put
+		assert(q.get_value().node_id == 2);
+		// And one step of a walk is enough; it does not wait for twenty
+		q.set_p(Vector3(200, 0, 0));
+		assert(q.get_value().node_id == 1);
+		q.set_p(Vector3(300, 0, 0));
+		assert(q.get_value().node_id == 2);
 	}
-	// A move in the middle of a sort does not restart it within the
-	// sort's first second (a falling camera restarted it every few
-	// frames, [WIN_WORLD]); once the old queue is drained the move is
-	// seen and the re-put against the old position is re-put again
-	// ([MISSING_CHUNK])
+
+	// **The player's own change comes first** even from further away.
+	// Both are outside VIEW_NEAR_D and off the camera's axis, so neither
+	// takes the view term and what is left is the player term.
 	{
 		SpatialUpdateQueue q;
 		q.set_p(Vector3(0, 0, 0));
-		q.put(Vector3(0, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+		q.put(Vector3(20, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
 				item_value("geometry", 1));
-		q.put(Vector3(500, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
-				item_value("geometry", 2));
-		q.set_p(Vector3(500, 0, 0));
-		q.update(1); // One re-put against 500
-		assert(q.get_length() == 1);
-		q.set_p(Vector3(0, 0, 0)); // Back, mid-sort: the sort goes on
-		assert(q.get_length() == 1);
-		q.update(10); // Drained, against 500 -- and 0 for the rest
+		q.put(Vector3(40, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 2), true); // the player dug it
+		assert(q.get_value().node_id == 2);
+		q.pop();
+		assert(q.get_value().node_id == 1);
+	}
+
+	// A put that did not come from the player does not forget that an
+	// earlier one did
+	{
+		SpatialUpdateQueue q;
+		q.set_p(Vector3(0, 0, 0));
+		q.put(Vector3(40, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 2), true);
+		q.put(Vector3(40, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 2), false);
+		q.put(Vector3(20, 0, 0), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 1));
 		assert(q.get_length() == 2);
-		q.set_p(Vector3(500, 0, 0)); // Settled where the sort began: the
-		assert(q.empty());           // move seen meanwhile is still a sort
-		q.update(10);
-		assert(q.get_length() == 2);
-		assert(q.get_value().node_id == 2); // The near one at 500, and due
-		assert(q.get_f() <= 1.0f);
+		assert(q.get_value().node_id == 2);
+	}
+
+	// **What is in front of the camera comes before what is behind it**,
+	// at the same distance
+	{
+		SpatialUpdateQueue q;
+		q.set_p(Vector3(0, 0, 0));
+		q.set_dir(Vector3(0, 0, -1));
+		q.put(Vector3(0, 0, 40), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 1)); // behind
+		q.put(Vector3(0, 0, -40), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 2)); // in front
+		assert(q.get_value().node_id == 2);
+		// Turning round turns the order round with it
+		q.set_dir(Vector3(0, 0, 1));
+		assert(q.get_value().node_id == 1);
+	}
+
+	// Near enough and which way the camera looks says nothing: the player
+	// can be standing on it
+	{
+		SpatialUpdateQueue q;
+		q.set_p(Vector3(0, 0, 0));
+		q.set_dir(Vector3(0, 0, -1));
+		q.put(Vector3(0, 0, 8), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 1)); // behind, but underfoot
+		q.put(Vector3(0, 0, -30), 1.0f, 100.0f, -1.0f, -1.0f,
+				item_value("geometry", 2)); // in front, further
+		assert(q.get_value().node_id == 1);
 	}
 }
 
@@ -368,6 +448,13 @@ struct LuaSUQ
 		o->internal.set_p(*p);
 		return 0;
 	}
+	static int l_set_dir(lua_State *L){
+		LuaSUQ *o = internal_checkobject(L, 1);
+		tolua_Error tolua_err;
+		GET_TOLUA_STUFF(dir, 2, Vector3);
+		o->internal.set_dir(*dir);
+		return 0;
+	}
 	static int l_put(lua_State *L){
 		LuaSUQ *o = internal_checkobject(L, 1);
 		tolua_Error tolua_err;
@@ -388,8 +475,11 @@ struct LuaSUQ
 		lua_getfield(L, -1, "node_id");
 		value.node_id = luaL_checkinteger(L, -1);
 		lua_pop(L, 1);
+		// The eighth is "the player caused this", which outranks the
+		// world's own churn at the same distance
+		bool player = (lua_type(L, 8) != LUA_TNIL) && lua_toboolean(L, 8);
 		o->internal.put(*p, near_weight, near_trigger_d,
-				far_weight, far_trigger_d, value);
+				far_weight, far_trigger_d, value, player);
 		return 0;
 	}
 	static int l_get(lua_State *L){
@@ -502,6 +592,7 @@ struct LuaSUQ
 		// fill method_table_L
 		DEF_METHOD(update);
 		DEF_METHOD(set_p);
+		DEF_METHOD(set_dir);
 		DEF_METHOD(put);
 		DEF_METHOD(get);
 		DEF_METHOD(peek_next_f);

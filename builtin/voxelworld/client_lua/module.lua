@@ -453,7 +453,9 @@ function sub_events()
 		if node and not node:GetVar("buildat_voxel_data"):IsEmpty() then
 			note_horizon(node, true)
 		end
-		queue_modified_node_update(node)
+		-- A chunk the player had predicted a write into is the answer to
+		-- something they did, and it goes before the world's own churn
+		queue_modified_node_update(node, nil, pred ~= nil)
 	end)
 
 	local function update_voxel_geometry(node)
@@ -696,6 +698,9 @@ function sub_events()
 		end
 
 		node_update_queue:set_p(camera_p)
+		-- Which way they look is part of the order now: what is in front
+		-- of them is what they are waiting to see
+		node_update_queue:set_dir(camera_dir)
 		-- Scale queue update operations according to the handling time of the
 		-- rest of the processing
 		node_update_queue:update(max_handling_time_us / 50 + 1)
@@ -944,7 +949,10 @@ function M.get_chunk_position(voxel_p)
 	return chunk_p, in_chunk_p
 end
 
-function queue_modified_node_update(node, prompt)
+-- `player` is "the player caused this" ([CLIENT_FRAME], user
+-- 2026-09-26): it rides with the item into the update queue, which puts
+-- it before the world's own churn at the same distance.
+function queue_modified_node_update(node, prompt, player)
 	if not node_update_queue then
 		return
 	end
@@ -975,12 +983,12 @@ function queue_modified_node_update(node, prompt)
 		type = "geometry",
 		current_lod = 0,
 		node_id = node:GetID(),
-	})
+	}, player)
 	node_update_queue:put(node:GetWorldPosition(),
 			MODIFIED_PHYSICS_NEAR_WEIGHT, M.physics_distance, nil, nil, {
 		type = "physics",
 		node_id = node:GetID(),
-	})
+	}, player)
 end
 
 -- Which registry the chunks are meshed with.
@@ -1296,7 +1304,8 @@ function M.set_static_voxel(x, y, z, v)
 	pred.after = volume:serialize()
 	predicted[id] = pred
 	buildat.set_voxel_data(node, pred.after)
-	queue_modified_node_update(node, true)
+	-- The player's own dig or place, and they are watching for it
+	queue_modified_node_update(node, true, true)
 	return true
 end
 
