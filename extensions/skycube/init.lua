@@ -86,7 +86,37 @@ function M.safe.new(magic, material)
 end
 
 -- Draw the six faces again, on the next frame
+-- **One face a frame, not six in one** ([CLIENT_FRAME], 2026-09-26).
+-- Six faces queued together are six scene renders in the same frame, and
+-- on a client whose frame is already the GPU's that shows as a bump once
+-- a second: a settled VoxeLibre world peaked at 0.055 to 0.073 s with
+-- them together and 0.049 to 0.057 with the cube left alone. The sky
+-- moves slowly enough that a face which is five frames behind the others
+-- cannot be told apart -- what a player would see is the bump.
+--
+-- `update()` asks for a refresh; the faces go out one a frame from
+-- `tick()`, which the game calls every frame.
 function Cube:update()
+	self.due = #self.surfaces
+end
+
+function Cube:tick()
+	if (self.due or 0) <= 0 then
+		return
+	end
+	local i = #self.surfaces - self.due + 1
+	self.due = self.due - 1
+	local surface = self.surfaces[i]
+	if surface then
+		surface:QueueUpdate()
+	end
+end
+
+-- Everything at once, for the first build of the cube: a world whose
+-- reflections are a sixth of a sky for the first frames looks wrong in a
+-- way a moving sky does not
+function Cube:update_now()
+	self.due = 0
 	for _, surface in ipairs(self.surfaces) do
 		surface:QueueUpdate()
 	end

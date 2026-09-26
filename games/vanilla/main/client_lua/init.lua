@@ -450,12 +450,19 @@ zone.zoneTexture = sky_cube.cube.texture
 sky_cube.us = 0
 function sky_cube.refresh(force)
 	local now = scene.elapsedTime
+	-- The faces go out one a frame ([CLIENT_FRAME]); `tick` is what sends
+	-- them, and a forced refresh -- the first build -- sends all six
+	local t0 = buildat.get_time_us()
 	if force or now >= sky_cube.due then
 		sky_cube.due = now + 1
-		local t0 = buildat.get_time_us()
-		sky_cube.cube:update()
-		sky_cube.us = sky_cube.us + buildat.get_time_us() - t0
+		if force then
+			sky_cube.cube:update_now()
+		else
+			sky_cube.cube:update()
+		end
 	end
+	sky_cube.cube:tick()
+	sky_cube.us = sky_cube.us + buildat.get_time_us() - t0
 end
 
 local game_skybox = skybox.new(scene, world_sky.node,
