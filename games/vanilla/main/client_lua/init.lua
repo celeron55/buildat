@@ -1304,7 +1304,10 @@ local WHITE_DISC_COLOR = {r = 1, g = 1, b = 1}
 -- has a separate brightness for the horizon, a sunrise band and a tonemap.
 -- What this is for is a night that looks like night; the rest is the
 -- difference between this sky and a photograph of Luanti's.
-local function apply_sky_of_hour()
+-- `force` sends all six faces of the reflection cube in this frame
+-- rather than one a frame ([CLIENT_FRAME]): the sky the player is
+-- under has been replaced, not merely moved on by a frame.
+local function apply_sky_of_hour(force)
 	local defaults = voxel_shading.sky_defaults
 	local day_zenith = game_sky.zenith or defaults.zenith
 	local day_horizon = game_sky.horizon or defaults.horizon
@@ -1568,7 +1571,7 @@ local function apply_sky_of_hour()
 	-- and left alone at noon, where the cube map is already right
 	voxel_shading.set_sky_tint(
 			three(night_zenith, dawn_zenith, day_zenith, t), 1 - t)
-	sky_cube.refresh(true)
+	sky_cube.refresh(force)
 end
 
 local function update_sky(dt)
@@ -2001,7 +2004,7 @@ luanti.sub_sky(function(sky)
 	elseif game_skybox:clear() and zone then
 		zone.zoneTexture = sky_cube.cube.texture
 	end
-	apply_sky_of_hour()
+	apply_sky_of_hour(true)
 end)
 
 luanti.sub_time(function(tod, speed)
