@@ -780,15 +780,17 @@ buildat.safe.SpatialUpdateQueue = function()
 		set_p = function(self, ...)
 			return internal:set_p(...)
 		end,
+		-- `player` is "the player caused this"; it rides into the queue
+		-- and puts the item before the world's own churn ([CLIENT_FRAME])
 		put = function(self, safe_p, near_weight, near_trigger_d,
-				far_weight, far_trigger_d, value)
+				far_weight, far_trigger_d, value, player)
 			if not getmetatable(safe_p) or
 					getmetatable(safe_p).type_name ~= "Vector3" then
 				error("p is not a sandboxed Vector3 instance")
 			end
 			p = getmetatable(safe_p).unsafe
 			return internal:put(p, near_weight, near_trigger_d,
-					far_weight, far_trigger_d, value)
+					far_weight, far_trigger_d, value, player)
 		end,
 		get = function(self, ...)
 			return internal:get(...)
@@ -818,6 +820,18 @@ buildat.safe.SpatialUpdateQueue = function()
 			end
 			p = getmetatable(safe_p).unsafe
 			internal:set_p(p)
+		end,
+		-- Which way the camera looks, for the queue's view term. **A
+		-- method the C++ has and this table does not is a nil call that
+		-- kills the handler it is in** (2026-09-26: set_dir raised every
+		-- frame, voxelworld's whole update went with it and 3024 chunks
+		-- stood undrawn).
+		set_dir = function(self, safe_dir)
+			if not getmetatable(safe_dir) or
+					getmetatable(safe_dir).type_name ~= "Vector3" then
+				error("dir is not a sandboxed Vector3 instance")
+			end
+			internal:set_dir(getmetatable(safe_dir).unsafe)
 		end,
 	}
 end

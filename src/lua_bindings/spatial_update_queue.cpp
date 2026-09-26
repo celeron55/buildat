@@ -412,6 +412,34 @@ static void self_check()
 		assert(q.get_value().node_id == 1);
 	}
 
+	// **A queue of thousands drains**: the client takes items while the
+	// head is due, so anything that can make a due item lose to one that
+	// is not stops the world being drawn (2026-09-26: a rewrite of this
+	// file left 3024 items standing and chunks undrawn after two
+	// seconds).
+	{
+		SpatialUpdateQueue q;
+		q.set_p(Vector3(0, 0, 0));
+		q.set_dir(Vector3(0, 0, -1));
+		for(int i = 0; i < 3000; i++){
+			// Spread over a shell the near trigger reaches, as the world's
+			// chunks are
+			float x = (float)(i % 30) * 10.0f - 150.0f;
+			float y = (float)((i / 30) % 10) * 10.0f;
+			float z = (float)(i / 300) * 10.0f - 50.0f;
+			q.put(Vector3(x, y, z), 1.0f, 1000.0f, -1.0f, -1.0f,
+					item_value("geometry", (uint32_t)i + 1));
+		}
+		assert(q.get_length() == 3000);
+		size_t taken = 0;
+		while(!q.empty() && q.get_f() <= 1.0f){
+			q.pop();
+			taken++;
+		}
+		assert(taken == 3000);
+		assert(q.empty());
+	}
+
 	// Near enough and which way the camera looks says nothing: the player
 	// can be standing on it
 	{
@@ -469,10 +497,16 @@ struct LuaSUQ
 				-1.0f : luaL_checknumber(L, 6);
 		luaL_checktype(L, 7, LUA_TTABLE);
 		SpatialUpdateQueue::Value value;
-		lua_getfield(L, -1, "type");
+		// **The table by its own index and not by the top of the stack**
+		// (2026-09-26): these read -1, which was the table only while it
+		// was the last argument. An eighth argument made the top a
+		// boolean, every put raised "unknown C++ exception in a binding",
+		// and the world stopped being drawn -- with an empty queue, which
+		// is what made it look like a starving one.
+		lua_getfield(L, 7, "type");
 		value.type = luaL_checkstring(L, -1);
 		lua_pop(L, 1);
-		lua_getfield(L, -1, "node_id");
+		lua_getfield(L, 7, "node_id");
 		value.node_id = luaL_checkinteger(L, -1);
 		lua_pop(L, 1);
 		// The eighth is "the player caused this", which outranks the
