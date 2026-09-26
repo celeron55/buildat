@@ -5123,8 +5123,23 @@ end
 -- section. Before that one box's batch was 3.5 s of a step in VoxeLibre
 -- (the fuzz run, 2026-09-17), with the budget looked at only after it.
 -- 0.1 (2026-09-18), down from 0.2: the step's ceiling is 0.25 s and the
--- ABMs are not the only thing in it
-local ABM_BUDGET_S = 0.1
+-- ABMs are not the only thing in it.
+--
+-- **0.03 (2026-09-26), because a budget larger than the step is no budget
+-- at all.** The step runs every 0.09 s (luanti.cpp's STEP_S) and this said
+-- a sweep could have 0.1 of it, so a VoxeLibre world with rules to sweep
+-- -- which is every VoxeLibre world -- spent **every** step entirely in
+-- ABMs: standing still in a made one, each step took 0.10 s and the
+-- breakdown read `abms 0.10 s`, leaving the objects, the liquids and the
+-- packets to run late behind it. A third of the step leaves the rest of
+-- the step for the rest of the step. Measured (the same fuzz seed, four
+-- minutes): the settled step 0.10 s to **0.04**, the run's seconds over
+-- the ceiling 4 to **1**, its worst client frame 0.216 s to 0.178, and
+-- the step's own peak stopped being the ABMs. A sweep with a backlog
+-- takes about three times as many steps to get through it, which is what
+-- a budget is for; a world with little to do finishes inside one either
+-- way ([CLIENT_FRAME]).
+local ABM_BUDGET_S = 0.03
 
 -- Where a sweep that ran out of budget got to: which rules it is for, the
 -- sections it was going to read, and how far along it is. A rule that comes
