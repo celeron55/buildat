@@ -162,6 +162,17 @@ local modified_queued_us = {}
 local modified_drawn_us = {}
 local modified_held = {}
 local MODIFIED_COALESCE_US = 1000000
+-- **And nothing the player is standing next to is ever held** (user,
+-- 2026-09-26: "delayed lighting updates feel awful to the user as
+-- response to the user's interactions; postponing them is a viable
+-- method only when they're tens of voxels away from the player"). The
+-- window above was applied to every chunk alike, so a dig in a chunk
+-- that had been drawn within the second waited up to a second to
+-- appear -- the client's own prediction included. Holding is a
+-- distance rule now: inside this many voxels of the camera a change is
+-- drawn as soon as the budget lets it, and beyond it the window still
+-- coalesces the churn a world makes of itself.
+local MODIFIED_PROMPT_D = 48
 -- And which of those have been complained about, so that one that is never
 -- drawn again says so once rather than every frame
 local modified_warned = {}
@@ -939,6 +950,14 @@ function queue_modified_node_update(node, prompt)
 	end
 	local id = node:GetID()
 	local now = buildat.get_time_us()
+	if not prompt and MODIFIED_PROMPT_D > 0 then
+		-- The chunk's own middle: a 32-voxel chunk reaches some way
+		-- past it, which is on the safe side of "near"
+		local d = (node:GetWorldPosition() - camera_p):Length()
+		if d <= MODIFIED_PROMPT_D then
+			prompt = true
+		end
+	end
 	if not prompt and not modified_queued_us[id] then
 		local drawn = modified_drawn_us[id]
 		if drawn and now - drawn < MODIFIED_COALESCE_US then
