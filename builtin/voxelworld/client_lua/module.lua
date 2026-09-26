@@ -103,6 +103,35 @@ local atlas_reg = buildat.createAtlasRegistry()
 -- bits (and any dynamic voxel node) would come out uniformly dark.
 M.use_skylight = false
 
+-- **One chunk's mesh is one call, and a budget cannot slice it**
+-- ([CLIENT_FRAME], 2026-09-26). The loop that spends the mesh budget
+-- reads its deadline between chunks, so a call over the budget takes
+-- what it takes. And the call is not only the queueing: the task's
+-- constructor deserialises the volume and preloads its textures **on
+-- this thread, on purpose** (mesh.cpp says so: "so that the calling
+-- code can measure how long its execution takes"), which is where an
+-- atlas segment for a voxel seen for the first time gets built.
+--
+-- Measured on a join into an already-made VoxeLibre world: the first
+-- chunk 858 to 1265 ms, the next five 70 to 160 each, and then 5 to 33
+-- ms a chunk for the rest of the session. Asking the registry once per
+-- distinct voxel instead of once per sample (39 thousand of them a
+-- chunk) was tried and changed nothing either way, so what costs is the
+-- atlas work itself and not the lookups around it.
+--
+-- This line is what makes that visible without a debug run, the way
+-- "slow packet" does for the network.
+local SLOW_MESH_US = 25000
+local slow_mesh_said = 0
+local function note_slow_mesh(node, t1, data_n, lod)
+	local took = buildat.get_time_us() - t1
+	if took < SLOW_MESH_US or slow_mesh_said >= 16 then
+		return
+	end
+	slow_mesh_said = slow_mesh_said + 1
+	log:info(string.format("mesh: node %d lod %d took %.0f ms",
+			node:GetID(), lod, took / 1000))
+end
 M.chunk_size_voxels = nil
 -- Whether the mesher is handed a horizon map with each chunk, which also
 -- packs the vertex alpha (see interface/mesh.h and voxel_shading's
@@ -513,6 +542,7 @@ function sub_events()
 						node, data, voxel_reg, atlas_reg, M.use_skylight,
 						set_up_materials, horizon)
 				M.frame_us.mesh = M.frame_us.mesh + buildat.get_time_us() - t1
+				note_slow_mesh(node, t1, 0, 1)
 
 				-- 1 -> 2
 				far_trigger_d = M.lod_distance * (1.0 + LOD_THRESHOLD)
@@ -521,6 +551,7 @@ function sub_events()
 				buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg,
 						atlas_reg, M.use_skylight, set_up_materials, horizon)
 				M.frame_us.mesh = M.frame_us.mesh + buildat.get_time_us() - t1
+				note_slow_mesh(node, t1, 0, lod)
 
 				if lod == 1 then
 					-- Shouldn't go here
