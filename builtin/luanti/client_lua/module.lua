@@ -940,12 +940,48 @@ function M.object_label(id)
 	return (tostring(t or have.drawn_as or "?"):gsub("[%s|]", "_"))
 end
 
+-- **What the packet last said about an object** ([PACKET_STALL] (3),
+-- measured on this desk 2026-09-26). The server sends every object's
+-- full state whenever any one of them moved, and standing still in a
+-- VoxeLibre world that is 78 to 83 objects several times a second, of
+-- which a handful are moving. Placing one costs a node lookup, three
+-- transforms through the binding, a box table and a voxel light lookup
+-- -- about 0.4 ms, so 25 to 42 ms a packet, and that packet is the
+-- frame. Two minutes standing still: 407 packets over 5 ms, 5.1
+-- seconds of frame time in them.
+--
+-- So an object the packet says nothing new about is left where it is.
+-- The nine doubles are compared in place -- no table is built to
+-- compare, since building one per object per packet is the cost being
+-- removed. Cleared wherever the node would have to be made again: a
+-- look that changed, an object that went.
+local object_last = {}
+-- How many packets it takes to re-light every object that is standing
+-- still, and which slice this packet does
+local LIGHT_TURNS = 8
+local object_light_turn = 0
+-- The nine doubles after the id, against what was placed last time
+local function object_same(prev, v, i)
+	if prev == nil then
+		return false
+	end
+	for k = 1, 9 do
+		if prev[k] ~= v[i + k] then
+			return false
+		end
+	end
+	return true
+end
+
 startup_packet("luanti:object_props", "luanti_data/object_props.bin", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	for i = 1, #values - 4, 5 do
 		object_looks[values[i]] = parse_look(values[i + 1], values[i + 2],
 				values[i + 3])
 		object_looks[values[i]].pointable = values[i + 4] ~= "0"
+		-- A look that changed is a node made again, and the next packet
+		-- has to do it rather than recognise the same nine doubles
+		object_last[values[i]] = nil
 	end
 end)
 
@@ -1019,7 +1055,7 @@ local function animate_object(id)
 	local a = look and look.anim
 	if not a then
 		anim_clock[id] = nil
-		return
+		return false
 	end
 	local now = buildat.get_time_us() / 1000000
 	local started = anim_clock[id]
@@ -1041,7 +1077,11 @@ local function animate_object(id)
 		if models[model_key(look.mesh, frame)] then
 			look.frame = frame
 		end
+		-- The node is made again for the new frame, so the packet must
+		-- not take this object for one that has not changed
+		return true
 	end
+	return false
 end
 
 -- Where one object is now, out of the eight numbers the server sends for
@@ -1069,7 +1109,23 @@ local function place_object(id, v, i)
 		end
 		return
 	end
-	animate_object(id)
+	local posed = animate_object(id)
+	-- Nothing about it has changed and its node is already made and
+	-- placed. **The light is still asked for, but not every packet**:
+	-- the hour moves under a mob that does not, so an object that never
+	-- moves would keep the colour it was born with -- and asking costs
+	-- a Vector3, four calls into C++ and a Color each, which measured
+	-- as the whole of what was left after the skip (26 to 30 ms a
+	-- packet for 75 objects). One object in LIGHT_TURNS a packet, in
+	-- turn, so every one of them is re-lit within about two seconds and
+	-- no packet pays for more than a few.
+	if not posed and object_nodes[id] and object_same(object_last[id], v, i)
+			and id ~= M.self_id then
+		if ((i - 1) / 10 + object_light_turn) % LIGHT_TURNS == 0 then
+			light_object(object_nodes[id], v[i + 1], v[i + 2], v[i + 3])
+		end
+		return
+	end
 	local node = object_node(id)
 	if node == nil then
 		-- Out of this packet's budget; the next one places it
@@ -1109,6 +1165,15 @@ local function place_object(id, v, i)
 	if id == M.self_id and self_pose then
 		node.rotation = magic.Quaternion(0, self_pose.yaw, 0)
 	end
+	-- Placed: what it was placed with, for the next packet to compare
+	local prev = object_last[id]
+	if prev == nil then
+		prev = {}
+		object_last[id] = prev
+	end
+	for k = 1, 9 do
+		prev[k] = v[i + k]
+	end
 end
 
 buildat.sub_packet("luanti:objects", function(data)
@@ -1123,6 +1188,7 @@ buildat.sub_packet("luanti:objects", function(data)
 	local i = 1
 	object_build_left_us = OBJECT_BUILD_BUDGET_US
 	objects_deferred = 0
+	object_light_turn = (object_light_turn + 1) % LIGHT_TURNS
 	while i + STRIDE - 1 <= #v do
 		local id = tostring(math.floor(v[i]))
 		seen[id] = true
@@ -1152,6 +1218,7 @@ buildat.sub_packet("luanti:objects", function(data)
 			object_nodes[id] = nil
 			object_looks[id] = nil
 			anim_clock[id] = nil
+			object_last[id] = nil
 		end
 	end
 end)
