@@ -729,21 +729,58 @@ local function room_ui_child(kind)
 	return e
 end
 
-local CHUNK = 16
+-- **Blocks, not columns** (2026-09-26). The wall used to be meshed in
+-- six slices 16 wide and the room's full 32 by 77 -- and a drawable is
+-- culled by its bounding box, so every one of the ten orbs' cube shadow
+-- maps redrew whole slices of room for a light that reaches 11 voxels.
+-- That was 3.85 of the frame's 5.17 million triangles. A block the
+-- light's own size lets the frustum do its work.
+-- **Blocks, not columns** (2026-09-26). The wall used to be meshed in
+-- six slices 16 wide and the room's full 32 by 77 -- and a drawable is
+-- culled by its bounding box, so every one of the ten orbs' cube shadow
+-- maps redrew whole slices of room for a light that reaches 11 voxels.
+-- That was 3.85 of the frame's 5.17 million triangles.
+-- **One table and not seven locals**: this file is at Lua 5.1's limit of
+-- 200 in a main chunk, and a block of stone is not worth a name each.
+local blk = {
+	-- Measured: 8 and 12 mesh no faster and cost half again as many
+	-- batches, 32 draws a fifth more triangles
+	size = 16,
+	nodes = {},
+	checked = false,
+}
 rows = room.build()
-local chunk_nodes = {}
-local function mesh_chunk(c)
-	local x0 = c * CHUNK
-	local w = math.min(CHUNK, room.W - x0)
+blk.nx = math.ceil(room.W / blk.size)
+blk.ny = math.ceil(room.H / blk.size)
+blk.nz = math.ceil(room.D / blk.size)
+blk.air = string.char(room.id.air)
+-- The block an index is in, and the one key the three make
+function blk.of(i, o) return math.floor((i - o) / blk.size) end
+function blk.key(cx, cy, cz) return (cz * blk.ny + cy) * blk.nx + cx end
+local function mesh_chunk(cx, cy, cz)
+	local n = blk.size
+	local x0, y0, z0 = cx * n, cy * n, cz * n
+	local w = math.min(n, room.W - x0)
+	local h = math.min(n, room.H - y0)
+	local d = math.min(n, room.D - z0)
 	local data = {}
-	local n = 0
-	for r = 1, #rows do
-		n = n + 1
-		data[n] = rows[r]:sub(x0 + 1, x0 + w)
+	local at = 0
+	for z = z0, z0 + d - 1 do
+		for y = y0, y0 + h - 1 do
+			at = at + 1
+			data[at] = rows[z * room.H + y + 1]:sub(x0 + 1, x0 + w)
+		end
 	end
-	local node = chunk_nodes[c]
+	local blob = table.concat(data)
+	local key = blk.key(cx, cy, cz)
+	local node = blk.nodes[key]
+	-- Most of a room is the air in it: a block of nothing gets no node,
+	-- and a dig that fills one builds it then
+	if node == nil and blob == string.rep(blk.air, #blob) then
+		return
+	end
 	if not node then
-		node = scene:CreateChild("room" .. c)
+		node = scene:CreateChild("room" .. key)
 		-- **The mesher centres a block on its node** (mesh.cpp: every
 		-- vertex is its voxel less half the block), so the node goes to
 		-- the block's middle rather than to its corner. The half is the
@@ -759,48 +796,57 @@ local function mesh_chunk(c)
 		-- block instead of the box keeps the stone on the same indices
 		-- as everything else in the room.
 		node.position = magic.Vector3(room.OX + x0 + w / 2 - 0.5,
-				room.OY + room.H / 2 - 0.5, room.OZ + room.D / 2 - 0.5)
-		chunk_nodes[c] = node
+				room.OY + y0 + h / 2 - 0.5, room.OZ + z0 + d / 2 - 0.5)
+		blk.nodes[key] = node
 	end
-	api.set_8bit_voxel_geometry(node, w, room.H, room.D,
-			table.concat(data), voxel_reg, atlas_reg,
-			room.OX + x0, room.OY, room.OZ)
+	api.set_8bit_voxel_geometry(node, w, h, d, blob, voxel_reg, atlas_reg,
+			room.OX + x0, room.OY + y0, room.OZ + z0)
 	apply_technique(node)
 	-- **The check that settles it**: the block's own bounding box against
 	-- the indices it was built from. A voxel spans half a unit each side
-	-- of its index, so the block spans half a unit outside its first and
-	-- last. This is what three guesses at the selection box's position
-	-- could not tell apart.
-	if c == 0 then
+	-- of its index, so the block stands inside the indices it was built
+	-- from. This is what three guesses at the selection box's position
+	-- could not tell apart. The first block with stone in it, since the
+	-- corner one is air.
+	if not blk.checked then
+		blk.checked = true
 		local bb = node:GetComponent("CustomGeometry").worldBoundingBox
-		local want = {room.OX + x0 - 0.5, room.OY - 0.5, room.OZ - 0.5}
+		local want = {room.OX + x0 - 0.5, room.OY + y0 - 0.5,
+				room.OZ + z0 - 0.5}
 		local got = {bb.min.x, bb.min.y, bb.min.z}
 		for i = 1, 3 do
-			assert(math.abs(got[i] - want[i]) < 0.01,
-					("the meshed block starts at %.2f, not %.2f, on axis %d")
-					:format(got[i], want[i], i))
+			assert(got[i] >= want[i] - 0.01,
+					("the meshed block starts at %.2f, outside %.2f, on " ..
+					"axis %d"):format(got[i], want[i], i))
 		end
-		log:info(("chunk 0 sits on its indices: %.2f %.2f %.2f .. " ..
-				"%.2f %.2f %.2f"):format(bb.min.x, bb.min.y, bb.min.z,
+		log:info(("block %d sits on its indices: %.2f %.2f %.2f .. " ..
+				"%.2f %.2f %.2f"):format(key, bb.min.x, bb.min.y, bb.min.z,
 				bb.max.x, bb.max.y, bb.max.z))
 	end
 end
-local CHUNKS = math.ceil(room.W / CHUNK)
-for c = 0, CHUNKS - 1 do
-	mesh_chunk(c)
+function blk.all()
+	for cz = 0, blk.nz - 1 do
+		for cy = 0, blk.ny - 1 do
+			for cx = 0, blk.nx - 1 do
+				mesh_chunk(cx, cy, cz)
+			end
+		end
+	end
 end
+blk.all()
 
 -- The whole room again from room.lua's description: what wants it is the
 -- ornament toggle, which changes what a voxel is rather than what is
 -- drawn over it
 function rebuild_room()
 	rows = room.build()
-	for c = 0, CHUNKS - 1 do
-		mesh_chunk(c)
-	end
+	blk.all()
 end
+blk.built = 0
+for _ in pairs(blk.nodes) do blk.built = blk.built + 1 end
 log:info("room: " .. room.W .. "x" .. room.H .. "x" .. room.D ..
-		" voxels of 45 cm in " .. CHUNKS .. " chunks")
+		" voxels of 45 cm in " .. blk.built .. " blocks of " .. blk.size ..
+		" that have anything in them")
 
 -- The dissolve rewrites the pocket's own box and re-meshes what it
 -- touched; the room is generated and never saved, so the description in
@@ -820,16 +866,19 @@ local function rewrite_box(x0, x1, y0, y1, z0, z1, open)
 								room.voxel_at(x, y, z))}
 					end
 				end
+				local cy = blk.of(y, room.OY)
+				local cz = blk.of(z, room.OZ)
 				for _, e in ipairs(out) do
 					rw = rw:sub(1, e[1] - 1) .. e[2] .. rw:sub(e[1] + 1)
-					touched[math.floor((e[1] - 1) / CHUNK)] = true
+					local cx = math.floor((e[1] - 1) / blk.size)
+					touched[blk.key(cx, cy, cz)] = {cx, cy, cz}
 				end
 				rows[ri] = rw
 			end
 		end
 	end
-	for c in pairs(touched) do
-		mesh_chunk(c)
+	for _, c in pairs(touched) do
+		mesh_chunk(c[1], c[2], c[3])
 	end
 end
 
@@ -2260,6 +2309,11 @@ local function reflection_probe(at)
 		kept[#kept + 1] = vp
 	end
 	zone.zoneTexture = cube
+	-- **Kept by name as well** (2026-09-26): F5 puts the probe back by
+	-- reading kept.probe, which nothing set, so the second press
+	-- assigned nil to a property that will not take one. The dark one
+	-- beside it was named all along.
+	kept.probe = cube
 	-- What the zone wears when the probe is taken away: an environment of
 	-- nothing, rather than no environment at all. The property will not
 	-- take nil, and an unbound cubemap reads bright rather than black.
@@ -2275,6 +2329,21 @@ local function reflection_probe(at)
 	end
 	kept.dark_probe = dark
 	kept[#kept + 1] = black
+	-- **And something in the engine has to hold each of them.** A Lua
+	-- table is not a reference: the safe wrapper does not own the C++
+	-- object, the engine's own count does, and the only thing holding
+	-- either cube map was the zone it was on. So F5 swapping them freed
+	-- the one being taken off, and the press after that handed the zone
+	-- a pointer to freed memory -- SIGSEGV in RefCounted, reached from
+	-- Zone::SetZoneTexture. A zone of its own, on a node that is never
+	-- enabled, is the reference that outlives the swap. (The same shape
+	-- as the materials in extensions/luanti_client/world.lua.)
+	for _, held in ipairs({cube, dark}) do
+		local keeper = scene:CreateChild("probe_keeper")
+		keeper.enabled = false
+		keeper:CreateComponent("Zone").zoneTexture = held
+		kept[#kept + 1] = keeper
+	end
 	return cube
 end
 reflection_probe(V(0, 2.0, 0.0))
@@ -2644,7 +2713,18 @@ magic.SubscribeToEvent("Update", "handle_camera_update")
 -- The worst frame of each second while the room is young, and after
 -- that only a frame over the ceiling, so a settled room is quiet.
 frame_watch = {worst = 0, worst_at = 0, due = 0, started = nil,
-		said = 0, ceiling = 0.1, young = 45, over = 0, summed = false}
+		said = 0,
+		-- A settled room's frame is well under the engine's own clamp, so
+		-- a reading of the settled frame asks for a lower bar
+		ceiling = tonumber(buildat.get_env("BUILDAT_LAUNCH_FRAME_CEILING") or
+				"") or 0.1,
+		young = 45, over = 0, summed = false,
+		-- A young room's frames are the bake's, not the room's: a reading
+		-- of the settled frame waits this many seconds for its table
+		dump_after = tonumber(buildat.get_env(
+				"BUILDAT_LAUNCH_FRAME_DUMP_AFTER") or "") or 0,
+		-- Every second, for an A/B of what a frame is spent on
+		every = (buildat.get_env("BUILDAT_LAUNCH_FRAME_TRACE") or "") ~= ""}
 -- Declared here and filled at the end of the file: the sandbox refuses
 -- an assignment to a global that the main chunk has not made
 frame_trace = {us = {}, due = 0}
@@ -2666,7 +2746,7 @@ function handle_frame_watch(event_type, event_data)
 	-- most a few times: what a Lua line cannot say is where in the
 	-- engine the time went (the same reading [PACKET_STALL] takes)
 	if frame_watch.worst >= frame_watch.ceiling and frame_watch.said < 3 and
-			buildat.profiler_data then
+			age >= frame_watch.dump_after and buildat.profiler_data then
 		frame_watch.said = frame_watch.said + 1
 		log:info("the frame that cost " ..
 				math.floor(frame_watch.worst * 1000) .. " ms:\n" ..
@@ -2675,7 +2755,7 @@ function handle_frame_watch(event_type, event_data)
 	-- Said when a second's worst frame is over the ceiling, and once at
 	-- the end of the young window whatever it was: a settled room is
 	-- quiet and a slow one says so without anybody asking.
-	if frame_watch.worst >= frame_watch.ceiling then
+	if frame_watch.worst >= frame_watch.ceiling or frame_watch.every then
 		log:info(string.format(
 				"frames: at %.0f s the worst of the last second was " ..
 				"%.0f ms (%.0f fps at that rate)", age,
