@@ -2415,11 +2415,55 @@ void generate_voxel_lod_geometry(int lod,
 			face_id = 4;
 		else if(n.getZ() < 0)
 			face_id = 5;
+		pv::Vector3DFloat quad[4] = {
+			pv_vertices[pv_vertex_i0 + 0].position,
+			pv_vertices[pv_vertex_i0 + 1].position,
+			pv_vertices[pv_vertex_i0 + 2].position,
+			pv_vertices[pv_vertex_i0 + 3].position,
+		};
+		if(face_owned_by_padding(lod_volume, quad, n))
+			continue;
+		// The voxel behind the face: which variant it wears, the colour it
+		// is drawn in and its surface modifiers, read the way
+		// generate_voxel_geometry() reads them.
+		const interface::VoxelVariant *variant = nullptr;
+		uint32_t voxel_color = 0xffffff;
+		float mods[interface::VOXEL_SURFACE_MODIFIERS] = {};
+		if((fmt.param.bound() && !voxel_def0->variants.empty()) ||
+				fmt.color.bound() || fmt.n_surface != 0){
+			VoxelSample back = face_back_voxel(lod_volume, quad, n);
+			if(fmt.param.bound() && !voxel_def0->variants.empty())
+				variant = voxel_def0->variant(fmt.param.get(back));
+			if(fmt.color.bound())
+				voxel_color = fmt.color.get(back) & 0xffffffUL;
+			if(fmt.n_surface != 0){
+				fmt.surface_of(back, mods);
+				if(fmt.tint.bound()){
+					mods[0] = pack_tint565(
+							tint_ramp_color(voxel_def0, fmt.tint_f(back)));
+				}
+			}
+		}
 		// Get texture coordinates (contained in AtlasSegmentCache)
 		size_t lod_i = lod - 2;
 		if(lod_i >= interface::VOXELDEF_NUM_LOD)
 			lod_i = interface::VOXELDEF_NUM_LOD - 1;
-		AtlasSegmentReference seg_ref = voxel_def0->lod_textures[lod_i][face_id];
+		// **A variant wears its own texture at every distance.** A palette
+		// is a variant whose tiles are the definition's through a multiply
+		// -- VoxeLibre colours every leaf and every blade of grass that way
+		// -- and the definition's own LOD segments are the untinted ones,
+		// so a LOD chunk drew the whole living world grey ([CLIENT_FRAME]).
+		// There are no LOD segments for a variant's tiles: three of them
+		// per palette entry per face is an atlas nobody can afford, and
+		// what the LOD simulation buys -- a texture pre-averaged for
+		// minification -- the mip chain buys again. So a variant's own
+		// full-resolution tile is what a far chunk wears.
+		const uint tile = variant ? (variant->tile_order[face_id] < 6 ?
+				variant->tile_order[face_id] : face_id) : face_id;
+		AtlasSegmentReference seg_ref =
+				(variant && tile < variant->texture_refs.size()) ?
+				variant->texture_refs[tile] :
+				voxel_def0->lod_textures[lod_i][face_id];
 		if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED){
 			// This is usually intentional for invisible voxels
 			//log_t(MODULE, "Voxel %i face %i atlas undefined", voxel_id0, face_id);
@@ -2444,31 +2488,25 @@ void generate_voxel_lod_geometry(int lod,
 			// memory, so let's do only one big memory allocation
 			tg.vertex_data.Reserve(pv_vertices.size() / 4 * 6);
 		}
-		pv::Vector3DFloat quad[4] = {
-			pv_vertices[pv_vertex_i0 + 0].position,
-			pv_vertices[pv_vertex_i0 + 1].position,
-			pv_vertices[pv_vertex_i0 + 2].position,
-			pv_vertices[pv_vertex_i0 + 3].position,
-		};
-		if(face_owned_by_padding(lod_volume, quad, n))
-			continue;
-		// The surface modifiers of the voxel behind the face; see
-		// generate_voxel_geometry(), which reads them the same way
-		float mods[interface::VOXEL_SURFACE_MODIFIERS] = {};
-		if(fmt.n_surface != 0){
-			VoxelSample back = face_back_voxel(lod_volume, quad, n);
-			fmt.surface_of(back, mods);
-			if(fmt.tint.bound()){
-				mods[0] = pack_tint565(
-						tint_ramp_color(voxel_def0, fmt.tint_f(back)));
-			}
-		}
 		unsigned corner_colors[4] = {
 			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
 		};
 		if(use_skylight){
 			face_vertex_colors(lod_volume, voxel_reg, fmt, quad, n, face_id,
 					corner_colors, horizon, lod);
+		}
+		// The voxel's own colour and what its param says about it, combined
+		// before either is packed -- generate_voxel_geometry()'s own lines
+		if(voxel_color != 0xffffff ||
+				(variant && variant->color != 0xffffff)){
+			uint32_t tint = variant ?
+					mul_rgb(voxel_color, variant->color) : voxel_color;
+			for(size_t i = 0; i < 4; i++){
+				corner_colors[i] = use_skylight ?
+						modulate_color(corner_colors[i], tint) :
+						plain_color(tint);
+			}
+			tg.has_colors = true;
 		}
 		// Go through indices of the face and mangle vertices according to them
 		// into the temporary vertex buffer
