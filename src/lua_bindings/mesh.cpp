@@ -6,6 +6,7 @@
 #include "interface/mesh.h"
 #include "interface/voxel_volume.h"
 #include "interface/thread_pool.h"
+#include "interface/os.h"
 #include <c55/os.h>
 #include <tolua++.h>
 #include <luabind/luabind.hpp>
@@ -227,17 +228,21 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 		horizon(parse_horizon(horizon_data, "set_voxel_geometry()"))
 	{
 		ScopeTimer timer("pre geometry");
-		// NOTE: Do the pre-processing here so that the calling code can
-		//       meaasure how long its execution takes
-		// NOTE: Could be split in two calls
+		// The deserialise is one shot and cheap beside what follows it;
+		// the textures are the part that used to take most of a second
+		// and they are pre()'s now, a slice at a time ([CLIENT_FRAME])
 		volume = interface::deserialize_volume(data);
-		interface::mesh::preload_textures(
-				*volume, voxel_reg.get(), atlas_reg.get());
 	}
-	// Called repeatedly from main thread until returns true
+	interface::mesh::PreloadCursor preload_cursor;
+	// Called repeatedly from the main thread until it returns true: the
+	// chunk's voxels have to be in the atlas before a worker meshes it,
+	// and building a segment for one seen for the first time is what a
+	// join's first chunks were paying for in one go.
 	bool pre()
 	{
-		return true;
+		return interface::mesh::preload_textures_sliced(
+				*volume, voxel_reg.get(), atlas_reg.get(), false,
+				interface::os::time_us() + 1500, preload_cursor);
 	}
 	// Called repeatedly from worker thread until returns true
 	bool thread()
@@ -337,13 +342,14 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 				interface::deserialize_volume(data);
 		lod_volume = interface::mesh::generate_voxel_lod_volume(
 				lod, *volume_orig, voxel_reg.get());
-		interface::mesh::preload_textures(
-				*lod_volume, voxel_reg.get(), atlas_reg.get(), true);
 	}
-	// Called repeatedly from main thread until returns true
+	interface::mesh::PreloadCursor preload_cursor;
+	// The far chunks' textures, on the same terms as the near ones'
 	bool pre()
 	{
-		return true;
+		return interface::mesh::preload_textures_sliced(
+				*lod_volume, voxel_reg.get(), atlas_reg.get(), true,
+				interface::os::time_us() + 1500, preload_cursor);
 	}
 	// Called repeatedly from worker thread until returns true
 	bool thread()

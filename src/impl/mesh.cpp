@@ -4,6 +4,7 @@
 #include "interface/voxel.h"
 #include "interface/voxel_selector.h"
 #include "core/log.h"
+#include "interface/os.h"
 #include <cstdlib>
 #include <PolyVoxCore/SimpleVolume.h>
 #include <PolyVoxCore/SurfaceMesh.h>
@@ -1293,6 +1294,54 @@ void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
 			tg_vert.texCoord_.y_ = aseg->coord1.y_;
 		}
 	}
+}
+
+// See the note in interface/mesh.h. The cursor walks the same order the
+// whole-volume version does, so a run that is interrupted and resumed
+// covers exactly what one pass would have.
+bool preload_textures_sliced(VoxelVolume &volume,
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg, bool with_lod,
+		int64_t deadline_us, PreloadCursor &cursor)
+{
+	const VoxelFmt fmt(voxel_reg);
+	auto region = volume.getEnclosingRegion();
+	auto &lc = region.getLowerCorner();
+	auto &uc = region.getUpperCorner();
+	if(!cursor.started){
+		cursor.x = lc.getX();
+		cursor.y = lc.getY();
+		cursor.z = lc.getZ();
+		cursor.started = true;
+	}
+	// **The clock is read inside the row.** A voxel whose definition is
+	// cached is a table lookup, but one seen for the first time has its
+	// atlas segment built here -- image, normal map, surface map, upload
+	// -- and that is milliseconds. A check every row let one row run to
+	// 80 ms ([CLIENT_FRAME], measured 2026-09-26); every eighth voxel
+	// costs a few thousand clock reads over a chunk and bounds it.
+	const int CLOCK_EVERY = 8;
+	for(; cursor.z <= uc.getZ(); cursor.z++){
+		for(; cursor.y <= uc.getY(); cursor.y++){
+			for(; cursor.x <= uc.getX(); cursor.x++){
+				VoxelSample v = volume.sample_at(cursor.x, cursor.y, cursor.z);
+				const interface::CachedVoxelDefinition *def =
+						voxel_reg->get_cached(v, atlas_reg, with_lod);
+				if(!def)
+					throw Exception(ss_()+"Undefined voxel: "+
+							itos(fmt.id_of(v)));
+				if(++cursor.since_clock >= CLOCK_EVERY){
+					cursor.since_clock = 0;
+					if(interface::os::time_us() >= deadline_us){
+						cursor.x++;
+						return false;
+					}
+				}
+			}
+			cursor.x = lc.getX();
+		}
+		cursor.y = lc.getY();
+	}
+	return true;
 }
 
 void preload_textures(VoxelVolume &volume,

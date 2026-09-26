@@ -4,6 +4,7 @@
 #include "interface/voxel_selector.h"
 #include "interface/voxel_volume.h"
 #include "core/log.h"
+#include "interface/os.h"
 #include "interface/voxel_cereal.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
@@ -95,43 +96,68 @@ struct CVoxelRegistry: public VoxelRegistry
 	static const uint32_t FAST_IDS = FAST_BLOCKS * FAST_IN_BLOCK;
 	typedef std::atomic<CachedVoxelDefinition*> FastSlot;
 	std::atomic<FastSlot*> m_fast[FAST_BLOCKS];
+	// **And the same table again for the callers that need the textures**
+	// ([CLIENT_FRAME], 2026-09-26). The one above is published as soon as
+	// an entry's basic fields are filled, which is why a caller carrying
+	// an atlas could not use it: its textures may not be built yet. So it
+	// took the mutex for every voxel of a chunk -- 39 thousand of them --
+	// against three or four workers meshing at the same time, and the
+	// waiting was 70 to 825 ms inside `set_voxel_geometry()`, on a chunk
+	// of 177 bytes. An entry lands in this one only once its textures are
+	// there, so the atlas path can read it with no lock at all.
+	std::atomic<FastSlot*> m_fast_tex[FAST_BLOCKS];
 	// The blocks themselves, kept until the registry goes: a reader may be
 	// in one. There are at most 256 of them.
 	sv_<sp_<FastSlot>> m_fast_blocks;
 
 	// Called with the mutex held, once an entry is finished
-	void publish_fast(VoxelTypeId id, CachedVoxelDefinition *cache)
+	void publish_fast_in(std::atomic<FastSlot*> *table, VoxelTypeId id,
+			CachedVoxelDefinition *cache)
 	{
 		if(id >= FAST_IDS)
 			return;
 		const uint32_t bi = id >> FAST_SHIFT;
-		FastSlot *block = m_fast[bi].load(std::memory_order_relaxed);
+		FastSlot *block = table[bi].load(std::memory_order_relaxed);
 		if(block == nullptr){
 			m_fast_blocks.push_back(sp_<FastSlot>(
 					new FastSlot[FAST_IN_BLOCK](),
 					std::default_delete<FastSlot[]>()));
 			block = m_fast_blocks.back().get();
-			m_fast[bi].store(block, std::memory_order_release);
+			table[bi].store(block, std::memory_order_release);
 		}
 		block[id & FAST_MASK].store(cache, std::memory_order_release);
+	}
+	void publish_fast(VoxelTypeId id, CachedVoxelDefinition *cache)
+	{
+		publish_fast_in(m_fast, id, cache);
+	}
+	// The entry is complete down to its atlas segments
+	void publish_fast_tex(VoxelTypeId id, CachedVoxelDefinition *cache)
+	{
+		publish_fast_in(m_fast_tex, id, cache);
 	}
 
 	// Nothing is fast any more: the entries these point at are about to go
 	void forget_fast()
 	{
-		for(uint32_t i = 0; i < FAST_BLOCKS; i++){
-			FastSlot *block = m_fast[i].load(std::memory_order_relaxed);
-			if(block == nullptr)
-				continue;
-			for(uint32_t j = 0; j < FAST_IN_BLOCK; j++)
-				block[j].store(nullptr, std::memory_order_release);
+		std::atomic<FastSlot*> *tables[2] = {m_fast, m_fast_tex};
+		for(int t = 0; t < 2; t++){
+			for(uint32_t i = 0; i < FAST_BLOCKS; i++){
+				FastSlot *block = tables[t][i].load(std::memory_order_relaxed);
+				if(block == nullptr)
+					continue;
+				for(uint32_t j = 0; j < FAST_IN_BLOCK; j++)
+					block[j].store(nullptr, std::memory_order_release);
+			}
 		}
 	}
 
 	CVoxelRegistry()
 	{
-		for(uint32_t i = 0; i < FAST_BLOCKS; i++)
+		for(uint32_t i = 0; i < FAST_BLOCKS; i++){
 			m_fast[i].store(nullptr, std::memory_order_relaxed);
+			m_fast_tex[i].store(nullptr, std::memory_order_relaxed);
+		}
 		m_defs.resize(1); // Id 0 is VOXELTYPEID_UNDEFINEDD
 	}
 
@@ -290,28 +316,41 @@ struct CVoxelRegistry: public VoxelRegistry
 		return get_unlocked(id);
 	}
 
-	// The fast path: an id whose entry is finished, asked about without an
-	// atlas. A caller that wants textures takes the lock, because those are
-	// filled later and only on the thread that has the atlas.
-	const CachedVoxelDefinition* fast_cached(VoxelTypeId id)
+	// The fast path: an id whose entry is finished. `table` says finished
+	// for what -- the basic fields, or those and the atlas segments.
+	const CachedVoxelDefinition* fast_cached_in(
+			std::atomic<FastSlot*> *table, VoxelTypeId id)
 	{
 		if(id >= FAST_IDS)
 			return nullptr;
-		FastSlot *block = m_fast[id >> FAST_SHIFT].load(
+		FastSlot *block = table[id >> FAST_SHIFT].load(
 				std::memory_order_acquire);
 		if(block == nullptr)
 			return nullptr;
 		return block[id & FAST_MASK].load(std::memory_order_acquire);
 	}
+	const CachedVoxelDefinition* fast_cached(VoxelTypeId id)
+	{
+		return fast_cached_in(m_fast, id);
+	}
+	// Finished down to its textures: what the mesher's preload asks for,
+	// and the reason it no longer takes the mutex once a voxel has been
+	// seen once
+	const CachedVoxelDefinition* fast_cached_tex(VoxelTypeId id)
+	{
+		return fast_cached_in(m_fast_tex, id);
+	}
 
 	const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
 			AtlasRegistry *atlas_reg, bool with_lod)
 	{
-		if(atlas_reg == nullptr){
-			const CachedVoxelDefinition *fast = fast_cached(id);
-			if(fast != nullptr)
-				return fast;
-		}
+		const CachedVoxelDefinition *fast = (atlas_reg == nullptr) ?
+				fast_cached(id) :
+				// With an atlas the entry has to carry its segments, and
+				// the LOD ones only when those are what is asked for
+				(with_lod ? nullptr : fast_cached_tex(id));
+		if(fast != nullptr)
+			return fast;
 		std::lock_guard<std::mutex> lock(m_mutex);
 		return get_cached_locked(id, atlas_reg, with_lod);
 	}
@@ -335,8 +374,21 @@ struct CVoxelRegistry: public VoxelRegistry
 			publish_fast(id, &cache);
 		}
 		if(!cache.textures_valid && atlas_reg){
+			// **What one voxel's first sight costs** ([CLIENT_FRAME],
+			// 2026-09-26): its faces' segments are added to the atlases
+			// and uploaded here, and a chunk that meets 800 ms of this is
+			// a chunk that blocks the frame for 800 ms.
+			const int64_t tex_t0 = interface::os::time_us();
 			update_cache_textures(cache, def, atlas_reg);
+			const int64_t tex_took = interface::os::time_us() - tex_t0;
+			if(tex_took >= 25000){
+				log_w(MODULE, "one voxel's textures took %i ms: %s",
+						(int)(tex_took / 1000), cs(def.name.block_name));
+			}
 			cache.textures_valid = true;
+			// Complete for a caller that carries an atlas, and published
+			// after the segments are there rather than before
+			publish_fast_tex(id, &cache);
 		}
 		if(with_lod && !cache.lod_textures_valid && atlas_reg){
 			update_cache_lod_textures(cache, def, atlas_reg);
@@ -362,9 +414,11 @@ struct CVoxelRegistry: public VoxelRegistry
 		// built and not after (set_format() refuses once anything is
 		// registered), so the fast path reads them the way it reads the
 		// entry they lead to: without the lock.
-		if(atlas_reg == nullptr){
-			const CachedVoxelDefinition *fast =
-					fast_cached(m_look.id_of(v, m_format));
+		{
+			const VoxelTypeId id = m_look.id_of(v, m_format);
+			const CachedVoxelDefinition *fast = (atlas_reg == nullptr) ?
+					fast_cached(id) :
+					(with_lod ? nullptr : fast_cached_tex(id));
 			if(fast != nullptr)
 				return fast;
 		}

@@ -78,6 +78,25 @@ namespace interface
 
 		// with_lod also builds the atlas segments a LOD mesh samples; see
 		// VoxelRegistry::get_cached()
+		// **A chunk's preload, a slice at a time** ([CLIENT_FRAME],
+		// 2026-09-26). Building an atlas segment for a voxel seen for the
+		// first time is what a join's 858 to 1265 ms first chunk is made
+		// of, and it happens on the thread that asked for the mesh. This
+		// carries a cursor, does what it can before the deadline and says
+		// whether it is done, so the caller can come back next frame.
+		struct PreloadCursor
+		{
+			int x = 0, y = 0, z = 0;
+			bool started = false;
+			// Voxels done since the clock was last read: building one
+			// voxel's atlas segment is milliseconds, so the deadline has
+			// to be looked at inside a row and not only between rows
+			int since_clock = 0;
+		};
+		bool preload_textures_sliced(VoxelVolume &volume,
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				bool with_lod, int64_t deadline_us, PreloadCursor &cursor);
+
 		void preload_textures(VoxelVolume &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				bool with_lod = false);
