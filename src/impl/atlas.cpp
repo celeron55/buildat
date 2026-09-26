@@ -3,6 +3,7 @@
 #include <sstream>
 #include "interface/atlas.h"
 #include "core/log.h"
+#include "interface/os.h"
 #include <Context.h>
 #include <ResourceCache.h>
 #include <Texture2D.h>
@@ -74,17 +75,29 @@ struct CAtlasRegistry: public AtlasRegistry
 					"segment");
 		// Get resolution of texture
 		magic::IntVector2 seg_img_size(seg_img->GetWidth(), seg_img->GetHeight());
-		// Try to find a texture atlas for this texture size
+		// **What is looked for is the segment's size, not the image's**
+		// ([CLIENT_FRAME], 2026-09-26). An atlas keeps the resolution of
+		// one segment; an animated texture's image is a strip of all its
+		// frames, so asking for an atlas whose segments are the size of
+		// the whole strip never found one and made a new atlas instead --
+		// three images of 2048 by 2048 allocated and uploaded, 60 to 70
+		// ms and 48 MB each. `mcl_core:water_source` alone spent 893 ms
+		// of the frame that first saw water making about thirteen of
+		// them. A texture that is not animated has one segment, so this
+		// is the same question it always was for those.
+		const magic::IntVector2 wanted_seg_res(
+				seg_img_size.x_ / segment_def.total_segments.x_,
+				seg_img_size.y_ / segment_def.total_segments.y_);
 		AtlasDefinition *atlas_def = nullptr;
 		for(AtlasDefinition &def0 : m_defs){
 			if(def0.id == ATLAS_UNDEFINED)
 				continue;
-			if(def0.segment_resolution == seg_img_size){
+			if(def0.segment_resolution == wanted_seg_res){
 				size_t max = def0.total_segments.x_ * def0.total_segments.y_;
 				if(def0.segments.size() >= max){
 					log_d(MODULE, "add_segment(): Found atlas for segment size "
 							"(%i, %i) %p, but it is full",
-							seg_img_size.x_, seg_img_size.y_, &def0);
+							wanted_seg_res.x_, wanted_seg_res.y_, &def0);
 					continue; // Full
 				}
 				atlas_def = &def0;
@@ -94,7 +107,8 @@ struct CAtlasRegistry: public AtlasRegistry
 		// If not found, create a texture atlas for this texture size
 		if(atlas_def){
 			log_d(MODULE, "add_segment(): Found atlas for segment size "
-					"(%i, %i): %p", seg_img_size.x_, seg_img_size.y_, atlas_def);
+					"(%i, %i): %p", wanted_seg_res.x_, wanted_seg_res.y_,
+					atlas_def);
 		} else {
 			// Create a new texture atlas
 			m_defs.resize(m_defs.size()+1);
@@ -170,11 +184,21 @@ struct CAtlasRegistry: public AtlasRegistry
 			// have no storage is incomplete -- it samples as black at every
 			// level, near ones included. Segments write their own box in
 			// every level after this; see upload_box().
+			// **What this costs, said out loud** ([CLIENT_FRAME],
+			// 2026-09-26): three whole atlases of 2048 by 2048 is 48 MB,
+			// and it lands in whichever frame first met a texture of a
+			// size no atlas had yet -- `mcl_core:water_source` measured
+			// 812 ms inside one `get_cached()`.
+			const int64_t alloc_t0 = interface::os::time_us();
 			cache->texture->SetData(cache->image);
 			if(m_surface_maps){
 				cache->normal_texture->SetData(cache->normal_image);
 				cache->spec_texture->SetData(cache->spec_image);
 			}
+			log_w(MODULE, "atlas %i for %ix%i segments: %i ms to allocate "
+					"its levels", (int)id, atlas_def->segment_resolution.x_,
+					atlas_def->segment_resolution.y_,
+					(int)((interface::os::time_us() - alloc_t0) / 1000));
 		}
 		// Add this segment to the atlas definition
 		uint seg_id = atlas_def->segments.size();
