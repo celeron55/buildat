@@ -2402,6 +2402,7 @@ function frame_peak.note(dt)
 					w.to_mesh, w.chunks, undrawn))
 		end
 	end
+	frame_peak.frames = (frame_peak.frames or 0) + 1
 	frame_peak.line_due = frame_peak.line_due - dt
 	if frame_peak.line_due <= 0 then
 		frame_peak.line_due = frame_peak.LINE_S
@@ -2409,9 +2410,17 @@ function frame_peak.note(dt)
 		-- overview camera is not a frame anyone waits on, and the fuzz
 		-- run reads these lines as the walk's
 		if player_placed and frame_peak.worst > 0 then
-			log:info(string.format("frame peak %.3f s in %s, held %.3f s",
-					frame_peak.worst, frame_peak.worst_phase,
-					frame_peak.s))
+			-- **And the rate beside the peak** ([CLIENT_FRAME],
+			-- 2026-09-26): a peak says what the worst frame was and
+			-- nothing about what the player is looking at the rest of
+			-- the time, and on a client whose frame is the GPU's the
+			-- steady rate is the thing that moves when the renderer is
+			-- given less to do. Frames since this line last printed.
+			log:info(string.format("frame peak %.3f s in %s, held %.3f s" ..
+					", %.0f fps", frame_peak.worst, frame_peak.worst_phase,
+					frame_peak.s,
+					(frame_peak.frames or 0) / frame_peak.LINE_S))
+			frame_peak.frames = 0
 			-- Urho's own table of the same five seconds when the worst
 			-- was over the ceiling: what "rest" was made of
 			if frame_peak.worst >= frame_peak.CEILING_S and
