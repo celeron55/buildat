@@ -8,7 +8,9 @@
 #include "interface/packet_stream.h"
 #include "interface/sha1.h"
 #include "interface/fs.h"
+#include "interface/os.h"
 #include "interface/compress.h"
+#include "interface/thread_pool.h"
 #include "lua_bindings/replicate.h"
 #include <c55/string_util.h>
 #include <c55/os.h> // get_timeofday_us()
@@ -73,6 +75,31 @@ static ss_ unpack_packet(const ss_ &data)
 }
 
 
+struct CState;
+
+// **The cached files are read and hashed on a worker** ([CLIENT_FRAME]).
+// A game announces thousands of them and this is the only thing in a join
+// that is pure disk and arithmetic; what it hands back to the main thread
+// is which of them have to be asked for and which were already there.
+struct CheckAnnouncedTask: public interface::thread_pool::Task
+{
+	CState *state;
+	sv_<std::tuple<ss_, ss_>> files;
+	ss_ cache_path;
+	// Filled by the worker
+	sv_<std::tuple<ss_, ss_>> wanted;
+	sv_<std::tuple<ss_, ss_, ss_>> cached; // name, hash, path
+
+	CheckAnnouncedTask(CState *state, sv_<std::tuple<ss_, ss_>> &&files,
+			const ss_ &cache_path):
+		state(state), files(std::move(files)), cache_path(cache_path)
+	{}
+
+	bool pre(){ return true; }
+	bool thread();
+	bool post();
+};
+
 struct CState: public State
 {
 	sp_<interface::TCPSocket> m_socket;
@@ -84,6 +111,9 @@ struct CState: public State
 	sm_<ss_, ss_> m_file_hashes; // name -> hash
 	set_<ss_> m_waiting_files; // name
 	bool m_tell_after_all_files_transferred_requested = false;
+	// The announced files are being read and hashed on a worker; see the
+	// core:announce_files handler
+	bool m_announce_checking = false;
 	// Connecting is possible only once. After that has happened, the whole
 	// state has to be recreated for making a new connection.
 	// In actuality the whole client application has to be recreated because
@@ -184,6 +214,14 @@ struct CState: public State
 			return;
 		if(m_socket->wait_data(0))
 			read_socket();
+		// **Nothing after the announce is read until it has been checked**
+		// ([CLIENT_FRAME]): the packets that follow it -- the scripts that
+		// a module's client half is made of -- expect the files to have
+		// been asked for, which cannot happen until the worker has said
+		// which are missing. The bytes wait in the buffer, and the frame
+		// goes on being drawn meanwhile, which is the whole point.
+		if(m_announce_checking)
+			return;
 		// **Whether or not anything new arrived** ([PACKET_STALL]): the
 		// drain has a budget now and can leave packets in the buffer, and
 		// a buffer that is only drained when the socket has more to say
@@ -270,6 +308,35 @@ struct CState: public State
 			// the server is the end that has a queue policy
 			m_socket->send_fd(packet_data);
 		});
+	}
+
+	// What the worker found: the cached files go to the resource cache and
+	// the rest are asked for. See CheckAnnouncedTask.
+	void announce_checked(CheckAnnouncedTask &task)
+	{
+		m_announce_checking = false;
+		for(const auto &entry : task.cached){
+			// Let Lua resource wrapper know that this happened so it can
+			// update the copy made for Urho3D's resource cache
+			m_app->file_updated_in_cache(std::get<0>(entry),
+					std::get<1>(entry), std::get<2>(entry));
+		}
+		for(const auto &pair : task.wanted)
+			m_waiting_files.insert(std::get<0>(pair));
+		log_i(MODULE, "%zu of %zu announced files are cached",
+				task.cached.size(), task.files.size());
+		if(!task.wanted.empty()){
+			std::ostringstream os(std::ios::binary);
+			{
+				cereal::PortableBinaryOutputArchive ar(os);
+				ar(task.wanted);
+			}
+			send_packet("core:request_files", os.str());
+		}
+		// The answer that was held back while this was being checked
+		if(m_tell_after_all_files_transferred_requested &&
+				m_waiting_files.empty())
+			send_packet("core:all_files_transferred", "");
 	}
 
 	ss_ get_file_path(const ss_ &name, ss_ *dst_file_hash)
@@ -424,59 +491,38 @@ void CState::setup_packet_handlers()
 			ar(files);
 		}
 		log_v(MODULE, "Server announces %zu files", files.size());
-		sv_<std::tuple<ss_, ss_>> wanted;
-		for(const auto &pair : files){
-			const ss_ &file_name = std::get<0>(pair);
-			const ss_ &file_hash = std::get<1>(pair);
-			m_file_hashes[file_name] = file_hash;
-			ss_ file_hash_hex = interface::sha1::hex(file_hash);
-			// Check if we already have this file
-			ss_ path = m_remote_cache_path+"/"+file_hash_hex;
-			std::ifstream ifs(path, std::ios::binary);
-			bool cached_is_ok = false;
-			if(ifs.good()){
-				std::string content((std::istreambuf_iterator<char>(ifs)),
-						std::istreambuf_iterator<char>());
-				ss_ content_hash = interface::sha1::calculate(content);
-				if(content_hash == file_hash){
-					// We have it; no need to ask this file
-					log_d(MODULE, "%s %s: cached",
-							cs(file_hash_hex), cs(file_name));
-					cached_is_ok = true;
-				} else {
-					// Our copy is broken, re-request it
-					log_i(MODULE, "%s %s: Our copy is broken (has hash %s)",
-							cs(file_hash_hex), cs(file_name),
-							cs(interface::sha1::hex(content_hash)));
-				}
-			}
-			if(cached_is_ok){
-				// Let Lua resource wrapper know that this happened so it can
-				// update the copy made for Urho3D's resource cache
-				m_app->file_updated_in_cache(file_name, file_hash, path);
-			} else {
-				log_d(MODULE, "%s %s: requesting",
-						cs(file_hash_hex), cs(file_name));
-				wanted.push_back(pair);
-				m_waiting_files.insert(file_name);
-			}
+		// The names and their hashes are the main thread's, because
+		// get_file_path() answers out of this the moment anything asks
+		for(const auto &pair : files)
+			m_file_hashes[std::get<0>(pair)] = std::get<1>(pair);
+		// **Reading and hashing the cache is not the frame's work**
+		// ([CLIENT_FRAME]): a VoxeLibre server announces five and a half
+		// thousand files and checking them took **975 ms of one frame**
+		// at every join. It is disk and arithmetic and nothing else, so it
+		// goes to a worker; what comes back to the main thread is the list
+		// to ask for and the cached ones to tell the resource cache about.
+		m_announce_checking = true;
+		interface::thread_pool::ThreadPool *pool =
+				m_app ? m_app->get_thread_pool() : nullptr;
+		up_<CheckAnnouncedTask> task(new CheckAnnouncedTask(
+				this, std::move(files), m_remote_cache_path));
+		if(pool){
+			pool->add_task(std::move(task));
+		} else {
+			// No pool (a client that never started one): the old way,
+			// which is correct and slow
+			while(!task->thread());
+			while(!task->post());
 		}
-		log_i(MODULE, "%zu of %zu announced files are cached",
-				files.size() - wanted.size(), files.size());
-		if(wanted.empty())
-			return;
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(wanted);
-		}
-		send_packet("core:request_files", os.str());
 	};
 
 	m_packet_handlers["core:tell_after_all_files_transferred"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		if(m_waiting_files.empty()){
+		// While the announced files are still being checked nothing is
+		// known to be missing yet, and answering now would be answering
+		// for a list that has not been made
+		if(m_waiting_files.empty() && !m_announce_checking){
 			send_packet("core:all_files_transferred", "");
 		} else {
 			m_tell_after_all_files_transferred_requested = true;
@@ -705,6 +751,41 @@ void CState::setup_packet_handlers()
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
 	};
+}
+
+bool CheckAnnouncedTask::thread()
+{
+	for(const auto &pair : files){
+		const ss_ &file_name = std::get<0>(pair);
+		const ss_ &file_hash = std::get<1>(pair);
+		const ss_ path = cache_path+"/"+interface::sha1::hex(file_hash);
+		std::ifstream ifs(path, std::ios::binary);
+		bool cached_is_ok = false;
+		if(ifs.good()){
+			std::string content((std::istreambuf_iterator<char>(ifs)),
+					std::istreambuf_iterator<char>());
+			const ss_ content_hash = interface::sha1::calculate(content);
+			if(content_hash == file_hash){
+				cached_is_ok = true;
+			} else {
+				// Our copy is broken, re-request it
+				log_i(MODULE, "%s %s: Our copy is broken (has hash %s)",
+						cs(interface::sha1::hex(file_hash)), cs(file_name),
+						cs(interface::sha1::hex(content_hash)));
+			}
+		}
+		if(cached_is_ok)
+			cached.push_back(std::make_tuple(file_name, file_hash, path));
+		else
+			wanted.push_back(pair);
+	}
+	return true;
+}
+
+bool CheckAnnouncedTask::post()
+{
+	state->announce_checked(*this);
+	return true;
 }
 
 State* createState(sp_<app::App> app)
