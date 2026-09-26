@@ -2028,6 +2028,7 @@ luanti.sub_sky(function(sky)
 
 	-- Six pictures rather than a gradient, if that is what the game asked
 	-- for and all six of them arrived
+	local handed_over = false
 	if sky.type == "skybox" and sky.textures and sky.textures[6] then
 		local cube = game_skybox:set(sky.textures)
 		-- What the world reflects follows the sky it is under; the zone's
@@ -2035,12 +2036,23 @@ luanti.sub_sky(function(sky)
 		-- keeps
 		if cube and zone then
 			zone.zoneTexture = cube
+			handed_over = true
 			log:info("the world reflects the game's own sky now")
 		end
 	elseif game_skybox:clear() and zone then
 		zone.zoneTexture = sky_cube.cube.texture
+		handed_over = true
 	end
-	apply_sky_of_hour(true)
+	-- **Forced only when the sky was replaced, not whenever it speaks**
+	-- ([CLIENT_FRAME], 2026-09-26). A game sends this packet as often as
+	-- it likes -- VoxeLibre's weather sends five of them every three
+	-- seconds, for ever -- and a force is six scene renders in one frame,
+	-- so the spreading the cube does was undone every three seconds and
+	-- the debug HUD read seven views. What has to be immediate is the
+	-- handover above, where the thing the world reflects has just been
+	-- swapped; an hour that has moved a little can wait for the faces to
+	-- go out one a frame.
+	apply_sky_of_hour(handed_over)
 end)
 
 luanti.sub_time(function(tod, speed)
