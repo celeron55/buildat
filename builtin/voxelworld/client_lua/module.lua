@@ -113,7 +113,14 @@ M.horizon = false
 -- horizon map's build and merge. The frame peak reads and zeroes them once
 -- a frame ([FRAME_PEAK]); accumulated rather than reset here, since the
 -- horizon work also runs from replicate's events outside the update.
-M.frame_us = {mesh = 0, horizon = 0, physics = 0}
+-- `update` is the whole of this module's own Update handler, of which
+-- the three above are parts: without it the frame peak could name only
+-- the meshing inside it and the rest of the handler -- the queue walk,
+-- the node updates, the LOD passes -- fell into "rest" with Urho3D's
+-- own frame ([FRAME_PEAK], 2026-09-26: a settled client's every peak
+-- read "rest", and this block was the largest single thing in it at
+-- 7.3 ms of a 33 ms frame).
+M.frame_us = {mesh = 0, horizon = 0, physics = 0, update = 0}
 M.section_size_chunks = nil
 M.section_size_voxels = nil
 -- Start higher than any conceivable value because otherwise things will never
@@ -574,6 +581,7 @@ function sub_events()
 
 	magic.SubscribeToEvent("Update", function(event_type, event_data)
 		buildat.profiler_block_begin("Buildat|voxelworld:update")
+		local update_t0 = buildat.get_time_us()
 
 		-- Required for handling device resets (eg. fullscreen toggle)
 		atlas_reg:update()
@@ -847,6 +855,8 @@ function sub_events()
 			camera_last_p = camera_p
 		end
 		--log:info(buildat.get_time_us()-t0)
+		M.frame_us.update = M.frame_us.update +
+				(buildat.get_time_us() - update_t0)
 		buildat.profiler_block_end()
 	end)
 

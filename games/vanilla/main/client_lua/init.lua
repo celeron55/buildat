@@ -2312,6 +2312,14 @@ function frame_peak.note(dt)
 	local pk = buildat.packet_us
 	local phases = {
 		{"mesh", vw.mesh}, {"horizon", vw.horizon}, {"physics", vw.physics},
+		-- **What "rest" was hiding** (2026-09-26): the three above are
+		-- parts of voxelworld's Update handler and the rest of it -- the
+		-- queue walk, the node updates, the LOD passes -- was accounted
+		-- to nothing, so a settled client's every peak read "rest" while
+		-- this block was 7.3 ms of a 33 ms frame. What is left after it
+		-- is Urho3D's own frame, which is what "rest" should mean.
+		{"voxelworld", math.max(0, vw.update - vw.mesh - vw.horizon -
+				vw.physics)},
 		{"sky cube", sky_cube.us}, {"sky vis", frame_peak.skyvis_us},
 		{"script", frame_peak.script_us},
 		-- The packets' Lua, named by the packet that took longest
@@ -2320,6 +2328,7 @@ function frame_peak.note(dt)
 		{"hud", luanti.frame_us or 0},
 	}
 	vw.mesh, vw.horizon, vw.physics, sky_cube.us = 0, 0, 0, 0
+	vw.update = 0
 	luanti.frame_us = 0
 	pk.total, pk.worst, pk.worst_name = 0, 0, ""
 	local accounted = 0
