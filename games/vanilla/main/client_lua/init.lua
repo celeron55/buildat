@@ -27,7 +27,9 @@ luanti.set_scene(scene)
 
 -- Seen from outside itself, so nothing drops to a reduced LOD, and nothing
 -- here walks on anything
-voxelworld.lod_distance = 1000
+-- TEMPORARY measurement knob ([CLIENT_FRAME]): BUILDAT_LODD=<n>
+voxelworld.lod_distance =
+		tonumber(buildat.get_env("BUILDAT_LODD") or "") or 1000
 -- What is asked of the server until the settings say ([VIEW_RANGE]): the
 -- same 120 as the setting's default, so the answer's arrival changes
 -- nothing on a fresh install
@@ -426,21 +428,17 @@ do
 	magic.renderer.shadowMapSize = 1024
 	magic.renderer.shadowQuality = magic.SHADOWQUALITY_SIMPLE_16BIT
 	magic.renderer.drawShadows = true
-	-- **A voxel chunk is a bad occluder and Urho3D's budget assumes a
-	-- small one**: `maxOccluderTriangles` is 5000 and a chunk's mesh is
-	-- about eight thousand, so the software occlusion buffer spent the
-	-- whole budget on the first chunk it came to -- fourteen occluders
-	-- rasterised, and the rest of the world behind a wall drawn anyway.
-	-- At 50000 it takes sixty-odd and culls a sixth of the batches
-	-- ([CLIENT_FRAME]: 570 -> 485, 26 -> 27 fps standing in a made
-	-- VoxeLibre world at noon).
-	--
-	-- simplified: the budget, not the occluder. About half of what the
-	-- culling saves goes back into rasterising a chunk's surface detail,
-	-- and a higher budget buys less each time; what would end that is a
-	-- coarse occluder per chunk -- its solid core as a few large quads --
-	-- which is the mesher's work rather than a setting's.
-	magic.renderer.maxOccluderTriangles = 50000
+	-- **Urho3D's occluder budget of 5000 stays**, although a voxel chunk's
+	-- mesh is about eight thousand triangles and the software occlusion
+	-- buffer therefore spends the whole of it on the first chunk it comes
+	-- to. Raising it to 50000 was tried and taken back out
+	-- ([CLIENT_FRAME]): it is worth one frame a second where the GPU is
+	-- the wall, and on a machine where the GPU is not -- the same desk's
+	-- Nvidia at twice the range -- rasterising those occluders is **a
+	-- third of the client's CPU**, which is the wall there. A budget
+	-- cannot be right for both. What would be is a cheap occluder: a
+	-- chunk's solid core as a few large quads, which is the mesher's work
+	-- rather than a setting's.
 end
 
 -- The sky the world stands under. builtin/voxel_shading's gradient sky is
