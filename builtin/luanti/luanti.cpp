@@ -936,9 +936,25 @@ struct Module: public interface::Module, public luanti::Interface
 	// the load radius, max_block_generate_distance (10) is what is filled,
 	// and active_block_range (4 blocks, which is exactly one section) is
 	// what the ABM and LBM sweeps touch.
-	static const int16_t LOAD_RADIUS_XZ = 3;
+	// **How far out is the server's to decide, not the client's**
+	// (user, 2026-09-26): a player who asks for a view range of four
+	// hundred is asking this machine to keep and to make that much world,
+	// and a public server has to be able to say no. So the two radii are
+	// Luanti's own settings -- `max_block_send_distance` (12 blocks of
+	// sixteen nodes, which is the 3 sections this used to hard-code) and
+	// `max_block_generate_distance` (10 blocks, the old 2) -- read once
+	// when the mods have loaded. A client's request is capped by the load
+	// radius in voxelworld, which sends the smaller of the two.
+	int16_t m_load_radius_xz = 3;
+	int16_t m_generate_radius_xz = 2;
+	// **Y does not grow with XZ.** Terrain worth generating at three
+	// hundred nodes out is the band the player's eye is in; a mapgen asked
+	// for a sphere spends most of it on sky and on stone a hundred and
+	// fifty nodes down that nobody at that distance will look at. Which
+	// band is right is the mapgen's business and this is a heuristic, not
+	// a truth (user, 2026-09-26), so the vertical radii stay where they
+	// are while the horizontal ones follow the setting.
 	static const int16_t LOAD_RADIUS_Y = 2;
-	static const int16_t GENERATE_RADIUS_XZ = 2;
 	static const int16_t GENERATE_RADIUS_Y = 1;
 	static const int32_t ACTIVE_RADIUS = 1;
 	// The world around the origin, which is where a mod puts things while
@@ -1765,8 +1781,8 @@ struct Module: public interface::Module, public luanti::Interface
 			if(it != m_player_peers.end())
 				peer = it->second;
 			points.push_back(voxelworld::LoadPoint(pair.second,
-					LOAD_RADIUS_XZ, LOAD_RADIUS_Y,
-					GENERATE_RADIUS_XZ, GENERATE_RADIUS_Y, peer));
+					m_load_radius_xz, LOAD_RADIUS_Y,
+					m_generate_radius_xz, GENERATE_RADIUS_Y, peer));
 		}
 		// A forceloaded section is a point with no radius at all
 		for(const auto &pair : m_forceloaded){
@@ -2231,8 +2247,40 @@ struct Module: public interface::Module, public luanti::Interface
 	// core.registered_nodes is ever looked at. That is also what makes
 	// core.override_item and core.unregister_item non-issues here.
 
+	// Luanti's own two settings, read once the mods have loaded and
+	// turned from its blocks of sixteen nodes into this world's sections
+	// of sixty-four. The defaults are Luanti's: 12 blocks sent, 10
+	// generated, which are the 3 and 2 sections this carried before.
+	void read_range_settings()
+	{
+		run_chunk_string(
+				"__buildat_send_blocks = tonumber(core.settings:get("
+				"'max_block_send_distance')) or 12 "
+				"__buildat_generate_blocks = tonumber(core.settings:get("
+				"'max_block_generate_distance')) or 10",
+				"read_range_settings");
+		auto sections_of = [&](const char *global, int fallback) -> int16_t {
+			lua_getglobal(m_lua, global);
+			const int blocks = lua_isnumber(m_lua, -1) ?
+					(int)lua_tonumber(m_lua, -1) : fallback;
+			lua_pop(m_lua, 1);
+			// Sixteen nodes to a block, sixty-four to a section; never
+			// nothing, and never so much that one player's setting can ask
+			// the machine for a world of thousands of sections
+			const int sections = blocks * 16 / 64;
+			return (int16_t)(sections < 1 ? 1 : (sections > 16 ? 16 :
+					sections));
+		};
+		m_load_radius_xz = sections_of("__buildat_send_blocks", 12);
+		m_generate_radius_xz = sections_of("__buildat_generate_blocks", 10);
+		log_i(MODULE, "world kept %i sections out and generated %i "
+				"(max_block_send_distance, max_block_generate_distance)",
+				(int)m_load_radius_xz, (int)m_generate_radius_xz);
+	}
+
 	void create_world()
 	{
+		read_range_settings();
 		// Nothing streams while a world is being imported into this one:
 		// see run_game(). The budget goes back to what it was once the
 		// import is done.
