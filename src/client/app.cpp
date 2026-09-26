@@ -3460,13 +3460,81 @@ struct CApp: public App, public magic::Application
 		begin_stop_local_server();
 		self->m_state->reset();
 		self->m_lost_connection_us = 0;
+		// **The last frame of the game goes with the game** ([MENU_LEAVE],
+		// 2026-09-27). A game drawn through set_preferred_viewports() --
+		// which is every game at a render scale -- is rendered into a
+		// texture that a UI image shows, and `forget_game_ui()` skips
+		// that image on purpose (it is the client's, not the game's). So
+		// leaving emptied the scene and took the viewports away while the
+		// image stayed, and the launcher's grid came up over the last
+		// frame of the world: driven, the picture two seconds after the
+		// leave was the same picture, to the pixel.
+		self->drop_preferred_texture();
+		self->m_preferred_viewports.clear();
+		self->m_preferred_rects.clear();
 		self->forget_game_ui();
 		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_reset_sandbox");
 		if(lua_isfunction(L, -1))
 			error_logging_pcall(L, 0, 0);
 		else
 			lua_pop(L, 1);
+		self->say_what_is_left("leave_to_menu");
 		return 0;
+	}
+
+	// **What a leave leaves** ([MENU_LEAVE]): the scene the game filled,
+	// the viewports that draw it and the camera they draw through, said
+	// once at the end of a leave. The report is that the launcher's grid
+	// comes up over a world that is still there, and a leave that says
+	// what it did not take is the difference between reading that and
+	// guessing at it.
+	void say_what_is_left(const char *when)
+	{
+		ss_ line = ss_("what is left after ") + when + ": ";
+		if(m_scene){
+			const unsigned n = m_scene->GetNumChildren(false);
+			line += "the scene holds " + itos(n) + " children";
+			unsigned said = 0;
+			for(unsigned i = 0; i < n && said < 8; i++){
+				magic::Node *c = m_scene->GetChild(i);
+				if(!c)
+					continue;
+				line += (said == 0 ? " (" : ", ");
+				line += ss_(c->GetName().CString()) + "#" +
+						itos(c->GetID()) + " " +
+						itos(c->GetNumComponents()) + " components";
+				said++;
+			}
+			if(said)
+				line += n > said ? ", ..." : "";
+			if(said)
+				line += ")";
+		} else {
+			line += "no scene";
+		}
+		// The image the client shows a game's render target through: it
+		// is the client's own element, so `forget_game_ui()` leaves it,
+		// and it is the last frame of the world if it is still here
+		line += ss_("; the preferred image is ") +
+				(m_preferred_image ? "still here" : "gone");
+		magic::Renderer *r = GetSubsystem<magic::Renderer>();
+		if(r){
+			line += "; " + itos(r->GetNumViewports()) + " viewports";
+			for(unsigned i = 0; i < r->GetNumViewports(); i++){
+				magic::Viewport *vp = r->GetViewport(i);
+				if(!vp)
+					continue;
+				magic::Scene *sc = vp->GetScene();
+				magic::Camera *cam = vp->GetCamera();
+				line += ss_(", ") + itos(i) + ": scene " +
+						(sc ? (sc == m_scene ? "the game's" : "another") :
+						"none") + ", camera " +
+						(cam ? (cam->GetNode() ?
+						cam->GetNode()->GetName().CString() : "unnamed") :
+						"none");
+			}
+		}
+		log_i(MODULE, "%s", cs(line));
 	}
 
 	static int l_disconnect(lua_State *L)

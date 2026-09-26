@@ -147,15 +147,18 @@ local function connect_or_show_error(address)
 		uistack.main:pop(root)
 		if state == "ok" then
 			log:info("connect_server() ok")
-			-- **The placeholder goes on the stack only when this menu
-			-- is the screen** ([LEAVE_POP], 2026-09-25): under another
-			-- launch UI -- the room -- this menu is the machinery a
-			-- launch runs through and nothing pops what it pushes, so
-			-- the entry outlived the game and the reset that took its
-			-- element with it. `false` still says a game is running.
-			game_root = (__buildat_menu_extension_name or "launch_menu")
-					== "launch_menu" and
-					uistack.main:push({desc="empty (game is running)"}) or false
+			-- **The placeholder goes on the stack whichever launcher
+			-- this is** ([MENU_LEAVE], 2026-09-27). It was pushed only
+			-- under launch_menu's own grid ([LEAVE_POP], 2026-09-25,
+			-- when nothing popped what this pushed under another
+			-- launcher); both of the others pop the whole stack when
+			-- they leave a game now -- the room says so in its own
+			-- `leave_game` ([MENU_STUCK]) and `__menu` pops to its grid
+			-- -- and without it the launcher's screens are drawn through
+			-- the world, and the scan stands aside only for a top named
+			-- "game is running", so a driven run cannot reach the game
+			-- at all.
+			game_root = uistack.main:push({desc="empty (game is running)"})
 			magic.ui:SetFocusElement(nil)
 		else
 			log:info("connect_server() failed")
@@ -297,6 +300,19 @@ local function show_starting(game)
 		end
 		if buildat.local_server_ready() then
 			done = true
+			buildat.set_watchdog_seconds(0)
+			-- **This screen goes when the game comes** ([MENU_LEAVE]).
+			-- It used to be left on the stack: its "Starting <game>..."
+			-- window then sat in the middle of the played world, its
+			-- Escape was still live -- so the player's first Escape
+			-- stopped the local server instead of pausing, and what was
+			-- left was the world still drawn under the launcher with
+			-- "The server exited" over it -- and, because the stack's
+			-- top was this screen rather than the placeholder below,
+			-- the scan a driven run reads never reached the game
+			-- (uistack stands aside only for "game is running").
+			-- Driven, 2026-09-27.
+			uistack.main:pop(root)
 			connect_or_show_error("localhost:"..buildat.local_server_port())
 			return
 		end
@@ -333,6 +349,12 @@ local function show_starting(game)
 
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		local key = event_data:GetInt("Key")
+		-- Only while there is still a start to cancel: once the server is
+		-- up this screen is the cover under a played world and Escape
+		-- belongs to the game ([MENU_LEAVE])
+		if done then
+			return
+		end
 		if key == KEY_ESCAPE then
 			done = true
 			buildat.request_stop_local_server()
