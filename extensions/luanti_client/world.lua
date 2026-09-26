@@ -786,6 +786,11 @@ function M.new(magic, buildat, log, options)
 		magic.renderer.shadowMapSize = 1024
 		magic.renderer.shadowQuality = magic.SHADOWQUALITY_SIMPLE_16BIT
 		magic.renderer.drawShadows = true
+		-- Urho3D's occluder budget is 5000 triangles and a voxel chunk's
+		-- mesh is about eight thousand, so the software occlusion buffer
+		-- spent all of it on the first chunk it came to. games/vanilla's
+		-- number and its reasoning ([CLIENT_FRAME]).
+		magic.renderer.maxOccluderTriangles = 50000
 	end
 
 	-- The mesher sets no technique on skylit geometry -- only the game knows

@@ -1787,6 +1787,13 @@ function M.define(dst, util)
 			shadowMapSize = util.simple_property("number"),
 			shadowQuality = util.simple_property("number"),
 			drawShadows = util.simple_property("boolean"),
+			-- The software occlusion buffer's budget: how many triangles
+			-- of occluder it rasterises before it stops, and how large on
+			-- screen an occluder has to be to be worth rasterising. A
+			-- voxel chunk is thousands of triangles, so Urho3D's default
+			-- 5000 is spent on the first few ([CLIENT_FRAME]).
+			maxOccluderTriangles = util.simple_property("number"),
+			occluderSizeThreshold = util.simple_property("number"),
 		},
 	})
 

@@ -426,6 +426,21 @@ do
 	magic.renderer.shadowMapSize = 1024
 	magic.renderer.shadowQuality = magic.SHADOWQUALITY_SIMPLE_16BIT
 	magic.renderer.drawShadows = true
+	-- **A voxel chunk is a bad occluder and Urho3D's budget assumes a
+	-- small one**: `maxOccluderTriangles` is 5000 and a chunk's mesh is
+	-- about eight thousand, so the software occlusion buffer spent the
+	-- whole budget on the first chunk it came to -- fourteen occluders
+	-- rasterised, and the rest of the world behind a wall drawn anyway.
+	-- At 50000 it takes sixty-odd and culls a sixth of the batches
+	-- ([CLIENT_FRAME]: 570 -> 485, 26 -> 27 fps standing in a made
+	-- VoxeLibre world at noon).
+	--
+	-- simplified: the budget, not the occluder. About half of what the
+	-- culling saves goes back into rasterising a chunk's surface detail,
+	-- and a higher budget buys less each time; what would end that is a
+	-- coarse occluder per chunk -- its solid core as a few large quads --
+	-- which is the mesher's work rather than a setting's.
+	magic.renderer.maxOccluderTriangles = 50000
 end
 
 -- The sky the world stands under. builtin/voxel_shading's gradient sky is
