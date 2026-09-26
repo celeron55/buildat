@@ -190,10 +190,32 @@ struct CAtlasRegistry: public AtlasRegistry
 			// size no atlas had yet -- `mcl_core:water_source` measured
 			// 812 ms inside one `get_cached()`.
 			const int64_t alloc_t0 = interface::os::time_us();
-			cache->texture->SetData(cache->image);
+			// **The blank levels are the card's to make** ([CLIENT_FRAME],
+			// 2026-09-26). SetData(Image*) walks the mip chain on the
+			// processor -- `Image::GetNextLevel()` halving 2048 by 2048
+			// down to one texel, three times over -- and sends every level
+			// through the driver, which measured 55 to 71 ms in whichever
+			// frame first met a segment size no atlas had yet. The image
+			// is blank, so level nought is one upload of nothing and
+			// `glGenerateMipmap` fills the rest from it without the
+			// processor touching a pixel.
+			auto allocate_levels = [&](magic::Texture2D *tex,
+					magic::Image *img){
+				tex->SetData(0, 0, 0, atlas_resolution.x_,
+						atlas_resolution.y_, img->GetData());
+				magic::Graphics *g =
+						m_context->GetSubsystem<magic::Graphics>();
+				if(g && atlas_levels > 1){
+					// OpenGL: the texture has to be bound for it to work
+					g->SetTexture(0, tex);
+					tex->RegenerateLevels();
+					g->SetTexture(0, nullptr);
+				}
+			};
+			allocate_levels(cache->texture, cache->image);
 			if(m_surface_maps){
-				cache->normal_texture->SetData(cache->normal_image);
-				cache->spec_texture->SetData(cache->spec_image);
+				allocate_levels(cache->normal_texture, cache->normal_image);
+				allocate_levels(cache->spec_texture, cache->spec_image);
 			}
 			log_w(MODULE, "atlas %i for %ix%i segments: %i ms to allocate "
 					"its levels", (int)id, atlas_def->segment_resolution.x_,
