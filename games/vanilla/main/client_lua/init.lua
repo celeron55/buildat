@@ -27,9 +27,11 @@ luanti.set_scene(scene)
 
 -- Seen from outside itself, so nothing drops to a reduced LOD, and nothing
 -- here walks on anything
--- TEMPORARY measurement knob ([CLIENT_FRAME]): BUILDAT_LODD=<n>
-voxelworld.lod_distance =
-		tonumber(buildat.get_env("BUILDAT_LODD") or "") or 1000
+-- How far full detail reaches. Past it voxelworld meshes a chunk from a
+-- downsampled volume, which is what the lod_detail setting picks below;
+-- 4000 is the largest view range there is, so this is "never" until the
+-- settings say otherwise.
+voxelworld.lod_distance = 4000
 -- What is asked of the server until the settings say ([VIEW_RANGE]): the
 -- same 120 as the setting's default, so the answer's arrival changes
 -- nothing on a fresh install
@@ -1275,8 +1277,44 @@ function sky_now.set_range(n)
 	end
 	FAR_CLIP = n
 	voxelworld.set_send_distance(n)
+	sky_now.apply_lod()
 	sky_now.apply_far(game_sky)
 	log:info("view range: " .. n)
+end
+
+-- **How far full detail reaches**, as a share of the viewing range
+-- ([CLIENT_FRAME]). Past it a chunk is meshed from a downsampled volume:
+-- a quarter of the triangles at the first step, and measurably fewer
+-- re-meshes as the player moves, at the price of a coarser silhouette in
+-- the distance. What it is for is a machine whose GPU is slower than its
+-- processor -- LOD spends CPU to buy triangles back -- and on this desk's
+-- Intel a made VoxeLibre world reads 30 fps at full, 55 at half. On a
+-- fast GPU it is worth almost nothing, which is why "full" is the
+-- default: nobody pays for the distance who is not short of GPU.
+--
+-- The share and not a distance, because it has to follow the range the
+-- player picks beside it.
+local LOD_SHARE = {half = 0.5, third = 1.0 / 3.0}
+sky_now.lod_detail = "full"
+function sky_now.apply_lod()
+	local share = LOD_SHARE[sky_now.lod_detail]
+	-- A chunk is placed by its centre, so full detail has to reach a
+	-- little past the clip or the rim of the world coarsens
+	voxelworld.lod_distance = share and
+			math.max(32, math.floor(FAR_CLIP * share)) or 4000
+end
+
+function sky_now.set_lod_detail(d)
+	if d ~= "full" and d ~= "half" and d ~= "third" then
+		return
+	end
+	if d == sky_now.lod_detail then
+		return
+	end
+	sky_now.lod_detail = d
+	sky_now.apply_lod()
+	log:info("distant terrain: " .. d .. " (lod_distance " ..
+			tostring(voxelworld.lod_distance) .. ")")
 end
 
 -- Luanti's indoors colour, the game's own or its default #646464, at a
@@ -4520,6 +4558,10 @@ buildat.sub_packet("main:settings", function(data)
 		local n = row:match("^view_range=(%d+)$")
 		if n then
 			sky_now.set_range(n)
+		end
+		local lod = row:match("^lod_detail=(%a+)$")
+		if lod then
+			sky_now.set_lod_detail(lod)
 		end
 		local bob = row:match("^view_bobbing_amount=([%d.]+)$")
 		if bob and WIELD.motion then

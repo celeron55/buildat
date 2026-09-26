@@ -964,6 +964,18 @@ struct Module: public interface::Module
 		snprintf(buf, sizeof buf, "%g", n);
 		return buf;
 	}
+	// How far full detail reaches, as a share of the viewing range
+	// ([CLIENT_FRAME]): "lod_detail": "full" | "half" | "third". Beyond
+	// it voxelworld meshes chunks at a reduced LOD, which is how a
+	// machine whose GPU is slower than its processor keeps its range --
+	// LOD spends CPU to buy triangles back. "full" is the default, which
+	// is the look as it has always been.
+	ss_ read_lod_detail()
+	{
+		const char *env = getenv("BUILDAT_LOD_DETAIL");
+		const ss_ v = env ? ss_(env) : read_setting("lod_detail");
+		return (v == "half" || v == "third") ? v : ss_("full");
+	}
 	ss_ read_view_range()
 	{
 		// BUILDAT_VIEW_RANGE for one run: the reference shooters set their
@@ -1052,12 +1064,14 @@ struct Module: public interface::Module
 	}
 	void write_settings(const sv_<ss_> &paths, const ss_ &mode,
 			const sv_<std::pair<ss_, ss_>> &keys, const ss_ &view_range,
-			const ss_ &view_bobbing, const ss_ &shoulder)
+			const ss_ &view_bobbing, const ss_ &shoulder,
+			const ss_ &lod_detail)
 	{
 		interface::fs::create_directories(luanti_path());
 		std::ofstream f(settings_path(), std::ios::trunc);
 		f << "{\"render_mode\": \"" << mode << "\", \"view_range\": \""
-				<< view_range << "\", \"view_bobbing_amount\": \""
+				<< view_range << "\", \"lod_detail\": \""
+				<< lod_detail << "\", \"view_bobbing_amount\": \""
 				<< view_bobbing << "\", \"third_person_shoulder\": \""
 				<< shoulder << "\", \"import_paths\": [";
 		for(size_t i = 0; i < paths.size(); i++){
@@ -1084,6 +1098,7 @@ struct Module: public interface::Module
 			ss_ mode = read_render_mode();
 			list.push_back("render_mode="+(mode.empty() ? ss_("pbr") : mode));
 			list.push_back("view_range="+read_view_range());
+			list.push_back("lod_detail="+read_lod_detail());
 			list.push_back("view_bobbing_amount="+read_view_bobbing());
 			// The back view centred or over the shoulder ([OVER_SHOULDER])
 			list.push_back("third_person_shoulder="+
@@ -1447,6 +1462,7 @@ struct Module: public interface::Module
 		ss_ view_range = "120";
 		ss_ view_bobbing = "1";
 		ss_ shoulder = "0";
+		ss_ lod_detail = "full";
 		for(const ss_ &v : values){
 			if(v.compare(0, 22, "third_person_shoulder=") == 0){
 				shoulder = v.substr(22) == "1" ? "1" : "0";
@@ -1469,6 +1485,10 @@ struct Module: public interface::Module
 				const int n = atoi(v.c_str() + 11);
 				if(n >= 20 && n <= 4000)
 					view_range = itos(n);
+			} else if(v.compare(0, 11, "lod_detail=") == 0){
+				const ss_ d = v.substr(11);
+				if(d == "full" || d == "half" || d == "third")
+					lod_detail = d;
 			} else if(v.compare(0, 4, "key.") == 0){
 				// key.<action>=<name>: the action a word, the name short
 				const size_t eq = v.find('=');
@@ -1484,7 +1504,8 @@ struct Module: public interface::Module
 			} else if(!v.empty() && v.size() <= 4096)
 				paths.push_back(v);
 		}
-		write_settings(paths, mode, keys, view_range, view_bobbing, shoulder);
+		write_settings(paths, mode, keys, view_range, view_bobbing, shoulder,
+				lod_detail);
 		log_i(MODULE, "settings: %zu import paths, render_mode %s, view_range "
 				"%s and %zu key bindings written to %s", paths.size(), cs(mode),
 				cs(view_range), keys.size(), cs(settings_path()));

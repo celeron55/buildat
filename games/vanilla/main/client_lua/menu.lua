@@ -543,6 +543,7 @@ function draw_settings(paths)
 	local view_range = "120"
 	local view_bobbing = "1"
 	local shoulder = "0"
+	local lod_detail = "full"
 	local kept = {}
 	local key_rows = {}
 	for _, p in ipairs(paths) do
@@ -550,8 +551,11 @@ function draw_settings(paths)
 		local r = p:match("^view_range=(%d+)$")
 		local b = p:match("^view_bobbing_amount=([%d.]+)$")
 		local sh = p:match("^third_person_shoulder=([01])$")
+		local ld = p:match("^lod_detail=(%a+)$")
 		if sh then
 			shoulder = sh
+		elseif ld then
+			lod_detail = ld
 		elseif m then
 			mode = m
 		elseif r then
@@ -569,6 +573,7 @@ function draw_settings(paths)
 		waiting("Saving...")
 		list[#list + 1] = "render_mode=" .. mode
 		list[#list + 1] = "view_range=" .. view_range
+		list[#list + 1] = "lod_detail=" .. lod_detail
 		list[#list + 1] = "view_bobbing_amount=" .. view_bobbing
 		list[#list + 1] = "third_person_shoulder=" .. shoulder
 		for _, r in ipairs(key_rows) do
@@ -586,6 +591,7 @@ function draw_settings(paths)
 		end
 		all[#all + 1] = "render_mode=" .. mode
 		all[#all + 1] = "view_range=" .. view_range
+		all[#all + 1] = "lod_detail=" .. lod_detail
 		all[#all + 1] = "view_bobbing_amount=" .. view_bobbing
 		all[#all + 1] = "third_person_shoulder=" .. shoulder
 		for _, r in ipairs(key_rows) do
@@ -627,6 +633,29 @@ function draw_settings(paths)
 	for _, r in ipairs({"60", "120", "200", "300", "400"}) do
 		menu:add((r == view_range and "[x] " or "[ ] ") .. r, function()
 			view_range = r
+			local list = {}
+			for _, p in ipairs(paths) do
+				list[#list + 1] = p
+			end
+			send(list)
+		end)
+	end
+	-- How far full detail reaches, as a share of the range above
+	-- ([CLIENT_FRAME]): past it a chunk is meshed from a downsampled
+	-- volume -- a quarter of the triangles at the first step, and a
+	-- coarser silhouette in the distance. It is the setting for a machine
+	-- whose GPU is slower than its processor, which is most laptops: on
+	-- this desk's Intel a made VoxeLibre world reads 30 fps at full and
+	-- 55 at half, and on its Nvidia the same change is worth almost
+	-- nothing. Full is the default, so nobody pays for the distance who
+	-- is not short of GPU.
+	local lod_text = menu.window:CreateChild("Text")
+	lod_text:SetStyleAuto()
+	lod_text:SetText("Distant terrain detail (less is faster):")
+	for _, d in ipairs({{"full", "Full"}, {"half", "Reduced past half range"},
+			{"third", "Reduced past a third"}}) do
+		menu:add((d[1] == lod_detail and "[x] " or "[ ] ") .. d[2], function()
+			lod_detail = d[1]
 			local list = {}
 			for _, p in ipairs(paths) do
 				list[#list + 1] = p
