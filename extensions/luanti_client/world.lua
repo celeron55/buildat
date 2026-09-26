@@ -4594,6 +4594,13 @@ function M.new(magic, buildat, log, options)
 		-- what was filled by hand; the registry puts its Images back
 		-- ([BOX_PLAYTEST_3] 1)
 		self.atlas_reg:update()
+		-- The reflection cube's faces go out one a frame, and `tick` is
+		-- what sends them: `update()` above only says that a refresh is
+		-- due ([CLIENT_FRAME]). Without this the cube is asked for and
+		-- never drawn.
+		if sky_cube then
+			sky_cube:tick()
+		end
 		-- Every frame, because easing towards a target is what it is for
 		if daylight then
 			apply_daylight(dtime)
