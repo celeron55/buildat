@@ -2308,7 +2308,9 @@ local function reflection_probe(at)
 		probe_surfaces[i] = surface
 		kept[#kept + 1] = vp
 	end
-	zone.zoneTexture = cube
+	-- **Not on the zone yet**: what the bake is allowed to see is the
+	-- room's own lamps, not the cube it is about to write. The frame
+	-- after the bake puts it on (handle_probe_update below).
 	-- **Kept by name as well** (2026-09-26): F5 puts the probe back by
 	-- reading kept.probe, which nothing set, so the second press
 	-- assigned nil to a property that will not take one. The dark one
@@ -2329,6 +2331,7 @@ local function reflection_probe(at)
 	end
 	kept.dark_probe = dark
 	kept[#kept + 1] = black
+	zone.zoneTexture = dark
 	-- **And something in the engine has to hold each of them.** A Lua
 	-- table is not a reference: the safe wrapper does not own the C++
 	-- object, the engine's own count does, and the only thing holding
@@ -2348,35 +2351,73 @@ local function reflection_probe(at)
 end
 reflection_probe(V(0, 2.0, 0.0))
 
--- Not the first frame: at boot the materials and the generated textures
--- are not on the GPU yet and a probe taken then is a picture of
--- nothing. A few bakes, spread over the first seconds, and then stop.
+-- **One bake, on the first frame, and nothing is timed** (user,
+-- 2026-09-26: the long frames it makes seconds in give a bad
+-- impression, and there has to be a robust way of knowing when the
+-- probe can be taken).
 --
--- **Counted in seconds and not in frames** (2026-09-26): it used to
--- bake all six faces every frame for the first ninety-one frames, and
--- six extra views a frame is what made those frames slow -- 100 ms
--- each, the engine's clamp -- so ninety-one of them took **fifteen
--- seconds** of a player's time at ten frames a second. The count being
--- in frames is what made it feed on itself: the slower the bake made
--- the frame, the longer the bake lasted. Four bakes at 0.15, 0.6, 1.5
--- and 3 s cover a texture arriving late and cost four frames.
-probe_bakes = {at = {0.15, 0.6, 1.5, 3.0}, next = 1, started = nil}
+-- The thing that made the old code bake again and again was never the
+-- textures arriving: a bake at frame 2, 4, 8, 16 and 32 all give the
+-- same picture to a fiftieth of a level. It was **the probe reading its
+-- own output**. The cube is the zone's environment map, so the first
+-- bake drew a room lit by whatever was in the cube -- an uninitialised
+-- one, which reads bright -- and every bake after it was converging
+-- that feedback. Ninety-one frames of it, then four spread over three
+-- seconds, both of them a loop dressed as a wait.
+--
+-- So the rule is not when, it is **what the bake is allowed to see**:
+-- the zone wears the black cube while the room is drawn into the probe,
+-- which makes the first bake a room lit by its own lamps and nothing
+-- else. That does not depend on a clock, a frame count or a machine's
+-- speed -- but one of them is not enough to look at: **a floor lit by
+-- nothing but the orbs is orange**, and every sphere in the room then
+-- reflects a red floor (user, 2026-09-26). So the cube goes on the zone
+-- and the room is drawn into it **once more, the very next frame**: the
+-- second bake is the room lit by the first, which is the bounce the red
+-- floor was missing. Two frames, both inside the boot's own burst,
+-- rather than four spread over three seconds of a player's time.
+--
+-- **And the room does not move under the player until it is done**
+-- (user, 2026-09-26): a slow frame is worst when it is the player's own
+-- movement that stutters. `probe_pending()` below holds the walk and
+-- the look for those two frames. The deadline is the safety: if the
+-- bake never happens -- a launch UI over the room at boot, the probe
+-- turned off -- the player is not held hostage to it.
+probe_bake = {queued = false, left = 2, done = false, started = nil,
+		hold = 2.0}
+-- Whether the room is still waiting for its one bake. Read by the FPS
+-- handler, which stands still while it is true.
+function probe_pending()
+	if probe_bake.done then return false end
+	local since = probe_bake.started and
+			buildat.get_time_us() / 1e6 - probe_bake.started or 0
+	return since < probe_bake.hold
+end
 function handle_probe_update()
+	if probe_bake.done then return end
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if held_was or held_by_others() then return end
 	if env("BUILDAT_LAUNCH_NORENDERPROBE") ~= "" then
+		probe_bake.done = true
 		return
 	end
-	if probe_bakes.next > #probe_bakes.at then
-		return
+	probe_bake.started = probe_bake.started or buildat.get_time_us() / 1e6
+	if probe_bake.queued then
+		-- The frame after the queue is the one that drew the six faces:
+		-- the cube has the room in it now, so the zone wears it -- and
+		-- the next bake, if there is one, sees the room lit by this one
+		if probe_on then
+			zone.zoneTexture = kept.probe
+		end
+		if probe_bake.left <= 0 then
+			probe_bake.done = true
+			log:info("probe: baked twice, the second off the first")
+			return
+		end
 	end
-	local now = buildat.get_time_us() / 1e6
-	probe_bakes.started = probe_bakes.started or now
-	if now - probe_bakes.started < probe_bakes.at[probe_bakes.next] then
-		return
-	end
-	probe_bakes.next = probe_bakes.next + 1
+	probe_bake.queued = true
+	probe_bake.left = probe_bake.left - 1
 	for _, s in ipairs(probe_surfaces) do
 		s:QueueUpdate()
 	end
@@ -2988,7 +3029,8 @@ function handle_fps_update(event_type, event_data)
 	local now_us = buildat.get_time_us()
 	local dt = fps_last_us and (now_us - fps_last_us) / 1000000 or 0
 	fps_last_us = now_us
-	if mode ~= "fps" or cam.to_from or terminal_open or pause_open then
+	if mode ~= "fps" or cam.to_from or terminal_open or pause_open or
+			probe_pending() then
 		return
 	end
 	-- Two seconds of catch-up at most: a frame that took longer than
