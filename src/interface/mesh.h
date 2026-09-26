@@ -181,6 +181,21 @@ namespace interface
 				const HorizonMap *horizon = nullptr,
 				const pv::Vector3DInt32 *uv_origin = nullptr);
 
+		// **A cheap stand-in shape for the occlusion buffer**
+		// ([CLIENT_FRAME]). A chunk's drawn mesh is thousands of triangles
+		// of surface detail saying what a few quads would, and Urho3D
+		// rasterises occluders on the processor out of a triangle budget,
+		// so the whole budget goes on the first chunk that comes along.
+		// This is the same silhouette at four voxels to a cell: a cell
+		// counts only when every voxel in it is opaque and fills itself,
+		// so the shape lies *inside* the solid it stands for and can never
+		// hide what is visible. A plain triangle list in the same local
+		// space as the chunk's mesh, for
+		// CustomGeometry::SetOcclusionGeometry(); empty when the chunk has
+		// no solid worth the name.
+		void generate_occluder(PODVector<Vector3> &result,
+				VoxelVolume &volume, VoxelRegistry *voxel_reg);
+
 		// A chunk's column heights for a HorizonMap: the local y of the
 		// highest voxel with an edge material that is not a cutout, per
 		// column, HORIZON_NONE where the column has none; w*d int16_t in

@@ -144,6 +144,11 @@ Geometry* CustomGeometry::GetLodGeometry(unsigned batchIndex, unsigned level)
 
 unsigned CustomGeometry::GetNumOccluderTriangles()
 {
+    // The stand-in shape, when there is one: View::UpdateOccluders sorts occluders by this, so a chunk whose
+    // silhouette is a few quads has to say so or it is ranked as the thousands of triangles it draws
+    if (!occlusionVertices_.Empty())
+        return occlusionVertices_.Size() / 3;
+
     unsigned triangles = 0;
 
     for (unsigned i = 0; i < batches_.Size(); ++i)
@@ -166,6 +171,15 @@ unsigned CustomGeometry::GetNumOccluderTriangles()
 bool CustomGeometry::DrawOcclusion(OcclusionBuffer* buffer)
 {
     bool success = true;
+
+    // A shape given for this purpose is the whole of it: see SetOcclusionGeometry(). Both windings, since
+    // it is a closed shell and its far side writes depth the near side has already written
+    if (!occlusionVertices_.Empty())
+    {
+        buffer->SetCullMode(CULL_NONE);
+        return buffer->AddTriangles(node_->GetWorldTransform(), &occlusionVertices_[0], sizeof(Vector3), 0,
+            occlusionVertices_.Size());
+    }
 
     for (unsigned i = 0; i < batches_.Size(); ++i)
     {
@@ -206,8 +220,14 @@ bool CustomGeometry::DrawOcclusion(OcclusionBuffer* buffer)
     return success;
 }
 
+void CustomGeometry::SetOcclusionGeometry(const PODVector<Vector3>& triangles)
+{
+    occlusionVertices_ = triangles;
+}
+
 void CustomGeometry::Clear()
 {
+    occlusionVertices_.Clear();
     elementMask_ = MASK_POSITION;
     batches_.Clear();
     geometries_.Clear();

@@ -214,6 +214,10 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	// out, and a material is per drawable.
 	sm_<uint, interface::mesh::TemporaryGeometry> masked_geoms;
 
+	// The cheap shape the occlusion buffer rasterises instead of the mesh
+	// ([CLIENT_FRAME]); built in the worker beside the mesh
+	magic::PODVector<magic::Vector3> occluder;
+
 	// The terrain's horizon around the chunk, when the caller has one:
 	// three int32 (the map's origin) and HORIZON_SIZE^2 int16 heights, as
 	// interface/mesh.h lays them out. See [PBR_FIT] 2c.
@@ -250,6 +254,8 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 		generate_voxel_geometry(
 				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get(),
 				use_skylight, &alpha_geoms, &masked_geoms, horizon.get());
+		interface::mesh::generate_occluder(occluder, *volume,
+				voxel_reg.get());
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -303,6 +309,10 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 		}
 		call_material_cb(material_cb);
 		cg->SetOccluder(true);
+		// The chunk's silhouette at four voxels to a cell, rather than the
+		// mesh's own thousands of triangles ([CLIENT_FRAME]); after
+		// set_voxel_geometry(), whose Clear() drops the last one
+		cg->SetOcclusionGeometry(occluder);
 		cg->SetCastShadows(true);
 		// Octree update: Trigger CustomGeometry::OnWorldBoundingBoxUpdate()
 		cg->SetZoneMask(magic::DEFAULT_ZONEMASK);

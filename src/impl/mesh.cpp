@@ -1392,6 +1392,141 @@ static sm_<uint, TemporaryGeometry>& geometry_for(
 	return result;
 }
 
+// **A cheap stand-in shape for the occlusion buffer** ([CLIENT_FRAME]).
+// See interface/mesh.h for why, and for the promise this keeps: a cell
+// counts only when every voxel in it is opaque and fills its own space,
+// so the shape lies inside the solid it stands for and can never hide
+// what is visible.
+static const int OCC_CELL = 4;
+
+// Does this voxel fill itself and stop light? A shape of its own (a
+// slab, a plant, a fence) does not, whatever its edge material says, and
+// neither does anything translucent or cut out with an alpha mask.
+static bool occ_solid(const interface::CachedVoxelDefinition *def)
+{
+	return def != nullptr &&
+			def->edge_material_id != interface::EDGEMATERIALID_EMPTY &&
+			def->face_draw_type == interface::FaceDrawType::ON_EDGE &&
+			!def->translucent && !def->alpha_masked && def->shape.empty();
+}
+
+void generate_occluder(PODVector<Vector3> &result,
+		VoxelVolume &volume, VoxelRegistry *voxel_reg)
+{
+	result.Clear();
+	const VoxelFmt fmt(voxel_reg);
+	// The volume is padded by one voxel on each side; the chunk itself is
+	// what is inside that, and PolyVox coordinate k + 1 is inner voxel k
+	const int w = volume.getWidth() - 2;
+	const int h = volume.getHeight() - 2;
+	const int d = volume.getDepth() - 2;
+	const int nx = w / OCC_CELL, ny = h / OCC_CELL, nz = d / OCC_CELL;
+	if(nx < 1 || ny < 1 || nz < 1)
+		return;
+	const auto &lc = volume.getEnclosingRegion().getLowerCorner();
+
+	// Which cells are wholly solid
+	sv_<uint8_t> solid((size_t)nx * ny * nz, 0);
+	auto cell = [&](int x, int y, int z) -> bool {
+		if(x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz)
+			return false;
+		return solid[((size_t)z * ny + y) * nx + x] != 0;
+	};
+	bool any = false;
+	for(int cz = 0; cz < nz; cz++)
+	for(int cy = 0; cy < ny; cy++)
+	for(int cx = 0; cx < nx; cx++){
+		bool all = true;
+		for(int z1 = 0; z1 < OCC_CELL && all; z1++)
+		for(int y1 = 0; y1 < OCC_CELL && all; y1++)
+		for(int x1 = 0; x1 < OCC_CELL && all; x1++){
+			const VoxelSample v = volume.sample_at(
+					lc.getX() + 1 + cx * OCC_CELL + x1,
+					lc.getY() + 1 + cy * OCC_CELL + y1,
+					lc.getZ() + 1 + cz * OCC_CELL + z1);
+			if(fmt.undefined(v) || !occ_solid(voxel_reg->get_cached(v)))
+				all = false;
+		}
+		if(all){
+			solid[((size_t)cz * ny + cy) * nx + cx] = 1;
+			any = true;
+		}
+	}
+	if(!any)
+		return;
+
+	// The boundary of that set, a slice at a time, each slice's quads
+	// merged greedily so that a chunk of solid rock is six of them rather
+	// than six hundred
+	const int dim[3] = {nx, ny, nz};
+	const float span[3] = {(float)w, (float)h, (float)d};
+	sv_<uint8_t> mask;
+	for(int axis = 0; axis < 3; axis++){
+		const int u = (axis + 1) % 3, v = (axis + 2) % 3;
+		for(int side = 0; side < 2; side++){
+			const int step = side ? 1 : -1;
+			for(int s = 0; s < dim[axis]; s++){
+				mask.assign((size_t)dim[u] * dim[v], 0);
+				for(int b = 0; b < dim[v]; b++)
+				for(int a = 0; a < dim[u]; a++){
+					int c[3];
+					c[axis] = s; c[u] = a; c[v] = b;
+					if(!cell(c[0], c[1], c[2]))
+						continue;
+					c[axis] = s + step;
+					if(cell(c[0], c[1], c[2]))
+						continue;
+					mask[(size_t)b * dim[u] + a] = 1;
+				}
+				// Greedy rectangles over the slice's mask
+				for(int b = 0; b < dim[v]; b++)
+				for(int a = 0; a < dim[u]; a++){
+					if(!mask[(size_t)b * dim[u] + a])
+						continue;
+					int aw = 1;
+					while(a + aw < dim[u] && mask[(size_t)b * dim[u] + a + aw])
+						aw++;
+					int bh = 1;
+					for(; b + bh < dim[v]; bh++){
+						bool row = true;
+						for(int k = 0; k < aw && row; k++)
+							if(!mask[(size_t)(b + bh) * dim[u] + a + k])
+								row = false;
+						if(!row)
+							break;
+					}
+					for(int y1 = 0; y1 < bh; y1++)
+						for(int x1 = 0; x1 < aw; x1++)
+							mask[(size_t)(b + y1) * dim[u] + a + x1] = 0;
+					// A boundary at inner index k sits at local k - span/2;
+					// the face of cell s on this side is at s or s + 1
+					const float p = (float)((side ? s + 1 : s) * OCC_CELL) -
+							span[axis] / 2.0f;
+					const float u0 = (float)(a * OCC_CELL) - span[u] / 2.0f;
+					const float u1 = (float)((a + aw) * OCC_CELL) -
+							span[u] / 2.0f;
+					const float v0 = (float)(b * OCC_CELL) - span[v] / 2.0f;
+					const float v1 = (float)((b + bh) * OCC_CELL) -
+							span[v] / 2.0f;
+					Vector3 corner[4];
+					const float uu[4] = {u0, u1, u1, u0};
+					const float vv[4] = {v0, v0, v1, v1};
+					for(int i = 0; i < 4; i++){
+						float c3[3];
+						c3[axis] = p; c3[u] = uu[i]; c3[v] = vv[i];
+						corner[i] = Vector3(c3[0], c3[1], c3[2]);
+					}
+					// Two triangles; the winding does not matter, the
+					// buffer rasterises this shape from both sides
+					static const int TRI[6] = {0, 1, 2, 0, 2, 3};
+					for(int i = 0; i < 6; i++)
+						result.Push(corner[TRI[i]]);
+				}
+			}
+		}
+	}
+}
+
 sv_<int16_t> column_heights(VoxelVolume &volume, VoxelRegistry *voxel_reg)
 {
 	const VoxelFmt fmt(voxel_reg);
