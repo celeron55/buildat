@@ -3293,9 +3293,33 @@ end
 -- A voxel stops a box if its definition says walkable. An unknown one --
 -- "ignore", which is what the void reads as -- does not, because a world
 -- that has not been generated is not a floor.
+--
+-- **Asked by content id** ([CLIENT_FRAME], 2026-09-26). This was
+-- `core.get_node()`, which builds a position table and a node table and
+-- then looks the definition up by name -- for every voxel of every
+-- collision box of every object of every step. A mob's box covers a
+-- handful of voxels and is tested on three axes, and VoxeLibre keeps a
+-- hundred objects active around a player: measured, the object walk was
+-- 239 ms of one step, of which the mods' own `on_step` was 122 and the
+-- rest was here, most of it making tables for the collector.
+--
+-- The raw read gives the id with no tables at all, and what the id means
+-- is remembered the first time it is asked.
+--
+-- simplified: a definition that changes after a box has already met that
+-- id keeps the old answer. Mods override at load, before any object is
+-- stepped; a game that wants to change `walkable` at runtime would want
+-- this cleared.
+local walkable_by_id = {}
 local function voxel_walkable(x, y, z)
-	local def = core.registered_nodes[core.get_node({x = x, y = y, z = z}).name]
-	return def ~= nil and def.walkable ~= false
+	local id = core.get_node_raw(x, y, z)
+	local w = walkable_by_id[id]
+	if w == nil then
+		local def = core.registered_nodes[core.get_name_from_content_id(id)]
+		w = def ~= nil and def.walkable ~= false
+		walkable_by_id[id] = w
+	end
+	return w
 end
 
 -- A node at p fills the voxel from p-0.5 to p+0.5, so the voxels a box
