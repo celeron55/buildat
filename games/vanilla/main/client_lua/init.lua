@@ -2435,8 +2435,16 @@ function frame_peak.note(dt)
 			frame_peak.table_at = buildat.get_time_us() / 1e6
 			-- Depth 5, not 4: the per-packet-type block
 			-- ("Buildat|packet:<name>", [PACKET_STALL]) sits one under
-			-- handle_packet, and naming the packet is the whole point
-			log:debug("profiler at that frame:\n" ..
+			-- handle_packet, and naming the packet is the whole point.
+			--
+			-- **Said at info, not debug** ([CLIENT_FRAME], 2026-09-26):
+			-- a frame of a fifth of a second that none of the marks
+			-- accounts for is the fault this item is about, and a table
+			-- only a debug run prints is a table nobody has. It is
+			-- already rare by construction -- a fifth of a second, more
+			-- than half of it unaccounted, and one every five seconds at
+			-- most.
+			log:info("profiler at that frame:\n" ..
 					(buildat.profiler_data(5) or ""))
 		end
 	end
