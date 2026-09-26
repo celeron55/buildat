@@ -282,10 +282,35 @@ struct CVoxelRegistry: public VoxelRegistry
 		m_defs[id] = def;
 		m_defs[id].id = id;
 		m_name_to_id[def.name] = id;
-		log_v(MODULE, "CVoxelRegistyr::add_voxel(): Added id=%i name=%s",
-				id, cs(def.name.dump()));
+		// The level is asked first because the name is built by dumping
+		// it, and the arguments of a log call are worked out whether or
+		// not the line is printed -- a registry's worth of them is a
+		// tenth of a second ([CLIENT_FRAME])
+		if(log_get_max_level() >= CORE_VERBOSE)
+			log_v(MODULE, "CVoxelRegistry::add_voxel(): Added id=%i name=%s",
+					id, cs(def.name.dump()));
 		m_is_dirty = true;
 		return id;
+	}
+
+	// A whole registry at once: one lock, one allocation, and the
+	// definitions moved rather than copied. See the interface.
+	void add_voxels(sv_<VoxelDefinition> &defs)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		for(VoxelDefinition &def : defs){
+			const VoxelTypeId id = m_defs.size();
+			if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
+				throw Exception(ss_()+"add_voxels(): def.id="+itos(def.id)+
+						"; should be "+itos(id));
+			if(m_name_to_id.count(def.name) != 0)
+				throw Exception(ss_()+"add_voxels(): Already exists: "+
+						cs(def.name.dump()));
+			m_name_to_id[def.name] = id;
+			m_defs.push_back(std::move(def));
+			m_defs[id].id = id;
+		}
+		m_is_dirty = true;
 	}
 
 	const VoxelDefinition* get(const VoxelTypeId &id)
@@ -1028,8 +1053,9 @@ void VoxelRegistry::deserialize(std::istream &is)
 	archive(format, defs, look);
 	clear();
 	set_format(format);
-	for(auto &def : defs)
-		add_voxel(def);
+	// In one go: a registry arriving over the network is thousands of
+	// definitions and this is the client's own frame ([CLIENT_FRAME])
+	add_voxels(defs);
 	// After the definitions, because the selector points at them
 	set_look_selector(look);
 }

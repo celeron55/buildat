@@ -796,6 +796,12 @@ namespace interface
 		virtual void set_look_selector(const VoxelSelector &selector) = 0;
 
 		virtual VoxelTypeId add_voxel(const VoxelDefinition &def) = 0;
+		// The same for a whole registry at once, which is how one arrives
+		// over the network: the definitions are moved out of the vector
+		// rather than copied, the room for them is taken in one go and the
+		// lock is taken once. A join's 28 MB of registry spent 121 ms of
+		// the client's frame in add_voxel() before this ([CLIENT_FRAME]).
+		virtual void add_voxels(sv_<VoxelDefinition> &defs) = 0;
 
 		virtual const VoxelDefinition* get(const VoxelTypeId &id) = 0;
 		virtual const VoxelDefinition* get(const VoxelName &name) = 0;
