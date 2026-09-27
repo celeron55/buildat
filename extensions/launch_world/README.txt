@@ -1,21 +1,23 @@
 launch_world
 ============
 
-An alternative launch UX: the room you start in. The client starts in a
-small hand-authored room and walks out of it into a game -- the games are
-warm orbs wedged in niches, the servers are mirrors on the floor, every
-readout is a real light source and nothing is on a HUD. An *alternative*
-to launch_menu, never a replacement, and its point is the opposite of a
-feature tour: a showcase of how much a buildat program can leave out.
-There is no server, no mapgen, no streaming, no sky, no day or night and
+The room you start in. The client starts in a small hand-authored room
+and walks out of it into a game -- the games are warm orbs wedged in
+niches, the servers are mirrors on the floor, every readout is a real
+light source and nothing is on a HUD. It is to be the default launch
+mode once it is polished enough, with launch_menu kept for the audience
+that wants a list; and it is a showcase of what a buildat program can
+be, not of how little one can be. There is no server, no mapgen, no streaming, no sky, no day or night and
 no entities -- the room is generated from a table every boot. The one
 thing it does keep is what the player changed: the voxels they placed,
 the spheres they moved, the field of view and the sound levels, as a
 diff against the generated room.
 
-The design, the reference frame it is built against and the reasoning
-behind every number here are in doc/plan/launcher_plan.md under
-[LAUNCH_WORLD]. This file is how to run it and what the keys do.
+The reference the room is held to -- every element, interaction,
+transition, look and sound, and where the room differs from it -- is
+doc/plan/launch_world.md; how it was argued and everything tried on the
+way is doc/plan/launch_world_history.md. This file is how to run it and
+what the keys do.
 
 Running it
 ----------
@@ -112,7 +114,7 @@ Environment
     BUILDAT_LAUNCH_TONEMAP   which of Urho3D's post-process effects to
                              append, comma separated. "Tonemap" by
                              default; "" for none
-    BUILDAT_LAUNCH_BIAS      the tonemap's exposure bias (1.05)
+    BUILDAT_LAUNCH_BIAS      the tonemap's exposure bias (1.15)
     BUILDAT_LAUNCH_WHITE     its white point -- where the curve reaches
                              255
     BUILDAT_LAUNCH_NOHDR     go back to LDR rendering. HDR is on: a
@@ -121,7 +123,7 @@ Environment
                              than light
     BUILDAT_LAUNCH_SUN       add a directional light
     BUILDAT_LAUNCH_SKY       how bright the cold light from above is
-                             (1.6), and BUILDAT_LAUNCH_ORB the orbs
+                             (2.2), and BUILDAT_LAUNCH_ORB the orbs (16)
     BUILDAT_LAUNCH_NOSHADOW  the lights without their shadow maps
     BUILDAT_LAUNCH_PROBEBOX  stand a probe box of known albedos in the
                              room: 90, 50, 18 and 4 per cent grey and
@@ -147,7 +149,7 @@ Environment
                              the brightest surface in the room and they
                              clip; floor_sheet.sh draws four values
     BUILDAT_LAUNCH_FLOOR_GLOSS
-                             their roughness (0.07), lower being
+                             their roughness (0.04), lower being
                              glossier
     BUILDAT_LAUNCH_STAND     where the player stands, in metres from the
                              room's middle (8). Read together with the
@@ -194,7 +196,6 @@ Environment
                              viewer", for measuring it again
     BUILDAT_LAUNCH_BARE      leave the floor empty: the wall, its
                              pockets and nothing else
-    BUILDAT_LAUNCH_HDR       say in the log what HDR is doing here
     BUILDAT_LAUNCH_WHITE_V   the white sphere's value
     BUILDAT_LAUNCH_FLOOR_SPEC
                              the floor's specular level (1.0)
@@ -212,7 +213,7 @@ What is where
 -------------
 
     core.sh                  the check an edit runs: one client, about
-                             fifteen seconds -- the room boots, draws,
+                             a minute -- the room boots, draws,
                              walks, launches a game and comes back, and
                              the log is read for a sandbox error.
                              check.sh is the whole of it and is what a
@@ -228,10 +229,14 @@ What is where
                              so the room is described once. Run it with
                              lua for its own check
     world.lua                everything the client draws and does
-    ornament.lua             the recursive ornament generator: a meander,
-                             a socket field, an orb's mark and a server's
-                             sigil, each a height field and an inlay mask
-                             with the albedo and normal derived from them
+    ornament.lua             the ornament generator: a band style per
+                             seed (a sigil, a worm or a worm with the
+                             hand flipped) drawn voxel by voxel along a
+                             frieze or a column, the wall's cut-block
+                             inlay, and a name-seeded mark for anything
+                             with no icon -- each a height field and an
+                             inlay mask with the albedo and normal
+                             derived from them
     synth.lua                the room's sound, synthesised, no assets
 
 Every texture in the room is generated at boot and registered into the
