@@ -783,6 +783,10 @@ struct Module: public interface::Module
 			}
 
 			size_t mismatches = 0;
+			// Which way they are wrong is the reading, not how many:
+			// light that is too high where the sky does not reach is a
+			// cave that the shader then treats as outdoors
+			size_t too_bright = 0, too_dark = 0;
 			pv::Vector3DInt32 first(0, 0, 0);
 			uint8_t first_want = 0, first_got = 0;
 			for(int y = 0; y < H; y++)
@@ -806,6 +810,10 @@ struct Module: public interface::Module
 				}
 				if(want == stored[i])
 					continue;
+				if(stored[i] > want)
+					too_bright++;
+				else
+					too_dark++;
 				if(mismatches == 0){
 					first = pv::Vector3DInt32(lc.getX() + x, lc.getY() + y,
 							lc.getZ() + z);
@@ -818,8 +826,10 @@ struct Module: public interface::Module
 				log_v(MODULE, "skylight verify: ok");
 			} else {
 				log_w(MODULE, "skylight verify: %zu voxels differ from a "
-						"fresh fill; first " PV3I_FORMAT " wants %i, has %i",
-						mismatches, PV3I_PARAMS(first), first_want, first_got);
+						"fresh fill, %zu of them brighter and %zu darker; "
+						"first " PV3I_FORMAT " wants %i, has %i",
+						mismatches, too_bright, too_dark, PV3I_PARAMS(first),
+						first_want, first_got);
 			}
 		});
 	}
