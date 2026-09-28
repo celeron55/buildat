@@ -3541,21 +3541,23 @@ struct CInstance: public voxelworld::Instance
 	// taller box put the whole column back to 15 and with a shorter one
 	// changed nothing ([UNDERGROUND_LIGHT], 2026-09-28). So the column is
 	// asked for whatever voxel wants to know.
-	// **Off by default, and the knob says why** (2026-09-28). The column
-	// rule is what lets a relight put daylight back at all -- without it
-	// core.fix_light() over a box whose top is under the loaded column
-	// zeroes the box and cannot fill it again, which is a played world
-	// that cannot be mended. But it also puts daylight down a shaft, and
-	// games/voxel_lighting's cave interior then goes from no black in the
-	// frame to 92% of it: the view 10_shaft_inside_cave reads RMSE 37.3
-	// against a bar of 30 with it on and 7.2 with it off. Why a cave loses
-	// its fill light when the shaft above it gains daylight is not
-	// understood yet, and blackening every cave is not a trade to make
-	// quietly -- the look is the user's.
+	// **On by default since 2026-09-28**, and it was off for a day before
+	// that. The column rule is what lets a relight put daylight back at
+	// all -- without it core.fix_light() over a box whose top is under the
+	// loaded column zeroes the box and cannot fill it again, which is a
+	// played world that cannot be mended: on a copy of the user's
+	// c55_mc2_12, /fixlight with the rule off left every reading where it
+	// was and the picture broken, and with it on put the open columns back
+	// to fifteen and drew a world with a sky in it.
+	// What held it off was games/voxel_lighting's cave going 92% black
+	// with it on (RMSE 37.3 against a bar of 30), and that was the
+	// generator being asked a question only a relight can answer; see
+	// SkylightSeed::from_relight. With that fixed the same view reads 1.9
+	// and the check passes, water_light.sh still falls a level a node and
+	// diglight.sh still reads its gradient.
 	//
-	// BUILDAT_SKY_COLUMN=1 turns it on. Off, the rule is what it was: the
-	// top of the section region and nothing else, which on a Luanti-sized
-	// map never fires.
+	// BUILDAT_SKY_COLUMN=0 puts the old rule back: the top of the section
+	// region and nothing else, which on a Luanti-sized map never fires.
 	// **The column is only asked for a relight** (from_relight): during
 	// worldgen the column above a voxel is half made and open_sky_from()
 	// then calls a cave open sky. The region's own top row is asked for
@@ -3565,8 +3567,8 @@ struct CInstance: public voxelworld::Instance
 	// (2026-09-28).
 	bool is_below_open_sky(const pv::Vector3DInt32 &p, bool from_relight)
 	{
-		static const bool off = !(getenv("BUILDAT_SKY_COLUMN") != nullptr &&
-				ss_(getenv("BUILDAT_SKY_COLUMN")) == "1");
+		static const bool off = getenv("BUILDAT_SKY_COLUMN") != nullptr &&
+				ss_(getenv("BUILDAT_SKY_COLUMN")) == "0";
 		const int section_h = m_section_size_chunks.getY() *
 				m_chunk_size_voxels.getY();
 		if(p.getY() == (m_section_region.getUpperCorner().getY() + 1) *
