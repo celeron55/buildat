@@ -655,9 +655,16 @@ do
 		AUTO_EXPOSURE.reset_frames = 2
 	end
 	-- The key pinned at one value, as BUILDAT_LUANTI_KEY does at start
+	-- **Said out loud** ([SKY_COLUMN_CAVE], 2026-09-28): a debug mode that
+	-- asks for the key and does not get it draws a metered picture that
+	-- reads like an absolute one, and two of those were argued from for an
+	-- evening. The same shape as the adaptation rate's own silent miss
+	-- (2026-09-24, above).
 	luanti.exposure_pin = function(k)
 		AUTO_EXPOSURE.lum_range = {k, k}
 		rp:SetShaderParameter("AutoExposureLumRange", magic.Vector2(k, k))
+		log:info(string.format("exposure: key pinned at %.3f, gain %.3f",
+				k, AUTO_EXPOSURE.middle_grey / k))
 	end
 	-- What a second view of the same world is drawn with -- the minimap:
 	-- the frame's own path, meter and curve and all, on a clone whose
@@ -1216,7 +1223,12 @@ luanti.sub_world_info(function(info)
 			mode == "pbr_debug_ground" then
 		voxel_shading.set_shadow_kinds(mode == "pbr_debug_light" and 2 or
 				mode == "pbr_debug_nibbles" and 3 or 4)
-		if luanti.exposure_pin then luanti.exposure_pin(0.18) end
+		if luanti.exposure_pin then
+			luanti.exposure_pin(0.18)
+		else
+			log:warning("exposure: " .. mode .. " could not pin the key; " ..
+					"the picture is metered, not absolute")
+		end
 		return
 	end
 	-- On sky_now rather than locals of their own: init.lua's main chunk is at
