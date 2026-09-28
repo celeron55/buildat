@@ -75,6 +75,13 @@ struct Module: public interface::Module
 	luanti::SceneReference m_scene = nullptr;
 	sv_<network::PeerInfo::Id> m_waiting_peers;
 	std::set<network::PeerInfo::Id> m_shown_world;
+	// The menu is a script of its own and is run once per peer, for the
+	// same reason show_world_to() is: files_transmitted comes again after
+	// every batch announced, and the ContentDB screen announces a
+	// thumbnail at a time -- twenty-one runs of main/menu.lua in five
+	// seconds, each asking for the saves again and drawing the whole menu
+	// again over the one on the screen ([CONTENTDB_SCAN])
+	std::set<network::PeerInfo::Id> m_shown_menu;
 	// Which client took the name BUILDAT_LUANTI_NAME asked for, if any;
 	// see player_name_of()
 	network::PeerInfo::Id m_named_peer = 0;
@@ -248,6 +255,7 @@ struct Module: public interface::Module
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
 		m_shown_world.erase(old_client.info.id);
+		m_shown_menu.erase(old_client.info.id);
 		if(!m_scene)
 			return;
 		luanti::access(m_server, [&](luanti::Interface *i){
@@ -536,6 +544,8 @@ struct Module: public interface::Module
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
 		if(!m_scene){
+			if(!m_shown_menu.insert(event.recipient).second)
+				return;
 			m_waiting_peers.push_back(event.recipient);
 			// Nothing to look at yet, so what the client draws is the menu:
 			// which save, and which game it needs. A world that was chosen

@@ -73,10 +73,25 @@ echo "$(echo "$names" | wc -w) launch UIs booted, $bad of them badly"
 	echo "delay 6000"; echo "event scan 8 b"
 	echo "delay 2000"; echo "quit"; } > "$out/cmds_back.txt"
 timeout 180 bin/buildat -o launch_ui=__menu -a game/vanilla/contentdb -D ../user 	-w 1280x720 -l 3 -L "$out/back.log" -c @"$out/cmds_back.txt" 	> /dev/null 2>&1
+# **A dead client is not a leave that did not work** ([CONTENTDB_SCAN]):
+# the scan below answers nothing when the client has taken a signal, and
+# the leave's own verdict then named the wrong fault
+if grep -aq "Crash: SIG" "$out/back.log"; then
+	echo "FAIL: the client died on the contentdb screen, before the leave"
+	grep -a "Crash: SIG" -A 6 "$out/back.log" | head -8
+	exit 1
+fi
 grid=$(grep -ac "back to the grid" "$out/back.log")
 lost=$(grep -ac "leave: no launcher to go back to" "$out/back.log")
 alive=$(grep -ac "scan b: ui" "$out/back.log")
 echo "leaving a game: back to the grid $grid times, $alive elements" 		"drawn after it"
+runs=$(grep -ac 'run_script_file("main/menu.lua")' "$out/back.log")
+echo "the game's menu script was run $runs times"
+if [ "$runs" -gt 1 ]; then
+	echo "FAIL: main/menu.lua is run once per batch of announced files --" \
+			"the whole menu is drawn again over the one on the screen"
+	exit 1
+fi
 if [ "$grid" -lt 1 ] || [ "$lost" -gt 0 ] || [ "$alive" -lt 10 ]; then
 	echo "FAIL: a game started from the grid cannot be left -- the client" 			"is left with no server and no menu"
 	grep -a "leave:\|Failed to run function" "$out/back.log" | head -3
