@@ -1485,6 +1485,10 @@ struct CInstance: public voxelworld::Instance
 	size_t m_relight_finish_f = 0;
 	size_t m_relight_finish_i = 0;
 	bool m_relight_pending = false;
+	// Which section the pending relight belongs to, so that its stale mark
+	// can be cleared when the flood actually finishes rather than when it
+	// starts; 0 when nothing is pending. See relight_if_stale().
+	uint64_t m_relight_key = 0;
 
 	// The pass that ends a relight: what light does not pass through
 	// wears the brightest light beside it, the way the flood leaves the
@@ -1516,6 +1520,13 @@ struct CInstance: public voxelworld::Instance
 		m_relight_finish_f = 0;
 		m_relight_finish_i = 0;
 		m_relight_pending = false;
+		// **And now the section is no longer stale**, which is the one
+		// place that is true; see relight_if_stale()
+		if(m_relight_key != 0){
+			if(m_stale_sections.erase(m_relight_key) > 0)
+				m_stale_dirty = true;
+			m_relight_key = 0;
+		}
 		return true;
 	}
 
@@ -1534,13 +1545,33 @@ struct CInstance: public voxelworld::Instance
 		const uint64_t key = section_key(section.section_p);
 		if(m_stale_sections.count(key) == 0)
 			return;
-		m_stale_sections.erase(key);
-		m_stale_dirty = true;
+		// **The mark is not cleared here.** This pass zeroes the section's
+		// flood before it re-floods it, and the flood stops at the tick's
+		// deadline -- so between the two the section is dark and the only
+		// record that it has to be finished is m_relight_pending, which is
+		// memory. A world closed in that window kept a zeroed section with
+		// no stale mark on it and never lit it again, which is a played
+		// world going dark section by section as it is played
+		// ([UNDERGROUND_LIGHT]'s playtest fault, 2026-09-28: a fuzz world
+		// read daylight 0 in open air thirty nodes above its canopy, where
+		// the same seed generated afresh reads 15). The mark goes when the
+		// flood is done, in relight_finish(), and until then a restart
+		// starts the section over -- which is the safe direction.
+		auto clear_mark = [&](){
+			if(m_stale_sections.erase(key) > 0)
+				m_stale_dirty = true;
+		};
+		// One at a time: the pending state is a single section's, and
+		// restarting this one would zero what the tick is carrying
+		if(m_relight_pending && m_relight_key == key)
+			return;
 		bool any = false;
 		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
 			any = any || m_light_maintained[f];
-		if(!any)
+		if(!any){
+			clear_mark();
 			return;
+		}
 
 		pv::Region region = get_section_region_voxels(section.section_p);
 		const pv::Vector3DInt32 lc = region.getLowerCorner();
@@ -1583,13 +1614,16 @@ struct CInstance: public voxelworld::Instance
 				seeded++;
 			}
 		}
-		if(seeded == 0)
+		if(seeded == 0){
+			clear_mark();
 			return;
+		}
 		const int64_t t_flood = interface::os::time_us();
 		m_relight_blockers = blockers;
 		m_relight_finish_f = 0;
 		m_relight_finish_i = 0;
 		m_relight_pending = true;
+		m_relight_key = key;
 		bool done = update_skylight_until(deadline_us);
 		const int64_t t_finish = interface::os::time_us();
 		if(done)
