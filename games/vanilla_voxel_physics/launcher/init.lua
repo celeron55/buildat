@@ -10,9 +10,10 @@
 return function(ctx)
 	local games = buildat.list_installed_games("luanti")
 	local game = nil
-	for _, name in ipairs(games) do
-		if not name:find("%.old") and (game == nil or name == "mineclone2") then
-			game = name
+	for _, g in ipairs(games) do
+		if not g.name:find("%.old") and
+				(game == nil or g.name == "mineclone2") then
+			game = g.name
 		end
 	end
 	if game == nil then

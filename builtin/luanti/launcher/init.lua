@@ -13,10 +13,24 @@
 local PRETTY = {mineclone2 = "VoxeLibre", minetest_game = "Minetest Game"}
 return function(ctx)
 	local out = {}
-	for i, name in ipairs(buildat.list_installed_games("luanti")) do
+	for i, g in ipairs(buildat.list_installed_games("luanti")) do
+		local name = g.name
 		if not name:find("%.old") then
+			-- **A game says it is a game, with its own picture and its
+			-- own size** ([LAUNCH_API]): without the category these
+			-- twenty-two were "an action with no opinion" and a launch UI
+			-- could not tell VoxeLibre from "Import a world", and without
+			-- the icon they all drew luanti.png, which the room's mark
+			-- rule reads as no icon at all. g.icon is already resolved --
+			-- the game's menu/icon.png, copied under the cache and
+			-- namespaced by family and name -- so it is passed through
+			-- rather than resolved again against this launcher's own
+			-- directory.
 			out[#out + 1] = {
-				id = name, label = PRETTY[name] or name, icon = "luanti.png",
+				id = name, label = PRETTY[name] or name,
+				icon = g.icon or "luanti.png",
+				resolved_icon = g.icon ~= nil,
+				category = "game", significance = g.size,
 				description = "Luanti game " .. name, order = 100 + i,
 				run = function()
 					-- The game's world selection: its saves, and a new one

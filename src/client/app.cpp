@@ -2691,11 +2691,60 @@ struct CApp: public App, public magic::Application
 		return 1;
 	}
 
-	// list_installed_games(family) -> {name, ...}: the directory names
-	// under <user>/<family>/games, for a launcher file that offers a tile
-	// per installed game of another engine's family -- "luanti" is
-	// user/luanti/games. In the sandbox: read-only, names only, and only
+	// **A game's own icon, made reachable.** A Luanti game ships
+	// menu/icon.png in its own directory under the user path, and a
+	// resource dir may only be added under the cache path
+	// (add_resource_dir()), so the file is copied there once, under
+	// <cache>/installed_games/<family>/<name>.png -- namespaced by family
+	// and game, so no two collide ([LAUNCH_API]). Returns the resource
+	// name to draw it by, or "" where the game ships no icon.
+	static ss_ installed_game_icon(lua_State *L, const ss_ &family,
+			const ss_ &name)
+	{
+		const ss_ from = g_client_config.get<ss_>("user_path")+"/"+family+
+				"/games/"+name+"/menu/icon.png";
+		if(!interface::fs::path_exists(from))
+			return "";
+		const ss_ root = g_client_config.get<ss_>("cache_path")+
+				"/installed_games";
+		const ss_ to = root+"/"+family+"/"+name+".png";
+		// Copied when it is not there or the game's has changed size: a
+		// game is installed rarely and this is asked every time the grid
+		// is shown
+		if(!interface::fs::path_exists(to) ||
+				interface::fs::file_size(to) !=
+				interface::fs::file_size(from)){
+			interface::fs::create_directories(root+"/"+family);
+			if(!interface::fs::copy_file(from, to)){
+				log_w(MODULE, "installed_game_icon(): cannot copy %s",
+						cs(from));
+				return "";
+			}
+		}
+		static std::set<ss_> added;
+		if(added.insert(root).second){
+			lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+			CApp *self = (CApp*)lua_touserdata(L, -1);
+			lua_pop(L, 1);
+			magic::ResourceCache *rc = self->GetSubsystem<
+					magic::ResourceCache>();
+			if(!rc->AddResourceDir(root.c_str()))
+				log_w(MODULE, "installed_game_icon(): cannot add %s",
+						cs(root));
+		}
+		return family+"/"+name+".png";
+	}
+
+	// list_installed_games(family) -> {{name =, size =, icon =}, ...}: the
+	// directories under <user>/<family>/games, for a launcher file that
+	// offers a tile per installed game of another engine's family --
+	// "luanti" is user/luanti/games. In the sandbox: read-only and only
 	// that one directory shape ([LAUNCH_GRID]).
+	//
+	// The size is the directory tree's, as list_games() answers for a
+	// buildat game, and it is what a launch action carries as its
+	// significance ([LAUNCH_API]); the icon is the resource name of the
+	// game's own menu/icon.png, or nil where the game ships none.
 	static int l_list_installed_games(lua_State *L)
 	{
 		const ss_ family = lua_bindings::lua_tocppstring(L, 1);
@@ -2710,7 +2759,17 @@ struct CApp: public App, public magic::Application
 		lua_newtable(L);
 		int i = 1;
 		for(const ss_ &name : names){
+			lua_newtable(L);
 			lua_pushstring(L, name.c_str());
+			lua_setfield(L, -2, "name");
+			lua_pushnumber(L, (lua_Number)interface::fs::directory_tree_size(
+					dir+"/"+name));
+			lua_setfield(L, -2, "size");
+			const ss_ icon = installed_game_icon(L, family, name);
+			if(icon != ""){
+				lua_pushstring(L, icon.c_str());
+				lua_setfield(L, -2, "icon");
+			}
 			lua_rawseti(L, -2, i++);
 		}
 		return 1;

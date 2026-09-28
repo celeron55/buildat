@@ -17,8 +17,10 @@ buildat.list_saves        = __buildat_list_saves
 -- list_launchers() -> {{kind, name, path, launcher = bool}, ...}: every
 -- game, builtin and extension in the tree, for the launch grid
 buildat.list_launchers    = __buildat_list_launchers
--- list_installed_games(family) -> {name, ...} under <user>/<family>/games;
--- names only, and in the sandbox too, for a launcher file's tiles
+-- list_installed_games(family) -> {{name =, size =, icon =}, ...} under
+-- <user>/<family>/games; read-only, and in the sandbox too, for a launcher
+-- file's tiles. icon is the resource name of the game's own menu/icon.png
+-- where it ships one, and absent where it does not ([LAUNCH_API])
 buildat.list_installed_games = __buildat_list_installed_games
 buildat.safe.list_installed_games = __buildat_list_installed_games
 buildat.start_local_server = __buildat_start_local_server

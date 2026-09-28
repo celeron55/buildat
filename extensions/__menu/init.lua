@@ -138,6 +138,10 @@ function M.boot(launch_action)
 	-- One entry: an icon, a word for it, and what picking it does. The
 	-- selected one is drawn bright and the rest dim, which is what the
 	-- keyboard and the mouse both move.
+	-- Tiles whose icon is named and does not resolve; a tile that quietly
+	-- falls back to a blank square is how twenty-two games shared one
+	-- picture without anybody noticing ([LAUNCH_API])
+	local icons_drawn, icons_missing = 0, 0
 	local function menu_entry(icon, text)
 		local button = row:CreateChild("Button")
 		button:SetStyleAuto()
@@ -154,6 +158,11 @@ function M.boot(launch_action)
 			-- game's own icon is pixel art
 			tex.filterMode = magic.FILTER_NEAREST
 			button_image:SetTexture(tex)
+			icons_drawn = icons_drawn + 1
+		elseif icon then
+			icons_missing = icons_missing + 1
+			log:warning("__menu: tile "..dump(text).." names an icon that "..
+					"does not resolve: "..dump(icon))
 		end
 		button_image.color = magic.Color(DIM, DIM, DIM)
 		button_image:SetFixedSize(120, 120)
@@ -208,7 +217,8 @@ function M.boot(launch_action)
 		end, action.description)
 	end
 
-	log:info("__menu: "..#items.." tiles")
+	log:info("__menu: "..#items.." tiles, "..icons_drawn..
+			" of them with a picture and "..icons_missing.." without")
 
 	-- The selected entry's name and description, to the right of the logo
 	-- in the logo's row ([LAUNCH_DESC]): the label on the first line,
