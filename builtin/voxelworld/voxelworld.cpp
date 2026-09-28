@@ -1561,6 +1561,8 @@ struct CInstance: public voxelworld::Instance
 			if(m_stale_sections.erase(key) > 0)
 				m_stale_dirty = true;
 		};
+		// A column's top may have moved since the last flood
+		forget_open_sky();
 		// One at a time: the pending state is a single section's, and
 		// restarting this one would zero what the tick is carrying
 		if(m_relight_pending && m_relight_key == key)
@@ -1613,6 +1615,25 @@ struct CInstance: public voxelworld::Instance
 				m_light_seeds[lf].push_back(SkylightSeed{p, 0, false, 0});
 				seeded++;
 			}
+		}
+		// BUILDAT_LIGHT_LOG=1: what a relight seeded and how much of it the
+		// sky reaches, which is the one thing that decides whether the
+		// flood has any daylight to put back. "0 of them under open sky"
+		// is a relight that can only zero the section, and it is what a
+		// world going dark looks like from in here ([UNDERGROUND_LIGHT]).
+		if(getenv("BUILDAT_LIGHT_LOG")){
+			size_t open = 0;
+			for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
+				for(const SkylightSeed &sd : m_light_seeds[f])
+					if(is_below_open_sky(sd.p))
+						open++;
+			log_w(MODULE, "relight " PV3I_FORMAT ": %zu seeds, %zu of them "
+					"under open sky, %zu blockers; the middle column opens "
+					"at y %i and the section's top is y %i",
+					PV3I_PARAMS(section.section_p), seeded, open,
+					blockers.size(),
+					(int)open_sky_from((lc.getX() + uc.getX()) / 2,
+							(lc.getZ() + uc.getZ()) / 2), (int)uc.getY());
 		}
 		if(seeded == 0){
 			clear_mark();
@@ -3411,27 +3432,97 @@ struct CInstance: public voxelworld::Instance
 	//
 	// Only asked of a voxel at the top edge of its section, so the walk is
 	// one column per section face rather than one per seed.
-	bool is_below_open_sky(const pv::Vector3DInt32 &p)
+	// The lowest voxel in a column the sky still reaches: everything above
+	// the highest thing that stops light, and the whole column where
+	// nothing does. Walked from the top of the world down, a whole section
+	// at a step where the section is not loaded -- there is no data there
+	// and above the terrain that is sky.
+	//
+	// Cached per column for the run of one flood, because a relight seeds a
+	// section's whole face and those seeds share their columns; cleared
+	// wherever a flood begins, since a write can move a column's top.
+	sm_<uint64_t, int32_t> m_open_sky_from;
+
+	void forget_open_sky()
 	{
+		m_open_sky_from.clear();
+	}
+
+	int32_t open_sky_from(int32_t x, int32_t z)
+	{
+		const uint64_t key = ((uint64_t)(uint32_t)x << 32) | (uint32_t)z;
+		auto it = m_open_sky_from.find(key);
+		if(it != m_open_sky_from.end())
+			return it->second;
 		const int section_h = m_section_size_chunks.getY() *
 				m_chunk_size_voxels.getY();
 		const int32_t region_top =
 				(m_section_region.getUpperCorner().getY() + 1) * section_h - 1;
-		if(p.getY() == region_top)
-			return true;
-		const pv::Vector3DInt16 sp = section_of_voxel(p);
-		if(p.getY() != ((int32_t)sp.getY() + 1) * section_h - 1)
-			return false;
-		for(int32_t y = p.getY() + 1; y <= region_top; y++){
-			const pv::Vector3DInt32 q(p.getX(), y, p.getZ());
+		const int32_t region_bottom =
+				(int32_t)m_section_region.getLowerCorner().getY() * section_h;
+		int32_t from = region_bottom;
+		// **No data is sky until the column has shown some.** Above the
+		// terrain a chunk was never generated and is not in memory, and
+		// that is where the daylight comes from; below it, a gap in what
+		// is loaded says nothing, so the walk stops there rather than
+		// lighting a cave through a chunk it cannot see.
+		bool seen_data = false;
+		for(int32_t y = region_top; y >= region_bottom; ){
+			const pv::Vector3DInt32 q(x, y, z);
 			const pv::Vector3DInt16 qs = section_of_voxel(q);
 			Section *section = get_section(qs);
-			if(section == nullptr || !section->loaded)
-				return true; // the data ends, and clear air is under it
-			if(!transmits_light_at(q))
-				return false;
+			if(section == nullptr || !section->loaded){
+				if(seen_data){
+					from = y + 1;
+					break;
+				}
+				// Step over the whole section rather than every voxel of it
+				y = (int32_t)qs.getY() * section_h - 1;
+				continue;
+			}
+			const pv::Vector3DInt32 chunk_p =
+					container_coord(q, m_chunk_size_voxels);
+			ChunkBuffer &buf =
+					section->chunk_buffers[section->get_chunk_i(chunk_p)];
+			if(!buf.volume){
+				// The section is loaded and this chunk of it is not: read
+				// as no data, and not pulled in -- a walk that loaded a
+				// column would load the world
+				if(seen_data){
+					from = y + 1;
+					break;
+				}
+				y = chunk_p.getY() * m_chunk_size_voxels.getY() - 1;
+				continue;
+			}
+			seen_data = true;
+			if(!voxel_transmits_light(
+					buf.volume->sample_at(light_local_p(q, chunk_p)))){
+				from = y + 1;
+				break;
+			}
+			y--;
 		}
-		return true;
+		m_open_sky_from[key] = from;
+		return from;
+	}
+
+	// **Where the sky reaches, wherever it is asked about.**
+	//
+	// It used to be one row of voxels at the top of the section region,
+	// which on a Luanti-sized map is thirty thousand voxels up and never
+	// loaded, so it never fired; then the top edge of a section whose
+	// column walked out of the data, which fired only for the section at
+	// the top of the loaded column. That second one left every relight
+	// below it with no source of its own: `/fixlight` over a box whose top
+	// was under the loaded column zeroed the box and could not fill it
+	// again -- measured on a played world, where the same command with a
+	// taller box put the whole column back to 15 and with a shorter one
+	// changed nothing ([UNDERGROUND_LIGHT], 2026-09-28). So the column is
+	// asked for whatever voxel wants to know.
+	bool is_below_open_sky(const pv::Vector3DInt32 &p)
+	{
+		return p.getY() >= open_sky_from(p.getX(), p.getZ());
 	}
 
 	struct LightNode
@@ -3716,6 +3807,9 @@ struct CInstance: public voxelworld::Instance
 	// 0 for none); false when one is still unfinished
 	bool update_skylight_until(int64_t deadline_us)
 	{
+		// The columns the seeds are about may have moved since the last
+		// flood; see open_sky_from()
+		forget_open_sky();
 		bool done = true;
 		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
 			done = update_light((LightField)f, deadline_us) && done;
