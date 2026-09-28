@@ -724,6 +724,21 @@ end
 local ABOVE_FIRST = 2 * CELLS * CELLS + 1
 local ABOVE_LAST = 3 * CELLS * CELLS
 
+-- The whole cube's mean, and its lowest cell: what the reflections are
+-- gated by per direction, which chamber_light() cannot say -- that is the
+-- mean of the eight brightest and reads 1.0 while most of the sphere is
+-- dark ([UNDERGROUND_LIGHT], 2026-09-28).
+function M.sky_vis_stats()
+	local sum, lo, hi = 0, 1e9, -1e9
+	for i = 1, CELL_COUNT do
+		local v = sky_vis[i]
+		sum = sum + v
+		if v < lo then lo = v end
+		if v > hi then hi = v end
+	end
+	return sum / CELL_COUNT, lo, hi
+end
+
 function M.sky_visibility_above()
 	local sum = 0
 	for i = ABOVE_FIRST, ABOVE_LAST do

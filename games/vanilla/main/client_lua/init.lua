@@ -1933,7 +1933,9 @@ local function update_sky(dt)
 					c.r * k, c.g * k, c.b * k, c.r * k * PHYS.bounce,
 					PHYS.ground.r * (sun * sc.r + c.r * k),
 					floor_f * dark, chamber_read, dark, chamber,
-					voxel_shading.sky_visibility_above()))
+					voxel_shading.sky_visibility_above()) ..
+					string.format(" skyvis mean/lo/hi %.3f/%.3f/%.3f",
+							voxel_shading.sky_vis_stats()))
 		end
 		local abl = buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""
 		if abl:find("amb") then zone.ambientColor = magic.Color(0, 0, 0) end
