@@ -471,7 +471,15 @@ void VS()
             // say (the flood's share, the sky share it becomes, the
             // shade), and 2 wants the light itself, which is the sum
             // below ([UNDERGROUND_LIGHT]).
-            vVertexLight = cShadowKinds > 3.5 ?
+            // **5 and 6 are that sum's two halves** ([SKY_COLUMN_CAVE],
+            // 2026-09-28): 2 draws `vVertexLight + vSkyAmbient * skyVis`
+            // and a night frame that stays lit with every uniform
+            // ablated cannot be read through it -- which half carries
+            // the light is the whole question. 5 is the sky ambient on
+            // its own, 6 is `baked` on its own.
+            vVertexLight = cShadowKinds > 5.5 ? baked :
+                cShadowKinds > 4.5 ? vec3(0.0) :
+                cShadowKinds > 3.5 ?
                     vec3(under_g, groundSeen, interior) :
                 cShadowKinds > 2.5 ? vec3(sky.x, sky.y, shade) :
                 cShadowKinds > 0.5 && cShadowKinds < 1.5 ? iColor.rgb : baked +
@@ -985,8 +993,11 @@ void PS()
         if(cShadowKinds > 0.5){
             // 2: the whole light a face gets, the sky share included --
             // the same sum the line below draws with, without the albedo
-            gl_FragColor = vec4(cShadowKinds > 1.5 && cShadowKinds < 2.5 ?
-                vVertexLight + vSkyAmbient * skyVis : vVertexLight, 1.0);
+            gl_FragColor = vec4(
+                cShadowKinds > 4.5 && cShadowKinds < 5.5 ?
+                    vSkyAmbient * skyVis :
+                cShadowKinds > 1.5 && cShadowKinds < 2.5 ?
+                    vVertexLight + vSkyAmbient * skyVis : vVertexLight, 1.0);
             return;
         }
         vec3 finalColor = (vVertexLight + vSkyAmbient * skyVis) * diffColor.rgb;

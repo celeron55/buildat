@@ -1219,10 +1219,17 @@ luanti.sub_world_info(function(info)
 	-- in green, the shade in blue. Both want BUILDAT_LUANTI_LINEAR=1
 	-- beside them, or the curve and the meter are on the reading; the key
 	-- is pinned so that one on the screen is one in the sky's units.
+	-- pbr_debug_skyamb / pbr_debug_baked are `light`'s two halves, and
+	-- they exist because the sum could not answer which half carried a
+	-- night frame that stayed lit with every uniform ablated
+	-- ([SKY_COLUMN_CAVE]).
 	if mode == "pbr_debug_light" or mode == "pbr_debug_nibbles" or
-			mode == "pbr_debug_ground" then
+			mode == "pbr_debug_ground" or mode == "pbr_debug_skyamb" or
+			mode == "pbr_debug_baked" then
 		voxel_shading.set_shadow_kinds(mode == "pbr_debug_light" and 2 or
-				mode == "pbr_debug_nibbles" and 3 or 4)
+				mode == "pbr_debug_nibbles" and 3 or
+				mode == "pbr_debug_skyamb" and 5 or
+				mode == "pbr_debug_baked" and 6 or 4)
 		if luanti.exposure_pin then
 			luanti.exposure_pin(0.18)
 		else
@@ -1956,6 +1963,14 @@ local function update_sky(dt)
 		end
 		local abl = buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""
 		if abl:find("amb") then zone.ambientColor = magic.Color(0, 0, 0) end
+		-- BUILDAT_LUANTI_ZONE_TINT=1: the world zone's ambient turned
+		-- bright red ([SKY_COLUMN_CAVE], 2026-09-28). Zeroing it says
+		-- nothing when a surface is already dark, but a surface that does
+		-- not go red is a surface reading somebody else's zone -- which is
+		-- the question a night frame that survives ABLATE=amb asks.
+		if buildat.get_env("BUILDAT_LUANTI_ZONE_TINT") == "1" then
+			zone.ambientColor = magic.Color(1, 0, 0)
+		end
 		if abl:find("bounce") then voxel_shading.set_bounce_light(0, 0, 0) end
 		if abl:find("ground") then voxel_shading.set_ground_light(0, 0, 0) end
 		if abl:find("lamp") then voxel_shading.set_lamp_light(0, 0, 0) end
