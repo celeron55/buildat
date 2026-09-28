@@ -1927,8 +1927,13 @@ local function update_sky(dt)
 		if buildat.get_env("BUILDAT_LUANTI_LIGHT_LOG") == "1" and
 				(sky_now.light_log_due or 0) <= os.time() then
 			sky_now.light_log_due = os.time() + 1
-			log:info(string.format("light terms: sky %.3f/%.3f/%.3f " ..
-					"bounce %.3f ground %.3f floor %.3f " ..
+			-- **Five decimals, not three** ([SKY_COLUMN_CAVE], 2026-09-28):
+			-- at 02:00 every one of these rounded to 0.000 while
+			-- pbr_debug_light drew the same faces at half a unit, and a
+			-- whole night's investigation read "the ambient is off" off
+			-- that. A night term is small, not absent.
+			log:info(string.format("light terms: sky %.5f/%.5f/%.5f " ..
+					"bounce %.5f ground %.5f floor %.5f " ..
 					"chamber_read %.3f dark %.3f chamber %.3f sky_above %.3f",
 					c.r * k, c.g * k, c.b * k, c.r * k * PHYS.bounce,
 					PHYS.ground.r * (sun * sc.r + c.r * k),
