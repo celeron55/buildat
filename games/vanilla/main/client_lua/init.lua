@@ -1212,8 +1212,10 @@ luanti.sub_world_info(function(info)
 	-- in green, the shade in blue. Both want BUILDAT_LUANTI_LINEAR=1
 	-- beside them, or the curve and the meter are on the reading; the key
 	-- is pinned so that one on the screen is one in the sky's units.
-	if mode == "pbr_debug_light" or mode == "pbr_debug_nibbles" then
-		voxel_shading.set_shadow_kinds(mode == "pbr_debug_light" and 2 or 3)
+	if mode == "pbr_debug_light" or mode == "pbr_debug_nibbles" or
+			mode == "pbr_debug_ground" then
+		voxel_shading.set_shadow_kinds(mode == "pbr_debug_light" and 2 or
+				mode == "pbr_debug_nibbles" and 3 or 4)
 		if luanti.exposure_pin then luanti.exposure_pin(0.18) end
 		return
 	end

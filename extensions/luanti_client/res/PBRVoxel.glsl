@@ -437,6 +437,9 @@ void VS()
             // (0.55 local, 0.63 terrain) keeps 0.12 of it and the open
             // shaded wall on the cliff top (0.65, 0.90) 0.34, which is the
             // render's 0.27 between them ([PBR_FIT], contrast_dirt_pit).
+            // The mesher's underground rule rides in g: nought under the
+            // column's own surface, the terrain cap above it
+            float under_g = isPacked ? iColor.g : 1.0;
             float groundSeen = isPacked ? shade * iColor.g : 1.0;
             // Cubed, with the ground's albedo doubled beside it ([PBR_FIT]
             // 3.3, 2026-09-19): the open shaded wall wanted more of the
@@ -468,7 +471,9 @@ void VS()
             // say (the flood's share, the sky share it becomes, the
             // shade), and 2 wants the light itself, which is the sum
             // below ([UNDERGROUND_LIGHT]).
-            vVertexLight = cShadowKinds > 2.5 ? vec3(sky.x, sky.y, shade) :
+            vVertexLight = cShadowKinds > 3.5 ?
+                    vec3(under_g, groundSeen, interior) :
+                cShadowKinds > 2.5 ? vec3(sky.x, sky.y, shade) :
                 cShadowKinds > 0.5 && cShadowKinds < 1.5 ? iColor.rgb : baked +
                 cBounceLight * (0.15 * cChamberLight + 1.0 * sky.x) *
                     (1.0 - ShapeSkylight(sky.x)) * shade +
