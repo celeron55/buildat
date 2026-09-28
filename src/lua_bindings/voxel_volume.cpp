@@ -305,12 +305,23 @@ static pv::Vector3DInt32 table_vector3_int(const luabind::object &t,
 // found, which is what this is computed from.
 static double ray_visibility(int status, int skylight, int steps)
 {
-	if(status == VOXEL_RAY_BLOCKED)
-		return 0.0;
 	if(steps <= 1)
 		return 1.0;
 	if(skylight < 0)
 		return 0.0;
+	// **A ray that was stopped is worth the daylight it travelled through**,
+	// not nothing. "Nothing if something solid stopped it" made a forest
+	// read as a sealed chamber: a leaf is walkable, so every ray into a
+	// canopy was blocked at its first step and a player standing in a
+	// jungle measured chamber_light() at 0.002 -- which turns the cave
+	// floor on whole and the bounce floor off, above ground, in daylight,
+	// and with the floor on it is also the gray ramp's threshold, so the
+	// shaded leaf tops came out pure gray ([UNDERGROUND_LIGHT], the
+	// playtest fault, 2026-09-28). A canopy is not a cave, and what tells
+	// them apart is already in the answer: the skylight of the air the ray
+	// crossed. Under leaves that is twelve of fifteen; in a sealed room it
+	// is nought, so the invariant that room reads dark at every hour
+	// stands.
 	return (double)skylight / (double)interface::VoxelInstance::SKYLIGHT_MAX;
 }
 
