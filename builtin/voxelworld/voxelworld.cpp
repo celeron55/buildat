@@ -337,6 +337,18 @@ struct CInstance: public voxelworld::Instance
 		// wears the brightest light beside it rather than real propagated
 		// light, so its stored level does not say whether a lamp went.
 		uint8_t old_emitted;
+		// **Put here by a relight, not by an edit or by the generator.**
+		// Only a relight asks the sky column where the daylight is, and
+		// the reason is that only a relight has a whole world under it:
+		// during worldgen the column above a voxel is half made, and
+		// open_sky_from() then calls a cave open sky, seeds it at fifteen
+		// and loses the lot when the rock above arrives and the
+		// neighbourhood is zeroed together with nothing left holding
+		// light to spread back. games/voxel_lighting, 2026-09-28: the
+		// column asked at generation left 87802 voxels darker than a
+		// fresh fill, the same number at 9, 30, 60 and 90 seconds, where
+		// without it the scene reads ok ([SKY_COLUMN_CAVE]).
+		bool from_relight;
 	};
 	std::vector<SkylightSeed> m_light_seeds[NUM_LIGHT_FIELDS];
 
@@ -1612,7 +1624,7 @@ struct CInstance: public voxelworld::Instance
 				// "It was a blocker and is not any more" is the shape the
 				// flood reads as "fill this one from what is around it",
 				// which is what every one of these wants
-				m_light_seeds[lf].push_back(SkylightSeed{p, 0, false, 0});
+				m_light_seeds[lf].push_back(SkylightSeed{p, 0, false, 0, true});
 				seeded++;
 			}
 		}
@@ -1625,7 +1637,7 @@ struct CInstance: public voxelworld::Instance
 			size_t open = 0;
 			for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
 				for(const SkylightSeed &sd : m_light_seeds[f])
-					if(is_below_open_sky(sd.p))
+					if(is_below_open_sky(sd.p, true))
 						open++;
 			log_w(MODULE, "relight " PV3I_FORMAT ": %zu seeds, %zu of them "
 					"under open sky, %zu blockers; the middle column opens "
@@ -2697,7 +2709,8 @@ struct CInstance: public voxelworld::Instance
 						voxel_light_source(old) != voxel_light_source(nv))){
 					if(!m_light_deferred) m_light_seeds[lf].push_back(SkylightSeed{
 							p, get_light(old_first, lf), old_transparent,
-							lf == LIGHT_LAMP ? voxel_light_source(old) : 0});
+							(uint8_t)(lf == LIGHT_LAMP ?
+							voxel_light_source(old) : 0), false});
 				}
 				// A dug blocker starts dark; see set_voxel()
 				set_light(first, (!old_transparent && now_transparent) ? 0 :
@@ -2788,7 +2801,8 @@ struct CInstance: public voxelworld::Instance
 						voxel_light_source(old) != voxel_light_source(now))){
 					if(!m_light_deferred) m_light_seeds[lf].push_back(SkylightSeed{
 							p, get_light(old_first, lf), old_transparent,
-							lf == LIGHT_LAMP ? voxel_light_source(old) : 0});
+							(uint8_t)(lf == LIGHT_LAMP ?
+							voxel_light_source(old) : 0), false});
 				}
 				// Not from a blocker that has just been dug out: what a
 				// blocker wears is the brightest light beside it, for the
@@ -3109,8 +3123,8 @@ struct CInstance: public voxelworld::Instance
 						if(!m_light_deferred) m_light_seeds[lf].push_back(SkylightSeed{
 								pv::Vector3DInt32(x, y, z),
 								get_light(old, lf), old_transparent,
-								lf == LIGHT_LAMP ?
-								voxel_light_source(dst_v) : 0});
+								(uint8_t)(lf == LIGHT_LAMP ?
+								voxel_light_source(dst_v) : 0), false});
 					}
 					// A dug blocker starts dark; see set_voxel()
 					set_light(nv, (!old_transparent && now_transparent) ? 0 :
@@ -3542,16 +3556,24 @@ struct CInstance: public voxelworld::Instance
 	// BUILDAT_SKY_COLUMN=1 turns it on. Off, the rule is what it was: the
 	// top of the section region and nothing else, which on a Luanti-sized
 	// map never fires.
-	bool is_below_open_sky(const pv::Vector3DInt32 &p)
+	// **The column is only asked for a relight** (from_relight): during
+	// worldgen the column above a voxel is half made and open_sky_from()
+	// then calls a cave open sky. The region's own top row is asked for
+	// every seed, as it always was -- on a small world it is the sky the
+	// generator's own flood comes from, and taking it away from
+	// generation seeds left games/voxel_lighting 126560 voxels dark
+	// (2026-09-28).
+	bool is_below_open_sky(const pv::Vector3DInt32 &p, bool from_relight)
 	{
 		static const bool off = !(getenv("BUILDAT_SKY_COLUMN") != nullptr &&
 				ss_(getenv("BUILDAT_SKY_COLUMN")) == "1");
-		if(off){
-			const int section_h = m_section_size_chunks.getY() *
-					m_chunk_size_voxels.getY();
-			return p.getY() == (m_section_region.getUpperCorner().getY() + 1) *
-					section_h - 1;
-		}
+		const int section_h = m_section_size_chunks.getY() *
+				m_chunk_size_voxels.getY();
+		if(p.getY() == (m_section_region.getUpperCorner().getY() + 1) *
+				section_h - 1)
+			return true;
+		if(off || !from_relight)
+			return false;
 		return p.getY() >= open_sky_from(p.getX(), p.getZ());
 	}
 
@@ -3952,7 +3974,8 @@ struct CInstance: public voxelworld::Instance
 					l = 0;
 				}
 
-				if(field == LIGHT_SKY && is_below_open_sky(seed.p))
+				if(field == LIGHT_SKY &&
+						is_below_open_sky(seed.p, seed.from_relight))
 					l = flood_max();
 				if(emitted > l)
 					l = emitted;
