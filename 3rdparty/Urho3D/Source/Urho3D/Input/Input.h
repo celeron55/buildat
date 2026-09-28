@@ -214,6 +214,12 @@ public:
     void RemoveAllGestures();
     /// Set the mouse cursor position. Uses the backbuffer (Graphics width/height) coordinates.
     void SetMousePosition(const IntVector2& position);
+    /// Buildat: a virtual mouse position for a scripted client. While set, GetMousePosition() returns it and SetMousePosition() moves it instead of warping the real cursor, which stays the desk's.
+    void SetVirtualMousePosition(const IntVector2& position);
+    /// buildat [FOCUS_LOG]: a word for the log on the next SetMouseVisible/SetMouseMode.
+    void SetMouseChangeReason(const String& reason) { mouseChangeReason_ = reason; }
+    /// Buildat: back to the real cursor.
+    void ClearVirtualMousePosition();
     /// Center the mouse position.
     void CenterMousePosition();
 
@@ -302,6 +308,18 @@ public:
 
     /// Treat the window as having input focus whether or not the OS gives it any. For injecting input into a window that must not steal focus from whatever the user is doing.
     void SetForceInputFocus(bool enable) { forceInputFocus_ = enable; }
+    /// buildat: add relative mouse motion straight into this frame's
+    /// accumulator, for a scripted run's look. An SDL_MOUSEMOTION pushed
+    /// into the queue can be flushed out of it again before Urho ever
+    /// sees it -- which silently lost a sequence's first mouse_move --
+    /// and a scripted look wants the motion to be exactly what was asked
+    /// for, not whatever survived.
+    void AddMouseMove(int dx, int dy)
+    {
+        mouseMove_.x_ += dx;
+        mouseMove_.y_ += dy;
+        mouseMoveScaled_ = false;
+    }
 
     /// Return whether input focus is being forced.
     bool GetForceInputFocus() const { return forceInputFocus_; }
@@ -397,6 +415,12 @@ private:
     IntVector2 lastMousePosition_;
     /// Last mouse position before being set to not visible.
     IntVector2 lastVisibleMousePosition_;
+    /// Buildat: the virtual mouse position, if any; see SetVirtualMousePosition().
+    IntVector2 virtualMousePosition_;
+    bool virtualMouse_{};
+    /// buildat [FOCUS_LOG]: why the cursor is about to change, and why focus was gained.
+    String mouseChangeReason_;
+    const char* focusReason_{};
     /// Mouse movement since last frame.
     IntVector2 mouseMove_;
     /// Mouse wheel movement since last frame.

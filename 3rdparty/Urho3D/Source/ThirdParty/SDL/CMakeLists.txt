@@ -1133,7 +1133,10 @@ elseif(WINDOWS)
       set(SOURCE_FILES ${SOURCE_FILES} ${DSOUND_AUDIO_SOURCES})
     endif()
 
-    if(HAVE_XAUDIO2_H)
+    # buildat: not under mingw-w64, whose current headers define XAudio2
+    # in a way this SDL's driver does not compile against (INTERFACE);
+    # DirectSound and WinMM remain, which is what a game needs
+    if(HAVE_XAUDIO2_H AND NOT MINGW)
       set(SDL_AUDIO_DRIVER_XAUDIO2 1)
       file(GLOB XAUDIO2_AUDIO_SOURCES ${SDL2_SOURCE_DIR}/src/audio/xaudio2/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${XAUDIO2_AUDIO_SOURCES})

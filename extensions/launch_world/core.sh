@@ -1,0 +1,125 @@
+#!/bin/bash
+# extensions/launch_world: the room's **core** check -- the one to run
+# after touching `world.lua`. One client, about a minute: the room boots,
+# draws, walks, browses, launches a game and comes back from it, and
+# nothing in the sandbox raised while it did.
+#
+#   extensions/launch_world/core.sh
+#
+# **check.sh is the whole of it** -- fifteen clients and twenty minutes --
+# and is what a push runs ([CHECK_COST], user 2026-09-25: "twenty minutes
+# is never the right answer to a one-word change"). This is what covers
+# an edit; the full one covers a release.
+#
+# tier: quick
+# cost: 60s
+# covers: games/digger/**
+# (it launches digger by name and leaves it again, which is that game's
+# client Lua starting, drawing and answering Escape)
+#
+# It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0
+# passed, 1 failed, 2 could not run, and a last line saying which.
+set -u
+here=$(cd "$(dirname "$0")/../.." && pwd)
+. "$here/builtin/luanti/test/lib.sh"
+out="$here/local/launch_world_core"; mkdir -p "$out"
+rm -f "$out"/*.png
+# The room's description asserts itself first, and costs nothing
+lua "$here/extensions/launch_world/room.lua" || exit 1
+cd "$here/Build"
+if pgrep -x buildat >/dev/null; then
+	echo "SKIP: a buildat client is already running" >&2; exit 2
+fi
+
+# **Waits, not delays**: the room says when it is up ("the room hums"),
+# when a game has the view and when it is back, so nothing here is timed
+# by guesswork -- which is what makes the same drive a minute on this
+# desk and still right at one frame a second in a container.
+{ echo "wait_log_any 60000 the room hums"
+	echo "delay 500"
+	echo "screenshot $out/stood.png"
+	# It starts in FPS mode: a held key walks, and a held key is frames
+	echo "keydown W"
+	echo "delay 900"
+	echo "keyup W"
+	echo "delay 400"
+	echo "screenshot $out/walked.png"
+	# Menu mode: typing a name flies to that orb and Return launches it
+	echo "event mode menu"
+	echo "delay 400"
+	for c in D I G G E R; do echo "keypress $c"; done
+	echo "delay 800"
+	echo "keypress Return"
+	echo "wait_log 120000 game: the room stands down"
+	echo "delay 1000"
+	# **The way out is the game's own** ([NO_WAY_BACK]): Escape runs
+	# buildat.leave(), which comes back here because there is a launcher
+	echo "keypress Escape"
+	echo "wait_log 20000 game: back in the room"
+	echo "delay 500"
+	echo "screenshot $out/back.png"
+	# **And the room is moving again**: nothing in it is ever static, so
+	# two frames apart say whether coming back left a screen on top of
+	# it ([MENU_STUCK]) or an animation stood down ([LAUNCH_FROZEN])
+	echo "delay 700"
+	echo "screenshot $out/back2.png"
+	echo "quit"
+	} > "$out/cmds.txt"
+# **A user directory of its own**: the desk's has saves and servers and
+# a room somebody moved things in, and a check that reads "the room
+# boots and launches" should not depend on any of it -- nor write its
+# own state into the player's ([SMOKE_PICK]: a runner has to mean the
+# same thing on another machine)
+mkdir -p "$out/user"
+run_client 40 "$out/cli.log" timeout 240 bin/buildat -m launch_world \
+	-D "$out/user" -w 640x360 -l 3 -c @"$out/cmds.txt" > /dev/null 2>&1
+sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli.log"
+
+contents=$(grep -a "launch_w.*: contents: " "$out/cli.log" | head -1 |
+	sed 's/.*contents: //')
+echo "contents: ${contents:-(nothing)}"
+# **A sandbox error is the way a room edit breaks**, and it is a line in
+# the log rather than a missing picture
+raised=$(grep -ac "Assignment to undeclared global\|pcall(): Runtime error" \
+	"$out/cli.log")
+launched=$(grep -ac "game: the room stands down" "$out/cli.log")
+back=$(grep -ac "game: back in the room" "$out/cli.log")
+python3 - "$out" <<'PY'
+import sys, os
+from PIL import Image, ImageChops
+out = sys.argv[1]
+def px(name):
+	p = os.path.join(out, name)
+	if not os.path.exists(p):
+		print("no picture: " + name)
+		return None
+	return Image.open(p).convert("L")
+a, b = px("stood.png"), px("walked.png")
+if a is None or b is None:
+	sys.exit(1)
+def moved_between(x, y):
+	if x is None or y is None:
+		return 0.0
+	hist = ImageChops.difference(x, y).histogram()
+	return sum(i * n for i, n in enumerate(hist)) / float(x.width * x.height)
+moved = moved_between(a, b)
+lit = sum(i * n for i, n in enumerate(a.histogram())) / float(a.width * a.height)
+drift = moved_between(px("back.png"), px("back2.png"))
+print("the room is lit to %.1f of a level, walking moved it by %.1f, and "
+		"it drifts by %.1f after a game" % (lit, moved, drift))
+# A black window is 0 either way; a frozen one moves by nothing
+sys.exit(0 if lit > 5.0 and moved > 1.0 and drift > 0.5 else 1)
+PY
+verdict_keep
+if [ "$verdict_rc" -ne 0 ] || [ "$raised" -gt 0 ] ||
+		[ "$launched" -lt 1 ] || [ "$back" -lt 1 ] ||
+		[ -z "$contents" ]; then
+	echo "the sandbox raised $raised times;" \
+			"a game was launched $launched and left $back times"
+	grep -a "Runtime error\|undeclared global" "$out/cli.log" | head -3
+	echo "FAIL: the room does not boot, draw, launch and come back"
+	exit 1
+fi
+echo "PASS: the room boots, walks, launches a game and comes back"
+exit 0
+# vim: set noet ts=4 sw=4:
