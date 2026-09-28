@@ -3496,7 +3496,14 @@ struct CInstance: public voxelworld::Instance
 				continue;
 			}
 			seen_data = true;
-			if(!voxel_transmits_light(
+			// **Sunlight's own predicate, not "light gets past".** Water
+			// and leaves let light through and still take a level off the
+			// sunlight going down a column, which is the difference
+			// voxel_propagates_sunlight() carries: water_light.sh reads a
+			// water column that falls a level a node, and with
+			// voxel_transmits_light() here the walk went straight through
+			// it and seeded the whole column at fifteen.
+			if(!voxel_propagates_sunlight(
 					buf.volume->sample_at(light_local_p(q, chunk_p)))){
 				from = y + 1;
 				break;
