@@ -370,14 +370,28 @@ local world_render_path = nil
 do
 	local zone_node = scene:CreateChild("Zone")
 	zone = zone_node:CreateComponent("Zone")
-	zone.boundingBox = magic.BoundingBox(-1000, 1000)
+	-- **Big enough for a Luanti world.** A thousand either way is a
+	-- hundredth of one: a chunk past it is inside no zone at all and is
+	-- lit by Urho's default zone, whose ambient nothing here ever sets.
+	-- extensions/luanti_client's is a hundred thousand and has been.
+	zone.boundingBox = magic.BoundingBox(-100000, 100000)
 	zone.ambientColor = SKY_AMBIENT
 	zone.fogColor = magic.Color(0.60, 0.72, 0.88)
 	-- Seven tenths of the way out, which is where
 	-- extensions/luanti_client's starts; see [LIGHT_SHAPE]
 	zone.fogStart = FAR_CLIP * 0.7
 	zone.fogEnd = FAR_CLIP
-	zone.priority = -1
+	-- **Above Urho's default zone, which is 0** ([SKY_COLUMN_CAVE],
+	-- 2026-09-28, and it was -1 until then). View::FindZone() keeps a
+	-- drawable's existing zone whenever that zone's priority is at least
+	-- the highest in view, so a chunk that once landed on the default
+	-- zone -- priority 0, and nothing in this game ever sets its ambient
+	-- -- kept it for as long as it was loaded. The picture: at 02:00 the
+	-- hill in front of the player was lit like noon and the ground beyond
+	-- it was black, with a hard edge, because the two were on different
+	-- zones. One is enough above; the number leaves room for a game's own.
+	zone.priority = tonumber(buildat.get_env("BUILDAT_LUANTI_ZONE_PRIO") or "")
+			or 1
 	zone.override = true
 	-- What the voxel shader reflects; without it its IBL term samples
 	-- nothing and every reflection is black
