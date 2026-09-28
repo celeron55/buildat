@@ -463,7 +463,13 @@ void VS()
             float n3 = sky.x * sky.x * sky.x;
             float interior = isPacked ?
                 shade * (1.0 - iColor.g) * n3 * n3 * (1.0 - step(0.97, sky.x)) : 0.0;
-            vVertexLight = cShadowKinds > 0.5 ? iColor.rgb : baked +
+            // The diagnostics ride on this varying rather than one of
+            // their own: 1 is the mesher's terms, 3 is what the nibbles
+            // say (the flood's share, the sky share it becomes, the
+            // shade), and 2 wants the light itself, which is the sum
+            // below ([UNDERGROUND_LIGHT]).
+            vVertexLight = cShadowKinds > 2.5 ? vec3(sky.x, sky.y, shade) :
+                cShadowKinds > 0.5 && cShadowKinds < 1.5 ? iColor.rgb : baked +
                 cBounceLight * (0.15 * cChamberLight + 1.0 * sky.x) *
                     (1.0 - ShapeSkylight(sky.x)) * shade +
                 cGroundLight * (0.5 - 0.5 * vNormal.y) *
@@ -972,7 +978,10 @@ void PS()
             float skyVis = 1.0;
         #endif
         if(cShadowKinds > 0.5){
-            gl_FragColor = vec4(vVertexLight, 1.0);
+            // 2: the whole light a face gets, the sky share included --
+            // the same sum the line below draws with, without the albedo
+            gl_FragColor = vec4(cShadowKinds > 1.5 && cShadowKinds < 2.5 ?
+                vVertexLight + vSkyAmbient * skyVis : vVertexLight, 1.0);
             return;
         }
         vec3 finalColor = (vVertexLight + vSkyAmbient * skyVis) * diffColor.rgb;
@@ -1062,7 +1071,15 @@ void PS()
         if(cGrayByLight > 0.0)
         {
             const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
-            float lightL = dot(vVertexLight, LUMA);
+            // **The whole light, the sky's share included.** vVertexLight
+            // is only part of it -- the lamp, the bounce, the ground and
+            // the cave floor -- and the sky is the term that lights an
+            // open shadow, so keying on vVertexLight alone drew every
+            // daylight shadow and every cave mouth gray whatever the sky
+            // was giving it ([UNDERGROUND_LIGHT], the playtest fault).
+            // The same sum the colour below is drawn with. A sealed place
+            // has no sky share, so nothing there moves.
+            float lightL = dot(vVertexLight + vSkyAmbient * skyVis, LUMA);
             float floorL = max(dot(cCaveAmbient, LUMA), 1e-6);
             float keep = smoothstep(floorL, cGrayByLight * floorL, lightL);
             finalColor = mix(vec3(dot(finalColor, LUMA)), finalColor, keep);

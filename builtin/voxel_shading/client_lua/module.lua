@@ -858,8 +858,19 @@ end
 -- The shadow-kind diagnostic: the vertex colour drawn as the mesher wrote
 -- it under BUILDAT_LUANTI_SHADOW_KINDS, one occlusion term per channel,
 -- no albedo, no ambient. See [PBR_FIT] 2c.
+--
+-- **Three settings, not two** ([UNDERGROUND_LIGHT]'s playtest fault):
+--   1 (or true)  the vertex colour, one occlusion term per channel;
+--   2            the light a face gets -- every ambient term summed, the
+--                sky share included -- with no albedo and no sun, which
+--                is the number the gray keys on and the number a "the
+--                shadows are unlit" report is about;
+--   3            what the nibbles say: the flood's share in red, the sky
+--                share it becomes in green, the mesher's shade in blue.
+-- Read the picture with BUILDAT_LUANTI_LINEAR=1 and a pinned key, or the
+-- curve is on the numbers.
 function M.set_shadow_kinds(on)
-	shadow_kinds = on and 1.0 or 0.0
+	shadow_kinds = type(on) == "number" and on or (on and 1.0 or 0.0)
 end
 
 function M.set_sky_light(k)

@@ -1202,6 +1202,21 @@ luanti.sub_world_info(function(info)
 		if luanti.exposure_pin then luanti.exposure_pin(0.18) end
 		return
 	end
+	-- pbr_debug_light / pbr_debug_nibbles: pbr's path and pbr's mesh, with
+	-- the shader drawing a number instead of the world
+	-- ([UNDERGROUND_LIGHT]). `light` is every ambient term a face gets
+	-- summed -- the sky share, the bounce, the ground, the cave floor, the
+	-- lamp -- with no albedo and no sun: the light a "the shadows are not
+	-- lit" report is about, and what the gray keys on. `nibbles` is what
+	-- the mesher wrote: the flood's share in red, the sky share it becomes
+	-- in green, the shade in blue. Both want BUILDAT_LUANTI_LINEAR=1
+	-- beside them, or the curve and the meter are on the reading; the key
+	-- is pinned so that one on the screen is one in the sky's units.
+	if mode == "pbr_debug_light" or mode == "pbr_debug_nibbles" then
+		voxel_shading.set_shadow_kinds(mode == "pbr_debug_light" and 2 or 3)
+		if luanti.exposure_pin then luanti.exposure_pin(0.18) end
+		return
+	end
 	-- On sky_now rather than locals of their own: init.lua's main chunk is at
 	-- Lua 5.1's two hundred locals and has been for a while
 	sky_now.unlit = true
@@ -1899,6 +1914,25 @@ local function update_sky(dt)
 			voxel_shading.set_chamber_light(chamber)
 		end
 		cave_ambient_now = chamber
+		-- **Every term of the light, said out loud** under
+		-- BUILDAT_LUANTI_LIGHT_LOG=1 ([UNDERGROUND_LIGHT]): the sky
+		-- ambient a face with the whole sky gets, the bounce and the
+		-- ground in the same units, the cave floor and the two per-frame
+		-- camera readings that scale them. Read beside the
+		-- pbr_debug_light picture, which is what a face actually gets:
+		-- the picture says which term is missing and this says why.
+		-- Once a second, and nothing at all unless it is asked for.
+		if buildat.get_env("BUILDAT_LUANTI_LIGHT_LOG") == "1" and
+				(sky_now.light_log_due or 0) <= os.time() then
+			sky_now.light_log_due = os.time() + 1
+			log:info(string.format("light terms: sky %.3f/%.3f/%.3f " ..
+					"bounce %.3f ground %.3f floor %.3f " ..
+					"chamber_read %.3f dark %.3f chamber %.3f sky_above %.3f",
+					c.r * k, c.g * k, c.b * k, c.r * k * PHYS.bounce,
+					PHYS.ground.r * (sun * sc.r + c.r * k),
+					floor_f * dark, chamber_read, dark, chamber,
+					voxel_shading.sky_visibility_above()))
+		end
 		local abl = buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""
 		if abl:find("amb") then zone.ambientColor = magic.Color(0, 0, 0) end
 		if abl:find("bounce") then voxel_shading.set_bounce_light(0, 0, 0) end
