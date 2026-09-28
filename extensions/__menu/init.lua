@@ -208,7 +208,9 @@ function M.boot(launch_action)
 	end
 	-- And every launch action the tree offers, in the grid's order
 	local actions = api.launch_actions()
+	local played = 0
 	for _, action in ipairs(actions) do
+		if action.last_launched then played = played + 1 end
 		add(action.icon, action.label, function()
 			local ok, why = api.launch(action.key)
 			if not ok then
@@ -218,7 +220,8 @@ function M.boot(launch_action)
 	end
 
 	log:info("__menu: "..#items.." tiles, "..icons_drawn..
-			" of them with a picture and "..icons_missing.." without")
+			" of them with a picture and "..icons_missing.." without, "..
+			played.." launched before")
 
 	-- The selected entry's name and description, to the right of the logo
 	-- in the logo's row ([LAUNCH_DESC]): the label on the first line,

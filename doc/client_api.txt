@@ -315,12 +315,16 @@ these does one nameable thing, and none is a general capability, because every
 addition here is attack surface for every game too.
 
 buildat.safe.launch_actions() -> {{key, id, label, icon, kind, from,
-  description, order, category, significance}, ...}
+  description, order, category, significance, last_launched}, ...}
 - The launch grid's tiles as plain data: no functions and no paths. The list
   is what the sandboxed launcher files built ([LAUNCH_GRID]).
+- last_launched is unix seconds, and absent for a key that never was, so a
+  launch UI can sort by recency without keeping a list of its own
+  ([LAUNCH_API]). The list is <user>/launch_history.csv, the newest 200.
 buildat.safe.launch(key) -> true, or false and why
 - Run one of them. The key is looked up in the table the trusted side built,
-  so a sandbox can name nothing that is not on the grid.
+  so a sandbox can name nothing that is not on the grid. The key and the
+  time go in the launch history.
 buildat.safe.list_games() -> {name, ...}
 buildat.safe.list_saves(game) -> {{name, ...}, ...}
 buildat.safe.launch_save(game, name) -> true, or false and why

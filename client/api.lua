@@ -178,10 +178,63 @@ end
 -- `ctx.launch` already ([LAUNCH_GRID]), so this is one step further
 -- out, not a new reach.
 local launch_runs = {}
+
+-- **A launch history, kept once for every launch UI** ([LAUNCH_API]).
+-- The API knew a save's modified time and nothing about what was
+-- launched when, so each launcher that wanted "recently played" had to
+-- keep a list of its own -- and a list per launcher is a list that
+-- disagrees with the next one. One line per key in
+-- <user>/launch_history.csv, "<unix seconds> <key>", and the oldest
+-- dropped past the cap: what was launched when is not worth more than
+-- a small file.
+local LAUNCH_HISTORY_MAX = 200
+local function launch_history_read()
+	local out = {}
+	local f = io.open(__buildat_get_path("user") .. "/launch_history.csv", "r")
+	if not f then
+		return out
+	end
+	for line in f:lines() do
+		local t, key = line:match("^(%d+) (.+)$")
+		if key then
+			out[key] = tonumber(t)
+		end
+	end
+	f:close()
+	return out
+end
+local function launch_history_note(key)
+	-- A key is written a line at a time, so one with a newline or a
+	-- control character in it would write a line this cannot read back
+	if key:find("%c") then
+		return
+	end
+	local seen = launch_history_read()
+	seen[key] = os.time()
+	local rows = {}
+	for k, t in pairs(seen) do
+		rows[#rows + 1] = {k = k, t = t}
+	end
+	table.sort(rows, function(a, b)
+		if a.t ~= b.t then return a.t > b.t end
+		return a.k < b.k
+	end)
+	local f = io.open(__buildat_get_path("user") .. "/launch_history.csv", "w")
+	if not f then
+		log:warning("launch: cannot write the launch history")
+		return
+	end
+	for i = 1, math.min(#rows, LAUNCH_HISTORY_MAX) do
+		f:write(rows[i].t .. " " .. rows[i].k .. "\n")
+	end
+	f:close()
+end
+
 buildat.safe.launch_actions = function()
 	local grid = dofile(buildat.extension_path("__menu") ..
 			"/launch_grid.lua")
 	local out = {}
+	local history = launch_history_read()
 	launch_runs = {}
 	for i, a in ipairs(grid.actions(log)) do
 		local key = tostring(a.from) .. "/" .. tostring(a.id or i)
@@ -193,7 +246,10 @@ buildat.safe.launch_actions = function()
 			-- category is an open set and the significance a number to
 			-- rank and scale by within one. Both are plain data and both
 			-- may be absent.
-			category = a.category, significance = a.significance}
+			category = a.category, significance = a.significance,
+			-- When this key was last launched, in unix seconds, or
+			-- absent for one that never was
+			last_launched = history[key]}
 	end
 	return out
 end
@@ -208,6 +264,7 @@ buildat.safe.launch = function(key)
 	if not run then
 		return false, "launch(" .. key .. "): no such action"
 	end
+	launch_history_note(key)
 	run()
 	return true
 end
