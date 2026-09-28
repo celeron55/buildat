@@ -3379,12 +3379,59 @@ struct CInstance: public voxelworld::Instance
 	}
 
 	// Voxels in the topmost row of the world see the open sky
+	// Where the sky reaches a voxel from outside the world's own data.
+	//
+	// The top of the section region is the formal answer, and on a
+	// Luanti-sized map that is thirty thousand voxels up and never loaded,
+	// so it never fires: what lit a generated world was the mapgen writing
+	// the light once and the flood keeping it. That leaves a re-flood with
+	// no source of its own -- relight_if_stale() zeroes a section before it
+	// re-floods it, and it could only get the daylight back from a
+	// neighbouring section that still had some. A section zeroed while the
+	// lit one above it was out of memory stayed dark for ever and was then
+	// the dark neighbour for the next one relit beside it, which is a
+	// played world going dark in patches ([UNDERGROUND_LIGHT], 2026-09-28:
+	// a played VoxeLibre world read daylight 0 in open air thirty nodes
+	// above its own canopy where the same seed generated afresh reads 15,
+	// and core.fix_light() could not bring it back).
+	//
+	// So the top of the *data* answers too: a voxel at the top of its own
+	// section whose column walks up through clear air and out of the loaded
+	// world is under the open sky. That is Luanti's own rule -- its
+	// propagateSunlight() takes the ignore above a chunk as sunlit -- and
+	// the same one mesh.cpp's horizon_says() uses where a ray leaves the
+	// volume ("walked out under the open sky").
+	//
+	// simplified: a cave section relit while the rock above it happens to
+	// be out of memory reads as sky. The sections above a loaded one are
+	// loaded too inside a load point's radius, so what this answers in
+	// practice is the top of the loaded column; the principled version
+	// wants the column's surface height, which voxelworld does not keep --
+	// mesh.cpp's horizon map is where that lives.
+	//
+	// Only asked of a voxel at the top edge of its section, so the walk is
+	// one column per section face rather than one per seed.
 	bool is_below_open_sky(const pv::Vector3DInt32 &p)
 	{
-		int section_h = m_section_size_chunks.getY() *
+		const int section_h = m_section_size_chunks.getY() *
 				m_chunk_size_voxels.getY();
-		return p.getY() ==
+		const int32_t region_top =
 				(m_section_region.getUpperCorner().getY() + 1) * section_h - 1;
+		if(p.getY() == region_top)
+			return true;
+		const pv::Vector3DInt16 sp = section_of_voxel(p);
+		if(p.getY() != ((int32_t)sp.getY() + 1) * section_h - 1)
+			return false;
+		for(int32_t y = p.getY() + 1; y <= region_top; y++){
+			const pv::Vector3DInt32 q(p.getX(), y, p.getZ());
+			const pv::Vector3DInt16 qs = section_of_voxel(q);
+			Section *section = get_section(qs);
+			if(section == nullptr || !section->loaded)
+				return true; // the data ends, and clear air is under it
+			if(!transmits_light_at(q))
+				return false;
+		}
+		return true;
 	}
 
 	struct LightNode
