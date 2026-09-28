@@ -8517,6 +8517,9 @@ struct Module: public interface::Module, public luanti::Interface
 		// then expects to be there
 		run_chunk_file(module_path()+"/lua/bootstrap.lua");
 		run_chunk_file(module_path()+"/vendor/builtin/init.lua");
+		// And what this tree adds to what the builtin registered: after it,
+		// because it changes commands the builtin has already put there
+		run_chunk_file(module_path()+"/lua/chatcommands.lua");
 		for(const auto &pair : m_pending_lua)
 			run_chunk_string(pair.first, pair.second);
 		m_pending_lua.clear();
