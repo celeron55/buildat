@@ -3039,8 +3039,9 @@ build_palette = function()
 	local cur = default_material()
 	local entries = doc.of_type("palette")
 	for _, p in ipairs(entries) do
-		local r = panel.row(palette_win)
-		panel.swatch(r, palette_rgb(p.id), function()
+		panel.swatch_row(palette_win, palette_rgb(p.id), "#" .. p.id .. "  " ..
+				p.strs.name .. "  (" .. MATERIAL_KINDS[p.ints.kind] .. ")",
+				function()
 			-- A second click on the same entry soon after is a double click:
 			-- the entry goes on what is selected, as Apply does
 			local now = buildat.get_time_us()
@@ -3061,10 +3062,7 @@ build_palette = function()
 			end
 			S.material = p.id
 			refresh_panels()
-		end, p.id == cur)
-		panel.label(r, "#" .. p.id .. "  " .. p.strs.name .. "  (" ..
-				MATERIAL_KINDS[p.ints.kind] .. ")",
-				p.id == cur and magic.Color(1.0, 0.85, 0.3) or nil)
+		end, p.id == cur, p.id == cur and magic.Color(1.0, 0.85, 0.3) or nil)
 	end
 	local e = doc.ents[cur]
 	local function set(ints, strs)

@@ -74,16 +74,23 @@ function M.field(parent, label, value, on_finish, width)
 	return e
 end
 
--- A colour swatch: a button with the colour on its face
-function M.swatch(parent, rgb, on_click, down)
+-- A palette row: one button with the colour and the label on it, so the
+-- label is as much the thing to click as the colour is
+function M.swatch_row(parent, rgb, text, on_click, down, text_color)
 	local b = parent:CreateChild("Button")
 	b:SetStyleAuto()
-	b:SetFixedSize(24, 24)
+	b:SetLayout(magic.LM_HORIZONTAL, 6, magic.IntRect(4, 3, 6, 3))
+	b.minHeight = 24
 	local face = b:CreateChild("BorderImage")
 	face:SetFixedSize(16, 16)
-	face:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	face.color = magic.Color(math.floor(rgb / 65536) % 256 / 255,
 			math.floor(rgb / 256) % 256 / 255, rgb % 256 / 255)
+	local t = b:CreateChild("Text")
+	t:SetStyleAuto()
+	t:SetText(text)
+	if text_color then
+		t:SetColor(text_color)
+	end
 	if down then
 		b.selected = true
 	end
