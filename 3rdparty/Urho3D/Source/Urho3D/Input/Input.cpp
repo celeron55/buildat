@@ -220,6 +220,23 @@ EM_BOOL EmscriptenInput::HandlePointerLockChange(int eventType, const Emscripten
         // Pointer Lock is now inactive
         inputInst->emscriptenPointerLock_ = false;
 
+        // buildat [WEB_CLIENT]: the browser ends the lock itself on Esc and
+        // keeps the key, so a game that still wanted the lock is given the
+        // Esc it did not see -- what the user asked for on the desktop
+        if (inputInst->mouseMode_ == MM_RELATIVE && !inputInst->emscriptenExitingPointerLock_)
+        {
+            SDL_Event evt;
+            SDL_zero(evt);
+            evt.key.keysym.sym = SDLK_ESCAPE;
+            evt.key.keysym.scancode = SDL_SCANCODE_ESCAPE;
+            evt.type = SDL_KEYDOWN;
+            evt.key.state = SDL_PRESSED;
+            SDL_PushEvent(&evt);
+            evt.type = SDL_KEYUP;
+            evt.key.state = SDL_RELEASED;
+            SDL_PushEvent(&evt);
+        }
+
         if (inputInst->mouseMode_ == MM_RELATIVE)
             inputInst->SetMouseModeEmscriptenFinal(MM_FREE, suppressMouseModeEvent_);
         else if (inputInst->mouseMode_ == MM_ABSOLUTE)

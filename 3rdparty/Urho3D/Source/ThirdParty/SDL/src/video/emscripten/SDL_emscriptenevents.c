@@ -557,9 +557,10 @@ Emscripten_HandleResize(int eventType, const EmscriptenUiEvent *uiEvent, void *u
             double w = window_data->window->w;
             double h = window_data->window->h;
 
-            if(window_data->external_size) {
-                emscripten_get_element_css_size(NULL, &w, &h);
-            }
+            /* buildat [WEB_CLIENT]: the page sizes the canvas by CSS to the
+               browser window, and at the start the two sizes are the same, so
+               external_size was false and a resize never took */
+            emscripten_get_element_css_size(NULL, &w, &h);
 
             emscripten_set_canvas_size(w * window_data->pixel_ratio, h * window_data->pixel_ratio);
 

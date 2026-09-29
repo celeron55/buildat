@@ -2,6 +2,9 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "app.h"
 #include <cmath>
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#endif
 #include "core/log.h"
 #include "core/json.h"
 #include "client/config.h"
@@ -1321,6 +1324,18 @@ struct CApp: public App, public magic::Application
 
 	void lost_connection()
 	{
+#ifdef __EMSCRIPTEN__
+		// The web client has no menu to go back to and cannot close its
+		// tab ([WEB_CLIENT]): it stops, and the page says so and offers the
+		// reload that connects again. An engine shutdown here only died in
+		// its GL calls on the way out.
+		EM_ASM({
+			if(Module['onDisconnected'])
+				Module['onDisconnected']();
+		});
+		emscripten_pause_main_loop();
+		return;
+#endif
 		if(g_local_server.valid() && !g_local_server_log.empty()){
 			// The socket closes before the process is gone -- a crash
 			// writes its backtrace first -- so the verdict waits a moment

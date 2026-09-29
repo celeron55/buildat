@@ -52,6 +52,22 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none; }
 			status.textContent = 'The client stopped: ' + what +
 				'\nReload the page to start again.';
 		},
+		// The client calls this when the server has gone, and stops
+		onDisconnected: function(){
+			status.innerHTML = '';
+			status.appendChild(document.createTextNode(
+				'The server closed the connection.\n'));
+			var a = document.createElement('a');
+			a.href = location.href;
+			a.textContent = 'Reload to connect again';
+			a.style.color = '#8cf';
+			a.style.pointerEvents = 'auto';
+			status.appendChild(a);
+			status.style.background = 'rgba(0,0,0,0.6)';
+			status.style.padding = '16px';
+			if(document.exitPointerLock)
+				document.exitPointerLock();
+		},
 	};
 	canvas.addEventListener('click', function(){ canvas.focus(); });
 })();
