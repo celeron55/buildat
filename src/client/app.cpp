@@ -212,14 +212,15 @@ static ss_ preferences_path()
 }
 
 #ifdef __EMSCRIPTEN__
-// The page's hidden textarea follows the focused LineEdit ([WEB_KEYS] step
-// 2, src/client/web/index.html): its place, and its text and selection
-// unless it is a password's. The browser's IME, right click menu, select
-// all, copy, cut and paste then work on it, and what they did comes back
-// as actions, taken here once a frame:
-//   "i<text>"          type the text (a paste, an IME's)
-//   "s<start>,<len>"   select, in characters
-//   "x"                delete the selection (a cut)
+// The page's hidden stand-in follows the focused LineEdit ([WEB_KEYS] steps
+// 2 and 4, src/client/web/index.html): its place, text and selection, and
+// whether it is a password's. The browser's IME, a touchscreen's keyboard,
+// its right click menu, select all, copy, cut and paste then work on it,
+// and what they did comes back as actions, taken here once a frame:
+//   "v<caret>,<text>"  the field's text is now this, the caret there
+//   "i<text>"          type the text (a paste)
+//   "s<start>,<len>"   select
+// Positions are in characters.
 static void web_text_sync(magic::UI *ui)
 {
 	magic::UIElement *f = ui->GetFocusElement();
@@ -232,7 +233,13 @@ static void web_text_sync(magic::UI *ui)
 		});
 		if(!a)
 			break;
-		if(e && a[0] == 'i'){
+		const char *comma = strchr(a, ',');
+		if(e && a[0] == 'v' && comma && e->IsEditable()){
+			unsigned caret = (unsigned)atoi(a + 1);
+			e->SetText(magic::String(comma + 1));
+			e->SetCursorPosition(caret);
+			e->GetTextElement()->ClearSelection();
+		} else if(e && a[0] == 'i'){
 			e->OnTextInput(magic::String(a + 1));
 		} else if(e && a[0] == 's'){
 			unsigned start = 0, len = 0;
@@ -240,9 +247,6 @@ static void web_text_sync(magic::UI *ui)
 				e->SetCursorPosition(start + len);
 				e->GetTextElement()->SetSelection(start, len);
 			}
-		} else if(e && a[0] == 'x'){
-			if(e->GetTextElement()->GetSelectionLength())
-				e->OnKey(magic::KEY_DELETE, 0, 0);
 		}
 		free(a);
 	}
@@ -256,15 +260,14 @@ static void web_text_sync(magic::UI *ui)
 	magic::Text *t = e->GetTextElement();
 	unsigned len = t->GetSelectionLength();
 	unsigned start = len ? t->GetSelectionStart() : e->GetCursorPosition();
-	// A password is neither copied nor selected from the page
-	bool shown = e->IsTextCopyable() && !e->GetEchoCharacter();
+	// A password's stand-in is a password input: never copied, and a phone's
+	// keyboard does not suggest it
+	bool secret = !e->IsTextCopyable() || e->GetEchoCharacter();
 	EM_ASM({
 		if(window.buildatText)
-			buildatText.sync($0, $1, $2, $3, $4 ? UTF8ToString($4) : null, $5, $6,
-					$7);
-	}, p.x_ * k, p.y_ * k, size.x_ * k, size.y_ * k,
-			shown ? e->GetText().CString() : nullptr, start, len,
-			e->IsEditable() ? 1 : 0);
+			buildatText.sync($0, $1, $2, $3, UTF8ToString($4), $5, $6, $7, $8);
+	}, p.x_ * k, p.y_ * k, size.x_ * k, size.y_ * k, e->GetText().CString(),
+			start, len, e->IsEditable() ? 1 : 0, secret ? 1 : 0);
 }
 #endif
 
