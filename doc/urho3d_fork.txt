@@ -170,3 +170,40 @@ step costs what was allocated, 0.05 ms.
 Source/Urho3D/.soversion
 
 Needed by the bundled build; not in the 1.7.1 tarball.
+
+A current Emscripten: emcmake and SDL's web backend ([WEB_EMSDK])
+-----------------------------------------------------------------
+CMake/Modules/UrhoCommon.cmake, Source/ThirdParty/SDL/CMakeLists.txt,
+Source/ThirdParty/SDL/src/{audio,video}/emscripten/
+
+The web build is configured with emsdk's own toolchain (emcmake), which
+sets no EMSCRIPTEN_EMCC_VERSION, so the 1.7.1 check that added -std=c++03
+for an emcc older than 1.31.3 always fired: the engine is compiled as
+gnu++17 for the web as it is natively, and the removed link option
+--memory-init-file is gone. SDL 2.0.5's Emscripten backend called JS that
+Emscripten no longer has: Runtime.dynCall became wasmTable.get(f)(arg),
+Module['Pointer_stringify'] became UTF8ToString. Current clang rejects its
+mixed declarations under -Werror (now not an error on EMSCRIPTEN) and one
+EGL function pointer assignment (cast). Built with emsdk 3.1.60.
+
+GLES3 and WebGL 2 ([WEB_GLES3])
+-------------------------------
+Graphics/GraphicsDefs.h, Graphics/{Batch,Renderer,View,ShaderPrecache,
+Texture2DArray,Texture3D}.cpp, Graphics/OpenGL/OGL*.{cpp,h},
+bin/CoreData/Shaders/GLSL/{Basic,Lighting,LitSolid,PostProcess,Samplers,
+Text,Transform,Uniforms}.glsl, bin/CoreData/RenderPaths/DeferredHWDepth.xml,
+CMake/Modules/UrhoCommon.cmake
+
+Upstream's GLES3 support (urho3d/Urho3D PR #2536, 508c281a4, merged after
+1.9.0) ported by hand to 1.7.1's file layout. URHO3D_GLES3 (web only)
+includes GLES3/gl3.h, asks SDL for a 3.0 context, sets gl3Support and
+compiles shaders as "#version 300 es". URHO3D_GLES2 now marks the GLES2-only
+paths that GL_ES_VERSION_2_0 used to (GLES3's header defines both), and
+DESKTOP_GRAPHICS_OR_GLES3 what desktop GL and GLES3 share. The shaders are
+upstream's, applied as a patch; they read DESKTOP_GRAPHICS/MOBILE_GRAPHICS,
+which ShaderVariation now defines on every platform -- without it desktop
+directional lights would drop to one shadow cascade. Two departures from
+upstream: Texture2D::Create_OGL keeps the WebGL 1 depth path under
+URHO3D_GLES2 (upstream's DESKTOP_GRAPHICS_OR_GLES3 switched WebGL 1 to the
+desktop one), and the GLES3 path draws instanced and sets divisors with the
+core functions. The engine sample and gradle parts of the PR are left out.

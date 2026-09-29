@@ -28,7 +28,7 @@
 #include "SDL_emscriptenvideo.h"
 #include "SDL_emscriptenopengles.h"
 
-#define LOAD_FUNC(NAME) _this->egl_data->NAME = NAME;
+#define LOAD_FUNC(NAME) _this->egl_data->NAME = (void *)NAME; /* buildat: a cast for current clang */
 
 /* EGL implementation of SDL OpenGL support */
 
