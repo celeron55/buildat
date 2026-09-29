@@ -1,0 +1,192 @@
+<!doctype html>
+<!-- The web client's page ([WEB_CLIENT] in doc/plan/web_client_plan.md).
+The game server serves this, buildat.js, buildat.wasm and buildat.data, and
+the client connects back to the server the page came from. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buildat</title>
+<style>
+html, body { margin: 0; height: 100%; background: #202020; overflow: hidden; }
+canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+#text { position: fixed; display: none; margin: 0; padding: 0; border: 0;
+	resize: none; overflow: hidden; white-space: pre; opacity: 0;
+	font-size: 16px; pointer-events: none; }
+#status { position: fixed; left: 0; right: 0; top: 40%; text-align: center;
+	color: #ddd; font: 16px sans-serif; white-space: pre-wrap; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+<textarea id="text" autocomplete="off" autocorrect="off" autocapitalize="off"
+	spellcheck="false" tabindex="-1"></textarea>
+<div id="status">Loading...</div>
+<script>
+(function(){
+	var status = document.getElementById('status');
+	var canvas = document.getElementById('canvas');
+	var https = location.protocol === 'https:';
+	// The server that served this page; behind a reverse proxy the port is
+	// the page's, 443 or 80 when the address has none
+	var port = location.port || (https ? '443' : '80');
+	var host = location.hostname.indexOf(':') >= 0 ?
+			'[' + location.hostname + ']' : location.hostname;
+	var args = ['-P', '/buildat', '-U', '/urho', '-C', '/buildat/cache',
+		'-D', '/buildat/user', '-s', host + ':' + port,
+		'-w', window.innerWidth + 'x' + window.innerHeight];
+	// Anything after ? is passed on as more arguments, space separated:
+	// ?-l 4 for a verbose log
+	var extra = decodeURIComponent(location.search.substring(1));
+	if(extra)
+		args = args.concat(extra.split(' ').filter(function(a){ return a; }));
+	window.Module = {
+		canvas: canvas,
+		arguments: args,
+		// Emscripten's sockets are WebSockets to this address and port
+		websocket: { url: https ? 'wss://' : 'ws://', subprotocol: 'binary' },
+		preRun: [function(){
+			FS.mkdir('/buildat/cache');
+			FS.mkdir('/buildat/user');
+			// Whether the page, and so its WebSocket, is TLS: what a game
+			// tells its user about a password it sends ([FP_ACCESS])
+			Module.ENV.BUILDAT_PAGE_HTTPS = https ? '1' : '0';
+		}],
+		print: function(t){ console.log(t); },
+		printErr: function(t){ console.warn(t); },
+		setStatus: function(t){ status.textContent = t; },
+		onRuntimeInitialized: function(){ status.textContent = ''; },
+		onAbort: function(what){
+			status.textContent = 'The client stopped: ' + what +
+				'\nReload the page to start again.';
+		},
+		// The client calls this when the server has gone, and stops
+		onDisconnected: function(){
+			status.innerHTML = '';
+			status.appendChild(document.createTextNode(
+				'The server closed the connection.\n'));
+			var a = document.createElement('a');
+			a.href = location.href;
+			a.textContent = 'Reload to connect again';
+			a.style.color = '#8cf';
+			a.style.pointerEvents = 'auto';
+			status.appendChild(a);
+			status.style.background = 'rgba(0,0,0,0.6)';
+			status.style.padding = '16px';
+			if(document.exitPointerLock)
+				document.exitPointerLock();
+		},
+	};
+	// The focused text field's stand-in ([WEB_KEYS] step 2): the browser's
+	// focus is on it while a LineEdit has the game's, so that an IME
+	// composes into it, and its right click menu, select all, copy, cut and
+	// paste are the browser's own. src/client/app.cpp syncs it each frame
+	// and takes what it did. Indices there are characters, here UTF-16.
+	var ta = document.getElementById('text');
+	var active = false, composing = false, actions = [];
+	function units(s, chars){ return Array.from(s).slice(0, chars).join('').length; }
+	function chars(s, u){ return Array.from(s.slice(0, u)).length; }
+	function selected(){
+		// The user's own selection (Ctrl+A, the menu's Select All) is the field's
+		var v = ta.value;
+		if(!active || composing || !ta.dataset.shown)
+			return;
+		var a = ta.selectionStart, b = ta.selectionEnd;
+		if(a + ',' + b === ta.dataset.sel)
+			return;
+		ta.dataset.sel = a + ',' + b;
+		actions.push('s' + chars(v, a) + ',' + (chars(v, b) - chars(v, a)));
+	}
+	window.buildatText = {
+		take: function(){ return actions.length ? actions.shift() : null; },
+		sync: function(x, y, w, h, text, start, len, editable){
+			if(x === null){
+				if(active){
+					active = false;
+					ta.style.display = 'none';
+					canvas.focus();
+				}
+				return;
+			}
+			var k = canvas.clientWidth / canvas.width;
+			var st = ta.style;
+			var box = [x * k, y * k, w * k, h * k].map(Math.round).join(',');
+			if(ta.dataset.box !== box){
+				ta.dataset.box = box;
+				var b = box.split(',');
+				st.left = b[0] + 'px'; st.top = b[1] + 'px';
+				st.width = b[2] + 'px'; st.height = b[3] + 'px';
+			}
+			if(!active){
+				active = true;
+				st.display = 'block';
+			}
+			if(document.activeElement !== ta)
+				ta.focus({preventScroll: true});
+			ta.readOnly = !editable;
+			// Setting the value would end an IME's composition
+			if(composing)
+				return;
+			var v = text === null ? '' : text;
+			if(ta.value !== v)
+				ta.value = v;
+			ta.dataset.shown = text === null ? '' : '1';
+			if(text !== null){
+				var a = units(v, start), b = units(v, start + len);
+				if(ta.selectionStart !== a || ta.selectionEnd !== b)
+					ta.setSelectionRange(a, b);
+				ta.dataset.sel = a + ',' + b;
+			}
+		},
+	};
+	ta.addEventListener('select', selected);
+	document.addEventListener('selectionchange', selected);
+	ta.addEventListener('compositionstart', function(){ composing = true; });
+	ta.addEventListener('compositionend', function(e){
+		composing = false;
+		if(e.data)
+			actions.push('i' + e.data);
+	});
+	ta.addEventListener('paste', function(e){
+		e.preventDefault();
+		// A line edit is one line
+		var t = e.clipboardData.getData('text/plain').replace(/[\r\n\t]+/g, ' ');
+		if(t && !ta.readOnly)
+			actions.push('i' + t);
+	});
+	// The browser copies what is selected here, which is the field's
+	ta.addEventListener('cut', function(){
+		if(!ta.readOnly)
+			actions.push('x');
+	});
+	// The menu's Delete; the keys' own deletes are the game's, claimed
+	ta.addEventListener('input', function(e){
+		if(!composing && e.inputType && e.inputType.indexOf('delete') === 0 &&
+				e.inputType !== 'deleteByCut')
+			actions.push('x');
+	});
+	// A right click on the focused field opens the browser's menu for it:
+	// the textarea takes the press, and the game does not see it
+	canvas.addEventListener('mousedown', function(e){
+		if(e.button !== 2 || !active)
+			return;
+		var r = ta.getBoundingClientRect();
+		if(e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top ||
+				e.clientY >= r.bottom)
+			return;
+		e.stopImmediatePropagation();
+		ta.style.pointerEvents = 'auto';
+	});
+	ta.addEventListener('contextmenu', function(){
+		setTimeout(function(){ ta.style.pointerEvents = 'none'; }, 0);
+	});
+	canvas.addEventListener('click', function(){
+		(active ? ta : canvas).focus({preventScroll: true});
+	});
+	// A middle click is the game's, not the browser's paste or autoscroll
+	canvas.addEventListener('auxclick', function(e){ e.preventDefault(); });
+})();
+</script>
+<script src="buildat.js"></script>
+</body>
+</html>
