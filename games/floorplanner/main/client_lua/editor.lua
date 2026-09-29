@@ -3011,6 +3011,18 @@ build_palette = function()
 	for _, p in ipairs(entries) do
 		local r = panel.row(palette_win)
 		panel.swatch(r, palette_rgb(p.id), function()
+			-- A second click on the same entry soon after is a double click:
+			-- the entry goes on what is selected, as Apply does
+			local now = buildat.get_time_us()
+			local double = S.last_swatch == p.id and
+					now - (S.last_swatch_us or 0) < 400000
+			S.last_swatch, S.last_swatch_us = p.id, now
+			if double and not S.replacing and next(S.sel) then
+				S.material = p.id
+				apply_material()
+				refresh_panels()
+				return
+			end
 			if S.replacing then
 				if p.id ~= S.replacing then
 					replace_entry(S.replacing, p.id)
