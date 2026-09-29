@@ -3008,7 +3008,7 @@ local function build_props()
 	end
 end
 
-local build_palette
+local build_palette, picker_win, close_picker
 do
 	local MATERIAL_KINDS = {[0] = "Drywall", "Wood", "Stone", "Wallpaper", "Lamp",
 		"Glass", "Metal", "Tile", "Fabric", "Plaster"}
@@ -3077,6 +3077,75 @@ do
 		send(ops)
 end
 
+-- The colour picker ([FP_COLOR]) on one colour of one palette entry:
+-- S.picker = {ent, field, title, groups, query}. Its named colours are
+-- client_data/colors.txt's, the groups the field and the type call for.
+local named_colours = nil
+close_picker = function()
+	if picker_win then
+		picker_win:Remove()
+		picker_win = nil
+	end
+	S.picker = nil
+end
+local function build_picker()
+	if picker_win then
+		picker_win:Remove()
+		picker_win = nil
+	end
+	local pk = S.picker
+	local e = pk and doc.ents[pk.ent]
+	if not e then
+		S.picker = nil
+		return
+	end
+	if not named_colours then
+		named_colours = {}
+		local text = buildat.get_file_content("main/colors.txt") or ""
+		for line in text:gmatch("[^\r\n]+") do
+			local g, name, hex = line:match("^(%w+)|([^|]+)|(%x%x%x%x%x%x)$")
+			if g then
+				named_colours[#named_colours + 1] = {group = g, name = name,
+						rgb = tonumber(hex, 16)}
+			end
+		end
+	end
+	local named = {}
+	for _, n in ipairs(named_colours) do
+		for _, g in ipairs(pk.groups) do
+			if n.group == g then
+				named[#named + 1] = n
+			end
+		end
+	end
+	picker_win = panel.color_picker({title = pk.title, rgb = e.ints[pk.field],
+		named = named, query = pk.query,
+		on_pick = function(rgb)
+			send({{op = "set", ent = {id = pk.ent, ints = {[pk.field] = rgb}}}})
+		end,
+		on_query = function(q)
+			pk.query = q
+			build_picker()
+		end,
+		on_close = close_picker,
+		pointer = function()
+			local sc = magic.ui.scale
+			return S.mx / sc, S.my / sc
+		end})
+end
+
+-- Which named colours fit a field of an entry: a wood's own colour is a
+-- wood's, a stain a stain's, paint a paint's -- never the others'
+local function colour_groups(p, field)
+	if field == "base" then
+		return ({[1] = {"wood"}, [2] = {"stone"}, [5] = {"glass"},
+				[6] = {"metal"}, [7] = {"tile"}})[p.kind] or {"paint"}
+	elseif field == "color" then
+		return p.finish == 2 and {"stain"} or {"paint"}
+	end
+	return p.kind == 7 and {"grout"} or p.kind == 2 and {"stone"} or {"paint"}
+end
+
 build_palette = function()
 	if palette_win then
 		palette_win:Remove()
@@ -3113,6 +3182,10 @@ build_palette = function()
 		end, p.id == cur, p.id == cur and magic.Color(1.0, 0.85, 0.3) or nil)
 	end
 	local e = doc.ents[cur]
+	if S.picker and S.picker.ent ~= cur then
+		close_picker()
+	end
+	build_picker()
 	local function set(ints, strs)
 		send({{op = "set", ent = {id = cur, ints = ints, strs = strs}}})
 	end
@@ -3129,11 +3202,16 @@ build_palette = function()
 					roughness = d.roughness, specular = d.specular})
 		end)
 		local function colour(label, name)
-			panel.field(palette_win, label, string.format("%06x", p[name]),
-					function(t)
+			local _, r = panel.field(palette_win, label,
+					string.format("%06x", p[name]), function(t)
 				local v = tonumber(t, 16)
 				if v and v >= 0 and v <= 0xffffff then set({[name] = v}) end
-			end, 120)
+			end, 90)
+			panel.chip(r, p[name], 14, function()
+				S.picker = {ent = cur, field = name, groups = colour_groups(p, name),
+						title = e.strs.name .. ": " .. label}
+				build_picker()
+			end)
 		end
 		if p.kind ~= 4 then
 			colour("Own colour", "base")
@@ -3296,7 +3374,7 @@ end
 
 local function over_ui()
 	local s = magic.ui.scale
-	return panel.over({toolbar, props, palette_win, pause_win}, S.mx / s,
+	return panel.over({toolbar, props, palette_win, pause_win, picker_win}, S.mx / s,
 			S.my / s)
 end
 
@@ -4156,6 +4234,8 @@ do
 			-- in progress; at the bottom of a view, the pause menu
 			if S.paused then
 				close_pause()
+			elseif S.picker then
+				close_picker()
 			elseif S.captured then
 				S.crosshair = false
 				update_capture()

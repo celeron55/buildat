@@ -71,7 +71,7 @@ function M.field(parent, label, value, on_finish, width)
 		on_finish(e:GetText())
 		magic.ui:SetFocusElement(nil)
 	end)
-	return e
+	return e, r
 end
 
 -- A palette row: one button with the colour and the label on it, so the
@@ -98,6 +98,197 @@ function M.swatch_row(parent, rgb, text, on_click, down, text_color)
 		on_click()
 	end)
 	return b
+end
+
+local function to_color(rgb, a)
+	return magic.Color(math.floor(rgb / 65536) % 256 / 255,
+			math.floor(rgb / 256) % 256 / 255, rgb % 256 / 255, a or 1)
+end
+
+-- h, s, v in 0..1 to 0xrrggbb and back
+function M.hsv_rgb(h, s, v)
+	local i = math.floor(h * 6) % 6
+	local f = h * 6 - math.floor(h * 6)
+	local p, q, t = v * (1 - s), v * (1 - f * s), v * (1 - (1 - f) * s)
+	local c = ({{v, t, p}, {q, v, p}, {p, v, t}, {p, q, v}, {t, p, v},
+			{v, p, q}})[i + 1]
+	local function b(x) return math.floor(x * 255 + 0.5) end
+	return b(c[1]) * 65536 + b(c[2]) * 256 + b(c[3])
+end
+
+function M.rgb_hsv(rgb)
+	local r = math.floor(rgb / 65536) % 256 / 255
+	local g = math.floor(rgb / 256) % 256 / 255
+	local b = rgb % 256 / 255
+	local mx, mn = math.max(r, g, b), math.min(r, g, b)
+	local d = mx - mn
+	local h = 0
+	if d > 0 then
+		if mx == r then
+			h = ((g - b) / d) % 6
+		elseif mx == g then
+			h = (b - r) / d + 2
+		else
+			h = (r - g) / d + 4
+		end
+		h = h / 6
+	end
+	return h, mx > 0 and d / mx or 0, mx
+end
+
+for _, rgb in ipairs({0x000000, 0xffffff, 0xff0000, 0x00ff00, 0x0000ff,
+		0xc49a6c, 0x4f5357, 0x123456}) do
+	assert(M.hsv_rgb(M.rgb_hsv(rgb)) == rgb,
+			string.format("hsv round trip %06x", rgb))
+end
+
+-- The wheel: hue around, saturation outwards, at full value; the picker
+-- dims it by the value it has. The image is made once and a texture of it
+-- for each window: the engine frees a texture made in Lua with the last
+-- element that used it, and a kept handle then points at nothing.
+local WHEEL = 144
+local wheel_image = nil
+local function wheel()
+	if wheel_image then
+		local t = magic.Texture2D:new()
+		t:SetNumLevels(1)
+		assert(t:SetData(wheel_image), "Texture2D:SetData")
+		return t
+	end
+	local image = magic.Image:new()
+	assert(image:SetSize(WHEEL, WHEEL, 4), "Image:SetSize")
+	local c = (WHEEL - 1) / 2
+	for y = 0, WHEEL - 1 do
+		for x = 0, WHEEL - 1 do
+			local dx, dy = x - c, y - c
+			local s = math.sqrt(dx * dx + dy * dy) / c
+			if s <= 1 then
+				local rgb = M.hsv_rgb((math.atan2(-dy, dx) / (2 * math.pi)) % 1,
+						s, 1)
+				image:SetPixel(x, y, to_color(rgb))
+			else
+				image:SetPixel(x, y, magic.Color(0, 0, 0, 0))
+			end
+		end
+	end
+	wheel_image = image
+	return wheel()
+end
+
+-- A small button of one colour; on_hover(text) as the pointer comes on it
+function M.chip(parent, rgb, size, on_click, on_hover, text)
+	local b = parent:CreateChild("Button")
+	b:SetStyleAuto()
+	b:SetFixedSize(size + 4, size + 4)
+	b:SetLayout(magic.LM_HORIZONTAL, 0, magic.IntRect(2, 2, 2, 2))
+	local face = b:CreateChild("BorderImage")
+	face:SetFixedSize(size, size)
+	face.color = to_color(rgb)
+	magic.SubscribeToEvent(b, "Released", function() on_click() end)
+	if on_hover then
+		magic.SubscribeToEvent(b, "HoverBegin", function() on_hover(text) end)
+	end
+	return b
+end
+
+-- The colour picker ([FP_COLOR]): a window over the middle of the screen.
+-- o.title, o.rgb (the value now), o.named ({name, rgb} that fit this
+-- field), o.query (what the named ones are narrowed by), o.on_pick(rgb),
+-- o.on_query(text), o.on_close(), o.pointer() -> the pointer in UI
+-- coordinates (the sandbox's Input has no position, and a UI click event
+-- is not whitelisted). A pick is a whole new value; the window
+-- is drawn again from the value that comes back.
+local NAMED_SHOWN = 48
+function M.color_picker(o)
+	local w = M.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	w.minWidth = 340
+	M.label(w, o.title)
+	local h, s, v = M.rgb_hsv(o.rgb)
+	local name_line
+	local function hover(text)
+		name_line:SetText(text or "")
+	end
+
+	local top = M.row(w)
+	-- A button for its Released, with the wheel as a picture on it
+	local disk = top:CreateChild("Button")
+	disk:SetFixedSize(WHEEL, WHEEL)
+	-- A button with no style is a plain white quad under the picture
+	disk.color = magic.Color(1, 1, 1, 0)
+	local face = disk:CreateChild("BorderImage")
+	face:SetFixedSize(WHEEL, WHEEL)
+	face.texture = wheel()
+	face.color = magic.Color(v, v, v)
+	face.blendMode = magic.BLEND_ALPHA
+	magic.SubscribeToEvent(disk, "Released", function()
+		local at = disk.screenPosition
+		local c = (WHEEL - 1) / 2
+		local px, py = o.pointer()
+		local dx = px - at.x - c
+		local dy = py - at.y - c
+		local r = math.sqrt(dx * dx + dy * dy) / c
+		if r <= 1.02 then
+			-- A black one has no hue to keep; the wheel's pick is seen
+			o.on_pick(M.hsv_rgb((math.atan2(-dy, dx) / (2 * math.pi)) % 1,
+					math.min(1, r), v > 0.02 and v or 1))
+		end
+	end)
+	-- The value, top bright to bottom dark, in this hue and saturation
+	local values = top:CreateChild("UIElement")
+	values:SetLayout(magic.LM_VERTICAL, 0, magic.IntRect(0, 0, 0, 0))
+	for i = 0, 8 do
+		local vv = 1 - i / 8
+		M.chip(values, M.hsv_rgb(h, s, vv), 12, function()
+			o.on_pick(M.hsv_rgb(h, s, vv))
+		end, hover, string.format("Brightness %d %%", vv * 100 + 0.5))
+	end
+	local side = top:CreateChild("UIElement")
+	side:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(4, 0, 0, 0))
+	local now = side:CreateChild("BorderImage")
+	now:SetFixedSize(64, 40)
+	now.color = to_color(o.rgb)
+	local hex = side:CreateChild("LineEdit")
+	hex:SetStyleAuto()
+	hex.minHeight = 22
+	hex:SetFixedWidth(84)
+	hex.textSelectable = true
+	hex.textCopyable = true
+	hex:SetText(string.format("%06x", o.rgb))
+	magic.SubscribeToEvent(hex, "TextFinished", function()
+		local t = hex:GetText():gsub("^#", "")
+		local x = #t == 6 and tonumber(t, 16)
+		magic.ui:SetFocusElement(nil)
+		if x then o.on_pick(x) end
+	end)
+	M.button(side, "Done (Esc)", function() o.on_close() end)
+
+	if #o.named > 0 then
+		local shown = {}
+		local q = (o.query or ""):lower()
+		for _, n in ipairs(o.named) do
+			if q == "" or n.name:lower():find(q, 1, true) then
+				shown[#shown + 1] = n
+			end
+		end
+		-- Narrowing is worth offering only when there is more than a screen
+		if #o.named > NAMED_SHOWN or q ~= "" then
+			M.field(w, "Find", o.query or "", function(t) o.on_query(t) end, 160)
+		end
+		local row
+		for i, n in ipairs(shown) do
+			if i > NAMED_SHOWN then
+				M.label(w, (#shown - NAMED_SHOWN) .. " more; Find narrows them")
+				break
+			end
+			if (i - 1) % 12 == 0 then
+				row = M.row(w)
+			end
+			M.chip(row, n.rgb, 18, function() o.on_pick(n.rgb) end, hover,
+					string.format("%s  %06x", n.name, n.rgb))
+		end
+	end
+	name_line = M.label(w, "")
+	return w
 end
 
 -- Whether a point in UI coordinates is on one of the elements
