@@ -284,15 +284,20 @@ cam3d.nearClip = 0.05
 cam3d.farClip = 500
 cam3d.fov = 60
 
-local vp2d = magic.Viewport:new(scene, cam2d)
-local vp3d = magic.Viewport:new(scene, cam3d)
--- Deferred, so that a house full of lamps costs a light each rather than a
--- light for each thing each lights; the plan view stays forward, unlit
-do
-	local rp = vp3d.renderPath:Clone()
+-- A viewport for a view, made new each time: the engine frees one when the
+-- viewports it is shown in are replaced, so one kept in Lua to show again
+-- would be a dangling pointer. So would a render path.
+local function viewport_for(v)
+	if v == "2d" then
+		return magic.Viewport:new(scene, cam2d)
+	end
+	local vp = magic.Viewport:new(scene, cam3d)
+	-- Deferred, so that a house full of lamps costs a light each rather
+	-- than a light for each thing each lights; the plan view stays forward
+	local rp = vp.renderPath:Clone()
 	rp:Load(magic.cache:GetResource("XMLFile", "RenderPaths/Deferred.xml"))
-	vp3d.renderPath = rp
-	M.kept[#M.kept + 1] = rp
+	vp.renderPath = rp
+	return vp
 end
 
 --
@@ -2315,7 +2320,11 @@ local function set_view(v)
 		S.walk_released = false
 	end
 	S.view = v
-	magic.set_preferred_viewports({v == "2d" and vp2d or vp3d})
+	-- Only when it changes: the walk and the free camera share a viewport
+	if (v == "2d") ~= (S.shown_2d == true) or not S.shown then
+		S.shown, S.shown_2d = true, v == "2d"
+		magic.set_preferred_viewports({viewport_for(v)})
+	end
 	-- The plan view's look: flat colours, or the materials lit
 	local flat = v == "2d" and S.plan_look and 1 or 0
 	lit_material:SetShaderParameter("PlanLook", flat)
@@ -3375,12 +3384,20 @@ local function click()
 	end
 end
 
+-- The use key's, defined with it below
+local use
+
 function M.mouse_down(button)
 	if S.view == "walk" and S.walk_released and not over_ui() then
 		-- A click on the view takes the mouse back
 		S.walk_released = false
 		update_capture()
 		S.swallow_up = true
+		return
+	end
+	if S.captured and S.tool ~= "voxel" and button == magic.MOUSEB_RIGHT then
+		-- Walking: the right button is Luanti's use, a door or a switch
+		use()
 		return
 	end
 	if S.captured and S.tool == "voxel" then
@@ -3417,7 +3434,7 @@ function M.mouse_up(button)
 		S.swallow_up = false
 		return
 	end
-	if S.captured and S.tool == "voxel" then
+	if S.captured and (S.tool == "voxel" or button == magic.MOUSEB_RIGHT) then
 		return
 	end
 	if button == magic.MOUSEB_RIGHT then
@@ -3555,7 +3572,7 @@ end
 
 -- The use key: a door or window under the cursor opens or closes. For an
 -- editor for everybody; a viewer opens it for themselves.
-local function use()
+use = function()
 	local s = pick_surface()
 	local id = s and s.kind == "instance" and s.id
 	-- With nothing under the cursor, the switch selected
