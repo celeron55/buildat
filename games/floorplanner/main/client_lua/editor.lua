@@ -5397,7 +5397,9 @@ do
 			list[#list + 1] = sd
 		end
 		voxel_solids(x, z, list)
-		return geom.walk(list, x, z, feet, BODY_R, STEP, HEAD)
+		-- The world's ground, where the current layout has it
+		return geom.walk(list, x, z, feet, BODY_R, STEP, HEAD,
+				place.rel(place.WORLD, place.current()).y)
 	end
 
 	-- dt: seconds of walking at the keys' speed, or mm: that far, which is

@@ -368,9 +368,10 @@ end
 -- `feet`, among solids {pts (counter-clockwise), y0, y1, floor}: pushed out
 -- of what it would be in, then standing on the highest one under its
 -- footprint that it can step onto (at most `step` up). A floor is only
--- stood on, never in the way. Returns x, z and the new feet.
+-- stood on, never in the way. ground: the level with nothing on it, the
+-- world's ground (0 when omitted). Returns x, z and the new feet.
 -- simplified: it steps down at once rather than falling
-function M.walk(list, x, z, feet, r, step, head)
+function M.walk(list, x, z, feet, r, step, head, ground)
 	-- The nearest point of a solid's outline, its distance, and whether
 	-- (x, z) is inside it
 	local function nearest(pts)
@@ -402,7 +403,7 @@ function M.walk(list, x, z, feet, r, step, head)
 	-- Under the whole footprint, not its middle: a stair's tread is
 	-- narrower than the body, whose edge meets the riser after next before
 	-- its middle is over the next
-	local ground = 0
+	ground = ground or 0
 	for _, sd in ipairs(list) do
 		if sd.y1 <= feet + step and sd.y1 > ground then
 			local _, _, bd, inside = nearest(sd.pts)
@@ -627,6 +628,19 @@ do
 		x, z, feet = M.walk(list, x, z + 20, feet, 250, 250, 1750)
 	end
 	near(feet, 3000, "walked up the parametric stairs")
+
+	-- Down from an upper floor at 0 into a stairwell whose stairs start a
+	-- step below it, the world's ground 3000 mm down
+	list = {}
+	cell(-2000, -3000, 2000, 0, 0, 0, true)
+	for k = 0, 13 do
+		cell(-500, k * 250, 500, (k + 1) * 250, -3000, -200 - k * 200)
+	end
+	x, z, feet = 0, -1000, 0
+	for _ = 1, 150 do
+		x, z, feet = M.walk(list, x, z + 20, feet, 250, 250, 1750, -3000)
+	end
+	assert(feet < -1000, "walked down into the stairwell: feet at " .. feet)
 end
 
 do
