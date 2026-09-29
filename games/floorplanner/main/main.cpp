@@ -124,6 +124,15 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"mat_right", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 		{"mat_core", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 	}, {}, {}},
+	{"room", {
+		{"mat_floor", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
+		{"mat_ceiling", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
+		{"ceiling", 0, 10000, 0}, // 0: the plan's
+	}, {
+		{"name", "room"},
+	}, {
+		{"nodes", "node", OnDelete::Remove, 3},
+	}},
 	{"palette", {
 		{"kind", 0, MK_COUNT - 1, MK_DRYWALL},
 		{"color", 0, 0xffffff, 0xe8e4dc},

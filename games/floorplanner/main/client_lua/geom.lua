@@ -235,6 +235,49 @@ function M.point_in_polygon(px, pz, pts)
 	return inside
 end
 
+-- The polygon with each edge moved inward: offsets[i] for the edge from
+-- pts[i] to pts[i + 1]. pts counter-clockwise; inward is then left.
+function M.inset(pts, offsets)
+	local n = #pts
+	local lines = {}
+	for i = 1, n do
+		local p, q = pts[i], pts[i % n + 1]
+		local l = len(q[1] - p[1], q[2] - p[2])
+		local ux, uz = 0, 0
+		if l > 0 then
+			ux, uz = (q[1] - p[1]) / l, (q[2] - p[2]) / l
+		end
+		local o = offsets[i] or 0
+		lines[i] = {x = p[1] - uz * o, z = p[2] + ux * o, ux = ux, uz = uz}
+	end
+	local out = {}
+	for i = 1, n do
+		local a, b = lines[(i - 2) % n + 1], lines[i]
+		local x, z = intersect(a.x, a.z, a.ux, a.uz, b.x, b.z, b.ux, b.uz)
+		out[i] = x and {x, z} or {b.x, b.z}
+	end
+	return out
+end
+
+function M.is_ccw(pts)
+	return area2(pts) > 0
+end
+
+function M.centroid(pts)
+	local a, cx, cz = 0, 0, 0
+	for i = 1, #pts do
+		local p, q = pts[i], pts[i % #pts + 1]
+		local c = cross(p[1], p[2], q[1], q[2])
+		a = a + c
+		cx = cx + (p[1] + q[1]) * c
+		cz = cz + (p[2] + q[2]) * c
+	end
+	if math.abs(a) < 1e-9 then
+		return pts[1][1], pts[1][2]
+	end
+	return cx / (3 * a), cz / (3 * a)
+end
+
 function M.snap(v, step)
 	return math.floor(v / step + 0.5) * step
 end
@@ -317,6 +360,13 @@ do
 	end
 	near(sum, M.area(u), "U triangulated")
 	near(M.area(u), 7, "U area")
+
+	local sq = {{0, 0}, {4000, 0}, {4000, 4000}, {0, 4000}}
+	near(M.area(M.inset(sq, {50, 50, 50, 50})), 3900 * 3900, "inset square")
+	near(M.area(M.inset(sq, {100, 0, 0, 0})), 3900 * 4000, "inset one side")
+	local cx, cz = M.centroid(sq)
+	near(cx, 2000, "centroid x")
+	near(cz, 2000, "centroid z")
 
 	local x, z = M.snap_direction(0, 0, 1000, 800, 90, 10)
 	near(x, 1000, "snap_direction projects onto the axis")
