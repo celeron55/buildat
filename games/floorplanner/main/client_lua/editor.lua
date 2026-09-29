@@ -3379,7 +3379,7 @@ local function build_props()
 							i.scale * v / S.calib.measured + 0.5))}})
 				end
 				S.calib = nil
-			end)
+			end, nil, true)
 		else
 			panel.button(props, S.calib and "Click two points on it" or
 					"Calibrate: two points and their distance", function()
@@ -3401,7 +3401,7 @@ local function build_props()
 		panel.label(props, "Room " .. sel.id)
 		panel.field(props, "Name", sel.strs.name, function(t)
 			set(sel.id, {strs = {name = t}})
-		end, 120)
+		end, 120, true)
 		int_field(sel.id, "Ceiling mm", "ceiling", sel.ints.ceiling)
 		panel.label(props, "(ceiling 0: the plan's)")
 		if r then
@@ -3783,7 +3783,7 @@ build_palette = function()
 		local p = e.ints
 		panel.field(palette_win, "Name", e.strs.name, function(t)
 			set(nil, {name = t})
-		end, 120)
+		end, 120, true)
 		-- The types as a grid of their previews, opened under the button
 		-- ([FP_TYPES]); Esc or the button again closes it
 		panel.button(palette_win, "Type: " .. MATERIAL_KINDS[p.kind] ..
@@ -3818,7 +3818,7 @@ build_palette = function()
 					string.format("%06x", p[name]), function(t)
 				local v = tonumber(t, 16)
 				if v and v >= 0 and v <= 0xffffff then set({[name] = v}) end
-			end, 90)
+			end, 90, true)
 			panel.chip(r, p[name], 14, function()
 				S.picker = {ent = cur, field = name, groups = colour_groups(p, name),
 						title = e.strs.name .. ": " .. label}
@@ -3954,10 +3954,10 @@ place.build_window = function()
 	end
 	panel.field(w, "Name", e.strs.name, function(t)
 		set(id, {strs = {name = t}})
-	end)
+	end, nil, true)
 	panel.field(w, "Group", e.strs.group, function(t)
 		set(id, {strs = {group = t}})
-	end)
+	end, nil, true)
 	int_field(id, "X mm", "x", c.x)
 	int_field(id, "Y mm", "y", c.y)
 	int_field(id, "Z mm", "z", c.z)
@@ -6366,6 +6366,7 @@ function M.resume()
 end
 
 function M.update(dt)
+	panel.flush()
 	if S.suspended then
 		return
 	end

@@ -83,6 +83,9 @@ return {
 	},
 	TextFinished = {
 	},
+	-- An element losing the UI's focus: a field left by a click elsewhere
+	Defocused = {
+	},
 	-- What the scrolling family says happened; see the classes of the same
 	-- name in safe_classes.lua. Element is the list, the bar or the slider
 	-- it happened to.

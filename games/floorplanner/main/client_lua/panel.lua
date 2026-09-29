@@ -16,6 +16,9 @@ function M.window(halign, valign, x, y, horizontal)
 	w:SetAlignment(halign, valign)
 	w:SetPosition(x, y)
 	w.opacity = 0.92
+	-- A click on the panel itself, not on a control, takes the focus from
+	-- a field, as a click on the view does (user)
+	w:SetFocusMode(magic.FM_FOCUSABLE)
 	return w
 end
 
@@ -115,7 +118,22 @@ function M.nudge_at(windows, ux, uy, dir, shift)
 end
 
 -- A labelled text field; on_finish(text) when Enter is pressed in it
-function M.field(parent, label, value, on_finish, width)
+-- **Leaving a field keeps what was typed** (user: Enter alone was obscure):
+-- a click elsewhere, Back or Tab does what Enter does, for a field that
+-- holds a value -- a number, or `keep`. A field that does something (a
+-- copy's name, a password) still waits for Enter. The action runs at the
+-- next flush(): the defocus comes while the UI is moving the focus, and a
+-- panel rebuilt there would pull the next element from under it.
+local leaving = {}
+function M.flush()
+	local l = leaving
+	leaving = {}
+	for _, f in ipairs(l) do
+		f()
+	end
+end
+
+function M.field(parent, label, value, on_finish, width, keep)
 	local r = M.row(parent)
 	local l = M.label(r, label)
 	l.minWidth = 112
@@ -133,8 +151,19 @@ function M.field(parent, label, value, on_finish, width)
 		numeric[name] = {on_finish = on_finish,
 				step = label:find("mm") and 10 or label:find("Kelvin") and 100 or 1}
 	end
+	local done = e:GetText()
+	if keep or type(value) == "number" then
+		magic.SubscribeToEvent(e, "Defocused", function()
+			local t = e:GetText()
+			if t ~= done then
+				done = t
+				leaving[#leaving + 1] = function() on_finish(t) end
+			end
+		end)
+	end
 	magic.SubscribeToEvent(e, "TextFinished", function()
-		on_finish(e:GetText())
+		done = e:GetText()
+		on_finish(done)
 		-- Unless on_finish moved it on, to the next field of a form
 		if e:HasFocus() then
 			magic.ui:SetFocusElement(nil)
