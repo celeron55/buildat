@@ -317,6 +317,13 @@ local function settings()
 	return doc.settings().ints
 end
 
+-- The grid, the plan's own so it is saved and restored with it. Here, above
+-- everything that snaps: a drag of a door along its wall called it from
+-- above where it was defined, and got nil
+local function grid_step()
+	return settings().grid
+end
+
 local function node_pos(id)
 	local d = S.drag
 	if d and d.moved then
@@ -1532,10 +1539,6 @@ local function snap_radius()
 	return SNAP_PX * dist * 1000 * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
 end
 
--- The plan's own, so it is saved and restored with it
-local function grid_step()
-	return settings().grid
-end
 
 
 local function angle_step()
@@ -1695,13 +1698,12 @@ local function pick_surface(whole)
 	end
 	local o, d = cursor_ray()
 	local best, best_t = nil, math.huge
+	-- What hangs from the ceiling is drawn from above too, so it is
+	-- picked from above too
 	for id, it in pairs(inst_data) do
-		local overhead = doc.ents[id].ints.align == 1
-		if not overhead or overhead_node.enabled then
-			local t = ray_instance(it, o, d, not whole and id or nil)
-			if t and t < best_t then
-				best, best_t = {kind = "instance", id = id}, t
-			end
+		local t = ray_instance(it, o, d, not whole and id or nil)
+		if t and t < best_t then
+			best, best_t = {kind = "instance", id = id}, t
 		end
 	end
 	for id, ol in pairs(outlines) do
@@ -1737,7 +1739,8 @@ local function pick_surface(whole)
 	for id, r in pairs(room_data) do
 		local surfaces = {{"floor", 2}}
 		-- (the 3D pick: best_t is how far along the ray it is)
-		if overhead_node.enabled then
+		-- A ceiling faces down and is seen only from under it
+		if d.y > 0 then
 			surfaces[2] = {"ceiling", room_ceiling(doc.ents[id])}
 		end
 		for _, s in ipairs(surfaces) do
@@ -4619,11 +4622,6 @@ local function place_cameras()
 	cam3d.aspectRatio = w / h
 	cam3d_node.position = magic.Vector3(S.pos.x, S.pos.y, S.pos.z)
 	cam3d_node.rotation = magic.Quaternion(S.pitch, S.yaw, 0)
-	-- The ceilings and what hangs from them are seen from inside the
-	-- rooms, and are out of the way of a camera above them
-	-- simplified: against the plan's ceiling, not each room's own
-	overhead_node.enabled = S.view ~= "2d" and
-			S.pos.y * 1000 < settings().ceiling
 end
 
 -- What each button would do, above the chat
