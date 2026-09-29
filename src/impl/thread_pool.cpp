@@ -55,7 +55,7 @@ struct CThreadPool: public ThreadPool
 	{
 		Thread *thread = (Thread*)arg;
 		log_d(MODULE, "Worker thread %p start", arg);
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 		// Set name
 		if(pthread_setname_np(thread->thread, "buildat:worker")){
 			log_w(MODULE, "Failed to set worker thread %p name", thread);
@@ -211,12 +211,41 @@ struct CThreadPool: public ThreadPool
 		m_threads.clear();
 	}
 
+	// With no workers (the web client, which has no threads: [WEB_CLIENT])
+	// the threaded part runs here, on the calling thread, a slice a frame.
+	// simplified: one task at a time and whole; a task whose thread() is
+	// longer than the slice still takes all of it.
+	static const int64_t INLINE_BUDGET_US = 8000;
+	void run_inline()
+	{
+		const int64_t t0 = get_timeofday_us();
+		while(get_timeofday_us() - t0 < INLINE_BUDGET_US){
+			up_<Task> current;
+			{
+				interface::MutexScope ms(m_mutex);
+				if(m_input_queue.empty())
+					return;
+				current = std::move(m_input_queue.front());
+				m_input_queue.pop_front();
+			}
+			try {
+				while(!current->thread());
+			} catch(std::exception &e){
+				log_w(MODULE, "Inline task failed: %s", e.what());
+			}
+			interface::MutexScope ms(m_mutex);
+			m_output_queue.push_back(std::move(current));
+		}
+	}
+
 	void run_post()
 	{
 		// The ones still getting ready, first: a chunk that cannot be
 		// meshed until its textures are in the atlas is what the frame is
 		// waiting on, and the output queue below is last frame's work
 		run_pre();
+		if(m_threads.empty())
+			run_inline();
 
 		int64_t t1 = get_timeofday_us();
 		size_t queue_size = 0;

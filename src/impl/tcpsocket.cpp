@@ -129,6 +129,15 @@ struct CTCPSocket: public TCPSocket
 #else
 			const bool pending = errno == EINPROGRESS;
 #endif
+#ifdef __EMSCRIPTEN__
+			// The web client's socket is a WebSocket ([WEB_CLIENT]): a
+			// select cannot wait for it to open, and it need not, because
+			// what is sent before it is open is queued for it. A server
+			// that is not there shows as the connection closing.
+			if(pending)
+				ok = true;
+			else
+#endif
 			if(pending){
 				fd_set wfds;
 				FD_ZERO(&wfds);
@@ -343,10 +352,34 @@ struct CTCPSocket: public TCPSocket
 		m_fd = fd_client;
 		return true;
 	}
+#ifdef __EMSCRIPTEN__
+	// The web client's socket is a WebSocket ([WEB_CLIENT]), which refuses
+	// a send while it is still opening, and a browser never blocks: what
+	// does not go now waits here, and goes on the next send or wait_data()
+	ss_ m_web_unsent;
+	bool flush_web_unsent()
+	{
+		if(m_web_unsent.empty())
+			return true;
+		ssize_t n = send(m_fd, &m_web_unsent[0], m_web_unsent.size(), 0);
+		if(n < 0){
+			if(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+				return true;
+			std::cerr<<"send: "<<strerror(errno)<<std::endl;
+			return false;
+		}
+		m_web_unsent.erase(0, (size_t)n);
+		return true;
+	}
+#endif
 	bool send_fd(const ss_ &data)
 	{
 		if(m_fd == -1)
 			return false;
+#ifdef __EMSCRIPTEN__
+		m_web_unsent += data;
+		return flush_web_unsent();
+#endif
 		if(send(m_fd, &data[0], data.size(), 0) == -1){
 			std::cerr<<"send: "<<strerror(errno)<<std::endl;
 			return false;
@@ -400,6 +433,9 @@ struct CTCPSocket: public TCPSocket
 	{
 		if(m_fd == -1)
 			return false;
+#ifdef __EMSCRIPTEN__
+		flush_web_unsent();
+#endif
 
 		struct timeval tv;
 		tv.tv_sec = 0;

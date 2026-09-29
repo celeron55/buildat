@@ -8,6 +8,9 @@ session.vim
 
 /build
 /Build
+# The web client build, and the web client it writes ([WEB_CLIENT])
+/Build-web
+/web
 /cache
 /user
 

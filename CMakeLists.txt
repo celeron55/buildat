@@ -16,6 +16,19 @@ set(DEBUG_LOG_TIMING FALSE CACHE BOOL "Output log messages of interesting but fl
 # the default. FALSE puts them where the platform says, which is what an
 # installed copy wants. See doc/plan/world_persistence_plan.md.
 set(PORTABLE TRUE CACHE BOOL "Keep cache/ and user/ beside the program")
+# The client for a web browser, which the server serves ([WEB_CLIENT] in
+# doc/plan/web_client_plan.md): configure a build directory of its own with
+# emsdk's emcmake (util/build_web.sh). No server, and no runtime-compiled
+# modules to share the engine and the core library with, so both are static.
+if(EMSCRIPTEN)
+	set(BUILDAT_WEB TRUE)
+	set(BUILD_SERVER FALSE CACHE BOOL "Build server" FORCE)
+	# buildat throws, and Emscripten does not catch unless asked. Emscripten's
+	# clang also refuses one of luabind's templates GCC takes, and its libc
+	# has M_PI and the like only with _GNU_SOURCE, which g++ always defines.
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexceptions -D_GNU_SOURCE -Wno-unusable-partial-specialization")
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fexceptions")
+endif()
 
 #
 # Urho3D dependency (bundled in 3rdparty/Urho3D)
@@ -46,6 +59,13 @@ set(URHO3D_ANGELSCRIPT FALSE CACHE BOOL "Enable Urho3D AngelScript")
 # LuaJIT is the runtime ([LUAJIT] in doc/plan/performance_plan.md); the
 # server's Luanti state and the client's sandbox are one Lua build
 set(URHO3D_LUAJIT TRUE CACHE BOOL "Enable Urho3D LuaJIT")
+if(BUILDAT_WEB)
+	# Static, wasm32, and PUC Lua: LuaJIT does not run in a browser, and the
+	# engine's web build turns it off anyway. WebGL 2 ([WEB_GLES3]).
+	set(URHO3D_LIB_TYPE STATIC)
+	set(URHO3D_LUAJIT FALSE)
+	set(URHO3D_64BIT FALSE)
+endif()
 if(NOT DEFINED URHO3D_64BIT)
 	if(CMAKE_SIZEOF_VOID_P EQUAL 8)
 		set(URHO3D_64BIT TRUE)
@@ -81,10 +101,14 @@ endif()
 # next ordinary link fails. Found the hard way.
 if(SANITIZE)
 	set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build-${SANITIZE}")
+elseif(BUILDAT_WEB)
+	set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build-web")
 else()
 	set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build")
 endif()
-if(WIN32)
+if(BUILDAT_WEB)
+	set(URHO3D_LIBRARY_FILE "${URHO3D_BUILD_DIR}/lib/libUrho3D.a")
+elseif(WIN32)
 	set(URHO3D_LIBRARY_FILE "${URHO3D_BUILD_DIR}/bin/Urho3D.dll")
 	set(URHO3D_IMPLIB_FILE "${URHO3D_BUILD_DIR}/lib/libUrho3D.dll.a")
 else()
@@ -155,13 +179,16 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 		-DURHO3D_PCH=FALSE
 		-DURHO3D_64BIT=${URHO3D_64BIT}
 	)
+	if(BUILDAT_WEB)
+		list(APPEND URHO3D_BUNDLE_CMAKE_ARGS -DURHO3D_GLES3=TRUE)
+	endif()
 	# Under Urho3D's MinGW toolchain the outer configure has exported the
 	# cross compilers into this process's environment (the toolchain's
 	# try_compile workaround), and Urho3D's own configure probes for a
 	# *native* compiler with the same environment -- and finds the cross
 	# one, which cannot link -rdynamic. Unset them for the child.
 	set(URHO3D_CONFIGURE_ENV "")
-	if(CMAKE_CROSSCOMPILING AND NOT CMAKE_HOST_WIN32)
+	if(CMAKE_CROSSCOMPILING AND NOT CMAKE_HOST_WIN32 AND NOT BUILDAT_WEB)
 		set(URHO3D_CONFIGURE_ENV /usr/bin/env -i "PATH=$ENV{PATH}"
 			"HOME=$ENV{HOME}")
 	endif()
@@ -183,13 +210,29 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 	else()
 		set(URHO3D_BUILD_COMMAND ${CMAKE_COMMAND} --build "${URHO3D_BUILD_DIR}" --parallel)
 	endif()
+	# The web build's engine archive is merged again when a third-party
+	# archive changed in the build just done, and the build runs once more
+	# to do that; a no-op when nothing did
+	set(URHO3D_POST_BUILD_COMMAND "")
+	if(BUILDAT_WEB)
+		set(URHO3D_POST_BUILD_COMMAND
+			COMMAND ${CMAKE_COMMAND} -DDIR=${URHO3D_BUILD_DIR}
+				-P ${CMAKE_SOURCE_DIR}/util/web_urho3d_stale.cmake
+			COMMAND ${URHO3D_BUILD_COMMAND})
+	endif()
 	add_custom_target(urho3d_build
 		COMMAND ${URHO3D_BUILD_COMMAND}
+		${URHO3D_POST_BUILD_COMMAND}
 		WORKING_DIRECTORY "${URHO3D_BUILD_DIR}"
 		COMMENT "Building bundled Urho3D"
 	)
 endif()
 
+if(NOT TARGET Urho3D AND BUILDAT_WEB)
+	add_library(Urho3D STATIC IMPORTED GLOBAL)
+	set_target_properties(Urho3D PROPERTIES
+		IMPORTED_LOCATION "${URHO3D_LIBRARY_FILE}")
+endif()
 if(NOT TARGET Urho3D)
 	add_library(Urho3D SHARED IMPORTED GLOBAL)
 	set_target_properties(Urho3D PROPERTIES
@@ -227,6 +270,11 @@ if(WIN32)
 endif()
 include_directories(${LUA_INCLUDE_DIRS})
 set(URHO3D_TOLUA_LIBRARY "${URHO3D_BUILD_DIR}/Source/ThirdParty/toluapp/src/lib/libtoluapp.a")
+if(BUILDAT_WEB)
+	# The static engine archive carries Lua and tolua++ already
+	set(LUA_LIBRARY "")
+	set(URHO3D_TOLUA_LIBRARY "")
+endif()
 
 #
 # Bundled libraries
@@ -345,7 +393,18 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} ${BUILDAT_VERSION_CPP})
 # sqlite's objects rather than a library: builtin/storage is a runtime-compiled
 # module and cannot link one, so buildat_core is what exports sqlite3_* to it.
-add_library(${BUILDAT_CORE_NAME} SHARED ${BUILDAT_CORE_SRCS}
+if(BUILDAT_WEB)
+	# No libcurl in a browser: interface/http.h is a stub that throws there,
+	# and a browser has no inotify, execinfo or signals
+	list(REMOVE_ITEM BUILDAT_CORE_SRCS src/impl/http.cpp
+		src/impl/linux/file_watch.cpp src/impl/linux/debug.cpp)
+	list(APPEND BUILDAT_CORE_SRCS src/impl/web/http.cpp
+		src/impl/web/file_watch.cpp src/impl/web/debug.cpp)
+	set(BUILDAT_CORE_TYPE STATIC)
+else()
+	set(BUILDAT_CORE_TYPE SHARED)
+endif()
+add_library(${BUILDAT_CORE_NAME} ${BUILDAT_CORE_TYPE} ${BUILDAT_CORE_SRCS}
 	$<TARGET_OBJECTS:sqlite>)
 add_dependencies(${BUILDAT_CORE_NAME} buildat_version)
 # libcurl, required ([CONTENTDB]): ContentDB is HTTPS only and the tree has
@@ -354,7 +413,9 @@ add_dependencies(${BUILDAT_CORE_NAME} buildat_version)
 # (util/docker/windows, schannel), CURL_INCLUDE_DIR and CURL_LIBRARY
 # passed by util/package.sh -- no DLL, no second C runtime in the
 # process ([WIN_DLL_INIT]).
-find_package(CURL REQUIRED)
+if(NOT BUILDAT_WEB)
+	find_package(CURL REQUIRED)
+endif()
 target_include_directories(${BUILDAT_CORE_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
 target_link_libraries(${BUILDAT_CORE_NAME}
 	c55lib
@@ -441,6 +502,52 @@ if(BUILD_CLIENT)
 	#		${LUA_LIBRARY}
 	#	)
 	#endif()
+
+	# The web client ([WEB_CLIENT]): buildat.js, .wasm and .data, and the
+	# page that starts them, in the directory the server serves them from
+	# (web_client_path; <share_path>/web by default)
+	if(BUILDAT_WEB)
+		set(BUILDAT_WEB_OUTPUT "${CMAKE_SOURCE_DIR}/web" CACHE PATH
+			"Where the web client is written, for the server to serve")
+		set_target_properties(${CLIENT_EXE_NAME} PROPERTIES
+			RUNTIME_OUTPUT_DIRECTORY "${BUILDAT_WEB_OUTPUT}")
+		# What the client reads from its share and Urho3D paths, in the
+		# browser's file system where the page's -P and -U point
+		set(WEB_PRELOAD
+			"${CMAKE_SOURCE_DIR}/client@/buildat/client"
+			"${CMAKE_SOURCE_DIR}/extensions@/buildat/extensions"
+			"${CMAKE_SOURCE_DIR}/builtin/luanti/client_data@/buildat/builtin/luanti/client_data"
+			"${CMAKE_SOURCE_DIR}/builtin/voxel_shading/client_data@/buildat/builtin/voxel_shading/client_data"
+			"${URHO3D_HOME}/bin/CoreData@/urho/bin/CoreData"
+			"${URHO3D_HOME}/bin/Data@/urho/bin/Data"
+		)
+		set(WEB_LINK_FLAGS
+			-fexceptions
+			-sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sFULL_ES3=1
+			-sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=268435456
+			# luabind and the Lua VM recurse deeper than the 64 KiB default
+			-sSTACK_SIZE=8388608
+			-sFORCE_FILESYSTEM=1
+			-sEXIT_RUNTIME=0
+			# What an uncaught exception or an abort was, in the console
+			-sASSERTIONS=1 -sEXCEPTION_STACK_TRACES=1
+			# Function names in the stack of a crash
+			--profiling-funcs
+			-sDISABLE_DEPRECATED_FIND_EVENT_TARGET_BEHAVIOR=0
+			"-sEXPORTED_RUNTIME_METHODS=['FS','callMain']"
+			"SHELL:--exclude-file *.swp"
+		)
+		# SHELL: keeps each pair whole; CMake would merge the repeated flags
+		foreach(P ${WEB_PRELOAD})
+			list(APPEND WEB_LINK_FLAGS "SHELL:--preload-file ${P}")
+		endforeach()
+		target_link_options(${CLIENT_EXE_NAME} PRIVATE ${WEB_LINK_FLAGS})
+		# An imported archive is no dependency of the link by itself
+		set_property(TARGET ${CLIENT_EXE_NAME} APPEND PROPERTY
+			LINK_DEPENDS "${URHO3D_LIBRARY_FILE}")
+		configure_file("${CMAKE_SOURCE_DIR}/src/client/web/index.html"
+			"${BUILDAT_WEB_OUTPUT}/index.html" COPYONLY)
+	endif()
 
 endif(BUILD_CLIENT)
 

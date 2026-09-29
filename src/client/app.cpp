@@ -1158,7 +1158,13 @@ struct CApp: public App, public magic::Application
 				m_options.graphics.maximized ? 1 : 0,
 				m_options.graphics.fullscreen ? 1 : 0);
 
+#ifdef __EMSCRIPTEN__
+		// No threads in the web client ([WEB_CLIENT]): the pool runs its
+		// tasks' threaded part in run_post() instead
+		m_thread_pool->start(0);
+#else
 		m_thread_pool->start(4); // TODO: Configurable
+#endif
 
 		sv_<ss_> resource_paths = {
 			g_client_config.get<ss_>("share_path")+"/client/data",

@@ -170,6 +170,18 @@ struct CState: public State
 			return;
 		}
 		m_connect_error = "";
+#ifdef __EMSCRIPTEN__
+		// No threads in the web client ([WEB_CLIENT]), and no need of one:
+		// its socket is a WebSocket that connect() only starts opening, and
+		// what is sent before it is open waits in the browser
+		{
+			ss_ error;
+			const bool ok = connect(address, &error);
+			m_connect_error = ok ? ss_() : error;
+			m_connect_result.store(ok ? 1 : -1);
+			return;
+		}
+#endif
 		m_connect_thread = std::thread([this, address](){
 			ss_ error;
 			const bool ok = connect(address, &error);

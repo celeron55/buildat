@@ -14,8 +14,12 @@
 // of the frame for a 1280x720 shot, on the main thread, and every
 // scripted run's screenshot was a "rest" peak in the frame column
 // ([FRAME_PEAK]); the pixels are copied out and written on a thread.
+// The web client links the engine statically, and its archive has the
+// encoder already ([WEB_CLIENT]).
+#ifndef __EMSCRIPTEN__
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBIW_ASSERT(x)
+#endif
 #include <STB/stb_image_write.h>
 #include <thread>
 #include <mutex>
@@ -166,8 +170,11 @@ static bool parse_direction(const ss_ &rest, double *yaw, double *pitch,
 		*error = "The direction has no length";
 		return false;
 	}
-	*yaw = atan2(x, z) * 180.0 / M_PI;
-	*pitch = asin(y / len) * 180.0 / M_PI;
+	// Not M_PI: Urho3D's MathDefs.h #undefs it, which with Emscripten's
+	// headers leaves it undefined here ([WEB_CLIENT])
+	const double deg = 180.0 / 3.14159265358979323846;
+	*yaw = atan2(x, z) * deg;
+	*pitch = asin(y / len) * deg;
 	return true;
 }
 

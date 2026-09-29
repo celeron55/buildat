@@ -1,0 +1,61 @@
+<!doctype html>
+<!-- The web client's page ([WEB_CLIENT] in doc/plan/web_client_plan.md).
+The game server serves this, buildat.js, buildat.wasm and buildat.data, and
+the client connects back to the server the page came from. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buildat</title>
+<style>
+html, body { margin: 0; height: 100%; background: #202020; overflow: hidden; }
+canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+#status { position: fixed; left: 0; right: 0; top: 40%; text-align: center;
+	color: #ddd; font: 16px sans-serif; white-space: pre-wrap; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+<div id="status">Loading...</div>
+<script>
+(function(){
+	var status = document.getElementById('status');
+	var canvas = document.getElementById('canvas');
+	var https = location.protocol === 'https:';
+	// The server that served this page; behind a reverse proxy the port is
+	// the page's, 443 or 80 when the address has none
+	var port = location.port || (https ? '443' : '80');
+	var host = location.hostname.indexOf(':') >= 0 ?
+			'[' + location.hostname + ']' : location.hostname;
+	var args = ['-P', '/buildat', '-U', '/urho', '-C', '/buildat/cache',
+		'-D', '/buildat/user', '-s', host + ':' + port,
+		'-w', window.innerWidth + 'x' + window.innerHeight];
+	// Anything after ? is passed on as more arguments, space separated:
+	// ?-l 4 for a verbose log
+	var extra = decodeURIComponent(location.search.substring(1));
+	if(extra)
+		args = args.concat(extra.split(' ').filter(function(a){ return a; }));
+	window.Module = {
+		canvas: canvas,
+		arguments: args,
+		// Emscripten's sockets are WebSockets to this address and port
+		websocket: { url: https ? 'wss://' : 'ws://', subprotocol: 'binary' },
+		preRun: [function(){
+			FS.mkdir('/buildat/cache');
+			FS.mkdir('/buildat/user');
+		}],
+		print: function(t){ console.log(t); },
+		printErr: function(t){ console.warn(t); },
+		setStatus: function(t){ status.textContent = t; },
+		onRuntimeInitialized: function(){ status.textContent = ''; },
+		onAbort: function(what){
+			status.textContent = 'The client stopped: ' + what +
+				'\nReload the page to start again.';
+		},
+	};
+	canvas.addEventListener('click', function(){ canvas.focus(); });
+})();
+</script>
+<script src="buildat.js"></script>
+</body>
+</html>
