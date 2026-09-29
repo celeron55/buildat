@@ -96,6 +96,9 @@ local S = {
 	-- Walking: where the feet are, mm, and the eyes above them
 	walk = {x = 0, z = 0, feet = 0, noclip = false},
 	eye = 1600,
+	-- Walking's vertical field of view in degrees, the viewer's own and
+	-- kept on this client (user)
+	walk_fov = tonumber(buildat.storage_read("walk_fov") or "") or 80,
 	export_mmpx = 10, -- the PNG export's scale
 	calib = nil,    -- an image being calibrated: {id, pts, measured}
 	yaw = 35, pitch = 40,
@@ -301,7 +304,7 @@ local cam3d_node = scene:CreateChild("Camera3D")
 local cam3d = cam3d_node:CreateComponent("Camera")
 cam3d.nearClip = 0.05
 cam3d.farClip = 500
--- Vertical, in degrees; walking has 72 (set_view)
+-- Vertical, in degrees; walking has S.walk_fov (set_view)
 cam3d.fov = 60
 
 -- A viewport for a view, made new each time: the engine frees one when the
@@ -2978,8 +2981,7 @@ local function set_view(v)
 		S.crosshair = false
 	end
 	S.view = v
-	-- Walking sees wider than the free camera (user)
-	cam3d.fov = v == "walk" and 72 or 60
+	cam3d.fov = v == "walk" and S.walk_fov or 60
 	-- Only when it changes: the walk and the free camera share a viewport
 	if (v == "2d") ~= (S.shown_2d == true) or not S.shown then
 		S.shown, S.shown_2d = true, v == "2d"
@@ -4072,6 +4074,16 @@ do
 			local v = tonumber(t)
 			if v and v > 0 then
 				S.eye = math.floor(v)
+			end
+		end)
+		panel.field(w, "Walk FOV deg", S.walk_fov, function(t)
+			local v = tonumber(t)
+			if v then
+				S.walk_fov = math.max(30, math.min(120, math.floor(v + 0.5)))
+				buildat.storage_write("walk_fov", tostring(S.walk_fov))
+				if S.view == "walk" then
+					cam3d.fov = S.walk_fov
+				end
 			end
 		end)
 		panel.button(w, "Back", function() open_pause() end)
