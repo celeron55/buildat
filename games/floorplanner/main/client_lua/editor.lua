@@ -1498,7 +1498,32 @@ local function nearest_edge(x, z, r, except)
 end
 
 -- Where the cursor's ray enters an instance's box, or nil
-local function ray_instance(it, o, d)
+-- Whether a point on a wall (mm) is in one of its openings, doors or
+-- windows: the wall is not there, whatever its outline says
+local function in_hole(wall, x, y, z)
+	for id, it in pairs(inst_data) do
+		if it.hosted and doc.ents[id].ints.host == wall then
+			local def = doc.ents[it.def].ints
+			if def.kind ~= KIND.switch then
+				local f = it.frame
+				local along = (x - f.ax) * f.ux + (z - f.az) * f.uz
+				local sill = doc.ents[id].ints.sill
+				if math.abs(along - it.along) < def.w / 2 and y > sill and
+						y < sill + def.h then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
+-- How far into an opening's edge its trim and frame stay pickable, mm
+local HOLE_MARGIN = 40
+
+-- id: the instance, for an opening or an open door: a ray through the hole
+-- in the wall misses it and goes on to what is seen through it
+local function ray_instance(it, o, d, id)
 	local ox, oy, oz = geom.unrot(o.x - W(it.x), o.y - W(it.y), o.z - W(it.z),
 			it.pitch, it.yaw, it.roll)
 	local dx, dy, dz = geom.unrot(d.x, d.y, d.z, it.pitch, it.yaw, it.roll)
@@ -1520,13 +1545,29 @@ local function ray_instance(it, o, d)
 			end
 		end
 	end
+	local def = it.hosted and id and doc.ents[it.def].ints
+	if def and (def.kind == KIND.opening or (def.kind == KIND.door and
+			open_amount(id) > 0)) then
+		-- Where the ray enters, in mm about the opening's middle: inside
+		-- the hole less the margin is the hole; a door's hole goes down to
+		-- the floor
+		local lx = (ox + dx * tmin) * 1000
+		local ly = (oy + dy * tmin) * 1000
+		local hw, hh = def.w / 2 - HOLE_MARGIN, def.h / 2 - HOLE_MARGIN
+		local floor = doc.ents[id].ints.sill == 0
+		if math.abs(lx) < hw and ly < hh and (ly > -hh or floor) then
+			return nil
+		end
+	end
 	return tmin
 end
 
 -- What is under the cursor for painting and selecting: an instance, a
 -- wall and which of its faces, or a room's floor or ceiling.
 -- {kind = "instance"|"wall"|"floor"|"ceiling", id, side}
-local function pick_surface()
+-- whole: an opening's hole is the opening's too, as the use key wants it
+-- -- an open door is closed by pointing through it
+local function pick_surface(whole)
 	if S.view == "2d" then
 		local x, z = cursor_floor()
 		-- The topmost instance under the cursor, as seen from above
@@ -1560,7 +1601,7 @@ local function pick_surface()
 	for id, it in pairs(inst_data) do
 		local overhead = doc.ents[id].ints.align == 1
 		if not overhead or overhead_node.enabled then
-			local t = ray_instance(it, o, d)
+			local t = ray_instance(it, o, d, not whole and id or nil)
 			if t and t < best_t then
 				best, best_t = {kind = "instance", id = id}, t
 			end
@@ -1582,7 +1623,8 @@ local function pick_surface()
 					local hx, hy, hz = o.x + d.x * t, o.y + d.y * t, o.z + d.z * t
 					local _, _, _, dist = geom.nearest_on_segment(hx, hz,
 							px, pz, qx, qz)
-					if dist < 1e-4 and hy >= y0 and hy <= y1 then
+					if dist < 1e-4 and hy >= y0 and hy <= y1 and
+							not in_hole(id, hx * 1000, hy * 1000, hz * 1000) then
 						best, best_t = {kind = "wall", id = id,
 								side = ol.sides[i], x = hx * 1000, z = hz * 1000}, t
 					end
@@ -4007,7 +4049,7 @@ do
 	-- cursor, or with nothing under it the switch selected. Returns its id and
 	-- kind, or nil.
 	use_target = function()
-		local s = pick_surface()
+		local s = pick_surface(true)
 		local id = s and s.kind == "instance" and s.id
 		local p = S.primary and doc.ents[S.primary]
 		if not id and p and p.type == "instance" and
