@@ -129,6 +129,7 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"sun", 0, 1, 0},
 		{"sun_yaw", 0, 359, 135},
 		{"sun_pitch", 5, 90, 40},
+		{"grid", 1, 100, 100}, // mm, what the plan snaps to
 	}, {}, {}, true},
 	{"node", {
 		{"x", -MAX_COORD, MAX_COORD, 0},

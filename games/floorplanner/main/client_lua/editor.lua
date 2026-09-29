@@ -64,7 +64,6 @@ local S = {
 	show_ids = true, -- the material id decals
 	plan_look = true, -- the plan view in flat colours (L)
 	tool = "select",
-	grid = 2,       -- index into GRID_STEPS
 	angle = 4,      -- index into ANGLE_STEPS: the angle snap
 	-- New walls
 	thickness = 100,
@@ -1441,9 +1440,11 @@ local function snap_radius()
 	return SNAP_PX * dist * 1000 * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
 end
 
+-- The plan's own, so it is saved and restored with it
 local function grid_step()
-	return GRID_STEPS[S.grid]
+	return settings().grid
 end
+
 
 local function angle_step()
 	return ANGLE_STEPS[S.angle] or 1
@@ -2487,6 +2488,18 @@ do
 
 end
 
+-- The next of GRID_STEPS after the plan's
+local function next_grid()
+	local g = grid_step()
+	local n = GRID_STEPS[1]
+	for i, v in ipairs(GRID_STEPS) do
+		if v == g then
+			n = GRID_STEPS[i % #GRID_STEPS + 1]
+		end
+	end
+	send({{op = "set", ent = {id = doc.settings().id, ints = {grid = n}}}})
+end
+
 --
 -- The panels
 --
@@ -2572,8 +2585,7 @@ local function build_toolbar()
 	local g = grid_step()
 	panel.button(toolbar, "Grid " .. (g < 10 and g .. " mm" or
 			(g / 10) .. " cm") .. " (G)", function()
-		S.grid = S.grid % #GRID_STEPS + 1
-		refresh_panels()
+		next_grid()
 	end)
 	local a = ANGLE_STEPS[S.angle]
 	panel.button(toolbar, "Angle " .. (a and a .. " deg" or "free") ..
@@ -4318,8 +4330,7 @@ do
 		elseif key == magic.KEY_M then
 			set_tool("paint")
 		elseif key == magic.KEY_G then
-			S.grid = S.grid % #GRID_STEPS + 1
-			refresh_panels()
+			next_grid()
 		elseif key == magic.KEY_H then
 			S.angle = S.angle % #ANGLE_STEPS + 1
 			refresh_panels()
