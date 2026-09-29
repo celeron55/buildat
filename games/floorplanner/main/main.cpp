@@ -42,6 +42,10 @@ static const size_t MAX_LIST = 1000;
 static const int32_t MAX_COORD = 100000000;
 static const int PBKDF2_ITERATIONS = 10000;
 static const int MAX_LOGIN_FAILURES = 5;
+// A voxel volume's cells run -128..127 on each axis, and it holds at most
+// this many voxels
+static const int32_t VOXEL_RANGE = 128;
+static const size_t MAX_VOXELS = 200000;
 
 struct Entity
 {
@@ -148,6 +152,7 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"trim", 0, 500, 70},
 		{"trim_depth", 0, 200, 15},
 		{"leaf", 0, 1, 0},       // door: single, double; window: fixed, casement
+		{"voxel_size", 1, 1000, 50}, // a voxel volume's, mm
 		{"mat", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 		{"mat_leaf", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 		{"mat_glass", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
@@ -368,6 +373,13 @@ struct Module: public interface::Module
 	storage::Store *m_store = nullptr;
 
 	std::map<int32_t, Entity> m_ents;
+	// Each voxel volume's voxels: the cell, packed as voxel_key() does, to
+	// the palette entry it is made of. Kept when its definition is deleted,
+	// so an undo that restores the definition gets them back.
+	// simplified: a volume is one blob in the save and whole in memory; the
+	// upgrade for big volumes is chunks, as voxelworld keeps them
+	std::map<int32_t, std::map<int32_t, int32_t>> m_voxels;
+	set_<int32_t> m_voxels_dirty;
 	int32_t m_next_id = 1;
 	set_<int32_t> m_dirty;
 	float m_flush_timer = 0;
@@ -398,6 +410,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:packet_received/fp:login"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:batch"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:chat"));
+		m_server->sub_event(this, Event::t("network:packet_received/fp:voxels"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:lock"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:unlock"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:preview"));
@@ -423,6 +436,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:chat", on_chat,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:voxels", on_voxels,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:lock", on_lock,
 				network::Packet)
@@ -518,8 +533,16 @@ struct Module: public interface::Module
 			m_ents[e.id] = e;
 			m_dirty.insert(e.id);
 		}
+		m_voxels.clear();
+		for(const ss_ &key : m_store->list("v/")){
+			ss_ data;
+			std::map<int32_t, int32_t> voxels;
+			if(m_store->get(key, data) && unpack(data, voxels))
+				m_voxels[std::stoi(key.substr(2))] = voxels;
+		}
 		m_store->set("schema_version", itos(SCHEMA_VERSION));
-		log_i(MODULE, "Loaded %zu entities", m_ents.size());
+		log_i(MODULE, "Loaded %zu entities and %zu voxel volumes",
+				m_ents.size(), m_voxels.size());
 	}
 
 	size_t count_type(const ss_ &type)
@@ -541,7 +564,7 @@ struct Module: public interface::Module
 
 	void flush()
 	{
-		if(!m_store || m_dirty.empty())
+		if(!m_store || (m_dirty.empty() && m_voxels_dirty.empty()))
 			return;
 		m_store->batch([&](){
 			for(int32_t id : m_dirty){
@@ -552,8 +575,11 @@ struct Module: public interface::Module
 				else
 					m_store->set(key, pack(it->second));
 			}
+			for(int32_t def : m_voxels_dirty)
+				m_store->set("v/"+itos(def), pack(m_voxels[def]));
 		});
 		m_dirty.clear();
+		m_voxels_dirty.clear();
 	}
 
 	void on_tick(const interface::TickEvent &event)
@@ -607,6 +633,94 @@ struct Module: public interface::Module
 			else
 				++it;
 		}
+	}
+
+	// Voxels
+
+	struct VoxelEdit
+	{
+		int32_t seq = 0;
+		int32_t def = 0;
+		// cell -> palette entry, 0 for none
+		std::map<int32_t, int32_t> sets;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(seq, def, sets);
+		}
+	};
+
+	static bool valid_voxel_key(int32_t key)
+	{
+		// Three bytes, each a cell coordinate + VOXEL_RANGE
+		return key >= 0 && key < (1 << 24);
+	}
+
+	void on_voxels(const network::Packet &packet)
+	{
+		auto pit = m_peers.find(packet.sender);
+		if(pit == m_peers.end() || pit->second.name.empty())
+			return;
+		VoxelEdit edit;
+		std::pair<int32_t, ss_> result;
+		if(!unpack(packet.data, edit)){
+			result.second = "Malformed voxels";
+		} else {
+			result.first = edit.seq;
+			result.second = check_voxels(packet.sender, edit);
+		}
+		if(result.second.empty()){
+			pit->second.op_budget -= edit.sets.size() / 10.0;
+			std::map<int32_t, int32_t> &voxels = m_voxels[edit.def];
+			for(auto &pair : edit.sets){
+				if(pair.second == 0)
+					voxels.erase(pair.first);
+				else
+					voxels[pair.first] = pair.second;
+			}
+			m_voxels_dirty.insert(edit.def);
+			// The sender's copy carries its number, as with fp:changes
+			for(auto &pair : m_peers){
+				if(pair.second.name.empty())
+					continue;
+				edit.seq = pair.first == packet.sender ? result.first : -1;
+				send(pair.first, "fp:voxels", pack(edit));
+			}
+		} else {
+			log_i(MODULE, "Voxels from %s refused: %s", cs(pit->second.name),
+					cs(result.second));
+		}
+		send(packet.sender, "fp:voxels_result", pack(result));
+	}
+
+	ss_ check_voxels(network::PeerId sender, const VoxelEdit &edit)
+	{
+		if(!peer_has(sender, "edit"))
+			return "You have no edit privilege";
+		auto it = m_ents.find(edit.def);
+		if(it == m_ents.end() || it->second.type != "definition" ||
+				it->second.ints.at("kind") != DK_VOXEL)
+			return "Not a voxel volume";
+		auto lock = m_locks.find(edit.def);
+		if(lock != m_locks.end() && lock->second != sender)
+			return m_peers[lock->second].name+" is moving that";
+		if(m_peers[sender].op_budget < edit.sets.size() / 10.0)
+			return "Too many voxels at once; slow down";
+		const std::map<int32_t, int32_t> &voxels = m_voxels[edit.def];
+		size_t added = 0;
+		for(auto &pair : edit.sets){
+			if(!valid_voxel_key(pair.first))
+				return "A voxel outside the volume";
+			if(pair.second != 0){
+				auto p = m_ents.find(pair.second);
+				if(p == m_ents.end() || p->second.type != "palette")
+					return "A voxel of what is not a palette entry";
+				if(!voxels.count(pair.first))
+					added++;
+			}
+		}
+		if(voxels.size() + added > MAX_VOXELS)
+			return "The volume is full";
+		return "";
 	}
 
 	// Drag locks, previews and presence
@@ -834,6 +948,15 @@ struct Module: public interface::Module
 		for(auto &pair : m_ents)
 			all.push_back(pair.second);
 		send(packet.sender, "fp:snapshot", pack(all));
+		for(auto &pair : m_voxels){
+			if(!m_ents.count(pair.first))
+				continue;
+			VoxelEdit v;
+			v.seq = -1;
+			v.def = pair.first;
+			v.sets = pair.second;
+			send(packet.sender, "fp:voxels", pack(v));
+		}
 		// Where the others are
 		for(auto &pair : m_peers){
 			if(pair.first == packet.sender || pair.second.name.empty() ||
@@ -1185,6 +1308,23 @@ struct Module: public interface::Module
 				touch(id);
 				m_ents.erase(id);
 				deleted.insert(id);
+			}
+		}
+
+		// A palette entry voxels are made of is in use, as much as one a
+		// wall is made of
+		for(int32_t id : deleted){
+			auto it = journal.find(id);
+			if(it == journal.end() || !it->second.first ||
+					it->second.second.type != "palette")
+				continue;
+			for(auto &vol : m_voxels){
+				if(!m_ents.count(vol.first))
+					continue;
+				for(auto &v : vol.second)
+					if(v.second == id)
+						return rollback("A palette entry still in use by "
+								"voxels cannot be deleted");
 			}
 		}
 

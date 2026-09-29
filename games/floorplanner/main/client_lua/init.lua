@@ -56,6 +56,10 @@ local doc = {
 	-- What undoes each batch of this user's, newest last
 	undo_stack = {},
 	redo_stack = {},
+	-- Each voxel volume's voxels: definition id -> {cell key -> palette
+	-- entry}, and a count per definition that grows with every change
+	voxels = {},
+	voxel_version = {},
 	-- Other users: peer -> {name, p (their presence), preview (entity id
 	-- -> the fields their drag would give it)}
 	others = {},
@@ -239,6 +243,25 @@ local function step(from, kind)
 		doc.notice("Nothing to " .. kind)
 		return
 	end
+	if ops.voxels then
+		-- Voxels set back, but not where somebody has set them since
+		local sets, skipped = {}, 0
+		local cur = doc.voxels[ops.def] or {}
+		for key, v in pairs(ops.voxels) do
+			if (cur[key] or 0) == ops.expect[key] then
+				sets[key] = v
+			else
+				skipped = skipped + 1
+			end
+		end
+		if skipped > 0 then
+			doc.notice(skipped .. " voxels changed by somebody else since")
+		end
+		if next(sets) then
+			doc.set_voxels(ops.def, sets, kind)
+		end
+		return
+	end
 	local left, skipped = still_applies(ops)
 	if skipped > 0 then
 		doc.notice(skipped .. " changed by somebody else since; left as is")
@@ -302,6 +325,84 @@ buildat.sub_packet("fp:privs", function(data)
 	end
 	if doc.privs_changed then
 		doc.privs_changed()
+	end
+end)
+
+--
+-- Voxels
+--
+local VOXELS = {"object", {"seq", "int32_t"}, {"def", "int32_t"},
+	{"sets", {"unordered_map", "int32_t", "int32_t"}}}
+-- The same bytes written as pairs: cereal.binary_output cannot write a map
+-- with number keys, since tracing one turns the key into a string in place
+-- (lua_tostring in src/lua_bindings/cereal.cpp), which breaks lua_next
+local VOXELS_OUT = {"object", {"seq", "int32_t"}, {"def", "int32_t"},
+	{"sets", {"array", {"object", {"k", "int32_t"}, {"v", "int32_t"}}}}}
+local VOXELS_RESULT = {"object", {"seq", "int32_t"}, {"error", "string"}}
+
+-- A cell of a volume as one number: x, y and z from -128 to 127
+function doc.voxel_key(x, y, z)
+	return (x + 128) + (y + 128) * 256 + (z + 128) * 65536
+end
+
+function doc.voxel_cell(key)
+	return key % 256 - 128, math.floor(key / 256) % 256 - 128,
+			math.floor(key / 65536) - 128
+end
+
+-- sets: cell key -> palette entry, 0 to empty the cell. Undone like a
+-- batch: what the cells held before, back.
+local voxel_pending = {}
+function doc.set_voxels(def, sets, kind)
+	local seq = doc.next_seq
+	doc.next_seq = seq + 1
+	local cur = doc.voxels[def] or {}
+	local inverse, expect = {}, {}
+	for key, v in pairs(sets) do
+		inverse[key] = cur[key] or 0
+		expect[key] = v
+	end
+	voxel_pending[seq] = {kind = kind, undo = {voxels = inverse, def = def,
+			expect = expect}}
+	local pairs_ = {}
+	for key, v in pairs(sets) do
+		pairs_[#pairs_ + 1] = {k = key, v = v}
+	end
+	buildat.send_packet("fp:voxels", cereal.binary_output({seq = seq,
+			def = def, sets = pairs_}, VOXELS_OUT))
+end
+
+buildat.sub_packet("fp:voxels", function(data)
+	local v = cereal.binary_input(data, VOXELS)
+	local vox = doc.voxels[v.def] or {}
+	doc.voxels[v.def] = vox
+	for key, m in pairs(v.sets) do
+		vox[key] = m ~= 0 and m or nil
+	end
+	doc.voxel_version[v.def] = (doc.voxel_version[v.def] or 0) + 1
+	if doc.voxels_changed then
+		doc.voxels_changed(v.def)
+	end
+end)
+
+buildat.sub_packet("fp:voxels_result", function(data)
+	local r = cereal.binary_input(data, VOXELS_RESULT)
+	local p = voxel_pending[r.seq]
+	voxel_pending[r.seq] = nil
+	if not p then
+		return
+	end
+	if r.error ~= "" then
+		doc.notice("Refused: " .. r.error)
+		return
+	end
+	local stack = p.kind == "undo" and doc.redo_stack or doc.undo_stack
+	stack[#stack + 1] = p.undo
+	if #stack > UNDO_DEPTH then
+		table.remove(stack, 1)
+	end
+	if not p.kind then
+		doc.redo_stack = {}
 	end
 end)
 

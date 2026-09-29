@@ -34,7 +34,7 @@ local DRAG_PX = 4
 local COPY_OFFSET = 500
 local JUSTIFY_NAMES = {[0] = "centered", [1] = "left", [2] = "right"}
 local TOOL_KEYS = {select = "V", node = "N", wall = "B", room = "R",
-	box = "O", hosted = "I", paint = "P"}
+	box = "O", hosted = "I", voxel = "M", paint = "P"}
 -- What a definition is, as main.cpp's DefKind
 local KIND = {box = 0, voxel = 1, opening = 2, door = 3, window = 4}
 local KIND_NAMES = {[0] = "Box", [2] = "Opening", [3] = "Door",
@@ -63,6 +63,7 @@ local S = {
 	-- New boxes
 	box = {w = 600, h = 750, d = 600, align = 0, offset = 0},
 	hosted = 3,     -- what the door/window tool puts in a wall
+	voxel_size = 50, -- a new voxel volume's, mm
 	-- Doors and windows a viewer has opened, which only they see
 	local_open = {},
 	material = nil, -- the palette entry picked
@@ -340,6 +341,8 @@ end
 -- when it was given none, and the entries follow in id order
 local palette_rows = {}
 local palette_key = nil
+-- Grows with every new palette texture, whose rows the meshes point at
+local palette_gen = 0
 
 local function row(id)
 	return palette_rows[id] or 0
@@ -422,6 +425,7 @@ local function palette_texture()
 		m:SetTexture(magic.TU_DIFFUSE, texture)
 		m:SetShaderParameter("PaletteRows", n)
 	end
+	palette_gen = palette_gen + 1
 end
 
 -- The walls with their ends looked up, their outlines, the rooms with
@@ -533,6 +537,22 @@ end
 -- An instance placed: its centre, rotation and extents in mm. The 90
 -- degree pitch and roll swap the definition's axes; the yaw turns the
 -- footprint, which is ex by ez in the yawed frame.
+-- A volume's voxels' extent in cells: {x0, y0, z0, x1, y1, z1}, or nil
+-- when it has none
+local function voxel_bounds(def)
+	local b = nil
+	for key in pairs(doc.voxels[def] or {}) do
+		local x, y, z = doc.voxel_cell(key)
+		if not b then
+			b = {x, y, z, x, y, z}
+		else
+			b[1], b[2], b[3] = math.min(b[1], x), math.min(b[2], y), math.min(b[3], z)
+			b[4], b[5], b[6] = math.max(b[4], x), math.max(b[5], y), math.max(b[6], z)
+		end
+	end
+	return b
+end
+
 local function build_inst_data()
 	inst_data = {}
 	local d = S.drag
@@ -568,6 +588,29 @@ local function build_inst_data()
 						ex = p.w + 2 * trim, ey = p.h, ez = f.lo + f.ro + 2 * td,
 						hosted = true, along = along, frame = f}
 			end
+		elseif def and def.ints.kind == KIND.voxel then
+			-- About its origin cell's corner, which is where it is placed:
+			-- its extent is what its voxels make it
+			local p = def.ints
+			local sz = p.voxel_size
+			local b = voxel_bounds(i.def) or {0, 0, 0, 0, 0, 0}
+			local lx0, ly0, lz0 = b[1] * sz, b[2] * sz, b[3] * sz
+			local lx1, ly1, lz1 = (b[4] + 1) * sz, (b[5] + 1) * sz, (b[6] + 1) * sz
+			local pitch, roll, yaw = i.pitch * 90, i.roll * 90, i.yaw / 1000
+			local ox, oz = i.x, i.z
+			if moved then
+				ox, oz = ox + d.dx, oz + d.dz
+			end
+			local oy = i.align == 1 and settings().ceiling - i.offset or i.offset
+			local cx, cy, cz = geom.rot((lx0 + lx1) / 2, (ly0 + ly1) / 2,
+					(lz0 + lz1) / 2, pitch, yaw, roll)
+			local ex, ey, ez = geom.rot(lx1 - lx0, ly1 - ly0, lz1 - lz0, pitch, 0,
+					roll)
+			it = {x = ox + cx, y = oy + cy, z = oz + cz, yaw = yaw, pitch = pitch,
+					roll = roll, ex = math.abs(ex), ey = math.abs(ey),
+					ez = math.abs(ez), hx = (lx1 - lx0) / 2, hy = (ly1 - ly0) / 2,
+					hz = (lz1 - lz0) / 2, voxel = true, ox = ox, oy = oy, oz = oz,
+					size = sz}
 		elseif def then
 			local p = def.ints
 			local pitch, roll = i.pitch * 90, i.roll * 90
@@ -616,6 +659,85 @@ local function instances_of(def)
 		end
 	end
 	return n
+end
+
+-- The voxel volumes' meshes, kept between rebuilds: an instance's is made
+-- again only when its voxels, its size or the palette's rows change, and
+-- otherwise only moved. instance id -> {node, key}
+local voxel_meshes = {}
+
+local FACES = {
+	{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
+}
+
+-- simplified: one quad per exposed voxel face, made through CustomGeometry,
+-- which is slow past some tens of thousands of faces; the upgrade is a
+-- greedy mesher filling a VertexBuffer with buildat.write_floats
+local function voxel_geometry(g, def, sz)
+	local vox = doc.voxels[def] or {}
+	local s = W(sz)
+	for key, mat in pairs(vox) do
+		local x, y, z = doc.voxel_cell(key)
+		local r = row(mat)
+		for _, f in ipairs(FACES) do
+			if not vox[doc.voxel_key(x + f[1], y + f[2], z + f[3])] then
+				local n = magic.Vector3(f[1], f[2], f[3])
+				-- The face's four corners: the cell's far side on the face's
+				-- axis, and the two others across it
+				local cx, cy, cz = x + 0.5 + f[1] * 0.5, y + 0.5 + f[2] * 0.5,
+						z + 0.5 + f[3] * 0.5
+				local u = f[1] ~= 0 and {0, 1, 0} or {1, 0, 0}
+				local v = f[3] ~= 0 and {0, 1, 0} or {0, 0, 1}
+				if f[2] ~= 0 then
+					u, v = {1, 0, 0}, {0, 0, 1}
+				end
+				local function C(a, b)
+					return magic.Vector3((cx + (u[1] * a + v[1] * b) * 0.5) * s,
+							(cy + (u[2] * a + v[2] * b) * 0.5) * s,
+							(cz + (u[3] * a + v[3] * b) * 0.5) * s)
+				end
+				tri(g, C(-1, -1), C(1, -1), C(1, 1), n, r)
+				tri(g, C(-1, -1), C(1, 1), C(-1, 1), n, r)
+			end
+		end
+	end
+end
+
+local function update_voxel_meshes()
+	local seen = {}
+	for id, it in pairs(inst_data) do
+		if it.voxel then
+			seen[id] = true
+			local e = doc.ents[id].ints
+			local def = e.def
+			local key = (doc.voxel_version[def] or 0) .. ":" .. palette_gen ..
+					":" .. it.size .. ":" .. def .. ":" .. e.align
+			local m = voxel_meshes[id]
+			if not m or m.key ~= key then
+				if m then
+					m.node:Remove()
+				end
+				local parent = e.align == 1 and overhead_node or walls_node
+				local node = parent:CreateChild("voxels")
+				local g = node:CreateComponent("CustomGeometry")
+				g:SetNumGeometries(1)
+				g:BeginGeometry(0, magic.TRIANGLE_LIST)
+				voxel_geometry(g, def, it.size)
+				g:Commit()
+				g:SetMaterial(0, lit_material)
+				m = {node = node, key = key}
+				voxel_meshes[id] = m
+			end
+			m.node.position = magic.Vector3(W(it.ox), W(it.oy), W(it.oz))
+			m.node.rotation = magic.Quaternion(it.pitch, it.yaw, it.roll)
+		end
+	end
+	for id, m in pairs(voxel_meshes) do
+		if not seen[id] then
+			m.node:Remove()
+			voxel_meshes[id] = nil
+		end
+	end
 end
 
 -- How open a door or window is, in thousandths: a viewer's own opening
@@ -888,6 +1010,7 @@ local function rebuild()
 		end
 	end
 	pieces_node.enabled = S.view == "3d"
+	update_voxel_meshes()
 	caps_node.enabled = S.view == "2d"
 	S.dirty = false
 end
@@ -1131,6 +1254,60 @@ local function pick_surface()
 		end
 	end
 	return best
+end
+
+-- The cell of a volume under the cursor: the first voxel the ray enters
+-- and the cell it came from, in the volume's own cells. With no voxel on
+-- the way, the cell on the floor where the ray meets it, as the place.
+local function voxel_ray(id)
+	local it = inst_data[id]
+	local o, d = cursor_ray()
+	local sz = it.size
+	local ox, oy, oz = geom.unrot((o.x - W(it.ox)) * 1000, (o.y - W(it.oy)) * 1000,
+			(o.z - W(it.oz)) * 1000, it.pitch, it.yaw, it.roll)
+	local dx, dy, dz = geom.unrot(d.x, d.y, d.z, it.pitch, it.yaw, it.roll)
+	ox, oy, oz = ox / sz, oy / sz, oz / sz
+	local vox = doc.voxels[doc.ents[id].ints.def] or {}
+	-- Amanatides and Woo: from cell to cell along the ray
+	local cell = {math.floor(ox), math.floor(oy), math.floor(oz)}
+	local pos, dir = {ox, oy, oz}, {dx, dy, dz}
+	local stepv, tmax, tdelta = {}, {}, {}
+	for a = 1, 3 do
+		if dir[a] > 0 then
+			stepv[a] = 1
+			tmax[a] = (cell[a] + 1 - pos[a]) / dir[a]
+			tdelta[a] = 1 / dir[a]
+		elseif dir[a] < 0 then
+			stepv[a] = -1
+			tmax[a] = (pos[a] - cell[a]) / -dir[a]
+			tdelta[a] = -1 / dir[a]
+		else
+			stepv[a], tmax[a], tdelta[a] = 0, math.huge, math.huge
+		end
+	end
+	local prev = nil
+	for _ = 1, 600 do
+		local inside = true
+		for a = 1, 3 do
+			inside = inside and cell[a] >= -128 and cell[a] <= 127
+		end
+		if inside and vox[doc.voxel_key(cell[1], cell[2], cell[3])] then
+			return {cell[1], cell[2], cell[3]}, prev
+		end
+		prev = {cell[1], cell[2], cell[3]}
+		local a = 1
+		if tmax[2] < tmax[a] then a = 2 end
+		if tmax[3] < tmax[a] then a = 3 end
+		cell[a] = cell[a] + stepv[a]
+		tmax[a] = tmax[a] + tdelta[a]
+	end
+	local x, z = cursor_floor()
+	if not x then
+		return nil
+	end
+	local lx, ly, lz = geom.unrot(x - it.ox, 1 - it.oy, z - it.oz, it.pitch,
+			it.yaw, it.roll)
+	return nil, {math.floor(lx / sz), math.floor(ly / sz), math.floor(lz / sz)}
 end
 
 -- Where a point the cursor gives lands: on a node, on an edge, or on the
@@ -1431,6 +1608,100 @@ local function add_box(x, z, w, d)
 	})
 end
 
+-- The voxel volume the voxel tool works on: the one selected
+local function voxel_target()
+	local id = S.primary
+	if id and S.sel[id] == "instance" and inst_data[id] and inst_data[id].voxel then
+		return id
+	end
+	return nil
+end
+
+local function in_range(c)
+	for a = 1, 3 do
+		if c[a] < -128 or c[a] > 127 then
+			return false
+		end
+	end
+	return true
+end
+
+-- A new voxel volume at the point, of one voxel, selected
+local function add_volume(x, z)
+	local def = doc.placeholder()
+	local inst = doc.placeholder()
+	send({
+		{op = "create", ent = {id = def, type = "definition", ints = {
+				kind = KIND.voxel, voxel_size = S.voxel_size}}},
+		{op = "create", ent = {id = inst, type = "instance", ints = {def = def,
+				x = math.floor(x + 0.5), z = math.floor(z + 0.5)}}},
+	}, function(err)
+		if err == "" then
+			doc.set_voxels(S.real[def], {[doc.voxel_key(0, 0, 0)] =
+					default_material()})
+			S.sel = {[S.real[inst]] = "instance"}
+			S.primary = S.real[inst]
+			M.refresh_panels()
+		end
+	end)
+end
+
+-- The voxel tool at the cursor: place a voxel against what is under it,
+-- or dig the one under it
+local function voxel_edit(dig)
+	if not doc.can("edit") then
+		doc.notice("Viewing only: no edit privilege")
+		return
+	end
+	local id = voxel_target()
+	if not id then
+		local x, z = snapped_point(nil)
+		if x and not dig then
+			add_volume(x, z)
+		else
+			doc.notice("Select a voxel volume, or place one on the floor")
+		end
+		return
+	end
+	local def = doc.ents[id].ints.def
+	local sets = {}
+	if S.view == "2d" then
+		-- From above: the top of the column under the cursor
+		local it = inst_data[id]
+		local x, z = cursor_floor()
+		local lx, _, lz = geom.unrot(x - it.ox, 0, z - it.oz, it.pitch, it.yaw,
+				it.roll)
+		local cx, cz = math.floor(lx / it.size), math.floor(lz / it.size)
+		local top = nil
+		for key in pairs(doc.voxels[def] or {}) do
+			local vx, vy, vz = doc.voxel_cell(key)
+			if vx == cx and vz == cz and (not top or vy > top) then
+				top = vy
+			end
+		end
+		if dig then
+			if top then
+				sets[doc.voxel_key(cx, top, cz)] = 0
+			end
+		else
+			local c = {cx, top and top + 1 or 0, cz}
+			if in_range(c) then
+				sets[doc.voxel_key(c[1], c[2], c[3])] = default_material()
+			end
+		end
+	else
+		local hit, place = voxel_ray(id)
+		if dig and hit then
+			sets[doc.voxel_key(hit[1], hit[2], hit[3])] = 0
+		elseif not dig and place and in_range(place) then
+			sets[doc.voxel_key(place[1], place[2], place[3])] = default_material()
+		end
+	end
+	if next(sets) then
+		doc.set_voxels(def, sets)
+	end
+end
+
 -- A door, window or opening put in a wall where the point is along it
 local function add_hosted(wall, x, z)
 	local f = wall_frame(wall)
@@ -1455,8 +1726,24 @@ end
 
 -- Copies of the selected instances next to them: linked ones share the
 -- definition, the others get a copy of it
+-- A copied definition's voxels go to the copy once it exists
+-- simplified: a second message after the copy's batch, so undoing the copy
+-- is two steps
+local function copy_voxels(copies)
+	for _, c in ipairs(copies) do
+		local vox = doc.voxels[c.from]
+		if vox and next(vox) and S.real[c.to] then
+			local sets = {}
+			for k, v in pairs(vox) do
+				sets[k] = v
+			end
+			doc.set_voxels(S.real[c.to], sets)
+		end
+	end
+end
+
 local function copy_selected(linked)
-	local ops, new = {}, {}
+	local ops, new, voxel_copies = {}, {}, {}
 	for id, kind in pairs(S.sel) do
 		if kind == "instance" then
 			local i = copy_fields(doc.ents[id].ints)
@@ -1465,6 +1752,7 @@ local function copy_selected(linked)
 				ops[#ops + 1] = {op = "create", ent = {id = def,
 						type = "definition", ints = copy_fields(
 						doc.ents[i.def].ints)}}
+				voxel_copies[#voxel_copies + 1] = {to = def, from = i.def}
 				i.def = def
 			end
 			if i.host ~= 0 then
@@ -1486,6 +1774,7 @@ local function copy_selected(linked)
 	end
 	send(ops, function(err)
 		if err == "" then
+			copy_voxels(voxel_copies)
 			-- The copies are what is selected now
 			S.sel = {}
 			for _, ph in ipairs(new) do
@@ -1504,7 +1793,11 @@ local function unlink(id)
 		{op = "create", ent = {id = def, type = "definition",
 				ints = copy_fields(doc.ents[i.def].ints)}},
 		{op = "set", ent = {id = id, ints = {def = def}}},
-	})
+	}, function(err)
+		if err == "" then
+			copy_voxels({{to = def, from = i.def}})
+		end
+	end)
 end
 
 -- Node `from` merged into node `into`: what referred to one refers to the
@@ -1753,6 +2046,17 @@ local label_nodes = {}
 
 local refresh_panels
 
+-- The voxel tool in 3D holds the mouse, Luanti's way: the view turns with
+-- it and a crosshair picks
+local function update_capture()
+	local want = S.tool == "voxel" and S.view == "3d"
+	if want ~= (S.captured or false) then
+		S.captured = want
+		S.looking = want
+		magic.input:SetMouseMode(want and magic.MM_RELATIVE or magic.MM_ABSOLUTE)
+	end
+end
+
 local function set_view(v)
 	S.view = v
 	magic.set_preferred_viewports({v == "2d" and vp2d or vp3d})
@@ -1762,6 +2066,7 @@ local function set_view(v)
 	glass_material:SetShaderParameter("PlanLook", flat)
 	caps_node.enabled = v == "2d"
 	pieces_node.enabled = v == "3d"
+	update_capture()
 	refresh_panels()
 end
 
@@ -1770,6 +2075,7 @@ local function set_tool(t)
 	S.draw = nil
 	S.corners = nil
 	S.typed = ""
+	update_capture()
 	refresh_panels()
 end
 
@@ -1782,7 +2088,7 @@ local function build_toolbar()
 			function() set_view(S.view == "2d" and "3d" or "2d") end, false, 40)
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Box"},
-			{"hosted", "Door/window"}, {"paint", "Paint"}}) do
+			{"hosted", "Door/window"}, {"voxel", "Voxels"}, {"paint", "Paint"}}) do
 		panel.button(toolbar, t[2] .. " (" .. TOOL_KEYS[t[1]] .. ")",
 				function() set_tool(t[1]) end, S.tool == t[1])
 	end
@@ -1908,6 +2214,48 @@ local function build_props()
 			panel.button(props, "Unlink", function() unlink(sel.id) end)
 		end
 		panel.button(props, "Delete (Del)", delete_selected)
+	elseif sel and sel.type == "instance" and
+			doc.ents[sel.ints.def].ints.kind == KIND.voxel then
+		local i = sel.ints
+		local p = doc.ents[i.def].ints
+		local links = instances_of(i.def)
+		local n = 0
+		for _ in pairs(doc.voxels[i.def] or {}) do
+			n = n + 1
+		end
+		panel.label(props, "Voxels " .. sel.id .. ": " .. n .. (links > 1 and
+				("   linked x" .. links) or ""))
+		int_field(i.def, "Voxel mm", "voxel_size", p.voxel_size)
+		int_field(sel.id, "X mm", "x", i.x)
+		int_field(sel.id, "Z mm", "z", i.z)
+		panel.field(props, "Yaw deg", i.yaw / 1000, function(t)
+			local v = tonumber(t)
+			if v then
+				set(sel.id, {ints = {yaw = math.floor(v * 1000 + 0.5) % 360000}})
+			end
+		end)
+		int_field(sel.id, "Offset mm", "offset", i.offset)
+		panel.button(props, i.align == 1 and "From the ceiling down" or
+				"From the floor up", function()
+			set(sel.id, {ints = {align = 1 - i.align}})
+		end)
+		local r = panel.row(props)
+		panel.button(r, "Pitch +90", function()
+			set(sel.id, {ints = {pitch = (i.pitch + 1) % 4}})
+		end)
+		panel.button(r, "Roll +90", function()
+			set(sel.id, {ints = {roll = (i.roll + 1) % 4}})
+		end)
+		panel.label(props, "Voxel tool (M): 3D left digs, right places;")
+		panel.label(props, "2D click adds on top, Ctrl+click takes off")
+		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
+		panel.button(props, "Linked clone (Ctrl+L)", function()
+			copy_selected(true)
+		end)
+		if links > 1 then
+			panel.button(props, "Unlink", function() unlink(sel.id) end)
+		end
+		panel.button(props, "Delete (Del)", delete_selected)
 	elseif sel and sel.type == "instance" then
 		local i = sel.ints
 		local def = doc.ents[i.def]
@@ -2023,6 +2371,14 @@ local function build_props()
 				if v and (v > 0 or f[2] == "sill") then d[f[2]] = v end
 			end)
 		end
+	elseif S.tool == "voxel" then
+		panel.label(props, "Select a volume to edit it, or")
+		panel.label(props, "place a voxel on the floor to start one")
+		panel.field(props, "Voxel mm", S.voxel_size, function(t)
+			local v = num(t)
+			if v and v > 0 then S.voxel_size = v end
+		end)
+		panel.label(props, "3D: the mouse turns the view, Esc lets go")
 	elseif S.tool == "box" then
 		panel.label(props, "New boxes: drag the footprint")
 		for _, f in ipairs({{"Width mm", "w"}, {"Height mm", "h"},
@@ -2570,6 +2926,8 @@ local function click()
 		if s and s.kind == "wall" and doc.can("edit") then
 			add_hosted(s.id, s.x, s.z)
 		end
+	elseif S.tool == "voxel" then
+		voxel_edit(S.ctrl)
 	elseif S.tool == "wall" or S.tool == "room" then
 		if not doc.can("edit") then
 			doc.notice("Viewing only: no edit privilege")
@@ -2604,7 +2962,15 @@ local function click()
 	elseif S.tool == "paint" then
 		local s = pick_surface()
 		if s and doc.can("edit") then
-			if s.kind == "instance" then
+			if s.kind == "instance" and inst_data[s.id].voxel then
+				-- One voxel takes the material
+				local hit = voxel_ray(s.id)
+				if hit then
+					doc.set_voxels(doc.ents[s.id].ints.def, {[doc.voxel_key(hit[1],
+							hit[2], hit[3])] = default_material()})
+				end
+				return
+			elseif s.kind == "instance" then
 				send({{op = "set", ent = {id = doc.ents[s.id].ints.def,
 						ints = {mat = default_material()}}}})
 				return
@@ -2620,6 +2986,15 @@ local function click()
 end
 
 function M.mouse_down(button)
+	if S.captured then
+		-- Luanti's: the left button digs, the right one places
+		if button == magic.MOUSEB_LEFT then
+			voxel_edit(true)
+		elseif button == magic.MOUSEB_RIGHT then
+			voxel_edit(false)
+		end
+		return
+	end
 	if button == magic.MOUSEB_RIGHT then
 		if S.draw or S.corners then
 			S.draw = nil
@@ -2641,6 +3016,9 @@ function M.mouse_down(button)
 end
 
 function M.mouse_up(button)
+	if S.captured then
+		return
+	end
 	if button == magic.MOUSEB_RIGHT then
 		if S.looking then
 			S.looking = false
@@ -2831,7 +3209,10 @@ function M.key_down(key, event_data)
 		return
 	end
 	if key == magic.KEY_ESCAPE then
-		if S.draw or S.corners then
+		if S.tool == "voxel" then
+			-- Out of the voxel tool, which lets the mouse go
+			set_tool("select")
+		elseif S.draw or S.corners then
 			S.draw = nil
 			S.corners = nil
 			S.typed = ""
@@ -2866,6 +3247,8 @@ function M.key_down(key, event_data)
 		set_tool("room")
 	elseif key == magic.KEY_O then
 		set_tool("box")
+	elseif key == magic.KEY_M then
+		set_tool("voxel")
 	elseif key == magic.KEY_I then
 		-- Again: the next of opening, door and window
 		if S.tool == "hosted" then
@@ -2892,6 +3275,8 @@ local function move_camera(dt)
 	local input = magic.input
 	S.shift = input:GetKeyDown(magic.KEY_LSHIFT) or
 			input:GetKeyDown(magic.KEY_RSHIFT)
+	S.ctrl = input:GetKeyDown(magic.KEY_LCTRL) or
+			input:GetKeyDown(magic.KEY_RCTRL)
 	if doc.typing() or input:GetKeyDown(magic.KEY_LCTRL) and S.view == "2d" then
 		return
 	end
@@ -2929,6 +3314,12 @@ local function place_cameras()
 	overhead_node.enabled = S.view == "3d" and
 			S.pos.y * 1000 < settings().ceiling
 end
+
+local crosshair = magic.ui.root:CreateChild("Text")
+crosshair:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 24)
+crosshair:SetText("+")
+crosshair:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+crosshair.visible = false
 
 -- A text over a place in the world, for this frame
 local label_i = 0
@@ -3114,6 +3505,30 @@ local function draw_overlay()
 			end
 		end
 	end
+	-- The voxel tool's crosshair and the cell it points at
+	crosshair.visible = S.captured or false
+	if S.captured and voxel_target() then
+		local id = voxel_target()
+		local it = inst_data[id]
+		local hit, place = voxel_ray(id)
+		local c = hit or place
+		if c then
+			local sz = it.size
+			local function corner(dx, dy, dz)
+				local x, y, z = geom.rot((c[1] + dx) * sz, (c[2] + dy) * sz,
+						(c[3] + dz) * sz, it.pitch, it.yaw, it.roll)
+				return magic.Vector3(W(it.ox + x), W(it.oy + y), W(it.oz + z))
+			end
+			local col = hit and magic.Color(1, 0.3, 0.2) or magic.Color(0.2, 1, 0.3)
+			for _, e in ipairs({{0,0,0, 1,0,0}, {0,0,0, 0,1,0}, {0,0,0, 0,0,1},
+					{1,1,1, 0,1,1}, {1,1,1, 1,0,1}, {1,1,1, 1,1,0},
+					{1,0,0, 1,1,0}, {1,0,0, 1,0,1}, {0,1,0, 1,1,0},
+					{0,1,0, 0,1,1}, {0,0,1, 1,0,1}, {0,0,1, 0,1,1}}) do
+				debug:AddLine(corner(e[1], e[2], e[3]), corner(e[4], e[5], e[6]),
+						col, false)
+			end
+		end
+	end
 	-- The others: their cursors, their cameras, what they have selected
 	for _, o in pairs(doc.others) do
 		local p = o.p
@@ -3274,6 +3689,10 @@ function M.start(d)
 	doc.privs_changed = refresh_panels
 	doc.others_changed = function()
 		S.dirty = true
+	end
+	doc.voxels_changed = function()
+		S.dirty = true
+		refresh_panels()
 	end
 	magic.SubscribeToEvent("MouseButtonDown", function(_, data)
 		M.mouse_down(data:GetInt("Button"))
