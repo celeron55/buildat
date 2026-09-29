@@ -353,7 +353,12 @@ Emscripten_HandleMouseButton(int eventType, const EmscriptenMouseEvent *mouseEve
 
     SDL_EventType sdl_event_type = (eventType == EMSCRIPTEN_EVENT_MOUSEDOWN ? SDL_PRESSED : SDL_RELEASED);
     SDL_SendMouseButton(window_data->window, 0, sdl_event_type, sdl_button);
-    return SDL_GetEventState(sdl_event_type) == SDL_ENABLE;
+    /* buildat [WEB_CLIENT]: SDL_PRESSED and SDL_RELEASED are states, not
+       event types, and asked of SDL_GetEventState they said "not handled":
+       the browser was not told to leave the button alone, and a middle
+       press in Firefox started its autoscroll or paste instead */
+    return SDL_GetEventState(eventType == EMSCRIPTEN_EVENT_MOUSEDOWN ?
+            SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP) == SDL_ENABLE;
 }
 
 EM_BOOL

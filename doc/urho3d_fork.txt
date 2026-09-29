@@ -223,3 +223,24 @@ two were equal at the start. In Input.cpp, when the browser ends a pointer
 lock that the game still wants (MM_RELATIVE, not an exit Urho asked for),
 an Esc down and up is pushed: the browser does that on Esc and keeps the
 key, and the game should see what the user pressed.
+
+The web mouse: the pointer lock follows MM_RELATIVE ([WEB_CLIENT])
+------------------------------------------------------------------
+Input/Input.cpp, Input/Input.h,
+Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c
+
+1.7.1's web input deferred a mode change until the browser answered, asked
+for the lock through emscripten_request_pointerlock(NULL, true) -- which
+waits for the next click or key -- and took a hidden cursor in MM_ABSOLUTE
+for a lock too. A drag asks on its button press, so its lock came at the
+release, after the game had gone back to MM_ABSOLUTE, and stayed; and the
+cursor hidden in the crosshair left a half state behind an Esc. Now: the
+mode is the game's at once; MM_RELATIVE asks for the lock there and then
+(canvas.requestPointerLock, which a recent user activation allows) and any
+other mode leaves it; a lock granted after the game stopped wanting it is
+left at once; the cursor hides while locked and is otherwise what the game
+set. SetMouseModeEmscriptenFinal and the deferred-request bookkeeping are
+gone. SDL's mouse button handler asked SDL_GetEventState about
+SDL_PRESSED/SDL_RELEASED instead of the event types, so the browser was
+never told to leave a button alone: a middle press in Firefox began its
+autoscroll or paste.

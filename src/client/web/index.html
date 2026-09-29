@@ -70,6 +70,8 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none; }
 		},
 	};
 	canvas.addEventListener('click', function(){ canvas.focus(); });
+	// A middle click is the game's, not the browser's paste or autoscroll
+	canvas.addEventListener('auxclick', function(e){ e.preventDefault(); });
 })();
 </script>
 <script src="buildat.js"></script>

@@ -122,21 +122,7 @@ public:
 private:
     /// Instance of Input subsystem that constructed this instance.
     Input* inputInst_;
-    /// The mouse mode being requested for pointer-lock.
-    static MouseMode requestedMouseMode_;
-    /// Flag indicating whether to suppress the next mouse mode change event.
-    static bool suppressMouseModeEvent_;
-
-    /// The mouse mode of the previous request for pointer-lock.
-    static MouseMode invalidatedRequestedMouseMode_;
-    /// Flag indicating the previous request to suppress the next mouse mode change event.
-    static bool invalidatedSuppressMouseModeEvent_;
 };
-
-bool EmscriptenInput::suppressMouseModeEvent_ = false;
-MouseMode EmscriptenInput::requestedMouseMode_ = MM_INVALID;
-bool EmscriptenInput::invalidatedSuppressMouseModeEvent_ = false;
-MouseMode EmscriptenInput::invalidatedRequestedMouseMode_ = MM_INVALID;
 
 EmscriptenInput::EmscriptenInput(Input* inputInst) :
     inputInst_(inputInst)
@@ -160,21 +146,26 @@ EmscriptenInput::EmscriptenInput(Input* inputInst) :
 
 void EmscriptenInput::RequestPointerLock(MouseMode mode, bool suppressEvent)
 {
-    requestedMouseMode_ = mode;
-    suppressMouseModeEvent_ = suppressEvent;
-    emscripten_request_pointerlock(NULL, true);
+    // buildat [WEB_CLIENT]: asked for now, not deferred to the next click or
+    // key as emscripten_request_pointerlock(NULL, true) does -- a drag asks
+    // on its button press and that got the lock at its release, after the
+    // game had let go of it. The browsers want only a recent user activation,
+    // and the game asks within a frame of the press. A refusal leaves the
+    // mouse unlocked, which still moves.
+    EM_ASM({
+        var c = Module['canvas'];
+        if (!c || !c.requestPointerLock)
+            return;
+        try {
+            var r = c.requestPointerLock();
+            if (r && r['catch'])
+                r['catch'](function(){});
+        } catch (e) {}
+    });
 }
 
 void EmscriptenInput::ExitPointerLock(bool suppressEvent)
 {
-    if (requestedMouseMode_ != MM_INVALID)
-    {
-        invalidatedRequestedMouseMode_ = requestedMouseMode_;
-        invalidatedSuppressMouseModeEvent_ = suppressMouseModeEvent_;
-    }
-    requestedMouseMode_ = MM_INVALID;
-    suppressMouseModeEvent_ = suppressEvent;
-
     if (inputInst_->IsMouseLocked())
     {
         inputInst_->emscriptenExitingPointerLock_ = true;
@@ -195,74 +186,46 @@ bool EmscriptenInput::IsVisible()
 
 EM_BOOL EmscriptenInput::HandlePointerLockChange(int eventType, const EmscriptenPointerlockChangeEvent* keyEvent, void* userData)
 {
+    // buildat [WEB_CLIENT]: the lock is held exactly while the mouse mode is
+    // MM_RELATIVE, whatever order the browser's answers come in
     Input* const inputInst = (Input*)userData;
-
-    bool invalid = false;
-    const bool suppress = suppressMouseModeEvent_;
-    if (requestedMouseMode_ == MM_INVALID && invalidatedRequestedMouseMode_ != MM_INVALID)
-    {
-        invalid = true;
-        requestedMouseMode_ = invalidatedRequestedMouseMode_;
-        suppressMouseModeEvent_ = invalidatedSuppressMouseModeEvent_;
-        invalidatedRequestedMouseMode_ = MM_INVALID;
-        invalidatedSuppressMouseModeEvent_ = false;
-    }
 
     if (keyEvent->isActive >= EM_TRUE)
     {
-        // Pointer Lock is now active
         inputInst->emscriptenPointerLock_ = true;
         inputInst->emscriptenEnteredPointerLock_ = true;
-        inputInst->SetMouseModeEmscriptenFinal(requestedMouseMode_, suppressMouseModeEvent_);
+        if (inputInst->mouseMode_ == MM_RELATIVE)
+            inputInst->SetMouseVisibleEmscripten(false, true);
+        else
+            // Granted after the game stopped wanting it
+            inputInst->emscriptenInput_->ExitPointerLock(true);
     }
     else
     {
-        // Pointer Lock is now inactive
         inputInst->emscriptenPointerLock_ = false;
-
-        // buildat [WEB_CLIENT]: the browser ends the lock itself on Esc and
-        // keeps the key, so a game that still wanted the lock is given the
-        // Esc it did not see -- what the user asked for on the desktop
-        if (inputInst->mouseMode_ == MM_RELATIVE && !inputInst->emscriptenExitingPointerLock_)
-        {
-            SDL_Event evt;
-            SDL_zero(evt);
-            evt.key.keysym.sym = SDLK_ESCAPE;
-            evt.key.keysym.scancode = SDL_SCANCODE_ESCAPE;
-            evt.type = SDL_KEYDOWN;
-            evt.key.state = SDL_PRESSED;
-            SDL_PushEvent(&evt);
-            evt.type = SDL_KEYUP;
-            evt.key.state = SDL_RELEASED;
-            SDL_PushEvent(&evt);
-        }
-
         if (inputInst->mouseMode_ == MM_RELATIVE)
-            inputInst->SetMouseModeEmscriptenFinal(MM_FREE, suppressMouseModeEvent_);
-        else if (inputInst->mouseMode_ == MM_ABSOLUTE)
-            inputInst->SetMouseModeEmscriptenFinal(MM_ABSOLUTE, suppressMouseModeEvent_);
-
+        {
+            inputInst->SetMouseVisibleEmscripten(inputInst->lastMouseVisible_, true);
+            // The browser ends the lock itself on Esc and keeps the key, so
+            // a game that still wanted the lock is given the Esc it did not
+            // see -- what the user asked for on the desktop
+            if (!inputInst->emscriptenExitingPointerLock_)
+            {
+                SDL_Event evt;
+                SDL_zero(evt);
+                evt.key.keysym.sym = SDLK_ESCAPE;
+                evt.key.keysym.scancode = SDL_SCANCODE_ESCAPE;
+                evt.type = SDL_KEYDOWN;
+                evt.key.state = SDL_PRESSED;
+                SDL_PushEvent(&evt);
+                evt.type = SDL_KEYUP;
+                evt.key.state = SDL_RELEASED;
+                SDL_PushEvent(&evt);
+            }
+        }
         inputInst->emscriptenExitingPointerLock_ = false;
     }
-
-    if (invalid)
-    {
-        if (keyEvent->isActive >= EM_TRUE)
-        {
-            // ExitPointerLock was called before the pointer-lock request was accepted.
-            // Exit from pointer-lock to avoid unexpected behavior.
-            invalidatedRequestedMouseMode_ = MM_INVALID;
-            inputInst->emscriptenInput_->ExitPointerLock(suppress);
-            return EM_TRUE;
-        }
-    }
-
-    requestedMouseMode_ = MM_INVALID;
-    suppressMouseModeEvent_ = false;
-
-    invalidatedRequestedMouseMode_ = MM_INVALID;
-    invalidatedSuppressMouseModeEvent_ = false;
-
+    inputInst->SuppressNextMouseMove();
     return EM_TRUE;
 }
 
@@ -617,9 +580,6 @@ void Input::SetMouseVisible(bool enable, bool suppressEvent)
 
                 if (mouseMode_ == MM_ABSOLUTE)
                     SetMouseModeAbsolute(SDL_TRUE);
-#else
-                if (mouseMode_ == MM_ABSOLUTE && !emscriptenPointerLock_)
-                    emscriptenInput_->RequestPointerLock(MM_ABSOLUTE, suppressEvent);
 #endif
                 SDL_ShowCursor(SDL_FALSE);
                 mouseVisible_ = false;
@@ -656,9 +616,6 @@ void Input::SetMouseVisible(bool enable, bool suppressEvent)
                         lastMousePosition_ = lastVisibleMousePosition_;
                     }
                 }
-#else
-                if (mouseMode_ == MM_ABSOLUTE && emscriptenPointerLock_)
-                    emscriptenInput_->ExitPointerLock(suppressEvent);
 #endif
             }
         }
@@ -697,137 +654,52 @@ void Input::ResetMouseVisible()
 #ifdef __EMSCRIPTEN__
 void Input::SetMouseVisibleEmscripten(bool enable, bool suppressEvent)
 {
+    // buildat [WEB_CLIENT]: the cursor only; the lock goes with MM_RELATIVE
     if (enable != mouseVisible_)
     {
-        if (mouseMode_ == MM_ABSOLUTE)
-        {
-            if (enable)
-            {
-                mouseVisible_ = true;
-                SDL_ShowCursor(SDL_TRUE);
-                emscriptenInput_->ExitPointerLock(suppressEvent);
-            }
-            else
-            {
-                if (emscriptenPointerLock_)
-                {
-                    mouseVisible_ = false;
-                    SDL_ShowCursor(SDL_FALSE);
-                }
-                else
-                    emscriptenInput_->RequestPointerLock(MM_ABSOLUTE, suppressEvent);
-            }
-        }
-        else
-        {
-            mouseVisible_ = enable;
-            SDL_ShowCursor(enable ? SDL_TRUE : SDL_FALSE);
-        }
+        mouseVisible_ = enable;
+        SDL_ShowCursor(enable ? SDL_TRUE : SDL_FALSE);
     }
 
     if (!suppressEvent)
         lastMouseVisible_ = mouseVisible_;
 }
 
-void Input::SetMouseModeEmscriptenFinal(MouseMode mode, bool suppressEvent)
+void Input::SetMouseModeEmscripten(MouseMode mode, bool suppressEvent)
 {
-    if (!suppressEvent)
-        lastMouseMode_ = mode;
-
+    // buildat [WEB_CLIENT]: the mode is the game's at once, and the pointer
+    // lock follows it: asked for with MM_RELATIVE, left with any other. The
+    // cursor hides when the lock comes (HandlePointerLockChange); until then
+    // the mouse moves as it would, which a drag the browser would not lock
+    // still turns by.
+    if (mode == mouseMode_ && !(mode == MM_RELATIVE && !emscriptenPointerLock_))
+        return;
+    const MouseMode previousMode = mouseMode_;
+    SuppressNextMouseMove();
     mouseMode_ = mode;
-
-    if (mode == MM_ABSOLUTE)
-    {
-        if (emscriptenPointerLock_)
-        {
-            SetMouseVisibleEmscripten(false, suppressEvent);
-        }
-        else
-        {
-            SetMouseVisibleEmscripten(true, suppressEvent);
-        }
-
-        UI* const ui = GetSubsystem<UI>();
-        Cursor* const cursor = ui->GetCursor();
-        SetMouseGrabbed(!(mouseVisible_ || (cursor && cursor->IsVisible())), suppressEvent);
-    }
-    else if (mode == MM_RELATIVE && emscriptenPointerLock_)
+    if (mode == MM_RELATIVE)
     {
         SetMouseGrabbed(true, suppressEvent);
-        SetMouseVisibleEmscripten(false, suppressEvent);
+        if (emscriptenPointerLock_)
+            SetMouseVisibleEmscripten(false, true);
+        else
+            emscriptenInput_->RequestPointerLock(mode, suppressEvent);
     }
     else
     {
+        emscriptenInput_->ExitPointerLock(suppressEvent);
+        if (previousMode == MM_RELATIVE)
+            SetMouseVisibleEmscripten(lastMouseVisible_, true);
         SetMouseGrabbed(false, suppressEvent);
     }
 
-    SuppressNextMouseMove();
-
     if (!suppressEvent)
     {
+        lastMouseMode_ = mode;
         VariantMap& eventData = GetEventDataMap();
         eventData[MouseModeChanged::P_MODE] = mode;
         eventData[MouseModeChanged::P_MOUSELOCKED] = IsMouseLocked();
         SendEvent(E_MOUSEMODECHANGED, eventData);
-    }
-}
-
-void Input::SetMouseModeEmscripten(MouseMode mode, bool suppressEvent)
-{
-    if (mode != mouseMode_)
-        SuppressNextMouseMove();
-
-    const MouseMode previousMode = mouseMode_;
-    mouseMode_ = mode;
-
-    UI* const ui = GetSubsystem<UI>();
-    Cursor* const cursor = ui->GetCursor();
-
-    // Handle changing from previous mode
-    if (previousMode == MM_RELATIVE)
-        ResetMouseVisible();
-
-    // Handle changing to new mode
-    if (mode == MM_FREE)
-    {
-        // Attempt to cancel pending pointer-lock requests
-        emscriptenInput_->ExitPointerLock(suppressEvent);
-        SetMouseGrabbed(!(mouseVisible_ || (cursor && cursor->IsVisible())), suppressEvent);
-    }
-    else if (mode == MM_ABSOLUTE)
-    {
-        if (!mouseVisible_)
-        {
-            if (emscriptenPointerLock_)
-            {
-                SetMouseVisibleEmscripten(false, suppressEvent);
-            }
-            else
-            {
-                if (!cursor)
-                    SetMouseVisible(true, suppressEvent);
-                // Deferred mouse mode change to pointer-lock callback
-                mouseMode_ = previousMode;
-                emscriptenInput_->RequestPointerLock(MM_ABSOLUTE, suppressEvent);
-            }
-
-            SetMouseGrabbed(!(mouseVisible_ || (cursor && cursor->IsVisible())), suppressEvent);
-        }
-    }
-    else if (mode == MM_RELATIVE)
-    {
-        if (emscriptenPointerLock_)
-        {
-            SetMouseVisibleEmscripten(false, true);
-            SetMouseGrabbed(!(cursor && cursor->IsVisible()), suppressEvent);
-        }
-        else
-        {
-            // Defer mouse mode change to pointer-lock callback
-            SetMouseGrabbed(false, true);
-            mouseMode_ = previousMode;
-            emscriptenInput_->RequestPointerLock(MM_RELATIVE, suppressEvent);
-        }
     }
 }
 #endif

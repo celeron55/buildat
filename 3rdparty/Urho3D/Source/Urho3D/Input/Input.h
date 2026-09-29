@@ -379,8 +379,6 @@ private:
 #else
     /// Set whether the operating system mouse cursor is visible (Emscripten platform only).
     void SetMouseVisibleEmscripten(bool enable, bool suppressEvent = false);
-    /// Set mouse mode final resolution (Emscripten platform only).
-    void SetMouseModeEmscriptenFinal(MouseMode mode, bool suppressEvent = false);
     /// SetMouseMode  (Emscripten platform only).
     void SetMouseModeEmscripten(MouseMode mode, bool suppressEvent);
     /// Handle frame end event.
