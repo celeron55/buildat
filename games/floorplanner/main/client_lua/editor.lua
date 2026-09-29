@@ -3596,13 +3596,189 @@ do
 		e:SetFocus(true)
 	end
 
+	-- **Who may use the plan** ([FP_ACCESS] 4), the admin's; the chat
+	-- commands it replaces are gone. The server sends the list at the join
+	-- and after every change, and the page follows it while it is open.
+	local users_page
+	local function secret(e)
+		e.echoCharacter = string.byte("*")
+		return e
+	end
+
+	local function password_page(name)
+		local w = dialog("A new password for " .. name)
+		local e
+		local function set()
+			doc.admin("password", name, e:GetText())
+			users_page()
+		end
+		e = secret(panel.field(w, "Password", "", set, 180))
+		local r = panel.row(w)
+		panel.button(r, "Set", set)
+		panel.button(r, "Back", function() users_page() end)
+		e:SetFocus(true)
+	end
+
+	local function delete_page(name)
+		local w = dialog("Delete the account " .. name .. "?")
+		panel.label(w, "Their session ends.")
+		local r = panel.row(w)
+		panel.button(r, "Delete", function()
+			doc.admin("delete", name)
+			users_page()
+		end)
+		panel.button(r, "Back", function() users_page() end)
+	end
+
+	local function add_page()
+		local w = dialog("Add a user")
+		local can_edit = true
+		local n, p
+		local function add()
+			doc.admin("add", n:GetText(), p:GetText(), can_edit)
+			users_page()
+		end
+		n = panel.field(w, "Name", "", function() p:SetFocus(true) end, 180)
+		p = secret(panel.field(w, "Password", "", add, 180))
+		local b
+		b = panel.button(w, "Can edit: yes", function()
+			can_edit = not can_edit
+			b:GetChild(0):SetText(can_edit and "Can edit: yes" or "Can edit: no")
+		end)
+		local r = panel.row(w)
+		panel.button(r, "Add", add)
+		panel.button(r, "Back", function() users_page() end)
+		n:SetFocus(true)
+	end
+
+	users_page = function()
+		S.pause_page = "users"
+		local w = dialog("Users")
+		local u = doc.users
+		-- What the last request came to, on a line that is always there so
+		-- that the buttons under it do not move when it appears; an
+		-- invite's code in a field, to copy
+		local message = doc.admin_message or ""
+		local code = message:match("^Invite code: (%w+)$")
+		if code then
+			panel.field(w, "Invite code", code, function() end, 140)
+		else
+			local l = panel.label(w, message ~= "" and message or " ",
+					magic.Color(1.0, 0.8, 0.4))
+			-- The field's height, which a code in its place takes
+			l.minHeight = 22
+		end
+		if not u then
+			panel.label(w, "Waiting for the server...")
+			panel.button(w, "Back", function() open_pause() end)
+			return
+		end
+		for _, user in ipairs(u.users) do
+			local has = {}
+			for _, p in ipairs(user.privs) do
+				has[p] = true
+			end
+			local r = panel.row(w)
+			local l = panel.label(r, user.name .. (user.here == 1 and " (here)" or ""))
+			l.minWidth = 140
+			panel.button(r, has.edit and "Edit: yes" or "Edit: no", function()
+				doc.admin("priv", user.name, "edit", not has.edit)
+			end)
+			panel.button(r, has.admin and "Admin: yes" or "Admin: no", function()
+				doc.admin("priv", user.name, "admin", not has.admin)
+			end)
+			if user.here == 1 then
+				panel.button(r, "Kick", function() doc.admin("kick", user.name) end)
+			end
+			panel.button(r, "Password...", function() password_page(user.name) end)
+			panel.button(r, "Delete...", function() delete_page(user.name) end)
+		end
+		panel.button(w, "Add a user...", add_page)
+		panel.label(w, "Invites (each makes one account):")
+		for _, inv in ipairs(u.invites) do
+			local r = panel.row(w)
+			local l = panel.label(r, inv.code .. (#inv.privs > 0 and "  can edit" or
+					"  view only") .. "  (" .. inv.by .. ")")
+			l.minWidth = 240
+			panel.button(r, "Delete", function() doc.admin("uninvite", inv.code) end)
+		end
+		local r = panel.row(w)
+		panel.button(r, "New invite: can edit", function()
+			doc.admin("invite", "", "", true)
+		end)
+		panel.button(r, "New invite: view only", function()
+			doc.admin("invite", "", "", false)
+		end)
+		local a = u.access
+		panel.button(w, a.open_registration == 1 and
+				"Open registration: on (anyone can make an account)" or
+				"Open registration: off (invites only)", function()
+			doc.admin("setting", "open_registration", "", a.open_registration ~= 1)
+		end)
+		panel.button(w, a.default_edit == 1 and
+				"New open-registration accounts can edit: yes" or
+				"New open-registration accounts can edit: no", function()
+			doc.admin("setting", "default_edit", "", a.default_edit ~= 1)
+		end)
+		panel.button(w, "Back", function()
+			doc.admin_message = nil
+			open_pause()
+		end)
+	end
+	-- doc's once M.start has it
+	M.users_changed = function()
+		if pause_win and S.pause_page == "users" then
+			users_page()
+		end
+	end
+
+	-- A user's own password ([FP_ACCESS] 4)
+	local function own_password_page(message)
+		S.pause_page = "passwd"
+		local w = dialog("Change password")
+		if message then
+			panel.label(w, message, magic.Color(1.0, 0.8, 0.4))
+		end
+		local old, new1, new2
+		local function change()
+			if new1:GetText() ~= new2:GetText() then
+				return own_password_page("The new passwords differ")
+			end
+			doc.passwd(old:GetText(), new1:GetText())
+		end
+		old = secret(panel.field(w, "Old", "", function()
+			new1:SetFocus(true) end, 180))
+		new1 = secret(panel.field(w, "New", "", function()
+			new2:SetFocus(true) end, 180))
+		new2 = secret(panel.field(w, "New again", "", change, 180))
+		local r = panel.row(w)
+		panel.button(r, "Change", change)
+		panel.button(r, "Back", function() open_pause() end)
+		old:SetFocus(true)
+	end
+	M.passwd_done = function(text)
+		if pause_win and S.pause_page == "passwd" then
+			own_password_page(text == "" and "The password was changed" or text)
+		end
+	end
+
 	open_pause = function()
+		S.pause_page = nil
 		S.paused = true
 		S.press, S.drag = nil, nil
 		update_capture()
 		local w = dialog("Paused")
 		panel.button(w, "Continue (Esc)", function() close_pause() end)
 		panel.button(w, "Settings", settings_page)
+		if doc.privs.admin then
+			panel.button(w, "Users...", function()
+				doc.admin("list")
+				users_page()
+			end)
+		end
+		if not doc.is_local then
+			panel.button(w, "Change password...", function() own_password_page() end)
+		end
 		-- The local user of a launched server can go back to the plans;
 		-- anybody can go back to the launcher
 		if doc.is_local then
@@ -5640,6 +5816,7 @@ end
 
 function M.start(d)
 	doc = d
+	doc.users_changed, doc.passwd_done = M.users_changed, M.passwd_done
 	S.material = nil
 	doc.listeners[#doc.listeners + 1] = function(changed, deleted)
 		if S.suspended then

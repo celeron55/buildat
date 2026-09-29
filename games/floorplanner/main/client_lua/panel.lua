@@ -135,7 +135,10 @@ function M.field(parent, label, value, on_finish, width)
 	end
 	magic.SubscribeToEvent(e, "TextFinished", function()
 		on_finish(e:GetText())
-		magic.ui:SetFocusElement(nil)
+		-- Unless on_finish moved it on, to the next field of a form
+		if e:HasFocus() then
+			magic.ui:SetFocusElement(nil)
+		end
 	end)
 	return e, r
 end

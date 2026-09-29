@@ -21,7 +21,10 @@ local ENTITY = {"object",
 	{"lists", {"unordered_map", "string", {"array", "int32_t"}}},
 }
 local TEXT = {"object", {"text", "string"}}
-local LOGIN = {"object", {"name", "string"}, {"password", "string"}}
+-- The code is the setup code of a plan with no admin, or an invite code
+-- for a new account ([FP_ACCESS])
+local LOGIN = {"object", {"name", "string"}, {"password", "string"},
+		{"code", "string"}}
 local BATCH = {"object",
 	{"seq", "int32_t"},
 	{"ops", {"array", {"object", {"op", "byte"}, {"ent", ENTITY}}}},
@@ -327,6 +330,48 @@ buildat.sub_packet("fp:images", function(data)
 	end
 end)
 
+-- The admin's menus and the password change ([FP_ACCESS] 4): the
+-- accounts, the open invites and the access settings, which the server
+-- sends an admin at the join and after every change; what a request came to
+local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
+		{"arg", "string"}, {"on", "byte"}}
+local USERS = {"object",
+	{"users", {"array", {"object", {"name", "string"},
+			{"privs", {"array", "string"}}, {"here", "byte"}}}},
+	{"invites", {"array", {"object", {"code", "string"},
+			{"privs", {"array", "string"}}, {"by", "string"}}}},
+	{"access", {"object", {"open_registration", "byte"},
+			{"default_edit", "byte"}}},
+}
+doc.users = nil
+function doc.admin(cmd, name, arg, on)
+	buildat.send_packet("fp:admin", cereal.binary_output({cmd = cmd,
+			name = name or "", arg = arg or "", on = on and 1 or 0}, ADMIN))
+end
+function doc.passwd(old, new)
+	buildat.send_packet("fp:passwd", cereal.binary_output(
+			{old = old, new = new}, {"object", {"old", "string"},
+			{"new", "string"}}))
+end
+buildat.sub_packet("fp:users", function(data)
+	doc.users = cereal.binary_input(data, USERS)
+	if doc.users_changed then
+		doc.users_changed()
+	end
+end)
+buildat.sub_packet("fp:admin_result", function(data)
+	doc.admin_message = cereal.binary_input(data, TEXT).text
+	if doc.users_changed then
+		doc.users_changed()
+	end
+end)
+buildat.sub_packet("fp:passwd_result", function(data)
+	local text = cereal.binary_input(data, TEXT).text
+	if doc.passwd_done then
+		doc.passwd_done(text)
+	end
+end)
+
 buildat.sub_packet("fp:privs", function(data)
 	doc.privs = {}
 	for _, p in ipairs(cereal.binary_input(data, {"array", "string"})) do
@@ -606,10 +651,12 @@ end
 -- The join dialog
 --
 local login_window = nil
+-- What the server said last in fp:hello; the join dialog reads it
+local hello = {}
 
-local function send_login(name, password)
+local function send_login(name, password, code)
 	buildat.send_packet("fp:login", cereal.binary_output(
-			{name = name, password = password}, LOGIN))
+			{name = name, password = password, code = code or ""}, LOGIN))
 end
 
 -- simplified: the join dialog is rebuilt on every error rather than
@@ -649,12 +696,24 @@ local function show_login(error_text, is_local)
 	local name = field(buildat.storage_read("name") or
 			buildat.get_preference("default_username") or "", false)
 	local password = nil
+	local code = nil
 	if is_local then
 		-- The plan is on this machine: no password to ask
 		label("On this computer: no password needed")
 	else
-		label("Password (a new name makes an account)")
+		label(hello.open_registration == 1 and
+				"Password (a new name makes an account)" or "Password")
 		password = field("", true)
+		-- [FP_ACCESS]: the plan's first admin claims it with the code in the
+		-- server's log; while registration is closed a new account needs an
+		-- invite
+		if hello.setup == 1 then
+			label("Setup code (the plan has no admin: see the server's log)")
+			code = field("", false)
+		elseif hello.open_registration ~= 1 then
+			label("Invite code (only for a new account)")
+			code = field("", false)
+		end
 		-- simplified: the connection is not encrypted yet ([TRANSPORT])
 		local warn = label("The password is sent unencrypted: use a trusted " ..
 				"network")
@@ -675,7 +734,8 @@ local function show_login(error_text, is_local)
 		local n = name:GetText()
 		buildat.storage_write("name", n)
 		doc.rejoin_name = n
-		send_login(n, password and password:GetText() or "")
+		send_login(n, password and password:GetText() or "",
+				code and code:GetText() or "")
 	end
 	magic.SubscribeToEvent(button, "Released", function() join() end)
 	magic.SubscribeToEvent(name, "TextFinished", function()
@@ -686,7 +746,16 @@ local function show_login(error_text, is_local)
 		end
 	end)
 	if password then
-		magic.SubscribeToEvent(password, "TextFinished", function() join() end)
+		magic.SubscribeToEvent(password, "TextFinished", function()
+			if code then
+				code:SetFocus(true)
+			else
+				join()
+			end
+		end)
+	end
+	if code then
+		magic.SubscribeToEvent(code, "TextFinished", function() join() end)
 	end
 	name:SetFocus(true)
 end
@@ -745,10 +814,10 @@ local function show_saves(saves)
 	e:SetFocus(true)
 end
 
-local hello = {}
 buildat.sub_packet("fp:hello", function(data)
 	hello = cereal.binary_input(data, {"object", {"local", "byte"},
-			{"pick", "byte"}, {"saves", {"array", "string"}}, {"plan", "string"}})
+			{"pick", "byte"}, {"saves", {"array", "string"}}, {"plan", "string"},
+			{"setup", "byte"}, {"open_registration", "byte"}})
 	doc.is_local = hello["local"] == 1
 	-- The open plan's name and the local user's plans, for a copy's name
 	doc.plan_name, doc.saves = hello.plan, hello.saves
@@ -773,7 +842,8 @@ buildat.sub_packet("fp:hello", function(data)
 	local auto_name = buildat.get_env("BUILDAT_FP_NAME")
 	if auto_name then
 		doc.rejoin_name = auto_name
-		send_login(auto_name, buildat.get_env("BUILDAT_FP_PASSWORD") or "")
+		send_login(auto_name, buildat.get_env("BUILDAT_FP_PASSWORD") or "",
+				buildat.get_env("BUILDAT_FP_CODE") or "")
 	else
 		show_login(nil, hello["local"] == 1)
 	end

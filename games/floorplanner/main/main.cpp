@@ -14,6 +14,7 @@
 #include "interface/sha256.h"
 #include "interface/fs.h"
 #include "interface/server_config.h"
+#include "interface/os.h"
 #include "client_file/api.h"
 #include "network/api.h"
 #include "storage/api.h"
@@ -324,6 +325,65 @@ struct Account
 
 static const sv_<ss_> KNOWN_PRIVS = {"edit", "admin"};
 
+// Who may make an account, the auth store's and not the document's
+// ([FP_ACCESS] 3): the plan's settings entity is changed by any editor's
+// ordinary edits, and its old default_edit is only read once, to carry it
+// over
+struct AccessSettings
+{
+	uint8_t open_registration = 0;
+	uint8_t default_edit = 1;
+
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(open_registration, default_edit);
+	}
+};
+
+// A one-time invite ([FP_ACCESS] 2): the privileges the account it makes
+// gets, and the admin who made it
+struct Invite
+{
+	sv_<ss_> privs;
+	ss_ by;
+
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(privs, by);
+	}
+};
+
+// Failed logins of one name or one address ([FP_ACCESS] 5): a wait that
+// doubles with each, up to a minute, and after FAIL_LOCK of them in the
+// window a lock of the window's length
+struct Failures
+{
+	int count = 0;
+	int64_t first_us = 0;
+	int64_t wait_until_us = 0;
+};
+static const int64_t FAIL_WINDOW_US = 600LL * 1000000;
+static const int FAIL_LOCK = 10;
+static const size_t MIN_PASSWORD = 6;
+
+// A code to type: no 0/O or 1/I to mistake for each other
+static ss_ random_code(size_t n)
+{
+	static const char *alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+	std::random_device rd;
+	ss_ s;
+	for(size_t i = 0; i < n; i++)
+		s += alphabet[rd() % 32];
+	return s;
+}
+
+static ss_ upper(ss_ s)
+{
+	for(char &c : s)
+		c = (char)toupper((unsigned char)c);
+	return s;
+}
+
 // Luanti's rule for a player name
 static bool valid_name(const ss_ &name)
 {
@@ -420,6 +480,13 @@ struct Module: public interface::Module
 	float m_flush_timer = 0;
 
 	std::map<network::PeerId, Peer> m_peers;
+	// [FP_ACCESS]: the plan's access settings, the code that claims it while
+	// it has no admin (empty when it has one), and the failed logins by name
+	// and by address
+	AccessSettings m_access;
+	ss_ m_setup_code;
+	std::map<ss_, Failures> m_name_failures;
+	std::map<ss_, Failures> m_address_failures;
 	// What is being dragged, and by whom: nobody else's batch may touch it
 	std::map<int32_t, network::PeerId> m_locks;
 
@@ -450,6 +517,8 @@ struct Module: public interface::Module
 				Event::t("network:packet_received/fp:copy_plan"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:batch"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:chat"));
+		m_server->sub_event(this, Event::t("network:packet_received/fp:admin"));
+		m_server->sub_event(this, Event::t("network:packet_received/fp:passwd"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:voxels"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:lock"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:unlock"));
@@ -482,6 +551,10 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:chat", on_chat,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:admin", on_admin,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:passwd", on_passwd,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:voxels", on_voxels,
 				network::Packet)
@@ -561,6 +634,7 @@ struct Module: public interface::Module
 		m_store = m_save->store("main");
 		m_save_name = name;
 		load();
+		load_access();
 		find_images();
 		log_i(MODULE, "Opened the plan %s", cs(name));
 		return true;
@@ -581,9 +655,14 @@ struct Module: public interface::Module
 		uint8_t pick = 0;       // no plan open: pick one of saves
 		sv_<ss_> saves;         // for the local user
 		ss_ plan;               // the one open, or ""
+		// [FP_ACCESS]: the join asks for the setup code (the plan has no
+		// admin), or says a new name needs an invite (registration is not
+		// open)
+		uint8_t setup = 0;
+		uint8_t open_registration = 0;
 		template<class Archive>
 		void serialize(Archive &archive){
-			archive(local, pick, saves, plan);
+			archive(local, pick, saves, plan, setup, open_registration);
 		}
 	};
 
@@ -595,6 +674,8 @@ struct Module: public interface::Module
 		h.local = is_local(peer);
 		h.pick = !m_store;
 		h.plan = m_store ? m_save_name : "";
+		h.setup = !h.local && !m_setup_code.empty();
+		h.open_registration = m_access.open_registration;
 		// Always, to the local user: the plan picker lists them, and a copy
 		// is named past them ([FP_COPY])
 		if(h.local){
@@ -651,6 +732,7 @@ struct Module: public interface::Module
 		m_voxels_dirty.clear();
 		m_locks.clear();
 		m_images.clear();
+		m_setup_code.clear();
 		for(auto &pair : m_peers){
 			pair.second.name.clear();
 			pair.second.has_presence = false;
@@ -920,6 +1002,8 @@ struct Module: public interface::Module
 		ss_ name = it->second.name;
 		m_peers.erase(it);
 		leave(client.info.id, name);
+		if(!name.empty() && m_store)
+			send_users_to_admins();
 	}
 
 	// A user gone, by leaving or by a kick: their locks go, and the others
@@ -1200,15 +1284,122 @@ struct Module: public interface::Module
 		return 0;
 	}
 
-	// simplified: the password arrives in the clear, because the transport
-	// is not encrypted yet ([TRANSPORT]). The client's dialog says so.
+	// Access ([FP_ACCESS])
+
+	void save_access()
+	{
+		m_store->set("access/settings", pack(m_access));
+	}
+
+	void load_access()
+	{
+		ss_ data;
+		if(!(m_store->get("access/settings", data) && unpack(data, m_access))){
+			// A plan from before: registration open where the launcher
+			// started the server, and default_edit carried over from the
+			// settings entity, where any editor could change it
+			m_access = AccessSettings();
+			m_access.open_registration = m_launched;
+			Entity *s = find_singleton("settings");
+			m_access.default_edit = !s || s->ints["default_edit"] != 0;
+			save_access();
+		}
+		update_setup_code();
+	}
+
+	int admin_count()
+	{
+		int n = 0;
+		for(const ss_ &key : m_store->list("auth/")){
+			Account account;
+			if(get_account(key.substr(5), account) && account.has("admin"))
+				n++;
+		}
+		return n;
+	}
+
+	// A plan with no admin is claimed with a code from the server's log
+	// ([FP_ACCESS] 1): on a public server the first to connect would
+	// otherwise be its admin
+	void update_setup_code()
+	{
+		if(admin_count() > 0){
+			m_setup_code.clear();
+			return;
+		}
+		if(!m_setup_code.empty())
+			return;
+		m_setup_code = random_code(8);
+		log_w(MODULE, "The plan %s has no admin. The first to join with the "
+				"setup code %s becomes it.", cs(m_save_name), cs(m_setup_code));
+	}
+
+	// How long, in microseconds, before a login of this name or from this
+	// address may be tried again
+	int64_t failure_wait(std::map<ss_, Failures> &m, const ss_ &key, int64_t now)
+	{
+		auto it = m.find(key);
+		if(it == m.end())
+			return 0;
+		if(now - it->second.first_us > FAIL_WINDOW_US &&
+				now >= it->second.wait_until_us){
+			m.erase(it);
+			return 0;
+		}
+		return std::max((int64_t)0, it->second.wait_until_us - now);
+	}
+
+	void note_failure(std::map<ss_, Failures> &m, const ss_ &key, int64_t now)
+	{
+		Failures &f = m[key];
+		if(f.count == 0 || now - f.first_us > FAIL_WINDOW_US){
+			f.count = 0;
+			f.first_us = now;
+		}
+		f.count++;
+		const int64_t wait = f.count >= FAIL_LOCK ? FAIL_WINDOW_US :
+				std::min((int64_t)60, (int64_t)1 << (f.count - 1)) * 1000000;
+		f.wait_until_us = now + wait;
+	}
+
+	Account new_account(const ss_ &password, const sv_<ss_> &privs)
+	{
+		Account account;
+		std::random_device rd;
+		account.salt.resize(16);
+		for(char &c : account.salt)
+			c = (char)(rd() & 0xff);
+		account.hash = pbkdf2_sha256(password, account.salt, PBKDF2_ITERATIONS);
+		account.privs = privs;
+		return account;
+	}
+
+	sv_<ss_> default_privs()
+	{
+		return m_access.default_edit ? sv_<ss_>{"edit"} : sv_<ss_>{};
+	}
+
+	struct LoginRequest
+	{
+		ss_ name;
+		ss_ password;
+		ss_ code; // the setup code, or an invite code ([FP_ACCESS])
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(name, password, code);
+		}
+	};
+
+	// simplified: the password arrives in the clear on a native client's
+	// connection, because the transport is not encrypted yet ([TRANSPORT]);
+	// the join dialog says so. The web client behind an https proxy has TLS.
 	void on_login(const network::Packet &packet)
 	{
 		auto pit = m_peers.find(packet.sender);
 		if(pit == m_peers.end())
 			return;
 		Peer &peer = pit->second;
-		std::pair<ss_, ss_> cred;
+		LoginRequest cred;
 		auto reply = [&](const ss_ &error){
 			send(packet.sender, "fp:login_result", pack(error));
 		};
@@ -1223,45 +1414,99 @@ struct Module: public interface::Module
 			return reply("Too many failed attempts; reconnect");
 		if(!unpack(packet.data, cred))
 			return reply("Malformed login");
-		const ss_ &name = cred.first;
-		const ss_ &password = cred.second;
+		const ss_ &name = cred.name;
+		const ss_ &password = cred.password;
+		const ss_ code = upper(cred.code);
 		if(!valid_name(name))
 			return reply("A name is 1 to 20 letters, digits, _ or -");
-		if(password.size() > 100)
+		if(password.size() > 100 || code.size() > 100)
 			return reply("The password is too long");
 		if(find_peer(name))
 			return reply(name+" is already here");
 
+		// [FP_ACCESS] 5: a name and an address that failed wait before
+		// they are tried again
+		const int64_t now = interface::os::time_us();
+		const int64_t wait = std::max(
+				failure_wait(m_name_failures, name, now),
+				failure_wait(m_address_failures, peer.address, now));
+		if(wait > 0 && !local){
+			log_i(MODULE, "Login of %s from %s refused: waiting after failures",
+					cs(name), cs(peer.address));
+			return reply("Too many failed logins; try again in "+
+					itos((int)((wait + 999999) / 1000000))+" s");
+		}
+		auto fail = [&](const ss_ &why){
+			peer.failures++;
+			note_failure(m_name_failures, name, now);
+			note_failure(m_address_failures, peer.address, now);
+			log_i(MODULE, "Login of %s from %s failed: %s", cs(name),
+					cs(peer.address), cs(why));
+			reply(why);
+		};
+
 		Account account;
 		if(get_account(name, account)){
 			if(!local && pbkdf2_sha256(password, account.salt,
-					PBKDF2_ITERATIONS) != account.hash){
-				peer.failures++;
-				log_i(MODULE, "Wrong password for %s", cs(name));
-				return reply("Wrong password");
+					PBKDF2_ITERATIONS) != account.hash)
+				return fail("Wrong password");
+			// An account of a plan that has no admin can claim it too
+			if(!local && !m_setup_code.empty() && !code.empty()){
+				if(code != m_setup_code)
+					return fail("Wrong setup code");
+				account.privs = {"edit", "admin"};
+				set_account(name, account);
+				log_i(MODULE, "%s claimed the plan with the setup code",
+						cs(name));
 			}
 		} else {
-			std::random_device rd;
-			account.salt.resize(16);
-			for(char &c : account.salt)
-				c = (char)(rd() & 0xff);
+			sv_<ss_> privs;
+			if(local){
+				// The first admin of the launcher's plan is its own user
+				privs = admin_count() == 0 ? sv_<ss_>{"edit", "admin"} :
+						default_privs();
+			} else {
+				if(password.size() < MIN_PASSWORD)
+					return reply("A new account's password is at least "+
+							itos((int)MIN_PASSWORD)+" characters");
+				Invite invite;
+				ss_ data;
+				if(!m_setup_code.empty()){
+					if(code != m_setup_code)
+						return fail(code.empty() ?
+								"This plan has no admin yet: the first account "
+								"needs the setup code from the server's log" :
+								"Wrong setup code");
+					privs = {"edit", "admin"};
+					log_i(MODULE, "%s claimed the plan with the setup code",
+							cs(name));
+				} else if(!code.empty()){
+					if(!(m_store->get("invite/"+code, data) &&
+							unpack(data, invite)))
+						return fail("No such invite code");
+					privs = invite.privs;
+					m_store->remove("invite/"+code);
+					log_i(MODULE, "%s used an invite of %s", cs(name),
+							cs(invite.by));
+				} else if(m_access.open_registration){
+					privs = default_privs();
+				} else {
+					return reply("New accounts need an invite code from an "
+							"admin");
+				}
+			}
 			// A local account gets a password nobody knows, so its name
 			// cannot be taken over from elsewhere with an empty one
 			ss_ pw = password;
-			if(local){
-				pw.resize(32);
-				for(char &c : pw)
-					c = (char)(rd() & 0xff);
-			}
-			account.hash = pbkdf2_sha256(pw, account.salt, PBKDF2_ITERATIONS);
-			// The first account of a plan is its admin: whoever made it
-			if(m_store->list("auth/").empty())
-				account.privs = {"edit", "admin"};
-			else if(find_singleton("settings")->ints["default_edit"])
-				account.privs = {"edit"};
+			if(local)
+				pw = random_code(32);
+			account = new_account(pw, privs);
 			set_account(name, account);
 			log_i(MODULE, "New account %s", cs(name));
 		}
+		m_name_failures.erase(name);
+		update_setup_code();
+		log_i(MODULE, "%s joined from %s", cs(name), cs(peer.address));
 		peer.name = name;
 		reply("");
 		send_privs(packet.sender, account);
@@ -1291,6 +1536,8 @@ struct Module: public interface::Module
 			send(packet.sender, "fp:presence", pack(out));
 		}
 		broadcast_chat("*** "+name+" joined");
+		// The admins' lists: who is here, a new account, an invite used
+		send_users_to_admins();
 	}
 
 	bool peer_has(network::PeerId peer_id, const ss_ &priv)
@@ -1313,83 +1560,234 @@ struct Module: public interface::Module
 		if(!unpack(packet.data, text) || text.empty() || text.size() > 500 ||
 				!valid_text(text))
 			return;
+		// The chat commands are the pause menu's now ([FP_ACCESS] 4)
 		if(text[0] == '/'){
-			command(packet.sender, text.substr(1));
+			send_chat(packet.sender, "The commands are in the pause menu "
+					"(Esc): Users..., Change password...");
 			return;
 		}
 		broadcast_chat("<"+it->second.name+"> "+text);
 	}
 
-	void command(network::PeerId sender, const ss_ &line)
+	// The admin's menus ([FP_ACCESS] 4), which replace the chat commands
+
+	struct UserRow
 	{
-		std::istringstream is(line);
-		ss_ cmd, name, priv;
-		is >> cmd >> name >> priv;
-		bool admin = peer_has(sender, "admin");
-		if(cmd == "privs"){
-			if(name.empty())
-				name = m_peers[sender].name;
-			Account account;
-			if(!get_account(name, account))
-				return send_chat(sender, "No account "+name);
-			ss_ s;
-			for(const ss_ &p : account.privs)
-				s += (s.empty() ? "" : ", ")+p;
-			return send_chat(sender, name+": "+(s.empty() ? "(none)" : s));
+		ss_ name;
+		sv_<ss_> privs;
+		uint8_t here = 0;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(name, privs, here);
 		}
-		if(cmd == "grant" || cmd == "revoke"){
-			if(!admin)
-				return send_chat(sender, "That needs admin");
+	};
+
+	struct UsersInfo
+	{
+		sv_<UserRow> users;
+		sv_<std::pair<ss_, Invite>> invites;
+		AccessSettings access;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(users, invites, access);
+		}
+	};
+
+	void send_users(network::PeerId peer)
+	{
+		UsersInfo info;
+		for(const ss_ &key : m_store->list("auth/")){
+			UserRow row;
+			row.name = key.substr(5);
+			Account account;
+			if(get_account(row.name, account))
+				row.privs = account.privs;
+			row.here = find_peer(row.name) != 0;
+			info.users.push_back(row);
+		}
+		for(const ss_ &key : m_store->list("invite/")){
+			Invite invite;
+			ss_ data;
+			if(m_store->get(key, data) && unpack(data, invite))
+				info.invites.push_back(std::make_pair(key.substr(7), invite));
+		}
+		info.access = m_access;
+		send(peer, "fp:users", pack(info));
+	}
+
+	void send_users_to_admins()
+	{
+		for(auto &pair : m_peers)
+			if(peer_has(pair.first, "admin"))
+				send_users(pair.first);
+	}
+
+	// Out of the plan: the client is told to leave, and is logged out here
+	// meanwhile.
+	// simplified: the network module has no way to drop a peer
+	void kick(network::PeerId target, const ss_ &why)
+	{
+		send(target, "fp:kicked", pack(why));
+		const ss_ name = m_peers[target].name;
+		m_peers[target].name.clear();
+		leave(target, "");
+		send_to_joined("fp:gone", pack((int32_t)target));
+		broadcast_chat("*** "+name+" left: "+why);
+	}
+
+	struct AdminRequest
+	{
+		ss_ cmd;
+		ss_ name;
+		ss_ arg;
+		uint8_t on = 0;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(cmd, name, arg, on);
+		}
+	};
+
+	void on_admin(const network::Packet &packet)
+	{
+		AdminRequest r;
+		if(!m_store || !peer_has(packet.sender, "admin") ||
+				!unpack(packet.data, r))
+			return;
+		const ss_ by = m_peers[packet.sender].name;
+		auto result = [&](const ss_ &text){
+			send(packet.sender, "fp:admin_result", pack(text));
+		};
+		Account account;
+		const bool exists = !r.name.empty() && get_account(r.name, account);
+		const network::PeerId target = exists ? find_peer(r.name) : 0;
+		if(r.cmd == "list"){
+			return send_users(packet.sender);
+		} else if(r.cmd == "priv"){
 			bool known = false;
 			for(const ss_ &p : KNOWN_PRIVS)
-				known |= p == priv;
-			if(!known)
-				return send_chat(sender, "Usage: /"+cmd+" <name> <edit|admin>");
-			Account account;
-			if(!get_account(name, account))
-				return send_chat(sender, "No account "+name);
+				known |= p == r.arg;
+			if(!exists || !known)
+				return result("No such account or privilege");
+			if(r.arg == "admin" && !r.on && account.has("admin") &&
+					admin_count() <= 1)
+				return result("The last admin keeps admin");
 			sv_<ss_> privs;
 			for(const ss_ &p : account.privs)
-				if(p != priv)
+				if(p != r.arg)
 					privs.push_back(p);
-			if(cmd == "grant")
-				privs.push_back(priv);
+			if(r.on)
+				privs.push_back(r.arg);
 			account.privs = privs;
-			set_account(name, account);
-			if(network::PeerId target = find_peer(name))
+			set_account(r.name, account);
+			if(target)
 				send_privs(target, account);
-			return broadcast_chat("*** "+name+(cmd == "grant" ? " was granted "
-					: " lost ")+priv);
-		}
-		if(cmd == "kick"){
-			if(!admin)
-				return send_chat(sender, "That needs admin");
-			network::PeerId target = find_peer(name);
+			log_i(MODULE, "%s %s %s %s", cs(by), r.on ? "granted" : "revoked",
+					cs(r.arg), cs(r.name));
+			result(r.name+(r.on ? " can " : " can no longer ")+
+					(r.arg == "edit" ? "edit" : "administer"));
+		} else if(r.cmd == "kick"){
 			if(!target)
-				return send_chat(sender, name+" is not here");
-			// simplified: the network module has no way to drop a peer, so
-			// the client is told to leave and is logged out here meanwhile
-			send(target, "fp:kicked", pack(ss_("Kicked by ")+
-					m_peers[sender].name));
-			m_peers[target].name.clear();
-			leave(target, "");
-			send_to_joined("fp:gone", pack((int32_t)target));
-			return broadcast_chat("*** "+name+" was kicked");
+				return result(r.name+" is not here");
+			kick(target, "kicked by "+by);
+			result(r.name+" was kicked");
+		} else if(r.cmd == "password"){
+			if(!exists)
+				return result("No account "+r.name);
+			if(r.arg.size() < MIN_PASSWORD || r.arg.size() > 100)
+				return result("A password is "+itos((int)MIN_PASSWORD)+
+						" to 100 characters");
+			Account fresh = new_account(r.arg, account.privs);
+			set_account(r.name, fresh);
+			if(target && target != packet.sender)
+				kick(target, "the password was reset by "+by);
+			log_i(MODULE, "%s reset the password of %s", cs(by), cs(r.name));
+			result("The password of "+r.name+" was reset");
+		} else if(r.cmd == "delete"){
+			if(!exists)
+				return result("No account "+r.name);
+			if(r.name == by)
+				return result("An admin does not delete their own account");
+			if(account.has("admin") && admin_count() <= 1)
+				return result("The last admin is not deleted");
+			if(target)
+				kick(target, "the account was deleted by "+by);
+			m_store->remove("auth/"+r.name);
+			log_i(MODULE, "%s deleted the account %s", cs(by), cs(r.name));
+			result("The account "+r.name+" was deleted");
+		} else if(r.cmd == "add"){
+			if(!valid_name(r.name))
+				return result("A name is 1 to 20 letters, digits, _ or -");
+			if(exists)
+				return result("There is an account "+r.name+" already");
+			if(r.arg.size() < MIN_PASSWORD || r.arg.size() > 100)
+				return result("A password is "+itos((int)MIN_PASSWORD)+
+						" to 100 characters");
+			set_account(r.name, new_account(r.arg,
+					r.on ? sv_<ss_>{"edit"} : sv_<ss_>{}));
+			log_i(MODULE, "%s added the account %s", cs(by), cs(r.name));
+			result("The account "+r.name+" was added");
+		} else if(r.cmd == "invite"){
+			Invite invite;
+			invite.by = by;
+			if(r.on)
+				invite.privs = {"edit"};
+			const ss_ code = random_code(10);
+			m_store->set("invite/"+code, pack(invite));
+			log_i(MODULE, "%s made an invite", cs(by));
+			result("Invite code: "+code);
+		} else if(r.cmd == "uninvite"){
+			m_store->remove("invite/"+upper(r.name));
+			result("The invite was deleted");
+		} else if(r.cmd == "setting"){
+			if(r.name == "open_registration")
+				m_access.open_registration = r.on;
+			else if(r.name == "default_edit")
+				m_access.default_edit = r.on;
+			else
+				return result("No such setting");
+			save_access();
+			log_i(MODULE, "%s set %s to %i", cs(by), cs(r.name), (int)r.on);
+			for(auto &pair : m_peers)
+				if(pair.second.name.empty())
+					send_hello(pair.first);
+			result("");
+		} else {
+			return;
 		}
-		if(cmd == "default_edit"){
-			if(!admin)
-				return send_chat(sender, "That needs admin");
-			if(name != "0" && name != "1")
-				return send_chat(sender, "Usage: /default_edit <0|1>");
-			Entity *s = find_singleton("settings");
-			s->ints["default_edit"] = name == "1";
-			m_dirty.insert(s->id);
-			broadcast_changes(-1, 0, {s->id}, {});
-			return send_chat(sender, "New accounts can "+
-					ss_(name == "1" ? "" : "not ")+"edit");
+		send_users_to_admins();
+	}
+
+	// A user's own password ([FP_ACCESS] 4): the old one and the new one
+	void on_passwd(const network::Packet &packet)
+	{
+		std::pair<ss_, ss_> pw;
+		auto it = m_peers.find(packet.sender);
+		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
+				!unpack(packet.data, pw))
+			return;
+		const ss_ name = it->second.name;
+		auto result = [&](const ss_ &text){
+			send(packet.sender, "fp:passwd_result", pack(text));
+		};
+		Account account;
+		if(!get_account(name, account))
+			return;
+		const int64_t now = interface::os::time_us();
+		if(failure_wait(m_name_failures, name, now) > 0)
+			return result("Too many failed attempts; wait and try again");
+		if(pbkdf2_sha256(pw.first, account.salt, PBKDF2_ITERATIONS) !=
+				account.hash){
+			note_failure(m_name_failures, name, now);
+			log_i(MODULE, "%s: a password change with a wrong password",
+					cs(name));
+			return result("The old password is wrong");
 		}
-		send_chat(sender, "Commands: /privs [name], /grant <name> <priv>, "
-				"/revoke <name> <priv>, /kick <name>, /default_edit <0|1>");
+		if(pw.second.size() < MIN_PASSWORD || pw.second.size() > 100)
+			return result("A password is "+itos((int)MIN_PASSWORD)+
+					" to 100 characters");
+		set_account(name, new_account(pw.second, account.privs));
+		log_i(MODULE, "%s changed their password", cs(name));
+		result("");
 	}
 
 	// Batches
