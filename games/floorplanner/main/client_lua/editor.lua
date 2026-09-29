@@ -3670,6 +3670,15 @@ function M.mouse_down(button)
 			S.typed = ""
 			return
 		end
+		if S.view == "2d" and not over_ui() then
+			-- Into 3D as if it had been 3D all along ([FP_ORBIT_2D]): the
+			-- camera straight above the plan's middle, looking down, as
+			-- high as makes its floor the plan's; then this is an orbit
+			local d = S.span / (2 * math.tan(math.rad(cam3d.fov) / 2))
+			S.pos = {x = W(S.cx), y = W(d), z = W(S.cz)}
+			S.yaw, S.pitch = 0, 90
+			set_view("3d")
+		end
 		if S.view == "3d" then
 			-- Orbiting what is pointed
 			local p = camera_pivot()
@@ -3746,7 +3755,7 @@ function M.mouse_move(x, y, dx, dy)
 		local ox, oy, oz = geom.unrot(S.pos.x - p.x, S.pos.y - p.y,
 				S.pos.z - p.z, S.pitch, S.yaw, 0)
 		S.yaw = S.yaw + dx * 0.3
-		S.pitch = math.max(-89, math.min(89, S.pitch + dy * 0.3))
+		S.pitch = math.max(-90, math.min(90, S.pitch + dy * 0.3))
 		local wx, wy, wz = geom.rot(ox, oy, oz, S.pitch, S.yaw, 0)
 		S.pos = {x = p.x + wx, y = p.y + wy, z = p.z + wz}
 		return
@@ -4363,6 +4372,7 @@ do
 		-- The camera's buttons
 		if S.view == "2d" then
 			g.middle = "drag: pan the plan"
+			g.right = "drag: into 3D, orbiting round the pointer"
 		elseif not S.captured then
 			g.right = "drag: orbit round what the pointer is on"
 			g.middle = "drag: pan the view"
