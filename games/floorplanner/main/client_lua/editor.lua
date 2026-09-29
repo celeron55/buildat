@@ -270,6 +270,11 @@ local function node_pos(id)
 			return n.x + d.dx, n.z + d.dz
 		end
 	end
+	-- Where somebody else's drag has it
+	local pv = doc.previewed(id)
+	if pv and pv.x then
+		return pv.x, pv.z
+	end
 	local n = doc.ents[id]
 	if not n then
 		return 0, 0
@@ -500,6 +505,14 @@ local function room_at(x, z)
 	return best
 end
 
+local function copy_fields(p)
+	local f = {}
+	for k, v in pairs(p) do
+		f[k] = v
+	end
+	return f
+end
+
 -- A wall's frame: its a end, its direction u and left normal n, how far
 -- its faces are from its line, its length and the yaw that turns +X to u
 local function wall_frame(id)
@@ -525,6 +538,14 @@ local function build_inst_data()
 	local d = S.drag
 	for _, e in ipairs(doc.of_type("instance")) do
 		local i = e.ints
+		-- Where somebody else's drag has it
+		local pv = doc.previewed(e.id)
+		if pv then
+			i = copy_fields(i)
+			for k, v in pairs(pv) do
+				i[k] = v
+			end
+		end
 		local def = doc.ents[i.def]
 		local moved = d and d.moved and d.kind == "move" and d.inst[e.id]
 		local it
@@ -1432,14 +1453,6 @@ local function add_hosted(wall, x, z)
 	})
 end
 
-local function copy_fields(p)
-	local f = {}
-	for k, v in pairs(p) do
-		f[k] = v
-	end
-	return f
-end
-
 -- Copies of the selected instances next to them: linked ones share the
 -- definition, the others get a copy of it
 local function copy_selected(linked)
@@ -2334,6 +2347,65 @@ local function start_drag()
 	end
 end
 
+-- What a drag moves, as entity ids: what it locks and previews
+local function drag_ids(d)
+	local ids = {}
+	if d.kind == "node" then
+		ids[1] = d.id
+	elseif d.kind == "move" then
+		for id in pairs(d.nodes) do
+			ids[#ids + 1] = id
+		end
+		for id in pairs(d.inst) do
+			ids[#ids + 1] = id
+		end
+	end
+	return ids
+end
+
+-- The dragged things where the drag has them, for the others
+local function drag_preview(d)
+	local ents = {}
+	if d.kind == "node" then
+		ents[1] = {id = d.id, ints = {x = d.x, z = d.z}}
+	elseif d.kind == "move" then
+		for id in pairs(d.nodes) do
+			local x, z = node_pos(id)
+			ents[#ents + 1] = {id = id, ints = {x = x, z = z}}
+		end
+		for id in pairs(d.inst) do
+			local it = inst_data[id]
+			if it and it.hosted then
+				ents[#ents + 1] = {id = id, ints = {along = math.floor(
+						it.along + 0.5)}}
+			elseif it then
+				ents[#ents + 1] = {id = id, ints = {x = math.floor(it.x + 0.5),
+						z = math.floor(it.z + 0.5)}}
+			end
+		end
+	end
+	return ents
+end
+
+-- A drag of what can be moved takes its lock; refused, it is dropped
+local function lock_drag()
+	local d = S.drag
+	if not d or (d.kind ~= "node" and d.kind ~= "move") then
+		return
+	end
+	doc.lock(drag_ids(d), function(why)
+		if S.drag == d then
+			S.drag = nil
+			S.press = nil
+			S.dirty = true
+		end
+		doc.notice(why)
+	end)
+end
+
+local PREVIEW_SECONDS = 0.05
+local preview_timer = 0
+
 local function update_drag()
 	local d = S.drag
 	if d.kind == "box" then
@@ -2376,6 +2448,10 @@ local function end_drag()
 	local d = S.drag
 	S.drag = nil
 	S.dirty = true
+	if d.kind == "node" or d.kind == "move" then
+		-- After the drag's batch, which the server takes first
+		M.after_drag = true
+	end
 	if d.kind == "box" then
 		local x0, x1 = math.min(S.press.mx, S.mx), math.max(S.press.mx, S.mx)
 		local y0, y1 = math.min(S.press.my, S.my), math.max(S.press.my, S.my)
@@ -2584,6 +2660,10 @@ function M.mouse_up(button)
 	else
 		click()
 	end
+	if M.after_drag then
+		M.after_drag = false
+		doc.unlock()
+	end
 	S.press = nil
 end
 
@@ -2602,9 +2682,21 @@ function M.mouse_move(x, y, dx, dy)
 	if S.press and not S.drag and geom.len(x - S.press.mx, y - S.press.my) >
 			DRAG_PX then
 		start_drag()
+		lock_drag()
 	end
 	if S.drag then
 		update_drag()
+	end
+end
+
+-- The previews go out at most every PREVIEW_SECONDS
+local function stream_drag(dt)
+	preview_timer = preview_timer + dt
+	local d = S.drag
+	if d and d.moved and (d.kind == "node" or d.kind == "move") and
+			preview_timer >= PREVIEW_SECONDS then
+		preview_timer = 0
+		doc.preview(drag_preview(d))
 	end
 end
 
@@ -2626,6 +2718,34 @@ function M.mouse_wheel(wheel)
 				y = S.pos.y - math.sin(pitch) * k,
 				z = S.pos.z + math.cos(yaw) * math.cos(pitch) * k}
 	end
+end
+
+-- The next other user's view becomes this one's
+local go_to_index = 0
+local function go_to_next_user()
+	local peers = {}
+	for peer, o in pairs(doc.others) do
+		if o.p then
+			peers[#peers + 1] = peer
+		end
+	end
+	if #peers == 0 then
+		doc.notice("Nobody else is here")
+		return
+	end
+	table.sort(peers)
+	go_to_index = go_to_index % #peers + 1
+	local o = doc.others[peers[go_to_index]]
+	local p = o.p
+	if p.view == 1 then
+		S.pos = {x = p.px / 1000, y = p.py / 1000, z = p.pz / 1000}
+		S.yaw, S.pitch = p.yaw / 1000, p.pitch / 1000
+		set_view("3d")
+	else
+		S.cx, S.cz, S.span = p.px, p.pz, math.max(500, p.py)
+		set_view("2d")
+	end
+	doc.notice("At " .. o.name .. "'s view")
 end
 
 -- The use key: a door or window under the cursor opens or closes. For an
@@ -2699,7 +2819,11 @@ function M.key_down(key, event_data)
 		end
 	end
 	if ctrl then
-		if key == magic.KEY_D then
+		if key == magic.KEY_Z and S.shift or key == magic.KEY_Y then
+			doc.redo()
+		elseif key == magic.KEY_Z then
+			doc.undo()
+		elseif key == magic.KEY_D then
 			copy_selected(false)
 		elseif key == magic.KEY_L then
 			copy_selected(true)
@@ -2721,6 +2845,8 @@ function M.key_down(key, event_data)
 		end
 	elseif key == magic.KEY_E then
 		use()
+	elseif key == magic.KEY_U then
+		go_to_next_user()
 	elseif key == magic.KEY_L then
 		S.plan_look = not S.plan_look
 		set_view(S.view)
@@ -2825,6 +2951,19 @@ end
 
 local function mm_text(v)
 	return string.format("%d mm", math.floor(v + 0.5))
+end
+
+-- A user's colour, from their name
+local function user_color(name)
+	local h = 0
+	for i = 1, #name do
+		h = (h * 31 + name:byte(i)) % 360
+	end
+	local k = function(n)
+		local x = (n + h / 30) % 12
+		return 0.5 - 0.45 * math.max(-1, math.min(x - 3, 9 - x, 1))
+	end
+	return magic.Color(k(0), k(8), k(4))
 end
 
 -- A door's swing or a window's glass as a plan draws them: a door open
@@ -2975,6 +3114,41 @@ local function draw_overlay()
 			end
 		end
 	end
+	-- The others: their cursors, their cameras, what they have selected
+	for _, o in pairs(doc.others) do
+		local p = o.p
+		if p and o.name then
+			local col = user_color(o.name)
+			local size = S.view == "2d" and W(10 * mm_per_px()) or 0.15
+			if p.view == 1 then
+				-- Their camera, as a small frustum where it is
+				local ex = magic.Vector3(W(p.px), W(p.py), W(p.pz))
+				local function at(fx, fy)
+					local x, y, z = geom.rot(fx * 0.3, fy * 0.2, 0.5, p.pitch / 1000,
+							p.yaw / 1000, 0)
+					return magic.Vector3(ex.x + x, ex.y + y, ex.z + z)
+				end
+				local c = {at(-1, -1), at(1, -1), at(1, 1), at(-1, 1)}
+				for i = 1, 4 do
+					debug:AddLine(ex, c[i], col, false)
+					debug:AddLine(c[i], c[i % 4 + 1], col, false)
+				end
+				world_label(p.px, S.view == "3d" and p.py or 0, p.pz, o.name)
+			else
+				debug:AddCross(P(p.cx, p.cz), size, col, false)
+				world_label(p.cx, 0, p.cz, o.name)
+			end
+			for _, id in ipairs(p.sel) do
+				if outlines[id] then
+					outline(outlines[id].pts, col)
+				elseif inst_data[id] then
+					outline(inst_data[id].foot, col)
+				elseif room_data[id] then
+					outline(room_data[id].pts, col)
+				end
+			end
+		end
+	end
 	-- Nodes, for the tools that pick them
 	if S.tool == "select" or S.tool == "node" then
 		local size = S.view == "2d" and W(6 * mm_per_px()) or 0.08
@@ -3029,9 +3203,40 @@ local function draw_overlay()
 	end
 end
 
+-- This user's presence, for the others, every PRESENCE_SECONDS
+local PRESENCE_SECONDS = 0.1
+local presence_timer = 0
+local function send_presence(dt)
+	presence_timer = presence_timer + dt
+	if presence_timer < PRESENCE_SECONDS then
+		return
+	end
+	presence_timer = 0
+	local cx, cz = cursor_floor()
+	local sel = {}
+	for id in pairs(S.sel) do
+		sel[#sel + 1] = id
+	end
+	for id in pairs(S.nodes) do
+		sel[#sel + 1] = id
+	end
+	local p = {view = S.view == "3d" and 1 or 0,
+			cx = math.floor(cx or 0), cz = math.floor(cz or 0), sel = sel,
+			yaw = math.floor(S.yaw * 1000), pitch = math.floor(S.pitch * 1000)}
+	if S.view == "3d" then
+		p.px, p.py, p.pz = math.floor(S.pos.x * 1000), math.floor(S.pos.y * 1000),
+				math.floor(S.pos.z * 1000)
+	else
+		p.px, p.py, p.pz = math.floor(S.cx), math.floor(S.span), math.floor(S.cz)
+	end
+	doc.send_presence(p)
+end
+
 function M.update(dt)
 	move_camera(dt)
 	place_cameras()
+	send_presence(dt)
+	stream_drag(dt)
 	if S.dirty then
 		rebuild()
 	end
@@ -3067,6 +3272,9 @@ function M.start(d)
 		refresh_panels()
 	end
 	doc.privs_changed = refresh_panels
+	doc.others_changed = function()
+		S.dirty = true
+	end
 	magic.SubscribeToEvent("MouseButtonDown", function(_, data)
 		M.mouse_down(data:GetInt("Button"))
 	end)

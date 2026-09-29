@@ -299,7 +299,9 @@ static bool valid_name(const ss_ &name)
 
 struct Op
 {
-	uint8_t op = 0; // 0 create, 1 set, 2 delete
+	// 0 create, 1 set, 2 delete, 3 restore: create again under the id it
+	// had, which is what an undo of a delete sends
+	uint8_t op = 0;
 	Entity ent;
 	template<class Archive>
 	void serialize(Archive &archive){
@@ -307,10 +309,26 @@ struct Op
 	}
 };
 
+// Where a user is and what they have selected, as the others are shown it
+struct Presence
+{
+	uint8_t view = 0;         // 0 the plan, 1 the 3D camera
+	int32_t cx = 0, cz = 0;   // the cursor on the floor, mm
+	int32_t px = 0, py = 0, pz = 0; // the camera, mm
+	int32_t yaw = 0, pitch = 0;     // millidegrees
+	sv_<int32_t> sel;
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(view, cx, cz, px, py, pz, yaw, pitch, sel);
+	}
+};
+
 struct Peer
 {
 	ss_ name; // empty until logged in
 	int failures = 0;
+	Presence presence;
+	bool has_presence = false;
 	// Rate limit: a bucket of operations refilled per second
 	double op_budget = 0;
 };
@@ -355,6 +373,8 @@ struct Module: public interface::Module
 	float m_flush_timer = 0;
 
 	std::map<network::PeerId, Peer> m_peers;
+	// What is being dragged, and by whom: nobody else's batch may touch it
+	std::map<int32_t, network::PeerId> m_locks;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -378,6 +398,11 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:packet_received/fp:login"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:batch"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:chat"));
+		m_server->sub_event(this, Event::t("network:packet_received/fp:lock"));
+		m_server->sub_event(this, Event::t("network:packet_received/fp:unlock"));
+		m_server->sub_event(this, Event::t("network:packet_received/fp:preview"));
+		m_server->sub_event(this,
+				Event::t("network:packet_received/fp:presence"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -398,6 +423,14 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:chat", on_chat,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:lock", on_lock,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:unlock", on_unlock,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:preview", on_preview,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:presence", on_presence,
 				network::Packet)
 	}
 
@@ -552,8 +585,138 @@ struct Module: public interface::Module
 			return;
 		ss_ name = it->second.name;
 		m_peers.erase(it);
-		if(!name.empty())
-			broadcast_chat("*** "+name+" left");
+		leave(client.info.id, name);
+	}
+
+	// A user gone, by leaving or by a kick: their locks go, and the others
+	// stop showing them
+	void leave(network::PeerId peer, const ss_ &name)
+	{
+		unlock_all(peer);
+		if(name.empty())
+			return;
+		send_to_joined("fp:gone", pack((int32_t)peer));
+		broadcast_chat("*** "+name+" left");
+	}
+
+	void unlock_all(network::PeerId peer)
+	{
+		for(auto it = m_locks.begin(); it != m_locks.end();){
+			if(it->second == peer)
+				it = m_locks.erase(it);
+			else
+				++it;
+		}
+	}
+
+	// Drag locks, previews and presence
+
+	struct LockRequest
+	{
+		int32_t seq = 0;
+		sv_<int32_t> ids;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(seq, ids);
+		}
+	};
+
+	void on_lock(const network::Packet &packet)
+	{
+		LockRequest req;
+		std::pair<int32_t, ss_> result;
+		if(!unpack(packet.data, req) || req.ids.size() > MAX_OPS_PER_BATCH)
+			return;
+		result.first = req.seq;
+		if(!peer_has(packet.sender, "edit")){
+			result.second = "You have no edit privilege";
+		} else {
+			for(int32_t id : req.ids){
+				auto it = m_locks.find(id);
+				if(it != m_locks.end() && it->second != packet.sender){
+					result.second = m_peers[it->second].name+
+							" is moving that";
+					break;
+				}
+			}
+		}
+		if(result.second.empty()){
+			// One drag at a time: what this user held before is let go
+			unlock_all(packet.sender);
+			for(int32_t id : req.ids)
+				m_locks[id] = packet.sender;
+		}
+		send(packet.sender, "fp:lock_result", pack(result));
+	}
+
+	void on_unlock(const network::Packet &packet)
+	{
+		unlock_all(packet.sender);
+		// And what it was showing the others goes
+		relay_preview(packet.sender, {});
+	}
+
+	struct Preview
+	{
+		int32_t peer = 0;
+		sv_<Entity> ents;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(peer, ents);
+		}
+	};
+
+	void relay_preview(network::PeerId sender, const sv_<Entity> &ents)
+	{
+		Preview p;
+		p.peer = (int32_t)sender;
+		p.ents = ents;
+		ss_ data = pack(p);
+		for(auto &pair : m_peers)
+			if(!pair.second.name.empty() && pair.first != sender)
+				send(pair.first, "fp:preview", data);
+	}
+
+	// A drag as it goes: where the dragged things would be, for the others
+	// to draw. Nothing in the document changes until the drag's batch.
+	void on_preview(const network::Packet &packet)
+	{
+		sv_<Entity> ents;
+		if(!peer_has(packet.sender, "edit") || !unpack(packet.data, ents) ||
+				ents.size() > MAX_OPS_PER_BATCH)
+			return;
+		relay_preview(packet.sender, ents);
+	}
+
+	struct PresenceOut
+	{
+		int32_t peer = 0;
+		ss_ name;
+		Presence p;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(peer, name, p);
+		}
+	};
+
+	void on_presence(const network::Packet &packet)
+	{
+		auto it = m_peers.find(packet.sender);
+		if(it == m_peers.end() || it->second.name.empty())
+			return;
+		Presence p;
+		if(!unpack(packet.data, p) || p.sel.size() > 1000)
+			return;
+		it->second.presence = p;
+		it->second.has_presence = true;
+		PresenceOut out;
+		out.peer = (int32_t)packet.sender;
+		out.name = it->second.name;
+		out.p = p;
+		ss_ data = pack(out);
+		for(auto &pair : m_peers)
+			if(!pair.second.name.empty() && pair.first != packet.sender)
+				send(pair.first, "fp:presence", data);
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
@@ -671,6 +834,17 @@ struct Module: public interface::Module
 		for(auto &pair : m_ents)
 			all.push_back(pair.second);
 		send(packet.sender, "fp:snapshot", pack(all));
+		// Where the others are
+		for(auto &pair : m_peers){
+			if(pair.first == packet.sender || pair.second.name.empty() ||
+					!pair.second.has_presence)
+				continue;
+			PresenceOut out;
+			out.peer = (int32_t)pair.first;
+			out.name = pair.second.name;
+			out.p = pair.second.presence;
+			send(packet.sender, "fp:presence", pack(out));
+		}
 		broadcast_chat("*** "+name+" joined");
 	}
 
@@ -753,6 +927,8 @@ struct Module: public interface::Module
 			send(target, "fp:kicked", pack(ss_("Kicked by ")+
 					m_peers[sender].name));
 			m_peers[target].name.clear();
+			leave(target, "");
+			send_to_joined("fp:gone", pack((int32_t)target));
 			return broadcast_chat("*** "+name+" was kicked");
 		}
 		if(cmd == "default_edit"){
@@ -809,6 +985,8 @@ struct Module: public interface::Module
 			result.error = "Too many operations in one batch";
 		} else if(pit->second.op_budget < batch.ops.size()){
 			result.error = "Too many operations; slow down";
+		} else if(!(result.error = locked_by_other(batch.ops,
+				packet.sender)).empty()){
 		} else {
 			pit->second.op_budget -= batch.ops.size();
 			set_<int32_t> changed, deleted;
@@ -822,6 +1000,16 @@ struct Module: public interface::Module
 			log_i(MODULE, "Batch %i from %s refused: %s", batch.seq,
 					cs(pit->second.name), cs(result.error));
 		send(packet.sender, "fp:batch_result", pack(result));
+	}
+
+	ss_ locked_by_other(const sv_<Op> &ops, network::PeerId sender)
+	{
+		for(const Op &op : ops){
+			auto it = m_locks.find(op.ent.id);
+			if(it != m_locks.end() && it->second != sender)
+				return m_peers[it->second].name+" is moving that";
+		}
+		return "";
 	}
 
 	struct Changes
@@ -840,13 +1028,20 @@ struct Module: public interface::Module
 			const set_<int32_t> &changed, const set_<int32_t> &deleted)
 	{
 		Changes c;
-		c.seq = seq;
+		c.seq = -1;
 		c.sender = (int32_t)sender;
 		for(int32_t id : changed)
 			if(!deleted.count(id))
 				c.ents.push_back(m_ents[id]);
 		c.deleted.assign(deleted.begin(), deleted.end());
-		send_to_joined("fp:changes", pack(c));
+		// The sender's copy carries its batch's number, which is how it
+		// knows the changes are its own
+		ss_ others = pack(c);
+		c.seq = seq;
+		ss_ own = pack(c);
+		for(auto &pair : m_peers)
+			if(!pair.second.name.empty())
+				send(pair.first, "fp:changes", pair.first == sender ? own : others);
 	}
 
 	// Applies ops to the document, all or nothing. On success returns ""
@@ -912,6 +1107,24 @@ struct Module: public interface::Module
 				if(!err.empty())
 					return rollback(err);
 				changed.insert(id);
+			} else if(op.op == 3){
+				const TypeSchema *s = find_schema(in.type);
+				if(!s || s->singleton)
+					return rollback("Cannot restore a \""+in.type+"\"");
+				if(in.id <= 0 || in.id >= m_next_id || m_ents.count(in.id))
+					return rollback("Entity "+itos(in.id)+
+							" cannot be restored");
+				if(m_ents.size() >= MAX_ENTITIES)
+					return rollback("The plan is full");
+				Entity e = make_default(*s);
+				e.id = in.id;
+				touch(e.id);
+				m_ents[e.id] = e;
+				ss_ err = set_fields(e.id, in, resolve);
+				if(!err.empty())
+					return rollback(err);
+				changed.insert(e.id);
+				deleted.erase(e.id);
 			} else if(op.op == 2){
 				int32_t id = resolve(in.id);
 				auto it = m_ents.find(id);

@@ -49,10 +49,18 @@ local doc = {
 	privs = {},
 	-- Called with (changed_ids, deleted_ids) after every change
 	listeners = {},
-	-- seq -> function(error, placeholders), for the sender's own batches
+	-- seq -> {done = function(error, placeholders), kind, inverse}, for
+	-- this client's own batches
 	pending = {},
 	next_seq = 1,
+	-- What undoes each batch of this user's, newest last
+	undo_stack = {},
+	redo_stack = {},
+	-- Other users: peer -> {name, p (their presence), preview (entity id
+	-- -> the fields their drag would give it)}
+	others = {},
 }
+local UNDO_DEPTH = 200
 
 function doc.can(priv)
 	return doc.privs[priv] == true
@@ -76,8 +84,9 @@ end
 -- ops: {{op = "create"|"set"|"delete", ent = {id =, type =, ints =, ...}}}
 -- A created entity takes a negative id, unique in the batch, which other ops
 -- in it may refer to; done(error, placeholders) gets the real ids.
-local OP_CODES = {create = 0, set = 1, delete = 2}
-function doc.send(ops, done)
+local OP_CODES = {create = 0, set = 1, delete = 2, restore = 3}
+-- kind: nil for an edit, "undo" or "redo" for what undoes one
+function doc.send(ops, done, kind)
 	local seq = doc.next_seq
 	doc.next_seq = seq + 1
 	local wire = {}
@@ -86,11 +95,11 @@ function doc.send(ops, done)
 		wire[i] = {op = OP_CODES[op.op], ent = {id = e.id, type = e.type or "",
 				ints = e.ints or {}, strs = e.strs or {}, lists = e.lists or {}}}
 	end
-	doc.pending[seq] = done or function(err)
+	doc.pending[seq] = {kind = kind, done = done or function(err)
 		if err ~= "" then
 			doc.notice("Refused: " .. err)
 		end
-	end
+	end}
 	buildat.send_packet("fp:batch",
 			cereal.binary_output({seq = seq, ops = wire}, BATCH))
 end
@@ -121,8 +130,138 @@ buildat.sub_packet("fp:snapshot", function(data)
 	notify(changed, {})
 end)
 
+local function same(a, b)
+	if type(a) ~= "table" then
+		return a == b
+	end
+	if #a ~= #b then
+		return false
+	end
+	for i = 1, #a do
+		if a[i] ~= b[i] then
+			return false
+		end
+	end
+	return true
+end
+
+local function copy(t)
+	local o = {}
+	for k, v in pairs(t) do
+		o[k] = type(v) == "table" and copy(v) or v
+	end
+	return o
+end
+
+-- What undoes a batch, from what the server says it changed and the
+-- replica before it: what it deleted is restored, what it made is
+-- deleted, and each changed field is set back. `expect` is what a field
+-- was left at, so an undo can skip one somebody else has changed since.
+local function inverse_of(c)
+	local restores, sets, deletes = {}, {}, {}
+	for _, e in ipairs(c.ents) do
+		local old = doc.ents[e.id]
+		if not old then
+			deletes[#deletes + 1] = {op = "delete", ent = {id = e.id}}
+		else
+			local ent = {id = e.id, ints = {}, strs = {}, lists = {}}
+			local expect = {ints = {}, strs = {}, lists = {}}
+			local any = false
+			for _, part in ipairs({"ints", "strs", "lists"}) do
+				for k, v in pairs(e[part]) do
+					if not same(old[part][k], v) then
+						ent[part][k] = old[part][k]
+						expect[part][k] = v
+						any = true
+					end
+				end
+			end
+			if any then
+				sets[#sets + 1] = {op = "set", ent = ent, expect = expect}
+			end
+		end
+	end
+	for _, id in ipairs(c.deleted) do
+		local old = doc.ents[id]
+		if old then
+			restores[#restores + 1] = {op = "restore", ent = copy(old)}
+		end
+	end
+	local out = {}
+	for _, list in ipairs({restores, sets, deletes}) do
+		for _, op in ipairs(list) do
+			out[#out + 1] = op
+		end
+	end
+	return out
+end
+
+-- An undo or redo, less what has changed under it since: a field somebody
+-- else has set is left as they set it
+local function still_applies(ops)
+	local out, skipped = {}, 0
+	for _, op in ipairs(ops) do
+		local cur = doc.ents[op.ent.id]
+		if op.op == "restore" then
+			if cur then
+				skipped = skipped + 1
+			else
+				out[#out + 1] = op
+			end
+		elseif op.op == "delete" then
+			if cur then
+				out[#out + 1] = op
+			end
+		elseif cur then
+			local ent = {id = op.ent.id, ints = {}, strs = {}, lists = {}}
+			local any = false
+			for _, part in ipairs({"ints", "strs", "lists"}) do
+				for k, v in pairs(op.ent[part]) do
+					if same(cur[part][k], op.expect[part][k]) then
+						ent[part][k] = v
+						any = true
+					else
+						skipped = skipped + 1
+					end
+				end
+			end
+			if any then
+				out[#out + 1] = {op = "set", ent = ent}
+			end
+		end
+	end
+	return out, skipped
+end
+
+local function step(from, kind)
+	local ops = table.remove(from)
+	if not ops then
+		doc.notice("Nothing to " .. kind)
+		return
+	end
+	local left, skipped = still_applies(ops)
+	if skipped > 0 then
+		doc.notice(skipped .. " changed by somebody else since; left as is")
+	end
+	if #left > 0 then
+		doc.send(left, nil, kind)
+	end
+end
+
+function doc.undo()
+	step(doc.undo_stack, "undo")
+end
+
+function doc.redo()
+	step(doc.redo_stack, "redo")
+end
+
 buildat.sub_packet("fp:changes", function(data)
 	local c = cereal.binary_input(data, CHANGES)
+	local own = c.seq >= 0 and doc.pending[c.seq]
+	if own then
+		own.inverse = inverse_of(c)
+	end
 	local changed = {}
 	for _, e in ipairs(c.ents) do
 		doc.ents[e.id] = e
@@ -136,11 +275,24 @@ end)
 
 buildat.sub_packet("fp:batch_result", function(data)
 	local r = cereal.binary_input(data, BATCH_RESULT)
-	local done = doc.pending[r.seq]
+	local p = doc.pending[r.seq]
 	doc.pending[r.seq] = nil
-	if done then
-		done(r.error, r.placeholders)
+	if not p then
+		return
 	end
+	-- An edit is undone by its inverse; an undo is redone by its own, and
+	-- a redo undone again
+	if r.error == "" and p.inverse and #p.inverse > 0 then
+		local stack = p.kind == "undo" and doc.redo_stack or doc.undo_stack
+		stack[#stack + 1] = p.inverse
+		if #stack > UNDO_DEPTH then
+			table.remove(stack, 1)
+		end
+		if not p.kind then
+			doc.redo_stack = {}
+		end
+	end
+	p.done(r.error, r.placeholders)
 end)
 
 buildat.sub_packet("fp:privs", function(data)
@@ -150,6 +302,101 @@ buildat.sub_packet("fp:privs", function(data)
 	end
 	if doc.privs_changed then
 		doc.privs_changed()
+	end
+end)
+
+--
+-- Drag locks, previews and presence
+--
+local LOCK = {"object", {"seq", "int32_t"}, {"ids", {"array", "int32_t"}}}
+local LOCK_RESULT = {"object", {"seq", "int32_t"}, {"error", "string"}}
+local PREVIEW = {"object", {"peer", "int32_t"}, {"ents", {"array", ENTITY}}}
+local PRESENCE = {"object",
+	{"view", "byte"},
+	{"cx", "int32_t"}, {"cz", "int32_t"},
+	{"px", "int32_t"}, {"py", "int32_t"}, {"pz", "int32_t"},
+	{"yaw", "int32_t"}, {"pitch", "int32_t"},
+	{"sel", {"array", "int32_t"}},
+}
+local PRESENCE_OUT = {"object", {"peer", "int32_t"}, {"name", "string"},
+	{"p", PRESENCE}}
+
+-- A drag takes the lock on what it moves; refused(why) when somebody else
+-- holds it
+local lock_waiting = {}
+function doc.lock(ids, refused)
+	local seq = doc.next_seq
+	doc.next_seq = seq + 1
+	lock_waiting[seq] = refused
+	buildat.send_packet("fp:lock", cereal.binary_output({seq = seq, ids = ids},
+			LOCK))
+end
+
+function doc.unlock()
+	buildat.send_packet("fp:unlock", "")
+end
+
+buildat.sub_packet("fp:lock_result", function(data)
+	local r = cereal.binary_input(data, LOCK_RESULT)
+	local refused = lock_waiting[r.seq]
+	lock_waiting[r.seq] = nil
+	if refused and r.error ~= "" then
+		refused(r.error)
+	end
+end)
+
+-- ents: {{id =, ints = {...}}}, what a drag would make of them
+function doc.preview(ents)
+	local wire = {}
+	for i, e in ipairs(ents) do
+		wire[i] = {id = e.id, type = "", ints = e.ints, strs = {}, lists = {}}
+	end
+	buildat.send_packet("fp:preview", cereal.binary_output(wire,
+			{"array", ENTITY}))
+end
+
+local function other(peer)
+	doc.others[peer] = doc.others[peer] or {preview = {}}
+	return doc.others[peer]
+end
+
+buildat.sub_packet("fp:preview", function(data)
+	local p = cereal.binary_input(data, PREVIEW)
+	local o = other(p.peer)
+	o.preview = {}
+	for _, e in ipairs(p.ents) do
+		o.preview[e.id] = e.ints
+	end
+	if doc.others_changed then
+		doc.others_changed()
+	end
+end)
+
+-- The fields entity id would have if the others' drags landed now, or nil
+function doc.previewed(id)
+	for _, o in pairs(doc.others) do
+		if o.preview[id] then
+			return o.preview[id]
+		end
+	end
+	return nil
+end
+
+function doc.send_presence(p)
+	buildat.send_packet("fp:presence", cereal.binary_output(p, PRESENCE))
+end
+
+buildat.sub_packet("fp:presence", function(data)
+	local r = cereal.binary_input(data, PRESENCE_OUT)
+	local o = other(r.peer)
+	o.name, o.p = r.name, r.p
+end)
+
+buildat.sub_packet("fp:gone", function(data)
+	local peer = cereal.binary_input(data, {"object", {"peer", "int32_t"}}).peer
+	doc.others[peer] = nil
+	if doc.others_changed then
+		doc.others_changed()
 	end
 end)
 
