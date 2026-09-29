@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/sounds.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The sounds the server asks for: PLAY_SOUND, STOP_SOUND and FADE_SOUND.
 --
