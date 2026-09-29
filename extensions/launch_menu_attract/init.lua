@@ -56,7 +56,7 @@ function M.boot(action)
 	scrim:SetPosition(0, 0)
 	scrim:SetFixedSize(magic.ui.root.width, magic.ui.root.height)
 
-	local ok2, why2 = api.compose_launch_ui("__menu", action)
+	local ok2, why2 = api.compose_launch_ui("launch_menu", action)
 	if not ok2 then
 		log:error("the menu did not come up: " .. tostring(why2))
 		return

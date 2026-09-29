@@ -29,7 +29,7 @@ function M.draw(o)
 	end
 	local save, on_back = o.save, o.on_back
 	local root = uistack.main:push({desc = "key bindings"})
-	root.defaultStyle = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	root.defaultStyle = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
 	window:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(10, 10, 10, 10))

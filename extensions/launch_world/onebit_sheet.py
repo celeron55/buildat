@@ -59,11 +59,9 @@ LOGOS = [
     "builtin/luanti/launcher/luanti.png",
     "games/vanilla/launcher/luanti.png",
     "extensions/luanti_client/res/icon.png",
-    "extensions/__menu/res/icon_local.png",
-    "extensions/__menu/res/icon_network.png",
-    "extensions/__menu/res/icon_preferences.png",
-    "extensions/launch_menu/launcher/local.png",
-    "extensions/launch_menu/launcher/network.png",
+    "extensions/launch_menu/res/icon_local.png",
+    "extensions/launch_menu/res/icon_network.png",
+    "extensions/launch_menu/res/icon_preferences.png",
 ]
 
 

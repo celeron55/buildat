@@ -201,6 +201,8 @@ end
 -- `ctx.launch` already ([LAUNCH_GRID]), so this is one step further
 -- out, not a new reach.
 local launch_runs = {}
+local launch_grid = dofile(__buildat_get_path("share") ..
+		"/client/launch_grid.lua")
 
 -- **A launch history, kept once for every launch UI** ([LAUNCH_API]).
 -- The API knew a save's modified time and nothing about what was
@@ -254,12 +256,10 @@ local function launch_history_note(key)
 end
 
 buildat.safe.launch_actions = function()
-	local grid = dofile(buildat.extension_path("__menu") ..
-			"/launch_grid.lua")
 	local out = {}
 	local history = launch_history_read()
 	launch_runs = {}
-	for i, a in ipairs(grid.actions(log)) do
+	for i, a in ipairs(launch_grid.actions(log)) do
 		local key = tostring(a.from) .. "/" .. tostring(a.id or i)
 		launch_runs[key] = a.run
 		out[i] = {key = key, id = a.id, label = a.label, icon = a.icon,
@@ -317,12 +317,11 @@ local function calling_extension(level)
 		return name
 	end
 	-- **And a trusted one is a path on disk**, which is what an
-	-- extension required by another extension is -- `launch_menu`
-	-- requires `__menu`, whose own `run_extension_file("preferences.
-	-- lua")` then looked in launch_menu's directory, found nothing,
-	-- answered nil, and the client aborted eighty lines later
-	-- ([MENU_FALLBACK], 2026-09-23). The same fault the composition
-	-- found, in the other direction.
+	-- extension required by another extension is: the menu, required
+	-- by another, asked for its `preferences.lua` in the other's
+	-- directory, found nothing, answered nil, and the client aborted
+	-- eighty lines later ([MENU_FALLBACK], 2026-09-23). The same fault
+	-- the composition found, in the other direction.
 	name = src:match("[/\\]extensions[/\\]([%w_]+)[/\\]")
 	if name then
 		return name
@@ -748,16 +747,70 @@ buildat.safe.launch_save = function(game, name)
 		return false, "launch_save(" .. game .. ", " .. name ..
 				"): no such save"
 	end
-	local m = require("buildat/extension/launch_menu")
-	if type(m) ~= "table" or type(m.start_local_game) ~= "function" then
-		return false, "launch_save(): no launch_menu to start " .. game
-	end
-	m.start_local_game(game, "save=" .. name)
+	launch_grid.screens().start_local_game(game, "save=" .. name)
 	return true
 end
 -- Whether the client has a local server up, which is how a launcher
 -- knows a launch action started a game rather than opening a screen
 buildat.safe.local_server_running = __buildat_local_server_running
+
+-- **The local server, for the screens a game is started through**
+-- (extensions/launch_menu/screens.lua, which runs in the sandbox). The
+-- user's and not a server's: a chunk a server sent may not start, stop
+-- or kill a process on this machine.
+local function from_served()
+	-- 1 is this, 2 the verb, 3 who called it
+	local info = debug.getinfo(3, "S")
+	return info ~= nil and __buildat_served_chunks[info.source] ~= nil
+end
+-- start_local_server(game[, launch]) -> true, or false and why. game is
+-- one list_games() answers; launch is key=value lines for the server's
+-- -u, a key of a name's shape, which the module reads as it would a
+-- packet.
+buildat.safe.start_local_server = function(game, launch)
+	if from_served() then
+		return false, "start_local_server: the user's, not a server's"
+	end
+	local found = false
+	for _, g in ipairs(__buildat_list_games()) do
+		if g.name == game then
+			found = true
+		end
+	end
+	if not found then
+		return false, "start_local_server: no game called " .. tostring(game)
+	end
+	if launch ~= nil then
+		if type(launch) ~= "string" or #launch > 4096 then
+			return false, "start_local_server: launch is a string"
+		end
+		for line in launch:gmatch("[^\n]+") do
+			if not line:match("^[%w_]+=[^\r]*$") then
+				return false, "start_local_server: a launch line is key=value"
+			end
+		end
+	end
+	return __buildat_start_local_server(game, launch)
+end
+-- stop_local_server(force): asks it to stop, or kills it with force
+buildat.safe.stop_local_server = function(force)
+	if from_served() then
+		return false, "stop_local_server: the user's, not a server's"
+	end
+	if force == true then
+		__buildat_force_kill_local_server()
+	else
+		__buildat_request_stop_local_server()
+	end
+	return true
+end
+-- local_server_state() -> port or nil, status: the port once it
+-- answers, and the last status line of its log
+buildat.safe.local_server_state = function()
+	local port = __buildat_local_server_ready() and
+			__buildat_local_server_port() or nil
+	return port, __buildat_local_server_status()
+end
 
 -- The one preference a game may set ([BOX_FIXES] b): the player's ear.
 -- Official's pause menu has mute and volume, and that is where a player

@@ -39,7 +39,7 @@ fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
 trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; pkill -INT -x buildat_server 2>/dev/null; rm -rf "$tmp"' EXIT
 # The grid by name, not by preference ([MENU_FALLBACK]); leave_ui.sh says why
-bin/buildat -m __menu -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
+bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
 cli=$!
 exec 3> "$fifo"

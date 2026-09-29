@@ -91,9 +91,9 @@ namespace app
 		// **Which extension is the launch UI** ([LAUNCH_SANDBOX]: the
 		// launch UI is a slot rather than a setting with three values).
 		// An extension's directory name; -m wins for that run, and a
-		// name that does not load falls back to __menu, since a user
+		// name that does not load falls back to launch_menu, since a user
 		// with no launcher has no way to fix the setting.
-		ss_ launch_ui = "__menu";
+		ss_ launch_ui = "launch_menu";
 		// **The name a game offers when it asks for one** ([FP_LAUNCH]):
 		// read by games through get_preference("default_username"), so the
 		// user types it once and not once per game. Luanti's rule for a

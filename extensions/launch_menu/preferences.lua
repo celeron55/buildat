@@ -1,4 +1,4 @@
--- Buildat: extension/__menu/preferences.lua
+-- Buildat: extension/launch_menu/preferences.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -21,7 +21,7 @@
 -- the sandbox and the whole extension outside it, and the safe half
 -- raises on a name it does not have rather than answering nil
 local api = buildat.safe or buildat
-local log = buildat.Logger("extension/__menu/preferences")
+local log = buildat.Logger("extension/launch_menu/preferences")
 local urho3d = require("buildat/extension/urho3d")
 local magic = urho3d.Vector3 and urho3d or urho3d.safe
 local uistack = require("buildat/extension/uistack")
@@ -244,7 +244,7 @@ function M.show()
 	-- not by running them.
 	local uis = api.list_launch_uis and api.list_launch_uis() or {}
 	if #uis > 1 then
-		local now = api.get_preference("launch_ui") or "__menu"
+		local now = api.get_preference("launch_ui") or "launch_menu"
 		local at = 1
 		for i, e in ipairs(uis) do
 			if e.name == now then at = i end
@@ -255,7 +255,7 @@ function M.show()
 		-- boot each option as it stepped onto it, and one of the steps
 		-- is a bare console -- at which point there is no menu left and
 		-- no way back for anyone who does not know
-		-- `buildat.set_launch_ui("__menu")`. A cycling row cannot show
+		-- `buildat.set_launch_ui("launch_menu")`. A cycling row cannot show
 		-- the next option without taking it, and taking this one
 		-- destroys the row; so the row cycles a **candidate** and the
 		-- one under it takes it. Switching is still one action from

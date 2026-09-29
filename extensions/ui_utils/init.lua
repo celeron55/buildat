@@ -227,7 +227,7 @@ function M.safe.vertical_menu(root, options)
 	-- has its own style keeps it.
 	if not root.defaultStyle then
 		root.defaultStyle = magic.cache:GetResource("XMLFile",
-				options.style or "__menu/res/main_style.xml")
+				options.style or "launch_menu/res/main_style.xml")
 	end
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
@@ -374,7 +374,7 @@ end
 
 function M.safe.show_notice(text)
 	local t = magic.ui.root:CreateChild("Text")
-	t.defaultStyle = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	t.defaultStyle = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 	t:SetStyleAuto()
 	t.text = tostring(text)
 	t.color = magic.Color(1, 0.6, 0.5)
@@ -423,7 +423,7 @@ function M.safe.show_message_dialog(message, on_close)
 
 	local root = uistack.main:push({desc="show_message_dialog"})
 
-	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	local style = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 	root.defaultStyle = style
 
 	local window = root:CreateChild("Window")
@@ -500,7 +500,7 @@ end
 function M.safe.show_confirm_dialog(message, on_yes, on_no)
 	local root = uistack.main:push({desc="show_confirm_dialog"})
 
-	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	local style = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 	root.defaultStyle = style
 
 	local window = root:CreateChild("Window")
@@ -571,7 +571,7 @@ function M.safe.show_notification(text, duration_s)
 
 	local window = magic.ui.root:CreateChild("Window")
 	window.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "__menu/res/main_style.xml")
+			"XMLFile", "launch_menu/res/main_style.xml")
 	window:SetStyleAuto()
 	window:SetName("show_notification window")
 	window:SetLayout(LM_VERTICAL, 0, magic.IntRect(10, 6, 10, 6))

@@ -9,7 +9,7 @@ local log = buildat.Logger("floorplanner")
 local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 
-local STYLE = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+local STYLE = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 magic.ui.root.defaultStyle = STYLE
 
 -- The wire types, the same as main.cpp's structs field for field

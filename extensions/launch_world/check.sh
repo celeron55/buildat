@@ -175,7 +175,7 @@ fi
 # Each waits for the line it is read by, and a run that never says it
 # waits out the timeout rather than a delay nobody sized
 { echo "wait_log_any 30000 contents: "; echo "quit"; } > "$out/cmds_slot.txt"
-{ echo "wait_log_any 30000 the launch UI is __menu"; echo "quit"
+{ echo "wait_log_any 30000 the launch UI is launch_menu"; echo "quit"
 	} > "$out/cmds_back.txt"
 { echo "wait_log_any 30000 could not start a launch UI"; echo "quit"
 	} > "$out/cmds_nolauncher.txt"
@@ -183,7 +183,7 @@ slot=$(bin/buildat -D ../user -w 640x360 -l 3 -o launch_ui=launch_world 	-c @"$o
 	sed -e 's/\x1b\[[0-9;]*m//g' | grep -ac "launch_w.*: contents: ")
 back=$(bin/buildat -D ../user -w 640x360 -l 3 -o launch_ui=nosuchthing 	-c @"$out/cmds_back.txt" 2>&1 |
 	sed -e 's/\x1b\[[0-9;]*m//g' | grep -av "wait_log" |
-	grep -ac "the launch UI is __menu")
+	grep -ac "the launch UI is launch_menu")
 # **And the room runs in the sandbox** ([LAUNCH_SANDBOX]), which is what
 # its launch_ui.txt asks for: the marker is what the client reads, so a
 # room that quietly went back to running trusted would still pass every

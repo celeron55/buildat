@@ -1,4 +1,4 @@
--- Buildat: extension/__menu/launch_grid.lua
+-- Buildat: client/launch_grid.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -6,11 +6,47 @@
 -- the tree run in the sandbox, its actions checked, their icons resolved
 -- on this side, and ctx.launch -- the file's one way out -- with its
 -- params crossing as plain data into a receiver that knows it is
--- untrusted. See doc/plan/launcher_plan.md.
-local launch_menu = require("buildat/extension/launch_menu")
+-- untrusted. See doc/plan/launcher_plan.md. Loaded by client/api.lua,
+-- whose launch_actions() and launch() are its safe face.
 local M = {}
 
 local ICON_FALLBACK = "buildat_logo.png"
+
+-- **The screens a game is started through**, extensions/launch_menu/
+-- screens.lua, run in the sandbox for each launch: every launch UI's game
+-- starts end there, and the file keeps no state, so a fresh copy is the
+-- same as a kept one. Named after the extension, as its own loader
+-- names it, so the verbs know whose file it is.
+function M.screens()
+	local f = io.open(__buildat_extension_path("launch_menu") ..
+			"/screens.lua", "rb")
+	if not f then
+		error("launch_grid: no launch_menu/screens.lua")
+	end
+	local code = f:read("*a")
+	f:close()
+	local ok, err, m = __buildat_run_code_in_sandbox(code,
+			"launch_menu/screens.lua")
+	if not ok or type(m) ~= "table" then
+		error("launch_grid: launch_menu/screens.lua: " .. tostring(err))
+	end
+	return m
+end
+
+-- The launch menu's own two tiles, which every launch UI's grid has:
+-- the local game list and connecting to a server
+local function menu_actions()
+	return {
+		{id = "local", label = "Local game", order = 1,
+			icon = "launch_menu/res/icon_local.png", resolved_icon = true,
+			description = "Start a game on this machine",
+			run = function() M.screens().show_local_game() end},
+		{id = "connect", label = "Connect to server", order = 2,
+			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
+			description = "Join a buildat server",
+			run = function() M.screens().show_connect_to_server() end},
+	}
+end
 local MAX_PARAMS_DEPTH = 8
 
 -- params as plain data: strings, numbers, booleans and tables of them,
@@ -71,7 +107,7 @@ local function do_launch(log, from, request)
 				lines[#lines + 1] = k.."="..tostring(v)
 			end
 		end
-		launch_menu.start_local_game(tostring(request.game),
+		M.screens().start_local_game(tostring(request.game),
 				table.concat(lines, "\n"))
 	elseif request.module then
 		log:warning("launch from "..from..": a builtin module is not a "..
@@ -169,7 +205,9 @@ function M.actions(log)
 		-- One rule: a directory is on the grid if it has launcher/init.lua.
 		-- The default tile for a game without one put the test scenes on
 		-- the grid; the real games carry a two-line file each.
-		if source.launcher then
+		if source.kind == "extension" and source.name == "launch_menu" then
+			actions = menu_actions()
+		elseif source.launcher then
 			actions = run_launcher(log, source)
 		end
 		local seen = {}

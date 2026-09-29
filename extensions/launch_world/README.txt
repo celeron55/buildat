@@ -275,7 +275,7 @@ line is a thing that has been seen to fail:
     a sphere put down rests on the floor
     the floor's made-up servers say so     -- on a client with no
                                               history of its own
-    every launch UI this tree ships boots  -- extensions/__menu/check.sh
+    every launch UI this tree ships boots  -- extensions/launch_menu/check.sh
 
 What the player changed is a diff against the generated room, in
 user/launch_world/room.txt: a voxel they placed is "x,y,z" on a line, a

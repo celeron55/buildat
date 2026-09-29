@@ -2776,7 +2776,7 @@ end
 -- commands, and what comes back arrives as luanti:chat.
 local CHAT_LINES = 8
 local CHAT_STYLE = magic.cache:GetResource("XMLFile",
-		"__menu/res/main_style.xml")
+		"launch_menu/res/main_style.xml")
 
 -- A block of lines rather than one Text with newlines in it, because a line
 -- is drawn in as many pieces as it has colours in it

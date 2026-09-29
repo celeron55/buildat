@@ -140,7 +140,7 @@ end
 local function ask_user(uri, entry, on_answer, suggested)
 	local root = uistack.main:push({desc="network permission dialog"})
 	root.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "__menu/res/main_style.xml")
+			"XMLFile", "launch_menu/res/main_style.xml")
 
 	local menu = ui_utils.vertical_menu(root, {min_width = 400})
 	local window = menu.window

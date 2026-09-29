@@ -1333,8 +1333,7 @@ struct CApp: public App, public magic::Application
 			// The dialog closes the client; the frozen view stays behind
 			// it, and a client with no menu extension loaded gets the
 			// plain shutdown
-			const ss_ menu =
-					g_client_config.get<ss_>("menu_extension_name");
+			const ss_ menu = launch_ui_name();
 			if(run_script_no_sandbox(
 					"local m = buildat.menu_extension and "
 					"buildat.menu_extension()\n"
@@ -1668,16 +1667,16 @@ struct CApp: public App, public magic::Application
 				// raising one falls back to, and the log says which
 				// was asked for ([LAUNCH_SANDBOX]).
 				bool tried_fallback = false;
-				if(extname != "__menu"){
+				if(extname != "launch_menu"){
 					log_w(MODULE, "launch UI \"%s\" did not load; falling"
-							" back to __menu", cs(extname));
+							" back to launch_menu", cs(extname));
 					m_launch_ui_fell_back = extname;
-					lua_pushstring(L, "__menu");
+					lua_pushstring(L, "launch_menu");
 					lua_setglobal(L, "__buildat_menu_extension_name");
 					ss_ fallback = ss_() +
-							"local m = require('buildat/extension/__menu')\n"
+							"local m = require('buildat/extension/launch_menu')\n"
 							"if type(m) ~= 'table' then\n"
-							"    error('Failed to load extension __menu')\n"
+							"    error('Failed to load extension launch_menu')\n"
 							"end\n"
 							"m.boot()\n";
 					// **The fallback is caught too, which is the whole
@@ -1690,19 +1689,19 @@ struct CApp: public App, public magic::Application
 					try {
 						// BUILDAT_TEST_NO_LAUNCHER=1 makes the fallback
 						// fail, which is the only way to drive the last
-						// resort without breaking __menu on disk: the
+						// resort without breaking launch_menu on disk: the
 						// promise it keeps is worth a check of its own
 						if(getenv("BUILDAT_TEST_NO_LAUNCHER"))
 							throw Exception("BUILDAT_TEST_NO_LAUNCHER");
 						ok2 = run_script_no_sandbox(fallback);
 					} catch(std::exception &e2){
-						log_e(MODULE, "the fallback launch UI __menu"
+						log_e(MODULE, "the fallback launch UI launch_menu"
 								" raised: %s", e2.what());
 						ok2 = false;
 					}
 					tried_fallback = true;
 					if(ok2){
-						log_i(MODULE, "the launch UI is __menu, not \"%s\"",
+						log_i(MODULE, "the launch UI is launch_menu, not \"%s\"",
 								cs(extname));
 						goto launch_ui_done;
 					}
@@ -1715,10 +1714,10 @@ struct CApp: public App, public magic::Application
 							"buildat could not start a launch UI.\n\n"
 							"Asked for: " + extname + "\n" +
 							(tried_fallback ?
-							"The built-in menu (__menu) raised as well.\n" :
+							"The built-in menu (launch_menu) raised as well.\n" :
 							"") +
 							"\nStart it with another one:\n"
-							"    buildat -m launch_menu\n"
+							"    buildat -m launch_world\n"
 							"or take launch_ui out of settings.json.\n\n"
 							"The log has the error.";
 					log_e(MODULE, "%s", cs(msg));
@@ -2385,14 +2384,14 @@ struct CApp: public App, public magic::Application
 	// **Which extension is the launch UI** ([LAUNCH_SANDBOX]: a slot an
 	// extension fills, not a setting with three values). `-m` wins for
 	// the run it is given on; otherwise it is the saved preference,
-	// which defaults to `__menu`.
+	// which defaults to `launch_menu`.
 	ss_ launch_ui_name()
 	{
 		const ss_ named = g_client_config.get<ss_>("menu_extension_name");
-		if(named != "__menu")
+		if(!named.empty())
 			return named;
 		if(m_options.launch_ui.empty())
-			return "__menu";
+			return "launch_menu";
 		return m_options.launch_ui;
 	}
 

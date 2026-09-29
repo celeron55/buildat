@@ -91,14 +91,14 @@ implement table "safe", which contains the safe interface.
 
 Extensions and modules use require "buildat/extension/<name>" to use extensions.
 
-The __menu extension is specially loaded automatically at client startup if no
-server address is provided on the command line, which is what running `buildat`
-with no arguments does. It is the launch menu: a local game, a remote server,
-and whatever launchable extensions it is told about. The screens behind its
-local-game and connect-to-server entries live in extensions/launch_menu, which
-is where they were written when a separate launcher binary ran a menu of its
-own. When disconnecting from a server, the whole client window is closed and
-reopened.
+The launch UI is loaded automatically at client startup if no server address
+is provided on the command line, which is what running `buildat` with no
+arguments does. By default it is extensions/launch_menu, which runs in the
+sandbox: a grid of a local game, a remote server, and whatever the tree's
+launcher files offer. Its screens.lua is where every launch UI's game starts
+end: the local game list, connecting, and the screens a local server starts
+behind, run in the sandbox by client/launch_grid.lua. When disconnecting from
+a server, the whole client window is closed and reopened.
 
 The launch grid
 ---------------

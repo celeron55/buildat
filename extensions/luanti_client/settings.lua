@@ -153,7 +153,7 @@ local RANGES = {60, 120, 200, 300, 400}
 function M.show()
 	local s = M.load()
 	local root = uistack.main:push({desc = "luanti_client settings"})
-	root.defaultStyle = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	root.defaultStyle = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 	local menu = ui_utils.vertical_menu(root, {min_width = 420})
 	local title = menu.window:CreateChild("Text")
 	title:SetStyleAuto()

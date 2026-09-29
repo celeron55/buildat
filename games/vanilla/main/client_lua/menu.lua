@@ -478,7 +478,7 @@ function draw(saves, save_games)
 end
 
 -- How big it is, the way buildat's own game menu says it: see
--- format_bytes() in extensions/launch_menu/init.lua, which this is the same
+-- format_bytes() in extensions/launch_menu/screens.lua, which this is the same
 -- ladder as. A menu that says nothing about size is a menu that cannot tell
 -- a moment's copy from a minute's.
 local function format_bytes(n)

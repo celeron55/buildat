@@ -38,10 +38,10 @@ fifo="$tmp/cmds.fifo"; mkfifo "$fifo"
 # **The grid by name, not by preference** (2026-09-24): this drives
 # the launch menu's own screens, and a desk whose `launch_ui` is set
 # to something else -- the room, the console -- booted that instead
-# and the scan found no tiles. `-m __menu` asks for the thing the
+# and the scan found no tiles. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
-bin/buildat -m __menu -w 1280x720 -l 3 -c - < "$fifo" > "$tmp/cli.log" 2>&1 &
+bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" > "$tmp/cli.log" 2>&1 &
 exec 3> "$fifo"
 python3 - "$tmp" <<'PY'
 import os, re, sys, time

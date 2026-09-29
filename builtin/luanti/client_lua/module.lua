@@ -442,7 +442,7 @@ end)
 function M.warm_fonts()
 	local holder = magic.ui.root:CreateChild("UIElement")
 	holder.defaultStyle = magic.cache:GetResource("XMLFile",
-			"__menu/res/main_style.xml")
+			"launch_menu/res/main_style.xml")
 	for _, size in ipairs({12, 13, 14, 15, 16}) do
 		local t = holder:CreateChild("Text")
 		t:SetStyleAuto()
@@ -2965,7 +2965,7 @@ local function make_ui()
 			return {size = #stacks, items = items}
 		end,
 		model = model_element,
-		style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml"),
+		style = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml"),
 		-- A plain white pixel, which a box or a tint is drawn with. Composed
 		-- rather than shipped: it is one operation and one file either way.
 		white = texture_of("[fill:1x1:#ffffffff"),

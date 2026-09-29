@@ -27,7 +27,7 @@ trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; pkill -INT -x buildat_serv
 	if [ -f "$tmp/settings.json.bak" ]; then cp "$tmp/settings.json.bak" "$settings"; else rm -f "$settings"; fi;
 	[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"' EXIT
 # The grid by name, not by preference: keys_ui.sh says why ([MENU_FALLBACK])
-bin/buildat -m __menu -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
+bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
 cli=$!
 exec 3> "$fifo"

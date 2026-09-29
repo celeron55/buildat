@@ -20,9 +20,9 @@ Config::Config()
 
 	set_default("server_address", "");
 	set_default("boot_to_menu", false);
-	// The launch menu: local games, remote servers, and the extensions that
-	// say they can be launched. See extensions/__menu.
-	set_default("menu_extension_name", "__menu");
+	// -m: the launch UI for this run, or empty for the saved preference
+	// (App::launch_ui_name). See extensions/launch_menu.
+	set_default("menu_extension_name", "");
 	// -a kind/name/id: one launch-grid action run on boot ([LAUNCH_GRID])
 	set_default("launch_action", "");
 	set_default("ui_scale", 0.0); // 0 = auto from short side / 1080

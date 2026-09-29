@@ -127,7 +127,7 @@ end
 -- XMLElement (2026-09-25): a document out of the resource cache walked
 -- -- the root, its children, an attribute and a number
 do
-	local f = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	local f = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 	assert(f, "the style file is in the cache")
 	local root = f:GetRoot()
 	assert(root:NotNull() and not root:IsNull(), "the root is there")
@@ -176,7 +176,7 @@ do
 	-- sandbox made is owned by Lua, and DefineShape hands it to a
 	-- SharedPtr that frees it under the collector -- a segfault in
 	-- RefCounted (2026-09-25). A game's cursor is a file it ships.
-	local img = magic.cache:GetResource("Image", "__menu/res/icon_local.png")
+	local img = magic.cache:GetResource("Image", "launch_menu/res/icon_local.png")
 	assert(img, "the image is in the cache")
 	local c = magic.ui.root:CreateChild("Cursor")
 	c:DefineShape("Normal", img, magic.IntRect(0, 0, 16, 16),

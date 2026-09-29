@@ -5337,7 +5337,7 @@ local PAUSE_ITEMS = {
 		-- is remembered as a preference and the other UI is booted now,
 		-- so switching is one action from either side ([TWO_AUDIENCES])
 		-- rather than a flag and a restart.
-		local ok, why = api.set_launch_ui("__menu")
+		local ok, why = api.set_launch_ui("launch_menu")
 		if not ok then
 			log:warning("pause: " .. tostring(why))
 			notice(tostring(why))
