@@ -35,8 +35,9 @@ local COPY_OFFSET = 500
 -- The view button goes round the views: the plan, the free camera, walking
 local NEXT_VIEW = {["2d"] = "3d", ["3d"] = "walk", walk = "2d"}
 local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk"}
--- Walking: the body's radius, how high a step it takes, its height, mm
-local BODY_R, STEP, HEAD = 250, 50, 1750
+-- Walking: the body's radius, how high a step it takes, its height, mm.
+-- A step takes a stair's riser, which building codes cap near 220 mm.
+local BODY_R, STEP, HEAD = 250, 250, 1750
 local JUSTIFY_NAMES = {[0] = "centered", [1] = "left", [2] = "right"}
 local TOOL_KEYS = {select = "V", node = "N", wall = "B", room = "R",
 	box = "O", hosted = "I", voxel = "K", paint = "M"}
@@ -1560,7 +1561,7 @@ local function build_layout(seen_voxels)
 	-- A floor is something to stand on, when walking up to another layout
 	for _, r in pairs(room_data) do
 		if #r.pts >= 3 then
-			solids[#solids + 1] = {pts = r.pts, y0 = 0, y1 = 0}
+			solids[#solids + 1] = {pts = r.pts, y0 = 0, y1 = 0, floor = true}
 		end
 	end
 	update_voxel_meshes(seen_voxels)
@@ -1624,7 +1625,7 @@ rebuild = function()
 				pts[k] = {x, z}
 			end
 			all_solids[#all_solids + 1] = {pts = pts, y0 = sd.y0 + r.y,
-					y1 = sd.y1 + r.y}
+					y1 = sd.y1 + r.y, floor = sd.floor}
 		end
 		place.layers[#place.layers + 1] = {insts = inst_data, rel = r}
 	end
@@ -5220,7 +5221,10 @@ do
 		voxel_solids(x, z, list)
 		for _ = 1, 4 do
 			for _, sd in ipairs(list) do
-				if sd.y1 > feet + STEP and sd.y0 < feet + HEAD then
+				-- A floor is only stood on: a room has no hole for the stairs
+				-- to come up through
+				if not sd.floor and sd.y1 > feet + STEP and
+						sd.y0 < feet + HEAD then
 					local pts = sd.pts
 					local bd, bx, bz = math.huge, 0, 0
 					for i = 1, #pts do
