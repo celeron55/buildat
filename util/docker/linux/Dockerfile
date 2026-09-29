@@ -26,7 +26,7 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
 	libcurl4-openssl-dev \
 	xvfb xauth libgl1-mesa-dri imagemagick zip tar gzip \
 	python3 python3-pil lua5.1 \
-	xz-utils \
+	xz-utils patchelf \
 	&& ln -sf /usr/bin/lua5.1 /usr/local/bin/lua \
 	&& rm -rf /var/lib/apt/lists/*
 # The web client's toolchain ([WEB_CLIENT], [LINUX_SERVER]): emsdk at its

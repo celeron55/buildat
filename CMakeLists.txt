@@ -248,12 +248,6 @@ include_directories(SYSTEM ${URHO3D_INCLUDE_DIRS})
 if(NOT WIN32)
 	set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
 	set(CMAKE_INSTALL_RPATH "\$ORIGIN/../lib;${URHO3D_BUILD_DIR}/lib")
-	# DT_RPATH, not RUNPATH ([LINUX_SERVER]): a RUNPATH is the executable's
-	# own, and libUrho3D.so's libGL.so.1 was not looked for in lib/, where
-	# the web archives bundle it for a box with no GL
-	if(NOT APPLE AND NOT BUILDAT_WEB)
-		set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--disable-new-dtags")
-	endif()
 endif()
 
 # Urho3D's Lua (luabind needs the headers and a Lua archive)

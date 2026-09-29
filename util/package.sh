@@ -637,6 +637,14 @@ bundle_libs() {
 		cp -L "$path" "$stage/lib/$f"
 		echo "bundled $f"
 	done
+	# Each library looks beside itself: an executable's search path covers
+	# only its own dependencies once a library has a RUNPATH of its own, as
+	# libUrho3D.so's is, and libUrho3D.so's libGL.so.1 and libGL's
+	# libGLdispatch.so.0 were not found in lib/
+	for f in "$stage"/lib/*.so*; do
+		[ -L "$f" ] && continue
+		patchelf --set-rpath '$ORIGIN' "$f"
+	done
 }
 
 # The web archives ([LINUX_SERVER]), out of another archive's stage:
