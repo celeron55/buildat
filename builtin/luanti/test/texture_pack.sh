@@ -1,0 +1,70 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# tier: full
+# [VOXEL_MATERIALS] layer 2's upgrade path: a texture pack under
+# user/luanti/texture_packs wins over what the game ships. The runner writes
+# a pack of one magenta stone texture, stands the player on camera.lua's
+# stone floor and reads how much of the floor is magenta; the pack is
+# removed after (it refuses to run if one of that name is already there).
+#
+#   builtin/luanti/test/texture_pack.sh
+set -u
+here=$(cd "$(dirname "$0")/../../.." && pwd)
+me=$(cd "$(dirname "$0")" && pwd)
+out="$here/local/texture_pack"
+mkdir -p "$out"
+pack="$here/user/luanti/texture_packs/buildat_check_pack"
+[ -e "$pack" ] && { echo "$pack is in the way" >&2; exit 2; }
+save=buildat_test_texture_pack
+cd "$here/Build"
+if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+	echo "a buildat server or client is already running" >&2; exit 2
+fi
+mkdir -p "$pack"
+trap 'rm -rf "$pack"' EXIT
+python3 - "$pack" <<'PY'
+import sys
+from PIL import Image
+Image.new("RGB", (16, 16), (255, 0, 255)).save(sys.argv[1] + "/default_stone.png")
+PY
+rm -rf "../user/games/vanilla/saves/$save"
+BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
+	BUILDAT_LUANTI_LUA="$me/camera.lua" \
+	bin/buildat_server -m ../games/vanilla -D ../user -P 29784 \
+	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
+for i in $(seq 1 400); do
+	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break
+	sleep 1
+done
+sleep 5
+srv=$(pgrep -x buildat_server | head -1)
+[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+{
+	echo "wait_log 60000 camera: the floor and the wall are placed"
+	echo "delay 3000"
+	echo "look_dir 0 -0.6 1"
+	echo "delay 1500"
+	echo "screenshot $out/floor.png"
+	echo "delay 500"
+	echo "quit"
+} > "$out/cmds.txt"
+bin/buildat -s localhost:29784 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 |
+	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+sleep 2
+kill -INT "$srv" 2>/dev/null
+for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+grep -a "texture pack:" "$out/srv.log" | sed 's/.*: //' | head -3
+python3 - "$out" <<'PY'
+import sys
+from PIL import Image
+im = Image.open("%s/floor.png" % sys.argv[1]).convert("RGB")
+w, h = im.size
+crop = im.crop((w // 3, h // 2, 2 * w // 3, h - h // 6))
+px = list(crop.getdata())
+mag = sum(1 for r, g, b in px if r > 150 and b > 150 and g < 100)
+share = 100.0 * mag / len(px)
+print("the floor is %.1f %% magenta" % share)
+print("PASS: the pack's texture is what the world wears" if share > 20
+		else "FAIL: the pack did not reach the world")
+sys.exit(0 if share > 20 else 1)
+PY

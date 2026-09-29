@@ -37,6 +37,11 @@ class Vector3;
 #define DESKTOP_GRAPHICS
 #endif
 
+// buildat [WEB_GLES3]: what desktop GL and GLES3 share and GLES2 lacks
+#if defined(DESKTOP_GRAPHICS) || defined(URHO3D_GLES3)
+#define DESKTOP_GRAPHICS_OR_GLES3
+#endif
+
 /// Primitive type.
 enum PrimitiveType
 {

@@ -245,12 +245,14 @@ struct Module: public interface::Module, public Interface
 
 			// The section grown by whatever the generator needs to place a
 			// thing that crosses the section boundary
-			pv::Region region;
+			pv::Region section_region;
 			voxelworld::access(m_server, task.scene_ref,
 					[&](voxelworld::Instance *world)
 			{
-				region = world->get_section_region_voxels(task.section_p);
+				section_region =
+						world->get_section_region_voxels(task.section_p);
 			});
+			pv::Region region = section_region;
 			pv::Vector3DInt32 pad = task.generator->get_padding_voxels();
 			region.setLowerCorner(region.getLowerCorner() - pad);
 			region.setUpperCorner(region.getUpperCorner() + pad);
@@ -272,8 +274,16 @@ struct Module: public interface::Module, public Interface
 			voxelworld::access(m_server, task.scene_ref,
 					[&](voxelworld::Instance *world)
 			{
-				world->merge_volume(volume, true);
+				// The section itself is this generator's to write; the
+				// padding around it is only a gift to whoever owns that,
+				// and loses to what is already there
+				world->merge_volume(volume, true, &section_region);
 			});
+
+			// On the main thread, after the merge: what a game runs over
+			// terrain that has just appeared goes here
+			m_server->emit_event("worldgen:section_generated",
+					new SectionGenerated(task.scene_ref, task.section_p));
 
 			worldgen::access(m_server, task.scene_ref,
 					[&](worldgen::Instance *instance)
