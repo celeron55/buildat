@@ -4328,6 +4328,9 @@ do
 		S.press, S.drag = nil, nil
 		update_capture()
 		local w = dialog("Paused")
+		-- Which plan this is, at a glance (user)
+		panel.label(w, "Plan: " .. (doc.plan_name or "?"),
+				magic.Color(1.0, 0.85, 0.3))
 		panel.button(w, "Continue (Esc)", function() close_pause() end)
 		panel.button(w, "Settings", settings_page)
 		if doc.privs.admin then
