@@ -3154,6 +3154,10 @@ end
 end
 
 refresh_panels = function()
+	-- Nothing to show between plans; resume() draws them again
+	if S.suspended then
+		return
+	end
 	-- A field being typed in is not pulled from under the typing; the
 	-- rebuild waits for the next change after it
 	if doc.typing() then
@@ -3226,7 +3230,15 @@ do
 		local w = dialog("Paused")
 		panel.button(w, "Continue (Esc)", function() close_pause() end)
 		panel.button(w, "Settings", settings_page)
-		panel.button(w, "Leave the plan", function() buildat.leave() end)
+		-- The local user of a launched server can go back to the plans;
+		-- anybody can go back to the launcher
+		if doc.is_local then
+			panel.button(w, "Other plan...", function()
+				close_pause()
+				doc.close_plan()
+			end)
+		end
+		panel.button(w, "Leave to the launcher", function() buildat.leave() end)
 		panel.button(w, "Quit", function() buildat.quit() end)
 	end
 
@@ -5128,7 +5140,52 @@ local function export_step()
 	e.frame = e.frame + 1
 end
 
+-- The plan closed for another ([FP_OTHER_PLAN]): the editor waits, drawing
+-- and showing nothing, until the next plan's snapshot resumes it
+local SCENE_PARTS = {walls_node, caps_node, overhead_node, pieces_node,
+	images_node, decals_node, lamps_node}
+function M.suspend()
+	close_pause()
+	S.crosshair = false
+	update_capture()
+	S.suspended = true
+	S.sel, S.primary, S.nodes, S.sel_face = {}, nil, {}, {}
+	S.draw, S.corners, S.linking, S.calib, S.drag, S.press = nil
+	for _, n in ipairs(SCENE_PARTS) do
+		n.enabled = false
+	end
+	for _, w in ipairs({toolbar, props, palette_win}) do
+		if w then
+			w.visible = false
+		end
+	end
+	for _, t in ipairs(label_nodes) do
+		t.visible = false
+	end
+	hud:SetText("")
+	crosshair.visible = false
+end
+
+function M.resume()
+	S.suspended = false
+	walls_node.enabled = true
+	images_node.enabled = true
+	decals_node.enabled = true
+	lamps_node.enabled = true
+	for _, w in ipairs({toolbar, props, palette_win}) do
+		if w then
+			w.visible = true
+		end
+	end
+	-- The rest of the scene's parts are set by the view
+	set_view(S.view)
+	S.dirty = true
+end
+
 function M.update(dt)
+	if S.suspended then
+		return
+	end
 	export_step()
 	move_camera(dt)
 	place_cameras()
@@ -5156,6 +5213,9 @@ function M.start(d)
 	doc = d
 	S.material = nil
 	doc.listeners[#doc.listeners + 1] = function(changed, deleted)
+		if S.suspended then
+			return
+		end
 		for id in pairs(S.sel) do
 			if not doc.ents[id] then
 				S.sel[id] = nil

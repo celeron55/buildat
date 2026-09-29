@@ -440,6 +440,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:login"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:open"));
+		m_server->sub_event(this,
+				Event::t("network:packet_received/fp:close_plan"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:batch"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:chat"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:voxels"));
@@ -466,6 +468,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/fp:login", on_login,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:open", on_open,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:close_plan", on_close_plan,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
 				network::Packet)
@@ -608,6 +612,35 @@ struct Module: public interface::Module
 		}
 		for(auto &pair : m_peers)
 			send_hello(pair.first);
+	}
+
+	// Back to the plan picker ([FP_OTHER_PLAN]): the plan saved and closed,
+	// everybody logged out of it, the local user offered the plans again
+	void on_close_plan(const network::Packet &packet)
+	{
+		if(!m_store || !is_local(packet.sender))
+			return;
+		flush();
+		storage::access(m_server, [&](storage::Interface *istorage){
+			istorage->close(m_save);
+		});
+		m_save = nullptr;
+		m_store = nullptr;
+		m_ents.clear();
+		m_voxels.clear();
+		m_dirty.clear();
+		m_voxels_dirty.clear();
+		m_locks.clear();
+		m_images.clear();
+		for(auto &pair : m_peers){
+			pair.second.name.clear();
+			pair.second.has_presence = false;
+		}
+		log_i(MODULE, "The plan is closed; the local user picks another");
+		for(auto &pair : m_peers){
+			send(pair.first, "fp:closed", "");
+			send_hello(pair.first);
+		}
 	}
 
 	// <save>/backups/1 is the newest of BACKUPS; the save is closed, so its

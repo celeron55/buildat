@@ -674,6 +674,7 @@ local function show_login(error_text, is_local)
 	local function join()
 		local n = name:GetText()
 		buildat.storage_write("name", n)
+		doc.rejoin_name = n
 		send_login(n, password and password:GetText() or "")
 	end
 	magic.SubscribeToEvent(button, "Released", function() join() end)
@@ -747,7 +748,14 @@ local hello = {}
 buildat.sub_packet("fp:hello", function(data)
 	hello = cereal.binary_input(data, {"object", {"local", "byte"},
 			{"pick", "byte"}, {"saves", {"array", "string"}}})
+	doc.is_local = hello["local"] == 1
 	if doc.joined_once then
+		return
+	end
+	-- Back from the picker with a plan open: the local user joins it under
+	-- the name they had
+	if hello.pick == 0 and doc.is_local and doc.rejoin_name then
+		send_login(doc.rejoin_name, "")
 		return
 	end
 	if hello.pick == 1 then
@@ -761,22 +769,48 @@ buildat.sub_packet("fp:hello", function(data)
 	-- A scripted or second client can skip the dialog
 	local auto_name = buildat.get_env("BUILDAT_FP_NAME")
 	if auto_name then
+		doc.rejoin_name = auto_name
 		send_login(auto_name, buildat.get_env("BUILDAT_FP_PASSWORD") or "")
 	else
 		show_login(nil, hello["local"] == 1)
 	end
 end)
 
+-- The plan closed, for another ([FP_OTHER_PLAN]): nothing of it is kept,
+-- the editor waits under the picker, and fp:hello says what comes next
+buildat.sub_packet("fp:closed", function(data)
+	doc.joined_once = false
+	doc.ents, doc.voxels, doc.voxel_version = {}, {}, {}
+	doc.others, doc.privs = {}, {}
+	doc.undo_stack, doc.redo_stack = {}, {}
+	doc.suspend_editor()
+end)
+
+-- Back to the picker: the server closes the plan
+function doc.close_plan()
+	buildat.send_packet("fp:close_plan", "")
+end
+
 buildat.sub_packet("fp:login_result", function(data)
 	local err = cereal.binary_input(data, TEXT).text
 	if err ~= "" then
 		log:info("Login refused: " .. err)
-		show_login(err, hello["local"] == 1)
+		-- Joined already, a second try's refusal is only said
+		if doc.joined_once then
+			doc.notice(err)
+		else
+			show_login(err, hello["local"] == 1)
+		end
 	end
 end)
 
 -- The editor is loaded once joined: it needs the document to show anything
 local editor = nil
+function doc.suspend_editor()
+	if editor then
+		editor.suspend()
+	end
+end
 function doc.joined()
 	doc.joined_once = true
 	if login_window then
@@ -785,6 +819,7 @@ function doc.joined()
 	end
 	magic.ui:SetFocusElement(nil)
 	if editor then
+		editor.resume()
 		return
 	end
 	local ok, err, m = buildat.run_script_file("main/editor.lua")
