@@ -364,6 +364,56 @@ function M.snap_direction(ax, az, px, pz, step_deg, len_step)
 	return ax + c * l, az + s * l
 end
 
+-- The walker, a cylinder of radius r standing at (x, z) with its feet at
+-- `feet`, among solids {pts (counter-clockwise), y0, y1, floor}: pushed out
+-- of what it would be in, then standing on the highest one under its
+-- footprint that it can step onto (at most `step` up). A floor is only
+-- stood on, never in the way. Returns x, z and the new feet.
+-- simplified: it steps down at once rather than falling
+function M.walk(list, x, z, feet, r, step, head)
+	-- The nearest point of a solid's outline, its distance, and whether
+	-- (x, z) is inside it
+	local function nearest(pts)
+		local bd, bx, bz = math.huge, 0, 0
+		for i = 1, #pts do
+			local p, q = pts[i], pts[i % #pts + 1]
+			local nx, nz, _, d = M.nearest_on_segment(x, z, p[1], p[2], q[1], q[2])
+			if d < bd then
+				bd, bx, bz = d, nx, nz
+			end
+		end
+		return bx, bz, bd, M.point_in_polygon(x, z, pts)
+	end
+	for _ = 1, 4 do
+		for _, sd in ipairs(list) do
+			if not sd.floor and sd.y1 > feet + step and sd.y0 < feet + head then
+				local bx, bz, bd, inside = nearest(sd.pts)
+				if inside or bd < r then
+					local dx, dz = x - bx, z - bz
+					local l = math.max(len(dx, dz), 1e-6)
+					if inside then
+						dx, dz = -dx, -dz
+					end
+					x, z = bx + dx / l * r, bz + dz / l * r
+				end
+			end
+		end
+	end
+	-- Under the whole footprint, not its middle: a stair's tread is
+	-- narrower than the body, whose edge meets the riser after next before
+	-- its middle is over the next
+	local ground = 0
+	for _, sd in ipairs(list) do
+		if sd.y1 <= feet + step and sd.y1 > ground then
+			local _, _, bd, inside = nearest(sd.pts)
+			if inside or bd < r then
+				ground = sd.y1
+			end
+		end
+	end
+	return x, z, ground
+end
+
 --
 -- Self-checks
 --
@@ -460,6 +510,36 @@ do
 	local x, z = M.snap_direction(0, 0, 1000, 800, 90, 10)
 	near(x, 1000, "snap_direction projects onto the axis")
 	near(z, 0, "snap_direction z")
+end
+
+do
+	-- Ten stairs of 200 mm voxels, 200 mm treads, up to a landing: walked
+	-- up in 20 mm strides. A 400 mm step alone is a wall.
+	local list = {}
+	local function cell(x0, z0, x1, z1, y0, y1, floor)
+		list[#list + 1] = {pts = {{x0, z0}, {x1, z0}, {x1, z1}, {x0, z1}},
+				y0 = y0, y1 = y1, floor = floor}
+	end
+	for k = 1, 10 do
+		for cy = 0, k - 1 do
+			cell(-400, k * 200, 400, k * 200 + 200, cy * 200, cy * 200 + 200)
+		end
+	end
+	cell(-400, 2200, 400, 5000, 2000, 2000, true)
+	local x, z, feet = 0, 0, 0
+	for _ = 1, 200 do
+		x, z, feet = M.walk(list, x, z + 20, feet, 250, 250, 1750)
+	end
+	near(feet, 2000, "walked up the stairs")
+	assert(z > 3000, "walked up the stairs: stopped at z " .. z)
+	list = {}
+	cell(-400, 1000, 400, 1200, 0, 400)
+	x, z, feet = 0, 0, 0
+	for _ = 1, 100 do
+		x, z, feet = M.walk(list, x, z + 20, feet, 250, 250, 1750)
+	end
+	near(feet, 0, "a 400 mm step")
+	near(z, 750, "a 400 mm step stops the body")
 end
 
 return M

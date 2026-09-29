@@ -5219,42 +5219,7 @@ do
 			list[#list + 1] = sd
 		end
 		voxel_solids(x, z, list)
-		for _ = 1, 4 do
-			for _, sd in ipairs(list) do
-				-- A floor is only stood on: a room has no hole for the stairs
-				-- to come up through
-				if not sd.floor and sd.y1 > feet + STEP and
-						sd.y0 < feet + HEAD then
-					local pts = sd.pts
-					local bd, bx, bz = math.huge, 0, 0
-					for i = 1, #pts do
-						local p, q = pts[i], pts[i % #pts + 1]
-						local nx, nz, _, d = geom.nearest_on_segment(x, z, p[1], p[2],
-								q[1], q[2])
-						if d < bd then
-							bd, bx, bz = d, nx, nz
-						end
-					end
-					local inside = geom.point_in_polygon(x, z, pts)
-					if inside or bd < BODY_R then
-						local dx, dz = x - bx, z - bz
-						local l = math.max(geom.len(dx, dz), 1e-6)
-						if inside then
-							dx, dz = -dx, -dz
-						end
-						x, z = bx + dx / l * BODY_R, bz + dz / l * BODY_R
-					end
-				end
-			end
-		end
-		local ground = 0
-		for _, sd in ipairs(list) do
-			if sd.y1 <= feet + STEP and sd.y1 > ground and
-					geom.point_in_polygon(x, z, sd.pts) then
-				ground = sd.y1
-			end
-		end
-		return x, z, ground
+		return geom.walk(list, x, z, feet, BODY_R, STEP, HEAD)
 	end
 
 	-- dt: seconds of walking at the keys' speed, or mm: that far, which is
