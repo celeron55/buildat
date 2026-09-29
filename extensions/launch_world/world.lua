@@ -157,43 +157,32 @@ do
 	end
 	log:info("servers: " .. #SERVERS .. " of the client's own")
 end
--- **And they say they are examples** ([TWO_AUDIENCES]: the audience for
--- this room is someone meeting buildat for the first time). Nine
--- invented hostnames standing on the floor read as servers to join, and
--- a first-time player learns what the room is by trying one -- so each
--- one that is not the player's own says so where its name is read out.
--- The localhost row is not an example: it is a real thing to try, and
--- the check needs one server it can name and fail to reach.
+-- **The proof's padding is gone** ([LAUNCH_WORLD] stage 1(b), 2026-09-28).
+-- Nine invented hostnames -- buildat.example.org, "the long night",
+-- "scrapyard" and the rest -- stood on the floor to show what a room
+-- full of servers looks like. They were a mock-up of a fetched
+-- serverlist, and a first-time player, who is who this room is for
+-- ([TWO_AUDIENCES]), met a lobby whose servers were props. A room shows
+-- what there is.
+--
+-- **What an empty lobby shows instead is one sensible pick, said as
+-- one**: localhost, which is a real thing to try -- a server this
+-- client can start for itself -- and which says where its name is read
+-- out that it is the room's suggestion rather than somewhere anybody is
+-- playing. The check also needs one server it can name and fail to
+-- reach, and this is it.
 local real_servers = 0
 for _, a in ipairs(FLOOR_ACTIONS) do
 	if a.category == "server" then real_servers = real_servers + 1 end
 end
-local SERVERS_MOCK = {
-	{name = "buildat.example.org", address = "buildat.example.org:29797"},
-	{name = "drift.example.net", address = "drift.example.net:29797"},
-	{name = "the long night", address = "night.example.org:29797"},
-	{name = "quarry", address = "quarry.example.net:29797"},
-	{name = "mine.example.net", address = "mine.example.net:29797"},
-	{name = "kiln", address = "kiln.example.org:29797"},
-	{name = "far shore", address = "shore.example.net:29797"},
-	{name = "the commons", address = "commons.example.org:29797"},
-	{name = "scrapyard", address = "scrap.example.net:29797"},
-	{name = "localhost", address = "127.0.0.1:29797", always = true},
-}
-for _, sv in ipairs(SERVERS_MOCK) do
+do
+	local sv = {name = "localhost", address = "127.0.0.1:29797"}
 	local had = false
 	for _, e in ipairs(SERVERS) do
 		if e.address == sv.address then had = true break end
 	end
-	-- **The last one is always there**: a client with ten addresses of
-	-- its own gets none of the padding otherwise, and the check needs
-	-- one server it can name and fail to reach
-	-- **The padding stands down when there are real ones** (2026-09-24):
-	-- a fetched serverlist arrives as launch actions of category
-	-- "server", and a floor with real servers on it has no business
-	-- carrying invented hostnames beside them.
-	if not had and ((#SERVERS + real_servers < 10) or sv.always) then
-		sv.example = not sv.always
+	if not had then
+		sv.example = true
 		SERVERS[#SERVERS + 1] = sv
 	end
 end
@@ -219,7 +208,7 @@ do
 	local ex = 0
 	for _, sv in ipairs(SERVERS) do if sv.example then ex = ex + 1 end end
 	log:info("servers: " .. #SERVERS .. " on the floor, " .. ex ..
-			" of them saying they are examples, " .. real_servers ..
+			" of them the room's own suggestion, " .. real_servers ..
 			" off a fetched list")
 end
 -- **More games than the wall can hold stand on the floor** (the open
@@ -1773,7 +1762,7 @@ for i, sv in ipairs(SERVERS) do
 	local row = 0.5 + math.floor((i - 1) / #SERVER_COLS) * 4.5
 	local o = {name = sv.name, address = sv.address, server = true,
 		description = sv.address ..
-				(sv.example and "   (an example, not a server)" or ""),
+				(sv.example and "   (the room's suggestion)" or ""),
 		floor = true, category = "server",
 		significance = sv.players,
 		search = sv.name .. " " .. sv.address}

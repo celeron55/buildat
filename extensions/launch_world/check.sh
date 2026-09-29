@@ -54,22 +54,25 @@ if pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 
-# **The floor's example servers say they are examples** ([TWO_AUDIENCES]:
-# a first-time player learns what the room is by trying one, and nine
-# invented hostnames that read as joinable teach the wrong thing). This
-# desk's client has ten addresses of its own, so none of the padding
-# shows here -- the assertion needs a client with no history, which is
-# an empty user path of its own.
+# **An empty lobby shows one sensible pick, said as one** ([LAUNCH_WORLD]
+# stage 1(b), 2026-09-28: the proof's nine invented hostnames are gone).
+# A first-time player learns what the room is by trying one, and props
+# that read as joinable teach the wrong thing; localhost is a real thing
+# to try and says where its name is read out that it is the room's
+# suggestion. This desk's client has addresses of its own, so the
+# assertion needs a client with no history, which is an empty user path
+# of its own.
 mkdir -p "$out/emptyuser"
 { echo "wait_log_any 30000 on the floor"; echo "quit"
 	} > "$out/cmds_cold.txt"
 examples=$(bin/buildat -m launch_world -D "$out/emptyuser" -w 640x360 -l 3 \
 	-c @"$out/cmds_cold.txt" 2>&1 | sed -e 's/\x1b\[[0-9;]*m//g' |
 	grep -a "launch_w.*: servers: .* on the floor" | head -1 |
-	sed -n 's/.*floor, \([0-9]*\) of them saying.*/\1/p')
-echo "a client with no history draws ${examples:-0} example servers"
-if [ "${examples:-0}" -lt 1 ]; then
-	echo "FAIL: the floor's made-up servers do not say they are examples"
+	sed -n 's/.*floor, \([0-9]*\) of them the room.*/\1/p')
+echo "a client with no history draws ${examples:-0} suggested servers"
+if [ "${examples:-0}" != "1" ]; then
+	echo "FAIL: an empty lobby should show exactly one server, the room's" \
+			"own suggestion, and say that it is one"
 	exit 1
 fi
 
