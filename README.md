@@ -79,6 +79,20 @@ macOS), which is what an installed copy wants. `-C` and `-D` override either.
 Optional: `-DURHO3D_LUAJIT=TRUE` builds the bundled LuaJIT instead of Lua.
 `URHO3D_HOME` still overrides the bundled tree if you need an external build.
 
+### The web client
+
+A server also serves a client for web browsers, on its own port: open
+`http://<server>:<port>/` and it connects back to the server it came from
+(see doc/plan/web_client_plan.md). It is built separately, with
+[emsdk](https://emscripten.org/docs/getting_started/downloads.html) 3.1.60:
+
+    $ ~/emsdk/emsdk install 3.1.60 && ~/emsdk/emsdk activate 3.1.60
+    $ util/build_web.sh
+
+It builds in `Build-web/` and writes `web/`, which the server serves from by
+default; `buildat_server -W <dir>` serves another. Behind an https reverse
+proxy the page connects over wss.
+
 Play
 ----
 

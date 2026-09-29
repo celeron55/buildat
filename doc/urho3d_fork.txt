@@ -207,3 +207,19 @@ upstream: Texture2D::Create_OGL keeps the WebGL 1 depth path under
 URHO3D_GLES2 (upstream's DESKTOP_GRAPHICS_OR_GLES3 switched WebGL 1 to the
 desktop one), and the GLES3 path draws instanced and sets divisors with the
 core functions. The engine sample and gradle parts of the PR are left out.
+
+More of SDL's Emscripten backend, and the browser's Esc ([WEB_CLIENT])
+----------------------------------------------------------------------
+Source/ThirdParty/SDL/src/joystick/emscripten/SDL_sysjoystick.c,
+Source/ThirdParty/SDL/src/video/emscripten/SDL_emscripten{opengles,video,
+events}.c, Input/Input.cpp
+
+What the web client ran into at run time: the gamepads are sampled before
+they are counted or read (Emscripten asserts it); eglQueryString is loaded
+with the other EGL functions (SDL_EGL_HasExtension called it through a
+null pointer); the window title goes through emscripten_set_window_title;
+a resizable window follows the canvas's CSS size on a resize even when the
+two were equal at the start. In Input.cpp, when the browser ends a pointer
+lock that the game still wants (MM_RELATIVE, not an exit Urho asked for),
+an Esc down and up is pushed: the browser does that on Esc and keeps the
+key, and the game should see what the user pressed.
