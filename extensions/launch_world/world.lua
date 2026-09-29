@@ -3194,6 +3194,64 @@ moved = {}
 -- that reads to the end of the line does not.
 bookmarks = {}
 bookmark_order = {}
+-- Where an orb stood before it was pinned, so unpinning puts it back
+-- rather than leaving a hole in the wall
+bookmark_home = {}
+
+-- The three things a move is: the sphere, its light, and where the room
+-- thinks the sphere is. `part()` takes metres and multiplies by U on the
+-- way in; a node's own position is in those units and `orb_places` is in
+-- metres, which is the pair the carry code already keeps in step.
+function move_orb_to(i, mx, my, mz)
+	if orb_nodes[i] then
+		orb_nodes[i].position = magic.Vector3(mx * U, my * U, mz * U)
+	end
+	if light_nodes[i] then
+		light_nodes[i].position = magic.Vector3(mx * U, my * U, mz * U)
+	end
+	orb_places[i] = {x = mx, y = my, z = mz}
+end
+
+-- **The bookmarks row, at the standing place** ([LAUNCH_WORLD] stage
+-- 1(b)). What the player pinned stands in front of where they stand, in
+-- the order they pinned it, low enough to leave the wall its frame. An
+-- orb is moved rather than copied: two spheres for one game would be two
+-- things to point at and one of them a lie about where it lives.
+function place_bookmarks()
+	local row = {}
+	for _, key in ipairs(bookmark_order) do
+		if bookmarks[key] then
+			for i, o in ipairs(ORBS) do
+				if o.key == key and orb_nodes[i] then
+					row[#row + 1] = i
+					break
+				end
+			end
+		end
+	end
+	local in_row = {}
+	for _, i in ipairs(row) do in_row[i] = true end
+	for i, home in pairs(bookmark_home) do
+		if not in_row[i] then
+			move_orb_to(i, home.x, home.y, home.z)
+			bookmark_home[i] = nil
+		end
+	end
+	for k, i in ipairs(row) do
+		if not bookmark_home[i] then
+			local p = orb_places[i]
+			bookmark_home[i] = {x = p.x, y = p.y, z = p.z}
+		end
+		-- On the floor, resting on it as the floor's own spheres do, and
+		-- far enough ahead that the row is a shelf at the player's feet
+		-- rather than a sphere across the whole frame: at 2.4 m one
+		-- pinned orb filled the middle of the view and the wall behind
+		-- it was gone (2026-09-28, the first try).
+		move_orb_to(i, HOME_FROM.x + (k - (#row + 1) / 2) * 1.3,
+				orb_across(ORBS[i]) * VOXEL_M / 2, HOME_FROM.z - 5.0)
+	end
+	log:info("bookmarks: " .. #row .. " in the row at the standing place")
+end
 
 -- The player's own voxels and moved spheres, read at boot. One row a
 -- line, which is a file a person can read and delete.
@@ -3258,6 +3316,7 @@ do
 				#bookmark_order .. " of them bookmarks, " .. put ..
 				" spheres put back where the player left them")
 	end
+	place_bookmarks()
 end
 
 -- **The room's own sound levels**, a global table rather than a field of
@@ -5782,6 +5841,7 @@ function handle_keydown(event_type, event_data)
 			log:info("bookmarks: " .. #bookmark_order .. " pinned (" ..
 					tostring(o.name) .. " " ..
 					(bookmarks[o.key] and "in" or "out") .. ")")
+			place_bookmarks()
 			write_save()
 		end
 		return
