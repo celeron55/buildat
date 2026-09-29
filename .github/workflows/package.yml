@@ -35,7 +35,9 @@ jobs:
         if: always()
         with:
           name: linux-smoke
-          path: Build/package/out/smoke/
+          path: |
+            Build/package/out/smoke/
+            Build/package/out/web-smoke/
           if-no-files-found: ignore
       # The build trees' logs, which a failed build names and which stayed
       # in the runner: 0.5.0 to 0.5.2 failed with nothing to read

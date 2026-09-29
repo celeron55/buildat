@@ -61,11 +61,13 @@ docker run --rm -i \
 rm -f "$tarball"
 # The web archives on a bare box, which only a host with docker can
 # make ([LINUX_SERVER]): a slim Debian with the least a server needs
+# Its logs in a directory of the host's: out/smoke/ is the container's,
+# made by root
 if [ "$target" = linux ]; then
-	mkdir -p "$out/smoke"
+	mkdir -p "$out/web-smoke"
 	for a in "$out"/buildat-*"$hash"-linux-x86_64-web.tar.gz \
 			"$out"/buildat-*"$hash"-linux-x86_64-web-precompiled.tar.gz; do
-		SMOKE_LOG="$out/smoke/$(basename "$a" .tar.gz).log" \
+		SMOKE_LOG="$out/web-smoke/$(basename "$a" .tar.gz).log" \
 			"$here/util/smoke_web_archive.sh" "$a"
 	done
 fi
