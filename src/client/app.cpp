@@ -1513,6 +1513,15 @@ struct CApp: public App, public magic::Application
 
 		apply_ui_scale();
 
+#ifdef __EMSCRIPTEN__
+		// Text input only while a text field has focus ([WEB_KEYS]): SDL
+		// starts it with the window, and LineEdit turns it on and off with
+		// its focus only for a screen keyboard. The web client's key handler
+		// leaves character keys to the browser only while it is on.
+		GetSubsystem<magic::UI>()->SetUseScreenKeyboard(true);
+		SDL_StopTextInput();
+#endif
+
 		GetSubsystem<magic::Engine>()->SetMaxFps(m_options.graphics.max_fps);
 		apply_sound_preferences();
 

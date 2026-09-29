@@ -477,6 +477,14 @@ EM_BOOL
 Emscripten_HandleKey(int eventType, const EmscriptenKeyboardEvent *keyEvent, void *userData)
 {
     Uint32 scancode;
+    /* buildat [WEB_KEYS]: a key an IME is composing with (229, "Process")
+       or a dead key is the IME's or the browser's: neither a game key nor
+       claimed */
+    const SDL_bool ime_key = keyEvent->keyCode == 229 ||
+            SDL_strcmp(keyEvent->key, "Process") == 0 ||
+            SDL_strcmp(keyEvent->key, "Dead") == 0;
+    if (ime_key)
+        return SDL_FALSE;
 
     /* .keyCode is deprecated, but still the most reliable way to get keys */
     if (keyEvent->keyCode < SDL_arraysize(emscripten_scancode_table)) {
@@ -504,15 +512,21 @@ Emscripten_HandleKey(int eventType, const EmscriptenKeyboardEvent *keyEvent, voi
         }
     }
 
-    SDL_bool prevent_default = SDL_GetEventState(eventType == EMSCRIPTEN_EVENT_KEYDOWN ? SDL_KEYDOWN : SDL_KEYUP) == SDL_ENABLE;
-
-    /* if TEXTINPUT events are enabled we can't prevent keydown or we won't get keypress
-     * we need to ALWAYS prevent backspace and tab otherwise chrome takes action and does bad navigation UX
-     */
-    if (eventType == EMSCRIPTEN_EVENT_KEYDOWN && SDL_GetEventState(SDL_TEXTINPUT) == SDL_ENABLE && keyEvent->keyCode != 8 /* backspace */ && keyEvent->keyCode != 9 /* tab */)
-        prevent_default = SDL_FALSE;
-
-    return prevent_default;
+    /* buildat [WEB_KEYS]: a key is claimed from the browser unless
+       - Ctrl, Alt or Meta is held: the browser's shortcuts stay its own,
+         and Ctrl+C, V and X must, or no copy or paste event comes;
+       - a text field has focus (text input is active only then; see the
+         web client's start) and the key types a character: the keypress
+         that carries the text has to come.
+       So F1 to F12, Tab, Backspace, the arrows, and with no field focused
+       Space, letters and the quick find's '/' are the game's. */
+    if (keyEvent->ctrlKey || keyEvent->altKey || keyEvent->metaKey)
+        return SDL_FALSE;
+    if (SDL_IsTextInputActive() && keyEvent->key[0] &&
+            (keyEvent->key[1] == 0 || (unsigned char)keyEvent->key[0] >= 0x80) &&
+            SDL_strlen(keyEvent->key) <= 4)
+        return SDL_FALSE;
+    return SDL_TRUE;
 }
 
 EM_BOOL

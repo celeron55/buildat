@@ -244,3 +244,15 @@ gone. SDL's mouse button handler asked SDL_GetEventState about
 SDL_PRESSED/SDL_RELEASED instead of the event types, so the browser was
 never told to leave a button alone: a middle press in Firefox began its
 autoscroll or paste.
+
+The web keyboard: which keys the page claims ([WEB_KEYS])
+--------------------------------------------------------
+Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c
+
+Emscripten_HandleKey claimed no key while text events were enabled, which
+is always, so F1 to F3 went to the browser. Now a key is claimed unless it
+is an IME's (key code 229, "Process", a dead key -- not sent as a game
+key either), Ctrl, Alt or Meta is held (the browser's shortcuts, and its
+copy and paste), or text input is active and the key types a character.
+The web client keeps text input off except while a LineEdit has focus
+(src/client/app.cpp); see doc/plan/web_client_plan.md [WEB_KEYS].
