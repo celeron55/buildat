@@ -3174,19 +3174,22 @@ local build_palette, picker_win, close_picker
 do
 	local FINISHES = {[0] = "Over its colour", "White undercoat", "Stain"}
 	local AXES = {[0] = "Grain along X", "Grain along Y", "Grain along Z"}
-	-- Which knobs each type has, beyond the colours and the finish
+	-- Which knobs each type has, beyond the colours and the finish.
+	-- Roughness and specular are the type's own (KIND_DEFAULTS, set when
+	-- the type is picked), not shown: they only shape a lamp's or the sun's
+	-- highlight, which the knobs did not visibly change (user, 2026-09-29)
 	local KNOBS = {
-		[0] = {"roughness", "specular", "reflect"},
-		{"roughness", "specular", "reflect", "scale", "seed", "axis", "contrast"},
-		{"roughness", "specular", "reflect", "scale", "seed", "color2"},
-		{"specular", "scale", "seed", "color2"},
+		[0] = {"reflect"},
+		{"reflect", "scale", "seed", "axis", "contrast"},
+		{"reflect", "scale", "seed", "color2"},
+		{"scale", "seed", "color2"},
 		{"temperature", "brightness"},
-		{"opacity", "specular", "reflect"},
-		{"roughness", "specular", "reflect", "scale"},
-		{"roughness", "specular", "reflect", "scale", "grout", "stagger", "color2"},
+		{"opacity", "reflect"},
+		{"reflect", "scale"},
+		{"reflect", "scale", "grout", "stagger", "color2"},
 		{"scale"},
-		{"roughness", "specular", "scale", "seed", "speckle"},
-		{"roughness", "specular", "reflect", "scale", "seed", "angle", "contrast"},
+		{"scale", "seed", "speckle"},
+		{"reflect", "scale", "seed", "angle", "contrast"},
 	}
 	local KNOB_LABELS = {roughness = "Roughness", specular = "Specular",
 		reflect = "Reflective", scale = "Scale mm", seed = "Seed",
