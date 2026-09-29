@@ -2030,11 +2030,25 @@ do
 		local nx, nz = -(bz - az) / l, (bx - ax) / l
 		local mx, mz = (ax + bx) / 2, (az + bz) / 2
 		local d = S.thickness + 20
-		add_op(b, "create", {id = doc.placeholder(), type = "wall", ints = {
+		local ph = doc.placeholder()
+		add_op(b, "create", {id = ph, type = "wall", ints = {
 				a = a, b = bnode, thickness = S.thickness, justify = S.justify,
 				height = S.height, hang = S.hang,
 				mat_left = face_material(mx + nx * d, mz + nz * d),
 				mat_right = face_material(mx - nx * d, mz - nz * d)}})
+		return ph
+	end
+
+	-- **What was put in is what is selected**, as a door already was: its
+	-- panel is then its own, and an edit there goes to Select (user)
+	local function select_placed(ph, kind)
+		return function(err)
+			if err == "" and S.real[ph] then
+				S.sel, S.sel_face = {[S.real[ph]] = kind}, {}
+				S.primary = S.real[ph]
+				M.refresh_panels()
+			end
+		end
 	end
 
 	add_wall = function(from, x, z, ref)
@@ -2055,8 +2069,8 @@ do
 		if not a or not bn then
 			return false
 		end
-		wall_op(b, a, from.x, from.z, bn, x, z)
-		send(finish_batch(b))
+		local ph = wall_op(b, a, from.x, from.z, bn, x, z)
+		send(finish_batch(b), select_placed(ph, "wall"))
 		-- The chain goes on from the end, which is now a node
 		S.draw = {x = x, z = z, ref = {node = bn}}
 		return true
@@ -2092,20 +2106,21 @@ do
 				end
 			end
 		end
-		send(finish_batch(b))
+		send(finish_batch(b), select_placed(ph, "room"))
 	end
 
 	-- A box drawn: a definition of that size and an instance of it
 	add_box = function(x, z, w, d)
 		local def = doc.placeholder()
+		local inst = doc.placeholder()
 		send({
 			{op = "create", ent = {id = def, type = "definition", ints = {kind = 0,
 					w = w, h = S.box.h, d = d, mat = default_material()}}},
-			{op = "create", ent = {id = doc.placeholder(), type = "instance",
+			{op = "create", ent = {id = inst, type = "instance",
 					ints = {def = def, x = math.floor(x + 0.5),
 					z = math.floor(z + 0.5), align = S.box.align,
 					offset = S.box.offset}}},
-		})
+		}, select_placed(inst, "instance"))
 	end
 
 	-- The voxel volume the voxel tool works on: the one selected
@@ -2653,6 +2668,12 @@ local function set_tool(t)
 	if t ~= S.tool and S.view == "3d" then
 		S.crosshair = false
 	end
+	-- A placing tool starts with nothing selected, so its panel is the
+	-- settings of what it puts in until it has put one in
+	if t ~= S.tool and (t == "wall" or t == "room" or t == "box" or
+			t == "hosted") then
+		S.sel, S.sel_face, S.primary = {}, {}, nil
+	end
 	S.tool = t
 	S.draw = nil
 	S.corners = nil
@@ -2710,9 +2731,22 @@ local function build_props()
 	end
 	props = panel.window(magic.HA_RIGHT, magic.VA_TOP, -8, 8)
 	local sel = S.primary and S.sel[S.primary] and doc.ents[S.primary]
+	-- **An edit of what is selected leaves a placing tool for Select**, the
+	-- selection kept (user): the next click in the view is then not one
+	-- more of what was being edited
+	local function editing_selection()
+		if sel and (S.tool == "wall" or S.tool == "room" or S.tool == "box" or
+				S.tool == "hosted") then
+			set_tool("select")
+		end
+	end
 	local function set(id, fields)
 		send({{op = "set", ent = {id = id, ints = fields.ints,
 				strs = fields.strs}}})
+		-- The plan's own settings are not the selection's
+		if id ~= doc.settings().id then
+			editing_selection()
+		end
 	end
 	local function num(text)
 		local v = tonumber(text)
@@ -2803,6 +2837,7 @@ local function build_props()
 					{"Glass", "mat_glass"}}) do
 				panel.button(r2, slot[1], function()
 					S.sel_face[sel.id] = slot[2]
+					editing_selection()
 					local m = p[slot[2]] ~= 0 and p[slot[2]] or p.mat
 					if doc.ents[m] then
 						S.material = m
