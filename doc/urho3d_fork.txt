@@ -256,3 +256,12 @@ key either), Ctrl, Alt or Meta is held (the browser's shortcuts, and its
 copy and paste), or text input is active and the key types a character.
 The web client keeps text input off except while a LineEdit has focus
 (src/client/app.cpp); see doc/plan/web_client_plan.md [WEB_KEYS].
+
+The web text fields: LineEdit's own clipboard keys ([WEB_KEYS] step 2)
+--------------------------------------------------------------------
+Source/Urho3D/UI/LineEdit.cpp
+
+In the browser LineEdit::OnKey leaves Ctrl+C, Ctrl+X and Ctrl+V alone. The
+page's hidden textarea does them through the browser's own copy, cut and
+paste (src/client/app.cpp, src/client/web/index.html), and LineEdit
+pasting its in-page clipboard as well would paste twice.

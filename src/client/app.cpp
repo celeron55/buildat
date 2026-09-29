@@ -65,6 +65,10 @@
 #include <DebugRenderer.h>
 #include <Profiler.h>
 #include <UI.h>
+#ifdef __EMSCRIPTEN__
+#include <LineEdit.h>
+#include <Text.h>
+#endif
 #include <Text.h>
 #include <Font.h>
 #include <CustomGeometry.h>
@@ -203,6 +207,63 @@ static ss_ preferences_path()
 {
 	return g_client_config.get<ss_>("user_path")+"/settings.json";
 }
+
+#ifdef __EMSCRIPTEN__
+// The page's hidden textarea follows the focused LineEdit ([WEB_KEYS] step
+// 2, src/client/web/index.html): its place, and its text and selection
+// unless it is a password's. The browser's IME, right click menu, select
+// all, copy, cut and paste then work on it, and what they did comes back
+// as actions, taken here once a frame:
+//   "i<text>"          type the text (a paste, an IME's)
+//   "s<start>,<len>"   select, in characters
+//   "x"                delete the selection (a cut)
+static void web_text_sync(magic::UI *ui)
+{
+	magic::UIElement *f = ui->GetFocusElement();
+	magic::LineEdit *e = f && f->GetType() == magic::LineEdit::GetTypeStatic() ?
+			static_cast<magic::LineEdit*>(f) : nullptr;
+	for(;;){
+		char *a = (char*)EM_ASM_PTR({
+			var a = window.buildatText ? buildatText.take() : null;
+			return a === null ? 0 : stringToNewUTF8(a);
+		});
+		if(!a)
+			break;
+		if(e && a[0] == 'i'){
+			e->OnTextInput(magic::String(a + 1));
+		} else if(e && a[0] == 's'){
+			unsigned start = 0, len = 0;
+			if(sscanf(a + 1, "%u,%u", &start, &len) == 2){
+				e->SetCursorPosition(start + len);
+				e->GetTextElement()->SetSelection(start, len);
+			}
+		} else if(e && a[0] == 'x'){
+			if(e->GetTextElement()->GetSelectionLength())
+				e->OnKey(magic::KEY_DELETE, 0, 0);
+		}
+		free(a);
+	}
+	if(!e){
+		EM_ASM({ if(window.buildatText) buildatText.sync(null); });
+		return;
+	}
+	float k = ui->GetScale();
+	magic::IntVector2 p = e->GetScreenPosition();
+	magic::IntVector2 size = e->GetSize();
+	magic::Text *t = e->GetTextElement();
+	unsigned len = t->GetSelectionLength();
+	unsigned start = len ? t->GetSelectionStart() : e->GetCursorPosition();
+	// A password is neither copied nor selected from the page
+	bool shown = e->IsTextCopyable() && !e->GetEchoCharacter();
+	EM_ASM({
+		if(window.buildatText)
+			buildatText.sync($0, $1, $2, $3, $4 ? UTF8ToString($4) : null, $5, $6,
+					$7);
+	}, p.x_ * k, p.y_ * k, size.x_ * k, size.y_ * k,
+			shown ? e->GetText().CString() : nullptr, start, len,
+			e->IsEditable() ? 1 : 0);
+}
+#endif
 
 namespace app {
 
@@ -2243,6 +2304,9 @@ struct CApp: public App, public magic::Application
 		// worldgen, and the stack says what this thread was doing;
 		// [BOX_PLAYTEST_2] 12)
 		interface::debug::watchdog_alive(g_watchdog_seconds);
+#ifdef __EMSCRIPTEN__
+		web_text_sync(GetSubsystem<magic::UI>());
+#endif
 		// A local server on its way out is reaped here rather than in
 		// whoever asked for it to go ([QUIT_STALL])
 		step_stop_local_server();
