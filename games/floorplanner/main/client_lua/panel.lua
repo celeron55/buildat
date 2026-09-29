@@ -132,6 +132,31 @@ function M.field(parent, label, value, on_finish, width)
 	return e, r
 end
 
+-- A button of a picture over its name: rect of texture, 48 px square;
+-- `down` draws it as the one chosen
+function M.preview_button(parent, texture, rect, text, on_click, down)
+	local b = parent:CreateChild("Button")
+	b:SetStyleAuto()
+	b:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(3, 3, 3, 3))
+	b:SetFixedWidth(70)
+	local face = b:CreateChild("BorderImage")
+	face:SetFixedSize(48, 48)
+	face.texture = texture
+	face.imageRect = rect
+	face:SetAlignment(magic.HA_CENTER, magic.VA_TOP)
+	local t = b:CreateChild("Text")
+	t:SetStyleAuto()
+	t:SetText(text)
+	t:SetFontSize(10)
+	t:SetAlignment(magic.HA_CENTER, magic.VA_TOP)
+	if down then
+		t:SetColor(magic.Color(1.0, 0.85, 0.3))
+		b.selected = true
+	end
+	magic.SubscribeToEvent(b, "Released", function() on_click() end)
+	return b
+end
+
 -- A palette row: one button with the colour and the label on it, so the
 -- label is as much the thing to click as the colour is
 function M.swatch_row(parent, rgb, text, on_click, down, text_color)

@@ -153,6 +153,10 @@ local lamps_node = scene:CreateChild("Lamps")
 -- From the resource cache, which holds them: a Material made in Lua is
 -- freed under a geometry still using it
 local lit_material = magic.cache:GetResource("Material", "main/palette.xml")
+-- The same, for the type previews: its own so the plan's flat look is not
+-- theirs
+local preview_material = magic.cache:GetResource("Material",
+		"main/palette_preview.xml")
 local flat_material = magic.cache:GetResource("Material", "main/flat_vcol.xml")
 local glass_material = magic.cache:GetResource("Material",
 		"main/palette_glass.xml")
@@ -423,6 +427,45 @@ end
 
 -- The palette's rows: 0 is what has no material, 1 the glass a window has
 -- when it was given none, and the entries follow in id order
+local MATERIAL_KINDS = {[0] = "Drywall", "Wood", "Stone", "Wallpaper", "Lamp",
+	"Glass", "Metal", "Tile", "Fabric", "Plaster", "Paneling"}
+-- What a type looks like when an entry is switched to it
+local KIND_DEFAULTS = {
+	[0] = {base = 0xe8e4dc, color2 = 0x404040, scale = 200, roughness = 800,
+			specular = 100},
+	{base = 0xb07a48, color2 = 0x404040, scale = 300, roughness = 600,
+			specular = 250},
+	{base = 0x9a968e, color2 = 0x5a5650, scale = 400, roughness = 500,
+			specular = 300},
+	{base = 0xeadfc8, color2 = 0x8a6a4a, scale = 150, roughness = 900,
+			specular = 50},
+	{base = 0xffffff, color2 = 0x404040, scale = 200, roughness = 500,
+			specular = 0},
+	{base = 0xa8c8e0, color2 = 0x404040, scale = 200, roughness = 50,
+			specular = 800},
+	{base = 0xb8bcc0, color2 = 0x404040, scale = 200, roughness = 300,
+			specular = 700},
+	{base = 0xf0f0ec, color2 = 0x9a9890, scale = 200, roughness = 200,
+			specular = 500},
+	{base = 0x6a7a8a, color2 = 0x404040, scale = 3, roughness = 1000,
+			specular = 20},
+	{base = 0xe4ddd0, color2 = 0x404040, scale = 200, roughness = 900,
+			specular = 60},
+	-- Paneling: scale is a board's width
+	{base = 0xd8b07a, color2 = 0x404040, scale = 120, roughness = 600,
+			specular = 250},
+}
+-- A type as its preview shows it: its defaults over every other field's
+local function kind_preview(k)
+	local p = {color = 0xffffff, finish = 0, opacity = 500, reflect = 0,
+		seed = 0, axis = 0, stagger = 0, grout = 3, temperature = 2700,
+		brightness = 500, speckle = 300, angle = 0, contrast = 1000, kind = k}
+	for f, v in pairs(KIND_DEFAULTS[k]) do
+		p[f] = v
+	end
+	return p
+end
+
 local palette_rows = {}
 local palette_key = nil
 -- Grows with every new palette texture, whose rows the meshes point at
@@ -455,7 +498,8 @@ local function palette_texture()
 	end
 	palette_key = key
 	palette_rows = {}
-	local n = #entries + 2
+	-- The two rows of nothing, a preview's for each type, then the entries
+	local n = #entries + 2 + #MATERIAL_KINDS + 1
 	local image = magic.Image:new()
 	assert(image:SetSize(8, n, 4), "Image:SetSize")
 	local function put(x, y, rgb, a)
@@ -476,10 +520,7 @@ local function palette_texture()
 	put(2, 1, 0x404040, 0.3)
 	px(3, 1, 0.1, 0.8, 0.5, 0)
 	px(4, 1, 0.5, 0, 0, 0)
-	for i, e in ipairs(entries) do
-		local p = e.ints
-		local y = i + 1
-		palette_rows[e.id] = y
+	local function put_row(y, p)
 		local base = p.kind == 4 and kelvin_rgb(p.temperature) or p.base
 		put(0, y, base, p.kind * 20 / 255)
 		put(1, y, p.color, p.finish * 32 / 255)
@@ -500,6 +541,13 @@ local function palette_texture()
 		-- Wood's grain contrast and paneling's angle
 		px(5, y, p.angle / 180, p.contrast / 3000, 0, 0)
 	end
+	for k = 0, #MATERIAL_KINDS do
+		put_row(2 + k, kind_preview(k))
+	end
+	for i, e in ipairs(entries) do
+		palette_rows[e.id] = i + 2 + #MATERIAL_KINDS
+		put_row(i + 2 + #MATERIAL_KINDS, e.ints)
+	end
 	local texture = magic.Texture2D:new()
 	-- One level: a smaller one would average the rows' knobs together
 	texture:SetNumLevels(1)
@@ -507,11 +555,55 @@ local function palette_texture()
 	texture.filterMode = magic.FILTER_NEAREST
 	M.kept[#M.kept + 1] = texture
 	M.kept[#M.kept + 1] = image
-	for _, m in ipairs({lit_material, glass_material}) do
+	for _, m in ipairs({lit_material, glass_material, preview_material}) do
 		m:SetTexture(magic.TU_DIFFUSE, texture)
 		m:SetShaderParameter("PaletteRows", n)
 	end
 	palette_gen = palette_gen + 1
+end
+
+-- The types' previews ([FP_TYPES]): a quad of each, a metre square, side
+-- by side in a scene of their own, drawn once into a texture PREVIEW_PX
+-- high and PREVIEW_PX a type wide. The quads point at the preview rows of
+-- the palette texture, so they are the shader's own look and follow it.
+local PREVIEW_PX = 64
+local function kind_previews()
+	if M.previews then
+		return M.previews.texture
+	end
+	local scene = magic.Scene.new()
+	scene:CreateComponent("Octree")
+	local zone = scene:CreateChild("zone"):CreateComponent("Zone")
+	zone.boundingBox = magic.BoundingBox(-100, 100)
+	zone.ambientColor = magic.Color(0.45, 0.45, 0.47)
+	local light_node = scene:CreateChild("light")
+	light_node.direction = magic.Vector3(0.3, -0.5, 1)
+	local light = light_node:CreateComponent("Light")
+	light.lightType = magic.LIGHT_DIRECTIONAL
+	light.color = magic.Color(0.8, 0.78, 0.74)
+	local count = #MATERIAL_KINDS + 1
+	local g = scene:CreateChild("quads"):CreateComponent("CustomGeometry")
+	g:SetNumGeometries(1)
+	g:BeginGeometry(0, magic.TRIANGLE_LIST)
+	local n = magic.Vector3(0, 0, -1)
+	for k = 0, count - 1 do
+		local x0, x1 = k * 1.0, k * 1.0 + 1.0
+		local function V(x, y) return magic.Vector3(x, y, 0) end
+		tri(g, V(x0, 0), V(x1, 0), V(x1, 1), n, 2 + k)
+		tri(g, V(x0, 0), V(x1, 1), V(x0, 1), n, 2 + k)
+	end
+	g:Commit()
+	g:SetMaterial(0, preview_material)
+	local cam_node = scene:CreateChild("camera")
+	local camera = cam_node:CreateComponent("Camera")
+	camera.orthographic = true
+	camera.orthoSize = 1.0
+	cam_node.position = magic.Vector3(count / 2, 0.5, -5)
+	local texture = magic.render_scene_to_texture(scene, cam_node,
+			PREVIEW_PX * count, PREVIEW_PX)
+	-- Kept: the scene goes when nothing holds it
+	M.previews = {scene = scene, texture = texture}
+	return texture
 end
 
 -- The walls with their ends looked up, their outlines, the rooms with
@@ -3037,8 +3129,6 @@ end
 
 local build_palette, picker_win, close_picker
 do
-	local MATERIAL_KINDS = {[0] = "Drywall", "Wood", "Stone", "Wallpaper", "Lamp",
-		"Glass", "Metal", "Tile", "Fabric", "Plaster", "Paneling"}
 	local FINISHES = {[0] = "Over its colour", "White undercoat", "Stain"}
 	local AXES = {[0] = "Grain along X", "Grain along Y", "Grain along Z"}
 	-- Which knobs each type has, beyond the colours and the finish
@@ -3054,32 +3144,6 @@ do
 		{"scale"},
 		{"roughness", "specular", "scale", "seed", "speckle"},
 		{"roughness", "specular", "reflect", "scale", "seed", "angle", "contrast"},
-	}
-	-- What a type looks like when an entry is switched to it
-	local KIND_DEFAULTS = {
-		[0] = {base = 0xe8e4dc, color2 = 0x404040, scale = 200, roughness = 800,
-				specular = 100},
-		{base = 0xb07a48, color2 = 0x404040, scale = 300, roughness = 600,
-				specular = 250},
-		{base = 0x9a968e, color2 = 0x5a5650, scale = 400, roughness = 500,
-				specular = 300},
-		{base = 0xeadfc8, color2 = 0x8a6a4a, scale = 150, roughness = 900,
-				specular = 50},
-		{base = 0xffffff, color2 = 0x404040, scale = 200, roughness = 500,
-				specular = 0},
-		{base = 0xa8c8e0, color2 = 0x404040, scale = 200, roughness = 50,
-				specular = 800},
-		{base = 0xb8bcc0, color2 = 0x404040, scale = 200, roughness = 300,
-				specular = 700},
-		{base = 0xf0f0ec, color2 = 0x9a9890, scale = 200, roughness = 200,
-				specular = 500},
-		{base = 0x6a7a8a, color2 = 0x404040, scale = 3, roughness = 1000,
-				specular = 20},
-		{base = 0xe4ddd0, color2 = 0x404040, scale = 200, roughness = 900,
-				specular = 60},
-		-- Paneling: scale is a board's width
-		{base = 0xd8b07a, color2 = 0x404040, scale = 120, roughness = 600,
-				specular = 250},
 	}
 	local KNOB_LABELS = {roughness = "Roughness", specular = "Specular",
 		reflect = "Reflective", scale = "Scale mm", seed = "Seed",
@@ -3226,13 +3290,35 @@ build_palette = function()
 		panel.field(palette_win, "Name", e.strs.name, function(t)
 			set(nil, {name = t})
 		end, 120)
-		panel.button(palette_win, "Type: " .. MATERIAL_KINDS[p.kind], function()
-			-- A new type starts from its own look
-			local k = (p.kind + 1) % (#MATERIAL_KINDS + 1)
-			local d = KIND_DEFAULTS[k]
-			set({kind = k, base = d.base, color2 = d.color2, scale = d.scale,
-					roughness = d.roughness, specular = d.specular})
-		end)
+		-- The types as a grid of their previews, opened under the button
+		-- ([FP_TYPES]); Esc or the button again closes it
+		panel.button(palette_win, "Type: " .. MATERIAL_KINDS[p.kind] ..
+				(S.type_open and "  ^" or "  v"), function()
+			S.type_open = not S.type_open
+			refresh_panels()
+		end, S.type_open)
+		if S.type_open then
+			local tex = kind_previews()
+			local r
+			for k = 0, #MATERIAL_KINDS do
+				if k % 4 == 0 then
+					r = panel.row(palette_win)
+				end
+				panel.preview_button(r, tex, magic.IntRect(k * PREVIEW_PX, 0,
+						(k + 1) * PREVIEW_PX, PREVIEW_PX), MATERIAL_KINDS[k],
+						function()
+					S.type_open = false
+					if k ~= p.kind then
+						-- A new type starts from its own look
+						local d = KIND_DEFAULTS[k]
+						set({kind = k, base = d.base, color2 = d.color2,
+								scale = d.scale, roughness = d.roughness,
+								specular = d.specular})
+					end
+					refresh_panels()
+				end, k == p.kind)
+			end
+		end
 		local function colour(label, name)
 			local _, r = panel.field(palette_win, label,
 					string.format("%06x", p[name]), function(t)
@@ -4281,6 +4367,9 @@ do
 				close_pause()
 			elseif S.picker then
 				close_picker()
+			elseif S.type_open then
+				S.type_open = false
+				refresh_panels()
 			elseif S.captured then
 				S.crosshair = false
 				update_capture()
