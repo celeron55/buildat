@@ -505,8 +505,9 @@ M.safe = {
 -- Kept so that `-m launch_menu` still starts something: the launch menu
 -- itself is extensions/__menu, which is what the client boots by default.
 -- Required here rather than at the top, because that one requires this one.
-function M.boot()
-	require("buildat/extension/__menu").boot()
+-- action: -a's kind/name/id, which the grid runs once it is drawn
+function M.boot(action)
+	require("buildat/extension/__menu").boot(action)
 end
 
 -- The vertical-menu version of the launch menu, which is what the `buildat`
