@@ -104,6 +104,8 @@ local S = {
 	-- "node"), and the one the panel shows
 	sel = {},
 	primary = nil,
+	-- The face each wall in it was selected by: "left", "right" or "core"
+	sel_face = {},
 	nodes = {},     -- the node tool's selection: id -> true
 	dirty = true,
 	-- Real ids of this session's placeholders, as batch results give them
@@ -2398,23 +2400,40 @@ do
 	end
 
 	-- The palette entry picked, on everything selected
-	apply_material = function()
+	-- both: a wall's two faces; else only the face it was selected by, and
+	-- a wall with none (selected by a box) is left alone
+	apply_material = function(both)
 		local mat = default_material()
 		local ops = {}
+		local faceless = 0
 		for id, kind in pairs(S.sel) do
 			local e = doc.ents[id]
 			if e and kind == "instance" then
 				ops[#ops + 1] = {op = "set", ent = {id = e.ints.def,
 						ints = {mat = mat}}}
 			elseif e and kind == "wall" then
-				ops[#ops + 1] = {op = "set", ent = {id = id,
-						ints = {mat_left = mat, mat_right = mat}}}
+				local face = S.sel_face[id]
+				local ints = both == true and {mat_left = mat, mat_right = mat} or
+						face == "left" and {mat_left = mat} or
+						face == "right" and {mat_right = mat} or
+						face == "core" and {mat_core = mat} or nil
+				if ints then
+					ops[#ops + 1] = {op = "set", ent = {id = id, ints = ints}}
+				else
+					faceless = faceless + 1
+				end
 			elseif e and kind == "room" then
 				ops[#ops + 1] = {op = "set", ent = {id = id,
 						ints = {mat_floor = mat}}}
 			end
 		end
-		send(ops)
+		if faceless > 0 then
+			doc.notice(faceless .. " walls were selected by a box, not by a face: "
+					.. "click a wall on the face to paint")
+		end
+		if #ops > 0 then
+			send(ops)
+		end
 	end
 
 end
@@ -2759,8 +2778,19 @@ local function build_props()
 				"Stands on the floor", function()
 			set(sel.id, {ints = {hang = 1 - w.hang}})
 		end)
-		panel.button(props, "Apply the palette entry (both faces)",
-				apply_material)
+		local face = S.sel_face[sel.id]
+		local face_mat = face == "left" and w.mat_left or face == "right" and
+				w.mat_right or face == "core" and w.mat_core or nil
+		panel.label(props, face and ("Selected by its " .. (face == "core" and
+				"top" or face .. " face") .. ", #" .. tostring(face_mat)) or
+				"Click the wall on a face to pick it")
+		if face then
+			panel.button(props, "The palette entry on that face (double click)",
+					function() apply_material() end)
+		end
+		panel.button(props, "The palette entry on both faces", function()
+			apply_material(true)
+		end)
 		panel.button(props, "Delete (Del)", delete_selected)
 	elseif sel and sel.type == "image" then
 		local i = sel.ints
@@ -3231,7 +3261,7 @@ local function press_target()
 			return {kind = "node", id = n}
 		elseif s then
 			return {kind = (s.kind == "wall" or s.kind == "image") and s.kind or
-					"room", id = s.id}
+					"room", id = s.id, side = s.side}
 		end
 	elseif S.tool == "node" then
 		local n = x and nearest_node(x, z, snap_radius())
@@ -3300,6 +3330,7 @@ local function start_drag()
 			S.sel = {}
 		end
 		S.sel[t.id] = t.kind
+		S.sel_face[t.id] = t.side
 	end
 	S.primary = t.id
 	if t.kind == "node" and sel_count() == 1 then
@@ -3446,6 +3477,7 @@ local function end_drag()
 			for id, w in pairs(wall_data) do
 				if inside(w.ax, w.az) and inside(w.bx, w.bz) then
 					S.sel[id] = "wall"
+					S.sel_face[id] = nil
 					S.primary = id
 				end
 			end
@@ -3545,6 +3577,7 @@ local function click()
 				S.sel[t.id] = nil
 			else
 				S.sel[t.id] = t.kind
+				S.sel_face[t.id] = t.side
 				S.primary = t.id
 			end
 		end
@@ -4475,7 +4508,9 @@ do
 					g.left = "keep " .. name .. " selected" ..
 							(edit and "; drag: move the selection" or "")
 				else
-					g.left = "select " .. name .. (edit and "; drag: move it" or "")
+					g.left = "select " .. name .. (t.kind == "wall" and t.side and
+							(" by its " .. (t.side == "core" and "top" or
+							t.side .. " face")) or "") .. (edit and "; drag: move it" or "")
 				end
 				if t.kind == "node" and edit then
 					g.left = g.left .. " (onto another node: merge them)"
@@ -4831,6 +4866,11 @@ local function draw_overlay()
 			local y0, y1 = wall_span(doc.ents[id].ints)
 			outline(outlines[id].pts, accent, S.view ~= "2d" and
 					{W(y0) + 0.004, W(y1) + 0.004} or nil)
+			-- The face it was selected by, brighter
+			if S.sel_face[id] then
+				draw_guide({hl = {{kind = "face", id = id, side = S.sel_face[id],
+						col = magic.Color(1.0, 0.95, 0.4)}}}, P, line, outline)
+			end
 			local w = wall_data[id]
 			world_label((w.ax + w.bx) / 2, 0, (w.az + w.bz) / 2,
 					mm_text(geom.len(w.bx - w.ax, w.bz - w.az)))
