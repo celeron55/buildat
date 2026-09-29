@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "lua_bindings/util.h"
 #include "core/log.h"
+#include "core/version.h"
 #include "interface/fs.h"
 #include <c55/os.h>
 #define MODULE "lua_bindings"
@@ -87,10 +88,19 @@ static int l_get_time_us(lua_State *L)
 	return 1;
 }
 
+// version() -> version, git hash ([VERSION]); sandbox-safe, so a launcher
+// file or a game can show what it runs on
+static int l_version(lua_State *L)
+{
+	lua_pushstring(L, BUILDAT_VERSION);
+	lua_pushstring(L, BUILDAT_GIT_HASH);
+	return 2;
+}
+
 void init_misc(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
 	DEF_BUILDAT_FUNC(print_log);
@@ -98,6 +108,7 @@ void init_misc(lua_State *L)
 	DEF_BUILDAT_FUNC(pcall)
 	DEF_BUILDAT_FUNC(fatal_error)
 	DEF_BUILDAT_FUNC(get_time_us)
+	DEF_BUILDAT_FUNC(version)
 }
 
 } // namespace lua_bindingss
