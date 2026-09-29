@@ -43,6 +43,8 @@ local TOOL_KEYS = {select = "V", node = "N", wall = "B", room = "R",
 -- What a definition is, as main.cpp's DefKind
 local KIND = {box = 0, voxel = 1, opening = 2, door = 3, window = 4,
 	switch = 5}
+-- A door's or a window's parts, by the field each keeps its material in
+local DOOR_PARTS = {mat = true, mat_leaf = true, mat_glass = true}
 local KIND_NAMES = {[0] = "Box", [2] = "Opening", [3] = "Door",
 	[4] = "Window", [5] = "Switch"}
 -- I goes round what the door/window tool puts in
@@ -2453,8 +2455,10 @@ do
 		for id, kind in pairs(S.sel) do
 			local e = doc.ents[id]
 			if e and kind == "instance" then
+				-- A door's or a window's part, when one was picked in its panel
+				local part = S.sel_face[id]
 				ops[#ops + 1] = {op = "set", ent = {id = e.ints.def,
-						ints = {mat = mat}}}
+						ints = {[DOOR_PARTS[part] and part or "mat"] = mat}}}
 			elseif e and kind == "wall" then
 				local face = S.sel_face[id]
 				local ints = both == true and {mat_left = mat, mat_right = mat} or
@@ -2685,13 +2689,22 @@ local function build_props()
 							math.floor(v * 10 + 0.5)))}})
 				end
 			end)
-			panel.label(props, "The palette entry on:")
+			-- The part a palette double click goes on, the palette showing
+			-- what it has now; a part with none of its own shows the frame's
+			panel.label(props, "Selected part (the palette's double click):")
 			local r2 = panel.row(props)
+			local part = DOOR_PARTS[S.sel_face[sel.id]] and S.sel_face[sel.id] or
+					"mat"
 			for _, slot in ipairs({{"Frame", "mat"}, {"Leaf", "mat_leaf"},
 					{"Glass", "mat_glass"}}) do
 				panel.button(r2, slot[1], function()
-					set(i.def, {ints = {[slot[2]] = default_material()}})
-				end)
+					S.sel_face[sel.id] = slot[2]
+					local m = p[slot[2]] ~= 0 and p[slot[2]] or p.mat
+					if doc.ents[m] then
+						S.material = m
+					end
+					refresh_panels()
+				end, part == slot[2])
 			end
 		end
 		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
@@ -3439,7 +3452,8 @@ do
 			return t.side == "ceiling" and e.ints.mat_ceiling or e.ints.mat_floor
 		elseif t.kind == "instance" then
 			local def = doc.ents[e.ints.def].ints
-			return def.kind ~= KIND.voxel and def.mat or nil
+			local m = DOOR_PARTS[t.side] and def[t.side] or 0
+			return def.kind ~= KIND.voxel and (m ~= 0 and m or def.mat) or nil
 		end
 		return nil
 	end
