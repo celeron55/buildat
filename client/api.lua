@@ -736,22 +736,27 @@ buildat.safe.local_server_running = __buildat_local_server_running
 
 -- The one preference a game may set ([BOX_FIXES] b): the player's ear.
 -- Official's pause menu has mute and volume, and that is where a player
--- reaches for them. get_sound() -> mute, volume; set_sound(mute, volume)
--- -> true, or false and why. The rest of the preferences stay the
+-- reaches for them. get_sound() -> mute, db; set_sound(mute, db) ->
+-- true, or false and why. The rest of the preferences stay the
 -- launcher's.
+--
+-- **The volume is decibels below full** ([VOLUME_LAW], user
+-- 2026-09-28): 0 is full, -3, -6 and so on are the steps a setting
+-- offers, and -33 or less is off. A game shows it in those units; the
+-- gain is made from it in the client, in the one place it is applied.
 buildat.safe.get_sound = function()
 	return __buildat_get_preference("sound_mute") == true,
-			__buildat_get_preference("sound_volume") or 1
+			__buildat_get_preference("sound_volume_db") or 0
 end
-buildat.safe.set_sound = function(mute, volume)
-	if type(mute) ~= "boolean" or type(volume) ~= "number" then
-		return false, "set_sound(mute, volume): a boolean and a number"
+buildat.safe.set_sound = function(mute, db)
+	if type(mute) ~= "boolean" or type(db) ~= "number" then
+		return false, "set_sound(mute, db): a boolean and decibels"
 	end
 	local ok, err = __buildat_set_preference("sound_mute", mute)
 	if not ok then
 		return false, err
 	end
-	return __buildat_set_preference("sound_volume", tostring(volume))
+	return __buildat_set_preference("sound_volume_db", tostring(db))
 end
 -- The bytes of a file the server served, or nil ([BLOCKED_MODULE]): a
 -- module that is busy answers no packet, and client_file is a module of its

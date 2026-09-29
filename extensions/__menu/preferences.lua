@@ -78,11 +78,18 @@ local PREFERENCES = {
 		values = {1, 2, 4, 8, 16},
 		show = function(v) return v == 1 and "off" or (v.."x") end,
 	},
+	-- **Decibels below full, not a fader position** ([VOLUME_LAW], user
+	-- 2026-09-28: "80% vs 100% linear is basically no change at all").
+	-- Eleven levels 3 dB apart and silence under them, so every step is
+	-- heard as the same step; the gain is made from this in the client,
+	-- where it is applied.
 	{
-		name = "sound_volume",
+		name = "sound_volume_db",
 		label = "Sound volume",
-		values = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0},
-		show = percent,
+		values = {-33, -30, -27, -24, -21, -18, -15, -12, -9, -6, -3, 0},
+		show = function(v)
+			return v <= -33 and "off" or (v .. " dB")
+		end,
 	},
 	{
 		name = "sound_mute",

@@ -96,7 +96,7 @@ int main(int argc, char *argv[])
 			"  -w [WxH]             Windowed at this size; not remembered\n"
 			"  -o [k=v,...]         Set preferences; not remembered. Keys:\n"
 			"                       render_scale, vsync, max_fps,\n"
-			"                       multisampling, sound_volume, sound_mute\n"
+			"                       multisampling, sound_volume_db, sound_mute\n"
 			"  -c [commands]        Run command sequence and exit\n"
 			"                       One command per line. @file reads a file,\n"
 			"                       - reads standard input as it arrives.\n"

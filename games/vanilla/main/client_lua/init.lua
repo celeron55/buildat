@@ -3582,9 +3582,11 @@ local function pause_spec()
 	-- click cycles mute and a volume ladder; buildat.set_sound is the one
 	-- preference a game may write ("Client preferences" in
 	-- doc/client_api.txt).
-	local mute, volume = buildat.get_sound()
+	-- **In decibels, as every volume in the tree is** ([VOLUME_LAW])
+	local mute, db = buildat.get_sound()
 	local sound = mute and "Sound: muted" or
-			string.format("Sound: on %d%%", math.floor(volume * 100 + 0.5))
+			(db <= -33 and "Sound: off" or
+			string.format("Sound: %d dB", db))
 	return "size[6,5.8]" ..
 			"label[0.2,0.2;Paused]" ..
 			"button_exit[0.4,1.0;5.2,0.8;continue;Continue playing]" ..
@@ -3593,16 +3595,18 @@ local function pause_spec()
 			"button[0.4,4.3;5.2,0.8;leave;Leave the game]"
 end
 
--- Each click: muted -> 100 %, then down the ladder, then muted again.
+-- Each click: muted -> 0 dB, then down the ladder in 6 dB steps, then
+-- muted again. Six clicks round rather than eleven, a pause menu being
+-- somewhere a player passes through; the settings screen has every step.
 -- On keys rather than a local of its own: this file is at Lua's 200.
 keys.cycle_sound = function()
-	local mute, volume = buildat.get_sound()
+	local mute, db = buildat.get_sound()
 	if mute then
-		buildat.set_sound(false, 1.0)
-	elseif volume > 0.15 then
-		buildat.set_sound(false, math.floor((volume - 0.2) * 10 + 0.5) / 10)
+		buildat.set_sound(false, 0)
+	elseif db > -30 then
+		buildat.set_sound(false, math.max(-30, db - 6))
 	else
-		buildat.set_sound(true, 1.0)
+		buildat.set_sound(true, 0)
 	end
 end
 

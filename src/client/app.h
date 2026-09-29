@@ -27,6 +27,11 @@ extern "C" {
 
 namespace app
 {
+	// One step under the quietest level a setting offers, and what
+	// "off" is: the settings move on 3 dB steps from 0 to -30
+	// ([VOLUME_LAW])
+	static const float SOUND_OFF_DB = -33.0f;
+
 	struct AppStartupError: public Exception {
 		ss_ msg;
 		AppStartupError(const ss_ &msg): Exception(msg){}
@@ -64,7 +69,13 @@ namespace app
 		GraphicsOptions graphics;
 		// Beside the graphics rather than inside it: the file is the user's
 		// preferences, GraphicsOptions is a display mode
-		float sound_volume = 1.0f;
+		// **A volume is decibels below full, not a fader position**
+		// ([VOLUME_LAW], user 2026-09-28: 80% against 100% on a linear
+		// scale is no change at all, and most of the slider does almost
+		// nothing). 0 dB is full, the steps are 3 dB down to -30, and
+		// SOUND_OFF_DB is the step under that, which is silence. The
+		// gain is made from it where it is applied and nowhere else.
+		float sound_volume_db = 0.0f;
 		bool sound_mute = false;
 		// The client's own log level and the one it hands its local server
 		// as -l ([LOG_LEVEL_PREF]): a box report without a shell. 3 is

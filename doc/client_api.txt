@@ -76,10 +76,13 @@ buildat.get_env(name) -> string, or nil when unset or not BUILDAT_-prefixed
   ablation); the prefix is the fence, so a server's Lua cannot read the
   user's environment.
 
-buildat.get_sound() -> mute, volume; buildat.set_sound(mute, volume) -> ok, err
+buildat.get_sound() -> mute, db; buildat.set_sound(mute, db) -> ok, err
 - The one preference a game may write: the player's ear, from a pause menu.
   Through the preferences' own parser and file, so the launcher's page and
   the game's row agree.
+- The volume is decibels below full ([VOLUME_LAW]): 0 is full, the settings
+  step 3 dB down to -30, and -33 or less is off. The gain is made from it in
+  the client, in the one place it is applied.
 
 buildat.take_screenshot() -> file name, or nil and why not
 - Into <user>/screenshots, named by the date and time. The caller says when
@@ -602,7 +605,7 @@ overridden for one run by -o (see README.md).
     vsync           present synchronised to the display
     max_fps         frame limiter; 0 is unlimited
     multisampling   MSAA samples: 1, 2, 4, 8 or 16
-    sound_volume    a gain every sound is multiplied by
+    sound_volume_db decibels below full, 0 to -30 and off under it
     sound_mute      that gain forced to zero
 
 render_scale is cooperative: it reaches a game's viewports only through

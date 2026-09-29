@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "app.h"
+#include <cmath>
 #include "core/log.h"
 #include "core/json.h"
 #include "client/config.h"
@@ -257,9 +258,9 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 		} else if(key == "multisampling"){
 			in_range = (v == 1 || v == 2 || v == 4 || v == 8 || v == 16);
 			opt->graphics.multisampling = (int)v;
-		} else if(key == "sound_volume"){
-			in_range = (v >= 0.0 && v <= 1.0);
-			opt->sound_volume = (float)v;
+		} else if(key == "sound_volume_db"){
+			in_range = (v >= app::SOUND_OFF_DB && v <= 0.0);
+			opt->sound_volume_db = (float)v;
 		} else if(key == "sound_mute"){
 			opt->sound_mute = (v != 0);
 		} else if(key == "log_level"){
@@ -451,7 +452,14 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jvs = o.get("vsync");
 	const json::Value &jmf = o.get("max_fps");
 	const json::Value &jms = o.get("multisampling");
-	const json::Value &jsv = o.get("sound_volume");
+	const json::Value &jsv = o.get("sound_volume_db");
+	// **The old key, read once** ([VOLUME_LAW]): a `sound_volume` in a
+	// file from before is a fader position, 0 to 1. It is turned into
+	// the decibels that sound the same and written back on the next
+	// save, so nobody's volume jumps on an upgrade. The two cannot be
+	// told apart by their values -- 0 is silence on one scale and full
+	// on the other -- which is why the key is a new one.
+	const json::Value &jsv_old = o.get("sound_volume");
 	const json::Value &jsm = o.get("sound_mute");
 	const json::Value &jui = o.get("launch_ui");
 	const json::Value &jll = o.get("log_level");
@@ -471,8 +479,28 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 		items += ss_()+(items.empty()?"":",")+"max_fps="+itos(jmf.as_integer());
 	if(jms.is_integer())
 		items += ss_()+(items.empty()?"":",")+"multisampling="+itos(jms.as_integer());
-	if(jsv.is_number())
-		items += ss_()+(items.empty()?"":",")+"sound_volume="+ftos(jsv.as_number());
+	if(jsv.is_number()){
+		items += ss_()+(items.empty()?"":",")+
+				"sound_volume_db="+ftos(jsv.as_number());
+	} else if(jsv_old.is_number()){
+		const double v = jsv_old.as_number();
+		double db = app::SOUND_OFF_DB;
+		if(v > 0.0){
+			db = 20.0 * log10(v);
+			// Onto the step grid the settings now move on, to the
+			// nearest step: the point is that nobody's volume jumps,
+			// and flooring 0.5 -- which is -6.02 dB -- to -9 is a jump
+			// down of a third of the gain
+			db = std::floor(db / 3.0 + 0.5) * 3.0;
+			if(db > 0.0)
+				db = 0.0;
+			if(db < app::SOUND_OFF_DB)
+				db = app::SOUND_OFF_DB;
+		}
+		log_i(MODULE, "sound_volume %s in the settings is a fader position"
+				" and is now %s dB", cs(ftos(v)), cs(ftos(db)));
+		items += ss_()+(items.empty()?"":",")+"sound_volume_db="+ftos(db);
+	}
 	if(jsm.is_boolean())
 		items += ss_()+(items.empty()?"":",")+"sound_mute="+(jsm.as_boolean()?"1":"0");
 	if(jui.is_string())
@@ -525,7 +553,7 @@ static void save_preferences(const app::Options &opt)
 	o.set("vsync", opt.graphics.vsync);
 	o.set("max_fps", opt.graphics.max_fps);
 	o.set("multisampling", opt.graphics.multisampling);
-	o.set("sound_volume", opt.sound_volume);
+	o.set("sound_volume_db", opt.sound_volume_db);
 	o.set("sound_mute", opt.sound_mute);
 	o.set("log_level", opt.log_level);
 	o.set("server_log_level", opt.server_log_level);
@@ -1096,12 +1124,12 @@ struct CApp: public App, public magic::Application
 			m_options.graphics.maximized = false;
 		}
 		log_v(MODULE, "preferences: render_scale=%s vsync=%i max_fps=%i"
-				" multisampling=%i sound_volume=%s sound_mute=%i",
+				" multisampling=%i sound_volume_db=%s sound_mute=%i",
 				cs(ftos(m_options.graphics.render_scale)),
 				m_options.graphics.vsync ? 1 : 0,
 				m_options.graphics.max_fps,
 				m_options.graphics.multisampling,
-				cs(ftos(m_options.sound_volume)),
+				cs(ftos(m_options.sound_volume_db)),
 				m_options.sound_mute ? 1 : 0);
 		m_restore_maximized = m_options.graphics.maximized;
 		log_v(MODULE, "window size: %ix%i maximized=%i fullscreen=%i",
@@ -2494,7 +2522,7 @@ struct CApp: public App, public magic::Application
 	{
 		const GraphicsOptions &g = m_options.graphics;
 		const GraphicsOptions &b = before.graphics;
-		if(m_options.sound_volume != before.sound_volume ||
+		if(m_options.sound_volume_db != before.sound_volume_db ||
 				m_options.sound_mute != before.sound_mute)
 			apply_sound_preferences();
 		// The client's own level at once; the server's on its next start.
@@ -2522,8 +2550,14 @@ struct CApp: public App, public magic::Application
 		magic::Audio *audio = GetSubsystem<magic::Audio>();
 		if(!audio)
 			return;
-		audio->SetMasterGain("Master",
-				m_options.sound_mute ? 0.0f : m_options.sound_volume);
+		// **The one place a decibel becomes a gain** ([VOLUME_LAW]).
+		// Everything above this line -- the settings screen, the pause
+		// menu, the room's desk -- carries decibels and nothing else.
+		const float db = m_options.sound_volume_db;
+		const float gain = (m_options.sound_mute ||
+				db <= app::SOUND_OFF_DB + 0.01f) ? 0.0f :
+				(float)pow(10.0, db / 20.0);
+		audio->SetMasterGain("Master", gain);
 	}
 
 	// With the cursor hidden, Urho3D on Linux hands the focus back only on
@@ -3094,7 +3128,7 @@ struct CApp: public App, public magic::Application
 	static const char** preference_names()
 	{
 		static const char *names[8] = {"render_scale", "vsync", "max_fps",
-				"multisampling", "sound_volume", "sound_mute", "launch_ui",
+				"multisampling", "sound_volume_db", "sound_mute", "launch_ui",
 				nullptr};
 		return names;
 	}
@@ -3132,8 +3166,8 @@ struct CApp: public App, public magic::Application
 			lua_pushinteger(L, o.graphics.max_fps);
 		else if(name == "multisampling")
 			lua_pushinteger(L, o.graphics.multisampling);
-		else if(name == "sound_volume")
-			lua_pushnumber(L, o.sound_volume);
+		else if(name == "sound_volume_db")
+			lua_pushnumber(L, o.sound_volume_db);
 		else if(name == "sound_mute")
 			lua_pushboolean(L, o.sound_mute);
 		else if(name == "launch_ui")

@@ -5120,7 +5120,9 @@ local STEPS = {
 	render_scale = {0.5, 2.0, 0.1, "%.2f"},
 	max_fps = {0, 480, 10, "%d"},
 	multisampling = {1, 16, 1, "%d"},
-	sound_volume = {0.0, 1.0, 0.05, "%.2f"},
+	-- Decibels below full on the settings' own 3 dB steps ([VOLUME_LAW]);
+	-- -33 is off, which is the step under the quietest level
+	sound_volume_db = {-33, 0, 3, "%d"},
 }
 settings = {}
 for _, name in ipairs(api.list_preferences()) do
@@ -5148,6 +5150,9 @@ local function setting_value(sg)
 	if sg.pref then
 		local v = api.get_preference(sg.pref)
 		if type(v) == "boolean" then return v and "on" or "off" end
+		if sg.pref == "sound_volume_db" then
+			return v <= -33 and "off" or (string.format("%d", v) .. " dB")
+		end
 		local st = STEPS[sg.pref]
 		return st and string.format(st[4], v) or tostring(v)
 	end
