@@ -2974,7 +2974,7 @@ local function build_props()
 	if props then
 		props:Remove()
 	end
-	props = panel.window(magic.HA_RIGHT, magic.VA_TOP, -8, 8)
+	props = panel.window(magic.HA_RIGHT, magic.VA_TOP, -8, 50)
 	local sel = S.primary and S.sel[S.primary] and doc.ents[S.primary]
 	-- **An edit of what is selected leaves a placing tool for Select**, the
 	-- selection kept (user): the next click in the view is then not one
