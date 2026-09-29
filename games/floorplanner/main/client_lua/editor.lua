@@ -3240,992 +3240,1026 @@ local function over_ui()
 			S.my / s)
 end
 
---
--- Input
---
--- What a left press would take, for the select and node tools: the same
--- pick for the click and for what the guide shows. In the select tool an
--- object under the cursor wins, then a node near it, then the wall,
--- picture or room it is on.
-local function press_target()
-	local x, z = cursor_floor()
-	if S.tool == "select" then
-		local s = pick_surface()
-		if s and s.kind == "instance" then
-			return {kind = "instance", id = s.id}
-		end
-		local n = x and nearest_node(x, z, snap_radius())
-		if n then
-			return {kind = "node", id = n}
-		elseif s then
-			return {kind = (s.kind == "wall" or s.kind == "image") and s.kind or
-					"room", id = s.id, side = s.side}
-		end
-	elseif S.tool == "node" then
-		local n = x and nearest_node(x, z, snap_radius())
-		if n then
-			return {kind = "node", id = n}
-		end
-	end
-	return nil
-end
-
-local function begin_press(button)
-	if button ~= magic.MOUSEB_LEFT or over_ui() then
-		return
-	end
-	local x, z = cursor_floor()
-	S.press = {mx = S.mx, my = S.my, x = x, z = z}
-	if S.calib then
-		return
-	end
-	if S.linking then
-		local s = pick_surface()
-		if s and s.kind == "instance" then
-			S.press.target = {kind = "instance", id = s.id}
-		end
-		return
-	end
-	S.press.target = press_target()
-end
-
-local function start_drag()
-	local t = S.press.target
-	if S.tool == "box" then
-		local x, z = snapped_point(nil)
-		if x then
-			S.drag = {kind = "footprint", x0 = x, z0 = z, x1 = x, z1 = z}
-		end
-		return
-	end
-	if (S.tool == "node" or S.tool == "select") and not t then
-		-- A box over what to select
-		S.drag = {kind = "box"}
-		return
-	end
-	if not t or not doc.can("edit") then
-		return
-	end
-	if S.tool == "node" then
-		if S.nodes[t.id] and next(S.nodes, next(S.nodes)) then
-			local nodes = {}
-			for id in pairs(S.nodes) do
-				nodes[id] = true
-			end
-			S.drag = {kind = "move", inst = {}, nodes = nodes, dx = 0, dz = 0,
-					moved = true}
-		else
-			S.nodes = {[t.id] = true}
-			S.drag = {kind = "node", id = t.id, moved = true,
-					x = doc.ents[t.id].ints.x, z = doc.ents[t.id].ints.z}
-		end
-		return
-	end
-	-- The select tool: what is pressed joins the selection unless it is in
-	-- it already, and the drag moves all of it; a lone node drags alone
-	if not S.sel[t.id] then
-		if not S.shift then
-			S.sel = {}
-		end
-		S.sel[t.id] = t.kind
-		S.sel_face[t.id] = t.side
-	end
-	S.primary = t.id
-	if t.kind == "node" and sel_count() == 1 then
-		S.drag = {kind = "node", id = t.id, moved = true,
-				x = doc.ents[t.id].ints.x, z = doc.ents[t.id].ints.z}
-	else
-		local inst, nodes = moved_by(S.sel)
-		S.drag = {kind = "move", inst = inst, nodes = nodes, dx = 0, dz = 0,
-				moved = true}
-	end
-end
-
--- What a drag moves, as entity ids: what it locks and previews
-local function drag_ids(d)
-	local ids = {}
-	if d.kind == "node" then
-		ids[1] = d.id
-	elseif d.kind == "move" then
-		for id in pairs(d.nodes) do
-			ids[#ids + 1] = id
-		end
-		for id in pairs(d.inst) do
-			ids[#ids + 1] = id
-		end
-	end
-	return ids
-end
-
--- The dragged things where the drag has them, for the others
-local function drag_preview(d)
-	local ents = {}
-	if d.kind == "node" then
-		ents[1] = {id = d.id, ints = {x = d.x, z = d.z}}
-	elseif d.kind == "move" then
-		for id in pairs(d.nodes) do
-			local x, z = node_pos(id)
-			ents[#ents + 1] = {id = id, ints = {x = x, z = z}}
-		end
-		for id in pairs(d.inst) do
-			local it = inst_data[id]
-			if it and it.hosted then
-				ents[#ents + 1] = {id = id, ints = {along = math.floor(
-						it.along + 0.5)}}
-			elseif it then
-				ents[#ents + 1] = {id = id, ints = {x = math.floor(it.x + 0.5),
-						z = math.floor(it.z + 0.5)}}
-			end
-		end
-	end
-	return ents
-end
-
--- A drag of what can be moved takes its lock; refused, it is dropped
-local function lock_drag()
-	local d = S.drag
-	if not d or (d.kind ~= "node" and d.kind ~= "move") then
-		return
-	end
-	doc.lock(drag_ids(d), function(why)
-		if S.drag == d then
-			S.drag = nil
-			S.press = nil
-			S.dirty = true
-		end
-		doc.notice(why)
-	end)
-end
-
-local PREVIEW_SECONDS = 0.05
-local preview_timer = 0
-
-local function update_drag()
-	local d = S.drag
-	if d.kind == "box" then
-		return
-	end
-	if d.kind == "footprint" then
-		local x, z = snapped_point(nil)
-		if x then
-			d.x1, d.z1 = x, z
-		end
-		return
-	end
-	if d.kind == "node" then
-		local x, z, ref = snapped_point(nil, {[d.id] = true})
-		if x then
-			d.x, d.z, d.onto = x, z, ref.node
-		end
-	else
+local press_target, plan_facing, plan_aligned, stream_drag, use, use_target, walk
+do
+	--
+	-- Input
+	--
+	-- What a left press would take, for the select and node tools: the same
+	-- pick for the click and for what the guide shows. In the select tool an
+	-- object under the cursor wins, then a node near it, then the wall,
+	-- picture or room it is on.
+	press_target = function()
 		local x, z = cursor_floor()
-		if x and S.press.x then
-			local g = grid_step()
-			d.dx = geom.snap(x - S.press.x, g)
-			d.dz = geom.snap(z - S.press.z, g)
+		if S.tool == "select" then
+			local s = pick_surface()
+			if s and s.kind == "instance" then
+				return {kind = "instance", id = s.id}
+			end
+			local n = x and nearest_node(x, z, snap_radius())
+			if n then
+				return {kind = "node", id = n}
+			elseif s then
+				return {kind = (s.kind == "wall" or s.kind == "image") and s.kind or
+						"room", id = s.id, side = s.side}
+			end
+		elseif S.tool == "node" then
+			local n = x and nearest_node(x, z, snap_radius())
+			if n then
+				return {kind = "node", id = n}
+			end
+		end
+		return nil
+	end
+
+	-- The material of what a click selected: a wall's by the face it was
+	-- selected by, a room's floor, an object's own; nil for what has none of
+	-- one (a voxel volume, a node, a picture)
+	local function material_of(t)
+		local e = t and doc.ents[t.id]
+		if not e then
+			return nil
+		end
+		if t.kind == "wall" then
+			local w = e.ints
+			local m = t.side == "left" and w.mat_left or t.side == "right" and
+					w.mat_right or (w.mat_core ~= 0 and w.mat_core or w.mat_left)
+			return m
+		elseif t.kind == "room" then
+			return e.ints.mat_floor
+		elseif t.kind == "instance" then
+			local def = doc.ents[e.ints.def].ints
+			return def.kind ~= KIND.voxel and def.mat or nil
+		end
+		return nil
+	end
+
+	-- A selection shows its material in the palette, to see and edit it
+	local function palette_follows(t)
+		local m = material_of(t)
+		if m and m ~= 0 and doc.ents[m] then
+			S.material = m
 		end
 	end
-	S.dirty = true
-end
 
--- The screen point of a plan point, in pixels
-local function to_screen(x, z)
-	local cam = S.view == "2d" and cam2d or cam3d
-	local p = cam:WorldToScreenPoint(magic.Vector3(W(x), 0, W(z)))
-	local w, h = screen_size()
-	return p.x * w, p.y * h
-end
-
--- simplified: a drag is sent when it is released, so others see it land
--- rather than move; streaming it goes with the drag locks in [FP_UNDO]
-local function end_drag()
-	local d = S.drag
-	S.drag = nil
-	S.dirty = true
-	if d.kind == "node" or d.kind == "move" then
-		-- After the drag's batch, which the server takes first
-		M.after_drag = true
+	local function begin_press(button)
+		if button ~= magic.MOUSEB_LEFT or over_ui() then
+			return
+		end
+		local x, z = cursor_floor()
+		S.press = {mx = S.mx, my = S.my, x = x, z = z}
+		if S.calib then
+			return
+		end
+		if S.linking then
+			local s = pick_surface()
+			if s and s.kind == "instance" then
+				S.press.target = {kind = "instance", id = s.id}
+			end
+			return
+		end
+		S.press.target = press_target()
 	end
-	if d.kind == "box" then
-		local x0, x1 = math.min(S.press.mx, S.mx), math.max(S.press.mx, S.mx)
-		local y0, y1 = math.min(S.press.my, S.my), math.max(S.press.my, S.my)
-		local function inside(x, z)
-			local sx, sy = to_screen(x, z)
-			return sx >= x0 and sx <= x1 and sy >= y0 and sy <= y1
+
+	local function start_drag()
+		local t = S.press.target
+		if S.tool == "box" then
+			local x, z = snapped_point(nil)
+			if x then
+				S.drag = {kind = "footprint", x0 = x, z0 = z, x1 = x, z1 = z}
+			end
+			return
+		end
+		if (S.tool == "node" or S.tool == "select") and not t then
+			-- A box over what to select
+			S.drag = {kind = "box"}
+			return
+		end
+		if not t or not doc.can("edit") then
+			return
 		end
 		if S.tool == "node" then
-			if not S.shift then
-				S.nodes = {}
-			end
-			for _, n in ipairs(doc.of_type("node")) do
-				if inside(n.ints.x, n.ints.z) then
-					S.nodes[n.id] = true
+			if S.nodes[t.id] and next(S.nodes, next(S.nodes)) then
+				local nodes = {}
+				for id in pairs(S.nodes) do
+					nodes[id] = true
 				end
+				S.drag = {kind = "move", inst = {}, nodes = nodes, dx = 0, dz = 0,
+						moved = true}
+			else
+				S.nodes = {[t.id] = true}
+				S.drag = {kind = "node", id = t.id, moved = true,
+						x = doc.ents[t.id].ints.x, z = doc.ents[t.id].ints.z}
 			end
-		else
+			return
+		end
+		-- The select tool: what is pressed joins the selection unless it is in
+		-- it already, and the drag moves all of it; a lone node drags alone
+		if not S.sel[t.id] then
 			if not S.shift then
 				S.sel = {}
 			end
-			for id, it in pairs(inst_data) do
-				if inside(it.x, it.z) then
-					S.sel[id] = "instance"
-					S.primary = id
-				end
-			end
-			for id, w in pairs(wall_data) do
-				if inside(w.ax, w.az) and inside(w.bx, w.bz) then
-					S.sel[id] = "wall"
-					S.sel_face[id] = nil
-					S.primary = id
-				end
-			end
-			for id, r in pairs(room_data) do
-				local all = true
-				for _, p in ipairs(r.pts) do
-					all = all and inside(p[1], p[2])
-				end
-				if all then
-					S.sel[id] = "room"
-					S.primary = id
-				end
-			end
+			S.sel[t.id] = t.kind
+			S.sel_face[t.id] = t.side
+			palette_follows(t)
 		end
-		refresh_panels()
-	elseif d.kind == "footprint" then
-		local w, dd = math.abs(d.x1 - d.x0), math.abs(d.z1 - d.z0)
-		if w >= 1 and dd >= 1 and doc.can("edit") then
-			add_box((d.x0 + d.x1) / 2, (d.z0 + d.z1) / 2, w, dd)
-		end
-	elseif d.kind == "node" then
-		if d.onto then
-			send(merge_ops(d.id, d.onto))
-			S.nodes = {}
+		S.primary = t.id
+		if t.kind == "node" and sel_count() == 1 then
+			S.drag = {kind = "node", id = t.id, moved = true,
+					x = doc.ents[t.id].ints.x, z = doc.ents[t.id].ints.z}
 		else
-			send({{op = "set", ent = {id = d.id, ints = {x = d.x, z = d.z}}}})
+			local inst, nodes = moved_by(S.sel)
+			S.drag = {kind = "move", inst = inst, nodes = nodes, dx = 0, dz = 0,
+					moved = true}
 		end
-	elseif d.dx ~= 0 or d.dz ~= 0 then
-		local ops = {}
-		for n in pairs(d.nodes) do
-			local p = doc.ents[n] and doc.ents[n].ints
-			if p then
-				ops[#ops + 1] = {op = "set", ent = {id = n,
-						ints = {x = p.x + d.dx, z = p.z + d.dz}}}
-			end
-		end
-		for id in pairs(d.inst) do
-			local i = doc.ents[id] and doc.ents[id].ints
-			local it = inst_data[id]
-			if i and it and it.hosted then
-				ops[#ops + 1] = {op = "set", ent = {id = id,
-						ints = {along = math.floor(it.along + 0.5)}}}
-			elseif i then
-				ops[#ops + 1] = {op = "set", ent = {id = id,
-						ints = {x = i.x + d.dx, z = i.z + d.dz}}}
-			end
-		end
-		send(ops)
 	end
-end
 
-local function click()
-	local t = S.press.target
-	if S.calib and not S.calib.measured then
-		local x, z = cursor_floor()
-		if x then
-			local c = S.calib
-			c.pts[#c.pts + 1] = {x, z}
-			if #c.pts == 2 then
-				c.measured = geom.len(c.pts[2][1] - c.pts[1][1],
-						c.pts[2][2] - c.pts[1][2])
-				refresh_panels()
+	-- What a drag moves, as entity ids: what it locks and previews
+	local function drag_ids(d)
+		local ids = {}
+		if d.kind == "node" then
+			ids[1] = d.id
+		elseif d.kind == "move" then
+			for id in pairs(d.nodes) do
+				ids[#ids + 1] = id
+			end
+			for id in pairs(d.inst) do
+				ids[#ids + 1] = id
 			end
 		end
-		return
+		return ids
 	end
-	if S.linking then
-		-- A lamp clicked joins the switch's lamps, or leaves them
-		local sw = doc.ents[S.linking]
-		if t and t.kind == "instance" and sw and is_lamp(t.id) then
-			local l, found = {}, false
-			for _, v in ipairs(sw.lists.lamps) do
-				if v == t.id then
-					found = true
-				else
-					l[#l + 1] = v
+
+	-- The dragged things where the drag has them, for the others
+	local function drag_preview(d)
+		local ents = {}
+		if d.kind == "node" then
+			ents[1] = {id = d.id, ints = {x = d.x, z = d.z}}
+		elseif d.kind == "move" then
+			for id in pairs(d.nodes) do
+				local x, z = node_pos(id)
+				ents[#ents + 1] = {id = id, ints = {x = x, z = z}}
+			end
+			for id in pairs(d.inst) do
+				local it = inst_data[id]
+				if it and it.hosted then
+					ents[#ents + 1] = {id = id, ints = {along = math.floor(
+							it.along + 0.5)}}
+				elseif it then
+					ents[#ents + 1] = {id = id, ints = {x = math.floor(it.x + 0.5),
+							z = math.floor(it.z + 0.5)}}
 				end
 			end
-			if not found then
-				l[#l + 1] = t.id
-			end
-			send({{op = "set", ent = {id = S.linking, lists = {lamps = l}}}})
-			doc.notice(found and "Unlinked" or "Linked")
-		elseif t then
-			doc.notice("That is not a lamp: a lamp is a box or voxels of a " ..
-					"lamp material")
 		end
-		return
+		return ents
 	end
-	if S.tool == "select" then
-		if not S.shift then
-			S.sel = {}
-			S.primary = nil
+
+	-- A drag of what can be moved takes its lock; refused, it is dropped
+	local function lock_drag()
+		local d = S.drag
+		if not d or (d.kind ~= "node" and d.kind ~= "move") then
+			return
 		end
-		if t then
-			if S.sel[t.id] and S.shift then
-				S.sel[t.id] = nil
-			else
-				S.sel[t.id] = t.kind
-				S.sel_face[t.id] = t.side
-				S.primary = t.id
+		doc.lock(drag_ids(d), function(why)
+			if S.drag == d then
+				S.drag = nil
+				S.press = nil
+				S.dirty = true
+			end
+			doc.notice(why)
+		end)
+	end
+
+	local PREVIEW_SECONDS = 0.05
+	local preview_timer = 0
+
+	local function update_drag()
+		local d = S.drag
+		if d.kind == "box" then
+			return
+		end
+		if d.kind == "footprint" then
+			local x, z = snapped_point(nil)
+			if x then
+				d.x1, d.z1 = x, z
+			end
+			return
+		end
+		if d.kind == "node" then
+			local x, z, ref = snapped_point(nil, {[d.id] = true})
+			if x then
+				d.x, d.z, d.onto = x, z, ref.node
+			end
+		else
+			local x, z = cursor_floor()
+			if x and S.press.x then
+				local g = grid_step()
+				d.dx = geom.snap(x - S.press.x, g)
+				d.dz = geom.snap(z - S.press.z, g)
 			end
 		end
-		refresh_panels()
-	elseif S.tool == "node" then
-		if not S.shift then
-			S.nodes = {}
+		S.dirty = true
+	end
+
+	-- The screen point of a plan point, in pixels
+	local function to_screen(x, z)
+		local cam = S.view == "2d" and cam2d or cam3d
+		local p = cam:WorldToScreenPoint(magic.Vector3(W(x), 0, W(z)))
+		local w, h = screen_size()
+		return p.x * w, p.y * h
+	end
+
+	-- simplified: a drag is sent when it is released, so others see it land
+	-- rather than move; streaming it goes with the drag locks in [FP_UNDO]
+	local function end_drag()
+		local d = S.drag
+		S.drag = nil
+		S.dirty = true
+		if d.kind == "node" or d.kind == "move" then
+			-- After the drag's batch, which the server takes first
+			M.after_drag = true
 		end
-		if t and t.kind == "node" then
-			S.nodes[t.id] = not S.nodes[t.id] or nil
+		if d.kind == "box" then
+			local x0, x1 = math.min(S.press.mx, S.mx), math.max(S.press.mx, S.mx)
+			local y0, y1 = math.min(S.press.my, S.my), math.max(S.press.my, S.my)
+			local function inside(x, z)
+				local sx, sy = to_screen(x, z)
+				return sx >= x0 and sx <= x1 and sy >= y0 and sy <= y1
+			end
+			if S.tool == "node" then
+				if not S.shift then
+					S.nodes = {}
+				end
+				for _, n in ipairs(doc.of_type("node")) do
+					if inside(n.ints.x, n.ints.z) then
+						S.nodes[n.id] = true
+					end
+				end
+			else
+				if not S.shift then
+					S.sel = {}
+				end
+				for id, it in pairs(inst_data) do
+					if inside(it.x, it.z) then
+						S.sel[id] = "instance"
+						S.primary = id
+					end
+				end
+				for id, w in pairs(wall_data) do
+					if inside(w.ax, w.az) and inside(w.bx, w.bz) then
+						S.sel[id] = "wall"
+						S.sel_face[id] = nil
+						S.primary = id
+					end
+				end
+				for id, r in pairs(room_data) do
+					local all = true
+					for _, p in ipairs(r.pts) do
+						all = all and inside(p[1], p[2])
+					end
+					if all then
+						S.sel[id] = "room"
+						S.primary = id
+					end
+				end
+			end
+			refresh_panels()
+		elseif d.kind == "footprint" then
+			local w, dd = math.abs(d.x1 - d.x0), math.abs(d.z1 - d.z0)
+			if w >= 1 and dd >= 1 and doc.can("edit") then
+				add_box((d.x0 + d.x1) / 2, (d.z0 + d.z1) / 2, w, dd)
+			end
+		elseif d.kind == "node" then
+			if d.onto then
+				send(merge_ops(d.id, d.onto))
+				S.nodes = {}
+			else
+				send({{op = "set", ent = {id = d.id, ints = {x = d.x, z = d.z}}}})
+			end
+		elseif d.dx ~= 0 or d.dz ~= 0 then
+			local ops = {}
+			for n in pairs(d.nodes) do
+				local p = doc.ents[n] and doc.ents[n].ints
+				if p then
+					ops[#ops + 1] = {op = "set", ent = {id = n,
+							ints = {x = p.x + d.dx, z = p.z + d.dz}}}
+				end
+			end
+			for id in pairs(d.inst) do
+				local i = doc.ents[id] and doc.ents[id].ints
+				local it = inst_data[id]
+				if i and it and it.hosted then
+					ops[#ops + 1] = {op = "set", ent = {id = id,
+							ints = {along = math.floor(it.along + 0.5)}}}
+				elseif i then
+					ops[#ops + 1] = {op = "set", ent = {id = id,
+							ints = {x = i.x + d.dx, z = i.z + d.dz}}}
+				end
+			end
+			send(ops)
 		end
-		refresh_panels()
-	elseif S.tool == "box" then
-		if not doc.can("edit") then
-			doc.notice("Viewing only: no edit privilege")
+	end
+
+	local function click()
+		local t = S.press.target
+		if S.calib and not S.calib.measured then
+			local x, z = cursor_floor()
+			if x then
+				local c = S.calib
+				c.pts[#c.pts + 1] = {x, z}
+				if #c.pts == 2 then
+					c.measured = geom.len(c.pts[2][1] - c.pts[1][1],
+							c.pts[2][2] - c.pts[1][2])
+					refresh_panels()
+				end
+			end
 			return
 		end
-		local x, z = snapped_point(nil)
-		if x then
-			add_box(x, z, S.box.w, S.box.d)
+		if S.linking then
+			-- A lamp clicked joins the switch's lamps, or leaves them
+			local sw = doc.ents[S.linking]
+			if t and t.kind == "instance" and sw and is_lamp(t.id) then
+				local l, found = {}, false
+				for _, v in ipairs(sw.lists.lamps) do
+					if v == t.id then
+						found = true
+					else
+						l[#l + 1] = v
+					end
+				end
+				if not found then
+					l[#l + 1] = t.id
+				end
+				send({{op = "set", ent = {id = S.linking, lists = {lamps = l}}}})
+				doc.notice(found and "Unlinked" or "Linked")
+			elseif t then
+				doc.notice("That is not a lamp: a lamp is a box or voxels of a " ..
+						"lamp material")
+			end
+			return
 		end
-	elseif S.tool == "hosted" then
+		if S.tool == "select" then
+			if not S.shift then
+				S.sel = {}
+				S.primary = nil
+			end
+			if t then
+				if S.sel[t.id] and S.shift then
+					S.sel[t.id] = nil
+				else
+					S.sel[t.id] = t.kind
+					S.sel_face[t.id] = t.side
+					S.primary = t.id
+					palette_follows(t)
+				end
+			end
+			refresh_panels()
+		elseif S.tool == "node" then
+			if not S.shift then
+				S.nodes = {}
+			end
+			if t and t.kind == "node" then
+				S.nodes[t.id] = not S.nodes[t.id] or nil
+			end
+			refresh_panels()
+		elseif S.tool == "box" then
+			if not doc.can("edit") then
+				doc.notice("Viewing only: no edit privilege")
+				return
+			end
+			local x, z = snapped_point(nil)
+			if x then
+				add_box(x, z, S.box.w, S.box.d)
+			end
+		elseif S.tool == "hosted" then
+			local s = pick_surface()
+			if s and s.kind == "wall" and doc.can("edit") then
+				add_hosted(s.id, s.x, s.z, s.side)
+			end
+		elseif S.tool == "voxel" then
+			voxel_edit(S.ctrl)
+		elseif S.tool == "wall" or S.tool == "room" then
+			if not doc.can("edit") then
+				doc.notice("Viewing only: no edit privilege")
+				return
+			end
+			local from = S.tool == "wall" and S.draw or
+					(S.corners and S.corners[#S.corners])
+			local x, z, ref = snapped_point(from)
+			if not x then
+				return
+			end
+			S.typed = ""
+			if S.tool == "room" then
+				S.corners = S.corners or {}
+				local first = S.corners[1]
+				if first and #S.corners >= 3 and
+						geom.len(x - first.x, z - first.z) <= snap_radius() then
+					add_room(S.corners)
+					S.corners = nil
+				else
+					S.corners[#S.corners + 1] = {x = x, z = z, ref = ref}
+				end
+			elseif S.draw then
+				if S.draw.ref and S.draw.ref.node and not real_id(S.draw.ref.node) then
+					-- The last segment's node has not come back yet
+					return
+				end
+				add_wall(S.draw, x, z, ref)
+			else
+				S.draw = {x = x, z = z, ref = ref}
+			end
+		elseif S.tool == "paint" then
+			local s = pick_surface()
+			if s and doc.can("edit") then
+				if s.kind == "instance" and inst_data[s.id].voxel then
+					-- One voxel takes the material
+					local hit = voxel_ray(s.id)
+					if hit then
+						doc.set_voxels(doc.ents[s.id].ints.def, {[doc.voxel_key(hit[1],
+								hit[2], hit[3])] = default_material()})
+					end
+					return
+				elseif s.kind == "instance" then
+					send({{op = "set", ent = {id = doc.ents[s.id].ints.def,
+							ints = {mat = default_material()}}}})
+					return
+				end
+				local f = s.kind == "floor" and "mat_floor" or
+						s.kind == "ceiling" and "mat_ceiling" or
+						s.side == "left" and "mat_left" or
+						s.side == "right" and "mat_right" or "mat_core"
+				send({{op = "set", ent = {id = s.id,
+						ints = {[f] = default_material()}}}})
+			end
+		end
+	end
+
+	-- The use key's, defined with it below
+
+	-- Whether the 3D camera looks as the plan does: straight down, and north
+	-- up within 10 degrees -- the plan has no other way up
+	plan_facing = function()
+		return S.pitch >= 89.5
+	end
+
+	plan_aligned = function()
+		local off = (S.yaw % 360 + 180) % 360 - 180
+		return plan_facing() and math.abs(off) <= 10
+	end
+
+	-- What a right or middle drag in 3D turns about or pans by: the point the
+	-- pointer is on, in world metres -- the thing under it, or where its ray
+	-- meets the floor -- or nil when it points at the sky
+	local function camera_pivot()
+		local o, d = cursor_ray()
 		local s = pick_surface()
-		if s and s.kind == "wall" and doc.can("edit") then
-			add_hosted(s.id, s.x, s.z, s.side)
+		if s and s.t then
+			return {x = o.x + d.x * s.t, y = o.y + d.y * s.t, z = o.z + d.z * s.t}
 		end
-	elseif S.tool == "voxel" then
-		voxel_edit(S.ctrl)
-	elseif S.tool == "wall" or S.tool == "room" then
-		if not doc.can("edit") then
-			doc.notice("Viewing only: no edit privilege")
+		local x, z, t = ray_at_height(0)
+		if x then
+			return {x = o.x + d.x * t, y = 0, z = o.z + d.z * t}
+		end
+		return nil
+	end
+
+	function M.mouse_down(button)
+		if S.paused then
 			return
 		end
-		local from = S.tool == "wall" and S.draw or
-				(S.corners and S.corners[#S.corners])
-		local x, z, ref = snapped_point(from)
+		if crosshair_view() and not S.captured and not over_ui() and
+				button == magic.MOUSEB_LEFT then
+			-- A click on the view goes up into the crosshair
+			S.crosshair = true
+			update_capture()
+			S.swallow_up = true
+			return
+		end
+		if S.captured and S.tool ~= "voxel" and button == magic.MOUSEB_RIGHT then
+			-- Walking: the right button is Luanti's use, a door or a switch
+			use()
+			return
+		end
+		if S.captured and S.tool == "voxel" then
+			-- Luanti's: the left button digs, the right one places
+			if button == magic.MOUSEB_LEFT then
+				voxel_edit(true)
+			elseif button == magic.MOUSEB_RIGHT then
+				voxel_edit(false)
+			end
+			return
+		end
+		if button == magic.MOUSEB_RIGHT then
+			if S.draw or S.corners then
+				S.draw = nil
+				S.corners = nil
+				S.typed = ""
+				return
+			end
+			if S.view == "2d" and not over_ui() then
+				-- Into 3D as if it had been 3D all along ([FP_ORBIT_2D]): the
+				-- camera straight above the plan's middle, looking down, as
+				-- high as makes its floor the plan's; then this is an orbit
+				local d = S.span / (2 * math.tan(math.rad(cam3d.fov) / 2))
+				S.pos = {x = W(S.cx), y = W(d), z = W(S.cz)}
+				S.yaw, S.pitch = 0, 90
+				set_view("3d")
+			end
+			if S.view == "3d" then
+				-- Orbiting what is pointed
+				local p = camera_pivot()
+				if p then
+					S.orbit = p
+					magic.input:SetMouseMode(magic.MM_RELATIVE)
+				end
+			end
+			return
+		end
+		if button == magic.MOUSEB_MIDDLE then
+			-- The plan and the 3D camera pan
+			if S.view == "2d" then
+				S.panning = true
+			elseif not S.captured then
+				local p = camera_pivot()
+				S.pan3d = {dist = p and geom.len(geom.len(p.x - S.pos.x,
+						p.y - S.pos.y), p.z - S.pos.z) or 5}
+				magic.input:SetMouseMode(magic.MM_RELATIVE)
+			end
+			return
+		end
+		begin_press(button)
+	end
+
+	function M.mouse_up(button)
+		if S.swallow_up then
+			S.swallow_up = false
+			return
+		end
+		if S.captured and (S.tool == "voxel" or button ~= magic.MOUSEB_LEFT) then
+			return
+		end
+		if (button == magic.MOUSEB_RIGHT and S.orbit) or
+				(button == magic.MOUSEB_MIDDLE and S.pan3d) then
+			local orbited = S.orbit
+			S.orbit, S.pan3d = nil, nil
+			magic.input:SetMouseMode(magic.MM_ABSOLUTE)
+			if orbited and plan_aligned() then
+				-- Back to the plan, where its floor is the view's: the middle
+				-- where the view's middle meets the floor, the span what the
+				-- camera's height sees
+				local o = S.pos
+				local f = {geom.rot(0, 0, 1, S.pitch, S.yaw, 0)}
+				local t = f[2] < -1e-6 and -o.y / f[2] or 0
+				S.cx = (o.x + f[1] * t) * 1000
+				S.cz = (o.z + f[3] * t) * 1000
+				S.span = math.max(500, math.min(200000, math.abs(o.y) * 1000 * 2 *
+						math.tan(math.rad(cam3d.fov) / 2)))
+				set_view("2d")
+			end
+			return
+		end
+		if button == magic.MOUSEB_RIGHT or (button == magic.MOUSEB_MIDDLE and
+				S.looking) then
+			S.panning = false
+			if S.looking then
+				S.looking = false
+				magic.input:SetMouseMode(magic.MM_ABSOLUTE)
+			end
+			return
+		end
+		if button == magic.MOUSEB_MIDDLE then
+			S.panning = false
+			return
+		end
+		if button ~= magic.MOUSEB_LEFT or not S.press then
+			return
+		end
+		if S.drag then
+			end_drag()
+		else
+			click()
+		end
+		if M.after_drag then
+			M.after_drag = false
+			doc.unlock()
+		end
+		S.press = nil
+	end
+
+	function M.mouse_move(x, y, dx, dy)
+		if S.orbit then
+			-- The camera goes round the point with the view: its offset from
+			-- the point is held in the camera's own frame, so the point stays
+			-- where it was on the screen
+			local p = S.orbit
+			local ox, oy, oz = geom.unrot(S.pos.x - p.x, S.pos.y - p.y,
+					S.pos.z - p.z, S.pitch, S.yaw, 0)
+			S.yaw = S.yaw + dx * 0.3
+			S.pitch = math.max(-90, math.min(90, S.pitch + dy * 0.3))
+			local wx, wy, wz = geom.rot(ox, oy, oz, S.pitch, S.yaw, 0)
+			S.pos = {x = p.x + wx, y = p.y + wy, z = p.z + wz}
+			return
+		end
+		if S.pan3d then
+			-- Across the view, as far as the pointed point moves under the
+			-- pointer
+			local _, h = screen_size()
+			local k = S.pan3d.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
+			local rx, ry, rz = geom.rot(1, 0, 0, S.pitch, S.yaw, 0)
+			local ux, uy, uz = geom.rot(0, 1, 0, S.pitch, S.yaw, 0)
+			S.pos = {x = S.pos.x - (rx * dx - ux * dy) * k,
+					y = S.pos.y - (ry * dx - uy * dy) * k,
+					z = S.pos.z - (rz * dx - uz * dy) * k}
+			return
+		end
+		if S.looking then
+			S.yaw = S.yaw + dx * 0.15
+			S.pitch = math.max(-89, math.min(89, S.pitch + dy * 0.15))
+			return
+		end
+		S.mx, S.my = x, y
+		if S.panning and S.view == "2d" then
+			local k = mm_per_px()
+			S.cx = S.cx - dx * k
+			S.cz = S.cz + dy * k
+		end
+		if S.press and not S.drag and geom.len(x - S.press.mx, y - S.press.my) >
+				DRAG_PX then
+			start_drag()
+			lock_drag()
+		end
+		if S.drag then
+			update_drag()
+		end
+	end
+
+	-- The previews go out at most every PREVIEW_SECONDS
+	stream_drag = function(dt)
+		preview_timer = preview_timer + dt
+		local d = S.drag
+		if d and d.moved and (d.kind == "node" or d.kind == "move") and
+				preview_timer >= PREVIEW_SECONDS then
+			preview_timer = 0
+			doc.preview(drag_preview(d))
+		end
+	end
+
+	function M.mouse_wheel(wheel)
+		if over_ui() then
+			return
+		end
+		if S.view == "2d" then
+			-- Zoom about the cursor: the point under it stays under it
+			local x0, z0 = cursor_floor()
+			S.span = math.max(500, math.min(200000, S.span * (wheel > 0 and 0.8
+					or 1.25)))
+			local x1, z1 = cursor_floor()
+			S.cx, S.cz = S.cx + x0 - x1, S.cz + z0 - z1
+		else
+			local yaw, pitch = math.rad(S.yaw), math.rad(S.pitch)
+			local k = wheel > 0 and 1 or -1
+			S.pos = {x = S.pos.x + math.sin(yaw) * math.cos(pitch) * k,
+					y = S.pos.y - math.sin(pitch) * k,
+					z = S.pos.z + math.cos(yaw) * math.cos(pitch) * k}
+		end
+	end
+
+	-- The next other user's view becomes this one's
+	local go_to_index = 0
+	local function go_to_next_user()
+		local peers = {}
+		for peer, o in pairs(doc.others) do
+			if o.p then
+				peers[#peers + 1] = peer
+			end
+		end
+		if #peers == 0 then
+			doc.notice("Nobody else is here")
+			return
+		end
+		table.sort(peers)
+		go_to_index = go_to_index % #peers + 1
+		local o = doc.others[peers[go_to_index]]
+		local p = o.p
+		if p.view >= 1 then
+			S.pos = {x = p.px / 1000, y = p.py / 1000, z = p.pz / 1000}
+			S.yaw, S.pitch = p.yaw / 1000, p.pitch / 1000
+			set_view("3d")
+		else
+			S.cx, S.cz, S.span = p.px, p.pz, math.max(500, p.py)
+			set_view("2d")
+		end
+		doc.notice("At " .. o.name .. "'s view")
+	end
+
+	-- A switch's lamps, all on or all off: on unless any of them is on
+	local function flip_switch(id)
+		local lamps = doc.ents[id].lists.lamps
+		if #lamps == 0 then
+			doc.notice("This switch has no lamps; link some to it")
+			return
+		end
+		local any = false
+		for _, l in ipairs(lamps) do
+			any = any or lamp_on(l)
+		end
+		if doc.can("edit") then
+			local ops = {}
+			for _, l in ipairs(lamps) do
+				S.local_on[l] = nil
+				ops[#ops + 1] = {op = "set", ent = {id = l, ints = {on = any and 0 or 1}}}
+			end
+			send(ops)
+		else
+			for _, l in ipairs(lamps) do
+				S.local_on[l] = not any
+			end
+			S.dirty = true
+		end
+	end
+
+	-- The use key: a door or window under the cursor opens or closes. For an
+	-- editor for everybody; a viewer opens it for themselves.
+	-- What the use key would work: a door, a window or a switch under the
+	-- cursor, or with nothing under it the switch selected. Returns its id and
+	-- kind, or nil.
+	use_target = function()
+		local s = pick_surface()
+		local id = s and s.kind == "instance" and s.id
+		local p = S.primary and doc.ents[S.primary]
+		if not id and p and p.type == "instance" and
+				doc.ents[p.ints.def].ints.kind == KIND.switch then
+			id = S.primary
+		end
+		local e = id and doc.ents[id]
+		if not e then
+			return nil
+		end
+		local kind = doc.ents[e.ints.def].ints.kind
+		if kind == KIND.switch or kind == KIND.door or kind == KIND.window then
+			return id, kind
+		end
+		return nil
+	end
+
+	use = function()
+		local id, kind = use_target()
+		if not id then
+			return
+		end
+		if kind == KIND.switch then
+			flip_switch(id)
+			return
+		end
+		local open = open_amount(id) > 0 and 0 or 1000
+		if doc.can("edit") then
+			S.local_open[id] = nil
+			send({{op = "set", ent = {id = id, ints = {open = open}}}})
+		else
+			S.local_open[id] = open
+			S.dirty = true
+		end
+	end
+
+	-- A length typed while drawing: Enter draws the segment that long, in the
+	-- direction the cursor gives
+	local function commit_typed()
+		local v = tonumber(S.typed)
+		S.typed = ""
+		local from = S.draw or (S.corners and S.corners[#S.corners])
+		if not v or v <= 0 or not from then
+			return
+		end
+		local x, z = snapped_point(from)
 		if not x then
 			return
 		end
-		S.typed = ""
-		if S.tool == "room" then
-			S.corners = S.corners or {}
-			local first = S.corners[1]
-			if first and #S.corners >= 3 and
-					geom.len(x - first.x, z - first.z) <= snap_radius() then
-				add_room(S.corners)
-				S.corners = nil
-			else
-				S.corners[#S.corners + 1] = {x = x, z = z, ref = ref}
-			end
-		elseif S.draw then
-			if S.draw.ref and S.draw.ref.node and not real_id(S.draw.ref.node) then
-				-- The last segment's node has not come back yet
-				return
-			end
-			add_wall(S.draw, x, z, ref)
+		local dx, dz = x - from.x, z - from.z
+		local l = geom.len(dx, dz)
+		if l == 0 then
+			return
+		end
+		x = math.floor(from.x + dx / l * v + 0.5)
+		z = math.floor(from.z + dz / l * v + 0.5)
+		if S.draw then
+			add_wall(S.draw, x, z, {})
 		else
-			S.draw = {x = x, z = z, ref = ref}
-		end
-	elseif S.tool == "paint" then
-		local s = pick_surface()
-		if s and doc.can("edit") then
-			if s.kind == "instance" and inst_data[s.id].voxel then
-				-- One voxel takes the material
-				local hit = voxel_ray(s.id)
-				if hit then
-					doc.set_voxels(doc.ents[s.id].ints.def, {[doc.voxel_key(hit[1],
-							hit[2], hit[3])] = default_material()})
-				end
-				return
-			elseif s.kind == "instance" then
-				send({{op = "set", ent = {id = doc.ents[s.id].ints.def,
-						ints = {mat = default_material()}}}})
-				return
-			end
-			local f = s.kind == "floor" and "mat_floor" or
-					s.kind == "ceiling" and "mat_ceiling" or
-					s.side == "left" and "mat_left" or
-					s.side == "right" and "mat_right" or "mat_core"
-			send({{op = "set", ent = {id = s.id,
-					ints = {[f] = default_material()}}}})
+			S.corners[#S.corners + 1] = {x = x, z = z, ref = {}}
 		end
 	end
-end
 
--- The use key's, defined with it below
-local use, use_target
-
--- Whether the 3D camera looks as the plan does: straight down, and north
--- up within 10 degrees -- the plan has no other way up
-local function plan_facing()
-	return S.pitch >= 89.5
-end
-
-local function plan_aligned()
-	local off = (S.yaw % 360 + 180) % 360 - 180
-	return plan_facing() and math.abs(off) <= 10
-end
-
--- What a right or middle drag in 3D turns about or pans by: the point the
--- pointer is on, in world metres -- the thing under it, or where its ray
--- meets the floor -- or nil when it points at the sky
-local function camera_pivot()
-	local o, d = cursor_ray()
-	local s = pick_surface()
-	if s and s.t then
-		return {x = o.x + d.x * s.t, y = o.y + d.y * s.t, z = o.z + d.z * s.t}
-	end
-	local x, z, t = ray_at_height(0)
-	if x then
-		return {x = o.x + d.x * t, y = 0, z = o.z + d.z * t}
-	end
-	return nil
-end
-
-function M.mouse_down(button)
-	if S.paused then
-		return
-	end
-	if crosshair_view() and not S.captured and not over_ui() and
-			button == magic.MOUSEB_LEFT then
-		-- A click on the view goes up into the crosshair
-		S.crosshair = true
-		update_capture()
-		S.swallow_up = true
-		return
-	end
-	if S.captured and S.tool ~= "voxel" and button == magic.MOUSEB_RIGHT then
-		-- Walking: the right button is Luanti's use, a door or a switch
-		use()
-		return
-	end
-	if S.captured and S.tool == "voxel" then
-		-- Luanti's: the left button digs, the right one places
-		if button == magic.MOUSEB_LEFT then
-			voxel_edit(true)
-		elseif button == magic.MOUSEB_RIGHT then
-			voxel_edit(false)
+	function M.key_down(key, event_data)
+		local qualifiers = event_data and event_data:GetInt("Qualifiers") or 0
+		local ctrl = qualifiers % 4 >= 2
+		-- Alt with anything is the window manager's: Alt+Tab switches windows,
+		-- not views
+		if qualifiers % 8 >= 4 then
+			return
 		end
-		return
-	end
-	if button == magic.MOUSEB_RIGHT then
 		if S.draw or S.corners then
-			S.draw = nil
-			S.corners = nil
-			S.typed = ""
-			return
-		end
-		if S.view == "2d" and not over_ui() then
-			-- Into 3D as if it had been 3D all along ([FP_ORBIT_2D]): the
-			-- camera straight above the plan's middle, looking down, as
-			-- high as makes its floor the plan's; then this is an orbit
-			local d = S.span / (2 * math.tan(math.rad(cam3d.fov) / 2))
-			S.pos = {x = W(S.cx), y = W(d), z = W(S.cz)}
-			S.yaw, S.pitch = 0, 90
-			set_view("3d")
-		end
-		if S.view == "3d" then
-			-- Orbiting what is pointed
-			local p = camera_pivot()
-			if p then
-				S.orbit = p
-				magic.input:SetMouseMode(magic.MM_RELATIVE)
-			end
-		end
-		return
-	end
-	if button == magic.MOUSEB_MIDDLE then
-		-- The plan and the 3D camera pan
-		if S.view == "2d" then
-			S.panning = true
-		elseif not S.captured then
-			local p = camera_pivot()
-			S.pan3d = {dist = p and geom.len(geom.len(p.x - S.pos.x,
-					p.y - S.pos.y), p.z - S.pos.z) or 5}
-			magic.input:SetMouseMode(magic.MM_RELATIVE)
-		end
-		return
-	end
-	begin_press(button)
-end
-
-function M.mouse_up(button)
-	if S.swallow_up then
-		S.swallow_up = false
-		return
-	end
-	if S.captured and (S.tool == "voxel" or button ~= magic.MOUSEB_LEFT) then
-		return
-	end
-	if (button == magic.MOUSEB_RIGHT and S.orbit) or
-			(button == magic.MOUSEB_MIDDLE and S.pan3d) then
-		local orbited = S.orbit
-		S.orbit, S.pan3d = nil, nil
-		magic.input:SetMouseMode(magic.MM_ABSOLUTE)
-		if orbited and plan_aligned() then
-			-- Back to the plan, where its floor is the view's: the middle
-			-- where the view's middle meets the floor, the span what the
-			-- camera's height sees
-			local o = S.pos
-			local f = {geom.rot(0, 0, 1, S.pitch, S.yaw, 0)}
-			local t = f[2] < -1e-6 and -o.y / f[2] or 0
-			S.cx = (o.x + f[1] * t) * 1000
-			S.cz = (o.z + f[3] * t) * 1000
-			S.span = math.max(500, math.min(200000, math.abs(o.y) * 1000 * 2 *
-					math.tan(math.rad(cam3d.fov) / 2)))
-			set_view("2d")
-		end
-		return
-	end
-	if button == magic.MOUSEB_RIGHT or (button == magic.MOUSEB_MIDDLE and
-			S.looking) then
-		S.panning = false
-		if S.looking then
-			S.looking = false
-			magic.input:SetMouseMode(magic.MM_ABSOLUTE)
-		end
-		return
-	end
-	if button == magic.MOUSEB_MIDDLE then
-		S.panning = false
-		return
-	end
-	if button ~= magic.MOUSEB_LEFT or not S.press then
-		return
-	end
-	if S.drag then
-		end_drag()
-	else
-		click()
-	end
-	if M.after_drag then
-		M.after_drag = false
-		doc.unlock()
-	end
-	S.press = nil
-end
-
-function M.mouse_move(x, y, dx, dy)
-	if S.orbit then
-		-- The camera goes round the point with the view: its offset from
-		-- the point is held in the camera's own frame, so the point stays
-		-- where it was on the screen
-		local p = S.orbit
-		local ox, oy, oz = geom.unrot(S.pos.x - p.x, S.pos.y - p.y,
-				S.pos.z - p.z, S.pitch, S.yaw, 0)
-		S.yaw = S.yaw + dx * 0.3
-		S.pitch = math.max(-90, math.min(90, S.pitch + dy * 0.3))
-		local wx, wy, wz = geom.rot(ox, oy, oz, S.pitch, S.yaw, 0)
-		S.pos = {x = p.x + wx, y = p.y + wy, z = p.z + wz}
-		return
-	end
-	if S.pan3d then
-		-- Across the view, as far as the pointed point moves under the
-		-- pointer
-		local _, h = screen_size()
-		local k = S.pan3d.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
-		local rx, ry, rz = geom.rot(1, 0, 0, S.pitch, S.yaw, 0)
-		local ux, uy, uz = geom.rot(0, 1, 0, S.pitch, S.yaw, 0)
-		S.pos = {x = S.pos.x - (rx * dx - ux * dy) * k,
-				y = S.pos.y - (ry * dx - uy * dy) * k,
-				z = S.pos.z - (rz * dx - uz * dy) * k}
-		return
-	end
-	if S.looking then
-		S.yaw = S.yaw + dx * 0.15
-		S.pitch = math.max(-89, math.min(89, S.pitch + dy * 0.15))
-		return
-	end
-	S.mx, S.my = x, y
-	if S.panning and S.view == "2d" then
-		local k = mm_per_px()
-		S.cx = S.cx - dx * k
-		S.cz = S.cz + dy * k
-	end
-	if S.press and not S.drag and geom.len(x - S.press.mx, y - S.press.my) >
-			DRAG_PX then
-		start_drag()
-		lock_drag()
-	end
-	if S.drag then
-		update_drag()
-	end
-end
-
--- The previews go out at most every PREVIEW_SECONDS
-local function stream_drag(dt)
-	preview_timer = preview_timer + dt
-	local d = S.drag
-	if d and d.moved and (d.kind == "node" or d.kind == "move") and
-			preview_timer >= PREVIEW_SECONDS then
-		preview_timer = 0
-		doc.preview(drag_preview(d))
-	end
-end
-
-function M.mouse_wheel(wheel)
-	if over_ui() then
-		return
-	end
-	if S.view == "2d" then
-		-- Zoom about the cursor: the point under it stays under it
-		local x0, z0 = cursor_floor()
-		S.span = math.max(500, math.min(200000, S.span * (wheel > 0 and 0.8
-				or 1.25)))
-		local x1, z1 = cursor_floor()
-		S.cx, S.cz = S.cx + x0 - x1, S.cz + z0 - z1
-	else
-		local yaw, pitch = math.rad(S.yaw), math.rad(S.pitch)
-		local k = wheel > 0 and 1 or -1
-		S.pos = {x = S.pos.x + math.sin(yaw) * math.cos(pitch) * k,
-				y = S.pos.y - math.sin(pitch) * k,
-				z = S.pos.z + math.cos(yaw) * math.cos(pitch) * k}
-	end
-end
-
--- The next other user's view becomes this one's
-local go_to_index = 0
-local function go_to_next_user()
-	local peers = {}
-	for peer, o in pairs(doc.others) do
-		if o.p then
-			peers[#peers + 1] = peer
-		end
-	end
-	if #peers == 0 then
-		doc.notice("Nobody else is here")
-		return
-	end
-	table.sort(peers)
-	go_to_index = go_to_index % #peers + 1
-	local o = doc.others[peers[go_to_index]]
-	local p = o.p
-	if p.view >= 1 then
-		S.pos = {x = p.px / 1000, y = p.py / 1000, z = p.pz / 1000}
-		S.yaw, S.pitch = p.yaw / 1000, p.pitch / 1000
-		set_view("3d")
-	else
-		S.cx, S.cz, S.span = p.px, p.pz, math.max(500, p.py)
-		set_view("2d")
-	end
-	doc.notice("At " .. o.name .. "'s view")
-end
-
--- A switch's lamps, all on or all off: on unless any of them is on
-local function flip_switch(id)
-	local lamps = doc.ents[id].lists.lamps
-	if #lamps == 0 then
-		doc.notice("This switch has no lamps; link some to it")
-		return
-	end
-	local any = false
-	for _, l in ipairs(lamps) do
-		any = any or lamp_on(l)
-	end
-	if doc.can("edit") then
-		local ops = {}
-		for _, l in ipairs(lamps) do
-			S.local_on[l] = nil
-			ops[#ops + 1] = {op = "set", ent = {id = l, ints = {on = any and 0 or 1}}}
-		end
-		send(ops)
-	else
-		for _, l in ipairs(lamps) do
-			S.local_on[l] = not any
-		end
-		S.dirty = true
-	end
-end
-
--- The use key: a door or window under the cursor opens or closes. For an
--- editor for everybody; a viewer opens it for themselves.
--- What the use key would work: a door, a window or a switch under the
--- cursor, or with nothing under it the switch selected. Returns its id and
--- kind, or nil.
-use_target = function()
-	local s = pick_surface()
-	local id = s and s.kind == "instance" and s.id
-	local p = S.primary and doc.ents[S.primary]
-	if not id and p and p.type == "instance" and
-			doc.ents[p.ints.def].ints.kind == KIND.switch then
-		id = S.primary
-	end
-	local e = id and doc.ents[id]
-	if not e then
-		return nil
-	end
-	local kind = doc.ents[e.ints.def].ints.kind
-	if kind == KIND.switch or kind == KIND.door or kind == KIND.window then
-		return id, kind
-	end
-	return nil
-end
-
-use = function()
-	local id, kind = use_target()
-	if not id then
-		return
-	end
-	if kind == KIND.switch then
-		flip_switch(id)
-		return
-	end
-	local open = open_amount(id) > 0 and 0 or 1000
-	if doc.can("edit") then
-		S.local_open[id] = nil
-		send({{op = "set", ent = {id = id, ints = {open = open}}}})
-	else
-		S.local_open[id] = open
-		S.dirty = true
-	end
-end
-
--- A length typed while drawing: Enter draws the segment that long, in the
--- direction the cursor gives
-local function commit_typed()
-	local v = tonumber(S.typed)
-	S.typed = ""
-	local from = S.draw or (S.corners and S.corners[#S.corners])
-	if not v or v <= 0 or not from then
-		return
-	end
-	local x, z = snapped_point(from)
-	if not x then
-		return
-	end
-	local dx, dz = x - from.x, z - from.z
-	local l = geom.len(dx, dz)
-	if l == 0 then
-		return
-	end
-	x = math.floor(from.x + dx / l * v + 0.5)
-	z = math.floor(from.z + dz / l * v + 0.5)
-	if S.draw then
-		add_wall(S.draw, x, z, {})
-	else
-		S.corners[#S.corners + 1] = {x = x, z = z, ref = {}}
-	end
-end
-
-function M.key_down(key, event_data)
-	local qualifiers = event_data and event_data:GetInt("Qualifiers") or 0
-	local ctrl = qualifiers % 4 >= 2
-	-- Alt with anything is the window manager's: Alt+Tab switches windows,
-	-- not views
-	if qualifiers % 8 >= 4 then
-		return
-	end
-	if S.draw or S.corners then
-		local digit = key >= magic.KEY_0 and key <= magic.KEY_9
-		if digit then
-			S.typed = S.typed .. tostring(key - magic.KEY_0)
-			return
-		elseif key == magic.KEY_BACKSPACE then
-			S.typed = S.typed:sub(1, -2)
-			return
-		elseif key == magic.KEY_RETURN or key == magic.KEY_KP_ENTER then
-			if S.typed == "" and S.corners and #S.corners >= 3 then
-				add_room(S.corners)
-				S.corners = nil
-			else
-				commit_typed()
-			end
-			return
-		end
-	end
-	if ctrl then
-		if key == magic.KEY_Z and S.shift or key == magic.KEY_Y then
-			doc.redo()
-		elseif key == magic.KEY_Z then
-			doc.undo()
-		elseif key == magic.KEY_D then
-			copy_selected(false)
-		elseif key == magic.KEY_L then
-			copy_selected(true)
-		end
-		return
-	end
-	if key == magic.KEY_ESCAPE then
-		-- Down one level ([FP_ESC]): the pause menu, the crosshair, what is
-		-- in progress; at the bottom of a view, the pause menu
-		if S.paused then
-			close_pause()
-		elseif S.captured then
-			S.crosshair = false
-			update_capture()
-		elseif S.draw or S.corners then
-			S.draw = nil
-			S.corners = nil
-			S.typed = ""
-		elseif S.linking then
-			S.linking = nil
-			refresh_panels()
-		elseif S.calib then
-			S.calib = nil
-			refresh_panels()
-		else
-			open_pause()
-		end
-	elseif S.paused then
-		-- The pause menu takes the keys
-	elseif key == magic.KEY_F and S.view == "walk" then
-		S.walk.noclip = not S.walk.noclip
-		doc.notice(S.walk.noclip and "Noclip: walls do not stop you; Space and C"
-				.. " go up and down" or "Noclip off")
-	elseif key == magic.KEY_E then
-		use()
-	elseif key == magic.KEY_U then
-		go_to_next_user()
-	elseif key == magic.KEY_L then
-		S.plan_look = not S.plan_look
-		set_view(S.view)
-	elseif key == magic.KEY_F1 then
-		set_view("2d")
-	elseif key == magic.KEY_F2 then
-		set_view("3d")
-	elseif key == magic.KEY_F3 then
-		set_view("walk")
-	elseif key == magic.KEY_Z then
-		rotate_selection(angle_step())
-	elseif key == magic.KEY_X then
-		rotate_selection(-angle_step())
-	elseif key == magic.KEY_V then
-		set_tool("select")
-	elseif key == magic.KEY_N then
-		set_tool("node")
-	elseif key == magic.KEY_B then
-		set_tool("wall")
-	elseif key == magic.KEY_R then
-		set_tool("room")
-	elseif key == magic.KEY_O then
-		set_tool("box")
-	elseif key == magic.KEY_K then
-		set_tool("voxel")
-	elseif key == magic.KEY_I then
-		-- Again: the next of opening, door and window
-		if S.tool == "hosted" then
-			S.hosted = NEXT_HOSTED[S.hosted]
-		end
-		set_tool("hosted")
-	elseif key == magic.KEY_M then
-		set_tool("paint")
-	elseif key == magic.KEY_G then
-		S.grid = S.grid % #GRID_STEPS + 1
-		refresh_panels()
-	elseif key == magic.KEY_H then
-		S.angle = S.angle % #ANGLE_STEPS + 1
-		refresh_panels()
-	elseif key == magic.KEY_DELETE then
-		delete_selected()
-	end
-end
-
-local walk
-do
-	--
-	-- Walking
-	--
-	-- The voxels of the volumes near (x, z) as footprints, for the walker
-	-- simplified: a volume pitched or rolled is its bounding box
-	local function voxel_solids(x, z, out)
-		for id, it in pairs(inst_data) do
-			if it.voxel and geom.len(x - it.x, z - it.z) < math.max(it.ex, it.ez) +
-					BODY_R * 2 then
-				if it.pitch % 360 ~= 0 or it.roll % 360 ~= 0 then
-					out[#out + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
+			local digit = key >= magic.KEY_0 and key <= magic.KEY_9
+			if digit then
+				S.typed = S.typed .. tostring(key - magic.KEY_0)
+				return
+			elseif key == magic.KEY_BACKSPACE then
+				S.typed = S.typed:sub(1, -2)
+				return
+			elseif key == magic.KEY_RETURN or key == magic.KEY_KP_ENTER then
+				if S.typed == "" and S.corners and #S.corners >= 3 then
+					add_room(S.corners)
+					S.corners = nil
 				else
-					local sz = it.size
-					for key in pairs(doc.voxels[doc.ents[id].ints.def] or {}) do
-						local cx, cy, cz = doc.voxel_cell(key)
-						local pts = {}
-						for k, c in ipairs({{0, 0}, {1, 0}, {1, 1}, {0, 1}}) do
-							local px, _, pz = geom.rot((cx + c[1]) * sz, 0,
-									(cz + c[2]) * sz, 0, it.yaw, 0)
-							pts[k] = {it.ox + px, it.oz + pz}
+					commit_typed()
+				end
+				return
+			end
+		end
+		if ctrl then
+			if key == magic.KEY_Z and S.shift or key == magic.KEY_Y then
+				doc.redo()
+			elseif key == magic.KEY_Z then
+				doc.undo()
+			elseif key == magic.KEY_D then
+				copy_selected(false)
+			elseif key == magic.KEY_L then
+				copy_selected(true)
+			end
+			return
+		end
+		if key == magic.KEY_ESCAPE then
+			-- Down one level ([FP_ESC]): the pause menu, the crosshair, what is
+			-- in progress; at the bottom of a view, the pause menu
+			if S.paused then
+				close_pause()
+			elseif S.captured then
+				S.crosshair = false
+				update_capture()
+			elseif S.draw or S.corners then
+				S.draw = nil
+				S.corners = nil
+				S.typed = ""
+			elseif S.linking then
+				S.linking = nil
+				refresh_panels()
+			elseif S.calib then
+				S.calib = nil
+				refresh_panels()
+			else
+				open_pause()
+			end
+		elseif S.paused then
+			-- The pause menu takes the keys
+		elseif key == magic.KEY_F and S.view == "walk" then
+			S.walk.noclip = not S.walk.noclip
+			doc.notice(S.walk.noclip and "Noclip: walls do not stop you; Space and C"
+					.. " go up and down" or "Noclip off")
+		elseif key == magic.KEY_E then
+			use()
+		elseif key == magic.KEY_U then
+			go_to_next_user()
+		elseif key == magic.KEY_L then
+			S.plan_look = not S.plan_look
+			set_view(S.view)
+		elseif key == magic.KEY_F1 then
+			set_view("2d")
+		elseif key == magic.KEY_F2 then
+			set_view("3d")
+		elseif key == magic.KEY_F3 then
+			set_view("walk")
+		elseif key == magic.KEY_Z then
+			rotate_selection(angle_step())
+		elseif key == magic.KEY_X then
+			rotate_selection(-angle_step())
+		elseif key == magic.KEY_V then
+			set_tool("select")
+		elseif key == magic.KEY_N then
+			set_tool("node")
+		elseif key == magic.KEY_B then
+			set_tool("wall")
+		elseif key == magic.KEY_R then
+			set_tool("room")
+		elseif key == magic.KEY_O then
+			set_tool("box")
+		elseif key == magic.KEY_K then
+			set_tool("voxel")
+		elseif key == magic.KEY_I then
+			-- Again: the next of opening, door and window
+			if S.tool == "hosted" then
+				S.hosted = NEXT_HOSTED[S.hosted]
+			end
+			set_tool("hosted")
+		elseif key == magic.KEY_M then
+			set_tool("paint")
+		elseif key == magic.KEY_G then
+			S.grid = S.grid % #GRID_STEPS + 1
+			refresh_panels()
+		elseif key == magic.KEY_H then
+			S.angle = S.angle % #ANGLE_STEPS + 1
+			refresh_panels()
+		elseif key == magic.KEY_DELETE then
+			delete_selected()
+		end
+	end
+
+	do
+		--
+		-- Walking
+		--
+		-- The voxels of the volumes near (x, z) as footprints, for the walker
+		-- simplified: a volume pitched or rolled is its bounding box
+		local function voxel_solids(x, z, out)
+			for id, it in pairs(inst_data) do
+				if it.voxel and geom.len(x - it.x, z - it.z) < math.max(it.ex, it.ez) +
+						BODY_R * 2 then
+					if it.pitch % 360 ~= 0 or it.roll % 360 ~= 0 then
+						out[#out + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
+					else
+						local sz = it.size
+						for key in pairs(doc.voxels[doc.ents[id].ints.def] or {}) do
+							local cx, cy, cz = doc.voxel_cell(key)
+							local pts = {}
+							for k, c in ipairs({{0, 0}, {1, 0}, {1, 1}, {0, 1}}) do
+								local px, _, pz = geom.rot((cx + c[1]) * sz, 0,
+										(cz + c[2]) * sz, 0, it.yaw, 0)
+								pts[k] = {it.ox + px, it.oz + pz}
+							end
+							if not geom.is_ccw(pts) then
+								pts = {pts[4], pts[3], pts[2], pts[1]}
+							end
+							out[#out + 1] = {pts = pts, y0 = it.oy + cy * sz,
+									y1 = it.oy + (cy + 1) * sz}
 						end
-						if not geom.is_ccw(pts) then
-							pts = {pts[4], pts[3], pts[2], pts[1]}
+					end
+				end
+			end
+	end
+
+	-- The walker at (x, z) with its feet at `feet`, pushed out of what it is
+	-- in, and standing on the highest thing under it it can step onto
+	-- simplified: it steps down at once rather than falling
+	local function collide(x, z, feet)
+		local list = {}
+		for _, sd in ipairs(solids) do
+			list[#list + 1] = sd
+		end
+		voxel_solids(x, z, list)
+		for _ = 1, 4 do
+			for _, sd in ipairs(list) do
+				if sd.y1 > feet + STEP and sd.y0 < feet + HEAD then
+					local pts = sd.pts
+					local bd, bx, bz = math.huge, 0, 0
+					for i = 1, #pts do
+						local p, q = pts[i], pts[i % #pts + 1]
+						local nx, nz, _, d = geom.nearest_on_segment(x, z, p[1], p[2],
+								q[1], q[2])
+						if d < bd then
+							bd, bx, bz = d, nx, nz
 						end
-						out[#out + 1] = {pts = pts, y0 = it.oy + cy * sz,
-								y1 = it.oy + (cy + 1) * sz}
+					end
+					local inside = geom.point_in_polygon(x, z, pts)
+					if inside or bd < BODY_R then
+						local dx, dz = x - bx, z - bz
+						local l = math.max(geom.len(dx, dz), 1e-6)
+						if inside then
+							dx, dz = -dx, -dz
+						end
+						x, z = bx + dx / l * BODY_R, bz + dz / l * BODY_R
 					end
 				end
 			end
 		end
-end
-
--- The walker at (x, z) with its feet at `feet`, pushed out of what it is
--- in, and standing on the highest thing under it it can step onto
--- simplified: it steps down at once rather than falling
-local function collide(x, z, feet)
-	local list = {}
-	for _, sd in ipairs(solids) do
-		list[#list + 1] = sd
-	end
-	voxel_solids(x, z, list)
-	for _ = 1, 4 do
+		local ground = 0
 		for _, sd in ipairs(list) do
-			if sd.y1 > feet + STEP and sd.y0 < feet + HEAD then
-				local pts = sd.pts
-				local bd, bx, bz = math.huge, 0, 0
-				for i = 1, #pts do
-					local p, q = pts[i], pts[i % #pts + 1]
-					local nx, nz, _, d = geom.nearest_on_segment(x, z, p[1], p[2],
-							q[1], q[2])
-					if d < bd then
-						bd, bx, bz = d, nx, nz
-					end
-				end
-				local inside = geom.point_in_polygon(x, z, pts)
-				if inside or bd < BODY_R then
-					local dx, dz = x - bx, z - bz
-					local l = math.max(geom.len(dx, dz), 1e-6)
-					if inside then
-						dx, dz = -dx, -dz
-					end
-					x, z = bx + dx / l * BODY_R, bz + dz / l * BODY_R
-				end
+			if sd.y1 <= feet + STEP and sd.y1 > ground and
+					geom.point_in_polygon(x, z, sd.pts) then
+				ground = sd.y1
 			end
 		end
+		return x, z, ground
 	end
-	local ground = 0
-	for _, sd in ipairs(list) do
-		if sd.y1 <= feet + STEP and sd.y1 > ground and
-				geom.point_in_polygon(x, z, sd.pts) then
-			ground = sd.y1
-		end
-	end
-	return x, z, ground
-end
 
-walk = function(dt, f, r)
-	local input = magic.input
-	local w = S.walk
-	-- Shift runs; Ctrl is the shortcuts' (Ctrl+D is a copy)
-	local speed = (S.shift and 3500 or 1400) * dt
-	local yaw = math.rad(S.yaw)
-	local dx = (math.sin(yaw) * f + math.cos(yaw) * r) * speed
-	local dz = (math.cos(yaw) * f - math.sin(yaw) * r) * speed
-	if w.noclip then
-		w.x, w.z = w.x + dx, w.z + dz
-		local u = 0
-		if input:GetKeyDown(magic.KEY_SPACE) then u = u + 1 end
-		if input:GetKeyDown(magic.KEY_C) then u = u - 1 end
-		w.feet = w.feet + u * speed
-	else
-		w.x, w.z, w.feet = collide(w.x + dx, w.z + dz, w.feet)
+	walk = function(dt, f, r)
+		local input = magic.input
+		local w = S.walk
+		-- Shift runs; Ctrl is the shortcuts' (Ctrl+D is a copy)
+		local speed = (S.shift and 3500 or 1400) * dt
+		local yaw = math.rad(S.yaw)
+		local dx = (math.sin(yaw) * f + math.cos(yaw) * r) * speed
+		local dz = (math.cos(yaw) * f - math.sin(yaw) * r) * speed
+		if w.noclip then
+			w.x, w.z = w.x + dx, w.z + dz
+			local u = 0
+			if input:GetKeyDown(magic.KEY_SPACE) then u = u + 1 end
+			if input:GetKeyDown(magic.KEY_C) then u = u - 1 end
+			w.feet = w.feet + u * speed
+		else
+			w.x, w.z, w.feet = collide(w.x + dx, w.z + dz, w.feet)
+		end
+		S.pos = {x = w.x / 1000, y = (w.feet + S.eye) / 1000, z = w.z / 1000}
 	end
-	S.pos = {x = w.x / 1000, y = (w.feet + S.eye) / 1000, z = w.z / 1000}
-end
+
+	end
 
 end
 
