@@ -1665,10 +1665,13 @@ local function build_layout(seen_voxels, wells)
 					end
 					solids[#solids + 1] = {pts = pts, y0 = it.y + b[2],
 							y1 = it.y + b[5]}
+					-- A cap a step, inside it: one over the whole footprint
+					-- floated over the low steps, the caps being drawn in 3D too
+					cap(pts, it.y + b[2], it.y + b[5], rgb_color(rgb, 0.7),
+							rgb_color(rgb, 0.9))
 				end
 			end
 			commit(g, lit_material)
-			cap(it.foot, it.y0, it.y1, rgb_color(rgb, 0.7), rgb_color(rgb, 0.9))
 			if not flat then
 				solids[#solids + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
 			end
