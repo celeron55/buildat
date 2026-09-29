@@ -208,7 +208,8 @@ local chat_input = nil
 
 -- True while a text field has the keyboard, so the editor leaves keys alone
 function doc.typing()
-	return magic.ui.focusElement ~= nil
+	local f = magic.ui.focusElement
+	return f ~= nil and f:GetTypeName() == "LineEdit"
 end
 
 local function close_chat()

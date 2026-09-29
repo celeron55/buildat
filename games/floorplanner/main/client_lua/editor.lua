@@ -50,6 +50,7 @@ local LEAF_T, LEAF_GAP, FRAME_W = 40, 4, 50
 
 local S = {
 	view = "2d",
+	plan_look = true, -- the plan view in flat colours (L)
 	tool = "select",
 	grid = 2,       -- index into GRID_STEPS
 	angle = 4,      -- index into ANGLE_STEPS: the angle snap
@@ -121,10 +122,12 @@ fill.brightness = 0.3
 
 -- From the resource cache, which holds them: a Material made in Lua is
 -- freed under a geometry still using it
-local lit_material = magic.cache:GetResource("Material", "main/lit_vcol.xml")
+local lit_material = magic.cache:GetResource("Material", "main/palette.xml")
 local flat_material = magic.cache:GetResource("Material", "main/flat_vcol.xml")
 local glass_material = magic.cache:GetResource("Material",
-		"main/glass_vcol.xml")
+		"main/palette_glass.xml")
+-- What a Lua wrapper would otherwise free under the engine
+M.kept = {}
 
 -- simplified: the two low bits only, which is all a flip holds
 local function bit_xor(a, b)
@@ -149,6 +152,8 @@ local function rgb_color(rgb, f)
 			math.floor(rgb / 256) % 256 / 255 * f, rgb % 256 / 255 * f)
 end
 
+local WHITE = magic.Color(1, 1, 1)
+
 -- A triangle facing n: Urho3D's front faces are clockwise as seen, which in
 -- its left-handed space is cross(b - a, c - a) pointing at the viewer
 local function tri(g, a, b, c, n, col)
@@ -160,10 +165,18 @@ local function tri(g, a, b, c, n, col)
 	if cx * n.x + cy * n.y + cz * n.z < 0 then
 		b, c = c, b
 	end
+	-- A number is a palette row, for the palette's shader; a Color is a
+	-- flat colour, for the plan view's own
+	local row = 0
+	if type(col) == "number" then
+		row, col = col, WHITE
+	end
+	local uv = magic.Vector2(row, 0)
 	for _, v in ipairs({a, b, c}) do
 		g:DefineVertex(v)
 		g:DefineNormal(n)
 		g:DefineColor(col)
+		g:DefineTexCoord(uv)
 	end
 end
 
@@ -211,7 +224,7 @@ do
 	g:BeginGeometry(0, magic.TRIANGLE_LIST)
 	local r = 200000
 	flat_polygon(g, {{-r, -r}, {r, -r}, {r, r}, {-r, r}}, 0, UP,
-			magic.Color(0.6, 0.6, 0.58))
+			magic.Color(0.85, 0.85, 0.83))
 	g:Commit()
 	g:SetMaterial(0, lit_material)
 end
@@ -264,12 +277,146 @@ local function node_pos(id)
 	return n.ints.x, n.ints.z
 end
 
+-- A lamp's light colour at a temperature in kelvin
+local function kelvin_rgb(k)
+	local t = k / 100
+	local r, g, b
+	if t <= 66 then
+		r, g = 255, 99.4708025861 * math.log(t) - 161.1195681661
+	else
+		r = 329.698727446 * (t - 60) ^ -0.1332047592
+		g = 288.1221695283 * (t - 60) ^ -0.0755148492
+	end
+	if t >= 66 then
+		b = 255
+	elseif t <= 19 then
+		b = 0
+	else
+		b = 138.5177312231 * math.log(t - 10) - 305.0447927307
+	end
+	local function c(v)
+		return math.floor(math.max(0, math.min(255, v)) + 0.5)
+	end
+	return c(r) * 65536 + c(g) * 256 + c(b)
+end
+
+local function split_rgb(v)
+	return math.floor(v / 65536) % 256 / 255, math.floor(v / 256) % 256 / 255,
+			v % 256 / 255
+end
+
+-- A palette entry's colour as the plan view and the swatches show it: its
+-- own colour with its finish applied, without the pattern
 local function palette_rgb(id)
 	local e = id and id ~= 0 and doc.ents[id]
-	if e and e.type == "palette" then
-		return e.ints.color
+	if not e or e.type ~= "palette" then
+		return 0xb0b0b0
 	end
-	return 0xb0b0b0
+	local p = e.ints
+	if p.kind == 4 then
+		return kelvin_rgb(p.temperature)
+	end
+	local br, bg, bb = split_rgb(p.base)
+	local pr, pg, pb = split_rgb(p.color)
+	local o = p.opacity / 1000
+	local r, g, b
+	if p.finish == 0 then
+		r, g, b = br * pr, bg * pg, bb * pb
+	elseif p.finish == 1 then
+		r, g, b = pr, pg, pb
+	else
+		r, g, b = br + (pr - br) * o, bg + (pg - bg) * o, bb + (pb - bb) * o
+	end
+	return math.floor(r * 255 + 0.5) * 65536 + math.floor(g * 255 + 0.5) * 256 +
+			math.floor(b * 255 + 0.5)
+end
+
+-- The palette's rows: 0 is what has no material, 1 the glass a window has
+-- when it was given none, and the entries follow in id order
+local palette_rows = {}
+local palette_key = nil
+
+local function row(id)
+	return palette_rows[id] or 0
+end
+
+-- The palette as the shader reads it: eight texels a row. The small
+-- integers are spread out (type * 20, finish * 32, flags * 16) and read back
+-- rounded: what the shader reads can be a level off what was written.
+--   0: own colour, type          1: paint, finish
+--   2: second colour, opacity    3: roughness, specular, reflect, seed low
+--   4: log2 of the scale in mm / 16, flags (grain axis + 4 * stagger),
+--      seed high, the type's own knob (lamp brightness, grout, speckle)
+-- Rebuilt only when an entry changes, since each texture is kept.
+local function palette_texture()
+	local entries = doc.of_type("palette")
+	local parts = {}
+	for _, e in ipairs(entries) do
+		for k, v in pairs(e.ints) do
+			parts[#parts + 1] = e.id .. k .. v
+		end
+	end
+	table.sort(parts)
+	local key = table.concat(parts, ",")
+	if key == palette_key then
+		return
+	end
+	palette_key = key
+	palette_rows = {}
+	local n = #entries + 2
+	local image = magic.Image:new()
+	assert(image:SetSize(8, n, 4), "Image:SetSize")
+	local function put(x, y, rgb, a)
+		local r, g, b = split_rgb(rgb)
+		image:SetPixel(x, y, magic.Color(r, g, b, a))
+	end
+	local function px(x, y, r, g, b, a)
+		image:SetPixel(x, y, magic.Color(r, g, b, a))
+	end
+	-- The two rows of nothing: a flat grey, and a pale glass
+	put(0, 0, 0xb0b0b0, 0)
+	put(1, 0, 0xffffff, 0)
+	put(2, 0, 0x404040, 1)
+	px(3, 0, 0.9, 0.05, 0, 0)
+	px(4, 0, 0.5, 0, 0, 0)
+	put(0, 1, 0xa8c8e0, 5 * 20 / 255)
+	put(1, 1, 0xffffff, 0)
+	put(2, 1, 0x404040, 0.3)
+	px(3, 1, 0.1, 0.8, 0.5, 0)
+	px(4, 1, 0.5, 0, 0, 0)
+	for i, e in ipairs(entries) do
+		local p = e.ints
+		local y = i + 1
+		palette_rows[e.id] = y
+		local base = p.kind == 4 and kelvin_rgb(p.temperature) or p.base
+		put(0, y, base, p.kind * 20 / 255)
+		put(1, y, p.color, p.finish * 32 / 255)
+		put(2, y, p.color2, p.opacity / 1000)
+		px(3, y, p.roughness / 1000, p.specular / 1000, p.reflect / 1000,
+				(p.seed % 256) / 255)
+		local knob = 0
+		if p.kind == 4 then
+			knob = p.brightness / 1000
+		elseif p.kind == 7 then
+			knob = math.min(1, p.grout / p.scale * 4)
+		elseif p.kind == 9 then
+			knob = p.speckle / 1000
+		end
+		px(4, y, math.log(p.scale) / math.log(2) / 16,
+				(p.axis + 4 * p.stagger) * 16 / 255, math.floor(p.seed / 256) / 255,
+				knob)
+	end
+	local texture = magic.Texture2D:new()
+	-- One level: a smaller one would average the rows' knobs together
+	texture:SetNumLevels(1)
+	assert(texture:SetData(image), "Texture2D:SetData")
+	texture.filterMode = magic.FILTER_NEAREST
+	M.kept[#M.kept + 1] = texture
+	M.kept[#M.kept + 1] = image
+	for _, m in ipairs({lit_material, glass_material}) do
+		m:SetTexture(magic.TU_DIFFUSE, texture)
+		m:SetShaderParameter("PaletteRows", n)
+	end
 end
 
 -- The walls with their ends looked up, their outlines, the rooms with
@@ -474,13 +621,11 @@ local function build_hosted(id, it, def, e, geometry, commit)
 		box_geometry(g, W(x1 - x0) / 2, W(y1 - y0) / 2, W(z1 - z0) / 2, col,
 				W(x0 + x1) / 2, W(y0 + y1) / 2, W(z0 + z1) / 2)
 	end
-	local frame_col = rgb_color(palette_rgb(def.mat))
-	local leaf_col = rgb_color(palette_rgb(def.mat_leaf ~= 0 and def.mat_leaf
-			or def.mat))
-	local glass_rgb = def.mat_glass ~= 0 and palette_rgb(def.mat_glass) or
-			0xa8c8e0
-	local glass_col = rgb_color(glass_rgb)
-	glass_col.a = 0.35
+	local frame_col = row(def.mat)
+	local leaf_col = row(def.mat_leaf ~= 0 and def.mat_leaf or def.mat)
+	-- simplified: only a window's glass is drawn see-through; a glass
+	-- entry on a wall or a box is drawn opaque in its tint
+	local glass_col = def.mat_glass ~= 0 and row(def.mat_glass) or 1
 	local hw, t, td = def.w / 2, def.trim, def.trim_depth
 	local y0, y1 = e.sill, e.sill + def.h
 	local window = def.kind == KIND.window
@@ -563,6 +708,7 @@ end
 -- walls is milliseconds; the upgrade is rebuilding only what is at the
 -- nodes that moved
 local function rebuild()
+	palette_texture()
 	wall_data = {}
 	for _, e in ipairs(doc.of_type("wall")) do
 		local w = e.ints
@@ -645,10 +791,9 @@ local function rebuild()
 		local w = doc.ents[id].ints
 		local y0, y1 = wall_span(w)
 		local cols = {
-			left = rgb_color(palette_rgb(w.mat_left)),
-			right = rgb_color(palette_rgb(w.mat_right)),
-			core = rgb_color(palette_rgb(w.mat_core ~= 0 and w.mat_core or
-					w.mat_left)),
+			left = row(w.mat_left),
+			right = row(w.mat_right),
+			core = row(w.mat_core ~= 0 and w.mat_core or w.mat_left),
 		}
 		local f = wall_frame(id)
 		local list = holes[id] or {}
@@ -696,11 +841,11 @@ local function rebuild()
 		local e = doc.ents[id]
 		if #r.pts >= 3 then
 			local g = geometry(walls_node)
-			flat_polygon(g, r.pts, 2, UP, rgb_color(palette_rgb(e.ints.mat_floor)))
+			flat_polygon(g, r.pts, 2, UP, row(e.ints.mat_floor))
 			commit(g, lit_material)
 			local cg = geometry(overhead_node)
 			flat_polygon(cg, r.pts, room_ceiling(e), DOWN,
-					rgb_color(palette_rgb(e.ints.mat_ceiling)))
+					row(e.ints.mat_ceiling))
 			commit(cg, lit_material)
 		end
 	end
@@ -716,7 +861,7 @@ local function rebuild()
 			node.rotation = magic.Quaternion(it.pitch, it.yaw, it.roll)
 			local rgb = palette_rgb(def.mat)
 			box_geometry(g, W(def.w) / 2, W(def.h) / 2, W(def.d) / 2,
-					rgb_color(rgb))
+					row(def.mat))
 			commit(g, lit_material)
 			cap(it.foot, it.y0, it.y1, rgb_color(rgb, 0.7), rgb_color(rgb, 0.9))
 		end
@@ -1598,6 +1743,10 @@ local refresh_panels
 local function set_view(v)
 	S.view = v
 	magic.set_preferred_viewports({v == "2d" and vp2d or vp3d})
+	-- The plan view's look: flat colours, or the materials lit
+	local flat = v == "2d" and S.plan_look and 1 or 0
+	lit_material:SetShaderParameter("PlanLook", flat)
+	glass_material:SetShaderParameter("PlanLook", flat)
 	caps_node.enabled = v == "2d"
 	pieces_node.enabled = v == "3d"
 	refresh_panels()
@@ -1911,48 +2060,176 @@ local function build_props()
 	end
 end
 
+local MATERIAL_KINDS = {[0] = "Drywall", "Wood", "Stone", "Wallpaper", "Lamp",
+	"Glass", "Metal", "Tile", "Fabric", "Plaster"}
+local FINISHES = {[0] = "Over its colour", "White undercoat", "Stain"}
+local AXES = {[0] = "Grain along X", "Grain along Y", "Grain along Z"}
+-- Which knobs each type has, beyond the colours and the finish
+local KNOBS = {
+	[0] = {"roughness", "specular", "reflect"},
+	{"roughness", "specular", "reflect", "scale", "seed", "axis"},
+	{"roughness", "specular", "reflect", "scale", "seed", "color2"},
+	{"specular", "scale", "seed", "color2"},
+	{"temperature", "brightness"},
+	{"opacity", "specular", "reflect"},
+	{"roughness", "specular", "reflect", "scale"},
+	{"roughness", "specular", "reflect", "scale", "grout", "stagger", "color2"},
+	{"scale"},
+	{"roughness", "specular", "scale", "seed", "speckle"},
+}
+-- What a type looks like when an entry is switched to it
+local KIND_DEFAULTS = {
+	[0] = {base = 0xe8e4dc, color2 = 0x404040, scale = 200, roughness = 800,
+			specular = 100},
+	{base = 0xb07a48, color2 = 0x404040, scale = 300, roughness = 600,
+			specular = 250},
+	{base = 0x9a968e, color2 = 0x5a5650, scale = 400, roughness = 500,
+			specular = 300},
+	{base = 0xeadfc8, color2 = 0x8a6a4a, scale = 150, roughness = 900,
+			specular = 50},
+	{base = 0xffffff, color2 = 0x404040, scale = 200, roughness = 500,
+			specular = 0},
+	{base = 0xa8c8e0, color2 = 0x404040, scale = 200, roughness = 50,
+			specular = 800},
+	{base = 0xb8bcc0, color2 = 0x404040, scale = 200, roughness = 300,
+			specular = 700},
+	{base = 0xf0f0ec, color2 = 0x9a9890, scale = 200, roughness = 200,
+			specular = 500},
+	{base = 0x6a7a8a, color2 = 0x404040, scale = 3, roughness = 1000,
+			specular = 20},
+	{base = 0xe4ddd0, color2 = 0x404040, scale = 200, roughness = 900,
+			specular = 60},
+}
+local KNOB_LABELS = {roughness = "Roughness", specular = "Specular",
+	reflect = "Reflective", scale = "Scale mm", seed = "Seed",
+	temperature = "Kelvin", brightness = "Brightness", opacity = "Opacity",
+	grout = "Grout mm", speckle = "Speckle"}
+-- Knobs in thousandths shown as percent
+local PERCENT = {roughness = true, specular = true, reflect = true,
+	brightness = true, opacity = true, speckle = true}
+
+-- Everything that holds palette entry `from`, moved to `to`, and `from`
+-- deleted, in one batch
+local function replace_entry(from, to)
+	local ops = {}
+	for id, e in pairs(doc.ents) do
+		local ints = {}
+		for k, v in pairs(e.ints) do
+			if v == from and k:sub(1, 3) == "mat" then
+				ints[k] = to
+			end
+		end
+		if next(ints) then
+			ops[#ops + 1] = {op = "set", ent = {id = id, ints = ints}}
+		end
+	end
+	ops[#ops + 1] = {op = "delete", ent = {id = from}}
+	send(ops)
+end
+
 local function build_palette()
 	if palette_win then
 		palette_win:Remove()
 	end
 	palette_win = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, 50)
-	panel.label(palette_win, "Palette")
+	panel.label(palette_win, S.replacing and "Pick the entry to use instead:"
+			or "Palette")
 	local cur = default_material()
 	local entries = doc.of_type("palette")
 	for _, p in ipairs(entries) do
 		local r = panel.row(palette_win)
-		panel.swatch(r, p.ints.color, function()
+		panel.swatch(r, palette_rgb(p.id), function()
+			if S.replacing then
+				if p.id ~= S.replacing then
+					replace_entry(S.replacing, p.id)
+				end
+				S.replacing = nil
+			end
 			S.material = p.id
 			refresh_panels()
 		end, p.id == cur)
-		panel.label(r, p.strs.name, p.id == cur and
-				magic.Color(1.0, 0.85, 0.3) or nil)
+		panel.label(r, p.strs.name .. "  (" .. MATERIAL_KINDS[p.ints.kind] .. ")",
+				p.id == cur and magic.Color(1.0, 0.85, 0.3) or nil)
 	end
 	local e = doc.ents[cur]
-	if e then
-		panel.field(palette_win, "Name", e.strs.name, function(t)
-			send({{op = "set", ent = {id = cur, strs = {name = t}}}})
-		end, 120)
-		panel.field(palette_win, "Colour", string.format("%06x", e.ints.color),
-				function(t)
-			local v = tonumber(t, 16)
-			if v then
-				send({{op = "set", ent = {id = cur, ints = {color = v}}}})
-			end
-		end, 120)
+	local function set(ints, strs)
+		send({{op = "set", ent = {id = cur, ints = ints, strs = strs}}})
 	end
-	panel.button(palette_win, "New entry", function()
+	if e then
+		local p = e.ints
+		panel.field(palette_win, "Name", e.strs.name, function(t)
+			set(nil, {name = t})
+		end, 120)
+		panel.button(palette_win, "Type: " .. MATERIAL_KINDS[p.kind], function()
+			-- A new type starts from its own look
+			local k = (p.kind + 1) % 10
+			local d = KIND_DEFAULTS[k]
+			set({kind = k, base = d.base, color2 = d.color2, scale = d.scale,
+					roughness = d.roughness, specular = d.specular})
+		end)
+		local function colour(label, name)
+			panel.field(palette_win, label, string.format("%06x", p[name]),
+					function(t)
+				local v = tonumber(t, 16)
+				if v and v >= 0 and v <= 0xffffff then set({[name] = v}) end
+			end, 120)
+		end
+		if p.kind ~= 4 then
+			colour("Own colour", "base")
+			colour("Paint", "color")
+			panel.button(palette_win, "Finish: " .. FINISHES[p.finish], function()
+				set({finish = (p.finish + 1) % 3})
+			end)
+			if p.finish == 2 and p.kind ~= 5 then
+				panel.field(palette_win, "Stain %", p.opacity / 10, function(t)
+					local v = tonumber(t)
+					if v then set({opacity = math.floor(v * 10 + 0.5)}) end
+				end, 120)
+			end
+		end
+		for _, k in ipairs(KNOBS[p.kind]) do
+			if k == "color2" then
+				colour(p.kind == 7 and "Grout colour" or p.kind == 3 and
+						"Pattern" or "Veins", "color2")
+			elseif k == "axis" then
+				panel.button(palette_win, AXES[p.axis], function()
+					set({axis = (p.axis + 1) % 3})
+				end)
+			elseif k == "stagger" then
+				panel.button(palette_win, p.stagger == 1 and "Staggered" or
+						"In a grid", function()
+					set({stagger = 1 - p.stagger})
+				end)
+			else
+				local shown = PERCENT[k] and p[k] / 10 or p[k]
+				panel.field(palette_win, KNOB_LABELS[k] .. (PERCENT[k] and " %"
+						or ""), shown, function(t)
+					local v = tonumber(t)
+					if v then
+						set({[k] = math.floor((PERCENT[k] and v * 10 or v) + 0.5)})
+					end
+				end, 120)
+			end
+		end
+	end
+	local r = panel.row(palette_win)
+	panel.button(r, "New entry", function()
 		local ph = doc.placeholder()
-		local c = e and e.ints.color or 0xe8e4dc
-		send({{op = "create", ent = {id = ph, type = "palette",
-				ints = {color = c}, strs = {name = "material " ..
-				(#entries + 1)}}}}, function(err)
+		local ints = e and copy_fields(e.ints) or {}
+		send({{op = "create", ent = {id = ph, type = "palette", ints = ints,
+				strs = {name = "material " .. (#entries + 1)}}}}, function(err)
 			if err == "" then
 				S.material = S.real[ph]
 				refresh_panels()
 			end
 		end)
 	end)
+	if e and #entries > 1 then
+		panel.button(r, "Replace", function()
+			S.replacing = cur
+			refresh_panels()
+		end)
+	end
 end
 
 refresh_panels = function()
@@ -2444,6 +2721,9 @@ function M.key_down(key, event_data)
 		end
 	elseif key == magic.KEY_E then
 		use()
+	elseif key == magic.KEY_L then
+		S.plan_look = not S.plan_look
+		set_view(S.view)
 	elseif key == magic.KEY_TAB then
 		set_view(S.view == "2d" and "3d" or "2d")
 	elseif key == magic.KEY_Z then

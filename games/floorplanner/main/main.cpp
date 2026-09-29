@@ -33,7 +33,7 @@ using interface::Event;
 namespace floorplanner {
 
 // Kept in the save; bumped when a stored entity's meaning changes
-static const int32_t SCHEMA_VERSION = 1;
+static const int32_t SCHEMA_VERSION = 2;
 static const size_t MAX_ENTITIES = 100000;
 static const size_t MAX_OPS_PER_BATCH = 2000;
 static const size_t MAX_STRING = 200;
@@ -172,9 +172,26 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"flip", 0, 3, 0},        // bit 0: hinge on the other jamb; 1: swing
 		{"open", 0, 1000, 0},     // thousandths of fully open
 	}, {}, {}},
+	// One material: its type, its own colour, the paint over it, and the
+	// knobs of its type. See Palette.glsl for what each does.
 	{"palette", {
 		{"kind", 0, MK_COUNT - 1, MK_DRYWALL},
-		{"color", 0, 0xffffff, 0xe8e4dc},
+		{"base", 0, 0xffffff, 0xe8e4dc},
+		{"color", 0, 0xffffff, 0xffffff},
+		{"finish", 0, 2, 0},       // 0 over its colour, 1 undercoat, 2 stain
+		{"opacity", 0, 1000, 500}, // a stain's, and glass's
+		{"color2", 0, 0xffffff, 0x404040}, // veins, pattern, grout
+		{"roughness", 0, 1000, 800},
+		{"specular", 0, 1000, 100},
+		{"reflect", 0, 1000, 0},
+		{"scale", 1, 60000, 200},  // mm
+		{"seed", 0, 65535, 0},
+		{"axis", 0, 2, 0},         // wood's grain: x, y, z
+		{"stagger", 0, 1, 0},      // tiles
+		{"grout", 0, 100, 3},      // mm
+		{"temperature", 1000, 12000, 2700}, // a lamp's, in kelvin
+		{"brightness", 0, 1000, 500},
+		{"speckle", 0, 1000, 300}, // plaster
 	}, {
 		{"name", "material"},
 	}, {}},
@@ -415,14 +432,39 @@ struct Module: public interface::Module
 					"version (schema "+version+")");
 			return;
 		}
+		int32_t stored = version.empty() ? SCHEMA_VERSION : std::stoi(version);
 		for(const ss_ &key : m_store->list("e/")){
 			ss_ data;
 			Entity e;
-			if(!m_store->get(key, data) || !unpack(data, e)){
+			if(!m_store->get(key, data) || !unpack(data, e) ||
+					!find_schema(e.type)){
 				log_w(MODULE, "Unreadable entity %s; skipped", cs(key));
 				continue;
 			}
+			// 1 -> 2: a palette entry's colour became its own colour, and
+			// `color` the paint over it
+			if(stored < 2 && e.type == "palette" && e.ints.count("color") &&
+					!e.ints.count("base")){
+				e.ints["base"] = e.ints["color"];
+				e.ints["color"] = 0xffffff;
+			}
+			// A field added since it was saved takes its default, and one
+			// that is gone goes
+			Entity d = make_default(*find_schema(e.type));
+			for(auto &pair : d.ints)
+				if(e.ints.count(pair.first))
+					pair.second = e.ints[pair.first];
+			for(auto &pair : d.strs)
+				if(e.strs.count(pair.first))
+					pair.second = e.strs[pair.first];
+			for(auto &pair : d.lists)
+				if(e.lists.count(pair.first))
+					pair.second = e.lists[pair.first];
+			d.id = e.id;
+			e = d;
 			m_ents[e.id] = e;
+			if(stored < SCHEMA_VERSION)
+				m_dirty.insert(e.id);
 			if(e.id >= m_next_id)
 				m_next_id = e.id + 1;
 		}
