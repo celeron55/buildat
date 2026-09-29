@@ -240,9 +240,13 @@ int main(int argc, char *argv[])
 			// one is "buildat-scripted". **Here, not in App::Setup()**:
 			// SDL reads it when the video subsystem starts, and the
 			// default window size asks SDL for the desktop's before
-			// that. A value the caller set is left alone.
+			// that. A value the caller set is left alone. X11's alone:
+			// MinGW has no setenv, and the Windows archive did not build
+			// from 0.5.0 on for it.
+#ifndef _WIN32
 			if(getenv("SDL_VIDEO_X11_WMCLASS") == NULL)
 				setenv("SDL_VIDEO_X11_WMCLASS", "buildat-scripted", 1);
+#endif
 			break;
 		}
 		case 'R':
