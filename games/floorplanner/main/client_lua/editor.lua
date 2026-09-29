@@ -2422,8 +2422,9 @@ do
 	end
 
 	-- The voxel tool at the cursor: place a voxel against what is under it,
-	-- or dig the one under it
-	voxel_edit = function(dig)
+	-- or dig the one under it, or (paint, Shift) give the one it would dig
+	-- the palette entry
+	voxel_edit = function(dig, paint)
 		if not doc.can("edit") then
 			doc.notice("Viewing only: no edit privilege")
 			return
@@ -2431,7 +2432,7 @@ do
 		local id = voxel_target()
 		if not id then
 			local x, z = snapped_point(nil)
-			if x and not dig then
+			if x and not dig and not paint then
 				add_volume(x, z)
 			else
 				doc.notice("Select a voxel volume, or place one on the floor")
@@ -2445,9 +2446,9 @@ do
 			if not cx then
 				return
 			end
-			if dig then
+			if dig or paint then
 				if top then
-					sets[doc.voxel_key(cx, top, cz)] = 0
+					sets[doc.voxel_key(cx, top, cz)] = paint and default_material() or 0
 				end
 			else
 				local c = {cx, top and top + 1 or 0, cz}
@@ -2457,7 +2458,9 @@ do
 			end
 		else
 			local hit, place = voxel_ray(id)
-			if dig and hit then
+			if paint and hit then
+				sets[doc.voxel_key(hit[1], hit[2], hit[3])] = default_material()
+			elseif dig and hit then
 				sets[doc.voxel_key(hit[1], hit[2], hit[3])] = 0
 			elseif not dig and place and in_range(place) then
 				sets[doc.voxel_key(place[1], place[2], place[3])] = default_material()
@@ -3137,7 +3140,8 @@ local function build_props()
 			refresh_panels()
 		end)
 		panel.label(props, "Voxel tool (K): 3D left digs, right places;")
-		panel.label(props, "2D click adds on top, Ctrl+click takes off")
+		panel.label(props, "2D click adds on top, Ctrl+click takes off;")
+		panel.label(props, "Shift+click gives a voxel the palette entry")
 		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
 		panel.button(props, "Linked clone (Ctrl+L)", function()
 			copy_selected(true)
@@ -4674,7 +4678,7 @@ do
 				add_hosted(s.id, s.x, s.z, s.side)
 			end
 		elseif S.tool == "voxel" then
-			voxel_edit(S.ctrl)
+			voxel_edit(S.ctrl, S.shift)
 		elseif S.tool == "wall" or S.tool == "room" then
 			if not doc.can("edit") then
 				doc.notice("Viewing only: no edit privilege")
@@ -4795,9 +4799,9 @@ do
 		if S.captured and S.tool == "voxel" then
 			-- Luanti's: the left button digs, the right one places
 			if button == magic.MOUSEB_LEFT then
-				voxel_edit(true)
+				voxel_edit(true, S.shift)
 			elseif button == magic.MOUSEB_RIGHT then
-				voxel_edit(false)
+				voxel_edit(false, S.shift)
 			end
 			return
 		end
@@ -5707,14 +5711,16 @@ do
 					g.left = "a voxel of " .. mat_text(cur) .. " on the column, layer " .. y
 					if top then
 						g.left = g.left .. "; Ctrl+Left: take the top one (" ..
-								mat_text(cell_of(id, {cx, top, cz})) .. ") off"
+								mat_text(cell_of(id, {cx, top, cz})) .. ") off" ..
+								"; Shift+Left: make it " .. mat_text(cur)
 					end
 				end
 			else
 				local hit, place = voxel_ray(id)
 				if hit then
 					hl({kind = "cell", id = id, c = hit, col = DIG})
-					g.left = "dig this voxel (" .. mat_text(cell_of(id, hit)) .. ")"
+					g.left = "dig this voxel (" .. mat_text(cell_of(id, hit)) ..
+							"); Shift+click: make it " .. mat_text(cur)
 				end
 				if place and math.max(math.abs(place[1] + 0.5), math.abs(place[2] +
 						0.5), math.abs(place[3] + 0.5)) < 128 then
