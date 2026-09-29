@@ -301,6 +301,7 @@ local cam3d_node = scene:CreateChild("Camera3D")
 local cam3d = cam3d_node:CreateComponent("Camera")
 cam3d.nearClip = 0.05
 cam3d.farClip = 500
+-- Vertical, in degrees; walking has 72 (set_view)
 cam3d.fov = 60
 
 -- A viewport for a view, made new each time: the engine frees one when the
@@ -2977,6 +2978,8 @@ local function set_view(v)
 		S.crosshair = false
 	end
 	S.view = v
+	-- Walking sees wider than the free camera (user)
+	cam3d.fov = v == "walk" and 72 or 60
 	-- Only when it changes: the walk and the free camera share a viewport
 	if (v == "2d") ~= (S.shown_2d == true) or not S.shown then
 		S.shown, S.shown_2d = true, v == "2d"
