@@ -118,7 +118,7 @@ local launch_ui_interface = nil
 -- anything else in the table is ignored rather than refused, since a
 -- launch UI's module is its own and may hold whatever it likes.
 local LAUNCH_INTERFACE = {entered_game = true, leave_game = true,
-	in_game = true, show_dead_server = true}
+	in_game = true, show_dead_server = true, game_loading = true}
 -- **Merged, not replaced**, because a launch UI may be a composition
 -- ([TWO_AUDIENCES]: the menu over the room). The composing extension's
 -- own module usually has none of these -- it boots two others and that
@@ -135,6 +135,29 @@ buildat.safe.provide_launch_interface = function(t)
 		if type(t[name]) == "function" then
 			launch_ui_interface[name] = t[name]
 		end
+	end
+	return true
+end
+
+-- **A game says when it stops being a menu and starts being a world**
+-- ([LAUNCH_API]'s fourth ask, user 2026-09-28). A game launched into a
+-- menu of its own -- vanilla's save list, its server screen -- is on the
+-- screen for as long as the player takes to choose, and a launch UI that
+-- paused an animation for it has no way of knowing when the choosing is
+-- over. The heuristics it has are the viewport handover and the local
+-- server coming up, and both are late and neither says which happened.
+--
+-- launch_loading(what): `what` is "world" or "server", anything else is
+-- refused. Nothing but the launch UI hears it, and a launch UI that
+-- provides no `game_loading` is not an error -- most will not want one.
+buildat.safe.launch_loading = function(what)
+	if what ~= "world" and what ~= "server" then
+		return false, 'launch_loading(what): "world" or "server"'
+	end
+	log:info("launch: the game is loading a " .. what)
+	local m = buildat.menu_extension()
+	if m and m.game_loading then
+		m.game_loading(what)
 	end
 	return true
 end

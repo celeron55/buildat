@@ -350,6 +350,14 @@ end
 -- down to the grid -- as launch_menu's own leave_game does.
 local in_a_game = false
 
+-- **A game that was launched into a menu of its own says when the
+-- choosing is over** ([LAUNCH_API]'s fourth ask). The grid has no
+-- animation to resume, so it says so and no more; the room is what
+-- wants this.
+function M.game_loading(what)
+	log:info("__menu: the game is loading a " .. tostring(what))
+end
+
 function M.entered_game()
 	in_a_game = true
 end

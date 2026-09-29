@@ -335,6 +335,9 @@ function draw(saves, save_games)
 				cereal.binary_output({name}, {"array", "string"}))
 	end
 	local function play(name)
+		-- The menu is done choosing; a launch UI that paused something
+		-- for it can carry on ([LAUNCH_API])
+		buildat.launch_loading("world")
 		waiting("Opening " .. name .. "...")
 		buildat.send_packet("main:open",
 				cereal.binary_output({name}, {"array", "string"}))
@@ -932,6 +935,7 @@ function draw_new_save_name(gameid, state)
 		-- screen with what was typed still in it
 		creating = {gameid = gameid, name = name, seed = seed,
 				mapgen = mapgen, flags = flags}
+		buildat.launch_loading("world")
 		waiting("Creating " .. name .. "...")
 		buildat.send_packet("main:create",
 				cereal.binary_output({name, gameid, seed,

@@ -330,6 +330,13 @@ buildat.safe.list_saves(game) -> {{name, ...}, ...}
 buildat.safe.launch_save(game, name) -> true, or false and why
 - Open a save. The pair has to be one list_saves() answers, so what reaches
   the server's -u is a save that is on the disk.
+buildat.safe.launch_loading(what) -> true, or false and why
+- A game launched into a menu of its own says here that it has stopped
+  being a menu and is loading: what is "world" or "server". Reaches the
+  launch UI's game_loading(what) if it provides one, and nothing else; a
+  launch UI without one is not an error ([LAUNCH_API]). What this replaces
+  is guessing from the viewport handover or the local server coming up,
+  both of which are late and neither of which says which happened.
 buildat.safe.local_server_running() -> bool
 - How a launcher knows a launch action started a game rather than opening a
   screen.
