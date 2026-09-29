@@ -1474,7 +1474,7 @@ magic.INSIDE:
 magic.INTERSECTS: 
 magic.Image: Clear, FlipHorizontal, FlipVertical, GetPixel, Resize, SetPixel, SetPixelInt, SetSize, components, compressed, height, new, width
 magic.IndexBuffer: SetData, SetShadowed, SetSize, indexCount, indexSize, new
-magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, IsMouseVisible, SetMouseMode, SetMouseVisible, mode, mouseVisible
+magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, GetMousePosition, IsMouseVisible, SetMouseMode, SetMouseVisible, mode, mouseVisible
 magic.IntRect: bottom, left, right, top
 magic.IntVector2: x, y
 magic.IntVector3: Length, from_buildat, x, y, z

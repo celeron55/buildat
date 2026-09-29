@@ -2592,6 +2592,10 @@ function M.define(dst, util)
 			GetKeyFromName = util.self_function("GetKeyFromName", {"number"}, {"Input", "string"}),
 			GetKeyPress = util.self_function("GetKeyPress", {"boolean"}, {"Input", "number"}),
 			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),
+			-- Where the pointer is, in window pixels: what the MouseMove
+			-- events add up to, read when a click needs it
+			GetMousePosition = util.self_function("GetMousePosition",
+					{dst.IntVector2}, {"Input"}),
 			-- Whether a mouse button is held, which the click events do not
 			-- say: a dig is held down rather than clicked
 			GetMouseButtonDown = util.self_function("GetMouseButtonDown",

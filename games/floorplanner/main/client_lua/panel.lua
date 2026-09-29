@@ -191,18 +191,120 @@ function M.chip(parent, rgb, size, on_click, on_hover, text)
 	return b
 end
 
+-- Many named colours at a glance: a column per row of `rows` (a paint
+-- maker's hue family, lightest at the top), BAND columns to a band. One
+-- texel a colour, drawn TILE px big with nearest filtering, so two thousand
+-- are one small image; a click picks by the pointer, as the wheel does.
+local SHEET_BAND, SHEET_TILE = 95, 8
+
+-- The pointer in UI coordinates
+local function pointer()
+	local p = magic.input:GetMousePosition()
+	local sc = magic.ui.scale
+	return p.x / sc, p.y / sc
+end
+
+-- The sheet's entry under the pointer, or nil
+local sheet = nil -- {button, cols, say(text)} of the window up now
+local function sheet_entry()
+	local at = sheet.button.screenPosition
+	local px, py = pointer()
+	local x = math.floor((px - at.x) / SHEET_TILE)
+	local y = math.floor((py - at.y) / SHEET_TILE)
+	if x < 0 or y < 0 or x >= SHEET_BAND then
+		return nil
+	end
+	local col = sheet.cols[math.floor(y / 13) * SHEET_BAND + x + 1]
+	return col and col[y % 13 + 1]
+end
+-- The name of the tile under the pointer, as a chip says its own
+magic.SubscribeToEvent("MouseMove", function()
+	if sheet then
+		-- A window taken down some other way (a plan closed under it) is
+		-- forgotten rather than asked again
+		local ok, n = pcall(sheet_entry)
+		if not ok then
+			sheet = nil
+		elseif n then
+			sheet.say(string.format("%s  %06x", n.name, n.rgb))
+		end
+	end
+end)
+
+-- Takes the picker's window down; what is in it is not asked again
+function M.close_picker(w)
+	sheet = nil
+	w:Remove()
+end
+
+function M.color_sheet(parent, cols, o)
+	local bands = math.ceil(#cols / SHEET_BAND)
+	local w = math.min(#cols, SHEET_BAND)
+	local h = bands * 13 - 1
+	local image = magic.Image:new()
+	assert(image:SetSize(w, h, 4), "Image:SetSize")
+	local none = magic.Color(0, 0, 0, 0)
+	for y = 0, h - 1 do
+		for x = 0, w - 1 do
+			image:SetPixel(x, y, none)
+		end
+	end
+	local at_col, at_row = nil, nil
+	for ci, col in ipairs(cols) do
+		local x = (ci - 1) % SHEET_BAND
+		local y0 = math.floor((ci - 1) / SHEET_BAND) * 13
+		for ri, n in ipairs(col) do
+			image:SetPixel(x, y0 + ri - 1, to_color(n.rgb))
+			if n.rgb == o.rgb and not at_col then
+				at_col, at_row = x, y0 + ri - 1
+			end
+		end
+	end
+	local t = magic.Texture2D:new()
+	t:SetNumLevels(1)
+	-- Before the data: after it the tiles were drawn smeared together
+	t.filterMode = magic.FILTER_NEAREST
+	assert(t:SetData(image), "Texture2D:SetData")
+	local b = parent:CreateChild("Button")
+	b:SetFixedSize(w * SHEET_TILE, h * SHEET_TILE)
+	b.color = magic.Color(1, 1, 1, 0)
+	local face = b:CreateChild("BorderImage")
+	face:SetFixedSize(w * SHEET_TILE, h * SHEET_TILE)
+	face.texture = t
+	face.blendMode = magic.BLEND_ALPHA
+	-- The value's own tile, framed
+	if at_col then
+		local T = SHEET_TILE
+		-- 2 px: at a UI scale under one a 1 px line can round to nothing
+		for _, r in ipairs({{-2, -2, T + 4, 2}, {-2, T, T + 4, 2},
+				{-2, 0, 2, T}, {T, 0, 2, T}}) do
+			local line = face:CreateChild("BorderImage")
+			line:SetPosition(at_col * T + r[1], at_row * T + r[2])
+			line:SetFixedSize(r[3], r[4])
+			line.color = magic.Color(1, 1, 1)
+		end
+	end
+	sheet = {button = b, cols = cols, say = o.say}
+	magic.SubscribeToEvent(b, "Released", function()
+		local n = sheet and sheet_entry()
+		if n then
+			o.on_pick(n.rgb)
+		end
+	end)
+	return b
+end
+
 -- The colour picker ([FP_COLOR]): a window over the middle of the screen.
 -- o.title, o.rgb (the value now), o.named ({name, rgb} that fit this
 -- field), o.query (what the named ones are narrowed by), o.on_pick(rgb),
--- o.on_query(text), o.on_close(), o.pointer() -> the pointer in UI
--- coordinates (the sandbox's Input has no position, and a UI click event
--- is not whitelisted). A pick is a whole new value; the window
+-- o.on_query(text), o.on_close(). A pick is a whole new value; the window
 -- is drawn again from the value that comes back.
-local NAMED_SHOWN = 48
+local NAMED_SHOWN = 72
 function M.color_picker(o)
 	local w = M.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
 	w.minWidth = 340
 	M.label(w, o.title)
+	sheet = nil
 	local h, s, v = M.rgb_hsv(o.rgb)
 	local name_line
 	local function hover(text)
@@ -223,7 +325,7 @@ function M.color_picker(o)
 	magic.SubscribeToEvent(disk, "Released", function()
 		local at = disk.screenPosition
 		local c = (WHEEL - 1) / 2
-		local px, py = o.pointer()
+		local px, py = pointer()
 		local dx = px - at.x - c
 		local dy = py - at.y - c
 		local r = math.sqrt(dx * dx + dy * dy) / c
@@ -263,31 +365,64 @@ function M.color_picker(o)
 	M.button(side, "Done (Esc)", function() o.on_close() end)
 
 	if #o.named > 0 then
-		local shown = {}
 		local q = (o.query or ""):lower()
+		-- In rows: a family of its own ({family} from the file's fourth
+		-- column, a paint maker's hue with its lightnesses), else twelve
+		local rows, row, matches = {}, nil, 0
 		for _, n in ipairs(o.named) do
 			if q == "" or n.name:lower():find(q, 1, true) then
-				shown[#shown + 1] = n
+				matches = matches + 1
+				if not row or #row == 12 or n.family ~= row.family then
+					row = {family = n.family}
+					rows[#rows + 1] = row
+				end
+				row[#row + 1] = n
 			end
 		end
-		-- Narrowing is worth offering only when there is more than a screen
+		-- Narrowing is worth offering only when there is more than a page.
+		-- Enter on what leaves one colour, a code typed whole, takes it.
 		if #o.named > NAMED_SHOWN or q ~= "" then
-			M.field(w, "Find", o.query or "", function(t) o.on_query(t) end, 160)
+			M.field(w, "Find", o.query or "", function(t)
+				local one, count = nil, 0
+				for _, n in ipairs(o.named) do
+					if t ~= "" and n.name:lower():find(t:lower(), 1, true) then
+						one, count = n, count + 1
+						if n.name:lower():sub(-#t - 1) == " " .. t:lower() then
+							count = 1
+							break
+						end
+					end
+				end
+				o.on_query(t)
+				if count == 1 then
+					o.on_pick(one.rgb)
+				end
+			end, 160)
 		end
-		local row
-		for i, n in ipairs(shown) do
-			if i > NAMED_SHOWN then
-				M.label(w, (#shown - NAMED_SHOWN) .. " more; Find narrows them")
-				break
+		if matches > NAMED_SHOWN then
+			M.color_sheet(w, rows, {rgb = o.rgb, on_pick = o.on_pick,
+					say = hover})
+		else
+			for _, r in ipairs(rows) do
+				local line = M.row(w)
+				for _, n in ipairs(r) do
+					M.chip(line, n.rgb, 18, function() o.on_pick(n.rgb) end, hover,
+							string.format("%s  %06x", n.name, n.rgb))
+				end
 			end
-			if (i - 1) % 12 == 0 then
-				row = M.row(w)
-			end
-			M.chip(row, n.rgb, 18, function() o.on_pick(n.rgb) end, hover,
-					string.format("%s  %06x", n.name, n.rgb))
+		end
+		if matches == 0 then
+			M.label(w, "Nothing matches")
 		end
 	end
 	name_line = M.label(w, "")
+	-- What the value is called, when it is one of the named ones
+	for _, n in ipairs(o.named) do
+		if n.rgb == o.rgb then
+			name_line:SetText(n.name)
+			break
+		end
+	end
 	return w
 end
 

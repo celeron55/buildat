@@ -3083,14 +3083,14 @@ end
 local named_colours = nil
 close_picker = function()
 	if picker_win then
-		picker_win:Remove()
+		panel.close_picker(picker_win)
 		picker_win = nil
 	end
 	S.picker = nil
 end
 local function build_picker()
 	if picker_win then
-		picker_win:Remove()
+		panel.close_picker(picker_win)
 		picker_win = nil
 	end
 	local pk = S.picker
@@ -3101,12 +3101,16 @@ local function build_picker()
 	end
 	if not named_colours then
 		named_colours = {}
-		local text = buildat.get_file_content("main/colors.txt") or ""
-		for line in text:gmatch("[^\r\n]+") do
-			local g, name, hex = line:match("^(%w+)|([^|]+)|(%x%x%x%x%x%x)$")
-			if g then
-				named_colours[#named_colours + 1] = {group = g, name = name,
-						rgb = tonumber(hex, 16)}
+		for _, file in ipairs({"main/colors.txt", "main/colors_tikkurila.txt"}) do
+			local text = buildat.get_file_content(file) or ""
+			for line in text:gmatch("[^\r\n]+") do
+				local g, name, hex, family = line:match(
+						"^(%w+)|([^|]+)|(%x%x%x%x%x%x)|?([^|]*)$")
+				if g then
+					named_colours[#named_colours + 1] = {group = g, name = name,
+							rgb = tonumber(hex, 16), family = family ~= "" and family
+							or nil}
+				end
 			end
 		end
 	end
@@ -3127,11 +3131,7 @@ local function build_picker()
 			pk.query = q
 			build_picker()
 		end,
-		on_close = close_picker,
-		pointer = function()
-			local sc = magic.ui.scale
-			return S.mx / sc, S.my / sc
-		end})
+		on_close = close_picker})
 end
 
 -- Which named colours fit a field of an entry: a wood's own colour is a
