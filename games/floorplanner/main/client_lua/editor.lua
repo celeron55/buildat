@@ -4359,8 +4359,12 @@ do
 			close_pause()
 			doc.close_plan()
 		end)
-		panel.button(w, "Leave to the launcher", function() buildat.leave() end)
-		panel.button(w, "Quit", function() buildat.quit() end)
+		-- A browser tab has no launcher to leave to, and is closed as a tab
+		-- (only the web page sets BUILDAT_PAGE_HTTPS)
+		if buildat.get_env("BUILDAT_PAGE_HTTPS") == nil then
+			panel.button(w, "Leave to the launcher", function() buildat.leave() end)
+			panel.button(w, "Quit", function() buildat.quit() end)
+		end
 	end
 
 	close_pause = function()
