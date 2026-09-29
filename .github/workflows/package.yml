@@ -37,6 +37,14 @@ jobs:
           name: linux-smoke
           path: Build/package/out/smoke/
           if-no-files-found: ignore
+      # The build trees' logs, which a failed build names and which stayed
+      # in the runner: 0.5.0 to 0.5.2 failed with nothing to read
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: linux-logs
+          path: Build/package/out/logs/
+          if-no-files-found: ignore
   windows:
     runs-on: ubuntu-latest
     steps:
@@ -69,6 +77,12 @@ jobs:
         with:
           name: windows-smoke
           path: Build/package/out/smoke/
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: windows-logs
+          path: Build/package/out/logs/
           if-no-files-found: ignore
   # One release from both builds: two jobs on one tag would race on
   # creating it. A tag with a hash in it is a squash, a prerelease; a
