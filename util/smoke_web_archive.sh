@@ -1,12 +1,12 @@
 #!/bin/bash
-# A server archive on a bare box ([LINUX_SERVER] in
+# A web archive on a bare box ([LINUX_SERVER] in
 # doc/plan/packaging_plan.md):
 #
-#   util/smoke_server_archive.sh Build/package/out/buildat-*-server.tar.gz
+#   util/smoke_web_archive.sh Build/package/out/buildat-*-web.tar.gz
 #
 # Unpacks it in debian:bookworm-slim with nothing added but libcurl4 --
-# and build-essential for the "server" archive, which compiles the games on
-# the box; the "server-precompiled" one has to start with no compiler and
+# and build-essential for the "web" archive, which compiles the games on
+# the box; the "web-precompiled" one has to start with no compiler and
 # compile nothing -- starts games/floorplanner there, and checks from
 # outside with util/test_web_transport.py that it serves the web client's
 # page and WebSocket and a native client's TCP. Needs docker, and python3
@@ -15,13 +15,13 @@ set -eu
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 archive=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 port="${PORT:-$(( 29400 + (RANDOM % 90) ))}"
-name="buildat-server-smoke-$$"
+name="buildat-web-smoke-$$"
 case "$archive" in
-	*-server-precompiled.tar.gz) packages="libcurl4"; precompiled=1 ;;
-	*-server.tar.gz) packages="libcurl4 build-essential"; precompiled= ;;
-	*) echo "not a server archive: $archive" >&2; exit 2 ;;
+	*-web-precompiled.tar.gz) packages="libcurl4"; precompiled=1 ;;
+	*-web.tar.gz) packages="libcurl4 build-essential"; precompiled= ;;
+	*) echo "not a web archive: $archive" >&2; exit 2 ;;
 esac
-log=$(mktemp /tmp/buildat_smoke_server_archive.XXXXXX)
+log=$(mktemp /tmp/buildat_smoke_web_archive.XXXXXX)
 cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 echo "smoke: $(basename "$archive") in debian:bookworm-slim with $packages, port $port"

@@ -17,12 +17,12 @@ jobs:
         with:
           # package_in_docker.sh names the archives by the short hash
           fetch-depth: 1
-      # The server archives' smoke runs on the runner, against a bare
+      # The web archives' smoke runs on the runner, against a bare
       # container ([LINUX_SERVER]); its transport test is python's
-      - name: The server archives' smoke needs websockets
+      - name: The web archives' smoke needs websockets
         run: sudo apt-get install -y python3-websockets
-      # Also the server archives ([LINUX_SERVER]): *-linux-x86_64-server
-      # and -server-precompiled, which carry the web client and are in
+      # Also the web archives ([LINUX_SERVER]): *-linux-x86_64-web
+      # and -web-precompiled, which carry the web client and are in
       # the upload and the release by the same *.tar.gz
       - name: Package in the Linux image
         run: JOBS=$(nproc) util/package_in_docker.sh linux

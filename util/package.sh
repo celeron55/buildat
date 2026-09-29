@@ -3,8 +3,8 @@
 #
 #   util/package.sh linux     -> buildat-<version>-<hash>-linux-x86_64-portable.tar.gz
 #                                buildat-<version>-<hash>-linux-x86_64-xdg.tar.gz
-#                                buildat-<version>-<hash>-linux-x86_64-server.tar.gz
-#                                buildat-<version>-<hash>-linux-x86_64-server-precompiled.tar.gz
+#                                buildat-<version>-<hash>-linux-x86_64-web.tar.gz
+#                                buildat-<version>-<hash>-linux-x86_64-web-precompiled.tar.gz
 #   util/package.sh windows   -> buildat-<version>-<hash>-win64.zip (a cross build)
 #
 # The version is the VERSION file's and the hash the tree's short git hash
@@ -575,12 +575,16 @@ build_web() {
 prebuild_games() {
 	local stage="$1" name="$2"
 	local logs="$stage/../prebuild-games-$name"
-	local g log port srv udir failed=""
+	local g log port=29799 srv udir failed=""
 	mkdir -p "$logs"
 	for g in $(ls "$stage/games"); do
 		[ -d "$stage/games/$g" ] || continue
 		log="$logs/$g.log"
-		port=$(( 29700 + (RANDOM % 90) ))
+		# A port of its own, counted up past any that is taken: one drawn
+		# at random came out the same for game after game, and the last
+		# game's server still had it
+		port=$((port + 1))
+		while (echo > "/dev/tcp/127.0.0.1/$port") 2>/dev/null; do port=$((port + 1)); done
 		udir=$(mktemp -d "/tmp/buildat_package_prebuild_games.XXXXXX")
 		PKG_TMP_DIRS="$PKG_TMP_DIRS $udir"
 		(cd "$stage" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
@@ -631,16 +635,16 @@ bundle_libs() {
 	done
 }
 
-# The server archives ([LINUX_SERVER]), out of another archive's stage:
-# "server" is the portable archive's with the libraries a bare box lacks,
-# and compiles the games on the box with its c++; "server-precompiled" is
-# the server archive's with every game's modules prebuilt as well, and
+# The web archives ([LINUX_SERVER]), out of another archive's stage:
+# "web" is the portable archive's with the libraries a bare box lacks,
+# and compiles the games on the box with its c++; "web-precompiled" is
+# the web archive's with every game's modules prebuilt as well, and
 # starts on a box with no compiler
-make_server_archive() {
+make_web_archive() {
 	local from="$1" name="$2" precompiled="${3:-}"
 	local src="$root/stage/$from" stage="$root/stage/$name"
 	rm -rf "$stage"; cp -a "$src" "$stage"
-	[ -s "$stage/web/buildat.wasm" ] || { echo "server archive: no web/ in the stage" >&2; return 1; }
+	[ -s "$stage/web/buildat.wasm" ] || { echo "web archive: no web/ in the stage" >&2; return 1; }
 	if [ -n "$precompiled" ]; then
 		prebuild_games "$stage" "$name" >&2 || return 1
 	else
@@ -733,13 +737,13 @@ linux)
 	build_web
 	a=$(make_one "buildat-$version-linux-x86_64-portable" -DPORTABLE=TRUE)
 	b=$(make_one "buildat-$version-linux-x86_64-xdg" -DPORTABLE=FALSE)
-	c=$(make_server_archive "buildat-$version-linux-x86_64-portable" \
-		"buildat-$version-linux-x86_64-server")
-	d=$(make_server_archive "buildat-$version-linux-x86_64-server" \
-		"buildat-$version-linux-x86_64-server-precompiled" precompiled)
+	c=$(make_web_archive "buildat-$version-linux-x86_64-portable" \
+		"buildat-$version-linux-x86_64-web")
+	d=$(make_web_archive "buildat-$version-linux-x86_64-web" \
+		"buildat-$version-linux-x86_64-web-precompiled" precompiled)
 	smoke_test "$a"
 	echo "archives:"; echo "  $a"; echo "  $b"; echo "  $c"; echo "  $d"
-	# The server archives on a bare box are util/smoke_server_archive.sh's,
+	# The web archives on a bare box are util/smoke_web_archive.sh's,
 	# run by util/package_in_docker.sh outside this container
 	;;
 windows)

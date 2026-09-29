@@ -50,20 +50,23 @@ docker run --rm -i \
 		# And the build trees' logs, for reading a failure from outside
 		mkdir -p /out/logs && for d in Build/package/build-*; do
 			b=\$(basename \$d); cp \$d/cmake.log /out/logs/\$b.cmake.log 2>/dev/null
-			cp \$d/build.log /out/logs/\$b.build.log 2>/dev/null; done; true
+			cp \$d/build.log /out/logs/\$b.build.log 2>/dev/null; done
+		# The web client's build and the per-game prebuilds ([LINUX_SERVER])
+		cp Build/package/build_web.log /out/logs/ 2>/dev/null
+		cp -r Build/package/stage/prebuild-games-* /out/logs/ 2>/dev/null; true
 		# And the smoke test's leavings, for reading a failure from outside
 		mkdir -p /out/smoke && cp /tmp/tmp.*/shot.png /tmp/tmp.*/*.log /out/smoke/ 2>/dev/null || true
 		exit \$status
 	" < "$tarball"
 rm -f "$tarball"
-# The server archives on a bare box, which only a host with docker can
+# The web archives on a bare box, which only a host with docker can
 # make ([LINUX_SERVER]): a slim Debian with the least a server needs
 if [ "$target" = linux ]; then
 	mkdir -p "$out/smoke"
-	for a in "$out"/buildat-*"$hash"-linux-x86_64-server.tar.gz \
-			"$out"/buildat-*"$hash"-linux-x86_64-server-precompiled.tar.gz; do
+	for a in "$out"/buildat-*"$hash"-linux-x86_64-web.tar.gz \
+			"$out"/buildat-*"$hash"-linux-x86_64-web-precompiled.tar.gz; do
 		SMOKE_LOG="$out/smoke/$(basename "$a" .tar.gz).log" \
-			"$here/util/smoke_server_archive.sh" "$a"
+			"$here/util/smoke_web_archive.sh" "$a"
 	done
 fi
 echo "archives in $out:"
