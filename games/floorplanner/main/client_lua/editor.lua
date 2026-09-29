@@ -1595,6 +1595,7 @@ local function pick_surface()
 	end
 	for id, r in pairs(room_data) do
 		local surfaces = {{"floor", 2}}
+		-- (the 3D pick: best_t is how far along the ray it is)
 		if overhead_node.enabled then
 			surfaces[2] = {"ceiling", room_ceiling(doc.ents[id])}
 		end
@@ -1604,6 +1605,9 @@ local function pick_surface()
 				best, best_t = {kind = s[1], id = id}, t
 			end
 		end
+	end
+	if best then
+		best.t = best_t
 	end
 	return best
 end
@@ -3532,6 +3536,22 @@ end
 -- The use key's, defined with it below
 local use, use_target
 
+-- What a right or middle drag in 3D turns about or pans by: the point the
+-- pointer is on, in world metres -- the thing under it, or where its ray
+-- meets the floor -- or nil when it points at the sky
+local function camera_pivot()
+	local o, d = cursor_ray()
+	local s = pick_surface()
+	if s and s.t then
+		return {x = o.x + d.x * s.t, y = o.y + d.y * s.t, z = o.z + d.z * s.t}
+	end
+	local x, z, t = ray_at_height(0)
+	if x then
+		return {x = o.x + d.x * t, y = 0, z = o.z + d.z * t}
+	end
+	return nil
+end
+
 function M.mouse_down(button)
 	if S.view == "walk" and S.walk_released and not over_ui() then
 		-- A click on the view takes the mouse back
@@ -3562,17 +3582,23 @@ function M.mouse_down(button)
 			return
 		end
 		if S.view == "3d" then
-			S.looking = true
-			magic.input:SetMouseMode(magic.MM_RELATIVE)
+			-- Orbiting what is pointed
+			local p = camera_pivot()
+			if p then
+				S.orbit = p
+				magic.input:SetMouseMode(magic.MM_RELATIVE)
+			end
 		end
 		return
 	end
 	if button == magic.MOUSEB_MIDDLE then
-		-- The plan pans; the 3D camera turns, as with the right button
+		-- The plan and the 3D camera pan
 		if S.view == "2d" then
 			S.panning = true
 		elseif not S.captured then
-			S.looking = true
+			local p = camera_pivot()
+			S.pan3d = {dist = p and geom.len(geom.len(p.x - S.pos.x,
+					p.y - S.pos.y), p.z - S.pos.z) or 5}
 			magic.input:SetMouseMode(magic.MM_RELATIVE)
 		end
 		return
@@ -3586,6 +3612,12 @@ function M.mouse_up(button)
 		return
 	end
 	if S.captured and (S.tool == "voxel" or button ~= magic.MOUSEB_LEFT) then
+		return
+	end
+	if (button == magic.MOUSEB_RIGHT and S.orbit) or
+			(button == magic.MOUSEB_MIDDLE and S.pan3d) then
+		S.orbit, S.pan3d = nil, nil
+		magic.input:SetMouseMode(magic.MM_ABSOLUTE)
 		return
 	end
 	if button == magic.MOUSEB_RIGHT or (button == magic.MOUSEB_MIDDLE and
@@ -3617,6 +3649,31 @@ function M.mouse_up(button)
 end
 
 function M.mouse_move(x, y, dx, dy)
+	if S.orbit then
+		-- The camera goes round the point with the view: its offset from
+		-- the point is held in the camera's own frame, so the point stays
+		-- where it was on the screen
+		local p = S.orbit
+		local ox, oy, oz = geom.unrot(S.pos.x - p.x, S.pos.y - p.y,
+				S.pos.z - p.z, S.pitch, S.yaw, 0)
+		S.yaw = S.yaw + dx * 0.3
+		S.pitch = math.max(-89, math.min(89, S.pitch + dy * 0.3))
+		local wx, wy, wz = geom.rot(ox, oy, oz, S.pitch, S.yaw, 0)
+		S.pos = {x = p.x + wx, y = p.y + wy, z = p.z + wz}
+		return
+	end
+	if S.pan3d then
+		-- Across the view, as far as the pointed point moves under the
+		-- pointer
+		local _, h = screen_size()
+		local k = S.pan3d.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
+		local rx, ry, rz = geom.rot(1, 0, 0, S.pitch, S.yaw, 0)
+		local ux, uy, uz = geom.rot(0, 1, 0, S.pitch, S.yaw, 0)
+		S.pos = {x = S.pos.x - (rx * dx - ux * dy) * k,
+				y = S.pos.y - (ry * dx - uy * dy) * k,
+				z = S.pos.z - (rz * dx - uz * dy) * k}
+		return
+	end
 	if S.looking then
 		S.yaw = S.yaw + dx * 0.15
 		S.pitch = math.max(-89, math.min(89, S.pitch + dy * 0.15))
@@ -3794,7 +3851,13 @@ local function commit_typed()
 end
 
 function M.key_down(key, event_data)
-	local ctrl = event_data and event_data:GetInt("Qualifiers") % 4 >= 2
+	local qualifiers = event_data and event_data:GetInt("Qualifiers") or 0
+	local ctrl = qualifiers % 4 >= 2
+	-- Alt with anything is the window manager's: Alt+Tab switches windows,
+	-- not views
+	if qualifiers % 8 >= 4 then
+		return
+	end
 	if S.draw or S.corners then
 		local digit = key >= magic.KEY_0 and key <= magic.KEY_9
 		if digit then
@@ -4206,8 +4269,8 @@ do
 		if S.view == "2d" then
 			g.middle = "drag: pan the plan"
 		elseif not S.captured then
-			g.right = "drag: turn the view"
-			g.middle = "drag: turn the view"
+			g.right = "drag: orbit round what the pointer is on"
+			g.middle = "drag: pan the view"
 		end
 		local cur = default_material()
 		local edit = doc.can("edit")
