@@ -2423,8 +2423,9 @@ do
 					faceless = faceless + 1
 				end
 			elseif e and kind == "room" then
-				ops[#ops + 1] = {op = "set", ent = {id = id,
-						ints = {mat_floor = mat}}}
+				ops[#ops + 1] = {op = "set", ent = {id = id, ints =
+						S.sel_face[id] == "ceiling" and {mat_ceiling = mat} or
+						{mat_floor = mat}}}
 			end
 		end
 		if faceless > 0 then
@@ -2845,7 +2846,12 @@ local function build_props()
 			panel.label(props, "Floor " .. m2(r.net) .. " net")
 			panel.label(props, m2(r.gross) .. " to the wall lines")
 		end
-		panel.button(props, "Apply the palette entry (floor)", apply_material)
+		local on_ceiling = S.sel_face[sel.id] == "ceiling"
+		panel.label(props, "Selected by its " .. (on_ceiling and "ceiling, #" ..
+				sel.ints.mat_ceiling or "floor, #" .. sel.ints.mat_floor))
+		panel.button(props, "The palette entry on the " .. (on_ceiling and
+				"ceiling" or "floor") .. " (double click)",
+				function() apply_material() end)
 		panel.button(props, "Delete (Del)", delete_selected)
 	elseif sel and sel.type == "node" then
 		panel.label(props, "Node " .. sel.id)
@@ -3261,7 +3267,11 @@ do
 				return {kind = "node", id = n}
 			elseif s then
 				return {kind = (s.kind == "wall" or s.kind == "image") and s.kind or
-						"room", id = s.id, side = s.side}
+						"room", id = s.id,
+						-- A room is selected by its floor or, from under it, its
+						-- ceiling, as a wall is by a face
+						side = s.kind == "ceiling" and "ceiling" or
+						s.kind == "floor" and "floor" or s.side}
 			end
 		elseif S.tool == "node" then
 			local n = x and nearest_node(x, z, snap_radius())
@@ -3286,7 +3296,7 @@ do
 					w.mat_right or (w.mat_core ~= 0 and w.mat_core or w.mat_left)
 			return m
 		elseif t.kind == "room" then
-			return e.ints.mat_floor
+			return t.side == "ceiling" and e.ints.mat_ceiling or e.ints.mat_floor
 		elseif t.kind == "instance" then
 			local def = doc.ents[e.ints.def].ints
 			return def.kind ~= KIND.voxel and def.mat or nil
@@ -4531,7 +4541,8 @@ do
 		if tool == "select" or tool == "node" then
 			local t = press_target()
 			if t then
-				hl({kind = t.kind, id = t.id})
+				hl({kind = t.kind == "room" and t.side == "ceiling" and "ceiling" or
+						t.kind, id = t.id})
 				local name = name_of(t.id)
 				if S.shift then
 					g.left = (S.sel[t.id] and "take " .. name .. " out of" or
@@ -4542,7 +4553,9 @@ do
 				else
 					g.left = "select " .. name .. (t.kind == "wall" and t.side and
 							(" by its " .. (t.side == "core" and "top" or
-							t.side .. " face")) or "") .. (edit and "; drag: move it" or "")
+							t.side .. " face")) or t.kind == "room" and t.side and
+							(" by its " .. t.side) or "") ..
+							(edit and "; drag: move it" or "")
 				end
 				if t.kind == "node" and edit then
 					g.left = g.left .. " (onto another node: merge them)"
@@ -4907,7 +4920,8 @@ local function draw_overlay()
 			world_label((w.ax + w.bx) / 2, 0, (w.az + w.bz) / 2,
 					mm_text(geom.len(w.bx - w.ax, w.bz - w.az)))
 		elseif kind == "room" and room_data[id] then
-			outline(room_data[id].pts, accent)
+			outline(room_data[id].pts, accent, S.sel_face[id] == "ceiling" and
+					S.view ~= "2d" and {W(room_ceiling(doc.ents[id])) - 0.004} or nil)
 			outline(room_data[id].inner, magic.Color(0.2, 0.6, 1.0))
 		elseif kind == "image" and image_data[id] then
 			outline(image_data[id].foot, accent)
