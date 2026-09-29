@@ -426,6 +426,67 @@ function M.stair_steps(w, h, d, n)
 	return out
 end
 
+-- A polygon less the convex holes over it (all counter-clockwise), as the
+-- polygons that are left: for each hole, the part outside each of its edges
+-- that is inside the edges before it
+-- simplified: clipping a concave polygon can leave pieces joined by a
+-- zero-width sliver, which triangulate as nothing
+function M.minus(pts, holes)
+	local pieces = {pts}
+	for _, hole in ipairs(holes) do
+		local out = {}
+		for _, piece in ipairs(pieces) do
+			for i = 1, #hole do
+				local a, b = hole[i], hole[i % #hole + 1]
+				local l = len(b[1] - a[1], b[2] - a[2])
+				if l > 0 then
+					-- Outward of a counter-clockwise edge is to its right
+					local nx, nz = (b[2] - a[2]) / l, -(b[1] - a[1]) / l
+					local p = M.clip(piece, {}, -nx, -nz, -(nx * a[1] + nz * a[2]))
+					for j = 1, i - 1 do
+						local c, d = hole[j], hole[j % #hole + 1]
+						local m = len(d[1] - c[1], d[2] - c[2])
+						if m > 0 and #p >= 3 then
+							local mx, mz = (d[2] - c[2]) / m, -(d[1] - c[1]) / m
+							p = M.clip(p, {}, mx, mz, mx * c[1] + mz * c[2])
+						end
+					end
+					if #p >= 3 and M.area(p) > 1 then
+						out[#out + 1] = p
+					end
+				end
+			end
+		end
+		pieces = out
+	end
+	return pieces
+end
+
+-- Which floor a walker is on, of floors {{id, y (its level), under (a
+-- room of it is under the walker)}, ...} with its feet at `feet`: the id to
+-- change to, or nil to stay on cur. Up to a floor over the walker once the
+-- feet are within 200 mm below it, down once they are 300 mm below cur's,
+-- and across to another building's rooms from outside cur's. The 100 mm
+-- between is so a step at the threshold does not flip them.
+function M.pick_floor(floors, cur, feet)
+	local c, best
+	for _, f in ipairs(floors) do
+		if f.id == cur then
+			c = f
+		end
+		if f.under and feet >= f.y - 200 and (not best or f.y > best.y) then
+			best = f
+		end
+	end
+	if not c or not best or best == c then
+		return nil
+	end
+	if best.y > c.y + 1 or feet < c.y - 300 or not c.under then
+		return best.id
+	end
+	return nil
+end
+
 --
 -- Self-checks
 --
@@ -566,6 +627,46 @@ do
 		x, z, feet = M.walk(list, x, z + 20, feet, 250, 250, 1750)
 	end
 	near(feet, 3000, "walked up the parametric stairs")
+end
+
+do
+	local function total(pieces)
+		local a = 0
+		for _, p in ipairs(pieces) do
+			a = a + M.area(p)
+		end
+		return a
+	end
+	local room = {{0, 0}, {4000, 0}, {4000, 4000}, {0, 4000}}
+	near(total(M.minus(room, {{{1000, 1000}, {2000, 1000}, {2000, 3000},
+			{1000, 3000}}})), 14e6, "a stairwell in a room")
+	near(total(M.minus(room, {{{5000, 0}, {6000, 0}, {6000, 1000},
+			{5000, 1000}}})), 16e6, "a hole beside the room")
+	near(total(M.minus(room, {{{3000, 3000}, {5000, 3000}, {5000, 5000},
+			{3000, 5000}}})), 15e6, "a hole over a corner")
+	near(total(M.minus(room, {{{1000, 1000}, {2000, 1000}, {2000, 2000},
+			{1000, 2000}}, {{2500, 2500}, {3500, 2500}, {3500, 3500},
+			{2500, 3500}}})), 14e6, "two holes")
+end
+
+do
+	-- A floor at 0 and one at 3000 over it, as from the lower one
+	local function fl(over)
+		return {{id = 1, y = 0, under = true}, {id = 2, y = 3000, under = over}}
+	end
+	assert(M.pick_floor(fl(true), 1, 2700) == nil, "on the stairs, below")
+	assert(M.pick_floor(fl(true), 1, 2800) == 2, "up at 200 mm below")
+	assert(M.pick_floor(fl(false), 1, 3000) == nil, "no room over the walker")
+	-- The same from the upper one, whose level is then 0
+	local up = {{id = 1, y = -3000, under = true}, {id = 2, y = 0, under = true}}
+	assert(M.pick_floor(up, 2, -200) == nil, "a step down stays up")
+	assert(M.pick_floor(up, 2, -300) == nil, "300 mm down stays up")
+	assert(M.pick_floor(up, 2, -301) == 1, "further down is the lower floor")
+	-- Out of one building's rooms and into another's at the same level
+	local side = {{id = 1, y = 0, under = false}, {id = 3, y = 0, under = true}}
+	assert(M.pick_floor(side, 1, 0) == 3, "into the other building")
+	assert(M.pick_floor({{id = 1, y = 0, under = false}}, 1, 0) == nil,
+			"outside, nowhere to go")
 end
 
 return M

@@ -1398,7 +1398,83 @@ end
 -- nodes that moved
 local rebuild
 do
-local function build_layout(seen_voxels)
+-- Stairwells ([FP_LAYOUTS]): stairs whose top is within STAIRWELL mm of
+-- another layout's floor cut their footprint out of that floor and out of
+-- the ceilings of their own. layouts: every layout, cur the current one's
+-- fields. Returns layout id -> {floor = {pts, ...}, ceiling = {...}}.
+local STAIRWELL = 200
+function place.stairwells(layouts, cur)
+	local out, rels, list = {}, {}, {}
+	for _, l in ipairs(layouts) do
+		out[l.id] = {floor = {}, ceiling = {}}
+		rels[l.id] = place.rel(l.ints, cur)
+		S.view_layout = l.id
+		for _, e in ipairs(of_type("instance")) do
+			local i = e.ints
+			local def = doc.ents[i.def]
+			if def and def.ints.kind == KIND.stairs and i.pitch == 0 and
+					i.roll == 0 then
+				local p = def.ints
+				local top = i.align == 1 and settings().ceiling - i.offset or
+						i.offset + p.h
+				local foot = {}
+				for k, c in ipairs({{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}) do
+					local fx, _, fz = geom.rot(c[1] * p.w / 2, 0, c[2] * p.d / 2, 0,
+							i.yaw / 1000, 0)
+					foot[k] = {i.x + fx, i.z + fz}
+				end
+				if not geom.is_ccw(foot) then
+					foot = {foot[4], foot[3], foot[2], foot[1]}
+				end
+				list[#list + 1] = {layout = l.id, top = top, foot = foot}
+			end
+		end
+	end
+	S.view_layout = S.layout
+	for _, st in ipairs(list) do
+		local r = rels[st.layout]
+		for id, u in pairs(rels) do
+			if id ~= st.layout and math.abs(st.top + r.y - u.y) <= STAIRWELL then
+				local pts = {}
+				for k, q in ipairs(st.foot) do
+					local x, _, z = place.point(r, q[1], 0, q[2])
+					local ux, _, uz = place.unpoint(u, x, 0, z)
+					pts[k] = {ux, uz}
+				end
+				table.insert(out[id].floor, pts)
+				table.insert(out[st.layout].ceiling, st.foot)
+			end
+		end
+	end
+	return out
+end
+
+-- Walking changes the current layout (geom.pick_floor)
+function place.follow(w)
+	local floors = {}
+	for _, l in ipairs(place.layers) do
+		local lx, _, lz = place.unpoint(l.rel, w.x, 0, w.z)
+		local under = false
+		for _, r in pairs(l.rooms) do
+			if geom.point_in_polygon(lx, lz, r.pts) then
+				under = true
+				break
+			end
+		end
+		floors[#floors + 1] = {id = l.id, y = l.rel.y, under = under}
+	end
+	local id = geom.pick_floor(floors, S.layout, w.feet)
+	if id then
+		place.switch(id)
+		-- Stale until the rebuild the switch asks for
+		place.layers = {}
+		doc.notice("On " .. doc.ents[id].strs.name)
+	end
+end
+
+-- wells: {floor = {pts, ...}, ceiling = {pts, ...}}, the stairwells cut in
+-- this layout's rooms
+local function build_layout(seen_voxels, wells)
 	solids = {}
 	wall_data = {}
 	for _, e in ipairs(of_type("wall")) do
@@ -1530,11 +1606,16 @@ local function build_layout(seen_voxels)
 		local e = doc.ents[id]
 		if #r.pts >= 3 then
 			local g = geometry(P.walls)
-			flat_polygon(g, r.pts, 2, UP, row(e.ints.mat_floor))
+			r.floor = geom.minus(r.pts, wells.floor)
+			for _, pts in ipairs(r.floor) do
+				flat_polygon(g, pts, 2, UP, row(e.ints.mat_floor))
+			end
 			commit(g, lit_material)
 			local cg = geometry(P.overhead)
-			flat_polygon(cg, r.pts, room_ceiling(e), DOWN,
-					row(e.ints.mat_ceiling))
+			for _, pts in ipairs(geom.minus(r.pts, wells.ceiling)) do
+				flat_polygon(cg, pts, room_ceiling(e), DOWN,
+						row(e.ints.mat_ceiling))
+			end
 			commit(cg, lit_material)
 		end
 	end
@@ -1595,8 +1676,8 @@ local function build_layout(seen_voxels)
 	end
 	-- A floor is something to stand on, when walking up to another layout
 	for _, r in pairs(room_data) do
-		if #r.pts >= 3 then
-			solids[#solids + 1] = {pts = r.pts, y0 = 0, y1 = 0, floor = true}
+		for _, pts in ipairs(r.floor or {}) do
+			solids[#solids + 1] = {pts = pts, y0 = 0, y1 = 0, floor = true}
 		end
 	end
 	update_voxel_meshes(seen_voxels)
@@ -1634,6 +1715,7 @@ rebuild = function()
 	end
 	local seen_voxels, all_solids = {}, {}
 	place.layers = {}
+	local wells = place.stairwells(order, cur)
 	for _, l in ipairs(order) do
 		local r = place.rel(l.ints, cur)
 		local parts = place.parts[l.id]
@@ -1652,7 +1734,7 @@ rebuild = function()
 			n.rotation = magic.Quaternion(0, r.yaw, 0)
 		end
 		P, S.view_layout = parts, l.id
-		build_layout(seen_voxels)
+		build_layout(seen_voxels, wells[l.id])
 		for _, sd in ipairs(solids) do
 			local pts = {}
 			for k, q in ipairs(sd.pts) do
@@ -1662,7 +1744,8 @@ rebuild = function()
 			all_solids[#all_solids + 1] = {pts = pts, y0 = sd.y0 + r.y,
 					y1 = sd.y1 + r.y, floor = sd.floor}
 		end
-		place.layers[#place.layers + 1] = {insts = inst_data, rel = r}
+		place.layers[#place.layers + 1] = {id = l.id, insts = inst_data, rel = r,
+				rooms = room_data}
 	end
 	solids = all_solids
 	for id, m in pairs(voxel_meshes) do
@@ -5337,6 +5420,7 @@ do
 			w.x, w.z, w.feet = collide(w.x + dx, w.z + dz, w.feet)
 		end
 		S.pos = {x = w.x / 1000, y = (w.feet + S.eye) / 1000, z = w.z / 1000}
+		place.follow(w)
 	end
 
 	end
