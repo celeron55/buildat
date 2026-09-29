@@ -4160,6 +4160,12 @@ do
 				S.yaw, S.pitch = 0, 90
 				set_view("3d")
 			end
+			if S.view == "walk" and not over_ui() then
+				-- Walking at the pointer: a right drag turns, as the mouse does
+				-- in the crosshair
+				S.looking = true
+				magic.input:SetMouseMode(magic.MM_RELATIVE)
+			end
 			if S.view == "3d" then
 				-- Orbiting what is pointed
 				local p = camera_pivot()
@@ -4174,6 +4180,12 @@ do
 			-- The plan and the 3D camera pan
 			if S.view == "2d" then
 				S.panning = true
+			elseif S.view == "walk" and not S.captured then
+				-- And a middle drag walks, as WASD do: up is forward
+				if not over_ui() then
+					S.walk_drag = true
+					magic.input:SetMouseMode(magic.MM_RELATIVE)
+				end
 			elseif not S.captured then
 				local p = camera_pivot()
 				S.pan3d = {dist = p and geom.len(geom.len(p.x - S.pos.x,
@@ -4191,6 +4203,11 @@ do
 			return
 		end
 		if S.captured and (S.tool == "voxel" or button ~= magic.MOUSEB_LEFT) then
+			return
+		end
+		if button == magic.MOUSEB_MIDDLE and S.walk_drag then
+			S.walk_drag = false
+			magic.input:SetMouseMode(magic.MM_ABSOLUTE)
 			return
 		end
 		if (button == magic.MOUSEB_RIGHT and S.orbit) or
@@ -4270,6 +4287,12 @@ do
 		if S.looking then
 			S.yaw = S.yaw + dx * 0.15
 			S.pitch = math.max(-89, math.min(89, S.pitch + dy * 0.15))
+			return
+		end
+		if S.walk_drag then
+			-- 10 mm a pixel, Shift two and a half times that as it runs
+			local mm = S.shift and 25 or 10
+			walk(0, -dy, dx, mm)
 			return
 		end
 		S.mx, S.my = x, y
@@ -4648,11 +4671,13 @@ do
 		return x, z, ground
 	end
 
-	walk = function(dt, f, r)
+	-- dt: seconds of walking at the keys' speed, or mm: that far, which is
+	-- a middle drag's
+	walk = function(dt, f, r, mm)
 		local input = magic.input
 		local w = S.walk
 		-- Shift runs; Ctrl is the shortcuts' (Ctrl+D is a copy)
-		local speed = (S.shift and 3500 or 1400) * dt
+		local speed = mm or (S.shift and 3500 or 1400) * dt
 		local yaw = math.rad(S.yaw)
 		local dx = (math.sin(yaw) * f + math.cos(yaw) * r) * speed
 		local dz = (math.cos(yaw) * f - math.sin(yaw) * r) * speed
@@ -4867,9 +4892,12 @@ do
 		end
 		-- At the pointer of a view with a crosshair, a click goes up into it
 		if crosshair_view() and not S.captured then
-			return {hl = {}, left = S.view == "walk" and
+			local walking = S.view == "walk"
+			return {hl = {}, left = walking and
 					"into the crosshair: walk, look and point (Esc: back)" or
-					"into the crosshair to dig and place (Esc: back)"}
+					"into the crosshair to dig and place (Esc: back)",
+					right = walking and "drag: turn" or nil,
+					middle = walking and "drag: walk" or nil}
 		end
 		local g = {hl = {}}
 		local function hl(t)
