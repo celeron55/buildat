@@ -100,9 +100,10 @@ struct CCompiler: public Compiler
 	{
 		if(m_compiler_command.empty()){
 			// [LUANTI_BUILD]: the archive without a compiler
-			log_e(MODULE, "%s: this archive ships no compiler; a game with C++ "
-					"modules that are not prebuilt needs the full one",
-					cs(in_path));
+			log_e(MODULE, "%s: no C++ compiler, and this module is not "
+					"prebuilt in the cache: a game with C++ modules that are "
+					"not prebuilt needs one (on Linux, the system's c++; on "
+					"Windows, the full archive's compiler/)", cs(in_path));
 			return false;
 		}
 		ss_ command = m_compiler_command;

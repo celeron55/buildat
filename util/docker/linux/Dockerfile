@@ -26,6 +26,17 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
 	libcurl4-openssl-dev \
 	xvfb xauth libgl1-mesa-dri imagemagick zip tar gzip \
 	python3 python3-pil lua5.1 \
+	xz-utils \
 	&& ln -sf /usr/bin/lua5.1 /usr/local/bin/lua \
 	&& rm -rf /var/lib/apt/lists/*
+# The web client's toolchain ([WEB_CLIENT], [LINUX_SERVER]): emsdk at its
+# own tag and the SDK of the same version, which is what the bundled
+# Urho3D's web build is pinned to (doc/plan/web_client_plan.md
+# [WEB_EMSDK]). util/build_web.sh finds it through EMSDK.
+ARG EMSDK_VERSION=3.1.60
+RUN git clone --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-core/emsdk.git /opt/emsdk \
+	&& /opt/emsdk/emsdk install "$EMSDK_VERSION" \
+	&& /opt/emsdk/emsdk activate "$EMSDK_VERSION" \
+	&& rm -rf /opt/emsdk/downloads
+ENV EMSDK=/opt/emsdk
 WORKDIR /work

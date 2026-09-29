@@ -3,6 +3,8 @@
 #
 #   util/package.sh linux     -> buildat-<version>-<hash>-linux-x86_64-portable.tar.gz
 #                                buildat-<version>-<hash>-linux-x86_64-xdg.tar.gz
+#                                buildat-<version>-<hash>-linux-x86_64-server.tar.gz
+#                                buildat-<version>-<hash>-linux-x86_64-server-precompiled.tar.gz
 #   util/package.sh windows   -> buildat-<version>-<hash>-win64.zip (a cross build)
 #
 # The version is the VERSION file's and the hash the tree's short git hash
@@ -548,6 +550,106 @@ wait_for_vanilla() {
 # games/vanilla with the bundled game through the found compiler, a client connected for one
 # screenshot, which must not be black. The one check that says the archive
 # starts on the machine it is on.
+# The web client ([WEB_CLIENT]), built into the tree's web/ before the
+# archives, whose install rule carries it; emsdk is util/docker/linux's
+build_web() {
+	if [ -z "${EMSDK:-}" ] && [ ! -d "$HOME/emsdk" ]; then
+		echo "package.sh: no emsdk (EMSDK) for the web client" >&2
+		return 1
+	fi
+	local log="$root/build_web.log"
+	echo "web client: util/build_web.sh ($log)" >&2
+	"$here/util/build_web.sh" -j "$jobs" > "$log" 2>&1 || {
+		echo "the web client did not build; its log's end:" >&2
+		tail -30 "$log" >&2; return 1; }
+	for f in index.html buildat.js buildat.wasm buildat.data; do
+		[ -s "$here/web/$f" ] || { echo "web client: no web/$f" >&2; return 1; }
+	done
+}
+
+# Every shipped game's modules compiled into a stage's cache
+# ([LINUX_SERVER]): each game started once on the staged server until it
+# listens, with a user directory of its own that is thrown away, so only
+# cache/rccpp_build/ keeps anything. A game that does not start fails the
+# packaging: the archive would not serve it on a box with no compiler.
+prebuild_games() {
+	local stage="$1" name="$2"
+	local logs="$stage/../prebuild-games-$name"
+	local g log port srv udir failed=""
+	mkdir -p "$logs"
+	for g in $(ls "$stage/games"); do
+		[ -d "$stage/games/$g" ] || continue
+		log="$logs/$g.log"
+		port=$(( 29700 + (RANDOM % 90) ))
+		udir=$(mktemp -d "/tmp/buildat_package_prebuild_games.XXXXXX")
+		PKG_TMP_DIRS="$PKG_TMP_DIRS $udir"
+		(cd "$stage" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
+			bin/buildat_server -m "games/$g" -D "$udir" -P "$port" -l 3 > "$log" 2>&1) &
+		srv=$!
+		if wait_for_line "$log" "$srv" "Listening at" 900 >/dev/null &&
+				! grep -q "Failed to build module" "$log"; then
+			echo "prebuild: $g built and listens"
+		else
+			echo "prebuild: $g did not start"; failed="$failed $g"
+		fi
+		kill -INT "$srv" 2>/dev/null || true
+		for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+		kill -9 "$srv" 2>/dev/null || true; wait "$srv" 2>/dev/null || true
+	done
+	find "$stage/cache" -mindepth 1 -maxdepth 1 ! -name rccpp_build -exec rm -rf {} +
+	rm -f "$stage"/cache/rccpp_build/*.compile.log
+	if [ -n "$failed" ]; then
+		echo "prebuild: games that did not start:$failed (see $logs/)"
+		return 1
+	fi
+	echo "prebuild: $(ls "$stage"/cache/rccpp_build/ | grep -c '\.so$') modules in the cache"
+}
+
+# The shared libraries a bare box lacks, into the stage's lib/
+# ([LINUX_SERVER]): what the shipped ELF files need, less glibc,
+# libstdc++/libgcc_s and libcurl with everything libcurl needs, which
+# stays the system's (its OpenSSL finds CA certificates where its distro
+# keeps them). What is left is GL, GLX and X11's, which the server loads
+# and never draws with. The binaries' RPATH is $ORIGIN/../lib.
+bundle_libs() {
+	local stage="$1"
+	local elfs curl_deps f lib path
+	elfs=$(find "$stage/bin" "$stage/lib" -maxdepth 1 -type f \( -name 'buildat*' -o -name '*.so*' \))
+	curl_deps=$(ldd "$(ldconfig -p | awk '/libcurl.so.4 / {print $NF; exit}')" 2>/dev/null |
+		awk '{print $1}')
+	for lib in $(for f in $elfs; do ldd "$f" 2>/dev/null; done |
+			awk '$3 ~ /^\// {print $1" "$3}' | sort -u | awk '{print $1"="$2}'); do
+		f=${lib%%=*}; path=${lib#*=}
+		case "$f" in
+			libc.so*|libm.so*|libdl.so*|libpthread.so*|librt.so*|ld-linux*|libresolv.so*|\
+			libutil.so*|libstdc++.so*|libgcc_s.so*|libcurl.so*) continue ;;
+		esac
+		echo "$curl_deps" | grep -qx "$f" && continue
+		[ -e "$stage/lib/$f" ] && continue
+		cp -L "$path" "$stage/lib/$f"
+		echo "bundled $f"
+	done
+}
+
+# The server archives ([LINUX_SERVER]), out of another archive's stage:
+# "server" is the portable archive's with the libraries a bare box lacks,
+# and compiles the games on the box with its c++; "server-precompiled" is
+# the server archive's with every game's modules prebuilt as well, and
+# starts on a box with no compiler
+make_server_archive() {
+	local from="$1" name="$2" precompiled="${3:-}"
+	local src="$root/stage/$from" stage="$root/stage/$name"
+	rm -rf "$stage"; cp -a "$src" "$stage"
+	[ -s "$stage/web/buildat.wasm" ] || { echo "server archive: no web/ in the stage" >&2; return 1; }
+	if [ -n "$precompiled" ]; then
+		prebuild_games "$stage" "$name" >&2 || return 1
+	else
+		bundle_libs "$stage" >&2
+	fi
+	tar -C "$stage/.." -czf "$out/$name.tar.gz" "$name"
+	echo "$out/$name.tar.gz"
+}
+
 smoke_test() {
 	local archive="$1"
 	local dir
@@ -560,7 +662,7 @@ smoke_test() {
 	echo "smoke test in $unpacked"
 	# The compiler's proof with a prebuilt cache ([PRECOMPILED]): one
 	# module's output taken out, so the start has to build it
-	rm -f "$unpacked"/cache/rccpp_build/client_file*
+	rm -f "$unpacked"/cache/rccpp_build/*client_file*
 	(cd "$unpacked" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://$dir/nowhere" \
 		bin/buildat_server -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
@@ -628,10 +730,17 @@ smoke)
 	smoke_test_wine "$2"
 	;;
 linux)
+	build_web
 	a=$(make_one "buildat-$version-linux-x86_64-portable" -DPORTABLE=TRUE)
 	b=$(make_one "buildat-$version-linux-x86_64-xdg" -DPORTABLE=FALSE)
+	c=$(make_server_archive "buildat-$version-linux-x86_64-portable" \
+		"buildat-$version-linux-x86_64-server")
+	d=$(make_server_archive "buildat-$version-linux-x86_64-server" \
+		"buildat-$version-linux-x86_64-server-precompiled" precompiled)
 	smoke_test "$a"
-	echo "archives:"; echo "  $a"; echo "  $b"
+	echo "archives:"; echo "  $a"; echo "  $b"; echo "  $c"; echo "  $d"
+	# The server archives on a bare box are util/smoke_server_archive.sh's,
+	# run by util/package_in_docker.sh outside this container
 	;;
 windows)
 	# The cross build: Urho3D's own MinGW toolchain file, with Debian's

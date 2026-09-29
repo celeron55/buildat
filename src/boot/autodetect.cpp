@@ -448,13 +448,20 @@ static bool detect_compiler_bin_paths(core::Config &config)
 		config.set("compiler_command", "");
 		return true;
 #else
-		log_e(MODULE, "No C++ compiler (c++) found in PATH. buildat compiles "
-				"a game's modules as it loads them; install one first:\n"
+		// Nor the Linux server archive ([LINUX_SERVER]), which carries every
+		// shipped game's modules prebuilt: it starts on a box with no
+		// compiler, and only a module that is not in its cache fails, with
+		// the line rccpp prints
+		log_w(MODULE, "No C++ compiler (c++) found in PATH. buildat compiles "
+				"a game's modules as it loads them, and without one only a "
+				"game whose modules are prebuilt in the cache starts. To "
+				"install one:\n"
 				"  Debian, Ubuntu:  sudo apt install build-essential\n"
 				"  Fedora:          sudo dnf install gcc-c++\n"
 				"  Arch:            sudo pacman -S gcc");
+		config.set("compiler_command", "");
+		return true;
 #endif
-		return false;
 	}
 	// Said out loud because the probe is silent now, and which compiler is
 	// going to build the runtime-compiled modules is worth knowing

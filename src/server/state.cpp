@@ -817,8 +817,23 @@ struct CState: public State, public interface::Server
 				MODULE_EXTENSION;
 		// TODO: Delete old ones
 #else
+		// Named by the directory the module is in as well as its own name
+		// ([LINUX_SERVER]): every game's module is "main", and one cache --
+		// the one a portable archive ships -- holds every game's. The
+		// directory's name, not its path, so the name holds wherever the
+		// tree is unpacked.
+		ss_ parent = info.path;
+		while(!parent.empty() && (parent.back() == '/' || parent.back() == '\\'))
+			parent.pop_back();
+		parent = interface::fs::strip_file_name(parent);
+		while(!parent.empty() && (parent.back() == '/' || parent.back() == '\\'))
+			parent.pop_back();
+		const size_t slash = parent.find_last_of("/\\");
+		if(slash != ss_::npos)
+			parent = parent.substr(slash + 1);
 		ss_ build_dst = g_server_config.get<ss_>("rccpp_build_path") +
-				"/"+info.name+"."+MODULE_EXTENSION;
+				"/"+(parent.empty() ? ss_() : parent+"_")+info.name+"."+
+				MODULE_EXTENSION;
 #endif
 
 		ss_ hashfile_path = build_dst+".hash";

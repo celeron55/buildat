@@ -56,5 +56,15 @@ docker run --rm -i \
 		exit \$status
 	" < "$tarball"
 rm -f "$tarball"
+# The server archives on a bare box, which only a host with docker can
+# make ([LINUX_SERVER]): a slim Debian with the least a server needs
+if [ "$target" = linux ]; then
+	mkdir -p "$out/smoke"
+	for a in "$out"/buildat-*"$hash"-linux-x86_64-server.tar.gz \
+			"$out"/buildat-*"$hash"-linux-x86_64-server-precompiled.tar.gz; do
+		SMOKE_LOG="$out/smoke/$(basename "$a" .tar.gz).log" \
+			"$here/util/smoke_server_archive.sh" "$a"
+	done
+fi
 echo "archives in $out:"
 ls -la "$out"
