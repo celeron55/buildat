@@ -426,9 +426,12 @@ function M.color_picker(o)
 	return w
 end
 
--- Whether a point in UI coordinates is on one of the elements
+-- Whether a point in UI coordinates is on one of the elements. pairs, not
+-- ipairs: a window that is not up is a nil in the list, and ipairs stopped
+-- at it -- a click on the colour picker, after the pause menu's nil, went
+-- through to the view behind.
 function M.over(elements, ux, uy)
-	for _, el in ipairs(elements) do
+	for _, el in pairs(elements) do
 		if el and el.visible then
 			local p = el.screenPosition
 			local s = el.size
