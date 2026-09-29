@@ -861,6 +861,9 @@ end
 -- focus on Esc before KeyDown gets here, so Esc in a field would otherwise
 -- reach the editor as a bare Esc and open the pause menu
 local was_typing = false
+-- The chat opens on the frame after T: the key's own text comes after its
+-- KeyDown and went into the new field, which then began with a "t"
+local chat_pending = false
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
@@ -889,7 +892,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		return
 	end
 	if key == magic.KEY_T and editor then
-		open_chat("")
+		chat_pending = true
 	elseif key == magic.KEY_ESCAPE and not editor then
 		buildat.leave()
 	elseif editor then
@@ -898,6 +901,10 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 end)
 
 magic.SubscribeToEvent("Update", function(event_type, event_data)
+	if chat_pending then
+		chat_pending = false
+		open_chat("")
+	end
 	was_typing = doc.typing()
 	redraw_messages()
 	if editor then
