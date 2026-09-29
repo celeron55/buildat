@@ -82,7 +82,11 @@ fi
 # the terminal, two numbers in the room's own save; a written save is
 # read back here, which is the half a listening session depends on.
 mkdir -p "$out/tieruser/launch_world"
-printf '!sound 0.40 0.30\n' > "$out/tieruser/launch_world/room.txt"
+# **In decibels since [VOLUME_LAW]** (2026-09-28): the row is
+# !sound_db and the levels are steps below full, which is what every
+# volume in the tree is now. An old !sound row of fader positions is
+# still read, once, and turned into the nearest steps.
+printf '!sound_db -9 -6\n' > "$out/tieruser/launch_world/room.txt"
 # **Every client run is under a timeout** (2026-09-24): a client can
 # hang in X11_ShowWindow waiting for the window manager to map its
 # window -- seen here on a `delay 2500; quit` sequence that sat for
@@ -96,7 +100,7 @@ snd=$(grep -a "launch_w.*: sound: the orbs at " "$out/snd.log" | head -1 |
 	sed 's/.*sound: //')
 echo "a saved room came up with $snd"
 rm -f "$out/tieruser/launch_world/room.txt"
-if [ "$snd" != "the orbs at 0.40, the bed at 0.30" ]; then
+if [ "$snd" != "the orbs at -9 dB, the bed at -6 dB" ]; then
 	echo "FAIL: the room does not keep the levels it was left at"
 	exit 1
 fi

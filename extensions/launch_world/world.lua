@@ -3284,11 +3284,32 @@ do
 				moved[name] = {x = tonumber(mx), y = tonumber(my),
 					z = tonumber(mz)}
 				n = n + 1
-			elseif line:match("^!sound ") then
+			elseif line:match("^!sound_db ") then
 				-- The room's own levels, kept where its voxels are
-				local a, b = line:match("^!sound ([%d%.]+) ([%d%.]+)$")
+				local a, b = line:match("^!sound_db (-?%d+) (-?%d+)$")
 				if a then
 					saved_sound = {tonumber(a), tonumber(b)}
+					n = n + 1
+				end
+			elseif line:match("^!sound ") then
+				-- **A row from before the decibels** ([VOLUME_LAW]): two
+				-- fader positions, read once through the old meaning and
+				-- rounded to the nearest step, so nobody's room gets
+				-- louder or quieter on an upgrade. Written back as
+				-- !sound_db on the next save.
+				local a, b = line:match("^!sound ([%d%.]+) ([%d%.]+)$")
+				if a then
+					local function db_of(v)
+						v = tonumber(v) or 0
+						if v <= 0 then return -33 end
+						local db = math.floor(20 * math.log10(v) / 3 + 0.5) * 3
+						return math.max(-33, math.min(0, db))
+					end
+					saved_sound = {db_of(a), db_of(b)}
+					log:info("save: the !sound row is fader positions; " ..
+							a .. " and " .. b .. " are " ..
+							saved_sound[1] .. " and " .. saved_sound[2] ..
+							" dB")
 					n = n + 1
 				end
 			elseif line:match("^!bookmark ") then
@@ -3334,7 +3355,20 @@ end
 -- the drone exists, and reaching forward for it wrote nothing and said
 -- nothing (2026-09-24). [ROOM_SOUND] wants these moved by ear, so they
 -- are two rows on the terminal and two numbers in the room's save.
-levels = {orbs = 1.0, bed = 0.6}
+-- **Decibels below full, on the settings' own 3 dB steps**
+-- ([VOLUME_LAW]): the client's volume moved to decibels and these are
+-- the tree's other two, so they move with it. The defaults are the
+-- nearest step to what they were by ear -- the orbs were 1.0 and the
+-- bed 0.6, which is -4.4 dB and rounds to -3. -33 is off.
+levels = {orbs = 0, bed = -3}
+
+-- The one place a level becomes a gain, as the client has one
+function level_gain(db)
+	if db <= -33 then
+		return 0
+	end
+	return 10 ^ (db / 20)
+end
 
 local save_dirty = false
 local function write_save()
@@ -3357,7 +3391,7 @@ local function write_save()
 		end
 	end
 	keys[#keys + 1] = string.format("!fov %d", fov)
-	keys[#keys + 1] = string.format("!sound %.2f %.2f", levels.orbs,
+	keys[#keys + 1] = string.format("!sound_db %d %d", levels.orbs,
 			levels.bed)
 	local ok, why = api.storage_write(SAVE_NAME,
 			table.concat(keys, "\n"))
@@ -4250,9 +4284,9 @@ if saved_sound then
 	levels.bed = saved_sound[2] or levels.bed
 end
 if kept.bed and kept.bed.source then
-	kept.bed.source.gain = levels.bed
+	kept.bed.source.gain = level_gain(levels.bed)
 end
-log:info(string.format("sound: the orbs at %.2f, the bed at %.2f",
+log:info(string.format("sound: the orbs at %d dB, the bed at %d dB",
 		levels.orbs, levels.bed))
 -- A pentatonic-ish stack: root, fifth, octave first, the rest sparser.
 -- Vast rather than busy, which is what the design asks for.
@@ -4334,7 +4368,7 @@ function handle_synth_update(event_type, event_data)
 		return
 	end
 	bed:update()
-	kept.bed.source.gain = levels.bed * sound_fade
+	kept.bed.source.gain = level_gain(levels.bed) * sound_fade
 	drone.t = drone.t + dt
 	-- **What the player is doing, as one number** ([ROOM_SOUND]): at
 	-- rest it is barely there, an orb under the crosshair brings it up,
@@ -4408,10 +4442,10 @@ function handle_synth_update(event_type, event_data)
 			local k = 1 - math.exp(-dt / 0.15)
 			v.gain = v.gain + (g - v.gain) * k
 			v.lit = v.lit + (want_lit - v.lit) * k
-			v.dark.source.gain = v.gain * lfo * (1 - v.lit) * levels.orbs *
-					sound_fade
-			v.lit_voice.source.gain = v.gain * lfo * v.lit * levels.orbs *
-					sound_fade
+			v.dark.source.gain = v.gain * lfo * (1 - v.lit) *
+					level_gain(levels.orbs) * sound_fade
+			v.lit_voice.source.gain = v.gain * lfo * v.lit *
+					level_gain(levels.orbs) * sound_fade
 		else
 			v.dark.source.gain = 0
 			v.lit_voice.source.gain = 0
@@ -5160,10 +5194,10 @@ local function setting_value(sg)
 	if sg.room == "probe" then return probe_on and "on" or "off" end
 	if sg.room == "fov" then return tostring(fov) .. " degrees" end
 	if sg.room == "drone" then
-		return string.format("%.2f", levels.orbs)
+		return levels.orbs <= -33 and "off" or (levels.orbs .. " dB")
 	end
 	if sg.room == "bed" then
-		return string.format("%.2f", levels.bed)
+		return levels.bed <= -33 and "off" or (levels.bed .. " dB")
 	end
 	return "install a game"
 end
@@ -5207,15 +5241,16 @@ setting_change = function(sg, dir)
 		save_dirty = true
 		log:info("setting: fov = " .. fov)
 	elseif sg.room == "drone" or sg.room == "bed" then
-		-- A twentieth at a time, and never past one: there is no master
-		-- limiter under these ([ROOM_SOUND])
+		-- 3 dB at a time on the settings' own steps, never above 0:
+		-- there is no master limiter under these ([ROOM_SOUND]), and a
+		-- step is a step wherever the tree shows a volume ([VOLUME_LAW])
 		local key = sg.room == "drone" and "orbs" or "bed"
-		levels[key] = math.max(0, math.min(1.0, levels[key] + dir * 0.05))
+		levels[key] = math.max(-33, math.min(0, levels[key] + dir * 3))
 		if sg.room == "bed" and kept.bed and kept.bed.source then
-			kept.bed.source.gain = levels.bed
+			kept.bed.source.gain = level_gain(levels.bed)
 		end
 		save_dirty = true
-		log:info(string.format("setting: %s level = %.2f", sg.room,
+		log:info(string.format("setting: %s level = %d dB", sg.room,
 				levels[key]))
 	elseif sg.room == "probe" then
 		probe_on = not probe_on
