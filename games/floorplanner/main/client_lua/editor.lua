@@ -3621,6 +3621,17 @@ end
 -- The use key's, defined with it below
 local use, use_target
 
+-- Whether the 3D camera looks as the plan does: straight down, and north
+-- up within 10 degrees -- the plan has no other way up
+local function plan_facing()
+	return S.pitch >= 89.5
+end
+
+local function plan_aligned()
+	local off = (S.yaw % 360 + 180) % 360 - 180
+	return plan_facing() and math.abs(off) <= 10
+end
+
 -- What a right or middle drag in 3D turns about or pans by: the point the
 -- pointer is on, in world metres -- the thing under it, or where its ray
 -- meets the floor -- or nil when it points at the sky
@@ -3714,8 +3725,22 @@ function M.mouse_up(button)
 	end
 	if (button == magic.MOUSEB_RIGHT and S.orbit) or
 			(button == magic.MOUSEB_MIDDLE and S.pan3d) then
+		local orbited = S.orbit
 		S.orbit, S.pan3d = nil, nil
 		magic.input:SetMouseMode(magic.MM_ABSOLUTE)
+		if orbited and plan_aligned() then
+			-- Back to the plan, where its floor is the view's: the middle
+			-- where the view's middle meets the floor, the span what the
+			-- camera's height sees
+			local o = S.pos
+			local f = {geom.rot(0, 0, 1, S.pitch, S.yaw, 0)}
+			local t = f[2] < -1e-6 and -o.y / f[2] or 0
+			S.cx = (o.x + f[1] * t) * 1000
+			S.cz = (o.z + f[3] * t) * 1000
+			S.span = math.max(500, math.min(200000, math.abs(o.y) * 1000 * 2 *
+					math.tan(math.rad(cam3d.fov) / 2)))
+			set_view("2d")
+		end
 		return
 	end
 	if button == magic.MOUSEB_RIGHT or (button == magic.MOUSEB_MIDDLE and
@@ -4373,6 +4398,9 @@ do
 		if S.view == "2d" then
 			g.middle = "drag: pan the plan"
 			g.right = "drag: into 3D, orbiting round the pointer"
+		elseif S.orbit and plan_facing() then
+			g.right = plan_aligned() and "let go: back to the plan view" or
+					"turn it north-up to let go into the plan view"
 		elseif not S.captured then
 			g.right = "drag: orbit round what the pointer is on"
 			g.middle = "drag: pan the view"
