@@ -612,7 +612,9 @@ local function send_login(name, password)
 			{name = name, password = password}, LOGIN))
 end
 
-local function show_login(error_text)
+-- simplified: the join dialog is rebuilt on every error rather than
+-- updated
+local function show_login(error_text, is_local)
 	if login_window then
 		login_window:Remove()
 	end
@@ -642,12 +644,20 @@ local function show_login(error_text)
 	end
 	label("Floor planner")
 	label("Name")
-	local name = field("", false)
-	label("Password (a new name makes an account)")
-	local password = field("", true)
-	-- simplified: the connection is not encrypted yet ([TRANSPORT])
-	local warn = label("The password is sent unencrypted: use a trusted network")
-	warn:SetColor(magic.Color(1.0, 0.8, 0.4))
+	-- The name used last on this server, kept on the client
+	local name = field(buildat.storage_read("name") or "", false)
+	local password = nil
+	if is_local then
+		-- The plan is on this machine: no password to ask
+		label("On this computer: no password needed")
+	else
+		label("Password (a new name makes an account)")
+		password = field("", true)
+		-- simplified: the connection is not encrypted yet ([TRANSPORT])
+		local warn = label("The password is sent unencrypted: use a trusted " ..
+				"network")
+		warn:SetColor(magic.Color(1.0, 0.8, 0.4))
+	end
 	if error_text then
 		local e = label(error_text)
 		e:SetColor(magic.Color(1.0, 0.4, 0.4))
@@ -660,27 +670,113 @@ local function show_login(error_text)
 	bt:SetText("Join")
 	bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	local function join()
-		send_login(name:GetText(), password:GetText())
+		local n = name:GetText()
+		buildat.storage_write("name", n)
+		send_login(n, password and password:GetText() or "")
 	end
 	magic.SubscribeToEvent(button, "Released", function() join() end)
 	magic.SubscribeToEvent(name, "TextFinished", function()
-		password:SetFocus(true)
+		if password then
+			password:SetFocus(true)
+		else
+			join()
+		end
 	end)
-	magic.SubscribeToEvent(password, "TextFinished", function() join() end)
+	if password then
+		magic.SubscribeToEvent(password, "TextFinished", function() join() end)
+	end
 	name:SetFocus(true)
 end
+
+-- The plans on this machine, to open one or make one: shown to the local
+-- user of a server the launch grid started, before anything is open
+local function show_saves(saves)
+	if login_window then
+		login_window:Remove()
+	end
+	local w = magic.ui.root:CreateChild("Window")
+	login_window = w
+	w:SetStyleAuto()
+	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
+	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	w.minWidth = 380
+	local function text(t)
+		local l = w:CreateChild("Text")
+		l:SetStyleAuto()
+		l:SetText(t)
+	end
+	local function button(t, f)
+		local b = w:CreateChild("Button")
+		b:SetStyleAuto()
+		b.minHeight = 28
+		local bt = b:CreateChild("Text")
+		bt:SetStyleAuto()
+		bt:SetText(t)
+		bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		magic.SubscribeToEvent(b, "Released", f)
+	end
+	local function open(name, create)
+		buildat.send_packet("fp:open", cereal.binary_output(
+				{name = name, create = create and 1 or 0},
+				{"object", {"name", "string"}, {"create", "byte"}}))
+	end
+	text("Floor planner: open a plan")
+	for _, s in ipairs(saves) do
+		button(s, function() open(s, false) end)
+	end
+	if #saves == 0 then
+		text("There are no plans yet")
+	end
+	text("Or a new one, by name (empty: \"plan\"):")
+	local e = w:CreateChild("LineEdit")
+	e:SetStyleAuto()
+	e.minHeight = 26
+	e.textSelectable = true
+	local function create()
+		local n = e:GetText()
+		open(n ~= "" and n or "plan", true)
+	end
+	magic.SubscribeToEvent(e, "TextFinished", create)
+	button("New plan", create)
+	e:SetFocus(true)
+end
+
+local hello = {}
+buildat.sub_packet("fp:hello", function(data)
+	hello = cereal.binary_input(data, {"object", {"local", "byte"},
+			{"pick", "byte"}, {"saves", {"array", "string"}}})
+	if doc.joined_once then
+		return
+	end
+	if hello.pick == 1 then
+		if hello["local"] == 1 then
+			show_saves(hello.saves)
+		else
+			show_login("No plan is open yet: the host is choosing one")
+		end
+		return
+	end
+	-- A scripted or second client can skip the dialog
+	local auto_name = buildat.get_env("BUILDAT_FP_NAME")
+	if auto_name then
+		send_login(auto_name, buildat.get_env("BUILDAT_FP_PASSWORD") or "")
+	else
+		show_login(nil, hello["local"] == 1)
+	end
+end)
 
 buildat.sub_packet("fp:login_result", function(data)
 	local err = cereal.binary_input(data, TEXT).text
 	if err ~= "" then
 		log:info("Login refused: " .. err)
-		show_login(err)
+		show_login(err, hello["local"] == 1)
 	end
 end)
 
 -- The editor is loaded once joined: it needs the document to show anything
 local editor = nil
 function doc.joined()
+	doc.joined_once = true
 	if login_window then
 		login_window:Remove()
 		login_window = nil
@@ -697,13 +793,7 @@ function doc.joined()
 	editor.start(doc)
 end
 
--- A scripted or second client can skip the dialog
-local auto_name = buildat.get_env("BUILDAT_FP_NAME")
-if auto_name then
-	send_login(auto_name, buildat.get_env("BUILDAT_FP_PASSWORD") or "")
-else
-	show_login(nil)
-end
+-- The first dialog waits for fp:hello: the plans to pick, or the join
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")

@@ -13,6 +13,7 @@
 #include "interface/event.h"
 #include "interface/sha256.h"
 #include "interface/fs.h"
+#include "interface/server_config.h"
 #include "client_file/api.h"
 #include "network/api.h"
 #include "storage/api.h"
@@ -27,6 +28,7 @@
 #include <sstream>
 #include <functional>
 #include <cmath>
+#include <algorithm>
 #define MODULE "main"
 
 using interface::Event;
@@ -359,6 +361,7 @@ struct Presence
 struct Peer
 {
 	ss_ name; // empty until logged in
+	ss_ address;
 	int failures = 0;
 	Presence presence;
 	bool has_presence = false;
@@ -436,6 +439,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:login"));
+		m_server->sub_event(this, Event::t("network:packet_received/fp:open"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:batch"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:chat"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:voxels"));
@@ -461,6 +465,8 @@ struct Module: public interface::Module
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/fp:login", on_login,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:open", on_open,
+				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:chat", on_chat,
@@ -479,12 +485,49 @@ struct Module: public interface::Module
 
 	// The save
 
-	// simplified: one plan, the save "plan". A list of plans to pick from
-	// is the launcher's job and comes with [FP_IO].
+	// One key of what the launcher asked for through the server's -u, as
+	// games/vanilla reads it: a value of the shape a save name has, or ""
+	ss_ launch_param(const ss_ &key_name)
+	{
+		const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
+		const ss_ key = key_name+"=";
+		size_t at = u.find(key);
+		if(at == ss_::npos || !(at == 0 || u[at - 1] == '\n'))
+			return "";
+		ss_ v = u.substr(at + key.size());
+		v = v.substr(0, v.find('\n'));
+		for(char c : v)
+			if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
+				return "";
+		return v.size() <= 64 ? v : "";
+	}
+
+	// Started from the launch grid ([FP_LAUNCH]): which plan is the local
+	// user's to pick, and the local user joins without a password. Run by
+	// hand, the server opens "plan", or the save=<name> it is given.
+	bool m_launched = false;
+
 	void on_start()
 	{
+		m_launched = launch_param("pick") == "1";
+		ss_ name = launch_param("save");
+		if(name.empty() && m_launched){
+			log_i(MODULE, "Waiting for the local user to pick a plan");
+			return;
+		}
+		open_save(name.empty() ? "plan" : name, true);
+	}
+
+	// Opens the save, or with create makes it when it is not there; a
+	// copy goes into its backups first
+	bool open_save(const ss_ &name, bool create)
+	{
+		bool valid = false;
 		storage::access(m_server, [&](storage::Interface *istorage){
-			m_save = istorage->open("plan");
+			valid = istorage->valid_name(name);
+			if(!valid)
+				return;
+			m_save = istorage->open(name);
 			if(m_save){
 				// A copy of the plan as it was, before anything touches it:
 				// what an undo that lives only for a session cannot give
@@ -492,19 +535,79 @@ struct Module: public interface::Module
 				ss_ path = m_save->path();
 				istorage->close(m_save);
 				backup(path);
-				m_save = istorage->open("plan");
-			} else {
-				m_save = istorage->create("plan");
+				m_save = istorage->open(name);
+			} else if(create){
+				m_save = istorage->create(name);
 			}
 		});
 		if(!m_save){
-			log_e(MODULE, "Could not open or create the save");
-			m_server->shutdown(1, "floorplanner: no save");
-			return;
+			log_e(MODULE, "Could not open or create the save %s", cs(name));
+			if(!m_launched)
+				m_server->shutdown(1, "floorplanner: no save");
+			return false;
 		}
 		m_store = m_save->store("main");
 		load();
 		find_images();
+		log_i(MODULE, "Opened the plan %s", cs(name));
+		return true;
+	}
+
+	// The local user: on this machine, of a server the launcher started
+	bool is_local(network::PeerId peer)
+	{
+		auto it = m_peers.find(peer);
+		return m_launched && it != m_peers.end() &&
+				(it->second.address == "127.0.0.1" ||
+				it->second.address == "::1");
+	}
+
+	struct Hello
+	{
+		uint8_t local = 0;      // no password asked
+		uint8_t pick = 0;       // no plan open: pick one of saves
+		sv_<ss_> saves;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(local, pick, saves);
+		}
+	};
+
+	// What the client shows first: the plans to pick from, for the local
+	// user when none is open; else the join, with a password or without
+	void send_hello(network::PeerId peer)
+	{
+		Hello h;
+		h.local = is_local(peer);
+		h.pick = !m_store;
+		if(h.pick && h.local){
+			storage::access(m_server, [&](storage::Interface *istorage){
+				sv_<storage::SaveInfo> infos = istorage->list();
+				// The one opened last first
+				std::sort(infos.begin(), infos.end(),
+						[](const storage::SaveInfo &a, const storage::SaveInfo &b){
+					return a.modified_us > b.modified_us;
+				});
+				for(const storage::SaveInfo &i : infos)
+					h.saves.push_back(i.name);
+			});
+		}
+		send(peer, "fp:hello", pack(h));
+	}
+
+	void on_open(const network::Packet &packet)
+	{
+		std::pair<ss_, uint8_t> req;
+		if(m_store || !is_local(packet.sender) || !unpack(packet.data, req))
+			return;
+		if(!open_save(req.first, req.second != 0)){
+			send(packet.sender, "fp:login_result", pack(ss_("Could not open "
+					"the plan \"")+req.first+"\""));
+			send_hello(packet.sender);
+			return;
+		}
+		for(auto &pair : m_peers)
+			send_hello(pair.first);
 	}
 
 	// <save>/backups/1 is the newest of BACKUPS; the save is closed, so its
@@ -699,6 +802,7 @@ struct Module: public interface::Module
 	{
 		Peer peer;
 		peer.op_budget = OPS_BURST;
+		peer.address = client.info.address;
 		m_peers[client.info.id] = peer;
 	}
 
@@ -937,6 +1041,7 @@ struct Module: public interface::Module
 			inetwork->send(event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
 		});
+		send_hello(event.recipient);
 	}
 
 	void send(network::PeerId peer, const ss_ &name, const ss_ &data)
@@ -994,13 +1099,18 @@ struct Module: public interface::Module
 	void on_login(const network::Packet &packet)
 	{
 		auto pit = m_peers.find(packet.sender);
-		if(pit == m_peers.end() || !m_store)
+		if(pit == m_peers.end())
 			return;
 		Peer &peer = pit->second;
 		std::pair<ss_, ss_> cred;
 		auto reply = [&](const ss_ &error){
 			send(packet.sender, "fp:login_result", pack(error));
 		};
+		if(!m_store)
+			return reply("No plan is open yet");
+		// The local user is on the machine the plan is on: a password
+		// would keep out nobody the files themselves do not let in
+		bool local = is_local(packet.sender);
 		if(!peer.name.empty())
 			return reply("Already joined");
 		if(peer.failures >= MAX_LOGIN_FAILURES)
@@ -1018,8 +1128,8 @@ struct Module: public interface::Module
 
 		Account account;
 		if(get_account(name, account)){
-			if(pbkdf2_sha256(password, account.salt, PBKDF2_ITERATIONS) !=
-					account.hash){
+			if(!local && pbkdf2_sha256(password, account.salt,
+					PBKDF2_ITERATIONS) != account.hash){
 				peer.failures++;
 				log_i(MODULE, "Wrong password for %s", cs(name));
 				return reply("Wrong password");
@@ -1029,8 +1139,15 @@ struct Module: public interface::Module
 			account.salt.resize(16);
 			for(char &c : account.salt)
 				c = (char)(rd() & 0xff);
-			account.hash = pbkdf2_sha256(password, account.salt,
-					PBKDF2_ITERATIONS);
+			// A local account gets a password nobody knows, so its name
+			// cannot be taken over from elsewhere with an empty one
+			ss_ pw = password;
+			if(local){
+				pw.resize(32);
+				for(char &c : pw)
+					c = (char)(rd() & 0xff);
+			}
+			account.hash = pbkdf2_sha256(pw, account.salt, PBKDF2_ITERATIONS);
 			// The first account of a plan is its admin: whoever made it
 			if(m_store->list("auth/").empty())
 				account.privs = {"edit", "admin"};
