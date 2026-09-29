@@ -4677,7 +4677,7 @@ do
 		local input = magic.input
 		local w = S.walk
 		-- Shift runs; Ctrl is the shortcuts' (Ctrl+D is a copy)
-		local speed = mm or (S.shift and 3500 or 1400) * dt
+		local speed = mm or (S.shift and 5250 or 2100) * dt
 		local yaw = math.rad(S.yaw)
 		local dx = (math.sin(yaw) * f + math.cos(yaw) * r) * speed
 		local dz = (math.cos(yaw) * f - math.sin(yaw) * r) * speed
