@@ -4104,12 +4104,26 @@ do
 
 	-- What a right or middle drag in 3D turns about or pans by: the point the
 	-- pointer is on, in world metres -- the thing under it, or where its ray
-	-- meets the floor -- or nil when it points at the sky
-	local function camera_pivot()
+	-- meets the floor -- or nil when it points at the sky. orbit: pointing
+	-- at none of the plan, the middle of the box round all its rooms, up to
+	-- half their highest ceiling (user)
+	local function camera_pivot(orbit)
 		local o, d = cursor_ray()
 		local s = pick_surface()
 		if s and s.t then
 			return {x = o.x + d.x * s.t, y = o.y + d.y * s.t, z = o.z + d.z * s.t}
+		end
+		if orbit and next(room_data) then
+			local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
+			local top = 0
+			for id, r in pairs(room_data) do
+				for _, p in ipairs(r.pts) do
+					x0, z0 = math.min(x0, p[1]), math.min(z0, p[2])
+					x1, z1 = math.max(x1, p[1]), math.max(z1, p[2])
+				end
+				top = math.max(top, room_ceiling(doc.ents[id]))
+			end
+			return {x = W((x0 + x1) / 2), y = W(top / 2), z = W((z0 + z1) / 2)}
 		end
 		local x, z, t = ray_at_height(0)
 		if x then
@@ -4168,7 +4182,7 @@ do
 			end
 			if S.view == "3d" then
 				-- Orbiting what is pointed
-				local p = camera_pivot()
+				local p = camera_pivot(true)
 				if p then
 					S.orbit = p
 					magic.input:SetMouseMode(magic.MM_RELATIVE)
@@ -4911,7 +4925,9 @@ do
 			g.right = plan_aligned() and "let go: back to the plan view" or
 					"turn it north-up to let go into the plan view"
 		elseif not S.captured then
-			g.right = "drag: orbit round what the pointer is on"
+			g.right = (pick_surface() or not next(room_data)) and
+					"drag: orbit round what the pointer is on" or
+					"drag: orbit round the middle of the plan"
 			g.middle = "drag: pan the view"
 		end
 		local cur = default_material()
