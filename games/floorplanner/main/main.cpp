@@ -25,6 +25,7 @@
 #include <random>
 #include <sstream>
 #include <functional>
+#include <cmath>
 #define MODULE "main"
 
 using interface::Event;
@@ -98,6 +99,9 @@ struct TypeSchema {
 		singleton(singleton){}
 };
 
+// What a definition is. A voxel volume comes with [FP_VOXELS].
+enum DefKind { DK_BOX, DK_VOXEL, DK_OPENING, DK_DOOR, DK_WINDOW, DK_COUNT };
+
 // Material types, as the palette's `kind` field holds them. The shader and
 // the client's palette editor use the same numbers.
 enum MaterialKind { MK_DRYWALL, MK_WOOD, MK_STONE, MK_WALLPAPER, MK_LAMP,
@@ -133,13 +137,20 @@ static const sv_<TypeSchema> SCHEMA = {
 	}, {
 		{"nodes", "node", OnDelete::Remove, 3},
 	}},
-	// The shape a set of instances share. kind 0: a box of w by h by d
+	// The shape a set of instances share; see DefKind. A box is w by h by
+	// d; an opening, a door and a window are w wide and h high, with trim
+	// round them on both faces
 	{"definition", {
-		{"kind", 0, 0, 0},
+		{"kind", 0, DK_COUNT - 1, DK_BOX},
 		{"w", 1, 100000, 600},
 		{"h", 1, 20000, 750},
 		{"d", 1, 100000, 600},
+		{"trim", 0, 500, 70},
+		{"trim_depth", 0, 200, 15},
+		{"leaf", 0, 1, 0},       // door: single, double; window: fixed, casement
 		{"mat", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
+		{"mat_leaf", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
+		{"mat_glass", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 	}, {}, {}},
 	// A definition placed: yaw in millidegrees, pitch and roll in quarter
 	// turns, and its height from the floor up or the ceiling down
@@ -152,6 +163,14 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"roll", 0, 3, 0},
 		{"align", 0, 1, 0},       // 1: from the ceiling down
 		{"offset", 0, 20000, 0},
+		// Hosted in a wall: its centre this far along from the wall's a
+		// end, its bottom sill above the floor. The position and yaw above
+		// are then the wall's.
+		{"host", 0, INT32_MAX, 0, "wall", OnDelete::Cascade, true},
+		{"along", -MAX_COORD, MAX_COORD, 0},
+		{"sill", 0, 20000, 0},
+		{"flip", 0, 3, 0},        // bit 0: hinge on the other jamb; 1: swing
+		{"open", 0, 1000, 0},     // thousandths of fully open
 	}, {}, {}},
 	{"palette", {
 		{"kind", 0, MK_COUNT - 1, MK_DRYWALL},
@@ -1014,6 +1033,31 @@ struct Module: public interface::Module
 		}
 		if(e.type == "wall" && e.ints.at("a") == e.ints.at("b"))
 			return "A wall needs two different nodes";
+		if(e.type == "instance"){
+			const Entity &def = m_ents[e.ints.at("def")];
+			int32_t kind = def.ints.at("kind");
+			bool hostable = kind == DK_OPENING || kind == DK_DOOR ||
+					kind == DK_WINDOW;
+			int32_t host = e.ints.at("host");
+			if(hostable != (host != 0))
+				return hostable ? "An opening needs a wall" :
+						"Only openings, doors and windows go in a wall";
+			// It fits the wall it is put in. Checked when the instance
+			// changes, not when the wall does: a wall shortened under a
+			// door is the user's to sort out, not a refused drag.
+			if(host){
+				const Entity &w = m_ents[host];
+				const Entity &a = m_ents[w.ints.at("a")];
+				const Entity &b = m_ents[w.ints.at("b")];
+				double dx = b.ints.at("x") - a.ints.at("x");
+				double dz = b.ints.at("z") - a.ints.at("z");
+				double len = std::sqrt(dx * dx + dz * dz);
+				double along = e.ints.at("along");
+				double half = def.ints.at("w") / 2.0;
+				if(along - half < 0 || along + half > len)
+					return "It does not fit its wall";
+			}
+		}
 		return "";
 	}
 };

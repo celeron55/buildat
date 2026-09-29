@@ -34,7 +34,19 @@ local DRAG_PX = 4
 local COPY_OFFSET = 500
 local JUSTIFY_NAMES = {[0] = "centered", [1] = "left", [2] = "right"}
 local TOOL_KEYS = {select = "V", node = "N", wall = "B", room = "R",
-	box = "O", paint = "P"}
+	box = "O", hosted = "I", paint = "P"}
+-- What a definition is, as main.cpp's DefKind
+local KIND = {box = 0, voxel = 1, opening = 2, door = 3, window = 4}
+local KIND_NAMES = {[0] = "Box", [2] = "Opening", [3] = "Door",
+	[4] = "Window"}
+-- A new opening, door and window
+local HOSTED = {
+	[2] = {w = 900, h = 2100, sill = 0},
+	[3] = {w = 900, h = 2100, sill = 0},
+	[4] = {w = 1200, h = 1200, sill = 900},
+}
+-- A door leaf's thickness and the gap round it, and a window's frame
+local LEAF_T, LEAF_GAP, FRAME_W = 40, 4, 50
 
 local S = {
 	view = "2d",
@@ -49,6 +61,9 @@ local S = {
 	room_walls = true, -- a room drawn gets walls on its edges
 	-- New boxes
 	box = {w = 600, h = 750, d = 600, align = 0, offset = 0},
+	hosted = 3,     -- what the door/window tool puts in a wall
+	-- Doors and windows a viewer has opened, which only they see
+	local_open = {},
 	material = nil, -- the palette entry picked
 	-- The cursor, in window pixels
 	mx = 0, my = 0,
@@ -108,6 +123,20 @@ fill.brightness = 0.3
 -- freed under a geometry still using it
 local lit_material = magic.cache:GetResource("Material", "main/lit_vcol.xml")
 local flat_material = magic.cache:GetResource("Material", "main/flat_vcol.xml")
+local glass_material = magic.cache:GetResource("Material",
+		"main/glass_vcol.xml")
+
+-- simplified: the two low bits only, which is all a flip holds
+local function bit_xor(a, b)
+	local r = 0
+	for i = 0, 1 do
+		local p = 2 ^ i
+		if (math.floor(a / p) % 2) ~= (math.floor(b / p) % 2) then
+			r = r + p
+		end
+	end
+	return r
+end
 
 -- The world is in metres; the plan in millimetres
 local function W(mm)
@@ -148,10 +177,12 @@ local function flat_polygon(g, pts, y, n, col)
 	end
 end
 
--- A box of half sizes hx, hy, hz (metres) about the origin
-local function box_geometry(g, hx, hy, hz, col)
+-- A box of half sizes hx, hy, hz (metres) about the origin, or about
+-- (cx, cy, cz)
+local function box_geometry(g, hx, hy, hz, col, cx, cy, cz)
+	cx, cy, cz = cx or 0, cy or 0, cz or 0
 	local function V(x, y, z)
-		return magic.Vector3(x * hx, y * hy, z * hz)
+		return magic.Vector3(cx + x * hx, cy + y * hy, cz + z * hz)
 	end
 	for _, f in ipairs({{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0},
 			{0, 0, 1}, {0, 0, -1}}) do
@@ -189,6 +220,8 @@ local walls_node = scene:CreateChild("Walls")
 local caps_node = scene:CreateChild("Caps")
 -- The ceilings and what is aligned to them, hidden from above
 local overhead_node = scene:CreateChild("Overhead")
+-- Doors' and windows' own parts: the plan view draws symbols instead
+local pieces_node = scene:CreateChild("Pieces")
 
 -- The cameras
 local cam2d_node = scene:CreateChild("Camera2D")
@@ -320,6 +353,23 @@ local function room_at(x, z)
 	return best
 end
 
+-- A wall's frame: its a end, its direction u and left normal n, how far
+-- its faces are from its line, its length and the yaw that turns +X to u
+local function wall_frame(id)
+	local w = wall_data[id]
+	if not w then
+		return nil
+	end
+	local l = geom.len(w.bx - w.ax, w.bz - w.az)
+	if l == 0 then
+		return nil
+	end
+	local ux, uz = (w.bx - w.ax) / l, (w.bz - w.az) / l
+	local lo, ro = geom.offsets(w.thickness, w.justify)
+	return {ax = w.ax, az = w.az, ux = ux, uz = uz, nx = -uz, nz = ux,
+			lo = lo, ro = ro, len = l, yaw = math.deg(math.atan2(-uz, ux))}
+end
+
 -- An instance placed: its centre, rotation and extents in mm. The 90
 -- degree pitch and roll swap the definition's axes; the yaw turns the
 -- footprint, which is ex by ez in the yawed frame.
@@ -329,13 +379,34 @@ local function build_inst_data()
 	for _, e in ipairs(doc.of_type("instance")) do
 		local i = e.ints
 		local def = doc.ents[i.def]
-		if def then
+		local moved = d and d.moved and d.kind == "move" and d.inst[e.id]
+		local it
+		if def and i.host ~= 0 then
+			-- In a wall: across its whole thickness and trim, at its sill
+			local f = wall_frame(i.host)
+			local p = def.ints
+			if f then
+				local along = i.along
+				if moved then
+					along = geom.snap(along + d.dx * f.ux + d.dz * f.uz,
+							grid_step())
+				end
+				local mid = (f.lo - f.ro) / 2
+				local trim = p.kind == KIND.opening and 0 or p.trim
+				local td = p.kind == KIND.opening and 0 or p.trim_depth
+				it = {x = f.ax + f.ux * along + f.nx * mid,
+						z = f.az + f.uz * along + f.nz * mid,
+						y = i.sill + p.h / 2, yaw = f.yaw, pitch = 0, roll = 0,
+						ex = p.w + 2 * trim, ey = p.h, ez = f.lo + f.ro + 2 * td,
+						hosted = true, along = along, frame = f}
+			end
+		elseif def then
 			local p = def.ints
 			local pitch, roll = i.pitch * 90, i.roll * 90
 			local ex, ey, ez = geom.rot(p.w, p.h, p.d, pitch, 0, roll)
 			ex, ey, ez = math.abs(ex), math.abs(ey), math.abs(ez)
 			local x, z = i.x, i.z
-			if d and d.moved and d.kind == "move" and d.inst[e.id] then
+			if moved then
 				x, z = x + d.dx, z + d.dz
 			end
 			local y
@@ -344,19 +415,27 @@ local function build_inst_data()
 			else
 				y = i.offset + ey / 2
 			end
-			local yaw = i.yaw / 1000
+			it = {x = x, y = y, z = z, yaw = i.yaw / 1000, pitch = pitch,
+					roll = roll, ex = ex, ey = ey, ez = ez,
+					-- The box's own half sizes, before its rotation
+					hx = p.w / 2, hy = p.h / 2, hz = p.d / 2}
+		end
+		if it then
+			it.hx = it.hx or it.ex / 2
+			it.hy = it.hy or it.ey / 2
+			it.hz = it.hz or it.ez / 2
+			it.y0, it.y1, it.def = it.y - it.ey / 2, it.y + it.ey / 2, i.def
 			local foot = {}
 			for k, c in ipairs({{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}) do
-				local fx, _, fz = geom.rot(c[1] * ex / 2, 0, c[2] * ez / 2, 0,
-						yaw, 0)
-				foot[k] = {x + fx, z + fz}
+				local fx, _, fz = geom.rot(c[1] * it.ex / 2, 0, c[2] * it.ez / 2,
+						0, it.yaw, 0)
+				foot[k] = {it.x + fx, it.z + fz}
 			end
 			if not geom.is_ccw(foot) then
 				foot = {foot[4], foot[3], foot[2], foot[1]}
 			end
-			inst_data[e.id] = {x = x, y = y, z = z, yaw = yaw, pitch = pitch,
-					roll = roll, ex = ex, ey = ey, ez = ez, y0 = y - ey / 2,
-					y1 = y + ey / 2, def = i.def, foot = foot}
+			it.foot = foot
+			inst_data[e.id] = it
 		end
 	end
 end
@@ -369,6 +448,115 @@ local function instances_of(def)
 		end
 	end
 	return n
+end
+
+-- How open a door or window is, in thousandths: a viewer's own opening
+-- wins over the plan's
+local function open_amount(id)
+	return S.local_open[id] or doc.ents[id].ints.open
+end
+
+-- A door's or window's parts, in the frame of the wall at its centre: X
+-- along the wall, Y up from the floor, Z to the wall's left
+local function build_hosted(id, it, def, e, geometry, commit)
+	if def.kind == KIND.opening then
+		return
+	end
+	local f = it.frame
+	local ox, oz = f.ax + f.ux * it.along, f.az + f.uz * it.along
+	local function part()
+		local g, node = geometry(pieces_node)
+		node.position = magic.Vector3(W(ox), 0, W(oz))
+		node.rotation = magic.Quaternion(0, f.yaw, 0)
+		return g, node
+	end
+	local function B(g, x0, y0, z0, x1, y1, z1, col)
+		box_geometry(g, W(x1 - x0) / 2, W(y1 - y0) / 2, W(z1 - z0) / 2, col,
+				W(x0 + x1) / 2, W(y0 + y1) / 2, W(z0 + z1) / 2)
+	end
+	local frame_col = rgb_color(palette_rgb(def.mat))
+	local leaf_col = rgb_color(palette_rgb(def.mat_leaf ~= 0 and def.mat_leaf
+			or def.mat))
+	local glass_rgb = def.mat_glass ~= 0 and palette_rgb(def.mat_glass) or
+			0xa8c8e0
+	local glass_col = rgb_color(glass_rgb)
+	glass_col.a = 0.35
+	local hw, t, td = def.w / 2, def.trim, def.trim_depth
+	local y0, y1 = e.sill, e.sill + def.h
+	local window = def.kind == KIND.window
+
+	-- The trim on both faces
+	local g = part()
+	if t > 0 and td > 0 then
+		for _, face in ipairs({{f.lo, f.lo + td}, {-f.ro - td, -f.ro}}) do
+			local z0, z1 = face[1], face[2]
+			local b = window and y0 - t or y0
+			B(g, -hw - t, b, z0, -hw, y1 + t, z1, frame_col)
+			B(g, hw, b, z0, hw + t, y1 + t, z1, frame_col)
+			B(g, -hw, y1, z0, hw, y1 + t, z1, frame_col)
+			if window then
+				B(g, -hw, y0 - t, z0, hw, y0, z1, frame_col)
+			end
+		end
+	end
+	-- A window's frame in the opening
+	if window then
+		local fw = FRAME_W
+		B(g, -hw, y0, -30, -hw + fw, y1, 30, frame_col)
+		B(g, hw - fw, y0, -30, hw, y1, 30, frame_col)
+		B(g, -hw + fw, y0, -30, hw - fw, y0 + fw, 30, frame_col)
+		B(g, -hw + fw, y1 - fw, -30, hw - fw, y1, 30, frame_col)
+	end
+	commit(g, lit_material)
+
+	-- The leaves, each on its own node at its hinge, turned by how open it
+	-- is: towards +Z, or -Z when the swing is flipped
+	local angle = open_amount(id) / 1000 * 90
+	local right = e.flip % 2 == 1
+	local sign = math.floor(e.flip / 2) % 2 == 1 and -1 or 1
+	local leaves = {}
+	if window then
+		local inner = hw - FRAME_W
+		leaves[1] = {x = right and inner or -inner, w = 2 * inner,
+				dir = right and -1 or 1}
+	elseif def.leaf == 1 then
+		leaves[1] = {x = -hw + LEAF_GAP, w = hw - 1.5 * LEAF_GAP, dir = 1}
+		leaves[2] = {x = hw - LEAF_GAP, w = hw - 1.5 * LEAF_GAP, dir = -1}
+	else
+		leaves[1] = {x = right and hw - LEAF_GAP or -hw + LEAF_GAP,
+				w = 2 * hw - 2 * LEAF_GAP, dir = right and -1 or 1}
+	end
+	-- A fixed window does not open
+	if window and def.leaf == 0 then
+		angle = 0
+	end
+	for _, lf in ipairs(leaves) do
+		local lg, node = part()
+		local yaw = f.yaw - lf.dir * sign * angle
+		local hx, _, hz = geom.rot(lf.x, 0, 0, 0, f.yaw, 0)
+		node.position = magic.Vector3(W(ox + hx), 0, W(oz + hz))
+		node.rotation = magic.Quaternion(0, yaw, 0)
+		local x0, x1 = 0, lf.dir * lf.w
+		if x1 < x0 then
+			x0, x1 = x1, x0
+		end
+		if window then
+			local fw = FRAME_W
+			B(lg, x0, y0 + fw, -20, x0 + fw, y1 - fw, 20, frame_col)
+			B(lg, x1 - fw, y0 + fw, -20, x1, y1 - fw, 20, frame_col)
+			B(lg, x0 + fw, y0 + fw, -20, x1 - fw, y0 + 2 * fw, 20, frame_col)
+			B(lg, x0 + fw, y1 - 2 * fw, -20, x1 - fw, y1 - fw, 20, frame_col)
+			commit(lg, lit_material)
+			local gg, gnode = part()
+			gnode.position = node.position
+			gnode.rotation = node.rotation
+			B(gg, x0 + fw, y0 + 2 * fw, -4, x1 - fw, y1 - 2 * fw, 4, glass_col)
+			commit(gg, glass_material)
+		else
+			B(lg, x0, y0, -LEAF_T / 2, x1, y1 - LEAF_GAP, LEAF_T / 2, leaf_col)
+			commit(lg, lit_material)
+		end
+	end
 end
 
 -- simplified: everything is rebuilt on any change, which at a few hundred
@@ -415,19 +603,10 @@ local function rebuild()
 		end
 	end
 
-	for id, o in pairs(outlines) do
-		local w = doc.ents[id].ints
-		local y0, y1 = wall_span(w)
-		local cols = {
-			left = rgb_color(palette_rgb(w.mat_left)),
-			right = rgb_color(palette_rgb(w.mat_right)),
-			core = rgb_color(palette_rgb(w.mat_core ~= 0 and w.mat_core or
-					w.mat_left)),
-		}
-		local g = geometry(walls_node)
-		local pts = o.pts
+	-- An outline extruded between y0 and y1, its faces coloured by label
+	local function extrude(g, pts, labels, y0, y1, cols, bottom)
 		flat_polygon(g, pts, y1, UP, cols.core)
-		if y0 > 0 then
+		if bottom then
 			flat_polygon(g, pts, y0, DOWN, cols.core)
 		end
 		local function v(p, y)
@@ -440,14 +619,77 @@ local function rebuild()
 			if l > 0.01 then
 				-- Outward of a counter-clockwise outline is to the right
 				local n = magic.Vector3(dz / l, 0, -dx / l)
-				local col = cols[o.sides[i]]
+				local col = cols[labels[i]]
 				tri(g, v(p, y0), v(q, y0), v(q, y1), n, col)
 				tri(g, v(p, y0), v(q, y1), v(p, y1), n, col)
 			end
 		end
-		commit(g, lit_material)
-		cap(pts, y0, y1, magic.Color(0.16, 0.16, 0.18),
-				magic.Color(0.55, 0.55, 0.58))
+	end
+
+	-- The openings in each wall, by where they are along it
+	local holes = {}
+	for id, it in pairs(inst_data) do
+		if it.hosted then
+			local host = doc.ents[id].ints.host
+			local p = doc.ents[it.def].ints
+			holes[host] = holes[host] or {}
+			table.insert(holes[host], {c = it.along, w = p.w,
+					sill = doc.ents[id].ints.sill, h = p.h})
+		end
+	end
+
+	-- A wall is cut along its length into slabs: whole ones between the
+	-- openings, and at each opening the part below its sill and the part
+	-- above its head. The faces the cuts make are the reveals.
+	for id, o in pairs(outlines) do
+		local w = doc.ents[id].ints
+		local y0, y1 = wall_span(w)
+		local cols = {
+			left = rgb_color(palette_rgb(w.mat_left)),
+			right = rgb_color(palette_rgb(w.mat_right)),
+			core = rgb_color(palette_rgb(w.mat_core ~= 0 and w.mat_core or
+					w.mat_left)),
+		}
+		local f = wall_frame(id)
+		local list = holes[id] or {}
+		table.sort(list, function(a, b) return a.c < b.c end)
+		local slabs, prev = {}, -math.huge
+		for _, h in ipairs(list) do
+			local s0, e0 = h.c - h.w / 2, h.c + h.w / 2
+			if s0 > prev then
+				slabs[#slabs + 1] = {prev, s0}
+			end
+			slabs[#slabs + 1] = {math.max(s0, prev), e0, h}
+			prev = math.max(prev, e0)
+		end
+		slabs[#slabs + 1] = {prev, math.huge}
+		local d0 = f and f.ax * f.ux + f.az * f.uz or 0
+		for _, sl in ipairs(slabs) do
+			local pts, labels = o.pts, o.sides
+			if f and sl[1] > -math.huge then
+				pts, labels = geom.clip(pts, labels, -f.ux, -f.uz, -(d0 + sl[1]),
+						"core")
+			end
+			if f and sl[2] < math.huge then
+				pts, labels = geom.clip(pts, labels, f.ux, f.uz, d0 + sl[2], "core")
+			end
+			local parts = {{y0, y1}}
+			if sl[3] then
+				parts = {{y0, math.min(y1, sl[3].sill)},
+						{math.max(y0, sl[3].sill + sl[3].h), y1}}
+			end
+			if #pts >= 3 then
+				for _, part in ipairs(parts) do
+					if part[2] - part[1] > 0.5 then
+						local g = geometry(walls_node)
+						extrude(g, pts, labels, part[1], part[2], cols, part[1] > 0)
+						commit(g, lit_material)
+						cap(pts, part[1], part[2], magic.Color(0.16, 0.16, 0.18),
+								magic.Color(0.55, 0.55, 0.58))
+					end
+				end
+			end
+		end
 	end
 
 	for id, r in pairs(room_data) do
@@ -466,15 +708,20 @@ local function rebuild()
 	for id, it in pairs(inst_data) do
 		local def = doc.ents[it.def].ints
 		local e = doc.ents[id].ints
-		local g, node = geometry(e.align == 1 and overhead_node or walls_node)
-		node.position = magic.Vector3(W(it.x), W(it.y), W(it.z))
-		node.rotation = magic.Quaternion(it.pitch, it.yaw, it.roll)
-		local rgb = palette_rgb(def.mat)
-		box_geometry(g, W(def.w) / 2, W(def.h) / 2, W(def.d) / 2,
-				rgb_color(rgb))
-		commit(g, lit_material)
-		cap(it.foot, it.y0, it.y1, rgb_color(rgb, 0.7), rgb_color(rgb, 0.9))
+		if it.hosted then
+			build_hosted(id, it, def, e, geometry, commit)
+		elseif def.kind == KIND.box then
+			local g, node = geometry(e.align == 1 and overhead_node or walls_node)
+			node.position = magic.Vector3(W(it.x), W(it.y), W(it.z))
+			node.rotation = magic.Quaternion(it.pitch, it.yaw, it.roll)
+			local rgb = palette_rgb(def.mat)
+			box_geometry(g, W(def.w) / 2, W(def.h) / 2, W(def.d) / 2,
+					rgb_color(rgb))
+			commit(g, lit_material)
+			cap(it.foot, it.y0, it.y1, rgb_color(rgb, 0.7), rgb_color(rgb, 0.9))
+		end
 	end
+	pieces_node.enabled = S.view == "3d"
 	caps_node.enabled = S.view == "2d"
 	S.dirty = false
 end
@@ -617,10 +864,9 @@ local function ray_instance(it, o, d)
 	local ox, oy, oz = geom.unrot(o.x - W(it.x), o.y - W(it.y), o.z - W(it.z),
 			it.pitch, it.yaw, it.roll)
 	local dx, dy, dz = geom.unrot(d.x, d.y, d.z, it.pitch, it.yaw, it.roll)
-	local def = doc.ents[it.def].ints
 	local tmin, tmax = 0, math.huge
-	for _, a in ipairs({{ox, dx, W(def.w) / 2}, {oy, dy, W(def.h) / 2},
-			{oz, dz, W(def.d) / 2}}) do
+	for _, a in ipairs({{ox, dx, W(it.hx)}, {oy, dy, W(it.hy)},
+			{oz, dz, W(it.hz)}}) do
 		if math.abs(a[2]) < 1e-12 then
 			if math.abs(a[1]) > a[3] then
 				return nil
@@ -660,7 +906,7 @@ local function pick_surface()
 				local w = wall_data[id]
 				local side = (w.bx - w.ax) * (z - w.az) -
 						(w.bz - w.az) * (x - w.ax) > 0 and "left" or "right"
-				return {kind = "wall", id = id, side = side}
+				return {kind = "wall", id = id, side = side, x = x, z = z}
 			end
 		end
 		local r = room_at(x, z)
@@ -695,14 +941,15 @@ local function pick_surface()
 							px, pz, qx, qz)
 					if dist < 1e-4 and hy >= y0 and hy <= y1 then
 						best, best_t = {kind = "wall", id = id,
-								side = ol.sides[i]}, t
+								side = ol.sides[i], x = hx * 1000, z = hz * 1000}, t
 					end
 				end
 			end
 		end
 		local hx, hz, t = ray_at_height(y1 * 1000)
 		if hx and t < best_t and geom.point_in_polygon(hx, hz, pts) then
-			best, best_t = {kind = "wall", id = id, side = "core"}, t
+			best, best_t = {kind = "wall", id = id, side = "core", x = hx,
+					z = hz}, t
 		end
 	end
 	for id, r in pairs(room_data) do
@@ -872,7 +1119,15 @@ local function node_for(b, x, z, ref)
 		add_op(b, "set", {id = e.wall, ints = {b = ph}})
 		local f = wall_fields(w)
 		f.a, f.b = ph, w.b
-		add_op(b, "create", {id = doc.placeholder(), type = "wall", ints = f})
+		local half = doc.placeholder()
+		add_op(b, "create", {id = half, type = "wall", ints = f})
+		-- What is in the wall past the split goes with the second half
+		for _, inst in ipairs(doc.of_type("instance")) do
+			if inst.ints.host == e.wall and inst.ints.along > ref.t then
+				add_op(b, "set", {id = inst.id, ints = {host = half,
+						along = inst.ints.along - ref.t}})
+			end
+		end
 		b.pairs[pair_key(w.a, ph)] = true
 		b.pairs[pair_key(ph, w.b)] = true
 	end
@@ -1010,6 +1265,28 @@ local function add_box(x, z, w, d)
 	})
 end
 
+-- A door, window or opening put in a wall where the point is along it
+local function add_hosted(wall, x, z)
+	local f = wall_frame(wall)
+	if not f then
+		return
+	end
+	local kind = S.hosted
+	local d = HOSTED[kind]
+	local along = geom.snap((x - f.ax) * f.ux + (z - f.az) * f.uz, grid_step())
+	along = math.max(d.w / 2, math.min(f.len - d.w / 2, along))
+	local def = doc.placeholder()
+	local mat = default_material()
+	send({
+		{op = "create", ent = {id = def, type = "definition", ints = {
+				kind = kind, w = d.w, h = d.h, mat = mat, mat_leaf = mat,
+				trim = kind == KIND.opening and 0 or 70}}},
+		{op = "create", ent = {id = doc.placeholder(), type = "instance",
+				ints = {def = def, host = wall, along = math.floor(along + 0.5),
+				sill = d.sill}}},
+	})
+end
+
 local function copy_fields(p)
 	local f = {}
 	for k, v in pairs(p) do
@@ -1032,8 +1309,13 @@ local function copy_selected(linked)
 						doc.ents[i.def].ints)}}
 				i.def = def
 			end
-			i.x = i.x + COPY_OFFSET
-			i.z = i.z - COPY_OFFSET
+			if i.host ~= 0 then
+				-- Along the wall, next to it
+				i.along = i.along + doc.ents[doc.ents[id].ints.def].ints.w + 100
+			else
+				i.x = i.x + COPY_OFFSET
+				i.z = i.z - COPY_OFFSET
+			end
 			local ph = doc.placeholder()
 			new[#new + 1] = ph
 			ops[#ops + 1] = {op = "create", ent = {id = ph, type = "instance",
@@ -1252,11 +1534,14 @@ local function send_turn(deg)
 	local ops = {}
 	for id in pairs(inst) do
 		local i = doc.ents[id].ints
-		local x, z = turn(i.x, i.z)
-		-- Yaw grows turning right, which from above is clockwise
-		local yaw = (i.yaw - math.floor(deg * 1000 + 0.5)) % 360000
-		ops[#ops + 1] = {op = "set", ent = {id = id, ints = {x = x, z = z,
-				yaw = yaw}}}
+		-- What is in a wall turns with the wall, not by itself
+		if i.host == 0 then
+			local x, z = turn(i.x, i.z)
+			-- Yaw grows turning right, which from above is clockwise
+			local yaw = (i.yaw - math.floor(deg * 1000 + 0.5)) % 360000
+			ops[#ops + 1] = {op = "set", ent = {id = id, ints = {x = x, z = z,
+					yaw = yaw}}}
+		end
 	end
 	for id in pairs(nodes) do
 		local p = doc.ents[id].ints
@@ -1314,6 +1599,7 @@ local function set_view(v)
 	S.view = v
 	magic.set_preferred_viewports({v == "2d" and vp2d or vp3d})
 	caps_node.enabled = v == "2d"
+	pieces_node.enabled = v == "3d"
 	refresh_panels()
 end
 
@@ -1334,7 +1620,7 @@ local function build_toolbar()
 			function() set_view(S.view == "2d" and "3d" or "2d") end, false, 40)
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Box"},
-			{"paint", "Paint"}}) do
+			{"hosted", "Door/window"}, {"paint", "Paint"}}) do
 		panel.button(toolbar, t[2] .. " (" .. TOOL_KEYS[t[1]] .. ")",
 				function() set_tool(t[1]) end, S.tool == t[1])
 	end
@@ -1410,6 +1696,56 @@ local function build_props()
 		end)
 		panel.button(props, "Apply the palette entry", apply_material)
 		panel.button(props, "Delete (Del)", delete_selected)
+	elseif sel and sel.type == "instance" and sel.ints.host ~= 0 then
+		local i = sel.ints
+		local p = doc.ents[i.def].ints
+		local links = instances_of(i.def)
+		panel.label(props, KIND_NAMES[p.kind] .. " " .. sel.id ..
+				(links > 1 and ("   linked x" .. links) or ""))
+		int_field(i.def, "Width mm", "w", p.w)
+		int_field(i.def, "Height mm", "h", p.h)
+		int_field(sel.id, "Sill mm", "sill", i.sill)
+		int_field(sel.id, "Along mm", "along", i.along)
+		if p.kind ~= KIND.opening then
+			int_field(i.def, "Trim mm", "trim", p.trim)
+			int_field(i.def, "Trim depth mm", "trim_depth", p.trim_depth)
+			local names = p.kind == KIND.door and {"Single leaf", "Double leaf"}
+					or {"Fixed", "Casement"}
+			panel.button(props, names[p.leaf + 1], function()
+				set(i.def, {ints = {leaf = 1 - p.leaf}})
+			end)
+			local r = panel.row(props)
+			panel.button(r, "Other hinge", function()
+				set(sel.id, {ints = {flip = bit_xor(i.flip, 1)}})
+			end)
+			panel.button(r, "Other side", function()
+				set(sel.id, {ints = {flip = bit_xor(i.flip, 2)}})
+			end)
+			panel.field(props, "Open %", math.floor(i.open / 10 + 0.5),
+					function(t)
+				local v = tonumber(t)
+				if v then
+					set(sel.id, {ints = {open = math.max(0, math.min(1000,
+							math.floor(v * 10 + 0.5)))}})
+				end
+			end)
+			panel.label(props, "The palette entry on:")
+			local r2 = panel.row(props)
+			for _, slot in ipairs({{"Frame", "mat"}, {"Leaf", "mat_leaf"},
+					{"Glass", "mat_glass"}}) do
+				panel.button(r2, slot[1], function()
+					set(i.def, {ints = {[slot[2]] = default_material()}})
+				end)
+			end
+		end
+		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
+		panel.button(props, "Linked clone (Ctrl+L)", function()
+			copy_selected(true)
+		end)
+		if links > 1 then
+			panel.button(props, "Unlink", function() unlink(sel.id) end)
+		end
+		panel.button(props, "Delete (Del)", delete_selected)
 	elseif sel and sel.type == "instance" then
 		local i = sel.ints
 		local def = doc.ents[i.def]
@@ -1441,7 +1777,7 @@ local function build_props()
 			set(sel.id, {ints = {roll = (i.roll + 1) % 4}})
 		end)
 		-- The gaps to the walls, typed to move the box
-		if inst_data[sel.id] then
+		if inst_data[sel.id] and not inst_data[sel.id].hosted then
 			for k, g in ipairs(wall_gaps(sel.id)) do
 				if g.gap then
 					panel.field(props, "Gap " .. ({"+X", "-X", "+Z", "-Z"})[k] ..
@@ -1508,6 +1844,23 @@ local function build_props()
 		int_field(sel.id, "X mm", "x", sel.ints.x)
 		int_field(sel.id, "Z mm", "z", sel.ints.z)
 		panel.button(props, "Delete (Del)", delete_selected)
+	elseif S.tool == "hosted" then
+		panel.label(props, "Click a wall to put in (I: the next):")
+		local r = panel.row(props)
+		for _, k in ipairs({KIND.opening, KIND.door, KIND.window}) do
+			panel.button(r, KIND_NAMES[k], function()
+				S.hosted = k
+				refresh_panels()
+			end, S.hosted == k)
+		end
+		local d = HOSTED[S.hosted]
+		for _, f in ipairs({{"Width mm", "w"}, {"Height mm", "h"},
+				{"Sill mm", "sill"}}) do
+			panel.field(props, f[1], d[f[2]], function(t)
+				local v = num(t)
+				if v and (v > 0 or f[2] == "sill") then d[f[2]] = v end
+			end)
+		end
 	elseif S.tool == "box" then
 		panel.label(props, "New boxes: drag the footprint")
 		for _, f in ipairs({{"Width mm", "w"}, {"Height mm", "h"},
@@ -1813,7 +2166,11 @@ local function end_drag()
 		end
 		for id in pairs(d.inst) do
 			local i = doc.ents[id] and doc.ents[id].ints
-			if i then
+			local it = inst_data[id]
+			if i and it and it.hosted then
+				ops[#ops + 1] = {op = "set", ent = {id = id,
+						ints = {along = math.floor(it.along + 0.5)}}}
+			elseif i then
 				ops[#ops + 1] = {op = "set", ent = {id = id,
 						ints = {x = i.x + d.dx, z = i.z + d.dz}}}
 			end
@@ -1854,6 +2211,11 @@ local function click()
 		local x, z = snapped_point(nil)
 		if x then
 			add_box(x, z, S.box.w, S.box.d)
+		end
+	elseif S.tool == "hosted" then
+		local s = pick_surface()
+		if s and s.kind == "wall" and doc.can("edit") then
+			add_hosted(s.id, s.x, s.z)
 		end
 	elseif S.tool == "wall" or S.tool == "room" then
 		if not doc.can("edit") then
@@ -1989,6 +2351,29 @@ function M.mouse_wheel(wheel)
 	end
 end
 
+-- The use key: a door or window under the cursor opens or closes. For an
+-- editor for everybody; a viewer opens it for themselves.
+local function use()
+	local s = pick_surface()
+	local id = s and s.kind == "instance" and s.id
+	local e = id and doc.ents[id]
+	if not e or e.ints.host == 0 then
+		return
+	end
+	local kind = doc.ents[e.ints.def].ints.kind
+	if kind ~= KIND.door and kind ~= KIND.window then
+		return
+	end
+	local open = open_amount(id) > 0 and 0 or 1000
+	if doc.can("edit") then
+		S.local_open[id] = nil
+		send({{op = "set", ent = {id = id, ints = {open = open}}}})
+	else
+		S.local_open[id] = open
+		S.dirty = true
+	end
+end
+
 -- A length typed while drawing: Enter draws the segment that long, in the
 -- direction the cursor gives
 local function commit_typed()
@@ -2057,6 +2442,8 @@ function M.key_down(key, event_data)
 		elseif S.tool ~= "select" then
 			set_tool("select")
 		end
+	elseif key == magic.KEY_E then
+		use()
 	elseif key == magic.KEY_TAB then
 		set_view(S.view == "2d" and "3d" or "2d")
 	elseif key == magic.KEY_Z then
@@ -2073,6 +2460,12 @@ function M.key_down(key, event_data)
 		set_tool("room")
 	elseif key == magic.KEY_O then
 		set_tool("box")
+	elseif key == magic.KEY_I then
+		-- Again: the next of opening, door and window
+		if S.tool == "hosted" then
+			S.hosted = S.hosted % 3 + 2
+		end
+		set_tool("hosted")
 	elseif key == magic.KEY_P then
 		set_tool("paint")
 	elseif key == magic.KEY_G then
@@ -2154,6 +2547,50 @@ local function mm_text(v)
 	return string.format("%d mm", math.floor(v + 0.5))
 end
 
+-- A door's swing or a window's glass as a plan draws them: a door open
+-- square to the wall with the arc it sweeps, a window as two lines
+local function plan_symbol(id, it, line)
+	local def = doc.ents[it.def].ints
+	local e = doc.ents[id].ints
+	local f = it.frame
+	local col = magic.Color(0.2, 0.2, 0.25)
+	local function at(a, c)
+		-- A point a along the wall from the centre, c across it
+		return f.ax + f.ux * (it.along + a) + f.nx * c,
+				f.az + f.uz * (it.along + a) + f.nz * c
+	end
+	local hw = def.w / 2
+	local mid = (f.lo - f.ro) / 2
+	if def.kind == KIND.window then
+		for _, c in ipairs({mid - 15, mid + 15}) do
+			local ax, az = at(-hw, c)
+			local bx, bz = at(hw, c)
+			line(ax, az, bx, bz, col)
+		end
+	elseif def.kind == KIND.door then
+		local right = e.flip % 2 == 1
+		local side = math.floor(e.flip / 2) % 2 == 1 and -1 or 1
+		local face = side > 0 and f.lo or -f.ro
+		local hinges = def.leaf == 1 and {{-hw, 1, hw}, {hw, -1, hw}} or
+				{{right and hw or -hw, right and -1 or 1, 2 * hw}}
+		for _, h in ipairs(hinges) do
+			local r = h[3]
+			local hx, hz = at(h[1], face)
+			local ox, oz = at(h[1], face + side * r)
+			line(hx, hz, ox, oz, col)
+			local steps = 12
+			local px, pz = at(h[1] + h[2] * r, face)
+			for k = 1, steps do
+				local a = k / steps * math.pi / 2
+				local qx, qz = at(h[1] + h[2] * r * math.cos(a),
+						face + side * r * math.sin(a))
+				line(px, pz, qx, qz, col)
+				px, pz = qx, qz
+			end
+		end
+	end
+end
+
 local function draw_overlay()
 	local y = S.view == "2d" and W(settings().cut) - 0.001 or 0.004
 	local function P(x, z, yy)
@@ -2217,8 +2654,10 @@ local function draw_overlay()
 				dashed(o.pts, dark)
 			end
 		end
-		for _, it in pairs(inst_data) do
-			if it.y0 >= cut then
+		for id, it in pairs(inst_data) do
+			if it.hosted then
+				plan_symbol(id, it, line)
+			elseif it.y0 >= cut then
 				dashed(it.foot, dark)
 			else
 				outline(it.foot, dark)
@@ -2245,7 +2684,7 @@ local function draw_overlay()
 	end
 	-- The primary object's gaps to the walls
 	if S.primary and S.sel[S.primary] == "instance" and inst_data[S.primary] and
-			not S.drag then
+			not inst_data[S.primary].hosted and not S.drag then
 		local it = inst_data[S.primary]
 		for _, g in ipairs(wall_gaps(S.primary)) do
 			if g.gap and g.gap > 0 then

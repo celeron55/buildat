@@ -278,6 +278,32 @@ function M.centroid(pts)
 	return cx / (3 * a), cz / (3 * a)
 end
 
+-- The polygon clipped to the side of a line where nx * x + nz * z <= d.
+-- labels[i] names the edge from pts[i]; an edge the clip makes is named
+-- `cut`. Returns the points and their labels.
+function M.clip(pts, labels, nx, nz, d, cut)
+	local op, ol = {}, {}
+	local n = #pts
+	for i = 1, n do
+		local p, q = pts[i], pts[i % n + 1]
+		local dp = nx * p[1] + nz * p[2] - d
+		local dq = nx * q[1] + nz * q[2] - d
+		local function crossing()
+			local t = dp / (dp - dq)
+			return {p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t}
+		end
+		if dp <= 0 then
+			op[#op + 1], ol[#ol + 1] = p, labels[i]
+			if dq > 0 then
+				op[#op + 1], ol[#ol + 1] = crossing(), cut
+			end
+		elseif dq <= 0 then
+			op[#op + 1], ol[#ol + 1] = crossing(), labels[i]
+		end
+	end
+	return op, ol
+end
+
 -- Where a ray from (ox, oz) along (ux, uz) crosses segment a-b: the ray's
 -- parameter, or nil
 function M.ray_segment(ox, oz, ux, uz, ax, az, bx, bz)
@@ -405,6 +431,16 @@ do
 	local cx, cz = M.centroid(sq)
 	near(cx, 2000, "centroid x")
 	near(cz, 2000, "centroid z")
+
+	-- A 4 by 4 square clipped to x <= 1 keeps a 1 by 4 strip, and the new
+	-- edge is the clip's
+	local cp, cl = M.clip(sq, {"a", "b", "c", "d"}, 1, 0, 1000, "cut")
+	near(M.area(cp), 1000 * 4000, "clip area")
+	local cuts = 0
+	for _, l in ipairs(cl) do
+		cuts = cuts + (l == "cut" and 1 or 0)
+	end
+	assert(cuts == 1 and #cp == 4, "clip makes one new edge")
 
 	near(M.ray_segment(0, 0, 1, 0, 5, -1, 5, 1), 5, "ray meets segment")
 	assert(M.ray_segment(0, 0, -1, 0, 5, -1, 5, 1) == nil, "ray points away")
