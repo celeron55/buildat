@@ -55,6 +55,57 @@ function M.button(parent, text, on_click, down, min_width)
 	return b
 end
 
+-- **Numeric fields step** (user): the wheel over one, or Up and Down in
+-- it, adds its step to the number and commits it as Enter would. A field
+-- given a number is one, found again by its element's name: no element is
+-- kept here, since a removed one still answers where it was.
+-- By the label: 10 for millimetres, 100 for kelvin, else 1; Shift x10.
+local numeric = {} -- element name -> {on_finish, step}
+local numeric_n = 0
+
+local function nudge(edit, dir, shift)
+	local entry = numeric[edit:GetName()]
+	local v = entry and tonumber(edit:GetText())
+	if not v then
+		return false
+	end
+	v = v + dir * entry.step * (shift and 10 or 1)
+	local text = v == math.floor(v) and string.format("%d", v) or tostring(v)
+	edit:SetText(text)
+	entry.on_finish(text)
+	return true
+end
+
+-- Up or Down in the field that has the focus; whether it was a numeric one
+function M.nudge_focused(dir, shift)
+	local f = magic.ui.focusElement
+	return f ~= nil and nudge(f, dir, shift)
+end
+
+-- The wheel at a point in UI coordinates over the windows up now; whether
+-- a numeric field was there. What the walk does not meet is forgotten.
+function M.nudge_at(windows, ux, uy, dir, shift)
+	local live, hit = {}, nil
+	local function walk(el)
+		local name = el:GetName()
+		if numeric[name] then
+			live[name] = numeric[name]
+			local p, s = el.screenPosition, el.size
+			if ux >= p.x and uy >= p.y and ux < p.x + s.x and uy < p.y + s.y then
+				hit = el
+			end
+		end
+		for i = 0, el:GetNumChildren() - 1 do
+			walk(el:GetChild(i))
+		end
+	end
+	for _, w in pairs(windows) do
+		walk(w)
+	end
+	numeric = live
+	return hit ~= nil and nudge(hit, dir, shift)
+end
+
 -- A labelled text field; on_finish(text) when Enter is pressed in it
 function M.field(parent, label, value, on_finish, width)
 	local r = M.row(parent)
@@ -67,6 +118,13 @@ function M.field(parent, label, value, on_finish, width)
 	e.textCopyable = true
 	e.textSelectable = true
 	e:SetText(tostring(value))
+	if type(value) == "number" then
+		numeric_n = numeric_n + 1
+		local name = "fp_number_" .. numeric_n
+		e:SetName(name)
+		numeric[name] = {on_finish = on_finish,
+				step = label:find("mm") and 10 or label:find("Kelvin") and 100 or 1}
+	end
 	magic.SubscribeToEvent(e, "TextFinished", function()
 		on_finish(e:GetText())
 		magic.ui:SetFocusElement(nil)

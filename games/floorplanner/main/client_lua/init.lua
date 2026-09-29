@@ -832,6 +832,11 @@ end
 
 -- The first dialog waits for fp:hello: the plans to pick, or the join
 
+-- Whether a field had the focus last frame: Urho's UI takes a LineEdit's
+-- focus on Esc before KeyDown gets here, so Esc in a field would otherwise
+-- reach the editor as a bare Esc and open the pause menu
+local was_typing = false
+
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	if chat_input then
@@ -840,7 +845,11 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		end
 		return
 	end
-	if doc.typing() then
+	if doc.typing() or (key == magic.KEY_ESCAPE and was_typing) then
+		was_typing = false
+		if editor and editor.nudge(key, event_data:GetInt("Qualifiers") % 2 == 1) then
+			return
+		end
 		-- Esc in a field drops what was typed: the panel comes back with
 		-- what it had. In the join dialog, before there is an editor, it
 		-- is the dialog's cancel, which is leaving.
@@ -864,6 +873,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 end)
 
 magic.SubscribeToEvent("Update", function(event_type, event_data)
+	was_typing = doc.typing()
 	redraw_messages()
 	if editor then
 		editor.update(event_data:GetFloat("TimeStep"))

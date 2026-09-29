@@ -4083,6 +4083,9 @@ do
 
 	function M.mouse_wheel(wheel)
 		if over_ui() then
+			local sc = magic.ui.scale
+			panel.nudge_at({toolbar, props, palette_win, pause_win, picker_win},
+					S.mx / sc, S.my / sc, wheel > 0 and 1 or -1, S.shift)
 			return
 		end
 		if S.view == "2d" then
@@ -4223,6 +4226,14 @@ do
 		else
 			S.corners[#S.corners + 1] = {x = x, z = z, ref = {}}
 		end
+	end
+
+	-- Up and Down in a numeric field step it; whether the key was that
+	function M.nudge(key, shift)
+		if key ~= magic.KEY_UP and key ~= magic.KEY_DOWN then
+			return false
+		end
+		return panel.nudge_focused(key == magic.KEY_UP and 1 or -1, shift)
 	end
 
 	function M.key_down(key, event_data)
