@@ -806,6 +806,17 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		return
 	end
 	if doc.typing() then
+		-- Esc in a field drops what was typed: the panel comes back with
+		-- what it had. In the join dialog, before there is an editor, it
+		-- is the dialog's cancel, which is leaving.
+		if key == magic.KEY_ESCAPE then
+			magic.ui:SetFocusElement(nil)
+			if editor then
+				editor.refresh_panels()
+			else
+				buildat.leave()
+			end
+		end
 		return
 	end
 	if key == magic.KEY_T and editor then

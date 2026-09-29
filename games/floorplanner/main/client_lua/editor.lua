@@ -32,7 +32,7 @@ local SNAP_PX = 12
 local DRAG_PX = 4
 -- Where a copy lands from what it was copied from
 local COPY_OFFSET = 500
--- Tab goes round the views: the plan, the free camera, walking
+-- The view button goes round the views: the plan, the free camera, walking
 local NEXT_VIEW = {["2d"] = "3d", ["3d"] = "walk", walk = "2d"}
 local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk"}
 -- Walking: the body's radius, how high a step it takes, its height, mm
@@ -2427,11 +2427,16 @@ local label_nodes = {}
 
 local refresh_panels
 
--- The voxel tool in 3D holds the mouse, Luanti's way: the view turns with
--- it and a crosshair picks
+-- Walking and the voxel tool in 3D have two levels ([FP_ESC]): the pointer,
+-- for the panels, and above it the crosshair, which holds the mouse
+-- Luanti's way -- the view turns with it and the crosshair picks. A click on
+-- the view goes up into the crosshair and Esc comes back down.
+local function crosshair_view()
+	return S.view == "walk" or (S.view == "3d" and S.tool == "voxel")
+end
+
 local function update_capture()
-	local want = (S.tool == "voxel" and S.view ~= "2d") or
-			(S.view == "walk" and not S.walk_released)
+	local want = S.crosshair and crosshair_view() and not S.paused or false
 	if want ~= (S.captured or false) then
 		S.captured = want
 		S.looking = want
@@ -2450,7 +2455,10 @@ local function set_view(v)
 		end
 		S.walk.feet = 0
 		S.pitch = 0
-		S.walk_released = false
+	end
+	-- A view starts at its pointer, so the view button can go on from it
+	if v ~= S.view then
+		S.crosshair = false
 	end
 	S.view = v
 	-- Only when it changes: the walk and the free camera share a viewport
@@ -2469,6 +2477,9 @@ local function set_view(v)
 end
 
 local function set_tool(t)
+	if t ~= S.tool and S.view == "3d" then
+		S.crosshair = false
+	end
 	S.tool = t
 	S.draw = nil
 	S.corners = nil
@@ -2482,7 +2493,7 @@ local function build_toolbar()
 		toolbar:Remove()
 	end
 	toolbar = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, 8, true)
-	panel.button(toolbar, VIEW_NAMES[S.view] .. " (Tab)",
+	panel.button(toolbar, VIEW_NAMES[S.view] .. " (F1 F2 F3)",
 			function() set_view(NEXT_VIEW[S.view]) end, false, 40)
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Box"},
@@ -3110,9 +3121,83 @@ refresh_panels = function()
 end
 M.refresh_panels = function() refresh_panels() end
 
+-- The pause menu ([FP_ESC]): what Esc opens at the bottom of any view, and
+-- a level of its own, so Esc on it is Continue. Its Settings are the
+-- planner's; the engine's are the launcher's.
+local pause_win = nil
+local open_pause, close_pause
+do
+	local function dialog(title)
+		if pause_win then
+			pause_win:Remove()
+		end
+		pause_win = panel.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+		pause_win.minWidth = 300
+		panel.label(pause_win, title)
+		return pause_win
+	end
+
+	local function settings_page()
+		local w = dialog("Settings")
+		local mute, db = buildat.get_sound()
+		panel.button(w, mute and "Sound: muted" or (db <= -33 and "Sound: off" or
+				string.format("Sound: %d dB", db)), function()
+			-- Muted, then full, then down 6 dB at a time
+			if mute then
+				buildat.set_sound(false, 0)
+			elseif db > -30 then
+				buildat.set_sound(false, math.max(-30, db - 6))
+			else
+				buildat.set_sound(true, 0)
+			end
+			settings_page()
+		end)
+		panel.button(w, S.plan_look and "The plan: flat colours (L)" or
+				"The plan: the materials (L)", function()
+			S.plan_look = not S.plan_look
+			set_view(S.view)
+			settings_page()
+		end)
+		panel.button(w, S.show_ids and "Material ids: shown" or
+				"Material ids: hidden", function()
+			S.show_ids = not S.show_ids
+			S.dirty = true
+			settings_page()
+		end)
+		panel.field(w, "Eye mm", S.eye, function(t)
+			local v = tonumber(t)
+			if v and v > 0 then
+				S.eye = math.floor(v)
+			end
+		end)
+		panel.button(w, "Back", function() open_pause() end)
+	end
+
+	open_pause = function()
+		S.paused = true
+		S.press, S.drag = nil, nil
+		update_capture()
+		local w = dialog("Paused")
+		panel.button(w, "Continue (Esc)", function() close_pause() end)
+		panel.button(w, "Settings", settings_page)
+		panel.button(w, "Leave the plan", function() buildat.leave() end)
+		panel.button(w, "Quit", function() buildat.quit() end)
+	end
+
+	close_pause = function()
+		if pause_win then
+			pause_win:Remove()
+			pause_win = nil
+		end
+		S.paused = false
+		update_capture()
+	end
+end
+
 local function over_ui()
 	local s = magic.ui.scale
-	return panel.over({toolbar, props, palette_win}, S.mx / s, S.my / s)
+	return panel.over({toolbar, props, palette_win, pause_win}, S.mx / s,
+			S.my / s)
 end
 
 --
@@ -3553,9 +3638,13 @@ local function camera_pivot()
 end
 
 function M.mouse_down(button)
-	if S.view == "walk" and S.walk_released and not over_ui() then
-		-- A click on the view takes the mouse back
-		S.walk_released = false
+	if S.paused then
+		return
+	end
+	if crosshair_view() and not S.captured and not over_ui() and
+			button == magic.MOUSEB_LEFT then
+		-- A click on the view goes up into the crosshair
+		S.crosshair = true
 		update_capture()
 		S.swallow_up = true
 		return
@@ -3888,37 +3977,33 @@ function M.key_down(key, event_data)
 		end
 		return
 	end
-	if key == magic.KEY_ESCAPE and S.view == "walk" and not S.walk_released and
-			S.tool ~= "voxel" then
-		-- Walking: the mouse is let go, for the panels
-		S.walk_released = true
-		update_capture()
-	elseif key == magic.KEY_F and S.view == "walk" then
-		S.walk.noclip = not S.walk.noclip
-		doc.notice(S.walk.noclip and "Noclip: walls do not stop you; Space and C"
-				.. " go up and down" or "Noclip off")
-	elseif key == magic.KEY_ESCAPE and S.calib then
-		S.calib = nil
-		refresh_panels()
-	elseif key == magic.KEY_ESCAPE and S.linking then
-		S.linking = nil
-		refresh_panels()
-	elseif key == magic.KEY_ESCAPE then
-		if S.tool == "voxel" then
-			-- Out of the voxel tool, which lets the mouse go
-			set_tool("select")
+	if key == magic.KEY_ESCAPE then
+		-- Down one level ([FP_ESC]): the pause menu, the crosshair, what is
+		-- in progress; at the bottom of a view, the pause menu
+		if S.paused then
+			close_pause()
+		elseif S.captured then
+			S.crosshair = false
+			update_capture()
 		elseif S.draw or S.corners then
 			S.draw = nil
 			S.corners = nil
 			S.typed = ""
-		elseif next(S.sel) or next(S.nodes) then
-			S.sel = {}
-			S.primary = nil
-			S.nodes = {}
+		elseif S.linking then
+			S.linking = nil
 			refresh_panels()
-		elseif S.tool ~= "select" then
-			set_tool("select")
+		elseif S.calib then
+			S.calib = nil
+			refresh_panels()
+		else
+			open_pause()
 		end
+	elseif S.paused then
+		-- The pause menu takes the keys
+	elseif key == magic.KEY_F and S.view == "walk" then
+		S.walk.noclip = not S.walk.noclip
+		doc.notice(S.walk.noclip and "Noclip: walls do not stop you; Space and C"
+				.. " go up and down" or "Noclip off")
 	elseif key == magic.KEY_E then
 		use()
 	elseif key == magic.KEY_U then
@@ -3926,8 +4011,12 @@ function M.key_down(key, event_data)
 	elseif key == magic.KEY_L then
 		S.plan_look = not S.plan_look
 		set_view(S.view)
-	elseif key == magic.KEY_TAB then
-		set_view(NEXT_VIEW[S.view])
+	elseif key == magic.KEY_F1 then
+		set_view("2d")
+	elseif key == magic.KEY_F2 then
+		set_view("3d")
+	elseif key == magic.KEY_F3 then
+		set_view("walk")
 	elseif key == magic.KEY_Z then
 		rotate_selection(angle_step())
 	elseif key == magic.KEY_X then
@@ -4258,8 +4347,14 @@ do
 	end
 
 	compute_guide = function()
-		if over_ui() and not S.captured then
+		if S.paused or (over_ui() and not S.captured) then
 			return nil
+		end
+		-- At the pointer of a view with a crosshair, a click goes up into it
+		if crosshair_view() and not S.captured then
+			return {hl = {}, left = S.view == "walk" and
+					"into the crosshair: walk, look and point (Esc: back)" or
+					"into the crosshair to dig and place (Esc: back)"}
 		end
 		local g = {hl = {}}
 		local function hl(t)
