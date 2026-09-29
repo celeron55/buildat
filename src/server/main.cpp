@@ -79,8 +79,8 @@ int main(int argc, char *argv[])
 
 	std::string module_path;
 
-	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:W:wRu:x:";
-	const char usagefmt[1400] =
+	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:W:T:wRu:x:";
+	const char usagefmt[1600] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
 			"  -m [module_path]     Specify module path\n"
@@ -99,6 +99,8 @@ int main(int argc, char *argv[])
 			"  -P [port]            Set network port (default 29500)\n"
 			"  -W [web_client_path] Serve the web client from here\n"
 			"                       (default share_path/web)\n"
+			"  -T [proxies]         Believe X-Forwarded-For from these\n"
+			"                       (comma separated; default 127.0.0.1,::1)\n"
 			"  -w                   Watch served files and push changes to\n"
 			"                       connected clients (for development)\n"
 			"  -R                   Restart a module when its source changes\n"
@@ -170,6 +172,10 @@ int main(int argc, char *argv[])
 		case 'W':
 			log_i(MODULE, "config.web_client_path: %s", c55_optarg);
 			config.set("web_client_path", c55_optarg);
+			break;
+		case 'T':
+			log_i(MODULE, "config.web_trusted_proxies: %s", c55_optarg);
+			config.set("web_trusted_proxies", c55_optarg);
 			break;
 		case 'w':
 			config.set("watch_client_files", true);

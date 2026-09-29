@@ -54,6 +54,14 @@ struct Peer
 
 	Id id = 0;
 	sp_<interface::TCPSocket> socket;
+	// The client behind a trusted proxy ([FP_ACCESS] 6): the last entry of
+	// its WebSocket upgrade's X-Forwarded-For, or empty
+	ss_ forwarded_for;
+	// Whom the game is told the peer is
+	ss_ address() const {
+		return forwarded_for.empty() ? socket->get_remote_address() :
+				forwarded_for;
+	}
 	std::deque<char> socket_buffer;
 	interface::PacketStream packet_stream;
 
@@ -457,14 +465,49 @@ struct Module: public interface::Module, public network::Interface
 		peer.accepted_us = interface::os::time_us();
 	}
 
+	// A reverse proxy's client ([FP_ACCESS] 6): believed only from the
+	// addresses web_trusted_proxies names (comma separated; loopback by
+	// default, which is nginx on the same box). The last entry is the one
+	// the proxy added; one that is not an address is ignored.
+	ss_ forwarded_for(const Peer &peer, const ss_ &header)
+	{
+		if(header.empty())
+			return "";
+		const ss_ from = peer.socket->get_remote_address();
+		const ss_ trusted = m_server->get_config().get<ss_>(
+				"web_trusted_proxies");
+		bool ok = false;
+		size_t at = 0;
+		while(at <= trusted.size()){
+			size_t comma = trusted.find(',', at);
+			if(comma == ss_::npos)
+				comma = trusted.size();
+			if(web::trim(trusted.substr(at, comma - at)) == from)
+				ok = true;
+			at = comma + 1;
+		}
+		if(!ok)
+			return "";
+		size_t comma = header.find_last_of(',');
+		ss_ last = web::trim(comma == ss_::npos ? header : header.substr(comma + 1));
+		if(last.empty() || last.size() > 45)
+			return "";
+		for(char c : last)
+			if(!(isxdigit((unsigned char)c) || c == '.' || c == ':'))
+				return "";
+		return last;
+	}
+
 	void emit_connected(Peer &peer)
 	{
-		log_i(MODULE, "Client %zu from %s connected%s",
-				peer.id, cs(peer.socket->get_remote_address()),
-				peer.kind == Peer::Kind::WebSocket ? " (WebSocket)" : "");
+		log_i(MODULE, "Client %zu from %s connected%s%s",
+				peer.id, cs(peer.address()),
+				peer.kind == Peer::Kind::WebSocket ? " (WebSocket)" : "",
+				peer.forwarded_for.empty() ? "" :
+				(" through "+peer.socket->get_remote_address()).c_str());
 		PeerInfo pinfo;
 		pinfo.id = peer.id;
-		pinfo.address = peer.socket->get_remote_address();
+		pinfo.address = peer.address();
 		m_server->emit_event("network:client_connected", new NewClient(pinfo));
 	}
 
@@ -545,6 +588,7 @@ struct Module: public interface::Module, public network::Interface
 			peer.queue_raw(std::move(r));
 			peer.kind = Peer::Kind::WebSocket;
 			peer.ws_in = rest;
+			peer.forwarded_for = forwarded_for(peer, headers["x-forwarded-for"]);
 			emit_connected(peer);
 			return deframe(peer);
 		}
@@ -855,7 +899,7 @@ struct Module: public interface::Module, public network::Interface
 		if(peer.game()){
 			PeerInfo pinfo;
 			pinfo.id = peer.id;
-			pinfo.address = peer.socket->get_remote_address();
+			pinfo.address = peer.address();
 			m_server->emit_event("network:client_disconnected",
 					new OldClient(pinfo));
 		}

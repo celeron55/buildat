@@ -26,6 +26,9 @@ Config::Config()
 	set_default("network_port", "29500");
 	// The web client's build ([WEB_CLIENT]); empty is <share_path>/web
 	set_default("web_client_path", "");
+	// Whose X-Forwarded-For is believed for a WebSocket client's address
+	// ([FP_ACCESS] 6): comma separated, loopback being nginx on the box
+	set_default("web_trusted_proxies", "127.0.0.1,::1");
 	// What an untrusted launcher asked for, key=value a line, through -u;
 	// a module reads it as it would a packet ([LAUNCH_GRID])
 	set_default("untrusted_launch", "");
