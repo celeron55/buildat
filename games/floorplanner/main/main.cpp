@@ -37,7 +37,7 @@ using interface::Event;
 namespace floorplanner {
 
 // Kept in the save; bumped when a stored entity's meaning changes
-static const int32_t SCHEMA_VERSION = 2;
+static const int32_t SCHEMA_VERSION = 3;
 static const size_t MAX_ENTITIES = 100000;
 static const size_t MAX_OPS_PER_BATCH = 2000;
 static const size_t MAX_STRING = 200;
@@ -131,8 +131,26 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"sun_yaw", 0, 359, 135},
 		{"sun_pitch", 5, 90, 40},
 		{"grid", 1, 100, 100}, // mm, what the plan snaps to
+		// Floor to floor, where "Add a floor above" puts one ([FP_LAYOUTS])
+		{"floor_step", 1000, 20000, 3000},
 	}, {}, {}, true},
+	// A floor or a building placed in the world ([FP_LAYOUTS]): its own
+	// coordinates turned by yaw (millidegrees) and moved to x, y, z. The
+	// layouts of one group are one building.
+	{"layout", {
+		{"x", -MAX_COORD, MAX_COORD, 0},
+		{"y", -MAX_COORD, MAX_COORD, 0},
+		{"z", -MAX_COORD, MAX_COORD, 0},
+		{"yaw", 0, 359999, 0},
+	}, {
+		{"name", "Ground floor"},
+		{"group", "Building"},
+	}, {}},
+	// Walls and rooms are their nodes' layout's
+	// simplified: nothing checks that a wall's or a room's nodes are in one
+	// layout; the client only joins nodes of the one it edits
 	{"node", {
+		{"layout", 1, INT32_MAX, 0, "layout", OnDelete::Restrict},
 		{"x", -MAX_COORD, MAX_COORD, 0},
 		{"z", -MAX_COORD, MAX_COORD, 0},
 	}, {}, {}},
@@ -176,6 +194,7 @@ static const sv_<TypeSchema> SCHEMA = {
 	// turns, and its height from the floor up or the ceiling down
 	{"instance", {
 		{"def", 1, INT32_MAX, 0, "definition", OnDelete::Cascade},
+		{"layout", 1, INT32_MAX, 0, "layout", OnDelete::Restrict},
 		{"x", -MAX_COORD, MAX_COORD, 0},
 		{"z", -MAX_COORD, MAX_COORD, 0},
 		{"yaw", 0, 359999, 0},
@@ -201,6 +220,7 @@ static const sv_<TypeSchema> SCHEMA = {
 	// A picture under the plan, an existing floor plan to trace: one of the
 	// save's images/, its middle at x, z, scale mm per 1000 pixels
 	{"image", {
+		{"layout", 1, INT32_MAX, 0, "layout", OnDelete::Restrict},
 		{"x", -MAX_COORD, MAX_COORD, 0},
 		{"z", -MAX_COORD, MAX_COORD, 0},
 		{"yaw", 0, 359999, 0},
@@ -653,7 +673,31 @@ struct Plan
 			m_ents[e.id] = e;
 			m_dirty.insert(e.id);
 		}
-		if(m_ents.size() == count_type("settings")){
+		// 2 -> 3: a plan from before layouts is one, and so is a new one
+		int32_t first_layout = 0;
+		for(auto &pair : m_ents)
+			if(pair.second.type == "layout"){
+				first_layout = pair.first;
+				break;
+			}
+		if(first_layout == 0){
+			Entity e = make_default(*find_schema("layout"));
+			e.id = first_layout = m_next_id++;
+			m_ents[e.id] = e;
+			m_dirty.insert(e.id);
+		}
+		for(auto &pair : m_ents){
+			Entity &e = pair.second;
+			auto it = e.ints.find("layout");
+			if(it == e.ints.end())
+				continue;
+			auto l = m_ents.find(it->second);
+			if(l == m_ents.end() || l->second.type != "layout"){
+				it->second = first_layout;
+				m_dirty.insert(e.id);
+			}
+		}
+		if(m_ents.size() == count_type("settings") + count_type("layout")){
 			Entity e = make_default(*find_schema("palette"));
 			e.id = m_next_id++;
 			e.strs["name"] = "white drywall";

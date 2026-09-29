@@ -92,6 +92,7 @@ end
 -- A created entity takes a negative id, unique in the batch, which other ops
 -- in it may refer to; done(error, placeholders) gets the real ids.
 local OP_CODES = {create = 0, set = 1, delete = 2, restore = 3}
+local LAYERED = {node = true, instance = true, image = true}
 -- kind: nil for an edit, "undo" or "redo" for what undoes one
 function doc.send(ops, done, kind)
 	local seq = doc.next_seq
@@ -99,8 +100,14 @@ function doc.send(ops, done, kind)
 	local wire = {}
 	for i, op in ipairs(ops) do
 		local e = op.ent
+		local ints = e.ints or {}
+		-- A new node, instance or picture is the current layout's
+		-- ([FP_LAYOUTS]); walls and rooms are their nodes'
+		if op.op == "create" and LAYERED[e.type] and not ints.layout then
+			ints.layout = doc.layout or 0
+		end
 		wire[i] = {op = OP_CODES[op.op], ent = {id = e.id, type = e.type or "",
-				ints = e.ints or {}, strs = e.strs or {}, lists = e.lists or {}}}
+				ints = ints, strs = e.strs or {}, lists = e.lists or {}}}
 	end
 	doc.pending[seq] = {kind = kind, done = done or function(err)
 		if err ~= "" then

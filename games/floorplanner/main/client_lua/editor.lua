@@ -275,6 +275,10 @@ local pieces_node = scene:CreateChild("Pieces")
 local images_node = scene:CreateChild("Images")
 -- Each surface's material id, on the surface
 local decals_node = scene:CreateChild("Decals")
+-- Each layout's own node under each of the parts, placing it ([FP_LAYOUTS]):
+-- place.parts: layout id -> {walls = node, ...}, and P the one rebuild()
+-- builds
+local P = nil
 -- simplified: a material per picture file, and one made in Lua is freed
 -- under the geometry using it, so there are eight of them in files and
 -- eight pictures at most; the upgrade is the engine keeping what Lua made
@@ -315,6 +319,116 @@ end
 --
 local function settings()
 	return doc.settings().ints
+end
+
+-- Layouts ([FP_LAYOUTS]). The current one, S.layout, is edited, and its
+-- own coordinates are the scene's: picking, snapping and the tools see only
+-- its entities. Every other is drawn where it is relative to it.
+-- S.view_layout is the layout whose entities of_type() gives: the current
+-- one, but another while rebuild() builds that one
+local of_type
+do
+	local function layout_of(e)
+		if e.type == "wall" then
+			local n = doc.ents[e.ints.a]
+			return n and n.ints.layout
+		elseif e.type == "room" then
+			local n = doc.ents[e.lists.nodes[1]]
+			return n and n.ints.layout
+		end
+		return e.ints.layout
+	end
+
+	local LAYERED = {node = true, wall = true, room = true, instance = true,
+		image = true}
+	of_type = function(t)
+		local all = doc.of_type(t)
+		if not LAYERED[t] then
+			return all
+		end
+		local out = {}
+		for _, e in ipairs(all) do
+			if layout_of(e) == S.view_layout then
+				out[#out + 1] = e
+			end
+		end
+		return out
+	end
+end
+
+local place = {parts = {}}
+-- The current layout's fields, making the first one current when the
+-- current one is gone
+function place.current()
+	local e = S.layout and doc.ents[S.layout]
+	if not e or e.type ~= "layout" then
+		e = doc.of_type("layout")[1]
+		S.layout = e and e.id
+	end
+	doc.layout = S.layout
+	S.view_layout = S.layout
+	return e and e.ints or {x = 0, y = 0, z = 0, yaw = 0}
+end
+
+-- The world's own placement
+place.WORLD = {x = 0, y = 0, z = 0, yaw = 0}
+-- Where the frame of a placement l ({x, y, z, yaw}: layout fields, mm and
+-- millidegrees) is in the frame of c: {x, y, z} mm and a yaw in degrees
+function place.rel(l, c)
+	local x, y, z = geom.unrot(l.x - c.x, l.y - c.y, l.z - c.z, 0, c.yaw / 1000,
+			0)
+	return {x = x, y = y, z = z, yaw = (l.yaw - c.yaw) / 1000}
+end
+-- A point of the frame r places, in the frame it is placed in, and back
+function place.point(r, x, y, z)
+	local px, py, pz = geom.rot(x, y, z, 0, r.yaw, 0)
+	return px + r.x, py + r.y, pz + r.z
+end
+function place.unpoint(r, x, y, z)
+	return geom.unrot(x - r.x, y - r.y, z - r.z, 0, r.yaw, 0)
+end
+-- Presence goes in the world's coordinates, and comes to where it is in
+-- the current layout's: back = true for that way
+function place.presence(p, back)
+	local r = place.rel(place.current(), place.WORLD)
+	local f = back and place.unpoint or place.point
+	local q = {}
+	for k, v in pairs(p) do
+		q[k] = v
+	end
+	local _
+	q.cx, _, q.cz = f(r, p.cx, 0, p.cz)
+	if p.view >= 1 then
+		q.px, q.py, q.pz = f(r, p.px, p.py, p.pz)
+	else
+		-- The plan view's py is its span
+		q.px, _, q.pz = f(r, p.px, 0, p.pz)
+	end
+	q.yaw = p.yaw + (back and -1 or 1) * r.yaw * 1000
+	for _, k in ipairs({"cx", "cz", "px", "py", "pz", "yaw"}) do
+		q[k] = math.floor(q[k] + 0.5)
+	end
+	return q
+end
+-- Another layout current, the cameras staying where they are in the world
+function place.switch(id)
+	local e = doc.ents[id]
+	if not e or e.type ~= "layout" or id == S.layout then
+		return
+	end
+	local r = place.rel(place.current(), e.ints)
+	S.layout = id
+	place.current()
+	local _
+	S.cx, _, S.cz = place.point(r, S.cx, 0, S.cz)
+	local x, y, z = place.point(r, S.pos.x * 1000, S.pos.y * 1000, S.pos.z * 1000)
+	S.pos = {x = x / 1000, y = y / 1000, z = z / 1000}
+	S.yaw = S.yaw + r.yaw
+	local w = S.walk
+	w.x, w.feet, w.z = place.point(r, w.x, w.feet, w.z)
+	S.sel, S.primary, S.nodes, S.sel_face = {}, nil, {}, {}
+	S.draw, S.corners, S.drag, S.press = nil
+	S.dirty = true
 end
 
 -- The grid, the plan's own so it is saved and restored with it. Here, above
@@ -491,7 +605,7 @@ end
 --      seed high, the type's own knob (lamp brightness, grout, speckle)
 -- Rebuilt only when an entry changes, since each texture is kept.
 local function palette_texture()
-	local entries = doc.of_type("palette")
+	local entries = of_type("palette")
 	local parts = {}
 	for _, e in ipairs(entries) do
 		for k, v in pairs(e.ints) do
@@ -657,7 +771,7 @@ end
 
 local function build_room_data()
 	room_data = {}
-	for _, e in ipairs(doc.of_type("room")) do
+	for _, e in ipairs(of_type("room")) do
 		local pts, ids = {}, {}
 		for _, n in ipairs(e.lists.nodes) do
 			local x, z = node_pos(n)
@@ -748,7 +862,7 @@ end
 local function build_inst_data()
 	inst_data = {}
 	local d = S.drag
-	for _, e in ipairs(doc.of_type("instance")) do
+	for _, e in ipairs(of_type("instance")) do
 		local i = e.ints
 		-- Where somebody else's drag has it
 		local pv = doc.previewed(e.id)
@@ -901,8 +1015,7 @@ local function voxel_geometry(g, def, sz, tint)
 	end
 end
 
-local function update_voxel_meshes()
-	local seen = {}
+local function update_voxel_meshes(seen)
 	for id, it in pairs(inst_data) do
 		if it.voxel then
 			seen[id] = true
@@ -917,7 +1030,7 @@ local function update_voxel_meshes()
 				if m then
 					m.node:Remove()
 				end
-				local parent = e.align == 1 and overhead_node or walls_node
+				local parent = e.align == 1 and P.overhead or P.walls
 				local node = parent:CreateChild("voxels")
 				local g = node:CreateComponent("CustomGeometry")
 				g:SetNumGeometries(1)
@@ -930,12 +1043,6 @@ local function update_voxel_meshes()
 			end
 			m.node.position = magic.Vector3(W(it.ox), W(it.oy), W(it.oz))
 			m.node.rotation = magic.Quaternion(it.pitch, it.yaw, it.roll)
-		end
-	end
-	for id, m in pairs(voxel_meshes) do
-		if not seen[id] then
-			m.node:Remove()
-			voxel_meshes[id] = nil
 		end
 	end
 end
@@ -953,7 +1060,7 @@ local function build_hosted(id, it, def, e, geometry, commit)
 		return
 	end
 	if def.kind == KIND.switch then
-		local g, node = geometry(pieces_node)
+		local g, node = geometry(P.pieces)
 		node.position = magic.Vector3(W(it.x), W(it.y), W(it.z))
 		node.rotation = magic.Quaternion(0, it.yaw, 0)
 		box_geometry(g, W(def.w) / 2, W(def.h) / 2, W(5), row(def.mat))
@@ -964,7 +1071,7 @@ local function build_hosted(id, it, def, e, geometry, commit)
 	local f = it.frame
 	local ox, oz = f.ax + f.ux * it.along, f.az + f.uz * it.along
 	local function part()
-		local g, node = geometry(pieces_node)
+		local g, node = geometry(P.pieces)
 		node.position = magic.Vector3(W(ox), 0, W(oz))
 		node.rotation = magic.Quaternion(0, f.yaw, 0)
 		return g, node
@@ -1075,7 +1182,7 @@ local function decal(corner, n, up, entry)
 	local x = corner[1] + rx * m - up[1] * m + n[1] * 2
 	local y = corner[2] + ry * m - up[2] * m + n[2] * 2
 	local z = corner[3] + rz * m - up[3] * m + n[3] * 2
-	local node = decals_node:CreateChild("decal")
+	local node = P.decals:CreateChild("decal")
 	built[#built + 1] = node
 	node.position = magic.Vector3(W(x), W(y), W(z))
 	-- Text3D faces its node's -Z: the node looks into the surface
@@ -1170,7 +1277,7 @@ end
 local function build_images()
 	image_data = {}
 	local d = S.drag
-	for _, e in ipairs(doc.of_type("image")) do
+	for _, e in ipairs(of_type("image")) do
 		local i = e.ints
 		-- The plan's own images/ ([FP_PLANS] 3)
 		local tex = e.strs.file ~= "" and magic.cache:GetResource("Texture2D",
@@ -1196,7 +1303,7 @@ local function build_images()
 			end
 			image_data[e.id] = {foot = foot, locked = i.locked == 1}
 			if mat and (S.view == "2d" or i.show3d == 1) then
-				local node = images_node:CreateChild("image")
+				local node = P.images:CreateChild("image")
 				built[#built + 1] = node
 				local g = node:CreateComponent("CustomGeometry")
 				g:SetNumGeometries(1)
@@ -1223,7 +1330,7 @@ do
 	-- A point light at (x, y, z) mm in a lamp entry's colour and brightness
 	local function lamp_light(x, y, z, entry)
 		local p = doc.ents[entry].ints
-		local node = lamps_node:CreateChild("lamp")
+		local node = P.lamps:CreateChild("lamp")
 		built[#built + 1] = node
 		node.position = magic.Vector3(W(x), W(y), W(z))
 		local light = node:CreateComponent("Light")
@@ -1284,11 +1391,12 @@ end
 -- simplified: everything is rebuilt on any change, which at a few hundred
 -- walls is milliseconds; the upgrade is rebuilding only what is at the
 -- nodes that moved
-local function rebuild()
-	palette_texture()
+local rebuild
+do
+local function build_layout(seen_voxels)
 	solids = {}
 	wall_data = {}
-	for _, e in ipairs(doc.of_type("wall")) do
+	for _, e in ipairs(of_type("wall")) do
 		local w = e.ints
 		local ax, az = node_pos(w.a)
 		local bx, bz = node_pos(w.b)
@@ -1299,10 +1407,6 @@ local function rebuild()
 	outlines = geom.wall_outlines(wall_data)
 	build_room_data()
 	build_inst_data()
-	for _, n in ipairs(built) do
-		n:Remove()
-	end
-	built = {}
 	local cut = settings().cut
 	local function geometry(parent)
 		local node = parent:CreateChild("")
@@ -1320,7 +1424,7 @@ local function rebuild()
 	-- where it is cut, lighter for what is below the cut
 	local function cap(pts, y0, y1, cut_col, low_col)
 		if y0 < cut then
-			local cg = geometry(caps_node)
+			local cg = geometry(P.caps)
 			flat_polygon(cg, pts, math.min(y1, cut) - 3, UP, y1 >= cut and
 					cut_col or low_col)
 			commit(cg, flat_material)
@@ -1404,7 +1508,7 @@ local function rebuild()
 			if #pts >= 3 then
 				for _, part in ipairs(parts) do
 					if part[2] - part[1] > 0.5 then
-						local g = geometry(walls_node)
+						local g = geometry(P.walls)
 						extrude(g, pts, labels, part[1], part[2], cols, part[1] > 0)
 						commit(g, lit_material)
 						cap(pts, part[1], part[2], magic.Color(0.16, 0.16, 0.18),
@@ -1420,10 +1524,10 @@ local function rebuild()
 	for id, r in pairs(room_data) do
 		local e = doc.ents[id]
 		if #r.pts >= 3 then
-			local g = geometry(walls_node)
+			local g = geometry(P.walls)
 			flat_polygon(g, r.pts, 2, UP, row(e.ints.mat_floor))
 			commit(g, lit_material)
-			local cg = geometry(overhead_node)
+			local cg = geometry(P.overhead)
 			flat_polygon(cg, r.pts, room_ceiling(e), DOWN,
 					row(e.ints.mat_ceiling))
 			commit(cg, lit_material)
@@ -1442,7 +1546,7 @@ local function rebuild()
 				solids[#solids + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
 			end
 		elseif def.kind == KIND.box then
-			local g, node = geometry(e.align == 1 and overhead_node or walls_node)
+			local g, node = geometry(e.align == 1 and P.overhead or P.walls)
 			node.position = magic.Vector3(W(it.x), W(it.y), W(it.z))
 			node.rotation = magic.Quaternion(it.pitch, it.yaw, it.roll)
 			local rgb = palette_rgb(def.mat)
@@ -1453,11 +1557,96 @@ local function rebuild()
 			solids[#solids + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
 		end
 	end
-	pieces_node.enabled = S.view ~= "2d"
-	update_voxel_meshes()
+	-- A floor is something to stand on, when walking up to another layout
+	for _, r in pairs(room_data) do
+		if #r.pts >= 3 then
+			solids[#solids + 1] = {pts = r.pts, y0 = 0, y1 = 0}
+		end
+	end
+	update_voxel_meshes(seen_voxels)
 	build_lamps(geometry)
-	build_images()
-	build_decals()
+	-- The pictures traced over and the material ids are the current
+	-- layout's; seen from above another's are clutter
+	image_data = {}
+	if S.view_layout == S.layout then
+		build_images()
+		build_decals()
+	end
+end
+
+-- The layouts' own inst_data and where each is, for the walker's voxels:
+-- {{insts, rel}, ...}
+place.layers = {}
+
+-- simplified: every layout is rebuilt on any change
+rebuild = function()
+	palette_texture()
+	for _, n in ipairs(built) do
+		n:Remove()
+	end
+	built = {}
+	local cur = place.current()
+	local order = {}
+	for _, l in ipairs(doc.of_type("layout")) do
+		if l.id ~= S.layout then
+			order[#order + 1] = l
+		end
+	end
+	-- The current one last, so what the tools read is its
+	if S.layout then
+		order[#order + 1] = doc.ents[S.layout]
+	end
+	local seen_voxels, all_solids = {}, {}
+	place.layers = {}
+	for _, l in ipairs(order) do
+		local r = place.rel(l.ints, cur)
+		local parts = place.parts[l.id]
+		if not parts then
+			parts = {}
+			for k, n in pairs({walls = walls_node, caps = caps_node,
+					overhead = overhead_node, pieces = pieces_node,
+					images = images_node, decals = decals_node,
+					lamps = lamps_node}) do
+				parts[k] = n:CreateChild("layout")
+			end
+			place.parts[l.id] = parts
+		end
+		for _, n in pairs(parts) do
+			n.position = magic.Vector3(W(r.x), W(r.y), W(r.z))
+			n.rotation = magic.Quaternion(0, r.yaw, 0)
+		end
+		P, S.view_layout = parts, l.id
+		build_layout(seen_voxels)
+		for _, sd in ipairs(solids) do
+			local pts = {}
+			for k, q in ipairs(sd.pts) do
+				local x, _, z = place.point(r, q[1], 0, q[2])
+				pts[k] = {x, z}
+			end
+			all_solids[#all_solids + 1] = {pts = pts, y0 = sd.y0 + r.y,
+					y1 = sd.y1 + r.y}
+		end
+		place.layers[#place.layers + 1] = {insts = inst_data, rel = r}
+	end
+	solids = all_solids
+	for id, m in pairs(voxel_meshes) do
+		if not seen_voxels[id] then
+			m.node:Remove()
+			voxel_meshes[id] = nil
+		end
+	end
+	for id, parts in pairs(place.parts) do
+		local e = doc.ents[id]
+		if not e or e.type ~= "layout" then
+			for _, n in pairs(parts) do
+				n:Remove()
+			end
+			place.parts[id] = nil
+		end
+	end
+	-- The ground is the world's, under every layout
+	ground_node.position = magic.Vector3(0, W(-cur.y), 0)
+	pieces_node.enabled = S.view ~= "2d"
 	-- The sun where the plan puts it
 	local st = settings()
 	sun.enabled = st.sun == 1
@@ -1465,6 +1654,7 @@ local function rebuild()
 	sun_node.direction = magic.Vector3(sx, sy, sz)
 	caps_node.enabled = S.view == "2d"
 	S.dirty = false
+end
 end
 
 --
@@ -1549,7 +1739,7 @@ end
 -- The node nearest to (x, z) within r, skipping those in `except`
 local function nearest_node(x, z, r, except)
 	local best, bd = nil, r
-	for _, n in ipairs(doc.of_type("node")) do
+	for _, n in ipairs(of_type("node")) do
 		if not (except and except[n.id]) then
 			local nx, nz = node_pos(n.id)
 			local d = geom.len(nx - x, nz - z)
@@ -1969,7 +2159,7 @@ do
 			local half = doc.placeholder()
 			add_op(b, "create", {id = half, type = "wall", ints = f})
 			-- What is in the wall past the split goes with the second half
-			for _, inst in ipairs(doc.of_type("instance")) do
+			for _, inst in ipairs(of_type("instance")) do
 				if inst.ints.host == e.wall and inst.ints.along > ref.t then
 					add_op(b, "set", {id = inst.id, ints = {host = half,
 							along = inst.ints.along - ref.t}})
@@ -1978,7 +2168,7 @@ do
 			b.pairs[pair_key(w.a, ph)] = true
 			b.pairs[pair_key(ph, w.b)] = true
 		end
-		for _, room in ipairs(doc.of_type("room")) do
+		for _, room in ipairs(of_type("room")) do
 			local l = room_list(b, room.id)
 			for i = 1, #l do
 				local j = i % #l + 1
@@ -1995,7 +2185,7 @@ do
 		if S.material and doc.ents[S.material] then
 			return S.material
 		end
-		local p = doc.of_type("palette")[1]
+		local p = of_type("palette")[1]
 		return p and p.id or 0
 	end
 
@@ -2098,7 +2288,7 @@ do
 		local mat = default_material()
 		add_op(b, "create", {id = ph, type = "room", ints = {mat_floor = mat,
 				mat_ceiling = mat}, strs = {name = "room " ..
-				(#doc.of_type("room") + 1)}, lists = {nodes = ids}})
+				(#of_type("room") + 1)}, lists = {nodes = ids}})
 		if S.room_walls then
 			for i = 1, #ids do
 				local j = i % #ids + 1
@@ -2358,7 +2548,7 @@ do
 				ends[key] = true
 			end
 		end
-		for _, room in ipairs(doc.of_type("room")) do
+		for _, room in ipairs(of_type("room")) do
 			local l = room.lists.nodes
 			local has_from, has_into = false, false
 			for _, n in ipairs(l) do
@@ -2399,7 +2589,7 @@ do
 					used = true
 				end
 			end
-			for _, room in ipairs(doc.of_type("room")) do
+			for _, room in ipairs(of_type("room")) do
 				for _, rn in ipairs(room.lists.nodes) do
 					used = used or rn == n
 				end
@@ -2418,7 +2608,7 @@ do
 		end
 		-- A room left with corners but no floor goes too; the server only
 		-- knows to remove one left with fewer than three
-		for _, room in ipairs(doc.of_type("room")) do
+		for _, room in ipairs(of_type("room")) do
 			local pts = {}
 			for _, n in ipairs(room.lists.nodes) do
 				if not ids[n] then
@@ -2693,6 +2883,12 @@ local function build_toolbar()
 	toolbar = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, 8, true)
 	panel.button(toolbar, VIEW_NAMES[S.view] .. " (F1 F2 F3)",
 			function() set_view(NEXT_VIEW[S.view]) end, false, 40)
+	-- The layout edited, and the window that picks another
+	local l = S.layout and doc.ents[S.layout]
+	panel.button(toolbar, l and l.strs.name or "Layouts", function()
+		S.layouts_open = not S.layouts_open
+		refresh_panels()
+	end, S.layouts_open)
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Box"},
 			{"hosted", "Door/window"}, {"voxel", "Voxels"}, {"paint", "Material"}}) do
@@ -3150,7 +3346,7 @@ local function build_props()
 						strs = {file = file}}}})
 			end)
 		end
-		for _, im in ipairs(doc.of_type("image")) do
+		for _, im in ipairs(of_type("image")) do
 			if im.ints.locked == 1 then
 				panel.button(props, "Unlock " .. im.strs.file, function()
 					set(im.id, {ints = {locked = 0}})
@@ -3266,7 +3462,7 @@ local function build_replace()
 	local function list(label, want, field)
 		local c = panel.column(cols)
 		panel.label(c, label)
-		for _, p in ipairs(doc.of_type("palette")) do
+		for _, p in ipairs(of_type("palette")) do
 			if not want or counts[p.id] then
 				local picked = rp[field] == p.id
 				panel.swatch_row(c, palette_rgb(p.id), "#" .. p.id .. "  " ..
@@ -3365,7 +3561,7 @@ build_palette = function()
 	panel.label(palette_win, S.replacing and "Pick the entry to use instead:"
 			or "Palette")
 	local cur = default_material()
-	local entries = doc.of_type("palette")
+	local entries = of_type("palette")
 	for _, p in ipairs(entries) do
 		panel.swatch_row(palette_win, palette_rgb(p.id), "#" .. p.id .. "  " ..
 				p.strs.name .. "  (" .. MATERIAL_KINDS[p.ints.kind] .. ")",
@@ -3507,6 +3703,128 @@ end
 
 end
 
+-- The layouts window ([FP_LAYOUTS]), from the toolbar: each layout by its
+-- group, to pick the one edited; the current one's own fields; a new floor
+-- or building
+place.build_window = function()
+	if place.win then
+		place.win:Remove()
+		place.win = nil
+	end
+	if not S.layouts_open then
+		return
+	end
+	local w = panel.window(magic.HA_CENTER, magic.VA_TOP, 0, 50)
+	place.win = w
+	local function set(id, fields)
+		send({{op = "set", ent = {id = id, ints = fields.ints,
+				strs = fields.strs}}})
+	end
+	local function int_field(id, label, name, value)
+		panel.field(w, label, value, function(t)
+			local v = tonumber(t)
+			if v then set(id, {ints = {[name] = math.floor(v + 0.5)}}) end
+		end)
+	end
+	local top = panel.row(w)
+	panel.label(top, "Layouts: click one to edit it")
+	panel.button(top, "Close", function()
+		S.layouts_open = false
+		refresh_panels()
+	end)
+	local list = doc.of_type("layout")
+	table.sort(list, function(a, b)
+		if a.strs.group ~= b.strs.group then
+			return a.strs.group < b.strs.group
+		end
+		if a.ints.y ~= b.ints.y then
+			return a.ints.y < b.ints.y
+		end
+		return a.id < b.id
+	end)
+	local groups, in_group = {}, 0
+	local e = doc.ents[S.layout]
+	for _, l in ipairs(list) do
+		groups[l.strs.group] = true
+		if e and l.strs.group == e.strs.group then
+			in_group = in_group + 1
+		end
+		panel.button(w, l.strs.group .. ": " .. l.strs.name, function()
+			place.switch(l.id)
+			refresh_panels()
+		end, l.id == S.layout)
+	end
+	if not e or not doc.can("edit") then
+		return
+	end
+	panel.label(w, "This one")
+	local id, c = e.id, e.ints
+	local function create(ints, strs)
+		local ph = doc.placeholder()
+		send({{op = "create", ent = {id = ph, type = "layout", ints = ints,
+				strs = strs}}}, function(err)
+			if err == "" then
+				place.switch(real_id(ph))
+				refresh_panels()
+			end
+		end)
+	end
+	panel.field(w, "Name", e.strs.name, function(t)
+		set(id, {strs = {name = t}})
+	end)
+	panel.field(w, "Group", e.strs.group, function(t)
+		set(id, {strs = {group = t}})
+	end)
+	int_field(id, "X mm", "x", c.x)
+	int_field(id, "Y mm", "y", c.y)
+	int_field(id, "Z mm", "z", c.z)
+	panel.field(w, "Yaw deg", c.yaw / 1000, function(t)
+		local v = tonumber(t)
+		if v then
+			set(id, {ints = {yaw = math.floor(v * 1000 + 0.5) % 360000}})
+		end
+	end)
+	local st = settings()
+	int_field(doc.settings().id, "Floor to floor mm", "floor_step",
+			st.floor_step)
+	panel.button(w, "Add a floor above", function()
+		-- Over the group's top one
+		local top = c
+		for _, l in ipairs(list) do
+			if l.strs.group == e.strs.group and l.ints.y > top.y then
+				top = l.ints
+			end
+		end
+		create({x = top.x, y = top.y + st.floor_step, z = top.z, yaw = top.yaw},
+				{name = "Floor " .. in_group, group = e.strs.group})
+	end)
+	panel.button(w, "New building", function()
+		-- Beside the others, 20 m past the furthest
+		local x, n = 0, 1
+		for _, l in ipairs(list) do
+			x = math.max(x, l.ints.x)
+		end
+		while groups["Building " .. n] or n == 1 and groups.Building do
+			n = n + 1
+		end
+		create({x = x + 20000, y = 0, z = 0, yaw = 0},
+				{name = "Ground floor", group = "Building " .. n})
+	end)
+	local empty = #list > 1
+	for _, t in ipairs({"node", "instance", "image"}) do
+		for _, x in ipairs(doc.of_type(t)) do
+			if x.ints.layout == id then
+				empty = false
+			end
+		end
+	end
+	if empty then
+		panel.button(w, "Delete this layout", function()
+			send({{op = "delete", ent = {id = id}}})
+		end)
+	end
+end
+
 refresh_panels = function()
 	-- Nothing to show between plans; resume() draws them again
 	if S.suspended then
@@ -3522,6 +3840,7 @@ refresh_panels = function()
 	build_toolbar()
 	build_props()
 	build_palette()
+	place.build_window()
 end
 M.refresh_panels = function() refresh_panels() end
 
@@ -3856,7 +4175,8 @@ end
 
 local function over_ui()
 	local s = magic.ui.scale
-	return panel.over({toolbar, props, palette_win, pause_win, picker_win}, S.mx / s,
+	return panel.over({toolbar, props, palette_win, pause_win, picker_win,
+			place.win}, S.mx / s,
 			S.my / s)
 end
 
@@ -4115,7 +4435,7 @@ do
 				if not S.shift then
 					S.nodes = {}
 				end
-				for _, n in ipairs(doc.of_type("node")) do
+				for _, n in ipairs(of_type("node")) do
 					if inside(n.ints.x, n.ints.z) then
 						S.nodes[n.id] = true
 					end
@@ -4606,7 +4926,7 @@ do
 		table.sort(peers)
 		go_to_index = go_to_index % #peers + 1
 		local o = doc.others[peers[go_to_index]]
-		local p = o.p
+		local p = place.presence(o.p, true)
 		if p.view >= 1 then
 			S.pos = {x = p.px / 1000, y = p.py / 1000, z = p.pz / 1000}
 			S.yaw, S.pitch = p.yaw / 1000, p.pitch / 1000
@@ -4843,10 +5163,11 @@ do
 		--
 		-- Walking
 		--
-		-- The voxels of the volumes near (x, z) as footprints, for the walker
+		-- The voxels of the volumes near (x, z) as footprints, for the walker,
+		-- in every layout: stairs go up to another
 		-- simplified: a volume pitched or rolled is its bounding box
-		local function voxel_solids(x, z, out)
-			for id, it in pairs(inst_data) do
+		local function layer_voxel_solids(insts, x, z, out)
+			for id, it in pairs(insts) do
 				if it.voxel and geom.len(x - it.x, z - it.z) < math.max(it.ex, it.ez) +
 						BODY_R * 2 then
 					if it.pitch % 360 ~= 0 or it.roll % 360 ~= 0 then
@@ -4870,7 +5191,23 @@ do
 					end
 				end
 			end
-	end
+		end
+		local function voxel_solids(x, z, out)
+			for _, l in ipairs(place.layers) do
+				local r = l.rel
+				local lx, _, lz = place.unpoint(r, x, 0, z)
+				local list = {}
+				layer_voxel_solids(l.insts, lx, lz, list)
+				for _, sd in ipairs(list) do
+					local pts = {}
+					for k, q in ipairs(sd.pts) do
+						local px, _, pz = place.point(r, q[1], 0, q[2])
+						pts[k] = {px, pz}
+					end
+					out[#out + 1] = {pts = pts, y0 = sd.y0 + r.y, y1 = sd.y1 + r.y}
+				end
+			end
+		end
 
 	-- The walker at (x, z) with its feet at `feet`, pushed out of what it is
 	-- in, and standing on the highest thing under it it can step onto
@@ -5639,7 +5976,7 @@ local function draw_overlay()
 	draw_guide(S.guide, P, line, outline)
 	-- The others: their cursors, their cameras, what they have selected
 	for _, o in pairs(doc.others) do
-		local p = o.p
+		local p = o.p and place.presence(o.p, true)
 		if p and o.name then
 			local col = user_color(o.name)
 			local size = S.view == "2d" and W(10 * mm_per_px()) or 0.15
@@ -5689,7 +6026,7 @@ local function draw_overlay()
 	-- Nodes, for the tools that pick them
 	if S.tool == "select" or S.tool == "node" then
 		local size = S.view == "2d" and W(6 * mm_per_px()) or 0.08
-		for _, n in ipairs(doc.of_type("node")) do
+		for _, n in ipairs(of_type("node")) do
 			local x, z = node_pos(n.id)
 			local on = S.sel[n.id] or S.nodes[n.id]
 			debug:AddCross(P(x, z), size, on and accent or
@@ -5766,7 +6103,7 @@ local function send_presence(dt)
 	else
 		p.px, p.py, p.pz = math.floor(S.cx), math.floor(S.span), math.floor(S.cz)
 	end
-	doc.send_presence(p)
+	doc.send_presence(place.presence(p))
 end
 
 -- The plan view at S.export_mmpx, without the panels, as a screenshot:
@@ -5815,6 +6152,15 @@ function M.suspend()
 		n:Remove()
 	end
 	built = {}
+	for _, parts in pairs(place.parts) do
+		for _, n in pairs(parts) do
+			n:Remove()
+		end
+	end
+	place.parts = {}
+	voxel_meshes = {}
+	S.layout, S.layouts_open = nil, false
+	place.build_window()
 	for _, n in ipairs(SCENE_PARTS) do
 		n.enabled = false
 	end
