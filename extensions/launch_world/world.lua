@@ -246,6 +246,16 @@ do
 		log:info("the wall holds " .. made .. " of " ..
 				(#GAMES + #spill - 1) .. " games; " .. #spill ..
 				" stand on the floor")
+	else
+		-- **Said when nothing spills, too** ([LAUNCH_WORLD] stage 1(b)
+		-- asks for every game on the wall, twenty-nine and not seven).
+		-- The spill line was the only word on this, so "they all fit"
+		-- read as silence and the clause could not be checked without
+		-- counting orbs in a picture. Four walls at a pitch of six hold
+		-- forty-six between them, which is more than this desk's
+		-- twenty-eight.
+		log:info("the wall holds all " .. (#GAMES - 1) .. " games in " ..
+				made .. " pockets, none on the floor")
 	end
 end
 -- **The tools are the terminal's, not the floor's** ([LAUNCH_WORLD]

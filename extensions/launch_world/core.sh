@@ -78,6 +78,22 @@ sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli.log"
 contents=$(grep -a "launch_w.*: contents: " "$out/cli.log" | head -1 |
 	sed 's/.*contents: //')
 echo "contents: ${contents:-(nothing)}"
+# **Every game is on the wall** ([LAUNCH_WORLD] stage 1(b): twenty-nine
+# and not seven). Four walls at a pitch of six hold forty-six pockets
+# between them, so a tree's games fit and the spill branch is dead code
+# on any desk with fewer than that -- which is the thing to notice if
+# the pitch or a wall's span ever changes and they quietly start
+# standing on the floor again.
+wall=$(grep -a "launch_w.*: the wall holds " "$out/cli.log" | head -1 |
+	sed 's/.*: the wall holds //')
+echo "the wall: ${wall:-(said nothing)}"
+case "$wall" in
+	*"none on the floor"*) ;;
+	*)
+		echo "FAIL: not every game is on the wall -- \"${wall:-nothing said}\""
+		exit 1
+		;;
+esac
 # **A sandbox error is the way a room edit breaks**, and it is a line in
 # the log rather than a missing picture
 raised=$(grep -ac "Assignment to undeclared global\|pcall(): Runtime error" \
