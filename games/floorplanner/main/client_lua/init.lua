@@ -723,6 +723,7 @@ local function show_saves(saves)
 				{name = name, create = create and 1 or 0},
 				{"object", {"name", "string"}, {"create", "byte"}}))
 	end
+	log:info("Plan picker: " .. #saves .. " plans")
 	text("Floor planner: open a plan")
 	for _, s in ipairs(saves) do
 		button(s, function() open(s, false) end)
@@ -747,8 +748,10 @@ end
 local hello = {}
 buildat.sub_packet("fp:hello", function(data)
 	hello = cereal.binary_input(data, {"object", {"local", "byte"},
-			{"pick", "byte"}, {"saves", {"array", "string"}}})
+			{"pick", "byte"}, {"saves", {"array", "string"}}, {"plan", "string"}})
 	doc.is_local = hello["local"] == 1
+	-- The open plan's name and the local user's plans, for a copy's name
+	doc.plan_name, doc.saves = hello.plan, hello.saves
 	if doc.joined_once then
 		return
 	end
@@ -789,6 +792,28 @@ end)
 -- Back to the picker: the server closes the plan
 function doc.close_plan()
 	buildat.send_packet("fp:close_plan", "")
+end
+
+-- The open plan copied as `name`, which is then the one open ([FP_COPY]);
+-- the server refuses a name a plan has already
+function doc.copy_plan(name)
+	buildat.send_packet("fp:copy_plan", cereal.binary_output({text = name},
+			TEXT))
+end
+
+-- The name a copy is offered: the plan's own and _n, the lowest n no plan
+-- has
+function doc.copy_name()
+	local taken = {}
+	for _, s in ipairs(doc.saves or {}) do
+		taken[s] = true
+	end
+	local base = doc.plan_name ~= "" and doc.plan_name or "plan"
+	local n = 1
+	while taken[base .. "_" .. n] do
+		n = n + 1
+	end
+	return base .. "_" .. n
 end
 
 buildat.sub_packet("fp:login_result", function(data)

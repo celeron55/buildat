@@ -404,6 +404,7 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 	// Owned by builtin/storage, which closes it when it unloads
 	storage::Save *m_save = nullptr;
+	ss_ m_save_name; // the open plan's
 	storage::Store *m_store = nullptr;
 
 	std::map<int32_t, Entity> m_ents;
@@ -445,6 +446,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:packet_received/fp:open"));
 		m_server->sub_event(this,
 				Event::t("network:packet_received/fp:close_plan"));
+		m_server->sub_event(this,
+				Event::t("network:packet_received/fp:copy_plan"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:batch"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:chat"));
 		m_server->sub_event(this, Event::t("network:packet_received/fp:voxels"));
@@ -473,6 +476,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/fp:open", on_open,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:close_plan", on_close_plan,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:copy_plan", on_copy_plan,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
 				network::Packet)
@@ -554,6 +559,7 @@ struct Module: public interface::Module
 			return false;
 		}
 		m_store = m_save->store("main");
+		m_save_name = name;
 		load();
 		find_images();
 		log_i(MODULE, "Opened the plan %s", cs(name));
@@ -573,10 +579,11 @@ struct Module: public interface::Module
 	{
 		uint8_t local = 0;      // no password asked
 		uint8_t pick = 0;       // no plan open: pick one of saves
-		sv_<ss_> saves;
+		sv_<ss_> saves;         // for the local user
+		ss_ plan;               // the one open, or ""
 		template<class Archive>
 		void serialize(Archive &archive){
-			archive(local, pick, saves);
+			archive(local, pick, saves, plan);
 		}
 	};
 
@@ -587,7 +594,10 @@ struct Module: public interface::Module
 		Hello h;
 		h.local = is_local(peer);
 		h.pick = !m_store;
-		if(h.pick && h.local){
+		h.plan = m_store ? m_save_name : "";
+		// Always, to the local user: the plan picker lists them, and a copy
+		// is named past them ([FP_COPY])
+		if(h.local){
 			storage::access(m_server, [&](storage::Interface *istorage){
 				sv_<storage::SaveInfo> infos = istorage->list();
 				// The one opened last first
@@ -623,12 +633,18 @@ struct Module: public interface::Module
 	{
 		if(!m_store || !is_local(packet.sender))
 			return;
+		close_plan();
+	}
+
+	void close_plan()
+	{
 		flush();
 		storage::access(m_server, [&](storage::Interface *istorage){
 			istorage->close(m_save);
 		});
 		m_save = nullptr;
 		m_store = nullptr;
+		m_save_name.clear();
 		m_ents.clear();
 		m_voxels.clear();
 		m_dirty.clear();
@@ -644,6 +660,60 @@ struct Module: public interface::Module
 			send(pair.first, "fp:closed", "");
 			send_hello(pair.first);
 		}
+	}
+
+	// **A copy of the open plan under a new name, which is then the one
+	// open** ([FP_COPY]; the local user's, as picking a plan is). Never
+	// over a save that exists. The plan is closed first, so its database
+	// and write-ahead log are copied whole; its images go with it, its
+	// backups do not.
+	void on_copy_plan(const network::Packet &packet)
+	{
+		ss_ name;
+		if(!m_store || !is_local(packet.sender) || !unpack(packet.data, name))
+			return;
+		ss_ why;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			if(!istorage->valid_name(name)){
+				why = "\""+name+"\" is not a name a plan can have";
+				return;
+			}
+			for(const storage::SaveInfo &i : istorage->list())
+				if(i.name == name)
+					why = "There is a plan called \""+name+"\" already";
+		});
+		if(!why.empty()){
+			send(packet.sender, "fp:login_result", pack(why));
+			return;
+		}
+		namespace fs = interface::fs;
+		const ss_ from = m_save->path();
+		const size_t slash = from.find_last_of("/\\");
+		const ss_ to = (slash == ss_::npos ? ss_(".") : from.substr(0, slash))+
+				"/"+name;
+		const ss_ old_name = m_save_name;
+		close_plan();
+		fs::create_directories(to+"/images");
+		bool ok = fs::copy_file(from+"/save.sqlite", to+"/save.sqlite");
+		if(fs::path_exists(from+"/save.sqlite-wal"))
+			ok = fs::copy_file(from+"/save.sqlite-wal", to+"/save.sqlite-wal") &&
+					ok;
+		for(const fs::Node &n : fs::list_directory(from+"/images"))
+			if(!n.is_directory)
+				ok = fs::copy_file(from+"/images/"+n.name, to+"/images/"+n.name) &&
+						ok;
+		// A copy that did not make it is not left as a plan to pick
+		if(!ok){
+			log_e(MODULE, "Could not copy the plan %s into %s", cs(old_name),
+					cs(to));
+			fs::remove_all(to);
+			open_save(old_name, false);
+		} else {
+			log_i(MODULE, "Copied the plan %s as %s", cs(old_name), cs(name));
+			open_save(name, false);
+		}
+		for(auto &pair : m_peers)
+			send_hello(pair.first);
 	}
 
 	// <save>/backups/1 is the newest of BACKUPS; the save is closed, so its

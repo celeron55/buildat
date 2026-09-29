@@ -3573,6 +3573,26 @@ do
 		panel.button(w, "Back", function() open_pause() end)
 	end
 
+	-- **A copy of the plan** ([FP_COPY]): under a name no plan has, which
+	-- is then the plan open; the server says so if the name is taken
+	local function copy_page()
+		local w = dialog("Copy this plan")
+		panel.label(w, "\"" .. doc.plan_name .. "\" as:")
+		local e
+		local function copy()
+			local n = e:GetText()
+			if n ~= "" then
+				close_pause()
+				doc.copy_plan(n)
+			end
+		end
+		e = panel.field(w, "Name", doc.copy_name(), copy, 180)
+		local r = panel.row(w)
+		panel.button(r, "Copy", copy)
+		panel.button(r, "Back", function() open_pause() end)
+		e:SetFocus(true)
+	end
+
 	open_pause = function()
 		S.paused = true
 		S.press, S.drag = nil, nil
@@ -3583,6 +3603,7 @@ do
 		-- The local user of a launched server can go back to the plans;
 		-- anybody can go back to the launcher
 		if doc.is_local then
+			panel.button(w, "Copy this plan...", copy_page)
 			panel.button(w, "Other plan...", function()
 				close_pause()
 				doc.close_plan()
