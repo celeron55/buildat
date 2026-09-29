@@ -274,3 +274,14 @@ element arrives: the page's textarea giving its focus back to the canvas
 turned input off. The focus that would have turned it back on does not
 bubble, so it stayed off until the browser window itself was focused
 again.
+
+The web's touch: the first finger's mouse in pixels ([FP_TOUCH])
+----------------------------------------------------------------
+Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c
+
+Emscripten_HandleTouch sends the first finger as the left mouse button.
+It gave SDL_SendMouseMotion the touch's 0..1 position, which is pixels
+there, so the press and the release were at the top left corner. A
+button tapped on a touchscreen was pressed through the UI's own touch
+handling and never released. The finger is now scaled to the window, as
+the mouse handler scales the mouse.
