@@ -104,7 +104,8 @@ struct TypeSchema {
 };
 
 // What a definition is. A voxel volume comes with [FP_VOXELS].
-enum DefKind { DK_BOX, DK_VOXEL, DK_OPENING, DK_DOOR, DK_WINDOW, DK_COUNT };
+enum DefKind { DK_BOX, DK_VOXEL, DK_OPENING, DK_DOOR, DK_WINDOW, DK_SWITCH,
+	DK_COUNT };
 
 // Material types, as the palette's `kind` field holds them. The shader and
 // the client's palette editor use the same numbers.
@@ -116,6 +117,11 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"ceiling", 1000, 10000, 2600},
 		{"cut", 100, 10000, 1200},
 		{"default_edit", 0, 1, 1},
+		// The sun, off by default: it has to cast shadows, or it shines
+		// through the walls
+		{"sun", 0, 1, 0},
+		{"sun_yaw", 0, 359, 135},
+		{"sun_pitch", 5, 90, 40},
 	}, {}, {}, true},
 	{"node", {
 		{"x", -MAX_COORD, MAX_COORD, 0},
@@ -176,7 +182,11 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"sill", 0, 20000, 0},
 		{"flip", 0, 3, 0},        // bit 0: hinge on the other jamb; 1: swing
 		{"open", 0, 1000, 0},     // thousandths of fully open
-	}, {}, {}},
+		{"on", 0, 1, 1},          // a lamp's
+	}, {}, {
+		// A switch's lamps
+		{"lamps", "instance", OnDelete::Remove, 0},
+	}},
 	// One material: its type, its own colour, the paint over it, and the
 	// knobs of its type. See Palette.glsl for what each does.
 	{"palette", {
@@ -1431,12 +1441,15 @@ struct Module: public interface::Module
 		if(e.type == "instance"){
 			const Entity &def = m_ents[e.ints.at("def")];
 			int32_t kind = def.ints.at("kind");
-			bool hostable = kind == DK_OPENING || kind == DK_DOOR ||
+			bool hosted = kind == DK_OPENING || kind == DK_DOOR ||
 					kind == DK_WINDOW;
 			int32_t host = e.ints.at("host");
-			if(hostable != (host != 0))
-				return hostable ? "An opening needs a wall" :
-						"Only openings, doors and windows go in a wall";
+			// A switch goes on a wall or anywhere
+			if(kind != DK_SWITCH && hosted != (host != 0))
+				return hosted ? "An opening needs a wall" :
+						"Only openings, doors, windows and switches go in a wall";
+			if(!e.lists.at("lamps").empty() && kind != DK_SWITCH)
+				return "Only a switch has lamps";
 			// It fits the wall it is put in. Checked when the instance
 			// changes, not when the wall does: a wall shortened under a
 			// door is the user's to sort out, not a refused drag.

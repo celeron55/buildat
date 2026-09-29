@@ -41,14 +41,18 @@ local JUSTIFY_NAMES = {[0] = "centered", [1] = "left", [2] = "right"}
 local TOOL_KEYS = {select = "V", node = "N", wall = "B", room = "R",
 	box = "O", hosted = "I", voxel = "M", paint = "P"}
 -- What a definition is, as main.cpp's DefKind
-local KIND = {box = 0, voxel = 1, opening = 2, door = 3, window = 4}
+local KIND = {box = 0, voxel = 1, opening = 2, door = 3, window = 4,
+	switch = 5}
 local KIND_NAMES = {[0] = "Box", [2] = "Opening", [3] = "Door",
-	[4] = "Window"}
+	[4] = "Window", [5] = "Switch"}
+-- I goes round what the door/window tool puts in
+local NEXT_HOSTED = {[2] = 3, [3] = 4, [4] = 5, [5] = 2}
 -- A new opening, door and window
 local HOSTED = {
 	[2] = {w = 900, h = 2100, sill = 0},
 	[3] = {w = 900, h = 2100, sill = 0},
 	[4] = {w = 1200, h = 1200, sill = 900},
+	[5] = {w = 80, h = 80, sill = 1050},
 }
 -- A door leaf's thickness and the gap round it, and a window's frame
 local LEAF_T, LEAF_GAP, FRAME_W = 40, 4, 50
@@ -69,8 +73,11 @@ local S = {
 	box = {w = 600, h = 750, d = 600, align = 0, offset = 0},
 	hosted = 3,     -- what the door/window tool puts in a wall
 	voxel_size = 50, -- a new voxel volume's, mm
-	-- Doors and windows a viewer has opened, which only they see
+	-- Doors and windows a viewer has opened, and lamps they have switched,
+	-- which only they see
 	local_open = {},
+	local_on = {},
+	linking = nil,  -- the switch whose lamps clicks add and remove
 	material = nil, -- the palette entry picked
 	-- The cursor, in window pixels
 	mx = 0, my = 0,
@@ -118,16 +125,24 @@ zone.fogColor = magic.Color(0.55, 0.62, 0.72)
 zone.fogStart = 150
 zone.fogEnd = 400
 
+-- The sun, when the plan has it: shadowed, since light that went through
+-- the walls would light the rooms as if they had none
 local sun_node = scene:CreateChild("Sun")
-sun_node.direction = magic.Vector3(-0.45, -1.0, 0.3)
 local sun = sun_node:CreateComponent("Light")
 sun.lightType = magic.LIGHT_DIRECTIONAL
-sun.brightness = 0.75
+sun.brightness = 1.0
+sun.castShadows = true
+sun.shadowBias = magic.BiasParameters(0.00025, 0.5)
+sun.shadowCascade = magic.CascadeParameters(8.0, 25.0, 80.0, 0.0, 0.8)
+-- A faint unshadowed light from one side, so that the faces of a wall read
+-- apart without the sun; it lights nothing that ambient light would not
 local fill_node = scene:CreateChild("Fill")
 fill_node.direction = magic.Vector3(0.5, -0.6, -0.7)
 local fill = fill_node:CreateComponent("Light")
 fill.lightType = magic.LIGHT_DIRECTIONAL
-fill.brightness = 0.3
+fill.brightness = 0.25
+-- The lamps' lights, rebuilt with everything else
+local lamps_node = scene:CreateChild("Lamps")
 
 -- From the resource cache, which holds them: a Material made in Lua is
 -- freed under a geometry still using it
@@ -162,10 +177,12 @@ local function rgb_color(rgb, f)
 end
 
 local WHITE = magic.Color(1, 1, 1)
+-- A lamp's vertices when it is off: its colour, and no light of its own
+local UNLIT = magic.Color(1, 1, 1, 0)
 
 -- A triangle facing n: Urho3D's front faces are clockwise as seen, which in
 -- its left-handed space is cross(b - a, c - a) pointing at the viewer
-local function tri(g, a, b, c, n, col)
+local function tri(g, a, b, c, n, col, tint)
 	local ux, uy, uz = b.x - a.x, b.y - a.y, b.z - a.z
 	local vx, vy, vz = c.x - a.x, c.y - a.y, c.z - a.z
 	local cx = uy * vz - uz * vy
@@ -178,7 +195,7 @@ local function tri(g, a, b, c, n, col)
 	-- flat colour, for the plan view's own
 	local row = 0
 	if type(col) == "number" then
-		row, col = col, WHITE
+		row, col = col, tint or WHITE
 	end
 	local uv = magic.Vector2(row, 0)
 	for _, v in ipairs({a, b, c}) do
@@ -201,7 +218,7 @@ end
 
 -- A box of half sizes hx, hy, hz (metres) about the origin, or about
 -- (cx, cy, cz)
-local function box_geometry(g, hx, hy, hz, col, cx, cy, cz)
+local function box_geometry(g, hx, hy, hz, col, cx, cy, cz, tint)
 	cx, cy, cz = cx or 0, cy or 0, cz or 0
 	local function V(x, y, z)
 		return magic.Vector3(cx + x * hx, cy + y * hy, cz + z * hz)
@@ -219,8 +236,8 @@ local function box_geometry(g, hx, hy, hz, col, cx, cy, cz)
 			return V(f[1] + u[1] * a + v[1] * b, f[2] + u[2] * a + v[2] * b,
 					f[3] + u[3] * a + v[3] * b)
 		end
-		tri(g, C(-1, -1), C(1, -1), C(1, 1), n, col)
-		tri(g, C(-1, -1), C(1, 1), C(-1, 1), n, col)
+		tri(g, C(-1, -1), C(1, -1), C(1, 1), n, col, tint)
+		tri(g, C(-1, -1), C(1, 1), C(-1, 1), n, col, tint)
 	end
 end
 
@@ -261,6 +278,14 @@ cam3d.fov = 60
 
 local vp2d = magic.Viewport:new(scene, cam2d)
 local vp3d = magic.Viewport:new(scene, cam3d)
+-- Deferred, so that a house full of lamps costs a light each rather than a
+-- light for each thing each lights; the plan view stays forward, unlit
+do
+	local rp = vp3d.renderPath:Clone()
+	rp:Load(magic.cache:GetResource("XMLFile", "RenderPaths/Deferred.xml"))
+	vp3d.renderPath = rp
+	M.kept[#M.kept + 1] = rp
+end
 
 --
 -- The document, as the editor reads it
@@ -343,6 +368,38 @@ local function palette_rgb(id)
 	end
 	return math.floor(r * 255 + 0.5) * 65536 + math.floor(g * 255 + 0.5) * 256 +
 			math.floor(b * 255 + 0.5)
+end
+
+-- Whether a lamp instance is lit: a viewer's own switching wins
+local function lamp_on(id)
+	if S.local_on[id] ~= nil then
+		return S.local_on[id]
+	end
+	return doc.ents[id].ints.on == 1
+end
+
+local function is_lamp_entry(id)
+	local e = id and id ~= 0 and doc.ents[id]
+	return e and e.type == "palette" and e.ints.kind == 4
+end
+
+-- Whether an instance gives light: a volume with lamp voxels, or a box of
+-- a lamp material
+local function is_lamp(id)
+	local e = doc.ents[id]
+	if not e or e.type ~= "instance" then
+		return false
+	end
+	local def = doc.ents[e.ints.def].ints
+	if def.kind == KIND.voxel then
+		for _, m in pairs(doc.voxels[e.ints.def] or {}) do
+			if is_lamp_entry(m) then
+				return true
+			end
+		end
+		return false
+	end
+	return def.kind == KIND.box and is_lamp_entry(def.mat)
 end
 
 -- The palette's rows: 0 is what has no material, 1 the glass a window has
@@ -592,10 +649,16 @@ local function build_inst_data()
 				local mid = (f.lo - f.ro) / 2
 				local trim = p.kind == KIND.opening and 0 or p.trim
 				local td = p.kind == KIND.opening and 0 or p.trim_depth
+				local thick = f.lo + f.ro + 2 * td
+				if p.kind == KIND.switch then
+					-- On one face, standing out of it
+					mid = i.flip % 2 == 0 and f.lo + 5 or -f.ro - 5
+					trim, thick = 0, 10
+				end
 				it = {x = f.ax + f.ux * along + f.nx * mid,
 						z = f.az + f.uz * along + f.nz * mid,
 						y = i.sill + p.h / 2, yaw = f.yaw, pitch = 0, roll = 0,
-						ex = p.w + 2 * trim, ey = p.h, ez = f.lo + f.ro + 2 * td,
+						ex = p.w + 2 * trim, ey = p.h, ez = thick,
 						hosted = true, along = along, frame = f}
 			end
 		elseif def and def.ints.kind == KIND.voxel then
@@ -683,7 +746,7 @@ local FACES = {
 -- simplified: one quad per exposed voxel face, made through CustomGeometry,
 -- which is slow past some tens of thousands of faces; the upgrade is a
 -- greedy mesher filling a VertexBuffer with buildat.write_floats
-local function voxel_geometry(g, def, sz)
+local function voxel_geometry(g, def, sz, tint)
 	local vox = doc.voxels[def] or {}
 	local s = W(sz)
 	for key, mat in pairs(vox) do
@@ -706,8 +769,8 @@ local function voxel_geometry(g, def, sz)
 							(cy + (u[2] * a + v[2] * b) * 0.5) * s,
 							(cz + (u[3] * a + v[3] * b) * 0.5) * s)
 				end
-				tri(g, C(-1, -1), C(1, -1), C(1, 1), n, r)
-				tri(g, C(-1, -1), C(1, 1), C(-1, 1), n, r)
+				tri(g, C(-1, -1), C(1, -1), C(1, 1), n, r, tint)
+				tri(g, C(-1, -1), C(1, 1), C(-1, 1), n, r, tint)
 			end
 		end
 	end
@@ -720,8 +783,10 @@ local function update_voxel_meshes()
 			seen[id] = true
 			local e = doc.ents[id].ints
 			local def = e.def
+			local on = lamp_on(id)
 			local key = (doc.voxel_version[def] or 0) .. ":" .. palette_gen ..
-					":" .. it.size .. ":" .. def .. ":" .. e.align
+					":" .. it.size .. ":" .. def .. ":" .. e.align .. ":" ..
+					tostring(on)
 			local m = voxel_meshes[id]
 			if not m or m.key ~= key then
 				if m then
@@ -732,7 +797,7 @@ local function update_voxel_meshes()
 				local g = node:CreateComponent("CustomGeometry")
 				g:SetNumGeometries(1)
 				g:BeginGeometry(0, magic.TRIANGLE_LIST)
-				voxel_geometry(g, def, it.size)
+				voxel_geometry(g, def, it.size, not on and UNLIT or nil)
 				g:Commit()
 				g:SetMaterial(0, lit_material)
 				m = {node = node, key = key}
@@ -760,6 +825,15 @@ end
 -- along the wall, Y up from the floor, Z to the wall's left
 local function build_hosted(id, it, def, e, geometry, commit)
 	if def.kind == KIND.opening then
+		return
+	end
+	if def.kind == KIND.switch then
+		local g, node = geometry(pieces_node)
+		node.position = magic.Vector3(W(it.x), W(it.y), W(it.z))
+		node.rotation = magic.Quaternion(0, it.yaw, 0)
+		box_geometry(g, W(def.w) / 2, W(def.h) / 2, W(5), row(def.mat))
+		g:Commit()
+		g:SetMaterial(0, lit_material)
 		return
 	end
 	local f = it.frame
@@ -857,6 +931,65 @@ local function build_hosted(id, it, def, e, geometry, commit)
 	end
 end
 
+-- A point light at (x, y, z) mm in a lamp entry's colour and brightness
+local function lamp_light(x, y, z, entry)
+	local p = doc.ents[entry].ints
+	local node = lamps_node:CreateChild("lamp")
+	built[#built + 1] = node
+	node.position = magic.Vector3(W(x), W(y), W(z))
+	local light = node:CreateComponent("Light")
+	light.lightType = magic.LIGHT_POINT
+	light.color = rgb_color(kelvin_rgb(p.temperature))
+	local b = p.brightness / 1000
+	light.brightness = 0.5 + 1.5 * b
+	light.range = 2 + 8 * b
+end
+
+-- The lamps that are on: each connected region of a volume's lamp voxels
+-- is one light at its middle, not one per voxel; a box of a lamp material
+-- is one at its centre
+local function build_lamps()
+	for id, it in pairs(inst_data) do
+		if lamp_on(id) and not it.hosted then
+			local def = doc.ents[it.def].ints
+			if it.voxel then
+				local vox = doc.voxels[it.def] or {}
+				local lit = {}
+				for key, m in pairs(vox) do
+					if is_lamp_entry(m) then
+						lit[key] = m
+					end
+				end
+				local seen = {}
+				for key, m in pairs(lit) do
+					if not seen[key] then
+						-- The region this voxel is in, by its six neighbours
+						local stack, n, sx, sy, sz = {key}, 0, 0, 0, 0
+						seen[key] = true
+						while #stack > 0 do
+							local k = table.remove(stack)
+							local x, y, z = doc.voxel_cell(k)
+							n, sx, sy, sz = n + 1, sx + x + 0.5, sy + y + 0.5, sz + z + 0.5
+							for _, f in ipairs(FACES) do
+								local nk = doc.voxel_key(x + f[1], y + f[2], z + f[3])
+								if lit[nk] and not seen[nk] then
+									seen[nk] = true
+									stack[#stack + 1] = nk
+								end
+							end
+						end
+						local lx, ly, lz = geom.rot(sx / n * it.size, sy / n * it.size,
+								sz / n * it.size, it.pitch, it.yaw, it.roll)
+						lamp_light(it.ox + lx, it.oy + ly, it.oz + lz, m)
+					end
+				end
+			elseif def.kind == KIND.box and is_lamp_entry(def.mat) then
+				lamp_light(it.x, it.y, it.z, def.mat)
+			end
+		end
+	end
+end
+
 -- simplified: everything is rebuilt on any change, which at a few hundred
 -- walls is milliseconds; the upgrade is rebuilding only what is at the
 -- nodes that moved
@@ -929,7 +1062,7 @@ local function rebuild()
 	-- The openings in each wall, by where they are along it
 	local holes = {}
 	for id, it in pairs(inst_data) do
-		if it.hosted then
+		if it.hosted and doc.ents[it.def].ints.kind ~= KIND.switch then
 			local host = doc.ents[id].ints.host
 			local p = doc.ents[it.def].ints
 			holes[host] = holes[host] or {}
@@ -1023,7 +1156,7 @@ local function rebuild()
 			node.rotation = magic.Quaternion(it.pitch, it.yaw, it.roll)
 			local rgb = palette_rgb(def.mat)
 			box_geometry(g, W(def.w) / 2, W(def.h) / 2, W(def.d) / 2,
-					row(def.mat))
+					row(def.mat), nil, nil, nil, not lamp_on(id) and UNLIT or nil)
 			commit(g, lit_material)
 			cap(it.foot, it.y0, it.y1, rgb_color(rgb, 0.7), rgb_color(rgb, 0.9))
 			solids[#solids + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
@@ -1031,6 +1164,12 @@ local function rebuild()
 	end
 	pieces_node.enabled = S.view ~= "2d"
 	update_voxel_meshes()
+	build_lamps(geometry)
+	-- The sun where the plan puts it
+	local st = settings()
+	sun.enabled = st.sun == 1
+	local sx, sy, sz = geom.rot(0, 0, 1, st.sun_pitch, st.sun_yaw, 0)
+	sun_node.direction = magic.Vector3(sx, sy, sz)
 	caps_node.enabled = S.view == "2d"
 	S.dirty = false
 end
@@ -1723,7 +1862,7 @@ local function voxel_edit(dig)
 end
 
 -- A door, window or opening put in a wall where the point is along it
-local function add_hosted(wall, x, z)
+local function add_hosted(wall, x, z, side)
 	local f = wall_frame(wall)
 	if not f then
 		return
@@ -1733,15 +1872,23 @@ local function add_hosted(wall, x, z)
 	local along = geom.snap((x - f.ax) * f.ux + (z - f.az) * f.uz, grid_step())
 	along = math.max(d.w / 2, math.min(f.len - d.w / 2, along))
 	local def = doc.placeholder()
+	local inst = doc.placeholder()
 	local mat = default_material()
 	send({
 		{op = "create", ent = {id = def, type = "definition", ints = {
 				kind = kind, w = d.w, h = d.h, mat = mat, mat_leaf = mat,
 				trim = kind == KIND.opening and 0 or 70}}},
-		{op = "create", ent = {id = doc.placeholder(), type = "instance",
+		{op = "create", ent = {id = inst, type = "instance",
 				ints = {def = def, host = wall, along = math.floor(along + 0.5),
-				sill = d.sill}}},
-	})
+				sill = d.sill, flip = side == "right" and 1 or 0}}},
+	}, function(err)
+		-- What was put in is what is selected
+		if err == "" then
+			S.sel = {[S.real[inst]] = "instance"}
+			S.primary = S.real[inst]
+			M.refresh_panels()
+		end
+	end)
 end
 
 -- Copies of the selected instances next to them: linked ones share the
@@ -2207,7 +2354,17 @@ local function build_props()
 		int_field(i.def, "Height mm", "h", p.h)
 		int_field(sel.id, "Sill mm", "sill", i.sill)
 		int_field(sel.id, "Along mm", "along", i.along)
-		if p.kind ~= KIND.opening then
+		if p.kind == KIND.switch then
+			panel.label(props, #sel.lists.lamps .. " lamps (E switches them)")
+			panel.button(props, S.linking == sel.id and "Done linking" or
+					"Link lamps: click them", function()
+				S.linking = S.linking ~= sel.id and sel.id or nil
+				refresh_panels()
+			end, S.linking == sel.id)
+			panel.button(props, "Other side of the wall", function()
+				set(sel.id, {ints = {flip = bit_xor(i.flip, 1)}})
+			end)
+		elseif p.kind ~= KIND.opening then
 			int_field(i.def, "Trim mm", "trim", p.trim)
 			int_field(i.def, "Trim depth mm", "trim_depth", p.trim_depth)
 			local names = p.kind == KIND.door and {"Single leaf", "Double leaf"}
@@ -2390,7 +2547,7 @@ local function build_props()
 	elseif S.tool == "hosted" then
 		panel.label(props, "Click a wall to put in (I: the next):")
 		local r = panel.row(props)
-		for _, k in ipairs({KIND.opening, KIND.door, KIND.window}) do
+		for _, k in ipairs({KIND.opening, KIND.door, KIND.window, KIND.switch}) do
 			panel.button(r, KIND_NAMES[k], function()
 				S.hosted = k
 				refresh_panels()
@@ -2455,6 +2612,13 @@ local function build_props()
 		panel.label(props, "Plan")
 		int_field(sid, "Ceiling mm", "ceiling", st.ceiling)
 		int_field(sid, "Plan cut mm", "cut", st.cut)
+		panel.button(props, st.sun == 1 and "Sun: on" or "Sun: off", function()
+			set(sid, {ints = {sun = 1 - st.sun}})
+		end)
+		if st.sun == 1 then
+			int_field(sid, "Sun from deg", "sun_yaw", st.sun_yaw)
+			int_field(sid, "Sun height deg", "sun_pitch", st.sun_pitch)
+		end
 		panel.field(props, "Eye mm", S.eye, function(t)
 			local v = num(t)
 			if v and v > 0 then S.eye = v end
@@ -2666,6 +2830,13 @@ local function begin_press(button)
 	end
 	local x, z = cursor_floor()
 	S.press = {mx = S.mx, my = S.my, x = x, z = z}
+	if S.linking then
+		local s = pick_surface()
+		if s and s.kind == "instance" then
+			S.press.target = {kind = "instance", id = s.id}
+		end
+		return
+	end
 	if S.tool == "select" then
 		-- An object under the cursor wins; then a node near it, then the
 		-- wall or room it is on
@@ -2927,6 +3098,29 @@ end
 
 local function click()
 	local t = S.press.target
+	if S.linking then
+		-- A lamp clicked joins the switch's lamps, or leaves them
+		local sw = doc.ents[S.linking]
+		if t and t.kind == "instance" and sw and is_lamp(t.id) then
+			local l, found = {}, false
+			for _, v in ipairs(sw.lists.lamps) do
+				if v == t.id then
+					found = true
+				else
+					l[#l + 1] = v
+				end
+			end
+			if not found then
+				l[#l + 1] = t.id
+			end
+			send({{op = "set", ent = {id = S.linking, lists = {lamps = l}}}})
+			doc.notice(found and "Unlinked" or "Linked")
+		elseif t then
+			doc.notice("That is not a lamp: a lamp is a box or voxels of a " ..
+					"lamp material")
+		end
+		return
+	end
 	if S.tool == "select" then
 		if not S.shift then
 			S.sel = {}
@@ -2961,7 +3155,7 @@ local function click()
 	elseif S.tool == "hosted" then
 		local s = pick_surface()
 		if s and s.kind == "wall" and doc.can("edit") then
-			add_hosted(s.id, s.x, s.z)
+			add_hosted(s.id, s.x, s.z, s.side)
 		end
 	elseif S.tool == "voxel" then
 		voxel_edit(S.ctrl)
@@ -3174,16 +3368,53 @@ local function go_to_next_user()
 	doc.notice("At " .. o.name .. "'s view")
 end
 
+-- A switch's lamps, all on or all off: on unless any of them is on
+local function flip_switch(id)
+	local lamps = doc.ents[id].lists.lamps
+	if #lamps == 0 then
+		doc.notice("This switch has no lamps; link some to it")
+		return
+	end
+	local any = false
+	for _, l in ipairs(lamps) do
+		any = any or lamp_on(l)
+	end
+	if doc.can("edit") then
+		local ops = {}
+		for _, l in ipairs(lamps) do
+			S.local_on[l] = nil
+			ops[#ops + 1] = {op = "set", ent = {id = l, ints = {on = any and 0 or 1}}}
+		end
+		send(ops)
+	else
+		for _, l in ipairs(lamps) do
+			S.local_on[l] = not any
+		end
+		S.dirty = true
+	end
+end
+
 -- The use key: a door or window under the cursor opens or closes. For an
 -- editor for everybody; a viewer opens it for themselves.
 local function use()
 	local s = pick_surface()
 	local id = s and s.kind == "instance" and s.id
+	-- With nothing under the cursor, the switch selected
+	local p = S.primary and doc.ents[S.primary]
+	if not id and p and p.type == "instance" and
+			doc.ents[p.ints.def].ints.kind == KIND.switch then
+		id = S.primary
+	end
 	local e = id and doc.ents[id]
-	if not e or e.ints.host == 0 then
+	if not e or (e.ints.host == 0 and doc.ents[e.ints.def].ints.kind ~=
+			KIND.switch) then
 		return
 	end
 	local kind = doc.ents[e.ints.def].ints.kind
+	if kind == KIND.switch then
+		flip_switch(id)
+		return
+	end
 	if kind ~= KIND.door and kind ~= KIND.window then
 		return
 	end
@@ -3265,6 +3496,9 @@ function M.key_down(key, event_data)
 		S.walk.noclip = not S.walk.noclip
 		doc.notice(S.walk.noclip and "Noclip: walls do not stop you; Space and C"
 				.. " go up and down" or "Noclip off")
+	elseif key == magic.KEY_ESCAPE and S.linking then
+		S.linking = nil
+		refresh_panels()
 	elseif key == magic.KEY_ESCAPE then
 		if S.tool == "voxel" then
 			-- Out of the voxel tool, which lets the mouse go
@@ -3309,7 +3543,7 @@ function M.key_down(key, event_data)
 	elseif key == magic.KEY_I then
 		-- Again: the next of opening, door and window
 		if S.tool == "hosted" then
-			S.hosted = S.hosted % 3 + 2
+			S.hosted = NEXT_HOSTED[S.hosted]
 		end
 		set_tool("hosted")
 	elseif key == magic.KEY_P then
@@ -3528,7 +3762,13 @@ local function plan_symbol(id, it, line)
 	end
 	local hw = def.w / 2
 	local mid = (f.lo - f.ro) / 2
-	if def.kind == KIND.window then
+	if def.kind == KIND.switch then
+		local pts = it.foot
+		for i = 1, #pts do
+			local p, q = pts[i], pts[i % #pts + 1]
+			line(p[1], p[2], q[1], q[2], col)
+		end
+	elseif def.kind == KIND.window then
 		for _, c in ipairs({mid - 15, mid + 15}) do
 			local ax, az = at(-hw, c)
 			local bx, bz = at(hw, c)
@@ -3647,6 +3887,17 @@ local function draw_overlay()
 			local it = inst_data[id]
 			outline(it.foot, accent, S.view ~= "2d" and
 					{W(it.y0) + 0.004, W(it.y1) + 0.004} or nil)
+		end
+	end
+	-- A switch's lamps, joined to it by dashed lines
+	local sw = S.primary and doc.ents[S.primary]
+	if sw and sw.type == "instance" and #sw.lists.lamps > 0 and inst_data[sw.id] then
+		local a = inst_data[sw.id]
+		for _, l in ipairs(sw.lists.lamps) do
+			local b = inst_data[l]
+			if b then
+				dashed({{a.x, a.z}, {b.x, b.z}}, magic.Color(0.9, 0.7, 0.1))
+			end
 		end
 	end
 	-- The primary object's gaps to the walls

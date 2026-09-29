@@ -245,6 +245,8 @@ void PS()
     float spec, power, refl, alpha;
     Surface(vWorldPos.xyz, normal, albedo, spec, power, refl, emissive, alpha);
     albedo *= vColor.rgb;
+    // A lamp switched off: its vertices' alpha is 0
+    emissive *= vColor.a;
 
     #ifdef HEIGHTFOG
         float fogFactor = GetHeightFogFactor(vWorldPos.w, vWorldPos.y);
