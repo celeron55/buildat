@@ -459,6 +459,13 @@ buildat.safe.set_preference = function(name, value)
 	if not a_preference(name) then
 		return false, "set_preference: no preference by that name"
 	end
+	-- **Read by games, set by the user**: a chunk a server sent may read
+	-- a preference (a game's name field offers default_username) and may
+	-- not write one; a launch extension, which is the user's, may
+	local info = debug.getinfo(2, "S")
+	if info and __buildat_served_chunks[info.source] then
+		return false, "set_preference: the user's, not a server's"
+	end
 	if type(value) ~= "boolean" and type(value) ~= "string" and
 			type(value) ~= "number" then
 		return false, "set_preference(name, value): a boolean, a number " ..

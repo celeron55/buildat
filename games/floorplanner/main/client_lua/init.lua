@@ -644,8 +644,10 @@ local function show_login(error_text, is_local)
 	end
 	label("Floor planner")
 	label("Name")
-	-- The name used last on this server, kept on the client
-	local name = field(buildat.storage_read("name") or "", false)
+	-- The name used last on this server, kept on the client; else the one
+	-- the user gave the client for every game
+	local name = field(buildat.storage_read("name") or
+			buildat.get_preference("default_username") or "", false)
 	local password = nil
 	if is_local then
 		-- The plan is on this machine: no password to ask

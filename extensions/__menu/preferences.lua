@@ -209,6 +209,34 @@ function M.show()
 		end
 	end
 
+	-- **The name games offer when they ask for one** ([FP_LAUNCH]): a
+	-- text, so a field rather than a cycling row. Enter sets it through
+	-- the parser; a name it refuses is said and the field goes back.
+	local username = api.get_preference("default_username")
+	if username ~= nil then
+		local row = menu.window:CreateChild("UIElement")
+		row:SetLayout(LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+		local label = row:CreateChild("Text")
+		label:SetStyleAuto()
+		label.text = "Default username for games"
+		local edit = row:CreateChild("LineEdit")
+		edit:SetStyleAuto()
+		edit:SetFixedHeight(26)
+		edit.minWidth = 320
+		edit.textSelectable = true
+		edit.textCopyable = true
+		edit:SetText(username)
+		magic.SubscribeToEvent(edit, "TextFinished", function()
+			local ok, err = api.set_preference("default_username",
+					edit:GetText())
+			if not ok then
+				log:warning("default_username: " .. tostring(err))
+				ui_utils.show_message_dialog(tostring(err))
+				edit:SetText(api.get_preference("default_username") or "")
+			end
+		end)
+	end
+
 	-- **Which launch UI this is** ([LAUNCH_SANDBOX]'s slot, and
 	-- [TWO_AUDIENCES]: switching is one action from either side, and the
 	-- room's pause dialog already has it going the other way). The

@@ -94,6 +94,11 @@ namespace app
 		// name that does not load falls back to __menu, since a user
 		// with no launcher has no way to fix the setting.
 		ss_ launch_ui = "__menu";
+		// **The name a game offers when it asks for one** ([FP_LAUNCH]):
+		// read by games through get_preference("default_username"), so the
+		// user types it once and not once per game. Luanti's rule for a
+		// name: 1 to 20 letters, digits, _ and -.
+		ss_ default_username = "User";
 	};
 
 	// Parses "k=v[,k=v...]" on top of whatever *opt already holds. Returns

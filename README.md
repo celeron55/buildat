@@ -99,8 +99,9 @@ Engine settings
 
 What the user sets once and every game honours: `render_scale` (3D viewports
 drawn at a fraction of the window size, with the UI left at native
-resolution), `vsync`, `max_fps`, `multisampling`, `sound_volume` and
-`sound_mute`. They live in `user/settings.json` beside the remembered
+resolution), `vsync`, `max_fps`, `multisampling`, `sound_volume`,
+`sound_mute`, and `default_username`, the name a game offers when it asks for
+one. They live in `user/settings.json` beside the remembered
 window size; the launch grid's "Engine settings" tile edits them, or set
 them for one run with `-o`, which is not written back:
 

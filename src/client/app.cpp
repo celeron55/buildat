@@ -238,6 +238,19 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->launch_ui = value;
 			continue;
 		}
+		if(key == "default_username"){
+			bool ok = !value.empty() && value.size() <= 20;
+			for(char c : value)
+				if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
+					ok = false;
+			if(!ok){
+				*error = "default_username: \""+value+"\" is not 1 to 20 "
+						"letters, digits, _ or -";
+				return false;
+			}
+			opt->default_username = value;
+			continue;
+		}
 		char *end = nullptr;
 		double v = strtod(value.c_str(), &end);
 		if(value.empty() || *end != '\0'){
@@ -462,6 +475,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jsv_old = o.get("sound_volume");
 	const json::Value &jsm = o.get("sound_mute");
 	const json::Value &jui = o.get("launch_ui");
+	const json::Value &jdu = o.get("default_username");
 	const json::Value &jll = o.get("log_level");
 	const json::Value &jsl = o.get("server_log_level");
 	// Through the same parser as -o, so that the range checks are written
@@ -505,6 +519,9 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 		items += ss_()+(items.empty()?"":",")+"sound_mute="+(jsm.as_boolean()?"1":"0");
 	if(jui.is_string())
 		items += ss_()+(items.empty()?"":",")+"launch_ui="+jui.as_string();
+	if(jdu.is_string())
+		items += ss_()+(items.empty()?"":",")+"default_username="+
+				jdu.as_string();
 	if(!items.empty()){
 		app::Options parsed = *opt;
 		if(!app::parse_preference_options(items, &parsed, &pref_err))
@@ -558,6 +575,7 @@ static void save_preferences(const app::Options &opt)
 	o.set("log_level", opt.log_level);
 	o.set("server_log_level", opt.server_log_level);
 	o.set("launch_ui", opt.launch_ui);
+	o.set("default_username", opt.default_username);
 	o.save_file(preferences_path().c_str());
 }
 
@@ -3132,9 +3150,9 @@ struct CApp: public App, public magic::Application
 	// and knows nothing about the file.
 	static const char** preference_names()
 	{
-		static const char *names[8] = {"render_scale", "vsync", "max_fps",
+		static const char *names[9] = {"render_scale", "vsync", "max_fps",
 				"multisampling", "sound_volume_db", "sound_mute", "launch_ui",
-				nullptr};
+				"default_username", nullptr};
 		return names;
 	}
 
@@ -3154,7 +3172,7 @@ struct CApp: public App, public magic::Application
 		return 1;
 	}
 
-	// get_preference(name) -> number or boolean, or nil for a name there is
+	// get_preference(name) -> number, boolean or string, or nil for a name there is
 	// no preference by
 	static int l_get_preference(lua_State *L)
 	{
@@ -3177,6 +3195,8 @@ struct CApp: public App, public magic::Application
 			lua_pushboolean(L, o.sound_mute);
 		else if(name == "launch_ui")
 			lua_pushstring(L, o.launch_ui.c_str());
+		else if(name == "default_username")
+			lua_pushstring(L, o.default_username.c_str());
 		else if(name == "log_level")
 			lua_pushinteger(L, o.log_level);
 		else if(name == "server_log_level")

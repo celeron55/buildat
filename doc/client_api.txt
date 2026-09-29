@@ -239,14 +239,17 @@ buildat.bignum
   SRP-6a login written that way.
 
 buildat.list_preferences() -> {name, ...}
-buildat.get_preference(name) -> number or boolean, nil for an unknown name
+buildat.get_preference(name) -> number, boolean or string, nil for an unknown
+  name
 buildat.set_preference(name, value) -> true, or false and why
 - The settings under "Engine settings" below. The C++ side is the
   authority: set_preference() parses and range checks a value through the same
   code -o goes through, applies what takes effect now -- the sound gain, the
   frame limiter, vsync and MSAA, the render scale -- and persists the rest.
-- Extension environment only, and deliberately: a preference is the user's,
-  and a server's sandboxed Lua has no business writing it.
+- A preference is the user's: game code a server sent can read one --
+  default_username is the name a game offers when it asks for one -- and
+  set_preference refuses it. A launch extension, which is the user's, can set
+  them.
 - extensions/__menu/settings.lua is the screen over these.
 
 buildat.read_image(resource_name) -> width, height, rgba
@@ -614,6 +617,8 @@ overridden for one run by -o (see README.md).
     multisampling   MSAA samples: 1, 2, 4, 8 or 16
     sound_volume_db decibels below full, 0 to -30 and off under it
     sound_mute      that gain forced to zero
+    default_username the name a game offers when it asks for one, "User"
+                    by default: 1 to 20 letters, digits, _ and -
 
 render_scale is cooperative: it reaches a game's viewports only through
 set_preferred_viewports(), because a viewport belongs to the game that made
