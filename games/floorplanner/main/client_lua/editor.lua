@@ -32,6 +32,11 @@ local SNAP_PX = 12
 local DRAG_PX = 4
 -- Where a copy lands from what it was copied from
 local COPY_OFFSET = 500
+-- Tab goes round the views: the plan, the free camera, walking
+local NEXT_VIEW = {["2d"] = "3d", ["3d"] = "walk", walk = "2d"}
+local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk"}
+-- Walking: the body's radius, how high a step it takes, its height, mm
+local BODY_R, STEP, HEAD = 250, 50, 1750
 local JUSTIFY_NAMES = {[0] = "centered", [1] = "left", [2] = "right"}
 local TOOL_KEYS = {select = "V", node = "N", wall = "B", room = "R",
 	box = "O", hosted = "I", voxel = "M", paint = "P"}
@@ -74,6 +79,9 @@ local S = {
 	cx = 0, cz = 0, span = 12000,
 	-- The 3D camera, in metres and degrees
 	pos = {x = -4, y = 6, z = -6},
+	-- Walking: where the feet are, mm, and the eyes above them
+	walk = {x = 0, z = 0, feet = 0, noclip = false},
+	eye = 1600,
 	yaw = 35, pitch = 40,
 	looking = false,
 	-- Tool state
@@ -437,6 +445,8 @@ local room_data = {}
 local inst_data = {}
 -- The scene nodes rebuild() made, for the next one to remove
 local built = {}
+-- What a walker bumps into: {pts, y0, y1}, footprints and their heights
+local solids = {}
 
 local function wall_span(w)
 	local ceiling = settings().ceiling
@@ -852,6 +862,7 @@ end
 -- nodes that moved
 local function rebuild()
 	palette_texture()
+	solids = {}
 	wall_data = {}
 	for _, e in ipairs(doc.of_type("wall")) do
 		local w = e.ints
@@ -974,6 +985,8 @@ local function rebuild()
 						commit(g, lit_material)
 						cap(pts, part[1], part[2], magic.Color(0.16, 0.16, 0.18),
 								magic.Color(0.55, 0.55, 0.58))
+						solids[#solids + 1] = {pts = pts, y0 = part[1],
+								y1 = part[2]}
 					end
 				end
 			end
@@ -998,6 +1011,12 @@ local function rebuild()
 		local e = doc.ents[id].ints
 		if it.hosted then
 			build_hosted(id, it, def, e, geometry, commit)
+			-- A window and a shut door are in the way; an open door is not
+			-- simplified: the opening, not the leaf where it has swung to
+			if def.kind == KIND.window or (def.kind == KIND.door and
+					open_amount(id) < 300) then
+				solids[#solids + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
+			end
 		elseif def.kind == KIND.box then
 			local g, node = geometry(e.align == 1 and overhead_node or walls_node)
 			node.position = magic.Vector3(W(it.x), W(it.y), W(it.z))
@@ -1007,9 +1026,10 @@ local function rebuild()
 					row(def.mat))
 			commit(g, lit_material)
 			cap(it.foot, it.y0, it.y1, rgb_color(rgb, 0.7), rgb_color(rgb, 0.9))
+			solids[#solids + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
 		end
 	end
-	pieces_node.enabled = S.view == "3d"
+	pieces_node.enabled = S.view ~= "2d"
 	update_voxel_meshes()
 	caps_node.enabled = S.view == "2d"
 	S.dirty = false
@@ -2049,7 +2069,8 @@ local refresh_panels
 -- The voxel tool in 3D holds the mouse, Luanti's way: the view turns with
 -- it and a crosshair picks
 local function update_capture()
-	local want = S.tool == "voxel" and S.view == "3d"
+	local want = (S.tool == "voxel" and S.view ~= "2d") or
+			(S.view == "walk" and not S.walk_released)
 	if want ~= (S.captured or false) then
 		S.captured = want
 		S.looking = want
@@ -2058,6 +2079,18 @@ local function update_capture()
 end
 
 local function set_view(v)
+	if v == "walk" and S.view ~= "walk" then
+		-- On the floor under the camera, or the plan's middle
+		if S.view == "3d" then
+			local x, z = S.pos.x * 1000, S.pos.z * 1000
+			S.walk.x, S.walk.z = x, z
+		else
+			S.walk.x, S.walk.z = S.cx, S.cz
+		end
+		S.walk.feet = 0
+		S.pitch = 0
+		S.walk_released = false
+	end
 	S.view = v
 	magic.set_preferred_viewports({v == "2d" and vp2d or vp3d})
 	-- The plan view's look: flat colours, or the materials lit
@@ -2065,7 +2098,7 @@ local function set_view(v)
 	lit_material:SetShaderParameter("PlanLook", flat)
 	glass_material:SetShaderParameter("PlanLook", flat)
 	caps_node.enabled = v == "2d"
-	pieces_node.enabled = v == "3d"
+	pieces_node.enabled = v ~= "2d"
 	update_capture()
 	refresh_panels()
 end
@@ -2084,8 +2117,8 @@ local function build_toolbar()
 		toolbar:Remove()
 	end
 	toolbar = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, 8, true)
-	panel.button(toolbar, S.view == "2d" and "2D" or "3D",
-			function() set_view(S.view == "2d" and "3d" or "2d") end, false, 40)
+	panel.button(toolbar, VIEW_NAMES[S.view] .. " (Tab)",
+			function() set_view(NEXT_VIEW[S.view]) end, false, 40)
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Box"},
 			{"hosted", "Door/window"}, {"voxel", "Voxels"}, {"paint", "Paint"}}) do
@@ -2422,6 +2455,10 @@ local function build_props()
 		panel.label(props, "Plan")
 		int_field(sid, "Ceiling mm", "ceiling", st.ceiling)
 		int_field(sid, "Plan cut mm", "cut", st.cut)
+		panel.field(props, "Eye mm", S.eye, function(t)
+			local v = num(t)
+			if v and v > 0 then S.eye = v end
+		end)
 	end
 	if not doc.can("edit") then
 		panel.label(props, "Viewing only: no edit privilege",
@@ -2986,7 +3023,14 @@ local function click()
 end
 
 function M.mouse_down(button)
-	if S.captured then
+	if S.view == "walk" and S.walk_released and not over_ui() then
+		-- A click on the view takes the mouse back
+		S.walk_released = false
+		update_capture()
+		S.swallow_up = true
+		return
+	end
+	if S.captured and S.tool == "voxel" then
 		-- Luanti's: the left button digs, the right one places
 		if button == magic.MOUSEB_LEFT then
 			voxel_edit(true)
@@ -3016,7 +3060,11 @@ function M.mouse_down(button)
 end
 
 function M.mouse_up(button)
-	if S.captured then
+	if S.swallow_up then
+		S.swallow_up = false
+		return
+	end
+	if S.captured and S.tool == "voxel" then
 		return
 	end
 	if button == magic.MOUSEB_RIGHT then
@@ -3115,7 +3163,7 @@ local function go_to_next_user()
 	go_to_index = go_to_index % #peers + 1
 	local o = doc.others[peers[go_to_index]]
 	local p = o.p
-	if p.view == 1 then
+	if p.view >= 1 then
 		S.pos = {x = p.px / 1000, y = p.py / 1000, z = p.pz / 1000}
 		S.yaw, S.pitch = p.yaw / 1000, p.pitch / 1000
 		set_view("3d")
@@ -3208,7 +3256,16 @@ function M.key_down(key, event_data)
 		end
 		return
 	end
-	if key == magic.KEY_ESCAPE then
+	if key == magic.KEY_ESCAPE and S.view == "walk" and not S.walk_released and
+			S.tool ~= "voxel" then
+		-- Walking: the mouse is let go, for the panels
+		S.walk_released = true
+		update_capture()
+	elseif key == magic.KEY_F and S.view == "walk" then
+		S.walk.noclip = not S.walk.noclip
+		doc.notice(S.walk.noclip and "Noclip: walls do not stop you; Space and C"
+				.. " go up and down" or "Noclip off")
+	elseif key == magic.KEY_ESCAPE then
 		if S.tool == "voxel" then
 			-- Out of the voxel tool, which lets the mouse go
 			set_tool("select")
@@ -3232,7 +3289,7 @@ function M.key_down(key, event_data)
 		S.plan_look = not S.plan_look
 		set_view(S.view)
 	elseif key == magic.KEY_TAB then
-		set_view(S.view == "2d" and "3d" or "2d")
+		set_view(NEXT_VIEW[S.view])
 	elseif key == magic.KEY_Z then
 		rotate_selection(angle_step())
 	elseif key == magic.KEY_X then
@@ -3269,6 +3326,102 @@ function M.key_down(key, event_data)
 end
 
 --
+-- Walking
+--
+-- The voxels of the volumes near (x, z) as footprints, for the walker
+-- simplified: a volume pitched or rolled is its bounding box
+local function voxel_solids(x, z, out)
+	for id, it in pairs(inst_data) do
+		if it.voxel and geom.len(x - it.x, z - it.z) < math.max(it.ex, it.ez) +
+				BODY_R * 2 then
+			if it.pitch % 360 ~= 0 or it.roll % 360 ~= 0 then
+				out[#out + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
+			else
+				local sz = it.size
+				for key in pairs(doc.voxels[doc.ents[id].ints.def] or {}) do
+					local cx, cy, cz = doc.voxel_cell(key)
+					local pts = {}
+					for k, c in ipairs({{0, 0}, {1, 0}, {1, 1}, {0, 1}}) do
+						local px, _, pz = geom.rot((cx + c[1]) * sz, 0,
+								(cz + c[2]) * sz, 0, it.yaw, 0)
+						pts[k] = {it.ox + px, it.oz + pz}
+					end
+					if not geom.is_ccw(pts) then
+						pts = {pts[4], pts[3], pts[2], pts[1]}
+					end
+					out[#out + 1] = {pts = pts, y0 = it.oy + cy * sz,
+							y1 = it.oy + (cy + 1) * sz}
+				end
+			end
+		end
+	end
+end
+
+-- The walker at (x, z) with its feet at `feet`, pushed out of what it is
+-- in, and standing on the highest thing under it it can step onto
+-- simplified: it steps down at once rather than falling
+local function collide(x, z, feet)
+	local list = {}
+	for _, sd in ipairs(solids) do
+		list[#list + 1] = sd
+	end
+	voxel_solids(x, z, list)
+	for _ = 1, 4 do
+		for _, sd in ipairs(list) do
+			if sd.y1 > feet + STEP and sd.y0 < feet + HEAD then
+				local pts = sd.pts
+				local bd, bx, bz = math.huge, 0, 0
+				for i = 1, #pts do
+					local p, q = pts[i], pts[i % #pts + 1]
+					local nx, nz, _, d = geom.nearest_on_segment(x, z, p[1], p[2],
+							q[1], q[2])
+					if d < bd then
+						bd, bx, bz = d, nx, nz
+					end
+				end
+				local inside = geom.point_in_polygon(x, z, pts)
+				if inside or bd < BODY_R then
+					local dx, dz = x - bx, z - bz
+					local l = math.max(geom.len(dx, dz), 1e-6)
+					if inside then
+						dx, dz = -dx, -dz
+					end
+					x, z = bx + dx / l * BODY_R, bz + dz / l * BODY_R
+				end
+			end
+		end
+	end
+	local ground = 0
+	for _, sd in ipairs(list) do
+		if sd.y1 <= feet + STEP and sd.y1 > ground and
+				geom.point_in_polygon(x, z, sd.pts) then
+			ground = sd.y1
+		end
+	end
+	return x, z, ground
+end
+
+local function walk(dt, f, r)
+	local input = magic.input
+	local w = S.walk
+	-- Shift runs; Ctrl is the shortcuts' (Ctrl+D is a copy)
+	local speed = (S.shift and 3500 or 1400) * dt
+	local yaw = math.rad(S.yaw)
+	local dx = (math.sin(yaw) * f + math.cos(yaw) * r) * speed
+	local dz = (math.cos(yaw) * f - math.sin(yaw) * r) * speed
+	if w.noclip then
+		w.x, w.z = w.x + dx, w.z + dz
+		local u = 0
+		if input:GetKeyDown(magic.KEY_SPACE) then u = u + 1 end
+		if input:GetKeyDown(magic.KEY_C) then u = u - 1 end
+		w.feet = w.feet + u * speed
+	else
+		w.x, w.z, w.feet = collide(w.x + dx, w.z + dz, w.feet)
+	end
+	S.pos = {x = w.x / 1000, y = (w.feet + S.eye) / 1000, z = w.z / 1000}
+end
+
+--
 -- Every frame
 --
 local function move_camera(dt)
@@ -3277,7 +3430,7 @@ local function move_camera(dt)
 			input:GetKeyDown(magic.KEY_RSHIFT)
 	S.ctrl = input:GetKeyDown(magic.KEY_LCTRL) or
 			input:GetKeyDown(magic.KEY_RCTRL)
-	if doc.typing() or input:GetKeyDown(magic.KEY_LCTRL) and S.view == "2d" then
+	if doc.typing() or S.ctrl then
 		return
 	end
 	local f, r, u = 0, 0, 0
@@ -3291,9 +3444,13 @@ local function move_camera(dt)
 		S.cz = S.cz + f * k
 		return
 	end
+	if S.view == "walk" then
+		walk(dt, f, r)
+		return
+	end
 	if input:GetKeyDown(magic.KEY_SPACE) then u = u + 1 end
 	if input:GetKeyDown(magic.KEY_C) then u = u - 1 end
-	local speed = (input:GetKeyDown(magic.KEY_LCTRL) and 12 or 4) * dt
+	local speed = (S.shift and 12 or 4) * dt
 	local yaw = math.rad(S.yaw)
 	S.pos = {x = S.pos.x + (math.sin(yaw) * f + math.cos(yaw) * r) * speed,
 			y = S.pos.y + u * speed,
@@ -3311,7 +3468,7 @@ local function place_cameras()
 	-- The ceilings and what hangs from them are seen from inside the
 	-- rooms, and are out of the way of a camera above them
 	-- simplified: against the plan's ceiling, not each room's own
-	overhead_node.enabled = S.view == "3d" and
+	overhead_node.enabled = S.view ~= "2d" and
 			S.pos.y * 1000 < settings().ceiling
 end
 
@@ -3478,7 +3635,7 @@ local function draw_overlay()
 	for id, kind in pairs(S.sel) do
 		if kind == "wall" and outlines[id] then
 			local y0, y1 = wall_span(doc.ents[id].ints)
-			outline(outlines[id].pts, accent, S.view == "3d" and
+			outline(outlines[id].pts, accent, S.view ~= "2d" and
 					{W(y0) + 0.004, W(y1) + 0.004} or nil)
 			local w = wall_data[id]
 			world_label((w.ax + w.bx) / 2, 0, (w.az + w.bz) / 2,
@@ -3488,7 +3645,7 @@ local function draw_overlay()
 			outline(room_data[id].inner, magic.Color(0.2, 0.6, 1.0))
 		elseif kind == "instance" and inst_data[id] then
 			local it = inst_data[id]
-			outline(it.foot, accent, S.view == "3d" and
+			outline(it.foot, accent, S.view ~= "2d" and
 					{W(it.y0) + 0.004, W(it.y1) + 0.004} or nil)
 		end
 	end
@@ -3548,7 +3705,21 @@ local function draw_overlay()
 					debug:AddLine(ex, c[i], col, false)
 					debug:AddLine(c[i], c[i % 4 + 1], col, false)
 				end
-				world_label(p.px, S.view == "3d" and p.py or 0, p.pz, o.name)
+				world_label(p.px, S.view ~= "2d" and p.py or 0, p.pz, o.name)
+				if p.view == 2 then
+					-- Walking: a body under the eyes
+					local feet = p.py - S.eye
+					local ring = {}
+					for k = 0, 11 do
+						local a = k / 12 * math.pi * 2
+						ring[k + 1] = {p.px + math.cos(a) * BODY_R,
+								p.pz + math.sin(a) * BODY_R}
+					end
+					outline(ring, col, S.view == "2d" and {y} or
+							{W(feet) + 0.004, W(feet + HEAD) + 0.004})
+					debug:AddLine(magic.Vector3(W(p.px), W(feet), W(p.pz)), ex,
+							col, false)
+				end
 			else
 				debug:AddCross(P(p.cx, p.cz), size, col, false)
 				world_label(p.cx, 0, p.cz, o.name)
@@ -3571,7 +3742,7 @@ local function draw_overlay()
 			local x, z = node_pos(n.id)
 			local on = S.sel[n.id] or S.nodes[n.id]
 			debug:AddCross(P(x, z), size, on and accent or
-					magic.Color(0.1, 0.3, 0.8), S.view == "3d")
+					magic.Color(0.1, 0.3, 0.8), S.view ~= "2d")
 		end
 	end
 	-- The box being dragged out, and a box's footprint being drawn
@@ -3635,10 +3806,10 @@ local function send_presence(dt)
 	for id in pairs(S.nodes) do
 		sel[#sel + 1] = id
 	end
-	local p = {view = S.view == "3d" and 1 or 0,
+	local p = {view = S.view == "walk" and 2 or S.view == "3d" and 1 or 0,
 			cx = math.floor(cx or 0), cz = math.floor(cz or 0), sel = sel,
 			yaw = math.floor(S.yaw * 1000), pitch = math.floor(S.pitch * 1000)}
-	if S.view == "3d" then
+	if S.view ~= "2d" then
 		p.px, p.py, p.pz = math.floor(S.pos.x * 1000), math.floor(S.pos.y * 1000),
 				math.floor(S.pos.z * 1000)
 	else
