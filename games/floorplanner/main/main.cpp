@@ -117,7 +117,7 @@ enum DefKind { DK_BOX, DK_VOXEL, DK_OPENING, DK_DOOR, DK_WINDOW, DK_SWITCH,
 // Material types, as the palette's `kind` field holds them. The shader and
 // the client's palette editor use the same numbers.
 enum MaterialKind { MK_DRYWALL, MK_WOOD, MK_STONE, MK_WALLPAPER, MK_LAMP,
-	MK_GLASS, MK_METAL, MK_TILE, MK_FABRIC, MK_PLASTER, MK_COUNT };
+	MK_GLASS, MK_METAL, MK_TILE, MK_FABRIC, MK_PLASTER, MK_PANEL, MK_COUNT };
 
 static const sv_<TypeSchema> SCHEMA = {
 	{"settings", {
@@ -227,6 +227,8 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"temperature", 1000, 12000, 2700}, // a lamp's, in kelvin
 		{"brightness", 0, 1000, 500},
 		{"speckle", 0, 1000, 300}, // plaster
+		{"angle", 0, 179, 0},      // paneling's boards, 0 horizontal, 90 vertical
+		{"contrast", 0, 3000, 1000}, // wood's grain, 1000 as it always was
 	}, {
 		{"name", "material"},
 	}, {}},

@@ -496,6 +496,8 @@ local function palette_texture()
 		px(4, y, math.log(p.scale) / math.log(2) / 16,
 				(p.axis + 4 * p.stagger) * 16 / 255, math.floor(p.seed / 256) / 255,
 				knob)
+		-- Wood's grain contrast and paneling's angle
+		px(5, y, p.angle / 180, p.contrast / 3000, 0, 0)
 	end
 	local texture = magic.Texture2D:new()
 	-- One level: a smaller one would average the rows' knobs together
@@ -3011,13 +3013,13 @@ end
 local build_palette, picker_win, close_picker
 do
 	local MATERIAL_KINDS = {[0] = "Drywall", "Wood", "Stone", "Wallpaper", "Lamp",
-		"Glass", "Metal", "Tile", "Fabric", "Plaster"}
+		"Glass", "Metal", "Tile", "Fabric", "Plaster", "Paneling"}
 	local FINISHES = {[0] = "Over its colour", "White undercoat", "Stain"}
 	local AXES = {[0] = "Grain along X", "Grain along Y", "Grain along Z"}
 	-- Which knobs each type has, beyond the colours and the finish
 	local KNOBS = {
 		[0] = {"roughness", "specular", "reflect"},
-		{"roughness", "specular", "reflect", "scale", "seed", "axis"},
+		{"roughness", "specular", "reflect", "scale", "seed", "axis", "contrast"},
 		{"roughness", "specular", "reflect", "scale", "seed", "color2"},
 		{"specular", "scale", "seed", "color2"},
 		{"temperature", "brightness"},
@@ -3026,6 +3028,7 @@ do
 		{"roughness", "specular", "reflect", "scale", "grout", "stagger", "color2"},
 		{"scale"},
 		{"roughness", "specular", "scale", "seed", "speckle"},
+		{"roughness", "specular", "reflect", "scale", "seed", "angle", "contrast"},
 	}
 	-- What a type looks like when an entry is switched to it
 	local KIND_DEFAULTS = {
@@ -3049,14 +3052,18 @@ do
 				specular = 20},
 		{base = 0xe4ddd0, color2 = 0x404040, scale = 200, roughness = 900,
 				specular = 60},
+		-- Paneling: scale is a board's width
+		{base = 0xd8b07a, color2 = 0x404040, scale = 120, roughness = 600,
+				specular = 250},
 	}
 	local KNOB_LABELS = {roughness = "Roughness", specular = "Specular",
 		reflect = "Reflective", scale = "Scale mm", seed = "Seed",
 		temperature = "Kelvin", brightness = "Brightness", opacity = "Opacity",
-		grout = "Grout mm", speckle = "Speckle"}
+		grout = "Grout mm", speckle = "Speckle", angle = "Angle deg",
+		contrast = "Grain contrast"}
 	-- Knobs in thousandths shown as percent
 	local PERCENT = {roughness = true, specular = true, reflect = true,
-		brightness = true, opacity = true, speckle = true}
+		brightness = true, opacity = true, speckle = true, contrast = true}
 
 	-- Everything that holds palette entry `from`, moved to `to`, and `from`
 	-- deleted, in one batch
@@ -3139,7 +3146,7 @@ end
 local function colour_groups(p, field)
 	if field == "base" then
 		return ({[1] = {"wood"}, [2] = {"stone"}, [5] = {"glass"},
-				[6] = {"metal"}, [7] = {"tile"}})[p.kind] or {"paint"}
+				[6] = {"metal"}, [7] = {"tile"}, [10] = {"wood"}})[p.kind] or {"paint"}
 	elseif field == "color" then
 		return p.finish == 2 and {"stain"} or {"paint"}
 	end
@@ -3196,7 +3203,7 @@ build_palette = function()
 		end, 120)
 		panel.button(palette_win, "Type: " .. MATERIAL_KINDS[p.kind], function()
 			-- A new type starts from its own look
-			local k = (p.kind + 1) % 10
+			local k = (p.kind + 1) % (#MATERIAL_KINDS + 1)
 			local d = KIND_DEFAULTS[k]
 			set({kind = k, base = d.base, color2 = d.color2, scale = d.scale,
 					roughness = d.roughness, specular = d.specular})
@@ -3241,7 +3248,8 @@ build_palette = function()
 				end)
 			else
 				local shown = PERCENT[k] and p[k] / 10 or p[k]
-				panel.field(palette_win, KNOB_LABELS[k] .. (PERCENT[k] and " %"
+				panel.field(palette_win, (k == "scale" and p.kind == 10 and
+						"Board mm" or KNOB_LABELS[k]) .. (PERCENT[k] and " %"
 						or ""), shown, function(t)
 					local v = tonumber(t)
 					if v then

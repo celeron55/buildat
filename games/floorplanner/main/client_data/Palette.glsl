@@ -107,6 +107,37 @@ float Fbm(vec3 p)
     return 0.5 * Noise3(p) + 0.25 * Noise3(p * 2.03) + 0.125 * Noise3(p * 4.01);
 }
 
+// Knots in wood: in a cell of `cell` metres now and then one, 4 to 15 mm
+// in radius, stretched along the grain (x). Returns how much of the knot's
+// core the point is in, and how far the rings nearby are bent round it.
+// A knot is kept inside its cell across the grain, which is a board.
+vec2 Knots(vec2 x, vec2 cell, float seed)
+{
+    vec2 c = floor(x / cell);
+    vec2 k = vec2(0.0);
+    for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+            vec2 id = c + vec2(float(i), float(j));
+            if (Hash3(vec3(id, seed)) > 0.3)
+                continue;
+            vec2 at = (id + vec2(Hash3(vec3(id, seed + 1.0)),
+                    0.2 + 0.6 * Hash3(vec3(id, seed + 2.0)))) * cell;
+            float rad = mix(0.004, 0.015, Hash3(vec3(id, seed + 3.0)));
+            float dist = length((x - at) / vec2(1.6, 1.0)) / rad;
+            k.x = max(k.x, 1.0 - smoothstep(0.75, 1.0, dist));
+            k.y += 2.5 * exp(-dist * 0.35);
+        }
+    }
+    return k;
+}
+
+// A knot's core: twice as far below the base as the grain's dark lines
+// (0.9 - 0.18 at a contrast of 1)
+float KnotShade(float contrast)
+{
+    return max(0.05, 0.9 - 0.36 * contrast);
+}
+
 float Luma(vec3 c)
 {
     return dot(c, vec3(0.299, 0.587, 0.114));
@@ -136,6 +167,7 @@ void Surface(vec3 p, vec3 n, out vec3 albedo, out float spec, out float power,
     vec4 t2 = Texel(2.0);
     vec4 t3 = Texel(3.0);
     vec4 t4 = Texel(4.0);
+    vec4 t5 = Texel(5.0);
     vec3 base = t0.rgb;
     float kind = floor(t0.a * 255.0 / 20.0 + 0.5);
     vec3 paint = t1.rgb;
@@ -150,6 +182,9 @@ void Surface(vec3 p, vec3 n, out vec3 albedo, out float spec, out float power,
     float scale = exp2(t4.r * 16.0) / 1000.0;
     float flags = floor(t4.g * 255.0 / 16.0 + 0.5);
     float param = t4.a;
+    // Wood's grain contrast, 1 as it always was, and paneling's angle
+    float contrast = t5.g * 3.0;
+    float angle = t5.r * 3.14159265;
     vec3 sp = p + vec3(seed * 1.37, seed * 0.71, seed * 2.13);
     vec3 q = sp / scale;
     vec2 uv = Plane(p, n) / scale;
@@ -166,10 +201,16 @@ void Surface(vec3 p, vec3 n, out vec3 albedo, out float spec, out float power,
         // Wood: rings about the grain's axis, streaked along it
         float axis = mod(flags, 4.0);
         vec3 g = axis < 0.5 ? q.yzx : (axis < 1.5 ? q.xzy : q.xyz);
-        float r = length(g.xy) * 6.0 + Fbm(vec3(g.xy * 2.0, g.z * 0.15)) * 3.0;
+        // simplified: the knots are on the surface, grain along its first
+        // axis, rather than branches through the solid
+        vec2 knot = Knots(vec2(g.z, g.x + g.y) * scale, vec2(0.45, 0.2), seed);
+        float r = length(g.xy) * 6.0 + Fbm(vec3(g.xy * 2.0, g.z * 0.15)) * 3.0 +
+                knot.y;
         float ring = smoothstep(0.2, 0.9, fract(r));
         float streak = Noise3(vec3(g.xy * 40.0, g.z * 0.5));
-        nat = base * mix(0.72, 1.08, ring) * (0.92 + 0.12 * streak);
+        nat = base * (0.9 + (ring - 0.5) * 0.36 * contrast) *
+                (0.98 + (streak - 0.5) * 0.12 * contrast);
+        nat = mix(nat, base * KnotShade(contrast), knot.x);
     } else if (kind < 2.5) {
         // Stone: mottled, with veins of the second colour
         float m = Fbm(q * 3.0);
@@ -211,10 +252,39 @@ void Surface(vec3 p, vec3 n, out vec3 albedo, out float spec, out float power,
         // Fabric: a weave
         float w = sin(uv.x * 6.2832) * sin(uv.y * 6.2832);
         nat = base * (0.86 + 0.14 * w) * (0.95 + 0.05 * Noise3(vec3(uv * 0.1, 0.0)));
-    } else {
+    } else if (kind < 9.5) {
         // Plaster: a soft mottle and fine speckle
         nat = base * (0.93 + 0.07 * Fbm(q * 8.0));
         nat += vec3(0.08) * step(0.975, Hash3(floor(p * 300.0))) * param;
+    } else {
+        // Paneling: boards `scale` wide, at the angle from the plane's first
+        // axis (0 runs them level on a wall, 90 upright), a V-groove at each
+        // seam, the grain along each board and every board its own
+        vec2 pm = Plane(p, n);
+        vec2 b = vec2(cos(angle) * pm.x + sin(angle) * pm.y,
+                -sin(angle) * pm.x + cos(angle) * pm.y) / scale;
+        float board = floor(b.y);
+        float f = fract(b.y);
+        float h = Hash3(vec3(board, seed, 3.7));
+        // Metres along the board and across it
+        float along = b.x * scale + h * 10.0;
+        float across = f * scale;
+        // Rings of a sawn log, some 8 mm apart, waving along the board
+        vec2 knot = Knots(vec2(along, b.y * scale), vec2(0.35, scale), seed);
+        float r = across * 125.0 + h * 7.0 +
+                Fbm(vec3(along * 4.0, across * 20.0, board)) * 2.5 + knot.y;
+        // Rings finer than a pixel are their average, not a moire
+        float ring = mix(smoothstep(0.2, 0.9, fract(r)), 0.55,
+                smoothstep(0.3, 0.8, fwidth(r)));
+        float streak = mix(Noise3(vec3(along * 3.0, across * 500.0, board)), 0.5,
+                smoothstep(0.3, 0.8, fwidth(across * 500.0)));
+        nat = base * (0.93 + 0.14 * h) *
+                (0.9 + (ring - 0.5) * 0.36 * contrast) *
+                (0.98 + (streak - 0.5) * 0.12 * contrast);
+        nat = mix(nat, base * KnotShade(contrast), knot.x);
+        // The groove: 3 mm each side of the seam, darkest at its bottom
+        float d = min(f, 1.0 - f) * scale;
+        nat *= mix(0.45, 1.0, smoothstep(0.0, 0.003, d));
     }
 
     // The finish: the paint over the material's own colour (only ever
