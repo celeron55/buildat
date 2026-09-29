@@ -233,6 +233,14 @@ EM_BOOL EmscriptenInput::HandleFocusChange(int eventType, const EmscriptenFocusE
 {
     Input* const inputInst = (Input*)userData;
 
+    // buildat [WEB_KEYS]: only the window's own focus is the game's. A
+    // focusout bubbles up from any element, such as the page's textarea
+    // for a text field giving its focus back to the canvas, and the focus
+    // that would restore it does not bubble: input stayed off until the
+    // browser window itself was focused again
+    if (strcmp(keyEvent->nodeName, "#window") != 0)
+        return EM_FALSE;
+
     inputInst->SuppressNextMouseMove();
 
     if (eventType == EMSCRIPTEN_EVENT_FOCUSOUT)
