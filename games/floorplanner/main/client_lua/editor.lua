@@ -39,7 +39,7 @@ local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk"}
 local BODY_R, STEP, HEAD = 250, 50, 1750
 local JUSTIFY_NAMES = {[0] = "centered", [1] = "left", [2] = "right"}
 local TOOL_KEYS = {select = "V", node = "N", wall = "B", room = "R",
-	box = "O", hosted = "I", voxel = "M", paint = "P"}
+	box = "O", hosted = "I", voxel = "K", paint = "M"}
 -- What a definition is, as main.cpp's DefKind
 local KIND = {box = 0, voxel = 1, opening = 2, door = 3, window = 4,
 	switch = 5}
@@ -59,6 +59,7 @@ local LEAF_T, LEAF_GAP, FRAME_W = 40, 4, 50
 
 local S = {
 	view = "2d",
+	show_ids = true, -- the material id decals
 	plan_look = true, -- the plan view in flat colours (L)
 	tool = "select",
 	grid = 2,       -- index into GRID_STEPS
@@ -265,6 +266,8 @@ local overhead_node = scene:CreateChild("Overhead")
 local pieces_node = scene:CreateChild("Pieces")
 -- The pictures traced over
 local images_node = scene:CreateChild("Images")
+-- Each surface's material id, on the surface
+local decals_node = scene:CreateChild("Decals")
 -- simplified: a material per picture file, and one made in Lua is freed
 -- under the geometry using it, so there are eight of them in files and
 -- eight pictures at most; the upgrade is the engine keeping what Lua made
@@ -951,6 +954,115 @@ end
 
 -- The pictures: a quad each over the floors, its size its pixels times
 -- its scale, drawn in the plan view and, if asked, in 3D
+-- A surface's material id, written on it: corner is the surface's upper
+-- left corner as seen from in front, n the way it faces and up the way
+-- that is up on it, all in mm and world axes
+local DECAL_MARGIN = 40
+local function decal(corner, n, up, entry)
+	if not entry or entry == 0 or not S.show_ids then
+		return
+	end
+	-- The viewer looks along -n; to their right is up x -n
+	local fx, fy, fz = -n[1], -n[2], -n[3]
+	local rx = up[2] * fz - up[3] * fy
+	local ry = up[3] * fx - up[1] * fz
+	local rz = up[1] * fy - up[2] * fx
+	local m = DECAL_MARGIN
+	local x = corner[1] + rx * m - up[1] * m + n[1] * 2
+	local y = corner[2] + ry * m - up[2] * m + n[2] * 2
+	local z = corner[3] + rz * m - up[3] * m + n[3] * 2
+	local node = decals_node:CreateChild("decal")
+	built[#built + 1] = node
+	node.position = magic.Vector3(W(x), W(y), W(z))
+	-- Text3D faces its node's -Z: the node looks into the surface
+	node:LookAt(magic.Vector3(W(x + fx), W(y + fy), W(z + fz)),
+			magic.Vector3(up[1], up[2], up[3]))
+	node.scale = magic.Vector3(1.5, 1.5, 1.5)
+	local t = node:CreateComponent("Text3D")
+	t:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 14)
+	t.text = tostring(entry)
+	t:SetAlignment(magic.HA_LEFT, magic.VA_TOP)
+	t:SetColor(magic.Color(0.1, 0.1, 0.12))
+	t.textEffect = magic.TE_STROKE
+	t.effectColor = magic.Color(1, 1, 1, 0.8)
+end
+
+-- The decals of everything: a wall's two faces at their longest stretch
+-- and its top, floors, ceilings, a box's six faces, a door's and a
+-- window's frame
+local function build_decals()
+	for id, o in pairs(outlines) do
+		local w = doc.ents[id].ints
+		local y0, y1 = wall_span(w)
+		for _, side in ipairs({"left", "right"}) do
+			local best, bl = nil, 0
+			for i = 1, #o.pts do
+				if o.sides[i] == side then
+					local p, q = o.pts[i], o.pts[i % #o.pts + 1]
+					local l = geom.len(q[1] - p[1], q[2] - p[2])
+					if l > bl then
+						best, bl = i, l
+					end
+				end
+			end
+			if best and bl > 2 * DECAL_MARGIN then
+				local p, q = o.pts[best], o.pts[best % #o.pts + 1]
+				local nx, nz = (q[2] - p[2]) / bl, -(q[1] - p[1]) / bl
+				-- Seen from outside, the edge runs left to right
+				decal({p[1], y1, p[2]}, {nx, 0, nz}, {0, 1, 0},
+						side == "left" and w.mat_left or w.mat_right)
+			end
+		end
+		-- The top only when it is not the left face's, which says it already
+		if w.mat_core ~= 0 and w.mat_core ~= w.mat_left then
+			decal({o.pts[1][1], y1, o.pts[1][2]}, {0, 1, 0}, {0, 0, 1}, w.mat_core)
+		end
+	end
+	for id, r in pairs(room_data) do
+		local e = doc.ents[id].ints
+		local x0, z1 = math.huge, -math.huge
+		for _, p in ipairs(r.inner) do
+			x0, z1 = math.min(x0, p[1]), math.max(z1, p[2])
+		end
+		decal({x0, 2, z1}, {0, 1, 0}, {0, 0, 1}, e.mat_floor)
+		decal({x0, room_ceiling(doc.ents[id]), z1 - 2 * DECAL_MARGIN},
+				{0, -1, 0}, {0, 0, -1}, e.mat_ceiling)
+	end
+	for id, it in pairs(inst_data) do
+		local def = doc.ents[it.def].ints
+		if not it.hosted and not it.voxel then
+			-- Each face: its normal and its up, in the box's own axes
+			for _, f in ipairs({{{0, 0, -1}, {0, 1, 0}}, {{0, 0, 1}, {0, 1, 0}},
+					{{-1, 0, 0}, {0, 1, 0}}, {{1, 0, 0}, {0, 1, 0}},
+					{{0, 1, 0}, {0, 0, 1}}, {{0, -1, 0}, {0, 0, -1}}}) do
+				local n, up = f[1], f[2]
+				local rx = up[2] * -n[3] - up[3] * -n[2]
+				local ry = up[3] * -n[1] - up[1] * -n[3]
+				local rz = up[1] * -n[2] - up[2] * -n[1]
+				local h = {it.hx, it.hy, it.hz}
+				local c = {}
+				for a = 1, 3 do
+					c[a] = (n[a] + up[a] - ({rx, ry, rz})[a]) * h[a]
+				end
+				local cx, cy, cz = geom.rot(c[1], c[2], c[3], it.pitch, it.yaw,
+						it.roll)
+				local wn = {geom.rot(n[1], n[2], n[3], it.pitch, it.yaw, it.roll)}
+				local wu = {geom.rot(up[1], up[2], up[3], it.pitch, it.yaw,
+						it.roll)}
+				decal({it.x + cx, it.y + cy, it.z + cz}, wn, wu, def.mat)
+			end
+		elseif it.hosted and (def.kind == KIND.door or def.kind == KIND.window) then
+			local f = it.frame
+			local e = doc.ents[id].ints
+			-- Seen from the wall's left, its far end along it is on the left
+			local a = it.along + def.w / 2 + def.trim
+			decal({f.ax + f.ux * a + f.nx * (f.lo + def.trim_depth),
+					e.sill + def.h + def.trim, f.az + f.uz * a + f.nz *
+					(f.lo + def.trim_depth)}, {f.nx, 0, f.nz}, {0, 1, 0}, def.mat)
+		end
+	end
+end
+
 local function build_images()
 	image_data = {}
 	local d = S.drag
@@ -1240,6 +1352,7 @@ local function rebuild()
 	update_voxel_meshes()
 	build_lamps(geometry)
 	build_images()
+	build_decals()
 	-- The sun where the plan puts it
 	local st = settings()
 	sun.enabled = st.sun == 1
@@ -1609,681 +1722,697 @@ local function wall_gaps(id)
 	return out
 end
 
---
--- Batches
---
--- A batch being built: its ops, and the room corner lists it has changed so
--- far, which go out as one set per room at the end
-local function new_batch()
-	return {ops = {}, lists = {}, split = {}, pairs = {}}
-end
-
--- The two node ids of an edge, in either order, as one key
-local function pair_key(u, v)
-	return math.min(u, v) .. ":" .. math.max(u, v)
-end
-
-local function add_op(b, op, ent)
-	b.ops[#b.ops + 1] = {op = op, ent = ent}
-end
-
-local function room_list(b, id)
-	if not b.lists[id] then
-		local l = {}
-		for i, n in ipairs(doc.ents[id].lists.nodes) do
-			l[i] = n
-		end
-		b.lists[id] = l
+local real_id, send, default_material, add_wall, add_room, add_box, voxel_target, voxel_column
+local voxel_edit, add_hosted, copy_selected, unlink, merge_ops, delete_selected, moved_by, apply_material, rotate_selection
+do
+	--
+	-- Batches
+	--
+	-- A batch being built: its ops, and the room corner lists it has changed so
+	-- far, which go out as one set per room at the end
+	local function new_batch()
+		return {ops = {}, lists = {}, split = {}, pairs = {}}
 	end
-	return b.lists[id]
-end
 
-local function finish_batch(b)
-	for id, l in pairs(b.lists) do
-		if doc.ents[id] then
-			add_op(b, "set", {id = id, lists = {nodes = l}})
-		end
+	-- The two node ids of an edge, in either order, as one key
+	local function pair_key(u, v)
+		return math.min(u, v) .. ":" .. math.max(u, v)
 	end
-	return b.ops
-end
 
-local function real_id(id)
-	if id and id < 0 then
-		return S.real[id]
+	local function add_op(b, op, ent)
+		b.ops[#b.ops + 1] = {op = op, ent = ent}
 	end
-	return id
-end
 
-local function send(ops, done)
-	doc.send(ops, function(err, placeholders)
-		for ph, id in pairs(placeholders) do
-			S.real[ph] = id
+	local function room_list(b, id)
+		if not b.lists[id] then
+			local l = {}
+			for i, n in ipairs(doc.ents[id].lists.nodes) do
+				l[i] = n
+			end
+			b.lists[id] = l
 		end
-		if err ~= "" then
-			doc.notice("Refused: " .. err)
-		end
-		if done then
-			done(err)
-		end
-	end)
-end
-
-local function wall_fields(w)
-	return {thickness = w.thickness, justify = w.justify, height = w.height,
-			hang = w.hang, mat_left = w.mat_left, mat_right = w.mat_right,
-			mat_core = w.mat_core}
-end
-
--- The ops that give a point a node: an existing one, a new one on an edge,
--- or a new one. A new node on an edge splits the wall on it and joins
--- every room with that edge, so neighbours keep sharing their corners.
--- Returns the node's id (maybe a placeholder), or nil when it cannot.
-local function node_for(b, x, z, ref)
-	if ref and ref.node then
-		return real_id(ref.node)
+		return b.lists[id]
 	end
-	local ph = doc.placeholder()
-	add_op(b, "create", {id = ph, type = "node",
-			ints = {x = math.floor(x + 0.5), z = math.floor(z + 0.5)}})
-	local e = ref and ref.edge
-	if not e then
+
+	local function finish_batch(b)
+		for id, l in pairs(b.lists) do
+			if doc.ents[id] then
+				add_op(b, "set", {id = id, lists = {nodes = l}})
+			end
+		end
+		return b.ops
+	end
+
+	real_id = function(id)
+		if id and id < 0 then
+			return S.real[id]
+		end
+		return id
+	end
+
+	send = function(ops, done)
+		doc.send(ops, function(err, placeholders)
+			for ph, id in pairs(placeholders) do
+				S.real[ph] = id
+			end
+			if err ~= "" then
+				doc.notice("Refused: " .. err)
+			end
+			if done then
+				done(err)
+			end
+		end)
+	end
+
+	local function wall_fields(w)
+		return {thickness = w.thickness, justify = w.justify, height = w.height,
+				hang = w.hang, mat_left = w.mat_left, mat_right = w.mat_right,
+				mat_core = w.mat_core}
+	end
+
+	-- The ops that give a point a node: an existing one, a new one on an edge,
+	-- or a new one. A new node on an edge splits the wall on it and joins
+	-- every room with that edge, so neighbours keep sharing their corners.
+	-- Returns the node's id (maybe a placeholder), or nil when it cannot.
+	local function node_for(b, x, z, ref)
+		if ref and ref.node then
+			return real_id(ref.node)
+		end
+		local ph = doc.placeholder()
+		add_op(b, "create", {id = ph, type = "node",
+				ints = {x = math.floor(x + 0.5), z = math.floor(z + 0.5)}})
+		local e = ref and ref.edge
+		if not e then
+			return ph
+		end
+		if e.wall and doc.ents[e.wall] then
+			if b.split[e.wall] then
+				-- The second split of one wall in a batch would work from the
+				-- first's stale end
+				return nil
+			end
+			b.split[e.wall] = true
+			-- The wall keeps a->node and a copy of it takes node->b
+			local w = doc.ents[e.wall].ints
+			add_op(b, "set", {id = e.wall, ints = {b = ph}})
+			local f = wall_fields(w)
+			f.a, f.b = ph, w.b
+			local half = doc.placeholder()
+			add_op(b, "create", {id = half, type = "wall", ints = f})
+			-- What is in the wall past the split goes with the second half
+			for _, inst in ipairs(doc.of_type("instance")) do
+				if inst.ints.host == e.wall and inst.ints.along > ref.t then
+					add_op(b, "set", {id = inst.id, ints = {host = half,
+							along = inst.ints.along - ref.t}})
+				end
+			end
+			b.pairs[pair_key(w.a, ph)] = true
+			b.pairs[pair_key(ph, w.b)] = true
+		end
+		for _, room in ipairs(doc.of_type("room")) do
+			local l = room_list(b, room.id)
+			for i = 1, #l do
+				local j = i % #l + 1
+				if (l[i] == e.u and l[j] == e.v) or (l[i] == e.v and l[j] == e.u) then
+					table.insert(l, i + 1, ph)
+					break
+				end
+			end
+		end
 		return ph
 	end
-	if e.wall and doc.ents[e.wall] then
-		if b.split[e.wall] then
-			-- The second split of one wall in a batch would work from the
-			-- first's stale end
-			return nil
-		end
-		b.split[e.wall] = true
-		-- The wall keeps a->node and a copy of it takes node->b
-		local w = doc.ents[e.wall].ints
-		add_op(b, "set", {id = e.wall, ints = {b = ph}})
-		local f = wall_fields(w)
-		f.a, f.b = ph, w.b
-		local half = doc.placeholder()
-		add_op(b, "create", {id = half, type = "wall", ints = f})
-		-- What is in the wall past the split goes with the second half
-		for _, inst in ipairs(doc.of_type("instance")) do
-			if inst.ints.host == e.wall and inst.ints.along > ref.t then
-				add_op(b, "set", {id = inst.id, ints = {host = half,
-						along = inst.ints.along - ref.t}})
-			end
-		end
-		b.pairs[pair_key(w.a, ph)] = true
-		b.pairs[pair_key(ph, w.b)] = true
-	end
-	for _, room in ipairs(doc.of_type("room")) do
-		local l = room_list(b, room.id)
-		for i = 1, #l do
-			local j = i % #l + 1
-			if (l[i] == e.u and l[j] == e.v) or (l[i] == e.v and l[j] == e.u) then
-				table.insert(l, i + 1, ph)
-				break
-			end
-		end
-	end
-	return ph
-end
 
-local function default_material()
-	if S.material and doc.ents[S.material] then
-		return S.material
+	default_material = function()
+		if S.material and doc.ents[S.material] then
+			return S.material
+		end
+		local p = doc.of_type("palette")[1]
+		return p and p.id or 0
 	end
-	local p = doc.of_type("palette")[1]
-	return p and p.id or 0
-end
 
--- The material a new wall face gets: the most common among the faces
--- already facing the room it faces, else the one picked
-local function face_material(x, z)
-	local room = room_at(x, z)
-	if not room then
-		return default_material()
-	end
-	local count, best, bn = {}, nil, 0
-	for id, w in pairs(wall_data) do
-		local l = geom.len(w.bx - w.ax, w.bz - w.az)
-		if l > 0 then
-			local mx, mz = (w.ax + w.bx) / 2, (w.az + w.bz) / 2
-			local nx, nz = -(w.bz - w.az) / l, (w.bx - w.ax) / l
-			local e = doc.ents[id].ints
-			local d = w.thickness + 20
-			for _, side in ipairs({{1, e.mat_left}, {-1, e.mat_right}}) do
-				if side[2] ~= 0 and room_at(mx + nx * d * side[1],
-						mz + nz * d * side[1]) == room then
-					count[side[2]] = (count[side[2]] or 0) + 1
-					if count[side[2]] > bn then
-						best, bn = side[2], count[side[2]]
+	-- The material a new wall face gets: the most common among the faces
+	-- already facing the room it faces, else the one picked
+	local function face_material(x, z)
+		local room = room_at(x, z)
+		if not room then
+			return default_material()
+		end
+		local count, best, bn = {}, nil, 0
+		for id, w in pairs(wall_data) do
+			local l = geom.len(w.bx - w.ax, w.bz - w.az)
+			if l > 0 then
+				local mx, mz = (w.ax + w.bx) / 2, (w.az + w.bz) / 2
+				local nx, nz = -(w.bz - w.az) / l, (w.bx - w.ax) / l
+				local e = doc.ents[id].ints
+				local d = w.thickness + 20
+				for _, side in ipairs({{1, e.mat_left}, {-1, e.mat_right}}) do
+					if side[2] ~= 0 and room_at(mx + nx * d * side[1],
+							mz + nz * d * side[1]) == room then
+						count[side[2]] = (count[side[2]] or 0) + 1
+						if count[side[2]] > bn then
+							best, bn = side[2], count[side[2]]
+						end
 					end
 				end
 			end
 		end
+		return best or default_material()
 	end
-	return best or default_material()
-end
 
--- A new wall's ops between two node ids at the given points
-local function wall_op(b, a, ax, az, bnode, bx, bz)
-	local l = geom.len(bx - ax, bz - az)
-	local nx, nz = -(bz - az) / l, (bx - ax) / l
-	local mx, mz = (ax + bx) / 2, (az + bz) / 2
-	local d = S.thickness + 20
-	add_op(b, "create", {id = doc.placeholder(), type = "wall", ints = {
-			a = a, b = bnode, thickness = S.thickness, justify = S.justify,
-			height = S.height, hang = S.hang,
-			mat_left = face_material(mx + nx * d, mz + nz * d),
-			mat_right = face_material(mx - nx * d, mz - nz * d)}})
-end
+	-- A new wall's ops between two node ids at the given points
+	local function wall_op(b, a, ax, az, bnode, bx, bz)
+		local l = geom.len(bx - ax, bz - az)
+		local nx, nz = -(bz - az) / l, (bx - ax) / l
+		local mx, mz = (ax + bx) / 2, (az + bz) / 2
+		local d = S.thickness + 20
+		add_op(b, "create", {id = doc.placeholder(), type = "wall", ints = {
+				a = a, b = bnode, thickness = S.thickness, justify = S.justify,
+				height = S.height, hang = S.hang,
+				mat_left = face_material(mx + nx * d, mz + nz * d),
+				mat_right = face_material(mx - nx * d, mz - nz * d)}})
+	end
 
-local function add_wall(from, x, z, ref)
-	local fe, te = from.ref and from.ref.edge, ref and ref.edge
-	if fe and te and fe.u == te.u and fe.v == te.v then
-		doc.notice("Both ends on one edge: nothing to draw")
-		return false
-	end
-	if from.ref and ref and from.ref.node and from.ref.node == ref.node then
-		return false
-	end
-	if geom.len(x - from.x, z - from.z) < 1 then
-		return false
-	end
-	local b = new_batch()
-	local a = node_for(b, from.x, from.z, from.ref)
-	local bn = node_for(b, x, z, ref)
-	if not a or not bn then
-		return false
-	end
-	wall_op(b, a, from.x, from.z, bn, x, z)
-	send(finish_batch(b))
-	-- The chain goes on from the end, which is now a node
-	S.draw = {x = x, z = z, ref = {node = bn}}
-	return true
-end
-
--- The room tool's corners, as a room and (if asked) walls on its edges
-local function add_room(corners)
-	if #corners < 3 then
-		return
-	end
-	local b = new_batch()
-	local ids = {}
-	for i, c in ipairs(corners) do
-		ids[i] = node_for(b, c.x, c.z, c.ref)
-		if not ids[i] then
-			doc.notice("Two corners on one wall: split it first")
-			return
-		end
-	end
-	local ph = doc.placeholder()
-	local mat = default_material()
-	add_op(b, "create", {id = ph, type = "room", ints = {mat_floor = mat,
-			mat_ceiling = mat}, strs = {name = "room " ..
-			(#doc.of_type("room") + 1)}, lists = {nodes = ids}})
-	if S.room_walls then
-		for i = 1, #ids do
-			local j = i % #ids + 1
-			local exists = b.pairs[pair_key(ids[i], ids[j])] or
-					(ids[i] > 0 and ids[j] > 0 and wall_between(ids[i], ids[j]))
-			if not exists then
-				wall_op(b, ids[i], corners[i].x, corners[i].z, ids[j],
-						corners[j].x, corners[j].z)
-			end
-		end
-	end
-	send(finish_batch(b))
-end
-
--- A box drawn: a definition of that size and an instance of it
-local function add_box(x, z, w, d)
-	local def = doc.placeholder()
-	send({
-		{op = "create", ent = {id = def, type = "definition", ints = {kind = 0,
-				w = w, h = S.box.h, d = d, mat = default_material()}}},
-		{op = "create", ent = {id = doc.placeholder(), type = "instance",
-				ints = {def = def, x = math.floor(x + 0.5),
-				z = math.floor(z + 0.5), align = S.box.align,
-				offset = S.box.offset}}},
-	})
-end
-
--- The voxel volume the voxel tool works on: the one selected
-local function voxel_target()
-	local id = S.primary
-	if id and S.sel[id] == "instance" and inst_data[id] and inst_data[id].voxel then
-		return id
-	end
-	return nil
-end
-
-local function in_range(c)
-	for a = 1, 3 do
-		if c[a] < -128 or c[a] > 127 then
+	add_wall = function(from, x, z, ref)
+		local fe, te = from.ref and from.ref.edge, ref and ref.edge
+		if fe and te and fe.u == te.u and fe.v == te.v then
+			doc.notice("Both ends on one edge: nothing to draw")
 			return false
 		end
-	end
-	return true
-end
-
--- A new voxel volume at the point, of one voxel, selected
-local function add_volume(x, z)
-	local def = doc.placeholder()
-	local inst = doc.placeholder()
-	send({
-		{op = "create", ent = {id = def, type = "definition", ints = {
-				kind = KIND.voxel, voxel_size = S.voxel_size}}},
-		{op = "create", ent = {id = inst, type = "instance", ints = {def = def,
-				x = math.floor(x + 0.5), z = math.floor(z + 0.5)}}},
-	}, function(err)
-		if err == "" then
-			doc.set_voxels(S.real[def], {[doc.voxel_key(0, 0, 0)] =
-					default_material()})
-			S.sel = {[S.real[inst]] = "instance"}
-			S.primary = S.real[inst]
-			M.refresh_panels()
+		if from.ref and ref and from.ref.node and from.ref.node == ref.node then
+			return false
 		end
-	end)
-end
-
--- The voxel tool at the cursor: place a voxel against what is under it,
--- or dig the one under it
-local function voxel_edit(dig)
-	if not doc.can("edit") then
-		doc.notice("Viewing only: no edit privilege")
-		return
-	end
-	local id = voxel_target()
-	if not id then
-		local x, z = snapped_point(nil)
-		if x and not dig then
-			add_volume(x, z)
-		else
-			doc.notice("Select a voxel volume, or place one on the floor")
+		if geom.len(x - from.x, z - from.z) < 1 then
+			return false
 		end
-		return
+		local b = new_batch()
+		local a = node_for(b, from.x, from.z, from.ref)
+		local bn = node_for(b, x, z, ref)
+		if not a or not bn then
+			return false
+		end
+		wall_op(b, a, from.x, from.z, bn, x, z)
+		send(finish_batch(b))
+		-- The chain goes on from the end, which is now a node
+		S.draw = {x = x, z = z, ref = {node = bn}}
+		return true
 	end
-	local def = doc.ents[id].ints.def
-	local sets = {}
-	if S.view == "2d" then
-		-- From above: the top of the column under the cursor
+
+	-- The room tool's corners, as a room and (if asked) walls on its edges
+	add_room = function(corners)
+		if #corners < 3 then
+			return
+		end
+		local b = new_batch()
+		local ids = {}
+		for i, c in ipairs(corners) do
+			ids[i] = node_for(b, c.x, c.z, c.ref)
+			if not ids[i] then
+				doc.notice("Two corners on one wall: split it first")
+				return
+			end
+		end
+		local ph = doc.placeholder()
+		local mat = default_material()
+		add_op(b, "create", {id = ph, type = "room", ints = {mat_floor = mat,
+				mat_ceiling = mat}, strs = {name = "room " ..
+				(#doc.of_type("room") + 1)}, lists = {nodes = ids}})
+		if S.room_walls then
+			for i = 1, #ids do
+				local j = i % #ids + 1
+				local exists = b.pairs[pair_key(ids[i], ids[j])] or
+						(ids[i] > 0 and ids[j] > 0 and wall_between(ids[i], ids[j]))
+				if not exists then
+					wall_op(b, ids[i], corners[i].x, corners[i].z, ids[j],
+							corners[j].x, corners[j].z)
+				end
+			end
+		end
+		send(finish_batch(b))
+	end
+
+	-- A box drawn: a definition of that size and an instance of it
+	add_box = function(x, z, w, d)
+		local def = doc.placeholder()
+		send({
+			{op = "create", ent = {id = def, type = "definition", ints = {kind = 0,
+					w = w, h = S.box.h, d = d, mat = default_material()}}},
+			{op = "create", ent = {id = doc.placeholder(), type = "instance",
+					ints = {def = def, x = math.floor(x + 0.5),
+					z = math.floor(z + 0.5), align = S.box.align,
+					offset = S.box.offset}}},
+		})
+	end
+
+	-- The voxel volume the voxel tool works on: the one selected
+	voxel_target = function()
+		local id = S.primary
+		if id and S.sel[id] == "instance" and inst_data[id] and inst_data[id].voxel then
+			return id
+		end
+		return nil
+	end
+
+	local function in_range(c)
+		for a = 1, 3 do
+			if c[a] < -128 or c[a] > 127 then
+				return false
+			end
+		end
+		return true
+	end
+
+	-- A new voxel volume at the point, of one voxel, selected
+	local function add_volume(x, z)
+		local def = doc.placeholder()
+		local inst = doc.placeholder()
+		send({
+			{op = "create", ent = {id = def, type = "definition", ints = {
+					kind = KIND.voxel, voxel_size = S.voxel_size}}},
+			{op = "create", ent = {id = inst, type = "instance", ints = {def = def,
+					x = math.floor(x + 0.5), z = math.floor(z + 0.5)}}},
+		}, function(err)
+			if err == "" then
+				doc.set_voxels(S.real[def], {[doc.voxel_key(0, 0, 0)] =
+						default_material()})
+				S.sel = {[S.real[inst]] = "instance"}
+				S.primary = S.real[inst]
+				M.refresh_panels()
+			end
+		end)
+	end
+
+	-- From above: the column of a volume's cells under the cursor, and the
+	-- top voxel in it (nil when it is empty)
+	voxel_column = function(id)
 		local it = inst_data[id]
 		local x, z = cursor_floor()
+		if not x then
+			return nil
+		end
 		local lx, _, lz = geom.unrot(x - it.ox, 0, z - it.oz, it.pitch, it.yaw,
 				it.roll)
 		local cx, cz = math.floor(lx / it.size), math.floor(lz / it.size)
 		local top = nil
-		for key in pairs(doc.voxels[def] or {}) do
+		for key in pairs(doc.voxels[doc.ents[id].ints.def] or {}) do
 			local vx, vy, vz = doc.voxel_cell(key)
 			if vx == cx and vz == cz and (not top or vy > top) then
 				top = vy
 			end
 		end
-		if dig then
-			if top then
-				sets[doc.voxel_key(cx, top, cz)] = 0
-			end
-		else
-			local c = {cx, top and top + 1 or 0, cz}
-			if in_range(c) then
-				sets[doc.voxel_key(c[1], c[2], c[3])] = default_material()
-			end
-		end
-	else
-		local hit, place = voxel_ray(id)
-		if dig and hit then
-			sets[doc.voxel_key(hit[1], hit[2], hit[3])] = 0
-		elseif not dig and place and in_range(place) then
-			sets[doc.voxel_key(place[1], place[2], place[3])] = default_material()
-		end
+		return cx, cz, top
 	end
-	if next(sets) then
-		doc.set_voxels(def, sets)
-	end
-end
 
--- A door, window or opening put in a wall where the point is along it
-local function add_hosted(wall, x, z, side)
-	local f = wall_frame(wall)
-	if not f then
-		return
-	end
-	local kind = S.hosted
-	local d = HOSTED[kind]
-	local along = geom.snap((x - f.ax) * f.ux + (z - f.az) * f.uz, grid_step())
-	along = math.max(d.w / 2, math.min(f.len - d.w / 2, along))
-	local def = doc.placeholder()
-	local inst = doc.placeholder()
-	local mat = default_material()
-	send({
-		{op = "create", ent = {id = def, type = "definition", ints = {
-				kind = kind, w = d.w, h = d.h, mat = mat, mat_leaf = mat,
-				trim = kind == KIND.opening and 0 or 70}}},
-		{op = "create", ent = {id = inst, type = "instance",
-				ints = {def = def, host = wall, along = math.floor(along + 0.5),
-				sill = d.sill, flip = side == "right" and 1 or 0}}},
-	}, function(err)
-		-- What was put in is what is selected
-		if err == "" then
-			S.sel = {[S.real[inst]] = "instance"}
-			S.primary = S.real[inst]
-			M.refresh_panels()
+	-- The voxel tool at the cursor: place a voxel against what is under it,
+	-- or dig the one under it
+	voxel_edit = function(dig)
+		if not doc.can("edit") then
+			doc.notice("Viewing only: no edit privilege")
+			return
 		end
-	end)
-end
-
--- Copies of the selected instances next to them: linked ones share the
--- definition, the others get a copy of it
--- A copied definition's voxels go to the copy once it exists
--- simplified: a second message after the copy's batch, so undoing the copy
--- is two steps
-local function copy_voxels(copies)
-	for _, c in ipairs(copies) do
-		local vox = doc.voxels[c.from]
-		if vox and next(vox) and S.real[c.to] then
-			local sets = {}
-			for k, v in pairs(vox) do
-				sets[k] = v
-			end
-			doc.set_voxels(S.real[c.to], sets)
-		end
-	end
-end
-
-local function copy_selected(linked)
-	local ops, new, voxel_copies = {}, {}, {}
-	for id, kind in pairs(S.sel) do
-		if kind == "instance" then
-			local i = copy_fields(doc.ents[id].ints)
-			if not linked then
-				local def = doc.placeholder()
-				ops[#ops + 1] = {op = "create", ent = {id = def,
-						type = "definition", ints = copy_fields(
-						doc.ents[i.def].ints)}}
-				voxel_copies[#voxel_copies + 1] = {to = def, from = i.def}
-				i.def = def
-			end
-			if i.host ~= 0 then
-				-- Along the wall, next to it
-				i.along = i.along + doc.ents[doc.ents[id].ints.def].ints.w + 100
+		local id = voxel_target()
+		if not id then
+			local x, z = snapped_point(nil)
+			if x and not dig then
+				add_volume(x, z)
 			else
-				i.x = i.x + COPY_OFFSET
-				i.z = i.z - COPY_OFFSET
+				doc.notice("Select a voxel volume, or place one on the floor")
 			end
-			local ph = doc.placeholder()
-			new[#new + 1] = ph
-			ops[#ops + 1] = {op = "create", ent = {id = ph, type = "instance",
-					ints = i}}
+			return
 		end
-	end
-	if #ops == 0 then
-		doc.notice("Copies are of objects; select one")
-		return
-	end
-	send(ops, function(err)
-		if err == "" then
-			copy_voxels(voxel_copies)
-			-- The copies are what is selected now
-			S.sel = {}
-			for _, ph in ipairs(new) do
-				S.sel[S.real[ph]] = "instance"
-				S.primary = S.real[ph]
+		local def = doc.ents[id].ints.def
+		local sets = {}
+		if S.view == "2d" then
+			local cx, cz, top = voxel_column(id)
+			if not cx then
+				return
 			end
-			M.refresh_panels()
-		end
-	end)
-end
-
-local function unlink(id)
-	local i = doc.ents[id].ints
-	local def = doc.placeholder()
-	send({
-		{op = "create", ent = {id = def, type = "definition",
-				ints = copy_fields(doc.ents[i.def].ints)}},
-		{op = "set", ent = {id = id, ints = {def = def}}},
-	}, function(err)
-		if err == "" then
-			copy_voxels({{to = def, from = i.def}})
-		end
-	end)
-end
-
--- Node `from` merged into node `into`: what referred to one refers to the
--- other, and what that makes degenerate goes
-local function merge_ops(from, into)
-	local b = new_batch()
-	local ends = {}
-	for id, w in pairs(wall_data) do
-		local a, bb = w.a_node, w.b_node
-		if a == from then a = into end
-		if bb == from then bb = into end
-		local key = pair_key(a, bb)
-		if a == bb or ends[key] then
-			add_op(b, "delete", {id = id})
-		elseif a ~= w.a_node or bb ~= w.b_node then
-			add_op(b, "set", {id = id, ints = {a = a, b = bb}})
-		end
-		if a ~= bb then
-			ends[key] = true
-		end
-	end
-	for _, room in ipairs(doc.of_type("room")) do
-		local l = room.lists.nodes
-		local has_from, has_into = false, false
-		for _, n in ipairs(l) do
-			has_from = has_from or n == from
-			has_into = has_into or n == into
-		end
-		if has_from then
-			local nl = {}
-			for _, n in ipairs(l) do
-				if n ~= from then
-					nl[#nl + 1] = n
-				elseif not has_into then
-					nl[#nl + 1] = into
+			if dig then
+				if top then
+					sets[doc.voxel_key(cx, top, cz)] = 0
+				end
+			else
+				local c = {cx, top and top + 1 or 0, cz}
+				if in_range(c) then
+					sets[doc.voxel_key(c[1], c[2], c[3])] = default_material()
 				end
 			end
-			if #nl < 3 then
-				add_op(b, "delete", {id = room.id})
-			else
-				add_op(b, "set", {id = room.id, lists = {nodes = nl}})
+		else
+			local hit, place = voxel_ray(id)
+			if dig and hit then
+				sets[doc.voxel_key(hit[1], hit[2], hit[3])] = 0
+			elseif not dig and place and in_range(place) then
+				sets[doc.voxel_key(place[1], place[2], place[3])] = default_material()
+			end
+		end
+		if next(sets) then
+			doc.set_voxels(def, sets)
+		end
+	end
+
+	-- A door, window or opening put in a wall where the point is along it
+	add_hosted = function(wall, x, z, side)
+		local f = wall_frame(wall)
+		if not f then
+			return
+		end
+		local kind = S.hosted
+		local d = HOSTED[kind]
+		local along = geom.snap((x - f.ax) * f.ux + (z - f.az) * f.uz, grid_step())
+		along = math.max(d.w / 2, math.min(f.len - d.w / 2, along))
+		local def = doc.placeholder()
+		local inst = doc.placeholder()
+		local mat = default_material()
+		send({
+			{op = "create", ent = {id = def, type = "definition", ints = {
+					kind = kind, w = d.w, h = d.h, mat = mat, mat_leaf = mat,
+					trim = kind == KIND.opening and 0 or 70}}},
+			{op = "create", ent = {id = inst, type = "instance",
+					ints = {def = def, host = wall, along = math.floor(along + 0.5),
+					sill = d.sill, flip = side == "right" and 1 or 0}}},
+		}, function(err)
+			-- What was put in is what is selected
+			if err == "" then
+				S.sel = {[S.real[inst]] = "instance"}
+				S.primary = S.real[inst]
+				M.refresh_panels()
+			end
+		end)
+	end
+
+	-- Copies of the selected instances next to them: linked ones share the
+	-- definition, the others get a copy of it
+	-- A copied definition's voxels go to the copy once it exists
+	-- simplified: a second message after the copy's batch, so undoing the copy
+	-- is two steps
+	local function copy_voxels(copies)
+		for _, c in ipairs(copies) do
+			local vox = doc.voxels[c.from]
+			if vox and next(vox) and S.real[c.to] then
+				local sets = {}
+				for k, v in pairs(vox) do
+					sets[k] = v
+				end
+				doc.set_voxels(S.real[c.to], sets)
 			end
 		end
 	end
-	add_op(b, "delete", {id = from})
-	return b.ops
-end
 
-local function unused_nodes(ops, gone_walls)
-	local candidates = {}
-	for id in pairs(gone_walls) do
-		local w = doc.ents[id].ints
-		candidates[w.a] = true
-		candidates[w.b] = true
+	copy_selected = function(linked)
+		local ops, new, voxel_copies = {}, {}, {}
+		for id, kind in pairs(S.sel) do
+			if kind == "instance" then
+				local i = copy_fields(doc.ents[id].ints)
+				if not linked then
+					local def = doc.placeholder()
+					ops[#ops + 1] = {op = "create", ent = {id = def,
+							type = "definition", ints = copy_fields(
+							doc.ents[i.def].ints)}}
+					voxel_copies[#voxel_copies + 1] = {to = def, from = i.def}
+					i.def = def
+				end
+				if i.host ~= 0 then
+					-- Along the wall, next to it
+					i.along = i.along + doc.ents[doc.ents[id].ints.def].ints.w + 100
+				else
+					i.x = i.x + COPY_OFFSET
+					i.z = i.z - COPY_OFFSET
+				end
+				local ph = doc.placeholder()
+				new[#new + 1] = ph
+				ops[#ops + 1] = {op = "create", ent = {id = ph, type = "instance",
+						ints = i}}
+			end
+		end
+		if #ops == 0 then
+			doc.notice("Copies are of objects; select one")
+			return
+		end
+		send(ops, function(err)
+			if err == "" then
+				copy_voxels(voxel_copies)
+				-- The copies are what is selected now
+				S.sel = {}
+				for _, ph in ipairs(new) do
+					S.sel[S.real[ph]] = "instance"
+					S.primary = S.real[ph]
+				end
+				M.refresh_panels()
+			end
+		end)
 	end
-	for n in pairs(candidates) do
-		local used = false
+
+	unlink = function(id)
+		local i = doc.ents[id].ints
+		local def = doc.placeholder()
+		send({
+			{op = "create", ent = {id = def, type = "definition",
+					ints = copy_fields(doc.ents[i.def].ints)}},
+			{op = "set", ent = {id = id, ints = {def = def}}},
+		}, function(err)
+			if err == "" then
+				copy_voxels({{to = def, from = i.def}})
+			end
+		end)
+	end
+
+	-- Node `from` merged into node `into`: what referred to one refers to the
+	-- other, and what that makes degenerate goes
+	merge_ops = function(from, into)
+		local b = new_batch()
+		local ends = {}
 		for id, w in pairs(wall_data) do
-			if not gone_walls[id] and (w.a_node == n or w.b_node == n) then
-				used = true
+			local a, bb = w.a_node, w.b_node
+			if a == from then a = into end
+			if bb == from then bb = into end
+			local key = pair_key(a, bb)
+			if a == bb or ends[key] then
+				add_op(b, "delete", {id = id})
+			elseif a ~= w.a_node or bb ~= w.b_node then
+				add_op(b, "set", {id = id, ints = {a = a, b = bb}})
+			end
+			if a ~= bb then
+				ends[key] = true
 			end
 		end
 		for _, room in ipairs(doc.of_type("room")) do
-			for _, rn in ipairs(room.lists.nodes) do
-				used = used or rn == n
+			local l = room.lists.nodes
+			local has_from, has_into = false, false
+			for _, n in ipairs(l) do
+				has_from = has_from or n == from
+				has_into = has_into or n == into
 			end
-		end
-		if not used then
-			ops[#ops + 1] = {op = "delete", ent = {id = n}}
-		end
-	end
-end
-
-local function delete_nodes(ops, ids)
-	for id in pairs(ids) do
-		if doc.ents[id] then
-			ops[#ops + 1] = {op = "delete", ent = {id = id}}
-		end
-	end
-	-- A room left with corners but no floor goes too; the server only
-	-- knows to remove one left with fewer than three
-	for _, room in ipairs(doc.of_type("room")) do
-		local pts = {}
-		for _, n in ipairs(room.lists.nodes) do
-			if not ids[n] then
-				pts[#pts + 1] = {node_pos(n)}
-			end
-		end
-		if #pts >= 3 and #pts < #room.lists.nodes and
-				geom.area(pts) < 10000 then
-			ops[#ops + 1] = {op = "delete", ent = {id = room.id}}
-		end
-	end
-end
-
-local function delete_selected()
-	local ops = {}
-	if S.tool == "node" then
-		delete_nodes(ops, S.nodes)
-		S.nodes = {}
-	else
-		local walls, nodes, defs = {}, {}, {}
-		for id, kind in pairs(S.sel) do
-			if doc.ents[id] then
-				if kind == "node" then
-					nodes[id] = true
+			if has_from then
+				local nl = {}
+				for _, n in ipairs(l) do
+					if n ~= from then
+						nl[#nl + 1] = n
+					elseif not has_into then
+						nl[#nl + 1] = into
+					end
+				end
+				if #nl < 3 then
+					add_op(b, "delete", {id = room.id})
 				else
-					ops[#ops + 1] = {op = "delete", ent = {id = id}}
-				end
-				if kind == "wall" then
-					walls[id] = true
-				elseif kind == "instance" then
-					local def = doc.ents[id].ints.def
-					defs[def] = (defs[def] or 0) + 1
+					add_op(b, "set", {id = room.id, lists = {nodes = nl}})
 				end
 			end
 		end
-		delete_nodes(ops, nodes)
-		-- Their nodes go with the walls where nothing else holds them, and
-		-- a definition with its last instance
-		unused_nodes(ops, walls)
-		for def, n in pairs(defs) do
-			if instances_of(def) == n then
-				ops[#ops + 1] = {op = "delete", ent = {id = def}}
-			end
-		end
-		S.sel = {}
-		S.primary = nil
+		add_op(b, "delete", {id = from})
+		return b.ops
 	end
-	if #ops > 0 then
+
+	local function unused_nodes(ops, gone_walls)
+		local candidates = {}
+		for id in pairs(gone_walls) do
+			local w = doc.ents[id].ints
+			candidates[w.a] = true
+			candidates[w.b] = true
+		end
+		for n in pairs(candidates) do
+			local used = false
+			for id, w in pairs(wall_data) do
+				if not gone_walls[id] and (w.a_node == n or w.b_node == n) then
+					used = true
+				end
+			end
+			for _, room in ipairs(doc.of_type("room")) do
+				for _, rn in ipairs(room.lists.nodes) do
+					used = used or rn == n
+				end
+			end
+			if not used then
+				ops[#ops + 1] = {op = "delete", ent = {id = n}}
+			end
+		end
+	end
+
+	local function delete_nodes(ops, ids)
+		for id in pairs(ids) do
+			if doc.ents[id] then
+				ops[#ops + 1] = {op = "delete", ent = {id = id}}
+			end
+		end
+		-- A room left with corners but no floor goes too; the server only
+		-- knows to remove one left with fewer than three
+		for _, room in ipairs(doc.of_type("room")) do
+			local pts = {}
+			for _, n in ipairs(room.lists.nodes) do
+				if not ids[n] then
+					pts[#pts + 1] = {node_pos(n)}
+				end
+			end
+			if #pts >= 3 and #pts < #room.lists.nodes and
+					geom.area(pts) < 10000 then
+				ops[#ops + 1] = {op = "delete", ent = {id = room.id}}
+			end
+		end
+	end
+
+	delete_selected = function()
+		local ops = {}
+		if S.tool == "node" then
+			delete_nodes(ops, S.nodes)
+			S.nodes = {}
+		else
+			local walls, nodes, defs = {}, {}, {}
+			for id, kind in pairs(S.sel) do
+				if doc.ents[id] then
+					if kind == "node" then
+						nodes[id] = true
+					else
+						ops[#ops + 1] = {op = "delete", ent = {id = id}}
+					end
+					if kind == "wall" then
+						walls[id] = true
+					elseif kind == "instance" then
+						local def = doc.ents[id].ints.def
+						defs[def] = (defs[def] or 0) + 1
+					end
+				end
+			end
+			delete_nodes(ops, nodes)
+			-- Their nodes go with the walls where nothing else holds them, and
+			-- a definition with its last instance
+			unused_nodes(ops, walls)
+			for def, n in pairs(defs) do
+				if instances_of(def) == n then
+					ops[#ops + 1] = {op = "delete", ent = {id = def}}
+				end
+			end
+			S.sel = {}
+			S.primary = nil
+		end
+		if #ops > 0 then
+			send(ops)
+		end
+	end
+
+	-- What a selection moves: instances by their position, walls and rooms by
+	-- their nodes
+	moved_by = function(sel)
+		local inst, nodes = {}, {}
+		for id, kind in pairs(sel) do
+			local e = doc.ents[id]
+			if e then
+				if kind == "instance" or kind == "image" then
+					inst[id] = true
+				elseif kind == "node" then
+					nodes[id] = true
+				elseif kind == "wall" then
+					nodes[e.ints.a] = true
+					nodes[e.ints.b] = true
+				elseif kind == "room" then
+					for _, n in ipairs(e.lists.nodes) do
+						nodes[n] = true
+					end
+				end
+			end
+		end
+		return inst, nodes
+	end
+
+	-- The selection turned by deg about its centre, counter-clockwise as seen
+	-- from above: positions about the centre, and each instance's own yaw.
+	-- A turn asked for while one is on its way waits for it, since it is
+	-- computed from where the first leaves things.
+	local turning, turn_queued = false, 0
+	local function send_turn(deg)
+		local inst, nodes = moved_by(S.sel)
+		local sx, sz, n = 0, 0, 0
+		for id in pairs(inst) do
+			local c = inst_data[id] or doc.ents[id].ints
+			sx, sz, n = sx + c.x, sz + c.z, n + 1
+		end
+		for id in pairs(nodes) do
+			local x, z = node_pos(id)
+			sx, sz, n = sx + x, sz + z, n + 1
+		end
+		if n == 0 then
+			return
+		end
+		sx, sz = sx / n, sz / n
+		local c, s = math.cos(math.rad(deg)), math.sin(math.rad(deg))
+		local function turn(x, z)
+			local dx, dz = x - sx, z - sz
+			return math.floor(sx + dx * c - dz * s + 0.5),
+					math.floor(sz + dx * s + dz * c + 0.5)
+		end
+		local ops = {}
+		for id in pairs(inst) do
+			local i = doc.ents[id].ints
+			-- What is in a wall turns with the wall, not by itself
+			if i.host == 0 then
+				local x, z = turn(i.x, i.z)
+				-- Yaw grows turning right, which from above is clockwise
+				local yaw = (i.yaw - math.floor(deg * 1000 + 0.5)) % 360000
+				ops[#ops + 1] = {op = "set", ent = {id = id, ints = {x = x, z = z,
+						yaw = yaw}}}
+			end
+		end
+		for id in pairs(nodes) do
+			local p = doc.ents[id].ints
+			local x, z = turn(p.x, p.z)
+			ops[#ops + 1] = {op = "set", ent = {id = id, ints = {x = x, z = z}}}
+		end
+		turning = true
+		send(ops, function()
+			turning = false
+			if turn_queued ~= 0 then
+				local q = turn_queued
+				turn_queued = 0
+				rotate_selection(q)
+			end
+		end)
+	end
+
+	rotate_selection = function(deg)
+		if turning then
+			turn_queued = turn_queued + deg
+		else
+			send_turn(deg)
+		end
+	end
+
+	-- The palette entry picked, on everything selected
+	apply_material = function()
+		local mat = default_material()
+		local ops = {}
+		for id, kind in pairs(S.sel) do
+			local e = doc.ents[id]
+			if e and kind == "instance" then
+				ops[#ops + 1] = {op = "set", ent = {id = e.ints.def,
+						ints = {mat = mat}}}
+			elseif e and kind == "wall" then
+				ops[#ops + 1] = {op = "set", ent = {id = id,
+						ints = {mat_left = mat, mat_right = mat}}}
+			elseif e and kind == "room" then
+				ops[#ops + 1] = {op = "set", ent = {id = id,
+						ints = {mat_floor = mat}}}
+			end
+		end
 		send(ops)
 	end
-end
 
--- What a selection moves: instances by their position, walls and rooms by
--- their nodes
-local function moved_by(sel)
-	local inst, nodes = {}, {}
-	for id, kind in pairs(sel) do
-		local e = doc.ents[id]
-		if e then
-			if kind == "instance" or kind == "image" then
-				inst[id] = true
-			elseif kind == "node" then
-				nodes[id] = true
-			elseif kind == "wall" then
-				nodes[e.ints.a] = true
-				nodes[e.ints.b] = true
-			elseif kind == "room" then
-				for _, n in ipairs(e.lists.nodes) do
-					nodes[n] = true
-				end
-			end
-		end
-	end
-	return inst, nodes
-end
-
--- The selection turned by deg about its centre, counter-clockwise as seen
--- from above: positions about the centre, and each instance's own yaw.
--- A turn asked for while one is on its way waits for it, since it is
--- computed from where the first leaves things.
-local rotate_selection
-local turning, turn_queued = false, 0
-local function send_turn(deg)
-	local inst, nodes = moved_by(S.sel)
-	local sx, sz, n = 0, 0, 0
-	for id in pairs(inst) do
-		local c = inst_data[id] or doc.ents[id].ints
-		sx, sz, n = sx + c.x, sz + c.z, n + 1
-	end
-	for id in pairs(nodes) do
-		local x, z = node_pos(id)
-		sx, sz, n = sx + x, sz + z, n + 1
-	end
-	if n == 0 then
-		return
-	end
-	sx, sz = sx / n, sz / n
-	local c, s = math.cos(math.rad(deg)), math.sin(math.rad(deg))
-	local function turn(x, z)
-		local dx, dz = x - sx, z - sz
-		return math.floor(sx + dx * c - dz * s + 0.5),
-				math.floor(sz + dx * s + dz * c + 0.5)
-	end
-	local ops = {}
-	for id in pairs(inst) do
-		local i = doc.ents[id].ints
-		-- What is in a wall turns with the wall, not by itself
-		if i.host == 0 then
-			local x, z = turn(i.x, i.z)
-			-- Yaw grows turning right, which from above is clockwise
-			local yaw = (i.yaw - math.floor(deg * 1000 + 0.5)) % 360000
-			ops[#ops + 1] = {op = "set", ent = {id = id, ints = {x = x, z = z,
-					yaw = yaw}}}
-		end
-	end
-	for id in pairs(nodes) do
-		local p = doc.ents[id].ints
-		local x, z = turn(p.x, p.z)
-		ops[#ops + 1] = {op = "set", ent = {id = id, ints = {x = x, z = z}}}
-	end
-	turning = true
-	send(ops, function()
-		turning = false
-		if turn_queued ~= 0 then
-			local q = turn_queued
-			turn_queued = 0
-			rotate_selection(q)
-		end
-	end)
-end
-
-rotate_selection = function(deg)
-	if turning then
-		turn_queued = turn_queued + deg
-	else
-		send_turn(deg)
-	end
-end
-
--- The palette entry picked, on everything selected
-local function apply_material()
-	local mat = default_material()
-	local ops = {}
-	for id, kind in pairs(S.sel) do
-		local e = doc.ents[id]
-		if e and kind == "instance" then
-			ops[#ops + 1] = {op = "set", ent = {id = e.ints.def,
-					ints = {mat = mat}}}
-		elseif e and kind == "wall" then
-			ops[#ops + 1] = {op = "set", ent = {id = id,
-					ints = {mat_left = mat, mat_right = mat}}}
-		elseif e and kind == "room" then
-			ops[#ops + 1] = {op = "set", ent = {id = id,
-					ints = {mat_floor = mat}}}
-		end
-	end
-	send(ops)
 end
 
 --
@@ -2353,7 +2482,7 @@ local function build_toolbar()
 			function() set_view(NEXT_VIEW[S.view]) end, false, 40)
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Box"},
-			{"hosted", "Door/window"}, {"voxel", "Voxels"}, {"paint", "Paint"}}) do
+			{"hosted", "Door/window"}, {"voxel", "Voxels"}, {"paint", "Material"}}) do
 		panel.button(toolbar, t[2] .. " (" .. TOOL_KEYS[t[1]] .. ")",
 				function() set_tool(t[1]) end, S.tool == t[1])
 	end
@@ -2369,6 +2498,11 @@ local function build_toolbar()
 		S.angle = S.angle % #ANGLE_STEPS + 1
 		refresh_panels()
 	end)
+	panel.button(toolbar, "IDs", function()
+		S.show_ids = not S.show_ids
+		S.dirty = true
+		refresh_panels()
+	end, S.show_ids)
 end
 
 local function m2(mm2)
@@ -2521,7 +2655,7 @@ local function build_props()
 		panel.button(r, "Roll +90", function()
 			set(sel.id, {ints = {roll = (i.roll + 1) % 4}})
 		end)
-		panel.label(props, "Voxel tool (M): 3D left digs, right places;")
+		panel.label(props, "Voxel tool (K): 3D left digs, right places;")
 		panel.label(props, "2D click adds on top, Ctrl+click takes off")
 		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
 		panel.button(props, "Linked clone (Ctrl+L)", function()
@@ -2610,6 +2744,8 @@ local function build_props()
 				"Stands on the floor", function()
 			set(sel.id, {ints = {hang = 1 - w.hang}})
 		end)
+		panel.button(props, "Apply the palette entry (both faces)",
+				apply_material)
 		panel.button(props, "Delete (Del)", delete_selected)
 	elseif sel and sel.type == "image" then
 		local i = sel.ints
@@ -2664,6 +2800,7 @@ local function build_props()
 			panel.label(props, "Floor " .. m2(r.net) .. " net")
 			panel.label(props, m2(r.gross) .. " to the wall lines")
 		end
+		panel.button(props, "Apply the palette entry (floor)", apply_material)
 		panel.button(props, "Delete (Del)", delete_selected)
 	elseif sel and sel.type == "node" then
 		panel.label(props, "Node " .. sel.id)
@@ -2868,7 +3005,8 @@ build_palette = function()
 			S.material = p.id
 			refresh_panels()
 		end, p.id == cur)
-		panel.label(r, p.strs.name .. "  (" .. MATERIAL_KINDS[p.ints.kind] .. ")",
+		panel.label(r, "#" .. p.id .. "  " .. p.strs.name .. "  (" ..
+				MATERIAL_KINDS[p.ints.kind] .. ")",
 				p.id == cur and magic.Color(1.0, 0.85, 0.3) or nil)
 	end
 	local e = doc.ents[cur]
@@ -2976,6 +3114,33 @@ end
 --
 -- Input
 --
+-- What a left press would take, for the select and node tools: the same
+-- pick for the click and for what the guide shows. In the select tool an
+-- object under the cursor wins, then a node near it, then the wall,
+-- picture or room it is on.
+local function press_target()
+	local x, z = cursor_floor()
+	if S.tool == "select" then
+		local s = pick_surface()
+		if s and s.kind == "instance" then
+			return {kind = "instance", id = s.id}
+		end
+		local n = x and nearest_node(x, z, snap_radius())
+		if n then
+			return {kind = "node", id = n}
+		elseif s then
+			return {kind = (s.kind == "wall" or s.kind == "image") and s.kind or
+					"room", id = s.id}
+		end
+	elseif S.tool == "node" then
+		local n = x and nearest_node(x, z, snap_radius())
+		if n then
+			return {kind = "node", id = n}
+		end
+	end
+	return nil
+end
+
 local function begin_press(button)
 	if button ~= magic.MOUSEB_LEFT or over_ui() then
 		return
@@ -2992,27 +3157,7 @@ local function begin_press(button)
 		end
 		return
 	end
-	if S.tool == "select" then
-		-- An object under the cursor wins; then a node near it, then the
-		-- wall or room it is on
-		local s = pick_surface()
-		if s and s.kind == "instance" then
-			S.press.target = {kind = "instance", id = s.id}
-			return
-		end
-		local n = x and nearest_node(x, z, snap_radius())
-		if n then
-			S.press.target = {kind = "node", id = n}
-		elseif s then
-			S.press.target = {kind = (s.kind == "wall" or s.kind == "image") and
-					s.kind or "room", id = s.id}
-		end
-	elseif S.tool == "node" then
-		local n = x and nearest_node(x, z, snap_radius())
-		if n then
-			S.press.target = {kind = "node", id = n}
-		end
-	end
+	S.press.target = press_target()
 end
 
 local function start_drag()
@@ -3385,7 +3530,7 @@ local function click()
 end
 
 -- The use key's, defined with it below
-local use
+local use, use_target
 
 function M.mouse_down(button)
 	if S.view == "walk" and S.walk_released and not over_ui() then
@@ -3423,7 +3568,13 @@ function M.mouse_down(button)
 		return
 	end
 	if button == magic.MOUSEB_MIDDLE then
-		S.panning = true
+		-- The plan pans; the 3D camera turns, as with the right button
+		if S.view == "2d" then
+			S.panning = true
+		elseif not S.captured then
+			S.looking = true
+			magic.input:SetMouseMode(magic.MM_RELATIVE)
+		end
 		return
 	end
 	begin_press(button)
@@ -3434,10 +3585,12 @@ function M.mouse_up(button)
 		S.swallow_up = false
 		return
 	end
-	if S.captured and (S.tool == "voxel" or button == magic.MOUSEB_RIGHT) then
+	if S.captured and (S.tool == "voxel" or button ~= magic.MOUSEB_LEFT) then
 		return
 	end
-	if button == magic.MOUSEB_RIGHT then
+	if button == magic.MOUSEB_RIGHT or (button == magic.MOUSEB_MIDDLE and
+			S.looking) then
+		S.panning = false
 		if S.looking then
 			S.looking = false
 			magic.input:SetMouseMode(magic.MM_ABSOLUTE)
@@ -3572,26 +3725,35 @@ end
 
 -- The use key: a door or window under the cursor opens or closes. For an
 -- editor for everybody; a viewer opens it for themselves.
-use = function()
+-- What the use key would work: a door, a window or a switch under the
+-- cursor, or with nothing under it the switch selected. Returns its id and
+-- kind, or nil.
+use_target = function()
 	local s = pick_surface()
 	local id = s and s.kind == "instance" and s.id
-	-- With nothing under the cursor, the switch selected
 	local p = S.primary and doc.ents[S.primary]
 	if not id and p and p.type == "instance" and
 			doc.ents[p.ints.def].ints.kind == KIND.switch then
 		id = S.primary
 	end
 	local e = id and doc.ents[id]
-	if not e or (e.ints.host == 0 and doc.ents[e.ints.def].ints.kind ~=
-			KIND.switch) then
-		return
+	if not e then
+		return nil
 	end
 	local kind = doc.ents[e.ints.def].ints.kind
-	if kind == KIND.switch then
-		flip_switch(id)
+	if kind == KIND.switch or kind == KIND.door or kind == KIND.window then
+		return id, kind
+	end
+	return nil
+end
+
+use = function()
+	local id, kind = use_target()
+	if not id then
 		return
 	end
-	if kind ~= KIND.door and kind ~= KIND.window then
+	if kind == KIND.switch then
+		flip_switch(id)
 		return
 	end
 	local open = open_amount(id) > 0 and 0 or 1000
@@ -3717,7 +3879,7 @@ function M.key_down(key, event_data)
 		set_tool("room")
 	elseif key == magic.KEY_O then
 		set_tool("box")
-	elseif key == magic.KEY_M then
+	elseif key == magic.KEY_K then
 		set_tool("voxel")
 	elseif key == magic.KEY_I then
 		-- Again: the next of opening, door and window
@@ -3725,7 +3887,7 @@ function M.key_down(key, event_data)
 			S.hosted = NEXT_HOSTED[S.hosted]
 		end
 		set_tool("hosted")
-	elseif key == magic.KEY_P then
+	elseif key == magic.KEY_M then
 		set_tool("paint")
 	elseif key == magic.KEY_G then
 		S.grid = S.grid % #GRID_STEPS + 1
@@ -3889,6 +4051,15 @@ local function place_cameras()
 			S.pos.y * 1000 < settings().ceiling
 end
 
+-- What each button would do, above the chat
+local hud = magic.ui.root:CreateChild("Text")
+hud:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 15)
+hud:SetAlignment(magic.HA_CENTER, magic.VA_BOTTOM)
+hud:SetPosition(0, -12)
+hud:SetTextEffect(magic.TE_SHADOW)
+hud:SetTextAlignment(magic.HA_CENTER)
+hud.priority = 90
+
 local crosshair = magic.ui.root:CreateChild("Text")
 crosshair:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 24)
 crosshair:SetText("+")
@@ -3976,6 +4147,398 @@ local function plan_symbol(id, it, line)
 						face + side * r * math.sin(a))
 				line(px, pz, qx, qz, col)
 				px, pz = qx, qz
+			end
+		end
+	end
+end
+
+--
+-- The guides: what the pointer is on, highlighted, and what each button
+-- would do to it, said ([FP_GUIDES]). compute_guide() makes the same picks
+-- the clicks do, so what is shown is what is done.
+--
+local compute_guide, draw_guide, guide_text
+do
+	local HOVER = magic.Color(0.2, 0.9, 1.0)
+	local DIG = magic.Color(1, 0.3, 0.2)
+	local PLACE = magic.Color(0.2, 1, 0.3)
+
+	local function name_of(id)
+		local e = doc.ents[id]
+		if not e then
+			return "?"
+		end
+		if e.type == "instance" then
+			local kind = doc.ents[e.ints.def].ints.kind
+			return (kind == KIND.voxel and "voxels" or
+					KIND_NAMES[kind]:lower()) .. " " .. id
+		elseif e.type == "room" then
+			return "room '" .. e.strs.name .. "'"
+		elseif e.type == "image" then
+			return "the picture " .. e.strs.file
+		end
+		return e.type .. " " .. id
+	end
+
+	local function mat_text(m)
+		local e = m and m ~= 0 and doc.ents[m]
+		if not e then
+			return "no material"
+		end
+		return "'" .. e.strs.name .. "' #" .. m
+	end
+
+	local function cell_of(id, c)
+		local e = doc.ents[id]
+		local m = (doc.voxels[e.ints.def] or {})[doc.voxel_key(c[1], c[2], c[3])]
+		return m
+	end
+
+	compute_guide = function()
+		if over_ui() and not S.captured then
+			return nil
+		end
+		local g = {hl = {}}
+		local function hl(t)
+			g.hl[#g.hl + 1] = t
+		end
+		-- The camera's buttons
+		if S.view == "2d" then
+			g.middle = "drag: pan the plan"
+		elseif not S.captured then
+			g.right = "drag: turn the view"
+			g.middle = "drag: turn the view"
+		end
+		local cur = default_material()
+		local edit = doc.can("edit")
+		-- The use key
+		local uid, ukind = use_target()
+		if uid then
+			local what
+			if ukind == KIND.switch then
+				local any = false
+				for _, l in ipairs(doc.ents[uid].lists.lamps) do
+					any = any or lamp_on(l)
+				end
+				what = "switch " .. name_of(uid) .. "'s lamps " ..
+						(any and "off" or "on")
+			else
+				what = (open_amount(uid) > 0 and "close " or "open ") .. name_of(uid)
+			end
+			g.use = what
+			hl({kind = "instance", id = uid, col = PLACE})
+			if S.captured and S.tool ~= "voxel" then
+				g.right = what
+			end
+		end
+		if S.calib then
+			local x, z = cursor_floor()
+			if x and not S.calib.measured then
+				hl({kind = "point", x = x, z = z})
+				g.left = "calibration point " .. (#S.calib.pts + 1) .. " of 2 here"
+			end
+			g.note = "Esc: stop calibrating"
+			return g
+		end
+		if S.linking then
+			local s = pick_surface()
+			if s and s.kind == "instance" and is_lamp(s.id) then
+				hl({kind = "instance", id = s.id})
+				local linked = false
+				for _, l in ipairs(doc.ents[S.linking].lists.lamps) do
+					linked = linked or l == s.id
+				end
+				g.left = (linked and "unlink " or "link ") .. name_of(s.id) ..
+						(linked and " from " or " to ") .. name_of(S.linking)
+			end
+			g.note = "Linking lamps: point at a lamp; Esc: done"
+			return g
+		end
+		local tool = S.tool
+		if tool == "select" or tool == "node" then
+			local t = press_target()
+			if t then
+				hl({kind = t.kind, id = t.id})
+				local name = name_of(t.id)
+				if S.shift then
+					g.left = (S.sel[t.id] and "take " .. name .. " out of" or
+							"add " .. name .. " to") .. " the selection"
+				elseif S.sel[t.id] or S.nodes[t.id] then
+					g.left = "keep " .. name .. " selected" ..
+							(edit and "; drag: move the selection" or "")
+				else
+					g.left = "select " .. name .. (edit and "; drag: move it" or "")
+				end
+				if t.kind == "node" and edit then
+					g.left = g.left .. " (onto another node: merge them)"
+				end
+			else
+				g.left = (next(S.sel) or next(S.nodes)) and
+						"clear the selection; drag: select by a box" or
+						"drag: select by a box"
+			end
+		elseif tool == "wall" or tool == "room" then
+			local from = tool == "wall" and S.draw or
+					(S.corners and S.corners[#S.corners])
+			local x, z, ref = snapped_point(from)
+			if x and edit then
+				local at = ref.node and " at node " .. ref.node or ref.edge and
+						(ref.edge.wall and ", splitting wall " .. ref.edge.wall or
+						" on a room's edge") or ""
+				if ref.node then
+					hl({kind = "node", id = ref.node})
+				elseif ref.edge then
+					hl({kind = "edge", u = ref.edge.u, v = ref.edge.v})
+				end
+				if tool == "wall" then
+					g.left = (S.draw and "end the wall here" or "start a wall here") .. at
+				else
+					local first = S.corners and S.corners[1]
+					if first and #S.corners >= 3 and
+							geom.len(x - first.x, z - first.z) <= snap_radius() then
+						g.left = "close the room: " .. #S.corners .. " corners"
+					else
+						g.left = "corner " .. ((S.corners and #S.corners or 0) + 1) ..
+								" here" .. at
+					end
+				end
+				if from then
+					g.right = "stop drawing"
+					g.note = "Type a length and Enter to draw it that long"
+				end
+			end
+		elseif tool == "box" then
+			local x, z = snapped_point(nil)
+			if x and edit then
+				hl({kind = "point", x = x, z = z})
+				g.left = "put a box here, " .. S.box.w .. " x " .. S.box.d ..
+						" mm, of " .. mat_text(cur) .. "; drag: draw its footprint"
+			end
+		elseif tool == "hosted" then
+			local s = pick_surface()
+			local f = s and s.kind == "wall" and wall_frame(s.id)
+			if f and edit then
+				local d = HOSTED[S.hosted]
+				local along = geom.snap((s.x - f.ax) * f.ux + (s.z - f.az) * f.uz,
+						grid_step())
+				along = math.max(d.w / 2, math.min(f.len - d.w / 2, along))
+				hl({kind = "wall", id = s.id})
+				hl({kind = "opening", frame = f, along = along, w = d.w,
+						sill = d.sill, h = d.h})
+				g.left = "put " .. KIND_NAMES[S.hosted]:lower() .. " into wall " ..
+						s.id .. ", " .. math.floor(along + 0.5) .. " mm along it"
+			end
+		elseif tool == "voxel" then
+			local id = voxel_target()
+			if not edit then
+			elseif not id then
+				local x, z = snapped_point(nil)
+				if x then
+					hl({kind = "point", x = x, z = z})
+					local what = "start a voxel volume here, of " .. mat_text(cur)
+					if S.captured then
+						g.right = what
+					else
+						g.left = what
+					end
+				end
+			elseif S.view == "2d" then
+				local cx, cz, top = voxel_column(id)
+				if cx then
+					local y = top and top + 1 or 0
+					hl({kind = "cell", id = id, c = {cx, y, cz}, col = PLACE})
+					g.left = "a voxel of " .. mat_text(cur) .. " on the column, layer " .. y
+					if top then
+						g.left = g.left .. "; Ctrl+Left: take the top one (" ..
+								mat_text(cell_of(id, {cx, top, cz})) .. ") off"
+					end
+				end
+			else
+				local hit, place = voxel_ray(id)
+				if hit then
+					hl({kind = "cell", id = id, c = hit, col = DIG})
+					g.left = "dig this voxel (" .. mat_text(cell_of(id, hit)) .. ")"
+				end
+				if place and math.max(math.abs(place[1] + 0.5), math.abs(place[2] +
+						0.5), math.abs(place[3] + 0.5)) < 128 then
+					hl({kind = "cell", id = id, c = place, col = PLACE})
+					g.right = "place a voxel of " .. mat_text(cur) .. " here"
+				end
+			end
+		elseif tool == "paint" then
+			local s = pick_surface()
+			if s and edit then
+				local old
+				if s.kind == "instance" and inst_data[s.id].voxel then
+					local hit = voxel_ray(s.id)
+					if hit then
+						hl({kind = "cell", id = s.id, c = hit})
+						g.left = "make this voxel " .. mat_text(cur) .. " (now " ..
+								mat_text(cell_of(s.id, hit)) .. ")"
+					end
+				elseif s.kind == "instance" then
+					hl({kind = "instance", id = s.id})
+					old = doc.ents[doc.ents[s.id].ints.def].ints.mat
+					g.left = "make " .. name_of(s.id) .. " " .. mat_text(cur) ..
+							" (now " .. mat_text(old) .. ")"
+				elseif s.kind == "wall" then
+					local w = doc.ents[s.id].ints
+					hl({kind = "face", id = s.id, side = s.side})
+					old = s.side == "left" and w.mat_left or s.side == "right" and
+							w.mat_right or (w.mat_core ~= 0 and w.mat_core or w.mat_left)
+					g.left = "make wall " .. s.id .. "'s " .. (s.side == "core" and
+							"top and ends" or s.side .. " face") .. " " .. mat_text(cur) ..
+							" (now " .. mat_text(old) .. ")"
+				elseif s.kind == "floor" or s.kind == "ceiling" then
+					local r = doc.ents[s.id]
+					hl({kind = s.kind, id = s.id})
+					old = s.kind == "floor" and r.ints.mat_floor or r.ints.mat_ceiling
+					g.left = "make " .. name_of(s.id) .. "'s " .. s.kind .. " " ..
+							mat_text(cur) .. " (now " .. mat_text(old) .. ")"
+				end
+			end
+		end
+		return g
+	end
+
+	guide_text = function(g)
+		if not g then
+			return ""
+		end
+		local lines = {}
+		for _, b in ipairs({{"left", "Left"}, {"right", "Right"},
+				{"middle", "Middle"}, {"use", "E"}}) do
+			if g[b[1]] then
+				lines[#lines + 1] = b[2] .. ": " .. g[b[1]]
+			end
+		end
+		if g.note then
+			lines[#lines + 1] = g.note
+		end
+		return table.concat(lines, "\n")
+	end
+
+	-- A cell of a volume as its 12 edges
+	local function cell_box(id, c, col)
+		local it = inst_data[id]
+		if not it then
+			return
+		end
+		local sz = it.size
+		local function corner(dx, dy, dz)
+			local x, y, z = geom.rot((c[1] + dx) * sz, (c[2] + dy) * sz,
+					(c[3] + dz) * sz, it.pitch, it.yaw, it.roll)
+			return magic.Vector3(W(it.ox + x), W(it.oy + y), W(it.oz + z))
+		end
+		for _, e in ipairs({{0,0,0, 1,0,0}, {0,0,0, 0,1,0}, {0,0,0, 0,0,1},
+				{1,1,1, 0,1,1}, {1,1,1, 1,0,1}, {1,1,1, 1,1,0},
+				{1,0,0, 1,1,0}, {1,0,0, 1,0,1}, {0,1,0, 1,1,0},
+				{0,1,0, 0,1,1}, {0,0,1, 1,0,1}, {0,0,1, 0,1,1}}) do
+			debug:AddLine(corner(e[1], e[2], e[3]), corner(e[4], e[5], e[6]),
+					col, false)
+		end
+	end
+
+	-- An instance's box as its 12 edges
+	local function inst_box(id, col)
+		local it = inst_data[id]
+		local function corner(sx, sy, sz)
+			local x, y, z = geom.rot(sx * it.hx, sy * it.hy, sz * it.hz, it.pitch,
+					it.yaw, it.roll)
+			return magic.Vector3(W(it.x + x), W(it.y + y), W(it.z + z))
+		end
+		for _, e in ipairs({{-1,-1,-1, 1,-1,-1}, {-1,-1,-1, -1,1,-1},
+				{-1,-1,-1, -1,-1,1}, {1,1,1, -1,1,1}, {1,1,1, 1,-1,1},
+				{1,1,1, 1,1,-1}, {1,-1,-1, 1,1,-1}, {1,-1,-1, 1,-1,1},
+				{-1,1,-1, 1,1,-1}, {-1,1,-1, -1,1,1}, {-1,-1,1, 1,-1,1},
+				{-1,-1,1, -1,1,1}}) do
+			debug:AddLine(corner(e[1], e[2], e[3]), corner(e[4], e[5], e[6]),
+					col, false)
+		end
+	end
+
+	draw_guide = function(g, P, line, outline)
+		if not g then
+			return
+		end
+		local plan = S.view == "2d"
+		for _, h in ipairs(g.hl) do
+			local col = h.col or HOVER
+			if h.kind == "point" then
+				debug:AddCross(P(h.x, h.z), plan and W(12 * mm_per_px()) or 0.15,
+						col, false)
+			elseif h.kind == "node" then
+				local x, z = node_pos(h.id)
+				debug:AddCross(P(x, z), plan and W(16 * mm_per_px()) or 0.25, col,
+						false)
+			elseif h.kind == "edge" then
+				local ux, uz = node_pos(h.u)
+				local vx, vz = node_pos(h.v)
+				line(ux, uz, vx, vz, col)
+			elseif h.kind == "wall" and outlines[h.id] then
+				local y0, y1 = wall_span(doc.ents[h.id].ints)
+				outline(outlines[h.id].pts, col, not plan and
+						{W(y0) + 0.004, W(y1) + 0.004} or nil)
+			elseif h.kind == "face" and outlines[h.id] then
+				local o = outlines[h.id]
+				local y0, y1 = wall_span(doc.ents[h.id].ints)
+				for i = 1, #o.pts do
+					if o.sides[i] == h.side then
+						local p, q = o.pts[i], o.pts[i % #o.pts + 1]
+						if plan then
+							line(p[1], p[2], q[1], q[2], col)
+						else
+							for _, yy in ipairs({y0, y1}) do
+								debug:AddLine(magic.Vector3(W(p[1]), W(yy), W(p[2])),
+										magic.Vector3(W(q[1]), W(yy), W(q[2])), col, false)
+							end
+							for _, c in ipairs({p, q}) do
+								debug:AddLine(magic.Vector3(W(c[1]), W(y0), W(c[2])),
+										magic.Vector3(W(c[1]), W(y1), W(c[2])), col, false)
+							end
+						end
+					end
+				end
+				if h.side == "core" then
+					outline(o.pts, col, not plan and {W(y1) + 0.004} or nil)
+				end
+			elseif (h.kind == "floor" or h.kind == "room") and room_data[h.id] then
+				outline(room_data[h.id].pts, col, not plan and {0.006} or nil)
+			elseif h.kind == "ceiling" and room_data[h.id] then
+				outline(room_data[h.id].pts, col,
+						{W(room_ceiling(doc.ents[h.id])) - 0.004})
+			elseif h.kind == "instance" and inst_data[h.id] then
+				if plan then
+					outline(inst_data[h.id].foot, col)
+				else
+					inst_box(h.id, col)
+				end
+			elseif h.kind == "image" and image_data[h.id] then
+				outline(image_data[h.id].foot, col)
+			elseif h.kind == "cell" then
+				cell_box(h.id, h.c, col)
+			elseif h.kind == "opening" then
+				-- Where the door or window would go, on the wall's left face
+				local f = h.frame
+				local function at(a, y)
+					return magic.Vector3(W(f.ax + f.ux * (h.along + a) + f.nx * f.lo),
+							W(y), W(f.az + f.uz * (h.along + a) + f.nz * f.lo))
+				end
+				if plan then
+					local pts = {}
+					for k, c in ipairs({{-1, f.lo}, {1, f.lo}, {1, -f.ro}, {-1, -f.ro}}) do
+						pts[k] = {f.ax + f.ux * (h.along + c[1] * h.w / 2) + f.nx * c[2],
+								f.az + f.uz * (h.along + c[1] * h.w / 2) + f.nz * c[2]}
+					end
+					outline(pts, PLACE)
+				else
+					local a, b = -h.w / 2, h.w / 2
+					local y0, y1 = h.sill, h.sill + h.h
+					debug:AddLine(at(a, y0), at(b, y0), PLACE, false)
+					debug:AddLine(at(b, y0), at(b, y1), PLACE, false)
+					debug:AddLine(at(b, y1), at(a, y1), PLACE, false)
+					debug:AddLine(at(a, y1), at(a, y0), PLACE, false)
+				end
 			end
 		end
 	end
@@ -4108,30 +4671,9 @@ local function draw_overlay()
 			end
 		end
 	end
-	-- The voxel tool's crosshair and the cell it points at
+	-- The voxel tool's and walking's crosshair, and what the pointer is on
 	crosshair.visible = S.captured or false
-	if S.captured and voxel_target() then
-		local id = voxel_target()
-		local it = inst_data[id]
-		local hit, place = voxel_ray(id)
-		local c = hit or place
-		if c then
-			local sz = it.size
-			local function corner(dx, dy, dz)
-				local x, y, z = geom.rot((c[1] + dx) * sz, (c[2] + dy) * sz,
-						(c[3] + dz) * sz, it.pitch, it.yaw, it.roll)
-				return magic.Vector3(W(it.ox + x), W(it.oy + y), W(it.oz + z))
-			end
-			local col = hit and magic.Color(1, 0.3, 0.2) or magic.Color(0.2, 1, 0.3)
-			for _, e in ipairs({{0,0,0, 1,0,0}, {0,0,0, 0,1,0}, {0,0,0, 0,0,1},
-					{1,1,1, 0,1,1}, {1,1,1, 1,0,1}, {1,1,1, 1,1,0},
-					{1,0,0, 1,1,0}, {1,0,0, 1,0,1}, {0,1,0, 1,1,0},
-					{0,1,0, 0,1,1}, {0,0,1, 1,0,1}, {0,0,1, 0,1,1}}) do
-				debug:AddLine(corner(e[1], e[2], e[3]), corner(e[4], e[5], e[6]),
-						col, false)
-			end
-		end
-	end
+	draw_guide(S.guide, P, line, outline)
 	-- The others: their cursors, their cameras, what they have selected
 	for _, o in pairs(doc.others) do
 		local p = o.p
@@ -4305,6 +4847,11 @@ function M.update(dt)
 		refresh_panels()
 	end
 	label_i = 0
+	S.guide = compute_guide()
+	local text = S.exporting and "" or guide_text(S.guide)
+	if hud.text ~= text then
+		hud:SetText(text)
+	end
 	draw_overlay()
 	for i = label_i + 1, #label_nodes do
 		label_nodes[i].visible = false
