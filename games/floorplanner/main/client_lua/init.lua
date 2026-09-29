@@ -708,16 +708,20 @@ local function show_login(error_text, is_local)
 		-- server's log; while registration is closed a new account needs an
 		-- invite
 		if hello.setup == 1 then
-			label("Setup code (the plan has no admin: see the server's log)")
+			label("Setup code (see the server's log)")
 			code = field("", false)
 		elseif hello.open_registration ~= 1 then
 			label("Invite code (only for a new account)")
 			code = field("", false)
 		end
-		-- simplified: the connection is not encrypted yet ([TRANSPORT])
-		local warn = label("The password is sent unencrypted: use a trusted " ..
-				"network")
-		warn:SetColor(magic.Color(1.0, 0.8, 0.4))
+		-- simplified: a native client's connection is not encrypted yet
+		-- ([TRANSPORT]); a web client on an https page has TLS, and its
+		-- page says so
+		if buildat.get_env("BUILDAT_PAGE_HTTPS") ~= "1" then
+			local warn = label("The password is sent unencrypted: use a " ..
+					"trusted network")
+			warn:SetColor(magic.Color(1.0, 0.8, 0.4))
+		end
 	end
 	if error_text then
 		local e = label(error_text)

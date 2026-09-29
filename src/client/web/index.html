@@ -43,6 +43,9 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none; }
 		preRun: [function(){
 			FS.mkdir('/buildat/cache');
 			FS.mkdir('/buildat/user');
+			// Whether the page, and so its WebSocket, is TLS: what a game
+			// tells its user about a password it sends ([FP_ACCESS])
+			Module.ENV.BUILDAT_PAGE_HTTPS = https ? '1' : '0';
 		}],
 		print: function(t){ console.log(t); },
 		printErr: function(t){ console.warn(t); },

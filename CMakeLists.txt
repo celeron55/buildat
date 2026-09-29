@@ -534,7 +534,7 @@ if(BUILD_CLIENT)
 			# Function names in the stack of a crash
 			--profiling-funcs
 			-sDISABLE_DEPRECATED_FIND_EVENT_TARGET_BEHAVIOR=0
-			"-sEXPORTED_RUNTIME_METHODS=['FS','callMain']"
+			"-sEXPORTED_RUNTIME_METHODS=['FS','ENV','callMain']"
 			"SHELL:--exclude-file *.swp"
 		)
 		# SHELL: keeps each pair whole; CMake would merge the repeated flags
