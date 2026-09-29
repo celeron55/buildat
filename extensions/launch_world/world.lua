@@ -3174,6 +3174,20 @@ local SAVE_NAME = "room.txt"
 -- survive a game being installed.
 moved = {}
 
+-- **What the player pinned** ([LAUNCH_WORLD] section 14: the room's save
+-- holds the bookmarks row, and pinning is the player's only organising).
+-- A set for "is this pinned" and a list for the order they were pinned
+-- in, because the row reads left to right and a set has no order.
+-- Globals rather than locals: this chunk is near Lua 5.1's two hundred
+-- and the file says so in several places already.
+--
+-- **A row a bookmark**, `!bookmark <key>`, rather than one line with all
+-- of them on it: a launch key is `<from>/<id>` and an id is whatever a
+-- launcher file called it, so a separator would need escaping and a row
+-- that reads to the end of the line does not.
+bookmarks = {}
+bookmark_order = {}
+
 -- The player's own voxels and moved spheres, read at boot. One row a
 -- line, which is a file a person can read and delete.
 do
@@ -3202,6 +3216,13 @@ do
 					saved_sound = {tonumber(a), tonumber(b)}
 					n = n + 1
 				end
+			elseif line:match("^!bookmark ") then
+				local key = line:match("^!bookmark (.+)$")
+				if key and not bookmarks[key] then
+					bookmarks[key] = true
+					bookmark_order[#bookmark_order + 1] = key
+					n = n + 1
+				end
 			elseif line:match("^!fov %d+$") then
 				-- The room's own setting, kept where its voxels are
 				fov = tonumber(line:match("(%d+)"))
@@ -3226,7 +3247,8 @@ do
 				end
 			end
 		end
-		log:info("save: " .. n .. " rows read, " .. put ..
+		log:info("save: " .. n .. " rows read, " ..
+				#bookmark_order .. " of them bookmarks, " .. put ..
 				" spheres put back where the player left them")
 	end
 end
@@ -3252,6 +3274,11 @@ local function write_save()
 		local m = moved[name]
 		keys[#keys + 1] = string.format("@%s %.3f %.3f %.3f", name,
 				m.x, m.y, m.z)
+	end
+	for _, key in ipairs(bookmark_order) do
+		if bookmarks[key] then
+			keys[#keys + 1] = "!bookmark " .. key
+		end
 	end
 	keys[#keys + 1] = string.format("!fov %d", fov)
 	keys[#keys + 1] = string.format("!sound %.2f %.2f", levels.orbs,
@@ -5707,6 +5734,34 @@ function handle_keydown(event_type, event_data)
 		-- showing itself off
 		drop_hint()
 		log:info("attract: the room is showing itself off")
+		return
+	end
+	-- **B pins what is pointed at** ([LAUNCH_WORLD] section 14: the
+	-- player's only organising). A toggle, so the same key takes it
+	-- back; written through at once rather than on a timer, a pin being
+	-- a rare thing the player will expect to survive a crash.
+	if key == magic.KEY_B and pointed_orb > 0 and ORBS[pointed_orb] then
+		local o = ORBS[pointed_orb]
+		if o.key then
+			if bookmarks[o.key] then
+				bookmarks[o.key] = nil
+				for i, k in ipairs(bookmark_order) do
+					if k == o.key then
+						table.remove(bookmark_order, i)
+						break
+					end
+				end
+				notice(o.name .. " unpinned")
+			else
+				bookmarks[o.key] = true
+				bookmark_order[#bookmark_order + 1] = o.key
+				notice(o.name .. " pinned")
+			end
+			log:info("bookmarks: " .. #bookmark_order .. " pinned (" ..
+					tostring(o.name) .. " " ..
+					(bookmarks[o.key] and "in" or "out") .. ")")
+			write_save()
+		end
 		return
 	end
 	idle_quiet = 0
