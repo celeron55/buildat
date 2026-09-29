@@ -113,7 +113,7 @@ struct TypeSchema {
 
 // What a definition is. A voxel volume comes with [FP_VOXELS].
 enum DefKind { DK_BOX, DK_VOXEL, DK_OPENING, DK_DOOR, DK_WINDOW, DK_SWITCH,
-	DK_COUNT };
+	DK_STAIRS, DK_COUNT };
 
 // Material types, as the palette's `kind` field holds them. The shader and
 // the client's palette editor use the same numbers.
@@ -186,6 +186,9 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"trim_depth", 0, 200, 15},
 		{"leaf", 0, 1, 0},       // door: single, double; window: fixed, casement
 		{"voxel_size", 1, 1000, 50}, // a voxel volume's, mm
+		// Stairs: w wide, rising h over their depth d along +Z in this
+		// many equal steps
+		{"steps", 1, 200, 15},
 		{"mat", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 		{"mat_leaf", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 		{"mat_glass", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},

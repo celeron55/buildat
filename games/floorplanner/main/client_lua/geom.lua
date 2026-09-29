@@ -414,6 +414,18 @@ function M.walk(list, x, z, feet, r, step, head)
 	return x, z, ground
 end
 
+-- Stairs w wide, rising h over their depth d along +Z in n steps, as one
+-- box a step, solid down to the bottom, about the stairs' middle:
+-- {{x0, y0, z0, x1, y1, z1}, ...}
+function M.stair_steps(w, h, d, n)
+	local out = {}
+	for k = 0, n - 1 do
+		out[#out + 1] = {-w / 2, -h / 2, -d / 2 + k * d / n,
+				w / 2, -h / 2 + (k + 1) * h / n, -d / 2 + (k + 1) * d / n}
+	end
+	return out
+end
+
 --
 -- Self-checks
 --
@@ -540,6 +552,20 @@ do
 	end
 	near(feet, 0, "a 400 mm step")
 	near(z, 750, "a 400 mm step stops the body")
+
+	-- Parametric stairs, 3000 mm up in 15 steps over 3750 mm, their middle
+	-- 2000 mm ahead: walked up onto the landing past them
+	list = {}
+	for _, b in ipairs(M.stair_steps(1000, 3000, 3750, 15)) do
+		cell(b[1], b[3] + 2000, b[4], b[6] + 2000, b[2] + 1500, b[5] + 1500)
+	end
+	near(list[15].y1, 3000, "the top step")
+	cell(-500, 3875, 500, 6000, 3000, 3000, true)
+	x, z, feet = 0, -500, 0
+	for _ = 1, 300 do
+		x, z, feet = M.walk(list, x, z + 20, feet, 250, 250, 1750)
+	end
+	near(feet, 3000, "walked up the parametric stairs")
 end
 
 return M

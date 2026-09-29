@@ -43,11 +43,11 @@ local TOOL_KEYS = {select = "V", node = "N", wall = "B", room = "R",
 	box = "O", hosted = "I", voxel = "K", paint = "M"}
 -- What a definition is, as main.cpp's DefKind
 local KIND = {box = 0, voxel = 1, opening = 2, door = 3, window = 4,
-	switch = 5}
+	switch = 5, stairs = 6}
 -- A door's or a window's parts, by the field each keeps its material in
 local DOOR_PARTS = {mat = true, mat_leaf = true, mat_glass = true}
 local KIND_NAMES = {[0] = "Box", [2] = "Opening", [3] = "Door",
-	[4] = "Window", [5] = "Switch"}
+	[4] = "Window", [5] = "Switch", [6] = "Stairs"}
 -- I goes round what the door/window tool puts in
 local NEXT_HOSTED = {[2] = 3, [3] = 4, [4] = 5, [5] = 2}
 -- A new opening, door and window
@@ -74,6 +74,10 @@ local S = {
 	room_walls = true, -- a room drawn gets walls on its edges
 	-- New boxes
 	box = {w = 600, h = 750, d = 600, align = 0, offset = 0},
+	-- The object tool's other shape: stairs this wide, up this high (0: the
+	-- plan's floor to floor) in risers of about this much, each this deep
+	shape = "box",
+	stairs = {w = 1000, h = 0, riser = 200, tread = 250},
 	hosted = 3,     -- what the door/window tool puts in a wall
 	voxel_size = 50, -- a new voxel volume's, mm
 	-- Doors and windows a viewer has opened, and lamps they have switched,
@@ -1556,6 +1560,37 @@ local function build_layout(seen_voxels)
 			commit(g, lit_material)
 			cap(it.foot, it.y0, it.y1, rgb_color(rgb, 0.7), rgb_color(rgb, 0.9))
 			solids[#solids + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
+		elseif def.kind == KIND.stairs then
+			-- A box a step, and a solid a step to walk up
+			local g, node = geometry(e.align == 1 and P.overhead or P.walls)
+			node.position = magic.Vector3(W(it.x), W(it.y), W(it.z))
+			node.rotation = magic.Quaternion(it.pitch, it.yaw, it.roll)
+			local rgb = palette_rgb(def.mat)
+			local flat = it.pitch % 360 == 0 and it.roll % 360 == 0
+			for _, b in ipairs(geom.stair_steps(def.w, def.h, def.d, def.steps)) do
+				box_geometry(g, W(b[4] - b[1]) / 2, W(b[5] - b[2]) / 2,
+						W(b[6] - b[3]) / 2, row(def.mat), W(b[1] + b[4]) / 2,
+						W(b[2] + b[5]) / 2, W(b[3] + b[6]) / 2)
+				-- simplified: stairs pitched or rolled are walked as their box
+				if flat then
+					local pts = {}
+					for k, c in ipairs({{b[1], b[3]}, {b[4], b[3]}, {b[4], b[6]},
+							{b[1], b[6]}}) do
+						local px, _, pz = geom.rot(c[1], 0, c[2], 0, it.yaw, 0)
+						pts[k] = {it.x + px, it.z + pz}
+					end
+					if not geom.is_ccw(pts) then
+						pts = {pts[4], pts[3], pts[2], pts[1]}
+					end
+					solids[#solids + 1] = {pts = pts, y0 = it.y + b[2],
+							y1 = it.y + b[5]}
+				end
+			end
+			commit(g, lit_material)
+			cap(it.foot, it.y0, it.y1, rgb_color(rgb, 0.7), rgb_color(rgb, 0.9))
+			if not flat then
+				solids[#solids + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
+			end
 		end
 	end
 	-- A floor is something to stand on, when walking up to another layout
@@ -2304,13 +2339,22 @@ do
 		send(finish_batch(b), select_placed(ph, "room"))
 	end
 
-	-- A box drawn: a definition of that size and an instance of it
+	-- A box drawn: a definition of that size and an instance of it. Stairs
+	-- the same, given their depth or taking it from their steps (d nil).
 	add_box = function(x, z, w, d)
 		local def = doc.placeholder()
 		local inst = doc.placeholder()
+		local ints = {kind = KIND.box, w = w, h = S.box.h, d = d,
+				mat = default_material()}
+		if S.shape == "stairs" then
+			local st = S.stairs
+			local h = st.h > 0 and st.h or settings().floor_step
+			local n = math.max(1, math.min(200, math.floor(h / st.riser + 0.5)))
+			ints.kind, ints.h, ints.steps = KIND.stairs, h, n
+			ints.d = d or n * st.tread
+		end
 		send({
-			{op = "create", ent = {id = def, type = "definition", ints = {kind = 0,
-					w = w, h = S.box.h, d = d, mat = default_material()}}},
+			{op = "create", ent = {id = def, type = "definition", ints = ints}},
 			{op = "create", ent = {id = inst, type = "instance",
 					ints = {def = def, x = math.floor(x + 0.5),
 					z = math.floor(z + 0.5), align = S.box.align,
@@ -2891,7 +2935,7 @@ local function build_toolbar()
 		refresh_panels()
 	end, S.layouts_open)
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
-			{"wall", "Wall"}, {"room", "Room"}, {"box", "Box"},
+			{"wall", "Wall"}, {"room", "Room"}, {"box", "Object"},
 			{"hosted", "Door/window"}, {"voxel", "Voxels"}, {"paint", "Material"}}) do
 		panel.button(toolbar, t[2] .. " (" .. TOOL_KEYS[t[1]] .. ")",
 				function() set_tool(t[1]) end, S.tool == t[1])
@@ -3107,11 +3151,32 @@ local function build_props()
 		local def = doc.ents[i.def]
 		local p = def.ints
 		local links = instances_of(i.def)
-		panel.label(props, "Box " .. sel.id .. (links > 1 and
+		panel.label(props, KIND_NAMES[p.kind] .. " " .. sel.id .. (links > 1 and
 				("   linked x" .. links) or ""))
 		int_field(i.def, "Width mm", "w", p.w)
 		int_field(i.def, "Height mm", "h", p.h)
 		int_field(i.def, "Depth mm", "d", p.d)
+		if p.kind == KIND.stairs then
+			-- The riser sets the steps, the height staying; the tread sets
+			-- the depth
+			int_field(i.def, "Steps", "steps", p.steps)
+			panel.field(props, "Riser mm", math.floor(p.h / p.steps * 10 + 0.5) / 10,
+					function(t)
+				local v = tonumber(t)
+				if v and v > 0 then
+					set(i.def, {ints = {steps = math.max(1, math.min(200,
+							math.floor(p.h / v + 0.5)))}})
+				end
+			end)
+			panel.field(props, "Tread mm", math.floor(p.d / p.steps * 10 + 0.5) / 10,
+					function(t)
+				local v = tonumber(t)
+				if v and v > 0 then
+					set(i.def, {ints = {d = math.floor(v * p.steps + 0.5)}})
+				end
+			end)
+			panel.label(props, "Up along its depth (yaw turns it)")
+		end
 		int_field(sel.id, "X mm", "x", i.x)
 		int_field(sel.id, "Z mm", "z", i.z)
 		panel.field(props, "Yaw deg", i.yaw / 1000, function(t)
@@ -3286,9 +3351,31 @@ local function build_props()
 		end)
 		panel.label(props, "3D: the mouse turns the view, Esc lets go")
 	elseif S.tool == "box" then
-		panel.label(props, "New boxes: drag the footprint")
-		for _, f in ipairs({{"Width mm", "w"}, {"Height mm", "h"},
-				{"Depth mm", "d"}, {"Offset mm", "offset"}}) do
+		local stairs = S.shape == "stairs"
+		panel.button(props, stairs and "Shape: stairs" or "Shape: box", function()
+			S.shape = stairs and "box" or "stairs"
+			refresh_panels()
+		end)
+		panel.label(props, stairs and "New stairs: click, or drag the footprint"
+				or "New boxes: drag the footprint")
+		if stairs then
+			local st = S.stairs
+			for _, f in ipairs({{"Width mm", "w"}, {"Height mm (0: a floor)", "h"},
+					{"Riser mm", "riser"}, {"Tread mm", "tread"}}) do
+				panel.field(props, f[1], st[f[2]], function(t)
+					local v = num(t)
+					if v and (v > 0 or f[2] == "h" and v == 0) then st[f[2]] = v end
+				end)
+			end
+			local h = st.h > 0 and st.h or settings().floor_step
+			local n = math.max(1, math.floor(h / st.riser + 0.5))
+			panel.label(props, n .. " steps of " ..
+					math.floor(h / n * 10 + 0.5) / 10 .. " mm, " ..
+					n * st.tread .. " mm deep")
+		end
+		for _, f in ipairs(stairs and {{"Offset mm", "offset"}} or
+				{{"Width mm", "w"}, {"Height mm", "h"}, {"Depth mm", "d"},
+				{"Offset mm", "offset"}}) do
 			panel.field(props, f[1], S.box[f[2]], function(t)
 				local v = num(t)
 				if v and (v > 0 or f[2] == "offset") then S.box[f[2]] = v end
@@ -4575,7 +4662,11 @@ do
 			end
 			local x, z = snapped_point(nil)
 			if x then
-				add_box(x, z, S.box.w, S.box.d)
+				if S.shape == "stairs" then
+					add_box(x, z, S.stairs.w, nil)
+				else
+					add_box(x, z, S.box.w, S.box.d)
+				end
 			end
 		elseif S.tool == "hosted" then
 			local s = pick_surface()
@@ -5574,7 +5665,10 @@ do
 			local x, z = snapped_point(nil)
 			if x and edit then
 				hl({kind = "point", x = x, z = z})
-				g.left = "put a box here, " .. S.box.w .. " x " .. S.box.d ..
+				g.left = S.shape == "stairs" and "put stairs here, " ..
+						S.stairs.w .. " mm wide, of " .. mat_text(cur) ..
+						"; drag: draw their footprint" or
+						"put a box here, " .. S.box.w .. " x " .. S.box.d ..
 						" mm, of " .. mat_text(cur) .. "; drag: draw its footprint"
 			end
 		elseif tool == "hosted" then
