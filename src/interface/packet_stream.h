@@ -120,6 +120,17 @@ namespace interface
 		void output(const ss_ &name, const ss_ &data,
 				std::function<void(const ss_&packet_data, bool droppable)> cb,
 				bool droppable = true);
+
+		// Only the definition of a type, sent now rather than before its
+		// first packet: the native client says this first on connecting,
+		// which tells the server's network module that it is not a
+		// browser without the quiet wait ([WEB_CLIENT]).
+		void define(const ss_ &name,
+				std::function<void(const ss_&packet_data, bool droppable)> cb);
+
+	private:
+		void send_new_types(
+				std::function<void(const ss_&packet_data, bool droppable)> cb);
 	};
 }
 // vim: set noet ts=4 sw=4:

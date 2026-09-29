@@ -263,6 +263,16 @@ struct CState: public State
 			log_i(MODULE, "client::State: Connect succeeded (%s:%s)",
 					cs(address), cs(port));
 			m_connected = true;
+			// Speak first, so that the server's network module knows this
+			// for a native client at once instead of after its quiet wait
+			// for a browser's request ([WEB_CLIENT]). The definition of the
+			// client's first packet is what it would send anyway. On the
+			// connect worker this is safe for the reason m_socket is: the
+			// main thread keeps off until the result is stored.
+			m_packet_stream.define("core:request_files",
+					[&](const ss_ &packet_data, bool droppable){
+				m_socket->send_fd(packet_data);
+			});
 		} else {
 			log_i(MODULE, "client::State: Connect failed (%s:%s)",
 					cs(address), cs(port));

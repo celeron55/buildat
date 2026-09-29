@@ -11,9 +11,12 @@
 #include "interface/thread.h"
 #include "interface/os.h"
 #include "interface/select_handler.h"
+#include "interface/sha1.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <deque>
 #include <set>
+#include <fstream>
+#include <algorithm>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/tuple.hpp>
 #include <deque>
@@ -53,6 +56,25 @@ struct Peer
 	sp_<interface::TCPSocket> socket;
 	std::deque<char> socket_buffer;
 	interface::PacketStream packet_stream;
+
+	// One port takes the native client, a browser fetching the web client
+	// and the web client's WebSocket ([WEB_CLIENT]). A new connection is
+	// Sniff until its first bytes say which; only Native and WebSocket are
+	// game peers, and the game hears of a peer when it becomes one.
+	enum class Kind { Sniff, Http, Native, WebSocket };
+	Kind kind = Kind::Native;
+	int64_t accepted_us = 0;
+	// Sniff and Http: what has come of the request so far
+	ss_ http_request;
+	// WebSocket: what has come and is not a whole frame yet
+	ss_ ws_in;
+	// Dropped once what is queued has gone: an HTTP response, or the
+	// answer to a WebSocket close
+	bool closing = false;
+
+	bool game() const {
+		return kind == Kind::Native || kind == Kind::WebSocket;
+	}
 
 	// What has been handed to this peer and has not gone down the socket
 	// yet, because the socket does not block any more: a peer that is not
@@ -157,10 +179,99 @@ struct Peer
 		out_queued_bytes += packet.size();
 	}
 
+	// Bytes that go as they are, ahead of nothing and behind what is queued:
+	// an HTTP response, a WebSocket control frame
+	void queue_raw(ss_ &&data)
+	{
+		out_queued_bytes += data.size();
+		out_queue.push_back(Queued{ss_(), std::move(data), false});
+	}
+
 	Peer(){}
 	Peer(Id id, sp_<interface::TCPSocket> socket):
 		id(id), socket(socket){}
 };
+
+// The server half of RFC 6455 and the little of HTTP that serves the web
+// client ([WEB_CLIENT])
+namespace web {
+
+// A browser sends its request as soon as it has connected, and a native
+// client sends a packet type definition as soon as it has connected, so
+// either is known by its first bytes. A connection that is quiet this long
+// is taken for a native client that does not speak first (one older than
+// [WEB_CLIENT]).
+// simplified: a browser's speculative preconnect that stays quiet longer is
+// taken for such a client and gets game bytes; its request later fails.
+static const int64_t SNIFF_US = 200000;
+static const size_t MAX_REQUEST_BYTES = 8 * 1024;
+// A request that does not arrive, or a response nobody reads
+static const int64_t HTTP_STALL_US = 10000000;
+static const size_t MAX_FRAME_BYTES = 16 * 1024 * 1024;
+
+static ss_ base64(const ss_ &data)
+{
+	static const char *t =
+			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	ss_ r;
+	for(size_t i = 0; i < data.size(); i += 3){
+		uint32_t v = (uint8_t)data[i] << 16;
+		if(i + 1 < data.size()) v |= (uint8_t)data[i + 1] << 8;
+		if(i + 2 < data.size()) v |= (uint8_t)data[i + 2];
+		r += t[(v >> 18) & 63];
+		r += t[(v >> 12) & 63];
+		r += i + 1 < data.size() ? t[(v >> 6) & 63] : '=';
+		r += i + 2 < data.size() ? t[v & 63] : '=';
+	}
+	return r;
+}
+
+static ss_ lower(ss_ s)
+{
+	for(char &c : s)
+		c = tolower((unsigned char)c);
+	return s;
+}
+
+static ss_ trim(const ss_ &s)
+{
+	size_t a = s.find_first_not_of(" \t");
+	if(a == ss_::npos)
+		return "";
+	return s.substr(a, s.find_last_not_of(" \t") - a + 1);
+}
+
+// A server's frame: never masked, always whole
+static ss_ frame(int opcode, const ss_ &payload)
+{
+	ss_ r;
+	r += (char)(0x80 | opcode);
+	const uint64_t n = payload.size();
+	if(n < 126){
+		r += (char)n;
+	} else if(n < 65536){
+		r += (char)126;
+		r += (char)(n >> 8);
+		r += (char)n;
+	} else {
+		r += (char)127;
+		for(int i = 7; i >= 0; i--)
+			r += (char)(n >> (i * 8));
+	}
+	return r + payload;
+}
+
+static ss_ response(const ss_ &status, const ss_ &content_type,
+		size_t content_length)
+{
+	return "HTTP/1.1 "+status+"\r\n"
+			"Content-Type: "+content_type+"\r\n"
+			"Content-Length: "+itos((int64_t)content_length)+"\r\n"
+			"Cache-Control: no-cache\r\n"
+			"Connection: close\r\n\r\n";
+}
+
+}
 
 struct Module: public interface::Module, public network::Interface
 {
@@ -253,12 +364,26 @@ struct Module: public interface::Module, public network::Interface
 		log_v(MODULE, "on_unload");
 		m_will_restore_after_unload = true;
 
+		// A connection that is not a game peer is not carried over: it has
+		// a request or a response half way, and the next module would not
+		// know. The browser asks again.
+		sv_<Peer::Id> not_game;
+		for(auto &pair : m_peers){
+			if(!pair.second.game())
+				not_game.push_back(pair.first);
+		}
+		for(Peer::Id id : not_game)
+			drop_peer(id);
+
 		int listening_fd = m_listening_socket->fd();
 		sv_<std::tuple<Peer::Id, int>> peer_restore_info;
+		sv_<Peer::Id> websocket_peers;
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
 			peer_restore_info.push_back(std::tuple<Peer::Id, int>(
 					peer.id, peer.socket->fd()));
+			if(peer.kind == Peer::Kind::WebSocket)
+				websocket_peers.push_back(peer.id);
 		}
 
 		std::ostringstream os(std::ios::binary);
@@ -266,6 +391,7 @@ struct Module: public interface::Module, public network::Interface
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(listening_fd);
 			ar(peer_restore_info);
+			ar(websocket_peers);
 		}
 		m_server->tmp_store_data("network:restore_info", os.str());
 	}
@@ -277,11 +403,17 @@ struct Module: public interface::Module, public network::Interface
 		// name, content, path
 		int listening_fd;
 		sv_<std::tuple<Peer::Id, int>> peer_restore_info;
+		sv_<Peer::Id> websocket_peers;
 		std::istringstream is(data, std::ios::binary);
 		{
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(listening_fd);
 			ar(peer_restore_info);
+			// Not there when the module that unloaded predates WebSockets
+			try {
+				ar(websocket_peers);
+			} catch(std::exception &e){
+			}
 		}
 
 		m_listening_socket.reset(interface::createTCPSocket(listening_fd));
@@ -293,6 +425,11 @@ struct Module: public interface::Module, public network::Interface
 			sp_<interface::TCPSocket> socket(interface::createTCPSocket(fd));
 			m_peers[peer_id] = Peer(peer_id, socket);
 			m_peers_by_socket[socket->fd()] = &m_peers[peer_id];
+			// simplified: a frame half received when the module unloaded is
+			// lost, the same as a native peer's half packet in socket_buffer
+			if(std::find(websocket_peers.begin(), websocket_peers.end(),
+					peer_id) != websocket_peers.end())
+				m_peers[peer_id].kind = Peer::Kind::WebSocket;
 		}
 	}
 
@@ -311,17 +448,248 @@ struct Module: public interface::Module, public network::Interface
 			log_w(MODULE, "Could not make peer socket non-blocking; a client "
 					"that stops reading will stall the server");
 		}
-		// Store socket
+		// Store socket. The game hears of it once sniff() knows what it is.
 		Peer::Id peer_id = m_next_peer_id++;
 		m_peers[peer_id] = Peer(peer_id, socket);
 		m_peers_by_socket[socket->fd()] = &m_peers[peer_id];
-		log_i(MODULE, "Client %zu from %s connected",
-				peer_id, cs(socket->get_remote_address()));
-		// Emit event
+		Peer &peer = m_peers[peer_id];
+		peer.kind = Peer::Kind::Sniff;
+		peer.accepted_us = interface::os::time_us();
+	}
+
+	void emit_connected(Peer &peer)
+	{
+		log_i(MODULE, "Client %zu from %s connected%s",
+				peer.id, cs(peer.socket->get_remote_address()),
+				peer.kind == Peer::Kind::WebSocket ? " (WebSocket)" : "");
 		PeerInfo pinfo;
-		pinfo.id = peer_id;
-		pinfo.address = socket->get_remote_address();
+		pinfo.id = peer.id;
+		pinfo.address = peer.socket->get_remote_address();
 		m_server->emit_event("network:client_connected", new NewClient(pinfo));
+	}
+
+	void become_native(Peer &peer)
+	{
+		peer.kind = Peer::Kind::Native;
+		peer.socket_buffer.insert(peer.socket_buffer.end(),
+				peer.http_request.begin(), peer.http_request.end());
+		peer.http_request.clear();
+		emit_connected(peer);
+		input_packets(peer);
+	}
+
+	// Whether the peer is to be kept. The native protocol's first bytes are
+	// a packet's type, and the first packet is core:define_packet_type,
+	// type 0: they never read as "GET " (which as a type is 0x4547).
+	bool sniff(Peer &peer)
+	{
+		static const ss_ get = "GET ";
+		const size_t n = std::min(peer.http_request.size(), get.size());
+		if(peer.http_request.compare(0, n, get, 0, n) != 0){
+			become_native(peer);
+			return true;
+		}
+		if(n < get.size())
+			return true;
+		peer.kind = Peer::Kind::Http;
+		return handle_http(peer);
+	}
+
+	// Whether the peer is to be kept
+	bool handle_http(Peer &peer)
+	{
+		const ss_ &req = peer.http_request;
+		const size_t end = req.find("\r\n\r\n");
+		if(end == ss_::npos)
+			return req.size() <= web::MAX_REQUEST_BYTES;
+		if(end + 4 > web::MAX_REQUEST_BYTES)
+			return false;
+		// "GET <target> HTTP/1.1", then "Name: value" lines
+		size_t eol = req.find("\r\n");
+		const ss_ line = req.substr(0, eol);
+		const size_t sp = line.find(' ', 4);
+		if(sp == ss_::npos || line.compare(sp, 6, " HTTP/") != 0)
+			return false;
+		ss_ target = line.substr(4, sp - 4);
+		target = target.substr(0, target.find('?'));
+		sm_<ss_, ss_> headers;
+		for(size_t at = eol + 2; at < end; at = eol + 2){
+			eol = req.find("\r\n", at);
+			const ss_ h = req.substr(at, eol - at);
+			const size_t colon = h.find(':');
+			if(colon == ss_::npos)
+				return false;
+			headers[web::lower(web::trim(h.substr(0, colon)))] =
+					web::trim(h.substr(colon + 1));
+		}
+		const ss_ rest = req.substr(end + 4);
+		peer.http_request.clear();
+
+		if(web::lower(headers["upgrade"]).find("websocket") != ss_::npos){
+			const ss_ &key = headers["sec-websocket-key"];
+			if(key.empty())
+				return false;
+			ss_ r = "HTTP/1.1 101 Switching Protocols\r\n"
+					"Upgrade: websocket\r\n"
+					"Connection: Upgrade\r\n"
+					"Sec-WebSocket-Accept: "+web::base64(interface::sha1::calculate(
+					key+"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))+"\r\n";
+			// Emscripten's socket emulation asks for it.
+			// simplified: a substring match on the offered list
+			if(web::lower(headers["sec-websocket-protocol"]).find("binary") !=
+					ss_::npos)
+				r += "Sec-WebSocket-Protocol: binary\r\n";
+			r += "\r\n";
+			// Ahead of anything the game sends, which only starts on the
+			// event below
+			peer.queue_raw(std::move(r));
+			peer.kind = Peer::Kind::WebSocket;
+			peer.ws_in = rest;
+			emit_connected(peer);
+			return deframe(peer);
+		}
+
+		// A closed list of names, and nothing else is looked at
+		static const sm_<ss_, std::pair<ss_, ss_>> files = {
+			{"/", {"index.html", "text/html; charset=utf-8"}},
+			{"/index.html", {"index.html", "text/html; charset=utf-8"}},
+			{"/buildat.js", {"buildat.js", "application/javascript"}},
+			{"/buildat.wasm", {"buildat.wasm", "application/wasm"}},
+			{"/buildat.data", {"buildat.data", "application/octet-stream"}},
+		};
+		peer.closing = true;
+		auto it = files.find(target);
+		if(it == files.end()){
+			ss_ body = "Not found\n";
+			peer.queue_raw(web::response("404 Not Found",
+					"text/plain; charset=utf-8", body.size()) + body);
+			return true;
+		}
+		const ss_ path = web_client_path()+"/"+it->second.first;
+		std::ifstream f(path, std::ios::binary);
+		ss_ body;
+		if(f.good()){
+			std::ostringstream os(std::ios::binary);
+			os<<f.rdbuf();
+			body = os.str();
+		}
+		if(!f.good() || body.empty()){
+			log_w(MODULE, "Web client file not found: %s", cs(path));
+			body = "The web client is not here: "+it->second.first+" is not "
+					"in the server's web_client_path.\n";
+			peer.queue_raw(web::response("404 Not Found",
+					"text/plain; charset=utf-8", body.size()) + body);
+			return true;
+		}
+		log_v(MODULE, "Peer %zu: serving %s (%zu bytes)", peer.id,
+				cs(path), body.size());
+		// It goes out through the peer's queue like anything else, as far as
+		// the socket takes it at a time.
+		// simplified: the whole file is read in memory, per download; tens
+		// of megabytes each. Reading it as the queue drains is the upgrade.
+		peer.queue_raw(web::response("200 OK", it->second.second,
+				body.size()));
+		peer.queue_raw(std::move(body));
+		return true;
+	}
+
+	ss_ web_client_path()
+	{
+		const ss_ &path = m_server->get_config().get<ss_>("web_client_path");
+		if(!path.empty())
+			return path;
+		return m_server->get_config().get<ss_>("share_path")+"/web";
+	}
+
+	// Takes what is whole of peer.ws_in; the payload is stream bytes, the
+	// same as a native peer's. Whether the peer is to be kept.
+	bool deframe(Peer &peer)
+	{
+		const ss_ &b = peer.ws_in;
+		size_t at = 0;
+		for(;;){
+			if(peer.closing)
+				break;
+			if(b.size() - at < 2)
+				break;
+			const uint8_t b0 = b[at], b1 = b[at + 1];
+			const bool fin = b0 & 0x80;
+			const int opcode = b0 & 0x0f;
+			// A client's frames are masked, always
+			if(!(b1 & 0x80) || (b0 & 0x70))
+				return false;
+			uint64_t len = b1 & 0x7f;
+			size_t h = 2;
+			if(len == 126){
+				if(b.size() - at < 4)
+					break;
+				len = (uint8_t)b[at + 2] << 8 | (uint8_t)b[at + 3];
+				h = 4;
+			} else if(len == 127){
+				if(b.size() - at < 10)
+					break;
+				len = 0;
+				for(size_t i = 0; i < 8; i++)
+					len = len << 8 | (uint8_t)b[at + 2 + i];
+				h = 10;
+			}
+			if(len > web::MAX_FRAME_BYTES){
+				log_w(MODULE, "Peer %zu: WebSocket frame of %zu bytes is over "
+						"the limit", peer.id, (size_t)len);
+				return false;
+			}
+			if(opcode >= 8 && (!fin || len > 125))
+				return false;
+			if(b.size() - at < h + 4 + len)
+				break;
+			const char *mask = &b[at + h];
+			ss_ payload(&b[at + h + 4], len);
+			for(size_t i = 0; i < len; i++)
+				payload[i] ^= mask[i & 3];
+			at += h + 4 + len;
+			switch(opcode){
+			case 0: // continuation
+			case 1: // text
+			case 2: // binary
+				// simplified: the order of a message's frames is not checked;
+				// every data frame is more of the stream
+				peer.socket_buffer.insert(peer.socket_buffer.end(),
+						payload.begin(), payload.end());
+				break;
+			case 8: // close: answered with its status, and the peer goes
+				log_i(MODULE, "Client %zu from %s closed its WebSocket",
+						peer.id, cs(peer.socket->get_remote_address()));
+				peer.queue_raw(web::frame(8, payload.substr(0, 2)));
+				peer.closing = true;
+				break;
+			case 9: // ping
+				peer.queue_raw(web::frame(10, payload));
+				break;
+			case 10: // pong
+				break;
+			default:
+				return false;
+			}
+		}
+		peer.ws_in.erase(0, at);
+		if(peer.closing)
+			peer.ws_in.clear();
+		input_packets(peer);
+		return true;
+	}
+
+	void input_packets(Peer &peer)
+	{
+		try {
+			peer.packet_stream.input(peer.socket_buffer,
+			[&](const ss_ &name, const ss_ &data){
+				// Emit event
+				m_server->emit_event(ss_()+"network:packet_received/"+name,
+						new Packet(peer.id, name, data));
+			});
+		} catch(interface::UnknownPacketReceived &e){
+			log_w(MODULE, "%s", e.what());
+		}
 	}
 
 	void on_incoming_data(int event_fd)
@@ -350,31 +718,44 @@ struct Module: public interface::Module, public network::Interface
 			throw Exception(ss_()+"Receive failed: "+strerror(errno));
 		}
 		if(r == 0){
-			log_i(MODULE, "Client %zu from %s disconnected",
-					peer.id, cs(peer.socket->get_remote_address()));
-
-			PeerInfo pinfo;
-			pinfo.id = peer.id;
-			pinfo.address = peer.socket->get_remote_address();
-			m_server->emit_event("network:client_disconnected",
-					new OldClient(pinfo));
-
-			m_peers_by_socket.erase(peer.socket->fd());
-			m_peers.erase(peer.id);
+			if(peer.game())
+				log_i(MODULE, "Client %zu from %s disconnected",
+						peer.id, cs(peer.socket->get_remote_address()));
+			drop_peer(peer.id);
 			return;
 		}
 		log_v(MODULE, "Received %zu bytes", r);
-		peer.socket_buffer.insert(peer.socket_buffer.end(), buf, buf + r);
-
-		try {
-			peer.packet_stream.input(peer.socket_buffer,
-			[&](const ss_ &name, const ss_ &data){
-				// Emit event
-				m_server->emit_event(ss_()+"network:packet_received/"+name,
-						new Packet(peer.id, name, data));
-			});
-		} catch(interface::UnknownPacketReceived &e){
-			log_w(MODULE, "%s", e.what());
+		bool keep = true;
+		switch(peer.kind){
+		case Peer::Kind::Sniff:
+			peer.http_request.append(buf, r);
+			keep = sniff(peer);
+			break;
+		case Peer::Kind::Http:
+			// What comes after the request is not read
+			if(!peer.closing){
+				peer.http_request.append(buf, r);
+				keep = handle_http(peer);
+			}
+			break;
+		case Peer::Kind::WebSocket:
+			if(!peer.closing){
+				peer.ws_in.append(buf, r);
+				keep = deframe(peer);
+			}
+			break;
+		case Peer::Kind::Native:
+			peer.socket_buffer.insert(peer.socket_buffer.end(), buf, buf + r);
+			input_packets(peer);
+			break;
+		}
+		if(keep)
+			flush_peer(peer);
+		if(!keep || (peer.closing && peer.out_pending() == 0)){
+			if(!keep)
+				log_i(MODULE, "Peer %zu from %s: bad request; dropping it",
+						peer.id, cs(peer.socket->get_remote_address()));
+			drop_peer(peer.id);
 		}
 	}
 
@@ -411,7 +792,10 @@ struct Module: public interface::Module, public network::Interface
 	bool any_peer_pending()
 	{
 		for(auto &pair : m_peers){
-			if(pair.second.out_pending() > 0)
+			const Peer &peer = pair.second;
+			// The web's peers also have clocks that flush_peers() keeps
+			if(peer.out_pending() > 0 || peer.closing ||
+					peer.kind == Peer::Kind::Sniff || peer.kind == Peer::Kind::Http)
 				return true;
 		}
 		return false;
@@ -422,12 +806,28 @@ struct Module: public interface::Module, public network::Interface
 		sv_<Peer::Id> to_drop;
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
+			const int64_t now = interface::os::time_us();
+			if(peer.kind == Peer::Kind::Sniff &&
+					now - peer.accepted_us >= web::SNIFF_US)
+				become_native(peer);
 			flush_peer(peer);
+			if(peer.closing && peer.out_pending() == 0){
+				to_drop.push_back(peer.id);
+				continue;
+			}
+			if(peer.kind == Peer::Kind::Http && now - std::max(peer.accepted_us,
+					peer.last_progress_us) >= web::HTTP_STALL_US){
+				log_i(MODULE, "Peer %zu from %s: HTTP stalled; dropping it",
+						peer.id, cs(peer.socket->get_remote_address()));
+				to_drop.push_back(peer.id);
+				continue;
+			}
+			if(!peer.game())
+				continue;
 			if(m_send_policy != SendPolicy::Disconnect)
 				continue;
 			if(peer.out_pending() <= m_max_queue_bytes)
 				continue;
-			const int64_t now = interface::os::time_us();
 			if(peer.over_since_us == 0){
 				peer.over_since_us = now;
 				if(peer.last_progress_us == 0)
@@ -452,11 +852,13 @@ struct Module: public interface::Module, public network::Interface
 		if(it == m_peers.end())
 			return;
 		Peer &peer = it->second;
-		PeerInfo pinfo;
-		pinfo.id = peer.id;
-		pinfo.address = peer.socket->get_remote_address();
-		m_server->emit_event("network:client_disconnected",
-				new OldClient(pinfo));
+		if(peer.game()){
+			PeerInfo pinfo;
+			pinfo.id = peer.id;
+			pinfo.address = peer.socket->get_remote_address();
+			m_server->emit_event("network:client_disconnected",
+					new OldClient(pinfo));
+		}
 		m_peers_by_socket.erase(peer.socket->fd());
 		peer.socket->close_fd();
 		m_peers.erase(it);
@@ -464,6 +866,9 @@ struct Module: public interface::Module, public network::Interface
 
 	void send_u(Peer &peer, const ss_ &name, const ss_ &data)
 	{
+		// A WebSocket peer that has said close is not sent any more
+		if(peer.closing)
+			return;
 		const bool latest_only = m_latest_only.count(name) > 0;
 		// A drop policy drops the whole of a fragmented packet or none of
 		// it: the fragments of one call are one packet to the reader
@@ -492,7 +897,13 @@ struct Module: public interface::Module, public network::Interface
 				dropping = true;
 				return;
 			}
-			peer.enqueue(name, packet_data, latest_only, droppable,
+			// A WebSocket peer gets each packet as a frame of its own. It is
+			// framed here, before the queue, so that the queue and its
+			// flow control only ever see whole frames: a LatestOnly
+			// replacement swaps one whole frame for another.
+			peer.enqueue(name, peer.kind == Peer::Kind::WebSocket ?
+					web::frame(2, packet_data) : packet_data,
+					latest_only, droppable,
 					data.size() <= interface::PacketStream::FRAGMENT_BYTES);
 		});
 		// The common case is a peer that is keeping up, and then this writes
@@ -504,7 +915,7 @@ struct Module: public interface::Module, public network::Interface
 	{
 		// Grab Peer (which contains socket)
 		auto it = m_peers.find(recipient);
-		if(it == m_peers.end()){
+		if(it == m_peers.end() || !it->second.game()){
 			log_w(MODULE, "network::send(): Peer %i doesn't exist",
 					recipient);
 			return;
@@ -574,7 +985,8 @@ struct Module: public interface::Module, public network::Interface
 		sv_<PeerInfo::Id> result;
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
-			result.push_back(peer.id);
+			if(peer.game())
+				result.push_back(peer.id);
 		}
 		return result;
 	}

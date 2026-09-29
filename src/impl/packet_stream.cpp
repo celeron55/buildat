@@ -151,14 +151,16 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 	}
 }
 
-void PacketStream::output(const ss_ &name, const ss_ &data,
-		std::function<void(const ss_&packet_data, bool droppable)> cb,
-		bool droppable)
+void PacketStream::define(const ss_ &name,
+		std::function<void(const ss_&packet_data, bool droppable)> cb)
 {
-	PacketType type = m_outgoing_types.get(name);
-	log_d(MODULE, "output(): name=\"%s\", data.size()=%zu",
-			cs(name), data.size());
+	m_outgoing_types.get(name);
+	send_new_types(cb);
+}
 
+void PacketStream::send_new_types(
+		std::function<void(const ss_&packet_data, bool droppable)> cb)
+{
 	// Send new packet types if needed
 	log_d(MODULE, "m_outgoing_types.m_next_type=%zu"
 			", m_highest_known_type=%zu",
@@ -185,6 +187,17 @@ void PacketStream::output(const ss_ &name, const ss_ &data,
 			output("core:define_packet_type", os.str(), cb, false);
 		}
 	}
+}
+
+void PacketStream::output(const ss_ &name, const ss_ &data,
+		std::function<void(const ss_&packet_data, bool droppable)> cb,
+		bool droppable)
+{
+	PacketType type = m_outgoing_types.get(name);
+	log_d(MODULE, "output(): name=\"%s\", data.size()=%zu",
+			cs(name), data.size());
+
+	send_new_types(cb);
 
 	log_d(MODULE, ">> %s", cs(name));
 

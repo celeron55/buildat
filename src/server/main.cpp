@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
 
 	std::string module_path;
 
-	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:wRu:x:";
+	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:W:wRu:x:";
 	const char usagefmt[1400] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
@@ -97,6 +97,8 @@ int main(int argc, char *argv[])
 			"  -x [module_name]     Skip compiling specified module\n"
 			"  -A [address]         Set listening address (default any4)\n"
 			"  -P [port]            Set network port (default 29500)\n"
+			"  -W [web_client_path] Serve the web client from here\n"
+			"                       (default share_path/web)\n"
 			"  -w                   Watch served files and push changes to\n"
 			"                       connected clients (for development)\n"
 			"  -R                   Restart a module when its source changes\n"
@@ -164,6 +166,10 @@ int main(int argc, char *argv[])
 		case 'P':
 			log_i(MODULE, "config.network_port: %s", c55_optarg);
 			config.set("network_port", c55_optarg);
+			break;
+		case 'W':
+			log_i(MODULE, "config.web_client_path: %s", c55_optarg);
+			config.set("web_client_path", c55_optarg);
 			break;
 		case 'w':
 			config.set("watch_client_files", true);
