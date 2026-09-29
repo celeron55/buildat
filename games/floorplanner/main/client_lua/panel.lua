@@ -25,6 +25,14 @@ function M.row(parent)
 	return r
 end
 
+-- Things one under another, inside a row
+function M.column(parent)
+	local c = parent:CreateChild("UIElement")
+	c:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	c:SetAlignment(magic.HA_LEFT, magic.VA_TOP)
+	return c
+end
+
 function M.label(parent, text, color)
 	local t = parent:CreateChild("Text")
 	t:SetStyleAuto()
@@ -164,6 +172,8 @@ function M.swatch_row(parent, rgb, text, on_click, down, text_color)
 	b:SetStyleAuto()
 	b:SetLayout(magic.LM_HORIZONTAL, 6, magic.IntRect(4, 3, 6, 3))
 	b.minHeight = 24
+	-- A column beside a longer one would stretch it
+	b.maxHeight = 30
 	local face = b:CreateChild("BorderImage")
 	face:SetFixedSize(16, 16)
 	face.color = magic.Color(math.floor(rgb / 65536) % 256 / 255,
@@ -171,6 +181,8 @@ function M.swatch_row(parent, rgb, text, on_click, down, text_color)
 	local t = b:CreateChild("Text")
 	t:SetStyleAuto()
 	t:SetText(text)
+	-- As wide as its words, which a narrow column would otherwise clip
+	b.minWidth = t.width + 36
 	if text_color then
 		t:SetColor(text_color)
 	end

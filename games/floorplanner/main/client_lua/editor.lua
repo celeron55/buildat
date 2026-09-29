@@ -2889,6 +2889,11 @@ local function build_props()
 		panel.button(r, "Roll +90", function()
 			set(sel.id, {ints = {roll = (i.roll + 1) % 4}})
 		end)
+		panel.button(props, "Replace a material...", function()
+			S.picker = nil
+			S.replace = {def = i.def, to = default_material()}
+			refresh_panels()
+		end)
 		panel.label(props, "Voxel tool (K): 3D left digs, right places;")
 		panel.label(props, "2D click adds on top, Ctrl+click takes off")
 		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
@@ -3220,12 +3225,80 @@ close_picker = function()
 		panel.close_picker(picker_win)
 		picker_win = nil
 	end
-	S.picker = nil
+	S.picker, S.replace = nil, nil
 end
-local function build_picker()
+
+-- **Replacing a material in a voxel volume** (user: a lamp built of the
+-- wrong voxels): S.replace = {def, from, to}, from what its voxels use to
+-- any palette entry, as one voxel edit and so one undo. The picker's window
+-- is its window too; one of the two is up at a time.
+local HIGHLIGHT = magic.Color(1.0, 0.85, 0.3)
+local build_picker
+local function build_replace()
+	local rp = S.replace
+	local vox = doc.voxels[rp.def]
+	if not doc.ents[rp.def] or not vox then
+		S.replace = nil
+		return
+	end
+	local counts = {}
+	local used = 0
+	for _, m in pairs(vox) do
+		if not counts[m] then
+			used = used + 1
+		end
+		counts[m] = (counts[m] or 0) + 1
+	end
+	-- One material in them: that is the one to replace
+	if not rp.from and used == 1 then
+		rp.from = next(counts)
+	end
+	local w = panel.window(magic.HA_CENTER, magic.VA_CENTER, 0, 0)
+	picker_win = w
+	w.minWidth = 320
+	panel.label(w, "Replace a material in these voxels")
+	-- From and To side by side (user): a palette is ten entries or more
+	local cols = panel.row(w)
+	local function list(label, want, field)
+		local c = panel.column(cols)
+		panel.label(c, label)
+		for _, p in ipairs(doc.of_type("palette")) do
+			if not want or counts[p.id] then
+				local picked = rp[field] == p.id
+				panel.swatch_row(c, palette_rgb(p.id), "#" .. p.id .. "  " ..
+						p.strs.name .. (counts[p.id] and ("  (" .. counts[p.id] ..
+						" voxels)") or ""), function()
+					rp[field] = p.id
+					build_picker()
+				end, picked, picked and HIGHLIGHT or nil)
+			end
+		end
+	end
+	list("From:", true, "from")
+	list("To:", false, "to")
+	local r = panel.row(w)
+	if rp.from and rp.to and rp.from ~= rp.to and counts[rp.from] then
+		panel.button(r, "Replace " .. counts[rp.from] .. " voxels", function()
+			local sets = {}
+			for key, m in pairs(vox) do
+				if m == rp.from then
+					sets[key] = rp.to
+				end
+			end
+			doc.set_voxels(rp.def, sets)
+			close_picker()
+		end)
+	end
+	panel.button(r, "Cancel (Esc)", close_picker)
+end
+
+build_picker = function()
 	if picker_win then
 		panel.close_picker(picker_win)
 		picker_win = nil
+	end
+	if S.replace then
+		return build_replace()
 	end
 	local pk = S.picker
 	local e = pk and doc.ents[pk.ent]
@@ -4403,7 +4476,7 @@ do
 			-- in progress; at the bottom of a view, the pause menu
 			if S.paused then
 				close_pause()
-			elseif S.picker then
+			elseif S.picker or S.replace then
 				close_picker()
 			elseif S.type_open then
 				S.type_open = false

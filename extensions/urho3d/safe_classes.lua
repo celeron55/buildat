@@ -1949,6 +1949,10 @@ function M.define(dst, util)
 			minHeight = util.simple_property("number"),
 			minWidth = util.simple_property("number"),
 			minSize = util.simple_property(dst.IntVector2),
+			-- What a layout may stretch an element to: a list in a column
+			-- beside a longer one keeps its rows' height
+			maxHeight = util.simple_property("number"),
+			maxWidth = util.simple_property("number"),
 			-- Read-only, and not because Urho3D says so: tolua++ generates
 			-- no setter for these (the generated binding is
 			-- tolua_variable("fixedWidth", getter, NULL)), so assigning
