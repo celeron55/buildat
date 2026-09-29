@@ -278,6 +278,44 @@ function M.centroid(pts)
 	return cx / (3 * a), cz / (3 * a)
 end
 
+-- Where a ray from (ox, oz) along (ux, uz) crosses segment a-b: the ray's
+-- parameter, or nil
+function M.ray_segment(ox, oz, ux, uz, ax, az, bx, bz)
+	local ex, ez = bx - ax, bz - az
+	local d = cross(ux, uz, ex, ez)
+	if math.abs(d) < 1e-9 then
+		return nil
+	end
+	local t = cross(ax - ox, az - oz, ex, ez) / d
+	local s = cross(ax - ox, az - oz, ux, uz) / d
+	if t < 0 or s < 0 or s > 1 then
+		return nil
+	end
+	return t
+end
+
+-- Urho3D's Quaternion(pitch, yaw, roll) on a vector, in degrees: roll about
+-- Z first, then pitch about X, then yaw about Y
+function M.rot(x, y, z, pitch, yaw, roll)
+	local c, s = math.cos(math.rad(roll)), math.sin(math.rad(roll))
+	x, y = x * c - y * s, x * s + y * c
+	c, s = math.cos(math.rad(pitch)), math.sin(math.rad(pitch))
+	y, z = y * c - z * s, y * s + z * c
+	c, s = math.cos(math.rad(yaw)), math.sin(math.rad(yaw))
+	x, z = x * c + z * s, -x * s + z * c
+	return x, y, z
+end
+
+function M.unrot(x, y, z, pitch, yaw, roll)
+	local c, s = math.cos(math.rad(-yaw)), math.sin(math.rad(-yaw))
+	x, z = x * c + z * s, -x * s + z * c
+	c, s = math.cos(math.rad(-pitch)), math.sin(math.rad(-pitch))
+	y, z = y * c - z * s, y * s + z * c
+	c, s = math.cos(math.rad(-roll)), math.sin(math.rad(-roll))
+	x, y = x * c - y * s, x * s + y * c
+	return x, y, z
+end
+
 function M.snap(v, step)
 	return math.floor(v / step + 0.5) * step
 end
@@ -367,6 +405,21 @@ do
 	local cx, cz = M.centroid(sq)
 	near(cx, 2000, "centroid x")
 	near(cz, 2000, "centroid z")
+
+	near(M.ray_segment(0, 0, 1, 0, 5, -1, 5, 1), 5, "ray meets segment")
+	assert(M.ray_segment(0, 0, -1, 0, 5, -1, 5, 1) == nil, "ray points away")
+
+	-- Yaw 90 turns +Z to +X, pitch 90 turns +Z down, and unrot undoes rot
+	local rx, ry, rz = M.rot(0, 0, 1, 0, 90, 0)
+	near(rx, 1, "yaw 90 x")
+	near(rz, 0, "yaw 90 z")
+	rx, ry, rz = M.rot(0, 0, 1, 90, 0, 0)
+	near(ry, -1, "pitch 90 looks down")
+	rx, ry, rz = M.rot(1, 2, 3, 90, 37, 180)
+	rx, ry, rz = M.unrot(rx, ry, rz, 90, 37, 180)
+	near(rx, 1, "unrot x")
+	near(ry, 2, "unrot y")
+	near(rz, 3, "unrot z")
 
 	local x, z = M.snap_direction(0, 0, 1000, 800, 90, 10)
 	near(x, 1000, "snap_direction projects onto the axis")

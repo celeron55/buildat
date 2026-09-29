@@ -133,6 +133,26 @@ static const sv_<TypeSchema> SCHEMA = {
 	}, {
 		{"nodes", "node", OnDelete::Remove, 3},
 	}},
+	// The shape a set of instances share. kind 0: a box of w by h by d
+	{"definition", {
+		{"kind", 0, 0, 0},
+		{"w", 1, 100000, 600},
+		{"h", 1, 20000, 750},
+		{"d", 1, 100000, 600},
+		{"mat", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
+	}, {}, {}},
+	// A definition placed: yaw in millidegrees, pitch and roll in quarter
+	// turns, and its height from the floor up or the ceiling down
+	{"instance", {
+		{"def", 1, INT32_MAX, 0, "definition", OnDelete::Cascade},
+		{"x", -MAX_COORD, MAX_COORD, 0},
+		{"z", -MAX_COORD, MAX_COORD, 0},
+		{"yaw", 0, 359999, 0},
+		{"pitch", 0, 3, 0},
+		{"roll", 0, 3, 0},
+		{"align", 0, 1, 0},       // 1: from the ceiling down
+		{"offset", 0, 20000, 0},
+	}, {}, {}},
 	{"palette", {
 		{"kind", 0, MK_COUNT - 1, MK_DRYWALL},
 		{"color", 0, 0xffffff, 0xe8e4dc},

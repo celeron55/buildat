@@ -3,7 +3,8 @@
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
 -- The editor: the scene built from the replica, the two cameras, the tools
--- and the panels. Walls and rooms on shared nodes ([FP_WALLS], [FP_ROOMS]).
+-- and the panels. Walls and rooms on shared nodes ([FP_WALLS], [FP_ROOMS]),
+-- boxes as definitions placed by instances ([FP_OBJECTS]).
 --
 -- Nothing here changes the document directly. A tool builds a batch and
 -- sends it; what the server accepts comes back as fp:changes and the scene
@@ -29,21 +30,25 @@ local ANGLE_STEPS = {false, 1, 5, 15, 45, 90}
 -- How near, in pixels, the cursor snaps to a node or an edge
 local SNAP_PX = 12
 local DRAG_PX = 4
+-- Where a copy lands from what it was copied from
+local COPY_OFFSET = 500
 local JUSTIFY_NAMES = {[0] = "centered", [1] = "left", [2] = "right"}
 local TOOL_KEYS = {select = "V", node = "N", wall = "B", room = "R",
-	paint = "P"}
+	box = "O", paint = "P"}
 
 local S = {
 	view = "2d",
 	tool = "select",
 	grid = 2,       -- index into GRID_STEPS
-	angle = 4,      -- index into ANGLE_STEPS: the angle snap with shift
+	angle = 4,      -- index into ANGLE_STEPS: the angle snap
 	-- New walls
 	thickness = 100,
 	justify = 0,
 	height = 0,
 	hang = 0,
 	room_walls = true, -- a room drawn gets walls on its edges
+	-- New boxes
+	box = {w = 600, h = 750, d = 600, align = 0, offset = 0},
 	material = nil, -- the palette entry picked
 	-- The cursor, in window pixels
 	mx = 0, my = 0,
@@ -59,8 +64,11 @@ local S = {
 	corners = nil,  -- the room tool's corners so far: {{x, z, ref}, ...}
 	typed = "",     -- a length being typed while drawing
 	press = nil,    -- a mouse press that may become a drag
-	drag = nil,     -- {kind = "node"|"nodes"|"wall"|"box", ...}
-	selected = nil, -- {kind = "node"|"wall"|"room", id}
+	drag = nil,     -- {kind = "node"|"move"|"box"|"footprint", ...}
+	-- The select tool's selection: id -> kind ("instance", "wall", "room",
+	-- "node"), and the one the panel shows
+	sel = {},
+	primary = nil,
 	nodes = {},     -- the node tool's selection: id -> true
 	dirty = true,
 	-- Real ids of this session's placeholders, as batch results give them
@@ -140,6 +148,29 @@ local function flat_polygon(g, pts, y, n, col)
 	end
 end
 
+-- A box of half sizes hx, hy, hz (metres) about the origin
+local function box_geometry(g, hx, hy, hz, col)
+	local function V(x, y, z)
+		return magic.Vector3(x * hx, y * hy, z * hz)
+	end
+	for _, f in ipairs({{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0},
+			{0, 0, 1}, {0, 0, -1}}) do
+		local n = magic.Vector3(f[1], f[2], f[3])
+		-- Two axes across the face
+		local u = f[1] ~= 0 and {0, 1, 0} or {1, 0, 0}
+		local v = f[3] ~= 0 and {0, 1, 0} or {0, 0, 1}
+		if f[2] ~= 0 then
+			u, v = {1, 0, 0}, {0, 0, 1}
+		end
+		local function C(a, b)
+			return V(f[1] + u[1] * a + v[1] * b, f[2] + u[2] * a + v[2] * b,
+					f[3] + u[3] * a + v[3] * b)
+		end
+		tri(g, C(-1, -1), C(1, -1), C(1, 1), n, col)
+		tri(g, C(-1, -1), C(1, 1), C(-1, 1), n, col)
+	end
+end
+
 local UP, DOWN = magic.Vector3(0, 1, 0), magic.Vector3(0, -1, 0)
 
 local ground_node = scene:CreateChild("Ground")
@@ -156,7 +187,8 @@ end
 
 local walls_node = scene:CreateChild("Walls")
 local caps_node = scene:CreateChild("Caps")
-local ceilings_node = scene:CreateChild("Ceilings")
+-- The ceilings and what is aligned to them, hidden from above
+local overhead_node = scene:CreateChild("Overhead")
 
 -- The cameras
 local cam2d_node = scene:CreateChild("Camera2D")
@@ -187,8 +219,7 @@ local function node_pos(id)
 	if d and d.moved then
 		if d.kind == "node" and d.id == id then
 			return d.x, d.z
-		elseif (d.kind == "wall" and (d.a == id or d.b == id)) or
-				(d.kind == "nodes" and d.ids[id]) then
+		elseif d.kind == "move" and d.nodes[id] then
 			local n = doc.ents[id].ints
 			return n.x + d.dx, n.z + d.dz
 		end
@@ -208,11 +239,13 @@ local function palette_rgb(id)
 	return 0xb0b0b0
 end
 
--- The walls with their ends looked up, their outlines, and the rooms with
--- their corners counter-clockwise; rebuild() fills them
+-- The walls with their ends looked up, their outlines, the rooms with
+-- their corners counter-clockwise, and the instances placed; rebuild()
+-- fills them
 local outlines = {}
 local wall_data = {}
 local room_data = {}
+local inst_data = {}
 -- The scene nodes rebuild() made, for the next one to remove
 local built = {}
 
@@ -287,6 +320,57 @@ local function room_at(x, z)
 	return best
 end
 
+-- An instance placed: its centre, rotation and extents in mm. The 90
+-- degree pitch and roll swap the definition's axes; the yaw turns the
+-- footprint, which is ex by ez in the yawed frame.
+local function build_inst_data()
+	inst_data = {}
+	local d = S.drag
+	for _, e in ipairs(doc.of_type("instance")) do
+		local i = e.ints
+		local def = doc.ents[i.def]
+		if def then
+			local p = def.ints
+			local pitch, roll = i.pitch * 90, i.roll * 90
+			local ex, ey, ez = geom.rot(p.w, p.h, p.d, pitch, 0, roll)
+			ex, ey, ez = math.abs(ex), math.abs(ey), math.abs(ez)
+			local x, z = i.x, i.z
+			if d and d.moved and d.kind == "move" and d.inst[e.id] then
+				x, z = x + d.dx, z + d.dz
+			end
+			local y
+			if i.align == 1 then
+				y = settings().ceiling - i.offset - ey / 2
+			else
+				y = i.offset + ey / 2
+			end
+			local yaw = i.yaw / 1000
+			local foot = {}
+			for k, c in ipairs({{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}) do
+				local fx, _, fz = geom.rot(c[1] * ex / 2, 0, c[2] * ez / 2, 0,
+						yaw, 0)
+				foot[k] = {x + fx, z + fz}
+			end
+			if not geom.is_ccw(foot) then
+				foot = {foot[4], foot[3], foot[2], foot[1]}
+			end
+			inst_data[e.id] = {x = x, y = y, z = z, yaw = yaw, pitch = pitch,
+					roll = roll, ex = ex, ey = ey, ez = ez, y0 = y - ey / 2,
+					y1 = y + ey / 2, def = i.def, foot = foot}
+		end
+	end
+end
+
+local function instances_of(def)
+	local n = 0
+	for _, e in ipairs(doc.of_type("instance")) do
+		if e.ints.def == def then
+			n = n + 1
+		end
+	end
+	return n
+end
+
 -- simplified: everything is rebuilt on any change, which at a few hundred
 -- walls is milliseconds; the upgrade is rebuilding only what is at the
 -- nodes that moved
@@ -302,22 +386,33 @@ local function rebuild()
 	end
 	outlines = geom.wall_outlines(wall_data)
 	build_room_data()
+	build_inst_data()
 	for _, n in ipairs(built) do
 		n:Remove()
 	end
 	built = {}
 	local cut = settings().cut
-	local function geometry(parent, material)
+	local function geometry(parent)
 		local node = parent:CreateChild("")
 		built[#built + 1] = node
 		local g = node:CreateComponent("CustomGeometry")
 		g:SetNumGeometries(1)
 		g:BeginGeometry(0, magic.TRIANGLE_LIST)
-		return g, material
+		return g, node
 	end
 	local function commit(g, material)
 		g:Commit()
 		g:SetMaterial(0, material)
+	end
+	-- What the plan view shows where the cut goes through something: dark
+	-- where it is cut, lighter for what is below the cut
+	local function cap(pts, y0, y1, cut_col, low_col)
+		if y0 < cut then
+			local cg = geometry(caps_node)
+			flat_polygon(cg, pts, math.min(y1, cut) - 3, UP, y1 >= cut and
+					cut_col or low_col)
+			commit(cg, flat_material)
+		end
 	end
 
 	for id, o in pairs(outlines) do
@@ -351,15 +446,8 @@ local function rebuild()
 			end
 		end
 		commit(g, lit_material)
-
-		-- What the plan view shows where the cut goes through a wall: dark
-		-- where it is cut, lighter for a wall below the cut
-		if y0 < cut then
-			local cg = geometry(caps_node)
-			flat_polygon(cg, pts, math.min(y1, cut) - 3, UP, y1 >= cut and
-					magic.Color(0.16, 0.16, 0.18) or magic.Color(0.55, 0.55, 0.58))
-			commit(cg, flat_material)
-		end
+		cap(pts, y0, y1, magic.Color(0.16, 0.16, 0.18),
+				magic.Color(0.55, 0.55, 0.58))
 	end
 
 	for id, r in pairs(room_data) do
@@ -368,11 +456,24 @@ local function rebuild()
 			local g = geometry(walls_node)
 			flat_polygon(g, r.pts, 2, UP, rgb_color(palette_rgb(e.ints.mat_floor)))
 			commit(g, lit_material)
-			local cg = geometry(ceilings_node)
+			local cg = geometry(overhead_node)
 			flat_polygon(cg, r.pts, room_ceiling(e), DOWN,
 					rgb_color(palette_rgb(e.ints.mat_ceiling)))
 			commit(cg, lit_material)
 		end
+	end
+
+	for id, it in pairs(inst_data) do
+		local def = doc.ents[it.def].ints
+		local e = doc.ents[id].ints
+		local g, node = geometry(e.align == 1 and overhead_node or walls_node)
+		node.position = magic.Vector3(W(it.x), W(it.y), W(it.z))
+		node.rotation = magic.Quaternion(it.pitch, it.yaw, it.roll)
+		local rgb = palette_rgb(def.mat)
+		box_geometry(g, W(def.w) / 2, W(def.h) / 2, W(def.d) / 2,
+				rgb_color(rgb))
+		commit(g, lit_material)
+		cap(it.foot, it.y0, it.y1, rgb_color(rgb, 0.7), rgb_color(rgb, 0.9))
 	end
 	caps_node.enabled = S.view == "2d"
 	S.dirty = false
@@ -455,6 +556,10 @@ local function grid_step()
 	return GRID_STEPS[S.grid]
 end
 
+local function angle_step()
+	return ANGLE_STEPS[S.angle] or 1
+end
+
 -- The node nearest to (x, z) within r, skipping those in `except`
 local function nearest_node(x, z, r, except)
 	local best, bd = nil, r
@@ -507,12 +612,49 @@ local function nearest_edge(x, z, r, except)
 	return best, bx, bz, bt
 end
 
--- What is under the cursor for painting and selecting: a wall and which of
--- its faces, or a room's floor or ceiling. {kind = "wall"|"floor"|
--- "ceiling", id, side}
+-- Where the cursor's ray enters an instance's box, or nil
+local function ray_instance(it, o, d)
+	local ox, oy, oz = geom.unrot(o.x - W(it.x), o.y - W(it.y), o.z - W(it.z),
+			it.pitch, it.yaw, it.roll)
+	local dx, dy, dz = geom.unrot(d.x, d.y, d.z, it.pitch, it.yaw, it.roll)
+	local def = doc.ents[it.def].ints
+	local tmin, tmax = 0, math.huge
+	for _, a in ipairs({{ox, dx, W(def.w) / 2}, {oy, dy, W(def.h) / 2},
+			{oz, dz, W(def.d) / 2}}) do
+		if math.abs(a[2]) < 1e-12 then
+			if math.abs(a[1]) > a[3] then
+				return nil
+			end
+		else
+			local t1, t2 = (-a[3] - a[1]) / a[2], (a[3] - a[1]) / a[2]
+			if t1 > t2 then
+				t1, t2 = t2, t1
+			end
+			tmin, tmax = math.max(tmin, t1), math.min(tmax, t2)
+			if tmin > tmax then
+				return nil
+			end
+		end
+	end
+	return tmin
+end
+
+-- What is under the cursor for painting and selecting: an instance, a
+-- wall and which of its faces, or a room's floor or ceiling.
+-- {kind = "instance"|"wall"|"floor"|"ceiling", id, side}
 local function pick_surface()
 	if S.view == "2d" then
 		local x, z = cursor_floor()
+		-- The topmost instance under the cursor, as seen from above
+		local best, top = nil, -math.huge
+		for id, it in pairs(inst_data) do
+			if it.y1 > top and geom.point_in_polygon(x, z, it.foot) then
+				best, top = id, it.y1
+			end
+		end
+		if best then
+			return {kind = "instance", id = best}
+		end
 		for id, o in pairs(outlines) do
 			if geom.point_in_polygon(x, z, o.pts) then
 				local w = wall_data[id]
@@ -526,6 +668,15 @@ local function pick_surface()
 	end
 	local o, d = cursor_ray()
 	local best, best_t = nil, math.huge
+	for id, it in pairs(inst_data) do
+		local overhead = doc.ents[id].ints.align == 1
+		if not overhead or overhead_node.enabled then
+			local t = ray_instance(it, o, d)
+			if t and t < best_t then
+				best, best_t = {kind = "instance", id = id}, t
+			end
+		end
+	end
 	for id, ol in pairs(outlines) do
 		local y0, y1 = wall_span(doc.ents[id].ints)
 		y0, y1 = W(y0), W(y1)
@@ -556,7 +707,7 @@ local function pick_surface()
 	end
 	for id, r in pairs(room_data) do
 		local surfaces = {{"floor", 2}}
-		if ceilings_node.enabled then
+		if overhead_node.enabled then
 			surfaces[2] = {"ceiling", room_ceiling(doc.ents[id])}
 		end
 		for _, s in ipairs(surfaces) do
@@ -600,6 +751,33 @@ local function snapped_point(from, except)
 		return math.floor(ex + 0.5), math.floor(ez + 0.5), {}
 	end
 	return geom.snap(x, grid_step()), geom.snap(z, grid_step()), {}
+end
+
+-- The gaps from an instance's footprint to the nearest wall face along its
+-- own four axes: {{dir = {ux, uz}, half = mm, gap = mm}, ...}; gap is nil
+-- where no wall is that way
+local function wall_gaps(id)
+	local it = inst_data[id]
+	local out = {}
+	for k, a in ipairs({{1, 0, it.ex}, {-1, 0, it.ex}, {0, 1, it.ez},
+			{0, -1, it.ez}}) do
+		local ux, _, uz = geom.rot(a[1], 0, a[2], 0, it.yaw, 0)
+		local best = nil
+		for _, o in pairs(outlines) do
+			local pts = o.pts
+			for i = 1, #pts do
+				local p, q = pts[i], pts[i % #pts + 1]
+				local t = geom.ray_segment(it.x, it.z, ux, uz, p[1], p[2],
+						q[1], q[2])
+				if t and t > a[3] / 2 and (not best or t < best) then
+					best = t
+				end
+			end
+		end
+		out[k] = {dir = {ux, uz}, half = a[3] / 2,
+				gap = best and best - a[3] / 2}
+	end
+	return out
 end
 
 --
@@ -819,6 +997,76 @@ local function add_room(corners)
 	send(finish_batch(b))
 end
 
+-- A box drawn: a definition of that size and an instance of it
+local function add_box(x, z, w, d)
+	local def = doc.placeholder()
+	send({
+		{op = "create", ent = {id = def, type = "definition", ints = {kind = 0,
+				w = w, h = S.box.h, d = d, mat = default_material()}}},
+		{op = "create", ent = {id = doc.placeholder(), type = "instance",
+				ints = {def = def, x = math.floor(x + 0.5),
+				z = math.floor(z + 0.5), align = S.box.align,
+				offset = S.box.offset}}},
+	})
+end
+
+local function copy_fields(p)
+	local f = {}
+	for k, v in pairs(p) do
+		f[k] = v
+	end
+	return f
+end
+
+-- Copies of the selected instances next to them: linked ones share the
+-- definition, the others get a copy of it
+local function copy_selected(linked)
+	local ops, new = {}, {}
+	for id, kind in pairs(S.sel) do
+		if kind == "instance" then
+			local i = copy_fields(doc.ents[id].ints)
+			if not linked then
+				local def = doc.placeholder()
+				ops[#ops + 1] = {op = "create", ent = {id = def,
+						type = "definition", ints = copy_fields(
+						doc.ents[i.def].ints)}}
+				i.def = def
+			end
+			i.x = i.x + COPY_OFFSET
+			i.z = i.z - COPY_OFFSET
+			local ph = doc.placeholder()
+			new[#new + 1] = ph
+			ops[#ops + 1] = {op = "create", ent = {id = ph, type = "instance",
+					ints = i}}
+		end
+	end
+	if #ops == 0 then
+		doc.notice("Copies are of objects; select one")
+		return
+	end
+	send(ops, function(err)
+		if err == "" then
+			-- The copies are what is selected now
+			S.sel = {}
+			for _, ph in ipairs(new) do
+				S.sel[S.real[ph]] = "instance"
+				S.primary = S.real[ph]
+			end
+			M.refresh_panels()
+		end
+	end)
+end
+
+local function unlink(id)
+	local i = doc.ents[id].ints
+	local def = doc.placeholder()
+	send({
+		{op = "create", ent = {id = def, type = "definition",
+				ints = copy_fields(doc.ents[i.def].ints)}},
+		{op = "set", ent = {id = id, ints = {def = def}}},
+	})
+end
+
 -- Node `from` merged into node `into`: what referred to one refers to the
 -- other, and what that makes degenerate goes
 local function merge_ops(from, into)
@@ -890,44 +1138,168 @@ local function unused_nodes(ops, gone_walls)
 	end
 end
 
+local function delete_nodes(ops, ids)
+	for id in pairs(ids) do
+		if doc.ents[id] then
+			ops[#ops + 1] = {op = "delete", ent = {id = id}}
+		end
+	end
+	-- A room left with corners but no floor goes too; the server only
+	-- knows to remove one left with fewer than three
+	for _, room in ipairs(doc.of_type("room")) do
+		local pts = {}
+		for _, n in ipairs(room.lists.nodes) do
+			if not ids[n] then
+				pts[#pts + 1] = {node_pos(n)}
+			end
+		end
+		if #pts >= 3 and #pts < #room.lists.nodes and
+				geom.area(pts) < 10000 then
+			ops[#ops + 1] = {op = "delete", ent = {id = room.id}}
+		end
+	end
+end
+
 local function delete_selected()
 	local ops = {}
 	if S.tool == "node" then
-		for id in pairs(S.nodes) do
-			if doc.ents[id] then
-				ops[#ops + 1] = {op = "delete", ent = {id = id}}
-			end
-		end
-		-- A room left with corners but no floor goes too; the server
-		-- only knows to remove one left with fewer than three
-		for _, room in ipairs(doc.of_type("room")) do
-			local pts = {}
-			for _, n in ipairs(room.lists.nodes) do
-				if not S.nodes[n] then
-					pts[#pts + 1] = {node_pos(n)}
-				end
-			end
-			if #pts >= 3 and #pts < #room.lists.nodes and
-					geom.area(pts) < 10000 then
-				ops[#ops + 1] = {op = "delete", ent = {id = room.id}}
-			end
-		end
+		delete_nodes(ops, S.nodes)
 		S.nodes = {}
 	else
-		local sel = S.selected
-		if not sel or not doc.ents[sel.id] then
-			return
+		local walls, nodes, defs = {}, {}, {}
+		for id, kind in pairs(S.sel) do
+			if doc.ents[id] then
+				if kind == "node" then
+					nodes[id] = true
+				else
+					ops[#ops + 1] = {op = "delete", ent = {id = id}}
+				end
+				if kind == "wall" then
+					walls[id] = true
+				elseif kind == "instance" then
+					local def = doc.ents[id].ints.def
+					defs[def] = (defs[def] or 0) + 1
+				end
+			end
 		end
-		ops[1] = {op = "delete", ent = {id = sel.id}}
-		if sel.kind == "wall" then
-			-- Its nodes go with it where nothing else holds them
-			unused_nodes(ops, {[sel.id] = true})
+		delete_nodes(ops, nodes)
+		-- Their nodes go with the walls where nothing else holds them, and
+		-- a definition with its last instance
+		unused_nodes(ops, walls)
+		for def, n in pairs(defs) do
+			if instances_of(def) == n then
+				ops[#ops + 1] = {op = "delete", ent = {id = def}}
+			end
 		end
-		S.selected = nil
+		S.sel = {}
+		S.primary = nil
 	end
 	if #ops > 0 then
 		send(ops)
 	end
+end
+
+-- What a selection moves: instances by their position, walls and rooms by
+-- their nodes
+local function moved_by(sel)
+	local inst, nodes = {}, {}
+	for id, kind in pairs(sel) do
+		local e = doc.ents[id]
+		if e then
+			if kind == "instance" then
+				inst[id] = true
+			elseif kind == "node" then
+				nodes[id] = true
+			elseif kind == "wall" then
+				nodes[e.ints.a] = true
+				nodes[e.ints.b] = true
+			elseif kind == "room" then
+				for _, n in ipairs(e.lists.nodes) do
+					nodes[n] = true
+				end
+			end
+		end
+	end
+	return inst, nodes
+end
+
+-- The selection turned by deg about its centre, counter-clockwise as seen
+-- from above: positions about the centre, and each instance's own yaw.
+-- A turn asked for while one is on its way waits for it, since it is
+-- computed from where the first leaves things.
+local rotate_selection
+local turning, turn_queued = false, 0
+local function send_turn(deg)
+	local inst, nodes = moved_by(S.sel)
+	local sx, sz, n = 0, 0, 0
+	for id in pairs(inst) do
+		sx, sz, n = sx + inst_data[id].x, sz + inst_data[id].z, n + 1
+	end
+	for id in pairs(nodes) do
+		local x, z = node_pos(id)
+		sx, sz, n = sx + x, sz + z, n + 1
+	end
+	if n == 0 then
+		return
+	end
+	sx, sz = sx / n, sz / n
+	local c, s = math.cos(math.rad(deg)), math.sin(math.rad(deg))
+	local function turn(x, z)
+		local dx, dz = x - sx, z - sz
+		return math.floor(sx + dx * c - dz * s + 0.5),
+				math.floor(sz + dx * s + dz * c + 0.5)
+	end
+	local ops = {}
+	for id in pairs(inst) do
+		local i = doc.ents[id].ints
+		local x, z = turn(i.x, i.z)
+		-- Yaw grows turning right, which from above is clockwise
+		local yaw = (i.yaw - math.floor(deg * 1000 + 0.5)) % 360000
+		ops[#ops + 1] = {op = "set", ent = {id = id, ints = {x = x, z = z,
+				yaw = yaw}}}
+	end
+	for id in pairs(nodes) do
+		local p = doc.ents[id].ints
+		local x, z = turn(p.x, p.z)
+		ops[#ops + 1] = {op = "set", ent = {id = id, ints = {x = x, z = z}}}
+	end
+	turning = true
+	send(ops, function()
+		turning = false
+		if turn_queued ~= 0 then
+			local q = turn_queued
+			turn_queued = 0
+			rotate_selection(q)
+		end
+	end)
+end
+
+rotate_selection = function(deg)
+	if turning then
+		turn_queued = turn_queued + deg
+	else
+		send_turn(deg)
+	end
+end
+
+-- The palette entry picked, on everything selected
+local function apply_material()
+	local mat = default_material()
+	local ops = {}
+	for id, kind in pairs(S.sel) do
+		local e = doc.ents[id]
+		if e and kind == "instance" then
+			ops[#ops + 1] = {op = "set", ent = {id = e.ints.def,
+					ints = {mat = mat}}}
+		elseif e and kind == "wall" then
+			ops[#ops + 1] = {op = "set", ent = {id = id,
+					ints = {mat_left = mat, mat_right = mat}}}
+		elseif e and kind == "room" then
+			ops[#ops + 1] = {op = "set", ent = {id = id,
+					ints = {mat_floor = mat}}}
+		end
+	end
+	send(ops)
 end
 
 --
@@ -961,7 +1333,8 @@ local function build_toolbar()
 	panel.button(toolbar, S.view == "2d" and "2D" or "3D",
 			function() set_view(S.view == "2d" and "3d" or "2d") end, false, 40)
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
-			{"wall", "Wall"}, {"room", "Room"}, {"paint", "Paint"}}) do
+			{"wall", "Wall"}, {"room", "Room"}, {"box", "Box"},
+			{"paint", "Paint"}}) do
 		panel.button(toolbar, t[2] .. " (" .. TOOL_KEYS[t[1]] .. ")",
 				function() set_tool(t[1]) end, S.tool == t[1])
 	end
@@ -972,7 +1345,7 @@ local function build_toolbar()
 		refresh_panels()
 	end)
 	local a = ANGLE_STEPS[S.angle]
-	panel.button(toolbar, "Shift angle " .. (a and a .. " deg" or "free") ..
+	panel.button(toolbar, "Angle " .. (a and a .. " deg" or "free") ..
 			" (H)", function()
 		S.angle = S.angle % #ANGLE_STEPS + 1
 		refresh_panels()
@@ -983,12 +1356,20 @@ local function m2(mm2)
 	return string.format("%.2f m2", mm2 / 1e6)
 end
 
+local function sel_count()
+	local n = 0
+	for _ in pairs(S.sel) do
+		n = n + 1
+	end
+	return n
+end
+
 local function build_props()
 	if props then
 		props:Remove()
 	end
 	props = panel.window(magic.HA_RIGHT, magic.VA_TOP, -8, 8)
-	local sel = S.selected and doc.ents[S.selected.id]
+	local sel = S.primary and S.sel[S.primary] and doc.ents[S.primary]
 	local function set(id, fields)
 		send({{op = "set", ent = {id = id, ints = fields.ints,
 				strs = fields.strs}}})
@@ -1003,6 +1384,7 @@ local function build_props()
 			if v then set(id, {ints = {[name] = v}}) end
 		end)
 	end
+	local count = sel_count()
 	if S.tool == "node" then
 		local n = 0
 		for _ in pairs(S.nodes) do
@@ -1014,6 +1396,76 @@ local function build_props()
 		if n > 0 then
 			panel.button(props, "Delete (Del)", delete_selected)
 		end
+	elseif count > 1 then
+		panel.label(props, count .. " selected")
+		panel.button(props, "Turn left (Z)", function()
+			rotate_selection(angle_step())
+		end)
+		panel.button(props, "Turn right (X)", function()
+			rotate_selection(-angle_step())
+		end)
+		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
+		panel.button(props, "Linked clones (Ctrl+L)", function()
+			copy_selected(true)
+		end)
+		panel.button(props, "Apply the palette entry", apply_material)
+		panel.button(props, "Delete (Del)", delete_selected)
+	elseif sel and sel.type == "instance" then
+		local i = sel.ints
+		local def = doc.ents[i.def]
+		local p = def.ints
+		local links = instances_of(i.def)
+		panel.label(props, "Box " .. sel.id .. (links > 1 and
+				("   linked x" .. links) or ""))
+		int_field(i.def, "Width mm", "w", p.w)
+		int_field(i.def, "Height mm", "h", p.h)
+		int_field(i.def, "Depth mm", "d", p.d)
+		int_field(sel.id, "X mm", "x", i.x)
+		int_field(sel.id, "Z mm", "z", i.z)
+		panel.field(props, "Yaw deg", i.yaw / 1000, function(t)
+			local v = tonumber(t)
+			if v then
+				set(sel.id, {ints = {yaw = math.floor(v * 1000 + 0.5) % 360000}})
+			end
+		end)
+		int_field(sel.id, "Offset mm", "offset", i.offset)
+		panel.button(props, i.align == 1 and "From the ceiling down" or
+				"From the floor up", function()
+			set(sel.id, {ints = {align = 1 - i.align}})
+		end)
+		local r = panel.row(props)
+		panel.button(r, "Pitch +90", function()
+			set(sel.id, {ints = {pitch = (i.pitch + 1) % 4}})
+		end)
+		panel.button(r, "Roll +90", function()
+			set(sel.id, {ints = {roll = (i.roll + 1) % 4}})
+		end)
+		-- The gaps to the walls, typed to move the box
+		if inst_data[sel.id] then
+			for k, g in ipairs(wall_gaps(sel.id)) do
+				if g.gap then
+					panel.field(props, "Gap " .. ({"+X", "-X", "+Z", "-Z"})[k] ..
+							" mm", math.floor(g.gap + 0.5), function(t)
+						local v = tonumber(t)
+						if v then
+							local m = g.gap - v
+							set(sel.id, {ints = {
+									x = math.floor(i.x + g.dir[1] * m + 0.5),
+									z = math.floor(i.z + g.dir[2] * m + 0.5)}})
+						end
+					end)
+				end
+			end
+		end
+		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
+		panel.button(props, "Linked clone (Ctrl+L)", function()
+			copy_selected(true)
+		end)
+		if links > 1 then
+			panel.button(props, "Unlink", function() unlink(sel.id) end)
+		end
+		panel.button(props, "Apply the palette entry", apply_material)
+		panel.button(props, "Delete (Del)", delete_selected)
 	elseif sel and sel.type == "wall" then
 		local w = sel.ints
 		local ax, az = node_pos(w.a)
@@ -1056,6 +1508,20 @@ local function build_props()
 		int_field(sel.id, "X mm", "x", sel.ints.x)
 		int_field(sel.id, "Z mm", "z", sel.ints.z)
 		panel.button(props, "Delete (Del)", delete_selected)
+	elseif S.tool == "box" then
+		panel.label(props, "New boxes: drag the footprint")
+		for _, f in ipairs({{"Width mm", "w"}, {"Height mm", "h"},
+				{"Depth mm", "d"}, {"Offset mm", "offset"}}) do
+			panel.field(props, f[1], S.box[f[2]], function(t)
+				local v = num(t)
+				if v and (v > 0 or f[2] == "offset") then S.box[f[2]] = v end
+			end)
+		end
+		panel.button(props, S.box.align == 1 and "From the ceiling down" or
+				"From the floor up", function()
+			S.box.align = 1 - S.box.align
+			refresh_panels()
+		end)
 	else
 		panel.label(props, "New walls")
 		panel.field(props, "Thickness mm", S.thickness, function(t)
@@ -1148,6 +1614,7 @@ refresh_panels = function()
 	build_props()
 	build_palette()
 end
+M.refresh_panels = function() refresh_panels() end
 
 local function over_ui()
 	local s = magic.ui.scale
@@ -1163,59 +1630,90 @@ local function begin_press(button)
 	end
 	local x, z = cursor_floor()
 	S.press = {mx = S.mx, my = S.my, x = x, z = z}
-	if S.tool == "select" or S.tool == "node" then
-		-- A node near the cursor wins over what it is on
-		if x then
-			local n = nearest_node(x, z, snap_radius())
-			if n then
-				S.press.target = {kind = "node", id = n}
-				return
-			end
+	if S.tool == "select" then
+		-- An object under the cursor wins; then a node near it, then the
+		-- wall or room it is on
+		local s = pick_surface()
+		if s and s.kind == "instance" then
+			S.press.target = {kind = "instance", id = s.id}
+			return
 		end
-		if S.tool == "select" then
-			local s = pick_surface()
-			if s then
-				S.press.target = {kind = s.kind == "wall" and "wall" or "room",
-						id = s.id}
-			end
+		local n = x and nearest_node(x, z, snap_radius())
+		if n then
+			S.press.target = {kind = "node", id = n}
+		elseif s then
+			S.press.target = {kind = s.kind == "wall" and "wall" or "room",
+					id = s.id}
+		end
+	elseif S.tool == "node" then
+		local n = x and nearest_node(x, z, snap_radius())
+		if n then
+			S.press.target = {kind = "node", id = n}
 		end
 	end
 end
 
 local function start_drag()
 	local t = S.press.target
-	if S.tool == "node" and not t then
-		-- A box over the nodes to select
+	if S.tool == "box" then
+		local x, z = snapped_point(nil)
+		if x then
+			S.drag = {kind = "footprint", x0 = x, z0 = z, x1 = x, z1 = z}
+		end
+		return
+	end
+	if (S.tool == "node" or S.tool == "select") and not t then
+		-- A box over what to select
 		S.drag = {kind = "box"}
 		return
 	end
 	if not t or not doc.can("edit") then
 		return
 	end
-	if t.kind == "node" and S.tool == "node" and S.nodes[t.id] and
-			next(S.nodes, next(S.nodes)) then
-		S.drag = {kind = "nodes", ids = S.nodes, dx = 0, dz = 0, moved = true}
-	elseif t.kind == "node" then
-		S.drag = {kind = "node", id = t.id, moved = true,
-				x = doc.ents[t.id].ints.x, z = doc.ents[t.id].ints.z}
-		if S.tool == "node" then
+	if S.tool == "node" then
+		if S.nodes[t.id] and next(S.nodes, next(S.nodes)) then
+			local nodes = {}
+			for id in pairs(S.nodes) do
+				nodes[id] = true
+			end
+			S.drag = {kind = "move", inst = {}, nodes = nodes, dx = 0, dz = 0,
+					moved = true}
+		else
 			S.nodes = {[t.id] = true}
+			S.drag = {kind = "node", id = t.id, moved = true,
+					x = doc.ents[t.id].ints.x, z = doc.ents[t.id].ints.z}
 		end
-	elseif t.kind == "wall" then
-		local w = doc.ents[t.id].ints
-		S.drag = {kind = "wall", id = t.id, a = w.a, b = w.b, dx = 0, dz = 0,
-				moved = true}
-	else
 		return
 	end
-	if S.tool == "select" then
-		S.selected = {kind = t.kind, id = t.id}
+	-- The select tool: what is pressed joins the selection unless it is in
+	-- it already, and the drag moves all of it; a lone node drags alone
+	if not S.sel[t.id] then
+		if not S.shift then
+			S.sel = {}
+		end
+		S.sel[t.id] = t.kind
+	end
+	S.primary = t.id
+	if t.kind == "node" and sel_count() == 1 then
+		S.drag = {kind = "node", id = t.id, moved = true,
+				x = doc.ents[t.id].ints.x, z = doc.ents[t.id].ints.z}
+	else
+		local inst, nodes = moved_by(S.sel)
+		S.drag = {kind = "move", inst = inst, nodes = nodes, dx = 0, dz = 0,
+				moved = true}
 	end
 end
 
 local function update_drag()
 	local d = S.drag
 	if d.kind == "box" then
+		return
+	end
+	if d.kind == "footprint" then
+		local x, z = snapped_point(nil)
+		if x then
+			d.x1, d.z1 = x, z
+		end
 		return
 	end
 	if d.kind == "node" then
@@ -1251,16 +1749,52 @@ local function end_drag()
 	if d.kind == "box" then
 		local x0, x1 = math.min(S.press.mx, S.mx), math.max(S.press.mx, S.mx)
 		local y0, y1 = math.min(S.press.my, S.my), math.max(S.press.my, S.my)
-		if not S.shift then
-			S.nodes = {}
+		local function inside(x, z)
+			local sx, sy = to_screen(x, z)
+			return sx >= x0 and sx <= x1 and sy >= y0 and sy <= y1
 		end
-		for _, n in ipairs(doc.of_type("node")) do
-			local sx, sy = to_screen(n.ints.x, n.ints.z)
-			if sx >= x0 and sx <= x1 and sy >= y0 and sy <= y1 then
-				S.nodes[n.id] = true
+		if S.tool == "node" then
+			if not S.shift then
+				S.nodes = {}
+			end
+			for _, n in ipairs(doc.of_type("node")) do
+				if inside(n.ints.x, n.ints.z) then
+					S.nodes[n.id] = true
+				end
+			end
+		else
+			if not S.shift then
+				S.sel = {}
+			end
+			for id, it in pairs(inst_data) do
+				if inside(it.x, it.z) then
+					S.sel[id] = "instance"
+					S.primary = id
+				end
+			end
+			for id, w in pairs(wall_data) do
+				if inside(w.ax, w.az) and inside(w.bx, w.bz) then
+					S.sel[id] = "wall"
+					S.primary = id
+				end
+			end
+			for id, r in pairs(room_data) do
+				local all = true
+				for _, p in ipairs(r.pts) do
+					all = all and inside(p[1], p[2])
+				end
+				if all then
+					S.sel[id] = "room"
+					S.primary = id
+				end
 			end
 		end
 		refresh_panels()
+	elseif d.kind == "footprint" then
+		local w, dd = math.abs(d.x1 - d.x0), math.abs(d.z1 - d.z0)
+		if w >= 1 and dd >= 1 and doc.can("edit") then
+			add_box((d.x0 + d.x1) / 2, (d.z0 + d.z1) / 2, w, dd)
+		end
 	elseif d.kind == "node" then
 		if d.onto then
 			send(merge_ops(d.id, d.onto))
@@ -1269,13 +1803,19 @@ local function end_drag()
 			send({{op = "set", ent = {id = d.id, ints = {x = d.x, z = d.z}}}})
 		end
 	elseif d.dx ~= 0 or d.dz ~= 0 then
-		local ids = d.kind == "wall" and {[d.a] = true, [d.b] = true} or d.ids
 		local ops = {}
-		for n in pairs(ids) do
+		for n in pairs(d.nodes) do
 			local p = doc.ents[n] and doc.ents[n].ints
 			if p then
 				ops[#ops + 1] = {op = "set", ent = {id = n,
 						ints = {x = p.x + d.dx, z = p.z + d.dz}}}
+			end
+		end
+		for id in pairs(d.inst) do
+			local i = doc.ents[id] and doc.ents[id].ints
+			if i then
+				ops[#ops + 1] = {op = "set", ent = {id = id,
+						ints = {x = i.x + d.dx, z = i.z + d.dz}}}
 			end
 		end
 		send(ops)
@@ -1285,7 +1825,18 @@ end
 local function click()
 	local t = S.press.target
 	if S.tool == "select" then
-		S.selected = t and {kind = t.kind, id = t.id} or nil
+		if not S.shift then
+			S.sel = {}
+			S.primary = nil
+		end
+		if t then
+			if S.sel[t.id] and S.shift then
+				S.sel[t.id] = nil
+			else
+				S.sel[t.id] = t.kind
+				S.primary = t.id
+			end
+		end
 		refresh_panels()
 	elseif S.tool == "node" then
 		if not S.shift then
@@ -1295,6 +1846,15 @@ local function click()
 			S.nodes[t.id] = not S.nodes[t.id] or nil
 		end
 		refresh_panels()
+	elseif S.tool == "box" then
+		if not doc.can("edit") then
+			doc.notice("Viewing only: no edit privilege")
+			return
+		end
+		local x, z = snapped_point(nil)
+		if x then
+			add_box(x, z, S.box.w, S.box.d)
+		end
 	elseif S.tool == "wall" or S.tool == "room" then
 		if not doc.can("edit") then
 			doc.notice("Viewing only: no edit privilege")
@@ -1329,6 +1889,11 @@ local function click()
 	elseif S.tool == "paint" then
 		local s = pick_surface()
 		if s and doc.can("edit") then
+			if s.kind == "instance" then
+				send({{op = "set", ent = {id = doc.ents[s.id].ints.def,
+						ints = {mat = default_material()}}}})
+				return
+			end
 			local f = s.kind == "floor" and "mat_floor" or
 					s.kind == "ceiling" and "mat_ceiling" or
 					s.side == "left" and "mat_left" or
@@ -1452,6 +2017,7 @@ local function commit_typed()
 end
 
 function M.key_down(key, event_data)
+	local ctrl = event_data and event_data:GetInt("Qualifiers") % 4 >= 2
 	if S.draw or S.corners then
 		local digit = key >= magic.KEY_0 and key <= magic.KEY_9
 		if digit then
@@ -1470,13 +2036,22 @@ function M.key_down(key, event_data)
 			return
 		end
 	end
+	if ctrl then
+		if key == magic.KEY_D then
+			copy_selected(false)
+		elseif key == magic.KEY_L then
+			copy_selected(true)
+		end
+		return
+	end
 	if key == magic.KEY_ESCAPE then
 		if S.draw or S.corners then
 			S.draw = nil
 			S.corners = nil
 			S.typed = ""
-		elseif S.selected or next(S.nodes) then
-			S.selected = nil
+		elseif next(S.sel) or next(S.nodes) then
+			S.sel = {}
+			S.primary = nil
 			S.nodes = {}
 			refresh_panels()
 		elseif S.tool ~= "select" then
@@ -1484,6 +2059,10 @@ function M.key_down(key, event_data)
 		end
 	elseif key == magic.KEY_TAB then
 		set_view(S.view == "2d" and "3d" or "2d")
+	elseif key == magic.KEY_Z then
+		rotate_selection(angle_step())
+	elseif key == magic.KEY_X then
+		rotate_selection(-angle_step())
 	elseif key == magic.KEY_V then
 		set_tool("select")
 	elseif key == magic.KEY_N then
@@ -1492,6 +2071,8 @@ function M.key_down(key, event_data)
 		set_tool("wall")
 	elseif key == magic.KEY_R then
 		set_tool("room")
+	elseif key == magic.KEY_O then
+		set_tool("box")
 	elseif key == magic.KEY_P then
 		set_tool("paint")
 	elseif key == magic.KEY_G then
@@ -1512,7 +2093,7 @@ local function move_camera(dt)
 	local input = magic.input
 	S.shift = input:GetKeyDown(magic.KEY_LSHIFT) or
 			input:GetKeyDown(magic.KEY_RSHIFT)
-	if doc.typing() then
+	if doc.typing() or input:GetKeyDown(magic.KEY_LCTRL) and S.view == "2d" then
 		return
 	end
 	local f, r, u = 0, 0, 0
@@ -1543,10 +2124,10 @@ local function place_cameras()
 	cam3d.aspectRatio = w / h
 	cam3d_node.position = magic.Vector3(S.pos.x, S.pos.y, S.pos.z)
 	cam3d_node.rotation = magic.Quaternion(S.pitch, S.yaw, 0)
-	-- The ceilings are seen from inside the rooms, and are out of the way
-	-- of a camera above them
+	-- The ceilings and what hangs from them are seen from inside the
+	-- rooms, and are out of the way of a camera above them
 	-- simplified: against the plan's ceiling, not each room's own
-	ceilings_node.enabled = S.view == "3d" and
+	overhead_node.enabled = S.view == "3d" and
 			S.pos.y * 1000 < settings().ceiling
 end
 
@@ -1581,6 +2162,27 @@ local function draw_overlay()
 	local function line(ax, az, bx, bz, col)
 		debug:AddLine(P(ax, az), P(bx, bz), col, false)
 	end
+	local function dashed(pts, col)
+		for i = 1, #pts do
+			local p, q = pts[i], pts[i % #pts + 1]
+			local l = geom.len(q[1] - p[1], q[2] - p[2])
+			local n = math.max(1, math.floor(l / (6 * mm_per_px())))
+			for j = 0, n - 1, 2 do
+				line(p[1] + (q[1] - p[1]) * j / n, p[2] + (q[2] - p[2]) * j / n,
+						p[1] + (q[1] - p[1]) * (j + 1) / n,
+						p[2] + (q[2] - p[2]) * (j + 1) / n, col)
+			end
+		end
+	end
+	local function outline(pts, col, ys)
+		for _, yy in ipairs(ys or {y}) do
+			for i = 1, #pts do
+				local p, q = pts[i], pts[i % #pts + 1]
+				debug:AddLine(P(p[1], p[2], yy), P(q[1], q[2], yy), col, false)
+			end
+		end
+	end
+	local dark = magic.Color(0.2, 0.2, 0.25)
 	-- The grid, in the plan view: the snap step where it is at least 8
 	-- pixels, coarser where it is not, and every metre darker
 	if S.view == "2d" then
@@ -1608,71 +2210,78 @@ local function draw_overlay()
 			local cx, cz = geom.centroid(r.pts)
 			world_label(cx, 0, cz, doc.ents[id].strs.name .. "\n" .. m2(r.net))
 		end
-		-- The walls hung above the cut, dashed
+		-- What is above the cut, dashed; the objects below it outlined
 		local cut = settings().cut
 		for id, o in pairs(outlines) do
-			local y0 = wall_span(doc.ents[id].ints)
-			if y0 >= cut then
-				local pts = o.pts
-				for i = 1, #pts do
-					local p, q = pts[i], pts[i % #pts + 1]
-					local l = geom.len(q[1] - p[1], q[2] - p[2])
-					local n = math.max(1, math.floor(l / (6 * mm_per_px())))
-					for j = 0, n - 1, 2 do
-						line(p[1] + (q[1] - p[1]) * j / n,
-								p[2] + (q[2] - p[2]) * j / n,
-								p[1] + (q[1] - p[1]) * (j + 1) / n,
-								p[2] + (q[2] - p[2]) * (j + 1) / n,
-								magic.Color(0.2, 0.2, 0.25))
-					end
-				end
+			if wall_span(doc.ents[id].ints) >= cut then
+				dashed(o.pts, dark)
+			end
+		end
+		for _, it in pairs(inst_data) do
+			if it.y0 >= cut then
+				dashed(it.foot, dark)
+			else
+				outline(it.foot, dark)
 			end
 		end
 	end
 	local accent = magic.Color(1.0, 0.6, 0.1)
-	local function outline(pts, col, ys)
-		for _, yy in ipairs(ys or {y}) do
-			for i = 1, #pts do
-				local p, q = pts[i], pts[i % #pts + 1]
-				debug:AddLine(P(p[1], p[2], yy), P(q[1], q[2], yy), col, false)
-			end
+	for id, kind in pairs(S.sel) do
+		if kind == "wall" and outlines[id] then
+			local y0, y1 = wall_span(doc.ents[id].ints)
+			outline(outlines[id].pts, accent, S.view == "3d" and
+					{W(y0) + 0.004, W(y1) + 0.004} or nil)
+			local w = wall_data[id]
+			world_label((w.ax + w.bx) / 2, 0, (w.az + w.bz) / 2,
+					mm_text(geom.len(w.bx - w.ax, w.bz - w.az)))
+		elseif kind == "room" and room_data[id] then
+			outline(room_data[id].pts, accent)
+			outline(room_data[id].inner, magic.Color(0.2, 0.6, 1.0))
+		elseif kind == "instance" and inst_data[id] then
+			local it = inst_data[id]
+			outline(it.foot, accent, S.view == "3d" and
+					{W(it.y0) + 0.004, W(it.y1) + 0.004} or nil)
 		end
 	end
-	local sel = S.selected
-	if sel and sel.kind == "wall" and outlines[sel.id] then
-		local y0, y1 = wall_span(doc.ents[sel.id].ints)
-		outline(outlines[sel.id].pts, accent, S.view == "3d" and
-				{W(y0) + 0.004, W(y1) + 0.004} or nil)
-		local w = wall_data[sel.id]
-		world_label((w.ax + w.bx) / 2, 0, (w.az + w.bz) / 2,
-				mm_text(geom.len(w.bx - w.ax, w.bz - w.az)))
-	elseif sel and sel.kind == "room" and room_data[sel.id] then
-		outline(room_data[sel.id].pts, accent)
-		outline(room_data[sel.id].inner, magic.Color(0.2, 0.6, 1.0))
+	-- The primary object's gaps to the walls
+	if S.primary and S.sel[S.primary] == "instance" and inst_data[S.primary] and
+			not S.drag then
+		local it = inst_data[S.primary]
+		for _, g in ipairs(wall_gaps(S.primary)) do
+			if g.gap and g.gap > 0 then
+				local ax, az = it.x + g.dir[1] * g.half, it.z + g.dir[2] * g.half
+				local bx, bz = ax + g.dir[1] * g.gap, az + g.dir[2] * g.gap
+				line(ax, az, bx, bz, magic.Color(0.2, 0.6, 1.0))
+				world_label((ax + bx) / 2, 0, (az + bz) / 2, mm_text(g.gap))
+			end
+		end
 	end
 	-- Nodes, for the tools that pick them
 	if S.tool == "select" or S.tool == "node" then
 		local size = S.view == "2d" and W(6 * mm_per_px()) or 0.08
 		for _, n in ipairs(doc.of_type("node")) do
 			local x, z = node_pos(n.id)
-			local on = (sel and sel.id == n.id) or S.nodes[n.id]
+			local on = S.sel[n.id] or S.nodes[n.id]
 			debug:AddCross(P(x, z), size, on and accent or
 					magic.Color(0.1, 0.3, 0.8), S.view == "3d")
 		end
 	end
-	-- The box being dragged out
-	if S.drag and S.drag.kind == "box" then
+	-- The box being dragged out, and a box's footprint being drawn
+	local d = S.drag
+	if d and d.kind == "box" and S.view == "2d" then
 		local w, h = screen_size()
-		local x0, y0, x1, y1 = S.press.mx, S.press.my, S.mx, S.my
-		if S.view == "2d" then
-			local function pz(px, py)
-				return S.cx + (px / w - 0.5) * S.span * w / h,
-						S.cz - (py / h - 0.5) * S.span
-			end
-			local ax, az = pz(x0, y0)
-			local bx, bz = pz(x1, y1)
-			outline({{ax, az}, {bx, az}, {bx, bz}, {ax, bz}}, accent)
+		local function pz(px, py)
+			return S.cx + (px / w - 0.5) * S.span * w / h,
+					S.cz - (py / h - 0.5) * S.span
 		end
+		local ax, az = pz(S.press.mx, S.press.my)
+		local bx, bz = pz(S.mx, S.my)
+		outline({{ax, az}, {bx, az}, {bx, bz}, {ax, bz}}, accent)
+	elseif d and d.kind == "footprint" then
+		outline({{d.x0, d.z0}, {d.x1, d.z0}, {d.x1, d.z1}, {d.x0, d.z1}},
+				accent)
+		world_label(d.x1, 0, d.z1, mm_text(math.abs(d.x1 - d.x0)) .. " x " ..
+				mm_text(math.abs(d.z1 - d.z0)))
 	end
 	-- What the wall and room tools would do on a click
 	if (S.tool == "wall" or S.tool == "room") and not over_ui() then
@@ -1721,15 +2330,21 @@ function M.start(d)
 	doc = d
 	S.material = nil
 	doc.listeners[#doc.listeners + 1] = function(changed, deleted)
-		S.dirty = true
-		if S.selected and not doc.ents[S.selected.id] then
-			S.selected = nil
+		for id in pairs(S.sel) do
+			if not doc.ents[id] then
+				S.sel[id] = nil
+			end
+		end
+		if S.primary and not S.sel[S.primary] then
+			S.primary = next(S.sel)
 		end
 		for id in pairs(S.nodes) do
 			if not doc.ents[id] then
 				S.nodes[id] = nil
 			end
 		end
+		-- The panel reads the instances' placement and gaps
+		rebuild()
 		refresh_panels()
 	end
 	doc.privs_changed = refresh_panels
