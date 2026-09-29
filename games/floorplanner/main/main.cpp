@@ -323,25 +323,20 @@ struct Account
 	}
 };
 
-static const sv_<ss_> KNOWN_PRIVS = {"edit", "admin"};
-
-// Who may make an account, the auth store's and not the document's
-// ([FP_ACCESS] 3): the plan's settings entity is changed by any editor's
-// ordinary edits, and its old default_edit is only read once, to carry it
-// over
+// Who may make an account: the server's store's ([FP_ACCESS] 3,
+// [FP_PLANS] 1), which only an admin's requests change
 struct AccessSettings
 {
 	uint8_t open_registration = 0;
-	uint8_t default_edit = 1;
 
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(open_registration, default_edit);
+		archive(open_registration);
 	}
 };
 
-// A one-time invite ([FP_ACCESS] 2): the privileges the account it makes
-// gets, and the admin who made it
+// A one-time invite ([FP_ACCESS] 2): the admin who made it. What its
+// account may do is each plan's ([FP_PLANS] 2); privs is kept empty
 struct Invite
 {
 	sv_<ss_> privs;
@@ -425,6 +420,8 @@ struct Peer
 {
 	ss_ name; // empty until logged in
 	ss_ address;
+	ss_ plan; // the plan the user is in ([FP_PLANS] 3), or ""
+
 	int failures = 0;
 	Presence presence;
 	bool has_presence = false;
@@ -459,12 +456,65 @@ static bool unpack(const ss_ &data, T &value)
 static const double OPS_PER_SECOND = 400;
 static const double OPS_BURST = 4000;
 
-struct Module: public interface::Module
+struct VoxelEdit
+{
+	int32_t seq = 0;
+	int32_t def = 0;
+	// cell -> palette entry, 0 for none
+	std::map<int32_t, int32_t> sets;
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(seq, def, sets);
+	}
+};
+
+struct LockRequest
+{
+	int32_t seq = 0;
+	sv_<int32_t> ids;
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(seq, ids);
+	}
+};
+
+struct Preview
+{
+	int32_t peer = 0;
+	sv_<Entity> ents;
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(peer, ents);
+	}
+};
+
+struct PresenceOut
+{
+	int32_t peer = 0;
+	ss_ name;
+	Presence p;
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(peer, name, p);
+	}
+};
+
+static bool valid_voxel_key(int32_t key)
+{
+	// Three bytes, each a cell coordinate + VOXEL_RANGE
+	return key >= 0 && key < (1 << 24);
+}
+
+
+// One open plan ([FP_PLANS] 3): its save, and all of it in memory. The
+// server has open as many as are in use, and closes one PLAN_IDLE_S after
+// the last user has left it.
+struct Plan
 {
 	interface::Server *m_server;
+	ss_ m_name;
 	// Owned by builtin/storage, which closes it when it unloads
 	storage::Save *m_save = nullptr;
-	ss_ m_save_name; // the open plan's
 	storage::Store *m_store = nullptr;
 
 	std::map<int32_t, Entity> m_ents;
@@ -477,326 +527,17 @@ struct Module: public interface::Module
 	set_<int32_t> m_voxels_dirty;
 	int32_t m_next_id = 1;
 	set_<int32_t> m_dirty;
-	float m_flush_timer = 0;
-
-	std::map<network::PeerId, Peer> m_peers;
-	// [FP_ACCESS]: the plan's access settings, the code that claims it while
-	// it has no admin (empty when it has one), and the failed logins by name
-	// and by address
-	AccessSettings m_access;
-	ss_ m_setup_code;
-	std::map<ss_, Failures> m_name_failures;
-	std::map<ss_, Failures> m_address_failures;
 	// What is being dragged, and by whom: nobody else's batch may touch it
 	std::map<int32_t, network::PeerId> m_locks;
+	// The save's images/ as files for the clients: the pictures a plan can
+	// be traced over. Put there by hand; a name is one file name.
+	sv_<ss_> m_images;
+	// Seconds with nobody in it
+	float m_idle = 0;
 
-	Module(interface::Server *server):
-		interface::Module(MODULE),
-		m_server(server)
-	{
-		check_pbkdf2();
-	}
-
-	~Module(){}
-
-	void init()
-	{
-		m_server->sub_event(this, Event::t("core:start"));
-		m_server->sub_event(this, Event::t("core:continue"));
-		m_server->sub_event(this, Event::t("core:unload"));
-		m_server->sub_event(this, Event::t("core:shutdown"));
-		m_server->sub_event(this, Event::t("core:tick"));
-		m_server->sub_event(this, Event::t("network:client_connected"));
-		m_server->sub_event(this, Event::t("network:client_disconnected"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
-		m_server->sub_event(this, Event::t("network:packet_received/fp:login"));
-		m_server->sub_event(this, Event::t("network:packet_received/fp:open"));
-		m_server->sub_event(this,
-				Event::t("network:packet_received/fp:close_plan"));
-		m_server->sub_event(this,
-				Event::t("network:packet_received/fp:copy_plan"));
-		m_server->sub_event(this, Event::t("network:packet_received/fp:batch"));
-		m_server->sub_event(this, Event::t("network:packet_received/fp:chat"));
-		m_server->sub_event(this, Event::t("network:packet_received/fp:admin"));
-		m_server->sub_event(this, Event::t("network:packet_received/fp:passwd"));
-		m_server->sub_event(this, Event::t("network:packet_received/fp:voxels"));
-		m_server->sub_event(this, Event::t("network:packet_received/fp:lock"));
-		m_server->sub_event(this, Event::t("network:packet_received/fp:unlock"));
-		m_server->sub_event(this, Event::t("network:packet_received/fp:preview"));
-		m_server->sub_event(this,
-				Event::t("network:packet_received/fp:presence"));
-	}
-
-	void event(const Event::Type &type, const Event::Private *p)
-	{
-		EVENT_VOIDN("core:start", on_start)
-		EVENT_VOIDN("core:continue", on_start)
-		EVENT_VOIDN("core:unload", flush)
-		EVENT_VOIDN("core:shutdown", flush)
-		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_TYPEN("network:client_connected", on_client_connected,
-				network::NewClient)
-		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
-				network::OldClient)
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
-		EVENT_TYPEN("network:packet_received/fp:login", on_login,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:open", on_open,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:close_plan", on_close_plan,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:copy_plan", on_copy_plan,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:chat", on_chat,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:admin", on_admin,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:passwd", on_passwd,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:voxels", on_voxels,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:lock", on_lock,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:unlock", on_unlock,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:preview", on_preview,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/fp:presence", on_presence,
-				network::Packet)
-	}
-
-	// The save
-
-	// One key of what the launcher asked for through the server's -u, as
-	// games/vanilla reads it: a value of the shape a save name has, or ""
-	ss_ launch_param(const ss_ &key_name)
-	{
-		const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
-		const ss_ key = key_name+"=";
-		size_t at = u.find(key);
-		if(at == ss_::npos || !(at == 0 || u[at - 1] == '\n'))
-			return "";
-		ss_ v = u.substr(at + key.size());
-		v = v.substr(0, v.find('\n'));
-		for(char c : v)
-			if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
-				return "";
-		return v.size() <= 64 ? v : "";
-	}
-
-	// Started from the launch grid ([FP_LAUNCH]): which plan is the local
-	// user's to pick, and the local user joins without a password. Run by
-	// hand, the server opens "plan", or the save=<name> it is given.
-	bool m_launched = false;
-
-	void on_start()
-	{
-		m_launched = launch_param("pick") == "1";
-		ss_ name = launch_param("save");
-		if(name.empty() && m_launched){
-			log_i(MODULE, "Waiting for the local user to pick a plan");
-			return;
-		}
-		open_save(name.empty() ? "plan" : name, true);
-	}
-
-	// Opens the save, or with create makes it when it is not there; a
-	// copy goes into its backups first
-	bool open_save(const ss_ &name, bool create)
-	{
-		bool valid = false;
-		storage::access(m_server, [&](storage::Interface *istorage){
-			valid = istorage->valid_name(name);
-			if(!valid)
-				return;
-			m_save = istorage->open(name);
-			if(m_save){
-				// A copy of the plan as it was, before anything touches it:
-				// what an undo that lives only for a session cannot give
-				// back
-				ss_ path = m_save->path();
-				istorage->close(m_save);
-				backup(path);
-				m_save = istorage->open(name);
-			} else if(create){
-				m_save = istorage->create(name);
-			}
-		});
-		if(!m_save){
-			log_e(MODULE, "Could not open or create the save %s", cs(name));
-			if(!m_launched)
-				m_server->shutdown(1, "floorplanner: no save");
-			return false;
-		}
-		m_store = m_save->store("main");
-		m_save_name = name;
-		load();
-		load_access();
-		find_images();
-		log_i(MODULE, "Opened the plan %s", cs(name));
-		return true;
-	}
-
-	// The local user: on this machine, of a server the launcher started
-	bool is_local(network::PeerId peer)
-	{
-		auto it = m_peers.find(peer);
-		return m_launched && it != m_peers.end() &&
-				(it->second.address == "127.0.0.1" ||
-				it->second.address == "::1");
-	}
-
-	struct Hello
-	{
-		uint8_t local = 0;      // no password asked
-		uint8_t pick = 0;       // no plan open: pick one of saves
-		sv_<ss_> saves;         // for the local user
-		ss_ plan;               // the one open, or ""
-		// [FP_ACCESS]: the join asks for the setup code (the plan has no
-		// admin), or says a new name needs an invite (registration is not
-		// open)
-		uint8_t setup = 0;
-		uint8_t open_registration = 0;
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(local, pick, saves, plan, setup, open_registration);
-		}
-	};
-
-	// What the client shows first: the plans to pick from, for the local
-	// user when none is open; else the join, with a password or without
-	void send_hello(network::PeerId peer)
-	{
-		Hello h;
-		h.local = is_local(peer);
-		h.pick = !m_store;
-		h.plan = m_store ? m_save_name : "";
-		h.setup = !h.local && !m_setup_code.empty();
-		h.open_registration = m_access.open_registration;
-		// Always, to the local user: the plan picker lists them, and a copy
-		// is named past them ([FP_COPY])
-		if(h.local){
-			storage::access(m_server, [&](storage::Interface *istorage){
-				sv_<storage::SaveInfo> infos = istorage->list();
-				// The one opened last first
-				std::sort(infos.begin(), infos.end(),
-						[](const storage::SaveInfo &a, const storage::SaveInfo &b){
-					return a.modified_us > b.modified_us;
-				});
-				for(const storage::SaveInfo &i : infos)
-					h.saves.push_back(i.name);
-			});
-		}
-		send(peer, "fp:hello", pack(h));
-	}
-
-	void on_open(const network::Packet &packet)
-	{
-		std::pair<ss_, uint8_t> req;
-		if(m_store || !is_local(packet.sender) || !unpack(packet.data, req))
-			return;
-		if(!open_save(req.first, req.second != 0)){
-			send(packet.sender, "fp:login_result", pack(ss_("Could not open "
-					"the plan \"")+req.first+"\""));
-			send_hello(packet.sender);
-			return;
-		}
-		for(auto &pair : m_peers)
-			send_hello(pair.first);
-	}
-
-	// Back to the plan picker ([FP_OTHER_PLAN]): the plan saved and closed,
-	// everybody logged out of it, the local user offered the plans again
-	void on_close_plan(const network::Packet &packet)
-	{
-		if(!m_store || !is_local(packet.sender))
-			return;
-		close_plan();
-	}
-
-	void close_plan()
-	{
-		flush();
-		storage::access(m_server, [&](storage::Interface *istorage){
-			istorage->close(m_save);
-		});
-		m_save = nullptr;
-		m_store = nullptr;
-		m_save_name.clear();
-		m_ents.clear();
-		m_voxels.clear();
-		m_dirty.clear();
-		m_voxels_dirty.clear();
-		m_locks.clear();
-		m_images.clear();
-		m_setup_code.clear();
-		for(auto &pair : m_peers){
-			pair.second.name.clear();
-			pair.second.has_presence = false;
-		}
-		log_i(MODULE, "The plan is closed; the local user picks another");
-		for(auto &pair : m_peers){
-			send(pair.first, "fp:closed", "");
-			send_hello(pair.first);
-		}
-	}
-
-	// **A copy of the open plan under a new name, which is then the one
-	// open** ([FP_COPY]; the local user's, as picking a plan is). Never
-	// over a save that exists. The plan is closed first, so its database
-	// and write-ahead log are copied whole; its images go with it, its
-	// backups do not.
-	void on_copy_plan(const network::Packet &packet)
-	{
-		ss_ name;
-		if(!m_store || !is_local(packet.sender) || !unpack(packet.data, name))
-			return;
-		ss_ why;
-		storage::access(m_server, [&](storage::Interface *istorage){
-			if(!istorage->valid_name(name)){
-				why = "\""+name+"\" is not a name a plan can have";
-				return;
-			}
-			for(const storage::SaveInfo &i : istorage->list())
-				if(i.name == name)
-					why = "There is a plan called \""+name+"\" already";
-		});
-		if(!why.empty()){
-			send(packet.sender, "fp:login_result", pack(why));
-			return;
-		}
-		namespace fs = interface::fs;
-		const ss_ from = m_save->path();
-		const size_t slash = from.find_last_of("/\\");
-		const ss_ to = (slash == ss_::npos ? ss_(".") : from.substr(0, slash))+
-				"/"+name;
-		const ss_ old_name = m_save_name;
-		close_plan();
-		fs::create_directories(to+"/images");
-		bool ok = fs::copy_file(from+"/save.sqlite", to+"/save.sqlite");
-		if(fs::path_exists(from+"/save.sqlite-wal"))
-			ok = fs::copy_file(from+"/save.sqlite-wal", to+"/save.sqlite-wal") &&
-					ok;
-		for(const fs::Node &n : fs::list_directory(from+"/images"))
-			if(!n.is_directory)
-				ok = fs::copy_file(from+"/images/"+n.name, to+"/images/"+n.name) &&
-						ok;
-		// A copy that did not make it is not left as a plan to pick
-		if(!ok){
-			log_e(MODULE, "Could not copy the plan %s into %s", cs(old_name),
-					cs(to));
-			fs::remove_all(to);
-			open_save(old_name, false);
-		} else {
-			log_i(MODULE, "Copied the plan %s as %s", cs(old_name), cs(name));
-			open_save(name, false);
-		}
-		for(auto &pair : m_peers)
-			send_hello(pair.first);
-	}
+	Plan(interface::Server *server, const ss_ &name):
+		m_server(server), m_name(name)
+	{}
 
 	// <save>/backups/1 is the newest of BACKUPS; the save is closed, so its
 	// write-ahead log is copied as it is
@@ -826,9 +567,6 @@ struct Module: public interface::Module
 			log_w(MODULE, "Could not back the plan up into %s", cs(dir));
 	}
 
-	// The save's images/ as files for the clients: the pictures a plan can
-	// be traced over. Put there by hand; a name is one file name.
-	sv_<ss_> m_images;
 	void find_images()
 	{
 		namespace fs = interface::fs;
@@ -852,22 +590,22 @@ struct Module: public interface::Module
 			}
 			m_images.push_back(n.name);
 			client_file::access(m_server, [&](client_file::Interface *i){
-				i->add_file_path("main/images/"+n.name, dir+"/"+n.name);
+				i->add_file_path("main/images/"+m_name+"/"+n.name, dir+"/"+n.name);
 			});
 		}
 		log_i(MODULE, "%zu images to trace over", m_images.size());
 	}
 
-	void load()
+	bool load()
 	{
 		m_ents.clear();
 		ss_ version;
 		if(m_store->get("schema_version", version) &&
 				std::stoi(version) > SCHEMA_VERSION){
-			// A newer build's plan: refuse rather than drop what it has
-			m_server->shutdown(1, "floorplanner: the plan is from a newer "
-					"version (schema "+version+")");
-			return;
+			// A newer build's plan: refused rather than dropping what it has
+			log_e(MODULE, "The plan %s is from a newer version (schema %s)",
+					cs(m_name), cs(version));
+			return false;
 		}
 		int32_t stored = version.empty() ? SCHEMA_VERSION : std::stoi(version);
 		for(const ss_ &key : m_store->list("e/")){
@@ -930,8 +668,9 @@ struct Module: public interface::Module
 				m_voxels[std::stoi(key.substr(2))] = voxels;
 		}
 		m_store->set("schema_version", itos(SCHEMA_VERSION));
-		log_i(MODULE, "Loaded %zu entities and %zu voxel volumes",
-				m_ents.size(), m_voxels.size());
+		log_i(MODULE, "Loaded %s: %zu entities and %zu voxel volumes",
+				cs(m_name), m_ents.size(), m_voxels.size());
+		return true;
 	}
 
 	size_t count_type(const ss_ &type)
@@ -971,921 +710,6 @@ struct Module: public interface::Module
 		m_voxels_dirty.clear();
 	}
 
-	void on_tick(const interface::TickEvent &event)
-	{
-		m_flush_timer += event.dtime;
-		if(m_flush_timer >= 1.0f){
-			m_flush_timer = 0;
-			flush();
-		}
-		for(auto &pair : m_peers){
-			pair.second.op_budget = std::min(OPS_BURST,
-					pair.second.op_budget + OPS_PER_SECOND * event.dtime);
-		}
-	}
-
-	// Peers
-
-	void on_client_connected(const network::NewClient &client)
-	{
-		Peer peer;
-		peer.op_budget = OPS_BURST;
-		peer.address = client.info.address;
-		m_peers[client.info.id] = peer;
-	}
-
-	void on_client_disconnected(const network::OldClient &client)
-	{
-		auto it = m_peers.find(client.info.id);
-		if(it == m_peers.end())
-			return;
-		ss_ name = it->second.name;
-		m_peers.erase(it);
-		leave(client.info.id, name);
-		if(!name.empty() && m_store)
-			send_users_to_admins();
-	}
-
-	// A user gone, by leaving or by a kick: their locks go, and the others
-	// stop showing them
-	void leave(network::PeerId peer, const ss_ &name)
-	{
-		unlock_all(peer);
-		if(name.empty())
-			return;
-		send_to_joined("fp:gone", pack((int32_t)peer));
-		broadcast_chat("*** "+name+" left");
-	}
-
-	void unlock_all(network::PeerId peer)
-	{
-		for(auto it = m_locks.begin(); it != m_locks.end();){
-			if(it->second == peer)
-				it = m_locks.erase(it);
-			else
-				++it;
-		}
-	}
-
-	// Voxels
-
-	struct VoxelEdit
-	{
-		int32_t seq = 0;
-		int32_t def = 0;
-		// cell -> palette entry, 0 for none
-		std::map<int32_t, int32_t> sets;
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(seq, def, sets);
-		}
-	};
-
-	static bool valid_voxel_key(int32_t key)
-	{
-		// Three bytes, each a cell coordinate + VOXEL_RANGE
-		return key >= 0 && key < (1 << 24);
-	}
-
-	void on_voxels(const network::Packet &packet)
-	{
-		auto pit = m_peers.find(packet.sender);
-		if(pit == m_peers.end() || pit->second.name.empty())
-			return;
-		VoxelEdit edit;
-		std::pair<int32_t, ss_> result;
-		if(!unpack(packet.data, edit)){
-			result.second = "Malformed voxels";
-		} else {
-			result.first = edit.seq;
-			result.second = check_voxels(packet.sender, edit);
-		}
-		if(result.second.empty()){
-			pit->second.op_budget -= edit.sets.size() / 10.0;
-			std::map<int32_t, int32_t> &voxels = m_voxels[edit.def];
-			for(auto &pair : edit.sets){
-				if(pair.second == 0)
-					voxels.erase(pair.first);
-				else
-					voxels[pair.first] = pair.second;
-			}
-			m_voxels_dirty.insert(edit.def);
-			// The sender's copy carries its number, as with fp:changes
-			for(auto &pair : m_peers){
-				if(pair.second.name.empty())
-					continue;
-				edit.seq = pair.first == packet.sender ? result.first : -1;
-				send(pair.first, "fp:voxels", pack(edit));
-			}
-		} else {
-			log_i(MODULE, "Voxels from %s refused: %s", cs(pit->second.name),
-					cs(result.second));
-		}
-		send(packet.sender, "fp:voxels_result", pack(result));
-	}
-
-	ss_ check_voxels(network::PeerId sender, const VoxelEdit &edit)
-	{
-		if(!peer_has(sender, "edit"))
-			return "You have no edit privilege";
-		auto it = m_ents.find(edit.def);
-		if(it == m_ents.end() || it->second.type != "definition" ||
-				it->second.ints.at("kind") != DK_VOXEL)
-			return "Not a voxel volume";
-		auto lock = m_locks.find(edit.def);
-		if(lock != m_locks.end() && lock->second != sender)
-			return m_peers[lock->second].name+" is moving that";
-		if(m_peers[sender].op_budget < edit.sets.size() / 10.0)
-			return "Too many voxels at once; slow down";
-		const std::map<int32_t, int32_t> &voxels = m_voxels[edit.def];
-		size_t added = 0;
-		for(auto &pair : edit.sets){
-			if(!valid_voxel_key(pair.first))
-				return "A voxel outside the volume";
-			if(pair.second != 0){
-				auto p = m_ents.find(pair.second);
-				if(p == m_ents.end() || p->second.type != "palette")
-					return "A voxel of what is not a palette entry";
-				if(!voxels.count(pair.first))
-					added++;
-			}
-		}
-		if(voxels.size() + added > MAX_VOXELS)
-			return "The volume is full";
-		return "";
-	}
-
-	// Drag locks, previews and presence
-
-	struct LockRequest
-	{
-		int32_t seq = 0;
-		sv_<int32_t> ids;
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(seq, ids);
-		}
-	};
-
-	void on_lock(const network::Packet &packet)
-	{
-		LockRequest req;
-		std::pair<int32_t, ss_> result;
-		if(!unpack(packet.data, req) || req.ids.size() > MAX_OPS_PER_BATCH)
-			return;
-		result.first = req.seq;
-		if(!peer_has(packet.sender, "edit")){
-			result.second = "You have no edit privilege";
-		} else {
-			for(int32_t id : req.ids){
-				auto it = m_locks.find(id);
-				if(it != m_locks.end() && it->second != packet.sender){
-					result.second = m_peers[it->second].name+
-							" is moving that";
-					break;
-				}
-			}
-		}
-		if(result.second.empty()){
-			// One drag at a time: what this user held before is let go
-			unlock_all(packet.sender);
-			for(int32_t id : req.ids)
-				m_locks[id] = packet.sender;
-		}
-		send(packet.sender, "fp:lock_result", pack(result));
-	}
-
-	void on_unlock(const network::Packet &packet)
-	{
-		unlock_all(packet.sender);
-		// And what it was showing the others goes
-		relay_preview(packet.sender, {});
-	}
-
-	struct Preview
-	{
-		int32_t peer = 0;
-		sv_<Entity> ents;
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(peer, ents);
-		}
-	};
-
-	void relay_preview(network::PeerId sender, const sv_<Entity> &ents)
-	{
-		Preview p;
-		p.peer = (int32_t)sender;
-		p.ents = ents;
-		ss_ data = pack(p);
-		for(auto &pair : m_peers)
-			if(!pair.second.name.empty() && pair.first != sender)
-				send(pair.first, "fp:preview", data);
-	}
-
-	// A drag as it goes: where the dragged things would be, for the others
-	// to draw. Nothing in the document changes until the drag's batch.
-	void on_preview(const network::Packet &packet)
-	{
-		sv_<Entity> ents;
-		if(!peer_has(packet.sender, "edit") || !unpack(packet.data, ents) ||
-				ents.size() > MAX_OPS_PER_BATCH)
-			return;
-		relay_preview(packet.sender, ents);
-	}
-
-	struct PresenceOut
-	{
-		int32_t peer = 0;
-		ss_ name;
-		Presence p;
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(peer, name, p);
-		}
-	};
-
-	void on_presence(const network::Packet &packet)
-	{
-		auto it = m_peers.find(packet.sender);
-		if(it == m_peers.end() || it->second.name.empty())
-			return;
-		Presence p;
-		if(!unpack(packet.data, p) || p.sel.size() > 1000)
-			return;
-		it->second.presence = p;
-		it->second.has_presence = true;
-		PresenceOut out;
-		out.peer = (int32_t)packet.sender;
-		out.name = it->second.name;
-		out.p = p;
-		ss_ data = pack(out);
-		for(auto &pair : m_peers)
-			if(!pair.second.name.empty() && pair.first != packet.sender)
-				send(pair.first, "fp:presence", data);
-	}
-
-	void on_files_transmitted(const client_file::FilesTransmitted &event)
-	{
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(event.recipient, "core:run_script",
-					"buildat.run_script_file(\"main/init.lua\")");
-		});
-		send_hello(event.recipient);
-	}
-
-	void send(network::PeerId peer, const ss_ &name, const ss_ &data)
-	{
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, name, data);
-		});
-	}
-
-	void send_to_joined(const ss_ &name, const ss_ &data)
-	{
-		for(auto &pair : m_peers)
-			if(!pair.second.name.empty())
-				send(pair.first, name, data);
-	}
-
-	void send_chat(network::PeerId peer, const ss_ &text)
-	{
-		send(peer, "fp:chat", pack(text));
-	}
-
-	void broadcast_chat(const ss_ &text)
-	{
-		send_to_joined("fp:chat", pack(text));
-	}
-
-	// Accounts
-
-	bool get_account(const ss_ &name, Account &account)
-	{
-		ss_ data;
-		return m_store->get("auth/"+name, data) && unpack(data, account);
-	}
-
-	void set_account(const ss_ &name, const Account &account)
-	{
-		m_store->set("auth/"+name, pack(account));
-	}
-
-	void send_privs(network::PeerId peer, const Account &account)
-	{
-		send(peer, "fp:privs", pack(account.privs));
-	}
-
-	network::PeerId find_peer(const ss_ &name)
-	{
-		for(auto &pair : m_peers)
-			if(pair.second.name == name)
-				return pair.first;
-		return 0;
-	}
-
-	// Access ([FP_ACCESS])
-
-	void save_access()
-	{
-		m_store->set("access/settings", pack(m_access));
-	}
-
-	void load_access()
-	{
-		ss_ data;
-		if(!(m_store->get("access/settings", data) && unpack(data, m_access))){
-			// A plan from before: registration open where the launcher
-			// started the server, and default_edit carried over from the
-			// settings entity, where any editor could change it
-			m_access = AccessSettings();
-			m_access.open_registration = m_launched;
-			Entity *s = find_singleton("settings");
-			m_access.default_edit = !s || s->ints["default_edit"] != 0;
-			save_access();
-		}
-		update_setup_code();
-	}
-
-	int admin_count()
-	{
-		int n = 0;
-		for(const ss_ &key : m_store->list("auth/")){
-			Account account;
-			if(get_account(key.substr(5), account) && account.has("admin"))
-				n++;
-		}
-		return n;
-	}
-
-	// A plan with no admin is claimed with a code from the server's log
-	// ([FP_ACCESS] 1): on a public server the first to connect would
-	// otherwise be its admin
-	void update_setup_code()
-	{
-		if(admin_count() > 0){
-			m_setup_code.clear();
-			return;
-		}
-		if(!m_setup_code.empty())
-			return;
-		m_setup_code = random_code(8);
-		log_w(MODULE, "The plan %s has no admin. The first to join with the "
-				"setup code %s becomes it.", cs(m_save_name), cs(m_setup_code));
-	}
-
-	// How long, in microseconds, before a login of this name or from this
-	// address may be tried again
-	int64_t failure_wait(std::map<ss_, Failures> &m, const ss_ &key, int64_t now)
-	{
-		auto it = m.find(key);
-		if(it == m.end())
-			return 0;
-		if(now - it->second.first_us > FAIL_WINDOW_US &&
-				now >= it->second.wait_until_us){
-			m.erase(it);
-			return 0;
-		}
-		return std::max((int64_t)0, it->second.wait_until_us - now);
-	}
-
-	void note_failure(std::map<ss_, Failures> &m, const ss_ &key, int64_t now)
-	{
-		Failures &f = m[key];
-		if(f.count == 0 || now - f.first_us > FAIL_WINDOW_US){
-			f.count = 0;
-			f.first_us = now;
-		}
-		f.count++;
-		const int64_t wait = f.count >= FAIL_LOCK ? FAIL_WINDOW_US :
-				std::min((int64_t)60, (int64_t)1 << (f.count - 1)) * 1000000;
-		f.wait_until_us = now + wait;
-	}
-
-	Account new_account(const ss_ &password, const sv_<ss_> &privs)
-	{
-		Account account;
-		std::random_device rd;
-		account.salt.resize(16);
-		for(char &c : account.salt)
-			c = (char)(rd() & 0xff);
-		account.hash = pbkdf2_sha256(password, account.salt, PBKDF2_ITERATIONS);
-		account.privs = privs;
-		return account;
-	}
-
-	sv_<ss_> default_privs()
-	{
-		return m_access.default_edit ? sv_<ss_>{"edit"} : sv_<ss_>{};
-	}
-
-	struct LoginRequest
-	{
-		ss_ name;
-		ss_ password;
-		ss_ code; // the setup code, or an invite code ([FP_ACCESS])
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(name, password, code);
-		}
-	};
-
-	// simplified: the password arrives in the clear on a native client's
-	// connection, because the transport is not encrypted yet ([TRANSPORT]);
-	// the join dialog says so. The web client behind an https proxy has TLS.
-	void on_login(const network::Packet &packet)
-	{
-		auto pit = m_peers.find(packet.sender);
-		if(pit == m_peers.end())
-			return;
-		Peer &peer = pit->second;
-		LoginRequest cred;
-		auto reply = [&](const ss_ &error){
-			send(packet.sender, "fp:login_result", pack(error));
-		};
-		if(!m_store)
-			return reply("No plan is open yet");
-		// The local user is on the machine the plan is on: a password
-		// would keep out nobody the files themselves do not let in
-		bool local = is_local(packet.sender);
-		if(!peer.name.empty())
-			return reply("Already joined");
-		if(peer.failures >= MAX_LOGIN_FAILURES)
-			return reply("Too many failed attempts; reconnect");
-		if(!unpack(packet.data, cred))
-			return reply("Malformed login");
-		const ss_ &name = cred.name;
-		const ss_ &password = cred.password;
-		const ss_ code = upper(cred.code);
-		if(!valid_name(name))
-			return reply("A name is 1 to 20 letters, digits, _ or -");
-		if(password.size() > 100 || code.size() > 100)
-			return reply("The password is too long");
-		if(find_peer(name))
-			return reply(name+" is already here");
-
-		// [FP_ACCESS] 5: a name and an address that failed wait before
-		// they are tried again
-		const int64_t now = interface::os::time_us();
-		const int64_t wait = std::max(
-				failure_wait(m_name_failures, name, now),
-				failure_wait(m_address_failures, peer.address, now));
-		if(wait > 0 && !local){
-			log_i(MODULE, "Login of %s from %s refused: waiting after failures",
-					cs(name), cs(peer.address));
-			return reply("Too many failed logins; try again in "+
-					itos((int)((wait + 999999) / 1000000))+" s");
-		}
-		auto fail = [&](const ss_ &why){
-			peer.failures++;
-			note_failure(m_name_failures, name, now);
-			note_failure(m_address_failures, peer.address, now);
-			log_i(MODULE, "Login of %s from %s failed: %s", cs(name),
-					cs(peer.address), cs(why));
-			reply(why);
-		};
-
-		Account account;
-		if(get_account(name, account)){
-			if(!local && pbkdf2_sha256(password, account.salt,
-					PBKDF2_ITERATIONS) != account.hash)
-				return fail("Wrong password");
-			// An account of a plan that has no admin can claim it too
-			if(!local && !m_setup_code.empty() && !code.empty()){
-				if(code != m_setup_code)
-					return fail("Wrong setup code");
-				account.privs = {"edit", "admin"};
-				set_account(name, account);
-				log_i(MODULE, "%s claimed the plan with the setup code",
-						cs(name));
-			}
-		} else {
-			sv_<ss_> privs;
-			if(local){
-				// The first admin of the launcher's plan is its own user
-				privs = admin_count() == 0 ? sv_<ss_>{"edit", "admin"} :
-						default_privs();
-			} else {
-				if(password.size() < MIN_PASSWORD)
-					return reply("A new account's password is at least "+
-							itos((int)MIN_PASSWORD)+" characters");
-				Invite invite;
-				ss_ data;
-				if(!m_setup_code.empty()){
-					if(code != m_setup_code)
-						return fail(code.empty() ?
-								"This plan has no admin yet: the first account "
-								"needs the setup code from the server's log" :
-								"Wrong setup code");
-					privs = {"edit", "admin"};
-					log_i(MODULE, "%s claimed the plan with the setup code",
-							cs(name));
-				} else if(!code.empty()){
-					if(!(m_store->get("invite/"+code, data) &&
-							unpack(data, invite)))
-						return fail("No such invite code");
-					privs = invite.privs;
-					m_store->remove("invite/"+code);
-					log_i(MODULE, "%s used an invite of %s", cs(name),
-							cs(invite.by));
-				} else if(m_access.open_registration){
-					privs = default_privs();
-				} else {
-					return reply("New accounts need an invite code from an "
-							"admin");
-				}
-			}
-			// A local account gets a password nobody knows, so its name
-			// cannot be taken over from elsewhere with an empty one
-			ss_ pw = password;
-			if(local)
-				pw = random_code(32);
-			account = new_account(pw, privs);
-			set_account(name, account);
-			log_i(MODULE, "New account %s", cs(name));
-		}
-		m_name_failures.erase(name);
-		update_setup_code();
-		log_i(MODULE, "%s joined from %s", cs(name), cs(peer.address));
-		peer.name = name;
-		reply("");
-		send_privs(packet.sender, account);
-		sv_<Entity> all;
-		for(auto &pair : m_ents)
-			all.push_back(pair.second);
-		send(packet.sender, "fp:snapshot", pack(all));
-		send(packet.sender, "fp:images", pack(m_images));
-		for(auto &pair : m_voxels){
-			if(!m_ents.count(pair.first))
-				continue;
-			VoxelEdit v;
-			v.seq = -1;
-			v.def = pair.first;
-			v.sets = pair.second;
-			send(packet.sender, "fp:voxels", pack(v));
-		}
-		// Where the others are
-		for(auto &pair : m_peers){
-			if(pair.first == packet.sender || pair.second.name.empty() ||
-					!pair.second.has_presence)
-				continue;
-			PresenceOut out;
-			out.peer = (int32_t)pair.first;
-			out.name = pair.second.name;
-			out.p = pair.second.presence;
-			send(packet.sender, "fp:presence", pack(out));
-		}
-		broadcast_chat("*** "+name+" joined");
-		// The admins' lists: who is here, a new account, an invite used
-		send_users_to_admins();
-	}
-
-	bool peer_has(network::PeerId peer_id, const ss_ &priv)
-	{
-		auto it = m_peers.find(peer_id);
-		if(it == m_peers.end() || it->second.name.empty())
-			return false;
-		Account account;
-		return get_account(it->second.name, account) && account.has(priv);
-	}
-
-	// Chat and its commands
-
-	void on_chat(const network::Packet &packet)
-	{
-		auto it = m_peers.find(packet.sender);
-		if(it == m_peers.end() || it->second.name.empty())
-			return;
-		ss_ text;
-		if(!unpack(packet.data, text) || text.empty() || text.size() > 500 ||
-				!valid_text(text))
-			return;
-		// The chat commands are the pause menu's now ([FP_ACCESS] 4)
-		if(text[0] == '/'){
-			send_chat(packet.sender, "The commands are in the pause menu "
-					"(Esc): Users..., Change password...");
-			return;
-		}
-		broadcast_chat("<"+it->second.name+"> "+text);
-	}
-
-	// The admin's menus ([FP_ACCESS] 4), which replace the chat commands
-
-	struct UserRow
-	{
-		ss_ name;
-		sv_<ss_> privs;
-		uint8_t here = 0;
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(name, privs, here);
-		}
-	};
-
-	struct UsersInfo
-	{
-		sv_<UserRow> users;
-		sv_<std::pair<ss_, Invite>> invites;
-		AccessSettings access;
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(users, invites, access);
-		}
-	};
-
-	void send_users(network::PeerId peer)
-	{
-		UsersInfo info;
-		for(const ss_ &key : m_store->list("auth/")){
-			UserRow row;
-			row.name = key.substr(5);
-			Account account;
-			if(get_account(row.name, account))
-				row.privs = account.privs;
-			row.here = find_peer(row.name) != 0;
-			info.users.push_back(row);
-		}
-		for(const ss_ &key : m_store->list("invite/")){
-			Invite invite;
-			ss_ data;
-			if(m_store->get(key, data) && unpack(data, invite))
-				info.invites.push_back(std::make_pair(key.substr(7), invite));
-		}
-		info.access = m_access;
-		send(peer, "fp:users", pack(info));
-	}
-
-	void send_users_to_admins()
-	{
-		for(auto &pair : m_peers)
-			if(peer_has(pair.first, "admin"))
-				send_users(pair.first);
-	}
-
-	// Out of the plan: the client is told to leave, and is logged out here
-	// meanwhile.
-	// simplified: the network module has no way to drop a peer
-	void kick(network::PeerId target, const ss_ &why)
-	{
-		send(target, "fp:kicked", pack(why));
-		const ss_ name = m_peers[target].name;
-		m_peers[target].name.clear();
-		leave(target, "");
-		send_to_joined("fp:gone", pack((int32_t)target));
-		broadcast_chat("*** "+name+" left: "+why);
-	}
-
-	struct AdminRequest
-	{
-		ss_ cmd;
-		ss_ name;
-		ss_ arg;
-		uint8_t on = 0;
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(cmd, name, arg, on);
-		}
-	};
-
-	void on_admin(const network::Packet &packet)
-	{
-		AdminRequest r;
-		if(!m_store || !peer_has(packet.sender, "admin") ||
-				!unpack(packet.data, r))
-			return;
-		const ss_ by = m_peers[packet.sender].name;
-		auto result = [&](const ss_ &text){
-			send(packet.sender, "fp:admin_result", pack(text));
-		};
-		Account account;
-		const bool exists = !r.name.empty() && get_account(r.name, account);
-		const network::PeerId target = exists ? find_peer(r.name) : 0;
-		if(r.cmd == "list"){
-			return send_users(packet.sender);
-		} else if(r.cmd == "priv"){
-			bool known = false;
-			for(const ss_ &p : KNOWN_PRIVS)
-				known |= p == r.arg;
-			if(!exists || !known)
-				return result("No such account or privilege");
-			if(r.arg == "admin" && !r.on && account.has("admin") &&
-					admin_count() <= 1)
-				return result("The last admin keeps admin");
-			sv_<ss_> privs;
-			for(const ss_ &p : account.privs)
-				if(p != r.arg)
-					privs.push_back(p);
-			if(r.on)
-				privs.push_back(r.arg);
-			account.privs = privs;
-			set_account(r.name, account);
-			if(target)
-				send_privs(target, account);
-			log_i(MODULE, "%s %s %s %s", cs(by), r.on ? "granted" : "revoked",
-					cs(r.arg), cs(r.name));
-			result(r.name+(r.on ? " can " : " can no longer ")+
-					(r.arg == "edit" ? "edit" : "administer"));
-		} else if(r.cmd == "kick"){
-			if(!target)
-				return result(r.name+" is not here");
-			kick(target, "kicked by "+by);
-			result(r.name+" was kicked");
-		} else if(r.cmd == "password"){
-			if(!exists)
-				return result("No account "+r.name);
-			if(r.arg.size() < MIN_PASSWORD || r.arg.size() > 100)
-				return result("A password is "+itos((int)MIN_PASSWORD)+
-						" to 100 characters");
-			Account fresh = new_account(r.arg, account.privs);
-			set_account(r.name, fresh);
-			if(target && target != packet.sender)
-				kick(target, "the password was reset by "+by);
-			log_i(MODULE, "%s reset the password of %s", cs(by), cs(r.name));
-			result("The password of "+r.name+" was reset");
-		} else if(r.cmd == "delete"){
-			if(!exists)
-				return result("No account "+r.name);
-			if(r.name == by)
-				return result("An admin does not delete their own account");
-			if(account.has("admin") && admin_count() <= 1)
-				return result("The last admin is not deleted");
-			if(target)
-				kick(target, "the account was deleted by "+by);
-			m_store->remove("auth/"+r.name);
-			log_i(MODULE, "%s deleted the account %s", cs(by), cs(r.name));
-			result("The account "+r.name+" was deleted");
-		} else if(r.cmd == "add"){
-			if(!valid_name(r.name))
-				return result("A name is 1 to 20 letters, digits, _ or -");
-			if(exists)
-				return result("There is an account "+r.name+" already");
-			if(r.arg.size() < MIN_PASSWORD || r.arg.size() > 100)
-				return result("A password is "+itos((int)MIN_PASSWORD)+
-						" to 100 characters");
-			set_account(r.name, new_account(r.arg,
-					r.on ? sv_<ss_>{"edit"} : sv_<ss_>{}));
-			log_i(MODULE, "%s added the account %s", cs(by), cs(r.name));
-			result("The account "+r.name+" was added");
-		} else if(r.cmd == "invite"){
-			Invite invite;
-			invite.by = by;
-			if(r.on)
-				invite.privs = {"edit"};
-			const ss_ code = random_code(10);
-			m_store->set("invite/"+code, pack(invite));
-			log_i(MODULE, "%s made an invite", cs(by));
-			result("Invite code: "+code);
-		} else if(r.cmd == "uninvite"){
-			m_store->remove("invite/"+upper(r.name));
-			result("The invite was deleted");
-		} else if(r.cmd == "setting"){
-			if(r.name == "open_registration")
-				m_access.open_registration = r.on;
-			else if(r.name == "default_edit")
-				m_access.default_edit = r.on;
-			else
-				return result("No such setting");
-			save_access();
-			log_i(MODULE, "%s set %s to %i", cs(by), cs(r.name), (int)r.on);
-			for(auto &pair : m_peers)
-				if(pair.second.name.empty())
-					send_hello(pair.first);
-			result("");
-		} else {
-			return;
-		}
-		send_users_to_admins();
-	}
-
-	// A user's own password ([FP_ACCESS] 4): the old one and the new one
-	void on_passwd(const network::Packet &packet)
-	{
-		std::pair<ss_, ss_> pw;
-		auto it = m_peers.find(packet.sender);
-		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
-				!unpack(packet.data, pw))
-			return;
-		const ss_ name = it->second.name;
-		auto result = [&](const ss_ &text){
-			send(packet.sender, "fp:passwd_result", pack(text));
-		};
-		Account account;
-		if(!get_account(name, account))
-			return;
-		const int64_t now = interface::os::time_us();
-		if(failure_wait(m_name_failures, name, now) > 0)
-			return result("Too many failed attempts; wait and try again");
-		if(pbkdf2_sha256(pw.first, account.salt, PBKDF2_ITERATIONS) !=
-				account.hash){
-			note_failure(m_name_failures, name, now);
-			log_i(MODULE, "%s: a password change with a wrong password",
-					cs(name));
-			return result("The old password is wrong");
-		}
-		if(pw.second.size() < MIN_PASSWORD || pw.second.size() > 100)
-			return result("A password is "+itos((int)MIN_PASSWORD)+
-					" to 100 characters");
-		set_account(name, new_account(pw.second, account.privs));
-		log_i(MODULE, "%s changed their password", cs(name));
-		result("");
-	}
-
-	// Batches
-
-	struct Batch
-	{
-		int32_t seq = 0;
-		sv_<Op> ops;
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(seq, ops);
-		}
-	};
-
-	struct BatchResult
-	{
-		int32_t seq = 0;
-		ss_ error;
-		std::map<int32_t, int32_t> placeholders;
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(seq, error, placeholders);
-		}
-	};
-
-	void on_batch(const network::Packet &packet)
-	{
-		auto pit = m_peers.find(packet.sender);
-		if(pit == m_peers.end() || pit->second.name.empty())
-			return;
-		Batch batch;
-		BatchResult result;
-		if(!unpack(packet.data, batch)){
-			result.error = "Malformed batch";
-		} else if(!peer_has(packet.sender, "edit")){
-			result.error = "You have no edit privilege";
-		} else if(batch.ops.size() > MAX_OPS_PER_BATCH){
-			result.error = "Too many operations in one batch";
-		} else if(pit->second.op_budget < batch.ops.size()){
-			result.error = "Too many operations; slow down";
-		} else if(!(result.error = locked_by_other(batch.ops,
-				packet.sender)).empty()){
-		} else {
-			pit->second.op_budget -= batch.ops.size();
-			set_<int32_t> changed, deleted;
-			result.error = apply(batch.ops, result.placeholders, changed,
-					deleted);
-			if(result.error.empty())
-				broadcast_changes(batch.seq, packet.sender, changed, deleted);
-		}
-		result.seq = batch.seq;
-		if(!result.error.empty())
-			log_i(MODULE, "Batch %i from %s refused: %s", batch.seq,
-					cs(pit->second.name), cs(result.error));
-		send(packet.sender, "fp:batch_result", pack(result));
-	}
-
-	ss_ locked_by_other(const sv_<Op> &ops, network::PeerId sender)
-	{
-		for(const Op &op : ops){
-			auto it = m_locks.find(op.ent.id);
-			if(it != m_locks.end() && it->second != sender)
-				return m_peers[it->second].name+" is moving that";
-		}
-		return "";
-	}
-
-	struct Changes
-	{
-		int32_t seq = -1;       // the sender's batch, for the sender
-		int32_t sender = 0;
-		sv_<Entity> ents;
-		sv_<int32_t> deleted;
-		template<class Archive>
-		void serialize(Archive &archive){
-			archive(seq, sender, ents, deleted);
-		}
-	};
-
-	void broadcast_changes(int32_t seq, network::PeerId sender,
-			const set_<int32_t> &changed, const set_<int32_t> &deleted)
-	{
-		Changes c;
-		c.seq = -1;
-		c.sender = (int32_t)sender;
-		for(int32_t id : changed)
-			if(!deleted.count(id))
-				c.ents.push_back(m_ents[id]);
-		c.deleted.assign(deleted.begin(), deleted.end());
-		// The sender's copy carries its batch's number, which is how it
-		// knows the changes are its own
-		ss_ others = pack(c);
-		c.seq = seq;
-		ss_ own = pack(c);
-		for(auto &pair : m_peers)
-			if(!pair.second.name.empty())
-				send(pair.first, "fp:changes", pair.first == sender ? own : others);
-	}
 
 	// Applies ops to the document, all or nothing. On success returns ""
 	// and fills changed and deleted; on failure the document is as it was.
@@ -2177,6 +1001,1525 @@ struct Module: public interface::Module
 			}
 		}
 		return "";
+	}
+};
+
+// How long a plan with nobody in it stays open ([FP_PLANS] 3)
+static const float PLAN_IDLE_S = 60;
+// A plan's role for a user ([FP_PLANS] 2), as meta/public gives it to
+// everyone who has none of their own
+static const int32_t PUBLIC_NONE = 0, PUBLIC_READ = 1, PUBLIC_EDIT = 2;
+
+// A plan's name: what a save's directory can be called on every system,
+// and never the server's own store, whose name begins with _
+static bool valid_plan_name(const ss_ &name)
+{
+	if(name.empty() || name.size() > 40 || name[0] == '_')
+		return false;
+	for(char c : name)
+		if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
+			return false;
+	return true;
+}
+
+struct Module: public interface::Module
+{
+	interface::Server *m_server;
+	// The server's own store ([FP_PLANS] 1): the accounts, the invites and
+	// the access settings, in the save _server, which is no plan
+	storage::Save *m_accounts_save = nullptr;
+	storage::Store *m_accounts = nullptr;
+	// The plans in use, by name
+	std::map<ss_, up_<Plan>> m_plans;
+	float m_flush_timer = 0;
+
+	std::map<network::PeerId, Peer> m_peers;
+	// [FP_ACCESS]: the server's access settings, the code that claims it
+	// while no account is an admin (empty when one is), and the failed
+	// logins by name and by address
+	AccessSettings m_access;
+	ss_ m_setup_code;
+	std::map<ss_, Failures> m_name_failures;
+	std::map<ss_, Failures> m_address_failures;
+
+	Module(interface::Server *server):
+		interface::Module(MODULE),
+		m_server(server)
+	{
+		check_pbkdf2();
+	}
+
+	~Module(){}
+
+	void init()
+	{
+		m_server->sub_event(this, Event::t("core:start"));
+		m_server->sub_event(this, Event::t("core:continue"));
+		m_server->sub_event(this, Event::t("core:unload"));
+		m_server->sub_event(this, Event::t("core:shutdown"));
+		m_server->sub_event(this, Event::t("core:tick"));
+		m_server->sub_event(this, Event::t("network:client_connected"));
+		m_server->sub_event(this, Event::t("network:client_disconnected"));
+		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
+		for(const char *name : {"fp:login", "fp:open", "fp:leave_plan",
+				"fp:copy_plan", "fp:plan_admin", "fp:batch", "fp:chat",
+				"fp:admin", "fp:passwd", "fp:voxels", "fp:lock", "fp:unlock",
+				"fp:preview", "fp:presence"})
+			m_server->sub_event(this,
+					Event::t(ss_("network:packet_received/")+name));
+	}
+
+	void event(const Event::Type &type, const Event::Private *p)
+	{
+		EVENT_VOIDN("core:start", on_start)
+		EVENT_VOIDN("core:continue", on_start)
+		EVENT_VOIDN("core:unload", flush_all)
+		EVENT_VOIDN("core:shutdown", flush_all)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
+		EVENT_TYPEN("network:client_connected", on_client_connected,
+				network::NewClient)
+		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
+				network::OldClient)
+		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
+				client_file::FilesTransmitted)
+		EVENT_TYPEN("network:packet_received/fp:login", on_login,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:open", on_open,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:leave_plan", on_leave_plan,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:copy_plan", on_copy_plan,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:plan_admin", on_plan_admin,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:chat", on_chat,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:admin", on_admin,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:passwd", on_passwd,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:voxels", on_voxels,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:lock", on_lock,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:unlock", on_unlock,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:preview", on_preview,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:presence", on_presence,
+				network::Packet)
+	}
+
+	// The start
+
+	// One key of what the launcher asked for through the server's -u, as
+	// games/vanilla reads it: a value of the shape a save name has, or ""
+	ss_ launch_param(const ss_ &key_name)
+	{
+		const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
+		const ss_ key = key_name+"=";
+		size_t at = u.find(key);
+		if(at == ss_::npos || !(at == 0 || u[at - 1] == '\n'))
+			return "";
+		ss_ v = u.substr(at + key.size());
+		v = v.substr(0, v.find('\n'));
+		for(char c : v)
+			if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
+				return "";
+		return v.size() <= 64 ? v : "";
+	}
+
+	// Started from the launch grid ([FP_LAUNCH]): the local user joins
+	// without a password, and is the first admin
+	bool m_launched = false;
+	// A plan the launcher named (save=<name>), which the local user is
+	// offered first
+	ss_ m_launch_plan;
+
+	void on_start()
+	{
+		m_launched = launch_param("pick") == "1";
+		m_launch_plan = launch_param("save");
+		if(m_accounts)
+			return;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			m_accounts_save = istorage->open("_server");
+			if(!m_accounts_save)
+				m_accounts_save = istorage->create("_server");
+		});
+		if(!m_accounts_save){
+			m_server->shutdown(1, "floorplanner: no server store");
+			return;
+		}
+		m_accounts = m_accounts_save->store("accounts");
+		load_access();
+	}
+
+	// Plans
+
+	// The plan of that name in use, opened (with create, made when it is not
+	// there) if it is not; nullptr if it could not be
+	Plan* open_plan(const ss_ &name, bool create)
+	{
+		auto it = m_plans.find(name);
+		if(it != m_plans.end())
+			return it->second.get();
+		if(!valid_plan_name(name))
+			return nullptr;
+		up_<Plan> plan(new Plan(m_server, name));
+		storage::access(m_server, [&](storage::Interface *istorage){
+			plan->m_save = istorage->open(name);
+			if(plan->m_save){
+				// A copy of the plan as it was, before anything touches it:
+				// what an undo that lives only for a session cannot give
+				// back
+				ss_ path = plan->m_save->path();
+				istorage->close(plan->m_save);
+				plan->backup(path);
+				plan->m_save = istorage->open(name);
+			} else if(create){
+				plan->m_save = istorage->create(name);
+			}
+		});
+		if(!plan->m_save){
+			log_w(MODULE, "Could not open or create the plan %s", cs(name));
+			return nullptr;
+		}
+		plan->m_store = plan->m_save->store("main");
+		if(!plan->load()){
+			close_save(plan.get());
+			return nullptr;
+		}
+		plan->find_images();
+		log_i(MODULE, "Opened the plan %s", cs(name));
+		Plan *p = plan.get();
+		m_plans[name] = std::move(plan);
+		return p;
+	}
+
+	void close_save(Plan *plan)
+	{
+		storage::access(m_server, [&](storage::Interface *istorage){
+			istorage->close(plan->m_save);
+		});
+		plan->m_save = nullptr;
+		plan->m_store = nullptr;
+	}
+
+	void close_plan(const ss_ &name)
+	{
+		auto it = m_plans.find(name);
+		if(it == m_plans.end())
+			return;
+		it->second->flush();
+		close_save(it->second.get());
+		m_plans.erase(it);
+		log_i(MODULE, "Closed the plan %s", cs(name));
+	}
+
+	void flush_all()
+	{
+		for(auto &pair : m_plans)
+			pair.second->flush();
+	}
+
+	sv_<ss_> plan_names()
+	{
+		sv_<ss_> names;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			for(const storage::SaveInfo &i : istorage->list())
+				if(valid_plan_name(i.name))
+					names.push_back(i.name);
+		});
+		std::sort(names.begin(), names.end());
+		return names;
+	}
+
+	// Who a plan is whose ([FP_PLANS] 2): read from the plan's store, which
+	// for a plan not in use is opened for it
+	struct PlanMeta
+	{
+		ss_ owner;
+		int32_t pub = PUBLIC_READ;
+		std::map<ss_, ss_> roles; // name -> editor or viewer
+	};
+
+	PlanMeta read_meta(storage::Store *store)
+	{
+		PlanMeta m;
+		ss_ v;
+		if(store->get("meta/owner", v))
+			m.owner = v;
+		if(store->get("meta/public", v))
+			m.pub = std::max(PUBLIC_NONE, std::min(PUBLIC_EDIT, atoi(v.c_str())));
+		for(const ss_ &key : store->list("role/"))
+			if(store->get(key, v))
+				m.roles[key.substr(5)] = v;
+		return m;
+	}
+
+	PlanMeta plan_meta(const ss_ &name)
+	{
+		auto it = m_plans.find(name);
+		if(it != m_plans.end())
+			return read_meta(it->second->m_store);
+		PlanMeta m;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			storage::Save *save = istorage->open(name);
+			if(!save)
+				return;
+			m = read_meta(save->store("main"));
+			istorage->close(save);
+		});
+		return m;
+	}
+
+	bool is_admin(const ss_ &user)
+	{
+		Account account;
+		return !user.empty() && get_account(user, account) &&
+				account.has("admin");
+	}
+
+	// What a user is in a plan: admin, owner, editor, viewer, or "" (not
+	// let in)
+	ss_ role_in(const PlanMeta &m, const ss_ &user)
+	{
+		// Owner first: the admin's own plan is theirs as well
+		if(!m.owner.empty() && m.owner == user)
+			return "owner";
+		if(is_admin(user))
+			return "admin";
+		auto it = m.roles.find(user);
+		if(it != m.roles.end())
+			return it->second;
+		return m.pub == PUBLIC_EDIT ? "editor" :
+				m.pub == PUBLIC_READ ? "viewer" : "";
+	}
+
+	static bool role_edits(const ss_ &role)
+	{
+		return role == "admin" || role == "owner" || role == "editor";
+	}
+
+	static bool role_manages(const ss_ &role)
+	{
+		return role == "admin" || role == "owner";
+	}
+
+	Plan* plan_of(network::PeerId peer)
+	{
+		auto it = m_peers.find(peer);
+		if(it == m_peers.end() || it->second.name.empty() ||
+				it->second.plan.empty())
+			return nullptr;
+		auto p = m_plans.find(it->second.plan);
+		return p == m_plans.end() ? nullptr : p->second.get();
+	}
+
+	ss_ peer_role(network::PeerId peer)
+	{
+		Plan *plan = plan_of(peer);
+		return plan ? role_in(read_meta(plan->m_store), m_peers[peer].name) : "";
+	}
+
+	bool can_edit(network::PeerId peer)
+	{
+		return role_edits(peer_role(peer));
+	}
+
+	struct PlanRow
+	{
+		ss_ name;
+		ss_ owner;
+		ss_ role;       // the user's
+		int32_t here = 0;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(name, owner, role, here);
+		}
+	};
+
+	// The plans a user may read, to open one or make one ([FP_PLANS] 4)
+	void send_plans(network::PeerId peer)
+	{
+		const ss_ user = m_peers[peer].name;
+		sv_<PlanRow> rows;
+		for(const ss_ &name : plan_names()){
+			PlanMeta m = plan_meta(name);
+			PlanRow row;
+			row.name = name;
+			row.owner = m.owner;
+			row.role = role_in(m, user);
+			if(row.role.empty())
+				continue;
+			for(auto &pair : m_peers)
+				if(pair.second.plan == name && !pair.second.name.empty())
+					row.here++;
+			rows.push_back(row);
+		}
+		send(peer, "fp:plans", pack(rows));
+	}
+
+	// A user into a plan: what it holds, where the others in it are, and what
+	// this user may do in it
+	void enter_plan(network::PeerId peer_id, Plan *plan)
+	{
+		Peer &peer = m_peers[peer_id];
+		leave_plan(peer_id);
+		peer.plan = plan->m_name;
+		peer.has_presence = false;
+		plan->m_idle = 0;
+		send(peer_id, "fp:entered", pack(plan->m_name));
+		send_privs(peer_id);
+		sv_<Entity> all;
+		for(auto &pair : plan->m_ents)
+			all.push_back(pair.second);
+		send(peer_id, "fp:snapshot", pack(all));
+		send(peer_id, "fp:images", pack(plan->m_images));
+		for(auto &pair : plan->m_voxels){
+			if(!plan->m_ents.count(pair.first))
+				continue;
+			VoxelEdit v;
+			v.seq = -1;
+			v.def = pair.first;
+			v.sets = pair.second;
+			send(peer_id, "fp:voxels", pack(v));
+		}
+		// Where the others are
+		for(auto &pair : m_peers){
+			if(pair.first == peer_id || pair.second.plan != plan->m_name ||
+					!pair.second.has_presence)
+				continue;
+			PresenceOut out;
+			out.peer = (int32_t)pair.first;
+			out.name = pair.second.name;
+			out.p = pair.second.presence;
+			send(peer_id, "fp:presence", pack(out));
+		}
+		log_i(MODULE, "%s entered the plan %s", cs(peer.name),
+				cs(plan->m_name));
+		send_to_plan(plan->m_name, "fp:chat", pack("*** "+peer.name+" joined"));
+		if(role_manages(peer_role(peer_id)))
+			send_members(peer_id);
+	}
+
+	// Out of the plan the user is in, if any: their locks go, the others
+	// stop showing them
+	void leave_plan(network::PeerId peer_id)
+	{
+		auto it = m_peers.find(peer_id);
+		if(it == m_peers.end() || it->second.plan.empty())
+			return;
+		const ss_ plan = it->second.plan;
+		it->second.plan.clear();
+		it->second.has_presence = false;
+		auto p = m_plans.find(plan);
+		if(p != m_plans.end())
+			unlock_all(*p->second, peer_id);
+		send_to_plan(plan, "fp:gone", pack((int32_t)peer_id));
+		if(!it->second.name.empty())
+			send_to_plan(plan, "fp:chat", pack("*** "+it->second.name+" left"));
+	}
+
+	// Out of the plan and back to the plans page
+	void to_plans(network::PeerId peer, const ss_ &why)
+	{
+		leave_plan(peer);
+		send(peer, "fp:closed", pack(why));
+		send_plans(peer);
+	}
+
+	struct OpenRequest
+	{
+		ss_ name;
+		uint8_t create = 0;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(name, create);
+		}
+	};
+
+	void on_open(const network::Packet &packet)
+	{
+		auto it = m_peers.find(packet.sender);
+		OpenRequest req;
+		if(it == m_peers.end() || it->second.name.empty() ||
+				!unpack(packet.data, req))
+			return;
+		const ss_ user = it->second.name;
+		auto refuse = [&](const ss_ &why){
+			send(packet.sender, "fp:open_result", pack(why));
+		};
+		if(!valid_plan_name(req.name))
+			return refuse("A plan's name is 1 to 40 letters, digits, _ or -, "
+					"not starting with _");
+		bool exists = false;
+		for(const ss_ &n : plan_names())
+			exists |= n == req.name;
+		if(req.create && exists)
+			return refuse("There is a plan called "+req.name+" already");
+		if(!req.create && !exists)
+			return refuse("There is no plan called "+req.name);
+		if(exists && role_in(plan_meta(req.name), user).empty())
+			return refuse("The plan "+req.name+" is not open to you");
+		Plan *plan = open_plan(req.name, req.create);
+		if(!plan)
+			return refuse("Could not open the plan "+req.name);
+		if(req.create){
+			// Anyone can make a plan, and it is theirs
+			plan->m_store->set("meta/owner", user);
+			log_i(MODULE, "%s made the plan %s", cs(user), cs(req.name));
+		}
+		refuse("");
+		enter_plan(packet.sender, plan);
+		send_plans_to_idle();
+	}
+
+	void on_leave_plan(const network::Packet &packet)
+	{
+		auto it = m_peers.find(packet.sender);
+		if(it == m_peers.end() || it->second.name.empty())
+			return;
+		to_plans(packet.sender, "");
+		send_plans_to_idle();
+	}
+
+	// The others on the plans page see who is in which
+	void send_plans_to_idle()
+	{
+		for(auto &pair : m_peers)
+			if(!pair.second.name.empty() && pair.second.plan.empty())
+				send_plans(pair.first);
+	}
+
+	// **A copy of the plan under a new name, which is the copier's**
+	// ([FP_COPY], [FP_PLANS] 5). The plan is flushed first, and nothing
+	// writes to it until the copy is done, so its database and write-ahead
+	// log are copied as they are; its images go with it, its backups and
+	// its members do not.
+	void on_copy_plan(const network::Packet &packet)
+	{
+		ss_ name;
+		Plan *from_plan = plan_of(packet.sender);
+		if(!from_plan || !unpack(packet.data, name))
+			return;
+		const ss_ user = m_peers[packet.sender].name;
+		auto refuse = [&](const ss_ &why){
+			send(packet.sender, "fp:open_result", pack(why));
+		};
+		if(!valid_plan_name(name))
+			return refuse("\""+name+"\" is not a name a plan can have");
+		for(const ss_ &n : plan_names())
+			if(n == name)
+				return refuse("There is a plan called \""+name+"\" already");
+		namespace fs = interface::fs;
+		from_plan->flush();
+		const ss_ from = from_plan->m_save->path();
+		const size_t slash = from.find_last_of("/\\");
+		const ss_ to = (slash == ss_::npos ? ss_(".") : from.substr(0, slash))+
+				"/"+name;
+		fs::create_directories(to+"/images");
+		bool ok = fs::copy_file(from+"/save.sqlite", to+"/save.sqlite");
+		if(fs::path_exists(from+"/save.sqlite-wal"))
+			ok = fs::copy_file(from+"/save.sqlite-wal", to+"/save.sqlite-wal") &&
+					ok;
+		for(const fs::Node &n : fs::list_directory(from+"/images"))
+			if(!n.is_directory)
+				ok = fs::copy_file(from+"/images/"+n.name, to+"/images/"+n.name) &&
+						ok;
+		Plan *copy = ok ? open_plan(name, false) : nullptr;
+		if(!copy){
+			log_e(MODULE, "Could not copy the plan %s into %s",
+					cs(from_plan->m_name), cs(to));
+			fs::remove_all(to);
+			return refuse("Could not copy the plan");
+		}
+		copy->m_store->set("meta/owner", user);
+		copy->m_store->set("meta/public", itos(PUBLIC_READ));
+		for(const ss_ &key : copy->m_store->list("role/"))
+			copy->m_store->remove(key);
+		log_i(MODULE, "%s copied the plan %s as %s", cs(user),
+				cs(from_plan->m_name), cs(name));
+		refuse("");
+		enter_plan(packet.sender, copy);
+		send_plans_to_idle();
+	}
+
+	// A plan's members and visibility ([FP_PLANS] 5), its owner's and an
+	// admin's: every account with its role here
+	struct MemberRow
+	{
+		ss_ name;
+		ss_ role;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(name, role);
+		}
+	};
+
+	struct MembersInfo
+	{
+		ss_ plan;
+		ss_ owner;
+		int32_t pub = PUBLIC_READ;
+		sv_<MemberRow> members;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(plan, owner, pub, members);
+		}
+	};
+
+	void send_members(network::PeerId peer)
+	{
+		Plan *plan = plan_of(peer);
+		if(!plan)
+			return;
+		PlanMeta m = read_meta(plan->m_store);
+		MembersInfo info;
+		info.plan = plan->m_name;
+		info.owner = m.owner;
+		info.pub = m.pub;
+		for(const ss_ &key : m_accounts->list("auth/")){
+			MemberRow row;
+			row.name = key.substr(5);
+			auto it = m.roles.find(row.name);
+			row.role = it == m.roles.end() ? "" : it->second;
+			info.members.push_back(row);
+		}
+		send(peer, "fp:members", pack(info));
+	}
+
+	// Everyone in the plan, after its members changed: what they may do, and
+	// for those who manage it the list
+	void plan_rights_changed(Plan *plan)
+	{
+		for(auto &pair : m_peers){
+			if(pair.second.plan != plan->m_name || pair.second.name.empty())
+				continue;
+			const ss_ role = peer_role(pair.first);
+			if(role.empty()){
+				to_plans(pair.first, "You are no longer let into this plan");
+				continue;
+			}
+			send_privs(pair.first);
+			if(role_manages(role))
+				send_members(pair.first);
+		}
+		send_plans_to_idle();
+	}
+
+	void on_plan_admin(const network::Packet &packet)
+	{
+		AdminRequest r;
+		Plan *plan = plan_of(packet.sender);
+		if(!plan || !role_manages(peer_role(packet.sender)) ||
+				!unpack(packet.data, r))
+			return;
+		const ss_ by = m_peers[packet.sender].name;
+		auto result = [&](const ss_ &text){
+			send(packet.sender, "fp:admin_result", pack(text));
+		};
+		Account account;
+		if(r.cmd == "list"){
+			// The page as it opens: accounts made since they entered
+			return send_members(packet.sender);
+		} else if(r.cmd == "role"){
+			if(!get_account(r.name, account))
+				return result("No account "+r.name);
+			if(r.arg != "" && r.arg != "editor" && r.arg != "viewer")
+				return result("No such role");
+			if(r.arg.empty())
+				plan->m_store->remove("role/"+r.name);
+			else
+				plan->m_store->set("role/"+r.name, r.arg);
+			log_i(MODULE, "%s made %s %s in %s", cs(by), cs(r.name),
+					r.arg.empty() ? "no member" : cs(r.arg), cs(plan->m_name));
+			result("");
+		} else if(r.cmd == "public"){
+			const int32_t v = atoi(r.arg.c_str());
+			if(v < PUBLIC_NONE || v > PUBLIC_EDIT)
+				return result("No such setting");
+			plan->m_store->set("meta/public", itos(v));
+			log_i(MODULE, "%s set the plan %s public to %i", cs(by),
+					cs(plan->m_name), v);
+			result("");
+		} else if(r.cmd == "delete"){
+			const ss_ name = plan->m_name;
+			for(auto &pair : m_peers)
+				if(pair.second.plan == name)
+					to_plans(pair.first, "The plan was deleted by "+by);
+			close_plan(name);
+			storage::access(m_server, [&](storage::Interface *istorage){
+				istorage->remove(name);
+			});
+			log_i(MODULE, "%s deleted the plan %s", cs(by), cs(name));
+			send_plans_to_idle();
+			return;
+		} else {
+			return;
+		}
+		plan_rights_changed(plan);
+	}
+
+	// The local user: on this machine, of a server the launcher started
+	bool is_local(network::PeerId peer)
+	{
+		auto it = m_peers.find(peer);
+		return m_launched && it != m_peers.end() &&
+				(it->second.address == "127.0.0.1" ||
+				it->second.address == "::1");
+	}
+
+	struct Hello
+	{
+		uint8_t local = 0;      // no password asked
+		// [FP_ACCESS]: the join asks for the setup code (the server has no
+		// admin), or says a new name needs an invite (registration is not
+		// open)
+		uint8_t setup = 0;
+		uint8_t open_registration = 0;
+		ss_ plan;               // what the launcher named, for the local user
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(local, setup, open_registration, plan);
+		}
+	};
+
+	// What the client shows first: the join, with a password or without
+	void send_hello(network::PeerId peer)
+	{
+		Hello h;
+		h.local = is_local(peer);
+		h.setup = !h.local && !m_setup_code.empty();
+		h.open_registration = m_access.open_registration;
+		h.plan = h.local ? m_launch_plan : "";
+		send(peer, "fp:hello", pack(h));
+	}
+
+	void on_tick(const interface::TickEvent &event)
+	{
+		m_flush_timer += event.dtime;
+		if(m_flush_timer >= 1.0f){
+			m_flush_timer = 0;
+			flush_all();
+		}
+		for(auto &pair : m_peers){
+			pair.second.op_budget = std::min(OPS_BURST,
+					pair.second.op_budget + OPS_PER_SECOND * event.dtime);
+		}
+		// A plan nobody is in is saved and closed after a while
+		sv_<ss_> idle;
+		for(auto &pair : m_plans){
+			bool used = false;
+			for(auto &peer : m_peers)
+				used |= peer.second.plan == pair.first;
+			pair.second->m_idle = used ? 0 : pair.second->m_idle + event.dtime;
+			if(pair.second->m_idle >= PLAN_IDLE_S)
+				idle.push_back(pair.first);
+		}
+		for(const ss_ &name : idle)
+			close_plan(name);
+	}
+
+	// Peers
+
+	void on_client_connected(const network::NewClient &client)
+	{
+		Peer peer;
+		peer.op_budget = OPS_BURST;
+		peer.address = client.info.address;
+		m_peers[client.info.id] = peer;
+	}
+
+	void on_client_disconnected(const network::OldClient &client)
+	{
+		auto it = m_peers.find(client.info.id);
+		if(it == m_peers.end())
+			return;
+		const ss_ name = it->second.name;
+		leave_plan(client.info.id);
+		m_peers.erase(client.info.id);
+		if(!name.empty()){
+			send_users_to_admins();
+			send_plans_to_idle();
+		}
+	}
+
+	void unlock_all(Plan &plan, network::PeerId peer)
+	{
+		for(auto it = plan.m_locks.begin(); it != plan.m_locks.end();){
+			if(it->second == peer)
+				it = plan.m_locks.erase(it);
+			else
+				++it;
+		}
+	}
+
+	// Voxels
+
+	void on_voxels(const network::Packet &packet)
+	{
+		Plan *plan = plan_of(packet.sender);
+		if(!plan)
+			return;
+		Peer &peer = m_peers[packet.sender];
+		VoxelEdit edit;
+		std::pair<int32_t, ss_> result;
+		if(!unpack(packet.data, edit)){
+			result.second = "Malformed voxels";
+		} else {
+			result.first = edit.seq;
+			result.second = check_voxels(*plan, packet.sender, edit);
+		}
+		if(result.second.empty()){
+			peer.op_budget -= edit.sets.size() / 10.0;
+			std::map<int32_t, int32_t> &voxels = plan->m_voxels[edit.def];
+			for(auto &pair : edit.sets){
+				if(pair.second == 0)
+					voxels.erase(pair.first);
+				else
+					voxels[pair.first] = pair.second;
+			}
+			plan->m_voxels_dirty.insert(edit.def);
+			// The sender's copy carries its number, as with fp:changes
+			for(auto &pair : m_peers){
+				if(pair.second.plan != plan->m_name || pair.second.name.empty())
+					continue;
+				edit.seq = pair.first == packet.sender ? result.first : -1;
+				send(pair.first, "fp:voxels", pack(edit));
+			}
+		} else {
+			log_i(MODULE, "Voxels from %s refused: %s", cs(peer.name),
+					cs(result.second));
+		}
+		send(packet.sender, "fp:voxels_result", pack(result));
+	}
+
+	ss_ check_voxels(Plan &plan, network::PeerId sender, const VoxelEdit &edit)
+	{
+		if(!can_edit(sender))
+			return "You cannot edit this plan";
+		auto it = plan.m_ents.find(edit.def);
+		if(it == plan.m_ents.end() || it->second.type != "definition" ||
+				it->second.ints.at("kind") != DK_VOXEL)
+			return "Not a voxel volume";
+		auto lock = plan.m_locks.find(edit.def);
+		if(lock != plan.m_locks.end() && lock->second != sender)
+			return m_peers[lock->second].name+" is moving that";
+		if(m_peers[sender].op_budget < edit.sets.size() / 10.0)
+			return "Too many voxels at once; slow down";
+		const std::map<int32_t, int32_t> &voxels = plan.m_voxels[edit.def];
+		size_t added = 0;
+		for(auto &pair : edit.sets){
+			if(!valid_voxel_key(pair.first))
+				return "A voxel outside the volume";
+			if(pair.second != 0){
+				auto p = plan.m_ents.find(pair.second);
+				if(p == plan.m_ents.end() || p->second.type != "palette")
+					return "A voxel of what is not a palette entry";
+				if(!voxels.count(pair.first))
+					added++;
+			}
+		}
+		if(voxels.size() + added > MAX_VOXELS)
+			return "The volume is full";
+		return "";
+	}
+
+	// Drag locks, previews and presence
+
+	void on_lock(const network::Packet &packet)
+	{
+		Plan *plan = plan_of(packet.sender);
+		LockRequest req;
+		std::pair<int32_t, ss_> result;
+		if(!plan || !unpack(packet.data, req) ||
+				req.ids.size() > MAX_OPS_PER_BATCH)
+			return;
+		result.first = req.seq;
+		if(!can_edit(packet.sender)){
+			result.second = "You cannot edit this plan";
+		} else {
+			for(int32_t id : req.ids){
+				auto it = plan->m_locks.find(id);
+				if(it != plan->m_locks.end() && it->second != packet.sender){
+					result.second = m_peers[it->second].name+
+							" is moving that";
+					break;
+				}
+			}
+		}
+		if(result.second.empty()){
+			// One drag at a time: what this user held before is let go
+			unlock_all(*plan, packet.sender);
+			for(int32_t id : req.ids)
+				plan->m_locks[id] = packet.sender;
+		}
+		send(packet.sender, "fp:lock_result", pack(result));
+	}
+
+	void on_unlock(const network::Packet &packet)
+	{
+		Plan *plan = plan_of(packet.sender);
+		if(!plan)
+			return;
+		unlock_all(*plan, packet.sender);
+		// And what it was showing the others goes
+		relay_preview(packet.sender, {});
+	}
+
+	void relay_preview(network::PeerId sender, const sv_<Entity> &ents)
+	{
+		Preview p;
+		p.peer = (int32_t)sender;
+		p.ents = ents;
+		ss_ data = pack(p);
+		const ss_ plan = m_peers[sender].plan;
+		for(auto &pair : m_peers)
+			if(!pair.second.name.empty() && pair.second.plan == plan &&
+					pair.first != sender)
+				send(pair.first, "fp:preview", data);
+	}
+
+	// A drag as it goes: where the dragged things would be, for the others
+	// to draw. Nothing in the document changes until the drag's batch.
+	void on_preview(const network::Packet &packet)
+	{
+		sv_<Entity> ents;
+		if(!can_edit(packet.sender) || !unpack(packet.data, ents) ||
+				ents.size() > MAX_OPS_PER_BATCH)
+			return;
+		relay_preview(packet.sender, ents);
+	}
+
+	void on_presence(const network::Packet &packet)
+	{
+		Plan *plan = plan_of(packet.sender);
+		if(!plan)
+			return;
+		Peer &peer = m_peers[packet.sender];
+		Presence p;
+		if(!unpack(packet.data, p) || p.sel.size() > 1000)
+			return;
+		peer.presence = p;
+		peer.has_presence = true;
+		PresenceOut out;
+		out.peer = (int32_t)packet.sender;
+		out.name = peer.name;
+		out.p = p;
+		ss_ data = pack(out);
+		for(auto &pair : m_peers)
+			if(!pair.second.name.empty() && pair.second.plan == plan->m_name &&
+					pair.first != packet.sender)
+				send(pair.first, "fp:presence", data);
+	}
+
+	void on_files_transmitted(const client_file::FilesTransmitted &event)
+	{
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(event.recipient, "core:run_script",
+					"buildat.run_script_file(\"main/init.lua\")");
+		});
+		send_hello(event.recipient);
+	}
+
+	void send(network::PeerId peer, const ss_ &name, const ss_ &data)
+	{
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, name, data);
+		});
+	}
+
+	void send_to_plan(const ss_ &plan, const ss_ &name, const ss_ &data)
+	{
+		for(auto &pair : m_peers)
+			if(!pair.second.name.empty() && pair.second.plan == plan)
+				send(pair.first, name, data);
+	}
+
+	void send_chat(network::PeerId peer, const ss_ &text)
+	{
+		send(peer, "fp:chat", pack(text));
+	}
+
+	// Accounts
+
+	bool get_account(const ss_ &name, Account &account)
+	{
+		ss_ data;
+		return m_accounts->get("auth/"+name, data) && unpack(data, account);
+	}
+
+	void set_account(const ss_ &name, const Account &account)
+	{
+		m_accounts->set("auth/"+name, pack(account));
+	}
+
+	// What the user may do: the server's admin, and in the plan they are in
+	// edit and manage it ([FP_PLANS] 2)
+	void send_privs(network::PeerId peer)
+	{
+		sv_<ss_> privs;
+		const ss_ role = peer_role(peer);
+		if(is_admin(m_peers[peer].name))
+			privs.push_back("admin");
+		if(role_edits(role))
+			privs.push_back("edit");
+		if(role_manages(role))
+			privs.push_back("manage");
+		send(peer, "fp:privs", pack(privs));
+	}
+
+	network::PeerId find_peer(const ss_ &name)
+	{
+		for(auto &pair : m_peers)
+			if(pair.second.name == name)
+				return pair.first;
+		return 0;
+	}
+
+	// Access ([FP_ACCESS])
+
+	void save_access()
+	{
+		m_accounts->set("access/settings", pack(m_access));
+	}
+
+	void load_access()
+	{
+		ss_ data;
+		if(!(m_accounts->get("access/settings", data) &&
+				unpack(data, m_access))){
+			// Registration open where the launcher started the server
+			m_access = AccessSettings();
+			m_access.open_registration = m_launched;
+			save_access();
+		}
+		update_setup_code();
+	}
+
+	int admin_count()
+	{
+		int n = 0;
+		for(const ss_ &key : m_accounts->list("auth/")){
+			Account account;
+			if(get_account(key.substr(5), account) && account.has("admin"))
+				n++;
+		}
+		return n;
+	}
+
+	// A server with no admin is claimed with a code from its log
+	// ([FP_ACCESS] 1): on a public server the first to connect would
+	// otherwise be its admin
+	void update_setup_code()
+	{
+		if(admin_count() > 0){
+			m_setup_code.clear();
+			return;
+		}
+		if(!m_setup_code.empty())
+			return;
+		m_setup_code = random_code(8);
+		log_w(MODULE, "The server has no admin. The first to join with the "
+				"setup code %s becomes it.", cs(m_setup_code));
+	}
+
+	// How long, in microseconds, before a login of this name or from this
+	// address may be tried again
+	int64_t failure_wait(std::map<ss_, Failures> &m, const ss_ &key, int64_t now)
+	{
+		auto it = m.find(key);
+		if(it == m.end())
+			return 0;
+		if(now - it->second.first_us > FAIL_WINDOW_US &&
+				now >= it->second.wait_until_us){
+			m.erase(it);
+			return 0;
+		}
+		return std::max((int64_t)0, it->second.wait_until_us - now);
+	}
+
+	void note_failure(std::map<ss_, Failures> &m, const ss_ &key, int64_t now)
+	{
+		Failures &f = m[key];
+		if(f.count == 0 || now - f.first_us > FAIL_WINDOW_US){
+			f.count = 0;
+			f.first_us = now;
+		}
+		f.count++;
+		const int64_t wait = f.count >= FAIL_LOCK ? FAIL_WINDOW_US :
+				std::min((int64_t)60, (int64_t)1 << (f.count - 1)) * 1000000;
+		f.wait_until_us = now + wait;
+	}
+
+	Account new_account(const ss_ &password, const sv_<ss_> &privs)
+	{
+		Account account;
+		std::random_device rd;
+		account.salt.resize(16);
+		for(char &c : account.salt)
+			c = (char)(rd() & 0xff);
+		account.hash = pbkdf2_sha256(password, account.salt, PBKDF2_ITERATIONS);
+		account.privs = privs;
+		return account;
+	}
+
+	struct LoginRequest
+	{
+		ss_ name;
+		ss_ password;
+		ss_ code; // the setup code, or an invite code ([FP_ACCESS])
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(name, password, code);
+		}
+	};
+
+	// Into the server ([FP_PLANS] 4); the plans come after.
+	// simplified: the password arrives in the clear on a native client's
+	// connection, because the transport is not encrypted yet ([TRANSPORT]);
+	// the join dialog says so. The web client behind an https proxy has TLS.
+	void on_login(const network::Packet &packet)
+	{
+		auto pit = m_peers.find(packet.sender);
+		if(pit == m_peers.end() || !m_accounts)
+			return;
+		Peer &peer = pit->second;
+		LoginRequest cred;
+		auto reply = [&](const ss_ &error){
+			send(packet.sender, "fp:login_result", pack(error));
+		};
+		// The local user is on the machine the plans are on: a password
+		// would keep out nobody the files themselves do not let in
+		bool local = is_local(packet.sender);
+		if(!peer.name.empty())
+			return reply("Already joined");
+		if(peer.failures >= MAX_LOGIN_FAILURES)
+			return reply("Too many failed attempts; reconnect");
+		if(!unpack(packet.data, cred))
+			return reply("Malformed login");
+		const ss_ &name = cred.name;
+		const ss_ &password = cred.password;
+		const ss_ code = upper(cred.code);
+		if(!valid_name(name))
+			return reply("A name is 1 to 20 letters, digits, _ or -");
+		if(password.size() > 100 || code.size() > 100)
+			return reply("The password is too long");
+		if(find_peer(name))
+			return reply(name+" is already here");
+
+		// [FP_ACCESS] 5: a name and an address that failed wait before
+		// they are tried again
+		const int64_t now = interface::os::time_us();
+		const int64_t wait = std::max(
+				failure_wait(m_name_failures, name, now),
+				failure_wait(m_address_failures, peer.address, now));
+		if(wait > 0 && !local){
+			log_i(MODULE, "Login of %s from %s refused: waiting after failures",
+					cs(name), cs(peer.address));
+			return reply("Too many failed logins; try again in "+
+					itos((int)((wait + 999999) / 1000000))+" s");
+		}
+		auto fail = [&](const ss_ &why){
+			peer.failures++;
+			note_failure(m_name_failures, name, now);
+			note_failure(m_address_failures, peer.address, now);
+			log_i(MODULE, "Login of %s from %s failed: %s", cs(name),
+					cs(peer.address), cs(why));
+			reply(why);
+		};
+
+		Account account;
+		if(get_account(name, account)){
+			if(!local && pbkdf2_sha256(password, account.salt,
+					PBKDF2_ITERATIONS) != account.hash)
+				return fail("Wrong password");
+			// An account of a server that has no admin can claim it too
+			if(!local && !m_setup_code.empty() && !code.empty()){
+				if(code != m_setup_code)
+					return fail("Wrong setup code");
+				account.privs = {"admin"};
+				set_account(name, account);
+				log_i(MODULE, "%s claimed the server with the setup code",
+						cs(name));
+			}
+		} else {
+			sv_<ss_> privs;
+			if(local){
+				// The first admin of the launcher's server is its own user
+				if(admin_count() == 0)
+					privs = {"admin"};
+			} else {
+				if(password.size() < MIN_PASSWORD)
+					return reply("A new account's password is at least "+
+							itos((int)MIN_PASSWORD)+" characters");
+				Invite invite;
+				ss_ data;
+				if(!m_setup_code.empty()){
+					if(code != m_setup_code)
+						return fail(code.empty() ?
+								"This server has no admin yet: the first "
+								"account needs the setup code from the "
+								"server's log" : "Wrong setup code");
+					privs = {"admin"};
+					log_i(MODULE, "%s claimed the server with the setup code",
+							cs(name));
+				} else if(!code.empty()){
+					if(!(m_accounts->get("invite/"+code, data) &&
+							unpack(data, invite)))
+						return fail("No such invite code");
+					m_accounts->remove("invite/"+code);
+					log_i(MODULE, "%s used an invite of %s", cs(name),
+							cs(invite.by));
+				} else if(!m_access.open_registration){
+					return reply("New accounts need an invite code from an "
+							"admin");
+				}
+			}
+			// A local account gets a password nobody knows, so its name
+			// cannot be taken over from elsewhere with an empty one
+			ss_ pw = password;
+			if(local)
+				pw = random_code(32);
+			account = new_account(pw, privs);
+			set_account(name, account);
+			log_i(MODULE, "New account %s", cs(name));
+		}
+		m_name_failures.erase(name);
+		update_setup_code();
+		log_i(MODULE, "%s joined from %s", cs(name), cs(peer.address));
+		peer.name = name;
+		reply("");
+		send_privs(packet.sender);
+		send_plans(packet.sender);
+		send_users_to_admins();
+	}
+
+	// Chat, in the plan the user is in
+
+	void on_chat(const network::Packet &packet)
+	{
+		Plan *plan = plan_of(packet.sender);
+		if(!plan)
+			return;
+		ss_ text;
+		if(!unpack(packet.data, text) || text.empty() || text.size() > 500 ||
+				!valid_text(text))
+			return;
+		// The chat commands are the pause menu's now ([FP_ACCESS] 4)
+		if(text[0] == '/'){
+			send_chat(packet.sender, "The commands are in the pause menu "
+					"(Esc): Users..., Plan members..., Change password...");
+			return;
+		}
+		send_to_plan(plan->m_name, "fp:chat",
+				pack("<"+m_peers[packet.sender].name+"> "+text));
+	}
+
+	// The server admin's menus ([FP_ACCESS] 4): the accounts, the invites
+	// and the access settings
+
+	struct UserRow
+	{
+		ss_ name;
+		sv_<ss_> privs;
+		uint8_t here = 0;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(name, privs, here);
+		}
+	};
+
+	struct UsersInfo
+	{
+		sv_<UserRow> users;
+		sv_<std::pair<ss_, Invite>> invites;
+		AccessSettings access;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(users, invites, access);
+		}
+	};
+
+	void send_users(network::PeerId peer)
+	{
+		UsersInfo info;
+		for(const ss_ &key : m_accounts->list("auth/")){
+			UserRow row;
+			row.name = key.substr(5);
+			Account account;
+			if(get_account(row.name, account))
+				row.privs = account.privs;
+			row.here = find_peer(row.name) != 0;
+			info.users.push_back(row);
+		}
+		for(const ss_ &key : m_accounts->list("invite/")){
+			Invite invite;
+			ss_ data;
+			if(m_accounts->get(key, data) && unpack(data, invite))
+				info.invites.push_back(std::make_pair(key.substr(7), invite));
+		}
+		info.access = m_access;
+		send(peer, "fp:users", pack(info));
+	}
+
+	void send_users_to_admins()
+	{
+		for(auto &pair : m_peers)
+			if(is_admin(pair.second.name))
+				send_users(pair.first);
+	}
+
+	// Off the server: the client is told to leave, and is logged out here
+	// meanwhile.
+	// simplified: the network module has no way to drop a peer
+	void kick(network::PeerId target, const ss_ &why)
+	{
+		leave_plan(target);
+		send(target, "fp:kicked", pack(why));
+		m_peers[target].name.clear();
+		send_plans_to_idle();
+	}
+
+	struct AdminRequest
+	{
+		ss_ cmd;
+		ss_ name;
+		ss_ arg;
+		uint8_t on = 0;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(cmd, name, arg, on);
+		}
+	};
+
+	void on_admin(const network::Packet &packet)
+	{
+		AdminRequest r;
+		auto pit = m_peers.find(packet.sender);
+		if(pit == m_peers.end() || !is_admin(pit->second.name) ||
+				!unpack(packet.data, r))
+			return;
+		const ss_ by = pit->second.name;
+		auto result = [&](const ss_ &text){
+			send(packet.sender, "fp:admin_result", pack(text));
+		};
+		Account account;
+		const bool exists = !r.name.empty() && get_account(r.name, account);
+		const network::PeerId target = exists ? find_peer(r.name) : 0;
+		if(r.cmd == "list"){
+			return send_users(packet.sender);
+		} else if(r.cmd == "priv"){
+			if(!exists || r.arg != "admin")
+				return result("No such account or privilege");
+			if(!r.on && account.has("admin") && admin_count() <= 1)
+				return result("The last admin keeps admin");
+			account.privs = r.on ? sv_<ss_>{"admin"} : sv_<ss_>{};
+			set_account(r.name, account);
+			if(target)
+				send_privs(target);
+			log_i(MODULE, "%s %s admin %s", cs(by), r.on ? "granted" : "revoked",
+					cs(r.name));
+			result(r.name+(r.on ? " is an admin" : " is no longer an admin"));
+		} else if(r.cmd == "kick"){
+			if(!target)
+				return result(r.name+" is not here");
+			kick(target, "kicked by "+by);
+			result(r.name+" was kicked");
+		} else if(r.cmd == "password"){
+			if(!exists)
+				return result("No account "+r.name);
+			if(r.arg.size() < MIN_PASSWORD || r.arg.size() > 100)
+				return result("A password is "+itos((int)MIN_PASSWORD)+
+						" to 100 characters");
+			set_account(r.name, new_account(r.arg, account.privs));
+			if(target && target != packet.sender)
+				kick(target, "the password was reset by "+by);
+			log_i(MODULE, "%s reset the password of %s", cs(by), cs(r.name));
+			result("The password of "+r.name+" was reset");
+		} else if(r.cmd == "delete"){
+			if(!exists)
+				return result("No account "+r.name);
+			if(r.name == by)
+				return result("An admin does not delete their own account");
+			if(account.has("admin") && admin_count() <= 1)
+				return result("The last admin is not deleted");
+			if(target)
+				kick(target, "the account was deleted by "+by);
+			m_accounts->remove("auth/"+r.name);
+			log_i(MODULE, "%s deleted the account %s", cs(by), cs(r.name));
+			result("The account "+r.name+" was deleted");
+		} else if(r.cmd == "add"){
+			if(!valid_name(r.name))
+				return result("A name is 1 to 20 letters, digits, _ or -");
+			if(exists)
+				return result("There is an account "+r.name+" already");
+			if(r.arg.size() < MIN_PASSWORD || r.arg.size() > 100)
+				return result("A password is "+itos((int)MIN_PASSWORD)+
+						" to 100 characters");
+			set_account(r.name, new_account(r.arg, {}));
+			log_i(MODULE, "%s added the account %s", cs(by), cs(r.name));
+			result("The account "+r.name+" was added");
+		} else if(r.cmd == "invite"){
+			Invite invite;
+			invite.by = by;
+			const ss_ code = random_code(10);
+			m_accounts->set("invite/"+code, pack(invite));
+			log_i(MODULE, "%s made an invite", cs(by));
+			result("Invite code: "+code);
+		} else if(r.cmd == "uninvite"){
+			m_accounts->remove("invite/"+upper(r.name));
+			result("The invite was deleted");
+		} else if(r.cmd == "setting"){
+			if(r.name != "open_registration")
+				return result("No such setting");
+			m_access.open_registration = r.on;
+			save_access();
+			log_i(MODULE, "%s set %s to %i", cs(by), cs(r.name), (int)r.on);
+			for(auto &pair : m_peers)
+				if(pair.second.name.empty())
+					send_hello(pair.first);
+			result("");
+		} else {
+			return;
+		}
+		send_users_to_admins();
+	}
+
+	// A user's own password ([FP_ACCESS] 4): the old one and the new one
+	void on_passwd(const network::Packet &packet)
+	{
+		std::pair<ss_, ss_> pw;
+		auto it = m_peers.find(packet.sender);
+		if(!m_accounts || it == m_peers.end() || it->second.name.empty() ||
+				!unpack(packet.data, pw))
+			return;
+		const ss_ name = it->second.name;
+		auto result = [&](const ss_ &text){
+			send(packet.sender, "fp:passwd_result", pack(text));
+		};
+		Account account;
+		if(!get_account(name, account))
+			return;
+		const int64_t now = interface::os::time_us();
+		if(failure_wait(m_name_failures, name, now) > 0)
+			return result("Too many failed attempts; wait and try again");
+		if(pbkdf2_sha256(pw.first, account.salt, PBKDF2_ITERATIONS) !=
+				account.hash){
+			note_failure(m_name_failures, name, now);
+			log_i(MODULE, "%s: a password change with a wrong password",
+					cs(name));
+			return result("The old password is wrong");
+		}
+		if(pw.second.size() < MIN_PASSWORD || pw.second.size() > 100)
+			return result("A password is "+itos((int)MIN_PASSWORD)+
+					" to 100 characters");
+		set_account(name, new_account(pw.second, account.privs));
+		log_i(MODULE, "%s changed their password", cs(name));
+		result("");
+	}
+
+	// Batches
+
+	struct Batch
+	{
+		int32_t seq = 0;
+		sv_<Op> ops;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(seq, ops);
+		}
+	};
+
+	struct BatchResult
+	{
+		int32_t seq = 0;
+		ss_ error;
+		std::map<int32_t, int32_t> placeholders;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(seq, error, placeholders);
+		}
+	};
+
+	void on_batch(const network::Packet &packet)
+	{
+		Plan *plan = plan_of(packet.sender);
+		if(!plan)
+			return;
+		Peer &peer = m_peers[packet.sender];
+		Batch batch;
+		BatchResult result;
+		if(!unpack(packet.data, batch)){
+			result.error = "Malformed batch";
+		} else if(!can_edit(packet.sender)){
+			result.error = "You cannot edit this plan";
+		} else if(batch.ops.size() > MAX_OPS_PER_BATCH){
+			result.error = "Too many operations in one batch";
+		} else if(peer.op_budget < batch.ops.size()){
+			result.error = "Too many operations; slow down";
+		} else if(!(result.error = locked_by_other(*plan, batch.ops,
+				packet.sender)).empty()){
+		} else {
+			peer.op_budget -= batch.ops.size();
+			set_<int32_t> changed, deleted;
+			result.error = plan->apply(batch.ops, result.placeholders, changed,
+					deleted);
+			if(result.error.empty())
+				broadcast_changes(*plan, batch.seq, packet.sender, changed,
+						deleted);
+		}
+		result.seq = batch.seq;
+		if(!result.error.empty())
+			log_i(MODULE, "Batch %i from %s refused: %s", batch.seq,
+					cs(peer.name), cs(result.error));
+		send(packet.sender, "fp:batch_result", pack(result));
+	}
+
+	ss_ locked_by_other(Plan &plan, const sv_<Op> &ops, network::PeerId sender)
+	{
+		for(const Op &op : ops){
+			auto it = plan.m_locks.find(op.ent.id);
+			if(it != plan.m_locks.end() && it->second != sender)
+				return m_peers[it->second].name+" is moving that";
+		}
+		return "";
+	}
+
+	struct Changes
+	{
+		int32_t seq = -1;       // the sender's batch, for the sender
+		int32_t sender = 0;
+		sv_<Entity> ents;
+		sv_<int32_t> deleted;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(seq, sender, ents, deleted);
+		}
+	};
+
+	void broadcast_changes(Plan &plan, int32_t seq, network::PeerId sender,
+			const set_<int32_t> &changed, const set_<int32_t> &deleted)
+	{
+		Changes c;
+		c.seq = -1;
+		c.sender = (int32_t)sender;
+		for(int32_t id : changed)
+			if(!deleted.count(id))
+				c.ents.push_back(plan.m_ents[id]);
+		c.deleted.assign(deleted.begin(), deleted.end());
+		// The sender's copy carries its batch's number, which is how it
+		// knows the changes are its own
+		ss_ others = pack(c);
+		c.seq = seq;
+		ss_ own = pack(c);
+		for(auto &pair : m_peers)
+			if(!pair.second.name.empty() && pair.second.plan == plan.m_name)
+				send(pair.first, "fp:changes", pair.first == sender ? own : others);
 	}
 };
 

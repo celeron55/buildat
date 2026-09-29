@@ -1172,8 +1172,9 @@ local function build_images()
 	local d = S.drag
 	for _, e in ipairs(doc.of_type("image")) do
 		local i = e.ints
+		-- The plan's own images/ ([FP_PLANS] 3)
 		local tex = e.strs.file ~= "" and magic.cache:GetResource("Texture2D",
-				"main/images/" .. e.strs.file)
+				"main/images/" .. doc.plan_name .. "/" .. e.strs.file)
 		if tex then
 			local mat = image_materials[e.strs.file]
 			if not mat and images_used < IMAGE_MATERIALS then
@@ -3681,9 +3682,8 @@ do
 			local r = panel.row(w)
 			local l = panel.label(r, user.name .. (user.here == 1 and " (here)" or ""))
 			l.minWidth = 140
-			panel.button(r, has.edit and "Edit: yes" or "Edit: no", function()
-				doc.admin("priv", user.name, "edit", not has.edit)
-			end)
+			-- Who edits what is each plan's (Plan members...); the server's
+			-- is who administers it ([FP_PLANS] 1)
 			panel.button(r, has.admin and "Admin: yes" or "Admin: no", function()
 				doc.admin("priv", user.name, "admin", not has.admin)
 			end)
@@ -3697,28 +3697,16 @@ do
 		panel.label(w, "Invites (each makes one account):")
 		for _, inv in ipairs(u.invites) do
 			local r = panel.row(w)
-			local l = panel.label(r, inv.code .. (#inv.privs > 0 and "  can edit" or
-					"  view only") .. "  (" .. inv.by .. ")")
+			local l = panel.label(r, inv.code .. "  (" .. inv.by .. ")")
 			l.minWidth = 240
 			panel.button(r, "Delete", function() doc.admin("uninvite", inv.code) end)
 		end
-		local r = panel.row(w)
-		panel.button(r, "New invite: can edit", function()
-			doc.admin("invite", "", "", true)
-		end)
-		panel.button(r, "New invite: view only", function()
-			doc.admin("invite", "", "", false)
-		end)
+		panel.button(w, "New invite", function() doc.admin("invite") end)
 		local a = u.access
 		panel.button(w, a.open_registration == 1 and
 				"Open registration: on (anyone can make an account)" or
 				"Open registration: off (invites only)", function()
 			doc.admin("setting", "open_registration", "", a.open_registration ~= 1)
-		end)
-		panel.button(w, a.default_edit == 1 and
-				"New open-registration accounts can edit: yes" or
-				"New open-registration accounts can edit: no", function()
-			doc.admin("setting", "default_edit", "", a.default_edit ~= 1)
 		end)
 		panel.button(w, "Back", function()
 			doc.admin_message = nil
@@ -3729,6 +3717,66 @@ do
 	M.users_changed = function()
 		if pause_win and S.pause_page == "users" then
 			users_page()
+		end
+	end
+
+	-- **Who may use this plan** ([FP_PLANS] 5): its owner's and an admin's.
+	-- The server sends the list when they enter it and after every change.
+	local members_page
+	local PUBLIC_TEXT = {[0] = "Others: cannot see it", [1] = "Others: can read",
+			[2] = "Others: can edit"}
+	local ROLE_NEXT = {[""] = "viewer", viewer = "editor", editor = ""}
+	local ROLE_LABEL = {[""] = "Role: others'", viewer = "Role: reader",
+			editor = "Role: editor"}
+
+	local function delete_plan_page()
+		local w = dialog("Delete the plan " .. doc.plan_name .. "?")
+		panel.label(w, "Everyone in it goes back to the plans.")
+		local r = panel.row(w)
+		panel.button(r, "Delete", function()
+			close_pause()
+			doc.plan_admin("delete")
+		end)
+		panel.button(r, "Back", function() members_page() end)
+	end
+
+	members_page = function()
+		S.pause_page = "members"
+		local w = dialog("Members of " .. doc.plan_name)
+		local message = doc.admin_message or ""
+		local l = panel.label(w, message ~= "" and message or " ",
+				magic.Color(1.0, 0.8, 0.4))
+		l.minHeight = 22
+		local m = doc.members
+		if not m then
+			panel.label(w, "Waiting for the server...")
+			panel.button(w, "Back", function() open_pause() end)
+			return
+		end
+		panel.label(w, "Owner: " .. (m.owner ~= "" and m.owner or "(none)"))
+		panel.button(w, PUBLIC_TEXT[m.pub] or "?", function()
+			doc.plan_admin("public", "", tostring((m.pub + 1) % 3))
+		end)
+		for _, member in ipairs(m.members) do
+			if member.name ~= m.owner then
+				local r = panel.row(w)
+				local n = panel.label(r, member.name)
+				n.minWidth = 140
+				panel.button(r, ROLE_LABEL[member.role] or member.role, function()
+					doc.plan_admin("role", member.name,
+							ROLE_NEXT[member.role] or "")
+				end)
+			end
+		end
+		panel.button(w, "Delete this plan...", delete_plan_page)
+		panel.button(w, "Back", function()
+			doc.admin_message = nil
+			open_pause()
+		end)
+	end
+	M.members_changed = function()
+		if pause_win and S.pause_page == "members" then
+			members_page()
 		end
 	end
 
@@ -3776,18 +3824,22 @@ do
 				users_page()
 			end)
 		end
+		if doc.privs.manage then
+			panel.button(w, "Plan members...", function()
+				doc.plan_admin("list")
+				members_page()
+			end)
+		end
 		if not doc.is_local then
 			panel.button(w, "Change password...", function() own_password_page() end)
 		end
-		-- The local user of a launched server can go back to the plans;
-		-- anybody can go back to the launcher
-		if doc.is_local then
-			panel.button(w, "Copy this plan...", copy_page)
-			panel.button(w, "Other plan...", function()
-				close_pause()
-				doc.close_plan()
-			end)
-		end
+		-- Anyone makes a copy, which is theirs, and goes back to the plans
+		-- ([FP_PLANS] 4, 5)
+		panel.button(w, "Copy this plan...", copy_page)
+		panel.button(w, "Other plan...", function()
+			close_pause()
+			doc.close_plan()
+		end)
 		panel.button(w, "Leave to the launcher", function() buildat.leave() end)
 		panel.button(w, "Quit", function() buildat.quit() end)
 	end
@@ -5756,6 +5808,13 @@ function M.suspend()
 	S.suspended = true
 	S.sel, S.primary, S.nodes, S.sel_face = {}, nil, {}, {}
 	S.draw, S.corners, S.linking, S.calib, S.drag, S.press = nil
+	-- What the plan left behind goes ([FP_PLANS]): enabled = false is not
+	-- recursive, and it stayed drawn under the plans page. The next plan's
+	-- snapshot builds its own.
+	for _, n in ipairs(built) do
+		n:Remove()
+	end
+	built = {}
 	for _, n in ipairs(SCENE_PARTS) do
 		n.enabled = false
 	end
@@ -5817,6 +5876,7 @@ end
 function M.start(d)
 	doc = d
 	doc.users_changed, doc.passwd_done = M.users_changed, M.passwd_done
+	doc.members_changed = M.members_changed
 	S.material = nil
 	doc.listeners[#doc.listeners + 1] = function(changed, deleted)
 		if S.suspended then

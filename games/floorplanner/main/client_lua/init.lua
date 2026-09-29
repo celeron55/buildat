@@ -340,9 +340,25 @@ local USERS = {"object",
 			{"privs", {"array", "string"}}, {"here", "byte"}}}},
 	{"invites", {"array", {"object", {"code", "string"},
 			{"privs", {"array", "string"}}, {"by", "string"}}}},
-	{"access", {"object", {"open_registration", "byte"},
-			{"default_edit", "byte"}}},
+	{"access", {"object", {"open_registration", "byte"}}},
 }
+-- A plan's members ([FP_PLANS] 5): its owner, whether others read or edit
+-- it, and each account's role in it
+local MEMBERS = {"object", {"plan", "string"}, {"owner", "string"},
+	{"pub", "int32_t"},
+	{"members", {"array", {"object", {"name", "string"}, {"role", "string"}}}},
+}
+doc.members = nil
+function doc.plan_admin(cmd, name, arg)
+	buildat.send_packet("fp:plan_admin", cereal.binary_output({cmd = cmd,
+			name = name or "", arg = arg or "", on = 0}, ADMIN))
+end
+buildat.sub_packet("fp:members", function(data)
+	doc.members = cereal.binary_input(data, MEMBERS)
+	if doc.members_changed then
+		doc.members_changed()
+	end
+end)
 doc.users = nil
 function doc.admin(cmd, name, arg, on)
 	buildat.send_packet("fp:admin", cereal.binary_output({cmd = cmd,
@@ -363,6 +379,9 @@ buildat.sub_packet("fp:admin_result", function(data)
 	doc.admin_message = cereal.binary_input(data, TEXT).text
 	if doc.users_changed then
 		doc.users_changed()
+	end
+	if doc.members_changed then
+		doc.members_changed()
 	end
 end)
 buildat.sub_packet("fp:passwd_result", function(data)
@@ -764,9 +783,23 @@ local function show_login(error_text, is_local)
 	name:SetFocus(true)
 end
 
--- The plans on this machine, to open one or make one: shown to the local
--- user of a server the launch grid started, before anything is open
-local function show_saves(saves)
+-- The plans ([FP_PLANS] 4): after the join, the ones this user may read,
+-- to open one or make a new one, which is theirs
+local PLAN_ROWS = {"array", {"object", {"name", "string"}, {"owner", "string"},
+		{"role", "string"}, {"here", "int32_t"}}}
+doc.plans = {}
+local auto_plan_done = false
+
+local function open_plan(name, create)
+	buildat.send_packet("fp:open", cereal.binary_output(
+			{name = name, create = create and 1 or 0},
+			{"object", {"name", "string"}, {"create", "byte"}}))
+end
+
+local ROLE_TEXT = {admin = "admin", owner = "yours", editor = "can edit",
+		viewer = "can read"}
+
+local function show_plans(message)
 	if login_window then
 		login_window:Remove()
 	end
@@ -775,11 +808,14 @@ local function show_saves(saves)
 	w:SetStyleAuto()
 	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
 	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-	w.minWidth = 380
-	local function text(t)
+	w.minWidth = 420
+	local function text(t, color)
 		local l = w:CreateChild("Text")
 		l:SetStyleAuto()
 		l:SetText(t)
+		if color then
+			l:SetColor(color)
+		end
 	end
 	local function button(t, f)
 		local b = w:CreateChild("Button")
@@ -791,61 +827,103 @@ local function show_saves(saves)
 		bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 		magic.SubscribeToEvent(b, "Released", f)
 	end
-	local function open(name, create)
-		buildat.send_packet("fp:open", cereal.binary_output(
-				{name = name, create = create and 1 or 0},
-				{"object", {"name", "string"}, {"create", "byte"}}))
-	end
-	log:info("Plan picker: " .. #saves .. " plans")
+	log:info("Plan picker: " .. #doc.plans .. " plans")
 	text("Floor planner: open a plan")
-	for _, s in ipairs(saves) do
-		button(s, function() open(s, false) end)
+	if message and message ~= "" then
+		text(message, magic.Color(1.0, 0.4, 0.4))
 	end
-	if #saves == 0 then
+	-- The one this user was in last, first
+	local last = buildat.storage_read("plan")
+	local rows = {}
+	for _, p in ipairs(doc.plans) do
+		if p.name == last then
+			table.insert(rows, 1, p)
+		else
+			rows[#rows + 1] = p
+		end
+	end
+	for _, p in ipairs(rows) do
+		local label = p.name .. "  (" .. (ROLE_TEXT[p.role] or p.role) ..
+				(p.owner ~= "" and p.role ~= "owner" and ", " .. p.owner .. "'s" or
+				"") .. (p.here > 0 and ", " .. p.here .. " here" or "") .. ")"
+		button(label, function() open_plan(p.name, false) end)
+	end
+	if #rows == 0 then
 		text("There are no plans yet")
 	end
-	text("Or a new one, by name (empty: \"plan\"):")
+	text("Or a new one, by name:")
 	local e = w:CreateChild("LineEdit")
 	e:SetStyleAuto()
 	e.minHeight = 26
 	e.textSelectable = true
 	local function create()
 		local n = e:GetText()
-		open(n ~= "" and n or "plan", true)
+		if n ~= "" then
+			open_plan(n, true)
+		end
 	end
 	magic.SubscribeToEvent(e, "TextFinished", create)
 	button("New plan", create)
 	e:SetFocus(true)
 end
 
+buildat.sub_packet("fp:plans", function(data)
+	doc.plans = cereal.binary_input(data, PLAN_ROWS)
+	if doc.in_plan then
+		return
+	end
+	-- A scripted client's plan, or the one the launcher named, once: opened,
+	-- or made when there is none of the name
+	if not auto_plan_done then
+		auto_plan_done = true
+		local want = buildat.get_env("BUILDAT_FP_PLAN")
+		if not want and doc.is_local and hello.plan ~= "" then
+			want = hello.plan
+		end
+		if want then
+			local exists = false
+			for _, p in ipairs(doc.plans) do
+				exists = exists or p.name == want
+			end
+			open_plan(want, not exists)
+			return
+		end
+	end
+	show_plans()
+end)
+
+buildat.sub_packet("fp:open_result", function(data)
+	local err = cereal.binary_input(data, TEXT).text
+	if err == "" then
+		return
+	end
+	log:info("Plan refused: " .. err)
+	if doc.in_plan then
+		doc.notice(err)
+	else
+		show_plans(err)
+	end
+end)
+
+buildat.sub_packet("fp:entered", function(data)
+	doc.plan_name = cereal.binary_input(data, TEXT).text
+	doc.in_plan = true
+	buildat.storage_write("plan", doc.plan_name)
+	log:info("Entered the plan " .. doc.plan_name)
+end)
+
 buildat.sub_packet("fp:hello", function(data)
 	hello = cereal.binary_input(data, {"object", {"local", "byte"},
-			{"pick", "byte"}, {"saves", {"array", "string"}}, {"plan", "string"},
-			{"setup", "byte"}, {"open_registration", "byte"}})
+			{"setup", "byte"}, {"open_registration", "byte"}, {"plan", "string"}})
 	doc.is_local = hello["local"] == 1
-	-- The open plan's name and the local user's plans, for a copy's name
-	doc.plan_name, doc.saves = hello.plan, hello.saves
-	if doc.joined_once then
-		return
-	end
-	-- Back from the picker with a plan open: the local user joins it under
-	-- the name they had
-	if hello.pick == 0 and doc.is_local and doc.rejoin_name then
-		send_login(doc.rejoin_name, "")
-		return
-	end
-	if hello.pick == 1 then
-		if hello["local"] == 1 then
-			show_saves(hello.saves)
-		else
-			show_login("No plan is open yet: the host is choosing one")
-		end
+	-- Said again when the admin changes who may register: a user who has
+	-- joined already has nothing to do with it
+	if doc.logged_in then
 		return
 	end
 	-- A scripted or second client can skip the dialog
 	local auto_name = buildat.get_env("BUILDAT_FP_NAME")
 	if auto_name then
-		doc.rejoin_name = auto_name
 		send_login(auto_name, buildat.get_env("BUILDAT_FP_PASSWORD") or "",
 				buildat.get_env("BUILDAT_FP_CODE") or "")
 	else
@@ -853,23 +931,28 @@ buildat.sub_packet("fp:hello", function(data)
 	end
 end)
 
--- The plan closed, for another ([FP_OTHER_PLAN]): nothing of it is kept,
--- the editor waits under the picker, and fp:hello says what comes next
+-- Out of the plan ([FP_OTHER_PLAN], [FP_PLANS] 4): nothing of it is kept,
+-- the editor waits under the plans page, which fp:plans brings
 buildat.sub_packet("fp:closed", function(data)
+	local why = cereal.binary_input(data, TEXT).text
+	doc.in_plan = false
 	doc.joined_once = false
 	doc.ents, doc.voxels, doc.voxel_version = {}, {}, {}
 	doc.others, doc.privs = {}, {}
 	doc.undo_stack, doc.redo_stack = {}, {}
 	doc.suspend_editor()
+	if why ~= "" then
+		doc.notice(why)
+	end
 end)
 
--- Back to the picker: the server closes the plan
+-- Back to the plans
 function doc.close_plan()
-	buildat.send_packet("fp:close_plan", "")
+	buildat.send_packet("fp:leave_plan", "")
 end
 
--- The open plan copied as `name`, which is then the one open ([FP_COPY]);
--- the server refuses a name a plan has already
+-- The open plan copied as `name`, which is then the one open and the
+-- copier's ([FP_COPY]); the server refuses a name a plan has already
 function doc.copy_plan(name)
 	buildat.send_packet("fp:copy_plan", cereal.binary_output({text = name},
 			TEXT))
@@ -879,8 +962,8 @@ end
 -- has
 function doc.copy_name()
 	local taken = {}
-	for _, s in ipairs(doc.saves or {}) do
-		taken[s] = true
+	for _, p in ipairs(doc.plans or {}) do
+		taken[p.name] = true
 	end
 	local base = doc.plan_name ~= "" and doc.plan_name or "plan"
 	local n = 1
@@ -895,11 +978,18 @@ buildat.sub_packet("fp:login_result", function(data)
 	if err ~= "" then
 		log:info("Login refused: " .. err)
 		-- Joined already, a second try's refusal is only said
-		if doc.joined_once then
+		if doc.logged_in then
 			doc.notice(err)
 		else
 			show_login(err, hello["local"] == 1)
 		end
+		return
+	end
+	-- Into the server: the plans come next
+	doc.logged_in = true
+	if login_window then
+		login_window:Remove()
+		login_window = nil
 	end
 end)
 

@@ -195,6 +195,11 @@ bool copy_file(const ss_ &from, const ss_ &to)
 	std::ofstream out(to.c_str(), std::ios::binary);
 	if(!out)
 		return false;
+	// An empty file is copied as one: << of a buffer with nothing in it
+	// sets failbit, and an open plan's empty write-ahead log was a failed
+	// copy ([FP_PLANS])
+	if(in.peek() == std::ifstream::traits_type::eof())
+		return true;
 	out << in.rdbuf();
 	return (bool)out;
 }
