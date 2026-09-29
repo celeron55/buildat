@@ -248,13 +248,31 @@ do
 				" stand on the floor")
 	end
 end
+-- **The tools are the terminal's, not the floor's** ([LAUNCH_WORLD]
+-- stage 1(b): the tools family as lines on the terminal's screen). The
+-- API's four families are games, saves, servers and tools, and a room
+-- that shows the first three apart and then pours the fourth onto the
+-- floor beside the saves is showing three families and a heap. An
+-- action that says `category = "tool"` goes to the terminal instead.
+TOOLS = {}
+do
+	local rest = {}
+	for _, a in ipairs(FLOOR_ACTIONS) do
+		if a.category == "tool" then
+			TOOLS[#TOOLS + 1] = a
+		else
+			rest[#rest + 1] = a
+		end
+	end
+	FLOOR_ACTIONS = rest
+end
 log:info("contents: " .. (#GAMES - 1) .. " games, " .. #FLOOR_ACTIONS ..
 		" other launch actions, " .. #SAVES .. " saves, " .. #SERVERS ..
-		" servers")
+		" servers, " .. #TOOLS .. " tools on the terminal")
 -- The one that installs a game, for the terminal's ContentDB row: the
 -- tree has no extensions/contentdb, so what there is is an import action
 install_action = nil
-for _, a in ipairs(FLOOR_ACTIONS) do
+for _, a in ipairs(TOOLS) do
 	if a.name:lower():find("import a game") or
 			a.name:lower():find("install") then
 		install_action = a
@@ -5046,9 +5064,18 @@ settings[#settings + 1] = {room = "fov"}
 settings[#settings + 1] = {room = "drone"}
 settings[#settings + 1] = {room = "bed"}
 settings[#settings + 1] = {room = "contentdb"}
+-- **And the tools family, a row each** ([LAUNCH_WORLD] stage 1(b)). The
+-- install action is not repeated here: it is the ContentDB row above,
+-- which is what step 9 asked for by name.
+for _, a in ipairs(TOOLS) do
+	if a ~= install_action then
+		settings[#settings + 1] = {tool = a}
+	end
+end
 sel = 1
 
 local function setting_value(sg)
+	if sg.tool then return "run it" end
 	if sg.pref then
 		local v = api.get_preference(sg.pref)
 		if type(v) == "boolean" then return v and "on" or "off" end
@@ -5068,6 +5095,7 @@ local function setting_value(sg)
 end
 
 local function setting_label(sg)
+	if sg.tool then return sg.tool.name end
 	if sg.pref then return sg.pref:gsub("_", " ") end
 	if sg.room == "palette" then return "palette" end
 	if sg.room == "probe" then return "reflection probe" end
@@ -5157,6 +5185,11 @@ function terminal_key(key)
 	elseif key == magic.KEY_RIGHT then
 		setting_change(settings[sel], 1)
 	elseif key == magic.KEY_RETURN then
+		if settings[sel].tool then
+			local a = settings[sel].tool
+			log:info("tools: running " .. tostring(a.name))
+			api.launch(a.key)
+		end
 		if settings[sel].room == "contentdb" then
 			-- **A game found, installed and launched without touching
 			-- another screen** is what step 9 asks for; what the tree

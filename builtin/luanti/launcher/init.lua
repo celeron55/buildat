@@ -43,14 +43,18 @@ return function(ctx)
 	end
 	-- And the two ways in: the launcher game's own import screens, whose
 	-- lists are the server's, so the game opens them on a menu= param
+	-- **The import screens are tools, not things to play** ([LAUNCH_API]'s
+	-- four families: games, saves, servers, tools). A launch UI that
+	-- shows the families apart -- the room puts tools on its terminal --
+	-- had no way to tell these from a game without reading their names.
 	out[#out + 1] = {id = "import_game", label = "Import a game",
-		icon = "luanti.png", order = 190,
+		icon = "luanti.png", order = 190, category = "tool",
 		description = "Copy a game from a Luanti installation",
 		run = function()
 			ctx.launch{game = "vanilla", params = {menu = "import_game"}}
 		end}
 	out[#out + 1] = {id = "import_world", label = "Import a world",
-		icon = "luanti.png", order = 191,
+		icon = "luanti.png", order = 191, category = "tool",
 		description = "Copy a world from a Luanti installation",
 		run = function()
 			ctx.launch{game = "vanilla", params = {menu = "import_world"}}
