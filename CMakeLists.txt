@@ -690,6 +690,10 @@ if(BUILD_SERVER)
 	else()
 		install(DIRECTORY "${CMAKE_SOURCE_DIR}/games" DESTINATION "${DST_SHARE}")
 	endif()
+	# The web client the server serves ([WEB_CLIENT]), when util/build_web.sh
+	# has made one: its default web_client_path is <share_path>/web
+	install(DIRECTORY "${CMAKE_SOURCE_DIR}/web" DESTINATION "${DST_SHARE}"
+		OPTIONAL)
 	install(DIRECTORY "${CMAKE_SOURCE_DIR}/src" DESTINATION "${DST_SHARE}")
 	install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/cereal/include" DESTINATION "${DST_SHARE}/3rdparty/cereal")
 	install(DIRECTORY "${CMAKE_SOURCE_DIR}/3rdparty/polyvox/library/PolyVoxCore/include" DESTINATION "${DST_SHARE}/3rdparty/polyvox/library/PolyVoxCore")
