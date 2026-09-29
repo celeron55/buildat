@@ -27,6 +27,7 @@
 #include <map>
 #include <random>
 #include <sstream>
+#include <fstream>
 #include <functional>
 #include <cmath>
 #include <algorithm>
@@ -54,6 +55,11 @@ static const size_t MAX_VOXELS = 200000;
 static const int BACKUPS = 5;
 // A background image a client is sent at most
 static const uint64_t MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+// A plan as a file ([FP_EXPORT]): what an import may be, at most
+static const size_t MAX_IMPORT_BYTES = 64 * 1024 * 1024;
+static const size_t MAX_IMPORT_IMAGES = 64;
+static const char *EXPORT_MAGIC = "buildat-floorplan";
+static const int32_t EXPORT_FORMAT = 1;
 
 struct Entity
 {
@@ -66,6 +72,34 @@ struct Entity
 	template<class Archive>
 	void serialize(Archive &archive){
 		archive(id, type, ints, strs, lists);
+	}
+};
+
+// A plan as a file ([FP_EXPORT]): what the plan is, and nothing of who may
+// use it -- no owner, roles or public setting
+struct ExportImage
+{
+	ss_ name;
+	ss_ data;
+
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(name, data);
+	}
+};
+struct PlanFile
+{
+	ss_ magic;
+	int32_t format = 0;
+	int32_t schema = 0;
+	sv_<Entity> ents;
+	// A voxel volume's definition id -> its voxels
+	std::map<int32_t, std::map<int32_t, int32_t>> voxels;
+	sv_<ExportImage> images;
+
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(magic, format, schema, ents, voxels, images);
 	}
 };
 
@@ -286,6 +320,35 @@ static bool valid_text(const ss_ &s)
 		if(c < 0x20 || c == 0x7f)
 			return false;
 	return true;
+}
+
+// A picture's file name in a plan's images/: a PNG or JPEG by its
+// extension, one name and no path, not hidden
+static bool valid_image_name(const ss_ &name)
+{
+	if(name.empty() || name.size() > 100 || !valid_text(name) ||
+			name.find('/') != ss_::npos || name.find('\\') != ss_::npos ||
+			name[0] == '.')
+		return false;
+	ss_ lower = name;
+	for(char &c : lower)
+		c = tolower(c);
+	namespace fs = interface::fs;
+	return fs::check_file_extension(lower.c_str(), "png") ||
+			fs::check_file_extension(lower.c_str(), "jpg") ||
+			fs::check_file_extension(lower.c_str(), "jpeg");
+}
+
+// Whether the bytes are what the name says: a PNG's or a JPEG's signature
+static bool image_matches_name(const ss_ &name, const ss_ &data)
+{
+	ss_ lower = name;
+	for(char &c : lower)
+		c = tolower(c);
+	if(interface::fs::check_file_extension(lower.c_str(), "png"))
+		return data.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0;
+	return data.size() >= 3 && (unsigned char)data[0] == 0xff &&
+			(unsigned char)data[1] == 0xd8 && (unsigned char)data[2] == 0xff;
 }
 
 // PBKDF2-HMAC-SHA256 with one 32-byte block
@@ -597,14 +660,7 @@ struct Plan
 		ss_ dir = m_save->path()+"/images";
 		fs::create_directories(dir);
 		for(const fs::Node &n : fs::list_directory(dir)){
-			ss_ lower = n.name;
-			for(char &c : lower)
-				c = tolower(c);
-			bool image = fs::check_file_extension(lower.c_str(), "png") ||
-					fs::check_file_extension(lower.c_str(), "jpg") ||
-					fs::check_file_extension(lower.c_str(), "jpeg");
-			if(n.is_directory || !image || !valid_text(n.name) ||
-					n.name.find('/') != ss_::npos || n.name[0] == '.')
+			if(n.is_directory || !valid_image_name(n.name))
 				continue;
 			if(fs::file_size(dir+"/"+n.name) > MAX_IMAGE_BYTES){
 				log_w(MODULE, "Image %s is too big to send; skipped",
@@ -1111,7 +1167,7 @@ struct Module: public interface::Module
 		for(const char *name : {"fp:login", "fp:open", "fp:leave_plan",
 				"fp:copy_plan", "fp:plan_admin", "fp:batch", "fp:chat",
 				"fp:admin", "fp:passwd", "fp:voxels", "fp:lock", "fp:unlock",
-				"fp:preview", "fp:presence"})
+				"fp:preview", "fp:presence", "fp:export", "fp:import"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -1136,6 +1192,10 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/fp:leave_plan", on_leave_plan,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:copy_plan", on_copy_plan,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:export", on_export,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:import", on_import,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:plan_admin", on_plan_admin,
 				network::Packet)
@@ -1592,6 +1652,257 @@ struct Module: public interface::Module
 				cs(from_plan->m_name), cs(name));
 		refuse("");
 		enter_plan(packet.sender, copy);
+		send_plans_to_idle();
+	}
+
+	// **A plan as a file** ([FP_EXPORT] 2), for anyone in it: from the plan
+	// as it is in memory, so its database is not touched, with the pictures
+	// its images use
+	struct ExportResult
+	{
+		ss_ error;
+		ss_ name; // the plan's
+		ss_ file;
+
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(error, name, file);
+		}
+	};
+
+	void on_export(const network::Packet &packet)
+	{
+		Plan *plan = plan_of(packet.sender);
+		if(!plan)
+			return;
+		PlanFile f;
+		f.magic = EXPORT_MAGIC;
+		f.format = EXPORT_FORMAT;
+		f.schema = SCHEMA_VERSION;
+		set_<ss_> used;
+		for(auto &pair : plan->m_ents){
+			f.ents.push_back(pair.second);
+			auto file = pair.second.strs.find("file");
+			if(pair.second.type == "image" && file != pair.second.strs.end())
+				used.insert(file->second);
+		}
+		for(auto &pair : plan->m_voxels)
+			if(plan->m_ents.count(pair.first) && !pair.second.empty())
+				f.voxels[pair.first] = pair.second;
+		for(const ss_ &name : plan->m_images){
+			if(!used.count(name))
+				continue;
+			std::ifstream is(plan->m_save->path()+"/images/"+name,
+					std::ios::binary);
+			std::ostringstream data;
+			data<<is.rdbuf();
+			if(!is.good() && !is.eof())
+				continue;
+			f.images.push_back(ExportImage{name, data.str()});
+		}
+		ExportResult r;
+		r.name = plan->m_name;
+		r.file = pack(f);
+		log_i(MODULE, "%s exported the plan %s (%zu bytes)",
+				cs(m_peers[packet.sender].name), cs(plan->m_name), r.file.size());
+		send(packet.sender, "fp:export_data", pack(r));
+	}
+
+	// **A plan from a file** ([FP_EXPORT] 3), for anyone logged in, as a new
+	// plan of theirs. Nothing in the file is taken on trust: the entities go
+	// through apply(), as every edit does, the voxels through the checks an
+	// edit's do, and the pictures are checked for what they claim to be.
+	// Anything refused leaves no plan behind.
+	struct ImportRequest
+	{
+		ss_ name;
+		ss_ file;
+
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(name, file);
+		}
+	};
+
+	void on_import(const network::Packet &packet)
+	{
+		auto it = m_peers.find(packet.sender);
+		if(it == m_peers.end() || it->second.name.empty())
+			return;
+		const ss_ user = it->second.name;
+		auto refuse = [&](const ss_ &why){
+			send(packet.sender, "fp:open_result", pack(why));
+		};
+		ImportRequest req;
+		if(packet.data.size() > MAX_IMPORT_BYTES)
+			return refuse("The file is over "+itos(MAX_IMPORT_BYTES >> 20)+
+					" MiB");
+		if(!unpack(packet.data, req))
+			return;
+		if(!valid_plan_name(req.name))
+			return refuse("\""+req.name+"\" is not a name a plan can have");
+		for(const ss_ &n : plan_names())
+			if(n == req.name)
+				return refuse("There is a plan called \""+req.name+"\" already");
+		PlanFile f;
+		if(!unpack(req.file, f) || f.magic != EXPORT_MAGIC)
+			return refuse("That is not a plan file");
+		if(f.format != EXPORT_FORMAT)
+			return refuse("That plan file is of another format ("+
+					itos(f.format)+")");
+		// simplified: the same schema only; an older one needs load()'s
+		// migrations applied to the file
+		if(f.schema != SCHEMA_VERSION)
+			return refuse("That plan file is from another version (schema "+
+					itos(f.schema)+", here "+itos(SCHEMA_VERSION)+")");
+		if(f.images.size() > MAX_IMPORT_IMAGES)
+			return refuse("The file has over "+itos(MAX_IMPORT_IMAGES)+
+					" pictures");
+		set_<ss_> image_names;
+		for(const ExportImage &im : f.images){
+			if(!valid_image_name(im.name) || !image_names.insert(im.name).second
+					|| im.data.size() > MAX_IMAGE_BYTES ||
+					!image_matches_name(im.name, im.data))
+				return refuse("A picture in the file is not one a plan can "
+						"have");
+		}
+
+		// The ops: every entity made, and then its references set, since
+		// apply() resolves a placeholder when it meets it. The file's ids
+		// become placeholders; a singleton is set on the new plan's own.
+		sv_<Op> makes, refs;
+		set_<int32_t> ids;
+		for(const Entity &e : f.ents){
+			const TypeSchema *sc = find_schema(e.type);
+			if(!sc)
+				return refuse("The file has an entity of an unknown type");
+			if(e.id <= 0 || !ids.insert(e.id).second)
+				return refuse("The file's entity ids are not valid");
+			Op make;
+			make.op = sc->singleton ? 1 : 0;
+			make.ent.id = -e.id;
+			make.ent.type = e.type;
+			make.ent.strs = e.strs;
+			Op ref;
+			ref.op = 1;
+			ref.ent.id = -e.id;
+			for(auto &pair : e.ints){
+				const IntField *field = nullptr;
+				for(const IntField &ff : sc->ints)
+					if(pair.first == ff.name)
+						field = &ff;
+				if(!field || !field->ref){
+					make.ent.ints[pair.first] = pair.second;
+				} else if(pair.second < 0){
+					return refuse("The file's references are not valid");
+				} else {
+					ref.ent.ints[pair.first] = -pair.second;
+				}
+			}
+			for(auto &pair : e.lists){
+				const ListField *field = nullptr;
+				for(const ListField &ff : sc->lists)
+					if(pair.first == ff.name)
+						field = &ff;
+				if(!field || !field->ref){
+					make.ent.lists[pair.first] = pair.second;
+					continue;
+				}
+				sv_<int32_t> &list = ref.ent.lists[pair.first];
+				for(int32_t v : pair.second){
+					if(v <= 0)
+						return refuse("The file's references are not valid");
+					list.push_back(-v);
+				}
+			}
+			if(sc->singleton && (!ref.ent.ints.empty() ||
+					!ref.ent.lists.empty()))
+				return refuse("The file's references are not valid");
+			makes.push_back(make);
+			if(!ref.ent.ints.empty() || !ref.ent.lists.empty())
+				refs.push_back(ref);
+		}
+
+		Plan *plan = open_plan(req.name, true);
+		if(!plan)
+			return refuse("Could not make the plan "+req.name);
+		auto discard = [&](const ss_ &why){
+			log_i(MODULE, "%s's import as %s refused: %s", cs(user),
+					cs(req.name), cs(why));
+			close_plan(req.name);
+			storage::access(m_server, [&](storage::Interface *istorage){
+				istorage->remove(req.name);
+			});
+			refuse(why);
+		};
+		// What a new plan starts with goes, the file's own taking its place
+		sv_<Op> ops;
+		for(auto &pair : plan->m_ents){
+			if(find_schema(pair.second.type)->singleton)
+				continue;
+			Op del;
+			del.op = 2;
+			del.ent.id = pair.first;
+			ops.push_back(del);
+		}
+		for(Op &op : makes){
+			if(op.op == 1){
+				Entity *single = plan->find_singleton(op.ent.type);
+				if(!single)
+					return discard("The plan has no "+op.ent.type);
+				op.ent.id = single->id;
+			}
+			ops.push_back(op);
+		}
+		ops.insert(ops.end(), refs.begin(), refs.end());
+		std::map<int32_t, int32_t> placeholders;
+		set_<int32_t> changed, deleted;
+		ss_ err = plan->apply(ops, placeholders, changed, deleted);
+		if(!err.empty())
+			return discard("The plan in the file is not valid: "+err);
+
+		for(auto &vol : f.voxels){
+			auto def = placeholders.find(-vol.first);
+			auto e = def == placeholders.end() ? plan->m_ents.end() :
+					plan->m_ents.find(def->second);
+			if(vol.first <= 0 || e == plan->m_ents.end() ||
+					e->second.type != "definition" ||
+					e->second.ints["kind"] != DK_VOXEL)
+				return discard("The file has voxels of no voxel volume");
+			if(vol.second.size() > MAX_VOXELS)
+				return discard("A voxel volume in the file is too big");
+			std::map<int32_t, int32_t> cells;
+			for(auto &c : vol.second){
+				auto m = c.second > 0 ? placeholders.find(-c.second) :
+						placeholders.end();
+				auto p = m == placeholders.end() ? plan->m_ents.end() :
+						plan->m_ents.find(m->second);
+				if(!valid_voxel_key(c.first) || p == plan->m_ents.end() ||
+						p->second.type != "palette")
+					return discard("The file's voxels are not valid");
+				cells[c.first] = m->second;
+			}
+			plan->m_voxels[def->second] = cells;
+			plan->m_voxels_dirty.insert(def->second);
+		}
+
+		const ss_ images = plan->m_save->path()+"/images";
+		interface::fs::create_directories(images);
+		for(const ExportImage &im : f.images){
+			std::ofstream os(images+"/"+im.name, std::ios::binary);
+			os.write(im.data.data(), im.data.size());
+			if(!os.good())
+				return discard("Could not write the plan's pictures");
+		}
+		plan->find_images();
+		plan->m_store->set("meta/owner", user);
+		plan->m_store->set("meta/public", itos(PUBLIC_READ));
+		plan->flush();
+		log_i(MODULE, "%s imported the plan %s: %zu entities, %zu voxel volumes,"
+				" %zu pictures", cs(user), cs(req.name), f.ents.size(),
+				f.voxels.size(), f.images.size());
+		refuse("");
+		enter_plan(packet.sender, plan);
 		send_plans_to_idle();
 	}
 

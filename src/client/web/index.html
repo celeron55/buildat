@@ -183,6 +183,36 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none; }
 	canvas.addEventListener('click', function(){
 		(active ? ta : canvas).focus({preventScroll: true});
 	});
+	// Files a game hands the user and takes from them ([FP_EXPORT] 4): the
+	// browser's download, and its file picker, whose file the client takes
+	// with picked_file() once it has been read. src/client/app.cpp
+	// l_save_file() and the ones after it.
+	window.buildatFiles = {
+		picked: null,
+		save: function(name, bytes){
+			var a = document.createElement('a');
+			a.href = URL.createObjectURL(new Blob([bytes]));
+			a.download = name;
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			setTimeout(function(){ URL.revokeObjectURL(a.href); }, 60000);
+		},
+		pick: function(accept){
+			var input = document.createElement('input');
+			input.type = 'file';
+			if(accept)
+				input.accept = accept;
+			input.addEventListener('change', function(){
+				var f = input.files[0];
+				if(f)
+					f.arrayBuffer().then(function(b){
+						buildatFiles.picked = {name: f.name, data: new Uint8Array(b)};
+					});
+			});
+			input.click();
+		},
+	};
 	// A middle click is the game's, not the browser's paste or autoscroll
 	canvas.addEventListener('auxclick', function(e){ e.preventDefault(); });
 })();

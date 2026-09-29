@@ -32,6 +32,7 @@
 #include <condition_variable>
 #include <deque>
 #include <fstream>
+#include <sstream>
 #include <c55/getopt.h>
 #include <c55/os.h>
 #include <Application.h>
@@ -102,6 +103,8 @@ static const float UI_REF_SHORT = 1080.f;
 // Under: maximized window chrome (taskbar, title). Over: 16:10 like 1200p.
 static const float UI_SNAP_UNDER = 0.08f;
 static const float UI_SNAP_OVER = 0.12f;
+// A file a user gives game code ([FP_EXPORT] 4), at most
+static const size_t MAX_USER_FILE_BYTES = 64 * 1024 * 1024;
 static const int MIN_WINDOW_W = 640;
 static const int MIN_WINDOW_H = 360;
 
@@ -1635,6 +1638,11 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(local_server_log_tail)
 		DEF_BUILDAT_FUNC(send_packet);
 		DEF_BUILDAT_FUNC(take_screenshot)
+		DEF_BUILDAT_FUNC(save_file)
+		DEF_BUILDAT_FUNC(exported_files)
+		DEF_BUILDAT_FUNC(read_exported)
+		DEF_BUILDAT_FUNC(pick_file)
+		DEF_BUILDAT_FUNC(picked_file)
 		DEF_BUILDAT_FUNC(dump_meshes)
 		DEF_BUILDAT_FUNC(get_file_path)
 		DEF_BUILDAT_FUNC(get_file_content)
@@ -3980,6 +3988,161 @@ struct CApp: public App, public magic::Application
 		self->m_pending_screenshot = dir+"/"+name;
 		lua_pushlstring(L, name.c_str(), name.size());
 		return 1;
+	}
+
+	// **Files a game hands the user and takes from them** ([FP_EXPORT] 4).
+	// The sandbox has no file access of its own, and gets none here: the
+	// client picks where a file goes and where one may come from. On
+	// native that is <user>/exports, found by the user as the screenshots
+	// are; on the web, the browser's download and file picker (the page's
+	// buildatFiles, src/client/web/index.html).
+	static ss_ exports_dir()
+	{
+		return g_client_config.get<ss_>("user_path")+"/exports";
+	}
+
+	// A name of letters, digits, _ - and ., not hidden, as a file in there
+	static ss_ user_file_name(const ss_ &in)
+	{
+		ss_ out;
+		for(char c : in.substr(0, 100))
+			out += isalnum((unsigned char)c) || c == '_' || c == '-' ||
+					c == '.' ? c : '_';
+		while(!out.empty() && out[0] == '.')
+			out.erase(0, 1);
+		return out.empty() ? "file" : out;
+	}
+
+	// save_file(name, data) -> where it went: the path on native, "" for the
+	// web's download; or nil and why not. Native never overwrites: a name
+	// taken gets _2, _3...
+	static int l_save_file(lua_State *L)
+	{
+		size_t name_len = 0, len = 0;
+		const char *name_c = luaL_checklstring(L, 1, &name_len);
+		const char *data = luaL_checklstring(L, 2, &len);
+		const ss_ name = user_file_name(ss_(name_c, name_len));
+#ifdef __EMSCRIPTEN__
+		EM_ASM({
+			if(window.buildatFiles)
+				buildatFiles.save(UTF8ToString($0), HEAPU8.slice($1, $1 + $2));
+		}, name.c_str(), data, len);
+		lua_pushstring(L, "");
+		return 1;
+#else
+		const ss_ dir = exports_dir();
+		interface::fs::create_directories(dir);
+		const size_t dot = name.find_last_of('.');
+		const ss_ stem = dot == ss_::npos ? name : name.substr(0, dot);
+		const ss_ ext = dot == ss_::npos ? "" : name.substr(dot);
+		ss_ path = dir+"/"+name;
+		for(int i = 2; interface::fs::path_exists(path); i++)
+			path = dir+"/"+stem+"_"+itos(i)+ext;
+		std::ofstream os(path, std::ios::binary);
+		os.write(data, len);
+		if(!os.good()){
+			lua_pushnil(L);
+			lua_pushstring(L, ("could not write "+path).c_str());
+			return 2;
+		}
+		lua_pushlstring(L, path.c_str(), path.size());
+		return 1;
+#endif
+	}
+
+	// exported_files() -> the names of the files in <user>/exports; none on
+	// the web, which has pick_file()
+	static int l_exported_files(lua_State *L)
+	{
+		lua_newtable(L);
+#ifndef __EMSCRIPTEN__
+		int i = 1;
+		for(const auto &n : interface::fs::list_directory(exports_dir())){
+			if(n.is_directory || n.name != user_file_name(n.name))
+				continue;
+			lua_pushlstring(L, n.name.c_str(), n.name.size());
+			lua_rawseti(L, -2, i++);
+		}
+#endif
+		return 1;
+	}
+
+	// read_exported(name) -> the bytes of that file in <user>/exports, or
+	// nil and why not
+	static int l_read_exported(lua_State *L)
+	{
+		const ss_ name = luaL_checkstring(L, 1);
+		const ss_ path = exports_dir()+"/"+name;
+		if(name != user_file_name(name) || !interface::fs::path_exists(path)){
+			lua_pushnil(L);
+			lua_pushstring(L, "no such file");
+			return 2;
+		}
+		if(interface::fs::file_size(path) > MAX_USER_FILE_BYTES){
+			lua_pushnil(L);
+			lua_pushstring(L, "the file is over 64 MiB");
+			return 2;
+		}
+		std::ifstream is(path, std::ios::binary);
+		std::ostringstream data;
+		data<<is.rdbuf();
+		const ss_ s = data.str();
+		lua_pushlstring(L, s.data(), s.size());
+		return 1;
+	}
+
+	// pick_file([accept]) -> whether a picker opened: the web's file picker,
+	// accept as the input element's (".fpplan"). What it picks comes from
+	// picked_file(). False on native, which has exported_files().
+	static int l_pick_file(lua_State *L)
+	{
+#ifdef __EMSCRIPTEN__
+		const char *accept = luaL_optstring(L, 1, "");
+		EM_ASM({
+			if(window.buildatFiles)
+				buildatFiles.pick(UTF8ToString($0));
+		}, accept);
+		lua_pushboolean(L, 1);
+#else
+		lua_pushboolean(L, 0);
+#endif
+		return 1;
+	}
+
+	// picked_file() -> name, data once the picked file has been read; nil
+	// until then; nil and why not for one that is too big
+	static int l_picked_file(lua_State *L)
+	{
+#ifdef __EMSCRIPTEN__
+		int len = EM_ASM_INT({
+			var p = window.buildatFiles && buildatFiles.picked;
+			return p ? p.data.length : -1;
+		});
+		if(len < 0){
+			lua_pushnil(L);
+			return 1;
+		}
+		if((size_t)len > MAX_USER_FILE_BYTES){
+			EM_ASM({ buildatFiles.picked = null; });
+			lua_pushnil(L);
+			lua_pushstring(L, "the file is over 64 MiB");
+			return 2;
+		}
+		ss_ data(len, '\0');
+		char *name = (char*)EM_ASM_PTR({
+			var p = buildatFiles.picked;
+			buildatFiles.picked = null;
+			HEAPU8.set(p.data, $0);
+			return stringToNewUTF8(p.name);
+		}, &data[0]);
+		lua_pushstring(L, name);
+		free(name);
+		lua_pushlstring(L, data.data(), data.size());
+		return 2;
+#else
+		lua_pushnil(L);
+		return 1;
+#endif
 	}
 
 	// dump_meshes([atlas_json]) -> the file name it was saved under, or nil

@@ -4348,6 +4348,10 @@ do
 		-- Anyone makes a copy, which is theirs, and goes back to the plans
 		-- ([FP_PLANS] 4, 5)
 		panel.button(w, "Copy this plan...", copy_page)
+		panel.button(w, "Export this plan", function()
+			close_pause()
+			doc.export_plan()
+		end)
 		panel.button(w, "Other plan...", function()
 			close_pause()
 			doc.close_plan()

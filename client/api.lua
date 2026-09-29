@@ -83,6 +83,13 @@ buildat.add_resource_dir  = __buildat_add_resource_dir
 -- Into <user>/screenshots, named by the date and the time; see
 -- l_take_screenshot() in src/client/app.cpp for why this is in the sandbox.
 buildat.take_screenshot   = __buildat_take_screenshot
+-- save_file, exported_files, read_exported, pick_file, picked_file: files a
+-- game hands the user and takes from them, as buildat.safe's below
+buildat.save_file         = __buildat_save_file
+buildat.exported_files    = __buildat_exported_files
+buildat.read_exported     = __buildat_read_exported
+buildat.pick_file         = __buildat_pick_file
+buildat.picked_file       = __buildat_picked_file
 -- dump_meshes([atlas_json]) -> the file name, or nil and why not. Same sandbox rule
 -- as take_screenshot: into <user>/meshdumps, named by the date. The
 -- scene's CustomGeometry in world space, which is what the client already
@@ -912,6 +919,22 @@ buildat.safe.compose_image            = __buildat_compose_image
 -- The file lands at the end of the frame; the name is reserved before this
 -- returns. See l_take_screenshot() in src/client/app.cpp.
 buildat.safe.take_screenshot          = __buildat_take_screenshot
+-- **Files a game hands the user and takes from them** ([FP_EXPORT] 4), the
+-- same rule as take_screenshot: the client picks where. On native,
+-- <user>/exports; on the web, the browser's download and file picker.
+--   save_file(name, data) -> the path it went to ("" for a download), or
+--       nil and why not; never overwrites
+--   exported_files() -> the names in <user>/exports; {} on the web
+--   read_exported(name) -> the bytes of one of those, or nil and why not
+--   pick_file([accept]) -> true when the web's picker opened; false on
+--       native
+--   picked_file() -> name, data once the picked file is read, else nil
+-- Files are at most 64 MiB. See l_save_file() in src/client/app.cpp.
+buildat.safe.save_file                = __buildat_save_file
+buildat.safe.exported_files           = __buildat_exported_files
+buildat.safe.read_exported            = __buildat_read_exported
+buildat.safe.pick_file                = __buildat_pick_file
+buildat.safe.picked_file              = __buildat_picked_file
 buildat.safe.dump_meshes              = __buildat_dump_meshes
 -- get_env(name) -> the variable, or nil. Only BUILDAT_-prefixed names, so a
 -- server's Lua cannot read the user's environment; what it is for is a knob

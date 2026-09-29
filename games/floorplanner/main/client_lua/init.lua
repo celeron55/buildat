@@ -871,8 +871,156 @@ local function show_plans(message)
 	end
 	magic.SubscribeToEvent(e, "TextFinished", create)
 	button("New plan", create)
+	button("Import a plan...", function() doc.show_import() end)
 	e:SetFocus(true)
 end
+
+-- **A plan from a file** ([FP_EXPORT] 3): on the web the browser's file
+-- picker; on native the .fpplan files in <user>/exports, where an export
+-- goes. Then a name for it, which a new plan of this user's gets.
+local IMPORT = {"object", {"name", "string"}, {"file", "string"}}
+local web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
+local picking = false
+
+local function page(title)
+	if login_window then
+		login_window:Remove()
+	end
+	local w = magic.ui.root:CreateChild("Window")
+	login_window = w
+	w:SetStyleAuto()
+	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
+	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	w.minWidth = 420
+	local function text(t, color)
+		local l = w:CreateChild("Text")
+		l:SetStyleAuto()
+		l:SetText(t)
+		if color then
+			l:SetColor(color)
+		end
+	end
+	local function button(t, f)
+		local b = w:CreateChild("Button")
+		b:SetStyleAuto()
+		b.minHeight = 28
+		local bt = b:CreateChild("Text")
+		bt:SetStyleAuto()
+		bt:SetText(t)
+		bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		magic.SubscribeToEvent(b, "Released", f)
+	end
+	text(title)
+	return w, text, button
+end
+
+-- The file being imported, for its page again when the server refuses
+local importing = nil
+
+local function import_as(file_name, data, message)
+	importing = {file_name, data}
+	local w, text, button = page("Import " .. file_name .. " as a new plan:")
+	if message then
+		text(message, magic.Color(1.0, 0.4, 0.4))
+	end
+	-- The file's name as a plan's: letters, digits, _ and -
+	local name = file_name:gsub("%.fpplan$", ""):gsub("[^%w_%-]", "_")
+			:gsub("^_+", ""):sub(1, 40)
+	local e = w:CreateChild("LineEdit")
+	e:SetStyleAuto()
+	e.minHeight = 26
+	e.textSelectable = true
+	e:SetText(name ~= "" and name or "imported")
+	local function go()
+		local n = e:GetText()
+		if n == "" then
+			return
+		end
+		text("Sending " .. math.floor(#data / 1024 + 0.5) .. " KiB...")
+		buildat.send_packet("fp:import", cereal.binary_output(
+				{name = n, file = data}, IMPORT))
+	end
+	magic.SubscribeToEvent(e, "TextFinished", go)
+	button("Import", go)
+	button("Back", function()
+		importing = nil
+		show_plans()
+	end)
+	e:SetFocus(true)
+end
+
+function doc.show_import(message)
+	local _, text, button = page("Import a plan from a file (.fpplan)")
+	if message then
+		text(message, magic.Color(1.0, 0.4, 0.4))
+	end
+	if web then
+		button("Choose a file...", function()
+			picking = buildat.pick_file(".fpplan")
+		end)
+	else
+		local any = false
+		local files = buildat.exported_files()
+		table.sort(files)
+		for _, f in ipairs(files) do
+			if f:match("%.fpplan$") then
+				any = true
+				button(f, function()
+					local data, why = buildat.read_exported(f)
+					if data then
+						import_as(f, data)
+					else
+						doc.show_import(why)
+					end
+				end)
+			end
+		end
+		if not any then
+			text("No .fpplan files in the exports folder, where")
+			text("\"Export this plan\" puts them: <user>/exports")
+		end
+	end
+	button("Back", function() show_plans() end)
+end
+
+-- The web's picked file, once the browser has read it
+local function poll_picked()
+	if not picking then
+		return
+	end
+	local file_name, data = buildat.picked_file()
+	if file_name then
+		picking = false
+		import_as(file_name, data)
+	elseif data then
+		picking = false
+		doc.show_import(data)
+	end
+end
+
+-- The open plan as a file: the server sends it, and the client saves it
+-- as a download or into <user>/exports
+function doc.export_plan()
+	buildat.send_packet("fp:export", "")
+end
+
+buildat.sub_packet("fp:export_data", function(data)
+	local r = cereal.binary_input(data, {"object", {"error", "string"},
+			{"name", "string"}, {"file", "string"}})
+	if r.error ~= "" then
+		doc.notice("Not exported: " .. r.error)
+		return
+	end
+	local path, why = buildat.save_file(r.name .. ".fpplan", r.file)
+	if not path then
+		doc.notice("Not exported: " .. why)
+	elseif path == "" then
+		doc.notice("Exported " .. r.name .. ".fpplan (" ..
+				math.floor(#r.file / 1024 + 0.5) .. " KiB): see your downloads")
+	else
+		doc.notice("Exported to " .. path)
+	end
+end)
 
 buildat.sub_packet("fp:plans", function(data)
 	doc.plans = cereal.binary_input(data, PLAN_ROWS)
@@ -905,7 +1053,9 @@ buildat.sub_packet("fp:open_result", function(data)
 		return
 	end
 	log:info("Plan refused: " .. err)
-	if doc.in_plan then
+	if importing then
+		import_as(importing[1], importing[2], err)
+	elseif doc.in_plan then
 		doc.notice(err)
 	else
 		show_plans(err)
@@ -913,6 +1063,7 @@ buildat.sub_packet("fp:open_result", function(data)
 end)
 
 buildat.sub_packet("fp:entered", function(data)
+	importing = nil
 	doc.plan_name = cereal.binary_input(data, TEXT).text
 	doc.in_plan = true
 	buildat.storage_write("plan", doc.plan_name)
@@ -1078,6 +1229,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	end
 	was_typing = doc.typing()
 	redraw_messages()
+	poll_picked()
 	if editor then
 		editor.update(event_data:GetFloat("TimeStep"))
 	end
