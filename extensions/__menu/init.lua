@@ -32,6 +32,8 @@ local preferences = api.run_extension_file("preferences.lua")
 -- below reads the same on both sides ([LAUNCH_SANDBOX])
 local FILTER_NEAREST, HA_CENTER, HA_LEFT, KEY_ESCAPE, LM_VERTICAL, VA_CENTER, VA_TOP =
 		magic.FILTER_NEAREST, magic.HA_CENTER, magic.HA_LEFT, magic.KEY_ESCAPE, magic.LM_VERTICAL, magic.VA_CENTER, magic.VA_TOP
+local KEY_BACKSPACE, KEY_RETURN, KEY_RETURN2, KEY_KP_ENTER =
+		magic.KEY_BACKSPACE, magic.KEY_RETURN, magic.KEY_RETURN2, magic.KEY_KP_ENTER
 
 local M = {safe = nil}
 
@@ -60,9 +62,62 @@ local ENTRY_SPACING = 24
 -- enough for; a row with nothing laying it out does not work it out itself
 local ENTRY_HEIGHT = 160
 
+-- **Typing searches the grid** (user, 2026-09-29): the tiles whose label
+-- starts with what is typed first, then the ones that only contain it, each
+-- in the grid's order; the first is selected, so "floo" and Enter starts
+-- the floor planner. A key that is a letter, a digit, a space or - types;
+-- Backspace takes one off and Escape clears what is typed before it quits.
+-- Pure, so the check below can run it.
+local function search(items, query)
+	if query == "" then
+		return items
+	end
+	local q = query:lower()
+	local starts, contains = {}, {}
+	for _, item in ipairs(items) do
+		local label = item.label:lower()
+		local at = label:find(q, 1, true)
+		if at == 1 then
+			starts[#starts + 1] = item
+		elseif at then
+			contains[#contains + 1] = item
+		end
+	end
+	for _, item in ipairs(contains) do
+		starts[#starts + 1] = item
+	end
+	return starts
+end
+
+do
+	local items = {{label = "Floor planner"}, {label = "Engine settings"},
+			{label = "Fleet"}, {label = "A floor mat"}}
+	local r = search(items, "f")
+	assert(#r == 3 and r[1].label == "Floor planner" and r[2].label == "Fleet"
+			and r[3].label == "A floor mat", "search: starts first")
+	r = search(items, "FLOO")
+	assert(#r == 2 and r[1].label == "Floor planner" and
+			r[2].label == "A floor mat", "search: case, then contains")
+	assert(#search(items, "") == 4, "search: nothing typed is everything")
+end
+
+-- The character a key types into the search, or nil: key codes are SDL's,
+-- which are the lower case ASCII of what the key says
+local function search_char(key)
+	if (key >= 97 and key <= 122) or (key >= 48 and key <= 57) or
+			key == 32 or key == 45 then
+		return string.char(key)
+	end
+	return nil
+end
+
 -- launch_action is -a's kind/name/id: the grid is drawn and that one
--- action is run on top of it, the way picking its tile would
-function M.boot(launch_action)
+-- action is run on top of it, the way picking its tile would. query is what
+-- the search has typed so far.
+function M.boot(launch_action, query)
+	-- The search's own rebuilds say nothing the first boot said already
+	local first = query == nil
+	query = query or ""
 	local root = uistack.main:push({desc = "boot"})
 
 	local style = magic.cache:GetResource("XMLFile", "__menu/res/boot_style.xml")
@@ -108,7 +163,7 @@ function M.boot(launch_action)
 
 	local title = layout:CreateChild("Text")
 	title:SetStyleAuto()
-	title.text = "Buildat"
+	title.text = query == "" and "Buildat" or ("Buildat: " .. query .. "_")
 	title:SetFontSize(28)
 	title:SetTextAlignment(HA_CENTER)
 	title.color = magic.Color(0.867, 0.867, 0.867)
@@ -223,6 +278,26 @@ function M.boot(launch_action)
 			" of them with a picture and "..icons_missing.." without, "..
 			played.." launched before")
 
+	-- What the search leaves, in its order; the rest are not drawn
+	local shown = search(items, query)
+	local kept = {}
+	for _, item in ipairs(shown) do
+		kept[item] = true
+	end
+	for _, item in ipairs(items) do
+		if not kept[item] then
+			item.button:Remove()
+		end
+	end
+	items = shown
+	if #items == 0 then
+		local none = layout:CreateChild("Text")
+		none:SetStyleAuto()
+		none.text = "Nothing matches \"" .. query .. "\" (Backspace, Escape)"
+		none:SetTextAlignment(HA_CENTER)
+		none.color = magic.Color(0.7, 0.7, 0.7)
+	end
+
 	-- The selected entry's name and description, to the right of the logo
 	-- in the logo's row ([LAUNCH_DESC]): the label on the first line,
 	-- larger, the description under it, wrapping to the window's right
@@ -291,10 +366,36 @@ function M.boot(launch_action)
 
 	-- launch_menu's keyboard selection, which is worth having here: up and
 	-- down, left and right, enter, and the mouse moving the same selection
+	local selected_index = 1
+	local function research(q)
+		uistack.main:pop(root)
+		M.boot(nil, q)
+	end
 	local nav = ui_utils.bind_button_menu(root, items, function(key)
 		if key == KEY_ESCAPE then
+			if query ~= "" then
+				research("")
+				return true
+			end
 			log:info("KEY_ESCAPE pressed at top level")
 			api.quit()
+			return
+		end
+		local c = search_char(key)
+		if c and magic.input:GetKeyPress(key) then
+			research(query .. c)
+			return true
+		elseif key == KEY_BACKSPACE and query ~= "" then
+			research(query:sub(1, -2))
+			return true
+		elseif (key == KEY_RETURN or key == KEY_RETURN2 or
+				key == KEY_KP_ENTER) and query ~= "" then
+			-- Here rather than the menu's own Enter, which waits a moment
+			-- after a screen is made, and every letter makes one
+			if magic.input:GetKeyPress(key) and items[selected_index] then
+				items[selected_index].action()
+			end
+			return true
 		end
 	end)
 	nav:set_columns(columns)
@@ -303,6 +404,7 @@ function M.boot(launch_action)
 		button:GetChild("ButtonImage").color = magic.Color(c, c, c)
 		button:GetChild("ButtonText").color = magic.Color(c, c, c)
 		if selected and index then
+			selected_index = index
 			scroll_to(index)
 			show_description(items[index])
 		elseif not selected and index and desc_name.text == items[index].label then
@@ -313,7 +415,8 @@ function M.boot(launch_action)
 	-- **The setting said another launch UI and it did not load**, so
 	-- this one says so rather than leaving the player wondering why
 	-- their choice did nothing ([LAUNCH_SANDBOX]'s fallback)
-	local fell_back = api.launch_ui_fell_back and api.launch_ui_fell_back()
+	local fell_back = first and api.launch_ui_fell_back and
+			api.launch_ui_fell_back()
 	if fell_back then
 		ui_utils.show_message_dialog("The launch UI \"" .. fell_back ..
 				"\" did not load, so this is the menu.\n\n" ..
