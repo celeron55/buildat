@@ -318,6 +318,15 @@ buildat.sub_packet("fp:batch_result", function(data)
 	p.done(r.error, r.placeholders)
 end)
 
+-- The pictures the server has to trace over, by file name
+doc.images = {}
+buildat.sub_packet("fp:images", function(data)
+	doc.images = cereal.binary_input(data, {"array", "string"})
+	if doc.privs_changed then
+		doc.privs_changed()
+	end
+end)
+
 buildat.sub_packet("fp:privs", function(data)
 	doc.privs = {}
 	for _, p in ipairs(cereal.binary_input(data, {"array", "string"})) do

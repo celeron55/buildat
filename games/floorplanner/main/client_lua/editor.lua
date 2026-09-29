@@ -89,6 +89,8 @@ local S = {
 	-- Walking: where the feet are, mm, and the eyes above them
 	walk = {x = 0, z = 0, feet = 0, noclip = false},
 	eye = 1600,
+	export_mmpx = 10, -- the PNG export's scale
+	calib = nil,    -- an image being calibrated: {id, pts, measured}
 	yaw = 35, pitch = 40,
 	looking = false,
 	-- Tool state
@@ -261,6 +263,12 @@ local caps_node = scene:CreateChild("Caps")
 local overhead_node = scene:CreateChild("Overhead")
 -- Doors' and windows' own parts: the plan view draws symbols instead
 local pieces_node = scene:CreateChild("Pieces")
+-- The pictures traced over
+local images_node = scene:CreateChild("Images")
+-- simplified: a material per picture file, and one made in Lua is freed
+-- under the geometry using it, so there are eight of them in files and
+-- eight pictures at most; the upgrade is the engine keeping what Lua made
+local IMAGE_MATERIALS = 8
 
 -- The cameras
 local cam2d_node = scene:CreateChild("Camera2D")
@@ -504,6 +512,11 @@ local inst_data = {}
 local built = {}
 -- What a walker bumps into: {pts, y0, y1}, footprints and their heights
 local solids = {}
+-- The pictures, as rebuild() placed them: id -> {foot}
+local image_data = {}
+-- The material each picture file has: file -> one of IMAGE_MATERIALS
+local image_materials = {}
+local images_used = 0
 
 local function wall_span(w)
 	local ceiling = settings().ceiling
@@ -931,24 +944,78 @@ local function build_hosted(id, it, def, e, geometry, commit)
 	end
 end
 
--- A point light at (x, y, z) mm in a lamp entry's colour and brightness
-local function lamp_light(x, y, z, entry)
-	local p = doc.ents[entry].ints
-	local node = lamps_node:CreateChild("lamp")
-	built[#built + 1] = node
-	node.position = magic.Vector3(W(x), W(y), W(z))
-	local light = node:CreateComponent("Light")
-	light.lightType = magic.LIGHT_POINT
-	light.color = rgb_color(kelvin_rgb(p.temperature))
-	local b = p.brightness / 1000
-	light.brightness = 0.5 + 1.5 * b
-	light.range = 2 + 8 * b
+-- The pictures: a quad each over the floors, its size its pixels times
+-- its scale, drawn in the plan view and, if asked, in 3D
+local function build_images()
+	image_data = {}
+	local d = S.drag
+	for _, e in ipairs(doc.of_type("image")) do
+		local i = e.ints
+		local tex = e.strs.file ~= "" and magic.cache:GetResource("Texture2D",
+				"main/images/" .. e.strs.file)
+		if tex then
+			local mat = image_materials[e.strs.file]
+			if not mat and images_used < IMAGE_MATERIALS then
+				images_used = images_used + 1
+				mat = magic.cache:GetResource("Material", "main/image" ..
+						images_used .. ".xml")
+				mat:SetTexture(magic.TU_DIFFUSE, tex)
+				image_materials[e.strs.file] = mat
+			end
+			local x, z = i.x, i.z
+			if d and d.moved and d.kind == "move" and d.inst[e.id] then
+				x, z = x + d.dx, z + d.dz
+			end
+			local hw, hh = tex.width * i.scale / 2000, tex.height * i.scale / 2000
+			local foot, uv = {}, {{0, 1}, {1, 1}, {1, 0}, {0, 0}}
+			for k, c in ipairs({{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}) do
+				local fx, _, fz = geom.rot(c[1] * hw, 0, c[2] * hh, 0, i.yaw / 1000, 0)
+				foot[k] = {x + fx, z + fz}
+			end
+			image_data[e.id] = {foot = foot, locked = i.locked == 1}
+			if mat and (S.view == "2d" or i.show3d == 1) then
+				local node = images_node:CreateChild("image")
+				built[#built + 1] = node
+				local g = node:CreateComponent("CustomGeometry")
+				g:SetNumGeometries(1)
+				g:BeginGeometry(0, magic.TRIANGLE_LIST)
+				local col = magic.Color(1, 1, 1, i.opacity / 1000)
+				-- Over the floors, under everything else
+				for _, t in ipairs({{1, 3, 2}, {1, 4, 3}}) do
+					for _, k in ipairs(t) do
+						g:DefineVertex(magic.Vector3(W(foot[k][1]), W(3), W(foot[k][2])))
+						g:DefineNormal(UP)
+						g:DefineColor(col)
+						g:DefineTexCoord(magic.Vector2(uv[k][1], uv[k][2]))
+					end
+				end
+				g:Commit()
+				g:SetMaterial(0, mat)
+			end
+		end
+	end
+end
+
+local build_lamps
+do
+	-- A point light at (x, y, z) mm in a lamp entry's colour and brightness
+	local function lamp_light(x, y, z, entry)
+		local p = doc.ents[entry].ints
+		local node = lamps_node:CreateChild("lamp")
+		built[#built + 1] = node
+		node.position = magic.Vector3(W(x), W(y), W(z))
+		local light = node:CreateComponent("Light")
+		light.lightType = magic.LIGHT_POINT
+		light.color = rgb_color(kelvin_rgb(p.temperature))
+		local b = p.brightness / 1000
+		light.brightness = 0.5 + 1.5 * b
+		light.range = 2 + 8 * b
 end
 
 -- The lamps that are on: each connected region of a volume's lamp voxels
 -- is one light at its middle, not one per voxel; a box of a lamp material
 -- is one at its centre
-local function build_lamps()
+build_lamps = function()
 	for id, it in pairs(inst_data) do
 		if lamp_on(id) and not it.hosted then
 			local def = doc.ents[it.def].ints
@@ -988,6 +1055,8 @@ local function build_lamps()
 			end
 		end
 	end
+end
+
 end
 
 -- simplified: everything is rebuilt on any change, which at a few hundred
@@ -1165,6 +1234,7 @@ local function rebuild()
 	pieces_node.enabled = S.view ~= "2d"
 	update_voxel_meshes()
 	build_lamps(geometry)
+	build_images()
 	-- The sun where the plan puts it
 	local st = settings()
 	sun.enabled = st.sun == 1
@@ -1355,6 +1425,11 @@ local function pick_surface()
 				local side = (w.bx - w.ax) * (z - w.az) -
 						(w.bz - w.az) * (x - w.ax) > 0 and "left" or "right"
 				return {kind = "wall", id = id, side = side, x = x, z = z}
+			end
+		end
+		for id, im in pairs(image_data) do
+			if not im.locked and geom.point_in_polygon(x, z, im.foot) then
+				return {kind = "image", id = id}
 			end
 		end
 		local r = room_at(x, z)
@@ -2106,7 +2181,7 @@ local function moved_by(sel)
 	for id, kind in pairs(sel) do
 		local e = doc.ents[id]
 		if e then
-			if kind == "instance" then
+			if kind == "instance" or kind == "image" then
 				inst[id] = true
 			elseif kind == "node" then
 				nodes[id] = true
@@ -2133,7 +2208,8 @@ local function send_turn(deg)
 	local inst, nodes = moved_by(S.sel)
 	local sx, sz, n = 0, 0, 0
 	for id in pairs(inst) do
-		sx, sz, n = sx + inst_data[id].x, sz + inst_data[id].z, n + 1
+		local c = inst_data[id] or doc.ents[id].ints
+		sx, sz, n = sx + c.x, sz + c.z, n + 1
 	end
 	for id in pairs(nodes) do
 		local x, z = node_pos(id)
@@ -2526,6 +2602,47 @@ local function build_props()
 			set(sel.id, {ints = {hang = 1 - w.hang}})
 		end)
 		panel.button(props, "Delete (Del)", delete_selected)
+	elseif sel and sel.type == "image" then
+		local i = sel.ints
+		panel.label(props, "Picture: " .. sel.strs.file)
+		int_field(sel.id, "mm per 1000 px", "scale", i.scale)
+		panel.field(props, "Opacity %", i.opacity / 10, function(t)
+			local v = tonumber(t)
+			if v then set(sel.id, {ints = {opacity = math.floor(v * 10 + 0.5)}}) end
+		end)
+		panel.field(props, "Yaw deg", i.yaw / 1000, function(t)
+			local v = tonumber(t)
+			if v then
+				set(sel.id, {ints = {yaw = math.floor(v * 1000 + 0.5) % 360000}})
+			end
+		end)
+		if S.calib and S.calib.id == sel.id and S.calib.measured then
+			panel.label(props, "The two points are " ..
+					math.floor(S.calib.measured + 0.5) .. " mm apart; really:")
+			panel.field(props, "Distance mm", "", function(t)
+				local v = tonumber(t)
+				if v and v > 0 then
+					set(sel.id, {ints = {scale = math.max(1, math.floor(
+							i.scale * v / S.calib.measured + 0.5))}})
+				end
+				S.calib = nil
+			end)
+		else
+			panel.button(props, S.calib and "Click two points on it" or
+					"Calibrate: two points and their distance", function()
+				S.calib = {id = sel.id, pts = {}}
+				refresh_panels()
+			end, S.calib ~= nil)
+		end
+		panel.button(props, "Lock it (a locked one cannot be picked)",
+				function()
+			set(sel.id, {ints = {locked = 1}})
+		end)
+		panel.button(props, i.show3d == 1 and "Shown in 3D too" or
+				"In the plan view only", function()
+			set(sel.id, {ints = {show3d = 1 - i.show3d}})
+		end)
+		panel.button(props, "Delete (Del)", delete_selected)
 	elseif sel and sel.type == "room" then
 		local r = room_data[sel.id]
 		panel.label(props, "Room " .. sel.id)
@@ -2623,6 +2740,28 @@ local function build_props()
 			local v = num(t)
 			if v and v > 0 then S.eye = v end
 		end)
+		-- The pictures in the save's images/, and the ones placed, locked
+		for _, file in ipairs(doc.images) do
+			panel.button(props, "Trace over " .. file, function()
+				send({{op = "create", ent = {id = doc.placeholder(), type = "image",
+						ints = {x = math.floor(S.cx), z = math.floor(S.cz)},
+						strs = {file = file}}}})
+			end)
+		end
+		for _, im in ipairs(doc.of_type("image")) do
+			if im.ints.locked == 1 then
+				panel.button(props, "Unlock " .. im.strs.file, function()
+					set(im.id, {ints = {locked = 0}})
+				end)
+			end
+		end
+		panel.field(props, "Export mm/px", S.export_mmpx, function(t)
+			local v = tonumber(t)
+			if v and v > 0 then S.export_mmpx = v end
+		end)
+		panel.button(props, "Export the plan view as PNG", function()
+			S.exporting = {frame = 0}
+		end)
 	end
 	if not doc.can("edit") then
 		panel.label(props, "Viewing only: no edit privilege",
@@ -2630,74 +2769,76 @@ local function build_props()
 	end
 end
 
-local MATERIAL_KINDS = {[0] = "Drywall", "Wood", "Stone", "Wallpaper", "Lamp",
-	"Glass", "Metal", "Tile", "Fabric", "Plaster"}
-local FINISHES = {[0] = "Over its colour", "White undercoat", "Stain"}
-local AXES = {[0] = "Grain along X", "Grain along Y", "Grain along Z"}
--- Which knobs each type has, beyond the colours and the finish
-local KNOBS = {
-	[0] = {"roughness", "specular", "reflect"},
-	{"roughness", "specular", "reflect", "scale", "seed", "axis"},
-	{"roughness", "specular", "reflect", "scale", "seed", "color2"},
-	{"specular", "scale", "seed", "color2"},
-	{"temperature", "brightness"},
-	{"opacity", "specular", "reflect"},
-	{"roughness", "specular", "reflect", "scale"},
-	{"roughness", "specular", "reflect", "scale", "grout", "stagger", "color2"},
-	{"scale"},
-	{"roughness", "specular", "scale", "seed", "speckle"},
-}
--- What a type looks like when an entry is switched to it
-local KIND_DEFAULTS = {
-	[0] = {base = 0xe8e4dc, color2 = 0x404040, scale = 200, roughness = 800,
-			specular = 100},
-	{base = 0xb07a48, color2 = 0x404040, scale = 300, roughness = 600,
-			specular = 250},
-	{base = 0x9a968e, color2 = 0x5a5650, scale = 400, roughness = 500,
-			specular = 300},
-	{base = 0xeadfc8, color2 = 0x8a6a4a, scale = 150, roughness = 900,
-			specular = 50},
-	{base = 0xffffff, color2 = 0x404040, scale = 200, roughness = 500,
-			specular = 0},
-	{base = 0xa8c8e0, color2 = 0x404040, scale = 200, roughness = 50,
-			specular = 800},
-	{base = 0xb8bcc0, color2 = 0x404040, scale = 200, roughness = 300,
-			specular = 700},
-	{base = 0xf0f0ec, color2 = 0x9a9890, scale = 200, roughness = 200,
-			specular = 500},
-	{base = 0x6a7a8a, color2 = 0x404040, scale = 3, roughness = 1000,
-			specular = 20},
-	{base = 0xe4ddd0, color2 = 0x404040, scale = 200, roughness = 900,
-			specular = 60},
-}
-local KNOB_LABELS = {roughness = "Roughness", specular = "Specular",
-	reflect = "Reflective", scale = "Scale mm", seed = "Seed",
-	temperature = "Kelvin", brightness = "Brightness", opacity = "Opacity",
-	grout = "Grout mm", speckle = "Speckle"}
--- Knobs in thousandths shown as percent
-local PERCENT = {roughness = true, specular = true, reflect = true,
-	brightness = true, opacity = true, speckle = true}
+local build_palette
+do
+	local MATERIAL_KINDS = {[0] = "Drywall", "Wood", "Stone", "Wallpaper", "Lamp",
+		"Glass", "Metal", "Tile", "Fabric", "Plaster"}
+	local FINISHES = {[0] = "Over its colour", "White undercoat", "Stain"}
+	local AXES = {[0] = "Grain along X", "Grain along Y", "Grain along Z"}
+	-- Which knobs each type has, beyond the colours and the finish
+	local KNOBS = {
+		[0] = {"roughness", "specular", "reflect"},
+		{"roughness", "specular", "reflect", "scale", "seed", "axis"},
+		{"roughness", "specular", "reflect", "scale", "seed", "color2"},
+		{"specular", "scale", "seed", "color2"},
+		{"temperature", "brightness"},
+		{"opacity", "specular", "reflect"},
+		{"roughness", "specular", "reflect", "scale"},
+		{"roughness", "specular", "reflect", "scale", "grout", "stagger", "color2"},
+		{"scale"},
+		{"roughness", "specular", "scale", "seed", "speckle"},
+	}
+	-- What a type looks like when an entry is switched to it
+	local KIND_DEFAULTS = {
+		[0] = {base = 0xe8e4dc, color2 = 0x404040, scale = 200, roughness = 800,
+				specular = 100},
+		{base = 0xb07a48, color2 = 0x404040, scale = 300, roughness = 600,
+				specular = 250},
+		{base = 0x9a968e, color2 = 0x5a5650, scale = 400, roughness = 500,
+				specular = 300},
+		{base = 0xeadfc8, color2 = 0x8a6a4a, scale = 150, roughness = 900,
+				specular = 50},
+		{base = 0xffffff, color2 = 0x404040, scale = 200, roughness = 500,
+				specular = 0},
+		{base = 0xa8c8e0, color2 = 0x404040, scale = 200, roughness = 50,
+				specular = 800},
+		{base = 0xb8bcc0, color2 = 0x404040, scale = 200, roughness = 300,
+				specular = 700},
+		{base = 0xf0f0ec, color2 = 0x9a9890, scale = 200, roughness = 200,
+				specular = 500},
+		{base = 0x6a7a8a, color2 = 0x404040, scale = 3, roughness = 1000,
+				specular = 20},
+		{base = 0xe4ddd0, color2 = 0x404040, scale = 200, roughness = 900,
+				specular = 60},
+	}
+	local KNOB_LABELS = {roughness = "Roughness", specular = "Specular",
+		reflect = "Reflective", scale = "Scale mm", seed = "Seed",
+		temperature = "Kelvin", brightness = "Brightness", opacity = "Opacity",
+		grout = "Grout mm", speckle = "Speckle"}
+	-- Knobs in thousandths shown as percent
+	local PERCENT = {roughness = true, specular = true, reflect = true,
+		brightness = true, opacity = true, speckle = true}
 
--- Everything that holds palette entry `from`, moved to `to`, and `from`
--- deleted, in one batch
-local function replace_entry(from, to)
-	local ops = {}
-	for id, e in pairs(doc.ents) do
-		local ints = {}
-		for k, v in pairs(e.ints) do
-			if v == from and k:sub(1, 3) == "mat" then
-				ints[k] = to
+	-- Everything that holds palette entry `from`, moved to `to`, and `from`
+	-- deleted, in one batch
+	local function replace_entry(from, to)
+		local ops = {}
+		for id, e in pairs(doc.ents) do
+			local ints = {}
+			for k, v in pairs(e.ints) do
+				if v == from and k:sub(1, 3) == "mat" then
+					ints[k] = to
+				end
+			end
+			if next(ints) then
+				ops[#ops + 1] = {op = "set", ent = {id = id, ints = ints}}
 			end
 		end
-		if next(ints) then
-			ops[#ops + 1] = {op = "set", ent = {id = id, ints = ints}}
-		end
-	end
-	ops[#ops + 1] = {op = "delete", ent = {id = from}}
-	send(ops)
+		ops[#ops + 1] = {op = "delete", ent = {id = from}}
+		send(ops)
 end
 
-local function build_palette()
+build_palette = function()
 	if palette_win then
 		palette_win:Remove()
 	end
@@ -2802,6 +2943,8 @@ local function build_palette()
 	end
 end
 
+end
+
 refresh_panels = function()
 	-- A field being typed in is not pulled from under the typing; the
 	-- rebuild waits for the next change after it
@@ -2830,6 +2973,9 @@ local function begin_press(button)
 	end
 	local x, z = cursor_floor()
 	S.press = {mx = S.mx, my = S.my, x = x, z = z}
+	if S.calib then
+		return
+	end
 	if S.linking then
 		local s = pick_surface()
 		if s and s.kind == "instance" then
@@ -2849,8 +2995,8 @@ local function begin_press(button)
 		if n then
 			S.press.target = {kind = "node", id = n}
 		elseif s then
-			S.press.target = {kind = s.kind == "wall" and "wall" or "room",
-					id = s.id}
+			S.press.target = {kind = (s.kind == "wall" or s.kind == "image") and
+					s.kind or "room", id = s.id}
 		end
 	elseif S.tool == "node" then
 		local n = x and nearest_node(x, z, snap_radius())
@@ -3098,6 +3244,19 @@ end
 
 local function click()
 	local t = S.press.target
+	if S.calib and not S.calib.measured then
+		local x, z = cursor_floor()
+		if x then
+			local c = S.calib
+			c.pts[#c.pts + 1] = {x, z}
+			if #c.pts == 2 then
+				c.measured = geom.len(c.pts[2][1] - c.pts[1][1],
+						c.pts[2][2] - c.pts[1][2])
+				refresh_panels()
+			end
+		end
+		return
+	end
 	if S.linking then
 		-- A lamp clicked joins the switch's lamps, or leaves them
 		local sw = doc.ents[S.linking]
@@ -3496,6 +3655,9 @@ function M.key_down(key, event_data)
 		S.walk.noclip = not S.walk.noclip
 		doc.notice(S.walk.noclip and "Noclip: walls do not stop you; Space and C"
 				.. " go up and down" or "Noclip off")
+	elseif key == magic.KEY_ESCAPE and S.calib then
+		S.calib = nil
+		refresh_panels()
 	elseif key == magic.KEY_ESCAPE and S.linking then
 		S.linking = nil
 		refresh_panels()
@@ -3559,36 +3721,38 @@ function M.key_down(key, event_data)
 	end
 end
 
---
--- Walking
---
--- The voxels of the volumes near (x, z) as footprints, for the walker
--- simplified: a volume pitched or rolled is its bounding box
-local function voxel_solids(x, z, out)
-	for id, it in pairs(inst_data) do
-		if it.voxel and geom.len(x - it.x, z - it.z) < math.max(it.ex, it.ez) +
-				BODY_R * 2 then
-			if it.pitch % 360 ~= 0 or it.roll % 360 ~= 0 then
-				out[#out + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
-			else
-				local sz = it.size
-				for key in pairs(doc.voxels[doc.ents[id].ints.def] or {}) do
-					local cx, cy, cz = doc.voxel_cell(key)
-					local pts = {}
-					for k, c in ipairs({{0, 0}, {1, 0}, {1, 1}, {0, 1}}) do
-						local px, _, pz = geom.rot((cx + c[1]) * sz, 0,
-								(cz + c[2]) * sz, 0, it.yaw, 0)
-						pts[k] = {it.ox + px, it.oz + pz}
+local walk
+do
+	--
+	-- Walking
+	--
+	-- The voxels of the volumes near (x, z) as footprints, for the walker
+	-- simplified: a volume pitched or rolled is its bounding box
+	local function voxel_solids(x, z, out)
+		for id, it in pairs(inst_data) do
+			if it.voxel and geom.len(x - it.x, z - it.z) < math.max(it.ex, it.ez) +
+					BODY_R * 2 then
+				if it.pitch % 360 ~= 0 or it.roll % 360 ~= 0 then
+					out[#out + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
+				else
+					local sz = it.size
+					for key in pairs(doc.voxels[doc.ents[id].ints.def] or {}) do
+						local cx, cy, cz = doc.voxel_cell(key)
+						local pts = {}
+						for k, c in ipairs({{0, 0}, {1, 0}, {1, 1}, {0, 1}}) do
+							local px, _, pz = geom.rot((cx + c[1]) * sz, 0,
+									(cz + c[2]) * sz, 0, it.yaw, 0)
+							pts[k] = {it.ox + px, it.oz + pz}
+						end
+						if not geom.is_ccw(pts) then
+							pts = {pts[4], pts[3], pts[2], pts[1]}
+						end
+						out[#out + 1] = {pts = pts, y0 = it.oy + cy * sz,
+								y1 = it.oy + (cy + 1) * sz}
 					end
-					if not geom.is_ccw(pts) then
-						pts = {pts[4], pts[3], pts[2], pts[1]}
-					end
-					out[#out + 1] = {pts = pts, y0 = it.oy + cy * sz,
-							y1 = it.oy + (cy + 1) * sz}
 				end
 			end
 		end
-	end
 end
 
 -- The walker at (x, z) with its feet at `feet`, pushed out of what it is
@@ -3635,7 +3799,7 @@ local function collide(x, z, feet)
 	return x, z, ground
 end
 
-local function walk(dt, f, r)
+walk = function(dt, f, r)
 	local input = magic.input
 	local w = S.walk
 	-- Shift runs; Ctrl is the shortcuts' (Ctrl+D is a copy)
@@ -3653,6 +3817,8 @@ local function walk(dt, f, r)
 		w.x, w.z, w.feet = collide(w.x + dx, w.z + dz, w.feet)
 	end
 	S.pos = {x = w.x / 1000, y = (w.feet + S.eye) / 1000, z = w.z / 1000}
+end
+
 end
 
 --
@@ -3883,10 +4049,22 @@ local function draw_overlay()
 		elseif kind == "room" and room_data[id] then
 			outline(room_data[id].pts, accent)
 			outline(room_data[id].inner, magic.Color(0.2, 0.6, 1.0))
+		elseif kind == "image" and image_data[id] then
+			outline(image_data[id].foot, accent)
 		elseif kind == "instance" and inst_data[id] then
 			local it = inst_data[id]
 			outline(it.foot, accent, S.view ~= "2d" and
 					{W(it.y0) + 0.004, W(it.y1) + 0.004} or nil)
+		end
+	end
+	-- The calibration's two points
+	if S.calib then
+		local c = S.calib
+		for i, p in ipairs(c.pts) do
+			debug:AddCross(P(p[1], p[2]), W(10 * mm_per_px()), accent, false)
+			if i == 2 then
+				line(c.pts[1][1], c.pts[1][2], p[1], p[2], accent)
+			end
 		end
 	end
 	-- A switch's lamps, joined to it by dashed lines
@@ -4069,7 +4247,36 @@ local function send_presence(dt)
 	doc.send_presence(p)
 end
 
+-- The plan view at S.export_mmpx, without the panels, as a screenshot:
+-- one frame to draw it that way, the shot at the end of the next
+local function export_step()
+	local e = S.exporting
+	if not e then
+		return
+	end
+	local _, h = screen_size()
+	if e.frame == 0 then
+		e.view, e.span = S.view, S.span
+		set_view("2d")
+		S.span = S.export_mmpx * h
+		for _, w in ipairs({toolbar, props, palette_win}) do
+			w.visible = false
+		end
+	elseif e.frame == 2 then
+		local name, why = buildat.take_screenshot()
+		doc.notice(name and ("Exported " .. name .. " at " .. S.export_mmpx ..
+				" mm/px") or ("Could not export: " .. tostring(why)))
+	elseif e.frame == 4 then
+		S.span = e.span
+		S.exporting = nil
+		set_view(e.view)
+		return
+	end
+	e.frame = e.frame + 1
+end
+
 function M.update(dt)
+	export_step()
 	move_camera(dt)
 	place_cameras()
 	send_presence(dt)

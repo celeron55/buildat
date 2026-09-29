@@ -12,6 +12,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/sha256.h"
+#include "interface/fs.h"
 #include "client_file/api.h"
 #include "network/api.h"
 #include "storage/api.h"
@@ -46,6 +47,10 @@ static const int MAX_LOGIN_FAILURES = 5;
 // this many voxels
 static const int32_t VOXEL_RANGE = 128;
 static const size_t MAX_VOXELS = 200000;
+// How many copies of the plan are kept, one made each time it is loaded
+static const int BACKUPS = 5;
+// A background image a client is sent at most
+static const uint64_t MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 struct Entity
 {
@@ -189,6 +194,19 @@ static const sv_<TypeSchema> SCHEMA = {
 	}},
 	// One material: its type, its own colour, the paint over it, and the
 	// knobs of its type. See Palette.glsl for what each does.
+	// A picture under the plan, an existing floor plan to trace: one of the
+	// save's images/, its middle at x, z, scale mm per 1000 pixels
+	{"image", {
+		{"x", -MAX_COORD, MAX_COORD, 0},
+		{"z", -MAX_COORD, MAX_COORD, 0},
+		{"yaw", 0, 359999, 0},
+		{"scale", 1, 10000000, 10000},
+		{"opacity", 0, 1000, 600},
+		{"locked", 0, 1, 0},
+		{"show3d", 0, 1, 0},
+	}, {
+		{"file", ""},
+	}, {}},
 	{"palette", {
 		{"kind", 0, MK_COUNT - 1, MK_DRYWALL},
 		{"base", 0, 0xffffff, 0xe8e4dc},
@@ -467,8 +485,17 @@ struct Module: public interface::Module
 	{
 		storage::access(m_server, [&](storage::Interface *istorage){
 			m_save = istorage->open("plan");
-			if(!m_save)
+			if(m_save){
+				// A copy of the plan as it was, before anything touches it:
+				// what an undo that lives only for a session cannot give
+				// back
+				ss_ path = m_save->path();
+				istorage->close(m_save);
+				backup(path);
+				m_save = istorage->open("plan");
+			} else {
 				m_save = istorage->create("plan");
+			}
 		});
 		if(!m_save){
 			log_e(MODULE, "Could not open or create the save");
@@ -477,6 +504,67 @@ struct Module: public interface::Module
 		}
 		m_store = m_save->store("main");
 		load();
+		find_images();
+	}
+
+	// <save>/backups/1 is the newest of BACKUPS; the save is closed, so its
+	// write-ahead log is copied as it is
+	void backup(const ss_ &path)
+	{
+		namespace fs = interface::fs;
+		ss_ dir = path+"/backups";
+		fs::create_directories(dir);
+		if(fs::path_exists(dir+"/"+itos(BACKUPS)))
+			fs::remove_all(dir+"/"+itos(BACKUPS));
+		for(int i = BACKUPS - 1; i >= 1; i--){
+			ss_ from = dir+"/"+itos(i);
+			if(!fs::path_exists(from))
+				continue;
+			fs::create_directories(dir+"/"+itos(i + 1));
+			for(const char *f : {"/save.sqlite", "/save.sqlite-wal"})
+				if(fs::path_exists(from+f))
+					fs::copy_file(from+f, dir+"/"+itos(i + 1)+f);
+			fs::remove_all(from);
+		}
+		fs::create_directories(dir+"/1");
+		bool ok = fs::copy_file(path+"/save.sqlite", dir+"/1/save.sqlite");
+		if(fs::path_exists(path+"/save.sqlite-wal"))
+			ok = fs::copy_file(path+"/save.sqlite-wal",
+					dir+"/1/save.sqlite-wal") && ok;
+		if(!ok)
+			log_w(MODULE, "Could not back the plan up into %s", cs(dir));
+	}
+
+	// The save's images/ as files for the clients: the pictures a plan can
+	// be traced over. Put there by hand; a name is one file name.
+	sv_<ss_> m_images;
+	void find_images()
+	{
+		namespace fs = interface::fs;
+		m_images.clear();
+		ss_ dir = m_save->path()+"/images";
+		fs::create_directories(dir);
+		for(const fs::Node &n : fs::list_directory(dir)){
+			ss_ lower = n.name;
+			for(char &c : lower)
+				c = tolower(c);
+			bool image = fs::check_file_extension(lower.c_str(), "png") ||
+					fs::check_file_extension(lower.c_str(), "jpg") ||
+					fs::check_file_extension(lower.c_str(), "jpeg");
+			if(n.is_directory || !image || !valid_text(n.name) ||
+					n.name.find('/') != ss_::npos || n.name[0] == '.')
+				continue;
+			if(fs::file_size(dir+"/"+n.name) > MAX_IMAGE_BYTES){
+				log_w(MODULE, "Image %s is too big to send; skipped",
+						cs(n.name));
+				continue;
+			}
+			m_images.push_back(n.name);
+			client_file::access(m_server, [&](client_file::Interface *i){
+				i->add_file_path("main/images/"+n.name, dir+"/"+n.name);
+			});
+		}
+		log_i(MODULE, "%zu images to trace over", m_images.size());
 	}
 
 	void load()
@@ -958,6 +1046,7 @@ struct Module: public interface::Module
 		for(auto &pair : m_ents)
 			all.push_back(pair.second);
 		send(packet.sender, "fp:snapshot", pack(all));
+		send(packet.sender, "fp:images", pack(m_images));
 		for(auto &pair : m_voxels){
 			if(!m_ents.count(pair.first))
 				continue;
