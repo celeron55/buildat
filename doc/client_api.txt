@@ -384,6 +384,13 @@ buildat.safe.storage_read(name) -> data or nil
 buildat.safe.storage_write(name, data) -> true, or false and why
 - One directory per launch extension under the user path. A name is one file,
   not a path, and there is a size limit.
+- Game code a server sent gets the same two as buildat.storage_read and
+  buildat.storage_write, kept per server like a web page's localStorage:
+  <user>/games/<game>/client for a server this client started (its port
+  changes every launch, its game does not), <user>/servers/<address> for any
+  other, so a server cannot read what another one or a local game stored.
+  Which is which is told by the chunk's name: run_script_file notes the
+  chunks a server served.
 buildat.safe.is_scripted() -> bool
 - Whether this client is driven by a command sequence, which a launcher asks
   before taking the mouse: a check shares a desk with the person whose mouse

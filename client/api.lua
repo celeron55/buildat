@@ -330,10 +330,28 @@ local function calling_extension(level)
 	return __buildat_menu_extension_name or "launch_menu"
 end
 
+-- The chunks servers served, by name (sandbox.lua's run_script_file)
+__buildat_served_chunks = {}
+
 local function storage_path(name)
 	if type(name) ~= "string" or not name:match("^[%w_%-%.]+$") or
 			name:find("%.%.") then
 		return nil, "storage: a name of letters, digits, _ - and ."
+	end
+	-- **Game code a server sent** keeps its things where the server's
+	-- game_storage_dir() says, like a web page's localStorage: a game
+	-- started here has its game's, anything else its address's. Taken by
+	-- the chunk's name, as a launch extension's is; a served chunk and an
+	-- extension's are named alike, so the loader writes down which is which.
+	-- 1 is this, 2 storage_read or storage_write, 3 who called that
+	local info = debug.getinfo(3, "S")
+	local src = info and info.source or ""
+	if __buildat_served_chunks[src] then
+		local dir = __buildat_game_storage_dir()
+		if not dir then
+			return nil, "storage: not connected to a server"
+		end
+		return dir .. "/" .. name, dir
 	end
 	local who = calling_extension(4)
 	if not who:match("^[%w_]+$") then

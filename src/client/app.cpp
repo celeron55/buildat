@@ -598,6 +598,9 @@ static bool valid_game_name(const ss_ &name)
 static interface::process::Handle g_local_server;
 // Port the local server was told to listen on ("" if none was started)
 static ss_ g_local_server_port;
+// The game the local server was started with, for the storage of the game
+// code it serves
+static ss_ g_local_server_game;
 // The watchdog's stall, in seconds; a screen may lower it ([BOX_PLAYTEST_2] 12)
 static int g_watchdog_seconds = 10;
 // The local server's log, tailed for its STATUS lines ([START_PROGRESS])
@@ -1519,6 +1522,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(local_server_ready)
 		DEF_BUILDAT_FUNC(local_server_running)
 		DEF_BUILDAT_FUNC(local_server_port)
+		DEF_BUILDAT_FUNC(game_storage_dir)
 		DEF_BUILDAT_FUNC(local_server_status)
 		DEF_BUILDAT_FUNC(local_server_log_tail)
 		DEF_BUILDAT_FUNC(send_packet);
@@ -2957,6 +2961,7 @@ struct CApp: public App, public magic::Application
 #endif
 
 		game_path = interface::fs::get_absolute_path(game_path);
+		g_local_server_game = game;
 		g_local_server_port = pick_free_local_port();
 		log_i(MODULE, "Starting local server on port %s", cs(g_local_server_port));
 		sv_<ss_> args{"-m", game_path, "-P", g_local_server_port,
@@ -3525,6 +3530,41 @@ struct CApp: public App, public magic::Application
 	}
 
 	// local_server_running() -> bool
+	// game_storage_dir() -> the directory under the user path where the
+	// game code of the server this client is connected to keeps what it
+	// stores on the client, or nil when there is no server: like a web
+	// page's localStorage, one per origin. A server this client started is
+	// its game's (the port changes every launch); any other its address's,
+	// so a server cannot read what another one, or a local game, stored.
+	static int l_game_storage_dir(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		ss_ address = self->m_state ? self->m_state->get_address() : "";
+		if(address.empty())
+			return 0;
+		ss_ user = g_client_config.get<ss_>("user_path");
+		adopt_pidfile();
+		bool local = !g_local_server_game.empty() &&
+				interface::process::is_running(g_local_server) &&
+				(address == "localhost:"+g_local_server_port ||
+				address == "127.0.0.1:"+g_local_server_port);
+		ss_ dir;
+		if(local){
+			dir = user+"/games/"+g_local_server_game+"/client";
+		} else {
+			// One directory name: what is not a letter, a digit, - or . is _
+			ss_ name = address;
+			for(char &c : name)
+				if(!(isalnum((unsigned char)c) || c == '-' || c == '.'))
+					c = '_';
+			dir = user+"/servers/"+name;
+		}
+		lua_pushstring(L, dir.c_str());
+		return 1;
+	}
+
 	static int l_local_server_running(lua_State *L)
 	{
 		adopt_pidfile();

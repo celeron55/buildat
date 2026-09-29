@@ -298,6 +298,10 @@ function buildat.run_script_file(name)
 		return false
 	end
 	log:info("buildat.run_script_file("..name.."): code length: "..#code)
+	-- A chunk a server served, which is what storage_read and
+	-- storage_write look at to give it the server's storage and not a
+	-- launch extension's
+	__buildat_served_chunks[name] = true
 	return __buildat_run_code_in_sandbox(code, name)
 end
 buildat.safe.run_script_file = buildat.run_script_file

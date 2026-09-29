@@ -15,6 +15,7 @@
 #include <c55/string_util.h>
 #include <c55/os.h> // get_timeofday_us()
 #include <cstdlib>
+#include <mutex>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
@@ -127,6 +128,9 @@ struct CState: public State
 	// last, so a main thread that reads it as done sees the error with it.
 	std::thread m_connect_thread;
 	std::atomic<int> m_connect_result{0};
+	// Set by connect(), which connect_start() runs on a thread
+	std::mutex m_address_mutex;
+	ss_ m_address;
 	ss_ m_connect_error;
 	sm_<ss_, std::function<void(const ss_ &, const ss_ &)>> m_packet_handlers;
 
@@ -268,8 +272,18 @@ struct CState: public State
 		return ok;
 	}
 
+	ss_ get_address()
+	{
+		std::lock_guard<std::mutex> lock(m_address_mutex);
+		return m_address;
+	}
+
 	bool connect(const ss_ &address, ss_ *error)
 	{
+		{
+			std::lock_guard<std::mutex> lock(m_address_mutex);
+			m_address = address;
+		}
 		if(address.empty()){
 			if(error)
 				*error = "Cannot connect to empty address";
