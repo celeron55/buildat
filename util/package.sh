@@ -567,18 +567,22 @@ build_web() {
 	done
 }
 
-# Every shipped game's modules compiled into a stage's cache
-# ([LINUX_SERVER]): each game started once on the staged server until it
-# listens, with a user directory of its own that is thrown away, so only
-# cache/rccpp_build/ keeps anything. A game that does not start fails the
-# packaging: the archive would not serve it on a box with no compiler.
+# The games web-precompiled carries compiled ([LINUX_SERVER]), chosen one by
+# one (user, 2026-09-29): the others ship as source, and on a box with no
+# compiler do not start
+WEB_PRECOMPILED_GAMES="floorplanner vanilla aggregate bomber_drone"
+
+# Those games' modules compiled into a stage's cache: each game started once
+# on the staged server until it listens, with a user directory of its own
+# that is thrown away, so only cache/rccpp_build/ keeps anything. A game that
+# does not start fails the packaging.
 prebuild_games() {
 	local stage="$1" name="$2"
 	local logs="$stage/../prebuild-games-$name"
 	local g log port=29799 srv udir failed=""
 	mkdir -p "$logs"
-	for g in $(ls "$stage/games"); do
-		[ -d "$stage/games/$g" ] || continue
+	for g in $WEB_PRECOMPILED_GAMES; do
+		[ -d "$stage/games/$g" ] || { echo "prebuild: no games/$g"; failed="$failed $g"; continue; }
 		log="$logs/$g.log"
 		# A port of its own, counted up past any that is taken: one drawn
 		# at random came out the same for game after game, and the last
