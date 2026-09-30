@@ -748,13 +748,16 @@ function M.light_color(x, y, z)
 	local k = 0.44
 	local a, b, l = u.ambient, u.bounce, u.lamp
 	-- The sun where the sky nibble is full, which in Luanti is direct
-	-- sunlight: an object in the open is lit as the ground beside it.
-	-- simplified: no shadow map and no normal, so the ground's level
-	-- face; an object in a tree's shadow on open ground is sunlit.
+	-- sunlight, at half: the mean of a face turned to it and one turned
+	-- away (user: the whole of it made a held pickaxe too bright).
+	-- simplified: no shadow map and no normal; an object in a tree's
+	-- shadow on open ground is half sunlit. [OBJECT_LIGHT] level 2 is
+	-- the sun's direction and shadow on it.
 	local s = u.sun and sky >= 1 and u.sun or {r = 0, g = 0, b = 0}
-	return magic.Color(k * (a.r * share + b.r * bounce + l.r * lit + s.r),
-			k * (a.g * share + b.g * bounce + l.g * lit + s.g),
-			k * (a.b * share + b.b * bounce + l.b * lit + s.b), 1.0)
+	local h = 0.5
+	return magic.Color(k * (a.r * share + b.r * bounce + l.r * lit + h * s.r),
+			k * (a.g * share + b.g * bounce + l.g * lit + h * s.g),
+			k * (a.b * share + b.b * bounce + l.b * lit + h * s.b), 1.0)
 end
 
 -- Set on an object's materials when it moves (and when the day turns; the
