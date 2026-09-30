@@ -51,6 +51,8 @@ local USERS = {"object",
 
 local opts = {}
 local window = nil
+-- The account page open, for the packets that redraw it; see M.users_page
+local page_kind, page_back, users_page, passwd_page = nil, nil, nil, nil
 
 local function notice(text)
 	if M.notice then
@@ -69,6 +71,10 @@ end
 -- on a narrow one ([FP_TOUCH] 2), and its texts wrap to it
 local function page_window(width)
 	local w = magic.ui.root:CreateChild("Window")
+	-- Its own style, for a game whose root has none (vanilla's world); what
+	-- is in it finds the style through it
+	w.defaultStyle = magic.cache:GetResource("XMLFile",
+			"launch_menu/res/main_style.xml")
 	w:SetStyleAuto()
 	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
 	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
@@ -230,6 +236,9 @@ end)
 
 buildat.sub_packet("accounts:users", function(data)
 	M.users = cereal.binary_input(data, USERS)
+	if page_kind == "users" then
+		users_page(page_back)
+	end
 	if M.on_users then
 		M.on_users()
 	end
@@ -237,6 +246,9 @@ end)
 
 buildat.sub_packet("accounts:admin_result", function(data)
 	M.message = cereal.binary_input(data, TEXT).text
+	if page_kind == "users" then
+		users_page(page_back)
+	end
 	if M.on_admin_result then
 		M.on_admin_result(M.message)
 	end
@@ -244,6 +256,10 @@ end)
 
 buildat.sub_packet("accounts:passwd_result", function(data)
 	local text = cereal.binary_input(data, TEXT).text
+	if page_kind == "passwd" then
+		passwd_page(page_back, text == "" and "The password was changed" or
+				text)
+	end
 	if M.on_passwd then
 		M.on_passwd(text)
 	end
@@ -268,6 +284,229 @@ function M.passwd(old, new)
 	buildat.send_packet("accounts:passwd", cereal.binary_output(
 			{old = old, new = new}, {"object", {"old", "string"},
 			{"new", "string"}}))
+end
+
+--
+-- The account pages ([VANILLA_PUBLIC] 2): a user's own password, and an
+-- admin's users, invites, bans and registration. Each game opens them from
+-- its own pause menu, and `back` is what their Back goes to. M.page is the
+-- page open, for the game's hit tests; M.close_page() closes it.
+--
+local function row(parent)
+	local r = parent:CreateChild("UIElement")
+	r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
+	return r
+end
+
+local function button(parent, text, on_click)
+	local b = parent:CreateChild("Button")
+	b:SetStyleAuto()
+	b.minHeight = 28
+	local t = b:CreateChild("Text")
+	t:SetStyleAuto()
+	t:SetText(text)
+	t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	b.minWidth = t.width + 24
+	magic.SubscribeToEvent(b, "Released", function() on_click() end)
+	return b
+end
+-- For a game's own pages in the same look: vanilla's pause menu
+M.page_button = button
+
+local function field(parent, label, secret, on_finish)
+	local r = row(parent)
+	local l = page_text(r, label)
+	l:SetWordwrap(false)
+	l.minWidth = 100
+	local e = r:CreateChild("LineEdit")
+	e:SetStyleAuto()
+	e.minHeight = 26
+	e.minWidth = 160
+	e.textSelectable = true
+	if secret then
+		e.echoCharacter = string.byte("*")
+	else
+		e.textCopyable = true
+	end
+	magic.SubscribeToEvent(e, "TextFinished", function() on_finish() end)
+	return e
+end
+
+local YELLOW = magic.Color(1.0, 0.8, 0.4)
+
+function M.close_page()
+	if M.page then
+		M.page:Remove()
+		M.page = nil
+	end
+	page_kind = nil
+end
+
+local function open_page(kind, title, back)
+	M.close_page()
+	page_kind, page_back = kind, back
+	M.page = page_window(560)
+	page_text(M.page, title)
+	return M.page
+end
+
+local function go_back()
+	M.close_page()
+	M.message = nil
+	if page_back then
+		page_back()
+	end
+end
+
+-- A user's own password; `message` is what the last change came to
+passwd_page = function(back, message)
+	local w = open_page("passwd", "Change password", back)
+	if message then
+		page_text(w, message, YELLOW)
+	end
+	local old, new1, new2
+	local function change()
+		if new1:GetText() ~= new2:GetText() then
+			return passwd_page(back, "The new passwords differ")
+		end
+		M.passwd(old:GetText(), new1:GetText())
+	end
+	old = field(w, "Old", true, function() new1:SetFocus(true) end)
+	new1 = field(w, "New", true, function() new2:SetFocus(true) end)
+	new2 = field(w, "New again", true, change)
+	local r = row(w)
+	button(r, "Change", change)
+	button(r, "Back", go_back)
+	old:SetFocus(true)
+end
+M.password_page = function(back) passwd_page(back) end
+
+-- A page of fields under the users page: a password for an account, or a
+-- new account's name and password
+local function ask_page(title, labels, on_done)
+	local w = open_page("ask", title, page_back)
+	local back = page_back
+	local es = {}
+	local function done()
+		local v = {}
+		for i, e in ipairs(es) do
+			v[i] = e:GetText()
+		end
+		on_done(v[1], v[2])
+		users_page(back)
+	end
+	for i, l in ipairs(labels) do
+		es[i] = field(w, l, l == "Password", function()
+			if es[i + 1] then
+				es[i + 1]:SetFocus(true)
+			else
+				done()
+			end
+		end)
+	end
+	local r = row(w)
+	button(r, "OK", done)
+	button(r, "Back", function() users_page(back) end)
+	es[1]:SetFocus(true)
+end
+
+-- simplified: every user on one page, with no scrolling; a server with
+-- more users than fit the screen needs a list that scrolls
+users_page = function(back)
+	local w = open_page("users", "Users", back)
+	-- What the last request came to, on a line that is always there so
+	-- that the buttons under it do not move when it appears; an invite's
+	-- code in a field, to copy
+	local message = M.message or ""
+	local code = message:match("^Invite code: (%w+)$")
+	if code then
+		local r = row(w)
+		page_text(r, "Invite code", YELLOW):SetWordwrap(false)
+		local e = r:CreateChild("LineEdit")
+		e:SetStyleAuto()
+		e.minHeight = 26
+		e.minWidth = 120
+		e.textCopyable = true
+		e.textSelectable = true
+		e:SetText(code)
+		button(r, "Copy", function()
+			magic.ui:SetClipboardText(code)
+			notice("Copied the invite code")
+		end)
+	else
+		page_text(w, message ~= "" and message or " ", YELLOW).minHeight = 22
+	end
+	local u = M.users
+	if not u then
+		page_text(w, "Waiting for the server...")
+		button(w, "Back", go_back)
+		return
+	end
+	for _, user in ipairs(u.users) do
+		local has = {}
+		for _, p in ipairs(user.privs) do
+			has[p] = true
+		end
+		local r = row(w)
+		local l = page_text(r, user.name .. (user.here == 1 and " (here)" or ""))
+		l:SetWordwrap(false)
+		l.minWidth = 120
+		button(r, has.admin and "Admin: yes" or "Admin: no", function()
+			M.admin("priv", user.name, "admin", not has.admin)
+		end)
+		if user.here == 1 then
+			button(r, "Kick", function() M.admin("kick", user.name) end)
+		end
+		if not has.admin then
+			button(r, "Ban", function() M.admin("ban", user.name) end)
+		end
+		button(r, "Password...", function()
+			ask_page("A new password for " .. user.name, {"Password"},
+					function(p) M.admin("password", user.name, p) end)
+		end)
+		button(r, "Delete...", function()
+			local w2 = open_page("ask", "Delete the account " .. user.name ..
+					"? Their session ends.", back)
+			local r2 = row(w2)
+			button(r2, "Delete", function()
+				M.admin("delete", user.name)
+				users_page(back)
+			end)
+			button(r2, "Back", function() users_page(back) end)
+		end)
+	end
+	button(w, "Add a user...", function()
+		ask_page("Add a user", {"Name", "Password"},
+				function(n, p) M.admin("add", n, p) end)
+	end)
+	page_text(w, "Invites (each makes one account):")
+	for _, inv in ipairs(u.invites) do
+		local r = row(w)
+		page_text(r, inv.code .. "  (" .. inv.by .. ")"):SetWordwrap(false)
+		button(r, "Delete", function() M.admin("uninvite", inv.code) end)
+	end
+	button(w, "New invite", function() M.admin("invite") end)
+	-- [VANILLA_PUBLIC] 4: a ban is of the name and of where it joined from
+	if #(u.bans or {}) > 0 then
+		page_text(w, "Banned:")
+		for _, b in ipairs(u.bans) do
+			local r = row(w)
+			page_text(r, b.name .. (b.address ~= "" and
+					"  (" .. b.address .. ")" or "")):SetWordwrap(false)
+			button(r, "Unban", function() M.admin("unban", b.name) end)
+		end
+	end
+	local a = u.access
+	button(w, a.open_registration == 1 and
+			"Open registration: on (anyone can make an account)" or
+			"Open registration: off (invites only)", function()
+		M.admin("setting", "open_registration", "", a.open_registration ~= 1)
+	end)
+	button(w, "Back", go_back)
+end
+M.users_page = function(back)
+	M.admin("list")
+	users_page(back)
 end
 
 -- The join: the server's hello brings the dialog, or the scripted login

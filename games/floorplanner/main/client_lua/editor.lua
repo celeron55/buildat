@@ -4183,145 +4183,15 @@ do
 		e:SetFocus(true)
 	end
 
-	-- **Who may use the plan** ([FP_ACCESS] 4), the admin's; the chat
-	-- commands it replaces are gone. The server sends the list at the join
-	-- and after every change, and the page follows it while it is open.
-	local users_page
-	local function secret(e)
-		e.echoCharacter = string.byte("*")
-		return e
-	end
-
-	local function password_page(name)
-		local w = dialog("A new password for " .. name)
-		local e
-		local function set()
-			doc.admin("password", name, e:GetText())
-			users_page()
+	-- **Who may use the server** ([FP_ACCESS] 4), the admin's, and a
+	-- user's own password: builtin/accounts' pages, which vanilla has too.
+	-- The pause menu makes way for one, and its Back brings it back.
+	local function account_page(open)
+		if pause_win then
+			pause_win:Remove()
+			pause_win = nil
 		end
-		e = secret(panel.field(w, "Password", "", set, 180))
-		local r = panel.row(w)
-		panel.button(r, "Set", set)
-		panel.button(r, "Back", function() users_page() end)
-		e:SetFocus(true)
-	end
-
-	local function delete_page(name)
-		local w = dialog("Delete the account " .. name .. "?")
-		panel.label(w, "Their session ends.")
-		local r = panel.row(w)
-		panel.button(r, "Delete", function()
-			doc.admin("delete", name)
-			users_page()
-		end)
-		panel.button(r, "Back", function() users_page() end)
-	end
-
-	local function add_page()
-		local w = dialog("Add a user")
-		local can_edit = true
-		local n, p
-		local function add()
-			doc.admin("add", n:GetText(), p:GetText(), can_edit)
-			users_page()
-		end
-		n = panel.field(w, "Name", "", function() p:SetFocus(true) end, 180)
-		p = secret(panel.field(w, "Password", "", add, 180))
-		local b
-		b = panel.button(w, "Can edit: yes", function()
-			can_edit = not can_edit
-			b:GetChild(0):SetText(can_edit and "Can edit: yes" or "Can edit: no")
-		end)
-		local r = panel.row(w)
-		panel.button(r, "Add", add)
-		panel.button(r, "Back", function() users_page() end)
-		n:SetFocus(true)
-	end
-
-	users_page = function()
-		S.pause_page = "users"
-		local w = dialog("Users")
-		local u = doc.users
-		-- What the last request came to, on a line that is always there so
-		-- that the buttons under it do not move when it appears; an
-		-- invite's code in a field, to copy
-		local message = doc.admin_message or ""
-		local code = message:match("^Invite code: (%w+)$")
-		if code then
-			local _, r = panel.field(w, "Invite code", code, function() end, 110)
-			panel.button(r, "Copy", function()
-				magic.ui:SetClipboardText(code)
-				doc.notice("Copied the invite code")
-			end)
-		else
-			local l = panel.label(w, message ~= "" and message or " ",
-					magic.Color(1.0, 0.8, 0.4))
-			-- The field's height, which a code in its place takes
-			l.minHeight = 22
-		end
-		if not u then
-			panel.label(w, "Waiting for the server...")
-			panel.button(w, "Back", function() open_pause() end)
-			return
-		end
-		for _, user in ipairs(u.users) do
-			local has = {}
-			for _, p in ipairs(user.privs) do
-				has[p] = true
-			end
-			local r = panel.row(w)
-			local l = panel.label(r, user.name .. (user.here == 1 and " (here)" or ""))
-			l.minWidth = 140
-			-- Who edits what is each plan's (Plan members...); the server's
-			-- is who administers it ([FP_PLANS] 1)
-			panel.button(r, has.admin and "Admin: yes" or "Admin: no", function()
-				doc.admin("priv", user.name, "admin", not has.admin)
-			end)
-			if user.here == 1 then
-				panel.button(r, "Kick", function() doc.admin("kick", user.name) end)
-			end
-			if not has.admin then
-				panel.button(r, "Ban", function() doc.admin("ban", user.name) end)
-			end
-			panel.button(r, "Password...", function() password_page(user.name) end)
-			panel.button(r, "Delete...", function() delete_page(user.name) end)
-		end
-		panel.button(w, "Add a user...", add_page)
-		panel.label(w, "Invites (each makes one account):")
-		for _, inv in ipairs(u.invites) do
-			local r = panel.row(w)
-			local l = panel.label(r, inv.code .. "  (" .. inv.by .. ")")
-			l.minWidth = 240
-			panel.button(r, "Delete", function() doc.admin("uninvite", inv.code) end)
-		end
-		panel.button(w, "New invite", function() doc.admin("invite") end)
-		-- [VANILLA_PUBLIC] 4: a ban is of the name and of where it joined from
-		if #(u.bans or {}) > 0 then
-			panel.label(w, "Banned:")
-			for _, b in ipairs(u.bans) do
-				local r = panel.row(w)
-				local l = panel.label(r, b.name .. (b.address ~= "" and
-						"  (" .. b.address .. ")" or ""))
-				l.minWidth = 240
-				panel.button(r, "Unban", function() doc.admin("unban", b.name) end)
-			end
-		end
-		local a = u.access
-		panel.button(w, a.open_registration == 1 and
-				"Open registration: on (anyone can make an account)" or
-				"Open registration: off (invites only)", function()
-			doc.admin("setting", "open_registration", "", a.open_registration ~= 1)
-		end)
-		panel.button(w, "Back", function()
-			doc.admin_message = nil
-			open_pause()
-		end)
-	end
-	-- doc's once M.start has it
-	M.users_changed = function()
-		if pause_win and S.pause_page == "users" then
-			users_page()
-		end
+		open(function() open_pause() end)
 	end
 
 	-- **Who may use this plan** ([FP_PLANS] 5): its owner's and an admin's.
@@ -4384,36 +4254,6 @@ do
 		end
 	end
 
-	-- A user's own password ([FP_ACCESS] 4)
-	local function own_password_page(message)
-		S.pause_page = "passwd"
-		local w = dialog("Change password")
-		if message then
-			panel.label(w, message, magic.Color(1.0, 0.8, 0.4))
-		end
-		local old, new1, new2
-		local function change()
-			if new1:GetText() ~= new2:GetText() then
-				return own_password_page("The new passwords differ")
-			end
-			doc.passwd(old:GetText(), new1:GetText())
-		end
-		old = secret(panel.field(w, "Old", "", function()
-			new1:SetFocus(true) end, 180))
-		new1 = secret(panel.field(w, "New", "", function()
-			new2:SetFocus(true) end, 180))
-		new2 = secret(panel.field(w, "New again", "", change, 180))
-		local r = panel.row(w)
-		panel.button(r, "Change", change)
-		panel.button(r, "Back", function() open_pause() end)
-		old:SetFocus(true)
-	end
-	M.passwd_done = function(text)
-		if pause_win and S.pause_page == "passwd" then
-			own_password_page(text == "" and "The password was changed" or text)
-		end
-	end
-
 	open_pause = function()
 		S.pause_page = nil
 		S.paused = true
@@ -4427,8 +4267,7 @@ do
 		panel.button(w, "Settings", settings_page)
 		if doc.privs.admin then
 			panel.button(w, "Users...", function()
-				doc.admin("list")
-				users_page()
+				account_page(doc.accounts.users_page)
 			end)
 		end
 		if doc.privs.manage then
@@ -4438,7 +4277,9 @@ do
 			end)
 		end
 		if not doc.is_local then
-			panel.button(w, "Change password...", function() own_password_page() end)
+			panel.button(w, "Change password...", function()
+				account_page(doc.accounts.password_page)
+			end)
 		end
 		-- Anyone makes a copy, which is theirs, and goes back to the plans
 		-- ([FP_PLANS] 4, 5)
@@ -4460,6 +4301,7 @@ do
 	end
 
 	close_pause = function()
+		doc.accounts.close_page()
 		if pause_win then
 			pause_win:Remove()
 			pause_win = nil
@@ -4472,7 +4314,7 @@ end
 local function over_ui()
 	local s = magic.ui.scale
 	return panel.over({toolbar, props, palette_win, pause_win, picker_win,
-			place.win, S.touch_bar}, S.mx / s,
+			place.win, S.touch_bar, doc.accounts.page}, S.mx / s,
 			S.my / s)
 end
 
@@ -5249,7 +5091,8 @@ do
 	function M.touch_begin(id, x, y)
 		local sc = magic.ui.scale
 		local on_ui = panel.over({toolbar, props, palette_win, pause_win,
-				picker_win, place.win, S.touch_bar}, x / sc, y / sc)
+				picker_win, place.win, S.touch_bar, doc.accounts.page},
+				x / sc, y / sc)
 		S.fingers[id] = {x = x, y = y, x0 = x, y0 = y, t0 = buildat.get_time_us(),
 				ui = on_ui}
 		if on_ui or S.paused then
@@ -6696,7 +6539,6 @@ end
 
 function M.start(d)
 	doc = d
-	doc.users_changed, doc.passwd_done = M.users_changed, M.passwd_done
 	doc.members_changed = M.members_changed
 	S.material = nil
 	doc.listeners[#doc.listeners + 1] = function(changed, deleted)

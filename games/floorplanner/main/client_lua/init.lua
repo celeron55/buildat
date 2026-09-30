@@ -363,39 +363,14 @@ local _, accounts_err, accounts = buildat.run_script_file("accounts/accounts.lua
 if type(accounts) ~= "table" then
 	error("floorplanner: could not load accounts.lua: " .. tostring(accounts_err))
 end
-doc.users = nil
-function doc.admin(cmd, name, arg, on)
-	accounts.admin(cmd, name, arg, on)
-end
-function doc.passwd(old, new)
-	accounts.passwd(old, new)
-end
-accounts.on_users = function()
-	doc.users = accounts.users
-	if doc.users_changed then
-		doc.users_changed()
-	end
-end
-accounts.on_admin_result = function(text)
-	doc.admin_message = text
-	if doc.users_changed then
-		doc.users_changed()
-	end
-end
-accounts.on_passwd = function(text)
-	if doc.passwd_done then
-		doc.passwd_done(text)
-	end
-end
+-- The editor's pause menu opens its Users and password pages
+doc.accounts = accounts
 accounts.on_kicked = function()
 	buildat.disconnect()
 end
 -- A plan members page's own requests' results
 buildat.sub_packet("fp:admin_result", function(data)
 	doc.admin_message = cereal.binary_input(data, TEXT).text
-	if doc.users_changed then
-		doc.users_changed()
-	end
 	if doc.members_changed then
 		doc.members_changed()
 	end
