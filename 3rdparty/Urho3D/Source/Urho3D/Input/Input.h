@@ -471,6 +471,8 @@ private:
     bool emscriptenEnteredPointerLock_;
     /// Flag indicating current pointer-lock status.
     bool emscriptenPointerLock_;
+    /// buildat: when the last Escape key press came, system milliseconds
+    unsigned emscriptenLastEscapeMs_;
 #endif
 };
 

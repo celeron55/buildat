@@ -28,6 +28,7 @@
 #include "../Core/ProcessUtils.h"
 #include "../Core/Profiler.h"
 #include "../Core/StringUtils.h"
+#include "../Core/Timer.h"
 #include "../Graphics/Graphics.h"
 #include "../Graphics/GraphicsEvents.h"
 #include "../Input/Input.h"
@@ -208,8 +209,12 @@ EM_BOOL EmscriptenInput::HandlePointerLockChange(int eventType, const Emscripten
             inputInst->SetMouseVisibleEmscripten(inputInst->lastMouseVisible_, true);
             // The browser ends the lock itself on Esc and keeps the key, so
             // a game that still wanted the lock is given the Esc it did not
-            // see -- what the user asked for on the desktop
-            if (!inputInst->emscriptenExitingPointerLock_)
+            // see -- what the user asked for on the desktop. Not when the
+            // game saw an Esc just now: Firefox grants a lock asked for
+            // while an Esc closes a menu and ends it for that same Esc, and
+            // the one given reopened the menu (user, 2026-09-30).
+            if (!inputInst->emscriptenExitingPointerLock_ &&
+                    Time::GetSystemTime() - inputInst->emscriptenLastEscapeMs_ >= 500)
             {
                 SDL_Event evt;
                 SDL_zero(evt);
@@ -326,6 +331,7 @@ Input::Input(Context* context) :
 #else
     emscriptenPointerLock_(false),
     emscriptenEnteredPointerLock_(false),
+    emscriptenLastEscapeMs_(0),
     emscriptenExitingPointerLock_(false),
 #endif
     touchEmulation_(false),
@@ -1845,6 +1851,10 @@ void Input::HandleSDLEvent(void* sdlEvent)
     switch (evt.type)
     {
     case SDL_KEYDOWN:
+#ifdef __EMSCRIPTEN__
+        if (evt.key.keysym.sym == SDLK_ESCAPE)
+            emscriptenLastEscapeMs_ = Time::GetSystemTime();
+#endif
         SetKey(ConvertSDLKeyCode(evt.key.keysym.sym, evt.key.keysym.scancode), evt.key.keysym.scancode, true);
         break;
 
