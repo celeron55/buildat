@@ -95,6 +95,8 @@ local S = {
 	pos = {x = -4, y = 6, z = -6},
 	-- Walking: where the feet are, mm, and the eyes above them
 	walk = {x = 0, z = 0, feet = 0, noclip = false},
+	-- The fingers down, by id ([FP_TOUCH] 3)
+	fingers = {},
 	eye = 1600,
 	-- The pointer is a finger ([FP_TOUCH]): the page says so
 	touch = buildat.get_env("BUILDAT_TOUCH") == "1",
@@ -2954,7 +2956,10 @@ local refresh_panels
 -- Luanti's way -- the view turns with it and the crosshair picks. A click on
 -- the view goes up into the crosshair and Esc comes back down.
 local function crosshair_view()
-	return S.view == "walk" or (S.view == "3d" and S.tool == "voxel")
+	-- A touchscreen has no pointer to hold: walking is by the stick and a
+	-- drag ([FP_TOUCH] 3), and the voxel tool by taps
+	return not S.touch and (S.view == "walk" or
+			(S.view == "3d" and S.tool == "voxel"))
 end
 
 local function update_capture()
@@ -4945,6 +4950,10 @@ do
 		if S.paused then
 			return
 		end
+		-- Walking on a touchscreen is the fingers' (M.touch_begin)
+		if S.touch and S.view == "walk" and not over_ui() then
+			return
+		end
 		if crosshair_view() and not S.captured and not over_ui() and
 				button == magic.MOUSEB_LEFT then
 			-- A click on the view goes up into the crosshair
@@ -5023,6 +5032,12 @@ do
 	function M.mouse_up(button)
 		if S.swallow_up then
 			S.swallow_up = false
+			return
+		end
+		-- The first finger's lift: a drag of the view, or a gesture of two,
+		-- ends without a click
+		if S.touch_cam or S.gesture then
+			S.touch_cam, S.panning, S.orbit, S.press = nil, false, nil, nil
 			return
 		end
 		if S.captured and (S.tool == "voxel" or button ~= magic.MOUSEB_LEFT) then
@@ -5119,6 +5134,25 @@ do
 			return
 		end
 		S.mx, S.my = x, y
+		if S.gesture then
+			return
+		end
+		-- [FP_TOUCH] 3: a finger dragged anywhere but on the selection moves
+		-- the view: the plan pans, the 3D camera orbits. The object tool's
+		-- drag is its footprint's.
+		if S.touch and S.press and not S.drag and S.tool ~= "box" and
+				geom.len(x - S.press.mx, y - S.press.my) > DRAG_PX then
+			local t = S.press.target
+			if not (t and (S.sel[t.id] or S.nodes[t.id])) then
+				S.press = nil
+				S.touch_cam = true
+				if S.view == "2d" then
+					S.panning = true
+				else
+					S.orbit = camera_pivot(true)
+				end
+			end
+		end
 		if S.panning and S.view == "2d" then
 			local k = mm_per_px()
 			S.cx = S.cx - dx * k
@@ -5165,6 +5199,118 @@ do
 			S.pos = {x = S.pos.x + math.sin(yaw) * math.cos(pitch) * k,
 					y = S.pos.y - math.sin(pitch) * k,
 					z = S.pos.z + math.cos(yaw) * math.cos(pitch) * k}
+		end
+	end
+
+	-- **Fingers** ([FP_TOUCH] 3). The first is also the left mouse button,
+	-- which SDL makes of it; these see every finger. Two pinch to zoom and
+	-- move together to pan, and whatever the first began as the mouse is
+	-- dropped. Walking: a finger put down at the lower left is a stick, and
+	-- any other turns the view.
+	function M.touch_begin(id, x, y)
+		local sc = magic.ui.scale
+		local on_ui = panel.over({toolbar, props, palette_win, pause_win,
+				picker_win, place.win}, x / sc, y / sc)
+		S.fingers[id] = {x = x, y = y, x0 = x, y0 = y, t0 = buildat.get_time_us(),
+				ui = on_ui}
+		if on_ui or S.paused then
+			return
+		end
+		local w, h = screen_size()
+		if S.view == "walk" then
+			if not S.stick and x < w * 0.45 and y > h * 0.55 then
+				S.fingers[id].stick = true
+				S.stick = {f = 0, r = 0}
+			end
+			return
+		end
+		local n = 0
+		for _, f in pairs(S.fingers) do
+			if not f.ui then
+				n = n + 1
+			end
+		end
+		if n == 2 then
+			if S.drag then
+				S.drag = nil
+				doc.unlock()
+			end
+			S.press, S.touch_cam, S.panning, S.orbit = nil, nil, false, nil
+			S.dirty = true
+			local p = S.view == "3d" and camera_pivot() or nil
+			S.gesture = {dist = p and geom.len(geom.len(p.x - S.pos.x,
+					p.y - S.pos.y), p.z - S.pos.z) or 5}
+		end
+	end
+
+	function M.touch_move(id, x, y, dx, dy)
+		local f = S.fingers[id]
+		if not f or f.ui then
+			return
+		end
+		local px, py = f.x, f.y
+		f.x, f.y = x, y
+		local w, h = screen_size()
+		if f.stick then
+			-- A tenth of the screen's short side is full speed
+			local r = math.min(w, h) * 0.1
+			S.stick.r = math.max(-1, math.min(1, (x - f.x0) / r))
+			S.stick.f = math.max(-1, math.min(1, -(y - f.y0) / r))
+			return
+		end
+		if S.view == "walk" then
+			S.yaw = S.yaw + dx * 0.2
+			S.pitch = math.max(-89, math.min(89, S.pitch + dy * 0.2))
+			return
+		end
+		if not S.gesture then
+			return
+		end
+		local o = nil
+		for oid, of in pairs(S.fingers) do
+			if oid ~= id and not of.ui then
+				o = of
+			end
+		end
+		if not o then
+			return
+		end
+		-- The pair's middle moves half as far as this finger did, and their
+		-- distance changes by the pinch
+		local d0 = math.max(1, geom.len(px - o.x, py - o.y))
+		local d1 = math.max(1, geom.len(x - o.x, y - o.y))
+		local mdx, mdy = (x - px) / 2, (y - py) / 2
+		if S.view == "2d" then
+			S.mx, S.my = (x + o.x) / 2, (y + o.y) / 2
+			local x0, z0 = cursor_floor()
+			S.span = math.max(500, math.min(200000, S.span * d0 / d1))
+			local x1, z1 = cursor_floor()
+			local k = mm_per_px()
+			S.cx = S.cx + (x0 or 0) - (x1 or 0) - mdx * k
+			S.cz = S.cz + (z0 or 0) - (z1 or 0) + mdy * k
+		else
+			local k = S.gesture.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
+			local rx, ry, rz = geom.rot(1, 0, 0, S.pitch, S.yaw, 0)
+			local ux, uy, uz = geom.rot(0, 1, 0, S.pitch, S.yaw, 0)
+			local fx, fy, fz = geom.rot(0, 0, 1, S.pitch, S.yaw, 0)
+			-- Toward what the pair looks at, by as much as the pinch spreads:
+			-- twice apart is half as far
+			local zoom = S.gesture.dist * (1 - d0 / d1)
+			S.gesture.dist = S.gesture.dist - zoom
+			S.pos = {x = S.pos.x - (rx * mdx - ux * mdy) * k + fx * zoom,
+					y = S.pos.y - (ry * mdx - uy * mdy) * k + fy * zoom,
+					z = S.pos.z - (rz * mdx - uz * mdy) * k + fz * zoom}
+		end
+	end
+
+	function M.touch_end(id, x, y)
+		local f = S.fingers[id]
+		S.fingers[id] = nil
+		if f and f.stick then
+			S.stick = nil
+		end
+		if not next(S.fingers) then
+			S.gesture = nil
 		end
 	end
 
@@ -5532,6 +5678,9 @@ local function move_camera(dt)
 		return
 	end
 	if S.view == "walk" then
+		if S.stick then
+			f, r = f + S.stick.f, r + S.stick.r
+		end
 		walk(dt, f, r)
 		return
 	end
@@ -6500,6 +6649,16 @@ function M.start(d)
 	end)
 	magic.SubscribeToEvent("MouseWheel", function(_, data)
 		M.mouse_wheel(data:GetInt("Wheel"))
+	end)
+	magic.SubscribeToEvent("TouchBegin", function(_, data)
+		M.touch_begin(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"))
+	end)
+	magic.SubscribeToEvent("TouchMove", function(_, data)
+		M.touch_move(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"),
+				data:GetInt("DX"), data:GetInt("DY"))
+	end)
+	magic.SubscribeToEvent("TouchEnd", function(_, data)
+		M.touch_end(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"))
 	end)
 	set_view("2d")
 	log:info("Editor started")
