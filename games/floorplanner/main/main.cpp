@@ -298,11 +298,12 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"speckle", 0, 1000, 300}, // plaster
 		{"angle", 0, 179, 0},      // paneling's boards, 0 horizontal, 90 vertical
 		{"contrast", 0, 3000, 1000}, // wood's grain, 1000 as it always was
-		// Paneling's: rough sawn 0 to lacquered 1000, and its seams' V-groove
-		// in tenths of a mm
+		// Paneling's: rough sawn 0 to lacquered 1000, its seams' groove in
+		// tenths of a mm, and how hand made it looks, to a log wall
 		{"polish", 0, 1000, 500},
-		{"gap_depth", 0, 100, 15},
-		{"gap_width", 0, 250, 60},
+		{"gap_depth", 0, 3000, 15},
+		{"gap_width", 0, 6000, 60},
+		{"handmade", 0, 1000, 0},
 	}, {
 		{"name", "material"},
 	}, {}},

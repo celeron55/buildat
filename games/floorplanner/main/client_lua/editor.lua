@@ -687,7 +687,7 @@ local function kind_preview(k)
 	local p = {color = 0xffffff, finish = 0, opacity = 500, reflect = 0,
 		seed = 0, axis = 0, stagger = 0, grout = 3, temperature = 2700,
 		brightness = 500, speckle = 300, angle = 0, contrast = 1000, polish = 500,
-		gap_depth = 15, gap_width = 60, kind = k}
+		gap_depth = 15, gap_width = 60, handmade = 0, kind = k}
 	for f, v in pairs(KIND_DEFAULTS[k]) do
 		p[f] = v
 	end
@@ -709,10 +709,10 @@ end
 --   0: own colour, type          1: paint, finish
 --   2: second colour, opacity    3: roughness, specular, reflect, seed low
 --   4: log2 of the scale in mm / 16, flags (grain axis + 4 * stagger),
---      seed high, the type's own knob (lamp brightness, grout, speckle,
---      paneling's gap width in tenths of a mm / 255)
---   5: paneling's angle, grain contrast, paneling's polish, its gap depth
---      in tenths of a mm / 255
+--      seed high, the type's own knob (lamp brightness, grout, speckle)
+--   5: paneling's angle, grain contrast, paneling's polish and hand made
+--      look
+--   6: paneling's gap width and depth in tenths of a mm, high and low bytes
 -- Rebuilt only when an entry changes, since each texture is kept.
 local function palette_texture()
 	local entries = of_type("palette")
@@ -769,15 +769,16 @@ local function palette_texture()
 			knob = math.min(1, p.grout / p.scale * 4)
 		elseif p.kind == 9 then
 			knob = p.speckle / 1000
-		elseif p.kind == 10 then
-			knob = p.gap_width / 255
 		end
 		px(4, y, math.log(p.scale) / math.log(2) / 16,
 				(p.axis + 4 * p.stagger) * 16 / 255, math.floor(p.seed / 256) / 255,
 				knob)
-		-- Wood's grain contrast, paneling's angle, polish and gap depth
+		-- Wood's grain contrast, paneling's angle, polish and hand made look
 		px(5, y, p.angle / 180, p.contrast / 3000, p.polish / 1000,
-				p.gap_depth / 255)
+				p.handmade / 1000)
+		-- Paneling's gap width and depth, 16 bits each
+		px(6, y, math.floor(p.gap_width / 256) / 255, (p.gap_width % 256) / 255,
+				math.floor(p.gap_depth / 256) / 255, (p.gap_depth % 256) / 255)
 	end
 	for k = 0, #MATERIAL_KINDS do
 		put_row(2 + k, kind_preview(k))
@@ -4335,19 +4336,20 @@ do
 		{"scale", "seed", "speckle"},
 		-- Paneling's polish stands for its roughness, specular and reflect
 		{"scale", "seed", "angle", "contrast", "polish", "gap_depth",
-			"gap_width"},
+			"gap_width", "handmade"},
 	}
 	local KNOB_LABELS = {roughness = "Roughness", specular = "Specular",
 		reflect = "Reflective", scale = "Scale mm", seed = "Seed",
 		temperature = "Kelvin", brightness = "Brightness", opacity = "Opacity",
 		grout = "Grout mm", speckle = "Speckle", angle = "Angle deg",
 		contrast = "Grain contrast", polish = "Polish",
-		gap_depth = "Gap depth mm", gap_width = "Gap width mm"}
+		gap_depth = "Gap depth mm", gap_width = "Gap width mm",
+		handmade = "Hand made"}
 	-- Knobs in thousandths shown as percent
 	local PERCENT = {roughness = true, specular = true, reflect = true,
 		brightness = true, opacity = true, speckle = true, contrast = true,
-		polish = true}
-	-- Knobs in tenths of a mm, shown as mm, nudged by half of one
+		polish = true, handmade = true}
+	-- Knobs in tenths of a mm, shown as mm, nudged by one
 	local TENTHS = {gap_depth = true, gap_width = true}
 
 	-- Everything that holds palette entry `from`, moved to `to`, and `from`
@@ -4662,7 +4664,7 @@ build_palette = function()
 					if v then
 						set({[k] = math.floor((tenth and v * 10 or v) + 0.5)})
 					end
-				end, 120, nil, TENTHS[k] and 0.5)
+				end, 120, nil, TENTHS[k] and 1)
 			end
 		end
 	end

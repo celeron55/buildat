@@ -194,6 +194,7 @@ void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float po
     vec4 t3 = Texel(3.0);
     vec4 t4 = Texel(4.0);
     vec4 t5 = Texel(5.0);
+    vec4 t6 = Texel(6.0);
     vec3 base = t0.rgb;
     float kind = floor(t0.a * 255.0 / 20.0 + 0.5);
     vec3 paint = t1.rgb;
@@ -212,6 +213,7 @@ void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float po
     float contrast = t5.g * 3.0;
     float angle = t5.r * 3.14159265;
     float polish = t5.b;
+    float handmade = t5.a;
     vec3 sp = p + vec3(seed * 1.37, seed * 0.71, seed * 2.13);
     vec3 q = sp / scale;
     vec2 uv = Plane(p, n) / scale;
@@ -286,10 +288,14 @@ void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float po
     } else {
         // Paneling: boards `scale` wide, at the angle from the plane's first
         // axis (0 runs them level on a wall, 90 upright), a V-groove at each
-        // seam, the grain along each board and every board its own
+        // seam, the grain along each board and every board its own.
+        // Hand made, the seams wander and the boards are uneven: up to a
+        // log wall's round logs of a sixth of their width up and down.
         vec2 pm = Plane(p, n);
         vec2 b = vec2(cos(angle) * pm.x + sin(angle) * pm.y,
                 -sin(angle) * pm.x + cos(angle) * pm.y) / scale;
+        b.y += handmade * 0.35 *
+                (Noise3(vec3(b.x * scale * 1.2, b.y * 0.7, seed * 0.13)) - 0.5);
         float board = floor(b.y);
         float f = fract(b.y);
         float h = Hash3(vec3(board, seed, 3.7));
@@ -314,26 +320,40 @@ void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float po
         PlaneAxes(n, pu, pv);
         vec3 t = -sin(angle) * pu + cos(angle) * pv;
         t = normalize(t - n * dot(t, n));
-        // The seam's V-groove, `gap` wide and `depth` deep: its two sides
-        // slope down to the seam, shaded the more the steeper they are.
-        // Where the groove is under a pixel its slope fades to the flat.
-        float depth = t5.a * 255.0 / 10000.0;
-        float half_gap = param * 255.0 / 20000.0;
+        vec3 s = normalize(cross(n, t));
+        // The seam's groove, `gap` wide and `depth` deep, in tenths of a mm
+        // in 16 bits: a V whose two sides slope down to the seam, and hand
+        // made a round one, as two logs' sides meet. Its sides are shaded
+        // the more the deeper and steeper; where the groove is under a
+        // pixel its slope fades to the flat.
+        float depth = (t6.b * 65280.0 + t6.a * 255.0) / 10000.0;
+        float half_gap = min((t6.r * 65280.0 + t6.g * 255.0) / 20000.0,
+                scale * 0.5) * (1.0 + handmade * 0.6 *
+                (Noise3(vec3(along * 2.0, board, 5.3)) - 0.5));
         float d = min(f, 1.0 - f) * scale;
         // (fwidth outside the branch: a derivative needs all the quad)
         float blur = fwidth(d);
         float slope = 0.0;
         if (half_gap > 0.0 && d < half_gap) {
-            float steep = depth / half_gap;
+            float x = 1.0 - d / half_gap;
+            float arc = sqrt(max(1.0 - x * x, 0.01));
+            float low = mix(x, 1.0 - arc, handmade);
+            float steep = depth / half_gap * mix(1.0, x / arc, handmade);
             slope = (f < 0.5 ? steep : -steep) *
                     (1.0 - smoothstep(0.5, 2.0, blur / half_gap));
-            nat *= mix(1.0 - 0.55 * min(1.0, steep * 2.0), 1.0, d / half_gap);
+            nat *= 1.0 - 0.55 * min(1.0, depth / half_gap * 2.0) * low;
         }
+        // simplified: the unevenness is noise taken for the slopes, not the
+        // gradient of a height; it reads as the same at these amplitudes
+        float bumps = handmade * 0.3 * (1.0 - smoothstep(0.02, 0.1, blur));
+        slope += bumps * (Noise3(vec3(along * 6.0, f * 3.0, board + seed)) - 0.5);
+        float slope_s = bumps *
+                (Noise3(vec3(along * 6.0 + 17.0, f * 3.0, board)) - 0.5);
         // Rough sawn, the fibres stand up across the grain; polished, the
         // colour deepens as wetted and the surface is a smooth mirror
         float rough = 1.0 - polish;
         slope += (streak - 0.5) * 0.4 * rough;
-        n = normalize(n - slope * t);
+        n = normalize(n - slope * t - slope_s * s);
         nat = pow(max(nat, vec3(0.0)), vec3(mix(0.85, 1.2, polish)));
         roughness = mix(0.95, 0.08, polish);
         spec = mix(0.03, 0.6, polish);
