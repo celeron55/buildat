@@ -27,6 +27,18 @@ accounts.logged_in = true
 accounts.on_kicked = function()
 	buildat.disconnect()
 end
+-- The chat console ([CHAT_CONSOLE]): Luanti's chat, what came before this
+-- script and all that comes after
+for _, line in ipairs(luanti.chat_lines or {}) do
+	accounts.chat_add(line)
+end
+luanti.sub_chat(function(line)
+	accounts.chat_add(line)
+end)
+accounts.chat_send = function(text)
+	buildat.send_packet("main:chat",
+			cereal.binary_output({text}, {"array", "string"}))
+end
 
 -- What the server said in main:account
 local account = {public = false, admin = false, world = "", is_local = false}
@@ -137,6 +149,9 @@ open = function()
 		page(function()
 			o.keys.draw(function() later(open) end)
 		end)
+	end)
+	accounts.page_button(w, "Chat...", function()
+		page(function() accounts.chat_page(open) end, open)
 	end)
 	local s
 	s = accounts.page_button(w, sound_text(), function()

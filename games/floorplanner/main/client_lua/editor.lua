@@ -4273,6 +4273,9 @@ do
 				magic.Color(1.0, 0.85, 0.3))
 		panel.button(w, "Continue (Esc)", function() close_pause() end)
 		panel.button(w, "Settings", settings_page)
+		panel.button(w, "Chat...", function()
+			account_page(doc.accounts.chat_page)
+		end)
 		if doc.privs.admin then
 			panel.button(w, "Users...", function()
 				account_page(doc.accounts.users_page)

@@ -599,6 +599,11 @@ function doc.notice(text)
 	log:info(text)
 	messages[#messages + 1] = {text = text, t = buildat.get_time_us()}
 	redraw_messages()
+	-- The chat console's too ([CHAT_CONSOLE]), which the pause menu opens
+	accounts.chat_add(text)
+end
+accounts.chat_send = function(text)
+	buildat.send_packet("fp:chat", cereal.binary_output({text = text}, TEXT))
 end
 
 buildat.sub_packet("fp:chat", function(data)
