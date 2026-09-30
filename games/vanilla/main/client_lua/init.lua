@@ -4612,6 +4612,14 @@ function frame_peak.update(dt)
 		end
 	end
 	if WIELD.motion then
+		-- The swing's phase: official's camera advances it at 3.5 swings a
+		-- second while digging (Camera::step, m_digging_anim), whatever the
+		-- dig takes; one swing per dig was a stone by hand swung once in
+		-- seconds (user). simplified: a released button stops it mid-swing
+		-- where official finishes the swing.
+		local digging_now = dig ~= nil and dig.time ~= nil
+		WIELD.dig_phase = digging_now and ((WIELD.dig_phase or 0) + dt * 3.5) % 1
+				or 0
 		local speed_xz = math.sqrt(player.vx * player.vx + player.vz * player.vz)
 		local flying = player.fly_active or player.fly
 		local m = WIELD.motion:update(dt, {
@@ -4620,9 +4628,8 @@ function frame_peak.update(dt)
 			climbing = player.climbing and math.abs(player.vy) > 1,
 			flying = flying,
 			speed = math.sqrt(speed_xz * speed_xz + player.vy * player.vy),
-			digging = dig ~= nil and dig.time ~= nil,
-			dig_anim = dig and dig.time and dig.time > 0 and
-					(dig.elapsed / dig.time) or 0,
+			digging = digging_now,
+			dig_anim = WIELD.dig_phase,
 			wield_changed = WIELD.last_wield_index ~= nil and
 					WIELD.last_wield_index ~= wield_index,
 		})
