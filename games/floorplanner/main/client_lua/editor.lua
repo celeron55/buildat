@@ -5154,8 +5154,7 @@ do
 			-- **A right click on what has no right click action clears the
 			-- selection** (user), and folds the palette: the view cleared
 			-- of its panels. The drag it may have started ends below.
-			if rc.moved < 5 and S.tool == "select" and not S.captured and
-					S.view ~= "walk" then
+			if rc.moved < 5 and S.tool == "select" and not S.captured then
 				S.sel, S.primary = {}, nil
 				S.palette_collapsed = true
 				S.dirty = true
