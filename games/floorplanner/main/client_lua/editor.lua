@@ -2030,12 +2030,24 @@ end
 -- mode change.
 M.UNLIT = {ambient = magic.Color(0.55, 0.55, 0.58),
 		fog = magic.Color(0.55, 0.62, 0.72)}
+-- **The moment's settings, saved or this client's** (user, 2026-09-30):
+-- the date, the hour, the time-lapse and the ground as the plan has them
+-- ("Saved"), or a copy of them this client changes for its own view and
+-- sends nowhere ("Temporary", S.sun_temp, for the plan it was made in),
+-- which a viewer may change too
+function M.sun()
+	local t = S.sun_temp
+	if t and t.plan == doc.plan_name then
+		return t
+	end
+	return settings()
+end
 -- The plan's minute now: its own, or on from it at the time-lapse's
 -- speed since this client saw it set
 -- simplified: from when this client saw it, so two clients that joined
 -- apart see a time-lapse apart; the upgrade is the server's clock
 function M.plan_minute()
-	local st = settings()
+	local st = M.sun()
 	-- Real time (user): each viewer's own wall clock, as the solar hour
 	-- simplified: the clock's hour, not the sun's at the plan's longitude
 	-- (the plan has none) and with summer time in it
@@ -2055,7 +2067,7 @@ end
 -- The plan's day of the year now: its own, or the viewer's calendar's
 -- under "real date and time"
 function M.plan_day()
-	local st = settings()
+	local st = M.sun()
 	if st.lapse == -2 then
 		return math.min(365, (buildat.get_local_time()))
 	end
@@ -2064,7 +2076,7 @@ end
 -- The ground's colour now, as the palette's row and the light's albedo
 function M.ground_rgb()
 	local st = settings()
-	return M.daylight.ground(st.latitude, M.plan_day(), st.ground)
+	return M.daylight.ground(st.latitude, M.plan_day(), M.sun().ground)
 end
 -- Whether what is drawn now is PBR: the setting's, and never the plan view
 function M.pbr_now()
@@ -2076,7 +2088,7 @@ function M.apply_daylight()
 	local minute = pbr and M.plan_minute() or 0
 	local day = M.plan_day()
 	local key = string.format("%s %.1f %d %d %d %d", tostring(pbr), minute,
-			st.north, st.latitude, day, st.ground)
+			st.north, st.latitude, day, M.sun().ground)
 	if key == S.daylight_key then
 		if pbr and M.sky then
 			M.sky:flush()
@@ -4929,7 +4941,9 @@ do
 				end
 			end)
 		end
-		if edit then
+		-- The plan's own, which a viewer reads
+		panel.view_only = not edit
+		do
 			-- The grid's choice shows before the plan comes back with it
 			local grids = {}
 			for i, g in ipairs(GRID_STEPS) do
@@ -4965,15 +4979,40 @@ do
 			end
 			panel.label(nr, where)
 			plan_int("Latitude deg", "latitude")
+			-- The moment: saved, which only editing changes, or this
+			-- client's own, which anyone does
+			local temp = S.sun_temp ~= nil and S.sun_temp.plan == doc.plan_name
+			panel.view_only = false
+			panel.dropdown(w, "Daylight", {{"Saved", false},
+					{"Temporary", true}}, temp, function(v)
+				if v then
+					S.sun_temp = {plan = doc.plan_name, day = M.plan_day(),
+							minute = math.floor(M.plan_minute()),
+							lapse = st.lapse, ground = st.ground}
+				else
+					S.sun_temp = nil
+				end
+				S.dirty = true
+				plan_settings_page()
+			end)
+			panel.view_only = not edit and not temp
+			local sun = M.sun()
 			local function set_ints(ints)
-				send({{op = "set", ent = {id = sid, ints = ints}}})
+				if temp then
+					for k, v in pairs(ints) do
+						S.sun_temp[k] = v
+					end
+					S.dirty = true
+				else
+					send({{op = "set", ent = {id = sid, ints = ints}}})
+				end
 			end
 			-- A date or an hour typed in takes over from the real clock
 			panel.field(w, "Date (d.m.)", dl.date_text(M.plan_day()), function(t)
 				local d = dl.parse_date(t)
 				if d then
 					set_ints({day = d, minute = math.floor(M.plan_minute()),
-							lapse = st.lapse == -2 and 0 or st.lapse})
+							lapse = sun.lapse == -2 and 0 or sun.lapse})
 				end
 			end)
 			local tr = panel.row(w)
@@ -4982,7 +5021,7 @@ do
 				local m = dl.parse_time(t)
 				if m then
 					set_ints({minute = m, day = M.plan_day(),
-							lapse = st.lapse < 0 and 0 or st.lapse})
+							lapse = sun.lapse < 0 and 0 or sun.lapse})
 				end
 			end)
 			-- The time-lapse goes on from the hour and date it shows now
@@ -4990,18 +5029,21 @@ do
 			-- as the grid's
 			local function choose(ints)
 				set_ints(ints)
-				for k, v in pairs(ints) do
-					st[k] = v
+				if not temp then
+					for k, v in pairs(ints) do
+						st[k] = v
+					end
 				end
 				plan_settings_page()
 			end
-			panel.dropdown(tr, "Time-lapse", dl.LAPSES, st.lapse, function(v)
+			panel.dropdown(tr, "Time-lapse", dl.LAPSES, sun.lapse, function(v)
 				choose({lapse = v, minute = math.floor(M.plan_minute()),
 						day = M.plan_day()})
 			end)
-			panel.dropdown(w, "Ground", dl.GROUNDS, st.ground, function(v)
+			panel.dropdown(w, "Ground", dl.GROUNDS, sun.ground, function(v)
 				choose({ground = v})
 			end)
+			panel.view_only = not edit
 			-- The pictures in the save's images/, and the ones placed, locked
 			for _, file in ipairs(doc.images) do
 				panel.button(w, "Trace over " .. file, function()
@@ -5020,6 +5062,7 @@ do
 				end
 			end
 		end
+		panel.view_only = false
 		panel.field(w, "Export mm/px", S.export_mmpx, function(t)
 			local v = tonumber(t)
 			if v and v > 0 then S.export_mmpx = v end
