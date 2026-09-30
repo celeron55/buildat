@@ -97,6 +97,110 @@ function M.button(parent, text, on_click, down, min_width)
 	return b
 end
 
+-- **A dropdown** (user): a button saying the choice, which opens under it
+-- a list of the choices over everything else. A choice, the button again,
+-- a press elsewhere (M.press) or Esc closes it; one is open at a time.
+-- choices: {{text, value}, ...}; on_choose(value)
+M.popup = nil
+local owner_at = nil -- the open one's button's place, found again by it
+local skip_owner = false
+function M.close_popup()
+	if M.popup then
+		M.popup:Remove()
+		M.popup, owner_at = nil, nil
+	end
+end
+-- A button's mark at its right end, its text centred in what is left:
+-- the dropdown's (Overpass has U+25BC and U+25B2, not the smaller ones)
+function M.mark(b, mark)
+	local t = b:GetChild(0)
+	local m = b:CreateChild("Text")
+	m:SetStyleAuto()
+	m:SetText(mark)
+	m:SetAlignment(magic.HA_RIGHT, magic.VA_CENTER)
+	m:SetPosition(-6, 0)
+	m:SetColor(t.color)
+	local room = m.width + 10
+	t:SetPosition(-room / 2, 0)
+	b.minWidth = b.minWidth + room
+	return b
+end
+
+function M.dropdown(parent, label, choices, current, on_choose, min_width)
+	local shown = "?"
+	for _, c in ipairs(choices) do
+		if c[2] == current then
+			shown = c[1]
+		end
+	end
+	local b
+	b = M.button(parent, (label and label .. ": " or "") .. shown,
+			function()
+		if skip_owner then
+			-- This press on it closed it already
+			skip_owner = false
+			return
+		end
+		M.close_popup()
+		local w = magic.ui.root:CreateChild("Window")
+		w:SetStyleAuto()
+		w:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(4, 4, 4, 4))
+		w:SetFocusMode(magic.FM_FOCUSABLE)
+		-- Over the pause menu and the colour picker
+		w.priority = 300
+		for _, c in ipairs(choices) do
+			M.button(w, c[1], function()
+				M.close_popup()
+				on_choose(c[2])
+			end, c[2] == current, b.width - 8)
+		end
+		local p = b.screenPosition
+		local y = p.y + b.height
+		if y + w.height > magic.ui.root.height then
+			y = math.max(0, p.y - w.height)
+		end
+		w:SetPosition(p.x, y)
+		M.popup = w
+		owner_at = {p.x, p.y, b.width, b.height}
+	end, false, min_width)
+	return M.mark(b, "▼")
+end
+
+-- A press anywhere, in UI coordinates, before it goes on: one off the open
+-- dropdown closes it. True when it did.
+function M.press(ux, uy)
+	if not M.popup or M.over({M.popup}, ux, uy) then
+		return false
+	end
+	local o = owner_at
+	skip_owner = ux >= o[1] and uy >= o[2] and ux < o[1] + o[3] and
+			uy < o[2] + o[4]
+	M.close_popup()
+	return true
+end
+
+-- **A checkbox** (user): one thing on or off, ticked when on. The box and
+-- its text are one button, drawn without a button's frame.
+function M.check(parent, text, checked, on_click)
+	local b = parent:CreateChild("Button")
+	b.color = magic.Color(0, 0, 0, 0)
+	b:SetLayout(magic.LM_HORIZONTAL, 6, magic.IntRect(4, 2, 4, 2))
+	local c = b:CreateChild("CheckBox")
+	c:SetStyleAuto()
+	c.verticalAlignment = magic.VA_CENTER
+	c.checked = checked
+	-- The button takes the click, not the box
+	c.enabled = false
+	local t = b:CreateChild("Text")
+	t:SetStyleAuto()
+	t:SetText(text)
+	t.verticalAlignment = magic.VA_CENTER
+	magic.SubscribeToEvent(b, "Released", function()
+		on_click()
+	end)
+	return b
+end
+
 -- **Numeric fields step** (user): the wheel over one, or Up and Down in
 -- it, adds its step to the number and commits it as Enter would. A field
 -- given a number is one, found again by its element's name: no element is

@@ -33,12 +33,11 @@ local DRAG_PX = 4
 -- Where a copy lands from what it was copied from
 local COPY_OFFSET = 500
 -- The view button goes round the views: the plan, the free camera, walking
-local NEXT_VIEW = {["2d"] = "3d", ["3d"] = "walk", walk = "2d"}
 local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk"}
 -- Walking: the body's radius, how high a step it takes, its height, mm.
 -- A step takes a stair's riser, which building codes cap near 220 mm.
 local BODY_R, STEP, HEAD = 250, 250, 1750
-local JUSTIFY_NAMES = {[0] = "centered", [1] = "left", [2] = "right"}
+local JUSTIFY_CHOICES = {{"centered", 0}, {"left", 1}, {"right", 2}}
 local TOOL_KEYS = {select = "V", node = "N", wall = "B", room = "R",
 	box = "O", hosted = "I", voxel = "K", paint = "M"}
 -- What a definition is, as main.cpp's DefKind
@@ -3055,11 +3054,11 @@ end
 -- of the toolbar and into Settings, with their keys); on M, since this
 -- file is at Lua's 200 locals
 function M.grid_text(g)
-	return "Grid: " .. (g < 10 and g .. " mm" or (g / 10) .. " cm") .. " (G)"
+	return g < 10 and g .. " mm" or (g / 10) .. " cm"
 end
-function M.angle_text()
-	local a = ANGLE_STEPS[S.angle]
-	return "Angle: " .. (a and a .. " deg" or "free") .. " (H)"
+function M.angle_text(i)
+	local a = ANGLE_STEPS[i]
+	return a and a .. " deg" or "free"
 end
 
 --
@@ -3150,29 +3149,39 @@ local function build_toolbar()
 	toolbar = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, 8)
 	local row, used = panel.row(toolbar), 0
 	local room = magic.ui.root.width - 16 - 12
-	local function add(text, key, f, down, min_width)
-		if key and not S.touch then
-			text = text .. " (" .. key .. ")"
-		end
+	-- make(parent) makes the button
+	local function place(make)
 		-- Measured before it is put in a row: a row a button was taken back
 		-- out of keeps the width it had with it
-		local probe = panel.button(magic.ui.root, text, function() end, down,
-				min_width)
+		local probe = make(magic.ui.root)
 		local w = probe.minWidth + 4
 		probe:Remove()
 		if used > 0 and used + w > room then
 			row, used = panel.row(toolbar), 0
 		end
 		-- Not stretched to the widest row
-		local b = panel.button(row, text, f, down, min_width)
+		local b = make(row)
 		b.maxWidth = b.minWidth
 		used = used + w
+	end
+	local function add(text, key, f, down, min_width)
+		if key and not S.touch then
+			text = text .. " (" .. key .. ")"
+		end
+		place(function(parent)
+			return panel.button(parent, text, f, down, min_width)
+		end)
 	end
 	-- The pause menu's own button, and on a desktop the key it is on: a
 	-- phone has no Esc, and a newcomer does not know it yet (user)
 	add("Menu", S.touch and nil or "Esc", function() M.open_pause() end)
-	add(VIEW_NAMES[S.view], S.touch and nil or "F1 F2 F3",
-			function() set_view(NEXT_VIEW[S.view]) end, false, 40)
+	local views = {}
+	for i, v in ipairs({"2d", "3d", "walk"}) do
+		views[i] = {VIEW_NAMES[v] .. (S.touch and "" or " (F" .. i .. ")"), v}
+	end
+	place(function(parent)
+		return panel.dropdown(parent, nil, views, S.view, set_view, 40)
+	end)
 	-- The layout edited, and the window that picks another
 	local l = S.layout and doc.ents[S.layout]
 	add(l and l.strs.name or "Layouts", nil, function()
@@ -3323,14 +3332,12 @@ local function build_props()
 		elseif p.kind ~= KIND.opening then
 			int_field(i.def, "Trim mm", "trim", p.trim)
 			int_field(i.def, "Trim depth mm", "trim_depth", p.trim_depth)
-			local names = p.kind == KIND.door and {"Single leaf", "Double leaf"}
-					or {"Fixed", "Casement"}
-			panel.button(props, names[p.leaf + 1], function()
+			panel.check(props, p.kind == KIND.door and "Double leaf" or
+					"Opens (casement)", p.leaf == 1, function()
 				set(i.def, {ints = {leaf = 1 - p.leaf}})
 			end)
 			if p.kind == KIND.door then
-				panel.button(props, p.glazed == 1 and "Glass pane" or
-						"Solid leaf", function()
+				panel.check(props, "Glass pane", p.glazed == 1, function()
 					set(i.def, {ints = {glazed = 1 - p.glazed}})
 				end)
 			end
@@ -3355,24 +3362,21 @@ local function build_props()
 			-- The part a palette double click goes on, the palette showing
 			-- what it has now; a part with none of its own shows the frame's
 			panel.label(props, "Selected part (the palette's double click):")
-			local r2 = panel.row(props)
 			local part = DOOR_PARTS[S.sel_face[sel.id]] and S.sel_face[sel.id] or
 					"mat"
 			local slots = {{"Frame", "mat"}, {"Leaf", "mat_leaf"}}
 			if p.kind == KIND.window or p.glazed == 1 then
 				slots[3] = {"Glass", "mat_glass"}
 			end
-			for _, slot in ipairs(slots) do
-				panel.button(r2, slot[1], function()
-					S.sel_face[sel.id] = slot[2]
-					editing_selection()
-					local m = p[slot[2]] ~= 0 and p[slot[2]] or p.mat
-					if doc.ents[m] then
-						S.material = m
-					end
-					refresh_panels()
-				end, part == slot[2])
-			end
+			panel.dropdown(props, "Part", slots, part, function(v)
+				S.sel_face[sel.id] = v
+				editing_selection()
+				local m = p[v] ~= 0 and p[v] or p.mat
+				if doc.ents[m] then
+					S.material = m
+				end
+				refresh_panels()
+			end)
 		end
 		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
 		panel.button(props, "Linked clone (Ctrl+L)", function()
@@ -3403,8 +3407,7 @@ local function build_props()
 			end
 		end)
 		int_field(sel.id, "Offset mm", "offset", i.offset)
-		panel.button(props, i.align == 1 and "From the ceiling down" or
-				"From the floor up", function()
+		panel.check(props, "From the ceiling down", i.align == 1, function()
 			set(sel.id, {ints = {align = 1 - i.align}})
 		end)
 		local r = panel.row(props)
@@ -3470,8 +3473,7 @@ local function build_props()
 			end
 		end)
 		int_field(sel.id, "Offset mm", "offset", i.offset)
-		panel.button(props, i.align == 1 and "From the ceiling down" or
-				"From the floor up", function()
+		panel.check(props, "From the ceiling down", i.align == 1, function()
 			set(sel.id, {ints = {align = 1 - i.align}})
 		end)
 		local r = panel.row(props)
@@ -3523,11 +3525,10 @@ local function build_props()
 		int_field(sel.id, "Thickness mm", "thickness", w.thickness)
 		int_field(sel.id, "Height mm", "height", w.height)
 		panel.label(props, "(height 0: to the ceiling)")
-		panel.button(props, "Justify: " .. JUSTIFY_NAMES[w.justify], function()
-			set(sel.id, {ints = {justify = (w.justify + 1) % 3}})
+		panel.dropdown(props, "Justify", JUSTIFY_CHOICES, w.justify, function(v)
+			set(sel.id, {ints = {justify = v}})
 		end)
-		panel.button(props, w.hang == 1 and "Hangs from the ceiling" or
-				"Stands on the floor", function()
+		panel.check(props, "Hangs from the ceiling", w.hang == 1, function()
 			set(sel.id, {ints = {hang = 1 - w.hang}})
 		end)
 		local face = S.sel_face[sel.id]
@@ -3580,8 +3581,7 @@ local function build_props()
 				function()
 			set(sel.id, {ints = {locked = 1}})
 		end)
-		panel.button(props, i.show3d == 1 and "Shown in 3D too" or
-				"In the plan view only", function()
+		panel.check(props, "Shown in 3D too", i.show3d == 1, function()
 			set(sel.id, {ints = {show3d = 1 - i.show3d}})
 		end)
 		panel.button(props, "Delete (Del)", delete_selected)
@@ -3611,13 +3611,14 @@ local function build_props()
 		panel.button(props, "Delete (Del)", delete_selected)
 	elseif S.tool == "hosted" then
 		panel.label(props, "Click a wall to put in (I: the next):")
-		local r = panel.row(props)
+		local kinds = {}
 		for _, k in ipairs({KIND.opening, KIND.door, KIND.window, KIND.switch}) do
-			panel.button(r, KIND_NAMES[k], function()
-				S.hosted = k
-				refresh_panels()
-			end, S.hosted == k)
+			kinds[#kinds + 1] = {KIND_NAMES[k], k}
 		end
+		panel.dropdown(props, "Kind", kinds, S.hosted, function(k)
+			S.hosted = k
+			refresh_panels()
+		end)
 		local d = HOSTED[S.hosted]
 		for _, f in ipairs({{"Width mm", "w"}, {"Height mm", "h"},
 				{"Sill mm", "sill"}}) do
@@ -3636,8 +3637,9 @@ local function build_props()
 		panel.label(props, "3D: the mouse turns the view, Esc lets go")
 	elseif S.tool == "box" then
 		local stairs = S.shape == "stairs"
-		panel.button(props, stairs and "Shape: stairs" or "Shape: box", function()
-			S.shape = stairs and "box" or "stairs"
+		panel.dropdown(props, "Shape", {{"box", "box"}, {"stairs", "stairs"}},
+				S.shape or "box", function(v)
+			S.shape = v
 			refresh_panels()
 		end)
 		panel.label(props, stairs and "New stairs: click, or drag the footprint"
@@ -3665,8 +3667,7 @@ local function build_props()
 				if v and (v > 0 or f[2] == "offset") then S.box[f[2]] = v end
 			end)
 		end
-		panel.button(props, S.box.align == 1 and "From the ceiling down" or
-				"From the floor up", function()
+		panel.check(props, "From the ceiling down", S.box.align == 1, function()
 			S.box.align = 1 - S.box.align
 			refresh_panels()
 		end)
@@ -3680,17 +3681,15 @@ local function build_props()
 			local v = num(t)
 			if v and v >= 0 then S.height = v end
 		end)
-		panel.button(props, "Justify: " .. JUSTIFY_NAMES[S.justify], function()
-			S.justify = (S.justify + 1) % 3
+		panel.dropdown(props, "Justify", JUSTIFY_CHOICES, S.justify, function(v)
+			S.justify = v
 			refresh_panels()
 		end)
-		panel.button(props, S.hang == 1 and "Hang from the ceiling" or
-				"Stand on the floor", function()
+		panel.check(props, "Hang from the ceiling", S.hang == 1, function()
 			S.hang = 1 - S.hang
 			refresh_panels()
 		end)
-		panel.button(props, S.room_walls and "Rooms get walls" or
-				"Rooms get no walls", function()
+		panel.check(props, "Rooms get walls", S.room_walls, function()
 			S.room_walls = not S.room_walls
 			refresh_panels()
 		end)
@@ -3941,11 +3940,11 @@ build_palette = function()
 		end, 120, true)
 		-- The types as a grid of their previews, opened under the button
 		-- ([FP_TYPES]); Esc or the button again closes it
-		panel.button(palette_win, "Type: " .. MATERIAL_KINDS[p.kind] ..
-				(S.type_open and "  ^" or "  v"), function()
+		panel.mark(panel.button(palette_win, "Type: " .. MATERIAL_KINDS[p.kind],
+				function()
 			S.type_open = not S.type_open
 			refresh_panels()
-		end, S.type_open)
+		end, S.type_open), S.type_open and "▲" or "▼")
 		if S.type_open then
 			local tex = kind_previews()
 			local r
@@ -3983,8 +3982,9 @@ build_palette = function()
 		if p.kind ~= 4 then
 			colour("Own colour", "base")
 			colour("Paint", "color")
-			panel.button(palette_win, "Finish: " .. FINISHES[p.finish], function()
-				set({finish = (p.finish + 1) % 3})
+			panel.dropdown(palette_win, "Finish", {{FINISHES[0], 0},
+					{FINISHES[1], 1}, {FINISHES[2], 2}}, p.finish, function(v)
+				set({finish = v})
 			end)
 			if p.finish == 2 and p.kind ~= 5 then
 				panel.field(palette_win, "Stain %", p.opacity / 10, function(t)
@@ -3998,12 +3998,12 @@ build_palette = function()
 				colour(p.kind == 7 and "Grout colour" or p.kind == 3 and
 						"Pattern" or "Veins", "color2")
 			elseif k == "axis" then
-				panel.button(palette_win, AXES[p.axis], function()
-					set({axis = (p.axis + 1) % 3})
+				panel.dropdown(palette_win, "Grain", {{"along X", 0},
+						{"along Y", 1}, {"along Z", 2}}, p.axis, function(v)
+					set({axis = v})
 				end)
 			elseif k == "stagger" then
-				panel.button(palette_win, p.stagger == 1 and "Staggered" or
-						"In a grid", function()
+				panel.check(palette_win, "Staggered", p.stagger == 1, function()
 					set({stagger = 1 - p.stagger})
 				end)
 			else
@@ -4095,12 +4095,11 @@ place.build_window = function()
 	-- At the bottom for everyone: what the 3D view shows of the floors
 	-- over this one (user)
 	local function above_toggle()
-		panel.button(w, S.hide_above and "Floors above: hidden in 3D" or
-				"Floors above: shown in 3D", function()
+		panel.check(w, "Hide the floors above in 3D", S.hide_above, function()
 			S.hide_above = not S.hide_above
 			buildat.storage_write("hide_above", S.hide_above and "1" or "0")
 			refresh_panels()
-		end, S.hide_above)
+		end)
 	end
 	if not e or not doc.can("edit") then
 		above_toggle()
@@ -4230,15 +4229,19 @@ do
 			end)
 		end
 		if edit then
-			-- The grid's button says what was just asked for, before the
-			-- plan comes back with it
-			local gb
-			gb = panel.button(w, M.grid_text(grid_step()), function()
-				gb:GetChild(0):SetText(M.grid_text(next_grid()))
+			-- The grid's choice shows before the plan comes back with it
+			local grids = {}
+			for i, g in ipairs(GRID_STEPS) do
+				grids[i] = {M.grid_text(g), g}
+			end
+			panel.dropdown(w, "Grid (G)", grids, grid_step(), function(g)
+				send({{op = "set", ent = {id = sid, ints = {grid = g}}}})
+				st.grid = g
+				plan_settings_page()
 			end)
 			plan_int("Ceiling mm", "ceiling")
 			plan_int("Plan cut mm", "cut")
-			panel.button(w, st.sun == 1 and "Sun: on" or "Sun: off", function()
+			panel.check(w, "Sun", st.sun == 1, function()
 				send({{op = "set", ent = {id = sid, ints = {sun = 1 - st.sun}}}})
 				st.sun = 1 - st.sun
 				plan_settings_page()
@@ -4280,32 +4283,35 @@ do
 	-- **This client's own settings**, kept here and nobody else's
 	local function client_settings_page()
 		local w = dialog("Client settings")
-		local ab
-		ab = panel.button(w, M.angle_text(), function()
-			S.angle = S.angle % #ANGLE_STEPS + 1
-			ab:GetChild(0):SetText(M.angle_text())
+		local angles = {}
+		for i = 1, #ANGLE_STEPS do
+			angles[i] = {M.angle_text(i), i}
+		end
+		panel.dropdown(w, "Angle (H)", angles, S.angle, function(i)
+			S.angle = i
+			client_settings_page()
 		end)
+		-- Muted, or full down to -30 dB, 6 dB at a time
 		local mute, db = buildat.get_sound()
-		panel.button(w, mute and "Sound: muted" or (db <= -33 and "Sound: off" or
-				string.format("Sound: %d dB", db)), function()
-			-- Muted, then full, then down 6 dB at a time
-			if mute then
-				buildat.set_sound(false, 0)
-			elseif db > -30 then
-				buildat.set_sound(false, math.max(-30, db - 6))
-			else
+		local sounds = {{"muted", "muted"}}
+		for v = 0, -30, -6 do
+			sounds[#sounds + 1] = {v .. " dB", v}
+		end
+		panel.dropdown(w, "Sound", sounds, mute and "muted" or
+				math.max(-30, math.floor(db / 6 + 0.5) * 6), function(v)
+			if v == "muted" then
 				buildat.set_sound(true, 0)
+			else
+				buildat.set_sound(false, v)
 			end
 			client_settings_page()
 		end)
-		panel.button(w, S.plan_look and "The plan: flat colours (L)" or
-				"The plan: the materials (L)", function()
+		panel.check(w, "The plan in flat colours (L)", S.plan_look, function()
 			S.plan_look = not S.plan_look
 			set_view(S.view)
 			client_settings_page()
 		end)
-		panel.button(w, S.show_ids and "Material ids: shown" or
-				"Material ids: hidden", function()
+		panel.check(w, "Material ids shown", S.show_ids, function()
 			S.show_ids = not S.show_ids
 			S.dirty = true
 			client_settings_page()
@@ -4367,11 +4373,10 @@ do
 	-- **Who may use this plan** ([FP_PLANS] 5): its owner's and an admin's.
 	-- The server sends the list when they enter it and after every change.
 	local members_page
-	local PUBLIC_TEXT = {[0] = "Others: cannot see it", [1] = "Others: can read",
-			[2] = "Others: can edit"}
-	local ROLE_NEXT = {[""] = "viewer", viewer = "editor", editor = ""}
-	local ROLE_LABEL = {[""] = "Role: others'", viewer = "Role: reader",
-			editor = "Role: editor"}
+	local PUBLIC_CHOICES = {{"cannot see it", 0}, {"can read", 1},
+			{"can edit", 2}}
+	local ROLE_CHOICES = {{"others'", ""}, {"reader", "viewer"},
+			{"editor", "editor"}}
 
 	local function delete_plan_page()
 		local w = dialog("Delete the plan " .. doc.plan_name .. "?")
@@ -4398,17 +4403,16 @@ do
 			return
 		end
 		panel.label(w, "Owner: " .. (m.owner ~= "" and m.owner or "(none)"))
-		panel.button(w, PUBLIC_TEXT[m.pub] or "?", function()
-			doc.plan_admin("public", "", tostring((m.pub + 1) % 3))
+		panel.dropdown(w, "Others", PUBLIC_CHOICES, m.pub, function(v)
+			doc.plan_admin("public", "", tostring(v))
 		end)
 		for _, member in ipairs(m.members) do
 			if member.name ~= m.owner then
 				local r = panel.row(w)
 				local n = panel.label(r, member.name)
 				n.minWidth = 140
-				panel.button(r, ROLE_LABEL[member.role] or member.role, function()
-					doc.plan_admin("role", member.name,
-							ROLE_NEXT[member.role] or "")
+				panel.dropdown(r, "Role", ROLE_CHOICES, member.role, function(v)
+					doc.plan_admin("role", member.name, v)
 				end)
 			end
 		end
@@ -4491,7 +4495,7 @@ end
 local function over_ui()
 	local s = magic.ui.scale
 	return panel.over({toolbar, props, palette_win, pause_win, picker_win,
-			place.win, S.touch_bar, doc.accounts.page}, S.mx / s,
+			place.win, S.touch_bar, doc.accounts.page, panel.popup}, S.mx / s,
 			S.my / s)
 end
 
@@ -5309,7 +5313,8 @@ do
 	function M.touch_begin(id, x, y)
 		local sc = magic.ui.scale
 		local on_ui = panel.over({toolbar, props, palette_win, pause_win,
-				picker_win, place.win, S.touch_bar, doc.accounts.page},
+				picker_win, place.win, S.touch_bar, doc.accounts.page,
+				panel.popup},
 				x / sc, y / sc)
 		S.fingers[id] = {x = x, y = y, x0 = x, y0 = y, t0 = buildat.get_time_us(),
 				ui = on_ui}
@@ -5575,7 +5580,9 @@ do
 	-- progress; at the bottom of a view, the pause menu. Esc's, and the
 	-- touch bar's Cancel ([FP_TOUCH] 4).
 	function M.escape()
-		if S.paused then
+		if panel.popup then
+			panel.close_popup()
+		elseif S.paused then
 			close_pause()
 		elseif S.picker or S.replace then
 			close_picker()
@@ -6939,7 +6946,14 @@ function M.start(d)
 		S.dirty = true
 		refresh_panels()
 	end
+	-- A press off an open dropdown closes it, and one on the view does
+	-- nothing else
 	magic.SubscribeToEvent("MouseButtonDown", function(_, data)
+		local sc = magic.ui.scale
+		if panel.press(S.mx / sc, S.my / sc) and not over_ui() then
+			S.swallow_up = true
+			return
+		end
 		M.mouse_down(data:GetInt("Button"))
 	end)
 	magic.SubscribeToEvent("MouseButtonUp", function(_, data)
@@ -6953,7 +6967,9 @@ function M.start(d)
 		M.mouse_wheel(data:GetInt("Wheel"))
 	end)
 	magic.SubscribeToEvent("TouchBegin", function(_, data)
-		M.touch_begin(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"))
+		local x, y, sc = data:GetInt("X"), data:GetInt("Y"), magic.ui.scale
+		panel.press(x / sc, y / sc)
+		M.touch_begin(data:GetInt("TouchID"), x, y)
 	end)
 	magic.SubscribeToEvent("TouchMove", function(_, data)
 		M.touch_move(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"),
