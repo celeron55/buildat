@@ -224,6 +224,7 @@ static ss_ preferences_path()
 //   "v<caret>,<text>"  the field's text is now this, the caret there
 //   "i<text>"          type the text (a paste)
 //   "s<start>,<len>"   select
+//   "e"                Enter, from a touchscreen's keyboard
 // Positions are in characters.
 static void web_text_sync(magic::UI *ui)
 {
@@ -245,6 +246,10 @@ static void web_text_sync(magic::UI *ui)
 			e->GetTextElement()->ClearSelection();
 		} else if(e && a[0] == 'i'){
 			e->OnTextInput(magic::String(a + 1));
+		} else if(e && a[0] == 'e'){
+			// A touchscreen keyboard's Enter: the field's own, which is
+			// what finishes it (TextFinished)
+			e->OnKey(magic::KEY_RETURN, 0, 0);
 		} else if(e && a[0] == 's'){
 			unsigned start = 0, len = 0;
 			if(sscanf(a + 1, "%u,%u", &start, &len) == 2){

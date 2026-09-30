@@ -3548,8 +3548,16 @@ function M.click(x, y, button)
 	end
 	-- Everything else on the form swallows the click without meaning
 	-- anything, which is what keeps it from digging the node behind it
-	return lx >= 0 and ly >= 0 and lx < form.drawn.size[1] and
+	local inside = lx >= 0 and ly >= 0 and lx < form.drawn.size[1] and
 			ly < form.drawn.size[2]
+	-- **Outside it, the form closes** as Luanti's does, unless it says
+	-- allow_close[false] (a death screen): on a touchscreen that is the
+	-- one way out, having no Escape (user, 2026-09-30)
+	if not inside and not form.spec:find("allow_close%[false%]") then
+		close_form(true)
+		return true
+	end
+	return inside
 end
 
 -- Escape closes it, which is the player closing it

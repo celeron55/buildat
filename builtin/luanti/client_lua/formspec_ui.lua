@@ -1324,6 +1324,14 @@ function M.new(magic, buildat, log, ctx)
 					edit.color = bg or magic.Color(0.1, 0.1, 0.12, 0.9)
 					local value = name == "field" and e.fields[5] or ""
 					edit:SetText(formspec.strip_escapes(value or ""))
+					-- The text fits the field: the style's size is for the
+					-- style's own field, and a form at a phone's scale made
+					-- it taller than the box (user, 2026-09-30)
+					local te = edit.textElement
+					if te then
+						te:SetFontSize(math.max(8, math.min(14,
+								math.floor(h * 0.6))))
+					end
 					if name == "pwdfield" then
 						edit.echoCharacter = 42 -- an asterisk
 					end
@@ -1395,6 +1403,11 @@ function M.new(magic, buildat, log, ctx)
 			elseif e.name == "set_focus" then
 				focus_name = e.fields[1]
 			end
+		end
+		-- Not on a touchscreen: a focused field opens its keyboard over the
+		-- form, and the field is the player's to tap (user, 2026-09-30)
+		if buildat.get_env("BUILDAT_TOUCH") == "1" then
+			focus_name = nil
 		end
 		for _, f in ipairs(fields) do
 			if f.name == focus_name and f.edit then

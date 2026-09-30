@@ -188,6 +188,12 @@ return function(o)
 		fingers[id] = f
 		if luanti.form_open() or over_buttons(ux, uy) then
 			f.ui = true
+			-- A form of Luanti's is clicked where the finger lands: the UI
+			-- sends no click of a finger's (UIMouseClick is the mouse's),
+			-- and a tap outside the form closes it
+			if luanti.form_window() then
+				luanti.click(ux, uy, "left")
+			end
 			return
 		end
 		local slot = hotbar_slot(ux, uy)

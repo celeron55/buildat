@@ -161,6 +161,7 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 	//                      deleting, a composition, a cut, the menu's Delete)
 	//   "i<text>"          type this (a paste, made one line)
 	//   "s<start>,<len>"   select
+	//   "e"                Enter (a touchscreen keyboard's)
 	// Indices there are characters, here UTF-16. A desktop's typing never
 	// reaches the stand-in: SDL takes its keypress and prevents it.
 	// **Two fingers are the game's at once** (user, a playtest: a two
@@ -251,12 +252,26 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 			if(e !== el || e.readOnly)
 				return;
 			var v = e.value;
-			// One line, whatever a keyboard's Enter or a suggestion put in
-			if(/[\r\n\t]/.test(v))
-				v = e.value = v.replace(/[\r\n\t]+/g, ' ');
+			// A touchscreen keyboard's Enter is a line break in the text:
+			// taken out, and the field's Enter (user, 2026-09-30)
+			var enter = /[\r\n]/.test(v);
+			if(enter)
+				v = e.value = v.replace(/[\r\n]+/g, '');
+			// One line, whatever a suggestion put in
+			if(/\t/.test(v))
+				v = e.value = v.replace(/\t+/g, ' ');
 			var caret = chars(v, e.selectionEnd);
 			e.dataset.sel = e.selectionStart + ',' + e.selectionEnd;
 			actions.push('v' + caret + ',' + v);
+			if(enter)
+				actions.push('e');
+		});
+		// And a password input's, which puts nothing in the text
+		e.addEventListener('keydown', function(ev){
+			if(ev.key === 'Enter' && e === pw){
+				ev.preventDefault();
+				actions.push('e');
+			}
 		});
 	});
 	// A right click on the focused field opens the browser's menu for it:

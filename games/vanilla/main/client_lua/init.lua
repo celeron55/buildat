@@ -4112,7 +4112,8 @@ end)
 -- Where a click landed, which MouseButtonDown does not say. A form is the
 -- only thing here that cares.
 magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
-	if not luanti.form_open() then
+	-- A touchscreen's taps are clicked by main/touch.lua
+	if not luanti.form_open() or keys.touch then
 		return
 	end
 	local button = event_data:GetInt("Button")
