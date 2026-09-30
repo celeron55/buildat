@@ -34,6 +34,79 @@ local TECHNIQUE = magic.cache:GetResource("Technique",
 -- has nothing in the tangent, so this is opt-in.
 local TECHNIQUE_MODIFIERS = magic.cache:GetResource("Technique",
 		"voxel_shading/PBRVoxelModifiers.xml")
+-- For the faces the mesher put on a chunk's "alpha" child: the same shader
+-- blended rather than cut out. See PBRVoxelAlpha.xml.
+local TECHNIQUE_ALPHA = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelAlpha.xml")
+-- And for the faces on its "masked" child: the same shader again, cut out by
+-- the texture's own alpha rather than drawn through it. See
+-- PBRVoxelMasked.xml.
+local TECHNIQUE_MASKED = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelMasked.xml")
+
+-- The same three with the sun gated by the skylight in the vertex colors: a
+-- surface the sky cannot reach gets no direct sunlight. A world whose light
+-- value means "how much sky is here" wants this; see use_sun_gate().
+local TECHNIQUE_SUN = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelSun.xml")
+local TECHNIQUE_SUN_MODIFIERS = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelSunModifiers.xml")
+local TECHNIQUE_SUN_ALPHA = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelSunAlpha.xml")
+local TECHNIQUE_SUN_MASKED = magic.cache:GetResource("Technique",
+		"voxel_shading/PBRVoxelSunMasked.xml")
+
+-- The eight above, in one table, so that a game can hand over eight of its
+-- own instead. **Nothing about the look changes for a game that does not**:
+-- these are the same resources, under the same names, and apply_to_node()
+-- reads them from here.
+--
+-- What wants that is builtin/luanti, which is hosting Luanti and wants
+-- Luanti's look where the other nine games using this module want buildat's.
+-- One shader set for both Luanti clients lives in
+-- extensions/luanti_client/res/; see [SHADER_HOME] in
+-- doc/plan/master_plan.md for why there and not here.
+local techniques = {
+	plain = TECHNIQUE,
+	modifiers = TECHNIQUE_MODIFIERS,
+	alpha = TECHNIQUE_ALPHA,
+	masked = TECHNIQUE_MASKED,
+	sun = TECHNIQUE_SUN,
+	sun_modifiers = TECHNIQUE_SUN_MODIFIERS,
+	sun_alpha = TECHNIQUE_SUN_ALPHA,
+	sun_masked = TECHNIQUE_SUN_MASKED,
+}
+
+-- Draw with somebody else's techniques: a table of resource names under the
+-- keys above, any of which may be left out to keep this module's own. Set it
+-- before the first chunk arrives; what is already drawn keeps the technique
+-- it was given, which is what use_sun_gate() says too.
+--
+-- The shader behind them is theirs as well, so what this module still owns
+-- for such a game is the *choosing* -- which of the eight a chunk, its
+-- translucent child and its masked child get -- and the parameters
+-- update() pushes.
+function M.use_technique_set(names)
+	if type(names) ~= "table" then
+		return
+	end
+	for key, name in pairs(names) do
+		if techniques[key] == nil then
+			log:warning("use_technique_set: no technique called " ..
+					tostring(key))
+		else
+			local res = magic.cache:GetResource("Technique", name)
+			if res == nil then
+				log:warning("use_technique_set: no resource " ..
+						tostring(name))
+			else
+				techniques[key] = res
+			end
+		end
+	end
+end
+
+local sun_gate = false
 local use_modifiers = false
 
 -- How much of the sky the camera can see, per direction, as a cube of 6x6
@@ -192,9 +265,32 @@ local sky_vis_dirty = false
 -- benchmarks turn it up to look at the reflections themselves. See
 -- M.set_specular_emphasis().
 local spec_emphasis = 1.0
+-- How much light is on the sky the reflections come from; see M.set_sky_light()
+local sky_light = 1.0
+-- And what colour it is now, against the noon sky the cube map holds; see
+-- M.set_sky_tint(). White and none is the cube map as it was baked.
+local sky_tint = magic.Vector3(1, 1, 1)
+local sky_tint_amount = 0.0
+-- Light bounced off the surroundings, reaching a surface where the sky does
+-- not; see M.set_bounce_light()
+local bounce_light = magic.Vector3(0, 0, 0)
+-- What a lamp at full reads as on the packed path, in the ambient's units;
+-- see M.set_lamp_light(). Unset (nil) is the plain path's white.
+local translucency_gain = 1.0
+local lamp_light = magic.Vector3(1, 1, 1)
+-- [CAVE_AO]: what a cave is never darker than, in the ambient's units and
+-- the same at every hour. Nothing until a client sets it.
+local cave_ambient = magic.Vector3(0, 0, 0)
+local chamber_light_param = 1.0
+local gray_by_light = 0.0
+-- And the ground's radiance, for the lower hemisphere; see M.set_ground_light()
+local ground_light = magic.Vector3(0, 0, 0)
+-- Whether the mesher packs the vertex alpha; see M.set_packed_sky()
+local packed_sky = 0.0
+-- The shadow-kind diagnostic; see M.set_shadow_kinds()
+local shadow_kinds = 0.0
 
-local function each_material(node, cb)
-	local cg = node:GetComponent("CustomGeometry")
+local function each_material_of(cg, cb)
 	if not cg then return end
 	local i = 0
 	while true do
@@ -205,6 +301,10 @@ local function each_material(node, cb)
 	end
 end
 
+local function each_material(node, cb)
+	each_material_of(node:GetComponent("CustomGeometry"), cb)
+end
+
 -- Draw a node's voxel geometry with this module's shader. Called for every
 -- chunk voxelworld meshes; a game with voxel geometry of its own outside the
 -- voxel world -- a rigid body made of voxels, say -- calls it for that node so
@@ -212,10 +312,69 @@ end
 -- data, and the shader then sees full skylight, which is what an object out in
 -- the open should get.
 function M.apply_to_node(node)
-	local technique = use_modifiers and TECHNIQUE_MODIFIERS or TECHNIQUE
+	local technique
+	if sun_gate then
+		technique = use_modifiers and techniques.sun_modifiers or
+				techniques.sun
+	else
+		technique = use_modifiers and techniques.modifiers or techniques.plain
+	end
 	each_material(node, function(m)
 		m:SetTechnique(0, technique)
+		m:SetShaderParameter("PackedSky", packed_sky)
+		m:SetShaderParameter("ShadowKinds", shadow_kinds)
+		-- **A parameter a material never sets is not zero** ([LOOK_CHECK]
+		-- says so, and 2026-09-24 paid for it): the parallax correction
+		-- [LAUNCH_WORLD] wants for a cube map that holds a room -- rather
+		-- than a sky, which is at infinity and needs none -- is off for a
+		-- world with a sky, and saying so here is what keeps it off.
+		-- Without this line voxel_lighting's pond and cave mouths moved
+		-- by ten times their own run-to-run noise.
+		m:SetShaderParameter("ProbeBox", 0.0)
 	end)
+	-- The faces of the world's translucent voxels, which the mesher puts on a
+	-- child node of their own so that Urho3D sorts them against the other
+	-- chunks' translucent geometry rather than against the opaque geometry
+	-- they are mixed with. Without a technique they are invisible rather than
+	-- see-through, so a world with water in it needs this whether or not it
+	-- knows about the child.
+	local alpha_node = node:GetChild("alpha")
+	if alpha_node then
+		each_material_of(alpha_node:GetComponent("CustomGeometry"),
+				function(m)
+			m:SetTechnique(0, sun_gate and techniques.sun_alpha or
+					techniques.alpha)
+			m:SetShaderParameter("PackedSky", packed_sky)
+			m:SetShaderParameter("ShadowKinds", shadow_kinds)
+			m:SetShaderParameter("ProbeBox", 0.0)
+		end)
+	end
+	-- And the alpha-masked ones, which are solid world with the holes in
+	-- their textures cut out. A game that marks no voxel masked never has
+	-- this child.
+	local masked_node = node:GetChild("masked")
+	if masked_node then
+		each_material_of(masked_node:GetComponent("CustomGeometry"),
+				function(m)
+			m:SetTechnique(0, sun_gate and techniques.sun_masked or
+					techniques.masked)
+			m:SetShaderParameter("PackedSky", packed_sky)
+			m:SetShaderParameter("ShadowKinds", shadow_kinds)
+			m:SetShaderParameter("ProbeBox", 0.0)
+		end)
+	end
+end
+
+-- Whether the sun is gated by the skylight the mesher packed into the vertex
+-- colours. A shadow map cannot tell a cave from a canopy -- in both the sky
+-- is blocked by geometry that is being drawn -- so the world's own light
+-- value is what says whether the sun reaches a surface at all. Turn it on in
+-- a world that maintains voxelworld's skylight, and leave it off in one that
+-- does not: there every surface reads as underground and the sun never
+-- arrives. Set it before the first chunk arrives; what is already drawn
+-- keeps the technique it was given.
+function M.use_sun_gate(enable)
+	sun_gate = enable and true or false
 end
 
 -- Read the voxel format's surface modifiers, for a world whose format binds
@@ -518,12 +677,114 @@ local function push_sky_vis()
 			if command ~= nil and command.type == magic.CMD_SCENEPASS then
 				command:SetShaderParameter("SkyVis", sky_vis_param)
 				command:SetShaderParameter("SpecEmphasis", spec_emphasis)
+				command:SetShaderParameter("SkyLight", sky_light)
+				command:SetShaderParameter("SkyTint", sky_tint)
+				command:SetShaderParameter("SkyTintAmount", sky_tint_amount)
+				command:SetShaderParameter("BounceLight", bounce_light)
+				command:SetShaderParameter("GroundLight", ground_light)
+				command:SetShaderParameter("LampLight", lamp_light)
+				command:SetShaderParameter("CaveAmbient", cave_ambient)
+				command:SetShaderParameter("ChamberLight", chamber_light_param)
+				command:SetShaderParameter("GrayByLight", gray_by_light)
+				command:SetShaderParameter("TranslucencyGain", translucency_gain)
+				-- Off for a world with a sky, and said every frame like
+				-- the rest: a cube map at infinity wants no parallax
+				-- ([LAUNCH_WORLD]'s room is the one that does)
+				command:SetShaderParameter("ProbeBox", 0.0)
 			end
 		end
 		return
 	end
 	render_path:SetShaderParameter("SkyVis", sky_vis_param)
 	render_path:SetShaderParameter("SpecEmphasis", spec_emphasis)
+	render_path:SetShaderParameter("SkyLight", sky_light)
+	render_path:SetShaderParameter("SkyTint", sky_tint)
+	render_path:SetShaderParameter("SkyTintAmount", sky_tint_amount)
+	render_path:SetShaderParameter("BounceLight", bounce_light)
+	render_path:SetShaderParameter("GroundLight", ground_light)
+	render_path:SetShaderParameter("LampLight", lamp_light)
+	render_path:SetShaderParameter("CaveAmbient", cave_ambient)
+	render_path:SetShaderParameter("ChamberLight", chamber_light_param)
+	render_path:SetShaderParameter("GrayByLight", gray_by_light)
+	render_path:SetShaderParameter("TranslucencyGain", translucency_gain)
+	render_path:SetShaderParameter("ProbeBox", 0.0)
+end
+
+-- How much of the sky is visible overhead: 1 out in the open, towards 0
+-- underground. What wants it is whatever is not per direction -- a zone's
+-- fog colour is the one -- and it costs nothing, the cells being kept here
+-- anyway. See [CAVE_SKY] in doc/plan/rendering_plan.md.
+--
+-- **The +Y face rather than the whole cube**, which that section proposed
+-- and which measuring rejected: half the cube looks at the ground wherever
+-- the player is standing, so a whole-cube mean is about a half in broad
+-- daylight and the fog would be part indoors on an open beach. The face is
+-- the cone of directions whose largest component is up, which is where the
+-- daylight comes from, and is the same face the shader indexes as 2.
+local ABOVE_FIRST = 2 * CELLS * CELLS + 1
+local ABOVE_LAST = 3 * CELLS * CELLS
+
+-- The whole cube's mean, and its lowest cell: what the reflections are
+-- gated by per direction, which chamber_light() cannot say -- that is the
+-- mean of the eight brightest and reads 1.0 while most of the sphere is
+-- dark ([UNDERGROUND_LIGHT], 2026-09-28).
+function M.sky_vis_stats()
+	local sum, lo, hi = 0, 1e9, -1e9
+	for i = 1, CELL_COUNT do
+		local v = sky_vis[i]
+		sum = sum + v
+		if v < lo then lo = v end
+		if v > hi then hi = v end
+	end
+	return sum / CELL_COUNT, lo, hi
+end
+
+function M.sky_visibility_above()
+	local sum = 0
+	for i = ABOVE_FIRST, ABOVE_LAST do
+		sum = sum + sky_vis[i]
+	end
+	return sum / (ABOVE_LAST - ABOVE_FIRST + 1)
+end
+
+-- How lit the brightest air this chamber shows the camera is: 0 where every
+-- direction ends in rock or in unlit air, towards 1 where some direction ends
+-- in air the daylight reached. What wants it is the light a chamber has by
+-- bouncing -- [UNDERGROUND_LIGHT]: a cave lit at its far end lights all of
+-- itself, and no face can work that out for itself, since the light arrives
+-- round a corner. The cells already carry it: a ray answers nothing if
+-- something solid stopped it and otherwise the skylight of the air it ended
+-- in, which is this question asked in one direction.
+--
+-- **The brightest few cells rather than the brightest one**: a cell is four
+-- jittered rays blended over time, so the single maximum chases its own
+-- sampling, and a lit far end that covers a few degrees still lands in
+-- several cells. Eight of 216 is about a twentieth of the sphere.
+local BEST_CELLS = 8
+
+function M.chamber_light()
+	-- An insertion sort over eight, once a frame, against 216 values: the
+	-- sort is cheaper than a table allocation would be
+	local best = {}
+	for i = 1, BEST_CELLS do
+		best[i] = 0.0
+	end
+	for i = 1, CELL_COUNT do
+		local v = sky_vis[i]
+		if v > best[BEST_CELLS] then
+			local j = BEST_CELLS
+			while j > 1 and best[j - 1] < v do
+				best[j] = best[j - 1]
+				j = j - 1
+			end
+			best[j] = v
+		end
+	end
+	local sum = 0
+	for i = 1, BEST_CELLS do
+		sum = sum + best[i]
+	end
+	return sum / BEST_CELLS
 end
 
 -- How much to multiply the reflected sky by, 1 being what a game renders.
@@ -535,6 +796,132 @@ end
 -- a change did anything. Turned up, the same change is tens of values and can
 -- be measured. It scales the reflection alone, so what it exaggerates is
 -- exactly what this module decides and nothing else.
+-- How much light is on the sky a surface reflects: one is the daylight the
+-- cube map was baked in, and a game with a clock turns it down as its night
+-- comes. Without it a pond at midnight mirrors a bright blue sky.
+-- Light bounced off the surroundings, in the zone ambient's units, which a
+-- surface receives in proportion to how much sky it does not see: what
+-- lights a cave by day. Nothing until a client sets it.
+-- A lamp at full, in the ambient's units, for the packed path: the
+-- mesher's lamp nibble is display white at full, which under a night
+-- sky of 0.00005 and the meter drew a far ridge's lamp-lit snow white
+-- ([PBR_FIT], [LOD_LIGHT]'s finding). The plain path keeps white.
+-- The transmitted light's level through a translucent surface, over
+-- Lambert through the leaf's colour squared ([PBR_FIT] 3b); the launcher
+-- sets it from the fit, BUILDAT_LUANTI_TRANSLUCENCY overrides
+function M.set_translucency_gain(k)
+	translucency_gain = math.max(0, k)
+	declare_countdown = 0
+end
+
+-- A light of the place rather than of the sky: a constant floor under the
+-- ambient so that the corner table and the hemisphere rays still shape a
+-- face where both nibbles are nought. Not scaled by the hour, which is
+-- what keeps [DARK_INVARIANT] -- see cCaveAmbient in PBRVoxel.glsl.
+-- [UNDERGROUND_LIGHT]: how lit the chamber the camera is in is, 0 to 1 and
+-- above 1 to brighten a lit one. It scales the bounce term's floor in the
+-- shader -- the light a face gets where the flood's nibble is nought -- so a
+-- sealed place stops following the hour while a cave lit round a corner keeps
+-- its light. One unless a client sets it, which is what the shader did before.
+function M.set_chamber_light(f)
+	chamber_light_param = math.max(0, f)
+	declare_countdown = 0
+end
+
+-- [NIGHT_GRAY]'s third ladder: show a face gray by the light it gets rather
+-- than by the radiance it gives out -- gray at the cave floor's own level,
+-- coloured a quarter above it. The frame pass does the same job on radiance
+-- and cannot hold the rule across materials. Off unless a client asks.
+-- top is the ramp's top as a multiple of the floor (1.25 is the picked
+-- width); nil or false turns it off.
+function M.set_gray_by_light(top)
+	gray_by_light = (type(top) == "number" and top > 0) and top or 0.0
+	declare_countdown = 0
+end
+
+function M.set_cave_ambient(r, g, b)
+	cave_ambient = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
+	declare_countdown = 0
+end
+
+function M.set_lamp_light(r, g, b)
+	lamp_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
+	declare_countdown = 0
+end
+
+function M.set_bounce_light(r, g, b)
+	bounce_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
+	declare_countdown = 0
+end
+
+-- The ground's radiance, in the zone ambient's units, which a surface
+-- receives by how much of its hemisphere looks down: half for a wall, all
+-- for a ceiling. Nothing until a client sets it.
+function M.set_ground_light(r, g, b)
+	ground_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
+	declare_countdown = 0
+end
+
+-- Whether the mesher packs the skylight nibble and the shade into the
+-- vertex alpha's two nibbles, which it does for a client that hands it a
+-- horizon map (voxelworld's M.horizon); the shader has to read it the same
+-- way. See [PBR_FIT] 2c.
+function M.set_packed_sky(on)
+	packed_sky = on and 1.0 or 0.0
+end
+
+-- The shadow-kind diagnostic: the vertex colour drawn as the mesher wrote
+-- it under BUILDAT_LUANTI_SHADOW_KINDS, one occlusion term per channel,
+-- no albedo, no ambient. See [PBR_FIT] 2c.
+--
+-- **Three settings, not two** ([UNDERGROUND_LIGHT]'s playtest fault):
+--   1 (or true)  the vertex colour, one occlusion term per channel;
+--   2            the light a face gets -- every ambient term summed, the
+--                sky share included -- with no albedo and no sun, which
+--                is the number the gray keys on and the number a "the
+--                shadows are unlit" report is about;
+--   3            what the nibbles say: the flood's share in red, the sky
+--                share it becomes in green, the mesher's shade in blue.
+-- Read the picture with BUILDAT_LUANTI_LINEAR=1 and a pinned key, or the
+-- curve is on the numbers.
+function M.set_shadow_kinds(on)
+	shadow_kinds = type(on) == "number" and on or (on and 1.0 or 0.0)
+end
+
+function M.set_sky_light(k)
+	if k == nil then
+		return
+	end
+	sky_light = math.max(0, k)
+	declare_countdown = 0
+end
+
+-- And what colour that sky is now. The cube map holds one sky -- the noon
+-- one -- so a reflection at night is the day's blue however far it is
+-- dimmed; this moves it towards the colour the game says its sky is at this
+-- hour, keeping the brightness the cube gives it so that the reflection
+-- still has the sky's own shape in it. amount is how far, and 0 is the cube
+-- map as it was baked.
+--
+-- simplified: one colour for the whole sky rather than a second cube map or
+-- one rendered as the day goes. A reflection of a sky that is orange at one
+-- horizon and blue at the other is beyond it.
+function M.set_sky_tint(color, amount)
+	if color then
+		-- Normalised, so that the tint decides the hue and the cube map
+		-- keeps deciding how bright each direction is
+		local r = color.r or color[1] or 1
+		local g = color.g or color[2] or 1
+		local b = color.b or color[3] or 1
+		local luma = math.max(0.001, 0.299 * r + 0.587 * g + 0.114 * b)
+		sky_tint = magic.Vector3(r / luma, g / luma, b / luma)
+	end
+	if amount then
+		sky_tint_amount = math.max(0, math.min(1, amount))
+	end
+	declare_countdown = 0
+end
+
 function M.set_specular_emphasis(v)
 	spec_emphasis = v
 	-- Straight away rather than at the next declaring walk, so a key that
@@ -597,6 +984,23 @@ function M.update(dt)
 	push_sky_vis()
 end
 
+-- The skybox's material, kept so that a game with a clock can move the sun
+-- across it; see M.set_sun_direction() below
+local skybox_material = nil
+
+-- What the sky is when nobody has asked for anything else, which is what
+-- create_skybox() sets. A game that blends its own sky from these -- one
+-- that darkens it at night, say -- reads them here rather than writing the
+-- same numbers down again.
+M.sky_defaults = {
+	zenith = {r = 0.13, g = 0.24, b = 0.58},
+	horizon = {r = 0.55, g = 0.66, b = 0.84},
+	cloud_cover = 0.34,
+	cloud_light = 1.0,
+	sun_half = 0.075,
+	sun_color = {r = 1.7, g = 1.66, b = 1.52},
+}
+
 -- The sky the world stands under, drawn by VoxelSkybox.glsl in the same
 -- gradient the cube map is baked in. sun_dir points the way the light travels,
 -- as a Light's direction does, so the sun itself is the other way.
@@ -609,8 +1013,140 @@ function M.create_skybox(scene, sun_dir)
 			"voxel_shading/VoxelSkybox.xml"))
 	material:SetShaderParameter("SunDirection", magic.Vector3(
 			-sun_dir.x, -sun_dir.y, -sun_dir.z))
+	-- What the shader draws the sky as: the gradient's two ends and how much
+	-- of it is cloud. They have to be set here because a parameter a
+	-- material never sets reads as zero, which is a black sky; these are
+	-- what the sky was before a game could ask for one of its own.
+	local d = M.sky_defaults
+	material:SetShaderParameter("SkyZenith",
+			magic.Vector3(d.zenith.r, d.zenith.g, d.zenith.b))
+	material:SetShaderParameter("SkyHorizon",
+			magic.Vector3(d.horizon.r, d.horizon.g, d.horizon.b))
+	material:SetShaderParameter("CloudCover", d.cloud_cover)
+	material:SetShaderParameter("CloudLight", d.cloud_light)
+	-- The sun's own square and the stars, for the same reason: what is not
+	-- set reads as zero, and zero here is a sky with no sun in it. A star
+	-- density of zero is what every game had before one could ask for them.
+	material:SetShaderParameter("SunHalf", d.sun_half)
+	material:SetShaderParameter("SunColor", magic.Vector3(d.sun_color.r,
+			d.sun_color.g, d.sun_color.b))
+	-- The painted square rather than a game's own picture of a sun, until
+	-- one says otherwise: a shader parameter a material never sets reads as
+	-- zero, and this says so rather than leaning on it
+	material:SetShaderParameter("SunTextured", 0.0)
+	material:SetShaderParameter("StarDensity", 0.0)
+	material:SetShaderParameter("StarColor", magic.Vector3(0.9, 0.9, 1.0))
+	material:SetShaderParameter("StarSize", 0.12)
 	skybox.material = material
+	skybox_material = material
 	return node
+end
+
+-- Where the sun is now, for a game whose sky follows a clock. The direction
+-- is the one a Light has -- the way the light travels -- so the sun itself is
+-- the other way, which is what the skybox is told. A game that never calls
+-- this keeps the sun create_skybox() was given.
+--
+-- What this does not move is the cube map the reflections come from: it is
+-- baked with the sun where it was, so a reflection at night is a reflection
+-- of the day's sky. Dimming the light is most of the way there; a second
+-- cube map, or one rendered as the day goes, is the rest of it.
+-- The sky a game asked for: the colour overhead, the colour at the horizon
+-- and how much of it is cloud (0 for none). Anything nil is left as it is.
+-- What this does not touch is the cube map the reflections come from, which
+-- is baked -- see set_sun_direction().
+function M.set_sky_look(zenith, horizon, cloud_cover)
+	if not skybox_material then
+		return
+	end
+	if zenith then
+		skybox_material:SetShaderParameter("SkyZenith",
+				magic.Vector3(zenith.r or zenith[1] or 0,
+				zenith.g or zenith[2] or 0, zenith.b or zenith[3] or 0))
+	end
+	if horizon then
+		skybox_material:SetShaderParameter("SkyHorizon",
+				magic.Vector3(horizon.r or horizon[1] or 0,
+				horizon.g or horizon[2] or 0, horizon.b or horizon[3] or 0))
+	end
+	if cloud_cover then
+		skybox_material:SetShaderParameter("CloudCover", cloud_cover)
+	end
+end
+
+-- How big the sun's square is and what colour, or nothing in the sky at all:
+-- Luanti's set_sun and set_moon, and the moon is the same square when the
+-- sun is under the world. half is the half-width on a plane one unit away,
+-- so 0.075 is the sun this sky was drawn with and 0 is no sun.
+function M.set_sun_look(half, color)
+	if not skybox_material then
+		return
+	end
+	if half then
+		skybox_material:SetShaderParameter("SunHalf", math.max(0, half))
+	end
+	if color then
+		skybox_material:SetShaderParameter("SunColor",
+				magic.Vector3(color.r or color[1] or 0,
+				color.g or color[2] or 0, color.b or color[3] or 0))
+	end
+end
+
+-- A game's own picture of a sun or a moon, drawn over the same square the
+-- painted one fills -- Luanti's set_sun{texture = ...} and set_moon. nil is
+-- the painted square back. The texture is the caller's to compose; what a
+-- Luanti game names is a texture modifier expression, and only the game's
+-- own client half knows how to turn one into a resource.
+function M.set_sun_texture(texture)
+	if not skybox_material then
+		return
+	end
+	if texture then
+		skybox_material:SetTexture(magic.TU_DIFFUSE, texture)
+		skybox_material:SetShaderParameter("SunTextured", 1.0)
+	else
+		skybox_material:SetShaderParameter("SunTextured", 0.0)
+	end
+end
+
+-- The stars: how many (as the share of the sky's cells that have one, so 0
+-- is none and 0.1 is a thick night sky), what colour, and how big each is.
+-- Nothing here knows about the hour -- a game fades them in as its night
+-- comes, because only the game knows when that is.
+function M.set_star_look(density, color, size)
+	if not skybox_material then
+		return
+	end
+	if density then
+		skybox_material:SetShaderParameter("StarDensity",
+				math.max(0, math.min(1, density)))
+	end
+	if color then
+		skybox_material:SetShaderParameter("StarColor",
+				magic.Vector3(color.r or color[1] or 0,
+				color.g or color[2] or 0, color.b or color[3] or 0))
+	end
+	if size then
+		skybox_material:SetShaderParameter("StarSize", math.max(0.001, size))
+	end
+end
+
+-- How much light is on the clouds: one is the daylight this sky was drawn
+-- with, and a game that has a night dims them as it comes. Without it a
+-- night sky has white clouds in it.
+function M.set_cloud_light(k)
+	if not skybox_material or not k then
+		return
+	end
+	skybox_material:SetShaderParameter("CloudLight", math.max(0, k))
+end
+
+function M.set_sun_direction(dir)
+	if not skybox_material then
+		return
+	end
+	skybox_material:SetShaderParameter("SunDirection",
+			magic.Vector3(-dir.x, -dir.y, -dir.z))
 end
 
 function M.set_camera(new_camera_node)
