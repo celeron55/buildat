@@ -55,21 +55,27 @@ int PseudoRandom::range(int min, int max)
 
 
 //noise poly:  p(n) = 60493n^3 + 19990303n + 137612589
+// The hash is unsigned because it is meant to overflow: signed overflow is
+// undefined, and an optimiser that takes it at its word gives back values
+// outside -1...1, which is a mapgen's terrain biased upwards by an octave.
+// Luanti's own does the same arithmetic in unsigned and casts to signed for
+// the division, so this stays the same noise as the one a Luanti world was
+// generated with.
 float noise2d(int x, int y, int seed) {
-	int n = (NOISE_MAGIC_X * x + NOISE_MAGIC_Y * y
+	unsigned int n = (NOISE_MAGIC_X * x + NOISE_MAGIC_Y * y
 			+ NOISE_MAGIC_SEED * seed) & 0x7fffffff;
 	n = (n >> 13) ^ n;
 	n = (n * (n * n * 60493 + 19990303) + 1376312589) & 0x7fffffff;
-	return 1.f - (float)n / 0x40000000;
+	return 1.f - (float)(int)n / 0x40000000;
 }
 
 
 float noise3d(int x, int y, int z, int seed) {
-	int n = (NOISE_MAGIC_X * x + NOISE_MAGIC_Y * y + NOISE_MAGIC_Z * z
+	unsigned int n = (NOISE_MAGIC_X * x + NOISE_MAGIC_Y * y + NOISE_MAGIC_Z * z
 			+ NOISE_MAGIC_SEED * seed) & 0x7fffffff;
 	n = (n >> 13) ^ n;
 	n = (n * (n * n * 60493 + 19990303) + 1376312589) & 0x7fffffff;
-	return 1.f - (float)n / 0x40000000;
+	return 1.f - (float)(int)n / 0x40000000;
 }
 
 

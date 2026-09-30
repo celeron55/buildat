@@ -18,6 +18,20 @@ namespace boot
 	struct BasicInitScope
 	{
 		BasicInitScope(){
+#ifdef _WIN32
+			// A GUI executable started from a shell prints there: the
+			// shell's console attached and the two streams reopened onto
+			// it. Started by a click there is none, and nothing opens one
+			// -- the log is the output ([WIN8_START] 19).
+			// Only when nothing was redirected: a stdout already a file
+			// (a harness's) stays that file
+			if(!GetConsoleWindow() &&
+					GetStdHandle(STD_OUTPUT_HANDLE) == NULL &&
+					AttachConsole(ATTACH_PARENT_PROCESS)){
+				freopen("CONOUT$", "w", stdout);
+				freopen("CONOUT$", "w", stderr);
+			}
+#endif
 			signal_handler_init();
 
 			// Force '.' as decimal point
@@ -25,8 +39,12 @@ namespace boot
 				std::locale::global(std::locale(std::locale(""), "C",
 						std::locale::numeric));
 			} catch(std::runtime_error &e){
-				// Can happen on Wine
+				// mingw's std::locale("") throws on every Windows, and the
+				// line was noise in front of a real fault's ([WIN8_START]);
+				// setlocale() below is what the number formatting needs
+#ifndef _WIN32
 				fprintf(stderr, "Failed to set numeric C++ locale\n");
+#endif
 			}
 			setlocale(LC_NUMERIC, "C");
 

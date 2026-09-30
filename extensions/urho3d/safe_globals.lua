@@ -365,6 +365,15 @@ return {
 	"MAX_VAR_TYPES",
 
 	-- VertexElement
+	-- What a vertex buffer's elements are, as the mask SetSize takes
+	-- ([URHO_SWEEP]): a game building its own mesh says which of these
+	-- its vertices carry
+	"MASK_POSITION",
+	"MASK_NORMAL",
+	"MASK_COLOR",
+	"MASK_TEXCOORD1",
+	"MASK_TEXCOORD2",
+	"MASK_TANGENT",
 	"ELEMENT_POSITION",
 	"ELEMENT_NORMAL",
 	"ELEMENT_COLOR",
@@ -868,6 +877,12 @@ return {
     "SHADOWQUALITY_PCF_24BIT",
     "SHADOWQUALITY_VSM",
     "SHADOWQUALITY_BLUR_VSM",
+    -- What a Constraint joins two bodies with ([URHO_SWEEP]'s Physics
+    -- batch, 2026-09-25)
+    "CONSTRAINT_POINT",
+    "CONSTRAINT_HINGE",
+    "CONSTRAINT_SLIDER",
+    "CONSTRAINT_CONETWIST",
     "VO_DISABLE_OCCLUSION",
     "VO_DISABLE_SHADOWS",
     "VO_LOW_MATERIAL_QUALITY",
