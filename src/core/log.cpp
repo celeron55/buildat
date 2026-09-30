@@ -7,11 +7,20 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <deque>
+#include <string>
+#include <cstdlib>
 #include <ctime>
 #include <cstring>
 #include <cstdarg>
 #ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+#ifdef _WIN32
 	#include "ports/windows_compat.h"
+	#include "ports/windows_minimal.h"
 #else
 	#include <pthread.h>
 #endif
@@ -39,9 +48,26 @@ static std::atomic_int current_level(0);
 static std::atomic_int max_level(CORE_INFO);
 
 static FILE *file = NULL;
+// The log's path and how much has gone into it, for the cap below: at
+// LOG_CAP_BYTES the file is moved to <path>_1 and started again, so a
+// forgotten -l 5 cannot fill a tmpfs (the verbose server log reached
+// 1.5 GB in eight minutes; [TMP_HYGIENE])
+static char log_path_kept[4096] = "";
+static std::atomic<long long> log_written(0);
+static long long LOG_CAP_BYTES = 512LL * 1024 * 1024; // BUILDAT_LOG_CAP_BYTES
+// The file beside stderr rather than instead of it: the default log
+// ([WIN8_START]), where the terminal and a harness reading the stream
+// keep what they had
+static bool tee = false;
 
 void log_init()
 {
+	// A line at a time to stderr: unbuffered, a long message goes out in
+	// pieces and another writer to the same stream (Urho3D's own log) lands
+	// in the middle of a line, which a reader parsing the log then trips
+	// on -- the driven run's scan block, 2026-09-22
+	static char stderr_buf[8192];
+	setvbuf(stderr, stderr_buf, _IOLBF, sizeof stderr_buf);
 }
 
 void log_set_max_level(int level)
@@ -54,13 +80,41 @@ int log_get_max_level()
 	return max_level;
 }
 
-void log_set_file(const char *path)
+void log_set_file(const char *path, bool tee_)
 {
 	log_mutex.lock();
-	file = fopen(path, "a");
-	if(file)
+#ifdef _WIN32
+	// Nothing to tee to: a GUI client started by a click has no stderr
+	// at all, and nothing here opens a console -- the file is the
+	// output. A redirected stderr (the smoke's file) and an attached
+	// shell console are handles, and keep the tee ([WIN8_START] 19).
+	{
+		HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+		if(tee_ && (err == NULL || err == INVALID_HANDLE_VALUE))
+			tee_ = false;
+	}
+#endif
+	// Binary, so that a Windows log is the same bytes as a Linux one: in
+	// text mode msvcrt writes \r\n and a reader of the file sees a \r on
+	// every line ([WIN8_START] 12)
+	file = fopen(path, "ab");
+	tee = tee_;
+	if(file){
+		snprintf(log_path_kept, sizeof log_path_kept, "%s", path);
+		if(getenv("BUILDAT_LOG_CAP_BYTES"))
+			LOG_CAP_BYTES = atoll(getenv("BUILDAT_LOG_CAP_BYTES"));
+		long pos = ftell(file);
+		log_written = pos > 0 ? pos : 0;
 		fprintf(stderr, "Opened log file \"%s\"\n", path);
-	else
+		// And stderr into the same file: a crash's backtrace is written
+		// there by the signal handler, and a local server a client
+		// started has no terminal for it to land on ([START_PROGRESS]).
+		// Not when teeing: the stream stays what it was.
+		if(!tee){
+			fflush(stderr);
+			dup2(fileno(file), 2);
+		}
+	} else
 		log_w("__log", "Failed to open log file \"%s\"", path);
 	log_mutex.unlock();
 }
@@ -86,7 +140,8 @@ void log_nl_nolock()
 		if(file){
 			fprintf(file, "\n");
 			fflush(file);
-		} else {
+		}
+		if(!file || tee){
 			fprintf(stderr, "\n");
 			if(use_colors)
 				fprintf(stderr, "\033[0m");
@@ -107,7 +162,7 @@ void log_nl()
 
 static void print(int level, const char *sys, const char *fmt, va_list va_args)
 {
-	if(use_colors && !file &&
+	if(use_colors && (!file || tee) &&
 			(level != current_level || line_begin) && level <= max_level){
 		if(level == CORE_FATAL)
 			fprintf(stderr, "\033[0m\033[0;1;41m"); // reset, bright red bg
@@ -148,13 +203,37 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 		const char *levelcs = "FEWIVDT";
 		if(file)
 			fprintf(file, "%s %c %s: ", timestr, levelcs[level], sysstr);
-		else
+		if(!file || tee)
 			fprintf(stderr, "%s %c %s: ", timestr, levelcs[level], sysstr);
 		line_begin = false;
 	}
-	if(file)
-		vfprintf(file, fmt, va_args);
-	else
+	if(file){
+		va_list copy;
+		va_copy(copy, va_args);
+		int n = vfprintf(file, fmt, copy);
+		va_end(copy);
+		if(n > 0 && (log_written += n) >= LOG_CAP_BYTES && log_path_kept[0]){
+			// Rotated: the file so far to _1 (the one before it gone), and
+			// this one opened again empty
+			fflush(file);
+			fclose(file);
+			char rotated[4200];
+			snprintf(rotated, sizeof rotated, "%s_1", log_path_kept);
+			remove(rotated);
+			rename(log_path_kept, rotated);
+			file = fopen(log_path_kept, "ab");
+			log_written = 0;
+			if(file){
+				if(!tee){
+					fflush(stderr);
+					dup2(fileno(file), 2);
+				}
+				fprintf(file, "log rotated at %lld bytes; the rest is in %s\n",
+						LOG_CAP_BYTES, rotated);
+			}
+		}
+	}
+	if(!file || tee)
 		vfprintf(stderr, fmt, va_args);
 }
 
@@ -165,11 +244,51 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 	FILE *f = file;
 	if(f == NULL)
 		f = stderr;
-	if(use_colors && !file)
+	if(use_colors && (!file || tee))
 		fprintf(f, "\033[0m"); // reset
 	vfprintf(f, fmt, va_args);
 	fprintf(f, "\n");
 }*/
+
+// The last lines, kept for a command sequence's wait_log ([START_WAIT]):
+// a scripted client's output is a pipe it cannot read back, so what it
+// waits for is remembered here. A few hundred, formatted without the
+// time and the system; a wait says how many had gone by when it began.
+static const size_t RECENT_MAX = 400;
+static std::deque<std::string> recent_lines;
+static long long recent_count = 0;
+
+static void remember_line(const char *fmt, va_list va_args)
+{
+	char buf[1024];
+	va_list copy;
+	va_copy(copy, va_args);
+	vsnprintf(buf, sizeof buf, fmt, copy);
+	va_end(copy);
+	recent_lines.push_back(buf);
+	if(recent_lines.size() > RECENT_MAX)
+		recent_lines.pop_front();
+	recent_count++;
+}
+
+long long log_line_count()
+{
+	interface::MutexScope ms(log_mutex);
+	return recent_count;
+}
+
+bool log_lines_since_contain(long long since, const char *text)
+{
+	interface::MutexScope ms(log_mutex);
+	long long first = recent_count - (long long)recent_lines.size();
+	size_t i = 0;
+	for(const std::string &line : recent_lines){
+		if(first + (long long)i >= since && line.find(text) != std::string::npos)
+			return true;
+		i++;
+	}
+	return false;
+}
 
 void log_(int level, const char *sys, const char *fmt, ...)
 {
@@ -181,6 +300,9 @@ void log_(int level, const char *sys, const char *fmt, ...)
 	va_start(va_args, fmt);
 	print(level, sys, fmt, va_args);
 	log_nl_nolock();
+	va_end(va_args);
+	va_start(va_args, fmt);
+	remember_line(fmt, va_args);
 	va_end(va_args);
 }
 
