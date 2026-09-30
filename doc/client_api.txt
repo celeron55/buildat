@@ -84,6 +84,13 @@ buildat.get_sound() -> mute, db; buildat.set_sound(mute, db) -> ok, err
   step 3 dB down to -30, and -33 or less is off. The gain is made from it in
   the client, in the one place it is applied.
 
+buildat.get_render_scale() -> share; buildat.set_render_scale(share) -> ok, err
+- The other preference a game may write: render_scale (see "Engine
+  settings"), from a game's own settings, since the web client has no
+  launcher to reach Engine settings through. The frame's cost, not its look.
+- The web client's default is 0.5 on a screen over 3000 device pixels on a
+  side, 1 otherwise.
+
 buildat.take_screenshot() -> file name, or nil and why not
 - Into <user>/screenshots, named by the date and time. The caller says when
   and nothing else: no path, no reading back, no overwrite. The file lands at

@@ -844,6 +844,21 @@ buildat.safe.set_sound = function(mute, db)
 	end
 	return __buildat_set_preference("sound_volume_db", tostring(db))
 end
+-- **The render scale, the other preference a game may set** (user,
+-- 2026-09-30): the web client has no launcher to reach Engine settings
+-- through, so a game's own settings carry it. What the game gets to set
+-- is how much its frame costs, never what is in it.
+-- get_render_scale() -> share; set_render_scale(share) -> true, or false
+-- and why
+buildat.safe.get_render_scale = function()
+	return __buildat_get_preference("render_scale") or 1
+end
+buildat.safe.set_render_scale = function(v)
+	if type(v) ~= "number" then
+		return false, "set_render_scale(share): a number"
+	end
+	return __buildat_set_preference("render_scale", tostring(v))
+end
 -- The bytes of a file the server served, or nil ([BLOCKED_MODULE]): a
 -- module that is busy answers no packet, and client_file is a module of its
 -- own, so a table served as a file reaches the client anyway. The sandbox

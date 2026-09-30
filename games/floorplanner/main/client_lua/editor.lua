@@ -4991,6 +4991,21 @@ do
 			end
 			client_settings_page()
 		end)
+		-- The engine's render_scale: the 3D drawn at a share of the
+		-- window's pixels, the UI sharp; the web has no launcher to set it
+		-- in. A value not on the list is shown as the nearest one.
+		local scale = buildat.get_render_scale()
+		local scales, near = {}, 1
+		for _, v in ipairs({0.25, 0.33, 0.5, 0.67, 0.75, 1}) do
+			scales[#scales + 1] = {math.floor(v * 100 + 0.5) .. " %", v}
+			if math.abs(v - scale) < math.abs(near - scale) then
+				near = v
+			end
+		end
+		panel.dropdown(w, "Render scale", scales, near, function(v)
+			buildat.set_render_scale(v)
+			client_settings_page()
+		end)
 		-- How the 3D view and walking are lit ([FP_DAYLIGHT])
 		panel.dropdown(w, "3D lighting", {{"PBR: the plan's sun and sky", "pbr"},
 				{"Unlit: plain, and lighter", "unlit"}}, S.lighting, function(v)

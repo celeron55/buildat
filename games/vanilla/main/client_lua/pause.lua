@@ -170,6 +170,26 @@ open = function()
 		cycle_sound()
 		s:GetChild(0):SetText(sound_text())
 	end)
+	-- The engine's render_scale: the 3D drawn at a share of the window's
+	-- pixels, the UI sharp. Each press the next step down, round to full
+	-- again; the web has no launcher to set it in.
+	local SCALES = {1, 0.75, 0.67, 0.5, 0.33, 0.25}
+	local function scale_text()
+		return string.format("Render scale: %d %%",
+				math.floor(buildat.get_render_scale() * 100 + 0.5))
+	end
+	local rs
+	rs = accounts.page_button(w, scale_text(), function()
+		local now, nxt = buildat.get_render_scale(), SCALES[1]
+		for _, v in ipairs(SCALES) do
+			if v < now - 0.001 then
+				nxt = v
+				break
+			end
+		end
+		buildat.set_render_scale(nxt)
+		rs:GetChild(0):SetText(scale_text())
+	end)
 	-- **The viewing range, the player's own** (user, 2026-09-30), kept on
 	-- this client for this server: each press the next step, round to the
 	-- nearest again, never over what the server allows (keys.view in

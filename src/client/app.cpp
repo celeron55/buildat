@@ -660,6 +660,17 @@ static void save_preferences(const app::Options &opt)
 
 static void resolve_preferences(app::Options *opt)
 {
+#ifdef __EMSCRIPTEN__
+	// **The web's render scale default** (user, 2026-09-30): a browser is
+	// not a performance setup, so a screen of over 3000 device pixels on a
+	// side (4K) draws the 3D at half; a saved choice or -o still wins
+	const double screen_px = EM_ASM_DOUBLE({
+		return Math.max(screen.width, screen.height) *
+				(window.devicePixelRatio || 1);
+	});
+	if(screen_px > 3000)
+		opt->graphics.render_scale = 0.5f;
+#endif
 	int desk_w = 0;
 	int desk_h = 0;
 	if(!desktop_size(&desk_w, &desk_h)){
