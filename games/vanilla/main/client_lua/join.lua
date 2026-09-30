@@ -34,5 +34,10 @@ end)
 -- The world is here; the world menu, when it loads, takes this over
 buildat.sub_packet("main:menu_done", close_wait)
 
-accounts.start({title = "Luanti on Buildat"})
+-- The title is the Luanti game the server runs, which the server says
+-- right after starting this script
+buildat.sub_packet("main:join_title", function(data)
+	local title = cereal.binary_input(data, {"array", "string"})[1] or ""
+	accounts.start({title = title ~= "" and title or "Luanti"})
+end)
 -- vim: set noet ts=4 sw=4:

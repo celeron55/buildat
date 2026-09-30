@@ -783,9 +783,25 @@ struct Module: public interface::Module
 		// what it is shown after is on_accounts_login's
 		if(m_public && !m_names.count(event.recipient)){
 			if(m_join_sent.insert(event.recipient).second){
+				// The join's title is the Luanti game running, which the
+				// script waits for; "" before an admin has chosen a world
+				ss_ title;
+				if(!m_world_name.empty()){
+					const ss_ gameid = gameid_of_save(m_world_name);
+					const ss_ game_path = find_game(gameid);
+					title = game_path.empty() ? gameid :
+							read_game_title(game_path);
+				}
+				std::ostringstream os(std::ios::binary);
+				{
+					cereal::PortableBinaryOutputArchive ar(os);
+					ar(sv_<ss_>{title});
+				}
 				network::access(m_server, [&](network::Interface *inetwork){
 					inetwork->send(event.recipient, "core:run_script",
 							"buildat.run_script_file(\"main/join.lua\")");
+					inetwork->send(event.recipient, "main:join_title",
+							os.str());
 				});
 			}
 			return;
