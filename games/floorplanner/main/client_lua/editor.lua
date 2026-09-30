@@ -2291,6 +2291,71 @@ local function snapped_point(from, except)
 	return geom.snap(x, grid_step()), geom.snap(z, grid_step()), {}
 end
 
+-- **A dragged node straightens its walls** (user): for each wall joined to
+-- it, lines out of the wall's other end at every multiple of the angle
+-- step (90 degrees when the angle is free). The pointer within a degree of
+-- one -- or within the snap radius of it, which a short wall needs -- puts
+-- the node on it, the wall's length snapped to the grid; near two walls'
+-- lines, where they cross, both straight. Before the grid and after nodes
+-- and edges; Ctrl gives it up. `ends`: the other ends, {{x, z}, ...}.
+-- Returns x, z and the lines it used ({p = {x, z}, ux, uz}), or nil.
+function M.angle_snap(x, z, ends)
+	if S.ctrl or #ends == 0 then
+		return nil
+	end
+	local step = ANGLE_STEPS[S.angle] or 90
+	local r = snap_radius()
+	local g = grid_step()
+	local tol = math.tan(math.rad(1))
+	local cands = {}
+	for _, p in ipairs(ends) do
+		local dx, dz = x - p[1], z - p[2]
+		local l = geom.len(dx, dz)
+		if l > 1 then
+			local a = math.rad(math.floor(math.deg(math.atan2(dz, dx)) / step + 0.5) *
+					step)
+			local ux, uz = math.cos(a), math.sin(a)
+			local t = dx * ux + dz * uz
+			local perp = math.abs(dx * uz - dz * ux)
+			local cap = math.max(t * tol, r)
+			if t > 0 and perp <= cap then
+				cands[#cands + 1] = {p = p, ux = ux, uz = uz, t = t, perp = perp,
+						cap = cap}
+			end
+		end
+	end
+	if #cands == 0 then
+		return nil
+	end
+	-- Two lines of different walls: where they cross, the nearest crossing
+	-- the pointer is in both captures of
+	local best, bd = nil, math.huge
+	for i = 1, #cands do
+		for j = i + 1, #cands do
+			local a, b = cands[i], cands[j]
+			local den = a.ux * b.uz - a.uz * b.ux
+			if (a.p[1] ~= b.p[1] or a.p[2] ~= b.p[2]) and math.abs(den) > 1e-6 then
+				local s = ((b.p[1] - a.p[1]) * b.uz - (b.p[2] - a.p[2]) * b.ux) / den
+				local cx, cz = a.p[1] + a.ux * s, a.p[2] + a.uz * s
+				local d = geom.len(cx - x, cz - z)
+				if s > 0 and d <= math.min(a.cap, b.cap) and d < bd then
+					best, bd = {cx, cz, a, b}, d
+				end
+			end
+		end
+	end
+	if best then
+		return math.floor(best[1] + 0.5), math.floor(best[2] + 0.5),
+				{best[3], best[4]}
+	end
+	-- One line: on it, at a length of whole grid steps
+	table.sort(cands, function(a, b) return a.perp < b.perp end)
+	local c = cands[1]
+	local t = math.max(g, geom.snap(c.t, g))
+	return math.floor(c.p[1] + c.ux * t + 0.5), math.floor(c.p[2] + c.uz * t + 0.5),
+			{c}
+end
+
 -- The gaps from an instance's footprint to the nearest wall face along its
 -- own four axes: {{dir = {ux, uz}, half = mm, gap = mm}, ...}; gap is nil
 -- where no wall is that way
@@ -3360,6 +3425,15 @@ local function build_props()
 			n = n + 1
 		end
 		panel.label(props, n .. " nodes selected")
+		-- One node's place, to be read off another and typed in (user)
+		if n == 1 then
+			local id = next(S.nodes)
+			local ne = doc.ents[id]
+			if ne then
+				int_field(id, "X mm", "x", ne.ints.x)
+				int_field(id, "Z mm", "z", ne.ints.z)
+			end
+		end
 		panel.label(props, "Drag one to move them all;")
 		panel.label(props, "drop one on another to merge")
 		if n > 0 then
@@ -4848,6 +4922,24 @@ do
 		end
 		if d.kind == "node" then
 			local x, z, ref = snapped_point(nil, {[d.id] = true})
+			d.angle_lines = nil
+			-- Off nodes and edges, the walls' angles before the grid
+			if x and not ref.node and not ref.edge then
+				local ends = {}
+				for _, w in pairs(wall_data) do
+					local other = w.a_node == d.id and w.b_node or
+							w.b_node == d.id and w.a_node or nil
+					if other and other ~= d.id then
+						local ox, oz = node_pos(other)
+						ends[#ends + 1] = {ox, oz}
+					end
+				end
+				local cx, cz = cursor_floor()
+				local ax, az, lines = M.angle_snap(cx, cz, ends)
+				if ax then
+					x, z, d.angle_lines = ax, az, lines
+				end
+			end
 			if x then
 				d.x, d.z, d.onto = x, z, ref.node
 			end
@@ -6797,6 +6889,18 @@ local function draw_overlay()
 				line(ax, az, bx, bz, magic.Color(0.2, 0.6, 1.0))
 				world_label((ax + bx) / 2, 0, (az + bz) / 2, mm_text(g.gap))
 			end
+		end
+	end
+	-- The lines a dragged node was straightened onto (M.angle_snap), each
+	-- wall's angle and length on it
+	if S.drag and S.drag.kind == "node" and S.drag.angle_lines and S.drag.x then
+		local d = S.drag
+		for _, c in ipairs(d.angle_lines) do
+			dashed({{c.p[1], c.p[2]}, {d.x, d.z}}, magic.Color(1.0, 0.55, 0.1))
+			local a = math.deg(math.atan2(d.z - c.p[2], d.x - c.p[1]))
+			world_label((c.p[1] + d.x) / 2, 0, (c.p[2] + d.z) / 2,
+					string.format("%d deg, ", math.floor((a % 360) + 0.5) % 360) ..
+					mm_text(geom.len(d.x - c.p[1], d.z - c.p[2])))
 		end
 	end
 	-- **A door, window or opening moved along its wall** (user): what is
