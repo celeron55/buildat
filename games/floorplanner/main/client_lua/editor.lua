@@ -4121,12 +4121,11 @@ do
 		return pause_win
 	end
 
-	local function settings_page()
-		local w = dialog("Settings")
-		-- **This plan's**, everyone's in it (user: out of the properties
-		-- panel, which is for the selection and the tools), then this
-		-- computer's own. A viewer gets the export.
-		panel.label(w, "This plan", magic.Color(1.0, 0.85, 0.3))
+	-- **The plan's settings**, everyone's in it (user: out of the
+	-- properties panel, which is for the selection and the tools, and a
+	-- page of their own). A viewer gets the export.
+	local function plan_settings_page()
+		local w = dialog("Plan settings")
 		local st = settings()
 		local sid = doc.settings().id
 		local edit = doc.can("edit")
@@ -4151,7 +4150,7 @@ do
 			panel.button(w, st.sun == 1 and "Sun: on" or "Sun: off", function()
 				send({{op = "set", ent = {id = sid, ints = {sun = 1 - st.sun}}}})
 				st.sun = 1 - st.sun
-				settings_page()
+				plan_settings_page()
 			end)
 			if st.sun == 1 then
 				plan_int("Sun from deg", "sun_yaw")
@@ -4170,7 +4169,7 @@ do
 					panel.button(w, "Unlock " .. im.strs.file, function()
 						send({{op = "set", ent = {id = im.id,
 								ints = {locked = 0}}}})
-						settings_page()
+						plan_settings_page()
 					end)
 				end
 			end
@@ -4184,7 +4183,12 @@ do
 			close_pause()
 			S.exporting = {frame = 0}
 		end)
-		panel.label(w, "This computer", magic.Color(1.0, 0.85, 0.3))
+		panel.button(w, "Back", function() open_pause() end)
+	end
+
+	-- **This client's own settings**, kept here and nobody else's
+	local function client_settings_page()
+		local w = dialog("Client settings")
 		local ab
 		ab = panel.button(w, M.angle_text(), function()
 			S.angle = S.angle % #ANGLE_STEPS + 1
@@ -4201,19 +4205,19 @@ do
 			else
 				buildat.set_sound(true, 0)
 			end
-			settings_page()
+			client_settings_page()
 		end)
 		panel.button(w, S.plan_look and "The plan: flat colours (L)" or
 				"The plan: the materials (L)", function()
 			S.plan_look = not S.plan_look
 			set_view(S.view)
-			settings_page()
+			client_settings_page()
 		end)
 		panel.button(w, S.show_ids and "Material ids: shown" or
 				"Material ids: hidden", function()
 			S.show_ids = not S.show_ids
 			S.dirty = true
-			settings_page()
+			client_settings_page()
 		end)
 		panel.field(w, "Eye mm", S.eye, function(t)
 			local v = tonumber(t)
@@ -4339,7 +4343,8 @@ do
 		panel.label(w, "Plan: " .. (doc.plan_name or "?"),
 				magic.Color(1.0, 0.85, 0.3))
 		panel.button(w, "Continue (Esc)", function() close_pause() end)
-		panel.button(w, "Settings", settings_page)
+		panel.button(w, "Plan settings...", plan_settings_page)
+		panel.button(w, "Client settings...", client_settings_page)
 		panel.button(w, "Chat...", function()
 			account_page(doc.accounts.chat_page)
 		end)
