@@ -2969,6 +2969,18 @@ local function next_grid()
 		end
 	end
 	send({{op = "set", ent = {id = doc.settings().id, ints = {grid = n}}}})
+	return n
+end
+
+-- The grid and the angle steps as the settings page says them (user: out
+-- of the toolbar and into Settings, with their keys); on M, since this
+-- file is at Lua's 200 locals
+function M.grid_text(g)
+	return "Grid: " .. (g < 10 and g .. " mm" or (g / 10) .. " cm") .. " (G)"
+end
+function M.angle_text()
+	local a = ANGLE_STEPS[S.angle]
+	return "Angle: " .. (a and a .. " deg" or "free") .. " (H)"
 end
 
 --
@@ -3093,15 +3105,6 @@ local function build_toolbar()
 			{"hosted", "Door/window"}, {"voxel", "Voxels"}, {"paint", "Material"}}) do
 		add(t[2], TOOL_KEYS[t[1]], function() set_tool(t[1]) end, S.tool == t[1])
 	end
-	local g = grid_step()
-	add("Grid " .. (g < 10 and g .. " mm" or (g / 10) .. " cm"), "G", function()
-		next_grid()
-	end)
-	local a = ANGLE_STEPS[S.angle]
-	add("Angle " .. (a and a .. " deg" or "free"), "H", function()
-		S.angle = S.angle % #ANGLE_STEPS + 1
-		refresh_panels()
-	end)
 	-- The panels folded away on a narrow screen, opened here
 	if panel.narrow() then
 		for _, p in ipairs({{"palette", "Palette"}, {"props", "Properties"}}) do
@@ -4152,6 +4155,17 @@ do
 
 	local function settings_page()
 		local w = dialog("Settings")
+		-- The plan's grid, which is everyone's in it; the button says what
+		-- was just asked for, before the plan comes back with it
+		local gb
+		gb = panel.button(w, M.grid_text(grid_step()), function()
+			gb:GetChild(0):SetText(M.grid_text(next_grid()))
+		end)
+		local ab
+		ab = panel.button(w, M.angle_text(), function()
+			S.angle = S.angle % #ANGLE_STEPS + 1
+			ab:GetChild(0):SetText(M.angle_text())
+		end)
 		local mute, db = buildat.get_sound()
 		panel.button(w, mute and "Sound: muted" or (db <= -33 and "Sound: off" or
 				string.format("Sound: %d dB", db)), function()
