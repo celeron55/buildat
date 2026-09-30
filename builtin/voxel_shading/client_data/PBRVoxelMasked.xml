@@ -1,0 +1,21 @@
+<!-- PBRVoxel for the faces the mesher put on the chunk's "masked" child: the
+     voxels a game called alpha masked -- leaves, a plant, a ladder, anything
+     whose picture has holes in it. The same shader as PBRVoxel.xml and the
+     same passes; what ALPHAMASK adds is that a texel the texture leaves
+     transparent is not drawn at all instead of being drawn in whatever
+     colour is under the alpha, which is usually black.
+
+     The shadow pass needs the define as well, or a leaf casts the shadow of
+     a solid cube. The depth pass does not have it, which follows
+     extensions/luanti_client's own technique: nothing in the forward path
+     these worlds render with uses that pass.
+
+     simplified: no VOXELMODIFIERS variant, the same gap PBRVoxelAlpha.xml
+     has and for the same reason -- nothing binds both yet. -->
+<technique vs="voxel_shading/PBRVoxel" ps="voxel_shading/PBRVoxel"
+        psdefines="DIFFMAP ALPHAMASK PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY">
+    <pass name="base" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" psdefines="ALPHAMASK" />
+</technique>
