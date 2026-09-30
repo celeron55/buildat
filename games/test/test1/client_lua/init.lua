@@ -45,7 +45,7 @@ camera_node.position = magic.Vector3(7.0, 7.0, 7.0)
 camera_node:LookAt(magic.Vector3(0, 1, 0))
 -- And this thing so the camera is shown on the screen
 local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
-magic.renderer:SetViewport(0, viewport)
+magic.set_preferred_viewports({viewport})
 
 -- Add some text
 local title_text = magic.ui.root:CreateChild("Text")
@@ -196,7 +196,7 @@ function handle_keydown(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	if key == magic.KEY_ESCAPE then
 		log:info("KEY_ESCAPE pressed")
-		buildat.disconnect()
+		buildat.leave()
 	end
 end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")
