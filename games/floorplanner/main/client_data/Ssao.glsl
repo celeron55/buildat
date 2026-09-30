@@ -60,7 +60,15 @@ void PS()
         return;
     }
     vec3 p = vFarRay * d;
-    vec3 n = normalize(texture2D(sNormalBuffer, vScreenPos).rgb * 2.0 - 1.0);
+    // A surface that wrote no normal (the ground's) is taken as open:
+    // normalizing nothing is NaN, which the blur and the bloom spread
+    vec3 nr = texture2D(sNormalBuffer, vScreenPos).rgb * 2.0 - 1.0;
+    float nl = length(nr);
+    if (!(nl > 0.5)) {
+        gl_FragColor = vec4(1.0);
+        return;
+    }
+    vec3 n = nr / nl;
     // The radius in this target's pixels, kept to what the cache bears
     float px_m = max(length(rx) * d, 1e-6);
     float r_px = clamp(cSsaoRadius / px_m, 2.0, 48.0);
@@ -84,6 +92,9 @@ void PS()
         hidden += max(0.0, up - 0.1) * max(0.0, 1.0 - vv / rr);
     }
     float ao = clamp(1.0 - cSsaoStrength * hidden / float(N), 0.0, 1.0);
+    // And whatever else: never anything but a number from 0 to 1
+    if (!(ao >= 0.0))
+        ao = 1.0;
     gl_FragColor = vec4(ao, ao, ao, 1.0);
 #endif
 #ifdef APPLY
@@ -104,6 +115,8 @@ void PS()
         }
     }
     float ao = sum / weight;
+    if (!(ao >= 0.0 && ao <= 1.0))
+        ao = 1.0;
     gl_FragColor = vec4(ao, ao, ao, 1.0);
 #endif
 }
