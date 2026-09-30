@@ -3332,9 +3332,28 @@ local function build_props()
 		local links = instances_of(i.def)
 		panel.label(props, KIND_NAMES[p.kind] .. " " .. sel.id ..
 				(links > 1 and ("   linked x" .. links) or ""))
-		int_field(i.def, "Width mm", "w", p.w)
-		int_field(i.def, "Height mm", "h", p.h)
-		int_field(sel.id, "Sill mm", "sill", i.sill)
+		-- **A window's sizes as its frame's or its glass's** (user): the
+		-- frame's are what is stored, and the glass is inset from it by
+		-- the frame and the sash on each side (build_hosted's FRAME_W
+		-- twice). A double casement's glass is from its one outer edge to
+		-- the other, the sashes' middle stiles over it.
+		local glass = p.kind == KIND.window and p.measure == 1
+		if p.kind == KIND.window then
+			panel.dropdown(props, "Sizes of", {{"the frame", 0}, {"the glass", 1}},
+					p.measure, function(v)
+				set(i.def, {ints = {measure = v}})
+			end)
+		end
+		local inset = glass and 2 * FRAME_W or 0
+		local function sized(id, label, name, value, by)
+			panel.field(props, label, value - by, function(t)
+				local v = num(t)
+				if v then set(id, {ints = {[name] = v + by}}) end
+			end)
+		end
+		sized(i.def, "Width mm", "w", p.w, 2 * inset)
+		sized(i.def, "Height mm", "h", p.h, 2 * inset)
+		sized(sel.id, "Sill mm", "sill", i.sill, -inset)
 		int_field(sel.id, "Along mm", "along", i.along)
 		if p.kind == KIND.switch then
 			panel.label(props, #sel.lists.lamps .. " lamps (E switches them)")
@@ -6684,6 +6703,10 @@ local function draw_overlay()
 			local def = e and doc.ents[e.ints.def]
 			if it and it.hosted and it.frame and def then
 				local f, hw = it.frame, def.ints.w / 2
+				-- From the glass's edges for a window measured by its glass
+				if def.ints.kind == KIND.window and def.ints.measure == 1 then
+					hw = hw - 2 * FRAME_W
+				end
 				for _, span in ipairs({{0, it.along - hw},
 						{it.along + hw, f.len}}) do
 					if span[2] - span[1] > 0 then
