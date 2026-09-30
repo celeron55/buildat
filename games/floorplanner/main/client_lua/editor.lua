@@ -129,7 +129,6 @@ local S = {
 	-- The 3D view without the floors above the current one, to see into it
 	-- from above (user); kept on the client
 	hide_above = buildat.storage_read("hide_above") == "1",
-	export_mmpx = 10, -- the PNG export's scale
 	calib = nil,    -- an image being calibrated: {id, pts, measured}
 	yaw = 35, pitch = 40,
 	looking = false,
@@ -5063,15 +5062,6 @@ do
 			end
 		end
 		panel.view_only = false
-		panel.field(w, "Export mm/px", S.export_mmpx, function(t)
-			local v = tonumber(t)
-			if v and v > 0 then S.export_mmpx = v end
-		end)
-		panel.button(w, "Export the plan view as PNG", function()
-			-- Of the view, not of this dialog over it
-			close_pause()
-			S.exporting = {frame = 0}
-		end)
 		panel.button(w, "Back", function() open_pause() end)
 	end
 
@@ -7919,34 +7909,6 @@ local function send_presence(dt)
 	doc.send_presence(place.presence(p))
 end
 
--- The plan view at S.export_mmpx, without the panels, as a screenshot:
--- one frame to draw it that way, the shot at the end of the next
-local function export_step()
-	local e = S.exporting
-	if not e then
-		return
-	end
-	local _, h = screen_size()
-	if e.frame == 0 then
-		e.view, e.span = S.view, S.span
-		set_view("2d")
-		S.span = S.export_mmpx * h
-		for _, w in ipairs({toolbar, props, palette_win}) do
-			w.visible = false
-		end
-	elseif e.frame == 2 then
-		local name, why = buildat.take_screenshot()
-		doc.notice(name and ("Exported " .. name .. " at " .. S.export_mmpx ..
-				" mm/px") or ("Could not export: " .. tostring(why)))
-	elseif e.frame == 4 then
-		S.span = e.span
-		S.exporting = nil
-		set_view(e.view)
-		return
-	end
-	e.frame = e.frame + 1
-end
-
 -- The plan closed for another ([FP_OTHER_PLAN]): the editor waits, drawing
 -- and showing nothing, until the next plan's snapshot resumes it
 local SCENE_PARTS = {walls_node, caps_node, overhead_node, pieces_node,
@@ -8090,7 +8052,6 @@ function M.update(dt)
 	if S.suspended then
 		return
 	end
-	export_step()
 	M.save_view(dt)
 	cam3d.fov = M.fov_for(S.view == "walk" and S.walk_fov or 60)
 	-- The floors above hidden in 3D, when the layouts menu says so. Deep:
@@ -8134,7 +8095,7 @@ function M.update(dt)
 		hud:SetFixedWidth(magic.ui.root.width - 24)
 		hud:SetPosition(0, -(S.touch_bar and S.touch_bar.height + 20 or 12))
 	end
-	local text = S.exporting and "" or guide_text(S.guide)
+	local text = guide_text(S.guide)
 	if hud.text ~= text then
 		hud:SetText(text)
 	end
