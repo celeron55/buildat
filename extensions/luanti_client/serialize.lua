@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/serialize.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Luanti puts everything on the wire big-endian, strings with a u16 length in
 -- front of them (u32 for the long ones). Arithmetic instead of bit operations,

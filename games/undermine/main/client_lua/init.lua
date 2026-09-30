@@ -10,6 +10,8 @@ local replicate = require("buildat/extension/replicate")
 local ui_utils = require("buildat/extension/ui_utils")
 local uistack = require("buildat/extension/uistack")
 local voxelworld = require("buildat/module/voxelworld")
+-- Nothing here waits for anything before the world may come ([TEXMOD_RACE])
+voxelworld.allow_streaming()
 local voxel_shading = require("buildat/module/voxel_shading")
 
 --local RENDER_DISTANCE = 640
@@ -321,11 +323,12 @@ do
 			PLAYER_HEIGHT * (0.5 - 0.411)
 	)
 	camera.farClip = RENDER_DISTANCE
-	camera.fov = 75
+	-- Of the screen's short side, a portrait one's width
+	magic.keep_fov(camera, 75)
 
 	-- And this thing so the camera is shown on the screen
 	local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
-	magic.renderer:SetViewport(0, viewport)
+	magic.set_preferred_viewports({viewport})
 
 	magic.renderer.HDRRendering = true
 	local rp = viewport.renderPath:Clone()
@@ -641,7 +644,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	end
 	if key == magic.KEY_ESCAPE then
 		log:info("KEY_ESCAPE pressed")
-		buildat.disconnect()
+		buildat.leave()
 	end
 	if key == magic.KEY_B then
 		open_structure_menu()
