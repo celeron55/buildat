@@ -707,6 +707,9 @@ local function palette_texture()
 	texture.filterMode = magic.FILTER_NEAREST
 	M.kept[#M.kept + 1] = texture
 	M.kept[#M.kept + 1] = image
+	-- The one that is on the materials, for a new GL context to be given
+	-- again (the ScreenMode handler below)
+	M.palette_upload = {texture = texture, image = image}
 	for _, m in ipairs({lit_material, glass_material, preview_material}) do
 		m:SetTexture(magic.TU_DIFFUSE, texture)
 		m:SetShaderParameter("PaletteRows", n)
@@ -757,6 +760,19 @@ local function kind_previews()
 	M.previews = {scene = scene, texture = texture}
 	return texture
 end
+
+-- **A new GL context** (user: F11 on native lost every material): what is
+-- written from Lua and not loaded from a file is not brought back by Urho,
+-- so the palette's pixels go back on and the types' previews are drawn
+-- again when next asked for. extensions/launch_world's handler is the model.
+magic.SubscribeToEvent("ScreenMode", function()
+	local pu = M.palette_upload
+	if pu then
+		pu.texture:SetData(pu.image)
+	end
+	M.previews = nil
+	log:info("screen mode changed: the palette texture goes back on")
+end)
 
 -- The walls with their ends looked up, their outlines, the rooms with
 -- their corners counter-clockwise, and the instances placed; rebuild()
