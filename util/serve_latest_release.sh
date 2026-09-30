@@ -4,12 +4,13 @@
 # terminal (a GNU screen): it stays in the foreground, the server's output
 # is its own, and Ctrl+C stops both.
 #
-#   util/serve_latest_release.sh <game> <port> [server options...]
-#   util/serve_latest_release.sh floorplanner 29500 -T 127.0.0.1
+#   util/serve_latest_release.sh <game> <port> <user dir> [server options...]
+#   util/serve_latest_release.sh floorplanner 29500 ~/buildat-user -T 127.0.0.1
 #
-# Everything is under BUILDAT_SERVE_DIR (default ~/buildat-serve):
+# The user directory holds the saves and accounts. Every version uses it
+# (-D), and it can be one a server used before. The rest is under
+# BUILDAT_SERVE_DIR (default ~/buildat-serve):
 #   versions/<archive>/  each release, unpacked
-#   user/                the saves and accounts, every version's (-D), kept
 #   current              the version running
 #   server.log           the server's output, also on the terminal
 # A new release is downloaded and unpacked, the running server is stopped
@@ -19,7 +20,7 @@
 # **A rollback** is by hand, with this script stopped: run the version
 # before from its directory,
 #   cd ~/buildat-serve/versions/<the one before>
-#   bin/buildat_server -m games/<game> -P <port> -D ~/buildat-serve/user
+#   bin/buildat_server -m games/<game> -P <port> -D <user dir>
 # Started again, this script goes back to the newest release. A game whose
 # saves carry a schema version (the floorplanner) refuses a save that a
 # newer version wrote.
@@ -29,13 +30,15 @@
 # Needs bash, curl and tar.
 set -u
 
-if [ $# -lt 2 ]; then
-	sed -n '5,7p' "$0" | sed 's/^# \?//' >&2
+if [ $# -lt 3 ]; then
+	grep '^#   util/' "$0" | sed 's/^# *//' >&2
 	exit 2
 fi
 game=$1
 port=$2
-shift 2
+mkdir -p "$3" || exit 1
+user_dir=$(cd "$3" && pwd)
+shift 3
 server_args=("$@")
 
 base=${BUILDAT_SERVE_DIR:-$HOME/buildat-serve}
@@ -43,7 +46,7 @@ poll=${POLL_SECONDS:-300}
 repo=${GITHUB_REPO:-celeron55/buildat}
 asset_re='linux-x86_64-web-precompiled\.tar\.gz'
 
-mkdir -p "$base/versions" "$base/user"
+mkdir -p "$base/versions"
 cd "$base" || exit 1
 
 say(){ echo "[serve $(date '+%F %T')] $*"; }
@@ -122,10 +125,10 @@ start(){
 		say "$current has no games/$game"
 		return 1
 	fi
-	say "starting $current: games/$game on port $port"
+	say "starting $current: games/$game on port $port, user $user_dir"
 	echo "$current" > "$base/current"
 	(cd "$dir" && exec bin/buildat_server -m "games/$game" -P "$port" \
-			-D "$base/user" "${server_args[@]}") \
+			-D "$user_dir" "${server_args[@]}") \
 			> >(tee -a "$base/server.log") 2>&1 &
 	pid=$!
 }
