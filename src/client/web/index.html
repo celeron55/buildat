@@ -9,7 +9,8 @@ the client connects back to the server the page came from. -->
 	maximum-scale=1, user-scalable=no">
 <title>Buildat</title>
 <style>
-html, body { margin: 0; height: 100%; background: #202020; overflow: hidden; }
+html, body { margin: 0; height: 100%; background: #202020; overflow: hidden;
+	touch-action: none; }
 canvas { display: block; width: 100vw; height: 100vh; outline: none;
 	touch-action: none; }
 #text, #password { position: fixed; display: none; margin: 0; padding: 0; border: 0;
@@ -127,6 +128,15 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 	//   "s<start>,<len>"   select
 	// Indices there are characters, here UTF-16. A desktop's typing never
 	// reaches the stand-in: SDL takes its keypress and prevents it.
+	// **Two fingers are the game's at once** (user, a playtest: a two
+	// finger drag started a second late): a phone's browser holds a
+	// multi-touch move back while it decides whether the page is being
+	// zoomed, which user-scalable=no does not stop where the browser forces
+	// zoom on. Cancelled here, before it can decide.
+	document.addEventListener('touchmove', function(e){
+		if(e.touches.length > 1)
+			e.preventDefault();
+	}, {passive: false});
 	var ta = document.getElementById('text');
 	var pw = document.getElementById('password');
 	var el = ta, active = false, composing = false, actions = [];
