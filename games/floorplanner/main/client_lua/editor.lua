@@ -1072,8 +1072,8 @@ local function update_voxel_meshes(seen)
 	end
 end
 
--- How open a door or window is, in thousandths: a viewer's own opening
--- wins over the plan's
+-- How open a door or window is, in thousandths of a right angle (to 1889,
+-- 170 degrees): a viewer's own opening wins over the plan's
 local function open_amount(id)
 	return S.local_open[id] or doc.ents[id].ints.open
 end
@@ -3256,12 +3256,15 @@ local function build_props()
 			panel.button(r, "Other side", function()
 				set(sel.id, {ints = {flip = bit_xor(i.flip, 2)}})
 			end)
-			panel.field(props, "Open %", math.floor(i.open / 10 + 0.5),
+			-- In degrees, 0 to 170 (user); stored in thousandths of a right
+			-- angle, 90 degrees being 1000
+			panel.field(props, "Open deg", math.floor(i.open * 0.09 + 0.5),
 					function(t)
 				local v = tonumber(t)
 				if v then
-					set(sel.id, {ints = {open = math.max(0, math.min(1000,
-							math.floor(v * 10 + 0.5)))}})
+					v = math.max(0, math.min(170, v))
+					set(sel.id, {ints = {open = math.min(1889,
+							math.floor(v / 0.09 + 0.5))}})
 				end
 			end)
 			-- The part a palette double click goes on, the palette showing

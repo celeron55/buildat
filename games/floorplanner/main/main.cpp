@@ -245,7 +245,10 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"along", -MAX_COORD, MAX_COORD, 0},
 		{"sill", 0, 20000, 0},
 		{"flip", 0, 3, 0},        // bit 0: hinge on the other jamb; 1: swing
-		{"open", 0, 1000, 0},     // thousandths of fully open
+		// Thousandths of a right angle, to 170 degrees (user: past fully
+		// open, which is 1000); the unit is kept so saved plans mean what
+		// they did
+		{"open", 0, 1889, 0},
 		{"on", 0, 1, 1},          // a lamp's
 	}, {}, {
 		// A switch's lamps
