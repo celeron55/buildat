@@ -2567,6 +2567,28 @@ do
 		end
 	end
 
+	-- **A node put into an edge** (user: a room drawn with three corners
+	-- made four): the wall on it split and every room along it given the
+	-- corner, as a wall drawn from there does, and the node selected to be
+	-- dragged. Returns whether it did.
+	function M.insert_node(x, z, ref)
+		if not (ref and ref.edge) then
+			return false
+		end
+		local b = new_batch()
+		local ph = node_for(b, x, z, ref)
+		if not ph then
+			return false
+		end
+		send(finish_batch(b), function(err)
+			if err == "" and S.real[ph] then
+				S.nodes = {[S.real[ph]] = true}
+				M.refresh_panels()
+			end
+		end)
+		return true
+	end
+
 	add_wall = function(from, x, z, ref)
 		local fe, te = from.ref and from.ref.edge, ref and ref.edge
 		if fe and te and fe.u == te.u and fe.v == te.v then
@@ -3435,7 +3457,8 @@ local function build_props()
 			end
 		end
 		panel.label(props, "Drag one to move them all;")
-		panel.label(props, "drop one on another to merge")
+		panel.label(props, "drop one on another to merge;")
+		panel.label(props, "double click an edge: a node into it")
 		if n > 0 then
 			panel.button(props, "Delete (Del)", delete_selected)
 		end
@@ -5138,6 +5161,20 @@ do
 			end
 			refresh_panels()
 		elseif S.tool == "node" then
+			-- A double click on an edge, off its nodes: a node into it
+			local now = buildat.get_time_us()
+			local double = S.last_node_click and
+					now - S.last_node_click.t < 400000 and
+					geom.len(S.mx - S.last_node_click.mx,
+							S.my - S.last_node_click.my) < M.px(8)
+			S.last_node_click = {t = now, mx = S.mx, my = S.my}
+			if double and not t and doc.can("edit") then
+				local x, z, ref = snapped_point(nil)
+				if x and ref.edge and M.insert_node(x, z, ref) then
+					S.last_node_click = nil
+					return
+				end
+			end
 			if not S.shift then
 				S.nodes = {}
 			end
