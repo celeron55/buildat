@@ -6534,6 +6534,86 @@ function M.suspend()
 	crosshair.visible = false
 end
 
+-- **Where the view was, per plan** (user, 2026-09-30): the mode, the
+-- layout and the cameras, kept on this client and put back when the plan is
+-- next opened. The storage key is the plan's name in hex, since a name is
+-- anything a user typed.
+-- simplified: a plan name of over 60 bytes is not remembered
+local function view_key()
+	local n = doc and doc.plan_name or ""
+	if n == "" or #n > 60 then
+		return nil
+	end
+	return "view_" .. (n:gsub(".", function(c)
+		return string.format("%02x", c:byte())
+	end))
+end
+
+local function view_record()
+	local w = S.walk
+	return string.format("%s;%s;%.1f;%.1f;%.1f;%.4f;%.4f;%.4f;%.3f;%.3f;" ..
+			"%.1f;%.1f;%.1f", S.view, tostring(S.layout or ""), S.cx, S.cz,
+			S.span, S.pos.x, S.pos.y, S.pos.z, S.yaw, S.pitch, w.x, w.z, w.feet)
+end
+
+-- Kept once a second when it changed; M.update calls it
+function M.save_view(dt)
+	S.view_save_t = (S.view_save_t or 0) + dt
+	if S.view_save_t < 1 then
+		return
+	end
+	S.view_save_t = 0
+	local key = view_key()
+	if not key then
+		return
+	end
+	local rec = view_record()
+	if rec ~= S.view_saved then
+		S.view_saved = rec
+		buildat.storage_write(key, rec)
+	end
+end
+
+-- Put back once the plan's document is here: init.lua calls it after the
+-- join. A layout that has gone leaves the current one as it is.
+function M.restore_view()
+	local key = view_key()
+	local rec = key and buildat.storage_read(key)
+	if not rec then
+		return
+	end
+	local f = {}
+	for part in (rec .. ";"):gmatch("([^;]*);") do
+		f[#f + 1] = part
+	end
+	local n = {}
+	for i = 3, 13 do
+		n[i] = tonumber(f[i])
+		if not n[i] then
+			return
+		end
+	end
+	local view = f[1]
+	if view ~= "2d" and view ~= "3d" and view ~= "walk" then
+		return
+	end
+	local layout = tonumber(f[2])
+	local e = layout and doc.ents[layout]
+	if e and e.type == "layout" then
+		S.layout = layout
+		place.current()
+	end
+	set_view(view)
+	S.cx, S.cz, S.span = n[3], n[4], math.max(500, math.min(200000, n[5]))
+	S.pos = {x = n[6], y = n[7], z = n[8]}
+	S.yaw, S.pitch = n[9], math.max(-90, math.min(90, n[10]))
+	S.walk.x, S.walk.z, S.walk.feet = n[11], n[12], n[13]
+	S.view_saved = view_record()
+	S.dirty = true
+	refresh_panels()
+	log:info("The view of " .. doc.plan_name .. " put back: " .. view)
+end
+
 function M.resume()
 	S.suspended = false
 	walls_node.enabled = true
@@ -6556,6 +6636,7 @@ function M.update(dt)
 		return
 	end
 	export_step()
+	M.save_view(dt)
 	cam3d.fov = M.fov_for(S.view == "walk" and S.walk_fov or 60)
 	-- The floors above hidden in 3D, when the layouts menu says so. Deep:
 	-- a layout's nodes hold its walls and objects as children.

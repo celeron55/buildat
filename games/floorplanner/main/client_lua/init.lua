@@ -906,6 +906,18 @@ buildat.sub_packet("fp:plans", function(data)
 		if not want and doc.launch_plan and doc.launch_plan ~= "" then
 			want = doc.launch_plan
 		end
+		-- **Else the plan this client had open** (user, 2026-09-30), when
+		-- it is still one this user may open; the editor puts its view back
+		local last = buildat.storage_read("plan") or ""
+		if not want and last ~= "" then
+			for _, p in ipairs(doc.plans) do
+				if p.name == last then
+					log:info("Opening the plan open last: " .. last)
+					open_plan(last, false)
+					return
+				end
+			end
+		end
 		if want then
 			local exists = false
 			for _, p in ipairs(doc.plans) do
@@ -937,6 +949,7 @@ buildat.sub_packet("fp:entered", function(data)
 	importing = nil
 	doc.plan_name = cereal.binary_input(data, TEXT).text
 	doc.in_plan = true
+	doc.view_restored = false
 	buildat.storage_write("plan", doc.plan_name)
 	log:info("Entered the plan " .. doc.plan_name)
 end)
@@ -956,8 +969,9 @@ buildat.sub_packet("fp:closed", function(data)
 	end
 end)
 
--- Back to the plans
+-- Back to the plans, which is also where the next join starts
 function doc.close_plan()
+	buildat.storage_write("plan", "")
 	buildat.send_packet("fp:leave_plan", "")
 end
 
@@ -999,14 +1013,20 @@ function doc.joined()
 	magic.ui:SetFocusElement(nil)
 	if editor then
 		editor.resume()
-		return
+	else
+		local ok, err, m = buildat.run_script_file("main/editor.lua")
+		if not ok or type(m) ~= "table" then
+			error("floorplanner: could not load editor.lua: " .. tostring(err))
+		end
+		editor = m
+		editor.start(doc)
 	end
-	local ok, err, m = buildat.run_script_file("main/editor.lua")
-	if not ok or type(m) ~= "table" then
-		error("floorplanner: could not load editor.lua: " .. tostring(err))
+	-- Where this client was in the plan, last time: once a visit, since a
+	-- snapshot can come again within one
+	if not doc.view_restored then
+		doc.view_restored = true
+		editor.restore_view()
 	end
-	editor = m
-	editor.start(doc)
 end
 
 -- The join first ([VANILLA_PUBLIC] 2), then the plans to pick
