@@ -28,6 +28,9 @@
 #include <fstream>
 #include <deque>
 #include <thread>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include <atomic>
 
 #ifdef _WIN32
@@ -111,6 +114,8 @@ struct CState: public State
 	ss_ m_tmp_path;
 	sm_<ss_, ss_> m_file_hashes; // name -> hash
 	set_<ss_> m_waiting_files; // name
+	// How many were asked for since the wait began, for the progress line
+	size_t m_files_asked = 0;
 	bool m_tell_after_all_files_transferred_requested = false;
 	// The announced files are being read and hashed on a worker; see the
 	// core:announce_files handler
@@ -348,6 +353,28 @@ struct CState: public State
 
 	// What the worker found: the cached files go to the resource cache and
 	// the rest are asked for. See CheckAnnouncedTask.
+	// **What the wait for the files is at** (user, 2026-09-30): a game of
+	// thousands of files is a minute on a phone of a screen nothing draws
+	// on, since nothing runs until they are in. The web page's status line
+	// says how far it is; natively it is the log's.
+	void show_file_progress()
+	{
+		const size_t left = m_waiting_files.size();
+		if(left != 0 && left % 100 != 0 && left != m_files_asked)
+			return;
+		const size_t got = m_files_asked - left;
+#ifdef __EMSCRIPTEN__
+		const ss_ text = left == 0 ? ss_() : "Downloading the game: "+
+				itos((int)got)+" of "+itos((int)m_files_asked)+" files";
+		EM_ASM({
+			if(Module.setStatus)
+				Module.setStatus(UTF8ToString($0));
+		}, text.c_str());
+#endif
+		if(left != 0)
+			log_v(MODULE, "files: %zu of %zu", got, m_files_asked);
+	}
+
 	void announce_checked(CheckAnnouncedTask &task)
 	{
 		m_announce_checking = false;
@@ -357,8 +384,12 @@ struct CState: public State
 			m_app->file_updated_in_cache(std::get<0>(entry),
 					std::get<1>(entry), std::get<2>(entry));
 		}
+		if(m_waiting_files.empty())
+			m_files_asked = 0;
 		for(const auto &pair : task.wanted)
 			m_waiting_files.insert(std::get<0>(pair));
+		m_files_asked += task.wanted.size();
+		show_file_progress();
 		log_i(MODULE, "%zu of %zu announced files are cached",
 				task.cached.size(), task.files.size());
 		if(!task.wanted.empty()){
@@ -587,6 +618,7 @@ void CState::setup_packet_handlers()
 				continue;
 			}
 			m_waiting_files.erase(file_name);
+			show_file_progress();
 			// The server does not hash what it reads off disk before sending
 			// it, so this is the check that a file is what it was announced
 			// as -- and it has to be here anyway, since a file can change
