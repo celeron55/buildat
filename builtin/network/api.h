@@ -92,6 +92,9 @@ namespace network
 		// is worth nothing. Everything undeclared keeps its order behind
 		// what was queued before it, sliced into fragments, so a
 		// LatestOnly packet waits one fragment and not the bulk.
+		// A client is told the LatestOnly names at its connect
+		// (core:unordered) and handles them ahead of a backlog of its own,
+		// so a module declares at its start.
 		enum class Channel { Ordered, LatestOnly };
 		virtual void declare(const ss_ &packet_name, Channel channel) = 0;
 		// The peer is disconnected once what is queued for it has gone, or

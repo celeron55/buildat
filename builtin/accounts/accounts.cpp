@@ -349,6 +349,18 @@ struct Module: public interface::Module, public Interface
 	void on_start()
 	{
 		m_launched = launch_param("launcher") == "1";
+		// **Answers go ahead of a game's bulk** ([NET_CHANNELS]; user,
+		// 2026-09-30: a new invite never showed, behind a world streaming to
+		// a slow link). Each is the whole of what it says, so a newer one
+		// replacing an unsent one loses nothing: the users list, what an
+		// admin's request came to, a login's and a password's answers.
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(const char *name : {"accounts:hello", "accounts:login_result",
+					"accounts:users", "accounts:admin_result",
+					"accounts:passwd_result"})
+				inetwork->declare(name,
+						network::Interface::Channel::LatestOnly);
+		});
 		if(m_store)
 			return;
 		storage::access(m_server, [&](storage::Interface *istorage){

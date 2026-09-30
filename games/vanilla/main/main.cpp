@@ -2553,6 +2553,21 @@ struct Module: public interface::Module
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->set_send_policy(network::SendPolicy::Disconnect,
 					8 * 1024 * 1024, 30000000);
+			// **The menus' answers go ahead of the world** ([NET_CHANNELS];
+			// user, 2026-09-30: "Looking for saves..." counted past 100 s in
+			// the world menu, behind the world streaming to a slow link).
+			// Each answer is the whole of what it says, so a newer one
+			// replacing an unsent one loses nothing, and they keep their
+			// order among themselves (main:menu before main:saves). Only
+			// answers to a script's own request: main:account and
+			// main:join_title follow the run_script that starts their
+			// reader, and ahead of it they would find nobody.
+			for(const char *name : {"main:menu", "main:saves", "main:save_info",
+					"main:imports", "main:settings", "main:progress",
+					"main:contentdb_list", "main:menu_message",
+					"main:menu_error"})
+				inetwork->declare(name,
+						network::Interface::Channel::LatestOnly);
 		});
 
 		ss_ gameid;

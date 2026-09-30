@@ -16,8 +16,10 @@
 #include <deque>
 #include <set>
 #include <fstream>
+#include <sstream>
 #include <algorithm>
 #include <cereal/types/vector.hpp>
+#include <cereal/types/string.hpp>
 #include <cereal/types/tuple.hpp>
 #include <deque>
 #ifdef _WIN32
@@ -507,10 +509,27 @@ struct Module: public interface::Module, public network::Interface
 				peer.kind == Peer::Kind::WebSocket ? " (WebSocket)" : "",
 				peer.forwarded_for.empty() ? "" :
 				(" through "+peer.socket->get_remote_address()).c_str());
+		send_unordered(peer);
 		PeerInfo pinfo;
 		pinfo.id = peer.id;
 		pinfo.address = peer.address();
 		m_server->emit_event("network:client_connected", new NewClient(pinfo));
+	}
+
+	// **What the client may handle out of order** ([NET_CHANNELS]; user,
+	// 2026-09-30): the LatestOnly names, whose order against the rest does
+	// not matter. A client that cannot keep up with a world arriving has the
+	// backlog in its own buffer, not in this queue, and an answer to a menu
+	// waited behind it for a minute; a client told these handles them first.
+	void send_unordered(Peer &peer)
+	{
+		sv_<ss_> names(m_latest_only.begin(), m_latest_only.end());
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(names);
+		}
+		send_u(peer, "core:unordered", os.str());
 	}
 
 	void become_native(Peer &peer)
@@ -1010,6 +1029,8 @@ struct Module: public interface::Module, public network::Interface
 			m_latest_only.insert(packet_name);
 		else
 			m_latest_only.erase(packet_name);
+		// simplified: a client is told the names at its connect, so a
+		// module declares at its start, before any connects
 	}
 
 	void disconnect(PeerInfo::Id id)

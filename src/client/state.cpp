@@ -114,6 +114,11 @@ struct CState: public State
 	ss_ m_tmp_path;
 	sm_<ss_, ss_> m_file_hashes; // name -> hash
 	set_<ss_> m_waiting_files; // name
+	// **What the server says may be handled out of order**
+	// (core:unordered, its LatestOnly names), and what has been read off
+	// the socket and not yet handled: see handle_socket_buffer()
+	set_<ss_> m_unordered;
+	std::deque<std::pair<ss_, ss_>> m_parsed;
 	// How many were asked for since the wait began, for the progress line
 	size_t m_files_asked = 0;
 	bool m_tell_after_all_files_transferred_requested = false;
@@ -218,6 +223,9 @@ struct CState: public State
 		m_connect_error = "";
 		m_socket = sp_<interface::TCPSocket>(interface::createTCPSocket());
 		m_socket_buffer.clear();
+		m_parsed.clear();
+		m_parsed_bytes = 0;
+		m_unordered.clear();
 		m_packet_stream = interface::PacketStream();
 		m_file_hashes.clear();
 		m_waiting_files.clear();
@@ -233,8 +241,19 @@ struct CState: public State
 		// The worker owns the socket while a connect runs
 		if(m_connect_result.load() == 0 && m_connect_thread.joinable())
 			return;
-		if(m_socket->wait_data(0))
-			read_socket();
+		// **All there is, up to a backlog** (user, 2026-09-30: an answer
+		// to a menu came a minute late): a read a frame was 100 KB, a few
+		// megabytes a second, and a world arriving faster than that waited
+		// in the socket, where nothing can go ahead of it. What is read is
+		// handled out of order where the server allows (see
+		// handle_socket_buffer()); past READ_AHEAD_BYTES of it not yet
+		// handled, the socket is left alone and the server waits, as
+		// before.
+		for(int i = 0; i < 1000 && backlog_bytes() < READ_AHEAD_BYTES &&
+				m_socket->wait_data(0); i++){
+			if(!read_socket())
+				break;
+		}
 		// **Nothing after the announce is read until it has been checked**
 		// ([CLIENT_FRAME]): the packets that follow it -- the scripts that
 		// a module's client half is made of -- expect the files to have
@@ -247,7 +266,7 @@ struct CState: public State
 		// drain has a budget now and can leave packets in the buffer, and
 		// a buffer that is only drained when the socket has more to say
 		// would sit on them until the server spoke again.
-		if(!m_socket_buffer.empty())
+		if(!m_socket_buffer.empty() || !m_parsed.empty())
 			handle_socket_buffer();
 	}
 
@@ -439,23 +458,33 @@ struct CState: public State
 		return file_content;
 	}
 
-	void read_socket()
+	static const size_t READ_AHEAD_BYTES = 64 * 1024 * 1024;
+	size_t m_parsed_bytes = 0;
+
+	size_t backlog_bytes() const
+	{
+		return m_socket_buffer.size() + m_parsed_bytes;
+	}
+
+	// Whether something was read and more may be waiting
+	bool read_socket()
 	{
 		int fd = m_socket->fd();
 		char buf[100000];
 		ssize_t r = recv(fd, buf, 100000, 0);
 		if(r == -1){
 			if(errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-				return;
+				return false;
 			lost_connection(ss_()+"receive failed: "+strerror(errno));
-			return;
+			return false;
 		}
 		if(r == 0){
 			lost_connection("the server closed the connection");
-			return;
+			return false;
 		}
 		log_d(MODULE, "Received %zu bytes", r);
 		m_socket_buffer.insert(m_socket_buffer.end(), buf, buf + r);
+		return !m_disconnected;
 	}
 
 	void handle_socket_buffer()
@@ -467,19 +496,61 @@ struct CState: public State
 		// the wire before first use, so an unknown one means the stream is
 		// no longer being read where packets start -- so the session ends
 		// and says why, and the client itself lives.
+		// **Read all of it, handle what may go first first** (user,
+		// 2026-09-30: an answer to a menu waited a minute): a world arriving
+		// faster than this handles it is a backlog here, where the server's
+		// queue for this client is empty and cannot put anything ahead.
+		// Reading is cheap and in order; handling is what the budget is for.
+		// What the server named unordered is handled at once, in its own
+		// order, and the rest in theirs, as far as the budget goes.
 		try {
 			m_packet_stream.input(m_socket_buffer,
 			[&](const ss_ &name, const ss_ &data){
-				try {
-					handle_packet(name, data);
-				} catch(std::exception &e){
-					log_w(MODULE, "Exception on handling packet: %s", e.what());
-				}
-			}, packet_drain_us());
+				m_parsed.emplace_back(name, data);
+				m_parsed_bytes += data.size();
+			});
 		} catch(interface::UnknownPacketReceived &e){
 			m_socket_buffer.clear();
 			lost_connection(ss_()+"the server sent something this cannot "
 					"read: "+e.what());
+			return;
+		}
+		auto dispatch = [&](const std::pair<ss_, ss_> &p){
+			try {
+				handle_packet(p.first, p.second);
+			} catch(std::exception &e){
+				log_w(MODULE, "Exception on handling packet: %s", e.what());
+			}
+		};
+		// **Never past a core: packet**: a run_script starts the handlers of
+		// what follows it, and an unordered packet taken ahead of it found
+		// nobody (the first placement, luanti:player_pos, was lost). Up to
+		// the first one, then, and in order from there.
+		if(!m_unordered.empty() && m_parsed.size() > 1){
+			std::deque<std::pair<ss_, ss_>> rest;
+			std::deque<std::pair<ss_, ss_>> first;
+			bool fence = false;
+			for(auto &p : m_parsed){
+				if(!fence && p.first.compare(0, 5, "core:") == 0)
+					fence = true;
+				(!fence && m_unordered.count(p.first) ? first : rest).push_back(
+						std::move(p));
+			}
+			m_parsed = std::move(rest);
+			for(const auto &p : first){
+				m_parsed_bytes -= p.second.size();
+				dispatch(p);
+			}
+		}
+		const int64_t budget = packet_drain_us();
+		const int64_t t0 = get_timeofday_us();
+		while(!m_parsed.empty()){
+			std::pair<ss_, ss_> p = std::move(m_parsed.front());
+			m_parsed.pop_front();
+			m_parsed_bytes -= p.second.size();
+			dispatch(p);
+			if(budget > 0 && get_timeofday_us() - t0 >= budget)
+				break;
 		}
 	}
 
@@ -536,6 +607,20 @@ struct CState: public State
 
 void CState::setup_packet_handlers()
 {
+	m_packet_handlers["core:unordered"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		sv_<ss_> names;
+		std::istringstream is(data, std::ios::binary);
+		{
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(names);
+		}
+		m_unordered = set_<ss_>(names.begin(), names.end());
+		log_v(MODULE, "%zu packet names may be handled out of order",
+				names.size());
+	};
+
 	m_packet_handlers["core:run_script"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
