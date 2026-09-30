@@ -367,5 +367,4 @@ void init_network(lua_State *L)
 
 } // namespace lua_bindings
 
-// codestyle:disable (currently util/codestyle.sh screws up the .def formatting)
 // vim: set noet ts=4 sw=4:

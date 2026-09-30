@@ -144,6 +144,11 @@ Geometry* CustomGeometry::GetLodGeometry(unsigned batchIndex, unsigned level)
 
 unsigned CustomGeometry::GetNumOccluderTriangles()
 {
+    // The stand-in shape, when there is one: View::UpdateOccluders sorts occluders by this, so a chunk whose
+    // silhouette is a few quads has to say so or it is ranked as the thousands of triangles it draws
+    if (!occlusionVertices_.Empty())
+        return occlusionVertices_.Size() / 3;
+
     unsigned triangles = 0;
 
     for (unsigned i = 0; i < batches_.Size(); ++i)
@@ -166,6 +171,15 @@ unsigned CustomGeometry::GetNumOccluderTriangles()
 bool CustomGeometry::DrawOcclusion(OcclusionBuffer* buffer)
 {
     bool success = true;
+
+    // A shape given for this purpose is the whole of it: see SetOcclusionGeometry(). Both windings, since
+    // it is a closed shell and its far side writes depth the near side has already written
+    if (!occlusionVertices_.Empty())
+    {
+        buffer->SetCullMode(CULL_NONE);
+        return buffer->AddTriangles(node_->GetWorldTransform(), &occlusionVertices_[0], sizeof(Vector3), 0,
+            occlusionVertices_.Size());
+    }
 
     for (unsigned i = 0; i < batches_.Size(); ++i)
     {
@@ -206,8 +220,14 @@ bool CustomGeometry::DrawOcclusion(OcclusionBuffer* buffer)
     return success;
 }
 
+void CustomGeometry::SetOcclusionGeometry(const PODVector<Vector3>& triangles)
+{
+    occlusionVertices_ = triangles;
+}
+
 void CustomGeometry::Clear()
 {
+    occlusionVertices_.Clear();
     elementMask_ = MASK_POSITION;
     batches_.Clear();
     geometries_.Clear();
@@ -360,6 +380,27 @@ void CustomGeometry::Commit()
             {
                 unsigned vertexCount = 0;
 
+                // **The whole geometry in one go when the layout already
+                // matches** ([CLIENT_FRAME]): with position, normal,
+                // colour, texcoord and tangent all present, the vertex
+                // buffer's elements are in the order CustomGeometryVertex
+                // holds them and nothing is left out, so the copy is the
+                // memory move it looks like. A voxel chunk is 8 MB of
+                // vertices and five little stores each was 9.6 ms of the
+                // frame that committed it.
+                static const unsigned FULL_MASK = MASK_POSITION | MASK_NORMAL |
+                    MASK_COLOR | MASK_TEXCOORD1 | MASK_TANGENT;
+                if (elementMask_ == FULL_MASK && vertices_[i].Size())
+                {
+                    memcpy(dest, &vertices_[i][0],
+                        vertices_[i].Size() * sizeof(CustomGeometryVertex));
+                    dest += vertices_[i].Size() * sizeof(CustomGeometryVertex);
+                    vertexCount = vertices_[i].Size();
+                    geometries_[i]->SetVertexBuffer(0, vertexBuffer_);
+                    geometries_[i]->SetDrawRange(primitiveTypes_[i], 0, 0, vertexStart, vertexCount);
+                    vertexStart += vertexCount;
+                    continue;
+                }
                 for (unsigned j = 0; j < vertices_[i].Size(); ++j)
                 {
                     *((Vector3*)dest) = vertices_[i][j].position_;
