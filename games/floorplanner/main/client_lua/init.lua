@@ -687,21 +687,37 @@ end
 
 -- simplified: the join dialog is rebuilt on every error rather than
 -- updated
+-- A window of the join and the plans pages: `width` wide, or the
+-- screen's width less a margin on a narrow one, a phone's ([FP_TOUCH] 2),
+-- and its texts wrap to it
+local function page_window(width)
+	local w = magic.ui.root:CreateChild("Window")
+	w:SetStyleAuto()
+	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
+	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
+	return w
+end
+
+local function page_text(w, t, color)
+	local l = w:CreateChild("Text")
+	l:SetStyleAuto()
+	l:SetWordwrap(true)
+	l:SetText(t)
+	if color then
+		l:SetColor(color)
+	end
+	return l
+end
+
 local function show_login(error_text, is_local)
 	if login_window then
 		login_window:Remove()
 	end
-	local w = magic.ui.root:CreateChild("Window")
+	local w = page_window(380)
 	login_window = w
-	w:SetStyleAuto()
-	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
-	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-	w.minWidth = 380
 	local function label(text)
-		local t = w:CreateChild("Text")
-		t:SetStyleAuto()
-		t:SetText(text)
-		return t
+		return page_text(w, text)
 	end
 	local function field(text, secret)
 		local e = w:CreateChild("LineEdit")
@@ -810,19 +826,10 @@ local function show_plans(message)
 	if login_window then
 		login_window:Remove()
 	end
-	local w = magic.ui.root:CreateChild("Window")
+	local w = page_window(420)
 	login_window = w
-	w:SetStyleAuto()
-	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
-	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-	w.minWidth = 420
 	local function text(t, color)
-		local l = w:CreateChild("Text")
-		l:SetStyleAuto()
-		l:SetText(t)
-		if color then
-			l:SetColor(color)
-		end
+		page_text(w, t, color)
 	end
 	local function button(t, f)
 		local b = w:CreateChild("Button")
@@ -886,19 +893,10 @@ local function page(title)
 	if login_window then
 		login_window:Remove()
 	end
-	local w = magic.ui.root:CreateChild("Window")
+	local w = page_window(420)
 	login_window = w
-	w:SetStyleAuto()
-	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
-	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-	w.minWidth = 420
 	local function text(t, color)
-		local l = w:CreateChild("Text")
-		l:SetStyleAuto()
-		l:SetText(t)
-		if color then
-			l:SetColor(color)
-		end
+		page_text(w, t, color)
 	end
 	local function button(t, f)
 		local b = w:CreateChild("Button")

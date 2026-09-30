@@ -5,11 +5,13 @@ the client connects back to the server the page came from. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1,
+	maximum-scale=1, user-scalable=no">
 <title>Buildat</title>
 <style>
 html, body { margin: 0; height: 100%; background: #202020; overflow: hidden; }
-canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+canvas { display: block; width: 100vw; height: 100vh; outline: none;
+	touch-action: none; }
 #text, #password { position: fixed; display: none; margin: 0; padding: 0; border: 0;
 	resize: none; overflow: hidden; white-space: pre; opacity: 0;
 	font-size: 16px; pointer-events: none; }
@@ -52,6 +54,10 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none; }
 			// Whether the page, and so its WebSocket, is TLS: what a game
 			// tells its user about a password it sends ([FP_ACCESS])
 			Module.ENV.BUILDAT_PAGE_HTTPS = https ? '1' : '0';
+			// Whether the pointer is a finger ([FP_TOUCH]): the client's UI
+			// scale, and the game's touch controls
+			Module.ENV.BUILDAT_TOUCH = window.matchMedia &&
+					matchMedia('(pointer: coarse)').matches ? '1' : '0';
 		}],
 		print: function(t){ console.log(t); },
 		printErr: function(t){ console.warn(t); },

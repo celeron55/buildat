@@ -31,6 +31,26 @@ return {
 	InputFocus = {
 		Focus = {variant = "Bool", safe = "boolean"},
 	},
+	-- Fingers on a touchscreen ([FP_TOUCH]): which one, and where in the
+	-- window's pixels. The first finger is also the left mouse button,
+	-- which SDL makes of it, so the UI and a tap work without these.
+	TouchBegin = {
+		TouchID = {variant = "Int", safe = "number"},
+		X = {variant = "Int", safe = "number"},
+		Y = {variant = "Int", safe = "number"},
+	},
+	TouchMove = {
+		TouchID = {variant = "Int", safe = "number"},
+		X = {variant = "Int", safe = "number"},
+		Y = {variant = "Int", safe = "number"},
+		DX = {variant = "Int", safe = "number"},
+		DY = {variant = "Int", safe = "number"},
+	},
+	TouchEnd = {
+		TouchID = {variant = "Int", safe = "number"},
+		X = {variant = "Int", safe = "number"},
+		Y = {variant = "Int", safe = "number"},
+	},
 	MouseButtonDown = {
 		Button = {variant = "Int", safe = "number"},
 		Buttons = {variant = "Int", safe = "number"},

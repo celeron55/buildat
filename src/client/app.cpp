@@ -4,6 +4,7 @@
 #include <cmath>
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
+#include <emscripten/html5.h>
 #endif
 #include "core/log.h"
 #include "core/json.h"
@@ -99,6 +100,9 @@ namespace magic = Urho3D;
 
 // Auto UI scale: min(window w,h) / this. Lua/config/CLI overrides replace it.
 static const float UI_REF_SHORT = 1080.f;
+// The fewest UI pixels a web page's short side is given, however big a
+// finger wants the UI ([FP_TOUCH] 1): a dialog's width and its margins
+static const float UI_MIN_SHORT = 400.f;
 // Snap to 1x, 2x, ... when close, so 1px lines stay on-pixel.
 // Under: maximized window chrome (taskbar, title). Over: 16:10 like 1200p.
 static const float UI_SNAP_UNDER = 0.08f;
@@ -880,8 +884,14 @@ void GraphicsOptions::apply(magic::Graphics *magic_graphics)
 {
 	int w = fullscreen ? full_w : window_w;
 	int h = fullscreen ? full_h : window_h;
+	// The web's canvas is drawn at device pixels ([FP_TOUCH] 1)
+#ifdef __EMSCRIPTEN__
+	const bool high_dpi = true;
+#else
+	const bool high_dpi = false;
+#endif
 	magic_graphics->SetMode(w, h, fullscreen, borderless, resizable,
-			false, vsync, triple_buffer, multisampling, 0, 0);
+			high_dpi, vsync, triple_buffer, multisampling, 0, 0);
 }
 
 class BuildatResourceRouter: public magic::ResourceRouter
@@ -1290,6 +1300,9 @@ struct CApp: public App, public magic::Application
 			engineParameters_["WindowHeight"] = m_options.graphics.window_h;
 			engineParameters_["WindowResizable"] = m_options.graphics.resizable;
 		}
+#ifdef __EMSCRIPTEN__
+		engineParameters_["HighDPI"] = true;
+#endif
 		engineParameters_["VSync"] = m_options.graphics.vsync;
 		engineParameters_["TripleBuffer"] = m_options.graphics.triple_buffer;
 		engineParameters_["Multisample"] = m_options.graphics.multisampling;
@@ -1539,6 +1552,15 @@ struct CApp: public App, public magic::Application
 				int other = logical_mode() ? m_logical_h : g->GetHeight();
 				if(other < short_side)
 					short_side = other;
+#ifdef __EMSCRIPTEN__
+				// [FP_TOUCH] 1: the canvas is at device pixels, and a CSS
+				// pixel is about as big to the eye on any screen, so the UI
+				// is sized in those: never below one UI pixel to one CSS
+				// pixel, and half again for a finger (the page says whether
+				// the pointer is one)
+				const double dpr = emscripten_get_device_pixel_ratio();
+				short_side = (int)(short_side / dpr);
+#endif
 				s = (float)short_side / UI_REF_SHORT;
 				if(s < 0.01f)
 					s = 0.01f;
@@ -1549,6 +1571,19 @@ struct CApp: public App, public magic::Application
 							s <= (float)n * (1.f + UI_SNAP_OVER))
 						s = (float)n;
 				}
+#ifdef __EMSCRIPTEN__
+				if(s < 1.f)
+					s = 1.f;
+				const char *touch = getenv("BUILDAT_TOUCH");
+				if(touch && touch[0] == '1')
+					s *= 1.5f;
+				s *= (float)dpr;
+				// But a phone's short side keeps room for a dialog: at least
+				// UI_MIN_SHORT UI pixels across
+				const float fit = (float)(short_side * dpr) / UI_MIN_SHORT;
+				if(s > fit)
+					s = fit;
+#endif
 			}
 		}
 		if(logical_mode()){
