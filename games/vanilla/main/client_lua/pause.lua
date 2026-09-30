@@ -171,20 +171,27 @@ open = function()
 		s:GetChild(0):SetText(sound_text())
 	end)
 	-- The engine's render_scale: the 3D drawn at a share of the window's
-	-- pixels, the UI sharp. Each press the next step down, round to full
-	-- again; the web has no launcher to set it in.
+	-- pixels, the UI sharp. Each press the next step down from automatic
+	-- (the client's choice, made again on each start and resize), round to
+	-- automatic again; the web has no launcher to set it in.
 	local SCALES = {1, 0.75, 0.67, 0.5, 0.33, 0.25}
 	local function scale_text()
-		return string.format("Render scale: %d %%",
-				math.floor(buildat.get_render_scale() * 100 + 0.5))
+		local now, auto = buildat.get_render_scale()
+		return string.format("Render scale: %s%d %%", auto and "automatic, "
+				or "", math.floor(now * 100 + 0.5))
 	end
 	local rs
 	rs = accounts.page_button(w, scale_text(), function()
-		local now, nxt = buildat.get_render_scale(), SCALES[1]
-		for _, v in ipairs(SCALES) do
-			if v < now - 0.001 then
-				nxt = v
-				break
+		local now, auto = buildat.get_render_scale()
+		local nxt = "auto"
+		if auto then
+			nxt = SCALES[1]
+		else
+			for _, v in ipairs(SCALES) do
+				if v < now - 0.001 then
+					nxt = v
+					break
+				end
 			end
 		end
 		buildat.set_render_scale(nxt)

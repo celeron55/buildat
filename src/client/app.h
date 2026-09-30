@@ -54,6 +54,9 @@ namespace app
 		// fraction of the window size; the UI stays at native resolution.
 		// 1.0 is a bypass, not a scale of one.
 		float render_scale = 1.0f;
+		// render_scale "auto" (user, 2026-09-30), the default: the scale is
+		// then settle_render_scale()'s, at the start and on each resize
+		bool render_scale_auto = true;
 		// Frame limiter. 200 is Urho3D's own desktop default, so leaving it
 		// alone changes nothing; 0 is unlimited.
 		int max_fps = 200;

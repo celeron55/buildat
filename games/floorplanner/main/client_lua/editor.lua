@@ -4993,16 +4993,21 @@ do
 		end)
 		-- The engine's render_scale: the 3D drawn at a share of the
 		-- window's pixels, the UI sharp; the web has no launcher to set it
-		-- in. A value not on the list is shown as the nearest one.
-		local scale = buildat.get_render_scale()
-		local scales, near = {}, 1
+		-- in. Automatic is the client's choice, made again on each start
+		-- and resize. A value not on the list is shown as the nearest one.
+		local scale, auto = buildat.get_render_scale()
+		local function pct(v)
+			return math.floor(v * 100 + 0.5) .. " %"
+		end
+		local scales, near = {{"automatic (" .. pct(scale) .. ")", "auto"}}, 1
 		for _, v in ipairs({0.25, 0.33, 0.5, 0.67, 0.75, 1}) do
-			scales[#scales + 1] = {math.floor(v * 100 + 0.5) .. " %", v}
+			scales[#scales + 1] = {pct(v), v}
 			if math.abs(v - scale) < math.abs(near - scale) then
 				near = v
 			end
 		end
-		panel.dropdown(w, "Render scale", scales, near, function(v)
+		panel.dropdown(w, "Render scale", scales, auto and "auto" or near,
+				function(v)
 			buildat.set_render_scale(v)
 			client_settings_page()
 		end)

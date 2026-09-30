@@ -56,8 +56,14 @@ local PREFERENCES = {
 		-- 1.0 is no scaling at all and is the bypass: the game draws into
 		-- the window itself. Above it is supersampling, which the same code
 		-- path gives away for free.
-		values = {0.5, 0.67, 0.75, 1.0, 1.5, 2.0},
-		show = percent,
+		values = {"auto", 0.5, 0.67, 0.75, 1.0, 1.5, 2.0},
+		show = function(v)
+			if v == "auto" then
+				return "automatic (" ..
+						percent(api.get_preferred_render_scale()) .. ")"
+			end
+			return percent(v)
+		end,
 	},
 	{
 		name = "vsync",
@@ -134,7 +140,11 @@ local function nearest_index(pref, value)
 	end
 	local best, best_d = 1, nil
 	for i, v in ipairs(pref.values) do
-		local d = math.abs(v - value)
+		if v == value then
+			return i
+		end
+		local d = type(v) == "number" and type(value) == "number" and
+				math.abs(v - value) or math.huge
 		if best_d == nil or d < best_d then
 			best, best_d = i, d
 		end

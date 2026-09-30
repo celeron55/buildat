@@ -848,14 +848,16 @@ end
 -- 2026-09-30): the web client has no launcher to reach Engine settings
 -- through, so a game's own settings carry it. What the game gets to set
 -- is how much its frame costs, never what is in it.
--- get_render_scale() -> share; set_render_scale(share) -> true, or false
--- and why
+-- get_render_scale() -> share, automatic; set_render_scale(share or
+-- "auto") -> true, or false and why. "auto" is the client's own choice,
+-- made again on each start and resize.
 buildat.safe.get_render_scale = function()
-	return __buildat_get_preference("render_scale") or 1
+	return __buildat_get_preferred_render_scale(),
+			__buildat_get_preference("render_scale") == "auto"
 end
 buildat.safe.set_render_scale = function(v)
-	if type(v) ~= "number" then
-		return false, "set_render_scale(share): a number"
+	if type(v) ~= "number" and v ~= "auto" then
+		return false, "set_render_scale(share): a number or \"auto\""
 	end
 	return __buildat_set_preference("render_scale", tostring(v))
 end

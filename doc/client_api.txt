@@ -84,13 +84,16 @@ buildat.get_sound() -> mute, db; buildat.set_sound(mute, db) -> ok, err
   step 3 dB down to -30, and -33 or less is off. The gain is made from it in
   the client, in the one place it is applied.
 
-buildat.get_render_scale() -> share; buildat.set_render_scale(share) -> ok, err
+buildat.get_render_scale() -> share, automatic
+buildat.set_render_scale(share or "auto") -> ok, err
 - The other preference a game may write: render_scale (see "Engine
   settings"), from a game's own settings, since the web client has no
   launcher to reach Engine settings through. The frame's cost, not its look.
-- The web client's default gives the 3D about 2.1 M pixels (1080p's) of the
-  page's canvas, at most 0.5 on a screen over 3000 device pixels on a side or
-  on a software renderer, rounded down to 1, 0.75, 0.67, 0.5, 0.33 or 0.25.
+- "auto", the default, is the client's choice, made again at each start and
+  resize: natively 1; on the web about 2.1 M pixels (1080p's) of the page's
+  canvas for the 3D, at most 0.5 on a screen over 3000 device pixels on a
+  side or on a software renderer, rounded down to 1, 0.75, 0.67, 0.5, 0.33
+  or 0.25.
 
 buildat.take_screenshot() -> file name, or nil and why not
 - Into <user>/screenshots, named by the date and time. The caller says when
@@ -634,7 +637,9 @@ how loud it is, never what the art is. Kept in user/settings.json, and
 overridden for one run by -o (see README.md).
 
     render_scale    3D viewports drawn at this fraction of the window size;
-                    the UI stays at native resolution. 1.0 is a bypass.
+                    the UI stays at native resolution. 1.0 is a bypass;
+                    "auto", the default, is the client's choice (see
+                    get_render_scale)
     vsync           present synchronised to the display
     max_fps         frame limiter; 0 is unlimited
     multisampling   MSAA samples: 1, 2, 4, 8 or 16

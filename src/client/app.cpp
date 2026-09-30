@@ -330,6 +330,10 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->default_username = value;
 			continue;
 		}
+		if(key == "render_scale" && value == "auto"){
+			opt->graphics.render_scale_auto = true;
+			continue;
+		}
 		char *end = nullptr;
 		double v = strtod(value.c_str(), &end);
 		if(value.empty() || *end != '\0'){
@@ -342,6 +346,7 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			// supersampling, which the same code path gives away for free
 			in_range = (v >= 0.1 && v <= 2.0);
 			opt->graphics.render_scale = (float)v;
+			opt->graphics.render_scale_auto = false;
 		} else if(key == "vsync"){
 			opt->graphics.vsync = (v != 0);
 		} else if(key == "max_fps"){
@@ -387,6 +392,11 @@ static void check_parse_preference_options()
 	// What an item does not name is left alone
 	if(o.graphics.max_fps != app::Options().graphics.max_fps)
 		throw Exception("parse_preference_options: clobbered max_fps");
+	if(o.graphics.render_scale_auto)
+		throw Exception("parse_preference_options: a number left it auto");
+	if(!app::parse_preference_options("render_scale=auto", &o, &err) ||
+			!o.graphics.render_scale_auto)
+		throw Exception("parse_preference_options: refused render_scale=auto");
 	if(app::parse_preference_options("render_scale", &o, &err))
 		throw Exception("parse_preference_options: took a bare key");
 	if(app::parse_preference_options("render_scale=0.5x", &o, &err))
@@ -566,6 +576,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 		items += ss_()+(items.empty()?"":",")+"server_log_level="+itos(jsl.as_integer());
 	if(jrs.is_number())
 		items += ss_()+(items.empty()?"":",")+"render_scale="+ftos(jrs.as_number());
+	else if(jrs.is_string() && jrs.as_string() == "auto")
+		items += ss_()+(items.empty()?"":",")+"render_scale=auto";
 	if(jvs.is_boolean())
 		items += ss_()+(items.empty()?"":",")+"vsync="+(jvs.as_boolean()?"1":"0");
 	if(jmf.is_integer())
@@ -657,7 +669,10 @@ static void save_preferences(const app::Options &opt)
 		o.set("maximized", opt.graphics.maximized);
 		o.set("fullscreen", opt.graphics.fullscreen);
 	}
-	o.set("render_scale", opt.graphics.render_scale);
+	if(opt.graphics.render_scale_auto)
+		o.set("render_scale", "auto");
+	else
+		o.set("render_scale", opt.graphics.render_scale);
 	o.set("vsync", opt.graphics.vsync);
 	o.set("max_fps", opt.graphics.max_fps);
 	o.set("multisampling", opt.graphics.multisampling);
@@ -670,7 +685,8 @@ static void save_preferences(const app::Options &opt)
 	o.save_file(preferences_path().c_str());
 }
 
-static void resolve_preferences(app::Options *opt)
+// What render_scale "auto" is: natively 1, the bypass
+static float auto_render_scale()
 {
 #ifdef __EMSCRIPTEN__
 	// **The web's render scale default** (user, 2026-09-30): a browser is
@@ -678,8 +694,8 @@ static void resolve_preferences(app::Options *opt)
 	// (2.1 M) of the page's canvas, a screen of over 3000 device pixels on
 	// a side (4K) half at most, and a GPU that is the CPU (SwiftShader,
 	// llvmpipe, Microsoft's basic renderer) half at most too; rounded down
-	// to a step the settings offer. A saved choice or -o still wins.
-	opt->graphics.render_scale = (float)EM_ASM_DOUBLE({
+	// to a step the settings offer. Only while render_scale is "auto".
+	return (float)EM_ASM_DOUBLE({
 		var dpr = window.devicePixelRatio || 1;
 		var s = Math.min(1, Math.sqrt(2.1e6 /
 				(window.innerWidth * window.innerHeight * dpr * dpr)));
@@ -703,7 +719,21 @@ static void resolve_preferences(app::Options *opt)
 		}
 		return 0.25;
 	});
+#else
+	return 1.0f;
 #endif
+}
+
+// A render scale of "auto" made a number, for now: at the start, on a
+// resize and when the setting is chosen
+static void settle_render_scale(app::Options *opt)
+{
+	if(opt->graphics.render_scale_auto)
+		opt->graphics.render_scale = auto_render_scale();
+}
+
+static void resolve_preferences(app::Options *opt)
+{
 	int desk_w = 0;
 	int desk_h = 0;
 	if(!desktop_size(&desk_w, &desk_h)){
@@ -1279,6 +1309,7 @@ struct CApp: public App, public magic::Application
 					&m_options, &err))
 				throw AppStartupError("-o: "+err);
 		}
+		settle_render_scale(&m_options);
 		if(m_options.graphics.size_forced){
 			m_options.graphics.fullscreen = false;
 			m_options.graphics.maximized = false;
@@ -2897,6 +2928,8 @@ struct CApp: public App, public magic::Application
 				m_options.graphics.fullscreen ? 1 : 0);
 		save_preferences(m_options);
 		apply_ui_scale();
+		// An "auto" render scale follows the window's size
+		settle_render_scale(&m_options);
 		// The offscreen texture is a fraction of the window, so a new window
 		// size is a new texture
 		apply_preferred_viewports();
@@ -3460,7 +3493,9 @@ struct CApp: public App, public magic::Application
 		lua_pop(L, 1);
 		const ss_ name = luaL_checkstring(L, 1);
 		const app::Options &o = self->m_options;
-		if(name == "render_scale")
+		if(name == "render_scale" && o.graphics.render_scale_auto)
+			lua_pushstring(L, "auto");
+		else if(name == "render_scale")
 			lua_pushnumber(L, o.graphics.render_scale);
 		else if(name == "vsync")
 			lua_pushboolean(L, o.graphics.vsync);
@@ -3511,6 +3546,7 @@ struct CApp: public App, public magic::Application
 			lua_pushstring(L, err.c_str());
 			return 2;
 		}
+		settle_render_scale(&parsed);
 		const app::Options before = self->m_options;
 		self->m_options = parsed;
 		self->apply_changed_preferences(before);
