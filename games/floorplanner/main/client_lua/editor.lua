@@ -403,8 +403,10 @@ local function viewport_for(v)
 	-- Deferred, so that a house full of lamps costs a light each rather
 	-- than a light for each thing each lights; the plan view stays forward
 	local rp = vp.renderPath:Clone()
-	rp:Load(magic.cache:GetResource("XMLFile", "RenderPaths/Deferred.xml"))
-	-- PBR: in radiance, metered and tone mapped ([FP_DAYLIGHT])
+	-- PBR: in radiance, metered and tone mapped ([FP_DAYLIGHT]), and the
+	-- ambient occluded in corners ([FP_AO])
+	rp:Load(magic.cache:GetResource("XMLFile", S.lighting == "pbr" and
+			"main/deferred_ssao.xml" or "RenderPaths/Deferred.xml"))
 	if S.lighting == "pbr" then
 		M.daylight.pbr_render_path(rp)
 	end
