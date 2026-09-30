@@ -51,6 +51,11 @@ buildat.sub_packet("main:account", function(data)
 	account = {public = v[1] == "1", admin = v[2] == "1", world = v[3] or "",
 			is_local = v[4] == "1"}
 	o.keys.public = account.public
+	-- A menu up before this came (the web starts paused) is missing what
+	-- the account adds to it
+	if window then
+		open()
+	end
 end)
 
 local function close()

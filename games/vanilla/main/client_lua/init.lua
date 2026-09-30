@@ -2479,7 +2479,16 @@ luanti.sub_player_pos(function(p)
 	end
 	if not player_placed then
 		player_placed = true
-		set_mouse_in_world(true, "the first placement")
+		-- **On the web the game starts paused** (user, 2026-09-30): a
+		-- browser locks the pointer only for a click, and taking the
+		-- mouse without one left a view that spun with a mouse the game
+		-- thought it had. The menu's Continue, or a click off it, is
+		-- that click. A touchscreen has no lock to ask for.
+		if buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil and not keys.touch then
+			keys.open_pause()
+		else
+			set_mouse_in_world(true, "the first placement")
+		end
 	end
 	log:info("the server put the player at " ..
 			string.format("%.1f, %.1f, %.1f", p.x, p.y, p.z) ..
@@ -3674,6 +3683,7 @@ local open_pause_menu = (function(ok, err, m)
 	end
 	return m
 end)(buildat.run_script_file("main/pause.lua"))({keys = keys})
+keys.open_pause = open_pause_menu
 
 --
 -- Pointing at a node, and digging it
