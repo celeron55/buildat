@@ -5438,6 +5438,11 @@ do
 		elseif S.calib then
 			S.calib = nil
 			refresh_panels()
+		elseif S.tool ~= "select" then
+			-- **A tool is a level of its own** (user): out of it to Select,
+			-- and from Select to the pause menu. The same in every view,
+			-- walking included, where the mouse's capture goes first.
+			set_tool("select")
 		else
 			open_pause()
 		end
