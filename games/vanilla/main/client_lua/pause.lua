@@ -136,14 +136,21 @@ open = function()
 	close()
 	local w = accounts.page_window(360)
 	window = w
-	luanti.hold(close, w)
+	-- **On the web Escape does not close it** (user, 2026-09-30): the
+	-- world takes the mouse back as it closes, and a browser grants no
+	-- pointer lock for an Escape -- Firefox took it and let it go, and
+	-- the view spun with a mouse the game thought was its own. A click
+	-- is what a lock can be asked for from: Continue, or anywhere off
+	-- the menu.
+	luanti.hold(close, w, buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil)
 	accounts.page_text(w, "Paused")
 	if account.world ~= "" then
 		accounts.page_text(w, "World: " .. account.world)
 	end
 	-- Continuing is the first thing on it and the first thing a player
-	-- wants: escape does the same, but a menu whose only way back is a key
-	-- nobody was told about is a menu that traps people
+	-- wants: escape (natively) and a click off the menu do the same, but a
+	-- menu whose only way back is a key nobody was told about is a menu
+	-- that traps people
 	accounts.page_button(w, "Continue playing", close)
 	accounts.page_button(w, "Key bindings", function()
 		page(function()
@@ -209,6 +216,30 @@ open = function()
 		accounts.page_button(w, "Log out", accounts.logout)
 	end
 end
+
+-- A click off the menu is Continue; not on a page it made way for. On the
+-- release, so that the world does not take the mouse with a button held
+-- down and start digging with it.
+local pressed_off = false
+local function off_menu()
+	if not window then
+		return false
+	end
+	local sc = magic.ui.scale
+	local m = magic.input:GetMousePosition()
+	local ux, uy = m.x / sc, m.y / sc
+	local p, s = window.screenPosition, window.size
+	return ux < p.x or uy < p.y or ux >= p.x + s.x or uy >= p.y + s.y
+end
+magic.SubscribeToEvent("MouseButtonDown", function()
+	pressed_off = off_menu()
+end)
+magic.SubscribeToEvent("MouseButtonUp", function()
+	if pressed_off and off_menu() then
+		close()
+	end
+	pressed_off = false
+end)
 
 return function(options)
 	o = options

@@ -3378,10 +3378,11 @@ end
 -- A game's own window over the world, such as vanilla's pause menu: while
 -- it is up form_open() says so, as for a form, and Escape calls `close`.
 -- `window`, if given, is what form_window() reports for a scan. hold(nil)
--- lets go.
-local held, held_window = nil, nil
-function M.hold(close, window)
-	held, held_window = close, window
+-- lets go. keep_on_escape: Escape does nothing, the window's own buttons
+-- close it.
+local held, held_window, held_keep = nil, nil, false
+function M.hold(close, window, keep_on_escape)
+	held, held_window, held_keep = close, window, keep_on_escape or false
 end
 
 -- form_open() -> whether a form is on the screen, so that whoever else is
@@ -3645,7 +3646,7 @@ function M.key(key)
 	-- A held window's keys are its own: what is typed into its fields is
 	-- not the game's
 	if held and not form then
-		if key == magic.KEY_ESCAPE then
+		if key == magic.KEY_ESCAPE and not held_keep then
 			local close = held
 			held, held_window = nil, nil
 			close()
