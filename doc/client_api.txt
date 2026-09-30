@@ -110,6 +110,12 @@ buildat.add_resource_dir(path) -> bool
   be asked of the resource cache by name. Only directories under the client's
   cache path; a resource dir is readable by everything the client draws.
 buildat.compose_image(args) -> width, height
+buildat.set_web_fullscreen(bool)
+- On the web client on a touchscreen: whether the page goes fullscreen, which
+  is the only way to put a phone browser's address bar away on a page that
+  does not scroll. Entering waits for the user's next tap (a browser only
+  allows it from one); leaving is at once. Off by default; nothing natively.
+
 buildat.get_cache_path() -> string (sandbox only, see below)
 buildat.create_directories(path) -> bool (unsafe Lua only)
 - The directory and its parents, for trusted Lua keeping a file of its own

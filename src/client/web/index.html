@@ -11,8 +11,10 @@ the client connects back to the server the page came from. -->
 <style>
 html, body { margin: 0; height: 100%; background: #202020; overflow: hidden;
 	touch-action: none; }
-canvas { display: block; width: 100vw; height: 100vh; outline: none;
-	touch-action: none; }
+/* 100dvh: the viewport that is visible. 100vh is the one with a phone
+   browser's toolbar away, and what the toolbar covered was cut off. */
+canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
+	outline: none; touch-action: none; }
 #text, #password { position: fixed; display: none; margin: 0; padding: 0; border: 0;
 	resize: none; overflow: hidden; white-space: pre; opacity: 0;
 	font-size: 16px; pointer-events: none; }
@@ -75,6 +77,24 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 	});
 	window.addEventListener('blur', away);
 	window.addEventListener('focus', back);
+	// **Fullscreen on a touchscreen while the game wants it** (user,
+	// 2026-09-30): a phone browser's address bar covers a page that does
+	// not scroll, and only fullscreen puts it away. A game says when, with
+	// buildat.set_web_fullscreen() (the floorplanner: whenever its menu is
+	// not up, which then brings the bar back). Entering takes a tap, so
+	// each tap asks; leaving is at once.
+	var coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+	function sync_fullscreen(){
+		var want = coarse && Module.buildatFullscreen;
+		var el = document.documentElement;
+		try {
+			if(want && !document.fullscreenElement && el.requestFullscreen)
+				el.requestFullscreen().catch(function(){});
+			else if(!want && document.fullscreenElement && document.exitFullscreen)
+				document.exitFullscreen().catch(function(){});
+		} catch(e){}
+	}
+	document.addEventListener('touchend', sync_fullscreen, true);
 	window.Module = {
 		canvas: canvas,
 		arguments: args,
@@ -117,9 +137,9 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 			Module.ENV.BUILDAT_PAGE_HTTPS = https ? '1' : '0';
 			// Whether the pointer is a finger ([FP_TOUCH]): the client's UI
 			// scale, and the game's touch controls
-			Module.ENV.BUILDAT_TOUCH = window.matchMedia &&
-					matchMedia('(pointer: coarse)').matches ? '1' : '0';
+			Module.ENV.BUILDAT_TOUCH = coarse ? '1' : '0';
 		}],
+		buildatSyncFullscreen: sync_fullscreen,
 		print: function(t){ console.log(t); },
 		printErr: function(t){ console.warn(t); },
 		setStatus: function(t){ status.textContent = t; },

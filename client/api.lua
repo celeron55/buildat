@@ -107,6 +107,7 @@ buildat.set_watchdog_seconds = __buildat_set_watchdog_seconds -- unsafe only
 
 buildat.safe.disconnect    = __buildat_disconnect
 buildat.safe.set_reload_on_return = __buildat_set_reload_on_return
+buildat.safe.set_web_fullscreen = __buildat_set_web_fullscreen
 -- **The extension this client was booted with as its launcher**, which
 -- is -m's argument and launch_menu by default. What asks is whatever has
 -- to go back to the launcher; those places named launch_menu outright,

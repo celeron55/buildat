@@ -1851,6 +1851,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(create_directories)
 		DEF_BUILDAT_FUNC(set_watchdog_seconds)
 		DEF_BUILDAT_FUNC(set_reload_on_return)
+		DEF_BUILDAT_FUNC(set_web_fullscreen)
 		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(set_ui_scale)
 		DEF_BUILDAT_FUNC(get_ui_scale)
@@ -4156,6 +4157,21 @@ struct CApp: public App, public magic::Application
 #ifdef __EMSCRIPTEN__
 		EM_ASM({ Module['buildatReloadOnReturn'] = !!$0; },
 				lua_toboolean(L, 1) ? 1 : 0);
+#endif
+		(void)L;
+		return 0;
+	}
+
+	// set_web_fullscreen(bool): on a touchscreen's web page, whether the
+	// page is fullscreen, which is what puts a phone browser's address bar
+	// away. Entering waits for the next tap; nothing natively.
+	static int l_set_web_fullscreen(lua_State *L)
+	{
+#ifdef __EMSCRIPTEN__
+		EM_ASM({
+			Module['buildatFullscreen'] = !!$0;
+			Module['buildatSyncFullscreen']();
+		}, lua_toboolean(L, 1) ? 1 : 0);
 #endif
 		(void)L;
 		return 0;

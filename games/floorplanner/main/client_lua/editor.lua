@@ -5204,6 +5204,8 @@ do
 	open_pause = function()
 		S.pause_page = nil
 		S.paused = true
+		-- A phone's address bar back with the menu, away without it
+		buildat.set_web_fullscreen(false)
 		S.press, S.drag = nil, nil
 		update_capture()
 		local w = dialog("Paused")
@@ -5261,6 +5263,7 @@ do
 			pause_win = nil
 		end
 		S.paused = false
+		buildat.set_web_fullscreen(true)
 		update_capture()
 	end
 end
@@ -8033,6 +8036,8 @@ function M.start(d)
 		M.touch_end(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"))
 	end)
 	set_view("2d")
+	-- A phone's address bar away from the first tap, until the menu
+	buildat.set_web_fullscreen(true)
 	log:info("Editor started")
 end
 
