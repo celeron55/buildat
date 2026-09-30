@@ -1706,8 +1706,14 @@ struct CApp: public App, public magic::Application
 	// top-level UI elements' sizes in UI units -- which a scale does not
 	// change, so shrinking cannot feed back -- against the screen, and the
 	// scale made small enough for the biggest to fit, down to FIT_FLOOR of
-	// what it would be; back up when they fit again. By size and not by
-	// place: a panel put partly off the screen on purpose is its game's.
+	// what it would be; back up when they fit again. By size, and for one
+	// held to the top or the left by where it starts too, which scales
+	// with it (user, 2026-09-30: the floorplanner's palette, under a
+	// toolbar of two rows on a phone, ran off the bottom while its size
+	// alone fitted); one that starts in the far half of the screen is put
+	// partly off it on purpose, and is its game's. Centred or held to the
+	// bottom or the right, the place moves with the scale and would feed
+	// back, so only the size counts.
 	// A side that is the root's own (a HUD, a stretched bar) follows the
 	// screen and does not count.
 	void update_ui_fit()
@@ -1757,10 +1763,19 @@ struct CApp: public App, public magic::Application
 						scan(c, depth + 1);
 					continue;
 				}
-				if(sz.x_ > 0 && !fill_w && sz.x_ * base > room_w)
-					need = std::min(need, room_w / sz.x_);
-				if(sz.y_ > 0 && !fill_h && sz.y_ * base > room_h)
-					need = std::min(need, room_h / sz.y_);
+				const magic::IntVector2 at = c->GetPosition();
+				int ext_w = sz.x_;
+				int ext_h = sz.y_;
+				if(c->GetHorizontalAlignment() == magic::HA_LEFT &&
+						at.x_ > 0 && at.x_ < rs.x_ / 2)
+					ext_w += at.x_;
+				if(c->GetVerticalAlignment() == magic::VA_TOP &&
+						at.y_ > 0 && at.y_ < rs.y_ / 2)
+					ext_h += at.y_;
+				if(ext_w > 0 && !fill_w && ext_w * base > room_w)
+					need = std::min(need, room_w / ext_w);
+				if(ext_h > 0 && !fill_h && ext_h * base > room_h)
+					need = std::min(need, room_h / ext_h);
 			}
 		};
 		scan(root, 0);
