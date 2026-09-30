@@ -2979,6 +2979,229 @@ do
 		send(finish_batch(b), select_placed(ph, "room"))
 	end
 
+	-- **Splitting a room and combining two** ([FP_ROOM_SPLIT], user
+	-- 2026-10-01), by two corners: a room is a list of nodes, and the walls
+	-- and what is in them are their own and stay as they are. A corner may
+	-- also be a node on one of the room's edges, which the room then gets.
+
+	-- Where node n is in a room's list: its index, or the edge it lies on
+	-- (after which it would go), or nil
+	local function room_place(list, n)
+		for i, m in ipairs(list) do
+			if m == n then
+				return i, false
+			end
+		end
+		local ne = doc.ents[n]
+		if not ne then
+			return nil
+		end
+		for i = 1, #list do
+			local u, v = doc.ents[list[i]], doc.ents[list[i % #list + 1]]
+			if u and v then
+				local _, _, t, d = geom.nearest_on_segment(ne.ints.x, ne.ints.z,
+						u.ints.x, u.ints.z, v.ints.x, v.ints.z)
+				if d < 2 and t > 0 and t < 1 then
+					return i, true
+				end
+			end
+		end
+		return nil
+	end
+
+	-- The room's list with a and b in it, and their indices; nil when a
+	-- corner is not the room's
+	local function with_corners(room, a, b)
+		local list = {}
+		for i, n in ipairs(room.lists.nodes) do
+			list[i] = n
+		end
+		for _, n in ipairs({a, b}) do
+			local i, edge = room_place(list, n)
+			if not i then
+				return nil
+			end
+			if edge then
+				table.insert(list, i + 1, n)
+			end
+		end
+		local ia, ib
+		for i, n in ipairs(list) do
+			if n == a then ia = i end
+			if n == b then ib = i end
+		end
+		return list, ia, ib
+	end
+
+	-- list[from], list[from + 1], ... list[to], round the end
+	local function arc(list, from, to)
+		local out, i = {}, from
+		while true do
+			out[#out + 1] = list[i]
+			if i == to then
+				return out
+			end
+			i = i % #list + 1
+		end
+	end
+
+	local function pts_of(ids)
+		local pts = {}
+		for i, n in ipairs(ids) do
+			local e = doc.ents[n].ints
+			pts[i] = {e.x, e.z}
+		end
+		return pts
+	end
+
+	-- Whether segments p-q and r-s cross other than at their ends
+	local function crosses(p, q, r, s2)
+		local function side(a, b, c)
+			return (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1])
+		end
+		local d1, d2 = side(p, q, r), side(p, q, s2)
+		local d3, d4 = side(r, s2, p), side(r, s2, q)
+		return d1 * d2 < 0 and d3 * d4 < 0
+	end
+
+	-- The room split along a-b: nil and why, or the two lists
+	function M.split_lists(room, a, b)
+		local list, ia, ib = with_corners(room, a, b)
+		if not list then
+			return nil, "Both corners must be on the room"
+		end
+		local n = #list
+		if ia % n + 1 == ib or ib % n + 1 == ia then
+			return nil, "Those corners are the ends of one edge"
+		end
+		local pts = pts_of(list)
+		local pa, pb = pts[ia], pts[ib]
+		local mid = {(pa[1] + pb[1]) / 2, (pa[2] + pb[2]) / 2}
+		if not geom.point_in_polygon(mid[1], mid[2], pts) then
+			return nil, "The line between the corners goes outside the room"
+		end
+		for i = 1, n do
+			if crosses(pa, pb, pts[i], pts[i % n + 1]) then
+				return nil, "The line between the corners crosses the room's edge"
+			end
+		end
+		return arc(list, ia, ib), arc(list, ib, ia)
+	end
+
+	function M.split_room(id, a, b)
+		local room = doc.ents[id]
+		local l1, l2 = M.split_lists(room, a, b)
+		if not l1 then
+			doc.notice(l2)
+			return
+		end
+		-- The bigger keeps the room; the other is a copy of its settings
+		if math.abs(geom.area(pts_of(l1))) < math.abs(geom.area(pts_of(l2))) then
+			l1, l2 = l2, l1
+		end
+		local bt = new_batch()
+		add_op(bt, "set", {id = id, lists = {nodes = l1}})
+		local ph = doc.placeholder()
+		local ints = {}
+		for k, v in pairs(room.ints) do
+			ints[k] = v
+		end
+		add_op(bt, "create", {id = ph, type = "room", ints = ints,
+				strs = {name = room.strs.name .. " 2"}, lists = {nodes = l2}})
+		-- A wall on the new edge, as a drawn room gets them
+		if S.room_walls and not wall_between(a, b) then
+			local ea, eb = doc.ents[a].ints, doc.ents[b].ints
+			wall_op(bt, a, ea.x, ea.z, b, eb.x, eb.z)
+		end
+		send(bt.ops, function(err)
+			if err == "" then
+				doc.notice("Split " .. room.strs.name .. " in two")
+			end
+		end)
+	end
+
+	-- Rooms ra and rb joined through the edge from a to b that they share:
+	-- nil and why, or the joined list
+	function M.combine_list(ra, rb, a, b)
+		local la, ia, ib = with_corners(ra, a, b)
+		local lb, ja, jb = with_corners(rb, a, b)
+		if not la or not lb then
+			return nil, "Both corners must be on both rooms"
+		end
+		local want = math.abs(geom.area(pts_of(la))) +
+				math.abs(geom.area(pts_of(lb)))
+		-- Each room's way from b to a that is not the shared edge, and the
+		-- other's from a to b: the one of the four whose area is the two's
+		for _, pa in ipairs({arc(la, ib, ia), arc(la, ia, ib)}) do
+			if pa[1] ~= b then
+				local r = {}
+				for i = #pa, 1, -1 do r[#r + 1] = pa[i] end
+				pa = r
+			end
+			for _, pb in ipairs({arc(lb, ja, jb), arc(lb, jb, ja)}) do
+				if pb[1] ~= a then
+					local r = {}
+					for i = #pb, 1, -1 do r[#r + 1] = pb[i] end
+					pb = r
+				end
+				local out = {}
+				for i = 1, #pa - 1 do out[#out + 1] = pa[i] end
+				for i = 1, #pb - 1 do out[#out + 1] = pb[i] end
+				if #out >= 3 and math.abs(math.abs(geom.area(pts_of(out))) -
+						want) <= 0.001 * want + 1 then
+					return out
+				end
+			end
+		end
+		return nil, "Those corners are not an edge the two rooms share"
+	end
+
+	function M.combine_rooms(ida, idb, a, b)
+		local ra, rb = doc.ents[ida], doc.ents[idb]
+		local list, why = M.combine_list(ra, rb, a, b)
+		if not list then
+			doc.notice(why)
+			return
+		end
+		-- The bigger's settings and name
+		if math.abs(geom.area(pts_of(ra.lists.nodes))) <
+				math.abs(geom.area(pts_of(rb.lists.nodes))) then
+			ida, idb, ra, rb = idb, ida, rb, ra
+		end
+		local bt = new_batch()
+		add_op(bt, "set", {id = ida, lists = {nodes = list}})
+		add_op(bt, "delete", {id = idb})
+		send(bt.ops, select_placed(ida, "room"))
+		doc.notice("Joined " .. rb.strs.name .. " into " .. ra.strs.name)
+	end
+
+	-- What two selected corners can do to the rooms: {{text, fn}, ...}
+	function M.room_actions(a, b)
+		local out, both = {}, {}
+		for _, r in ipairs(of_type("room")) do
+			if with_corners(r, a, b) then
+				both[#both + 1] = r
+				if M.split_lists(r, a, b) then
+					out[#out + 1] = {"Split " .. r.strs.name .. " here", function()
+						M.split_room(r.id, a, b)
+					end}
+				end
+			end
+		end
+		for i = 1, #both do
+			for j = i + 1, #both do
+				local ra, rb = both[i], both[j]
+				if M.combine_list(ra, rb, a, b) then
+					out[#out + 1] = {"Combine " .. ra.strs.name .. " and " ..
+							rb.strs.name, function()
+						M.combine_rooms(ra.id, rb.id, a, b)
+					end}
+				end
+			end
+		end
+		return out
+	end
+
 	-- A box drawn: a definition of that size and an instance of it. Stairs
 	-- the same, given their depth or taking it from their steps (d nil).
 	add_box = function(x, z, w, d)
@@ -3866,6 +4089,18 @@ local function sel_count()
 	return n
 end
 
+-- The room actions of two corners, as buttons, or how to get one
+function M.room_buttons(a, b)
+	local acts = M.room_actions(a, b)
+	for _, act in ipairs(acts) do
+		panel.button(props, act[1], act[2])
+	end
+	if #acts == 0 then
+		panel.label(props, "(two corners of a room split it,")
+		panel.label(props, " two shared by two rooms join them)")
+	end
+end
+
 local function build_props()
 	if props then
 		props:Remove()
@@ -3925,6 +4160,10 @@ local function build_props()
 				int_field(id, "Z mm", "z", ne.ints.z)
 			end
 		end
+		if n == 2 then
+			local a = next(S.nodes)
+			M.room_buttons(a, next(S.nodes, a))
+		end
 		panel.label(props, "Drag one to move them all;")
 		panel.label(props, "drop one on another to merge;")
 		panel.label(props, "double click an edge: a node into it")
@@ -3933,6 +4172,14 @@ local function build_props()
 		end
 	elseif count > 1 then
 		panel.label(props, count .. " selected")
+		-- Two corners: a room split or two combined there
+		if count == 2 then
+			local a = next(S.sel)
+			local b = next(S.sel, a)
+			if S.sel[a] == "node" and S.sel[b] == "node" then
+				M.room_buttons(a, b)
+			end
+		end
 		panel.button(props, "Turn left (Z)", function()
 			rotate_selection(angle_step())
 		end)
