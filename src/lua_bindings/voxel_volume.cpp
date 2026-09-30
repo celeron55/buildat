@@ -193,6 +193,9 @@ enum VoxelRayStatus {
 	VOXEL_RAY_NO_DATA = 1,   // Left the volumes it was given
 	VOXEL_RAY_RANGE = 2,     // Used up max_steps
 	VOXEL_RAY_SKYLIGHT = 3,  // Reached stop_skylight
+	// Stopped by something the sky is seen through anyway: a leaf, a
+	// plant, a pane. Solid to walk on, not a wall to the daylight.
+	VOXEL_RAY_BLOCKED_CLEAR = 4,
 };
 
 static const int VOXEL_RAY_MAX_STEPS = 4096;
@@ -305,12 +308,30 @@ static pv::Vector3DInt32 table_vector3_int(const luabind::object &t,
 // found, which is what this is computed from.
 static double ray_visibility(int status, int skylight, int steps)
 {
+	// **A wall is a wall.** Only what the sky is seen through anyway --
+	// a leaf, a plant, a pane -- passes the daylight it stands in; stone
+	// stops the ray at nothing, which is what keeps a cave a cave. With
+	// every blocker passing it, games/voxel_lighting's shaft interior
+	// went from no black at all to 92% of the frame ([UNDERGROUND_LIGHT]).
 	if(status == VOXEL_RAY_BLOCKED)
 		return 0.0;
 	if(steps <= 1)
 		return 1.0;
 	if(skylight < 0)
 		return 0.0;
+	// **A ray that was stopped is worth the daylight it travelled through**,
+	// not nothing. "Nothing if something solid stopped it" made a forest
+	// read as a sealed chamber: a leaf is walkable, so every ray into a
+	// canopy was blocked at its first step and a player standing in a
+	// jungle measured chamber_light() at 0.002 -- which turns the cave
+	// floor on whole and the bounce floor off, above ground, in daylight,
+	// and with the floor on it is also the gray ramp's threshold, so the
+	// shaded leaf tops came out pure gray ([UNDERGROUND_LIGHT], the
+	// playtest fault, 2026-09-28). A canopy is not a cave, and what tells
+	// them apart is already in the answer: the skylight of the air the ray
+	// crossed. Under leaves that is twelve of fifteen; in a sealed room it
+	// is nought, so the invariant that room reads dark at every hour
+	// stands.
 	return (double)skylight / (double)interface::VoxelInstance::SKYLIGHT_MAX;
 }
 
@@ -336,6 +357,7 @@ static void march_rays(RayJob &job)
 	// physically_solid per voxel id, filled as ids turn up. Unknown ids stop a
 	// ray: an id with no definition is not something to see the sky through.
 	sv_<int8_t> solid_cache;
+	sv_<int8_t> clear_cache;
 
 	for(size_t ri = 0; ri < n; ri++){
 		double dx = job.dirs[ri * 3 + 0];
@@ -418,16 +440,30 @@ static void march_rays(RayJob &job)
 					vz - chunk_p.getZ() * volume_set.chunk_size.getZ());
 			interface::VoxelTypeId id = look.id_of(v, fmt);
 
-			if((size_t)id >= solid_cache.size())
+			if((size_t)id >= solid_cache.size()){
 				solid_cache.resize((size_t)id + 1, -1);
+				clear_cache.resize((size_t)id + 1, -1);
+			}
 			int8_t solid = solid_cache[id];
 			if(solid < 0){
 				const interface::VoxelDefinition *def = job.voxel_reg->get(id);
 				solid = (def == nullptr || def->physically_solid) ? 1 : 0;
 				solid_cache[id] = solid;
+				// And whether what stops the ray is a thing the sky is
+				// seen through anyway -- a leaf, a plant, a pane. See
+				// ray_visibility().
+				// transmits_light alone, which is Luanti's
+				// sunlight_propagates: a voxel that says the sky is seen
+				// through it. Not the edge material, which is empty for
+				// anything that draws no face against its neighbour and
+				// is true of games/voxel_lighting's own blocks -- with
+				// that in the test the shaft interior did not move at all.
+				clear_cache[id] = (def != nullptr &&
+						def->transmits_light) ? 1 : 0;
 			}
 			if(solid){
-				status = VOXEL_RAY_BLOCKED;
+				status = clear_cache[id] ? VOXEL_RAY_BLOCKED_CLEAR :
+						VOXEL_RAY_BLOCKED;
 				hit_id = id;
 				break;
 			}
@@ -736,5 +772,4 @@ void init_voxel_volume(lua_State *L)
 
 } // namespace lua_bindingss
 
-// codestyle:disable (currently util/codestyle.sh screws up the .def formatting)
 // vim: set noet ts=4 sw=4:
