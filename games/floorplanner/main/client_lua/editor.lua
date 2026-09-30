@@ -3162,6 +3162,12 @@ local function build_props()
 		return
 	end
 	local sel = S.primary and S.sel[S.primary] and doc.ents[S.primary]
+	-- **Nothing to show with Select and nothing selected** (user): the
+	-- panel is for what is selected and for a tool's own settings
+	if S.tool == "select" and not sel and sel_count() == 0 then
+		props.visible = false
+		return
+	end
 	-- **An edit of what is selected leaves a placing tool for Select**, the
 	-- selection kept (user): the next click in the view is then not one
 	-- more of what was being edited
