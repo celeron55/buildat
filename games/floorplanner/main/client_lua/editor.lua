@@ -5434,10 +5434,45 @@ do
 	-- pick for the click and for what the guide shows. In the select tool an
 	-- object under the cursor wins, then a node near it, then the wall,
 	-- picture or room it is on.
+	-- **Leeway round the selection** (user): with something selected, a
+	-- press that misses it by up to LEEWAY_PX still takes it; tried at
+	-- points round the pointer, nearest first
+	M.LEEWAY_PX = 12
+	function M.near_selection()
+		if not next(S.sel) then
+			return nil
+		end
+		local mx, my = S.mx, S.my
+		local found = nil
+		for _, r in ipairs({M.LEEWAY_PX / 2, M.LEEWAY_PX}) do
+			local d = M.px(r)
+			for i = 0, 7 do
+				local a = i * math.pi / 4
+				S.mx, S.my = mx + math.cos(a) * d, my + math.sin(a) * d
+				local s = pick_surface()
+				if s and S.sel[s.id] then
+					found = {kind = S.sel[s.id], id = s.id, side = S.sel_face[s.id]}
+					break
+				end
+			end
+			if found then
+				break
+			end
+		end
+		S.mx, S.my = mx, my
+		return found
+	end
+
 	press_target = function()
 		local x, z = cursor_floor()
 		if S.tool == "select" then
 			local s = pick_surface()
+			if not (s and S.sel[s.id]) then
+				local near = M.near_selection()
+				if near then
+					return near
+				end
+			end
 			if s and s.kind == "instance" then
 				-- With the part: a door's leaf is selected as its leaf
 				return {kind = "instance", id = s.id, side = s.side}
@@ -5545,15 +5580,22 @@ do
 			end
 			return
 		end
-		-- The select tool: what is pressed joins the selection unless it is in
-		-- it already, and the drag moves all of it; a lone node drags alone
+		-- The select tool: the drag moves the selection, and only what was
+		-- selected before the press (user, 2026-10-01: a press that missed
+		-- the selected object moved the room under it). A drag on anything
+		-- else selects it, as a click would, and moves nothing; a lone node
+		-- drags alone.
 		if not S.sel[t.id] then
 			if not S.shift then
 				S.sel = {}
 			end
 			S.sel[t.id] = t.kind
 			S.sel_face[t.id] = t.side
+			S.primary = t.id
 			palette_follows(t)
+			S.press = nil
+			refresh_panels()
+			return
 		end
 		S.primary = t.id
 		if t.kind == "node" and sel_count() == 1 then
@@ -7239,8 +7281,7 @@ do
 					g.left = "select " .. name .. (t.kind == "wall" and t.side and
 							(" by its " .. (t.side == "core" and "top" or
 							t.side .. " face")) or t.kind == "room" and t.side and
-							(" by its " .. t.side) or "") ..
-							(edit and "; drag: move it" or "")
+							(" by its " .. t.side) or "")
 				end
 				if t.kind == "node" and edit then
 					g.left = g.left .. " (onto another node: merge them)"
