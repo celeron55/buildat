@@ -32,9 +32,18 @@
 #if defined(IOS) || defined(TVOS)
 #include <OpenGLES/ES2/gl.h>
 #include <OpenGLES/ES2/glext.h>
+#define URHO3D_GLES2
 #elif defined(__ANDROID__) || defined (__arm__) || defined(__aarch64__) || defined (__EMSCRIPTEN__)
+// buildat [WEB_GLES3]: GLES3 (WebGL 2) backported from upstream's PR #2536;
+// URHO3D_GLES2 marks the GLES2-only paths from here on
+#ifdef URHO3D_GLES3
+#include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h>
+#else
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#define URHO3D_GLES2
+#endif
 #else
 #include <GLEW/glew.h>
 #endif
@@ -50,6 +59,12 @@
 #endif
 #ifndef GL_ETC1_RGB8_OES
 #define GL_ETC1_RGB8_OES 0x8d64
+#endif
+#ifndef GL_DEPTH_COMPONENT24_OES
+#define GL_DEPTH_COMPONENT24_OES 0x81A6
+#endif
+#ifndef GL_DEPTH24_STENCIL8_OES
+#define GL_DEPTH24_STENCIL8_OES 0x88F0
 #endif
 #ifndef COMPRESSED_RGB_PVRTC_4BPPV1_IMG
 #define COMPRESSED_RGB_PVRTC_4BPPV1_IMG 0x8c00

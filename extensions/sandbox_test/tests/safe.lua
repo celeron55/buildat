@@ -12,4 +12,7 @@ assert(global_foo == "bar")
 -- This too
 assert(buildat.is_in_sandbox)
 
--- vim: set noet ts=4 sw=4:
+
+-- The wrapper exercises moved to ../wrapped.lua ([URHO_SWEEP]), which
+-- the hostile boot runs and the check reads; this file is what Ctrl+F12
+-- runs and is about the sandbox itself.

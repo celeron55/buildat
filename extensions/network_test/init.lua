@@ -21,7 +21,7 @@ local PORT = 30001
 function M.boot()
 	local root = uistack.main:push({desc="network_test"})
 	root.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "__menu/res/main_style.xml")
+			"XMLFile", "launch_menu/res/main_style.xml")
 
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
