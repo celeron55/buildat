@@ -1,26 +1,32 @@
 #!/bin/bash
-# Runs a game on the newest GitHub release's Linux web-precompiled archive,
-# and moves to each newer release as it appears. For a testing server in a
-# terminal (a GNU screen): it stays in the foreground, the server's output
-# is its own, and Ctrl+C stops both.
+# Runs games on the newest GitHub release's Linux web-precompiled archive,
+# and moves to each newer release as it appears. For testing servers in a
+# terminal (a GNU screen): it stays in the foreground, the servers' output
+# is its own, and Ctrl+C stops them all.
 #
 #   util/serve_latest_release.sh <game> <port> <user dir> [server options...]
+#           [-- <game> <port> <user dir> [server options...]]...
 #   util/serve_latest_release.sh floorplanner 29500 ~/buildat-user -T 127.0.0.1
+#   util/serve_latest_release.sh floorplanner 29500 ~/fp-user -- vanilla 30000 ~/vanilla-user
 #
-# The user directory holds the saves and accounts. Every version uses it
-# (-D), and it can be one a server used before. The rest is under
-# BUILDAT_SERVE_DIR (default ~/buildat-serve):
-#   versions/<archive>/  each release, unpacked
-#   current              the version running
-#   server.log           the server's output, also on the terminal
-# A new release is downloaded and unpacked, the running server is stopped
-# with SIGTERM (a game saves on it), and the new one started. Every version
-# but that one and the one before it is deleted.
+# Each server is a game, a port and a user directory, which holds its
+# saves and accounts. Every version uses it (-D), and it can be one a
+# server used before. The servers all run the same release. The rest is
+# under BUILDAT_SERVE_DIR (default ~/buildat-serve):
+#   versions/<archive>/     each release, unpacked
+#   current                 the version running
+#   server-<game>-<port>.log  a server's output, also on the terminal with
+#                           [<game>:<port>] before each line
+# A new release is downloaded and unpacked, every running server is
+# stopped with SIGTERM (a game saves on it), and each is started on the new
+# one. A server that exits is started again by itself. Every version but
+# the running one and the one before it is deleted.
 #
 # **A rollback** is by hand, with this script stopped: run the version
 # before from its directory,
 #   cd ~/buildat-serve/versions/<the one before>
 #   bin/buildat_server -m games/<game> -P <port> -D <user dir>
+# for each server.
 # Started again, this script goes back to the newest release. A game whose
 # saves carry a schema version (the floorplanner) refuses a save that a
 # newer version wrote.
@@ -30,16 +36,29 @@
 # Needs bash, curl and tar.
 set -u
 
-if [ $# -lt 3 ]; then
-	grep '^#   util/' "$0" | sed 's/^# *//' >&2
+usage(){
+	grep '^#   util/\|^#           \[' "$0" | sed 's/^# *//' >&2
 	exit 2
-fi
-game=$1
-port=$2
-mkdir -p "$3" || exit 1
-user_dir=$(cd "$3" && pwd)
-shift 3
-server_args=("$@")
+}
+# The servers, by index: game, port, user directory, and their options as
+# lines
+games=() ports=() users=() opts=()
+while [ $# -gt 0 ]; do
+	[ $# -lt 3 ] && usage
+	games+=("$1")
+	ports+=("$2")
+	mkdir -p "$3" || exit 1
+	users+=("$(cd "$3" && pwd)")
+	shift 3
+	o=""
+	while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+		o+="$1"$'\n'
+		shift
+	done
+	opts+=("$o")
+	[ $# -gt 0 ] && shift
+done
+[ ${#games[@]} -eq 0 ] && usage
 
 base=${BUILDAT_SERVE_DIR:-$HOME/buildat-serve}
 poll=${POLL_SECONDS:-300}
@@ -118,41 +137,61 @@ prune(){
 	done
 }
 
-pid=""
+# The servers' process ids, by index; a version a server would not start
+# on is not tried again until another comes
+pids=() broken=()
+
 start(){
+	local i=$1 game=${games[$1]} port=${ports[$1]}
 	local dir="$base/versions/$current"
 	if [ ! -d "$dir/games/$game" ]; then
 		say "$current has no games/$game"
+		broken[$i]=$current
 		return 1
 	fi
-	say "starting $current: games/$game on port $port, user $user_dir"
+	local args=()
+	[ -n "${opts[$i]}" ] && mapfile -t args <<< "${opts[$i]%$'\n'}"
+	say "starting $game on port $port on $current, user ${users[$i]}"
 	echo "$current" > "$base/current"
 	(cd "$dir" && exec bin/buildat_server -m "games/$game" -P "$port" \
-			-D "$user_dir" "${server_args[@]}") \
-			> >(tee -a "$base/server.log") 2>&1 &
-	pid=$!
+			-D "${users[$i]}" "${args[@]}") \
+			> >(sed -u "s/^/[$game:$port] /" |
+				tee -a "$base/server-$game-$port.log") 2>&1 &
+	pids[$i]=$!
 }
 
 stop(){
+	local i=$1 pid=${pids[$1]:-}
 	[ -z "$pid" ] && return
 	if kill -0 "$pid" 2>/dev/null; then
-		say "stopping the server"
+		say "stopping ${games[$i]} on port ${ports[$i]}"
 		kill -TERM "$pid" 2>/dev/null
-		local i
-		for i in $(seq 60); do
+		local n
+		for n in $(seq 60); do
 			kill -0 "$pid" 2>/dev/null || break
 			sleep 0.5
 		done
 		if kill -0 "$pid" 2>/dev/null; then
-			say "the server did not stop in 30 s; killing it"
+			say "${games[$i]} did not stop in 30 s; killing it"
 			kill -KILL "$pid" 2>/dev/null
 		fi
 	fi
 	wait "$pid" 2>/dev/null
-	pid=""
+	pids[$i]=""
 }
 
-trap 'stop; say "stopped"; exit 0' INT TERM
+stop_all(){
+	local i
+	# All told at once, so that they save and go together
+	for i in "${!games[@]}"; do
+		[ -n "${pids[$i]:-}" ] && kill -TERM "${pids[$i]}" 2>/dev/null
+	done
+	for i in "${!games[@]}"; do
+		stop "$i"
+	done
+}
+
+trap 'stop_all; say "stopped"; exit 0' INT TERM
 
 # What ran last, else the newest there is
 current=""
@@ -162,8 +201,6 @@ else
 	current=$(ls -1 versions | grep -v '^\.' | sort -V | tail -n 1)
 fi
 
-# A version that would not start is not tried again until another comes
-broken=""
 next_poll=0
 while true; do
 	now=$(date +%s)
@@ -176,22 +213,27 @@ while true; do
 			name=$(install "$url")
 			if [ -n "$name" ]; then
 				say "new version: $name"
-				stop
+				stop_all
 				current=$name
-				start
+				for i in "${!games[@]}"; do
+					start "$i"
+				done
 				prune
 			fi
 		fi
 	fi
-	if [ -n "$current" ] && [ "$broken" != "$current" ] &&
-			{ [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; }; then
-		if [ -n "$pid" ]; then
-			wait "$pid" 2>/dev/null
-			say "the server exited ($?); starting it again in 10 s"
-			pid=""
-			sleep 10
+	for i in "${!games[@]}"; do
+		pid=${pids[$i]:-}
+		if [ -n "$current" ] && [ "${broken[$i]:-}" != "$current" ] &&
+				{ [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; }; then
+			if [ -n "$pid" ]; then
+				wait "$pid" 2>/dev/null
+				say "${games[$i]} on port ${ports[$i]} exited ($?); starting it again in 10 s"
+				pids[$i]=""
+				sleep 10
+			fi
+			start "$i"
 		fi
-		start || broken=$current
-	fi
+	done
 	sleep 5
 done
