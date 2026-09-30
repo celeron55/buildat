@@ -1,5 +1,7 @@
 # Buildat sub-build
 /Build/
+# ...and the web client's ([WEB_CLIENT])
+/Build-web/
 
 # Output directories
 /bin/*
