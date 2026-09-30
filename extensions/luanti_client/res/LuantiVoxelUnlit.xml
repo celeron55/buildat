@@ -1,0 +1,19 @@
+<!-- Voxel geometry drawn by its baked vertex-color light, with a shadow map
+     over it, for builtin/luanti's non-PBR path.
+
+     res/VoxelUnlit.xml beside this file is the same base pass with an
+     additive light pass instead, which is what a game with point lights in an
+     unlit world wants. This one is the parity path: official Luanti with its
+     dynamic shadows on darkens what the sun cannot see and leaves the rest of
+     the baked light alone, and an additive pass cannot do that. See
+     [NON_PBR], "Which path owes parity", in doc/plan/rendering_plan.md.
+
+     The shadow pass is what makes this geometry cast into the map as well as
+     receive from it. -->
+<technique vs="luanti_client/res/VoxelUnlit" ps="luanti_client/res/VoxelUnlit">
+    <pass name="base" />
+    <pass name="light" vs="luanti_client/res/VoxelUnlitShadow"
+            ps="luanti_client/res/VoxelUnlitShadow"
+            depthtest="equal" depthwrite="false" blend="multiply" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>

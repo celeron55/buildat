@@ -62,14 +62,19 @@ struct Worldgen: public worldgen::GeneratorInterface
 		int d = uc.getZ() - lc.getZ() + 1;
 
 		interface::v3f spread_h(280, 280, 280);
-		interface::NoiseParams np_h(0, 14, spread_h, 0, 5, 0.45);
+		// Retuned 2026-09-14: the noise hash used to multiply in signed
+		// arithmetic, so it came back biased and with about twice the swing
+		// -- the same numbers now give a terrain half as tall and much
+		// lower. The offset and the scale are what put the old ground back;
+		// the spawn line says where it landed, and it said y=61 before.
+		interface::NoiseParams np_h(27.4, 26, spread_h, 0, 5, 0.45);
 		interface::Noise noise_h(&np_h, 3, w, d);
 		noise_h.fbmMap2D(lc.getX() + spread_h.X/2,
 				lc.getZ() + spread_h.Z/2);
 		noise_h.transformNoiseMap();
 
 		interface::v3f spread_b(48, 48, 48);
-		interface::NoiseParams np_b(0, 3, spread_b, 11, 3, 0.5);
+		interface::NoiseParams np_b(6.4, 6.3, spread_b, 11, 3, 0.5);
 		interface::Noise noise_b(&np_b, 3, w, d);
 		noise_b.fbmMap2D(lc.getX() + spread_b.X/2,
 				lc.getZ() + spread_b.Z/2);
@@ -164,24 +169,39 @@ struct Module: public interface::Module
 
 	// chunk 32 * section 2; matches voxelworld defaults
 	static const int SECTION_SIZE_VOXELS = 64;
-	// Radius 5 fills a ~320-voxel view; Y is finite. Unload beyond 7.
-	static const int STREAM_RADIUS_XZ = 5;
-	static const int STREAM_UNLOAD_RADIUS_XZ = 7;
-	static const int STREAM_RADIUS_Y = 1;
-	static const int STREAM_Y_MIN = -1;
-	static const int STREAM_Y_MAX = 1;
+	// Radius 5 fills a ~320-voxel view; sections live until 7, so flying
+	// back and forth over the edge does not generate the same one twice.
+	// Three sections of world is all the height there is.
+	static const int GENERATE_RADIUS_XZ = 5;
+	static const int LOAD_RADIUS_XZ = 7;
+	static const int RADIUS_Y = 1;
+	static const int SECTION_Y_MIN = -1;
+	static const int SECTION_Y_MAX = 1;
+	// The generator runs in a thread and its queue says how far behind it
+	// is; the streamer waits instead of piling more on
 	static const size_t STREAM_QUEUE_SOFT_MAX = 12;
 	static const size_t STREAM_SECTIONS_PER_PASS = 2;
 
 	bool m_spawn_ready = false;
+	// The runway is built once every section it touches is loaded. A write
+	// into a section that is not there does nothing, and since the world
+	// started streaming those sections arrive a few at a time -- so the far
+	// end of the runway used to be written into nothing and lost.
+	bool m_runway_pending = false;
+	int m_runway_y = 0;
 	size_t m_sent_worldgen_queue = (size_t)-1;
 	float m_spawn_y = 0;
 	size_t m_worldgen_queue = 0;
-	uint m_stream_tick = 0;
+	uint m_queue_send_tick = 0;
 
 	sm_<network::PeerInfo::Id, pv::Vector3DInt32> m_drone_voxel_p;
-	set_<uint64_t> m_requested_sections;
+	// Sections the runway and the bombs have changed. Nothing here is
+	// saved, so a section that unloads loses what was done to it.
 	set_<uint64_t> m_pinned_sections;
+	// The points are pushed on the next tick rather than where they change:
+	// a bomb changes them from inside voxelworld's own access, and a runway
+	// would push a thousand times for one set of sections.
+	bool m_load_points_dirty = true;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -282,10 +302,11 @@ struct Module: public interface::Module
 
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			// Spawn section only; stream_around() loads the rest on demand.
-			// PolyVox Region asserts upper >= lower, so an empty box is not
-			// possible.
-			pv::Region region(-1, 0, 4, -1, 0, 4);
+			// The world's bounds in sections: as wide as anyone will ever
+			// fly, three sections tall. Nothing is loaded until the load
+			// points below say where; the sky is above the top of this.
+			pv::Region region(-30000, SECTION_Y_MIN, -30000,
+					30000, SECTION_Y_MAX, 30000);
 			ivoxelworld->create_instance(m_main_scene, region);
 		});
 
@@ -321,12 +342,7 @@ struct Module: public interface::Module
 			instance->enable();
 		});
 
-		pv::Vector3DInt32 spawn_p(SPAWN_X, 20, SPAWN_Z);
-		m_requested_sections.insert(section_key(
-				interface::container_coord(spawn_p.getX(), SECTION_SIZE_VOXELS),
-				interface::container_coord(spawn_p.getY(), SECTION_SIZE_VOXELS),
-				interface::container_coord(spawn_p.getZ(), SECTION_SIZE_VOXELS)));
-		stream_around(spawn_p);
+		update_load_points();
 	}
 
 	void on_unload()
@@ -372,137 +388,56 @@ struct Module: public interface::Module
 	// back as freshly generated terrain, so keep the modified ones loaded.
 	void pin_section_at_voxel(const pv::Vector3DInt32 &p)
 	{
-		m_pinned_sections.insert(section_key_at_voxel(p));
+		if(m_pinned_sections.insert(section_key_at_voxel(p)).second)
+			m_load_points_dirty = true;
 	}
 
-	void request_section(voxelworld::Instance *world,
-			const pv::Vector3DInt16 &section_p)
+	// Where the world stays loaded: every drone, the spawn while there is
+	// none, and every section the runway or a bomb has changed. voxelworld
+	// does the loading, the generating and the unloading from these.
+	void update_load_points()
 	{
-		if(section_p.getY() < STREAM_Y_MIN || section_p.getY() > STREAM_Y_MAX)
-			return;
-		uint64_t k = section_key(section_p.getX(), section_p.getY(),
-				section_p.getZ());
-		if(!m_requested_sections.insert(k).second)
-			return;
-		world->load_or_generate_section(section_p);
-	}
-
-	sv_<pv::Vector3DInt16> sections_to_request(const pv::Vector3DInt32 &voxel_p)
-	{
-		// Use m_worldgen_queue, not worldgen::access: generation holds that
-		// module for the whole section and would stall this thread's events.
-		size_t queued = m_worldgen_queue;
-		int sx = interface::container_coord(voxel_p.getX(), SECTION_SIZE_VOXELS);
-		int sy = interface::container_coord(voxel_p.getY(), SECTION_SIZE_VOXELS);
-		int sz = interface::container_coord(voxel_p.getZ(), SECTION_SIZE_VOXELS);
-
-		sv_<pv::Vector3DInt16> wanted;
-		for(int r = 0; r <= STREAM_RADIUS_XZ; r++){
-			if(queued >= STREAM_QUEUE_SOFT_MAX && r > 0)
-				break;
-			for(int dy = -STREAM_RADIUS_Y; dy <= STREAM_RADIUS_Y; dy++){
-				int y = sy + dy;
-				if(y < STREAM_Y_MIN || y > STREAM_Y_MAX)
-					continue;
-				for(int dz = -r; dz <= r; dz++){
-					for(int dx = -r; dx <= r; dx++){
-						if(r > 0 && dx != r && dx != -r &&
-								dz != r && dz != -r)
-							continue;
-						uint64_t k = section_key(sx + dx, y, sz + dz);
-						if(m_requested_sections.count(k))
-							continue;
-						wanted.push_back(pv::Vector3DInt16(sx + dx, y, sz + dz));
-						queued++;
-						if(wanted.size() >= STREAM_SECTIONS_PER_PASS)
-							return wanted;
-					}
-				}
-			}
-		}
-		return wanted;
-	}
-
-	void stream_around(const pv::Vector3DInt32 &voxel_p)
-	{
-		sv_<pv::Vector3DInt16> wanted = sections_to_request(voxel_p);
-		if(wanted.empty())
-			return;
-
-		voxelworld::access(m_server, m_main_scene,
-				[&](voxelworld::Instance *world)
-		{
-			for(const auto &p : wanted)
-				request_section(world, p);
-		});
-	}
-
-	void stream_drones_or_spawn()
-	{
+		sv_<voxelworld::LoadPoint> points;
 		if(m_drone_voxel_p.empty()){
-			stream_around(pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z));
-			return;
+			points.push_back(voxelworld::LoadPoint(
+					pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z),
+					LOAD_RADIUS_XZ, RADIUS_Y,
+					GENERATE_RADIUS_XZ, RADIUS_Y));
 		}
-		for(auto &pair : m_drone_voxel_p)
-			stream_around(pair.second);
-	}
-
-	bool section_near_any_drone(const pv::Vector3DInt16 &section_p)
-	{
-		auto near_p = [&](const pv::Vector3DInt32 &voxel_p){
-			int sx = interface::container_coord(voxel_p.getX(),
-					SECTION_SIZE_VOXELS);
-			int sz = interface::container_coord(voxel_p.getZ(),
-					SECTION_SIZE_VOXELS);
-			int dx = section_p.getX() - sx;
-			int dz = section_p.getZ() - sz;
-			if(dx < 0) dx = -dx;
-			if(dz < 0) dz = -dz;
-			// Y is only three layers; keep the whole column while XZ is near
-			return dx <= STREAM_UNLOAD_RADIUS_XZ &&
-					dz <= STREAM_UNLOAD_RADIUS_XZ;
-		};
-		if(m_drone_voxel_p.empty())
-			return near_p(pv::Vector3DInt32(SPAWN_X, 20, SPAWN_Z));
 		for(auto &pair : m_drone_voxel_p){
-			if(near_p(pair.second))
-				return true;
+			// Tagged with the peer, which is what makes it the point the
+			// world is sent to that client from
+			points.push_back(voxelworld::LoadPoint(pair.second,
+					LOAD_RADIUS_XZ, RADIUS_Y,
+					GENERATE_RADIUS_XZ, RADIUS_Y, pair.first));
 		}
-		return false;
-	}
-
-	void unload_distant_sections()
-	{
-		sv_<uint64_t> drop;
-		for(uint64_t k : m_requested_sections){
-			if(m_pinned_sections.count(k))
-				continue;
-			pv::Vector3DInt16 p = section_from_key(k);
-			if(section_near_any_drone(p))
-				continue;
-			drop.push_back(k);
-			if(drop.size() >= STREAM_SECTIONS_PER_PASS)
-				break;
+		// A pin is a point with no radius at all
+		for(uint64_t k : m_pinned_sections){
+			pv::Vector3DInt16 sp = section_from_key(k);
+			points.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
+					sp.getX() * SECTION_SIZE_VOXELS,
+					sp.getY() * SECTION_SIZE_VOXELS,
+					sp.getZ() * SECTION_SIZE_VOXELS), 0, 0, 0, 0));
 		}
-		if(drop.empty())
-			return;
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
 		{
-			for(uint64_t k : drop){
-				world->unload_section(section_from_key(k));
-				m_requested_sections.erase(k);
-			}
+			world->set_load_points(points);
+			// Backpressure: only this module can see how far behind the
+			// generator is, so it is the one that tells the streamer to wait
+			world->set_stream_budget(
+					m_worldgen_queue >= STREAM_QUEUE_SOFT_MAX ? 0 :
+					STREAM_SECTIONS_PER_PASS);
 		});
+		m_load_points_dirty = false;
 	}
 
 	void on_tick(const interface::TickEvent &event)
 	{
-		if(((m_stream_tick++) % 4) == 0){
-			stream_drones_or_spawn();
-			unload_distant_sections();
-		}
-		if((m_stream_tick % 10) == 0)
+		try_build_runway();
+		if(m_load_points_dirty)
+			update_load_points();
+		if(((m_queue_send_tick++) % 10) == 0)
 			send_worldgen_queue_size();
 		try_resolve_spawn();
 	}
@@ -522,6 +457,43 @@ struct Module: public interface::Module
 		});
 		log_v(MODULE, "Sent spawn (%.2f, %.2f, %.2f) to peer %zu",
 				x, y, z, peer);
+	}
+
+	// Every voxel the runway and its airspace touch, so that the sections
+	// can be asked for before anything is written into them and looked at
+	// again to see whether they have arrived.
+	template<typename F> void over_runway(int runway_y, F f)
+	{
+		for(int dx = -AIRSPACE_MARGIN; dx < RUNWAY_LENGTH + AIRSPACE_MARGIN;
+				dx++){
+			for(int dz = -RUNWAY_HALF_WIDTH - AIRSPACE_MARGIN;
+					dz <= RUNWAY_HALF_WIDTH + AIRSPACE_MARGIN; dz++){
+				const int x = SPAWN_X + dx;
+				const int z = SPAWN_Z + dz;
+				f(pv::Vector3DInt32(x, runway_y - 4, z));
+				f(pv::Vector3DInt32(x, runway_y, z));
+				f(pv::Vector3DInt32(x, runway_y + AIRSPACE_HEIGHT, z));
+			}
+		}
+	}
+
+	// Is there terrain in all of them yet? A section that exists is not the
+	// same as a section that has been generated: the generator writes the
+	// whole section when it is done and what it writes wins, so a runway
+	// laid before that is laid into nothing. An undefined voxel is how a
+	// section with nothing in it yet reads, which is the same test
+	// try_resolve_spawn() makes.
+	bool runway_ground_ready(voxelworld::Instance *world, int runway_y)
+	{
+		bool all = true;
+		over_runway(runway_y, [&](const pv::Vector3DInt32 &p){
+			if(!all)
+				return;
+			if(world->get_voxel(p, true).get_id() ==
+					interface::VOXELTYPEID_UNDEFINED)
+				all = false;
+		});
+		return all;
 	}
 
 	// The strip itself is rock, the ground under it dirt so a runway laid over
@@ -559,6 +531,25 @@ struct Module: public interface::Module
 	// Terrain ids: 2 rock, 3 dirt, 4 grass. Skip air (1), trees/leaves (5, 6).
 	// Unloaded voxels are UNDEFINED; skip them so spawn can resolve as soon
 	// as the surface section exists, while further sections still generate.
+	// The runway, once every section it touches has arrived. Until then
+	// there is nothing to write into: voxelworld says so in a warning and
+	// drops the write, which is how the far half of the runway went missing
+	// when the world started streaming.
+	void try_build_runway()
+	{
+		if(!m_runway_pending)
+			return;
+		voxelworld::access(m_server, m_main_scene,
+				[&](voxelworld::Instance *world)
+		{
+			if(!runway_ground_ready(world, m_runway_y))
+				return;
+			build_runway(world, m_runway_y);
+			m_runway_pending = false;
+			log_i(MODULE, "Runway built at y=%i", m_runway_y);
+		});
+	}
+
 	void try_resolve_spawn()
 	{
 		if(m_spawn_ready)
@@ -592,11 +583,18 @@ struct Module: public interface::Module
 			return;
 		if(surface_y < SPAWN_Y_MIN)
 			return;
+		// The sections it will be written into are asked for here and the
+		// strip itself is built once they are all loaded; see
+		// try_build_runway() on the tick.
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
 		{
-			build_runway(world, surface_y);
+			over_runway(surface_y, [&](const pv::Vector3DInt32 &p){
+				pin_section_at_voxel(p);
+			});
 		});
+		m_runway_y = surface_y;
+		m_runway_pending = true;
 		// Voxel n is a 1x1x1 cube centered at n; sit on its top face
 		m_spawn_y = (float)surface_y + 0.5f + 0.4f;
 		m_spawn_ready = true;
@@ -672,6 +670,7 @@ struct Module: public interface::Module
 	{
 		log_t(MODULE, "on_worldgen_queue_modified()");
 		m_worldgen_queue = event.queue_size;
+		m_load_points_dirty = true;
 		try_resolve_spawn();
 	}
 
@@ -699,12 +698,13 @@ struct Module: public interface::Module
 		m_drone_voxel_p[packet.sender] = pv::Vector3DInt32(
 				(int32_t)std::floor(x), (int32_t)std::floor(y),
 				(int32_t)std::floor(z));
-		stream_around(m_drone_voxel_p[packet.sender]);
+		m_load_points_dirty = true;
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
 		m_drone_voxel_p.erase(old_client.info.id);
+		m_load_points_dirty = true;
 	}
 };
 
