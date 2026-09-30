@@ -99,6 +99,9 @@ local S = {
 	eye = 1600,
 	-- The pointer is a finger ([FP_TOUCH]): the page says so
 	touch = buildat.get_env("BUILDAT_TOUCH") == "1",
+	-- In a browser (only the web page sets it): the wheel comes in tenths
+	-- of a notch there
+	web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil,
 	-- Walking's vertical field of view in degrees, the viewer's own and
 	-- kept on this client (user)
 	walk_fov = tonumber(buildat.storage_read("walk_fov") or "") or 80,
@@ -5355,8 +5358,9 @@ do
 		end
 		-- **A notch is a share of the distance** (user): 0.8 of it in and
 		-- 1.25 out, to the speed setting's power -- the wheel is in notches,
-		-- the web's included (the SDL port counts them)
-		local notches = math.max(-10, math.min(10, wheel))
+		-- the web's in tenths (its SDL port counts them so)
+		local notches = math.max(-10, math.min(10,
+				S.web and wheel / 10 or wheel))
 		local f = 0.8 ^ (notches * S.wheel_speed / 100)
 		if S.view == "walk" then
 			-- Walking: a metre a notch along the look, as it was

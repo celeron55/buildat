@@ -391,17 +391,19 @@ EM_BOOL
 Emscripten_HandleWheel(int eventType, const EmscriptenWheelEvent *wheelEvent, void *userData)
 {
     SDL_WindowData *window_data = userData;
-    /* buildat: in notches, as a desktop's wheel is. A browser gives pixels
+    /* buildat: in tenths of a notch (a desktop's wheel is whole notches,
+       and the web page's reader divides by ten). A browser gives pixels
        (about 100 a notch), lines (3 a notch) or pages, and a smooth
        scroll a notch in many small events: they are added up, and the
-       whole notches go on (user, 2026-09-30: the floorplanner zoomed far
-       faster on the web). */
+       whole tenths go on (user, 2026-09-30: the floorplanner zoomed far
+       faster on the web, and then in steps of whole notches that
+       Firefox's fewer pixels reached only now and then). */
     static double acc_x = 0.0, acc_y = 0.0;
     double unit = wheelEvent->deltaMode == DOM_DELTA_PIXEL ? 100.0 :
             wheelEvent->deltaMode == DOM_DELTA_LINE ? 3.0 : 1.0;
     int nx, ny;
-    acc_x += wheelEvent->deltaX / unit;
-    acc_y += wheelEvent->deltaY / unit;
+    acc_x += wheelEvent->deltaX * 10.0 / unit;
+    acc_y += wheelEvent->deltaY * 10.0 / unit;
     nx = (int)acc_x;
     ny = (int)acc_y;
     acc_x -= nx;
