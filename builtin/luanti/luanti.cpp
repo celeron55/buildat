@@ -20,6 +20,7 @@
 #include "main_context/api.h"
 #include "client_file/api.h"
 #include "network/api.h"
+#include "accounts/api.h"
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
@@ -1846,6 +1847,43 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		return pv::Vector3DInt16((int16_t)k, (int16_t)(k >> 16),
 				(int16_t)(k >> 32));
+	}
+
+	// __luanti_accounts(cmd, a, b): Luanti's kicks and bans, which are
+	// builtin/accounts' ([VANILLA_PUBLIC] 4). A player's name is their
+	// account's.
+	//   "kick", name, reason -> "" when done, else why not
+	//   "ban", name          -> the same
+	//   "unban", name or address -> the same
+	//   "ban_list"           -> "name|address, ..."
+	//   "ip", name           -> the address, or ""
+	static int l_accounts(lua_State *L)
+	{
+		Module *self = module_of(L);
+		const ss_ cmd = luaL_checkstring(L, 1);
+		const ss_ a = luaL_optstring(L, 2, "");
+		const ss_ b = luaL_optstring(L, 3, "");
+		ss_ out;
+		accounts::access(self->m_server, [&](accounts::Interface *i){
+			const accounts::PeerId peer = a.empty() ? 0 : i->find_peer(a);
+			if(cmd == "kick"){
+				if(!peer)
+					out = a+" is not here";
+				else
+					i->kick(peer, b.empty() ? "Kicked" : b);
+			} else if(cmd == "ban"){
+				out = i->ban(a, "the game");
+			} else if(cmd == "unban"){
+				out = i->unban(a);
+			} else if(cmd == "ban_list"){
+				for(const ss_ &ban : i->ban_list())
+					out += (out.empty() ? "" : ", ")+ban;
+			} else if(cmd == "ip"){
+				out = peer ? i->address_of(peer) : "";
+			}
+		});
+		lua_pushstring(L, out.c_str());
+		return 1;
 	}
 
 	// __luanti_forceload(x, y, z, wanted) -> whether it is kept now
@@ -8441,6 +8479,7 @@ struct Module: public interface::Module, public luanti::Interface
 		lua_call(m_lua, 1, 0);
 
 		set_global_cfunction("__luanti_log", l_log);
+		set_global_cfunction("__luanti_accounts", l_accounts);
 		set_global_cfunction("__luanti_get_us_time", l_get_us_time);
 		set_global_cfunction("__luanti_list_dir", l_list_dir);
 		set_global_cfunction("__luanti_path_exists", l_path_exists);

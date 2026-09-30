@@ -3270,7 +3270,7 @@ function core.get_player_information(name)
 		return nil
 	end
 	return {
-		address = "",
+		address = core.get_player_ip(name) or "",
 		ip_version = 4,
 		connection_uptime = 0,
 		protocol_version = PROTOCOL_VERSION,

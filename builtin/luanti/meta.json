@@ -5,6 +5,7 @@
 		{"module": "voxelworld"},
 		{"module": "worldgen"},
 		{"module": "luanti_mapgen"},
-		{"module": "client_lua"}
+		{"module": "client_lua"},
+		{"module": "accounts"}
 	]
 }

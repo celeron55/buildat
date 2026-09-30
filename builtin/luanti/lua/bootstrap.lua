@@ -2221,8 +2221,8 @@ local STUBS_NIL = {
 	"hud_replace_builtin",
 	-- Auth and privileges (M4)
 	"set_player_privs", "auth_reload",
-	"kick_player", "disconnect_player", "ban_player", "unban_player_or_ip",
-	"get_ban_list", "get_ban_description",
+	-- kick_player, disconnect_player, the bans and get_player_ip are
+	-- builtin/accounts', below
 	-- The server itself
 	"cancel_shutdown_requests", "get_server_status",
 	"get_server_max_lag", "get_worldpath_nocreate",
@@ -2238,11 +2238,55 @@ local STUBS_NIL = {
 	-- a log. A directory copied, moved or removed is also a decision about
 	-- what a downloaded game may do to the user's disk, which is why these
 	-- three are a stub and not four lines of implementation.
-	"cpdir", "mvdir", "rmdir", "get_player_ip", "save_gen_notify",
+	"cpdir", "mvdir", "rmdir", "save_gen_notify",
 }
 
 for _, name in ipairs(STUBS_NIL) do
 	stub(name, nil)
+end
+
+-- **Kicks and bans are the server's accounts'** ([VANILLA_PUBLIC] 4): a
+-- ban is of the account and of the address it last joined from, and an
+-- admin sees and lifts it on the Users page as well as with /unban.
+-- simplified: reconnect (a kick's "join again") is not said to the client
+function core.kick_player(name, reason)
+	return __luanti_accounts("kick", name, reason or "") == ""
+end
+core.disconnect_player = core.kick_player
+
+function core.ban_player(name)
+	local why = __luanti_accounts("ban", name)
+	if why ~= "" then
+		core.log("action", "ban_player(" .. tostring(name) .. "): " .. why)
+	end
+	return why == ""
+end
+
+function core.unban_player_or_ip(name_or_ip)
+	return __luanti_accounts("unban", name_or_ip) == ""
+end
+
+function core.get_ban_list()
+	return __luanti_accounts("ban_list")
+end
+
+-- The bans that name the account or the address, as get_ban_list says
+-- them
+function core.get_ban_description(name_or_ip)
+	local out = {}
+	for ban in core.get_ban_list():gmatch("[^,]+") do
+		ban = ban:match("^%s*(.-)%s*$")
+		local n, ip = ban:match("^(.*)|(.*)$")
+		if n == name_or_ip or ip == name_or_ip then
+			out[#out + 1] = ban
+		end
+	end
+	return table.concat(out, ", ")
+end
+
+function core.get_player_ip(name)
+	local ip = __luanti_accounts("ip", name)
+	return ip ~= "" and ip or nil
 end
 
 -- A mod channel with nobody on the other end: no client here speaks the
