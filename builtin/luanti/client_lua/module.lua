@@ -469,6 +469,12 @@ end
 -- mesh name -> {quads = {...}} once the server has answered, or false while
 -- it is being asked for: a model is asked for by name and arrives once.
 local models = {}
+-- Who redraws on the item images (M.sub_item_images), and the mesh nodes
+-- a hand draws as their mesh (luanti:wield_meshes); up here, since a
+-- model arriving tells them too
+local item_image_subs = {}
+local wield_meshes = {}
+M.wield_generation = 0
 -- mesh name and textures -> the node its geometry was built on, which every
 -- object of that kind is a clone of. Every vertex is a sandbox call, and the
 -- extension measured a VoxeLibre skeleton at 250 ms of them; a clone is
@@ -711,8 +717,10 @@ function M.set_light_units(ambient, bounce, lamp, sun)
 end
 
 -- The flat colour at a position, or nil where no voxel is loaded (the
--- caller keeps what it had: a full-bright guess lit caves)
-function M.light_color(x, y, z)
+-- caller keeps what it had: a full-bright guess lit caves). no_sun leaves
+-- the sun out, for a lit model that has the sun's light of its own.
+M.PBR_TEXEL_K = 0.44
+function M.light_color(x, y, z, no_sun)
 	local v = voxelworld.get_static_voxel(buildat.Vector3(
 			math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5)))
 	if v == nil then
@@ -745,7 +753,7 @@ function M.light_color(x, y, z)
 	-- scaled by that so a mid tone sits level with the world's.
 	-- simplified: one factor for every texel; the upgrade is an unlit
 	-- technique that decodes, which level 2's material does anyway.
-	local k = 0.44
+	local k = M.PBR_TEXEL_K
 	local a, b, l = u.ambient, u.bounce, u.lamp
 	-- The sun where the sky nibble is full, which in Luanti is direct
 	-- sunlight, at half: the mean of a face turned to it and one turned
@@ -753,7 +761,8 @@ function M.light_color(x, y, z)
 	-- simplified: no shadow map and no normal; an object in a tree's
 	-- shadow on open ground is half sunlit. [OBJECT_LIGHT] level 2 is
 	-- the sun's direction and shadow on it.
-	local s = u.sun and sky >= 1 and u.sun or {r = 0, g = 0, b = 0}
+	local s = u.sun and sky >= 1 and not no_sun and u.sun or
+			{r = 0, g = 0, b = 0}
 	local h = 0.5
 	return magic.Color(k * (a.r * share + b.r * bounce + l.r * lit + h * s.r),
 			k * (a.g * share + b.g * bounce + l.g * lit + h * s.g),
@@ -1044,6 +1053,17 @@ buildat.sub_packet("luanti:model", function(data)
 	-- before the model it names has been asked for
 	if form_model_arrived then
 		form_model_arrived()
+	end
+	-- And a hand holding a mesh node ([WIELD_MESH]): what draws the hand
+	-- listens for the item images, which is when it tries again. Only for
+	-- a wield mesh: a mob's poses arrive several a second
+	for _, wm in pairs(wield_meshes) do
+		if wm.mesh == values.name then
+			for _, f in ipairs(item_image_subs) do
+				f()
+			end
+			break
+		end
 	end
 end)
 
@@ -2325,7 +2345,6 @@ local item_images = {}
 -- a palette_index of its own is coloured by reading that picture
 local item_palettes = {}
 
-local item_image_subs = {}
 
 -- sub_item_images(f) -> f() when the images arrive, and once now if they
 -- already have. Whatever draws an item has to follow them: the inventory
@@ -2368,19 +2387,58 @@ end
 -- given node's CustomGeometry, one geometry per texture, and returns the
 -- textures' resource names in geometry order, or nil for an item with no
 -- picture. The mesh is a unit across; the caller scales it.
+-- The second value is what it is: "mesh", "cube" or "flat", which the
+-- caller sizes by (official's node and extruded scales). A mesh node
+-- whose model has not arrived is nil, and is asked for.
 function M.wield_geometry(node, item_name, expr_override)
+	local wm = not expr_override and wield_meshes[item_name]
+	if wm then
+		-- Posed at its first frame, as Luanti draws a node's mesh: a
+		-- skinned one's bind pose is not the shape (VoxeLibre's arm came
+		-- apart into its bones' pieces)
+		local have = models[model_key(wm.mesh, 0)]
+		if not have then
+			want_model(wm.mesh, 0)
+			return nil
+		end
+		local tiles = buildat.set_quad_geometry(node, have.quads)
+		local textures = {}
+		for i = 1, #tiles do
+			local resource = texture_of(wm.tiles[tiles[i] + 1] or
+					wm.tiles[1] or "")
+			if resource == nil then
+				return nil
+			end
+			textures[i] = resource
+		end
+		return textures, "mesh"
+	end
 	local expr = expr_override or item_images[item_name]
 	if expr == nil then
 		return nil
 	end
 	local cg = node:GetComponent("CustomGeometry") or
 			node:CreateComponent("CustomGeometry")
+	-- The face's normal, for a lit technique; the second winding's is the
+	-- other way
+	local function normal(a, b, c)
+		local ux, uy, uz = b[1] - a[1], b[2] - a[2], b[3] - a[3]
+		local vx, vy, vz = c[1] - a[1], c[2] - a[2], c[3] - a[3]
+		local nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz,
+				ux * vy - uy * vx
+		local l = math.sqrt(nx * nx + ny * ny + nz * nz)
+		l = l > 0 and l or 1
+		nx, ny, nz = nx / l, ny / l, nz / l
+		return magic.Vector3(nx, ny, nz), magic.Vector3(-nx, -ny, -nz)
+	end
 	-- Both windings of every quad: a shape in the hand is looked at from
 	-- whatever side the hand turns to, and a face culled for its winding
 	-- was a dirt block held as a thin dark plate
 	local function quad(a, b, c, d, u, v)
-		for _, p in ipairs({a, b, c, a, c, d, a, c, b, a, d, c}) do
+		local n, back = normal(a, b, c)
+		for i, p in ipairs({a, b, c, a, c, d, a, c, b, a, d, c}) do
 			cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
+			cg:DefineNormal(i <= 6 and n or back)
 			cg:DefineTexCoord(magic.Vector2(u, v))
 		end
 	end
@@ -2409,8 +2467,10 @@ function M.wield_geometry(node, item_name, expr_override)
 		local function uvface(a, b, c, d)
 			local uv = {{0, 0}, {1, 0}, {1, 1}, {0, 1}}
 			local ps = {a, b, c, d}
-			for _, i in ipairs({1, 2, 3, 1, 3, 4, 1, 3, 2, 1, 4, 3}) do
+			local n, back = normal(a, b, c)
+			for k, i in ipairs({1, 2, 3, 1, 3, 4, 1, 3, 2, 1, 4, 3}) do
 				cg:DefineVertex(magic.Vector3(ps[i][1], ps[i][2], ps[i][3]))
+				cg:DefineNormal(k <= 6 and n or back)
 				cg:DefineTexCoord(magic.Vector2(uv[i][1], uv[i][2]))
 			end
 		end
@@ -2423,7 +2483,7 @@ function M.wield_geometry(node, item_name, expr_override)
 		uvface({-h, h, -h}, {-h, -h, -h}, {h, -h, -h}, {h, h, -h})
 		uvface({h, h, h}, {h, -h, h}, {-h, -h, h}, {-h, h, h})
 		cg:Commit()
-		return textures
+		return textures, "cube"
 	end
 	local resource = texture_of(expr)
 	if resource == nil then
@@ -2467,7 +2527,7 @@ function M.wield_geometry(node, item_name, expr_override)
 		end
 	end
 	cg:Commit()
-	return {resource}
+	return {resource}, "flat"
 end
 
 -- The ones that have no image, said once each
@@ -2618,7 +2678,8 @@ function M.wield_look(str)
 	if expr == nil or expr == "" then
 		expr = meta.inventory_image
 	end
-	if expr == nil or expr == "" then
+	local own = expr ~= nil and expr ~= ""
+	if not own then
 		expr = item_images[stack.name]
 	end
 	if expr == nil or expr == "" then
@@ -2634,7 +2695,13 @@ function M.wield_look(str)
 	if meta.wield_overlay and meta.wield_overlay ~= "" then
 		add = add .. "^" .. meta.wield_overlay
 	end
-	expr = add_to_expr(expr, add)
+	-- Metadata that does not touch the look (VoxeLibre's hand carries
+	-- some) leaves the item's own, which for a mesh node is its mesh
+	if not own and add == "" then
+		expr = nil
+	else
+		expr = add_to_expr(expr, add)
+	end
 	-- wield_scale is how much bigger the hand holds it; a vector as
 	-- "x,y,z" or one number for all three
 	local sx, sy, sz = nil, nil, nil
@@ -2648,7 +2715,7 @@ function M.wield_look(str)
 			sx, sy, sz = one, one, one
 		end
 	end
-	return expr, stack.name .. "\1" .. expr .. "\1" ..
+	return expr, stack.name .. "\1" .. (expr or "") .. "\1" ..
 			tostring(meta.wield_scale or ""), sx, sy, sz
 end
 
@@ -3700,6 +3767,32 @@ startup_packet("luanti:dig_props", "luanti_data/dig_props.bin", function(data)
 			footsteps .. " nodes with a footstep, " .. dug_n ..
 			" with a dug sound and " .. placed_n .. " with a place sound")
 end)
+
+-- item name -> {mesh = name, tiles = {expr, ...}} for a mesh node in a
+-- hand ([WIELD_MESH]; core.__wield_meshes())
+startup_packet("luanti:wield_meshes", "luanti_data/wield_meshes.bin",
+		function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	for i = 1, #values - 1, 2 do
+		local parts = {}
+		for part in string.gmatch(values[i + 1] .. "\1", "([^\1]*)\1") do
+			parts[#parts + 1] = part
+		end
+		local tiles = {}
+		for j = 2, #parts do
+			tiles[j - 1] = parts[j]
+		end
+		wield_meshes[values[i]] = {mesh = parts[1], tiles = tiles}
+	end
+	log:info("luanti:wield_meshes: " .. math.floor(#values / 2) .. " items")
+	-- A shape the hand built before these came (the picture, flat) is
+	-- stale: the caller drops what it built for an older generation
+	M.wield_generation = M.wield_generation + 1
+	for _, f in ipairs(item_image_subs) do
+		f()
+	end
+end)
+buildat.send_packet("luanti:get_wield_meshes", "")
 
 startup_packet("luanti:item_palettes", "luanti_data/item_palettes.bin",
 		function(data)

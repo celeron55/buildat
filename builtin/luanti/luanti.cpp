@@ -1112,6 +1112,8 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_item_palettes"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/luanti:get_wield_meshes"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_object_props"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:get_dig_props"));
@@ -1152,6 +1154,8 @@ struct Module: public interface::Module, public luanti::Interface
 				on_get_item_images, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_item_palettes",
 				on_get_item_palettes, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:get_wield_meshes",
+				on_get_wield_meshes, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_object_props",
 				on_get_object_props, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:get_dig_props",
@@ -2541,6 +2545,8 @@ struct Module: public interface::Module, public luanti::Interface
 				"item image fields");
 		serve_lua_table_file("__item_palettes",
 				"luanti_data/item_palettes.bin", "item palettes");
+		serve_lua_table_file("__wield_meshes",
+				"luanti_data/wield_meshes.bin", "wield meshes");
 	}
 
 	void send_texmods(network::PeerInfo::Id peer)
@@ -7113,6 +7119,21 @@ struct Module: public interface::Module, public luanti::Interface
 		});
 		log_v(MODULE, "C%zu: %zu item palettes", (size_t)packet.sender,
 				flat.size() / 2);
+	}
+
+	// What a hand holding a mesh node draws ([WIELD_MESH]); see
+	// core.__wield_meshes()
+	void on_get_wield_meshes(const network::Packet &packet)
+	{
+		sv_<ss_> flat = string_list_from_lua("__wield_meshes");
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "luanti:wield_meshes", os.str());
+		});
 	}
 
 	void on_get_item_images(const network::Packet &packet)

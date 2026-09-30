@@ -4383,6 +4383,31 @@ function core.__item_images()
 	return out
 end
 
+-- core.__wield_meshes() -> {item name, mesh "\1" tile "\1" tile ..., ...}
+--
+-- What a hand holding a mesh node draws: official's WieldMeshSceneNode
+-- draws the node's own mesh, in its tiles, for a node whose drawtype is
+-- "mesh" and that has no wield_image -- VoxeLibre's hand is one, the
+-- player's skin on an arm ([WIELD_MESH]). The tiles are the expressions
+-- in the mesh's material order.
+function core.__wield_meshes()
+	local out = {}
+	for name, def in pairs(core.registered_items) do
+		if name ~= "" and def.drawtype == "mesh" and
+				type(def.mesh) == "string" and def.mesh ~= "" and
+				(def.wield_image == nil or def.wield_image == "") then
+			local parts = {def.mesh}
+			local tiles = def.tiles or def.tile_images
+			for i = 1, math.max(1, type(tiles) == "table" and #tiles or 0) do
+				parts[#parts + 1] = tile_of(def, i) or ""
+			end
+			out[#out + 1] = name
+			out[#out + 1] = table.concat(parts, "\1")
+		end
+	end
+	return out
+end
+
 -- core.__item_palettes() -> {item name, palette texture, ...}
 --
 -- Which palette an item's definition names, for a stack that carries a

@@ -970,6 +970,28 @@ WIELD.camera_mode = 1
 WIELD.shoulder = false
 wield_node:GetChild("box").scale = magic.Vector3(WIELD.node_scale, WIELD.node_scale,
 		WIELD.node_scale)
+-- **Lit under pbr** (user, 2026-09-30): a shape through Urho's PBR lit
+-- passes, so the sun's direction and its shadow map fall on it as the
+-- world's own light pass has them. The ambient is the world zone's, the
+-- open sky's; the material's colour scales it to the light where the
+-- player stands (update_sky), so a cave darkens the hand and a torch
+-- lights it -- and the sun with it, which a cave's shadow map has taken
+-- away already. (A zone of the hand's own carried the ambient and took the
+-- sun's light pass away with it, for a reason not found.) The parity modes
+-- keep the flat unlit colour.
+function WIELD.set_lit(sh, lit)
+	if sh.lit == lit then
+		return
+	end
+	sh.lit = lit
+	for _, m in ipairs(sh.materials) do
+		m:SetTechnique(0, magic.cache:GetResource("Technique", lit and
+				"luanti/PBRLitAlphaMask.xml" or "luanti/UnlitAlphaMask.xml"))
+		m:SetShaderParameter("Roughness", 1.0)
+		m:SetShaderParameter("Metallic", 0.0)
+	end
+end
+
 -- A node's enabled does not reach its children (Urho's SetEnabled is
 -- not deep): the box's child node and the shapes are switched with it,
 -- or an empty hand drew the box black in every picture (2026-09-20)
@@ -1011,6 +1033,16 @@ local hotbar_pictures = {}
 -- stack is the itemstring, since what the hand holds may be a stack's own
 -- picture rather than its item's ([ITEM_META_LOOK])
 local function draw_wielded(item_name, stack)
+	-- What was built before the mesh nodes were known is built again
+	if WIELD.generation ~= luanti.wield_generation then
+		WIELD.generation = luanti.wield_generation
+		for _, sh in pairs(hotbar_pictures["\1shapes"] or {}) do
+			if sh then
+				sh.node:Remove()
+			end
+		end
+		hotbar_pictures["\1shapes"] = nil
+	end
 	hotbar_pictures["\1shapes"] = hotbar_pictures["\1shapes"] or {}
 	local wield_shapes = hotbar_pictures["\1shapes"]
 	if item_name == nil or not luanti.hud_flag("wielditem") then
@@ -1022,7 +1054,7 @@ local function draw_wielded(item_name, stack)
 	local shape = wield_shapes[key]
 	if shape == nil then
 		local holder = wield_node:CreateChild("shape")
-		local resources = luanti.wield_geometry(holder, item_name, expr)
+		local resources, kind = luanti.wield_geometry(holder, item_name, expr)
 		if resources == nil then
 			-- Not kept: a picture whose file had not come yet was a box
 			-- for the rest of the session (user, 2026-09-30: a torch as a
@@ -1030,6 +1062,8 @@ local function draw_wielded(item_name, stack)
 			holder:Remove()
 		else
 			local cg = holder:GetComponent("CustomGeometry")
+			-- Unlit until update_sky() says the frame is pbr's, which
+			-- lights it (WIELD.set_lit)
 			local materials = {}
 			for i, resource in ipairs(resources) do
 				local m = wield_material:Clone()
@@ -1042,14 +1076,15 @@ local function draw_wielded(item_name, stack)
 			end
 			cg.castShadows = false
 			holder.enabled = false
-			-- a node's cube and a picture's slab are official's sizes
-			local sc = #resources == 3 and WIELD.node_scale or
+			-- a node's cube or mesh and a picture's slab are official's
+			-- sizes
+			local sc = kind ~= "flat" and WIELD.node_scale or
 					WIELD.extruded_scale
 			-- And what the stack asked the hand to hold it at, over that
 			-- ([ITEM_META_LOOK]'s wield_scale)
 			holder.scale = magic.Vector3(sc * (sx or 1), sc * (sy or sx or 1),
 					sc * (sz or sx or 1))
-			shape = {node = holder, materials = materials}
+			shape = {node = holder, materials = materials, lit = false}
 			wield_shapes[key] = shape
 		end
 	end
@@ -1100,7 +1135,11 @@ local function draw_hotbar()
 	end
 	local name = parse_stack(hotbar_stacks[wield_index])
 	wielded_text:SetText(name or "")
-	draw_wielded(name, hotbar_stacks[wield_index])
+	if name then
+		draw_wielded(name, hotbar_stacks[wield_index])
+	else
+		draw_wielded(parse_stack(WIELD.hand_stack), WIELD.hand_stack)
+	end
 end
 
 -- Set once the HUD is built: a HUD element that draws a list of the player's
@@ -1115,6 +1154,10 @@ end)
 
 luanti.sub_inventory(function(lists)
 	hotbar_stacks = lists.main or {}
+	-- What an empty hand holds: the player's "hand" list, official's
+	-- (LocalPlayer::getWieldedItem's hand fallback) -- VoxeLibre's arm in
+	-- the player's skin
+	WIELD.hand_stack = (lists.hand or {})[1]
 	draw_hotbar()
 	if hud_follows_inventory then
 		hud_follows_inventory()
@@ -2107,9 +2150,29 @@ local function update_sky(dt)
 	local cp = camera_node.worldPosition
 	local col = luanti.light_color(cp.x, cp.y, cp.z) or magic.Color(k, k, k, 1.0)
 	wield_material:SetShaderParameter("MatDiffColor", col)
-	-- and the shapes' own materials, clones of it ([WIELD_MESH])
+	-- and the shapes' own materials, clones of it ([WIELD_MESH]); a lit
+	-- one's the light there without the sun over the zone's ambient, which
+	-- the shader multiplies it by
+	local lit_col = nil
+	local lit = luanti.light_units ~= nil
 	for _, sh in pairs(hotbar_pictures["\1shapes"] or {}) do
 		if sh then
+			WIELD.set_lit(sh, lit)
+		end
+		if sh and sh.lit then
+			if lit_col == nil then
+				local a = luanti.light_color(cp.x, cp.y, cp.z, true) or col
+				local z = zone.ambientColor
+				local function ratio(v, zv)
+					return zv > 1e-6 and v / zv or 0
+				end
+				lit_col = magic.Color(ratio(a.r, z.r), ratio(a.g, z.g),
+						ratio(a.b, z.b), 1.0)
+			end
+			for _, m in ipairs(sh.materials) do
+				m:SetShaderParameter("MatDiffColor", lit_col)
+			end
+		elseif sh then
 			for _, m in ipairs(sh.materials) do
 				m:SetShaderParameter("MatDiffColor", col)
 			end

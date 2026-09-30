@@ -732,9 +732,16 @@ luabind::object set_quad_geometry(const luabind::object &node_o,
 		for(const Quad &q : all){
 			if(q.tile != tiles[g])
 				continue;
-			for(int c : corners){
+			// The face's normal, for a lit technique (the held item under
+			// pbr, [WIELD_MESH]); the back winding's is the other way
+			Vector3 p0(q.p[0], q.p[1], q.p[2]);
+			Vector3 n = (Vector3(q.p[3], q.p[4], q.p[5]) - p0).CrossProduct(
+					Vector3(q.p[6], q.p[7], q.p[8]) - p0).Normalized();
+			for(int i = 0; i < 12; i++){
+				int c = corners[i];
 				cg->DefineVertex(Vector3(q.p[c * 3], q.p[c * 3 + 1],
 						q.p[c * 3 + 2]));
+				cg->DefineNormal(i < 6 ? n : -n);
 				cg->DefineTexCoord(Vector2(q.uv[c * 2], q.uv[c * 2 + 1]));
 			}
 		}
