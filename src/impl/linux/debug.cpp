@@ -15,6 +15,8 @@
 #include <signal.h>
 #include <sys/ucontext.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <time.h>
 #define MODULE "debug"
 
 namespace interface {
@@ -383,6 +385,78 @@ static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 
 	g_signal_handlers_active--;
 	exit(1);
+}
+
+// The watchdog ([WIN8_START] 14): the watched thread is sent SIGUSR2
+// once it has said nothing for stall_seconds, and the handler, on that
+// thread, prints its own backtrace to stderr the way a crash's is
+static pthread_t g_watched_thread;
+static std::atomic<int64_t> g_watched_alive_us(0);
+static int g_watchdog_stall_s = 10;
+static std::atomic_bool g_watchdog_started(false);
+
+static int64_t watchdog_now_us()
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+static void watchdog_sighandler(int sig, siginfo_t *info, void *secret)
+{
+	(void)sig; (void)info;
+	ucontext_t *uc = (ucontext_t*)secret;
+	void *trace[BACKTRACE_SIZE];
+	int trace_size = backtrace(trace, BACKTRACE_SIZE);
+	trace[1] = (void*)uc->uc_mcontext.gregs[REG_EIP];
+	stderr_backtrace(trace, trace_size, SIGUSR2);
+}
+
+static void *watchdog_main(void*)
+{
+	int64_t next_report = 0;
+	bool stalled = false;
+	for(;;){
+		sleep(1);
+		const int64_t now = watchdog_now_us();
+		const int64_t alive = g_watched_alive_us;
+		if(now - alive < (int64_t)g_watchdog_stall_s * 1000000){
+			stalled = false;
+			continue;
+		}
+		if(!stalled){
+			stalled = true;
+			next_report = now;
+		}
+		if(now < next_report)
+			continue;
+		next_report = now + 60000000;
+		fprintf(stderr, "\nWatchdog: no frame for %d s; the main thread's stack:\n",
+				(int)((now - alive) / 1000000));
+		pthread_kill(g_watched_thread, SIGUSR2);
+	}
+	return nullptr;
+}
+
+void watchdog_alive(int stall_seconds)
+{
+	g_watched_alive_us = watchdog_now_us();
+	// Every call, so a screen may lower it for its own stay
+	g_watchdog_stall_s = stall_seconds;
+	if(g_watchdog_started.exchange(true))
+		return;
+	g_watched_thread = pthread_self();
+	struct sigaction sa;
+	memset(&sa, 0, sizeof sa);
+	sa.sa_sigaction = watchdog_sighandler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART | SA_SIGINFO;
+	sigaction(SIGUSR2, &sa, NULL);
+	pthread_t t;
+	if(pthread_create(&t, NULL, watchdog_main, NULL) == 0)
+		pthread_detach(t);
+	log_i(MODULE, "Watchdog: the main thread's stack is logged after %d s "
+			"without a frame", stall_seconds);
 }
 
 void init_signal_handlers(const SigConfig &config)

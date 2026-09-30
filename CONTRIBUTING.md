@@ -1,0 +1,64 @@
+Contributing to buildat
+=======================
+
+Terms
+-----
+
+By offering a change you state that you wrote it, or have the right to
+offer it, and that it may be distributed under the licence of the file
+it touches:
+
+- **`builtin/luanti/` and `extensions/luanti_client/`**, outside their
+  `vendor/` directories: **`Apache-2.0 OR MIT`**. Both licences, at the
+  recipient's choice. This is deliberate and it is the one thing here
+  worth reading twice: Luanti is LGPL-2.1-or-later, Apache-2.0 is
+  incompatible with LGPL-2.1, and MIT is not -- so a Luanti developer
+  can take a function out of this Luanti client and carry it home. A
+  contribution offered under Apache alone would close that door for
+  everybody, which is why it cannot be accepted there.
+- **Everything else**: `Apache-2.0`, as the rest of the tree is.
+- **`vendor/` directories**: not ours. They carry the licence of the
+  project they came from, and a change to one belongs upstream.
+
+No CLA, no paperwork, no copyright assignment. A `Signed-off-by:` line
+in the commit (`git commit -s`), the Developer Certificate of Origin's
+form, is welcome and is not required.
+
+Every file outside `vendor/` in the two subtrees above carries
+`SPDX-License-Identifier: Apache-2.0 OR MIT` in its header; a new file
+there wants the same line. `MIT.txt` and `LICENSE` beside it have the
+texts.
+
+Code taken from elsewhere
+-------------------------
+
+Where a file **transcribes** another project's source rather than
+reimplementing a behaviour, the header says so and names that project's
+licence -- `builtin/luanti/lua/misc.lua`'s day/night table is the
+example. Reimplementing a documented behaviour is not transcription and
+wants no such line.
+
+Assets follow the same rule, written down where they sit:
+`extensions/luanti_client/res/LICENSE` is how it is done.
+
+Checks
+------
+
+A change is expected to leave the quick tier green:
+
+    builtin/luanti/test/run_all.sh quick
+
+and, if it touches the Luanti module or a renderer, the full tier,
+which wants the game media (`util/media_fetch.sh`). The tiers are
+described in `doc/plan/maintenance_plan.md`; `util/checks_in_docker.sh`
+runs one the way CI does.
+
+Non-trivial logic leaves one runnable check behind. A runner says
+`PASS:` or `FAIL:` on its last line and exits by it -- that contract is
+in `builtin/luanti/test/lib.sh`.
+
+Style
+-----
+
+Match the file you are in. The tree is tabs, 80 columns, and comments
+that say why rather than what.
