@@ -5898,6 +5898,17 @@ do
 	function M.escape()
 		if panel.popup then
 			panel.close_popup()
+		elseif S.drag then
+			-- **A drag given up** (user): nothing moves, and the button's
+			-- release that follows is not a click
+			local was = S.drag
+			S.drag, S.press = nil, nil
+			if was.kind == "node" or was.kind == "move" then
+				doc.unlock()
+			end
+			S.swallow_up = true
+			S.dirty = true
+			refresh_panels()
 		elseif S.place_copy then
 			S.place_copy = nil
 			S.dirty = true
