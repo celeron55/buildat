@@ -5582,19 +5582,11 @@ do
 		end
 		-- The select tool: the drag moves the selection, and only what was
 		-- selected before the press (user, 2026-10-01: a press that missed
-		-- the selected object moved the room under it). A drag on anything
-		-- else selects it, as a click would, and moves nothing; a lone node
-		-- drags alone.
+		-- the selected object moved the room under it). A drag that starts
+		-- on anything else is the box over what to select, as on nothing;
+		-- a click selects it. A lone node drags alone.
 		if not S.sel[t.id] then
-			if not S.shift then
-				S.sel = {}
-			end
-			S.sel[t.id] = t.kind
-			S.sel_face[t.id] = t.side
-			S.primary = t.id
-			palette_follows(t)
-			S.press = nil
-			refresh_panels()
+			S.drag = {kind = "box"}
 			return
 		end
 		S.primary = t.id
@@ -7281,7 +7273,7 @@ do
 					g.left = "select " .. name .. (t.kind == "wall" and t.side and
 							(" by its " .. (t.side == "core" and "top" or
 							t.side .. " face")) or t.kind == "room" and t.side and
-							(" by its " .. t.side) or "")
+							(" by its " .. t.side) or "") .. "; drag: select by a box"
 				end
 				if t.kind == "node" and edit then
 					g.left = g.left .. " (onto another node: merge them)"
