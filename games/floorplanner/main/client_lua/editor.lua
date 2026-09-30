@@ -6139,8 +6139,16 @@ do
 				{{"left", "Left"}, {"right", "Right"}, {"middle", "Middle"},
 				{"use", "E"}}
 		for _, b in ipairs(names) do
-			if g[b[1]] then
-				lines[#lines + 1] = b[2] .. ": " .. g[b[1]]
+			local t = g[b[1]]
+			-- A finger's drag on nothing moves the view, not a box
+			if t and S.touch then
+				t = t:gsub("; drag: select by a box", "")
+				if t:match("^drag:") then
+					t = nil
+				end
+			end
+			if t then
+				lines[#lines + 1] = b[2] .. ": " .. t
 			end
 		end
 		if g.note then

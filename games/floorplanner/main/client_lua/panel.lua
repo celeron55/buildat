@@ -22,13 +22,13 @@ function M.window(halign, valign, x, y, horizontal)
 	return w
 end
 
--- **Panels folded away on a narrow screen** ([FP_TOUCH] 2): a phone's is
--- too narrow for the palette and the properties side by side over the
--- view. There they start folded, a toolbar button opens one, and one opened
+-- **Panels folded away on a small screen** ([FP_TOUCH] 2): a phone's is
+-- too narrow in portrait, and too low in landscape, for the palette and the
+-- properties beside the view. There they start folded, a toolbar button opens one, and one opened
 -- folds the others; on a wide screen none is ever folded.
 M.folds = {}
 function M.narrow()
-	return magic.ui.root.width < 700
+	return magic.ui.root.width < 700 or magic.ui.root.height < 500
 end
 
 function M.folded(key)
