@@ -103,6 +103,9 @@ local S = {
 	-- Walking's vertical field of view in degrees, the viewer's own and
 	-- kept on this client (user)
 	walk_fov = tonumber(buildat.storage_read("walk_fov") or "") or 80,
+	-- How fast the mouse turns the view, in percent: walking's look and
+	-- the 3D view's orbit (user)
+	mouse_sens = tonumber(buildat.storage_read("mouse_sens") or "") or 100,
 	export_mmpx = 10, -- the PNG export's scale
 	calib = nil,    -- an image being calibrated: {id, pts, measured}
 	yaw = 35, pitch = 40,
@@ -4168,6 +4171,13 @@ do
 				buildat.storage_write("walk_fov", tostring(S.walk_fov))
 			end
 		end)
+		panel.field(w, "Mouse sens. %", S.mouse_sens, function(t)
+			local v = tonumber(t)
+			if v then
+				S.mouse_sens = math.max(10, math.min(500, math.floor(v + 0.5)))
+				buildat.storage_write("mouse_sens", tostring(S.mouse_sens))
+			end
+		end)
 		panel.button(w, "Back", function() open_pause() end)
 	end
 
@@ -5005,8 +5015,9 @@ do
 			local p = S.orbit
 			local ox, oy, oz = geom.unrot(S.pos.x - p.x, S.pos.y - p.y,
 					S.pos.z - p.z, S.pitch, S.yaw, 0)
-			S.yaw = S.yaw + dx * 0.3
-			S.pitch = math.max(-90, math.min(90, S.pitch + dy * 0.3))
+			local k = 0.3 * S.mouse_sens / 100
+			S.yaw = S.yaw + dx * k
+			S.pitch = math.max(-90, math.min(90, S.pitch + dy * k))
 			local wx, wy, wz = geom.rot(ox, oy, oz, S.pitch, S.yaw, 0)
 			S.pos = {x = p.x + wx, y = p.y + wy, z = p.z + wz}
 			return
@@ -5024,8 +5035,9 @@ do
 			return
 		end
 		if S.looking then
-			S.yaw = S.yaw + dx * 0.15
-			S.pitch = math.max(-89, math.min(89, S.pitch + dy * 0.15))
+			local k = 0.15 * S.mouse_sens / 100
+			S.yaw = S.yaw + dx * k
+			S.pitch = math.max(-89, math.min(89, S.pitch + dy * k))
 			return
 		end
 		if S.walk_drag then
