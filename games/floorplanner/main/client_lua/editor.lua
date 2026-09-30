@@ -1150,7 +1150,12 @@ local function build_hosted(id, it, def, e, geometry, commit)
 	local right = e.flip % 2 == 1
 	local sign = math.floor(e.flip / 2) % 2 == 1 and -1 or 1
 	local leaves = {}
-	if window then
+	if window and def.leaf == 2 then
+		-- Double casement (user): two sashes meeting in the middle
+		local inner = hw - FRAME_W
+		leaves[1] = {x = -inner, w = inner, dir = 1}
+		leaves[2] = {x = inner, w = inner, dir = -1}
+	elseif window then
 		local inner = hw - FRAME_W
 		leaves[1] = {x = right and inner or -inner, w = 2 * inner,
 				dir = right and -1 or 1}
@@ -3344,10 +3349,16 @@ local function build_props()
 		elseif p.kind ~= KIND.opening then
 			int_field(i.def, "Trim mm", "trim", p.trim)
 			int_field(i.def, "Trim depth mm", "trim_depth", p.trim_depth)
-			panel.check(props, p.kind == KIND.door and "Double leaf" or
-					"Opens (casement)", p.leaf == 1, function()
-				set(i.def, {ints = {leaf = 1 - p.leaf}})
-			end)
+			if p.kind == KIND.door then
+				panel.check(props, "Double leaf", p.leaf == 1, function()
+					set(i.def, {ints = {leaf = 1 - p.leaf}})
+				end)
+			else
+				panel.dropdown(props, "Opens", {{"fixed", 0}, {"casement", 1},
+						{"double casement", 2}}, p.leaf, function(v)
+					set(i.def, {ints = {leaf = v}})
+				end)
+			end
 			if p.kind == KIND.door then
 				panel.check(props, "Glass pane", p.glazed == 1, function()
 					set(i.def, {ints = {glazed = 1 - p.glazed}})
