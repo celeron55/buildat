@@ -2748,6 +2748,81 @@ do
 	-- The voxel tool at the cursor: place a voxel against what is under it,
 	-- or dig the one under it, or (paint, Shift) give the one it would dig
 	-- the palette entry
+	-- **The cell a press or a release points at** in the selected volume
+	-- (user): mode "dig" and "paint" an existing voxel, "place" the empty
+	-- one on it -- or, off every voxel, the floor's cell beside the volume
+	-- (within a cell of what it has, or anywhere when it has none): a volume
+	-- that is being edited is not added to far from itself. nil: nothing.
+	function M.voxel_cell(mode)
+		local id = voxel_target()
+		if not id then
+			return nil
+		end
+		if S.view == "2d" then
+			local cx, cz, top = voxel_column(id)
+			if not cx then
+				return nil
+			end
+			if mode == "place" then
+				local c = {cx, top and top + 1 or 0, cz}
+				return in_range(c) and id or nil, c
+			end
+			return top and id or nil, top and {cx, top, cz}
+		end
+		local hit, place = voxel_ray(id)
+		if mode ~= "place" then
+			return hit and id or nil, hit
+		end
+		if not place or not in_range(place) then
+			return nil
+		end
+		if not hit then
+			local b = voxel_bounds(doc.ents[id].ints.def)
+			if b and (place[1] < b[1] - 1 or place[1] > b[4] + 1 or
+					place[3] < b[3] - 1 or place[3] > b[6] + 1) then
+				return nil
+			end
+		end
+		return id, place
+	end
+
+	-- A box of cells from a to b, both in: emptied, painted where there are
+	-- voxels, or filled where there are none
+	local MAX_BOX = 100000
+	function M.voxel_box(mode, id, a, b)
+		if not doc.can("edit") then
+			doc.notice("Viewing only: no edit privilege")
+			return
+		end
+		local def = doc.ents[id].ints.def
+		local vox = doc.voxels[def] or {}
+		local lo = {math.min(a[1], b[1]), math.min(a[2], b[2]), math.min(a[3], b[3])}
+		local hi = {math.max(a[1], b[1]), math.max(a[2], b[2]), math.max(a[3], b[3])}
+		if (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1) * (hi[3] - lo[3] + 1) > MAX_BOX then
+			doc.notice("A box of more than " .. MAX_BOX .. " voxels: make it smaller")
+			return
+		end
+		local mat = default_material()
+		local sets = {}
+		for x = lo[1], hi[1] do
+			for y = lo[2], hi[2] do
+				for z = lo[3], hi[3] do
+					local key = doc.voxel_key(x, y, z)
+					if mode == "dig" then
+						if vox[key] then sets[key] = 0 end
+					elseif mode == "paint" then
+						if vox[key] then sets[key] = mat end
+					elseif not vox[key] then
+						sets[key] = mat
+					end
+				end
+			end
+		end
+		if next(sets) then
+			doc.set_voxels(def, sets)
+		end
+	end
+
 	voxel_edit = function(dig, paint)
 		if not doc.can("edit") then
 			doc.notice("Viewing only: no edit privilege")
@@ -2781,13 +2856,10 @@ do
 				end
 			end
 		else
-			local hit, place = voxel_ray(id)
-			if paint and hit then
-				sets[doc.voxel_key(hit[1], hit[2], hit[3])] = default_material()
-			elseif dig and hit then
-				sets[doc.voxel_key(hit[1], hit[2], hit[3])] = 0
-			elseif not dig and place and in_range(place) then
-				sets[doc.voxel_key(place[1], place[2], place[3])] = default_material()
+			local ok, c = M.voxel_cell(paint and "paint" or dig and "dig" or "place")
+			if ok then
+				sets[doc.voxel_key(c[1], c[2], c[3])] = (dig and not paint) and 0 or
+						default_material()
 			end
 		end
 		if next(sets) then
@@ -5369,11 +5441,23 @@ do
 			return
 		end
 		if S.captured and S.tool == "voxel" then
-			-- Luanti's: the left button digs, the right one places
-			if button == magic.MOUSEB_LEFT then
-				voxel_edit(true, S.shift)
-			elseif button == magic.MOUSEB_RIGHT then
-				voxel_edit(false, S.shift)
+			-- Luanti's: the left button digs, the right one places -- and
+			-- **held, a box** (user): from the cell pressed to the one let go
+			-- on, both in; released where nothing is, nothing. A new volume
+			-- when none is selected, on the press, as before.
+			if button ~= magic.MOUSEB_LEFT and button ~= magic.MOUSEB_RIGHT then
+				return
+			end
+			if not voxel_target() then
+				voxel_edit(button == magic.MOUSEB_LEFT, S.shift)
+				return
+			end
+			local mode = button == magic.MOUSEB_RIGHT and "place" or
+					S.shift and "paint" or "dig"
+			local id, c = M.voxel_cell(mode)
+			if id then
+				S.voxel_box = {mode = mode, id = id, a = c, button = button}
+				S.dirty = true
 			end
 			return
 		end
@@ -5439,6 +5523,16 @@ do
 	end
 
 	function M.mouse_up(button)
+		local vb = S.voxel_box
+		if vb and button == vb.button then
+			S.voxel_box = nil
+			S.dirty = true
+			local id, c = M.voxel_cell(vb.mode)
+			if id == vb.id then
+				M.voxel_box(vb.mode, id, vb.a, c)
+			end
+			return
+		end
 		if button == magic.MOUSEB_RIGHT and S.right_click then
 			local rc = S.right_click
 			S.right_click = nil
@@ -5951,6 +6045,10 @@ do
 	function M.escape()
 		if panel.popup then
 			panel.close_popup()
+		elseif S.voxel_box then
+			-- The box given up; the button's release does nothing then
+			S.voxel_box = nil
+			S.dirty = true
 		elseif S.drag then
 			-- **A drag given up** (user): nothing moves, and the button's
 			-- release that follows is not a click
@@ -6597,6 +6695,21 @@ do
 								"; Shift+Left: make it " .. mat_text(cur)
 					end
 				end
+			elseif S.voxel_box and S.voxel_box.id == id then
+				-- The box a release here would make, from where it was pressed
+				local vb = S.voxel_box
+				local ok, c = M.voxel_cell(vb.mode)
+				local col = vb.mode == "place" and PLACE or DIG
+				if ok then
+					hl({kind = "cell", id = id, c = vb.a, c2 = c, col = col})
+					local n = (math.abs(c[1] - vb.a[1]) + 1) *
+							(math.abs(c[2] - vb.a[2]) + 1) * (math.abs(c[3] - vb.a[3]) + 1)
+					g.left = "let go: " .. ({place = "fill", dig = "empty",
+							paint = "paint"})[vb.mode] .. " " .. n .. " cells; Esc: none"
+				else
+					hl({kind = "cell", id = id, c = vb.a, col = col})
+					g.left = "let go here: nothing (point at the volume); Esc: none"
+				end
 			else
 				local hit, place = voxel_ray(id)
 				if hit then
@@ -6604,10 +6717,14 @@ do
 					g.left = "dig this voxel (" .. mat_text(cell_of(id, hit)) ..
 							"); Shift+click: make it " .. mat_text(cur)
 				end
-				if place and math.max(math.abs(place[1] + 0.5), math.abs(place[2] +
-						0.5), math.abs(place[3] + 0.5)) < 128 then
-					hl({kind = "cell", id = id, c = place, col = PLACE})
-					g.right = "place a voxel of " .. mat_text(cur) .. " here"
+				local pok, pc = M.voxel_cell("place")
+				if pok then
+					hl({kind = "cell", id = id, c = pc, col = PLACE})
+					g.right = "place a voxel of " .. mat_text(cur) ..
+							" here (hold: a box)"
+				end
+				if hit then
+					g.left = g.left .. " (hold: a box)"
 				end
 			end
 		elseif tool == "paint" then
@@ -6676,15 +6793,21 @@ do
 	end
 
 	-- A cell of a volume as its 12 edges
-	local function cell_box(id, c, col)
+	local function cell_box(id, c, col, c2)
 		local it = inst_data[id]
 		if not it then
 			return
 		end
 		local sz = it.size
+		-- From one cell to another, both in
+		c2 = c2 or c
+		local lo = {math.min(c[1], c2[1]), math.min(c[2], c2[2]), math.min(c[3], c2[3])}
+		local n = {math.abs(c[1] - c2[1]) + 1, math.abs(c[2] - c2[2]) + 1,
+				math.abs(c[3] - c2[3]) + 1}
 		local function corner(dx, dy, dz)
-			local x, y, z = geom.rot((c[1] + dx) * sz, (c[2] + dy) * sz,
-					(c[3] + dz) * sz, it.pitch, it.yaw, it.roll)
+			local x, y, z = geom.rot((lo[1] + dx * n[1]) * sz,
+					(lo[2] + dy * n[2]) * sz, (lo[3] + dz * n[3]) * sz,
+					it.pitch, it.yaw, it.roll)
 			return magic.Vector3(W(it.ox + x), W(it.oy + y), W(it.oz + z))
 		end
 		for _, e in ipairs({{0,0,0, 1,0,0}, {0,0,0, 0,1,0}, {0,0,0, 0,0,1},
@@ -6794,7 +6917,7 @@ do
 			elseif h.kind == "image" and image_data[h.id] then
 				outline(image_data[h.id].foot, col)
 			elseif h.kind == "cell" then
-				cell_box(h.id, h.c, col)
+				cell_box(h.id, h.c, col, h.c2)
 			elseif h.kind == "opening" then
 				-- Where the door or window would go, on the wall's left face
 				local f = h.frame
