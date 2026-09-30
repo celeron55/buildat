@@ -7003,6 +7003,7 @@ crosshair:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 24)
 crosshair:SetText("+")
 crosshair:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 crosshair.visible = false
+crosshair.priority = -10
 
 -- A text over a place in the world, for this frame
 local label_i = 0
@@ -7013,6 +7014,8 @@ local function world_label(x_mm, y_mm, z_mm, text)
 		t = magic.ui.root:CreateChild("Text")
 		t:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 13)
 		t:SetTextEffect(magic.TE_SHADOW)
+		-- Of the scene: under every panel and menu, whenever it was made
+		t.priority = -10
 		label_nodes[label_i] = t
 	end
 	local cam = S.view == "2d" and cam2d or cam3d
