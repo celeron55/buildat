@@ -63,10 +63,9 @@ local LEAF_T, LEAF_GAP, FRAME_W = 40, 4, 50
 local S = {
 	-- How the 3D view and walking are lit ([FP_DAYLIGHT]): "pbr", the
 	-- plan's sun and sky at its place and hour in radiance, or "unlit",
-	-- the plain look the plan view always has, for clarity and speed; a
-	-- touchscreen starts unlit. The viewer's own, kept on the client.
-	lighting = buildat.storage_read("lighting") or
-			(buildat.get_env("BUILDAT_TOUCH") == "1" and "unlit" or "pbr"),
+	-- the plain look the plan view always has, for clarity and speed; every
+	-- client starts pbr. The viewer's own, kept on the client.
+	lighting = buildat.storage_read("lighting") or "pbr",
 	view = "2d",
 	show_ids = true, -- the material id decals
 	plan_look = true, -- the plan view in flat colours (L)
