@@ -122,6 +122,11 @@ local S = {
 	-- The middle drag in 3D moving the camera along the ground (XZ) rather
 	-- than across the screen (user), the default; kept on the client
 	pan_xz = buildat.storage_read("pan_xz") ~= "0",
+	-- How far the 3D view's middle drag moves the camera, in percent of
+	-- the point under the pointer following it (user); the plan view's
+	-- stays one to one. Kept on the client, so a desktop and a phone each
+	-- have their own.
+	pan_speed = tonumber(buildat.storage_read("pan_speed") or "") or 100,
 	-- The 3D view without the floors above the current one, to see into it
 	-- from above (user); kept on the client
 	hide_above = buildat.storage_read("hide_above") == "1",
@@ -4978,6 +4983,13 @@ do
 				buildat.storage_write("mouse_sens", tostring(S.mouse_sens))
 			end
 		end)
+		panel.field(w, "3D pan %", S.pan_speed, function(t)
+			local v = tonumber(t)
+			if v then
+				S.pan_speed = math.max(10, math.min(1000, math.floor(v + 0.5)))
+				buildat.storage_write("pan_speed", tostring(S.pan_speed))
+			end
+		end)
 		panel.field(w, "Wheel zoom %", S.wheel_speed, function(t)
 			local v = tonumber(t)
 			if v then
@@ -6002,7 +6014,8 @@ do
 			-- Across the view, as far as the pointed point moves under the
 			-- pointer
 			local _, h = screen_size()
-			local k = S.pan3d.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
+			local k = S.pan3d.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h *
+					S.pan_speed / 100
 			local rx, ry, rz = geom.rot(1, 0, 0, S.pitch, S.yaw, 0)
 			local ux, uy, uz = geom.rot(0, 1, 0, S.pitch, S.yaw, 0)
 			if S.pan_xz then
@@ -6230,7 +6243,9 @@ do
 			S.cx = S.cx + (x0 or 0) - (x1 or 0) - mdx * k
 			S.cz = S.cz + (z0 or 0) - (z1 or 0) + mdy * k
 		else
-			local k = S.gesture.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
+			-- The pair's move is a touchscreen's middle drag, at its speed
+			local k = S.gesture.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h *
+					S.pan_speed / 100
 			local rx, ry, rz = geom.rot(1, 0, 0, S.pitch, S.yaw, 0)
 			local ux, uy, uz = geom.rot(0, 1, 0, S.pitch, S.yaw, 0)
 			local fx, fy, fz = geom.rot(0, 0, 1, S.pitch, S.yaw, 0)
