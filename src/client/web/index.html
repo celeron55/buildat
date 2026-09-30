@@ -187,6 +187,22 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 			} catch(e) {}
 		}
 	}, true);
+	// **Sound starts with the user's doing** (user, 2026-09-30: silent in
+	// Firefox): a browser makes an audio context suspended until the page
+	// resumes it from a click, a tap or a key, and the SDL this is built on
+	// makes its context at the start and never resumes it. Every such event
+	// asks while it is still suspended.
+	function resume_audio(){
+		if(typeof SDL2 !== 'undefined' && SDL2.audioContext &&
+				SDL2.audioContext.state === 'suspended'){
+			var r = SDL2.audioContext.resume();
+			if(r && r.catch)
+				r.catch(function(){});
+		}
+	}
+	['mousedown', 'keydown', 'touchend'].forEach(function(type){
+		document.addEventListener(type, resume_audio, true);
+	});
 	// **Two fingers are the game's at once** (user, a playtest: a two
 	// finger drag started a second late): a phone's browser holds a
 	// multi-touch move back while it decides whether the page is being
