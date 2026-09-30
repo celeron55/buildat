@@ -131,7 +131,7 @@ static int l_random_bytes(lua_State *L)
 void init_crypto(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
 	DEF_BUILDAT_FUNC(sha1)
