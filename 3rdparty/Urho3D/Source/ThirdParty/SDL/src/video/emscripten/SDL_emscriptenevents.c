@@ -353,7 +353,12 @@ Emscripten_HandleMouseButton(int eventType, const EmscriptenMouseEvent *mouseEve
 
     SDL_EventType sdl_event_type = (eventType == EMSCRIPTEN_EVENT_MOUSEDOWN ? SDL_PRESSED : SDL_RELEASED);
     SDL_SendMouseButton(window_data->window, 0, sdl_event_type, sdl_button);
-    return SDL_GetEventState(sdl_event_type) == SDL_ENABLE;
+    /* buildat [WEB_CLIENT]: SDL_PRESSED and SDL_RELEASED are states, not
+       event types, and asked of SDL_GetEventState they said "not handled":
+       the browser was not told to leave the button alone, and a middle
+       press in Firefox started its autoscroll or paste instead */
+    return SDL_GetEventState(eventType == EMSCRIPTEN_EVENT_MOUSEDOWN ?
+            SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP) == SDL_ENABLE;
 }
 
 EM_BOOL
@@ -423,6 +428,7 @@ Emscripten_HandleTouch(int eventType, const EmscriptenTouchEvent *touchEvent, vo
     for (i = 0; i < touchEvent->numTouches; i++) {
         SDL_FingerID id;
         float x, y;
+        int mx, my;
 
         if (!touchEvent->touches[i].isChanged)
             continue;
@@ -430,12 +436,18 @@ Emscripten_HandleTouch(int eventType, const EmscriptenTouchEvent *touchEvent, vo
         id = touchEvent->touches[i].identifier;
         x = touchEvent->touches[i].canvasX / client_w;
         y = touchEvent->touches[i].canvasY / client_h;
+        /* buildat [FP_TOUCH]: the first finger's mouse is in the window's
+           pixels, as the mouse handler's is; it was given the touch's 0..1,
+           so a tap pressed and released the mouse at the top left corner
+           and a button tapped never saw it released */
+        mx = x * window_data->window->w;
+        my = y * window_data->window->h;
 
         if (eventType == EMSCRIPTEN_EVENT_TOUCHSTART) {
             if (!window_data->finger_touching) {
                 window_data->finger_touching = SDL_TRUE;
                 window_data->first_finger = id;
-                SDL_SendMouseMotion(window_data->window, SDL_TOUCH_MOUSEID, 0, x, y);
+                SDL_SendMouseMotion(window_data->window, SDL_TOUCH_MOUSEID, 0, mx, my);
                 SDL_SendMouseButton(window_data->window, SDL_TOUCH_MOUSEID, SDL_PRESSED, SDL_BUTTON_LEFT);
             }
             SDL_SendTouch(deviceId, id, SDL_TRUE, x, y, 1.0f);
@@ -445,7 +457,7 @@ Emscripten_HandleTouch(int eventType, const EmscriptenTouchEvent *touchEvent, vo
             }
         } else if (eventType == EMSCRIPTEN_EVENT_TOUCHMOVE) {
             if ((window_data->finger_touching) && (window_data->first_finger == id)) {
-                SDL_SendMouseMotion(window_data->window, SDL_TOUCH_MOUSEID, 0, x, y);
+                SDL_SendMouseMotion(window_data->window, SDL_TOUCH_MOUSEID, 0, mx, my);
             }
             SDL_SendTouchMotion(deviceId, id, x, y, 1.0f);
 
@@ -472,6 +484,14 @@ EM_BOOL
 Emscripten_HandleKey(int eventType, const EmscriptenKeyboardEvent *keyEvent, void *userData)
 {
     Uint32 scancode;
+    /* buildat [WEB_KEYS]: a key an IME is composing with (229, "Process")
+       or a dead key is the IME's or the browser's: neither a game key nor
+       claimed */
+    const SDL_bool ime_key = keyEvent->keyCode == 229 ||
+            SDL_strcmp(keyEvent->key, "Process") == 0 ||
+            SDL_strcmp(keyEvent->key, "Dead") == 0;
+    if (ime_key)
+        return SDL_FALSE;
 
     /* .keyCode is deprecated, but still the most reliable way to get keys */
     if (keyEvent->keyCode < SDL_arraysize(emscripten_scancode_table)) {
@@ -499,15 +519,21 @@ Emscripten_HandleKey(int eventType, const EmscriptenKeyboardEvent *keyEvent, voi
         }
     }
 
-    SDL_bool prevent_default = SDL_GetEventState(eventType == EMSCRIPTEN_EVENT_KEYDOWN ? SDL_KEYDOWN : SDL_KEYUP) == SDL_ENABLE;
-
-    /* if TEXTINPUT events are enabled we can't prevent keydown or we won't get keypress
-     * we need to ALWAYS prevent backspace and tab otherwise chrome takes action and does bad navigation UX
-     */
-    if (eventType == EMSCRIPTEN_EVENT_KEYDOWN && SDL_GetEventState(SDL_TEXTINPUT) == SDL_ENABLE && keyEvent->keyCode != 8 /* backspace */ && keyEvent->keyCode != 9 /* tab */)
-        prevent_default = SDL_FALSE;
-
-    return prevent_default;
+    /* buildat [WEB_KEYS]: a key is claimed from the browser unless
+       - Ctrl, Alt or Meta is held: the browser's shortcuts stay its own,
+         and Ctrl+C, V and X must, or no copy or paste event comes;
+       - a text field has focus (text input is active only then; see the
+         web client's start) and the key types a character: the keypress
+         that carries the text has to come.
+       So F1 to F12, Tab, Backspace, the arrows, and with no field focused
+       Space, letters and the quick find's '/' are the game's. */
+    if (keyEvent->ctrlKey || keyEvent->altKey || keyEvent->metaKey)
+        return SDL_FALSE;
+    if (SDL_IsTextInputActive() && keyEvent->key[0] &&
+            (keyEvent->key[1] == 0 || (unsigned char)keyEvent->key[0] >= 0x80) &&
+            SDL_strlen(keyEvent->key) <= 4)
+        return SDL_FALSE;
+    return SDL_TRUE;
 }
 
 EM_BOOL
@@ -557,9 +583,10 @@ Emscripten_HandleResize(int eventType, const EmscriptenUiEvent *uiEvent, void *u
             double w = window_data->window->w;
             double h = window_data->window->h;
 
-            if(window_data->external_size) {
-                emscripten_get_element_css_size(NULL, &w, &h);
-            }
+            /* buildat [WEB_CLIENT]: the page sizes the canvas by CSS to the
+               browser window, and at the start the two sizes are the same, so
+               external_size was false and a resize never took */
+            emscripten_get_element_css_size(NULL, &w, &h);
 
             emscripten_set_canvas_size(w * window_data->pixel_ratio, h * window_data->pixel_ratio);
 

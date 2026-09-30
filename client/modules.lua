@@ -6,6 +6,12 @@ local log = buildat.Logger("__client/modules")
 -- Module interfaces, indexed by module name
 local loaded_modules = {}
 
+-- The cache dropped, so the next connection runs the module halves
+-- afresh ([MENU_CONTEXT])
+function __buildat_reset_modules()
+	loaded_modules = {}
+end
+
 -- Called by client/sandbox.lua
 function __buildat_require_module(name)
 	log:debug("__buildat_require_module(\""..name.."\")")
