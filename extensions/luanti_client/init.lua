@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- A Luanti client for buildat: connect to an unmodified Luanti server
 -- and do the client's side of its protocol.
@@ -19,6 +20,14 @@ local path = __buildat_extension_path("luanti_client")
 local srp = dofile(path.."/srp.lua")
 local engine_test = dofile(path.."/engine_test.lua")
 local luanti = dofile(path.."/client.lua")
+-- The extension's settings file ([EXT_SETTINGS]); the BUILDAT_* variables
+-- below stay one-run overrides
+local settings = dofile(path.."/settings.lua")
+local SETTINGS = settings.load()
+-- View bobbing as official's ([VIEW_BOB]), the module both clients share;
+-- BUILDAT_VIEW_BOBBING is the amount for a run (the shooters' 0), 1 else
+local camera_motion = dofile(path.."/res/camera_motion.lua")
+local VIEW_BOBBING = tonumber(os.getenv("BUILDAT_VIEW_BOBBING") or "") or SETTINGS.view_bobbing
 local world = dofile(path.."/world.lua")
 local nodedef = dofile(path.."/nodedef.lua")
 local media = dofile(path.."/media.lua")
@@ -29,6 +38,10 @@ local inventory = dofile(path.."/inventory.lua")
 local objmesh = dofile(path.."/objmesh.lua")
 local b3dmesh = dofile(path.."/b3dmesh.lua")
 local luanti_hud = dofile(path.."/hud.lua")
+-- On the HUD module's table rather than a local of its own: the connect
+-- callback below is at Lua's 60-upvalue line ([EXT_HUD_PARITY])
+luanti_hud.minimap = dofile(path.."/res/minimap.lua")
+luanti_hud.hotbar = dofile(path.."/res/hotbar.lua")
 local sounds = dofile(path.."/sounds.lua")
 local formspec = dofile(path.."/formspec.lua")
 local formspec_ui = dofile(path.."/formspec_ui.lua")
@@ -37,17 +50,37 @@ local M = {safe = nil}
 
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat -c ...),
 -- which cannot easily clear a text field
-local DEFAULT_ADDRESS = os.getenv("BUILDAT_LUANTI_ADDRESS") or "localhost:30000"
-local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or "buildat"
+local DEFAULT_ADDRESS = os.getenv("BUILDAT_LUANTI_ADDRESS") or SETTINGS.address
+local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or SETTINGS.name
 -- The PBR checkbox's starting state. A scripted run has to hit the box by
 -- pixel coordinates otherwise, and a miss looks like the shader not working
 -- rather than like a missed click.
-local DEFAULT_PBR = (os.getenv("BUILDAT_LUANTI_PBR") or "") ~= ""
+-- Which of the three rendering modes to draw in: "unlit", "shadows" or "pbr".
+-- Unset means this client's own default, which is unlit; the numbers keep
+-- working for whatever already passes them, 0 having been the unlit path and
+-- 1 the PBR one before either had a name. builtin/luanti reads the same
+-- variable with the same answers, its own default being pbr -- see
+-- [RENDER_MODES] in doc/plan/rendering_plan.md.
+local DEFAULT_MODE = (function()
+	local v = os.getenv("BUILDAT_LUANTI_PBR") or ""
+	if v == "" then
+		return SETTINGS.mode
+	elseif v == "0" then
+		return "unlit"
+	elseif v == "1" then
+		return "pbr"
+	elseif v == "unlit" or v == "shadows" or v == "pbr" then
+		return v
+	end
+	log:warning("BUILDAT_LUANTI_PBR=\"" .. v .. "\" is not a mode; " ..
+			"drawing unlit. Wanted unlit, shadows or pbr")
+	return "unlit"
+end)()
 
 -- How far the camera sees, and how far out blocks are kept, in nodes. The
 -- client asks the server for blocks by the same distance; see
 -- WANTED_RANGE_BLOCKS in client.lua.
-local FAR_CLIP = 240
+local FAR_CLIP = SETTINGS.view_range
 local DROP_DISTANCE = 260
 -- Degrees of look per pixel of mouse movement
 local MOUSE_SENSITIVITY = 0.15
@@ -125,9 +158,22 @@ local BINDINGS = {
 	{action = "left", key = KEY_A, name = "A", what = "Walk left"},
 	{action = "right", key = KEY_D, name = "D", what = "Walk right"},
 	{action = "jump", key = KEY_SPACE, name = "Space", what = "Jump"},
-	{action = "sneak", key = KEY_CTRL, name = "Ctrl", what = "Sneak"},
-	{action = "fast", key = KEY_SHIFT, name = "Shift", what = "Move fast"},
+	-- The same keys as games/vanilla's, so one scripted episode drives both
+	{action = "sneak", key = KEY_SHIFT, name = "Shift", what = "Sneak"},
+	{action = "fast", key = KEY_CTRL, name = "Ctrl", what = "Move fast"},
 	{action = "fly", key = KEY_K, name = "K", what = "Fly on and off"},
+	{action = "camera", key = KEY_C, name = "C",
+			what = "Camera: first person, behind, in front"},
+	{action = "zoom", key = KEY_Z, name = "Z",
+			what = "Zoom while held (the zoom privilege)"},
+	{action = "fog", key = KEY_F3, name = "F3", what = "Fog on and off"},
+	{action = "minimap", key = KEY_V, name = "V", what = "Minimap modes"},
+	{action = "screenshot", key = KEY_F12, name = "F12",
+			what = "A screenshot (the engine's)"},
+	{action = "profiler", key = KEY_F6, name = "F6",
+			what = "The engine's profiler on and off"},
+	{action = "fullscreen", key = KEY_F11, name = "F11",
+			what = "Fullscreen on and off (the engine's)"},
 	{action = "noclip", key = KEY_H, name = "H",
 			what = "Through walls on and off"},
 	{action = "chat", key = KEY_T, name = "T", what = "Say something"},
@@ -153,13 +199,21 @@ local BINDINGS = {
 -- Whether cancelling the connect dialog quits the client: it does when this
 -- extension is the client's whole reason for running, and does not when
 -- buildat's menu is underneath. See M.boot() and M.launch.
-local cancel_exits = true
+-- On SETTINGS rather than a local of its own: the session's callbacks
+-- are at Lua's 60-upvalue line
+SETTINGS.cancel_exits = true
 
 -- action -> the entry, for the code that asks "which key is this?"
 local BIND = {}
 for _, b in ipairs(BINDINGS) do
 	BIND[b.action] = b
+	b.default_key = b.key
+	b.default_name = b.name
 end
+-- What the settings say instead ([EXT_SETTINGS]), and the table for
+-- the settings screen's editor
+settings.apply_keys(BINDINGS)
+settings.bindings = BINDINGS
 local media_root_added = false
 
 -- Luanti's day/night ratio, from its daynightratio.h: 0.175 at night, 1.0 in
@@ -170,10 +224,35 @@ local DAYNIGHT_RAMP = {
 	{5375, 0.500}, {5625, 0.675}, {5875, 0.875}, {6125, 1.000},
 }
 
+-- The light the sky has before the sun is up ([DAWN_LIGHT]): Luanti's ramp
+-- above sits at its 0.175 floor until 4:22, while the halo is drawn from the
+-- sun's direction and is up well before that -- 4:00-5:00 read as a bright
+-- halo over black ground, and 19:00-20:00 the same. Zero below -18 degrees
+-- (where the stretched day puts 4:00), 0.3 at the horizon and nothing above
+-- it, where the ramp is larger anyway. games/vanilla's half is
+-- luanti_sky.predawn(); the two clients keep their own copies of this the
+-- way they keep their own of everything else drawn twice.
+local PREDAWN_LOW = -0.309
+local PREDAWN_PEAK = 0.3
+
+local function predawn(height)
+	if not height or height >= 0 or height <= PREDAWN_LOW then
+		return 0
+	end
+	-- BUILDAT_LUANTI_NO_PREDAWN=1 turns it off, which is how dawn_light.sh
+	-- reads the same hours with and without it
+	local off = buildat.get_env("BUILDAT_LUANTI_NO_PREDAWN")
+	if off and off ~= "" then
+		return 0
+	end
+
+	return PREDAWN_PEAK * (height - PREDAWN_LOW) / -PREDAWN_LOW
+end
+
 -- override is what a server said the light is whatever the time is, or nil.
 -- BUILDAT_LUANTI_FORCE_DAY wins over it: a scripted run asked for daylight
 -- and a game that overrides the ratio underground would take it away again.
-local function daynight_ratio(time_of_day, override)
+local function daynight_ratio(time_of_day, override, height)
 	-- A scripted run cannot wait for morning, and a screenshot of the world
 	-- at night says little about how it looks
 	-- An environment variable that is set but empty is a variable that is
@@ -190,17 +269,20 @@ local function daynight_ratio(time_of_day, override)
 	if t > 12000 then
 		t = 24000 - t
 	end
+	local ratio = 1.0
 	if t <= DAYNIGHT_RAMP[2][1] then
-		return DAYNIGHT_RAMP[1][2]
-	end
-	for i = 2, #DAYNIGHT_RAMP do
-		if DAYNIGHT_RAMP[i][1] > t then
-			local a, b = DAYNIGHT_RAMP[i - 1], DAYNIGHT_RAMP[i]
-			local f = (t - a[1]) / (b[1] - a[1])
-			return a[2] + f * (b[2] - a[2])
+		ratio = DAYNIGHT_RAMP[1][2]
+	else
+		for i = 2, #DAYNIGHT_RAMP do
+			if DAYNIGHT_RAMP[i][1] > t then
+				local a, b = DAYNIGHT_RAMP[i - 1], DAYNIGHT_RAMP[i]
+				local f = (t - a[1]) / (b[1] - a[1])
+				ratio = a[2] + f * (b[2] - a[2])
+				break
+			end
 		end
 	end
-	return 1.0
+	return math.max(ratio, predawn(height))
 end
 
 local function labeled_edit(parent, label, value)
@@ -209,7 +291,11 @@ local function labeled_edit(parent, label, value)
 	text.text = label
 	local edit = parent:CreateChild("LineEdit")
 	edit:SetStyleAuto()
-	edit.minHeight = 24
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	edit.textCopyable = true
+	edit.textSelectable = true
+	-- Fixed, not min: a column beside a tall list would stretch it
+	edit:SetFixedHeight(26)
 	edit.minWidth = 300
 	edit:SetText(value or "")
 	return edit
@@ -231,14 +317,20 @@ end
 local show_connect_dialog
 
 -- The screen that shows what the client is doing, and drives it every frame
--- pbr: whether to draw the world with the PBR shader; see the connect
+-- mode: which of unlit, shadows and pbr to draw the world in; see the connect
 -- dialog, where it is chosen, and world.lua for what it changes
-local function show_client(host, port, name, password, pbr)
+local function show_client(host, port, name, password, mode)
 	local root = uistack.main:push({desc="luanti_client"})
+	-- A world is on the screen from here on: a caught error is a notice
+	-- line rather than a dialog, which under a session would take the
+	-- mouse from the player ([MENU_ERRORS])
+	if ui_utils.set_in_game then
+		ui_utils.set_in_game(true)
+	end
 	-- Held rather than read back off the element: the sandbox hands out no
 	-- resource it did not just wrap
 	local style = magic.cache:GetResource(
-			"XMLFile", "__menu/res/main_style.xml")
+			"XMLFile", "launch_menu/res/main_style.xml")
 	root.defaultStyle = style
 
 	-- Text in the top left corner rather than a window: the world is behind
@@ -347,10 +439,40 @@ local function show_client(host, port, name, password, pbr)
 	-- read them presses F5 like anyone else.
 	local show_hud = true
 	local show_chat = true
-	local show_debug = false
+	-- F5's levels, as the module's ([EXT_HUD_PARITY]): 0 nothing, 1 the
+	-- one-line row (the mode and where the player is, in official's
+	-- words), 2 the whole block
+	local show_debug = 0
+
+	-- A connect that fails before there is a session: said in a dialog
+	-- and back to the connect screen, as a session that fails later is
+	-- ([BOX_PLAYTEST_2] 2) -- a line in the corner of a screen nothing
+	-- else happens on told nobody. Reached through add_line(text, true)
+	-- rather than by name: the connect callback below is at Lua's
+	-- 60-upvalue line.
+	local function connect_failed(err)
+		log:warning("Could not connect to "..host..":"..port..": "..
+				tostring(err))
+		chat_text:Remove()
+		info_text:Remove()
+		tint_panel:Remove()
+		status_text:Remove()
+		if loading_panel then
+			loading_panel:Remove()
+			loading_panel = nil
+		end
+		uistack.main:pop(root)
+		ui_utils.show_message_dialog("Could not connect to "..host..":"..
+				port..": "..tostring(err), function()
+			show_connect_dialog(host..":"..port, name)
+		end)
+	end
 
 	local lines = {"Luanti: "..host..":"..port}
-	local function add_line(text)
+	local function add_line(text, fatal)
+		if fatal then
+			return connect_failed(text)
+		end
 		lines[#lines + 1] = text
 		while #lines > 10 do
 			table.remove(lines, 2) -- Keep the address line
@@ -360,9 +482,11 @@ local function show_client(host, port, name, password, pbr)
 
 	add_line("Asking to connect...")
 
+	-- What this connection is for, for the permission dialog's field
+	-- ([NET_DESC]): the caller knows, the user still decides
 	network.udp_connect(host, port, function(socket, err)
 		if not socket then
-			add_line("Could not connect: "..tostring(err))
+			add_line(tostring(err), true)
 			return
 		end
 		local client = luanti.new(socket, {
@@ -381,7 +505,7 @@ local function show_client(host, port, name, password, pbr)
 
 		local view = world.new(magic, buildat.safe, log, {
 				far_clip = FAR_CLIP,
-				pbr = pbr,
+				mode = mode,
 				read_image = buildat.read_image,
 				read_mesh = function(def)
 					return read_mesh and read_mesh(def) or nil
@@ -709,6 +833,7 @@ local function show_client(host, port, name, password, pbr)
 		local prepend = ""
 		local detached = {}
 		local form = nil
+		local screen_was_above = false -- a stack screen over the session
 		local form_stale = false
 
 		-- Pointing, digging and placing
@@ -722,6 +847,14 @@ local function show_client(host, port, name, password, pbr)
 		local pointed_object = nil
 		local dig = nil
 		local digging = false
+		-- 1 first person, 2 third from behind, 3 third from the front
+		local camera_mode = 1
+		local zoom_held = false
+		local fog_on = true
+		-- The bob's state for this session; the extension draws no hand, so
+		-- only the camera's offset and roll are used of what it answers
+		local motion = camera_motion.new()
+		motion.amount = VIEW_BOBBING
 		-- Time left before the held dig button hits a pointed object again;
 		-- Luanti's object_hit_delay
 		local hit_wait = 0
@@ -779,6 +912,22 @@ local function show_client(host, port, name, password, pbr)
 					loading_panel:Remove()
 					loading_panel = nil
 				end
+				-- The minimap at the top right, official's own whether or
+				-- not the game adds one, under the minimap HUD flag; V
+				-- walks its modes ([EXT_HUD_PARITY]). The shared module,
+				-- over this client's scene; on `view` for the local line.
+				if not view.minimap then
+					local size = math.floor(128 * magic.ui.root.width /
+							math.max(1, buildat.logical_size() or
+							magic.graphics.width))
+					view.minimap = luanti_hud.minimap.new{magic = magic,
+							scene = view.scene, parent = magic.ui.root,
+							render_path = view.viewport.renderPath,
+							w = size, h = size,
+							height = math.floor(SETTINGS.view_range * 0.6)}
+					view.minimap.view:SetAlignment(HA_RIGHT, VA_TOP)
+					view.minimap.view:SetPosition(-10, 10)
+				end
 				-- A node whose texture expression cannot be built stays a
 				-- placeholder, and this is the only thing that says why
 				for mod_name, expr in pairs(texmod.unimplemented) do
@@ -791,11 +940,20 @@ local function show_client(host, port, name, password, pbr)
 		-- The atlas textures the world is drawn with are filled in by hand
 		-- rather than loaded from a file, and Urho3D can only bring back
 		-- what it loaded: a change of screen mode takes the GL context with
-		-- it and the world comes back black. Building the registry again is
-		-- what fills them.
+		-- it and the world comes back black.
+		--
+		-- The atlas registry keeps the Image every segment was written
+		-- into and puts it back when the texture says its data is lost
+		-- (`AtlasRegistry::update()`, which voxelworld's client half calls
+		-- every frame); this client never called it and rebuilt the whole
+		-- registry on ScreenMode instead -- which on the box left the
+		-- world black going into fullscreen and, in pbr, for good coming
+		-- out of it, the rebuild filling textures the materials no longer
+		-- drew with ([BOX_PLAYTEST_3] 1). The rebuild is gone; the
+		-- per-frame update is in view:update().
 		local screen_mode_cb = magic.SubscribeToEvent("ScreenMode",
 				function()
-					registry_stale = true
+					log:info("screen mode changed; the atlas restores itself")
 				end)
 
 		client.on_nodedef = function(data)
@@ -806,7 +964,14 @@ local function show_client(host, port, name, password, pbr)
 			for _, def in pairs(defs) do
 				node_by_name[def.name] = def
 			end
+			local through, blocking = 0, 0
+			for _, def in pairs(defs) do
+				if def.pointable == 0 then through = through + 1 end
+				if def.pointable == 2 then blocking = blocking + 1 end
+			end
 			add_line(count.." node definitions")
+			log:info(count.." node definitions, "..through..
+					" the ray goes through, "..blocking.." block it")
 			registry_stale = true
 			-- Starts the fallback clock: a server that never announces its
 			-- media must not leave the loading panel up forever
@@ -856,13 +1021,21 @@ local function show_client(host, port, name, password, pbr)
 		-- stands still until the ground under them is there.
 		local avatar = player.new(
 				function(x, y, z) return view:is_solid(x, y, z) end,
-				function(x, y, z) return view:is_liquid(x, y, z) end)
+				function(x, y, z) return view:is_liquid(x, y, z) end,
+				nil,
+				function(x, y, z) return view:resistance_at(x, y, z) end)
 		client.on_movement = function(m)
 			avatar.movement = m
 			add_line("The game's movement constants arrived")
 		end
 
 		client.on_itemdef = function(data)
+			-- The first of the game's content, which is the join having
+			-- gone through: the name it went through with is kept for the
+			-- server ([BOX_PLAYTEST_2] 4)
+			if not got_content then
+				settings.remember_server_name(host, port, name)
+			end
 			got_content = true
 			local items, count = itemdef.parse(luanti.serialize, data, log,
 					client.protocol_version)
@@ -1015,8 +1188,13 @@ local function show_client(host, port, name, password, pbr)
 				object_head = object_head + 1
 				object_queued[id] = nil
 				local obj = world_objects[id]
-				-- Gone again, or the player's own: nothing to draw
-				if obj and not obj.is_self then
+				-- Gone again, the player's own in first person, or riding
+				-- on a bone this cannot follow ([OVER_SHOULDER]: an
+				-- attached object drawn at its own position lands at the
+				-- player's feet): nothing to draw
+				if obj and obj.attached_to then
+					view:remove_object(id)
+				elseif obj and (not obj.is_self or camera_mode ~= 1) then
 					local t1 = buildat.get_time_us()
 					view:set_object(obj, object_resource)
 					built = built + 1
@@ -1090,12 +1268,17 @@ local function show_client(host, port, name, password, pbr)
 			end
 			local r = luanti.serialize.reader(data)
 			local ok, err = pcall(objects.apply_message, obj, r)
+			-- The local player's own override goes to the avatar's physics
+			if ok and obj.is_self and obj.physics_override and avatar then
+				avatar.override = obj.physics_override
+				obj.physics_override = nil
+			end
 			if not ok then
 				-- One message this does not understand is not worth losing
 				-- the object over; the rest still arrive
 				return
 			end
-			if obj.visual_stale and not obj.is_self then
+			if obj.visual_stale and (not obj.is_self or camera_mode ~= 1) then
 				queue_object(id)
 			end
 		end
@@ -1220,6 +1403,77 @@ local function show_client(host, port, name, password, pbr)
 		local function node_def_at(p)
 			local id = view:node_at(p[1], p[2], p[3])
 			return id and node_defs and node_defs[id] or nil
+		end
+
+		-- The id a node name has here, for a predicted write. Air is not in
+		-- the definitions the server sends; its id is the protocol's
+		local function node_id_of(name)
+			if name == "air" then
+				return 126 -- CONTENT_AIR
+			end
+			local def = node_by_name[name]
+			return def and def.id or nil
+		end
+
+		-- Dig prediction ([PREDICTION]): the node becomes its definition's
+		-- node_dig_prediction the moment the dig completes (air unless the
+		-- definition names another, "" for none), and the server's update
+		-- overwrites whatever this got wrong -- official's Game::handleDigging
+		local function predict_dig(p)
+			local def = node_def_at(p)
+			if not def then
+				return
+			end
+			local want = def.node_dig_prediction
+			if want == nil then
+				want = "air"
+			end
+			if want == "" then
+				return
+			end
+			local id = node_id_of(want)
+			if id then
+				view:set_node(p[1], p[2], p[3], id, nil, 0)
+				log:info(string.format("predicted %s at (%d, %d, %d)", want,
+						p[1], p[2], p[3]))
+			end
+		end
+
+		-- Placement prediction: the wielded item's node_placement_prediction
+		-- into above (or under when buildable_to), unless the pointed node
+		-- takes the click (rightclickable and no sneak) or the item says ""
+		-- (a custom on_place). simplified: only a node with no facedir or
+		-- wallmounted paramtype2 is predicted; the others wait for the
+		-- server's answer with the param2 it works out.
+		local function predict_place(pointed_under, pointed_above, sneak)
+			local held = wielded()
+			local idef = held and item_defs and item_defs[held.name]
+			local want = idef and idef.node_placement_prediction
+			if want == nil then
+				want = node_by_name[held and held.name or ""] and held.name or ""
+			end
+			if want == "" then
+				return
+			end
+			local udef = node_def_at(pointed_under)
+			if udef and udef.rightclickable and not sneak then
+				return
+			end
+			local def = node_by_name[want]
+			if not def or def.id == nil then
+				return
+			end
+			-- ContentParamType2: 3 facedir, 4 wallmounted, 9 and 10 their
+			-- coloured kinds, 13 and 14 the 4dir ones
+			local pt2 = def.param_type_2 or 0
+			if pt2 == 3 or pt2 == 4 or pt2 == 9 or pt2 == 10 or pt2 == 13 or
+					pt2 == 14 then
+				return
+			end
+			local at = (udef and udef.buildable_to) and pointed_under or pointed_above
+			view:set_node(at[1], at[2], at[3], def.id, nil, 0)
+			log:info(string.format("predicted %s at (%d, %d, %d)", want,
+					at[1], at[2], at[3]))
 		end
 
 		-- The pointing ray, and what holding the dig button does to what it
@@ -1374,6 +1628,7 @@ local function show_client(host, port, name, password, pbr)
 						wield_index - 1, {under = dig.under,
 						above = dig.above})
 				dig.done = true
+				predict_dig(dig.under)
 			end
 			update_crack()
 		end
@@ -1547,11 +1802,54 @@ local function show_client(host, port, name, password, pbr)
 			end,
 		})
 
+		-- `event scan` beside a screenshot says where the camera and the
+		-- player's own model were when the frame was drawn
+		-- ([OVER_SHOULDER]'s open reading: the model's feet land as if the
+		-- camera were nearer than the setback loop's last value, and the
+		-- two have to be read in the same frame before anything moves)
+		magic.SubscribeToEvent("command_seq:scan", function()
+			log:info(view:camera_report())
+		end)
+
 		local held = nil
 
-		-- The hotbar and the health bar, remade when what they show changes
+		-- The health bar, remade when what it shows changes; the hotbar
+		-- beside it is the row both clients share ([EXT_HOTBAR]) and keeps
+		-- its own elements
 		local hud = nil
 		local hud_key = nil
+		local hotbar_look = nil
+		local hotbar_row = luanti_hud.hotbar.new{
+			magic = magic, buildat = buildat, log = log,
+			white = magic.cache:GetResource("Texture2D",
+					"luanti_client/res/white.png"),
+			font = magic.cache:GetResource("Font", buildat.font_mono),
+			texture = function(name)
+				if not name or name == "" then
+					return nil
+				end
+				local resource = media_texture(name)
+				local tex = resource and
+						magic.cache:GetResource("Texture2D", resource)
+				if tex then
+					tex.filterMode = magic.FILTER_NEAREST
+				end
+				return tex
+			end,
+			stack = function(stack)
+				if not stack or stack.count == 0 then
+					return nil, nil, nil
+				end
+				local resource = item_image(stack.name)
+				local tex = resource and
+						magic.cache:GetResource("Texture2D", resource)
+				if tex then
+					tex.filterMode = magic.FILTER_NEAREST
+				end
+				return tex, stack.count > 1 and tostring(stack.count) or "",
+						stack.name
+			end,
+		}
 
 		-- The game's own HUD: what the server said is on the screen, the
 		-- element holding it, and whether that has to be built again. The
@@ -1663,7 +1961,7 @@ local function show_client(host, port, name, password, pbr)
 			chat_text.visible = show_chat and
 					luanti_hud.has_flag(hud_flags, luanti_hud.FLAG.chat)
 			local chat_y = 8
-			if show_debug then
+			if show_debug > 0 then
 				chat_y = 8 + status_text.height + 8
 			end
 			if chat_y ~= chat_at_y then
@@ -1685,12 +1983,34 @@ local function show_client(host, port, name, password, pbr)
 			if game_hud_stale or size ~= game_hud_size then
 				game_hud_stale = false
 				game_hud_size = size
+
 				if game_hud then
 					game_hud:Remove()
 				end
 				local missing
-				game_hud, missing = ui:hud_elements(ui_root, hud_elements,
-						ui_root.width, ui_root.height)
+				local images
+				-- What a screen pixel is in this UI's units, which is what
+				-- Luanti multiplies a HUD element's sizes and offsets by
+				-- ([EXT_HOTBAR])
+				game_hud, missing, images = ui:hud_elements(ui_root,
+						hud_elements, ui_root.width, ui_root.height,
+						ui_root.width / math.max(1, buildat.logical_size() or
+						magic.graphics.width))
+				-- The lowest of the game's own image elements, which for a
+				-- game that draws its hotbar's background itself is that
+				-- background; the check reads it against the row
+				-- ([EXT_HOTBAR])
+				local low = nil
+				for _, im in ipairs(images) do
+					if not low or im.y + im.h > low.y + low.h then
+						low = im
+					end
+				end
+				if low then
+					log:info("hud image lowest: \""..tostring(low.name)..
+							"\" at "..low.x..","..low.y.." "..low.w.."x"..
+							low.h)
+				end
 				if not game_hud_missing and next(missing) then
 					game_hud_missing = true
 					local names = {}
@@ -1703,27 +2023,24 @@ local function show_client(host, port, name, password, pbr)
 			end
 			game_hud.visible = on
 
-			-- simplified: the hotbar flag takes this client's own hotbar
-			-- away and the health bar goes with it, because the two are one
-			-- element here. A game that turns off the hotbar and keeps the
-			-- health bar is not one this has met.
-			if not on or not luanti_hud.has_flag(hud_flags,
-					luanti_hud.FLAG.hotbar) then
-				if hud then
-					hud:Remove()
-					hud = nil
-					hud_key = nil
-				end
-				return
-			end
+			local show_hotbar = on and luanti_hud.has_flag(hud_flags,
+					luanti_hud.FLAG.hotbar)
 			local list = inv and inv.main or nil
-			local healthbar = luanti_hud.has_flag(hud_flags,
+			local healthbar = on and luanti_hud.has_flag(hud_flags,
 					luanti_hud.FLAG.healthbar)
+			-- The game's own two pictures for the row, which is what makes
+			-- it look like the game's rather than like nothing
+			-- ([EXT_HOTBAR]); a game that sends neither gets Luanti's own
+			-- per-slot squares, as official does.
+			local params = client.hud_params or {}
+			local count = params[luanti_hud.PARAM_HOTBAR_ITEMCOUNT] or
+					HOTBAR_SLOTS
 			local key = tostring(wield_index).."/"..tostring(client.hp)..
-					"/"..tostring(healthbar)
-			-- What is in the slots, as a string, so that the bar is only
-			-- built again when it would look different
-			for i = 1, HOTBAR_SLOTS do
+					"/"..tostring(healthbar).."/"..tostring(show_hotbar)..
+					"/"..tostring(count).."/"..size
+			-- What is in the slots, as a string, so that the row is only
+			-- drawn again when it would look different
+			for i = 1, count do
 				local stack = list and list.items[i] or nil
 				key = key.."|"..(stack and
 						(stack.name.." "..stack.count) or "")
@@ -1732,12 +2049,45 @@ local function show_client(host, port, name, password, pbr)
 				return
 			end
 			hud_key = key
+			hotbar_row:relayout()
+			-- Said once per look, which is what a driven check reads: where
+			-- the row landed against the game's own bars ([EXT_HOTBAR])
+			local look = count.."/"..tostring(params[
+					luanti_hud.PARAM_HOTBAR_IMAGE]).."/"..tostring(params[
+					luanti_hud.PARAM_HOTBAR_SELECTED_IMAGE]).."/"..size
+			if look ~= hotbar_look then
+				hotbar_look = look
+				local _, _, slot, margin = hotbar_row:metrics()
+				log:info("hotbar: "..count.." slots, image \""..
+						tostring(params[luanti_hud.PARAM_HOTBAR_IMAGE])..
+						"\", marker \""..tostring(params[
+						luanti_hud.PARAM_HOTBAR_SELECTED_IMAGE])..
+						"\", row "..math.floor(
+						(ui_root.width - count * slot) / 2)..","..
+						(ui_root.height - margin - slot).." "..
+						(count * slot).."x"..slot.." in "..size)
+			end
+			hotbar_row:draw{
+				list = list and list.items or {},
+				wield = wield_index, count = count, shown = show_hotbar,
+				image = params[luanti_hud.PARAM_HOTBAR_IMAGE],
+				selected_image =
+						params[luanti_hud.PARAM_HOTBAR_SELECTED_IMAGE],
+			}
 			if hud then
 				hud:Remove()
+				hud = nil
 			end
-			hud = ui:hud(ui_root, list, HOTBAR_SLOTS, wield_index,
-					healthbar and client.hp or nil, 20,
-					ui_root.width, ui_root.height)
+			if healthbar and show_hotbar and client.hp then
+				-- Just above the row, which is where a game that draws its
+				-- own bars against official's hotbar expects the space to
+				-- be taken
+				local _, _, slot, margin = hotbar_row:metrics()
+				local width = count * slot
+				hud = ui:health_bar(ui_root, client.hp, 20,
+						math.floor((ui_root.width - width) / 2),
+						ui_root.height - margin - slot, width, slot)
+			end
 		end
 
 		-- The escape handler a form with fields in it needs, kept so that a
@@ -1795,6 +2145,7 @@ local function show_client(host, port, name, password, pbr)
 		-- A form the server closed or replaced is not the player closing it,
 		-- and gets no quit.
 		local function close_form(quit)
+			uistack.set_scan_extra(nil)
 			if not form then
 				return
 			end
@@ -1850,6 +2201,10 @@ local function show_client(host, port, name, password, pbr)
 			local h = ui_root.height
 			local layout = formspec.layout(size, real, w, h)
 			form.drawn = ui:show(ui_root, elements, layout, w, h, form.state)
+			-- A form is drawn on the UI root and not on this session's own
+			-- screen, so a scan of the stack does not reach it; this is
+			-- what a driven run reads the form's elements through
+			uistack.set_scan_extra(form.drawn.window)
 			local typeable = false
 			for _, f in ipairs(form.drawn.fields) do
 				if f.edit then
@@ -2091,7 +2446,9 @@ local function show_client(host, port, name, password, pbr)
 				if lx >= b.x and lx < b.x + b.w and
 						ly >= b.y and ly < b.y + b.h then
 					local fields = form_fields()
-					fields[b.name] = ""
+					-- A hypertext's action says which one it was; a button
+					-- says only that it was pressed ([FORMSPEC_SCROLL])
+					fields[b.name] = b.value or ""
 					if b.exit then
 						fields.quit = "true"
 					end
@@ -2110,6 +2467,30 @@ local function show_client(host, port, name, password, pbr)
 			for _, t in ipairs(form.drawn.taps) do
 				if lx >= t.x and lx < t.x + t.w and
 						ly >= t.y and ly < t.y + t.h then
+					-- A dropdown's own two taps ([FORMSPEC_SCROLL]): the
+					-- box opens and closes the list and sends nothing, an
+					-- item in it is the choice
+					if t.open then
+						form.state.dropdown_open =
+								form.state.dropdown_open ~= t.name and
+								t.name or nil
+						form_stale = true
+						return
+					end
+					if t.scroll then
+						-- A scrollbar's trough, paged ([FORMSPEC_SCROLL])
+						form.state.scroll = form.state.scroll or {}
+						local v = (form.state.scroll[t.name] or 0) + t.scroll
+						form.state.scroll[t.name] =
+								math.max(0, math.min(1000, v))
+						form_stale = true
+					end
+					if t.pick then
+						form.state.dropdown = form.state.dropdown or {}
+						form.state.dropdown[t.name] = t.pick
+						form.state.dropdown_open = nil
+						form_stale = true
+					end
 					local fields = form_fields()
 					fields[t.name] = t.value
 					if t.check then
@@ -2219,8 +2600,27 @@ local function show_client(host, port, name, password, pbr)
 				open_form(spec, "", "nodemeta", pointed_under)
 				return
 			end
+			-- Not into the player's own space, as Game::nodePlacement
+			-- refuses: a walkable node that would land in the body's box
+			-- -- into under when that is buildable_to, else into above --
+			-- is not placed, and the server trusts the client on this
+			-- ([POINTABLE])
+			local held = wielded()
+			local hdef = held and node_by_name and node_by_name[held.name]
+			if hdef and hdef.walkable then
+				local udef = node_def_at(pointed_under)
+				local at = (udef and udef.buildable_to) and pointed_under or
+						pointed_above
+				if at[1] + 0.5 > avatar.x - 0.3 and at[1] - 0.5 < avatar.x + 0.3 and
+						at[2] + 0.5 > avatar.y and at[2] - 0.5 < avatar.y + 1.75 and
+						at[3] + 0.5 > avatar.z - 0.3 and at[3] - 0.5 < avatar.z + 0.3 then
+					return
+				end
+			end
 			client:interact(luanti.INTERACT_PLACE, wield_index - 1,
 					{under = pointed_under, above = pointed_above})
+			predict_place(pointed_under, pointed_above,
+					magic.input:GetKeyDown(BIND.sneak.key))
 		end
 
 		-- The bottom line is remade every frame; everything above it is the
@@ -2295,6 +2695,23 @@ local function show_client(host, port, name, password, pbr)
 			local reflections = sky_vis and string.format(
 					" | sky %.2f up over %d blocks", sky_vis, sky_blocks) or ""
 
+			-- Level 1 is one line and stays one line, as the module's:
+			-- what makes a picture a picture of what it claims to be.
+			-- Official's yaw is counter-clockwise from +Z and its pitch
+			-- positive looking up; the words are the module's.
+			if show_debug == 1 then
+				local yaw = (360 - (client.yaw or 0)) % 360
+				local cardinal = (yaw >= 45 and yaw < 135) and "West -X" or
+						(yaw >= 135 and yaw < 225) and "South -Z" or
+						(yaw >= 225 and yaw < 315) and "East +X" or "North +Z"
+				status_text.text = string.format(
+						"luanti_client | %s:%d | %s | %s%s | (%.1f, %.1f, %.1f)"..
+						" | yaw: %.1f\194\176 %s | pitch: %.1f\194\176",
+						host, port, SETTINGS.mode, client.state, condition,
+						avatar.x, avatar.y, avatar.z, yaw, cardinal,
+						-(client.pitch or 0))
+				return
+			end
 			-- Two lines rather than one: one line of this does not fit on a
 			-- screen and what runs off the edge is the half that changes
 			status_text.text = table.concat(lines, "\n").."\n"..
@@ -2375,8 +2792,20 @@ local function show_client(host, port, name, password, pbr)
 				avatar:set_position(p.x, p.y, p.z)
 			end
 			-- A form or a chat line takes the mouse and the keys; the player
-			-- stands still rather than walking blind behind it
-			if form or chat_input then
+			-- stands still rather than walking blind behind it. So does a
+			-- screen on the UI stack over the session's own -- the pause
+			-- menu's settings and key screens -- with the cursor shown and
+			-- free while one is up: on the box the view turned under them
+			-- and the cursor vanished ([BOX_PLAYTEST_3] 2).
+			local screen_above = uistack.main.stack[#uistack.main.stack] ~= root
+			if screen_above ~= screen_was_above then
+				screen_was_above = screen_above
+				if not form and not chat_input then
+					magic.input:SetMouseVisible(screen_above,
+							screen_above and "a screen over the game" or nil)
+				end
+			end
+			if form or chat_input or screen_above then
 				client:set_position(avatar.x, avatar.y, avatar.z)
 				client:set_motion(0, 0, 0, 0)
 				return
@@ -2421,11 +2850,97 @@ local function show_client(host, port, name, password, pbr)
 			if wish.jump then keys = keys + luanti.KEY_JUMP end
 			if wish.sneak then keys = keys + luanti.KEY_SNEAK end
 			if wish.fast then keys = keys + luanti.KEY_AUX1 end
+			-- Zoom while Z is held, behind the zoom privilege
+			-- ([VIEW_KEYS]): the control bit goes to the server, the fov
+			-- to the camera
+			-- gated by the player's own zoom_fov property as official is
+			-- (0 off, 15 in creative)
+			local zoom_fov = 0
+			for _, obj in pairs(world_objects) do
+				if obj.is_self and obj.props then
+					zoom_fov = obj.props.zoom_fov or 0
+				end
+			end
+			local zooming = down("zoom") and zoom_fov > 0
+			if zooming then keys = keys + luanti.KEY_ZOOM end
+			if zooming ~= zoom_held then
+				zoom_held = zooming
+				view:set_zoom(zooming, zoom_fov)
+			end
 
 			local x, y, z = avatar:update(dtime, wish)
 			client:set_position(x, y, z, pitch, yaw)
 			client:set_motion(avatar.vx, avatar.vy, avatar.vz, keys)
-			view:set_camera(x, y + player.EYE_HEIGHT, z, pitch, yaw)
+			local speed_xz = math.sqrt(avatar.vx * avatar.vx + avatar.vz * avatar.vz)
+			local m = motion:update(dtime, {
+				walking = speed_xz > 1 and avatar.on_ground,
+				swimming = avatar.in_liquid and
+						(speed_xz > 1 or math.abs(avatar.vy) > 1),
+				climbing = avatar.climbing and math.abs(avatar.vy) > 1,
+				flying = avatar.fly_active or avatar.fly,
+				speed = math.sqrt(speed_xz * speed_xz + avatar.vy * avatar.vy),
+				digging = digging,
+			})
+			-- Sideways along the camera's right, and up; Luanti's yaw is
+			-- counterclockwise from +Z seen from above
+			local ry = math.rad(yaw)
+			local cx = x + m.offset[1] * math.cos(ry)
+			local cy = y + player.EYE_HEIGHT + m.offset[2]
+			local cz = z + m.offset[1] * math.sin(ry)
+			local cpitch, cyaw = pitch, yaw
+			if camera_mode ~= 1 then
+				-- The own model at the player's own feet, turned with the
+				-- look ([BOX_PLAYTEST_4] 4, 5)
+				view.self_pose = {x, y, z, yaw}
+				-- Third person, official's Camera::update: back along the
+				-- look (or ahead, turned round) up to 2.75 nodes, a fifth
+				-- up, the height following the look past 1.2, half a node
+				-- short of a solid node. Luanti's yaw is counterclockwise
+				-- from +z: the look is (-sin yaw, -sin pitch, cos yaw)
+				local rp = math.rad(pitch)
+				local dx, dy, dz = -math.sin(ry) * math.cos(rp), -math.sin(rp),
+						math.cos(ry) * math.cos(rp)
+				if camera_mode == 3 then
+					dx, dy, dz = -dx, -dy, -dz
+				end
+				local ex, ey, ez = cx, cy, cz
+				cy = ey + 0.2
+				for i = 10, 27 do
+					local t = i / 10
+					cx = ex - dx * t
+					cz = ez - dz * t
+					if i > 12 then
+						cy = ey - dy * t
+					end
+					-- A block this client does not hold yet is not a wall:
+					-- is_solid() answers "solid" for one, which behind a
+					-- player who has just joined stopped the camera a node
+					-- back and filled the frame with their own model
+					-- ([BOX_PLAYTEST_4] 3's "wonky"). Official's camera
+					-- reads its own map the same way.
+					local bx, by, bz = math.floor(cx + 0.5),
+							math.floor(cy + 0.5), math.floor(cz + 0.5)
+					if view:node_at(bx, by, bz) ~= nil and
+							view:is_solid(bx, by, bz) then
+						cx, cy, cz = cx + dx * 0.5, cy + dy * 0.5, cz + dz * 0.5
+						break
+					end
+				end
+				if camera_mode == 3 then
+					cpitch, cyaw = -pitch, yaw + 180
+				end
+			end
+			-- Over the shoulder when the settings say so ([OVER_SHOULDER]):
+			-- the eye to the right and a little up, the look and the
+			-- pointing ray unchanged. Luanti's yaw is counterclockwise
+			-- from +z, so the right is yaw - 90.
+			if camera_mode == 2 and SETTINGS.shoulder ~= 0 then
+				local rr = math.rad(yaw - 90)
+				cx = cx - math.sin(rr) * 0.4
+				cz = cz + math.cos(rr) * 0.4
+				cy = cy + 0.15
+			end
+			view:set_camera(cx, cy, cz, cpitch, cyaw, m.roll)
 		end
 
 		-- Set once the session is over -- the server said no, the connection
@@ -2611,6 +3126,17 @@ local function show_client(host, port, name, password, pbr)
 					queue_object(id)
 				end
 			end
+			-- The player's own object, drawn in the third-person views: the server
+			-- sends no position for it, so it stands where the avatar is, turned
+			-- the way the player looks ([THIRD_PERSON])
+			if camera_mode ~= 1 then
+				for _, obj in pairs(world_objects) do
+					if obj.is_self then
+						obj.position = {avatar.x, avatar.y, avatar.z}
+						obj.yaw = client.yaw
+					end
+				end
+			end
 			view:place_objects(world_objects, dtime)
 			last_objects_built = flush_objects()
 			-- The blocks whose light a node change may have moved. The
@@ -2646,13 +3172,20 @@ local function show_client(host, port, name, password, pbr)
 				-- which is how a game lights another dimension; the sun
 				-- still goes where the time says, as it does in Luanti.
 				view:set_daylight(daynight_ratio(time_of_day,
-						client.day_night_override), time_of_day)
+						client.day_night_override,
+						view:sun_height(time_of_day)), time_of_day)
 			end
 			-- Nothing is dropped until the server has said where the player
 			-- is: until then the camera is at the origin and everything that
 			-- has arrived looks far away, and a dropped block is one the
 			-- server will not send again
 			view:update(dtime, client.state == "ready" and DROP_DISTANCE or nil)
+			if view.minimap then
+				view.minimap.view.visible = show_hud and not loading and
+						luanti_hud.has_flag(hud_flags, luanti_hud.FLAG.minimap)
+						and luanti_hud.minimap.MODES[view.minimap.mode].nodes > 0
+				view.minimap:follow(view.camera_node.worldPosition, dtime)
+			end
 
 			-- Media requests go out a batch a frame, and the registry is
 			-- rebuilt once what was asked for has arrived
@@ -2777,6 +3310,9 @@ local function show_client(host, port, name, password, pbr)
 			caption.color = magic.Color(0.8, 0.8, 0.85)
 
 			chat_input = chat_window:CreateChild("LineEdit")
+			-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+			chat_input.textCopyable = true
+			chat_input.textSelectable = true
 			chat_input.defaultStyle = style
 			chat_input:SetStyleAuto()
 			chat_input:SetPosition(12, 30)
@@ -2887,6 +3423,33 @@ local function show_client(host, port, name, password, pbr)
 						math.floor(event_data:GetInt("X") / scale),
 						math.floor(event_data:GetInt("Y") / scale),
 					}
+					-- A scrollbar's thumb is dragged while the button is
+					-- held over it ([FORMSPEC_SCROLL])
+					if form and form.drawn and form.drawn.bars and
+							magic.input:GetMouseButtonDown(
+							magic.MOUSEB_LEFT) then
+						local lx = mouse_at[1] - form.drawn.origin[1]
+						local ly = mouse_at[2] - form.drawn.origin[2]
+						for _, b in ipairs(form.drawn.bars) do
+							if lx >= b.x and lx < b.x + b.w and
+									ly >= b.y and ly < b.y + b.h then
+								local frac = b.vertical and
+										(ly - b.y) / math.max(1, b.h) or
+										(lx - b.x) / math.max(1, b.w)
+								local v = math.floor(math.max(0,
+										math.min(1, frac)) * b.max)
+								form.state.scroll = form.state.scroll or {}
+								if v ~= (form.state.scroll[b.name] or 0) then
+									form.state.scroll[b.name] = v
+									form_stale = true
+									local fields = form_fields()
+									fields[b.name] = "CHG:"..v
+									send_form_fields(fields)
+								end
+								break
+							end
+						end
+					end
 				end)
 
 		-- Where a click landed, which MouseButtonDown does not say
@@ -2907,6 +3470,29 @@ local function show_client(host, port, name, password, pbr)
 				function(event_type, event_data)
 					if not form or not form.drawn then
 						return
+					end
+					-- Over a scroll_container the wheel is that
+					-- container's ([FORMSPEC_SCROLL])
+					if mouse_at and form.drawn.scrolls then
+						local lx = mouse_at[1] - form.drawn.origin[1]
+						local ly = mouse_at[2] - form.drawn.origin[2]
+						for _, c in ipairs(form.drawn.scrolls) do
+							if c.bar and lx >= c.x and lx < c.x + c.w and
+									ly >= c.y and ly < c.y + c.h then
+								form.state.scroll = form.state.scroll or {}
+								local v = (form.state.scroll[c.bar] or 0) -
+										event_data:GetInt("Wheel") * 100
+								v = math.max(0, math.min(1000, v))
+								if v ~= (form.state.scroll[c.bar] or 0) then
+									form.state.scroll[c.bar] = v
+									form_stale = true
+									local fields = form_fields()
+									fields[c.bar] = "CHG:"..v
+									send_form_fields(fields)
+								end
+								return
+							end
+						end
 					end
 					local t = form.drawn.tables[1]
 					if not t or t.count <= t.visible then
@@ -2967,6 +3553,9 @@ local function show_client(host, port, name, password, pbr)
 				return
 			end
 			left = true
+			if ui_utils.set_in_game then
+				ui_utils.set_in_game(false)
+			end
 			magic.UnsubscribeFromEvent("Update", update_cb)
 			magic.UnsubscribeFromEvent("MouseButtonDown", mouse_down_cb)
 			magic.UnsubscribeFromEvent("MouseButtonUp", mouse_up_cb)
@@ -2985,6 +3574,10 @@ local function show_client(host, port, name, password, pbr)
 			info_text:Remove()
 			tint_panel:Remove()
 			status_text:Remove()
+			if view.minimap then
+				view.minimap:destroy()
+				view.minimap = nil
+			end
 			if loading_panel then
 				loading_panel:Remove()
 				loading_panel = nil
@@ -3010,12 +3603,13 @@ local function show_client(host, port, name, password, pbr)
 			uistack.main:pop(root)
 		end
 
-		-- The pause menu, and the key list it opens. Both are formspecs
-		-- drawn by this client's own formspec code rather than dialogs built
-		-- by hand: the only thing that differs from a game's form is where
-		-- the buttons go, and a local form's fields reach a function here
-		-- instead of the server. Escape closes whichever of the two is up,
-		-- because that is what close_form already does.
+		-- The pause menu: a formspec drawn by this client's own formspec
+		-- code rather than a dialog built by hand: the only thing that
+		-- differs from a game's form is where the buttons go, and a local
+		-- form's fields reach a function here instead of the server.
+		-- Escape closes it, because that is what close_form already does.
+		-- The key bindings and the settings it opens are screens on the
+		-- UI stack ([EXT_SETTINGS]).
 		local sound_muted = false
 
 		local function pause_spec()
@@ -3024,35 +3618,15 @@ local function show_client(host, port, name, password, pbr)
 			-- back to the game is a key nobody was told about is a menu that
 			-- traps people. button_exit closes the form by itself, which is
 			-- exactly what continuing is.
-			return "size[6,5.8]"..
+			return "size[6,6.9]"..
 					"label[0.2,0.2;Paused]"..
 					"button_exit[0.4,1.0;5.2,0.8;btn_continue;"..
 					"Continue playing]"..
 					"button[0.4,2.1;5.2,0.8;btn_sound;"..
 					(sound_muted and "Unmute sound" or "Mute sound").."]"..
 					"button[0.4,3.2;5.2,0.8;btn_keys;Key bindings]"..
-					"button[0.4,4.3;5.2,0.8;btn_exit;Exit]"
-		end
-
-		-- Every binding this client has, in two columns, out of the same
-		-- table the code reads. A label's text is split on commas and
-		-- semicolons by the formspec grammar, so BINDINGS keeps them out.
-		local function keys_spec()
-			local half = math.ceil(#BINDINGS / 2)
-			local out = {"size[12,"..tostring(1.5 + half * 0.6).."]",
-					"label[0.2,0.2;Key bindings]"}
-			for i, b in ipairs(BINDINGS) do
-				local first = i <= half
-				local x = first and 0.3 or 6.2
-				local row = first and (i - 1) or (i - half - 1)
-				local y = 0.9 + row * 0.6
-				out[#out + 1] = "label["..x..","..y..";"..b.name.."]"
-				out[#out + 1] = "label["..(x + 1.8)..","..y..";"..
-						b.what.."]"
-			end
-			out[#out + 1] = "button[4.8,"..tostring(0.7 + half * 0.6)..
-					";2.4,0.8;btn_back;Back]"
-			return table.concat(out)
+					"button[0.4,4.3;5.2,0.8;btn_settings;Settings...]"..
+					"button[0.4,5.4;5.2,0.8;btn_exit;Exit]"
 		end
 
 		local menu_fields
@@ -3066,14 +3640,23 @@ local function show_client(host, port, name, password, pbr)
 				-- drawn again rather than left saying the wrong thing
 				open_local_form(pause_spec(), menu_fields)
 			elseif fields.btn_keys then
-				open_local_form(keys_spec(), menu_fields)
+				-- The shared editor ([EXT_SETTINGS]) on the UI stack, over
+				-- the closed form; back reopens the menu
+				close_form()
+				settings.show_keys(BINDINGS, open_pause_menu)
+			elseif fields.btn_settings then
+				close_form()
+				settings.show()
 			elseif fields.btn_back then
 				open_local_form(pause_spec(), menu_fields)
 			elseif fields.btn_exit then
 				-- The disconnect goes out and the window closes, which is
-				-- the same path the window's own close button takes
+				-- the same path the window's own close button takes; from
+				-- buildat's menu the grid underneath is what is left
 				leave()
-				engine:Exit()
+				if SETTINGS.cancel_exits then
+					engine:Exit()
+				end
 			end
 		end
 
@@ -3099,7 +3682,10 @@ local function show_client(host, port, name, password, pbr)
 			log:info("Session ended: "..(text:gsub("\n", " ")))
 			leave()
 			ui_utils.show_message_dialog(text, function()
-				if got_content then
+				-- Launched from buildat's menu the grid is underneath, and
+				-- closing the client over it would be leaving the launcher
+				-- for a server's refusal ([BOX_PLAYTEST_2] 2)
+				if got_content and SETTINGS.cancel_exits then
 					engine:Exit()
 				else
 					-- Nothing of the game ever arrived, so this was the
@@ -3122,6 +3708,34 @@ local function show_client(host, port, name, password, pbr)
 			-- Luanti's own keys for these, out of BINDINGS at the top of
 			-- this file. A server that does not give the player the fly and
 			-- noclip privileges pulls them back.
+			-- Official's camera mode key ([THIRD_PERSON]): first person,
+			-- third from behind, third from the front, under the server's
+			-- TOCLIENT_CAMERA restriction; the own model is drawn in the
+			-- third views and taken back out in first
+			if key == BIND.fog.key then
+				fog_on = not fog_on
+				view:set_fog(fog_on)
+				add_chat(fog_on and "Fog enabled" or "Fog disabled")
+			end
+			if key == BIND.camera.key then
+				local allowed = client.camera_mode_allowed or 0
+				local next_mode = camera_mode % 3 + 1
+				if allowed ~= 0 then
+					next_mode = allowed
+				end
+				camera_mode = next_mode
+				for id, obj in pairs(world_objects) do
+					if obj.is_self then
+						if camera_mode == 1 then
+							view:remove_object(id)
+						else
+							queue_object(id)
+						end
+					end
+				end
+				add_chat(({"First person view", "Third person view",
+						"Third person view (front)"})[camera_mode])
+			end
 			if key == BIND.fly.key then
 				-- The server's own movement check pulls a player without
 				-- the privilege back; saying so is the whole difference
@@ -3172,8 +3786,11 @@ local function show_client(host, port, name, password, pbr)
 				show_chat = not show_chat
 			end
 			if key == BIND.debug.key then
-				show_debug = not show_debug
-				status_text.visible = show_debug
+				show_debug = (show_debug + 1) % 3
+				status_text.visible = show_debug > 0
+			end
+			if key == BIND.minimap.key and view.minimap then
+				add_chat(view.minimap:next_mode())
 			end
 			if key == BIND.noclip.key then
 				avatar.noclip = not avatar.noclip
@@ -3193,7 +3810,7 @@ local function show_client(host, port, name, password, pbr)
 				end
 			end
 		end)
-	end)
+	end, {description = "Luanti server at "..host..":"..port})
 end
 
 -- address and name are what to start the fields with; without them the
@@ -3202,33 +3819,38 @@ end
 show_connect_dialog = function(address, name)
 	local root = uistack.main:push({desc="luanti_client connect"})
 	root.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "__menu/res/main_style.xml")
+			"XMLFile", "launch_menu/res/main_style.xml")
 
 	local menu = ui_utils.vertical_menu(root, {min_width = 300})
-	local window = menu.window
+	local outer = menu.window
 
-	local title = window:CreateChild("Text")
+	local title = outer:CreateChild("Text")
 	title:SetStyleAuto()
 	title.text = "Connect to a Luanti server"
+
+	-- Two columns ([SERVER_LIST]): a list of servers on the left -- the
+	-- addresses this client has used, or Luanti's official list -- and the
+	-- fields on the right; a pick fills the address, a second pick connects
+	local columns = outer:CreateChild("UIElement")
+	columns:SetLayout(LM_HORIZONTAL, 16, magic.IntRect(0, 0, 0, 0))
+	local left = columns:CreateChild("UIElement")
+	left:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+	left:SetFixedWidth(520)
+	local window = columns:CreateChild("UIElement")
+	window:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+	window:SetFixedWidth(320)
 
 	local address_edit = labeled_edit(window, "Address",
 			address or DEFAULT_ADDRESS)
 	local name_edit = labeled_edit(window, "Player name", name or DEFAULT_NAME)
 	local password_edit = labeled_edit(window, "Password", "")
 
-	-- Picked before anything loads and fixed for the session: the atlas's
-	-- normal and surface maps have to be on from the first texture it builds,
-	-- and building them is most of what the media takes. What it buys is in
-	-- res/PBRVoxel.xml.
-	local pbr_row = window:CreateChild("UIElement")
-	pbr_row:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
-	pbr_row.minHeight = 24
-	local pbr_check = pbr_row:CreateChild("CheckBox")
-	pbr_check:SetStyleAuto()
-	local pbr_label = pbr_row:CreateChild("Text")
-	pbr_label:SetStyleAuto()
-	pbr_label.text = "Enable PBR (slower to load)"
-	pbr_check.checked = DEFAULT_PBR
+	-- The render mode is the settings screen's ([BOX_PLAYTEST_2] 3), fixed
+	-- for the session before anything loads: the atlas's normal and
+	-- surface maps have to be on from the first texture it builds. The
+	-- checkbox that was here read its element after the screen was popped
+	-- and threw, so the connect never started and the grid was what was
+	-- left, with no word why (finding 2).
 	-- The password is the field a second try is most likely about, and it is
 	-- the one that is not filled in
 	if address then
@@ -3252,9 +3874,14 @@ show_connect_dialog = function(address, name)
 			magic.UnsubscribeFromEvent("KeyDown", escape_cb)
 			escape_cb = nil
 		end
+		-- The address and the name kept for next time ([EXT_SETTINGS])
+		local kept = settings.load()
+		kept.address = address_edit:GetText()
+		kept.name = name
+		settings.save(kept)
+		local password = password_edit:GetText()
 		uistack.main:pop(root)
-		show_client(host, port, name, password_edit:GetText(),
-				pbr_check.checked)
+		show_client(host, port, name, password, DEFAULT_MODE)
 	end
 
 	local function cancel()
@@ -3266,13 +3893,145 @@ show_connect_dialog = function(address, name)
 		-- Launched on its own there is nothing to go back to, so cancelling
 		-- is quitting; launched from buildat's menu, that menu is what is
 		-- underneath and cancelling belongs to it. See M.launch below.
-		if cancel_exits then
+		if SETTINGS.cancel_exits then
 			engine:Exit()
 		end
 	end
 
 	menu:add("Connect", connect)
 	menu:add("Cancel", cancel)
+
+	-- The left column: the source row, a filter, the list
+	local sources = left:CreateChild("UIElement")
+	sources:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
+	local source_buttons = {}
+	-- The filter is put back as it was left ([BOX_PLAYTEST_2] 13b)
+	local filter_edit = labeled_edit(left, "Filter",
+			SETTINGS.server_filter or "")
+	local list = ui_utils.server_list(left, {width = 520, height = 420},
+			function(row, second)
+		address_edit:SetText(row.address)
+		-- The name last used on that server ([BOX_PLAYTEST_2] 4)
+		if row.player_name and row.player_name ~= "" then
+			name_edit:SetText(row.player_name)
+		end
+		if second then
+			connect()
+		end
+	end)
+	local source = "recent"
+	local official_rows = nil
+	local status = left:CreateChild("Text")
+	status:SetStyleAuto()
+	local function matches(row, filter)
+		local hay = (row.name .. " " .. (row.line or "") .. " " .. row.address):lower()
+		for word in filter:lower():gmatch("%S+") do
+			if not hay:find(word, 1, true) then
+				return false
+			end
+		end
+		return true
+	end
+	local function show()
+		for name, b in pairs(source_buttons) do
+			b.selected = (name == source)
+		end
+		local rows = {}
+		if source == "recent" then
+			for _, e in ipairs(network.known_addresses()) do
+				local host, port = e.uri:match("^%a+://(.-):(%d+)$")
+				if host and e.accepted then
+					rows[#rows + 1] = {name = host .. ":" .. port,
+							address = host .. ":" .. port,
+							line = e.description ~= "" and e.description or nil,
+							player_name = e.name}
+				end
+			end
+			status.text = #rows == 0 and "No servers used yet" or ""
+		else
+			rows = official_rows or {}
+			status.text = official_rows and (#rows .. " servers") or "Fetching the list..."
+		end
+		local filter = filter_edit:GetText()
+		if filter ~= "" then
+			local kept = {}
+			for _, r in ipairs(rows) do
+				if matches(r, filter) then
+					kept[#kept + 1] = r
+				end
+			end
+			rows = kept
+		end
+		list:set_rows(rows)
+	end
+	-- Luanti's official list, fetched on each open of it: name, address
+	-- and port, players of max, the description under; the flags as words
+	local function fetch_official()
+		official_rows = nil
+		show()
+		network.http_get("https://servers.luanti.org/list", function(body, err)
+			if not body then
+				status.text = "The list did not come: " .. tostring(err)
+				official_rows = {}
+				show()
+				return
+			end
+			local data = network.parse_json(body)
+			local rows = {}
+			for _, srv in ipairs(data and data.list or {}) do
+				local flags = {}
+				if srv.creative then flags[#flags + 1] = "creative" end
+				if srv.damage then flags[#flags + 1] = "damage" end
+				if srv.pvp then flags[#flags + 1] = "pvp" end
+				local addr = tostring(srv.address or "") .. ":" .. tostring(srv.port or 30000)
+				rows[#rows + 1] = {
+					name = string.format("%s   %s   %s/%s", tostring(srv.name or addr),
+							addr, tostring(srv.clients or 0), tostring(srv.clients_max or "?")),
+					address = addr,
+					-- Two lines of it; the whole is the server's own page
+					line = tostring(srv.description or ""):sub(1, 150) ..
+							(#tostring(srv.description or "") > 150 and "..." or "") ..
+							(#flags > 0 and ("  [" .. table.concat(flags, ", ") .. "]") or "") ..
+							(srv.version and ("  " .. srv.version) or ""),
+				}
+			end
+			official_rows = rows
+			show()
+		end, {description = "Luanti's official server list"})
+	end
+	local function source_button(name, label)
+		local b = source_buttons[name]
+		b = sources:CreateChild("Button")
+		b:SetStyleAuto()
+		b:SetName("Button")
+		b:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+		b:SetFixedSize(250, 26)
+		local t = b:CreateChild("Text")
+		t:SetName("ButtonText")
+		t:SetStyleAuto()
+		t.text = label
+		t:SetTextAlignment(HA_CENTER)
+		magic.SubscribeToEvent(b, "Released", function()
+			source = name
+			if name == "official" then
+				fetch_official()
+			else
+				show()
+			end
+		end)
+		source_buttons[name] = b
+	end
+	source_button("recent", "Servers used")
+	source_button("official", "Official list")
+	magic.SubscribeToEvent(filter_edit, "TextFinished", function()
+		show()
+		-- Kept for the next time this screen opens
+		local kept = settings.load()
+		kept.server_filter = filter_edit:GetText()
+		SETTINGS.server_filter = kept.server_filter
+		settings.save(kept)
+	end)
+	show()
 
 	-- Escape cancels. A plain subscription rather than the stack's own,
 	-- because a LineEdit with the focus swallows the key and a stack handler
@@ -3298,24 +4057,48 @@ end
 -- Launched as the client's whole reason for running: `buildat -m
 -- luanti_client`, where cancelling the dialog quits.
 function M.boot()
-	cancel_exits = true
+	SETTINGS.cancel_exits = true
 	self_tests()
+	-- A scripted run has nothing to click, and the dialog's focus is in a
+	-- LineEdit that swallows Return. BUILDAT_LUANTI_CONNECT goes straight in
+	-- with the address and the name the environment already supplies -- see
+	-- DEFAULT_ADDRESS above, which says those two are for scripted runs. The
+	-- reference shot harness is what wants it; a person still gets the dialog.
+	if (os.getenv("BUILDAT_LUANTI_CONNECT") or "") ~= "" then
+		local host, port = split_address(DEFAULT_ADDRESS)
+		log:info("connecting to " .. host .. ":" .. port ..
+				" without the dialog, as BUILDAT_LUANTI_CONNECT asks")
+		show_client(host, port, DEFAULT_NAME,
+				os.getenv("BUILDAT_LUANTI_PASSWORD") or "", DEFAULT_MODE)
+		return
+	end
 	show_connect_dialog()
 end
 
 -- What makes this extension one of the things buildat's own menu offers: a
 -- name to show, an icon, and what to do when it is picked. The menu keeps
 -- the list of extensions it offers; an extension says how to launch itself.
--- See doc/design.txt, "Launchable extensions".
-M.launch = {
-	title = "Play on a Luanti server",
-	icon = "luanti_client/res/icon.png",
-	run = function()
-		cancel_exits = false
-		self_tests()
-		show_connect_dialog()
-	end,
-}
+-- See doc/architecture.txt, "The launch grid".
+-- Entered from the launch grid ([LAUNCH_GRID]): the tile is
+-- launcher/init.lua, sandboxed, and this is the one door it has. The name
+-- says what the request is: treat request.params as a packet from a
+-- server -- validate, default, ignore the rest. The menu is underneath,
+-- so cancelling the dialog goes back to it rather than exiting.
+function M.on_untrusted_launch(request)
+	local params = type(request) == "table" and
+			type(request.params) == "table" and request.params or {}
+	if params.menu == "settings" then
+		settings.show()
+		return
+	end
+	local address = type(params.address) == "string" and
+			#params.address <= 256 and params.address or nil
+	local name = type(params.name) == "string" and #params.name <= 64 and
+			params.name or nil
+	SETTINGS.cancel_exits = false
+	self_tests()
+	show_connect_dialog(address, name)
+end
 
 return M
 -- vim: set noet ts=4 sw=4:
