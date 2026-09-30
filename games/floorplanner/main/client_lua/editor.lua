@@ -5893,6 +5893,24 @@ do
 	-- at none of the plan, the middle of the box round all its rooms, up to
 	-- half their highest ceiling (user). An orbit about the floor, or the
 	-- ground, turns about half the room's height over it (user)
+	-- The middle of the box round all the plan's rooms, up to half their
+	-- highest ceiling; nil without rooms
+	function M.plan_middle()
+		if not next(room_data) then
+			return nil
+		end
+		local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
+		local top = 0
+		for id, r in pairs(room_data) do
+			for _, p in ipairs(r.pts) do
+				x0, z0 = math.min(x0, p[1]), math.min(z0, p[2])
+				x1, z1 = math.max(x1, p[1]), math.max(z1, p[2])
+			end
+			top = math.max(top, room_ceiling(doc.ents[id]))
+		end
+		return {x = W((x0 + x1) / 2), y = W(top / 2), z = W((z0 + z1) / 2)}
+	end
+
 	local function camera_pivot(orbit)
 		local o, d = cursor_ray()
 		local s = pick_surface()
@@ -5904,16 +5922,7 @@ do
 			return p
 		end
 		if orbit and next(room_data) then
-			local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
-			local top = 0
-			for id, r in pairs(room_data) do
-				for _, p in ipairs(r.pts) do
-					x0, z0 = math.min(x0, p[1]), math.min(z0, p[2])
-					x1, z1 = math.max(x1, p[1]), math.max(z1, p[2])
-				end
-				top = math.max(top, room_ceiling(doc.ents[id]))
-			end
-			return {x = W((x0 + x1) / 2), y = W(top / 2), z = W((z0 + z1) / 2)}
+			return M.plan_middle()
 		end
 		local x, z, t = ray_at_height(0)
 		if x then
@@ -6235,7 +6244,9 @@ do
 				if S.view == "2d" then
 					S.panning = true
 				else
-					S.orbit = camera_pivot(true)
+					-- About the plan's middle, not the finger's point (user):
+					-- under a finger, the point it is on is what should move
+					S.orbit = M.plan_middle() or camera_pivot(true)
 				end
 			end
 		end
