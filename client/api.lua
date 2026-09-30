@@ -879,6 +879,7 @@ buildat.safe.get_preferred_render_scale = __buildat_get_preferred_render_scale
 buildat.safe.font_sans     = buildat.font_sans
 buildat.safe.font_mono     = buildat.font_mono
 buildat.safe.get_time_us   = __buildat_get_time_us
+buildat.safe.get_local_time = __buildat_get_local_time
 buildat.safe.version       = __buildat_version
 buildat.safe.sha1          = __buildat_sha1
 buildat.safe.sha256        = __buildat_sha256

@@ -90,8 +90,10 @@ function M.time_text(minute)
 	return string.format("%d:%02d", math.floor(minute / 60), minute % 60)
 end
 
--- The time-lapse's speeds: minutes of the plan's day a second
-M.LAPSES = {{"off", 0}, {"1 min/s", 1}, {"10 min/s", 10}, {"1 h/s", 60}}
+-- The time-lapse's speeds: minutes of the plan's day a second; and the
+-- viewer's own clock for the hour (-1), and for the date too (-2)
+M.LAPSES = {{"off", 0}, {"1 min/s", 1}, {"10 min/s", 10}, {"1 h/s", 60},
+	{"real time", -1}, {"real date and time", -2}}
 
 --
 -- The ground by the season

@@ -161,13 +161,14 @@ static const sv_<TypeSchema> SCHEMA = {
 		// The site and the moment the 3D view is lit for ([FP_DAYLIGHT]):
 		// north in degrees clockwise from the plan view's up, the latitude,
 		// the day of the year and the minute of the (solar) day, a
-		// time-lapse's speed in minutes a second (0 still), and the
+		// time-lapse's speed in minutes a second (0 still; -1 each viewer's
+		// own clock for the hour, -2 their clock and calendar), and the
 		// ground: 0 by the season, 1 green, 2 yellow, 3 snow
 		{"north", 0, 359, 0},
 		{"latitude", -90, 90, 65},
 		{"day", 1, 365, 172},
 		{"minute", 0, 1439, 720},
-		{"lapse", 0, 60, 0},
+		{"lapse", -2, 60, 0},
 		{"ground", 0, 3, 0},
 		{"grid", 1, 100, 100}, // mm, what the plan snaps to
 		// Floor to floor, where "Add a floor above" puts one ([FP_LAYOUTS])

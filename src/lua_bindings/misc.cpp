@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "lua_bindings/util.h"
+#include <ctime>
 #include "core/log.h"
 #include "core/version.h"
 #include "interface/fs.h"
@@ -88,6 +89,25 @@ static int l_get_time_us(lua_State *L)
 	return 1;
 }
 
+// get_local_time() -> day of the year (1..366), hour, minute, second: the
+// user's wall clock, which os.date would give but the sandbox leaves out
+// (Lua 5.1's os.date can crash on a bad format)
+static int l_get_local_time(lua_State *L)
+{
+	const time_t t = time(nullptr);
+	struct tm tmv;
+#ifdef _WIN32
+	localtime_s(&tmv, &t);
+#else
+	localtime_r(&t, &tmv);
+#endif
+	lua_pushinteger(L, tmv.tm_yday + 1);
+	lua_pushinteger(L, tmv.tm_hour);
+	lua_pushinteger(L, tmv.tm_min);
+	lua_pushinteger(L, tmv.tm_sec);
+	return 4;
+}
+
 // version() -> version, git hash ([VERSION]); sandbox-safe, so a launcher
 // file or a game can show what it runs on
 static int l_version(lua_State *L)
@@ -108,6 +128,7 @@ void init_misc(lua_State *L)
 	DEF_BUILDAT_FUNC(pcall)
 	DEF_BUILDAT_FUNC(fatal_error)
 	DEF_BUILDAT_FUNC(get_time_us)
+	DEF_BUILDAT_FUNC(get_local_time)
 	DEF_BUILDAT_FUNC(version)
 }
 

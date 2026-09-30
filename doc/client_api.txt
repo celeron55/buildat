@@ -33,6 +33,8 @@ buildat.Logger(module_name) -> object
 buildat.version -> string, the client's version and hash
 
 buildat.get_time_us() -> microseconds, a monotonic clock
+buildat.get_local_time() -> day of the year (1..366), hour, minute, second
+- The user's wall clock, in their time zone.
 
 buildat.sha1(data) -> 20 bytes
 buildat.sha256(data) -> 32 bytes
