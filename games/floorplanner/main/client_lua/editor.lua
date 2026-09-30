@@ -6671,6 +6671,30 @@ local function draw_overlay()
 			end
 		end
 	end
+	-- **A door, window or opening moved along its wall** (user): what is
+	-- left of the wall on each side, from the hole's edge to the wall's
+	-- end, on that part of the wall.
+	-- simplified: to the end of the wall's line, which at a corner is
+	-- half the other wall's thickness past the face seen there
+	local dr = S.drag
+	if dr and dr.kind == "move" and dr.moved and dr.inst then
+		for id in pairs(dr.inst) do
+			local it = inst_data[id]
+			local e = doc.ents[id]
+			local def = e and doc.ents[e.ints.def]
+			if it and it.hosted and it.frame and def then
+				local f, hw = it.frame, def.ints.w / 2
+				for _, span in ipairs({{0, it.along - hw},
+						{it.along + hw, f.len}}) do
+					if span[2] - span[1] > 0 then
+						local t = (span[1] + span[2]) / 2
+						world_label(f.ax + f.ux * t, 0, f.az + f.uz * t,
+								mm_text(span[2] - span[1]))
+					end
+				end
+			end
+		end
+	end
 	-- The voxel tool's and walking's crosshair, and what the pointer is on
 	crosshair.visible = S.captured or false
 	draw_guide(S.guide, P, line, outline)
