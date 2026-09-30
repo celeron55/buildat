@@ -28,7 +28,7 @@
 #include "SDL_emscriptenvideo.h"
 #include "SDL_emscriptenopengles.h"
 
-#define LOAD_FUNC(NAME) _this->egl_data->NAME = NAME;
+#define LOAD_FUNC(NAME) _this->egl_data->NAME = (void *)NAME; /* buildat: a cast for current clang */
 
 /* EGL implementation of SDL OpenGL support */
 
@@ -56,6 +56,9 @@ Emscripten_GLES_LoadLibrary(_THIS, const char *path) {
     LOAD_FUNC(eglWaitNative);
     LOAD_FUNC(eglWaitGL);
     LOAD_FUNC(eglBindAPI);
+    /* buildat [WEB_EMSDK]: SDL_EGL_HasExtension calls it, and unloaded it
+       was a call through a null pointer */
+    LOAD_FUNC(eglQueryString);
     
     _this->egl_data->egl_display = _this->egl_data->eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (!_this->egl_data->egl_display) {
