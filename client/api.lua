@@ -1163,6 +1163,28 @@ function buildat.safe.set_quad_geometry(safe_node, quads)
 	return __buildat_set_quad_geometry(getmetatable(safe_node).unsafe, quads)
 end
 
+-- set_cell_geometry(node, cells, size, r, g, b, a): a volume of cubic cells
+-- as the node's CustomGeometry; see src/lua_bindings/mesh.cpp
+function buildat.safe.set_cell_geometry(safe_node, cells, size, r, g, b, a)
+	if not getmetatable(safe_node) or
+			getmetatable(safe_node).type_name ~= "Node" then
+		error("node is not a sandboxed Node instance")
+	end
+	if type(cells) ~= "table" or type(size) ~= "number" then
+		error("cells is not a table or size is not a number")
+	end
+	for _, v in ipairs(cells) do
+		if type(v) ~= "number" then
+			error("cells holds something that is not a number")
+		end
+	end
+	local function num(v)
+		return type(v) == "number" and v or 1
+	end
+	return __buildat_set_cell_geometry(getmetatable(safe_node).unsafe, cells,
+			size, num(r), num(g), num(b), num(a))
+end
+
 function buildat.safe.clear_voxel_geometry(safe_node)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then

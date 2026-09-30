@@ -694,6 +694,76 @@ ss_ column_heights(const luabind::object &buffer_o,
 	return ss_((const char*)h.data(), h.size() * sizeof(int16_t));
 }
 
+// set_cell_geometry(node, cells, size, r, g, b, a): a volume of cubic cells
+// as the node's CustomGeometry, one geometry, a face wherever a cell's
+// neighbour is empty -- a face's normal, the colour (r, g, b, a) and the
+// texture coordinate (row, 0) on each vertex, one winding. `cells` is a
+// flat list of key, row: a key is (x+128) + (y+128)*256 + (z+128)*65536,
+// each of x, y and z from -128 to 127, and a cell is `size` across. The
+// floorplanner's voxel volumes; in C++ because a face at a time from Lua
+// was 24 sandbox calls, a quarter of a second for 4000 voxels natively and
+// a freeze on the web (user, 2026-09-30).
+void set_cell_geometry(const luabind::object &node_o,
+		const luabind::object &cells, float size, float r, float g, float b,
+		float a)
+{
+	lua_State *L = node_o.interpreter();
+	GET_TOLUA_STUFF(node, 1, Node);
+	std::unordered_map<int, int> row_of;
+	sv_<int> flat;
+	for(luabind::iterator it(cells), end; it != end; ++it)
+		flat.push_back(luabind::object_cast<int>(*it));
+	for(size_t i = 0; i + 1 < flat.size(); i += 2)
+		row_of[flat[i]] = flat[i + 1];
+	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
+	cg->SetNumGeometries(1);
+	cg->BeginGeometry(0, TRIANGLE_LIST);
+	static const int F[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0},
+			{0, 0, 1}, {0, 0, -1}};
+	const Color col(r, g, b, a);
+	for(const auto &pair : row_of){
+		const int key = pair.first;
+		const int x = key % 256 - 128, y = (key / 256) % 256 - 128,
+				z = key / 65536 - 128;
+		const Vector2 uv((float)pair.second, 0.f);
+		for(const auto &f : F){
+			const int nx = x + f[0], ny = y + f[1], nz = z + f[2];
+			if(nx >= -128 && nx <= 127 && ny >= -128 && ny <= 127 &&
+					nz >= -128 && nz <= 127 && row_of.count(
+					(nx + 128) + (ny + 128) * 256 + (nz + 128) * 65536))
+				continue;
+			const Vector3 n((float)f[0], (float)f[1], (float)f[2]);
+			// The face's middle, and two axes across it
+			const Vector3 c((x + 0.5f + f[0] * 0.5f), (y + 0.5f + f[1] * 0.5f),
+					(z + 0.5f + f[2] * 0.5f));
+			Vector3 u = f[0] != 0 ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
+			Vector3 v = f[2] != 0 ? Vector3(0, 1, 0) : Vector3(0, 0, 1);
+			if(f[1] != 0){
+				u = Vector3(1, 0, 0);
+				v = Vector3(0, 0, 1);
+			}
+			auto C = [&](float s, float t){
+				return (c + (u * s + v * t) * 0.5f) * size;
+			};
+			const Vector3 q[4] = {C(-1, -1), C(1, -1), C(1, 1), C(-1, 1)};
+			const int tris[2][3] = {{0, 1, 2}, {0, 2, 3}};
+			for(const auto &t : tris){
+				Vector3 pa = q[t[0]], pb = q[t[1]], pc = q[t[2]];
+				// Wound to face the normal, as editor.lua's tri() winds
+				if((pb - pa).CrossProduct(pc - pa).DotProduct(n) < 0)
+					std::swap(pb, pc);
+				for(const Vector3 &p : {pa, pb, pc}){
+					cg->DefineVertex(p);
+					cg->DefineNormal(n);
+					cg->DefineColor(col);
+					cg->DefineTexCoord(uv);
+				}
+			}
+		}
+	}
+	cg->Commit();
+}
+
 // set_quad_geometry(node, quads) -> {tile, ...}: a model's quads -- a Lua
 // list of {tile=, p={12 numbers}, uv={8 numbers}} -- as the node's
 // CustomGeometry, one geometry per distinct tile in ascending tile order
@@ -759,6 +829,7 @@ void init_mesh(lua_State *L)
 	using namespace luabind;
 	module(L)[
 			LUABIND_FUNC(set_quad_geometry),
+			LUABIND_FUNC(set_cell_geometry),
 			LUABIND_FUNC(column_heights),
 			LUABIND_FUNC(set_simple_voxel_model),
 			LUABIND_FUNC(set_8bit_voxel_geometry),

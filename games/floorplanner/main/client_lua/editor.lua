@@ -1033,37 +1033,20 @@ local FACES = {
 	{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
 }
 
--- simplified: one quad per exposed voxel face, made through CustomGeometry,
--- which is slow past some tens of thousands of faces; the upgrade is a
--- greedy mesher filling a VertexBuffer with buildat.write_floats
-local function voxel_geometry(g, def, sz, tint)
-	local vox = doc.voxels[def] or {}
-	local s = W(sz)
-	for key, mat in pairs(vox) do
-		local x, y, z = doc.voxel_cell(key)
-		local r = row(mat)
-		for _, f in ipairs(FACES) do
-			if not vox[doc.voxel_key(x + f[1], y + f[2], z + f[3])] then
-				local n = magic.Vector3(f[1], f[2], f[3])
-				-- The face's four corners: the cell's far side on the face's
-				-- axis, and the two others across it
-				local cx, cy, cz = x + 0.5 + f[1] * 0.5, y + 0.5 + f[2] * 0.5,
-						z + 0.5 + f[3] * 0.5
-				local u = f[1] ~= 0 and {0, 1, 0} or {1, 0, 0}
-				local v = f[3] ~= 0 and {0, 1, 0} or {0, 0, 1}
-				if f[2] ~= 0 then
-					u, v = {1, 0, 0}, {0, 0, 1}
-				end
-				local function C(a, b)
-					return magic.Vector3((cx + (u[1] * a + v[1] * b) * 0.5) * s,
-							(cy + (u[2] * a + v[2] * b) * 0.5) * s,
-							(cz + (u[3] * a + v[3] * b) * 0.5) * s)
-				end
-				tri(g, C(-1, -1), C(1, -1), C(1, 1), n, r, tint)
-				tri(g, C(-1, -1), C(1, 1), C(-1, 1), n, r, tint)
-			end
-		end
+-- A volume's cells as the node's geometry: a face wherever a neighbour is
+-- empty, built in the engine from one list of cells and palette rows
+-- (buildat.set_cell_geometry; a face at a time from here was a freeze on
+-- the web, user 2026-09-30)
+-- simplified: a quad per exposed face; the upgrade is a greedy mesher,
+-- which the same call can do inside
+local function voxel_geometry(node, def, sz, tint)
+	local cells = {}
+	for key, mat in pairs(doc.voxels[def] or {}) do
+		cells[#cells + 1] = key
+		cells[#cells + 1] = row(mat)
 	end
+	local c = tint or WHITE
+	buildat.set_cell_geometry(node, cells, W(sz), c.r, c.g, c.b, c.a)
 end
 
 local function update_voxel_meshes(seen)
@@ -1083,11 +1066,8 @@ local function update_voxel_meshes(seen)
 				end
 				local parent = e.align == 1 and P.overhead or P.walls
 				local node = parent:CreateChild("voxels")
-				local g = node:CreateComponent("CustomGeometry")
-				g:SetNumGeometries(1)
-				g:BeginGeometry(0, magic.TRIANGLE_LIST)
-				voxel_geometry(g, def, it.size, not on and UNLIT or nil)
-				g:Commit()
+				voxel_geometry(node, def, it.size, not on and UNLIT or nil)
+				local g = node:GetComponent("CustomGeometry")
 				g:SetMaterial(0, lit_material)
 				m = {node = node, key = key}
 				voxel_meshes[id] = m
