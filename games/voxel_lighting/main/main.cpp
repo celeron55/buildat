@@ -42,13 +42,49 @@ static const float VIEW_DIR_X = -1.0f;
 static const float VIEW_DIR_Y = -0.7f;
 static const float VIEW_DIR_Z = -1.0f;
 
-// Tuned so the surface keeps sky above it and rock below it across the volume
-static const float TERRAIN_AMPLITUDE = 9.0f;
+// Tuned so the surface keeps sky above it and rock below it across the volume.
+//
+// Retuned twice. First on 2026-09-14, when the noise hash stopped multiplying
+// in signed arithmetic: the same numbers that gave a surface at 19..45 gave
+// one at 7..17, and the amplitude and offset put the band back. That was not
+// enough -- the band was right and the *shape* was not, and the scene is
+// about a shape: the cave has to break out of a hillside, both because a
+// mouth in flat ground is a hole in a floor and because the gradient is what
+// these scenes exist to photograph. With the field the fixed hash gives, the
+// mouth stood on flat ground (eight voxels along the cave the ground rose by
+// one) and the shaft that should break out well up the slope came out *below*
+// the mouth, so its cap sat on the mouth instead of up the hill.
+//
+// So the seed and the mouth's own corner are knobs here now, and the four of
+// them were searched together rather than derived: the field is
+// interface::Noise, which __luanti_noise_map() hands to Lua, so a probe can
+// try thousands of sets against what the scene needs -- a surface inside the
+// volume, a mouth part way up it, a cave that stays in the volume to its end,
+// a pond with a rim just above its water line, and ground that climbs at the
+// mouth. These are what came out: a surface at 18..45 where it used to be
+// 19..45, the ground climbing eight voxels over the first eight of the cave,
+// and the shaft breaking out thirteen voxels above the mouth.
+static const float TERRAIN_AMPLITUDE = 22.0f;
 
-// Shifts the terrain up or down in the volume. With the noise below, 0 puts
-// the surface at roughly y=19..44, averaging the middle of the volume. The
+// Shifts the terrain up or down in the volume. With the noise below, 15 puts
+// the surface at roughly y=18..45, averaging the middle of the volume. The
 // generator logs the range it actually got, so retune this by reading that.
-static const float GROUND_OFFSET = 0.0f;
+static const float GROUND_OFFSET = 15.0f;
+
+// Which field the terrain is. One number of a different field is one scene of
+// a different shape, and the shape is what is being chosen here; see above.
+static const int TERRAIN_SEED = 17;
+
+// How far in from the far corner of the volume the cave's mouth sits, before
+// the whole cave is rotated about the middle. It decides which part of the
+// hill the mouth lands in, so it is searched with the terrain rather than set
+// once.
+static const int CAVE_MOUTH_INSET = 14;
+
+// How far from the mouth's own column a tree has to stand. A canopy is five
+// voxels across and both cave cameras look at the mouth, so one growing in
+// the doorway hides what the picture is of.
+static const int TREE_MOUTH_CLEARANCE = 7;
 
 static const float CAVE_RADIUS = 3.5f;
 // A pond, for a surface smooth enough to reflect the sky where everything else
@@ -126,7 +162,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// Digger's amplitude is set for its own much longer wavelength;
 			// at this one it would swing the surface across the whole volume.
 			interface::NoiseParams np(0, TERRAIN_AMPLITUDE, spread, 0, 5, 0.4);
-			interface::Noise noise(&np, 3, w, d);
+			interface::Noise noise(&np, TERRAIN_SEED, w, d);
 			noise.fbmMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
 			noise.transformNoiseMap();
 
@@ -186,15 +222,38 @@ struct Worldgen: public worldgen::GeneratorInterface
 				}
 			}
 
+			// Where the cave's mouth will be. Worked out before anything is
+			// planted, because nothing may grow in the doorway: the tree
+			// that does hides the thing both cave cameras are pointed at.
+			float ca = std::cos(CAVE_YAW_DEGREES * 3.14159265f / 180.0f);
+			float sa = std::sin(CAVE_YAW_DEGREES * 3.14159265f / 180.0f);
+			auto rot_x = [&](float x, float z){ return x * ca + z * sa; };
+			auto rot_z = [&](float x, float z){ return -x * sa + z * ca; };
+			float centre_x = lc.getX() + VOLUME_SIZE / 2.0f;
+			float centre_z = lc.getZ() + VOLUME_SIZE / 2.0f;
+			float ox = (uc.getX() - CAVE_MOUTH_INSET) - centre_x;
+			float oz = (uc.getZ() - CAVE_MOUTH_INSET) - centre_z;
+			int mouth_x = (int)std::floor(centre_x + rot_x(ox, oz) + 0.5f);
+			int mouth_z = (int)std::floor(centre_z + rot_z(ox, oz) + 0.5f);
+			// surface_at() indexes the noise map, so it must stay in the region
+			if(mouth_x < lc.getX()) mouth_x = lc.getX();
+			if(mouth_x > uc.getX()) mouth_x = uc.getX();
+			if(mouth_z < lc.getZ()) mouth_z = lc.getZ();
+			if(mouth_z > uc.getZ()) mouth_z = uc.getZ();
+
 			// Trees, for something that casts a shadow with a shape to it.
 			// Digger's density is a forest; here it would hide the terrain.
-			// Seed picked by eye: keeps the cave mouth clear of canopy
 			auto pr = interface::PseudoRandom(777);
 			for(int i = 0; i < w * d / 400; i++){
 				int x = pr.range(lc.getX() + 3, uc.getX() - 3);
 				int z = pr.range(lc.getZ() + 3, uc.getZ() - 3);
 				int y = (int)(surface_at(x, z) + 11.0f);
 				if(y < lc.getY() || y > uc.getY() - 8)
+					continue;
+				// A canopy is five voxels across, so this keeps the whole of
+				// it out of the mouth rather than only its trunk
+				if(std::abs(x - mouth_x) <= TREE_MOUTH_CLEARANCE &&
+						std::abs(z - mouth_z) <= TREE_MOUTH_CLEARANCE)
 					continue;
 
 				for(int y1 = y; y1 < y + 4; y1++)
@@ -277,28 +336,10 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// of a sealed pocket. Both the axis and its starting point are
 			// rotated about the centre of the volume, so the whole cave turns
 			// rather than just pivoting at the mouth.
-			float ca = std::cos(CAVE_YAW_DEGREES * 3.14159265f / 180.0f);
-			float sa = std::sin(CAVE_YAW_DEGREES * 3.14159265f / 180.0f);
-			auto rot_x = [&](float x, float z){ return x * ca + z * sa; };
-			auto rot_z = [&](float x, float z){ return -x * sa + z * ca; };
-
-			float centre_x = lc.getX() + VOLUME_SIZE / 2.0f;
-			float centre_z = lc.getZ() + VOLUME_SIZE / 2.0f;
-
 			float rdx = rot_x(VIEW_DIR_X, VIEW_DIR_Z);
 			float rdz = rot_z(VIEW_DIR_X, VIEW_DIR_Z);
 			float dl = std::sqrt(rdx*rdx + VIEW_DIR_Y*VIEW_DIR_Y + rdz*rdz);
 			float dx = rdx / dl, dy = VIEW_DIR_Y / dl, dz = rdz / dl;
-
-			float ox = (uc.getX() - 10) - centre_x;
-			float oz = (uc.getZ() - 10) - centre_z;
-			int mouth_x = (int)std::floor(centre_x + rot_x(ox, oz) + 0.5f);
-			int mouth_z = (int)std::floor(centre_z + rot_z(ox, oz) + 0.5f);
-			// surface_at() indexes the noise map, so it must stay in the region
-			if(mouth_x < lc.getX()) mouth_x = lc.getX();
-			if(mouth_x > uc.getX()) mouth_x = uc.getX();
-			if(mouth_z < lc.getZ()) mouth_z = lc.getZ();
-			if(mouth_z > uc.getZ()) mouth_z = uc.getZ();
 
 			float sx = mouth_x;
 			float sz = mouth_z;
@@ -509,9 +550,9 @@ struct Module: public interface::Module
 			// roughness, spec_strength, bumpiness, translucency, spots,
 			// static_spots. The README says why these values.
 			add_voxel(reg, "rock", "main/rock.png", true, false,
-					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.04f); // id 2
+					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.25f); // id 2
 			add_voxel(reg, "dirt", "main/dirt.png", true, false,
-					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.04f); // id 3
+					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.25f); // id 3
 			add_voxel(reg, "grass", "main/grass.png", true, false,
 					0.90f, 1.0f, 0.75f, 0.06f, 0.012f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true, false,
@@ -742,6 +783,10 @@ struct Module: public interface::Module
 			}
 
 			size_t mismatches = 0;
+			// Which way they are wrong is the reading, not how many:
+			// light that is too high where the sky does not reach is a
+			// cave that the shader then treats as outdoors
+			size_t too_bright = 0, too_dark = 0;
 			pv::Vector3DInt32 first(0, 0, 0);
 			uint8_t first_want = 0, first_got = 0;
 			for(int y = 0; y < H; y++)
@@ -765,6 +810,10 @@ struct Module: public interface::Module
 				}
 				if(want == stored[i])
 					continue;
+				if(stored[i] > want)
+					too_bright++;
+				else
+					too_dark++;
 				if(mismatches == 0){
 					first = pv::Vector3DInt32(lc.getX() + x, lc.getY() + y,
 							lc.getZ() + z);
@@ -777,8 +826,10 @@ struct Module: public interface::Module
 				log_v(MODULE, "skylight verify: ok");
 			} else {
 				log_w(MODULE, "skylight verify: %zu voxels differ from a "
-						"fresh fill; first " PV3I_FORMAT " wants %i, has %i",
-						mismatches, PV3I_PARAMS(first), first_want, first_got);
+						"fresh fill, %zu of them brighter and %zu darker; "
+						"first " PV3I_FORMAT " wants %i, has %i",
+						mismatches, too_bright, too_dark, PV3I_PARAMS(first),
+						first_want, first_got);
 			}
 		});
 	}
