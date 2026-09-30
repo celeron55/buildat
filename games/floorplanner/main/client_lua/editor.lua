@@ -5064,8 +5064,20 @@ do
 			return
 		end
 		if S.captured and S.tool ~= "voxel" and button == magic.MOUSEB_RIGHT then
-			-- Walking: the right button is Luanti's use, a door or a switch
-			use()
+			-- Walking: the right button is Luanti's use, a door or a switch;
+			-- with neither at the crosshair, it clears the selection as a
+			-- right click does elsewhere (user)
+			-- (the target at the crosshair, not the selected switch E takes)
+			local s = pick_surface(true)
+			if S.tool ~= "select" or s and s.kind == "instance" and
+					use_target() == s.id then
+				use()
+			else
+				S.sel, S.primary = {}, nil
+				S.palette_collapsed = true
+				S.dirty = true
+				refresh_panels()
+			end
 			return
 		end
 		if S.captured and S.tool == "voxel" then
