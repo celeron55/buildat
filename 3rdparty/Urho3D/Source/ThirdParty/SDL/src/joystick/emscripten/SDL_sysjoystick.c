@@ -167,12 +167,14 @@ SDL_SYS_JoystickInit(void)
     EmscriptenGamepadEvent gamepadState;
 
     numjoysticks = 0;
-    numjs = emscripten_get_num_gamepads();
 
     /* Check if gamepad is supported by browser */
-    if (numjs == EMSCRIPTEN_RESULT_NOT_SUPPORTED) {
+    /* buildat [WEB_EMSDK]: current Emscripten wants the gamepads sampled
+       before they are counted or read, as later SDLs do */
+    if (emscripten_sample_gamepad_data() != EMSCRIPTEN_RESULT_SUCCESS) {
         return SDL_SetError("Gamepads not supported");
     }
+    numjs = emscripten_get_num_gamepads();
 
     /* handle already connected gamepads */
     if (numjs > 0) {
@@ -313,6 +315,7 @@ SDL_SYS_JoystickUpdate(SDL_Joystick * joystick)
     int i, result, buttonState;
 
     if (item) {
+        emscripten_sample_gamepad_data();
         result = emscripten_get_gamepad_status(item->index, &gamepadState);
         if( result == EMSCRIPTEN_RESULT_SUCCESS) {
             if(gamepadState.timestamp == 0 || gamepadState.timestamp != item->timestamp) {
