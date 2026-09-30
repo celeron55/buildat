@@ -47,6 +47,7 @@ class Input : public Object
 {
     void SetToggleFullscreen(bool enable);
     void SetMouseVisible(bool enable, bool suppressEvent = false);
+    void SetMouseChangeReason(const String reason);
     void SetMouseGrabbed(bool grab, bool suppressEvent = false);
     void SetMouseMode(MouseMode mode, bool suppressEvent = false);
     bool IsMouseLocked();
