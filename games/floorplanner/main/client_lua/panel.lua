@@ -205,7 +205,8 @@ end
 -- it, adds its step to the number and commits it as Enter would. A field
 -- given a number is one, found again by its element's name: no element is
 -- kept here, since a removed one still answers where it was.
--- By the label: 10 for millimetres, 100 for kelvin, else 1; Shift x10.
+-- By the label: 10 for millimetres, 100 for kelvin, else 1, unless the
+-- field was given its step; Shift x10.
 local numeric = {} -- element name -> {on_finish, step}
 local numeric_n = 0
 
@@ -268,7 +269,7 @@ function M.flush()
 	end
 end
 
-function M.field(parent, label, value, on_finish, width, keep)
+function M.field(parent, label, value, on_finish, width, keep, step)
 	local r = M.row(parent)
 	local l = M.label(r, label)
 	l.minWidth = 112
@@ -283,8 +284,8 @@ function M.field(parent, label, value, on_finish, width, keep)
 		numeric_n = numeric_n + 1
 		local name = "fp_number_" .. numeric_n
 		e:SetName(name)
-		numeric[name] = {on_finish = on_finish,
-				step = label:find("mm") and 10 or label:find("Kelvin") and 100 or 1}
+		numeric[name] = {on_finish = on_finish, step = step or
+				label:find("mm") and 10 or label:find("Kelvin") and 100 or 1}
 	end
 	local done = e:GetText()
 	if keep or type(value) == "number" then

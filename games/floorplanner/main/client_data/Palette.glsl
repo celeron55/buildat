@@ -166,9 +166,26 @@ vec2 Plane(vec3 p, vec3 n)
     return p.xy;
 }
 
+// The world axes of Plane()'s two
+void PlaneAxes(vec3 n, out vec3 u, out vec3 v)
+{
+    vec3 a = abs(n);
+    if (a.y >= a.x && a.y >= a.z) {
+        u = vec3(1.0, 0.0, 0.0);
+        v = vec3(0.0, 0.0, 1.0);
+    } else if (a.x >= a.z) {
+        u = vec3(0.0, 0.0, 1.0);
+        v = vec3(0.0, 1.0, 0.0);
+    } else {
+        u = vec3(1.0, 0.0, 0.0);
+        v = vec3(0.0, 1.0, 0.0);
+    }
+}
+
 // A material at the fragment: its albedo, how much and how tightly it
-// reflects light, its reflectiveness, its own light and its opacity
-void Surface(vec3 p, vec3 n, out vec3 albedo, out float spec, out float power,
+// reflects light, its reflectiveness, its own light and its opacity; and
+// the normal, which a pattern with a relief bends
+void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float power,
         out float refl, out vec3 emissive, out float alpha)
 {
     vec4 t0 = Texel(0.0);
@@ -194,6 +211,7 @@ void Surface(vec3 p, vec3 n, out vec3 albedo, out float spec, out float power,
     // Wood's grain contrast, 1 as it always was, and paneling's angle
     float contrast = t5.g * 3.0;
     float angle = t5.r * 3.14159265;
+    float polish = t5.b;
     vec3 sp = p + vec3(seed * 1.37, seed * 0.71, seed * 2.13);
     vec3 q = sp / scale;
     vec2 uv = Plane(p, n) / scale;
@@ -291,9 +309,35 @@ void Surface(vec3 p, vec3 n, out vec3 albedo, out float spec, out float power,
                 (0.9 + (ring - 0.5) * 0.36 * contrast) *
                 (0.98 + (streak - 0.5) * 0.12 * contrast);
         nat = mix(nat, base * KnotShade(contrast), knot.x);
-        // The groove: 3 mm each side of the seam, darkest at its bottom
+        // Across the boards in the world, along the face
+        vec3 pu, pv;
+        PlaneAxes(n, pu, pv);
+        vec3 t = -sin(angle) * pu + cos(angle) * pv;
+        t = normalize(t - n * dot(t, n));
+        // The seam's V-groove, `gap` wide and `depth` deep: its two sides
+        // slope down to the seam, shaded the more the steeper they are.
+        // Where the groove is under a pixel its slope fades to the flat.
+        float depth = t5.a * 255.0 / 10000.0;
+        float half_gap = param * 255.0 / 20000.0;
         float d = min(f, 1.0 - f) * scale;
-        nat *= mix(0.45, 1.0, smoothstep(0.0, 0.003, d));
+        // (fwidth outside the branch: a derivative needs all the quad)
+        float blur = fwidth(d);
+        float slope = 0.0;
+        if (half_gap > 0.0 && d < half_gap) {
+            float steep = depth / half_gap;
+            slope = (f < 0.5 ? steep : -steep) *
+                    (1.0 - smoothstep(0.5, 2.0, blur / half_gap));
+            nat *= mix(1.0 - 0.55 * min(1.0, steep * 2.0), 1.0, d / half_gap);
+        }
+        // Rough sawn, the fibres stand up across the grain; polished, the
+        // colour deepens as wetted and the surface is a smooth mirror
+        float rough = 1.0 - polish;
+        slope += (streak - 0.5) * 0.4 * rough;
+        n = normalize(n - slope * t);
+        nat = pow(max(nat, vec3(0.0)), vec3(mix(0.85, 1.2, polish)));
+        roughness = mix(0.95, 0.08, polish);
+        spec = mix(0.03, 0.6, polish);
+        refl = 0.25 * polish * polish;
     }
 
     // The finish: the paint over the material's own colour (only ever
