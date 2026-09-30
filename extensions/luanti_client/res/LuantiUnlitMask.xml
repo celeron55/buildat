@@ -1,0 +1,9 @@
+<!-- An unlit cut-out: the texel drawn or discarded, with the depth write
+     on, so the depth buffer sorts a model's faces. DiffUnlitAlpha blends
+     with no depth write, and a skin's hat layer painted over the head
+     behind it ([OBJECT_MESH]). The pass stays "alpha": that is the one the
+     pbr render path draws forward and unlit; a "base" pass goes through
+     its lighting and comes out black. -->
+<technique vs="Unlit" ps="Unlit" psdefines="DIFFMAP ALPHAMASK">
+    <pass name="alpha" depthwrite="true" />
+</technique>
