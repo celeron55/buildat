@@ -374,6 +374,14 @@ if type(accounts) ~= "table" then
 end
 -- The editor's pause menu opens its Users and password pages
 doc.accounts = accounts
+-- The tutorial ([FP_TUTORIAL]), which goes on after a reload
+do
+	local _, terr, make = buildat.run_script_file("main/tutorial.lua")
+	if type(make) ~= "function" then
+		error("floorplanner: could not load tutorial.lua: " .. tostring(terr))
+	end
+	doc.tutorial = make(doc)
+end
 accounts.on_kicked = function()
 	buildat.disconnect()
 end
@@ -795,6 +803,8 @@ local function show_plans(message)
 	magic.SubscribeToEvent(e, "TextFinished", create)
 	button("New plan", create)
 	button("Import a plan...", function() doc.show_import() end)
+	-- The basics, step by step ([FP_TUTORIAL])
+	button("Tutorial", function() doc.tutorial.start() end)
 	e:SetFocus(true)
 end
 
@@ -1067,6 +1077,7 @@ function doc.joined()
 			error("floorplanner: could not load editor.lua: " .. tostring(err))
 		end
 		editor = m
+		doc.editor = m
 		editor.start(doc)
 	end
 	-- Where this client was in the plan, last time: once a visit, since a

@@ -3267,14 +3267,15 @@ do
 	end
 
 	-- A new voxel volume at the point, of one voxel, selected
-	local function add_volume(x, z)
+	local function add_volume(x, z, offset)
 		local def = doc.placeholder()
 		local inst = doc.placeholder()
 		send({
 			{op = "create", ent = {id = def, type = "definition", ints = {
 					kind = KIND.voxel, voxel_size = S.voxel_size}}},
 			{op = "create", ent = {id = inst, type = "instance", ints = {def = def,
-					x = math.floor(x + 0.5), z = math.floor(z + 0.5)}}},
+					x = math.floor(x + 0.5), z = math.floor(z + 0.5),
+					offset = offset or 0}}},
 		}, function(err)
 			if err == "" then
 				doc.set_voxels(S.real[def], {[doc.voxel_key(0, 0, 0)] =
@@ -3409,8 +3410,23 @@ do
 		local id = voxel_target()
 		if not id then
 			local x, z = snapped_point(nil)
+			-- In 3D, on the top of what the crosshair is on (user: a lamp on
+			-- a cupboard), a new volume starts there
+			local offset = nil
+			if S.view ~= "2d" then
+				local s = pick_surface(true)
+				local it = s and s.kind == "instance" and inst_data[s.id]
+				if it and s.t then
+					local o, d = cursor_ray()
+					local y = (o.y + d.y * s.t) * 1000
+					if d.y < 0 and math.abs(y - it.y1) < 20 then
+						x, z = (o.x + d.x * s.t) * 1000, (o.z + d.z * s.t) * 1000
+						offset = math.floor(it.y1 + 0.5)
+					end
+				end
+			end
 			if x and not dig and not paint then
-				add_volume(x, z)
+				add_volume(x, z, offset)
 			else
 				doc.notice("Select a voxel volume, or place one on the floor")
 			end
@@ -4539,7 +4555,8 @@ local function build_props()
 		end
 	elseif S.tool == "voxel" then
 		panel.label(props, "Select a volume to edit it, or")
-		panel.label(props, "place a voxel on the floor to start one")
+		panel.label(props, "place a voxel on the floor or on an")
+		panel.label(props, "object's top to start one")
 		panel.field(props, "Voxel mm", S.voxel_size, function(t)
 			local v = num(t)
 			if v and v > 0 then S.voxel_size = v end
@@ -8389,6 +8406,8 @@ end
 
 function M.start(d)
 	doc = d
+	-- The editor's state, for what reads it from outside (tutorial.lua)
+	M.S = S
 	doc.members_changed = M.members_changed
 	doc.backups_changed = M.backups_changed
 	S.material = nil
