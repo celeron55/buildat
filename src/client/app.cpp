@@ -674,14 +674,35 @@ static void resolve_preferences(app::Options *opt)
 {
 #ifdef __EMSCRIPTEN__
 	// **The web's render scale default** (user, 2026-09-30): a browser is
-	// not a performance setup, so a screen of over 3000 device pixels on a
-	// side (4K) draws the 3D at half; a saved choice or -o still wins
-	const double screen_px = EM_ASM_DOUBLE({
-		return Math.max(screen.width, screen.height) *
-				(window.devicePixelRatio || 1);
+	// not a performance setup. The 3D gets about a 1080p frame's pixels
+	// (2.1 M) of the page's canvas, a screen of over 3000 device pixels on
+	// a side (4K) half at most, and a GPU that is the CPU (SwiftShader,
+	// llvmpipe, Microsoft's basic renderer) half at most too; rounded down
+	// to a step the settings offer. A saved choice or -o still wins.
+	opt->graphics.render_scale = (float)EM_ASM_DOUBLE({
+		var dpr = window.devicePixelRatio || 1;
+		var s = Math.min(1, Math.sqrt(2.1e6 /
+				(window.innerWidth * window.innerHeight * dpr * dpr)));
+		if(Math.max(screen.width, screen.height) * dpr > 3000)
+			s = Math.min(s, 0.5);
+		try {
+			var gl = document.createElement('canvas').getContext('webgl');
+			var info = gl && gl.getExtension('WEBGL_debug_renderer_info');
+			var name = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : '';
+			if(/swiftshader|llvmpipe|softpipe|basic render|software/i.test(name))
+				s = Math.min(s, 0.5);
+			var lose = gl && gl.getExtension('WEBGL_lose_context');
+			if(lose)
+				lose.loseContext();
+		} catch(e){}
+		// (no [a, b] here: a comma outside parentheses splits the macro)
+		var steps = '1 0.75 0.67 0.5 0.33 0.25'.split(' ');
+		for(var i = 0; i < steps.length; i++){
+			if(+steps[i] <= s + 0.001)
+				return +steps[i];
+		}
+		return 0.25;
 	});
-	if(screen_px > 3000)
-		opt->graphics.render_scale = 0.5f;
 #endif
 	int desk_w = 0;
 	int desk_h = 0;

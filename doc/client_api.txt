@@ -88,8 +88,9 @@ buildat.get_render_scale() -> share; buildat.set_render_scale(share) -> ok, err
 - The other preference a game may write: render_scale (see "Engine
   settings"), from a game's own settings, since the web client has no
   launcher to reach Engine settings through. The frame's cost, not its look.
-- The web client's default is 0.5 on a screen over 3000 device pixels on a
-  side, 1 otherwise.
+- The web client's default gives the 3D about 2.1 M pixels (1080p's) of the
+  page's canvas, at most 0.5 on a screen over 3000 device pixels on a side or
+  on a software renderer, rounded down to 1, 0.75, 0.67, 0.5, 0.33 or 0.25.
 
 buildat.take_screenshot() -> file name, or nil and why not
 - Into <user>/screenshots, named by the date and time. The caller says when
