@@ -1,0 +1,11 @@
+{
+	"dependencies": [
+		{"module": "main_context"},
+		{"module": "client_file"},
+		{"module": "voxelworld"},
+		{"module": "worldgen"},
+		{"module": "luanti_mapgen"},
+		{"module": "client_lua"},
+		{"module": "accounts"}
+	]
+}

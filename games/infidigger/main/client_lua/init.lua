@@ -8,6 +8,8 @@ local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
+-- Nothing here waits for anything before the world may come ([TEXMOD_RACE])
+voxelworld.allow_streaming()
 local voxel_shading = require("buildat/module/voxel_shading")
 
 -- Fog hides the streaming edge (section = 64 voxels, load radius 5).
@@ -249,7 +251,7 @@ do
 
 	-- And this thing so the camera is shown on the screen
 	local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))
-	magic.renderer:SetViewport(0, viewport)
+	magic.set_preferred_viewports({viewport})
 
 	magic.renderer.HDRRendering = true
 	local rp = viewport.renderPath:Clone()
@@ -373,7 +375,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	if key == magic.KEY_ESCAPE then
 		log:info("KEY_ESCAPE pressed")
-		buildat.disconnect()
+		buildat.leave()
 	end
 end)
 
