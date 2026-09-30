@@ -4329,8 +4329,9 @@ local function build_props()
 		end)
 	end
 	if not doc.can("edit") then
-		panel.label(props, "Viewing only: no edit privilege",
-				magic.Color(1, 0.6, 0.4))
+		panel.label(props, doc.can("can_edit") and
+				"Viewing: switch to Editing in the menu" or
+				"Viewing only: no edit privilege", magic.Color(1, 0.6, 0.4))
 	end
 end
 
@@ -5266,7 +5267,17 @@ do
 			panel.label(w, "Plan: " .. (doc.plan_name or "?"),
 					magic.Color(1.0, 0.85, 0.3))
 		end
+		S.pause_top = w
 		panel.button(w, "Continue (Esc)", function() close_pause() end)
+		-- Viewing or editing ([FP_VIEW_EDIT]): a plan opens for viewing, and
+		-- editing goes back to it after 30 minutes without an edit
+		local modes = {{"Viewing", false}}
+		if doc.can("can_edit") then
+			modes[2] = {"Editing", true}
+		end
+		panel.dropdown(w, "Mode", modes, doc.can("edit"), function(v)
+			doc.set_editing(v)
+		end)
 		panel.button(w, "Plan settings...", plan_settings_page)
 		panel.button(w, "Client settings...", client_settings_page)
 		panel.button(w, "Chat...", function()
@@ -5333,6 +5344,11 @@ do
 		buildat.set_web_fullscreen(true)
 		update_capture()
 	end
+	-- Whether the menu's first page is what is up
+	function M.pause_top()
+		return pause_win ~= nil and pause_win == S.pause_top
+	end
+	M.open_pause = function() open_pause() end
 end
 
 local function over_ui()
@@ -8076,7 +8092,13 @@ function M.start(d)
 		rebuild()
 		refresh_panels()
 	end
-	doc.privs_changed = refresh_panels
+	doc.privs_changed = function()
+		refresh_panels()
+		-- The pause menu's mode shows what the server says
+		if M.pause_top() then
+			M.open_pause()
+		end
+	end
 	doc.others_changed = function()
 		S.dirty = true
 	end

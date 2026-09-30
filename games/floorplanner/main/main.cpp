@@ -1180,7 +1180,8 @@ struct Module: public interface::Module
 				"fp:copy_plan", "fp:plan_admin", "fp:batch", "fp:chat",
 				"fp:voxels", "fp:lock", "fp:unlock",
 				"fp:preview", "fp:presence", "fp:export", "fp:import",
-				"fp:backups", "fp:open_backup", "fp:restore_backup"})
+				"fp:backups", "fp:open_backup", "fp:restore_backup",
+				"fp:set_editing"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -1218,6 +1219,8 @@ struct Module: public interface::Module
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:restore_backup",
 				on_restore_backup, network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:set_editing",
+				on_set_editing, network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:chat", on_chat,
@@ -1458,9 +1461,90 @@ struct Module: public interface::Module
 		return plan ? role_in(read_meta(plan->m_store), m_peers[peer].name) : "";
 	}
 
+	// **Viewing or editing** (user, 2026-09-30): a plan opens for viewing,
+	// and one whose role edits switches to editing in the pause menu. Per
+	// user, not per plan or per client: it is for the plan it was switched
+	// on in, so entering another puts it back to viewing, and it lasts over
+	// a rejoin; EDITING_IDLE_S without an edit puts it back too. In memory:
+	// a server restart has everyone viewing.
+	static constexpr int64_t EDITING_IDLE_S = 30 * 60;
+	struct Editing
+	{
+		ss_ plan;
+		int64_t last = 0; // the last edit, or the switch
+	};
+	std::map<ss_, Editing> m_editing; // by user
+	float m_editing_timer = 0;
+
+	bool editing(const ss_ &user, const ss_ &plan)
+	{
+		auto it = m_editing.find(user);
+		return it != m_editing.end() && it->second.plan == plan &&
+				(int64_t)time(nullptr) - it->second.last < EDITING_IDLE_S;
+	}
+
+	// Whether a peer may edit now; asking is an edit's attempt, which keeps
+	// editing on
 	bool can_edit(network::PeerId peer)
 	{
-		return role_edits(peer_role(peer));
+		Plan *plan = plan_of(peer);
+		const ss_ &user = m_peers[peer].name;
+		if(!plan || !role_edits(peer_role(peer)) || !editing(user, plan->m_name))
+			return false;
+		m_editing[user].last = (int64_t)time(nullptr);
+		return true;
+	}
+
+	ss_ edit_refusal(network::PeerId peer)
+	{
+		return role_edits(peer_role(peer)) ?
+				"You are viewing: switch to Editing in the menu" :
+				"You cannot edit this plan";
+	}
+
+	// Each of a user's clients hears the new privileges
+	void send_privs_to_user(const ss_ &user)
+	{
+		for(auto &pair : m_peers)
+			if(pair.second.name == user)
+				send_privs(pair.first);
+	}
+
+	void on_set_editing(const network::Packet &packet)
+	{
+		uint8_t on = 0;
+		Plan *plan = plan_of(packet.sender);
+		if(!plan || !unpack(packet.data, on))
+			return;
+		const ss_ user = m_peers[packet.sender].name;
+		if(on && role_edits(peer_role(packet.sender))){
+			Editing &e = m_editing[user];
+			e.plan = plan->m_name;
+			e.last = (int64_t)time(nullptr);
+			log_i(MODULE, "%s is editing %s", cs(user), cs(plan->m_name));
+		} else {
+			m_editing.erase(user);
+		}
+		send_privs_to_user(user);
+	}
+
+	// Editing that has gone EDITING_IDLE_S without an edit: back to viewing,
+	// and the user told
+	void expire_editing()
+	{
+		const int64_t now = (int64_t)time(nullptr);
+		sv_<ss_> gone;
+		for(auto &pair : m_editing)
+			if(now - pair.second.last >= EDITING_IDLE_S)
+				gone.push_back(pair.first);
+		for(const ss_ &user : gone){
+			m_editing.erase(user);
+			send_privs_to_user(user);
+			for(auto &pair : m_peers)
+				if(pair.second.name == user)
+					send(pair.first, "fp:chat", pack(ss_(
+							"*** Back to viewing: no edits for 30 minutes")));
+		}
 	}
 
 	struct PlanRow
@@ -1502,6 +1586,12 @@ struct Module: public interface::Module
 	{
 		Peer &peer = m_peers[peer_id];
 		leave_plan(peer_id);
+		// Editing is for the plan it was switched on in
+		auto ed = m_editing.find(peer.name);
+		if(ed != m_editing.end() && ed->second.plan != plan->m_name){
+			m_editing.erase(ed);
+			send_privs_to_user(peer.name);
+		}
 		peer.plan = plan->m_name;
 		peer.has_presence = false;
 		plan->m_idle = 0;
@@ -2250,6 +2340,11 @@ struct Module: public interface::Module
 			m_flush_timer = 0;
 			flush_all();
 		}
+		m_editing_timer += event.dtime;
+		if(m_editing_timer >= 5.0f){
+			m_editing_timer = 0;
+			expire_editing();
+		}
 		for(auto &pair : m_peers){
 			pair.second.op_budget = std::min(OPS_BURST,
 					pair.second.op_budget + OPS_PER_SECOND * event.dtime);
@@ -2356,7 +2451,7 @@ struct Module: public interface::Module
 	ss_ check_voxels(Plan &plan, network::PeerId sender, const VoxelEdit &edit)
 	{
 		if(!can_edit(sender))
-			return "You cannot edit this plan";
+			return edit_refusal(sender);
 		auto it = plan.m_ents.find(edit.def);
 		if(it == plan.m_ents.end() || it->second.type != "definition" ||
 				it->second.ints.at("kind") != DK_VOXEL)
@@ -2396,7 +2491,7 @@ struct Module: public interface::Module
 			return;
 		result.first = req.seq;
 		if(!can_edit(packet.sender)){
-			result.second = "You cannot edit this plan";
+			result.second = edit_refusal(packet.sender);
 		} else {
 			for(int32_t id : req.ids){
 				auto it = plan->m_locks.find(id);
@@ -2509,8 +2604,12 @@ struct Module: public interface::Module
 		const ss_ role = peer_role(peer);
 		if(is_admin(m_peers[peer].name))
 			privs.push_back("admin");
-		if(role_edits(role))
-			privs.push_back("edit");
+		Plan *plan = plan_of(peer);
+		if(role_edits(role)){
+			privs.push_back("can_edit");
+			if(plan && editing(m_peers[peer].name, plan->m_name))
+				privs.push_back("edit");
+		}
 		if(role_manages(role))
 			privs.push_back("manage");
 		send(peer, "fp:privs", pack(privs));
@@ -2603,7 +2702,7 @@ struct Module: public interface::Module
 		if(!unpack(packet.data, batch)){
 			result.error = "Malformed batch";
 		} else if(!can_edit(packet.sender)){
-			result.error = "You cannot edit this plan";
+			result.error = edit_refusal(packet.sender);
 		} else if(batch.ops.size() > MAX_OPS_PER_BATCH){
 			result.error = "Too many operations in one batch";
 		} else if(peer.op_budget < batch.ops.size()){

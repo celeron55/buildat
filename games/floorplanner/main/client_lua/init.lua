@@ -73,6 +73,12 @@ local UNDO_DEPTH = 200
 function doc.can(priv)
 	return doc.privs[priv] == true
 end
+-- Viewing or editing ([FP_VIEW_EDIT]): the server says which in fp:privs,
+-- "edit" while editing and "can_edit" when the user's role would
+function doc.set_editing(on)
+	buildat.send_packet("fp:set_editing", cereal.binary_output({on = on and 1
+			or 0}, {"object", {"on", "byte"}}))
+end
 
 function doc.of_type(type)
 	local out = {}
