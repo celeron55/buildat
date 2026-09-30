@@ -2953,13 +2953,36 @@ do
 			ints.kind, ints.h, ints.steps = KIND.stairs, h, n
 			ints.d = d or n * st.tread
 		end
-		send({
-			{op = "create", ent = {id = def, type = "definition", ints = ints}},
-			{op = "create", ent = {id = inst, type = "instance",
-					ints = {def = def, x = math.floor(x + 0.5),
-					z = math.floor(z + 0.5), align = S.box.align,
-					offset = S.box.offset}}},
-		}, select_placed(inst, "instance"))
+		local ops = {}
+		local align, offset = S.box.align, S.box.offset
+		if S.shape == "lamp" then
+			-- **A plafond lamp** (user): a square 250 by 250, 50 thick, on
+			-- the ceiling, of the palette's lamp material -- a new "Lamp"
+			-- entry when it has none -- and lit, as an instance starts
+			local mat = nil
+			for _, p in ipairs(of_type("palette")) do
+				if p.ints.kind == 4 then
+					mat = p.id
+					break
+				end
+			end
+			if not mat then
+				mat = doc.placeholder()
+				local k = KIND_DEFAULTS[4]
+				ops[#ops + 1] = {op = "create", ent = {id = mat, type = "palette",
+						ints = {kind = 4, base = k.base, color2 = k.color2,
+						scale = k.scale, roughness = k.roughness,
+						specular = k.specular}, strs = {name = "Lamp"}}}
+			end
+			ints.w, ints.h, ints.d, ints.mat = 250, 50, 250, mat
+			align, offset = 1, 0
+		end
+		ops[#ops + 1] = {op = "create", ent = {id = def, type = "definition",
+				ints = ints}}
+		ops[#ops + 1] = {op = "create", ent = {id = inst, type = "instance",
+				ints = {def = def, x = math.floor(x + 0.5),
+				z = math.floor(z + 0.5), align = align, offset = offset}}}
+		send(ops, select_placed(inst, "instance"))
 	end
 
 	-- The voxel volume the voxel tool works on: the one selected
@@ -4216,14 +4239,17 @@ local function build_props()
 		panel.label(props, "3D: the mouse turns the view, Esc lets go")
 	elseif S.tool == "box" then
 		local stairs = S.shape == "stairs"
-		panel.dropdown(props, "Shape", {{"box", "box"}, {"stairs", "stairs"}},
-				S.shape or "box", function(v)
+		panel.dropdown(props, "Shape", {{"box", "box"}, {"stairs", "stairs"},
+				{"plafond lamp", "lamp"}}, S.shape or "box", function(v)
 			S.shape = v
 			refresh_panels()
 		end)
-		panel.label(props, stairs and "New stairs: click, or drag the footprint"
+		local lamp = S.shape == "lamp"
+		panel.label(props, lamp and "New lamps: click where one goes; on the ceiling, lit" or
+				stairs and "New stairs: click, or drag the footprint"
 				or "New boxes: drag the footprint")
-		if stairs then
+		if lamp then
+		elseif stairs then
 			local st = S.stairs
 			for _, f in ipairs({{"Width mm", "w"}, {"Height mm (0: a floor)", "h"},
 					{"Riser mm", "riser"}, {"Tread mm", "tread"}}) do
@@ -4238,7 +4264,7 @@ local function build_props()
 					math.floor(h / n * 10 + 0.5) / 10 .. " mm, " ..
 					n * st.tread .. " mm deep")
 		end
-		for _, f in ipairs(stairs and {{"Offset mm", "offset"}} or
+		for _, f in ipairs(lamp and {} or stairs and {{"Offset mm", "offset"}} or
 				{{"Width mm", "w"}, {"Height mm", "h"}, {"Depth mm", "d"},
 				{"Offset mm", "offset"}}) do
 			panel.field(props, f[1], S.box[f[2]], function(t)
@@ -4246,10 +4272,12 @@ local function build_props()
 				if v and (v > 0 or f[2] == "offset") then S.box[f[2]] = v end
 			end)
 		end
-		panel.check(props, "From the ceiling down", S.box.align == 1, function()
-			S.box.align = 1 - S.box.align
-			refresh_panels()
-		end)
+		if not lamp then
+			panel.check(props, "From the ceiling down", S.box.align == 1, function()
+				S.box.align = 1 - S.box.align
+				refresh_panels()
+			end)
+		end
 	else
 		panel.label(props, "New walls")
 		panel.field(props, "Thickness mm", S.thickness, function(t)
@@ -5264,8 +5292,9 @@ do
 	local function start_drag()
 		local t = S.press.target
 		if S.tool == "box" then
+			-- A lamp is placed with a click, its size its own
 			local x, z = snapped_point(nil)
-			if x then
+			if x and S.shape ~= "lamp" then
 				S.drag = {kind = "footprint", x0 = x, z0 = z, x1 = x, z1 = z}
 			end
 			return
@@ -5633,6 +5662,8 @@ do
 			if x then
 				if S.shape == "stairs" then
 					add_box(x, z, S.stairs.w, nil)
+				elseif S.shape == "lamp" then
+					add_box(x, z, 250, 250)
 				else
 					add_box(x, z, S.box.w, S.box.d)
 				end
@@ -7014,7 +7045,8 @@ do
 			local x, z = snapped_point(nil)
 			if x and edit then
 				hl({kind = "point", x = x, z = z})
-				g.left = S.shape == "stairs" and "put stairs here, " ..
+				g.left = S.shape == "lamp" and "put a plafond lamp on the ceiling here" or
+						S.shape == "stairs" and "put stairs here, " ..
 						S.stairs.w .. " mm wide, of " .. mat_text(cur) ..
 						"; drag: draw their footprint" or
 						"put a box here, " .. S.box.w .. " x " .. S.box.d ..
