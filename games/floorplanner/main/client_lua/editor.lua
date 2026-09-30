@@ -1800,6 +1800,18 @@ local function screen_size()
 	return magic.graphics.width, magic.graphics.height
 end
 
+-- **A field of view is of the screen's short side** (user, the sixth
+-- round): the camera's is vertical, which on a portrait screen left a
+-- slot. The degrees are the narrower of width and height; set each frame,
+-- so a turned phone follows.
+function M.fov_for(deg)
+	local w, h = screen_size()
+	if h <= w or w <= 0 then
+		return deg
+	end
+	return math.deg(2 * math.atan(math.tan(math.rad(deg) / 2) * h / w))
+end
+
 -- Millimetres per pixel in the plan view
 local function mm_per_px()
 	local _, h = screen_size()
@@ -2994,7 +3006,6 @@ local function set_view(v)
 		S.crosshair = false
 	end
 	S.view = v
-	cam3d.fov = v == "walk" and S.walk_fov or 60
 	-- Only when it changes: the walk and the free camera share a viewport
 	if (v == "2d") ~= (S.shown_2d == true) or not S.shown then
 		S.shown, S.shown_2d = true, v == "2d"
@@ -4155,9 +4166,6 @@ do
 			if v then
 				S.walk_fov = math.max(30, math.min(120, math.floor(v + 0.5)))
 				buildat.storage_write("walk_fov", tostring(S.walk_fov))
-				if S.view == "walk" then
-					cam3d.fov = S.walk_fov
-				end
 			end
 		end)
 		panel.button(w, "Back", function() open_pause() end)
@@ -4297,6 +4305,9 @@ do
 		if buildat.get_env("BUILDAT_PAGE_HTTPS") == nil then
 			panel.button(w, "Leave to the launcher", function() buildat.leave() end)
 			panel.button(w, "Quit", function() buildat.quit() end)
+		elseif not doc.is_local then
+			-- The tab's way out, which also ends a kept login ([ACC_KEEP])
+			panel.button(w, "Log out", doc.accounts.logout)
 		end
 	end
 
@@ -4684,6 +4695,12 @@ do
 			return
 		end
 		if S.tool == "select" then
+			-- **What is selected, tapped again, opens its properties** when
+			-- they are folded away (user, the sixth round): a phone has no
+			-- other way to them from the view
+			if t and S.sel[t.id] and not S.shift and panel.folded("props") then
+				panel.toggle_fold("props")
+			end
 			if not S.shift then
 				S.sel = {}
 				S.primary = nil
@@ -5839,7 +5856,8 @@ do
 					g.left = (S.sel[t.id] and "take " .. name .. " out of" or
 							"add " .. name .. " to") .. " the selection"
 				elseif S.sel[t.id] or S.nodes[t.id] then
-					g.left = "keep " .. name .. " selected" ..
+					g.left = (S.sel[t.id] and panel.folded("props") and
+							"its properties" or "keep " .. name .. " selected") ..
 							(edit and "; drag: move the selection" or "")
 				else
 					g.left = "select " .. name .. (t.kind == "wall" and t.side and
@@ -6500,6 +6518,7 @@ function M.update(dt)
 		return
 	end
 	export_step()
+	cam3d.fov = M.fov_for(S.view == "walk" and S.walk_fov or 60)
 	move_camera(dt)
 	place_cameras()
 	send_presence(dt)
