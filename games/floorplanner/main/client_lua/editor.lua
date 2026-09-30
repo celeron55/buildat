@@ -3603,44 +3603,6 @@ local function build_props()
 			S.room_walls = not S.room_walls
 			refresh_panels()
 		end)
-		local st = settings()
-		local sid = doc.settings().id
-		panel.label(props, "Plan")
-		int_field(sid, "Ceiling mm", "ceiling", st.ceiling)
-		int_field(sid, "Plan cut mm", "cut", st.cut)
-		panel.button(props, st.sun == 1 and "Sun: on" or "Sun: off", function()
-			set(sid, {ints = {sun = 1 - st.sun}})
-		end)
-		if st.sun == 1 then
-			int_field(sid, "Sun from deg", "sun_yaw", st.sun_yaw)
-			int_field(sid, "Sun height deg", "sun_pitch", st.sun_pitch)
-		end
-		panel.field(props, "Eye mm", S.eye, function(t)
-			local v = num(t)
-			if v and v > 0 then S.eye = v end
-		end)
-		-- The pictures in the save's images/, and the ones placed, locked
-		for _, file in ipairs(doc.images) do
-			panel.button(props, "Trace over " .. file, function()
-				send({{op = "create", ent = {id = doc.placeholder(), type = "image",
-						ints = {x = math.floor(S.cx), z = math.floor(S.cz)},
-						strs = {file = file}}}})
-			end)
-		end
-		for _, im in ipairs(of_type("image")) do
-			if im.ints.locked == 1 then
-				panel.button(props, "Unlock " .. im.strs.file, function()
-					set(im.id, {ints = {locked = 0}})
-				end)
-			end
-		end
-		panel.field(props, "Export mm/px", S.export_mmpx, function(t)
-			local v = tonumber(t)
-			if v and v > 0 then S.export_mmpx = v end
-		end)
-		panel.button(props, "Export the plan view as PNG", function()
-			S.exporting = {frame = 0}
-		end)
 	end
 	if not doc.can("edit") then
 		panel.label(props, "Viewing only: no edit privilege",
@@ -4161,12 +4123,68 @@ do
 
 	local function settings_page()
 		local w = dialog("Settings")
-		-- The plan's grid, which is everyone's in it; the button says what
-		-- was just asked for, before the plan comes back with it
-		local gb
-		gb = panel.button(w, M.grid_text(grid_step()), function()
-			gb:GetChild(0):SetText(M.grid_text(next_grid()))
+		-- **This plan's**, everyone's in it (user: out of the properties
+		-- panel, which is for the selection and the tools), then this
+		-- computer's own. A viewer gets the export.
+		panel.label(w, "This plan", magic.Color(1.0, 0.85, 0.3))
+		local st = settings()
+		local sid = doc.settings().id
+		local edit = doc.can("edit")
+		local function plan_int(label, name)
+			panel.field(w, label, st[name], function(t)
+				local v = tonumber(t)
+				if v then
+					send({{op = "set", ent = {id = sid,
+							ints = {[name] = math.floor(v + 0.5)}}}})
+				end
+			end)
+		end
+		if edit then
+			-- The grid's button says what was just asked for, before the
+			-- plan comes back with it
+			local gb
+			gb = panel.button(w, M.grid_text(grid_step()), function()
+				gb:GetChild(0):SetText(M.grid_text(next_grid()))
+			end)
+			plan_int("Ceiling mm", "ceiling")
+			plan_int("Plan cut mm", "cut")
+			panel.button(w, st.sun == 1 and "Sun: on" or "Sun: off", function()
+				send({{op = "set", ent = {id = sid, ints = {sun = 1 - st.sun}}}})
+				st.sun = 1 - st.sun
+				settings_page()
+			end)
+			if st.sun == 1 then
+				plan_int("Sun from deg", "sun_yaw")
+				plan_int("Sun height deg", "sun_pitch")
+			end
+			-- The pictures in the save's images/, and the ones placed, locked
+			for _, file in ipairs(doc.images) do
+				panel.button(w, "Trace over " .. file, function()
+					send({{op = "create", ent = {id = doc.placeholder(),
+							type = "image", ints = {x = math.floor(S.cx),
+							z = math.floor(S.cz)}, strs = {file = file}}}})
+				end)
+			end
+			for _, im in ipairs(of_type("image")) do
+				if im.ints.locked == 1 then
+					panel.button(w, "Unlock " .. im.strs.file, function()
+						send({{op = "set", ent = {id = im.id,
+								ints = {locked = 0}}}})
+						settings_page()
+					end)
+				end
+			end
+		end
+		panel.field(w, "Export mm/px", S.export_mmpx, function(t)
+			local v = tonumber(t)
+			if v and v > 0 then S.export_mmpx = v end
 		end)
+		panel.button(w, "Export the plan view as PNG", function()
+			-- Of the view, not of this dialog over it
+			close_pause()
+			S.exporting = {frame = 0}
+		end)
+		panel.label(w, "This computer", magic.Color(1.0, 0.85, 0.3))
 		local ab
 		ab = panel.button(w, M.angle_text(), function()
 			S.angle = S.angle % #ANGLE_STEPS + 1
