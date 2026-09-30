@@ -252,7 +252,8 @@ do
 			PLAYER_HEIGHT * (0.5 - 0.411)
 	)
 	camera.farClip = RENDER_DISTANCE
-	camera.fov = 75
+	-- Of the screen's short side, a portrait one's width
+	magic.keep_fov(camera, 75)
 
 	-- And this thing so the camera is shown on the screen
 	local viewport = magic.Viewport:new(scene, camera_node:GetComponent("Camera"))

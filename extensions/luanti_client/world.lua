@@ -829,7 +829,17 @@ function M.new(magic, buildat, log, options)
 	-- else. TOCLIENT_FOV can ask for degrees or for a multiplier of this,
 	-- over a transition time, which is what a game zooms with.
 	local BASE_FOV = 72
-	camera.fov = BASE_FOV
+	-- **The fov wanted, and the camera's** (user, 2026-09-30): the degrees
+	-- are of the screen's short side, a portrait phone's width, which
+	-- fov_for turns into the camera's vertical fov; set again each frame so
+	-- that a turned screen follows. Transitions run on the wanted one.
+	-- On self: this function is at Lua's 200 locals
+	self.fov_for = require("buildat/extension/urho3d").safe.fov_for
+	function self.apply_fov(v)
+		self.fov_now = v
+		camera.fov = self.fov_for(v)
+	end
+	self.apply_fov(BASE_FOV)
 	self.camera_node = camera_node
 	self.camera = camera
 
@@ -846,7 +856,7 @@ function M.new(magic, buildat, log, options)
 	function self:set_zoom(on, zoom_fov)
 		if on then
 			fov_step = nil
-			camera.fov = zoom_fov or 15
+			self.apply_fov(zoom_fov or 15)
 		else
 			local f = self.fov_server or {}
 			self:set_fov(f.fov, f.is_multiplier, 0)
@@ -874,24 +884,25 @@ function M.new(magic, buildat, log, options)
 		want = math.min(math.max(want, 5), 160)
 		fov_target = want
 		if transition_time and transition_time > 0 then
-			fov_step = math.abs(want - camera.fov) / transition_time
+			fov_step = math.abs(want - self.fov_now) / transition_time
 		else
 			fov_step = nil
-			camera.fov = want
+			self.apply_fov(want)
 		end
 	end
 
 	function self:update_fov(dtime)
 		if not fov_step then
+			self.apply_fov(self.fov_now)
 			return
 		end
-		local at = camera.fov
+		local at = self.fov_now
 		if at < fov_target then
 			at = math.min(fov_target, at + fov_step * dtime)
 		else
 			at = math.max(fov_target, at - fov_step * dtime)
 		end
-		camera.fov = at
+		self.apply_fov(at)
 		if at == fov_target then
 			fov_step = nil
 		end

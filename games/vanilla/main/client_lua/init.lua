@@ -524,7 +524,10 @@ do
 	-- of any wall it is against, which at 1.0 clipped the wall away.
 	camera.nearClip = 0.1
 	camera.farClip = FAR_CLIP
-	camera.fov = CAMERA_FOV
+	-- What the fov is wanted at: set on the screen's short side each frame
+	-- (magic.fov_for), a portrait phone's width (user, 2026-09-30)
+	keys.fov_want = CAMERA_FOV
+	camera.fov = magic.fov_for(CAMERA_FOV)
 
 	local viewport = magic.Viewport:new(scene, camera)
 	magic.set_preferred_viewports({viewport})
@@ -2357,10 +2360,11 @@ local eye_offset = {x = 0, y = 0, z = 0}
 luanti.sub_camera(function(c)
 	if camera then
 		if c.fov and c.fov > 0 then
-			camera.fov = c.is_multiplier and (CAMERA_FOV * c.fov) or c.fov
+			keys.fov_want = c.is_multiplier and (CAMERA_FOV * c.fov) or c.fov
 		else
-			camera.fov = CAMERA_FOV
+			keys.fov_want = CAMERA_FOV
 		end
+		camera.fov = magic.fov_for(keys.fov_want)
 		WIELD.place(camera.fov)
 	end
 	-- Luanti's own unit here is BS, which is ten units to the node
@@ -4556,8 +4560,15 @@ function frame_peak.update(dt)
 			local c = luanti.camera()
 			local base = (c.fov and c.fov > 0) and
 					(c.is_multiplier and (CAMERA_FOV * c.fov) or c.fov) or CAMERA_FOV
-			camera.fov = zooming and zoom_fov or base
+			keys.fov_want = zooming and zoom_fov or base
+			camera.fov = magic.fov_for(keys.fov_want)
 			WIELD.place(camera.fov)
+		end
+		-- And when the screen turns
+		local fov = magic.fov_for(keys.fov_want or CAMERA_FOV)
+		if math.abs(camera.fov - fov) > 0.01 then
+			camera.fov = fov
+			WIELD.place(fov)
 		end
 	end
 	if WIELD.camera_mode ~= 1 then

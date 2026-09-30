@@ -172,7 +172,8 @@ do
 	local camera = camera_node:CreateComponent("Camera")
 	camera.nearClip = 0.2
 	camera.farClip = 120
-	camera.fov = 60
+	-- Of the screen's short side, a portrait one's width
+	magic.keep_fov(camera, 60)
 	local listener = camera_node:CreateComponent("SoundListener")
 	if magic.audio then
 		magic.audio.listener = listener

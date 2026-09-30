@@ -195,7 +195,8 @@ local function make_camera(name, parent)
 	local camera = node:CreateComponent("Camera")
 	camera.nearClip = 0.15
 	camera.farClip = RENDER_DISTANCE
-	camera.fov = 90
+	-- Of the screen's short side, a portrait one's width
+	magic.keep_fov(camera, 90)
 	return node, camera
 end
 

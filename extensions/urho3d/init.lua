@@ -486,6 +486,33 @@ function Safe.viewport_generation()
 	return __buildat_viewport_generation()
 end
 
+-- **A field of view of the screen's short side** (user, 2026-09-30): a
+-- camera's fov is vertical, which on a portrait screen is a slot. deg is
+-- then the narrower of the width and the height, and what comes back is the
+-- vertical fov that gives it.
+function Safe.fov_for(deg)
+	local w, h = Safe.graphics.width, Safe.graphics.height
+	if h <= w or w <= 0 then
+		return deg
+	end
+	return math.deg(2 * math.atan(math.tan(math.rad(deg) / 2) * h / w))
+end
+
+-- The camera kept at fov_for(deg), a turned phone and a resized window
+-- included; for a game whose fov does not change otherwise
+function Safe.keep_fov(camera, deg)
+	camera.fov = Safe.fov_for(deg)
+	local w, h = Safe.graphics.width, Safe.graphics.height
+	Safe.SubscribeToEvent("Update", function()
+		local g = Safe.graphics
+		if g.width ~= w or g.height ~= h then
+			w, h = g.width, g.height
+			-- A camera the game has removed since is left alone
+			pcall(function() camera.fov = Safe.fov_for(deg) end)
+		end
+	end)
+end
+
 --
 -- Unsafe interface
 --

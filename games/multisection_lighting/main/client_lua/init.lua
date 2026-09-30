@@ -143,7 +143,8 @@ do
 	local camera = camera_node:CreateComponent("Camera")
 	camera.nearClip = 1.0
 	camera.farClip = FAR_CLIP
-	camera.fov = CAMERA_FOV
+	-- Of the screen's short side, a portrait one's width
+	magic.keep_fov(camera, CAMERA_FOV)
 
 	local viewport = magic.Viewport:new(scene, camera)
 	magic.set_preferred_viewports({viewport})
