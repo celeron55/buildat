@@ -15,6 +15,13 @@ namespace boot
 		// Return value: true if succesful, false if failed
 		bool detect_server_paths(core::Config &config);
 		bool detect_client_paths(core::Config &config);
+
+		// The log ([WIN8_START]): with no -L, <cache>/<name>.log at info,
+		// the previous run's moved to <name>_1.log first; a relative -L is
+		// made absolute against the cwd. Then the first lines: the exe,
+		// the root, the cwd and the log's path. name is "buildat" or
+		// "buildat_server". Returns the log's absolute path, "" for none.
+		ss_ open_log(core::Config &config, const ss_ &name, const ss_ &exe);
 	}
 }
 // vim: set noet ts=4 sw=4:

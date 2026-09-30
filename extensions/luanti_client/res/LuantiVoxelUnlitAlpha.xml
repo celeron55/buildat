@@ -1,0 +1,14 @@
+<!-- The translucent faces -- water -- on builtin/luanti's shadows path:
+     VoxelUnlitAlpha's blended pass, and the shadow map multiplied over it
+     as LuantiVoxelUnlit does for the opaque faces, weighted by the texel's
+     alpha ([PARITY_LEFTOVERS]: official Luanti shadows its water). The
+     shadow pass so the surface also casts: a water surface shades its bed
+     in Luanti too. -->
+<technique vs="luanti_client/res/VoxelUnlit" ps="luanti_client/res/VoxelUnlit"
+        psdefines="TRANSLUCENT">
+    <pass name="alpha" blend="alpha" depthwrite="false" cull="none" />
+    <pass name="litalpha" vs="luanti_client/res/VoxelUnlitShadow"
+            ps="luanti_client/res/VoxelUnlitShadow"
+            vsdefines="TRANSLUCENT" psdefines="TRANSLUCENT"
+            depthwrite="false" blend="multiply" cull="none" />
+</technique>

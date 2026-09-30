@@ -6,6 +6,8 @@ local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
+-- Nothing here waits for anything before the world may come ([TEXMOD_RACE])
+voxelworld.allow_streaming()
 local voxel_shading = require("buildat/module/voxel_shading")
 
 local scene = replicate.main_scene
@@ -142,10 +144,11 @@ do
 	local camera = camera_node:CreateComponent("Camera")
 	camera.nearClip = 1.0
 	camera.farClip = FAR_CLIP
-	camera.fov = CAMERA_FOV
+	-- Of the screen's short side, a portrait one's width
+	magic.keep_fov(camera, CAMERA_FOV)
 
 	local viewport = magic.Viewport:new(scene, camera)
-	magic.renderer:SetViewport(0, viewport)
+	magic.set_preferred_viewports({viewport})
 
 	magic.renderer.HDRRendering = true
 	local rp = viewport.renderPath:Clone()
