@@ -1159,6 +1159,10 @@ local function build_hosted(id, it, def, e, geometry, commit)
 	if window and def.leaf == 0 then
 		angle = 0
 	end
+	-- **Where each leaf is, for a click on it** (user): its box in its own
+	-- frame, and the hinge and the turn that frame is at, in the layout's
+	-- metres as the picking ray is (ray_instance)
+	it.leaves = {}
 	for _, lf in ipairs(leaves) do
 		local lg, node = part()
 		local yaw = f.yaw - lf.dir * sign * angle
@@ -1169,6 +1173,9 @@ local function build_hosted(id, it, def, e, geometry, commit)
 		if x1 < x0 then
 			x0, x1 = x1, x0
 		end
+		local t = window and 20 or LEAF_T / 2
+		it.leaves[#it.leaves + 1] = {x = W(ox + hx), z = W(oz + hz), yaw = yaw,
+				lo = {W(x0), W(y0), W(-t)}, hi = {W(x1), W(y1), W(t)}}
 		if window then
 			local fw = FRAME_W
 			B(lg, x0, y0 + fw, -20, x0 + fw, y1 - fw, 20, frame_col)
@@ -1972,7 +1979,57 @@ local HOLE_MARGIN = 40
 
 -- id: the instance, for an opening or an open door: a ray through the hole
 -- in the wall misses it and goes on to what is seen through it
+-- A ray against a box from lo to hi, in the box's frame: where it enters,
+-- or nil. These are on M: this file is at Lua's 200 locals.
+function M.ray_box(ox, oy, oz, dx, dy, dz, lo, hi)
+	local tmin, tmax = 0, math.huge
+	for a, v in ipairs({{ox, dx}, {oy, dy}, {oz, dz}}) do
+		if math.abs(v[2]) < 1e-12 then
+			if v[1] < lo[a] or v[1] > hi[a] then
+				return nil
+			end
+		else
+			local t1, t2 = (lo[a] - v[1]) / v[2], (hi[a] - v[1]) / v[2]
+			if t1 > t2 then
+				t1, t2 = t2, t1
+			end
+			tmin, tmax = math.max(tmin, t1), math.min(tmax, t2)
+			if tmin > tmax then
+				return nil
+			end
+		end
+	end
+	return tmin
+end
+
+-- Where the ray meets one of a door's or a window's leaves first, or nil
+function M.ray_leaves(it, o, d)
+	local best = nil
+	for _, lf in ipairs(it.leaves or {}) do
+		local ox, oy, oz = geom.unrot(o.x - lf.x, o.y, o.z - lf.z, 0, lf.yaw, 0)
+		local dx, dy, dz = geom.unrot(d.x, d.y, d.z, 0, lf.yaw, 0)
+		local t = M.ray_box(ox, oy, oz, dx, dy, dz, lf.lo, lf.hi)
+		if t and (not best or t < best) then
+			best = t
+		end
+	end
+	return best
+end
+
+-- The ray against an instance: where it enters, and "leaf" when that is a
+-- door's or a window's leaf, which is outside the box once it swings
 local function ray_instance(it, o, d, id)
+	local leaf_t = it.hosted and M.ray_leaves(it, o, d)
+	local t = M.ray_instance_box(it, o, d, id)
+	-- A shut leaf is inside the frame's box, a little behind where the
+	-- ray enters it: a leaf hit within a wall's depth of that is the leaf
+	if leaf_t and (not t or leaf_t <= t + 0.4) then
+		return leaf_t, "leaf"
+	end
+	return t
+end
+
+function M.ray_instance_box(it, o, d, id)
 	local ox, oy, oz = geom.unrot(o.x - W(it.x), o.y - W(it.y), o.z - W(it.z),
 			it.pitch, it.yaw, it.roll)
 	local dx, dy, dz = geom.unrot(d.x, d.y, d.z, it.pitch, it.yaw, it.roll)
@@ -2050,9 +2107,11 @@ local function pick_surface(whole)
 	-- What hangs from the ceiling is drawn from above too, so it is
 	-- picked from above too
 	for id, it in pairs(inst_data) do
-		local t = ray_instance(it, o, d, not whole and id or nil)
+		local t, part = ray_instance(it, o, d, not whole and id or nil)
 		if t and t < best_t then
-			best, best_t = {kind = "instance", id = id}, t
+			-- A leaf is the door's leaf part, which a click selects
+			best, best_t = {kind = "instance", id = id,
+					side = part == "leaf" and "mat_leaf" or nil}, t
 		end
 	end
 	for id, ol in pairs(outlines) do
@@ -4423,7 +4482,8 @@ do
 		if S.tool == "select" then
 			local s = pick_surface()
 			if s and s.kind == "instance" then
-				return {kind = "instance", id = s.id}
+				-- With the part: a door's leaf is selected as its leaf
+				return {kind = "instance", id = s.id, side = s.side}
 			end
 			local n = x and nearest_node(x, z, snap_radius())
 			if n then
@@ -4959,6 +5019,14 @@ do
 				S.typed = ""
 				return
 			end
+			-- **A right click on a door's or a window's leaf opens or shuts
+			-- it** (user): in 3D and walking, a right press that the mouse
+			-- then hardly moves -- orbiting and turning are the right drag
+			if (S.view == "3d" or S.view == "walk") and not over_ui() then
+				local s = pick_surface()
+				S.right_click = {moved = 0,
+						leaf = s and s.side == "mat_leaf" and s.id or nil}
+			end
 			if S.view == "2d" and not over_ui() then
 				-- Into 3D as if it had been 3D all along ([FP_ORBIT_2D]): the
 				-- camera straight above the plan's middle, looking down, as
@@ -5006,6 +5074,19 @@ do
 	end
 
 	function M.mouse_up(button)
+		if button == magic.MOUSEB_RIGHT and S.right_click then
+			local rc = S.right_click
+			S.right_click = nil
+			if rc.leaf and rc.moved < 5 and doc.ents[rc.leaf] then
+				S.orbit, S.pan3d = nil, nil
+				if S.looking then
+					S.looking = false
+				end
+				magic.input:SetMouseMode(magic.MM_ABSOLUTE)
+				M.toggle_open(rc.leaf)
+				return
+			end
+		end
 		if S.swallow_up then
 			S.swallow_up = false
 			return
@@ -5073,6 +5154,9 @@ do
 	end
 
 	function M.mouse_move(x, y, dx, dy)
+		if S.right_click then
+			S.right_click.moved = S.right_click.moved + math.abs(dx) + math.abs(dy)
+		end
 		if S.orbit then
 			-- The camera goes round the point with the view: its offset from
 			-- the point is held in the camera's own frame, so the point stays
@@ -5401,6 +5485,12 @@ do
 			flip_switch(id)
 			return
 		end
+		M.toggle_open(id)
+	end
+
+	-- Shut to 90 degrees open, anything open to shut: the plan's for an
+	-- editor, the viewer's own otherwise
+	function M.toggle_open(id)
 		local open = open_amount(id) > 0 and 0 or 1000
 		if doc.can("edit") then
 			S.local_open[id] = nil
