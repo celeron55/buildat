@@ -1,0 +1,354 @@
+-- Buildat: games/floorplanner/main/client_lua/daylight.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+--
+-- **Daylight by place and time** ([FP_DAYLIGHT] in
+-- doc/plan/floorplanner_plan.md): where the sun is for the plan's latitude,
+-- north, date and hour; what the sun, the sky and the clouds are worth
+-- then; the ground by the season; the sky drawn and rendered into a cube
+-- for reflections; the render path that makes the frame an eye's. The
+-- numbers are games/vanilla's pbr path's (PHYS in its init.lua, fitted
+-- against a path-traced reference), and the sky is
+-- extensions/luanti_client's LuantiSky, which both Luanti clients draw.
+--
+--   local daylight = buildat.run_script_file("main/daylight.lua")
+local magic = require("buildat/extension/urho3d")
+local M = {}
+local rad, sin, cos = math.rad, math.sin, math.cos
+
+--
+-- Where the sun is
+--
+-- The direction towards the sun on the plan (+X to the plan view's right,
+-- +Z up the screen, +Y up) and the sine of its elevation. `north` is
+-- degrees clockwise from the plan view's up to north; `day` 1..365,
+-- `minute` 0..1439 of solar time.
+-- simplified: solar time (no equation of time, a quarter of an hour at
+-- most; no longitude or time zone), and the declination's cosine fit
+function M.sun_toward(lat, north, day, minute)
+	local decl = rad(-23.44 * cos(rad(360 / 365 * (day + 10))))
+	local hour_angle = rad((minute / 60 - 12) * 15)
+	local p = rad(lat)
+	local sin_h = sin(p) * sin(decl) + cos(p) * cos(decl) * cos(hour_angle)
+	sin_h = math.max(-1, math.min(1, sin_h))
+	local cos_h = math.sqrt(1 - sin_h * sin_h)
+	-- The azimuth from south, westward; then from north, eastward
+	local az = math.atan2(sin(hour_angle), cos(hour_angle) * sin(p) -
+			math.tan(decl) * cos(p)) + math.pi
+	local east, northward = sin(az) * cos_h, cos(az) * cos_h
+	local a = rad(north)
+	local nx, nz = sin(a), cos(a)
+	local ex, ez = cos(a), -sin(a)
+	return east * ex + northward * nx, sin_h, east * ez + northward * nz
+end
+
+-- The eight points of the compass, for a direction on the plan
+local POINTS = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"}
+-- Where a direction on the plan (dx, dz) points, as a compass point
+function M.compass(north, dx, dz)
+	-- The direction's own angle clockwise from the plan's up, less north's
+	local a = (math.deg(math.atan2(dx, dz)) - north) % 360
+	return POINTS[math.floor(a / 45 + 0.5) % 8 + 1]
+end
+-- Where north is on the plan view's screen, as a clock's hour
+function M.north_clock(north)
+	local h = math.floor(north / 30 + 0.5) % 12
+	return h == 0 and 12 or h
+end
+
+-- "21.6." or "21.6" -> the day of the year; nil for no date
+local MONTH_DAYS = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+function M.parse_date(t)
+	local d, m = tostring(t):match("^%s*(%d+)%.(%d+)%.?%s*$")
+	d, m = tonumber(d), tonumber(m)
+	if not d or m < 1 or m > 12 or d < 1 or d > MONTH_DAYS[m] then
+		return nil
+	end
+	for i = 1, m - 1 do
+		d = d + MONTH_DAYS[i]
+	end
+	return d
+end
+function M.date_text(day)
+	local m = 1
+	while m < 12 and day > MONTH_DAYS[m] do
+		day = day - MONTH_DAYS[m]
+		m = m + 1
+	end
+	return day .. "." .. m .. "."
+end
+-- "15:30" -> minutes; nil for no time
+function M.parse_time(t)
+	local h, mi = tostring(t):match("^%s*(%d+):(%d+)%s*$")
+	h, mi = tonumber(h), tonumber(mi)
+	if not h or h > 23 or mi > 59 then
+		return nil
+	end
+	return h * 60 + mi
+end
+function M.time_text(minute)
+	return string.format("%d:%02d", math.floor(minute / 60), minute % 60)
+end
+
+-- The time-lapse's speeds: minutes of the plan's day a second
+M.LAPSES = {{"off", 0}, {"1 min/s", 1}, {"10 min/s", 10}, {"1 h/s", 60}}
+
+--
+-- The ground by the season
+--
+-- A crude climate by latitude: the year's mean and its swing, coldest
+-- about 20 January in the north and half a year on in the south. 65 N is
+-- -14 in January and +18 in July, near Oulu's.
+function M.temperature(lat, day)
+	local a = math.abs(lat)
+	local coldest = lat >= 0 and 20 or 202
+	local phase = 2 * math.pi * (day - coldest) / 365
+	return 28 - 0.4 * a - 0.25 * a * cos(phase), sin(phase) > 0
+end
+M.GROUNDS = {{"by season", 0}, {"green", 1}, {"yellow", 2}, {"snow", 3}}
+local GROUND_RGB = {[1] = 0x55733a, [2] = 0xa8955a, [3] = 0xe8ecf0}
+-- The ground's colour (0xRRGGBB): `mode` a GROUNDS value, 0 by season.
+-- Snow below -1 C, and in spring until the thaw has passed +2; bare and
+-- yellow until +8 in spring and below +10 in autumn; green above.
+function M.ground(lat, day, mode)
+	if mode ~= 0 and GROUND_RGB[mode] then
+		return GROUND_RGB[mode]
+	end
+	local t, warming = M.temperature(lat, day)
+	if t < -1 or (warming and t < 2) then
+		return GROUND_RGB[3]
+	end
+	if (warming and t < 8) or (not warming and t < 10) then
+		return GROUND_RGB[2]
+	end
+	return GROUND_RGB[1]
+end
+
+--
+-- What the sun and the sky are worth: vanilla's PHYS, in its units
+--
+local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
+		sky_horizon = 12.0, night_sky = 0.0001, dome = 1.2, cloud_n = 8,
+		lamp = 8,
+		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
+		day_horizon = {r = 0.99, g = 0.995, b = 1.0},
+		cloud = {r = 0.9, g = 0.92, b = 0.95}}
+M.PHYS = PHYS
+local function clamp01(v)
+	return math.max(0, math.min(1, v))
+end
+local function lum(c)
+	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+end
+local function scaled(c, to)
+	local l = lum(c)
+	if l <= 1e-9 then
+		return {r = to, g = to, b = to}
+	end
+	return {r = c.r * to / l, g = c.g * to / l, b = c.b * to / l}
+end
+local function mix(a, b, k)
+	return {r = a.r + (b.r - a.r) * k, g = a.g + (b.g - a.g) * k,
+			b = a.b + (b.b - a.b) * k}
+end
+function M.sun_irradiance(h)
+	if h <= 0 then
+		return 0
+	end
+	return PHYS.sun_e0 * math.exp(-PHYS.sun_tau / math.max(h, 0.05))
+end
+
+-- Everything the hour's light is, from the sine of the sun's elevation and
+-- the ground's albedo (a colour 0..1): the sun's irradiance and colour,
+-- the sky's zenith and horizon radiance, the ambient a face gets under
+-- the open sky, and what lights the clouds
+function M.light(h, ground)
+	local s = {}
+	s.sun = M.sun_irradiance(h)
+	-- Rayleigh through an air mass of 1 / sin(elevation), luminance one
+	local m = 1 / math.max(h, 0.05)
+	local sc = {r = math.exp(-0.05 * m), g = math.exp(-0.10 * m),
+			b = math.exp(-0.24 * m)}
+	s.sun_color = scaled(sc, 1)
+	-- The sky: its day hues through a warm dawn to night's, at vanilla's
+	-- radiance curves
+	local f = clamp01((h + 0.02) / 0.55)
+	local fh = clamp01((h + 0.05) / 0.21)
+	local dz, dh = PHYS.day_zenith, PHYS.day_horizon
+	local dawn_h = {r = dh.r * 0.75, g = dh.g * 0.52, b = dh.b * 0.45}
+	local night_z = {r = dz.r * 0.10, g = dz.g * 0.10, b = dz.b * 0.14}
+	local zen_hue = f < 0.5 and mix(night_z, mix(night_z, dz, 0.5), f * 2) or
+			mix(mix(night_z, dz, 0.5), dz, (f - 0.5) * 2)
+	local hor_hue = fh < 0.5 and mix(night_z, dawn_h, fh * 2) or
+			mix(dawn_h, dh, (fh - 0.5) * 2)
+	s.zenith = scaled(zen_hue, PHYS.night_sky + (PHYS.sky_zenith -
+			PHYS.night_sky) * f)
+	s.horizon = scaled(hor_hue, PHYS.night_sky + (PHYS.sky_horizon -
+			PHYS.night_sky) * fh)
+	-- The dome a face sees: five parts zenith, one horizon, at the mean
+	local dome_hue = {r = (5 * s.zenith.r + s.horizon.r) / 6,
+			g = (5 * s.zenith.g + s.horizon.g) / 6,
+			b = (5 * s.zenith.b + s.horizon.b) / 6}
+	local mean = PHYS.night_sky + (PHYS.sky_zenith * PHYS.dome -
+			PHYS.night_sky) * f
+	local amb = scaled(dome_hue, mean)
+	-- and a quarter of what the ground sends up (a wall sees it with half
+	-- its view, a floor not at): its albedo times the sky and a third of
+	-- the sun on it, over pi ([PBR_FIT]'s ground term)
+	local up = s.sun * math.max(h, 0) / 3 / math.pi
+	s.ambient = {r = amb.r + 0.25 * ground.r * (up * s.sun_color.r + mean / math.pi),
+			g = amb.g + 0.25 * ground.g * (up * s.sun_color.g + mean / math.pi),
+			b = amb.b + 0.25 * ground.b * (up * s.sun_color.b + mean / math.pi)}
+	-- The clouds lit, vanilla's [CLOUD_LIGHT]: a thin noon cloud cloud_n
+	-- times the zenith's patch
+	local al = PHYS.cloud
+	local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
+	local k_sun = math.max(0, (PHYS.cloud_n * PHYS.sky_zenith * math.pi /
+			lum(al) - noon_mean) / M.sun_irradiance(1))
+	local e = s.sun * math.max(h, 0) * k_sun / math.pi
+	s.cloud_sun = {r = al.r * e * s.sun_color.r, g = al.g * e * s.sun_color.g,
+			b = al.b * e * s.sun_color.b}
+	s.cloud_sky = {r = al.r * dome_hue.r / math.pi, g = al.g * dome_hue.g / math.pi,
+			b = al.b * dome_hue.b / math.pi}
+	return s
+end
+
+--
+-- The sky, drawn and reflected
+--
+local SUN_HALF = 0.04
+-- A skybox with LuantiSky and the cube the plan's surfaces reflect.
+-- sky:set(toward, h, light) each time the hour moves; sky:show(on).
+function M.new_sky(scene)
+	local node = scene:CreateChild("Sky")
+	local box = node:CreateComponent("Skybox")
+	box:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
+	local mat = magic.Material:new()
+	mat:SetTechnique(0, magic.cache:GetResource("Technique",
+			"luanti_client/res/LuantiSky.xml"))
+	box.material = mat
+	-- Every uniform the shader reads: an unset one reads as zero
+	local V = magic.Vector3
+	for name, v in pairs({SunTint = V(1, 1, 1), CloudColor = V(0.9, 0.92, 0.95),
+			StarColor = V(0.9, 0.9, 1.0), SkyIndoors = V(0.39, 0.39, 0.39)}) do
+		mat:SetShaderParameter(name, v)
+	end
+	for name, v in pairs({StarFade = 0, SunSize = SUN_HALF, SunOverexposure = 2.5,
+			MoonSize = 0, StarDensity = 0, CloudCoverage = 0.35, CloudAlpha = 1,
+			SunTextured = 0, MoonTextured = 0, SkyAutoDim = 0, SkyPhysical = 1,
+			SkyOutside = 1}) do
+		mat:SetShaderParameter(name, v)
+	end
+	mat:SetShaderParameter("CloudWind", magic.Vector2(0.004, 0))
+	local cube = require("buildat/extension/skycube").new(magic, mat)
+	local self = {node = node, material = mat, cube = cube, texture = cube.texture}
+	local last = nil
+	function self:set(tx, ty, tz, h, light)
+		local function v3(c)
+			return V(c.r, c.g, c.b)
+		end
+		mat:SetShaderParameter("SunDirection", V(tx, ty, tz))
+		mat:SetShaderParameter("SkyTop", v3(light.zenith))
+		mat:SetShaderParameter("SkyHorizon", v3(light.horizon))
+		local disc = math.min(light.sun / (math.pi * SUN_HALF * SUN_HALF), 65504)
+		local sc = light.sun_color
+		mat:SetShaderParameter("SunRadiance", V(disc * sc.r, disc * sc.g,
+				disc * sc.b))
+		mat:SetShaderParameter("CloudSun", v3(light.cloud_sun))
+		mat:SetShaderParameter("CloudSky", v3(light.cloud_sky))
+		-- The cube again when the sun has moved, four times a second at
+		-- most: it is six renders, and a time-lapse moves it every frame
+		self.want = string.format("%.3f %.3f %.3f", tx, ty, tz)
+		self:flush()
+	end
+	-- The cube's render, when it is due; called each frame too, so the
+	-- last move of a time-lapse is drawn once it stops
+	function self:flush()
+		local now = buildat.get_time_us()
+		if self.want ~= last and now - (self.cube_t or 0) > 250000 then
+			last, self.cube_t = self.want, now
+			cube:update()
+		end
+	end
+	function self:show(on)
+		node.enabled = on
+	end
+	return self
+end
+
+--
+-- The frame an eye's: HDR, metered, bloomed a little, tone mapped and
+-- gamma encoded, as vanilla's pbr path (AUTO_EXPOSURE and its passes)
+--
+function M.pbr_render_path(rp)
+	local function add(file)
+		rp:Append(magic.cache:GetResource("XMLFile", file))
+	end
+	add("luanti_client/res/LuantiAutoExposure.xml")
+	add("PostProcess/BloomHDR.xml")
+	add("PostProcess/Tonemap.xml")
+	add("luanti_client/res/LuantiTonemap.xml")
+	add("PostProcess/GammaCorrection.xml")
+	rp:SetEnabled("TonemapReinhardEq3", false)
+	rp:SetEnabled("TonemapACES", false)
+	rp:SetEnabled("TonemapUncharted2", true)
+	rp:SetShaderParameter("BloomHDRThreshold", 1.2)
+	rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0, 0.03))
+	rp:SetShaderParameter("TonemapExposureBias", 1.0)
+	rp:SetShaderParameter("TonemapMaxWhite", 2.0)
+	rp:SetShaderParameter("AutoExposureAdaptRate", 0.6)
+	rp:SetShaderParameter("AutoExposureLumRange", magic.Vector2(0.003, 100.0))
+	rp:SetShaderParameter("AutoExposureMiddleGrey", 0.18)
+	return rp
+end
+
+--
+-- **A room's daylight factor**: the share of the open sky's light its
+-- surfaces get, from the glass it has over its floor (the rule of thumb,
+-- about a fifth of the ratio), a little even with none
+--
+function M.daylight_factor(glass, floor)
+	if floor <= 0 then
+		return 1
+	end
+	return math.max(0.005, math.min(0.5, 0.2 * glass / floor))
+end
+
+-- The checks, at load
+do
+	local function elevation(lat, day, minute)
+		local _, h = M.sun_toward(lat, 0, day, minute)
+		return math.deg(math.asin(h))
+	end
+	local function near(a, b, eps, what)
+		assert(math.abs(a - b) <= eps, what .. ": " .. a .. " against " .. b)
+	end
+	near(elevation(65, 80, 720), 25, 1, "equinox noon at 65 N")
+	near(elevation(65, 172, 720), 48.4, 0.5, "midsummer noon at 65 N")
+	near(elevation(65, 355, 720), 1.6, 0.5, "midwinter noon at 65 N")
+	-- Noon due south: with north up the screen, south is down it (-Z)
+	local x, _, z = M.sun_toward(65, 0, 80, 720)
+	assert(math.abs(x) < 1e-6 and z < 0, "noon is due south")
+	-- Morning in the east, which with north up is the screen's right (+X)
+	x = M.sun_toward(65, 0, 172, 6 * 60)
+	assert(x > 0, "morning in the east")
+	-- North turned to the screen's right: noon's south is to the left
+	x = M.sun_toward(65, 90, 80, 720)
+	assert(x < -0.5, "north at 3 o'clock puts noon at 9")
+	assert(M.compass(0, 0, 1) == "N" and M.compass(0, -1, 1) == "NW" and
+			M.compass(90, 1, 0) == "N", "compass points")
+	assert(M.north_clock(270) == 9 and M.north_clock(0) == 12, "the clock")
+	assert(M.parse_date("21.6.") == 172 and M.date_text(172) == "21.6.",
+			"dates")
+	assert(M.parse_time("15:30") == 930 and M.time_text(930) == "15:30",
+			"times")
+	-- Oulu's year: snow in January, green in July, yellow late in April
+	-- and in October
+	assert(M.ground(65, 15, 0) == GROUND_RGB[3], "January snow at 65 N")
+	assert(M.ground(65, 196, 0) == GROUND_RGB[1], "July green at 65 N")
+	assert(M.ground(65, 290, 0) == GROUND_RGB[2], "October yellow at 65 N")
+	assert(M.ground(20, 15, 0) == GROUND_RGB[1], "the tropics' green")
+end
+
+return M
+-- vim: set noet ts=4 sw=4:
