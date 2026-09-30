@@ -632,19 +632,31 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 
 static void save_preferences(const app::Options &opt)
 {
-	// Nothing that came from the command line is remembered: -w's size, -o's
-	// preferences, and a -c run's whole set of them
-	if(opt.preferences_disabled || !opt.preference_overrides.empty() ||
-			opt.graphics.size_forced)
-		return;
-	if(opt.graphics.window_w < MIN_WINDOW_W ||
-			opt.graphics.window_h < MIN_WINDOW_H)
+	// Nothing that came from the command line is remembered: -o's
+	// preferences, a -c run's whole set of them, and -w's size -- the rest
+	// of a -w run's are, since the web page always gives -w, and the
+	// window's are then what the file had
+	if(opt.preferences_disabled || !opt.preference_overrides.empty())
 		return;
 	json::Value o = json::object();
-	o.set("width", opt.graphics.window_w);
-	o.set("height", opt.graphics.window_h);
-	o.set("maximized", opt.graphics.maximized);
-	o.set("fullscreen", opt.graphics.fullscreen);
+	if(opt.graphics.size_forced){
+		json::json_error_t err;
+		json::Value old = json::load_file(preferences_path().c_str(), &err);
+		if(old.is_object()){
+			for(const char *k : {"width", "height", "maximized", "fullscreen"}){
+				if(!old.get(k).is_undefined())
+					o.set(k, old.get(k));
+			}
+		}
+	} else {
+		if(opt.graphics.window_w < MIN_WINDOW_W ||
+				opt.graphics.window_h < MIN_WINDOW_H)
+			return;
+		o.set("width", opt.graphics.window_w);
+		o.set("height", opt.graphics.window_h);
+		o.set("maximized", opt.graphics.maximized);
+		o.set("fullscreen", opt.graphics.fullscreen);
+	}
 	o.set("render_scale", opt.graphics.render_scale);
 	o.set("vsync", opt.graphics.vsync);
 	o.set("max_fps", opt.graphics.max_fps);
