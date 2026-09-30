@@ -327,9 +327,13 @@ void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float po
         // the more the deeper and steeper; where the groove is under a
         // pixel its slope fades to the flat.
         float depth = (t6.b * 65280.0 + t6.a * 255.0) / 10000.0;
+        // Hand made, the gap wanders in width, and its edges are chipped:
+        // patches a few cm long where a piece has come off them
+        float chip = max(0.0, Noise3(vec3(along * 18.0, board, 9.1)) - 0.55) * 2.2;
         float half_gap = min((t6.r * 65280.0 + t6.g * 255.0) / 20000.0,
                 scale * 0.5) * (1.0 + handmade * 0.6 *
-                (Noise3(vec3(along * 2.0, board, 5.3)) - 0.5));
+                (Noise3(vec3(along * 2.0, board, 5.3)) - 0.5) +
+                handmade * chip);
         float d = min(f, 1.0 - f) * scale;
         // (fwidth outside the branch: a derivative needs all the quad)
         float blur = fwidth(d);
@@ -349,14 +353,61 @@ void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float po
         slope += bumps * (Noise3(vec3(along * 6.0, f * 3.0, board + seed)) - 0.5);
         float slope_s = bumps *
                 (Noise3(vec3(along * 6.0 + 17.0, f * 3.0, board)) - 0.5);
-        // Rough sawn, the fibres stand up across the grain; polished, the
-        // colour deepens as wetted and the surface is a smooth mirror
+        // Hand made, the boards have lived: drying cracks along the grain,
+        // a few per board, wavering and thinning out at their ends; and
+        // dings, small dents here and there. Each fades to its average
+        // where it is finer than a pixel.
+        if (handmade > 0.0) {
+            float seg = along / 0.8 + h * 3.0;
+            float k = Hash3(vec3(board, floor(seg), seed + 11.0));
+            float u = fract(seg);
+            float taper = smoothstep(0.0, 0.3, u) * smoothstep(1.0, 0.7, u);
+            float cpos = (0.2 + 0.6 * Hash3(vec3(board, floor(seg), seed + 17.0))) *
+                    scale + 0.006 * (Noise3(vec3(along * 5.0, board, 3.0)) - 0.5);
+            float cw = (0.0006 + 0.0016 * k) * taper *
+                    step(k, 0.75 * handmade);
+            float dc = abs(across - cpos);
+            float aa = max(fwidth(across), 1e-6);
+            float crack = (1.0 - smoothstep(0.0, cw + aa, dc)) *
+                    min(1.0, cw / aa);
+            nat *= 1.0 - 0.75 * crack;
+            slope += sign(across - cpos) * 0.6 * crack;
+            // Dings here and there (user: as of a nail pulled out once),
+            // in cells of 30 cm, one in about twelve, 3 to 8 mm across
+            vec2 q2 = vec2(along, across) / 0.3;
+            vec2 cell = floor(q2);
+            float r = Hash3(vec3(cell, board + seed + 23.0));
+            vec2 cen = cell + 0.2 + 0.6 * vec2(Hash3(vec3(cell, board + 29.0)),
+                    Hash3(vec3(cell, board + 31.0)));
+            float rad = 0.0015 + 0.0025 * Hash3(vec3(cell, board + 37.0));
+            vec2 dv = (q2 - cen) * 0.3;
+            float dd = length(dv);
+            float seen = 1.0 - smoothstep(0.3, 1.0, fwidth(dd) / rad);
+            if (r < 0.08 * handmade && dd < rad) {
+                // A bowl 2 mm deep: its slope, out from the middle, and
+                // the grime in it
+                vec2 g = dv * (2.0 * 0.002 / (rad * rad)) * seen;
+                slope += g.y;
+                slope_s += g.x;
+                nat *= 1.0 - 0.35 * (1.0 - dd / rad) * seen;
+            }
+        }
+        // Rough sawn, the fibres stand up across the grain and the surface
+        // is grit a millimetre or two across, lit and dark by turns, where
+        // a pixel is finer than it; polished, the colour deepens as wetted
+        // and the surface is a smooth mirror. Unfinished wood has no
+        // highlight at all (user: a log wall at polish 0 was still shiny).
         float rough = 1.0 - polish;
         slope += (streak - 0.5) * 0.4 * rough;
+        vec3 gp = p * 600.0;
+        float grit = rough * (1.0 - smoothstep(0.3, 1.0, length(fwidth(gp))));
+        slope += (Noise3(gp) - 0.5) * 0.6 * grit;
+        slope_s += (Noise3(gp + 31.0) - 0.5) * 0.6 * grit;
+        nat *= 1.0 + (Noise3(gp * 0.5 + 7.0) - 0.5) * 0.25 * grit;
         n = normalize(n - slope * t - slope_s * s);
         nat = pow(max(nat, vec3(0.0)), vec3(mix(0.85, 1.2, polish)));
-        roughness = mix(0.95, 0.08, polish);
-        spec = mix(0.03, 0.6, polish);
+        roughness = mix(1.0, 0.08, polish);
+        spec = 0.6 * polish * sqrt(polish);
         refl = 0.25 * polish * polish;
     }
 
