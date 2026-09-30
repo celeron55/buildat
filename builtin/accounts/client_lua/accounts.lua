@@ -447,10 +447,10 @@ users_page = function(back)
 		for _, p in ipairs(user.privs) do
 			has[p] = true
 		end
+		-- The name over its buttons: five of them are a narrow window's
+		-- width at the web client's scale
+		page_text(w, user.name .. (user.here == 1 and " (here)" or ""))
 		local r = row(w)
-		local l = page_text(r, user.name .. (user.here == 1 and " (here)" or ""))
-		l:SetWordwrap(false)
-		l.minWidth = 120
 		button(r, has.admin and "Admin: yes" or "Admin: no", function()
 			M.admin("priv", user.name, "admin", not has.admin)
 		end)

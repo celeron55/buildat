@@ -156,7 +156,11 @@ open = function()
 			accounts.page_button(w, "Worlds...", worlds)
 		end
 	end
-	accounts.page_button(w, "Leave the game", function() buildat.leave() end)
+	-- A browser tab has no launcher to leave to, and is closed as a tab
+	-- (only the web page sets BUILDAT_PAGE_HTTPS)
+	if buildat.get_env("BUILDAT_PAGE_HTTPS") == nil then
+		accounts.page_button(w, "Leave the game", function() buildat.leave() end)
+	end
 end
 
 return function(options)
