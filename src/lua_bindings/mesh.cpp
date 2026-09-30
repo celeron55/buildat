@@ -694,10 +694,10 @@ ss_ column_heights(const luabind::object &buffer_o,
 	return ss_((const char*)h.data(), h.size() * sizeof(int16_t));
 }
 
-// set_cell_geometry(node, cells, size, r, g, b, a): a volume of cubic cells
+// set_cell_geometry(node, cells, size, r, g, b, a, v): a volume of cubic cells
 // as the node's CustomGeometry, one geometry, a face wherever a cell's
 // neighbour is empty -- a face's normal, the colour (r, g, b, a) and the
-// texture coordinate (row, 0) on each vertex, one winding. `cells` is a
+// texture coordinate (row, v) on each vertex, one winding. `cells` is a
 // flat list of key, row: a key is (x+128) + (y+128)*256 + (z+128)*65536,
 // each of x, y and z from -128 to 127, and a cell is `size` across. The
 // floorplanner's voxel volumes; in C++ because a face at a time from Lua
@@ -705,7 +705,7 @@ ss_ column_heights(const luabind::object &buffer_o,
 // a freeze on the web (user, 2026-09-30).
 void set_cell_geometry(const luabind::object &node_o,
 		const luabind::object &cells, float size, float r, float g, float b,
-		float a)
+		float a, float tv)
 {
 	lua_State *L = node_o.interpreter();
 	GET_TOLUA_STUFF(node, 1, Node);
@@ -725,7 +725,7 @@ void set_cell_geometry(const luabind::object &node_o,
 		const int key = pair.first;
 		const int x = key % 256 - 128, y = (key / 256) % 256 - 128,
 				z = key / 65536 - 128;
-		const Vector2 uv((float)pair.second, 0.f);
+		const Vector2 uv((float)pair.second, tv);
 		for(const auto &f : F){
 			const int nx = x + f[0], ny = y + f[1], nz = z + f[2];
 			if(nx >= -128 && nx <= 127 && ny >= -128 && ny <= 127 &&

@@ -24,6 +24,7 @@ local panel = load("panel.lua")
 
 local M = {}
 local doc
+M.daylight = load("daylight.lua")
 
 local GRID_STEPS = {1, 10, 50, 100}
 local ANGLE_STEPS = {false, 1, 5, 15, 45, 90}
@@ -60,6 +61,12 @@ local HOSTED = {
 local LEAF_T, LEAF_GAP, FRAME_W = 40, 4, 50
 
 local S = {
+	-- How the 3D view and walking are lit ([FP_DAYLIGHT]): "pbr", the
+	-- plan's sun and sky at its place and hour in radiance, or "unlit",
+	-- the plain look the plan view always has, for clarity and speed; a
+	-- touchscreen starts unlit. The viewer's own, kept on the client.
+	lighting = buildat.storage_read("lighting") or
+			(buildat.get_env("BUILDAT_TOUCH") == "1" and "unlit" or "pbr"),
 	view = "2d",
 	show_ids = true, -- the material id decals
 	plan_look = true, -- the plan view in flat colours (L)
@@ -162,7 +169,7 @@ local sun = sun_node:CreateComponent("Light")
 sun.lightType = magic.LIGHT_DIRECTIONAL
 sun.brightness = 1.0
 sun.castShadows = true
-sun.shadowBias = magic.BiasParameters(0.00025, 0.5)
+sun.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
 sun.shadowCascade = magic.CascadeParameters(8.0, 25.0, 80.0, 0.0, 0.8)
 -- A faint unshadowed light from one side, so that the faces of a wall read
 -- apart without the sun; it lights nothing that ambient light would not
@@ -177,11 +184,15 @@ local lamps_node = scene:CreateChild("Lamps")
 -- From the resource cache, which holds them: a Material made in Lua is
 -- freed under a geometry still using it
 local lit_material = magic.cache:GetResource("Material", "main/palette.xml")
+-- A ceiling is seen from above by the sun, from its back: it casts all the
+-- same ([FP_DAYLIGHT])
+lit_material.shadowCullMode = magic.CULL_NONE
 -- The same, for the type previews: its own so the plan's flat look is not
 -- theirs
 local preview_material = magic.cache:GetResource("Material",
 		"main/palette_preview.xml")
 local flat_material = magic.cache:GetResource("Material", "main/flat_vcol.xml")
+M.shadow_material = magic.cache:GetResource("Material", "main/shadow_only.xml")
 local glass_material = magic.cache:GetResource("Material",
 		"main/palette_glass.xml")
 -- What a Lua wrapper would otherwise free under the engine
@@ -241,12 +252,22 @@ local function tri(g, a, b, c, n, col, tint)
 	if out then
 		local nx, ny, nz = n.x, n.y, n.z
 		local cr, cg, cb, ca = col.r, col.g, col.b, col.a
+		-- What of the sky's light this face does not get, which the
+		-- texture coordinate's y carries to the shader ([FP_DAYLIGHT]):
+		-- the room the face looks into, a little in front of it, or one
+		-- value for a part built in its own frame
+		local occ = M.tri_occ or 0
+		local fn = M.tri_occ_fn
+		if fn then
+			occ = fn((a.x + b.x + c.x) / 3 + nx * 0.05,
+					(a.z + b.z + c.z) / 3 + nz * 0.05)
+		end
 		local k = #out
 		for _, p in ipairs({a, b, c}) do
 			out[k + 1], out[k + 2], out[k + 3] = p.x, p.y, p.z
 			out[k + 4], out[k + 5], out[k + 6] = nx, ny, nz
 			out[k + 7], out[k + 8], out[k + 9], out[k + 10] = cr, cg, cb, ca
-			out[k + 11], out[k + 12] = row, 0
+			out[k + 11], out[k + 12] = row, occ
 			k = k + 12
 		end
 		return
@@ -308,13 +329,25 @@ local UP, DOWN = magic.Vector3(0, 1, 0), magic.Vector3(0, -1, 0)
 M.UP3, M.DOWN3 = V3(0, 1, 0), V3(0, -1, 0)
 
 local ground_node = scene:CreateChild("Ground")
-do
-	local g = ground_node:CreateComponent("CustomGeometry")
+-- The ground: the plain grey, or under PBR the season's colour in its own
+-- palette row ([FP_DAYLIGHT]); again when either changes
+function M.build_ground()
+	if not M.ground_row then
+		return
+	end
+	local pbr = M.pbr_now()
+	local key = tostring(pbr) .. ":" .. tostring(M.ground_row)
+	if key == M.ground_key then
+		return
+	end
+	M.ground_key = key
+	local g = ground_node:GetComponent("CustomGeometry") or
+			ground_node:CreateComponent("CustomGeometry")
 	g:SetNumGeometries(1)
 	g:BeginGeometry(0, magic.TRIANGLE_LIST)
 	local r = 200000
 	flat_polygon(g, {{-r, -r}, {r, -r}, {r, r}, {-r, r}}, 0, M.UP3,
-			magic.Color(0.85, 0.85, 0.83))
+			pbr and M.ground_row or magic.Color(0.85, 0.85, 0.83))
 	g:Commit()
 	g:SetMaterial(0, lit_material)
 end
@@ -365,6 +398,10 @@ local function viewport_for(v)
 	-- than a light for each thing each lights; the plan view stays forward
 	local rp = vp.renderPath:Clone()
 	rp:Load(magic.cache:GetResource("XMLFile", "RenderPaths/Deferred.xml"))
+	-- PBR: in radiance, metered and tone mapped ([FP_DAYLIGHT])
+	if S.lighting == "pbr" then
+		M.daylight.pbr_render_path(rp)
+	end
 	vp.renderPath = rp
 	return vp
 end
@@ -674,14 +711,18 @@ local function palette_texture()
 		end
 	end
 	table.sort(parts)
-	local key = table.concat(parts, ",")
+	-- and the ground's colour of the season, its row the last
+	local ground = M.ground_rgb()
+	local key = table.concat(parts, ",") .. ";" .. ground
 	if key == palette_key then
 		return
 	end
 	palette_key = key
 	palette_rows = {}
-	-- The two rows of nothing, a preview's for each type, then the entries
-	local n = #entries + 2 + #MATERIAL_KINDS + 1
+	-- The two rows of nothing, a preview's for each type, the entries, then
+	-- the ground's ([FP_DAYLIGHT])
+	local n = #entries + 2 + #MATERIAL_KINDS + 1 + 1
+	M.ground_row = n - 1
 	local image = magic.Image:new()
 	assert(image:SetSize(8, n, 4), "Image:SetSize")
 	local function put(x, y, rgb, a)
@@ -730,6 +771,12 @@ local function palette_texture()
 		palette_rows[e.id] = i + 2 + #MATERIAL_KINDS
 		put_row(i + 2 + #MATERIAL_KINDS, e.ints)
 	end
+	-- The ground: flat, as the first row of nothing, in its own colour
+	put(0, M.ground_row, ground, 0)
+	put(1, M.ground_row, 0xffffff, 0)
+	put(2, M.ground_row, 0x404040, 1)
+	px(3, M.ground_row, 0.9, 0.05, 0, 0)
+	px(4, M.ground_row, 0.5, 0, 0, 0)
 	local texture = magic.Texture2D:new()
 	-- One level: a smaller one would average the rows' knobs together
 	texture:SetNumLevels(1)
@@ -1069,14 +1116,14 @@ local FACES = {
 -- the web, user 2026-09-30)
 -- simplified: a quad per exposed face; the upgrade is a greedy mesher,
 -- which the same call can do inside
-local function voxel_geometry(node, def, sz, tint)
+local function voxel_geometry(node, def, sz, tint, occ)
 	local cells = {}
 	for key, mat in pairs(doc.voxels[def] or {}) do
 		cells[#cells + 1] = key
 		cells[#cells + 1] = row(mat)
 	end
 	local c = tint or WHITE
-	buildat.set_cell_geometry(node, cells, W(sz), c.r, c.g, c.b, c.a)
+	buildat.set_cell_geometry(node, cells, W(sz), c.r, c.g, c.b, c.a, occ or 0)
 end
 
 local function update_voxel_meshes(seen)
@@ -1086,9 +1133,11 @@ local function update_voxel_meshes(seen)
 			local e = doc.ents[id].ints
 			local def = e.def
 			local on = lamp_on(id)
+			-- and the room it stands in, for the sky's share ([FP_DAYLIGHT])
+			local occ = M.inst_occlusion(it)
 			local key = (doc.voxel_version[def] or 0) .. ":" .. palette_gen ..
 					":" .. it.size .. ":" .. def .. ":" .. e.align .. ":" ..
-					tostring(on)
+					tostring(on) .. ":" .. occ
 			local m = voxel_meshes[id]
 			if not m or m.key ~= key then
 				if m then
@@ -1096,9 +1145,10 @@ local function update_voxel_meshes(seen)
 				end
 				local parent = e.align == 1 and P.overhead or P.walls
 				local node = parent:CreateChild("voxels")
-				voxel_geometry(node, def, it.size, not on and UNLIT or nil)
+				voxel_geometry(node, def, it.size, not on and UNLIT or nil, occ)
 				local g = node:GetComponent("CustomGeometry")
 				g:SetMaterial(0, lit_material)
+				g.castShadows = true
 				m = {node = node, key = key}
 				voxel_meshes[id] = m
 			end
@@ -1429,7 +1479,9 @@ do
 		light.lightType = magic.LIGHT_POINT
 		light.color = rgb_color(kelvin_rgb(p.temperature))
 		local b = p.brightness / 1000
-		light.brightness = 0.5 + 1.5 * b
+		-- Under PBR at vanilla's lamp radiance, beside the sun's
+		light.brightness = (0.5 + 1.5 * b) * (M.pbr_now() and
+				M.daylight.PHYS.lamp or 1)
 		light.range = 2 + 8 * b
 end
 
@@ -1559,6 +1611,62 @@ function place.follow(w)
 	end
 end
 
+-- **What of the open sky's light each room gets** ([FP_DAYLIGHT]): its
+-- daylight factor from the glass it has -- windows, glazed doors and
+-- openings, found on either side of their walls -- over its floor
+-- (daylight.lua), kept as 1 - it by room id, and the lookup tri() makes
+-- for a face in the layout's own frame. simplified: the sky's share only;
+-- the sun a room's windows let in lights the floor it falls on and not
+-- the rest of the room, which a bounce term would.
+function M.room_occlusion()
+	local glass = {}
+	for _, it in pairs(inst_data) do
+		local def = it.hosted and it.frame and doc.ents[it.def]
+		local d = def and def.ints
+		local a = 0
+		if d and d.kind == KIND.window then
+			a = math.max(0, d.w - 4 * FRAME_W) * math.max(0, d.h - 4 * FRAME_W)
+		elseif d and d.kind == KIND.opening then
+			a = d.w * d.h
+		elseif d and d.kind == KIND.door and d.glazed == 1 then
+			a = math.max(0, d.w - 240) * math.max(0, d.h - 1050)
+		end
+		if a > 0 then
+			local f = it.frame
+			local off = f.lo + f.ro + 100
+			for _, sgn in ipairs({1, -1}) do
+				local rid = room_at(it.x + f.nx * off * sgn, it.z + f.nz * off * sgn)
+				if rid then
+					glass[rid] = (glass[rid] or 0) + a
+				end
+			end
+		end
+	end
+	M.room_occ = {}
+	for id, rd in pairs(room_data) do
+		M.room_occ[id] = 1 - M.daylight.daylight_factor(glass[id] or 0, rd.net)
+	end
+	M.tri_occ, M.tri_occ_fn = 0, function(xm, zm)
+		local id = room_at(xm * 1000, zm * 1000)
+		return id and M.room_occ[id] or 0
+	end
+end
+-- One value for what is built in its own frame: the room it stands in, or
+-- for a door or a window the darker of the two it is between
+function M.inst_occlusion(it)
+	local function at(x, z)
+		local id = room_at(x, z)
+		return id and M.room_occ[id] or 0
+	end
+	if it.hosted and it.frame then
+		local f = it.frame
+		local off = f.lo + f.ro + 100
+		return math.max(at(it.x + f.nx * off, it.z + f.nz * off),
+				at(it.x - f.nx * off, it.z - f.nz * off))
+	end
+	return at(it.x, it.z)
+end
+
 -- wells: {floor = {pts, ...}, ceiling = {pts, ...}}, the stairwells cut in
 -- this layout's rooms
 local function build_layout(seen_voxels, wells)
@@ -1575,6 +1683,7 @@ local function build_layout(seen_voxels, wells)
 	outlines = geom.wall_outlines(wall_data)
 	build_room_data()
 	build_inst_data()
+	M.room_occlusion()
 	local cut = settings().cut
 	-- A part's triangles, gathered in Lua and handed to the engine by
 	-- commit() in one call (see tri())
@@ -1588,7 +1697,11 @@ local function build_layout(seen_voxels, wells)
 	local function commit(g, material)
 		buildat.set_triangle_geometry(g.node, TRI_LISTS[g])
 		TRI_LISTS[g] = nil
-		g.node:GetComponent("CustomGeometry"):SetMaterial(0, material)
+		local cg = g.node:GetComponent("CustomGeometry")
+		cg:SetMaterial(0, material)
+		-- Everything in the sun's way casts its shadow but the glass, which
+		-- is how daylight comes in ([FP_DAYLIGHT])
+		cg.castShadows = material ~= glass_material
 	end
 	-- What the plan view shows where the cut goes through something: dark
 	-- where it is cut, lighter for what is below the cut
@@ -1706,12 +1819,33 @@ local function build_layout(seen_voxels, wells)
 						row(e.ints.mat_ceiling))
 			end
 			commit(cg, lit_material)
+			-- A slab over it for the sun's shadow alone, 300 mm thick and
+			-- out past the walls: the thin wall tops and the ceiling
+			-- leaked a line of daylight where they meet ([FP_DAYLIGHT])
+			local offs = {}
+			for i = 1, #r.pts do
+				offs[i] = -300
+			end
+			local slab_pts = geom.inset(r.pts, offs)
+			if #slab_pts >= 3 then
+				local sg = geometry(P.overhead)
+				local c0 = room_ceiling(e)
+				local labels = {}
+				for i = 1, #slab_pts do
+					labels[i] = "core"
+				end
+				extrude(sg, slab_pts, labels, c0, c0 + 300, {core = 0}, true)
+				commit(sg, M.shadow_material)
+			end
 		end
 	end
 
+	local occ_fn = M.tri_occ_fn
+	M.tri_occ_fn = nil
 	for id, it in pairs(inst_data) do
 		local def = doc.ents[it.def].ints
 		local e = doc.ents[id].ints
+		M.tri_occ = M.inst_occlusion(it)
 		if it.hosted then
 			build_hosted(id, it, def, e, geometry, commit)
 			-- A window and a shut door are in the way; an open door is not
@@ -1766,6 +1900,7 @@ local function build_layout(seen_voxels, wells)
 			end
 		end
 	end
+	M.tri_occ, M.tri_occ_fn = 0, occ_fn
 	-- A floor is something to stand on, when walking up to another layout
 	for _, r in pairs(room_data) do
 		for _, pts in ipairs(r.floor or {}) do
@@ -1790,6 +1925,7 @@ place.layers = {}
 -- simplified: every layout is rebuilt on any change
 rebuild = function()
 	palette_texture()
+	M.build_ground()
 	for _, n in ipairs(built) do
 		n:Remove()
 	end
@@ -1862,14 +1998,91 @@ rebuild = function()
 	-- The ground is the world's, under every layout
 	ground_node.position = magic.Vector3(0, W(-cur.y), 0)
 	pieces_node.enabled = S.view ~= "2d"
-	-- The sun where the plan puts it
-	local st = settings()
-	sun.enabled = st.sun == 1
-	local sx, sy, sz = geom.rot(0, 0, 1, st.sun_pitch, st.sun_yaw, 0)
-	sun_node.direction = magic.Vector3(sx, sy, sz)
 	caps_node.enabled = S.view == "2d"
+	S.daylight_key = nil
 	S.dirty = false
 end
+end
+
+-- **The plan's daylight** on the 3D view and walking ([FP_DAYLIGHT],
+-- daylight.lua): the sun where the plan's place and hour put it, at its
+-- irradiance and colour, the sky's ambient and fog, the sky drawn and its
+-- cube reflected; or, unlit and in the plan view, the plain look. Each
+-- frame, recomputed when the minute (to a tenth), the settings or the
+-- mode change.
+M.UNLIT = {ambient = magic.Color(0.55, 0.55, 0.58),
+		fog = magic.Color(0.55, 0.62, 0.72)}
+-- The plan's minute now: its own, or on from it at the time-lapse's
+-- speed since this client saw it set
+-- simplified: from when this client saw it, so two clients that joined
+-- apart see a time-lapse apart; the upgrade is the server's clock
+function M.plan_minute()
+	local st = settings()
+	local key = st.minute .. ":" .. st.lapse
+	if S.lapse_key ~= key then
+		S.lapse_key, S.lapse_t0 = key, buildat.get_time_us()
+	end
+	if st.lapse == 0 then
+		return st.minute
+	end
+	return (st.minute + st.lapse * (buildat.get_time_us() - S.lapse_t0) / 1e6) % 1440
+end
+-- The ground's colour now, as the palette's row and the light's albedo
+function M.ground_rgb()
+	local st = settings()
+	return M.daylight.ground(st.latitude, st.day, st.ground)
+end
+-- Whether what is drawn now is PBR: the setting's, and never the plan view
+function M.pbr_now()
+	return S.lighting == "pbr" and S.view ~= "2d"
+end
+function M.apply_daylight()
+	local pbr = M.pbr_now()
+	local st = settings()
+	local minute = pbr and M.plan_minute() or 0
+	local key = string.format("%s %.1f %d %d %d %d", tostring(pbr), minute,
+			st.north, st.latitude, st.day, st.ground)
+	if key == S.daylight_key then
+		if pbr and M.sky then
+			M.sky:flush()
+		end
+		return
+	end
+	S.daylight_key = key
+	for _, m in ipairs({lit_material, glass_material}) do
+		m:SetShaderParameter("Pbr", pbr and 1 or 0)
+	end
+	if not pbr then
+		sun.enabled, fill.enabled = false, true
+		zone.ambientColor, zone.fogColor = M.UNLIT.ambient, M.UNLIT.fog
+		if M.sky then
+			M.sky:show(false)
+		end
+		return
+	end
+	M.sky = M.sky or M.daylight.new_sky(scene)
+	M.sky:show(true)
+	zone.zoneTexture = M.sky.texture
+	local tx, h, tz = M.daylight.sun_toward(st.latitude, st.north, st.day, minute)
+	local rgb = M.ground_rgb()
+	local function lin(v)
+		return (v / 255) ^ 2.2
+	end
+	local light = M.daylight.light(h, {r = lin(math.floor(rgb / 65536)),
+			g = lin(math.floor(rgb / 256) % 256), b = lin(rgb % 256)})
+	sun.enabled, fill.enabled = h > 0, false
+	sun_node.direction = magic.Vector3(-tx, -h, -tz)
+	-- The shader's Lambert has no 1/pi, which the irradiance carries here
+	sun.brightness = light.sun / math.pi
+	local sc = light.sun_color
+	sun.color = magic.Color(sc.r, sc.g, sc.b)
+	local a, f = light.ambient, light.horizon
+	zone.ambientColor = magic.Color(a.r, a.g, a.b)
+	zone.fogColor = magic.Color(f.r, f.g, f.b)
+	M.sky:set(tx, h, tz, h, light)
+	for _, m in ipairs({lit_material, glass_material}) do
+		m:SetShaderParameter("SunToward", magic.Vector3(tx, h, tz))
+	end
 end
 
 --
@@ -3422,10 +3635,17 @@ local function set_view(v)
 		S.crosshair = false
 	end
 	S.view = v
-	-- Only when it changes: the walk and the free camera share a viewport
-	if (v == "2d") ~= (S.shown_2d == true) or not S.shown then
-		S.shown, S.shown_2d = true, v == "2d"
+	-- Only when it changes: the walk and the free camera share a viewport.
+	-- The lighting's HDR frame is for the 3D one under PBR.
+	local lighting = v ~= "2d" and S.lighting or "unlit"
+	if (v == "2d") ~= (S.shown_2d == true) or not S.shown or
+			lighting ~= S.shown_lighting then
+		S.shown, S.shown_2d, S.shown_lighting = true, v == "2d", lighting
+		magic.renderer.HDRRendering = lighting == "pbr"
 		magic.set_preferred_viewports({viewport_for(v)})
+		S.daylight_key = nil
+		-- The lamps' brightness and the ground go with it
+		S.dirty = true
 	end
 	-- The plan view's look: flat colours, or the materials lit
 	local flat = v == "2d" and S.plan_look and 1 or 0
@@ -4618,15 +4838,49 @@ do
 			end)
 			plan_int("Ceiling mm", "ceiling")
 			plan_int("Plan cut mm", "cut")
-			panel.check(w, "Sun", st.sun == 1, function()
-				send({{op = "set", ent = {id = sid, ints = {sun = 1 - st.sun}}}})
-				st.sun = 1 - st.sun
-				plan_settings_page()
+			-- **The site and the moment the 3D view is lit for**
+			-- ([FP_DAYLIGHT]): north, with where it is now said beside it
+			-- -- where the camera points in 3D, where north is on the
+			-- screen in the plan view -- the latitude, the date and the
+			-- hour, a time-lapse and the ground
+			local dl = M.daylight
+			local nr = panel.row(w)
+			panel.field(nr, "North deg", st.north, function(t)
+				local v = tonumber(t)
+				if v then
+					send({{op = "set", ent = {id = sid,
+							ints = {north = math.floor(v + 0.5) % 360}}}})
+				end
 			end)
-			if st.sun == 1 then
-				plan_int("Sun from deg", "sun_yaw")
-				plan_int("Sun height deg", "sun_pitch")
+			local where
+			if S.view == "2d" then
+				where = "North is at " .. dl.north_clock(st.north) .. " o'clock"
+			else
+				local fx, _, fz = geom.rot(0, 0, 1, S.pitch, S.yaw, 0)
+				where = "Pointing " .. dl.compass(st.north, fx, fz)
 			end
+			panel.label(nr, where)
+			plan_int("Latitude deg", "latitude")
+			local function set_ints(ints)
+				send({{op = "set", ent = {id = sid, ints = ints}}})
+			end
+			panel.field(w, "Date (d.m.)", dl.date_text(st.day), function(t)
+				local d = dl.parse_date(t)
+				if d then set_ints({day = d}) end
+			end)
+			local tr = panel.row(w)
+			panel.field(tr, "Time (h:mm)", dl.time_text(math.floor(M.plan_minute())),
+					function(t)
+				local m = dl.parse_time(t)
+				if m then set_ints({minute = m}) end
+			end)
+			-- The time-lapse goes on from the hour it shows now
+			panel.dropdown(tr, "Time-lapse", dl.LAPSES, st.lapse, function(v)
+				set_ints({lapse = v, minute = math.floor(M.plan_minute())})
+			end)
+			panel.dropdown(w, "Ground", dl.GROUNDS, st.ground, function(v)
+				set_ints({ground = v})
+			end)
 			-- The pictures in the save's images/, and the ones placed, locked
 			for _, file in ipairs(doc.images) do
 				panel.button(w, "Trace over " .. file, function()
@@ -4681,6 +4935,14 @@ do
 			else
 				buildat.set_sound(false, v)
 			end
+			client_settings_page()
+		end)
+		-- How the 3D view and walking are lit ([FP_DAYLIGHT])
+		panel.dropdown(w, "3D lighting", {{"PBR: the plan's sun and sky", "pbr"},
+				{"Unlit: plain, and lighter", "unlit"}}, S.lighting, function(v)
+			S.lighting = v
+			buildat.storage_write("lighting", v)
+			set_view(S.view)
 			client_settings_page()
 		end)
 		panel.check(w, "The plan in flat colours (L)", S.plan_look, function()
@@ -7535,6 +7797,7 @@ function M.update(dt)
 	if S.dirty then
 		rebuild()
 	end
+	M.apply_daylight()
 	if S.panels_stale and not doc.typing() then
 		refresh_panels()
 	end

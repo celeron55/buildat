@@ -41,6 +41,15 @@ varying vec4 vColor;
 #ifdef COMPILEPS
     uniform float cPaletteRows;
     uniform float cPlanLook;
+    // **PBR** ([FP_DAYLIGHT]): the frame in radiance, metered and tone
+    // mapped after; albedo decoded from the palette's sRGB, the ambient
+    // the sky's times what of it reaches this face (its room's daylight
+    // factor, which the vertex carries as 1 - it in the texture
+    // coordinate's y), reflections of the sky's own cube, lamps at
+    // vanilla's radiance. 0: the unlit look as it always was.
+    uniform float cPbr;
+    // Towards the sun, for the sky's brighter side ([FP_DAYLIGHT])
+    uniform vec3 cSunToward;
 #endif
 
 void VS()
@@ -300,11 +309,15 @@ void Surface(vec3 p, vec3 n, out vec3 albedo, out float spec, out float power,
     power = mix(120.0, 4.0, roughness);
 }
 
-// A sky and a ground for what is reflected
-// simplified: an analytic sky rather than a captured cube map; the upgrade
-// is a probe per room
+// A sky and a ground for what is reflected: the sky's cube under PBR, and
+// an analytic one otherwise
+// simplified: the open sky's even indoors; the upgrade is a probe per room
 vec3 Environment(vec3 r)
 {
+    #if !defined(GL_ES) || __VERSION__ >= 300
+        if (cPbr > 0.5)
+            return textureCube(sZoneCubeMap, r).rgb * (1.0 - vRow.y);
+    #endif
     return mix(vec3(0.35, 0.33, 0.30), vec3(0.75, 0.82, 0.92), smoothstep(-0.2, 0.3, r.y));
 }
 
@@ -317,6 +330,22 @@ void PS()
     albedo *= vColor.rgb;
     // A lamp switched off: its vertices' alpha is 0
     emissive *= vColor.a;
+    // What of the ambient reaches this face
+    float ambientShare = 1.0;
+    if (cPbr > 0.5)
+    {
+        albedo = pow(max(albedo, vec3(0.0)), vec3(2.2));
+        emissive = pow(max(emissive, vec3(0.0)), vec3(2.2)) * 8.0;
+        ambientShare = 1.0 - vRow.y;
+        // A face sees the sky by which way it is turned: all of it facing
+        // up, half on a wall, the floor's bounce facing down; and the
+        // sun's side of the sky is the brighter one. So the faces of a
+        // room read apart where the ambient is all there is.
+        vec2 sh = cSunToward.xz;
+        float shl = length(sh);
+        float side = shl > 0.01 ? dot(normal.xz, sh / shl) : 0.0;
+        ambientShare *= (0.7 + 0.3 * normal.y) * (1.0 + 0.2 * side);
+    }
 
     #ifdef HEIGHTFOG
         float fogFactor = GetHeightFogFactor(vWorldPos.w, vWorldPos.y);
@@ -346,7 +375,7 @@ void PS()
         if (cPlanLook > 0.5)
             finalColor = vec3(0.0);
         #ifdef AMBIENT
-            finalColor += cAmbientColor.rgb * albedo + emissive + reflected;
+            finalColor += cAmbientColor.rgb * albedo * ambientShare + emissive + reflected;
             if (cPlanLook > 0.5)
                 finalColor = albedo;
             gl_FragColor = vec4(GetFog(finalColor, fogFactor), alpha);
@@ -354,7 +383,7 @@ void PS()
             gl_FragColor = vec4(GetLitFog(finalColor, fogFactor), alpha);
         #endif
     #elif defined(DEFERRED)
-        vec3 finalColor = vVertexLight * albedo + emissive + reflected;
+        vec3 finalColor = vVertexLight * albedo * ambientShare + emissive + reflected;
         if (cPlanLook > 0.5)
             finalColor = albedo;
         gl_FragData[0] = vec4(GetFog(finalColor, fogFactor), 1.0);
@@ -362,7 +391,7 @@ void PS()
         gl_FragData[2] = vec4(normal * 0.5 + 0.5, power / 255.0);
         gl_FragData[3] = vec4(EncodeDepth(vWorldPos.w), 0.0);
     #else
-        vec3 finalColor = vVertexLight * albedo + emissive + reflected;
+        vec3 finalColor = vVertexLight * albedo * ambientShare + emissive + reflected;
         if (cPlanLook > 0.5)
             finalColor = albedo;
         gl_FragColor = vec4(GetFog(finalColor, fogFactor), alpha);

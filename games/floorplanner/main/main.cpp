@@ -158,11 +158,17 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"ceiling", 1000, 10000, 2600},
 		{"cut", 100, 10000, 1200},
 		{"default_edit", 0, 1, 1},
-		// The sun, off by default: it has to cast shadows, or it shines
-		// through the walls
-		{"sun", 0, 1, 0},
-		{"sun_yaw", 0, 359, 135},
-		{"sun_pitch", 5, 90, 40},
+		// The site and the moment the 3D view is lit for ([FP_DAYLIGHT]):
+		// north in degrees clockwise from the plan view's up, the latitude,
+		// the day of the year and the minute of the (solar) day, a
+		// time-lapse's speed in minutes a second (0 still), and the
+		// ground: 0 by the season, 1 green, 2 yellow, 3 snow
+		{"north", 0, 359, 0},
+		{"latitude", -90, 90, 65},
+		{"day", 1, 365, 172},
+		{"minute", 0, 1439, 720},
+		{"lapse", 0, 60, 0},
+		{"ground", 0, 3, 0},
 		{"grid", 1, 100, 100}, // mm, what the plan snaps to
 		// Floor to floor, where "Add a floor above" puts one ([FP_LAYOUTS])
 		{"floor_step", 1000, 20000, 3000},

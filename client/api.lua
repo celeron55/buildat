@@ -1178,9 +1178,10 @@ function buildat.safe.set_triangle_geometry(safe_node, verts)
 	return __buildat_set_triangle_geometry(getmetatable(safe_node).unsafe, verts)
 end
 
--- set_cell_geometry(node, cells, size, r, g, b, a): a volume of cubic cells
--- as the node's CustomGeometry; see src/lua_bindings/mesh.cpp
-function buildat.safe.set_cell_geometry(safe_node, cells, size, r, g, b, a)
+-- set_cell_geometry(node, cells, size, r, g, b, a, v): a volume of cubic
+-- cells as the node's CustomGeometry, v the texture coordinate's second
+-- half on every vertex (0 unless given); see src/lua_bindings/mesh.cpp
+function buildat.safe.set_cell_geometry(safe_node, cells, size, r, g, b, a, v)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
@@ -1197,7 +1198,7 @@ function buildat.safe.set_cell_geometry(safe_node, cells, size, r, g, b, a)
 		return type(v) == "number" and v or 1
 	end
 	return __buildat_set_cell_geometry(getmetatable(safe_node).unsafe, cells,
-			size, num(r), num(g), num(b), num(a))
+			size, num(r), num(g), num(b), num(a), type(v) == "number" and v or 0)
 end
 
 function buildat.safe.clear_voxel_geometry(safe_node)
