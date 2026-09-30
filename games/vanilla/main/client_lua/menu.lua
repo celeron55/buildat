@@ -46,9 +46,16 @@ local menu_game = nil
 -- that screen's back goes to the grid, not to a save list nobody asked
 -- for. A launch for a game's worlds goes back through the world screen.
 local launched_for = nil
+-- A public server's ([VANILLA_PUBLIC] 5): "public", or "public_running"
+-- when this is opened over the world running, from the pause menu
+local public = nil
+-- What the pause menu gets back as when this goes back to the world
+local M = {back = nil}
 buildat.sub_packet("main:menu", function(data)
 	local game = data:match("^worlds:(.+)$")
-	if game then
+	if data:match("^public") then
+		public = data
+	elseif game then
 		menu_game = game
 		menu_wanted = nil
 	else
@@ -287,24 +294,23 @@ function draw(saves, save_games)
 	local items = {}
 	for i, name in ipairs(saves) do
 		local gameid = save_games[i]
-		if menu_game and gameid ~= menu_game then
-			goto next_save
-		end
-		local known = false
-		for _, g in ipairs(games) do
-			if g == gameid then
-				known = true
+		-- No goto: the web client's Lua is 5.1
+		if not menu_game or gameid == menu_game then
+			local known = false
+			for _, g in ipairs(games) do
+				if g == gameid then
+					known = true
+				end
 			end
+			local label = menu_game and name or (name .. "   (" ..
+					(gameid ~= "" and gameid or "game not recorded") .. ")")
+			if gameid ~= "" and not known then
+				-- Still listed: a save whose game is not installed is a
+				-- save, and saying so is more use than hiding it
+				label = label .. "  -- no such game"
+			end
+			items[#items + 1] = {label = label, name = name}
 		end
-		local label = menu_game and name or (name .. "   (" ..
-				(gameid ~= "" and gameid or "game not recorded") .. ")")
-		if gameid ~= "" and not known then
-			-- Still listed: a save whose game is not installed is a save,
-			-- and saying so is more use than hiding it
-			label = label .. "  -- no such game"
-		end
-		items[#items + 1] = {label = label, name = name}
-		::next_save::
 	end
 	local shown = filtered(items, save_filter)
 	add_filter({window = left}, save_filter, #items, #shown, function(text)
@@ -394,17 +400,35 @@ function draw(saves, save_games)
 		waiting("Looking in your Luanti installation...")
 		buildat.send_packet("main:get_imports", "")
 	end
-	under:add("Import a game from Luanti...", function()
-		ask_for_imports("games")
-	end)
-	under:add("Import a world from Luanti...", function()
-		ask_for_imports("worlds")
-	end)
-	-- Back to the launcher's grid ([MENU_CONTEXT]); a client that came
-	-- straight to this server leaves it instead
-	under:add("< back to the launcher", function()
-		buildat.leave()
-	end)
+	if public then
+		-- A game from ContentDB is on the server for everyone, where an
+		-- import is from this computer's Luanti
+		under:add("Get a game from ContentDB...", function()
+			ask_contentdb("")
+		end)
+	else
+		under:add("Import a game from Luanti...", function()
+			ask_for_imports("games")
+		end)
+		under:add("Import a world from Luanti...", function()
+			ask_for_imports("worlds")
+		end)
+	end
+	if public == "public_running" then
+		under:add("< back to the world", function()
+			done = true
+			close()
+			if M.back then
+				M.back()
+			end
+		end)
+	else
+		-- Back to the launcher's grid ([MENU_CONTEXT]); a client that came
+		-- straight to this server leaves it instead
+		under:add("< back to the launcher", function()
+			buildat.leave()
+		end)
+	end
 
 	-- The right column: the glance, the flags, Play and Delete
 	panel = {lines = {}, flags = {}}
@@ -735,6 +759,14 @@ local pictures = {}
 function draw_contentdb(flat)
 	local menu = import_menu("ContentDB: games" ..
 			(contentdb_query ~= "" and (" matching \"" .. contentdb_query .. "\"") or ""))
+	if public then
+		-- [VANILLA_PUBLIC] 7: a game's mods are Lua that runs on the server
+		local warn = menu.window:CreateChild("Text")
+		warn:SetStyleAuto()
+		warn:SetText("A game's mods run on this server: " ..
+				"install only games you trust.")
+		warn:SetColor(magic.Color(1.0, 0.8, 0.4))
+	end
 	local edit = menu.window:CreateChild("LineEdit")
 	edit:SetStyleAuto()
 	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
@@ -928,7 +960,9 @@ function draw_new_save_name(gameid, state)
 		end)
 		mapgen_buttons[name] = b
 	end
-	menu:add("Create and play", function()
+	-- Over a running world a new one is only made ([VANILLA_PUBLIC] 5)
+	menu:add(public == "public_running" and "Create" or "Create and play",
+			function()
 		local name = edit:GetText()
 		local seed = seed_edit:GetText()
 		-- Kept, so that a create the server refuses comes back to this
@@ -1239,6 +1273,9 @@ end)
 -- News, not an error: the list it changed is asked for again and the
 -- line shown over it for a moment
 buildat.sub_packet("main:menu_message", function(data)
+	if done then
+		return
+	end
 	local message = cereal.binary_input(data, {"array", "string"})[1]
 	log:info("menu: " .. tostring(message))
 	buildat.send_packet("main:get_saves", "")
@@ -1246,6 +1283,9 @@ buildat.sub_packet("main:menu_message", function(data)
 end)
 
 buildat.sub_packet("main:menu_error", function(data)
+	if done then
+		return
+	end
 	local message = cereal.binary_input(data, {"array", "string"})[1]
 	log:warning("menu: " .. tostring(message))
 	-- A create that did not happen goes back to the screen it came from
@@ -1278,4 +1318,5 @@ end)
 
 buildat.send_packet("main:get_saves", "")
 waiting("Looking for saves...")
+return M
 -- vim: set noet ts=4 sw=4:

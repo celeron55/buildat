@@ -102,7 +102,7 @@ for i in $(seq 1 "$runs"); do
 	log="$out/run$i.log"
 	BUILDAT_LUANTI_GAME="$game" BUILDAT_LUANTI_SAVE="$save" \
 		BUILDAT_LUANTI_LUA="$probe" \
-		"$build/bin/buildat_server" -m "$root/games/vanilla" \
+		"$build/bin/buildat_server" -u launcher=1 -m "$root/games/vanilla" \
 		-D "$root/user" -P "$port" -l 4 2>&1 \
 		| sed -e 's/\x1b\[[0-9;]*m//g' > "$log" &
 	# Generation is over when no new section has been started for a while.

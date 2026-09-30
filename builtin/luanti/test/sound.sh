@@ -50,7 +50,7 @@ fi
 rm -rf "$here/user/games/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=$save \
 	BUILDAT_LUANTI_LUA="$me/sound.lua" \
-	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" -l 3 \
+	bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P "$port" -l 3 \
 	> "$out/srv.log" 2>&1 &
 srv=$!
 for i in $(seq 1 120); do

@@ -3565,78 +3565,14 @@ hud_follows_inventory = function()
 end
 
 --
--- The pause menu, and the keys that hide things
---
--- Escape used to disconnect, which is a key nobody was told about doing the
--- one thing that cannot be undone. What it opens is a form of the client's
--- own -- the game is told nothing about it -- drawn by the same renderer a
--- server's forms go through.
-
-local function pause_spec()
-	-- Continuing is the first thing on it and the first thing a player
-	-- wants: escape does the same, but a menu whose only way back is a key
-	-- nobody was told about is a menu that traps people. button_exit closes
-	-- the form by itself, which is what continuing is.
-	--
-	-- The sound row, as official's pause menu has it ([BOX_FIXES] b): a
-	-- click cycles mute and a volume ladder; buildat.set_sound is the one
-	-- preference a game may write ("Client preferences" in
-	-- doc/client_api.txt).
-	-- **In decibels, as every volume in the tree is** ([VOLUME_LAW])
-	local mute, db = buildat.get_sound()
-	local sound = mute and "Sound: muted" or
-			(db <= -33 and "Sound: off" or
-			string.format("Sound: %d dB", db))
-	return "size[6,5.8]" ..
-			"label[0.2,0.2;Paused]" ..
-			"button_exit[0.4,1.0;5.2,0.8;continue;Continue playing]" ..
-			"button[0.4,2.1;5.2,0.8;keys;Key bindings]" ..
-			"button[0.4,3.2;5.2,0.8;sound;" .. sound .. "]" ..
-			"button[0.4,4.3;5.2,0.8;leave;Leave the game]"
-end
-
--- Each click: muted -> 0 dB, then down the ladder in 6 dB steps, then
--- muted again. Six clicks round rather than eleven, a pause menu being
--- somewhere a player passes through; the settings screen has every step.
--- On keys rather than a local of its own: this file is at Lua's 200.
-keys.cycle_sound = function()
-	local mute, db = buildat.get_sound()
-	if mute then
-		buildat.set_sound(false, 0)
-	elseif db > -30 then
-		buildat.set_sound(false, math.max(-30, db - 6))
-	else
-		buildat.set_sound(true, 0)
+-- The pause menu, main/pause.lua; its key binding editor is keys.lua's, the
+-- same screen the launcher's settings draw
+local open_pause_menu = (function(ok, err, m)
+	if not ok or type(m) ~= "function" then
+		error("vanilla: could not load pause.lua: " .. tostring(err))
 	end
-end
-
-local menu_fields
-
-menu_fields = function(fields)
-	if fields.keys then
-		-- The editor, the same screen the launcher's settings draw; the
-		-- pause menu comes back when it is left
-		luanti.close_form()
-		-- The mouse on the screen for the editor, and back in the world
-		-- when the pause menu returns (its own form takes it again)
-		set_mouse_in_world(false, "the key bindings")
-		keys.draw(function()
-			set_mouse_in_world(true, "the key bindings closed")
-			luanti.show_local_form(pause_spec(), menu_fields)
-		end)
-	elseif fields.sound then
-		keys.cycle_sound()
-		luanti.show_local_form(pause_spec(), menu_fields)
-	elseif fields.back then
-		luanti.show_local_form(pause_spec(), menu_fields)
-	elseif fields.leave then
-		buildat.leave()
-	end
-end
-
-local function open_pause_menu()
-	luanti.show_local_form(pause_spec(), menu_fields)
-end
+	return m
+end)(buildat.run_script_file("main/pause.lua"))({key_bindings = keys.draw})
 
 --
 -- Pointing at a node, and digging it

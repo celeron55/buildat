@@ -26,7 +26,7 @@ rm -rf "../user/games/vanilla/saves/$save"
 trap 'pkill -INT -x buildat_server 2>/dev/null; true' EXIT
 BUILDAT_LUANTI_GAME="${GAME:-mineclone2}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/object_collide.lua" \
-	timeout 300 bin/buildat_server -m ../games/vanilla -D ../user -P 29791 \
+	timeout 300 bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P 29791 \
 	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 280); do
 	grep -aq "collidecheck: done" "$out/srv.log" 2>/dev/null && break

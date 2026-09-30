@@ -30,7 +30,7 @@ PY
 rm -rf "../user/games/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/camera.lua" \
-	bin/buildat_server -m ../games/vanilla -D ../user -P 29784 \
+	bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P 29784 \
 	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break

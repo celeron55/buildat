@@ -21,6 +21,7 @@
 #include "replicate/api.h"
 #include "client_file/api.h"
 #include "storage/api.h"
+#include "accounts/api.h"
 #include <cstdlib>
 #include <sys/stat.h>
 #include <ctime>
@@ -116,6 +117,21 @@ struct Module: public interface::Module
 	// and by no later one: vanilla's client sends that packet more than
 	// once, and a repeat is not a user asking twice
 	bool m_launched_param_save = false;
+	// [VANILLA_PUBLIC] 1: a server the launcher did not start is public. A
+	// client joins through builtin/accounts first, the worlds and ContentDB
+	// are an admin's, and the server's imports and settings nobody's.
+	bool m_public = false;
+	// The world running, or starting
+	ss_ m_world_name;
+	// [VANILLA_PUBLIC] 5: a switch to another world, which is a restart
+	// when this reaches zero: the time left, in seconds, or below 0 for none
+	float m_restart_in = -1;
+	// The exit status that asks util/serve_latest_release.sh to start the
+	// server again at once
+	static const int RESTART_STATUS = 20;
+	// Who has joined, by the account name their player has
+	std::map<network::PeerInfo::Id, ss_> m_names;
+	std::set<network::PeerInfo::Id> m_join_sent;
 
 	void init()
 	{
@@ -168,6 +184,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:drop"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
+		m_server->sub_event(this, Event::t("accounts:login"));
+		m_server->sub_event(this, Event::t("accounts:privs"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -221,6 +239,8 @@ struct Module: public interface::Module
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:where", on_where,
 				network::Packet)
+		EVENT_TYPEN("accounts:login", on_accounts_login, accounts::Login)
+		EVENT_TYPEN("accounts:privs", on_accounts_privs, accounts::Login)
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
 				network::OldClient)
 	}
@@ -242,6 +262,11 @@ struct Module: public interface::Module
 	// choosing one there is the shape this ends up as.
 	ss_ player_name_of(network::PeerInfo::Id peer)
 	{
+		// A public server's players are its accounts ([VANILLA_PUBLIC] 3)
+		if(m_public){
+			auto it = m_names.find(peer);
+			return it != m_names.end() ? it->second : "client"+itos(peer);
+		}
 		const char *name = getenv("BUILDAT_LUANTI_NAME");
 		if(name == nullptr || name[0] == '\0')
 			return "client"+itos(peer);
@@ -261,6 +286,172 @@ struct Module: public interface::Module
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->remove_player(player_name_of(old_client.info.id));
 		});
+		m_names.erase(old_client.info.id);
+		m_join_sent.erase(old_client.info.id);
+	}
+
+	// Public mode ([VANILLA_PUBLIC])
+
+	// A save a world may be: not _server, which is builtin/accounts', nor
+	// any other name beginning with _
+	static bool is_world_name(const ss_ &name)
+	{
+		return !name.empty() && name[0] != '_';
+	}
+
+	bool is_admin(network::PeerInfo::Id peer)
+	{
+		auto it = m_names.find(peer);
+		if(it == m_names.end())
+			return false;
+		bool admin = false;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			admin = i->is_admin(it->second);
+		});
+		return admin;
+	}
+
+	// What the world menu may do: anything on the launcher's server, and an
+	// admin's on a public one
+	bool may_manage(network::PeerInfo::Id peer)
+	{
+		if(!m_public || is_admin(peer))
+			return true;
+		menu_error(peer, "Only an admin manages this server's worlds");
+		return false;
+	}
+
+	// The launcher's server's alone: the server's own disk and settings
+	bool local_only(network::PeerInfo::Id peer)
+	{
+		if(!m_public)
+			return true;
+		menu_error(peer, "Not on a public server");
+		return false;
+	}
+
+	// [VANILLA_PUBLIC] 5: the world a public server runs, which an admin
+	// chose and it starts at boot
+	ss_ public_world_file()
+	{
+		return m_server->get_config().get<ss_>("user_path")+"/games/"+
+				m_server->get_game_id()+"/public_world";
+	}
+
+	ss_ read_public_world()
+	{
+		std::ifstream f(public_world_file());
+		ss_ name;
+		std::getline(f, name);
+		return is_world_name(name) ? name : "";
+	}
+
+	void write_public_world(const ss_ &name)
+	{
+		interface::fs::create_directories(
+				interface::fs::strip_file_name(public_world_file()));
+		std::ofstream f(public_world_file());
+		f<<name<<"\n";
+	}
+
+	// Another world, by restarting: everyone is told, the choice is kept
+	// for the next start, and the server exits with RESTART_STATUS, which
+	// the script that runs it takes as start again at once
+	void switch_world(const ss_ &name, network::PeerInfo::Id by)
+	{
+		if(name == m_world_name){
+			menu_message(by, name+" is the world running");
+			return;
+		}
+		write_public_world(name);
+		log_i(MODULE, "%s switches the world to %s", cs(m_names[by]), cs(name));
+		if(m_scene){
+			luanti::access(m_server, [&](luanti::Interface *i){
+				i->chat_send_all("The server switches to the world "+name+
+						": join again in a moment");
+			});
+		}
+		// A moment for that to reach everyone before the connections go
+		m_restart_in = 1.5f;
+	}
+
+	// A path on the server, as a message says it: the launcher's own user
+	// may be told where, and a public server's users are not
+	ss_ where(const ss_ &path)
+	{
+		return m_public ? ss_("(on the server)") : path;
+	}
+
+	// A player's packets are a joined player's
+	bool joined(network::PeerInfo::Id peer)
+	{
+		return !m_public || m_names.count(peer);
+	}
+
+	// In through the join: the world when there is one; else the world
+	// menu for an admin, and for anyone else a wait until an admin has
+	// chosen one
+	void on_accounts_login(const accounts::Login &login)
+	{
+		if(!m_public)
+			return;
+		m_names[login.peer] = login.name;
+		if(m_scene){
+			show_world_to(login.peer);
+			return;
+		}
+		m_waiting_peers.push_back(login.peer);
+		if(is_admin(login.peer)){
+			m_shown_menu.insert(login.peer);
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(login.peer, "core:run_script",
+						"buildat.run_script_file(\"main/menu.lua\")");
+			});
+			return;
+		}
+		sv_<ss_> values{"No world is running on this server yet: an admin "
+				"chooses one. You are in as soon as they have."};
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(values);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(login.peer, "main:join_wait", os.str());
+		});
+	}
+
+	// What the client shows of the server's: whether it is a public one,
+	// whether its user is an admin, the world running, and whether its user
+	// is the launcher's own -- the pause menu's pages
+	void send_account(network::PeerInfo::Id peer)
+	{
+		bool is_local = false;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			is_local = i->is_local(peer);
+		});
+		sv_<ss_> values{m_public ? "1" : "0", is_admin(peer) ? "1" : "0",
+				m_world_name, is_local ? "1" : "0"};
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(values);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "main:account", os.str());
+		});
+	}
+
+	// A server admin has every privilege in the world ([VANILLA_PUBLIC] 3)
+	void on_accounts_privs(const accounts::Login &login)
+	{
+		send_account(login.peer);
+		if(!m_public || !m_scene || !m_shown_world.count(login.peer))
+			return;
+		const bool admin = is_admin(login.peer);
+		luanti::access(m_server, [&](luanti::Interface *i){
+			i->set_admin(login.name, admin);
+		});
 	}
 
 	// Where a client says its player is, five times a second each. Kept
@@ -277,6 +468,8 @@ struct Module: public interface::Module
 	// src/server/state.cpp coalesces for the same reason.
 	void on_where(const network::Packet &packet)
 	{
+		if(!joined(packet.sender))
+			return;
 		Where w;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -315,6 +508,11 @@ struct Module: public interface::Module
 	// this is for; thirty would be worse than what it replaced.
 	void on_tick(const interface::TickEvent &event)
 	{
+		if(m_restart_in >= 0){
+			m_restart_in -= event.dtime;
+			if(m_restart_in < 0)
+				m_server->shutdown(RESTART_STATUS, "switching the world");
+		}
 		poll_contentdb();
 		m_where_timer += event.dtime;
 		if(m_where_timer < 0.2f)
@@ -344,6 +542,8 @@ struct Module: public interface::Module
 	// which is what Luanti's own TOSERVER_DAMAGE is worth as well.
 	void on_fell(const network::Packet &packet)
 	{
+		if(!joined(packet.sender))
+			return;
 		double speed = 0;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -367,6 +567,8 @@ struct Module: public interface::Module
 	// everyone.
 	void on_chat(const network::Packet &packet)
 	{
+		if(!joined(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -389,6 +591,8 @@ struct Module: public interface::Module
 	// the module about.
 	void on_wield(const network::Packet &packet)
 	{
+		if(!joined(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -412,6 +616,8 @@ struct Module: public interface::Module
 	// all of them, which is what Luanti's Q and Ctrl-Q are.
 	void on_drop(const network::Packet &packet)
 	{
+		if(!joined(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -437,6 +643,8 @@ struct Module: public interface::Module
 	// callback around a dig live.
 	void on_dig(const network::Packet &packet)
 	{
+		if(!joined(packet.sender))
+			return;
 		pv::Vector3DInt32 voxel_p;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -461,6 +669,8 @@ struct Module: public interface::Module
 	// -- and main:dig is what it sends when it is done.
 	void on_dig_start(const network::Packet &packet)
 	{
+		if(!joined(packet.sender))
+			return;
 		pv::Vector3DInt32 voxel_p;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -483,6 +693,8 @@ struct Module: public interface::Module
 	// delay while it is held.
 	void on_punch_object(const network::Packet &packet)
 	{
+		if(!joined(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -510,6 +722,8 @@ struct Module: public interface::Module
 	// which is where a node goes.
 	void on_place(const network::Packet &packet)
 	{
+		if(!joined(packet.sender))
+			return;
 		pv::Vector3DInt32 under, above;
 		// Whether the player was holding the key that means "build against
 		// this rather than use it"; see place_node() in luanti/api.h
@@ -543,7 +757,21 @@ struct Module: public interface::Module
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
+		// A public server's client joins first ([VANILLA_PUBLIC] 2), and
+		// what it is shown after is on_accounts_login's
+		if(m_public && !m_names.count(event.recipient)){
+			if(m_join_sent.insert(event.recipient).second){
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->send(event.recipient, "core:run_script",
+							"buildat.run_script_file(\"main/join.lua\")");
+				});
+			}
+			return;
+		}
 		if(!m_scene){
+			// Waiting for an admin to choose a world
+			if(m_public && !is_admin(event.recipient))
+				return;
 			if(!m_shown_menu.insert(event.recipient).second)
 				return;
 			m_waiting_peers.push_back(event.recipient);
@@ -589,6 +817,8 @@ struct Module: public interface::Module
 	// array of strings can carry.
 	void on_get_saves(const network::Packet &packet)
 	{
+		if(!may_manage(packet.sender))
+			return;
 		// **A launch that named a save opens it and never draws a menu**
 		// ([LAUNCH_WORLD]: a save opened through ctx.launch's params).
 		// The launcher hands "save=<name>" to the server's -u, which is
@@ -628,6 +858,14 @@ struct Module: public interface::Module
 				});
 			}
 		}
+		// A public server's menu has no imports and no local settings, and
+		// over a running world it goes back to it ([VANILLA_PUBLIC] 5)
+		if(m_public){
+			const ss_ menu = m_starting ? "public_running" : "public";
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(packet.sender, "main:menu", menu);
+			});
+		}
 		sv_<ss_> flat;
 		sv_<ss_> saves;
 		storage::access(m_server, [&](storage::Interface *istorage){
@@ -637,8 +875,10 @@ struct Module: public interface::Module
 					[](const storage::SaveInfo &a, const storage::SaveInfo &b){
 				return a.modified_us > b.modified_us;
 			});
+			// _server is builtin/accounts', and _ is not a world's
 			for(const storage::SaveInfo &info : infos)
-				saves.push_back(info.name);
+				if(!info.name.empty() && info.name[0] != '_')
+					saves.push_back(info.name);
 		});
 		flat.push_back(itos(saves.size()));
 		for(const ss_ &name : saves){
@@ -714,6 +954,8 @@ struct Module: public interface::Module
 	// keys; the size the directory's.
 	void on_save_info(const network::Packet &packet)
 	{
+		if(!may_manage(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -726,6 +968,8 @@ struct Module: public interface::Module
 		if(values.empty())
 			return;
 		const ss_ name = values[0];
+		if(!is_world_name(name))
+			return;
 		sv_<ss_> flat{"name", name};
 		storage::access(m_server, [&](storage::Interface *istorage){
 			storage::Save *save = istorage->open(name);
@@ -821,6 +1065,8 @@ struct Module: public interface::Module
 	// save's world.mt, which core.settings reads when the world loads
 	void on_set_world_flags(const network::Packet &packet)
 	{
+		if(!may_manage(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -830,7 +1076,7 @@ struct Module: public interface::Module
 			log_w(MODULE, "main:set_world_flags: %s", e.what());
 			return;
 		}
-		if(values.size() < 3)
+		if(values.size() < 3 || !is_world_name(values[0]))
 			return;
 		ss_ path;
 		storage::access(m_server, [&](storage::Interface *istorage){
@@ -855,6 +1101,8 @@ struct Module: public interface::Module
 	// <date>, not removed; the list is sent again
 	void on_delete(const network::Packet &packet)
 	{
+		if(!may_manage(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -864,8 +1112,13 @@ struct Module: public interface::Module
 			log_w(MODULE, "main:delete: %s", e.what());
 			return;
 		}
-		if(values.empty())
+		if(values.empty() || !is_world_name(values[0]))
 			return;
+		if(m_starting && values[0] == m_world_name){
+			menu_error(packet.sender, "The world that is running is not "
+					"deleted");
+			return;
+		}
 		ss_ path;
 		storage::access(m_server, [&](storage::Interface *istorage){
 			storage::Save *save = istorage->open(values[0]);
@@ -885,7 +1138,8 @@ struct Module: public interface::Module
 		strftime(date, sizeof date, "%Y-%m-%d_%H%M%S", localtime(&now));
 		const ss_ to = trash+"/"+values[0]+"-"+date;
 		if(rename(path.c_str(), to.c_str()) != 0){
-			menu_error(packet.sender, "Could not move "+path+" to "+to);
+			menu_error(packet.sender, "Could not move "+where(path)+" to "+
+					where(to));
 			return;
 		}
 		log_i(MODULE, "Save %s moved to %s", cs(values[0]), cs(to));
@@ -1104,7 +1358,8 @@ struct Module: public interface::Module
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
-			sv_<ss_> list = read_import_paths();
+			// A public server's import paths are nobody's business
+			sv_<ss_> list = m_public ? sv_<ss_>() : read_import_paths();
 			ss_ mode = read_render_mode();
 			list.push_back("render_mode="+(mode.empty() ? ss_("pbr") : mode));
 			list.push_back("view_range="+read_view_range());
@@ -1237,6 +1492,8 @@ struct Module: public interface::Module
 
 	void on_contentdb_query(const network::Packet &packet)
 	{
+		if(!may_manage(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -1255,6 +1512,8 @@ struct Module: public interface::Module
 
 	void on_contentdb_install(const network::Packet &packet)
 	{
+		if(!may_manage(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -1279,7 +1538,7 @@ struct Module: public interface::Module
 		const ss_ to = luanti_path()+"/games/"+name;
 		if(interface::fs::path_exists(to)){
 			menu_error(packet.sender, name+" is already installed. Remove "+
-					to+" yourself if you mean to replace it.");
+					where(to)+" yourself if you mean to replace it.");
 			return;
 		}
 		Job *job = new Job();
@@ -1372,7 +1631,7 @@ struct Module: public interface::Module
 			const ss_ from = tops == 1 ? job->into_dir+"/"+top : job->into_dir;
 			if(rename(from.c_str(), to.c_str()) != 0){
 				menu_error(job->peer, "Installing "+job->name+" failed: cannot "
-						"rename "+from);
+						"rename "+where(from));
 				continue;
 			}
 			interface::fs::remove_all(job->into_dir);
@@ -1457,6 +1716,8 @@ struct Module: public interface::Module
 	// removes, and sends the result
 	void on_set_settings(const network::Packet &packet)
 	{
+		if(!local_only(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -1671,6 +1932,8 @@ struct Module: public interface::Module
 	// second over two hundred and fifty directories.
 	void on_get_imports(const network::Packet &packet)
 	{
+		if(!local_only(packet.sender))
+			return;
 		sv_<ss_> games;
 		sv_<ss_> worlds;
 		sv_<ss_> installed = list_games();
@@ -1822,6 +2085,8 @@ struct Module: public interface::Module
 	// a recursive delete under user/ driven by a menu.
 	void on_import_game(const network::Packet &packet)
 	{
+		if(!local_only(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -1872,6 +2137,8 @@ struct Module: public interface::Module
 	// picking and the name.
 	void on_import_world(const network::Packet &packet)
 	{
+		if(!local_only(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -1929,6 +2196,8 @@ struct Module: public interface::Module
 	// opening the old one.
 	void on_open(const network::Packet &packet)
 	{
+		if(!may_manage(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -1941,11 +2210,18 @@ struct Module: public interface::Module
 		if(values.empty())
 			return;
 		ss_ name = values[0];
+		if(!is_world_name(name))
+			return;
 		ss_ gameid = gameid_of_save(name);
 		if(gameid == ""){
 			menu_error(packet.sender, "The save "+name+" does not say which"
 					" game it needs");
 			return;
+		}
+		if(m_public && m_starting){
+			if(name == m_world_name)
+				return menu_message(packet.sender, name+" is running already");
+			return switch_world(name, packet.sender);
 		}
 		start_world(gameid, name, packet.sender);
 	}
@@ -1965,6 +2241,8 @@ struct Module: public interface::Module
 
 	void on_create(const network::Packet &packet)
 	{
+		if(!may_manage(packet.sender))
+			return;
 		sv_<ss_> values;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
@@ -1977,9 +2255,9 @@ struct Module: public interface::Module
 		if(values.size() < 2)
 			return;
 		ss_ name = values[0], gameid = values[1];
-		bool valid = false;
+		bool valid = is_world_name(name);
 		storage::access(m_server, [&](storage::Interface *istorage){
-			valid = istorage->valid_name(name);
+			valid = valid && istorage->valid_name(name);
 		});
 		if(!valid){
 			menu_error(packet.sender, "\""+name+"\" is not a name a save can"
@@ -2027,6 +2305,13 @@ struct Module: public interface::Module
 		});
 		if(!save){
 			menu_error(packet.sender, "There is already a save called "+name);
+			return;
+		}
+		// While a world runs, one world at a time: made, and run by
+		// switching to it
+		if(m_public && m_starting){
+			menu_message(packet.sender, "The world "+name+" was made: run it "
+					"to switch to it");
 			return;
 		}
 		start_world(gameid, name, packet.sender);
@@ -2087,8 +2372,12 @@ struct Module: public interface::Module
 		// the scene brings voxelworld's registry, megabytes that over a
 		// slow link held the placement -- and the client's input -- for
 		// minutes ([NET_SIM]'s link cell)
+		const bool admin = m_public && is_admin(peer);
+		send_account(peer);
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->add_player(player_name_of(peer), peer);
+			if(admin)
+				i->set_admin(player_name_of(peer), true);
 		});
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
 			ireplicate->assign_scene_to_peer(m_scene, peer);
@@ -2177,6 +2466,10 @@ struct Module: public interface::Module
 	// runs what the environment says, which is what every check here does.
 	void on_start()
 	{
+		m_public = launch_param("launcher") != "1";
+		if(m_public)
+			log_i(MODULE, "A public server: clients join by account, and the "
+					"worlds are the admins'");
 		// BUILDAT_LUANTI_FETCH_ONCE: one ContentDB listing at start, its
 		// outcome logged and sent to nobody -- the smoke's way of running
 		// http_get, whose std::call_once died on the box through a
@@ -2243,7 +2536,13 @@ struct Module: public interface::Module
 			launched_game = "";
 		if(!(wanted_game && wanted_game[0]) && !launched_game.empty())
 			wanted_game = launched_game.c_str();
-		if(wanted_game && wanted_game[0]){
+		if(m_public && !read_public_world().empty() &&
+				!gameid_of_save(read_public_world()).empty()){
+			// The world an admin chose ([VANILLA_PUBLIC] 5), over the
+			// environment, which is then the first boot's
+			world_name = read_public_world();
+			gameid = gameid_of_save(world_name);
+		} else if(wanted_game && wanted_game[0]){
 			gameid = wanted_game;
 			// The save is named after the game unless something says
 			// otherwise, which is what running two imports of the same game
@@ -2266,7 +2565,8 @@ struct Module: public interface::Module
 				return;
 			}
 		} else {
-			// Whoever connects picks; see on_get_saves()
+			// Whoever connects picks; see on_get_saves(). On a public
+			// server that is an admin.
 			log_i(MODULE, "Waiting for a save to be chosen");
 			return;
 		}
@@ -2294,7 +2594,13 @@ struct Module: public interface::Module
 		ss_ game_path = find_game(gameid);
 		if(game_path.empty()){
 			ss_ message = "World "+world_name+" wants game "+gameid+
-					", which is not in "+luanti_path()+"/games";
+					", which is not in "+where(luanti_path()+"/games");
+			// A public server waits for an admin rather than exiting,
+			// which its runner would take as a crash to restart
+			if(peer == 0 && m_public){
+				log_e(MODULE, "%s; waiting for an admin", cs(message));
+				return;
+			}
 			if(peer == 0){
 				m_server->shutdown(1, message);
 				return;
@@ -2303,6 +2609,9 @@ struct Module: public interface::Module
 			return;
 		}
 		m_starting = true;
+		m_world_name = world_name;
+		if(m_public)
+			write_public_world(world_name);
 
 		// The world runs in a buildat save and never in a Luanti world
 		// directory. Nothing here writes to user/luanti at any point: a
@@ -2401,6 +2710,10 @@ struct Module: public interface::Module
 				i->import_world_settings(import_from, save);
 				i->import_world(import_from);
 			}
+			// No singleplayer: its privileges are everyone's
+			// ([VANILLA_PUBLIC] 3)
+			if(m_public)
+				i->load_lua("core.__public = true", "vanilla_public");
 			i->run_game(game_path, save);
 		});
 	}

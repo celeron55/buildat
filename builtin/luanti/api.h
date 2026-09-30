@@ -151,6 +151,12 @@ namespace luanti
 		// one. The angles are radians, horizontal measured the way
 		// core.get_look_horizontal() means it.
 		virtual void add_player(const ss_ &name, size_t peer) = 0;
+		// A server admin has every privilege ([VANILLA_PUBLIC] 3); said
+		// again whenever that changes. After luanti:game_loaded.
+		virtual void set_admin(const ss_ &name, bool admin) = 0;
+		// A line to everyone's chat, the server's own (core.chat_send_all).
+		// After luanti:game_loaded.
+		virtual void chat_send_all(const ss_ &text) = 0;
 		virtual void remove_player(const ss_ &name) = 0;
 		// controls is what the player is holding down, in Luanti's own bit
 		// order -- PlayerControl::getKeysPressed(), which is what

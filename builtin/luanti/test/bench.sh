@@ -14,7 +14,7 @@ trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; kill "$cl
 port=$(( 29500 + (RANDOM % 90) ))
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_bench \
 	BUILDAT_LUANTI_LUA="$me/bench.lua" \
-	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" 2>&1 \
+	bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/srv.log" &
 for i in $(seq 1 200); do
 	grep -q "Mods loaded" "$tmp/srv.log" 2>/dev/null && break

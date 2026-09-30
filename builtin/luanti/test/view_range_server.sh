@@ -35,7 +35,7 @@ run_one() {
 		echo "$settings"; } > "$out/fixture_$name.lua"
 	BUILDAT_LUANTI_GAME="${GAME:-devtest}" \
 		BUILDAT_LUANTI_SAVE="$save" BUILDAT_LUANTI_LUA="$out/fixture_$name.lua" \
-		timeout 300 bin/buildat_server -m ../games/vanilla -D ../user \
+		timeout 300 bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user \
 		-P 29822 -l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' \
 		> "$out/srv_$name.log" &
 	for i in $(seq 1 300); do

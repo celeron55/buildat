@@ -231,7 +231,7 @@ if [ ! -f "$here/cache/rccpp_build/main.so" ] ||
 		"$here/cache/rccpp_build/main.so" ]; then
 	echo "warming the module cache (a cold compile is seven seconds)"
 	BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=zz_warm \
-		bin/buildat_server -m ../games/vanilla -D ../user -P 31877 -l 3 \
+		bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P 31877 -l 3 \
 		> "$out/warm.log" 2>&1 &
 	warm=$!
 	for i in $(seq 1 120); do
@@ -1332,7 +1332,7 @@ save=zza_launch_world_test
 rm -rf "$here/user/games/vanilla/saves/$save"
 port=31879
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE="$save" \
-	bin/buildat_server -m ../games/vanilla -D ../user -P "$port" -l 3 \
+	bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P "$port" -l 3 \
 	> "$out/save_server.log" 2>&1 &
 maker=$!
 # What this run is for is the save's own record of which game it needs,

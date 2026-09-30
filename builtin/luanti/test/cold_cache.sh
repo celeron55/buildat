@@ -28,7 +28,7 @@ trap 'pkill -INT -x buildat_server 2>/dev/null; true' EXIT
 echo 'core.settings:set("time_speed", "0")' > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE=buildat_test_cold \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	timeout 400 bin/buildat_server -m ../games/vanilla -D ../user -P 29825 \
+	timeout 400 bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P 29825 \
 	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 300); do
 	grep -aq "Mods loaded" "$out/srv.log" 2>/dev/null && break

@@ -94,7 +94,7 @@ end)
 LUA
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -m ../games/vanilla -D ../user -P 29778 \
+	bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P 29778 \
 	-l "${LOG_LEVEL:-3}" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break

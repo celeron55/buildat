@@ -3008,7 +3008,10 @@ struct CApp: public App, public magic::Application
 				continue;
 			const ss_ dir = games+"/"+g.name+"/saves";
 			for(const auto &n : interface::fs::list_directory(dir)){
-				if(!n.is_directory || !valid_game_name(n.name))
+				// _server is the server's accounts (builtin/accounts), and a
+				// save beginning with _ is none of the player's
+				if(!n.is_directory || !valid_game_name(n.name) ||
+						n.name[0] == '_')
 					continue;
 				const ss_ db = dir+"/"+n.name+"/save.sqlite";
 				if(!interface::fs::path_exists(db))

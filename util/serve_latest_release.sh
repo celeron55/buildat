@@ -20,7 +20,9 @@
 # A new release is downloaded and unpacked, every running server is
 # stopped with SIGTERM (a game saves on it), and each is started on the new
 # one. A server that exits is started again by itself. Every version but
-# the running one and the one before it is deleted.
+# the running one and the one before it is deleted. A server that exits with
+# status 20 is a game's own restart (games/vanilla switching its world), and
+# is started again at once.
 #
 # **A rollback** is by hand, with this script stopped: run the version
 # before from its directory,
@@ -228,9 +230,16 @@ while true; do
 				{ [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; }; then
 			if [ -n "$pid" ]; then
 				wait "$pid" 2>/dev/null
-				say "${games[$i]} on port ${ports[$i]} exited ($?); starting it again in 10 s"
+				status=$?
 				pids[$i]=""
-				sleep 10
+				# 20 is a game's own restart, such as games/vanilla
+				# switching its world: again at once
+				if [ "$status" = 20 ]; then
+					say "${games[$i]} on port ${ports[$i]} restarts itself"
+				else
+					say "${games[$i]} on port ${ports[$i]} exited ($status); starting it again in 10 s"
+					sleep 10
+				fi
 			fi
 			start "$i"
 		fi

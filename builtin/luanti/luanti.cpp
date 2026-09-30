@@ -8659,6 +8659,18 @@ struct Module: public interface::Module, public luanti::Interface
 		node_action("core.__add_player(\""+lua_quoted(name)+"\") return true");
 	}
 
+	void set_admin(const ss_ &name, bool admin)
+	{
+		node_action("core.__set_admin(\""+lua_quoted(name)+"\", "+
+				(admin ? "true" : "false")+") return true");
+	}
+
+	void chat_send_all(const ss_ &text)
+	{
+		node_action("core.chat_send_all(\""+lua_quoted(text)+
+				"\") return true");
+	}
+
 	void remove_player(const ss_ &name)
 	{
 		node_action("core.__remove_player(\""+lua_quoted(name)+

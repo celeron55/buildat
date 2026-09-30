@@ -1050,7 +1050,16 @@ end
 -- runs the on_chat_message callbacks and stops at the first that says it
 -- took the line -- the vendored builtin registers the one that runs a "/"
 -- command among them -- and what nobody takes is said to everybody.
+-- A public server's passwords are its accounts' ([VANILLA_PUBLIC] 3)
+local ACCOUNT_COMMANDS = {setpassword = true, clearpassword = true}
+
 function core.__chat_message(name, message)
+	local command = message:match("^/(%S+)")
+	if core.__public and command and ACCOUNT_COMMANDS[command] then
+		core.chat_send_player(name, "Passwords are this server's accounts': " ..
+				"change yours in the menu")
+		return true
+	end
 	for _, cb in ipairs(core.registered_on_chat_messages or {}) do
 		local ok, handled = pcall(cb, name, message)
 		if not ok then
@@ -1982,6 +1991,11 @@ end
 -- default_privs and nothing more. A world opened through the launcher is
 -- somebody's own world, so this is true unless the world says otherwise.
 function core.is_singleplayer()
+	-- A public server's is not ([VANILLA_PUBLIC] 3): games/vanilla sets
+	-- core.__public before the game loads
+	if core.__public then
+		return false
+	end
 	return core.settings:get_bool("singleplayer", true)
 end
 
@@ -5649,8 +5663,17 @@ function core.get_server_uptime()
 	return (core.get_us_time() - up_since_us) / 1000000
 end
 
+-- The server's admins ([VANILLA_PUBLIC] 3): every privilege, in every world.
+-- games/vanilla says who they are, from builtin/accounts, and again when
+-- that changes.
+core.__admins = {}
+function core.__set_admin(name, on)
+	core.__admins[name] = on and true or nil
+	core.__send_privs(name)
+end
+
 function core.get_player_privs(name)
-	if core.is_singleplayer() then
+	if core.is_singleplayer() or core.__admins[name] then
 		local all = {}
 		for priv, _ in pairs(core.registered_privileges or {}) do
 			all[priv] = true

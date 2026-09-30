@@ -189,7 +189,7 @@ smoke_test_wine() {
 	rm -f "$unpacked"/cache/rccpp_build/client_file*
 	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://Z:$dir/nowhere" \
-		"$wine" bin/buildat_server.exe -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
+		"$wine" bin/buildat_server.exe -u launcher=1 -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
 	wait_for_vanilla "$dir/srv.log" "$srv" "smoke test under Wine" || {
@@ -365,7 +365,7 @@ smoke_test_wine_luanti() {
 	export WINEDEBUG=-all WINEPREFIX="$dir/wine"
 	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://Z:$dir/nowhere" \
-		"$wine" bin/buildat_server.exe -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
+		"$wine" bin/buildat_server.exe -u launcher=1 -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	# -l 4, as the full smoke: the section line it waits for is logged there
 	wait_for_vanilla "$dir/srv.log" "$srv" "luanti-only smoke under Wine" || {
@@ -398,11 +398,11 @@ prebuild_modules() {
 			wine=$(command -v wine64 || command -v wine)
 			export WINEDEBUG=-all WINEPREFIX="$stage/../wine-prebuild"
 			(cd "$stage" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
-				"$wine" bin/buildat_server.exe -m games/vanilla -P "$port" -l 3 > "$log" 2>&1) &
+				"$wine" bin/buildat_server.exe -u launcher=1 -m games/vanilla -P "$port" -l 3 > "$log" 2>&1) &
 			;;
 		*)
 			(cd "$stage" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
-				bin/buildat_server -m games/vanilla -P "$port" -l 3 > "$log" 2>&1) &
+				bin/buildat_server -u launcher=1 -m games/vanilla -P "$port" -l 3 > "$log" 2>&1) &
 			;;
 	esac
 	srv=$!
@@ -681,7 +681,7 @@ smoke_test() {
 	rm -f "$unpacked"/cache/rccpp_build/*client_file*
 	(cd "$unpacked" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://$dir/nowhere" \
-		bin/buildat_server -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
+		bin/buildat_server -u launcher=1 -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
 	# The server compiles every module it loads through the compiler

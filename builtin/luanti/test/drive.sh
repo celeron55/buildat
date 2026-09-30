@@ -93,7 +93,7 @@ else
 { echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; echo "rawset(_G, \"FUZZ_DRIVEN\", true)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -m "../games/$GAME_DIR" -D ../user -P "$port" \
+	bin/buildat_server -u launcher=1 -m "../games/$GAME_DIR" -D ../user -P "$port" \
 	-l "${LOG_LEVEL:-4}" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do
