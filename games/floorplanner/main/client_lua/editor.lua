@@ -216,6 +216,9 @@ local UNLIT = magic.Color(1, 1, 1, 0)
 
 -- A triangle facing n: Urho3D's front faces are clockwise as seen, which in
 -- its left-handed space is cross(b - a, c - a) pointing at the viewer
+-- The lists tri() gathers into, by the part they are for: a lookup here
+-- rather than a field of the part, which an engine geometry would refuse
+local TRI_LISTS = {}
 local function tri(g, a, b, c, n, col, tint)
 	local ux, uy, uz = b.x - a.x, b.y - a.y, b.z - a.z
 	local vx, vy, vz = c.x - a.x, c.y - a.y, c.z - a.z
@@ -231,22 +234,47 @@ local function tri(g, a, b, c, n, col, tint)
 	if type(col) == "number" then
 		row, col = col, tint or WHITE
 	end
+	-- A list being built (TRI_LISTS, handed to the engine at once by
+	-- buildat.set_triangle_geometry): 12 numbers a vertex, no call into the
+	-- engine a vertex
+	local out = TRI_LISTS[g]
+	if out then
+		local nx, ny, nz = n.x, n.y, n.z
+		local cr, cg, cb, ca = col.r, col.g, col.b, col.a
+		local k = #out
+		for _, p in ipairs({a, b, c}) do
+			out[k + 1], out[k + 2], out[k + 3] = p.x, p.y, p.z
+			out[k + 4], out[k + 5], out[k + 6] = nx, ny, nz
+			out[k + 7], out[k + 8], out[k + 9], out[k + 10] = cr, cg, cb, ca
+			out[k + 11], out[k + 12] = row, 0
+			k = k + 12
+		end
+		return
+	end
+	-- An engine geometry, a call a vertex (plain {x, y, z} tables made
+	-- into the engine's vectors here)
 	local uv = magic.Vector2(row, 0)
+	local nv = magic.Vector3(n.x, n.y, n.z)
 	for _, v in ipairs({a, b, c}) do
-		g:DefineVertex(v)
-		g:DefineNormal(n)
+		g:DefineVertex(magic.Vector3(v.x, v.y, v.z))
+		g:DefineNormal(nv)
 		g:DefineColor(col)
 		g:DefineTexCoord(uv)
 	end
+end
+
+-- A point or a direction as tri() takes it: a plain table, which costs
+-- nothing to make or read where an engine vector is a sandbox object
+local function V3(x, y, z)
+	return {x = x, y = y, z = z}
 end
 
 -- A flat polygon at height y (mm) facing n, as one geometry
 local function flat_polygon(g, pts, y, n, col)
 	for _, t in ipairs(geom.triangulate(pts)) do
 		local a, b, c = pts[t[1]], pts[t[2]], pts[t[3]]
-		tri(g, magic.Vector3(W(a[1]), W(y), W(a[2])),
-				magic.Vector3(W(b[1]), W(y), W(b[2])),
-				magic.Vector3(W(c[1]), W(y), W(c[2])), n, col)
+		tri(g, V3(W(a[1]), W(y), W(a[2])), V3(W(b[1]), W(y), W(b[2])),
+				V3(W(c[1]), W(y), W(c[2])), n, col)
 	end
 end
 
@@ -255,11 +283,11 @@ end
 local function box_geometry(g, hx, hy, hz, col, cx, cy, cz, tint)
 	cx, cy, cz = cx or 0, cy or 0, cz or 0
 	local function V(x, y, z)
-		return magic.Vector3(cx + x * hx, cy + y * hy, cz + z * hz)
+		return V3(cx + x * hx, cy + y * hy, cz + z * hz)
 	end
 	for _, f in ipairs({{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0},
 			{0, 0, 1}, {0, 0, -1}}) do
-		local n = magic.Vector3(f[1], f[2], f[3])
+		local n = V3(f[1], f[2], f[3])
 		-- Two axes across the face
 		local u = f[1] ~= 0 and {0, 1, 0} or {1, 0, 0}
 		local v = f[3] ~= 0 and {0, 1, 0} or {0, 0, 1}
@@ -276,6 +304,8 @@ local function box_geometry(g, hx, hy, hz, col, cx, cy, cz, tint)
 end
 
 local UP, DOWN = magic.Vector3(0, 1, 0), magic.Vector3(0, -1, 0)
+-- The same for tri()
+M.UP3, M.DOWN3 = V3(0, 1, 0), V3(0, -1, 0)
 
 local ground_node = scene:CreateChild("Ground")
 do
@@ -283,7 +313,7 @@ do
 	g:SetNumGeometries(1)
 	g:BeginGeometry(0, magic.TRIANGLE_LIST)
 	local r = 200000
-	flat_polygon(g, {{-r, -r}, {r, -r}, {r, r}, {-r, r}}, 0, UP,
+	flat_polygon(g, {{-r, -r}, {r, -r}, {r, r}, {-r, r}}, 0, M.UP3,
 			magic.Color(0.85, 0.85, 0.83))
 	g:Commit()
 	g:SetMaterial(0, lit_material)
@@ -1095,8 +1125,7 @@ local function build_hosted(id, it, def, e, geometry, commit)
 		node.position = magic.Vector3(W(it.x), W(it.y), W(it.z))
 		node.rotation = magic.Quaternion(0, it.yaw, 0)
 		box_geometry(g, W(def.w) / 2, W(def.h) / 2, W(5), row(def.mat))
-		g:Commit()
-		g:SetMaterial(0, lit_material)
+		commit(g, lit_material)
 		return
 	end
 	local f = it.frame
@@ -1547,24 +1576,26 @@ local function build_layout(seen_voxels, wells)
 	build_room_data()
 	build_inst_data()
 	local cut = settings().cut
+	-- A part's triangles, gathered in Lua and handed to the engine by
+	-- commit() in one call (see tri())
 	local function geometry(parent)
 		local node = parent:CreateChild("")
 		built[#built + 1] = node
-		local g = node:CreateComponent("CustomGeometry")
-		g:SetNumGeometries(1)
-		g:BeginGeometry(0, magic.TRIANGLE_LIST)
+		local g = {node = node}
+		TRI_LISTS[g] = {}
 		return g, node
 	end
 	local function commit(g, material)
-		g:Commit()
-		g:SetMaterial(0, material)
+		buildat.set_triangle_geometry(g.node, TRI_LISTS[g])
+		TRI_LISTS[g] = nil
+		g.node:GetComponent("CustomGeometry"):SetMaterial(0, material)
 	end
 	-- What the plan view shows where the cut goes through something: dark
 	-- where it is cut, lighter for what is below the cut
 	local function cap(pts, y0, y1, cut_col, low_col)
 		if y0 < cut then
 			local cg = geometry(P.caps)
-			flat_polygon(cg, pts, math.min(y1, cut) - 3, UP, y1 >= cut and
+			flat_polygon(cg, pts, math.min(y1, cut) - 3, M.UP3, y1 >= cut and
 					cut_col or low_col)
 			commit(cg, flat_material)
 		end
@@ -1572,12 +1603,12 @@ local function build_layout(seen_voxels, wells)
 
 	-- An outline extruded between y0 and y1, its faces coloured by label
 	local function extrude(g, pts, labels, y0, y1, cols, bottom)
-		flat_polygon(g, pts, y1, UP, cols.core)
+		flat_polygon(g, pts, y1, M.UP3, cols.core)
 		if bottom then
-			flat_polygon(g, pts, y0, DOWN, cols.core)
+			flat_polygon(g, pts, y0, M.DOWN3, cols.core)
 		end
 		local function v(p, y)
-			return magic.Vector3(W(p[1]), W(y), W(p[2]))
+			return V3(W(p[1]), W(y), W(p[2]))
 		end
 		for i = 1, #pts do
 			local p, q = pts[i], pts[i % #pts + 1]
@@ -1585,7 +1616,7 @@ local function build_layout(seen_voxels, wells)
 			local l = geom.len(dx, dz)
 			if l > 0.01 then
 				-- Outward of a counter-clockwise outline is to the right
-				local n = magic.Vector3(dz / l, 0, -dx / l)
+				local n = V3(dz / l, 0, -dx / l)
 				local col = cols[labels[i]]
 				tri(g, v(p, y0), v(q, y0), v(q, y1), n, col)
 				tri(g, v(p, y0), v(q, y1), v(p, y1), n, col)
@@ -1666,12 +1697,12 @@ local function build_layout(seen_voxels, wells)
 			local g = geometry(P.walls)
 			r.floor = geom.minus(r.pts, wells.floor)
 			for _, pts in ipairs(r.floor) do
-				flat_polygon(g, pts, 2, UP, row(e.ints.mat_floor))
+				flat_polygon(g, pts, 2, M.UP3, row(e.ints.mat_floor))
 			end
 			commit(g, lit_material)
 			local cg = geometry(P.overhead)
 			for _, pts in ipairs(geom.minus(r.pts, wells.ceiling)) do
-				flat_polygon(cg, pts, room_ceiling(e), DOWN,
+				flat_polygon(cg, pts, room_ceiling(e), M.DOWN3,
 						row(e.ints.mat_ceiling))
 			end
 			commit(cg, lit_material)

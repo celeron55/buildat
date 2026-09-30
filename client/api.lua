@@ -1163,6 +1163,21 @@ function buildat.safe.set_quad_geometry(safe_node, quads)
 	return __buildat_set_quad_geometry(getmetatable(safe_node).unsafe, quads)
 end
 
+-- set_triangle_geometry(node, verts): a triangle list, 12 numbers a vertex
+-- (position, normal, colour, texture coordinate), as the node's
+-- CustomGeometry; see src/lua_bindings/mesh.cpp
+function buildat.safe.set_triangle_geometry(safe_node, verts)
+	if not getmetatable(safe_node) or
+			getmetatable(safe_node).type_name ~= "Node" then
+		error("node is not a sandboxed Node instance")
+	end
+	if type(verts) ~= "table" then
+		error("verts is not a table")
+	end
+	-- Anything not a number reads as 0 in the engine (lua_tonumber)
+	return __buildat_set_triangle_geometry(getmetatable(safe_node).unsafe, verts)
+end
+
 -- set_cell_geometry(node, cells, size, r, g, b, a): a volume of cubic cells
 -- as the node's CustomGeometry; see src/lua_bindings/mesh.cpp
 function buildat.safe.set_cell_geometry(safe_node, cells, size, r, g, b, a)

@@ -764,6 +764,40 @@ void set_cell_geometry(const luabind::object &node_o,
 	cg->Commit();
 }
 
+// set_triangle_geometry(node, verts): a triangle list as the node's
+// CustomGeometry, one geometry: `verts` is a flat list of 12 numbers a
+// vertex -- position, normal, colour (r, g, b, a) and texture coordinate --
+// three vertices a triangle. What the floorplanner builds its walls and
+// objects into, in Lua, and hands over at once: a triangle defined a call
+// at a time from the sandbox was a dozen calls, and a window 10 to 20 ms
+// natively, several times that on the web (user, 2026-09-30).
+void set_triangle_geometry(const luabind::object &node_o,
+		const luabind::object &verts)
+{
+	lua_State *L = node_o.interpreter();
+	GET_TOLUA_STUFF(node, 1, Node);
+	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
+	cg->SetNumGeometries(1);
+	cg->BeginGeometry(0, TRIANGLE_LIST);
+	verts.push(L);
+	const int t = lua_gettop(L);
+	const size_t n = lua_objlen(L, t) / 12;
+	float f[12];
+	for(size_t i = 0; i < n; i++){
+		for(int k = 0; k < 12; k++){
+			lua_rawgeti(L, t, (int)(i * 12 + k + 1));
+			f[k] = (float)lua_tonumber(L, -1);
+			lua_pop(L, 1);
+		}
+		cg->DefineVertex(Vector3(f[0], f[1], f[2]));
+		cg->DefineNormal(Vector3(f[3], f[4], f[5]));
+		cg->DefineColor(Color(f[6], f[7], f[8], f[9]));
+		cg->DefineTexCoord(Vector2(f[10], f[11]));
+	}
+	lua_pop(L, 1);
+	cg->Commit();
+}
+
 // set_quad_geometry(node, quads) -> {tile, ...}: a model's quads -- a Lua
 // list of {tile=, p={12 numbers}, uv={8 numbers}} -- as the node's
 // CustomGeometry, one geometry per distinct tile in ascending tile order
@@ -830,6 +864,7 @@ void init_mesh(lua_State *L)
 	module(L)[
 			LUABIND_FUNC(set_quad_geometry),
 			LUABIND_FUNC(set_cell_geometry),
+			LUABIND_FUNC(set_triangle_geometry),
 			LUABIND_FUNC(column_heights),
 			LUABIND_FUNC(set_simple_voxel_model),
 			LUABIND_FUNC(set_8bit_voxel_geometry),
