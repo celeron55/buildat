@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "voxelworld/api.h"
+#include "storage/api.h"
 #include "network/api.h"
 #include "client_file/api.h"
 #include "replicate/api.h"
@@ -14,10 +15,12 @@
 #include "interface/voxel.h"
 #include "interface/block.h"
 #include "interface/voxel_volume.h"
+#include "interface/voxel_cereal.h"
 #include "interface/polyvox_numeric.h"
 #include "interface/polyvox_cereal.h"
 #include "interface/polyvox_std.h"
 #include "interface/os.h"
+#include <cstring>
 #include <PolyVoxCore/RawVolume.h>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
@@ -32,8 +35,15 @@
 #include <Geometry.h>
 #include <Zone.h>
 #include <deque>
+#include <mutex>
+#include <map>
 #include <algorithm>
 #define MODULE "voxelworld"
+
+// What a voxel type the game no longer registers is tinted with, so that a
+// player or a developer sees it rather than finding out the hard way. It
+// multiplies the vertex colour, which is light; see adopt_unknown_voxel().
+static const uint32_t UNKNOWN_VOXEL_TINT = 0xff60ff;
 
 using interface::Event;
 namespace magic = Urho3D;
@@ -61,6 +71,14 @@ struct ChunkBuffer
 	bool unload_if_old(int64_t timeout_us){ // True if not loaded
 		if(!volume)
 			return true;
+		// A buffer that has changes in it has nowhere to put them: what
+		// writes them out is commit(), which runs at the end of the access
+		// that made them. Dropping it here would lose whatever was written
+		// into it -- which is what happened to a caller that wrote more
+		// buffers in one access() than the limit allows. It stays until it
+		// is committed, and the limit is exceeded until then.
+		if(dirty)
+			return false;
 		if(interface::os::time_us() < last_accessed_us + timeout_us)
 			return false;
 		log_t(MODULE, "Unloading chunk " PV3I_FORMAT, PV3I_PARAMS(chunk_p));
@@ -91,6 +109,15 @@ struct Section
 	bool loaded = false;
 	bool save_enabled = false;
 	bool generated = false;
+	// The generator's own merge has been over it. generated is set when
+	// the generation is asked for; between the two, what stands in the
+	// section was put there by a write (a game's set_node past the
+	// generated world) and the generator's merge keeps it.
+	bool arrived = false;
+	// Something has changed since this section was read from the save, or it
+	// was never in one. A section is written only when this is set, which is
+	// what keeps saving a world nobody is digging in free.
+	bool modified = false;
 
 	Section(): // Needed for containers
 		chunk_size(0, 0, 0) // This is used to detect uninitialized instance
@@ -198,6 +225,15 @@ ChunkBuffer& Section::get_buffer(const pv::Vector3DInt32 &chunk_p,
 	return buf;
 }
 
+// See m_keep_loaded in CInstance: a run that never unloads anything, for the
+// reference shots. A free function because the instance and the module both
+// ask, and because it is read once per object rather than per step.
+static bool keep_loaded_wanted()
+{
+	const char *v = getenv("BUILDAT_VOXELWORLD_KEEP_LOADED");
+	return v != nullptr && v[0] != '\0' && ss_(v) != "0";
+}
+
 struct QueuedNodePhysicsUpdate
 {
 	uint node_id = 0;
@@ -246,6 +282,25 @@ struct CInstance: public voxelworld::Instance
 	int64_t m_buffer_unload_timeout = 5000000;
 	size_t m_max_buffers_loaded = 50;
 
+	// **A run that never unloads anything**, for the reference shots:
+	// BUILDAT_VOXELWORLD_KEEP_LOADED=1. The fixture forceloads the sections
+	// it will photograph, which stops those being dropped as distant -- but
+	// the buffers go anyway, on a five second timeout that does not ask
+	// whether anything wants them, so a camera coming back to a viewpoint
+	// still waits for them to be read and sent again. That wait is a hole in
+	// the picture, and a hole does not look like a missing chunk: it looks
+	// like a rendering fault.
+	//
+	// **It changes retention and nothing else.** What is ready changes; what
+	// is drawn is still bounded by the client's far clip and its fog exactly
+	// as before, so a picture taken with this on is comparable with one taken
+	// without. A mode that quietly drew more would be worse than the missing
+	// meshes. Memory is why it is not the default: a run of five viewpoints
+	// is bounded, and a session that wandered would grow without limit, which
+	// is what the timeout is for.
+	// See [KEEP_LOADED] in doc/plan/rendering_plan.md.
+	const bool m_keep_loaded = keep_loaded_wanted();
+
 	// Sections (this(y,z)=sector, sector(x)=section)
 	sm_<pv::Vector<2, int16_t>, sm_<int16_t, Section>> m_sections;
 	// Cache of last used sections (add to end, remove from beginning)
@@ -261,8 +316,11 @@ struct CInstance: public voxelworld::Instance
 	// (as a sorted array in descending node_id order)
 	std::vector<QueuedNodePhysicsUpdate> m_nodes_needing_physics_update;
 
-	// Skylight. Off unless the world asks for it; see api.h.
-	bool m_skylight_enabled = false;
+	// The light fields this world maintains, and the changes each of them
+	// has to be brought up to date after. Off unless the world asks; see
+	// set_light_maintained() in api.h.
+	static const size_t NUM_LIGHT_FIELDS = 2;
+	bool m_light_maintained[NUM_LIGHT_FIELDS] = {false, false};
 	bool m_physics_enabled;
 	// The world region in sections, so that the top of it can be found. Light
 	// enters from above that; everything outside is a barrier.
@@ -275,8 +333,98 @@ struct CInstance: public voxelworld::Instance
 		pv::Vector3DInt32 p;
 		uint8_t old_level;
 		bool was_transparent;
+		// What the voxel that was there made of its own light. A blocker
+		// wears the brightest light beside it rather than real propagated
+		// light, so its stored level does not say whether a lamp went.
+		uint8_t old_emitted;
+		// **Put here by a relight, not by an edit or by the generator.**
+		// Only a relight asks the sky column where the daylight is, and
+		// the reason is that only a relight has a whole world under it:
+		// during worldgen the column above a voxel is half made, and
+		// open_sky_from() then calls a cave open sky, seeds it at fifteen
+		// and loses the lot when the rock above arrives and the
+		// neighbourhood is zeroed together with nothing left holding
+		// light to spread back. games/voxel_lighting, 2026-09-28: the
+		// column asked at generation left 87802 voxels darker than a
+		// fresh fill, the same number at 9, 30, 60 and 90 seconds, where
+		// without it the scene reads ok ([SKY_COLUMN_CAVE]).
+		bool from_relight;
 	};
-	std::vector<SkylightSeed> m_skylight_seeds;
+	std::vector<SkylightSeed> m_light_seeds[NUM_LIGHT_FIELDS];
+
+	// The world region's own sections have not been created yet; see the
+	// constructor
+	bool m_initial_sections_pending = true;
+	// How long the first sections wait for a game to say where it wants
+	// them. A game sets its load points in its own good time -- often one
+	// event after the world is made -- and the first tick can land in
+	// between; a world too big to fill has to wait for them rather than
+	// give up on the first tick it sees. At 30 Hz these are a tenth of a
+	// second and ten seconds.
+	int m_initial_sections_waited = 0;
+	static const int INITIAL_SECTIONS_WARN_TICKS = 3;
+	static const int INITIAL_SECTIONS_GIVE_UP_TICKS = 300;
+	static const int64_t MAX_INITIAL_SECTIONS = 4096;
+
+	// Streaming: the points the world is kept loaded around, and how much
+	// one pass may do. Empty and off until a game sets load points; until
+	// then the world is its region and stays there.
+	sv_<voxelworld::LoadPoint> m_load_points;
+	bool m_streaming = false;
+	size_t m_stream_budget = 2;
+	uint m_stream_tick = 0;
+	// Sections the save was asked for and does not have; see load_saved_only()
+	set_<uint64_t> m_save_misses;
+
+	// What the send filter answers from. replicate asks it from its own
+	// thread, so this much is behind a lock of its own -- a small one, and
+	// never held while reaching into another module.
+	std::mutex m_send_mutex;
+	// Chunk node id -> the chunk it holds. A node that is not in here is
+	// not this world's and the filter says nothing about it.
+	sm_<uint, pv::Vector3DInt32> m_chunk_node_chunk_p;
+	// The load point of each peer that has one of its own
+	sm_<replicate::PeerId, voxelworld::LoadPoint> m_peer_points;
+	// How much world each client asked for, in sections. A peer that never
+	// asked is not in here and gets everything its load point keeps.
+	sm_<replicate::PeerId, int> m_peer_send_radius;
+	// Where a peer was when replicate last reconsidered what it has
+	sm_<replicate::PeerId, pv::Vector3DInt16> m_peer_section;
+
+	// Persistence. Null until a game calls set_save(); a world that never
+	// does is generated and forgotten, which is what every game did before
+	// this existed and what an arena game wants.
+	storage::Store *m_store = nullptr;
+	ss_ m_world_name;
+	// The save's voxel name table: save id -> name, append-only and never
+	// renumbered. The running game owns the numbering and the save stores
+	// names -- the game is the only thing that can decide whether a name
+	// still means what it meant, and a save has nothing to contribute to
+	// that question. See doc/plan/world_persistence_plan.md.
+	sv_<interface::VoxelName> m_save_names;
+	std::map<ss_, interface::VoxelTypeId> m_save_id_of_name;
+	bool m_save_names_dirty = false;
+	// save id -> session id and back. Both are the identity in the common
+	// case -- the same game, registering the same types in the same order --
+	// and then a chunk is the byte copy of the save's row that it was before
+	// any of this existed.
+	sv_<interface::VoxelTypeId> m_save_to_session;
+	sv_<interface::VoxelTypeId> m_session_to_save;
+	bool m_id_map_identity = true;
+	bool m_logged_remap = false;
+	// Session ids up to here are in the name table, and the registry row on
+	// disk was written when the table reached the second of these. They are
+	// what keeps both of those from being redone on every section.
+	interface::VoxelTypeId m_names_synced_to = 0;
+	interface::VoxelTypeId m_registry_saved_to = (interface::VoxelTypeId)-1;
+	// The definitions the save carries, for a type the game has stopped
+	// registering. Loaded on the first one that turns up and not before.
+	up_<interface::VoxelRegistry> m_saved_reg;
+	sv_<interface::VoxelName> m_unknown_voxels;
+	// The formats the save's chunks are in, indexed by the tag a chunk row
+	// carries, and which of them new chunks are written in
+	sv_<interface::VoxelFormat> m_save_formats;
+	uint16_t m_write_format = 0;
 
 	CInstance(interface::Server *server, SceneReference scene_ref,
 			const pv::Region &region, bool physics_enabled):
@@ -294,17 +442,23 @@ struct CInstance: public voxelworld::Instance
 			m_atlas_reg.reset(interface::createAtlasRegistry(context));
 		});
 
-		// TODO: Load from disk or something
+		// The region's sections are created on the first tick and not here.
+		// A game creates the world, registers its voxels and calls
+		// set_save() in one core:start, in that order, and a section that
+		// comes out of a save must not be generated -- so nothing may be
+		// loaded before the game has had the chance to say whether there is
+		// a save to look in.
 
-		auto lc = region.getLowerCorner();
-		auto uc = region.getUpperCorner();
-		for(int z = lc.getZ(); z <= uc.getZ(); z++){
-			for(int y = lc.getY(); y <= uc.getY(); y++){
-				for(int x = lc.getX(); x <= uc.getX(); x++){
-					load_or_generate_section(pv::Vector3DInt16(x, y, z));
-				}
-			}
-		}
+		check_streaming();
+
+		// Which chunks reach which peer. Nothing is filtered until a game
+		// gives its peers load points of their own; see peer_wants_node().
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			irep->set_node_filter(m_scene_ref,
+					[this](replicate::PeerId peer, uint node_id){
+				return peer_wants_node(peer, node_id);
+			});
+		});
 
 		// Find peers that already are on the scene and iniitalize them
 		sv_<replicate::PeerId> peers;
@@ -320,6 +474,325 @@ struct CInstance: public voxelworld::Instance
 
 	~CInstance()
 	{
+		// The filter holds this; it must not outlive it
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			irep->set_node_filter(m_scene_ref, nullptr);
+		});
+	}
+
+	// Returns false while it is still waiting for the game to say where it
+	// wants sections; see the tick.
+	bool create_initial_sections()
+	{
+		auto lc = m_section_region.getLowerCorner();
+		auto uc = m_section_region.getUpperCorner();
+		int64_t num = (int64_t)(uc.getX() - lc.getX() + 1) *
+				(uc.getY() - lc.getY() + 1) * (uc.getZ() - lc.getZ() + 1);
+		// The bounds of a world that streams are far larger than anything
+		// anyone wants loaded at once, and creating them would be the rest
+		// of the day. Such a world has to stream, so what this does is wait
+		// for the load points that make it stream -- and say so, and then
+		// give up, if they never come.
+		if(num > MAX_INITIAL_SECTIONS){
+			m_initial_sections_waited++;
+			if(m_initial_sections_waited == INITIAL_SECTIONS_WARN_TICKS)
+				log_w(MODULE, "The region is %s sections; waiting for "
+						"set_load_points(), because a world with bounds "
+						"bigger than it wants loaded has to stream",
+						cs(itos(num)));
+			if(m_initial_sections_waited < INITIAL_SECTIONS_GIVE_UP_TICKS)
+				return false;
+			throw Exception(ss_()+"voxelworld: the region is "+itos(num)+
+					" sections and nothing called set_load_points(); a world "
+					"with bounds bigger than it wants loaded has to stream");
+		}
+		for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					load_or_generate_section(pv::Vector3DInt16(x, y, z));
+				}
+			}
+		}
+		return true;
+	}
+
+	// Streaming. One pass loads, generates or unloads a few sections at
+	// most, nearest first, so that a player waiting for the ground under
+	// them does not wait for the horizon.
+
+	static uint64_t section_key(const pv::Vector3DInt16 &p)
+	{
+		return (uint64_t)(uint16_t)p.getX() |
+				((uint64_t)(uint16_t)p.getY() << 16) |
+				((uint64_t)(uint16_t)p.getZ() << 32);
+	}
+
+	pv::Vector3DInt16 section_of_voxel(const pv::Vector3DInt32 &p)
+	{
+		return container_coord16(
+				container_coord(p, m_chunk_size_voxels),
+				m_section_size_chunks);
+	}
+
+	bool is_in_bounds(const pv::Vector3DInt16 &sp)
+	{
+		auto lc = m_section_region.getLowerCorner();
+		auto uc = m_section_region.getUpperCorner();
+		return sp.getX() >= lc.getX() && sp.getX() <= uc.getX() &&
+				sp.getY() >= lc.getY() && sp.getY() <= uc.getY() &&
+				sp.getZ() >= lc.getZ() && sp.getZ() <= uc.getZ();
+	}
+
+	// Inside some point's load radius, which is what lets a section stay
+	static int dist(int a, int b){ return a > b ? a - b : b - a; }
+
+	bool is_wanted_loaded(const pv::Vector3DInt16 &sp)
+	{
+		for(const voxelworld::LoadPoint &lp : m_load_points){
+			pv::Vector3DInt16 c = section_of_voxel(lp.p);
+			if(dist(sp.getX(), c.getX()) <= lp.load_xz &&
+					dist(sp.getZ(), c.getZ()) <= lp.load_xz &&
+					dist(sp.getY(), c.getY()) <= lp.load_y)
+				return true;
+		}
+		return false;
+	}
+
+	// Which chunks a peer is sent: the ones its own load point keeps near
+	// it, as far out as its client asked for. replicate calls this from its
+	// own sync, so it reaches into nothing and holds only m_send_mutex.
+	//
+	// A node this world did not make, or a peer whose position nobody
+	// declared, is none of this filter's business and passes.
+	bool peer_wants_node(replicate::PeerId peer, uint node_id)
+	{
+		std::lock_guard<std::mutex> lock(m_send_mutex);
+		auto it = m_chunk_node_chunk_p.find(node_id);
+		if(it == m_chunk_node_chunk_p.end())
+			return true;
+		auto pit = m_peer_points.find(peer);
+		if(pit == m_peer_points.end())
+			return true;
+		const voxelworld::LoadPoint &lp = pit->second;
+		int radius = lp.load_xz;
+		auto rit = m_peer_send_radius.find(peer);
+		// A peer that has not said how much it wants wants nothing yet:
+		// the client says 0 until its game's textures are composed
+		// ([TEXMOD_RACE]), and a "0" sent before this module knew the
+		// peer (the launcher's client joins before the world exists) was
+		// dropped, so the world streamed and was meshed with no textures
+		// ([FIRST_RUN]). It says its distance again when ready.
+		if(rit == m_peer_send_radius.end())
+			return false;
+		if(rit->second < radius)
+			radius = rit->second;
+		pv::Vector3DInt16 sp = container_coord16(it->second,
+				m_section_size_chunks);
+		pv::Vector3DInt16 c = section_of_voxel(lp.p);
+		return dist(sp.getX(), c.getX()) <= radius &&
+				dist(sp.getZ(), c.getZ()) <= radius &&
+				dist(sp.getY(), c.getY()) <= lp.load_y;
+	}
+
+	// The client says how much world it wants; what it gets is that or the
+	// load radius, whichever is smaller. Only the client knows what its
+	// computer can draw, and loading more than it will look at is the
+	// server's memory spent on nothing.
+	void on_set_send_distance(const network::Packet &packet)
+	{
+		if(!m_clients_initialized.count(packet.sender))
+			return;
+		int distance_voxels = atoi(packet.data.c_str());
+		if(distance_voxels < 0)
+			return;
+		int section_w = m_chunk_size_voxels.getX() *
+				m_section_size_chunks.getX();
+		// A section the point is anywhere in is one the client can see into;
+		// nought is nothing at all, not the section the point is in -- a
+		// client that has not said it may have the world yet ([TEXMOD_RACE])
+		int radius = distance_voxels == 0 ? -1 :
+				(distance_voxels + section_w - 1) / section_w;
+		log_v(MODULE, "C%zu: wants %i voxels of world, which is %i sections",
+				(size_t)packet.sender, distance_voxels, radius);
+		{
+			std::lock_guard<std::mutex> lock(m_send_mutex);
+			m_peer_send_radius[packet.sender] = radius;
+		}
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			irep->refresh_peer_nodes(m_scene_ref, packet.sender);
+		});
+	}
+
+	void stream_pass()
+	{
+		size_t budget = m_stream_budget;
+		for(const voxelworld::LoadPoint &lp : m_load_points){
+			if(budget == 0)
+				return;
+			stream_around(lp, budget);
+		}
+		if(budget == 0)
+			return;
+		unload_distant_sections(budget);
+	}
+
+	// The sections of a box around c, ring by ring outward, so that the
+	// nearest section that is missing something is the one that gets it. The
+	// callback is given the ring it is on -- which is its distance in XZ --
+	// and stops the walk by returning false.
+	template<typename F>
+	static void for_each_section_around(const pv::Vector3DInt16 &c,
+			int load_xz, int load_y, F f)
+	{
+		for(int r = 0; r <= load_xz; r++){
+			for(int dy = -load_y; dy <= load_y; dy++){
+				for(int dz = -r; dz <= r; dz++){
+					for(int dx = -r; dx <= r; dx++){
+						// The ring and not the square: what is inside it was
+						// walked by a smaller r already
+						if(r > 0 && dx != r && dx != -r &&
+								dz != r && dz != -r)
+							continue;
+						if(!f(pv::Vector3DInt16(c.getX() + dx, c.getY() + dy,
+								c.getZ() + dz), r, dy))
+							return;
+					}
+				}
+			}
+		}
+	}
+
+	void stream_around(const voxelworld::LoadPoint &lp, size_t &budget)
+	{
+		for_each_section_around(section_of_voxel(lp.p), lp.load_xz, lp.load_y,
+				[&](const pv::Vector3DInt16 &sp, int r, int dy) -> bool
+		{
+			if(!is_in_bounds(sp))
+				return true;
+			bool generate = (r <= lp.generate_xz &&
+					dist(dy, 0) <= lp.generate_y);
+			if(!stream_section(sp, generate))
+				return true;
+			return --budget != 0;
+		});
+	}
+
+	// The rings cover the box exactly once, nearest first, and the ring a
+	// section is on is its distance -- which is what decides whether it is
+	// generated as well as loaded
+	static void check_streaming()
+	{
+		const int R = 3, RY = 1;
+		const pv::Vector3DInt16 c(10, -2, 7);
+		set_<uint64_t> seen;
+		int last_r = 0;
+		size_t n = 0;
+		for_each_section_around(c, R, RY,
+				[&](const pv::Vector3DInt16 &sp, int r, int dy) -> bool
+		{
+			bool fresh = seen.insert(section_key(sp)).second;
+			assert(fresh);
+			(void)fresh;
+			assert(r >= last_r);
+			last_r = r;
+			assert(r == std::max(dist(sp.getX(), c.getX()),
+					dist(sp.getZ(), c.getZ())));
+			assert(dy == sp.getY() - c.getY());
+			assert(dist(sp.getY(), c.getY()) <= RY);
+			n++;
+			return true;
+		});
+		assert(n == (size_t)(2*R+1) * (2*R+1) * (2*RY+1));
+		// And it stops where it is told
+		size_t stopped_after = 0;
+		for_each_section_around(c, R, RY,
+				[&](const pv::Vector3DInt16 &sp, int r, int dy) -> bool
+		{
+			return ++stopped_after < 5;
+		});
+		assert(stopped_after == 5);
+		log_v(MODULE, "check_streaming: the rings cover the box once");
+	}
+
+	// True if this section wanted something and got it
+	bool stream_section(const pv::Vector3DInt16 &sp, bool generate)
+	{
+		Section *section = get_section(sp);
+		if(section && section->loaded && (section->generated || !generate))
+			return false;
+		if(generate){
+			load_or_generate_section(sp);
+			return true;
+		}
+		return load_saved_only(sp);
+	}
+
+	// What the save already holds, without generating what it does not: the
+	// terrain a player sees far away is the terrain that is already there.
+	bool load_saved_only(const pv::Vector3DInt16 &sp)
+	{
+		if(!m_store)
+			return false;
+		// The save was asked once and does not have it; asking again every
+		// pass would be a query per section of the load radius per pass
+		if(m_save_misses.count(section_key(sp)))
+			return false;
+		Section &section = force_get_section(sp);
+		if(section.loaded)
+			return true;
+		if(load_saved_section(section)){
+			section.loaded = true;
+			m_server->emit_event("voxelworld:section_loaded",
+					new SectionLoaded(m_scene_ref, sp));
+			return true;
+		}
+		m_save_misses.insert(section_key(sp));
+		forget_section(sp);
+		return false;
+	}
+
+	// Drop a section nothing was put in. Not unload_section(): there is
+	// nothing to write, no nodes to remove and no buffers to free.
+	void forget_section(const pv::Vector3DInt16 &sp)
+	{
+		Section *section = get_section(sp);
+		if(!section)
+			return;
+		m_last_used_sections.erase(
+				std::remove(m_last_used_sections.begin(),
+				m_last_used_sections.end(), section),
+				m_last_used_sections.end());
+		pv::Vector<2, int16_t> p_yz(sp.getY(), sp.getZ());
+		auto sector_it = m_sections.find(p_yz);
+		if(sector_it == m_sections.end())
+			return;
+		sector_it->second.erase(sp.getX());
+		if(sector_it->second.empty())
+			m_sections.erase(sector_it);
+	}
+
+	void unload_distant_sections(size_t &budget)
+	{
+		if(m_keep_loaded)
+			return;
+		sv_<pv::Vector3DInt16> drop;
+		for(auto &sector : m_sections){
+			for(auto &pair : sector.second){
+				Section &section = pair.second;
+				if(!section.loaded)
+					continue;
+				if(is_wanted_loaded(section.section_p))
+					continue;
+				drop.push_back(section.section_p);
+				if(drop.size() >= budget)
+					break;
+			}
+			if(drop.size() >= budget)
+				break;
+		}
+		for(const pv::Vector3DInt16 &sp : drop)
+			unload_section(sp);
+		budget -= drop.size();
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -331,12 +804,53 @@ struct CInstance: public voxelworld::Instance
 				replicate::PeerLeftScene);
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
+		EVENT_TYPEN("network:packet_received/voxelworld:set_send_distance",
+				on_set_send_distance, network::Packet)
 		/*EVENT_TYPEN("network:packet_received/voxelworld:get_section",
 				on_get_section, network::Packet)*/
 	}
 
+	// How long one tick may spend building chunks' collision boxes; see
+	// the loop that reads it
+	static const int64_t PHYSICS_BUDGET_US = 100000;
+
 	void on_tick(const interface::TickEvent &event)
 	{
+		// Where a long tick went ([BLOCKED_MODULE]): this tick holds
+		// main_context while it runs and replicate, the relight and a
+		// game's own module queue behind it -- 1.9 s of it under a world
+		// being generated and walked. The phases are timed so the next
+		// reading names one instead of the tick.
+		const int64_t tick_t0 = interface::os::time_us();
+		int64_t t_announce = 0, t_initial = 0, t_stream = 0, t_scene = 0,
+				t_unload = 0;
+		size_t physics_nodes = 0;
+		// What the commits since the last tick wrote, told to replicate and
+		// the clients in one go. It is here rather than at the end of the
+		// commit because a commit runs inside whatever module asked for
+		// voxelworld, and this part of it reaches into replicate and
+		// network -- so a mod writing a node used to wait for both, once
+		// per node. Now it waits for neither, and the tick pays once.
+		announce_committed_nodes();
+		t_announce = interface::os::time_us() - tick_t0;
+
+		if(m_initial_sections_pending){
+			// A world that streams says where it wants sections; the region
+			// is then its bounds and its sky and not a thing to fill
+			if(m_streaming)
+				m_initial_sections_pending = false;
+			else if(create_initial_sections())
+				m_initial_sections_pending = false;
+		}
+
+		t_initial = interface::os::time_us() - tick_t0 - t_announce;
+
+		// Every fourth tick: often enough that a running player stays ahead
+		// of the edge, seldom enough that the work is not the tick
+		if(m_streaming && ((m_stream_tick++) % 4) == 0)
+			stream_pass();
+		t_stream = interface::os::time_us() - tick_t0 - t_announce - t_initial;
+
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Scene *scene = imc->find_scene(m_scene_ref);
 			if(!scene){
@@ -348,10 +862,24 @@ struct CInstance: public voxelworld::Instance
 
 			// Update node collision boxes
 			if(!m_nodes_needing_physics_update.empty()){
+				physics_nodes = m_nodes_needing_physics_update.size();
 				log_v(MODULE, "Updating physics of %zu nodes",
-						m_nodes_needing_physics_update.size());
+						physics_nodes);
 			}
+			// A chunk's collision boxes are 50-70 ms of deserializing its
+			// volume and building a box per solid voxel, and this holds
+			// main_context while it runs: forty of them in a tick was 1.8 s
+			// with replicate, the relight and a game's own module waiting
+			// behind it ([BLOCKED_MODULE]). At most PHYSICS_BUDGET_US of
+			// them a tick; the rest keep their place in the queue and the
+			// chunk they are for is without its boxes for a tick or two.
+			const int64_t physics_t0 = interface::os::time_us();
+			size_t physics_done = 0;
 			for(QueuedNodePhysicsUpdate &update: m_nodes_needing_physics_update){
+				if(physics_done > 0 && interface::os::time_us() - physics_t0 >
+						PHYSICS_BUDGET_US)
+					break;
+				physics_done++;
 				uint node_id = update.node_id;
 				Node *n = scene->GetNode(node_id);
 				if(!n){
@@ -369,14 +897,35 @@ struct CInstance: public voxelworld::Instance
 				interface::mesh::set_voxel_physics_boxes(n, context, *volume,
 						m_voxel_reg.get());
 			}
-			m_nodes_needing_physics_update.clear();
+			m_nodes_needing_physics_update.erase(
+					m_nodes_needing_physics_update.begin(),
+					m_nodes_needing_physics_update.begin() + physics_done);
+			if(!m_nodes_needing_physics_update.empty())
+				log_v(MODULE, "Node physics: %zu done, %zu left for the next "
+						"tick", physics_done,
+						m_nodes_needing_physics_update.size());
 		});
+
+		t_scene = interface::os::time_us() - tick_t0 - t_announce - t_initial -
+				t_stream;
 
 		// Unload stuff if needed
 		maintain_maximum_buffer_limit();
+		t_unload = interface::os::time_us() - tick_t0 - t_announce -
+				t_initial - t_stream - t_scene;
 
 		// Send updated voxel registry if needed
 		send_voxel_registry_if_dirty();
+		const int64_t tick_us = interface::os::time_us() - tick_t0;
+		if(tick_us > 100000)
+			log_w(MODULE, "on_tick(): %i ms -- announce %i, initial %i, "
+					"stream %i, the scene %i (%zu nodes' physics), unload %i, "
+					"the registry %i", (int)(tick_us / 1000),
+					(int)(t_announce / 1000), (int)(t_initial / 1000),
+					(int)(t_stream / 1000), (int)(t_scene / 1000),
+					physics_nodes, (int)(t_unload / 1000),
+					(int)((tick_us - t_announce - t_initial - t_stream -
+					t_scene - t_unload) / 1000));
 	}
 
 	void on_peer_joined_scene(const replicate::PeerJoinedScene &event)
@@ -435,6 +984,10 @@ struct CInstance: public voxelworld::Instance
 	void unload_node(Scene *scene, uint node_id)
 	{
 		log_d(MODULE, "Unloading node %i", node_id);
+		{
+			std::lock_guard<std::mutex> lock(m_send_mutex);
+			m_chunk_node_chunk_p.erase(node_id);
+		}
 		Node *n = scene->GetNode(node_id);
 		if(!n){
 			log_w(MODULE, "Cannot unload node %i: Not found in scene", node_id);
@@ -515,7 +1068,11 @@ struct CInstance: public voxelworld::Instance
 		return section;
 	}
 
-	void create_chunk_node(Scene *scene, Section &section, int x, int y, int z)
+	// saved_data is a chunk read back out of a save: the same bytes this
+	// wrote there, which are the same bytes replication sends, so nothing
+	// about the on-disk format was designed -- it is the volume format.
+	void create_chunk_node(Scene *scene, Section &section, int x, int y, int z,
+			const ss_ *saved_data = nullptr)
 	{
 		Context *context = scene->GetContext();
 
@@ -544,6 +1101,11 @@ struct CInstance: public voxelworld::Instance
 		if(n->GetID() == 0)
 			throw Exception("Can't handle static node id=0");
 		section.node_ids->setVoxelAt(chunk_p, n->GetID());
+		{
+			// What the send filter answers from; see peer_wants_node()
+			std::lock_guard<std::mutex> lock(m_send_mutex);
+			m_chunk_node_chunk_p[n->GetID()] = chunk_p;
+		}
 
 		// Distinguish static voxel nodes from others
 		n->SetVar(StringHash("buildat_static"), Variant(true));
@@ -553,8 +1115,16 @@ struct CInstance: public voxelworld::Instance
 		int d = m_chunk_size_voxels.getZ();
 
 		// This makes sure the node will be found when searched from the octree,
-		// both on the server and the client
+		// both on the server and the client. It is a marker and nothing else:
+		// a zone mask of zero is what keeps it out of the renderer's zone
+		// assignment, and that matters because what a drawable was last in is
+		// cached on the drawable itself as a plain pointer. A chunk's node is
+		// unloaded while the drawables around it stay, and Urho3D only clears
+		// that pointer in the drawables its box still covers, so one that has
+		// moved out since keeps a pointer into freed memory and the renderer
+		// follows it on a worker thread.
 		Zone *node_zone = n->CreateComponent<Zone>();
+		node_zone->SetZoneMask(0);
 		node_zone->SetPriority(-1000);
 		node_zone->SetBoundingBox(BoundingBox(
 				Vector3(-w/2, -h/2, -d/2), Vector3(w/2, h/2, d/2)));
@@ -573,9 +1143,13 @@ struct CInstance: public voxelworld::Instance
 		// allocated, so a chunk of nothing but VOXELTYPEID_UNDEFINED costs
 		// its planes nothing at all
 
-		run_commit_hooks_in_thread(chunk_p, *volume);
+		// A loaded chunk has had the in_thread hooks run on it already, on
+		// the way in to the save
+		if(!saved_data)
+			run_commit_hooks_in_thread(chunk_p, *volume);
 
-		ss_ data = interface::serialize_volume_compressed(*volume);
+		ss_ data = saved_data ? *saved_data :
+				interface::serialize_volume_compressed(*volume);
 		n->SetVar(StringHash("buildat_voxel_data"), Variant(
 				PODVector<uint8_t>((const uint8_t*)data.c_str(), data.size())));
 
@@ -607,8 +1181,134 @@ struct CInstance: public voxelworld::Instance
 		});
 	}
 
+	// One chunk, one row. The section is the load and unload unit, but the
+	// chunk is what a node holds and what the volume format describes, so a
+	// key per chunk means no container format had to be invented for the
+	// eight of them.
+	ss_ chunk_key(const pv::Vector3DInt32 &chunk_p)
+	{
+		return m_world_name+"/"+itos(chunk_p.getX())+","+
+				itos(chunk_p.getY())+","+itos(chunk_p.getZ());
+	}
+
+	// The generated mark, beside the section's chunks: "1" once a
+	// generator has been over the section. A section a neighbour's
+	// generator spilled into is saved before it is generated, and without
+	// the mark it came back as generated and never was -- a hole in the
+	// world ([UNGENERATED_SAVED] in doc/plan/world_persistence_plan.md).
+	// A save from before the key has chunks and no mark, and those were
+	// all generated for real.
+	ss_ generated_key(const pv::Vector3DInt16 &section_p)
+	{
+		return m_world_name+"/s"+itos(section_p.getX())+","+
+				itos(section_p.getY())+","+itos(section_p.getZ())+"/generated";
+	}
+
+	// A chunk's row in the save: a header naming the format the chunk was
+	// written in, and then the blob replication already produces. The tag is
+	// Luanti's MapBlock property and it buys what it buys there -- chunks
+	// are independent of each other, so a save converges as sections are
+	// touched instead of being rewritten in one go, and one unreadable chunk
+	// is one unreadable chunk.
+	static const size_t CHUNK_HEADER_SIZE = 6;
+
+	ss_ chunk_row(const ss_ &blob)
+	{
+		ss_ row;
+		row.reserve(CHUNK_HEADER_SIZE + blob.size());
+		row += "BVC";
+		row += (char)1;
+		row += (char)(m_write_format & 0xff);
+		row += (char)((m_write_format >> 8) & 0xff);
+		row += blob;
+		return row;
+	}
+
+	// A row without the header was written before there was one, and is in
+	// the world's own format by definition -- there was only ever the one. A
+	// cereal archive begins with an endianness byte and never with 'B', so
+	// the two cannot be read for each other.
+	bool split_chunk_row(const ss_ &row, uint16_t &format_out, ss_ &blob_out)
+	{
+		if(row.size() < CHUNK_HEADER_SIZE || row.compare(0, 3, "BVC") != 0){
+			format_out = m_write_format;
+			blob_out = row;
+			return true;
+		}
+		if((uint8_t)row[3] != 1)
+			return false;
+		format_out = (uint16_t)(uint8_t)row[4] |
+				((uint16_t)(uint8_t)row[5] << 8);
+		blob_out = row.substr(CHUNK_HEADER_SIZE);
+		return true;
+	}
+
+	// A chunk out of the save, in the cut and the numbering this world runs.
+	// Byte for byte what was stored, in the common case.
+	bool prepare_loaded_chunk(const pv::Vector3DInt32 &chunk_p,
+			const ss_ &row, ss_ &data_out, bool &converted_out)
+	{
+		ss_ where = ss_("chunk ")+itos(chunk_p.getX())+","+
+				itos(chunk_p.getY())+","+itos(chunk_p.getZ());
+		uint16_t tag = 0;
+		ss_ blob;
+		if(!split_chunk_row(row, tag, blob)){
+			refuse_save(where+" has a header this build does not know");
+			return false;
+		}
+		if(tag == m_write_format && m_id_map_identity){
+			data_out = blob;
+			return true;
+		}
+		// What comes out is not what is on disk, so the section is written
+		// back the next time it is unloaded: the save converges on the
+		// world's own format as sections are touched, and nothing that was
+		// not touched is rewritten
+		converted_out = true;
+		up_<VoxelVolume> volume = interface::deserialize_volume(blob);
+		if(!volume){
+			refuse_save(where+" is not in a volume format this build knows");
+			return false;
+		}
+		const interface::VoxelFormat &format = m_voxel_reg->get_format();
+		if(tag != m_write_format){
+			if(tag >= m_save_formats.size()){
+				refuse_save(where+" is tagged with format "+itos((int)tag)+
+						", which the save's format table does not have");
+				return false;
+			}
+			ss_ why;
+			up_<VoxelVolume> moved = interface::migrate_volume(*volume,
+					m_save_formats[tag], format, &why);
+			if(!moved){
+				refuse_save(where+" was written in "+
+						m_save_formats[tag].dump()+" and this world is "+
+						format.dump()+": "+why);
+				return false;
+			}
+			volume = std::move(moved);
+		}
+		if(!m_id_map_identity)
+			interface::remap_volume_ids(*volume, format, m_save_to_session);
+		data_out = interface::serialize_volume_compressed(*volume);
+		return true;
+	}
+
+	// A chunk on its way into the save, in the save's numbering
+	ss_ prepare_saved_chunk(const ss_ &blob)
+	{
+		if(m_id_map_identity)
+			return blob;
+		up_<VoxelVolume> volume = interface::deserialize_volume(blob);
+		if(!volume)
+			return blob;
+		interface::remap_volume_ids(*volume, m_voxel_reg->get_format(),
+				m_session_to_save);
+		return interface::serialize_volume_compressed(*volume);
+	}
+
 	// Somehow get the section's static nodes and possible other nodes, either
-	// by loading from disk or by creating new ones
+	// by loading from the save or by creating new ones
 	void load_section(Section &section)
 	{
 		if(section.loaded)
@@ -617,10 +1317,358 @@ struct CInstance: public voxelworld::Instance
 		pv::Vector3DInt16 section_p = section.section_p;
 		log_d(MODULE, "Loading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
 
-		// TODO: If found on disk, load nodes from there
-		// TODO: If not found on disk, create new static nodes
-		// Always create new nodes for now
-		create_section(section);
+		if(!m_store || !load_saved_section(section))
+			create_section(section);
+		// A section whose light went stale while it was away is flooded
+		// again from what is around it now
+		relight_if_stale(section);
+		// What a game keeps of its own per section comes back with it
+		m_server->emit_event("voxelworld:section_loaded",
+				new SectionLoaded(m_scene_ref, section_p));
+	}
+
+	// True if the whole section was in the save. All or nothing: a section
+	// with some of its chunks saved and some not would have to be both loaded
+	// and generated, and generation is by section.
+	bool load_saved_section(Section &section)
+	{
+		update_id_maps();
+		if(!m_store) // update_id_maps() can refuse the save
+			return false;
+		auto lc = section.contained_chunks.getLowerCorner();
+		auto uc = section.contained_chunks.getUpperCorner();
+		sv_<ss_> chunks;
+		chunks.reserve(section.num_chunks);
+		bool converted = false;
+		for(int z = 0; z <= uc.getZ() - lc.getZ(); z++){
+			for(int y = 0; y <= uc.getY() - lc.getY(); y++){
+				for(int x = 0; x <= uc.getX() - lc.getX(); x++){
+					pv::Vector3DInt32 chunk_p(
+							lc.getX() + x, lc.getY() + y, lc.getZ() + z);
+					ss_ row;
+					if(!m_store->get(chunk_key(chunk_p), row))
+						return false;
+					ss_ data;
+					if(!prepare_loaded_chunk(chunk_p, row, data, converted))
+						return false;
+					chunks.push_back(data);
+				}
+			}
+		}
+		log_v(MODULE, "Loading section " PV3I_FORMAT " from the save",
+				PV3I_PARAMS(section.section_p));
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->check_scene(m_scene_ref);
+			size_t i = 0;
+			for(int z = 0; z <= uc.getZ() - lc.getZ(); z++){
+				for(int y = 0; y <= uc.getY() - lc.getY(); y++){
+					for(int x = 0; x <= uc.getX() - lc.getX(); x++){
+						create_chunk_node(scene, section, x, y, z,
+								&chunks[i++]);
+					}
+				}
+			}
+		});
+		// Generated if the save says so, or if it predates the mark. A
+		// section that is loaded and not generated goes to the generator
+		// from load_or_generate_section(), whose merge writes by priority:
+		// the terrain fills in around what was spilled rather than over it.
+		ss_ mark;
+		if(m_store->get(generated_key(section.section_p), mark))
+			section.generated = (mark == "1");
+		else
+			section.generated = true;
+		if(!section.generated)
+			log_v(MODULE, "Section " PV3I_FORMAT " came out of the save "
+					"ungenerated", PV3I_PARAMS(section.section_p));
+		section.modified = converted;
+		return true;
+	}
+
+	// Writes the section's chunks as one transaction. Called when a section
+	// is unloaded and when the world is saved as a whole; both are moments
+	// where the data is about to stop being reachable.
+	//
+	// A section nothing has touched since it was read is not written at all,
+	// which is what keeps saving a world people are only walking through
+	// free. The flag is per section rather than per chunk because a section
+	// is what is read and written as a unit.
+	void save_section(Section &section)
+	{
+		// What the light reached while a section was away is written with
+		// the sections, since it is about them
+		save_stale_sections();
+		if(!m_store || !section.loaded || !section.modified)
+			return;
+		update_id_maps();
+		if(!m_store) // update_id_maps() can refuse the save
+			return;
+		sv_<ss_> keys;
+		sv_<ss_> values;
+		keys.reserve(section.num_chunks);
+		values.reserve(section.num_chunks);
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			Scene *scene = imc->check_scene(m_scene_ref);
+			auto lc = section.contained_chunks.getLowerCorner();
+			auto uc = section.contained_chunks.getUpperCorner();
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+				for(int y = lc.getY(); y <= uc.getY(); y++){
+					for(int x = lc.getX(); x <= uc.getX(); x++){
+						uint id = section.node_ids->getVoxelAt(x, y, z);
+						if(!id)
+							continue;
+						Node *n = scene->GetNode(id);
+						if(!n)
+							continue;
+						const Variant &var =
+								n->GetVar(StringHash("buildat_voxel_data"));
+						const PODVector<unsigned char> &buf = var.GetBuffer();
+						if(buf.Size() == 0)
+							continue;
+						keys.push_back(chunk_key(pv::Vector3DInt32(x, y, z)));
+						values.push_back(
+								ss_((const char*)&buf[0], buf.Size()));
+					}
+				}
+			}
+		});
+		if(keys.empty()){
+			section.modified = false;
+			return;
+		}
+		// Outside the scene lock: a chunk that has to be renumbered is
+		// decompressed, rewritten and compressed again, and the scene is not
+		// waiting for that
+		for(ss_ &value : values)
+			value = chunk_row(prepare_saved_chunk(value));
+		// One transaction: a row at a time outside one is the classic slow
+		// save, and it is also what leaves half a section on disk after a
+		// crash. The name table goes in with the chunks that made it grow,
+		// so there is no window where a row names an id the table has not.
+		m_store->batch([&](){
+			for(size_t i = 0; i < keys.size(); i++)
+				m_store->set(keys[i], values[i]);
+			m_store->set(generated_key(section.section_p),
+					section.generated ? "1" : "0");
+			save_name_table();
+			save_registry();
+		});
+		section.modified = false;
+		// The save has it now, whatever the streamer was told earlier
+		m_save_misses.erase(section_key(section.section_p));
+	}
+
+	bool is_section_generated(const pv::Vector3DInt16 &section_p)
+	{
+		Section *section = get_section(section_p);
+		return section != nullptr && section->loaded && section->generated;
+	}
+
+	// See api.h: what has been written into this section is all of it there
+	// is going to be, so no generator is asked for one
+	void set_section_generated(const pv::Vector3DInt16 &section_p)
+	{
+		Section &section = force_get_section(section_p);
+		if(!section.loaded)
+			load_section(section);
+		if(section.generated)
+			return;
+		section.generated = true;
+		// Marked rather than generated, and the mark belongs in the save
+		// with the voxels: a section that came back without it would be
+		// generated over on the next run
+		section.modified = true;
+	}
+
+	// A section that was marked stale while it was not in memory: take the
+	// light out of it and let it back in from its own sources and from the
+	// neighbours that are here now. Nothing is asked of the neighbours that
+	// are not -- what they hold marks this one stale again when they load.
+	//
+	// The whole section is walked, which is a quarter of a million voxels;
+	// it happens once per section per time the world's light moved while
+	// that section was away. Only its faces and the voxels that make their
+	// own light are seeded, because the flood spreads inwards from them --
+	// that is what a flood is for.
+	// The blockers of a deferred relight whose flood stopped at its
+	// deadline, for the pass that finishes it; see relight_if_stale()
+	sv_<pv::Vector3DInt32> m_relight_blockers;
+	// Where the blockers' pass got to when a deadline stopped it
+	size_t m_relight_finish_f = 0;
+	size_t m_relight_finish_i = 0;
+	bool m_relight_pending = false;
+	// Which section the pending relight belongs to, so that its stale mark
+	// can be cleared when the flood actually finishes rather than when it
+	// starts; 0 when nothing is pending. See relight_if_stale().
+	uint64_t m_relight_key = 0;
+
+	// The pass that ends a relight: what light does not pass through
+	// wears the brightest light beside it, the way the flood leaves the
+	// blockers it touched
+	// The blockers' faces read off their lit neighbours, under the same
+	// deadline as the flood: a section's blockers are its solid voxels,
+	// tens of thousands, and this pass unsliced was the 110-170 ms every
+	// relight call cost against a 20 ms budget ([STEP_SLICE], seed 7's
+	// rerun: the pass 23 ms, the flood 11 ms, the rest unnamed). True
+	// when done; false leaves m_relight_pending set for the next call.
+	bool relight_finish(int64_t deadline_us = 0)
+	{
+		for(; m_relight_finish_f < NUM_LIGHT_FIELDS;
+				m_relight_finish_f++, m_relight_finish_i = 0){
+			const size_t f = m_relight_finish_f;
+			if(!m_light_maintained[f])
+				continue;
+			m_light_running = (LightField)f;
+			m_light_buf = nullptr;
+			m_light_section = nullptr;
+			for(size_t &i = m_relight_finish_i; i < m_relight_blockers.size(); i++){
+				if(deadline_us != 0 && (i & 255) == 255 &&
+						interface::os::time_us() >= deadline_us)
+					return false;
+				light_blocker_from_neighbours(m_relight_blockers[i]);
+			}
+		}
+		m_relight_blockers.clear();
+		m_relight_finish_f = 0;
+		m_relight_finish_i = 0;
+		m_relight_pending = false;
+		// **And now the section is no longer stale**, which is the one
+		// place that is true; see relight_if_stale()
+		if(m_relight_key != 0){
+			if(m_stale_sections.erase(m_relight_key) > 0)
+				m_stale_dirty = true;
+			m_relight_key = 0;
+		}
+		return true;
+	}
+
+	// Continues a relight whose flood a deadline stopped; true when done
+	bool relight_continue(int64_t deadline_us)
+	{
+		if(!m_relight_pending)
+			return true;
+		if(!update_skylight_until(deadline_us))
+			return false;
+		return relight_finish(deadline_us);
+	}
+
+	void relight_if_stale(Section &section, int64_t deadline_us = 0)
+	{
+		const uint64_t key = section_key(section.section_p);
+		if(m_stale_sections.count(key) == 0)
+			return;
+		// **The mark is not cleared here.** This pass zeroes the section's
+		// flood before it re-floods it, and the flood stops at the tick's
+		// deadline -- so between the two the section is dark and the only
+		// record that it has to be finished is m_relight_pending, which is
+		// memory. A world closed in that window kept a zeroed section with
+		// no stale mark on it and never lit it again, which is a played
+		// world going dark section by section as it is played
+		// ([UNDERGROUND_LIGHT]'s playtest fault, 2026-09-28: a fuzz world
+		// read daylight 0 in open air thirty nodes above its canopy, where
+		// the same seed generated afresh reads 15). The mark goes when the
+		// flood is done, in relight_finish(), and until then a restart
+		// starts the section over -- which is the safe direction.
+		auto clear_mark = [&](){
+			if(m_stale_sections.erase(key) > 0)
+				m_stale_dirty = true;
+		};
+		// A column's top may have moved since the last flood
+		forget_open_sky();
+		// One at a time: the pending state is a single section's, and
+		// restarting this one would zero what the tick is carrying
+		if(m_relight_pending && m_relight_key == key)
+			return;
+		bool any = false;
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
+			any = any || m_light_maintained[f];
+		if(!any){
+			clear_mark();
+			return;
+		}
+
+		pv::Region region = get_section_region_voxels(section.section_p);
+		const pv::Vector3DInt32 lc = region.getLowerCorner();
+		const pv::Vector3DInt32 uc = region.getUpperCorner();
+		sv_<pv::Vector3DInt32> blockers;
+		size_t seeded = 0;
+		const int64_t t_seed = interface::os::time_us();
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+			const LightField lf = (LightField)f;
+			if(!m_light_maintained[lf])
+				continue;
+			m_light_running = lf;
+			m_light_buf = nullptr;
+			m_light_section = nullptr;
+			const bool first = blockers.empty();
+			for(int32_t z = lc.getZ(); z <= uc.getZ(); z++)
+			for(int32_t y = lc.getY(); y <= uc.getY(); y++)
+			for(int32_t x = lc.getX(); x <= uc.getX(); x++){
+				const pv::Vector3DInt32 p(x, y, z);
+				VoxelInstance v = light_get(p);
+				if(get_id(v) == interface::VOXELTYPEID_UNDEFINED)
+					continue;
+				if(flood_get(v) != 0)
+					light_set(p, v, 0);
+				if(!transmits_light_at(p)){
+					if(first && emitted_at(p) == 0)
+						blockers.push_back(p);
+					if(emitted_at(p) == 0)
+						continue;
+				}
+				const bool edge = (x == lc.getX() || x == uc.getX() ||
+						y == lc.getY() || y == uc.getY() ||
+						z == lc.getZ() || z == uc.getZ());
+				if(!edge && emitted_at(p) == 0)
+					continue;
+				// "It was a blocker and is not any more" is the shape the
+				// flood reads as "fill this one from what is around it",
+				// which is what every one of these wants
+				m_light_seeds[lf].push_back(SkylightSeed{p, 0, false, 0, true});
+				seeded++;
+			}
+		}
+		// BUILDAT_LIGHT_LOG=1: what a relight seeded and how much of it the
+		// sky reaches, which is the one thing that decides whether the
+		// flood has any daylight to put back. "0 of them under open sky"
+		// is a relight that can only zero the section, and it is what a
+		// world going dark looks like from in here ([UNDERGROUND_LIGHT]).
+		if(getenv("BUILDAT_LIGHT_LOG")){
+			size_t open = 0;
+			for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
+				for(const SkylightSeed &sd : m_light_seeds[f])
+					if(is_below_open_sky(sd.p, true))
+						open++;
+			log_w(MODULE, "relight " PV3I_FORMAT ": %zu seeds, %zu of them "
+					"under open sky, %zu blockers; the middle column opens "
+					"at y %i and the section's top is y %i",
+					PV3I_PARAMS(section.section_p), seeded, open,
+					blockers.size(),
+					(int)open_sky_from((lc.getX() + uc.getX()) / 2,
+							(lc.getZ() + uc.getZ()) / 2), (int)uc.getY());
+		}
+		if(seeded == 0){
+			clear_mark();
+			return;
+		}
+		const int64_t t_flood = interface::os::time_us();
+		m_relight_blockers = blockers;
+		m_relight_finish_f = 0;
+		m_relight_finish_i = 0;
+		m_relight_pending = true;
+		m_relight_key = key;
+		bool done = update_skylight_until(deadline_us);
+		const int64_t t_finish = interface::os::time_us();
+		if(done)
+			done = relight_finish(deadline_us);
+		log_v(MODULE, "Section " PV3I_FORMAT ": light was stale, %zu seeds, "
+				"%zu blockers; the pass %i ms, the flood %i ms, the faces "
+				"%i ms%s",
+				PV3I_PARAMS(section.section_p), seeded, blockers.size(),
+				(int)((t_flood - t_seed) / 1000),
+				(int)((t_finish - t_flood) / 1000),
+				(int)((interface::os::time_us() - t_finish) / 1000),
+				done ? "" : " so far, the rest next tick");
 	}
 
 	// Generate the section; requires static nodes to already exist
@@ -628,7 +1676,14 @@ struct CInstance: public voxelworld::Instance
 	{
 		if(section.generated)
 			return;
+		// What a generator writes is the light it writes; a stale mark from
+		// before it existed means nothing
+		if(m_stale_sections.erase(section_key(section.section_p)) > 0)
+			m_stale_dirty = true;
 		section.generated = true;
+		// Whatever the generator makes of it is not in the save, and a
+		// generator that writes nothing at all still ran
+		section.modified = true;
 		pv::Vector3DInt16 section_p = section.section_p;
 		log_v(MODULE, "Section will be generated: " PV3I_FORMAT,
 				PV3I_PARAMS(section_p));
@@ -672,6 +1727,8 @@ struct CInstance: public voxelworld::Instance
 
 	void unload_old_buffers(int64_t unload_timeout, size_t max_buffers)
 	{
+		if(m_keep_loaded)
+			return;
 		// Swap out the current set
 		std::vector<Section*> sections_with_loaded_buffers;
 		sections_with_loaded_buffers.swap(m_sections_with_loaded_buffers);
@@ -718,14 +1775,26 @@ struct CInstance: public voxelworld::Instance
 	// decide; see VoxelFormat in interface/voxel.h. A game sets its format
 	// through get_voxel_reg()->set_format() before it generates anything,
 	// so this is read rather than cached.
+	const interface::VoxelField& light_field(
+			voxelworld::Instance::LightField f = LIGHT_SKY)
+	{
+		const interface::VoxelFormat &fmt = m_voxel_reg->get_format();
+		return (f == LIGHT_LAMP) ? fmt.light_lamp : fmt.light_sky;
+	}
+
 	const interface::VoxelField& sky_field()
 	{
-		return m_voxel_reg->get_format().light_sky;
+		return light_field(LIGHT_SKY);
+	}
+
+	uint8_t light_max(voxelworld::Instance::LightField f = LIGHT_SKY)
+	{
+		return (uint8_t)light_field(f).mask();
 	}
 
 	uint8_t sky_max()
 	{
-		return (uint8_t)sky_field().mask();
+		return light_max(LIGHT_SKY);
 	}
 
 	// The voxel's type, through the format the game chose. Not
@@ -750,14 +1819,26 @@ struct CInstance: public voxelworld::Instance
 		return get_id(v) == interface::VOXELTYPEID_UNDEFINED;
 	}
 
+	uint8_t get_light(const VoxelInstance &v,
+			voxelworld::Instance::LightField f = LIGHT_SKY)
+	{
+		return (uint8_t)light_field(f).get(v.data);
+	}
+
+	void set_light(VoxelInstance &v, uint8_t level,
+			voxelworld::Instance::LightField f = LIGHT_SKY)
+	{
+		light_field(f).set(v.data, level);
+	}
+
 	uint8_t get_sky(const VoxelInstance &v)
 	{
-		return (uint8_t)sky_field().get(v.data);
+		return get_light(v, LIGHT_SKY);
 	}
 
 	void set_sky(VoxelInstance &v, uint8_t level)
 	{
-		sky_field().set(v.data, level);
+		set_light(v, level, LIGHT_SKY);
 	}
 
 	void add_commit_hook(up_<CommitHook> hook)
@@ -821,6 +1902,70 @@ struct CInstance: public voxelworld::Instance
 			generate_section(section);
 	}
 
+	void load_section_no_generate(const pv::Vector3DInt16 &section_p)
+	{
+		// Not one the streamer will unload on its next pass: a mapgen
+		// mod's write below the world's bottom section made two sections
+		// of scene nodes for the streamer to take down at once, 500 ms in
+		// the step ([STEP_SLICE]). What is written there is dropped, as
+		// Luanti drops a vmanip's writes outside its emerged area.
+		if(!m_load_points.empty() && !is_wanted_loaded(section_p)){
+			log_v(MODULE, "A write into section " PV3I_FORMAT " outside the "
+					"load range is dropped", PV3I_PARAMS(section_p));
+			return;
+		}
+		Section &section = force_get_section(section_p);
+		if(!section.loaded)
+			load_section(section);
+	}
+
+	void set_load_points(const sv_<voxelworld::LoadPoint> &points)
+	{
+		m_load_points = points;
+		m_streaming = true;
+		// A peer whose point moved into another section is sent another set
+		// of chunks, and replicate has no other way of knowing that it did
+		sv_<replicate::PeerId> moved;
+		{
+			std::lock_guard<std::mutex> lock(m_send_mutex);
+			m_peer_points.clear();
+			for(const voxelworld::LoadPoint &lp : points){
+				if(lp.peer == 0)
+					continue;
+				m_peer_points[lp.peer] = lp;
+				pv::Vector3DInt16 sp = section_of_voxel(lp.p);
+				auto it = m_peer_section.find(lp.peer);
+				if(it != m_peer_section.end() && it->second == sp)
+					continue;
+				m_peer_section[lp.peer] = sp;
+				moved.push_back(lp.peer);
+			}
+		}
+		if(moved.empty())
+			return;
+		replicate::access(m_server, [&](replicate::Interface *irep){
+			for(replicate::PeerId peer : moved)
+				irep->refresh_peer_nodes(m_scene_ref, peer);
+		});
+	}
+
+	sv_<pv::Vector3DInt16> get_loaded_sections()
+	{
+		sv_<pv::Vector3DInt16> result;
+		for(auto &sector : m_sections){
+			for(auto &pair : sector.second){
+				if(pair.second.loaded)
+					result.push_back(pair.second.section_p);
+			}
+		}
+		return result;
+	}
+
+	void set_stream_budget(size_t sections_per_pass)
+	{
+		m_stream_budget = sections_per_pass;
+	}
+
 	void unload_section(const pv::Vector3DInt16 &section_p)
 	{
 		Section *section = get_section(section_p);
@@ -828,6 +1973,18 @@ struct CInstance: public voxelworld::Instance
 			return;
 
 		log_v(MODULE, "Unloading section " PV3I_FORMAT, PV3I_PARAMS(section_p));
+
+		// Before the voxels go, so that a game writing something of its own
+		// out with the section still has the section to look at
+		m_server->emit_event("voxelworld:section_unloaded",
+				new SectionUnloaded(m_scene_ref, section_p));
+
+		if(m_store){
+			// What the nodes hold is what has been committed; the buffers
+			// below are dropped without one
+			commit();
+			save_section(*section);
+		}
 
 		for(ChunkBuffer &buf : section->chunk_buffers){
 			if(!buf.volume)
@@ -876,6 +2033,515 @@ struct CInstance: public voxelworld::Instance
 	{
 		Section *section = get_section(section_p);
 		return section && section->loaded;
+	}
+
+	ss_ registry_key(){ return m_world_name+"/registry"; }
+	ss_ names_key(){ return m_world_name+"/names"; }
+	ss_ formats_key(){ return m_world_name+"/formats"; }
+	ss_ stale_key(){ return m_world_name+"/light_stale"; }
+
+	// Sections the light reached while they were not in memory. What they
+	// hold may be wrong in either direction -- a blocker put up next to
+	// them, or one taken away -- and they are re-flooded when they are
+	// loaded. Persisted, because a world that is closed and opened again
+	// has the same wrong light in it. See "Crossing a section boundary" in
+	// doc/plan/voxel_data_model_plan.md.
+	set_<uint64_t> m_stale_sections;
+	bool m_stale_dirty = false;
+
+	// Sections relight_region_later() has marked, in order; a section
+	// loaded or unloaded meanwhile is simply not there when its turn comes
+	std::deque<pv::Vector3DInt16> m_relight_queue;
+	bool m_light_deferred = false;
+	void set_light_deferred(bool on)
+	{
+		m_light_deferred = on;
+	}
+
+	void mark_section_stale(const pv::Vector3DInt16 &section_p)
+	{
+		if(m_stale_sections.insert(section_key(section_p)).second)
+			m_stale_dirty = true;
+	}
+
+	// See relight_region() in api.h: every section the region touches has
+	// its light taken out and let back in, now rather than when it is next
+	// loaded.
+	void relight_region(const pv::Region &region)
+	{
+		const pv::Vector3DInt16 lc = section_of_voxel(region.getLowerCorner());
+		const pv::Vector3DInt16 uc = section_of_voxel(region.getUpperCorner());
+		size_t n = 0;
+		for(int16_t z = lc.getZ(); z <= uc.getZ(); z++)
+		for(int16_t y = lc.getY(); y <= uc.getY(); y++)
+		for(int16_t x = lc.getX(); x <= uc.getX(); x++){
+			const pv::Vector3DInt16 section_p(x, y, z);
+			Section *section = get_section(section_p);
+			if(section == nullptr)
+				continue;
+			mark_section_stale(section_p);
+			relight_if_stale(*section);
+			n++;
+		}
+		if(n > 0)
+			log_d(MODULE, "relight_region(): %zu sections", n);
+	}
+
+	void relight_region_later(const pv::Region &region)
+	{
+		const pv::Vector3DInt16 lc = section_of_voxel(region.getLowerCorner());
+		const pv::Vector3DInt16 uc = section_of_voxel(region.getUpperCorner());
+		for(int16_t z = lc.getZ(); z <= uc.getZ(); z++)
+		for(int16_t y = lc.getY(); y <= uc.getY(); y++)
+		for(int16_t x = lc.getX(); x <= uc.getX(); x++){
+			const pv::Vector3DInt16 section_p(x, y, z);
+			if(get_section(section_p) == nullptr)
+				continue;
+			mark_section_stale(section_p);
+			m_relight_queue.push_back(section_p);
+		}
+	}
+
+	size_t relight_stale(int64_t budget_us, int64_t near_budget_us = 0,
+			int near_sections = 2)
+	{
+		const int64_t t0 = interface::os::time_us();
+		int64_t deadline = t0 + budget_us;
+		// The near budget while the nearest stale section is close to a
+		// load point (the pending flood counts as near: it was picked so)
+		if(near_budget_us > budget_us && !m_load_points.empty()){
+			bool near = m_relight_pending;
+			const int64_t r2 = (int64_t)near_sections * near_sections;
+			for(size_t i = 0; i < m_relight_queue.size() && !near; i++){
+				const pv::Vector3DInt16 &sp = m_relight_queue[i];
+				for(const voxelworld::LoadPoint &lp : m_load_points){
+					const pv::Vector3DInt16 lps = section_of_voxel(lp.p);
+					int64_t dx = (int64_t)sp.getX() - lps.getX();
+					int64_t dy = (int64_t)sp.getY() - lps.getY();
+					int64_t dz = (int64_t)sp.getZ() - lps.getZ();
+					if(dx * dx + dy * dy + dz * dz <= r2){
+						near = true;
+						break;
+					}
+				}
+			}
+			if(near)
+				deadline = t0 + near_budget_us;
+		}
+		// A flood a previous tick left unfinished comes first
+		if(!relight_continue(deadline))
+			return m_relight_queue.size() + 1;
+		size_t done = 0;
+		while(!m_relight_queue.empty()){
+			if(interface::os::time_us() >= deadline)
+				break;
+			// The section nearest a load point first, not the first queued:
+			// a jungle spawn's own canopy sat black for a minute while the
+			// relight worked through 185 sections in the order the mapgen
+			// wrote them ([SEED5_SETTLE], 2026-09-20)
+			size_t best = 0;
+			if(!m_load_points.empty()){
+				int64_t best_d = INT64_MAX;
+				for(size_t i = 0; i < m_relight_queue.size(); i++){
+					const pv::Vector3DInt16 &sp = m_relight_queue[i];
+					int64_t d = INT64_MAX;
+					for(const voxelworld::LoadPoint &lp : m_load_points){
+						const pv::Vector3DInt16 lps = section_of_voxel(lp.p);
+						int64_t dx = (int64_t)sp.getX() - lps.getX();
+						int64_t dy = (int64_t)sp.getY() - lps.getY();
+						int64_t dz = (int64_t)sp.getZ() - lps.getZ();
+						int64_t dd = dx * dx + dy * dy + dz * dz;
+						if(dd < d)
+							d = dd;
+					}
+					if(d < best_d){
+						best_d = d;
+						best = i;
+					}
+				}
+			}
+			const pv::Vector3DInt16 section_p = m_relight_queue[best];
+			m_relight_queue.erase(m_relight_queue.begin() + best);
+			Section *section = get_section(section_p);
+			if(section != nullptr){
+				relight_if_stale(*section, deadline);
+				done++;
+				if(m_relight_pending)
+					return m_relight_queue.size() + 1;
+			}
+		}
+		if(done > 0)
+			log_d(MODULE, "relight_stale(): %zu sections, %zu queued", done,
+					m_relight_queue.size());
+		return m_relight_queue.size();
+	}
+
+	void load_stale_sections()
+	{
+		m_stale_sections.clear();
+		m_stale_dirty = false;
+		if(!m_store)
+			return;
+		ss_ data;
+		if(!m_store->get(stale_key(), data))
+			return;
+		std::istringstream is(data, std::ios::binary);
+		cereal::PortableBinaryInputArchive ar(is);
+		uint8_t version = 0;
+		ar(version);
+		if(version != 1)
+			return;
+		sv_<uint64_t> keys;
+		ar(keys);
+		for(uint64_t k : keys)
+			m_stale_sections.insert(k);
+		if(!m_stale_sections.empty())
+			log_v(MODULE, "World \"%s\": %zu sections with stale light",
+					cs(m_world_name), m_stale_sections.size());
+	}
+
+	void save_stale_sections()
+	{
+		if(!m_store || !m_stale_dirty)
+			return;
+		sv_<uint64_t> keys(m_stale_sections.begin(), m_stale_sections.end());
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar((uint8_t)1, keys);
+		}
+		m_store->set(stale_key(), os.str());
+		m_stale_dirty = false;
+	}
+
+	void set_save(storage::Save *save, const ss_ &world_name)
+	{
+		if(!save){
+			m_store = nullptr;
+			m_world_name = "";
+			m_save_names.clear();
+			m_save_id_of_name.clear();
+			m_save_to_session.clear();
+			m_session_to_save.clear();
+			m_save_formats.clear();
+			m_saved_reg.reset();
+			return;
+		}
+		m_store = save->store("voxelworld");
+		m_world_name = world_name;
+		load_name_table();
+		load_format_table();
+		load_stale_sections();
+	}
+
+	// The save holds something this build must not overwrite: a chunk in a
+	// cut nothing here can move it out of, or a voxel type with no name this
+	// game or the save can put to it. Stop touching the save altogether
+	// rather than guess -- what is on disk is somebody's world, and a wrong
+	// guess written over it cannot be undone.
+	void refuse_save(const ss_ &why)
+	{
+		log_e(MODULE, "World \"%s\": %s. The save is neither read nor written "
+				"any further; migrating it is the game's to do.",
+				cs(m_world_name), cs(why));
+		m_store = nullptr;
+	}
+
+	void load_name_table()
+	{
+		m_save_names.clear();
+		m_save_id_of_name.clear();
+		m_save_to_session.clear();
+		m_session_to_save.clear();
+		m_save_names_dirty = false;
+		m_names_synced_to = 0;
+		m_registry_saved_to = (interface::VoxelTypeId)-1;
+		ss_ data;
+		if(m_store->get(names_key(), data)){
+			std::istringstream is(data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			uint8_t version = 0;
+			ar(version);
+			if(version != 1)
+				throw Exception(ss_()+"voxelworld: the name table of world \""+
+						m_world_name+"\" is version "+itos(version)+
+						" and this build writes 1");
+			ar(m_save_names);
+		}
+		// Save id 0 is VOXELTYPEID_UNDEFINED under every format, and is not
+		// a name
+		if(m_save_names.empty())
+			m_save_names.resize(1);
+		// A save written before there was a name table carries the registry
+		// it was written under instead, and that registry *is* the numbering
+		// its chunks are in. Seeding the table from it is what keeps such a
+		// save readable by a game that has since registered its types in
+		// another order -- without this the ids would quietly mean something
+		// else.
+		if(m_save_names.size() == 1)
+			seed_name_table_from_saved_registry();
+		for(size_t i = 1; i < m_save_names.size(); i++)
+			m_save_id_of_name[m_save_names[i].dump()] =
+					(interface::VoxelTypeId)i;
+	}
+
+	void seed_name_table_from_saved_registry()
+	{
+		if(!load_saved_registry())
+			return;
+		interface::VoxelTypeId num = m_saved_reg->num_voxels();
+		for(interface::VoxelTypeId id = 1; id <= num; id++){
+			const interface::VoxelDefinition *def = m_saved_reg->get(id);
+			if(!def)
+				break;
+			m_save_names.push_back(def->name);
+		}
+		if(m_save_names.size() > 1){
+			m_save_names_dirty = true;
+			log_v(MODULE, "World \"%s\": name table seeded with %zu names "
+					"from the registry the save carries",
+					cs(m_world_name), m_save_names.size() - 1);
+		}
+	}
+
+	bool load_saved_registry()
+	{
+		if(m_saved_reg)
+			return true;
+		ss_ data;
+		if(!m_store->get(registry_key(), data))
+			return false;
+		m_saved_reg.reset(interface::createVoxelRegistry());
+		m_saved_reg->deserialize(data);
+		return true;
+	}
+
+	void save_name_table()
+	{
+		if(!m_store || !m_save_names_dirty)
+			return;
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar((uint8_t)1, m_save_names);
+		}
+		m_store->set(names_key(), os.str());
+		m_save_names_dirty = false;
+	}
+
+	// The save's id for a name, appending it if the save has not seen it.
+	// The table only ever grows, which is what keeps a chunk written under
+	// an older one valid.
+	interface::VoxelTypeId save_id_of(const interface::VoxelName &name)
+	{
+		ss_ key = name.dump();
+		auto it = m_save_id_of_name.find(key);
+		if(it != m_save_id_of_name.end())
+			return it->second;
+		m_save_names.push_back(name);
+		interface::VoxelTypeId id =
+				(interface::VoxelTypeId)(m_save_names.size() - 1);
+		m_save_id_of_name[key] = id;
+		m_save_names_dirty = true;
+		return id;
+	}
+
+	// A voxel type the save has and the game no longer registers. It gets a
+	// session id of its own so that its word travels whole and it is written
+	// back under the same name, and it is drawn with the definition the save
+	// carries -- so a dropped type still looks like itself in an old world.
+	//
+	// What that would hide is that the game does not support it any more, so
+	// every variant of it is tinted. Honest limitation: the tint multiplies
+	// the vertex colour, which is light and not albedo, so in the dark an
+	// unknown voxel looks like everything else.
+	const interface::VoxelDefinition* adopt_unknown_voxel(
+			const interface::VoxelName &name)
+	{
+		if(!load_saved_registry())
+			return nullptr;
+		const interface::VoxelDefinition *saved = m_saved_reg->get(name);
+		if(!saved)
+			return nullptr;
+		interface::VoxelDefinition def = *saved;
+		def.id = interface::VOXELTYPEID_UNDEFINED;
+		// A definition with no variants has one now, which is the plain cube
+		// with somewhere to put the tint; variant_of_param is all zeroes, so
+		// every param value finds it
+		if(def.variants.empty())
+			def.variants.resize(1);
+		for(interface::VoxelVariant &v : def.variants)
+			v.color = UNKNOWN_VOXEL_TINT;
+		interface::VoxelTypeId id = m_voxel_reg->add_voxel(def);
+		log_w(MODULE, "World \"%s\": the save has voxel type %s, which this "
+				"game does not register. It is kept and drawn with the "
+				"definition the save carries, tinted.",
+				cs(m_world_name), cs(name.dump()));
+		m_unknown_voxels.push_back(name);
+		return m_voxel_reg->get(id);
+	}
+
+	// save id -> session id and back, worked out by name.
+	//
+	// Called before a section is read or written rather than once, because
+	// the game goes on registering voxel types after set_save(): a name that
+	// does not resolve now may resolve later, and a type registered later
+	// still has to reach the table before anything holding it is written.
+	// Both loops normally do nothing at all.
+	void update_id_maps()
+	{
+		// What cached_of() remembers is about a registry that may be about
+		// to gain a type. Nothing that is already in it changes, but this is
+		// the cheap place to be sure.
+		m_def_memo = nullptr;
+		// Every type the game has registered goes into the table first, so
+		// that writing a chunk cannot come across a name the save has no id
+		// for. Appending in id order is what keeps the identity case the
+		// identity.
+		interface::VoxelTypeId num = m_voxel_reg->num_voxels();
+		for(interface::VoxelTypeId id = m_names_synced_to + 1; id <= num; id++){
+			const interface::VoxelDefinition *def = m_voxel_reg->get(id);
+			if(!def)
+				break;
+			interface::VoxelTypeId save_id = save_id_of(def->name);
+			if(save_id >= m_save_to_session.size())
+				m_save_to_session.resize(save_id + 1, 0);
+			m_save_to_session[save_id] = id;
+			m_names_synced_to = id;
+		}
+		// What is left is a name the save has and the game does not register
+		m_save_to_session.resize(m_save_names.size(), 0);
+		for(size_t i = 1; i < m_save_names.size(); i++){
+			if(m_save_to_session[i] != 0)
+				continue; // Resolved once and for all: nothing is unregistered
+			const interface::VoxelDefinition *def =
+					adopt_unknown_voxel(m_save_names[i]);
+			if(!def){
+				refuse_save("the save holds voxel type "+
+						m_save_names[i].dump()+", which this game does not "
+						"register and the save's own definitions do not "
+						"describe");
+				return;
+			}
+			m_save_to_session[i] = def->id;
+			if(def->id >= m_names_synced_to)
+				m_names_synced_to = def->id;
+		}
+		m_session_to_save.assign(m_names_synced_to + 1, 0);
+		for(size_t i = 1; i < m_save_to_session.size(); i++){
+			interface::VoxelTypeId sid = m_save_to_session[i];
+			if(sid != 0 && sid < m_session_to_save.size())
+				m_session_to_save[sid] = (interface::VoxelTypeId)i;
+		}
+		m_id_map_identity = true;
+		for(size_t i = 1; i < m_save_to_session.size(); i++){
+			if(m_save_to_session[i] != i){
+				m_id_map_identity = false;
+				break;
+			}
+		}
+		for(size_t i = 1; m_id_map_identity && i < m_session_to_save.size();
+				i++){
+			if(m_session_to_save[i] != i)
+				m_id_map_identity = false;
+		}
+		if(!m_id_map_identity && !m_logged_remap){
+			m_logged_remap = true;
+			size_t n = 0;
+			for(size_t i = 1; i < m_save_to_session.size(); i++)
+				if(m_save_to_session[i] != i)
+					n++;
+			log_i(MODULE, "World \"%s\": the save's voxel numbering is not "
+					"this run's; %zu of %zu names are read and written through "
+					"the table", cs(m_world_name), n,
+					m_save_names.size() - 1);
+		}
+	}
+
+	// The formats the save's chunks are in. A save may hold a mix and that
+	// is the point: chunks are independent, so nothing is rewritten that was
+	// not modified, and one damaged chunk is one damaged chunk.
+	void load_format_table()
+	{
+		m_save_formats.clear();
+		m_write_format = 0;
+		ss_ data;
+		if(m_store->get(formats_key(), data)){
+			std::istringstream is(data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			uint8_t version = 0;
+			ar(version);
+			if(version != 1)
+				throw Exception(ss_()+"voxelworld: the format table of world "
+						"\""+m_world_name+"\" is version "+itos(version)+
+						" and this build writes 1");
+			ar(m_save_formats);
+		}
+		const interface::VoxelFormat &format = m_voxel_reg->get_format();
+		for(size_t i = 0; i < m_save_formats.size(); i++){
+			if(m_save_formats[i] == format){
+				m_write_format = (uint16_t)i;
+				return;
+			}
+		}
+		m_save_formats.push_back(format);
+		m_write_format = (uint16_t)(m_save_formats.size() - 1);
+		save_format_table();
+		if(m_save_formats.size() > 1)
+			log_i(MODULE, "World \"%s\": %s is new to this save, which holds "
+					"%zu formats now", cs(m_world_name), cs(format.dump()),
+					m_save_formats.size());
+	}
+
+	void save_format_table()
+	{
+		if(!m_store)
+			return;
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar((uint8_t)1, m_save_formats);
+		}
+		m_store->set(formats_key(), os.str());
+	}
+
+	// The definitions themselves, so that a type the game stops registering
+	// can still be drawn and still has a name. Not the authority on
+	// numbering -- the name table is -- and written again whenever the game
+	// has registered something since.
+	void save_registry()
+	{
+		if(!m_store || m_registry_saved_to == m_names_synced_to)
+			return;
+		m_store->set(registry_key(), m_voxel_reg->serialize());
+		m_registry_saved_to = m_names_synced_to;
+	}
+
+	sv_<interface::VoxelName> get_unknown_voxels()
+	{
+		return m_unknown_voxels;
+	}
+
+	void save()
+	{
+		if(!m_store)
+			return;
+		commit();
+		save_stale_sections();
+		size_t n = 0, total = 0;
+		for(auto &sector_pair : m_sections){
+			for(auto &section_pair : sector_pair.second){
+				total++;
+				if(!m_store) // A section can refuse the save
+					continue;
+				if(!section_pair.second.modified)
+					continue;
+				save_section(section_pair.second);
+				n++;
+			}
+		}
+		log_v(MODULE, "World \"%s\": saved %zu sections of %zu",
+				cs(m_world_name), n, total);
 	}
 
 	void set_voxel_direct(const pv::Vector3DInt32 &p,
@@ -939,6 +2605,8 @@ struct CInstance: public voxelworld::Instance
 
 			run_commit_hooks_in_scene(chunk_p, n);
 		});
+
+		section->modified = true;
 
 		// Mark node for collision box update
 		mark_node_for_physics_update(node_id);
@@ -1019,16 +2687,35 @@ struct CInstance: public voxelworld::Instance
 			buf->volume->add_planes(planes);
 
 		interface::VoxelSample nv = v;
-		if(m_skylight_enabled){
+		if(m_light_maintained[LIGHT_SKY]){
 			interface::VoxelSample old = buf->volume->sample_at(voxel_p);
 			VoxelInstance old_first(old.planes[0]);
 			VoxelInstance first(nv.planes[0]);
 			bool old_transparent = voxel_transmits_light(old);
-			if(old_transparent != voxel_transmits_light(nv)){
-				m_skylight_seeds.push_back(SkylightSeed{
-						p, get_sky(old_first), old_transparent});
+			// A write that carries light means it: a generator knows what
+			// the sky reaches in the world it just made, and that light is
+			// the map's from then on. A write that carries none takes the
+			// light that was there and is seeded, which is every ordinary
+			// set_voxel. See "the light is stored" in voxelworld's api.h.
+			const bool now_transparent = voxel_transmits_light(nv);
+			for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+				const LightField lf = (LightField)f;
+				if(!m_light_maintained[lf])
+					continue;
+				if(get_light(first, lf) != 0)
+					continue;
+				if(old_transparent != now_transparent ||
+						(lf == LIGHT_LAMP &&
+						voxel_light_source(old) != voxel_light_source(nv))){
+					if(!m_light_deferred) m_light_seeds[lf].push_back(SkylightSeed{
+							p, get_light(old_first, lf), old_transparent,
+							(uint8_t)(lf == LIGHT_LAMP ?
+							voxel_light_source(old) : 0), false});
+				}
+				// A dug blocker starts dark; see set_voxel()
+				set_light(first, (!old_transparent && now_transparent) ? 0 :
+						get_light(old_first, lf), lf);
 			}
-			set_sky(first, get_sky(old_first));
 			nv.planes[0] = first.data;
 		}
 
@@ -1087,7 +2774,7 @@ struct CInstance: public voxelworld::Instance
 				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
 		);
 		VoxelInstance nv = v;
-		if(m_skylight_enabled){
+		if(m_light_maintained[LIGHT_SKY]){
 			// The whole voxel, because which definition it wears can depend
 			// on any of its planes; only the first one is being written
 			interface::VoxelSample old = buf.volume->sample_at(voxel_p);
@@ -1095,16 +2782,38 @@ struct CInstance: public voxelworld::Instance
 			now.planes[0] = v.data;
 			VoxelInstance old_first(old.planes[0]);
 			bool old_transparent = voxel_transmits_light(old);
-			if(old_transparent != voxel_transmits_light(now)){
-				m_skylight_seeds.push_back(SkylightSeed{
-						p, get_sky(old_first), old_transparent});
+			// A voxel written with light of its own keeps it: that is a
+			// generator saying what the sky reaches where it has just
+			// built. Written without, the light is voxelworld's -- it is
+			// carried over from the voxel that was there, because a caller
+			// writing a plain voxel would otherwise wipe out the light of
+			// one whose transparency did not change and nothing would put
+			// it back, and the change is seeded so the flood can fix it.
+			const bool now_transparent = voxel_transmits_light(now);
+			for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+				const LightField lf = (LightField)f;
+				if(!m_light_maintained[lf])
+					continue;
+				if(get_light(nv, lf) != 0)
+					continue;
+				if(old_transparent != now_transparent ||
+						(lf == LIGHT_LAMP &&
+						voxel_light_source(old) != voxel_light_source(now))){
+					if(!m_light_deferred) m_light_seeds[lf].push_back(SkylightSeed{
+							p, get_light(old_first, lf), old_transparent,
+							(uint8_t)(lf == LIGHT_LAMP ?
+							voxel_light_source(old) : 0), false});
+				}
+				// Not from a blocker that has just been dug out: what a
+				// blocker wears is the brightest light beside it, for the
+				// mesher's sake, and carried into the air it becomes the
+				// flood spreads it on as the air's own -- a stair dug
+				// sideways never dimmed, since each step's wall wore the
+				// step's light and was then dug ([DIG_LIGHT]). Dark, and
+				// the flood fills it from around it a level lower.
+				set_light(nv, (!old_transparent && now_transparent) ? 0 :
+						get_light(old_first, lf), lf);
 			}
-			// Once skylight is on those bits belong to voxelworld, so they
-			// are carried over from the voxel that was there; a caller
-			// writing a plain voxel would otherwise wipe the light out of
-			// one whose transparency did not change, and nothing would put
-			// it back
-			set_sky(nv, get_sky(old_first));
 		}
 
 		buf.volume->setVoxelAt(voxel_p, nv);
@@ -1123,12 +2832,133 @@ struct CInstance: public voxelworld::Instance
 			m_sections_with_loaded_buffers.insert(it, section);
 	}
 
+	// The voxels of a region in one read, chunk by chunk rather than voxel
+	// by voxel through get_voxel(): what a caller of this is doing is a
+	// sweep, and a section is a quarter of a million voxels.
+	//
+	// What is not there -- a section that is not loaded, a chunk nothing has
+	// written -- is left undefined, which is what get_voxel() answers for
+	// one and what the volume already holds.
+	VoxelVolume get_volume(const pv::Region &region)
+	{
+		const pv::Vector3DInt32 rlc = region.getLowerCorner();
+		const pv::Vector3DInt32 ruc = region.getUpperCorner();
+		VoxelVolume out(region);
+		if(ruc.getX() < rlc.getX() || ruc.getY() < rlc.getY() ||
+				ruc.getZ() < rlc.getZ())
+			return out;
+		pv::Vector3DInt32 chunk_lc = container_coord(rlc, m_chunk_size_voxels);
+		pv::Vector3DInt32 chunk_uc = container_coord(ruc, m_chunk_size_voxels);
+
+		for(int cz = chunk_lc.getZ(); cz <= chunk_uc.getZ(); cz++){
+		for(int cy = chunk_lc.getY(); cy <= chunk_uc.getY(); cy++){
+		for(int cx = chunk_lc.getX(); cx <= chunk_uc.getX(); cx++){
+			pv::Vector3DInt32 chunk_p(cx, cy, cz);
+			pv::Vector3DInt16 section_p =
+					container_coord16(chunk_p, m_section_size_chunks);
+			Section *section = get_section(section_p);
+			if(section == nullptr || !section->loaded)
+				continue;
+			ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
+					&m_total_buffers_loaded);
+			if(!buf.volume)
+				continue;
+
+			// Whatever planes the chunk has, the answer gets: a caller
+			// reading a world of more than one plane is reading all of it
+			out.add_planes(buf.volume->planes());
+			const size_t num_extra_planes = buf.volume->planes().size() > 1 ?
+					buf.volume->planes().size() - 1 : 0;
+
+			pv::Region chunk_region = get_chunk_region_voxels(chunk_p);
+			pv::Vector3DInt32 lc = chunk_region.getLowerCorner();
+			pv::Vector3DInt32 uc = chunk_region.getUpperCorner();
+			if(lc.getX() < rlc.getX()) lc.setX(rlc.getX());
+			if(lc.getY() < rlc.getY()) lc.setY(rlc.getY());
+			if(lc.getZ() < rlc.getZ()) lc.setZ(rlc.getZ());
+			if(uc.getX() > ruc.getX()) uc.setX(ruc.getX());
+			if(uc.getY() > ruc.getY()) uc.setY(ruc.getY());
+			if(uc.getZ() > ruc.getZ()) uc.setZ(ruc.getZ());
+
+			pv::Vector3DInt32 chunk_off(
+					chunk_p.getX() * m_chunk_size_voxels.getX(),
+					chunk_p.getY() * m_chunk_size_voxels.getY(),
+					chunk_p.getZ() * m_chunk_size_voxels.getZ());
+
+			// A row at a time rather than a voxel at a time: a run along
+			// x is contiguous in both volumes, so it is a memcpy per plane
+			// -- and the sampler underneath the voxel-at-a-time version was
+			// 12% of the server's whole CPU in a devtest profile. The old
+			// walk is still here for the rows copy_run_from() will not
+			// take, which is any that is not wholly inside both volumes.
+			const size_t run = (size_t)(uc.getX() - lc.getX() + 1);
+			VoxelVolume::Sampler src(buf.volume.get());
+			VoxelVolume::Sampler dst(&out);
+			for(int z = lc.getZ(); z <= uc.getZ(); z++){
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+				if(out.copy_run_from(*buf.volume,
+						lc.getX() - chunk_off.getX(),
+						y - chunk_off.getY(),
+						z - chunk_off.getZ(),
+						lc.getX(), y, z, run))
+					continue;
+				src.setPosition(
+						lc.getX() - chunk_off.getX(),
+						y - chunk_off.getY(),
+						z - chunk_off.getZ());
+				dst.setPosition(lc.getX(), y, z);
+			for(int x = lc.getX(); x <= uc.getX(); x++,
+					src.movePositiveX(), dst.movePositiveX()){
+				dst.setVoxel(src.getVoxel());
+				for(size_t pi = 1; pi <= num_extra_planes; pi++){
+					out.set_plane_at((uint8_t)pi, x, y, z,
+							buf.volume->plane_at((uint8_t)pi,
+							x - chunk_off.getX(), y - chunk_off.getY(),
+							z - chunk_off.getZ()));
+				}
+			}
+			}
+			}
+
+			auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
+					m_sections_with_loaded_buffers.end(), section,
+					std::greater<Section*>());
+			if(it == m_sections_with_loaded_buffers.end() || *it != section)
+				m_sections_with_loaded_buffers.insert(it, section);
+		}
+		}
+		}
+
+		// Buffers were loaded above; keep to the limit once, not per voxel
+		maintain_maximum_buffer_limit();
+		return out;
+	}
+
 	// See the comment on Instance::merge_volume() in api.h for what the
 	// priorities are. This is chunk by chunk rather than voxel by voxel
 	// through set_voxel(): a section is a quarter of a million voxels, and
 	// all of this is done while holding the module.
 	void merge_volume(const VoxelVolume &volume,
-			bool create_missing_sections)
+			bool create_missing_sections, const pv::Region *owned)
+	{
+		write_volume(volume, create_missing_sections, false, owned);
+	}
+
+	// The same walk that overwrites instead, which is what everything that
+	// is not a generator wants: an importer, a VoxelManip, a mod putting a
+	// building down.
+	void set_volume(const VoxelVolume &volume, bool create_missing_sections)
+	{
+		write_volume(volume, create_missing_sections, true);
+	}
+
+	// overwrite tells the two apart: with it every defined voxel of the
+	// volume is written, and without it the generator priorities in api.h
+	// decide. A voxel that is undefined in the volume is skipped either
+	// way, so a caller can leave holes.
+	void write_volume(const VoxelVolume &volume,
+			bool create_missing_sections, bool overwrite,
+			const pv::Region *owned = nullptr)
 	{
 		const pv::Region region = volume.getEnclosingRegion();
 		auto rlc = region.getLowerCorner();
@@ -1146,6 +2976,10 @@ struct CInstance: public voxelworld::Instance
 			Section *section = get_section(section_p);
 			if(section == nullptr || !section->loaded){
 				if(!create_missing_sections)
+					continue;
+				// And not outside the load range either, once there is
+				// one; see load_section_no_generate()
+				if(!m_load_points.empty() && !is_wanted_loaded(section_p))
 					continue;
 				// Created but not generated: the voxels are undefined apart
 				// from what this volume writes, and generate_section() will
@@ -1195,16 +3029,28 @@ struct CInstance: public voxelworld::Instance
 			VoxelVolume::Sampler src(
 					const_cast<VoxelVolume*>(&volume));
 			VoxelVolume::Sampler dst(buf.volume.get());
+			// A generator over a section it has not merged before keeps
+			// what stands there: the minimal game's floor, written while
+			// its mods loaded, lost the chunk whose section was generated
+			// after the write
+			const bool keep_standing = owned != nullptr && !section->arrived;
 
 			bool chunk_written = false;
+			// The rows the copy below reads to see whether it can take them
+			sv_<uint32_t> src_words, dst_words;
 			for(int z = lc.getZ(); z <= uc.getZ(); z++){
 			for(int y = lc.getY(); y <= uc.getY(); y++){
-				src.setPosition(lc.getX(), y, z);
+			// One stretch of a row, a voxel at a time: the general case, and
+			// what the run copy after it falls back to.
+			auto walk = [&](int x_from, int x_to){
+				if(x_from > x_to)
+					return;
+				src.setPosition(x_from, y, z);
 				dst.setPosition(
-						lc.getX() - chunk_off.getX(),
+						x_from - chunk_off.getX(),
 						y - chunk_off.getY(),
 						z - chunk_off.getZ());
-			for(int x = lc.getX(); x <= uc.getX(); x++,
+			for(int x = x_from; x <= x_to; x++,
 					src.movePositiveX(), dst.movePositiveX()){
 				VoxelInstance nv = src.getVoxel();
 				if(is_undefined(nv))
@@ -1220,7 +3066,20 @@ struct CInstance: public voxelworld::Instance
 						sample_of(old) : buf.volume->sample_at(
 						x - chunk_off.getX(), y - chunk_off.getY(),
 						z - chunk_off.getZ());
-				if(!old_undefined){
+				// Inside what the writer owns, what it says goes; outside
+				// it -- a generator's padding reaching into a neighbour --
+				// the priorities below decide. See merge_volume() in api.h.
+				const bool writer_owns = overwrite || (owned != nullptr &&
+						x >= owned->getLowerCorner().getX() &&
+						x <= owned->getUpperCorner().getX() &&
+						y >= owned->getLowerCorner().getY() &&
+						y <= owned->getUpperCorner().getY() &&
+						z >= owned->getLowerCorner().getZ() &&
+						z <= owned->getUpperCorner().getZ());
+				if(keep_standing && !old_undefined &&
+						!voxel_is_fully_empty(dst_v))
+					continue;
+				if(!writer_owns && !old_undefined){
 					// Anything already standing here wins
 					if(!voxel_is_fully_empty(dst_v))
 						continue;
@@ -1229,14 +3088,47 @@ struct CInstance: public voxelworld::Instance
 						continue;
 				}
 
-				if(m_skylight_enabled){
-					bool old_transparent = voxel_transmits_light(dst_v);
-					if(old_transparent != voxel_transmits_light(src_v)){
-						m_skylight_seeds.push_back(SkylightSeed{
-								pv::Vector3DInt32(x, y, z),
-								get_sky(old), old_transparent});
+				// Only the faces of the volume touch what was already in
+				// the world: a voxel inside it that had no light and is
+				// given none can neither lose light nor be reached by any,
+				// because every neighbour that could reach it is part of
+				// the same write. So the inside of a generated section
+				// costs no seeds at all, and the light that does come from
+				// outside enters over the faces and floods inwards from
+				// there. A voxel that had light, or that makes its own,
+				// still seeds wherever it is.
+				const bool on_volume_face =
+						x == rlc.getX() || x == ruc.getX() ||
+						y == rlc.getY() || y == ruc.getY() ||
+						z == rlc.getZ() || z == ruc.getZ();
+
+				// Light that came with the volume is kept and needs no
+				// seed; this is the generator's path and a generated world
+				// arrives lit. See set_voxel() above.
+				for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+					const LightField lf = (LightField)f;
+					if(!m_light_maintained[lf] || get_light(nv, lf) != 0)
+						continue;
+					if(!on_volume_face && get_light(old, lf) == 0 &&
+							voxel_light_source(src_v) == 0){
+						set_light(nv, 0, lf);
+						continue;
 					}
-					set_sky(nv, get_sky(old));
+					bool old_transparent = voxel_transmits_light(dst_v);
+					const bool now_transparent = voxel_transmits_light(src_v);
+					if(old_transparent != now_transparent ||
+							(lf == LIGHT_LAMP &&
+							voxel_light_source(dst_v) !=
+							voxel_light_source(src_v))){
+						if(!m_light_deferred) m_light_seeds[lf].push_back(SkylightSeed{
+								pv::Vector3DInt32(x, y, z),
+								get_light(old, lf), old_transparent,
+								(uint8_t)(lf == LIGHT_LAMP ?
+								voxel_light_source(dst_v) : 0), false});
+					}
+					// A dug blocker starts dark; see set_voxel()
+					set_light(nv, (!old_transparent && now_transparent) ? 0 :
+							get_light(old, lf), lf);
 				}
 
 				dst.setVoxel(nv);
@@ -1253,6 +3145,90 @@ struct CInstance: public voxelworld::Instance
 				chunk_written = true;
 				num_written++;
 			}
+			};
+
+			// And the stretch that can be copied instead of walked.
+			//
+			// Every voxel the writer owns whose light came with it -- or
+			// which is dark beside dark and makes none of its own -- ends
+			// the walk above as "write the source voxel and seed nothing",
+			// which for a run of them is a memcpy per plane. That is the
+			// generator's own case over nearly the whole of its section.
+			//
+			// What it may not take: a voxel on a face of the volume, where
+			// light crosses into what was already in the world; a voxel the
+			// writer does not own, where what is already there may win; and
+			// a run with anything undefined in it, which the walk skips.
+			int copy_from = uc.getX() + 1, copy_to = uc.getX();
+			int fx0 = lc.getX(), fx1 = uc.getX();
+			bool row_owned = overwrite;
+			if(!row_owned && owned != nullptr &&
+					y >= owned->getLowerCorner().getY() &&
+					y <= owned->getUpperCorner().getY() &&
+					z >= owned->getLowerCorner().getZ() &&
+					z <= owned->getUpperCorner().getZ()){
+				if(fx0 < owned->getLowerCorner().getX())
+					fx0 = owned->getLowerCorner().getX();
+				if(fx1 > owned->getUpperCorner().getX())
+					fx1 = owned->getUpperCorner().getX();
+				row_owned = fx0 <= fx1;
+			}
+			if(y == rlc.getY() || y == ruc.getY() ||
+					z == rlc.getZ() || z == ruc.getZ()){
+				row_owned = false;
+			} else {
+				if(fx0 == rlc.getX())
+					fx0++;
+				if(fx1 == ruc.getX())
+					fx1--;
+				if(fx0 > fx1)
+					row_owned = false;
+			}
+			if(row_owned){
+				const size_t n = (size_t)(fx1 - fx0 + 1);
+				src_words.resize(n);
+				dst_words.resize(n);
+				const int dx0 = fx0 - chunk_off.getX();
+				const int dy0 = y - chunk_off.getY();
+				const int dz0 = z - chunk_off.getZ();
+				bool can_copy =
+						volume.read_words(fx0, y, z, n, &src_words[0]) &&
+						buf.volume->read_words(dx0, dy0, dz0, n,
+								&dst_words[0]);
+				for(size_t k = 0; k < n && can_copy; k++){
+					const VoxelInstance sv(src_words[k]);
+					if(is_undefined(sv) || (keep_standing &&
+							!is_undefined(VoxelInstance(dst_words[k])))){
+						can_copy = false;
+						break;
+					}
+					for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+						const LightField lf = (LightField)f;
+						if(!m_light_maintained[lf])
+							continue;
+						// It brought its own light, so nothing is decided
+						// here; see the walk above
+						if(get_light(sv, lf) != 0)
+							continue;
+						// Dark arriving where there was light, or a light of
+						// its own arriving: both are the walk's business
+						if(get_light(VoxelInstance(dst_words[k]), lf) != 0 ||
+								voxel_light_source(sample_of(sv)) != 0){
+							can_copy = false;
+							break;
+						}
+					}
+				}
+				if(can_copy && buf.volume->copy_run_from(volume,
+						fx0, y, z, dx0, dy0, dz0, n)){
+					copy_from = fx0;
+					copy_to = fx1;
+					chunk_written = true;
+					num_written += n;
+				}
+			}
+			walk(lc.getX(), copy_from - 1);
+			walk(copy_to + 1, uc.getX());
 			}
 			}
 
@@ -1274,9 +3250,17 @@ struct CInstance: public voxelworld::Instance
 		}
 
 		// Buffers were loaded above; keep to the limit once, not per voxel
+		if(owned != nullptr){
+			Section *s = get_section(container_coord16(container_coord(
+					owned->getLowerCorner(), m_chunk_size_voxels),
+					m_section_size_chunks));
+			if(s)
+				s->arrived = true;
+		}
 		maintain_maximum_buffer_limit();
 
-		log_d(MODULE, "merge_volume(): %zu voxels written", num_written);
+		log_d(MODULE, "%s: %zu voxels written",
+				overwrite ? "set_volume()" : "merge_volume()", num_written);
 	}
 
 	// Read a voxel without loading anything or touching any bookkeeping, so
@@ -1344,6 +3328,34 @@ struct CInstance: public voxelworld::Instance
 	// brightest light next to them instead, which is what the mesher reads
 	// when the air voxel in front of a face is in a chunk it is not meshing.
 
+	// What the three questions below ask the registry, with the last answer
+	// kept. They are asked of every voxel a write or a light flood touches
+	// -- a section is a quarter of a million of them -- and those are nearly
+	// all the same handful of types, stone under air. Asking is a virtual
+	// call and a couple of loads; comparing the sample is neither.
+	//
+	// An entry never moves and a new voxel type does not change an old one's,
+	// so what would invalidate this is the registry being cleared, which
+	// does not happen to a server's. update_id_maps() drops it anyway, being
+	// the one place here that adds a type.
+	interface::VoxelSample m_def_memo_key;
+	const interface::CachedVoxelDefinition *m_def_memo = nullptr;
+
+	const interface::CachedVoxelDefinition* cached_of(
+			const interface::VoxelSample &v)
+	{
+		if(m_def_memo != nullptr &&
+				memcmp(&v, &m_def_memo_key, sizeof(v)) == 0)
+			return m_def_memo;
+		const interface::CachedVoxelDefinition *def =
+				m_voxel_reg->get_cached(v);
+		if(def != nullptr){
+			m_def_memo_key = v;
+			m_def_memo = def;
+		}
+		return def;
+	}
+
 	// Whether nothing at all occupies the voxel. Not the same as
 	// voxel_transmits_light(): a voxel can leave the faces against it
 	// undrawn and still hold a mesh of its own inside itself, and such a
@@ -1352,31 +3364,219 @@ struct CInstance: public voxelworld::Instance
 	{
 		if(is_undefined(VoxelInstance(v.planes[0])))
 			return false;
-		const interface::CachedVoxelDefinition *def =
-				m_voxel_reg->get_cached(v);
+		const interface::CachedVoxelDefinition *def = cached_of(v);
 		if(def == nullptr)
 			return false;
 		return def->fully_empty;
+	}
+
+	// What a voxel makes of its own light, by value. Only asked while lamp
+	// light is maintained, so a world without it pays nothing.
+	uint8_t voxel_light_source(const interface::VoxelSample &v)
+	{
+		if(is_undefined(VoxelInstance(v.planes[0])))
+			return 0;
+		const interface::CachedVoxelDefinition *def = cached_of(v);
+		return def ? def->light_source : 0;
+	}
+
+	// Whether the sunlight column goes on through the voxel undiminished,
+	// which is Luanti's sunlight_propagates and not the same question as
+	// whether light gets past at all ([WATER_LIGHT]): water lets light
+	// through a level at a time in every direction, the column included, so
+	// a pool ten deep is not lit like its surface. A voxel with nothing in
+	// it propagates by being nothing; anything else says so, which is what
+	// transmits_light carries (luanti.cpp registers it from the game's
+	// sunlight_propagates). A shaped voxel leaves its edges empty so that
+	// its neighbours draw their faces, and that is what used to answer this.
+	bool voxel_propagates_sunlight(const interface::VoxelSample &v)
+	{
+		if(is_undefined(VoxelInstance(v.planes[0])))
+			return false;
+		const interface::CachedVoxelDefinition *def = cached_of(v);
+		if(def == nullptr)
+			return false;
+		return def->fully_empty || def->transmits_light;
 	}
 
 	bool voxel_transmits_light(const interface::VoxelSample &v)
 	{
 		if(is_undefined(VoxelInstance(v.planes[0])))
 			return false;
-		const interface::CachedVoxelDefinition *def =
-				m_voxel_reg->get_cached(v);
+		const interface::CachedVoxelDefinition *def = cached_of(v);
 		if(def == nullptr)
 			return false;
-		return def->edge_material_id == interface::EDGEMATERIALID_EMPTY;
+		// Two ways light gets past a voxel: nothing is there, or something
+		// is and the sky is seen through it anyway. See
+		// VoxelDefinition::transmits_light.
+		return def->edge_material_id == interface::EDGEMATERIALID_EMPTY ||
+				def->transmits_light;
 	}
 
 	// Voxels in the topmost row of the world see the open sky
-	bool is_below_open_sky(const pv::Vector3DInt32 &p)
+	// Where the sky reaches a voxel from outside the world's own data.
+	//
+	// The top of the section region is the formal answer, and on a
+	// Luanti-sized map that is thirty thousand voxels up and never loaded,
+	// so it never fires: what lit a generated world was the mapgen writing
+	// the light once and the flood keeping it. That leaves a re-flood with
+	// no source of its own -- relight_if_stale() zeroes a section before it
+	// re-floods it, and it could only get the daylight back from a
+	// neighbouring section that still had some. A section zeroed while the
+	// lit one above it was out of memory stayed dark for ever and was then
+	// the dark neighbour for the next one relit beside it, which is a
+	// played world going dark in patches ([UNDERGROUND_LIGHT], 2026-09-28:
+	// a played VoxeLibre world read daylight 0 in open air thirty nodes
+	// above its own canopy where the same seed generated afresh reads 15,
+	// and core.fix_light() could not bring it back).
+	//
+	// So the top of the *data* answers too: a voxel at the top of its own
+	// section whose column walks up through clear air and out of the loaded
+	// world is under the open sky. That is Luanti's own rule -- its
+	// propagateSunlight() takes the ignore above a chunk as sunlit -- and
+	// the same one mesh.cpp's horizon_says() uses where a ray leaves the
+	// volume ("walked out under the open sky").
+	//
+	// simplified: a cave section relit while the rock above it happens to
+	// be out of memory reads as sky. The sections above a loaded one are
+	// loaded too inside a load point's radius, so what this answers in
+	// practice is the top of the loaded column; the principled version
+	// wants the column's surface height, which voxelworld does not keep --
+	// mesh.cpp's horizon map is where that lives.
+	//
+	// Only asked of a voxel at the top edge of its section, so the walk is
+	// one column per section face rather than one per seed.
+	// The lowest voxel in a column the sky still reaches: everything above
+	// the highest thing that stops light, and the whole column where
+	// nothing does. Walked from the top of the world down, a whole section
+	// at a step where the section is not loaded -- there is no data there
+	// and above the terrain that is sky.
+	//
+	// Cached per column for the run of one flood, because a relight seeds a
+	// section's whole face and those seeds share their columns; cleared
+	// wherever a flood begins, since a write can move a column's top.
+	sm_<uint64_t, int32_t> m_open_sky_from;
+
+	void forget_open_sky()
 	{
-		int section_h = m_section_size_chunks.getY() *
+		m_open_sky_from.clear();
+	}
+
+	int32_t open_sky_from(int32_t x, int32_t z)
+	{
+		const uint64_t key = ((uint64_t)(uint32_t)x << 32) | (uint32_t)z;
+		auto it = m_open_sky_from.find(key);
+		if(it != m_open_sky_from.end())
+			return it->second;
+		const int section_h = m_section_size_chunks.getY() *
 				m_chunk_size_voxels.getY();
-		return p.getY() ==
+		const int32_t region_top =
 				(m_section_region.getUpperCorner().getY() + 1) * section_h - 1;
+		const int32_t region_bottom =
+				(int32_t)m_section_region.getLowerCorner().getY() * section_h;
+		int32_t from = region_bottom;
+		// **No data is sky until the column has shown some.** Above the
+		// terrain a chunk was never generated and is not in memory, and
+		// that is where the daylight comes from; below it, a gap in what
+		// is loaded says nothing, so the walk stops there rather than
+		// lighting a cave through a chunk it cannot see.
+		bool seen_data = false;
+		for(int32_t y = region_top; y >= region_bottom; ){
+			const pv::Vector3DInt32 q(x, y, z);
+			const pv::Vector3DInt16 qs = section_of_voxel(q);
+			Section *section = get_section(qs);
+			if(section == nullptr || !section->loaded){
+				if(seen_data){
+					from = y + 1;
+					break;
+				}
+				// Step over the whole section rather than every voxel of it
+				y = (int32_t)qs.getY() * section_h - 1;
+				continue;
+			}
+			const pv::Vector3DInt32 chunk_p =
+					container_coord(q, m_chunk_size_voxels);
+			ChunkBuffer &buf =
+					section->chunk_buffers[section->get_chunk_i(chunk_p)];
+			if(!buf.volume){
+				// The section is loaded and this chunk of it is not: read
+				// as no data, and not pulled in -- a walk that loaded a
+				// column would load the world
+				if(seen_data){
+					from = y + 1;
+					break;
+				}
+				y = chunk_p.getY() * m_chunk_size_voxels.getY() - 1;
+				continue;
+			}
+			seen_data = true;
+			// **Sunlight's own predicate, not "light gets past".** Water
+			// and leaves let light through and still take a level off the
+			// sunlight going down a column, which is the difference
+			// voxel_propagates_sunlight() carries: water_light.sh reads a
+			// water column that falls a level a node, and with
+			// voxel_transmits_light() here the walk went straight through
+			// it and seeded the whole column at fifteen.
+			if(!voxel_propagates_sunlight(
+					buf.volume->sample_at(light_local_p(q, chunk_p)))){
+				from = y + 1;
+				break;
+			}
+			y--;
+		}
+		m_open_sky_from[key] = from;
+		return from;
+	}
+
+	// **Where the sky reaches, wherever it is asked about.**
+	//
+	// It used to be one row of voxels at the top of the section region,
+	// which on a Luanti-sized map is thirty thousand voxels up and never
+	// loaded, so it never fired; then the top edge of a section whose
+	// column walked out of the data, which fired only for the section at
+	// the top of the loaded column. That second one left every relight
+	// below it with no source of its own: `/fixlight` over a box whose top
+	// was under the loaded column zeroed the box and could not fill it
+	// again -- measured on a played world, where the same command with a
+	// taller box put the whole column back to 15 and with a shorter one
+	// changed nothing ([UNDERGROUND_LIGHT], 2026-09-28). So the column is
+	// asked for whatever voxel wants to know.
+	// **On by default since 2026-09-28**, and it was off for a day before
+	// that. The column rule is what lets a relight put daylight back at
+	// all -- without it core.fix_light() over a box whose top is under the
+	// loaded column zeroes the box and cannot fill it again, which is a
+	// played world that cannot be mended: on a copy of the user's
+	// c55_mc2_12, /fixlight with the rule off left every reading where it
+	// was and the picture broken, and with it on put the open columns back
+	// to fifteen and drew a world with a sky in it.
+	// What held it off was games/voxel_lighting's cave going 92% black
+	// with it on (RMSE 37.3 against a bar of 30), and that was the
+	// generator being asked a question only a relight can answer; see
+	// SkylightSeed::from_relight. With that fixed the same view reads 1.9
+	// and the check passes, water_light.sh still falls a level a node and
+	// diglight.sh still reads its gradient.
+	//
+	// BUILDAT_SKY_COLUMN=0 puts the old rule back: the top of the section
+	// region and nothing else, which on a Luanti-sized map never fires.
+	// **The column is only asked for a relight** (from_relight): during
+	// worldgen the column above a voxel is half made and open_sky_from()
+	// then calls a cave open sky. The region's own top row is asked for
+	// every seed, as it always was -- on a small world it is the sky the
+	// generator's own flood comes from, and taking it away from
+	// generation seeds left games/voxel_lighting 126560 voxels dark
+	// (2026-09-28).
+	bool is_below_open_sky(const pv::Vector3DInt32 &p, bool from_relight)
+	{
+		static const bool off = getenv("BUILDAT_SKY_COLUMN") != nullptr &&
+				ss_(getenv("BUILDAT_SKY_COLUMN")) == "0";
+		const int section_h = m_section_size_chunks.getY() *
+				m_chunk_size_voxels.getY();
+		if(p.getY() == (m_section_region.getUpperCorner().getY() + 1) *
+				section_h - 1)
+			return true;
+		if(off || !from_relight)
+			return false;
+		return p.getY() >= open_sky_from(p.getX(), p.getZ());
 	}
 
 	struct LightNode
@@ -1411,8 +3611,15 @@ struct CInstance: public voxelworld::Instance
 		Section *section = m_light_section;
 		if(section == nullptr || section_p != m_light_section_p){
 			section = get_section(section_p);
-			if(section == nullptr)
+			if(section == nullptr){
+				// The light reached a section that is not in memory. What
+				// it holds may now be wrong either way, so it is marked and
+				// re-flooded when it is loaded -- rather than pulled in
+				// here, which one node at the top of a shaft would do all
+				// the way down it.
+				mark_section_stale(section_p);
 				return nullptr;
+			}
 			auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
 					m_sections_with_loaded_buffers.end(), section,
 					std::greater<Section*>());
@@ -1462,13 +3669,67 @@ struct CInstance: public voxelworld::Instance
 	// pushing each new light value into the blocking neighbours of the voxel
 	// that got it. Only ever raises one, so it is right on its own as long as
 	// no light went away; update_skylight() recomputes the few that did.
+	// Which light the flood below is maintaining. One field is brought up
+	// to date at a time, so this is set for the run rather than threaded
+	// through every helper of it.
+	LightField m_light_running = LIGHT_SKY;
+
+	uint8_t flood_get(const VoxelInstance &v)
+	{
+		return get_light(v, m_light_running);
+	}
+
+	void flood_set(VoxelInstance &v, uint8_t level)
+	{
+		set_light(v, level, m_light_running);
+	}
+
+	uint8_t flood_max()
+	{
+		return light_max(m_light_running);
+	}
+
+	// Light a voxel makes of its own, which is what lamp light floods from:
+	// a torch, a lava flow. The sky has no emitters -- its source is the
+	// open sky above the world and the light already stored in a voxel.
+	uint8_t emitted_at(const pv::Vector3DInt32 &p)
+	{
+		if(m_light_running != LIGHT_LAMP)
+			return 0;
+		VoxelInstance v = light_get(p);
+		const interface::CachedVoxelDefinition *def = cached_of(sample_of(v));
+		return def ? def->light_source : 0;
+	}
+
+	// A voxel light does not pass through wears the brightest light beside
+	// it, which is what the mesher reads off a face; one that makes its own
+	// light keeps that whatever is around it.
+	void light_blocker_from_neighbours(const pv::Vector3DInt32 &p)
+	{
+		VoxelInstance v = light_get(p);
+		if(transmits_light_at(p))
+			return;
+		uint8_t best = emitted_at(p);
+		for(size_t k = 0; k < 6; k++){
+			pv::Vector3DInt32 np(
+					p.getX() + LIGHT_OFF[k][0],
+					p.getY() + LIGHT_OFF[k][1],
+					p.getZ() + LIGHT_OFF[k][2]);
+			VoxelInstance nv = light_get(np);
+			if(transmits_light_at(np) && flood_get(nv) > best)
+				best = flood_get(nv);
+		}
+		if(flood_get(v) != best)
+			light_set(p, v, best);
+	}
+
 	void light_bleed_into_blockers(const pv::Vector3DInt32 &p, uint8_t level)
 	{
 		for(size_t k = 0; k < 6; k++){
 			pv::Vector3DInt32 n(p.getX() + LIGHT_OFF[k][0],
 					p.getY() + LIGHT_OFF[k][1], p.getZ() + LIGHT_OFF[k][2]);
 			VoxelInstance nv = light_get(n);
-			if(transmits_light_at(n) || get_sky(nv) >= level)
+			if(transmits_light_at(n) || flood_get(nv) >= level)
 				continue;
 			light_set(n, nv, level);
 		}
@@ -1480,7 +3741,7 @@ struct CInstance: public voxelworld::Instance
 		ChunkBuffer *buf = light_buffer(chunk_p);
 		if(buf == nullptr)
 			return;
-		set_sky(v, level);
+		flood_set(v, level);
 		buf->volume->setVoxelAt(light_local_p(p, chunk_p), v);
 		if(!buf->dirty){
 			buf->dirty = true;
@@ -1511,7 +3772,19 @@ struct CInstance: public voxelworld::Instance
 				buf->volume->sample_at(light_local_p(p, chunk_p)));
 	}
 
-	// Bring the skylight up to date after the voxels in m_skylight_seeds
+	// See voxel_propagates_sunlight(): asked of the voxel the column is
+	// about to enter
+	bool propagates_sunlight_at(const pv::Vector3DInt32 &p)
+	{
+		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		ChunkBuffer *buf = light_buffer(chunk_p);
+		if(buf == nullptr)
+			return false;
+		return voxel_propagates_sunlight(
+				buf->volume->sample_at(light_local_p(p, chunk_p)));
+	}
+
+	// Bring the skylight up to date after the voxels in m_light_seeds[LIGHT_SKY]
 	// changed. Light is taken out of everything the changed voxels were
 	// lighting, and then spread back in from whatever still has light, so the
 	// work done is proportional to how far the change reaches rather than to
@@ -1519,33 +3792,195 @@ struct CInstance: public voxelworld::Instance
 	// crosses chunk and section boundaries by itself; a section that is not in
 	// memory reads as undefined and stops the light, which keeps an edit next
 	// to the edge of the loaded world from running away.
+	// Every light the world maintains, each in turn
+	// A flood in progress, kept between ticks ([STEP_SLICE]): the deferred
+	// relight of a section is a breadth-first flood over its air, 100-200
+	// ms for a VoxeLibre section, and one tick may not hold it. The
+	// queues and the indices into them are the whole state; a flood that
+	// stops at its deadline goes on where it was on the next call, and
+	// what it has written so far is committed like any other write, so a
+	// section may be seen half-lit for a tick or two.
+	struct FloodState
+	{
+		bool active = false;
+		std::vector<LightNode> unlight, spread;
+		// Voxels that block light next to light that went away. Only
+		// these have to be worked out the slow way; everywhere else the
+		// light is pushed into them as it is written.
+		std::vector<pv::Vector3DInt32> blockers;
+		size_t ui = 0, si = 0, seeds_n = 0;
+		std::chrono::steady_clock::time_point t0;
+	};
+	FloodState m_flood[NUM_LIGHT_FIELDS];
+
 	void update_skylight()
 	{
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
+			update_light((LightField)f, 0);
+	}
+
+	// A write's seeds flooded now, to the end, while a deferred relight's
+	// flood is under way and would otherwise take them on its end -- ticks
+	// or seconds later under relight_stale()'s budget: a placed lamp lit
+	// nothing in the reference set's vp8 and check_map read its room lit
+	// before the flood ([DIG_LIGHT], [CHECK_MAP_FLAKE]). The relight's
+	// state is put aside, the seeds run as a flood of their own, and the
+	// relight goes on where it was; the two write the same voxels and the
+	// relight's pass, which takes light out and lets it back in, settles
+	// whatever they disagree on.
+	// Only a handful of seeds -- a player's dig or placement; a relight's
+	// pass seeds a section by the ten thousand into the same queue, and
+	// those are the sliced flood's to take under its budget, not this
+	// one's to run at once (a probe cycle stalled on it, 2026-09-20).
+	static const size_t NOW_SEEDS_MAX = 256;
+	void update_skylight_now()
+	{
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+			if(m_light_seeds[f].empty() ||
+					m_light_seeds[f].size() > NOW_SEEDS_MAX)
+				continue;
+			FloodState paused;
+			paused.active = m_flood[f].active;
+			paused.unlight.swap(m_flood[f].unlight);
+			paused.spread.swap(m_flood[f].spread);
+			paused.blockers.swap(m_flood[f].blockers);
+			paused.ui = m_flood[f].ui; paused.si = m_flood[f].si;
+			paused.seeds_n = m_flood[f].seeds_n; paused.t0 = m_flood[f].t0;
+			m_flood[f] = FloodState();
+			update_light((LightField)f, 0);
+			m_flood[f].active = paused.active;
+			m_flood[f].unlight.swap(paused.unlight);
+			m_flood[f].spread.swap(paused.spread);
+			m_flood[f].blockers.swap(paused.blockers);
+			m_flood[f].ui = paused.ui; m_flood[f].si = paused.si;
+			m_flood[f].seeds_n = paused.seeds_n; m_flood[f].t0 = paused.t0;
+		}
+	}
+
+	// Every field's flood until the deadline (microseconds of time_us(),
+	// 0 for none); false when one is still unfinished
+	bool update_skylight_until(int64_t deadline_us)
+	{
+		// The columns the seeds are about may have moved since the last
+		// flood; see open_sky_from()
+		forget_open_sky();
+		bool done = true;
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
+			done = update_light((LightField)f, deadline_us) && done;
+		return done;
+	}
+
+	// Returns false when the deadline stopped it before the end
+	bool update_light(LightField field, int64_t deadline_us)
+	{
+		FloodState &st = m_flood[field];
+		auto over = [&](){
+			return deadline_us != 0 && interface::os::time_us() >= deadline_us;
+		};
 		std::vector<SkylightSeed> seeds;
-		seeds.swap(m_skylight_seeds);
-		if(!m_skylight_enabled || seeds.empty())
-			return;
-		auto t0 = std::chrono::steady_clock::now();
+		if(!st.active){
+			seeds.swap(m_light_seeds[field]);
+			if(!m_light_maintained[field] || seeds.empty())
+				return true;
+			st = FloodState();
+			st.active = true;
+			st.t0 = std::chrono::steady_clock::now();
+			st.seeds_n = seeds.size();
+		} else if(!m_light_seeds[field].empty()){
+			// New seeds while a flood runs go on the end of it
+			seeds.swap(m_light_seeds[field]);
+			st.seeds_n += seeds.size();
+		}
+		m_light_running = field;
 		m_light_buf = nullptr;
 		m_light_section = nullptr;
 
-		std::vector<LightNode> unlight;
-		std::vector<LightNode> spread;
-		// Voxels that block light next to light that went away. Only these
-		// have to be worked out the slow way; everywhere else the light is
-		// pushed into them as it is written.
-		std::vector<pv::Vector3DInt32> blockers;
+		std::vector<LightNode> &unlight = st.unlight;
+		std::vector<LightNode> &spread = st.spread;
+		std::vector<pv::Vector3DInt32> &blockers = st.blockers;
 
-		for(const SkylightSeed &seed : seeds){
+		for(size_t si = 0; si < seeds.size(); si++){
+			// The seeds are the slow half under a flood ([FLOOD_STEP]: a
+			// liquid pass's 11 806 seeds took 1.9 s with 1210 spread --
+			// each one scattered over the sea, its chunk's buffer loaded
+			// for it); over the deadline the rest go back to the front of
+			// the queue and this returns unfinished, the next call's first
+			if((si & 63) == 63 && over()){
+				m_light_seeds[field].insert(m_light_seeds[field].begin(),
+						seeds.begin() + si, seeds.end());
+				st.seeds_n -= seeds.size() - si;
+				return false;
+			}
+			const SkylightSeed &seed = seeds[si];
 			VoxelInstance v = light_get(seed.p);
 			bool now_transparent = transmits_light_at(seed.p);
+			// A handful of seeds is a player's dig: said one by one, so a
+			// dig whose light does not come out right can be read off
+			// the log ([DIG_LIGHT])
+			if(seeds.size() <= 4){
+				log_d(MODULE, "%s seed " PV3I_FORMAT ": was %s now %s, old %u, "
+						"holds %u, emits %u", field == LIGHT_SKY ? "sky" : "lamp",
+						PV3I_PARAMS(seed.p),
+						seed.was_transparent ? "clear" : "solid",
+						now_transparent ? "clear" : "solid",
+						(unsigned)seed.old_level, (unsigned)flood_get(v),
+						(unsigned)emitted_at(seed.p));
+				for(size_t k = 0; k < 6; k++){
+					pv::Vector3DInt32 n(
+							seed.p.getX() + LIGHT_OFF[k][0],
+							seed.p.getY() + LIGHT_OFF[k][1],
+							seed.p.getZ() + LIGHT_OFF[k][2]);
+					log_d(MODULE, "  beside " PV3I_FORMAT ": %s, holds %u",
+							PV3I_PARAMS(n),
+							transmits_light_at(n) ? "clear" : "solid",
+							(unsigned)flood_get(light_get(n)));
+				}
+			}
 			if(seed.was_transparent && !now_transparent){
 				// It took its light with it
 				unlight.push_back(LightNode{seed.p, seed.old_level});
 				blockers.push_back(seed.p);
+				// Unless what arrived makes its own light. A torch is a
+				// solid node that nothing sees through and it still lights
+				// the room: an emitter is a source whether or not light
+				// passes through it.
+				const uint8_t emitted = emitted_at(seed.p);
+				if(emitted > 0){
+					light_set(seed.p, v, emitted);
+					spread.push_back(LightNode{seed.p, emitted});
+				}
 			} else if(!seed.was_transparent && now_transparent){
-				// It is dark and has to be filled from around it
-				uint8_t l = is_below_open_sky(seed.p) ? sky_max() : 0;
+				// It has to be filled from around it, unless it is a source
+				// itself: the open sky above the world, a voxel that makes
+				// its own light, or one the generator lit -- which is what
+				// makes the sky reach the ground in a world whose region
+				// top is thirty thousand voxels up and never loaded
+				uint8_t l = flood_get(v);
+				const uint8_t emitted = emitted_at(seed.p);
+
+				// Unless what went was a light source of its own: a torch
+				// is solid and lights the room, and taking one away has to
+				// take its light with it. What it holds is that light --
+				// a blocker wears the brightest light beside it so the
+				// mesher has something to read off its faces -- so it is
+				// cleared here rather than spread back out.
+				//
+				// Found through nodecore, whose player hand is a node with
+				// light_source 14 that blocks light: the startup map check
+				// put one in a room, took it out again, and the room stayed
+				// lit at 13. devtest's own lamps are glasslike and let light
+				// through, which is the other branch and has always worked.
+				if(seed.old_emitted > emitted){
+					light_set(seed.p, v, 0);
+					unlight.push_back(LightNode{seed.p, seed.old_emitted});
+					l = 0;
+				}
+
+				if(field == LIGHT_SKY &&
+						is_below_open_sky(seed.p, seed.from_relight))
+					l = flood_max();
+				if(emitted > l)
+					l = emitted;
 				light_set(seed.p, v, l);
 				if(l > 0){
 					spread.push_back(LightNode{seed.p, l});
@@ -1559,8 +3994,23 @@ struct CInstance: public voxelworld::Instance
 					VoxelInstance nv = light_get(n);
 					if(!transmits_light_at(n))
 						continue;
-					if(get_sky(nv) > 0)
-						spread.push_back(LightNode{n, get_sky(nv)});
+					if(flood_get(nv) > 0)
+						spread.push_back(LightNode{n, flood_get(nv)});
+				}
+			} else {
+				// Transparency did not change, so what changed is what the
+				// voxel makes of its own light: a torch put down or taken
+				// away. More than it holds makes it a source; less means
+				// the light it was giving has to be taken back.
+				const uint8_t emitted = emitted_at(seed.p);
+				const uint8_t held = flood_get(v);
+				if(emitted > held){
+					light_set(seed.p, v, emitted);
+					spread.push_back(LightNode{seed.p, emitted});
+					light_bleed_into_blockers(seed.p, emitted);
+				} else if(seed.old_level > 0 && emitted < seed.old_level){
+					light_set(seed.p, v, 0);
+					unlight.push_back(LightNode{seed.p, seed.old_level});
 				}
 			}
 		}
@@ -1571,7 +4021,9 @@ struct CInstance: public voxelworld::Instance
 		// back from. Straight down is the exception: light does not dim on the
 		// way down, so a full strength voxel below a full strength one was
 		// still lit by it.
-		for(size_t i = 0; i < unlight.size(); i++){
+		for(size_t &i = st.ui; i < unlight.size(); i++){
+			if((i & 255) == 255 && over())
+				return false;
 			LightNode node = unlight[i];
 			for(size_t k = 0; k < 6; k++){
 				pv::Vector3DInt32 n(
@@ -1584,11 +4036,12 @@ struct CInstance: public voxelworld::Instance
 					blockers.push_back(n);
 					continue;
 				}
-				uint8_t nl = get_sky(nv);
+				uint8_t nl = flood_get(nv);
 				if(nl == 0)
 					continue;
-				bool lit_from_above = (k == LIGHT_DOWN &&
-						node.level == sky_max() && nl == sky_max());
+				bool lit_from_above = (field == LIGHT_SKY &&
+						k == LIGHT_DOWN && node.level == flood_max() &&
+						nl == flood_max() && propagates_sunlight_at(n));
 				if(nl < node.level || lit_from_above){
 					light_set(n, nv, 0);
 					unlight.push_back(LightNode{n, nl});
@@ -1599,7 +4052,9 @@ struct CInstance: public voxelworld::Instance
 		}
 
 		// Spread it back in
-		for(size_t i = 0; i < spread.size(); i++){
+		for(size_t &i = st.si; i < spread.size(); i++){
+			if((i & 255) == 255 && over())
+				return false;
 			LightNode node = spread[i];
 			if(node.level == 0)
 				continue;
@@ -1608,9 +4063,16 @@ struct CInstance: public voxelworld::Instance
 			// after it was queued, and spreading the level it used to have
 			// would put light back where it was just taken from.
 			VoxelInstance v = light_get(node.p);
-			if(!transmits_light_at(node.p))
+			const uint8_t emitted = emitted_at(node.p);
+			// A voxel light does not pass through spreads nothing, unless
+			// it is making the light itself
+			if(!transmits_light_at(node.p) && emitted == 0)
 				continue;
-			node.level = get_sky(v);
+			node.level = flood_get(v);
+			if(emitted > node.level){
+				node.level = emitted;
+				light_set(node.p, v, node.level);
+			}
 			if(node.level == 0)
 				continue;
 			for(size_t k = 0; k < 6; k++){
@@ -1620,14 +4082,15 @@ struct CInstance: public voxelworld::Instance
 						node.p.getZ() + LIGHT_OFF[k][2]);
 				VoxelInstance nv = light_get(n);
 				if(!transmits_light_at(n)){
-					if(get_sky(nv) < node.level)
+					if(flood_get(nv) < node.level)
 						light_set(n, nv, node.level);
 					continue;
 				}
-				uint8_t target = (k == LIGHT_DOWN &&
-						node.level == sky_max()) ?
-						sky_max() : node.level - 1;
-				if(target > get_sky(nv)){
+				uint8_t target = (field == LIGHT_SKY &&
+						k == LIGHT_DOWN && node.level == flood_max() &&
+						propagates_sunlight_at(n)) ?
+						flood_max() : node.level - 1;
+				if(target > flood_get(nv)){
 					light_set(n, nv, target);
 					spread.push_back(LightNode{n, target});
 				}
@@ -1647,29 +4110,24 @@ struct CInstance: public voxelworld::Instance
 		blockers.erase(std::unique(blockers.begin(), blockers.end()),
 				blockers.end());
 		size_t n_blockers = blockers.size();
-		for(const pv::Vector3DInt32 &p : blockers){
-			VoxelInstance v = light_get(p);
-			if(transmits_light_at(p))
-				continue;
-			uint8_t best = 0;
-			for(size_t k = 0; k < 6; k++){
-				pv::Vector3DInt32 np(
-						p.getX() + LIGHT_OFF[k][0],
-						p.getY() + LIGHT_OFF[k][1],
-						p.getZ() + LIGHT_OFF[k][2]);
-				VoxelInstance nv = light_get(np);
-				if(transmits_light_at(np) && get_sky(nv) > best)
-					best = get_sky(nv);
-			}
-			if(get_sky(v) != best)
-				light_set(p, v, best);
-		}
+		for(const pv::Vector3DInt32 &p : blockers)
+			light_blocker_from_neighbours(p);
 
-		log_v(MODULE, "update_skylight(): %zu seeds, %zu unlit, %zu spread, "
-				"%zu blockers in %i ms", seeds.size(), unlight.size(),
-				spread.size(), n_blockers,
+		const int took_ms =
 				(int)std::chrono::duration_cast<std::chrono::milliseconds>(
-				std::chrono::steady_clock::now() - t0).count());
+				std::chrono::steady_clock::now() - st.t0).count();
+		// Said out loud when it is slow, because this runs at the end of
+		// every access into voxelworld and everything waiting to get in
+		// waits for it: a game that builds its terrain in on_generated --
+		// VoxeLibre does -- hands it a section's worth of seeds at a time,
+		// and a caller that only wanted to read a node is behind that.
+		static const int SLOW_LIGHT_MS = 500;
+		log_(took_ms >= SLOW_LIGHT_MS ? CORE_WARNING : CORE_VERBOSE, MODULE,
+				"update_skylight(): %zu seeds, %zu unlit, %zu spread, "
+				"%zu blockers in %i ms", st.seeds_n, unlight.size(),
+				spread.size(), n_blockers, took_ms);
+		st = FloodState();
+		return true;
 	}
 
 	// Commit and unload chunk buffer
@@ -1680,6 +4138,7 @@ struct CInstance: public voxelworld::Instance
 			// No changes
 			return;
 		}
+		section->modified = true;
 
 		pv::Vector3DInt32 chunk_p = section->get_chunk_p(chunk_i);
 		uint node_id = section->node_ids->getVoxelAt(chunk_p);
@@ -1700,8 +4159,17 @@ struct CInstance: public voxelworld::Instance
 
 		run_commit_hooks_in_thread(chunk_p, *chunk_buffer.volume);
 
+		const int64_t t_before_pack = interface::os::time_us();
 		ss_ new_data = interface::serialize_volume_compressed(
 				*chunk_buffer.volume);
+
+		// What a commit is made of, because a commit that takes seconds for
+		// one buffer is not taking them in zstd: this runs in voxelworld's
+		// own thread and the scene belongs to the main one, so every buffer
+		// written is a wait for whatever the main thread is doing. The two
+		// are counted apart and commit() says which it was.
+		const int64_t t_before_scene = interface::os::time_us();
+		m_commit_pack_us += t_before_scene - t_before_pack;
 
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Scene *scene = imc->check_scene(m_scene_ref);
@@ -1727,30 +4195,7 @@ struct CInstance: public voxelworld::Instance
 
 			run_commit_hooks_in_scene(chunk_p, n);
 		});
-
-		// First send updated voxel registry to clients so that they are ready
-		// to generate stuff from the voxels
-		send_voxel_registry_if_dirty();
-
-		// Then synchronize node and notify clients about it
-		sv_<replicate::PeerId> peers;
-		replicate::access(m_server, [&](replicate::Interface *ireplicate){
-			ireplicate->sync_node_immediate(m_scene_ref, node_id);
-			peers = ireplicate->find_peers_that_know_node(m_scene_ref, node_id);
-		});
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar((int32_t)node_id);
-		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			for(auto &peer_id: peers){
-				if(!m_clients_initialized.count(peer_id))
-					continue;
-				inetwork->send(peer_id, "voxelworld:node_volume_updated",
-						os.str());
-			}
-		});
+		m_commit_scene_us += interface::os::time_us() - t_before_scene;
 
 		// Mark node for collision box update
 		mark_node_for_physics_update(node_id);
@@ -1759,8 +4204,72 @@ struct CInstance: public voxelworld::Instance
 		chunk_buffer.dirty = false;
 		m_total_buffers_dirty--;
 
-		m_server->emit_event("voxelworld:node_volume_updated",
-				new NodeVolumeUpdated(m_scene_ref, node_id, true, chunk_p));
+		// Telling replicate and the clients about it is the same work for
+		// one node as for a hundred, and it is a hop into another module's
+		// thread which itself hops into main_context's -- so it is done once
+		// for the whole commit rather than once per buffer. See
+		// announce_committed_nodes().
+		m_committed_nodes.push_back(
+				std::pair<uint, pv::Vector3DInt32>(node_id, chunk_p));
+	}
+
+	// What commit() tells the rest of the server about the buffers it wrote:
+	// the voxel registry first, so that a client has the types before it is
+	// given voxels of them, then one pass through replicate for every node,
+	// then the packets and the events.
+	//
+	// Measured on a VoxeLibre world being generated (2026-09-15): one hop
+	// per buffer cost between two and a half and five and a half seconds for
+	// a single dirty buffer, all of it inside replicate::access(), because
+	// replicate's own sync_node_immediate() waits for main_context in turn.
+	// Everything that wants voxelworld waits behind that, which is what the
+	// shutdown hang looks like from the outside.
+	void announce_committed_nodes()
+	{
+		if(m_committed_nodes.empty())
+			return;
+		// First send updated voxel registry to clients so that they are ready
+		// to generate stuff from the voxels
+		const int64_t t_before_reg = interface::os::time_us();
+		send_voxel_registry_if_dirty();
+
+		// Then synchronize the nodes and notify clients about them
+		const int64_t t_before_rep = interface::os::time_us();
+		m_commit_registry_us += t_before_rep - t_before_reg;
+		sv_<sv_<replicate::PeerId>> peers(m_committed_nodes.size());
+		replicate::access(m_server, [&](replicate::Interface *ireplicate){
+			for(size_t i = 0; i < m_committed_nodes.size(); i++){
+				const uint node_id = m_committed_nodes[i].first;
+				ireplicate->sync_node_immediate(m_scene_ref, node_id);
+				peers[i] = ireplicate->find_peers_that_know_node(
+						m_scene_ref, node_id);
+			}
+		});
+		m_commit_replicate_us += interface::os::time_us() - t_before_rep;
+
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(size_t i = 0; i < m_committed_nodes.size(); i++){
+				const uint node_id = m_committed_nodes[i].first;
+				std::ostringstream os(std::ios::binary);
+				{
+					cereal::PortableBinaryOutputArchive ar(os);
+					ar((int32_t)node_id);
+				}
+				for(auto &peer_id: peers[i]){
+					if(!m_clients_initialized.count(peer_id))
+						continue;
+					inetwork->send(peer_id, "voxelworld:node_volume_updated",
+							os.str());
+				}
+			}
+		});
+
+		for(const auto &pair : m_committed_nodes){
+			m_server->emit_event("voxelworld:node_volume_updated",
+					new NodeVolumeUpdated(m_scene_ref, pair.first, true,
+					pair.second));
+		}
+		m_committed_nodes.clear();
 	}
 
 	size_t num_buffers_loaded()
@@ -1768,29 +4277,111 @@ struct CInstance: public voxelworld::Instance
 		return m_total_buffers_loaded;
 	}
 
-	void set_skylight_enabled(bool enabled)
+	void set_light_maintained(LightField field, bool maintained)
+	{
+		if(maintained && !light_field(field).bound()){
+			throw Exception(ss_()+"voxelworld: this world's format has "
+					"nowhere to put "+(field == LIGHT_LAMP ? "lamp" : "sky")+
+					" light");
+		}
+		if(field == LIGHT_LAMP){
+			m_light_maintained[LIGHT_LAMP] = maintained;
+			return;
+		}
+		set_skylight_enabled_impl(maintained);
+	}
+
+	void set_skylight_enabled_impl(bool enabled)
 	{
 		if(enabled && !sky_field().bound())
 			throw Exception(ss_()+"set_skylight_enabled(): there is nowhere "
 					"to put it in "+m_voxel_reg->get_format().dump());
-		m_skylight_enabled = enabled;
+		m_light_maintained[LIGHT_SKY] = enabled;
 	}
+
+	// What the last commit() spent where; see commit_chunk_buffer()
+	int64_t m_commit_pack_us = 0;
+	int64_t m_commit_scene_us = 0;
+	int64_t m_commit_registry_us = 0;
+	int64_t m_commit_replicate_us = 0;
+	// The nodes this commit wrote, for announce_committed_nodes()
+	sv_<std::pair<uint, pv::Vector3DInt32>> m_committed_nodes;
 
 	void commit()
 	{
+		const int64_t t0 = interface::os::time_us();
+		m_commit_pack_us = 0;
+		m_commit_scene_us = 0;
+		m_commit_registry_us = 0;
+		m_commit_replicate_us = 0;
 		// Before anything is meshed, so that the light lands in the same
-		// remesh as the voxels that changed it
-		update_skylight();
+		// remesh as the voxels that changed it -- unless a deferred
+		// relight's flood is under way, which relight_stale() carries on
+		// under its own budget: finishing it here made the slicing moot,
+		// since every access ends here ([STEP_SLICE]). Seeds from writes
+		// made meanwhile wait on the end of that flood, a few ticks.
+		// Under a budget ([FLOOD_STEP]): a liquid pass's thousands of
+		// writes seeded a flood of 330 000 voxels that took 1.6 s of the
+		// step. What the budget leaves is a pending relight with no
+		// blockers of its own, carried on by relight_stale() under the
+		// tick's budget as a section's deferred relight is; the light of
+		// those writes lags a few ticks, the step does not.
+		static const int64_t COMMIT_LIGHT_BUDGET_US = 50000;
+		if(!m_relight_pending){
+			if(!update_skylight_until(t0 + COMMIT_LIGHT_BUDGET_US)){
+				m_relight_blockers.clear();
+				m_relight_finish_f = 0;
+				m_relight_finish_i = 0;
+				m_relight_pending = true;
+			}
+		} else
+			update_skylight_now();
+		const int64_t t_light = interface::os::time_us();
 
 		if(m_sections_with_loaded_buffers.empty())
 			return;
 		log_d(MODULE, "Committing %zu dirty buffers in %zu sections",
 				m_total_buffers_dirty,
 				m_sections_with_loaded_buffers.size());
+		const size_t was_dirty = m_total_buffers_dirty;
+		// Said while it is still going and not only when it is over: a
+		// commit that never returns is what a hang looks like from the
+		// outside, and a line per second saying how far it has got is what
+		// tells that apart from a commit that is merely long.
+		static const int64_t SAY_EVERY_US = 1000000;
+		int64_t say_at = t0 + SAY_EVERY_US;
+		size_t written = 0;
 		for(Section *section : m_sections_with_loaded_buffers){
 			for(size_t i = 0; i < section->chunk_buffers.size(); i++){
+				if(section->chunk_buffers[i].dirty)
+					written++;
 				commit_chunk_buffer(section, i);
+				const int64_t now = interface::os::time_us();
+				if(now >= say_at){
+					say_at = now + SAY_EVERY_US;
+					log_w(MODULE, "commit(): %zu of %zu dirty buffers "
+							"written after %.1f s", written, was_dirty,
+							(now - t0) / 1e6);
+				}
 			}
+		}
+		// The nodes this wrote are announced on the next tick and not here;
+		// see announce_committed_nodes() and on_tick().
+		//
+		// This runs at the end of every access into voxelworld -- see
+		// voxelworld::access() in api.h -- so whatever it costs is what
+		// every other module waits for before it can get in. A second of it
+		// is a second of the game not answering.
+		static const int64_t SLOW_COMMIT_US = 500000;
+		const int64_t took = interface::os::time_us() - t0;
+		if(took >= SLOW_COMMIT_US){
+			log_w(MODULE, "commit(): %zu dirty buffers in %zu sections took "
+					"%.1f s -- light %.1f, packing %.1f, the main thread "
+					"%.1f, the voxel registry %.1f, replicate %.1f",
+					was_dirty, m_sections_with_loaded_buffers.size(),
+					took / 1e6, (t_light - t0) / 1e6,
+					m_commit_pack_us / 1e6, m_commit_scene_us / 1e6,
+					m_commit_registry_us / 1e6, m_commit_replicate_us / 1e6);
 		}
 	}
 
@@ -1861,15 +4452,21 @@ struct Module: public interface::Module, public voxelworld::Interface
 
 	void init()
 	{
+		if(keep_loaded_wanted())
+			log_i(MODULE, "BUILDAT_VOXELWORLD_KEEP_LOADED: nothing is "
+					"unloaded this run");
 		// NOTE: These also apply to CInstances
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
+		m_server->sub_event(this, Event::t("core:shutdown"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("replicate:peer_joined_scene"));
 		m_server->sub_event(this, Event::t("replicate:peer_left_scene"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("main_context:scene_deleted"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/voxelworld:set_send_distance"));
 		/*m_server->sub_event(this, Event::t(
 					"network:packet_received/voxelworld:get_section"));*/
 	}
@@ -1878,6 +4475,7 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
+		EVENT_VOIDN("core:shutdown", on_shutdown)
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("replicate:peer_joined_scene", on_peer_joined_scene,
@@ -1914,6 +4512,15 @@ struct Module: public interface::Module, public voxelworld::Interface
 		// Remove everything else
 		n->RemoveAllComponents();
 		n->Remove();
+	}
+
+	// The server is going away. A world with a save gets one last flush; one
+	// without is unchanged by this, which is every game that has not asked
+	// for persistence.
+	void on_shutdown()
+	{
+		for(auto &pair : m_instances)
+			pair.second->save();
 	}
 
 	void on_unload()
