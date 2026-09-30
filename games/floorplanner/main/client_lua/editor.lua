@@ -119,6 +119,9 @@ local S = {
 	-- zooms toward the cursor rather than along its own direction (user)
 	wheel_speed = tonumber(buildat.storage_read("wheel_speed") or "") or 100,
 	zoom_to_cursor = buildat.storage_read("zoom_to_cursor") == "1",
+	-- The middle drag in 3D moving the camera along the ground (XZ) rather
+	-- than across the screen (user); kept on the client
+	pan_xz = buildat.storage_read("pan_xz") == "1",
 	-- The 3D view without the floors above the current one, to see into it
 	-- from above (user); kept on the client
 	hide_above = buildat.storage_read("hide_above") == "1",
@@ -4982,6 +4985,12 @@ do
 				buildat.storage_write("wheel_speed", tostring(S.wheel_speed))
 			end
 		end)
+		panel.check(w, "3D: the middle drag moves along the ground", S.pan_xz,
+				function()
+			S.pan_xz = not S.pan_xz
+			buildat.storage_write("pan_xz", S.pan_xz and "1" or "0")
+			client_settings_page()
+		end)
 		panel.check(w, "3D: the wheel zooms toward the cursor", S.zoom_to_cursor,
 				function()
 			S.zoom_to_cursor = not S.zoom_to_cursor
@@ -5996,6 +6005,17 @@ do
 			local k = S.pan3d.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
 			local rx, ry, rz = geom.rot(1, 0, 0, S.pitch, S.yaw, 0)
 			local ux, uy, uz = geom.rot(0, 1, 0, S.pitch, S.yaw, 0)
+			if S.pan_xz then
+				-- Along the ground: the view's right and its forward, both
+				-- level, the ground grabbed and pulled
+				local fx, _, fz = geom.rot(0, 0, 1, 0, S.yaw, 0)
+				local rl = geom.len(rx, rz)
+				if rl > 1e-6 then
+					rx, rz = rx / rl, rz / rl
+				end
+				ry = 0
+				ux, uy, uz = fx, 0, fz
+			end
 			S.pos = {x = S.pos.x - (rx * dx - ux * dy) * k,
 					y = S.pos.y - (ry * dx - uy * dy) * k,
 					z = S.pos.z - (rz * dx - uz * dy) * k}
