@@ -106,6 +106,9 @@ local S = {
 	-- How fast the mouse turns the view, in percent: walking's look and
 	-- the 3D view's orbit (user)
 	mouse_sens = tonumber(buildat.storage_read("mouse_sens") or "") or 100,
+	-- The 3D view without the floors above the current one, to see into it
+	-- from above (user); kept on the client
+	hide_above = buildat.storage_read("hide_above") == "1",
 	export_mmpx = 10, -- the PNG export's scale
 	calib = nil,    -- an image being calibrated: {id, pts, measured}
 	yaw = 35, pitch = 40,
@@ -1735,6 +1738,9 @@ rebuild = function()
 	end
 	local seen_voxels, all_solids = {}, {}
 	place.layers = {}
+	-- Which layouts are above the current one, for S.hide_above; what is
+	-- built new is shown, so the hiding is done again
+	place.above, place.shown = {}, {}
 	local wells = place.stairwells(order, cur)
 	for _, l in ipairs(order) do
 		local r = place.rel(l.ints, cur)
@@ -1753,6 +1759,7 @@ rebuild = function()
 			n.position = magic.Vector3(W(r.x), W(r.y), W(r.z))
 			n.rotation = magic.Quaternion(0, r.yaw, 0)
 		end
+		place.above[l.id] = r.y > 0
 		P, S.view_layout = parts, l.id
 		build_layout(seen_voxels, wells[l.id])
 		for _, sd in ipairs(solids) do
@@ -4023,7 +4030,18 @@ place.build_window = function()
 			refresh_panels()
 		end, l.id == S.layout)
 	end
+	-- At the bottom for everyone: what the 3D view shows of the floors
+	-- over this one (user)
+	local function above_toggle()
+		panel.button(w, S.hide_above and "Floors above: hidden in 3D" or
+				"Floors above: shown in 3D", function()
+			S.hide_above = not S.hide_above
+			buildat.storage_write("hide_above", S.hide_above and "1" or "0")
+			refresh_panels()
+		end, S.hide_above)
+	end
 	if not e or not doc.can("edit") then
+		above_toggle()
 		return
 	end
 	panel.label(w, "This one")
@@ -4092,6 +4110,7 @@ place.build_window = function()
 			send({{op = "delete", ent = {id = id}}})
 		end)
 	end
+	above_toggle()
 end
 
 refresh_panels = function()
@@ -6538,6 +6557,19 @@ function M.update(dt)
 	end
 	export_step()
 	cam3d.fov = M.fov_for(S.view == "walk" and S.walk_fov or 60)
+	-- The floors above hidden in 3D, when the layouts menu says so. Deep:
+	-- a layout's nodes hold its walls and objects as children.
+	place.shown = place.shown or {}
+	for id, parts in pairs(place.parts) do
+		local shown = not (S.hide_above and S.view == "3d" and
+				place.above and place.above[id])
+		if place.shown[id] ~= shown then
+			place.shown[id] = shown
+			for _, n in pairs(parts) do
+				n:SetDeepEnabled(shown)
+			end
+		end
+	end
 	move_camera(dt)
 	place_cameras()
 	send_presence(dt)

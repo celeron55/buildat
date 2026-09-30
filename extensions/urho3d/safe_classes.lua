@@ -1508,6 +1508,10 @@ function M.define(dst, util)
 			Remove = util.self_function("Remove", {}, {"Node"}),
 			SetEnabled = util.self_function(
 					"SetEnabled", {}, {"Node", "boolean"}),
+			-- The node, its children and their components: what hides a
+			-- whole subtree, where SetEnabled is only the node's own
+			SetDeepEnabled = util.self_function(
+					"SetDeepEnabled", {}, {"Node", "boolean"}),
 			-- A copy of the node and its components, in the same parent.
 			-- Urho3D copies a component through its attributes, which is in
 			-- the engine: what wants this is geometry that costs a sandbox
