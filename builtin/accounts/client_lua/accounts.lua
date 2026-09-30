@@ -395,12 +395,18 @@ end
 
 local YELLOW = magic.Color(1.0, 0.8, 0.4)
 
+local chat_list = nil
+-- The width a line of the chat wraps to: the page's less its margins and
+-- the list's scroll bar
+local chat_width = 100
+
 function M.close_page()
 	if M.page then
 		M.page:Remove()
 		M.page = nil
 	end
 	page_kind = nil
+	chat_list = nil
 end
 
 local function open_page(kind, title, back)
@@ -568,6 +574,74 @@ end
 M.users_page = function(back)
 	M.admin("list")
 	users_page(back)
+end
+
+--
+-- **The chat console** ([CHAT_CONSOLE]): the chat as a page of its own, a
+-- log that scrolls and a line to type in, for a touchscreen, where there
+-- is no key to open a game's chat line, and for reading back. The game
+-- hands it every line with chat_add() and sets chat_send(text).
+--
+M.chat_lines = {}
+M.chat_send = nil
+local CHAT_KEEP = 200
+
+local function chat_row(text)
+	local t = chat_list:CreateChild("Text")
+	t:SetStyleAuto()
+	t:SetWordwrap(true)
+	t:SetFixedWidth(chat_width)
+	t:SetText(text)
+	chat_list:AddItem(t)
+end
+
+local function chat_to_end()
+	chat_list.viewPosition = magic.IntVector2(0, 1000000)
+end
+
+function M.chat_add(line)
+	M.chat_lines[#M.chat_lines + 1] = line
+	while #M.chat_lines > CHAT_KEEP do
+		table.remove(M.chat_lines, 1)
+	end
+	if chat_list then
+		chat_row(line)
+		chat_to_end()
+	end
+end
+
+function M.chat_page(back)
+	local w = open_page("chat", "Chat", back)
+	chat_width = math.max(100, w.width - 32 - 28)
+	chat_list = w:CreateChild("ListView")
+	chat_list:SetStyleAuto()
+	chat_list:SetFixedHeight(math.max(120,
+			math.floor(magic.ui.root.height * 0.5)))
+	for _, line in ipairs(M.chat_lines) do
+		chat_row(line)
+	end
+	local r = row(w)
+	local e = r:CreateChild("LineEdit")
+	e:SetStyleAuto()
+	e.minHeight = 28
+	e.textCopyable = true
+	e.textSelectable = true
+	local function send()
+		local text = e:GetText()
+		if text ~= "" and M.chat_send then
+			M.chat_send(text)
+		end
+		e:SetText("")
+	end
+	magic.SubscribeToEvent(e, "TextFinished", send)
+	local b = button(r, "Send", send)
+	b:SetFixedWidth(b.minWidth)
+	button(w, "Back", go_back)
+	chat_to_end()
+	-- A touchscreen's keyboard would cover the log: it opens on a tap
+	if buildat.get_env("BUILDAT_TOUCH") ~= "1" then
+		e:SetFocus(true)
+	end
 end
 
 -- The join: the server's hello brings the dialog, or the scripted login

@@ -473,8 +473,12 @@ struct Module: public interface::Module, public Interface
 		ss_ data;
 		if(m_store->get("ban/"+name, data))
 			unpack(data, b);
+		// **An address only where anyone can make an account** (user,
+		// 2026-09-30): there a banned player comes back under a new name.
+		// On an invite-only server the account is enough, and an address
+		// ban would keep out others behind the same one.
 		const PeerId peer = find_peer(name);
-		if(peer)
+		if(peer && m_access.open_registration)
 			b.address = address_of(peer);
 		m_store->set("ban/"+name, pack(b));
 		if(!b.address.empty())
@@ -539,7 +543,8 @@ struct Module: public interface::Module, public Interface
 		ss_ data;
 		if(m_store->get("ban/"+name, data))
 			return "You are banned from this server";
-		if(!address.empty() && m_store->get("banaddr/"+address, data))
+		if(m_access.open_registration && !address.empty() &&
+				m_store->get("banaddr/"+address, data))
 			return "This address is banned from this server";
 		return "";
 	}

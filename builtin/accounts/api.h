@@ -59,7 +59,8 @@ namespace accounts
 		virtual bool launched() = 0;
 		// Off the server, told why
 		virtual void kick(PeerId peer, const ss_ &why) = 0;
-		// A ban by name, and by the address the name last joined from.
+		// A ban by name, and by the address the name last joined from while
+		// registration is open.
 		// "" when done, else why not.
 		virtual ss_ ban(const ss_ &name, const ss_ &by) = 0;
 		// A name or an address; "" when done, else why not

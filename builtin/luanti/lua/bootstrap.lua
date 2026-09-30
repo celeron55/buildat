@@ -2276,7 +2276,8 @@ function core.get_ban_description(name_or_ip)
 	local out = {}
 	for ban in core.get_ban_list():gmatch("[^,]+") do
 		ban = ban:match("^%s*(.-)%s*$")
-		local n, ip = ban:match("^(.*)|(.*)$")
+		-- "name|address", or the name alone for a ban of the account
+		local n, ip = ban:match("^([^|]*)|?(.*)$")
 		if n == name_or_ip or ip == name_or_ip then
 			out[#out + 1] = ban
 		end
