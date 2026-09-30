@@ -122,6 +122,11 @@ struct Peer
 	int64_t last_progress_us = 0;
 	// Said once per peer rather than per packet
 	bool warned_full = false;
+	// When this end last sent the peer anything, for keepalive(), and
+	// whether it has had one: the first goes whatever else is being sent,
+	// so that a client busy with a world knows it is to expect them
+	int64_t last_send_us = 0;
+	bool keepalive_sent = false;
 
 	size_t out_pending() const {
 		return out_buf.size() - out_sent + out_queued_bytes;
@@ -854,6 +859,25 @@ struct Module: public interface::Module, public network::Interface
 		}
 	}
 
+	// **network:keepalive** (user, 2026-09-30): an empty packet to a game
+	// peer that has been sent nothing for KEEPALIVE_US, so that a client
+	// hears from a live server every few seconds and can tell a link that
+	// died without closing (src/client/state.cpp, SILENCE_US). On this
+	// thread, which goes round whatever the game's modules are doing.
+	static const int64_t KEEPALIVE_US = 5000000;
+	void keepalive()
+	{
+		const int64_t now = interface::os::time_us();
+		for(auto &pair : m_peers){
+			Peer &peer = pair.second;
+			if(peer.game() && !peer.closing && (!peer.keepalive_sent ||
+					now - peer.last_send_us >= KEEPALIVE_US)){
+				peer.keepalive_sent = true;
+				send_u(peer, "network:keepalive", "");
+			}
+		}
+	}
+
 	bool any_peer_pending()
 	{
 		for(auto &pair : m_peers){
@@ -935,6 +959,7 @@ struct Module: public interface::Module, public network::Interface
 		// A WebSocket peer that has said close is not sent any more
 		if(peer.closing)
 			return;
+		peer.last_send_us = interface::os::time_us();
 		const bool latest_only = m_latest_only.count(name) > 0;
 		// A drop policy drops the whole of a fragmented packet or none of
 		// it: the fragments of one call are one packet to the reader
@@ -1102,6 +1127,7 @@ void NetworkThread::run(interface::Thread *thread)
 		// five milliseconds and only while a peer is actually behind.
 		bool pending = false;
 		network::access(m_module->m_server, [&](network::Interface *inetwork){
+			m_module->keepalive();
 			pending = m_module->any_peer_pending();
 		});
 

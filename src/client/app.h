@@ -115,7 +115,7 @@ namespace app
 		// The connection is gone: shut down, but when the local server
 		// this client started has died, show its log's tail first
 		// ([START_PROGRESS])
-		virtual void lost_connection() = 0;
+		virtual void lost_connection(const ss_ &reason) = 0;
 		virtual void run_script(const ss_ &script) = 0;
 		virtual bool run_script_no_sandbox(const ss_ &script) = 0;
 		virtual void handle_packet(const ss_ &name, const ss_ &data) = 0;

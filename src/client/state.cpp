@@ -132,6 +132,14 @@ struct CState: public State
 	bool m_connected = false;
 	// Set once the connection is gone; see lost_connection()
 	bool m_disconnected = false;
+	// **A connection that died without closing** (user, 2026-09-30: the
+	// web client froze, saying nothing): a server that sends
+	// network:keepalive to an idle peer is heard from every few seconds,
+	// so nothing at all for this long is a dead link. Only once one has
+	// come: an older server sends none, and an idle one was quiet.
+	static const int64_t SILENCE_US = 30000000;
+	bool m_keepalive_seen = false;
+	int64_t m_last_data_us = 0;
 	// The connect running on a worker ([BOX_PLAYTEST_2] 12). The thread
 	// touches m_socket and nothing else of this, and the main thread keeps
 	// off the socket while m_connect_result says 0; the result is stored
@@ -232,6 +240,8 @@ struct CState: public State
 		m_tell_after_all_files_transferred_requested = false;
 		m_connected = false;
 		m_disconnected = false;
+		m_keepalive_seen = false;
+		m_last_data_us = 0;
 	}
 
 	void update()
@@ -253,6 +263,18 @@ struct CState: public State
 				m_socket->wait_data(0); i++){
 			if(!read_socket())
 				break;
+		}
+		if(m_disconnected)
+			return;
+		// A backlog this end has not got round to is not the server's
+		// silence
+		const int64_t now = get_timeofday_us();
+		if(m_last_data_us == 0 || backlog_bytes() >= READ_AHEAD_BYTES)
+			m_last_data_us = now;
+		if(m_keepalive_seen && now - m_last_data_us >= SILENCE_US){
+			lost_connection(ss_()+"nothing from the server in "+
+					itos(SILENCE_US / 1000000)+" s");
+			return;
 		}
 		// **Nothing after the announce is read until it has been checked**
 		// ([CLIENT_FRAME]): the packets that follow it -- the scripts that
@@ -282,7 +304,7 @@ struct CState: public State
 		m_disconnected = true;
 		log_w(MODULE, "Disconnected from server: %s", cs(reason));
 		if(m_app)
-			m_app->lost_connection();
+			m_app->lost_connection(reason);
 	}
 
 	bool connect_host_port(const ss_ &address, const ss_ &port, ss_ *error)
@@ -483,6 +505,7 @@ struct CState: public State
 			return false;
 		}
 		log_d(MODULE, "Received %zu bytes", r);
+		m_last_data_us = get_timeofday_us();
 		m_socket_buffer.insert(m_socket_buffer.end(), buf, buf + r);
 		return !m_disconnected;
 	}
@@ -607,6 +630,12 @@ struct CState: public State
 
 void CState::setup_packet_handlers()
 {
+	m_packet_handlers["network:keepalive"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		m_keepalive_seen = true;
+	};
+
 	m_packet_handlers["core:unordered"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{

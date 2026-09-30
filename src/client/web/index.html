@@ -49,7 +49,9 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 	// seconds (Vivaldi on Android, another app in front). A disconnect after
 	// the page was away reloads it once it is in front again; one while it
 	// was in front waits for the user to go away and come back, so that a
-	// server that is down is not reloaded over and over.
+	// server that is down is not reloaded over and over. Only for a game
+	// that asked, with buildat.set_reload_on_return(true): a heavy one
+	// (vanilla) is not loaded again without the user saying so.
 	var away_now = false, back_at = 0, disconnected = false;
 	function present(){
 		return document.visibilityState === 'visible' && document.hasFocus();
@@ -62,7 +64,7 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 			return;
 		away_now = false;
 		back_at = Date.now();
-		if(disconnected)
+		if(disconnected && Module.buildatReloadOnReturn)
 			location.reload();
 	}
 	document.addEventListener('visibilitychange', function(){
@@ -126,27 +128,33 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 			status.textContent = 'The client stopped: ' + what +
 				'\nReload the page to start again.';
 		},
-		// The client calls this when the server has gone, and stops
-		onDisconnected: function(){
+		// The client calls this when the server has gone, and stops;
+		// reason is what it saw
+		onDisconnected: function(reason){
 			disconnected = true;
 			// Gone while the page was away, or noticed just after it came
 			// back (a page in the background does not run): the browser's
 			// doing. Away, back() reloads it on the return.
-			if(!away_now && Date.now() - back_at < 10000)
+			if(Module.buildatReloadOnReturn && !away_now &&
+					Date.now() - back_at < 10000)
 				location.reload();
 			status.innerHTML = '';
 			status.appendChild(document.createTextNode(
-				'The server closed the connection.\n'));
-			var a = document.createElement('a');
-			a.href = location.href;
-			a.textContent = 'Reload to connect again';
-			a.style.color = '#8cf';
-			a.style.pointerEvents = 'auto';
-			status.appendChild(a);
-			status.style.background = 'rgba(0,0,0,0.6)';
+				'Disconnected: ' + (reason || 'the connection was lost') +
+				'.\n\n'));
+			var b = document.createElement('button');
+			b.textContent = 'Reconnect';
+			b.style.font = 'inherit';
+			b.style.padding = '8px 24px';
+			b.style.pointerEvents = 'auto';
+			b.onclick = function(){ location.reload(); };
+			status.appendChild(b);
+			status.style.background = 'rgba(0,0,0,0.75)';
 			status.style.padding = '16px';
 			if(document.exitPointerLock)
 				document.exitPointerLock();
+			if(document.fullscreenElement && document.exitFullscreen)
+				document.exitFullscreen();
 		},
 	};
 	// The focused text field's stand-in ([WEB_KEYS] steps 2 and 4): the

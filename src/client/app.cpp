@@ -1407,7 +1407,7 @@ struct CApp: public App, public magic::Application
 	// might be what went with it; see lost_connection() and on_update()
 	int64_t m_lost_connection_us = 0;
 
-	void lost_connection()
+	void lost_connection(const ss_ &reason)
 	{
 #ifdef __EMSCRIPTEN__
 		// The web client has no menu to go back to and cannot close its
@@ -1416,8 +1416,8 @@ struct CApp: public App, public magic::Application
 		// its GL calls on the way out.
 		EM_ASM({
 			if(Module['onDisconnected'])
-				Module['onDisconnected']();
-		});
+				Module['onDisconnected'](UTF8ToString($0));
+		}, reason.c_str());
 		emscripten_pause_main_loop();
 		return;
 #endif
@@ -1692,6 +1692,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(create_directories)
 		DEF_BUILDAT_FUNC(set_watchdog_seconds)
+		DEF_BUILDAT_FUNC(set_reload_on_return)
 		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(set_ui_scale)
 		DEF_BUILDAT_FUNC(get_ui_scale)
@@ -3978,6 +3979,21 @@ struct CApp: public App, public magic::Application
 			return 1;
 		}
 		log_w(MODULE, "Unknown named path: \"%s\"", cs(name));
+		return 0;
+	}
+
+	// set_reload_on_return(bool): on the web, whether a disconnect while
+	// the page was away reloads it on the return, which is what a phone's
+	// browser dropping a page in the background calls for. A light game
+	// asks for it; a heavy one leaves the user to say, with the page's
+	// reload button (user, 2026-09-30). Nothing natively.
+	static int l_set_reload_on_return(lua_State *L)
+	{
+#ifdef __EMSCRIPTEN__
+		EM_ASM({ Module['buildatReloadOnReturn'] = !!$0; },
+				lua_toboolean(L, 1) ? 1 : 0);
+#endif
+		(void)L;
 		return 0;
 	}
 

@@ -11,6 +11,9 @@ local magic = require("buildat/extension/urho3d")
 
 local STYLE = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 magic.ui.root.defaultStyle = STYLE
+-- Light enough to load again by itself when a phone's browser dropped it in
+-- the background (src/client/web/index.html)
+buildat.set_reload_on_return(true)
 
 -- The wire types, the same as main.cpp's structs field for field
 local ENTITY = {"object",
