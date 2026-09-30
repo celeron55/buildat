@@ -204,11 +204,30 @@ struct LoginRequest
 	ss_ name;
 	ss_ password;
 	ss_ code; // the setup code, or an invite code
+	// [ACC_KEEP]: a token from a login that asked to be kept, in place of
+	// the password; and whether this login asks for one
+	ss_ token;
+	uint8_t keep = 0;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(name, password, code);
+		archive(name, password, code, token, keep);
 	}
 };
+
+// **A kept login** ([ACC_KEEP]), stored as token/<the token's sha256>: the
+// account, when it ends, and the account's password hash then, so that a
+// new password or a deleted account ends it too
+struct KeptLogin
+{
+	ss_ name;
+	int64_t expires_us = 0;
+	ss_ hash;
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(name, expires_us, hash);
+	}
+};
+static const int64_t KEEP_US = 90LL * 24 * 3600 * 1000000;
 
 struct AdminRequest
 {
@@ -286,7 +305,7 @@ struct Module: public interface::Module, public Interface
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		for(const char *name : {"accounts:get_hello", "accounts:login",
-				"accounts:admin", "accounts:passwd"})
+				"accounts:admin", "accounts:passwd", "accounts:logout"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -305,6 +324,8 @@ struct Module: public interface::Module, public Interface
 		EVENT_TYPEN("network:packet_received/accounts:admin", on_admin,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:passwd", on_passwd,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/accounts:logout", on_logout,
 				network::Packet)
 	}
 
@@ -648,8 +669,11 @@ struct Module: public interface::Module, public Interface
 			return;
 		Peer &peer = pit->second;
 		LoginRequest cred;
+		// The error, or "", and the token of a login asked to be kept
+		ss_ token;
 		auto reply = [&](const ss_ &error){
-			send(packet.sender, "accounts:login_result", pack(error));
+			send(packet.sender, "accounts:login_result",
+					pack(std::make_pair(error, token)));
 		};
 		// The local user is on the machine the saves are on: a password
 		// would keep out nobody the files themselves do not let in
@@ -665,7 +689,7 @@ struct Module: public interface::Module, public Interface
 		const ss_ code = upper(cred.code);
 		if(!valid_name(name))
 			return reply("A name is 1 to 20 letters, digits, _ or -");
-		if(password.size() > 100 || code.size() > 100)
+		if(password.size() > 100 || code.size() > 100 || cred.token.size() > 100)
 			return reply("The password is too long");
 		if(find_peer(name))
 			return reply(name+" is already here");
@@ -700,7 +724,18 @@ struct Module: public interface::Module, public Interface
 		};
 
 		Account account;
-		if(get_account(name, account)){
+		if(!cred.token.empty()){
+			KeptLogin kept;
+			ss_ data;
+			const ss_ key = "token/"+interface::sha256::hex(
+					interface::sha256::calculate(cred.token));
+			if(!(m_store->get(key, data) && unpack(data, kept)) ||
+					kept.name != name || kept.expires_us < now ||
+					!get_account(name, account) || kept.hash != account.hash){
+				m_store->remove(key);
+				return fail("The saved login has ended: log in again");
+			}
+		} else if(get_account(name, account)){
 			if(!local && pbkdf2_sha256(password, account.salt,
 					PBKDF2_ITERATIONS) != account.hash)
 				return fail("Wrong password");
@@ -757,6 +792,16 @@ struct Module: public interface::Module, public Interface
 		}
 		m_name_failures.erase(name);
 		update_setup_code();
+		if(cred.keep && !local && cred.token.empty()){
+			token = random_code(32);
+			KeptLogin kept;
+			kept.name = name;
+			kept.expires_us = now + KEEP_US;
+			kept.hash = account.hash;
+			m_store->set("token/"+interface::sha256::hex(
+					interface::sha256::calculate(token)), pack(kept));
+			log_i(MODULE, "%s is kept logged in", cs(name));
+		}
 		log_i(MODULE, "%s joined from %s", cs(name), cs(peer.address));
 		peer.name = name;
 		reply("");
@@ -934,6 +979,26 @@ struct Module: public interface::Module, public Interface
 		set_account(name, new_account(pw.second, account.privs));
 		log_i(MODULE, "%s changed their password", cs(name));
 		result("");
+	}
+
+	// A kept login ended by its user ([ACC_KEEP]): the token, which must be
+	// this peer's account's
+	void on_logout(const network::Packet &packet)
+	{
+		auto it = m_peers.find(packet.sender);
+		ss_ tok;
+		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
+				!unpack(packet.data, tok))
+			return;
+		const ss_ key = "token/"+interface::sha256::hex(
+				interface::sha256::calculate(tok));
+		KeptLogin kept;
+		ss_ data;
+		if(m_store->get(key, data) && unpack(data, kept) &&
+				kept.name == it->second.name){
+			m_store->remove(key);
+			log_i(MODULE, "%s logged out", cs(kept.name));
+		}
 	}
 
 	void* get_interface()

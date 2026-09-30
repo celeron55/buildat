@@ -35,7 +35,8 @@ local M = {
 
 local TEXT = {"object", {"text", "string"}}
 local LOGIN = {"object", {"name", "string"}, {"password", "string"},
-		{"code", "string"}}
+		{"code", "string"}, {"token", "string"}, {"keep", "byte"}}
+local LOGIN_RESULT = {"object", {"error", "string"}, {"token", "string"}}
 local HELLO = {"object", {"local", "byte"}, {"setup", "byte"},
 		{"open_registration", "byte"}}
 local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
@@ -62,9 +63,15 @@ local function notice(text)
 	end
 end
 
-local function send_login(name, password, code)
+-- **Keep me logged in** ([ACC_KEEP]): the token a login asked to be kept
+-- got, in the client's storage for this server, which the next hello logs
+-- in with and asks nothing
+local token_tried = false
+
+local function send_login(name, password, code, token, keep)
 	buildat.send_packet("accounts:login", cereal.binary_output(
-			{name = name, password = password, code = code or ""}, LOGIN))
+			{name = name, password = password, code = code or "",
+			token = token or "", keep = keep and 1 or 0}, LOGIN))
 end
 
 -- A window of the join: `width` wide, or the screen's width less a margin
@@ -127,9 +134,11 @@ local function show_login(error_text)
 	label(opts.title or "Join")
 	label("Name")
 	-- The name used last on this server, kept on the client; else the one
-	-- the user gave the client for every game
+	-- the user gave the client for every game, unless that is the client's
+	-- own default, which is nobody's name (user, the sixth round)
+	local default = buildat.get_preference("default_username")
 	local name = field(buildat.storage_read("name") or
-			buildat.get_preference("default_username") or "", false)
+			(default ~= "User" and default) or "", false)
 	local password = nil
 	local code = nil
 	if is_local then
@@ -157,6 +166,24 @@ local function show_login(error_text)
 			warn:SetColor(magic.Color(1.0, 0.8, 0.4))
 		end
 	end
+	local keep = nil
+	if not is_local then
+		keep = {on = buildat.storage_read("keep") == "1"}
+		local kb = w:CreateChild("Button")
+		kb:SetStyleAuto()
+		kb.minHeight = 30
+		local kt = kb:CreateChild("Text")
+		kt:SetStyleAuto()
+		kt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		local function draw_keep()
+			kt:SetText((keep.on and "[x] " or "[ ] ") .. "Keep me logged in")
+		end
+		draw_keep()
+		magic.SubscribeToEvent(kb, "Released", function()
+			keep.on = not keep.on
+			draw_keep()
+		end)
+	end
 	if error_text then
 		local e = label(error_text)
 		e:SetColor(magic.Color(1.0, 0.4, 0.4))
@@ -171,9 +198,10 @@ local function show_login(error_text)
 	local function join()
 		local n = name:GetText()
 		buildat.storage_write("name", n)
+		buildat.storage_write("keep", keep and keep.on and "1" or "0")
 		M.name = n
 		send_login(n, password and password:GetText() or "",
-				code and code:GetText() or "")
+				code and code:GetText() or "", nil, keep and keep.on)
 	end
 	magic.SubscribeToEvent(button, "Released", function() join() end)
 	magic.SubscribeToEvent(name, "TextFinished", function()
@@ -208,22 +236,37 @@ buildat.sub_packet("accounts:hello", function(data)
 	-- A scripted or second client can skip the dialog
 	local env = opts.env or "BUILDAT_JOIN"
 	local auto_name = buildat.get_env(env .. "_NAME")
+	local token = buildat.storage_read("token") or ""
 	if auto_name and not M.auto_tried then
 		M.auto_tried = true
 		M.name = auto_name
 		send_login(auto_name, buildat.get_env(env .. "_PASSWORD") or "",
-				buildat.get_env(env .. "_CODE") or "")
+				buildat.get_env(env .. "_CODE") or "", nil,
+				buildat.get_env(env .. "_KEEP") == "1")
+	elseif token ~= "" and not token_tried then
+		token_tried = true
+		M.name = buildat.storage_read("name") or ""
+		log:info("Logging in as " .. M.name .. " with the kept login")
+		send_login(M.name, "", "", token)
 	else
 		show_login(nil)
 	end
 end)
 
 buildat.sub_packet("accounts:login_result", function(data)
-	local err = cereal.binary_input(data, TEXT).text
+	local r = cereal.binary_input(data, LOGIN_RESULT)
+	local err = r.error
 	if err ~= "" then
 		log:info("Login refused: " .. err)
+		-- A kept login that did not work is forgotten
+		if token_tried then
+			buildat.storage_write("token", "")
+		end
 		show_login(err)
 		return
+	end
+	if r.token ~= "" then
+		buildat.storage_write("token", r.token)
 	end
 	M.logged_in = true
 	M.close()
@@ -278,6 +321,24 @@ end)
 function M.admin(cmd, name, arg, on)
 	buildat.send_packet("accounts:admin", cereal.binary_output({cmd = cmd,
 			name = name or "", arg = arg or "", on = on and 1 or 0}, ADMIN))
+end
+
+-- Whether this client has a kept login on this server
+function M.kept()
+	return (buildat.storage_read("token") or "") ~= ""
+end
+
+-- The kept login ended, on the server and here, and the client off the
+-- server: the next join asks again
+function M.logout()
+	local token = buildat.storage_read("token") or ""
+	if token ~= "" then
+		buildat.send_packet("accounts:logout",
+				cereal.binary_output({text = token}, TEXT))
+	end
+	buildat.storage_write("token", "")
+	buildat.storage_write("keep", "0")
+	buildat.disconnect()
 end
 
 function M.passwd(old, new)

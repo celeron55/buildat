@@ -160,6 +160,9 @@ open = function()
 	-- (only the web page sets BUILDAT_PAGE_HTTPS)
 	if buildat.get_env("BUILDAT_PAGE_HTTPS") == nil then
 		accounts.page_button(w, "Leave the game", function() buildat.leave() end)
+	elseif account.public and not account.is_local then
+		-- The tab's way out, which also ends a kept login ([ACC_KEEP])
+		accounts.page_button(w, "Log out", accounts.logout)
 	end
 end
 

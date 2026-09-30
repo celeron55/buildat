@@ -528,13 +528,15 @@ if(BUILD_CLIENT)
 			# luabind and the Lua VM recurse deeper than the 64 KiB default
 			-sSTACK_SIZE=8388608
 			-sFORCE_FILESYSTEM=1
+			# IndexedDB for the cache and the user directory ([WEB_PERSIST])
+			-lidbfs.js
 			-sEXIT_RUNTIME=0
 			# What an uncaught exception or an abort was, in the console
 			-sASSERTIONS=1 -sEXCEPTION_STACK_TRACES=1
 			# Function names in the stack of a crash
 			--profiling-funcs
 			-sDISABLE_DEPRECATED_FIND_EVENT_TARGET_BEHAVIOR=0
-			"-sEXPORTED_RUNTIME_METHODS=['FS','ENV','callMain','UTF8ToString','stringToNewUTF8']"
+			"-sEXPORTED_RUNTIME_METHODS=['FS','ENV','callMain','UTF8ToString','stringToNewUTF8','addRunDependency','removeRunDependency']"
 			"SHELL:--exclude-file *.swp"
 		)
 		# SHELL: keeps each pair whole; CMake would merge the repeated flags

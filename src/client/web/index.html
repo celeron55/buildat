@@ -51,6 +51,35 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 		preRun: [function(){
 			FS.mkdir('/buildat/cache');
 			FS.mkdir('/buildat/user');
+			// **Kept between loads** ([WEB_PERSIST]): the files the server
+			// sent, and what games store on the client, in IndexedDB. Read
+			// back before the client starts, written out every few seconds
+			// and when the page is hidden.
+			// simplified: the cache grows until the browser evicts the site
+			FS.mount(FS.filesystems.IDBFS, {}, '/buildat/cache');
+			FS.mount(FS.filesystems.IDBFS, {}, '/buildat/user');
+			Module.addRunDependency('idbfs');
+			FS.syncfs(true, function(err){
+				if(err)
+					console.warn('IndexedDB read: ' + err);
+				Module.removeRunDependency('idbfs');
+			});
+			var syncing = false;
+			function save(){
+				if(syncing)
+					return;
+				syncing = true;
+				FS.syncfs(false, function(err){
+					syncing = false;
+					if(err)
+						console.warn('IndexedDB write: ' + err);
+				});
+			}
+			setInterval(save, 5000);
+			document.addEventListener('visibilitychange', function(){
+				if(document.visibilityState === 'hidden')
+					save();
+			});
 			// Whether the page, and so its WebSocket, is TLS: what a game
 			// tells its user about a password it sends ([FP_ACCESS])
 			Module.ENV.BUILDAT_PAGE_HTTPS = https ? '1' : '0';
