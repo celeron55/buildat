@@ -5015,7 +5015,9 @@ do
 			local p = S.orbit
 			local ox, oy, oz = geom.unrot(S.pos.x - p.x, S.pos.y - p.y,
 					S.pos.z - p.z, S.pitch, S.yaw, 0)
-			local k = 0.3 * S.mouse_sens / 100
+			-- A finger's orbit (the emulated mouse's) at half the mouse's
+			-- speed (user)
+			local k = 0.3 * S.mouse_sens / 100 * (S.touch and 0.5 or 1)
 			S.yaw = S.yaw + dx * k
 			S.pitch = math.max(-90, math.min(90, S.pitch + dy * k))
 			local wx, wy, wz = geom.rot(ox, oy, oz, S.pitch, S.yaw, 0)
@@ -5176,8 +5178,10 @@ do
 			return
 		end
 		if S.view == "walk" then
-			S.yaw = S.yaw + dx * 0.2
-			S.pitch = math.max(-89, math.min(89, S.pitch + dy * 0.2))
+			-- The mouse sensitivity setting's, at half of 0.2 (user)
+			local k = 0.1 * S.mouse_sens / 100
+			S.yaw = S.yaw + dx * k
+			S.pitch = math.max(-89, math.min(89, S.pitch + dy * k))
 			return
 		end
 		if not S.gesture then
