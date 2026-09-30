@@ -99,6 +99,10 @@ return {
 	},
 	HoverEnd = {
 	},
+	-- A button pressed down and let go: a touchscreen's held buttons
+	-- (games/vanilla's Jump and Sneak) are held between the two
+	Pressed = {
+	},
 	Released = {
 	},
 	TextFinished = {

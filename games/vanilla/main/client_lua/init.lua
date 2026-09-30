@@ -142,6 +142,11 @@ local BIND = keys.BIND
 
 local function key_down(action)
 	local b = BIND[action]
+	-- A touchscreen's stick and buttons (main/touch.lua) hold the same
+	-- actions the keys do
+	if keys.touch and keys.touch.held[action] then
+		return true
+	end
 	return b ~= nil and b.key ~= nil and magic.input:GetKeyDown(b.key)
 end
 
@@ -340,7 +345,10 @@ do
 			return
 		end
 		mouse_in_world = enable
-		magic.input:SetMouseVisible(not enable, reason or "set_mouse_in_world")
+		-- A touchscreen's pointer stays: the UI takes a finger's taps only
+		-- while it is shown, and the touch controls are UI
+		magic.input:SetMouseVisible(not enable or keys.touch ~= nil,
+				reason or "set_mouse_in_world")
 	end
 	magic.SubscribeToEvent("Update", function()
 		local open = luanti.form_open()
@@ -353,7 +361,8 @@ do
 			magic.input:SetMouseVisible(true, "a form opened")
 		else
 			mouse_in_world = wanted
-			magic.input:SetMouseVisible(not wanted, "the form closed")
+			magic.input:SetMouseVisible(not wanted or keys.touch ~= nil,
+					"the form closed")
 		end
 	end)
 end
@@ -3941,8 +3950,10 @@ local OBJECT_HIT_DELAY = 0.2
 local hit_wait = 0
 
 local function update_dig(dt, playing)
-	local holding = playing and
-			magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT)
+	-- On a touchscreen the first finger is also the left button, which
+	-- SDL makes of it: the touch controls say when a dig is held
+	local holding = playing and (keys.touch and keys.touch.dig or
+			not keys.touch and magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT))
 	hit_wait = math.max(0, hit_wait - dt)
 	if not holding then
 		hit_wait = 0
@@ -4006,18 +4017,21 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	end
 	-- A form on the screen is clicked through UIMouseClick below, which is
 	-- what says where the click landed; what is behind it is not what was
-	-- clicked on
-	if luanti.form_open() then
+	-- clicked on. A touchscreen's finger is its own (main/touch.lua).
+	if luanti.form_open() or keys.touch then
 		return
 	end
+	if button == magic.MOUSEB_RIGHT then
+		keys.place_now()
+	end
+end)
+
+-- Luanti's place-or-use at what is pointed at: the right button, and a
+-- touchscreen's tap
+keys.place_now = function()
 	if pointed_p == nil then
 		log:info(string.format("click at nothing: reach %.1f",
 				math.min(POINT_RANGE, luanti.dig_range(wield_index))))
-		return
-	end
-	-- The left button is the dig, and it is held rather than clicked:
-	-- update_dig() above has it, because how long it takes is a timer
-	if button == magic.MOUSEB_LEFT then
 		return
 	end
 	-- The right button is Luanti's place-or-use: what it comes to is the
@@ -4027,7 +4041,7 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	-- than use it, which is the only way to put something on top of a chest
 	local under = voxel_packet_value(pointed_p)
 	local above = voxel_packet_value(pointed_above or pointed_p)
-	local sneak = magic.input:GetKeyDown(magic.KEY_LSHIFT) or
+	local sneak = key_down("sneak") or magic.input:GetKeyDown(magic.KEY_LSHIFT) or
 			magic.input:GetKeyDown(magic.KEY_RSHIFT)
 	buildat.send_packet("main:place", cereal.binary_output({
 		under = under,
@@ -4062,7 +4076,7 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 		-- here: item_place excludes the player who placed it
 		luanti.place_sound(pr.place, at.x, at.y, at.z)
 	end
-end)
+end
 
 -- The wheel picks a hotbar slot, which is what it does in Luanti
 magic.SubscribeToEvent("MouseWheel", function(event_type, event_data)
@@ -4125,7 +4139,10 @@ keys.toggle_mode = function(mode, word)
 end
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
-	local key = event_data:GetInt("Key")
+	keys.on_key(event_data:GetInt("Key"))
+end)
+-- A key's action, which a touchscreen's buttons press as well
+keys.on_key = function(key)
 	-- A form takes escape to close itself; what is left is this game's own
 	-- While a line is being typed the keys are that line's, which is why
 	-- this is before everything else
@@ -4239,7 +4256,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	elseif key == BIND.menu.key then
 		open_pause_menu()
 	end
-end)
+end
 
 -- Where the player is, a few times a second: the server moves its own player
 -- there, and a Luanti mod asking where the player is gets this.
@@ -4268,7 +4285,8 @@ local function control_bits()
 	-- Nothing is held while the mouse is on the screen: a form is open, a
 	-- line is being typed, or Tab put it there, and the keys are that
 	-- window's rather than the player's
-	if not mouse_in_world or luanti.form_open() or chat_input ~= nil then
+	if not (mouse_in_world or keys.touch) or luanti.form_open() or
+			chat_input ~= nil then
 		return 0
 	end
 	local bits = 0
@@ -4277,11 +4295,17 @@ local function control_bits()
 			bits = bits + 2 ^ (i - 1)
 		end
 	end
-	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
-		bits = bits + CONTROL_DIG
-	end
-	if magic.input:GetMouseButtonDown(magic.MOUSEB_RIGHT) then
-		bits = bits + CONTROL_PLACE
+	if keys.touch then
+		if keys.touch.dig then
+			bits = bits + CONTROL_DIG
+		end
+	else
+		if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+			bits = bits + CONTROL_DIG
+		end
+		if magic.input:GetMouseButtonDown(magic.MOUSEB_RIGHT) then
+			bits = bits + CONTROL_PLACE
+		end
 	end
 	-- zoom, the tenth bit ([VIEW_KEYS]): official's Z, behind the zoom
 	-- privilege, which the server hands out with the rest
@@ -4398,10 +4422,17 @@ function frame_peak.update(dt)
 	-- The mouse turns the head while it is in the world; while it is on the
 	-- screen -- a form is open, a line is being typed, or Tab put it there
 	-- -- it is the pointer
-	local playing = mouse_in_world and not luanti.form_open() and
-			chat_input == nil
+	-- -- it is the pointer. A touchscreen has no pointer to put anywhere:
+	-- a finger turns the head (main/touch.lua), in degrees
+	local playing = (mouse_in_world or keys.touch) and
+			not luanti.form_open() and chat_input == nil
 	if playing then
 		local dmouse = magic.input:GetMouseMove()
+		if keys.touch then
+			dmouse = {x = 0, y = 0}
+			yaw, pitch = yaw + keys.touch.yaw, pitch + keys.touch.pitch
+			keys.touch.yaw, keys.touch.pitch = 0, 0
+		end
 		yaw = yaw + dmouse.x * MOUSE_SENSITIVITY
 		pitch = pitch + dmouse.y * MOUSE_SENSITIVITY
 		if pitch > 89 then pitch = 89 end
@@ -4633,6 +4664,30 @@ magic.SubscribeToEvent("ScreenMode", function()
 	end
 	draw_hotbar()
 end)
+
+-- **Touch controls** on a touchscreen (main/touch.lua); nil elsewhere, and
+-- then the mouse is what it always was
+if buildat.get_env("BUILDAT_TOUCH") == "1" then
+	keys.touch = (function(ok, err, m)
+		if not ok or type(m) ~= "function" then
+			error("vanilla: could not load touch.lua: " .. tostring(err))
+		end
+		return m
+	end)(buildat.run_script_file("main/touch.lua"))({
+		on_key = keys.on_key,
+		BIND = BIND,
+		pause = open_pause_menu,
+		place = keys.place_now,
+		set_wield = set_wield,
+		inventory = function() keys.on_key(BIND.inventory.key) end,
+		chat = function() keys.open_chat() end,
+		hotbar = function()
+			local _, _, slot, margin = hotbar_metrics()
+			return (luanti.hotbar and luanti.hotbar.count) or 8, slot, margin
+		end,
+	})
+	log:info("touch controls on")
+end
 
 buildat.send_packet("main:get_settings", "")
 log:info("vanilla client ready")

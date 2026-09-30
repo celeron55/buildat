@@ -183,6 +183,12 @@ end
 
 return function(options)
 	o = options
+	-- The chat console straight from the world, for the touch controls'
+	-- Chat; its Back goes back to the world
+	o.keys.open_chat = function()
+		close()
+		page(function() accounts.chat_page(close) end, close)
+	end
 	return open
 end
 -- vim: set noet ts=4 sw=4:
