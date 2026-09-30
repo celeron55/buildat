@@ -1,0 +1,258 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+#pragma once
+#include "interface/event.h"
+#include "interface/server.h"
+#include "interface/module.h"
+#include <functional>
+
+namespace main_context
+{
+	struct OpaqueSceneReference;
+	typedef OpaqueSceneReference* SceneReference;
+}
+
+namespace storage
+{
+	struct Save;
+}
+
+namespace luanti
+{
+	using main_context::SceneReference;
+
+	// The game's mods have loaded, the voxel registry is built and the map
+	// exists. The scene is the module's own: it is what knows the world's
+	// node ids and its light, so it is what owns them, and this is how
+	// whoever started the game finds out where to put its peers.
+	struct GameLoaded: public interface::Event::Private
+	{
+		SceneReference scene;
+
+		GameLoaded(SceneReference scene): scene(scene){}
+	};
+
+	// Nodes that are not the map's ([BODY_INTERACT]): a body that came off
+	// the world keeps its voxels in the same coordinate space, in a region
+	// far outside the map's bounds -- stacked in Y from REGION_Y, a
+	// REGION_STRIDE apart -- so that a position in it is an ordinary
+	// position to every mod. A module that owns such bodies gives the
+	// luanti module one of these, and get_node()/set_node() at a position
+	// past REGION_Y ask it instead of the map. Outside every body a
+	// region position reads as ignore (get() false) and a write is
+	// dropped. The words are the luanti voxel format's (id, the light
+	// nibbles, param2).
+	static const int32_t REGION_Y = 1000000;
+	static const int32_t REGION_STRIDE = 4096;
+	struct RegionMap
+	{
+		virtual ~RegionMap(){}
+		virtual bool get(int32_t x, int32_t y, int32_t z, uint32_t &word) = 0;
+		virtual bool set(int32_t x, int32_t y, int32_t z, uint32_t word) = 0;
+		// Where a region position is in the world, through the body's
+		// transform: what add_item(), add_entity(), a particle or a sound
+		// at a body's voxel means. False outside every body.
+		virtual bool to_world(float x, float y, float z,
+				float &wx, float &wy, float &wz) = 0;
+	};
+
+	struct Interface
+	{
+		// The region map above, or nullptr for none; the owner keeps it
+		// alive and unsets it before it goes
+		virtual void set_region_map(RegionMap *map) = 0;
+
+		// Load Luanti's builtin and the game's mods, and run them. The game
+		// is a directory with a game.conf, under user_path/luanti and not in
+		// anyone's Luanti install.
+		//
+		// The world is the save, and the save is the caller's to open and to
+		// keep open: the map, the clock and everything else the world is go
+		// into it. A Luanti world directory is never written to -- it is
+		// read for which game it wants, or imported, and that is all.
+		// core.get_worldpath() is a directory of the save's rather than the
+		// save's own root, since a Luanti mod writing through it -- which is
+		// normal, and which games depend on -- must not be able to land on
+		// save.sqlite.
+		//
+		// Whatever extends the environment is registered before this is
+		// called: Luanti loads its mods once, in order, and a late arrival
+		// would be a different kind of thing entirely.
+		// What the server is doing while a game loads, as a line of text at
+		// a time: the game, each mod with its number out of the total, the
+		// registry, the world. Registered before run_game(), because that
+		// is what takes the minutes and does not return until it is done.
+		//
+		// It is called on the server's own thread from inside run_game();
+		// buildat's network::send() writes to the socket there and then, so
+		// a packet sent from the handler reaches a client whose own thread
+		// is still running.
+		virtual void set_progress_handler(
+				std::function<void(const ss_ &)> handler) = 0;
+
+		virtual void run_game(const ss_ &game_path, storage::Save *save) = 0;
+
+		// What a Luanti world is made out of: its seed, which mapgen made it
+		// and what that mapgen was told, read out of its map_meta.txt into
+		// the save.
+		//
+		// Before run_game(), because the world is made when the game starts
+		// and a mapgen told afterwards has already generated the ground the
+		// player stands on. What the save already says is kept, so a world
+		// that has been played here keeps its own terrain whatever it is
+		// imported over. The rest of a Luanti world -- its map, its clock,
+		// what its mods remembered -- is import_world(), which is after.
+		virtual void import_world_settings(const ss_ &luanti_world_path,
+				storage::Save *save) = 0;
+
+		// Hand Lua into the Luanti environment. chunkname is what a traceback
+		// calls it. An error after run_game(), for the reason above.
+		virtual void load_lua(const ss_ &chunk, const ss_ &chunkname) = 0;
+
+		// Read a Luanti world into the running game's world: the clock it
+		// was left at, and as much of its map as this world has room for.
+		// One direction: the Luanti world directory is opened read-only and
+		// nothing is written back to it.
+		//
+		// Before run_game(), which is where it happens: the map is read
+		// once the game's nodes are registered and before a generator has
+		// been asked for any section, because a section that has been
+		// generated is one whose generator writes over what is read into
+		// it. A section the map reaches into is not generated at all after
+		// this -- what the imported world did not hold is not there, the
+		// way it was not there in the world it came from.
+		//
+		// A name this game does not register becomes "unknown" and is
+		// counted. What comes over is the nodes and their two params, the
+		// metadata hanging off them, the timer on a node that had one, the
+		// entities the blocks were holding, the clock and what the mods
+		// remembered.
+		//
+		// The mods have therefore already loaded when the storage arrives,
+		// so a mod that read its storage while loading read the save's own
+		// and sees the imported values from the next run. A value the save
+		// already has is kept, so importing twice does not take a mod's
+		// memory back to what the Luanti world had.
+		virtual void import_world(const ss_ &luanti_world_path) = 0;
+
+		// A client arriving, leaving, and saying where it is. A player is
+		// what Luanti calls whoever is on the other end of a client: the
+		// name is the caller's to choose and is what everything about the
+		// player is keyed by, the join and leave callbacks a mod registers
+		// run here, and core.get_connected_players() answers with them.
+		//
+		// The peer is which client it is, so that what a player is sent --
+		// their inventory, and the formspecs after it -- has somewhere to
+		// go. It is network::PeerInfo::Id, kept as a number here so that
+		// this header does not have to know about the network module.
+		//
+		// Where a player is is their client's to say; nothing here moves
+		// one. The angles are radians, horizontal measured the way
+		// core.get_look_horizontal() means it.
+		virtual void add_player(const ss_ &name, size_t peer) = 0;
+		// A server admin has every privilege ([VANILLA_PUBLIC] 3); said
+		// again whenever that changes. After luanti:game_loaded.
+		virtual void set_admin(const ss_ &name, bool admin) = 0;
+		// A line of the server's own to a player's chat, or everyone's when
+		// `to` is "" (core.chat_send_player, core.chat_send_all). After
+		// luanti:game_loaded.
+		virtual void chat_send(const ss_ &to, const ss_ &text) = 0;
+		virtual void remove_player(const ss_ &name) = 0;
+		// controls is what the player is holding down, in Luanti's own bit
+		// order -- PlayerControl::getKeysPressed(), which is what
+		// get_player_control_bits() answers with and what
+		// get_player_control() is unpacked from.
+		virtual void set_player_pos(const ss_ &name, float x, float y,
+				float z, float look_h, float look_v, int32_t controls) = 0;
+
+		// How fast a player was going down when they hit something, in
+		// nodes a second. The physics is the client's, so the landing is
+		// its word; what it costs is worked out here, the way Luanti's
+		// client environment works it out -- one hit point per node a
+		// second over fourteen.
+		virtual void player_fell(const ss_ &name, float speed) = 0;
+
+		// What a click comes to. The node is dug the way core.dig_node()
+		// digs one -- the pointed thing is handed to the vendored builtin,
+		// so can_dig, after_dig_node and the drops are the builtin's own --
+		// and the answer is whether anything happened.
+		//
+		// The player is who dug it and who the drops go to; a name that is
+		// nobody's digs with no actor, and then what it drops lands on the
+		// ground.
+		virtual bool dig_node(int32_t x, int32_t y, int32_t z,
+				const ss_ &player_name) = 0;
+
+		// The same node, as the button goes down rather than when the dig
+		// completes: what it comes to is core.node_punch(), so a mod's
+		// on_punch runs. The dig itself is timed on the client -- see
+		// core.__dig_props() -- and arrives as its own packet.
+		virtual bool punch_node(int32_t x, int32_t y, int32_t z,
+				const ss_ &player_name) = 0;
+
+		// The other button. under is the node pointed at and above the empty
+		// voxel in front of it; what it comes to is core.item_place(), so the
+		// pointed node's on_rightclick wins if it has one and the player's
+		// wielded item is placed otherwise -- and what comes back is whether
+		// anything happened.
+		//
+		// sneak is whether the player was holding the key that means "build
+		// against this, do not use it", which is the only way to put a node
+		// down on top of a chest. It is remembered as the player's control
+		// state, which is where a mod reads it.
+		virtual bool place_node(int32_t under_x, int32_t under_y,
+				int32_t under_z, int32_t above_x, int32_t above_y,
+				int32_t above_z, const ss_ &player_name,
+				bool sneak = false) = 0;
+
+		// The drop key: what the player is holding goes into the world as
+		// an object. count is how many of the stack go, and zero is all of
+		// them -- the item's own on_drop is what does it.
+		virtual bool drop_wielded(const ss_ &player_name, int count) = 0;
+
+		// A click on an object rather than on a node: the entity's own
+		// on_punch runs, and what the wielded item does to it is
+		// core.get_hit_params(). The id is the one the client was sent with
+		// the object's position.
+		virtual bool punch_object(int32_t id, const ss_ &player_name) = 0;
+
+		// Which hotbar slot the player is holding, one-based. It is the
+		// client's to say -- the keys and the wheel are there -- and the
+		// server reads it whenever a dig or a place asks what is in hand.
+		virtual void set_wield_index(const ss_ &player_name, int index) = 0;
+
+		// A line a player typed. What it comes to is the on_chat_message
+		// callbacks -- the vendored builtin registers the one that runs a
+		// "/" command among them -- and a line nobody takes is said to
+		// everyone, which is what Luanti's own server does with it.
+		virtual void chat_message(const ss_ &player_name,
+				const ss_ &message) = 0;
+
+		// The scene the map is in, or null until luanti:game_loaded
+		virtual SceneReference get_scene() = 0;
+
+		// core.<name>() called and its result read as a list of strings:
+		// how a module beside this one asks the game's Lua a question of
+		// its own -- a function it registered through load_lua() -- once
+		// the game is loaded. Empty on an error, which is logged.
+		virtual sv_<ss_> call_string_list(const ss_ &name) = 0;
+
+		// Whether the map's chunks get server-side collision shapes
+		// (voxelworld's physics_enabled): off, since nothing of the game's
+		// own collides on the server; a module that drops rigid bodies onto
+		// the terrain asks before run_game() ([VOXEL_PHYSICS_SAMPLE]).
+		virtual void set_server_physics(bool on) = 0;
+	};
+
+	inline bool access(interface::Server *server,
+			std::function<void(luanti::Interface*)> cb)
+	{
+		return server->access_module("luanti", [&](interface::Module *module){
+			auto *iface = (luanti::Interface*)module->check_interface();
+			cb(iface);
+		});
+	}
+}
+
+// vim: set noet ts=4 sw=4:
