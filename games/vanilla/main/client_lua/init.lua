@@ -337,6 +337,19 @@ local set_mouse_in_world
 do
 	local was_open = false
 	local wanted = false
+	-- **A browser holds the pointer only in relative mode** (user,
+	-- 2026-09-30: the look stopped at the screen's edge): Urho3D asks for
+	-- the pointer lock with MM_RELATIVE and leaves it with anything else,
+	-- where a hidden cursor is all a native window needs. The browser
+	-- grants it just after a click or a key; a click in the world asks
+	-- again while it is not held (see MouseButtonDown below).
+	local web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
+	keys.web_lock = function(enable)
+		if web and not keys.touch then
+			magic.input:SetMouseMode(enable and magic.MM_RELATIVE or
+					magic.MM_ABSOLUTE)
+		end
+	end
 	-- reason: a word for the log ([FOCUS_LOG]), which is where a lost
 	-- mouse is read from
 	set_mouse_in_world = function(enable, reason)
@@ -349,6 +362,7 @@ do
 		-- while it is shown, and the touch controls are UI
 		magic.input:SetMouseVisible(not enable or keys.touch ~= nil,
 				reason or "set_mouse_in_world")
+		keys.web_lock(enable)
 	end
 	magic.SubscribeToEvent("Update", function()
 		local open = luanti.form_open()
@@ -359,10 +373,12 @@ do
 		if open then
 			mouse_in_world = false
 			magic.input:SetMouseVisible(true, "a form opened")
+			keys.web_lock(false)
 		else
 			mouse_in_world = wanted
 			magic.input:SetMouseVisible(not wanted or keys.touch ~= nil,
 					"the form closed")
+			keys.web_lock(wanted)
 		end
 	end)
 end
@@ -4015,6 +4031,12 @@ local function update_dig(dt, playing)
 end
 
 magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
+	-- The pointer lock asked for again by a click, which a browser grants
+	-- (lost to Escape, or asked for at the join with no click to go on);
+	-- Urho3D asks only while it is not held
+	if mouse_in_world then
+		keys.web_lock(true)
+	end
 	local button = event_data:GetInt("Button")
 	if button ~= magic.MOUSEB_LEFT and button ~= magic.MOUSEB_RIGHT then
 		return
