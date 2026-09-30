@@ -1,6 +1,7 @@
 -- Buildat: extensions/luanti_client/skyvis.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- How much of the sky the camera can see in each direction, as a cube of
 -- CELLS x CELLS values per face, which res/PBRVoxel.glsl multiplies its

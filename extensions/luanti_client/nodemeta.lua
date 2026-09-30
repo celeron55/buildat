@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/nodemeta.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The metadata that hangs off a voxel: what a chest holds, what a sign says.
 --
