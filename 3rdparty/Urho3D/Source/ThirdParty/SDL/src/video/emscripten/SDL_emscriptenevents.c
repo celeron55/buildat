@@ -391,7 +391,23 @@ EM_BOOL
 Emscripten_HandleWheel(int eventType, const EmscriptenWheelEvent *wheelEvent, void *userData)
 {
     SDL_WindowData *window_data = userData;
-    SDL_SendMouseWheel(window_data->window, 0, wheelEvent->deltaX, -wheelEvent->deltaY, SDL_MOUSEWHEEL_NORMAL);
+    /* buildat: in notches, as a desktop's wheel is. A browser gives pixels
+       (about 100 a notch), lines (3 a notch) or pages, and a smooth
+       scroll a notch in many small events: they are added up, and the
+       whole notches go on (user, 2026-09-30: the floorplanner zoomed far
+       faster on the web). */
+    static double acc_x = 0.0, acc_y = 0.0;
+    double unit = wheelEvent->deltaMode == DOM_DELTA_PIXEL ? 100.0 :
+            wheelEvent->deltaMode == DOM_DELTA_LINE ? 3.0 : 1.0;
+    int nx, ny;
+    acc_x += wheelEvent->deltaX / unit;
+    acc_y += wheelEvent->deltaY / unit;
+    nx = (int)acc_x;
+    ny = (int)acc_y;
+    acc_x -= nx;
+    acc_y -= ny;
+    if (nx != 0 || ny != 0)
+        SDL_SendMouseWheel(window_data->window, 0, nx, -ny, SDL_MOUSEWHEEL_NORMAL);
     return SDL_GetEventState(SDL_MOUSEWHEEL) == SDL_ENABLE;
 }
 

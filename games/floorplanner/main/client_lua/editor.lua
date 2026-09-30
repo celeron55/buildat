@@ -105,6 +105,10 @@ local S = {
 	-- How fast the mouse turns the view, in percent: walking's look and
 	-- the 3D view's orbit (user)
 	mouse_sens = tonumber(buildat.storage_read("mouse_sens") or "") or 100,
+	-- How much a wheel notch zooms, in percent, and whether the 3D view
+	-- zooms toward the cursor rather than along its own direction (user)
+	wheel_speed = tonumber(buildat.storage_read("wheel_speed") or "") or 100,
+	zoom_to_cursor = buildat.storage_read("zoom_to_cursor") == "1",
 	-- The 3D view without the floors above the current one, to see into it
 	-- from above (user); kept on the client
 	hide_above = buildat.storage_read("hide_above") == "1",
@@ -4362,6 +4366,19 @@ do
 				buildat.storage_write("mouse_sens", tostring(S.mouse_sens))
 			end
 		end)
+		panel.field(w, "Wheel zoom %", S.wheel_speed, function(t)
+			local v = tonumber(t)
+			if v then
+				S.wheel_speed = math.max(10, math.min(500, math.floor(v + 0.5)))
+				buildat.storage_write("wheel_speed", tostring(S.wheel_speed))
+			end
+		end)
+		panel.check(w, "3D: the wheel zooms toward the cursor", S.zoom_to_cursor,
+				function()
+			S.zoom_to_cursor = not S.zoom_to_cursor
+			buildat.storage_write("zoom_to_cursor", S.zoom_to_cursor and "1" or "0")
+			client_settings_page()
+		end)
 		panel.button(w, "Back", function() open_pause() end)
 	end
 
@@ -5336,19 +5353,52 @@ do
 					S.mx / sc, S.my / sc, wheel > 0 and 1 or -1, S.shift)
 			return
 		end
-		if S.view == "2d" then
+		-- **A notch is a share of the distance** (user): 0.8 of it in and
+		-- 1.25 out, to the speed setting's power -- the wheel is in notches,
+		-- the web's included (the SDL port counts them)
+		local notches = math.max(-10, math.min(10, wheel))
+		local f = 0.8 ^ (notches * S.wheel_speed / 100)
+		if S.view == "walk" then
+			-- Walking: a metre a notch along the look, as it was
+			local yaw, pitch = math.rad(S.yaw), math.rad(S.pitch)
+			S.pos = {x = S.pos.x + math.sin(yaw) * math.cos(pitch) * notches,
+					y = S.pos.y - math.sin(pitch) * notches,
+					z = S.pos.z + math.cos(yaw) * math.cos(pitch) * notches}
+		elseif S.view == "2d" then
 			-- Zoom about the cursor: the point under it stays under it
 			local x0, z0 = cursor_floor()
-			S.span = math.max(500, math.min(200000, S.span * (wheel > 0 and 0.8
-					or 1.25)))
+			S.span = math.max(500, math.min(200000, S.span * f))
 			local x1, z1 = cursor_floor()
 			S.cx, S.cz = S.cx + x0 - x1, S.cz + z0 - z1
 		else
-			local yaw, pitch = math.rad(S.yaw), math.rad(S.pitch)
-			local k = wheel > 0 and 1 or -1
-			S.pos = {x = S.pos.x + math.sin(yaw) * math.cos(pitch) * k,
-					y = S.pos.y - math.sin(pitch) * k,
-					z = S.pos.z + math.cos(yaw) * math.cos(pitch) * k}
+			-- The distance: to what the pointer is on, else to the middle
+			-- of the layout's rooms
+			local o, d = cursor_ray()
+			local s = pick_surface()
+			local dist = s and s.t
+			if not dist and next(room_data) then
+				local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
+				for _, rd in pairs(room_data) do
+					for _, p in ipairs(rd.pts) do
+						x0, z0 = math.min(x0, p[1]), math.min(z0, p[2])
+						x1, z1 = math.max(x1, p[1]), math.max(z1, p[2])
+					end
+				end
+				dist = geom.len(geom.len(W((x0 + x1) / 2) - S.pos.x, S.pos.y),
+						W((z0 + z1) / 2) - S.pos.z)
+			end
+			dist = dist or 5
+			-- Not through what is pointed at: 0.3 m short of it at most
+			local step = math.min(dist * (1 - f), math.max(0, dist - 0.3))
+			-- Along the view as it always was, or toward the cursor
+			local dx, dy, dz = d.x, d.y, d.z
+			if not S.zoom_to_cursor then
+				local yaw, pitch = math.rad(S.yaw), math.rad(S.pitch)
+				dx, dy, dz = math.sin(yaw) * math.cos(pitch), -math.sin(pitch),
+						math.cos(yaw) * math.cos(pitch)
+			end
+			S.pos = {x = S.pos.x + dx * step, y = S.pos.y + dy * step,
+					z = S.pos.z + dz * step}
 		end
 	end
 
