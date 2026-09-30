@@ -44,6 +44,35 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 	var extra = decodeURIComponent(location.search.substring(1));
 	if(extra)
 		args = args.concat(extra.split(' ').filter(function(a){ return a; }));
+	// **Back in by itself** (user, 2026-09-30): a phone's browser drops
+	// the connection of a page that has been in the background for some
+	// seconds (Vivaldi on Android, another app in front). A disconnect after
+	// the page was away reloads it once it is in front again; one while it
+	// was in front waits for the user to go away and come back, so that a
+	// server that is down is not reloaded over and over.
+	var away_now = false, back_at = 0, disconnected = false;
+	function present(){
+		return document.visibilityState === 'visible' && document.hasFocus();
+	}
+	function away(){
+		away_now = true;
+	}
+	function back(){
+		if(!present() || !away_now)
+			return;
+		away_now = false;
+		back_at = Date.now();
+		if(disconnected)
+			location.reload();
+	}
+	document.addEventListener('visibilitychange', function(){
+		if(document.visibilityState === 'hidden')
+			away();
+		else
+			back();
+	});
+	window.addEventListener('blur', away);
+	window.addEventListener('focus', back);
 	window.Module = {
 		canvas: canvas,
 		arguments: args,
@@ -99,6 +128,12 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 		},
 		// The client calls this when the server has gone, and stops
 		onDisconnected: function(){
+			disconnected = true;
+			// Gone while the page was away, or noticed just after it came
+			// back (a page in the background does not run): the browser's
+			// doing. Away, back() reloads it on the return.
+			if(!away_now && Date.now() - back_at < 10000)
+				location.reload();
 			status.innerHTML = '';
 			status.appendChild(document.createTextNode(
 				'The server closed the connection.\n'));
