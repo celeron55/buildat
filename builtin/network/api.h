@@ -94,6 +94,10 @@ namespace network
 		// LatestOnly packet waits one fragment and not the bulk.
 		enum class Channel { Ordered, LatestOnly };
 		virtual void declare(const ss_ &packet_name, Channel channel) = 0;
+		// The peer is disconnected once what is queued for it has gone, or
+		// in two seconds if it does not read: a packet sent just before,
+		// such as why, still arrives. Nothing more is sent to it.
+		virtual void disconnect(PeerInfo::Id peer) = 0;
 	};
 
 	inline bool access(interface::Server *server,

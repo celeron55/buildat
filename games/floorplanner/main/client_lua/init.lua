@@ -23,8 +23,6 @@ local ENTITY = {"object",
 local TEXT = {"object", {"text", "string"}}
 -- The code is the setup code of a plan with no admin, or an invite code
 -- for a new account ([FP_ACCESS])
-local LOGIN = {"object", {"name", "string"}, {"password", "string"},
-		{"code", "string"}}
 local BATCH = {"object",
 	{"seq", "int32_t"},
 	{"ops", {"array", {"object", {"op", "byte"}, {"ent", ENTITY}}}},
@@ -342,13 +340,6 @@ end)
 -- sends an admin at the join and after every change; what a request came to
 local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
 		{"arg", "string"}, {"on", "byte"}}
-local USERS = {"object",
-	{"users", {"array", {"object", {"name", "string"},
-			{"privs", {"array", "string"}}, {"here", "byte"}}}},
-	{"invites", {"array", {"object", {"code", "string"},
-			{"privs", {"array", "string"}}, {"by", "string"}}}},
-	{"access", {"object", {"open_registration", "byte"}}},
-}
 -- A plan's members ([FP_PLANS] 5): its owner, whether others read or edit
 -- it, and each account's role in it
 local MEMBERS = {"object", {"plan", "string"}, {"owner", "string"},
@@ -366,22 +357,40 @@ buildat.sub_packet("fp:members", function(data)
 		doc.members_changed()
 	end
 end)
+-- The server's accounts ([VANILLA_PUBLIC] 2): the join, and the admin's and
+-- the user's own requests, are builtin/accounts'
+local _, accounts_err, accounts = buildat.run_script_file("accounts/accounts.lua")
+if type(accounts) ~= "table" then
+	error("floorplanner: could not load accounts.lua: " .. tostring(accounts_err))
+end
 doc.users = nil
 function doc.admin(cmd, name, arg, on)
-	buildat.send_packet("fp:admin", cereal.binary_output({cmd = cmd,
-			name = name or "", arg = arg or "", on = on and 1 or 0}, ADMIN))
+	accounts.admin(cmd, name, arg, on)
 end
 function doc.passwd(old, new)
-	buildat.send_packet("fp:passwd", cereal.binary_output(
-			{old = old, new = new}, {"object", {"old", "string"},
-			{"new", "string"}}))
+	accounts.passwd(old, new)
 end
-buildat.sub_packet("fp:users", function(data)
-	doc.users = cereal.binary_input(data, USERS)
+accounts.on_users = function()
+	doc.users = accounts.users
 	if doc.users_changed then
 		doc.users_changed()
 	end
-end)
+end
+accounts.on_admin_result = function(text)
+	doc.admin_message = text
+	if doc.users_changed then
+		doc.users_changed()
+	end
+end
+accounts.on_passwd = function(text)
+	if doc.passwd_done then
+		doc.passwd_done(text)
+	end
+end
+accounts.on_kicked = function()
+	buildat.disconnect()
+end
+-- A plan members page's own requests' results
 buildat.sub_packet("fp:admin_result", function(data)
 	doc.admin_message = cereal.binary_input(data, TEXT).text
 	if doc.users_changed then
@@ -389,12 +398,6 @@ buildat.sub_packet("fp:admin_result", function(data)
 	end
 	if doc.members_changed then
 		doc.members_changed()
-	end
-end)
-buildat.sub_packet("fp:passwd_result", function(data)
-	local text = cereal.binary_input(data, TEXT).text
-	if doc.passwd_done then
-		doc.passwd_done(text)
 	end
 end)
 
@@ -627,10 +630,6 @@ buildat.sub_packet("fp:chat", function(data)
 	doc.notice(cereal.binary_input(data, TEXT).text)
 end)
 
-buildat.sub_packet("fp:kicked", function(data)
-	doc.notice(cereal.binary_input(data, TEXT).text)
-	buildat.disconnect()
-end)
 
 local chat_input = nil
 
@@ -677,17 +676,7 @@ end
 -- The join dialog
 --
 local login_window = nil
--- What the server said last in fp:hello; the join dialog reads it
-local hello = {}
-
-local function send_login(name, password, code)
-	buildat.send_packet("fp:login", cereal.binary_output(
-			{name = name, password = password, code = code or ""}, LOGIN))
-end
-
--- simplified: the join dialog is rebuilt on every error rather than
--- updated
--- A window of the join and the plans pages: `width` wide, or the
+-- A window of the plans pages: `width` wide, or the
 -- screen's width less a margin on a narrow one, a phone's ([FP_TOUCH] 2),
 -- and its texts wrap to it
 local function page_window(width)
@@ -708,102 +697,6 @@ local function page_text(w, t, color)
 		l:SetColor(color)
 	end
 	return l
-end
-
-local function show_login(error_text, is_local)
-	if login_window then
-		login_window:Remove()
-	end
-	local w = page_window(380)
-	login_window = w
-	local function label(text)
-		return page_text(w, text)
-	end
-	local function field(text, secret)
-		local e = w:CreateChild("LineEdit")
-		e:SetStyleAuto()
-		e.minHeight = 26
-		e.textCopyable = not secret
-		e.textSelectable = true
-		if secret then
-			e.echoCharacter = string.byte("*")
-		end
-		e:SetText(text)
-		return e
-	end
-	label("Floor planner")
-	label("Name")
-	-- The name used last on this server, kept on the client; else the one
-	-- the user gave the client for every game
-	local name = field(buildat.storage_read("name") or
-			buildat.get_preference("default_username") or "", false)
-	local password = nil
-	local code = nil
-	if is_local then
-		-- The plan is on this machine: no password to ask
-		label("On this computer: no password needed")
-	else
-		label(hello.open_registration == 1 and
-				"Password (a new name makes an account)" or "Password")
-		password = field("", true)
-		-- [FP_ACCESS]: the plan's first admin claims it with the code in the
-		-- server's log; while registration is closed a new account needs an
-		-- invite
-		if hello.setup == 1 then
-			label("Setup code (see the server's log)")
-			code = field("", false)
-		elseif hello.open_registration ~= 1 then
-			label("Invite code (only for a new account)")
-			code = field("", false)
-		end
-		-- simplified: a native client's connection is not encrypted yet
-		-- ([TRANSPORT]); a web client on an https page has TLS, and its
-		-- page says so
-		if buildat.get_env("BUILDAT_PAGE_HTTPS") ~= "1" then
-			local warn = label("The password is sent unencrypted: use a " ..
-					"trusted network")
-			warn:SetColor(magic.Color(1.0, 0.8, 0.4))
-		end
-	end
-	if error_text then
-		local e = label(error_text)
-		e:SetColor(magic.Color(1.0, 0.4, 0.4))
-	end
-	local button = w:CreateChild("Button")
-	button:SetStyleAuto()
-	button.minHeight = 30
-	local bt = button:CreateChild("Text")
-	bt:SetStyleAuto()
-	bt:SetText("Join")
-	bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-	local function join()
-		local n = name:GetText()
-		buildat.storage_write("name", n)
-		doc.rejoin_name = n
-		send_login(n, password and password:GetText() or "",
-				code and code:GetText() or "")
-	end
-	magic.SubscribeToEvent(button, "Released", function() join() end)
-	magic.SubscribeToEvent(name, "TextFinished", function()
-		if password then
-			password:SetFocus(true)
-		else
-			join()
-		end
-	end)
-	if password then
-		magic.SubscribeToEvent(password, "TextFinished", function()
-			if code then
-				code:SetFocus(true)
-			else
-				join()
-			end
-		end)
-	end
-	if code then
-		magic.SubscribeToEvent(code, "TextFinished", function() join() end)
-	end
-	name:SetFocus(true)
 end
 
 -- The plans ([FP_PLANS] 4): after the join, the ones this user may read,
@@ -1030,8 +923,8 @@ buildat.sub_packet("fp:plans", function(data)
 	if not auto_plan_done then
 		auto_plan_done = true
 		local want = buildat.get_env("BUILDAT_FP_PLAN")
-		if not want and doc.is_local and hello.plan ~= "" then
-			want = hello.plan
+		if not want and doc.launch_plan and doc.launch_plan ~= "" then
+			want = doc.launch_plan
 		end
 		if want then
 			local exists = false
@@ -1066,25 +959,6 @@ buildat.sub_packet("fp:entered", function(data)
 	doc.in_plan = true
 	buildat.storage_write("plan", doc.plan_name)
 	log:info("Entered the plan " .. doc.plan_name)
-end)
-
-buildat.sub_packet("fp:hello", function(data)
-	hello = cereal.binary_input(data, {"object", {"local", "byte"},
-			{"setup", "byte"}, {"open_registration", "byte"}, {"plan", "string"}})
-	doc.is_local = hello["local"] == 1
-	-- Said again when the admin changes who may register: a user who has
-	-- joined already has nothing to do with it
-	if doc.logged_in then
-		return
-	end
-	-- A scripted or second client can skip the dialog
-	local auto_name = buildat.get_env("BUILDAT_FP_NAME")
-	if auto_name then
-		send_login(auto_name, buildat.get_env("BUILDAT_FP_PASSWORD") or "",
-				buildat.get_env("BUILDAT_FP_CODE") or "")
-	else
-		show_login(nil, hello["local"] == 1)
-	end
 end)
 
 -- Out of the plan ([FP_OTHER_PLAN], [FP_PLANS] 4): nothing of it is kept,
@@ -1129,26 +1003,6 @@ function doc.copy_name()
 	return base .. "_" .. n
 end
 
-buildat.sub_packet("fp:login_result", function(data)
-	local err = cereal.binary_input(data, TEXT).text
-	if err ~= "" then
-		log:info("Login refused: " .. err)
-		-- Joined already, a second try's refusal is only said
-		if doc.logged_in then
-			doc.notice(err)
-		else
-			show_login(err, hello["local"] == 1)
-		end
-		return
-	end
-	-- Into the server: the plans come next
-	doc.logged_in = true
-	if login_window then
-		login_window:Remove()
-		login_window = nil
-	end
-end)
-
 -- The editor is loaded once joined: it needs the document to show anything
 local editor = nil
 function doc.suspend_editor()
@@ -1175,7 +1029,19 @@ function doc.joined()
 	editor.start(doc)
 end
 
--- The first dialog waits for fp:hello: the plans to pick, or the join
+-- The join first ([VANILLA_PUBLIC] 2), then the plans to pick
+accounts.notice = function(text)
+	doc.notice(text)
+end
+accounts.on_joined = function()
+	doc.logged_in = true
+	doc.is_local = accounts.hello["local"] == 1
+end
+-- The plan the launcher named, for its own user; before fp:plans
+buildat.sub_packet("fp:launch", function(data)
+	doc.launch_plan = cereal.binary_input(data, TEXT).text
+end)
+accounts.start({title = "Floor planner", env = "BUILDAT_FP"})
 
 -- Whether a field had the focus last frame: Urho's UI takes a LineEdit's
 -- focus on Esc before KeyDown gets here, so Esc in a field would otherwise

@@ -3189,10 +3189,13 @@ struct CApp: public App, public magic::Application
 		// changes, which is off unless this client was asked for it
 		if(g_client_config.get<bool>("reload_modules"))
 			args.push_back("-R");
-		if(!launch.empty()){
-			args.push_back("-u");
-			args.push_back(launch);
-		}
+		// The server knows it is this launcher's: its own user joins by
+		// name alone, and a game keeps its launcher-only doors open
+		// (builtin/accounts, [VANILLA_PUBLIC] 1). Whoever else starts a
+		// server gives it no -u, and it is a public one.
+		args.push_back("-u");
+		args.push_back(launch.empty() ? ss_("launcher=1") :
+				"launcher=1\n"+launch);
 		// Started in the root, whatever the client's cwd: from bin/ (a
 		// click on the exe) every path it forms would be off by one
 		g_local_server = interface::process::start(server_path, args,

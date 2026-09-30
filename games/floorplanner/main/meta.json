@@ -3,6 +3,7 @@
 		{"module": "network"},
 		{"module": "client_lua"},
 		{"module": "client_data"},
-		{"module": "storage"}
+		{"module": "storage"},
+		{"module": "accounts"}
 	]
 }

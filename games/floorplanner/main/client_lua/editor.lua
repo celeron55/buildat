@@ -4280,6 +4280,9 @@ do
 			if user.here == 1 then
 				panel.button(r, "Kick", function() doc.admin("kick", user.name) end)
 			end
+			if not has.admin then
+				panel.button(r, "Ban", function() doc.admin("ban", user.name) end)
+			end
 			panel.button(r, "Password...", function() password_page(user.name) end)
 			panel.button(r, "Delete...", function() delete_page(user.name) end)
 		end
@@ -4292,6 +4295,17 @@ do
 			panel.button(r, "Delete", function() doc.admin("uninvite", inv.code) end)
 		end
 		panel.button(w, "New invite", function() doc.admin("invite") end)
+		-- [VANILLA_PUBLIC] 4: a ban is of the name and of where it joined from
+		if #(u.bans or {}) > 0 then
+			panel.label(w, "Banned:")
+			for _, b in ipairs(u.bans) do
+				local r = panel.row(w)
+				local l = panel.label(r, b.name .. (b.address ~= "" and
+						"  (" .. b.address .. ")" or ""))
+				l.minWidth = 240
+				panel.button(r, "Unban", function() doc.admin("unban", b.name) end)
+			end
+		end
 		local a = u.access
 		panel.button(w, a.open_registration == 1 and
 				"Open registration: on (anyone can make an account)" or

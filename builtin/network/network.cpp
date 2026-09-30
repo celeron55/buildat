@@ -76,9 +76,11 @@ struct Peer
 	ss_ http_request;
 	// WebSocket: what has come and is not a whole frame yet
 	ss_ ws_in;
-	// Dropped once what is queued has gone: an HTTP response, or the
-	// answer to a WebSocket close
+	// Dropped once what is queued has gone: an HTTP response, the answer to
+	// a WebSocket close, or a game's disconnect()
 	bool closing = false;
+	// disconnect()'s: dropped by then even if the peer does not read
+	int64_t close_by_us = 0;
 
 	bool game() const {
 		return kind == Kind::Native || kind == Kind::WebSocket;
@@ -855,7 +857,8 @@ struct Module: public interface::Module, public network::Interface
 					now - peer.accepted_us >= web::SNIFF_US)
 				become_native(peer);
 			flush_peer(peer);
-			if(peer.closing && peer.out_pending() == 0){
+			if(peer.closing && (peer.out_pending() == 0 ||
+					(peer.close_by_us != 0 && now >= peer.close_by_us))){
 				to_drop.push_back(peer.id);
 				continue;
 			}
@@ -1007,6 +1010,15 @@ struct Module: public interface::Module, public network::Interface
 			m_latest_only.insert(packet_name);
 		else
 			m_latest_only.erase(packet_name);
+	}
+
+	void disconnect(PeerInfo::Id id)
+	{
+		auto it = m_peers.find(id);
+		if(it == m_peers.end())
+			return;
+		it->second.closing = true;
+		it->second.close_by_us = interface::os::time_us() + 2000000;
 	}
 
 	void set_send_policy(SendPolicy policy, size_t max_queue_bytes,
