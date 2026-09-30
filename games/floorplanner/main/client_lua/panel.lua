@@ -77,6 +77,21 @@ function M.label(parent, text, color)
 	return t
 end
 
+-- **View only** ([FP_VIEW_EDIT], user): while set, what is made shows
+-- and does not change: a field is read-only, a dropdown is its text, a
+-- checkbox shows its tick and a colour chip its colour, and a button is not
+-- there (M.keep() makes one that only shows something)
+M.view_only = false
+
+-- A button made whatever view_only says: one that edits nothing
+function M.keep(fn)
+	local was = M.view_only
+	M.view_only = false
+	local r = fn()
+	M.view_only = was
+	return r
+end
+
 -- on_click(); `down` draws it pressed (the current tool, a set toggle)
 function M.button(parent, text, on_click, down, min_width)
 	local b = parent:CreateChild("Button")
@@ -94,6 +109,9 @@ function M.button(parent, text, on_click, down, min_width)
 	magic.SubscribeToEvent(b, "Released", function()
 		on_click()
 	end)
+	if M.view_only then
+		b.visible = false
+	end
 	return b
 end
 
@@ -132,6 +150,9 @@ function M.dropdown(parent, label, choices, current, on_choose, min_width)
 		if c[2] == current then
 			shown = c[1]
 		end
+	end
+	if M.view_only then
+		return M.label(parent, (label and label .. ": " or "") .. shown)
 	end
 	local b
 	b = M.button(parent, (label and label .. ": " or "") .. shown,
@@ -191,6 +212,7 @@ function M.check(parent, text, checked, on_click)
 	c.checked = checked
 	-- The button takes the click, not the box
 	c.enabled = false
+	b.enabled = not M.view_only
 	local t = b:CreateChild("Text")
 	t:SetStyleAuto()
 	t:SetText(text)
@@ -280,6 +302,10 @@ function M.field(parent, label, value, on_finish, width, keep, step)
 	e.textCopyable = true
 	e.textSelectable = true
 	e:SetText(tostring(value))
+	if M.view_only then
+		e.editable = false
+		return e, r
+	end
 	if type(value) == "number" then
 		numeric_n = numeric_n + 1
 		local name = "fp_number_" .. numeric_n
@@ -447,6 +473,7 @@ function M.chip(parent, rgb, size, on_click, on_hover, text)
 	local face = b:CreateChild("BorderImage")
 	face:SetFixedSize(size, size)
 	face.color = to_color(rgb)
+	b.enabled = not M.view_only
 	magic.SubscribeToEvent(b, "Released", function() on_click() end)
 	if on_hover then
 		magic.SubscribeToEvent(b, "HoverBegin", function() on_hover(text) end)

@@ -3716,6 +3716,13 @@ local function set_view(v)
 end
 
 local function set_tool(t)
+	-- Viewing ([FP_VIEW_EDIT]): only Select, whose clicks show things
+	if t ~= "select" and not doc.can("edit") then
+		doc.notice(doc.can("can_edit") and
+				"Viewing: switch to Editing in the menu to use that tool" or
+				"Viewing only: no edit privilege")
+		return
+	end
 	if t ~= S.tool and S.view == "3d" then
 		S.crosshair = false
 	end
@@ -3782,10 +3789,15 @@ local function build_toolbar()
 		S.layouts_open = not S.layouts_open
 		refresh_panels()
 	end, S.layouts_open)
+	-- Viewing ([FP_VIEW_EDIT]): the tools that only make and change
+	-- things are not there
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Object"},
 			{"hosted", "Door/window"}, {"voxel", "Voxels"}, {"paint", "Material"}}) do
-		add(t[2], TOOL_KEYS[t[1]], function() set_tool(t[1]) end, S.tool == t[1])
+		if t[1] == "select" or doc.can("edit") then
+			add(t[2], TOOL_KEYS[t[1]], function() set_tool(t[1]) end,
+					S.tool == t[1])
+		end
 	end
 	-- The panels folded away on a narrow screen, opened here
 	if panel.narrow() then
@@ -3801,6 +3813,11 @@ local function build_toolbar()
 		S.dirty = true
 		refresh_panels()
 	end, S.show_ids)
+	-- Viewing with a role that edits: the way to editing, last (user),
+	-- where the tools were
+	if not doc.can("edit") and doc.can("can_edit") then
+		add("Start editing", nil, function() doc.set_editing(true) end)
+	end
 	-- The panels start under it
 	S.panel_y = 8 + toolbar.height + 8
 	-- **A touchscreen's keys** ([FP_TOUCH] 4): what Ctrl+Z, Ctrl+Y, Del,
@@ -3812,9 +3829,11 @@ local function build_toolbar()
 	if S.touch then
 		local b = panel.window(magic.HA_RIGHT, magic.VA_BOTTOM, -8, -8, true)
 		S.touch_bar = b
-		panel.button(b, "Undo", function() doc.undo() end)
-		panel.button(b, "Redo", function() doc.redo() end)
-		panel.button(b, "Delete", function() delete_selected() end)
+		if doc.can("edit") then
+			panel.button(b, "Undo", function() doc.undo() end)
+			panel.button(b, "Redo", function() doc.redo() end)
+			panel.button(b, "Delete", function() delete_selected() end)
+		end
 		if S.view == "walk" then
 			panel.button(b, "Use", function() M.use() end)
 		end
@@ -3997,7 +4016,9 @@ local function build_props()
 			if p.kind == KIND.window or p.glazed == 1 then
 				slots[3] = {"Glass", "mat_glass"}
 			end
-			panel.dropdown(props, "Part", slots, part, function(v)
+			-- Which part's palette entry shows: not an edit
+			panel.keep(function() return panel.dropdown(props, "Part", slots,
+					part, function(v)
 				S.sel_face[sel.id] = v
 				editing_selection()
 				local m = p[v] ~= 0 and p[v] or p.mat
@@ -4005,7 +4026,7 @@ local function build_props()
 					S.material = m
 				end
 				refresh_panels()
-			end)
+			end) end)
 		end
 		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
 		panel.button(props, "Linked clone (Ctrl+L)", function()
@@ -4330,7 +4351,7 @@ local function build_props()
 	end
 	if not doc.can("edit") then
 		panel.label(props, doc.can("can_edit") and
-				"Viewing: switch to Editing in the menu" or
+				"Viewing: Editing is in the menu" or
 				"Viewing only: no edit privilege", magic.Color(1, 0.6, 0.4))
 	end
 end
@@ -4552,12 +4573,13 @@ build_palette = function()
 		panel.label(palette_win, "Pick the entry to use instead:")
 	else
 		local ce = doc.ents[cur]
-		panel.mark(panel.button(palette_win, S.palette_collapsed and ce and
+		panel.keep(function() return panel.mark(panel.button(palette_win,
+				S.palette_collapsed and ce and
 				("Palette: #" .. cur .. "  " .. ce.strs.name) or "Palette",
 				function()
 			S.palette_collapsed = not S.palette_collapsed
 			refresh_panels()
-		end), S.palette_collapsed and "▼" or "▲")
+		end), S.palette_collapsed and "▼" or "▲") end)
 		if S.palette_collapsed then
 			-- The colour picker goes with it; a voxel replace keeps its own
 			if S.picker and not S.replace then
@@ -4608,12 +4630,16 @@ build_palette = function()
 		end, 120, true)
 		-- The types as a grid of their previews, opened under the button
 		-- ([FP_TYPES]); Esc or the button again closes it
-		panel.mark(panel.button(palette_win, "Type: " .. MATERIAL_KINDS[p.kind],
-				function()
-			S.type_open = not S.type_open
-			refresh_panels()
-		end, S.type_open), S.type_open and "▲" or "▼")
-		if S.type_open then
+		if panel.view_only then
+			panel.label(palette_win, "Type: " .. MATERIAL_KINDS[p.kind])
+		else
+			panel.mark(panel.button(palette_win, "Type: " .. MATERIAL_KINDS[p.kind],
+					function()
+				S.type_open = not S.type_open
+				refresh_panels()
+			end, S.type_open), S.type_open and "▲" or "▼")
+		end
+		if S.type_open and not panel.view_only then
 			local tex = kind_previews()
 			local r
 			for k = 0, #MATERIAL_KINDS do
@@ -4735,10 +4761,10 @@ place.build_window = function()
 	end
 	local top = panel.row(w)
 	panel.label(top, "Layouts: click one to edit it")
-	panel.button(top, "Close", function()
+	panel.keep(function() return panel.button(top, "Close", function()
 		S.layouts_open = false
 		refresh_panels()
-	end)
+	end) end)
 	local list = doc.of_type("layout")
 	table.sort(list, function(a, b)
 		if a.strs.group ~= b.strs.group then
@@ -4756,19 +4782,21 @@ place.build_window = function()
 		if e and l.strs.group == e.strs.group then
 			in_group = in_group + 1
 		end
-		panel.button(w, l.strs.group .. ": " .. l.strs.name, function()
+		panel.keep(function() return panel.button(w, l.strs.group .. ": " ..
+				l.strs.name, function()
 			place.switch(l.id)
 			refresh_panels()
-		end, l.id == S.layout)
+		end, l.id == S.layout) end)
 	end
 	-- At the bottom for everyone: what the 3D view shows of the floors
 	-- over this one (user)
 	local function above_toggle()
-		panel.check(w, "Hide the floors above in 3D", S.hide_above, function()
+		panel.keep(function() return panel.check(w, "Hide the floors above in 3D",
+				S.hide_above, function()
 			S.hide_above = not S.hide_above
 			buildat.storage_write("hide_above", S.hide_above and "1" or "0")
 			refresh_panels()
-		end)
+		end) end)
 	end
 	if not e or not doc.can("edit") then
 		above_toggle()
@@ -4856,9 +4884,13 @@ refresh_panels = function()
 	end
 	S.panels_stale = false
 	build_toolbar()
+	-- Viewing ([FP_VIEW_EDIT]): the panels show everything and change
+	-- nothing
+	panel.view_only = not doc.can("edit")
 	build_props()
 	build_palette()
 	place.build_window()
+	panel.view_only = false
 end
 M.refresh_panels = function() refresh_panels() end
 
@@ -8093,6 +8125,9 @@ function M.start(d)
 		refresh_panels()
 	end
 	doc.privs_changed = function()
+		if not doc.can("edit") and S.tool ~= "select" then
+			set_tool("select")
+		end
 		refresh_panels()
 		-- The pause menu's mode shows what the server says
 		if M.pause_top() then

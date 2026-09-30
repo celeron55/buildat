@@ -2128,6 +2128,8 @@ function M.define(dst, util)
 			-- so this moves nothing the user did not ask to move.
 			textCopyable = util.simple_property("boolean"),
 			textSelectable = util.simple_property("boolean"),
+			-- A field to read and copy from, not to type into
+			editable = util.simple_property("boolean"),
 		},
 	})
 
