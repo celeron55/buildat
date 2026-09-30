@@ -2141,9 +2141,14 @@ local function pick_surface(whole)
 		end
 	end
 	for id, ol in pairs(outlines) do
-		local y0, y1 = wall_span(doc.ents[id].ints)
+		-- (an outline outlives its wall for the frame a plan is left in)
+		local we = doc.ents[id]
+		local y0, y1 = 0, 0
+		if we then
+			y0, y1 = wall_span(we.ints)
+		end
 		y0, y1 = W(y0), W(y1)
-		local pts = ol.pts
+		local pts = we and ol.pts or {}
 		for i = 1, #pts do
 			local p, q = pts[i], pts[i % #pts + 1]
 			local px, pz, qx, qz = W(p[1]), W(p[2]), W(q[1]), W(q[2])

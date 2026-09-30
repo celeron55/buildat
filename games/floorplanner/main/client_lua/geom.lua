@@ -155,9 +155,15 @@ end
 -- simplified: O(n^3), which is nothing for a wall and fine for a room;
 -- a polygon of thousands of corners would want a better one.
 function M.triangulate(pts)
+	-- **A corner given twice is one corner** (user, a wall's top half
+	-- missing): it has no area and no ear, and the fallback below took a
+	-- real corner out with the half of the polygon it made
 	local idx = {}
 	for i = 1, #pts do
-		idx[i] = i
+		local q = pts[idx[#idx] or #pts]
+		if math.abs(pts[i][1] - q[1]) > 0.01 or math.abs(pts[i][2] - q[2]) > 0.01 then
+			idx[#idx + 1] = i
+		end
 	end
 	if area2(pts) < 0 then
 		local r = {}
@@ -199,7 +205,17 @@ function M.triangulate(pts)
 		end
 		if not found then
 			-- Collinear leftovers: drop the flattest corner and go on
-			table.remove(idx, 1)
+			local flat, best = 1, math.huge
+			for i = 1, #idx do
+				local a = pts[idx[(i - 2) % #idx + 1]]
+				local b, c = pts[idx[i]], pts[idx[i % #idx + 1]]
+				local k = math.abs(cross(b[1] - a[1], b[2] - a[2],
+						c[1] - b[1], c[2] - b[2]))
+				if k < best then
+					flat, best = i, k
+				end
+			end
+			table.remove(idx, flat)
 		end
 	end
 	if #idx == 3 and area2({pts[idx[1]], pts[idx[2]], pts[idx[3]]}) > 1e-9 then
@@ -681,6 +697,26 @@ do
 	assert(M.pick_floor(side, 1, 0) == 3, "into the other building")
 	assert(M.pick_floor({{id = 1, y = 0, under = false}}, 1, 0) == nil,
 			"outside, nowhere to go")
+end
+
+-- A corner given twice (two walls' outlines meeting at a room corner) or a
+-- point on an edge still covers the whole polygon
+do
+	local function covered(pts)
+		local s = 0
+		for _, t in ipairs(M.triangulate(pts)) do
+			s = s + M.area({pts[t[1]], pts[t[2]], pts[t[3]]})
+		end
+		return math.abs(s - M.area(pts)) < 1
+	end
+	assert(covered({{0, 0}, {4000, 0}, {4000, 0}, {4000, 100}, {0, 100}}),
+			"a repeated corner")
+	assert(covered({{0, 0}, {4000, 0}, {4000, 100}, {0, 100}, {0, 0}}),
+			"a repeated corner at the wrap")
+	assert(covered({{0, 0}, {2000, 0}, {4000, 0}, {4000, 100}, {0, 100}}),
+			"a point on an edge")
+	assert(covered({{0, 0}, {4000, 0}, {4000, 100}, {100, 100}, {100, 100},
+			{100, 3000}, {0, 3000}}), "an L with a repeated corner")
 end
 
 return M
