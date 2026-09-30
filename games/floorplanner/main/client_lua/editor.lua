@@ -5116,7 +5116,9 @@ do
 	-- is then the plan open; the server says so if the name is taken
 	local function copy_page()
 		local w = dialog("Copy this plan")
-		panel.label(w, "\"" .. doc.plan_name .. "\" as:")
+		panel.label(w, (doc.backup and "The backup of \"" .. doc.backup.of ..
+				"\" from " .. doc.backup.label or "\"" .. doc.plan_name .. "\"") ..
+				" as:")
 		local e
 		local function copy()
 			local n = e:GetText()
@@ -5201,6 +5203,51 @@ do
 		end
 	end
 
+	-- **The plan's backups** ([FP_BACKUPS]), newest first: one opens to
+	-- look at, and Copy this plan keeps it
+	local function backups_page()
+		S.pause_page = "backups"
+		local w = dialog("Backups of " .. (doc.backup and doc.backup.of or
+				doc.plan_name))
+		local b = doc.backups
+		if not b then
+			panel.label(w, "Waiting for the server...")
+		elseif #b.rows == 0 then
+			panel.label(w, "None yet: one is made when the plan opens changed,")
+			panel.label(w, "and each hour it is open and changes.")
+		else
+			panel.label(w, "Each opens view only.")
+			for _, r in ipairs(b.rows) do
+				local here = doc.backup and doc.plan_name:sub(-#r.id - 1) ==
+						"-" .. r.id
+				panel.button(w, r.label, function()
+					close_pause()
+					doc.open_backup(r.id)
+				end, here)
+			end
+		end
+		panel.button(w, "Back", function() open_pause() end)
+	end
+	-- Put back as the plan, after a yes: the plan as it is goes into a
+	-- backup first
+	local function restore_page()
+		local w = dialog("Restore " .. doc.backup.of .. " to this backup?")
+		panel.label(w, "It becomes as it was " .. doc.backup.label)
+		panel.label(w, "for everyone in it. How it is now is kept")
+		panel.label(w, "as a backup, which can be restored in turn.")
+		local r = panel.row(w)
+		panel.button(r, "Restore", function()
+			close_pause()
+			doc.restore_backup()
+		end)
+		panel.button(r, "Back", function() open_pause() end)
+	end
+	M.backups_changed = function()
+		if pause_win and S.pause_page == "backups" then
+			backups_page()
+		end
+	end
+
 	open_pause = function()
 		S.pause_page = nil
 		S.paused = true
@@ -5209,9 +5256,16 @@ do
 		S.press, S.drag = nil, nil
 		update_capture()
 		local w = dialog("Paused")
-		-- Which plan this is, at a glance (user)
-		panel.label(w, "Plan: " .. (doc.plan_name or "?"),
-				magic.Color(1.0, 0.85, 0.3))
+		-- Which plan this is, at a glance (user); a backup says so
+		if doc.backup then
+			local c = magic.Color(1.0, 0.85, 0.3)
+			panel.label(w, "Backup of " .. doc.backup.of, c)
+			panel.label(w, doc.backup.label, c)
+			panel.label(w, "View only", c)
+		else
+			panel.label(w, "Plan: " .. (doc.plan_name or "?"),
+					magic.Color(1.0, 0.85, 0.3))
+		end
 		panel.button(w, "Continue (Esc)", function() close_pause() end)
 		panel.button(w, "Plan settings...", plan_settings_page)
 		panel.button(w, "Client settings...", client_settings_page)
@@ -5237,6 +5291,19 @@ do
 		-- Anyone makes a copy, which is theirs, and goes back to the plans
 		-- ([FP_PLANS] 4, 5)
 		panel.button(w, "Copy this plan...", copy_page)
+		panel.button(w, "Backups...", function()
+			doc.request_backups()
+			backups_page()
+		end)
+		if doc.backup and doc.backup.restore == 1 then
+			panel.button(w, "Restore this backup...", restore_page)
+		end
+		if doc.backup then
+			panel.button(w, "Back to " .. doc.backup.of, function()
+				close_pause()
+				doc.open_plan(doc.backup.of)
+			end)
+		end
 		panel.button(w, "Export this plan", function()
 			close_pause()
 			doc.export_plan()
@@ -7973,6 +8040,7 @@ end
 function M.start(d)
 	doc = d
 	doc.members_changed = M.members_changed
+	doc.backups_changed = M.backups_changed
 	S.material = nil
 	doc.listeners[#doc.listeners + 1] = function(changed, deleted)
 		if S.suspended then

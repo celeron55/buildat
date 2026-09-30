@@ -695,6 +695,40 @@ local function open_plan(name, create)
 			{"object", {"name", "string"}, {"create", "byte"}}))
 end
 
+-- **A plan's backups** ([FP_BACKUPS]): the list, for anyone who reads the
+-- plan, and one opened to look at, a plan everyone in only reads; Copy
+-- this plan keeps it. doc.backup is {of, label} while in one.
+local BACKUPS = {"object", {"plan", "string"}, {"rows", {"array",
+	{"object", {"id", "string"}, {"label", "string"}}}}}
+doc.backups = nil
+function doc.request_backups()
+	doc.backups = nil
+	buildat.send_packet("fp:backups", "")
+end
+buildat.sub_packet("fp:backups", function(data)
+	doc.backups = cereal.binary_input(data, BACKUPS)
+	if doc.backups_changed then
+		doc.backups_changed()
+	end
+end)
+function doc.open_backup(id)
+	buildat.send_packet("fp:open_backup", cereal.binary_output({text = id},
+			TEXT))
+end
+buildat.sub_packet("fp:backup", function(data)
+	doc.backup = cereal.binary_input(data, {"object", {"of", "string"},
+			{"label", "string"}, {"restore", "byte"}})
+end)
+-- The backup looked at put back as the plan it is of, for one who may
+-- edit that; everyone in the plan gets it again
+function doc.restore_backup()
+	buildat.send_packet("fp:restore_backup", "")
+end
+-- Out of a backup, into the plan it is of
+function doc.open_plan(name)
+	open_plan(name, false)
+end
+
 local ROLE_TEXT = {admin = "admin", owner = "yours", editor = "can edit",
 		viewer = "can read"}
 
@@ -953,7 +987,11 @@ buildat.sub_packet("fp:entered", function(data)
 	doc.plan_name = cereal.binary_input(data, TEXT).text
 	doc.in_plan = true
 	doc.view_restored = false
-	buildat.storage_write("plan", doc.plan_name)
+	doc.backup = nil
+	-- A backup (its name begins with _) is not what a next join opens
+	if doc.plan_name:sub(1, 1) ~= "_" then
+		buildat.storage_write("plan", doc.plan_name)
+	end
 	log:info("Entered the plan " .. doc.plan_name)
 end)
 
@@ -992,7 +1030,8 @@ function doc.copy_name()
 	for _, p in ipairs(doc.plans or {}) do
 		taken[p.name] = true
 	end
-	local base = doc.plan_name ~= "" and doc.plan_name or "plan"
+	local base = doc.backup and doc.backup.of or
+			doc.plan_name ~= "" and doc.plan_name or "plan"
 	local n = 1
 	while taken[base .. "_" .. n] do
 		n = n + 1

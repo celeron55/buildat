@@ -32,6 +32,7 @@
 #include <functional>
 #include <cmath>
 #include <algorithm>
+#include <ctime>
 #define MODULE "main"
 
 using interface::Event;
@@ -51,7 +52,90 @@ static const int32_t MAX_COORD = 100000000;
 static const int32_t VOXEL_RANGE = 128;
 static const size_t MAX_VOXELS = 200000;
 // How many copies of the plan are kept, one made each time it is loaded
-static const int BACKUPS = 5;
+// **Backups by time** (user, 2026-09-30): a plan's backups/<unix time>,
+// made when it opens changed since the last one and each hour it stays
+// open and changes. All of the last hour are kept, then the oldest of each
+// hour for a day, of each day for a week and of each week to BACKUP_KEEP_S:
+// the oldest, since the state to go back to is the one before a change
+// that came later in the same hour.
+static const int64_t BACKUP_EVERY_S = 3600;
+static const int64_t BACKUP_KEEP_S = 60 * 86400;
+
+// Which of a plan's backups (their times, any order) thinning drops at
+// `now`; the newest is always kept
+static sv_<int64_t> backups_to_drop(sv_<int64_t> ids, int64_t now)
+{
+	std::sort(ids.begin(), ids.end());
+	set_<ss_> buckets;
+	sv_<int64_t> drop;
+	for(size_t i = 0; i < ids.size(); i++){
+		const int64_t age = now - ids[i];
+		ss_ bucket;
+		if(age < 3600)
+			bucket = "a"+itos(ids[i]);
+		else if(age < 86400)
+			bucket = "h"+itos(ids[i] / 3600);
+		else if(age < 7 * 86400)
+			bucket = "d"+itos(ids[i] / 86400);
+		else if(age < BACKUP_KEEP_S)
+			bucket = "w"+itos(ids[i] / (7 * 86400));
+		if(i + 1 < ids.size() && (bucket.empty() || buckets.count(bucket)))
+			drop.push_back(ids[i]);
+		else
+			buckets.insert(bucket);
+	}
+	return drop;
+}
+
+static void check_backups_to_drop()
+{
+	const int64_t now = 100 * 86400;
+	auto dropped = [&](const sv_<int64_t> &ids){
+		sv_<int64_t> d = backups_to_drop(ids, now);
+		std::sort(d.begin(), d.end());
+		return d;
+	};
+	// The last hour all stays
+	if(!dropped({now - 10, now - 20, now - 3000}).empty())
+		throw Exception("backups_to_drop: dropped from the last hour");
+	// Two in one hour of the day: the newer goes
+	const int64_t h = now - 5 * 3600;
+	const int64_t h0 = h - h % 3600;
+	if(dropped({h0 + 10, h0 + 20, now}) != sv_<int64_t>{h0 + 20})
+		throw Exception("backups_to_drop: kept two in an hour");
+	if(!dropped({now - 2 * 3600, now - 4 * 3600, now}).empty())
+		throw Exception("backups_to_drop: dropped hours apart");
+	// Past the keep, all go but the newest
+	if(dropped({now - BACKUP_KEEP_S - 10, now - BACKUP_KEEP_S - 20}) !=
+			sv_<int64_t>{now - BACKUP_KEEP_S - 20})
+		throw Exception("backups_to_drop: kept an old one");
+	// Days in the week: the oldest of each
+	const int64_t d = now - now % 86400;
+	if(dropped({d - 2 * 86400 + 10, d - 2 * 86400 + 20, d - 3 * 86400 + 10,
+			now}) != sv_<int64_t>{d - 2 * 86400 + 20})
+		throw Exception("backups_to_drop: days");
+}
+
+// A backup's time as a person reads it: the server's clock, and how long
+// ago, which is the same in every time zone
+static ss_ backup_label(int64_t id, int64_t now)
+{
+	if(id < 0)
+		return "older backup "+itos(-id)+" (time unknown)";
+	char buf[32] = {};
+	const time_t t = (time_t)id;
+	struct tm tmv;
+#ifdef _WIN32
+	localtime_s(&tmv, &t);
+#else
+	localtime_r(&t, &tmv);
+#endif
+	strftime(buf, sizeof buf, "%Y-%m-%d %H:%M", &tmv);
+	const int64_t age = std::max<int64_t>(0, now - id);
+	ss_ ago = age < 3600 ? itos(age / 60)+" min" : age < 2 * 86400 ?
+			itos(age / 3600)+" h" : itos(age / 86400)+" days";
+	return ss_(buf)+" ("+ago+" ago)";
+}
 // A background image a client is sent at most
 static const uint64_t MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 // A plan as a file ([FP_EXPORT]): what an import may be, at most
@@ -511,37 +595,78 @@ struct Plan
 	sv_<ss_> m_images;
 	// Seconds with nobody in it
 	float m_idle = 0;
+	// Written to since the last backup, and when that was
+	bool m_changed = false;
+	int64_t m_last_backup = 0;
+	// A backup opened to look at ([FP_BACKUPS]): the plan it is of, and
+	// when it was made. Everyone in it is a viewer, and it goes when it
+	// closes.
+	ss_ m_backup_of;
+	int64_t m_backup_id = 0;
 
 	Plan(interface::Server *server, const ss_ &name):
 		m_server(server), m_name(name)
 	{}
 
-	// <save>/backups/1 is the newest of BACKUPS; the save is closed, so its
-	// write-ahead log is copied as it is
+	// The times of <save>/backups/*, newest first, and after them the
+	// numbered ones from before ([FP_BACKUPS]) as -1, -2 and on: their
+	// times are not known (each was copied again at every open, so their
+	// files' times are all the last open's), and they are never thinned
+	static sv_<int64_t> list_backups(const ss_ &path)
+	{
+		namespace fs = interface::fs;
+		sv_<int64_t> ids, old;
+		for(const fs::Node &n : fs::list_directory(path+"/backups")){
+			if(!n.is_directory || n.name.empty() || n.name.size() > 18 ||
+					n.name.find_first_not_of("0123456789") != ss_::npos)
+				continue;
+			const int64_t id = std::stoll(n.name);
+			if(n.name.size() <= 2)
+				old.push_back(-id);
+			else
+				ids.push_back(id);
+		}
+		std::sort(ids.begin(), ids.end(), std::greater<int64_t>());
+		std::sort(old.begin(), old.end(), std::greater<int64_t>());
+		ids.insert(ids.end(), old.begin(), old.end());
+		return ids;
+	}
+
+	static ss_ backup_dir(const ss_ &path, int64_t id)
+	{
+		return path+"/backups/"+itos(id < 0 ? -id : id);
+	}
+
+	// A copy of the save into <save>/backups/<now>, then the old ones
+	// thinned. The save is closed, or open and just flushed with nothing
+	// written until this returns, so its write-ahead log is copied as it is.
 	void backup(const ss_ &path)
 	{
 		namespace fs = interface::fs;
-		ss_ dir = path+"/backups";
-		fs::create_directories(dir);
-		if(fs::path_exists(dir+"/"+itos(BACKUPS)))
-			fs::remove_all(dir+"/"+itos(BACKUPS));
-		for(int i = BACKUPS - 1; i >= 1; i--){
-			ss_ from = dir+"/"+itos(i);
-			if(!fs::path_exists(from))
-				continue;
-			fs::create_directories(dir+"/"+itos(i + 1));
-			for(const char *f : {"/save.sqlite", "/save.sqlite-wal"})
-				if(fs::path_exists(from+f))
-					fs::copy_file(from+f, dir+"/"+itos(i + 1)+f);
-			fs::remove_all(from);
+		const int64_t now = (int64_t)time(nullptr);
+		const ss_ dir = path+"/backups";
+		sv_<int64_t> ids;
+		for(int64_t id : list_backups(path))
+			if(id > 0)
+				ids.push_back(id);
+		if(ids.empty() || ids[0] < now){
+			const ss_ to = dir+"/"+itos(now);
+			fs::create_directories(to);
+			bool ok = fs::copy_file(path+"/save.sqlite", to+"/save.sqlite");
+			if(fs::path_exists(path+"/save.sqlite-wal"))
+				ok = fs::copy_file(path+"/save.sqlite-wal",
+						to+"/save.sqlite-wal") && ok;
+			if(!ok){
+				log_w(MODULE, "Could not back the plan up into %s", cs(to));
+				fs::remove_all(to);
+				return;
+			}
+			ids.push_back(now);
 		}
-		fs::create_directories(dir+"/1");
-		bool ok = fs::copy_file(path+"/save.sqlite", dir+"/1/save.sqlite");
-		if(fs::path_exists(path+"/save.sqlite-wal"))
-			ok = fs::copy_file(path+"/save.sqlite-wal",
-					dir+"/1/save.sqlite-wal") && ok;
-		if(!ok)
-			log_w(MODULE, "Could not back the plan up into %s", cs(dir));
+		for(int64_t id : backups_to_drop(ids, now))
+			fs::remove_all(dir+"/"+itos(id));
+		m_last_backup = now;
+		m_changed = false;
 	}
 
 	void find_images()
@@ -688,7 +813,10 @@ struct Plan
 	{
 		if(!m_store || (m_dirty.empty() && m_voxels_dirty.empty()))
 			return;
+		m_changed = true;
 		m_store->batch([&](){
+			// For the next open: changed since its last backup
+			m_store->set("meta/unbacked", "1");
 			for(int32_t id : m_dirty){
 				ss_ key = "e/"+itos(id);
 				auto it = m_ents.find(id);
@@ -1037,6 +1165,7 @@ struct Module: public interface::Module
 
 	void init()
 	{
+		check_backups_to_drop();
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:unload"));
@@ -1050,7 +1179,8 @@ struct Module: public interface::Module
 		for(const char *name : {"fp:open", "fp:leave_plan",
 				"fp:copy_plan", "fp:plan_admin", "fp:batch", "fp:chat",
 				"fp:voxels", "fp:lock", "fp:unlock",
-				"fp:preview", "fp:presence", "fp:export", "fp:import"})
+				"fp:preview", "fp:presence", "fp:export", "fp:import",
+				"fp:backups", "fp:open_backup", "fp:restore_backup"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -1082,6 +1212,12 @@ struct Module: public interface::Module
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:plan_admin", on_plan_admin,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:backups", on_backups,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:open_backup", on_open_backup,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:restore_backup",
+				on_restore_backup, network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:chat", on_chat,
@@ -1124,6 +1260,12 @@ struct Module: public interface::Module
 	void on_start()
 	{
 		m_launch_plan = launch_param("save");
+		// Backups opened to look at when the server last stopped
+		storage::access(m_server, [&](storage::Interface *istorage){
+			for(const storage::SaveInfo &i : istorage->list())
+				if(i.name.compare(0, 8, "_backup-") == 0)
+					istorage->remove(i.name);
+		});
 	}
 
 	// Plans
@@ -1141,15 +1283,24 @@ struct Module: public interface::Module
 		storage::access(m_server, [&](storage::Interface *istorage){
 			plan->m_save = istorage->open(name);
 			if(plan->m_save){
-				// A copy of the plan as it was, before anything touches it:
-				// what an undo that lives only for a session cannot give
-				// back
+				// A copy of the plan as it was, before anything touches it,
+				// when it changed since the last: what an undo that lives
+				// only for a session cannot give back
 				ss_ path = plan->m_save->path();
-				istorage->close(plan->m_save);
-				plan->backup(path);
-				plan->m_save = istorage->open(name);
+				ss_ unbacked;
+				plan->m_save->store("main")->get("meta/unbacked", unbacked);
+				sv_<int64_t> ids = Plan::list_backups(path);
+				plan->m_last_backup = ids.empty() ? 0 : std::max<int64_t>(0, ids[0]);
+				if(unbacked != "0" || ids.empty()){
+					istorage->close(plan->m_save);
+					plan->backup(path);
+					plan->m_save = istorage->open(name);
+					if(plan->m_save)
+						plan->m_save->store("main")->set("meta/unbacked", "0");
+				}
 			} else if(create){
 				plan->m_save = istorage->create(name);
+				plan->m_last_backup = (int64_t)time(nullptr);
 			}
 		});
 		if(!plan->m_save){
@@ -1183,8 +1334,14 @@ struct Module: public interface::Module
 		if(it == m_plans.end())
 			return;
 		it->second->flush();
+		const bool view = !it->second->m_backup_of.empty();
 		close_save(it->second.get());
 		m_plans.erase(it);
+		if(view){
+			storage::access(m_server, [&](storage::Interface *istorage){
+				istorage->remove(name);
+			});
+		}
 		log_i(MODULE, "Closed the plan %s", cs(name));
 	}
 
@@ -1290,9 +1447,14 @@ struct Module: public interface::Module
 		return p == m_plans.end() ? nullptr : p->second.get();
 	}
 
+	// In a backup, whoever may read the plan it is of reads it, and nobody
+	// more
 	ss_ peer_role(network::PeerId peer)
 	{
 		Plan *plan = plan_of(peer);
+		if(plan && !plan->m_backup_of.empty())
+			return role_in(plan_meta(plan->m_backup_of),
+					m_peers[peer].name).empty() ? "" : "viewer";
 		return plan ? role_in(read_meta(plan->m_store), m_peers[peer].name) : "";
 	}
 
@@ -1344,6 +1506,15 @@ struct Module: public interface::Module
 		peer.has_presence = false;
 		plan->m_idle = 0;
 		send(peer_id, "fp:entered", pack(plan->m_name));
+		if(!plan->m_backup_of.empty()){
+			// Of, when, and whether this user may restore it
+			const bool restore = role_edits(role_in(plan_meta(plan->m_backup_of),
+					peer.name));
+			send(peer_id, "fp:backup", pack(std::make_pair(
+					std::make_pair(plan->m_backup_of, backup_label(
+					plan->m_backup_id, (int64_t)time(nullptr))),
+					(uint8_t)(restore ? 1 : 0))));
+		}
 		send_privs(peer_id);
 		sv_<Entity> all;
 		for(auto &pair : plan->m_ents)
@@ -1516,6 +1687,175 @@ struct Module: public interface::Module
 				cs(from_plan->m_name), cs(name));
 		refuse("");
 		enter_plan(packet.sender, copy);
+		send_plans_to_idle();
+	}
+
+	// **A plan's backups, to look at** ([FP_BACKUPS], user 2026-09-30):
+	// for anyone who may read the plan, since a reader is as likely to be
+	// the one who finds it broken. One opens as a plan of its own, a copy
+	// of the backup that everyone in reads and nobody edits, gone when it
+	// closes; Copy this plan makes a plan of it to keep.
+
+	// The plan a peer's backups are of: the one they are in, or the one
+	// the backup they are in is of
+	Plan* backups_plan(network::PeerId peer)
+	{
+		Plan *plan = plan_of(peer);
+		if(!plan)
+			return nullptr;
+		if(plan->m_backup_of.empty())
+			return plan;
+		return open_plan(plan->m_backup_of, false);
+	}
+
+	struct BackupRow
+	{
+		ss_ id;
+		ss_ label;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(id, label);
+		}
+	};
+
+	void on_backups(const network::Packet &packet)
+	{
+		Plan *plan = backups_plan(packet.sender);
+		if(!plan || peer_role(packet.sender).empty())
+			return;
+		const int64_t now = (int64_t)time(nullptr);
+		sv_<BackupRow> rows;
+		for(int64_t id : Plan::list_backups(plan->m_save->path())){
+			BackupRow r;
+			r.id = itos(id);
+			r.label = backup_label(id, now);
+			rows.push_back(r);
+		}
+		send(packet.sender, "fp:backups", pack(std::make_pair(plan->m_name,
+				rows)));
+	}
+
+	void on_open_backup(const network::Packet &packet)
+	{
+		ss_ id_s;
+		Plan *of = backups_plan(packet.sender);
+		if(!of || peer_role(packet.sender).empty() || !unpack(packet.data, id_s))
+			return;
+		auto refuse = [&](const ss_ &why){
+			send(packet.sender, "fp:open_result", pack(why));
+		};
+		const ss_ path = of->m_save->path();
+		int64_t id = 0;
+		for(int64_t b : Plan::list_backups(path))
+			if(itos(b) == id_s)
+				id = b;
+		if(id == 0)
+			return refuse("There is no such backup");
+		const ss_ name = "_backup-"+of->m_name+"-"+itos(id);
+		Plan *view = nullptr;
+		auto it = m_plans.find(name);
+		if(it != m_plans.end()){
+			view = it->second.get();
+		} else {
+			// Beside the plans, as a copy is, with the plan's pictures
+			namespace fs = interface::fs;
+			const size_t slash = path.find_last_of("/\\");
+			const ss_ to = (slash == ss_::npos ? ss_(".") : path.substr(0, slash))+
+					"/"+name;
+			const ss_ from = Plan::backup_dir(path, id);
+			fs::remove_all(to);
+			fs::create_directories(to+"/images");
+			bool ok = fs::copy_file(from+"/save.sqlite", to+"/save.sqlite");
+			if(fs::path_exists(from+"/save.sqlite-wal"))
+				ok = fs::copy_file(from+"/save.sqlite-wal",
+						to+"/save.sqlite-wal") && ok;
+			for(const fs::Node &n : fs::list_directory(path+"/images"))
+				if(!n.is_directory)
+					ok = fs::copy_file(path+"/images/"+n.name,
+							to+"/images/"+n.name) && ok;
+			up_<Plan> plan(new Plan(m_server, name));
+			plan->m_backup_of = of->m_name;
+			plan->m_backup_id = id;
+			if(ok){
+				storage::access(m_server, [&](storage::Interface *istorage){
+					plan->m_save = istorage->open(name);
+				});
+			}
+			if(plan->m_save){
+				plan->m_store = plan->m_save->store("main");
+				if(!plan->load()){
+					close_save(plan.get());
+					plan->m_save = nullptr;
+				}
+			}
+			if(!plan->m_save){
+				log_e(MODULE, "Could not open the backup %s", cs(name));
+				fs::remove_all(to);
+				return refuse("Could not open the backup");
+			}
+			plan->find_images();
+			view = plan.get();
+			m_plans[name] = std::move(plan);
+			log_i(MODULE, "%s opened the backup %s", cs(m_peers[packet.sender].name),
+					cs(name));
+		}
+		refuse("");
+		enter_plan(packet.sender, view);
+		send_plans_to_idle();
+	}
+
+	// **A backup put back as the plan** (user, 2026-09-30), by someone who
+	// may edit the plan, from the backup they are looking at: everyone
+	// stays on the one plan rather than moving to a copy. The plan as it
+	// was goes into a backup first, so a restore can be taken back the same
+	// way; its members, owner and pictures stay. Everyone in it gets it
+	// again, as a new join does.
+	void on_restore_backup(const network::Packet &packet)
+	{
+		Plan *view = plan_of(packet.sender);
+		if(!view || view->m_backup_of.empty())
+			return;
+		const ss_ user = m_peers[packet.sender].name;
+		auto refuse = [&](const ss_ &why){
+			send(packet.sender, "fp:open_result", pack(why));
+		};
+		if(!role_edits(role_in(plan_meta(view->m_backup_of), user)))
+			return refuse("You cannot edit "+view->m_backup_of);
+		Plan *plan = open_plan(view->m_backup_of, false);
+		if(!plan)
+			return refuse("Could not open "+view->m_backup_of);
+		plan->flush();
+		plan->backup(plan->m_save->path());
+		for(auto &pair : plan->m_ents)
+			if(!view->m_ents.count(pair.first))
+				plan->m_dirty.insert(pair.first);
+		for(auto &pair : plan->m_voxels)
+			if(!view->m_voxels.count(pair.first))
+				plan->m_voxels_dirty.insert(pair.first);
+		plan->m_ents = view->m_ents;
+		for(auto &pair : plan->m_ents)
+			plan->m_dirty.insert(pair.first);
+		plan->m_voxels = view->m_voxels;
+		for(auto &pair : plan->m_voxels)
+			plan->m_voxels_dirty.insert(pair.first);
+		// Ids on from both, so nothing new takes one an undo remembers
+		plan->m_next_id = std::max(plan->m_next_id, view->m_next_id);
+		plan->m_locks.clear();
+		plan->flush();
+		const ss_ label = backup_label(view->m_backup_id, (int64_t)time(nullptr));
+		log_i(MODULE, "%s restored %s to its backup %s", cs(user),
+				cs(plan->m_name), cs(itos(view->m_backup_id)));
+		const ss_ why = user+" restored the plan to its backup of "+label;
+		for(auto &pair : m_peers){
+			if(pair.second.plan != plan->m_name || pair.first == packet.sender)
+				continue;
+			pair.second.plan.clear();
+			send(pair.first, "fp:closed", pack(why));
+			enter_plan(pair.first, plan);
+		}
+		refuse("");
+		send(packet.sender, "fp:closed", pack(why));
+		enter_plan(packet.sender, plan);
 		send_plans_to_idle();
 	}
 
@@ -1913,6 +2253,19 @@ struct Module: public interface::Module
 		for(auto &pair : m_peers){
 			pair.second.op_budget = std::min(OPS_BURST,
 					pair.second.op_budget + OPS_PER_SECOND * event.dtime);
+		}
+		// Each hour a plan stays open and is changed, a backup
+		const int64_t now = (int64_t)time(nullptr);
+		for(auto &pair : m_plans){
+			Plan &p = *pair.second;
+			if(!p.m_backup_of.empty() || !p.m_save ||
+					now - p.m_last_backup < BACKUP_EVERY_S)
+				continue;
+			p.flush();
+			if(!p.m_changed)
+				continue;
+			p.backup(p.m_save->path());
+			p.m_store->set("meta/unbacked", "0");
 		}
 		// A plan nobody is in is saved and closed after a while
 		sv_<ss_> idle;
