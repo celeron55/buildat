@@ -120,8 +120,8 @@ local S = {
 	wheel_speed = tonumber(buildat.storage_read("wheel_speed") or "") or 100,
 	zoom_to_cursor = buildat.storage_read("zoom_to_cursor") == "1",
 	-- The middle drag in 3D moving the camera along the ground (XZ) rather
-	-- than across the screen (user); kept on the client
-	pan_xz = buildat.storage_read("pan_xz") == "1",
+	-- than across the screen (user), the default; kept on the client
+	pan_xz = buildat.storage_read("pan_xz") ~= "0",
 	-- The 3D view without the floors above the current one, to see into it
 	-- from above (user); kept on the client
 	hide_above = buildat.storage_read("hide_above") == "1",
