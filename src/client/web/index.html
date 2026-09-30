@@ -164,6 +164,21 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none;
 	//   "e"                Enter (a touchscreen keyboard's)
 	// Indices there are characters, here UTF-16. A desktop's typing never
 	// reaches the stand-in: SDL takes its keypress and prevents it.
+	// **The pointer lock asked for in the click itself** (user, Firefox):
+	// the engine asks a frame after a click, which a browser may take as no
+	// longer the user's doing. While the game wants the lock (Urho3D's
+	// relative mouse mode sets buildatWantLock), a press on the canvas asks
+	// for it here, before the engine sees the press.
+	canvas.addEventListener('mousedown', function(){
+		if(window.Module && Module.buildatWantLock &&
+				document.pointerLockElement !== canvas && canvas.requestPointerLock){
+			try {
+				var r = canvas.requestPointerLock();
+				if(r && r.catch)
+					r.catch(function(){});
+			} catch(e) {}
+		}
+	}, true);
 	// **Two fingers are the game's at once** (user, a playtest: a two
 	// finger drag started a second late): a phone's browser holds a
 	// multi-touch move back while it decides whether the page is being

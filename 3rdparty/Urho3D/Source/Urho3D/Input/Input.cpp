@@ -685,6 +685,10 @@ void Input::SetMouseModeEmscripten(MouseMode mode, bool suppressEvent)
     const MouseMode previousMode = mouseMode_;
     SuppressNextMouseMove();
     mouseMode_ = mode;
+    // buildat [WEB_CLIENT]: the page asks for the lock itself in its own
+    // mousedown while this says the game wants it, which is a gesture every
+    // browser takes; the request below comes a frame after the click
+    EM_ASM({ Module['buildatWantLock'] = $0; }, mode == MM_RELATIVE ? 1 : 0);
     if (mode == MM_RELATIVE)
     {
         SetMouseGrabbed(true, suppressEvent);
