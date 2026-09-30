@@ -2274,6 +2274,50 @@ local function voxel_ray(id)
 	return nil, {math.floor(lx / sz), math.floor(ly / sz), math.floor(lz / sz)}
 end
 
+-- **Imaginary cells past the volume** (user): the cell where the pointer's
+-- ray meets the plane through cell `a` that faces the view most -- of the
+-- volume's three axes, the one nearest the view's direction -- so a box
+-- held on past the voxels goes on as a sheet in that plane. nil when the
+-- ray runs along the plane or away from it.
+function M.voxel_plane_cell(id, a)
+	local it = inst_data[id]
+	if not it then
+		return nil
+	end
+	local o, d = cursor_ray()
+	local sz = it.size
+	local ox, oy, oz = geom.unrot((o.x - W(it.ox)) * 1000, (o.y - W(it.oy)) * 1000,
+			(o.z - W(it.oz)) * 1000, it.pitch, it.yaw, it.roll)
+	local dx, dy, dz = geom.unrot(d.x, d.y, d.z, it.pitch, it.yaw, it.roll)
+	local p, v = {ox / sz, oy / sz, oz / sz}, {dx, dy, dz}
+	-- The camera's own forward, for which plane faces it
+	local f = {geom.rot(0, 0, 1, S.pitch, S.yaw, 0)}
+	f = {geom.unrot(f[1], f[2], f[3], it.pitch, it.yaw, it.roll)}
+	local ax = 1
+	for k = 2, 3 do
+		if math.abs(f[k]) > math.abs(f[ax]) then
+			ax = k
+		end
+	end
+	if math.abs(v[ax]) < 1e-6 then
+		return nil
+	end
+	local t = (a[ax] + 0.5 - p[ax]) / v[ax]
+	if t <= 0 then
+		return nil
+	end
+	local c = {}
+	for k = 1, 3 do
+		c[k] = k == ax and a[ax] or math.floor(p[k] + v[k] * t)
+	end
+	for k = 1, 3 do
+		if c[k] < -128 or c[k] > 127 then
+			return nil
+		end
+	end
+	return c
+end
+
 -- Where a point the cursor gives lands: on a node, on an edge, or on the
 -- grid. from: the point a segment is drawn from, for the angle snap.
 -- Returns x, z and what it landed on: {node = id} or {edge = e, t = mm}.
@@ -2784,6 +2828,22 @@ do
 			end
 		end
 		return id, place
+	end
+
+	-- Where a held box would end: the cell pointed at, or for a fill off
+	-- the volume's voxels the imaginary one in the plane facing the view
+	function M.voxel_box_end(vb)
+		local id, c = M.voxel_cell(vb.mode)
+		if vb.mode == "place" and S.view ~= "2d" then
+			local hit = voxel_ray(vb.id)
+			if not hit then
+				local pc = M.voxel_plane_cell(vb.id, vb.a)
+				if pc then
+					return vb.id, pc
+				end
+			end
+		end
+		return id, c
 	end
 
 	-- A box of cells from a to b, both in: emptied, painted where there are
@@ -5527,7 +5587,7 @@ do
 		if vb and button == vb.button then
 			S.voxel_box = nil
 			S.dirty = true
-			local id, c = M.voxel_cell(vb.mode)
+			local id, c = M.voxel_box_end(vb)
 			if id == vb.id then
 				M.voxel_box(vb.mode, id, vb.a, c)
 			end
@@ -6698,7 +6758,7 @@ do
 			elseif S.voxel_box and S.voxel_box.id == id then
 				-- The box a release here would make, from where it was pressed
 				local vb = S.voxel_box
-				local ok, c = M.voxel_cell(vb.mode)
+				local ok, c = M.voxel_box_end(vb)
 				local col = vb.mode == "place" and PLACE or DIG
 				if ok then
 					hl({kind = "cell", id = id, c = vb.a, c2 = c, col = col})
