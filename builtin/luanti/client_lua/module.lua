@@ -3299,10 +3299,19 @@ function M.form_wheel(delta)
 	return false
 end
 
+-- A game's own window over the world, such as vanilla's pause menu: while
+-- it is up form_open() says so, as for a form, and Escape calls `close`.
+-- `window`, if given, is what form_window() reports for a scan. hold(nil)
+-- lets go.
+local held, held_window = nil, nil
+function M.hold(close, window)
+	held, held_window = close, window
+end
+
 -- form_open() -> whether a form is on the screen, so that whoever else is
 -- reading the mouse leaves it alone while one is
 function M.form_open()
-	return form ~= nil
+	return form ~= nil or held ~= nil
 end
 
 -- The open form's name and drawn window, for whoever reports what is on
@@ -3373,6 +3382,9 @@ function M.objects()
 end
 
 function M.form_window()
+	if form == nil and held and held_window then
+		return "", held_window
+	end
 	if form == nil or form.drawn == nil then
 		return nil, nil
 	end
@@ -3432,6 +3444,29 @@ function M.click(x, y, button)
 			send_fields(fields)
 			if b.exit then
 				close_form(false)
+			end
+			return true
+		end
+	end
+	-- A table's or a textlist's row: "CHG:<row>" goes back, as Luanti's own
+	-- client sends it, and a tree's row that opens opens or closes.
+	-- simplified: no "DCL:" for a double click
+	for _, t in ipairs(form.drawn.tables or {}) do
+		if inside(t) then
+			for _, r in ipairs(t.rows) do
+				if ly >= r.y and ly < r.y + t.row_h then
+					if r.opens then
+						form.state.open = form.state.open or {}
+						local open = form.state.open[t.name] or {}
+						form.state.open[t.name] = open
+						open[r.index] = not open[r.index] or nil
+						draw_form()
+					end
+					local fields = form_fields()
+					fields[t.name] = "CHG:" .. r.index
+					send_fields(fields)
+					break
+				end
 			end
 			return true
 		end
@@ -3521,6 +3556,16 @@ end
 function M.key(key)
 	if form and key == magic.KEY_ESCAPE then
 		close_form(true)
+		return true
+	end
+	-- A held window's keys are its own: what is typed into its fields is
+	-- not the game's
+	if held and not form then
+		if key == magic.KEY_ESCAPE then
+			local close = held
+			held, held_window = nil, nil
+			close()
+		end
 		return true
 	end
 	return false
