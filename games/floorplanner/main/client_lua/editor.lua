@@ -334,6 +334,12 @@ local function settings()
 	return doc.settings().ints
 end
 
+-- SNAP_PX and DRAG_PX for a finger ([FP_TOUCH] 4): a pixel is a device's, a fraction of
+-- a CSS pixel on a phone, and a finger is broader than a pointer
+function M.px(n)
+	return S.touch and n * 2 * magic.ui.scale or n
+end
+
 -- Layouts ([FP_LAYOUTS]). The current one, S.layout, is edited, and its
 -- own coordinates are the scene's: picking, snapping and the tools see only
 -- its entities. Every other is drawn where it is relative to it.
@@ -1848,7 +1854,7 @@ end
 -- How far a pixel is on the floor where the cursor is, for snap radii
 local function snap_radius()
 	if S.view == "2d" then
-		return SNAP_PX * mm_per_px()
+		return M.px(SNAP_PX) * mm_per_px()
 	end
 	local x, z = cursor_floor()
 	if not x then
@@ -1857,7 +1863,7 @@ local function snap_radius()
 	local dist = geom.len(x / 1000 - S.pos.x, z / 1000 - S.pos.z)
 	dist = math.sqrt(dist * dist + S.pos.y * S.pos.y)
 	local _, h = screen_size()
-	return SNAP_PX * dist * 1000 * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
+	return M.px(SNAP_PX) * dist * 1000 * 2 * math.tan(math.rad(cam3d.fov) / 2) / h
 end
 
 
@@ -3091,6 +3097,23 @@ local function build_toolbar()
 	end, S.show_ids)
 	-- The panels start under it
 	S.panel_y = 8 + toolbar.height + 8
+	-- **A touchscreen's keys** ([FP_TOUCH] 4): what Ctrl+Z, Ctrl+Y, Del,
+	-- E and Esc do, at the lower right
+	if S.touch_bar then
+		S.touch_bar:Remove()
+		S.touch_bar = nil
+	end
+	if S.touch then
+		local b = panel.window(magic.HA_RIGHT, magic.VA_BOTTOM, -8, -8, true)
+		S.touch_bar = b
+		panel.button(b, "Undo", function() doc.undo() end)
+		panel.button(b, "Redo", function() doc.redo() end)
+		panel.button(b, "Delete", function() delete_selected() end)
+		if S.view == "walk" then
+			panel.button(b, "Use", function() M.use() end)
+		end
+		panel.button(b, "Cancel", function() M.escape() end)
+	end
 end
 
 local function m2(mm2)
@@ -4435,11 +4458,13 @@ end
 local function over_ui()
 	local s = magic.ui.scale
 	return panel.over({toolbar, props, palette_win, pause_win, picker_win,
-			place.win}, S.mx / s,
+			place.win, S.touch_bar}, S.mx / s,
 			S.my / s)
 end
 
 local press_target, plan_facing, plan_aligned, stream_drag, use, use_target, walk
+-- For the touch bar, built before use is
+M.use = function() use() end
 do
 	--
 	-- Input
@@ -5141,7 +5166,7 @@ do
 		-- the view: the plan pans, the 3D camera orbits. The object tool's
 		-- drag is its footprint's.
 		if S.touch and S.press and not S.drag and S.tool ~= "box" and
-				geom.len(x - S.press.mx, y - S.press.my) > DRAG_PX then
+				geom.len(x - S.press.mx, y - S.press.my) > M.px(DRAG_PX) then
 			local t = S.press.target
 			if not (t and (S.sel[t.id] or S.nodes[t.id])) then
 				S.press = nil
@@ -5159,7 +5184,7 @@ do
 			S.cz = S.cz + dy * k
 		end
 		if S.press and not S.drag and geom.len(x - S.press.mx, y - S.press.my) >
-				DRAG_PX then
+				M.px(DRAG_PX) then
 			start_drag()
 			lock_drag()
 		end
@@ -5210,7 +5235,7 @@ do
 	function M.touch_begin(id, x, y)
 		local sc = magic.ui.scale
 		local on_ui = panel.over({toolbar, props, palette_win, pause_win,
-				picker_win, place.win}, x / sc, y / sc)
+				picker_win, place.win, S.touch_bar}, x / sc, y / sc)
 		S.fingers[id] = {x = x, y = y, x0 = x, y0 = y, t0 = buildat.get_time_us(),
 				ui = on_ui}
 		if on_ui or S.paused then
@@ -5250,6 +5275,9 @@ do
 		end
 		local px, py = f.x, f.y
 		f.x, f.y = x, y
+		if geom.len(x - f.x0, y - f.y0) > M.px(DRAG_PX) then
+			f.moved = true
+		end
 		local w, h = screen_size()
 		if f.stick then
 			-- A tenth of the screen's short side is full speed
@@ -5300,6 +5328,20 @@ do
 			S.pos = {x = S.pos.x - (rx * mdx - ux * mdy) * k + fx * zoom,
 					y = S.pos.y - (ry * mdx - uy * mdy) * k + fy * zoom,
 					z = S.pos.z - (rz * mdx - uz * mdy) * k + fz * zoom}
+		end
+	end
+
+	-- A finger held still: the right button's, for what a finger can do
+	-- with it -- a wall or a room being drawn ends, and a door or a switch
+	-- is used
+	function M.long_press()
+		S.press = nil
+		S.swallow_up = true
+		if S.draw or S.corners then
+			S.draw, S.corners, S.typed = nil, nil, ""
+			doc.notice("Drawing ended")
+		else
+			use()
 		end
 	end
 
@@ -5446,6 +5488,35 @@ do
 		return panel.nudge_focused(key == magic.KEY_UP and 1 or -1, shift)
 	end
 
+	-- Down one level ([FP_ESC]): the pause menu, the crosshair, what is in
+	-- progress; at the bottom of a view, the pause menu. Esc's, and the
+	-- touch bar's Cancel ([FP_TOUCH] 4).
+	function M.escape()
+		if S.paused then
+			close_pause()
+		elseif S.picker or S.replace then
+			close_picker()
+		elseif S.type_open then
+			S.type_open = false
+			refresh_panels()
+		elseif S.captured then
+			S.crosshair = false
+			update_capture()
+		elseif S.draw or S.corners then
+			S.draw = nil
+			S.corners = nil
+			S.typed = ""
+		elseif S.linking then
+			S.linking = nil
+			refresh_panels()
+		elseif S.calib then
+			S.calib = nil
+			refresh_panels()
+		else
+			open_pause()
+		end
+	end
+
 	function M.key_down(key, event_data)
 		local qualifiers = event_data and event_data:GetInt("Qualifiers") or 0
 		local ctrl = qualifiers % 4 >= 2
@@ -5485,31 +5556,7 @@ do
 			return
 		end
 		if key == magic.KEY_ESCAPE then
-			-- Down one level ([FP_ESC]): the pause menu, the crosshair, what is
-			-- in progress; at the bottom of a view, the pause menu
-			if S.paused then
-				close_pause()
-			elseif S.picker or S.replace then
-				close_picker()
-			elseif S.type_open then
-				S.type_open = false
-				refresh_panels()
-			elseif S.captured then
-				S.crosshair = false
-				update_capture()
-			elseif S.draw or S.corners then
-				S.draw = nil
-				S.corners = nil
-				S.typed = ""
-			elseif S.linking then
-				S.linking = nil
-				refresh_panels()
-			elseif S.calib then
-				S.calib = nil
-				refresh_panels()
-			else
-				open_pause()
-			end
+			M.escape()
 		elseif S.paused then
 			-- The pause menu takes the keys
 		elseif key == magic.KEY_F and S.view == "walk" then
@@ -5711,6 +5758,9 @@ hud:SetPosition(0, -12)
 hud:SetTextEffect(magic.TE_SHADOW)
 hud:SetTextAlignment(magic.HA_CENTER)
 hud.priority = 90
+if S.touch then
+	hud:SetWordwrap(true)
+end
 
 local crosshair = magic.ui.root:CreateChild("Text")
 crosshair:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 24)
@@ -6083,8 +6133,12 @@ do
 			return ""
 		end
 		local lines = {}
-		for _, b in ipairs({{"left", "Left"}, {"right", "Right"},
-				{"middle", "Middle"}, {"use", "E"}}) do
+		-- A touchscreen's are what the last tap did, and holding still
+		-- ([FP_TOUCH] 4); the mouse's other buttons are its gestures
+		local names = S.touch and {{"left", "Tap"}, {"use", "Hold"}} or
+				{{"left", "Left"}, {"right", "Right"}, {"middle", "Middle"},
+				{"use", "E"}}
+		for _, b in ipairs(names) do
 			if g[b[1]] then
 				lines[#lines + 1] = b[2] .. ": " .. g[b[1]]
 			end
@@ -6547,7 +6601,7 @@ function M.suspend()
 	for _, n in ipairs(SCENE_PARTS) do
 		n.enabled = false
 	end
-	for _, w in ipairs({toolbar, props, palette_win}) do
+	for _, w in ipairs({toolbar, props, palette_win, S.touch_bar}) do
 		if w then
 			w.visible = false
 		end
@@ -6565,7 +6619,7 @@ function M.resume()
 	images_node.enabled = true
 	decals_node.enabled = true
 	lamps_node.enabled = true
-	for _, w in ipairs({toolbar, props, palette_win}) do
+	for _, w in ipairs({toolbar, props, palette_win, S.touch_bar}) do
 		if w then
 			w.visible = true
 		end
@@ -6593,6 +6647,21 @@ function M.update(dt)
 	end
 	label_i = 0
 	S.guide = compute_guide()
+	-- [FP_TOUCH] 4: a finger held still is the right button
+	if S.touch and not S.paused then
+		local only, n = nil, 0
+		for _, f in pairs(S.fingers) do
+			only, n = f, n + 1
+		end
+		if n == 1 and not only.ui and not only.stick and not only.moved and
+				not only.held and buildat.get_time_us() - only.t0 > 500000 then
+			only.held = true
+			M.long_press()
+		end
+		-- The guide wraps to the screen, over the touch bar
+		hud:SetFixedWidth(magic.ui.root.width - 24)
+		hud:SetPosition(0, -(S.touch_bar and S.touch_bar.height + 20 or 12))
+	end
 	local text = S.exporting and "" or guide_text(S.guide)
 	if hud.text ~= text then
 		hud:SetText(text)
