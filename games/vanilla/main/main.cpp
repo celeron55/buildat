@@ -1287,6 +1287,15 @@ struct Module: public interface::Module
 		const int n = atoi(v.c_str());
 		return (n >= 20 && n <= 4000) ? itos(n) : ss_("120");
 	}
+	// "web_view_range": the web client's viewing range unless its player
+	// chose one (user, 2026-09-30): a browser meshes on one thread and
+	// loads a world slower. "" when not set, and the client's own default
+	// (80, 60 on a touchscreen) holds; never over view_range either way.
+	ss_ read_web_view_range()
+	{
+		const int n = atoi(read_setting("web_view_range").c_str());
+		return (n >= 20 && n <= 4000) ? itos(n) : ss_();
+	}
 	// The key bindings ([KEY_BINDINGS]): settings.json's "keys" object,
 	// action to key name, as "key.<action>=<name>" rows of the list
 	sv_<ss_> read_key_rows()
@@ -1369,10 +1378,15 @@ struct Module: public interface::Module
 			const ss_ &view_bobbing, const ss_ &shoulder,
 			const ss_ &lod_detail)
 	{
+		// Set by hand only, so kept through the settings screen's save
+		const ss_ web_range = read_web_view_range();
 		interface::fs::create_directories(luanti_path());
 		std::ofstream f(settings_path(), std::ios::trunc);
 		f << "{\"render_mode\": \"" << mode << "\", \"view_range\": \""
-				<< view_range << "\", \"lod_detail\": \""
+				<< view_range << "\", ";
+		if(!web_range.empty())
+			f << "\"web_view_range\": \"" << web_range << "\", ";
+		f << "\"lod_detail\": \""
 				<< lod_detail << "\", \"view_bobbing_amount\": \""
 				<< view_bobbing << "\", \"third_person_shoulder\": \""
 				<< shoulder << "\", \"import_paths\": [";
@@ -1401,6 +1415,9 @@ struct Module: public interface::Module
 			ss_ mode = read_render_mode();
 			list.push_back("render_mode="+(mode.empty() ? ss_("pbr") : mode));
 			list.push_back("view_range="+read_view_range());
+			const ss_ web_range = read_web_view_range();
+			if(!web_range.empty())
+				list.push_back("web_view_range="+web_range);
 			list.push_back("lod_detail="+read_lod_detail());
 			list.push_back("view_bobbing_amount="+read_view_bobbing());
 			// The back view centred or over the shoulder ([OVER_SHOULDER])

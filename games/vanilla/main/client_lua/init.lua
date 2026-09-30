@@ -4660,13 +4660,49 @@ end)
 
 -- The settings, for the key rows in them ([KEY_BINDINGS]); the same
 -- packet answers the pause menu's editor after a save
+-- **The viewing range** (user, 2026-09-30): the server's view_range is
+-- the most anyone gets; within it the player's own, kept on this client
+-- for this server (the pause menu's View range), or else the web client's
+-- default, which is lower since a browser meshes on one thread: the
+-- server's web_view_range, else 80, 60 on a touchscreen. On keys: this
+-- file is at Lua's 200 locals.
+keys.view = {ceiling = 120}
+function keys.view.default()
+	local v = keys.view
+	if buildat.get_env("BUILDAT_PAGE_HTTPS") == nil then
+		return v.ceiling
+	end
+	local web = v.web or (buildat.get_env("BUILDAT_TOUCH") == "1" and 60 or 80)
+	return math.min(v.ceiling, web)
+end
+function keys.view.current()
+	local chosen = tonumber(buildat.storage_read("view_range") or "")
+	return chosen and math.min(chosen, keys.view.ceiling) or keys.view.default()
+end
+-- The player's choice, or nil for the default
+function keys.view.choose(n)
+	buildat.storage_write("view_range", n and tostring(n) or "")
+	sky_now.set_range(keys.view.current())
+end
+-- From the start, before the server's settings come: a browser does not
+-- first ask for the whole of the native default
+sky_now.set_range(keys.view.current())
+
 buildat.sub_packet("main:settings", function(data)
 	local list = keys.own_rows(cereal.binary_input(data, {"array", "string"}))
 	keys.apply(list)
+	keys.view.web = nil
+	for _, row in ipairs(list) do
+		local w = row:match("^web_view_range=(%d+)$")
+		if w then
+			keys.view.web = tonumber(w)
+		end
+	end
 	for _, row in ipairs(list) do
 		local n = row:match("^view_range=(%d+)$")
 		if n then
-			sky_now.set_range(n)
+			keys.view.ceiling = tonumber(n)
+			sky_now.set_range(keys.view.current())
 		end
 		local lod = row:match("^lod_detail=(%a+)$")
 		if lod then

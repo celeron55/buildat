@@ -158,6 +158,35 @@ open = function()
 		cycle_sound()
 		s:GetChild(0):SetText(sound_text())
 	end)
+	-- **The viewing range, the player's own** (user, 2026-09-30), kept on
+	-- this client for this server: each press the next step, round to the
+	-- nearest again, never over what the server allows (keys.view in
+	-- init.lua). A web client starts lower, and a fast one can go up.
+	local view = o.keys.view
+	if view then
+		local STEPS = {40, 60, 80, 120, 160, 240, 360, 500, 800}
+		local function view_text()
+			return "View range: " .. view.current() ..
+					((buildat.storage_read("view_range") or "") == "" and
+					" (default)" or "")
+		end
+		local vb
+		vb = accounts.page_button(w, view_text(), function()
+			local now, nxt = view.current(), nil
+			for _, n in ipairs(STEPS) do
+				if n > now and n <= view.ceiling then
+					nxt = n
+					break
+				end
+			end
+			-- The server's own number is the last step when it is not one
+			if not nxt and now < view.ceiling then
+				nxt = view.ceiling
+			end
+			view.choose(nxt or math.min(STEPS[1], view.ceiling))
+			vb:GetChild(0):SetText(view_text())
+		end)
+	end
 	if account.public then
 		if not account.is_local then
 			accounts.page_button(w, "Change password...", function()
