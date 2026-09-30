@@ -1103,6 +1103,16 @@ struct CApp: public App, public magic::Application
 	// each call it again
 	bool m_shutdown_signal_handled = false;
 	float m_ui_scale_lua = 0.f; // 0 = not set by Lua
+	// **What the scale is multiplied by for a menu to fit** (user,
+	// 2026-09-30: a phone in portrait showed part of a menu, its buttons
+	// out of reach): 1, or less while a top-level element is bigger than
+	// the screen; see update_ui_fit()
+	float m_fit_factor = 1.f;
+	// When a button, a finger or a key was last down: the scale is not
+	// changed under a press or a gesture, nor for FIT_QUIET_US after one
+	int64_t m_input_busy_us = 0;
+	static constexpr int64_t FIT_QUIET_US = 500000;
+	static constexpr float FIT_FLOOR = 0.5f;
 	bool m_restore_maximized = false;
 	Options m_options;
 	bool m_draw_debug_geometry = false;
@@ -1591,6 +1601,9 @@ struct CApp: public App, public magic::Application
 #endif
 			}
 		}
+		// A scripted client keeps its logical size, which is what its
+		// pictures are compared at; update_ui_fit() leaves it at 1 there
+		s *= m_fit_factor;
 		if(logical_mode()){
 			// The root stays the logical size over the game's own UI scale,
 			// drawn at that scale times the window's, and sits in the
@@ -1612,6 +1625,76 @@ struct CApp: public App, public magic::Application
 		}
 		ui->SetScale(s);
 		log_i(MODULE, "UI scale %g (%ix%i)", s, g->GetWidth(), g->GetHeight());
+	}
+
+	// **Menus fit the screen** (user, 2026-09-30): each frame, the visible
+	// top-level UI elements' sizes in UI units -- which a scale does not
+	// change, so shrinking cannot feed back -- against the screen, and the
+	// scale made small enough for the biggest to fit, down to FIT_FLOOR of
+	// what it would be; back up when they fit again. By size and not by
+	// place: a panel put partly off the screen on purpose is its game's.
+	// A side that is the root's own (a HUD, a stretched bar) follows the
+	// screen and does not count.
+	void update_ui_fit()
+	{
+		if(logical_mode())
+			return;
+		magic::Graphics *g = GetSubsystem<magic::Graphics>();
+		magic::UI *ui = GetSubsystem<magic::UI>();
+		magic::Input *in = GetSubsystem<magic::Input>();
+		if(!g || !ui || !in)
+			return;
+		const int64_t now = get_timeofday_us();
+		bool busy = in->GetMouseButtonDown(magic::MOUSEB_LEFT |
+				magic::MOUSEB_MIDDLE | magic::MOUSEB_RIGHT) ||
+				in->GetNumTouches() > 0;
+		if(!busy){
+			int n = 0;
+			const Uint8 *keys = SDL_GetKeyboardState(&n);
+			for(int i = 0; keys && i < n && !busy; i++)
+				busy = keys[i] != 0;
+		}
+		if(busy){
+			m_input_busy_us = now;
+			return;
+		}
+		if(now - m_input_busy_us < FIT_QUIET_US)
+			return;
+		magic::UIElement *root = ui->GetRoot();
+		const float base = ui->GetScale() / m_fit_factor;
+		const magic::IntVector2 rs = root->GetSize();
+		const float room_w = g->GetWidth() * 0.98f;
+		const float room_h = g->GetHeight() * 0.98f;
+		float need = base;
+		// A layer the size of the screen (a launcher's stack of screens)
+		// is looked into: what is in it is what has to fit
+		std::function<void(magic::UIElement *, int)> scan =
+				[&](magic::UIElement *parent, int depth){
+			for(magic::UIElement *c : parent->GetChildren()){
+				if(!c || !c->IsVisible())
+					continue;
+				const magic::IntVector2 sz = c->GetSize();
+				// The root's own size, give or take its rounding
+				const bool fill_w = std::abs(sz.x_ - rs.x_) <= 1;
+				const bool fill_h = std::abs(sz.y_ - rs.y_) <= 1;
+				if(fill_w && fill_h){
+					if(depth < 4)
+						scan(c, depth + 1);
+					continue;
+				}
+				if(sz.x_ > 0 && !fill_w && sz.x_ * base > room_w)
+					need = std::min(need, room_w / sz.x_);
+				if(sz.y_ > 0 && !fill_h && sz.y_ * base > room_h)
+					need = std::min(need, room_h / sz.y_);
+			}
+		};
+		scan(root, 0);
+		float f = std::max(FIT_FLOOR, std::min(1.f, need / base));
+		if(std::fabs(f - m_fit_factor) > 0.02f){
+			m_fit_factor = f;
+			log_i(MODULE, "UI scale fitted to the screen: x%g", f);
+			apply_ui_scale();
+		}
 	}
 
 	void Start()
@@ -2359,6 +2442,7 @@ struct CApp: public App, public magic::Application
 #ifdef __EMSCRIPTEN__
 		web_text_sync(GetSubsystem<magic::UI>());
 #endif
+		update_ui_fit();
 		// A local server on its way out is reaped here rather than in
 		// whoever asked for it to go ([QUIT_STALL])
 		step_stop_local_server();
