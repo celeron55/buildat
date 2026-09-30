@@ -76,9 +76,11 @@ namespace interface
 	// voxel that faces one of twenty-four directions, or wears one of eight
 	// palette colours, from needing a voxel type of its own for every case.
 	//
-	// A variant carries no textures. It permutes the definition's own six --
-	// tile_order[f] is which of them face f wears -- because a turned cube
-	// wears the same textures as an unturned one, in a different order.
+	// A variant permutes the definition's own textures -- tile_order[f] is
+	// which of them face f wears -- because a turned cube wears the same
+	// textures as an unturned one, in a different order. It can also name
+	// textures of its own, which is what a palette needs; see
+	// VoxelVariant::textures.
 	struct VoxelVariant
 	{
 		// Quads of the voxel's own instead of the definition's; empty for
@@ -86,6 +88,25 @@ namespace interface
 		sv_<VoxelQuad> shape;
 		uint8_t tile_order[6] = {0, 1, 2, 3, 4, 5};
 		uint8_t tile_turns[6] = {};
+		// Textures of the variant's own, indexed the way a tile is
+		// everywhere else: 0...5 are the voxel's six faces and 6 and over
+		// are the definition's extra_textures. As many as the variant
+		// replaces and no more; empty for a variant that only turns, which
+		// is most of them, and an empty vector costs nothing.
+		//
+		// What wants them is a palette. A voxel that wears the colour its
+		// param names wears its own tiles through a modifier that
+		// multiplies them, and the colour is albedo rather than light, so
+		// it cannot be the vertex colour below. The atlas then grows with
+		// distinct tiles times palette entries and not with directions,
+		// because directions permute what a variant names and colours
+		// multiply it: eight colours of a facedir node are 192 variants and
+		// 48 textures.
+		sv_<AtlasSegmentDefinition> textures;
+		// The same, resolved into the atlas. Filled by the registry when it
+		// builds the cached definition, and empty in a definition a game
+		// hands over.
+		sv_<AtlasSegmentReference> texture_refs;
 		// Multiplied into the vertex colour, 0xRRGGBB.
 		//
 		// The vertex colour is light, not albedo -- the mesher packs it as
@@ -96,7 +117,7 @@ namespace interface
 		// contribution to the lighting is a scalar here and cannot be
 		// tinted, so a palette entry would show in shade and vanish in
 		// sunlight. An albedo tint wants a channel of its own; see
-		// local/voxel_data_model_plan.md.
+		// doc/plan/voxel_data_model_plan.md.
 		uint32_t color = 0xffffff;
 		// Where a liquid's surface stands in the voxel; see
 		// VoxelDefinition::liquid_top. Luanti's flowing liquids put their
@@ -128,6 +149,26 @@ namespace interface
 		// texture is shared with the cube that is not turned, so the turn
 		// belongs to the face rather than to the atlas segment.
 		uint8_t tile_turns[6] = {};
+		// **How many voxels a texture spans before it repeats** ([WORLD_UV]).
+		// A voxel face repeats its texture once per voxel, so a feature
+		// larger than one voxel cannot exist and a big surface reads as a
+		// grid of identical stamps. At 1 -- which is every voxel that says
+		// nothing -- nothing changes. Above it, a face takes its own slice
+		// of the repeat from where the voxel is in the world, and the
+		// neighbour continues the sequence.
+		//
+		// It costs nothing in the atlas: the wrap falls on a voxel boundary
+		// and never inside a quad, so a face's coordinates stay inside its
+		// own segment rect.
+		uint8_t uv_scale = 1;
+		// **How many voxels it spans upwards**, where uv_scale is across
+		// ([SIGIL_ROUND], 2026-09-24: a frieze that runs along a wall is
+		// eight voxels across and one tall, and one number for both axes
+		// made a slab's edge show one eighth of the texture's height,
+		// chosen by where the slab sat in the world). Nought means "the
+		// same as uv_scale", which is every definition written before
+		// this and the square case.
+		uint8_t uv_scale_v = 0;
 		// Other properties
 		ss_ handler_module;
 		FaceDrawType face_draw_type = FaceDrawType::ON_EDGE;
@@ -141,6 +182,32 @@ namespace interface
 		// that and still hold a mesh of its own shape inside itself. What
 		// wants to know whether a voxel is free is this flag.
 		bool fully_empty = false;
+		// Light passes through this voxel although it is something. A voxel
+		// whose edge material is EDGEMATERIALID_EMPTY already transmits
+		// light -- nothing is there -- and this is the other case: glass, a
+		// pane, a plant, anything the sky is seen through and which is still
+		// drawn.
+		//
+		// It exists because the edge material is one test doing two jobs:
+		// whether a face is drawn against this voxel, and whether light gets
+		// past it. Luanti splits them -- a glasslike node has faces and
+		// sunlight_propagates -- and this is that split, added rather than
+		// substituted so that a game that says nothing keeps the behaviour
+		// it had.
+		bool transmits_light = false;
+		// How much light this voxel emits of its own, 0...15, for a world
+		// that maintains lamp light: a torch, a lava flow, a glowing
+		// mushroom. 0 for nearly everything.
+		//
+		// Only a world whose format binds light_lamp *and* asks for it to
+		// be maintained reads this; see set_light_maintained() in
+		// voxelworld/api.h. A game whose lamps are lights in the scene
+		// leaves it at zero and the shader does that work instead.
+		//
+		// Not serialized: the client does not need it -- what it draws is
+		// the light already stored in each voxel -- and keeping it off the
+		// wire means a save written before it existed still reads.
+		uint8_t light_source = 0;
 		// A shape of the voxel's own instead of a cube. Empty for a cube,
 		// which is what most voxels are and the fast path the voxel mesher
 		// exists for; a voxel with quads has them copied into the chunk's
@@ -168,6 +235,20 @@ namespace interface
 		// mesher puts them in a geometry of their own; what technique that
 		// gets is the game's business, as with the rest of the materials.
 		bool translucent = false;
+		// The voxel's faces are opaque where its texture is and not there at
+		// all where it is not: leaves, a plant, a ladder, anything whose
+		// picture has holes in it. It is drawn with the solid world -- depth
+		// and shadows and no sorting -- with the texture's alpha cutting the
+		// holes out, which is what Luanti's use_texture_alpha = "clip"
+		// means and what an alpha-masked technique does.
+		//
+		// The mesher puts these faces in a geometry of their own as well,
+		// for the same reason the translucent ones get one: a material is
+		// per drawable, so a pass of its own needs a drawable of its own.
+		// Everything else about them is the opaque rules -- a face against
+		// one of these is hidden exactly as it would be against a solid
+		// voxel, which is what Luanti does too.
+		bool alpha_masked = false;
 		// Which family of shapes this voxel's shape belongs to, or 0 for
 		// none. A shape's quad is not drawn when the neighbour it faces has
 		// the same group: that is what keeps the faces inside a body of water
@@ -188,7 +269,41 @@ namespace interface
 		// getCornerLevel, and it is the one thing here the mesher works out
 		// per voxel instead of per definition.
 		bool is_liquid = false;
+		// Whether this is the liquid's source rather than one of its
+		// flowing levels ([WATER_LIGHT] 3). Luanti's getCornerLevel()
+		// answers a corner that any source touches with the full height of
+		// the voxel, without averaging: a shore where a flow meets a pool
+		// stands level with the pool, it does not sag into the flow.
+		bool liquid_is_source = false;
 		float liquid_top = 0.5f;
+		// A ladder, a vine, a rope: something a player holds on to instead
+		// of falling past. Luanti's own climbable, and the client's physics
+		// is what does anything with it -- nothing here draws differently
+		// for it.
+		bool climbable = false;
+		// How much this voxel holds a body back, 0 for not at all. Luanti's
+		// own move_resistance, which defaults to liquid_viscosity: water is
+		// 1 and lava is 7, and a game can put it on anything. The client's
+		// physics is the only thing that reads it.
+		uint8_t move_resistance = 0;
+		// What the node stood on does to a player, Luanti's node groups of
+		// the same names ([PLAYER_PHYSICS]): the bouncy rating, the
+		// slippery rating, and whether jumping or descending is refused.
+		// The client's physics is the only reader.
+		uint8_t bouncy = 0;
+		uint8_t slippery = 0;
+		bool disable_jump = false;
+		bool disable_descend = false;
+		// What a player is in when standing in this: Luanti's
+		// liquid_move_physics, which defaults to "it is a liquid" and a
+		// game may set either way -- a swimmable non-liquid, a liquid
+		// walked through ([WATER_PARITY]). is_liquid stays the drawing.
+		bool swimmable = false;
+		// Whether a ray stops here: Luanti's pointable -- 1 true, 0 false
+		// (the ray goes through: water in most games, decor), 2 "blocking"
+		// (the ray stops with nothing pointed). Objects carry the same
+		// field on their own ([POINTABLE]).
+		uint8_t pointable = 1;
 		// Which family of connecting voxels this one belongs to, 1...32, or
 		// 0 for one nothing reaches out to; and which families this one
 		// reaches out to, as a bit per family. A fence and its gates are one
@@ -278,14 +393,35 @@ namespace interface
 		EdgeMaterialId edge_material_id = EDGEMATERIALID_EMPTY;
 		bool physically_solid = false;
 		bool fully_empty = false;
+		// Copied from the definition; see VoxelDefinition::transmits_light
+		bool transmits_light = false;
+		// Copied from the definition; see VoxelDefinition::light_source
+		uint8_t light_source = 0;
 		// Copied from the definition; see VoxelDefinition::shape
 		sv_<VoxelQuad> shape;
 		bool shape_double_sided = false;
 		bool shape_lit_from_above = false;
 		bool translucent = false;
+		// Copied from the definition; see VoxelDefinition::alpha_masked
+		bool alpha_masked = false;
 		uint8_t shape_group = 0;
+		// [WORLD_UV]; see VoxelDefinition::uv_scale
+		uint8_t uv_scale = 1;
+		// [SIGIL_ROUND]; see VoxelDefinition::uv_scale_v. Nought is "the
+		// same as uv_scale"
+		uint8_t uv_scale_v = 0;
 		bool is_liquid = false;
+		// Copied from the definition; see VoxelDefinition::liquid_is_source
+		bool liquid_is_source = false;
 		float liquid_top = 0.5f;
+		// Copied from the definition; see VoxelDefinition::climbable
+		bool climbable = false;
+		// Copied from the definition; see VoxelDefinition::move_resistance
+		uint8_t move_resistance = 0;
+		// Copied from the definition; see VoxelDefinition::swimmable
+		bool swimmable = false;
+		// Copied from the definition; see VoxelDefinition::pointable
+		uint8_t pointable = 1;
 		uint8_t connect_group = 0;
 		uint32_t connect_mask = 0;
 		bool connect_to_solid = false;
@@ -443,7 +579,7 @@ namespace interface
 		// than albedo, so this tints the light a voxel receives and not its
 		// texture. For a game whose voxels are unlit colour that is the same
 		// thing; for one that wants a palette over a texture it is not. See
-		// local/voxel_data_model_plan.md.
+		// doc/plan/voxel_data_model_plan.md.
 		VoxelField color;
 
 		// Modifiers: fields the mesher reads to change how a voxel is drawn
@@ -514,6 +650,21 @@ namespace interface
 			return -1;
 		}
 
+		// Every engine role in one list, for code that has to treat them
+		// all the same way rather than by name. What wants it is a
+		// migration moving a saved chunk from the cut it was written in to
+		// the cut the game is running now; nothing else has needed it.
+		//
+		// The name is what a warning calls the role by. The order is the
+		// declaration order above and is not part of any format -- nothing
+		// is stored by it.
+		struct Role
+		{
+			const char *name;
+			VoxelField VoxelFormat::*field;
+		};
+		static const sv_<Role>& roles();
+
 		static VoxelFormat legacy()
 		{
 			VoxelFormat f;
@@ -560,6 +711,20 @@ namespace interface
 			return surface_modifiers(slots) != 0;
 		}
 
+		// The same cut: the same planes, and every role in the same place.
+		// What asks is a save, deciding whether the chunks it holds are in
+		// the format the world is running now.
+		bool operator==(const VoxelFormat &o) const {
+			if(planes != o.planes)
+				return false;
+			for(const Role &r : roles()){
+				if(!(this->*(r.field) == o.*(r.field)))
+					return false;
+			}
+			return true;
+		}
+		bool operator!=(const VoxelFormat &o) const { return !(*this == o); }
+
 		// Every bound field is inside its plane, no two overlap, and the id
 		// fits VOXELTYPEID_MAX. why, when given, gets the first reason it
 		// did not.
@@ -583,6 +748,16 @@ namespace interface
 
 		virtual void clear() = 0;
 		virtual sv_<VoxelDefinition> get_all() = 0;
+		// How many voxel types there are, without copying any of them. What
+		// asks is a line of detail on a screen: a client whose count is not
+		// the server's has a registry fault and nothing else is worth
+		// looking at yet.
+		virtual size_t get_count() = 0;
+
+		// How many types are registered, so that walking the ids is a loop
+		// with an end rather than one that asks for the id after the last
+		// and reads the warning as its answer. Ids run 1..num_voxels().
+		virtual VoxelTypeId num_voxels() = 0;
 
 		// How a voxel word is cut up; see VoxelFormat. The default is
 		// VoxelFormat::legacy().
@@ -595,6 +770,18 @@ namespace interface
 		// that does not validate and on one that arrives too late.
 		virtual const VoxelFormat& get_format() = 0;
 		virtual void set_format(const VoxelFormat &format) = 0;
+
+		// A named plane of a module's own appended to the format, whatever
+		// module set the format and whenever it does: the plane is added
+		// now and again to every format set_format() is given after this,
+		// so a variant's module can ask before the base game has said what
+		// its cut is ([GAME_BASE]). Nothing bound reads it -- it is the
+		// module's bits, read and written by name through the sample API.
+		// A chunk takes the plane on the first time it is written after
+		// this, so it is allowed after the world exists; a plane of that
+		// name already there (of the same width) is left as it is. Returns
+		// the plane's index.
+		virtual int add_plane(const ss_ &name, uint8_t bits) = 0;
 
 		// How a voxel's definition is found; see VoxelSelector in
 		// interface/voxel_selector.h. The default is the id role of the
@@ -609,6 +796,12 @@ namespace interface
 		virtual void set_look_selector(const VoxelSelector &selector) = 0;
 
 		virtual VoxelTypeId add_voxel(const VoxelDefinition &def) = 0;
+		// The same for a whole registry at once, which is how one arrives
+		// over the network: the definitions are moved out of the vector
+		// rather than copied, the room for them is taken in one go and the
+		// lock is taken once. A join's 28 MB of registry spent 121 ms of
+		// the client's frame in add_voxel() before this ([CLIENT_FRAME]).
+		virtual void add_voxels(sv_<VoxelDefinition> &defs) = 0;
 
 		virtual const VoxelDefinition* get(const VoxelTypeId &id) = 0;
 		virtual const VoxelDefinition* get(const VoxelName &name) = 0;
