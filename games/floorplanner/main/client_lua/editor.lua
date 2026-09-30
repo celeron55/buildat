@@ -3077,9 +3077,9 @@ local function build_toolbar()
 		b.maxWidth = b.minWidth
 		used = used + w
 	end
-	if S.touch then
-		add("Menu", nil, function() M.open_pause() end)
-	end
+	-- The pause menu's own button, and on a desktop the key it is on: a
+	-- phone has no Esc, and a newcomer does not know it yet (user)
+	add("Menu", S.touch and nil or "Esc", function() M.open_pause() end)
 	add(VIEW_NAMES[S.view], S.touch and nil or "F1 F2 F3",
 			function() set_view(NEXT_VIEW[S.view]) end, false, 40)
 	-- The layout edited, and the window that picks another
