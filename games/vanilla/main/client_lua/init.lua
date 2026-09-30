@@ -4686,6 +4686,9 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 			return (luanti.hotbar and luanti.hotbar.count) or 8, slot, margin
 		end,
 	})
+	-- And Luanti's Android autojump: a node's step is walked up without
+	-- the Jump button
+	player.autojump = true
 	log:info("touch controls on")
 end
 
