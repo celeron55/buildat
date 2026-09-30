@@ -5508,6 +5508,13 @@ do
 			if button ~= magic.MOUSEB_LEFT and button ~= magic.MOUSEB_RIGHT then
 				return
 			end
+			-- The other button while a box is held gives the box up, as Esc
+			-- does (user); its own release is then nothing either
+			if S.voxel_box then
+				S.voxel_box.cancelled = true
+				S.dirty = true
+				return
+			end
 			if not voxel_target() then
 				voxel_edit(button == magic.MOUSEB_LEFT, S.shift)
 				return
@@ -5584,6 +5591,14 @@ do
 
 	function M.mouse_up(button)
 		local vb = S.voxel_box
+		if vb and vb.cancelled then
+			-- Given up by the other button: both buttons' releases are
+			-- nothing, and the box goes with the one that started it
+			if button == vb.button then
+				S.voxel_box = nil
+			end
+			return
+		end
 		if vb and button == vb.button then
 			S.voxel_box = nil
 			S.dirty = true
@@ -6755,6 +6770,8 @@ do
 								"; Shift+Left: make it " .. mat_text(cur)
 					end
 				end
+			elseif S.voxel_box and S.voxel_box.cancelled then
+				g.left = "given up: let go of the buttons"
 			elseif S.voxel_box and S.voxel_box.id == id then
 				-- The box a release here would make, from where it was pressed
 				local vb = S.voxel_box
