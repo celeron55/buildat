@@ -199,6 +199,29 @@ canvas { display: block; width: 100vw; height: 100vh; outline: none; }
 	canvas.addEventListener('click', function(){
 		(active ? el : canvas).focus({preventScroll: true});
 	});
+	// Text a game puts on the clipboard ([WEB_KEYS] step 3; Urho3D's
+	// UI::SetClipboardText): the Clipboard API where the page is secure,
+	// else execCommand('copy') on a selection of its own, which works only
+	// soon after a click or key -- as the game's copy button is
+	window.buildatClipboard = function(t){
+		function old(){
+			var had = document.activeElement;
+			var x = document.createElement('textarea');
+			x.value = t;
+			x.style.position = 'fixed';
+			x.style.opacity = '0';
+			document.body.appendChild(x);
+			x.select();
+			try { document.execCommand('copy'); } catch(e){}
+			x.remove();
+			if(had)
+				had.focus({preventScroll: true});
+		}
+		if(navigator.clipboard && window.isSecureContext)
+			navigator.clipboard.writeText(t).catch(old);
+		else
+			old();
+	};
 	// Files a game hands the user and takes from them ([FP_EXPORT] 4): the
 	// browser's download, and its file picker, whose file the client takes
 	// with picked_file() once it has been read. src/client/app.cpp

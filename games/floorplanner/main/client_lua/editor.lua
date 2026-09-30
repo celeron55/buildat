@@ -4174,7 +4174,11 @@ do
 		local message = doc.admin_message or ""
 		local code = message:match("^Invite code: (%w+)$")
 		if code then
-			panel.field(w, "Invite code", code, function() end, 140)
+			local _, r = panel.field(w, "Invite code", code, function() end, 110)
+			panel.button(r, "Copy", function()
+				magic.ui:SetClipboardText(code)
+				doc.notice("Copied the invite code")
+			end)
 		else
 			local l = panel.label(w, message ~= "" and message or " ",
 					magic.Color(1.0, 0.8, 0.4))

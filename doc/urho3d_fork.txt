@@ -285,3 +285,12 @@ there, so the press and the release were at the top left corner. A
 button tapped on a touchscreen was pressed through the UI's own touch
 handling and never released. The finger is now scaled to the window, as
 the mouse handler scales the mouse.
+
+The web's clipboard ([WEB_KEYS] step 3)
+--------------------------------------
+Source/Urho3D/UI/UI.cpp
+
+UI::SetClipboardText also hands the text to the page's buildatClipboard
+(src/client/web/index.html), since SDL's clipboard on the web is the
+page's own. The page writes it with the Clipboard API where the page is
+secure, else with execCommand('copy').
