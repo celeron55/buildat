@@ -148,7 +148,7 @@ bool Texture2DArray::SetData(unsigned layer, unsigned level, int x, int y, int w
 
     graphics_->SetTextureForUpdate(this);
 
-#ifndef GL_ES_VERSION_2_0
+#ifndef URHO3D_GLES2
     bool wholeLevel = x == 0 && y == 0 && width == levelWidth && height == levelHeight && layer == 0;
     unsigned format = GetSRGB() ? GetSRGBFormat(format_) : format_;
 
@@ -417,7 +417,7 @@ bool Texture2DArray::Create()
 {
     Release();
 
-#ifdef GL_ES_VERSION_2_0
+#if defined(GL_ES_VERSION_2_0) && !defined(GL_ES_VERSION_3_0)
     URHO3D_LOGERROR("Failed to create 2D array texture, currently unsupported on OpenGL ES 2");
     return false;
 #else

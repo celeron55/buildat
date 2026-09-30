@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/client.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Luanti's client side of the login, on top of connection.lua:
 --
@@ -37,8 +38,12 @@ local FORMSPEC_API_VERSION = 8
 -- path this implements, where claiming an older one would send it down a
 -- path for a client that no longer exists. The string beside it is what
 -- Luanti puts its full version in, and a server shows it in a player list.
+-- The buildat version goes in it ([LICENSE_DUAL]'s first courtesy), so
+-- an operator reading a player list sees "buildat 0.4.19 luanti_client"
+-- rather than a bare name and knows what is connecting
 local VERSION = {major = 5, minor = 17, patch = 0,
-		hash = "buildat luanti_client"}
+		hash = "buildat "..(buildat.version and buildat.version() or "?")..
+				" luanti_client"}
 
 -- The language the player reads, which a game asks for through
 -- get_player_information().lang_code -- this game's craft guide, creative
@@ -138,6 +143,7 @@ local TOCLIENT = {
 	TIME_OF_DAY    = 0x29,
 	MOVE_PLAYER    = 0x34,
 	MOVEMENT       = 0x45,
+	CAMERA         = 0x48,
 	MEDIA          = 0x38,
 	NODEDEF        = 0x3A,
 	ANNOUNCE_MEDIA = 0x3C,
@@ -703,6 +709,13 @@ function M.new(socket, options, log)
 		end
 	end
 
+	-- TOCLIENT_CAMERA: which camera modes the key may reach -- 0 any, 1
+	-- first, 2 third, 3 third front ([THIRD_PERSON])
+	self.camera_mode_allowed = 0
+	handlers[TOCLIENT.CAMERA] = function(r)
+		self.camera_mode_allowed = r:u8()
+	end
+
 	handlers[TOCLIENT.HUDADD] = function(r)
 		local id, e = hud.read_add(r, self.protocol_version)
 		self.hud_elements[id] = e
@@ -887,6 +900,18 @@ function M.new(socket, options, log)
 			sky.night_sky = read_color(r)
 			sky.night_horizon = read_color(r)
 			sky.indoors = read_color(r)
+		end
+		-- The tail Luanti 5.9+ appends; an older server's packet ends here.
+		-- fog_start is what the reference fixture turns the fog off with
+		-- (0.99: see builtin/luanti/test/reference_shots/runner.lua), so it is read as of 2026-09-17.
+		if r:remaining() >= 4 + 2 + 4 + 4 then
+			sky.body_orbit_tilt = r:f32()
+			sky.fog_distance = r:s16()
+			sky.fog_start = r:f32()
+			sky.fog_color = read_color(r)
+		end
+		if r:remaining() >= 1 then
+			sky.auto_dim_skybox = r:u8() ~= 0
 		end
 		if self.on_sky then
 			self.on_sky(sky)
