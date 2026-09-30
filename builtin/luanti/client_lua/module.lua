@@ -703,10 +703,11 @@ end
 -- a face with no sun -- the hour's ambient (the sky share of it), the
 -- bounce (the rest), a lamp at full -- and the flat colour is that at the
 -- voxel's nibbles, no floor. Unset, the parity modes' floor and ramp.
+-- sun: the sun's on a level face, for a voxel under the open sky
 M.light_units = nil
-function M.set_light_units(ambient, bounce, lamp)
+function M.set_light_units(ambient, bounce, lamp, sun)
 	M.light_units = ambient and {ambient = ambient, bounce = bounce,
-			lamp = lamp} or nil
+			lamp = lamp, sun = sun} or nil
 end
 
 -- The flat colour at a position, or nil where no voxel is loaded (the
@@ -746,9 +747,14 @@ function M.light_color(x, y, z)
 	-- technique that decodes, which level 2's material does anyway.
 	local k = 0.44
 	local a, b, l = u.ambient, u.bounce, u.lamp
-	return magic.Color(k * (a.r * share + b.r * bounce + l.r * lit),
-			k * (a.g * share + b.g * bounce + l.g * lit),
-			k * (a.b * share + b.b * bounce + l.b * lit), 1.0)
+	-- The sun where the sky nibble is full, which in Luanti is direct
+	-- sunlight: an object in the open is lit as the ground beside it.
+	-- simplified: no shadow map and no normal, so the ground's level
+	-- face; an object in a tree's shadow on open ground is sunlit.
+	local s = u.sun and sky >= 1 and u.sun or {r = 0, g = 0, b = 0}
+	return magic.Color(k * (a.r * share + b.r * bounce + l.r * lit + s.r),
+			k * (a.g * share + b.g * bounce + l.g * lit + s.g),
+			k * (a.b * share + b.b * bounce + l.b * lit + s.b), 1.0)
 end
 
 -- Set on an object's materials when it moves (and when the day turns; the

@@ -1024,8 +1024,10 @@ local function draw_wielded(item_name, stack)
 		local holder = wield_node:CreateChild("shape")
 		local resources = luanti.wield_geometry(holder, item_name, expr)
 		if resources == nil then
+			-- Not kept: a picture whose file had not come yet was a box
+			-- for the rest of the session (user, 2026-09-30: a torch as a
+			-- see-through cube); the next redraw tries again
 			holder:Remove()
-			shape = false
 		else
 			local cg = holder:GetComponent("CustomGeometry")
 			local materials = {}
@@ -1048,8 +1050,8 @@ local function draw_wielded(item_name, stack)
 			holder.scale = magic.Vector3(sc * (sx or 1), sc * (sy or sx or 1),
 					sc * (sz or sx or 1))
 			shape = {node = holder, materials = materials}
+			wield_shapes[key] = shape
 		end
-		wield_shapes[key] = shape
 	end
 	for name, sh in pairs(wield_shapes) do
 		if sh then
@@ -1905,11 +1907,18 @@ local function update_sky(dt)
 		voxel_shading.set_lamp_light(PHYS.lamp * 1.0, PHYS.lamp * 0.6,
 				PHYS.lamp * 0.3)
 		-- The same three for the objects and the hand, drawn unlit in
-		-- the frame's units ([OBJECT_LIGHT], the unit gap)
+		-- the frame's units ([OBJECT_LIGHT], the unit gap), and the
+		-- sun's on a level face, which the open sky adds: without it a
+		-- torch held in the midday sun was a shadow's dark blue (user,
+		-- 2026-09-30)
+		local sun_level = PHYS.sun(height) * math.max(height, 0) / math.pi
+		local suc = sky_lights.sun.color
 		luanti.set_light_units(zone.ambientColor,
 				magic.Color(c.r * k * PHYS.bounce, c.g * k * PHYS.bounce,
 						c.b * k * PHYS.bounce),
-				magic.Color(PHYS.lamp * 1.0, PHYS.lamp * 0.6, PHYS.lamp * 0.3))
+				magic.Color(PHYS.lamp * 1.0, PHYS.lamp * 0.6, PHYS.lamp * 0.3),
+				magic.Color(sun_level * suc.r, sun_level * suc.g,
+						sun_level * suc.b))
 		voxel_shading.set_translucency_gain(tonumber(
 				buildat.get_env("BUILDAT_LUANTI_TRANSLUCENCY") or "") or
 				PHYS.translucency)
