@@ -2737,6 +2737,20 @@ do
 	end
 
 	copy_selected = function(linked)
+		-- **A door, window or opening alone is copied into a wall of the
+		-- user's choosing** (user: a linked clone of a window did not fit
+		-- on its wall, and was wanted on another one anyway): the next
+		-- click on a wall puts it there (M.place_copy), Esc gives up
+		local only, n = nil, 0
+		for id, kind in pairs(S.sel) do
+			only, n = id, n + 1
+		end
+		local oe = only and doc.ents[only]
+		if n == 1 and S.sel[only] == "instance" and oe and oe.ints.host ~= 0 then
+			S.place_copy = {id = only, linked = linked}
+			S.dirty = true
+			return
+		end
 		local ops, new, voxel_copies = {}, {}, {}
 		for id, kind in pairs(S.sel) do
 			if kind == "instance" then
@@ -2775,6 +2789,41 @@ do
 					S.sel[S.real[ph]] = "instance"
 					S.primary = S.real[ph]
 				end
+				M.refresh_panels()
+			end
+		end)
+	end
+
+	-- The copy S.place_copy is for, into this wall under the pointer: along
+	-- it where the pointer is, snapped and kept inside it, the rest as the
+	-- original has it; a linked one shares its definition
+	function M.place_copy(wall, x, z, side)
+		local pc = S.place_copy
+		S.place_copy = nil
+		S.dirty = true
+		local src = pc and doc.ents[pc.id]
+		local f = wall_frame(wall)
+		if not src or not f then
+			return
+		end
+		local i = copy_fields(src.ints)
+		local w = doc.ents[i.def].ints.w
+		local along = geom.snap((x - f.ax) * f.ux + (z - f.az) * f.uz, grid_step())
+		i.along = math.floor(math.max(w / 2, math.min(f.len - w / 2, along)) + 0.5)
+		i.host = wall
+		local ops = {}
+		if not pc.linked then
+			local def = doc.placeholder()
+			ops[#ops + 1] = {op = "create", ent = {id = def, type = "definition",
+					ints = copy_fields(doc.ents[i.def].ints)}}
+			i.def = def
+		end
+		local ph = doc.placeholder()
+		ops[#ops + 1] = {op = "create", ent = {id = ph, type = "instance", ints = i}}
+		send(ops, function(err)
+			if err == "" then
+				S.sel = {[S.real[ph]] = "instance"}
+				S.primary = S.real[ph]
 				M.refresh_panels()
 			end
 		end)
@@ -5110,6 +5159,17 @@ do
 		if S.touch and S.view == "walk" and not over_ui() then
 			return
 		end
+		-- A copy being put into a wall (copy_selected): a click on one puts
+		-- it there, and a click on nothing does nothing
+		if S.place_copy and button == magic.MOUSEB_LEFT and not over_ui() and
+				not S.captured then
+			local s = pick_surface()
+			if s and s.kind == "wall" and doc.can("edit") then
+				M.place_copy(s.id, s.x, s.z, s.side)
+			end
+			S.swallow_up = true
+			return
+		end
 		if crosshair_view() and not S.captured and not over_ui() and
 				button == magic.MOUSEB_LEFT then
 			-- A click on the view goes up into the crosshair
@@ -5718,6 +5778,9 @@ do
 	function M.escape()
 		if panel.popup then
 			panel.close_popup()
+		elseif S.place_copy then
+			S.place_copy = nil
+			S.dirty = true
 		elseif S.paused then
 			close_pause()
 		elseif S.picker or S.replace then
@@ -6223,7 +6286,7 @@ do
 			g.note = "Linking lamps: point at a lamp; Esc: done"
 			return g
 		end
-		local tool = S.tool
+		local tool = S.place_copy and "place_copy" or S.tool
 		if tool == "select" or tool == "node" then
 			local t = press_target()
 			if t then
@@ -6291,6 +6354,24 @@ do
 						"; drag: draw their footprint" or
 						"put a box here, " .. S.box.w .. " x " .. S.box.d ..
 						" mm, of " .. mat_text(cur) .. "; drag: draw its footprint"
+			end
+		elseif tool == "place_copy" then
+			local src = doc.ents[S.place_copy.id]
+			local s = pick_surface()
+			local f = s and s.kind == "wall" and wall_frame(s.id)
+			g.left = "click a wall to put the " .. (S.place_copy.linked and
+					"linked clone" or "copy") .. " in (Esc: no copy)"
+			if f and src then
+				local d = doc.ents[src.ints.def].ints
+				local along = geom.snap((s.x - f.ax) * f.ux + (s.z - f.az) * f.uz,
+						grid_step())
+				along = math.max(d.w / 2, math.min(f.len - d.w / 2, along))
+				hl({kind = "wall", id = s.id})
+				hl({kind = "opening", frame = f, along = along, w = d.w,
+						sill = src.ints.sill, h = d.h})
+				g.left = "put the " .. (S.place_copy.linked and "linked clone" or
+						"copy") .. " into wall " .. s.id .. ", " ..
+						math.floor(along + 0.5) .. " mm along it (Esc: no copy)"
 			end
 		elseif tool == "hosted" then
 			local s = pick_surface()
