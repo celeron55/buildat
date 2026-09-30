@@ -12,7 +12,7 @@
 -- keep its hands off the keys and the mouse, as a form does.
 --
 --   local open = run_script_file("main/pause.lua")(o)
--- o.key_bindings(back): the key binding editor, `back` when it is left.
+-- o.keys: keys.lua's table, whose editor is the key bindings page.
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local luanti = require("buildat/module/luanti")
@@ -38,6 +38,7 @@ buildat.sub_packet("main:account", function(data)
 	local v = cereal.binary_input(data, {"array", "string"})
 	account = {public = v[1] == "1", admin = v[2] == "1", world = v[3] or "",
 			is_local = v[4] == "1"}
+	o.keys.public = account.public
 end)
 
 local function close()
@@ -134,7 +135,7 @@ open = function()
 	accounts.page_button(w, "Continue playing", close)
 	accounts.page_button(w, "Key bindings", function()
 		page(function()
-			o.key_bindings(function() later(open) end)
+			o.keys.draw(function() later(open) end)
 		end)
 	end)
 	local s

@@ -129,6 +129,10 @@ struct Module: public interface::Module
 	// The exit status that asks util/serve_latest_release.sh to start the
 	// server again at once
 	static const int RESTART_STATUS = 20;
+	// A public server's chat: per peer, how full the bucket is and when it
+	// was last looked at (see on_chat)
+	std::map<network::PeerInfo::Id, std::pair<double, int64_t>> m_chat_bucket;
+	static constexpr double CHAT_BURST = 5;
 	// Who has joined, by the account name their player has
 	std::map<network::PeerInfo::Id, ss_> m_names;
 	std::set<network::PeerInfo::Id> m_join_sent;
@@ -288,6 +292,7 @@ struct Module: public interface::Module
 		});
 		m_names.erase(old_client.info.id);
 		m_join_sent.erase(old_client.info.id);
+		m_chat_bucket.erase(old_client.info.id);
 	}
 
 	// Public mode ([VANILLA_PUBLIC])
@@ -367,7 +372,7 @@ struct Module: public interface::Module
 		log_i(MODULE, "%s switches the world to %s", cs(m_names[by]), cs(name));
 		if(m_scene){
 			luanti::access(m_server, [&](luanti::Interface *i){
-				i->chat_send_all("The server switches to the world "+name+
+				i->chat_send("", "The server switches to the world "+name+
 						": join again in a moment");
 			});
 		}
@@ -581,6 +586,23 @@ struct Module: public interface::Module
 		if(values.empty() || values[0].empty())
 			return;
 		const ss_ &message = values[0];
+		// **A public server's chat is limited** ([VANILLA_PUBLIC] 8): a
+		// player's lines fill a bucket that empties one a second, and a
+		// line into a full one is refused and the player told
+		if(m_public){
+			const int64_t now = interface::os::time_us();
+			auto &b = m_chat_bucket[packet.sender];
+			b.first = std::max(0.0, b.first - (now - b.second) / 1e6);
+			b.second = now;
+			if(b.first + 1 > CHAT_BURST){
+				luanti::access(m_server, [&](luanti::Interface *i){
+					i->chat_send(player_name_of(packet.sender),
+							"Too many lines: wait a moment");
+				});
+				return;
+			}
+			b.first += 1;
+		}
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->chat_message(player_name_of(packet.sender), message);
 		});

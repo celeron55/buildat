@@ -142,9 +142,45 @@ local function list_with_keys()
 	return out
 end
 
+-- **A public server's key rows are the client's own** ([VANILLA_PUBLIC]
+-- 6): kept in the client's storage for that server, over the ones in the
+-- server's list, which are its owner's. pause.lua sets M.public from
+-- main:account.
+-- simplified: per server; a player's keys for every server would be a
+-- client preference
+M.public = false
+
+function M.own_rows(list)
+	if not M.public then
+		return list
+	end
+	local out = {}
+	for _, row in ipairs(list) do
+		if not row:match("^key%.") then
+			out[#out + 1] = row
+		end
+	end
+	for row in (buildat.storage_read("key_rows") or ""):gmatch("[^\n]+") do
+		out[#out + 1] = row
+	end
+	return out
+end
+
 local function save()
+	local list = list_with_keys()
+	if M.public then
+		local rows = {}
+		for _, row in ipairs(list) do
+			if row:match("^key%.") then
+				rows[#rows + 1] = row
+			end
+		end
+		buildat.storage_write("key_rows", table.concat(rows, "\n"))
+		M.apply(list)
+		return
+	end
 	buildat.send_packet("main:set_settings",
-			cereal.binary_output(list_with_keys(), {"array", "string"}))
+			cereal.binary_output(list, {"array", "string"}))
 end
 
 -- The editor is the one both clients share, luanti_client/res/key_editor.lua,

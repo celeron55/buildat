@@ -3572,7 +3572,7 @@ local open_pause_menu = (function(ok, err, m)
 		error("vanilla: could not load pause.lua: " .. tostring(err))
 	end
 	return m
-end)(buildat.run_script_file("main/pause.lua"))({key_bindings = keys.draw})
+end)(buildat.run_script_file("main/pause.lua"))({keys = keys})
 
 --
 -- Pointing at a node, and digging it
@@ -4596,7 +4596,7 @@ end)
 -- The settings, for the key rows in them ([KEY_BINDINGS]); the same
 -- packet answers the pause menu's editor after a save
 buildat.sub_packet("main:settings", function(data)
-	local list = cereal.binary_input(data, {"array", "string"})
+	local list = keys.own_rows(cereal.binary_input(data, {"array", "string"}))
 	keys.apply(list)
 	for _, row in ipairs(list) do
 		local n = row:match("^view_range=(%d+)$")

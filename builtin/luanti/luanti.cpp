@@ -8704,10 +8704,14 @@ struct Module: public interface::Module, public luanti::Interface
 				(admin ? "true" : "false")+") return true");
 	}
 
-	void chat_send_all(const ss_ &text)
+	void chat_send(const ss_ &to, const ss_ &text)
 	{
-		node_action("core.chat_send_all(\""+lua_quoted(text)+
-				"\") return true");
+		if(to.empty())
+			node_action("core.chat_send_all(\""+lua_quoted(text)+
+					"\") return true");
+		else
+			node_action("core.chat_send_player(\""+lua_quoted(to)+"\", \""+
+					lua_quoted(text)+"\") return true");
 	}
 
 	void remove_player(const ss_ &name)
