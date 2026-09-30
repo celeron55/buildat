@@ -4985,12 +4985,17 @@ do
 	-- pointer is on, in world metres -- the thing under it, or where its ray
 	-- meets the floor -- or nil when it points at the sky. orbit: pointing
 	-- at none of the plan, the middle of the box round all its rooms, up to
-	-- half their highest ceiling (user)
+	-- half their highest ceiling (user). An orbit about the floor, or the
+	-- ground, turns about half the room's height over it (user)
 	local function camera_pivot(orbit)
 		local o, d = cursor_ray()
 		local s = pick_surface()
 		if s and s.t then
-			return {x = o.x + d.x * s.t, y = o.y + d.y * s.t, z = o.z + d.z * s.t}
+			local p = {x = o.x + d.x * s.t, y = o.y + d.y * s.t, z = o.z + d.z * s.t}
+			if orbit and s.kind == "floor" then
+				p.y = W(room_ceiling(doc.ents[s.id]) / 2)
+			end
+			return p
 		end
 		if orbit and next(room_data) then
 			local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
@@ -5006,7 +5011,8 @@ do
 		end
 		local x, z, t = ray_at_height(0)
 		if x then
-			return {x = o.x + d.x * t, y = 0, z = o.z + d.z * t}
+			return {x = o.x + d.x * t, z = o.z + d.z * t,
+					y = orbit and W(settings().ceiling / 2) or 0}
 		end
 		return nil
 	end
