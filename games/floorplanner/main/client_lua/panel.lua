@@ -120,7 +120,7 @@ function M.mark(b, mark)
 	m:SetAlignment(magic.HA_RIGHT, magic.VA_CENTER)
 	m:SetPosition(-6, 0)
 	m:SetColor(t.color)
-	local room = m.width + 10
+	local room = m.width + 16
 	t:SetPosition(-room / 2, 0)
 	b.minWidth = b.minWidth + room
 	return b

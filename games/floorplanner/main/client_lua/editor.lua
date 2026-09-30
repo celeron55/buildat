@@ -3895,9 +3895,35 @@ build_palette = function()
 		palette_win.visible = false
 		return
 	end
-	panel.label(palette_win, S.replacing and "Pick the entry to use instead:"
-			or "Palette")
+	-- **The palette folds to its title** (user): a click on the title
+	-- row, or a right click that clears the selection, folds it, and it
+	-- opens by itself when something new is selected or a tool it goes on
+	-- is taken. Folded it is a dropdown's button saying the entry.
+	local sel_now = S.primary or next(S.sel)
+	if (sel_now and sel_now ~= S.palette_sel) or (S.tool ~= S.palette_tool and
+			S.tool ~= "select" and S.tool ~= "node") or S.replacing then
+		S.palette_collapsed = false
+	end
+	S.palette_sel, S.palette_tool = sel_now, S.tool
 	local cur = default_material()
+	if S.replacing then
+		panel.label(palette_win, "Pick the entry to use instead:")
+	else
+		local ce = doc.ents[cur]
+		panel.mark(panel.button(palette_win, S.palette_collapsed and ce and
+				("Palette: #" .. cur .. "  " .. ce.strs.name) or "Palette",
+				function()
+			S.palette_collapsed = not S.palette_collapsed
+			refresh_panels()
+		end), S.palette_collapsed and "▼" or "▲")
+		if S.palette_collapsed then
+			-- The colour picker goes with it; a voxel replace keeps its own
+			if S.picker and not S.replace then
+				close_picker()
+			end
+			return
+		end
+	end
 	local entries = of_type("palette")
 	for _, p in ipairs(entries) do
 		panel.swatch_row(palette_win, palette_rgb(p.id), "#" .. p.id .. "  " ..
@@ -5061,7 +5087,7 @@ do
 			-- **A right click on a door's or a window's leaf opens or shuts
 			-- it** (user): in 3D and walking, a right press that the mouse
 			-- then hardly moves -- orbiting and turning are the right drag
-			if (S.view == "3d" or S.view == "walk") and not over_ui() then
+			if not over_ui() then
 				local s = pick_surface()
 				S.right_click = {moved = 0,
 						leaf = s and s.side == "mat_leaf" and s.id or nil}
@@ -5124,6 +5150,16 @@ do
 				magic.input:SetMouseMode(magic.MM_ABSOLUTE)
 				M.toggle_open(rc.leaf)
 				return
+			end
+			-- **A right click on what has no right click action clears the
+			-- selection** (user), and folds the palette: the view cleared
+			-- of its panels. The drag it may have started ends below.
+			if rc.moved < 5 and S.tool == "select" and not S.captured and
+					S.view ~= "walk" then
+				S.sel, S.primary = {}, nil
+				S.palette_collapsed = true
+				S.dirty = true
+				refresh_panels()
 			end
 		end
 		if S.swallow_up then
