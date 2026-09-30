@@ -1494,16 +1494,19 @@ do
 		light.lightType = magic.LIGHT_POINT
 		light.color = rgb_color(kelvin_rgb(p.temperature))
 		local b = p.brightness / 1000
-		-- Under PBR at vanilla's lamp radiance, beside the sun's
-		light.brightness = (0.5 + 1.5 * b) * (M.pbr_now() and
-				M.daylight.PHYS.lamp or 1)
+		-- At vanilla's lamp radiance, beside the sun's
+		light.brightness = (0.5 + 1.5 * b) * M.daylight.PHYS.lamp
 		light.range = 2 + 8 * b
 end
 
 -- The lamps that are on: each connected region of a volume's lamp voxels
 -- is one light at its middle, not one per voxel; a box of a lamp material
--- is one at its centre
+-- is one at its centre. Only under PBR (user): in the unlit look, and so
+-- in the plan view, a lamp's light only oversaturates.
 build_lamps = function()
+	if not M.pbr_now() then
+		return
+	end
 	for id, it in pairs(inst_data) do
 		if lamp_on(id) and not it.hosted then
 			local def = doc.ents[it.def].ints
