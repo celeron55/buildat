@@ -5890,11 +5890,13 @@ do
 	-- What a right or middle drag in 3D turns about or pans by: the point the
 	-- pointer is on, in world metres -- the thing under it, or where its ray
 	-- meets the floor -- or nil when it points at the sky. orbit: pointing
-	-- at none of the plan, the middle of the box round all its rooms, up to
+	-- at none of the plan, the middle of the box round the current
+	-- layout's rooms, up to
 	-- half their highest ceiling (user). An orbit about the floor, or the
 	-- ground, turns about half the room's height over it (user)
-	-- The middle of the box round all the plan's rooms, up to half their
-	-- highest ceiling; nil without rooms
+	-- The middle of the box round the current layout's rooms (room_data is
+	-- its, being built last), up to half their highest ceiling; nil
+	-- without rooms
 	function M.plan_middle()
 		if not next(room_data) then
 			return nil
