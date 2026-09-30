@@ -65,6 +65,16 @@ buildat.sub_packet("main:menu", function(data)
 end)
 local import_page = 1
 
+-- **A width that fits the screen** (user, 2026-09-30: a phone): what the
+-- menu asks for, or the screen's width less a margin; a narrow screen
+-- stacks the world list's two columns
+local function fit(px)
+	return math.min(px, magic.ui.root.width - 40)
+end
+local function narrow()
+	return magic.ui.root.width < 1000
+end
+
 -- What is typed into each list's filter box, kept across the redraws a page
 -- turn or a filter change costs. See add_filter().
 local save_filter = ""
@@ -109,7 +119,9 @@ local function waiting(message)
 	end
 	close()
 	root = uistack.main:push({desc = "vanilla menu: waiting"})
-	local menu = ui_utils.vertical_menu(root, {min_width = 420})
+	-- Over the HUD and the hotbar (priority 10) when over the world
+	root.priority = 100
+	local menu = ui_utils.vertical_menu(root, {min_width = fit(420)})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	local text = menu.window:CreateChild("Text")
 	text:SetStyleAuto()
@@ -272,7 +284,9 @@ function draw(saves, save_games)
 	last_saves, last_save_games = saves, save_games
 	close()
 	root = uistack.main:push({desc = "vanilla menu: saves"})
-	local menu = ui_utils.vertical_menu(root, {min_width = 420})
+	-- Over the HUD and the hotbar (priority 10) when over the world
+	root.priority = 100
+	local menu = ui_utils.vertical_menu(root, {min_width = fit(420)})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 
 	local title = menu.window:CreateChild("Text")
@@ -281,13 +295,14 @@ function draw(saves, save_games)
 			"vanilla: which save?")
 
 	local columns = menu.window:CreateChild("UIElement")
-	columns:SetLayout(magic.LM_HORIZONTAL, 16, magic.IntRect(0, 0, 0, 0))
+	columns:SetLayout(narrow() and magic.LM_VERTICAL or magic.LM_HORIZONTAL,
+			16, magic.IntRect(0, 0, 0, 0))
 	local left = columns:CreateChild("UIElement")
 	left:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(0, 0, 0, 0))
-	left:SetFixedWidth(520)
+	left:SetFixedWidth(fit(520))
 	local right = columns:CreateChild("UIElement")
 	right:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(0, 0, 0, 0))
-	right:SetFixedWidth(420)
+	right:SetFixedWidth(fit(420))
 
 	-- Every save, newest first: the server sorts them by when each was
 	-- last played
@@ -319,7 +334,8 @@ function draw(saves, save_games)
 	end)
 	local list = left:CreateChild("ListView")
 	list:SetStyleAuto()
-	list:SetFixedSize(520, 520)
+	list:SetFixedSize(fit(520), narrow() and
+			math.max(100, math.floor(magic.ui.root.height * 0.18)) or 520)
 	if selected_save then
 		local still = false
 		for _, item in ipairs(shown) do
@@ -353,7 +369,7 @@ function draw(saves, save_games)
 		row:SetStyleAuto()
 		row:SetName("Button")
 		row:SetLayout(magic.LM_VERTICAL, 10, magic.IntRect(8, 0, 8, 0))
-		row:SetFixedWidth(496)
+		row:SetFixedWidth(fit(520) - 24)
 		row.minHeight = 28
 		local text = row:CreateChild("Text")
 		text:SetName("ButtonText")
@@ -379,7 +395,7 @@ function draw(saves, save_games)
 	-- One button rather than one per game: which game is a choice, and it
 	-- goes on the same screen as the name it is being given
 	local under = {add = function(_, label, action)
-		return button_on(menu, left, label, action, 520)
+		return button_on(menu, left, label, action, fit(520))
 	end}
 	under:add(menu_game and "New world..." or "New save...", function()
 		if menu_game then
@@ -434,13 +450,20 @@ function draw(saves, save_games)
 	panel = {lines = {}, flags = {}}
 	local head = right:CreateChild("Text")
 	head:SetStyleAuto()
-	head:SetText(selected_save or "Pick a world on the left")
+	head:SetText(selected_save or (narrow() and "Pick a world above" or
+			"Pick a world on the left"))
 	panel.head = head
-	for k = 1, 7 do
+	-- On a narrow screen the glance is one line that wraps, so that the
+	-- screen fits a phone's height
+	for k = 1, narrow() and 1 or 7 do
 		local line = right:CreateChild("Text")
 		line:SetStyleAuto()
 		line:SetText("")
 		line:SetTextAlignment(magic.HA_LEFT)
+		if narrow() then
+			line:SetWordwrap(true)
+			line:SetFixedWidth(fit(420))
+		end
 		panel.lines[k] = line
 	end
 	local function flag_row(key, label)
@@ -454,7 +477,7 @@ function draw(saves, save_games)
 					cereal.binary_output({selected_save,
 					f.creative_mode and "true" or "false",
 					f.enable_damage and "true" or "false"}, {"array", "string"}))
-		end, 420)
+		end, fit(420))
 		panel[key] = {button = b, label = label}
 	end
 	flag_row("creative_mode", "Creative mode")
@@ -463,7 +486,7 @@ function draw(saves, save_games)
 		if selected_save then
 			play(selected_save)
 		end
-	end, 420)
+	end, fit(420))
 	button_on(menu, right, "Delete...", function()
 		local name = selected_save
 		if not name then
@@ -476,7 +499,7 @@ function draw(saves, save_games)
 			buildat.send_packet("main:delete",
 					cereal.binary_output({name}, {"array", "string"}))
 		end, function() end)
-	end, 420)
+	end, fit(420))
 	if selected_save then
 		select(selected_save)
 	end
@@ -536,7 +559,9 @@ end
 local function import_menu(title)
 	close()
 	root = uistack.main:push({desc = "vanilla menu: " .. title})
-	local menu = ui_utils.vertical_menu(root, {min_width = 420})
+	-- Over the HUD and the hotbar (priority 10) when over the world
+	root.priority = 100
+	local menu = ui_utils.vertical_menu(root, {min_width = fit(420)})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	local text = menu.window:CreateChild("Text")
 	text:SetStyleAuto()
@@ -785,7 +810,11 @@ function draw_contentdb(flat)
 	-- simplified: the arrows do not scroll the list to the selected row.
 	local list = menu.window:CreateChild("ListView")
 	list:SetStyleAuto()
-	list:SetFixedSize(860, 620)
+	list:SetFixedSize(fit(860), math.min(620,
+			math.floor(magic.ui.root.height * 0.6)))
+	-- A phone's row has no room for the picture
+	local row_w = fit(860) - 40
+	local with_pic = row_w >= 600
 	pictures = {}
 	local n = 0
 	for i = 1, #flat - 4, 5 do
@@ -793,14 +822,17 @@ function draw_contentdb(flat)
 		n = n + 1
 		local row = list.contentElement:CreateChild("UIElement")
 		row:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(4, 4, 4, 4))
-		row:SetFixedWidth(820)
-		local pic = row:CreateChild("Sprite")
-		pic:SetFixedSize(96, 64)
-		pic.color = magic.Color(0.3, 0.3, 0.3)
-		pictures["contentdb/" .. author .. "_" .. name .. ".png"] = pic
+		row:SetFixedWidth(row_w)
+		if with_pic then
+			local pic = row:CreateChild("Sprite")
+			pic:SetFixedSize(96, 64)
+			pic.color = magic.Color(0.3, 0.3, 0.3)
+			pictures["contentdb/" .. author .. "_" .. name .. ".png"] = pic
+		end
+		local block_w = row_w - (with_pic and 106 or 0) - 120
 		local block = row:CreateChild("UIElement")
 		block:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
-		block:SetFixedWidth(580)
+		block:SetFixedWidth(block_w)
 		local head = block:CreateChild("Text")
 		head:SetStyleAuto()
 		head:SetText(title .. "  by " .. author)
@@ -808,7 +840,7 @@ function draw_contentdb(flat)
 		if desc ~= "" then
 			local body = block:CreateChild("Text")
 			body:SetStyleAuto()
-			body:SetFixedWidth(580)
+			body:SetFixedWidth(block_w)
 			body:SetWordwrap(true)
 			body:SetText(desc)
 			body:SetTextAlignment(magic.HA_LEFT)
@@ -1169,8 +1201,12 @@ buildat.sub_packet("main:save_info", function(data)
 	lines[#lines + 1] = "explored: " .. sections .. " sections, " ..
 			math.floor(math.sqrt(sections) * 64 + 0.5) .. " nodes across"
 	lines[#lines + 1] = format_bytes(tonumber(info.bytes) or 0) .. " on disk"
-	for k, line in ipairs(panel.lines) do
-		line:SetText(lines[k] or "")
+	if #panel.lines == 1 then
+		panel.lines[1]:SetText(table.concat(lines, "; "))
+	else
+		for k, line in ipairs(panel.lines) do
+			line:SetText(lines[k] or "")
+		end
 	end
 	panel.flags.creative_mode = info.creative_mode == "true"
 	panel.flags.enable_damage = info.enable_damage == "true"

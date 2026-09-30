@@ -83,6 +83,8 @@ local function page_window(width)
 	w.defaultStyle = magic.cache:GetResource("XMLFile",
 			"launch_menu/res/main_style.xml")
 	w:SetStyleAuto()
+	-- Over a game's HUD, such as the Luanti hotbar (priority 10)
+	w.priority = 100
 	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
 	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
@@ -279,6 +281,7 @@ end)
 
 buildat.sub_packet("accounts:users", function(data)
 	M.users = cereal.binary_input(data, USERS)
+	log:info(#M.users.users .. " accounts listed")
 	if page_kind == "users" then
 		users_page(page_back)
 	end
@@ -319,6 +322,7 @@ end)
 -- An admin's request: list, priv, kick, ban, unban, password, delete, add,
 -- invite, uninvite, setting
 function M.admin(cmd, name, arg, on)
+	log:info("admin request: " .. cmd)
 	buildat.send_packet("accounts:admin", cereal.binary_output({cmd = cmd,
 			name = name or "", arg = arg or "", on = on and 1 or 0}, ADMIN))
 end
@@ -509,6 +513,20 @@ users_page = function(back)
 		button(w, "Back", go_back)
 		return
 	end
+	-- **The accounts, invites and bans in a list that scrolls** (user,
+	-- 2026-09-30): a server's users are more than a phone's screen. Its
+	-- height is what is in it, up to under half the screen.
+	local list = w:CreateChild("ListView")
+	list:SetStyleAuto()
+	local item_width = math.max(100, w.width - 32 - 28)
+	local lines = 0
+	local function item()
+		local it = list:CreateChild("UIElement")
+		it:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 2, 0, 2))
+		it:SetFixedWidth(item_width)
+		list:AddItem(it)
+		return it
+	end
 	for _, user in ipairs(u.users) do
 		local has = {}
 		for _, p in ipairs(user.privs) do
@@ -516,8 +534,10 @@ users_page = function(back)
 		end
 		-- The name over its buttons: five of them are a narrow window's
 		-- width at the web client's scale
-		page_text(w, user.name .. (user.here == 1 and " (here)" or ""))
-		local r = row(w)
+		local it = item()
+		page_text(it, user.name .. (user.here == 1 and " (here)" or ""))
+		local r = row(it)
+		lines = lines + 2
 		button(r, has.admin and "Admin: yes" or "Admin: no", function()
 			M.admin("priv", user.name, "admin", not has.admin)
 		end)
@@ -542,27 +562,37 @@ users_page = function(back)
 			button(r2, "Back", function() users_page(back) end)
 		end)
 	end
-	button(w, "Add a user...", function()
-		ask_page("Add a user", {"Name", "Password"},
-				function(n, p) M.admin("add", n, p) end)
-	end)
-	page_text(w, "Invites (each makes one account):")
+	if #u.invites > 0 then
+		page_text(item(), "Invites (each makes one account):")
+		lines = lines + 1
+	end
 	for _, inv in ipairs(u.invites) do
-		local r = row(w)
+		local r = row(item())
+		lines = lines + 1
 		page_text(r, inv.code .. "  (" .. inv.by .. ")"):SetWordwrap(false)
 		button(r, "Delete", function() M.admin("uninvite", inv.code) end)
 	end
-	button(w, "New invite", function() M.admin("invite") end)
-	-- [VANILLA_PUBLIC] 4: a ban is of the name and of where it joined from
+	-- [VANILLA_PUBLIC] 4: a ban is of the account, and of where it joined
+	-- from while registration is open
 	if #(u.bans or {}) > 0 then
-		page_text(w, "Banned:")
+		page_text(item(), "Banned:")
+		lines = lines + 1
 		for _, b in ipairs(u.bans) do
-			local r = row(w)
+			local r = row(item())
+			lines = lines + 1
 			page_text(r, b.name .. (b.address ~= "" and
 					"  (" .. b.address .. ")" or "")):SetWordwrap(false)
 			button(r, "Unban", function() M.admin("unban", b.name) end)
 		end
 	end
+	list:SetFixedHeight(math.min(lines * 34 + 8,
+			math.floor(magic.ui.root.height * 0.45)))
+	local r = row(w)
+	button(r, "Add a user...", function()
+		ask_page("Add a user", {"Name", "Password"},
+				function(n, p) M.admin("add", n, p) end)
+	end)
+	button(r, "New invite", function() M.admin("invite") end)
 	local a = u.access
 	button(w, a.open_registration == 1 and
 			"Open registration: on (anyone can make an account)" or
