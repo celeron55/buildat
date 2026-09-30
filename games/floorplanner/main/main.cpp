@@ -218,6 +218,7 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"trim", 0, 500, 70},
 		{"trim_depth", 0, 200, 15},
 		{"leaf", 0, 1, 0},       // door: single, double; window: fixed, casement
+		{"glazed", 0, 1, 0},     // door: a glass pane in each leaf (user)
 		{"voxel_size", 1, 1000, 50}, // a voxel volume's, mm
 		// Stairs: w wide, rising h over their depth d along +Z in this
 		// many equal steps

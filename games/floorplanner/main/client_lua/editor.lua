@@ -1189,8 +1189,28 @@ local function build_hosted(id, it, def, e, geometry, commit)
 			B(gg, x0 + fw, y0 + 2 * fw, -4, x1 - fw, y1 - 2 * fw, 4, glass_col)
 			commit(gg, glass_material)
 		else
-			B(lg, x0, y0, -LEAF_T / 2, x1, y1 - LEAF_GAP, LEAF_T / 2, leaf_col)
-			commit(lg, lit_material)
+			-- **A glazed leaf** (user): stiles and rails around a pane, the
+			-- bottom rail a panel to 900 mm; a leaf too small for a pane
+			-- is solid
+			local st, top, bot = 120, 150, 900
+			local ly1 = y1 - LEAF_GAP
+			local lt = LEAF_T / 2
+			if def.glazed == 1 and x1 - x0 > 2 * st + 100 and
+					ly1 - y0 > top + bot + 200 then
+				B(lg, x0, y0, -lt, x0 + st, ly1, lt, leaf_col)
+				B(lg, x1 - st, y0, -lt, x1, ly1, lt, leaf_col)
+				B(lg, x0 + st, y0, -lt, x1 - st, y0 + bot, lt, leaf_col)
+				B(lg, x0 + st, ly1 - top, -lt, x1 - st, ly1, lt, leaf_col)
+				commit(lg, lit_material)
+				local gg, gnode = part()
+				gnode.position = node.position
+				gnode.rotation = node.rotation
+				B(gg, x0 + st, y0 + bot, -4, x1 - st, ly1 - top, 4, glass_col)
+				commit(gg, glass_material)
+			else
+				B(lg, x0, y0, -lt, x1, ly1, lt, leaf_col)
+				commit(lg, lit_material)
+			end
 		end
 	end
 end
@@ -3308,6 +3328,12 @@ local function build_props()
 			panel.button(props, names[p.leaf + 1], function()
 				set(i.def, {ints = {leaf = 1 - p.leaf}})
 			end)
+			if p.kind == KIND.door then
+				panel.button(props, p.glazed == 1 and "Glass pane" or
+						"Solid leaf", function()
+					set(i.def, {ints = {glazed = 1 - p.glazed}})
+				end)
+			end
 			local r = panel.row(props)
 			panel.button(r, "Other hinge", function()
 				set(sel.id, {ints = {flip = bit_xor(i.flip, 1)}})
@@ -3332,8 +3358,11 @@ local function build_props()
 			local r2 = panel.row(props)
 			local part = DOOR_PARTS[S.sel_face[sel.id]] and S.sel_face[sel.id] or
 					"mat"
-			for _, slot in ipairs({{"Frame", "mat"}, {"Leaf", "mat_leaf"},
-					{"Glass", "mat_glass"}}) do
+			local slots = {{"Frame", "mat"}, {"Leaf", "mat_leaf"}}
+			if p.kind == KIND.window or p.glazed == 1 then
+				slots[3] = {"Glass", "mat_glass"}
+			end
+			for _, slot in ipairs(slots) do
 				panel.button(r2, slot[1], function()
 					S.sel_face[sel.id] = slot[2]
 					editing_selection()
