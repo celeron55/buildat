@@ -96,6 +96,8 @@ local S = {
 	-- Walking: where the feet are, mm, and the eyes above them
 	walk = {x = 0, z = 0, feet = 0, noclip = false},
 	eye = 1600,
+	-- The pointer is a finger ([FP_TOUCH]): the page says so
+	touch = buildat.get_env("BUILDAT_TOUCH") == "1",
 	-- Walking's vertical field of view in degrees, the viewer's own and
 	-- kept on this client (user)
 	walk_fov = tonumber(buildat.storage_read("walk_fov") or "") or 80,
@@ -3019,37 +3021,71 @@ local function build_toolbar()
 	if toolbar then
 		toolbar:Remove()
 	end
-	toolbar = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, 8, true)
-	panel.button(toolbar, VIEW_NAMES[S.view] .. " (F1 F2 F3)",
+	-- Rows of buttons, as many as the screen's width needs ([FP_TOUCH] 2);
+	-- one on a desktop's. A touchscreen has no keys: no key in the names,
+	-- and a Menu button for Esc's pause menu.
+	toolbar = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, 8)
+	local row, used = panel.row(toolbar), 0
+	local room = magic.ui.root.width - 16 - 12
+	local function add(text, key, f, down, min_width)
+		if key and not S.touch then
+			text = text .. " (" .. key .. ")"
+		end
+		-- Measured before it is put in a row: a row a button was taken back
+		-- out of keeps the width it had with it
+		local probe = panel.button(magic.ui.root, text, function() end, down,
+				min_width)
+		local w = probe.minWidth + 4
+		probe:Remove()
+		if used > 0 and used + w > room then
+			row, used = panel.row(toolbar), 0
+		end
+		-- Not stretched to the widest row
+		local b = panel.button(row, text, f, down, min_width)
+		b.maxWidth = b.minWidth
+		used = used + w
+	end
+	if S.touch then
+		add("Menu", nil, function() M.open_pause() end)
+	end
+	add(VIEW_NAMES[S.view], S.touch and nil or "F1 F2 F3",
 			function() set_view(NEXT_VIEW[S.view]) end, false, 40)
 	-- The layout edited, and the window that picks another
 	local l = S.layout and doc.ents[S.layout]
-	panel.button(toolbar, l and l.strs.name or "Layouts", function()
+	add(l and l.strs.name or "Layouts", nil, function()
 		S.layouts_open = not S.layouts_open
 		refresh_panels()
 	end, S.layouts_open)
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Object"},
 			{"hosted", "Door/window"}, {"voxel", "Voxels"}, {"paint", "Material"}}) do
-		panel.button(toolbar, t[2] .. " (" .. TOOL_KEYS[t[1]] .. ")",
-				function() set_tool(t[1]) end, S.tool == t[1])
+		add(t[2], TOOL_KEYS[t[1]], function() set_tool(t[1]) end, S.tool == t[1])
 	end
 	local g = grid_step()
-	panel.button(toolbar, "Grid " .. (g < 10 and g .. " mm" or
-			(g / 10) .. " cm") .. " (G)", function()
+	add("Grid " .. (g < 10 and g .. " mm" or (g / 10) .. " cm"), "G", function()
 		next_grid()
 	end)
 	local a = ANGLE_STEPS[S.angle]
-	panel.button(toolbar, "Angle " .. (a and a .. " deg" or "free") ..
-			" (H)", function()
+	add("Angle " .. (a and a .. " deg" or "free"), "H", function()
 		S.angle = S.angle % #ANGLE_STEPS + 1
 		refresh_panels()
 	end)
-	panel.button(toolbar, "IDs", function()
+	-- The panels folded away on a narrow screen, opened here
+	if panel.narrow() then
+		for _, p in ipairs({{"palette", "Palette"}, {"props", "Properties"}}) do
+			add(p[2], nil, function()
+				panel.toggle_fold(p[1])
+				refresh_panels()
+			end, not panel.folded(p[1]))
+		end
+	end
+	add("IDs", nil, function()
 		S.show_ids = not S.show_ids
 		S.dirty = true
 		refresh_panels()
 	end, S.show_ids)
+	-- The panels start under it
+	S.panel_y = 8 + toolbar.height + 8
 end
 
 local function m2(mm2)
@@ -3068,7 +3104,11 @@ local function build_props()
 	if props then
 		props:Remove()
 	end
-	props = panel.window(magic.HA_RIGHT, magic.VA_TOP, -8, 50)
+	props = panel.window(magic.HA_RIGHT, magic.VA_TOP, -8, S.panel_y or 50)
+	if panel.folded("props") then
+		props.visible = false
+		return
+	end
 	local sel = S.primary and S.sel[S.primary] and doc.ents[S.primary]
 	-- **An edit of what is selected leaves a placing tool for Select**, the
 	-- selection kept (user): the next click in the view is then not one
@@ -3740,7 +3780,11 @@ build_palette = function()
 	if palette_win then
 		palette_win:Remove()
 	end
-	palette_win = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, 50)
+	palette_win = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, S.panel_y or 50)
+	if panel.folded("palette") then
+		palette_win.visible = false
+		return
+	end
 	panel.label(palette_win, S.replacing and "Pick the entry to use instead:"
 			or "Palette")
 	local cur = default_material()
@@ -3897,7 +3941,7 @@ place.build_window = function()
 	if not S.layouts_open then
 		return
 	end
-	local w = panel.window(magic.HA_CENTER, magic.VA_TOP, 0, 50)
+	local w = panel.window(magic.HA_CENTER, magic.VA_TOP, 0, S.panel_y or 50)
 	place.win = w
 	local function set(id, fields)
 		send({{op = "set", ent = {id = id, ints = fields.ints,
@@ -4032,6 +4076,8 @@ M.refresh_panels = function() refresh_panels() end
 -- planner's; the engine's are the launcher's.
 local pause_win = nil
 local open_pause, close_pause
+-- For the toolbar's Menu, built before these are
+M.open_pause = function() open_pause() end
 do
 	local function dialog(title)
 		if pause_win then

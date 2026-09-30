@@ -22,6 +22,37 @@ function M.window(halign, valign, x, y, horizontal)
 	return w
 end
 
+-- **Panels folded away on a narrow screen** ([FP_TOUCH] 2): a phone's is
+-- too narrow for the palette and the properties side by side over the
+-- view. There they start folded, a toolbar button opens one, and one opened
+-- folds the others; on a wide screen none is ever folded.
+M.folds = {}
+function M.narrow()
+	return magic.ui.root.width < 700
+end
+
+function M.folded(key)
+	if not M.narrow() then
+		return false
+	end
+	if M.folds[key] == nil then
+		M.folds[key] = true
+	end
+	return M.folds[key]
+end
+
+function M.toggle_fold(key)
+	local opening = M.folded(key)
+	M.folds[key] = not opening
+	if opening then
+		for k in pairs(M.folds) do
+			if k ~= key then
+				M.folds[k] = true
+			end
+		end
+	end
+end
+
 function M.row(parent)
 	local r = parent:CreateChild("UIElement")
 	r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
