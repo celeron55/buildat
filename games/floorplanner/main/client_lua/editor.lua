@@ -907,12 +907,16 @@ local function build_inst_data()
 		local moved = d and d.moved and d.kind == "move" and d.inst[e.id]
 		local it
 		if def and i.host ~= 0 then
-			-- In a wall: across its whole thickness and trim, at its sill
-			local f = wall_frame(i.host)
+			-- In a wall: across its whole thickness and trim, at its sill;
+			-- dragged onto another, in that one (the drag's rehost)
+			local rh = moved and d.rehost
+			local f = wall_frame(rh and rh.wall or i.host)
 			local p = def.ints
 			if f then
 				local along = i.along
-				if moved then
+				if rh then
+					along = rh.along
+				elseif moved then
 					along = geom.snap(along + d.dx * f.ux + d.dz * f.uz,
 							grid_step())
 				end
@@ -4854,6 +4858,26 @@ do
 				d.dx = geom.snap(x - S.press.x, g)
 				d.dz = geom.snap(z - S.press.z, g)
 			end
+			-- **A door, window or opening dragged onto another wall goes
+			-- into it** (user): where the pointer is on that wall
+			d.rehost = nil
+			local one, n = nil, 0
+			for id in pairs(d.inst or {}) do
+				one, n = id, n + 1
+			end
+			local oe = n == 1 and not next(d.nodes or {}) and doc.ents[one]
+			if oe and oe.ints.host ~= 0 then
+				local ps = pick_surface()
+				local f = ps and ps.kind == "wall" and ps.id ~= oe.ints.host and
+						wall_frame(ps.id)
+				if f then
+					local w = doc.ents[oe.ints.def].ints.w
+					local along = geom.snap((ps.x - f.ax) * f.ux +
+							(ps.z - f.az) * f.uz, grid_step())
+					d.rehost = {wall = ps.id, along = math.max(w / 2,
+							math.min(f.len - w / 2, along))}
+				end
+			end
 		end
 		S.dirty = true
 	end
@@ -4933,7 +4957,7 @@ do
 			else
 				send({{op = "set", ent = {id = d.id, ints = {x = d.x, z = d.z}}}})
 			end
-		elseif d.dx ~= 0 or d.dz ~= 0 then
+		elseif d.dx ~= 0 or d.dz ~= 0 or d.rehost then
 			local ops = {}
 			for n in pairs(d.nodes) do
 				local p = doc.ents[n] and doc.ents[n].ints
@@ -4945,7 +4969,11 @@ do
 			for id in pairs(d.inst) do
 				local i = doc.ents[id] and doc.ents[id].ints
 				local it = inst_data[id]
-				if i and it and it.hosted then
+				if i and it and it.hosted and d.rehost then
+					ops[#ops + 1] = {op = "set", ent = {id = id,
+							ints = {host = d.rehost.wall,
+							along = math.floor(d.rehost.along + 0.5)}}}
+				elseif i and it and it.hosted then
 					ops[#ops + 1] = {op = "set", ent = {id = id,
 							ints = {along = math.floor(it.along + 0.5)}}}
 				elseif i then
