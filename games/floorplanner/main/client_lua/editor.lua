@@ -5917,6 +5917,9 @@ do
 	local HOVER = magic.Color(0.2, 0.9, 1.0)
 	local DIG = magic.Color(1, 0.3, 0.2)
 	local PLACE = magic.Color(0.2, 1, 0.3)
+	-- What a right click does something to (user): a door's leaf to open
+	-- or shut
+	local RIGHT = magic.Color(1.0, 0.55, 0.1)
 
 	local function name_of(id)
 		local e = doc.ents[id]
@@ -5956,11 +5959,19 @@ do
 		-- At the pointer of a view with a crosshair, a click goes up into it
 		if crosshair_view() and not S.captured then
 			local walking = S.view == "walk"
-			return {hl = {}, left = walking and
+			local g = {hl = {}, left = walking and
 					"into the crosshair: walk, look and point (Esc: back)" or
 					"into the crosshair to dig and place (Esc: back)",
 					right = walking and "drag: turn" or nil,
 					middle = walking and "drag: walk" or nil}
+			-- A click on a door's leaf opens or shuts it (mouse_up)
+			local s = walking and pick_surface()
+			if s and s.side == "mat_leaf" and doc.ents[s.id] then
+				g.right = "click: " .. (open_amount(s.id) > 0 and "close " or
+						"open ") .. name_of(s.id) .. "; drag: turn"
+				g.hl[1] = {kind = "leaves", id = s.id, col = RIGHT}
+			end
+			return g
 		end
 		local g = {hl = {}}
 		local function hl(t)
@@ -5974,9 +5985,16 @@ do
 			g.right = plan_aligned() and "let go: back to the plan view" or
 					"turn it north-up to let go into the plan view"
 		elseif not S.captured then
-			g.right = (pick_surface() or not next(room_data)) and
+			local s = pick_surface()
+			g.right = (s or not next(room_data)) and
 					"drag: orbit round what the pointer is on" or
 					"drag: orbit round the middle of the plan"
+			-- A click on a door's leaf opens or shuts it (mouse_up)
+			if s and s.side == "mat_leaf" and doc.ents[s.id] then
+				g.right = "click: " .. (open_amount(s.id) > 0 and "close " or
+						"open ") .. name_of(s.id) .. "; " .. g.right
+				hl({kind = "leaves", id = s.id, col = RIGHT})
+			end
 			g.middle = "drag: pan the view"
 		end
 		local cur = default_material()
@@ -5999,6 +6017,9 @@ do
 			hl({kind = "instance", id = uid, col = PLACE})
 			if S.captured and S.tool ~= "voxel" then
 				g.right = what
+				-- The right button is the use key there: its colour
+				hl({kind = ukind == KIND.switch and "instance" or "leaves",
+						id = uid, col = RIGHT})
 			end
 		end
 		if S.calib then
@@ -6305,6 +6326,27 @@ do
 					outline(inst_data[h.id].foot, col)
 				else
 					inst_box(h.id, col)
+				end
+			elseif h.kind == "leaves" and inst_data[h.id] then
+				-- Each leaf's box, where it has swung to; a door with none
+				-- (an opening) has its own box
+				local leaves = inst_data[h.id].leaves or {}
+				if #leaves == 0 then
+					inst_box(h.id, col)
+				end
+				for _, lf in ipairs(leaves) do
+					local function V(i)
+						local x = i % 2 == 0 and lf.lo[1] or lf.hi[1]
+						local y = math.floor(i / 2) % 2 == 0 and lf.lo[2] or lf.hi[2]
+						local z = math.floor(i / 4) == 0 and lf.lo[3] or lf.hi[3]
+						local wx, wy, wz = geom.rot(x, y, z, 0, lf.yaw, 0)
+						return magic.Vector3(lf.x + wx, wy, lf.z + wz)
+					end
+					for _, e in ipairs({{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2},
+							{1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6},
+							{3, 7}}) do
+						debug:AddLine(V(e[1]), V(e[2]), col, false)
+					end
 				end
 			elseif h.kind == "image" and image_data[h.id] then
 				outline(image_data[h.id].foot, col)
