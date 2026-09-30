@@ -2484,11 +2484,12 @@ luanti.sub_player_pos(function(p)
 		-- mouse without one left a view that spun with a mouse the game
 		-- thought it had. The menu's Continue, or a click off it, is
 		-- that click. A touchscreen has no lock to ask for.
+		-- Wanted all the same: with the menu up that is only noted, and
+		-- the menu closing takes the mouse
 		if buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil and not keys.touch then
 			keys.open_pause()
-		else
-			set_mouse_in_world(true, "the first placement")
 		end
+		set_mouse_in_world(true, "the first placement")
 	end
 	log:info("the server put the player at " ..
 			string.format("%.1f, %.1f, %.1f", p.x, p.y, p.z) ..
