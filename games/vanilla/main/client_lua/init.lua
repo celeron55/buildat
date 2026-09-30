@@ -4181,6 +4181,14 @@ keys.on_key = function(key)
 		end
 		return
 	end
+	-- **A text field being typed in takes the keys** (user): a form's,
+	-- such as a creative inventory's search, or a page's; Esc still closes
+	-- what it is on
+	local focus = magic.ui.focusElement
+	if focus and focus:GetTypeName() == "LineEdit" and
+			key ~= magic.KEY_ESCAPE then
+		return
+	end
 	if luanti.key(key) then
 		return
 	end
