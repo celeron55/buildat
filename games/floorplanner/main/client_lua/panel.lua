@@ -304,14 +304,9 @@ function M.field(parent, label, value, on_finish, width, keep, step)
 	e:SetText(tostring(value))
 	if M.view_only then
 		e.editable = false
-		-- Read-only reads as such: grey under the white text, not the
-		-- near-black of a field to type into (user). A button's face in
-		-- the style's texture, since a colour only darkens what is there:
-		-- its middle alone, without the light edge, so the field sits in
-		-- the window like its text does
-		e.imageRect = magic.IntRect(22, 6, 26, 10)
-		e.border = magic.IntRect(0, 0, 0, 0)
-		e.imageBorder = magic.IntRect(0, 0, 0, 0)
+		-- Read-only reads as such (user): no field behind the text, which
+		-- is its own element and stays
+		e.color = magic.Color(1, 1, 1, 0)
 		return e, r
 	end
 	if type(value) == "number" then
