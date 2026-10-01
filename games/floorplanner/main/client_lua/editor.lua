@@ -1940,7 +1940,8 @@ function M.probes_tick()
 	end
 end
 -- One value for what is built in its own frame: the room it stands in, or
--- for a door or a window the darker of the two it is between
+-- for a door or a window the darker of the two it is between; and for
+-- those, the two, on the side of the frame's normal first
 function M.inst_occlusion(it)
 	local function at(x, z)
 		local id = room_at(x, z)
@@ -1952,7 +1953,7 @@ function M.inst_occlusion(it)
 		-- The darker of the two by the occ part (slot + occ, packed)
 		local a = at(it.x + f.nx * off, it.z + f.nz * off)
 		local b = at(it.x - f.nx * off, it.z - f.nz * off)
-		return (a % 1) >= (b % 1) and a or b
+		return (a % 1) >= (b % 1) and a or b, a, b
 	end
 	return at(it.x, it.z)
 end
@@ -1995,7 +1996,31 @@ local function build_layout(seen_voxels, wells)
 		return g, node
 	end
 	local function commit(g, material)
-		buildat.set_triangle_geometry(g.node, TRI_LISTS[g])
+		-- A door's or a window's face takes the room it is in front of, as
+		-- a wall's does (tri_occ_fn), by where it is in the layout's frame
+		-- with the node's turn about Y; one inside the wall, the side of
+		-- the wall it faces or, square to the wall in the opening, is on
+		local sides, list = M.tri_sides, TRI_LISTS[g]
+		if sides then
+			local d, o = g.node.direction, g.node.position
+			local dx, dz = d.x, d.z
+			for k = 0, #list - 36, 36 do
+				local nx, nz = list[k + 4], list[k + 6]
+				local wx, wz = nx * dz + nz * dx, nz * dz - nx * dx
+				local lx = (list[k + 1] + list[k + 13] + list[k + 25]) / 3
+				local lz = (list[k + 3] + list[k + 15] + list[k + 27]) / 3
+				local px = o.x + lx * dz + lz * dx
+				local pz = o.z + lz * dz - lx * dx
+				local id = room_at((px + wx * 0.05) * 1000, (pz + wz * 0.05) * 1000)
+				local s = wx * sides.nx + wz * sides.nz
+				if math.abs(s) <= 0.01 then
+					s = (px * 1000 - sides.x) * sides.nx + (pz * 1000 - sides.z) * sides.nz
+				end
+				local occ = id and M.room_occ[id] or (s > 0 and sides.a or sides.b)
+				list[k + 12], list[k + 24], list[k + 36] = occ, occ, occ
+			end
+		end
+		buildat.set_triangle_geometry(g.node, list)
 		TRI_LISTS[g] = nil
 		local cg = g.node:GetComponent("CustomGeometry")
 		cg:SetMaterial(0, material)
@@ -2166,7 +2191,13 @@ local function build_layout(seen_voxels, wells)
 	for id, it in pairs(inst_data) do
 		local def = doc.ents[it.def].ints
 		local e = doc.ents[id].ints
-		M.tri_occ = M.inst_occlusion(it)
+		local occ, a, b = M.inst_occlusion(it)
+		M.tri_occ = occ
+		-- A door's or a window's faces each their own room (commit):
+		-- the darker one's was black on the lit side of a door to a room
+		-- with no window and its lamp off
+		M.tri_sides = a and {a = a, b = b, nx = it.frame.nx, nz = it.frame.nz,
+				x = it.x, z = it.z}
 		if it.hosted then
 			build_hosted(id, it, def, e, geometry, commit)
 			-- A window and a shut door are in the way; an open door is not
@@ -2221,7 +2252,7 @@ local function build_layout(seen_voxels, wells)
 			end
 		end
 	end
-	M.tri_occ, M.tri_occ_fn = 0, occ_fn
+	M.tri_occ, M.tri_occ_fn, M.tri_sides = 0, occ_fn, nil
 	-- A floor is something to stand on, when walking up to another layout
 	for _, r in pairs(room_data) do
 		for _, pts in ipairs(r.floor or {}) do
