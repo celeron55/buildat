@@ -203,10 +203,13 @@ vec2 TreeRow(vec2 p, float cell0, float lo, float hi, float seed, float aa,
         float y = p.y / h;
         float in_tree;
         if(pine < 0.5){
-            // Spruce: narrowing to the top, each of five tiers flaring
-            // out at its foot
+            // Spruce: as wide at the foot as ever, its side rising almost
+            // upright and leaning in the more the higher it is, to a blunt
+            // top (user: bulbous, not a triangle); each of five tiers
+            // flaring out at its foot
             float tier = fract(y * 5.0 + SkyHash(vec2(id, seed + 4.0)));
-            float hw = h * 0.21 * (1.0 - y) * (0.72 + 0.28 * tier);
+            float hw = h * 0.21 * (1.0 - pow(clamp(y, 0.0, 1.0), 1.8)) *
+                    (0.72 + 0.28 * tier);
             in_tree = (1.0 - smoothstep(hw - aa, hw + aa, dx)) *
                     (1.0 - smoothstep(1.0 - aa / h, 1.0, y));
         } else {
