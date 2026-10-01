@@ -85,6 +85,11 @@ return function(doc)
 	-- phone folds the palette and the properties away, and a step that
 	-- needs one says so while it is folded
 	local touch = buildat.get_env("BUILDAT_TOUCH") == "1"
+	-- A key's name as bound now (keys.lua)
+	local function k(action)
+		local e = ed()
+		return e and e.keys and e.keys.name(action) or "?"
+	end
 	local function click(t)
 		if not touch then
 			return t
@@ -115,10 +120,10 @@ return function(doc)
 		{"A plan opens for viewing, so nothing changes by accident. Press " ..
 				"Start editing at the end of the toolbar.",
 				function() return doc.can("edit") end},
-		{"Go to the plan view: choose 2D (F1) in the view dropdown at the " ..
-				"left of the toolbar.",
+		{function() return "Go to the plan view: choose 2D (" .. k("view_2d") ..
+				") in the view dropdown at the left of the toolbar." end,
 				function() return S().view == "2d" end},
-		{function() return click("Draw a room: pick Room (R) in the " ..
+		{function() return click("Draw a room: pick Room (" .. k("room") .. ") in the " ..
 				"toolbar, then click its corners on the floor. Click the " ..
 				"first corner again, or press Enter, to close it. The room " ..
 				"gets walls and a lamp on its ceiling.") end,
@@ -145,7 +150,7 @@ return function(doc)
 					return false
 				end},
 		{function() return click("A door in the wall between the rooms: " ..
-				"pick Door/window (I), check that Kind in its panel says " ..
+				"pick Door/window (" .. k("hosted") .. "), check that Kind in its panel says " ..
 				"Door, and click on the wall.") .. props() end,
 				function() return #instances(3) >= 1 end},
 		{function() return click("A window: with Door/window still picked, " ..
@@ -153,7 +158,7 @@ return function(doc)
 				"wall.") .. props() end,
 				function() return #instances(4) >= 1 end},
 		{function() return click("A linked clone shares its shape with the " ..
-				"original: pick Select (V), click the window, press Linked " ..
+				"original: pick Select (" .. k("select") .. "), click the window, press Linked " ..
 				"clone in its panel (Ctrl+L), then click another wall.") ..
 				props() end,
 				function()
@@ -166,7 +171,7 @@ return function(doc)
 					end
 					return false
 				end},
-		{function() return click("A dresser: pick Object (O) and drag its " ..
+		{function() return click("A dresser: pick Object (" .. k("box") .. ") and drag its " ..
 				"footprint on the floor against a wall, about 1 m by 0.5 m. " ..
 				"Then type a height of 800 in the panel's Height mm.") ..
 				props() end,
@@ -182,7 +187,8 @@ return function(doc)
 		{function() return click("Build the lamp from voxels on the " ..
 				"dresser: click the Lamp entry in the palette (the ceiling " ..
 				"lamps made it), pick " ..
-				"Voxels (K) and go to 3D (the view dropdown, or F2). Click " ..
+				"Voxels (" .. k("voxel") .. ") and go to 3D (the view dropdown, or " ..
+				k("view_3d") .. "). Click " ..
 				"the dresser's top to start a volume there, then click on " ..
 				"its voxels for more. The panel's Click says whether a click " ..
 				"places, digs or paints.") .. palette() .. props() end,
@@ -194,8 +200,8 @@ return function(doc)
 					end
 					return false
 				end},
-		{function() return click("A switch for it: in 2D (F1), pick " ..
-				"Door/window (I), set Kind to Switch and click a wall. Then " ..
+		{function() return click("A switch for it: in 2D (" .. k("view_2d") .. "), pick " ..
+				"Door/window (" .. k("hosted") .. "), set Kind to Switch and click a wall. Then " ..
 				"click the switch to select it, press \"Link lamps\" in its " ..
 				"panel, " ..
 				"click the lamp and press Done linking.") .. props() end,
@@ -207,7 +213,7 @@ return function(doc)
 				end},
 		{function() return click("Stairs: click the drywall entry in the " ..
 				"palette (what is made gets the entry chosen), pick Object " ..
-				"(O), set Shape to stairs in its panel and drag their " ..
+				"(" .. k("box") .. "), set Shape to stairs in its panel and drag their " ..
 				"footprint in a room. They climb along their depth.") ..
 				props() end,
 				function() return #instances(6) >= 1 end},
@@ -234,12 +240,15 @@ return function(doc)
 				function() return S().layout == ground() end},
 		{function() return touch and "Walk in the house: choose Walk in the " ..
 				"view dropdown. A finger at the lower left walks, another " ..
-				"turns the view." or "Walk in the house: choose Walk (F3) " ..
-				"in the view dropdown. W, A, S and D walk; drag with the " ..
+				"turns the view." or "Walk in the house: choose Walk (" ..
+				k("view_walk") .. ") in the view dropdown. " .. k("forward") ..
+				", " .. k("left") .. ", " .. k("back") .. " and " .. k("right") ..
+				" walk; drag with the " ..
 				"right mouse button to turn." end,
 				function() return S().view == "walk" end},
 		{function() return touch and "Open the door: walk to it and tap it." or
-				"Open the door: point at it and press E (or right click it)."
+				"Open the door: point at it and press " .. k("use") ..
+				" (or right click it)."
 				end,
 				function()
 					for _, d in ipairs(instances(3)) do
@@ -249,7 +258,8 @@ return function(doc)
 					return false
 				end},
 		{function() return touch and "Switch the lamp: tap the switch on the " ..
-				"wall." or "Switch the lamp: point at the switch and press E." end,
+				"wall." or "Switch the lamp: point at the switch and press " ..
+				k("use") .. "." end,
 				function() return lamps_state() ~= mark.lamps end,
 				function() mark.lamps = lamps_state() end},
 		{function() return click("Switch the lamp on again if it is off. " ..

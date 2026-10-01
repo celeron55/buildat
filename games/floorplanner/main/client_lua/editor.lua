@@ -21,8 +21,11 @@ local function load(name)
 end
 local geom = load("geom.lua")
 local panel = load("panel.lua")
+local keys = load("keys.lua")
 
 local M = {}
+-- init.lua's chat key, and its way past the T while a key is being bound
+M.keys = keys
 local doc
 M.daylight = load("daylight.lua")
 
@@ -39,8 +42,6 @@ local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk"}
 -- A step takes a stair's riser, which building codes cap near 220 mm.
 local BODY_R, STEP, HEAD = 250, 250, 1750
 local JUSTIFY_CHOICES = {{"centered", 0}, {"left", 1}, {"right", 2}}
-local TOOL_KEYS = {select = "V", node = "N", wall = "B", room = "R",
-	box = "O", hosted = "I", voxel = "K", paint = "M"}
 -- What a definition is, as main.cpp's DefKind
 local KIND = {box = 0, voxel = 1, opening = 2, door = 3, window = 4,
 	switch = 5, stairs = 6}
@@ -4115,7 +4116,8 @@ local function build_toolbar()
 	add("Menu", S.touch and nil or "Esc", function() M.open_pause() end)
 	local views = {}
 	for i, v in ipairs({"2d", "3d", "walk"}) do
-		views[i] = {VIEW_NAMES[v] .. (S.touch and "" or " (F" .. i .. ")"), v}
+		views[i] = {VIEW_NAMES[v] .. (S.touch and "" or
+				" (" .. keys.name("view_" .. v) .. ")"), v}
 	end
 	place(function(parent)
 		return panel.dropdown(parent, nil, views, S.view, set_view, 40)
@@ -4132,7 +4134,7 @@ local function build_toolbar()
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Object"},
 			{"hosted", "Door/window"}, {"voxel", "Voxels"}, {"paint", "Material"}}) do
 		if t[1] == "select" or doc.can("edit") then
-			add(t[2], TOOL_KEYS[t[1]], function() set_tool(t[1]) end,
+			add(t[2], keys.name(t[1]), function() set_tool(t[1]) end,
 					S.tool == t[1])
 		end
 	end
@@ -4290,7 +4292,8 @@ local function build_props()
 		panel.label(props, "drop one on another to merge;")
 		panel.label(props, "double click an edge: a node into it")
 		if n > 0 then
-			panel.button(props, "Delete (Del)", delete_selected)
+			panel.button(props, "Delete (" .. keys.name("delete") .. ")",
+				delete_selected)
 		end
 	elseif count > 1 then
 		panel.label(props, count .. " selected")
@@ -4302,10 +4305,12 @@ local function build_props()
 				M.room_buttons(a, b)
 			end
 		end
-		panel.button(props, "Turn left (Z)", function()
+		panel.button(props, "Turn left (" .. keys.name("turn_left") .. ")",
+				function()
 			rotate_selection(angle_step())
 		end)
-		panel.button(props, "Turn right (X)", function()
+		panel.button(props, "Turn right (" .. keys.name("turn_right") .. ")",
+				function()
 			rotate_selection(-angle_step())
 		end)
 		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
@@ -4313,7 +4318,8 @@ local function build_props()
 			copy_selected(true)
 		end)
 		panel.button(props, "Apply the palette entry", apply_material)
-		panel.button(props, "Delete (Del)", delete_selected)
+		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
+				delete_selected)
 	elseif sel and sel.type == "instance" and sel.ints.host ~= 0 then
 		local i = sel.ints
 		local p = doc.ents[i.def].ints
@@ -4417,7 +4423,8 @@ local function build_props()
 		if links > 1 then
 			panel.button(props, "Unlink", function() unlink(sel.id) end)
 		end
-		panel.button(props, "Delete (Del)", delete_selected)
+		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
+				delete_selected)
 	elseif sel and sel.type == "instance" and
 			doc.ents[sel.ints.def].ints.kind == KIND.voxel then
 		local i = sel.ints
@@ -4458,7 +4465,8 @@ local function build_props()
 			S.replace = {def = i.def, to = default_material()}
 			refresh_panels()
 		end)
-		panel.label(props, "Voxel tool (K): a click places, Ctrl+click")
+		panel.label(props, "Voxel tool (" .. keys.name("voxel") ..
+				"): a click places, Ctrl+click")
 		panel.label(props, "digs, Shift+click gives a voxel the entry")
 		if S.tool == "voxel" then
 			M.voxel_mode_dropdown()
@@ -4470,7 +4478,8 @@ local function build_props()
 		if links > 1 then
 			panel.button(props, "Unlink", function() unlink(sel.id) end)
 		end
-		panel.button(props, "Delete (Del)", delete_selected)
+		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
+				delete_selected)
 	elseif sel and sel.type == "instance" then
 		local i = sel.ints
 		local def = doc.ents[i.def]
@@ -4579,7 +4588,8 @@ local function build_props()
 			panel.button(props, "Unlink", function() unlink(sel.id) end)
 		end
 		panel.button(props, "Apply the palette entry", apply_material)
-		panel.button(props, "Delete (Del)", delete_selected)
+		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
+				delete_selected)
 	elseif sel and sel.type == "wall" then
 		local w = sel.ints
 		local ax, az = node_pos(w.a)
@@ -4615,7 +4625,8 @@ local function build_props()
 		panel.button(props, "The palette entry on both faces", function()
 			apply_material(true)
 		end)
-		panel.button(props, "Delete (Del)", delete_selected)
+		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
+				delete_selected)
 	elseif sel and sel.type == "image" then
 		local i = sel.ints
 		panel.label(props, "Picture: " .. sel.strs.file)
@@ -4655,7 +4666,8 @@ local function build_props()
 		panel.check(props, "Shown in 3D too", i.show3d == 1, function()
 			set(sel.id, {ints = {show3d = 1 - i.show3d}})
 		end)
-		panel.button(props, "Delete (Del)", delete_selected)
+		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
+				delete_selected)
 	elseif sel and sel.type == "room" then
 		local r = room_data[sel.id]
 		panel.label(props, "Room " .. sel.id)
@@ -4674,12 +4686,14 @@ local function build_props()
 		panel.button(props, "The palette entry on the " .. (on_ceiling and
 				"ceiling" or "floor") .. " (double click)",
 				function() apply_material() end)
-		panel.button(props, "Delete (Del)", delete_selected)
+		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
+				delete_selected)
 	elseif sel and sel.type == "node" then
 		panel.label(props, "Node " .. sel.id)
 		int_field(sel.id, "X mm", "x", sel.ints.x)
 		int_field(sel.id, "Z mm", "z", sel.ints.z)
-		panel.button(props, "Delete (Del)", delete_selected)
+		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
+				delete_selected)
 	elseif S.tool == "hosted" then
 		panel.label(props, "Click a wall to put in (I: the next):")
 		local kinds = {}
@@ -5371,7 +5385,7 @@ do
 			for i, g in ipairs(GRID_STEPS) do
 				grids[i] = {M.grid_text(g), g}
 			end
-			panel.dropdown(w, "Grid (G)", grids, grid_step(), function(g)
+			panel.dropdown(w, "Grid (" .. keys.name("grid") .. ")", grids, grid_step(), function(g)
 				send({{op = "set", ent = {id = sid, ints = {grid = g}}}})
 				st.grid = g
 				plan_settings_page()
@@ -5489,13 +5503,59 @@ do
 	end
 
 	-- **This client's own settings**, kept here and nobody else's
+	-- **The keys** (user: a key mapping menu like vanilla's): a row per
+	-- action, its key a button; pressed, the next key down binds it --
+	-- Escape leaves it, Backspace puts the default back. A key bound to
+	-- two actions shows red on both, and either can be the one it does.
+	-- Saved at once, in this client's storage (keys.lua).
+	local function keys_page()
+		local w = dialog("Keys")
+		panel.label(w, "Press a key's button, then the new key.")
+		panel.label(w, "Escape leaves it, Backspace puts back the default.")
+		local cols = panel.row(w)
+		local half = math.ceil(#keys.BINDINGS / 2)
+		local col = panel.column(cols)
+		for i, b in ipairs(keys.BINDINGS) do
+			if i == half + 1 then
+				col = panel.column(cols)
+			end
+			local r = panel.row(col)
+			panel.label(r, b.what):SetFixedWidth(230)
+			if b.action then
+				local bt = panel.button(r, S.binding == b.action and "Press a key..." or
+						keys.name(b.action), function()
+					S.binding = b.action
+					keys_page()
+				end, S.binding == b.action, 110)
+				bt:SetFixedWidth(110)
+				if keys.taken(b) then
+					bt:GetChild(0):SetColor(magic.Color(1.0, 0.35, 0.3))
+				end
+			else
+				panel.label(r, b.name, magic.Color(0.7, 0.7, 0.7)):SetFixedWidth(110)
+			end
+		end
+		local r = panel.row(w)
+		panel.button(r, "Defaults", function()
+			S.binding = nil
+			keys.defaults()
+			refresh_panels()
+			keys_page()
+		end)
+		panel.button(r, "Back", function()
+			S.binding = nil
+			open_pause()
+		end)
+	end
+	M.keys_page = keys_page
+
 	local function client_settings_page()
 		local w = dialog("Client settings")
 		local angles = {}
 		for i = 1, #ANGLE_STEPS do
 			angles[i] = {M.angle_text(i), i}
 		end
-		panel.dropdown(w, "Angle (H)", angles, S.angle, function(i)
+		panel.dropdown(w, "Angle (" .. keys.name("angle") .. ")", angles, S.angle, function(i)
 			S.angle = i
 			client_settings_page()
 		end)
@@ -5542,7 +5602,8 @@ do
 			set_view(S.view)
 			client_settings_page()
 		end)
-		panel.check(w, "The plan in flat colours (L)", S.plan_look, function()
+		panel.check(w, "The plan in flat colours (" .. keys.name("flat") .. ")",
+				S.plan_look, function()
 			S.plan_look = not S.plan_look
 			set_view(S.view)
 			client_settings_page()
@@ -5769,6 +5830,7 @@ do
 		end)
 		panel.button(w, "Plan settings...", plan_settings_page)
 		panel.button(w, "Client settings...", client_settings_page)
+		panel.button(w, "Keys...", keys_page)
 		panel.button(w, "Chat...", function()
 			account_page(doc.accounts.chat_page)
 		end)
@@ -7285,7 +7347,27 @@ do
 		end
 	end
 
+	-- A key being bound takes the next key ([the keys page])
+	function M.capture_key(key)
+		local action = S.binding
+		if not action then
+			return false
+		end
+		S.binding = nil
+		if key == magic.KEY_BACKSPACE then
+			keys.set(action, nil)
+		elseif key ~= magic.KEY_ESCAPE then
+			keys.set(action, key)
+		end
+		refresh_panels()
+		M.keys_page()
+		return true
+	end
+
 	function M.key_down(key, event_data)
+		if M.capture_key(key) then
+			return
+		end
 		local qualifiers = event_data and event_data:GetInt("Qualifiers") or 0
 		local ctrl = qualifiers % 4 >= 2
 		-- Alt with anything is the window manager's: Alt+Tab switches windows,
@@ -7323,57 +7405,56 @@ do
 			end
 			return
 		end
+		local function is(action)
+			return key == keys.key(action)
+		end
 		if key == magic.KEY_ESCAPE then
 			M.escape()
 		elseif S.paused then
 			-- The pause menu takes the keys
-		elseif key == magic.KEY_F and S.view == "walk" then
+		elseif is("noclip") and S.view == "walk" then
 			S.walk.noclip = not S.walk.noclip
-			doc.notice(S.walk.noclip and "Noclip: walls do not stop you; Space and C"
-					.. " go up and down" or "Noclip off")
-		elseif key == magic.KEY_E then
+			doc.notice(S.walk.noclip and "Noclip: walls do not stop you; " ..
+					keys.name("up") .. " and " .. keys.name("down") ..
+					" go up and down" or "Noclip off")
+		elseif is("use") then
 			use()
-		elseif key == magic.KEY_U then
+		elseif is("next_user") then
 			go_to_next_user()
-		elseif key == magic.KEY_L then
+		elseif is("flat") then
 			S.plan_look = not S.plan_look
 			set_view(S.view)
-		elseif key == magic.KEY_F1 then
+		elseif is("view_2d") then
 			set_view("2d")
-		elseif key == magic.KEY_F2 then
+		elseif is("view_3d") then
 			set_view("3d")
-		elseif key == magic.KEY_F3 then
+		elseif is("view_walk") then
 			set_view("walk")
-		elseif key == magic.KEY_Z then
+		elseif is("turn_left") then
 			rotate_selection(angle_step())
-		elseif key == magic.KEY_X then
+		elseif is("turn_right") then
 			rotate_selection(-angle_step())
-		elseif key == magic.KEY_V then
-			set_tool("select")
-		elseif key == magic.KEY_N then
-			set_tool("node")
-		elseif key == magic.KEY_B then
-			set_tool("wall")
-		elseif key == magic.KEY_R then
-			set_tool("room")
-		elseif key == magic.KEY_O then
-			set_tool("box")
-		elseif key == magic.KEY_K then
-			set_tool("voxel")
-		elseif key == magic.KEY_I then
+		elseif is("hosted") then
 			-- Again: the next of opening, door and window
 			if S.tool == "hosted" then
 				S.hosted = NEXT_HOSTED[S.hosted]
 			end
 			set_tool("hosted")
-		elseif key == magic.KEY_M then
-			set_tool("paint")
-		elseif key == magic.KEY_G then
+		elseif is("select") or is("node") or is("wall") or is("room") or
+				is("box") or is("voxel") or is("paint") then
+			for _, t in ipairs({"select", "node", "wall", "room", "box",
+					"voxel", "paint"}) do
+				if is(t) then
+					set_tool(t)
+					break
+				end
+			end
+		elseif is("grid") then
 			next_grid()
-		elseif key == magic.KEY_H then
+		elseif is("angle") then
 			S.angle = S.angle % #ANGLE_STEPS + 1
 			refresh_panels()
-		elseif key == magic.KEY_DELETE then
+		elseif is("delete") then
 			delete_selected()
 		end
 	end
@@ -7455,8 +7536,8 @@ do
 		if w.noclip then
 			w.x, w.z = w.x + dx, w.z + dz
 			local u = 0
-			if input:GetKeyDown(magic.KEY_SPACE) then u = u + 1 end
-			if input:GetKeyDown(magic.KEY_C) then u = u - 1 end
+			if keys.down("up") then u = u + 1 end
+			if keys.down("down") then u = u - 1 end
 			w.feet = w.feet + u * speed
 		else
 			w.x, w.z, w.feet = collide(w.x + dx, w.z + dz, w.feet)
@@ -7482,10 +7563,10 @@ local function move_camera(dt)
 		return
 	end
 	local f, r, u = 0, 0, 0
-	if input:GetKeyDown(magic.KEY_W) then f = f + 1 end
-	if input:GetKeyDown(magic.KEY_S) then f = f - 1 end
-	if input:GetKeyDown(magic.KEY_D) then r = r + 1 end
-	if input:GetKeyDown(magic.KEY_A) then r = r - 1 end
+	if keys.down("forward") then f = f + 1 end
+	if keys.down("back") then f = f - 1 end
+	if keys.down("right") then r = r + 1 end
+	if keys.down("left") then r = r - 1 end
 	if S.view == "2d" then
 		local k = S.span * dt
 		S.cx = S.cx + r * k
@@ -7499,8 +7580,8 @@ local function move_camera(dt)
 		walk(dt, f, r)
 		return
 	end
-	if input:GetKeyDown(magic.KEY_SPACE) then u = u + 1 end
-	if input:GetKeyDown(magic.KEY_C) then u = u - 1 end
+	if keys.down("up") then u = u + 1 end
+	if keys.down("down") then u = u - 1 end
 	local speed = (S.shift and 12 or 4) * dt
 	local yaw = math.rad(S.yaw)
 	S.pos = {x = S.pos.x + (math.sin(yaw) * f + math.cos(yaw) * r) * speed,
@@ -7984,7 +8065,7 @@ do
 		-- ([FP_TOUCH] 4); the mouse's other buttons are its gestures
 		local names = S.touch and {{"left", "Tap"}, {"use", "Hold"}} or
 				{{"left", "Left"}, {"right", "Right"}, {"middle", "Middle"},
-				{"use", "E"}}
+				{"use", keys.name("use")}}
 		for _, b in ipairs(names) do
 			local t = g[b[1]]
 			-- A finger's drag on nothing moves the view, not a box

@@ -1144,7 +1144,9 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		end
 		return
 	end
-	if key == magic.KEY_T and editor then
+	if editor and editor.capture_key(key) then
+		return
+	elseif editor and key == editor.keys.key("chat") then
 		chat_pending = true
 	elseif key == magic.KEY_ESCAPE and not editor then
 		buildat.leave()
