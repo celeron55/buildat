@@ -703,7 +703,7 @@ local KIND_DEFAULTS = {
 local function kind_preview(k)
 	local p = {color = 0xffffff, finish = 0, opacity = 500, reflect = 0,
 		seed = 0, axis = 0, stagger = 0, grout = 3, temperature = 2700,
-		brightness = 100, speckle = 300, angle = 0, contrast = 1000, polish = 500,
+		brightness = 1000, speckle = 300, angle = 0, contrast = 1000, polish = 500,
 		gap_depth = 15, gap_width = 60, handmade = 0, kind = k}
 	for f, v in pairs(KIND_DEFAULTS[k]) do
 		p[f] = v
@@ -781,7 +781,8 @@ local function palette_texture()
 				(p.seed % 256) / 255)
 		local knob = 0
 		if p.kind == 4 then
-			knob = p.brightness / 1000
+			-- 0 to 1000 %, as its square root for the steps
+			knob = math.sqrt(p.brightness / 10000)
 		elseif p.kind == 7 then
 			knob = math.min(1, p.grout / p.scale * 4)
 		elseif p.kind == 9 then
@@ -1512,12 +1513,11 @@ do
 		local light = node:CreateComponent("Light")
 		light.lightType = magic.LIGHT_POINT
 		light.color = rgb_color(kelvin_rgb(p.temperature))
+		-- 1 is 100 %, a lamp's beside the sun (user, 2026-10-02); in
+		-- proportion to it, as the lamp's surface is (Palette.glsl)
 		local b = p.brightness / 1000
-		-- At vanilla's lamp radiance, beside the sun's; in proportion to
-		-- the brightness, as the lamp's surface is (Palette.glsl), 10 %
-		-- where it was (user, 2026-10-02: 10 % is a lamp's beside the sun)
-		light.brightness = 6.5 * b * M.daylight.PHYS.lamp
-		light.range = 2 + 8 * b
+		light.brightness = 0.65 * b * M.daylight.PHYS.lamp
+		light.range = 2 + 0.8 * b
 end
 
 -- The lamps that are on: each connected region of a volume's lamp voxels

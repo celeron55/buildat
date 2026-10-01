@@ -406,7 +406,7 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"stagger", 0, 1, 0},      // tiles
 		{"grout", 0, 100, 3},      // mm
 		{"temperature", 1000, 12000, 2700}, // a lamp's, in kelvin
-		{"brightness", 0, 1000, 100}, // a lamp's; 100 beside the sun
+		{"brightness", 0, 10000, 1000}, // a lamp's, 0.1 %: 100 % beside the sun
 		{"speckle", 0, 1000, 300}, // plaster
 		{"angle", 0, 179, 0},      // paneling's boards, 0 horizontal, 90 vertical
 		{"contrast", 0, 3000, 1000}, // wood's grain, 1000 as it always was

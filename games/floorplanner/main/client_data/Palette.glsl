@@ -265,12 +265,13 @@ void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float po
         nat = mix(base, second, on);
     } else if (kind < 4.5) {
         // Lamp: its own light, in its colour, in proportion to the
-        // brightness as the light it casts is (editor.lua's lamp_light):
-        // radiance under PBR, 10 % as 30 % was when the gamma took the
-        // brightness with the colour (user, 2026-10-02: 10 % is a lamp's
-        // beside the sun); and as bright in the plain look
-        emissive = cPbr > 0.5 ? pow(max(base, vec3(0.0)), vec3(2.2)) * param * 119.0 :
-                base * param * 12.0;
+        // brightness as the light it casts is (editor.lua's lamp_light;
+        // 1 is 100 %, a lamp's beside the sun, packed as its square root
+        // over ten): radiance under PBR, a lit fixture's; and as bright in
+        // the plain look (user, 2026-10-02)
+        float b = param * param * 10.0;
+        emissive = cPbr > 0.5 ? pow(max(base, vec3(0.0)), vec3(2.2)) * b * 36.0 :
+                base * b * 1.2;
     } else if (kind < 5.5) {
         // Glass: a tint and how much it lets through
         alpha = opacity;
