@@ -264,8 +264,13 @@ void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float po
                     0.3 * Noise3(vec3(uv * 4.0, seed)));
         nat = mix(base, second, on);
     } else if (kind < 4.5) {
-        // Lamp: its own light, in its colour
-        emissive = base * param * 4.0;
+        // Lamp: its own light, in its colour, in proportion to the
+        // brightness as the light it casts is (editor.lua's lamp_light):
+        // radiance under PBR, 10 % as 30 % was when the gamma took the
+        // brightness with the colour (user, 2026-10-02: 10 % is a lamp's
+        // beside the sun); and as bright in the plain look
+        emissive = cPbr > 0.5 ? pow(max(base, vec3(0.0)), vec3(2.2)) * param * 119.0 :
+                base * param * 12.0;
     } else if (kind < 5.5) {
         // Glass: a tint and how much it lets through
         alpha = opacity;
@@ -721,7 +726,6 @@ void PS()
     if (cPbr > 0.5)
     {
         albedo = pow(max(albedo, vec3(0.0)), vec3(2.2));
-        emissive = pow(max(emissive, vec3(0.0)), vec3(2.2)) * 8.0;
         ambientShare = 1.0 - SkyOcc();
         bounce = RoomBounce();
         // A face sees the sky by which way it is turned: all of it facing

@@ -703,7 +703,7 @@ local KIND_DEFAULTS = {
 local function kind_preview(k)
 	local p = {color = 0xffffff, finish = 0, opacity = 500, reflect = 0,
 		seed = 0, axis = 0, stagger = 0, grout = 3, temperature = 2700,
-		brightness = 500, speckle = 300, angle = 0, contrast = 1000, polish = 500,
+		brightness = 100, speckle = 300, angle = 0, contrast = 1000, polish = 500,
 		gap_depth = 15, gap_width = 60, handmade = 0, kind = k}
 	for f, v in pairs(KIND_DEFAULTS[k]) do
 		p[f] = v
