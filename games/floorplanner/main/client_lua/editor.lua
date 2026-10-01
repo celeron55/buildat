@@ -6021,10 +6021,13 @@ do
 			panel.view_only = false
 			local r = panel.row(w)
 			panel.label(r, v.walk == 1 and "Walking" or "3D")
-			panel.keep(function() return panel.button(r, "Go to", function()
-				close_pause()
-				M.go_viewport(e.id)
-			end) end)
+			-- (user) The camera there, the menu left open; Go to below goes
+			-- to the one previewed
+			panel.keep(function() return panel.button(r, "Preview", function()
+				M.previewed = e.id
+				M.go_viewport(e.id, true)
+				viewports_page()
+			end, M.previewed == e.id) end)
 			if edit then
 				if S.view ~= "2d" and not S.vp then
 					panel.button(r, "Use this camera", function()
@@ -6064,7 +6067,16 @@ do
 			panel.view_only = false
 			panel.label(w, " ")
 		end
-		panel.button(w, "Back", function() open_pause() end)
+		local br = panel.row(w)
+		panel.button(br, "Back", function() open_pause() end)
+		local pv = M.previewed and doc.ents[M.previewed]
+		if pv then
+			panel.keep(function() return panel.button(br, "Go to " ..
+					pv.strs.name, function()
+				close_pause()
+				M.go_viewport(pv.id)
+			end) end)
+		end
 	end
 
 	local function client_settings_page()
@@ -9402,7 +9414,8 @@ function M.show_ui()
 	end
 end
 
-function M.go_viewport(id)
+-- preview: the camera only, the menus and the selection as they are
+function M.go_viewport(id, preview)
 	local e = doc.ents[id]
 	if not e or e.type ~= "viewport" then
 		return
@@ -9413,9 +9426,12 @@ function M.go_viewport(id)
 	S.vp = nil
 	set_view("3d")
 	S.vp = id
-	S.sel, S.sel_face, S.primary, S.nodes = {}, {}, nil, {}
 	S.daylight_key = nil
 	S.dirty = true
+	if preview then
+		return
+	end
+	S.sel, S.sel_face, S.primary, S.nodes = {}, {}, nil, {}
 	refresh_panels()
 	M.hide_ui()
 end
