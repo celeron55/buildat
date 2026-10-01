@@ -8982,7 +8982,11 @@ do
 				what = (open_amount(uid) > 0 and "close " or "open ") .. name_of(uid)
 			end
 			g.use = what
-			hl({kind = "instance", id = uid, col = PLACE})
+			-- (not with no tool, where only what the right button uses
+			-- shows, in its colour: user, 2026-10-02)
+			if S.tool then
+				hl({kind = "instance", id = uid, col = PLACE})
+			end
 			if S.captured and S.tool ~= "voxel" then
 				g.right = what
 				-- The right button is the use key there: its colour
