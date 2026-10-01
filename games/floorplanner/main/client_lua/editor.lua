@@ -2239,6 +2239,7 @@ place.layers = {}
 
 -- simplified: every layout is rebuilt on any change
 rebuild = function()
+	M.build_gen = M.build_gen + 1
 	palette_texture()
 	M.build_ground()
 	for _, n in ipairs(built) do
@@ -7922,6 +7923,9 @@ crosshair.priority = -10
 
 -- A text over a place in the world, for this frame
 local label_i = 0
+-- The text each label was last set to (on M: the chunk is at Lua's
+-- limit of 200 locals)
+M.label_texts = {}
 local function world_label(x_mm, y_mm, z_mm, text)
 	label_i = label_i + 1
 	local t = label_nodes[label_i]
@@ -7935,10 +7939,16 @@ local function world_label(x_mm, y_mm, z_mm, text)
 	end
 	local cam = S.view == "2d" and cam2d or cam3d
 	local p = cam:WorldToScreenPoint(magic.Vector3(W(x_mm), W(y_mm), W(z_mm)))
-	t:SetText(text)
+	-- Set only when it changes: a text set is laid out again (user: a big
+	-- plan panned slowly in Firefox)
+	if M.label_texts[label_i] ~= text then
+		M.label_texts[label_i] = text
+		t:SetText(text)
+	end
 	t.visible = true
-	t:SetPosition(math.floor(p.x * magic.ui.root.width) + 8,
-			math.floor(p.y * magic.ui.root.height) - 18)
+	local root = magic.ui.root
+	t:SetPosition(math.floor(p.x * root.width) + 8,
+			math.floor(p.y * root.height) - 18)
 end
 
 local function mm_text(v)
@@ -8540,21 +8550,38 @@ do
 	end
 end
 
+-- **What the plan view draws that changes only with the plan or the zoom**
+-- (user, 2026-10-01: panning a big plan in Firefox was slow; the dashes
+-- over what is above the cut alone were some 2000 debug lines a frame,
+-- each two sandboxed vectors): the walls and objects above the cut, the
+-- objects' outlines and the doors' and windows' symbols, as a line list on
+-- a node, made again when the plan, the zoom, the cut or the floor edited
+-- change. Drawn a frame at a time as before during a drag, which moves
+-- things without a rebuild, and on a client without set_line_geometry.
+local plan_lines_node = scene:CreateChild("PlanLines")
+-- And the grid, over three times the view each way, made again when the
+-- view leaves that or the step changes
+local grid_node = scene:CreateChild("PlanGrid")
+M.build_gen = 0
+
 local function draw_overlay()
 	local y = S.view == "2d" and W(settings().cut) - 0.001 or 0.004
+	plan_lines_node.enabled = false
+	grid_node.enabled = false
 	local function P(x, z, yy)
 		return magic.Vector3(W(x), yy or y, W(z))
 	end
 	local function line(ax, az, bx, bz, col)
 		debug:AddLine(P(ax, az), P(bx, bz), col, false)
 	end
-	local function dashed(pts, col)
+	local function dashed(pts, col, ln)
+		ln = ln or line
 		for i = 1, #pts do
 			local p, q = pts[i], pts[i % #pts + 1]
 			local l = geom.len(q[1] - p[1], q[2] - p[2])
 			local n = math.max(1, math.floor(l / (6 * mm_per_px())))
 			for j = 0, n - 1, 2 do
-				line(p[1] + (q[1] - p[1]) * j / n, p[2] + (q[2] - p[2]) * j / n,
+				ln(p[1] + (q[1] - p[1]) * j / n, p[2] + (q[2] - p[2]) * j / n,
 						p[1] + (q[1] - p[1]) * (j + 1) / n,
 						p[2] + (q[2] - p[2]) * (j + 1) / n, col)
 			end
@@ -8583,13 +8610,42 @@ local function draw_overlay()
 		local fine = magic.Color(0.62, 0.62, 0.62)
 		local major = magic.Color(0.45, 0.45, 0.48)
 		local gy = 0.004
-		for gx = math.floor(x0 / step) * step, x1, step do
-			debug:AddLine(P(gx, z0, gy), P(gx, z1, gy),
-					gx % 1000 == 0 and major or fine, true)
-		end
-		for gz = math.floor(z0 / step) * step, z1, step do
-			debug:AddLine(P(x0, gz, gy), P(x1, gz, gy),
-					gz % 1000 == 0 and major or fine, true)
+		local g = M.grid_cache
+		if buildat.set_line_geometry then
+			if not (g and g.step == step and x0 >= g.x0 and x1 <= g.x1 and
+					z0 >= g.z0 and z1 <= g.z1) then
+				local dx, dz = x1 - x0, z1 - z0
+				g = {step = step, x0 = x0 - dx, x1 = x1 + dx, z0 = z0 - dz,
+						z1 = z1 + dz}
+				M.grid_cache = g
+				local out = {}
+				local function add(ax, az, bx, bz, c)
+					local k = #out
+					out[k + 1], out[k + 2], out[k + 3] = W(ax), gy, W(az)
+					out[k + 4], out[k + 5], out[k + 6], out[k + 7] = c.r, c.g, c.b, 1
+					out[k + 8], out[k + 9], out[k + 10] = W(bx), gy, W(bz)
+					out[k + 11], out[k + 12], out[k + 13], out[k + 14] = c.r, c.g, c.b, 1
+				end
+				for gx = math.floor(g.x0 / step) * step, g.x1, step do
+					add(gx, g.z0, gx, g.z1, gx % 1000 == 0 and major or fine)
+				end
+				for gz = math.floor(g.z0 / step) * step, g.z1, step do
+					add(g.x0, gz, g.x1, gz, gz % 1000 == 0 and major or fine)
+				end
+				buildat.set_line_geometry(grid_node, out)
+				grid_node:GetComponent("CustomGeometry"):SetMaterial(0,
+						flat_material)
+			end
+			grid_node.enabled = true
+		else
+			for gx = math.floor(x0 / step) * step, x1, step do
+				debug:AddLine(P(gx, z0, gy), P(gx, z1, gy),
+						gx % 1000 == 0 and major or fine, true)
+			end
+			for gz = math.floor(z0 / step) * step, z1, step do
+				debug:AddLine(P(x0, gz, gy), P(x1, gz, gy),
+						gz % 1000 == 0 and major or fine, true)
+			end
 		end
 		-- The rooms' names and areas
 		for id, r in pairs(room_data) do
@@ -8598,19 +8654,46 @@ local function draw_overlay()
 		end
 		-- What is above the cut, dashed; the objects below it outlined
 		local cut = settings().cut
-		for id, o in pairs(outlines) do
-			if wall_span(doc.ents[id].ints) >= cut then
-				dashed(o.pts, dark)
+		local function plan_lines(ln)
+			for id, o in pairs(outlines) do
+				if wall_span(doc.ents[id].ints) >= cut then
+					dashed(o.pts, dark, ln)
+				end
+			end
+			for id, it in pairs(inst_data) do
+				if it.hosted then
+					plan_symbol(id, it, ln)
+				elseif it.y0 >= cut then
+					dashed(it.foot, dark, ln)
+				else
+					for i = 1, #it.foot do
+						local p, q = it.foot[i], it.foot[i % #it.foot + 1]
+						ln(p[1], p[2], q[1], q[2], dark)
+					end
+				end
 			end
 		end
-		for id, it in pairs(inst_data) do
-			if it.hosted then
-				plan_symbol(id, it, line)
-			elseif it.y0 >= cut then
-				dashed(it.foot, dark)
-			else
-				outline(it.foot, dark)
+		if buildat.set_line_geometry and not S.drag then
+			local key = M.build_gen .. ":" .. mm_per_px() .. ":" .. cut ..
+					":" .. tostring(S.layout)
+			if key ~= M.plan_lines_key then
+				M.plan_lines_key = key
+				local out = {}
+				plan_lines(function(ax, az, bx, bz, c)
+					local k = #out
+					out[k + 1], out[k + 2], out[k + 3] = W(ax), y, W(az)
+					out[k + 4], out[k + 5], out[k + 6], out[k + 7] = c.r, c.g, c.b, c.a
+					out[k + 8], out[k + 9], out[k + 10] = W(bx), y, W(bz)
+					out[k + 11], out[k + 12], out[k + 13], out[k + 14] =
+							c.r, c.g, c.b, c.a
+				end)
+				buildat.set_line_geometry(plan_lines_node, out)
+				plan_lines_node:GetComponent("CustomGeometry"):SetMaterial(0,
+						flat_material)
 			end
+			plan_lines_node.enabled = true
+		else
+			plan_lines(line)
 		end
 	end
 	local accent = magic.Color(1.0, 0.6, 0.1)

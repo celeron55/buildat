@@ -1197,6 +1197,20 @@ function buildat.safe.set_triangle_geometry(safe_node, verts)
 	return __buildat_set_triangle_geometry(getmetatable(safe_node).unsafe, verts)
 end
 
+-- set_line_geometry(node, verts): a line list, 7 numbers a vertex
+-- (position, colour), as the node's CustomGeometry; see
+-- src/lua_bindings/mesh.cpp
+function buildat.safe.set_line_geometry(safe_node, verts)
+	if not getmetatable(safe_node) or
+			getmetatable(safe_node).type_name ~= "Node" then
+		error("node is not a sandboxed Node instance")
+	end
+	if type(verts) ~= "table" then
+		error("verts is not a table")
+	end
+	return __buildat_set_line_geometry(getmetatable(safe_node).unsafe, verts)
+end
+
 -- set_cell_geometry(node, cells, size, r, g, b, a, v): a volume of cubic
 -- cells as the node's CustomGeometry, v the texture coordinate's second
 -- half on every vertex (0 unless given); see src/lua_bindings/mesh.cpp
