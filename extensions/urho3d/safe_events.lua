@@ -17,9 +17,39 @@ return {
 		Key = {variant = "Int", safe = "number"},
 		-- True when this is a key repeat rather than a fresh press
 		Repeat = {variant = "Bool", safe = "boolean"},
+		-- Which modifiers were held: shift 1, ctrl 2, alt 4, summed.
+		-- A shortcut wants this rather than the two control keys' own
+		-- states, and it says nothing the key itself does not
+		-- ([LAUNCH_CONSOLE]: Ctrl+C copies the line it is pointing at).
+		Qualifiers = {variant = "Int", safe = "number"},
 	},
 	KeyUp = {
 		Key = {variant = "Int", safe = "number"},
+	},
+	-- The window gained or lost input focus ([FOCUS_LOG]): what the
+	-- mouse's capture follows
+	InputFocus = {
+		Focus = {variant = "Bool", safe = "boolean"},
+	},
+	-- Fingers on a touchscreen ([FP_TOUCH]): which one, and where in the
+	-- window's pixels. The first finger is also the left mouse button,
+	-- which SDL makes of it, so the UI and a tap work without these.
+	TouchBegin = {
+		TouchID = {variant = "Int", safe = "number"},
+		X = {variant = "Int", safe = "number"},
+		Y = {variant = "Int", safe = "number"},
+	},
+	TouchMove = {
+		TouchID = {variant = "Int", safe = "number"},
+		X = {variant = "Int", safe = "number"},
+		Y = {variant = "Int", safe = "number"},
+		DX = {variant = "Int", safe = "number"},
+		DY = {variant = "Int", safe = "number"},
+	},
+	TouchEnd = {
+		TouchID = {variant = "Int", safe = "number"},
+		X = {variant = "Int", safe = "number"},
+		Y = {variant = "Int", safe = "number"},
 	},
 	MouseButtonDown = {
 		Button = {variant = "Int", safe = "number"},
@@ -69,9 +99,60 @@ return {
 	},
 	HoverEnd = {
 	},
+	-- A button pressed down and let go: a touchscreen's held buttons
+	-- (games/vanilla's Jump and Sneak) are held between the two
+	Pressed = {
+	},
 	Released = {
 	},
 	TextFinished = {
+	},
+	-- An element losing the UI's focus: a field left by a click elsewhere
+	Defocused = {
+	},
+	-- What the scrolling family says happened; see the classes of the same
+	-- name in safe_classes.lua. Element is the list, the bar or the slider
+	-- it happened to.
+	ItemSelected = {
+		Element = {variant = "Ptr", safe = "UIElement"},
+		Selection = {variant = "Int", safe = "number"},
+	},
+	ItemDeselected = {
+		Element = {variant = "Ptr", safe = "UIElement"},
+		Selection = {variant = "Int", safe = "number"},
+	},
+	SelectionChanged = {
+		Element = {variant = "Ptr", safe = "UIElement"},
+	},
+	-- A menu's own item was chosen, which for a DropDownList arrives
+	-- alongside ItemSelected
+	MenuSelected = {
+		Element = {variant = "Ptr", safe = "UIElement"},
+	},
+	ItemClicked = {
+		Element = {variant = "Ptr", safe = "UIElement"},
+		Item = {variant = "Ptr", safe = "UIElement"},
+		Selection = {variant = "Int", safe = "number"},
+		Button = {variant = "Int", safe = "number"},
+	},
+	ItemDoubleClicked = {
+		Element = {variant = "Ptr", safe = "UIElement"},
+		Item = {variant = "Ptr", safe = "UIElement"},
+		Selection = {variant = "Int", safe = "number"},
+		Button = {variant = "Int", safe = "number"},
+	},
+	SliderChanged = {
+		Element = {variant = "Ptr", safe = "UIElement"},
+		Value = {variant = "Float", safe = "number"},
+	},
+	ScrollBarChanged = {
+		Element = {variant = "Ptr", safe = "UIElement"},
+		Value = {variant = "Float", safe = "number"},
+	},
+	ViewChanged = {
+		Element = {variant = "Ptr", safe = "UIElement"},
+		X = {variant = "Int", safe = "number"},
+		Y = {variant = "Int", safe = "number"},
 	},
 	NodeAdded = {
 		Scene = {variant = "Ptr", safe = "Scene"},
