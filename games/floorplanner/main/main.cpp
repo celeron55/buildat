@@ -349,6 +349,7 @@ static const sv_<TypeSchema> SCHEMA = {
 		// they did
 		{"open", 0, 1889, 0},
 		{"on", 0, 1, 1},          // a lamp's
+		{"blinds", 0, 1000, 0},   // a window's blind, thousandths down
 	}, {}, {
 		// A switch's lamps
 		{"lamps", "instance", OnDelete::Remove, 0},

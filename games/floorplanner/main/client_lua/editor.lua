@@ -91,6 +91,7 @@ local S = {
 	-- which only they see
 	local_open = {},
 	local_on = {},
+	local_blinds = {},
 	linking = nil,  -- the switch whose lamps clicks add and remove
 	material = nil, -- the palette entry picked
 	-- The cursor, in window pixels
@@ -1196,6 +1197,17 @@ end
 local function open_amount(id)
 	return S.local_open[id] or doc.ents[id].ints.open
 end
+-- How far down a window's blind is, in thousandths: a viewer's own wins
+function M.blinds_amount(id)
+	return S.local_blinds[id] or doc.ents[id].ints.blinds or 0
+end
+-- What a blind lets through, down that far: an almost shut venetian
+-- blind's tenth or so where it is down
+-- simplified: the light that comes through the slats, not their glow
+M.BLIND_THROUGH = 0.08
+function M.blinds_through(id)
+	return 1 - (1 - M.BLIND_THROUGH) * M.blinds_amount(id) / 1000
+end
 
 -- A door's or window's parts, in the frame of the wall at its centre: X
 -- along the wall, Y up from the floor, Z to the wall's left
@@ -1253,6 +1265,37 @@ local function build_hosted(id, it, def, e, geometry, commit)
 		B(g, hw - fw, y0, -30, hw, y1, 30, frame_col)
 		B(g, -hw + fw, y0, -30, hw - fw, y0 + fw, 30, frame_col)
 		B(g, -hw + fw, y1 - fw, -30, hw - fw, y1, 30, frame_col)
+		-- **Its blind** (user, 2026-10-02): a venetian blind almost shut,
+		-- down from the top of the glass as far as it is drawn, on the
+		-- room's side of the frame (the side a room is on; between two,
+		-- the side the sashes swing to): slats a little apart, each a
+		-- little out from the next, under a head rail, in the frame's
+		-- colour. The sun comes through the gaps as the shadow map has
+		-- them, a patch of dots (user: fine as it is); the worked out
+		-- light goes by BLIND_THROUGH.
+		local down = M.blinds_amount(id) / 1000
+		if down > 0 then
+			local off = f.lo + f.ro + 100
+			local plus = room_at(it.x + f.nx * off, it.z + f.nz * off)
+			local minus = room_at(it.x - f.nx * off, it.z - f.nz * off)
+			local zs = (plus and minus) and
+					(math.floor(e.flip / 2) % 2 == 1 and -1 or 1) or plus and 1 or -1
+			local zc = zs * 40
+			local top = y1 - fw
+			local bottom = top - (top - (y0 + fw)) * down
+			local xa, xb = -hw + fw, hw - fw
+			B(g, xa, top - 30, zc - 6, xb, top, zc + 6, frame_col)
+			local PITCH, SLAT = 25, 23
+			local k = 0
+			local y = top - 30
+			while y - SLAT >= bottom - 1 do
+				local dz = (k % 2 == 0) and 1.5 or -1.5
+				B(g, xa + 2, y - SLAT, zc + dz - 1.5, xb - 2, y, zc + dz + 1.5,
+						frame_col)
+				y = y - PITCH
+				k = k + 1
+			end
+		end
 	end
 	commit(g, lit_material)
 
@@ -1821,12 +1864,14 @@ end
 function M.room_occlusion()
 	local glass = {}
 	local sunward = {}
-	for _, it in pairs(inst_data) do
+	for iid, it in pairs(inst_data) do
 		local def = it.hosted and it.frame and doc.ents[it.def]
 		local d = def and def.ints
 		local a = 0
 		if d and d.kind == KIND.window then
-			a = math.max(0, d.w - 4 * FRAME_W) * math.max(0, d.h - 4 * FRAME_W)
+			-- less what its blind keeps out
+			a = math.max(0, d.w - 4 * FRAME_W) * math.max(0, d.h - 4 * FRAME_W) *
+					M.blinds_through(iid)
 		elseif d and d.kind == KIND.opening then
 			a = d.w * d.h
 		elseif d and d.kind == KIND.door and d.glazed == 1 then
@@ -5338,6 +5383,15 @@ local function build_props()
 							math.floor(v / 0.09 + 0.5))}})
 				end
 			end)
+			if p.kind == KIND.window then
+				panel.field(props, "Blinds %", (i.blinds or 0) / 10, function(t)
+					local v = tonumber(t)
+					if v then
+						set(sel.id, {ints = {blinds = math.floor(
+								math.max(0, math.min(100, v)) * 10 + 0.5)}})
+					end
+				end)
+			end
 			-- The part a palette double click goes on, the palette showing
 			-- what it has now; a part with none of its own shows the frame's
 			panel.label(props, "Selected part (the palette's double click):")
@@ -8392,6 +8446,8 @@ do
 			flip_switch(id)
 		elseif kind == "lamp" then
 			M.flip_lamps({id})
+		elseif kind == KIND.window then
+			M.toggle_blinds(id)
 		else
 			M.toggle_open(id)
 		end
@@ -8412,6 +8468,18 @@ do
 			send({{op = "set", ent = {id = id, ints = {open = open}}}})
 		else
 			S.local_open[id] = open
+			S.dirty = true
+		end
+	end
+	-- A window's blind all the way down, or up from however far it is
+	-- (user, 2026-10-02: a window is used by its blind, not its sashes)
+	function M.toggle_blinds(id)
+		local down = M.blinds_amount(id) > 0 and 0 or 1000
+		if doc.can("edit") then
+			S.local_blinds[id] = nil
+			send({{op = "set", ent = {id = id, ints = {blinds = down}}}})
+		else
+			S.local_blinds[id] = down
 			S.dirty = true
 		end
 	end
@@ -8914,6 +8982,9 @@ do
 			return "turn " .. name_of(id) .. "'s lamps " .. (any and "off" or "on")
 		elseif kind == "lamp" then
 			return "turn " .. name_of(id) .. (lamp_on(id) and " off" or " on")
+		elseif kind == KIND.window then
+			return (M.blinds_amount(id) > 0 and "raise " or "lower ") ..
+					name_of(id) .. "'s blind"
 		end
 		return (open_amount(id) > 0 and "close " or "open ") .. name_of(id)
 	end
