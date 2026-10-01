@@ -87,7 +87,7 @@ local S = {
 	shape = "box",
 	stairs = {w = 1000, h = 0, riser = 200, tread = 250},
 	hosted = 3,     -- what the door/window tool puts in a wall
-	voxel_size = 50, -- a new voxel volume's, mm
+	voxel_size = 150, -- a new voxel volume's, mm (user, 2026-10-01: was 50)
 	-- Doors and windows a viewer has opened, and lamps they have switched,
 	-- which only they see
 	local_open = {},
