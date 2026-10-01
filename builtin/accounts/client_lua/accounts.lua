@@ -136,7 +136,7 @@ local function show_login(error_text)
 	-- The game, and what it runs on: "Floor planner | Buildat 0.5.8-bafe9fd8"
 	-- (user, 2026-09-30)
 	local version, hash = buildat.version()
-	label((opts.title or "Join") .. " | Buildat " .. tostring(version) ..
+	label((opts.title or "Join") .. " v." .. tostring(version) ..
 			(hash and hash ~= "" and ("-" .. hash) or ""))
 	label("Name")
 	-- The name used last on this server, kept on the client; else the one
