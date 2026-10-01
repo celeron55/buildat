@@ -8994,9 +8994,11 @@ do
 		if uid then
 			local what = M.use_text(uid, ukind)
 			g.use = what
-			-- (not with no tool, where only what the right button uses
-			-- shows, in its colour: user, 2026-10-02)
-			if S.tool then
+			-- Only when it is not what is under the pointer, which shows in
+			-- the right button's colour (user, 2026-10-02: two boxes on a
+			-- door, one of them whatever Select's filter said): the
+			-- selected switch E works from anywhere
+			if uid ~= M.use_pointed() then
 				hl({kind = "instance", id = uid, col = PLACE})
 			end
 			if S.captured and S.tool ~= "voxel" then
