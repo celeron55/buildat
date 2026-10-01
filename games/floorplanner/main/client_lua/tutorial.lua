@@ -85,10 +85,20 @@ return function(doc)
 	-- phone folds the palette and the properties away, and a step that
 	-- needs one says so while it is folded
 	local touch = buildat.get_env("BUILDAT_TOUCH") == "1"
-	-- A key's name as bound now (keys.lua)
+	-- **Only this setup's way** (user: the tutorial says how to do a
+	-- thing with what the user has, not to confuse): a key's name as bound
+	-- now (keys.lua), and " (key)" after a button's name on a desktop and
+	-- nothing on a touchscreen, which has no keys
 	local function k(action)
 		local e = ed()
 		return e and e.keys and e.keys.name(action) or "?"
+	end
+	local function kk(action)
+		return touch and "" or " (" .. k(action) .. ")"
+	end
+	-- Words for a desktop only
+	local function desk(t)
+		return touch and "" or t
 	end
 	local function click(t)
 		if not touch then
@@ -120,12 +130,12 @@ return function(doc)
 		{"A plan opens for viewing, so nothing changes by accident. Press " ..
 				"Start editing at the end of the toolbar.",
 				function() return doc.can("edit") end},
-		{function() return "Go to the plan view: choose 2D (" .. k("view_2d") ..
-				") in the view dropdown at the left of the toolbar." end,
+		{function() return "Go to the plan view: choose 2D" .. kk("view_2d") ..
+				" in the view dropdown at the left of the toolbar." end,
 				function() return S().view == "2d" end},
-		{function() return click("Draw a room: pick Room (" .. k("room") .. ") in the " ..
+		{function() return click("Draw a room: pick Room" .. kk("room") .. " in the " ..
 				"toolbar, then click its corners on the floor. Click the " ..
-				"first corner again, or press Enter, to close it. The room " ..
+				"first corner again" .. desk(", or press Enter,") .. " to close it. The room " ..
 				"gets walls and a lamp on its ceiling.") end,
 				function() return #of("room") >= 1 end},
 		{function() return click("Draw a second room beside the first, " ..
@@ -150,7 +160,7 @@ return function(doc)
 					return false
 				end},
 		{function() return click("A door in the wall between the rooms: " ..
-				"pick Door/window (" .. k("hosted") .. "), check that Kind in its panel says " ..
+				"pick Door/window" .. kk("hosted") .. ", check that Kind in its panel says " ..
 				"Door, and click on the wall.") .. props() end,
 				function() return #instances(3) >= 1 end},
 		{function() return click("A window: with Door/window still picked, " ..
@@ -158,8 +168,8 @@ return function(doc)
 				"wall.") .. props() end,
 				function() return #instances(4) >= 1 end},
 		{function() return click("A linked clone shares its shape with the " ..
-				"original: pick Select (" .. k("select") .. "), click the window, press Linked " ..
-				"clone in its panel (Ctrl+L), then click another wall.") ..
+				"original: pick Select" .. kk("select") .. ", click the window, press Linked " ..
+				"clone in its panel" .. desk(" (Ctrl+L)") .. ", then click another wall.") ..
 				props() end,
 				function()
 					local n = {}
@@ -171,7 +181,7 @@ return function(doc)
 					end
 					return false
 				end},
-		{function() return click("A dresser: pick Object (" .. k("box") .. ") and drag its " ..
+		{function() return click("A dresser: pick Object" .. kk("box") .. " and drag its " ..
 				"footprint on the floor against a wall, about 1 m by 0.5 m. " ..
 				"Then type a height of 800 in the panel's Height mm.") ..
 				props() end,
@@ -187,8 +197,8 @@ return function(doc)
 		{function() return click("Build the lamp from voxels on the " ..
 				"dresser: click the Lamp entry in the palette (the ceiling " ..
 				"lamps made it), pick " ..
-				"Voxels (" .. k("voxel") .. ") and go to 3D (the view dropdown, or " ..
-				k("view_3d") .. "). Click " ..
+				"Voxels" .. kk("voxel") .. " and go to 3D in the view dropdown" ..
+				kk("view_3d") .. ". Click " ..
 				"the dresser's top to start a volume there, then click on " ..
 				"its voxels for more. The panel's Click says whether a click " ..
 				"places, digs or paints.") .. palette() .. props() end,
@@ -200,8 +210,8 @@ return function(doc)
 					end
 					return false
 				end},
-		{function() return click("A switch for it: in 2D (" .. k("view_2d") .. "), pick " ..
-				"Door/window (" .. k("hosted") .. "), set Kind to Switch and click a wall. Then " ..
+		{function() return click("A switch for it: in 2D" .. kk("view_2d") .. ", pick " ..
+				"Door/window" .. kk("hosted") .. ", set Kind to Switch and click a wall. Then " ..
 				"click the switch to select it, press \"Link lamps\" in its " ..
 				"panel, " ..
 				"click the lamp and press Done linking.") .. props() end,
@@ -212,8 +222,8 @@ return function(doc)
 					return false
 				end},
 		{function() return click("Stairs: click the drywall entry in the " ..
-				"palette (what is made gets the entry chosen), pick Object " ..
-				"(" .. k("box") .. "), set Shape to stairs in its panel and drag their " ..
+				"palette (what is made gets the entry chosen), pick Object" ..
+				kk("box") .. ", set Shape to stairs in its panel and drag their " ..
 				"footprint in a room. They climb along their depth.") ..
 				props() end,
 				function() return #instances(6) >= 1 end},
@@ -222,8 +232,8 @@ return function(doc)
 				"now, the one below drawn under it.",
 				function() return #of("layout") >= 2 end},
 		{function() return click("Draw a room on the new floor with the " ..
-				"Room tool, over the one below. In the plan view (2D, F1) " ..
-				"the floor below shows faintly under it to line up with.")
+				"Room tool, over the one below. In the plan view (2D" ..
+				desk(", " .. k("view_2d")) .. ") the floor below shows faintly under it to line up with.")
 				end,
 				function()
 					local cur = S().layout
@@ -240,8 +250,8 @@ return function(doc)
 				function() return S().layout == ground() end},
 		{function() return touch and "Walk in the house: choose Walk in the " ..
 				"view dropdown. A finger at the lower left walks, another " ..
-				"turns the view." or "Walk in the house: choose Walk (" ..
-				k("view_walk") .. ") in the view dropdown. " .. k("forward") ..
+				"turns the view." or "Walk in the house: choose Walk" ..
+				kk("view_walk") .. " in the view dropdown. " .. k("forward") ..
 				", " .. k("left") .. ", " .. k("back") .. " and " .. k("right") ..
 				" walk; drag with the " ..
 				"right mouse button to turn." end,
@@ -294,6 +304,8 @@ return function(doc)
 		end
 		return t
 	end
+	-- For games/floorplanner/test/tutorial_text.lua
+	T.text_of, T.steps = text_of, #STEPS
 
 	-- **The window** (user, a phone): small, in a corner, folded to its
 	-- title by a tap on it, and under the panels and menus until it is

@@ -4214,7 +4214,7 @@ end
 -- What the voxel tool's click does in 3D, for a touchscreen above all,
 -- which has no Ctrl or Shift
 function M.voxel_mode_dropdown()
-	panel.keep(function() return panel.dropdown(props, "Click", {
+	panel.keep(function() return panel.dropdown(props, S.touch and "Tap" or "Click", {
 		{"place a voxel", "place"}, {"dig one", "dig"},
 		{"paint one", "paint"}}, S.voxel_mode, function(v)
 		S.voxel_mode = v
