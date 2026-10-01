@@ -824,6 +824,14 @@ void set_line_geometry(const luabind::object &node_o,
 		}
 		cg->DefineVertex(Vector3(f[0], f[1], f[2]));
 		cg->DefineColor(Color(f[3], f[4], f[5], f[6]));
+		// **A texture coordinate, though no line has a texture** (user,
+		// 2026-10-01: the grid was missing in Firefox): Urho3D's Unlit
+		// vertex shader reads one whatever its defines, and without one
+		// in this buffer the attribute was left on whatever buffer was
+		// bound before. Firefox refuses such a draw outright when that
+		// one is shorter ("Vertex fetch requires 52, but attribs only
+		// supply 6"), so whether a line list showed went by draw order.
+		cg->DefineTexCoord(Vector2(0.f, 0.f));
 	}
 	lua_pop(L, 1);
 	cg->Commit();
