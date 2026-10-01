@@ -49,6 +49,10 @@ end
 -- Returns {id = {pts = {{x, z}, ...}, sides = {"right"|"left"|"core", ...}}}:
 -- the outline counter-clockwise, sides[i] naming the face from pts[i] to
 -- pts[i + 1].
+-- How far, in mm, a wall's end keeps off another's face it would touch
+-- (wall_outlines): enough for the depth buffer to tell them apart
+M.WALL_KEEP_OFF = 3
+
 function M.wall_outlines(walls)
 	-- Every end at every node, per group
 	local at = {}
@@ -103,10 +107,33 @@ function M.wall_outlines(walls)
 				end
 			end
 		end
+		-- **A wall's end that would touch another's face at the node keeps
+		-- off it** (user): where a wall is justified to one side, its face
+		-- on that side runs through the node, and a wall joined there from
+		-- its other side filled the T's hole right up to that face -- a
+		-- line of its material on it. An end with both faces off the node,
+		-- whose corners are further along it than the node, takes its node
+		-- point WALL_KEEP_OFF back into itself; what that leaves is inside
+		-- the walls.
+		local face_through = false
 		for _, en in ipairs(ends) do
+			if en.ccw_off == 0 or en.cw_off == 0 then
+				face_through = true
+			end
+		end
+		for _, en in ipairs(ends) do
+			local mid = n >= 3 and {en.x, en.z} or nil
+			if mid and face_through and en.ccw_off > 0 and en.cw_off > 0 then
+				local function along(p)
+					return (p[1] - en.x) * en.ux + (p[2] - en.z) * en.uz
+				end
+				local k = M.WALL_KEEP_OFF
+				if along(en.ccw_pt) > k and along(en.cw_pt) > k then
+					mid = {en.x + en.ux * k, en.z + en.uz * k}
+				end
+			end
 			corners[en.id] = corners[en.id] or {}
-			corners[en.id][en.e] = {ccw = en.ccw_pt, cw = en.cw_pt,
-					mid = n >= 3 and {en.x, en.z} or nil}
+			corners[en.id][en.e] = {ccw = en.ccw_pt, cw = en.cw_pt, mid = mid}
 		end
 	end
 
@@ -548,6 +575,33 @@ do
 	near(s[4][2], -50, "T stem corner z")
 	local total = M.area(t[1].pts) + M.area(t[2].pts) + M.area(t[3].pts)
 	near(total, 2000 * 100 + 950 * 100, "T covers its footprint exactly once")
+
+	-- An outset room wall, its face on the line inside the room (z > 0),
+	-- and a centred wall joined to its middle from outside: the joined
+	-- wall stops short of the room's face, and the room's wall still runs
+	-- straight along it
+	local ot = M.wall_outlines({
+		[1] = {ax = 0, az = 0, bx = 1000, bz = 0, a_node = 1, b_node = 2,
+				thickness = 200, justify = 2},
+		[2] = {ax = 0, az = 0, bx = -1000, bz = 0, a_node = 1, b_node = 3,
+				thickness = 200, justify = 1},
+		[3] = {ax = 0, az = 0, bx = 0, bz = -1000, a_node = 1, b_node = 4,
+				thickness = 100, justify = 0},
+	})
+	for _, q in ipairs(ot[3].pts) do
+		assert(q[2] < -1,
+				"the joined wall keeps off the room's face: z " .. q[2])
+	end
+	for _, w in ipairs({ot[1], ot[2]}) do
+		local top = -math.huge
+		for _, q in ipairs(w.pts) do
+			top = math.max(top, q[2])
+		end
+		near(top, 0, "the room's face stays on the line")
+	end
+	-- and a plain centred T is as it was
+	near(M.area(t[1].pts) + M.area(t[2].pts) + M.area(t[3].pts),
+			2000 * 100 + 950 * 100, "T still covers its footprint")
 
 	-- A wall on its own is its rectangle, left-justified above the line
 	local r = M.wall_outlines({[1] = {ax = 0, az = 0, bx = 2000, bz = 0,
