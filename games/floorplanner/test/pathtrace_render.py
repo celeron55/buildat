@@ -9,7 +9,8 @@
 # <user>/meshdumps (editor.lua's M.refdump_tick). The same triangles, each palette row's albedo as the client
 # takes it, the sun and the sky as apply_daylight has them; written as
 # linear radiance (<stem>_cycles.exr, and .npy for compare.py, which puts
-# it through the client's own frame pipeline).
+# it through the client's own frame pipeline), with the white a grey card
+# sees where the client takes its white (<stem>_cycles_white.npy).
 #
 #   blender -b -P pathtrace_render.py -- <dump.obj.gz> [samples]
 #   pathtrace_compare.py <the client's screenshot> <dump>_cycles.npy <regions>
@@ -182,6 +183,28 @@ def main():
 	exr = stem + "_cycles.exr"
 	scene.render.filepath = exr
 	bpy.ops.render.render(write_still=True)
+	# And the white the eye is adapted to (FpFrame.glsl): what a grey card
+	# is lit by where the client takes it (the room's probe), the mean of a
+	# panorama there by solid angle
+	scene.camera.matrix_world.translation = Vector(
+			y_up_to_blender(*meta["white_at"]))
+	cam = scene.camera.data
+	cam.type = "PANO"
+	cam.panorama_type = "EQUIRECTANGULAR"
+	scene.render.resolution_x, scene.render.resolution_y = 128, 64
+	scene.cycles.samples = 64
+	pano = stem + "_cycles_pano.exr"
+	scene.render.filepath = pano
+	bpy.ops.render.render(write_still=True)
+	pimg = bpy.data.images.load(pano)
+	pp = np.empty(128 * 64 * 4, dtype=np.float32)
+	pimg.pixels.foreach_get(pp)
+	pp = pp.reshape(64, 128, 4)[:, :, :3]
+	lat = (np.arange(64) + 0.5) / 64 * math.pi - math.pi / 2
+	wgt = np.cos(lat)[:, None, None]
+	white = (pp * wgt).sum(axis=(0, 1)) / (wgt.sum() * 128)
+	np.save(stem + "_cycles_white.npy", white)
+	print("white", white)
 	# The pixels, top row first, for compare.py
 	img = bpy.data.images.load(exr)
 	w, h = img.size

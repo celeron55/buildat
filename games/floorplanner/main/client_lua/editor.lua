@@ -1846,6 +1846,7 @@ end
 -- this was written on (extensions/launch_world's [PBR_HDR] finding), so
 -- the average is the reduce pass's and a reflection is sharp.
 local PROBE_T, PROBE_ROWS = 32, 64
+M.PROBE_ROWS = PROBE_ROWS
 -- Pitch and yaw of each face's camera: +X, -X, +Y, -Y, +Z, -Z, which is
 -- the order and the axes Palette.glsl's ProbeUV reads them in
 local PROBE_FACES = {{0, 90}, {0, -90}, {-90, 0}, {90, 0}, {0, 0}, {0, 180}}
@@ -1868,6 +1869,9 @@ local function probes_init()
 	assert(reduce:SetSize(6, PROBE_ROWS, f16, magic.TEXTURE_RENDERTARGET),
 			"the probes' ambient cubes")
 	reduce.filterMode = magic.FILTER_NEAREST
+	-- and for the frame's white (FpFrame.glsl)
+	assert(magic.cache:AddManualResource(reduce, "fp_probe_reduce"),
+			"the probes' ambient cubes in the cache")
 	local function view(texture, xml, fov)
 		local node = scene:CreateChild("probe camera")
 		local cam = node:CreateComponent("Camera")
@@ -1898,6 +1902,7 @@ local function probes_init()
 	M.probe = p
 	return p
 end
+M.probes_init = probes_init
 
 -- Each frame: the next face of the next room, under the cube mode
 function M.probes_tick()
@@ -2494,6 +2499,11 @@ function M.apply_daylight()
 	local sc = light.sun_color
 	sun.color = magic.Color(sc.r, sc.g, sc.b)
 	local a, f = light.ambient, light.horizon
+	-- The white outdoors (M.wb_tick): a grey card's light, a quarter of
+	-- the sun's irradiance over its sphere and half of the sky's
+	M.wb_outdoor = {r = sc.r * light.sun / 4 / math.pi + a.r / 2,
+			g = sc.g * light.sun / 4 / math.pi + a.g / 2,
+			b = sc.b * light.sun / 4 / math.pi + a.b / 2}
 	zone.ambientColor = magic.Color(a.r, a.g, a.b)
 	zone.fogColor = magic.Color(f.r, f.g, f.b)
 	M.sky.material:SetShaderParameter("Treeline", st.treeline / 1000)
@@ -9477,6 +9487,62 @@ function M.go_viewport(id, preview)
 	M.hide_ui()
 end
 
+-- **The white the eye is adapted to** (FpFrame.glsl): the room probe of
+-- the room the camera is in, under the cube mode, else the outdoor one;
+-- from the room before to it in a second, as the eye takes a moment too.
+-- In fp_wb, a texture of two texels: the two slots, the share of the
+-- second, on; and the outdoor white's colour.
+-- simplified: under plain PBR indoors, the outdoor white; the upgrade is
+-- the room's ambient and bounce
+function M.wb_tick(dt)
+	if not M.pbr_now() then
+		return
+	end
+	M.probes_init()
+	local w = M.wb
+	if not w then
+		local image = magic.Image:new()
+		assert(image:SetSize(2, 1, 4), "the white's image")
+		local texture = magic.Texture2D:new()
+		texture:SetNumLevels(1)
+		texture.filterMode = magic.FILTER_NEAREST
+		assert(magic.cache:AddManualResource(texture, "fp_wb"), "the white in the cache")
+		M.kept[#M.kept + 1] = image
+		M.kept[#M.kept + 1] = texture
+		w = {a = 0, b = 0, t = 1, image = image, texture = texture}
+		M.wb = w
+	end
+	local slot = 0
+	if S.lighting == "pbr_cube" then
+		-- or, standing in a doorway, the one looked into
+		local fx, fz = math.sin(math.rad(S.yaw)), math.cos(math.rad(S.yaw))
+		local id
+		for _, ahead in ipairs({0, 300, 600}) do
+			id = id or room_at(S.pos.x * 1000 + fx * ahead,
+					S.pos.z * 1000 + fz * ahead)
+		end
+		local s = id and M.room_slot[id]
+		if s and s < M.PROBE_ROWS and M.probe_ready[s] then
+			slot = s
+		end
+	end
+	if slot ~= w.b then
+		w.a, w.b, w.t = w.t >= 0.5 and w.b or w.a, slot, 0
+	end
+	w.t = math.min(1, w.t + dt)
+	local o = M.wb_outdoor or {r = 1, g = 1, b = 1}
+	local m = math.max(o.r, o.g, o.b, 1e-6)
+	local key = string.format("%d %d %.3f %.4f %.4f %.4f", w.a, w.b, w.t,
+			o.r / m, o.g / m, o.b / m)
+	if key == w.key then
+		return
+	end
+	w.key = key
+	w.image:SetPixel(0, 0, magic.Color(w.a / 255, w.b / 255, w.t, 1))
+	w.image:SetPixel(1, 0, magic.Color(o.r / m, o.g / m, o.b / m, 1))
+	assert(w.texture:SetData(w.image), "the white's texture")
+end
+
 -- **A dump for the path-traced reference** (games/floorplanner/test/
 -- pathtrace_render.py, user, 2026-10-01): with BUILDAT_FP_REFDUMP naming a
 -- viewport, that viewport is gone to and, REFDUMP_WAIT seconds on, when
@@ -9548,6 +9614,11 @@ function M.refdump_tick(dt)
 		'"camera_dir": ' .. v3(math.sin(yaw) * math.cos(pitch),
 				-math.sin(pitch), math.cos(yaw) * math.cos(pitch)),
 		'"fov": ' .. string.format("%.6g", cam3d.fov),
+		-- Where the frame's white is taken (M.wb_tick): the room probe's
+		-- place, or the eye's outdoors
+		'"white_at": ' .. (M.wb and M.room_probe[M.wb.b] and
+				v3(W(M.room_probe[M.wb.b].x), W(M.room_probe[M.wb.b].y),
+				W(M.room_probe[M.wb.b].z)) or v3(S.pos.x, S.pos.y, S.pos.z)),
 		'"sun_toward": ' .. v3(tx, h, tz),
 		'"sun_irradiance": ' .. string.format("%.6g", light.sun),
 		'"sun_color": ' .. c3(light.sun_color),
@@ -9618,6 +9689,7 @@ function M.update(dt)
 	end
 	M.apply_daylight()
 	M.probes_tick()
+	M.wb_tick(dt)
 	M.refdump_tick(dt)
 	-- A menu made since: its buttons for the keyboard
 	if pause_win and pause_win ~= M.keyed_win then

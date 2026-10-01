@@ -289,16 +289,12 @@ function M.pbr_render_path(rp)
 	end
 	add("luanti_client/res/LuantiAutoExposure.xml")
 	add("PostProcess/BloomHDR.xml")
-	add("PostProcess/Tonemap.xml")
-	add("luanti_client/res/LuantiTonemap.xml")
+	-- The light's colour adapted to and Khronos PBR Neutral, not vanilla's
+	-- Uncharted2, whose shoulder is for its caves (user, 2026-10-01)
+	add("main/fp_frame.xml")
 	add("PostProcess/GammaCorrection.xml")
-	rp:SetEnabled("TonemapReinhardEq3", false)
-	rp:SetEnabled("TonemapACES", false)
-	rp:SetEnabled("TonemapUncharted2", true)
 	rp:SetShaderParameter("BloomHDRThreshold", 1.2)
 	rp:SetShaderParameter("BloomHDRMix", magic.Vector2(1.0, 0.03))
-	rp:SetShaderParameter("TonemapExposureBias", 1.0)
-	rp:SetShaderParameter("TonemapMaxWhite", 2.0)
 	rp:SetShaderParameter("AutoExposureAdaptRate", 0.6)
 	-- **The meter's top** (user: snow in sunlight with some specular in
 	-- saturation): a frame metered over 7 is exposed as if it were 7, so

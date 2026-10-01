@@ -1,0 +1,10 @@
+<!-- The eye's adaptation to the light's colour and the tone map, after
+     the meter (FpFrame.glsl; daylight.lua's M.pbr_render_path) -->
+<renderpath>
+    <command type="quad" tag="FpFrame" vs="main/FpFrame" ps="main/FpFrame" output="viewport">
+        <texture unit="diffuse" name="viewport" />
+        <texture unit="normal" name="adaptedLum" />
+        <texture unit="specular" name="generated/fp_probe_reduce" />
+        <texture unit="emissive" name="generated/fp_wb" />
+    </command>
+</renderpath>
