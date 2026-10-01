@@ -641,10 +641,13 @@ vec3 ProbeSample(vec3 d, float row)
 // as sqrt(L / 16)) -- is the patch of the box where the cell's middle
 // leaves it, of the area the cell's solid angle makes there, and lights
 // the surface at x, facing n, as a disc does: L A cos cos / (pi r^2 + A),
-// the ambient term that is. The discs' shares are at most all of the
-// surface's view: near a corner they would add up to more, and the light
-// the probes see of it would grow round and round. x and n in the box's
-// frame (along, up, across).
+// the ambient term that is. Inside the room the box is all of the
+// surface's view, so the discs' shares are made to add up to it: two by
+// two cells a face are coarse by a corner, where their shares came to
+// less, a shade deeper than the path tracer's corners and one that went
+// with the cells' size (user, 2026-10-02), which is the occlusion pass's
+// to make; and more would have grown round and round through the probes.
+// x and n in the box's frame (along, up, across).
 vec3 ProbeLight(float row, vec3 x, vec3 n, vec3 lo, vec3 hi, vec2 U)
 {
     vec4 q0 = TableTexel(row, 6.0);
@@ -685,11 +688,15 @@ vec3 ProbeLight(float row, vec3 x, vec3 n, vec3 lo, vec3 hi, vec2 U)
         sum += L * share;
         shares += share;
     }
-    return sum / max(shares, 1.0);
+    return shares > 1e-4 ? sum / shares : vec3(0.0);
 }
 
 // The light round a surface at p, facing n, in a room with its probes:
-// the two probes it is between, put back on the box
+// the two probes it is between, put back on the box; taken a little in
+// from the box's faces, which the cells are too coarse to be right by
+// (by a window wall, a ceiling's edge came out lighter where the path
+// tracer's was half as dark, user 2026-10-02). What is near a corner is
+// the occlusion pass's (deferred_ssao.xml).
 vec3 RoomAmbient(vec3 p, vec3 n)
 {
     vec4 o = RoomTexel(2.0);
@@ -702,6 +709,8 @@ vec3 RoomAmbient(vec3 p, vec3 n)
     vec3 hi = vec3(Decode16(e.r, e.g), Decode16(y.b, y.a), Decode16(e.b, e.a));
     vec2 pd = p.xz - O;
     vec3 x = vec3(dot(pd, U), p.y, dot(pd, vec2(-U.y, U.x)));
+    vec3 inset = min(vec3(0.4), (hi - lo) * 0.5);
+    x = clamp(x, lo + inset, hi - inset);
     vec3 nl = vec3(dot(n.xz, U), n.y, dot(n.xz, vec2(-U.y, U.x)));
     vec3 pr = RoomProbes(p);
     vec3 a = ProbeLight(pr.x, x, nl, lo, hi, U);

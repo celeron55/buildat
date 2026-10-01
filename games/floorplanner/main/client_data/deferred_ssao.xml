@@ -17,8 +17,10 @@
         <output index="2" name="normal" />
         <output index="3" name="depth" />
     </command>
+    <!-- The radius and the strength fitted to a path-traced room's edges
+         (games/floorplanner/test/pathtrace_render.py, 2026-10-02) -->
     <command type="quad" tag="Ssao" vs="main/Ssao" ps="main/Ssao" psdefines="AO" output="ssao">
-        <parameter name="SsaoRadius" value="0.5" />
+        <parameter name="SsaoRadius" value="0.8" />
         <parameter name="SsaoStrength" value="1.6" />
         <texture unit="depth" name="depth" />
         <texture unit="normal" name="normal" />
