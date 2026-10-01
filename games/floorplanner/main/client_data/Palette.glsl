@@ -521,15 +521,11 @@ float SkyOcc()
     return clamp(vRow.y - RoomSlot(), 0.0, 1.0);
 }
 
+#include "main/RoomLight.glsl"
+
 // **The sun a room's windows let in, bounced** (editor.lua's
 // M.room_bounce): radiance to add to the ambient, stored as sqrt(L / 16)
-// in the room table (sSpecMap), eight texels a row: the first by the
-// room's slot
-const float ROOM_ROWS = 256.0;
-vec4 TableTexel(float row, float i)
-{
-    return texture2D(sSpecMap, vec2((i + 0.5) / 8.0, (row + 0.5) / ROOM_ROWS));
-}
+// in the room table, the first texel by the room's slot
 vec4 RoomTexel(float i)
 {
     return TableTexel(RoomSlot(), i);
@@ -542,13 +538,6 @@ vec3 RoomBounce()
     return t * t * 16.0;
 }
 
-// The room probes' layout, as editor.lua makes them: PROBE_K by PROBE_K
-// cells a face
-const float PROBE_ROWS = 64.0;
-const float PROBE_K = 2.0;
-// A cell's solid angle: a quarter of a face's
-const float CELL_OMEGA = 0.5235988;
-
 // Whether the room is lit by its probes: the drawn ones (cRoomCubes 1)
 // or editor.lua's worked out ones (2), once they are there
 bool RoomCube()
@@ -559,65 +548,7 @@ bool RoomCube()
     return RoomTexel(0.0).a > 0.5;
 }
 
-// A probe's light as a number: what is not one, or past half float's
-// range, is none (the probes see their own light, and one bad texel
-// would go round and fill the rooms)
-vec3 Finite(vec3 c)
-{
-    return max(c.r, max(c.g, c.b)) < 60000.0 && c == c ? max(c, vec3(0.0)) : vec3(0.0);
-}
-
-// A length in the room table: 16 bits, 4 mm a step from -131 m; and an
-// axis's component, 16 bits from -1 to 1
-float Decode16(float hi, float lo)
-{
-    return (floor(hi * 255.0 + 0.5) * 256.0 + floor(lo * 255.0 + 0.5) - 32768.0) * 0.004;
-}
-float DecodeUnit(float hi, float lo)
-{
-    return (floor(hi * 255.0 + 0.5) * 256.0 + floor(lo * 255.0 + 0.5)) / 32767.5 - 1.0;
-}
-
-// **The room's probes along it** (editor.lua's M.room_probes): the row
-// before the point, the row after, and how far between
-vec3 RoomProbes(vec3 p)
-{
-    vec4 t1 = RoomTexel(1.0);
-    float first = floor(t1.r * 255.0 + 0.5);
-    float n = floor(t1.g * 255.0 + 0.5);
-    if (n < 1.5)
-        return vec3(first, first, 0.0);
-    vec4 a = TableTexel(first, 6.0);
-    vec4 b = TableTexel(first + n - 1.0, 6.0);
-    vec2 p0 = vec2(Decode16(a.r, a.g), Decode16(a.b, a.a));
-    vec2 p1 = vec2(Decode16(b.r, b.g), Decode16(b.b, b.a));
-    vec2 d = p1 - p0;
-    float t = clamp(dot(p.xz - p0, d) / max(dot(d, d), 1e-6), 0.0, 1.0) * (n - 1.0);
-    float i = min(floor(t), n - 2.0);
-    return vec3(first + i, first + i + 1.0, t - i);
-}
-
-// A probe face's look, right and up, as the face cameras have them
-// (editor.lua's PROBE_FACES: +X, -X, +Y, -Y, +Z, -Z); a face is drawn
-// with its top at the tile's top
-void FaceAxes(float face, out vec3 f, out vec3 r, out vec3 u)
-{
-    if (face < 0.5) {
-        f = vec3(1.0, 0.0, 0.0); r = vec3(0.0, 0.0, -1.0); u = vec3(0.0, 1.0, 0.0);
-    } else if (face < 1.5) {
-        f = vec3(-1.0, 0.0, 0.0); r = vec3(0.0, 0.0, 1.0); u = vec3(0.0, 1.0, 0.0);
-    } else if (face < 2.5) {
-        f = vec3(0.0, 1.0, 0.0); r = vec3(1.0, 0.0, 0.0); u = vec3(0.0, 0.0, -1.0);
-    } else if (face < 3.5) {
-        f = vec3(0.0, -1.0, 0.0); r = vec3(1.0, 0.0, 0.0); u = vec3(0.0, 0.0, 1.0);
-    } else if (face < 4.5) {
-        f = vec3(0.0, 0.0, 1.0); r = vec3(1.0, 0.0, 0.0); u = vec3(0.0, 1.0, 0.0);
-    } else {
-        f = vec3(0.0, 0.0, -1.0); r = vec3(-1.0, 0.0, 0.0); u = vec3(0.0, 1.0, 0.0);
-    }
-}
-
-// What a probe sees along d, from its drawn faces
+// What a drawn probe sees along d, from its faces
 vec3 ProbeSample(vec3 d, float row)
 {
     vec3 a = abs(d);
@@ -632,91 +563,36 @@ vec3 ProbeSample(vec3 d, float row)
     return Finite(texture2D(sNormalMap, uv).rgb);
 }
 
-// **A probe's light put back on the room's box** (user, 2026-10-01: the
-// light round a probe was a far wall's too, at the probe's nearness to
-// the sun's patch; checked against the path tracer's at three walls of
-// a room, within a tenth with two by two cells a face, where the probe's
-// own was off by up to three times): each cell of the probe's faces --
-// its mean radiance (the reduce pass's, or editor.lua's worked out ones,
-// as sqrt(L / 16)) -- is the patch of the box where the cell's middle
-// leaves it, of the area the cell's solid angle makes there, and lights
-// the surface at x, facing n, as a disc does: L A cos cos / (pi r^2 + A),
-// the ambient term that is. Inside the room the box is all of the
-// surface's view, so the discs' shares are made to add up to it: two by
-// two cells a face are coarse by a corner, where their shares came to
-// less, a shade deeper than the path tracer's corners and one that went
-// with the cells' size (user, 2026-10-02), which is the occlusion pass's
-// to make; and more would have grown round and round through the probes.
-// x and n in the box's frame (along, up, across).
-vec3 ProbeLight(float row, vec3 x, vec3 n, vec3 lo, vec3 hi, vec2 U)
+// **The light round a surface at p, facing n, in a room with its probes**:
+// from the room's grid (GridBake.glsl, sEmissiveMap), where p is in it --
+// along and across by the texture's filter, up by hand -- for the three
+// of its six normals n is between, by n's squares
+vec3 GridNormal(float dir, float block, vec3 g)
 {
-    vec4 q0 = TableTexel(row, 6.0);
-    vec4 q1 = TableTexel(row, 7.0);
-    vec4 o = RoomTexel(2.0);
-    vec2 qd = vec2(Decode16(q0.r, q0.g), Decode16(q0.b, q0.a)) -
-            vec2(Decode16(o.r, o.g), Decode16(o.b, o.a));
-    vec3 q = vec3(dot(qd, U), Decode16(q1.r, q1.g), dot(qd, vec2(-U.y, U.x)));
-    float v = (row + 0.5) / PROBE_ROWS;
-    vec3 sum = vec3(0.0);
-    float shares = 0.0;
-    for (int i = 0; i < 24; i++) {
-        float fi = float(i);
-        float face = floor(fi / 4.0);
-        float c = fi - face * 4.0;
-        float cy = floor(c / 2.0);
-        float cx = c - cy * 2.0;
-        vec3 f, r, u;
-        FaceAxes(face, f, r, u);
-        vec3 dw = normalize(f + r * (cx - 0.5) + u * (0.5 - cy));
-        vec3 d = vec3(dot(dw.xz, U), dw.y, dot(dw.xz, vec2(-U.y, U.x)));
-        vec3 sd = vec3(abs(d.x) > 1e-6 ? d.x : 1e-6, abs(d.y) > 1e-6 ? d.y : 1e-6,
-                abs(d.z) > 1e-6 ? d.z : 1e-6);
-        vec3 tt = (mix(lo, hi, step(0.0, sd)) - q) / sd;
-        float t = max(min(tt.x, min(tt.y, tt.z)), 0.0);
-        vec3 nh = tt.x <= tt.y && tt.x <= tt.z ? vec3(-sign(sd.x), 0.0, 0.0) :
-                tt.y <= tt.z ? vec3(0.0, -sign(sd.y), 0.0) : vec3(0.0, 0.0, -sign(sd.z));
-        vec3 h = q + d * t;
-        float A = CELL_OMEGA * t * t / max(abs(dot(d, nh)), 0.05);
-        vec3 w = x - h;
-        float r2 = dot(w, w);
-        float rl = sqrt(max(r2, 1e-8));
-        float ce = max(dot(w, nh) / rl, 0.0);
-        float cr = max(-dot(w, n) / rl, 0.0);
-        vec3 L = texture2D(sEmissiveMap, vec2((fi + 0.5) / 24.0, v)).rgb;
-        L = Finite(cRoomCubes > 1.5 ? L * L * 16.0 : L);
-        float share = A * ce * cr / (3.14159265 * r2 + A);
-        sum += L * share;
-        shares += share;
-    }
-    return shares > 1e-4 ? sum / shares : vec3(0.0);
+    float iy0 = floor(g.y);
+    float iy1 = min(iy0 + 1.0, GRID_Y - 1.0);
+    float u = (dir * GRID_U + g.x + 0.5) / GRID_W;
+    float row = block * GRID_Y * GRID_V + g.z + 0.5;
+    vec3 a = texture2D(sEmissiveMap, vec2(u, (row + iy0 * GRID_V) / GRID_H)).rgb;
+    vec3 b = texture2D(sEmissiveMap, vec2(u, (row + iy1 * GRID_V) / GRID_H)).rgb;
+    return Finite(mix(a, b, g.y - iy0));
 }
-
-// The light round a surface at p, facing n, in a room with its probes:
-// the two probes it is between, put back on the box; taken a little in
-// from the box's faces, which the cells are too coarse to be right by
-// (by a window wall, a ceiling's edge came out lighter where the path
-// tracer's was half as dark, user 2026-10-02). What is near a corner is
-// the occlusion pass's (deferred_ssao.xml).
 vec3 RoomAmbient(vec3 p, vec3 n)
 {
-    vec4 o = RoomTexel(2.0);
-    vec4 e = RoomTexel(3.0);
-    vec4 ax = RoomTexel(4.0);
-    vec4 y = RoomTexel(5.0);
-    vec2 O = vec2(Decode16(o.r, o.g), Decode16(o.b, o.a));
-    vec2 U = normalize(vec2(DecodeUnit(ax.r, ax.g), DecodeUnit(ax.b, ax.a)));
-    vec3 lo = vec3(0.0, Decode16(y.r, y.g), 0.0);
-    vec3 hi = vec3(Decode16(e.r, e.g), Decode16(y.b, y.a), Decode16(e.b, e.a));
-    vec2 pd = p.xz - O;
-    vec3 x = vec3(dot(pd, U), p.y, dot(pd, vec2(-U.y, U.x)));
-    vec3 inset = min(vec3(0.4), (hi - lo) * 0.5);
-    x = clamp(x, lo + inset, hi - inset);
+    float slot = RoomSlot();
+    float block = RoomRows(slot).x;
+    vec2 O, U;
+    vec3 lo, hi;
+    RoomBox(slot, O, U, lo, hi);
+    vec3 inset = BoxInset(lo, hi);
+    vec3 x = ToBox(p, O, U);
+    vec3 g = clamp((x - lo - inset) / max(hi - lo - 2.0 * inset, vec3(1e-4)), 0.0, 1.0) *
+            vec3(GRID_U - 1.0, GRID_Y - 1.0, GRID_V - 1.0);
     vec3 nl = vec3(dot(n.xz, U), n.y, dot(n.xz, vec2(-U.y, U.x)));
-    vec3 pr = RoomProbes(p);
-    vec3 a = ProbeLight(pr.x, x, nl, lo, hi, U);
-    if (pr.z < 0.001)
-        return a;
-    return mix(a, ProbeLight(pr.y, x, nl, lo, hi, U), pr.z);
+    vec3 w = nl * nl;
+    return w.x * GridNormal(nl.x >= 0.0 ? 0.0 : 1.0, block, g) +
+            w.y * GridNormal(nl.y >= 0.0 ? 2.0 : 3.0, block, g) +
+            w.z * GridNormal(nl.z >= 0.0 ? 4.0 : 5.0, block, g);
 }
 
 // A sky and a ground for what is reflected: the sky's cube under PBR, and
@@ -781,7 +657,7 @@ void PS()
         cubeAmb = RoomAmbient(vWorldPos.xyz, normal);
         // and the room reflected, from the nearer drawn probe
         if (cRoomCubes < 1.5) {
-            vec3 pr = RoomProbes(vWorldPos.xyz);
+            vec3 pr = RoomProbes(RoomSlot(), vWorldPos.xyz);
             reflected = ProbeSample(reflect(-eye, normal),
                     pr.z < 0.5 ? pr.x : pr.y) * fresnel;
         }

@@ -2062,22 +2062,7 @@ function M.box_exit(b, p, d)
 end
 function M.cpu_cubes(tx, h, tz, light)
 	local K = M.PROBE_K
-	local image = M.cpu_cube_image
-	if not image then
-		image = magic.Image:new()
-		assert(image:SetSize(6 * K * K, M.PROBE_ROWS, 4), "cpu cubes image")
-		local texture = magic.Texture2D:new()
-		texture:SetNumLevels(1)
-		-- Held by the cache: the materials let go of it under the cube
-		-- mode, and one nothing holds is freed under the next SetData
-		assert(magic.cache:AddManualResource(image, "fp_cpu_cubes_image"),
-				"cpu cubes image in the cache")
-		assert(magic.cache:AddManualResource(texture, "fp_cpu_cubes"),
-				"cpu cubes in the cache")
-		M.cpu_cube_image, M.cpu_cube_texture = image, texture
-		M.kept[#M.kept + 1] = image
-		M.kept[#M.kept + 1] = texture
-	end
+	local image = M.cpu_cells_init()
 	M.cpu_cube = {}
 	-- The texels as one list (buildat.set_image_data)
 	local cw = 6 * K * K
@@ -2212,10 +2197,31 @@ function M.cpu_cubes(tx, h, tz, light)
 	buildat.set_image_data(image, v)
 	assert(M.cpu_cube_texture:SetData(image), "cpu cubes texture")
 	M.cpu_cube_texture.filterMode = magic.FILTER_NEAREST
-	if M.cube_mode == 2 then
-		for _, m in ipairs({lit_material, glass_material}) do
-			m:SetTexture(magic.TU_EMISSIVE, M.cpu_cube_texture)
-		end
+	M.grid_bake()
+end
+-- The worked out cells' image and texture, by name for the grid's pass:
+-- held by the cache, as one nothing holds is freed under the next SetData
+function M.cpu_cells_init()
+	if not M.cpu_cube_image then
+		local image = magic.Image:new()
+		assert(image:SetSize(6 * M.PROBE_K * M.PROBE_K, M.PROBE_ROWS, 4),
+				"cpu cubes image")
+		local texture = magic.Texture2D:new()
+		texture:SetNumLevels(1)
+		assert(magic.cache:AddManualResource(image, "fp_cpu_cubes_image"),
+				"cpu cubes image in the cache")
+		assert(magic.cache:AddManualResource(texture, "fp_cpu_cubes"),
+				"cpu cubes in the cache")
+		assert(texture:SetData(image), "cpu cubes texture")
+		M.cpu_cube_image, M.cpu_cube_texture = image, texture
+	end
+	return M.cpu_cube_image
+end
+-- The rooms' grid drawn again, at the next frame, when what it is from has
+-- changed: the room table, the worked out cells, the mode
+function M.grid_bake()
+	if M.probe then
+		M.probe.grid_surface:QueueUpdate()
 	end
 end
 
@@ -2284,8 +2290,22 @@ local function probes_init()
 	p.atlas, p.reduce = atlas, reduce
 	M.kept[#M.kept + 1] = atlas
 	M.kept[#M.kept + 1] = reduce
+	-- **The rooms' grid** (GridBake.glsl): GRID_U * 6 by 64 rooms'
+	-- GRID_Y * GRID_V, what a surface's light is read from in both modes;
+	-- drawn from either mode's cells, which are there by name before
+	M.cpu_cells_init()
+	local grid = magic.Texture2D:new()
+	grid:SetNumLevels(1)
+	assert(grid:SetSize(48, PROBE_ROWS * 24, f16, magic.TEXTURE_RENDERTARGET),
+			"the rooms' grid")
+	grid.filterMode = magic.FILTER_BILINEAR
+	assert(magic.cache:AddManualResource(grid, "fp_room_grid"),
+			"the rooms' grid in the cache")
+	local _, gvp, gsurface = view(grid, "main/fp_grid.xml", 90)
+	p.grid, p.grid_vp, p.grid_surface = grid, gvp, gsurface
 	for _, m in ipairs({lit_material, glass_material}) do
 		m:SetTexture(magic.TU_NORMAL, atlas)
+		m:SetTexture(magic.TU_EMISSIVE, grid)
 	end
 	M.probe = p
 	return p
@@ -2302,11 +2322,11 @@ function M.probes_tick()
 		local p = mode > 0 and probes_init()
 		for _, m in ipairs({lit_material, glass_material}) do
 			m:SetShaderParameter("RoomCubes", mode)
-			if mode == 1 then
-				m:SetTexture(magic.TU_EMISSIVE, p.reduce)
-			elseif mode == 2 and M.cpu_cube_texture then
-				m:SetTexture(magic.TU_EMISSIVE, M.cpu_cube_texture)
-			end
+		end
+		if p then
+			-- The grid from this mode's cells
+			p.grid_vp.renderPath:SetShaderParameter("RoomCubes", mode)
+			M.grid_bake()
 		end
 		-- The room table's readiness is the mode's
 		S.daylight_key = nil
@@ -2335,6 +2355,7 @@ function M.probes_tick()
 			(face + 1) * PROBE_T, (row + 1) * PROBE_T))
 	p.surface:QueueUpdate()
 	p.reduce_surface:QueueUpdate()
+	p.grid_surface:QueueUpdate()
 	if face == 5 and not M.probe_ready[row] then
 		M.probe_ready[row] = true
 		if M.bounce_args then
