@@ -13,6 +13,14 @@ M.safe.main_scene = getmetatable(magic.Scene).wrap(__buildat_replicated_scene)
 local sync_node_added_subs = {}
 local sync_node_removed_subs = {}
 
+-- The scene emptied and the subscribers forgotten: a connection left
+-- ([MENU_CONTEXT]); the next one fills it again
+function M.reset()
+	sync_node_added_subs = {}
+	sync_node_removed_subs = {}
+	__buildat_replicated_scene:RemoveAllChildren()
+end
+
 -- Callback will be called for each node added to the scene.
 -- Callback is called immediately for all existing nodes.
 function M.safe.sub_sync_node_added(opts, cb)
