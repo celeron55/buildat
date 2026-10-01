@@ -9650,6 +9650,11 @@ function M.suspend()
 	end
 	place.parts = {}
 	voxel_meshes = {}
+	-- and what they were built from: fp:closed empties the entities, and a
+	-- ray against an instance whose door was gone was an error (user,
+	-- 2026-10-02)
+	outlines, wall_data, room_data, inst_data, solids = {}, {}, {}, {}, {}
+	place.layers = {}
 	S.layout, S.layouts_open = nil, false
 	place.build_window()
 	for _, n in ipairs(SCENE_PARTS) do
@@ -10185,7 +10190,16 @@ function M.start(d)
 	end
 	-- A press off an open dropdown closes it, and one on the view does
 	-- nothing else
-	magic.SubscribeToEvent("MouseButtonDown", function(_, data)
+	-- None of the input is the editor's under the plans page (M.suspend):
+	-- a click on a plan there went on to pick in the plan just closed
+	local function live(f)
+		return function(...)
+			if not S.suspended then
+				f(...)
+			end
+		end
+	end
+	magic.SubscribeToEvent("MouseButtonDown", live(function(_, data)
 		-- A viewport's hidden menus come back, and the click does nothing
 		-- else
 		if doc.ui_hidden then
@@ -10199,29 +10213,29 @@ function M.start(d)
 			return
 		end
 		M.mouse_down(data:GetInt("Button"))
-	end)
-	magic.SubscribeToEvent("MouseButtonUp", function(_, data)
+	end))
+	magic.SubscribeToEvent("MouseButtonUp", live(function(_, data)
 		M.mouse_up(data:GetInt("Button"))
-	end)
-	magic.SubscribeToEvent("MouseMove", function(_, data)
+	end))
+	magic.SubscribeToEvent("MouseMove", live(function(_, data)
 		M.mouse_move(data:GetInt("X"), data:GetInt("Y"), data:GetInt("DX"),
 				data:GetInt("DY"))
-	end)
-	magic.SubscribeToEvent("MouseWheel", function(_, data)
+	end))
+	magic.SubscribeToEvent("MouseWheel", live(function(_, data)
 		M.mouse_wheel(data:GetInt("Wheel"))
-	end)
-	magic.SubscribeToEvent("TouchBegin", function(_, data)
+	end))
+	magic.SubscribeToEvent("TouchBegin", live(function(_, data)
 		local x, y, sc = data:GetInt("X"), data:GetInt("Y"), magic.ui.scale
 		panel.press(x / sc, y / sc)
 		M.touch_begin(data:GetInt("TouchID"), x, y)
-	end)
-	magic.SubscribeToEvent("TouchMove", function(_, data)
+	end))
+	magic.SubscribeToEvent("TouchMove", live(function(_, data)
 		M.touch_move(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"),
 				data:GetInt("DX"), data:GetInt("DY"))
-	end)
-	magic.SubscribeToEvent("TouchEnd", function(_, data)
+	end))
+	magic.SubscribeToEvent("TouchEnd", live(function(_, data)
 		M.touch_end(data:GetInt("TouchID"), data:GetInt("X"), data:GetInt("Y"))
-	end)
+	end))
 	set_view("2d")
 	-- A phone's address bar away from the first tap, until the menu
 	buildat.set_web_fullscreen(true)
