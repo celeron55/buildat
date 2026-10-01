@@ -498,6 +498,30 @@ void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float po
     power = mix(120.0, 4.0, roughness);
 }
 
+// **The texture coordinate's y**: a room's slot in the room table and,
+// after the point, the share of the open sky's light the face does not get
+// (1 - its room's daylight factor); 0 outdoors
+float RoomSlot()
+{
+    return floor(vRow.y + 0.0005);
+}
+float SkyOcc()
+{
+    return clamp(vRow.y - RoomSlot(), 0.0, 1.0);
+}
+
+// **The sun a room's windows let in, bounced** (editor.lua's
+// M.room_bounce): radiance to add to the ambient, stored as sqrt(L / 16)
+// in the room table (sSpecMap), a row a room
+vec3 RoomBounce()
+{
+    float slot = RoomSlot();
+    if (slot < 0.5)
+        return vec3(0.0);
+    vec3 t = texture2D(sSpecMap, vec2(0.5, (slot + 0.5) / 256.0)).rgb;
+    return t * t * 16.0;
+}
+
 // A sky and a ground for what is reflected: the sky's cube under PBR, and
 // an analytic one otherwise
 // simplified: the open sky's even indoors; the upgrade is a probe per room
@@ -505,7 +529,7 @@ vec3 Environment(vec3 r)
 {
     #if !defined(GL_ES) || __VERSION__ >= 300
         if (cPbr > 0.5)
-            return textureCube(sZoneCubeMap, r).rgb * (1.0 - vRow.y);
+            return textureCube(sZoneCubeMap, r).rgb * (1.0 - SkyOcc());
     #endif
     return mix(vec3(0.35, 0.33, 0.30), vec3(0.75, 0.82, 0.92), smoothstep(-0.2, 0.3, r.y));
 }
@@ -521,11 +545,14 @@ void PS()
     emissive *= vColor.a;
     // What of the ambient reaches this face
     float ambientShare = 1.0;
+    // The room's bounced sunlight, on top of the sky's ambient
+    vec3 bounce = vec3(0.0);
     if (cPbr > 0.5)
     {
         albedo = pow(max(albedo, vec3(0.0)), vec3(2.2));
         emissive = pow(max(emissive, vec3(0.0)), vec3(2.2)) * 8.0;
-        ambientShare = 1.0 - vRow.y;
+        ambientShare = 1.0 - SkyOcc();
+        bounce = RoomBounce();
         // A face sees the sky by which way it is turned: all of it facing
         // up, half on a wall, the floor's bounce facing down; and the
         // sun's side of the sky is the brighter one. So the faces of a
@@ -564,7 +591,8 @@ void PS()
         if (cPlanLook > 0.5)
             finalColor = vec3(0.0);
         #ifdef AMBIENT
-            finalColor += cAmbientColor.rgb * albedo * ambientShare + emissive + reflected;
+            finalColor += (cAmbientColor.rgb * ambientShare + bounce) * albedo +
+                    emissive + reflected;
             if (cPlanLook > 0.5)
                 finalColor = albedo;
             gl_FragColor = vec4(GetFog(finalColor, fogFactor), alpha);
@@ -572,7 +600,8 @@ void PS()
             gl_FragColor = vec4(GetLitFog(finalColor, fogFactor), alpha);
         #endif
     #elif defined(DEFERRED)
-        vec3 finalColor = vVertexLight * albedo * ambientShare + emissive + reflected;
+        vec3 finalColor = (vVertexLight * ambientShare + bounce) * albedo +
+                emissive + reflected;
         if (cPlanLook > 0.5)
             finalColor = albedo;
         gl_FragData[0] = vec4(GetFog(finalColor, fogFactor), 1.0);
@@ -580,7 +609,8 @@ void PS()
         gl_FragData[2] = vec4(normal * 0.5 + 0.5, power / 255.0);
         gl_FragData[3] = vec4(EncodeDepth(vWorldPos.w), 0.0);
     #else
-        vec3 finalColor = vVertexLight * albedo * ambientShare + emissive + reflected;
+        vec3 finalColor = (vVertexLight * ambientShare + bounce) * albedo +
+                emissive + reflected;
         if (cPlanLook > 0.5)
             finalColor = albedo;
         gl_FragColor = vec4(GetFog(finalColor, fogFactor), alpha);

@@ -1654,8 +1654,35 @@ end
 -- for a face in the layout's own frame. simplified: the sky's share only;
 -- the sun a room's windows let in lights the floor it falls on and not
 -- the rest of the room, which a bounce term would.
+-- **Each room's slot**, 1 to 255, over the whole rebuild (0: outdoors,
+-- or no slot left): its row in the room table, which the texture
+-- coordinate's y carries as slot + 1 - daylight factor. And what its
+-- sunlight bounce is worked out from (M.room_bounce): the glass to the
+-- outside with which way it faces, in the scene's frame, and the room's
+-- floor colour and surfaces.
+M.room_slot, M.room_light, M.room_slots_used = {}, {}, 0
+local function entry_albedo(id)
+	local e = id and doc.ents[id]
+	if not e or e.type ~= "palette" then
+		return {r = 0.5, g = 0.5, b = 0.5}
+	end
+	local p = e.ints
+	local function lin(rgb)
+		return {r = (math.floor(rgb / 65536) / 255) ^ 2.2,
+				g = (math.floor(rgb / 256) % 256 / 255) ^ 2.2,
+				b = (rgb % 256 / 255) ^ 2.2}
+	end
+	local base, paint = lin(p.base), lin(p.color)
+	local k = p.finish == 1 and 1 or p.finish == 2 and p.opacity / 1000 or 0
+	local function ch(c)
+		local nat = base[c]
+		return p.finish == 0 and nat * paint[c] or nat + (paint[c] - nat) * k
+	end
+	return {r = ch("r"), g = ch("g"), b = ch("b")}
+end
 function M.room_occlusion()
 	local glass = {}
+	local sunward = {}
 	for _, it in pairs(inst_data) do
 		local def = it.hosted and it.frame and doc.ents[it.def]
 		local d = def and def.ints
@@ -1670,21 +1697,105 @@ function M.room_occlusion()
 		if a > 0 then
 			local f = it.frame
 			local off = f.lo + f.ro + 100
+			local side = {}
 			for _, sgn in ipairs({1, -1}) do
-				local rid = room_at(it.x + f.nx * off * sgn, it.z + f.nz * off * sgn)
+				side[sgn] = room_at(it.x + f.nx * off * sgn, it.z + f.nz * off * sgn)
+				local rid = side[sgn]
 				if rid then
 					glass[rid] = (glass[rid] or 0) + a
+				end
+			end
+			-- Glass with the outside behind it lets the sun in: facing
+			-- away from the room, in the scene's frame
+			local through = d.kind == KIND.opening and 1 or 0.75
+			for _, sgn in ipairs({1, -1}) do
+				local rid = side[sgn]
+				if rid and not side[-sgn] then
+					local r = M.cur_rel or place.WORLD
+					local x0, _, z0 = place.point(r, 0, 0, 0)
+					local x1, _, z1 = place.point(r, -f.nx * sgn, 0, -f.nz * sgn)
+					local l = sunward[rid] or {}
+					sunward[rid] = l
+					l[#l + 1] = {a = a / 1e6 * through, ox = x1 - x0, oz = z1 - z0}
 				end
 			end
 		end
 	end
 	M.room_occ = {}
 	for id, rd in pairs(room_data) do
-		M.room_occ[id] = 1 - M.daylight.daylight_factor(glass[id] or 0, rd.net)
+		local occ = 1 - M.daylight.daylight_factor(glass[id] or 0, rd.net)
+		local slot = M.room_slot[id]
+		if not slot and M.room_slots_used < 255 then
+			M.room_slots_used = M.room_slots_used + 1
+			slot = M.room_slots_used
+			M.room_slot[id] = slot
+		end
+		-- Packed: slot + occ, occ under 1
+		M.room_occ[id] = (slot or 0) + math.min(occ, 0.995)
+		if slot then
+			local e = doc.ents[id]
+			local perim = 0
+			for i = 1, #rd.pts do
+				local p, q = rd.pts[i], rd.pts[i % #rd.pts + 1]
+				perim = perim + geom.len(q[1] - p[1], q[2] - p[2])
+			end
+			local floor = rd.net / 1e6
+			M.room_light[slot] = {wins = sunward[id] or {},
+					area = 2 * floor + perim / 1000 * room_ceiling(e) / 1000,
+					floor = entry_albedo(e.ints.mat_floor)}
+		end
 	end
 	M.tri_occ, M.tri_occ_fn = 0, function(xm, zm)
 		local id = room_at(xm * 1000, zm * 1000)
 		return id and M.room_occ[id] or 0
+	end
+end
+
+-- **The sun a room's windows let in, bounced** (user, 2026-10-01): what
+-- comes through the glass facing the sun lands on the floor, which sends
+-- its colour of it back into the room; spread over the room's surfaces
+-- and taken up again by them, half each time (1 / (1 - 0.5)). As the
+-- shader's ambient adds it: irradiance over pi. The room table's row
+-- `slot` is it, as sqrt(L / 16).
+-- simplified: the patch is taken to land on the floor, whatever the
+-- sun's height, and nothing outside shades a window
+M.ROOM_TABLE_ROWS = 256
+function M.room_bounce(tx, h, tz, light)
+	local image = M.room_table_image
+	if not image then
+		image = magic.Image:new()
+		assert(image:SetSize(1, M.ROOM_TABLE_ROWS, 4), "room table image")
+		M.room_table_image = image
+		M.kept[#M.kept + 1] = image
+	end
+	local e = h > 0 and light.sun or 0
+	local sc = light.sun_color
+	for slot = 1, M.ROOM_TABLE_ROWS - 1 do
+		local rl = M.room_light[slot]
+		local c = {0, 0, 0}
+		if rl and e > 0 then
+			local flux = 0
+			for _, w in ipairs(rl.wins) do
+				flux = flux + w.a * e * math.max(0, w.ox * tx + w.oz * tz)
+			end
+			local k = flux / math.max(rl.area, 1) / 0.5 / math.pi
+			c = {k * rl.floor.r * sc.r, k * rl.floor.g * sc.g, k * rl.floor.b * sc.b}
+		end
+		image:SetPixel(0, slot, magic.Color(math.sqrt(math.min(c[1], 16) / 16),
+				math.sqrt(math.min(c[2], 16) / 16),
+				math.sqrt(math.min(c[3], 16) / 16), 1))
+	end
+	local texture = M.room_table
+	if not texture then
+		texture = magic.Texture2D:new()
+		texture:SetNumLevels(1)
+		M.room_table = texture
+		M.kept[#M.kept + 1] = texture
+	end
+	assert(texture:SetData(image), "room table texture")
+	texture.filterMode = magic.FILTER_NEAREST
+	for _, m in ipairs({lit_material, glass_material}) do
+		m:SetTexture(magic.TU_SPECULAR, texture)
 	end
 end
 -- One value for what is built in its own frame: the room it stands in, or
@@ -1697,8 +1808,10 @@ function M.inst_occlusion(it)
 	if it.hosted and it.frame then
 		local f = it.frame
 		local off = f.lo + f.ro + 100
-		return math.max(at(it.x + f.nx * off, it.z + f.nz * off),
-				at(it.x - f.nx * off, it.z - f.nz * off))
+		-- The darker of the two by the occ part (slot + occ, packed)
+		local a = at(it.x + f.nx * off, it.z + f.nz * off)
+		local b = at(it.x - f.nx * off, it.z - f.nz * off)
+		return (a % 1) >= (b % 1) and a or b
 	end
 	return at(it.x, it.z)
 end
@@ -2005,6 +2118,7 @@ rebuild = function()
 	end
 	local seen_voxels, all_solids = {}, {}
 	place.layers = {}
+	M.room_slot, M.room_light, M.room_slots_used = {}, {}, 0
 	-- Which layouts are above the current one, for S.hide_above; what is
 	-- built new is shown, so the hiding is done again
 	place.above, place.shown = {}, {}
@@ -2034,6 +2148,7 @@ rebuild = function()
 		end
 		place.above[l.id] = r.y > 0
 		P, S.view_layout = parts, l.id
+		M.cur_rel = r
 		foundation = l.ints.y > 0 and l.ints.y == lowest[l.strs.group] and
 				{h = l.ints.y, mat = l.ints.mat_foundation} or nil
 		build_layout(seen_voxels, wells[l.id])
@@ -2189,6 +2304,7 @@ function M.apply_daylight()
 	zone.ambientColor = magic.Color(a.r, a.g, a.b)
 	zone.fogColor = magic.Color(f.r, f.g, f.b)
 	M.sky.material:SetShaderParameter("Treeline", st.treeline / 1000)
+	M.room_bounce(tx, h, tz, light)
 	M.sky:set(tx, h, tz, h, light)
 	-- A changed treeline is in the reflections at once, not when the sun
 	-- next moves
