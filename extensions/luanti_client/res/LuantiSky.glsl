@@ -210,20 +210,24 @@ vec2 TreeRow(vec2 p, float cell0, float lo, float hi, float seed, float aa,
             in_tree = (1.0 - smoothstep(hw - aa, hw + aa, dx)) *
                     (1.0 - smoothstep(1.0 - aa / h, 1.0, y));
         } else {
-            // Pine: a trunk to half of it, then a wide crown, flat on top
-            // and uneven, in a few lumps of its own
-            float trunk = 1.0 - smoothstep(h * 0.015 - aa, h * 0.015 + aa, dx);
+            // Pine: narrower and lower than a spruce, its crown at about
+            // the backing's top so that it is part of the forest rather
+            // than a ball over it (user); a trunk under a crown of a few
+            // lumps, flat on top
+            float hp = h * 0.85;
+            float yp = p.y / hp;
+            float trunk = 1.0 - smoothstep(hp * 0.012 - aa, hp * 0.012 + aa, dx);
             float crown = 0.0;
             for(int j = 0; j < 3; j++){
                 float fj = float(j);
                 vec2 lc = vec2((SkyHash(vec2(id, seed + 5.0 + fj)) - 0.5) *
-                        0.28, 0.72 + 0.18 * SkyHash(vec2(id, seed + 8.0 + fj)));
-                vec2 q = vec2((p.x - at) / h - lc.x, y - lc.y) /
-                        vec2(0.17, 0.11);
-                crown = max(crown, 1.0 - smoothstep(1.0 - aa / h * 8.0, 1.0,
+                        0.18, 0.68 + 0.12 * SkyHash(vec2(id, seed + 8.0 + fj)));
+                vec2 q = vec2((p.x - at) / hp - lc.x, yp - lc.y) /
+                        vec2(0.11, 0.09);
+                crown = max(crown, 1.0 - smoothstep(1.0 - aa / hp * 10.0, 1.0,
                         length(q)));
             }
-            in_tree = max(trunk * step(y, 0.75), crown);
+            in_tree = max(trunk * step(yp, 0.7), crown);
         }
         in_tree *= step(0.0, y);
         if(in_tree > best.x)
@@ -419,7 +423,7 @@ void PS()
             // the single trees (user), and two rows of them over it
             vec2 back = TreeRow(p, 0.2, 0.75, 1.1, 3.0, aa, around, 0.15);
             vec2 mid = TreeRow(p, 0.32, 0.8, 1.2, 7.0, aa, around, 0.3);
-            vec2 front = TreeRow(p, 0.45, 0.45, 0.7, 11.0, aa, around, 0.3);
+            vec2 front = TreeRow(p, 0.45, 0.45, 0.7, 11.0, aa, around, 0.0);
             // Raised to where the crowns are, no sky seen through (user)
             float body_top = 0.72 + 0.15 * SkyNoise(vec2(p.x * 1.3, 1.0)) +
                     0.06 * SkyNoise(vec2(p.x * 7.0, 2.0));
