@@ -292,9 +292,15 @@ local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
 -- median of 39 of 255 in the render with the sky still at 0, which is
 -- [PT_NIGHT]'s target; the same number is LUM_RANGE in
 -- pathtrace_render.py.
+-- **The top is vp5_1000's own key** (user, 2026-10-01: its greenery sets
+-- a good snow exposure, and a field of snow and ice should keep it rather
+-- than be metered down to dull): 7.04 there, measured as the ratio of the
+-- metered reference shot to one at a key pinned at 1. It is the highest
+-- key of the reference views (vp1_1300 is 3.0, the rest under 2), so the
+-- cap changes none of them; pathtrace_render.py's 100 is left alone.
 local AUTO_EXPOSURE = {
 	adapt_rate = 0.6,
-	lum_range = {0.003, 100.0},
+	lum_range = {0.003, 7.0},
 	middle_grey = 0.18,
 	-- Frames left before the rate goes back after a reset; in this
 	-- table since the chunk is at Lua 5.1's two hundred locals
