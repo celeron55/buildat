@@ -78,6 +78,8 @@ local S = {
 	height = 0,
 	hang = 0,
 	room_walls = true, -- a room drawn gets walls on its edges
+	-- and a plafond lamp at its middle (user: a room is dark without one)
+	room_lamp = buildat.storage_read("room_lamp") ~= "0",
 	-- New boxes
 	box = {w = 600, h = 750, d = 600, align = 0, offset = 0},
 	-- The object tool's other shape: stairs this wide, up this high (0: the
@@ -2977,6 +2979,18 @@ do
 				end
 			end
 		end
+		-- The lamp at the middle, when the middle is in the room (not
+		-- always so for an L)
+		if S.room_lamp then
+			local pts = {}
+			for i, c in ipairs(corners) do
+				pts[i] = {c.x, c.z}
+			end
+			local cx, cz = geom.centroid(pts)
+			if geom.point_in_polygon(cx, cz, pts) then
+				M.plafond_ops(b.ops, cx, cz)
+			end
+		end
 		local selected = select_placed(ph, "room")
 		send(finish_batch(b), function(err)
 			selected(err)
@@ -3227,6 +3241,34 @@ do
 		return out
 	end
 
+	-- **A plafond lamp** (user): a square 250 by 250, 50 thick, on the
+	-- ceiling at (x, z), of the palette's lamp material -- a new "Lamp"
+	-- entry when it has none -- and lit, as an instance starts. Its ops
+	-- go onto ops, the instance's last.
+	function M.plafond_ops(ops, x, z)
+		local mat = nil
+		for _, p in ipairs(of_type("palette")) do
+			if p.ints.kind == 4 then
+				mat = p.id
+				break
+			end
+		end
+		if not mat then
+			mat = doc.placeholder()
+			local k = KIND_DEFAULTS[4]
+			ops[#ops + 1] = {op = "create", ent = {id = mat, type = "palette",
+					ints = {kind = 4, base = k.base, color2 = k.color2,
+					scale = k.scale, roughness = k.roughness,
+					specular = k.specular}, strs = {name = "Lamp"}}}
+		end
+		local def = doc.placeholder()
+		ops[#ops + 1] = {op = "create", ent = {id = def, type = "definition",
+				ints = {kind = KIND.box, w = 250, h = 50, d = 250, mat = mat}}}
+		ops[#ops + 1] = {op = "create", ent = {id = doc.placeholder(),
+				type = "instance", ints = {def = def, x = math.floor(x + 0.5),
+				z = math.floor(z + 0.5), align = 1, offset = 0}}}
+	end
+
 	-- A box drawn: a definition of that size and an instance of it. Stairs
 	-- the same, given their depth or taking it from their steps (d nil).
 	add_box = function(x, z, w, d)
@@ -3244,26 +3286,9 @@ do
 		local ops = {}
 		local align, offset = S.box.align, S.box.offset
 		if S.shape == "lamp" then
-			-- **A plafond lamp** (user): a square 250 by 250, 50 thick, on
-			-- the ceiling, of the palette's lamp material -- a new "Lamp"
-			-- entry when it has none -- and lit, as an instance starts
-			local mat = nil
-			for _, p in ipairs(of_type("palette")) do
-				if p.ints.kind == 4 then
-					mat = p.id
-					break
-				end
-			end
-			if not mat then
-				mat = doc.placeholder()
-				local k = KIND_DEFAULTS[4]
-				ops[#ops + 1] = {op = "create", ent = {id = mat, type = "palette",
-						ints = {kind = 4, base = k.base, color2 = k.color2,
-						scale = k.scale, roughness = k.roughness,
-						specular = k.specular}, strs = {name = "Lamp"}}}
-			end
-			ints.w, ints.h, ints.d, ints.mat = 250, 50, 250, mat
-			align, offset = 1, 0
+			M.plafond_ops(ops, x, z)
+			send(ops, select_placed(ops[#ops].ent.id, "instance"))
+			return
 		end
 		ops[#ops + 1] = {op = "create", ent = {id = def, type = "definition",
 				ints = ints}}
@@ -4658,6 +4683,11 @@ local function build_props()
 		end)
 		panel.check(props, "Hang from the ceiling", S.hang == 1, function()
 			S.hang = 1 - S.hang
+			refresh_panels()
+		end)
+		panel.check(props, "Rooms get a ceiling lamp", S.room_lamp, function()
+			S.room_lamp = not S.room_lamp
+			buildat.storage_write("room_lamp", S.room_lamp and "1" or "0")
 			refresh_panels()
 		end)
 		panel.check(props, "Rooms get walls", S.room_walls, function()

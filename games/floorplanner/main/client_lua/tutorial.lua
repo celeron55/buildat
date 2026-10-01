@@ -121,7 +121,7 @@ return function(doc)
 		{function() return click("Draw a room: pick Room (R) in the " ..
 				"toolbar, then click its corners on the floor. Click the " ..
 				"first corner again, or press Enter, to close it. The room " ..
-				"gets walls.") end,
+				"gets walls and a lamp on its ceiling.") end,
 				function() return #of("room") >= 1 end},
 		{function() return click("Draw a second room beside the first, " ..
 				"starting and ending on the first room's corners, so the two " ..
@@ -179,21 +179,13 @@ return function(doc)
 					end
 					return false
 				end},
-		{function() return "A night lamp needs a glowing material: in the " ..
-				"Palette, press New entry, then set its Type to Lamp." ..
-				palette() end,
-				function()
-					for _, p in ipairs(of("palette")) do
-						if p.ints.kind == 4 then return true end
-					end
-					return false
-				end},
 		{function() return click("Build the lamp from voxels on the " ..
-				"dresser: with the Lamp entry chosen in the palette, pick " ..
+				"dresser: click the Lamp entry in the palette (the ceiling " ..
+				"lamps made it), pick " ..
 				"Voxels (K) and go to 3D (the view dropdown, or F2). Click " ..
 				"the dresser's top to start a volume there, then click on " ..
 				"its voxels for more. The panel's Click says whether a click " ..
-				"places, digs or paints.") .. props() end,
+				"places, digs or paints.") .. palette() .. props() end,
 				function()
 					for _, i in ipairs(instances(1)) do
 						for _, m in pairs(doc.voxels[i.ints.def] or {}) do
