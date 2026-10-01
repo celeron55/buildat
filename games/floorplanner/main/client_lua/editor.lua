@@ -9933,7 +9933,8 @@ end
 -- the room probes have bounced their light round, the scene's meshes are
 -- dumped (buildat.dump_meshes, into <user>/meshdumps) with what the render
 -- needs beside them: the camera, the sun and the sky as apply_daylight
--- has them, and each palette row's albedo as M.room_bounce takes it.
+-- has them, and each palette row's albedo as M.room_bounce takes it; and
+-- a screenshot, after which the client quits.
 -- The lamps are switched off for this client, as the render has none.
 -- simplified: the albedo is the entry's flat colour, without the
 -- pattern's gaps and grain
@@ -9942,7 +9943,16 @@ M.refdump = buildat.get_env("BUILDAT_FP_REFDUMP") and
 		{name = buildat.get_env("BUILDAT_FP_REFDUMP")}
 function M.refdump_tick(dt)
 	local r = M.refdump
-	if not r or r.done then
+	if not r then
+		return
+	end
+	-- Done: a second for the screenshot to land, then the client goes
+	if r.done then
+		r.quit_t = r.quit_t + dt
+		if r.quit_t > 1 then
+			M.refdump = nil
+			buildat.quit()
+		end
 		return
 	end
 	if not r.t then
@@ -10012,6 +10022,10 @@ function M.refdump_tick(dt)
 	}, ",\n") .. "}\n"
 	local name, err = buildat.dump_meshes(json, scene)
 	log:info("Reference dump of " .. r.name .. ": " .. tostring(name or err))
+	-- and the client's own frame of it, into <user>/screenshots
+	local shot, serr = buildat.take_screenshot()
+	log:info("Reference screenshot of " .. r.name .. ": " .. tostring(shot or serr))
+	r.quit_t = 0
 end
 
 function M.leave_viewport()

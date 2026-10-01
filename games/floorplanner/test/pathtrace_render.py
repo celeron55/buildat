@@ -6,7 +6,8 @@
 # and paint decisions are made off the 3D view, so its light is checked
 # against a path tracer, not guessed): Cycles over a dump the client wrote
 # with BUILDAT_FP_REFDUMP=<viewport name> in its environment, into
-# <user>/meshdumps (editor.lua's M.refdump_tick). The same triangles, each palette row's albedo as the client
+# <user>/meshdumps, with its own frame in <user>/screenshots, and quits
+# (editor.lua's M.refdump_tick). The same triangles, each palette row's albedo as the client
 # takes it, the sun and the sky as apply_daylight has them; written as
 # linear radiance (<stem>_cycles.exr, and .npy for compare.py, which puts
 # it through the client's own frame pipeline), with the white a grey card
