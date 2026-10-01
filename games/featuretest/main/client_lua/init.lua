@@ -172,14 +172,15 @@ do
 	local camera = camera_node:CreateComponent("Camera")
 	camera.nearClip = 0.2
 	camera.farClip = 120
-	camera.fov = 60
+	-- Of the screen's short side, a portrait one's width
+	magic.keep_fov(camera, 60)
 	local listener = camera_node:CreateComponent("SoundListener")
 	if magic.audio then
 		magic.audio.listener = listener
 		magic.audio:SetMasterGain(magic.SOUND_MASTER, 0.7)
 	end
 	local viewport = magic.Viewport:new(scene, camera)
-	magic.renderer:SetViewport(0, viewport)
+	magic.set_preferred_viewports({viewport})
 end
 
 do
@@ -259,7 +260,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	if key == magic.KEY_ESCAPE then
 		log:info("KEY_ESCAPE pressed")
-		buildat.disconnect()
+		buildat.leave()
 	end
 end)
 -- vim: set noet ts=4 sw=4:
