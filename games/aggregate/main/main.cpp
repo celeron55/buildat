@@ -72,7 +72,7 @@ static const int WATER_LEVEL = 25;
 // where support ultimately comes from.
 static const int BEDROCK_TOP = -60;
 
-// This game's own cut of a voxel. See local/aggregate_game_plan.md.
+// This game's own cut of a voxel. See doc/plan/aggregate_game_plan.md.
 //
 // Two planes. The first is the engine's, and holds what the engine reads
 // plus the two numbers the simulation keeps; the second is this game's, and
@@ -807,7 +807,10 @@ struct Worldgen: public worldgen::GeneratorInterface
 					uc.getX(), uc.getY(), uc.getZ());
 
 			interface::v3f spread(160, 160, 160);
-			interface::NoiseParams np(0, 20, spread, 0, 7, 0.4);
+			// Retuned 2026-09-14 with digger's, which this is: the noise
+			// hash stopped coming back biased and with twice the swing, and
+			// these are what put the same ground back under the spawn
+			interface::NoiseParams np(47, 37, spread, 0, 7, 0.4);
 
 			int w = uc.getX() - lc.getX() + 1;
 			int d = uc.getZ() - lc.getZ() + 1;
