@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/srp.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The client half of Luanti's login: SRP-6a with SHA-256 and the 2048-bit
 -- group of RFC 5054. The password itself never goes to the server; what does
@@ -17,7 +18,7 @@
 -- to the length of N. The name in x is lowercase (that is how the verifier was
 -- made), the one in M is as the player typed it.
 --
--- M.self_test() checks all of this against vectors from util/srp_reference.py.
+-- M.self_test() checks all of this against vectors from extensions/luanti_client/test/srp_reference.py.
 
 local bignum = buildat.bignum
 local H = buildat.sha256

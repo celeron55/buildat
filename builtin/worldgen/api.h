@@ -33,6 +33,20 @@ namespace worldgen
 		{}
 	};
 
+	// A section has been generated and merged into the world. What listens
+	// is whatever has to run after a generator on the main thread -- a
+	// game's own callbacks over the terrain that has just appeared -- and
+	// cannot be in generate(), which is a worker thread with no module.
+	struct SectionGenerated: public interface::Event::Private
+	{
+		SceneReference scene;
+		pv::Vector3DInt16 section_p;
+
+		SectionGenerated(SceneReference scene,
+				const pv::Vector3DInt16 &section_p):
+			scene(scene), section_p(section_p){}
+	};
+
 	struct GeneratorInterface
 	{
 		virtual ~GeneratorInterface(){}

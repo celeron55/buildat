@@ -79,6 +79,16 @@ struct ModuleContainer
 	interface::Semaphore direct_cb_executed_sem;
 	// post() when direct_cb becomes free, wait() for that to happen
 	interface::Semaphore direct_cb_free_sem;
+	// Which module is using the one direct_cb slot, for the log when
+	// somebody has been waiting for it too long. Written by whoever holds
+	// the slot and read by whoever is waiting, so a stale read says a name
+	// that was true a moment ago, which is what it is for.
+	ss_ direct_cb_holder;
+
+	// When the caller currently in execute_direct_cb() started waiting for
+	// the slot; see the warning there. Written and read under the slot's own
+	// serialization, so there is only ever one caller in it.
+	int64_t slot_wait_from = 0;
 
 	// NOTE: thread-ref_backtraces() Holds the backtraces along the way of a
 	// direct callback chain initiated by this module. Cleared when beginning to
@@ -162,6 +172,30 @@ struct ModuleContainer
 	}
 	void push_event(const Event &event){
 		interface::MutexScope ms(event_queue_mutex);
+		// A tick is a heartbeat and not data: a module that takes longer
+		// than the tick interval to handle one would otherwise collect a
+		// queue of them that only grows, and every other event -- a
+		// packet from a client, a generated section -- waits behind the
+		// whole backlog. So a tick pushed at a module that has one
+		// waiting is added to that one's dtime instead, which keeps the
+		// time right for anything that integrates it.
+		static const Event::Type tick_type =
+				interface::getGlobalEventRegistry()->type("core:tick");
+		if(event.type == tick_type){
+			for(Event &queued : event_queue){
+				if(queued.type != tick_type)
+					continue;
+				const auto *old_p = static_cast<
+						const interface::TickEvent*>(queued.p.get());
+				const auto *new_p = static_cast<
+						const interface::TickEvent*>(event.p.get());
+				if(!old_p || !new_p)
+					break;
+				queued = Event(tick_type, new interface::TickEvent(
+						old_p->dtime + new_p->dtime));
+				return;
+			}
+		}
 		event_queue.push_back(event);
 		event_queue_sem.post();
 	}
@@ -180,7 +214,39 @@ struct ModuleContainer
 			throw Exception("caller_mc == this");
 		log_t(MODULE, "execute_direct_cb[%s]: Waiting for direct_cb to be free",
 				cs(info.name));
-		direct_cb_free_sem.wait(); // Wait for direct_cb to be free
+		// Wait for direct_cb to be free, in slices, so that a wait that
+		// never ends says whose it is: one module can be inside another at
+		// a time, and a caller queueing behind a call that is itself stuck
+		// is how a deadlock here looks from the outside. Said after five
+		// seconds and every ten after that.
+		{
+			// The same twenty as below, for the same reason
+			static const int64_t FIRST_US = 20000000;
+			static const int64_t THEN_US = 10000000;
+			int64_t waited = 0;
+			int64_t slice = FIRST_US;
+			slot_wait_from = interface::os::time_us();
+			while(!direct_cb_free_sem.wait_us(slice)){
+				waited += slice;
+				slice = THEN_US;
+				const ss_ caller_name = caller_mc ? caller_mc->info.name :
+						ss_("(not a module)");
+				log_w(MODULE, "M[%s] has been waiting %.0f s to get into "
+						"M[%s], which M[%s] is in", cs(caller_name),
+						waited / 1e6, cs(info.name), cs(direct_cb_holder));
+			}
+		}
+		const int64_t slot_us = interface::os::time_us() - slot_wait_from;
+		direct_cb_holder = caller_mc ? caller_mc->info.name :
+				ss_("(not a module)");
+		// Whose queue a module is waiting in. A wait of seconds is the shape
+		// of every slow thing between modules here, and which half it is --
+		// waiting for the module to be free, or waiting for the callback to
+		// run -- is the difference between "somebody else is in there" and
+		// "what I asked for is slow". Said at a second, because a startup
+		// legitimately spends longer than that and a line per access would
+		// be the log.
+		const int64_t cb_from = interface::os::time_us();
 		{
 			interface::MutexScope ms(mutex);
 			// This is the last chance to turn around
@@ -189,6 +255,7 @@ struct ModuleContainer
 						cs(info.name));
 
 				// Let the next ones pass too
+				direct_cb_holder = "";
 				direct_cb_free_sem.post();
 
 				// Return an exception to make sure the caller doesn't continue
@@ -217,13 +284,48 @@ struct ModuleContainer
 		//       forcing this semaphore to open, because exiting this function
 		//       while direct_cb is being executed is unsafe. You have to figure
 		//       out what direct_cb has ended up waiting for, and fix that.
-		// Wait for execution to finish
-		direct_cb_executed_sem.wait();
+		// Wait for execution to finish, in slices, so that a wait that never
+		// ends says whose it is: a module calling into another and never
+		// coming back is a server that looks hung with nothing in the log,
+		// and the name of both ends is the whole of what anybody chasing it
+		// needs first. It says so once and then every ten seconds.
+		{
+			// Twenty seconds before the first word, because a module can
+			// legitimately be busy for a long time -- VoxeLibre's mods take
+			// eleven seconds to load and everything else waits for that --
+			// and a warning that fires on every startup is one nobody reads.
+			static const int64_t FIRST_US = 20000000;
+			static const int64_t THEN_US = 10000000;
+			int64_t waited = 0;
+			int64_t slice = FIRST_US;
+			while(!direct_cb_executed_sem.wait_us(slice)){
+				waited += slice;
+				slice = THEN_US;
+				const ss_ caller_name = caller_mc ? caller_mc->info.name :
+						ss_("(not a module)");
+				log_w(MODULE, "M[%s] has been waiting %.0f s for M[%s] to "
+						"run a direct callback", cs(caller_name),
+						waited / 1e6, cs(info.name));
+			}
+		}
+		{
+			static const int64_t SLOW_ACCESS_US = 1000000;
+			const int64_t cb_us = interface::os::time_us() - cb_from;
+			if(slot_us + cb_us >= SLOW_ACCESS_US){
+				const ss_ caller_name = caller_mc ? caller_mc->info.name :
+						ss_("(not a module)");
+				log_w(MODULE, "M[%s] waited %.1f s for M[%s]: %.1f s for the "
+						"module to be free, %.1f s for the callback to run",
+						cs(caller_name), (slot_us + cb_us) / 1e6,
+						cs(info.name), slot_us / 1e6, cb_us / 1e6);
+			}
+		}
 		// Grab execution result
 		std::exception_ptr eptr = direct_cb_exception;
 		direct_cb_exception = nullptr; // Not to be used anymore
 		thread->set_caller_thread(nullptr);
 		// Set direct_cb to be free again
+		direct_cb_holder = "";
 		direct_cb_free_sem.post();
 		// Handle execution result
 		if(eptr){
@@ -367,6 +469,14 @@ void ModuleThread::handle_direct_cb(
 	mc->direct_cb_executed_sem.post();
 }
 
+// How long a module may spend on one event before it is worth saying so.
+// A module's thread handles one event at a time and everything else waits --
+// another module's access into it, and every event behind it in its own
+// queue -- so a handler that takes seconds is felt everywhere as lag, and
+// which handler it was is the first thing anybody chasing that wants to
+// know. A second is far past anything a game does per event on purpose.
+static const int64_t SLOW_EVENT_US = 1000000;
+
 void ModuleThread::handle_event(Event &event)
 {
 	if(!mc->module){
@@ -376,7 +486,15 @@ void ModuleThread::handle_event(Event &event)
 		try {
 			log_t(MODULE, "M[%s]->event(): Executing",
 					cs(mc->info.name));
+			const int64_t t0 = interface::os::time_us();
 			mc->module->event(event.type, event.p.get());
+			const int64_t took = interface::os::time_us() - t0;
+			if(took >= SLOW_EVENT_US){
+				log_w(MODULE, "M[%s]->event(\"%s\") took %.1f s",
+						cs(mc->info.name),
+						cs(interface::getGlobalEventRegistry()->name(
+								event.type)), took / 1e6);
+			}
 			log_t(MODULE, "M[%s]->event(): Executed",
 					cs(mc->info.name));
 		} catch(std::exception &e){
@@ -440,6 +558,7 @@ struct CState: public State, public interface::Server
 	// TODO: Handle properly in reloads (unload by popping from top, then reload
 	//       everything until top)
 	sv_<ss_> m_module_load_order;
+	size_t m_module_count = 0;
 	sv_<sv_<wp_<ModuleContainer>>> m_event_subs;
 	// NOTE: You can make a copy of an sp_<ModuleContainer> and unlock this
 	//       mutex for processing the module asynchronously (just lock mc->mutex)
@@ -482,6 +601,12 @@ struct CState: public State, public interface::Server
 		m_compiler->include_directories.push_back(
 				g_server_config.get<ss_>("interface_path")+
 				"/../../3rdparty/polyvox/library/PolyVoxCore/include");
+		// Only builtin/storage includes sqlite3.h; everything else goes
+		// through its api.h. The symbols come from buildat_core, which the
+		// server already has open, so no module links anything for this.
+		m_compiler->include_directories.push_back(
+				g_server_config.get<ss_>("interface_path")+
+				"/../../3rdparty/sqlite/src");
 		m_compiler->include_directories.push_back(
 				g_server_config.get<ss_>("share_path")+"/builtin");
 
@@ -507,10 +632,22 @@ struct CState: public State, public interface::Server
 				urho3d_path+"/Build/include/Urho3D/ThirdParty");
 		m_compiler->include_directories.push_back(
 				urho3d_path+"/Build/include/Urho3D/ThirdParty/Bullet");
+		// The Lua the engine was built with, for a module's <lua.h>: the
+		// bundled Lua's headers land under ThirdParty/Lua and LuaJIT's
+		// under ThirdParty/LuaJIT, and the server links whichever it is
+		// ([LUAJIT] in doc/plan/performance_plan.md)
+		m_compiler->include_directories.push_back(
+				urho3d_path+"/Build/include/Urho3D/ThirdParty/"+
+				ss_(BUILDAT_LUA_DIR));
 		m_compiler->include_directories.push_back(
 				urho3d_path+"/Source/ThirdParty/SDL/include");
 		m_compiler->library_directories.push_back(
 				urho3d_path+"/Build/lib");
+		// And an archive's lib/ beside the share path, where the install
+		// rules put libUrho3D and buildat_core ([PACKAGING]); a source
+		// tree has no such directory and the line is harmless there
+		m_compiler->library_directories.push_back(
+				g_server_config.get<ss_>("share_path")+"/lib");
 		m_compiler->libraries.push_back("-lUrho3D");
 		m_compiler->include_directories.push_back(
 				urho3d_path+"/Source/ThirdParty/Bullet/src");
@@ -603,29 +740,37 @@ struct CState: public State, public interface::Server
 	{
 		ss_ init_cpp_path = info.path+"/"+info.name+".cpp";
 
-		// Set up file watch
-
-		sv_<ss_> files_to_watch = {init_cpp_path};
+		// What this module is built out of. The build cache is keyed on all
+		// of it, so the scan happens whether or not anything is watched.
 		sv_<ss_> include_dirs = m_compiler->include_directories;
 		include_dirs.push_back(m_modules_path);
 		sv_<ss_> includes = list_includes(init_cpp_path, include_dirs);
 		log_d(MODULE, "Includes: %s", cs(dump(includes)));
-		files_to_watch.insert(files_to_watch.end(), includes.begin(),
-				includes.end());
 
-		if(m_module_file_watches.count(info.name) == 0){
-			sp_<interface::FileWatch> w(interface::createFileWatch());
-			for(const ss_ &watch_path : files_to_watch){
-				ss_ dir_path = interface::fs::strip_file_name(watch_path);
-				w->add(dir_path, [this, info, watch_path](const ss_ &modified_path){
-					if(modified_path != watch_path)
-						return;
-					log_i(MODULE, "Module modified: %s: %s",
-							cs(info.name), cs(info.path));
-					m_modified_modules.insert(info.name);
-				});
+		// And the watch that restarts the module when one of them changes,
+		// if this server is one that does that. Off by default: see
+		// "reload_modules" in server/config.cpp for why, and -R for turning
+		// it on. No inotify watch exists at all when it is off.
+		if(g_server_config.get<bool>("reload_modules")){
+			sv_<ss_> files_to_watch = {init_cpp_path};
+			files_to_watch.insert(files_to_watch.end(), includes.begin(),
+					includes.end());
+
+			if(m_module_file_watches.count(info.name) == 0){
+				sp_<interface::FileWatch> w(interface::createFileWatch());
+				for(const ss_ &watch_path : files_to_watch){
+					ss_ dir_path = interface::fs::strip_file_name(watch_path);
+					w->add(dir_path, [this, info, watch_path](
+							const ss_ &modified_path){
+						if(modified_path != watch_path)
+							return;
+						log_i(MODULE, "Module modified: %s: %s",
+								cs(info.name), cs(info.path));
+						m_modified_modules.insert(info.name);
+					});
+				}
+				m_module_file_watches[info.name] = w;
 			}
-			m_module_file_watches[info.name] = w;
 		}
 
 		// Build
@@ -672,8 +817,23 @@ struct CState: public State, public interface::Server
 				MODULE_EXTENSION;
 		// TODO: Delete old ones
 #else
+		// Named by the directory the module is in as well as its own name
+		// ([LINUX_SERVER]): every game's module is "main", and one cache --
+		// the one a portable archive ships -- holds every game's. The
+		// directory's name, not its path, so the name holds wherever the
+		// tree is unpacked.
+		ss_ parent = info.path;
+		while(!parent.empty() && (parent.back() == '/' || parent.back() == '\\'))
+			parent.pop_back();
+		parent = interface::fs::strip_file_name(parent);
+		while(!parent.empty() && (parent.back() == '/' || parent.back() == '\\'))
+			parent.pop_back();
+		const size_t slash = parent.find_last_of("/\\");
+		if(slash != ss_::npos)
+			parent = parent.substr(slash + 1);
 		ss_ build_dst = g_server_config.get<ss_>("rccpp_build_path") +
-				"/"+info.name+"."+MODULE_EXTENSION;
+				"/"+(parent.empty() ? ss_() : parent+"_")+info.name+"."+
+				MODULE_EXTENSION;
 #endif
 
 		ss_ hashfile_path = build_dst+".hash";
@@ -690,12 +850,34 @@ struct CState: public State, public interface::Server
 								std::istreambuf_iterator<char>());
 					}
 				}
-				if(previous_hash == content_hash){
+				// The file holds the hash as hex: the raw bytes, read back
+				// in text mode on Windows, ended at a 0x1a (Ctrl-Z) -- two
+				// of fifteen modules' hashes held one and compiled on every
+				// start of the box ([BOX_FIXES] c). An old raw file
+				// mismatches once and is rewritten.
+				if(previous_hash == interface::sha1::hex(content_hash)){
 					log_v(MODULE, "No need to recompile %s", cs(info.name));
 					skip_compile = true;
+				} else {
+					log_v(MODULE, "%s: the cached hash differs (%s against %s); "
+							"compiling", cs(info.name), cs(previous_hash.substr(0, 12)),
+							cs(interface::sha1::hex(content_hash).substr(0, 12)));
 				}
 			}
 		}
+
+		// The status line a start is read by ([START_PROGRESS]): the
+		// client's waiting screen tails the log for "STATUS ", and a
+		// shell start reads the same. A cache hit is a "Loading", a
+		// compile a "Compiling", so a first start reads differently.
+		if(m_module_count)
+			log_i(MODULE, "STATUS %s %s (%zu of %zu)",
+					skip_compile ? "Loading" : "Compiling", cs(info.name),
+					m_module_load_order.size() + 1, m_module_count);
+		else
+			log_i(MODULE, "STATUS %s %s (%zu of ?)",
+					skip_compile ? "Loading" : "Compiling", cs(info.name),
+					m_module_load_order.size() + 1);
 
 		m_compiler->include_directories.push_back(m_modules_path);
 		bool build_ok = m_compiler->build(info.name, init_cpp_path, build_dst,
@@ -710,7 +892,7 @@ struct CState: public State, public interface::Server
 		// Update hash file
 		if(!skip_compile){
 			std::ofstream f(hashfile_path);
-			f<<content_hash;
+			f<<interface::sha1::hex(content_hash);
 		}
 
 		// Construct instance
@@ -928,6 +1110,12 @@ struct CState: public State, public interface::Server
 			emit_event(Event("core:module_unloaded",
 					new interface::ModuleUnloadedEvent(module_name)));
 		}
+	}
+
+	void set_module_count(size_t count)
+	{
+		// The loader's list plus what is loaded already (__loader, loader)
+		m_module_count = m_module_load_order.size() + count;
 	}
 
 	ss_ get_modules_path()
@@ -1231,6 +1419,11 @@ struct CState: public State, public interface::Server
 		emit_event(event, false);
 	}
 
+	void emit_event_synchronously(Event event)
+	{
+		emit_event(event, true);
+	}
+
 	void handle_events()
 	{
 		// Get modified modules and push events to queue
@@ -1326,6 +1519,21 @@ struct CState: public State, public interface::Server
 		if(it == m_file_paths.end())
 			return "";
 		return it->second;
+	}
+
+	ss_ get_game_id()
+	{
+		// Trailing slashes and "." are what a shell's tab completion leaves
+		// behind, so strip them before taking the last component
+		ss_ path = m_modules_path;
+		while(!path.empty() && (path[path.size()-1] == '/' ||
+				path[path.size()-1] == '\\'))
+			path.resize(path.size() - 1);
+		size_t sep = path.find_last_of("/\\");
+		ss_ name = (sep == ss_::npos) ? path : path.substr(sep + 1);
+		if(name.empty() || name == "." || name == "..")
+			return "unnamed";
+		return name;
 	}
 
 	const interface::ServerConfig& get_config()
