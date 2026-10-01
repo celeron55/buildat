@@ -570,17 +570,24 @@ vec3 ProbeSample(vec3 d)
     return c == c ? max(c, vec3(0.0)) : vec3(0.0);
 }
 
-// The light the room's probe sees round a normal: the averages of the
-// three faces it points into, weighted by the normal's squares (an
-// "ambient cube"), as the radiance an ambient term is
+// The light the room's probe sees round a normal: the six faces'
+// averages, each weighted by how much of the cosine lobe round the normal
+// falls on it (w(c), c = n . the face's axis, fitted to the integral; they
+// add up to 1), as the radiance an ambient term is. The normal's squares
+// over three faces were all one face's for a face along an axis: a
+// ceiling saw only the floor's colour.
 vec3 AmbientCube(vec3 n)
 {
-    vec3 w = n * n;
     float row = (RoomSlot() + 0.5) / PROBE_ROWS;
-    vec3 x = texture2D(sEmissiveMap, vec2((n.x >= 0.0 ? 0.5 : 1.5) / 6.0, row)).rgb;
-    vec3 y = texture2D(sEmissiveMap, vec2((n.y >= 0.0 ? 2.5 : 3.5) / 6.0, row)).rgb;
-    vec3 z = texture2D(sEmissiveMap, vec2((n.z >= 0.0 ? 4.5 : 5.5) / 6.0, row)).rgb;
-    vec3 c = w.x * x + w.y * y + w.z * z;
+    vec3 c = vec3(0.0);
+    for (int i = 0; i < 6; i++)
+    {
+        float f = float(i);
+        float a = (i == 0 || i == 2 || i == 4) ? 1.0 : -1.0;
+        float d = a * (i < 2 ? n.x : i < 4 ? n.y : n.z);
+        float w = max(0.1115 + 0.277 * d + 0.1655 * d * d, 0.0);
+        c += w * texture2D(sEmissiveMap, vec2((f + 0.5) / 6.0, row)).rgb;
+    }
     return c == c ? max(c, vec3(0.0)) : vec3(0.0);
 }
 
@@ -641,6 +648,14 @@ void PS()
     vec3 cubeAmb = vec3(0.0);
     if (cubes) {
         cubeAmb = AmbientCube(normal);
+        // Half its colour, as an eye adapting to a room's light would
+        // take out: the probe sees itself, so each bounce took on the
+        // room's colour again, and a white ceiling under a wooden room's
+        // light was brown (user, 2026-10-01). Halved here, it is halved
+        // each bounce too.
+        // simplified: a fixed share for every room; the upgrade is a
+        // white balance by the light reaching the eye
+        cubeAmb = mix(vec3(dot(cubeAmb, vec3(0.2126, 0.7152, 0.0722))), cubeAmb, 0.5);
         reflected = ProbeSample(reflect(-eye, normal)) * fresnel;
     }
 
