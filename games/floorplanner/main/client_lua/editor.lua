@@ -5583,6 +5583,26 @@ place.build_window = function()
 		create({x = top.x, y = top.y + st.floor_step, z = top.z, yaw = top.yaw},
 				{name = "Floor " .. in_group, group = e.strs.group})
 	end)
+	-- **The lamps of a floor, or of all of them, at once** (user: lighting
+	-- without wiring switches when the switches are not what is studied):
+	-- as a switch does, off if any is on. A viewer's too, for themselves.
+	local function lamps_button(text, layout)
+		panel.keep(function() return panel.button(w, text, function()
+			local lamps = {}
+			for _, x in ipairs(doc.of_type("instance")) do
+				if (not layout or x.ints.layout == layout) and is_lamp(x.id) then
+					lamps[#lamps + 1] = x.id
+				end
+			end
+			if #lamps == 0 then
+				doc.notice(layout and "No lamps on this floor" or "No lamps")
+				return
+			end
+			M.flip_lamps(lamps)
+		end) end)
+	end
+	lamps_button("Lamps on this floor on/off", id)
+	lamps_button("All lamps on/off", nil)
 	panel.button(w, "New building", function()
 		-- Beside the others, 20 m past the furthest
 		local x, n = 0, 1
@@ -7486,13 +7506,9 @@ do
 		doc.notice("At " .. o.name .. "'s view")
 	end
 
-	-- A switch's lamps, all on or all off: on unless any of them is on
-	local function flip_switch(id)
-		local lamps = doc.ents[id].lists.lamps
-		if #lamps == 0 then
-			doc.notice("This switch has no lamps; link some to it")
-			return
-		end
+	-- Lamps all on or all off: off if any of them is on, else on. For the
+	-- plan's editors for everybody; a viewer switches them for themselves.
+	function M.flip_lamps(lamps)
 		local any = false
 		for _, l in ipairs(lamps) do
 			any = any or lamp_on(l)
@@ -7510,6 +7526,16 @@ do
 			end
 			S.dirty = true
 		end
+	end
+
+	-- A switch's lamps
+	local function flip_switch(id)
+		local lamps = doc.ents[id].lists.lamps
+		if #lamps == 0 then
+			doc.notice("This switch has no lamps; link some to it")
+			return
+		end
+		M.flip_lamps(lamps)
 	end
 
 	-- The use key: a door or window under the cursor opens or closes. For an
