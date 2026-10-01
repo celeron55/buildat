@@ -50,6 +50,11 @@ varying vec4 vColor;
     uniform float cPbr;
     // Towards the sun, for the sky's brighter side ([FP_DAYLIGHT])
     uniform vec3 cSunToward;
+    // **The room probes** (editor.lua, the lighting "pbr_cube"): 1 to light
+    // a room's surfaces from its own probe -- the atlas of the rooms' faces
+    // in sNormalMap, their averages in sEmissiveMap -- once the room
+    // table's alpha says the room's is drawn
+    uniform float cRoomCubes;
 #endif
 
 void VS()
@@ -522,6 +527,63 @@ vec3 RoomBounce()
     return t * t * 16.0;
 }
 
+// The room probes' layout, as editor.lua makes them
+const float PROBE_ROWS = 64.0;
+
+bool RoomCube()
+{
+    float slot = RoomSlot();
+    if (cRoomCubes < 0.5 || cPbr < 0.5 || slot < 0.5 || slot > PROBE_ROWS - 1.5)
+        return false;
+    return texture2D(sSpecMap, vec2(0.5, (slot + 0.5) / 256.0)).a > 0.5;
+}
+
+// What the room's probe sees along d: the face d is most along, and where
+// on it, by the face camera's own axes (editor.lua's PROBE_FACES: +X, -X,
+// +Y, -Y, +Z, -Z); a face is drawn with its top at the tile's top
+vec3 ProbeSample(vec3 d)
+{
+    vec3 a = abs(d);
+    float face;
+    vec3 f, r, u;
+    if (a.x >= a.y && a.x >= a.z) {
+        face = d.x > 0.0 ? 0.0 : 1.0;
+        f = vec3(sign(d.x), 0.0, 0.0);
+        r = vec3(0.0, 0.0, -sign(d.x));
+        u = vec3(0.0, 1.0, 0.0);
+    } else if (a.y >= a.z) {
+        face = d.y > 0.0 ? 2.0 : 3.0;
+        f = vec3(0.0, sign(d.y), 0.0);
+        r = vec3(1.0, 0.0, 0.0);
+        u = vec3(0.0, 0.0, -sign(d.y));
+    } else {
+        face = d.z > 0.0 ? 4.0 : 5.0;
+        f = vec3(0.0, 0.0, sign(d.z));
+        r = vec3(sign(d.z), 0.0, 0.0);
+        u = vec3(0.0, 1.0, 0.0);
+    }
+    float k = 1.0 / dot(d, f);
+    vec2 t = clamp(vec2(0.5 + 0.5 * dot(d, r) * k, 0.5 - 0.5 * dot(d, u) * k),
+            0.5 / 32.0, 1.0 - 0.5 / 32.0);
+    vec2 uv = vec2((face + t.x) / 6.0, (RoomSlot() + t.y) / PROBE_ROWS);
+    vec3 c = texture2D(sNormalMap, uv).rgb;
+    return c == c ? max(c, vec3(0.0)) : vec3(0.0);
+}
+
+// The light the room's probe sees round a normal: the averages of the
+// three faces it points into, weighted by the normal's squares (an
+// "ambient cube"), as the radiance an ambient term is
+vec3 AmbientCube(vec3 n)
+{
+    vec3 w = n * n;
+    float row = (RoomSlot() + 0.5) / PROBE_ROWS;
+    vec3 x = texture2D(sEmissiveMap, vec2((n.x >= 0.0 ? 0.5 : 1.5) / 6.0, row)).rgb;
+    vec3 y = texture2D(sEmissiveMap, vec2((n.y >= 0.0 ? 2.5 : 3.5) / 6.0, row)).rgb;
+    vec3 z = texture2D(sEmissiveMap, vec2((n.z >= 0.0 ? 4.5 : 5.5) / 6.0, row)).rgb;
+    vec3 c = w.x * x + w.y * y + w.z * z;
+    return c == c ? max(c, vec3(0.0)) : vec3(0.0);
+}
+
 // A sky and a ground for what is reflected: the sky's cube under PBR, and
 // an analytic one otherwise
 // simplified: the open sky's even indoors; the upgrade is a probe per room
@@ -572,6 +634,15 @@ void PS()
     vec3 eye = normalize(cCameraPosPS - vWorldPos.xyz);
     float fresnel = refl * (0.25 + 0.75 * pow(1.0 - max(dot(eye, normal), 0.0), 5.0));
     vec3 reflected = Environment(reflect(-eye, normal)) * fresnel;
+    // In a room with its probe drawn: the room itself reflected, and the
+    // light round the surface from what the probe saw, in place of the
+    // sky's share and the bounce
+    bool cubes = RoomCube();
+    vec3 cubeAmb = vec3(0.0);
+    if (cubes) {
+        cubeAmb = AmbientCube(normal);
+        reflected = ProbeSample(reflect(-eye, normal)) * fresnel;
+    }
 
     #if defined(PERPIXEL)
         vec3 lightDir;
@@ -591,7 +662,8 @@ void PS()
         if (cPlanLook > 0.5)
             finalColor = vec3(0.0);
         #ifdef AMBIENT
-            finalColor += (cAmbientColor.rgb * ambientShare + bounce) * albedo +
+            finalColor += (cubes ? cubeAmb :
+                    cAmbientColor.rgb * ambientShare + bounce) * albedo +
                     emissive + reflected;
             if (cPlanLook > 0.5)
                 finalColor = albedo;
@@ -600,7 +672,8 @@ void PS()
             gl_FragColor = vec4(GetLitFog(finalColor, fogFactor), alpha);
         #endif
     #elif defined(DEFERRED)
-        vec3 finalColor = (vVertexLight * ambientShare + bounce) * albedo +
+        vec3 finalColor = (cubes ? cubeAmb :
+                vVertexLight * ambientShare + bounce) * albedo +
                 emissive + reflected;
         if (cPlanLook > 0.5)
             finalColor = albedo;
@@ -609,7 +682,8 @@ void PS()
         gl_FragData[2] = vec4(normal * 0.5 + 0.5, power / 255.0);
         gl_FragData[3] = vec4(EncodeDepth(vWorldPos.w), 0.0);
     #else
-        vec3 finalColor = (vVertexLight * ambientShare + bounce) * albedo +
+        vec3 finalColor = (cubes ? cubeAmb :
+                vVertexLight * ambientShare + bounce) * albedo +
                 emissive + reflected;
         if (cPlanLook > 0.5)
             finalColor = albedo;

@@ -282,7 +282,7 @@ return function(doc)
 				"that is lighter to draw.",
 				function() return S().lighting == "unlit" end},
 		{"And back to PBR in the same place.",
-				function() return S().lighting == "pbr" end},
+				function() return S().lighting ~= "unlit" end},
 		{"Menu, Plan settings: set Time-lapse to 1 h/s and watch the day " ..
 				"go round in 3D; off stops it. Daylight: Temporary changes " ..
 				"only your own view, which anyone may do.",

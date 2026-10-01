@@ -421,9 +421,10 @@ local function viewport_for(v)
 	local rp = vp.renderPath:Clone()
 	-- PBR: in radiance, metered and tone mapped ([FP_DAYLIGHT]), and the
 	-- ambient occluded in corners ([FP_AO])
-	rp:Load(magic.cache:GetResource("XMLFile", S.lighting == "pbr" and
+	local pbr = S.lighting ~= "unlit"
+	rp:Load(magic.cache:GetResource("XMLFile", pbr and
 			"main/deferred_ssao.xml" or "RenderPaths/Deferred.xml"))
-	if S.lighting == "pbr" then
+	if pbr then
 		M.daylight.pbr_render_path(rp)
 	end
 	vp.renderPath = rp
@@ -1660,7 +1661,12 @@ end
 -- sunlight bounce is worked out from (M.room_bounce): the glass to the
 -- outside with which way it faces, in the scene's frame, and the room's
 -- floor colour and surfaces.
-M.room_slot, M.room_light, M.room_slots_used = {}, {}, 0
+-- Kept over rebuilds, so that a room keeps its row and its probe; a room
+-- gone frees its slot at the end of the rebuild
+M.room_slot, M.slot_owner, M.room_light, M.room_seen = {}, {}, {}, {}
+-- And where each slot's probe stands, in the scene's frame, mm, and
+-- whether its six faces have been drawn (M.probes_tick)
+M.room_probe, M.probe_ready = {}, {}
 local function entry_albedo(id)
 	local e = id and doc.ents[id]
 	if not e or e.type ~= "palette" then
@@ -1725,11 +1731,17 @@ function M.room_occlusion()
 	for id, rd in pairs(room_data) do
 		local occ = 1 - M.daylight.daylight_factor(glass[id] or 0, rd.net)
 		local slot = M.room_slot[id]
-		if not slot and M.room_slots_used < 255 then
-			M.room_slots_used = M.room_slots_used + 1
-			slot = M.room_slots_used
-			M.room_slot[id] = slot
+		if not slot then
+			for k = 1, 255 do
+				if not M.slot_owner[k] then
+					slot = k
+					M.slot_owner[k] = id
+					M.room_slot[id] = slot
+					break
+				end
+			end
 		end
+		M.room_seen[id] = true
 		-- Packed: slot + occ, occ under 1
 		M.room_occ[id] = (slot or 0) + math.min(occ, 0.995)
 		if slot then
@@ -1743,6 +1755,23 @@ function M.room_occlusion()
 			M.room_light[slot] = {wins = sunward[id] or {},
 					area = 2 * floor + perim / 1000 * room_ceiling(e) / 1000,
 					floor = entry_albedo(e.ints.mat_floor)}
+			-- The probe: in the middle of the room, or in its first
+			-- triangle's where the middle is outside it (an L), at a
+			-- standing eye's height or half the ceiling's
+			local cx, cz = 0, 0
+			for _, p in ipairs(rd.pts) do
+				cx, cz = cx + p[1] / #rd.pts, cz + p[2] / #rd.pts
+			end
+			if not geom.point_in_polygon(cx, cz, rd.pts) then
+				local t = geom.triangulate(rd.pts)[1]
+				if t then
+					cx = (rd.pts[t[1]][1] + rd.pts[t[2]][1] + rd.pts[t[3]][1]) / 3
+					cz = (rd.pts[t[1]][2] + rd.pts[t[2]][2] + rd.pts[t[3]][2]) / 3
+				end
+			end
+			local px, py, pz = place.point(M.cur_rel or place.WORLD, cx,
+					math.min(1500, room_ceiling(e) / 2), cz)
+			M.room_probe[slot] = {x = px, y = py, z = pz}
 		end
 	end
 	M.tri_occ, M.tri_occ_fn = 0, function(xm, zm)
@@ -1761,6 +1790,7 @@ end
 -- sun's height, and nothing outside shades a window
 M.ROOM_TABLE_ROWS = 256
 function M.room_bounce(tx, h, tz, light)
+	M.bounce_args = {tx, h, tz, light}
 	local image = M.room_table_image
 	if not image then
 		image = magic.Image:new()
@@ -1781,9 +1811,10 @@ function M.room_bounce(tx, h, tz, light)
 			local k = flux / math.max(rl.area, 1) / 0.5 / math.pi
 			c = {k * rl.floor.r * sc.r, k * rl.floor.g * sc.g, k * rl.floor.b * sc.b}
 		end
+		-- Alpha: whether the slot's probe is drawn (the cube mode's)
 		image:SetPixel(0, slot, magic.Color(math.sqrt(math.min(c[1], 16) / 16),
 				math.sqrt(math.min(c[2], 16) / 16),
-				math.sqrt(math.min(c[3], 16) / 16), 1))
+				math.sqrt(math.min(c[3], 16) / 16), M.probe_ready[slot] and 1 or 0))
 	end
 	local texture = M.room_table
 	if not texture then
@@ -1796,6 +1827,115 @@ function M.room_bounce(tx, h, tz, light)
 	texture.filterMode = magic.FILTER_NEAREST
 	for _, m in ipairs({lit_material, glass_material}) do
 		m:SetTexture(magic.TU_SPECULAR, texture)
+	end
+end
+
+-- **A probe in each room** (3D lighting "PBR with room cube maps", user,
+-- 2026-10-01): the room seen from its middle in six 90 degree faces,
+-- drawn in HDR into a row of an atlas, PROBE_T a face, a row a room slot;
+-- and each face averaged into a texel of a 6 by PROBE_ROWS table by the
+-- reduce pass (probe_reduce.xml), which is the ambient cube a surface
+-- takes its indirect light from (Palette.glsl). One face is drawn a
+-- frame, round all the rooms, so a change in the light reaches a room's
+-- probe in a second or so for ten rooms. Each face sees the probes of the
+-- frames before, so the light bounces on.
+-- simplified: one probe a room, so all of a room is lit as from its
+-- middle; a slot over PROBE_ROWS - 1 has none, and its room is lit as
+-- without the cubes. A float16 render target has no mips on the driver
+-- this was written on (extensions/launch_world's [PBR_HDR] finding), so
+-- the average is the reduce pass's and a reflection is sharp.
+local PROBE_T, PROBE_ROWS = 32, 64
+-- Pitch and yaw of each face's camera: +X, -X, +Y, -Y, +Z, -Z, which is
+-- the order and the axes Palette.glsl's ProbeUV reads them in
+local PROBE_FACES = {{0, 90}, {0, -90}, {-90, 0}, {90, 0}, {0, 0}, {0, 180}}
+local function probes_init()
+	if M.probe then
+		return M.probe
+	end
+	local p = {i = 0}
+	local f16 = magic.Graphics.GetRGBAFloat16Format()
+	local atlas = magic.Texture2D:new()
+	atlas:SetNumLevels(1)
+	assert(atlas:SetSize(6 * PROBE_T, PROBE_ROWS * PROBE_T, f16,
+			magic.TEXTURE_RENDERTARGET), "the probes' atlas")
+	atlas.filterMode = magic.FILTER_BILINEAR
+	-- By name, for the reduce pass's render path to read
+	assert(magic.cache:AddManualResource(atlas, "fp_probe_atlas"),
+			"the probes' atlas in the cache")
+	local reduce = magic.Texture2D:new()
+	reduce:SetNumLevels(1)
+	assert(reduce:SetSize(6, PROBE_ROWS, f16, magic.TEXTURE_RENDERTARGET),
+			"the probes' ambient cubes")
+	reduce.filterMode = magic.FILTER_NEAREST
+	local function view(texture, xml, fov)
+		local node = scene:CreateChild("probe camera")
+		local cam = node:CreateComponent("Camera")
+		cam.fov = fov
+		cam.aspectRatio = 1
+		cam.nearClip = 0.05
+		cam.farClip = 500
+		local vp = magic.Viewport:new(scene, cam)
+		local rp = vp.renderPath:Clone()
+		rp:Load(magic.cache:GetResource("XMLFile", xml))
+		vp.renderPath = rp
+		local surface = texture:GetRenderSurface()
+		surface:SetViewport(0, vp)
+		surface.updateMode = magic.SURFACE_MANUALUPDATE
+		M.kept[#M.kept + 1] = vp
+		return node, vp, surface
+	end
+	p.node, p.vp, p.surface = view(atlas, "RenderPaths/Deferred.xml", 90)
+	local _, _, rsurface = view(reduce, "main/probe_reduce.xml", 90)
+	p.reduce_surface = rsurface
+	p.atlas, p.reduce = atlas, reduce
+	M.kept[#M.kept + 1] = atlas
+	M.kept[#M.kept + 1] = reduce
+	for _, m in ipairs({lit_material, glass_material}) do
+		m:SetTexture(magic.TU_NORMAL, atlas)
+		m:SetTexture(magic.TU_EMISSIVE, reduce)
+	end
+	M.probe = p
+	return p
+end
+
+-- Each frame: the next face of the next room, under the cube mode
+function M.probes_tick()
+	local on = S.lighting == "pbr_cube" and M.pbr_now()
+	for _, m in ipairs({lit_material, glass_material}) do
+		m:SetShaderParameter("RoomCubes", on and 1 or 0)
+	end
+	if not on then
+		return
+	end
+	local p = probes_init()
+	local slots = {}
+	for slot in pairs(M.room_probe) do
+		if slot < PROBE_ROWS then
+			slots[#slots + 1] = slot
+		end
+	end
+	if #slots == 0 then
+		return
+	end
+	table.sort(slots)
+	p.i = p.i % (#slots * 6)
+	local slot = slots[math.floor(p.i / 6) + 1]
+	local face = p.i % 6
+	p.i = p.i + 1
+	local at = M.room_probe[slot]
+	p.node.position = magic.Vector3(W(at.x), W(at.y), W(at.z))
+	p.node.rotation = magic.Quaternion(PROBE_FACES[face + 1][1],
+			PROBE_FACES[face + 1][2], 0)
+	p.vp:SetRect(magic.IntRect(face * PROBE_T, slot * PROBE_T,
+			(face + 1) * PROBE_T, (slot + 1) * PROBE_T))
+	p.surface:QueueUpdate()
+	p.reduce_surface:QueueUpdate()
+	if face == 5 and not M.probe_ready[slot] then
+		M.probe_ready[slot] = true
+		if M.bounce_args then
+			local a = M.bounce_args
+			M.room_bounce(a[1], a[2], a[3], a[4])
+		end
 	end
 end
 -- One value for what is built in its own frame: the room it stands in, or
@@ -2118,7 +2258,7 @@ rebuild = function()
 	end
 	local seen_voxels, all_solids = {}, {}
 	place.layers = {}
-	M.room_slot, M.room_light, M.room_slots_used = {}, {}, 0
+	M.room_light, M.room_seen = {}, {}
 	-- Which layouts are above the current one, for S.hide_above; what is
 	-- built new is shown, so the hiding is done again
 	place.above, place.shown = {}, {}
@@ -2166,6 +2306,13 @@ rebuild = function()
 				rooms = room_data}
 	end
 	solids = all_solids
+	-- The slots of rooms that are gone
+	for id, slot in pairs(M.room_slot) do
+		if not M.room_seen[id] then
+			M.room_slot[id], M.slot_owner[slot], M.room_probe[slot] = nil, nil, nil
+			M.probe_ready[slot] = nil
+		end
+	end
 	for id, m in pairs(voxel_meshes) do
 		if not seen_voxels[id] then
 			m.node:Remove()
@@ -2248,7 +2395,7 @@ function M.ground_rgb()
 end
 -- Whether what is drawn now is PBR: the setting's, and never the plan view
 function M.pbr_now()
-	return S.lighting == "pbr" and S.view ~= "2d"
+	return S.lighting ~= "unlit" and S.view ~= "2d"
 end
 function M.apply_daylight()
 	local pbr = M.pbr_now()
@@ -4181,7 +4328,7 @@ local function set_view(v)
 	if (v == "2d") ~= (S.shown_2d == true) or not S.shown or
 			lighting ~= S.shown_lighting then
 		S.shown, S.shown_2d, S.shown_lighting = true, v == "2d", lighting
-		magic.renderer.HDRRendering = lighting == "pbr"
+		magic.renderer.HDRRendering = lighting ~= "unlit"
 		magic.set_preferred_viewports({viewport_for(v)})
 		S.daylight_key = nil
 		-- The lamps' brightness and the ground go with it
@@ -5749,6 +5896,7 @@ do
 		end)
 		-- How the 3D view and walking are lit ([FP_DAYLIGHT])
 		panel.dropdown(w, "3D lighting", {{"PBR: the plan's sun and sky", "pbr"},
+				{"PBR with room cube maps: reflections, more light", "pbr_cube"},
 				{"Unlit: plain, and lighter", "unlit"}}, S.lighting, function(v)
 			S.lighting = v
 			buildat.storage_write("lighting", v)
@@ -8865,6 +9013,7 @@ function M.update(dt)
 		rebuild()
 	end
 	M.apply_daylight()
+	M.probes_tick()
 	if S.panels_stale and not doc.typing() then
 		refresh_panels()
 	end

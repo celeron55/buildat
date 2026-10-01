@@ -1238,6 +1238,13 @@ function M.define(dst, util)
 			SetSize = util.self_function("SetSize", {"boolean"},
 					{"Texture2D", "number", "number", "number",
 					{"number", "__nil"}}),
+			-- A render target's surface (SetSize with TEXTURE_RENDERTARGET),
+			-- which viewports draw into: games/floorplanner's room probes
+			GetRenderSurface = util.wrap_function({"Texture2D"},
+				function(self)
+					return util.wrap_instance("RenderSurface",
+							self:GetRenderSurface())
+				end),
 		},
 	})
 
