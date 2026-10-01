@@ -254,7 +254,7 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"minute", 0, 1439, 720},
 		{"lapse", -2, 60, 0},
 		{"ground", 0, 3, 0},
-		{"grid", 1, 100, 100}, // mm, what the plan snaps to
+		{"grid", 1, 1000, 100}, // mm, what the plan snaps to
 		// Floor to floor, where "Add a floor above" puts one ([FP_LAYOUTS])
 		{"floor_step", 1000, 20000, 3000},
 	}, {}, {}, true},

@@ -26,7 +26,7 @@ local M = {}
 local doc
 M.daylight = load("daylight.lua")
 
-local GRID_STEPS = {1, 10, 50, 100}
+local GRID_STEPS = {1, 10, 50, 100, 200, 500, 1000}
 local ANGLE_STEPS = {false, 1, 5, 15, 45, 90}
 -- How near, in pixels, the cursor snaps to a node or an edge
 local SNAP_PX = 12
@@ -2618,9 +2618,14 @@ local function snapped_point(from, except)
 				math.floor(uz + (vz - uz) * t / l + 0.5), {edge = e, t = t}
 	end
 	if from then
-		local step = S.shift and ANGLE_STEPS[S.angle] or 90
-		local ex, ez = geom.snap_direction(from.x, from.z, x, z,
-				step or nil, grid_step())
+		-- Right angles, or with Shift or the touch bar's Angle the angle
+		-- step, which may be free
+		local step = 90
+		if S.shift or S.touch_angle then
+			step = ANGLE_STEPS[S.angle] or nil
+		end
+		local ex, ez = geom.snap_direction(from.x, from.z, x, z, step,
+				grid_step())
 		return math.floor(ex + 0.5), math.floor(ez + 0.5), {}
 	end
 	return geom.snap(x, grid_step()), geom.snap(z, grid_step()), {}
@@ -4129,6 +4134,13 @@ local function build_toolbar()
 			panel.button(b, "Undo", function() doc.undo() end)
 			panel.button(b, "Redo", function() doc.redo() end)
 			panel.button(b, "Delete", function() delete_selected() end)
+			-- What Shift does to a wall or room drawn: the angle step
+			-- instead of right angles (user)
+			panel.button(b, "Angle " .. (S.touch_angle and
+					M.angle_text(S.angle) or "90 deg"), function()
+				S.touch_angle = not S.touch_angle
+				refresh_panels()
+			end)
 		end
 		if S.view == "walk" then
 			panel.button(b, "Use", function() M.use() end)
