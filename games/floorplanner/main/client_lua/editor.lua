@@ -1972,7 +1972,12 @@ local function build_layout(seen_voxels, wells)
 		local bx, bz = node_pos(w.b)
 		wall_data[e.id] = {ax = ax, az = az, bx = bx, bz = bz,
 				a_node = w.a, b_node = w.b, thickness = w.thickness,
-				justify = w.justify, group = w.hang}
+				justify = w.justify,
+				-- Joined with what is at its height: one that hangs clear
+				-- of the floor apart from the standing ones, but one hung
+				-- from the ceiling all the way down is standing (user:
+				-- such a corner was open outside)
+				group = (wall_span(w)) > 0 and 1 or 0}
 	end
 	outlines = geom.wall_outlines(wall_data)
 	build_room_data()
