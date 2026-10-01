@@ -5821,6 +5821,12 @@ do
 			if n then
 				return {kind = "node", id = n}
 			end
+		elseif S.tool == "box" then
+			-- The selected object, to be moved by a drag
+			local s = pick_surface()
+			if s and s.kind == "instance" and S.sel[s.id] then
+				return {kind = "instance", id = s.id, side = s.side}
+			end
 		end
 		return nil
 	end
@@ -5877,7 +5883,14 @@ do
 
 	local function start_drag()
 		local t = S.press.target
-		if S.tool == "box" then
+		-- **With something selected, the Object tool places nothing** (user,
+		-- 2026-10-01: a click to check what was just put in put in another):
+		-- a drag of the selected object moves it, as Select's does, and one
+		-- elsewhere ends as a click that lets go of the selection
+		if S.tool == "box" and sel_count() > 0 and not t then
+			return
+		end
+		if S.tool == "box" and not t then
 			-- A lamp is placed with a click, its size its own
 			local x, z = snapped_point(nil)
 			if x and S.shape ~= "lamp" then
@@ -6238,6 +6251,13 @@ do
 				S.nodes[t.id] = not S.nodes[t.id] or nil
 			end
 			refresh_panels()
+		elseif S.tool == "box" and sel_count() > 0 then
+			-- The selected object clicked: nothing; elsewhere: let go of it,
+			-- and the next click places
+			if not t then
+				S.sel, S.sel_face, S.primary = {}, {}, nil
+				refresh_panels()
+			end
 		elseif S.tool == "box" then
 			if not doc.can("edit") then
 				doc.notice("Viewing only: no edit privilege")
