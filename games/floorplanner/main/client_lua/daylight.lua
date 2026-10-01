@@ -109,21 +109,22 @@ function M.temperature(lat, day)
 end
 M.GROUNDS = {{"by season", 0}, {"green", 1}, {"yellow", 2}, {"snow", 3}}
 local GROUND_RGB = {[1] = 0x55733a, [2] = 0xa8955a, [3] = 0xe8ecf0}
--- The ground's colour (0xRRGGBB): `mode` a GROUNDS value, 0 by season.
+-- The ground's colour (0xRRGGBB) and which of green, yellow and snow it
+-- is (1 to 3): `mode` a GROUNDS value, 0 by season.
 -- Snow below -1 C, and in spring until the thaw has passed +2; bare and
 -- yellow until +8 in spring and below +10 in autumn; green above.
 function M.ground(lat, day, mode)
 	if mode ~= 0 and GROUND_RGB[mode] then
-		return GROUND_RGB[mode]
+		return GROUND_RGB[mode], mode
 	end
 	local t, warming = M.temperature(lat, day)
 	if t < -1 or (warming and t < 2) then
-		return GROUND_RGB[3]
+		return GROUND_RGB[3], 3
 	end
 	if (warming and t < 8) or (not warming and t < 10) then
-		return GROUND_RGB[2]
+		return GROUND_RGB[2], 2
 	end
-	return GROUND_RGB[1]
+	return GROUND_RGB[1], 1
 end
 
 --

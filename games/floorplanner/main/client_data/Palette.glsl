@@ -285,6 +285,57 @@ void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float po
         // Plaster: a soft mottle and fine speckle
         nat = base * (0.93 + 0.07 * Fbm(q * 8.0));
         nat += vec3(0.08) * step(0.975, Hash3(floor(p * 300.0))) * param;
+    } else if (kind > 10.5) {
+        // The ground (user: grass that looks like grass): patches of
+        // metres, clumps of decimetres, and blades a few millimetres
+        // apart that tilt the surface, each its average where it is finer
+        // than a pixel. param: 0 green, 0.5 dry and yellow, 1 snow.
+        vec2 g = p.xz;
+        float dry = step(0.25, param) * (1.0 - step(0.75, param));
+        float snow = step(0.75, param);
+        float wide = Noise3(vec3(g * 0.08, 7.7));
+        float mottle = Fbm(vec3(g * 0.25, 1.3));
+        vec2 cp = g * 5.0;
+        float clump = mix(Noise3(vec3(cp, 3.1)), 0.5,
+                smoothstep(0.3, 0.8, length(fwidth(cp))));
+        // Strokes of a couple of centimetres, two ways crossed: blades
+        // seen from above
+        vec2 fp = g * 60.0;
+        float fine_seen = 1.0 - smoothstep(0.3, 0.8, length(fwidth(fp * 4.0)));
+        vec2 f1 = vec2(0.8 * g.x + 0.6 * g.y, -0.6 * g.x + 0.8 * g.y) *
+                vec2(50.0, 250.0);
+        vec2 f2 = vec2(0.8 * g.x - 0.6 * g.y, 0.6 * g.x + 0.8 * g.y) *
+                vec2(250.0, 50.0);
+        float fine = mix(0.5, 0.5 * (Noise3(vec3(f1, 5.9)) +
+                Noise3(vec3(f2, 8.3))), fine_seen);
+        vec2 bp = g * 400.0;
+        float blade_seen = 1.0 - smoothstep(0.3, 0.8, length(fwidth(bp)));
+        float blade = mix(0.5, Noise3(vec3(bp, 0.0)), blade_seen);
+        // Lusher and bluer, or sunnier and yellower, by the patch
+        float lush = smoothstep(0.3, 0.7, mottle);
+        vec3 tint = mix(vec3(1.1, 1.05, 0.78), vec3(0.85, 0.94, 0.95), lush);
+        nat = base * mix(tint, vec3(1.0), snow) * (0.9 + 0.2 * wide);
+        float k = 1.0 + dry * 0.2 - snow * 0.85;
+        nat *= (1.0 + (clump - 0.5) * 0.25 * k) * (1.0 + (fine - 0.5) * 0.7 * k) *
+                (1.0 + (blade - 0.5) * 0.6 * k);
+        // Dry, bare soil shows in places
+        float bare = dry * smoothstep(0.62, 0.75, Fbm(vec3(g * 0.6, 4.4)));
+        nat = mix(nat, vec3(0.42, 0.36, 0.29) * (0.9 + 0.2 * fine), bare);
+        // Snow: a sparse glint of a crystal, where one is a pixel or more
+        nat += vec3(0.3) * snow * blade_seen *
+                step(0.995, Hash3(vec3(floor(bp), 2.0)));
+        // The blades lean every way, which breaks up the light
+        float tilt = (1.0 - snow * 0.8) * (1.0 - bare);
+        n = normalize(n + tilt * vec3(
+                (Noise3(vec3(bp, 11.0)) - 0.5) * 0.7 * blade_seen +
+                (Noise3(vec3(fp, 13.0)) - 0.5) * 0.4 * fine_seen, 0.0,
+                (Noise3(vec3(bp, 17.0)) - 0.5) * 0.7 * blade_seen +
+                (Noise3(vec3(fp, 19.0)) - 0.5) * 0.4 * fine_seen));
+        // No sheen: as rough as this, the highlight would be the whole
+        // lawn
+        roughness = 1.0;
+        spec = 0.0;
+        refl = 0.0;
     } else {
         // Paneling: boards `scale` wide, at the angle from the plane's first
         // axis (0 runs them level on a wall, 90 upright), a V-groove at each

@@ -727,7 +727,7 @@ local function palette_texture()
 	end
 	table.sort(parts)
 	-- and the ground's colour of the season, its row the last
-	local ground = M.ground_rgb()
+	local ground, ground_mode = M.ground_rgb()
 	local key = table.concat(parts, ",") .. ";" .. ground
 	if key == palette_key then
 		return
@@ -790,12 +790,13 @@ local function palette_texture()
 		palette_rows[e.id] = i + 2 + #MATERIAL_KINDS
 		put_row(i + 2 + #MATERIAL_KINDS, e.ints)
 	end
-	-- The ground: flat, as the first row of nothing, in its own colour
-	put(0, M.ground_row, ground, 0)
+	-- The ground: the shader's own type 11, grass or snow in its own
+	-- colour; the knob is green 0, dry 0.5, snow 1
+	put(0, M.ground_row, ground, 11 * 20 / 255)
 	put(1, M.ground_row, 0xffffff, 0)
 	put(2, M.ground_row, 0x404040, 1)
-	px(3, M.ground_row, 0.9, 0.05, 0, 0)
-	px(4, M.ground_row, 0.5, 0, 0, 0)
+	px(3, M.ground_row, 1, 0, 0, 0)
+	px(4, M.ground_row, 0.5, 0, 0, ((ground_mode or 1) - 1) / 2)
 	local texture = magic.Texture2D:new()
 	-- One level: a smaller one would average the rows' knobs together
 	texture:SetNumLevels(1)
