@@ -1686,6 +1686,7 @@ local function entry_albedo(id)
 	end
 	return {r = ch("r"), g = ch("g"), b = ch("b")}
 end
+M.entry_albedo = entry_albedo
 function M.room_occlusion()
 	local glass = {}
 	local sunward = {}
@@ -9445,6 +9446,89 @@ function M.go_viewport(id, preview)
 	M.hide_ui()
 end
 
+-- **A dump for the path-traced reference** (games/floorplanner/test/
+-- pathtrace_render.py, user, 2026-10-01): with BUILDAT_FP_REFDUMP naming a
+-- viewport, that viewport is gone to and, REFDUMP_WAIT seconds on, when
+-- the room probes have bounced their light round, the scene's meshes are
+-- dumped (buildat.dump_meshes, into <user>/meshdumps) with what the render
+-- needs beside them: the camera, the sun and the sky as apply_daylight
+-- has them, and each palette row's albedo as M.room_bounce takes it.
+-- The lamps are switched off for this client, as the render has none.
+-- simplified: the albedo is the entry's flat colour, without the
+-- pattern's gaps and grain
+M.REFDUMP_WAIT = 20
+M.refdump = buildat.get_env("BUILDAT_FP_REFDUMP") and
+		{name = buildat.get_env("BUILDAT_FP_REFDUMP")}
+function M.refdump_tick(dt)
+	local r = M.refdump
+	if not r or r.done then
+		return
+	end
+	if not r.t then
+		for _, e in ipairs(M.viewports()) do
+			if e.strs.name == r.name then
+				M.go_viewport(e.id)
+				r.t = 0
+			end
+		end
+		-- The lamps off, for this client: the render has none
+		for id in pairs(doc.ents) do
+			if is_lamp(id) then
+				S.local_on[id] = false
+				S.dirty = true
+			end
+		end
+		return
+	end
+	r.t = r.t + dt
+	if r.t < M.REFDUMP_WAIT then
+		return
+	end
+	r.done = true
+	local function v3(x, y, z)
+		return string.format("[%.6g, %.6g, %.6g]", x, y, z)
+	end
+	local function c3(c)
+		return v3(c.r, c.g, c.b)
+	end
+	local function lin(rgb)
+		return {r = (math.floor(rgb / 65536) / 255) ^ 2.2,
+				g = (math.floor(rgb / 256) % 256 / 255) ^ 2.2,
+				b = (rgb % 256 / 255) ^ 2.2}
+	end
+	local st = settings()
+	local tx, h, tz = M.daylight.sun_toward(st.latitude, st.north,
+			M.plan_day(), M.plan_minute())
+	local ground = lin(M.ground_rgb())
+	local light = M.daylight.light(h, ground)
+	local yaw, pitch = math.rad(S.yaw), math.rad(S.pitch)
+	-- Each row the meshes point at: kind 5 is glass, 4 a lamp
+	local rows = {'"0": {"albedo": ' .. c3(lin(0xb0b0b0)) .. ', "kind": 0}',
+			'"1": {"albedo": ' .. c3(lin(0xa8c8e0)) .. ', "kind": 5}',
+			string.format('"%d": {"albedo": %s, "kind": 0}', M.ground_row,
+			c3(ground))}
+	for _, e in ipairs(of_type("palette")) do
+		rows[#rows + 1] = string.format('"%d": {"albedo": %s, "kind": %d}',
+				row(e.id), c3(M.entry_albedo(e.id)), e.ints.kind)
+	end
+	local json = "{" .. table.concat({
+		'"viewport": "' .. r.name:gsub('[%c"\\]', "") .. '"',
+		'"camera_pos": ' .. v3(S.pos.x, S.pos.y, S.pos.z),
+		'"camera_dir": ' .. v3(math.sin(yaw) * math.cos(pitch),
+				-math.sin(pitch), math.cos(yaw) * math.cos(pitch)),
+		'"fov": ' .. string.format("%.6g", cam3d.fov),
+		'"sun_toward": ' .. v3(tx, h, tz),
+		'"sun_irradiance": ' .. string.format("%.6g", light.sun),
+		'"sun_color": ' .. c3(light.sun_color),
+		'"sky_zenith": ' .. c3(light.zenith),
+		'"sky_horizon": ' .. c3(light.horizon),
+		'"sky_ambient": ' .. c3(light.ambient),
+		'"rows": {\n' .. table.concat(rows, ",\n") .. "\n}",
+	}, ",\n") .. "}\n"
+	local name, err = buildat.dump_meshes(json, scene)
+	log:info("Reference dump of " .. r.name .. ": " .. tostring(name or err))
+end
+
 function M.leave_viewport()
 	if not S.vp then
 		return
@@ -9503,6 +9587,7 @@ function M.update(dt)
 	end
 	M.apply_daylight()
 	M.probes_tick()
+	M.refdump_tick(dt)
 	-- A menu made since: its buttons for the keyboard
 	if pause_win and pause_win ~= M.keyed_win then
 		M.keyed_win = pause_win

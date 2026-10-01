@@ -90,7 +90,7 @@ buildat.exported_files    = __buildat_exported_files
 buildat.read_exported     = __buildat_read_exported
 buildat.pick_file         = __buildat_pick_file
 buildat.picked_file       = __buildat_picked_file
--- dump_meshes([atlas_json]) -> the file name, or nil and why not. Same sandbox rule
+-- dump_meshes([atlas_json], [node]) -> the file name, or nil and why not. Same sandbox rule
 -- as take_screenshot: into <user>/meshdumps, named by the date. The
 -- scene's CustomGeometry in world space, which is what the client already
 -- drew. See l_dump_meshes() in src/client/app.cpp.
@@ -955,7 +955,19 @@ buildat.safe.exported_files           = __buildat_exported_files
 buildat.safe.read_exported            = __buildat_read_exported
 buildat.safe.pick_file                = __buildat_pick_file
 buildat.safe.picked_file              = __buildat_picked_file
-buildat.safe.dump_meshes              = __buildat_dump_meshes
+-- dump_meshes([atlas_json], [node]): node, a sandboxed Node, dumps what is
+-- under it rather than the replicated scene
+function buildat.safe.dump_meshes(atlas, safe_node)
+	if safe_node ~= nil then
+		if not getmetatable(safe_node) or
+				getmetatable(safe_node).type_name ~= "Node" and
+				getmetatable(safe_node).type_name ~= "Scene" then
+			error("node is not a sandboxed Node instance")
+		end
+		return __buildat_dump_meshes(atlas, getmetatable(safe_node).unsafe)
+	end
+	return __buildat_dump_meshes(atlas)
+end
 -- get_env(name) -> the variable, or nil. Only BUILDAT_-prefixed names, so a
 -- server's Lua cannot read the user's environment; what it is for is a knob
 -- a harness sets on the client's process, such as the rendering mode. See

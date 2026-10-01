@@ -39,6 +39,7 @@
 #include <Application.h>
 #include <Engine.h>
 #include <LuaScript.h>
+#include <tolua++.h>
 #include <CoreEvents.h>
 #include <Input.h>
 #include <InputEvents.h> // E_EXITREQUESTED
@@ -4419,7 +4420,12 @@ struct CApp: public App, public magic::Application
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
-		if(!self->m_scene){
+		// Under the node given, else the scene the server replicates: a game
+		// with a scene of its own hands over its root
+		magic::Node *root = self->m_scene;
+		if(lua_isuserdata(L, 2))
+			root = (magic::Node*)tolua_tousertype(L, 2, 0);
+		if(!root){
 			lua_pushnil(L);
 			lua_pushstring(L, "no scene");
 			return 2;
@@ -4475,7 +4481,7 @@ struct CApp: public App, public magic::Application
 		};
 
 		magic::PODVector<magic::Camera*> cams;
-		self->m_scene->GetComponents<magic::Camera>(cams, true);
+		root->GetComponents<magic::Camera>(cams, true);
 		if(!cams.Empty() && cams[0]->GetNode()){
 			magic::Node *cn = cams[0]->GetNode();
 			const magic::Vector3 p = cn->GetWorldPosition();
@@ -4558,7 +4564,7 @@ struct CApp: public App, public magic::Application
 		};
 
 		magic::PODVector<magic::CustomGeometry*> geoms;
-		self->m_scene->GetComponents<magic::CustomGeometry>(geoms, true);
+		root->GetComponents<magic::CustomGeometry>(geoms, true);
 		const int64_t t_start = interface::os::time_us();
 		int64_t t_tex = 0;
 		unsigned vbase = 1;
