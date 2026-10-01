@@ -184,6 +184,9 @@ local function show_login(error_text)
 		local function draw_keep()
 			kt:SetText((keep.on and "[x] " or "[ ] ") .. "Keep me logged in")
 		end
+		-- **By the keyboard too** (user, 2026-10-01): Tab reaches it after
+		-- the fields, and a focused button is pressed by Space or Enter
+		kb:SetFocusMode(magic.FM_FOCUSABLE)
 		draw_keep()
 		magic.SubscribeToEvent(kb, "Released", function()
 			keep.on = not keep.on
@@ -209,6 +212,8 @@ local function show_login(error_text)
 		send_login(n, password and password:GetText() or "",
 				code and code:GetText() or "", nil, keep and keep.on)
 	end
+	-- and Join after it
+	button:SetFocusMode(magic.FM_FOCUSABLE)
 	magic.SubscribeToEvent(button, "Released", function() join() end)
 	magic.SubscribeToEvent(name, "TextFinished", function()
 		if password then
