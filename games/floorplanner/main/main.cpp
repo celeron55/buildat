@@ -266,6 +266,9 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"y", -MAX_COORD, MAX_COORD, 0},
 		{"z", -MAX_COORD, MAX_COORD, 0},
 		{"yaw", 0, 359999, 0},
+		// The foundation under a building's lowest floor when it is above
+		// the ground (user); 0 the plain grey
+		{"mat_foundation", 0, INT32_MAX, 0, "palette", OnDelete::Restrict, true},
 	}, {
 		{"name", "Ground floor"},
 		{"group", "Building"},

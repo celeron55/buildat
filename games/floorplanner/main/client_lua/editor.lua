@@ -1692,6 +1692,11 @@ end
 
 -- wells: {floor = {pts, ...}, ceiling = {pts, ...}}, the stairwells cut in
 -- this layout's rooms
+-- **A foundation from the ground up to the floor** (user): set by
+-- rebuild() for a building's lowest layout when it is above the ground,
+-- {h = its height in mm, mat = the palette entry}, else nil
+local foundation = nil
+
 local function build_layout(seen_voxels, wells)
 	solids = {}
 	wall_data = {}
@@ -1797,6 +1802,16 @@ local function build_layout(seen_voxels, wells)
 		end
 		slabs[#slabs + 1] = {prev, math.huge}
 		local d0 = f and f.ax * f.ux + f.az * f.uz or 0
+		if foundation then
+			local g = geometry(P.walls)
+			local labels = {}
+			for i = 1, #o.pts do
+				labels[i] = "core"
+			end
+			extrude(g, o.pts, labels, -foundation.h, 0,
+					{core = row(foundation.mat)}, false)
+			commit(g, lit_material)
+		end
 		for _, sl in ipairs(slabs) do
 			local pts, labels = o.pts, o.sides
 			if f and sl[1] > -math.huge then
@@ -1829,6 +1844,17 @@ local function build_layout(seen_voxels, wells)
 
 	for id, r in pairs(room_data) do
 		local e = doc.ents[id]
+		-- The foundation under the floor too, where a room has no walls
+		if foundation and #r.pts >= 3 then
+			local g = geometry(P.walls)
+			local labels = {}
+			for i = 1, #r.pts do
+				labels[i] = "core"
+			end
+			extrude(g, r.pts, labels, -foundation.h, 0,
+					{core = row(foundation.mat)}, false)
+			commit(g, lit_material)
+		end
 		if #r.pts >= 3 then
 			local g = geometry(P.walls)
 			r.floor = geom.minus(r.pts, wells.floor)
@@ -1970,6 +1996,12 @@ rebuild = function()
 	-- built new is shown, so the hiding is done again
 	place.above, place.shown = {}, {}
 	local wells = place.stairwells(order, cur)
+	-- Each building's lowest floor, which a foundation goes under
+	local lowest = {}
+	for _, l in ipairs(order) do
+		local g = l.strs.group
+		lowest[g] = math.min(lowest[g] or math.huge, l.ints.y)
+	end
 	for _, l in ipairs(order) do
 		local r = place.rel(l.ints, cur)
 		local parts = place.parts[l.id]
@@ -1989,7 +2021,10 @@ rebuild = function()
 		end
 		place.above[l.id] = r.y > 0
 		P, S.view_layout = parts, l.id
+		foundation = l.ints.y > 0 and l.ints.y == lowest[l.strs.group] and
+				{h = l.ints.y, mat = l.ints.mat_foundation} or nil
 		build_layout(seen_voxels, wells[l.id])
+		foundation = nil
 		for _, sd in ipairs(solids) do
 			local pts = {}
 			for k, q in ipairs(sd.pts) do
@@ -5214,6 +5249,13 @@ place.build_window = function()
 	end, nil, true)
 	int_field(id, "X mm", "x", c.x)
 	int_field(id, "Y mm", "y", c.y)
+	-- Under the building's lowest floor when it is above the ground
+	local fm = doc.ents[c.mat_foundation]
+	panel.label(w, "Foundation: " .. (fm and "'" .. fm.strs.name .. "' #" ..
+			c.mat_foundation or "plain grey"))
+	panel.button(w, "Foundation: the palette entry", function()
+		set(id, {ints = {mat_foundation = default_material()}})
+	end)
 	int_field(id, "Z mm", "z", c.z)
 	panel.field(w, "Yaw deg", c.yaw / 1000, function(t)
 		local v = tonumber(t)
