@@ -49,8 +49,6 @@ local KIND = {box = 0, voxel = 1, opening = 2, door = 3, window = 4,
 local DOOR_PARTS = {mat = true, mat_leaf = true, mat_glass = true}
 local KIND_NAMES = {[0] = "Box", [2] = "Opening", [3] = "Door",
 	[4] = "Window", [5] = "Switch", [6] = "Stairs"}
--- I goes round what the wall items tool puts in
-local NEXT_HOSTED = {[2] = 3, [3] = 4, [4] = 5, [5] = 2}
 -- A new opening, door and window
 local HOSTED = {
 	[2] = {w = 900, h = 2100, sill = 0},
@@ -3203,13 +3201,19 @@ end
 -- {kind = "instance"|"wall"|"floor"|"ceiling", id, side}
 -- whole: an opening's hole is the opening's too, as the use key wants it
 -- -- an open door is closed by pointing through it
-local function pick_surface(whole)
+-- accept(kind, id): what may be picked, the rest seen through (Select's
+-- filter, M.sel_accept); all when nil
+local function pick_surface(whole, accept)
+	local function ok(kind, id)
+		return not accept or accept(kind, id)
+	end
 	if S.view == "2d" then
 		local x, z = cursor_floor()
 		-- The topmost instance under the cursor, as seen from above
 		local best, top = nil, -math.huge
 		for id, it in pairs(inst_data) do
-			if it.y1 > top and geom.point_in_polygon(x, z, it.foot) then
+			if it.y1 > top and geom.point_in_polygon(x, z, it.foot) and
+					ok("instance", id) then
 				best, top = id, it.y1
 			end
 		end
@@ -3217,7 +3221,7 @@ local function pick_surface(whole)
 			return {kind = "instance", id = best}
 		end
 		for id, o in pairs(outlines) do
-			if geom.point_in_polygon(x, z, o.pts) then
+			if geom.point_in_polygon(x, z, o.pts) and ok("wall", id) then
 				local w = wall_data[id]
 				local side = (w.bx - w.ax) * (z - w.az) -
 						(w.bz - w.az) * (x - w.ax) > 0 and "left" or "right"
@@ -3225,12 +3229,13 @@ local function pick_surface(whole)
 			end
 		end
 		for id, im in pairs(image_data) do
-			if not im.locked and geom.point_in_polygon(x, z, im.foot) then
+			if not im.locked and geom.point_in_polygon(x, z, im.foot) and
+					ok("image", id) then
 				return {kind = "image", id = id}
 			end
 		end
 		local r = room_at(x, z)
-		return r and {kind = "floor", id = r} or nil
+		return r and ok("floor", r) and {kind = "floor", id = r} or nil
 	end
 	local o, d = cursor_ray()
 	local best, best_t = nil, math.huge
@@ -3238,7 +3243,7 @@ local function pick_surface(whole)
 	-- picked from above too
 	for id, it in pairs(inst_data) do
 		local t, part = ray_instance(it, o, d, not whole and id or nil)
-		if t and t < best_t then
+		if t and t < best_t and ok("instance", id) then
 			-- A leaf is the door's leaf part, which a click selects
 			best, best_t = {kind = "instance", id = id,
 					side = part == "leaf" and "mat_leaf" or nil}, t
@@ -3246,7 +3251,7 @@ local function pick_surface(whole)
 	end
 	for id, ol in pairs(outlines) do
 		-- (an outline outlives its wall for the frame a plan is left in)
-		local we = doc.ents[id]
+		local we = ok("wall", id) and doc.ents[id]
 		local y0, y1 = 0, 0
 		if we then
 			y0, y1 = wall_span(we.ints)
@@ -3280,10 +3285,10 @@ local function pick_surface(whole)
 		end
 	end
 	for id, r in pairs(room_data) do
-		local surfaces = {{"floor", 2}}
+		local surfaces = ok("floor", id) and {{"floor", 2}} or {}
 		-- (the 3D pick: best_t is how far along the ray it is)
 		-- A ceiling faces down and is seen only from under it
-		if d.y > 0 then
+		if d.y > 0 and #surfaces > 0 then
 			surfaces[2] = {"ceiling", room_ceiling(doc.ents[id])}
 		end
 		for _, s in ipairs(surfaces) do
@@ -3297,6 +3302,89 @@ local function pick_surface(whole)
 		best.t = best_t
 	end
 	return best
+end
+
+-- **The selection filter** (user, 2026-10-02, as KiCad's PCB editor
+-- has): what of the plan Select picks, by click and by box, a check box a
+-- kind in its panel while nothing is selected; what is not picked is
+-- seen through. With no tool at all nothing is. The Material tool and
+-- the snapping of the tools that draw go by everything. This client's,
+-- kept in its storage as "<kind>=0" lines for what is off.
+M.SEL_KINDS = {{"walls", "Walls"}, {"rooms", "Rooms"}, {"objects", "Objects"},
+		{"lamps", "Lamps"}, {"wall_items", "Wall items"}, {"stairs", "Stairs"},
+		{"voxels", "Voxels"}, {"pictures", "Pictures"}, {"nodes", "Nodes"}}
+function M.sel_filter()
+	if not M.sel_filter_on then
+		M.sel_filter_on = {}
+		for _, k in ipairs(M.SEL_KINDS) do
+			M.sel_filter_on[k[1]] = true
+		end
+		for line in (buildat.storage_read("select_filter") or ""):gmatch("[^\n]+") do
+			local k, v = line:match("^([%w_]+)=(%d)$")
+			if k and M.sel_filter_on[k] ~= nil then
+				M.sel_filter_on[k] = v == "1"
+			end
+		end
+	end
+	return M.sel_filter_on
+end
+function M.set_sel_filter(kind, on)
+	local f = M.sel_filter()
+	if kind then
+		f[kind] = on
+	else
+		for k in pairs(f) do
+			f[k] = on
+		end
+	end
+	local lines = {}
+	for _, k in ipairs(M.SEL_KINDS) do
+		if not f[k[1]] then
+			lines[#lines + 1] = k[1] .. "=0"
+		end
+	end
+	buildat.storage_write("select_filter", table.concat(lines, "\n"))
+	-- What is selected and no longer may be lets go
+	M.sel_drop_filtered()
+end
+-- The filter's kind of a pick or a selection: kind as pick_surface or
+-- S.sel has it
+function M.sel_category(kind, id)
+	if kind == "instance" then
+		local e = doc.ents[id]
+		local def = e and doc.ents[e.ints.def]
+		local k = def and def.ints.kind
+		if k == KIND.stairs then
+			return "stairs"
+		elseif k == KIND.voxel then
+			return "voxels"
+		elseif k and k ~= KIND.box then
+			return "wall_items"
+		end
+		return is_lamp(id) and "lamps" or "objects"
+	elseif kind == "wall" then
+		return "walls"
+	elseif kind == "image" then
+		return "pictures"
+	elseif kind == "node" then
+		return "nodes"
+	end
+	return "rooms"
+end
+function M.sel_accept(kind, id)
+	return S.tool == "select" and M.sel_filter()[M.sel_category(kind, id)]
+end
+function M.sel_drop_filtered()
+	for id, k in pairs(S.sel) do
+		if not M.sel_accept(k, id) then
+			S.sel[id], S.sel_face[id] = nil, nil
+		end
+	end
+	if S.primary and not S.sel[S.primary] then
+		S.primary = next(S.sel)
+	end
+	S.dirty = true
+	M.refresh_panels()
 end
 
 -- The cell of a volume under the cursor: the first voxel the ray enters
@@ -4859,7 +4947,19 @@ function M.pick_view(v)
 	set_view(v)
 end
 
-local function set_tool(t)
+-- toggle: from the tool's button or key, which, the tool being in use,
+-- leaves it for no tool at all (user, 2026-10-02): nothing can then be
+-- selected, and what was lets go; Select's filter is as it was when it
+-- comes back
+local function set_tool(t, toggle)
+	if toggle and t == S.tool then
+		S.tool = nil
+		S.draw, S.corners, S.drag = nil, nil, nil
+		S.sel, S.sel_face, S.primary, S.nodes = {}, {}, nil, {}
+		S.dirty = true
+		refresh_panels()
+		return
+	end
 	-- Viewing ([FP_VIEW_EDIT]): only Select, whose clicks show things
 	if t ~= "select" and not doc.can("edit") then
 		doc.notice(doc.can("can_edit") and
@@ -4957,7 +5057,7 @@ local function build_toolbar()
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Object"},
 			{"hosted", "Wall items"}, {"voxel", "Voxels"}, {"paint", "Material"}}) do
 		if t[1] == "select" or doc.can("edit") then
-			add(t[2], keys.name(t[1]), function() set_tool(t[1]) end,
+			add(t[2], keys.name(t[1]), function() set_tool(t[1], true) end,
 					S.tool == t[1])
 		end
 	end
@@ -5058,10 +5158,30 @@ local function build_props()
 	if S.stair_riser and not (sel and sel.id == S.stair_riser.inst) then
 		S.stair_riser = nil
 	end
-	-- **Nothing to show with Select and nothing selected** (user): the
-	-- panel is for what is selected and for a tool's own settings
-	if S.tool == "select" and not sel and sel_count() == 0 then
+	-- **With no tool, nothing** (user): nothing can be selected
+	if not S.tool then
 		props.visible = false
+		return
+	end
+	-- **Select's filter, with nothing selected** (M.sel_filter): what is
+	-- selected takes the panel over
+	if S.tool == "select" and not sel and sel_count() == 0 then
+		local f = M.sel_filter()
+		local all = true
+		for _, k in ipairs(M.SEL_KINDS) do
+			all = all and f[k[1]]
+		end
+		panel.label(props, "Select picks:")
+		panel.keep(function()
+			panel.check(props, "All", all, function()
+				M.set_sel_filter(nil, not all)
+			end)
+			for _, k in ipairs(M.SEL_KINDS) do
+				panel.check(props, k[2], f[k[1]], function()
+					M.set_sel_filter(k[1], not f[k[1]])
+				end)
+			end
+		end)
 		return
 	end
 	-- **An edit of what is selected leaves a placing tool for Select**, the
@@ -5832,8 +5952,9 @@ build_palette = function()
 	-- opens by itself when something new is selected or a tool it goes on
 	-- is taken. Folded it is a dropdown's button saying the entry.
 	local sel_now = S.primary or next(S.sel)
-	if (sel_now and sel_now ~= S.palette_sel) or (S.tool ~= S.palette_tool and
-			S.tool ~= "select" and S.tool ~= "node") or S.replacing then
+	if (sel_now and sel_now ~= S.palette_sel) or (S.tool and
+			S.tool ~= S.palette_tool and S.tool ~= "select" and
+			S.tool ~= "node") or S.replacing then
 		S.palette_collapsed = false
 	end
 	S.palette_sel, S.palette_tool = sel_now, S.tool
@@ -6934,7 +7055,7 @@ do
 			for i = 0, 7 do
 				local a = i * math.pi / 4
 				S.mx, S.my = mx + math.cos(a) * d, my + math.sin(a) * d
-				local s = pick_surface()
+				local s = pick_surface(nil, M.sel_accept)
 				if s and S.sel[s.id] then
 					found = {kind = S.sel[s.id], id = s.id, side = S.sel_face[s.id]}
 					break
@@ -6951,7 +7072,7 @@ do
 	press_target = function()
 		local x, z = cursor_floor()
 		if S.tool == "select" then
-			local s = pick_surface()
+			local s = pick_surface(nil, M.sel_accept)
 			if not (s and S.sel[s.id]) then
 				local near = M.near_selection()
 				if near then
@@ -6962,7 +7083,7 @@ do
 				-- With the part: a door's leaf is selected as its leaf
 				return {kind = "instance", id = s.id, side = s.side}
 			end
-			local n = x and nearest_node(x, z, snap_radius())
+			local n = x and M.sel_filter().nodes and nearest_node(x, z, snap_radius())
 			if n then
 				return {kind = "node", id = n}
 			elseif s then
@@ -7262,13 +7383,14 @@ do
 					S.sel = {}
 				end
 				for id, it in pairs(inst_data) do
-					if inside(it.x, it.z) then
+					if inside(it.x, it.z) and M.sel_accept("instance", id) then
 						S.sel[id] = "instance"
 						S.primary = id
 					end
 				end
 				for id, w in pairs(wall_data) do
-					if inside(w.ax, w.az) and inside(w.bx, w.bz) then
+					if inside(w.ax, w.az) and inside(w.bx, w.bz) and
+							M.sel_accept("wall", id) then
 						S.sel[id] = "wall"
 						S.sel_face[id] = nil
 						S.primary = id
@@ -7279,7 +7401,7 @@ do
 					for _, p in ipairs(r.pts) do
 						all = all and inside(p[1], p[2])
 					end
-					if all then
+					if all and M.sel_accept("room", id) then
 						S.sel[id] = "room"
 						S.primary = id
 					end
@@ -8366,10 +8488,11 @@ do
 		elseif S.calib then
 			S.calib = nil
 			refresh_panels()
-		elseif S.tool ~= "select" then
+		elseif S.tool and S.tool ~= "select" then
 			-- **A tool is a level of its own** (user): out of it to Select,
-			-- and from Select to the pause menu. The same in every view,
-			-- walking included, where the mouse's capture goes first.
+			-- and from Select, or no tool, to the pause menu. The same in
+			-- every view, walking included, where the mouse's capture goes
+			-- first.
 			set_tool("select")
 		else
 			open_pause()
@@ -8466,18 +8589,13 @@ do
 			rotate_selection(angle_step())
 		elseif is("turn_right") then
 			rotate_selection(-angle_step())
-		elseif is("hosted") then
-			-- Again: the next of opening, door and window
-			if S.tool == "hosted" then
-				S.hosted = NEXT_HOSTED[S.hosted]
-			end
-			set_tool("hosted")
 		elseif is("select") or is("node") or is("wall") or is("room") or
-				is("box") or is("voxel") or is("paint") then
+				is("box") or is("hosted") or is("voxel") or is("paint") then
+			-- Again: out of it, to no tool
 			for _, t in ipairs({"select", "node", "wall", "room", "box",
-					"voxel", "paint"}) do
+					"hosted", "voxel", "paint"}) do
 				if is(t) then
-					set_tool(t)
+					set_tool(t, true)
 					break
 				end
 			end
@@ -10222,7 +10340,7 @@ function M.start(d)
 		refresh_panels()
 	end
 	doc.privs_changed = function()
-		if not doc.can("edit") and S.tool ~= "select" then
+		if not doc.can("edit") and S.tool and S.tool ~= "select" then
 			set_tool("select")
 		end
 		refresh_panels()
