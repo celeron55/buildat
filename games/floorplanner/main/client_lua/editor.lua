@@ -67,7 +67,7 @@ local S = {
 	-- client starts pbr. The viewer's own, kept on the client.
 	lighting = buildat.storage_read("lighting") or "pbr",
 	view = "2d",
-	show_ids = true, -- the material id decals
+	show_ids = false, -- the material id decals
 	plan_look = true, -- the plan view in flat colours (L)
 	tool = "select",
 	voxel_mode = "place", -- the voxel tool's click in 3D
