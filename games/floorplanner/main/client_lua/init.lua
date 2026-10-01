@@ -703,9 +703,16 @@ local PLAN_ROWS = {"array", {"object", {"name", "string"}, {"owner", "string"},
 doc.plans = {}
 local auto_plan_done = false
 
+-- **A space in a typed name is an underscore** (user, 2026-10-01): a name
+-- can be written naturally, and the plan's directory still has none. The
+-- ends are trimmed, and a run of spaces is one _.
+local function plan_name(text)
+	return (text:match("^%s*(.-)%s*$"):gsub("%s+", "_"))
+end
+
 local function open_plan(name, create)
 	buildat.send_packet("fp:open", cereal.binary_output(
-			{name = name, create = create and 1 or 0},
+			{name = plan_name(name), create = create and 1 or 0},
 			{"object", {"name", "string"}, {"create", "byte"}}))
 end
 
@@ -856,7 +863,7 @@ local function import_as(file_name, data, message)
 	e.textSelectable = true
 	e:SetText(name ~= "" and name or "imported")
 	local function go()
-		local n = e:GetText()
+		local n = plan_name(e:GetText())
 		if n == "" then
 			return
 		end
@@ -1035,7 +1042,8 @@ end
 -- The open plan copied as `name`, which is then the one open and the
 -- copier's ([FP_COPY]); the server refuses a name a plan has already
 function doc.copy_plan(name)
-	buildat.send_packet("fp:copy_plan", cereal.binary_output({text = name},
+	buildat.send_packet("fp:copy_plan", cereal.binary_output(
+			{text = plan_name(name)},
 			TEXT))
 end
 
