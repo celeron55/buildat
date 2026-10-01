@@ -119,6 +119,14 @@ inline ss_ dump(const uint8_t &v){
 	return itos(v);
 }
 
+#ifdef __EMSCRIPTEN__
+// size_t on wasm32 is unsigned long, which is neither of the above
+template<>
+inline ss_ dump(const unsigned long &v){
+	return itos(v);
+}
+#endif
+
 template<typename T>
 static inline ss_ dump(const sv_<T> &vs){
 	std::ostringstream os(std::ios::binary);
