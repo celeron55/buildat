@@ -8670,7 +8670,12 @@ local function draw_overlay()
 		local z0, z1 = S.cz - S.span / 2, S.cz + S.span / 2
 		local fine = magic.Color(0.62, 0.62, 0.62)
 		local major = magic.Color(0.45, 0.45, 0.48)
-		local gy = 0.004
+		-- 30 mm up, over the floors (2 mm) by enough for a 16 bit depth
+		-- buffer over the plan camera's 100 m (a browser's may be; user:
+		-- the grid went under the floors in Firefox when it became
+		-- geometry, where the debug lines drawn last had won the tie); the
+		-- camera looks straight down, so the height shows nowhere else
+		local gy = 0.03
 		local g = M.grid_cache
 		if buildat.set_line_geometry then
 			if not (g and g.step == step and x0 >= g.x0 and x1 <= g.x1 and
