@@ -1209,6 +1209,19 @@ function buildat.safe.set_triangle_geometry(safe_node, verts)
 	return __buildat_set_triangle_geometry(getmetatable(safe_node).unsafe, verts)
 end
 
+-- set_image_data(image, values): all of an Image's bytes from a flat list
+-- of numbers from 0 to 1, rows from the top; see src/lua_bindings/mesh.cpp
+function buildat.safe.set_image_data(safe_image, values)
+	if not getmetatable(safe_image) or
+			getmetatable(safe_image).type_name ~= "Image" then
+		error("image is not a sandboxed Image instance")
+	end
+	if type(values) ~= "table" then
+		error("values is not a table")
+	end
+	return __buildat_set_image_data(getmetatable(safe_image).unsafe, values)
+end
+
 -- set_line_geometry(node, verts): a line list, 7 numbers a vertex
 -- (position, colour), as the node's CustomGeometry; see
 -- src/lua_bindings/mesh.cpp

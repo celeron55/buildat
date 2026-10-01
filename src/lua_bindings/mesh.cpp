@@ -16,6 +16,7 @@
 #include <StaticModel.h>
 #include <Model.h>
 #include <CustomGeometry.h>
+#include <Image.h>
 #include <algorithm>
 #include <CollisionShape.h>
 #include <RigidBody.h>
@@ -837,6 +838,38 @@ void set_line_geometry(const luabind::object &node_o,
 	cg->Commit();
 }
 
+// set_image_data(image, values): all of an Image's bytes from a flat list
+// of numbers from 0 to 1, components at a time, rows from the top. One
+// call for what was a SetPixel and a Color a texel from the sandbox: the
+// floorplanner's room table, 2048 texels, was 20 to 60 ms of that on the
+// web each time the daylight moved (user, 2026-10-02). The list is the
+// image's size exactly; a value that is not a number from 0 to 1 is
+// clamped, and one that is not a number at all is 0.
+void set_image_data(const luabind::object &image_o,
+		const luabind::object &values)
+{
+	lua_State *L = image_o.interpreter();
+	GET_TOLUA_STUFF(image, 1, Image);
+	if(image->IsCompressed() || image->GetDepth() != 1)
+		throw Exception("set_image_data: a compressed or 3D image");
+	const size_t n = (size_t)image->GetWidth() * image->GetHeight() *
+			image->GetComponents();
+	values.push(L);
+	const int t = lua_gettop(L);
+	if(!lua_istable(L, t) || lua_objlen(L, t) != n){
+		lua_pop(L, 1);
+		throw Exception("set_image_data: the list is not the image's size");
+	}
+	unsigned char *d = image->GetData();
+	for(size_t i = 0; i < n; i++){
+		lua_rawgeti(L, t, (int)(i + 1));
+		const double v = lua_tonumber(L, -1);
+		lua_pop(L, 1);
+		d[i] = v > 0.0 ? (v < 1.0 ? (unsigned char)(v * 255.0 + 0.5) : 255) : 0;
+	}
+	lua_pop(L, 1);
+}
+
 // set_quad_geometry(node, quads) -> {tile, ...}: a model's quads -- a Lua
 // list of {tile=, p={12 numbers}, uv={8 numbers}} -- as the node's
 // CustomGeometry, one geometry per distinct tile in ascending tile order
@@ -905,6 +938,7 @@ void init_mesh(lua_State *L)
 			LUABIND_FUNC(set_cell_geometry),
 			LUABIND_FUNC(set_triangle_geometry),
 			LUABIND_FUNC(set_line_geometry),
+			LUABIND_FUNC(set_image_data),
 			LUABIND_FUNC(column_heights),
 			LUABIND_FUNC(set_simple_voxel_model),
 			LUABIND_FUNC(set_8bit_voxel_geometry),

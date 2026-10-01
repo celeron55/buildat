@@ -1923,7 +1923,8 @@ end
 -- probes are there to light it (alpha); its first probe row and their
 -- number (/ 255); its box (M.room_probes): the corner's x and z, the
 -- extents along and across, the along axis's x and z, the floor's and the
--- ceiling's height. By a probe's row: its x and z, and its y. A length is
+-- ceiling's height. By a probe's row: its x and z, and its y and its
+-- room's slot (/ 255). A length is
 -- 16 bits in two bytes, 4 mm a step from -131 m; the axis 16 bits from -1
 -- to 1.
 M.ROOM_TABLE_ROWS = 256
@@ -1933,27 +1934,37 @@ function M.room_bounce(tx, h, tz, light)
 	if not image then
 		image = magic.Image:new()
 		assert(image:SetSize(8, M.ROOM_TABLE_ROWS, 4), "room table image")
+		assert(magic.cache:AddManualResource(image, "fp_room_table_image"),
+				"room table image in the cache")
 		M.room_table_image = image
-		M.kept[#M.kept + 1] = image
 	end
-	local function c16(a, b, unit)
-		local function k(v)
+	-- The texels as one list (buildat.set_image_data), four numbers each
+	local W8 = 8
+	local v = {}
+	for i = 1, W8 * M.ROOM_TABLE_ROWS * 4 do
+		v[i] = 0
+	end
+	local function put(x, y, r, g, b, a)
+		local i = (y * W8 + x) * 4
+		v[i + 1], v[i + 2], v[i + 3], v[i + 4] = r, g, b, a
+	end
+	local function c16(x, y, a, b, unit)
+		local function k(val)
 			if unit then
-				return math.max(0, math.min(65535, math.floor((v + 1) * 32767.5 + 0.5)))
+				return math.max(0, math.min(65535, math.floor((val + 1) * 32767.5 + 0.5)))
 			end
-			return math.max(0, math.min(65535, math.floor(v / 0.004 + 0.5) + 32768))
+			return math.max(0, math.min(65535, math.floor(val / 0.004 + 0.5) + 32768))
 		end
 		local ka, kb = k(a), k(b)
-		return magic.Color(math.floor(ka / 256) / 255, ka % 256 / 255,
+		put(x, y, math.floor(ka / 256) / 255, ka % 256 / 255,
 				math.floor(kb / 256) / 255, kb % 256 / 255)
 	end
 	local e = h > 0 and light.sun or 0
 	local sc = light.sun_color
 	local drawn = S.lighting == "pbr_cube"
-	for slot = 1, M.ROOM_TABLE_ROWS - 1 do
-		local rl = M.room_light[slot]
+	for slot, rl in pairs(M.room_light) do
 		local c = {0, 0, 0}
-		if rl and e > 0 then
+		if e > 0 then
 			local flux = 0
 			for _, w in ipairs(rl.wins) do
 				flux = flux + w.a * e * math.max(0, w.ox * tx + w.oz * tz)
@@ -1961,34 +1972,41 @@ function M.room_bounce(tx, h, tz, light)
 			local k = flux / math.max(rl.area, 1) / 0.5 / math.pi
 			c = {k * rl.floor.r * sc.r, k * rl.floor.g * sc.g, k * rl.floor.b * sc.b}
 		end
-		local pr = rl and M.probe_rows[slot]
+		local pr = M.probe_rows[slot]
 		local ready = pr ~= nil
 		if pr and drawn then
 			for row = pr.first, pr.first + pr.n - 1 do
 				ready = ready and M.probe_ready[row] == true
 			end
 		end
-		image:SetPixel(0, slot, magic.Color(math.sqrt(math.min(c[1], 16) / 16),
+		put(0, slot, math.sqrt(math.min(c[1], 16) / 16),
 				math.sqrt(math.min(c[2], 16) / 16),
-				math.sqrt(math.min(c[3], 16) / 16), ready and 1 or 0))
-		image:SetPixel(1, slot, magic.Color(pr and pr.first / 255 or 0,
-				pr and pr.n / 255 or 0, 0, 0))
-		local b = pr and pr.box
-		local none = magic.Color(0, 0, 0, 0)
-		image:SetPixel(2, slot, b and c16(b.ox, b.oz) or none)
-		image:SetPixel(3, slot, b and c16(b.lu, b.lv) or none)
-		image:SetPixel(4, slot, b and c16(b.ux, b.uz, true) or none)
-		image:SetPixel(5, slot, b and c16(b.y0, b.y1) or none)
-		local at = M.probe_pos[slot]
-		image:SetPixel(6, slot, at and c16(W(at.x), W(at.z)) or none)
-		image:SetPixel(7, slot, at and c16(W(at.y), 0) or none)
+				math.sqrt(math.min(c[3], 16) / 16), ready and 1 or 0)
+		if pr then
+			put(1, slot, pr.first / 255, pr.n / 255, 0, 0)
+			local b = pr.box
+			c16(2, slot, b.ox, b.oz)
+			c16(3, slot, b.lu, b.lv)
+			c16(4, slot, b.ux, b.uz, true)
+			c16(5, slot, b.y0, b.y1)
+		end
 	end
+	-- By a probe's row: its place, and its room's slot
+	for row, at in pairs(M.probe_pos) do
+		c16(6, row, W(at.x), W(at.z))
+		c16(7, row, W(at.y), 0)
+		v[(row * W8 + 7) * 4 + 3] = (M.row_owner[row] or 0) / 255
+	end
+	buildat.set_image_data(image, v)
 	local texture = M.room_table
 	if not texture then
 		texture = magic.Texture2D:new()
 		texture:SetNumLevels(1)
+		-- Held by the cache, and read by name by the grid's pass
+		-- (fp_grid.xml)
+		assert(magic.cache:AddManualResource(texture, "fp_room_table"),
+				"room table in the cache")
 		M.room_table = texture
-		M.kept[#M.kept + 1] = texture
 	end
 	assert(texture:SetData(image), "room table texture")
 	texture.filterMode = magic.FILTER_NEAREST
@@ -2061,6 +2079,12 @@ function M.cpu_cubes(tx, h, tz, light)
 		M.kept[#M.kept + 1] = texture
 	end
 	M.cpu_cube = {}
+	-- The texels as one list (buildat.set_image_data)
+	local cw = 6 * K * K
+	local v = {}
+	for i = 1, cw * M.PROBE_ROWS * 4 do
+		v[i] = 0
+	end
 	local rgb = M.ground_rgb()
 	local function lin(v)
 		return (v / 255) ^ 2.2
@@ -2175,15 +2199,17 @@ function M.cpu_cubes(tx, h, tz, light)
 					end
 				end
 				M.cpu_cube[row] = cells
-				for i, v in ipairs(cells) do
-					image:SetPixel(i - 1, row, magic.Color(
-							math.sqrt(math.min(v[1], 16) / 16),
-							math.sqrt(math.min(v[2], 16) / 16),
-							math.sqrt(math.min(v[3], 16) / 16), 1))
+				for i, c in ipairs(cells) do
+					local o = (row * cw + i - 1) * 4
+					v[o + 1] = math.sqrt(math.min(c[1], 16) / 16)
+					v[o + 2] = math.sqrt(math.min(c[2], 16) / 16)
+					v[o + 3] = math.sqrt(math.min(c[3], 16) / 16)
+					v[o + 4] = 1
 				end
 			end
 		end
 	end
+	buildat.set_image_data(image, v)
 	assert(M.cpu_cube_texture:SetData(image), "cpu cubes texture")
 	M.cpu_cube_texture.filterMode = magic.FILTER_NEAREST
 	if M.cube_mode == 2 then
