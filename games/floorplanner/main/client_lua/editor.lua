@@ -74,7 +74,7 @@ local S = {
 	voxel_mode = "place", -- the voxel tool's click in 3D
 	angle = 4,      -- index into ANGLE_STEPS: the angle snap
 	-- New walls
-	thickness = 100,
+	thickness = 120, -- a new wall's, mm: a 90 mm stud and a board on each side (user)
 	justify = 0,
 	height = 0,
 	hang = 0,

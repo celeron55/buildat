@@ -287,7 +287,7 @@ static const sv_<TypeSchema> SCHEMA = {
 	{"wall", {
 		{"a", 1, INT32_MAX, 0, "node", OnDelete::Cascade},
 		{"b", 1, INT32_MAX, 0, "node", OnDelete::Cascade},
-		{"thickness", 1, 2000, 100},
+		{"thickness", 1, 2000, 120},
 		{"justify", 0, 2, 0},     // 0 centered, 1 left, 2 right of a->b
 		{"height", 0, 20000, 0},  // 0: full height
 		{"hang", 0, 1, 0},        // 1: from the ceiling down
