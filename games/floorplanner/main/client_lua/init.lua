@@ -1144,7 +1144,11 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		end
 		return
 	end
-	if editor and editor.capture_key(key) then
+	if editor and doc.ui_hidden then
+		-- A viewport's hidden menus come back, and the key does nothing else
+		editor.show_ui()
+		return
+	elseif editor and editor.capture_key(key) then
 		return
 	elseif editor and key == editor.keys.key("chat") then
 		chat_pending = true
@@ -1162,6 +1166,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	end
 	was_typing = doc.typing()
 	redraw_messages()
+	msg_text.visible = not doc.ui_hidden
 	poll_picked()
 	if editor then
 		editor.update(event_data:GetFloat("TimeStep"))

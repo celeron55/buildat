@@ -431,6 +431,10 @@ return function(doc)
 		if step < 1 or step > #STEPS then
 			return
 		end
+		-- Hidden with the menus while a viewport is shown clean
+		if win then
+			win.visible = not doc.ui_hidden
+		end
 		since = since + data:GetFloat("TimeStep")
 		if since < 0.25 then
 			return

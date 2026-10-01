@@ -369,6 +369,27 @@ static const sv_<TypeSchema> SCHEMA = {
 	}, {
 		{"file", ""},
 	}, {}},
+	// **A saved viewpoint** (user, 2026-10-01): a camera fixed where it was,
+	// to see the plan again from the same place -- the free 3D camera's or
+	// a walker's eyes (walk 1), at x, y, z mm in its layout's frame,
+	// looking yaw and pitch (millidegrees) with a vertical field of view of
+	// fov degrees; and the day and minute it was saved at, which it puts
+	// the light at when recall is 1
+	{"viewport", {
+		{"layout", 1, INT32_MAX, 0, "layout", OnDelete::Cascade},
+		{"x", -MAX_COORD, MAX_COORD, 0},
+		{"y", -MAX_COORD, MAX_COORD, 0},
+		{"z", -MAX_COORD, MAX_COORD, 0},
+		{"yaw", -1000000, 1000000, 0},
+		{"pitch", -90000, 90000, 0},
+		{"walk", 0, 1, 0},
+		{"fov", 1, 179, 60},
+		{"day", 1, 365, 172},
+		{"minute", 0, 1439, 720},
+		{"recall", 0, 1, 1},
+	}, {
+		{"name", "Viewport"},
+	}, {}},
 	{"palette", {
 		{"kind", 0, MK_COUNT - 1, MK_DRYWALL},
 		{"base", 0, 0xffffff, 0xe8e4dc},

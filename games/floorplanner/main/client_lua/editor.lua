@@ -2358,10 +2358,18 @@ M.UNLIT = {ambient = magic.Color(0.55, 0.55, 0.58),
 -- which a viewer may change too
 function M.sun()
 	local t = S.sun_temp
-	if t and t.plan == doc.plan_name then
-		return t
+	local base = (t and t.plan == doc.plan_name) and t or settings()
+	-- A viewport that recalls its moment: its day and minute, still
+	local vp = S.vp and doc.ents[S.vp]
+	if vp and vp.ints.recall == 1 then
+		local t2 = {}
+		for k, v in pairs(base) do
+			t2[k] = v
+		end
+		t2.day, t2.minute, t2.lapse = vp.ints.day, vp.ints.minute, 0
+		return t2
 	end
-	return settings()
+	return base
 end
 -- The plan's minute now: its own, or on from it at the time-lapse's
 -- speed since this client saw it set
@@ -4318,6 +4326,10 @@ end
 -- takes its own again. The walker starts under the free camera the first
 -- time, and again by "Walk from here".
 local function set_view(v)
+	-- Another view than a viewport's is out of it
+	if S.vp and v ~= "3d" then
+		M.leave_viewport()
+	end
 	if v == "walk" and S.view ~= "walk" then
 		if not S.walk.placed then
 			-- On the floor under the camera, or the plan's middle
@@ -4364,11 +4376,20 @@ end
 -- puts the walker under the free camera first. (On M: the chunk is at
 -- Lua's limit of 200 locals.)
 function M.pick_view(v)
+	if v == "save" then
+		M.save_viewport()
+		return
+	elseif type(v) == "string" and v:sub(1, 3) == "vp:" then
+		M.go_viewport(tonumber(v:sub(4)))
+		return
+	end
 	if v == "walk_here" then
 		S.walk.placed = false
 		v = "walk"
 	end
-	if v == "3d" and S.view ~= "3d" and S.cam3d then
+	local was_vp = S.vp
+	M.leave_viewport()
+	if v == "3d" and (S.view ~= "3d" or was_vp) and S.cam3d then
 		local c = S.cam3d
 		S.pos = {x = c.x, y = c.y, z = c.z}
 		S.yaw, S.pitch = c.yaw, c.pitch
@@ -4442,11 +4463,25 @@ local function build_toolbar()
 		views[i] = {VIEW_NAMES[v] .. (S.touch and "" or
 				" (" .. keys.name("view_" .. v) .. ")"), v}
 	end
-	if S.view == "3d" then
+	if S.view == "3d" and not S.vp then
 		views[#views + 1] = {"Walk from here", "walk_here"}
 	end
+	-- **Viewports** (user, 2026-10-01): saved from 3D or walking by an
+	-- editor, gone to by anyone; picked again, or the dropdown opened and
+	-- closed, the menus are hidden again
+	if S.view ~= "2d" and not S.vp and doc.can("edit") then
+		views[#views + 1] = {"Save viewport", "save"}
+	end
+	for _, e in ipairs(M.viewports()) do
+		views[#views + 1] = {e.strs.name, "vp:" .. e.id}
+	end
 	place(function(parent)
-		return panel.dropdown(parent, nil, views, S.view, M.pick_view, 40)
+		return panel.dropdown(parent, nil, views,
+				S.vp and "vp:" .. S.vp or S.view, M.pick_view, 40, function()
+			if S.vp then
+				M.hide_ui()
+			end
+		end)
 	end)
 	-- The layout edited, and the window that picks another
 	local l = S.layout and doc.ents[S.layout]
@@ -5958,6 +5993,80 @@ do
 	end
 	M.keys_page = keys_page
 
+	-- **The plan's viewports** (user, 2026-10-01): each one's name, a way
+	-- to it, whether it brings its date and time with it and what they
+	-- are; an editor also puts it where the camera is now, or deletes it.
+	-- A viewer goes to them.
+	local function viewports_page()
+		local w = dialog("Viewports")
+		local edit = doc.can("edit")
+		local dl = M.daylight
+		local list = M.viewports()
+		if #list == 0 then
+			panel.label(w, "None yet: \"Save viewport\" in the view dropdown,")
+			panel.label(w, "in 3D or walking, saves the camera as one")
+		end
+		local function set(id, ints, strs)
+			send({{op = "set", ent = {id = id, ints = ints, strs = strs}}},
+					function() viewports_page() end)
+		end
+		for _, e in ipairs(list) do
+			local v = e.ints
+			panel.view_only = not edit
+			panel.field(w, "Name", e.strs.name, function(t)
+				if t ~= "" then
+					set(e.id, nil, {name = t})
+				end
+			end, 160, true)
+			panel.view_only = false
+			local r = panel.row(w)
+			panel.label(r, v.walk == 1 and "Walking" or "3D")
+			panel.keep(function() return panel.button(r, "Go to", function()
+				close_pause()
+				M.go_viewport(e.id)
+			end) end)
+			if edit then
+				if S.view ~= "2d" and not S.vp then
+					panel.button(r, "Use this camera", function()
+						local walk = S.view == "walk"
+						set(e.id, {layout = S.layout,
+								x = math.floor(S.pos.x * 1000 + 0.5),
+								y = math.floor(S.pos.y * 1000 + 0.5),
+								z = math.floor(S.pos.z * 1000 + 0.5),
+								yaw = math.floor(S.yaw % 360 * 1000 + 0.5) % 360000,
+								pitch = math.floor(S.pitch * 1000 + 0.5),
+								walk = walk and 1 or 0,
+								fov = math.floor((walk and S.walk_fov or 60) + 0.5)})
+					end)
+				end
+				panel.button(r, "Delete", function()
+					send({{op = "delete", ent = {id = e.id}}},
+							function() viewports_page() end)
+				end)
+			end
+			panel.view_only = not edit
+			panel.check(w, "Recall its date and time", v.recall == 1, function()
+				set(e.id, {recall = 1 - v.recall})
+			end)
+			local tr = panel.row(w)
+			panel.field(tr, "Date (d.m.)", dl.date_text(v.day), function(t)
+				local d = dl.parse_date(t)
+				if d then
+					set(e.id, {day = d})
+				end
+			end)
+			panel.field(tr, "Time (h:mm)", dl.time_text(v.minute), function(t)
+				local m = dl.parse_time(t)
+				if m then
+					set(e.id, {minute = m})
+				end
+			end)
+			panel.view_only = false
+			panel.label(w, " ")
+		end
+		panel.button(w, "Back", function() open_pause() end)
+	end
+
 	local function client_settings_page()
 		local w = dialog("Client settings")
 		local angles = {}
@@ -6242,6 +6351,7 @@ do
 		panel.button(w, "Plan settings...", plan_settings_page)
 		panel.button(w, "Client settings...", client_settings_page)
 		panel.button(w, "Keys...", keys_page)
+		panel.button(w, "Viewports...", viewports_page)
 		panel.button(w, "Chat...", function()
 			account_page(doc.accounts.chat_page)
 		end)
@@ -7426,6 +7536,10 @@ do
 	-- dropped. Walking: a finger put down at the lower left is a stick, and
 	-- any other turns the view.
 	function M.touch_begin(id, x, y)
+		if doc.ui_hidden then
+			M.show_ui()
+			return
+		end
 		local sc = magic.ui.scale
 		local on_ui = panel.over({toolbar, props, palette_win, pause_win,
 				picker_win, place.win, S.touch_bar, doc.accounts.page,
@@ -9234,6 +9348,88 @@ function M.resume()
 	S.dirty = true
 end
 
+-- **Viewports** (user, 2026-10-01): a camera saved in the plan, from 3D
+-- or walking, to see it again from the very same place. Gone to, the
+-- camera is fixed there -- nothing that moves a camera moves it -- with
+-- its own field of view, what was selected is let go of, and the menus
+-- and texts are hidden until a key, a click or a touch; and, when it
+-- recalls its moment, the light is its day and minute. Selecting and
+-- editing go on as in 3D. Another view leaves it.
+function M.viewports()
+	local list = {}
+	for _, e in ipairs(doc.of_type("viewport")) do
+		list[#list + 1] = e
+	end
+	table.sort(list, function(a, b) return a.id < b.id end)
+	return list
+end
+
+function M.save_viewport()
+	if S.view == "2d" or not doc.can("edit") or not S.layout then
+		return
+	end
+	local n = 0
+	for _, e in ipairs(M.viewports()) do
+		local k = tonumber(e.strs.name:match("^Viewport (%d+)$") or "")
+		if k and k > n then
+			n = k
+		end
+	end
+	local walk = S.view == "walk"
+	local name = "Viewport " .. (n + 1)
+	local function mm(m)
+		return math.floor(m * 1000 + 0.5)
+	end
+	send({{op = "create", ent = {id = doc.placeholder(), type = "viewport",
+			ints = {layout = S.layout, x = mm(S.pos.x), y = mm(S.pos.y),
+			z = mm(S.pos.z), yaw = math.floor(S.yaw % 360 * 1000 + 0.5) % 360000,
+			pitch = math.floor(S.pitch * 1000 + 0.5), walk = walk and 1 or 0,
+			fov = math.floor((walk and S.walk_fov or 60) + 0.5),
+			day = M.plan_day(), minute = math.floor(M.plan_minute()) % 1440,
+			recall = 1}, strs = {name = name}}}})
+	doc.notice("Saved as " .. name)
+end
+
+function M.hide_ui()
+	doc.ui_hidden = true
+	panel.close_popup()
+end
+
+function M.show_ui()
+	if doc.ui_hidden then
+		doc.ui_hidden = false
+		refresh_panels()
+	end
+end
+
+function M.go_viewport(id)
+	local e = doc.ents[id]
+	if not e or e.type ~= "viewport" then
+		return
+	end
+	if e.ints.layout ~= S.layout then
+		place.switch(e.ints.layout)
+	end
+	S.vp = nil
+	set_view("3d")
+	S.vp = id
+	S.sel, S.sel_face, S.primary, S.nodes = {}, {}, nil, {}
+	S.daylight_key = nil
+	S.dirty = true
+	refresh_panels()
+	M.hide_ui()
+end
+
+function M.leave_viewport()
+	if not S.vp then
+		return
+	end
+	S.vp = nil
+	S.daylight_key = nil
+	M.show_ui()
+	refresh_panels()
+end
+
 function M.update(dt)
 	panel.flush()
 	if S.suspended then
@@ -9255,8 +9451,20 @@ function M.update(dt)
 		end
 	end
 	move_camera(dt)
+	-- A viewport's camera does not move: whatever moved it, it is put back
+	local vp = S.vp and doc.ents[S.vp]
+	if S.vp and not vp then
+		M.leave_viewport()
+	elseif vp then
+		local v = vp.ints
+		S.pos = {x = W(v.x), y = W(v.y), z = W(v.z)}
+		S.yaw, S.pitch = v.yaw / 1000, v.pitch / 1000
+		cam3d.fov = M.fov_for(v.fov)
+	end
 	-- The camera of the view in use, kept for when it is gone back to
-	if S.view == "3d" then
+	if S.vp then
+		-- (a viewport's is its own)
+	elseif S.view == "3d" then
 		S.cam3d = {x = S.pos.x, y = S.pos.y, z = S.pos.z, yaw = S.yaw,
 				pitch = S.pitch}
 	elseif S.view == "walk" then
@@ -9274,7 +9482,8 @@ function M.update(dt)
 		refresh_panels()
 	end
 	label_i = 0
-	S.guide = compute_guide()
+	-- No hints and no highlights while a viewport is shown clean
+	S.guide = not doc.ui_hidden and compute_guide() or nil
 	-- [FP_TOUCH] 4: a finger held still is the right button
 	if S.touch and not S.paused then
 		local only, n = nil, 0
@@ -9297,6 +9506,19 @@ function M.update(dt)
 	draw_overlay()
 	for i = label_i + 1, #label_nodes do
 		label_nodes[i].visible = false
+	end
+	-- Hidden for a viewport: whatever was made or shown since
+	if doc.ui_hidden then
+		-- (pairs: any of them may be nil, where ipairs would stop)
+		for _, w in pairs({toolbar, props, palette_win, picker_win, place.win,
+				pause_win, S.touch_bar, hud, crosshair}) do
+			w.visible = false
+		end
+		for i = 1, label_i do
+			label_nodes[i].visible = false
+		end
+	else
+		hud.visible = true
 	end
 end
 
@@ -9349,6 +9571,13 @@ function M.start(d)
 	-- A press off an open dropdown closes it, and one on the view does
 	-- nothing else
 	magic.SubscribeToEvent("MouseButtonDown", function(_, data)
+		-- A viewport's hidden menus come back, and the click does nothing
+		-- else
+		if doc.ui_hidden then
+			M.show_ui()
+			S.swallow_up = true
+			return
+		end
 		local sc = magic.ui.scale
 		if panel.press(S.mx / sc, S.my / sc) and not over_ui() then
 			S.swallow_up = true

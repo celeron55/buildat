@@ -118,14 +118,21 @@ end
 -- **A dropdown** (user): a button saying the choice, which opens under it
 -- a list of the choices over everything else. A choice, the button again,
 -- a press elsewhere (M.press) or Esc closes it; one is open at a time.
--- choices: {{text, value}, ...}; on_choose(value)
+-- choices: {{text, value}, ...}; on_choose(value); on_dismiss(), when
+-- given, when it is closed with nothing chosen
 M.popup = nil
 local owner_at = nil -- the open one's button's place, found again by it
 local skip_owner = false
+local dismissed = nil -- the open one's on_dismiss
 function M.close_popup()
 	if M.popup then
 		M.popup:Remove()
 		M.popup, owner_at = nil, nil
+		local f = dismissed
+		dismissed = nil
+		if f then
+			f()
+		end
 	end
 end
 -- A button's mark at its right end, its text centred in what is left:
@@ -144,7 +151,8 @@ function M.mark(b, mark)
 	return b
 end
 
-function M.dropdown(parent, label, choices, current, on_choose, min_width)
+function M.dropdown(parent, label, choices, current, on_choose, min_width,
+		on_dismiss)
 	local shown = "?"
 	for _, c in ipairs(choices) do
 		if c[2] == current then
@@ -163,6 +171,7 @@ function M.dropdown(parent, label, choices, current, on_choose, min_width)
 			return
 		end
 		M.close_popup()
+		dismissed = on_dismiss
 		local w = magic.ui.root:CreateChild("Window")
 		w:SetStyleAuto()
 		w:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(4, 4, 4, 4))
@@ -171,6 +180,7 @@ function M.dropdown(parent, label, choices, current, on_choose, min_width)
 		w.priority = 300
 		for _, c in ipairs(choices) do
 			M.button(w, c[1], function()
+				dismissed = nil
 				M.close_popup()
 				on_choose(c[2])
 			end, c[2] == current, b.width - 8)
