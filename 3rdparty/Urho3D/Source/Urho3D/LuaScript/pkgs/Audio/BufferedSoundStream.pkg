@@ -1,0 +1,31 @@
+$#include "Audio/BufferedSoundStream.h"
+$#include "IO/VectorBuffer.h"
+
+class BufferedSoundStream : public SoundStream
+{
+    BufferedSoundStream();
+    ~BufferedSoundStream();
+
+    // AddData(const void*, unsigned) takes raw bytes, which a Lua string
+    // cannot carry: tolua converts a string through const char*, so the
+    // first zero byte in a block of PCM would end it. A VectorBuffer is
+    // the binding's own byte container and has WriteShort(), so a script
+    // fills one sample by sample and hands it over in one call.
+    tolua_outside void BufferedSoundStreamAddBuffer @ AddData(const VectorBuffer& buffer);
+    void Clear();
+
+    unsigned GetBufferNumBytes() const;
+    float GetBufferLength() const;
+
+    tolua_readonly tolua_property__get_set unsigned bufferNumBytes;
+    tolua_readonly tolua_property__get_set float bufferLength;
+};
+
+${
+static void BufferedSoundStreamAddBuffer(BufferedSoundStream* stream, const VectorBuffer& buffer)
+{
+    if (!stream || !buffer.GetSize())
+        return;
+    stream->AddData((void*)buffer.GetData(), buffer.GetSize());
+}
+$}
