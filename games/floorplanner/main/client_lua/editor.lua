@@ -5701,7 +5701,7 @@ do
 		buildat.set_web_fullscreen(false)
 		S.press, S.drag = nil, nil
 		update_capture()
-		local w = dialog("Paused")
+		local w = dialog("Version: " .. buildat.version())
 		-- Which plan this is, at a glance (user); a backup says so
 		if doc.backup then
 			local c = magic.Color(1.0, 0.85, 0.3)
