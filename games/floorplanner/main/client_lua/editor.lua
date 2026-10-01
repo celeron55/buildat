@@ -70,6 +70,7 @@ local S = {
 	show_ids = true, -- the material id decals
 	plan_look = true, -- the plan view in flat colours (L)
 	tool = "select",
+	voxel_mode = "place", -- the voxel tool's click in 3D
 	angle = 4,      -- index into ANGLE_STEPS: the angle snap
 	-- New walls
 	thickness = 100,
@@ -2976,7 +2977,31 @@ do
 				end
 			end
 		end
-		send(finish_batch(b), select_placed(ph, "room"))
+		local selected = select_placed(ph, "room")
+		send(finish_batch(b), function(err)
+			selected(err)
+			-- The 3D view, while it is not looked at, above the new room and
+			-- looking down at it (user: it began where nothing was)
+			if err == "" and S.view == "2d" then
+				M.look_at_corners(corners)
+			end
+		end)
+	end
+
+	-- The 3D camera south of the points' middle and above, looking down at
+	-- 60 degrees from far enough to see them all
+	function M.look_at_corners(corners)
+		local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
+		for _, c in ipairs(corners) do
+			x0, z0 = math.min(x0, c.x), math.min(z0, c.z)
+			x1, z1 = math.max(x1, c.x), math.max(z1, c.z)
+		end
+		local size = W(math.max(x1 - x0, z1 - z0, 1000))
+		local dist = size / (2 * math.tan(math.rad(cam3d.fov) / 2)) * 2 + 1
+		S.yaw, S.pitch = 0, 60
+		local fx, fy, fz = geom.rot(0, 0, 1, S.pitch, S.yaw, 0)
+		S.pos = {x = W((x0 + x1) / 2) - fx * dist, y = W(1200) - fy * dist,
+				z = W((z0 + z1) / 2) - fz * dist}
 	end
 
 	-- **Splitting a room and combining two** ([FP_ROOM_SPLIT], user
@@ -3915,8 +3940,9 @@ local refresh_panels
 local function crosshair_view()
 	-- A touchscreen has no pointer to hold: walking is by the stick and a
 	-- drag ([FP_TOUCH] 3), and the voxel tool by taps
-	return not S.touch and (S.view == "walk" or
-			(S.view == "3d" and S.tool == "voxel"))
+	-- The voxel tool works at the pointer in 3D (user: a touchscreen has
+	-- no crosshair, and it needs none)
+	return not S.touch and S.view == "walk"
 end
 
 local function update_capture()
@@ -4115,6 +4141,17 @@ function M.room_buttons(a, b)
 		panel.label(props, "(two corners of a room split it,")
 		panel.label(props, " two shared by two rooms join them)")
 	end
+end
+
+-- What the voxel tool's click does in 3D, for a touchscreen above all,
+-- which has no Ctrl or Shift
+function M.voxel_mode_dropdown()
+	panel.keep(function() return panel.dropdown(props, "Click", {
+		{"place a voxel", "place"}, {"dig one", "dig"},
+		{"paint one", "paint"}}, S.voxel_mode, function(v)
+		S.voxel_mode = v
+		refresh_panels()
+	end) end)
 end
 
 local function build_props()
@@ -4348,9 +4385,11 @@ local function build_props()
 			S.replace = {def = i.def, to = default_material()}
 			refresh_panels()
 		end)
-		panel.label(props, "Voxel tool (K): 3D left digs, right places;")
-		panel.label(props, "2D click adds on top, Ctrl+click takes off;")
-		panel.label(props, "Shift+click gives a voxel the palette entry")
+		panel.label(props, "Voxel tool (K): a click places, Ctrl+click")
+		panel.label(props, "digs, Shift+click gives a voxel the entry")
+		if S.tool == "voxel" then
+			M.voxel_mode_dropdown()
+		end
 		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
 		panel.button(props, "Linked clone (Ctrl+L)", function()
 			copy_selected(true)
@@ -4561,7 +4600,7 @@ local function build_props()
 			local v = num(t)
 			if v and v > 0 then S.voxel_size = v end
 		end)
-		panel.label(props, "3D: the mouse turns the view, Esc lets go")
+		M.voxel_mode_dropdown()
 	elseif S.tool == "box" then
 		local stairs = S.shape == "stairs"
 		panel.dropdown(props, "Shape", {{"box", "box"}, {"stairs", "stairs"},
@@ -6387,6 +6426,33 @@ do
 			end
 			return
 		end
+		-- **The voxel tool at the pointer in 3D** (user): the left button
+		-- does what the panel's Click says -- place, dig or paint -- Ctrl
+		-- digs and Shift paints; held, a box. The right one orbits as ever.
+		-- Pressed on nothing of the volume, it is a press as any other, so
+		-- a finger's drag moves the view.
+		if S.tool == "voxel" and S.view == "3d" and not S.captured and
+				button == magic.MOUSEB_LEFT and not over_ui() then
+			local mode = S.ctrl and "dig" or S.shift and "paint" or S.voxel_mode
+			if S.voxel_box then
+				S.voxel_box.cancelled = true
+				S.dirty = true
+				return
+			end
+			if not voxel_target() then
+				if mode == "place" then
+					voxel_edit(false, false)
+					return
+				end
+			else
+				local id, c = M.voxel_cell(mode)
+				if id then
+					S.voxel_box = {mode = mode, id = id, a = c, button = button}
+					S.dirty = true
+					return
+				end
+			end
+		end
 		if button == magic.MOUSEB_RIGHT then
 			if S.draw or S.corners then
 				S.draw = nil
@@ -6497,6 +6563,7 @@ do
 		-- ends without a click
 		if S.touch_cam or S.gesture then
 			S.touch_cam, S.panning, S.orbit, S.press = nil, false, nil, nil
+			S.pan3d = nil
 			return
 		end
 		if S.captured and (S.tool == "voxel" or button ~= magic.MOUSEB_LEFT) then
@@ -6627,9 +6694,11 @@ do
 				if S.view == "2d" then
 					S.panning = true
 				else
-					-- About the plan's middle, not the finger's point (user):
-					-- under a finger, the point it is on is what should move
-					S.orbit = M.plan_middle() or camera_pivot(true)
+					-- One finger pans, as the middle drag does (user: two
+					-- orbit, which is the less often wanted)
+					local p = camera_pivot()
+					S.pan3d = {dist = p and geom.len(geom.len(p.x - S.pos.x,
+							p.y - S.pos.y), p.z - S.pos.z) or 5}
 				end
 			end
 		end
@@ -6752,10 +6821,16 @@ do
 				doc.unlock()
 			end
 			S.press, S.touch_cam, S.panning, S.orbit = nil, nil, false, nil
+			S.pan3d = nil
+			if S.voxel_box then
+				S.voxel_box = nil
+			end
 			S.dirty = true
-			local p = S.view == "3d" and camera_pivot() or nil
-			S.gesture = {dist = p and geom.len(geom.len(p.x - S.pos.x,
-					p.y - S.pos.y), p.z - S.pos.z) or 5}
+			-- Two fingers in 3D orbit round the plan's middle (a finger's
+			-- own point is what should move, user) and pinch toward it
+			local p = S.view == "3d" and (M.plan_middle() or camera_pivot(true))
+			S.gesture = {pivot = p or nil, dist = p and geom.len(geom.len(
+					p.x - S.pos.x, p.y - S.pos.y), p.z - S.pos.z) or 5}
 		end
 	end
 
@@ -6810,19 +6885,25 @@ do
 			S.cx = S.cx + (x0 or 0) - (x1 or 0) - mdx * k
 			S.cz = S.cz + (z0 or 0) - (z1 or 0) + mdy * k
 		else
-			-- The pair's move is a touchscreen's middle drag, at its speed
-			local k = S.gesture.dist * 2 * math.tan(math.rad(cam3d.fov) / 2) / h *
-					S.pan_speed / 100
-			local rx, ry, rz = geom.rot(1, 0, 0, S.pitch, S.yaw, 0)
-			local ux, uy, uz = geom.rot(0, 1, 0, S.pitch, S.yaw, 0)
-			local fx, fy, fz = geom.rot(0, 0, 1, S.pitch, S.yaw, 0)
+			-- The pair's move orbits, as the right drag does, at a
+			-- finger's speed
+			local p = S.gesture.pivot
+			if p then
+				local ox, oy, oz = geom.unrot(S.pos.x - p.x, S.pos.y - p.y,
+						S.pos.z - p.z, S.pitch, S.yaw, 0)
+				local k = 0.15 * S.mouse_sens / 100
+				S.yaw = S.yaw + mdx * k
+				S.pitch = math.max(-90, math.min(90, S.pitch + mdy * k))
+				local wx, wy, wz = geom.rot(ox, oy, oz, S.pitch, S.yaw, 0)
+				S.pos = {x = p.x + wx, y = p.y + wy, z = p.z + wz}
+			end
 			-- Toward what the pair looks at, by as much as the pinch spreads:
 			-- twice apart is half as far
+			local fx, fy, fz = geom.rot(0, 0, 1, S.pitch, S.yaw, 0)
 			local zoom = S.gesture.dist * (1 - d0 / d1)
 			S.gesture.dist = S.gesture.dist - zoom
-			S.pos = {x = S.pos.x - (rx * mdx - ux * mdy) * k + fx * zoom,
-					y = S.pos.y - (ry * mdx - uy * mdy) * k + fy * zoom,
-					z = S.pos.z - (rz * mdx - uz * mdy) * k + fz * zoom}
+			S.pos = {x = S.pos.x + fx * zoom, y = S.pos.y + fy * zoom,
+					z = S.pos.z + fz * zoom}
 		end
 	end
 
@@ -6845,6 +6926,17 @@ do
 		S.fingers[id] = nil
 		if f and f.stick then
 			S.stick = nil
+		end
+		-- Walking, a tap on a door, a window or a switch uses it (user: a
+		-- touchscreen had no way to)
+		if f and S.view == "walk" and not f.stick and not f.ui and
+				not f.moved and not S.paused and
+				buildat.get_time_us() - f.t0 < 500000 then
+			S.mx, S.my = x, y
+			local s = pick_surface(true)
+			if s and s.kind == "instance" and use_target() then
+				use()
+			end
 		end
 		if not next(S.fingers) then
 			S.gesture = nil
@@ -7667,13 +7759,28 @@ do
 				end
 			else
 				local hit, place = voxel_ray(id)
-				if hit then
+				local pok, pc = M.voxel_cell("place")
+				if not S.captured then
+					-- At the pointer: the left button by the panel's Click
+					local mode = S.ctrl and "dig" or S.shift and "paint" or
+							S.voxel_mode
+					if mode == "place" and pok then
+						hl({kind = "cell", id = id, c = pc, col = PLACE})
+						g.left = "place a voxel of " .. mat_text(cur) ..
+								" here (hold: a box); Ctrl: dig, Shift: paint"
+					elseif mode ~= "place" and hit then
+						hl({kind = "cell", id = id, c = hit, col = DIG})
+						g.left = (mode == "dig" and "dig this voxel (" ..
+								mat_text(cell_of(id, hit)) .. ")" or "make this voxel " ..
+								mat_text(cur)) .. " (hold: a box)"
+					end
+					hit = nil
+				elseif hit then
 					hl({kind = "cell", id = id, c = hit, col = DIG})
 					g.left = "dig this voxel (" .. mat_text(cell_of(id, hit)) ..
 							"); Shift+click: make it " .. mat_text(cur)
 				end
-				local pok, pc = M.voxel_cell("place")
-				if pok then
+				if pok and S.captured then
 					hl({kind = "cell", id = id, c = pc, col = PLACE})
 					g.right = "place a voxel of " .. mat_text(cur) ..
 							" here (hold: a box)"
@@ -8408,6 +8515,7 @@ function M.start(d)
 	doc = d
 	-- The editor's state, for what reads it from outside (tutorial.lua)
 	M.S = S
+	M.folded = panel.folded
 	doc.members_changed = M.members_changed
 	doc.backups_changed = M.backups_changed
 	S.material = nil

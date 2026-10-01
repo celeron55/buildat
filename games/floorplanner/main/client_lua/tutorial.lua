@@ -3,7 +3,7 @@
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
 -- **The tutorial** ([FP_TUTORIAL], user 2026-10-01): steps of a text and a
--- check, in a small window at the bottom; the next step comes when the
+-- check, in a small window in a corner; the next step comes when the
 -- check says the user did it. Started from the plan picker, kept on this
 -- client over a reload. It only reads what the editor and the document
 -- already have: nothing in the editor knows it is there.
@@ -81,7 +81,33 @@ return function(doc)
 		return ed() and ed().plan_minute and ed().plan_minute() or 0
 	end
 
-	-- {text, check, enter}; the text says what to do and where it is
+	-- A touchscreen's words, and how its folded panels are opened: a
+	-- phone folds the palette and the properties away, and a step that
+	-- needs one says so while it is folded
+	local touch = buildat.get_env("BUILDAT_TOUCH") == "1"
+	local function click(t)
+		if not touch then
+			return t
+		end
+		return (t:gsub("Click", "Tap"):gsub("click", "tap"))
+	end
+	local function open_panel(key, name)
+		local e = ed()
+		if e and e.folded and e.folded(key) then
+			return " (" .. name .. " is folded away: tap " .. name ..
+					" in the toolbar to open it, and again to fold it)"
+		end
+		return ""
+	end
+	local function props()
+		return open_panel("props", "Properties")
+	end
+	local function palette()
+		return open_panel("palette", "Palette")
+	end
+
+	-- {text, check, enter}: the text, or a function giving it, says what
+	-- to do and where it is
 	local STEPS = {
 		{"Welcome. This tutorial builds a small house step by step. Type a " ..
 				"name for a new plan in the field and press New plan.",
@@ -89,12 +115,17 @@ return function(doc)
 		{"A plan opens for viewing, so nothing changes by accident. Press " ..
 				"Start editing at the end of the toolbar.",
 				function() return doc.can("edit") end},
-		{"Draw a room: pick Room (R) in the toolbar, then click its corners " ..
-				"on the floor. Click the first corner again, or press Enter, " ..
-				"to close it. The room gets walls.",
+		{"Go to the plan view: choose 2D (F1) in the view dropdown at the " ..
+				"left of the toolbar.",
+				function() return S().view == "2d" end},
+		{function() return click("Draw a room: pick Room (R) in the " ..
+				"toolbar, then click its corners on the floor. Click the " ..
+				"first corner again, or press Enter, to close it. The room " ..
+				"gets walls.") end,
 				function() return #of("room") >= 1 end},
-		{"Draw a second room beside the first, starting and ending on the " ..
-				"first room's corners, so the two share a wall.",
+		{function() return click("Draw a second room beside the first, " ..
+				"starting and ending on the first room's corners, so the two " ..
+				"share a wall.") end,
 				function()
 					local rooms = of("room")
 					for i = 1, #rooms do
@@ -113,15 +144,18 @@ return function(doc)
 					end
 					return false
 				end},
-		{"Put a door in the wall between the rooms: pick Door/window (I) " ..
-				"and click on the wall. What it puts in is shown in the " ..
-				"properties panel on the right.",
+		{function() return click("A door in the wall between the rooms: " ..
+				"pick Door/window (I), check that Kind in its panel says " ..
+				"Door, and click on the wall.") .. props() end,
 				function() return #instances(3) >= 1 end},
-		{"Now a window: with Door/window still picked, set Kind to Window " ..
-				"in the panel (or press I), then click an outside wall.",
+		{function() return click("A window: with Door/window still picked, " ..
+				"set Kind to Window in the panel, then click an outside " ..
+				"wall.") .. props() end,
 				function() return #instances(4) >= 1 end},
-		{"A linked clone shares its shape with the original. Pick Select " ..
-				"(V), click the window, press Ctrl+L, then click another wall.",
+		{function() return click("A linked clone shares its shape with the " ..
+				"original: pick Select (V), click the window, press Linked " ..
+				"clone in its panel (Ctrl+L), then click another wall.") ..
+				props() end,
 				function()
 					local n = {}
 					for _, w in ipairs(instances(4)) do
@@ -132,30 +166,34 @@ return function(doc)
 					end
 					return false
 				end},
-		{"A cupboard: pick Object (O) and drag its footprint on the floor " ..
-				"against a wall. Then type a height of 2000 in the panel's " ..
-				"Height mm.",
+		{function() return click("A dresser: pick Object (O) and drag its " ..
+				"footprint on the floor against a wall, about 1 m by 0.5 m. " ..
+				"Then type a height of 800 in the panel's Height mm.") ..
+				props() end,
 				function()
 					for _, i in ipairs(instances(0)) do
-						if doc.ents[i.ints.def].ints.h >= 1500 then
+						local h = doc.ents[i.ints.def].ints.h
+						if h >= 500 and h <= 1500 and h ~= 750 then
 							return true
 						end
 					end
 					return false
 				end},
-		{"A night lamp needs a glowing material. In the Palette on the " ..
-				"left, press New entry, then set its Type to Lamp.",
+		{function() return "A night lamp needs a glowing material: in the " ..
+				"Palette, press New entry, then set its Type to Lamp." ..
+				palette() end,
 				function()
 					for _, p in ipairs(of("palette")) do
 						if p.ints.kind == 4 then return true end
 					end
 					return false
 				end},
-		{"Build the lamp from voxels on the cupboard: click the Lamp entry " ..
-				"in the palette, pick Voxels (K) and go to 3D (the view " ..
-				"dropdown, or F2). A left click takes the crosshair: aim at " ..
-				"the cupboard's top and right click to place a voxel, then a " ..
-				"few more. Esc lets the mouse go.",
+		{function() return click("Build the lamp from voxels on the " ..
+				"dresser: with the Lamp entry chosen in the palette, pick " ..
+				"Voxels (K) and go to 3D (the view dropdown, or F2). Click " ..
+				"the dresser's top to start a volume there, then click on " ..
+				"its voxels for more. The panel's Click says whether a click " ..
+				"places, digs or paints.") .. props() end,
 				function()
 					for _, i in ipairs(instances(1)) do
 						for _, m in pairs(doc.voxels[i.ints.def] or {}) do
@@ -164,21 +202,30 @@ return function(doc)
 					end
 					return false
 				end},
-		{"A switch for it: pick Door/window (I), set Kind to Switch and " ..
-				"click a wall. Then, with the switch selected, press \"Link " ..
-				"lamps\" in its panel, click the lamp and press Done linking.",
-				function() return #first_switch_lamps() > 0 end},
-		{"Stairs: click the drywall entry in the palette (what is new gets " ..
-				"the entry chosen), pick Object (O), set Shape to stairs in " ..
-				"its panel and drag their footprint in a room. They climb " ..
-				"along their depth.",
+		{function() return click("A switch for it: in 2D (F1), pick " ..
+				"Door/window (I), set Kind to Switch and click a wall. Then, " ..
+				"with the switch selected, press \"Link lamps\" in its panel, " ..
+				"click the lamp and press Done linking.") .. props() end,
+				function()
+					for _, sw in ipairs(instances(5)) do
+						if #sw.lists.lamps > 0 then return true end
+					end
+					return false
+				end},
+		{function() return click("Stairs: click the drywall entry in the " ..
+				"palette (what is made gets the entry chosen), pick Object " ..
+				"(O), set Shape to stairs in its panel and drag their " ..
+				"footprint in a room. They climb along their depth.") ..
+				props() end,
 				function() return #instances(6) >= 1 end},
 		{"A floor above: press the floor's button in the toolbar (it says " ..
 				"its name), then Add a floor above. The new floor is edited " ..
 				"now, the one below drawn under it.",
 				function() return #of("layout") >= 2 end},
-		{"Draw a room on the new floor with the Room tool, over the one " ..
-				"below.",
+		{function() return click("Draw a room on the new floor with the " ..
+				"Room tool, over the one below. In the plan view (2D, F1) " ..
+				"the floor below shows faintly under it to line up with.")
+				end,
 				function()
 					local cur = S().layout
 					for _, r in ipairs(of("room")) do
@@ -189,13 +236,18 @@ return function(doc)
 					end
 					return false
 				end},
-		{"Back to the ground floor: press the floor's button and click the " ..
+		{"Back to the ground floor: press the floor's button and choose the " ..
 				"first one in the list.",
 				function() return S().layout == ground() end},
-		{"Walk in the house: choose Walk (F3) from the view dropdown. W, A, " ..
-				"S and D walk; drag with the right mouse button to turn.",
+		{function() return touch and "Walk in the house: choose Walk in the " ..
+				"view dropdown. A finger at the lower left walks, another " ..
+				"turns the view." or "Walk in the house: choose Walk (F3) " ..
+				"in the view dropdown. W, A, S and D walk; drag with the " ..
+				"right mouse button to turn." end,
 				function() return S().view == "walk" end},
-		{"Open the door: point at it and press E (or right click it).",
+		{function() return touch and "Open the door: walk to it and tap it." or
+				"Open the door: point at it and press E (or right click it)."
+				end,
 				function()
 					for _, d in ipairs(instances(3)) do
 						local lo = S().local_open and S().local_open[d.id]
@@ -203,15 +255,14 @@ return function(doc)
 					end
 					return false
 				end},
-		{"Switch the lamp: point at the switch and press E. In the plan " ..
-				"view a switch is small: drag a box over it to select it, " ..
-				"then E switches the selected one.",
+		{function() return touch and "Switch the lamp: tap the switch on the " ..
+				"wall." or "Switch the lamp: point at the switch and press E." end,
 				function() return lamps_state() ~= mark.lamps end,
 				function() mark.lamps = lamps_state() end},
-		{"Switch the lamp on again if it is off. The light is the plan's " ..
-				"place and moment: open the Menu (Esc), Plan settings, and " ..
-				"type an evening time such as 22:00 in Time, then look at " ..
-				"the room in 3D.",
+		{function() return click("Switch the lamp on again if it is off. " ..
+				"The light is the plan's place and moment: open the Menu, " ..
+				"Plan settings, and type an evening time such as 22:00 in " ..
+				"Time, then look at the room in 3D.") end,
 				function() return math.abs(minute() - mark.minute) >= 60 end,
 				function() mark.minute = minute() end},
 		{"Menu, Client settings: set 3D lighting to Unlit, the plain look " ..
@@ -232,6 +283,32 @@ return function(doc)
 				function() return false end},
 	}
 
+	local function text_of(i)
+		local t = STEPS[i][1]
+		if type(t) == "function" then
+			local ok, v = pcall(t)
+			return ok and v or ""
+		end
+		return t
+	end
+
+	-- **The window** (user, a phone): small, in a corner, folded to its
+	-- title by a tap on it, and under the panels and menus until it is
+	-- itself tapped. A new step unfolds it.
+	local folded = false
+	local LOW, HIGH = -5, 99 -- under the panels (0); over the hint line (90)
+	local shown_text = nil
+	local function place()
+		if not win then
+			return
+		end
+		-- Lower right, over the hint lines at the bottom (four at most) and
+		-- a touchscreen's buttons under them (user)
+		local bar = S().touch_bar
+		local y = (bar and bar.height + 20 or 12) + 4 * 20 + 8
+		win:SetAlignment(magic.HA_RIGHT, magic.VA_BOTTOM)
+		win:SetPosition(-4, -y)
+	end
 	local function show()
 		if win then
 			win:Remove()
@@ -240,41 +317,56 @@ return function(doc)
 		if step < 1 or step > #STEPS then
 			return
 		end
+		local font = magic.cache:GetResource("Font", buildat.font_sans)
+		local size = touch and 12 or 14
 		win = magic.ui.root:CreateChild("Window")
 		win:SetStyleAuto()
-		win:SetLayout(magic.LM_VERTICAL, 6, magic.IntRect(12, 10, 12, 10))
-		-- At the lower right: the menus are in the middle and the panels
-		-- at the top
-		win:SetAlignment(magic.HA_RIGHT, magic.VA_BOTTOM)
-		local width = math.min(460, magic.ui.root.width - 16)
+		win:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(8, 6, 8, 6))
+		local width = math.min(touch and 260 or 420, magic.ui.root.width - 16)
 		win:SetFixedWidth(width)
-		win.priority = 20
-		-- Over the hint lines at the bottom, four of them at most
-		win:SetPosition(-8, -130)
-		title = win:CreateChild("Text")
-		title:SetStyleAuto()
-		title:SetText("Tutorial, step " .. step .. " of " .. #STEPS)
+		win.priority = LOW
+		win.opacity = 0.94
+		place()
+		local head = win:CreateChild("Button")
+		head:SetStyleAuto()
+		head.minHeight = 22
+		title = head:CreateChild("Text")
+		title:SetFont(font, size)
+		title:SetText("Tutorial " .. step .. "/" .. #STEPS ..
+				(folded and "  ▼" or "  ▲"))
 		title:SetColor(magic.Color(1.0, 0.85, 0.3))
+		title:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		magic.SubscribeToEvent(head, "Released", function()
+			folded = not folded
+			show()
+			win.priority = HIGH
+		end)
+		body = nil
+		shown_text = nil
+		if folded then
+			return
+		end
 		body = win:CreateChild("Text")
-		body:SetStyleAuto()
-		body:SetFixedWidth(width - 48)
+		body:SetFont(font, size)
+		body:SetFixedWidth(width - 36)
 		body:SetWordwrap(true)
-		body:SetText(STEPS[step][1])
+		shown_text = text_of(step)
+		body:SetText(shown_text)
 		local row = win:CreateChild("UIElement")
-		row:SetLayout(magic.LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
+		row:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
 		local function button(text, fn)
 			local b = row:CreateChild("Button")
 			b:SetStyleAuto()
-			b.minHeight = 24
+			b.minHeight = 22
 			local t = b:CreateChild("Text")
-			t:SetStyleAuto()
+			t:SetFont(font, size)
 			t:SetText(text)
 			t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-			b.minWidth = t.width + 20
+			b.minWidth = t.width + 14
 			magic.SubscribeToEvent(b, "Released", fn)
 		end
 		if step < #STEPS then
-			button("Skip this step", function() T.go(step + 1) end)
+			button("Skip", function() T.go(step + 1) end)
 		end
 		if step > 1 then
 			button("Back", function() T.go(step - 1) end)
@@ -282,10 +374,32 @@ return function(doc)
 		button("End", function() T.go(0) end)
 	end
 
+	-- A press on the window brings it over the menus; one elsewhere puts
+	-- it back under them
+	local function pressed_at(x, y)
+		if not win then
+			return
+		end
+		local sc = magic.ui.scale
+		local ux, uy = x / sc, y / sc
+		local p, sz = win.screenPosition, win.size
+		local on = ux >= p.x and uy >= p.y and ux < p.x + sz.x and
+				uy < p.y + sz.y
+		win.priority = on and HIGH or LOW
+	end
+	magic.SubscribeToEvent("MouseButtonDown", function()
+		local m = magic.input:GetMousePosition()
+		pressed_at(m.x, m.y)
+	end)
+	magic.SubscribeToEvent("TouchBegin", function(_, data)
+		pressed_at(data:GetInt("X"), data:GetInt("Y"))
+	end)
+
 	function T.go(i)
 		step = i
 		buildat.storage_write("tutorial", tostring(i))
 		mark = {}
+		folded = false
 		if STEPS[i] and STEPS[i][3] then
 			STEPS[i][3]()
 		end
@@ -309,6 +423,18 @@ return function(doc)
 		since = 0
 		if not win then
 			T.go(step)
+		end
+		-- The text follows what is on the screen (a folded panel), and the
+		-- window the toolbar's height
+		place()
+		if body then
+			local t = text_of(step)
+			if t ~= shown_text then
+				-- Made again, so that it is as high as its text
+				local pr = win.priority
+				show()
+				win.priority = pr
+			end
 		end
 		local ok, done = pcall(STEPS[step][2])
 		if ok and done then
