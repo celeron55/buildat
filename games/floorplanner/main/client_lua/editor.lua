@@ -355,8 +355,20 @@ function M.build_ground()
 			ground_node:CreateComponent("CustomGeometry")
 	g:SetNumGeometries(1)
 	g:BeginGeometry(0, magic.TRIANGLE_LIST)
+	-- Under PBR a disc of 200 m round the camera, whose edge is where the
+	-- sky's treeline stands (LuantiSky.glsl, TREE_DISTANCE): the node
+	-- follows the camera (M.apply_daylight), and the lawn's pattern is the
+	-- world's, so it stays put
 	local r = 200000
-	flat_polygon(g, {{-r, -r}, {r, -r}, {r, r}, {-r, r}}, 0, M.UP3,
+	local pts = {{-r, -r}, {r, -r}, {r, r}, {-r, r}}
+	if pbr then
+		pts = {}
+		for i = 1, 96 do
+			local a = i / 96 * 2 * math.pi
+			pts[i] = {r * math.cos(a), r * math.sin(a)}
+		end
+	end
+	flat_polygon(g, pts, 0, M.UP3,
 			pbr and M.ground_row or magic.Color(0.85, 0.85, 0.83))
 	g:Commit()
 	g:SetMaterial(0, lit_material)
@@ -2128,8 +2140,17 @@ function M.apply_daylight()
 	local st = settings()
 	local minute = pbr and M.plan_minute() or 0
 	local day = M.plan_day()
-	local key = string.format("%s %.1f %d %d %d %d", tostring(pbr), minute,
-			st.north, st.latitude, day, M.sun().ground)
+	-- The trees' foot is the ground's, which moves with the floor edited,
+	-- and the ground's disc is under the camera
+	if M.sky then
+		local y = ground_node.position.y
+		M.sky.material:SetShaderParameter("TreeGround", y)
+		if pbr then
+			ground_node.position = magic.Vector3(S.pos.x, y, S.pos.z)
+		end
+	end
+	local key = string.format("%s %.1f %d %d %d %d %d", tostring(pbr), minute,
+			st.north, st.latitude, day, M.sun().ground, st.treeline)
 	if key == S.daylight_key then
 		if pbr and M.sky then
 			M.sky:flush()
@@ -2167,7 +2188,14 @@ function M.apply_daylight()
 	local a, f = light.ambient, light.horizon
 	zone.ambientColor = magic.Color(a.r, a.g, a.b)
 	zone.fogColor = magic.Color(f.r, f.g, f.b)
+	M.sky.material:SetShaderParameter("Treeline", st.treeline / 1000)
 	M.sky:set(tx, h, tz, h, light)
+	-- A changed treeline is in the reflections at once, not when the sun
+	-- next moves
+	if M.sky.treeline ~= st.treeline then
+		M.sky.treeline = st.treeline
+		M.sky.cube:update()
+	end
 	for _, m in ipairs({lit_material, glass_material}) do
 		m:SetShaderParameter("SunToward", magic.Vector3(tx, h, tz))
 	end
@@ -5392,6 +5420,15 @@ do
 			end)
 			plan_int("Ceiling mm", "ceiling")
 			plan_int("Plan cut mm", "cut")
+			-- The trees on the horizon (PBR): their height over their
+			-- distance, 15 m at 200 m being 7.5
+			panel.field(w, "Treeline %", st.treeline / 10, function(t)
+				local v = tonumber(t)
+				if v and v >= 0 then
+					send({{op = "set", ent = {id = sid,
+							ints = {treeline = math.floor(v * 10 + 0.5)}}}})
+				end
+			end)
 			-- **The site and the moment the 3D view is lit for**
 			-- ([FP_DAYLIGHT]): north, with where it is now said beside it
 			-- -- where the camera points in 3D, where north is on the

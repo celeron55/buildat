@@ -254,6 +254,9 @@ static const sv_<TypeSchema> SCHEMA = {
 		{"minute", 0, 1439, 720},
 		{"lapse", -2, 60, 0},
 		{"ground", 0, 3, 0},
+		// The treeline drawn on the horizon under PBR: a tree's height over
+		// its distance, in tenths of a percent (75: 15 m at 200 m); 0 none
+		{"treeline", 0, 500, 75},
 		{"grid", 1, 1000, 100}, // mm, what the plan snaps to
 		// Floor to floor, where "Add a floor above" puts one ([FP_LAYOUTS])
 		{"floor_step", 1000, 20000, 3000},

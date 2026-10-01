@@ -89,6 +89,12 @@ uniform vec3 cCloudSky;
 // How much sky the camera can see, as one number: 0 in a cave, 1 anywhere
 // that is not one. See [CAVE_SKY]'s correction in doc/plan/rendering_plan.md.
 uniform float cSkyOutside;
+// **A treeline along the horizon** (games/floorplanner's plan setting;
+// unset, 0, it is not drawn): a tree's height over its distance, and the
+// ground's height in the world, which its foot stands on where the ground
+// ends (TREE_DISTANCE away).
+uniform float cTreeline;
+uniform float cTreeGround;
 
 // How far below the horizon the sky darkens into the ground haze
 const float HAZE_DEPTH = 0.25;
@@ -168,6 +174,62 @@ float SkyHash(vec2 p)
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
     p3 += dot(p3, p3.yzx + 33.33);
     return fract((p3.x + p3.y) * p3.z);
+}
+
+// The trees, in units of a tree's height: x along the horizon, y up from
+// the ground. A row of trees in cells of `cell`, each a spruce (a cone in
+// tiers) or a pine (a bare trunk under a rounded crown), of a height of
+// lo..hi; seed tells rows apart. Returns how much of the point is a tree
+// (the edge softened over `aa`), and in .y whether it is a pine's. `around`
+// is the horizon's length in these units: the cells are fitted to it, so
+// the row meets itself behind with no seam.
+vec2 TreeRow(vec2 p, float cell0, float lo, float hi, float seed, float aa,
+        float around, float pines)
+{
+    float n = max(1.0, floor(around / cell0));
+    float cell = around / n;
+    float c = floor(p.x / cell);
+    vec2 best = vec2(0.0);
+    for(int k = -2; k <= 2; k++){
+        float ix = c + float(k);
+        float id = mod(ix, n);
+        float present = SkyHash(vec2(id, seed));
+        if(present < 0.04)
+            continue;
+        float at = (ix + 0.2 + 0.6 * SkyHash(vec2(id, seed + 1.0))) * cell;
+        float h = mix(lo, hi, SkyHash(vec2(id, seed + 2.0)));
+        float pine = step(1.0 - pines, SkyHash(vec2(id, seed + 3.0)));
+        float dx = abs(p.x - at);
+        float y = p.y / h;
+        float in_tree;
+        if(pine < 0.5){
+            // Spruce: narrowing to the top, each of five tiers flaring
+            // out at its foot
+            float tier = fract(y * 5.0 + SkyHash(vec2(id, seed + 4.0)));
+            float hw = h * 0.21 * (1.0 - y) * (0.72 + 0.28 * tier);
+            in_tree = (1.0 - smoothstep(hw - aa, hw + aa, dx)) *
+                    (1.0 - smoothstep(1.0 - aa / h, 1.0, y));
+        } else {
+            // Pine: a trunk to half of it, then a wide crown, flat on top
+            // and uneven, in a few lumps of its own
+            float trunk = 1.0 - smoothstep(h * 0.015 - aa, h * 0.015 + aa, dx);
+            float crown = 0.0;
+            for(int j = 0; j < 3; j++){
+                float fj = float(j);
+                vec2 lc = vec2((SkyHash(vec2(id, seed + 5.0 + fj)) - 0.5) *
+                        0.28, 0.72 + 0.18 * SkyHash(vec2(id, seed + 8.0 + fj)));
+                vec2 q = vec2((p.x - at) / h - lc.x, y - lc.y) /
+                        vec2(0.17, 0.11);
+                crown = max(crown, 1.0 - smoothstep(1.0 - aa / h * 8.0, 1.0,
+                        length(q)));
+            }
+            in_tree = max(trunk * step(y, 0.75), crown);
+        }
+        in_tree *= step(0.0, y);
+        if(in_tree > best.x)
+            best = vec2(in_tree, pine);
+    }
+    return best;
 }
 
 float SkyNoise(vec2 p)
@@ -334,6 +396,55 @@ void PS()
             cover *= tex.a;
         }
         color = mix(color, moon_color, cover);
+    }
+
+    // **The treeline** (user, 2026-10-01): a forest TREE_DISTANCE away,
+    // trees cTreeline of that tall; a row of full-sized spruces and pines
+    // over a band of undergrowth, and a sparser row of smaller ones in
+    // front of it, darker and less in the haze. Lit by the sun's
+    // irradiance and the sky's dome, and dull and dark beside the lawn.
+    if(cTreeline > 0.0){
+        const float TREE_DISTANCE = 200.0;
+        float horiz = max(length(d.xz), 1e-4);
+        // In tree heights: along the horizon, and up from the ground where
+        // it ends
+        vec2 p = vec2((atan(d.z, d.x) + 3.14159265) / cTreeline,
+                (d.y / horiz * TREE_DISTANCE + (cCameraPosPS.y - cTreeGround)) /
+                (cTreeline * TREE_DISTANCE));
+        float aa = max(length(fwidth(p)), 1e-4);
+        if(p.y < 1.4 && p.y > -0.5){
+            float around = 6.28319 / cTreeline;
+            // Full, with hardly a gap (user): the forest's body, a strip
+            // solid to a noisy top well up the trees, which spares most of
+            // the single trees (user), and two rows of them over it
+            vec2 back = TreeRow(p, 0.2, 0.75, 1.1, 3.0, aa, around, 0.15);
+            vec2 mid = TreeRow(p, 0.32, 0.8, 1.2, 7.0, aa, around, 0.3);
+            vec2 front = TreeRow(p, 0.45, 0.45, 0.7, 11.0, aa, around, 0.3);
+            // Raised to where the crowns are, no sky seen through (user)
+            float body_top = 0.72 + 0.15 * SkyNoise(vec2(p.x * 1.3, 1.0)) +
+                    0.06 * SkyNoise(vec2(p.x * 7.0, 2.0));
+            float body = (1.0 - smoothstep(body_top - aa, body_top + aa, p.y)) *
+                    step(0.0, p.y);
+            if(mid.x > back.x)
+                back = mid;
+            back.x = max(back.x, body);
+            // Darker and duller than the summer lawn (0x55733a): 0x2d3a28,
+            // and the pines a little browner
+            vec3 SPRUCE = vec3(0.026, 0.042, 0.021);
+            vec3 PINE = vec3(0.033, 0.041, 0.024);
+            vec3 sun_e = cSunRadiance * 3.14159 * cSunSize * cSunSize;
+            vec2 dh = d.xz / horiz;
+            float sl = length(sun.xz);
+            float facing = sl > 1e-4 ? -dot(dh, sun.xz / sl) : 0.0;
+            vec3 light = sun_e / 3.14159 * max(sun.y, 0.0) *
+                    (0.45 + 0.35 * facing) + cSkyTop * 1.2 * 0.6;
+            vec3 back_c = mix(mix(SPRUCE, PINE, back.y) * light, cSkyHorizon,
+                    0.22);
+            vec3 front_c = mix(mix(SPRUCE, PINE, front.y) * 0.85 * light,
+                    cSkyHorizon, 0.18);
+            color = mix(color, back_c, back.x);
+            color = mix(color, front_c, front.x);
+        }
     }
 
     // And whether the camera can see the sky at all. **A scalar, not a
