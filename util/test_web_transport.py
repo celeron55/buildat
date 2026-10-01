@@ -25,6 +25,22 @@ assert status("/?x=1") == 200, "/ with a query"
 assert status("/nope") == 404, "missing path"
 print("http ok")
 
+# The same file again with its ETag is a 304; deflate is what was asked for
+import zlib
+r = urllib.request.urlopen(urllib.request.Request(base + "/index.html",
+        headers={"Accept-Encoding": "deflate"}), timeout=5)
+assert r.headers["Content-Encoding"] == "deflate", r.headers
+assert b"<html" in zlib.decompress(r.read()), "deflated index.html"
+etag = r.headers["ETag"]
+assert etag, "no ETag"
+try:
+    code = urllib.request.urlopen(urllib.request.Request(base + "/index.html",
+            headers={"If-None-Match": etag}), timeout=5).status
+except urllib.error.HTTPError as e:
+    code = e.code
+assert code == 304, code
+print("etag and deflate ok")
+
 async def ws():
     async with websockets.connect(f"ws://{host}:{port}/",
             subprotocols=["binary"], max_size=None) as c:

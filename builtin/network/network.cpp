@@ -12,6 +12,7 @@
 #include "interface/os.h"
 #include "interface/select_handler.h"
 #include "interface/sha1.h"
+#include "interface/compress.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <deque>
 #include <set>
@@ -30,6 +31,7 @@
 	#include <unistd.h> // usleep()
 #endif
 #include <errno.h>
+#include <sys/stat.h>
 #define MODULE "network"
 
 using interface::Event;
@@ -278,13 +280,14 @@ static ss_ frame(int opcode, const ss_ &payload)
 	return r + payload;
 }
 
+// extra: more header lines, each ending in \r\n
 static ss_ response(const ss_ &status, const ss_ &content_type,
-		size_t content_length)
+		size_t content_length, const ss_ &extra = "")
 {
 	return "HTTP/1.1 "+status+"\r\n"
 			"Content-Type: "+content_type+"\r\n"
 			"Content-Length: "+itos((int64_t)content_length)+"\r\n"
-			"Cache-Control: no-cache\r\n"
+			"Cache-Control: no-cache\r\n"+extra+
 			"Connection: close\r\n\r\n";
 }
 
@@ -305,6 +308,14 @@ struct Module: public interface::Module, public network::Interface
 	int64_t m_grace_us = 10000000;
 	bool m_will_restore_after_unload = false;
 	up_<interface::Thread> m_thread;
+	// The web client's files as last read, by name, kept while the file's
+	// modification time and size are the same (its ETag)
+	struct WebFile {
+		ss_ etag;
+		ss_ body;
+		ss_ deflated;
+	};
+	sm_<ss_, WebFile> m_web_files;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -636,30 +647,60 @@ struct Module: public interface::Module, public network::Interface
 			return true;
 		}
 		const ss_ path = web_client_path()+"/"+it->second.first;
-		std::ifstream f(path, std::ios::binary);
-		ss_ body;
-		if(f.good()){
+		// **A reload does not download the client again** (user,
+		// 2026-10-01: a phone reloads the page each time it comes back): the
+		// browser asks with the ETag it has, and the same file is a 304
+		struct stat st;
+		const ss_ etag = stat(path.c_str(), &st) == 0 ? "\""+
+				itos((int64_t)st.st_mtime)+"-"+itos((int64_t)st.st_size)+"\"" : "";
+		WebFile &wf = m_web_files[it->second.first];
+		if(etag.empty() || wf.etag != etag){
+			wf = WebFile();
+			std::ifstream f(path, std::ios::binary);
+			if(f.good()){
+				std::ostringstream os(std::ios::binary);
+				os<<f.rdbuf();
+				wf.body = os.str();
+			}
+			if(!f.good() || wf.body.empty()){
+				log_w(MODULE, "Web client file not found: %s", cs(path));
+				ss_ body = "The web client is not here: "+it->second.first+
+						" is not in the server's web_client_path.\n";
+				peer.queue_raw(web::response("404 Not Found",
+						"text/plain; charset=utf-8", body.size()) + body);
+				return true;
+			}
+			// Compressed once per build; about a second for the wasm, in
+			// this thread
+			// simplified: zlib's stream, which is what HTTP's "deflate"
+			// is and every browser takes; gzip only adds a header and a CRC
 			std::ostringstream os(std::ios::binary);
-			os<<f.rdbuf();
-			body = os.str();
+			interface::compress_zlib(wf.body, os, 6);
+			wf.deflated = os.str();
+			wf.etag = etag;
 		}
-		if(!f.good() || body.empty()){
-			log_w(MODULE, "Web client file not found: %s", cs(path));
-			body = "The web client is not here: "+it->second.first+" is not "
-					"in the server's web_client_path.\n";
-			peer.queue_raw(web::response("404 Not Found",
-					"text/plain; charset=utf-8", body.size()) + body);
+		const ss_ cache = etag.empty() ? "" : "ETag: "+etag+"\r\n";
+		if(!etag.empty() && headers["if-none-match"].find(etag) != ss_::npos){
+			log_v(MODULE, "Peer %zu: %s not modified", peer.id, cs(path));
+			peer.queue_raw("HTTP/1.1 304 Not Modified\r\n"+cache+
+					"Cache-Control: no-cache\r\nConnection: close\r\n\r\n");
 			return true;
 		}
-		log_v(MODULE, "Peer %zu: serving %s (%zu bytes)", peer.id,
-				cs(path), body.size());
+		// simplified: a substring match; "deflate;q=0" would still get it
+		const bool deflate =
+				web::lower(headers["accept-encoding"]).find("deflate") != ss_::npos;
+		const ss_ &body = deflate ? wf.deflated : wf.body;
+		log_v(MODULE, "Peer %zu: serving %s (%zu bytes%s)", peer.id,
+				cs(path), body.size(), deflate ? ", deflated" : "");
 		// It goes out through the peer's queue like anything else, as far as
 		// the socket takes it at a time.
-		// simplified: the whole file is read in memory, per download; tens
-		// of megabytes each. Reading it as the queue drains is the upgrade.
+		// simplified: the whole file is kept in memory, and copied per
+		// download; tens of megabytes. Reading it as the queue drains is the
+		// upgrade.
 		peer.queue_raw(web::response("200 OK", it->second.second,
-				body.size()));
-		peer.queue_raw(std::move(body));
+				body.size(), cache+(deflate ? "Content-Encoding: deflate\r\n" :
+				"")+"Vary: Accept-Encoding\r\n"));
+		peer.queue_raw(ss_(body));
 		return true;
 	}
 
