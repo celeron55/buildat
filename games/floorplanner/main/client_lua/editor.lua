@@ -5868,9 +5868,12 @@ build_palette = function()
 	local list, view = palette_win, nil
 	if #entries > PALETTE_ROWS then
 		-- Made first, so that it is where the entries were; the column it
-		-- is given moves into it
+		-- is given is made in it, not in the panel: the panel's layout grew
+		-- to all the entries while they were its, and a layout does not
+		-- shrink, so the panel stayed that tall and spread its rows out
+		-- (user, 2026-10-02)
 		view = palette_win:CreateChild("ScrollView")
-		list = palette_win:CreateChild("UIElement")
+		list = view:CreateChild("UIElement")
 		list:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
 	end
 	local cur_index, widest = nil, 0
