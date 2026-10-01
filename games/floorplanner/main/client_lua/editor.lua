@@ -5289,8 +5289,13 @@ end
 
 build_palette = function()
 	if palette_win then
+		-- Where its list was scrolled to, for the one made in its place
+		if M.palette_view then
+			M.palette_scroll = M.palette_view.viewPosition.y
+		end
 		palette_win:Remove()
 	end
+	M.palette_view = nil
 	palette_win = panel.window(magic.HA_LEFT, magic.VA_TOP, 8, S.panel_y or 50)
 	if panel.folded("palette") then
 		palette_win.visible = false
@@ -5327,8 +5332,27 @@ build_palette = function()
 		end
 	end
 	local entries = of_type("palette")
-	for _, p in ipairs(entries) do
-		panel.swatch_row(palette_win, palette_rgb(p.id), "#" .. p.id .. "  " ..
+	-- **Over PALETTE_ROWS entries, a list that scrolls** (user: a plan of
+	-- twenty materials made a column taller than the screen): the rows in a
+	-- column of their own in a ScrollView of that many rows, the wheel and
+	-- its bar scrolling it; where it was scrolled to is kept over the
+	-- panel's rebuilds, and an entry newly picked is scrolled into view
+	local PALETTE_ROWS = 8
+	local ROW = 30 + 4
+	local list, view = palette_win, nil
+	if #entries > PALETTE_ROWS then
+		-- Made first, so that it is where the entries were; the column it
+		-- is given moves into it
+		view = palette_win:CreateChild("ScrollView")
+		list = palette_win:CreateChild("UIElement")
+		list:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
+	end
+	local cur_index, widest = nil, 0
+	for i, p in ipairs(entries) do
+		if p.id == cur then
+			cur_index = i
+		end
+		local row = panel.swatch_row(list, palette_rgb(p.id), "#" .. p.id .. "  " ..
 				p.strs.name .. "  (" .. MATERIAL_KINDS[p.ints.kind] .. ")",
 				function()
 			-- A second click on the same entry soon after is a double click:
@@ -5352,6 +5376,36 @@ build_palette = function()
 			S.material = p.id
 			refresh_panels()
 		end, p.id == cur, p.id == cur and magic.Color(1.0, 0.85, 0.3) or nil)
+		widest = math.max(widest, row.minWidth)
+		if view then
+			-- One height for all, which the scrolling counts in
+			row:SetFixedHeight(30)
+		end
+	end
+	if view then
+		view:SetStyleAuto()
+		-- Out of Tab's way, as the fields are what the keyboard is for
+		view:SetFocusMode(magic.FM_NOTFOCUSABLE)
+		view:SetScrollBarsVisible(false, true)
+		view.scrollBarsAutoVisible = false
+		view:SetFixedHeight(PALETTE_ROWS * ROW - 4)
+		view:SetFixedWidth(widest + 20)
+		list:SetFixedWidth(widest)
+		view.contentElement = list
+		-- At the panel's top left: it keeps where the window's layout had
+		-- put it before it moved, which is below what the view shows
+		list:SetPosition(0, 0)
+		local y = M.palette_scroll or 0
+		if cur_index and cur ~= M.palette_scrolled_to then
+			local top = (cur_index - 1) * ROW
+			local h = PALETTE_ROWS * ROW - 4
+			if top < y or top + ROW > y + h then
+				y = math.max(0, top - math.floor(h / 2))
+			end
+		end
+		M.palette_scrolled_to = cur
+		view.viewPosition = magic.IntVector2(0, y)
+		M.palette_view = view
 	end
 	local e = doc.ents[cur]
 	if S.picker and S.picker.ent ~= cur then
