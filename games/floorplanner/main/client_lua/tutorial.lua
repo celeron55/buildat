@@ -160,10 +160,10 @@ return function(doc)
 					return false
 				end},
 		{function() return click("A door in the wall between the rooms: " ..
-				"pick Door/window" .. kk("hosted") .. ", check that Kind in its panel says " ..
+				"pick Wall items" .. kk("hosted") .. ", check that Kind in its panel says " ..
 				"Door, and click on the wall.") .. props() end,
 				function() return #instances(3) >= 1 end},
-		{function() return click("A window: with Door/window still picked, " ..
+		{function() return click("A window: with Wall items still picked, " ..
 				"set Kind to Window in the panel, then click an outside " ..
 				"wall.") .. props() end,
 				function() return #instances(4) >= 1 end},
@@ -211,7 +211,7 @@ return function(doc)
 					return false
 				end},
 		{function() return click("A switch for it: in 2D" .. kk("view_2d") .. ", pick " ..
-				"Door/window" .. kk("hosted") .. ", set Kind to Switch and click a wall. Then " ..
+				"Wall items" .. kk("hosted") .. ", set Kind to Switch and click a wall. Then " ..
 				"click the switch to select it, press \"Link lamps\" in its " ..
 				"panel, " ..
 				"click the lamp and press Done linking.") .. props() end,

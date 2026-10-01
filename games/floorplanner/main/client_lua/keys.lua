@@ -30,7 +30,7 @@ M.BINDINGS = {
 	{action = "room", key = magic.KEY_R, what = "Room tool"},
 	{action = "box", key = magic.KEY_O, what = "Object tool"},
 	{action = "hosted", key = magic.KEY_I,
-			what = "Door/window tool"},
+			what = "Wall items tool"},
 	{action = "voxel", key = magic.KEY_K, what = "Voxels tool"},
 	{action = "paint", key = magic.KEY_M, what = "Material tool"},
 	{action = "turn_left", key = magic.KEY_Z, what = "Turn the selection left"},

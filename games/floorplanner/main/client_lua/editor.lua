@@ -49,7 +49,7 @@ local KIND = {box = 0, voxel = 1, opening = 2, door = 3, window = 4,
 local DOOR_PARTS = {mat = true, mat_leaf = true, mat_glass = true}
 local KIND_NAMES = {[0] = "Box", [2] = "Opening", [3] = "Door",
 	[4] = "Window", [5] = "Switch", [6] = "Stairs"}
--- I goes round what the door/window tool puts in
+-- I goes round what the wall items tool puts in
 local NEXT_HOSTED = {[2] = 3, [3] = 4, [4] = 5, [5] = 2}
 -- A new opening, door and window
 local HOSTED = {
@@ -87,7 +87,7 @@ local S = {
 	-- plan's floor to floor) in risers of about this much, each this deep
 	shape = "box",
 	stairs = {w = 1000, h = 0, riser = 200, tread = 250},
-	hosted = 3,     -- what the door/window tool puts in a wall
+	hosted = 3,     -- what the wall items tool puts in a wall
 	voxel_size = 150, -- a new voxel volume's, mm (user, 2026-10-01: was 50)
 	-- Doors and windows a viewer has opened, and lamps they have switched,
 	-- which only they see
@@ -4955,7 +4955,7 @@ local function build_toolbar()
 	-- things are not there
 	for _, t in ipairs({{"select", "Select"}, {"node", "Nodes"},
 			{"wall", "Wall"}, {"room", "Room"}, {"box", "Object"},
-			{"hosted", "Door/window"}, {"voxel", "Voxels"}, {"paint", "Material"}}) do
+			{"hosted", "Wall items"}, {"voxel", "Voxels"}, {"paint", "Material"}}) do
 		if t[1] == "select" or doc.can("edit") then
 			add(t[2], keys.name(t[1]), function() set_tool(t[1]) end,
 					S.tool == t[1])
