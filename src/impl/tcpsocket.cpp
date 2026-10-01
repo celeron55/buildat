@@ -16,6 +16,7 @@
 //typedef int socket_t;
 #endif
 #include <string.h> // strerror()
+#include <stdlib.h> // getenv()
 #include <iostream>
 #include <iomanip>
 
@@ -288,6 +289,16 @@ struct CTCPSocket: public TCPSocket
 			int val = 1;
 			setsockopt(try_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&val,
 					sizeof(val));
+#ifdef SO_REUSEPORT
+			// **The port shared with a stand-in** that answers browsers
+			// while the server restarts (util/serve_latest_release.sh), only
+			// when asked: otherwise a second server on the port fails to
+			// bind, as it should
+			const char *share = getenv("BUILDAT_SHARE_PORT");
+			if(share && strcmp(share, "1") == 0)
+				setsockopt(try_fd, SOL_SOCKET, SO_REUSEPORT, (const char*)&val,
+						sizeof(val));
+#endif
 			if(res->ai_family == AF_INET6){
 				int val = 1;
 				setsockopt(try_fd, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&val,
