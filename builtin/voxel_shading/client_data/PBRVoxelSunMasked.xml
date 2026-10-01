@@ -1,0 +1,11 @@
+<!-- The same technique as PBRVoxelMasked.xml beside it, with the sun gated by
+     the skylight the mesher packed into the vertex colors; see
+     PBRVoxelSun.xml for what that is and which worlds want it. -->
+<technique vs="voxel_shading/PBRVoxel" ps="voxel_shading/PBRVoxel"
+        vsdefines="VOXELSUNGATE"
+        psdefines="VOXELSUNGATE DIFFMAP ALPHAMASK PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY">
+    <pass name="base" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" psdefines="ALPHAMASK" />
+</technique>
