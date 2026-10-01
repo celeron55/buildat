@@ -648,14 +648,6 @@ void PS()
     vec3 cubeAmb = vec3(0.0);
     if (cubes) {
         cubeAmb = AmbientCube(normal);
-        // Half its colour, as an eye adapting to a room's light would
-        // take out: the probe sees itself, so each bounce took on the
-        // room's colour again, and a white ceiling under a wooden room's
-        // light was brown (user, 2026-10-01). Halved here, it is halved
-        // each bounce too.
-        // simplified: a fixed share for every room; the upgrade is a
-        // white balance by the light reaching the eye
-        cubeAmb = mix(vec3(dot(cubeAmb, vec3(0.2126, 0.7152, 0.0722))), cubeAmb, 0.5);
         reflected = ProbeSample(reflect(-eye, normal)) * fresnel;
     }
 
