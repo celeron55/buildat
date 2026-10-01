@@ -1513,8 +1513,10 @@ do
 		light.lightType = magic.LIGHT_POINT
 		light.color = rgb_color(kelvin_rgb(p.temperature))
 		local b = p.brightness / 1000
-		-- At vanilla's lamp radiance, beside the sun's
-		light.brightness = (0.5 + 1.5 * b) * M.daylight.PHYS.lamp
+		-- At vanilla's lamp radiance, beside the sun's; in proportion to
+		-- the brightness, as the lamp's surface is (Palette.glsl), 10 %
+		-- where it was (user, 2026-10-02: 10 % is a lamp's beside the sun)
+		light.brightness = 6.5 * b * M.daylight.PHYS.lamp
 		light.range = 2 + 8 * b
 end
 
