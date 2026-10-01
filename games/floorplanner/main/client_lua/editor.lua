@@ -1664,9 +1664,12 @@ end
 -- Kept over rebuilds, so that a room keeps its row and its probe; a room
 -- gone frees its slot at the end of the rebuild
 M.room_slot, M.slot_owner, M.room_light, M.room_seen = {}, {}, {}, {}
--- And where each slot's probe stands, in the scene's frame, mm, and
--- whether its six faces have been drawn (M.probes_tick)
-M.room_probe, M.probe_ready = {}, {}
+-- And each slot's probes (M.room_probes): the rows of the probes' atlas
+-- they are drawn in, {first, n, and the first's and the last's x and z in
+-- the scene's frame, m}; each row's slot, where its probe stands (the
+-- scene's frame, mm) and whether its six faces have been drawn
+-- (M.probes_tick)
+M.probe_rows, M.row_owner, M.probe_pos, M.probe_ready = {}, {}, {}, {}
 local function entry_albedo(id)
 	local e = id and doc.ents[id]
 	if not e or e.type ~= "palette" then
@@ -1687,6 +1690,134 @@ local function entry_albedo(id)
 	return {r = ch("r"), g = ch("g"), b = ch("b")}
 end
 M.entry_albedo = entry_albedo
+
+-- A room's walls' albedo: their faces' to it, by their length
+function M.wall_albedo(rd)
+	local sum, len = {r = 0, g = 0, b = 0}, 0
+	for i = 1, #rd.ids do
+		local wid, forward = wall_between(rd.ids[i], rd.ids[i % #rd.ids + 1])
+		local p, q = rd.pts[i], rd.pts[i % #rd.pts + 1]
+		local l = geom.len(q[1] - p[1], q[2] - p[2])
+		local w = wid and doc.ents[wid]
+		-- The room is left of its counter-clockwise edges
+		local a = entry_albedo(w and (forward and w.ints.mat_left or
+				w.ints.mat_right))
+		sum.r, sum.g, sum.b = sum.r + a.r * l, sum.g + a.g * l, sum.b + a.b * l
+		len = len + l
+	end
+	if len <= 0 then
+		return {r = 0.5, g = 0.5, b = 0.5}
+	end
+	return {r = sum.r / len, g = sum.g / len, b = sum.b / len}
+end
+
+-- **A room's probes** (user, 2026-10-01: one in the middle of a long room
+-- lit its far wall as if it were by the sun's patch at the other end; the
+-- path-traced reference had that wall at under half): along the room's
+-- longest edge, one every 2 m or so, up to four, at a standing eye's
+-- height or half the ceiling's. Rows of the atlas (PROBE_ROWS) for them,
+-- next to each other, kept while their number is; fewer when there are
+-- not enough, none past that.
+-- simplified: on the line through the middle of the room across that
+-- edge; a probe that is not in the room (an L) is put in its first
+-- triangle's middle
+M.PROBE_GAP, M.PROBES_MAX = 2000, 4
+function M.free_rows(slot)
+	local pr = M.probe_rows[slot]
+	if not pr then
+		return
+	end
+	for row = pr.first, pr.first + pr.n - 1 do
+		M.row_owner[row], M.probe_pos[row], M.probe_ready[row] = nil, nil, nil
+	end
+	M.probe_rows[slot] = nil
+end
+function M.room_probes(slot, rd, e)
+	local pts = #rd.inner >= 3 and rd.inner or rd.pts
+	local ux, uz, best = 1, 0, 0
+	for i = 1, #pts do
+		local p, q = pts[i], pts[i % #pts + 1]
+		local l = geom.len(q[1] - p[1], q[2] - p[2])
+		if l > best then
+			best, ux, uz = l, (q[1] - p[1]) / l, (q[2] - p[2]) / l
+		end
+	end
+	local t0, t1, s0, s1 = math.huge, -math.huge, math.huge, -math.huge
+	for _, p in ipairs(pts) do
+		local t, sv = p[1] * ux + p[2] * uz, -p[1] * uz + p[2] * ux
+		t0, t1 = math.min(t0, t), math.max(t1, t)
+		s0, s1 = math.min(s0, sv), math.max(s1, sv)
+	end
+	local n = math.max(1, math.min(M.PROBES_MAX, math.ceil((t1 - t0) / M.PROBE_GAP)))
+	-- The rows: the same ones while the number is the same
+	local pr = M.probe_rows[slot]
+	if not pr or pr.n ~= n then
+		M.free_rows(slot)
+		pr = nil
+		for want = n, 1, -1 do
+			for first = 1, M.PROBE_ROWS - want do
+				local free = true
+				for row = first, first + want - 1 do
+					free = free and not M.row_owner[row]
+				end
+				if free then
+					pr = {first = first, n = want}
+					break
+				end
+			end
+			if pr then
+				break
+			end
+		end
+		if not pr then
+			return
+		end
+		for row = pr.first, pr.first + pr.n - 1 do
+			M.row_owner[row] = slot
+		end
+		M.probe_rows[slot] = pr
+	end
+	n = pr.n
+	local y = math.min(1500, room_ceiling(e) / 2)
+	local sm = (s0 + s1) / 2
+	local r = M.cur_rel or place.WORLD
+	for i = 1, n do
+		local t = t0 + (t1 - t0) * (i - 0.5) / n
+		local x, z = t * ux - sm * uz, t * uz + sm * ux
+		if not geom.point_in_polygon(x, z, pts) then
+			local tri = geom.triangulate(pts)[1]
+			if tri then
+				x = (pts[tri[1]][1] + pts[tri[2]][1] + pts[tri[3]][1]) / 3
+				z = (pts[tri[1]][2] + pts[tri[2]][2] + pts[tri[3]][2]) / 3
+			end
+		end
+		local px, py, pz = place.point(r, x, y, z)
+		M.probe_pos[pr.first + i - 1] = {x = px, y = py, z = pz}
+	end
+	local a, b = M.probe_pos[pr.first], M.probe_pos[pr.first + n - 1]
+	pr.x0, pr.z0, pr.x1, pr.z1 = W(a.x), W(a.z), W(b.x), W(b.z)
+	-- and the room's box, which the probes' light is put back on
+	-- (Palette.glsl's RoomAmbient): a corner, the along axis, the extents
+	-- along it and across, the floor's and the ceiling's height; m
+	local ox, oy, oz = place.point(r, t0 * ux - s0 * uz, 0, t0 * uz + s0 * ux)
+	local ax, _, az = place.point(r, ux, 0, uz)
+	local zx, _, zz = place.point(r, 0, 0, 0)
+	pr.box = {ox = W(ox), oz = W(oz), ux = ax - zx, uz = az - zz,
+			lu = W(t1 - t0), lv = W(s1 - s0), y0 = W(oy), y1 = W(oy + room_ceiling(e))}
+end
+
+-- Where along a room's probes a point (the scene's frame, m) is: the row
+-- before it, the row after and how far between
+function M.probe_at(pr, x, z)
+	if pr.n < 2 then
+		return pr.first, pr.first, 0
+	end
+	local dx, dz = pr.x1 - pr.x0, pr.z1 - pr.z0
+	local t = ((x - pr.x0) * dx + (z - pr.z0) * dz) / (dx * dx + dz * dz)
+	t = math.max(0, math.min(1, t)) * (pr.n - 1)
+	local i = math.min(math.floor(t), pr.n - 2)
+	return pr.first + i, pr.first + i + 1, t - i
+end
 function M.room_occlusion()
 	local glass = {}
 	local sunward = {}
@@ -1723,7 +1854,11 @@ function M.room_occlusion()
 					local x1, _, z1 = place.point(r, -f.nx * sgn, 0, -f.nz * sgn)
 					local l = sunward[rid] or {}
 					sunward[rid] = l
-					l[#l + 1] = {a = a / 1e6 * through, ox = x1 - x0, oz = z1 - z0}
+					-- and its middle in the scene's frame, in metres, for the
+					-- light the probes see from it (M.cpu_cubes)
+					local cx, cy, cz = place.point(r, it.x, (it.y0 + it.y1) / 2, it.z)
+					l[#l + 1] = {a = a / 1e6 * through, ox = x1 - x0, oz = z1 - z0,
+							x = W(cx), y = W(cy), z = W(cz), through = through}
 				end
 			end
 		end
@@ -1753,26 +1888,16 @@ function M.room_occlusion()
 				perim = perim + geom.len(q[1] - p[1], q[2] - p[2])
 			end
 			local floor = rd.net / 1e6
+			local height = room_ceiling(e) / 1000
+			local _, fy = place.point(M.cur_rel or place.WORLD, 0, 0, 0)
 			M.room_light[slot] = {wins = sunward[id] or {},
-					area = 2 * floor + perim / 1000 * room_ceiling(e) / 1000,
-					floor = entry_albedo(e.ints.mat_floor)}
-			-- The probe: in the middle of the room, or in its first
-			-- triangle's where the middle is outside it (an L), at a
-			-- standing eye's height or half the ceiling's
-			local cx, cz = 0, 0
-			for _, p in ipairs(rd.pts) do
-				cx, cz = cx + p[1] / #rd.pts, cz + p[2] / #rd.pts
-			end
-			if not geom.point_in_polygon(cx, cz, rd.pts) then
-				local t = geom.triangulate(rd.pts)[1]
-				if t then
-					cx = (rd.pts[t[1]][1] + rd.pts[t[2]][1] + rd.pts[t[3]][1]) / 3
-					cz = (rd.pts[t[1]][2] + rd.pts[t[2]][2] + rd.pts[t[3]][2]) / 3
-				end
-			end
-			local px, py, pz = place.point(M.cur_rel or place.WORLD, cx,
-					math.min(1500, room_ceiling(e) / 2), cz)
-			M.room_probe[slot] = {x = px, y = py, z = pz}
+					area = 2 * floor + perim / 1000 * height,
+					floor_area = floor, wall_area = perim / 1000 * height,
+					floor = entry_albedo(e.ints.mat_floor),
+					ceiling = entry_albedo(e.ints.mat_ceiling),
+					wall = M.wall_albedo(rd), height = height,
+					floor_y = W(fy)}
+			M.room_probes(slot, rd, e)
 		end
 	end
 	M.tri_occ, M.tri_occ_fn = 0, function(xm, zm)
@@ -1785,22 +1910,44 @@ end
 -- comes through the glass facing the sun lands on the floor, which sends
 -- its colour of it back into the room; spread over the room's surfaces
 -- and taken up again by them, half each time (1 / (1 - 0.5)). As the
--- shader's ambient adds it: irradiance over pi. The room table's row
--- `slot` is it, as sqrt(L / 16).
+-- shader's ambient adds it: irradiance over pi. For a room without
+-- probes; with them, the probes' light is the ambient (M.cpu_cubes, or
+-- the cube mode's drawn ones).
 -- simplified: the patch is taken to land on the floor, whatever the
 -- sun's height, and nothing outside shades a window
+--
+-- **The room table**, eight texels a row (Palette.glsl's RoomTexel). By
+-- the room's slot: the bounce as sqrt(L / 16) and whether the room's
+-- probes are there to light it (alpha); its first probe row and their
+-- number (/ 255); its box (M.room_probes): the corner's x and z, the
+-- extents along and across, the along axis's x and z, the floor's and the
+-- ceiling's height. By a probe's row: its x and z, and its y. A length is
+-- 16 bits in two bytes, 4 mm a step from -131 m; the axis 16 bits from -1
+-- to 1.
 M.ROOM_TABLE_ROWS = 256
 function M.room_bounce(tx, h, tz, light)
 	M.bounce_args = {tx, h, tz, light}
 	local image = M.room_table_image
 	if not image then
 		image = magic.Image:new()
-		assert(image:SetSize(1, M.ROOM_TABLE_ROWS, 4), "room table image")
+		assert(image:SetSize(8, M.ROOM_TABLE_ROWS, 4), "room table image")
 		M.room_table_image = image
 		M.kept[#M.kept + 1] = image
 	end
+	local function c16(a, b, unit)
+		local function k(v)
+			if unit then
+				return math.max(0, math.min(65535, math.floor((v + 1) * 32767.5 + 0.5)))
+			end
+			return math.max(0, math.min(65535, math.floor(v / 0.004 + 0.5) + 32768))
+		end
+		local ka, kb = k(a), k(b)
+		return magic.Color(math.floor(ka / 256) / 255, ka % 256 / 255,
+				math.floor(kb / 256) / 255, kb % 256 / 255)
+	end
 	local e = h > 0 and light.sun or 0
 	local sc = light.sun_color
+	local drawn = S.lighting == "pbr_cube"
 	for slot = 1, M.ROOM_TABLE_ROWS - 1 do
 		local rl = M.room_light[slot]
 		local c = {0, 0, 0}
@@ -1812,10 +1959,27 @@ function M.room_bounce(tx, h, tz, light)
 			local k = flux / math.max(rl.area, 1) / 0.5 / math.pi
 			c = {k * rl.floor.r * sc.r, k * rl.floor.g * sc.g, k * rl.floor.b * sc.b}
 		end
-		-- Alpha: whether the slot's probe is drawn (the cube mode's)
+		local pr = rl and M.probe_rows[slot]
+		local ready = pr ~= nil
+		if pr and drawn then
+			for row = pr.first, pr.first + pr.n - 1 do
+				ready = ready and M.probe_ready[row] == true
+			end
+		end
 		image:SetPixel(0, slot, magic.Color(math.sqrt(math.min(c[1], 16) / 16),
 				math.sqrt(math.min(c[2], 16) / 16),
-				math.sqrt(math.min(c[3], 16) / 16), M.probe_ready[slot] and 1 or 0))
+				math.sqrt(math.min(c[3], 16) / 16), ready and 1 or 0))
+		image:SetPixel(1, slot, magic.Color(pr and pr.first / 255 or 0,
+				pr and pr.n / 255 or 0, 0, 0))
+		local b = pr and pr.box
+		local none = magic.Color(0, 0, 0, 0)
+		image:SetPixel(2, slot, b and c16(b.ox, b.oz) or none)
+		image:SetPixel(3, slot, b and c16(b.lu, b.lv) or none)
+		image:SetPixel(4, slot, b and c16(b.ux, b.uz, true) or none)
+		image:SetPixel(5, slot, b and c16(b.y0, b.y1) or none)
+		local at = M.probe_pos[slot]
+		image:SetPixel(6, slot, at and c16(W(at.x), W(at.z)) or none)
+		image:SetPixel(7, slot, at and c16(W(at.y), 0) or none)
 	end
 	local texture = M.room_table
 	if not texture then
@@ -1828,6 +1992,196 @@ function M.room_bounce(tx, h, tz, light)
 	texture.filterMode = magic.FILTER_NEAREST
 	for _, m in ipairs({lit_material, glass_material}) do
 		m:SetTexture(magic.TU_SPECULAR, texture)
+	end
+	M.cpu_cubes(tx, h, tz, light)
+end
+
+-- **The probes' light worked out here** (plain PBR, user 2026-10-01: the
+-- mode without the drawn probes, to come close to the path-traced
+-- reference too): each probe's cells (M.PROBE_K by M.PROBE_K a face, as
+-- the reduce pass has the drawn ones) as they would have seen the room's
+-- box. Where a cell's middle looks, the box is the room's surfaces -- the
+-- ceiling up, the floor down, the walls round -- at their albedo times
+-- the room's light, as an integrating sphere has it: the sky's flux
+-- through the glass spread over the surfaces, and what they and the
+-- sun's patches send on, again and again (1 / (1 - the mean albedo), a
+-- channel at a time, which is the room's colour cast); and on them the
+-- sources, by the share of the cell that sees them: each window's view
+-- of half sky and half ground, and each sun's patch, the window's area
+-- where the sun through its middle lands on the box, at that face's
+-- albedo times the sun on it. Palette.glsl puts the cells back on the box
+-- for each surface, near and far as they are. In a 6 * K * K by
+-- PROBE_ROWS texture as sqrt(L / 16).
+-- simplified: a window and a patch are discs; glass between rooms lets
+-- nothing through; a source is not shaded; the surfaces are lit evenly
+M.PROBE_K = 2
+M.FACE_AXES = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1},
+		{0, 0, -1}}
+-- Each face's right and up, as Palette.glsl's ProbeSample has the face
+-- cameras' (PROBE_FACES)
+M.FACE_RU = {{{0, 0, -1}, {0, 1, 0}}, {{0, 0, 1}, {0, 1, 0}},
+		{{1, 0, 0}, {0, 0, -1}}, {{1, 0, 0}, {0, 0, 1}},
+		{{1, 0, 0}, {0, 1, 0}}, {{-1, 0, 0}, {0, 1, 0}}}
+-- Where a ray from p (local to the box: along, up, across) leaves the box,
+-- and the face's inward normal
+function M.box_exit(b, p, d)
+	local lo, hi = {0, b.y0, 0}, {b.lu, b.y1, b.lv}
+	local tmin, axis = math.huge, 1
+	for i = 1, 3 do
+		if math.abs(d[i]) > 1e-9 then
+			local t = ((d[i] > 0 and hi[i] or lo[i]) - p[i]) / d[i]
+			if t < tmin then
+				tmin, axis = t, i
+			end
+		end
+	end
+	local n = {0, 0, 0}
+	n[axis] = d[axis] > 0 and -1 or 1
+	tmin = math.max(tmin, 0)
+	return {p[1] + d[1] * tmin, p[2] + d[2] * tmin, p[3] + d[3] * tmin}, n
+end
+function M.cpu_cubes(tx, h, tz, light)
+	local K = M.PROBE_K
+	local image = M.cpu_cube_image
+	if not image then
+		image = magic.Image:new()
+		assert(image:SetSize(6 * K * K, M.PROBE_ROWS, 4), "cpu cubes image")
+		local texture = magic.Texture2D:new()
+		texture:SetNumLevels(1)
+		M.cpu_cube_image, M.cpu_cube_texture = image, texture
+		M.kept[#M.kept + 1] = image
+		M.kept[#M.kept + 1] = texture
+	end
+	M.cpu_cube = {}
+	local rgb = M.ground_rgb()
+	local function lin(v)
+		return (v / 255) ^ 2.2
+	end
+	local ground = {lin(math.floor(rgb / 65536)), lin(math.floor(rgb / 256) % 256),
+			lin(rgb % 256)}
+	local sky = {light.ambient.r, light.ambient.g, light.ambient.b}
+	local sc = {light.sun_color.r, light.sun_color.g, light.sun_color.b}
+	local e_sun = h > 0 and light.sun or 0
+	local view = {}
+	for c = 1, 3 do
+		view[c] = 0.5 * sky[c] + 0.5 * ground[c] * (e_sun * math.max(h, 0) / math.pi + sky[c])
+	end
+	for slot, pr in pairs(M.probe_rows) do
+		local rl = M.room_light[slot]
+		local b = pr.box
+		if rl and b then
+			local function ch(t)
+				return {t.r, t.g, t.b}
+			end
+			local rf, rc, rw = ch(rl.floor), ch(rl.ceiling), ch(rl.wall)
+			local function albedo(n)
+				return n[2] > 0.5 and rf or n[2] < -0.5 and rc or rw
+			end
+			-- The scene's frame to the box's: along, up, across
+			local function loc(x, y, z)
+				local dx, dz = x - b.ox, z - b.oz
+				return {dx * b.ux + dz * b.uz, y, -dx * b.uz + dz * b.ux}
+			end
+			local function dir(x, y, z)
+				return {x * b.ux + z * b.uz, y, -x * b.uz + z * b.ux}
+			end
+			local A = math.max(rl.area, 1)
+			-- The sources, discs on the box: middle, inward normal, area,
+			-- radiance
+			local sources = {}
+			local phi_win, phi_ref = {0, 0, 0}, {0, 0, 0}
+			local s = dir(tx, h, tz)
+			for _, w in ipairs(rl.wins) do
+				-- The window on its wall's face of the box: its middle (on
+				-- the wall's line) brought onto the box, facing in
+				local c = loc(w.x, w.y, w.z)
+				local at = {math.max(0, math.min(b.lu, c[1])),
+						math.max(b.y0, math.min(b.y1, c[2])), math.max(0, math.min(b.lv, c[3]))}
+				local inward = dir(-w.ox, 0, -w.oz)
+				local n = math.abs(inward[1]) > math.abs(inward[3]) and
+						{inward[1] > 0 and 1 or -1, 0, 0} or {0, 0, inward[3] > 0 and 1 or -1}
+				sources[#sources + 1] = {p = at, n = n, a = w.a, l = view}
+				for i = 1, 3 do
+					phi_win[i] = phi_win[i] + math.pi * view[i] * w.a
+				end
+				local cosw = w.ox * tx + w.oz * tz
+				if e_sun > 0 and cosw > 0 then
+					local pp, pn = M.box_exit(b, at, {-s[1], -s[2], -s[3]})
+					local cosf = math.max(0.05, s[1] * pn[1] + s[2] * pn[2] + s[3] * pn[3])
+					local alb = albedo(pn)
+					local lp = {}
+					for i = 1, 3 do
+						phi_ref[i] = phi_ref[i] + alb[i] * e_sun * cosw * w.a * sc[i]
+						lp[i] = alb[i] * e_sun * cosf * w.through * sc[i] / math.pi
+					end
+					sources[#sources + 1] = {p = pp, n = pn,
+							a = math.min(w.a / w.through * cosw / cosf, rl.floor_area), l = lp}
+				end
+			end
+			-- The surfaces' irradiance: the sky's direct, spread, and what
+			-- has been reflected once or more
+			local eu = {}
+			for i = 1, 3 do
+				local mean = (rl.floor_area * (rf[i] + rc[i]) + rl.wall_area * rw[i]) / A
+				eu[i] = phi_win[i] / A + (phi_ref[i] + mean * phi_win[i]) /
+						(A * (1 - math.min(mean, 0.95)))
+			end
+			for row = pr.first, pr.first + pr.n - 1 do
+				local pw = M.probe_pos[row]
+				local q = loc(W(pw.x), W(pw.y), W(pw.z))
+				local cells = {}
+				for f = 1, 6 do
+					local fa, ru = M.FACE_AXES[f], M.FACE_RU[f]
+					for cy = 0, K - 1 do
+						for cx = 0, K - 1 do
+							-- Three by three looks in the cell, at what the box
+							-- is there
+							local sum = {0, 0, 0}
+							for sy = 0, 2 do
+								for sx = 0, 2 do
+									local a = 2 * (cx + (sx + 0.5) / 3) / K - 1
+									local bb = 1 - 2 * (cy + (sy + 0.5) / 3) / K
+									local d = dir(fa[1] + ru[1][1] * a + ru[2][1] * bb,
+											fa[2] + ru[1][2] * a + ru[2][2] * bb,
+											fa[3] + ru[1][3] * a + ru[2][3] * bb)
+									local hp, hn = M.box_exit(b, q, d)
+									local alb = albedo(hn)
+									local l = {alb[1] * eu[1] / math.pi,
+											alb[2] * eu[2] / math.pi, alb[3] * eu[3] / math.pi}
+									for _, src in ipairs(sources) do
+										local dx, dy, dz = hp[1] - src.p[1], hp[2] - src.p[2],
+												hp[3] - src.p[3]
+										if hn[1] * src.n[1] + hn[2] * src.n[2] +
+												hn[3] * src.n[3] > 0.9 and
+												dx * dx + dy * dy + dz * dz < src.a / math.pi then
+											l = src.l
+										end
+									end
+									for i = 1, 3 do
+										sum[i] = sum[i] + l[i] / 9
+									end
+								end
+							end
+							cells[#cells + 1] = sum
+						end
+					end
+				end
+				M.cpu_cube[row] = cells
+				for i, v in ipairs(cells) do
+					image:SetPixel(i - 1, row, magic.Color(
+							math.sqrt(math.min(v[1], 16) / 16),
+							math.sqrt(math.min(v[2], 16) / 16),
+							math.sqrt(math.min(v[3], 16) / 16), 1))
+				end
+			end
+		end
+	end
+	assert(M.cpu_cube_texture:SetData(image), "cpu cubes texture")
+	M.cpu_cube_texture.filterMode = magic.FILTER_NEAREST
+	if M.cube_mode == 2 then
+		for _, m in ipairs({lit_material, glass_material}) do
+			m:SetTexture(magic.TU_EMISSIVE, M.cpu_cube_texture)
+		end
 	end
 end
 
@@ -1866,7 +2220,8 @@ local function probes_init()
 			"the probes' atlas in the cache")
 	local reduce = magic.Texture2D:new()
 	reduce:SetNumLevels(1)
-	assert(reduce:SetSize(6, PROBE_ROWS, f16, magic.TEXTURE_RENDERTARGET),
+	assert(reduce:SetSize(6 * M.PROBE_K * M.PROBE_K, PROBE_ROWS, f16,
+			magic.TEXTURE_RENDERTARGET),
 			"the probes' ambient cubes")
 	reduce.filterMode = magic.FILTER_NEAREST
 	-- and for the frame's white (FpFrame.glsl)
@@ -1897,47 +2252,57 @@ local function probes_init()
 	M.kept[#M.kept + 1] = reduce
 	for _, m in ipairs({lit_material, glass_material}) do
 		m:SetTexture(magic.TU_NORMAL, atlas)
-		m:SetTexture(magic.TU_EMISSIVE, reduce)
 	end
 	M.probe = p
 	return p
 end
 M.probes_init = probes_init
 
--- Each frame: the next face of the next room, under the cube mode
+-- Each frame: which probes light the rooms (the shader's RoomCubes: 0
+-- none, 1 the drawn ones, 2 M.cpu_cubes'), and under the cube mode the
+-- next face of the next probe
 function M.probes_tick()
-	local on = S.lighting == "pbr_cube" and M.pbr_now()
-	for _, m in ipairs({lit_material, glass_material}) do
-		m:SetShaderParameter("RoomCubes", on and 1 or 0)
+	local mode = not M.pbr_now() and 0 or S.lighting == "pbr_cube" and 1 or 2
+	if mode ~= M.cube_mode then
+		M.cube_mode = mode
+		local p = mode > 0 and probes_init()
+		for _, m in ipairs({lit_material, glass_material}) do
+			m:SetShaderParameter("RoomCubes", mode)
+			if mode == 1 then
+				m:SetTexture(magic.TU_EMISSIVE, p.reduce)
+			elseif mode == 2 and M.cpu_cube_texture then
+				m:SetTexture(magic.TU_EMISSIVE, M.cpu_cube_texture)
+			end
+		end
+		-- The room table's readiness is the mode's
+		S.daylight_key = nil
 	end
-	if not on then
+	if mode ~= 1 then
 		return
 	end
 	local p = probes_init()
-	local slots = {}
-	for slot in pairs(M.room_probe) do
-		if slot < PROBE_ROWS then
-			slots[#slots + 1] = slot
-		end
+	local rows = {}
+	for row in pairs(M.probe_pos) do
+		rows[#rows + 1] = row
 	end
-	if #slots == 0 then
+	if #rows == 0 then
 		return
 	end
-	table.sort(slots)
-	p.i = p.i % (#slots * 6)
-	local slot = slots[math.floor(p.i / 6) + 1]
+	table.sort(rows)
+	p.i = p.i % (#rows * 6)
+	local row = rows[math.floor(p.i / 6) + 1]
 	local face = p.i % 6
 	p.i = p.i + 1
-	local at = M.room_probe[slot]
+	local at = M.probe_pos[row]
 	p.node.position = magic.Vector3(W(at.x), W(at.y), W(at.z))
 	p.node.rotation = magic.Quaternion(PROBE_FACES[face + 1][1],
 			PROBE_FACES[face + 1][2], 0)
-	p.vp:SetRect(magic.IntRect(face * PROBE_T, slot * PROBE_T,
-			(face + 1) * PROBE_T, (slot + 1) * PROBE_T))
+	p.vp:SetRect(magic.IntRect(face * PROBE_T, row * PROBE_T,
+			(face + 1) * PROBE_T, (row + 1) * PROBE_T))
 	p.surface:QueueUpdate()
 	p.reduce_surface:QueueUpdate()
-	if face == 5 and not M.probe_ready[slot] then
-		M.probe_ready[slot] = true
+	if face == 5 and not M.probe_ready[row] then
+		M.probe_ready[row] = true
 		if M.bounce_args then
 			local a = M.bounce_args
 			M.room_bounce(a[1], a[2], a[3], a[4])
@@ -2352,8 +2717,8 @@ rebuild = function()
 	-- The slots of rooms that are gone
 	for id, slot in pairs(M.room_slot) do
 		if not M.room_seen[id] then
-			M.room_slot[id], M.slot_owner[slot], M.room_probe[slot] = nil, nil, nil
-			M.probe_ready[slot] = nil
+			M.room_slot[id], M.slot_owner[slot] = nil, nil
+			M.free_rows(slot)
 		end
 	end
 	for id, m in pairs(voxel_meshes) do
@@ -9487,13 +9852,13 @@ function M.go_viewport(id, preview)
 	M.hide_ui()
 end
 
--- **The white the eye is adapted to** (FpFrame.glsl): the room probe of
--- the room the camera is in, under the cube mode, else the outdoor one;
--- from the room before to it in a second, as the eye takes a moment too.
--- In fp_wb, a texture of two texels: the two slots, the share of the
--- second, on; and the outdoor white's colour.
--- simplified: under plain PBR indoors, the outdoor white; the upgrade is
--- the room's ambient and bounce
+-- **The white the eye is adapted to** (FpFrame.glsl): the probes' where
+-- the camera is along its room -- or, standing in a doorway, the room it
+-- looks into -- else the outdoor one; FpFrame.glsl moves the eye's to it
+-- in a second or so. In fp_wb, a texture of two texels: the two drawn
+-- probes' rows and how far between (the cube mode); and a white's colour
+-- (worked out probes', or outdoors).
+-- simplified: under plain PBR without probes, the outdoor white
 function M.wb_tick(dt)
 	if not M.pbr_now() then
 		return
@@ -9509,36 +9874,47 @@ function M.wb_tick(dt)
 		assert(magic.cache:AddManualResource(texture, "fp_wb"), "the white in the cache")
 		M.kept[#M.kept + 1] = image
 		M.kept[#M.kept + 1] = texture
-		w = {a = 0, b = 0, t = 1, image = image, texture = texture}
+		w = {image = image, texture = texture}
 		M.wb = w
 	end
-	local slot = 0
-	if S.lighting == "pbr_cube" then
-		-- or, standing in a doorway, the one looked into
-		local fx, fz = math.sin(math.rad(S.yaw)), math.cos(math.rad(S.yaw))
-		local id
-		for _, ahead in ipairs({0, 300, 600}) do
-			id = id or room_at(S.pos.x * 1000 + fx * ahead,
-					S.pos.z * 1000 + fz * ahead)
-		end
-		local s = id and M.room_slot[id]
-		if s and s < M.PROBE_ROWS and M.probe_ready[s] then
-			slot = s
+	local fx, fz = math.sin(math.rad(S.yaw)), math.cos(math.rad(S.yaw))
+	local id
+	for _, ahead in ipairs({0, 300, 600}) do
+		id = id or room_at(S.pos.x * 1000 + fx * ahead, S.pos.z * 1000 + fz * ahead)
+	end
+	local slot = id and M.room_slot[id]
+	local pr = slot and M.probe_rows[slot]
+	local ra, rb, t, o = 0, 0, 0, M.wb_outdoor or {r = 1, g = 1, b = 1}
+	M.wb_at = nil
+	if pr then
+		local a, b, f = M.probe_at(pr, S.pos.x, S.pos.z)
+		local pa, pb = M.probe_pos[a], M.probe_pos[b]
+		M.wb_at = {W(pa.x + (pb.x - pa.x) * f), W(pa.y + (pb.y - pa.y) * f),
+				W(pa.z + (pb.z - pa.z) * f)}
+		if M.cube_mode == 1 and M.probe_ready[a] and M.probe_ready[b] then
+			ra, rb, t = a, b, f
+		elseif M.cube_mode == 2 and M.cpu_cube[a] and M.cpu_cube[b] then
+			local c = {0, 0, 0}
+			for _, k in ipairs({{a, 1 - f}, {b, f}}) do
+				for _, face in ipairs(M.cpu_cube[k[1]]) do
+					for i = 1, 3 do
+						c[i] = c[i] + face[i] * k[2]
+					end
+				end
+			end
+			o = {r = c[1], g = c[2], b = c[3]}
+		else
+			M.wb_at = nil
 		end
 	end
-	if slot ~= w.b then
-		w.a, w.b, w.t = w.t >= 0.5 and w.b or w.a, slot, 0
-	end
-	w.t = math.min(1, w.t + dt)
-	local o = M.wb_outdoor or {r = 1, g = 1, b = 1}
 	local m = math.max(o.r, o.g, o.b, 1e-6)
-	local key = string.format("%d %d %.3f %.4f %.4f %.4f", w.a, w.b, w.t,
+	local key = string.format("%d %d %.3f %.4f %.4f %.4f", ra, rb, t,
 			o.r / m, o.g / m, o.b / m)
 	if key == w.key then
 		return
 	end
 	w.key = key
-	w.image:SetPixel(0, 0, magic.Color(w.a / 255, w.b / 255, w.t, 1))
+	w.image:SetPixel(0, 0, magic.Color(ra / 255, rb / 255, t, 1))
 	w.image:SetPixel(1, 0, magic.Color(o.r / m, o.g / m, o.b / m, 1))
 	assert(w.texture:SetData(w.image), "the white's texture")
 end
@@ -9614,11 +9990,10 @@ function M.refdump_tick(dt)
 		'"camera_dir": ' .. v3(math.sin(yaw) * math.cos(pitch),
 				-math.sin(pitch), math.cos(yaw) * math.cos(pitch)),
 		'"fov": ' .. string.format("%.6g", cam3d.fov),
-		-- Where the frame's white is taken (M.wb_tick): the room probe's
-		-- place, or the eye's outdoors
-		'"white_at": ' .. (M.wb and M.room_probe[M.wb.b] and
-				v3(W(M.room_probe[M.wb.b].x), W(M.room_probe[M.wb.b].y),
-				W(M.room_probe[M.wb.b].z)) or v3(S.pos.x, S.pos.y, S.pos.z)),
+		-- Where the frame's white is taken (M.wb_tick): between the room's
+		-- probes, or the eye's outdoors
+		'"white_at": ' .. (M.wb_at and v3(M.wb_at[1], M.wb_at[2], M.wb_at[3]) or
+				v3(S.pos.x, S.pos.y, S.pos.z)),
 		'"sun_toward": ' .. v3(tx, h, tz),
 		'"sun_irradiance": ' .. string.format("%.6g", light.sun),
 		'"sun_color": ' .. c3(light.sun_color),

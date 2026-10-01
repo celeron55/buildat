@@ -517,78 +517,180 @@ float SkyOcc()
 
 // **The sun a room's windows let in, bounced** (editor.lua's
 // M.room_bounce): radiance to add to the ambient, stored as sqrt(L / 16)
-// in the room table (sSpecMap), a row a room
+// in the room table (sSpecMap), eight texels a row: the first by the
+// room's slot
+const float ROOM_ROWS = 256.0;
+vec4 TableTexel(float row, float i)
+{
+    return texture2D(sSpecMap, vec2((i + 0.5) / 8.0, (row + 0.5) / ROOM_ROWS));
+}
+vec4 RoomTexel(float i)
+{
+    return TableTexel(RoomSlot(), i);
+}
 vec3 RoomBounce()
 {
-    float slot = RoomSlot();
-    if (slot < 0.5)
+    if (RoomSlot() < 0.5)
         return vec3(0.0);
-    vec3 t = texture2D(sSpecMap, vec2(0.5, (slot + 0.5) / 256.0)).rgb;
+    vec3 t = RoomTexel(0.0).rgb;
     return t * t * 16.0;
 }
 
-// The room probes' layout, as editor.lua makes them
+// The room probes' layout, as editor.lua makes them: PROBE_K by PROBE_K
+// cells a face
 const float PROBE_ROWS = 64.0;
+const float PROBE_K = 2.0;
+// A cell's solid angle: a quarter of a face's
+const float CELL_OMEGA = 0.5235988;
 
+// Whether the room is lit by its probes: the drawn ones (cRoomCubes 1)
+// or editor.lua's worked out ones (2), once they are there
 bool RoomCube()
 {
     float slot = RoomSlot();
-    if (cRoomCubes < 0.5 || cPbr < 0.5 || slot < 0.5 || slot > PROBE_ROWS - 1.5)
+    if (cRoomCubes < 0.5 || cPbr < 0.5 || slot < 0.5)
         return false;
-    return texture2D(sSpecMap, vec2(0.5, (slot + 0.5) / 256.0)).a > 0.5;
+    return RoomTexel(0.0).a > 0.5;
 }
 
-// What the room's probe sees along d: the face d is most along, and where
-// on it, by the face camera's own axes (editor.lua's PROBE_FACES: +X, -X,
-// +Y, -Y, +Z, -Z); a face is drawn with its top at the tile's top
-vec3 ProbeSample(vec3 d)
+// A length in the room table: 16 bits, 4 mm a step from -131 m; and an
+// axis's component, 16 bits from -1 to 1
+float Decode16(float hi, float lo)
+{
+    return (floor(hi * 255.0 + 0.5) * 256.0 + floor(lo * 255.0 + 0.5) - 32768.0) * 0.004;
+}
+float DecodeUnit(float hi, float lo)
+{
+    return (floor(hi * 255.0 + 0.5) * 256.0 + floor(lo * 255.0 + 0.5)) / 32767.5 - 1.0;
+}
+
+// **The room's probes along it** (editor.lua's M.room_probes): the row
+// before the point, the row after, and how far between
+vec3 RoomProbes(vec3 p)
+{
+    vec4 t1 = RoomTexel(1.0);
+    float first = floor(t1.r * 255.0 + 0.5);
+    float n = floor(t1.g * 255.0 + 0.5);
+    if (n < 1.5)
+        return vec3(first, first, 0.0);
+    vec4 a = TableTexel(first, 6.0);
+    vec4 b = TableTexel(first + n - 1.0, 6.0);
+    vec2 p0 = vec2(Decode16(a.r, a.g), Decode16(a.b, a.a));
+    vec2 p1 = vec2(Decode16(b.r, b.g), Decode16(b.b, b.a));
+    vec2 d = p1 - p0;
+    float t = clamp(dot(p.xz - p0, d) / max(dot(d, d), 1e-6), 0.0, 1.0) * (n - 1.0);
+    float i = min(floor(t), n - 2.0);
+    return vec3(first + i, first + i + 1.0, t - i);
+}
+
+// A probe face's look, right and up, as the face cameras have them
+// (editor.lua's PROBE_FACES: +X, -X, +Y, -Y, +Z, -Z); a face is drawn
+// with its top at the tile's top
+void FaceAxes(float face, out vec3 f, out vec3 r, out vec3 u)
+{
+    if (face < 0.5) {
+        f = vec3(1.0, 0.0, 0.0); r = vec3(0.0, 0.0, -1.0); u = vec3(0.0, 1.0, 0.0);
+    } else if (face < 1.5) {
+        f = vec3(-1.0, 0.0, 0.0); r = vec3(0.0, 0.0, 1.0); u = vec3(0.0, 1.0, 0.0);
+    } else if (face < 2.5) {
+        f = vec3(0.0, 1.0, 0.0); r = vec3(1.0, 0.0, 0.0); u = vec3(0.0, 0.0, -1.0);
+    } else if (face < 3.5) {
+        f = vec3(0.0, -1.0, 0.0); r = vec3(1.0, 0.0, 0.0); u = vec3(0.0, 0.0, 1.0);
+    } else if (face < 4.5) {
+        f = vec3(0.0, 0.0, 1.0); r = vec3(1.0, 0.0, 0.0); u = vec3(0.0, 1.0, 0.0);
+    } else {
+        f = vec3(0.0, 0.0, -1.0); r = vec3(-1.0, 0.0, 0.0); u = vec3(0.0, 1.0, 0.0);
+    }
+}
+
+// What a probe sees along d, from its drawn faces
+vec3 ProbeSample(vec3 d, float row)
 {
     vec3 a = abs(d);
-    float face;
+    float face = a.x >= a.y && a.x >= a.z ? (d.x > 0.0 ? 0.0 : 1.0) :
+            a.y >= a.z ? (d.y > 0.0 ? 2.0 : 3.0) : (d.z > 0.0 ? 4.0 : 5.0);
     vec3 f, r, u;
-    if (a.x >= a.y && a.x >= a.z) {
-        face = d.x > 0.0 ? 0.0 : 1.0;
-        f = vec3(sign(d.x), 0.0, 0.0);
-        r = vec3(0.0, 0.0, -sign(d.x));
-        u = vec3(0.0, 1.0, 0.0);
-    } else if (a.y >= a.z) {
-        face = d.y > 0.0 ? 2.0 : 3.0;
-        f = vec3(0.0, sign(d.y), 0.0);
-        r = vec3(1.0, 0.0, 0.0);
-        u = vec3(0.0, 0.0, -sign(d.y));
-    } else {
-        face = d.z > 0.0 ? 4.0 : 5.0;
-        f = vec3(0.0, 0.0, sign(d.z));
-        r = vec3(sign(d.z), 0.0, 0.0);
-        u = vec3(0.0, 1.0, 0.0);
-    }
+    FaceAxes(face, f, r, u);
     float k = 1.0 / dot(d, f);
     vec2 t = clamp(vec2(0.5 + 0.5 * dot(d, r) * k, 0.5 - 0.5 * dot(d, u) * k),
             0.5 / 32.0, 1.0 - 0.5 / 32.0);
-    vec2 uv = vec2((face + t.x) / 6.0, (RoomSlot() + t.y) / PROBE_ROWS);
+    vec2 uv = vec2((face + t.x) / 6.0, (row + t.y) / PROBE_ROWS);
     vec3 c = texture2D(sNormalMap, uv).rgb;
     return c == c ? max(c, vec3(0.0)) : vec3(0.0);
 }
 
-// The light the room's probe sees round a normal: the six faces'
-// averages, each weighted by how much of the cosine lobe round the normal
-// falls on it (w(c), c = n . the face's axis, fitted to the integral; they
-// add up to 1), as the radiance an ambient term is. The normal's squares
-// over three faces were all one face's for a face along an axis: a
-// ceiling saw only the floor's colour.
-vec3 AmbientCube(vec3 n)
+// **A probe's light put back on the room's box** (user, 2026-10-01: the
+// light round a probe was a far wall's too, at the probe's nearness to
+// the sun's patch; checked against the path tracer's at three walls of
+// a room, within a tenth with two by two cells a face, where the probe's
+// own was off by up to three times): each cell of the probe's faces --
+// its mean radiance (the reduce pass's, or editor.lua's worked out ones,
+// as sqrt(L / 16)) -- is the patch of the box where the cell's middle
+// leaves it, of the area the cell's solid angle makes there, and lights
+// the surface at x, facing n, as a disc does: L A cos cos / (pi r^2 + A),
+// the ambient term that is. x and n in the box's frame (along, up, across).
+vec3 ProbeLight(float row, vec3 x, vec3 n, vec3 lo, vec3 hi, vec2 U)
 {
-    float row = (RoomSlot() + 0.5) / PROBE_ROWS;
-    vec3 c = vec3(0.0);
-    for (int i = 0; i < 6; i++)
-    {
-        float f = float(i);
-        float a = (i == 0 || i == 2 || i == 4) ? 1.0 : -1.0;
-        float d = a * (i < 2 ? n.x : i < 4 ? n.y : n.z);
-        float w = max(0.1115 + 0.277 * d + 0.1655 * d * d, 0.0);
-        c += w * texture2D(sEmissiveMap, vec2((f + 0.5) / 6.0, row)).rgb;
+    vec4 q0 = TableTexel(row, 6.0);
+    vec4 q1 = TableTexel(row, 7.0);
+    vec4 o = RoomTexel(2.0);
+    vec2 qd = vec2(Decode16(q0.r, q0.g), Decode16(q0.b, q0.a)) -
+            vec2(Decode16(o.r, o.g), Decode16(o.b, o.a));
+    vec3 q = vec3(dot(qd, U), Decode16(q1.r, q1.g), dot(qd, vec2(-U.y, U.x)));
+    float v = (row + 0.5) / PROBE_ROWS;
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < 24; i++) {
+        float fi = float(i);
+        float face = floor(fi / 4.0);
+        float c = fi - face * 4.0;
+        float cy = floor(c / 2.0);
+        float cx = c - cy * 2.0;
+        vec3 f, r, u;
+        FaceAxes(face, f, r, u);
+        vec3 dw = normalize(f + r * (cx - 0.5) + u * (0.5 - cy));
+        vec3 d = vec3(dot(dw.xz, U), dw.y, dot(dw.xz, vec2(-U.y, U.x)));
+        vec3 sd = vec3(abs(d.x) > 1e-6 ? d.x : 1e-6, abs(d.y) > 1e-6 ? d.y : 1e-6,
+                abs(d.z) > 1e-6 ? d.z : 1e-6);
+        vec3 tt = (mix(lo, hi, step(0.0, sd)) - q) / sd;
+        float t = max(min(tt.x, min(tt.y, tt.z)), 0.0);
+        vec3 nh = tt.x <= tt.y && tt.x <= tt.z ? vec3(-sign(sd.x), 0.0, 0.0) :
+                tt.y <= tt.z ? vec3(0.0, -sign(sd.y), 0.0) : vec3(0.0, 0.0, -sign(sd.z));
+        vec3 h = q + d * t;
+        float A = CELL_OMEGA * t * t / max(abs(dot(d, nh)), 0.05);
+        vec3 w = x - h;
+        float r2 = dot(w, w);
+        float rl = sqrt(max(r2, 1e-8));
+        float ce = max(dot(w, nh) / rl, 0.0);
+        float cr = max(-dot(w, n) / rl, 0.0);
+        vec3 L = texture2D(sEmissiveMap, vec2((fi + 0.5) / 24.0, v)).rgb;
+        L = cRoomCubes > 1.5 ? L * L * 16.0 : L;
+        if (!(L.r == L.r && L.g == L.g && L.b == L.b))
+            L = vec3(0.0);
+        sum += L * (A * ce * cr / (3.14159265 * r2 + A));
     }
-    return c == c ? max(c, vec3(0.0)) : vec3(0.0);
+    return max(sum, vec3(0.0));
+}
+
+// The light round a surface at p, facing n, in a room with its probes:
+// the two probes it is between, put back on the box
+vec3 RoomAmbient(vec3 p, vec3 n)
+{
+    vec4 o = RoomTexel(2.0);
+    vec4 e = RoomTexel(3.0);
+    vec4 ax = RoomTexel(4.0);
+    vec4 y = RoomTexel(5.0);
+    vec2 O = vec2(Decode16(o.r, o.g), Decode16(o.b, o.a));
+    vec2 U = normalize(vec2(DecodeUnit(ax.r, ax.g), DecodeUnit(ax.b, ax.a)));
+    vec3 lo = vec3(0.0, Decode16(y.r, y.g), 0.0);
+    vec3 hi = vec3(Decode16(e.r, e.g), Decode16(y.b, y.a), Decode16(e.b, e.a));
+    vec2 pd = p.xz - O;
+    vec3 x = vec3(dot(pd, U), p.y, dot(pd, vec2(-U.y, U.x)));
+    vec3 nl = vec3(dot(n.xz, U), n.y, dot(n.xz, vec2(-U.y, U.x)));
+    vec3 pr = RoomProbes(p);
+    vec3 a = ProbeLight(pr.x, x, nl, lo, hi, U);
+    if (pr.z < 0.001)
+        return a;
+    return mix(a, ProbeLight(pr.y, x, nl, lo, hi, U), pr.z);
 }
 
 // A sky and a ground for what is reflected: the sky's cube under PBR, and
@@ -641,14 +743,19 @@ void PS()
     vec3 eye = normalize(cCameraPosPS - vWorldPos.xyz);
     float fresnel = refl * (0.25 + 0.75 * pow(1.0 - max(dot(eye, normal), 0.0), 5.0));
     vec3 reflected = Environment(reflect(-eye, normal)) * fresnel;
-    // In a room with its probe drawn: the room itself reflected, and the
-    // light round the surface from what the probe saw, in place of the
-    // sky's share and the bounce
+    // In a room with its probes: the light round the surface from what
+    // they see, in place of the sky's share and the bounce, and with drawn
+    // ones the room itself reflected
     bool cubes = RoomCube();
     vec3 cubeAmb = vec3(0.0);
     if (cubes) {
-        cubeAmb = AmbientCube(normal);
-        reflected = ProbeSample(reflect(-eye, normal)) * fresnel;
+        cubeAmb = RoomAmbient(vWorldPos.xyz, normal);
+        // and the room reflected, from the nearer drawn probe
+        if (cRoomCubes < 1.5) {
+            vec3 pr = RoomProbes(vWorldPos.xyz);
+            reflected = ProbeSample(reflect(-eye, normal),
+                    pr.z < 0.5 ? pr.x : pr.y) * fresnel;
+        }
     }
 
     #if defined(PERPIXEL)

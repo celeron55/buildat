@@ -8,8 +8,9 @@
 //
 // The adaptation: a von Kries scaling in Bradford's cone space from the
 // white the eye is adapted to -- what a grey card at the eye is lit by,
-// the camera's room probe averaged over its six faces, or the sun's and
-// the sky's outdoors (editor.lua's M.wb_tick, in fp_wb) -- to the
+// the probes' where the camera is along its room averaged over their six
+// faces, or the sun's and the sky's outdoors (editor.lua's M.wb_tick, in
+// fp_wb), which the eye's own (fpWhite) moves to in a second or so -- to the
 // display's D65, by CIECAM02's degree of adaptation D, which the
 // adapting luminance gives: about 1 in daylight, less in the dark. A
 // path-traced room's light is that of its walls bounced again and again
@@ -25,6 +26,7 @@
 #include "ScreenPos.glsl"
 
 varying vec2 vScreenPos;
+varying vec2 vTexCoord;
 
 void VS()
 {
@@ -32,6 +34,7 @@ void VS()
     vec3 worldPos = GetWorldPos(modelMatrix);
     gl_Position = GetClipPos(worldPos);
     vScreenPos = GetScreenPosPreDiv(gl_Position);
+    vTexCoord = GetQuadTexCoord(gl_Position);
 }
 
 #ifdef COMPILEPS
@@ -49,16 +52,19 @@ const float CD_PER_UNIT = 1000.0;
 // The room probes' ambient cubes (editor.lua)
 const float PROBE_ROWS = 64.0;
 
-vec3 RoomWhite(float slot, vec3 outdoor)
+// A probe's cells' mean (all of a solid angle), at luminance one
+vec3 ProbeWhite(float row, vec3 outdoor)
 {
-    if (slot < 0.5)
+    if (row < 0.5)
         return outdoor;
     vec3 c = vec3(0.0);
-    for (int i = 0; i < 6; i++)
-        c += texture2D(sSpecMap, vec2((float(i) + 0.5) / 6.0,
-                (slot + 0.5) / PROBE_ROWS)).rgb;
-    return c == c && dot(c, LUM) > 1e-6 ? c : outdoor;
+    for (int i = 0; i < 24; i++)
+        c += texture2D(sSpecMap, vec2((float(i) + 0.5) / 24.0,
+                (row + 0.5) / PROBE_ROWS)).rgb;
+    return c == c && dot(c, LUM) > 1e-6 ? c / dot(c, LUM) : outdoor;
 }
+// The eye's white's way to the scene's: a time constant of a second
+const float WHITE_RATE = 1.0;
 
 vec3 PBRNeutral(vec3 color)
 {
@@ -80,19 +86,27 @@ vec3 PBRNeutral(vec3 color)
 
 void PS()
 {
-    vec3 color = max(texture2D(sDiffMap, vScreenPos).rgb, 0.0);
-    // fp_wb: the two rooms' slots, how far from the first to the second,
-    // whether it is on; and the outdoor white
+#ifdef WHITE
+    // fpWhite: the eye's white, at luminance one, moved to the scene's
     vec4 p = texture2D(sEmissiveMap, vec2(0.25, 0.5));
-    vec3 outdoor = texture2D(sEmissiveMap, vec2(0.75, 0.5)).rgb;
-    if (p.a > 0.5) {
-        vec3 w = mix(RoomWhite(floor(p.r * 255.0 + 0.5), outdoor),
-                RoomWhite(floor(p.g * 255.0 + 0.5), outdoor), p.b);
-        float la = texture2D(sNormalMap, vec2(0.5, 0.5)).r * CD_PER_UNIT;
-        float D = clamp(1.0 - exp((-la - 42.0) / 92.0) / 3.6, 0.0, 1.0);
-        vec3 gain = mix(vec3(1.0), (RGB2LMS * vec3(1.0)) /
-                max(RGB2LMS * (w / max(dot(w, LUM), 1e-6)), vec3(1e-6)), D);
-        color = max(LMS2RGB * (gain * (RGB2LMS * color)), 0.0);
-    }
+    vec3 o = texture2D(sEmissiveMap, vec2(0.75, 0.5)).rgb;
+    o /= max(dot(o, LUM), 1e-6);
+    vec3 target = mix(ProbeWhite(floor(p.r * 255.0 + 0.5), o),
+            ProbeWhite(floor(p.g * 255.0 + 0.5), o), p.b);
+    vec3 prev = texture2D(sDiffMap, vTexCoord).rgb;
+    float k = 1.0 - exp(-cDeltaTimePS * WHITE_RATE);
+    // The first frame's, and one gone wrong: straight to it
+    if (!(dot(prev, LUM) > 0.01 && dot(prev, LUM) < 100.0))
+        k = 1.0;
+    gl_FragColor = vec4(mix(prev, target, k), 1.0);
+#else
+    vec3 color = max(texture2D(sDiffMap, vScreenPos).rgb, 0.0);
+    vec3 w = texture2D(sSpecMap, vec2(0.5, 0.5)).rgb;
+    float la = texture2D(sNormalMap, vec2(0.5, 0.5)).r * CD_PER_UNIT;
+    float D = clamp(1.0 - exp((-la - 42.0) / 92.0) / 3.6, 0.0, 1.0);
+    vec3 gain = mix(vec3(1.0), (RGB2LMS * vec3(1.0)) /
+            max(RGB2LMS * (w / max(dot(w, LUM), 1e-6)), vec3(1e-6)), D);
+    color = max(LMS2RGB * (gain * (RGB2LMS * color)), 0.0);
     gl_FragColor = vec4(PBRNeutral(color), 1.0);
+#endif
 }
