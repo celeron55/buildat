@@ -7001,7 +7001,9 @@ do
 			if not over_ui() then
 				local s = pick_surface()
 				S.right_click = {moved = 0,
-						leaf = s and s.side == "mat_leaf" and s.id or nil}
+						leaf = s and s.side == "mat_leaf" and s.id or nil,
+						lamp = s and s.kind == "instance" and is_lamp(s.id) and
+						s.id or nil}
 			end
 			if S.view == "2d" and not over_ui() then
 				-- Into 3D as if it had been 3D all along ([FP_ORBIT_2D]): the
@@ -7078,6 +7080,16 @@ do
 				end
 				magic.input:SetMouseMode(magic.MM_ABSOLUTE)
 				M.toggle_open(rc.leaf)
+				return
+			end
+			-- And on a lamp switches it (user)
+			if rc.lamp and rc.moved < 5 and doc.ents[rc.lamp] then
+				S.orbit, S.pan3d = nil, nil
+				if S.looking then
+					S.looking = false
+				end
+				magic.input:SetMouseMode(magic.MM_ABSOLUTE)
+				M.flip_lamps({rc.lamp})
 				return
 			end
 			-- **A right click on what has no right click action clears the
@@ -7559,6 +7571,10 @@ do
 		if kind == KIND.switch or kind == KIND.door or kind == KIND.window then
 			return id, kind
 		end
+		-- A lamp on its own (user: as a door or a switch)
+		if is_lamp(id) then
+			return id, "lamp"
+		end
 		return nil
 	end
 
@@ -7569,6 +7585,10 @@ do
 		end
 		if kind == KIND.switch then
 			flip_switch(id)
+			return
+		end
+		if kind == "lamp" then
+			M.flip_lamps({id})
 			return
 		end
 		M.toggle_open(id)
@@ -8107,6 +8127,10 @@ do
 				g.right = "click: " .. (open_amount(s.id) > 0 and "close " or
 						"open ") .. name_of(s.id) .. "; drag: turn"
 				g.hl[1] = {kind = "leaves", id = s.id, col = RIGHT}
+			elseif s and s.kind == "instance" and is_lamp(s.id) then
+				g.right = "click: switch " .. name_of(s.id) ..
+						(lamp_on(s.id) and " off" or " on") .. "; drag: turn"
+				g.hl[1] = {kind = "instance", id = s.id, col = RIGHT}
 			end
 			return g
 		end
@@ -8131,6 +8155,10 @@ do
 				g.right = "click: " .. (open_amount(s.id) > 0 and "close " or
 						"open ") .. name_of(s.id) .. "; " .. g.right
 				hl({kind = "leaves", id = s.id, col = RIGHT})
+			elseif s and s.kind == "instance" and is_lamp(s.id) then
+				g.right = "click: switch " .. name_of(s.id) ..
+						(lamp_on(s.id) and " off" or " on") .. "; " .. g.right
+				hl({kind = "instance", id = s.id, col = RIGHT})
 			end
 			g.middle = "drag: pan the view"
 		end
@@ -8147,6 +8175,8 @@ do
 				end
 				what = "switch " .. name_of(uid) .. "'s lamps " ..
 						(any and "off" or "on")
+			elseif ukind == "lamp" then
+				what = "switch " .. name_of(uid) .. (lamp_on(uid) and " off" or " on")
 			else
 				what = (open_amount(uid) > 0 and "close " or "open ") .. name_of(uid)
 			end
@@ -8155,8 +8185,8 @@ do
 			if S.captured and S.tool ~= "voxel" then
 				g.right = what
 				-- The right button is the use key there: its colour
-				hl({kind = ukind == KIND.switch and "instance" or "leaves",
-						id = uid, col = RIGHT})
+				hl({kind = (ukind == KIND.switch or ukind == "lamp") and
+						"instance" or "leaves", id = uid, col = RIGHT})
 			end
 		end
 		if S.calib then
