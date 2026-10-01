@@ -7450,6 +7450,15 @@ do
 
 	local function click()
 		local t = S.press.target
+		-- **With no tool, a click uses what it is on** (user, 2026-10-02),
+		-- as a right click does: nothing else is the left button's then
+		if not S.tool then
+			local id, kind = M.use_pointed()
+			if id then
+				M.use_id(id, kind)
+			end
+			return
+		end
 		if S.calib and not S.calib.measured then
 			local x, z = cursor_floor()
 			if x then
@@ -7707,8 +7716,9 @@ do
 			return
 		end
 		if crosshair_view() and not S.captured and not over_ui() and
-				button == magic.MOUSEB_LEFT then
-			-- A click on the view goes up into the crosshair
+				button == magic.MOUSEB_LEFT and (S.tool or not M.use_pointed()) then
+			-- A click on the view goes up into the crosshair; with no tool,
+			-- one on what can be used uses it (click)
 			S.crosshair = true
 			update_capture()
 			S.swallow_up = true
@@ -8938,11 +8948,15 @@ do
 					"into the crosshair to dig and place (Esc: back)",
 					right = walking and "drag: turn" or nil,
 					middle = walking and "drag: walk" or nil}
-			-- A right click uses what it is on (mouse_up)
+			-- A right click uses what it is on (mouse_up), and with no tool
+			-- a left one too
 			local uid, ukind = M.use_pointed()
 			if walking and uid then
 				g.right = "click: " .. M.use_text(uid, ukind) .. "; drag: turn"
 				g.hl[1] = M.use_hl(uid, ukind)
+				if not S.tool then
+					g.left = M.use_text(uid, ukind)
+				end
 			end
 			return g
 		end
@@ -8967,6 +8981,9 @@ do
 			if uid then
 				g.right = "click: " .. M.use_text(uid, ukind) .. "; " .. g.right
 				hl(M.use_hl(uid, ukind))
+				if not S.tool then
+					g.left = M.use_text(uid, ukind)
+				end
 			end
 			g.middle = "drag: pan the view"
 		end
@@ -8986,6 +9003,9 @@ do
 				g.right = what
 				-- The right button is the use key there: its colour
 				hl(M.use_hl(uid, ukind))
+				if not S.tool and M.use_pointed() == uid then
+					g.left = what
+				end
 			end
 		end
 		if S.calib then
