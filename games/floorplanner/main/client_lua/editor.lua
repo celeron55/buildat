@@ -4182,6 +4182,9 @@ local function build_props()
 		return
 	end
 	local sel = S.primary and S.sel[S.primary] and doc.ents[S.primary]
+	if S.stair_riser and not (sel and sel.id == S.stair_riser.inst) then
+		S.stair_riser = nil
+	end
 	-- **Nothing to show with Select and nothing selected** (user): the
 	-- panel is for what is selected and for a tool's own settings
 	if S.tool == "select" and not sel and sel_count() == 0 then
@@ -4428,16 +4431,45 @@ local function build_props()
 		panel.label(props, KIND_NAMES[p.kind] .. " " .. sel.id .. (links > 1 and
 				("   linked x" .. links) or ""))
 		int_field(i.def, "Width mm", "w", p.w)
-		int_field(i.def, "Height mm", "h", p.h)
+		if p.kind == KIND.stairs then
+			-- **The height keeps the riser, and the steps follow** (user).
+			-- The riser is the one before the first height edit, kept while
+			-- these stairs stay selected, so that 10 mm at a time adds up
+			-- to a step.
+			-- simplified: in memory only; a Steps or Riser edit, another
+			-- selection or a reload starts from the riser the stairs have
+			panel.field(props, "Height mm", p.h, function(t)
+				local v = num(t)
+				if not v or v <= 0 then
+					return
+				end
+				local r = S.stair_riser
+				if not (r and r.inst == sel.id) then
+					r = {inst = sel.id, riser = p.h / p.steps}
+					S.stair_riser = r
+				end
+				set(i.def, {ints = {h = v, steps = math.max(1, math.min(200,
+						math.floor(v / r.riser + 0.5)))}})
+			end)
+		else
+			int_field(i.def, "Height mm", "h", p.h)
+		end
 		int_field(i.def, "Depth mm", "d", p.d)
 		if p.kind == KIND.stairs then
 			-- The riser sets the steps, the height staying; the tread sets
 			-- the depth
-			int_field(i.def, "Steps", "steps", p.steps)
+			panel.field(props, "Steps", p.steps, function(t)
+				local v = num(t)
+				if v then
+					S.stair_riser = nil
+					set(i.def, {ints = {steps = v}})
+				end
+			end)
 			panel.field(props, "Riser mm", math.floor(p.h / p.steps * 10 + 0.5) / 10,
 					function(t)
 				local v = tonumber(t)
 				if v and v > 0 then
+					S.stair_riser = nil
 					set(i.def, {ints = {steps = math.max(1, math.min(200,
 							math.floor(p.h / v + 0.5)))}})
 				end
