@@ -195,8 +195,9 @@ return function(doc)
 					return false
 				end},
 		{function() return click("A switch for it: in 2D (F1), pick " ..
-				"Door/window (I), set Kind to Switch and click a wall. Then, " ..
-				"with the switch selected, press \"Link lamps\" in its panel, " ..
+				"Door/window (I), set Kind to Switch and click a wall. Then " ..
+				"click the switch to select it, press \"Link lamps\" in its " ..
+				"panel, " ..
 				"click the lamp and press Done linking.") .. props() end,
 				function()
 					for _, sw in ipairs(instances(5)) do

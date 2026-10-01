@@ -3531,14 +3531,7 @@ do
 			{op = "create", ent = {id = inst, type = "instance",
 					ints = {def = def, host = wall, along = math.floor(along + 0.5),
 					sill = d.sill, flip = side == "right" and 1 or 0}}},
-		}, function(err)
-			-- What was put in is what is selected
-			if err == "" then
-				S.sel = {[S.real[inst]] = "instance"}
-				S.primary = S.real[inst]
-				M.refresh_panels()
-			end
-		end)
+		})
 	end
 
 	-- Copies of the selected instances next to them: linked ones share the
@@ -6261,10 +6254,21 @@ do
 				end
 			end
 		elseif S.tool == "hosted" then
+			-- **What is put in is not selected** (user, the tutorial: the
+			-- door's properties hid the Kind of the next one). One clicked
+			-- is, for its properties; any other click lets go of it.
 			local s = pick_surface()
-			if s and s.kind == "wall" and doc.can("edit") then
+			local e = s and s.kind == "instance" and doc.ents[s.id]
+			S.sel, S.sel_face, S.primary = {}, {}, nil
+			if e and e.ints.host ~= 0 then
+				S.sel[s.id] = "instance"
+				S.sel_face[s.id] = s.side
+				S.primary = s.id
+				palette_follows({kind = "instance", id = s.id, side = s.side})
+			elseif s and s.kind == "wall" and doc.can("edit") then
 				add_hosted(s.id, s.x, s.z, s.side)
 			end
+			refresh_panels()
 		elseif S.tool == "voxel" then
 			voxel_edit(S.ctrl, S.shift)
 		elseif S.tool == "wall" or S.tool == "room" then
