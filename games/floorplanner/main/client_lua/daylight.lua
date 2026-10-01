@@ -300,7 +300,12 @@ function M.pbr_render_path(rp)
 	rp:SetShaderParameter("TonemapExposureBias", 1.0)
 	rp:SetShaderParameter("TonemapMaxWhite", 2.0)
 	rp:SetShaderParameter("AutoExposureAdaptRate", 0.6)
-	rp:SetShaderParameter("AutoExposureLumRange", magic.Vector2(0.003, 100.0))
+	-- **The meter's top** (user: snow in sunlight with some specular in
+	-- saturation): a frame metered over 7 is exposed as if it were 7, so
+	-- that a sunlit snow field is near white and its sheen past the tone
+	-- map's white. Picked off a ladder of 3.5, 7 and 12 under an evening
+	-- sun: 3.5 blew out the snow's shadows too, 12 left it grey.
+	rp:SetShaderParameter("AutoExposureLumRange", magic.Vector2(0.003, 7.0))
 	rp:SetShaderParameter("AutoExposureMiddleGrey", 0.18)
 	return rp
 end

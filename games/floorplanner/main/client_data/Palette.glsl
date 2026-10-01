@@ -321,20 +321,43 @@ void Surface(vec3 p, inout vec3 n, out vec3 albedo, out float spec, out float po
         // Dry, bare soil shows in places
         float bare = dry * smoothstep(0.62, 0.75, Fbm(vec3(g * 0.6, 4.4)));
         nat = mix(nat, vec3(0.42, 0.36, 0.29) * (0.9 + 0.2 * fine), bare);
-        // Snow: a sparse glint of a crystal, where one is a pixel or more
-        nat += vec3(0.3) * snow * blade_seen *
-                step(0.995, Hash3(vec3(floor(bp), 2.0)));
         // The blades lean every way, which breaks up the light
-        float tilt = (1.0 - snow * 0.8) * (1.0 - bare);
+        float tilt = (1.0 - snow) * (1.0 - bare);
         n = normalize(n + tilt * vec3(
                 (Noise3(vec3(bp, 11.0)) - 0.5) * 0.7 * blade_seen +
                 (Noise3(vec3(fp, 13.0)) - 0.5) * 0.4 * fine_seen, 0.0,
                 (Noise3(vec3(bp, 17.0)) - 0.5) * 0.7 * blade_seen +
                 (Noise3(vec3(fp, 19.0)) - 0.5) * 0.4 * fine_seen));
-        // No sheen: as rough as this, the highlight would be the whole
-        // lawn
+        // No sheen on grass: as rough as this, the highlight would be the
+        // whole lawn
         roughness = 1.0;
         spec = 0.0;
+        if (snow > 0.5) {
+            // Snow (user: brighter and more specular), lit as vanilla's
+            // PBR snow is (extensions/luanti_client/surface.lua) but not
+            // in its blocks: near white, a broad sheen, and round crystals
+            // a few millimetres across, one in cells of 1 cm here and
+            // there, each turned a little its own way and glossy, so that
+            // some catch the sun from anywhere; gone where one is under a
+            // pixel. Turned a little and to the sun's side: turned away
+            // from it, they read as dark specks. No drifts: the sheen over a
+            // gently tilted surface was bands.
+            nat = min(base * 1.15, vec3(0.97)) * (0.97 + 0.03 * mottle);
+            vec2 sc = g * 100.0;
+            vec2 cell = floor(sc);
+            vec2 at = 0.25 + 0.5 * vec2(Hash3(vec3(cell, 3.0)),
+                    Hash3(vec3(cell, 5.0)));
+            float rad = 0.2 + 0.15 * Hash3(vec3(cell, 9.0));
+            float facet = (1.0 - smoothstep(0.4, 0.8, length(fwidth(sc)))) *
+                    step(Hash3(vec3(cell, 7.0)), 0.15) *
+                    (1.0 - smoothstep(rad * 0.7, rad, length(fract(sc) - at)));
+            vec2 turn = vec2(Hash3(vec3(cell, 41.0)), Hash3(vec3(cell, 67.0))) *
+                    2.0 - 1.0;
+            turn *= sign(dot(turn, cSunToward.xz) + 1e-4);
+            n = normalize(n + facet * 0.15 * vec3(turn.x, 0.0, turn.y));
+            roughness = mix(0.7, 0.1, facet);
+            spec = mix(0.25, 1.0, facet);
+        }
         refl = 0.0;
     } else {
         // Paneling: boards `scale` wide, at the angle from the plane's first
