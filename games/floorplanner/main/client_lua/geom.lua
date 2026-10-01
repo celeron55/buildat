@@ -23,11 +23,18 @@ local function cross(ax, az, bx, bz)
 end
 
 -- How far a wall's two faces are from its a->b line: (left, right)
-function M.offsets(thickness, justify)
+-- justify 3 is custom (user, 2026-10-02): the wall's middle `shift` mm
+-- to the left of the line, or to its right where negative, by any amount:
+-- past half the thickness the line is off the wall, a face's distance
+-- negative
+function M.offsets(thickness, justify, shift)
 	if justify == 1 then
 		return thickness, 0
 	elseif justify == 2 then
 		return 0, thickness
+	elseif justify == 3 then
+		local s = shift or 0
+		return thickness / 2 + s, thickness / 2 - s
 	end
 	return thickness / 2, thickness / 2
 end
@@ -60,7 +67,7 @@ function M.wall_outlines(walls)
 		local l = len(w.bx - w.ax, w.bz - w.az)
 		if l > 0 then
 			local ux, uz = (w.bx - w.ax) / l, (w.bz - w.az) / l
-			local lo, ro = M.offsets(w.thickness, w.justify)
+			local lo, ro = M.offsets(w.thickness, w.justify, w.shift)
 			for _, e in ipairs({"a", "b"}) do
 				local key = (w.group or 0) .. ":" .. w[e .. "_node"]
 				at[key] = at[key] or {}
@@ -554,6 +561,12 @@ do
 	near(p[4][1], 50, "L inner x")
 	near(p[4][2], 50, "L inner z")
 	near(M.area(p), 1000 * 100 - 50 * 50 + 50 * 50 - 50 * 50 + 50 * 50, "L area")
+	do
+		local lo, ro = M.offsets(120, 3, 200)
+		assert(lo == 260 and ro == -140, "a custom justify off the wall")
+		lo, ro = M.offsets(120, 3, -60)
+		assert(lo == 0 and ro == 120, "a custom justify is right's at -60")
+	end
 	assert(#M.triangulate(p) == 2, "a wall's outline is two triangles")
 
 	-- A T: the stem ends at the through walls' face, the node fills the rest

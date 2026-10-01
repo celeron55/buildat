@@ -41,7 +41,8 @@ local VIEW_NAMES = {["2d"] = "2D", ["3d"] = "3D", walk = "Walk"}
 -- Walking: the body's radius, how high a step it takes, its height, mm.
 -- A step takes a stair's riser, which building codes cap near 220 mm.
 local BODY_R, STEP, HEAD = 250, 250, 1750
-local JUSTIFY_CHOICES = {{"centered", 0}, {"left", 1}, {"right", 2}}
+local JUSTIFY_CHOICES = {{"centered", 0}, {"left", 1}, {"right", 2},
+	{"custom", 3}}
 -- What a definition is, as main.cpp's DefKind
 local KIND = {box = 0, voxel = 1, opening = 2, door = 3, window = 4,
 	switch = 5, stairs = 6}
@@ -74,6 +75,7 @@ local S = {
 	-- New walls
 	thickness = 120, -- a new wall's, mm: a 90 mm stud and a board on each side (user)
 	justify = 0,
+	shift = 0,      -- a custom justify's, mm left of the line
 	height = 0,
 	hang = 0,
 	room_walls = true, -- a room drawn gets walls on its edges
@@ -951,7 +953,7 @@ local function build_room_data()
 			offsets[i] = 0
 			if wid then
 				local w = wall_data[wid]
-				local lo, ro = geom.offsets(w.thickness, w.justify)
+				local lo, ro = geom.offsets(w.thickness, w.justify, w.shift)
 				-- The room is left of its counter-clockwise edges
 				offsets[i] = forward and lo or ro
 			end
@@ -993,7 +995,7 @@ local function wall_frame(id)
 		return nil
 	end
 	local ux, uz = (w.bx - w.ax) / l, (w.bz - w.az) / l
-	local lo, ro = geom.offsets(w.thickness, w.justify)
+	local lo, ro = geom.offsets(w.thickness, w.justify, w.shift)
 	return {ax = w.ax, az = w.az, ux = ux, uz = uz, nx = -uz, nz = ux,
 			lo = lo, ro = ro, len = l, yaw = math.deg(math.atan2(-uz, ux))}
 end
@@ -2442,7 +2444,7 @@ local function build_layout(seen_voxels, wells)
 		local bx, bz = node_pos(w.b)
 		wall_data[e.id] = {ax = ax, az = az, bx = bx, bz = bz,
 				a_node = w.a, b_node = w.b, thickness = w.thickness,
-				justify = w.justify,
+				justify = w.justify, shift = w.shift,
 				-- Joined with what is at its height: one that hangs clear
 				-- of the floor apart from the standing ones, but one hung
 				-- from the ceiling all the way down is standing (user:
@@ -3530,6 +3532,75 @@ function M.voxel_plane_cell(id, a)
 	return c
 end
 
+-- **Where along an edge a point snaps** (user, 2026-10-02: a corner put
+-- on a wall could not make the wall drawn to it straight), the edge from
+-- (ux, uz) to (vx, vz), l long, the pointer at et along it: where a line
+-- from the point drawn from -- and, drawing a room, from its first
+-- corner, which the last wall goes back to -- at a right angle crosses
+-- it; else at the angle step (45 degrees, or Shift's); within the snap
+-- radius r of the pointer each. Else where a grid line crosses it, the
+-- nearest; else the grid's steps from its u end.
+function M.along_edge(ux, uz, vx, vz, l, et, from, r)
+	local ex, ez = (vx - ux) / l, (vz - uz) / l
+	local anchors = {}
+	if from then
+		anchors[#anchors + 1] = from
+	end
+	local first = S.tool == "room" and S.corners and S.corners[1]
+	if first and not (from and first.x == from.x and first.z == from.z) then
+		anchors[#anchors + 1] = first
+	end
+	-- Where the line from p at angle a (degrees) crosses the edge's line
+	local function cross_at(p, a)
+		local dx, dz = math.cos(math.rad(a)), math.sin(math.rad(a))
+		local den = ex * dz - ez * dx
+		if math.abs(den) < 1e-9 then
+			return nil
+		end
+		return ((p.x - ux) * dz - (p.z - uz) * dx) / den
+	end
+	local steps = {90}
+	if S.shift or S.touch_angle then
+		-- (free: none)
+		steps[2] = ANGLE_STEPS[S.angle] or nil
+	else
+		steps[2] = 45
+	end
+	for _, step in ipairs(steps) do
+		local best, bd = nil, r
+		for _, p in ipairs(anchors) do
+			for k = 0, math.floor(360 / step) - 1 do
+				local t = cross_at(p, k * step)
+				if t and t > 0 and t < l and math.abs(t - et) <= bd then
+					best, bd = t, math.abs(t - et)
+				end
+			end
+		end
+		if best then
+			return best
+		end
+	end
+	-- The grid's lines, x and z, where they cross the edge
+	local g = grid_step()
+	local best, bd = nil, math.huge
+	local px, pz = ux + ex * et, uz + ez * et
+	for _, axis in ipairs({{ex, ux, px}, {ez, uz, pz}}) do
+		local d, o, at = axis[1], axis[2], axis[3]
+		if math.abs(d) > 1e-6 then
+			for _, k in ipairs({math.floor(at / g), math.floor(at / g) + 1}) do
+				local t = (k * g - o) / d
+				if t > 0 and t < l and math.abs(t - et) < bd then
+					best, bd = t, math.abs(t - et)
+				end
+			end
+		end
+	end
+	if best then
+		return best
+	end
+	return geom.snap(et, g)
+end
+
 -- Where a point the cursor gives lands: on a node, on an edge, or on the
 -- grid. from: the point a segment is drawn from, for the angle snap.
 -- Returns x, z and what it landed on: {node = id} or {edge = e, t = mm}.
@@ -3546,11 +3617,11 @@ local function snapped_point(from, except)
 	end
 	local e, _, _, et = nearest_edge(x, z, r, except)
 	if e then
-		-- Along the edge, the distance from its u end is what snaps
 		local ux, uz = node_pos(e.u)
 		local vx, vz = node_pos(e.v)
 		local l = geom.len(vx - ux, vz - uz)
-		local t = math.max(1, math.min(l - 1, geom.snap(et, grid_step())))
+		local t = M.along_edge(ux, uz, vx, vz, l, et, from, r)
+		t = math.max(1, math.min(l - 1, t))
 		return math.floor(ux + (vx - ux) * t / l + 0.5),
 				math.floor(uz + (vz - uz) * t / l + 0.5), {edge = e, t = t}
 	end
@@ -3723,7 +3794,8 @@ do
 	end
 
 	local function wall_fields(w)
-		return {thickness = w.thickness, justify = w.justify, height = w.height,
+		return {thickness = w.thickness, justify = w.justify, shift = w.shift,
+				height = w.height,
 				hang = w.hang, mat_left = w.mat_left, mat_right = w.mat_right,
 				mat_core = w.mat_core}
 	end
@@ -3826,6 +3898,7 @@ do
 		local ph = doc.placeholder()
 		add_op(b, "create", {id = ph, type = "wall", ints = {
 				a = a, b = bnode, thickness = S.thickness, justify = S.justify,
+				shift = S.shift,
 				height = S.height, hang = S.hang,
 				mat_left = face_material(mx + nx * d, mz + nz * d),
 				mat_right = face_material(mx - nx * d, mz - nz * d)}})
@@ -5606,6 +5679,9 @@ local function build_props()
 		panel.dropdown(props, "Justify", JUSTIFY_CHOICES, w.justify, function(v)
 			set(sel.id, {ints = {justify = v}})
 		end)
+		if w.justify == 3 then
+			int_field(sel.id, "Offset mm (+ left)", "shift", w.shift)
+		end
 		panel.check(props, "Hangs from the ceiling", w.hang == 1, function()
 			set(sel.id, {ints = {hang = 1 - w.hang}})
 		end)
@@ -5773,6 +5849,12 @@ local function build_props()
 			S.justify = v
 			refresh_panels()
 		end)
+		if S.justify == 3 then
+			panel.field(props, "Offset mm (+ left)", S.shift, function(t)
+				local v = num(t)
+				if v then S.shift = math.max(-10000, math.min(10000, v)) end
+			end)
+		end
 		panel.check(props, "Hang from the ceiling", S.hang == 1, function()
 			S.hang = 1 - S.hang
 			refresh_panels()
