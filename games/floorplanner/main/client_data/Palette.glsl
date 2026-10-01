@@ -559,6 +559,14 @@ bool RoomCube()
     return RoomTexel(0.0).a > 0.5;
 }
 
+// A probe's light as a number: what is not one, or past half float's
+// range, is none (the probes see their own light, and one bad texel
+// would go round and fill the rooms)
+vec3 Finite(vec3 c)
+{
+    return max(c.r, max(c.g, c.b)) < 60000.0 && c == c ? max(c, vec3(0.0)) : vec3(0.0);
+}
+
 // A length in the room table: 16 bits, 4 mm a step from -131 m; and an
 // axis's component, 16 bits from -1 to 1
 float Decode16(float hi, float lo)
@@ -621,8 +629,7 @@ vec3 ProbeSample(vec3 d, float row)
     vec2 t = clamp(vec2(0.5 + 0.5 * dot(d, r) * k, 0.5 - 0.5 * dot(d, u) * k),
             0.5 / 32.0, 1.0 - 0.5 / 32.0);
     vec2 uv = vec2((face + t.x) / 6.0, (row + t.y) / PROBE_ROWS);
-    vec3 c = texture2D(sNormalMap, uv).rgb;
-    return c == c ? max(c, vec3(0.0)) : vec3(0.0);
+    return Finite(texture2D(sNormalMap, uv).rgb);
 }
 
 // **A probe's light put back on the room's box** (user, 2026-10-01: the
@@ -634,7 +641,10 @@ vec3 ProbeSample(vec3 d, float row)
 // as sqrt(L / 16)) -- is the patch of the box where the cell's middle
 // leaves it, of the area the cell's solid angle makes there, and lights
 // the surface at x, facing n, as a disc does: L A cos cos / (pi r^2 + A),
-// the ambient term that is. x and n in the box's frame (along, up, across).
+// the ambient term that is. The discs' shares are at most all of the
+// surface's view: near a corner they would add up to more, and the light
+// the probes see of it would grow round and round. x and n in the box's
+// frame (along, up, across).
 vec3 ProbeLight(float row, vec3 x, vec3 n, vec3 lo, vec3 hi, vec2 U)
 {
     vec4 q0 = TableTexel(row, 6.0);
@@ -645,6 +655,7 @@ vec3 ProbeLight(float row, vec3 x, vec3 n, vec3 lo, vec3 hi, vec2 U)
     vec3 q = vec3(dot(qd, U), Decode16(q1.r, q1.g), dot(qd, vec2(-U.y, U.x)));
     float v = (row + 0.5) / PROBE_ROWS;
     vec3 sum = vec3(0.0);
+    float shares = 0.0;
     for (int i = 0; i < 24; i++) {
         float fi = float(i);
         float face = floor(fi / 4.0);
@@ -669,12 +680,12 @@ vec3 ProbeLight(float row, vec3 x, vec3 n, vec3 lo, vec3 hi, vec2 U)
         float ce = max(dot(w, nh) / rl, 0.0);
         float cr = max(-dot(w, n) / rl, 0.0);
         vec3 L = texture2D(sEmissiveMap, vec2((fi + 0.5) / 24.0, v)).rgb;
-        L = cRoomCubes > 1.5 ? L * L * 16.0 : L;
-        if (!(L.r == L.r && L.g == L.g && L.b == L.b))
-            L = vec3(0.0);
-        sum += L * (A * ce * cr / (3.14159265 * r2 + A));
+        L = Finite(cRoomCubes > 1.5 ? L * L * 16.0 : L);
+        float share = A * ce * cr / (3.14159265 * r2 + A);
+        sum += L * share;
+        shares += share;
     }
-    return max(sum, vec3(0.0));
+    return sum / max(shares, 1.0);
 }
 
 // The light round a surface at p, facing n, in a room with its probes:
@@ -747,6 +758,10 @@ void PS()
 
     vec3 eye = normalize(cCameraPosPS - vWorldPos.xyz);
     float fresnel = refl * (0.25 + 0.75 * pow(1.0 - max(dot(eye, normal), 0.0), 5.0));
+    // What is reflected is not also scattered: a white surface that was
+    // both sent the probes more than they saw of it, round and round
+    if (cPlanLook < 0.5)
+        albedo *= 1.0 - fresnel;
     vec3 reflected = Environment(reflect(-eye, normal)) * fresnel;
     // In a room with its probes: the light round the surface from what
     // they see, in place of the sky's share and the bounce, and with drawn

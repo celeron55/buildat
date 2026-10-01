@@ -2050,6 +2050,12 @@ function M.cpu_cubes(tx, h, tz, light)
 		assert(image:SetSize(6 * K * K, M.PROBE_ROWS, 4), "cpu cubes image")
 		local texture = magic.Texture2D:new()
 		texture:SetNumLevels(1)
+		-- Held by the cache: the materials let go of it under the cube
+		-- mode, and one nothing holds is freed under the next SetData
+		assert(magic.cache:AddManualResource(image, "fp_cpu_cubes_image"),
+				"cpu cubes image in the cache")
+		assert(magic.cache:AddManualResource(texture, "fp_cpu_cubes"),
+				"cpu cubes in the cache")
 		M.cpu_cube_image, M.cpu_cube_texture = image, texture
 		M.kept[#M.kept + 1] = image
 		M.kept[#M.kept + 1] = texture

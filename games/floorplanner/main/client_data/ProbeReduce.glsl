@@ -10,7 +10,7 @@
 // surface takes its indirect light from (Palette.glsl's RoomAmbient).
 // simplified: the texels are not weighted by the solid angle they cover,
 // so a face's corners count a little too much. A sample that is not a
-// number (a face not drawn yet) is left out.
+// number (a face not drawn yet), or past half float's range, is left out.
 #include "Uniforms.glsl"
 #include "Samplers.glsl"
 #include "Transform.glsl"
@@ -47,7 +47,8 @@ void PS()
         for (int i = 0; i < SIDE; i++) {
             vec2 at = (tile + vec2(float(2 * i + 1), float(2 * j + 1))) / ATLAS;
             vec3 c = texture2D(sDiffMap, at).rgb;
-            if (!(c.r == c.r && c.g == c.g && c.b == c.b))
+            if (!(c.r == c.r && c.g == c.g && c.b == c.b &&
+                    max(c.r, max(c.g, c.b)) < 60000.0))
                 continue;
             sum += c;
             n += 1.0;

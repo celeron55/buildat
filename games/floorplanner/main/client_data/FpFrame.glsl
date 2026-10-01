@@ -61,7 +61,7 @@ vec3 ProbeWhite(float row, vec3 outdoor)
     for (int i = 0; i < 24; i++)
         c += texture2D(sSpecMap, vec2((float(i) + 0.5) / 24.0,
                 (row + 0.5) / PROBE_ROWS)).rgb;
-    return c == c && dot(c, LUM) > 1e-6 ? c / dot(c, LUM) : outdoor;
+    return c == c && dot(c, LUM) > 1e-6 && dot(c, LUM) < 1e6 ? c / dot(c, LUM) : outdoor;
 }
 // The eye's white's way to the scene's: a time constant of a second
 const float WHITE_RATE = 1.0;
