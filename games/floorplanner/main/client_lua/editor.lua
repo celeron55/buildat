@@ -7793,15 +7793,13 @@ do
 				S.typed = ""
 				return
 			end
-			-- **A right click on a door's or a window's leaf opens or shuts
-			-- it** (user): in 3D and walking, a right press that the mouse
-			-- then hardly moves -- orbiting and turning are the right drag
+			-- **A right click uses what it is on** (user), as the use key
+			-- does (M.use_pointed): in 3D and walking, a right press that the
+			-- mouse then hardly moves -- orbiting and turning are the right
+			-- drag
 			if not over_ui() then
-				local s = pick_surface()
-				S.right_click = {moved = 0,
-						leaf = s and s.side == "mat_leaf" and s.id or nil,
-						lamp = s and s.kind == "instance" and is_lamp(s.id) and
-						s.id or nil}
+				local id, kind = M.use_pointed()
+				S.right_click = {moved = 0, use = id, kind = kind}
 			end
 			if S.view == "2d" and not over_ui() then
 				-- Into 3D as if it had been 3D all along ([FP_ORBIT_2D]): the
@@ -7871,23 +7869,13 @@ do
 		if button == magic.MOUSEB_RIGHT and S.right_click then
 			local rc = S.right_click
 			S.right_click = nil
-			if rc.leaf and rc.moved < 5 and doc.ents[rc.leaf] then
+			if rc.use and rc.moved < 5 and doc.ents[rc.use] then
 				S.orbit, S.pan3d = nil, nil
 				if S.looking then
 					S.looking = false
 				end
 				magic.input:SetMouseMode(magic.MM_ABSOLUTE)
-				M.toggle_open(rc.leaf)
-				return
-			end
-			-- And on a lamp switches it (user)
-			if rc.lamp and rc.moved < 5 and doc.ents[rc.lamp] then
-				S.orbit, S.pan3d = nil, nil
-				if S.looking then
-					S.looking = false
-				end
-				magic.input:SetMouseMode(magic.MM_ABSOLUTE)
-				M.flip_lamps({rc.lamp})
+				M.use_id(rc.use, rc.kind)
 				return
 			end
 			-- **A right click on what has no right click action clears the
@@ -8351,49 +8339,58 @@ do
 		end
 		M.flip_lamps(lamps)
 	end
+	M.flip_switch = flip_switch
 
-	-- The use key: a door or window under the cursor opens or closes. For an
-	-- editor for everybody; a viewer opens it for themselves.
-	-- What the use key would work: a door, a window or a switch under the
-	-- cursor, or with nothing under it the switch selected. Returns its id and
-	-- kind, or nil.
-	use_target = function()
+	-- **What can be used**, by the use key and by a right click alike
+	-- (user, 2026-10-02): a door, a window, a switch or a lamp. An editor's
+	-- use is everybody's; a viewer's is their own.
+	-- What is under the pointer to use -- all of a door or a window, its
+	-- frame and its hole too: an open door is shut by pointing through
+	-- it. Its id and kind, or nil.
+	function M.use_pointed()
 		local s = pick_surface(true)
-		local id = s and s.kind == "instance" and s.id
-		local p = S.primary and doc.ents[S.primary]
-		if not id and p and p.type == "instance" and
-				doc.ents[p.ints.def].ints.kind == KIND.switch then
-			id = S.primary
-		end
-		local e = id and doc.ents[id]
+		local e = s and s.kind == "instance" and doc.ents[s.id]
 		if not e then
 			return nil
 		end
 		local kind = doc.ents[e.ints.def].ints.kind
 		if kind == KIND.switch or kind == KIND.door or kind == KIND.window then
-			return id, kind
+			return s.id, kind
 		end
 		-- A lamp on its own (user: as a door or a switch)
-		if is_lamp(id) then
-			return id, "lamp"
+		if is_lamp(s.id) then
+			return s.id, "lamp"
 		end
 		return nil
 	end
-
-	use = function()
-		local id, kind = use_target()
-		if not id then
-			return
+	-- And for the use key, with nothing under the pointer, the switch
+	-- selected: one being linked to its lamps is tried without pointing
+	use_target = function()
+		local id, kind = M.use_pointed()
+		if id then
+			return id, kind
 		end
+		local p = S.primary and doc.ents[S.primary]
+		if p and p.type == "instance" and
+				doc.ents[p.ints.def].ints.kind == KIND.switch then
+			return S.primary, KIND.switch
+		end
+		return nil
+	end
+	function M.use_id(id, kind)
 		if kind == KIND.switch then
 			flip_switch(id)
-			return
-		end
-		if kind == "lamp" then
+		elseif kind == "lamp" then
 			M.flip_lamps({id})
-			return
+		else
+			M.toggle_open(id)
 		end
-		M.toggle_open(id)
+	end
+	use = function()
+		local id, kind = use_target()
+		if id then
+			M.use_id(id, kind)
+		end
 	end
 
 	-- Shut to 90 degrees open, anything open to shut: the plan's for an
@@ -8895,6 +8892,25 @@ do
 		end
 		return e.type .. " " .. id
 	end
+	M.name_of = name_of
+	-- What using a thing does, and its highlight in the right button's
+	-- colour: a door's or a window's leaves, the rest whole
+	function M.use_text(id, kind)
+		if kind == KIND.switch then
+			local any = false
+			for _, l in ipairs(doc.ents[id].lists.lamps) do
+				any = any or lamp_on(l)
+			end
+			return "turn " .. name_of(id) .. "'s lamps " .. (any and "off" or "on")
+		elseif kind == "lamp" then
+			return "turn " .. name_of(id) .. (lamp_on(id) and " off" or " on")
+		end
+		return (open_amount(id) > 0 and "close " or "open ") .. name_of(id)
+	end
+	function M.use_hl(id, kind)
+		return {kind = (kind == KIND.switch or kind == "lamp") and "instance" or
+				"leaves", id = id, col = RIGHT}
+	end
 
 	local function mat_text(m)
 		local e = m and m ~= 0 and doc.ents[m]
@@ -8922,16 +8938,11 @@ do
 					"into the crosshair to dig and place (Esc: back)",
 					right = walking and "drag: turn" or nil,
 					middle = walking and "drag: walk" or nil}
-			-- A click on a door's leaf opens or shuts it (mouse_up)
-			local s = walking and pick_surface()
-			if s and s.side == "mat_leaf" and doc.ents[s.id] then
-				g.right = "click: " .. (open_amount(s.id) > 0 and "close " or
-						"open ") .. name_of(s.id) .. "; drag: turn"
-				g.hl[1] = {kind = "leaves", id = s.id, col = RIGHT}
-			elseif s and s.kind == "instance" and is_lamp(s.id) then
-				g.right = "click: switch " .. name_of(s.id) ..
-						(lamp_on(s.id) and " off" or " on") .. "; drag: turn"
-				g.hl[1] = {kind = "instance", id = s.id, col = RIGHT}
+			-- A right click uses what it is on (mouse_up)
+			local uid, ukind = M.use_pointed()
+			if walking and uid then
+				g.right = "click: " .. M.use_text(uid, ukind) .. "; drag: turn"
+				g.hl[1] = M.use_hl(uid, ukind)
 			end
 			return g
 		end
@@ -8951,15 +8962,11 @@ do
 			g.right = (s or not next(room_data)) and
 					"drag: orbit round what the pointer is on" or
 					"drag: orbit round the middle of the plan"
-			-- A click on a door's leaf opens or shuts it (mouse_up)
-			if s and s.side == "mat_leaf" and doc.ents[s.id] then
-				g.right = "click: " .. (open_amount(s.id) > 0 and "close " or
-						"open ") .. name_of(s.id) .. "; " .. g.right
-				hl({kind = "leaves", id = s.id, col = RIGHT})
-			elseif s and s.kind == "instance" and is_lamp(s.id) then
-				g.right = "click: switch " .. name_of(s.id) ..
-						(lamp_on(s.id) and " off" or " on") .. "; " .. g.right
-				hl({kind = "instance", id = s.id, col = RIGHT})
+			-- A right click uses what it is on (mouse_up)
+			local uid, ukind = M.use_pointed()
+			if uid then
+				g.right = "click: " .. M.use_text(uid, ukind) .. "; " .. g.right
+				hl(M.use_hl(uid, ukind))
 			end
 			g.middle = "drag: pan the view"
 		end
@@ -8968,19 +8975,7 @@ do
 		-- The use key
 		local uid, ukind = use_target()
 		if uid then
-			local what
-			if ukind == KIND.switch then
-				local any = false
-				for _, l in ipairs(doc.ents[uid].lists.lamps) do
-					any = any or lamp_on(l)
-				end
-				what = "switch " .. name_of(uid) .. "'s lamps " ..
-						(any and "off" or "on")
-			elseif ukind == "lamp" then
-				what = "switch " .. name_of(uid) .. (lamp_on(uid) and " off" or " on")
-			else
-				what = (open_amount(uid) > 0 and "close " or "open ") .. name_of(uid)
-			end
+			local what = M.use_text(uid, ukind)
 			g.use = what
 			-- (not with no tool, where only what the right button uses
 			-- shows, in its colour: user, 2026-10-02)
@@ -8990,8 +8985,7 @@ do
 			if S.captured and S.tool ~= "voxel" then
 				g.right = what
 				-- The right button is the use key there: its colour
-				hl({kind = (ukind == KIND.switch or ukind == "lamp") and
-						"instance" or "leaves", id = uid, col = RIGHT})
+				hl(M.use_hl(uid, ukind))
 			end
 		end
 		if S.calib then
