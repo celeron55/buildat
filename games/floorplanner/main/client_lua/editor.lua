@@ -5969,6 +5969,7 @@ do
 				local bt = panel.button(r, S.binding == b.action and "Press a key..." or
 						keys.name(b.action), function()
 					S.binding = b.action
+					S.binding_t = buildat.get_time_us()
 					keys_page()
 				end, S.binding == b.action, 110)
 				bt:SetFixedWidth(110)
@@ -7913,7 +7914,9 @@ do
 	-- A key being bound takes the next key ([the keys page])
 	function M.capture_key(key)
 		local action = S.binding
-		if not action then
+		-- Not the Enter or Space that pressed the key's button itself,
+		-- which reaches here after the UI took it
+		if not action or buildat.get_time_us() - (S.binding_t or 0) < 100000 then
 			return false
 		end
 		S.binding = nil
@@ -7974,7 +7977,8 @@ do
 		if key == magic.KEY_ESCAPE then
 			M.escape()
 		elseif S.paused then
-			-- The pause menu takes the keys
+			-- The pause menu takes the keys: Up and Down go through it
+			M.menu_key(key)
 		elseif is("noclip") and S.view == "walk" then
 			S.walk.noclip = not S.walk.noclip
 			doc.notice(S.walk.noclip and "Noclip: walls do not stop you; " ..
@@ -9367,6 +9371,11 @@ end
 -- and texts are hidden until a key, a click or a touch; and, when it
 -- recalls its moment, the light is its day and minute. Selecting and
 -- editing go on as in 3D. Another view leaves it.
+-- Up and Down through the pause menu's page; true when taken
+function M.menu_key(key)
+	return pause_win ~= nil and panel.menu_key(pause_win, key)
+end
+
 function M.viewports()
 	local list = {}
 	for _, e in ipairs(doc.of_type("viewport")) do
@@ -9494,6 +9503,11 @@ function M.update(dt)
 	end
 	M.apply_daylight()
 	M.probes_tick()
+	-- A menu made since: its buttons for the keyboard
+	if pause_win and pause_win ~= M.keyed_win then
+		M.keyed_win = pause_win
+		panel.keyboard_menu(pause_win)
+	end
 	if S.panels_stale and not doc.typing() then
 		refresh_panels()
 	end

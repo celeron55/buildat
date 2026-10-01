@@ -1131,6 +1131,10 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		if editor and editor.nudge(key, event_data:GetInt("Qualifiers") % 2 == 1) then
 			return
 		end
+		-- Up and Down out of a menu's text field to the item next to it
+		if editor and editor.menu_key(key) then
+			return
+		end
 		-- Esc in a field drops what was typed: the panel comes back with
 		-- what it had. In the join dialog, before there is an editor, it
 		-- is the dialog's cancel, which is leaving.

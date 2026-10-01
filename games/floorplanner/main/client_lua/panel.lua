@@ -210,6 +210,66 @@ function M.press(ux, uy)
 	return true
 end
 
+-- **A menu by the keyboard** (user, 2026-10-01): a window's buttons take
+-- the focus, so Tab goes through them and its fields, Enter or Space
+-- presses the one with it (Urho3D's), and M.menu_key's Up and Down go to
+-- the one before or after; the first button has it to start with. Only
+-- for windows that are menus: a toolbar button kept focused would be
+-- pressed again by the next Space.
+local function menu_items(e, out)
+	if not e.visible then
+		return out
+	end
+	local t = e:GetTypeName()
+	if (t == "Button" and e.enabled) or t == "LineEdit" then
+		out[#out + 1] = e
+		if t == "Button" then
+			-- A dropdown's or a checkbox's insides are the button's
+			return out
+		end
+	end
+	for i = 0, e:GetNumChildren() - 1 do
+		menu_items(e:GetChild(i), out)
+	end
+	return out
+end
+
+function M.keyboard_menu(win)
+	local items = menu_items(win, {})
+	local first = nil
+	for _, e in ipairs(items) do
+		if e:GetTypeName() == "Button" then
+			e:SetFocusMode(magic.FM_FOCUSABLE)
+			first = first or e
+		end
+	end
+	if first then
+		first:SetFocus(true)
+	end
+end
+
+-- Up or Down in win: the focus to the item before or after. True when
+-- the key was taken.
+function M.menu_key(win, key)
+	if key ~= magic.KEY_UP and key ~= magic.KEY_DOWN then
+		return false
+	end
+	local items = menu_items(win, {})
+	if #items == 0 then
+		return false
+	end
+	local at = 0
+	for i, e in ipairs(items) do
+		if e:HasFocus() then
+			at = i
+		end
+	end
+	local d = key == magic.KEY_DOWN and 1 or -1
+	local i = at == 0 and 1 or (at - 1 + d) % #items + 1
+	items[i]:SetFocus(true)
+	return true
+end
+
 -- **A checkbox** (user): one thing on or off, ticked when on. The box and
 -- its text are one button, drawn without a button's frame.
 function M.check(parent, text, checked, on_click)
