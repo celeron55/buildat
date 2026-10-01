@@ -4311,17 +4311,27 @@ local function update_capture()
 	end
 end
 
+-- **The free camera and the walker are each their own** (user,
+-- 2026-10-01: a walking shot could not be taken again from the same place
+-- after an edit in 3D): M.update keeps the camera of the view in use --
+-- S.cam3d, and the walker's look in S.walk -- and a view gone back to
+-- takes its own again. The walker starts under the free camera the first
+-- time, and again by "Walk from here".
 local function set_view(v)
 	if v == "walk" and S.view ~= "walk" then
-		-- On the floor under the camera, or the plan's middle
-		if S.view == "3d" then
-			local x, z = S.pos.x * 1000, S.pos.z * 1000
-			S.walk.x, S.walk.z = x, z
-		else
-			S.walk.x, S.walk.z = S.cx, S.cz
+		if not S.walk.placed then
+			-- On the floor under the camera, or the plan's middle
+			if S.view == "3d" then
+				local x, z = S.pos.x * 1000, S.pos.z * 1000
+				S.walk.x, S.walk.z = x, z
+			else
+				S.walk.x, S.walk.z = S.cx, S.cz
+			end
+			S.walk.feet = 0
+			S.walk.yaw, S.walk.pitch = S.yaw, 0
+			S.walk.placed = true
 		end
-		S.walk.feet = 0
-		S.pitch = 0
+		S.yaw, S.pitch = S.walk.yaw, S.walk.pitch
 	end
 	-- A view starts at its pointer, so the view button can go on from it
 	if v ~= S.view then
@@ -4348,6 +4358,22 @@ local function set_view(v)
 	pieces_node.enabled = v ~= "2d"
 	update_capture()
 	refresh_panels()
+end
+
+-- A view the user picked: 3D takes its own camera back. "walk_here"
+-- puts the walker under the free camera first. (On M: the chunk is at
+-- Lua's limit of 200 locals.)
+function M.pick_view(v)
+	if v == "walk_here" then
+		S.walk.placed = false
+		v = "walk"
+	end
+	if v == "3d" and S.view ~= "3d" and S.cam3d then
+		local c = S.cam3d
+		S.pos = {x = c.x, y = c.y, z = c.z}
+		S.yaw, S.pitch = c.yaw, c.pitch
+	end
+	set_view(v)
 end
 
 local function set_tool(t)
@@ -4416,8 +4442,11 @@ local function build_toolbar()
 		views[i] = {VIEW_NAMES[v] .. (S.touch and "" or
 				" (" .. keys.name("view_" .. v) .. ")"), v}
 	end
+	if S.view == "3d" then
+		views[#views + 1] = {"Walk from here", "walk_here"}
+	end
 	place(function(parent)
-		return panel.dropdown(parent, nil, views, S.view, set_view, 40)
+		return panel.dropdown(parent, nil, views, S.view, M.pick_view, 40)
 	end)
 	-- The layout edited, and the window that picks another
 	local l = S.layout and doc.ents[S.layout]
@@ -7833,11 +7862,11 @@ do
 			S.plan_look = not S.plan_look
 			set_view(S.view)
 		elseif is("view_2d") then
-			set_view("2d")
+			M.pick_view("2d")
 		elseif is("view_3d") then
-			set_view("3d")
+			M.pick_view("3d")
 		elseif is("view_walk") then
-			set_view("walk")
+			M.pick_view("walk")
 		elseif is("turn_left") then
 			rotate_selection(angle_step())
 		elseif is("turn_right") then
@@ -9110,9 +9139,16 @@ end
 
 local function view_record()
 	local w = S.walk
+	-- and after them the free camera and the walker's look, each kept
+	-- while the other is in use
+	local c = S.cam3d or {x = S.pos.x, y = S.pos.y, z = S.pos.z, yaw = S.yaw,
+			pitch = S.pitch}
 	return string.format("%s;%s;%.1f;%.1f;%.1f;%.4f;%.4f;%.4f;%.3f;%.3f;" ..
-			"%.1f;%.1f;%.1f", S.view, tostring(S.layout or ""), S.cx, S.cz,
-			S.span, S.pos.x, S.pos.y, S.pos.z, S.yaw, S.pitch, w.x, w.z, w.feet)
+			"%.1f;%.1f;%.1f;%.4f;%.4f;%.4f;%.3f;%.3f;%.3f;%.3f;%d", S.view,
+			tostring(S.layout or ""), S.cx, S.cz,
+			S.span, S.pos.x, S.pos.y, S.pos.z, S.yaw, S.pitch, w.x, w.z, w.feet,
+			c.x, c.y, c.z, c.yaw, c.pitch, w.yaw or S.yaw, w.pitch or 0,
+			w.placed and 1 or 0)
 end
 
 -- Kept once a second when it changed; M.update calls it
@@ -9167,6 +9203,15 @@ function M.restore_view()
 	S.pos = {x = n[6], y = n[7], z = n[8]}
 	S.yaw, S.pitch = n[9], math.max(-90, math.min(90, n[10]))
 	S.walk.x, S.walk.z, S.walk.feet = n[11], n[12], n[13]
+	-- A record from before the two cameras were apart has none of these
+	local m = {}
+	for i = 14, 21 do
+		m[i] = tonumber(f[i])
+	end
+	if m[21] then
+		S.cam3d = {x = m[14], y = m[15], z = m[16], yaw = m[17], pitch = m[18]}
+		S.walk.yaw, S.walk.pitch, S.walk.placed = m[19], m[20], m[21] == 1
+	end
 	S.view_saved = view_record()
 	S.dirty = true
 	refresh_panels()
@@ -9210,6 +9255,13 @@ function M.update(dt)
 		end
 	end
 	move_camera(dt)
+	-- The camera of the view in use, kept for when it is gone back to
+	if S.view == "3d" then
+		S.cam3d = {x = S.pos.x, y = S.pos.y, z = S.pos.z, yaw = S.yaw,
+				pitch = S.pitch}
+	elseif S.view == "walk" then
+		S.walk.yaw, S.walk.pitch = S.yaw, S.pitch
+	end
 	place_cameras()
 	send_presence(dt)
 	stream_drag(dt)
