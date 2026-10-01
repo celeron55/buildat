@@ -5895,9 +5895,10 @@ do
 			client_settings_page()
 		end)
 		-- How the 3D view and walking are lit ([FP_DAYLIGHT])
-		panel.dropdown(w, "3D lighting", {{"PBR: the plan's sun and sky", "pbr"},
-				{"PBR with room cube maps: reflections, more light", "pbr_cube"},
-				{"Unlit: plain, and lighter", "unlit"}}, S.lighting, function(v)
+		-- Lightest first
+		panel.dropdown(w, "3D lighting", {{"Unlit: plain, and lighter", "unlit"},
+				{"PBR: the plan's sun and sky", "pbr"},
+				{"PBR + room cube maps", "pbr_cube"}}, S.lighting, function(v)
 			S.lighting = v
 			buildat.storage_write("lighting", v)
 			set_view(S.view)
