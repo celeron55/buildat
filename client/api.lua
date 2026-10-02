@@ -978,6 +978,13 @@ end
 -- a harness sets on the client's process, such as the rendering mode. See
 -- l_get_env() in src/client/app.cpp.
 buildat.safe.get_env                  = __buildat_get_env
+-- connection_encrypted() -> whether the server connection is under TLS:
+-- a web client on an https page, or a native one joined by https://
+buildat.safe.connection_encrypted = function()
+	local a = __buildat_server_address() or ""
+	return __buildat_get_env("BUILDAT_PAGE_HTTPS") == "1" or
+			a:match("^https://") ~= nil or a:match("^wss://") ~= nil
+end
 -- get_cache_path() -> the directory those two work in. The share and user
 -- paths stay out of the sandbox; this is here because writing a file under
 -- the cache means knowing where the cache is.

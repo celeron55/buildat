@@ -239,10 +239,7 @@ local function show_login(error_text)
 			label("Invite code (only for a new account)")
 			code = field("", false)
 		end
-		-- simplified: a native client's connection is not encrypted yet
-		-- ([TRANSPORT]); a web client on an https page has TLS, and its
-		-- page says so
-		if buildat.get_env("BUILDAT_PAGE_HTTPS") ~= "1" then
+		if not buildat.connection_encrypted() then
 			local warn = label("The password is sent unencrypted: use a " ..
 					"trusted network")
 			warn:SetColor(magic.Color(1.0, 0.8, 0.4))
