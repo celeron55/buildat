@@ -96,7 +96,7 @@ static int l_decompress(lua_State *L)
 void init_compress(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
 	DEF_BUILDAT_FUNC(compress)
