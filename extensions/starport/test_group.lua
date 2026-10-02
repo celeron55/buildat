@@ -41,4 +41,8 @@ assert(inside[2].kind == "server" and inside[2].server.address == "b:1")
 local o = g.order_pool({{address = "x", players = 9, players_max = 10},
 	{address = "y", players = 5}})
 assert(o[1].address == "y")
+-- The user's region before the load
+local r = g.order_pool({{address = "x", players = 0, region = "us"},
+	{address = "y", players = 9, players_max = 10, region = "EU"}}, "eu")
+assert(r[1].address == "y")
 print("test_group: ok")

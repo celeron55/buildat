@@ -253,6 +253,9 @@ function M.show_connect_to_server()
 	local sp_title = left:CreateChild("Text")
 	sp_title:SetStyleAuto()
 	sp_title.text = "Public servers: asking the Starports..."
+	-- A Starport's error is long; it wraps in the column, not widens it
+	sp_title:SetWordwrap(true)
+	sp_title:SetFixedWidth(440)
 	local search = left:CreateChild("LineEdit")
 	search:SetStyleAuto()
 	search.minHeight = 24

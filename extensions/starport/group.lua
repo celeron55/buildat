@@ -7,8 +7,10 @@
 -- is. Plain data in and out, so test_group.lua runs it with no client:
 --
 --   group(servers)            the top: a row a fleet, a row a server in none
---   group(servers, fleet_id)  inside a fleet: a row a pool, a row a server
---                             in no pool
+--   group(servers, fleet_id[, region])
+--                             inside a fleet: a row a pool, a row a server
+--                             in no pool; a pool's servers in `region`
+--                             first
 --
 -- A row: {kind = "fleet"|"pool"|"server", name, description, players,
 -- count, fleet (its {id, name, description, link}), servers (the row's,
@@ -22,16 +24,22 @@ local function load_of(x)
 	return players / (max > 0 and max or 100)
 end
 
--- A pool's servers, the one to connect to first: the least loaded, the
+-- A pool's servers, the one to connect to first: those in the user's
+-- region (their Starport setting, "" for none), then the least loaded, the
 -- address as the tie-break so every client agrees
--- simplified: no user region yet, so a pool across regions is ordered by
--- load alone ([STARPORT] 2b names the region as the next key)
-function M.order_pool(servers)
+function M.order_pool(servers, region)
 	local out = {}
 	for i, x in ipairs(servers) do
 		out[i] = x
 	end
+	region = (region or ""):lower()
+	local function near(x)
+		return region ~= "" and tostring(x.region or ""):lower() == region
+	end
 	table.sort(out, function(a, b)
+		if near(a) ~= near(b) then
+			return near(a)
+		end
 		local la, lb = load_of(a), load_of(b)
 		if la ~= lb then
 			return la < lb
@@ -49,7 +57,7 @@ local function players_of(servers)
 	return n
 end
 
-function M.group(servers, fleet_id)
+function M.group(servers, fleet_id, region)
 	local rows, at = {}, {}
 	local function bucket(key, make)
 		if not at[key] then
@@ -91,7 +99,7 @@ function M.group(servers, fleet_id)
 		r.count = #r.servers
 		r.players = players_of(r.servers)
 		if r.kind == "pool" then
-			r.servers = M.order_pool(r.servers)
+			r.servers = M.order_pool(r.servers, region)
 			r.server = r.servers[1]
 			r.description = r.server.description
 		end

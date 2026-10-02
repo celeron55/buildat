@@ -579,6 +579,15 @@ settings_page = function(can, again, message)
 		settings_page(can, true)
 	end, can and not e.managed.direct_connect)
 
+	-- 2b: a pool's server in the same region goes first
+	r = add_row(w)
+	add_label(r, "My region (e.g. eu)", 240)
+	local region = add_edit(r, s.region or "")
+	add_button(r, "Set", function()
+		s.region = region:GetText()
+		save_state()
+		settings_page(can, true)
+	end)
 	-- 5b
 	add_button(w, "Send my Starport key: " .. (s.send_key and "on" or "off"),
 			function()
@@ -858,8 +867,10 @@ function M.safe.open_report_here()
 end
 
 -- group(servers[, fleet_id]): a fetch's servers as fleet, pool and
--- server rows (group.lua)
-M.safe.group = group.group
+-- server rows (group.lua), a pool's servers in the user's region first
+function M.safe.group(servers, fleet_id)
+	return group.group(servers, fleet_id, load_state().region or "")
+end
 
 M.fetch = M.safe.fetch
 M.direct_connect_allowed = M.safe.direct_connect_allowed
