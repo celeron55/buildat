@@ -187,10 +187,27 @@ static ss_ confine_child(core::Config &config, const ss_ &module_path)
 	return "";
 }
 
+// **Opt-in until the user's run on Windows** (2026-10-03): the box is
+// built and has not run on real Windows (Wine has no AppContainer), and a
+// fault in it would stop every local game there. BUILDAT_WINDOWS_BOX=1
+// turns it on, for the client too (client/pipe_stream.cpp); otherwise
+// the server runs as before and says so.
+bool windows_box_wanted()
+{
+	const char *on = getenv("BUILDAT_WINDOWS_BOX");
+	return on && ss_(on) == "1";
+}
+
 ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 {
 	if(config.get<bool>("boxed"))
 		return confine_child(config, module_path);
+	if(!windows_box_wanted()){
+		log_w(MODULE, "Not boxed: the Windows box is BUILDAT_WINDOWS_BOX=1 "
+				"until it has been run on Windows; the app can reach every "
+				"file you can");
+		return "";
+	}
 
 	const ss_ app = app_of(module_path);
 	const ss_ user = norm(config.get<ss_>("user_path"));

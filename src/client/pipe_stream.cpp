@@ -94,9 +94,12 @@ ss_ local_server_pipe(const ss_ &app, const ss_ &port)
 	const char *plain = getenv("BUILDAT_PIPE");
 	if(plain && ss_(plain) == "1")
 		return "\\\\.\\pipe\\buildat-"+port;
-	// A server started unboxed listens on loopback as before
+	// A server started unboxed listens on loopback as before: by
+	// --unconfined, or while the Windows box is opt-in
+	// (src/server/confine_windows.cpp)
 	const char *unconfined = getenv("BUILDAT_UNCONFINED");
-	if(unconfined && ss_(unconfined) == "1")
+	const char *box = getenv("BUILDAT_WINDOWS_BOX");
+	if((unconfined && ss_(unconfined) == "1") || !box || ss_(box) != "1")
 		return "";
 	const ss_ name_a = "buildat."+app;
 	std::wstring name(name_a.begin(), name_a.end());
