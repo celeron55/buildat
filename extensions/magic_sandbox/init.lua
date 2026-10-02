@@ -5,6 +5,28 @@ local log = buildat.Logger("extension/magic_sandbox")
 local dump = buildat.dump
 local M = {safe = {}}
 
+-- Every wrapper alive, by what it wraps: unsafe -> {safe -> true}, both
+-- levels weak, so that what happens to the unsafe side can reach them
+-- without a walk: a UI element's removal marks its wrappers dead
+-- (extension/urho3d, [UI_UAF]) -- tolua keeps a userdata after its object
+-- is deleted, and a property read through it is a use-after-free. Keyed
+-- by the unsafe because the HUD makes and removes elements every frame,
+-- and a walk of every wrapper per removal held frames for seconds. The
+-- value is `true` and not the meta: LuaJIT has no ephemerons, so a value
+-- that reaches its own key (the meta reaches the safe and the unsafe)
+-- pins the entry, and every wrapper ever made stayed for the collector
+-- to walk (a frame of 58 s in the objects packet). The meta is
+-- getmetatable(safe).
+M.live = setmetatable({}, {__mode = "k"})
+local function register(unsafe, safe)
+	local set = M.live[unsafe]
+	if not set then
+		set = setmetatable({}, {__mode = "k"})
+		M.live[unsafe] = set
+	end
+	set[safe] = true
+end
+
 -- The resulting value from this function should be placed directly in the
 -- sandbox environment's global environment as _G[type_name]
 function M.wrap_class(type_name, def)
@@ -26,6 +48,7 @@ function M.wrap_class(type_name, def)
 			__index = class_meta, -- For reading class properties
 		})
 		meta.__index = function(table, key)
+			if meta.dead then error(meta.dead, 2) end
 			if def.custom_index then
 				return def.custom_index(safe, key)
 			end
@@ -84,6 +107,7 @@ function M.wrap_class(type_name, def)
 			error("Instance of "..dump(type_name).." does not have field or property "..dump(key))
 		end
 		meta.__newindex = function(table, key, value)
+			if meta.dead then error(meta.dead, 2) end
 			if def.custom_newindex then
 				return def.custom_newindex(safe, key, value)
 			end
@@ -140,6 +164,7 @@ function M.wrap_class(type_name, def)
 			end
 		end
 		setmetatable(safe, meta)
+		register(unsafe, safe)
 		return safe
 	end
 	class_meta.create_new = function(_, ...)
@@ -195,6 +220,7 @@ function M.safe_to_unsafe(safe_thing, valid_types)
 	end
 	local meta = getmetatable(safe_thing)
 	if meta and meta.type_name then
+		if meta.dead then error(meta.dead, 2) end
 		-- Check if it is directly this kind of wrapped type
 		for _, valid_type in ipairs(valid_types) do
 			if allowed_type_name(valid_type) == meta.type_name then
