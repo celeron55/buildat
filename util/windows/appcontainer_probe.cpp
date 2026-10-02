@@ -310,8 +310,65 @@ static bool read_line(HANDLE h, std::string *out)
 	return !out->empty();
 }
 
+// --run <container> <command line>: the command in that AppContainer
+// (made if missing), with the three network capabilities and the
+// caller's directory, its output here -- for reading what a boxed
+// server's tools see ([PROCESS_SANDBOX] B)
+static int run_in(const char *container, const char *cmdline)
+{
+	std::wstring name(container, container + strlen(container));
+	PSID sid = nullptr;
+	HRESULT hr = CreateAppContainerProfile(name.c_str(), name.c_str(),
+			name.c_str(), nullptr, 0, &sid);
+	if(hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS))
+		hr = DeriveAppContainerSidFromAppContainerName(name.c_str(), &sid);
+	if(FAILED(hr)){
+		printf("run: no container (HRESULT %u)\n", (unsigned)hr);
+		return 1;
+	}
+	SID_AND_ATTRIBUTES caps[3];
+	BYTE cap_sid[3][SECURITY_MAX_SID_SIZE];
+	WELL_KNOWN_SID_TYPE kinds[3] = {WinCapabilityInternetClientSid,
+			WinCapabilityInternetClientServerSid,
+			WinCapabilityPrivateNetworkClientServerSid};
+	for(int i = 0; i < 3; i++){
+		DWORD size = SECURITY_MAX_SID_SIZE;
+		CreateWellKnownSid(kinds[i], nullptr, cap_sid[i], &size);
+		caps[i].Sid = cap_sid[i];
+		caps[i].Attributes = SE_GROUP_ENABLED;
+	}
+	SECURITY_CAPABILITIES sc = {};
+	sc.AppContainerSid = sid;
+	sc.Capabilities = caps;
+	sc.CapabilityCount = 3;
+	STARTUPINFOEXA si = {};
+	si.StartupInfo.cb = sizeof si;
+	SIZE_T attr_size = 0;
+	InitializeProcThreadAttributeList(nullptr, 1, 0, &attr_size);
+	si.lpAttributeList = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(
+			GetProcessHeap(), 0, attr_size);
+	InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &attr_size);
+	UpdateProcThreadAttribute(si.lpAttributeList, 0,
+			PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, &sc, sizeof sc,
+			nullptr, nullptr);
+	std::string cmd = cmdline;
+	PROCESS_INFORMATION pi = {};
+	if(!CreateProcessA(nullptr, &cmd[0], nullptr, nullptr, TRUE,
+			EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr, &si.StartupInfo, &pi)){
+		printf("run: CreateProcess: %s\n", err(GetLastError()).c_str());
+		return 1;
+	}
+	WaitForSingleObject(pi.hProcess, INFINITE);
+	DWORD code = 1;
+	GetExitCodeProcess(pi.hProcess, &code);
+	printf("run: exit 0x%08lx\n", (unsigned long)code);
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
+	if(argc > 3 && strcmp(argv[1], "--run") == 0)
+		return run_in(argv[2], argv[3]);
 	WSADATA wsa;
 	WSAStartup(MAKEWORD(2, 2), &wsa);
 	if(argc > 1 && strcmp(argv[1], "--boxed-listen") == 0)

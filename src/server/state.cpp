@@ -593,8 +593,17 @@ struct CState: public State, public interface::Server
 
 		// We don't want to directly add the interface path as it contains
 		// stuff like mutex.h which match on Windows to Urho3D's Mutex.h
-		m_compiler->include_directories.push_back(
-				g_server_config.get<ss_>("interface_path")+"/..");
+		// The parent named, not ".../interface/..": in a Windows
+		// AppContainer gcc's check took a directory ending in ".." for
+		// one that is not there, and no module found interface/module.h
+		// ([PROCESS_SANDBOX] B, 2026-10-03)
+		{
+			ss_ ip = g_server_config.get<ss_>("interface_path");
+			while(!ip.empty() && (ip.back() == '/' || ip.back() == '\\'))
+				ip.pop_back();
+			m_compiler->include_directories.push_back(
+					interface::fs::strip_file_name(ip));
+		}
 		m_compiler->include_directories.push_back(
 				g_server_config.get<ss_>(
 				"interface_path")+"/../../3rdparty/cereal/include");
