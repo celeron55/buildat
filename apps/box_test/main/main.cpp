@@ -25,6 +25,7 @@
 	#include <sys/stat.h>
 	#include <sys/syscall.h>
 	#include <netdb.h>
+	#include <netinet/in.h>
 	#include <cstring>
 #endif
 #define MODULE "box_test"
@@ -81,6 +82,39 @@ static bool can_connect_unix(const ss_ &name)
 		a.sun_path[0] = 0;
 	bool ok = connect(fd, (struct sockaddr*)&a,
 			offsetof(struct sockaddr_un, sun_path) + n) == 0;
+	close(fd);
+	return ok;
+}
+
+// TCP to a port on this machine: got through unless the box refused it
+// (EACCES); a refusal by nobody listening is the port reached
+static bool tcp_reaches(int port)
+{
+	int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if(fd < 0)
+		return false;
+	struct sockaddr_in a;
+	memset(&a, 0, sizeof a);
+	a.sin_family = AF_INET;
+	a.sin_port = htons(port);
+	a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	bool reached = connect(fd, (struct sockaddr*)&a, sizeof a) == 0 ||
+			errno != EACCES;
+	close(fd);
+	return reached;
+}
+
+static bool tcp_binds(int port)
+{
+	int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if(fd < 0)
+		return false;
+	struct sockaddr_in a;
+	memset(&a, 0, sizeof a);
+	a.sin_family = AF_INET;
+	a.sin_port = htons(port);
+	a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	bool ok = bind(fd, (struct sockaddr*)&a, sizeof a) == 0;
 	close(fd);
 	return ok;
 }
@@ -171,6 +205,10 @@ struct Module: public interface::Module
 			}()},
 			{"io_uring", syscall(__NR_io_uring_setup, 1, nullptr) >= 0 ||
 				errno != ENOSYS},
+			// The TCP rules: other programs' services on this machine
+			{"connect to 127.0.0.1:22", tcp_reaches(22)},
+			{"connect to 127.0.0.1:631", tcp_reaches(631)},
+			{"listen on another port", tcp_binds(29899)},
 		};
 		ss_ through;
 		int n = 0;

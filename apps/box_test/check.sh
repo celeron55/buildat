@@ -35,7 +35,7 @@ line=$(grep -a "box_test: .* reaches tried" "$out/srv.log" | tail -1 |
 echo "${line:-(the hostile app said nothing)}"
 tried=$(echo "$line" | sed -n 's/^\([0-9]*\) reaches tried.*/\1/p')
 # **Its own canary**: a list that shrank to nothing would read as a pass
-if [ "${tried:-0}" -lt 15 ]; then
+if [ "${tried:-0}" -lt 22 ]; then
 	echo "FAIL: only ${tried:-0} reaches were tried"
 	exit 1
 fi

@@ -73,9 +73,17 @@ static CURL *easy(const ss_ &url, char *errbuf)
 static void perform(CURL *c, const ss_ &url, const char *errbuf)
 {
 	const CURLcode r = curl_easy_perform(c);
-	long status = 0;
+	long status = 0, os_errno = 0, port = 0;
 	curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+	curl_easy_getinfo(c, CURLINFO_OS_ERRNO, &os_errno);
+	curl_easy_getinfo(c, CURLINFO_PRIMARY_PORT, &port);
 	curl_easy_cleanup(c);
+	// [PROCESS_SANDBOX]: a port the server's box refuses
+	if(r == CURLE_COULDNT_CONNECT && os_errno == EACCES){
+		log_w(MODULE, "%s: the server's box refused port %li; its admin "
+				"allows it with --connect-ports or BUILDAT_CONNECT_PORTS",
+				cs(url), port);
+	}
 	if(r != CURLE_OK){
 		throw Exception("http: "+url+": "+
 				(errbuf[0] ? ss_(errbuf) : ss_(curl_easy_strerror(r)))+

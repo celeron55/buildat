@@ -50,6 +50,15 @@ ss_ confine(core::Config &config, const ss_ &module_path)
 #ifndef LANDLOCK_ACCESS_FS_IOCTL_DEV
 	#define LANDLOCK_ACCESS_FS_IOCTL_DEV (1ULL << 15)
 #endif
+#ifndef LANDLOCK_ACCESS_NET_BIND_TCP
+	#define LANDLOCK_ACCESS_NET_BIND_TCP (1ULL << 0)
+	#define LANDLOCK_ACCESS_NET_CONNECT_TCP (1ULL << 1)
+	#define LANDLOCK_RULE_NET_PORT ((enum landlock_rule_type)2)
+	struct landlock_net_port_attr {
+		uint64_t allowed_access;
+		uint64_t port;
+	} __attribute__((packed));
+#endif
 #ifndef LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET
 	#define LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET (1ULL << 0)
 	#define LANDLOCK_SCOPE_SIGNAL (1ULL << 1)
@@ -268,10 +277,33 @@ ss_ confine(core::Config &config, const ss_ &module_path)
 		attr.handled_access_fs |= LANDLOCK_ACCESS_FS_TRUNCATE;
 	if(abi >= 5)
 		attr.handled_access_fs |= LANDLOCK_ACCESS_FS_IOCTL_DEV;
-	// simplified: no TCP rules -- an app's outgoing ports are not known
-	// ahead (a mod's HTTP), and the threat model is the user's files and
-	// programs; bind and connect by port when an app can declare them
-	attr.handled_access_net = 0;
+	// **TCP by port** (user, 2026-10-03), from ABI 4: the services on
+	// 127.0.0.1 are other running programs. Bind the server's own port
+	// only; connect to the ports buildat itself implies -- HTTP and HTTPS
+	// (Starports, ContentDB, blocklists), mail submission (a Starport's
+	// codes), a buildat server's and a Starport's defaults -- and to the
+	// ones the server's admin names outside the box (--connect-ports,
+	// BUILDAT_CONNECT_PORTS: "8080,2525", or "any"), never to ones an app
+	// names. simplified: by port and not by address, which is all Landlock
+	// has; UDP is not covered at all.
+	const ss_ extra = config.get<ss_>("connect_ports");
+	const bool connect_any = extra == "any";
+	sv_<int> connect_ports = {80, 443, 465, 587, 29500, 29595};
+	if(!connect_any){
+		size_t at = 0;
+		while(at < extra.size()){
+			size_t comma = extra.find(',', at);
+			if(comma == ss_::npos)
+				comma = extra.size();
+			const int p = atoi(extra.substr(at, comma - at).c_str());
+			if(p > 0 && p < 65536)
+				connect_ports.push_back(p);
+			at = comma + 1;
+		}
+	}
+	const int listen_port = atoi(config.get<ss_>("network_port").c_str());
+	attr.handled_access_net = abi >= 4 ? (LANDLOCK_ACCESS_NET_BIND_TCP |
+			(connect_any ? 0 : LANDLOCK_ACCESS_NET_CONNECT_TCP)) : 0;
 	attr.scoped = abi >= 6 ? (LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET |
 			LANDLOCK_SCOPE_SIGNAL) : 0;
 	const size_t attr_size = abi >= 6 ? sizeof(RulesetAttr) :
@@ -317,6 +349,20 @@ ss_ confine(core::Config &config, const ss_ &module_path)
 	rs.add(app_cache, rw);
 	rs.add(user+"/shared", FS_READ);
 	rs.add_around(prebuilt, {app_cache}, FS_READ);
+	auto net_rule = [&](uint64_t access, int port){
+		struct landlock_net_port_attr a;
+		a.allowed_access = access;
+		a.port = (uint64_t)port;
+		if(syscall(SYS_landlock_add_rule, rs.fd, LANDLOCK_RULE_NET_PORT,
+				&a, 0) != 0)
+			rs.refused.push_back("port "+itos(port)+": "+strerror(errno));
+	};
+	if(attr.handled_access_net){
+		net_rule(LANDLOCK_ACCESS_NET_BIND_TCP, listen_port);
+		if(!connect_any)
+			for(int p : connect_ports)
+				net_rule(LANDLOCK_ACCESS_NET_CONNECT_TCP, p);
+	}
 
 	if(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0){
 		close(rs.fd);
@@ -334,12 +380,25 @@ ss_ confine(core::Config &config, const ss_ &module_path)
 
 	for(const ss_ &r : rs.refused)
 		log_w(MODULE, "No rule for %s", cs(r));
+	ss_ tcp;
+	if(!attr.handled_access_net){
+		tcp = "TCP is not limited before ABI 4";
+	} else {
+		tcp = "TCP bound to port "+itos(listen_port)+" only, connecting ";
+		if(connect_any){
+			tcp += "anywhere (--connect-ports any)";
+		} else {
+			tcp += "to ports";
+			for(int p : connect_ports)
+				tcp += " "+itos(p);
+		}
+	}
 	log_i(MODULE, "The server is boxed: Landlock ABI %i (the filesystem%s), "
-			"seccomp (no unix sockets, no io_uring); TCP is not limited. "
+			"seccomp (no unix sockets, no io_uring); %s. "
 			"%s and %s writable, %s/shared readable",
 			abi, abi >= 6 ? ", abstract sockets and signals scoped" :
 				"; signals and abstract sockets not scoped before ABI 6",
-			cs(app_user), cs(app_shared), cs(user));
+			cs(tcp), cs(app_user), cs(app_shared), cs(user));
 	return "";
 }
 

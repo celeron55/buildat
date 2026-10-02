@@ -159,7 +159,10 @@ Terminal 2:
 On Linux the server confines itself before it loads an app (Landlock and
 seccomp): the app writes `<user>/apps/<app>`, its own `<user>/shared/<app>`
 and its own cache, reads the install and the other apps' shared
-directories, and reaches nothing else of yours. Where the kernel cannot
+directories, and reaches nothing else of yours. It binds TCP only on its
+own port and connects only to ports 80, 443, 465, 587, 29500 and 29595,
+plus what `--connect-ports` (or `BUILDAT_CONNECT_PORTS`) adds: the
+services on 127.0.0.1 are other programs of yours. Where the kernel cannot
 make the box the server refuses to start; `--unconfined` (or
 `BUILDAT_UNCONFINED=1`) runs it without one. `apps/box_test/check.sh` is
 the check.

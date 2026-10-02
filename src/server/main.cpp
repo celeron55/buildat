@@ -87,13 +87,24 @@ int main(int argc, char *argv[])
 	// knows no long options; BUILDAT_UNCONFINED=1 says the same
 	bool unconfined = getenv("BUILDAT_UNCONFINED") &&
 			ss_(getenv("BUILDAT_UNCONFINED")) == "1";
+	// --connect-ports P,Q: what a boxed server may connect to beyond
+	// buildat's own ports; also BUILDAT_CONNECT_PORTS
+	if(getenv("BUILDAT_CONNECT_PORTS"))
+		config.set("connect_ports", ss_(getenv("BUILDAT_CONNECT_PORTS")));
 	for(int i = 1; i < argc; i++){
-		if(ss_(argv[i]) != "--unconfined")
+		int take = 0;
+		if(ss_(argv[i]) == "--unconfined"){
+			unconfined = true;
+			take = 1;
+		} else if(ss_(argv[i]) == "--connect-ports" && i + 1 < argc){
+			config.set("connect_ports", ss_(argv[i + 1]));
+			take = 2;
+		}
+		if(!take)
 			continue;
-		unconfined = true;
-		for(int j = i; j < argc - 1; j++)
-			argv[j] = argv[j + 1];
-		argc--;
+		for(int j = i; j < argc - take; j++)
+			argv[j] = argv[j + take];
+		argc -= take;
 		i--;
 	}
 
@@ -127,6 +138,10 @@ int main(int argc, char *argv[])
 			"  -u [key=value lines] What an untrusted launcher asked for\n"
 			"                       (the launch grid; a module reads it as it\n"
 			"                       would a packet)\n"
+			"  --connect-ports P,Q  Ports the boxed server may connect to\n"
+			"                       beyond 80, 443, 465, 587, 29500 and\n"
+			"                       29595, or \"any\" (also\n"
+			"                       BUILDAT_CONNECT_PORTS)\n"
 			"  --unconfined         Run without the box (also\n"
 			"                       BUILDAT_UNCONFINED=1): the app reaches\n"
 			"                       all of your files\n"

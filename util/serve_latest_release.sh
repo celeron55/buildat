@@ -26,6 +26,12 @@
 # browser with a page that says so and reloads itself, until the server
 # says it is listening (they share the port: BUILDAT_SHARE_PORT=1).
 #
+# **The box** ([PROCESS_SANDBOX], 0.5.67 and newer): each server confines
+# itself, and refuses to start on a kernel without Landlock unless given
+# --unconfined. A boxed server connects out only to ports 80, 443, 465,
+# 587, 29500 and 29595; a Starport that lists servers on other ports is
+# given more as a server option, "--connect-ports any" or a list.
+#
 # **A rollback** is by hand, with this script stopped: run the version
 # before from its directory,
 #   cd ~/buildat-serve/versions/<the one before>

@@ -156,6 +156,16 @@ struct CTCPSocket: public TCPSocket
 					std::cerr<<"connect: no answer in "<<timeout_ms<<" ms"<<std::endl;
 				}
 			} else {
+#ifndef _WIN32
+				// [PROCESS_SANDBOX]: the box refuses a port at once
+				if(errno == EACCES && addr->sa_family != AF_UNIX){
+					const int p = ntohs(addr->sa_family == AF_INET6 ?
+							((const sockaddr_in6*)addr)->sin6_port :
+							((const sockaddr_in*)addr)->sin_port);
+					std::cerr<<"connect: the server's box refused port "<<p<<
+							"; its admin allows it with --connect-ports"<<std::endl;
+				} else
+#endif
 				std::cerr<<"connect: "<<strerror(errno)<<std::endl;
 			}
 		}
