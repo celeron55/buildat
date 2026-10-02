@@ -595,12 +595,15 @@ settings_page = function(can, again, message)
 		save_state()
 		settings_page(can, true)
 	end)
-	add_text(w, s.send_key and
+	add_text(w, (s.send_key and
 			"Your key builds the standing your reports are weighed by, and "..
 			"brings you their outcomes." or
-			"Off: nothing of your use is kept, your reports weigh as a new "..
-			"key's, you get no outcomes, and turning it on starts a new "..
-			"key from nothing.", GREY)
+			"Off: your key is not sent, so Starports keep nothing new of "..
+			"your use; your reports weigh as a new key's and get no "..
+			"outcomes. The key is kept: turned on again, it is sent with "..
+			"its standing as it was."), GREY)
+	add_text(w, "The keys are in " .. STATE_PATH .. " (\"keys\"). "..
+			"Deleting them there starts over with new ones.", GREY)
 	-- 5c
 	r = add_row(w)
 	add_button(r, "Export keys", function()
