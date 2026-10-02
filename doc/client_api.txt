@@ -488,7 +488,7 @@ urho3d (magic)
 --------------
 Whitelist-based wrapper for the Urho3D Lua API; the sandbox sees it as the
 global "magic" and, through sandbox.make_global, as the Urho3D globals
-themselves. The whitelist is in extensions/urho3d/safe_classes.lua (the
+themselves. The whitelist is in client/extensions/urho3d/safe_classes.lua (the
 classes, their methods and properties), safe_globals.lua (the constants and
 the global functions) and safe_events.lua (which events reach the sandbox,
 and which fields of each). The classes and every member of each are in the

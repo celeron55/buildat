@@ -2152,7 +2152,7 @@ struct CApp: public App, public magic::Application
 	}
 
 	// A scripted client never hides or captures the cursor: the Input
-	// wrapper in extensions/urho3d/safe_classes.lua refuses those calls
+	// wrapper in client/extensions/urho3d/safe_classes.lua refuses those calls
 	// while is_scripted(). Undoing a hide after the fact was what warped
 	// the desktop cursor to the window's corner -- Urho's re-show restores
 	// a position sampled while the cursor was hidden. See [SCRIPTED_CURSOR]
@@ -2724,7 +2724,7 @@ struct CApp: public App, public magic::Application
 		// stands down too early). Taking the view is this call, and a
 		// launcher that keeps drawing while a game loads has to know
 		// when the game has actually taken it. The count lives here
-		// rather than in extensions/urho3d because each sandbox has its
+		// rather than in client/extensions/urho3d because each sandbox has its
 		// own copy of that file: a game bumping its own count is not
 		// something the launcher's copy can see.
 		m_viewport_generation++;
@@ -4674,10 +4674,16 @@ struct CApp: public App, public magic::Application
 	}
 
 	// extension_path(name: string)
+	// [EXTENSIONS_SANDBOXED]: the client's own extensions -- the sandbox
+	// itself and what needs trust -- are in client/extensions and come
+	// first, so that nothing in extensions/ takes one of their names
 	static int l_extension_path(lua_State *L)
 	{
 		ss_ name = lua_bindings::lua_tocppstring(L, 1);
-		ss_ path = g_client_config.get<ss_>("share_path")+"/extensions/"+name;
+		const ss_ share = g_client_config.get<ss_>("share_path");
+		ss_ path = share+"/client/extensions/"+name;
+		if(!interface::fs::path_exists(path+"/init.lua"))
+			path = share+"/extensions/"+name;
 		// TODO: Check if extension actually exists and do something suitable if
 		//       not
 		lua_pushlstring(L, path.c_str(), path.size());

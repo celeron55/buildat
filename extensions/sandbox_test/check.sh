@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: quick
 # cost: 3s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
-# covers: client/sandbox.lua client/api.lua extensions/urho3d/** src/lua_bindings/**
+# covers: client/sandbox.lua client/api.lua client/extensions/urho3d/** src/lua_bindings/**
 # (client/api.lua is the sandbox's own surface -- every verb this check
 # tries to reach past, and the ones wrapped.lua exercises)
 # [LAUNCH_SANDBOX]: **the hostile launch UI**. The launch UI is a slot
