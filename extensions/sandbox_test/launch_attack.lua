@@ -38,8 +38,10 @@ local ATTEMPTS = {
 	{"getfenv(0)", function() return getfenv(0) end},
 	-- The trusted half of the client's own API
 	{"buildat.get_env", function() return buildat.get_env("HOME") end},
-	{"buildat.start_local_server",
-		function() return buildat.start_local_server("vanilla") end},
+	-- A launcher verb since games are apps; a path for a name is what it
+	-- must refuse
+	{"buildat.start_local_server a path",
+		function() return buildat.start_local_server("../apps/vanilla") end},
 	{"__buildat_run_code_in_sandbox",
 		function() return __buildat_run_code_in_sandbox("return 1") end},
 	{"the client's Lua state", function() return __buildat_app end},
@@ -60,6 +62,31 @@ local ATTEMPTS = {
 		function() return buildat.launch("extension/nothing/0") end},
 	{"set_launch_ui to something that is not one",
 		function() return buildat.set_launch_ui("nosuchthing") end},
+	-- [SAFE_TABLE_PATCH]: the tables trusted code calls through. The
+	-- network permission dialog is drawn by ui_utils.vertical_menu on
+	-- uistack.main; a write that lands is a game drawing that dialog.
+	{"rewrite ui_utils.vertical_menu", function()
+		local u = require("buildat/extension/ui_utils")
+		u.vertical_menu = function() end
+		return true
+	end},
+	{"rewrite uistack.main:push", function()
+		local s = require("buildat/extension/uistack")
+		s.main.push = function() end
+		return true
+	end},
+	{"rewrite urho3d's cache", function()
+		require("buildat/extension/urho3d").cache = {}
+		return true
+	end},
+	{"rewrite buildat.launch", function()
+		buildat.launch = function() end
+		return true
+	end},
+	{"rewrite string.format", function()
+		string.format = function() end
+		return true
+	end},
 }
 
 function M.run()

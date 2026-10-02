@@ -43,6 +43,112 @@ __buildat_sandbox_environment = {
 }
 
 --
+-- Read-only views
+--
+
+-- [SAFE_TABLE_PATCH]: **what the sandbox is handed is a view, not the
+-- table**. An extension's .safe table is the same table trusted code
+-- calls through -- the network permission dialog draws with
+-- ui_utils.safe.vertical_menu and pushes on uistack.safe.main -- so a
+-- game that assigned into it drew, labelled and answered the dialog.
+-- A view reads through to the table, nested tables as views too, and
+-- refuses every assignment; a table whose metatable takes assignments
+-- itself is handed out as it is. A function read through a view gets its
+-- view arguments back as the tables they show, so a method keeps
+-- working (uistack.main:push() writes into the real stack).
+-- simplified: # and the table library see a view as empty, and a table
+-- a function returns is the table itself, not a view; a .safe function
+-- that hands out shared state has to copy it.
+local view_of = setmetatable({}, {__mode = "k"}) -- table -> its view
+local real_of = setmetatable({}, {__mode = "k"}) -- view -> its table
+local wrapper_of = setmetatable({}, {__mode = "k"}) -- function -> wrapper
+
+local function unwrap(n, a)
+	for i = 1, n do
+		local r = real_of[a[i]]
+		if r then a[i] = r end
+	end
+	return unpack(a, 1, n)
+end
+
+local view
+local function shown(v)
+	local t = type(v)
+	if t == "table" then
+		return view(v)
+	elseif t == "function" then
+		local w = wrapper_of[v]
+		if not w then
+			w = function(...)
+				return v(unwrap(select("#", ...), {...}))
+			end
+			wrapper_of[v] = w
+		end
+		return w
+	end
+	return v
+end
+
+view = function(t)
+	if real_of[t] then return t end
+	-- A wrapped object (magic.ui.root) has its own __newindex, which is
+	-- the sandbox's way of setting a property, and it checks the write
+	local mt = getmetatable(t)
+	if type(mt) == "table" and mt.__newindex then return t end
+	local p = view_of[t]
+	if p then return p end
+	p = setmetatable({}, {
+		__index = function(_, k) return shown(t[k]) end,
+		__newindex = function(_, k)
+			error("sandbox: "..tostring(k).." is read-only here", 2)
+		end,
+		__call = function(_, ...) return t(unwrap(select("#", ...), {...})) end,
+		__metatable = false,
+	})
+	view_of[t] = p
+	real_of[p] = t
+	return p
+end
+
+-- Iterating a view walks the table under it
+local function view_next(p, k)
+	local nk, v = next(real_of[p], k)
+	return nk, shown(v)
+end
+__buildat_sandbox_environment.next = function(t, k)
+	if real_of[t] then return view_next(t, k) end
+	return next(t, k)
+end
+__buildat_sandbox_environment.pairs = function(t)
+	if real_of[t] then return view_next, t, nil end
+	return pairs(t)
+end
+__buildat_sandbox_environment.ipairs = function(t)
+	local r = real_of[t]
+	if not r then return ipairs(t) end
+	return function(_, i)
+		i = i + 1
+		local v = r[i]
+		if v ~= nil then return i, shown(v) end
+	end, t, 0
+end
+-- The standard tables too, one sandboxed script not rewriting
+-- string.format under another; their functions take no views and are
+-- handed out as they are
+for _, k in ipairs({"coroutine", "string", "table", "math", "os"}) do
+	local t = __buildat_sandbox_environment[k]
+	local p = setmetatable({}, {
+		__index = t,
+		__newindex = function(_, k)
+			error("sandbox: "..tostring(k).." is read-only here", 2)
+		end,
+		__metatable = false,
+	})
+	real_of[p] = t
+	__buildat_sandbox_environment[k] = p
+end
+
+--
 -- Sandbox require
 --
 
@@ -76,7 +182,7 @@ __buildat_sandbox_environment.require = function(name)
 		if type(unsafe) ~= 'table' or type(unsafe.safe) ~= 'table' then
 			error("require: \""..name.."\" didn't return safe interface")
 		end
-		return unsafe.safe
+		return view(unsafe.safe)
 	end
 	-- Allow loading the client-side parts of modules
 	local m = string.match(name, '^buildat/module/([a-zA-Z0-9_]+)$')
@@ -320,11 +426,10 @@ end
 -- in extensions.
 __buildat_sandbox_environment.buildat.is_in_sandbox = true
 
-setmetatable(__buildat_sandbox_environment.buildat, {
-	__newindex = function(t, k, v)
-		assert("Cannot add fields to buildat namespace in sandbox environment")
-	end,
-})
+-- A view, as the extensions' tables are: a game rewriting buildat.launch
+-- would have rewritten it under the launch UI
+__buildat_sandbox_environment.buildat =
+		view(__buildat_sandbox_environment.buildat)
 
 log:info("sandbox.lua loaded")
 -- vim: set noet ts=4 sw=4:
