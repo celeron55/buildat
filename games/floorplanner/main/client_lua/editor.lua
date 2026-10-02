@@ -928,6 +928,27 @@ end
 local function room_ceiling(e)
 	return e.ints.ceiling > 0 and e.ints.ceiling or settings().ceiling
 end
+-- **The ceiling over a point** (user, 2026-10-02: what hung from the
+-- ceiling hung from the plan's, not its room's): the smallest room of the
+-- layout being looked at that the point is in, else the plan's. From the
+-- rooms themselves, as it is wanted before their data is built.
+function M.ceiling_at(x, z)
+	local best, area = nil, math.huge
+	for _, e in ipairs(of_type("room")) do
+		local pts = {}
+		for _, n in ipairs(e.lists.nodes) do
+			local nx, nz = node_pos(n)
+			pts[#pts + 1] = {nx, nz}
+		end
+		if #pts >= 3 and geom.point_in_polygon(x, z, pts) then
+			local a = math.abs(geom.area(pts))
+			if a < area then
+				best, area = e, a
+			end
+		end
+	end
+	return best and room_ceiling(best) or settings().ceiling
+end
 
 local function build_room_data()
 	room_data = {}
@@ -1077,7 +1098,7 @@ local function build_inst_data()
 			if moved then
 				ox, oz = ox + d.dx, oz + d.dz
 			end
-			local oy = i.align == 1 and settings().ceiling - i.offset or i.offset
+			local oy = i.align == 1 and M.ceiling_at(i.x, i.z) - i.offset or i.offset
 			local cx, cy, cz = geom.rot((lx0 + lx1) / 2, (ly0 + ly1) / 2,
 					(lz0 + lz1) / 2, pitch, yaw, roll)
 			local ex, ey, ez = geom.rot(lx1 - lx0, ly1 - ly0, lz1 - lz0, pitch, 0,
@@ -1098,7 +1119,7 @@ local function build_inst_data()
 			end
 			local y
 			if i.align == 1 then
-				y = settings().ceiling - i.offset - ey / 2
+				y = M.ceiling_at(i.x, i.z) - i.offset - ey / 2
 			else
 				y = i.offset + ey / 2
 			end
@@ -1636,7 +1657,7 @@ function place.stairwells(layouts, cur)
 			if def and def.ints.kind == KIND.stairs and i.pitch == 0 and
 					i.roll == 0 then
 				local p = def.ints
-				local top = i.align == 1 and settings().ceiling - i.offset or
+				local top = i.align == 1 and M.ceiling_at(i.x, i.z) - i.offset or
 						i.offset + p.h
 				local foot = {}
 				for k, c in ipairs({{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}) do
