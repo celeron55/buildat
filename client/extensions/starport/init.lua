@@ -411,10 +411,23 @@ end
 -- unasked = n, errors = {"url: why", ...}}. Without `ask`, a Starport
 -- whose host the user has not accepted yet is left out rather than put
 -- in front of them as a permission dialog (as extensions/serverlist does)
-function M.safe.fetch(cb, ask)
+function M.safe.fetch(cb, ask, extra)
 	local e = effective()
-	local urls, unasked = {}, 0
+	-- The settings' Starports, and any the caller adds (a report asks the
+	-- Starports the player's IDs come from too)
+	local starports, have = {}, {}
 	for _, url in ipairs(e.starports) do
+		starports[#starports + 1] = url
+		have[url] = true
+	end
+	for _, url in ipairs(extra or {}) do
+		if not have[url] then
+			starports[#starports + 1] = url
+			have[url] = true
+		end
+	end
+	local urls, unasked = {}, 0
+	for _, url in ipairs(starports) do
 		if ask or accepted(url) then
 			urls[#urls + 1] = url
 		else
@@ -433,14 +446,14 @@ function M.safe.fetch(cb, ask)
 		end
 	end
 	-- One not asked yet shows what it said last time
-	for _, url in ipairs(e.starports) do
+	for _, url in ipairs(starports) do
 		if not (ask or accepted(url)) then
 			use_kept(url)
 		end
 	end
 	if waiting == 0 then
 		local ordered = {}
-		for _, url in ipairs(e.starports) do
+		for _, url in ipairs(starports) do
 			if results[url] then
 				ordered[#ordered + 1] = {url, results[url]}
 			end
@@ -459,7 +472,7 @@ function M.safe.fetch(cb, ask)
 			end
 		end
 		cb(shown, {hidden = hidden, unasked = unasked, stale = stale,
-				errors = #e.starports == 0 and
+				errors = #starports == 0 and
 				{"No Starports in the settings"} or {}})
 		return
 	end
@@ -470,7 +483,7 @@ function M.safe.fetch(cb, ask)
 		end
 		-- In the settings' order, whichever answered first
 		local ordered = {}
-		for _, url in ipairs(e.starports) do
+		for _, url in ipairs(starports) do
 			if results[url] then
 				ordered[#ordered + 1] = {url, results[url]}
 			end
@@ -1656,31 +1669,114 @@ function M.safe.open_report(address)
 	return true
 end
 
+-- [REPORT_HERE]: an address as an endpoint -- the host without its case,
+-- the port with the default said (443 under TLS, 29500 else) and whether
+-- TLS -- so "Host:443" over https and a listing of host, 443, tls are one.
+-- tls is the page's for an address with no scheme (the web client's).
+local function endpoint(address, tls)
+	local a = tostring(address)
+	local scheme, rest = a:match("^(%a+)://(.*)$")
+	if scheme then
+		tls = scheme == "https" or scheme == "wss"
+		a = rest
+	end
+	a = a:gsub("/.*$", "")
+	local host, port
+	if a:sub(1, 1) == "[" then
+		host, port = a:match("^%[(.-)%]:?(%d*)$")
+	else
+		host, port = a:match("^([^:]*):?(%d*)$")
+	end
+	return (host or ""):lower() .. ":" ..
+			(tonumber(port) or (tls and 443 or 29500)) ..
+			(tls and " tls" or "")
+end
+M.endpoint = endpoint
+
 -- open_report_here(): the report dialog for the server this client is on,
--- for a server's own page ([STARPORT] 5); found in the Starports' lists,
--- which are fetched when the last fetch does not have it
--- simplified: by the address connected to, which is the listing's only
--- when the player connected by the address the listing has
+-- for a server's own page ([STARPORT] 5). **The server is never asked**
+-- (user, 2026-10-02): a bad actor's would not help. The listing is found
+-- in the lists of the Starports the player trusts -- the settings' and
+-- the ones their IDs come from -- by the endpoint connected to; where none
+-- has it, the player picks it by name.
 function M.safe.open_report_here()
 	local address = __buildat_server_address()
 	if not address then
 		return false
 	end
-	local function go()
-		local row = row_of(address)
+	local here = endpoint(address,
+			buildat.get_env("BUILDAT_PAGE_HTTPS") == "1")
+	local function find()
+		for _, x in ipairs(last_rows) do
+			if endpoint(tostring(x.host) .. ":" .. tostring(x.port),
+					x.tls == true) == here then
+				return x
+			end
+		end
+		return nil
+	end
+	local id_starports = {}
+	for url, _ in pairs(load_state().ids or {}) do
+		id_starports[#id_starports + 1] = url
+	end
+	table.sort(id_starports)
+	local function go(_, info)
+		local row = find()
+		local addrs = {}
+		for _, x in ipairs(last_rows) do
+			addrs[#addrs + 1] = tostring(x.address)
+		end
+		local errors = info and info.errors or {}
+		log:info("report here: connected to " .. address .. " (" .. here ..
+				"); " .. #last_rows .. " rows (" .. table.concat(addrs, ", ") ..
+				"); errors: " .. table.concat(errors, "; ") .. "; " ..
+				(row and "found" or "NOT FOUND"))
 		if row then
 			open_report_row(row)
-		else
-			local root, w = open_window("starport report", 520)
-			add_text(w, address .. " is not listed on your Starports, so "..
-					"there is nobody to report it to.")
-			add_button(w, "Close", function() uistack.main:pop(root) end)
+			return
 		end
+		-- Which failure it was, and the listings to pick from
+		local root, w = open_window("starport report", 560)
+		local asked = {}
+		for _, url in ipairs(effective().starports) do
+			asked[#asked + 1] = url
+		end
+		for _, url in ipairs(id_starports) do
+			asked[#asked + 1] = url
+		end
+		if #asked == 0 then
+			add_text(w, "No Starports are set, so there is nobody to " ..
+					"report to: add one in the Starport settings.")
+		else
+			add_text(w, address .. " is not among the listings of " ..
+					table.concat(asked, ", ") .. ".")
+		end
+		for _, e in ipairs(errors) do
+			add_text(w, "Did not answer: " .. e, YELLOW)
+		end
+		log:info("report here: " .. math.min(#last_rows, 20) ..
+				" listings offered to pick by name")
+		if #last_rows > 0 then
+			add_text(w, "If it is listed under another address, pick it:")
+			-- simplified: the first twenty, by players; a long list wants
+			-- the server list's filter
+			for i, x in ipairs(last_rows) do
+				if i > 20 then
+					break
+				end
+				add_button(w, tostring(x.name) .. "  (" .. tostring(x.address) ..
+						")", function()
+					uistack.main:pop(root)
+					open_report_row(x)
+				end)
+			end
+		end
+		add_button(w, "Close", function() uistack.main:pop(root) end)
 	end
-	if row_of(address) then
+	if find() then
 		go()
 	else
-		M.safe.fetch(function() go() end, true)
+		M.safe.fetch(go, true, id_starports)
 	end
 	return true
 end
