@@ -23,6 +23,11 @@ void sleep_us(int us)
 
 ss_ get_current_exe_path()
 {
+#ifdef __EMSCRIPTEN__
+	// The web client has no executable file; this is where it would be in
+	// the bundle's tree ([WEB_CLIENT]), beside the share path's client/
+	return "/buildat/bin/buildat";
+#endif
 	char buf[BUFSIZ];
 	memset(buf, 0, BUFSIZ);
 	if(readlink("/proc/self/exe", buf, BUFSIZ-1) == -1)

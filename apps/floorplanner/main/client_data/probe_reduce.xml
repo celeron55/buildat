@@ -1,0 +1,8 @@
+<!-- The room probes' ambient cubes: each 32 by 32 face of the probes'
+     atlas averaged into one texel (ProbeReduce.glsl; editor.lua's room
+     probes) -->
+<renderpath>
+    <command type="quad" vs="main/ProbeReduce" ps="main/ProbeReduce" output="viewport">
+        <texture unit="diffuse" name="generated/fp_probe_atlas" />
+    </command>
+</renderpath>
