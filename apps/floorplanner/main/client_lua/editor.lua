@@ -5079,7 +5079,8 @@ end
 -- floor: the plan view's middle, or where the camera looks meets the
 -- floor (under the camera where it does not); looking the way the camera
 -- did, level, or from the plan view or 3D looking straight down, the way
--- the walk looked last.
+-- the walk looked last. From 3D looking as one walking does, under the
+-- camera, looking as it does.
 function M.pick_view(v)
 	if v == "save" then
 		M.save_viewport()
@@ -5103,8 +5104,14 @@ function M.pick_view(v)
 	if v == "walk_here" then
 		local x, z
 		local keep_look = S.view == "2d" or (S.view == "3d" and S.pitch > 80)
+		-- From 3D looking as one walking does -- 30 degrees down or less,
+		-- or up (user, 2026-10-02): from under the camera, looking as it
+		-- does
+		local as_walking = S.view == "3d" and S.pitch <= 30
 		if S.view == "2d" then
 			x, z = S.cx, S.cz
+		elseif as_walking then
+			x, z = S.pos.x * 1000, S.pos.z * 1000
 		else
 			local yaw, pitch = math.rad(S.yaw), math.rad(S.pitch)
 			local fy = -math.sin(pitch)
@@ -5116,7 +5123,9 @@ function M.pick_view(v)
 			end
 		end
 		S.walk.x, S.walk.z, S.walk.feet = x, z, 0
-		if not keep_look then
+		if as_walking then
+			S.walk.yaw, S.walk.pitch = S.yaw, S.pitch
+		elseif not keep_look then
 			S.walk.yaw, S.walk.pitch = S.yaw, 0
 		end
 		S.walk.placed = true
