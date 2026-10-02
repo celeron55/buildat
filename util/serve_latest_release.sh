@@ -30,7 +30,9 @@
 # before from its directory,
 #   cd ~/buildat-serve/versions/<the one before>
 #   bin/buildat_server -m apps/<app> -P <port> -D <user dir>
-# for each server.
+# for each server. To a release from before apps were called apps
+# (0.5.57 and older), it is -m games/<app>, and <user dir>/apps is moved
+# back to <user dir>/games first: a newer server moved it on its start.
 # Started again, this script goes back to the newest release. A game whose
 # saves carry a schema version (the floorplanner) refuses a save that a
 # newer version wrote.
