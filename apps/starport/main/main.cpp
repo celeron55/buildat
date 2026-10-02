@@ -160,7 +160,7 @@ static const std::initializer_list<const char*> KINDS =
 static const std::initializer_list<const char*> AUDIENCES =
 		{"everyone", "teen", "adult"};
 static const std::initializer_list<const char*> ACCESSES =
-		{"open", "registration", "invite", "password", "external"};
+		{"open", "invite", "starport", "password", "external"};
 static const std::initializer_list<const char*> REASONS = {"category",
 		"illegal", "csam", "harassment", "scam", "malware", "impersonation",
 		"spam", "other"};
@@ -199,7 +199,7 @@ static ss_ check_categories(const json::Value &b)
 	if(!in_set(jstr(b, "audience"), AUDIENCES))
 		return "audience: everyone, teen or adult";
 	if(!in_set(jstr(b, "access"), ACCESSES))
-		return "access: open, registration, invite, password or external";
+		return "access: open, invite, starport, password or external";
 	// How people log in: its own accounts, Starport IDs, or both (10c)
 	const ss_ login = jstr(b, "login", "local");
 	if(!in_set(login, {"local", "starport", "both"}))

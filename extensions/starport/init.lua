@@ -33,7 +33,7 @@ local STYLE = "launch_menu/res/main_style.xml"
 
 local AUDIENCES = {"everyone", "teen", "adult"}
 local KINDS = {"world", "arena", "app", "other"}
-local ACCESSES = {"open", "registration", "invite", "password", "external"}
+local ACCESSES = {"open", "invite", "starport", "password", "external"}
 -- The last list each Starport gave, for when it cannot be reached
 -- ([STARPORT] 4): {url = {ts, servers}}
 local LIST_CACHE = __buildat_get_path("cache") .. "/starport_list.json"
@@ -70,7 +70,7 @@ local function default_filters()
 	return {
 		audience = {everyone = true, teen = true, adult = false},
 		kind = {world = true, arena = true, app = true, other = true},
-		access = {open = true, registration = true, invite = true,
+		access = {open = true, invite = true, starport = true,
 			password = true, external = true},
 		hide = {},
 		languages = "",

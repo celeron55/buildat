@@ -123,6 +123,14 @@ s = [x for x in json.load(sys.stdin)['servers'] if x['name'] == 'Check main']
 assert s and s[0]['fleet']['name'] == 'Check fleet' and s[0]['pool'] == 'main', s
 " || fail "the fleet's server is not served in the fleet (sp.log, an2.log)"
 echo "ok: a server joined the fleet by its config line"
+# 10g: access from the Accounts settings, not the file's "open": invite
+# only (a server the launcher did not start), with IDs or without
+api "localhost:$SP/api/list" | python3 -c "
+import json, sys
+a = {x['name']: x['access'] for x in json.load(sys.stdin)['servers']}
+assert a.get('Check main') == 'starport' and a.get('Check house') == 'invite', a
+" || fail "access is not derived from the Accounts settings"
+echo "ok: access from the Accounts settings: starport, invite"
 
 token=$(python3 - "$SP" <<'PY'
 import json, sys, time, urllib.request

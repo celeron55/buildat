@@ -29,6 +29,9 @@ namespace starport_announce
 		// 10g: whether a blocklist this server follows bans the identity
 		// `sub` of the Starport at `host`
 		virtual bool is_blocked(const ss_ &host, const ss_ &sub) = 0;
+		// 10g: something the listing is derived from changed (who may make
+		// an account): announce now rather than at the next interval
+		virtual void announce_soon() = 0;
 		// "" when the token is good, else why not
 		virtual ss_ verify_id_token(const ss_ &token, IdLogin *out) = 0;
 	};

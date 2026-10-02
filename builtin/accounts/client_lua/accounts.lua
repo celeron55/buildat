@@ -974,8 +974,9 @@ local TEXT_FIELDS = {
 local CHOICES = {
 	{"kind", "Kind", {"world", "arena", "app", "other"}},
 	{"audience", "Audience", {"everyone", "teen", "adult"}},
-	{"access", "Access", {"open", "registration", "invite", "password",
-		"external"}},
+	-- Derived from the Accounts page unless one of the two the server
+	-- cannot know (10g)
+	{"access", "Access", {"auto", "password", "external"}},
 }
 local DESCRIPTORS = {
 	{"violence", "Violence", {"none", "cartoon", "realistic"}},
@@ -1100,10 +1101,12 @@ local STARPORT_HELP = {
 	"audiences (the official one leaves adult out), and a player's filters "..
 	"and age decide what they see.",
 	"# Access",
-	"open: anyone joins. registration: an account is made on this server "..
-	"first. invite: an invite code is needed. password: a password shared "..
-	"by the players. external: an account made somewhere else first, at "..
-	"the sign-up address.",
+	"auto: what the Accounts page says (the page shows it), one of open "..
+	"(anyone can make an account here), starport (local accounts are "..
+	"invite only, and Starport IDs may join) or invite (invite only, no "..
+	"Starport IDs).",
+	"password: the players share a password to get in. external: an "..
+	"account made somewhere else first, at the sign-up address.",
 	"# The descriptors: what the server has",
 	"Violence: none; cartoon (unrealistic, no blood); realistic.",
 	"Chat between players: none; moderated (someone watches it and acts); "..
@@ -1245,6 +1248,10 @@ starport_page = function(back, confirm_remove)
 		for _, f in ipairs(CHOICES) do
 			draft.choice[f[1]] = valid(c[f[1]], f[3])
 		end
+		-- Access is derived unless the file says one of its two
+		if draft.choice.access == nil then
+			draft.choice.access = "auto"
+		end
 		local d = type(c.descriptors) == "table" and c.descriptors or {}
 		for _, f in ipairs(DESCRIPTORS) do
 			draft.desc[f[1]] = valid(d[f[1]], f[3])
@@ -1282,6 +1289,8 @@ starport_page = function(back, confirm_remove)
 			draft.text[f[1]] = edits[f[1]]:GetText()
 		end
 	end
+	page_text(w, "Access from the Accounts page is now: " ..
+			tostring(info.access_now or "?"), GREY)
 	-- Three to a row: the page is long, and wide enough for them
 	local dr
 	local n = 0
@@ -1325,6 +1334,9 @@ starport_page = function(back, confirm_remove)
 		-- A choice not made goes as "?": the Starport says what it wants
 		for _, f in ipairs(CHOICES) do
 			c[f[1]] = draft.choice[f[1]] or "?"
+		end
+		if c.access == "auto" then
+			c.access = nil
 		end
 		c.descriptors = {}
 		for _, f in ipairs(DESCRIPTORS) do

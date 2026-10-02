@@ -88,6 +88,9 @@ namespace accounts
 		// Starport ID accounts banned with "Report to Starport", for
 		// starport_announce to send. A ban gone is gone from this too.
 		virtual sv_<ss_> reported_bans() = 0;
+		// 10g: whether anyone may make a local account (else invites only),
+		// which a listing's access is derived from
+		virtual bool registration_open() = 0;
 		// 10g: how many accounts are linked to IDs of the Starport at host
 		virtual size_t linked_count(const ss_ &host) = 0;
 	};

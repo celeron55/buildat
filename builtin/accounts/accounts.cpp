@@ -1201,6 +1201,11 @@ struct Module: public interface::Module, public Interface
 				return result("No such setting");
 			m_access.open_registration = r.on;
 			save_access();
+			// A listing's access is derived from it (10g)
+			starport_announce::access(m_server,
+					[&](starport_announce::Interface *s){
+				s->announce_soon();
+			});
 			log_i(MODULE, "%s set %s to %i", cs(by), cs(r.name), (int)r.on);
 			for(auto &pair : m_peers)
 				if(pair.second.name.empty())
@@ -1436,6 +1441,11 @@ struct Module: public interface::Module, public Interface
 					link.substr(b + 1));
 		});
 		return blocked;
+	}
+
+	bool registration_open()
+	{
+		return m_access.open_registration != 0;
 	}
 
 	size_t linked_count(const ss_ &host)

@@ -586,7 +586,8 @@ struct Module: public interface::Module, public Interface
 			m_wake.wait_for(lock, std::chrono::seconds(soon ? 25 :
 					ANNOUNCE_INTERVAL_S),
 					[&](){ return m_stop || !m_delist.empty() ||
-					m_config_text != text; });
+					m_config_text != text || m_announce_now; });
+			m_announce_now = false;
 			if(m_stop)
 				return;
 		}
@@ -637,6 +638,7 @@ struct Module: public interface::Module, public Interface
 		}
 		// How people log in, as the listing says it (10c, 10g)
 		body.set("login", ids_mode_of(cfg) == "off" ? "local" : "both");
+		body.set("access", access_of(cfg));
 		body.set("app", m_server->get_app_id());
 		body.set("version", ss_(BUILDAT_VERSION));
 		body.set("port", (int64_t)atoi(m_server->get_config().get<ss_>("network_port").c_str()));
@@ -732,6 +734,26 @@ struct Module: public interface::Module, public Interface
 		return host.substr(0, host.find_first_of(":/"));
 	}
 
+	// **Access, from the Accounts page** (10g): local accounts open is
+	// open; invite only, with Starport IDs taken, is starport; else
+	// invite. A shared password or an account made elsewhere is the
+	// config's own word ("access": "password" or "external").
+	ss_ access_of(const json::Value &c)
+	{
+		const json::Value &a = c.get("access");
+		if(a.is_string() && (a.as_string() == "password" ||
+				a.as_string() == "external"))
+			return a.as_string();
+		bool open = false;
+		if(m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *acc){
+				open = acc->registration_open();
+			});
+		if(open)
+			return "open";
+		return ids_mode_of(c) != "off" ? "starport" : "invite";
+	}
+
 	// "ids", or what an older file's "login" meant
 	static ss_ ids_mode_of(const json::Value &c)
 	{
@@ -786,6 +808,16 @@ struct Module: public interface::Module, public Interface
 		return write_config(c);
 	}
 
+	bool m_announce_now = false;
+	void announce_soon()
+	{
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_announce_now = true;
+		}
+		m_wake.notify_all();
+	}
+
 	bool is_blocked(const ss_ &host, const ss_ &sub)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
@@ -813,6 +845,7 @@ struct Module: public interface::Module, public Interface
 		const json::Value c = config();
 		out.set("config", c.is_object() ? c : json::object());
 		out.set("path", config_path());
+		out.set("access_now", access_of(c));
 		out.set("message", message);
 		json::Value rows = json::array();
 		for(const ss_ &url : urls_of(c)){
