@@ -8,7 +8,7 @@
 -- One tile rather than one per game, so the sample does not crowd the
 -- grid the games' own tiles are on.
 return function(ctx)
-	local games = buildat.list_installed_games("luanti")
+	local games = buildat.list_installed_games("vanilla")
 	local game = nil
 	for _, g in ipairs(games) do
 		if not g.name:find("%.old") and

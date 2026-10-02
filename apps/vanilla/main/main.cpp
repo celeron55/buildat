@@ -2442,10 +2442,19 @@ struct Module: public interface::Module
 	// Under the user path, not the cache: a Luanti game the user installed
 	// and a world they have played are things they chose, and the cache is
 	// what the program can recreate by itself. See
-	// doc/plan/world_persistence_plan.md.
+	// doc/plan/world_persistence_plan.md. What vanilla shares with other
+	// apps, read-only to them ([PROCESS_SANDBOX]): the games, the texture
+	// packs, settings.json. Was <user>/luanti, moved at start by
+	// interface::fs::migrate_user_apps().
 	ss_ luanti_path()
 	{
-		return m_server->get_config().get<ss_>("user_path")+"/luanti";
+		return m_server->get_config().get<ss_>("user_path")+"/shared/vanilla";
+	}
+	// The imported Luanti worlds are vanilla's own: they hold their
+	// players' password hashes
+	ss_ worlds_path()
+	{
+		return m_server->get_config().get<ss_>("user_path")+"/apps/vanilla/worlds";
 	}
 
 	// world.mt's gameid, or "" for a directory that has no world.mt
@@ -2478,7 +2487,7 @@ struct Module: public interface::Module
 	sv_<World> list_worlds()
 	{
 		sv_<World> worlds;
-		ss_ dir = luanti_path()+"/worlds";
+		ss_ dir = worlds_path();
 		for(const interface::fs::Node &n : interface::fs::list_directory(dir)){
 			if(!n.is_directory || n.name == "." || n.name == "..")
 				continue;

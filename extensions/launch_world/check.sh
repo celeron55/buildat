@@ -217,7 +217,7 @@ fi
 # in a container the hold itself landed three minutes after the mouse
 # let go, which is a frame rate rather than a fault. Where there is no
 # game, the drive leaves that block out and the assertions below say so.
-games_installed=$(ls "$here/user/luanti/games" 2>/dev/null | wc -l)
+games_installed=$(ls "$here/user/shared/vanilla/games" 2>/dev/null | wc -l)
 
 # **The modules are compiled before any drive starts.** A server whose
 # rccpp cache is cold spends seven seconds compiling `main`, and in this
@@ -1091,14 +1091,14 @@ fi
 # The drive before this one ends by launching a game, so its client and
 # its server are on their way out while this one starts
 wait_quiet 40 || true
-cdb_game=$(ls "$here/user/luanti/games" 2>/dev/null | head -1)
+cdb_game=$(ls "$here/user/shared/vanilla/games" 2>/dev/null | head -1)
 if [ -z "$cdb_game" ]; then
 	echo "SKIP: no installed Luanti game to mirror for ContentDB" >&2
 	exit 2
 fi
 rm -rf "$out/cdb_mirror"; mkdir -p "$out/cdb_mirror"
 "$here/util/contentdb_mirror.sh" "$out/cdb_mirror" \
-	"$here/user/luanti/games/$cdb_game" Wuzzy "$cdb_game" "$cdb_game" \
+	"$here/user/shared/vanilla/games/$cdb_game" Wuzzy "$cdb_game" "$cdb_game" \
 	> /dev/null || { echo "SKIP: no ContentDB mirror" >&2; exit 2; }
 pkill -f "http.server 30211" 2>/dev/null || true
 (cd "$out/cdb_mirror" && exec python3 -m http.server 30211 \

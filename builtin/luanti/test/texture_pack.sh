@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [VOXEL_MATERIALS] layer 2's upgrade path: a texture pack under
-# user/luanti/texture_packs wins over what the game ships. The runner writes
+# user/shared/vanilla/texture_packs wins over what the game ships. The runner writes
 # a pack of one magenta stone texture, stands the player on camera.lua's
 # stone floor and reads how much of the floor is magenta; the pack is
 # removed after (it refuses to run if one of that name is already there).
@@ -13,7 +13,7 @@ here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/texture_pack"
 mkdir -p "$out"
-pack="$here/user/luanti/texture_packs/buildat_check_pack"
+pack="$here/user/shared/vanilla/texture_packs/buildat_check_pack"
 [ -e "$pack" ] && { echo "$pack is in the way" >&2; exit 2; }
 save=buildat_test_texture_pack
 cd "$here/Build"

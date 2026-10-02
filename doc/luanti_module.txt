@@ -13,7 +13,7 @@ milestones and the reasoning. What is written down here is what exists.
 Where the content lives
 -----------------------
 
-Games are scanned from user/luanti/games, worlds from user/luanti/worlds.
+Games are scanned from user/shared/vanilla/games, worlds from user/apps/vanilla/worlds.
 Those are buildat's own directories on purpose: nothing here reads the content
 of a real Luanti installation, and nothing here can write to one. A game is a
 directory with a game.conf; a world is a directory with a world.mt naming its
@@ -31,10 +31,10 @@ a fixture that is different on every machine.
 
 A real game, once there is one to point at:
 
-    $ mkdir -p user/luanti/games user/luanti/worlds
-    $ cp -r ~/projects/luanti/games/devtest user/luanti/games/devtest
-    $ mkdir user/luanti/worlds/devtest_world
-    $ printf 'gameid = devtest\n' > user/luanti/worlds/devtest_world/world.mt
+    $ mkdir -p user/shared/vanilla/games user/apps/vanilla/worlds
+    $ cp -r ~/projects/luanti/games/devtest user/shared/vanilla/games/devtest
+    $ mkdir user/apps/vanilla/worlds/devtest_world
+    $ printf 'gameid = devtest\n' > user/apps/vanilla/worlds/devtest_world/world.mt
     $ cd Build && bin/buildat_server -m ../apps/vanilla
 
 apps/vanilla runs the first world it finds, the one
@@ -44,7 +44,7 @@ nothing; it is what the module is tested against.
 The environment variables it reads, since none of them are in the client's -h:
 
     BUILDAT_LUANTI_GAME=<gameid>     Run this game at startup, no menu
-    BUILDAT_LUANTI_WORLD=<name>      Run this world under user/luanti/worlds
+    BUILDAT_LUANTI_WORLD=<name>      Run this world under user/apps/vanilla/worlds
     BUILDAT_LUANTI_SAVE=<name>       Which save the above two run in
     BUILDAT_LUANTI_LUA=<path>        Lua to load into the environment
     BUILDAT_LUANTI_IMPORT=<path>     Import ONE Luanti world directory into

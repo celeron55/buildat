@@ -39,9 +39,9 @@ git -C "$here" archive --format=tar HEAD > "$tarball"
 # The game media the full and long tiers want, from the host rather
 # than fetched again per run ([CI_RUNS] (4)): util/media_fetch.sh fills
 # it, and CI caches it keyed on the release ids that script prints
-media="${BUILDAT_MEDIA_DIR:-$here/user/luanti}"
+media="${BUILDAT_MEDIA_DIR:-$here/user/shared/vanilla}"
 mount_media=""
-[ -d "$media/games" ] && mount_media="-v $media:/work/buildat/user/luanti:z"
+[ -d "$media/games" ] && mount_media="-v $media:/work/buildat/user/shared/vanilla:z"
 docker run --rm -i \
 	-v "$out:/out:z" \
 	$mount_media \

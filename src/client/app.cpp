@@ -3075,14 +3075,14 @@ struct CApp: public App, public magic::Application
 	// menu/icon.png in its own directory under the user path, and a
 	// resource dir may only be added under the cache path
 	// (add_resource_dir()), so the file is copied there once, under
-	// <cache>/installed_games/<family>/<name>.png -- namespaced by family
-	// and game, so no two collide ([LAUNCH_API]). Returns the resource
-	// name to draw it by, or "" where the game ships no icon.
+	// <cache>/installed_games/<app>/<name>.png -- namespaced by app and
+	// game, so no two collide ([LAUNCH_API]). Returns the resource name to
+	// draw it by, or "" where the game ships no icon.
 	static ss_ installed_game_icon(lua_State *L, const ss_ &family,
 			const ss_ &name)
 	{
-		const ss_ from = g_client_config.get<ss_>("user_path")+"/"+family+
-				"/games/"+name+"/menu/icon.png";
+		const ss_ from = g_client_config.get<ss_>("user_path")+"/shared/"+
+				family+"/games/"+name+"/menu/icon.png";
 		if(!interface::fs::path_exists(from))
 			return "";
 		const ss_ root = g_client_config.get<ss_>("cache_path")+
@@ -3115,11 +3115,12 @@ struct CApp: public App, public magic::Application
 		return family+"/"+name+".png";
 	}
 
-	// list_installed_games(family) -> {{name =, size =, icon =}, ...}: the
-	// directories under <user>/<family>/games, for a launcher file that
-	// offers a tile per installed game of another engine's family --
-	// "luanti" is user/luanti/games. In the sandbox: read-only and only
-	// that one directory shape ([LAUNCH_GRID]).
+	// list_installed_games(app) -> {{name =, size =, icon =}, ...}: the
+	// directories under <user>/shared/<app>/games, for a launcher file that
+	// offers a tile per game another engine's app installed -- "vanilla"
+	// is the Luanti games ([PROCESS_SANDBOX]: what an app shares is
+	// <user>/shared/<app>). In the sandbox: read-only and only that one
+	// directory shape ([LAUNCH_GRID]).
 	//
 	// The size is the directory tree's, as list_apps() answers for a
 	// buildat game, and it is what a launch action carries as its
@@ -3129,8 +3130,9 @@ struct CApp: public App, public magic::Application
 	{
 		const ss_ family = lua_bindings::lua_tocppstring(L, 1);
 		if(!valid_app_name(family))
-			return luaL_error(L, "list_installed_games(): bad family");
-		const ss_ dir = g_client_config.get<ss_>("user_path")+"/"+family+"/games";
+			return luaL_error(L, "list_installed_games(): bad app");
+		const ss_ dir = g_client_config.get<ss_>("user_path")+"/shared/"+
+				family+"/games";
 		sv_<ss_> names;
 		for(const auto &n : interface::fs::list_directory(dir))
 			if(n.is_directory && valid_app_name(n.name))

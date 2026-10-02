@@ -44,8 +44,8 @@ jobs:
         run: echo "key=$(util/media_fetch.sh --key | md5sum | cut -c1-32)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
         with:
-          path: user/luanti
-          key: luanti-media-${{ steps.media.outputs.key }}
+          path: user/shared/vanilla
+          key: vanilla-media-${{ steps.media.outputs.key }}
       - name: Fetch what the cache did not have
         run: util/media_fetch.sh
       - name: The ${{ matrix.tier }} tier

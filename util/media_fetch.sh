@@ -1,6 +1,6 @@
 #!/bin/bash
 # The game media the full and long tiers want ([CI_RUNS] (4)), fetched
-# from ContentDB into <user>/luanti/games:
+# from ContentDB into <user>/shared/vanilla/games:
 #
 #   util/media_fetch.sh            install what is missing
 #   util/media_fetch.sh --key      print author/name and release id per
@@ -12,7 +12,7 @@
 # alone whatever release it is -- this is a fetch, not an updater.
 set -eu
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-dest="${BUILDAT_USER_DIR:-$here/user}/luanti/games"
+dest="${BUILDAT_USER_DIR:-$here/user}/shared/vanilla/games"
 url="${BUILDAT_CONTENTDB_URL:-https://content.luanti.org}"
 # author/name/installed-as. mineclone2 is VoxeLibre, and the runners
 # name it by the directory Luanti installs it under

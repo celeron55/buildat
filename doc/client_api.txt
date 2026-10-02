@@ -141,11 +141,12 @@ buildat.SpatialUpdateQueue() -> queue
   of things at positions that hands them out nearest first from where :set_p
   last said the viewer is. voxelworld's chunk meshing runs on one.
 
-buildat.list_installed_games(family) -> {{name =, size =, icon =}, ...}
-- Under <user>/<family>/games, for a launcher file's tiles. size is the
+buildat.list_installed_games(app) -> {{name =, size =, icon =}, ...}
+- Under <user>/shared/<app>/games, what an app shares with the others
+  ("vanilla": the Luanti games), for a launcher file's tiles. size is the
   directory tree's, as list_apps() answers for a buildat app; icon is the
   resource name of the game's own menu/icon.png, copied under the cache and
-  namespaced by family and game, and absent where the game ships none.
+  namespaced by app and game, and absent where the game ships none.
 
 Voxel data, in both environments (the sandbox's names are the same; the
 data model itself is under "Voxel data" and "Miscellaneous" below):

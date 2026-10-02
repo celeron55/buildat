@@ -431,7 +431,7 @@ prebuild_modules() {
 	find "$stage/cache" -mindepth 1 -maxdepth 1 ! -name rccpp_build -exec rm -rf {} +
 	rm -f "$stage"/cache/rccpp_build/*.compile.log
 	rm -rf "$stage/user/apps/vanilla/saves/prebuild"
-	rm -f "$stage"/user/luanti/settings.json
+	rm -f "$stage"/user/shared/vanilla/settings.json
 	local n
 	n=$(ls "$stage"/cache/rccpp_build/ 2>/dev/null | grep -c "\.\(so\|dll\)$" || true)
 	echo "prebuild: $n modules in the archive's cache"

@@ -17,8 +17,8 @@ buildat.list_saves        = __buildat_list_saves
 -- list_launchers() -> {{kind, name, path, launcher = bool}, ...}: every
 -- game, builtin and extension in the tree, for the launch grid
 buildat.list_launchers    = __buildat_list_launchers
--- list_installed_games(family) -> {{name =, size =, icon =}, ...} under
--- <user>/<family>/games; read-only, and in the sandbox too, for a launcher
+-- list_installed_games(app) -> {{name =, size =, icon =}, ...} under
+-- <user>/shared/<app>/games ("vanilla": the Luanti games); read-only, and in the sandbox too, for a launcher
 -- file's tiles. icon is the resource name of the game's own menu/icon.png
 -- where it ships one, and absent where it does not ([LAUNCH_API])
 buildat.list_installed_games = __buildat_list_installed_games

@@ -3,7 +3,7 @@
 # tier: quick
 # cost: 24s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # covers: src/client/command_seq.cpp src/client/command_seq.h
-# [KEY_BINDINGS]: a rebound key walks the player. user/luanti/settings.json
+# [KEY_BINDINGS]: a rebound key walks the player. user/shared/vanilla/settings.json
 # holds key.forward=U; a devtest client joins, holds U for three seconds,
 # and the scan's position has to have moved; the scan's keys line has to
 # say forward=U*. The settings.json is put back after. Prints PASS or FAIL.
@@ -13,8 +13,8 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_keys.XXXXXX")
 cd "$here/Build"
-settings=../user/luanti/settings.json
-mkdir -p ../user/luanti
+settings=../user/shared/vanilla/settings.json
+mkdir -p ../user/shared/vanilla
 [ -f "$settings" ] && cp "$settings" "$tmp/settings.json.bak"
 trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null;
 	if [ -f "$tmp/settings.json.bak" ]; then cp "$tmp/settings.json.bak" "$settings"; else rm -f "$settings"; fi;

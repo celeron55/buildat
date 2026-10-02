@@ -24,7 +24,7 @@ save=buildat_test_footstep
 port=31997
 GAME="${GAME:-minetest_game}"
 cd "$here/Build"
-[ -d "$here/user/luanti/games/$GAME" ] || {
+[ -d "$here/user/shared/vanilla/games/$GAME" ] || {
 	echo "SKIP: $GAME is not installed" >&2; exit "$SKIP"; }
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2

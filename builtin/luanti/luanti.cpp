@@ -5279,7 +5279,7 @@ struct Module: public interface::Module, public luanti::Interface
 	ss_ settings_render_mode()
 	{
 		std::ifstream f(m_server->get_config().get<ss_>("user_path")+
-				"/luanti/settings.json");
+				"/shared/vanilla/settings.json");
 		if(!f.good())
 			return "";
 		std::stringstream ss;
@@ -5298,18 +5298,18 @@ struct Module: public interface::Module, public luanti::Interface
 	// Luanti's own base textures -- blank.png, heart.png, bubble.png,
 	// what a game's HUD asks the engine for: the copy under the module
 	// (textures/base, with its licence), or the user's own if they put
-	// one at user/luanti/textures/base/pack, which wins
+	// one at user/shared/vanilla/textures/base/pack, which wins
 	ss_ base_textures_path()
 	{
 		const ss_ user = m_server->get_config().get<ss_>("user_path")+
-				"/luanti/textures/base/pack";
+				"/shared/vanilla/textures/base/pack";
 		if(interface::fs::path_exists(user))
 			return user;
 		return module_path()+"/textures/base/pack";
 	}
 
 	// The player's own texture packs: every directory under
-	// user/luanti/texture_packs, by name. They go in front of everything
+	// user/shared/vanilla/texture_packs, by name. They go in front of everything
 	// else, because first-one-wins is the rule below and a pack's whole
 	// point is to override what the game ships -- including the LabPBR
 	// sidecars the atlas reads ([VOXEL_MATERIALS] layer 2, whose upgrade
@@ -5317,7 +5317,7 @@ struct Module: public interface::Module, public luanti::Interface
 	void collect_texture_packs(sv_<ss_> &dirs)
 	{
 		const ss_ root = m_server->get_config().get<ss_>("user_path")+
-				"/luanti/texture_packs";
+				"/shared/vanilla/texture_packs";
 		if(!interface::fs::path_exists(root))
 			return;
 		sv_<ss_> names;
@@ -7008,7 +7008,7 @@ struct Module: public interface::Module, public luanti::Interface
 		ss_ m = !asked_mode.empty() ? asked_mode :
 				(mode != nullptr) ? ss_(mode) : ss_("");
 		// Neither side saying: the launcher game's setting
-		// (user/luanti/settings.json, its "render_mode"; [LAUNCH_GRID])
+		// (user/shared/vanilla/settings.json, its "render_mode"; [LAUNCH_GRID])
 		if(m.empty())
 			m = settings_render_mode();
 		if(m == "0")

@@ -24,7 +24,7 @@ rm -rf "../user/apps/vanilla/saves/$save"
 # The client takes it from the settings the module pushes at join, not
 # from a key, so it goes into the same file the settings screen writes --
 # which is the user's own, hence the copy back on the way out.
-settings="$here/user/luanti/settings.json"
+settings="$here/user/shared/vanilla/settings.json"
 if [ -n "${SHOULDER:-}" ]; then
 	# The backup's path is fixed here and not left to $out, which is
 	# reassigned two lines down: a trap body in single quotes expands at
@@ -130,7 +130,7 @@ print("behind, looking up: top %.0f bottom %.0f; down: top %.0f bottom %.0f" %
 		(r["behind_up"][0], r["behind_up"][1], r["behind_down"][0], r["behind_down"][1]))
 # And where the model is in the frame: centred it covers the crosshair,
 # over the shoulder it does not ([OVER_SHOULDER]; the setting's row in
-# user/luanti/settings.json says which this run drew)
+# user/shared/vanilla/settings.json says which this run drew)
 # Which view this run drew ([OVER_SHOULDER]): the patch at the crosshair
 # on the open stage, and how much of it is the model rather than the
 # world. The share is what to read and not the mean -- the mean moves

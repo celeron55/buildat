@@ -14,8 +14,8 @@ here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d "/tmp/buildat_keys_ui.XXXXXX")
 cd "$here/Build"
-settings=../user/luanti/settings.json
-mkdir -p ../user/luanti
+settings=../user/shared/vanilla/settings.json
+mkdir -p ../user/shared/vanilla
 [ -f "$settings" ] && cp "$settings" "$tmp/settings.json.bak"
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""

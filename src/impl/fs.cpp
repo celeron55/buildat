@@ -21,16 +21,54 @@ bool rename(const ss_ &from, const ss_ &to)
 	return std::rename(from.c_str(), to.c_str()) == 0;
 }
 
+// [PROCESS_SANDBOX]: <user>/luanti was a family's directory that every
+// app could write. What vanilla shares -- the Luanti games, texture packs,
+// textures and settings.json -- is <user>/shared/vanilla, which the other
+// apps can only read; the worlds hold their players' password hashes and
+// are vanilla's own, <user>/apps/vanilla/worlds. Moved entry by entry, and
+// one whose new place is taken stays where it is.
+static void migrate_user_luanti(const ss_ &user_path)
+{
+	const ss_ from = user_path+"/luanti";
+	if(!path_exists(from))
+		return;
+	const ss_ shared = user_path+"/shared/vanilla";
+	const ss_ own = user_path+"/apps/vanilla";
+	create_directories(shared);
+	create_directories(own);
+	for(const Node &n : list_directory(from)){
+		if(n.name == "." || n.name == "..")
+			continue;
+		const ss_ to = (n.name == "worlds" ? own : shared)+"/"+n.name;
+		if(path_exists(to)){
+			log_w(MODULE, "Not moving %s/%s: %s is there already",
+					cs(from), cs(n.name), cs(to));
+		} else if(rename(from+"/"+n.name, to)){
+			log_i(MODULE, "Moved %s/%s to %s", cs(from), cs(n.name), cs(to));
+		} else {
+			log_w(MODULE, "Could not move %s/%s to %s",
+					cs(from), cs(n.name), cs(to));
+		}
+	}
+	// Only if it is empty now: rmdir refuses one that is not
+#ifdef _WIN32
+	RemoveDirectoryA(from.c_str());
+#else
+	rmdir(from.c_str());
+#endif
+}
+
 void migrate_user_apps(const ss_ &user_path)
 {
 	const ss_ from = user_path+"/games";
 	const ss_ to = user_path+"/apps";
-	if(!path_exists(from) || path_exists(to))
-		return;
-	if(rename(from, to))
-		log_i(MODULE, "Moved %s to %s: apps were called games", cs(from), cs(to));
-	else
-		log_w(MODULE, "Could not move %s to %s", cs(from), cs(to));
+	if(path_exists(from) && !path_exists(to)){
+		if(rename(from, to))
+			log_i(MODULE, "Moved %s to %s: apps were called games", cs(from), cs(to));
+		else
+			log_w(MODULE, "Could not move %s to %s", cs(from), cs(to));
+	}
+	migrate_user_luanti(user_path);
 }
 
 bool check_file_extension(const char *path, const char *ext)

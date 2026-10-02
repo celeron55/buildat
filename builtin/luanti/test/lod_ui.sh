@@ -18,8 +18,8 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_lod_ui.XXXXXX")
 cd "$here/Build"
-settings=../user/luanti/settings.json
-mkdir -p ../user/luanti
+settings=../user/shared/vanilla/settings.json
+mkdir -p ../user/shared/vanilla
 [ -f "$settings" ] && cp "$settings" "$tmp/settings.json.bak"
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
@@ -31,7 +31,7 @@ bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
 cli=$!
 exec 3> "$fifo"
-python3 - "$tmp/cli.log" "$fifo" "$here/user/luanti/settings.json" <<'PY'
+python3 - "$tmp/cli.log" "$fifo" "$here/user/shared/vanilla/settings.json" <<'PY'
 import re, sys, time
 log, fifo, settings = sys.argv[1], sys.argv[2], sys.argv[3]
 out = open(fifo, "w")

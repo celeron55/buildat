@@ -6,7 +6,7 @@
 # they were, the seed is copied out of its field and pasted into the name
 # with Ctrl+C and Ctrl+V, and the mapgen picked on the screen is the one
 # written into the new world's world.mt. Needs VoxeLibre installed under
-# user/luanti/games, which drive.sh's menu runs want too.
+# user/shared/vanilla/games, which drive.sh's menu runs want too.
 #
 #   builtin/luanti/test/new_world.sh
 set -u

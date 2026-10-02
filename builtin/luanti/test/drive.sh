@@ -78,7 +78,7 @@ if [ -n "${MENU_RUN:-}" ]; then
 		tmp=$(mktemp -d /tmp/buildat_menu_run.XXXXXX)
 		mkdir -p "$tmp/data" "$tmp/cache" "$tmp/mirror"
 		"$here/util/contentdb_mirror.sh" "$tmp/mirror" \
-			"$here/user/luanti/games/$GAME" Wuzzy "$GAME" VoxeLibre >/dev/null
+			"$here/user/shared/vanilla/games/$GAME" Wuzzy "$GAME" VoxeLibre >/dev/null
 		# A mirror left by an interrupted run answers 404 from a deleted
 		# directory; exec, so the trap's kill reaches python itself
 		pkill -f "http.server $((port + 200))" 2>/dev/null || true

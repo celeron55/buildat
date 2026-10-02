@@ -42,7 +42,9 @@ namespace interface
 		// **Apps were games** (2026-10-02): <user>/games, where what an
 		// app keeps lived, to <user>/apps, once, when there is no apps yet.
 		// Both the server and the client do it as they start, so a save or
-		// a setting kept by an older version is where this one looks.
+		// a setting kept by an older version is where this one looks. And
+		// <user>/luanti ([PROCESS_SANDBOX], 2026-10-02): its worlds to
+		// <user>/apps/vanilla/worlds, the rest to <user>/shared/vanilla.
 		void migrate_user_apps(const ss_ &user_path);
 
 		// Bytes in a regular file; 0 if missing or not a regular file.

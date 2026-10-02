@@ -3,7 +3,7 @@
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 -- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
--- One tile per Luanti game installed under user/luanti/games -- devtest,
+-- One tile per Luanti game installed under user/shared/vanilla/games -- devtest,
 -- VoxeLibre, whatever is there -- which is why the launch grid asks every
 -- time it is shown ([LAUNCH_GRID]). What a tile starts is the game's
 -- server through apps/vanilla with the game's name as the one
@@ -13,7 +13,7 @@
 local PRETTY = {mineclone2 = "VoxeLibre", minetest_game = "Minetest Game"}
 return function(ctx)
 	local out = {}
-	for i, g in ipairs(buildat.list_installed_games("luanti")) do
+	for i, g in ipairs(buildat.list_installed_games("vanilla")) do
 		local name = g.name
 		if not name:find("%.old") then
 			-- **A game says it is a game, with its own picture and its

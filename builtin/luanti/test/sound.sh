@@ -42,7 +42,7 @@ out="$here/local/sound"; mkdir -p "$out"
 save=buildat_test_sound
 port=31998
 cd "$here/Build"
-[ -d "$here/user/luanti/games/devtest" ] || {
+[ -d "$here/user/shared/vanilla/games/devtest" ] || {
 	echo "SKIP: devtest is not installed" >&2; exit 77; }
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2; exit 77
