@@ -47,14 +47,23 @@ grep -q "Listening at" "$log" || { echo "smoke: no Listening in 900 s" >&2; tail
 python3 "$here/util/test_web_transport.py" "127.0.0.1:$port"
 # **And the page runs** ([WEB_BLANK]): the transport test passed the 0.5.67
 # web client, which came up black -- its scripts raised in the browser's
-# Lua. A headless Firefox loads the page: the game's first script has to
-# run, and nothing may fail to. Needs Firefox and Node 22 (web_drive.sh);
-# without them CI fails and a desk says so and goes on.
+# Lua. A headless browser loads the page: the game's first script has to
+# run, and nothing may fail to. Chrome where there is one, since it draws
+# with SwiftShader where there is no GPU (a CI runner, where Firefox's
+# WebGL could not make a context); else Firefox. Needs Node 22
+# (web_drive.sh); without a browser or it CI fails, and a desk says so and
+# goes on.
 node_major=$(node --version 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p')
-if command -v firefox >/dev/null 2>&1 && [ "${node_major:-0}" -ge 22 ]; then
+browser=""
+if command -v "${CHROME:-google-chrome}" >/dev/null 2>&1; then
+	browser=chrome
+elif command -v firefox >/dev/null 2>&1; then
+	browser=firefox
+fi
+if [ -n "$browser" ] && [ "${node_major:-0}" -ge 22 ]; then
 	page_out=$(mktemp -d /tmp/buildat_smoke_web_page.XXXXXX)
 	if ! WEB_DRIVE_URL="http://127.0.0.1:$port/" "$here/util/web_drive.sh" \
-			firefox floorplanner "$here/util/web_page_smoke.json" "$page_out" ||
+			"$browser" floorplanner "$here/util/web_page_smoke.json" "$page_out" ||
 			grep -aq "Failed to run" "$page_out/page.log"; then
 		echo "smoke: the web client's page did not run its scripts:" >&2
 		grep -a "Failed to run\| E \|rror" "$page_out/page.log" | head -10 >&2
@@ -63,12 +72,12 @@ if command -v firefox >/dev/null 2>&1 && [ "${node_major:-0}" -ge 22 ]; then
 	fi
 	[ -n "${SMOKE_LOG:-}" ] && cp "$page_out/page.png" "$(dirname "$SMOKE_LOG")/page.png"
 	rm -rf "$page_out"
-	echo "smoke: the web client's page ran its scripts in Firefox"
+	echo "smoke: the web client's page ran its scripts in $browser"
 elif [ -n "${CI:-}" ]; then
-	echo "smoke: no Firefox or no Node 22 here, and the page is not checked" >&2
+	echo "smoke: no browser or no Node 22 here, and the page is not checked" >&2
 	exit 1
 else
-	echo "smoke: no Firefox or no Node 22 here; the page itself is not checked"
+	echo "smoke: no browser or no Node 22 here; the page itself is not checked"
 fi
 docker logs "$name" > "$log" 2>&1 || true
 if [ -n "$precompiled" ]; then
