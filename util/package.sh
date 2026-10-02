@@ -257,8 +257,9 @@ make_one() {
 	# compiles for the building machine unless told otherwise, and a DLL
 	# with AVX-512 in a static initialiser dies on any other box before the
 	# smoke, which runs on the same machine, can see it. Every shipped exe,
-	# DLL and .so disassembled; a zmm register, a ymm one or vpternlog
-	# fails the packaging.
+	# DLL and .so disassembled; a %zmm register, a %ymm one or vpternlog
+	# fails the packaging. A register only, with its %: a bare "ymm" is
+	# also in a symbol name, psa_asymmetric_encrypt.
 	if ! command -v objdump >/dev/null 2>&1; then
 		echo "package.sh: no objdump to check the shipped binaries with (binutils)" >&2
 		return 1
@@ -266,7 +267,7 @@ make_one() {
 	{
 		bad=""
 		while IFS= read -r f; do
-			n=$(objdump -d "$f" 2>/dev/null | grep -cE 'zmm|ymm|vpternlog' || true)
+			n=$(objdump -d "$f" 2>/dev/null | grep -cE '%[yz]mm|vpternlog' || true)
 			[ "$n" -gt 0 ] && bad="$bad $(basename "$f")=$n"
 		done < <(find "$stage" -type f \( -name '*.exe' -o -name '*.dll' -o -name '*.so' -o -name '*.so.*' -o -name 'buildat' -o -name 'buildat_server' \) )
 		if [ -n "$bad" ]; then
