@@ -100,9 +100,12 @@ struct PipeSocket: public interface::TCPSocket
 			return false;
 		if(offset >= data.size())
 			return true;
+		// A piece that fits the pipe's buffer: a non-blocking write larger
+		// than the room left writes nothing, and was tried again for good
+		// (Wine, 2026-10-03: the announce went and the files never did)
+		const size_t piece = std::min<size_t>(data.size() - offset, 16384);
 		DWORD n = 0;
-		if(!WriteFile(m_pipe, &data[offset], (DWORD)(data.size() - offset),
-				&n, nullptr))
+		if(!WriteFile(m_pipe, &data[offset], (DWORD)piece, &n, nullptr))
 			return false;
 		*sent = n;
 		return true;

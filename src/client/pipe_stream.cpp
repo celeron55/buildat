@@ -15,6 +15,7 @@
 #include <userenv.h>
 #include <sddl.h>
 #undef interface
+#include <algorithm>
 #define MODULE "pipe"
 
 namespace client {
@@ -47,9 +48,10 @@ struct CPipeStream: public Wss
 	{
 		size_t at = 0;
 		while(at < data.size()){
+			// A piece that fits the pipe's buffer, as the server's side
+			const DWORD piece = (DWORD)std::min<size_t>(data.size() - at, 16384);
 			DWORD n = 0;
-			if(!WriteFile(m_pipe, &data[at], (DWORD)(data.size() - at), &n,
-					nullptr))
+			if(!WriteFile(m_pipe, &data[at], piece, &n, nullptr))
 				return false;
 			at += n;
 			if(n == 0)

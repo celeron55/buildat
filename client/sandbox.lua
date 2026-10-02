@@ -80,12 +80,20 @@ local function unwrap(n, a)
 	return unpack(a, 1, n)
 end
 
+-- **Only a method is wrapped** (2026-10-03, [WEB_BLANK]): a function at
+-- a module's own level (magic.SubscribeToEvent, buildat.storage_read) is
+-- handed out as it is, since it reads its caller's frame -- getfenv(2),
+-- debug.getinfo -- and the web client's Lua 5.1 raises "no function
+-- environment for tail call" through a wrapper, which blanked the 0.5.67
+-- web client. A function a level further in (uistack.main.push) is
+-- wrapped, so that a view passed to it as self is the table again.
 local view
-local function shown(v)
+local depth_of = setmetatable({}, {__mode = "k"}) -- view -> its depth
+local function shown(v, depth)
 	local t = type(v)
 	if t == "table" then
-		return view(v)
-	elseif t == "function" then
+		return view(v, depth + 1)
+	elseif t == "function" and depth >= 2 then
 		local w = wrapper_of[v]
 		if not w then
 			w = function(...)
@@ -99,7 +107,8 @@ local function shown(v)
 	return v
 end
 
-view = function(t)
+view = function(t, depth)
+	depth = depth or 1
 	if real_of[t] then return t end
 	-- A wrapped object (magic.ui.root) has its own __newindex, which is
 	-- the sandbox's way of setting a property, and it checks the write
@@ -108,7 +117,7 @@ view = function(t)
 	local p = view_of[t]
 	if p then return p end
 	p = setmetatable({}, {
-		__index = function(_, k) return shown(t[k]) end,
+		__index = function(_, k) return shown(t[k], depth) end,
 		__newindex = function(_, k)
 			error("sandbox: "..tostring(k).." is read-only here", 2)
 		end,
@@ -117,13 +126,14 @@ view = function(t)
 	})
 	view_of[t] = p
 	real_of[p] = t
+	depth_of[p] = depth
 	return p
 end
 
 -- Iterating a view walks the table under it
 local function view_next(p, k)
 	local nk, v = next(real_of[p], k)
-	return nk, shown(v)
+	return nk, shown(v, depth_of[p] or 1)
 end
 __buildat_sandbox_environment.next = function(t, k)
 	if real_of[t] then return view_next(t, k) end
@@ -139,7 +149,7 @@ __buildat_sandbox_environment.ipairs = function(t)
 	return function(_, i)
 		i = i + 1
 		local v = r[i]
-		if v ~= nil then return i, shown(v) end
+		if v ~= nil then return i, shown(v, depth_of[t] or 1) end
 	end, t, 0
 end
 -- The standard tables too, one sandboxed script not rewriting
