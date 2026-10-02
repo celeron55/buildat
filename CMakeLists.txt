@@ -457,6 +457,7 @@ if(BUILD_CLIENT)
 	set(CLIENT_SRCS
 		src/client/main.cpp
 		src/client/state.cpp
+		src/client/wss.cpp
 		src/client/app.cpp
 		src/client/config.cpp
 		src/client/command_seq.cpp

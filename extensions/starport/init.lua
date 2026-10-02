@@ -317,6 +317,18 @@ local function passes(f, x)
 	return true
 end
 
+-- A server behind a proxy with TLS (its listing's tls) is joined by
+-- "https://host:port", the port always said, so that the address a client
+-- is connected to finds its row however it was typed
+local function canonical(address)
+	local host, rest = tostring(address):match("^https://([^/]-)(:?%d*)/?$")
+	if not host then
+		return address
+	end
+	return "https://" .. host .. ":" .. (rest ~= "" and rest:sub(2) or "443")
+end
+M.canonical_address = canonical
+
 -- simplified: one server on two Starports is one row by its address; its
 -- listings there are separate keys, as each Starport made its own secret
 local function merge(by_starport)
@@ -325,7 +337,8 @@ local function merge(by_starport)
 		local url, servers = pair[1], pair[2]
 		for _, x in ipairs(servers) do
 			if type(x) == "table" and x.host and x.port then
-				local addr = tostring(x.host) .. ":" .. tostring(x.port)
+				local addr = (x.tls and "https://" or "") .. tostring(x.host) ..
+						":" .. tostring(x.port)
 				local row = at[addr]
 				if not row then
 					row = {}
@@ -1270,6 +1283,9 @@ end
 -- first time, in this side's own dialog.
 function M.safe.id_token_here(cb)
 	local address = __buildat_server_address()
+	if address then
+		address = canonical(address)
+	end
 	if not address then
 		return cb(nil, "not connected")
 	end
@@ -1335,7 +1351,8 @@ function M.safe.id_token_here(cb)
 		end
 		local function ask(name)
 			id_call(url, "token", {session = s.ids[url].session,
-				listing = listing, address = address, name = name},
+				listing = listing, address = address:gsub("^https://", ""),
+				name = name},
 					function(res, err, away)
 				if not res and away then
 					return offline(err)

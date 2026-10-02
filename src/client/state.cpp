@@ -4,6 +4,7 @@
 #include "client/state.h"
 #include "client/app.h"
 #include "client/config.h"
+#include "client/wss.h"
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
 #include "interface/sha1.h"
@@ -107,6 +108,9 @@ struct CheckAnnouncedTask: public interface::thread_pool::Task
 struct CState: public State
 {
 	sp_<interface::TCPSocket> m_socket;
+	// A server behind a proxy with TLS: the stream is in a WebSocket over
+	// TLS on m_socket (client/wss.h)
+	std::unique_ptr<client::Wss> m_wss;
 	std::deque<char> m_socket_buffer;
 	interface::PacketStream m_packet_stream;
 	sp_<app::App> m_app;
@@ -229,6 +233,7 @@ struct CState: public State
 			m_connect_thread.join();
 		m_connect_result.store(0);
 		m_connect_error = "";
+		m_wss.reset();
 		m_socket = sp_<interface::TCPSocket>(interface::createTCPSocket());
 		m_socket_buffer.clear();
 		m_parsed.clear();
@@ -260,7 +265,7 @@ struct CState: public State
 		// handled, the socket is left alone and the server waits, as
 		// before.
 		for(int i = 0; i < 1000 && backlog_bytes() < READ_AHEAD_BYTES &&
-				m_socket->wait_data(0); i++){
+				((m_wss && m_wss->pending()) || m_socket->wait_data(0)); i++){
 			if(!read_socket())
 				break;
 		}
@@ -317,6 +322,18 @@ struct CState: public State
 		}
 
 		bool ok = m_socket->connect_fd(address, port);
+		if(ok && m_wss){
+			const ss_ why = m_wss->start(address, port,
+					g_client_config.get<ss_>("share_path")+
+					"/extensions/network/ca-bundle.pem");
+			if(!why.empty()){
+				log_w(MODULE, "client::State: %s", cs(why));
+				if(error)
+					*error = why;
+				m_socket->close_fd();
+				return false;
+			}
+		}
 		if(ok){
 			log_i(MODULE, "client::State: Connect succeeded (%s:%s)",
 					cs(address), cs(port));
@@ -329,7 +346,7 @@ struct CState: public State
 			// main thread keeps off until the result is stored.
 			m_packet_stream.define("core:request_files",
 					[&](const ss_ &packet_data, bool droppable){
-				m_socket->send_fd(packet_data);
+				send_raw(packet_data);
 			});
 		} else {
 			log_i(MODULE, "client::State: Connect failed (%s:%s)",
@@ -359,6 +376,14 @@ struct CState: public State
 		}
 		ss_ host;
 		ss_ port;
+		// "https://host": a server behind a proxy with TLS. The web
+		// client's socket is a secure WebSocket on an https page already.
+		if(client::parse_secure_address(address, &host, &port)){
+#ifndef __EMSCRIPTEN__
+			m_wss.reset(client::create_wss(m_socket.get()));
+#endif
+			return connect_host_port(host, port, error);
+		}
 		c55::Strfnd f(address);
 		if(address[0] == '['){
 			f.next("[");
@@ -381,6 +406,14 @@ struct CState: public State
 		return connect_host_port(host, port, error);
 	}
 
+	void send_raw(const ss_ &data)
+	{
+		if(m_wss)
+			m_wss->send(data);
+		else
+			m_socket->send_fd(data);
+	}
+
 	void send_packet(const ss_ &name, const ss_ &data)
 	{
 		log_v(MODULE, "send_packet(): name=%s", cs(name));
@@ -388,7 +421,7 @@ struct CState: public State
 				[&](const ss_ &packet_data, bool droppable){
 			// Nothing is dropped here: the client's socket write blocks and
 			// the server is the end that has a queue policy
-			m_socket->send_fd(packet_data);
+			send_raw(packet_data);
 		});
 	}
 
@@ -491,6 +524,18 @@ struct CState: public State
 	// Whether something was read and more may be waiting
 	bool read_socket()
 	{
+		if(m_wss){
+			ss_ got, why;
+			const int n = m_wss->read(got, &why);
+			if(n < 0)
+				lost_connection(why);
+			if(n <= 0)
+				return false;
+			m_last_data_us = get_timeofday_us();
+			m_socket_buffer.insert(m_socket_buffer.end(), got.begin(),
+					got.end());
+			return !m_disconnected;
+		}
 		int fd = m_socket->fd();
 		char buf[100000];
 		ssize_t r = recv(fd, buf, 100000, 0);

@@ -80,10 +80,11 @@ int main(int argc, char *argv[])
 	client::Config &config = g_client_config;
 
 	const char opts[100] = "hs:P:C:D:U:l:L:m:u:w:o:c:Ra:";
-	const char usagefmt[1400] =
+	const char usagefmt[] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
-			"  -s [address]         Specify server address\n"
+			"  -s [address]         Specify server address: host[:port], or\n"
+			"                       https://host[:port] behind a TLS proxy\n"
 			"  -P [share_path]      Specify share/ path\n"
 			"  -C [cache_path]      Specify cache/ path\n"
 			"  -D [user_path]       Specify user/ path\n"
