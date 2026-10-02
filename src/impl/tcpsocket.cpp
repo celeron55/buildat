@@ -16,6 +16,7 @@
 //typedef int socket_t;
 #endif
 #include <string.h> // strerror()
+#include <stdlib.h> // getenv()
 #include <iostream>
 #include <iomanip>
 
@@ -109,6 +110,74 @@ struct CTCPSocket: public TCPSocket
 		}
 		return true;
 	}
+	static bool connect_with_timeout(int fd, const struct sockaddr *addr,
+			socklen_t addrlen, int timeout_ms)
+	{
+#ifdef _WIN32
+		u_long on = 1;
+		ioctlsocket(fd, FIONBIO, &on);
+#else
+		const int flags = fcntl(fd, F_GETFL, 0);
+		fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+		bool ok = false;
+		int r = connect(fd, addr, addrlen);
+		if(r == 0){
+			ok = true;
+		} else {
+#ifdef _WIN32
+			const bool pending = WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+			const bool pending = errno == EINPROGRESS;
+#endif
+#ifdef __EMSCRIPTEN__
+			// The web client's socket is a WebSocket ([WEB_CLIENT]): a
+			// select cannot wait for it to open, and it need not, because
+			// what is sent before it is open is queued for it. A server
+			// that is not there shows as the connection closing.
+			if(pending)
+				ok = true;
+			else
+#endif
+			if(pending){
+				fd_set wfds;
+				FD_ZERO(&wfds);
+				FD_SET(fd, &wfds);
+				struct timeval tv = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
+				if(select(fd + 1, NULL, &wfds, NULL, &tv) > 0){
+					int soerr = 0;
+					socklen_t len = sizeof(soerr);
+					if(getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&soerr,
+							&len) == 0 && soerr == 0)
+						ok = true;
+					else
+						std::cerr<<"connect: error "<<soerr<<std::endl;
+				} else {
+					std::cerr<<"connect: no answer in "<<timeout_ms<<" ms"<<std::endl;
+				}
+			} else {
+#ifndef _WIN32
+				// [PROCESS_SANDBOX]: the box refuses a port at once
+				if(errno == EACCES && addr->sa_family != AF_UNIX){
+					const int p = ntohs(addr->sa_family == AF_INET6 ?
+							((const sockaddr_in6*)addr)->sin6_port :
+							((const sockaddr_in*)addr)->sin_port);
+					std::cerr<<"connect: the server's box refused port "<<p<<
+							"; its admin allows it with --connect-ports"<<std::endl;
+				} else
+#endif
+				std::cerr<<"connect: "<<strerror(errno)<<std::endl;
+			}
+		}
+#ifdef _WIN32
+		on = 0;
+		ioctlsocket(fd, FIONBIO, &on);
+#else
+		fcntl(fd, F_SETFL, flags);
+#endif
+		return ok;
+	}
+
 	bool connect_fd(const ss_ &address, const ss_ &port)
 	{
 		close_fd();
@@ -144,8 +213,16 @@ struct CTCPSocket: public TCPSocket
 				std::cerr<<"socket: "<<strerror(errno)<<std::endl;
 				continue;
 			}
-			if(connect(try_fd, res->ai_addr, res->ai_addrlen) == -1){
-				std::cerr<<"connect: "<<strerror(errno)<<std::endl;
+			// A connect with a ceiling, not a blocking one: the client's
+			// main thread sat in Winsock's connect for good when it
+			// connected to a local server that was not yet listening (the
+			// box's dump, 2026-09-21 -- the waiting screen had read a
+			// stale "Listening"); on Windows a SYN to a closed port is
+			// retried for seconds, and nothing in the frame loop ran.
+			// Non-blocking, a select of five seconds, then blocking again
+			// for the stream the socket is used as ([WIN8_START] 14).
+			if(!connect_with_timeout(try_fd, res->ai_addr, res->ai_addrlen,
+					5000)){
 				closesocket(try_fd);
 				continue;
 			}
@@ -222,6 +299,16 @@ struct CTCPSocket: public TCPSocket
 			int val = 1;
 			setsockopt(try_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&val,
 					sizeof(val));
+#ifdef SO_REUSEPORT
+			// **The port shared with a stand-in** that answers browsers
+			// while the server restarts (util/serve_latest_release.sh), only
+			// when asked: otherwise a second server on the port fails to
+			// bind, as it should
+			const char *share = getenv("BUILDAT_SHARE_PORT");
+			if(share && strcmp(share, "1") == 0)
+				setsockopt(try_fd, SOL_SOCKET, SO_REUSEPORT, (const char*)&val,
+						sizeof(val));
+#endif
 			if(res->ai_family == AF_INET6){
 				int val = 1;
 				setsockopt(try_fd, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&val,
@@ -272,24 +359,104 @@ struct CTCPSocket: public TCPSocket
 		int val = 1;
 		setsockopt(fd_client, SOL_SOCKET, SO_REUSEADDR, (const char*)&val,
 				sizeof(val));
+		// A small send buffer, so that what waits for a slow peer waits in
+		// the network module's queue, where a LatestOnly packet can go
+		// ahead of it ([NET_CHANNELS]) -- not in the kernel, where the
+		// autotuned 4 MB is minutes at a lossy link's rate and nothing
+		// passes it. simplified: 64 KB a round trip caps a peer at some
+		// 800 kB/s over 80 ms; a transport with its own window ([TRANSPORT])
+		// lifts this.
+		int sndbuf = 64 * 1024;
+		setsockopt(fd_client, SOL_SOCKET, SO_SNDBUF, (const char*)&sndbuf,
+				sizeof(sndbuf));
 
 		m_fd = fd_client;
 		return true;
 	}
+#ifdef __EMSCRIPTEN__
+	// The web client's socket is a WebSocket ([WEB_CLIENT]), which refuses
+	// a send while it is still opening, and a browser never blocks: what
+	// does not go now waits here, and goes on the next send or wait_data()
+	ss_ m_web_unsent;
+	bool flush_web_unsent()
+	{
+		if(m_web_unsent.empty())
+			return true;
+		ssize_t n = send(m_fd, &m_web_unsent[0], m_web_unsent.size(), 0);
+		if(n < 0){
+			if(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+				return true;
+			std::cerr<<"send: "<<strerror(errno)<<std::endl;
+			return false;
+		}
+		m_web_unsent.erase(0, (size_t)n);
+		return true;
+	}
+#endif
 	bool send_fd(const ss_ &data)
 	{
 		if(m_fd == -1)
 			return false;
+#ifdef __EMSCRIPTEN__
+		m_web_unsent += data;
+		return flush_web_unsent();
+#endif
 		if(send(m_fd, &data[0], data.size(), 0) == -1){
 			std::cerr<<"send: "<<strerror(errno)<<std::endl;
 			return false;
 		}
 		return true;
 	}
+	bool set_nonblocking(bool nonblocking)
+	{
+		if(m_fd == -1)
+			return false;
+#ifdef _WIN32
+		u_long on = nonblocking ? 1 : 0;
+		return ioctlsocket(m_fd, FIONBIO, &on) == 0;
+#else
+		int flags = fcntl(m_fd, F_GETFL, 0);
+		if(flags == -1)
+			return false;
+		if(nonblocking)
+			flags |= O_NONBLOCK;
+		else
+			flags &= ~O_NONBLOCK;
+		return fcntl(m_fd, F_SETFL, flags) == 0;
+#endif
+	}
+	// What fits, and how much that was. A socket whose buffer is full is not
+	// an error: nothing goes, `sent` is zero and the caller keeps the rest.
+	bool send_some(const ss_ &data, size_t offset, size_t *sent)
+	{
+		*sent = 0;
+		if(m_fd == -1)
+			return false;
+		if(offset >= data.size())
+			return true;
+		ssize_t n = send(m_fd, &data[offset], data.size() - offset, 0);
+		if(n < 0){
+#ifdef _WIN32
+			// Winsock says "would block" its own way, and errno says nothing
+			if(WSAGetLastError() == WSAEWOULDBLOCK)
+				return true;
+#else
+			if(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+				return true;
+#endif
+			std::cerr<<"send: "<<strerror(errno)<<std::endl;
+			return false;
+		}
+		*sent = (size_t)n;
+		return true;
+	}
 	bool wait_data(int timeout_us)
 	{
 		if(m_fd == -1)
 			return false;
+#ifdef __EMSCRIPTEN__
+		flush_web_unsent();
+#endif
 
 		struct timeval tv;
 		tv.tv_sec = 0;
@@ -350,6 +517,13 @@ TCPSocket* createTCPSocket(int fd)
 	return new CTCPSocket(fd);
 }
 
+// Whether something accepts on the address, within 50 ms: a non-blocking
+// connect and a select on it. A blocking connect here stalled the
+// launcher's waiting screen, which asks every frame -- Winsock retries a
+// SYN to a closed port for about a second, and behind the firewall's
+// first-run prompt the connect timeout -- so the screen froze and the
+// client never came back ([WIN8_START]). A port that is not listening
+// yet answers "no" inside the 50 ms on every platform.
 bool probe_connect(const ss_ &address, const ss_ &port)
 {
 	struct addrinfo hints;
@@ -366,8 +540,35 @@ bool probe_connect(const ss_ &address, const ss_ &port)
 		int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if(fd == -1)
 			continue;
-		if(connect(fd, res->ai_addr, res->ai_addrlen) == 0)
+#ifdef _WIN32
+		u_long on = 1;
+		ioctlsocket(fd, FIONBIO, &on);
+#else
+		fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+#endif
+		int r = connect(fd, res->ai_addr, res->ai_addrlen);
+		if(r == 0){
 			ok = true;
+		} else {
+#ifdef _WIN32
+			const bool pending = WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+			const bool pending = errno == EINPROGRESS;
+#endif
+			if(pending){
+				fd_set wfds;
+				FD_ZERO(&wfds);
+				FD_SET(fd, &wfds);
+				struct timeval tv = {0, 50000};
+				if(select(fd + 1, NULL, &wfds, NULL, &tv) > 0){
+					int soerr = 0;
+					socklen_t len = sizeof(soerr);
+					if(getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&soerr,
+							&len) == 0 && soerr == 0)
+						ok = true;
+				}
+			}
+		}
 		closesocket(fd);
 		if(ok)
 			break;

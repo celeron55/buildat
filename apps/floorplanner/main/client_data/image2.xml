@@ -1,0 +1,4 @@
+<!-- A picture traced over, one of eight: see build_images() in editor.lua -->
+<material>
+	<technique name="Techniques/DiffVColUnlitAlpha.xml" />
+</material>

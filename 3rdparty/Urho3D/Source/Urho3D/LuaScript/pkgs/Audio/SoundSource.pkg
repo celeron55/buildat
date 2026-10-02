@@ -7,6 +7,7 @@ class SoundSource : public Component
 {
     void Seek(float seekTime);
     void Play(Sound* sound);
+    void Play(SoundStream* stream);
     void Play(Sound* sound, float frequency);
     void Play(Sound* sound, float frequency, float gain);
     void Play(Sound* sound, float frequency, float gain, float panning);

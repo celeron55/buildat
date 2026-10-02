@@ -105,7 +105,7 @@ not to do that has neither a visible colour nor a visible shadow. With the
 curve in, the sun is about fifty times the sky -- roughly what it is -- so a
 lit surface takes the sun's own warm colour instead of a mixture with the
 sky's, and the same curve lifts the shadows, so a shadow under full skylight
-reads as shade rather than as a hole. games/voxel_lighting arrived at the same
+reads as shade rather than as a hole. apps/voxel_lighting arrived at the same
 numbers for the same reasons.
 
 Where the sun and the moon are for the purpose of casting a shadow is stepped
@@ -241,7 +241,7 @@ srp.lua         The client half of the SRP-6a login, on buildat.bignum
 client.lua      The commands: the login, the map blocks, and dispatch for the
                 rest
 nodedef.lua     NODEDEF: what a node id is called, how it is drawn, its tiles
-media.lua       The server's media files, in cache/luanti_media/<server>/
+media.lua       The server's media files, in cache/luanti_client/<server>/ (buildat.cache_write)
 player.lua      The player's box: the keys, gravity, and collision against
                 the nodes
 shapes.lua      Luanti's node shapes, as the quads a voxel definition takes
@@ -275,6 +275,16 @@ texmod.lua      Luanti's texture modifier language, as compose_image()
 world.lua       The scene: a node per map block, with buildat's voxel mesher
                 on it, and the voxel registry the node definitions build
 engine_test.lua Checks of the engine primitives, run at boot
+settings.lua    The client's own settings in <user>/luanti_client/settings.json
+                (render mode, view range, view bobbing, name, address, the
+                rebound keys) and their screen; the BUILDAT_* environment
+                variables stay one-run overrides
+res/*.lua       The Lua both Luanti clients share, dofile'd here and served
+                by builtin/luanti as luanti/<name> to apps/vanilla's client
+                half: camera_motion.lua (view bobbing and the hand's
+                motion), key_editor.lua (the key bindings screen),
+                minimap.lua (official's minimap and its V modes over the
+                scene)
 init.lua        The connect dialog and the status screen
 
 The engine side of this is nothing Luanti-specific: sockets (extension/network),
@@ -309,7 +319,7 @@ through Urho3D, so the blending, the eight symmetries, the scaling and the
 colour arithmetic are checked pixel by pixel.
 
 srp.lua has self_test(), which init.lua runs at boot; its vectors come from
-util/srp_reference.py, which does SRP-6a separately in Python.
+extensions/luanti_client/test/srp_reference.py, which does SRP-6a separately in Python.
 
 Both login paths have been run against a real Luanti server: registering a new
 player (FIRST_SRP) and logging in as one the server knows (SRP), and the

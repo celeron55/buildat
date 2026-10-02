@@ -17,6 +17,7 @@ __buildat_sandbox_environment = {
 	next = next,
 	pairs = pairs,
 	pcall = pcall,
+	select = select,
 	tonumber = tonumber,
 	tostring = tostring,
 	type = type,
@@ -29,8 +30,8 @@ __buildat_sandbox_environment = {
 		len = string.len, lower = string.lower, match = string.match,
 		rep = string.rep, reverse = string.reverse, sub = string.sub,
 		upper = string.upper },
-	table = { insert = table.insert, maxn = table.maxn, remove = table.remove,
-		sort = table.sort },
+	table = { concat = table.concat, insert = table.insert,
+		maxn = table.maxn, remove = table.remove, sort = table.sort },
 	math = { abs = math.abs, acos = math.acos, asin = math.asin,
 		atan = math.atan, atan2 = math.atan2, ceil = math.ceil, cos = math.cos,
 		cosh = math.cosh, deg = math.deg, exp = math.exp, floor = math.floor,
@@ -43,46 +44,207 @@ __buildat_sandbox_environment = {
 }
 
 --
+-- Read-only views
+--
+
+-- [SAFE_TABLE_PATCH]: **what the sandbox is handed is a view, not the
+-- table**. An extension's .safe table is the same table trusted code
+-- calls through -- the network permission dialog draws with
+-- ui_utils.safe.vertical_menu and pushes on uistack.safe.main -- so a
+-- game that assigned into it drew, labelled and answered the dialog.
+-- A view reads through to the table, nested tables as views too, and
+-- refuses every assignment; a table whose metatable takes assignments
+-- itself is handed out as it is. A function read through a view gets its
+-- view arguments back as the tables they show, so a method keeps
+-- working (uistack.main:push() writes into the real stack).
+-- simplified: # and the table library see a view as empty, and a table
+-- a function returns is the table itself, not a view; a .safe function
+-- that hands out shared state has to copy it.
+local view_of = setmetatable({}, {__mode = "k"}) -- table -> its view
+local real_of = setmetatable({}, {__mode = "k"}) -- view -> its table
+local wrapper_of = setmetatable({}, {__mode = "k"}) -- function -> wrapper
+local wrapped = setmetatable({}, {__mode = "k"}) -- wrapper -> function
+
+-- What a view or a wrapper stands for, or nil: the exploit search walks
+-- that, since a view's table and a wrapper's function are what the
+-- sandbox reaches (client/extensions/sandbox_scan). Trusted only.
+function __buildat_sandbox_seen_through(v)
+	return real_of[v] or wrapped[v]
+end
+
+local function unwrap(n, a)
+	for i = 1, n do
+		local r = real_of[a[i]]
+		if r then a[i] = r end
+	end
+	return unpack(a, 1, n)
+end
+
+local view
+local function shown(v)
+	local t = type(v)
+	if t == "table" then
+		return view(v)
+	elseif t == "function" then
+		local w = wrapper_of[v]
+		if not w then
+			w = function(...)
+				return v(unwrap(select("#", ...), {...}))
+			end
+			wrapper_of[v] = w
+			wrapped[w] = v
+		end
+		return w
+	end
+	return v
+end
+
+view = function(t)
+	if real_of[t] then return t end
+	-- A wrapped object (magic.ui.root) has its own __newindex, which is
+	-- the sandbox's way of setting a property, and it checks the write
+	local mt = getmetatable(t)
+	if type(mt) == "table" and mt.__newindex then return t end
+	local p = view_of[t]
+	if p then return p end
+	p = setmetatable({}, {
+		__index = function(_, k) return shown(t[k]) end,
+		__newindex = function(_, k)
+			error("sandbox: "..tostring(k).." is read-only here", 2)
+		end,
+		__call = function(_, ...) return t(unwrap(select("#", ...), {...})) end,
+		__metatable = false,
+	})
+	view_of[t] = p
+	real_of[p] = t
+	return p
+end
+
+-- Iterating a view walks the table under it
+local function view_next(p, k)
+	local nk, v = next(real_of[p], k)
+	return nk, shown(v)
+end
+__buildat_sandbox_environment.next = function(t, k)
+	if real_of[t] then return view_next(t, k) end
+	return next(t, k)
+end
+__buildat_sandbox_environment.pairs = function(t)
+	if real_of[t] then return view_next, t, nil end
+	return pairs(t)
+end
+__buildat_sandbox_environment.ipairs = function(t)
+	local r = real_of[t]
+	if not r then return ipairs(t) end
+	return function(_, i)
+		i = i + 1
+		local v = r[i]
+		if v ~= nil then return i, shown(v) end
+	end, t, 0
+end
+-- The standard tables too, one sandboxed script not rewriting
+-- string.format under another; their functions take no views and are
+-- handed out as they are
+for _, k in ipairs({"coroutine", "string", "table", "math", "os"}) do
+	local t = __buildat_sandbox_environment[k]
+	local p = setmetatable({}, {
+		__index = t,
+		__newindex = function(_, k)
+			error("sandbox: "..tostring(k).." is read-only here", 2)
+		end,
+		__metatable = false,
+	})
+	real_of[p] = t
+	__buildat_sandbox_environment[k] = p
+end
+
+--
 -- Sandbox require
 --
 
+-- Two namespaces are loadable from inside the sandbox and nothing else is:
+-- an extension's safe interface, and a module's client half.
+--
+-- **package.loaded is not a whitelist and must never be searched by name**,
+-- which is what this used to do before looking at either namespace. It
+-- holds every standard library the host state has -- so require("os")
+-- handed the sandbox os.execute, require("io") handed it io.open,
+-- require("package") handed it loadlib and require("_G") handed it
+-- loadstring, none of which are anywhere near the sandbox environment
+-- itself. A server's client Lua runs in here, so that was the server
+-- running what it liked on the machine of everyone who connected to it.
+-- Each namespace looks in package.loaded under its own full name, which is
+-- what it was written under.
 __buildat_sandbox_environment.require = function(name)
 	log:debug("require(\""..name.."\")")
-	-- Check loaded modules
-	if package.loaded[name] then
-		local loaded = package.loaded[name]
-		if type(loaded) == 'table' and type(loaded.safe) == 'table' then
-			return loaded.safe
-		end
-		return loaded
-	end
 	-- Allow loading extensions
 	local m = string.match(name, '^buildat/extension/([a-zA-Z0-9_]+)$')
 	if m then
-		local unsafe = __buildat_require_extension(m)
+		local unsafe = package.loaded[name]
 		if unsafe == nil then
-			error("require: Cannot load extension: \""..m.."\"")
+			unsafe = __buildat_require_extension(m)
+			if unsafe == nil then
+				error("require: Cannot load extension: \""..m.."\"")
+			end
+			package.loaded[name] = unsafe
+			log:verbose("Loaded extension \""..name.."\"")
 		end
-		package.loaded[name] = unsafe
-		if type(unsafe.safe) ~= 'table' then
+		if type(unsafe) ~= 'table' or type(unsafe.safe) ~= 'table' then
 			error("require: \""..name.."\" didn't return safe interface")
 		end
-		log:verbose("Loaded extension \""..name.."\"")
-		return unsafe.safe
+		return view(unsafe.safe)
 	end
 	-- Allow loading the client-side parts of modules
 	local m = string.match(name, '^buildat/module/([a-zA-Z0-9_]+)$')
 	if m then
-		local interface = __buildat_require_module(m)
+		local interface = package.loaded[name]
 		if interface == nil then
-			error("require: Cannot load module: \""..m.."\"")
+			interface = __buildat_require_module(m)
+			if interface == nil then
+				error("require: Cannot load module: \""..m.."\"")
+			end
+			package.loaded[name] = interface
+			log:verbose("Loaded module \""..name.."\"")
 		end
-		package.loaded[name] = interface
-		log:verbose("Loaded module \""..name.."\"")
 		return interface
 	end
 	-- Disallow loading anything else
 	error("require: \""..name.."\" not found in sandbox")
+end
+
+-- What a connection's sandboxed scripts left behind, dropped, so that a
+-- menu-only connection can be left for the launcher without exiting the
+-- client ([MENU_CONTEXT]): the packet handlers, the module halves'
+-- require cache, the event mux's sandbox handlers, and the replicated
+-- scene's children (the game's camera, zone, sky). The UI stack is the
+-- launcher's to pop. simplified: what the module halves put in C++ --
+-- composed textures, the voxel registry -- stays; a new connection
+-- replaces it by name.
+function __buildat_reset_sandbox()
+	__buildat_reset_packet_subs()
+	for name, _ in pairs(package.loaded) do
+		if string.match(name, '^buildat/module/') then
+			package.loaded[name] = nil
+		end
+	end
+	__buildat_reset_modules()
+	-- **These two never ran**: an extension is not in package.loaded --
+	-- the loader keeps its own table -- so both lookups read nil from
+	-- the day they were written (found 2026-09-23 by [LAUNCH_WORLD]).
+	-- __buildat_loaded_extension() is the table's own reader, and it
+	-- does not load an extension that is not up.
+	local urho3d = __buildat_loaded_extension("urho3d")
+	if urho3d and urho3d.drop_sandbox_handlers then
+		-- **The launch UI's own handlers stay**: it is sandboxed code
+		-- too now ([LAUNCH_SANDBOX]), and dropping them left the room
+		-- drawing and answering nothing after a game (2026-09-23)
+		urho3d.drop_sandbox_handlers(__buildat_menu_extension_name)
+	end
+	local replicate = __buildat_loaded_extension("replicate")
+	if replicate and replicate.reset then
+		replicate.reset()
+	end
+	log:info("__buildat_reset_sandbox(): done")
 end
 
 --
@@ -100,7 +262,7 @@ function __buildat_sandbox_debug_check_value(value)
 	end
 end
 
--- For debugging purposes. Used by extensions/sandbox_test.
+-- For debugging purposes. Used by client/extensions/sandbox_scan.
 __buildat_latest_sandbox_global_wrapper_number = 0 -- Incremented every time
 __buildat_latest_sandbox_global_wrapper = nil
 -- Save a number of old wrappers for debugging purposes
@@ -170,11 +332,53 @@ local function run_function_in_sandbox(untrusted_function, sandbox)
 	return status, err, retval
 end
 
+-- A caught error shown, not only logged ([MENU_ERRORS]): before a world
+-- is joined -- the launch menu and every screen on the stack -- a dialog
+-- with the message's first line and "the log has the rest", the screen
+-- it happened on left as it is; in a game a notice line, since a form's
+-- callback erroring must not take the mouse. One per distinct message
+-- a minute, so a per-frame error is one dialog and a log full. The
+-- box's Connect died in its pcall and the screen just went back
+-- (2026-09-22).
+local reported_at = {}
+function __buildat_report_error(err)
+	local first = tostring(err):match("^[^\n]*") or tostring(err)
+	local now = os.time()
+	if reported_at[first] and now - reported_at[first] < 60 then
+		return
+	end
+	reported_at[first] = now
+	local ui_utils = __buildat_loaded_extension("ui_utils") or
+			__buildat_require_extension("ui_utils")
+	if type(ui_utils) ~= "table" or type(ui_utils.safe) ~= "table" then
+		return
+	end
+	-- A game the launcher started, or a client that says a world is up on
+	-- its own screens (luanti_client's session). Whichever extension is
+	-- the launcher, not launch_menu by name (buildat.menu_extension).
+	local menu = buildat.menu_extension and buildat.menu_extension()
+	local in_app = (menu and menu.in_app and menu.in_app()) or
+			ui_utils.in_app == true
+	local shown = first .. "\n\n(the log has the rest)"
+	log:info("error shown "..(in_app and "as a notice" or "in a dialog")..": "..first)
+	if in_app then
+		if ui_utils.safe.show_notice then
+			ui_utils.safe.show_notice(first)
+		end
+	elseif ui_utils.safe.show_message_dialog then
+		ui_utils.safe.show_message_dialog(shown)
+	end
+end
+
 function __buildat_run_function_in_sandbox(untrusted_function)
 	local status, err, retval = run_function_in_sandbox(
 			untrusted_function, __buildat_sandbox_environment)
 	if status == false then
 		log:error("Failed to run function:\n"..err)
+		local ok, why = pcall(__buildat_report_error, err)
+		if not ok then
+			log:warning("the error could not be shown: "..tostring(why))
+		end
 	end
 	return status, err, retval
 end
@@ -195,6 +399,10 @@ function __buildat_run_code_in_sandbox(untrusted_code, chunkname)
 			untrusted_code, __buildat_sandbox_environment, chunkname)
 	if status == false then
 		log:error("Failed to run script:\n"..err)
+		local ok, why = pcall(__buildat_report_error, err)
+		if not ok then
+			log:warning("the error could not be shown: "..tostring(why))
+		end
 	end
 	return status, err, retval
 end
@@ -206,6 +414,10 @@ function buildat.run_script_file(name)
 		return false
 	end
 	log:info("buildat.run_script_file("..name.."): code length: "..#code)
+	-- A chunk a server served, which is what storage_read and
+	-- storage_write look at to give it the server's storage and not a
+	-- launch extension's
+	__buildat_served_chunks[name] = true
 	return __buildat_run_code_in_sandbox(code, name)
 end
 buildat.safe.run_script_file = buildat.run_script_file
@@ -224,11 +436,10 @@ end
 -- in extensions.
 __buildat_sandbox_environment.buildat.is_in_sandbox = true
 
-setmetatable(__buildat_sandbox_environment.buildat, {
-	__newindex = function(t, k, v)
-		assert("Cannot add fields to buildat namespace in sandbox environment")
-	end,
-})
+-- A view, as the extensions' tables are: a game rewriting buildat.launch
+-- would have rewritten it under the launch UI
+__buildat_sandbox_environment.buildat =
+		view(__buildat_sandbox_environment.buildat)
 
 log:info("sandbox.lua loaded")
 -- vim: set noet ts=4 sw=4:
