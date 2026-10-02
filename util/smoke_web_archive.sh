@@ -80,7 +80,8 @@ if [ -n "$browser" ] && [ "${node_major:-0}" -ge 22 ]; then
 		fi
 	fi
 	[ -n "${SMOKE_LOG:-}" ] && cp "$page_out/page.png" "$(dirname "$SMOKE_LOG")/page.png"
-	rm -rf "$page_out"
+	# Chrome may still be writing its profile as it goes
+	rm -rf "$page_out" 2>/dev/null || true
 	echo "smoke: the web client's page ran its scripts in $browser"
 elif [ -n "${CI:-}" ]; then
 	echo "smoke: no browser or no Node 22 here, and the page is not checked" >&2
