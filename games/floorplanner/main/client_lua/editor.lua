@@ -904,6 +904,10 @@ local image_data = {}
 local image_materials = {}
 local images_used = 0
 
+-- A wall's height, and a hanging one's, go by the plan's ceiling, never
+-- a room's: a wall is between rooms whose ceilings may differ (user,
+-- 2026-10-02: no corner cases), where an object hangs from its room's
+-- (M.ceiling_at)
 local function wall_span(w)
 	local ceiling = settings().ceiling
 	local h = w.height > 0 and math.min(w.height, ceiling) or ceiling
