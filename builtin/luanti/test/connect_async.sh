@@ -79,7 +79,10 @@ els = scan()
 edits = [x for x in els if x[0] == "LineEdit" and x[3] > 0]
 if len(edits) < 2:
     fail("the connect screen has %d fields" % len(edits))
-click(edits[0])
+# The address field by what it holds: the public servers' search is a
+# field too, and comes first ([STARPORT] 4)
+address = [x for x in edits if x[5] == "localhost"]
+click(address[0] if address else edits[0])
 write("keypress End", *(["keypress Backspace"] * 40))
 write("text 192.0.2.1", "delay 200")
 e = find(els, "Connect")

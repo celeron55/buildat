@@ -19,6 +19,8 @@ local ui_utils = require("buildat/extension/ui_utils")
 ui_utils = ui_utils.bind_button_menu and ui_utils or ui_utils.safe
 local network = require("buildat/extension/network")
 network = network.safe or network
+local starport = require("buildat/extension/starport")
+starport = starport.safe or starport
 local HA_CENTER, HA_LEFT, HA_RIGHT, KEY_ESCAPE, LM_HORIZONTAL, LM_VERTICAL, VA_CENTER =
 		magic.HA_CENTER, magic.HA_LEFT, magic.HA_RIGHT, magic.KEY_ESCAPE, magic.LM_HORIZONTAL, magic.LM_VERTICAL, magic.VA_CENTER
 local STYLE = "launch_menu/res/main_style.xml"
@@ -206,35 +208,130 @@ function M.show_connect_to_server()
 	local window = columns:CreateChild("UIElement")
 	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 
-	local address_edit = make_labeled_edit(window, "Address", "localhost")
-	local port_edit = make_labeled_edit(window, "Port (optional)", "29500")
-	address_edit:SetFocus(true)
+	-- A typed address, and the servers used, unless the Starport lock
+	-- says the list is the only way in ([STARPORT] 4)
+	local direct = starport.direct_connect_allowed()
+	local address_edit, port_edit
+	if direct then
+		address_edit = make_labeled_edit(window, "Address", "localhost")
+		port_edit = make_labeled_edit(window, "Port (optional)", "29500")
+		address_edit:SetFocus(true)
+	end
 	local do_connect
-	local used = left:CreateChild("Text")
-	used:SetStyleAuto()
-	used.text = "Servers used:"
-	local list = ui_utils.server_list(left, {width = 440, height = 300},
-			function(row, second)
-		address_edit:SetText(row.host)
-		port_edit:SetText(row.port)
+	local picked = nil
+	local function pick(row, second)
+		picked = row
+		if direct then
+			address_edit:SetText(row.host)
+			port_edit:SetText(row.port)
+		end
 		if second then
 			do_connect()
 		end
-	end)
-	local rows = {}
-	for _, e in ipairs(network.known_addresses()) do
-		local host, port = e.uri:match("^%a+://(.-):(%d+)$")
-		if host and e.accepted then
-			rows[#rows + 1] = {name = host .. ":" .. port, host = host, port = port,
-					line = e.description ~= "" and e.description or nil}
+	end
+
+	-- **Public servers** from the Starports in the settings, merged and
+	-- filtered by the extension; a search narrows what came
+	local sp_title = left:CreateChild("Text")
+	sp_title:SetStyleAuto()
+	sp_title.text = "Public servers: asking the Starports..."
+	local search = left:CreateChild("LineEdit")
+	search:SetStyleAuto()
+	search.minHeight = 24
+	search.textCopyable = true
+	search.textSelectable = true
+	local sp_list = ui_utils.server_list(left, {width = 440,
+			height = direct and 220 or 440}, pick)
+	local sp_rows = {}
+	local function show_public()
+		local q = search:GetText():lower()
+		local rows = {}
+		for _, x in ipairs(sp_rows) do
+			local hay = (tostring(x.name) .. " " .. tostring(x.description) ..
+					" " .. table.concat(x.tags or {}, " ")):lower()
+			if q == "" or hay:find(q, 1, true) then
+				local host, port = x.address:match("^(.*):(%d+)$")
+				local d = {}
+				for k, v in pairs(x.descriptors or {}) do
+					if v ~= "no" and v ~= "none" then
+						d[#d + 1] = k .. " " .. tostring(v)
+					end
+				end
+				table.sort(d)
+				rows[#rows + 1] = {name = tostring(x.name) .. "   " ..
+						tostring(x.players or 0) .. " playing",
+					host = host, port = port, address = x.address,
+					line = tostring(x.description or "") .. "\n" ..
+						tostring(x.kind) .. ", " .. tostring(x.audience) ..
+						", " .. tostring(x.access) ..
+						(#d > 0 and " (" .. table.concat(d, ", ") .. ")" or "") ..
+						"  via " .. table.concat(x.starports or {}, ", ")}
+			end
 		end
+		sp_list:set_rows(rows)
 	end
-	if #rows == 0 then
-		used.text = "No servers used yet"
+	magic.SubscribeToEvent(search, "TextFinished", show_public)
+	local function refresh(ask)
+		starport.fetch(function(rows, info)
+			sp_rows = rows
+			sp_title.text = "Public servers: " .. #rows ..
+					(info.hidden > 0 and ", " .. info.hidden ..
+					" hidden by your filters" or "") ..
+					(info.unasked > 0 and "; Refresh asks " .. info.unasked ..
+					" more Starport(s)" or "") ..
+					(#info.errors > 0 and "\n" .. table.concat(info.errors,
+					"\n") or "")
+			show_public()
+		end, ask)
 	end
-	list:set_rows(rows)
+	refresh(false)
+	local sp_buttons = left:CreateChild("UIElement")
+	sp_buttons:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
+	for _, b in ipairs({
+		{"Refresh", function() refresh(true) end},
+		{"Report...", function()
+			if not picked or not picked.address or
+					not starport.open_report(picked.address) then
+				show_error("Pick a public server to report")
+			end
+		end},
+		{"Starport settings...", function() starport.open_settings() end},
+	}) do
+		local button = make_button(sp_buttons, b[1])
+		button:SetFixedHeight(26)
+		magic.SubscribeToEvent(button, "Released", b[2])
+	end
+
+	if direct then
+		local used = left:CreateChild("Text")
+		used:SetStyleAuto()
+		used.text = "Servers used:"
+		local list = ui_utils.server_list(left, {width = 440, height = 220},
+				pick)
+		local rows = {}
+		for _, e in ipairs(network.known_addresses()) do
+			local host, port = e.uri:match("^%a+://(.-):(%d+)$")
+			if host and e.accepted then
+				rows[#rows + 1] = {name = host .. ":" .. port, host = host,
+						port = port,
+						line = e.description ~= "" and e.description or nil}
+			end
+		end
+		if #rows == 0 then
+			used.text = "No servers used yet"
+		end
+		list:set_rows(rows)
+	end
 
 	do_connect = function()
+		if not direct then
+			if not picked then
+				show_error("Pick a server from the list")
+				return
+			end
+			connect_or_show_error(picked.host .. ":" .. picked.port)
+			return
+		end
 		local host = address_edit:GetText()
 		local port = port_edit:GetText()
 		if host == "" then
@@ -252,12 +349,14 @@ function M.show_connect_to_server()
 	magic.SubscribeToEvent(connect_button, "Released", function()
 		do_connect()
 	end)
-	magic.SubscribeToEvent(address_edit, "TextFinished", function()
-		do_connect()
-	end)
-	magic.SubscribeToEvent(port_edit, "TextFinished", function()
-		do_connect()
-	end)
+	if direct then
+		magic.SubscribeToEvent(address_edit, "TextFinished", function()
+			do_connect()
+		end)
+		magic.SubscribeToEvent(port_edit, "TextFinished", function()
+			do_connect()
+		end)
+	end
 
 	local back_button = make_button(window, "Back")
 	-- Fixed: the column beside the list would stretch the last button

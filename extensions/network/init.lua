@@ -552,16 +552,20 @@ end
 
 -- parse_json(text) -> table or nil, error: the module's own reader
 -- (json.lua beside this file), which defines onto a `core` table
-local parse_json
+local parse_json, write_json
 do
 	local saved = rawget(_G, "core")
 	rawset(_G, "core", {log = function(_, message) log:warning(message) end})
 	dofile(__buildat_extension_path("network").."/json.lua")
-	parse_json = core.parse_json
+	parse_json, write_json = core.parse_json, core.write_json
 	rawset(_G, "core", saved)
 end
 function M.safe.parse_json(text)
 	return parse_json(text, nil, true)
+end
+-- write_json(value) -> text, or nil and why not
+function M.safe.write_json(value)
+	return write_json(value)
 end
 
 -- LuaSocket's socket.gettime()
@@ -577,6 +581,7 @@ M.http_post = M.safe.http_post
 M.known_addresses = M.safe.known_addresses
 M.set_address_name = M.safe.set_address_name
 M.parse_json = M.safe.parse_json
+M.write_json = M.safe.write_json
 
 return M
 -- vim: set noet ts=4 sw=4:
