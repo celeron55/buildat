@@ -2771,6 +2771,16 @@ struct Module: public interface::Module
 		const ss_ outcome = jstr(q, "outcome");
 		if(outcome != "reverse" && outcome != "keep")
 			throw Exception("outcome: reverse or keep");
+		// An ID's suspension (10d): lifted
+		const ss_ lid = jstr(a, "listing");
+		if(outcome == "reverse" && lid.compare(0, 3, "id:") == 0){
+			json::Value id = load("ids", lid.substr(3));
+			if(id.is_object()){
+				id.set("suspended_until", (int64_t)0);
+				put("ids", lid.substr(3), id);
+			}
+			audit(by, lid, "restore", "appeal", jstr(q, "text"), false);
+		}
 		if(outcome == "reverse"){
 			json::Value l = load("listings", jstr(a, "listing"));
 			if(l.is_object()){
