@@ -208,6 +208,13 @@ bool LineEdit::OnDragDropFinish(UIElement* source)
 
 void LineEdit::OnKey(int key, int buttons, int qualifiers)
 {
+#ifdef __EMSCRIPTEN__
+    // buildat [WEB_KEYS]: in the browser, its own copy, cut and paste do
+    // these through the page's textarea (src/client/app.cpp); doing them
+    // here as well would paste twice
+    if ((key == KEY_X || key == KEY_C || key == KEY_V) && (qualifiers & QUAL_CTRL))
+        return;
+#endif
     bool changed = false;
     bool cursorMoved = false;
 
