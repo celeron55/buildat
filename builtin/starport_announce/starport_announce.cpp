@@ -205,6 +205,23 @@ struct Module: public interface::Module, public Interface
 				normalize_url("https://host") != "https://host" ||
 				normalize_url("http://[::1]") != "http://[::1]:29595")
 			throw Exception("starport_announce: normalize_url self-check");
+		auto said = [](const ss_ &a){
+			json::Value b = json::object();
+			if(!public_address(a, 29500, b))
+				return ss_("bad");
+			const json::Value &h = b.get("address");
+			return (h.is_string() ? h.as_string() : ss_())+" "+
+					itos(b.get("port").as_integer())+
+					(b.get("tls").is_true() ? " tls" : "");
+		};
+		if(said("") != " 29500" ||
+				said("https://fp.example.org/") != "fp.example.org 443 tls" ||
+				said("https://fp.example.org:8443") != "fp.example.org 8443 tls" ||
+				said("fp.example.org:30000") != "fp.example.org 30000" ||
+				said("[::1]:30000") != "::1 30000" ||
+				said("fp.example.org/x?y") != "bad" ||
+				said("fp.example.org:99999") != "bad")
+			throw Exception("starport_announce: public_address self-check");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("network:http_request"));
@@ -271,6 +288,47 @@ struct Module: public interface::Module, public Interface
 				u += ":29595";
 		}
 		return u;
+	}
+
+	// **Where players reach this server**, starport.json's "address": ""
+	// for the address the announce comes from and the server's own port;
+	// "host[:port]"; or "https://host[:port]" behind a proxy with TLS, on
+	// 443 unless said, which a client joins by a secure WebSocket. Sets the
+	// announce's address, port and tls; false for one that is not an
+	// address.
+	static bool public_address(ss_ a, int64_t own_port, json::Value &body)
+	{
+		bool tls = false;
+		if(a.compare(0, 8, "https://") == 0){
+			tls = true;
+			a = a.substr(8);
+		} else if(a.compare(0, 7, "http://") == 0){
+			a = a.substr(7);
+		}
+		while(!a.empty() && a.back() == '/')
+			a.pop_back();
+		int64_t port = tls ? 443 : own_port;
+		const size_t colon = a.rfind(':');
+		const bool v6 = !a.empty() && a[0] == '[';
+		if(colon != ss_::npos && (!v6 || colon > a.find(']'))){
+			const ss_ p = a.substr(colon + 1);
+			if(p.empty() || p.size() > 5 ||
+					p.find_first_not_of("0123456789") != ss_::npos)
+				return false;
+			port = atoi(p.c_str());
+			a = a.substr(0, colon);
+		}
+		if(v6 && a.size() > 2 && a.back() == ']')
+			a = a.substr(1, a.size() - 2);
+		if(a.size() > 253 || port < 1 || port > 65535 ||
+				a.find_first_not_of("abcdefghijklmnopqrstuvwxyz"
+				"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:") != ss_::npos)
+			return false;
+		if(!a.empty())
+			body.set("address", a);
+		body.set("port", port);
+		body.set("tls", tls);
+		return true;
 	}
 
 	static sv_<ss_> urls_of(const json::Value &c)
@@ -641,7 +699,15 @@ struct Module: public interface::Module, public Interface
 		body.set("access", access_of(cfg));
 		body.set("app", m_server->get_app_id());
 		body.set("version", ss_(BUILDAT_VERSION));
-		body.set("port", (int64_t)atoi(m_server->get_config().get<ss_>("network_port").c_str()));
+		const json::Value &addr = cfg.get("address");
+		if(!public_address(addr.is_string() ? addr.as_string() : "",
+				atoi(m_server->get_config().get<ss_>("network_port").c_str()),
+				body)){
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_status[url] = "not announced: the address is not host, "
+					"host:port or https://host[:port]";
+			return true;
+		}
 		body.set("players", (int64_t)player_count());
 		// 10d: the whole of the bans reported to this Starport, so a ban
 		// taken back is gone from it too

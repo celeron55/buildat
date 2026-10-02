@@ -582,7 +582,19 @@ struct Module: public interface::Module
 		ss_ host = jstr(b, "address");
 		if(host.empty())
 			host = r.address;
-		const bool moved = jstr(l, "host") != host || jint(l, "port") != port;
+		// Into the challenge's URL: a host name or an address, nothing else
+		if(host.size() > 253 || host.find_first_not_of(
+				"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+				"0123456789.-:") != ss_::npos){
+			refuse(r, "address: a host name or an IP address");
+			return;
+		}
+		// Behind a proxy with TLS: challenged over HTTPS, joined by a
+		// secure WebSocket
+		const bool tls = b.get("tls").is_true();
+		const bool moved = jstr(l, "host") != host || jint(l, "port") != port ||
+				l.get("tls").is_true() != tls;
+		l.set("tls", tls);
 		for(const char *k : {"name", "description", "kind", "audience",
 				"access", "region", "app", "version", "signup_url"})
 			l.set(k, b.get(k).is_string() ? b.get(k) : json::Value(""));
@@ -814,7 +826,8 @@ struct Module: public interface::Module
 			host = "["+host+"]";
 		VerifyJob j;
 		j.listing = jstr(l, "id");
-		j.url = "http://"+host+":"+itos(jint(l, "port"))+
+		j.url = ss_(l.get("tls").is_true() ? "https://" : "http://")+host+":"+
+				itos(jint(l, "port"))+
 				"/api/starport/challenge?listing="+j.listing+"&nonce="+nonce;
 		j.expect = hex(interface::sha256::hmac(unhex(jstr(l, "secret")), nonce));
 		{
@@ -896,7 +909,7 @@ struct Module: public interface::Module
 			json::Value s = json::object();
 			for(const char *k : {"id", "name", "description", "host", "port",
 					"app", "version", "tags", "languages", "region", "signup_url",
-					"login",
+					"login", "tls",
 					"players", "players_max"})
 				s.set(k, l.get(k));
 			const json::Value e = effective(l);

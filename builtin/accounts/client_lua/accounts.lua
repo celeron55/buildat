@@ -987,6 +987,7 @@ end)
 -- it wants
 local TEXT_FIELDS = {
 	{"name", "Name"}, {"description", "Description"},
+	{"address", "Public address"},
 	{"signup_url", "Sign-up address (access external)"},
 	{"region", "Region"}, {"fleet", "Fleet (id:code)"}, {"pool", "Pool"},
 	{"tags", "Tags"},
@@ -1099,6 +1100,11 @@ local STARPORT_HELP = {
 	"builders' plans.",
 	"Description: a sentence or two, up to 500 characters. Example: A shared "..
 	"floor plan for the Torkkola house; visitors welcome to look.",
+	"Public address: where players reach this server. Empty: the address "..
+	"the announce comes from, and this server's own port. Behind a proxy "..
+	"with TLS, its https:// address, which clients join by a secure "..
+	"WebSocket; the Starport checks the server through it. Examples: "..
+	"https://fp.example.org, fp.example.org:30000.",
 	"Sign-up address: with access \"external\" only, where an account is "..
 	"made before joining. Example: https://example.org/join.",
 	"Region: where the server is, for players choosing a near one and for a "..
