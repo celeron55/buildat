@@ -508,6 +508,18 @@ local function field(parent, label, secret, on_finish)
 end
 
 local YELLOW = magic.Color(1.0, 0.8, 0.4)
+
+-- The open dropdown's choices, one at a time (the Starport page's)
+local popup = nil
+-- The Starport page's listing as being edited, kept over its redraws (a
+-- dropdown's choice redraws it); nil to take the server's config again
+local draft = nil
+local function close_popup()
+	if popup then
+		popup:Remove()
+		popup = nil
+	end
+end
 local GREY = magic.Color(0.7, 0.7, 0.7)
 
 local chat_list = nil
@@ -516,6 +528,7 @@ local chat_list = nil
 local chat_width = 100
 
 function M.close_page()
+	close_popup()
 	if M.page then
 		M.page:Remove()
 		M.page = nil
@@ -524,10 +537,10 @@ function M.close_page()
 	chat_list = nil
 end
 
-local function open_page(kind, title, back)
+local function open_page(kind, title, back, width)
 	M.close_page()
 	page_kind, page_back = kind, back
-	M.page = page_window(560)
+	M.page = page_window(width or 560)
 	page_text(M.page, title)
 	return M.page
 end
@@ -929,16 +942,85 @@ local starport_info = nil
 local starport_page
 buildat.sub_packet("starport:config", function(data)
 	starport_info = buildat.parse_json(data)
+	-- What the server has now is what is edited
+	draft = nil
 	if page_kind == "starport" then
 		starport_page(page_back)
 	end
 end)
 
-local LISTING_FIELDS = {"name", "description", "kind", "audience", "access",
-	"signup_url", "region", "fleet", "pool"}
+-- The listing's text fields, and its choices ([STARPORT] 3): a choice not
+-- made is a red "?", sent as it is, which the Starport refuses saying what
+-- it wants
+local TEXT_FIELDS = {
+	{"name", "Name"}, {"description", "Description"},
+	{"signup_url", "Sign-up address (access external)"},
+	{"region", "Region"}, {"fleet", "Fleet (id:code)"}, {"pool", "Pool"},
+	{"tags", "Tags"},
+	{"languages", "Languages"},
+}
+local CHOICES = {
+	{"kind", "Kind", {"world", "arena", "app", "other"}},
+	{"audience", "Audience", {"everyone", "teen", "adult"}},
+	{"access", "Access", {"open", "registration", "invite", "password",
+		"external"}},
+}
+local DESCRIPTORS = {
+	{"violence", "Violence", {"none", "cartoon", "realistic"}},
+	{"chat", "Chat", {"none", "moderated", "unmoderated"}},
+	{"ugc", "Player content", {"none", "moderated", "unmoderated"}},
+	{"language", "Bad language", {"no", "yes"}},
+	{"sexual", "Sexual content", {"no", "yes"}},
+	{"drugs", "Drugs", {"no", "yes"}},
+	{"purchases", "Purchases", {"no", "yes"}},
+	{"gambling", "Gambling", {"no", "yes"}},
+	{"personal_data", "Personal data", {"no", "yes"}},
+}
+local RED = magic.Color(1.0, 0.35, 0.35)
+
+
+-- A dropdown: its label, and a button saying the value, a red "?" for none;
+-- pressed, the choices under it
+local function dropdown(parent, label, choices, current, on_choose)
+	local l = page_text(parent, label)
+	l:SetWordwrap(false)
+	l:SetFixedWidth(130)
+	local b
+	b = button(parent, (current or "?") .. "  \226\150\188", function()
+		close_popup()
+		local w = magic.ui.root:CreateChild("Window")
+		w.defaultStyle = magic.cache:GetResource("XMLFile",
+				"launch_menu/res/main_style.xml")
+		w:SetStyleAuto()
+		w:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(4, 4, 4, 4))
+		-- Over the page (100)
+		w.priority = 200
+		for _, c in ipairs(choices) do
+			local cb = button(w, c, function()
+				close_popup()
+				on_choose(c)
+			end)
+			cb.minWidth = b.width
+		end
+		local p = b.screenPosition
+		local y = p.y + b.height
+		if y + w.height > magic.ui.root.height then
+			y = math.max(0, p.y - w.height)
+		end
+		w:SetPosition(p.x, y)
+		popup = w
+	end)
+	b:SetFixedWidth(118)
+	if not current then
+		b:GetChild(0):SetColor(RED)
+	end
+	return b
+end
 
 starport_page = function(back, confirm_remove)
-	local w = open_page("starport", "Starport", back)
+	-- Wide: the listing's choices are many (page_window narrows it on a
+	-- narrow screen)
+	local w = open_page("starport", "Starport", back, 840)
 	local info = starport_info
 	if not info then
 		page_text(w, "Waiting for the server...")
@@ -955,8 +1037,8 @@ starport_page = function(back, confirm_remove)
 	if info.message and info.message ~= "" then
 		page_text(w, info.message, YELLOW)
 	end
-	page_text(w, "Written to " .. tostring(info.path) .. ", which an edit "..
-			"by hand changes too", GREY)
+	page_text(w, "Kept in the app's starport.json; an edit there counts too",
+			GREY)
 	local r = row(w)
 	button(r, c.enabled == false and "Starport: off" or "Starport: on",
 			function()
@@ -1003,30 +1085,115 @@ starport_page = function(back, confirm_remove)
 		end
 	end)
 	-- The listing: what the server says it is ([STARPORT] 3)
-	local edits = {}
-	for _, k in ipairs(LISTING_FIELDS) do
-		edits[k] = field(w, k, false, function() end)
-		edits[k]:SetText(tostring(c[k] or ""))
+	local function valid(v, choices)
+		for _, x in ipairs(choices) do
+			if x == v then
+				return v
+			end
+		end
+		return nil
 	end
-	local rest = field(w, "descriptors, tags, languages (JSON)", false,
-			function() end)
-	rest:SetText(encode({descriptors = c.descriptors or {},
-		tags = c.tags or {}, languages = c.languages or {}}))
+	if not draft then
+		draft = {text = {}, choice = {}, desc = {}}
+		for _, f in ipairs(TEXT_FIELDS) do
+			local v = c[f[1]]
+			draft.text[f[1]] = type(v) == "table" and table.concat(v, ", ") or
+					tostring(v or "")
+		end
+		for _, f in ipairs(CHOICES) do
+			draft.choice[f[1]] = valid(c[f[1]], f[3])
+		end
+		local d = type(c.descriptors) == "table" and c.descriptors or {}
+		for _, f in ipairs(DESCRIPTORS) do
+			draft.desc[f[1]] = valid(d[f[1]], f[3])
+		end
+	end
+	-- The long ones a row each, the short ones two to a row
+	local edits = {}
+	local PAIRED = {region = true, pool = true, tags = true, languages = true}
+	local pr, in_pr = nil, 0
+	for _, f in ipairs(TEXT_FIELDS) do
+		local e
+		if PAIRED[f[1]] then
+			if in_pr % 2 == 0 then
+				pr = row(w)
+			end
+			in_pr = in_pr + 1
+			local l = page_text(pr, f[2])
+			l:SetWordwrap(false)
+			l:SetFixedWidth(130)
+			e = pr:CreateChild("LineEdit")
+			e:SetStyleAuto()
+			e.minHeight = 26
+			e:SetFixedWidth(240)
+			e.textSelectable = true
+			e.textCopyable = true
+		else
+			e = field(w, f[2], false, function() end)
+		end
+		e:SetText(draft.text[f[1]])
+		edits[f[1]] = e
+	end
+	-- What was typed, kept before a redraw
+	local function take_text()
+		for _, f in ipairs(TEXT_FIELDS) do
+			draft.text[f[1]] = edits[f[1]]:GetText()
+		end
+	end
+	-- Three to a row: the page is long, and wide enough for them
+	local dr
+	local n = 0
+	local function next_row()
+		if n % 3 == 0 then
+			dr = row(w)
+		end
+		n = n + 1
+	end
+	for _, f in ipairs(CHOICES) do
+		next_row()
+		dropdown(dr, f[2], f[3], draft.choice[f[1]], function(v)
+			take_text()
+			draft.choice[f[1]] = v
+			starport_page(back)
+		end)
+	end
+	for _, f in ipairs(DESCRIPTORS) do
+		next_row()
+		dropdown(dr, f[2], f[3], draft.desc[f[1]], function(v)
+			take_text()
+			draft.desc[f[1]] = v
+			starport_page(back)
+		end)
+	end
 	local r3 = row(w)
 	button(r3, "Save the listing", function()
-		for _, k in ipairs(LISTING_FIELDS) do
-			local v = edits[k]:GetText()
-			c[k] = v ~= "" and v or nil
+		take_text()
+		for _, f in ipairs(TEXT_FIELDS) do
+			local v = draft.text[f[1]]
+			if f[1] == "tags" or f[1] == "languages" then
+				local list = {}
+				for x in v:gmatch("[^,%s]+") do
+					list[#list + 1] = x
+				end
+				c[f[1]] = list
+			else
+				c[f[1]] = v ~= "" and v or nil
+			end
 		end
-		local more = buildat.parse_json(rest:GetText())
-		if type(more) == "table" then
-			c.descriptors = more.descriptors
-			c.tags = more.tags
-			c.languages = more.languages
+		-- A choice not made goes as "?": the Starport says what it wants
+		for _, f in ipairs(CHOICES) do
+			c[f[1]] = draft.choice[f[1]] or "?"
+		end
+		c.descriptors = {}
+		for _, f in ipairs(DESCRIPTORS) do
+			c.descriptors[f[1]] = draft.desc[f[1]] or "?"
 		end
 		save()
 	end)
-	button(r3, "Back", function() users_page(back) end)
+	button(r3, "Back", function()
+		close_popup()
+		users_page(back)
+	end)
 end
 M.starport_page = function(back)
 	starport_info = nil
