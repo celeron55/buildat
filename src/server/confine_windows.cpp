@@ -172,8 +172,10 @@ struct Grants
 // them, the app's own cache
 static ss_ confine_child(core::Config &config, const ss_ &module_path)
 {
+	boxed_step("confine_child");
 	if(!in_app_container())
 		return "started --boxed and not in an AppContainer";
+	boxed_step("in its AppContainer");
 	const ss_ app = app_of(module_path);
 	const ss_ cache = config.get<ss_>("cache_path");
 	const ss_ prebuilt = config.get<ss_>("rccpp_build_path");
@@ -297,6 +299,10 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	for(int i = 0; PATH_KEYS[i]; i++)
 		paths += ss_(PATH_KEYS[i])+"="+config.get<ss_>(PATH_KEYS[i])+"\n";
 	SetEnvironmentVariableW(L"BUILDAT_BOXED_PATHS", wide(paths).c_str());
+	// The child's start, step by step, where a buffer cannot hide it
+	const ss_ steps = app_cache+"\\boxed_start.log";
+	std::remove(steps.c_str());
+	SetEnvironmentVariableW(L"BUILDAT_BOXED_STEPS", wide(steps).c_str());
 	SetEnvironmentVariableW(L"TMP", wide(app_cache+"\\tmp").c_str());
 	SetEnvironmentVariableW(L"TEMP", wide(app_cache+"\\tmp").c_str());
 	SECURITY_ATTRIBUTES sa = {sizeof sa, nullptr, TRUE};
@@ -348,7 +354,9 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	}
 	ResumeThread(pi.hThread);
 	CloseHandle(pi.hThread);
-	log_i(MODULE, "Started the server in AppContainer buildat.%s", cs(app));
+	log_i(MODULE, "Started the server in AppContainer buildat.%s, pid %i "
+			"(this is %i); its start's steps go to %s", cs(app),
+			(int)pi.dwProcessId, (int)GetCurrentProcessId(), cs(steps));
 
 	char buf[4096];
 	DWORD n;

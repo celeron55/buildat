@@ -268,6 +268,11 @@ int main(int argc, char *argv[])
 	// move of old directories with it. Its output is the parent's to log.
 	const bool boxed = config.get<bool>("boxed");
 	if(boxed){
+		// Its output is a pipe to its parent: unbuffered, so what it shows
+		// is where the child is
+		setvbuf(stdout, nullptr, _IONBF, 0);
+		setvbuf(stderr, nullptr, _IONBF, 0);
+		server::boxed_step("main: the arguments read");
 		const char *paths = getenv("BUILDAT_BOXED_PATHS");
 		ss_ all = paths ? paths : "";
 		size_t at = 0;
@@ -281,6 +286,7 @@ int main(int argc, char *argv[])
 				config.set(kv.substr(0, eq), kv.substr(eq + 1));
 			at = nl + 1;
 		}
+		server::boxed_step("main: the parent's paths taken");
 	} else {
 		if(!boot::autodetect::detect_server_paths(config))
 			return 1;
@@ -335,9 +341,12 @@ int main(int argc, char *argv[])
 	ss_ shutdown_reason;
 
 	try {
+		server::boxed_step("main: making the state");
 		up_<server::State> state(server::createState());
+		server::boxed_step("main: loading the modules");
 
 		state->load_modules(module_path);
+		server::boxed_step("main: the modules loaded; the main loop");
 
 		// Main loop
 		uint64_t next_tick_us = get_timeofday_us();

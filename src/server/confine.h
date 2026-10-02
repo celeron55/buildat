@@ -29,6 +29,12 @@ namespace server
 	ss_ confine(core::Config &config, const ss_ &module_path,
 			int *exit_code);
 
+	// [PROCESS_SANDBOX] B: a boxed child's start, a step at a time, flushed
+	// to the file its parent named in BUILDAT_BOXED_STEPS as well as to
+	// the log, so a hang names its step even where the log's pipe holds
+	// lines back. Nothing where no file was named.
+	void boxed_step(const char *what);
+
 	// The app's name, as the server's get_app_id() takes it
 	inline ss_ app_of(const ss_ &module_path)
 	{

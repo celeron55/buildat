@@ -4,7 +4,30 @@
 #include "core/config.h"
 #include "core/log.h"
 #include "interface/fs.h"
+#include <cstdio>
+#include <cstdlib>
+#ifdef _WIN32
+	#include <process.h>
+	#define getpid _getpid
+#else
+	#include <unistd.h>
+#endif
 #define MODULE "confine"
+
+namespace server {
+void boxed_step(const char *what)
+{
+	const char *path = getenv("BUILDAT_BOXED_STEPS");
+	if(!path || !*path)
+		return;
+	log_i(MODULE, "boxed step: %s (pid %i)", what, (int)getpid());
+	FILE *f = fopen(path, "ab");
+	if(!f)
+		return;
+	fprintf(f, "%s (pid %i)\n", what, (int)getpid());
+	fclose(f);
+}
+}
 
 #if !defined(__linux__) && !defined(_WIN32)
 
