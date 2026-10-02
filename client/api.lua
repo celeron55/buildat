@@ -39,6 +39,7 @@ buildat.get_time_us       = __buildat_get_time_us
 buildat.version           = __buildat_version
 buildat.sha1              = __buildat_sha1
 buildat.sha256            = __buildat_sha256
+buildat.qr_code           = __buildat_qr_code
 buildat.hex               = __buildat_hex
 buildat.random_bytes      = __buildat_random_bytes
 -- compress(data, format [, level]) -> string, where format is "zlib" or "zstd"
@@ -884,6 +885,10 @@ buildat.safe.get_local_time = __buildat_get_local_time
 buildat.safe.version       = __buildat_version
 buildat.safe.sha1          = __buildat_sha1
 buildat.safe.sha256        = __buildat_sha256
+-- qr_code(text) -> the QR code's modules as a string of "0" and "1", row
+-- by row from the top, and its side; or nil. Reads and writes nothing:
+-- a TOTP secret's otpauth:// link for an authenticator app ([STARPORT] 10a)
+buildat.safe.qr_code       = __buildat_qr_code
 buildat.safe.hex           = __buildat_hex
 buildat.safe.compress      = __buildat_compress
 buildat.safe.decompress    = __buildat_decompress

@@ -546,6 +546,39 @@ passwd_page = function(back, message)
 end
 M.password_page = function(back) passwd_page(back) end
 
+-- A QR code of `text` for an authenticator app's camera ([STARPORT] 10a),
+-- drawn at 6 pixels a module with the quiet zone round it: scaled down by
+-- the UI it stays readable
+local function qr_image(parent, text)
+	local bits, n = buildat.qr_code(text)
+	if not bits then
+		return nil
+	end
+	local px, quiet = 6, 4
+	local side = (n + 2 * quiet) * px
+	local rows = {}
+	for y = 0, side - 1 do
+		local row = {}
+		local my = math.floor(y / px) - quiet
+		for x = 0, side - 1 do
+			local mx = math.floor(x / px) - quiet
+			local dark = mx >= 0 and my >= 0 and mx < n and my < n and
+					bits:byte(my * n + mx + 1) == 49
+			row[#row + 1] = dark and "\0\0\0" or "\255\255\255"
+		end
+		rows[#rows + 1] = table.concat(row)
+	end
+	local img = magic.Image:new()
+	img:SetSize(side, side, 3)
+	magic.image_set_data(img, side, side, 3, table.concat(rows))
+	local tex = magic.Texture2D:new()
+	tex:SetData(img)
+	local b = parent:CreateChild("BorderImage")
+	b.texture = tex
+	b:SetFixedSize(side, side)
+	return b
+end
+
 -- **Two-step login** ([STARPORT] 10a): TOTP on the user's own account. The
 -- server answers every request with whether it is on and, while turning it
 -- on, the secret to give an authenticator app
@@ -566,7 +599,7 @@ totp_page = function(back)
 		k.textCopyable = true
 		k.textSelectable = true
 		k:SetText(st.secret)
-		page_text(w, st.uri)
+		qr_image(w, st.uri)
 		local code = field(w, "Code", false, function() end)
 		local r = row(w)
 		button(r, "Turn on", function()

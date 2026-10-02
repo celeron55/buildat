@@ -287,6 +287,7 @@ add_subdirectory("3rdparty/polyvox")
 add_subdirectory("3rdparty/zlib")
 add_subdirectory("3rdparty/zstd")
 add_subdirectory("3rdparty/mbedtls")
+add_subdirectory("3rdparty/qrcodegen")
 add_subdirectory("3rdparty/sqlite")
 add_subdirectory("3rdparty/luabind-deboostified")
 
@@ -494,6 +495,7 @@ if(BUILD_CLIENT)
 		zlib
 		zstd
 		mbedtls
+		qrcodegen
 		luabind
 		Urho3D
 		${URHO3D_TOLUA_LIBRARY}

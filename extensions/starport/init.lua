@@ -841,6 +841,39 @@ local function close_and(root, f)
 	end
 end
 
+-- A QR code of `text` for an authenticator app's camera ([STARPORT] 10a),
+-- drawn at 6 pixels a module with the quiet zone round it: scaled down by
+-- the UI it stays readable
+local function qr_image(parent, text)
+	local bits, n = buildat.qr_code(text)
+	if not bits then
+		return nil
+	end
+	local px, quiet = 6, 4
+	local side = (n + 2 * quiet) * px
+	local rows = {}
+	for y = 0, side - 1 do
+		local row = {}
+		local my = math.floor(y / px) - quiet
+		for x = 0, side - 1 do
+			local mx = math.floor(x / px) - quiet
+			local dark = mx >= 0 and my >= 0 and mx < n and my < n and
+					bits:byte(my * n + mx + 1) == 49
+			row[#row + 1] = dark and "\0\0\0" or "\255\255\255"
+		end
+		rows[#rows + 1] = table.concat(row)
+	end
+	local img = magic.Image:new()
+	img:SetSize(side, side, 3)
+	magic.image_set_data(img, side, side, 3, table.concat(rows))
+	local tex = magic.Texture2D:new()
+	tex:SetData(img)
+	local b = parent:CreateChild("BorderImage")
+	b.texture = tex
+	b:SetFixedSize(side, side)
+	return b
+end
+
 -- id_login(url[, then_cb]): the login dialog; then_cb() once logged in
 function M.id_login(url, then_cb, message)
 	local root, w = open_window("starport id login", 520)
@@ -1122,7 +1155,7 @@ function M.id_page(url, message)
 							"enter the code it shows:")
 					local k = add_edit(w2, res.secret)
 					k.minWidth = 400
-					add_text(w2, res.uri, GREY)
+					qr_image(w2, res.uri)
 					local c = add_edit(w2, "")
 					local rr = add_row(w2)
 					add_button(rr, "Turn on", function()

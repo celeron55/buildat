@@ -16,6 +16,7 @@
 #include <mbedtls/gcm.h>
 #include <mbedtls/pkcs5.h>
 #include <mbedtls/error.h>
+#include <qrcodegen.h>
 #include <algorithm>
 #include <cstring>
 #include <map>
@@ -373,6 +374,30 @@ static int l_tls_free(lua_State *L)
 	return 0;
 }
 
+// qr_code(text) -> the modules' bits as a string of '0' and '1', a row at a
+// time from the top, and the side; or nil. A TOTP secret's otpauth:// link,
+// shown to an authenticator app's camera ([STARPORT] 10a). Safe: it reads
+// nothing and writes nothing.
+static int l_qr_code(lua_State *L)
+{
+	const ss_ text = lua_checkcppstring(L, 1);
+	uint8_t qr[qrcodegen_BUFFER_LEN_MAX];
+	uint8_t tmp[qrcodegen_BUFFER_LEN_MAX];
+	if(text.size() > 1000 || !qrcodegen_encodeText(text.c_str(), tmp, qr,
+			qrcodegen_Ecc_MEDIUM, qrcodegen_VERSION_MIN, qrcodegen_VERSION_MAX,
+			qrcodegen_Mask_AUTO, true))
+		return 0;
+	const int n = qrcodegen_getSize(qr);
+	ss_ bits;
+	bits.reserve(n * n);
+	for(int y = 0; y < n; y++)
+		for(int x = 0; x < n; x++)
+			bits += qrcodegen_getModule(qr, x, y) ? '1' : '0';
+	lua_pushlstring(L, bits.data(), bits.size());
+	lua_pushinteger(L, n);
+	return 2;
+}
+
 void init_crypto(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
@@ -394,6 +419,7 @@ void init_crypto(lua_State *L)
 	DEF_BUILDAT_FUNC(tls_new)
 	DEF_BUILDAT_FUNC(tls_step)
 	DEF_BUILDAT_FUNC(tls_free)
+	DEF_BUILDAT_FUNC(qr_code)
 }
 
 } // namespace lua_bindings
