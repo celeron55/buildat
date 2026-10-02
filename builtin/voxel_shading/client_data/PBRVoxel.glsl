@@ -228,6 +228,50 @@ void VS()
     // when nothing sets it, so voxel_shading pushes it every frame.
     uniform float cSpecEmphasis;
 
+    // How much light is on the sky the cube map holds. The cube map is baked
+    // at noon, so a reflection at night is a reflection of the day's sky;
+    // dimming it is most of the way to the right thing, and a second cube
+    // map or one rendered as the day goes is the rest. One is the daylight
+    // it was baked in, and voxel_shading pushes it beside the emphasis.
+    uniform float cSkyLight;
+
+    // And what colour that sky is now. The cube map holds the noon sky, so
+    // a reflection at night is the day's blue however far it is dimmed; this
+    // moves the sample towards the colour the game says its sky is at this
+    // hour, keeping the brightness the cube gives it so that the shape of
+    // the reflection survives. The amount is zero for a material that says
+    // nothing, which is the cube map as it was baked.
+    uniform vec3 cSkyTint;
+    uniform float cSkyTintAmount;
+
+    // **Where the cube map was rendered from, and the box it holds**
+    // ([LAUNCH_WORLD], 2026-09-24: "the reflection might have the wrong
+    // FOV"). A cube map is a picture of the world from one point, and a
+    // surface reflects along a direction -- so every surface that is not
+    // *at* that point reflects the room as seen from somewhere else, and
+    // a wide flat floor shows it at the wrong size and in the wrong
+    // place. That reads exactly like a wrong field of view.
+    //
+    // The correction is the standard one for a room-shaped space: follow
+    // the reflected ray to where it leaves the box the cube map holds,
+    // and look up *that* point relative to the probe. A sky needs none of
+    // this -- it is at infinity -- so the box is zero unless something
+    // sets it, and zero means the lookup is the raw direction, which is
+    // what every world that has a sky in its cube map wants.
+#ifdef VOXELROOMPROBE
+    // **Asked for explicitly, not inferred from the box.** A shader
+    // parameter a material never sets does not reliably read as zero --
+    // Urho3D writes the ones a material has and leaves the rest as the
+    // last draw left them -- so a correction switched on by "the box is
+    // not degenerate" turned itself on in games that had never heard of
+    // it, and voxel_lighting's pond moved by seven times its own noise
+    // floor ([LOOK_CHECK], 2026-09-24). One flag, set beside the box.
+    uniform float cProbeBox;
+    uniform vec3 cProbePos;
+    uniform vec3 cProbeBoxMin;
+    uniform vec3 cProbeBoxMax;
+#endif
+
     const float TRANSMISSION_CELLS = 16.0;   // Cells per voxel, per axis
     // A material whose own roughness is already below this cannot glint, so
     // water is given a duller base than a still pond would have
@@ -537,7 +581,7 @@ void PS()
         vec3 lightDir;
         vec3 finalColor;
 
-        float atten = 1;
+        float atten = 1.0;
 
         #if defined(DIRLIGHT)
             atten = GetAtten(normal, vWorldPos.xyz, lightDir);
@@ -658,18 +702,82 @@ void PS()
                 roughness);
             float ndv = clamp(dot(-toCamera, normal), 0.0, 1.0);
             float mip = GetMipFromRoughness(roughness);
-            vec3 lookup = FixCubeLookup(reflectDir);
+            // Parallax correction, where the cube map holds a room
+            // rather than a sky: the ray from this surface along the
+            // reflection, out to the box, and the lookup is that hit
+            // point seen from the probe. A degenerate box (nothing set
+            // it) leaves the direction alone.
+            vec3 probeDir = reflectDir;
+            #ifdef VOXELROOMPROBE
+            if(cProbeBox > 0.5 && cProbeBoxMax.x > cProbeBoxMin.x){
+                vec3 invR = 1.0 / probeDir;
+                vec3 tMax = (cProbeBoxMax - vWorldPos.xyz) * invR;
+                vec3 tMin = (cProbeBoxMin - vWorldPos.xyz) * invR;
+                vec3 tFar = max(tMax, tMin);
+                float t = min(min(tFar.x, tFar.y), tFar.z);
+                // Behind the surface or outside the box: keep the plain
+                // direction rather than aiming at nothing
+                if(t > 0.0){
+                    probeDir = normalize(vWorldPos.xyz + probeDir * t -
+                        cProbePos);
+                }
+            }
+            #endif
+            vec3 lookup = FixCubeLookup(probeDir);
             // simplified: a direction the camera cannot see the sky along
             // reflects nothing rather than the dark rock that is actually
             // there. Bounced light is in the vertex color if a floor for it is
             // ever wanted.
-            vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb *
-                GetSkyVisibility(reflectDir);
+            // **Is this cube map the sky, or this room?** One answer
+            // drives both halves ([LAUNCH_WORLD], 2026-09-24): a sky is
+            // at infinity, so it wants no parallax and it *does* want
+            // gating -- a tunnel's walls stop reflecting sky while the
+            // sky out of its mouth still reflects. A cube map that
+            // holds the room around it wants the opposite: the
+            // parallax above, and no gating at all, because a room is
+            // visible from inside it by definition. So the flag that
+            // says "a room-shaped box" turns the sky visibility off as
+            // well as the correction on.
+            #ifdef VOXELROOMPROBE
+                vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb;
+                if(cProbeBox <= 0.5){
+                    cube *= GetSkyVisibility(reflectDir);
+                }
+            #else
+                vec3 cube = textureLod(sZoneCubeMap, lookup, mip).rgb *
+                    GetSkyVisibility(reflectDir);
+            #endif
+            // **A reflection is a colour, never a NaN** ([PBR_HDR]). A
+            // float16 zone cube can hand back a value that is not a
+            // number, and this term is *added* to the frame: one NaN
+            // here makes the pixel NaN, every additive light pass after
+            // it adds to NaN, and the surface goes black -- which is
+            // what "a float probe unlights the room" was. Comparisons
+            // against NaN are false, so this is written as a test that
+            // only a real number passes.
+            if(!(cube.r >= 0.0 && cube.r < 1.0e6 &&
+                    cube.g >= 0.0 && cube.g < 1.0e6 &&
+                    cube.b >= 0.0 && cube.b < 1.0e6)){
+                cube = vec3(0.0);
+            }
+            if(cSkyTintAmount > 0.0){
+                float sky_luma = dot(cube, vec3(0.299, 0.587, 0.114));
+                cube = mix(cube, cSkyTint * sky_luma, cSkyTintAmount);
+            }
             // Scaled by how much sky the surface itself sees as well as by
             // how much is visible along the reflection: the cube map answers
             // for the direction, the vertex color for the place.
+            // The same answer again: a surface in a sealed room sees all
+            // of that room's cube map whatever its own skylight says,
+            // and this room's is nought everywhere -- there is no sky in
+            // it to be visible.
+            #ifdef VOXELROOMPROBE
+                float skyGate = cProbeBox > 0.5 ? 1.0 : vSkyVisibility;
+            #else
+                float skyGate = vSkyVisibility;
+            #endif
             finalColor.rgb += cube * EnvBRDFApprox(specColor, roughness, ndv) *
-                vSkyVisibility * cSpecEmphasis;
+                skyGate * cSpecEmphasis * cSkyLight;
         #endif
 
         #ifdef ENVCUBEMAP
