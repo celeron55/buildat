@@ -1755,7 +1755,10 @@ struct Module: public interface::Module
 		if(jint(id, "suspended_until") > now_s())
 			throw Exception("this ID is suspended");
 		if(!id.get("adult").is_true() && id.get("birth_year").is_undefined())
-			throw Exception("say your age on the ID's page first");
+			throw Exception("say your age first: servers on this Starport "
+					"have age limits, so an ID says whether its owner is 18 "
+					"or over (in the client: Starport settings..., Starport "
+					"ID..., Change the age...)");
 		json::Value l = load("listings", jstr(b, "listing"));
 		// 10g: an unlisted server is found by the address the client is
 		// connected to, among the verified listings -- never by an id the

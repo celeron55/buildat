@@ -549,6 +549,11 @@ local function add_text(parent, text, color)
 	local t = parent:CreateChild("Text")
 	t:SetStyleAuto()
 	t:SetWordwrap(true)
+	-- Urho3D's wrap lets the last characters of a line past the width it
+	-- is given: a window's text is given less (24, its margins)
+	if parent.width > 24 then
+		t:SetFixedWidth(math.floor((parent.width - 24) * 0.95))
+	end
 	t.text = text
 	if color then
 		t.color = color
@@ -606,6 +611,8 @@ local YELLOW = magic.Color(1.0, 0.8, 0.4)
 local GREY = magic.Color(0.7, 0.7, 0.7)
 
 local settings_page
+-- What open_settings() was given: the list filtered again by what changed
+local settings_closed
 local settings_root = nil
 
 -- The PIN, when one is set, before anything the lock covers is changed
@@ -630,7 +637,9 @@ local function ask_pin(on_done)
 	add_button(r, "View only", function() go(false) end)
 end
 
-local function toggle_row(w, label, set, values, can)
+-- `hides`: the set says what is hidden, and [x] is still what is shown, as
+-- in the rows above it (user, 2026-10-02: all of them ticked hid them all)
+local function toggle_row(w, label, set, values, can, hides)
 	local r = add_row(w)
 	add_label(r, label, 90)
 	for _, v in ipairs(values) do
@@ -638,7 +647,8 @@ local function toggle_row(w, label, set, values, can)
 		if type(v) == "table" then
 			name, shown = v[1], v[2]
 		end
-		add_button(r, (set[name] and "[x] " or "[ ] ") .. shown, function()
+		local on = (set[name] and true or false) ~= (hides or false)
+		add_button(r, (on and "[x] " or "[ ] ") .. shown, function()
 			set[name] = not set[name]
 			save_state()
 			settings_page(can, true)
@@ -705,9 +715,9 @@ settings_page = function(can, again, message)
 	for _, d in ipairs(DESCRIPTORS) do
 		hides[#hides + 1] = {d[1], d[2]}
 	end
-	toggle_row(w, "Hide", f.hide, {hides[1], hides[2], hides[3]}, fc)
-	toggle_row(w, "", f.hide, {hides[4], hides[5], hides[6]}, fc)
-	toggle_row(w, "", f.hide, {hides[7], hides[8], hides[9]}, fc)
+	toggle_row(w, "With", f.hide, {hides[1], hides[2], hides[3]}, fc, true)
+	toggle_row(w, "", f.hide, {hides[4], hides[5], hides[6]}, fc, true)
+	toggle_row(w, "", f.hide, {hides[7], hides[8], hides[9]}, fc, true)
 	r = add_row(w)
 	add_label(r, "Languages (en, fi; empty: all)", 240)
 	local langs = add_edit(r, f.languages)
@@ -804,7 +814,12 @@ settings_page = function(can, again, message)
 					x.state or "sent"), GREY)
 		end
 	end
-	add_button(w, "Back", function() uistack.main:pop(root) end)
+	add_button(w, "Back", function()
+		uistack.main:pop(root)
+		if settings_closed then
+			settings_closed()
+		end
+	end)
 end
 
 --
@@ -1281,6 +1296,46 @@ end
 -- Starport ID of a Starport that lists it ([STARPORT] 10c); cb(token) or
 -- cb(nil, why). The name used in the server's community is asked the
 -- first time, in this side's own dialog.
+-- The age an ID has not said yet, asked where a join needs it (user,
+-- 2026-10-02: "say your age on the ID's page first" left a newcomer
+-- stuck); on_done(true) once the Starport has it
+local function ask_age(url, session, on_done)
+	ask_pin(function(can)
+		if not can then
+			return on_done(false)
+		end
+		local root, w = open_window("starport id age", 560)
+		add_text(w, "Your Starport ID has no age yet")
+		add_text(w, "Servers on " .. url .. " have age limits, so before "..
+				"your ID joins one, say whether you are 18 or over. That "..
+				"is all that is kept for an adult; under 18, the birth "..
+				"year. You can change it later: Starport settings..., "..
+				"Starport ID..., Change the age...", GREY)
+		local get_age = age_rows(w)
+		local st = add_text(w, "")
+		local rr = add_row(w)
+		add_button(rr, "Save and join", function()
+			local a, why = get_age()
+			if not a then
+				st.text = why
+				return
+			end
+			a.session = session
+			id_call(url, "age", a, function(res, err)
+				if not res then
+					st.text = tostring(err)
+					return
+				end
+				uistack.main:pop(root)
+				on_done(true)
+			end)
+		end)
+		add_button(rr, "Cancel", close_and(root, function()
+			on_done(false)
+		end))
+	end)
+end
+
 function M.safe.id_token_here(cb)
 	local address = __buildat_server_address()
 	if address then
@@ -1363,6 +1418,17 @@ function M.safe.id_token_here(cb)
 							M.safe.id_token_here(cb)
 						end, "Log in again")
 					end
+					-- An ID made without an age (one made by joining the
+					-- Starport app): asked here, then the join goes on
+					if tostring(err):lower():find("say your age", 1, true) then
+						return ask_age(url, s.ids[url].session, function(ok)
+							if ok then
+								ask(name)
+							else
+								cb(nil, "cancelled")
+							end
+						end)
+					end
 					return cb(nil, err)
 				end
 				if res.need_name then
@@ -1398,8 +1464,10 @@ function M.safe.id_token_here(cb)
 	end
 end
 
--- open_settings(): the settings dialog, behind the PIN where one is set
-function M.safe.open_settings()
+-- open_settings([on_closed]): the settings dialog, behind the PIN where
+-- one is set; on_closed() at its Back
+function M.safe.open_settings(on_closed)
+	settings_closed = on_closed
 	ask_pin(function(ok)
 		settings_page(ok)
 	end)

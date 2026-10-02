@@ -353,7 +353,10 @@ function M.show_connect_to_server()
 				show_error("Pick a public server to report")
 			end
 		end},
-		{"Starport settings...", function() starport.open_settings() end},
+		{"Starport settings...", function()
+			-- The filters may change: the list again, from what is kept
+			starport.open_settings(function() refresh(false) end)
+		end},
 	}) do
 		local button = make_button(sp_buttons, b[1])
 		button:SetFixedHeight(26)
