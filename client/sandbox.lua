@@ -63,6 +63,14 @@ __buildat_sandbox_environment = {
 local view_of = setmetatable({}, {__mode = "k"}) -- table -> its view
 local real_of = setmetatable({}, {__mode = "k"}) -- view -> its table
 local wrapper_of = setmetatable({}, {__mode = "k"}) -- function -> wrapper
+local wrapped = setmetatable({}, {__mode = "k"}) -- wrapper -> function
+
+-- What a view or a wrapper stands for, or nil: the exploit search walks
+-- that, since a view's table and a wrapper's function are what the
+-- sandbox reaches (client/extensions/sandbox_scan). Trusted only.
+function __buildat_sandbox_seen_through(v)
+	return real_of[v] or wrapped[v]
+end
 
 local function unwrap(n, a)
 	for i = 1, n do
@@ -84,6 +92,7 @@ local function shown(v)
 				return v(unwrap(select("#", ...), {...}))
 			end
 			wrapper_of[v] = w
+			wrapped[w] = v
 		end
 		return w
 	end
@@ -253,7 +262,7 @@ function __buildat_sandbox_debug_check_value(value)
 	end
 end
 
--- For debugging purposes. Used by extensions/sandbox_test.
+-- For debugging purposes. Used by client/extensions/sandbox_scan.
 __buildat_latest_sandbox_global_wrapper_number = 0 -- Incremented every time
 __buildat_latest_sandbox_global_wrapper = nil
 -- Save a number of old wrappers for debugging purposes

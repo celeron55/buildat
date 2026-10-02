@@ -2627,7 +2627,7 @@ struct CApp: public App, public magic::Application
 			}
 		}
 		if(key == Urho3D::KEY_F12 && (event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL)){
-			ss_ extname = "sandbox_test";
+			ss_ extname = "sandbox_scan";
 			ss_ script = ss_() +
 					"local m = require('buildat/extension/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"

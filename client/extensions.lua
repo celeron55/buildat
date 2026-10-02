@@ -13,7 +13,7 @@ local loaded_extensions = {}
 -- sandbox's require hands out a view of that.
 -- simplified: the ones below are still loaded trusted until they are
 -- converted; the list only shrinks.
-local NOT_YET_SANDBOXED = {luanti_client = true, sandbox_test = true}
+local NOT_YET_SANDBOXED = {luanti_client = true}
 
 local function load_trusted(name, path)
 	local script, err = loadfile(path)
