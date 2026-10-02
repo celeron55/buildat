@@ -24,7 +24,7 @@ cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2; exit "$SKIP"
 fi
-rm -rf "../user/games/vanilla/saves/$save"
+rm -rf "../user/apps/vanilla/saves/$save"
 trap 'pkill -INT -x buildat_server 2>/dev/null; true' EXIT
 
 # A world of its own and no player: what is measured is what the server
@@ -35,7 +35,7 @@ run_one() {
 		echo "$settings"; } > "$out/fixture_$name.lua"
 	BUILDAT_LUANTI_GAME="${GAME:-devtest}" \
 		BUILDAT_LUANTI_SAVE="$save" BUILDAT_LUANTI_LUA="$out/fixture_$name.lua" \
-		timeout 300 bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user \
+		timeout 300 bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user \
 		-P 29822 -l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' \
 		> "$out/srv_$name.log" &
 	for i in $(seq 1 300); do

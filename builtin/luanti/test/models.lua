@@ -3,7 +3,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=model_check \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/models.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- Four of devtest's glTF test entities in a row four nodes in front of the
 -- player, and the frog again as a node beside them. What the log says is the

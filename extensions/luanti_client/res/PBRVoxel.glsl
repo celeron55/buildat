@@ -5,7 +5,7 @@
 // to deliver it. What keeps the two apart now is that a good deal of what is
 // in here is an art style rather than a mechanism -- how far a spot turns, how
 // narrowly a leaf passes light through itself -- and this client's worlds and
-// games/voxel_lighting's are not the same worlds. Tuning one of them through a
+// apps/voxel_lighting's are not the same worlds. Tuning one of them through a
 // shared file retunes the other, which is how voxel_lighting's rock quietly
 // lost its speckle.
 //

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs games on the newest GitHub release's Linux web-precompiled archive,
+# Runs apps on the newest GitHub release's Linux web-precompiled archive,
 # and moves to each newer release as it appears. For testing servers in a
 # terminal (a GNU screen): it stays in the foreground, the servers' output
 # is its own, and Ctrl+C stops them all.
@@ -21,7 +21,7 @@
 # stopped with SIGTERM (a game saves on it), and each is started on the new
 # one. A server that exits is started again by itself. Every version but
 # the running one and the one before it is deleted. A server that exits with
-# status 20 is a game's own restart (games/vanilla switching its world), and
+# status 20 is a game's own restart (apps/vanilla switching its world), and
 # is started again at once; meanwhile a stand-in on its port answers a
 # browser with a page that says so and reloads itself, until the server
 # says it is listening (they share the port: BUILDAT_SHARE_PORT=1).
@@ -29,7 +29,7 @@
 # **A rollback** is by hand, with this script stopped: run the version
 # before from its directory,
 #   cd ~/buildat-serve/versions/<the one before>
-#   bin/buildat_server -m games/<game> -P <port> -D <user dir>
+#   bin/buildat_server -m apps/<app> -P <port> -D <user dir>
 # for each server.
 # Started again, this script goes back to the newest release. A game whose
 # saves carry a schema version (the floorplanner) refuses a save that a
@@ -216,8 +216,11 @@ standin_check(){
 start(){
 	local i=$1 game=${games[$1]} port=${ports[$1]}
 	local dir="$base/versions/$current"
-	if [ ! -d "$dir/games/$game" ]; then
-		say "$current has no games/$game"
+	# apps/, or games/ in a release from before apps were called apps
+	local apps=apps
+	[ -d "$dir/apps" ] || apps=games
+	if [ ! -d "$dir/$apps/$game" ]; then
+		say "$current has no $apps/$game"
 		broken[$i]=$current
 		return 1
 	fi
@@ -226,7 +229,7 @@ start(){
 	say "starting $game on port $port on $current, user ${users[$i]}"
 	echo "$current" > "$base/current"
 	(cd "$dir" && BUILDAT_SHARE_PORT=1 exec bin/buildat_server \
-			-m "games/$game" -P "$port" \
+			-m "$apps/$game" -P "$port" \
 			-D "${users[$i]}" "${args[@]}") \
 			> >(sed -u "s/^/[$game:$port] /" |
 				tee -a "$base/server-$game-$port.log") 2>&1 &
@@ -304,7 +307,7 @@ while true; do
 				wait "$pid" 2>/dev/null
 				status=$?
 				pids[$i]=""
-				# 20 is a game's own restart, such as games/vanilla
+				# 20 is a game's own restart, such as apps/vanilla
 				# switching its world: again at once
 				if [ "$status" = 20 ]; then
 					say "${games[$i]} on port ${ports[$i]} restarts itself"

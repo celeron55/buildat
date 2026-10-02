@@ -1,6 +1,6 @@
 Buildat Client API
 ==================
-The Lua API a game's client_lua and an extension see: buildat.*, the
+The Lua API an app's client_lua and an extension see: buildat.*, the
 sandboxed magic (Urho3D), the built-in extensions' safe interfaces, and
 the voxel data model as Lua reads it. Rewritten against the code
 2026-09-21 ([CLIENT_API_DOC]); util/api_names.py --check says whether it
@@ -12,7 +12,7 @@ plain Lua, no rules) and the sandbox (everything a server sends, and a
 launcher file's tiles). What a name is in each is said with the name.
 
 Terminology: a *voxel* is one cell of a voxel volume, and a *node* is a scene
-node -- what a Scene holds and a component hangs off. Games that come from
+node -- what a Scene holds and a component hangs off. Apps that come from
 elsewhere may call a voxel a node (Luanti does); in buildat it is a voxel.
 
 
@@ -66,7 +66,7 @@ buildat.logical_size() -> w, h
 buildat.get_preferred_render_scale() -> number
 - The fraction of the window size the user asked 3D viewports to be rendered
   at. 1.0 means no scaling at all, which is the default.
-- magic.set_preferred_viewports() is what applies it; this is for a game that
+- magic.set_preferred_viewports() is what applies it; this is for an app that
   wants to know, to show it on a settings screen of its own or to size
   something of its own to match.
 - See "Engine settings" below.
@@ -79,17 +79,17 @@ buildat.get_env(name) -> string, or nil when unset or not BUILDAT_-prefixed
   user's environment.
 
 buildat.get_sound() -> mute, db; buildat.set_sound(mute, db) -> ok, err
-- The one preference a game may write: the player's ear, from a pause menu.
+- The one preference an app may write: the player's ear, from a pause menu.
   Through the preferences' own parser and file, so the launcher's page and
-  the game's row agree.
+  the app's row agree.
 - The volume is decibels below full ([VOLUME_LAW]): 0 is full, the settings
   step 3 dB down to -30, and -33 or less is off. The gain is made from it in
   the client, in the one place it is applied.
 
 buildat.get_render_scale() -> share, automatic
 buildat.set_render_scale(share or "auto") -> ok, err
-- The other preference a game may write: render_scale (see "Engine
-  settings"), from a game's own settings, since the web client has no
+- The other preference an app may write: render_scale (see "Engine
+  settings"), from an app's own settings, since the web client has no
   launcher to reach Engine settings through. The frame's cost, not its look.
 - "auto", the default, is the client's choice, made again at each start and
   resize: natively 1; on the web about 2.1 M pixels (1080p's) of the page's
@@ -119,7 +119,7 @@ buildat.set_web_fullscreen(bool)
 buildat.get_cache_path() -> string (sandbox only, see below)
 buildat.create_directories(path) -> bool (unsafe Lua only)
 - The directory and its parents, for trusted Lua keeping a file of its own
-  under the user path; a path is not a thing a game gets to name
+  under the user path; a path is not a thing an app gets to name
 buildat.set_watchdog_seconds(n) (unsafe Lua only)
 - How long without a frame before the watchdog logs this thread's stack;
   0 puts the default (10) back. A screen that waits lowers it
@@ -137,7 +137,7 @@ buildat.SpatialUpdateQueue() -> queue
 
 buildat.list_installed_games(family) -> {{name =, size =, icon =}, ...}
 - Under <user>/<family>/games, for a launcher file's tiles. size is the
-  directory tree's, as list_games() answers for a buildat game; icon is the
+  directory tree's, as list_apps() answers for a buildat app; icon is the
   resource name of the game's own menu/icon.png, copied under the cache and
   namespaced by family and game, and absent where the game ships none.
 
@@ -218,13 +218,13 @@ API specific to the extension environment:
 buildat.connect_server(address)
 - Address may include port in format "host:port" or "[host]:port"
 
-buildat.list_games() -> {name, ...}, the games under games/
+buildat.list_apps() -> {name, ...}, the apps under apps/
 buildat.list_launchers() -> {{kind, name, path, launcher = bool}, ...}
-- Every game, builtin and extension in the tree, for the launch grid
+- Every app, builtin and extension in the tree, for the launch grid
   ([LAUNCH_GRID]); launcher says whether it has a launcher/init.lua.
 
-buildat.start_local_server(game [, launch]) -> ok, error
-- Starts buildat_server as a child on a free port with -m games/<game>, and
+buildat.start_local_server(app [, launch]) -> ok, error
+- Starts buildat_server as a child on a free port with -m apps/<app>, and
   -u launch for the launch-grid action it is for. The server always gets a
   log: the client's own _server sibling when the client has -L, else
   cache/local_server_<port>.log at info ([START_PROGRESS]).
@@ -265,8 +265,8 @@ buildat.set_preference(name, value) -> true, or false and why
   authority: set_preference() parses and range checks a value through the same
   code -o goes through, applies what takes effect now -- the sound gain, the
   frame limiter, vsync and MSAA, the render scale -- and persists the rest.
-- A preference is the user's: game code a server sent can read one --
-  default_username is the name a game offers when it asks for one -- and
+- A preference is the user's: app code a server sent can read one --
+  default_username is the name an app offers when it asks for one -- and
   set_preference refuses it. A launch extension, which is the user's, can set
   them.
 - extensions/launch_menu/preferences.lua is the screen over these.
@@ -282,13 +282,13 @@ buildat.connect_server_start(address), buildat.connect_server_poll() -> state
   it answers. The blocking connect_server() freezes the frame for as long as
   the connect takes ([BOX_PLAYTEST_2] 12). The sandbox has these as
   connect_start/connect_poll.
-buildat.list_saves(game) -> {{name, ...}, ...}, the saves of one game
+buildat.list_saves(app) -> {{name, ...}, ...}, the saves of one app
 buildat.launch_ui_sandboxed(name) -> bool
 - Whether that launch UI's launch_ui.txt asks to be run in the sandbox. The
   client's boot reads it; nothing in the sandbox does.
 buildat.menu_extension() -> the launch UI's module, or the interface it gave
-- Whom the client and a game's own menu call for entered_game, leave_game,
-  in_game and show_dead_server ([MENU_CONTEXT]).
+- Whom the client and an app's own menu call for entered_app, leave_app,
+  in_app and show_dead_server ([MENU_CONTEXT]).
 
 
 The sandbox environment
@@ -315,7 +315,7 @@ buildat.disconnect()
 - If connected from the menu, quit to the menu (the client state is reset by
   restarting it); if connected from the command line, close the client
 buildat.leave()
-- Back to the launcher's grid when there is one under the game
+- Back to the launcher's grid when there is one under the app
   ([MENU_CONTEXT]), else what disconnect() does
 buildat.set_reload_on_return(bool)
 - On the web client: whether a disconnect while the page was away (a phone's
@@ -339,10 +339,10 @@ The launch UI's own verbs
 -------------------------
 
 A launch extension is a slot anybody can fill, so it has to run in the sandbox
-every game runs in ([LAUNCH_SANDBOX]). The rule that keeps this list short is
+every app runs in ([LAUNCH_SANDBOX]). The rule that keeps this list short is
 that the trusted side owns the verbs and the sandbox owns the drawing: each of
 these does one nameable thing, and none is a general capability, because every
-addition here is attack surface for every game too.
+addition here is attack surface for every app too.
 
 buildat.safe.launch_actions() -> {{key, id, label, icon, kind, from,
   description, order, category, significance, last_launched}, ...}
@@ -355,23 +355,23 @@ buildat.safe.launch(key) -> true, or false and why
 - Run one of them. The key is looked up in the table the trusted side built,
   so a sandbox can name nothing that is not on the grid. The key and the
   time go in the launch history.
-buildat.safe.list_games() -> {name, ...}
-buildat.safe.list_saves(game) -> {{name, ...}, ...}
-buildat.safe.launch_save(game, name) -> true, or false and why
+buildat.safe.list_apps() -> {name, ...}
+buildat.safe.list_saves(app) -> {{name, ...}, ...}
+buildat.safe.launch_save(app, name) -> true, or false and why
 - Open a save. The pair has to be one list_saves() answers, so what reaches
   the server's -u is a save that is on the disk.
 buildat.safe.launch_loading(what) -> true, or false and why
-- A game launched into a menu of its own says here that it has stopped
+- An app launched into a menu of its own says here that it has stopped
   being a menu and is loading: what is "world" or "server". Reaches the
-  launch UI's game_loading(what) if it provides one, and nothing else; a
+  launch UI's app_loading(what) if it provides one, and nothing else; a
   launch UI without one is not an error ([LAUNCH_API]). What this replaces
   is guessing from the viewport handover or the local server coming up,
   both of which are late and neither of which says which happened.
 buildat.safe.local_server_running() -> bool
-- How a launcher knows a launch action started a game rather than opening a
+- How a launcher knows a launch action started an app rather than opening a
   screen.
-buildat.safe.start_local_server(game[, launch]) -> true, or false and why
-- Start a local server of a game list_games() answers. launch is key=value
+buildat.safe.start_local_server(app[, launch]) -> true, or false and why
+- Start a local server of an app list_apps() answers. launch is key=value
   lines for the server's -u. Refused to a chunk a server sent, as
   stop_local_server is.
 buildat.safe.stop_local_server(force) -> true, or false and why
@@ -379,18 +379,18 @@ buildat.safe.stop_local_server(force) -> true, or false and why
 buildat.safe.local_server_state() -> port or nil, status
 - The port once the local server answers, and the last status line of its
   log. extensions/launch_menu/screens.lua is these three's user: the screens
-  every launch UI's game starts go through.
+  every launch UI's app starts go through.
 buildat.safe.connect_start(address) -> true, or false and why
 buildat.safe.connect_poll() -> the connect's state
 - Connecting on a worker, polled from a frame handler.
 buildat.safe.leave_to_menu()
-- Back to the launcher from a game ([MENU_CONTEXT]): the connection dropped,
+- Back to the launcher from an app ([MENU_CONTEXT]): the connection dropped,
   the local server stopped and the sandbox's leavings cleared.
 buildat.safe.quit()
 - The client shuts down. A launcher calling engine:Exit() is reaching for the
   engine to do what this does.
 buildat.safe.provide_launch_interface(t) -> true, or false and why
-- Give the client entered_game, leave_game, in_game and show_dead_server.
+- Give the client entered_app, leave_app, in_app and show_dead_server.
   Merged, not replaced, since a launch UI may be a composition of two.
 buildat.safe.list_launch_uis() -> {{name, title, ...}, ...}
 - The launch UIs this client has, listed without running one: an extension
@@ -421,11 +421,11 @@ buildat.safe.storage_read(name) -> data or nil
 buildat.safe.storage_write(name, data) -> true, or false and why
 - One directory per launch extension under the user path. A name is one file,
   not a path, and there is a size limit.
-- Game code a server sent gets the same two as buildat.storage_read and
+- App code a server sent gets the same two as buildat.storage_read and
   buildat.storage_write, kept per server like a web page's localStorage:
-  <user>/games/<game>/client for a server this client started (its port
-  changes every launch, its game does not), <user>/servers/<address> for any
-  other, so a server cannot read what another one or a local game stored.
+  <user>/apps/<app>/client for a server this client started (its port
+  changes every launch, its app does not), <user>/servers/<address> for any
+  other, so a server cannot read what another one or a local app stored.
   Which is which is told by the chunk's name: run_script_file notes the
   chunks a server served.
 buildat.safe.is_scripted() -> bool
@@ -438,7 +438,7 @@ buildat.safe.get_file_content(name) -> bytes or nil
 
 buildat.Vector3(x, y, z) / buildat.Vector3(v) -> {x, y, z} with :add, :sub,
 buildat.Vector2(x, y) -> {x, y}                    :mul_components, :length...
-- Plain-table vectors with the arithmetic a game's own code wants, as
+- Plain-table vectors with the arithmetic an app's own code wants, as
   against the sandboxed magic.Vector3, which is a wrapped userdata.
 
 
@@ -537,7 +537,7 @@ UnsubscribeFromEvent(event_name, callback)
 buildat.parse_json(text) -> value, or nil and why not
 - JSON to plain Lua: objects become tables keyed by their names, arrays
   become lists from 1, and strings, numbers and booleans are themselves. What
-  a game fetches with network.http_get is what this is for.
+  an app fetches with network.http_get is what this is for.
 - A JSON null becomes nil, so an array with nulls in it has holes and # stops
   at the first one. A document nests 64 deep at most, and 8 MB is refused.
 - Urho3D's own JSONFile and JSONValue are not on the whitelist: their getters
@@ -571,7 +571,7 @@ A mesh built from Lua: VertexBuffer, IndexBuffer, Geometry, Model
   geometries and a StaticModel the Model, all by reference count.
 
 DebugRenderer, through scene:CreateComponent("DebugRenderer")
-- A game's own debug geometry: AddLine, AddTriangle, AddCross, AddCircle,
+- An app's own debug geometry: AddLine, AddTriangle, AddCross, AddCircle,
   AddSphere, AddBoundingBox and AddNode, each taking a Color and an optional
   depth test. What it is given is drawn by renderer:DrawDebugGeometry([depth])
   and then forgotten, so nothing survives the frame it was added in. SetView
@@ -579,14 +579,14 @@ DebugRenderer, through scene:CreateComponent("DebugRenderer")
   viewport it draws.
 
 Cursor:DefineShape(shape, image, rect, hot_spot)
-- A game's own cursor art, for a Cursor element of its own. The shape is
+- An app's own cursor art, for a Cursor element of its own. The shape is
   Urho3D's name for one ("Normal", "ResizeVertical", ...).
 - The image has to come out of the resource cache: Urho3D hands it to a
   SharedPtr, which would free an image the sandbox built from under the
   collector. An image with no name is refused for that reason.
 
 XMLFile:GetRoot([name]) -> XMLElement, XMLFile:ToString([indentation])
-- A game's own XML, read: the file comes out of the resource cache like any
+- An app's own XML, read: the file comes out of the resource cache like any
   other media (magic.cache:GetResource("XMLFile", "mygame/data.xml")), and the
   element walks it -- IsNull/NotNull, GetName, GetValue, HasChild,
   GetChild([name]), GetNext([name]), GetParent, GetFile, HasAttribute,
@@ -599,7 +599,7 @@ XMLFile:GetRoot([name]) -> XMLElement, XMLFile:ToString([indentation])
 magic.render_scene_to_texture(scene, camera_node, w, h) -> Texture2D
 - A scene drawn into a texture instead of into the window. What wants it is a
   thumbnail: a voxel volume or a model seen on its own, on a button, which is
-  what the structures menu in games/aggregate wears.
+  what the structures menu in apps/aggregate wears.
 - The camera node needs a Camera component. The texture keeps updating every
   frame, so geometry built asynchronously -- set_voxel_geometry() -- appears
   when it arrives without anything asking for another update.
@@ -613,14 +613,14 @@ magic.render_scene_to_texture(scene, camera_node, w, h) -> Texture2D
 
 magic.set_preferred_viewports({viewport, ...})
 - The viewports the user's graphics preferences are applied to, as against the
-  raw renderer:SetViewport() ones, which are drawn the way the game says and
+  raw renderer:SetViewport() ones, which are drawn the way the app says and
   nothing else. That is what "preferred" means throughout this API: it honours
   what the user asked for.
 - Use it instead of renderer:SetViewport(). The engine draws the scene at the
   user's render_scale, under a UI that stays at native resolution, and the
-  viewport stays the game's own -- replacing renderPath afterwards, which most
-  games do, still works, and so does HDR. renderer:GetViewport(0) answers with
-  the game's preferred viewport when the renderer holds none (it is on a
+  viewport stays the app's own -- replacing renderPath afterwards, which most
+  apps do, still works, and so does HDR. renderer:GetViewport(0) answers with
+  the app's preferred viewport when the renderer holds none (it is on a
   texture then), so a render path set through it reaches the picture.
 - The whole list at once, because Urho3D needs both a viewport per slot and a
   count. An empty table is teardown: nothing is left on the screen.
@@ -629,18 +629,18 @@ magic.set_preferred_viewports({viewport, ...})
       magic.set_preferred_viewports({vp_top, vp_bottom})   -- two
       magic.set_preferred_viewports({})                    -- teardown
 
-- Declarative: this is what is on the screen now. A game that moves a viewport
-  rect -- games/bomber_drone splits the window in half -- calls it again after
+- Declarative: this is what is on the screen now. An app that moves a viewport
+  rect -- apps/bomber_drone splits the window in half -- calls it again after
   setting the new rects, and the rects it reads are in window pixels whatever
   the scale is, so nothing about screen-to-world maths or picking changes.
-- A game that does not call this is drawn at native resolution and keeps
+- An app that does not call this is drawn at native resolution and keeps
   working. The preference is a preference: the client owns how much the frame
-  costs, the game owns what is in it. That is the deal, not a gap to be closed
+  costs, the app owns what is in it. That is the deal, not a gap to be closed
   later.
 
 Engine settings
 ---------------
-What the user sets once and every game honours: how much the frame costs and
+What the user sets once and every app honours: how much the frame costs and
 how loud it is, never what the art is. Kept in user/settings.json, and
 overridden for one run by -o (see README.md).
 
@@ -653,19 +653,19 @@ overridden for one run by -o (see README.md).
     multisampling   MSAA samples: 1, 2, 4, 8 or 16
     sound_volume_db decibels below full, 0 to -30 and off under it
     sound_mute      that gain forced to zero
-    default_username the name a game offers when it asks for one, "User"
+    default_username the name an app offers when it asks for one, "User"
                     by default: 1 to 20 letters, digits, _ and -
 
-render_scale is cooperative: it reaches a game's viewports only through
-set_preferred_viewports(), because a viewport belongs to the game that made
+render_scale is cooperative: it reaches an app's viewports only through
+set_preferred_viewports(), because a viewport belongs to the app that made
 it. The sound pair is enforced, because Urho3D already multiplies every sound
 type's gain by the "Master" one -- which is why Audio:SetMasterGain("Master")
-is refused in the sandbox. Games have "Effect", "Music", "Ambient" and
+is refused in the sandbox. Apps have "Effect", "Music", "Ambient" and
 "Voice", and their own mixing multiplies under the user's setting.
 
 Shadow quality, texture and material quality, filtering, FOV and draw distance
-are deliberately not here: each one changes what the game looks like or what a
-player can see, and the game is the one that should say.
+are deliberately not here: each one changes what the app looks like or what a
+player can see, and the app is the one that should say.
 
 The launch menu has a page of them, in extensions/launch_menu/preferences.lua. It
 is a page of widgets over buildat.get_preference() and set_preference() and
@@ -694,7 +694,7 @@ Note:
 	side, because then you will get unpredictable fighting between the one set
 	on server-side and client-side.
 
-	Example: games/entitytest/main/client_lua/init.lua
+	Example: apps/entitytest/main/client_lua/init.lua
 
 replicate.main_scene
 - Main replicated scene instance. To show it on screen, add a camera and a
@@ -788,7 +788,7 @@ show_message_dialog(message [, on_close])
 show_confirm_dialog(message, on_yes, on_no)
 show_notice(text)
 - A line at the top of the screen for six seconds, taking neither the mouse
-  nor the focus: what a caught error is shown as in a game ([MENU_ERRORS])
+  nor the focus: what a caught error is shown as in an app ([MENU_ERRORS])
 show_notification(text, duration_s)
 - A small non-modal notice in the top right corner, gone after duration_s
   (2 seconds by default)
@@ -960,16 +960,16 @@ param values it applies to:
   Luanti's flowing liquids put in param2. The corner heights that make a
   surface continuous read the neighbours' own params too.
 - Only a param up to 8 bits wide is looked up this way. A wider one is
-  storage for the game to read itself.
+  storage for the app to read itself.
 
-voxel_reg:set_format{...} says how the game cuts up a voxel's 32 bits. The
+voxel_reg:set_format{...} says how the app cuts up a voxel's 32 bits. The
 default is what buildat had before this existed -- the type id in bits 0...20
-and two 4-bit light levels in 24...31 -- and a game that says nothing keeps
+and two 4-bit light levels in 24...31 -- and an app that says nothing keeps
 it. Say it before the first voxel is added: everything already stored, and
 every volume on its way anywhere, is bits under the old format.
 
   voxel_reg:set_format{
-      plane_bits = 32,                    -- the game's own plane's width
+      plane_bits = 32,                    -- the app's own plane's width
       id = {shift = 0, width = 16},       -- indexes the registry
       light_sky = {shift = 16, width = 4},
       light_lamp = {shift = 20, width = 4},
@@ -979,7 +979,7 @@ every volume on its way anywhere, is bits under the old format.
       tint = nil, wetness = nil, grain = nil, gloss = nil,
       speckle = nil, emission = nil,      -- surface, at most four at once
       sag_top = nil, sag_bottom = nil,    -- geometry
-      planes = {                          -- planes after the game's own
+      planes = {                          -- planes after the app's own
           {name = "mymod:heat", bits = 8},
       },
   }
@@ -987,14 +987,14 @@ every volume on its way anywhere, is bits under the old format.
 - Those five are the roles the engine understands. A role left out is not
   bound, which is not the same as one that is always zero: a world with no
   light bound is not dark, it is one where nothing asks about light. Bits no
-  role covers are the game's own.
+  role covers are the app's own.
 - Bind the light the world actually fills and no more. light_lamp is for a
   world that works out the light a voxel gets from something other than the
-  sky and stores it per voxel, which is what a Luanti server does; a game
+  sky and stores it per voxel, which is what a Luanti server does; an app
   whose lamps are lights in the scene wants only light_sky, and the shader
   lights the geometry from the lamps.
 - id is what the registry is indexed by, at most 21 bits wide. With no id
-  bound there is one voxel type, which is what a game whose voxels are
+  bound there is one voxel type, which is what an app whose voxels are
   colours rather than types wants.
 - param is handed to the voxel's definition, which is what says what it
   means: which way the voxel faces, how high a liquid stands in it, which
@@ -1002,14 +1002,14 @@ every volume on its way anywhere, is bits under the old format.
 - color is 0xRRGGBB in the low 24 bits of a field 24 or 32 bits wide, and is
   multiplied into the vertex colour. That colour is light rather than albedo,
   so it tints the light a voxel receives and not its texture: right for a
-  game whose voxels are unlit colour, wrong for a palette over a texture.
+  app whose voxels are unlit colour, wrong for a palette over a texture.
 - The modifiers say how much of something a voxel has, where a role says
   what it is. Each is normalised against its own field's width, so a 4-bit
-  field and an 8-bit one both run 0...1 and a game can widen one without
+  field and an 8-bit one both run 0...1 and an app can widen one without
   touching its shader.
 - The surface modifiers reach the shader as four numbers in the vertex
   tangent and nowhere else; the engine promises the four and their order and
-  the game's shader decides what they look like. The order is tint, wetness,
+  the app's shader decides what they look like. The order is tint, wetness,
   grain, gloss, speckle, emission, with the bound ones packed towards x --
   fixed rather than the order they were written, so that two worlds binding
   the same roles hand their shaders the same thing. At most four may be
@@ -1026,22 +1026,22 @@ every volume on its way anywhere, is bits under the old format.
   to vdef.sag_extent voxels. The mesher averages the sag of the voxels that
   meet at each corner, so a sagging surface runs continuously instead of
   stepping; what the sag means -- a liquid's level, a floor giving under a
-  load, shallow snow -- is the game's.
+  load, shallow snow -- is the app's.
 - A voxel's bits are stored **a plane at a time**: a plane is one array over
   a chunk holding the same bits of every voxel in it, so a world's voxels
   are several arrays rather than one array of words. A format has one
-  32-bit plane unless it says otherwise, which is what every game here has
+  32-bit plane unless it says otherwise, which is what every app here has
   and is the same bits in the same order as before planes existed.
 - What a second plane is for: a field a simulation sweeps, which it then
   reads a byte per voxel of instead of four; a field a module keeps without
-  asking the game for room in a word it has already spent; and a mixture
+  asking the app for room in a word it has already spent; and a mixture
   world, where the number of fields is the number of materials. A plane
   nothing has written costs a chunk nothing at all.
 - A field says which plane it is in: {plane = 1, shift = 0, width = 4}.
-  plane defaults to 0, the game's own.
+  plane defaults to 0, the app's own.
 - Reading one: volume:get_plane_at(plane, x, y, z) and its setter, and
   voxelworld.get_static_voxel_plane(p, plane) on the client. Both hand back a
-  plain number, because a plane other than the first holds the game's own
+  plain number, because a plane other than the first holds the app's own
   bits and none of the engine's roles. get_voxel_at() and get_static_voxel()
   are the first plane, as they always were. Each plane is 8, 16 or 32 bits, the
   first has no name and the rest must have one, and there are at most eight.
@@ -1050,7 +1050,7 @@ every volume on its way anywhere, is bits under the old format.
 - voxel_reg:dump_format() writes the format out, for a log line.
 
 voxel_reg:set_look_rules{...} says how a voxel's *definition* is found, for a
-world whose voxels have no type id at all. The default, and what every game
+world whose voxels have no type id at all. The default, and what every app
 in this tree does, is the id role of the format: a shift, a mask and an
 index. Rules are the other way.
 
@@ -1072,7 +1072,7 @@ index. Rules are the other way.
 - A clause is a field and a range, both ends included. lo defaults to 0 and
   hi to the field's whole range, so a clause with one of them is "at least"
   or "at most". field is a role name or a table {shift = ..., width = ...}
-  for a field of the game's own that no role covers.
+  for a field of the app's own that no role covers.
 - The definition is still where every property lives -- what is drawn,
   whether the physics collides with it, whether light passes. A selector
   only changes how the definition is found, so nothing that asks a question
@@ -1085,13 +1085,13 @@ index. Rules are the other way.
 - The id role, where it is bound, still says whether a voxel has been
   generated at all -- id 0 is "nothing has got here yet" whatever the rules
   make of the rest of the word.
-- It travels with the registry, as the format does. games/aggregate_look is
+- It travels with the registry, as the format does. apps/aggregate_look is
   a world that uses it: two rules over two fields, and no voxel id stored
   anywhere.
 - The format travels with the registry, so a client that deserializes one
   gets the world's cut along with its definitions.
 
-atlas_reg:set_surface_maps(false) says the game's voxel shader samples the
+atlas_reg:set_surface_maps(false) says the app's voxel shader samples the
 diffuse atlas and nothing else. An atlas then carries neither the normal map
 nor the surface map derived from its segments' pixels, which is two thirds of
 what adding a texture to an atlas costs and two thirds of its memory. Say it
@@ -1171,7 +1171,7 @@ buildat.compose_image(args) -> width, height
 - Raster operations over an RGBA canvas, saved as a PNG. What wanted this is
   Luanti's texture modifiers ("dirt.png^grass.png", "[colorize:#ff0000:128",
   "[combine:32x32:0,0=a.png"), which are a small language over these
-  operations; the language itself belongs in the game's own code.
+  operations; the language itself belongs in the app's own code.
 
   buildat.compose_image{
       size = {16, 16},        -- the canvas; default: the first blit's
@@ -1240,7 +1240,7 @@ buildat.compose_image(args) -> width, height
 buildat.read_image(resource_name) -> width, height, rgba
 - The pixels of an image, as one string of four bytes per pixel, row by row.
   What wanted this is a colour palette: an image of a few dozen pixels that a
-  game indexes to say what colour something is drawn in.
+  app indexes to say what colour something is drawn in.
 
 VoxelDefinition.shape
 - A shape of the voxel's own instead of a cube: an array of quads, each

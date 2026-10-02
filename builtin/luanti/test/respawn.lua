@@ -6,7 +6,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=respawn \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/respawn.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 --   respawn: dead hp=0, back hp=20 at (-145,6,180)
 core.register_on_joinplayer(function(player)

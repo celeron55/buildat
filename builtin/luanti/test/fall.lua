@@ -4,7 +4,7 @@
 -- three seconds; no player, so objects are made active everywhere.
 --
 --   BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_LUA=builtin/luanti/test/fall.lua \
---       bin/buildat_server -m ../games/vanilla -D ../user -P 29791
+--       bin/buildat_server -m ../apps/vanilla -D ../user -P 29791
 core.register_on_mods_loaded(function()
 	core.after(4, function()
 		local O = {x = 0, y = 120, z = 0}

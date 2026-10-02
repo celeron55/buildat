@@ -67,7 +67,7 @@ fi
 	echo "delay 6000"; echo "event scan 8 b"
 	echo "delay 2000"; echo "quit"; } > "$out/cmds_back.txt"
 rm -f "$out/back.log" "$out/back_server.log"
-bin/buildat -o launch_ui=launch_menu_attract -a game/vanilla/contentdb \
+bin/buildat -o launch_ui=launch_menu_attract -a app/vanilla/contentdb \
 	-D ../user -w 1280x720 -l 3 -L "$out/back.log" \
 	-c @"$out/cmds_back.txt" > /dev/null 2>&1
 grid=$(grep -ac "back to the grid" "$out/back.log")

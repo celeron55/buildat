@@ -49,7 +49,7 @@ if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 fi
 # KEEP_SAVE=1 rejoins the run before's world: the player is a returning
 # one, placed at join ([PLAYER_POS_RACE])
-[ -n "${KEEP_SAVE:-}" ] || rm -rf "../user/games/$GAME_DIR/saves/$save"
+[ -n "${KEEP_SAVE:-}" ] || rm -rf "../user/apps/$GAME_DIR/saves/$save"
 port=$(( 29800 + (SEED % 90) ))
 srv=""; cli=""; drv=""; netsim=""
 # The run's temp dir goes with it: 200 MB of game and cache a run, and
@@ -70,7 +70,7 @@ cold=""
 if [ -n "${MENU_RUN:-}" ]; then
 	srv=""
 	START_WAIT="${START_WAIT:-8}"
-	rm -rf "../user/games/vanilla/saves/menu_run_$SEED"
+	rm -rf "../user/apps/vanilla/saves/menu_run_$SEED"
 	if [ "$MENU_RUN" = full ]; then
 		# Empty user and cache directories, given to the client (-D, -C)
 		# and by it to the server it starts, and ContentDB as a mirror of

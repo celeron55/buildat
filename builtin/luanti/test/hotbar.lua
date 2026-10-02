@@ -5,7 +5,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=hotbar_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/hotbar.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- Connect a client and look at the bottom of the screen: there are twelve
 -- slots rather than the eight a game that says nothing gets, the slot in

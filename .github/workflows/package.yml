@@ -60,7 +60,7 @@ jobs:
           name: windows-archive
           path: Build/package/out/*-win64.zip
           if-no-files-found: error
-      # The "Luanti only" archive ([LUANTI_BUILD]): games/vanilla and no
+      # The "Luanti only" archive ([LUANTI_BUILD]): apps/vanilla and no
       # compiler, a third of the full one; the release lists it
       - uses: actions/upload-artifact@v4
         with:

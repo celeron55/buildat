@@ -4,7 +4,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=hudinv_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/hudinventory.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- Connect a client: four slots sit above the middle of the screen with the
 -- second one marked, holding what the player was given. A column of four

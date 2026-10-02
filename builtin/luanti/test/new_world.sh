@@ -13,7 +13,7 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/new_world"; mkdir -p "$out"
-saves="$here/user/games/vanilla/saves"
+saves="$here/user/apps/vanilla/saves"
 if pgrep -x buildat >/dev/null || pgrep -x buildat_server >/dev/null; then
 	echo "a client or a server is already running" >&2; exit 2
 fi

@@ -64,7 +64,7 @@ namespace network
 		Drop,
 		// Over the limit for longer than the grace period, the peer is
 		// disconnected. Luanti's own answer, and what
-		// games/vanilla picks.
+		// apps/vanilla picks.
 		Disconnect,
 	};
 

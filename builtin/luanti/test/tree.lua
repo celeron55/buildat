@@ -3,7 +3,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=tree_check \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/tree.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- Two ways in, and this checks both. core.spawn_tree() puts one in the map
 -- beside the player when they join and counts what came out of it:

@@ -366,10 +366,10 @@ local notices = {}
 -- game is not the only kind -- luanti_client's session runs on the menu's
 -- screens and a dialog there takes the mouse from the player. A client says
 -- so here; client/sandbox.lua reads it.
-M.in_game = false
+M.in_app = false
 
 function M.safe.set_in_game(on)
-	M.in_game = on and true or false
+	M.in_app = on and true or false
 end
 
 function M.safe.show_notice(text)

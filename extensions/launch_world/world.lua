@@ -80,7 +80,8 @@ for _, a in ipairs(api.launch_actions()) do
 	local o = {name = a.label, icon = a.icon, key = a.key, kind = a.kind,
 		description = a.description, from = a.from,
 		category = a.category or "action", significance = a.significance}
-	if o.category == "game" then
+	-- An app, or a Luanti game (builtin/luanti's tiles), on the wall
+	if o.category == "app" or o.category == "game" then
 		GAMES[#GAMES + 1] = o
 	else
 		-- **Everything in this table is on the floor by definition**
@@ -116,7 +117,7 @@ for _, sv in ipairs(api.list_saves()) do
 	-- BUILDAT_LAUNCH_SAVES=<n> is the cap, for looking at a floor with
 	-- fewer on it and for driving the prompt's own path to the rest
 	if #SAVES >= (tonumber(env("BUILDAT_LAUNCH_SAVES")) or 12) then
-		unshown_saves[#unshown_saves + 1] = {name = sv.name, game = sv.game}
+		unshown_saves[#unshown_saves + 1] = {name = sv.name, app = sv.app}
 	else
 		SAVES[#SAVES + 1] = sv
 	end
@@ -1604,7 +1605,7 @@ local function bay_u(i) return room.bay_u(i - 1) end
 local function bay_y(i) return room.bay_y(i - 1) end
 
 -- **An orb is as big as its game** (the plan: 1.2 to 1.8 voxels across,
--- from the game's own size). `list_games()` answers a directory tree's
+-- from the game's own size). `list_apps()` answers a directory tree's
 -- bytes, and on a linear scale every game here sits at the bottom -- one
 -- is a hundred times another -- so it is the log that is spread across
 -- the range. A tree with one game gets the middle.
@@ -1806,14 +1807,14 @@ local SAVE_COLS = {-11.0, -7.5, -4.0, 4.0, 7.5, 11.0}
 for i, sv in ipairs(SAVES) do
 	local col = SAVE_COLS[(i - 1) % #SAVE_COLS + 1]
 	local row = 13.0 - math.floor((i - 1) / #SAVE_COLS) * 3.2
-	local o = {name = sv.name, game = sv.game, save = true,
-		description = "save of " .. sv.game, floor = true,
+	local o = {name = sv.name, app = sv.app, save = true,
+		description = "save of " .. sv.app, floor = true,
 		category = "save",
 		-- Its recency, against the oldest of the ones listed: the list
 		-- is newest first, so the last one is the floor to measure from
 		significance = sig.save_epoch and
 				math.max(0, (tonumber(sv.modified) or 0) - sig.save_epoch) or nil,
-		search = sv.name .. " " .. sv.game}
+		search = sv.name .. " " .. sv.app}
 	ORBS[#ORBS + 1] = o
 	orb_places[#orb_places + 1] = {x = col,
 		y = orb_across(o) * VOXEL_M / 2, z = row}
@@ -2497,7 +2498,7 @@ camera_node:GetComponent("Camera").fov = fov
 local viewport = magic.Viewport:new(scene,
 		camera_node:GetComponent("Camera"))
 -- **The viewport is registered before the render path is touched**,
--- which is the order games/voxel_lighting uses and the last difference
+-- which is the order apps/voxel_lighting uses and the last difference
 -- between the two that was left to try.
 magic.set_preferred_viewports({viewport})
 
@@ -2541,7 +2542,7 @@ function apply_room_path(vp)
 	-- orbs and the readout draw and everything lit by a point light does
 	-- not. Brighten the shot six times and that is what is in it. So the
 	-- light passes are not reaching the HDR buffer, and the base pass
-	-- is. games/voxel_lighting renders in HDR with the same three
+	-- is. apps/voxel_lighting renders in HDR with the same three
 	-- effects appended in the same order, and the difference that is
 	-- left is that its scene is lit by a **directional** light and this
 	-- one by points. That is where the next look starts, and it is a
@@ -3023,7 +3024,7 @@ room_stack = room_stack.safe or room_stack
 -- hold and the game. Input stands down on `held_by_others()` below,
 -- which is the other question: whether the player is steering the room.
 function screen_taken()
-	if in_game or console_open or backdrop then
+	if in_app or console_open or backdrop then
 		return true
 	end
 	local st = room_stack and room_stack.main and room_stack.main.stack
@@ -3035,7 +3036,7 @@ function screen_taken()
 end
 
 function held_by_others()
-	-- `launching` is the input half of `in_game`: the launch has
+	-- `launching` is the input half of `in_app`: the launch has
 	-- committed and the player is not steering the room any more, but
 	-- the room is still what is on the screen ([LAUNCH_WORLD],
 	-- 2026-09-24: it stood down at the first moment of a sequence that
@@ -4353,10 +4354,10 @@ function handle_synth_update(event_type, event_data)
 	-- 2026-09-24): the input goes when the launch commits, but the
 	-- room is still what the player is looking at until the game draws,
 	-- and a wait that goes silent at its first moment feels switched
-	-- off rather than continuous. So the sound follows *in_game*, not
+	-- off rather than continuous. So the sound follows *in_app*, not
 	-- the input gate -- and when the room does go, the drone **fades**.
 	local dt = event_data:GetFloat("TimeStep")
-	local want_sound = (in_game or console_open or backdrop) and 0 or 1
+	local want_sound = (in_app or console_open or backdrop) and 0 or 1
 	sound_fade = sound_fade + (want_sound - sound_fade) *
 			(1 - math.exp(-dt / 0.35))
 	if want_sound == 0 and sound_fade < 0.01 then
@@ -4678,7 +4679,7 @@ local function connect_poll(dt)
 				string.format("%.1f s", connecting.t))
 		notice("")
 		connecting = nil
-		entered_game()
+		entered_app()
 	elseif status == "failed" then
 		-- The room stays up and says what happened, rather than a
 		-- dialog: a server that is not there is an ordinary thing
@@ -5034,7 +5035,7 @@ local function match_name(b)
 	local o = b and ORBS[b]
 	if not o then return nil end
 	-- A save says whose it is: two games may both have a "world"
-	return o.save and (o.name .. "  (" .. o.game .. ")") or o.name
+	return o.save and (o.name .. "  (" .. o.app .. ")") or o.name
 end
 
 -- **The terminal**: settings and the ContentDB listing are a thing you
@@ -5561,7 +5562,7 @@ local function matches_for(query)
 	local low = query:lower()
 	for _, sv in ipairs(unshown_saves or {}) do
 		if sv.name:lower():sub(1, #low) == low then
-			out[#out + 1] = {i = "save:" .. sv.game .. "/" .. sv.name,
+			out[#out + 1] = {i = "save:" .. sv.app .. "/" .. sv.name,
 				score = #sv.name - #low}
 		end
 	end
@@ -5707,7 +5708,7 @@ function launch(b)
 					" (not on the floor)")
 			local ok, why = api.launch_save(game, name)
 			if ok then
-				entered_game()
+				entered_app()
 			else
 				log:warning("launch: " .. tostring(why))
 			end
@@ -5740,7 +5741,7 @@ function launch(b)
 		-- anything on the grid -- so the room asks whether a server came
 		-- up rather than assuming one did.
 		if api.local_server_running() then
-			entered_game()
+			entered_app()
 		end
 	elseif ORBS[b] and ORBS[b].server then
 		connect_to(ORBS[b].name, ORBS[b].address)
@@ -5752,10 +5753,10 @@ function launch(b)
 		-- simplified: a game that reads no `save` key starts as it
 		-- normally would, which is what vanilla did before it read one.
 		local o = ORBS[b]
-		log:info("launch: save " .. o.name .. " of " .. o.game)
-		local ok, why = api.launch_save(o.game, o.name)
+		log:info("launch: save " .. o.name .. " of " .. o.app)
+		local ok, why = api.launch_save(o.app, o.name)
 		if ok then
-			entered_game()
+			entered_app()
 		else
 			log:warning("launch: " .. tostring(why))
 		end
@@ -5851,7 +5852,7 @@ function handle_keydown(event_type, event_data)
 	-- comes back here when there is a launcher under it. The room used
 	-- to bind F10 to rescue players from games that dropped the client
 	-- instead; the launcher should not have to rig anything up to make
-	-- games behave, and `leave_game()` is still the door -- the client
+	-- games behave, and `leave_app()` is still the door -- the client
 	-- calls it through the launch interface.
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
@@ -6103,7 +6104,7 @@ magic.SubscribeToEvent("command_seq:mode", "handle_seq_mode")
 -- old wrapper back to `set_preferred_viewports()` after the sandbox
 -- reset segfaults, and the room's cloned render path has to go on the
 -- new one or it draws black with HDR on.
-in_game = false
+in_app = false
 -- **The launch has committed and the game is not on screen yet**: the
 -- room gives up the input at once and keeps drawing and humming until
 -- something else takes the view -- which is `set_preferred_viewports`,
@@ -6152,8 +6153,8 @@ end
 -- goes -- a prompt and a crosshair belong to a room somebody is using
 -- -- and the room keeps drawing and sounding. What it is waiting for
 -- is the game's own view.
-function entered_game()
-	if in_game or launching then return end
+function entered_app()
+	if in_app or launching then return end
 	launching = true
 	launch_started_us = buildat.get_time_us()
 	launch_viewports = magic.viewport_generation and
@@ -6169,8 +6170,8 @@ end
 -- drone fade rather than cut, the point being that the wait feels
 -- continuous rather than switched off.
 function stand_down(why)
-	if in_game then return end
-	in_game = true
+	if in_app then return end
+	in_app = true
 	launching = false
 	log:info("game: the room stands down (" .. why .. ")")
 end
@@ -6189,20 +6190,20 @@ function launch_watch()
 	end
 end
 
-function leave_game()
+function leave_app()
 	-- **A launch that has not finished is still something to leave**
 	-- ([LEAVE_POP], 2026-09-25): a menu launched from an orb -- ContentDB
 	-- -- never takes the viewport, so the room stands down on
 	-- LAUNCH_WAIT_S's timeout, and "back to the launcher" pressed before
-	-- that found `in_game` false and did nothing. Which is also why it
+	-- that found `in_app` false and did nothing. Which is also why it
 	-- worked by luck: wait long enough and the same button works.
-	local was = in_game or launching
+	local was = in_app or launching
 	launching = false
 	if not was then return false end
 	-- **The screens under the game go with it** ([MENU_STUCK], user
 	-- 2026-09-24): the launcher composed under the room pushes a
 	-- placeholder when it starts a game and pops it in its own
-	-- leave_game, which is not the one that runs when the room is the
+	-- leave_app, which is not the one that runs when the room is the
 	-- launcher -- so a game's menu, and the placeholder under it, stayed
 	-- on the screen while the room took the input back. The room pushes
 	-- nothing itself, so the stack is empty when the room owns the
@@ -6215,7 +6216,7 @@ function leave_game()
 		st:pop_to(st.stack[1], true)
 	end
 	api.leave_to_menu()
-	in_game = false
+	in_app = false
 	local vp = magic.Viewport:new(scene,
 			camera_node:GetComponent("Camera"))
 	apply_room_path(vp)
@@ -6293,9 +6294,9 @@ show_hint()
 end)()
 
 return {
-	entered_game = entered_game,
-	leave_game = leave_game,
-	in_game = function() return in_game end,
+	entered_app = entered_app,
+	leave_app = leave_app,
+	in_app = function() return in_app end,
 	be_backdrop = be_backdrop,
 }
 

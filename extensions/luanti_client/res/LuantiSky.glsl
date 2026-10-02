@@ -89,7 +89,7 @@ uniform vec3 cCloudSky;
 // How much sky the camera can see, as one number: 0 in a cave, 1 anywhere
 // that is not one. See [CAVE_SKY]'s correction in doc/plan/rendering_plan.md.
 uniform float cSkyOutside;
-// **A treeline along the horizon** (games/floorplanner's plan setting;
+// **A treeline along the horizon** (apps/floorplanner's plan setting;
 // unset, 0, it is not drawn): a tree's height over its distance, and the
 // ground's height in the world, which its foot stands on where the ground
 // ends (TREE_DISTANCE away).

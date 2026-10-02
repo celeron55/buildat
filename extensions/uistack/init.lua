@@ -180,7 +180,7 @@ function M.UIStack(root)
 		-- ([LEAVE_POP], 2026-09-25): a sandbox reset removes the
 		-- elements under the stack's entries, and reaching one from the
 		-- sandbox afterwards raises ([UI_UAF]'s guard, which is right
-		-- and stays) -- inside a leave_game, where everything after the
+		-- and stays) -- inside a leave_app, where everything after the
 		-- pop then never runs and the player is left with a button that
 		-- does nothing. A removed element needs no unsubscribing and no
 		-- reparenting; it needs taking off the stack.

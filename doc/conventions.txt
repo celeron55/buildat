@@ -106,7 +106,7 @@ Directory structure
 │   ├── impl    << Interface implementations
 │   ├── interface << Interface available to modules
 │   └── server  << Server-specific code
-├── games       << Games that can be run using buildat_server -m <path>
+├── apps       << Apps that can be run using buildat_server -m <path>
 ├── doc         << This documentation; doc/plan is the plan and its history
 ├── user        << The user's data: saves, imported Luanti games and worlds,
 │                  engine settings -- never in git
@@ -156,9 +156,9 @@ runner is dear, the tree carries a core one beside it -- one client and well
 under a minute, the paths an edit breaks (extensions/launch_world/core.sh
 against check.sh) -- and that is what an edit runs.
 
-A game's look is checked by a runner and not by memory: a change under
+An app's look is checked by a runner and not by memory: a change under
 builtin/voxel_shading, the mesher or voxelworld picks
-games/voxel_lighting/check.sh through its "covers" line. That one compares the
+apps/voxel_lighting/check.sh through its "covers" line. That one compares the
 fourteen framings against the reference run kept in local/voxel_lighting/ref/
 -- taken with --accept on a tree whose look somebody has confirmed -- and says
 which view moved and by how much. With no reference on the machine it skips
@@ -217,7 +217,7 @@ The bundled copy is patched. See urho3d_fork.txt before updating it.
 Menu screens
 ------------
 
-Escape is Back, on every screen the launcher and the games draw: what the
+Escape is Back, on every screen the launcher and the apps draw: what the
 screen's "< back", "Back", "Cancel" or "Ok" button does, Escape does,
 whether or not a text field has the focus. The one place it is is
 ui_utils.bind_button_menu (extensions/ui_utils), which every vertical_menu

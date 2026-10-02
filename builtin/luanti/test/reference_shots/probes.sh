@@ -61,7 +61,7 @@ read_probe() {   # file crop -> "r g b"
 }
 
 # Anything shot before the newest source file cannot be measuring it
-newest_src=$(find "$here/builtin" "$here/games" "$here/extensions" \
+newest_src=$(find "$here/builtin" "$here/apps" "$here/extensions" \
 		-name '*.lua' -o -name '*.cpp' -o -name '*.h' -o -name '*.glsl' \
 		2>/dev/null | xargs -r stat -c %Y 2>/dev/null | sort -rn | head -1)
 

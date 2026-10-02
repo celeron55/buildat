@@ -6,7 +6,7 @@
 --
 --   BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=vldeath \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/vldeath.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 --   vldeath: died and respawned, hp=20
 core.register_on_joinplayer(function(player)

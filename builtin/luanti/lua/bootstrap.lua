@@ -404,7 +404,7 @@ end
 -- everyone. Both want the same thing: ask the peer for a fresh
 -- core:tell_after_all_files_transferred and wait for client_file's
 -- files_transmitted event. **The trap in doing that** is that
--- games/vanilla listens to the same event and shows the world to
+-- apps/vanilla listens to the same event and shows the world to
 -- whoever it names, so a second one for a player already in the world
 -- re-runs their init.lua; that has to be settled first.
 local dynamic_media_n = 0
@@ -1991,7 +1991,7 @@ end
 -- default_privs and nothing more. A world opened through the launcher is
 -- somebody's own world, so this is true unless the world says otherwise.
 function core.is_singleplayer()
-	-- A public server's is not ([VANILLA_PUBLIC] 3): games/vanilla sets
+	-- A public server's is not ([VANILLA_PUBLIC] 3): apps/vanilla sets
 	-- core.__public before the game loads
 	if core.__public then
 		return false
@@ -5734,7 +5734,7 @@ function core.get_server_uptime()
 end
 
 -- The server's admins ([VANILLA_PUBLIC] 3): every privilege, in every world.
--- games/vanilla says who they are, from builtin/accounts, and again when
+-- apps/vanilla says who they are, from builtin/accounts, and again when
 -- that changes.
 core.__admins = {}
 function core.__set_admin(name, on)

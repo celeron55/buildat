@@ -105,7 +105,7 @@ not to do that has neither a visible colour nor a visible shadow. With the
 curve in, the sun is about fifty times the sky -- roughly what it is -- so a
 lit surface takes the sun's own warm colour instead of a mixture with the
 sky's, and the same curve lifts the shadows, so a shadow under full skylight
-reads as shade rather than as a hole. games/voxel_lighting arrived at the same
+reads as shade rather than as a hole. apps/voxel_lighting arrived at the same
 numbers for the same reasons.
 
 Where the sun and the moon are for the purpose of casting a shadow is stepped
@@ -280,7 +280,7 @@ settings.lua    The client's own settings in <user>/luanti_client/settings.json
                 rebound keys) and their screen; the BUILDAT_* environment
                 variables stay one-run overrides
 res/*.lua       The Lua both Luanti clients share, dofile'd here and served
-                by builtin/luanti as luanti/<name> to games/vanilla's client
+                by builtin/luanti as luanti/<name> to apps/vanilla's client
                 half: camera_motion.lua (view bobbing and the hand's
                 motion), key_editor.lua (the key bindings screen),
                 minimap.lua (official's minimap and its V modes over the

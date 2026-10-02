@@ -5,7 +5,7 @@
 -- VoxelManip), and the command is asked to bring it back.
 --
 --   BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_LUA=builtin/luanti/test/fixlight.lua \
---       bin/buildat_server -m ../games/vanilla -D ../user -P 29791
+--       bin/buildat_server -m ../apps/vanilla -D ../user -P 29791
 core.register_on_joinplayer(function(player)
 	core.after(25, function()
 		local p = player:get_pos()

@@ -6,7 +6,7 @@
 -- One tile per Luanti game installed under user/luanti/games -- devtest,
 -- VoxeLibre, whatever is there -- which is why the launch grid asks every
 -- time it is shown ([LAUNCH_GRID]). What a tile starts is the game's
--- server through games/vanilla with the game's name as the one
+-- server through apps/vanilla with the game's name as the one
 -- param, which that module reads as it would a packet; when the launcher
 -- game folds into this module the target becomes {module = "luanti"}.
 -- The player sees the game's name, never the module's.
@@ -35,7 +35,7 @@ return function(ctx)
 				run = function()
 					-- The game's world selection: its saves, and a new one
 					-- by name, on the launcher game's own save screen
-					ctx.launch{game = "vanilla",
+					ctx.launch{app = "vanilla",
 							params = {luanti_game = name, menu = "worlds"}}
 				end,
 			}
@@ -51,13 +51,13 @@ return function(ctx)
 		icon = "luanti.png", order = 190, category = "tool",
 		description = "Copy a game from a Luanti installation",
 		run = function()
-			ctx.launch{game = "vanilla", params = {menu = "import_game"}}
+			ctx.launch{app = "vanilla", params = {menu = "import_game"}}
 		end}
 	out[#out + 1] = {id = "import_world", label = "Import a world",
 		icon = "luanti.png", order = 191, category = "tool",
 		description = "Copy a world from a Luanti installation",
 		run = function()
-			ctx.launch{game = "vanilla", params = {menu = "import_world"}}
+			ctx.launch{app = "vanilla", params = {menu = "import_world"}}
 		end}
 	-- The settings tile is the launcher game's own (its launcher/init.lua)
 	return out

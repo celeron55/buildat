@@ -15,7 +15,7 @@
 # install rules into a staging directory, gathers every third-party licence
 # into licenses/, writes VERSION, makes the archive under Build/package/out/,
 # and smoke-tests it: unpacks into a clean directory, starts buildat_server
-# on games/digger -- which compiles a module at run time through the found
+# on apps/digger -- which compiles a module at run time through the found
 # or bundled compiler -- connects a client that takes one screenshot that is
 # not black, and quits. Nothing is packaged by hand. Runs the same inside
 # util/docker's images as on a desk.
@@ -189,7 +189,7 @@ smoke_test_wine() {
 	rm -f "$unpacked"/cache/rccpp_build/client_file*
 	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://Z:$dir/nowhere" \
-		"$wine" bin/buildat_server.exe -u launcher=1 -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
+		"$wine" bin/buildat_server.exe -u launcher=1 -m apps/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
 	wait_for_vanilla "$dir/srv.log" "$srv" "smoke test under Wine" || {
@@ -295,7 +295,7 @@ make_one() {
 	# by the sha1 of its source, includes and flags, so a cache filled
 	# here is used as is on the box -- a cold start was 114 s of
 	# compiling there. The staged tree's own server, on the shipped
-	# compiler (under Wine for the Windows one), with games/vanilla and
+	# compiler (under Wine for the Windows one), with apps/vanilla and
 	# the minimal game, until it listens; then everything but
 	# rccpp_build/ goes out of the cache again. The smoke keeps the
 	# compiler's proof by building one module (see there).
@@ -330,7 +330,7 @@ make_luanti_only() {
 	# The full archive's option back, so a later install of it is the full one
 	(cd "$build" && cmake "$here" "$@" -DBUILDAT_LUANTI_ONLY=FALSE > /dev/null 2>&1) || true
 	[ -d "$stage/compiler" ] && { echo "luanti only: compiler/ is in the archive" >&2; exit 1; }
-	[ -d "$stage/games/digger" ] && { echo "luanti only: games/digger is in the archive" >&2; exit 1; }
+	[ -d "$stage/apps/digger" ] && { echo "luanti only: apps/digger is in the archive" >&2; exit 1; }
 	if [ -d "$root/stage/$full/cache/rccpp_build" ]; then
 		mkdir -p "$stage/cache"
 		cp -r "$root/stage/$full/cache/rccpp_build" "$stage/cache/"
@@ -365,7 +365,7 @@ smoke_test_wine_luanti() {
 	export WINEDEBUG=-all WINEPREFIX="$dir/wine"
 	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://Z:$dir/nowhere" \
-		"$wine" bin/buildat_server.exe -u launcher=1 -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
+		"$wine" bin/buildat_server.exe -u launcher=1 -m apps/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	# -l 4, as the full smoke: the section line it waits for is logged there
 	wait_for_vanilla "$dir/srv.log" "$srv" "luanti-only smoke under Wine" || {
@@ -398,11 +398,11 @@ prebuild_modules() {
 			wine=$(command -v wine64 || command -v wine)
 			export WINEDEBUG=-all WINEPREFIX="$stage/../wine-prebuild"
 			(cd "$stage" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
-				"$wine" bin/buildat_server.exe -u launcher=1 -m games/vanilla -P "$port" -l 3 > "$log" 2>&1) &
+				"$wine" bin/buildat_server.exe -u launcher=1 -m apps/vanilla -P "$port" -l 3 > "$log" 2>&1) &
 			;;
 		*)
 			(cd "$stage" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
-				bin/buildat_server -u launcher=1 -m games/vanilla -P "$port" -l 3 > "$log" 2>&1) &
+				bin/buildat_server -u launcher=1 -m apps/vanilla -P "$port" -l 3 > "$log" 2>&1) &
 			;;
 	esac
 	srv=$!
@@ -429,7 +429,7 @@ prebuild_modules() {
 	# Only the built modules stay: no logs, no compile output, no save
 	find "$stage/cache" -mindepth 1 -maxdepth 1 ! -name rccpp_build -exec rm -rf {} +
 	rm -f "$stage"/cache/rccpp_build/*.compile.log
-	rm -rf "$stage/user/games/vanilla/saves/prebuild"
+	rm -rf "$stage/user/apps/vanilla/saves/prebuild"
 	rm -f "$stage"/user/luanti/settings.json
 	local n
 	n=$(ls "$stage"/cache/rccpp_build/ 2>/dev/null | grep -c "\.\(so\|dll\)$" || true)
@@ -439,10 +439,10 @@ prebuild_modules() {
 }
 
 # What both smoke tests wait for from the server ([WIN_MAPGEN_BUILD]):
-# games/vanilla with the bundled minimal game, so that every builtin --
+# apps/vanilla with the bundled minimal game, so that every builtin --
 # luanti and luanti_mapgen above all, the modules a player uses -- is
 # compiled by the shipped compiler, the game's mods load and one section
-# generates. games/digger before never compiled either, and a mapgen that
+# generates. apps/digger before never compiled either, and a mapgen that
 # did not build under mingw shipped in 0.4.2.
 # The CPU time, in seconds, of a process and everything under it, and of
 # every Windows process there is: under Wine each process is reparented
@@ -547,7 +547,7 @@ wait_for_vanilla() {
 }
 
 # The archive unpacked into a clean directory and run: the server on
-# games/vanilla with the bundled game through the found compiler, a client connected for one
+# apps/vanilla with the bundled game through the found compiler, a client connected for one
 # screenshot, which must not be black. The one check that says the archive
 # starts on the machine it is on.
 # The web client ([WEB_CLIENT]), built into the tree's web/ before the
@@ -567,32 +567,32 @@ build_web() {
 	done
 }
 
-# The games web-precompiled carries compiled ([LINUX_SERVER]), chosen one by
+# The apps web-precompiled carries compiled ([LINUX_SERVER]), chosen one by
 # one (user, 2026-09-29): the others ship as source, and on a box with no
 # compiler do not start
-WEB_PRECOMPILED_GAMES="floorplanner vanilla aggregate bomber_drone"
+WEB_PRECOMPILED_APPS="floorplanner vanilla aggregate bomber_drone"
 
-# Those games' modules compiled into a stage's cache: each game started once
+# Those apps' modules compiled into a stage's cache: each game started once
 # on the staged server until it listens, with a user directory of its own
 # that is thrown away, so only cache/rccpp_build/ keeps anything. A game that
 # does not start fails the packaging.
-prebuild_games() {
+prebuild_apps() {
 	local stage="$1" name="$2"
-	local logs="$stage/../prebuild-games-$name"
+	local logs="$stage/../prebuild-apps-$name"
 	local g log port=29799 srv udir failed=""
 	mkdir -p "$logs"
-	for g in $WEB_PRECOMPILED_GAMES; do
-		[ -d "$stage/games/$g" ] || { echo "prebuild: no games/$g"; failed="$failed $g"; continue; }
+	for g in $WEB_PRECOMPILED_APPS; do
+		[ -d "$stage/apps/$g" ] || { echo "prebuild: no apps/$g"; failed="$failed $g"; continue; }
 		log="$logs/$g.log"
 		# A port of its own, counted up past any that is taken: one drawn
 		# at random came out the same for game after game, and the last
 		# game's server still had it
 		port=$((port + 1))
 		while (echo > "/dev/tcp/127.0.0.1/$port") 2>/dev/null; do port=$((port + 1)); done
-		udir=$(mktemp -d "/tmp/buildat_package_prebuild_games.XXXXXX")
+		udir=$(mktemp -d "/tmp/buildat_package_prebuild_apps.XXXXXX")
 		PKG_TMP_DIRS="$PKG_TMP_DIRS $udir"
 		(cd "$stage" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
-			bin/buildat_server -m "games/$g" -D "$udir" -P "$port" -l 3 > "$log" 2>&1) &
+			bin/buildat_server -m "apps/$g" -D "$udir" -P "$port" -l 3 > "$log" 2>&1) &
 		srv=$!
 		if wait_for_line "$log" "$srv" "Listening at" 900 >/dev/null &&
 				! grep -q "Failed to build module" "$log"; then
@@ -607,7 +607,7 @@ prebuild_games() {
 	find "$stage/cache" -mindepth 1 -maxdepth 1 ! -name rccpp_build -exec rm -rf {} +
 	rm -f "$stage"/cache/rccpp_build/*.compile.log
 	if [ -n "$failed" ]; then
-		echo "prebuild: games that did not start:$failed (see $logs/)"
+		echo "prebuild: apps that did not start:$failed (see $logs/)"
 		return 1
 	fi
 	echo "prebuild: $(ls "$stage"/cache/rccpp_build/ | grep -c '\.so$') modules in the cache"
@@ -649,7 +649,7 @@ bundle_libs() {
 
 # The web archives ([LINUX_SERVER]), out of another archive's stage:
 # "web" is the portable archive's with the libraries a bare box lacks,
-# and compiles the games on the box with its c++; "web-precompiled" is
+# and compiles the apps on the box with its c++; "web-precompiled" is
 # the web archive's with every game's modules prebuilt as well, and
 # starts on a box with no compiler
 make_web_archive() {
@@ -658,7 +658,7 @@ make_web_archive() {
 	rm -rf "$stage"; cp -a "$src" "$stage"
 	[ -s "$stage/web/buildat.wasm" ] || { echo "web archive: no web/ in the stage" >&2; return 1; }
 	if [ -n "$precompiled" ]; then
-		prebuild_games "$stage" "$name" >&2 || return 1
+		prebuild_apps "$stage" "$name" >&2 || return 1
 	else
 		bundle_libs "$stage" >&2
 	fi
@@ -681,7 +681,7 @@ smoke_test() {
 	rm -f "$unpacked"/cache/rccpp_build/*client_file*
 	(cd "$unpacked" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://$dir/nowhere" \
-		bin/buildat_server -u launcher=1 -m games/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
+		bin/buildat_server -u launcher=1 -m apps/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
 	# The server compiles every module it loads through the compiler
@@ -791,7 +791,7 @@ windows)
 		check_imports "$b"
 	fi
 	# The "Luanti only" archive ([LUANTI_BUILD]): the same build tree
-	# installed again with BUILDAT_LUANTI_ONLY (games/vanilla alone, no
+	# installed again with BUILDAT_LUANTI_ONLY (apps/vanilla alone, no
 	# compiler), and the modules the full archive's prebuild compiled
 	# copied into its cache, since it cannot compile them itself
 	c=$(make_luanti_only "buildat-$version-win64" "buildat-$version-win64-luanti" \

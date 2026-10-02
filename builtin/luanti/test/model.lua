@@ -3,7 +3,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=model_form_check \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/model.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- A form comes up four seconds after joining with three models in it: the
 -- spider unturned, the snowman turned a quarter around, and a frog in a tall

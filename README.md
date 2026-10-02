@@ -2,7 +2,7 @@
 
 Buildat
 =======
-A small engine for networked 3D games.
+A small engine for networked 3D apps.
 
 The server runs C++ modules compiled at runtime. The client runs a
 whitelisted subset of Urho3D's Lua API in a sandbox; scripts and data
@@ -18,12 +18,12 @@ Further reading:
   client, server, modules, extensions, the launch grid, the network, voxels
 * [doc/conventions.txt](doc/conventions.txt) -- coding style, naming, commit
   messages, coordinates
-* [doc/client_api.txt](doc/client_api.txt) -- the Lua API a game's client
+* [doc/client_api.txt](doc/client_api.txt) -- the Lua API an app's client
   code and an extension see (out of date; a full pass is planned)
 * [doc/client_commands.txt](doc/client_commands.txt) -- driving the client from
   a command file: keys, mouse, look, screenshot, the scan events
 * [doc/luanti_module.txt](doc/luanti_module.txt) -- builtin/luanti: a Luanti
-  game running inside buildat_server, and how it is checked
+  app running inside buildat_server, and how it is checked
 * [doc/luanti_client.txt](doc/luanti_client.txt) -- extensions/luanti_client:
   playing on a real Luanti server over its own protocol
 * [doc/urho3d_fork.txt](doc/urho3d_fork.txt) -- what the bundled Urho3D
@@ -50,7 +50,7 @@ Install dependencies
 	        libcurl-devel
 
 The server also needs a C++ compiler at run time, not just at build time: it
-compiles game modules as it loads them. It looks for `c++` in PATH.
+compiles app modules as it loads them. It looks for `c++` in PATH.
 
 Build
 -------
@@ -98,11 +98,11 @@ Play
 
     $ $wherever_buildat_is/Build/bin/buildat
 
-The launch menu: a local game, a server to connect to, or one of the
+The launch menu: a local app, a server to connect to, or one of the
 extensions that can be launched on their own -- a Luanti client, so far.
 Arrows or the mouse to pick, enter to go.
 
-Debug keys, in any game:
+Debug keys, in any app:
 
 * F8: draw debug geometry
 * F9: on-screen profiler, render and resource stats
@@ -111,10 +111,10 @@ Debug keys, in any game:
 Engine settings
 ---------------
 
-What the user sets once and every game honours: `render_scale` (3D viewports
+What the user sets once and every app honours: `render_scale` (3D viewports
 drawn at a fraction of the window size, with the UI left at native
 resolution), `vsync`, `max_fps`, `multisampling`, `sound_volume`,
-`sound_mute`, and `default_username`, the name a game offers when it asks for
+`sound_mute`, and `default_username`, the name an app offers when it asks for
 one. They live in `user/settings.json` beside the remembered
 window size; the launch grid's "Engine settings" tile edits them, or set
 them for one run with `-o`, which is not written back:
@@ -126,15 +126,15 @@ against `cache/`, which is what the program can recreate by itself. In the
 default portable build both sit in the buildat directory; `-D` and `-C` move
 them, and `-DPORTABLE=FALSE` puts them where the platform says (see Build).
 
-See [doc/client_api.txt](doc/client_api.txt) for what a game does to honour
+See [doc/client_api.txt](doc/client_api.txt) for what an app does to honour
 `render_scale`, and what the client does not get to decide.
 
 Saves
 -----
 
-A game can persist its world. `games/digger` does: it opens or creates the
-save `user/games/digger/saves/world`, and what you dig is there next time.
-Delete that directory to start over. Every other game generates and forgets,
+An app can persist its world. `apps/digger` does: it opens or creates the
+save `user/apps/digger/saves/world`, and what you dig is there next time.
+Delete that directory to start over. Every other app generates and forgets,
 which is what they did before saves existed -- persistence is opt-in, and an
 arena game whose world is gone when the match ends should not have one.
 
@@ -149,7 +149,7 @@ For development or hosting, run the two binaries separately:
 Terminal 1:
 
     $ $wherever_buildat_is/Build
-    $ bin/buildat_server -m ../games/minigame
+    $ bin/buildat_server -m ../apps/minigame
 
 Terminal 2:
 
@@ -173,8 +173,8 @@ Modify something and see stuff happen
 Edit something and then restart the client (CTRL+C in terminal 2):
 
     $ cd $wherever_buildat_is
-    $ vim games/minigame/main/client_lua/init.lua
-    $ vim games/minigame/main/main.cpp
+    $ vim apps/minigame/main/client_lua/init.lua
+    $ vim apps/minigame/main/main.cpp
     $ vim builtin/network/network.cpp
 
 The server can do that part for you while you develop: `-R` makes it restart
@@ -196,5 +196,5 @@ Use Mingw-w64 in an MSYS environment. Make sure to use a pthreads version of Min
 
 Running the server:
 
-    $ bin/buildat_server.exe -m ../games/minigame -c "c++ -Lbin -lbuildat_server_core"
+    $ bin/buildat_server.exe -m ../apps/minigame -c "c++ -Lbin -lbuildat_server_core"
 

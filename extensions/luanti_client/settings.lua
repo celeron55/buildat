@@ -12,7 +12,7 @@
 --
 -- The key bindings are init.lua's table; what differs from its defaults is
 -- the "keys" map here (action -> Urho3D key name), applied at load, and
--- the editor is the one games/vanilla shares (res/key_editor.lua).
+-- the editor is the one apps/vanilla shares (res/key_editor.lua).
 
 local M = {}
 

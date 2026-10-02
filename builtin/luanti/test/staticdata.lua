@@ -3,7 +3,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=static_check \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/staticdata.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- Luanti asks every active object for its static data every couple of
 -- seconds, because that is what it writes into the block the object is in.

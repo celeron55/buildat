@@ -4,7 +4,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=compass_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/compass.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- Connect a client and turn: the picture at the top left turns the other
 -- way, and the strip under it scrolls. devtest ships no compass of its own,

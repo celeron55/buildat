@@ -5,7 +5,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=sky_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/sky.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- Connect a client and look up: it is midnight, the sky is dark, and the
 -- stars are red and far too many, which is what says the count and the

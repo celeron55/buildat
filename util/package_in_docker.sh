@@ -54,7 +54,7 @@ docker run --rm -i \
 		# The web client's build and the per-game prebuilds ([LINUX_SERVER])
 		# (a Windows run has neither; the script is set -e)
 		cp Build/package/build_web.log /out/logs/ 2>/dev/null || true
-		cp -r Build/package/stage/prebuild-games-* /out/logs/ 2>/dev/null || true
+		cp -r Build/package/stage/prebuild-apps-* /out/logs/ 2>/dev/null || true
 		# And the smoke test's leavings, for reading a failure from outside
 		mkdir -p /out/smoke && cp /tmp/tmp.*/shot.png /tmp/tmp.*/*.log /out/smoke/ 2>/dev/null || true
 		exit \$status

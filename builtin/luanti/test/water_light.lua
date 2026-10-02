@@ -8,7 +8,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=water_light_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/water_light.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 local LEN = 10
 local DEPTH = 10
 local base = nil

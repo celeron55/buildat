@@ -37,10 +37,10 @@ end
 -- the local game list and connecting to a server
 local function menu_actions()
 	return {
-		{id = "local", label = "Local game", order = 1,
+		{id = "local", label = "Local app", order = 1,
 			icon = "launch_menu/res/icon_local.png", resolved_icon = true,
-			description = "Start a game on this machine",
-			run = function() M.screens().show_local_game() end},
+			description = "Start an app on this machine",
+			run = function() M.screens().show_local_apps() end},
 		{id = "connect", label = "Connect to server", order = 2,
 			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
 			description = "Join a buildat server",
@@ -93,7 +93,9 @@ local function do_launch(log, from, request)
 			return
 		end
 		ext.on_untrusted_launch({from = from, params = params})
-	elseif request.game then
+	elseif request.app or request.game then
+		-- (`game`, as an app was called before: accepted still)
+		local app = request.app or request.game
 		-- To a game the params go as key=value lines through the server's
 		-- -u, which a module reads as it would a packet; the top level
 		-- only, strings, numbers and booleans, a key of a name's shape
@@ -107,7 +109,7 @@ local function do_launch(log, from, request)
 				lines[#lines + 1] = k.."="..tostring(v)
 			end
 		end
-		M.screens().start_local_game(tostring(request.game),
+		M.screens().start_local_app(tostring(app),
 				table.concat(lines, "\n"))
 	elseif request.module then
 		log:warning("launch from "..from..": a builtin module is not a "..
@@ -159,10 +161,10 @@ local function run_launcher(log, source)
 	return actions, from
 end
 
-local KIND_ORDER = {menu = 0, game = 1, builtin = 2, extension = 3}
+local KIND_ORDER = {menu = 0, app = 1, builtin = 2, extension = 3}
 
 -- Every action the tree offers, checked and in the grid's order: explicit
--- order first, then by kind -- games, builtins, extensions -- then label
+-- order first, then by kind -- apps, builtins, extensions -- then label
 -- **What a launch action says about itself** ([LAUNCH_SIGNIFY]): the
 -- category is what kind of thing it is -- an **open set**, so a launch
 -- UI that meets one it does not know draws its default rather than
@@ -176,10 +178,10 @@ local KIND_ORDER = {menu = 0, game = 1, builtin = 2, extension = 3}
 -- an `action` with no opinion. So the size a launch UI already draws
 -- games by comes from the action rather than from the UI guessing which
 -- game an action came from.
-local function significance_of(a, source, game_sizes)
+local function significance_of(a, source, app_sizes)
 	local n = tonumber(a.significance)
-	if n == nil and source.kind == "game" then
-		n = game_sizes[source.name]
+	if n == nil and source.kind == "app" then
+		n = app_sizes[source.name]
 	end
 	if n == nil or n < 0 then
 		return nil
@@ -196,9 +198,9 @@ end
 
 function M.actions(log)
 	local out = {}
-	local game_sizes = {}
-	for _, g in ipairs(buildat.list_games() or {}) do
-		game_sizes[g.name] = tonumber(g.size)
+	local app_sizes = {}
+	for _, g in ipairs(buildat.list_apps() or {}) do
+		app_sizes[g.name] = tonumber(g.size)
 	end
 	for _, source in ipairs(buildat.list_launchers()) do
 		local actions, from = nil, source.kind.."/"..source.name
@@ -239,8 +241,8 @@ function M.actions(log)
 					order = tonumber(a.order),
 					kind = source.kind, from = from,
 					category = category_of(a) or
-							(source.kind == "game" and "game" or "action"),
-					significance = significance_of(a, source, game_sizes),
+							(source.kind == "app" and "app" or "action"),
+					significance = significance_of(a, source, app_sizes),
 					run = function()
 						local ok, err = pcall(run)
 						if not ok then

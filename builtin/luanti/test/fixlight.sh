@@ -40,14 +40,14 @@ if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 fi
 # A world of its own, made fresh: what is measured is the light a made world
 # has, so a save from an earlier run would be measuring that run instead
-rm -rf "../user/games/vanilla/saves/$save"
+rm -rf "../user/apps/vanilla/saves/$save"
 trap 'pkill -INT -x buildat_server 2>/dev/null; true' EXIT
 { echo 'core.settings:set("time_speed", "0")'
   echo 'core.after(0, function() core.set_timeofday(0.5) end)'
   cat "$me/fixlight.lua"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="${GAME:-mineclone2}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	timeout 400 bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P "$port" \
+	timeout 400 bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" \
 	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 300); do
 	grep -aq "Mods loaded" "$out/srv.log" 2>/dev/null && break

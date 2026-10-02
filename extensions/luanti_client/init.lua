@@ -158,7 +158,7 @@ local BINDINGS = {
 	{action = "left", key = KEY_A, name = "A", what = "Walk left"},
 	{action = "right", key = KEY_D, name = "D", what = "Walk right"},
 	{action = "jump", key = KEY_SPACE, name = "Space", what = "Jump"},
-	-- The same keys as games/vanilla's, so one scripted episode drives both
+	-- The same keys as apps/vanilla's, so one scripted episode drives both
 	{action = "sneak", key = KEY_SHIFT, name = "Shift", what = "Sneak"},
 	{action = "fast", key = KEY_CTRL, name = "Ctrl", what = "Move fast"},
 	{action = "fly", key = KEY_K, name = "K", what = "Fly on and off"},
@@ -229,7 +229,7 @@ local DAYNIGHT_RAMP = {
 -- sun's direction and is up well before that -- 4:00-5:00 read as a bright
 -- halo over black ground, and 19:00-20:00 the same. Zero below -18 degrees
 -- (where the stretched day puts 4:00), 0.3 at the horizon and nothing above
--- it, where the ramp is larger anyway. games/vanilla's half is
+-- it, where the ramp is larger anyway. apps/vanilla's half is
 -- luanti_sky.predawn(); the two clients keep their own copies of this the
 -- way they keep their own of everything else drawn twice.
 local PREDAWN_LOW = -0.309

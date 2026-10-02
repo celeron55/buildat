@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: quick
 # cost: 104s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
-# covers: extensions/ui_utils/** extensions/uistack/** extensions/launch_menu/** games/vanilla/main/client_lua/**
+# covers: extensions/ui_utils/** extensions/uistack/** extensions/launch_menu/** apps/vanilla/main/client_lua/**
 # (this is the runner that drives them: every launch UI booted by name,
 # a game of vanilla's left through the stack, a screen pushed over the
 # grid, and a dead server's dialog)
@@ -59,7 +59,7 @@ echo "$(echo "$names" | wc -w) launch UIs booted, $bad of them badly"
 # **And the grid can be left.** A launcher that cannot be gone back to
 # leaves a client with no server and no menu, and nothing short of
 # [FIRST_RUN]'s twenty minutes was driving it: the menu had no
-# `leave_game` at all, so a game started from the default launcher was
+# `leave_app` at all, so a game started from the default launcher was
 # a one-way trip (2026-09-24). This boots the grid straight into a
 # game's own screen (-a runs one launch action), clicks that screen's
 # "< back to the launcher", and asks the client to describe itself
@@ -69,7 +69,7 @@ echo "$(echo "$names" | wc -w) launch UIs booted, $bad of them badly"
 	echo "mouse_pos 639 608"; echo "delay 300"; echo "mouse_click left"
 	echo "delay 6000"; echo "event scan 8 b"
 	echo "delay 2000"; echo "quit"; } > "$out/cmds_back.txt"
-timeout 180 bin/buildat -o launch_ui=launch_menu -a game/vanilla/contentdb -D ../user 	-w 1280x720 -l 3 -L "$out/back.log" -c @"$out/cmds_back.txt" 	> /dev/null 2>&1
+timeout 180 bin/buildat -o launch_ui=launch_menu -a app/vanilla/contentdb -D ../user 	-w 1280x720 -l 3 -L "$out/back.log" -c @"$out/cmds_back.txt" 	> /dev/null 2>&1
 # **A dead client is not a leave that did not work** ([CONTENTDB_SCAN]):
 # the scan below answers nothing when the client has taken a signal, and
 # the leave's own verdict then named the wrong fault
@@ -143,7 +143,7 @@ fi
 # it was the run before's, so the kill took nothing and the assertion
 # failed on a server that was never touched)
 rm -f "$out/dead.log" "$out/dead_server.log"
-bin/buildat -o launch_ui=launch_menu -a game/vanilla/contentdb -D ../user \
+bin/buildat -o launch_ui=launch_menu -a app/vanilla/contentdb -D ../user \
 	-w 1280x720 -l 3 -L "$out/dead.log" -c @"$out/cmds_dead.txt" \
 	> /dev/null 2>&1 &
 client=$!

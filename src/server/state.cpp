@@ -1521,7 +1521,7 @@ struct CState: public State, public interface::Server
 		return it->second;
 	}
 
-	ss_ get_game_id()
+	ss_ get_app_id()
 	{
 		// Trailing slashes and "." are what a shell's tab completion leaves
 		// behind, so strip them before taking the last component

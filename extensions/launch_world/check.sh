@@ -227,11 +227,11 @@ games_installed=$(ls "$here/user/luanti/games" 2>/dev/null | wc -l)
 # server that never came up. That fault is its own item; warming the
 # cache here keeps it from being reported as something else.
 if [ ! -f "$here/cache/rccpp_build/main.so" ] ||
-		[ "$here/games/vanilla/main/main.cpp" -nt \
+		[ "$here/apps/vanilla/main/main.cpp" -nt \
 		"$here/cache/rccpp_build/main.so" ]; then
 	echo "warming the module cache (a cold compile is seven seconds)"
 	BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=zz_warm \
-		bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P 31877 -l 3 \
+		bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P 31877 -l 3 \
 		> "$out/warm.log" 2>&1 &
 	warm=$!
 	for i in $(seq 1 120); do
@@ -239,7 +239,7 @@ if [ ! -f "$here/cache/rccpp_build/main.so" ] ||
 		sleep 1
 	done
 	kill -9 "$warm" 2>/dev/null; wait "$warm" 2>/dev/null
-	rm -rf "$here/user/games/vanilla/saves/zz_warm"
+	rm -rf "$here/user/apps/vanilla/saves/zz_warm"
 fi
 
 # **wait_log_any, not wait_log**: the room says it is humming once, at
@@ -1329,10 +1329,10 @@ PYMARK
 # finds a save by the start of its name, and this desk has other saves
 # beginning "zz" from a session's own driving
 save=zza_launch_world_test
-rm -rf "$here/user/games/vanilla/saves/$save"
+rm -rf "$here/user/apps/vanilla/saves/$save"
 port=31879
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE="$save" \
-	bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P "$port" -l 3 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" -l 3 \
 	> "$out/save_server.log" 2>&1 &
 maker=$!
 # What this run is for is the save's own record of which game it needs,
@@ -1411,7 +1411,7 @@ dialog=$(grep -ac "A world is already starting" \
 	"$out/save_cli_server.log" "$out/hidden_cli_server.log" 2>/dev/null |
 	sed 's/.*://' | awk '{n += $1} END {print n + 0}')
 echo "\"already starting\" said to the client: ${dialog:-0} times"
-rm -rf "$here/user/games/vanilla/saves/$save"
+rm -rf "$here/user/apps/vanilla/saves/$save"
 if [ "${dialog:-0}" -gt 0 ]; then
 	echo "FAIL: opening a save by name puts a dialog over the world"
 	grep -a "already starting\|opening save " "$out/save_cli_server.log" |

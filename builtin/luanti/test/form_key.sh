@@ -18,7 +18,7 @@ cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
-rm -rf "../user/games/vanilla/saves/$save"
+rm -rf "../user/apps/vanilla/saves/$save"
 cat > "$out/fixture.lua" <<'LUA'
 core.settings:set("creative_mode", "true")
 core.settings:set("time_speed", "0")
@@ -26,7 +26,7 @@ core.settings:set("mobs_spawn", "false")
 LUA
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P 29785 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P 29785 \
 	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break

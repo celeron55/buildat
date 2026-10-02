@@ -12,7 +12,7 @@
 --
 --   BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=fuzz \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/fuzz.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- The world is left running -- ABMs, LBMs, the clock, mobs -- because a
 -- long run is what meets the faults a frozen one cannot.

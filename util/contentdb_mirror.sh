@@ -1,6 +1,6 @@
 #!/bin/bash
 # A ContentDB mirror for a test ([FIRST_RUN]): a directory that answers
-# the two requests games/vanilla makes -- the game list and a package's
+# the two requests apps/vanilla makes -- the game list and a package's
 # releases -- as files, and holds the game's zip, so that
 #
 #   util/contentdb_mirror.sh <dir> <game_dir> <author> <name> <title>

@@ -344,7 +344,7 @@ struct CInstance: public voxelworld::Instance
 		// open_sky_from() then calls a cave open sky, seeds it at fifteen
 		// and loses the lot when the rock above arrives and the
 		// neighbourhood is zeroed together with nothing left holding
-		// light to spread back. games/voxel_lighting, 2026-09-28: the
+		// light to spread back. apps/voxel_lighting, 2026-09-28: the
 		// column asked at generation left 87802 voxels darker than a
 		// fresh fill, the same number at 9, 30, 60 and 90 seconds, where
 		// without it the scene reads ok ([SKY_COLUMN_CAVE]).
@@ -3549,7 +3549,7 @@ struct CInstance: public voxelworld::Instance
 	// c55_mc2_12, /fixlight with the rule off left every reading where it
 	// was and the picture broken, and with it on put the open columns back
 	// to fifteen and drew a world with a sky in it.
-	// What held it off was games/voxel_lighting's cave going 92% black
+	// What held it off was apps/voxel_lighting's cave going 92% black
 	// with it on (RMSE 37.3 against a bar of 30), and that was the
 	// generator being asked a question only a relight can answer; see
 	// SkylightSeed::from_relight. With that fixed the same view reads 1.9
@@ -3563,7 +3563,7 @@ struct CInstance: public voxelworld::Instance
 	// then calls a cave open sky. The region's own top row is asked for
 	// every seed, as it always was -- on a small world it is the sky the
 	// generator's own flood comes from, and taking it away from
-	// generation seeds left games/voxel_lighting 126560 voxels dark
+	// generation seeds left apps/voxel_lighting 126560 voxels dark
 	// (2026-09-28).
 	bool is_below_open_sky(const pv::Vector3DInt32 &p, bool from_relight)
 	{

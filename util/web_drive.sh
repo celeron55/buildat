@@ -3,7 +3,7 @@
 # (util/web_drive.js says what a step is):
 #
 #   util/web_drive.sh <firefox|chrome> <game> <steps.json> [out dir]
-#   util/web_drive.sh firefox floorplanner games/floorplanner/test/web_smoke.json
+#   util/web_drive.sh firefox floorplanner apps/floorplanner/test/web_smoke.json
 #
 # Starts buildat_server with the game on a free port, a user directory of
 # its own and the web client from web/ (util/build_web.sh makes it), and the
@@ -46,7 +46,7 @@ trap cleanup EXIT
 
 echo "web_drive: $browser, $game on port $port, out $out"
 cd "$here"
-setsid Build/bin/buildat_server -m "games/$game" -D "$out/user" -P "$port" \
+setsid Build/bin/buildat_server -m "apps/$game" -D "$out/user" -P "$port" \
 		-W "$here/web" -l 3 > "$out/server.log" 2>&1 &
 pids+=($!)
 for i in $(seq 1 120); do

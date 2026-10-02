@@ -36,7 +36,7 @@ local NO_SPOTS = (os.getenv("BUILDAT_LUANTI_NO_SPOTS") or "") ~= ""
 local surface = dofile(__buildat_extension_path("luanti_client")..
 		"/surface.lua")
 -- The sky rendered into a cube for the world to reflect, shared with
--- games/vanilla; see [SKY_REFLECTIONS]
+-- apps/vanilla; see [SKY_REFLECTIONS]
 local skycube = require("buildat/extension/skycube").safe
 
 local M = {}
@@ -562,7 +562,7 @@ function M.new(magic, buildat, log, options)
 	-- number is large because Urho's PBR direct lighting is normalized -- the
 	-- BRDF is divided by pi and so is the diffuse term inside it -- and
 	-- because the frame is tone mapped, so a sun well past white is what
-	-- white is for. games/voxel_lighting arrived at the same number for the
+	-- white is for. apps/voxel_lighting arrived at the same number for the
 	-- same reasons.
 	local SUN_BRIGHTNESS = 50.0
 	-- How far past the tone curve's middle the frame is exposed
@@ -916,7 +916,7 @@ function M.new(magic, buildat, log, options)
 	magic.set_preferred_viewports({viewport})
 
 	-- On the PBR path the frame is rendered in HDR and tone mapped, the way
-	-- games/voxel_lighting does it. Nothing else makes the sun read as the
+	-- apps/voxel_lighting does it. Nothing else makes the sun read as the
 	-- sun: in a frame that clips at one, a sun strong enough to put a real
 	-- shadow on the ground flattens every lit surface to white, and one weak
 	-- enough not to do that is a sun whose colour and whose shadow are both
@@ -2164,7 +2164,7 @@ function M.new(magic, buildat, log, options)
 	-- where a placed node would go, or nil for nothing in range.
 	--
 	-- Marching in steps a tenth of a node long and rounding to the nearest
-	-- integer, which is what games/digger does: a node is the cube around
+	-- integer, which is what apps/digger does: a node is the cube around
 	-- its coordinate, so rounding is the whole test. A step that lands in the
 	-- same node as the last one is skipped rather than asked about twice.
 	local POINT_STEP = 0.1
@@ -2259,7 +2259,7 @@ function M.new(magic, buildat, log, options)
 
 	-- The outline of the face the ray came through, on the node it stopped
 	-- in. One flat outline that gets turned to whichever face it is, which is
-	-- what games/digger does; NoTextureVColMultiply darkens what is behind it
+	-- what apps/digger does; NoTextureVColMultiply darkens what is behind it
 	-- rather than drawing over it, so it reads on any texture.
 	-- What is pointed at: a frame around every face of the voxel, which
 	-- together read as the wire box Luanti draws around it. Two triangles
@@ -3660,7 +3660,7 @@ function M.new(magic, buildat, log, options)
 	-- is left for the sun is what the sun is. Only a little warm: what makes
 	-- sunlight read as golden is the blue ambient beside it, and a light
 	-- warmer than this shows up undisguised in what a glint reflects.
-	-- games/voxel_lighting's sun is the same colour.
+	-- apps/voxel_lighting's sun is the same colour.
 	local SUN_COLOR = {1.0, 0.96, 0.88}
 	-- How much of the horizon's own tint the light takes when the sun is down
 	-- among it. Not all of it: sun_tint is the colour a band of sky is

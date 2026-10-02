@@ -1,5 +1,6 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+#include "interface/fs.h"
 #include "core/types.h"
 #include "core/log.h"
 #include "core/version.h"
@@ -104,7 +105,7 @@ int main(int argc, char *argv[])
 			"  -R                   A local server this client starts restarts\n"
 			"                       a module when its source changes\n"
 			"  -a [kind/name/id]    Run one launch-grid action on boot, e.g.\n"
-			"                       builtin/luanti/devtest, game/digger/play\n"
+			"                       builtin/luanti/devtest, app/digger/play\n"
 			;
 
 	int forced_w = 0, forced_h = 0;
@@ -268,6 +269,7 @@ int main(int argc, char *argv[])
 	if(!config.check_paths()){
 		return 1;
 	}
+	interface::fs::migrate_user_apps(config.get<ss_>("user_path"));
 
 	app::Options app_options;
 	app_options.preference_overrides = preference_overrides;

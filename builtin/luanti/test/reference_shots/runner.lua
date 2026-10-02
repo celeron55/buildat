@@ -13,7 +13,7 @@
 --   BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=refviews \
 --   BUILDAT_LUANTI_IMPORT=~/projects/luanti/worlds/mc2_2026-09-15_0033 \
 --   BUILDAT_LUANTI_LUA=<build.sh's fixture.lua> \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- As official Luanti's, build.sh's refviews/ dropped into <world>/worldmods.
 --

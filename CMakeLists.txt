@@ -682,15 +682,15 @@ if(BUILD_SERVER)
 	install(TARGETS ${SERVER_EXE_NAME} DESTINATION "${DST_BIN}")
 	install(DIRECTORY "${CMAKE_SOURCE_DIR}/builtin" DESTINATION "${DST_SHARE}")
 	# BUILDAT_LUANTI_ONLY ([LUANTI_BUILD]): the "Luanti only" archive --
-	# games/vanilla and no other game, and no compiler; its modules come
+	# apps/vanilla and no other app, and no compiler; its modules come
 	# prebuilt in its cache (util/package.sh copies them from the full
 	# archive's stage). A reconfigure of the same build tree, not a
 	# rebuild: the option only changes what is installed.
-	option(BUILDAT_LUANTI_ONLY "Install games/vanilla alone and no compiler" FALSE)
+	option(BUILDAT_LUANTI_ONLY "Install apps/vanilla alone and no compiler" FALSE)
 	if(BUILDAT_LUANTI_ONLY)
-		install(DIRECTORY "${CMAKE_SOURCE_DIR}/games/vanilla" DESTINATION "${DST_SHARE}/games")
+		install(DIRECTORY "${CMAKE_SOURCE_DIR}/apps/vanilla" DESTINATION "${DST_SHARE}/apps")
 	else()
-		install(DIRECTORY "${CMAKE_SOURCE_DIR}/games" DESTINATION "${DST_SHARE}")
+		install(DIRECTORY "${CMAKE_SOURCE_DIR}/apps" DESTINATION "${DST_SHARE}")
 	endif()
 	# The web client the server serves ([WEB_CLIENT]), when util/build_web.sh
 	# has made one: its default web_client_path is <share_path>/web

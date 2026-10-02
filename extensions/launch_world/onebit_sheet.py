@@ -57,7 +57,7 @@ TILE = 128         # how big a tile is drawn on the sheet
 LOGOS = [
     "client/data/buildat_logo.png",
     "builtin/luanti/launcher/luanti.png",
-    "games/vanilla/launcher/luanti.png",
+    "apps/vanilla/launcher/luanti.png",
     "extensions/luanti_client/res/icon.png",
     "extensions/launch_menu/res/icon_local.png",
     "extensions/launch_menu/res/icon_network.png",

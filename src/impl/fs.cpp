@@ -4,6 +4,7 @@
 #include <c55/filesys.h>
 #include <c55/string_util.h>
 #include <fstream>
+#include <cstdio>
 #include "core/log.h"
 #define MODULE "fs"
 #ifdef _WIN32
@@ -14,6 +15,23 @@
 
 namespace interface {
 namespace fs {
+
+bool rename(const ss_ &from, const ss_ &to)
+{
+	return std::rename(from.c_str(), to.c_str()) == 0;
+}
+
+void migrate_user_apps(const ss_ &user_path)
+{
+	const ss_ from = user_path+"/games";
+	const ss_ to = user_path+"/apps";
+	if(!path_exists(from) || path_exists(to))
+		return;
+	if(rename(from, to))
+		log_i(MODULE, "Moved %s to %s: apps were called games", cs(from), cs(to));
+	else
+		log_w(MODULE, "Could not move %s to %s", cs(from), cs(to));
+}
 
 bool check_file_extension(const char *path, const char *ext)
 {

@@ -13,7 +13,7 @@
 #
 # tier: quick
 # cost: 60s
-# covers: games/digger/**
+# covers: apps/digger/**
 # (it launches digger by name and leaves it again, which is that game's
 # client Lua starting, drawing and answering Escape)
 #

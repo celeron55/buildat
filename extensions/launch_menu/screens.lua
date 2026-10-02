@@ -125,7 +125,7 @@ end
 
 -- Whether a game runs under the launcher's screens ([MENU_ERRORS] reads
 -- it: a dialog before a join, a notice line in a game)
-function M.in_game()
+function M.in_app()
 	for _, e in ipairs(uistack.main.stack) do
 		local ok, name = pcall(function() return e:GetName() end)
 		if ok and name and name:find(GAME_RUNNING, 1, true) then
@@ -394,7 +394,7 @@ end
 
 -- A game by name, with launch: key=value lines for the server's -u, or
 -- nil. What a tile on the launch grid ends in ([LAUNCH_GRID]).
-function M.start_local_game(game, launch)
+function M.start_local_app(game, launch)
 	api.stop_local_server()
 	if not api.local_server_running() then
 		do_start_local_game(game, launch)
@@ -403,7 +403,7 @@ function M.start_local_game(game, launch)
 	show_waiting_for_old_server(game, launch)
 end
 
-function M.show_local_game()
+function M.show_local_apps()
 	local root = uistack.main:push({desc="local_game"})
 	root.defaultStyle = magic.cache:GetResource("XMLFile", STYLE)
 
@@ -411,19 +411,19 @@ function M.show_local_game()
 
 	local title = menu.window:CreateChild("Text")
 	title:SetStyleAuto()
-	title.text = "Local game"
+	title.text = "Local app"
 
-	local games = api.list_games()
+	local games = api.list_apps()
 	if #games == 0 then
 		local empty = menu.window:CreateChild("Text")
 		empty:SetStyleAuto()
-		empty.text = "No games found"
+		empty.text = "No apps found"
 	else
 		for _, game in ipairs(games) do
 			local name = game.name
 			local button = make_game_button(menu.window, name, game.size)
 			menu:add(button, function()
-				M.start_local_game(name)
+				M.start_local_app(name)
 			end)
 		end
 	end

@@ -442,7 +442,7 @@ static void check_scaled_viewport_size()
 		throw Exception("scaled_length: minimum of one pixel");
 	if(scaled_length(1280, 1.5f) != 1920)
 		throw Exception("scaled_length: above one");
-	// games/bomber_drone's second viewport: the same factor, so the two
+	// apps/bomber_drone's second viewport: the same factor, so the two
 	// halves still meet
 	magic::IntRect r = scaled_rect(magic::IntRect(0, 360, 1280, 720), 0.5f);
 	if(r.left_ != 0 || r.top_ != 180 || r.right_ != 640 || r.bottom_ != 360)
@@ -755,7 +755,7 @@ static void resolve_preferences(app::Options *opt)
 				&opt->graphics.window_w, &opt->graphics.window_h);
 }
 
-static bool valid_game_name(const ss_ &name)
+static bool valid_app_name(const ss_ &name)
 {
 	if(name.empty() || name.size() > 64)
 		return false;
@@ -772,7 +772,7 @@ static interface::process::Handle g_local_server;
 static ss_ g_local_server_port;
 // The game the local server was started with, for the storage of the game
 // code it serves
-static ss_ g_local_server_game;
+static ss_ g_local_server_app;
 // The watchdog's stall, in seconds; a screen may lower it ([BOX_PLAYTEST_2] 12)
 static int g_watchdog_seconds = 10;
 // The local server's log, tailed for its STATUS lines ([START_PROGRESS])
@@ -1344,7 +1344,7 @@ struct CApp: public App, public magic::Application
 			// The launch grid's icons: <name>/launcher/<icon>.png and a
 			// game's icon.png, resolved by the menu on the trusted side
 			// ([LAUNCH_GRID]). The same exposure as extensions above.
-			g_client_config.get<ss_>("share_path")+"/games",
+			g_client_config.get<ss_>("share_path")+"/apps",
 			g_client_config.get<ss_>("share_path")+"/builtin",
 			g_client_config.get<ss_>("urho3d_path")+"/bin/CoreData",
 			g_client_config.get<ss_>("urho3d_path")+"/bin/Data",
@@ -1839,7 +1839,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(connect_server_start)
 		DEF_BUILDAT_FUNC(connect_server_poll)
 		DEF_BUILDAT_FUNC(disconnect)
-		DEF_BUILDAT_FUNC(list_games)
+		DEF_BUILDAT_FUNC(list_apps)
 		DEF_BUILDAT_FUNC(start_local_server)
 		DEF_BUILDAT_FUNC(list_launchers)
 		DEF_BUILDAT_FUNC(list_installed_games)
@@ -3030,8 +3030,8 @@ struct CApp: public App, public magic::Application
 		return 2;
 	}
 
-	// list_launchers() -> {{kind = "game"|"builtin"|"extension", name, path},
-	// ...}: every games/<name>, builtin/<name> and extensions/<name> in the
+	// list_launchers() -> {{kind = "app"|"builtin"|"extension", name, path},
+	// ...}: every apps/<name>, builtin/<name> and extensions/<name> in the
 	// tree, with whether it ships launcher/init.lua as `launcher = true`.
 	// Nothing else is scanned -- not a save, not a Luanti game's mods. The
 	// menu draws the launch grid from this and runs the launcher files in
@@ -3040,7 +3040,7 @@ struct CApp: public App, public magic::Application
 	{
 		const ss_ share = g_client_config.get<ss_>("share_path");
 		const struct { const char *kind; const char *dir; } kinds[] = {
-			{"game", "games"}, {"builtin", "builtin"},
+			{"app", "apps"}, {"builtin", "builtin"},
 			{"extension", "extensions"}};
 		lua_newtable(L);
 		int i = 1;
@@ -3049,7 +3049,7 @@ struct CApp: public App, public magic::Application
 			auto nodes = interface::fs::list_directory(dir);
 			sv_<ss_> names;
 			for(const auto &n : nodes)
-				if(n.is_directory && valid_game_name(n.name))
+				if(n.is_directory && valid_app_name(n.name))
 					names.push_back(n.name);
 			std::sort(names.begin(), names.end());
 			for(const ss_ &name : names){
@@ -3120,19 +3120,19 @@ struct CApp: public App, public magic::Application
 	// "luanti" is user/luanti/games. In the sandbox: read-only and only
 	// that one directory shape ([LAUNCH_GRID]).
 	//
-	// The size is the directory tree's, as list_games() answers for a
+	// The size is the directory tree's, as list_apps() answers for a
 	// buildat game, and it is what a launch action carries as its
 	// significance ([LAUNCH_API]); the icon is the resource name of the
 	// game's own menu/icon.png, or nil where the game ships none.
 	static int l_list_installed_games(lua_State *L)
 	{
 		const ss_ family = lua_bindings::lua_tocppstring(L, 1);
-		if(!valid_game_name(family))
+		if(!valid_app_name(family))
 			return luaL_error(L, "list_installed_games(): bad family");
 		const ss_ dir = g_client_config.get<ss_>("user_path")+"/"+family+"/games";
 		sv_<ss_> names;
 		for(const auto &n : interface::fs::list_directory(dir))
-			if(n.is_directory && valid_game_name(n.name))
+			if(n.is_directory && valid_app_name(n.name))
 				names.push_back(n.name);
 		std::sort(names.begin(), names.end());
 		lua_newtable(L);
@@ -3154,9 +3154,9 @@ struct CApp: public App, public magic::Application
 		return 1;
 	}
 
-	// list_saves([game]) -> {{game =, name =, modified =}, ...}: every
-	// save under <user>/games/<game>/saves/<name>/save.sqlite, newest
-	// first, for the whole tree or for one game. That path is the
+	// list_saves([app]) -> {{app =, name =, modified =}, ...}: every
+	// save under <user>/apps/<app>/saves/<name>/save.sqlite, newest
+	// first, for the whole tree or for one app. That path is the
 	// storage module's own (builtin/storage/storage.cpp), and it is
 	// enumerated here rather than asked of a server because a launcher
 	// has no server to ask -- which is what [LAUNCH_WORLD] wanted it
@@ -3179,14 +3179,14 @@ struct CApp: public App, public magic::Application
 		ss_ only_game;
 		if(lua_gettop(L) >= 1 && !lua_isnil(L, 1)){
 			only_game = lua_bindings::lua_tocppstring(L, 1);
-			if(!valid_game_name(only_game))
-				return luaL_error(L, "list_saves(): bad game name");
+			if(!valid_app_name(only_game))
+				return luaL_error(L, "list_saves(): bad app name");
 		}
-		const ss_ games = g_client_config.get<ss_>("user_path")+"/games";
+		const ss_ games = g_client_config.get<ss_>("user_path")+"/apps";
 		struct Row { ss_ game, name; int64_t modified; };
 		sv_<Row> rows;
 		for(const auto &g : interface::fs::list_directory(games)){
-			if(!g.is_directory || !valid_game_name(g.name))
+			if(!g.is_directory || !valid_app_name(g.name))
 				continue;
 			if(only_game != "" && g.name != only_game)
 				continue;
@@ -3194,7 +3194,7 @@ struct CApp: public App, public magic::Application
 			for(const auto &n : interface::fs::list_directory(dir)){
 				// _server is the server's accounts (builtin/accounts), and a
 				// save beginning with _ is none of the player's
-				if(!n.is_directory || !valid_game_name(n.name) ||
+				if(!n.is_directory || !valid_app_name(n.name) ||
 						n.name[0] == '_')
 					continue;
 				const ss_ db = dir+"/"+n.name+"/save.sqlite";
@@ -3216,7 +3216,7 @@ struct CApp: public App, public magic::Application
 		for(const Row &r : rows){
 			lua_newtable(L);
 			lua_pushstring(L, r.game.c_str());
-			lua_setfield(L, -2, "game");
+			lua_setfield(L, -2, "app");
 			lua_pushstring(L, r.name.c_str());
 			lua_setfield(L, -2, "name");
 			lua_pushnumber(L, (double)r.modified);
@@ -3226,14 +3226,14 @@ struct CApp: public App, public magic::Application
 		return 1;
 	}
 
-	// list_games() -> {{name=, size=}, ...}
-	static int l_list_games(lua_State *L)
+	// list_apps() -> {{name=, size=}, ...}
+	static int l_list_apps(lua_State *L)
 	{
-		ss_ games_dir = g_client_config.get<ss_>("share_path")+"/games";
+		ss_ games_dir = g_client_config.get<ss_>("share_path")+"/apps";
 		auto nodes = interface::fs::list_directory(games_dir);
 		sv_<ss_> names;
 		for(const auto &n : nodes){
-			if(!n.is_directory || !valid_game_name(n.name))
+			if(!n.is_directory || !valid_app_name(n.name))
 				continue;
 			names.push_back(n.name);
 		}
@@ -3262,13 +3262,13 @@ struct CApp: public App, public magic::Application
 	{
 		ss_ game = lua_bindings::lua_tocppstring(L, 1);
 		ss_ launch = lua_isstring(L, 2) ? lua_bindings::lua_tocppstring(L, 2) : "";
-		if(!valid_game_name(game)){
+		if(!valid_app_name(game)){
 			lua_pushboolean(L, false);
-			lua_pushstring(L, "Invalid game name");
+			lua_pushstring(L, "Invalid app name");
 			return 2;
 		}
 
-		ss_ game_path = g_client_config.get<ss_>("share_path")+"/games/"+game;
+		ss_ game_path = g_client_config.get<ss_>("share_path")+"/apps/"+game;
 		if(!interface::fs::path_exists(game_path)){
 			lua_pushboolean(L, false);
 			lua_pushstring(L, "Game not found");
@@ -3305,7 +3305,7 @@ struct CApp: public App, public magic::Application
 #endif
 
 		game_path = interface::fs::get_absolute_path(game_path);
-		g_local_server_game = game;
+		g_local_server_app = game;
 		g_local_server_port = pick_free_local_port();
 		log_i(MODULE, "Starting local server on port %s", cs(g_local_server_port));
 		sv_<ss_> args{"-m", game_path, "-P", g_local_server_port,
@@ -3898,13 +3898,13 @@ struct CApp: public App, public magic::Application
 			return 0;
 		ss_ user = g_client_config.get<ss_>("user_path");
 		adopt_pidfile();
-		bool local = !g_local_server_game.empty() &&
+		bool local = !g_local_server_app.empty() &&
 				interface::process::is_running(g_local_server) &&
 				(address == "localhost:"+g_local_server_port ||
 				address == "127.0.0.1:"+g_local_server_port);
 		ss_ dir;
 		if(local){
-			dir = user+"/games/"+g_local_server_game+"/client";
+			dir = user+"/apps/"+g_local_server_app+"/client";
 		} else {
 			// One directory name: what is not a letter, a digit, - or . is _
 			ss_ name = address;

@@ -1,5 +1,6 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+#include "interface/fs.h"
 #include "core/types.h"
 #include "core/log.h"
 #include "core/version.h"
@@ -228,6 +229,7 @@ int main(int argc, char *argv[])
 	if(!config.check_paths()){
 		return 1;
 	}
+	interface::fs::migrate_user_apps(config.get<ss_>("user_path"));
 
 	if(module_path.empty()){
 		std::cerr<<"Module path (-m) is empty"<<std::endl;

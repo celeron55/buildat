@@ -47,10 +47,10 @@ cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2; exit 77
 fi
-rm -rf "$here/user/games/vanilla/saves/$save"
+rm -rf "$here/user/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=$save \
 	BUILDAT_LUANTI_LUA="$me/sound.lua" \
-	bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P "$port" -l 3 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" -l 3 \
 	> "$out/srv.log" 2>&1 &
 srv=$!
 for i in $(seq 1 120); do
@@ -94,7 +94,7 @@ PYEOF
 )
 kill -9 "$cli" 2>/dev/null; wait "$cli" 2>/dev/null
 kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
-rm -rf "$here/user/games/vanilla/saves/$save"
+rm -rf "$here/user/apps/vanilla/saves/$save"
 asked=$(grep -ac "sound check: three asked" "$out/srv.log")
 echo "the server asked $asked times; the mix peaked at ${peak:-0}"
 if [ ! -s "$out/mix.raw" ]; then

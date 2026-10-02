@@ -9,8 +9,8 @@ buildat.connect_server    = __buildat_connect_server
 -- ([BOX_PLAYTEST_2] 12)
 buildat.connect_server_start = __buildat_connect_server_start
 buildat.connect_server_poll  = __buildat_connect_server_poll
-buildat.list_games        = __buildat_list_games
--- list_saves([game]) -> {{game=, name=, modified=}, ...}, newest first.
+buildat.list_apps        = __buildat_list_apps
+-- list_saves([app]) -> {{app=, name=, modified=}, ...}, newest first.
 -- The saves on disk, enumerated without a server, since a launcher has
 -- none to ask ([LAUNCH_WORLD]).
 buildat.list_saves        = __buildat_list_saves
@@ -126,8 +126,8 @@ local launch_ui_interface = nil
 -- The three the client and a game's own menu call ([MENU_CONTEXT]);
 -- anything else in the table is ignored rather than refused, since a
 -- launch UI's module is its own and may hold whatever it likes.
-local LAUNCH_INTERFACE = {entered_game = true, leave_game = true,
-	in_game = true, show_dead_server = true, game_loading = true}
+local LAUNCH_INTERFACE = {entered_app = true, leave_app = true,
+	in_app = true, show_dead_server = true, app_loading = true}
 -- **Merged, not replaced**, because a launch UI may be a composition
 -- ([TWO_AUDIENCES]: the menu over the room). The composing extension's
 -- own module usually has none of these -- it boots two others and that
@@ -158,15 +158,15 @@ end
 --
 -- launch_loading(what): `what` is "world" or "server", anything else is
 -- refused. Nothing but the launch UI hears it, and a launch UI that
--- provides no `game_loading` is not an error -- most will not want one.
+-- provides no `app_loading` is not an error -- most will not want one.
 buildat.safe.launch_loading = function(what)
 	if what ~= "world" and what ~= "server" then
 		return false, 'launch_loading(what): "world" or "server"'
 	end
 	log:info("launch: the game is loading a " .. what)
 	local m = buildat.menu_extension()
-	if m and m.game_loading then
-		m.game_loading(what)
+	if m and m.app_loading then
+		m.app_loading(what)
 	end
 	return true
 end
@@ -180,8 +180,8 @@ end
 -- does -- a client started straight into a server has nothing to go back to
 buildat.safe.leave = function()
 	local m = buildat.menu_extension()
-	if m and m.leave_game then
-		m.leave_game()
+	if m and m.leave_app then
+		m.leave_app()
 	else
 		-- **Said out loud, because the quiet version of this is a dead
 		-- client**: with no launcher to go back to, leaving a game is a
@@ -467,7 +467,7 @@ buildat.safe.set_preference = function(name, value)
 	if not a_preference(name) then
 		return false, "set_preference: no preference by that name"
 	end
-	-- **Read by games, set by the user**: a chunk a server sent may read
+	-- **Read by apps, set by the user**: a chunk a server sent may read
 	-- a preference (a game's name field offers default_username) and may
 	-- not write one; a launch extension, which is the user's, may
 	local info = debug.getinfo(2, "S")
@@ -730,7 +730,7 @@ buildat.safe.set_launch_ui = function(name)
 end
 
 -- The two read-only enumerations a launcher draws its room from
-buildat.safe.list_games = __buildat_list_games
+buildat.safe.list_apps = __buildat_list_apps
 buildat.safe.list_saves = __buildat_list_saves
 -- launch_save(game, name): open one of them. A save is the player's own
 -- and the launch grid has no tile for it, so this is the one launch a
@@ -756,7 +756,7 @@ buildat.safe.launch_save = function(game, name)
 		return false, "launch_save(" .. game .. ", " .. name ..
 				"): no such save"
 	end
-	launch_grid.screens().start_local_game(game, "save=" .. name)
+	launch_grid.screens().start_local_app(game, "save=" .. name)
 	return true
 end
 -- Whether the client has a local server up, which is how a launcher
@@ -773,7 +773,7 @@ local function from_served()
 	return info ~= nil and __buildat_served_chunks[info.source] ~= nil
 end
 -- start_local_server(game[, launch]) -> true, or false and why. game is
--- one list_games() answers; launch is key=value lines for the server's
+-- one list_apps() answers; launch is key=value lines for the server's
 -- -u, a key of a name's shape, which the module reads as it would a
 -- packet.
 buildat.safe.start_local_server = function(game, launch)
@@ -781,13 +781,13 @@ buildat.safe.start_local_server = function(game, launch)
 		return false, "start_local_server: the user's, not a server's"
 	end
 	local found = false
-	for _, g in ipairs(__buildat_list_games()) do
+	for _, g in ipairs(__buildat_list_apps()) do
 		if g.name == game then
 			found = true
 		end
 	end
 	if not found then
-		return false, "start_local_server: no game called " .. tostring(game)
+		return false, "start_local_server: no app called " .. tostring(game)
 	end
 	if launch ~= nil then
 		if type(launch) ~= "string" or #launch > 4096 then

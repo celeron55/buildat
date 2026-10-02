@@ -241,7 +241,7 @@ function M.boot(launch_action, query)
 	-- What the user sets once and every game honours; not a launch, so
 	-- the menu's own rather than a tile from the tree
 	add("launch_menu/res/icon_preferences.png", "Engine settings", preferences.show,
-			"What every game honours: the window, the sound, the mouse.")
+			"What every app honours: the window, the sound, the mouse.")
 	-- **The console offers its screen and the menu takes it too**
 	-- ([LAUNCH_CONSOLE]: it is offered to every launch UI, and the room
 	-- already had it). Not a launch either: it draws over this screen
@@ -421,6 +421,8 @@ function M.boot(launch_action, query)
 	end
 
 	if launch_action then
+		-- An app's was game/<name>/<id> before apps were called apps
+		launch_action = launch_action:gsub("^game/", "app/")
 		local found = nil
 		for _, action in ipairs(actions) do
 			if action.key == launch_action or
@@ -452,11 +454,11 @@ end
 -- choosing is over** ([LAUNCH_API]'s fourth ask). The grid has no
 -- animation to resume, so it says so and no more; the room is what
 -- wants this.
-function M.game_loading(what)
+function M.app_loading(what)
 	log:info("launch_menu: the game is loading a " .. tostring(what))
 end
 
-M.in_game = screens.in_game
+M.in_app = screens.in_app
 
 -- A local server that died: the last lines of its log and where the
 -- whole of it is, so a crash's backtrace is on the screen and not just
@@ -466,8 +468,8 @@ M.in_game = screens.in_game
 -- what the grid did until 2026-09-24.
 M.show_dead_server = screens.show_dead_server
 
-function M.leave_game()
-	if not screens.in_game() and not api.local_server_running() then
+function M.leave_app()
+	if not screens.in_app() and not api.local_server_running() then
 		return false
 	end
 	-- **The stack comes down before the sweep, not after it.** The

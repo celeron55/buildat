@@ -3,7 +3,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=drop_check \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/drop.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- The player joins holding ten dirt. Press Q and the whole stack goes;
 -- press Ctrl-Q and one of it does. The line this logs every second says

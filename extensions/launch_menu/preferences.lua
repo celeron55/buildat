@@ -228,7 +228,7 @@ function M.show()
 		row:SetLayout(LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
 		local label = row:CreateChild("Text")
 		label:SetStyleAuto()
-		label.text = "Default username for games"
+		label.text = "Default username for apps"
 		local edit = row:CreateChild("LineEdit")
 		edit:SetStyleAuto()
 		edit:SetFixedHeight(26)

@@ -5,9 +5,9 @@
 #   util/smoke_web_archive.sh Build/package/out/buildat-*-web.tar.gz
 #
 # Unpacks it in debian:bookworm-slim with nothing added but libcurl4 --
-# and build-essential for the "web" archive, which compiles the games on
+# and build-essential for the "web" archive, which compiles the apps on
 # the box; the "web-precompiled" one has to start with no compiler and
-# compile nothing -- starts games/floorplanner there, and checks from
+# compile nothing -- starts apps/floorplanner there, and checks from
 # outside with util/test_web_transport.py that it serves the web client's
 # page and WebSocket and a native client's TCP. Needs docker, and python3
 # with websockets on the host. util/package_in_docker.sh runs it.
@@ -33,7 +33,7 @@ docker run -d --name "$name" -p "127.0.0.1:$port:29500" \
 		apt-get update -qq && apt-get install -y -qq --no-install-recommends $packages >/dev/null
 		mkdir /srv/b && tar -C /srv/b -xzf /a/$(basename "$archive") && cd /srv/b/*/
 		echo compiler: \$(command -v c++ || echo none)
-		exec bin/buildat_server -m games/floorplanner -l 3
+		exec bin/buildat_server -m apps/floorplanner -l 3
 	" >/dev/null
 for i in $(seq 1 900); do
 	docker logs "$name" > "$log" 2>&1 || true

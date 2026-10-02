@@ -26,13 +26,13 @@ function M.boot(action)
 	end
 	-- **What the client asks a launcher for** ([MENU_CONTEXT]): the room
 	-- hands back the three the client and a game's own menu call --
-	-- `buildat.leave()` goes through `leave_game`, and [MENU_ERRORS]
-	-- reads `in_game` to choose a dialog or a notice.
+	-- `buildat.leave()` goes through `leave_app`, and [MENU_ERRORS]
+	-- reads `in_app` to choose a dialog or a notice.
 	local room = api.run_extension_file("world.lua")
 	if type(room) == "table" then
-		M.entered_game = room.entered_game
-		M.leave_game = room.leave_game
-		M.in_game = room.in_game
+		M.entered_app = room.entered_app
+		M.leave_app = room.leave_app
+		M.in_app = room.in_app
 		if backdrop and room.be_backdrop then
 			room.be_backdrop()
 		end

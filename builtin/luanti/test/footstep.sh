@@ -60,10 +60,10 @@ core.register_on_joinplayer(function(player)
 	core.log("action", "footstep: the player is on " .. dirt)
 end)
 LUA
-rm -rf "$here/user/games/vanilla/saves/$save"
+rm -rf "$here/user/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -u launcher=1 -m ../games/vanilla -D ../user -P "$port" -l 3 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" -l 3 \
 	> "$out/srv.log" 2>&1 &
 srv=$!
 for i in $(seq 1 300); do

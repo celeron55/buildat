@@ -20,7 +20,7 @@ by the server at start through RCC++ and cached under cache/rccpp_build by
 the hash of its sources), an optional api.h other modules include to talk
 to it, and by convention client_lua/ and client_data/ that builtin/client_lua
 and builtin/client_data ship to the client. Modules under builtin/ are the
-engine's own; a game's are under games/<game>/, and the first one loaded is
+engine's own; an app's are under apps/<app>/, and the first one loaded is
 __loader, which reads the rest through builtin/loader.
 
 <module>.cpp defines a struct deriving from interface::Module and exports
@@ -80,7 +80,7 @@ interface/server.h -- interface::Server, the one object a module holds
 - tmp_store_data / tmp_restore_data: a named blob that survives a reload
 - add_file_path(name, path) / get_file_path(name): the file namespace the
   client mirrors (builtin/client_file serves it); "" when not found
-- get_config(): the server's Config (server_config.h); get_game_id(): the
+- get_config(): the server's Config (server_config.h); get_app_id(): the
   last component of -m, which namespaces what is kept under the user path
 - access_thread_pool(cb): the server's pool (thread_pool.h)
 - TickEvent, ModuleModifiedEvent, ModuleLoadedEvent, ModuleUnloadedEvent are
@@ -248,11 +248,11 @@ builtin, the modules' interfaces
 
 builtin/loader/api.h -- loader::Interface: activate(), get_module_info(name).
 The first module; it reads meta.json files, resolves the order and loads
-the rest; on -R it reloads a module whose sources changed. A game whose
-__loader/meta.json has "base": "<game>" is a variant of that sibling
-game: the base's modules load as the variant's own, a module directory in
-both is the variant's, and the variant is its own game everywhere else
-(its tile, its saves). games/vanilla_voxel_physics is one.
+the rest; on -R it reloads a module whose sources changed. An app whose
+__loader/meta.json has "base": "<app>" is a variant of that sibling
+app: the base's modules load as the variant's own, a module directory in
+both is the variant's, and the variant is its own app everywhere else
+(its tile, its saves). apps/vanilla_voxel_physics is one.
 
 builtin/main_context/api.h -- main_context::Interface: the server-side
 Urho3D context and its scenes. get_context(), create_scene() ->
@@ -264,7 +264,7 @@ builtin/network/api.h -- network::Interface: send(peer, name, data),
 list_peers(), set_send_policy(policy, max_queue_bytes, grace_us) --
 SendPolicy Buffer (queue without bound), Drop (a new packet over the limit
 is dropped), Disconnect (over the limit for grace_us and the peer is let
-go, what games/vanilla picks); the grace counts from when the socket
+go, what apps/vanilla picks); the grace counts from when the socket
 last took anything from the peer. declare(name, Channel::LatestOnly):
 a packet of that name waits in a lane of its own where a newer one
 replaces an older still queued (positions, HUD values) and goes ahead of
@@ -293,7 +293,7 @@ create(name) (split on purpose: a typo cannot start a new game) -> Save*,
 close, list() -> SaveInfo (name, modified_us), remove, valid_name. A Save
 has path() and store(name) -> Store, a sqlite object store with get / set /
 remove / list / batch, that modules keep their data in under
-<user>/games/<game_id>/saves/<name>.
+<user>/apps/<app_id>/saves/<name>.
 
 builtin/voxelworld/api.h -- voxelworld::Instance, one per scene
 (access(server, scene, cb)): the voxel world. get_voxel_reg(); set_save /
@@ -383,7 +383,7 @@ interface/polyvox_std.h: operator, dump, os
 interface/process.h: get_environment_variable, ExecOptions, shell_exec, Handle, valid, start, request_terminate, kill_force, terminate, is_running, reap
 interface/select_handler.h: SelectHandler, check, timeval
 interface/semaphore.h: Semaphore, wait, wait_us, timespec, post
-interface/server.h: ServerConfig, TickEvent, ModuleModifiedEvent, ModuleLoadedEvent, ModuleUnloadedEvent, Server, ~Server, shutdown, load_module, set_module_count, unload_module, reload_module, get_modules_path, get_builtin_modules_path, get_module_path, has_module, get_loaded_modules, access_module, sub_event, emit_event, tmp_store_data, tmp_restore_data, add_file_path, get_file_path, get_config, get_game_id, access_thread_pool
+interface/server.h: ServerConfig, TickEvent, ModuleModifiedEvent, ModuleLoadedEvent, ModuleUnloadedEvent, Server, ~Server, shutdown, load_module, set_module_count, unload_module, reload_module, get_modules_path, get_builtin_modules_path, get_module_path, has_module, get_loaded_modules, access_module, sub_event, emit_event, tmp_store_data, tmp_restore_data, add_file_path, get_file_path, get_config, get_app_id, access_thread_pool
 interface/server_config.h: ServerConfig
 interface/sha1.h: calculate, hex
 interface/sha256.h: calculate, hex

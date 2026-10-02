@@ -34,7 +34,7 @@ seed="${3:-20260915}"
 across="${4:-6}"
 save="${5:-bench_worldgen}"
 build="$root/Build"
-saves="$root/user/games/vanilla/saves"
+saves="$root/user/apps/vanilla/saves"
 out="$(mktemp -d /tmp/buildat_bench_worldgen.XXXXXX)"
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $out" >&2 || rm -rf "$out"' EXIT
 
@@ -102,7 +102,7 @@ for i in $(seq 1 "$runs"); do
 	log="$out/run$i.log"
 	BUILDAT_LUANTI_GAME="$game" BUILDAT_LUANTI_SAVE="$save" \
 		BUILDAT_LUANTI_LUA="$probe" \
-		"$build/bin/buildat_server" -u launcher=1 -m "$root/games/vanilla" \
+		"$build/bin/buildat_server" -u launcher=1 -m "$root/apps/vanilla" \
 		-D "$root/user" -P "$port" -l 4 2>&1 \
 		| sed -e 's/\x1b\[[0-9;]*m//g' > "$log" &
 	# Generation is over when no new section has been started for a while.

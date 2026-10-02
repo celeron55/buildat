@@ -18,7 +18,7 @@ remembers between runs. Use it for anything that compares images between runs.
 so a preference someone left at render_scale=0.5 can never change what a
 screenshot looks like, and a run never writes the file. A -c run is also muted
 unless -o says otherwise: nothing captures audio, and a driven run playing a
-game's music through whoever's speakers is a small recurring annoyance with no
+app's music through whoever's speakers is a small recurring annoyance with no
 upside. -o still wins, which is how a preference itself gets tested:
 
     $ bin/buildat -s localhost -w 1600x900 -o render_scale=0.5 -c @check.txt
@@ -40,13 +40,13 @@ rather than ending the run.
 The writer has to stay open -- the sleep above is what keeps it so -- because
 closing the last writer of a fifo is end of input.
 
-delay is wall-clock milliseconds of game time continuing to run. Use it to wait
+delay is wall-clock milliseconds of app time continuing to run. Use it to wait
 for startup, network, or for a held key to have an effect. Input is queued as
 SDL events at the start of the frame (before Urho3D Input::Update). Screenshots
 are taken after the current frame has been rendered (3D + UI), before buffer
 swap.
 
-The OS mouse is never captured or grabbed in -c mode, even if the game calls
+The OS mouse is never captured or grabbed in -c mode, even if the app calls
 SetMouseVisible(false). Use mouse_move for look (GetMouseMove); that is
 relative and does not use a cursor position. mouse_pos is for a visible UI
 cursor. look does the same pushing for you and waits for the camera to arrive,
@@ -66,7 +66,7 @@ flag. Under Xvfb that is normally fine.
 Commands
 --------
 delay <ms>
-    Wait this many milliseconds before the next command. Game keeps running.
+    Wait this many milliseconds before the next command. App keeps running.
 
 A driven client is a window the desk did not ask for, and says so: its
 WM_CLASS is "buildat-scripted" where a client somebody opened is
@@ -119,18 +119,18 @@ mouse_move <dx> <dy>
     Relative motion in pixels (GetMouseMove). Does not move the OS cursor.
 
     It goes straight into the frame's motion accumulator rather than onto
-    the SDL queue, so the game reads exactly what was asked for; a pushed
+    the SDL queue, so the app reads exactly what was asked for; a pushed
     SDL_MOUSEMOTION could be flushed back out of the queue before Urho3D
     ever saw it, and something does that to the first one of a run. That
     one is still lost (2026-09-23): the delta reaches the accumulator and
-    the game reads zero that frame, by a route that is neither
+    the app reads zero that frame, by a route that is neither
     SuppressNextMouseMove() nor ResetInputAccumulation(), both of which
     were instrumented and never fire for it.
 
     **So prefer `look` for aiming.** It pushes motion and measures what
     the camera did with it, over as many frames as that takes, which is
-    immune to a lost push and does not need to know the game's
-    sensitivity. `mouse_move` is the primitive under it, for a game whose
+    immune to a lost push and does not need to know the app's
+    sensitivity. `mouse_move` is the primitive under it, for an app whose
     camera `look` cannot read.
 
 mouse_down <button>
@@ -153,18 +153,18 @@ look_dir <x> <y> <z>
     +X, pitch positive upwards; look_dir takes a direction and works out the
     same two angles.
 
-    Nothing here knows what game is running. The camera is turned by injecting
+    Nothing here knows what app is running. The camera is turned by injecting
     mouse movement and watching what the camera of viewport 0 does about it:
     how far a pixel turns it, and which way round, is measured from what the
-    last frame's push actually did, so a game with its own sensitivity or its
+    last frame's push actually did, so an app with its own sensitivity or its
     mouse look inverted is aimed as well as any other. A push that changes
     nothing is tried the other way before it is believed.
 
     The command ends when the camera is there, which is usually three or four
     frames. An axis that has moved and then stops answering in both directions
-    is against a limit the game keeps -- a pitch clamp, most of the time -- and
+    is against a limit the app keeps -- a pitch clamp, most of the time -- and
     the command ends with a warning naming where it stopped. A camera that
-    never moves at all, or a viewport with no camera on it, is not a game this
+    never moves at all, or a viewport with no camera on it, is not an app this
     can aim: the sequence fails and the client exits non-zero.
 
 text <string>
@@ -177,7 +177,7 @@ event <name> [param]
     sandbox's safe list); the runner knows nothing of the names. The reply,
     if any, is a line in the log, which is what a test reads.
 
-    The receivers in games/vanilla's client (builtin/luanti):
+    The receivers in apps/vanilla's client (builtin/luanti):
 
     event scan <resolution> <label>
         Logs, under `scan <label>:` lines and ending in `scan <label>: end`,

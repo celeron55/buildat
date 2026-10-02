@@ -6,7 +6,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=gennotify_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/gennotify.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- A client has to connect for the world to stream, which is what makes
 -- sections generate. See core.set_gen_notify() in lua/bootstrap.lua for

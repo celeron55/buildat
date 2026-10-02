@@ -8,7 +8,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=sound_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/sound.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- devtest's soundstuff mod ships soundstuff_mono.ogg, which is what is
 -- asked for: one at the player, one positional beside them, one looped.

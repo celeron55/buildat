@@ -4,7 +4,7 @@
 -- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The key bindings editor both Luanti clients draw ([EXT_SETTINGS]):
--- games/vanilla's keys.lua over its table saved in the launcher's settings,
+-- apps/vanilla's keys.lua over its table saved in the launcher's settings,
 -- and extensions/luanti_client over its own in settings.json. A row per
 -- action with its key's name and what it does; a row picked (click, or
 -- arrows and Enter) says "Press a key...", and the next key down binds it

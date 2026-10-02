@@ -3,7 +3,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=digprops_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/digprops.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- The client works a dig time out for itself out of core.__dig_props(), so
 -- what has to hold is that its arithmetic on the records agrees with

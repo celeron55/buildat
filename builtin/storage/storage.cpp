@@ -374,11 +374,11 @@ struct Module: public interface::Module, public Interface
 		interface::Module(MODULE),
 		m_server(server)
 	{
-		// One game per server -- it is started -m ../games/<game> and that is
-		// the whole of it -- so the game is not a parameter of any call here,
-		// and a game has no way to name another game's saves.
+		// One app per server -- it is started -m ../apps/<app> and that is
+		// the whole of it -- so the app is not a parameter of any call here,
+		// and an app has no way to name another app's saves.
 		m_saves_path = m_server->get_config().get<ss_>("user_path")+
-				"/games/"+m_server->get_game_id()+"/saves";
+				"/apps/"+m_server->get_app_id()+"/saves";
 	}
 
 	~Module()

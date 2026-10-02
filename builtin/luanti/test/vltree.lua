@@ -5,7 +5,7 @@
 --
 --   BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=vltree \
 --   BUILDAT_LUANTI_LUA=../builtin/luanti/test/vltree.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- The spawn chunks generate without a client; a line per chunk says:
 --

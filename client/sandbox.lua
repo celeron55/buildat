@@ -241,11 +241,11 @@ function __buildat_report_error(err)
 	-- its own screens (luanti_client's session). Whichever extension is
 	-- the launcher, not launch_menu by name (buildat.menu_extension).
 	local menu = buildat.menu_extension and buildat.menu_extension()
-	local in_game = (menu and menu.in_game and menu.in_game()) or
-			ui_utils.in_game == true
+	local in_app = (menu and menu.in_app and menu.in_app()) or
+			ui_utils.in_app == true
 	local shown = first .. "\n\n(the log has the rest)"
-	log:info("error shown "..(in_game and "as a notice" or "in a dialog")..": "..first)
-	if in_game then
+	log:info("error shown "..(in_app and "as a notice" or "in a dialog")..": "..first)
+	if in_app then
 		if ui_utils.safe.show_notice then
 			ui_utils.safe.show_notice(first)
 		end

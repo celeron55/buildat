@@ -13,7 +13,7 @@
 #
 #   builtin/luanti/test/lod_ui.sh
 #
-# covers: games/vanilla/main/main.cpp games/vanilla/main/client_lua/menu.lua
+# covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/menu.lua
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_lod_ui.XXXXXX")

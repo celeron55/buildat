@@ -5,7 +5,7 @@
 --
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=detached_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/detached.lua \
---   bin/buildat_server -m ../games/vanilla -D ../user
+--   bin/buildat_server -m ../apps/vanilla -D ../user
 --
 -- Connect a client and press I: the form has the player's own slots under a
 -- row of three, which is the detached inventory, holding stone, dirt and
