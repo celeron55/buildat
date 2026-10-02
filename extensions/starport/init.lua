@@ -602,8 +602,10 @@ settings_page = function(can, again, message)
 			"your use; your reports weigh as a new key's and get no "..
 			"outcomes. The key is kept: turned on again, it is sent with "..
 			"its standing as it was."), GREY)
-	add_text(w, "The keys are in " .. STATE_PATH .. " (\"keys\"). "..
-			"Deleting them there starts over with new ones.", GREY)
+	if not s.send_key then
+		add_text(w, "The keys are in " .. STATE_PATH .. " (\"keys\"). "..
+				"Deleting them there starts over with new ones.", GREY)
+	end
 	-- 5c
 	r = add_row(w)
 	add_button(r, "Export keys", function()
