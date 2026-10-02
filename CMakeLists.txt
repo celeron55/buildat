@@ -570,6 +570,7 @@ if(BUILD_SERVER)
 		src/server/config.cpp
 		src/server/rccpp_util.cpp
 		src/server/confine.cpp
+		src/server/confine_windows.cpp
 	)
 	add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 
@@ -580,6 +581,8 @@ if(BUILD_SERVER)
 		Urho3D
 	)
 	if(WIN32)
+		# The box ([PROCESS_SANDBOX]): AppContainer profiles
+		target_link_libraries(${SERVER_EXE_NAME} userenv)
 	else()
 		target_link_libraries(${SERVER_EXE_NAME} dl)
 	endif()

@@ -96,6 +96,10 @@ int main(int argc, char *argv[])
 		if(ss_(argv[i]) == "--unconfined"){
 			unconfined = true;
 			take = 1;
+		} else if(ss_(argv[i]) == "--boxed"){
+			// The child a boxed parent started (Windows); see confine.h
+			config.set("boxed", true);
+			take = 1;
 		} else if(ss_(argv[i]) == "--connect-ports" && i + 1 < argc){
 			config.set("connect_ports", ss_(argv[i + 1]));
 			take = 2;
@@ -259,14 +263,33 @@ int main(int argc, char *argv[])
 
 	signal_handler_init();
 
-	if(!boot::autodetect::detect_server_paths(config))
-		return 1;
-	boot::autodetect::open_log(config, "buildat_server", argv[0]);
-
-	if(!config.check_paths()){
-		return 1;
+	// **A boxed child takes the paths its parent settled**: detecting them
+	// writes where the box cannot, and the parent did it, the log and the
+	// move of old directories with it. Its output is the parent's to log.
+	const bool boxed = config.get<bool>("boxed");
+	if(boxed){
+		const char *paths = getenv("BUILDAT_BOXED_PATHS");
+		ss_ all = paths ? paths : "";
+		size_t at = 0;
+		while(at < all.size()){
+			size_t nl = all.find('\n', at);
+			if(nl == ss_::npos)
+				nl = all.size();
+			const ss_ kv = all.substr(at, nl - at);
+			const size_t eq = kv.find('=');
+			if(eq != ss_::npos)
+				config.set(kv.substr(0, eq), kv.substr(eq + 1));
+			at = nl + 1;
+		}
+	} else {
+		if(!boot::autodetect::detect_server_paths(config))
+			return 1;
+		boot::autodetect::open_log(config, "buildat_server", argv[0]);
+		if(!config.check_paths()){
+			return 1;
+		}
+		interface::fs::migrate_user_apps(config.get<ss_>("user_path"));
 	}
-	interface::fs::migrate_user_apps(config.get<ss_>("user_path"));
 
 	if(module_path.empty()){
 		std::cerr<<"Module path (-m) is empty"<<std::endl;
@@ -293,8 +316,12 @@ int main(int argc, char *argv[])
 		log_w(MODULE, "Unconfined (--unconfined or BUILDAT_UNCONFINED=1): "
 				"the app can reach every file you can");
 	} else {
-		const ss_ why = server::confine(config, module_path);
-#ifdef __linux__
+		// Windows: the unboxed process is the box's parent, and is done
+		// when its child is
+		int child_exit = -1;
+		const ss_ why = server::confine(config, module_path, &child_exit);
+		if(child_exit >= 0)
+			return child_exit;
 		if(!why.empty()){
 			log_e(MODULE, "The server's box could not be made: %s. Starting "
 					"an app unboxed lets it reach every file you can; to do "
@@ -302,13 +329,6 @@ int main(int argc, char *argv[])
 					"BUILDAT_UNCONFINED=1.", cs(why));
 			return 1;
 		}
-#else
-		// simplified: the Windows box (an AppContainer) is not built yet,
-		// so a platform without one runs unboxed and says so rather than
-		// refusing ([PROCESS_SANDBOX]'s order: Linux first)
-		if(!why.empty())
-			log_w(MODULE, "Not boxed: %s", cs(why));
-#endif
 	}
 
 	int exit_status = 0;

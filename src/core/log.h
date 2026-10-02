@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
+#include <cstddef>
 
 // The numeric values of these go from fatal=0 to trace=6 in ascending order.
 extern const int CORE_FATAL;
@@ -18,6 +19,9 @@ int log_get_max_level();
 // tee: the file beside stderr rather than instead of it (the default log)
 void log_set_file(const char *path, bool tee = false);
 void log_close();
+// Bytes as they are, to the file and the terminal as a line would go: a
+// boxed child's output, carried by its parent ([PROCESS_SANDBOX])
+void log_raw(const char *data, size_t n);
 
 // The recent lines, for a wait on one ([START_WAIT]): how many have gone
 // by, and whether one since that count holds the text

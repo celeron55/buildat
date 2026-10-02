@@ -119,6 +119,20 @@ void log_set_file(const char *path, bool tee_)
 	log_mutex.unlock();
 }
 
+void log_raw(const char *data, size_t n)
+{
+	log_mutex.lock();
+	if(file){
+		fwrite(data, 1, n, file);
+		fflush(file);
+	}
+	if(!file || tee){
+		fwrite(data, 1, n, stderr);
+		fflush(stderr);
+	}
+	log_mutex.unlock();
+}
+
 void log_close()
 {
 	log_mutex.lock();

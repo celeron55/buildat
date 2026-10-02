@@ -6,15 +6,17 @@
 #include "interface/fs.h"
 #define MODULE "confine"
 
-#ifndef __linux__
+#if !defined(__linux__) && !defined(_WIN32)
 
 namespace server {
-ss_ confine(core::Config &config, const ss_ &module_path)
+ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 {
 	return "this platform has no box yet";
 }
 }
 
+#elif defined(_WIN32)
+// confine_windows.cpp
 #else
 
 #include <linux/landlock.h>
@@ -223,7 +225,7 @@ static ss_ install_seccomp()
 	return "";
 }
 
-ss_ confine(core::Config &config, const ss_ &module_path)
+ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 {
 	// Landlock restricts the calling thread and what it starts; a thread
 	// already running would stay outside
@@ -238,15 +240,7 @@ ss_ confine(core::Config &config, const ss_ &module_path)
 		return ss_("Landlock is not available (")+strerror(errno)+"): the "
 				"kernel is older than 5.13 or has it off in its lsm= list";
 
-	// The app's name, as the server's get_app_id() takes it
-	ss_ app = module_path;
-	while(!app.empty() && (app.back() == '/' || app.back() == '\\'))
-		app.pop_back();
-	const size_t sep = app.find_last_of("/\\");
-	if(sep != ss_::npos)
-		app = app.substr(sep + 1);
-	if(app.empty() || app == "." || app == "..")
-		app = "unnamed";
+	const ss_ app = app_of(module_path);
 
 	const ss_ user = real(config.get<ss_>("user_path"));
 	const ss_ cache = real(config.get<ss_>("cache_path"));

@@ -18,6 +18,8 @@ Config::Config()
 	// The ports a boxed server may connect to beyond buildat's own, the
 	// admin's (--connect-ports, BUILDAT_CONNECT_PORTS): "8080,2525" or "any"
 	set_default("connect_ports", "");
+	// Started by a boxed parent, in the box (Windows; --boxed)
+	set_default("boxed", false);
 	set_default("interface_path", "");
 	set_default("share_path", "");
 	set_default("cache_path", "");
