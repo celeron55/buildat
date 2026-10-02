@@ -399,6 +399,18 @@ buildat.sub_packet("accounts:login_result", function(data)
 	M.close()
 	magic.ui:SetFocusElement(nil)
 	log:info("Joined as " .. tostring(M.name))
+	-- A scripted admin's requests, a line each, "cmd name [arg]" -- what a
+	-- check does as an admin (<env>_ADMIN; the server checks the admin)
+	local admin = buildat.get_env((opts.env or "BUILDAT_JOIN") .. "_ADMIN")
+	if admin and admin ~= "" and not M.admin_sent then
+		M.admin_sent = true
+		for l in admin:gmatch("[^\n]+") do
+			local cmd, name, arg = l:match("^(%S+)%s*(%S*)%s*(.*)$")
+			if cmd then
+				M.admin(cmd, name, arg, cmd == "priv")
+			end
+		end
+	end
 	if M.on_joined then
 		M.on_joined(M.name)
 	end
@@ -417,6 +429,7 @@ end)
 
 buildat.sub_packet("accounts:admin_result", function(data)
 	M.message = cereal.binary_input(data, TEXT).text
+	log:info("admin result: " .. M.message)
 	if page_kind == "users" then
 		users_page(page_back)
 	end

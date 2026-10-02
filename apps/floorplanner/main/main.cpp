@@ -1291,6 +1291,11 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
+		// One user's two clients, one editing and one viewing
+		// ([FP_TWO_CLIENTS])
+		accounts::access(m_server, [&](accounts::Interface *i){
+			i->set_multiple_logins(true);
+		});
 		m_launch_plan = launch_param("save");
 		// Backups opened to look at when the server last stopped
 		storage::access(m_server, [&](storage::Interface *istorage){
@@ -1491,23 +1496,24 @@ struct Module: public interface::Module
 	}
 
 	// **Viewing or editing** (user, 2026-09-30): a plan opens for viewing,
-	// and one whose role edits switches to editing in the pause menu. Per
-	// user, not per plan or per client: it is for the plan it was switched
-	// on in, so entering another puts it back to viewing, and it lasts over
-	// a rejoin; EDITING_IDLE_S without an edit puts it back too. In memory:
-	// a server restart has everyone viewing.
+	// and one whose role edits switches to editing in the pause menu. **Per
+	// connection** ([FP_TWO_CLIENTS], user 2026-10-03): one user's two
+	// clients, one editing and one viewing. It is for the plan it was
+	// switched on in, so entering another puts that client back to viewing;
+	// EDITING_IDLE_S without an edit puts it back too, and so does leaving.
+	// In memory: a server restart has everyone viewing.
 	static constexpr int64_t EDITING_IDLE_S = 30 * 60;
 	struct Editing
 	{
 		ss_ plan;
 		int64_t last = 0; // the last edit, or the switch
 	};
-	std::map<ss_, Editing> m_editing; // by user
+	std::map<network::PeerId, Editing> m_editing; // by connection
 	float m_editing_timer = 0;
 
-	bool editing(const ss_ &user, const ss_ &plan)
+	bool editing(network::PeerId peer, const ss_ &plan)
 	{
-		auto it = m_editing.find(user);
+		auto it = m_editing.find(peer);
 		return it != m_editing.end() && it->second.plan == plan &&
 				(int64_t)time(nullptr) - it->second.last < EDITING_IDLE_S;
 	}
@@ -1517,10 +1523,9 @@ struct Module: public interface::Module
 	bool can_edit(network::PeerId peer)
 	{
 		Plan *plan = plan_of(peer);
-		const ss_ &user = m_peers[peer].name;
-		if(!plan || !role_edits(peer_role(peer)) || !editing(user, plan->m_name))
+		if(!plan || !role_edits(peer_role(peer)) || !editing(peer, plan->m_name))
 			return false;
-		m_editing[user].last = (int64_t)time(nullptr);
+		m_editing[peer].last = (int64_t)time(nullptr);
 		return true;
 	}
 
@@ -1547,32 +1552,33 @@ struct Module: public interface::Module
 			return;
 		const ss_ user = m_peers[packet.sender].name;
 		if(on && role_edits(peer_role(packet.sender))){
-			Editing &e = m_editing[user];
+			Editing &e = m_editing[packet.sender];
 			e.plan = plan->m_name;
 			e.last = (int64_t)time(nullptr);
-			log_i(MODULE, "%s is editing %s", cs(user), cs(plan->m_name));
+			log_i(MODULE, "%s (%i) is editing %s", cs(user),
+					(int)packet.sender, cs(plan->m_name));
 		} else {
-			m_editing.erase(user);
+			m_editing.erase(packet.sender);
 		}
-		send_privs_to_user(user);
+		send_privs(packet.sender);
 	}
 
 	// Editing that has gone EDITING_IDLE_S without an edit: back to viewing,
-	// and the user told
+	// and that client told
 	void expire_editing()
 	{
 		const int64_t now = (int64_t)time(nullptr);
-		sv_<ss_> gone;
+		sv_<network::PeerId> gone;
 		for(auto &pair : m_editing)
 			if(now - pair.second.last >= EDITING_IDLE_S)
 				gone.push_back(pair.first);
-		for(const ss_ &user : gone){
-			m_editing.erase(user);
-			send_privs_to_user(user);
-			for(auto &pair : m_peers)
-				if(pair.second.name == user)
-					send(pair.first, "fp:chat", pack(ss_(
-							"*** Back to viewing: no edits for 30 minutes")));
+		for(network::PeerId peer : gone){
+			m_editing.erase(peer);
+			if(m_peers.count(peer) == 0)
+				continue;
+			send_privs(peer);
+			send(peer, "fp:chat", pack(ss_(
+					"*** Back to viewing: no edits for 30 minutes")));
 		}
 	}
 
@@ -1615,11 +1621,11 @@ struct Module: public interface::Module
 	{
 		Peer &peer = m_peers[peer_id];
 		leave_plan(peer_id);
-		// Editing is for the plan it was switched on in
-		auto ed = m_editing.find(peer.name);
+		// Editing is for the plan it was switched on in, this client's
+		auto ed = m_editing.find(peer_id);
 		if(ed != m_editing.end() && ed->second.plan != plan->m_name){
 			m_editing.erase(ed);
-			send_privs_to_user(peer.name);
+			send_privs(peer_id);
 		}
 		peer.plan = plan->m_name;
 		peer.has_presence = false;
@@ -2422,6 +2428,7 @@ struct Module: public interface::Module
 			return;
 		const ss_ name = it->second.name;
 		leave_plan(client.info.id);
+		m_editing.erase(client.info.id);
 		m_peers.erase(client.info.id);
 		if(!name.empty())
 			send_plans_to_idle();
@@ -2636,7 +2643,7 @@ struct Module: public interface::Module
 		Plan *plan = plan_of(peer);
 		if(role_edits(role)){
 			privs.push_back("can_edit");
-			if(plan && editing(m_peers[peer].name, plan->m_name))
+			if(plan && editing(peer, plan->m_name))
 				privs.push_back("edit");
 		}
 		if(role_manages(role))

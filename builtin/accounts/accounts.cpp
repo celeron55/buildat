@@ -528,6 +528,21 @@ struct Module: public interface::Module, public Interface
 		return 0;
 	}
 
+	sv_<PeerId> find_peers(const ss_ &name)
+	{
+		sv_<PeerId> out;
+		for(auto &pair : m_peers)
+			if(!name.empty() && pair.second.name == name)
+				out.push_back(pair.first);
+		return out;
+	}
+
+	bool m_multiple_logins = false;
+	void set_multiple_logins(bool on)
+	{
+		m_multiple_logins = on;
+	}
+
 	ss_ address_of(PeerId peer)
 	{
 		auto it = m_peers.find(peer);
@@ -598,15 +613,17 @@ struct Module: public interface::Module, public Interface
 		// 2026-09-30): there a banned player comes back under a new name.
 		// On an invite-only server the account is enough, and an address
 		// ban would keep out others behind the same one.
-		const PeerId peer = find_peer(name);
-		if(peer && m_access.open_registration)
-			b.address = address_of(peer);
+		// Each connection's address, where the name is here more than once
+		const sv_<PeerId> peers = find_peers(name);
+		if(!peers.empty() && m_access.open_registration)
+			b.address = address_of(peers[0]);
 		m_store->set("ban/"+name, pack(b));
-		if(!b.address.empty())
-			m_store->set("banaddr/"+b.address, name);
+		if(m_access.open_registration)
+			for(PeerId p : peers)
+				m_store->set("banaddr/"+address_of(p), name);
 		log_i(MODULE, "%s banned %s (%s)", cs(by), cs(name), cs(b.address));
-		if(peer)
-			kick(peer, "banned by "+by);
+		for(PeerId p : peers)
+			kick(p, "banned by "+by);
 		send_users_to_admins();
 		return "";
 	}
@@ -846,7 +863,7 @@ struct Module: public interface::Module, public Interface
 			return reply("A name is 1 to 20 letters, digits, _ or -");
 		if(password.size() > 100 || code.size() > 100 || cred.token.size() > 100)
 			return reply("The password is too long");
-		if(find_peer(name))
+		if(find_peer(name) && !m_multiple_logins)
 			return reply(name+" is already here");
 		if(!local){
 			const ss_ why = banned(name, peer.address);
@@ -1079,8 +1096,7 @@ struct Module: public interface::Module, public Interface
 
 	void privs_changed(const ss_ &name)
 	{
-		const PeerId peer = find_peer(name);
-		if(peer)
+		for(PeerId peer : find_peers(name))
 			m_server->emit_event("accounts:privs", new Login(peer, name));
 	}
 
@@ -1098,6 +1114,8 @@ struct Module: public interface::Module, public Interface
 		Account account;
 		const bool exists = !r.name.empty() && get_account(r.name, account);
 		const PeerId target = exists ? find_peer(r.name) : 0;
+		// Every connection of the name ([FP_TWO_CLIENTS])
+		const sv_<PeerId> targets = exists ? find_peers(r.name) : sv_<PeerId>();
 		if(r.cmd == "list"){
 			return send_users(packet.sender);
 		} else if(r.cmd == "priv"){
@@ -1114,7 +1132,8 @@ struct Module: public interface::Module, public Interface
 		} else if(r.cmd == "kick"){
 			if(!target)
 				return result(r.name+" is not here");
-			kick(target, "kicked by "+by);
+			for(PeerId t : targets)
+				kick(t, "kicked by "+by);
 			result(r.name+" was kicked");
 		} else if(r.cmd == "ban"){
 			ss_ why = ban(r.name, by);
@@ -1138,8 +1157,9 @@ struct Module: public interface::Module, public Interface
 			// A password someone knows: the account no longer logs in by
 			// its Starport ID only (10g)
 			m_store->set("own_password/"+r.name, "");
-			if(target && target != packet.sender)
-				kick(target, "the password was reset by "+by);
+			for(PeerId t : targets)
+				if(t != packet.sender)
+					kick(t, "the password was reset by "+by);
 			log_i(MODULE, "%s reset the password of %s", cs(by), cs(r.name));
 			result("The password of "+r.name+" was reset");
 		} else if(r.cmd == "delete"){
@@ -1149,8 +1169,8 @@ struct Module: public interface::Module, public Interface
 				return result("An admin does not delete their own account");
 			if(account.has("admin") && admin_count() <= 1)
 				return result("The last admin is not deleted");
-			if(target)
-				kick(target, "the account was deleted by "+by);
+			for(PeerId t : targets)
+				kick(t, "the account was deleted by "+by);
 			m_store->remove("auth/"+r.name);
 			// Its Starport ID's link, and what waited for approval (10g)
 			ss_ link;

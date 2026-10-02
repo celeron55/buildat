@@ -45,8 +45,17 @@ namespace accounts
 	{
 		// The name a peer joined as, or "" before it has
 		virtual ss_ name_of(PeerId peer) = 0;
-		// The peer that has joined as `name`, or 0
+		// The peer that has joined as `name`, or 0; the first, where the app
+		// lets a name be here more than once
 		virtual PeerId find_peer(const ss_ &name) = 0;
+		// [FP_TWO_CLIENTS]: every peer joined as `name`
+		virtual sv_<PeerId> find_peers(const ss_ &name) = 0;
+		// Whether one name may be here from more than one client at once
+		// (floorplanner: an editing client and a viewing one); off by
+		// default, as for a Luanti player, who is one object per name. A
+		// kick, a ban, a reset password and a deleted account then reach
+		// every connection of the name.
+		virtual void set_multiple_logins(bool on) = 0;
 		// Its address, as the network module has it (a trusted proxy's
 		// X-Forwarded-For included)
 		virtual ss_ address_of(PeerId peer) = 0;
