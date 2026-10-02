@@ -45,7 +45,7 @@
 #include <memory>
 #include "interface/tcpsocket.h"
 #ifdef _WIN32
-	#include <winsock2.h>
+	#include "ports/windows_sockets.h"
 #else
 	#include <sys/socket.h>
 #endif
