@@ -17,6 +17,11 @@
 #   6. The first server reports a ban of the ID; a blocklist it publishes
 #      to, which the fleet subscribes to, keeps the ID out of the fleet's
 #      server too, and the ban is in the queue as a report about the ID.
+#   7. The server's own side (10g), by editing starport.json as its admin's
+#      page does, watched: unlisted and IDs "approved only" leave the list
+#      and keep the ID login, found by address; a new ID waits for
+#      approval; a Starport removed from the file withdraws the listing at
+#      once. (5 has the setup code make an ID the server's first admin.)
 #
 #   KEEP_TMP=1 apps/starport/check.sh
 set -u
@@ -141,13 +146,21 @@ PY
 ) || fail "the ID API"
 echo "ok: IDs made, an adult's year not kept, a token got"
 printf 'delay 8000\nquit\n' > "$tmp/cmds2.txt"
+# The server has no admin yet: the setup code makes the ID it (10g)
+setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/an2.log" | tail -1 | cut -d' ' -f3)
 BUILDAT_FP_STARPORT=$token timeout 90 Build/bin/buildat -D "$tmp/cl" \
 	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
 	> "$tmp/cl2.log" 2>&1
+grep -q "Login refused: This server has no admin yet" "$tmp/cl2.log" ||
+	fail "an ID got in before the server had an admin (cl2.log)"
+BUILDAT_FP_STARPORT=$token BUILDAT_FP_CODE=$setup timeout 90 \
+	Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN2 \
+	-c @"$tmp/cmds2.txt" > "$tmp/cl2.log" 2>&1
 grep -q "Joined as grownup" "$tmp/cl2.log" &&
-	grep -q "New account grownup for a Starport ID" "$tmp/an2.log" ||
-	fail "the token did not log in (cl2.log, an2.log)"
-echo "ok: the ID's token logged in to the fleet's server"
+	grep -q "New account grownup for a Starport ID" "$tmp/an2.log" &&
+	grep -q "grownup claimed the server with the setup code" "$tmp/an2.log" ||
+	fail "the token did not log in as the first admin (cl2.log, an2.log)"
+echo "ok: the ID's token logged in to the fleet's server, its first admin"
 
 # 6: as the first server would announce a ban it reported
 python3 - "$SP" "$tmp/an/apps/floorplanner" "$id" > "$tmp/ban.json" <<'PY' ||
@@ -205,4 +218,57 @@ BUILDAT_FP_STARPORT=$token timeout 90 Build/bin/buildat -D "$tmp/cl" \
 grep -q "Login refused: Banned by a blocklist" "$tmp/cl4.log" ||
 	fail "the blocklist did not keep the ID out (cl4.log, an2b.log)"
 echo "ok: the blocklist keeps the ID out of the fleet's server"
+
+# 7
+python3 - "$tmp/an2/apps/floorplanner/starport.json" <<'PY'
+import json, sys
+c = json.load(open(sys.argv[1]))
+c.update(unlisted=True, ids="approved")
+c.pop("login", None)
+json.dump(c, open(sys.argv[1], "w"))
+PY
+for _ in $(seq 30); do
+	api "localhost:$SP/api/list" | grep -q '"Check main"' || break
+	sleep 1
+done
+api "localhost:$SP/api/list" | grep -q '"Check main"' &&
+	fail "an unlisted server is still in the list"
+echo "ok: unlisted, out of the list, by the watched file alone"
+tokens=$(python3 - "$SP" "$AN2" <<'PY'
+import json, sys, urllib.request
+B = "http://127.0.0.1:%s/api/id/" % sys.argv[1]
+def call(w, **k):
+    return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
+out = []
+for n in ("newbie",):
+    s = call("register", name=n, password="secret1", adult=True)["result"]["session"]
+    # By the address the client is on: the server is in no list now
+    r = call("token", session=s, address="127.0.0.1:" + sys.argv[2], name=n)
+    assert r["ok"], r
+    out.append(r["result"]["token"])
+print(" ".join(out))
+PY
+) || fail "an unlisted server's token, by address"
+tnew=$tokens
+BUILDAT_FP_STARPORT=$tnew timeout 90 Build/bin/buildat -D "$tmp/cl" \
+	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
+	> "$tmp/cl5.log" 2>&1
+grep -q "Login refused: Your Starport ID waits" "$tmp/cl5.log" ||
+	fail "a new ID did not wait for approval (cl5.log)"
+echo "ok: approved only: a new ID waits"
+python3 - "$tmp/an/apps/floorplanner/starport.json" <<'PY'
+import json, sys
+c = json.load(open(sys.argv[1]))
+c["starports"] = []
+json.dump(c, open(sys.argv[1], "w"))
+PY
+for _ in $(seq 30); do
+	api "localhost:$SP/api/list" | grep -q '"Check house"' || break
+	sleep 1
+done
+api "localhost:$SP/api/list" | grep -q '"Check house"' &&
+	fail "a removed Starport still lists the server"
+grep -q "Withdrawn from" "$tmp/an.log" ||
+	fail "no withdrawal in an.log"
+echo "ok: a Starport removed from the file withdraws the listing at once"
 echo PASS

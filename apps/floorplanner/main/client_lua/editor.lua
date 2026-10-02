@@ -7173,7 +7173,7 @@ do
 			account_page(doc.accounts.chat_page)
 		end)
 		if doc.privs.admin then
-			panel.button(w, "Users...", function()
+			panel.button(w, "Accounts...", function()
 				account_page(doc.accounts.users_page)
 			end)
 		end

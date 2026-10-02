@@ -35,6 +35,7 @@
 #include "network/api.h"
 #include "starport_announce/api.h"
 #include "accounts/api.h"
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <thread>
@@ -155,8 +156,17 @@ struct Module: public interface::Module, public Interface
 {
 	interface::Server *m_server;
 	ss_ m_dir;
+	// starport.json as last read, and its text; under m_mutex (the thread
+	// announces from it)
 	json::Value m_config;
+	ss_ m_config_text;
 	std::mutex m_mutex;
+	// 10g: the Starports to delist from, for the thread; each Starport's
+	// last answer and the blocklists it says this server follows
+	sv_<ss_> m_delist;
+	sm_<ss_, ss_> m_status;
+	sm_<ss_, sv_<ss_>> m_subscribed;
+	int64_t m_next_read_us = 0;
 	// By the Starport's url
 	sm_<ss_, Listing> m_listings;
 	// 10d: the identities of the blocklists this server subscribes to, by
@@ -193,7 +203,8 @@ struct Module: public interface::Module, public Interface
 		m_server->sub_event(this, Event::t("network:http_request"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		for(const char *n : {"starport:relay_open", "starport:relay_send",
-				"starport:relay_close"})
+				"starport:relay_close", "starport:config_get",
+				"starport:config_set"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+n));
 	}
@@ -212,29 +223,87 @@ struct Module: public interface::Module, public Interface
 				on_relay_send, network::Packet)
 		EVENT_TYPEN("network:packet_received/starport:relay_close",
 				on_relay_close, network::Packet)
+		EVENT_TYPEN("network:packet_received/starport:config_get",
+				on_config_get, network::Packet)
+		EVENT_TYPEN("network:packet_received/starport:config_set",
+				on_config_set, network::Packet)
 	}
 
 	void on_start()
 	{
 		m_dir = m_server->get_config().get<ss_>("user_path")+"/apps/"+
 				m_server->get_app_id();
-		const ss_ path = m_dir+"/starport.json";
-		const ss_ text = read_file(path);
-		if(text.empty()){
-			log_v(MODULE, "No %s: not announced to any Starport", cs(path));
-			return;
-		}
-		json::json_error_t err;
-		m_config = json::load_string(text.c_str(), &err);
-		if(!m_config.is_object() || !m_config.get("starports").is_array()){
-			log_w(MODULE, "%s: not an object with \"starports\" (line %d: %s);"
-					" not announced", cs(path), err.line, err.text);
-			return;
-		}
 		load_state();
-		log_i(MODULE, "Announcing to %u Starport(s)",
-				m_config.get("starports").size());
+		read_config();
 		m_start_announcing = true;
+	}
+
+	ss_ config_path(){ return m_dir+"/starport.json"; }
+
+	json::Value config()
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_config.deepcopy();
+	}
+
+	static sv_<ss_> urls_of(const json::Value &c)
+	{
+		sv_<ss_> out;
+		const json::Value &u = c.get("starports");
+		for(unsigned i = 0; u.is_array() && i < u.size(); i++)
+			if(u.at(i).is_string())
+				out.push_back(u.at(i).as_string());
+		return out;
+	}
+	static bool is_on(const json::Value &c)
+	{
+		return c.is_object() && !c.get("enabled").is_false();
+	}
+
+	// **starport.json, watched** (10g): the admin's page writes it, and so
+	// may a hand or a script; a change is taken in without a restart. A
+	// Starport no longer announced to -- removed, or Starport turned off --
+	// is told so at once.
+	void read_config()
+	{
+		const ss_ text = read_file(config_path());
+		ss_ old_text;
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			old_text = m_config_text;
+		}
+		if(text == old_text)
+			return;
+		json::Value c;
+		if(!text.empty()){
+			json::json_error_t err;
+			c = json::load_string(text.c_str(), &err);
+			if(!c.is_object() || !c.get("starports").is_array()){
+				log_w(MODULE, "%s: not an object with \"starports\" (line %d:"
+						" %s); kept as it was", cs(config_path()), err.line,
+						err.text);
+				std::lock_guard<std::mutex> lock(m_mutex);
+				m_config_text = text;
+				return;
+			}
+		}
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			const sv_<ss_> was = is_on(m_config) ? urls_of(m_config) :
+					sv_<ss_>();
+			const sv_<ss_> now = is_on(c) ? urls_of(c) : sv_<ss_>();
+			for(const ss_ &u : was)
+				if(std::find(now.begin(), now.end(), u) == now.end())
+					m_delist.push_back(u);
+			m_config = c;
+			m_config_text = text;
+		}
+		if(is_on(c))
+			log_i(MODULE, "Announcing to %u Starport(s)", c.get("starports").size());
+		else
+			log_v(MODULE, "%s: not announced to any Starport",
+					cs(config_path()));
+		m_wake.notify_all();
 	}
 
 	// The first announce waits for the first tick: every module has
@@ -277,9 +346,10 @@ struct Module: public interface::Module, public Interface
 		end_relay(p.sender);
 		const ss_ url = p.data;
 		bool allowed = false;
-		const json::Value &urls = m_config.get("starports");
-		for(unsigned i = 0; urls.is_array() && i < urls.size(); i++)
-			allowed |= urls.at(i).is_string() && urls.at(i).as_string() == url;
+		const json::Value c = config();
+		if(is_on(c))
+			for(const ss_ &u : urls_of(c))
+				allowed |= u == url;
 		if(!allowed){
 			relay_send_packet(p.sender, "starport:relay_closed",
 					"not a Starport this server is on");
@@ -401,6 +471,11 @@ struct Module: public interface::Module, public Interface
 	void on_tick()
 	{
 		flush_relays();
+		const int64_t now = interface::os::time_us();
+		if(!m_dir.empty() && now >= m_next_read_us){
+			m_next_read_us = now + 2000000;
+			read_config();
+		}
 		if(!m_start_announcing)
 			return;
 		m_start_announcing = false;
@@ -464,16 +539,51 @@ struct Module: public interface::Module, public Interface
 	void run()
 	{
 		for(;;){
-			const json::Value &urls = m_config.get("starports");
-			for(unsigned i = 0; i < urls.size(); i++){
-				if(urls.at(i).is_string())
-					announce(urls.at(i).as_string());
+			sv_<ss_> delist;
+			json::Value c;
+			{
+				std::lock_guard<std::mutex> lock(m_mutex);
+				delist.swap(m_delist);
+				c = m_config.deepcopy();
 			}
+			for(const ss_ &url : delist)
+				withdraw(url);
+			// A change announced just after the last announce is refused as
+			// too soon; that one is tried again shortly, not in 5 minutes
+			bool soon = false;
+			if(is_on(c))
+				for(const ss_ &url : urls_of(c))
+					soon |= !announce(url, c);
 			std::unique_lock<std::mutex> lock(m_mutex);
-			m_wake.wait_for(lock, std::chrono::seconds(ANNOUNCE_INTERVAL_S),
-					[this](){ return m_stop; });
+			const ss_ text = m_config_text;
+			m_wake.wait_for(lock, std::chrono::seconds(soon ? 25 :
+					ANNOUNCE_INTERVAL_S),
+					[&](){ return m_stop || !m_delist.empty() ||
+					m_config_text != text; });
 			if(m_stop)
 				return;
+		}
+	}
+
+	// 10g: off that Starport's list at once, not after its timeout
+	void withdraw(const ss_ &url)
+	{
+		json::Value body = json::object();
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			auto it = m_listings.find(url);
+			if(it == m_listings.end())
+				return;
+			body.set("id", it->second.id);
+			body.set("secret", interface::sha256::hex(it->second.secret));
+			m_status[url] = "withdrawn";
+			m_blocked.erase(url);
+		}
+		try {
+			interface::http_post(url+"/api/delist", body.stringify());
+			log_i(MODULE, "Withdrawn from %s", cs(url));
+		} catch(std::exception &e){
+			log_w(MODULE, "Withdrawing from %s: %s", cs(url), e.what());
 		}
 	}
 
@@ -486,15 +596,20 @@ struct Module: public interface::Module, public Interface
 		return n;
 	}
 
-	void announce(const ss_ &url)
+	// False when the Starport said it was too soon (try again shortly)
+	bool announce(const ss_ &url, const json::Value &cfg)
 	{
 		json::Value body = json::object();
 		// What the server says it is: the config as it is, less the list of
-		// Starports, which is this server's business
-		for(json::Iterator it(m_config); it.valid(); it.next()){
-			if(it.key() != "starports")
-				body.set(it.key(), it.value());
+		// Starports, which is this server's business, and the settings
+		// that are this server's own
+		for(json::Iterator it(cfg); it.valid(); it.next()){
+			const ss_ k = it.key();
+			if(k != "starports" && k != "ids" && k != "enabled")
+				body.set(k, it.value());
 		}
+		// How people log in, as the listing says it (10c, 10g)
+		body.set("login", ids_mode_of(cfg) == "off" ? "local" : "both");
 		body.set("app", m_server->get_app_id());
 		body.set("version", ss_(BUILDAT_VERSION));
 		body.set("port", (int64_t)atoi(m_server->get_config().get<ss_>("network_port").c_str()));
@@ -530,14 +645,29 @@ struct Module: public interface::Module, public Interface
 			answer = interface::http_post(url+"/api/announce", body.stringify());
 		} catch(std::exception &e){
 			log_w(MODULE, "Announce to %s: %s", cs(url), e.what());
-			return;
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_status[url] = ss_("unreachable: ")+e.what();
+			return true;
 		}
 		const json::Value v = json::load_string(answer.c_str());
 		if(!v.is_object() || !v.get("ok").is_true()){
-			log_w(MODULE, "Announce to %s refused: %s", cs(url),
-					v.is_object() && v.get("error").is_string() ?
-					v.get("error").as_cstring() : cs(answer.substr(0, 200)));
-			return;
+			const ss_ why = v.is_object() && v.get("error").is_string() ?
+					v.get("error").as_string() : answer.substr(0, 200);
+			log_w(MODULE, "Announce to %s refused: %s", cs(url), cs(why));
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_status[url] = "refused: "+why;
+			return why != "announced too often";
+		}
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_status[url] = v.get("status").is_string() ?
+					v.get("status").as_string() : ss_("announced");
+			sv_<ss_> subs;
+			const json::Value &sl = v.get("subscribed");
+			for(unsigned i = 0; sl.is_array() && i < sl.size(); i++)
+				if(sl.at(i).is_string())
+					subs.push_back(sl.at(i).as_string());
+			m_subscribed[url] = subs;
 		}
 		if(v.get("blocked").is_array()){
 			std::set<ss_> blocked;
@@ -562,6 +692,7 @@ struct Module: public interface::Module, public Interface
 		}
 		log_v(MODULE, "Announced to %s: %s", cs(url),
 				v.get("status").is_string() ? v.get("status").as_cstring() : "");
+		return true;
 	}
 
 	// -- [STARPORT] 10c
@@ -574,11 +705,131 @@ struct Module: public interface::Module, public Interface
 		return host.substr(0, host.find_first_of(":/"));
 	}
 
+	// "ids", or what an older file's "login" meant
+	static ss_ ids_mode_of(const json::Value &c)
+	{
+		if(!is_on(c))
+			return "off";
+		const json::Value &ids = c.get("ids");
+		if(ids.is_string() && (ids.as_string() == "anyone" ||
+				ids.as_string() == "approved"))
+			return ids.as_string();
+		if(ids.is_string())
+			return "off";
+		const json::Value &login = c.get("login");
+		return login.is_string() && (login.as_string() == "starport" ||
+				login.as_string() == "both") ? "anyone" : "off";
+	}
+
+	ss_ ids_mode()
+	{
+		return ids_mode_of(config());
+	}
+
 	bool accepts_ids()
 	{
-		const ss_ login = m_config.get("login").is_string() ?
-				m_config.get("login").as_string() : "local";
-		return login == "starport" || login == "both";
+		return ids_mode() != "off";
+	}
+
+	// starport.json written whole, then read back as any edit is
+	ss_ write_config(const json::Value &c)
+	{
+		if(!c.is_object() || !c.get("starports").is_array())
+			return "starport.json: an object with \"starports\"";
+		interface::fs::create_directories(m_dir);
+		write_file(config_path()+".tmp", c.stringify());
+		if(!interface::fs::rename(config_path()+".tmp", config_path()))
+			return "could not write "+config_path();
+		read_config();
+		return "";
+	}
+
+	ss_ set_ids_mode(const ss_ &mode)
+	{
+		if(mode != "off" && mode != "anyone" && mode != "approved")
+			return "Starport IDs: off, anyone or approved";
+		json::Value c = config();
+		if(!c.is_object()){
+			if(mode == "off")
+				return "";
+			return "No Starport set up: set one up on the Starport page first";
+		}
+		c.set("ids", mode);
+		c.del_key("login");
+		return write_config(c);
+	}
+
+	bool is_blocked(const ss_ &host, const ss_ &sub)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		for(auto &pair : m_blocked)
+			if(host_of(pair.first) == host && pair.second.count(sub))
+				return true;
+		return false;
+	}
+
+	// -- The admin's Starport page (10g)
+
+	bool peer_is_admin(network::PeerInfo::Id peer)
+	{
+		bool admin = false;
+		if(m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *a){
+				admin = a->is_admin(a->name_of(peer));
+			});
+		return admin;
+	}
+
+	void send_config(network::PeerInfo::Id peer, const ss_ &message)
+	{
+		json::Value out = json::object();
+		const json::Value c = config();
+		out.set("config", c.is_object() ? c : json::object());
+		out.set("path", config_path());
+		out.set("message", message);
+		json::Value rows = json::array();
+		for(const ss_ &url : urls_of(c)){
+			json::Value r = json::object();
+			r.set("url", url);
+			{
+				std::lock_guard<std::mutex> lock(m_mutex);
+				auto it = m_listings.find(url);
+				if(it != m_listings.end()){
+					r.set("listing", it->second.id);
+					r.set("claim", claim_code(it->second));
+				}
+				r.set("status", m_status[url]);
+				json::Value subs = json::array();
+				for(const ss_ &n : m_subscribed[url])
+					subs.append(n);
+				r.set("subscribed", subs);
+			}
+			// What removing it would cut off: the accounts of its IDs
+			int64_t linked = 0;
+			if(m_server->has_module("accounts"))
+				accounts::access(m_server, [&](accounts::Interface *a){
+					linked = a->linked_count(host_of(url));
+				});
+			r.set("linked", linked);
+			rows.append(r);
+		}
+		out.set("starports", rows);
+		relay_send_packet(peer, "starport:config", out.stringify());
+	}
+
+	void on_config_get(const network::Packet &p)
+	{
+		if(peer_is_admin(p.sender))
+			send_config(p.sender, "");
+	}
+
+	void on_config_set(const network::Packet &p)
+	{
+		if(!peer_is_admin(p.sender))
+			return;
+		json::json_error_t err;
+		const json::Value c = json::load_string(p.data.c_str(), &err);
+		send_config(p.sender, write_config(c));
 	}
 
 	ss_ verify_id_token(const ss_ &token, IdLogin *out)

@@ -355,9 +355,12 @@ struct UsersInfo
 	AccessSettings access;
 	// name, address
 	sv_<std::pair<ss_, ss_>> bans;
+	// 10g: Starport IDs off, anyone or approved; the IDs waiting
+	ss_ starport_ids;
+	sv_<ss_> approvals;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(users, invites, access, bans);
+		archive(users, invites, access, bans, starport_ids, approvals);
 	}
 };
 
@@ -403,7 +406,7 @@ struct Module: public interface::Module, public Interface
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		for(const char *name : {"accounts:get_hello", "accounts:login",
 				"accounts:admin", "accounts:passwd", "accounts:logout",
-				"accounts:totp"})
+				"accounts:totp", "accounts:link_starport"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -427,6 +430,8 @@ struct Module: public interface::Module, public Interface
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:totp", on_totp,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/accounts:link_starport",
+				on_link_starport, network::Packet)
 	}
 
 	// One key of what the launcher asked for through the server's -u
@@ -457,7 +462,8 @@ struct Module: public interface::Module, public Interface
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(const char *name : {"accounts:hello", "accounts:login_result",
 					"accounts:users", "accounts:admin_result",
-					"accounts:passwd_result", "accounts:totp_result"})
+					"accounts:passwd_result", "accounts:totp_result",
+					"accounts:link_result"})
 				inetwork->declare(name,
 						network::Interface::Channel::LatestOnly);
 		});
@@ -822,7 +828,11 @@ struct Module: public interface::Module, public Interface
 			});
 			if(!why.empty())
 				return reply(why);
-			cred.name = id.name;
+			// 10g: an ID linked to an account logs in as that account,
+			// whatever name it picked for the community
+			ss_ linked;
+			cred.name = m_store->get("starport/"+id.starport+"/"+id.sub,
+					linked) ? linked : id.name;
 			cred.password.clear();
 			cred.token.clear();
 		}
@@ -869,8 +879,13 @@ struct Module: public interface::Module, public Interface
 		if(!id.sub.empty()){
 			const ss_ link = "starport/"+id.starport+"/"+id.sub;
 			ss_ linked;
+			ss_ mode = "off";
+			starport_announce::access(m_server,
+					[&](starport_announce::Interface *s){
+				mode = s->ids_mode();
+			});
 			if(m_store->get(link, linked)){
-				if(linked != name || !get_account(name, account))
+				if(!get_account(name, account))
 					return reply("This Starport ID's account here is gone; "
 							"ask an admin");
 			} else {
@@ -878,13 +893,37 @@ struct Module: public interface::Module, public Interface
 					return reply("The name "+name+" is taken on this server "
 							"by an account of its own: pick another for "
 							"this community on the Starport");
+				// No admin yet: as with a local account, only the setup
+				// code makes a new one, and makes it the admin (10g)
+				if(!m_setup_code.empty() && code != m_setup_code)
+					return fail(code.empty() ? "This server has no admin "
+							"yet: the first account needs the setup code from "
+							"the server's log" : "Wrong setup code");
 				// A password nobody knows: this account logs in by its ID
 				account = new_account(random_code(32), {});
 				set_account(name, account);
 				m_store->set(link, name);
 				m_store->set("starport_of/"+name, link);
-				log_i(MODULE, "New account %s for a Starport ID of %s",
-						cs(name), cs(id.starport));
+				// 10g: approved only, the new ID waits for an admin
+				if(mode == "approved" && m_setup_code.empty())
+					m_store->set("approval/"+name, "");
+				log_i(MODULE, "New account %s for a Starport ID of %s%s",
+						cs(name), cs(id.starport), mode == "approved" ?
+						" (waiting for approval)" : "");
+				send_users_to_admins();
+			}
+			ss_ pending;
+			if(m_store->get("approval/"+name, pending))
+				return reply("Your Starport ID waits for an admin of this "
+						"server to let it in");
+			// The first admin by ID, as by a local login (10g)
+			if(!m_setup_code.empty() && !code.empty()){
+				if(code != m_setup_code)
+					return fail("Wrong setup code");
+				account.privs = {"admin"};
+				set_account(name, account);
+				log_i(MODULE, "%s claimed the server with the setup code",
+						cs(name));
 			}
 		} else if(!cred.token.empty()){
 			KeptLogin kept;
@@ -960,6 +999,15 @@ struct Module: public interface::Module, public Interface
 			set_account(name, account);
 			log_i(MODULE, "New account %s", cs(name));
 		}
+		// 10g: a blocklist's ban of the ID is a ban of its account here,
+		// password and kept login too -- not of an admin's or a
+		// moderator's, which a blocklist must not lock out
+		if(id.sub.empty() && !local && !account.has("admin") &&
+				!account.has("moderator") && id_blocked(name)){
+			log_i(MODULE, "Login of %s refused: its Starport ID is on a "
+					"blocklist", cs(name));
+			return reply("Banned by a blocklist this server follows");
+		}
 		m_name_failures.erase(name);
 		update_setup_code();
 		if(cred.keep && !local && cred.token.empty()){
@@ -1001,6 +1049,13 @@ struct Module: public interface::Module, public Interface
 		}
 		info.access = m_access;
 		info.bans = bans();
+		info.starport_ids = "off";
+		starport_announce::access(m_server,
+				[&](starport_announce::Interface *s){
+			info.starport_ids = s->ids_mode();
+		});
+		for(const ss_ &key : m_store->list("approval/"))
+			info.approvals.push_back(key.substr(9));
 		send(peer, "accounts:users", pack(info));
 	}
 
@@ -1085,6 +1140,13 @@ struct Module: public interface::Module, public Interface
 			if(target)
 				kick(target, "the account was deleted by "+by);
 			m_store->remove("auth/"+r.name);
+			// Its Starport ID's link, and what waited for approval (10g)
+			ss_ link;
+			if(m_store->get("starport_of/"+r.name, link))
+				m_store->remove(link);
+			m_store->remove("starport_of/"+r.name);
+			m_store->remove("approval/"+r.name);
+			m_store->remove("ban_report/"+r.name);
 			log_i(MODULE, "%s deleted the account %s", cs(by), cs(r.name));
 			result("The account "+r.name+" was deleted");
 		} else if(r.cmd == "add"){
@@ -1108,6 +1170,32 @@ struct Module: public interface::Module, public Interface
 		} else if(r.cmd == "uninvite"){
 			m_store->remove("invite/"+upper(r.name));
 			result("The invite was deleted");
+		} else if(r.cmd == "setting" && r.name == "starport_ids"){
+			ss_ why = "This server has no Starport module";
+			starport_announce::access(m_server,
+					[&](starport_announce::Interface *s){
+				why = s->set_ids_mode(r.arg);
+			});
+			for(auto &pair : m_peers)
+				if(pair.second.name.empty())
+					send_hello(pair.first);
+			result(why);
+		} else if(r.cmd == "approve" || r.cmd == "turn_away"){
+			ss_ pending;
+			if(!m_store->get("approval/"+r.name, pending))
+				return result("No ID of "+r.name+" waits");
+			m_store->remove("approval/"+r.name);
+			if(r.cmd == "turn_away"){
+				ss_ link;
+				if(m_store->get("starport_of/"+r.name, link))
+					m_store->remove(link);
+				m_store->remove("starport_of/"+r.name);
+				m_store->remove("auth/"+r.name);
+			}
+			log_i(MODULE, "%s: %s's Starport ID %s", cs(by), cs(r.name),
+					r.cmd == "approve" ? "let in" : "turned away");
+			result(r.cmd == "approve" ? r.name+" may join" :
+					r.name+" was turned away");
 		} else if(r.cmd == "setting"){
 			if(r.name != "open_registration")
 				return result("No such setting");
@@ -1175,6 +1263,41 @@ struct Module: public interface::Module, public Interface
 			m_store->remove(key);
 			log_i(MODULE, "%s logged out", cs(kept.name));
 		}
+	}
+
+	// **Linking a Starport ID to one's own account** (10g): its logins land
+	// on this account from then on, as a player moving between Starports
+	// does. The data is the ID's token for this server.
+	void on_link_starport(const network::Packet &packet)
+	{
+		auto it = m_peers.find(packet.sender);
+		if(!m_store || it == m_peers.end() || it->second.name.empty())
+			return;
+		const ss_ name = it->second.name;
+		auto result = [&](const ss_ &text){
+			send(packet.sender, "accounts:link_result", pack(text));
+		};
+		starport_announce::IdLogin id;
+		ss_ why = "This server does not take Starport IDs";
+		starport_announce::access(m_server,
+				[&](starport_announce::Interface *s){
+			why = s->verify_id_token(packet.data, &id);
+		});
+		if(!why.empty())
+			return result(why);
+		const ss_ link = "starport/"+id.starport+"/"+id.sub;
+		ss_ linked;
+		if(m_store->get(link, linked))
+			return result(linked == name ? "Already linked" :
+					"That Starport ID is another account's here");
+		ss_ old;
+		if(m_store->get("starport_of/"+name, old))
+			m_store->remove(old);
+		m_store->set(link, name);
+		m_store->set("starport_of/"+name, link);
+		log_i(MODULE, "%s linked a Starport ID of %s", cs(name),
+				cs(id.starport));
+		result("");
 	}
 
 	// -- TOTP ([STARPORT] 10a)
@@ -1296,6 +1419,28 @@ struct Module: public interface::Module, public Interface
 		m_store->set("ban_report/"+name, reason.empty() ? ss_("other") :
 				reason);
 		return "";
+	}
+
+	bool id_blocked(const ss_ &name)
+	{
+		ss_ link;
+		if(!m_store->get("starport_of/"+name, link))
+			return false;
+		const size_t a = link.find('/'), b = link.rfind('/');
+		if(a == ss_::npos || b <= a)
+			return false;
+		bool blocked = false;
+		starport_announce::access(m_server,
+				[&](starport_announce::Interface *s){
+			blocked = s->is_blocked(link.substr(a + 1, b - a - 1),
+					link.substr(b + 1));
+		});
+		return blocked;
+	}
+
+	size_t linked_count(const ss_ &host)
+	{
+		return m_store ? m_store->list("starport/"+host+"/").size() : 0;
 	}
 
 	sv_<ss_> reported_bans()

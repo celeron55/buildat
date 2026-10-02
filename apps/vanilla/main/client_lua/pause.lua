@@ -241,7 +241,7 @@ open = function()
 			end)
 		end
 		if account.admin then
-			accounts.page_button(w, "Users...", function()
+			accounts.page_button(w, "Accounts...", function()
 				page(function() accounts.users_page(open) end, open)
 			end)
 			accounts.page_button(w, "Worlds...", worlds)

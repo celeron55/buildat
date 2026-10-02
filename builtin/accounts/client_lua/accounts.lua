@@ -54,6 +54,9 @@ local USERS = {"object",
 			{"privs", {"array", "string"}}, {"by", "string"}}}},
 	{"access", {"object", {"open_registration", "byte"}}},
 	{"bans", {"array", {"object", {"name", "string"}, {"address", "string"}}}},
+	-- [STARPORT] 10g: Starport IDs off, anyone or approved; those waiting
+	{"starport_ids", "string"},
+	{"approvals", {"array", "string"}},
 }
 
 local opts = {}
@@ -181,6 +184,8 @@ local function show_login(error_text)
 	local version, hash = buildat.version()
 	label((opts.title or "Join") .. " v." .. tostring(version) ..
 			(hash and hash ~= "" and ("-" .. hash) or ""))
+	-- Declared here for the Starport ID's button, made before them
+	local password, code, keep = nil, nil, nil
 	-- [STARPORT] 10c: a Starport ID in place of an account here; the
 	-- token comes from the client's own Starport extension, which asks
 	-- the Starport, so the password never comes here
@@ -201,7 +206,10 @@ local function show_login(error_text)
 				if not token then
 					return show_login(why ~= "cancelled" and why or nil)
 				end
-				send_login("", "", "", nil, false, "", token)
+				-- With the setup code, the first admin is an ID (10g); and
+				-- kept logged in as a local login is
+				send_login("", "", code and code:GetText() or "", nil,
+						keep and keep.on, "", token)
 			end)
 		end)
 		label("or with an account of this server:")
@@ -213,8 +221,6 @@ local function show_login(error_text)
 	local default = buildat.get_preference("default_username")
 	local name = field(buildat.storage_read("name") or
 			(default ~= "User" and default) or "", false)
-	local password = nil
-	local code = nil
 	if is_local then
 		-- The saves are on this machine: no password to ask
 		label("On this computer: no password needed")
@@ -240,7 +246,6 @@ local function show_login(error_text)
 			warn:SetColor(magic.Color(1.0, 0.8, 0.4))
 		end
 	end
-	local keep = nil
 	if not is_local then
 		keep = {on = buildat.storage_read("keep") == "1"}
 		local kb = w:CreateChild("Button")
@@ -319,7 +324,8 @@ buildat.sub_packet("accounts:hello", function(data)
 	local auto_starport = buildat.get_env(env .. "_STARPORT")
 	if auto_starport and auto_starport ~= "" and not M.auto_tried then
 		M.auto_tried = true
-		send_login("", "", "", nil, false, "", auto_starport)
+		send_login("", "", buildat.get_env(env .. "_CODE") or "", nil,
+				buildat.get_env(env .. "_KEEP") == "1", "", auto_starport)
 		return
 	end
 	local token = buildat.storage_read("token") or ""
@@ -363,6 +369,8 @@ buildat.sub_packet("accounts:login_result", function(data)
 	end
 	if r.token ~= "" then
 		buildat.storage_write("token", r.token)
+		-- A Starport ID's name comes from the server
+		buildat.storage_write("name", M.name or "")
 	end
 	M.logged_in = true
 	M.close()
@@ -402,6 +410,14 @@ buildat.sub_packet("accounts:passwd_result", function(data)
 	end
 	if M.on_passwd then
 		M.on_passwd(text)
+	end
+end)
+
+buildat.sub_packet("accounts:link_result", function(data)
+	local text = cereal.binary_input(data, TEXT).text
+	if page_kind == "passwd" then
+		passwd_page(page_back, text == "" and "The Starport ID is linked: "..
+				"it logs in as this account now" or text)
 	end
 end)
 
@@ -492,6 +508,7 @@ local function field(parent, label, secret, on_finish)
 end
 
 local YELLOW = magic.Color(1.0, 0.8, 0.4)
+local GREY = magic.Color(0.7, 0.7, 0.7)
 
 local chat_list = nil
 -- The width a line of the chat wraps to: the page's less its margins and
@@ -541,6 +558,21 @@ passwd_page = function(back, message)
 	new2 = field(w, "New again", true, change)
 	local r = row(w)
 	button(r, "Change", change)
+	-- [STARPORT] 10g: this account the one a Starport ID logs in as
+	if M.hello.starport == 1 then
+		button(r, "Link a Starport ID...", function()
+			local ok, starport = pcall(require, "buildat/extension/starport")
+			if not ok or not starport.id_token_here then
+				return passwd_page(back, "This client has no Starport extension")
+			end
+			starport.id_token_here(function(token, why)
+				if not token then
+					return passwd_page(back, why)
+				end
+				buildat.send_packet("accounts:link_starport", token)
+			end)
+		end)
+	end
 	button(r, "Back", go_back)
 	old:SetFocus(true)
 end
@@ -718,7 +750,7 @@ end
 -- simplified: every user on one page, with no scrolling; a server with
 -- more users than fit the screen needs a list that scrolls
 users_page = function(back)
-	local w = open_page("users", "Users", back)
+	local w = open_page("users", "Accounts", back)
 	-- What the last request came to, on a line that is always there so
 	-- that the buttons under it do not move when it appears; an invite's
 	-- code in a field, to copy
@@ -760,6 +792,15 @@ users_page = function(back)
 		it:SetFixedWidth(item_width)
 		list:AddItem(it)
 		return it
+	end
+	-- [STARPORT] 10g: Starport IDs waiting for an admin
+	for _, name in ipairs(u.approvals or {}) do
+		local it = item()
+		page_text(it, name .. ": a Starport ID waiting to be let in", YELLOW)
+		local r = row(it)
+		lines = lines + 2
+		button(r, "Let in", function() M.admin("approve", name) end)
+		button(r, "Turn away", function() M.admin("turn_away", name) end)
 	end
 	for _, user in ipairs(u.users) do
 		local has = {}
@@ -829,12 +870,170 @@ users_page = function(back)
 	button(r, "New invite", function() M.admin("invite") end)
 	local a = u.access
 	button(w, a.open_registration == 1 and
-			"Open registration: on (anyone can make an account)" or
-			"Open registration: off (invites only)", function()
+			"Local accounts: anyone can make one" or
+			"Local accounts: invite only", function()
 		M.admin("setting", "open_registration", "", a.open_registration ~= 1)
 	end)
-	button(w, "Back", go_back)
+	-- [STARPORT] 10g: off, anyone, approved only
+	local ids = u.starport_ids or "off"
+	local next_ids = {off = "anyone", anyone = "approved", approved = "off"}
+	button(w, ({off = "Starport IDs: off",
+		anyone = "Starport IDs: anyone may join",
+		approved = "Starport IDs: approved only"})[ids] or ids, function()
+		M.admin("setting", "starport_ids", next_ids[ids] or "off")
+	end)
+	local r2 = row(w)
+	button(r2, "Starport...", function() M.starport_page(back) end)
+	button(r2, "Back", go_back)
 end
+--
+-- **The server's Starport page** ([STARPORT] 10g): starport.json, which
+-- builtin/starport_announce writes and watches, and what each Starport last
+-- answered. The admin's only; the server checks.
+--
+-- The keys whose values are lists, empty ones too (the sandbox has no
+-- metatables to mark them by)
+local ARRAY_KEYS = {starports = true, tags = true, languages = true}
+local function encode(v, as_array)
+	local t = type(v)
+	if t == "nil" then
+		return "null"
+	elseif t == "boolean" or t == "number" then
+		return tostring(v)
+	elseif t == "string" then
+		return '"' .. v:gsub('[%c"\\]', function(c)
+			local map = {['"'] = '\\"', ['\\'] = '\\\\', ['\n'] = '\\n',
+				['\r'] = '\\r', ['\t'] = '\\t'}
+			return map[c] or string.format("\\u%04x", c:byte())
+		end) .. '"'
+	end
+	local out = {}
+	if as_array or v[1] ~= nil then
+		for _, x in ipairs(v) do
+			out[#out + 1] = encode(x)
+		end
+		return "[" .. table.concat(out, ",") .. "]"
+	end
+	if next(v) == nil then
+		return "{}"
+	end
+	for k, x in pairs(v) do
+		out[#out + 1] = encode(tostring(k)) .. ":" .. encode(x, ARRAY_KEYS[k])
+	end
+	return "{" .. table.concat(out, ",") .. "}"
+end
+assert(encode({a = {1, "x\n"}}) == '{"a":[1,"x\\n"]}')
+assert(encode({starports = {}}) == '{"starports":[]}')
+
+local starport_info = nil
+local starport_page
+buildat.sub_packet("starport:config", function(data)
+	starport_info = buildat.parse_json(data)
+	if page_kind == "starport" then
+		starport_page(page_back)
+	end
+end)
+
+local LISTING_FIELDS = {"name", "description", "kind", "audience", "access",
+	"signup_url", "region", "fleet", "pool"}
+
+starport_page = function(back, confirm_remove)
+	local w = open_page("starport", "Starport", back)
+	local info = starport_info
+	if not info then
+		page_text(w, "Waiting for the server...")
+		button(w, "Back", function() users_page(back) end)
+		return
+	end
+	local c = info.config or {}
+	if type(c.starports) ~= "table" then
+		c.starports = {}
+	end
+	local function save()
+		buildat.send_packet("starport:config_set", encode(c))
+	end
+	if info.message and info.message ~= "" then
+		page_text(w, info.message, YELLOW)
+	end
+	page_text(w, "Written to " .. tostring(info.path) .. ", which an edit "..
+			"by hand changes too", GREY)
+	local r = row(w)
+	button(r, c.enabled == false and "Starport: off" or "Starport: on",
+			function()
+		c.enabled = c.enabled == false
+		save()
+	end)
+	button(r, c.unlisted and "Unlisted: yes (IDs, not in the list)" or
+			"Unlisted: no", function()
+		c.unlisted = not c.unlisted
+		save()
+	end)
+	for i, s in ipairs(info.starports or {}) do
+		page_text(w, tostring(s.url) .. ": " .. tostring(s.status ~= "" and
+				s.status or "not announced yet"))
+		page_text(w, "listing " .. tostring(s.listing or "-") ..
+				", claim code " .. tostring(s.claim or "-") .. "; " ..
+				tostring(s.linked or 0) .. " accounts linked to its IDs" ..
+				((s.subscribed and #s.subscribed > 0) and "; follows " ..
+				table.concat(s.subscribed, ", ") or ""), GREY)
+		if confirm_remove == s.url then
+			page_text(w, "Remove it? Its listing is withdrawn at once, and "..
+					tostring(s.linked or 0) .. " accounts cannot log in by "..
+					"their IDs while it is gone (an admin can give them "..
+					"passwords).", YELLOW)
+			local rr = row(w)
+			button(rr, "Remove", function()
+				table.remove(c.starports, i)
+				save()
+			end)
+			button(rr, "Keep it", function() starport_page(back) end)
+		else
+			button(w, "Remove " .. tostring(s.url), function()
+				starport_page(back, s.url)
+			end)
+		end
+	end
+	local add = field(w, "Add a Starport", false, function() end)
+	add:SetText("https://")
+	button(w, "Add", function()
+		local url = add:GetText():gsub("/+$", "")
+		if url:match("^https?://[%w%.%-]+[:%d]*$") then
+			table.insert(c.starports, url)
+			save()
+		end
+	end)
+	-- The listing: what the server says it is ([STARPORT] 3)
+	local edits = {}
+	for _, k in ipairs(LISTING_FIELDS) do
+		edits[k] = field(w, k, false, function() end)
+		edits[k]:SetText(tostring(c[k] or ""))
+	end
+	local rest = field(w, "descriptors, tags, languages (JSON)", false,
+			function() end)
+	rest:SetText(encode({descriptors = c.descriptors or {},
+		tags = c.tags or {}, languages = c.languages or {}}))
+	local r3 = row(w)
+	button(r3, "Save the listing", function()
+		for _, k in ipairs(LISTING_FIELDS) do
+			local v = edits[k]:GetText()
+			c[k] = v ~= "" and v or nil
+		end
+		local more = buildat.parse_json(rest:GetText())
+		if type(more) == "table" then
+			c.descriptors = more.descriptors
+			c.tags = more.tags
+			c.languages = more.languages
+		end
+		save()
+	end)
+	button(r3, "Back", function() users_page(back) end)
+end
+M.starport_page = function(back)
+	starport_info = nil
+	buildat.send_packet("starport:config_get", "")
+	starport_page(back)
+end
+
 M.users_page = function(back)
 	M.admin("list")
 	users_page(back)

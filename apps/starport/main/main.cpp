@@ -493,6 +493,8 @@ struct Module: public interface::Module
 		}
 		if(r.path == "/api/announce" && r.method == "POST")
 			api_announce(r, body);
+		else if(r.path == "/api/delist" && r.method == "POST")
+			api_delist(r, body);
 		else if(r.path == "/api/list")
 			api_list(r, body);
 		else if(r.path == "/api/report" && r.method == "POST")
@@ -585,6 +587,10 @@ struct Module: public interface::Module
 				"access", "region", "app", "version", "signup_url"})
 			l.set(k, b.get(k).is_string() ? b.get(k) : json::Value(""));
 		l.set("login", jstr(b, "login", "local"));
+		// 10g: verified and taking IDs, not served in the list
+		l.set("unlisted", b.get("unlisted").is_true());
+		// Announcing again ends a withdrawal
+		l.del_key("withdrawn");
 		json::Value desc = b.get("descriptors").deepcopy();
 		for(const auto &pair : DESCRIPTORS)
 			if(desc.get(pair.first).is_undefined())
@@ -610,6 +616,7 @@ struct Module: public interface::Module
 		pool_check(l);
 		take_bans(l, b.get("bans"));
 		answer.set("blocked", blocked_for(l));
+		answer.set("subscribed", subscribed_names(l));
 		answer.set("ok", true);
 		answer.set("id", jstr(l, "id"));
 		answer.set("status", served_status(l));
@@ -703,6 +710,22 @@ struct Module: public interface::Module
 		return out;
 	}
 
+	// 10g: a server off this Starport's list at once, by its own word;
+	// kept, and back at its next announce
+	void api_delist(const network::HttpRequest &r, const json::Value &b)
+	{
+		json::Value l = load("listings", jstr(b, "id"));
+		if(!l.is_object() || !same(jstr(l, "secret"), jstr(b, "secret"))){
+			refuse(r, "no such listing, or not its secret");
+			return;
+		}
+		l.set("withdrawn", true);
+		put("listings", jstr(l, "id"), l);
+		json::Value v = json::object();
+		v.set("ok", true);
+		respond(r, 200, v);
+	}
+
 	// What it says that a listing whose audience is everyone has
 	// unmoderated chat or content: a moderator looks ([STARPORT] 3)
 	void consistency_check(const json::Value &l)
@@ -740,8 +763,13 @@ struct Module: public interface::Module
 		const ss_ f = filtered_out(l);
 		if(!f.empty())
 			return "filtered out by this instance: "+f;
+		if(l.get("withdrawn").is_true())
+			return "withdrawn by its server";
 		if(now_s() - jint(l, "last_announce") > 900)
 			return "offline";
+		if(l.get("unlisted").is_true())
+			return "unlisted by its server: it takes Starport IDs, and is "
+					"not in the list";
 		return st == "hidden" ? "hidden from filtered views" : "listed";
 	}
 
@@ -1715,7 +1743,21 @@ struct Module: public interface::Module
 			throw Exception("this ID is suspended");
 		if(!id.get("adult").is_true() && id.get("birth_year").is_undefined())
 			throw Exception("say your age on the ID's page first");
-		const json::Value l = load("listings", jstr(b, "listing"));
+		json::Value l = load("listings", jstr(b, "listing"));
+		// 10g: an unlisted server is found by the address the client is
+		// connected to, among the verified listings -- never by an id the
+		// server names, which could be another server's
+		const ss_ address = jstr(b, "address");
+		if(!l.is_object() && !address.empty()){
+			for(const ss_ &lid : store("listings")->list("")){
+				const json::Value o = load("listings", lid);
+				if(jstr(o, "verify") == "ok" && jstr(o, "status") != "banned" &&
+						jstr(o, "host")+":"+itos(jint(o, "port")) == address){
+					l = o;
+					break;
+				}
+			}
+		}
 		if(!l.is_object())
 			throw Exception("no such listing");
 		// 10b: the age band against the listing's audience
@@ -1765,6 +1807,7 @@ struct Module: public interface::Module
 		json::Value out = json::object();
 		out.set("token", payload+"."+hex(interface::sha256::hmac(
 				unhex(jstr(l, "secret")), payload)));
+		out.set("listing", jstr(l, "id"));
 		out.set("name", shown);
 		out.set("exp", jint(p, "exp"));
 		return out;
@@ -2263,6 +2306,24 @@ struct Module: public interface::Module
 		json::Value out = json::array();
 		for(const ss_ &n : names)
 			out.append(sub_of(n, scope));
+		return out;
+	}
+
+	// The names of the blocklists a listing's server follows
+	json::Value subscribed_names(const json::Value &l)
+	{
+		json::Value out = json::array();
+		for(const ss_ &id : store("blocklists")->list("")){
+			const json::Value list = load("blocklists", id);
+			const json::Value &subs = list.get("subscribers");
+			for(unsigned i = 0; subs.is_array() && i < subs.size(); i++){
+				const ss_ s = subs.at(i).as_string();
+				if(s == scope_of(l) || s == "listing:"+jstr(l, "id")){
+					out.append(jstr(list, "name"));
+					break;
+				}
+			}
+		}
 		return out;
 	}
 

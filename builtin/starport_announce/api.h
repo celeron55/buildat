@@ -20,8 +20,15 @@ namespace starport_announce
 
 	struct Interface
 	{
-		// Whether starport.json's "login" lets Starport IDs in
+		// Whether starport.json lets Starport IDs in (10g: "ids" is off,
+		// anyone or approved; Starport off is off)
 		virtual bool accepts_ids() = 0;
+		virtual ss_ ids_mode() = 0;
+		// Writes "ids" into starport.json; "" when done, else why not
+		virtual ss_ set_ids_mode(const ss_ &mode) = 0;
+		// 10g: whether a blocklist this server follows bans the identity
+		// `sub` of the Starport at `host`
+		virtual bool is_blocked(const ss_ &host, const ss_ &sub) = 0;
 		// "" when the token is good, else why not
 		virtual ss_ verify_id_token(const ss_ &token, IdLogin *out) = 0;
 	};

@@ -326,34 +326,40 @@ home = function()
 					s(st.text), YELLOW)
 			l.button("Appeal", function() appeal_page(st) end)
 		end
-		local b = row(w)
-		button(b, "Fleets", function() fleets_page(me) end)
-		button(b, "Blocklists", function() blocklists_page(me) end)
-		if me.moderator then
-			button(b, "Queue", queue_page)
-			button(b, "Listings", function() listings_page("") end)
-			button(b, "Audit log", audit_page)
-			button(b, "Appeals", appeals_page)
-		end
-		if me.admin then
-			button(b, "Settings", settings_page)
-			button(b, "Accounts", function()
+		local function account_page(open_it)
+			return function()
 				page:Remove()
 				page = nil
-				accounts.users_page(home)
-			end)
+				open_it(home)
+			end
 		end
-		button(b, "Password", function()
-			page:Remove()
-			page = nil
-			accounts.password_page(home)
-		end)
+		local buttons = {
+			{"Fleets", function() fleets_page(me) end},
+			{"Blocklists", function() blocklists_page(me) end},
+		}
+		if me.moderator then
+			table.insert(buttons, {"Queue", queue_page})
+			table.insert(buttons, {"Listings", function() listings_page("") end})
+			table.insert(buttons, {"Audit log", audit_page})
+			table.insert(buttons, {"Appeals", appeals_page})
+		end
+		if me.admin then
+			table.insert(buttons, {"Settings", settings_page})
+			table.insert(buttons, {"Accounts",
+					account_page(accounts.users_page)})
+		end
+		table.insert(buttons, {"Password", account_page(accounts.password_page)})
 		-- [STARPORT] 10a: recommended to whoever moderates
-		button(b, "Two-step login", function()
-			page:Remove()
-			page = nil
-			accounts.totp_page(home)
-		end)
+		table.insert(buttons, {"Two-step login",
+				account_page(accounts.totp_page)})
+		-- Six to a row, which fits the window
+		local b
+		for i, x in ipairs(buttons) do
+			if (i - 1) % 6 == 0 then
+				b = row(w)
+			end
+			button(b, x[1], x[2])
+		end
 	end)
 end
 

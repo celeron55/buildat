@@ -799,7 +799,7 @@ local function unhex(h)
 	return (h:gsub("%x%x", function(x) return string.char(tonumber(x, 16)) end))
 end
 
-local function keep_token(url, listing, token, exp)
+local function keep_token(url, address, token, exp)
 	local pw = id_passwords[url]
 	if not pw then
 		return
@@ -807,7 +807,7 @@ local function keep_token(url, listing, token, exp)
 	local s = load_state()
 	s.sealed = s.sealed or {}
 	s.sealed[url] = s.sealed[url] or {}
-	s.sealed[url][listing] = hex(__buildat_seal(pw, network.write_json(
+	s.sealed[url][address] = hex(__buildat_seal(pw, network.write_json(
 			{token = token, exp = exp})))
 	save_state()
 end
@@ -1241,26 +1241,34 @@ function M.safe.id_token_here(cb)
 		return cb(nil, "not connected")
 	end
 	local function with_row(row)
-		if not row then
-			return cb(nil, address .. " is not listed on your Starports")
-		end
 		local s = load_state()
 		local url, listing = nil, nil
-		for u, l in pairs(row.ids) do
+		-- Not in the list (an unlisted server, 10g): the Starports the user
+		-- has an ID on, which find the server by this address
+		local ids = row and row.ids or {}
+		if not row then
+			for _, u in ipairs(effective().starports) do
+				ids[u] = false
+			end
+		end
+		for u, l in pairs(ids) do
 			if s.ids[u] then
-				url, listing = u, l
+				url, listing = u, l or nil
 			end
 		end
 		if not url then
+			if not next(ids) then
+				return cb(nil, "No Starports in your settings")
+			end
 			-- Not logged in to any of them: the first one's login
-			for u, l in pairs(row.ids) do
-				url, listing = u, l
+			for u, l in pairs(ids) do
+				url, listing = u, l or nil
 			end
 			return M.id_login(url, function() M.safe.id_token_here(cb) end)
 		end
 		-- The Starport away: a kept token, opened by the password
 		local function offline(why)
-			local sealed = s.sealed and s.sealed[url] and s.sealed[url][listing]
+			local sealed = s.sealed and s.sealed[url] and s.sealed[url][address]
 			if not sealed then
 				return cb(nil, "The Starport cannot be reached (" .. why ..
 						"), and there is no saved login for this server")
@@ -1294,7 +1302,8 @@ function M.safe.id_token_here(cb)
 		end
 		local function ask(name)
 			id_call(url, "token", {session = s.ids[url].session,
-				listing = listing, name = name}, function(res, err, away)
+				listing = listing, address = address, name = name},
+					function(res, err, away)
 				if not res and away then
 					return offline(err)
 				end
@@ -1309,8 +1318,9 @@ function M.safe.id_token_here(cb)
 				if res.need_name then
 					local root, w = open_window("starport id name", 520)
 					add_text(w, "The name to use in " .. tostring(
-							type(row.fleet) == "table" and row.fleet.name or
-							row.name) .. ". Only this community sees it; "..
+							row and (type(row.fleet) == "table" and
+							row.fleet.name or row.name) or address) ..
+							". Only this community sees it; "..
 							"others do not see which name you use here.")
 					local e = add_edit(w, res.suggest or "")
 					local rr = add_row(w)
@@ -1324,7 +1334,7 @@ function M.safe.id_token_here(cb)
 					end))
 					return
 				end
-				keep_token(url, listing, res.token, res.exp)
+				keep_token(url, address, res.token, res.exp)
 				cb(res.token)
 			end)
 		end
