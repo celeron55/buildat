@@ -878,6 +878,10 @@ struct Module: public interface::Module, public network::Interface
 				return;
 			}
 #endif
+			// Nothing to read after all: a readiness listed for the fd's
+			// previous peer, which a new connection took over
+			if(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+				return;
 			throw Exception(ss_()+"Receive failed: "+strerror(errno));
 		}
 		if(r == 0){
