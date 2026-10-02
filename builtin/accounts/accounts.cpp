@@ -342,9 +342,12 @@ struct UserRow
 	ss_ name;
 	sv_<ss_> privs;
 	uint8_t here = 0;
+	// 10g: logs in only by its Starport ID (no password anyone knows), so
+	// not while the Starport is away
+	uint8_t id_only = 0;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(name, privs, here);
+		archive(name, privs, here, id_only);
 	}
 };
 
@@ -1039,6 +1042,9 @@ struct Module: public interface::Module, public Interface
 			if(get_account(row.name, account))
 				row.privs = account.privs;
 			row.here = find_peer(row.name) != 0;
+			ss_ x;
+			row.id_only = m_store->get("starport_of/"+row.name, x) &&
+					!m_store->get("own_password/"+row.name, x);
 			info.users.push_back(row);
 		}
 		for(const ss_ &key : m_store->list("invite/")){
@@ -1126,6 +1132,9 @@ struct Module: public interface::Module, public Interface
 				return result("A password is "+itos((int)MIN_PASSWORD)+
 						" to 100 characters");
 			set_account(r.name, new_account(r.arg, account.privs));
+			// A password someone knows: the account no longer logs in by
+			// its Starport ID only (10g)
+			m_store->set("own_password/"+r.name, "");
 			if(target && target != packet.sender)
 				kick(target, "the password was reset by "+by);
 			log_i(MODULE, "%s reset the password of %s", cs(by), cs(r.name));
@@ -1147,6 +1156,7 @@ struct Module: public interface::Module, public Interface
 			m_store->remove("starport_of/"+r.name);
 			m_store->remove("approval/"+r.name);
 			m_store->remove("ban_report/"+r.name);
+			m_store->remove("own_password/"+r.name);
 			log_i(MODULE, "%s deleted the account %s", cs(by), cs(r.name));
 			result("The account "+r.name+" was deleted");
 		} else if(r.cmd == "add"){
@@ -1246,6 +1256,7 @@ struct Module: public interface::Module, public Interface
 			return result("A password is "+itos((int)MIN_PASSWORD)+
 					" to 100 characters");
 		set_account(name, new_account(pw.second, account.privs));
+		m_store->set("own_password/"+name, "");
 		log_i(MODULE, "%s changed their password", cs(name));
 		result("");
 	}
@@ -1298,6 +1309,9 @@ struct Module: public interface::Module, public Interface
 		ss_ old;
 		if(m_store->get("starport_of/"+name, old))
 			m_store->remove(old);
+		else
+			// An account of its own being linked: its password is known
+			m_store->set("own_password/"+name, "");
 		m_store->set(link, name);
 		m_store->set("starport_of/"+name, link);
 		log_i(MODULE, "%s linked a Starport ID of %s", cs(name),

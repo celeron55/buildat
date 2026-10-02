@@ -49,7 +49,8 @@ local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
 		{"arg", "string"}, {"on", "byte"}}
 local USERS = {"object",
 	{"users", {"array", {"object", {"name", "string"},
-			{"privs", {"array", "string"}}, {"here", "byte"}}}},
+			{"privs", {"array", "string"}}, {"here", "byte"},
+			{"id_only", "byte"}}}},
 	{"invites", {"array", {"object", {"code", "string"},
 			{"privs", {"array", "string"}}, {"by", "string"}}}},
 	{"access", {"object", {"open_registration", "byte"}}},
@@ -804,6 +805,25 @@ users_page = function(back)
 		button(w, "Back", go_back)
 		return
 	end
+	-- [STARPORT] 10g: admins that all log in by a Starport ID only are
+	-- locked out while the Starport is away
+	local admins, id_only_admins = 0, 0
+	for _, user in ipairs(u.users) do
+		for _, p in ipairs(user.privs) do
+			if p == "admin" then
+				admins = admins + 1
+				if user.id_only == 1 then
+					id_only_admins = id_only_admins + 1
+				end
+			end
+		end
+	end
+	if admins > 0 and id_only_admins == admins then
+		page_text(w, "Every admin logs in only by a Starport ID: while the "..
+				"Starport cannot be reached, nobody can manage this server. "..
+				"Give an admin a local password (Password... on their row).",
+				magic.Color(1.0, 0.4, 0.4))
+	end
 	-- **The accounts, invites and bans in a list that scrolls** (user,
 	-- 2026-09-30): a server's users are more than a phone's screen. Its
 	-- height is what is in it, up to under half the screen.
@@ -835,7 +855,8 @@ users_page = function(back)
 		-- The name over its buttons: five of them are a narrow window's
 		-- width at the web client's scale
 		local it = item()
-		page_text(it, user.name .. (user.here == 1 and " (here)" or ""))
+		page_text(it, user.name .. (user.here == 1 and " (here)" or "") ..
+				(user.id_only == 1 and " (Starport ID only)" or ""))
 		local r = row(it)
 		lines = lines + 2
 		button(r, has.admin and "Admin: yes" or "Admin: no", function()
