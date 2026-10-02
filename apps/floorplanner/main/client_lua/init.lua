@@ -682,6 +682,8 @@ local function page_window(width)
 	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
 	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
+	-- By the keyboard ([MENU_KEYS])
+	require("buildat/extension/ui_utils").keyboard_page(w)
 	return w
 end
 

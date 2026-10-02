@@ -23,6 +23,7 @@
 local log = buildat.Logger("accounts")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
+local ui_utils = require("buildat/extension/ui_utils")
 
 local M = {
 	hello = {},
@@ -106,6 +107,8 @@ local function page_window(width)
 	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
 	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
+	-- By the keyboard, every page of it ([MENU_KEYS])
+	ui_utils.keyboard_page(w)
 	return w
 end
 M.page_window = page_window

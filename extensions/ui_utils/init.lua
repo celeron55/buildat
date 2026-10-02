@@ -20,10 +20,201 @@ local M = {safe = {}}
 -- show_*_window() (?)
 -- vertical_menu() / bind_button_menu()
 
+-- **Every page by the keyboard** ([MENU_KEYS], user 2026-10-02). The
+-- arrows, Tab and Shift+Tab go through a page's buttons and fields, Enter
+-- or Space presses the button with the focus (both Tab and the press are
+-- Urho3D's own once a button takes the focus), and every button has a
+-- letter, drawn in brackets in its label -- "[C]hange password..." --
+-- that focuses it; pressed again, the next with the same letter. A label
+-- may name its own with "&" ("Log &out"). Not on a touchscreen
+-- (BUILDAT_TOUCH): no keys there, and the brackets would be noise.
+local TOUCH = buildat.get_env("BUILDAT_TOUCH") == "1"
+
+-- Whether an element is still there, and whether it is shown: a removed
+-- one raises ([UI_UAF]'s guard), which is the answer to the first
+local function gone(e)
+	return not pcall(function() return e.visible end)
+end
+
+-- **A page's window is known by a name of its own**: a window removed and
+-- another made in the same frame can sit at the same address, and the old
+-- wrapper then reads the new one (the guard's own simplified: note) -- the
+-- plan picker's page went on to letter the editor's toolbar. A window with
+-- a name keeps it and is known by that.
+local page_serial = 0
+local function page_name(win)
+	local ok, name = pcall(function() return win:GetName() end)
+	if not ok then
+		return nil
+	end
+	if name == "" then
+		page_serial = page_serial + 1
+		name = "keyboard_page_" .. page_serial
+		win:SetName(name)
+	end
+	return name
+end
+local function shown(e)
+	local ok, v = pcall(function() return e.visible end)
+	return ok and v == true
+end
+
+-- The page's buttons and fields, in the order they are drawn
+local function page_items(e, out)
+	if not e.visible then
+		return out
+	end
+	local t = e:GetTypeName()
+	if (t == "Button" and e.enabled) or t == "LineEdit" then
+		out[#out + 1] = e
+		if t == "Button" then
+			-- A dropdown's or a checkbox's insides are the button's
+			return out
+		end
+	end
+	for i = 0, e:GetNumChildren() - 1 do
+		page_items(e:GetChild(i), out)
+	end
+	return out
+end
+
+local function button_text(b)
+	for i = 0, b:GetNumChildren() - 1 do
+		local c = b:GetChild(i)
+		if c:GetTypeName() == "Text" then
+			return c
+		end
+		local d = button_text(c)
+		if d then
+			return d
+		end
+	end
+	return nil
+end
+
+-- The label with its letter in brackets, and the letter; the first letter
+-- of the label not taken on the page, then the next. What is already in
+-- brackets -- a checkbox's "[x]" -- is not a candidate.
+local function mark_letter(label, taken)
+	local amp = label:find("&%a")
+	if amp then
+		local ch = label:sub(amp + 1, amp + 1)
+		return label:sub(1, amp - 1) .. "[" .. ch .. "]" ..
+				label:sub(amp + 2), ch:lower()
+	end
+	local depth = 0
+	for i = 1, #label do
+		local c = label:sub(i, i)
+		if c == "[" then
+			depth = depth + 1
+		elseif c == "]" then
+			depth = math.max(0, depth - 1)
+		elseif depth == 0 and c:match("%a") and not taken[c:lower()] then
+			return label:sub(1, i - 1) .. "[" .. c .. "]" .. label:sub(i + 1),
+					c:lower()
+		end
+	end
+	return label, nil
+end
+
+-- A label without its letter's brackets: "[C]hange" and "Log [o]ut", but
+-- not a checkbox's "[x] Damage", whose brackets stand apart from words
+local function unmark(text)
+	return (text:gsub("()%[(%a)%]()", function(s, c, e)
+		local before = s > 1 and text:sub(s - 1, s - 1) or ""
+		local after = text:sub(e, e)
+		if before:match("%w") or after:match("%w") then
+			return c
+		end
+		return nil
+	end))
+end
+M.safe.unmark = unmark
+
+-- The label with `ch` bracketed where it first stands outside brackets, or
+-- nil where the label no longer has it
+local function remark(label, ch)
+	local depth = 0
+	for i = 1, #label do
+		local c = label:sub(i, i)
+		if c == "[" then
+			depth = depth + 1
+		elseif c == "]" then
+			depth = math.max(0, depth - 1)
+		elseif depth == 0 and c:lower() == ch then
+			return label:sub(1, i - 1) .. "[" .. c .. "]" .. label:sub(i + 1)
+		end
+	end
+	return nil
+end
+
+-- **A page's letters, kept as its labels change**: a menu that writes a
+-- label after making the button, or again on every press ("Mute: on"),
+-- would otherwise lose its brackets. refresh() runs a frame at a time; a
+-- button keeps its letter, and one with no label yet gets one when it has.
+-- The button is held and its Text found again each time: a Text held
+-- across frames is freed under its wrapper when a page replaces its
+-- contents in place, and reading it was a crash (2026-10-02).
+local function letterer()
+	local L = {taken = {}, by_letter = {}, entries = {}}
+	-- A button named "no_letter" gets none: a key binding's button reads
+	-- "W" or "F1", and a bracket in it would be a lie
+	function L:add(button, key)
+		if TOUCH or button:GetName() == "no_letter" then
+			return
+		end
+		self.entries[#self.entries + 1] = {b = button, key = key}
+		self:refresh()
+	end
+	function L:refresh()
+		for _, e in ipairs(self.entries) do
+			local ok, t = pcall(button_text, e.b)
+			local text = ok and t and t.text
+			if text and text ~= e.marked then
+				local new = nil
+				if e.ch then
+					new = remark(text, e.ch)
+				else
+					local ch
+					new, ch = mark_letter(unmark(text), self.taken)
+					if ch then
+						e.ch = ch
+						self.taken[ch] = true
+						self.by_letter[ch] = self.by_letter[ch] or {}
+						table.insert(self.by_letter[ch], e.key)
+					else
+						new = nil
+					end
+				end
+				if new and new ~= text then
+					t.text = new
+				end
+				e.marked = new or text
+			end
+		end
+	end
+	-- The keys with `ch`, or nil
+	function L:with(ch)
+		return self.by_letter[ch]
+	end
+	-- "bcm": the letters given, for the log a check reads
+	function L:summary()
+		local out = {}
+		for _, e in ipairs(self.entries) do
+			out[#out + 1] = e.ch or "-"
+		end
+		return table.concat(out)
+	end
+	return L
+end
+
 -- One selected index for mouse hover and arrow keys. Button.selected uses
 -- pressedOffset; native hover would still highlight the mouse-over item if
 -- arrows move elsewhere, so copy hoverOffset onto pressedOffset and clear it.
-local function button_menu_nav(root)
+-- options.letters = false: no letters, for a menu whose letters are its
+-- own (the launch grid's type-to-filter)
+local function button_menu_nav(root, options)
+	local use_letters = not (options and options.letters == false)
 	local items = {}
 	local selected = 1
 	-- When this menu came up: the Enter that finished a filter field on the
@@ -33,6 +224,8 @@ local function button_menu_nav(root)
 	local born_us = buildat.get_time_us()
 	local on_other_key = nil
 	local on_change = nil
+	-- [MENU_KEYS]: a letter selects its item, as keyboard_page's focuses
+	local letters = letterer()
 
 	local function apply()
 		for i, item in ipairs(items) do
@@ -65,6 +258,9 @@ local function button_menu_nav(root)
 		end
 		local i = #items + 1
 		items[i] = {button = button, action = action}
+		if use_letters then
+			letters:add(button, i)
+		end
 		local hover = button.hoverOffset
 		button.pressedOffset = magic.IntVector2(hover.x, hover.y)
 		button.hoverOffset = magic.IntVector2(0, 0)
@@ -92,7 +288,8 @@ local function button_menu_nav(root)
 		for _, item in ipairs(items) do
 			local text = item.button:GetChild("ButtonText")
 			local label = text and text.text or ""
-			label = label:lower()
+			-- Without its letter's brackets ([MENU_KEYS])
+			label = unmark(label):lower()
 			if label:sub(1, 1) == "<" or label == "back" or label == "cancel" or
 					label == "ok" or label == "close" then
 				return item
@@ -170,6 +367,20 @@ local function button_menu_nav(root)
 					buildat.get_time_us() - born_us > 200000 then
 				items[selected].action()
 			end
+		else
+			local q = event_data:GetInt("Qualifiers")
+			local ch = key >= 0 and key < 256 and string.char(key):lower()
+			local list = ch and letters:with(ch)
+			if list and math.floor(q / magic.QUAL_CTRL) % 2 == 0 and
+					math.floor(q / magic.QUAL_ALT) % 2 == 0 then
+				local next_i = list[1]
+				for n, i in ipairs(list) do
+					if i == selected then
+						next_i = list[n % #list + 1]
+					end
+				end
+				select_i(next_i)
+			end
 		end
 	end)
 
@@ -185,15 +396,196 @@ local function button_menu_nav(root)
 		select_i(math.max(1, math.min(#items, i)))
 	end)
 
+	-- **A button the menu does not know of** is one the keyboard cannot
+	-- reach: said once, the first frame the menu is up ([MENU_KEYS])
+	local checked = false
+	root:SubscribeToStackEvent("Update", function()
+		if use_letters then
+			letters:refresh()
+		end
+		if checked then
+			return
+		end
+		checked = true
+		-- simplified: a wrapper is not the same table twice, so a button
+		-- is known by its label and where it is
+		local function id(b)
+			local t = button_text(b)
+			local p = b.screenPosition
+			return (t and unmark(t.text) or "") .. "@" .. p.x .. "," .. p.y
+		end
+		local known = {}
+		for _, item in ipairs(items) do
+			known[id(item.button)] = true
+		end
+		for _, e in ipairs(page_items(root, {})) do
+			if e:GetTypeName() == "Button" and not known[id(e)] then
+				local t = button_text(e)
+				log:warning("menu: a button outside its menu's keys: " ..
+						(t and dump(unmark(t.text)) or "(no label)"))
+			end
+		end
+		log:verbose("menu: " .. #items .. " items, letters " ..
+				letters:summary())
+	end)
+
 	return nav
+end
+
+-- The pages that took the keys, newest last: only the newest one still
+-- shown answers, so a page over another does not share its keys
+local keyboard_pages = {}
+
+-- The page's own window still there: not removed, and not another one at
+-- its address
+local function page_gone(page)
+	if gone(page.win) then
+		return true
+	end
+	local ok, name = pcall(function() return page.win:GetName() end)
+	return not ok or name ~= page.name
+end
+
+local function newest_page()
+	for i = #keyboard_pages, 1, -1 do
+		if not page_gone(keyboard_pages[i]) and shown(keyboard_pages[i].win) then
+			return keyboard_pages[i]
+		end
+	end
+	return nil
+end
+
+-- The page's items and letters read again from its window: nothing of it
+-- is held from one frame to the next but the window
+local function rewalk(page)
+	page.items = page_items(page.win, {})
+	page.letters = letterer()
+	for _, e in ipairs(page.items) do
+		if e:GetTypeName() == "Button" then
+			e:SetFocusMode(magic.FM_FOCUSABLE)
+			page.letters:add(e, e)
+		end
+	end
+end
+
+local function arrange(page)
+	rewalk(page)
+	local first, inside = nil, false
+	for _, e in ipairs(page.items) do
+		if e:HasFocus() then
+			inside = true
+		end
+		if e:GetTypeName() == "Button" then
+			first = first or e
+		end
+	end
+	-- The first button has the focus to start with, unless the page gave
+	-- it to one of its own (a password page's first field)
+	if first and not inside then
+		first:SetFocus(true)
+	end
+end
+
+-- keyboard_page(win): win, a window or a page, by the keyboard. Its
+-- buttons and fields are read a frame later, so a page built after the
+-- call that made its window gets them all.
+function M.safe.keyboard_page(win)
+	local page = {win = win, items = {}, letters = letterer(),
+			name = page_name(win)}
+	keyboard_pages[#keyboard_pages + 1] = page
+	local update_sub, key_sub, click_sub
+	local arranged, dirty = false, false
+	-- A key or a click may have changed the page: read again the frame
+	-- after, which is when its labels are what the press made them
+	click_sub = magic.SubscribeToEvent("MouseButtonUp", function()
+		dirty = true
+	end)
+	update_sub = magic.SubscribeToEvent("Update", function()
+		if page_gone(page) then
+			magic.UnsubscribeFromEvent("Update", update_sub)
+			magic.UnsubscribeFromEvent("MouseButtonUp", click_sub)
+			return
+		end
+		if not arranged and shown(win) then
+			arranged = true
+			arrange(page)
+			log:verbose("keyboard_page: " .. #page.items ..
+					" buttons and fields, letters " .. page.letters:summary())
+		elseif dirty and shown(win) then
+			dirty = false
+			rewalk(page)
+		end
+	end)
+	key_sub = magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
+		if page_gone(page) or not shown(win) then
+			-- Removed, not hidden for a moment
+			if page_gone(page) then
+				magic.UnsubscribeFromEvent("KeyDown", key_sub)
+				for i, p in ipairs(keyboard_pages) do
+					if p == page then
+						table.remove(keyboard_pages, i)
+						break
+					end
+				end
+			end
+			return
+		end
+		if newest_page() ~= page or not arranged then
+			return
+		end
+		dirty = true
+		rewalk(page)
+		if #page.items == 0 then
+			return
+		end
+		local key = event_data:GetInt("Key")
+		local focus = magic.ui.focusElement
+		local typing = focus ~= nil and focus:GetTypeName() == "LineEdit"
+		if key == KEY_UP or key == KEY_DOWN or
+				(not typing and (key == KEY_LEFT or key == KEY_RIGHT)) then
+			local at = 0
+			for i, e in ipairs(page.items) do
+				if shown(e) and e:HasFocus() then
+					at = i
+				end
+			end
+			local d = (key == KEY_DOWN or key == KEY_RIGHT) and 1 or -1
+			local n = #page.items
+			local i = at == 0 and 1 or (at - 1 + d) % n + 1
+			page.items[i]:SetFocus(true)
+			return
+		end
+		-- A letter, with no Ctrl or Alt, outside a text field
+		local q = event_data:GetInt("Qualifiers")
+		if typing or math.floor(q / magic.QUAL_CTRL) % 2 == 1 or
+				math.floor(q / magic.QUAL_ALT) % 2 == 1 then
+			return
+		end
+		local ch = key >= 0 and key < 256 and string.char(key):lower() or nil
+		local list = ch and page.letters:with(ch)
+		if not list then
+			return
+		end
+		local next_i = 1
+		for i, e in ipairs(list) do
+			if e:HasFocus() then
+				next_i = i % #list + 1
+			end
+		end
+		list[next_i]:SetFocus(true)
+		local t = button_text(list[next_i])
+		log:verbose("keyboard: " .. ch .. " to " .. (t and unmark(t.text) or "?"))
+	end)
+	return win
 end
 
 -- Bind up/down/enter and hover selection to existing buttons on a uistack
 -- root. Each item is {button, action} or {button=..., action=...}.
 -- Subscribes Released on the buttons; don't also subscribe Released.
--- Returns a handle with :add(button, action) and :on_key(fn).
-function M.safe.bind_button_menu(root, items, on_other_key)
-	local nav = button_menu_nav(root)
+-- Returns a handle with :add(button, action) and :on_key(fn). options as
+-- button_menu_nav's.
+function M.safe.bind_button_menu(root, items, on_other_key, options)
+	local nav = button_menu_nav(root, options)
 	if items then
 		for _, item in ipairs(items) do
 			nav:add(item.button or item[1], item.action or item[2])
@@ -243,7 +635,7 @@ function M.safe.vertical_menu(root, options)
 			options.padding or magic.IntRect(10, 10, 10, 10))
 	window:SetAlignment(HA_LEFT, VA_CENTER)
 
-	local nav = button_menu_nav(root)
+	local nav = button_menu_nav(root, options)
 	if options.on_key then
 		nav:on_key(options.on_key)
 	end
@@ -653,7 +1045,7 @@ function M.safe.scan_ui(label, element, depth, out)
 					return child.GetText and child:GetText() or child.text
 				end)
 				if okt and text then
-					line = line .. " text " .. dump(text)
+					line = line .. " text " .. dump(unmark(text))
 				end
 			end
 			if kind == "BorderImage" or kind == "Sprite" or

@@ -394,7 +394,8 @@ function M.boot(launch_action, query)
 			end
 			return true
 		end
-	end)
+	-- Its letters are the search's, not a button's
+	end, {letters = false})
 	nav:set_columns(columns)
 	nav:on_change(function(button, selected, index)
 		local c = selected and 1 or DIM

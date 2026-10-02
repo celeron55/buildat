@@ -94,6 +94,8 @@ function M.draw(o)
 	end
 	for i, b in ipairs(BINDINGS) do
 		local button = make_button(col[(i - 1) % 2 + 1], label_of(b))
+		-- Its label starts with a key's name ([MENU_KEYS])
+		button:SetName("no_letter")
 		rows[#rows + 1] = {b = b, button = button}
 		items[#items + 1] = {button, function()
 			if bindable(b) then
