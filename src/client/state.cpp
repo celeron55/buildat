@@ -111,6 +111,8 @@ struct CState: public State
 	// A server behind a proxy with TLS: the stream is in a WebSocket over
 	// TLS on m_socket (client/wss.h)
 	std::unique_ptr<client::Wss> m_wss;
+	// m_wss is a pipe, not TLS over m_socket
+	bool m_pipe = false;
 	std::deque<char> m_socket_buffer;
 	interface::PacketStream m_packet_stream;
 	sp_<app::App> m_app;
@@ -234,6 +236,7 @@ struct CState: public State
 		m_connect_result.store(0);
 		m_connect_error = "";
 		m_wss.reset();
+		m_pipe = false;
 		m_socket = sp_<interface::TCPSocket>(interface::createTCPSocket());
 		m_socket_buffer.clear();
 		m_parsed.clear();
@@ -321,7 +324,7 @@ struct CState: public State
 			return false;
 		}
 
-		bool ok = m_socket->connect_fd(address, port);
+		bool ok = m_pipe || m_socket->connect_fd(address, port);
 		if(ok && m_wss){
 			const ss_ why = m_wss->start(address, port,
 					g_client_config.get<ss_>("share_path")+
@@ -376,6 +379,15 @@ struct CState: public State
 		}
 		ss_ host;
 		ss_ port;
+#ifdef _WIN32
+		// "pipe:<path>": a local server boxed in an AppContainer
+		// ([PROCESS_SANDBOX] B 2), which loopback does not reach
+		if(address.compare(0, 5, "pipe:") == 0){
+			m_pipe = true;
+			m_wss.reset(client::create_pipe_stream());
+			return connect_host_port(address.substr(5), "", error);
+		}
+#endif
 		// "https://host": a server behind a proxy with TLS. The web
 		// client's socket is a secure WebSocket on an https page already.
 		if(client::parse_secure_address(address, &host, &port)){

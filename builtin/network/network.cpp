@@ -33,10 +33,121 @@
 #include <errno.h>
 #include <sys/stat.h>
 #define MODULE "network"
+#ifdef _WIN32
+	#include <thread>
+	#include <mutex>
+	#include <atomic>
+#endif
 
 using interface::Event;
 
 namespace network {
+
+#ifdef _WIN32
+// **The local client by a pipe** ([PROCESS_SANDBOX] B 2): a server boxed in
+// an AppContainer cannot be reached over loopback by the client that
+// started it, and a pipe it makes as \\.\pipe\LOCAL\buildat-<port> lands in
+// its container's namespace, where the client opens it by the full path.
+// The pipe carries the same byte stream a TCP peer does. A peer of it has
+// this for its socket: no fd a select can wait on (fd() is a negative id
+// of its own, which get_sockets() leaves out), so the network thread
+// polls it, every few milliseconds while there is one.
+// simplified: polled in the pipe's non-blocking mode rather than
+// overlapped I/O; it is one local client.
+struct PipeSocket: public interface::TCPSocket
+{
+	HANDLE m_pipe;
+	int m_id;
+	PipeSocket(HANDLE pipe, int id): m_pipe(pipe), m_id(id){}
+	~PipeSocket(){ close_fd(); }
+	int fd() const { return m_id; }
+	bool good() const { return m_pipe != INVALID_HANDLE_VALUE; }
+	void release_fd(){ m_pipe = INVALID_HANDLE_VALUE; }
+	void close_fd()
+	{
+		if(m_pipe == INVALID_HANDLE_VALUE)
+			return;
+		DisconnectNamedPipe(m_pipe);
+		CloseHandle(m_pipe);
+		m_pipe = INVALID_HANDLE_VALUE;
+	}
+	bool listen_fd(){ return false; }
+	bool connect_fd(const ss_&, const ss_&){ return false; }
+	bool bind_fd(const ss_&, const ss_&){ return false; }
+	bool accept_fd(const TCPSocket&){ return false; }
+	bool set_nonblocking(bool){ return true; }
+	bool wait_data(int){ return false; }
+	ss_ get_local_address() const { return "pipe"; }
+	// The client that started this server, on this machine
+	ss_ get_remote_address() const { return "127.0.0.1"; }
+	bool send_fd(const ss_ &data)
+	{
+		size_t at = 0;
+		while(at < data.size()){
+			size_t sent = 0;
+			if(!send_some(data, at, &sent))
+				return false;
+			at += sent;
+			if(sent == 0)
+				Sleep(1);
+		}
+		return true;
+	}
+	bool send_some(const ss_ &data, size_t offset, size_t *sent)
+	{
+		*sent = 0;
+		if(m_pipe == INVALID_HANDLE_VALUE)
+			return false;
+		if(offset >= data.size())
+			return true;
+		DWORD n = 0;
+		if(!WriteFile(m_pipe, &data[offset], (DWORD)(data.size() - offset),
+				&n, nullptr))
+			return false;
+		*sent = n;
+		return true;
+	}
+	// > 0 bytes, 0 the client went, -1 nothing now
+	int read_some(char *buf, int size)
+	{
+		DWORD n = 0;
+		if(ReadFile(m_pipe, buf, (DWORD)size, &n, nullptr))
+			return n > 0 ? (int)n : -1;
+		const DWORD e = GetLastError();
+		return e == ERROR_NO_DATA ? -1 : 0;
+	}
+};
+
+// The pipes a client has connected, waiting for the network module to take
+// them. The listening thread is the process's, not the module's: a module
+// reloaded under it would leave it pointing at freed code.
+static std::mutex g_pipe_mutex;
+static sv_<HANDLE> g_pipe_new;
+static std::atomic<bool> g_pipe_started(false);
+
+static void pipe_listen(const ss_ &name)
+{
+	for(;;){
+		HANDLE p = CreateNamedPipeA(name.c_str(), PIPE_ACCESS_DUPLEX,
+				PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+				PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, nullptr);
+		if(p == INVALID_HANDLE_VALUE){
+			log_w(MODULE, "The pipe %s could not be made (%i)", cs(name),
+					(int)GetLastError());
+			return;
+		}
+		if(!ConnectNamedPipe(p, nullptr) &&
+				GetLastError() != ERROR_PIPE_CONNECTED){
+			CloseHandle(p);
+			continue;
+		}
+		DWORD mode = PIPE_READMODE_BYTE | PIPE_NOWAIT;
+		SetNamedPipeHandleState(p, &mode, nullptr, nullptr);
+		std::lock_guard<std::mutex> lock(g_pipe_mutex);
+		g_pipe_new.push_back(p);
+	}
+}
+#endif
 
 struct Module;
 
@@ -388,6 +499,26 @@ struct Module: public interface::Module, public network::Interface
 		} else {
 			log_i(MODULE, "Listening at %s:%s, fd=%i", cs(address), cs(port),
 					m_listening_socket->fd());
+#ifdef _WIN32
+			// Boxed, the client that started this server comes by a pipe;
+			// BUILDAT_PIPE=1 makes one unboxed too, outside a container's
+			// namespace, which is how Wine drives it
+			const bool boxed = m_server->get_config().get<bool>("boxed");
+			const char *env = getenv("BUILDAT_PIPE");
+			if((boxed || (env && ss_(env) == "1")) && !g_pipe_started.exchange(true)){
+				const ss_ name = ss_("\\\\.\\pipe\\") +
+						(boxed ? "LOCAL\\" : "")+"buildat-"+port;
+				std::thread(pipe_listen, name).detach();
+				log_i(MODULE, "Listening at %s too", cs(name));
+				// The firewall's question ([PROCESS_SANDBOX] B 3)
+				if(boxed)
+					log_i(MODULE, "Windows asks the first time whether to let "
+							"others reach this server; its default lets in "
+							"the network the machine is on (public or "
+							"private), and the other kind needs its box "
+							"ticked too");
+			}
+#endif
 			log_i(MODULE, "STATUS Listening");
 		}
 	}
@@ -869,7 +1000,7 @@ struct Module: public interface::Module, public network::Interface
 		int fd = peer.socket->fd();
 		if(fd != event_fd)
 			throw Exception("on_incoming_data: fds don't match");
-		char buf[100000];
+		static char buf[100000];
 		ssize_t r = recv(fd, buf, 100000, 0);
 		if(r == -1){
 #ifdef ECONNRESET // No idea why this isn't defined on MinGW
@@ -884,6 +1015,12 @@ struct Module: public interface::Module, public network::Interface
 				return;
 			throw Exception(ss_()+"Receive failed: "+strerror(errno));
 		}
+		take_input(peer, buf, r);
+	}
+
+	// What came from a peer, by whichever transport: 0 bytes is its going
+	void take_input(Peer &peer, const char *buf, ssize_t r)
+	{
 		if(r == 0){
 			if(peer.game())
 				log_i(MODULE, "Client %zu from %s disconnected",
@@ -1121,9 +1258,58 @@ struct Module: public interface::Module, public network::Interface
 		result.push_back(m_listening_socket->fd());
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
-			result.push_back(peer.socket->fd());
+			// A pipe's peer has no fd to wait on; poll_pipes() reads it
+			if(peer.socket->fd() >= 0)
+				result.push_back(peer.socket->fd());
 		}
 		return result;
+	}
+
+	// The pipes' peers ([PROCESS_SANDBOX] B 2): new ones taken, and what
+	// each has sent read. Whether any are there or coming, so the network
+	// thread knows to come round often.
+	bool poll_pipes()
+	{
+#ifdef _WIN32
+		sv_<HANDLE> fresh;
+		{
+			std::lock_guard<std::mutex> lock(g_pipe_mutex);
+			fresh.swap(g_pipe_new);
+		}
+		for(HANDLE h : fresh){
+			Peer::Id peer_id = m_next_peer_id++;
+			sp_<interface::TCPSocket> socket(
+					new PipeSocket(h, -1000 - (int)peer_id));
+			m_peers[peer_id] = Peer(peer_id, socket);
+			m_peers_by_socket[socket->fd()] = &m_peers[peer_id];
+			Peer &peer = m_peers[peer_id];
+			peer.kind = Peer::Kind::Sniff;
+			peer.accepted_us = interface::os::time_us();
+			log_v(MODULE, "Peer %zu by the pipe", peer_id);
+		}
+		sv_<Peer::Id> pipes;
+		for(auto &pair : m_peers)
+			if(pair.second.socket->fd() < 0)
+				pipes.push_back(pair.first);
+		static char buf[100000];
+		for(Peer::Id id : pipes){
+			for(int i = 0; i < 16; i++){
+				auto it = m_peers.find(id);
+				if(it == m_peers.end())
+					break;
+				PipeSocket *ps = (PipeSocket*)it->second.socket.get();
+				const int r = ps->read_some(buf, sizeof buf);
+				if(r < 0)
+					break;
+				take_input(it->second, buf, r);
+				if(r == 0)
+					break;
+			}
+		}
+		return !pipes.empty() || g_pipe_started;
+#else
+		return false;
+#endif
 	}
 
 	void handle_active_socket(int fd)
@@ -1244,6 +1430,9 @@ void NetworkThread::run(interface::Thread *thread)
 		network::access(m_module->m_server, [&](network::Interface *inetwork){
 			m_module->keepalive();
 			pending = m_module->any_peer_pending();
+			// A pipe's peer is read here, not by the select
+			if(m_module->poll_pipes())
+				pending = true;
 		});
 
 		sv_<int> active_sockets;

@@ -10,6 +10,7 @@
 #include "core/json.h"
 #include "client/config.h"
 #include "client/state.h"
+#include "client/wss.h"
 #include "client/command_seq.h"
 #include "lua_bindings/init.h"
 #include "lua_bindings/util.h"
@@ -781,6 +782,31 @@ static size_t g_local_server_log_offset = 0;
 static bool g_local_server_listening = false;
 static int64_t g_local_server_started_s = 0;
 static ss_ g_local_server_status;
+
+// [PROCESS_SANDBOX] B 2: on Windows the local server is boxed and loopback
+// does not reach it, so it is joined, and asked whether it is up, by its
+// pipe. "" where loopback is the way (client/wss.h).
+static ss_ local_pipe()
+{
+	if(g_local_server_app.empty() || g_local_server_port.empty())
+		return "";
+	return client::local_server_pipe(g_local_server_app, g_local_server_port);
+}
+static ss_ to_local_pipe(const ss_ &address)
+{
+	const ss_ pipe = local_pipe();
+	if(!pipe.empty() && (address == "localhost:"+g_local_server_port ||
+			address == "127.0.0.1:"+g_local_server_port))
+		return "pipe:"+pipe;
+	return address;
+}
+static bool local_server_answers()
+{
+	const ss_ pipe = local_pipe();
+	if(!pipe.empty())
+		return client::pipe_ready(pipe);
+	return interface::probe_connect("127.0.0.1", g_local_server_port);
+}
 
 // simplified: A free port is picked by probing; a race with another process
 // grabbing it in between is possible but harmless for a local game (the server
@@ -2989,7 +3015,7 @@ struct CApp: public App, public magic::Application
 
 		self->remember_menu_ui();
 		ss_ error;
-		bool ok = self->m_state->connect(address, &error);
+		bool ok = self->m_state->connect(to_local_pipe(address), &error);
 		lua_pushboolean(L, ok);
 		if(ok)
 			lua_pushnil(L);
@@ -3009,7 +3035,7 @@ struct CApp: public App, public magic::Application
 
 		ss_ address = lua_bindings::lua_tocppstring(L, 1);
 		self->remember_menu_ui();
-		self->m_state->connect_start(address);
+		self->m_state->connect_start(to_local_pipe(address));
 		return 0;
 	}
 
@@ -3825,8 +3851,7 @@ struct CApp: public App, public magic::Application
 			return 1;
 		}
 		if(g_local_server_log.empty()){
-			lua_pushboolean(L, interface::probe_connect("127.0.0.1",
-					g_local_server_port));
+			lua_pushboolean(L, local_server_answers());
 			return 1;
 		}
 		tail_local_server_log();
@@ -3836,8 +3861,7 @@ struct CApp: public App, public magic::Application
 		// loading and sat in the connect for good) is not a server. The
 		// non-blocking probe is a peer to the server for a moment, which
 		// is the price of not trusting a file.
-		lua_pushboolean(L, g_local_server_listening &&
-				interface::probe_connect("127.0.0.1", g_local_server_port));
+		lua_pushboolean(L, g_local_server_listening && local_server_answers());
 		return 1;
 	}
 
@@ -3922,7 +3946,8 @@ struct CApp: public App, public magic::Application
 		bool local = !g_local_server_app.empty() &&
 				interface::process::is_running(g_local_server) &&
 				(address == "localhost:"+g_local_server_port ||
-				address == "127.0.0.1:"+g_local_server_port);
+				address == "127.0.0.1:"+g_local_server_port ||
+				(!local_pipe().empty() && address == "pipe:"+local_pipe()));
 		ss_ dir;
 		if(local){
 			dir = user+"/apps/"+g_local_server_app+"/client";

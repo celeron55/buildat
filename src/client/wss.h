@@ -32,6 +32,17 @@ namespace client
 	};
 
 	Wss* create_wss(interface::TCPSocket *socket);
+#ifdef _WIN32
+	// A named pipe's stream ([PROCESS_SANDBOX] B 2): start() takes the
+	// pipe's full path as its host
+	Wss* create_pipe_stream();
+#endif
+	// The pipe of the local server this client started, boxed on Windows
+	// in the AppContainer buildat.<app>: its full path, or "" where it is
+	// joined over loopback (another platform, an unboxed server)
+	ss_ local_server_pipe(const ss_ &app, const ss_ &port);
+	// Whether the server is listening on it
+	bool pipe_ready(const ss_ &path);
 
 	// "https://host[:port][/]" or "wss://...": the host and the port (443
 	// unless said); false for any other address

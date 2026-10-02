@@ -458,6 +458,7 @@ if(BUILD_CLIENT)
 		src/client/main.cpp
 		src/client/state.cpp
 		src/client/wss.cpp
+		src/client/pipe_stream.cpp
 		src/client/app.cpp
 		src/client/config.cpp
 		src/client/command_seq.cpp
@@ -486,6 +487,8 @@ if(BUILD_CLIENT)
 	# (boot/basic_init.h) so -c runs and --help still print there.
 	if(WIN32)
 		set_target_properties(${CLIENT_EXE_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
+		# The boxed local server's pipe ([PROCESS_SANDBOX]): its container's SID
+		target_link_libraries(${CLIENT_EXE_NAME} userenv)
 	endif()
 
 	target_link_libraries(${CLIENT_EXE_NAME}

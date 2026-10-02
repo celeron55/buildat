@@ -187,8 +187,14 @@ smoke_test_wine() {
 	# Wine gives its own from the registry, so this proves less than a
 	# desktop does, and the desktop is the done-when
 	rm -f "$unpacked"/cache/rccpp_build/client_file*
+	# **Unboxed, and joined by the pipe** ([PROCESS_SANDBOX] B): Wine has
+	# no AppContainer, so the box cannot be made under it; BUILDAT_PIPE=1
+	# has the server listen on a pipe outside any container's namespace
+	# as well, and the client joins by it -- the transport a boxed local
+	# server is joined by on Windows
 	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://Z:$dir/nowhere" \
+		BUILDAT_UNCONFINED=1 BUILDAT_PIPE=1 \
 		"$wine" bin/buildat_server.exe -u launcher=1 -m apps/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
@@ -210,7 +216,7 @@ smoke_test_wine() {
 	# Under the server's stall rule: a dialog or a deadlock -- winedbg's
 	# crash box before ShowCrashDialog was off -- costs half a minute,
 	# not the ceiling
-	(cd "$unpacked" && "$wine" bin/buildat.exe -s "localhost:$port" -w 640x360 -l 3 -c "@Z:$dir/cmds.txt" > "$dir/cli.log" 2>&1) &
+	(cd "$unpacked" && "$wine" bin/buildat.exe -s "pipe:\\\\.\\pipe\\buildat-$port" -w 640x360 -l 3 -c "@Z:$dir/cmds.txt" > "$dir/cli.log" 2>&1) &
 	local cli=$!
 	wait_for_line "$dir/cli.log" "$cli" "Command sequence complete" 180 || true
 	sleep 5
@@ -366,6 +372,7 @@ smoke_test_wine_luanti() {
 	export WINEDEBUG=-all WINEPREFIX="$dir/wine"
 	(cd "$unpacked" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://Z:$dir/nowhere" \
+		BUILDAT_UNCONFINED=1 \
 		"$wine" bin/buildat_server.exe -u launcher=1 -m apps/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	# -l 4, as the full smoke: the section line it waits for is logged there
@@ -399,6 +406,7 @@ prebuild_modules() {
 			wine=$(command -v wine64 || command -v wine)
 			export WINEDEBUG=-all WINEPREFIX="$stage/../wine-prebuild"
 			(cd "$stage" && env -u TEMP -u TMP -u TMPDIR BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
+				BUILDAT_UNCONFINED=1 \
 				"$wine" bin/buildat_server.exe -u launcher=1 -m apps/vanilla -P "$port" -l 3 > "$log" 2>&1) &
 			;;
 		*)
