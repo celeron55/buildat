@@ -767,12 +767,14 @@ end
 -- the Starport only; a server gets a token for itself (id_token_here).
 --
 
+-- cb(result) or cb(nil, why, unreachable): unreachable when the Starport
+-- did not answer at all
 local function id_call(url, what, body, cb)
 	network.http_post(url .. "/api/id/" .. what, network.write_json(body),
 			function(answer, err)
 		local v = answer and network.parse_json(answer)
 		if type(v) ~= "table" then
-			cb(nil, tostring(err or "no answer"))
+			cb(nil, tostring(err or "no answer"), true)
 		elseif not v.ok then
 			-- A session that ended is forgotten here too
 			if v.error == "session" then
@@ -788,6 +790,28 @@ end
 
 -- What is kept of a logged-in ID: enough to log in to servers and to cap
 -- the filters, nothing a server should see
+-- **Tokens kept for when the Starport is away** (10c): sealed with the
+-- Starport password (Mbed TLS: PBKDF2 and AES-GCM), which this client
+-- holds in memory only, for the run it was typed in
+local id_passwords = {}
+
+local function unhex(h)
+	return (h:gsub("%x%x", function(x) return string.char(tonumber(x, 16)) end))
+end
+
+local function keep_token(url, listing, token, exp)
+	local pw = id_passwords[url]
+	if not pw then
+		return
+	end
+	local s = load_state()
+	s.sealed = s.sealed or {}
+	s.sealed[url] = s.sealed[url] or {}
+	s.sealed[url][listing] = hex(__buildat_seal(pw, network.write_json(
+			{token = token, exp = exp})))
+	save_state()
+end
+
 local function keep_id(url, session, me)
 	local s = load_state()
 	s.ids[url] = {session = session, name = me.name, band = me.band,
@@ -845,10 +869,21 @@ function M.id_login(url, then_cb, message)
 				return
 			end
 			keep_id(url, res.session, res.me)
+			id_passwords[url] = password:GetText()
 			uistack.main:pop(root)
-			if res.remind_email then
-				M.id_page(url, "This ID has no recovery e-mail: a forgotten "..
-						"password is the end of it. You can add one here.")
+			local remind = "This ID has no recovery e-mail: a forgotten "..
+					"password is the end of it."
+			if res.remind_email and then_cb then
+				-- Said, and what the login was for goes on
+				local root2, w2 = open_window("starport id remind", 520)
+				add_text(w2, remind, YELLOW)
+				local rr = add_row(w2)
+				add_button(rr, "Add one...", close_and(root2, function()
+					M.id_page(url)
+				end))
+				add_button(rr, "Later", close_and(root2, then_cb))
+			elseif res.remind_email then
+				M.id_page(url, remind .. " You can add one here.")
 			elseif then_cb then
 				then_cb()
 			end
@@ -1000,6 +1035,7 @@ function M.id_register(url, then_cb)
 					return
 				end
 				keep_id(url, res.session, res.me)
+				id_passwords[url] = pw:GetText()
 				uistack.main:pop(root)
 				if then_cb then
 					then_cb()
@@ -1189,9 +1225,46 @@ function M.safe.id_token_here(cb)
 			end
 			return M.id_login(url, function() M.safe.id_token_here(cb) end)
 		end
+		-- The Starport away: a kept token, opened by the password
+		local function offline(why)
+			local sealed = s.sealed and s.sealed[url] and s.sealed[url][listing]
+			if not sealed then
+				return cb(nil, "The Starport cannot be reached (" .. why ..
+						"), and there is no saved login for this server")
+			end
+			local root, w = open_window("starport id offline", 520)
+			add_text(w, "The Starport cannot be reached. Your saved login "..
+					"for this server is locked with your Starport password:")
+			local e = add_edit(w, "", true)
+			local st = add_text(w, "")
+			local function go()
+				local plain = __buildat_unseal(e:GetText(), unhex(sealed))
+				local v = plain and network.parse_json(plain)
+				if not v then
+					st.text = "Not the password"
+					return
+				end
+				if (tonumber(v.exp) or 0) < os.time() then
+					st.text = "The saved login has expired"
+					return
+				end
+				uistack.main:pop(root)
+				cb(v.token)
+			end
+			magic.SubscribeToEvent(e, "TextFinished", go)
+			local rr = add_row(w)
+			add_button(rr, "Log in", go)
+			add_button(rr, "Cancel", close_and(root, function()
+				cb(nil, "cancelled")
+			end))
+			e:SetFocus(true)
+		end
 		local function ask(name)
 			id_call(url, "token", {session = s.ids[url].session,
-				listing = listing, name = name}, function(res, err)
+				listing = listing, name = name}, function(res, err, away)
+				if not res and away then
+					return offline(err)
+				end
 				if not res then
 					if err == "session" then
 						return M.id_login(url, function()
@@ -1218,6 +1291,7 @@ function M.safe.id_token_here(cb)
 					end))
 					return
 				end
+				keep_token(url, listing, res.token, res.exp)
 				cb(res.token)
 			end)
 		end

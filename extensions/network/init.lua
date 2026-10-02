@@ -455,7 +455,172 @@ end
 -- (__buildat_http_get); read back on Update.
 local http_pending = {}
 local http_polling = false
+-- **HTTPS through the server** ([STARPORT] 10c): the web client has no
+-- HTTP of its own. Its server relays a TCP connection to a Starport it
+-- announces to, and the TLS is this client's (Mbed TLS, __buildat_tls_*),
+-- so the server carries bytes it cannot read. One request at a time.
+-- BUILDAT_HTTP_RELAY=1 takes this way on a native client too, for a check.
+-- simplified: for a Starport only, as the server relays to nothing else
+local relay_queue = {}
+local relay_busy = false
+local ca_pem = nil
+
+local function relay_next()
+	if relay_busy or #relay_queue == 0 then
+		return
+	end
+	relay_busy = true
+	local job = table.remove(relay_queue, 1)
+	local function done(body, err)
+		relay_busy = false
+		job.cb(body, err)
+		relay_next()
+	end
+	if not __buildat_server_address() then
+		return done(nil, "not connected to a server to relay through")
+	end
+	local scheme, host, port, path = job.url:match(
+			"^(https?)://([^/:]+):?(%d*)(.*)$")
+	if scheme ~= "https" then
+		return done(nil, "the relay takes https only")
+	end
+	if not ca_pem then
+		local f = io.open(__buildat_extension_path("network") ..
+				"/ca-bundle.pem", "rb")
+		ca_pem = f and f:read("*a") or ""
+		if f then
+			f:close()
+		end
+	end
+	local h, err = __buildat_tls_new(host, ca_pem)
+	if not h then
+		return done(nil, err)
+	end
+	local origin = scheme .. "://" .. host .. (port ~= "" and ":" .. port or "")
+	local request = (job.body and "POST " or "GET ") ..
+			(path ~= "" and path or "/") .. " HTTP/1.1\r\n" ..
+			"Host: " .. host .. "\r\n" ..
+			"User-Agent: buildat (relay)\r\n" ..
+			"Connection: close\r\n" ..
+			(job.body and ("Content-Type: application/json\r\n" ..
+			"Content-Length: " .. #job.body .. "\r\n") or "") ..
+			"\r\n" .. (job.body or "")
+	local sent_request = false
+	local response = ""
+	local finished = false
+	-- The body of a whole response, or nil while more is to come
+	local function parse(final)
+		local head_end = response:find("\r\n\r\n", 1, true)
+		if not head_end then
+			return nil
+		end
+		local head = response:sub(1, head_end - 1)
+		local rest = response:sub(head_end + 4)
+		local status = tonumber(head:match("^HTTP/%d%.%d (%d+)"))
+		local body = nil
+		if head:lower():find("transfer%-encoding:%s*chunked") then
+			local out, at = {}, 1
+			while true do
+				local line_end = rest:find("\r\n", at, true)
+				if not line_end then
+					break
+				end
+				local size = tonumber(rest:sub(at, line_end - 1):match(
+						"^%x+"), 16)
+				if not size then
+					break
+				end
+				if size == 0 then
+					body = table.concat(out)
+					break
+				end
+				if #rest < line_end + 1 + size then
+					break
+				end
+				out[#out + 1] = rest:sub(line_end + 2, line_end + 1 + size)
+				at = line_end + 2 + size + 2
+			end
+		else
+			local len = tonumber(head:lower():match(
+					"content%-length:%s*(%d+)"))
+			if len and #rest >= len then
+				body = rest:sub(1, len)
+			elseif final then
+				body = rest
+			end
+		end
+		if not body then
+			return nil
+		end
+		return body, status
+	end
+	local function finish(body, why)
+		if finished then
+			return
+		end
+		finished = true
+		log:info("relay " .. job.url .. ": " .. (why or ("ok, " .. #body ..
+				" bytes")))
+		__buildat_tls_free(h)
+		buildat.send_packet("starport:relay_close", "")
+		done(body, why)
+	end
+	local state_open = false
+	local function pump(cipher_in)
+		if finished then
+			return
+		end
+		local out, plain, state = __buildat_tls_step(h, cipher_in or "",
+				(state_open and not sent_request) and request or nil)
+		if state_open and not sent_request then
+			sent_request = true
+		end
+		if out ~= "" then
+			buildat.send_packet("starport:relay_send", out)
+		end
+		response = response .. plain
+		if state:sub(1, 6) == "error:" then
+			return finish(nil, "TLS " .. state)
+		end
+		if state == "open" and not state_open then
+			state_open = true
+			return pump("")
+		end
+		local body, status = parse(state == "closed")
+		if body then
+			if status and status >= 200 and status < 300 then
+				finish(body)
+			else
+				finish(nil, "HTTP " .. tostring(status))
+			end
+		elseif state == "closed" then
+			finish(nil, "closed before a whole response")
+		end
+	end
+	buildat.sub_packet("starport:relay_data", function(data) pump(data) end)
+	buildat.sub_packet("starport:relay_closed", function(why)
+		local body, status = parse(true)
+		if body and status and status >= 200 and status < 300 then
+			finish(body)
+		else
+			finish(nil, "relay: " .. tostring(why))
+		end
+	end)
+	buildat.send_packet("starport:relay_open", origin)
+	pump("")
+end
+
+local function use_relay()
+	return buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil or
+			buildat.get_env("BUILDAT_HTTP_RELAY") == "1"
+end
+
 local function http_start(url, cb, body)
+	if use_relay() then
+		relay_queue[#relay_queue + 1] = {url = url, body = body, cb = cb}
+		relay_next()
+		return
+	end
 	local id = __buildat_http_get(url, body)
 	http_pending[id] = cb
 	if not http_polling then

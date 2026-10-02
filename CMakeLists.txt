@@ -286,6 +286,7 @@ add_subdirectory("3rdparty/smallsha1")
 add_subdirectory("3rdparty/polyvox")
 add_subdirectory("3rdparty/zlib")
 add_subdirectory("3rdparty/zstd")
+add_subdirectory("3rdparty/mbedtls")
 add_subdirectory("3rdparty/sqlite")
 add_subdirectory("3rdparty/luabind-deboostified")
 
@@ -492,6 +493,7 @@ if(BUILD_CLIENT)
 		PolyVoxCore
 		zlib
 		zstd
+		mbedtls
 		luabind
 		Urho3D
 		${URHO3D_TOLUA_LIBRARY}
