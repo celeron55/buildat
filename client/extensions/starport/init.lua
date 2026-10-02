@@ -555,6 +555,8 @@ local function open_window(desc, width)
 			return true
 		end
 	end)
+	-- By the keyboard ([MENU_KEYS])
+	require("buildat/extension/ui_utils").safe.keyboard_page(w)
 	return root, w
 end
 
