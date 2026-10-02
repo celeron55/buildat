@@ -198,6 +198,13 @@ struct Module: public interface::Module, public Interface
 
 	void init()
 	{
+		// What a wrong default would send announces to the wrong port for
+		if(normalize_url("host") != "http://host:29595" ||
+				normalize_url("http://host/") != "http://host:29595" ||
+				normalize_url("http://host:80") != "http://host:80" ||
+				normalize_url("https://host") != "https://host" ||
+				normalize_url("http://[::1]") != "http://[::1]:29595")
+			throw Exception("starport_announce: normalize_url self-check");
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("network:http_request"));
@@ -246,13 +253,33 @@ struct Module: public interface::Module, public Interface
 		return m_config.deepcopy();
 	}
 
+	// **A Starport's address with no port is on 29595** (10g), Starport's
+	// own default, so a Starport and a server of another app share an
+	// address: "host" and "http://host" are http://host:29595. https:// is
+	// a proxy's, on 443 as ever.
+	static ss_ normalize_url(ss_ u)
+	{
+		while(!u.empty() && u.back() == '/')
+			u.pop_back();
+		if(u.find("://") == ss_::npos)
+			u = "http://"+u;
+		if(u.compare(0, 7, "http://") == 0){
+			const ss_ hostport = u.substr(7);
+			const bool v6 = !hostport.empty() && hostport[0] == '[';
+			const size_t close = v6 ? hostport.find(']') : 0;
+			if(hostport.find(':', v6 ? close : 0) == ss_::npos)
+				u += ":29595";
+		}
+		return u;
+	}
+
 	static sv_<ss_> urls_of(const json::Value &c)
 	{
 		sv_<ss_> out;
 		const json::Value &u = c.get("starports");
 		for(unsigned i = 0; u.is_array() && i < u.size(); i++)
 			if(u.at(i).is_string())
-				out.push_back(u.at(i).as_string());
+				out.push_back(normalize_url(u.at(i).as_string()));
 		return out;
 	}
 	static bool is_on(const json::Value &c)

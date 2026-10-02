@@ -15,6 +15,7 @@
 #include <c55/getopt.h>
 #include <c55/os.h>
 #include <iostream>
+#include <fstream>
 #include <climits>
 #include <cstdlib> // srand()
 #include <signal.h>
@@ -79,6 +80,7 @@ int main(int argc, char *argv[])
 	server::Config &config = g_server_config;
 
 	std::string module_path;
+	bool port_given = false;
 
 	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:W:T:wRu:x:";
 	const char usagefmt[1600] =
@@ -97,7 +99,8 @@ int main(int argc, char *argv[])
 			"  -L [log file path]   Append log to a specified file\n"
 			"  -x [module_name]     Skip compiling specified module\n"
 			"  -A [address]         Set listening address (default any4)\n"
-			"  -P [port]            Set network port (default 29500)\n"
+			"  -P [port]            Set network port (default 29500, or the\n"
+			"                       app's default_port: Starport's 29595)\n"
 			"  -W [web_client_path] Serve the web client from here\n"
 			"                       (default share_path/web)\n"
 			"  -T [proxies]         Believe X-Forwarded-For from these\n"
@@ -169,6 +172,7 @@ int main(int argc, char *argv[])
 		case 'P':
 			log_i(MODULE, "config.network_port: %s", c55_optarg);
 			config.set("network_port", c55_optarg);
+			port_given = true;
 			break;
 		case 'W':
 			log_i(MODULE, "config.web_client_path: %s", c55_optarg);
@@ -234,6 +238,19 @@ int main(int argc, char *argv[])
 	if(module_path.empty()){
 		std::cerr<<"Module path (-m) is empty"<<std::endl;
 		return 1;
+	}
+	// **An app's own default port** ([STARPORT] 10g): apps/<app>/default_port,
+	// one number, where -P says none -- Starport's is 29595, so a Starport
+	// and a server of another app share an address without either naming
+	// a port
+	if(!port_given){
+		std::ifstream f(module_path+"/default_port");
+		int port = 0;
+		if(f >> port && port > 0 && port < 65536){
+			log_i(MODULE, "config.network_port: %i (the app's default_port)",
+					port);
+			config.set("network_port", itos(port));
+		}
 	}
 
 	int exit_status = 0;

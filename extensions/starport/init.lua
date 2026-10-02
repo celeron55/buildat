@@ -77,6 +77,38 @@ local function default_filters()
 	}
 end
 
+-- **A Starport's address with no port is on 29595** ([STARPORT] 10g):
+-- "host" and "http://host" are http://host:29595, as the server takes them
+-- (builtin/starport_announce); https:// is a proxy's, on 443
+local function normalize_url(u)
+	u = tostring(u):gsub("/+$", "")
+	if not u:find("://", 1, true) then
+		u = "http://" .. u
+	end
+	if u:sub(1, 7) == "http://" then
+		local hostport = u:sub(8)
+		local after = hostport:sub(1, 1) == "[" and
+				(hostport:match("^%[.-%](.*)$") or "") or hostport
+		if not after:find(":", 1, true) then
+			u = u .. ":29595"
+		end
+	end
+	return u
+end
+assert(normalize_url("host") == "http://host:29595" and
+		normalize_url("http://host/") == "http://host:29595" and
+		normalize_url("http://host:80") == "http://host:80" and
+		normalize_url("https://host") == "https://host" and
+		normalize_url("http://[::1]") == "http://[::1]:29595")
+
+local function normalize_urls(list)
+	local out = {}
+	for i, u in ipairs(list) do
+		out[i] = normalize_url(u)
+	end
+	return out
+end
+
 local function read_json(path)
 	local f = io.open(path, "rb")
 	if not f then
@@ -174,8 +206,8 @@ local function effective()
 		end
 	end
 	return {
-		starports = type(m.starports) == "table" and m.starports or
-				s.starports,
+		starports = normalize_urls(type(m.starports) == "table" and
+				m.starports or s.starports),
 		filters = filters,
 		direct_connect = (m.direct_connect == nil) and s.direct_connect or
 				m.direct_connect == true,
@@ -640,9 +672,10 @@ settings_page = function(can, again, message)
 	local r = add_row(w)
 	local new = add_edit(r, "https://")
 	add_button(r, "Add Starport", function()
-		local url = new:GetText():gsub("/+$", "")
+		local url = normalize_url(new:GetText())
 		if not url:match("^https?://[%w%.%-]+[:%d]*$") then
-			return settings_page(can, true, "A Starport is an https:// address")
+			return settings_page(can, true, "A Starport is a host name, or "..
+					"an http(s):// address")
 		end
 		table.insert(s.starports, url)
 		save_state()
