@@ -11,6 +11,9 @@
 #      reporter's key asks and gets the outcome.
 #   4. The admin makes a fleet; a second server with the fleet's line in
 #      its starport.json is served in it without anyone claiming it.
+#   5. A Starport ID: an adult's year is not kept, a child needs consent,
+#      and the ID's token logs in to the fleet's server, whose account is
+#      linked to it.
 #
 #   KEEP_TMP=1 apps/starport/check.sh
 set -u
@@ -96,7 +99,7 @@ echo "ok: the reporter sees the report rejected"
 fleet=$(grep -o '"code":"[0-9a-f]*","description":"","id":"[0-9a-f]*"' \
 	"$tmp/cl.log" | head -1 | sed 's/"code":"\([0-9a-f]*\)".*"id":"\([0-9a-f]*\)"/\2:\1/')
 [ -n "$fleet" ] || fail "no fleet made (cl.log)"
-sed "s/\"Check house\"/\"Check main\", \"fleet\": \"$fleet\", \"pool\": \"main\"/" \
+sed "s/\"Check house\"/\"Check main\", \"fleet\": \"$fleet\", \"pool\": \"main\", \"login\": \"both\"/" \
 	"$tmp/an/apps/floorplanner/starport.json" \
 	> "$tmp/an2/apps/floorplanner/starport.json"
 Build/bin/buildat_server -m apps/floorplanner -D "$tmp/an2" -P $AN2 -l 3 \
@@ -112,4 +115,34 @@ s = [x for x in json.load(sys.stdin)['servers'] if x['name'] == 'Check main']
 assert s and s[0]['fleet']['name'] == 'Check fleet' and s[0]['pool'] == 'main', s
 " || fail "the fleet's server is not served in the fleet (sp.log, an2.log)"
 echo "ok: a server joined the fleet by its config line"
+
+token=$(python3 - "$SP" <<'PY'
+import json, sys, time, urllib.request
+B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+def call(w, **k):
+    return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
+y = time.gmtime().tm_year
+r = call("id/register", name="kid", password="secret1", birth_year=y - 10)
+assert not r["ok"] and "consent" in r["error"], r
+r = call("id/register", name="grown", password="secret1", birth_year=y - 40)
+assert r["ok"] and r["result"]["me"]["adult"] and \
+		"birth_year" not in r["result"]["me"], r
+s = r["result"]["session"]
+lid = [x["id"] for x in call("list")["servers"] if x["name"] == "Check main"][0]
+r = call("id/token", session=s, listing=lid)
+assert r["ok"] and r["result"]["need_name"], r
+r = call("id/token", session=s, listing=lid, name="grownup")
+assert r["ok"], r
+print(r["result"]["token"])
+PY
+) || fail "the ID API"
+echo "ok: IDs made, an adult's year not kept, a token got"
+printf 'delay 8000\nquit\n' > "$tmp/cmds2.txt"
+BUILDAT_FP_STARPORT=$token timeout 90 Build/bin/buildat -D "$tmp/cl" \
+	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
+	> "$tmp/cl2.log" 2>&1
+grep -q "Joined as grownup" "$tmp/cl2.log" &&
+	grep -q "New account grownup for a Starport ID" "$tmp/an2.log" ||
+	fail "the token did not log in (cl2.log, an2.log)"
+echo "ok: the ID's token logged in to the fleet's server"
 echo PASS

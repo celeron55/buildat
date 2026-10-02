@@ -3,12 +3,14 @@
 #include "accounts/api.h"
 #include "network/api.h"
 #include "storage/api.h"
+#include "starport_announce/api.h"
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/server_config.h"
 #include "interface/event.h"
 #include "interface/sha256.h"
+#include "interface/sha1.h"
 #include "interface/os.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
@@ -90,6 +92,71 @@ static void check_pbkdf2()
 			b != "ae4d0c95af6b46d32d0adff928f06dd0"
 			"2a303f8ef3c251dfd6e2d85a95474c43")
 		throw Exception("accounts: PBKDF2-HMAC-SHA256 self-check failed");
+}
+
+// **TOTP** ([STARPORT] 10a, RFC 6238): HMAC-SHA1, 30 s steps, 6 digits.
+// For a server's own admins and moderators, and anyone who wants it; a
+// Starport ID is an account of the Starport's server and has it the same.
+static ss_ hmac_sha1(ss_ key, const ss_ &msg)
+{
+	if(key.size() > 64)
+		key = interface::sha1::calculate(key);
+	key.resize(64, '\0');
+	ss_ ipad(64, '\0'), opad(64, '\0');
+	for(int i = 0; i < 64; i++){
+		ipad[i] = key[i] ^ 0x36;
+		opad[i] = key[i] ^ 0x5c;
+	}
+	return interface::sha1::calculate(opad +
+			interface::sha1::calculate(ipad + msg));
+}
+
+static ss_ hotp(const ss_ &secret, uint64_t counter, int digits = 6)
+{
+	ss_ msg(8, '\0');
+	for(int i = 7; i >= 0; i--, counter >>= 8)
+		msg[i] = (char)(counter & 0xff);
+	const ss_ h = hmac_sha1(secret, msg);
+	const int o = h[19] & 0x0f;
+	uint32_t v = ((uint32_t)(h[o] & 0x7f) << 24) |
+			((uint32_t)(unsigned char)h[o + 1] << 16) |
+			((uint32_t)(unsigned char)h[o + 2] << 8) |
+			(uint32_t)(unsigned char)h[o + 3];
+	uint32_t mod = 1;
+	for(int i = 0; i < digits; i++)
+		mod *= 10;
+	char buf[16];
+	snprintf(buf, sizeof buf, "%0*u", digits, v % mod);
+	return buf;
+}
+
+// What authenticator apps take: RFC 4648 base32, no padding
+static ss_ base32(const ss_ &data)
+{
+	static const char *A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+	ss_ out;
+	uint32_t buf = 0;
+	int bits = 0;
+	for(unsigned char c : data){
+		buf = (buf << 8) | c;
+		bits += 8;
+		while(bits >= 5){
+			out += A[(buf >> (bits - 5)) & 31];
+			bits -= 5;
+		}
+	}
+	if(bits > 0)
+		out += A[(buf << (5 - bits)) & 31];
+	return out;
+}
+
+// RFC 6238's SHA-1 vector at T = 59 s, and RFC 4648's base32. Run at every
+// start, as the PBKDF2 one is: a wrong TOTP locks people out.
+static void totp_self_check()
+{
+	if(hotp("12345678901234567890", 59 / 30, 8) != "94287082" ||
+			base32("foobar") != "MZXW6YTBOI")
+		throw Exception("accounts: TOTP self-check failed");
 }
 
 struct Account
@@ -193,9 +260,11 @@ struct Hello
 	// a new name needs an invite (registration is not open)
 	uint8_t setup = 0;
 	uint8_t open_registration = 0;
+	// [STARPORT] 10c: a Starport ID logs in here
+	uint8_t starport = 0;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(local, setup, open_registration);
+		archive(local, setup, open_registration, starport);
 	}
 };
 
@@ -208,9 +277,36 @@ struct LoginRequest
 	// the password; and whether this login asks for one
 	ss_ token;
 	uint8_t keep = 0;
+	// [STARPORT] 10: the TOTP code, and a Starport ID's token for this
+	// server in place of a name and a password
+	ss_ totp;
+	ss_ starport;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(name, password, code, token, keep);
+		archive(name, password, code, token, keep, totp, starport);
+	}
+};
+
+// accounts:totp: begin (a new secret, pending), confirm (its first code
+// turns it on), off (a code turns it off)
+struct TotpRequest
+{
+	ss_ cmd;
+	ss_ code;
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(cmd, code);
+	}
+};
+struct TotpResult
+{
+	ss_ error;
+	ss_ secret; // base32, while one is pending
+	ss_ uri;    // otpauth://, for an app's own QR reader or a link
+	uint8_t on = 0;
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(error, secret, uri, on);
 	}
 };
 
@@ -301,11 +397,13 @@ struct Module: public interface::Module, public Interface
 	void init()
 	{
 		check_pbkdf2();
+		totp_self_check();
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		for(const char *name : {"accounts:get_hello", "accounts:login",
-				"accounts:admin", "accounts:passwd", "accounts:logout"})
+				"accounts:admin", "accounts:passwd", "accounts:logout",
+				"accounts:totp"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -326,6 +424,8 @@ struct Module: public interface::Module, public Interface
 		EVENT_TYPEN("network:packet_received/accounts:passwd", on_passwd,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:logout", on_logout,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/accounts:totp", on_totp,
 				network::Packet)
 	}
 
@@ -357,7 +457,7 @@ struct Module: public interface::Module, public Interface
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(const char *name : {"accounts:hello", "accounts:login_result",
 					"accounts:users", "accounts:admin_result",
-					"accounts:passwd_result"})
+					"accounts:passwd_result", "accounts:totp_result"})
 				inetwork->declare(name,
 						network::Interface::Channel::LatestOnly);
 		});
@@ -667,6 +767,10 @@ struct Module: public interface::Module, public Interface
 		h.local = is_local(peer);
 		h.setup = !h.local && !m_setup_code.empty();
 		h.open_registration = m_access.open_registration;
+		starport_announce::access(m_server,
+				[&](starport_announce::Interface *s){
+			h.starport = s->accepts_ids() ? 1 : 0;
+		});
 		send(peer, "accounts:hello", pack(h));
 	}
 
@@ -689,8 +793,10 @@ struct Module: public interface::Module, public Interface
 		// The error, or "", and the token of a login asked to be kept
 		ss_ token;
 		auto reply = [&](const ss_ &error){
+			// The name joined as: a Starport ID's is the token's
 			send(packet.sender, "accounts:login_result",
-					pack(std::make_pair(error, token)));
+					pack(std::make_pair(std::make_pair(error, token),
+					error.empty() ? cred.name : ss_())));
 		};
 		// The local user is on the machine the saves are on: a password
 		// would keep out nobody the files themselves do not let in
@@ -701,6 +807,22 @@ struct Module: public interface::Module, public Interface
 			return reply("Too many failed attempts; reconnect");
 		if(!unpack(packet.data, cred))
 			return reply("Malformed login");
+		// [STARPORT] 10c: a Starport ID's token in place of a password; the
+		// name is the one the player picked on the Starport for this
+		// community, and the account is the one linked to the ID
+		starport_announce::IdLogin id;
+		if(!cred.starport.empty()){
+			ss_ why = "This server does not take Starport IDs";
+			starport_announce::access(m_server,
+					[&](starport_announce::Interface *s){
+				why = s->verify_id_token(cred.starport, &id);
+			});
+			if(!why.empty())
+				return reply(why);
+			cred.name = id.name;
+			cred.password.clear();
+			cred.token.clear();
+		}
 		const ss_ &name = cred.name;
 		const ss_ &password = cred.password;
 		const ss_ code = upper(cred.code);
@@ -741,7 +863,27 @@ struct Module: public interface::Module, public Interface
 		};
 
 		Account account;
-		if(!cred.token.empty()){
+		if(!id.sub.empty()){
+			const ss_ link = "starport/"+id.starport+"/"+id.sub;
+			ss_ linked;
+			if(m_store->get(link, linked)){
+				if(linked != name || !get_account(name, account))
+					return reply("This Starport ID's account here is gone; "
+							"ask an admin");
+			} else {
+				if(exists(name))
+					return reply("The name "+name+" is taken on this server "
+							"by an account of its own: pick another for "
+							"this community on the Starport");
+				// A password nobody knows: this account logs in by its ID
+				account = new_account(random_code(32), {});
+				set_account(name, account);
+				m_store->set(link, name);
+				m_store->set("starport_of/"+name, link);
+				log_i(MODULE, "New account %s for a Starport ID of %s",
+						cs(name), cs(id.starport));
+			}
+		} else if(!cred.token.empty()){
 			KeptLogin kept;
 			ss_ data;
 			const ss_ key = "token/"+interface::sha256::hex(
@@ -756,6 +898,14 @@ struct Module: public interface::Module, public Interface
 			if(!local && pbkdf2_sha256(password, account.salt,
 					PBKDF2_ITERATIONS) != account.hash)
 				return fail("Wrong password");
+			if(!local && totp_on(name)){
+				// Said so, not counted: the client asks for the code
+				if(cred.totp.empty())
+					return reply("TOTP: enter the code from your "
+							"authenticator app");
+				if(!check_totp(name, cred.totp))
+					return fail("TOTP: wrong code");
+			}
 			// An account of a server that has no admin can claim it too
 			if(!local && !m_setup_code.empty() && !code.empty()){
 				if(code != m_setup_code)
@@ -1016,6 +1166,162 @@ struct Module: public interface::Module, public Interface
 			m_store->remove(key);
 			log_i(MODULE, "%s logged out", cs(kept.name));
 		}
+	}
+
+	// -- TOTP ([STARPORT] 10a)
+
+	ss_ totp_secret(const ss_ &name, const char *kind = "totp/")
+	{
+		ss_ data;
+		return m_store && m_store->get(kind+name, data) ? data : ss_();
+	}
+
+	bool totp_on(const ss_ &name)
+	{
+		return !totp_secret(name).empty();
+	}
+
+	// The step each name last used, so a code is good once
+	std::map<ss_, uint64_t> m_totp_last;
+
+	bool check_totp(const ss_ &name, const ss_ &code)
+	{
+		const ss_ secret = totp_secret(name);
+		if(secret.empty() || code.size() != 6)
+			return false;
+		const uint64_t now = (uint64_t)(interface::os::time_us() / 1000000) /
+				30;
+		// One step either way, for a clock a little off
+		for(uint64_t c = now - 1; c <= now + 1; c++){
+			if(hotp(secret, c) == code && c > m_totp_last[name]){
+				m_totp_last[name] = c;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// A new secret, pending until its first code: base32
+	ss_ totp_begin(const ss_ &name)
+	{
+		std::random_device rd;
+		ss_ secret(20, '\0');
+		for(char &c : secret)
+			c = (char)(rd() & 0xff);
+		m_store->set("totp_pending/"+name, secret);
+		return base32(secret);
+	}
+
+	ss_ totp_confirm(const ss_ &name, const ss_ &code)
+	{
+		const ss_ secret = totp_secret(name, "totp_pending/");
+		if(secret.empty())
+			return "Nothing to confirm: begin again";
+		m_store->set("totp/"+name, secret);
+		if(!check_totp(name, code)){
+			m_store->remove("totp/"+name);
+			return "Wrong code: check the app's time and try again";
+		}
+		m_store->remove("totp_pending/"+name);
+		log_i(MODULE, "%s turned TOTP on", cs(name));
+		return "";
+	}
+
+	ss_ totp_off(const ss_ &name, const ss_ &code)
+	{
+		if(!totp_on(name))
+			return "";
+		if(!check_totp(name, code))
+			return "Wrong code";
+		m_store->remove("totp/"+name);
+		log_i(MODULE, "%s turned TOTP off", cs(name));
+		return "";
+	}
+
+	ss_ totp_uri(const ss_ &name, const ss_ &secret_b32)
+	{
+		ss_ issuer = m_server->get_app_id();
+		return "otpauth://totp/"+issuer+":"+name+"?secret="+secret_b32+
+				"&issuer="+issuer;
+	}
+
+	void on_totp(const network::Packet &packet)
+	{
+		auto it = m_peers.find(packet.sender);
+		TotpRequest req;
+		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
+				!unpack(packet.data, req))
+			return;
+		const ss_ name = it->second.name;
+		TotpResult r;
+		if(req.cmd == "begin"){
+			r.secret = totp_begin(name);
+			r.uri = totp_uri(name, r.secret);
+		} else if(req.cmd == "confirm"){
+			r.error = totp_confirm(name, req.code);
+			// Still pending: the key again, to try once more
+			const ss_ pending = totp_secret(name, "totp_pending/");
+			if(!r.error.empty() && !pending.empty()){
+				r.secret = base32(pending);
+				r.uri = totp_uri(name, r.secret);
+			}
+		} else if(req.cmd == "off"){
+			r.error = totp_off(name, req.code);
+		} else if(req.cmd != "status"){
+			r.error = "No such TOTP command";
+		}
+		r.on = totp_on(name) ? 1 : 0;
+		send(packet.sender, "accounts:totp_result", pack(r));
+	}
+
+	// -- What a Starport (apps/starport) asks of its own server's accounts
+	// ([STARPORT] 10): a Starport ID is an account here
+
+	ss_ create_account(const ss_ &name, const ss_ &password)
+	{
+		if(!m_store)
+			return "Not ready";
+		if(!valid_name(name))
+			return "A name is 1 to 20 letters, digits, _ or -";
+		if(exists(name))
+			return "That name is taken";
+		if(password.size() < MIN_PASSWORD || password.size() > 100)
+			return "A password is "+itos((int)MIN_PASSWORD)+
+					" to 100 characters";
+		set_account(name, new_account(password, {}));
+		log_i(MODULE, "New account %s (Starport ID)", cs(name));
+		return "";
+	}
+
+	bool check_password(const ss_ &name, const ss_ &password)
+	{
+		Account account;
+		return get_account(name, account) && password.size() <= 100 &&
+				pbkdf2_sha256(password, account.salt, PBKDF2_ITERATIONS) ==
+				account.hash;
+	}
+
+	ss_ set_password(const ss_ &name, const ss_ &password)
+	{
+		Account account;
+		if(!get_account(name, account))
+			return "No such account";
+		if(password.size() < MIN_PASSWORD || password.size() > 100)
+			return "A password is "+itos((int)MIN_PASSWORD)+
+					" to 100 characters";
+		set_account(name, new_account(password, account.privs));
+		return "";
+	}
+
+	ss_ delete_account(const ss_ &name)
+	{
+		if(!exists(name))
+			return "No such account";
+		m_store->remove("auth/"+name);
+		m_store->remove("totp/"+name);
+		m_store->remove("totp_pending/"+name);
+		log_i(MODULE, "Account %s deleted", cs(name));
+		return "";
 	}
 
 	void* get_interface()

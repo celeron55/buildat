@@ -231,6 +231,9 @@ open = function()
 			accounts.page_button(w, "Change password...", function()
 				page(function() accounts.password_page(open) end, open)
 			end)
+			accounts.page_button(w, "Two-step login...", function()
+				page(function() accounts.totp_page(open) end, open)
+			end)
 			-- To the Starports that list it ([STARPORT] 5); the dialog is
 			-- the client's own
 			accounts.page_button(w, "Report this server...", function()

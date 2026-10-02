@@ -146,6 +146,9 @@ local function load_state()
 	state.keys = type(state.keys) == "table" and state.keys or {}
 	state.receipts = type(state.receipts) == "table" and state.receipts or {}
 	state.pin = state.pin or ""
+	-- [STARPORT] 10: the Starport IDs logged in, by Starport: {session,
+	-- name, band, key}
+	state.ids = type(state.ids) == "table" and state.ids or {}
 	return state
 end
 
@@ -198,6 +201,11 @@ end
 -- This client's key on a Starport, made the first time it is needed
 local function key_for(url)
 	local s = load_state()
+	-- [STARPORT] 10a: an ID holds the key, and logging in brings it
+	local id = s.ids and s.ids[url]
+	if id and type(id.key) == "string" and #id.key == 64 then
+		return id.key
+	end
 	if not s.keys[url] then
 		s.keys[url] = hex(buildat.random_bytes(32))
 		save_state()
@@ -211,10 +219,37 @@ end
 
 local last_rows = {}
 
+-- The last fetch's row of an address
+local function row_of(address)
+	for _, x in ipairs(last_rows) do
+		if x.address == address then
+			return x
+		end
+	end
+	return nil
+end
+
 -- Whether the filters let a listing through
+-- [STARPORT] 10b: the youngest band of the IDs logged in caps what is
+-- shown: under 13 sees `everyone`, 13 to 17 also `teen`
+local function band_allows(audience)
+	local s = load_state()
+	for _, id in pairs(s.ids or {}) do
+		-- Not said yet counts as the youngest
+		if (id.band == "under 13" or id.band == "not said") and
+				audience ~= "everyone" then
+			return false
+		end
+		if id.band == "13-17" and audience == "adult" then
+			return false
+		end
+	end
+	return true
+end
+
 local function passes(f, x)
 	if not f.audience[x.audience] or not f.kind[x.kind] or
-			not f.access[x.access] then
+			not f.access[x.access] or not band_allows(x.audience) then
 		return false
 	end
 	for _, d in ipairs(DESCRIPTORS) do
@@ -453,6 +488,9 @@ local function open_window(desc, width)
 	w:SetLayout(magic.LM_VERTICAL, 6, magic.IntRect(12, 12, 12, 12))
 	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
+	-- Over whatever a server draws (its join window is at 100): this
+	-- side's dialogs are the ones the player has to be able to trust
+	root.priority = 1000
 	root:SubscribeToStackEvent("KeyDown", function(_, data)
 		if data:GetInt("Key") == magic.KEY_ESCAPE then
 			uistack.main:pop(root)
@@ -583,6 +621,16 @@ settings_page = function(can, again, message)
 	for i, url in ipairs(e.starports) do
 		local r = add_row(w)
 		add_label(r, url, 360)
+		-- [STARPORT] 10: this Starport's ID, or the way to one
+		local id = s.ids[url]
+		add_button(r, id and "ID: " .. tostring(id.name) .. "..." or
+				"Starport ID...", function()
+			if id then
+				M.id_page(url)
+			else
+				M.id_login(url)
+			end
+		end)
 		add_button(r, "Remove", function()
 			table.remove(s.starports, i)
 			save_state()
@@ -711,6 +759,476 @@ settings_page = function(can, again, message)
 		end
 	end
 	add_button(w, "Back", function() uistack.main:pop(root) end)
+end
+
+--
+-- **Starport ID** ([STARPORT] 10): logging in, registering and the account,
+-- over the Starport's HTTPS API (POST /api/id/<call>). The password goes to
+-- the Starport only; a server gets a token for itself (id_token_here).
+--
+
+local function id_call(url, what, body, cb)
+	network.http_post(url .. "/api/id/" .. what, network.write_json(body),
+			function(answer, err)
+		local v = answer and network.parse_json(answer)
+		if type(v) ~= "table" then
+			cb(nil, tostring(err or "no answer"))
+		elseif not v.ok then
+			-- A session that ended is forgotten here too
+			if v.error == "session" then
+				load_state().ids[url] = nil
+				save_state()
+			end
+			cb(nil, tostring(v.error))
+		else
+			cb(v.result)
+		end
+	end, {description = "Starport"})
+end
+
+-- What is kept of a logged-in ID: enough to log in to servers and to cap
+-- the filters, nothing a server should see
+local function keep_id(url, session, me)
+	local s = load_state()
+	s.ids[url] = {session = session, name = me.name, band = me.band,
+		key = me.key}
+	save_state()
+end
+
+local function id_refresh(url, cb)
+	local id = load_state().ids[url]
+	if not id then
+		return cb(nil, "not logged in")
+	end
+	id_call(url, "me", {session = id.session}, function(me, err)
+		if me then
+			keep_id(url, id.session, me)
+		end
+		cb(me, err)
+	end)
+end
+
+local function close_and(root, f)
+	return function()
+		uistack.main:pop(root)
+		if f then
+			f()
+		end
+	end
+end
+
+-- id_login(url[, then_cb]): the login dialog; then_cb() once logged in
+function M.id_login(url, then_cb, message)
+	local root, w = open_window("starport id login", 520)
+	add_text(w, "Starport ID at " .. url)
+	if message then
+		add_text(w, message, YELLOW)
+	end
+	local r = add_row(w)
+	add_label(r, "Name", 120)
+	local name = add_edit(r, "")
+	r = add_row(w)
+	add_label(r, "Password", 120)
+	local password = add_edit(r, "", true)
+	local totp_row = add_row(w)
+	add_label(totp_row, "TOTP code (if on)", 120)
+	local totp = add_edit(totp_row, "")
+	local status = add_text(w, "")
+	local function go()
+		status.text = "Logging in..."
+		id_call(url, "login", {name = name:GetText(),
+			password = password:GetText(), totp = totp:GetText()},
+				function(res, err)
+			if not res then
+				status.text = err == "totp" and
+						"Enter the code from your authenticator app" or err
+				return
+			end
+			keep_id(url, res.session, res.me)
+			uistack.main:pop(root)
+			if res.remind_email then
+				M.id_page(url, "This ID has no recovery e-mail: a forgotten "..
+						"password is the end of it. You can add one here.")
+			elseif then_cb then
+				then_cb()
+			end
+		end)
+	end
+	magic.SubscribeToEvent(password, "TextFinished", go)
+	magic.SubscribeToEvent(totp, "TextFinished", go)
+	r = add_row(w)
+	add_button(r, "Log in", go)
+	add_button(r, "Make an ID...", function()
+		uistack.main:pop(root)
+		M.id_register(url, then_cb)
+	end)
+	add_button(r, "Forgot password...", function()
+		uistack.main:pop(root)
+		M.id_reset(url, name:GetText())
+	end)
+	add_button(r, "Close", close_and(root))
+	name:SetFocus(true)
+end
+
+function M.id_reset(url, name_text)
+	local root, w = open_window("starport id reset", 520)
+	add_text(w, "A new password: a code goes to the ID's recovery e-mail.")
+	local r = add_row(w)
+	add_label(r, "Name", 120)
+	local name = add_edit(r, name_text or "")
+	local status = add_text(w, "")
+	add_button(w, "Send the code", function()
+		id_call(url, "reset_request", {name = name:GetText()},
+				function(res, err)
+			status.text = res or err
+		end)
+	end)
+	r = add_row(w)
+	add_label(r, "Code", 120)
+	local code = add_edit(r, "")
+	r = add_row(w)
+	add_label(r, "New password", 120)
+	local pw = add_edit(r, "", true)
+	r = add_row(w)
+	add_button(r, "Set the password", function()
+		id_call(url, "reset", {name = name:GetText(), code = code:GetText(),
+			password = pw:GetText()}, function(res, err)
+			if res then
+				uistack.main:pop(root)
+				M.id_login(url, nil, "Password set: log in with it")
+			else
+				status.text = err
+			end
+		end)
+	end)
+	add_button(r, "Close", close_and(root))
+end
+
+-- The age, as 10b has it: "18 or over" and nothing more, or a birth year
+-- and, under 13, a parent's consent. Under the lock (4): a PIN set, the
+-- PIN first
+local function age_rows(w)
+	local age = {adult = nil, year = "", consent = false}
+	local r = add_row(w)
+	add_label(r, "Are you 18 or over?", 200)
+	local yes, no
+	local year_row, consent_b
+	local function draw()
+		yes:GetChild(0).text = (age.adult == true and "[x]" or "[ ]") .. " Yes"
+		no:GetChild(0).text = (age.adult == false and "[x]" or "[ ]") .. " No"
+		year_row.visible = age.adult == false
+		consent_b.visible = age.adult == false
+		consent_b:GetChild(0).text = (age.consent and "[x]" or "[ ]") ..
+				" Under 13: I have a parent's consent"
+	end
+	yes = add_button(r, "Yes", function() age.adult = true draw() end)
+	no = add_button(r, "No", function() age.adult = false draw() end)
+	year_row = add_row(w)
+	add_label(year_row, "Birth year", 200)
+	local year = add_edit(year_row, "")
+	consent_b = add_button(w, "", function()
+		age.consent = not age.consent
+		draw()
+	end)
+	draw()
+	return function()
+		if age.adult == nil then
+			return nil, "Say whether you are 18 or over"
+		end
+		if age.adult then
+			return {adult = true}
+		end
+		local y = tonumber(year:GetText())
+		if not y then
+			return nil, "The year you were born"
+		end
+		return {adult = false, birth_year = y, consent = age.consent}
+	end
+end
+
+function M.id_register(url, then_cb)
+	ask_pin(function(can)
+		if not can then
+			return
+		end
+		local root, w = open_window("starport id register", 640)
+		add_text(w, "A Starport ID at " .. url)
+		-- 10a: what it holds, said where it is made
+		add_text(w, "It holds: a name, a password (as a hash), a recovery "..
+				"e-mail if you give one, \"18 or over\" or a birth year under "..
+				"that, a parent's consent under 13, how many times you have "..
+				"logged in, your report key, and a separate identity for "..
+				"each community you join. That is all, on purpose: it is "..
+				"made for privacy, and nothing more is asked or kept than "..
+				"logging in, the age limits and moderation need.", GREY)
+		local r = add_row(w)
+		add_label(r, "Name", 200)
+		local name = add_edit(r, "")
+		r = add_row(w)
+		add_label(r, "Password", 200)
+		local pw = add_edit(r, "", true)
+		r = add_row(w)
+		add_label(r, "Password again", 200)
+		local pw2 = add_edit(r, "", true)
+		r = add_row(w)
+		add_label(r, "Recovery e-mail (optional)", 200)
+		local email = add_edit(r, "")
+		add_text(w, "Without one, a forgotten password is the end of the ID "..
+				"and its standing. You can add it later.", GREY)
+		local get_age = age_rows(w)
+		local status = add_text(w, "")
+		r = add_row(w)
+		add_button(r, "Make the ID", function()
+			if pw:GetText() ~= pw2:GetText() then
+				status.text = "The passwords differ"
+				return
+			end
+			local a, why = get_age()
+			if not a then
+				status.text = why
+				return
+			end
+			local body = {name = name:GetText(), password = pw:GetText(),
+				email = email:GetText(), adult = a.adult,
+				birth_year = a.birth_year, consent = a.consent,
+				-- The key this client has used there: its standing comes
+				key = load_state().keys[url]}
+			status.text = "Making it..."
+			id_call(url, "register", body, function(res, err)
+				if not res then
+					status.text = err
+					return
+				end
+				keep_id(url, res.session, res.me)
+				uistack.main:pop(root)
+				if then_cb then
+					then_cb()
+				else
+					M.id_page(url, res.email_error)
+				end
+			end)
+		end)
+		add_button(r, "Close", close_and(root))
+	end)
+end
+
+-- The ID's own page: e-mail, TOTP, password, age, log out, delete
+function M.id_page(url, message)
+	id_refresh(url, function(me, err)
+		local root, w = open_window("starport id", 680)
+		if not me then
+			add_text(w, "Starport ID at " .. url .. ": " .. tostring(err))
+			add_button(w, "Log in...", function()
+				uistack.main:pop(root)
+				M.id_login(url)
+			end)
+			add_button(w, "Close", close_and(root))
+			return
+		end
+		local function again(text)
+			uistack.main:pop(root)
+			M.id_page(url, text)
+		end
+		local session = load_state().ids[url].session
+		add_text(w, "Starport ID " .. me.name .. " at " .. url .. " (age " ..
+				me.band .. ", " .. me.logins .. " logins)")
+		if message and message ~= "" then
+			add_text(w, message, YELLOW)
+		end
+		for _, st in ipairs(me.statements or {}) do
+			add_text(w, tostring(st.action) .. " for " .. tostring(st.reason) ..
+					": " .. tostring(st.text), YELLOW)
+		end
+		-- The e-mail
+		local r = add_row(w)
+		add_label(r, "Recovery e-mail", 160)
+		local email = add_edit(r, me.email_pending ~= "" and me.email_pending
+				or me.email)
+		add_button(r, "Set", function()
+			id_call(url, "email", {session = session, email = email:GetText()},
+					function(res, e2)
+				again(res == "sent" and "A code went to the address" or
+						res and "Set" or e2)
+			end)
+		end)
+		if me.email_pending ~= "" then
+			r = add_row(w)
+			add_label(r, "Code from the mail", 160)
+			local code = add_edit(r, "")
+			add_button(r, "Confirm", function()
+				id_call(url, "confirm_email", {session = session,
+					code = code:GetText()}, function(res, e2)
+					again(res and "Confirmed" or e2)
+				end)
+			end)
+		end
+		-- TOTP
+		r = add_row(w)
+		add_label(r, me.totp and "TOTP: on" or "TOTP: off", 160)
+		local code = add_edit(r, "")
+		if me.totp then
+			add_button(r, "Turn off (code)", function()
+				id_call(url, "totp", {session = session, cmd = "off",
+					code = code:GetText()}, function(res, e2)
+					again(res and "TOTP is off" or e2)
+				end)
+			end)
+		else
+			add_button(r, "Turn on...", function()
+				id_call(url, "totp", {session = session, cmd = "begin"},
+						function(res, e2)
+					if not res then
+						return again(e2)
+					end
+					uistack.main:pop(root)
+					local root2, w2 = open_window("starport id totp", 620)
+					add_text(w2, "Add this key to an authenticator app, then "..
+							"enter the code it shows:")
+					local k = add_edit(w2, res.secret)
+					k.minWidth = 400
+					add_text(w2, res.uri, GREY)
+					local c = add_edit(w2, "")
+					local rr = add_row(w2)
+					add_button(rr, "Turn on", function()
+						id_call(url, "totp", {session = session,
+							cmd = "confirm", code = c:GetText()},
+								function(res2, e3)
+							uistack.main:pop(root2)
+							M.id_page(url, res2 and "TOTP is on" or e3)
+						end)
+					end)
+					add_button(rr, "Close", close_and(root2))
+				end)
+			end)
+		end
+		-- The password
+		r = add_row(w)
+		add_label(r, "Password: old, new", 160)
+		local old = add_edit(r, "", true)
+		local new = add_edit(r, "", true)
+		add_button(r, "Change", function()
+			id_call(url, "password", {session = session, old = old:GetText(),
+				new = new:GetText()}, function(res, e2)
+				again(res and "Password changed" or e2)
+			end)
+		end)
+		-- The age, under the lock
+		add_button(w, "Change the age...", function()
+			ask_pin(function(can)
+				if not can then
+					return
+				end
+				uistack.main:pop(root)
+				local root2, w2 = open_window("starport id age", 560)
+				local get_age = age_rows(w2)
+				local st = add_text(w2, "")
+				local rr = add_row(w2)
+				add_button(rr, "Save", function()
+					local a, why = get_age()
+					if not a then
+						st.text = why
+						return
+					end
+					a.session = session
+					id_call(url, "age", a, function(res, e3)
+						uistack.main:pop(root2)
+						M.id_page(url, res and "Saved" or e3)
+					end)
+				end)
+				add_button(rr, "Close", close_and(root2))
+			end)
+		end)
+		r = add_row(w)
+		add_button(r, "Log out", function()
+			id_call(url, "logout", {session = session}, function() end)
+			load_state().ids[url] = nil
+			save_state()
+			uistack.main:pop(root)
+		end)
+		local dpw = add_edit(r, "", true)
+		add_button(r, "Delete the ID (password)", function()
+			id_call(url, "delete", {session = session,
+				password = dpw:GetText()}, function(res, e2)
+				if res then
+					load_state().ids[url] = nil
+					save_state()
+					uistack.main:pop(root)
+				else
+					again(e2)
+				end
+			end)
+		end)
+		add_button(w, "Close", close_and(root))
+	end)
+end
+
+-- id_token_here(cb): a token for the server this client is on, from the
+-- Starport ID of a Starport that lists it ([STARPORT] 10c); cb(token) or
+-- cb(nil, why). The name used in the server's community is asked the
+-- first time, in this side's own dialog.
+function M.safe.id_token_here(cb)
+	local address = __buildat_server_address()
+	if not address then
+		return cb(nil, "not connected")
+	end
+	local function with_row(row)
+		if not row then
+			return cb(nil, address .. " is not listed on your Starports")
+		end
+		local s = load_state()
+		local url, listing = nil, nil
+		for u, l in pairs(row.ids) do
+			if s.ids[u] then
+				url, listing = u, l
+			end
+		end
+		if not url then
+			-- Not logged in to any of them: the first one's login
+			for u, l in pairs(row.ids) do
+				url, listing = u, l
+			end
+			return M.id_login(url, function() M.safe.id_token_here(cb) end)
+		end
+		local function ask(name)
+			id_call(url, "token", {session = s.ids[url].session,
+				listing = listing, name = name}, function(res, err)
+				if not res then
+					if err == "session" then
+						return M.id_login(url, function()
+							M.safe.id_token_here(cb)
+						end, "Log in again")
+					end
+					return cb(nil, err)
+				end
+				if res.need_name then
+					local root, w = open_window("starport id name", 520)
+					add_text(w, "The name to use in " .. tostring(
+							type(row.fleet) == "table" and row.fleet.name or
+							row.name) .. ". Only this community sees it; "..
+							"others do not see which name you use here.")
+					local e = add_edit(w, res.suggest or "")
+					local rr = add_row(w)
+					add_button(rr, "Use it", function()
+						local n = e:GetText()
+						uistack.main:pop(root)
+						ask(n)
+					end)
+					add_button(rr, "Cancel", close_and(root, function()
+						cb(nil, "cancelled")
+					end))
+					return
+				end
+				cb(res.token)
+			end)
+		end
+		ask(nil)
+	end
+	local row = row_of(address)
+	if row then
+		with_row(row)
+	else
+		M.safe.fetch(function() with_row(row_of(address)) end, true)
+	end
 end
 
 -- open_settings(): the settings dialog, behind the PIN where one is set
@@ -873,15 +1391,6 @@ local function open_report_row(row)
 	add_button(r, "Close", function() uistack.main:pop(root) end)
 end
 
-local function row_of(address)
-	for _, x in ipairs(last_rows) do
-		if x.address == address then
-			return x
-		end
-	end
-	return nil
-end
-
 -- open_report(address): the report dialog for a listing of the last fetch
 function M.safe.open_report(address)
 	local row = row_of(address)
@@ -932,6 +1441,7 @@ M.direct_connect_allowed = M.safe.direct_connect_allowed
 M.open_settings = M.safe.open_settings
 M.open_report = M.safe.open_report
 M.open_report_here = M.safe.open_report_here
+M.id_token_here = M.safe.id_token_here
 M.group = M.safe.group
 return M
 -- vim: set noet ts=4 sw=4:

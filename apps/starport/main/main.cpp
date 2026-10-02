@@ -199,6 +199,10 @@ static ss_ check_categories(const json::Value &b)
 		return "audience: everyone, teen or adult";
 	if(!in_set(jstr(b, "access"), ACCESSES))
 		return "access: open, registration, invite, password or external";
+	// How people log in: its own accounts, Starport IDs, or both (10c)
+	const ss_ login = jstr(b, "login", "local");
+	if(!in_set(login, {"local", "starport", "both"}))
+		return "login: local, starport or both";
 	// An account made somewhere else first: where ([STARPORT] 3)
 	const ss_ signup = jstr(b, "signup_url");
 	if(jstr(b, "access") == "external" && (signup.size() > 200 ||
@@ -287,6 +291,8 @@ static json::Value default_settings()
 	// to it ([STARPORT] 2a); off for a test instance, the address then
 	// taken as given
 	s.set("email_confirmation", true);
+	// Whether players can make Starport IDs here (10)
+	s.set("id_registration", true);
 	// How the codes go: url smtp://host:587 or smtps://host:465
 	json::Value smtp = json::object();
 	for(const char *k : {"url", "from", "user", "password"})
@@ -492,6 +498,8 @@ struct Module: public interface::Module
 			api_report(r, body);
 		else if(r.path == "/api/report_status" && r.method == "POST")
 			api_report_status(r, body);
+		else if(r.path.compare(0, 8, "/api/id/") == 0 && r.method == "POST")
+			api_id(r, body);
 		else if(r.path == "/api/transparency")
 			api_transparency(r);
 		else if(r.path.compare(0, 14, "/api/starport/") == 0)
@@ -575,6 +583,7 @@ struct Module: public interface::Module
 		for(const char *k : {"name", "description", "kind", "audience",
 				"access", "region", "app", "version", "signup_url"})
 			l.set(k, b.get(k).is_string() ? b.get(k) : json::Value(""));
+		l.set("login", jstr(b, "login", "local"));
 		json::Value desc = b.get("descriptors").deepcopy();
 		for(const auto &pair : DESCRIPTORS)
 			if(desc.get(pair.first).is_undefined())
@@ -856,6 +865,7 @@ struct Module: public interface::Module
 			json::Value s = json::object();
 			for(const char *k : {"id", "name", "description", "host", "port",
 					"app", "version", "tags", "languages", "region", "signup_url",
+					"login",
 					"players", "players_max"})
 				s.set(k, l.get(k));
 			const json::Value e = effective(l);
@@ -1306,6 +1316,453 @@ struct Module: public interface::Module
 	}
 
 	// -----------------------------------------------------------------------
+	// 10. Starport ID: an account of this server's builtin/accounts, and
+	// what Starport keeps of it in "ids" (all of it listed to the user at
+	// registration, 10a)
+
+	static int64_t this_year()
+	{
+		const time_t t = time(nullptr);
+		struct tm tm;
+		gmtime_r(&t, &tm);
+		return tm.tm_year + 1900;
+	}
+
+	// 10b: the lowest the age can be, from the year alone; 18 for "18 or
+	// over", which is all that is known of an adult
+	static int64_t age_low(const json::Value &id)
+	{
+		if(id.get("adult").is_true())
+			return 18;
+		// Not said yet (an account made by joining the app): the youngest
+		if(id.get("birth_year").is_undefined())
+			return 0;
+		return this_year() - jint(id, "birth_year") - 1;
+	}
+	static const char* band(const json::Value &id)
+	{
+		const int64_t a = age_low(id);
+		return a >= 18 ? "18+" : a >= 13 ? "13-17" : "under 13";
+	}
+
+	// The account: "" when done, else why not. q has adult (bool), or
+	// birth_year and, under 13, consent
+	ss_ set_age(json::Value &id, const json::Value &q)
+	{
+		if(q.get("adult").is_true()){
+			id.set("adult", true);
+			id.del_key("birth_year");
+			id.del_key("consent");
+			return "";
+		}
+		const int64_t y = jint(q, "birth_year");
+		if(y < this_year() - 120 || y > this_year())
+			return "birth_year: the year you were born";
+		json::Value probe = json::object();
+		probe.set("birth_year", y);
+		if(age_low(probe) >= 18){
+			// Not kept: an adult is "18 or over" and nothing more
+			id.set("adult", true);
+			id.del_key("birth_year");
+			id.del_key("consent");
+			return "";
+		}
+		if(age_low(probe) < 13 && !q.get("consent").is_true())
+			return "consent: under 13, a parent's consent is needed";
+		id.set("adult", false);
+		id.set("birth_year", y);
+		id.set("consent", q.get("consent").is_true());
+		return "";
+	}
+
+	json::Value id_me(const ss_ &name)
+	{
+		const json::Value id = load("ids", name);
+		const json::Value o = load("operators", name);
+		json::Value me = json::object();
+		me.set("name", name);
+		me.set("email", jstr(o, "email"));
+		me.set("email_pending", jstr(o, "email_pending"));
+		me.set("adult", id.get("adult").is_true());
+		if(!id.get("adult").is_true())
+			me.set("birth_year", jint(id, "birth_year"));
+		me.set("consent", id.get("consent").is_true());
+		me.set("band", !id.get("adult").is_true() &&
+				id.get("birth_year").is_undefined() ? "not said" : band(id));
+		me.set("logins", jint(id, "logins"));
+		me.set("key", jstr(id, "key"));
+		bool totp = false;
+		accounts::access(m_server, [&](accounts::Interface *a){
+			totp = a->totp_on(name);
+		});
+		me.set("totp", totp);
+		me.set("suspended_until", jint(id, "suspended_until"));
+		json::Value scopes = json::array();
+		const json::Value &sc = id.get("scopes");
+		if(sc.is_object())
+			for(json::Iterator it(sc); it.valid(); it.next()){
+				json::Value x = json::object();
+				x.set("scope", it.key());
+				x.set("name", jstr(it.value(), "name"));
+				scopes.append(x);
+			}
+		me.set("scopes", scopes);
+		// Its statements of reasons (6), where it was suspended
+		json::Value st = json::array();
+		for(const ss_ &sid : store("statements")->list("")){
+			const json::Value s = load("statements", sid);
+			if(jstr(s, "owner") == name)
+				st.append(s);
+		}
+		me.set("statements", st);
+		return me;
+	}
+
+	ss_ new_session(const ss_ &name)
+	{
+		const ss_ session = random_hex(32);
+		json::Value s = json::object();
+		s.set("name", name);
+		s.set("expires", now_s() + 30 * 86400);
+		put("sessions", hex(interface::sha256::calculate(session)), s);
+		return session;
+	}
+
+	// The ID a session is of, or ""
+	ss_ session_name(const ss_ &session)
+	{
+		if(session.empty() || session.size() > 100)
+			return "";
+		const ss_ key = hex(interface::sha256::calculate(session));
+		const json::Value s = load("sessions", key);
+		if(!s.is_object())
+			return "";
+		if(jint(s, "expires") < now_s()){
+			store("sessions")->remove(key);
+			return "";
+		}
+		return jstr(s, "name");
+	}
+
+	// The reminder of a missing recovery e-mail: on the 2nd, 6th, 18th,
+	// 54th... login (2 * 3^n, 10a)
+	static bool remind_login(int64_t n)
+	{
+		for(int64_t m = 2; m <= n; m *= 3)
+			if(m == n)
+				return true;
+		return false;
+	}
+
+	// A per-fleet identity (10c): the same in a fleet, different in any
+	// other; a listing in no fleet is its own scope
+	ss_ scope_of(const json::Value &l)
+	{
+		return jstr(l, "fleet").empty() ? "listing:"+jstr(l, "id") :
+				"fleet:"+jstr(l, "fleet");
+	}
+	ss_ sub_of(const ss_ &name, const ss_ &scope)
+	{
+		json::Value k = load("settings", "id_secret");
+		if(!k.is_string()){
+			k = json::Value(random_hex(32));
+			put("settings", "id_secret", k);
+		}
+		return hex(interface::sha256::hmac(unhex(k.as_string()),
+				name+"|"+scope)).substr(0, 24);
+	}
+
+	static ss_ base64url(const ss_ &data)
+	{
+		static const char *A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop"
+				"qrstuvwxyz0123456789-_";
+		ss_ out;
+		uint32_t buf = 0;
+		int bits = 0;
+		for(unsigned char c : data){
+			buf = (buf << 8) | c;
+			bits += 8;
+			while(bits >= 6){
+				out += A[(buf >> (bits - 6)) & 63];
+				bits -= 6;
+			}
+		}
+		if(bits > 0)
+			out += A[(buf << (6 - bits)) & 63];
+		return out;
+	}
+
+	void api_id(const network::HttpRequest &r, const json::Value &b)
+	{
+		const ss_ what = r.path.substr(8);
+		json::Value result;
+		ss_ error;
+		try {
+			result = id_call(r, what, b);
+		} catch(std::exception &e){
+			error = e.what();
+		}
+		json::Value v = json::object();
+		if(error.empty()){
+			v.set("ok", true);
+			v.set("result", result);
+		} else {
+			v.set("ok", false);
+			v.set("error", error);
+		}
+		respond(r, 200, v);
+	}
+
+	json::Value id_call(const network::HttpRequest &r, const ss_ &what,
+			const json::Value &b)
+	{
+		accounts::Interface *acc = nullptr;
+		accounts::access(m_server, [&](accounts::Interface *a){ acc = a; });
+		if(!acc)
+			throw Exception("Starport is not ready");
+		if(what == "register"){
+			if(!setting("id_registration").is_true())
+				throw Exception("this Starport makes no new IDs");
+			if(!rate_ok("id_register", r.address, 5, 86400))
+				throw Exception("too many new IDs from this address today");
+			const ss_ name = jstr(b, "name");
+			json::Value id = json::object();
+			const ss_ age_error = set_age(id, b);
+			if(!age_error.empty())
+				throw Exception(age_error);
+			const ss_ err = acc->create_account(name, jstr(b, "password"));
+			if(!err.empty())
+				throw Exception(err);
+			id.set("logins", (int64_t)1);
+			id.set("created", now_s());
+			id.set("scopes", json::object());
+			// The report key the client had, or a new one (5c)
+			const ss_ key = jstr(b, "key");
+			id.set("key", is_hex(key, 64) ? key : random_hex(32));
+			put("ids", name, id);
+			json::Value out = json::object();
+			if(!jstr(b, "email").empty()){
+				try {
+					out.set("email", cmd_set_email(name, jstr(b, "email")));
+				} catch(std::exception &e){
+					out.set("email_error", e.what());
+				}
+			}
+			out.set("session", new_session(name));
+			out.set("me", id_me(name));
+			return out;
+		}
+		if(what == "login"){
+			const ss_ name = jstr(b, "name");
+			if(!rate_ok("id_login_addr", r.address, 30, 3600) ||
+					!rate_ok("id_login_name", name, 10, 3600))
+				throw Exception("too many logins; try later");
+			json::Value id = load("ids", name);
+			if(!acc->check_password(name, jstr(b, "password")))
+				throw Exception("wrong name or password");
+			// An account made by joining the app (an operator's) is an ID
+			// too, from its first login here; its age is not said yet
+			if(!id.is_object()){
+				id = json::object();
+				id.set("logins", (int64_t)0);
+				id.set("created", now_s());
+				id.set("scopes", json::object());
+				id.set("key", random_hex(32));
+				id.set("adult", false);
+			}
+			if(acc->totp_on(name)){
+				if(jstr(b, "totp").empty())
+					throw Exception("totp");
+				if(!acc->check_totp(name, jstr(b, "totp")))
+					throw Exception("wrong TOTP code");
+			}
+			if(jint(id, "suspended_until") > now_s())
+				throw Exception("this ID is suspended; its statement of "
+						"reasons is on the Starport");
+			id.set("logins", jint(id, "logins") + 1);
+			put("ids", name, id);
+			json::Value out = json::object();
+			out.set("session", new_session(name));
+			out.set("me", id_me(name));
+			out.set("remind_email", jstr(load("operators", name),
+					"email").empty() && remind_login(jint(id, "logins")));
+			return out;
+		}
+		if(what == "reset_request"){
+			const ss_ name = jstr(b, "name");
+			const json::Value o = load("operators", name);
+			if(!rate_ok("id_reset", name, 3, 86400) ||
+					!rate_ok("id_reset_addr", r.address, 10, 86400))
+				throw Exception("too many resets; try later");
+			// Said the same whether or not there is an address, so a
+			// name's e-mail cannot be probed
+			if(!jstr(o, "email").empty() && can_mail()){
+				json::Value id = load("ids", name);
+				const ss_ code = random_hex(4);
+				id.set("reset_code", code);
+				id.set("reset_ts", now_s());
+				put("ids", name, id);
+				const ss_ sp = jstr(m_settings, "name");
+				mail(name, jstr(o, "email"), sp+": a new password",
+						"A new password for the Starport ID "+name+" on "+sp+
+						" was asked for. The code is:\n\n    "+code+"\n\n"
+						"If that was not you, nothing needs doing.\n");
+			}
+			return json::Value("if the ID has a recovery e-mail, a code "
+					"went to it");
+		}
+		if(what == "reset"){
+			const ss_ name = jstr(b, "name");
+			json::Value id = load("ids", name);
+			if(!rate_ok("id_reset_try", name, 10, 86400) ||
+					jstr(id, "reset_code").empty() ||
+					now_s() - jint(id, "reset_ts") > 86400 ||
+					!same(jstr(id, "reset_code"), jstr(b, "code")))
+				throw Exception("not the code, or it is over a day old");
+			const ss_ err = acc->set_password(name, jstr(b, "password"));
+			if(!err.empty())
+				throw Exception(err);
+			id.set("reset_code", "");
+			put("ids", name, id);
+			return json::Value(true);
+		}
+		// The rest are of a logged-in ID
+		const ss_ name = session_name(jstr(b, "session"));
+		if(name.empty())
+			throw Exception("session");
+		json::Value id = load("ids", name);
+		if(!id.is_object())
+			throw Exception("session");
+		if(what == "me")
+			return id_me(name);
+		if(what == "logout"){
+			store("sessions")->remove(hex(interface::sha256::calculate(
+					jstr(b, "session"))));
+			return json::Value(true);
+		}
+		if(what == "email")
+			return cmd_set_email(name, jstr(b, "email"));
+		if(what == "confirm_email")
+			return cmd_confirm_email(name, jstr(b, "code"));
+		if(what == "age"){
+			const ss_ err = set_age(id, b);
+			if(!err.empty())
+				throw Exception(err);
+			put("ids", name, id);
+			return id_me(name);
+		}
+		if(what == "password"){
+			if(!acc->check_password(name, jstr(b, "old")))
+				throw Exception("the old password is wrong");
+			const ss_ err = acc->set_password(name, jstr(b, "new"));
+			if(!err.empty())
+				throw Exception(err);
+			return json::Value(true);
+		}
+		if(what == "totp"){
+			const ss_ cmd = jstr(b, "cmd");
+			json::Value out = json::object();
+			if(cmd == "begin"){
+				out.set("secret", acc->totp_begin(name));
+				out.set("uri", acc->totp_uri(name, jstr(out, "secret")));
+			} else if(cmd == "confirm" || cmd == "off"){
+				const ss_ err = cmd == "confirm" ?
+						acc->totp_confirm(name, jstr(b, "code")) :
+						acc->totp_off(name, jstr(b, "code"));
+				if(!err.empty())
+					throw Exception(err);
+			}
+			out.set("on", acc->totp_on(name));
+			return out;
+		}
+		if(what == "delete"){
+			if(!acc->check_password(name, jstr(b, "password")))
+				throw Exception("the password is wrong");
+			// What moderation must keep of a suspended ID stays, as its
+			// record and not as the account (10a)
+			if(jint(id, "suspended_until") > now_s()){
+				json::Value keep = json::object();
+				keep.set("band", band(id));
+				keep.set("suspended_until", jint(id, "suspended_until"));
+				keep.set("deleted", now_s());
+				put("moderation_ids", name, keep);
+			}
+			store("ids")->remove(name);
+			store("operators")->remove(name);
+			acc->delete_account(name);
+			for(const ss_ &k : store("sessions")->list(""))
+				if(jstr(load("sessions", k), "name") == name)
+					store("sessions")->remove(k);
+			return json::Value(true);
+		}
+		if(what == "token")
+			return id_token(name, id, b);
+		throw Exception("no such call");
+	}
+
+	// 10c: a token for one listing, signed with its secret, which its
+	// server checks without asking Starport. The name used in a fleet is
+	// asked the first time ("name" back, and the ID's own as a suggestion)
+	json::Value id_token(const ss_ &name, json::Value id, const json::Value &b)
+	{
+		if(jint(id, "suspended_until") > now_s())
+			throw Exception("this ID is suspended");
+		if(!id.get("adult").is_true() && id.get("birth_year").is_undefined())
+			throw Exception("say your age on the ID's page first");
+		const json::Value l = load("listings", jstr(b, "listing"));
+		if(!l.is_object())
+			throw Exception("no such listing");
+		// 10b: the age band against the listing's audience
+		const ss_ aud = jstr(effective(l), "audience");
+		const int64_t age = age_low(id);
+		if((aud == "adult" && age < 18) || (aud == "teen" && age < 13))
+			throw Exception("this server's audience is "+aud+": not for "
+					"this ID's age");
+		const ss_ scope = scope_of(l);
+		json::Value scopes = id.get("scopes").is_object() ?
+				id.get("scopes").deepcopy() : json::object();
+		ss_ shown = jstr(scopes.get(scope), "name");
+		if(shown.empty()){
+			const ss_ want = jstr(b, "name");
+			if(want.empty()){
+				json::Value out = json::object();
+				out.set("need_name", true);
+				out.set("suggest", name);
+				return out;
+			}
+			if(want.size() > 20 || want.find_first_not_of(
+					"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+					"0123456789_-") != ss_::npos)
+				throw Exception("a name is 1 to 20 letters, digits, _ or -");
+			const ss_ taken_key = scope+"|"+want;
+			const json::Value taken = load("scope_names", taken_key);
+			if(taken.is_string() && taken.as_string() != name)
+				throw Exception("that name is taken in this community");
+			put("scope_names", taken_key, json::Value(name));
+			json::Value s = json::object();
+			s.set("name", want);
+			scopes.set(scope, s);
+			id.set("scopes", scopes);
+			put("ids", name, id);
+			shown = want;
+		}
+		json::Value p = json::object();
+		p.set("sub", sub_of(name, scope));
+		p.set("name", shown);
+		p.set("listing", jstr(l, "id"));
+		p.set("exp", now_s() + 30 * 86400);
+		if(aud == "adult")
+			p.set("adult", true);
+		const ss_ payload = base64url(p.stringify());
+		json::Value out = json::object();
+		out.set("token", payload+"."+hex(interface::sha256::hmac(
+				unhex(jstr(l, "secret")), payload)));
+		out.set("name", shown);
+		out.set("exp", jint(p, "exp"));
+		return out;
+	}
+
+	// -----------------------------------------------------------------------
 	// Every tick: the verifier's results; once a day, what keeping data
 	// costs; every six hours, the listings checked again
 
@@ -1356,6 +1813,19 @@ struct Module: public interface::Module
 				gone++;
 			}
 		}
+		// 10b: a year that has reached 18 is dropped for "18 or over"
+		for(const ss_ &name : store("ids")->list("")){
+			json::Value id = load("ids", name);
+			if(!id.get("adult").is_true() && age_low(id) >= 18){
+				id.set("adult", true);
+				id.del_key("birth_year");
+				id.del_key("consent");
+				put("ids", name, id);
+			}
+		}
+		for(const ss_ &k : store("sessions")->list(""))
+			if(jint(load("sessions", k), "expires") < t)
+				store("sessions")->remove(k);
 		// A delisting for a time runs out
 		for(const ss_ &id : store("listings")->list("")){
 			json::Value l = load("listings", id);
@@ -1946,7 +2416,7 @@ struct Module: public interface::Module
 				l.set("status", "active");
 				l.set("status_auto", false);
 				if(reason == "category")
-					l.set("relabel", json::Value());
+					l.del_key("relabel");
 				put("listings", id, l);
 				audit(by, id, "restore", reason,
 						"the automatic action undone: reports dismissed", false);
@@ -2066,7 +2536,7 @@ struct Module: public interface::Module
 			if(l.is_object()){
 				l.set("status", "active");
 				l.set("status_until", (int64_t)0);
-				l.set("relabel", json::Value());
+				l.del_key("relabel");
 				put("listings", jstr(l, "id"), l);
 				store("bans")->remove("listing:"+jstr(l, "id"));
 				audit(by, jstr(l, "id"), "restore", "appeal", jstr(q, "text"),

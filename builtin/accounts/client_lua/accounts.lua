@@ -17,8 +17,9 @@
 --   on_passwd(text)        "" when the password was changed, else why not
 --   on_kicked(text)        before the client disconnects
 --   notice(text)           a line the game shows; the log's by default
--- A scripted client joins by the environment: <env>_NAME, <env>_PASSWORD and
--- <env>_CODE (env is "BUILDAT_JOIN" by default).
+-- A scripted client joins by the environment: <env>_NAME, <env>_PASSWORD,
+-- <env>_CODE and <env>_TOTP, or by a Starport ID's token in <env>_STARPORT
+-- (env is "BUILDAT_JOIN" by default).
 local log = buildat.Logger("accounts")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
@@ -35,10 +36,15 @@ local M = {
 
 local TEXT = {"object", {"text", "string"}}
 local LOGIN = {"object", {"name", "string"}, {"password", "string"},
-		{"code", "string"}, {"token", "string"}, {"keep", "byte"}}
-local LOGIN_RESULT = {"object", {"error", "string"}, {"token", "string"}}
+		{"code", "string"}, {"token", "string"}, {"keep", "byte"},
+		{"totp", "string"}, {"starport", "string"}}
+local TOTP_REQ = {"object", {"cmd", "string"}, {"code", "string"}}
+local TOTP_RESULT = {"object", {"error", "string"}, {"secret", "string"},
+		{"uri", "string"}, {"on", "byte"}}
+local LOGIN_RESULT = {"object", {"r", {"object", {"error", "string"},
+		{"token", "string"}}}, {"name", "string"}}
 local HELLO = {"object", {"local", "byte"}, {"setup", "byte"},
-		{"open_registration", "byte"}}
+		{"open_registration", "byte"}, {"starport", "byte"}}
 local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
 		{"arg", "string"}, {"on", "byte"}}
 local USERS = {"object",
@@ -68,11 +74,17 @@ end
 -- in with and asks nothing
 local token_tried = false
 
-local function send_login(name, password, code, token, keep)
+-- The last login sent, for the TOTP code it may turn out to need
+local last_login = nil
+
+local function send_login(name, password, code, token, keep, totp, starport)
+	last_login = {name, password, code, token, keep}
 	buildat.send_packet("accounts:login", cereal.binary_output(
 			{name = name, password = password, code = code or "",
-			token = token or "", keep = keep and 1 or 0}, LOGIN))
+			token = token or "", keep = keep and 1 or 0, totp = totp or "",
+			starport = starport or ""}, LOGIN))
 end
+M.send_login = send_login
 
 -- A window of the join: `width` wide, or the screen's width less a margin
 -- on a narrow one ([FP_TOUCH] 2), and its texts wrap to it
@@ -113,6 +125,36 @@ end
 
 -- simplified: the join dialog is rebuilt on every error rather than
 -- updated
+-- **The TOTP code** ([STARPORT] 10a): asked after the password was right,
+-- and sent with the same login again
+local function show_totp(error_text)
+	M.close()
+	local w = page_window(380)
+	window = w
+	page_text(w, "Code from your authenticator app")
+	local e = w:CreateChild("LineEdit")
+	e:SetStyleAuto()
+	e.minHeight = 26
+	e.textSelectable = true
+	if error_text and error_text ~= "" then
+		page_text(w, error_text, magic.Color(1.0, 0.4, 0.4))
+	end
+	local function go()
+		local l = last_login
+		send_login(l[1], l[2], l[3], l[4], l[5], e:GetText())
+	end
+	magic.SubscribeToEvent(e, "TextFinished", go)
+	local b = w:CreateChild("Button")
+	b:SetStyleAuto()
+	b.minHeight = 30
+	local bt = b:CreateChild("Text")
+	bt:SetStyleAuto()
+	bt:SetText("Join")
+	bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	magic.SubscribeToEvent(b, "Released", go)
+	e:SetFocus(true)
+end
+
 local function show_login(error_text)
 	M.close()
 	local is_local = M.hello["local"] == 1
@@ -138,6 +180,31 @@ local function show_login(error_text)
 	local version, hash = buildat.version()
 	label((opts.title or "Join") .. " v." .. tostring(version) ..
 			(hash and hash ~= "" and ("-" .. hash) or ""))
+	-- [STARPORT] 10c: a Starport ID in place of an account here; the
+	-- token comes from the client's own Starport extension, which asks
+	-- the Starport, so the password never comes here
+	if M.hello.starport == 1 and not is_local then
+		local sb = w:CreateChild("Button")
+		sb:SetStyleAuto()
+		sb.minHeight = 30
+		local st = sb:CreateChild("Text")
+		st:SetStyleAuto()
+		st:SetText("Sign in with your Starport ID")
+		st:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		magic.SubscribeToEvent(sb, "Released", function()
+			local ok, starport = pcall(require, "buildat/extension/starport")
+			if not ok or not starport.id_token_here then
+				return show_login("This client has no Starport extension")
+			end
+			starport.id_token_here(function(token, why)
+				if not token then
+					return show_login(why ~= "cancelled" and why or nil)
+				end
+				send_login("", "", "", nil, false, "", token)
+			end)
+		end)
+		label("or with an account of this server:")
+	end
 	label("Name")
 	-- The name used last on this server, kept on the client; else the one
 	-- the user gave the client for every game, unless that is the client's
@@ -247,13 +314,21 @@ buildat.sub_packet("accounts:hello", function(data)
 	-- A scripted or second client can skip the dialog
 	local env = opts.env or "BUILDAT_JOIN"
 	local auto_name = buildat.get_env(env .. "_NAME")
+	-- A Starport ID's token, as a check gets one from the Starport's API
+	local auto_starport = buildat.get_env(env .. "_STARPORT")
+	if auto_starport and auto_starport ~= "" and not M.auto_tried then
+		M.auto_tried = true
+		send_login("", "", "", nil, false, "", auto_starport)
+		return
+	end
 	local token = buildat.storage_read("token") or ""
 	if auto_name and not M.auto_tried then
 		M.auto_tried = true
 		M.name = auto_name
 		send_login(auto_name, buildat.get_env(env .. "_PASSWORD") or "",
 				buildat.get_env(env .. "_CODE") or "", nil,
-				buildat.get_env(env .. "_KEEP") == "1")
+				buildat.get_env(env .. "_KEEP") == "1",
+				buildat.get_env(env .. "_TOTP") or "")
 	elseif token ~= "" and not token_tried then
 		token_tried = true
 		M.name = buildat.storage_read("name") or ""
@@ -265,13 +340,22 @@ buildat.sub_packet("accounts:hello", function(data)
 end)
 
 buildat.sub_packet("accounts:login_result", function(data)
-	local r = cereal.binary_input(data, LOGIN_RESULT)
+	local outer = cereal.binary_input(data, LOGIN_RESULT)
+	local r = outer.r
+	if outer.name ~= "" then
+		M.name = outer.name
+	end
 	local err = r.error
 	if err ~= "" then
 		log:info("Login refused: " .. err)
 		-- A kept login that did not work is forgotten
 		if token_tried then
 			buildat.storage_write("token", "")
+		end
+		if err:sub(1, 5) == "TOTP:" and last_login then
+			show_totp(err == "TOTP: enter the code from your authenticator "..
+					"app" and "" or err:sub(7))
+			return
 		end
 		show_login(err)
 		return
@@ -460,6 +544,71 @@ passwd_page = function(back, message)
 	old:SetFocus(true)
 end
 M.password_page = function(back) passwd_page(back) end
+
+-- **Two-step login** ([STARPORT] 10a): TOTP on the user's own account. The
+-- server answers every request with whether it is on and, while turning it
+-- on, the secret to give an authenticator app
+local totp_page
+local totp_state = {on = 0, secret = "", uri = "", error = ""}
+totp_page = function(back)
+	local w = open_page("totp", "Two-step login (TOTP)", back)
+	local st = totp_state
+	if st.error ~= "" then
+		page_text(w, st.error, YELLOW)
+	end
+	if st.secret ~= "" then
+		page_text(w, "Add this key to an authenticator app, then enter " ..
+				"the code it shows:")
+		local k = w:CreateChild("LineEdit")
+		k:SetStyleAuto()
+		k.minHeight = 26
+		k.textCopyable = true
+		k.textSelectable = true
+		k:SetText(st.secret)
+		page_text(w, st.uri)
+		local code = field(w, "Code", false, function() end)
+		local r = row(w)
+		button(r, "Turn on", function()
+			buildat.send_packet("accounts:totp", cereal.binary_output(
+					{cmd = "confirm", code = code:GetText()}, TOTP_REQ))
+		end)
+		button(r, "Back", go_back)
+		return
+	end
+	page_text(w, st.on == 1 and "On: logging in asks for a code from your " ..
+			"authenticator app." or "Off. With it on, logging in also asks " ..
+			"for a code from an authenticator app on your phone.")
+	if st.on == 1 then
+		local code = field(w, "Code", false, function() end)
+		local r = row(w)
+		button(r, "Turn off", function()
+			buildat.send_packet("accounts:totp", cereal.binary_output(
+					{cmd = "off", code = code:GetText()}, TOTP_REQ))
+		end)
+		button(r, "Back", go_back)
+	else
+		local r = row(w)
+		button(r, "Turn on...", function()
+			buildat.send_packet("accounts:totp", cereal.binary_output(
+					{cmd = "begin", code = ""}, TOTP_REQ))
+		end)
+		button(r, "Back", go_back)
+	end
+end
+M.totp_page = function(back)
+	totp_state = {on = 0, secret = "", uri = "", error = ""}
+	buildat.send_packet("accounts:totp", cereal.binary_output(
+			{cmd = "status", code = ""}, TOTP_REQ))
+	totp_page(back)
+end
+
+buildat.sub_packet("accounts:totp_result", function(data)
+	local r = cereal.binary_input(data, TOTP_RESULT)
+	totp_state = {on = r.on, secret = r.secret, uri = r.uri, error = r.error}
+	if page_kind == "totp" then
+		totp_page(page_back)
+	end
+end)
 
 -- A page of fields under the users page: a password for an account, or a
 -- new account's name and password

@@ -346,6 +346,12 @@ home = function()
 			page = nil
 			accounts.password_page(home)
 		end)
+		-- [STARPORT] 10a: recommended to whoever moderates
+		button(b, "Two-step login", function()
+			page:Remove()
+			page = nil
+			accounts.totp_page(home)
+		end)
 	end)
 end
 

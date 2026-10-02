@@ -32,6 +32,7 @@
 #include "interface/http.h"
 #include "interface/sha256.h"
 #include "network/api.h"
+#include "starport_announce/api.h"
 #include <fstream>
 #include <sstream>
 #include <thread>
@@ -96,7 +97,29 @@ struct Listing {
 	ss_ secret; // raw bytes, as the Starport gave them (hex in the file)
 };
 
-struct Module: public interface::Module
+// base64url without padding, as a Starport's token has it
+static ss_ unbase64url(const ss_ &in)
+{
+	ss_ out;
+	uint32_t buf = 0;
+	int bits = 0;
+	for(char c : in){
+		int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ?
+				c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52 :
+				c == '-' ? 62 : c == '_' ? 63 : -1;
+		if(v < 0)
+			return "";
+		buf = (buf << 6) | v;
+		bits += 6;
+		if(bits >= 8){
+			bits -= 8;
+			out += (char)((buf >> bits) & 0xff);
+		}
+	}
+	return out;
+}
+
+struct Module: public interface::Module, public Interface
 {
 	interface::Server *m_server;
 	ss_ m_dir;
@@ -290,6 +313,65 @@ struct Module: public interface::Module
 		}
 		log_v(MODULE, "Announced to %s: %s", cs(url),
 				v.get("status").is_string() ? v.get("status").as_cstring() : "");
+	}
+
+	// -- [STARPORT] 10c
+
+	bool accepts_ids()
+	{
+		const ss_ login = m_config.get("login").is_string() ?
+				m_config.get("login").as_string() : "local";
+		return login == "starport" || login == "both";
+	}
+
+	ss_ verify_id_token(const ss_ &token, IdLogin *out)
+	{
+		if(!accepts_ids())
+			return "This server does not take Starport IDs";
+		const size_t dot = token.find('.');
+		if(dot == ss_::npos || token.size() > 2000)
+			return "Not a Starport ID token";
+		const ss_ payload = token.substr(0, dot);
+		const ss_ sig = token.substr(dot + 1);
+		ss_ host;
+		ss_ listing;
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			for(auto &pair : m_listings){
+				const ss_ want = interface::sha256::hex(
+						interface::sha256::hmac(pair.second.secret, payload));
+				if(want.size() == sig.size() && want == sig){
+					host = pair.first;
+					listing = pair.second.id;
+				}
+			}
+		}
+		if(host.empty())
+			return "The token is not from a Starport this server is on";
+		const json::Value p = json::load_string(unbase64url(payload).c_str());
+		if(!p.is_object() || !p.get("sub").is_string() ||
+				!p.get("name").is_string())
+			return "A malformed token";
+		if(p.get("listing").is_string() &&
+				p.get("listing").as_string() != listing)
+			return "The token is for another server";
+		const json::Value &exp = p.get("exp");
+		if(!exp.is_number() || exp.as_number() < (double)time(nullptr))
+			return "The token has expired: log in to the Starport again";
+		// The host of the Starport's url
+		const size_t s = host.find("://");
+		host = s == ss_::npos ? host : host.substr(s + 3);
+		host = host.substr(0, host.find_first_of(":/"));
+		out->sub = p.get("sub").as_string();
+		out->name = p.get("name").as_string();
+		out->starport = host;
+		out->adult = p.get("adult").is_true();
+		return "";
+	}
+
+	void* get_interface()
+	{
+		return dynamic_cast<Interface*>(this);
 	}
 
 	void on_http_request(const network::HttpRequest &r)

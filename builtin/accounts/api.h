@@ -67,6 +67,23 @@ namespace accounts
 		virtual ss_ unban(const ss_ &name_or_address) = 0;
 		// "name|address" per ban, as Luanti's get_ban_list says them
 		virtual sv_<ss_> ban_list() = 0;
+
+		// [STARPORT] 10: a Starport ID is an account of the Starport's own
+		// server, made and checked over its HTTP API. "" when done, else
+		// why not.
+		virtual ss_ create_account(const ss_ &name, const ss_ &password) = 0;
+		virtual bool check_password(const ss_ &name, const ss_ &password) = 0;
+		virtual ss_ set_password(const ss_ &name, const ss_ &password) = 0;
+		virtual ss_ delete_account(const ss_ &name) = 0;
+		// TOTP (RFC 6238), for any account: whether it is on; a code, good
+		// once; a new secret (base32), pending until confirmed by a code;
+		// off by a code
+		virtual bool totp_on(const ss_ &name) = 0;
+		virtual bool check_totp(const ss_ &name, const ss_ &code) = 0;
+		virtual ss_ totp_begin(const ss_ &name) = 0;
+		virtual ss_ totp_confirm(const ss_ &name, const ss_ &code) = 0;
+		virtual ss_ totp_off(const ss_ &name, const ss_ &code) = 0;
+		virtual ss_ totp_uri(const ss_ &name, const ss_ &secret_base32) = 0;
 	};
 
 	inline bool access(interface::Server *server,
