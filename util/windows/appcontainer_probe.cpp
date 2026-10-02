@@ -10,6 +10,12 @@
 // It makes an AppContainer profile, starts a copy of itself in it, runs the
 // tests from both sides, prints one line a test, and deletes the profile.
 //
+// With --listen, the second question: can another machine reach a listener
+// in the box (a public server)? The boxed copy listens on every interface
+// on PORT_LISTEN and the unboxed parent on PORT_CONTROL beside it, so a
+// connection that reaches the parent and not the box is the box's doing
+// and not the firewall's. Both wait LISTEN_SECONDS for a connection.
+//
 // Built by util/build_appcontainer_probe.sh (mingw-w64, static).
 #define _WIN32_WINNT 0x0A00
 #include <winsock2.h>
@@ -26,6 +32,9 @@
 static const wchar_t *PROFILE = L"buildat.appcontainer_probe";
 static const int PORT_BOX = 29961;    // The boxed copy listens here
 static const int PORT_PARENT = 29962; // The parent listens here
+static const int PORT_LISTEN = 29963; // --listen: the box, every interface
+static const int PORT_CONTROL = 29964; // --listen: the parent, beside it
+static const int LISTEN_SECONDS = 600;
 
 static std::string err(DWORD e)
 {
@@ -87,13 +96,13 @@ static std::string tcp_connect(const char *host, int port, int timeout_ms)
 	return why;
 }
 
-static SOCKET tcp_listen(int port, std::string *why)
+static SOCKET tcp_listen(int port, std::string *why, bool any = false)
 {
 	SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
 	sockaddr_in a = {};
 	a.sin_family = AF_INET;
 	a.sin_port = htons(port);
-	a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	a.sin_addr.s_addr = htonl(any ? INADDR_ANY : INADDR_LOOPBACK);
 	if(bind(s, (sockaddr*)&a, sizeof a) != 0 || listen(s, 4) != 0){
 		*why = err(WSAGetLastError());
 		closesocket(s);
@@ -102,22 +111,114 @@ static SOCKET tcp_listen(int port, std::string *why)
 	return s;
 }
 
-static std::string tcp_accept(SOCKET l, int timeout_ms)
+// "" or why not; *from gets the peer's address, and the peer a line
+static std::string tcp_accept(SOCKET l, int timeout_ms, std::string *from = nullptr)
 {
 	fd_set r;
 	FD_ZERO(&r); FD_SET(l, &r);
 	timeval tv = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
 	if(select(0, &r, nullptr, nullptr, &tv) <= 0)
 		return "nothing came in " + std::to_string(timeout_ms / 1000) + " s";
-	SOCKET c = accept(l, nullptr, nullptr);
+	sockaddr_in peer = {};
+	int plen = sizeof peer;
+	SOCKET c = accept(l, (sockaddr*)&peer, &plen);
 	if(c == INVALID_SOCKET)
 		return err(WSAGetLastError());
+	if(from){
+		char ip[INET_ADDRSTRLEN] = {0};
+		inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof ip);
+		*from = std::string(ip) + ":" + std::to_string(ntohs(peer.sin_port));
+		const char *hello = "appcontainer_probe: you got through\n";
+		send(c, hello, (int)strlen(hello), 0);
+	}
 	closesocket(c);
 	return "";
 }
 
+// --listen in the box: one connection from anywhere, or the time is up
+static int child_listen()
+{
+	const char *who = "boxed";
+	std::string why;
+	SOCKET l = tcp_listen(PORT_LISTEN, &why, true);
+	line(who, ("listen on every interface, port " +
+			std::to_string(PORT_LISTEN)).c_str(), l != INVALID_SOCKET, why);
+	if(l != INVALID_SOCKET){
+		std::string from;
+		why = tcp_accept(l, LISTEN_SECONDS * 1000, &from);
+		line(who, "a connection from outside came in", why.empty(),
+				why.empty() ? "from " + from : why);
+		closesocket(l);
+	}
+	printf("DONE\n");
+	fflush(stdout);
+	return 0;
+}
+
+// --listen's control, in the parent, on its own thread
+static DWORD WINAPI control_listen(void *)
+{
+	const char *who = "unboxed";
+	std::string why;
+	SOCKET l = tcp_listen(PORT_CONTROL, &why, true);
+	line(who, ("control: listen on every interface, port " +
+			std::to_string(PORT_CONTROL)).c_str(), l != INVALID_SOCKET, why);
+	if(l != INVALID_SOCKET){
+		std::string from;
+		why = tcp_accept(l, LISTEN_SECONDS * 1000, &from);
+		line(who, "control: a connection from outside came in", why.empty(),
+				why.empty() ? "from " + from : why);
+		closesocket(l);
+	}
+	return 0;
+}
+
+// The real version: GetVersionEx says 6.2 to a program with no manifest
+static std::string windows_version()
+{
+	typedef LONG (WINAPI *RtlGetVersion_t)(OSVERSIONINFOW*);
+	RtlGetVersion_t f = (RtlGetVersion_t)(void*)GetProcAddress(
+			GetModuleHandleA("ntdll.dll"), "RtlGetVersion");
+	OSVERSIONINFOW v = {sizeof v};
+	if(!f || f(&v) != 0)
+		return "unknown";
+	return std::to_string(v.dwMajorVersion) + "." +
+			std::to_string(v.dwMinorVersion) + " build " +
+			std::to_string(v.dwBuildNumber);
+}
+
+// The Documents folder where it really is (it may be in OneDrive)
+static std::wstring documents_path()
+{
+	PWSTR p = nullptr;
+	std::wstring s;
+	if(SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &p)))
+		s = p;
+	CoTaskMemFree(p);
+	return s;
+}
+
+static std::string narrow(const std::wstring &w)
+{
+	std::string s;
+	for(wchar_t c : w)
+		s += c < 128 ? (char)c : '?';
+	return s;
+}
+
+static std::string list_dir(const std::wstring &dir, bool *listed)
+{
+	WIN32_FIND_DATAW fd;
+	HANDLE fh = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+	*listed = fh != INVALID_HANDLE_VALUE;
+	if(!*listed)
+		return err(GetLastError());
+	FindClose(fh);
+	return "";
+}
+
 // The boxed copy. Its stdout is a pipe the parent reads, line by line.
-static int child()
+static int child(const std::wstring &docs)
 {
 	const char *who = "boxed";
 	std::string why;
@@ -175,13 +276,11 @@ static int child()
 				err(GetLastError()) : "it wrote one (removed again)");
 	if(h != INVALID_HANDLE_VALUE)
 		CloseHandle(h);
-	std::wstring docs = std::wstring(prof) + L"\\Documents\\*";
-	WIN32_FIND_DATAW fd;
-	HANDLE fh = FindFirstFileW(docs.c_str(), &fd);
-	refused(who, "list your Documents", fh != INVALID_HANDLE_VALUE,
-			fh == INVALID_HANDLE_VALUE ? err(GetLastError()) : "it listed it");
-	if(fh != INVALID_HANDLE_VALUE)
-		FindClose(fh);
+	// The parent's path, which the parent listed first as the control
+	bool listed = false;
+	std::string lwhy = docs.empty() ? "no path given" : list_dir(docs, &listed);
+	refused(who, "list your Documents", listed,
+			listed ? "it listed it" : lwhy);
 	bool clip = false;
 	std::string clip_why;
 	if(OpenClipboard(nullptr)){
@@ -215,12 +314,20 @@ int main(int argc, char **argv)
 {
 	WSADATA wsa;
 	WSAStartup(MAKEWORD(2, 2), &wsa);
-	if(argc > 1 && strcmp(argv[1], "--boxed") == 0)
-		return child();
+	if(argc > 1 && strcmp(argv[1], "--boxed-listen") == 0)
+		return child_listen();
+	if(argc > 1 && strcmp(argv[1], "--boxed") == 0){
+		// The Documents path, from the parent
+		int n = 0;
+		LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &n);
+		return child(n > 2 ? std::wstring(wargv[2]) : std::wstring());
+	}
+	const bool listen_mode = argc > 1 && strcmp(argv[1], "--listen") == 0;
 
 	const char *who = "unboxed";
-	OSVERSIONINFOA v = {sizeof v};
-	printf("appcontainer_probe: buildat [PROCESS_SANDBOX]; paste all of this back\n");
+	printf("appcontainer_probe: buildat [PROCESS_SANDBOX]%s; paste all of this back\n",
+			listen_mode ? " --listen" : "");
+	printf("Windows %s\n", windows_version().c_str());
 	DeleteAppContainerProfile(PROFILE);
 	PSID sid = nullptr;
 	HRESULT hr = CreateAppContainerProfile(PROFILE, PROFILE, PROFILE,
@@ -269,8 +376,40 @@ int main(int argc, char **argv)
 	sc.CapabilityCount = 3;
 
 	std::string why;
-	SOCKET pl = tcp_listen(PORT_PARENT, &why);
-	line(who, "listen on 127.0.0.1", pl != INVALID_SOCKET, why);
+	SOCKET pl = INVALID_SOCKET;
+	std::wstring docs;
+	HANDLE control = nullptr;
+	if(listen_mode){
+		// Where to connect from the other machine
+		char host[256] = {0};
+		gethostname(host, sizeof host);
+		addrinfo hints = {}, *res = nullptr;
+		hints.ai_family = AF_INET;
+		if(getaddrinfo(host, nullptr, &hints, &res) == 0){
+			for(addrinfo *a = res; a; a = a->ai_next){
+				char ip[INET_ADDRSTRLEN] = {0};
+				inet_ntop(AF_INET, &((sockaddr_in*)a->ai_addr)->sin_addr,
+						ip, sizeof ip);
+				printf("unboxed: this machine is %s; connect to %s:%d (the box)"
+						" and %s:%d (the control)\n", ip, ip, PORT_LISTEN, ip,
+						PORT_CONTROL);
+			}
+			freeaddrinfo(res);
+		}
+		printf("unboxed: waiting %d s for both; if the firewall asks, say "
+				"what it asked\n", LISTEN_SECONDS);
+		fflush(stdout);
+		control = CreateThread(nullptr, 0, control_listen, nullptr, 0, nullptr);
+	} else {
+		pl = tcp_listen(PORT_PARENT, &why);
+		line(who, "listen on 127.0.0.1", pl != INVALID_SOCKET, why);
+		// The control for the box's Documents test
+		docs = documents_path();
+		bool listed = false;
+		std::string lwhy = docs.empty() ? "no Documents folder" :
+				list_dir(docs, &listed);
+		line(who, ("control: list " + narrow(docs)).c_str(), listed, lwhy);
+	}
 
 	// The box's stdout, to read its lines
 	SECURITY_ATTRIBUTES sa = {sizeof sa, nullptr, TRUE};
@@ -290,7 +429,8 @@ int main(int argc, char **argv)
 	UpdateProcThreadAttribute(si.lpAttributeList, 0,
 			PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, &sc, sizeof sc,
 			nullptr, nullptr);
-	std::wstring cmd = std::wstring(L"\"") + exe + L"\" --boxed";
+	std::wstring cmd = std::wstring(L"\"") + exe + L"\"" +
+			(listen_mode ? L" --boxed-listen" : L" --boxed \"" + docs + L"\"");
 	PROCESS_INFORMATION pi = {};
 	BOOL ok = CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, TRUE,
 			EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr,
@@ -343,6 +483,9 @@ int main(int argc, char **argv)
 				fflush(stdout);
 			}
 		}
+		// --listen: the control may still be waiting; a minute more for it
+		if(control)
+			WaitForSingleObject(control, 60000);
 		WaitForSingleObject(pi.hProcess, 5000);
 		CloseHandle(pi.hProcess);
 		CloseHandle(pi.hThread);
@@ -351,9 +494,6 @@ int main(int argc, char **argv)
 	// container that no longer exists
 	hr = DeleteAppContainerProfile(PROFILE);
 	line(who, "delete the AppContainer profile", SUCCEEDED(hr), "");
-	if(GetVersionExA(&v))
-		printf("Windows %lu.%lu build %lu\n", v.dwMajorVersion,
-				v.dwMinorVersion, v.dwBuildNumber);
 	return 0;
 }
 // vim: set noet ts=4 sw=4:

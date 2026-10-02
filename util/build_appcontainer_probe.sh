@@ -12,7 +12,7 @@ docker build -q -t buildat-package-windows "$here/util/docker/windows" >/dev/nul
 docker run --rm -u "$(id -u):$(id -g)" -v "$here:/src:z" -w /src buildat-package-windows \
 	x86_64-w64-mingw32-g++ -O2 -static -std=c++17 \
 	util/windows/appcontainer_probe.cpp -o local/appcontainer_probe.exe \
-	-lws2_32 -luserenv -ladvapi32 -lshell32 -luser32 2>&1 |
+	-lws2_32 -luserenv -ladvapi32 -lshell32 -luser32 -lole32 -luuid 2>&1 |
 	grep -v "^$" || true
 ls -la "$here/local/appcontainer_probe.exe"
 # vim: set noet ts=4 sw=4:
