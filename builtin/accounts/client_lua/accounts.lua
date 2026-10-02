@@ -537,11 +537,23 @@ function M.close_page()
 	chat_list = nil
 end
 
-local function open_page(kind, title, back, width)
+-- `help`, a function, puts a Help button at the title's right
+local function open_page(kind, title, back, width, help)
 	M.close_page()
 	page_kind, page_back = kind, back
 	M.page = page_window(width or 560)
-	page_text(M.page, title)
+	if help then
+		local r = M.page:CreateChild("UIElement")
+		r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
+		local t = page_text(r, title)
+		t:SetWordwrap(false)
+		local b = button(r, "Help", help)
+		b:SetFixedWidth(b.minWidth)
+		-- The title takes the rest of the row, which puts Help at its end
+		t:SetFixedWidth(M.page.width - 32 - b.minWidth - 4)
+	else
+		page_text(M.page, title)
+	end
 	return M.page
 end
 
@@ -939,7 +951,7 @@ assert(encode({a = {1, "x\n"}}) == '{"a":[1,"x\\n"]}')
 assert(encode({starports = {}}) == '{"starports":[]}')
 
 local starport_info = nil
-local starport_page
+local starport_page, starport_help
 buildat.sub_packet("starport:config", function(data)
 	starport_info = buildat.parse_json(data)
 	-- What the server has now is what is edited
@@ -1017,10 +1029,140 @@ local function dropdown(parent, label, choices, current, on_choose)
 	return b
 end
 
+-- **What the Starport page is, and what goes in each field** ([STARPORT]
+-- 10g): a window over the page, its text scrolling
+local STARPORT_HELP = {
+	"# What this page is",
+	"Starports are directories of public servers: players find servers in "..
+	"their lists, and log in with a Starport ID where a server allows it. "..
+	"This page decides whether this server is listed, on which Starports, "..
+	"and what the listing says. Who may join by a Starport ID (off, anyone, "..
+	"approved only) is set on the Accounts page.",
+	"Everything here is kept in this app's starport.json beside its saves. "..
+	"The server reads that file again within seconds of a change, so it can "..
+	"also be edited by hand or by a script, and nothing has to restart.",
+	"# Starport: on / off",
+	"Off: the server is on no list and takes no Starport IDs; the "..
+	"Starports are told at once and keep the listing for when it comes "..
+	"back on.",
+	"# Unlisted",
+	"Yes: the server stays off the public lists, and still takes Starport "..
+	"IDs. For a private community that wants Starport logins without "..
+	"advertising itself.",
+	"# The Starports",
+	"Each Starport the server announces to, with what it last answered: "..
+	"listed; unlisted; unclaimed (an operator has not claimed it yet); "..
+	"filtered out by that Starport's own rules; refused, with the reason "..
+	"(a field it does not accept, for one); or unreachable.",
+	"Listing id and claim code: to be listed, the listing is claimed by an "..
+	"operator account on that Starport. Join the Starport app, set a "..
+	"contact e-mail, and claim the listing there with this id and code. "..
+	"Anyone with the code can claim it: keep it among this server's admins. "..
+	"(A server in a fleet is claimed by the fleet line instead.)",
+	"Accounts linked to its IDs: how many of this server's accounts log in "..
+	"by an ID of that Starport. Removing the Starport stops their ID "..
+	"logins; an admin can give them passwords on the Accounts page.",
+	"Follows: the blocklists of that Starport this server subscribes to. "..
+	"An ID they ban cannot join; its account here cannot log in by "..
+	"password either, unless it is an admin or a moderator.",
+	"Add a Starport: its address. A host name alone, like "..
+	"starport.example.org, means http://starport.example.org:29595, "..
+	"Starport's own port. A Starport behind an https proxy is written "..
+	"https://starport.example.org.",
+	"# The listing",
+	"What the Starport shows of this server. Nothing is sent until Save the "..
+	"listing; a dropdown with a red ? is a choice not made yet, which the "..
+	"Starport refuses (its status then says which).",
+	"Name: what the list shows, 1 to 60 characters. Example: Torkkola "..
+	"builders' plans.",
+	"Description: a sentence or two, up to 500 characters. Example: A shared "..
+	"floor plan for the Torkkola house; visitors welcome to look.",
+	"Sign-up address: with access \"external\" only, where an account is "..
+	"made before joining. Example: https://example.org/join.",
+	"Region: where the server is, for players choosing a near one and for a "..
+	"pool's choice. Example: eu, us-east.",
+	"Fleet: puts this server in a fleet of one operator's servers, shown "..
+	"together. The line is the fleet's id and code, from the Fleets page "..
+	"of the Starport app. Example: 3312a3640de3:b7896830ad5df4c1.",
+	"Pool: servers of a fleet with the same pool name are interchangeable "..
+	"(they only split the load); players are sent to the least busy one. "..
+	"Example: main. Empty: this server is its own entry.",
+	"Tags: up to 8, lower case, comma separated, for search. Example: "..
+	"creative, building, finnish.",
+	"Languages: the languages spoken there, comma separated. Example: en, fi.",
+	"# Kind",
+	"world: a persistent world to come back to. arena: matches that start "..
+	"and end. app: not a game -- a tool, a creative or social space (the "..
+	"floor planner is one). other: none of these.",
+	"# Audience",
+	"The server's own rating, as an app store's. everyone: for all ages. "..
+	"teen: 13 and over. adult: 18 and over. Starports may hide some "..
+	"audiences (the official one leaves adult out), and a player's filters "..
+	"and age decide what they see.",
+	"# Access",
+	"open: anyone joins. registration: an account is made on this server "..
+	"first. invite: an invite code is needed. password: a password shared "..
+	"by the players. external: an account made somewhere else first, at "..
+	"the sign-up address.",
+	"# The descriptors: what the server has",
+	"Violence: none; cartoon (unrealistic, no blood); realistic.",
+	"Chat between players: none; moderated (someone watches it and acts); "..
+	"unmoderated.",
+	"Player content (builds, images, text players make that others see): "..
+	"none; moderated; unmoderated.",
+	"Bad language: yes if swearing and the like is common or allowed.",
+	"Sexual content: yes if there is any.",
+	"Drugs: yes if drug use is shown or a theme.",
+	"Purchases: yes if anything costs real money.",
+	"Gambling: yes if there are paid random rewards (loot boxes and the "..
+	"like) or betting.",
+	"Personal data: yes if the server collects personal data beyond play, "..
+	"such as e-mail addresses.",
+	"An audience of everyone with unmoderated chat or player content is "..
+	"looked at by the Starport's moderators. Moderators may relabel a "..
+	"listing that says less than it has; its operator gets a statement of "..
+	"reasons and can appeal.",
+}
+-- A heading is a line beginning with "# "
+
+starport_help = function()
+	close_popup()
+	local w = page_window(720)
+	-- Over the Starport page (100) and its dropdowns (200)
+	w.priority = 300
+	page_text(w, "Starport: help")
+	local list = w:CreateChild("ListView")
+	list:SetStyleAuto()
+	list:SetFixedHeight(math.max(160, math.floor(magic.ui.root.height * 0.7)))
+	-- The list's inside, less its scroll bar, and a tenth less again:
+	-- Urho3D's wrap measures a line a few percent short of what it draws,
+	-- more so at some UI scales, and a fixed margin did not cover all
+	local width = math.max(100, math.floor((w.width - 60) * 0.9))
+	for i, t in ipairs(STARPORT_HELP) do
+		if i > 1 and t:sub(1, 2) == "# " then
+			local gap = list:CreateChild("UIElement")
+			gap:SetFixedHeight(10)
+			list:AddItem(gap)
+		end
+		local x = list:CreateChild("Text")
+		x:SetStyleAuto()
+		x:SetWordwrap(true)
+		x:SetFixedWidth(width)
+		if t:sub(1, 2) == "# " then
+			x:SetText(t:sub(3))
+			x:SetColor(YELLOW)
+		else
+			x:SetText(t)
+		end
+		list:AddItem(x)
+	end
+	button(w, "Close", function() w:Remove() end)
+end
+
 starport_page = function(back, confirm_remove)
 	-- Wide: the listing's choices are many (page_window narrows it on a
 	-- narrow screen)
-	local w = open_page("starport", "Starport", back, 840)
+	local w = open_page("starport", "Starport", back, 840, starport_help)
 	local info = starport_info
 	if not info then
 		page_text(w, "Waiting for the server...")
