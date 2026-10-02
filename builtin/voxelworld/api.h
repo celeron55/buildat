@@ -6,6 +6,7 @@
 #include "interface/module.h"
 #include "interface/voxel.h"
 #include "interface/voxel_volume.h"
+#include "storage/api.h"
 #include <PolyVoxCore/Vector.h>
 #include <PolyVoxCore/Region.h>
 #include <PolyVoxCore/RawVolume.h>
@@ -45,6 +46,34 @@ namespace voxelworld
 		{}
 	};
 
+	// A section has come into the world, or is about to leave it. What
+	// listens is a game that keeps something of its own per section -- what
+	// hangs off the nodes, the timers running in it -- and has to bring it
+	// back with the section and write it out with it.
+	//
+	// Loaded is emitted after the voxels are there and unloaded before they
+	// go; both reach the listener after voxelworld has let go of the
+	// section, so a listener may call back into it.
+	struct SectionLoaded: public interface::Event::Private
+	{
+		SceneReference scene;
+		pv::Vector3DInt16 section_p;
+
+		SectionLoaded(SceneReference scene,
+				const pv::Vector3DInt16 &section_p):
+			scene(scene), section_p(section_p){}
+	};
+
+	struct SectionUnloaded: public interface::Event::Private
+	{
+		SceneReference scene;
+		pv::Vector3DInt16 section_p;
+
+		SectionUnloaded(SceneReference scene,
+				const pv::Vector3DInt16 &section_p):
+			scene(scene), section_p(section_p){}
+	};
+
 	struct NodeVolumeUpdated: public interface::Event::Private
 	{
 		SceneReference scene;
@@ -56,6 +85,44 @@ namespace voxelworld
 				bool is_static_chunk, const pv::Vector3DInt32 &chunk_p):
 			scene(scene), node_id(node_id),
 			is_static_chunk(is_static_chunk), chunk_p(chunk_p)
+		{}
+	};
+
+	// Where the world is kept loaded: a point in voxels, and how far around
+	// it sections live. The radii are per point because a player needs a big
+	// one and a machine that only has to keep working needs the smallest one
+	// that does -- and because two players differ from each other: a client
+	// on a weaker computer wants less sent to it, and loading more than that
+	// client will look at is the server spending memory on nothing.
+	//
+	// A section pinned in place is a point with every radius zero.
+	struct LoadPoint
+	{
+		pv::Vector3DInt32 p; // In voxels
+		// Sections this far out are loaded if the save has them and left
+		// alone if it does not: what a player sees far away is the terrain
+		// that is already there, and new terrain appears closer in. This is
+		// also the radius a section has to leave before it is unloaded, so
+		// keeping it larger than the generate radius is what stops a player
+		// walking back and forth from generating the same section twice.
+		int16_t load_xz = 0;
+		int16_t load_y = 0;
+		// ... and this far out, generated as well. <= the load radii.
+		int16_t generate_xz = 0;
+		int16_t generate_y = 0;
+		// Whose point this is, if it is a client's, and zero if it is not.
+		// A peer's point is also where the world is sent to that peer from:
+		// how much it gets is the smaller of what its client asked for and
+		// this point's load radius, because the server cannot send what it
+		// does not keep. A peer with no point of its own gets everything.
+		size_t peer = 0;
+
+		LoadPoint(){}
+		LoadPoint(const pv::Vector3DInt32 &p,
+				int16_t load_xz, int16_t load_y,
+				int16_t generate_xz, int16_t generate_y, size_t peer = 0):
+			p(p), load_xz(load_xz), load_y(load_y),
+			generate_xz(generate_xz), generate_y(generate_y), peer(peer)
 		{}
 	};
 
@@ -75,6 +142,40 @@ namespace voxelworld
 	{
 		virtual interface::VoxelRegistry* get_voxel_reg() = 0;
 
+		// Persist this world in a save, under a name of its own -- a save
+		// holds zero, one or many worlds, so the name is what separates
+		// them. Until this is called nothing is persisted, which is what
+		// every game did before it existed: generate and forget.
+		//
+		// Call it after registering voxels and before asking for any
+		// section. Sections already in the save are loaded instead of
+		// generated.
+		//
+		// The running game owns the voxel numbering and the save stores
+		// names: what a save holds is a name table, and loading translates
+		// its ids into the ones this run registered. So a game is free to
+		// register its types in another order, or to add and drop them,
+		// without a world it has saved meaning anything else than it did.
+		// Registering more types after this call is allowed; each reaches
+		// the save's table before anything holding it is written.
+		//
+		// The Save belongs to whoever opened it, and closing it while a
+		// world still points at it is a use-after-free. Pass nullptr to stop
+		// persisting first.
+		virtual void set_save(storage::Save *save, const ss_ &world_name) = 0;
+
+		// Write out every section that has changed since it was read.
+		// Happens by itself when a section is unloaded and at shutdown, so
+		// this is for a game that wants a checkpoint of its own.
+		virtual void save() = 0;
+
+		// Voxel types the save holds that this game does not register. They
+		// are kept, drawn with the definitions the save carries and tinted,
+		// so an old world still looks like itself -- but the game no longer
+		// supports them, and this is how a game says so on screen instead of
+		// leaving someone to walk into it.
+		virtual sv_<interface::VoxelName> get_unknown_voxels() = 0;
+
 		virtual void add_commit_hook(up_<CommitHook> hook) = 0;
 
 		virtual pv::Vector3DInt16 get_section_size_voxels() = 0;
@@ -89,14 +190,93 @@ namespace voxelworld
 
 		virtual void load_or_generate_section(
 				const pv::Vector3DInt16 &section_p) = 0;
+		// Loaded from the save or created empty, not generated: what a
+		// write lands in when it reaches past the generated world -- a
+		// mapgen mod's structure spilling into the next section -- and the
+		// generator fills in the rest around it when that section's turn
+		// comes, as write_volume() has always had it. Generating it on the
+		// spot was 500 ms inside the mod's own step ([STEP_SLICE]).
+		virtual void load_section_no_generate(
+				const pv::Vector3DInt16 &section_p) = 0;
+
+		// The points the world stays loaded around, replacing the previous
+		// set; call it whenever they move, it only remembers them. A few
+		// sections are loaded, generated or unloaded per pass after that, so
+		// that one tick never carries a whole world.
+		//
+		// Nothing outside the region given to create_instance() is loaded,
+		// which is what makes that region the world's bounds: a game that
+		// streams says how tall and how wide its world is by asking for it,
+		// and the sky is still at the top of it.
+		//
+		// A world that never calls this loads its whole region at the start
+		// and keeps it, which is what every game did before this existed.
+		virtual void set_load_points(const sv_<LoadPoint> &points) = 0;
+
+		// Every section that is loaded right now, in no particular order.
+		// What asks is a sweep -- an ABM, a fill, an importer clipping what
+		// it reads -- which would otherwise walk the bounds and skip what is
+		// not there; over a streamed world that walk is the cost.
+		virtual sv_<pv::Vector3DInt16> get_loaded_sections() = 0;
+
+		// How many sections one streaming pass may load, generate or unload;
+		// two by default. A game whose generator runs behind turns this down
+		// to nothing while its queue is long and back up when it drains --
+		// only the game can see that queue. Nothing else should touch it.
+		virtual void set_stream_budget(size_t sections_per_pass) = 0;
 
 		virtual void unload_section(const pv::Vector3DInt16 &section_p) = 0;
 
 		virtual bool is_section_loaded(const pv::Vector3DInt16 &section_p) = 0;
 
+		// Whether a generator has been over it. A section can be loaded and
+		// not generated -- a volume write created it to hold what crossed
+		// into it -- and what a generator writes when it does arrive is the
+		// section's own; see merge_volume()'s owned region. So anything
+		// that wants to write terrain of its own and have it stay waits for
+		// this.
+		virtual bool is_section_generated(
+				const pv::Vector3DInt16 &section_p) = 0;
+
+		// Say a section has been generated without generating it: its
+		// voxels came from somewhere else. What asks is an importer reading
+		// another engine's world, and what it prevents is the generator
+		// running over that section afterwards and writing what was read
+		// away -- inside its own section a generator's volume wins, which
+		// is what merge_volume()'s owned region means.
+		//
+		// The section is created and loaded if it is not there yet. What
+		// the caller does not write stays undefined, the way it is in a
+		// section nobody has asked for: a caller that only covers part of a
+		// section is saying that the rest of it is not there rather than
+		// that it is empty.
+		virtual void set_section_generated(
+				const pv::Vector3DInt16 &section_p) = 0;
+
 		virtual void set_voxel(const pv::Vector3DInt32 &p,
 				const VoxelInstance &v,
 				bool disable_warnings = false) = 0;
+
+		// The voxels of a region, in one read rather than one per voxel:
+		// what asks for this is a sweep, and a section is a quarter of a
+		// million voxels. The answer carries every plane the chunks it came
+		// from have.
+		//
+		// What is not there -- a section that is not loaded, a chunk nothing
+		// has written -- comes back as VOXELTYPEID_UNDEFINED, which is what
+		// get_voxel() answers for one.
+		virtual VoxelVolume get_volume(const pv::Region &region) = 0;
+
+		// The other direction, and the one merge_volume() below is not:
+		// every defined voxel of the volume is written, whatever was there.
+		// An importer, a VoxelManip and a mod putting a building down all
+		// mean this; a generator means merge_volume().
+		//
+		// A voxel that is undefined in the volume is skipped, so a caller
+		// can still leave holes, and create_missing_sections works the same
+		// way it does below.
+		virtual void set_volume(const VoxelVolume &volume,
+				bool create_missing_sections = false) = 0;
 
 		// Write a generated volume into the world, by priority per voxel: a
 		// voxel that has not been generated yet (VOXELTYPEID_UNDEFINED) takes
@@ -119,7 +299,8 @@ namespace voxelworld
 		// as something standing there.
 		virtual void merge_volume(
 				const VoxelVolume &volume,
-				bool create_missing_sections) = 0;
+				bool create_missing_sections,
+				const pv::Region *owned = nullptr) = 0;
 
 		// Maintain VoxelInstance::get_skylight() of every voxel in the world.
 		// Off by default; a world that does not want skylight pays nothing and
@@ -127,17 +308,82 @@ namespace voxelworld
 		// date by set_voxel(), including through generation, and is settled
 		// before commit() meshes anything.
 		//
-		// Light enters from above the top of the world region at full
-		// strength, falls through anything that transmits light without
-		// losing any, and spreads sideways and upwards losing one step per
-		// voxel. A voxel transmits light if its edge material is
+		// Light enters from two places, and needs no switch between them:
+		// from above the top of the world region, when that section is
+		// loaded; and from any voxel that already holds light, because the
+		// light is stored in the voxel and the save carries it. The second
+		// is what a world taller than anything that will ever be loaded at
+		// once needs -- its region top is thirty thousand voxels up and is
+		// never there -- and it makes producing correct light the
+		// generator's contract.
+		//
+		// So a voxel written with light of its own keeps it: that is a
+		// generator saying what the sky reaches where it has just built.
+		// One written without takes the light that was there, and the
+		// change is what the flood works from.
+		//
+		// Light falls through anything that transmits light without losing
+		// any, and spreads sideways and upwards losing one step per voxel.
+		// A voxel transmits light if its edge material is
 		// EDGEMATERIALID_EMPTY, which is the same test the mesher uses to
 		// decide whether a face is drawn against it.
 		//
 		// simplified: transparency is that one test, so glass would have to
 		// be a light barrier or a hole in the terrain. A voxel definition
 		// flag of its own is the upgrade path.
-		virtual void set_skylight_enabled(bool enabled) = 0;
+		// Which light this is about. A game binds the fields it fills (see
+		// VoxelFormat) and asks for the ones it wants kept up to date here;
+		// the two are separate questions and both are opt-in.
+		//
+		// LIGHT_SKY is the sky's, and every game in this tree that has a sky
+		// asks for it. LIGHT_LAMP is light a voxel emits of its own --
+		// VoxelDefinition::light_source -- which a Luanti game's mechanics
+		// read (mob spawning, crops) and a game whose lamps are lights in
+		// the scene does not want at all: the shader does that work and the
+		// field would be bits spent on zeroes.
+		enum LightField { LIGHT_SKY, LIGHT_LAMP };
+
+		virtual void set_light_maintained(LightField field,
+				bool maintained) = 0;
+
+		// The sky's, which is what nearly every caller means
+		void set_skylight_enabled(bool enabled){
+			set_light_maintained(LIGHT_SKY, enabled);
+		}
+
+		// Work the light in these sections out again from what is in them
+		// and what is around them. A game that writes a region of terrain
+		// with no light in it -- a Luanti mod's mapgen does exactly that,
+		// and Luanti's own answer to it is VoxelManip:calc_lighting() --
+		// asks for this afterwards; without it the terrain it wrote is dark
+		// and stays dark, because a write carrying no light takes the light
+		// that was there and there was none.
+		//
+		// It is the same work a section that came back stale does: the
+		// light in the section is taken out and let back in from its faces
+		// and its own sources. Costly enough to be worth asking for rather
+		// than doing on every write -- a section is a quarter of a million
+		// voxels.
+		virtual void relight_region(const pv::Region &region) = 0;
+
+		// The same, later: the sections are marked stale now and
+		// relight_stale() brings them up to date under a budget, one section
+		// at a time, so the recompute is not inside the step that wrote them
+		// ([STEP_SLICE]: a mapgen mod's write_to_map was a 160 ms relight
+		// in the same step as its own 200 ms). Until then the section wears
+		// the light the write's own flood left, which is nearly right.
+		virtual void relight_region_later(const pv::Region &region) = 0;
+		// Returns how many sections are still stale. The nearest a load point
+		// goes first; while that one is within near_sections of a load
+		// point the budget is near_budget_us instead -- a jungle spawn's
+		// own canopy is black until its sections are relit, and the tick
+		// may spend more on those than on the far ones ([SEED5_SETTLE])
+		virtual size_t relight_stale(int64_t budget_us,
+				int64_t near_budget_us = 0, int near_sections = 2) = 0;
+		// While on, a write does not flood light from what it changed: for
+		// a writer that will ask for a relight of everything it touched
+		// anyway, whose flood was the same work twice ([STEP_SLICE])
+		virtual void set_light_deferred(bool on) = 0;
 
 		virtual size_t num_buffers_loaded() = 0;
 
@@ -176,6 +422,12 @@ namespace voxelworld
 		// It is a parameter and not a setting because the initial sections are
 		// created here. The client has its own switch; see physics_distance in
 		// voxelworld's client_lua.
+		//
+		// The region is in sections, and is the world's bounds: nothing
+		// outside it is ever loaded, and the sky is above the top of it. A
+		// world that does not stream (see set_load_points()) also has every
+		// section of it loaded at the start, so a world that wants bounds
+		// bigger than it wants to load has to stream.
 		virtual void create_instance(SceneReference scene_ref,
 				const pv::Region &region, bool physics_enabled = false) = 0;
 		virtual void delete_instance(SceneReference scene_ref) = 0;
