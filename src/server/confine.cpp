@@ -33,6 +33,7 @@ ss_ confine(core::Config &config, const ss_ &module_path)
 #include <string.h>
 #include <stdlib.h>
 #include <dirent.h>
+#include <fstream>
 
 // What older headers lack: the build box is older than the kernels the
 // server runs on
@@ -286,7 +287,15 @@ ss_ confine(core::Config &config, const ss_ &module_path)
 	// BUILDAT_CONNECT_PORTS: "8080,2525", or "any"), never to ones an app
 	// names. simplified: by port and not by address, which is all Landlock
 	// has; UDP is not covered at all.
-	const ss_ extra = config.get<ss_>("connect_ports");
+	// Or the admin's file <user>/connect_ports, one line: the box cannot
+	// write the user path's top level, so an app cannot give itself ports
+	ss_ extra = config.get<ss_>("connect_ports");
+	if(extra.empty()){
+		std::ifstream f(user+"/connect_ports");
+		std::getline(f, extra);
+		while(!extra.empty() && isspace((unsigned char)extra.back()))
+			extra.pop_back();
+	}
 	const bool connect_any = extra == "any";
 	sv_<int> connect_ports = {80, 443, 465, 587, 29500, 29595};
 	if(!connect_any){
@@ -386,7 +395,7 @@ ss_ confine(core::Config &config, const ss_ &module_path)
 	} else {
 		tcp = "TCP bound to port "+itos(listen_port)+" only, connecting ";
 		if(connect_any){
-			tcp += "anywhere (--connect-ports any)";
+			tcp += "anywhere (connect_ports any)";
 		} else {
 			tcp += "to ports";
 			for(int p : connect_ports)

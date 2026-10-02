@@ -30,7 +30,9 @@
 # itself, and refuses to start on a kernel without Landlock unless given
 # --unconfined. A boxed server connects out only to ports 80, 443, 465,
 # 587, 29500 and 29595; a Starport that lists servers on other ports is
-# given more as a server option, "--connect-ports any" or a list.
+# given more by a file in its user directory, <user dir>/connect_ports,
+# one line: "any", or a list such as "8080,30000" -- or as a server option,
+# "--connect-ports any".
 #
 # **A rollback** is by hand, with this script stopped: run the version
 # before from its directory,
