@@ -9,6 +9,8 @@
 	// is the namespace below
 	#undef interface
 #endif
+#include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <mutex>
 #define MODULE "http"
@@ -112,6 +114,57 @@ ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type)
 	}
 	curl_slist_free_all(headers);
 	return out;
+}
+
+struct ReadState {
+	const ss_ *data;
+	size_t at;
+};
+static size_t from_string(char *p, size_t size, size_t n, void *user)
+{
+	ReadState &r = *(ReadState*)user;
+	const size_t len = std::min(size * n, r.data->size() - r.at);
+	memcpy(p, r.data->data() + r.at, len);
+	r.at += len;
+	return len;
+}
+
+void send_mail(const ss_ &url, const ss_ &user, const ss_ &password,
+		const ss_ &from, const ss_ &to, const ss_ &message)
+{
+	char errbuf[CURL_ERROR_SIZE] = {0};
+	CURL *c = easy(url, errbuf);
+	if(!user.empty()){
+		curl_easy_setopt(c, CURLOPT_USERNAME, user.c_str());
+		curl_easy_setopt(c, CURLOPT_PASSWORD, password.c_str());
+	}
+	curl_easy_setopt(c, CURLOPT_USE_SSL, (long)CURLUSESSL_TRY);
+	curl_easy_setopt(c, CURLOPT_MAIL_FROM, ("<"+from+">").c_str());
+	struct curl_slist *rcpt = curl_slist_append(nullptr,
+			("<"+to+">").c_str());
+	curl_easy_setopt(c, CURLOPT_MAIL_RCPT, rcpt);
+	ReadState r{&message, 0};
+	curl_easy_setopt(c, CURLOPT_READFUNCTION, from_string);
+	curl_easy_setopt(c, CURLOPT_READDATA, &r);
+	curl_easy_setopt(c, CURLOPT_UPLOAD, 1L);
+	try {
+		perform(c, url, errbuf);
+	} catch(...){
+		curl_slist_free_all(rcpt);
+		throw;
+	}
+	curl_slist_free_all(rcpt);
+}
+
+bool mail_supported()
+{
+	global_init_once();
+	const curl_version_info_data *v = curl_version_info(CURLVERSION_NOW);
+	for(const char * const *p = v->protocols; p && *p; p++){
+		if(strcmp(*p, "smtp") == 0)
+			return true;
+	}
+	return false;
 }
 
 void http_download(const ss_ &url, const ss_ &path,

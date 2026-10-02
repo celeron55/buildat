@@ -271,6 +271,15 @@ static json::Value default_settings()
 	// How long an address is kept ([STARPORT] 8)
 	s.set("retention_days", (int64_t)7);
 	// Who moderates, and whose reports go first ([STARPORT] 6)
+	// Whether an operator's e-mail address is confirmed by a code mailed
+	// to it ([STARPORT] 2a); off for a test instance, the address then
+	// taken as given
+	s.set("email_confirmation", true);
+	// How the codes go: url smtp://host:587 or smtps://host:465
+	json::Value smtp = json::object();
+	for(const char *k : {"url", "from", "user", "password"})
+		smtp.set(k, "");
+	s.set("smtp", smtp);
 	s.set("moderators", json::array());
 	s.set("trusted_flaggers", json::array());
 	return s;
@@ -1309,17 +1318,10 @@ struct Module: public interface::Module
 		const bool admin = is_admin(name);
 		if(cmd == "me")
 			return cmd_me(name, mod, admin);
-		if(cmd == "set_email"){
-			const ss_ email = jstr(q, "email");
-			if(email.size() > 200 || email.find('@') == ss_::npos)
-				throw Exception("an e-mail address");
-			json::Value o = load("operators", name);
-			if(!o.is_object())
-				o = json::object();
-			o.set("email", email);
-			put("operators", name, o);
-			return json::Value(true);
-		}
+		if(cmd == "set_email")
+			return cmd_set_email(name, jstr(q, "email"));
+		if(cmd == "confirm_email")
+			return cmd_confirm_email(name, jstr(q, "code"));
 		if(cmd == "claim")
 			return cmd_claim(name, q);
 		if(cmd == "appeal")
@@ -1359,6 +1361,9 @@ struct Module: public interface::Module
 		r.set("admin", admin);
 		const json::Value o = load("operators", name);
 		r.set("email", o.is_object() ? jstr(o, "email") : ss_());
+		r.set("email_pending", o.is_object() ? jstr(o, "email_pending") :
+				ss_());
+		r.set("email_confirmation", setting("email_confirmation").is_true());
 		json::Value ls = json::array();
 		for(const ss_ &id : store("listings")->list("")){
 			const json::Value l = load("listings", id);
@@ -1375,6 +1380,88 @@ struct Module: public interface::Module
 		r.set("statements", st);
 		r.set("starport", jstr(m_settings, "name"));
 		return r;
+	}
+
+	// "set" when taken as given, "sent" when a code went to it
+	json::Value cmd_set_email(const ss_ &name, const ss_ &email)
+	{
+		// Goes into a mail's header: one address, nothing that ends a line
+		const size_t at = email.find('@');
+		if(email.size() > 200 || at == ss_::npos || at == 0 ||
+				at != email.rfind('@') || at + 1 == email.size() ||
+				email.find_first_of(" \t\r\n<>,;\"()") != ss_::npos)
+			throw Exception("an e-mail address");
+		json::Value o = load("operators", name);
+		if(!o.is_object())
+			o = json::object();
+		if(!setting("email_confirmation").is_true()){
+			o.set("email", email);
+			o.set("email_pending", "");
+			put("operators", name, o);
+			return json::Value("set");
+		}
+		const json::Value &smtp = setting("smtp");
+		if(jstr(smtp, "url").empty() || jstr(smtp, "from").empty())
+			throw Exception("this Starport cannot send mail: its admin sets "
+					"smtp, or turns email_confirmation off");
+		if(!interface::mail_supported())
+			throw Exception("this Starport's libcurl cannot send mail (a "
+					"minimal build): its admin installs a full one, or turns "
+					"email_confirmation off");
+		if(!rate_ok("mail", name, 3, 3600))
+			throw Exception("three codes an hour; try later");
+		const ss_ code = random_hex(4);
+		o.set("email_pending", email);
+		o.set("email_code", code);
+		o.set("email_code_ts", now_s());
+		put("operators", name, o);
+		char date[64];
+		const time_t t = time(nullptr);
+		struct tm tm;
+		gmtime_r(&t, &tm);
+		strftime(date, sizeof date, "%a, %d %b %Y %H:%M:%S +0000", &tm);
+		const ss_ sp = jstr(m_settings, "name");
+		const ss_ message = ss_("Date: ")+date+"\r\n"
+				"From: "+jstr(smtp, "from")+"\r\n"
+				"To: "+email+"\r\n"
+				"Subject: "+sp+": confirming your e-mail address\r\n"
+				"\r\n"
+				"The account "+name+" on "+sp+" gave this address as its\r\n"
+				"contact. To confirm it, enter this code there:\r\n"
+				"\r\n"
+				"    "+code+"\r\n"
+				"\r\n"
+				"If that was not you, nothing needs doing.\r\n";
+		// A thread of its own, holding copies only: the mail server may be
+		// slow, and this module may be gone before it answers
+		const ss_ url = jstr(smtp, "url"), user = jstr(smtp, "user"),
+				password = jstr(smtp, "password"), from = jstr(smtp, "from");
+		std::thread([=](){
+			try {
+				interface::send_mail(url, user, password, from, email, message);
+				log_i(MODULE, "Sent a confirmation code to %s's address",
+						cs(name));
+			} catch(std::exception &e){
+				log_w(MODULE, "Mail to %s's address: %s", cs(name), e.what());
+			}
+		}).detach();
+		return json::Value("sent");
+	}
+
+	json::Value cmd_confirm_email(const ss_ &name, const ss_ &code)
+	{
+		json::Value o = load("operators", name);
+		if(!o.is_object() || jstr(o, "email_pending").empty())
+			throw Exception("no address waiting for a code");
+		if(now_s() - jint(o, "email_code_ts") > 86400)
+			throw Exception("the code is over a day old; ask for another");
+		if(!same(jstr(o, "email_code"), code))
+			throw Exception("not the code");
+		o.set("email", jstr(o, "email_pending"));
+		o.set("email_pending", "");
+		o.set("email_code", "");
+		put("operators", name, o);
+		return json::Value(true);
 	}
 
 	json::Value cmd_claim(const ss_ &name, const json::Value &q)

@@ -15,6 +15,14 @@ namespace interface
 	// announcing itself, a client's report); throws as http_get does
 	ss_ http_post(const ss_ &url, const ss_ &body,
 			const ss_ &content_type = "application/json");
+	// A mail through an SMTP server (smtp:// or smtps://; STARTTLS when the
+	// server offers it): `message` is the whole of it, headers and all,
+	// lines ending in CRLF. user empty: no login. Throws as http_get does.
+	void send_mail(const ss_ &url, const ss_ &user, const ss_ &password,
+			const ss_ &from, const ss_ &to, const ss_ &message);
+	// Whether the libcurl in use speaks SMTP: a minimal build (Fedora's
+	// libcurl-minimal) does not
+	bool mail_supported();
 	// The body straight to a file. progress(got, total) is called as it
 	// comes (total 0 when the server does not say); false from it aborts,
 	// which throws.

@@ -19,6 +19,17 @@ namespace interface
 		throw Exception("HTTP is not available in the web client");
 	}
 
+	void send_mail(const ss_ &url, const ss_ &user, const ss_ &password,
+			const ss_ &from, const ss_ &to, const ss_ &message)
+	{
+		throw Exception("Mail is not available in the web client");
+	}
+
+	bool mail_supported()
+	{
+		return false;
+	}
+
 	void http_download(const ss_ &url, const ss_ &path,
 			std::function<bool(uint64_t got, uint64_t total)> progress)
 	{
