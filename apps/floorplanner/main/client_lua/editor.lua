@@ -5023,6 +5023,10 @@ local function set_view(v)
 	if S.vp and v ~= "3d" then
 		M.leave_viewport()
 	end
+	-- 3D (here) from the plan view stays 3D until another view is picked
+	if v ~= "3d" then
+		S.no_plan_return = nil
+	end
 	if v == "walk" and S.view ~= "walk" then
 		if not S.walk.placed then
 			-- On the floor under the camera, or the plan's middle
@@ -5065,9 +5069,17 @@ local function set_view(v)
 	refresh_panels()
 end
 
--- A view the user picked: 3D takes its own camera back. "walk_here"
--- puts the walker under the free camera first. (On M: the chunk is at
--- Lua's limit of 200 locals.)
+-- A view the user picked: 3D takes its own camera back. (On M: the chunk
+-- is at Lua's limit of 200 locals.)
+-- "3d_here": 3D from the camera there is -- walking's as it is, the plan
+-- view's as a right drag turns it into 3D, looking down -- and from the
+-- plan view without the orbit's way back into it (S.no_plan_return), the
+-- 3D view's own camera going on from it.
+-- "walk_here": walking from what the middle of the screen is on, on this
+-- floor: the plan view's middle, or where the camera looks meets the
+-- floor (under the camera where it does not); looking the way the camera
+-- did, level, or from the plan view or 3D looking straight down, the way
+-- the walk looked last.
 function M.pick_view(v)
 	if v == "save" then
 		M.save_viewport()
@@ -5076,9 +5088,42 @@ function M.pick_view(v)
 		M.go_viewport(tonumber(v:sub(4)))
 		return
 	end
+	if v == "3d_here" then
+		local from_2d = S.view == "2d"
+		if from_2d then
+			local d = S.span / (2 * math.tan(math.rad(cam3d.fov) / 2))
+			S.pos = {x = W(S.cx), y = W(d), z = W(S.cz)}
+			S.yaw, S.pitch = 0, 90
+		end
+		M.leave_viewport()
+		set_view("3d")
+		S.no_plan_return = from_2d or nil
+		return
+	end
 	if v == "walk_here" then
-		S.walk.placed = false
+		local x, z
+		local keep_look = S.view == "2d" or (S.view == "3d" and S.pitch > 80)
+		if S.view == "2d" then
+			x, z = S.cx, S.cz
+		else
+			local yaw, pitch = math.rad(S.yaw), math.rad(S.pitch)
+			local fy = -math.sin(pitch)
+			x, z = S.pos.x * 1000, S.pos.z * 1000
+			if fy < -1e-3 then
+				local t = -S.pos.y / fy
+				x = (S.pos.x + math.sin(yaw) * math.cos(pitch) * t) * 1000
+				z = (S.pos.z + math.cos(yaw) * math.cos(pitch) * t) * 1000
+			end
+		end
+		S.walk.x, S.walk.z, S.walk.feet = x, z, 0
+		if not keep_look then
+			S.walk.yaw, S.walk.pitch = S.yaw, 0
+		end
+		S.walk.placed = true
 		v = "walk"
+		if S.view == "walk" then
+			S.yaw, S.pitch = S.walk.yaw, S.walk.pitch
+		end
 	end
 	local was_vp = S.vp
 	M.leave_viewport()
@@ -5168,9 +5213,12 @@ local function build_toolbar()
 		views[i] = {VIEW_NAMES[v] .. (S.touch and "" or
 				" (" .. keys.name("view_" .. v) .. ")"), v}
 	end
-	if S.view == "3d" and not S.vp then
-		views[#views + 1] = {"Walk from here", "walk_here"}
+	-- **From where the view is** (user, 2026-10-02): 3D with this camera,
+	-- or walking from what the middle of the screen is on (M.pick_view)
+	if S.view ~= "3d" or S.vp then
+		views[#views + 1] = {"3D (here)", "3d_here"}
 	end
+	views[#views + 1] = {"Walk (here)", "walk_here"}
 	-- **Viewports** (user, 2026-10-01): saved from 3D or walking by an
 	-- editor, gone to by anyone; picked again, or the dropdown opened and
 	-- closed, the menus are hidden again
@@ -8083,7 +8131,7 @@ do
 			local orbited = S.orbit
 			S.orbit, S.pan3d = nil, nil
 			magic.input:SetMouseMode(magic.MM_ABSOLUTE)
-			if orbited and plan_aligned() then
+			if orbited and plan_aligned() and not S.no_plan_return then
 				-- Back to the plan, where its floor is the view's: the middle
 				-- where the view's middle meets the floor, the span what the
 				-- camera's height sees
@@ -9146,7 +9194,7 @@ do
 		if S.view == "2d" then
 			g.middle = "drag: pan the plan"
 			g.right = "drag: into 3D, orbiting round the pointer"
-		elseif S.orbit and plan_facing() then
+		elseif S.orbit and plan_facing() and not S.no_plan_return then
 			g.right = plan_aligned() and "let go: back to the plan view" or
 					"turn it north-up to let go into the plan view"
 		elseif not S.captured then
