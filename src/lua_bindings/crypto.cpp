@@ -141,7 +141,7 @@ static int l_random_bytes(lua_State *L)
 }
 
 // -- [STARPORT] 10f: Mbed TLS, for the trusted side (client/extensions/network,
-// extensions/starport); not in the sandbox
+// client/extensions/starport); not in the sandbox
 
 // seal(password, plain) -> a blob: a salt, PBKDF2-HMAC-SHA256 of the
 // password (100000 rounds) as an AES-256-GCM key, the IV, the ciphertext

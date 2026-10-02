@@ -3894,7 +3894,7 @@ struct CApp: public App, public magic::Application
 	// its game's (the port changes every launch); any other its address's,
 	// so a server cannot read what another one, or a local game, stored.
 	// server_address() -> the address the client is connected to, or nil.
-	// Trusted only: extensions/starport's report of the server one is on
+	// Trusted only: client/extensions/starport's report of the server one is on
 	static int l_server_address(lua_State *L)
 	{
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
