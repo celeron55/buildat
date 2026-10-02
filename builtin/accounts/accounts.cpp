@@ -613,11 +613,14 @@ struct Module: public interface::Module, public Interface
 			if(unpack(data, b) && !b.address.empty())
 				m_store->remove("banaddr/"+b.address);
 			m_store->remove("ban/"+name_or_address);
+			// Off the Starports at the next announce, too (10d)
+			m_store->remove("ban_report/"+name_or_address);
 			found = true;
 		}
 		if(m_store->get("banaddr/"+name_or_address, data)){
 			m_store->remove("banaddr/"+name_or_address);
 			m_store->remove("ban/"+data);
+			m_store->remove("ban_report/"+data);
 			found = true;
 		}
 		if(!found)
@@ -1050,7 +1053,13 @@ struct Module: public interface::Module, public Interface
 			kick(target, "kicked by "+by);
 			result(r.name+" was kicked");
 		} else if(r.cmd == "ban"){
-			const ss_ why = ban(r.name, by);
+			ss_ why = ban(r.name, by);
+			// [STARPORT] 10d: the reason, and whether it goes to the
+			// Starports (an account of a Starport ID only)
+			if(why.empty() && r.on){
+				const ss_ rep = report_ban(r.name, r.arg.substr(0, 40));
+				why = rep.empty() ? "" : r.name+" was banned; "+rep;
+			}
 			result(why.empty() ? r.name+" was banned" : why);
 		} else if(r.cmd == "unban"){
 			const ss_ why = unban(r.name);
@@ -1276,6 +1285,39 @@ struct Module: public interface::Module, public Interface
 
 	// -- What a Starport (apps/starport) asks of its own server's accounts
 	// ([STARPORT] 10): a Starport ID is an account here
+
+	// [STARPORT] 10d: a ban to report to the Starport the account's ID is
+	// of; "" when it will be, else why not
+	ss_ report_ban(const ss_ &name, const ss_ &reason)
+	{
+		ss_ link;
+		if(!m_store->get("starport_of/"+name, link))
+			return "not reported: not a Starport ID's account";
+		m_store->set("ban_report/"+name, reason.empty() ? ss_("other") :
+				reason);
+		return "";
+	}
+
+	sv_<ss_> reported_bans()
+	{
+		sv_<ss_> out;
+		if(!m_store)
+			return out;
+		for(const ss_ &key : m_store->list("ban_report/")){
+			const ss_ name = key.substr(11);
+			ss_ link, reason;
+			if(!m_store->get("starport_of/"+name, link) ||
+					!m_store->get(key, reason))
+				continue;
+			// starport/<host>/<sub>
+			const size_t a = link.find('/'), b = link.rfind('/');
+			if(a == ss_::npos || b <= a)
+				continue;
+			out.push_back(link.substr(a + 1, b - a - 1)+"|"+
+					link.substr(b + 1)+"|"+reason);
+		}
+		return out;
+	}
 
 	ss_ create_account(const ss_ &name, const ss_ &password)
 	{

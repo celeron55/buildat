@@ -39,6 +39,7 @@
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <set>
 #include <condition_variable>
 #define MODULE "main"
 
@@ -607,6 +608,8 @@ struct Module: public interface::Module
 		put("listings", jstr(l, "id"), l);
 		consistency_check(l);
 		pool_check(l);
+		take_bans(l, b.get("bans"));
+		answer.set("blocked", blocked_for(l));
 		answer.set("ok", true);
 		answer.set("id", jstr(l, "id"));
 		answer.set("status", served_status(l));
@@ -1138,6 +1141,9 @@ struct Module: public interface::Module
 	// for good, never banned ([STARPORT] 7)
 	void auto_act(json::Value g)
 	{
+		// An ID is suspended by a moderator, never by reports alone (10d)
+		if(!jstr(g, "id_name").empty())
+			return;
 		const json::Value t = thresholds(jstr(g, "reason"));
 		const double w = jnum(g, "weight");
 		ss_ want;
@@ -1746,6 +1752,8 @@ struct Module: public interface::Module
 			put("ids", name, id);
 			shown = want;
 		}
+		// 10d: which ID a server's report of this identity is about
+		put("subs", scope+"|"+sub_of(name, scope), json::Value(name));
 		json::Value p = json::object();
 		p.set("sub", sub_of(name, scope));
 		p.set("name", shown);
@@ -1943,6 +1951,8 @@ struct Module: public interface::Module
 			return cmd_fleet(name, cmd, q);
 		if(cmd == "fleet_remove_server")
 			return cmd_fleet_remove_server(name, q);
+		if(cmd.compare(0, 10, "blocklist_") == 0 || cmd == "blocklists")
+			return cmd_blocklist(name, cmd, q);
 		if(cmd == "appeal")
 			return cmd_appeal(name, q);
 		if(!mod)
@@ -1963,6 +1973,11 @@ struct Module: public interface::Module
 			return cmd_appeals();
 		if(cmd == "decide_appeal")
 			return cmd_decide_appeal(name, q);
+		if(cmd == "suspend_id"){
+			suspend_id(name, jstr(q, "id"), jint(q, "days"),
+					jstr(q, "reason", "other"), jstr(q, "text"));
+			return json::Value(true);
+		}
 		if(!admin)
 			throw Exception("for the admin");
 		if(cmd == "settings")
@@ -2152,6 +2167,217 @@ struct Module: public interface::Module
 		return listing_summary(l);
 	}
 
+	// -- 10d. Bans shared: blocklists
+
+	// A server's whole current set of reported bans: kept as its own, and
+	// a ban new to it is a report about the ID for a moderator
+	void take_bans(const json::Value &l, const json::Value &bans)
+	{
+		if(!bans.is_array())
+			return;
+		const ss_ scope = scope_of(l);
+		const json::Value old = load("listing_bans", jstr(l, "id"));
+		json::Value now = json::array();
+		for(unsigned i = 0; i < bans.size() && i < 10000; i++){
+			const json::Value &x = bans.at(i);
+			const ss_ sub = jstr(x, "sub");
+			const json::Value who = load("subs", scope+"|"+sub);
+			if(!who.is_string())
+				continue; // not an identity this Starport gave
+			json::Value e = json::object();
+			e.set("sub", sub);
+			e.set("name", who.as_string());
+			ss_ reason = jstr(x, "reason");
+			e.set("reason", reason);
+			now.append(e);
+			bool was = false;
+			for(unsigned j = 0; old.is_array() && j < old.size(); j++)
+				was |= jstr(old.at(j), "sub") == sub;
+			if(was)
+				continue;
+			if(!in_set(reason, REASONS))
+				reason = "other";
+			json::Value rep = json::object();
+			const ss_ rid = random_hex(8);
+			rep.set("id", rid);
+			rep.set("listing", jstr(l, "id"));
+			rep.set("reason", reason);
+			rep.set("text", "banned on "+jstr(l, "name")+" ("+
+					jstr(l, "id")+"), reported by the server");
+			rep.set("key", "");
+			rep.set("address", "");
+			rep.set("ts", now_s());
+			rep.set("trusted", false);
+			rep.set("weight", 1.0);
+			rep.set("state", "open");
+			const ss_ gid = "id:"+who.as_string()+"|"+reason;
+			rep.set("group", gid);
+			put("reports", rid, rep);
+			add_to_group(gid, jstr(l, "id"), reason, rid, "");
+			json::Value g = load("groups", gid);
+			g.set("id_name", who.as_string());
+			put("groups", gid, g);
+		}
+		put("listing_bans", jstr(l, "id"), now);
+	}
+
+	// The IDs a list bans: its publishers' current bans
+	std::set<ss_> list_bans(const json::Value &list)
+	{
+		std::set<ss_> names;
+		const json::Value &pubs = list.get("publishers");
+		for(const ss_ &lid : store("listing_bans")->list("")){
+			const json::Value ol = load("listings", lid);
+			bool published = false;
+			for(unsigned i = 0; pubs.is_array() && i < pubs.size(); i++){
+				const ss_ p = pubs.at(i).as_string();
+				published |= p == scope_of(ol) || p == "listing:"+lid;
+			}
+			if(!published)
+				continue;
+			const json::Value bans = load("listing_bans", lid);
+			for(unsigned i = 0; bans.is_array() && i < bans.size(); i++)
+				names.insert(jstr(bans.at(i), "name"));
+		}
+		return names;
+	}
+
+	// What a listing's server keeps out: the bans of the lists it
+	// subscribes to, each as the identity it has in that server's fleet
+	json::Value blocked_for(const json::Value &l)
+	{
+		const ss_ scope = scope_of(l);
+		std::set<ss_> names;
+		for(const ss_ &id : store("blocklists")->list("")){
+			const json::Value list = load("blocklists", id);
+			const json::Value &subs = list.get("subscribers");
+			bool sub = false;
+			for(unsigned i = 0; subs.is_array() && i < subs.size(); i++){
+				const ss_ s = subs.at(i).as_string();
+				sub |= s == scope || s == "listing:"+jstr(l, "id");
+			}
+			if(sub)
+				for(const ss_ &n : list_bans(list))
+					names.insert(n);
+		}
+		json::Value out = json::array();
+		for(const ss_ &n : names)
+			out.append(sub_of(n, scope));
+		return out;
+	}
+
+	// Whether `scope` ("fleet:<id>" or "listing:<id>") is the account's
+	bool owns_scope(const ss_ &name, const ss_ &scope)
+	{
+		if(scope.compare(0, 6, "fleet:") == 0)
+			return jstr(load("fleets", scope.substr(6)), "owner") == name;
+		if(scope.compare(0, 8, "listing:") == 0)
+			return jstr(load("listings", scope.substr(8)), "owner") == name;
+		return false;
+	}
+
+	static json::Value without(const json::Value &arr, const ss_ &x)
+	{
+		json::Value out = json::array();
+		for(unsigned i = 0; arr.is_array() && i < arr.size(); i++)
+			if(arr.at(i).as_string() != x)
+				out.append(arr.at(i));
+		return out;
+	}
+	static json::Value with(const json::Value &arr, const ss_ &x)
+	{
+		json::Value out = without(arr, x);
+		out.append(x);
+		return out;
+	}
+
+	// Lists are public within the Starport: anyone subscribes their own
+	// servers to any. Publishing to another's list is offered by the
+	// server's owner and accepted by the list's
+	json::Value cmd_blocklist(const ss_ &name, const ss_ &cmd,
+			const json::Value &q)
+	{
+		if(cmd == "blocklists"){
+			json::Value out = json::array();
+			for(const ss_ &id : store("blocklists")->list("")){
+				json::Value list = load("blocklists", id);
+				list.set("bans", (int64_t)list_bans(list).size());
+				out.append(list);
+			}
+			return out;
+		}
+		if(cmd == "blocklist_create"){
+			const ss_ lname = jstr(q, "name");
+			if(lname.empty() || lname.size() > 60)
+				throw Exception("name: 1 to 60 characters");
+			json::Value list = json::object();
+			list.set("id", random_hex(6));
+			list.set("name", lname);
+			list.set("owner", name);
+			list.set("publishers", json::array());
+			list.set("offers", json::array());
+			list.set("subscribers", json::array());
+			put("blocklists", jstr(list, "id"), list);
+			return list;
+		}
+		json::Value list = load("blocklists", jstr(q, "list"));
+		if(!list.is_object())
+			throw Exception("no such blocklist");
+		const ss_ scope = jstr(q, "scope");
+		const bool own_list = jstr(list, "owner") == name;
+		if(cmd == "blocklist_accept" || cmd == "blocklist_drop"){
+			if(!own_list)
+				throw Exception("not your blocklist");
+			list.set("offers", without(list.get("offers"), scope));
+			if(cmd == "blocklist_accept")
+				list.set("publishers", with(list.get("publishers"), scope));
+			else
+				list.set("publishers", without(list.get("publishers"), scope));
+		} else {
+			if(!owns_scope(name, scope))
+				throw Exception("scope: fleet:<id> or listing:<id> of yours");
+			if(cmd == "blocklist_publish"){
+				if(own_list)
+					list.set("publishers", with(list.get("publishers"),
+							scope));
+				else
+					list.set("offers", with(list.get("offers"), scope));
+			} else if(cmd == "blocklist_unpublish"){
+				list.set("publishers", without(list.get("publishers"), scope));
+				list.set("offers", without(list.get("offers"), scope));
+			} else if(cmd == "blocklist_subscribe"){
+				list.set("subscribers", q.get("on").is_false() ?
+						without(list.get("subscribers"), scope) :
+						with(list.get("subscribers"), scope));
+			} else
+				throw Exception("no such command: "+cmd);
+		}
+		put("blocklists", jstr(list, "id"), list);
+		return list;
+	}
+
+	// A Starport moderator's suspension of an ID, with its statement (6)
+	void suspend_id(const ss_ &by, const ss_ &idname, int64_t days,
+			const ss_ &reason, const ss_ &text)
+	{
+		json::Value id = load("ids", idname);
+		if(!id.is_object())
+			throw Exception("no such ID");
+		id.set("suspended_until", days > 0 ? now_s() + days * 86400 :
+				(int64_t)4102444800LL);
+		put("ids", idname, id);
+		for(const ss_ &k : store("sessions")->list(""))
+			if(jstr(load("sessions", k), "name") == idname)
+				store("sessions")->remove(k);
+		audit(by, "id:"+idname, "suspend", reason, text, false);
+		json::Value fake = json::object();
+		fake.set("id", "id:"+idname);
+		fake.set("name", "Starport ID "+idname);
+		fake.set("owner", idname);
+		statement(fake, days > 0 ? "suspended for "+itos(days)+" days" :
+				"suspended", reason, text, by);
+	}
+
 	// -- 2b. An operator's fleets: made, renamed, a new code
 
 	json::Value cmd_fleet(const ss_ &name, const ss_ &cmd, const json::Value &q)
@@ -2284,6 +2510,15 @@ struct Module: public interface::Module
 		json::Value r = json::object();
 		r.set("group", g);
 		r.set("reports", reps);
+		// An ID's: its age band and whether it is suspended, nothing more
+		if(!jstr(g, "id_name").empty()){
+			const json::Value id = load("ids", jstr(g, "id_name"));
+			json::Value x = json::object();
+			x.set("name", jstr(g, "id_name"));
+			x.set("band", id.is_object() ? band(id) : "deleted");
+			x.set("suspended_until", jint(id, "suspended_until"));
+			r.set("id", x);
+		}
 		const json::Value l = load("listings", jstr(g, "listing"));
 		if(l.is_object())
 			r.set("listing", listing_summary(l));
@@ -2402,8 +2637,13 @@ struct Module: public interface::Module
 		if(decision != "dismiss" && decision != "uphold")
 			throw Exception("decision: dismiss or uphold");
 		const ss_ reason = jstr(g, "reason");
-		const sv_<ss_> members = members_of(g);
-		if(decision == "uphold" && members.empty())
+		if(!jstr(g, "id_name").empty() && decision == "uphold")
+			suspend_id(by, jstr(g, "id_name"), jint(q, "days"), reason,
+					jstr(q, "text"));
+		const sv_<ss_> members = jstr(g, "id_name").empty() ? members_of(g) :
+				sv_<ss_>();
+		if(decision == "uphold" && members.empty() &&
+				jstr(g, "id_name").empty())
 			throw Exception("the listing has gone");
 		for(const ss_ &id : members){
 			json::Value l = load("listings", id);

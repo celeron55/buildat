@@ -33,11 +33,13 @@
 #include "interface/sha256.h"
 #include "network/api.h"
 #include "starport_announce/api.h"
+#include "accounts/api.h"
 #include <fstream>
 #include <sstream>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <set>
 #define MODULE "starport_announce"
 
 using interface::Event;
@@ -127,6 +129,9 @@ struct Module: public interface::Module, public Interface
 	std::mutex m_mutex;
 	// By the Starport's url
 	sm_<ss_, Listing> m_listings;
+	// 10d: the identities of the blocklists this server subscribes to, by
+	// the Starport's url, as its last announce's answer said them
+	sm_<ss_, std::set<ss_>> m_blocked;
 	std::thread m_thread;
 	std::condition_variable m_wake;
 	bool m_stop = false;
@@ -151,12 +156,14 @@ struct Module: public interface::Module, public Interface
 	void init()
 	{
 		m_server->sub_event(this, Event::t("core:start"));
+		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("network:http_request"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_VOIDN("core:start", on_start)
+		EVENT_VOIDN("core:tick", on_tick)
 		EVENT_TYPEN("network:http_request", on_http_request,
 				network::HttpRequest)
 	}
@@ -181,6 +188,17 @@ struct Module: public interface::Module, public Interface
 		load_state();
 		log_i(MODULE, "Announcing to %u Starport(s)",
 				m_config.get("starports").size());
+		m_start_announcing = true;
+	}
+
+	// The first announce waits for the first tick: every module has
+	// started by then, builtin/accounts and its reported bans (10d) too
+	bool m_start_announcing = false;
+	void on_tick()
+	{
+		if(!m_start_announcing)
+			return;
+		m_start_announcing = false;
 		m_thread = std::thread([this](){ run(); });
 	}
 
@@ -276,6 +294,24 @@ struct Module: public interface::Module, public Interface
 		body.set("version", ss_(BUILDAT_VERSION));
 		body.set("port", (int64_t)atoi(m_server->get_config().get<ss_>("network_port").c_str()));
 		body.set("players", (int64_t)player_count());
+		// 10d: the whole of the bans reported to this Starport, so a ban
+		// taken back is gone from it too
+		const ss_ host = host_of(url);
+		json::Value bans = json::array();
+		if(m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *a){
+				for(const ss_ &line : a->reported_bans()){
+					const size_t p1 = line.find('|');
+					const size_t p2 = line.find('|', p1 + 1);
+					if(p2 == ss_::npos || line.substr(0, p1) != host)
+						continue;
+					json::Value b = json::object();
+					b.set("sub", line.substr(p1 + 1, p2 - p1 - 1));
+					b.set("reason", line.substr(p2 + 1));
+					bans.append(b);
+				}
+			});
+		body.set("bans", bans);
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
 			auto it = m_listings.find(url);
@@ -298,6 +334,14 @@ struct Module: public interface::Module, public Interface
 					v.get("error").as_cstring() : cs(answer.substr(0, 200)));
 			return;
 		}
+		if(v.get("blocked").is_array()){
+			std::set<ss_> blocked;
+			for(unsigned i = 0; i < v.get("blocked").size(); i++)
+				if(v.get("blocked").at(i).is_string())
+					blocked.insert(v.get("blocked").at(i).as_string());
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_blocked[url] = blocked;
+		}
 		if(v.get("id").is_string() && v.get("secret").is_string()){
 			std::lock_guard<std::mutex> lock(m_mutex);
 			Listing &l = m_listings[url];
@@ -317,6 +361,14 @@ struct Module: public interface::Module, public Interface
 
 	// -- [STARPORT] 10c
 
+	// The host of a Starport's url
+	static ss_ host_of(const ss_ &url)
+	{
+		const size_t s = url.find("://");
+		ss_ host = s == ss_::npos ? url : url.substr(s + 3);
+		return host.substr(0, host.find_first_of(":/"));
+	}
+
 	bool accepts_ids()
 	{
 		const ss_ login = m_config.get("login").is_string() ?
@@ -335,6 +387,7 @@ struct Module: public interface::Module, public Interface
 		const ss_ sig = token.substr(dot + 1);
 		ss_ host;
 		ss_ listing;
+		bool blocked = false;
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
 			for(auto &pair : m_listings){
@@ -355,13 +408,16 @@ struct Module: public interface::Module, public Interface
 		if(p.get("listing").is_string() &&
 				p.get("listing").as_string() != listing)
 			return "The token is for another server";
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			blocked = m_blocked[host].count(p.get("sub").as_string()) > 0;
+		}
+		if(blocked)
+			return "Banned by a blocklist this server follows";
 		const json::Value &exp = p.get("exp");
 		if(!exp.is_number() || exp.as_number() < (double)time(nullptr))
 			return "The token has expired: log in to the Starport again";
-		// The host of the Starport's url
-		const size_t s = host.find("://");
-		host = s == ss_::npos ? host : host.substr(s + 3);
-		host = host.substr(0, host.find_first_of(":/"));
+		host = host_of(host);
 		out->sub = p.get("sub").as_string();
 		out->name = p.get("name").as_string();
 		out->starport = host;

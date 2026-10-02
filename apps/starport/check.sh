@@ -14,6 +14,9 @@
 #   5. A Starport ID: an adult's year is not kept, a child needs consent,
 #      and the ID's token logs in to the fleet's server, whose account is
 #      linked to it.
+#   6. The first server reports a ban of the ID; a blocklist it publishes
+#      to, which the fleet subscribes to, keeps the ID out of the fleet's
+#      server too, and the ban is in the queue as a report about the ID.
 #
 #   KEEP_TMP=1 apps/starport/check.sh
 set -u
@@ -145,4 +148,61 @@ grep -q "Joined as grownup" "$tmp/cl2.log" &&
 	grep -q "New account grownup for a Starport ID" "$tmp/an2.log" ||
 	fail "the token did not log in (cl2.log, an2.log)"
 echo "ok: the ID's token logged in to the fleet's server"
+
+# 6: as the first server would announce a ban it reported
+python3 - "$SP" "$tmp/an/apps/floorplanner" "$id" > "$tmp/ban.json" <<'PY' ||
+import base64, json, sys, urllib.request
+B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+def call(w, **k):
+    return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
+s = call("id/login", name="grown", password="secret1")["result"]["session"]
+t = call("id/token", session=s, listing=sys.argv[3], name="grownup")["result"]["token"]
+p = t.split(".")[0]
+sub = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["sub"]
+conf = json.load(open(sys.argv[2] + "/starport.json"))
+st = list(json.load(open(sys.argv[2] + "/starport_state.json")).values())[0]
+del conf["starports"]
+conf.update(app="floorplanner", version="x", port=29642, players=0,
+		id=st["id"], secret=st["secret"],
+		bans=[{"sub": sub, "reason": "harassment"}])
+r = json.loads(urllib.request.urlopen(B.replace("/api/", "/api/announce"),
+		json.dumps(conf).encode()).read())
+assert r["ok"], r
+print(json.dumps({"listing": st["id"]}))
+PY
+	fail "announcing a ban"
+printf 'delay 8000\nquit\n' > "$tmp/cmds3.txt"
+BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
+BUILDAT_SP_REQS='{"cmd":"blocklist_create","name":"Check list"}' \
+	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl3.log" 2>&1
+list=$(grep -o '"id":"[0-9a-f]*","name":"Check list"' "$tmp/cl3.log" |
+	head -1 | cut -d'"' -f4)
+[ -n "$list" ] || fail "no blocklist made (cl3.log)"
+BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
+BUILDAT_SP_REQS="{\"cmd\":\"blocklist_publish\",\"list\":\"$list\",\"scope\":\"listing:$id\"}
+{\"cmd\":\"blocklist_subscribe\",\"list\":\"$list\",\"scope\":\"fleet:${fleet%%:*}\"}
+{\"cmd\":\"queue\"}" \
+	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl3.log" 2>&1
+grep -q '"id":"id:grown|harassment"' "$tmp/cl3.log" ||
+	fail "the ban is not in the queue as a report about the ID (cl3.log)"
+echo "ok: a reported ban is in the queue, about the ID"
+# The fleet's server learns the list at its next announce: its start
+kill "${pids[-1]}"
+sleep 2
+Build/bin/buildat_server -m apps/floorplanner -D "$tmp/an2" -P $AN2 -l 3 \
+	> "$tmp/an2b.log" 2>&1 &
+pids+=($!)
+for _ in $(seq 120); do
+	grep -q "Announcing to" "$tmp/an2b.log" && break
+	sleep 1
+done
+sleep 3
+BUILDAT_FP_STARPORT=$token timeout 90 Build/bin/buildat -D "$tmp/cl" \
+	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
+	> "$tmp/cl4.log" 2>&1
+grep -q "Login refused: Banned by a blocklist" "$tmp/cl4.log" ||
+	fail "the blocklist did not keep the ID out (cl4.log, an2b.log)"
+echo "ok: the blocklist keeps the ID out of the fleet's server"
 echo PASS

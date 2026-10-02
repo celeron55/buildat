@@ -84,6 +84,10 @@ namespace accounts
 		virtual ss_ totp_confirm(const ss_ &name, const ss_ &code) = 0;
 		virtual ss_ totp_off(const ss_ &name, const ss_ &code) = 0;
 		virtual ss_ totp_uri(const ss_ &name, const ss_ &secret_base32) = 0;
+		// 10d: the bans reported to Starports, "host|sub|reason" each: the
+		// Starport ID accounts banned with "Report to Starport", for
+		// starport_announce to send. A ban gone is gone from this too.
+		virtual sv_<ss_> reported_bans() = 0;
 	};
 
 	inline bool access(interface::Server *server,

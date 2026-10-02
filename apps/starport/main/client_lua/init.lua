@@ -238,6 +238,7 @@ end
 
 local home, queue_page, group_page, listings_page, listing_page
 local audit_page, appeals_page, settings_page, appeal_page, fleets_page
+local blocklists_page
 
 -- What a moderator does to a listing ([STARPORT] 6), for a group's
 -- reports (decide) or on its own (act)
@@ -327,6 +328,7 @@ home = function()
 		end
 		local b = row(w)
 		button(b, "Fleets", function() fleets_page(me) end)
+		button(b, "Blocklists", function() blocklists_page(me) end)
 		if me.moderator then
 			button(b, "Queue", queue_page)
 			button(b, "Listings", function() listings_page("") end)
@@ -386,6 +388,69 @@ fleets_page = function(me)
 		end)
 	end)
 	button(r, "Back", home)
+end
+
+-- 10d: blocklists, public within the Starport. A server publishes its
+-- reported bans to a list (its owner's at once, another's when accepted)
+-- and subscribes to any list for its bans
+blocklists_page = function(me)
+	req("blocklists", {}, function(lists)
+		local w = open("Blocklists", function() blocklists_page(me) end)
+		-- The account's own fleets and servers, as the scope to act for
+		local scopes = {}
+		for _, f in ipairs(me.fleets or {}) do
+			scopes[#scopes + 1] = "fleet:" .. s(f.id)
+		end
+		for _, x in ipairs(me.listings or {}) do
+			if s(x.fleet) == "" then
+				scopes[#scopes + 1] = "listing:" .. s(x.id)
+			end
+		end
+		text(w, "Yours: " .. (#scopes > 0 and table.concat(scopes, ", ") or
+				"no fleets or servers"), GREY)
+		local scope = edit(w, "Acting for", scopes[1] or "")
+		local l = list(w, 0.4)
+		for _, b in ipairs(lists) do
+			l.text(s(b.name) .. " (" .. s(b.owner) .. "): " .. s(b.bans) ..
+					" bans; publishers " .. table.concat(b.publishers or {},
+					", ") .. "; subscribers " .. #(b.subscribers or {}))
+			local r = l.row()
+			local function go(cmd, extra)
+				local q = {list = b.id, scope = scope:GetText()}
+				for k, v in pairs(extra or {}) do
+					q[k] = v
+				end
+				req(cmd, q, function()
+					req("me", {}, blocklists_page)
+				end)
+			end
+			button(r, "Publish to it", function() go("blocklist_publish") end)
+			button(r, "Stop", function() go("blocklist_unpublish") end)
+			button(r, "Subscribe", function() go("blocklist_subscribe") end)
+			button(r, "Unsubscribe", function()
+				go("blocklist_subscribe", {on = false})
+			end)
+			if b.owner == me.name then
+				for _, o in ipairs(b.offers or {}) do
+					local rr = l.row()
+					button(rr, "Accept " .. o, function()
+						go("blocklist_accept", {scope = o})
+					end)
+					button(rr, "Refuse", function()
+						go("blocklist_drop", {scope = o})
+					end)
+				end
+			end
+		end
+		local name = edit(w, "New list's name", "")
+		local r = row(w)
+		button(r, "Make a list", function()
+			req("blocklist_create", {name = name:GetText()}, function()
+				req("me", {}, blocklists_page)
+			end)
+		end)
+		button(r, "Back", home)
+	end)
 end
 
 appeal_page = function(st)
@@ -465,10 +530,25 @@ group_page = function(gid)
 					(s(a.by) ~= "" and a.by or "Starport") .. ": " ..
 					s(a.text), GREY)
 		end
-		action_rows(w, function(q)
-			q.group, q.decision = gid, "uphold"
-			req("decide", q, queue_page)
-		end)
+		if r.id then
+			-- 10d: a Starport ID that servers banned; only a moderator
+			-- suspends it, with a statement it gets
+			text(w, "Starport ID " .. s(r.id.name) .. ", age " ..
+					s(r.id.band) .. ((tonumber(r.id.suspended_until) or 0) >
+					0 and ", suspended" or ""), YELLOW)
+			local why = edit(w, "Statement", "")
+			local days = edit(w, "Days (0: until lifted)", "30")
+			button(row(w), "Suspend the ID", function()
+				req("decide", {group = gid, decision = "uphold",
+					action = "suspend", text = why:GetText(),
+					days = tonumber(days:GetText()) or 0}, queue_page)
+			end)
+		else
+			action_rows(w, function(q)
+				q.group, q.decision = gid, "uphold"
+				req("decide", q, queue_page)
+			end)
+		end
 		local b = row(w)
 		button(b, "Dismiss", function()
 			req("decide", {group = gid, decision = "dismiss"}, queue_page)

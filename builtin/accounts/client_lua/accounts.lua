@@ -60,6 +60,7 @@ local opts = {}
 local window = nil
 -- The account page open, for the packets that redraw it; see M.users_page
 local page_kind, page_back, users_page, passwd_page = nil, nil, nil, nil
+local ban_page
 
 local function notice(text)
 	if M.notice then
@@ -610,6 +611,48 @@ buildat.sub_packet("accounts:totp_result", function(data)
 	end
 end)
 
+-- **A ban, its reason and whether it goes to the Starports** ([STARPORT]
+-- 10d): ticked by itself for a reason others should know of; a house rule
+-- stays here. Only a Starport ID's account is reported
+local BAN_REASONS = {
+	{"harassment", "Harassment or abuse", true},
+	{"illegal", "Illegal content", true},
+	{"csam", "Child sexual abuse material", true},
+	{"scam", "Scam, phishing or malware", true},
+	{"other", "Breaking this server's rules", false},
+}
+ban_page = function(name, back)
+	local w = open_page("ask", "Ban " .. name, back)
+	local reason, report = nil, false
+	local buttons, rb = {}, nil
+	local function draw()
+		for k, b in pairs(buttons) do
+			b:GetChild(0):SetColor(k == reason and YELLOW or
+					magic.Color(1, 1, 1))
+		end
+		rb:GetChild(0):SetText((report and "[x]" or "[ ]") ..
+				" Report to Starport (a Starport ID only)")
+	end
+	for _, x in ipairs(BAN_REASONS) do
+		buttons[x[1]] = button(w, x[2], function()
+			reason = x[1]
+			report = x[3]
+			draw()
+		end)
+	end
+	rb = button(w, "", function()
+		report = not report
+		draw()
+	end)
+	draw()
+	local r = row(w)
+	button(r, "Ban", function()
+		M.admin("ban", name, reason or "other", report)
+		users_page(back)
+	end)
+	button(r, "Back", function() users_page(back) end)
+end
+
 -- A page of fields under the users page: a password for an account, or a
 -- new account's name and password
 local function ask_page(title, labels, on_done)
@@ -703,7 +746,7 @@ users_page = function(back)
 			button(r, "Kick", function() M.admin("kick", user.name) end)
 		end
 		if not has.admin then
-			button(r, "Ban", function() M.admin("ban", user.name) end)
+			button(r, "Ban...", function() ban_page(user.name, back) end)
 		end
 		button(r, "Password...", function()
 			ask_page("A new password for " .. user.name, {"Password"},
