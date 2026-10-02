@@ -9,6 +9,7 @@
 		{"module": "voxelworld"},
 		{"module": "voxel_shading"},
 		{"module": "luanti"},
-		{"module": "accounts"}
+		{"module": "accounts"},
+		{"module": "starport_announce"}
 	]
 }
