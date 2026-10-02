@@ -204,6 +204,10 @@ static ss_ check_categories(const json::Value &b)
 		return "descriptors: an object";
 	for(const auto &pair : DESCRIPTORS){
 		const ss_ v = jstr(d, pair.first.c_str());
+		// One a server's version does not know yet is "unknown" ([STARPORT]
+		// 3: categories are versioned)
+		if(d.get(pair.first).is_undefined())
+			continue;
 		if(std::find(pair.second.begin(), pair.second.end(), v) ==
 				pair.second.end())
 			return "descriptors."+pair.first+": one of "+dump(pair.second);
@@ -563,7 +567,11 @@ struct Module: public interface::Module
 		for(const char *k : {"name", "description", "kind", "audience",
 				"access", "region", "app", "version"})
 			l.set(k, b.get(k).is_string() ? b.get(k) : json::Value(""));
-		l.set("descriptors", b.get("descriptors"));
+		json::Value desc = b.get("descriptors").deepcopy();
+		for(const auto &pair : DESCRIPTORS)
+			if(desc.get(pair.first).is_undefined())
+				desc.set(pair.first, "unknown");
+		l.set("descriptors", desc);
 		l.set("tags", b.get("tags").is_array() ? b.get("tags") : json::array());
 		l.set("languages", b.get("languages").is_array() ? b.get("languages") :
 				json::array());
@@ -572,16 +580,107 @@ struct Module: public interface::Module
 		l.set("host", host);
 		l.set("port", port);
 		l.set("last_announce", t);
-		if(moved || jstr(l, "verify") == ""){
+		// A failed check is tried again at the next announce: a restart,
+		// a moment's network trouble
+		if(moved || jstr(l, "verify") != "ok"){
 			l.set("verify", "pending");
 			queue_verify(l);
 		}
+		join_fleet(l, jstr(b, "fleet"), jstr(b, "pool"));
 		put("listings", jstr(l, "id"), l);
 		consistency_check(l);
+		pool_check(l);
 		answer.set("ok", true);
 		answer.set("id", jstr(l, "id"));
 		answer.set("status", served_status(l));
 		respond(r, 200, answer);
+	}
+
+	// -- 2b. Fleets and pools
+
+	// "<id>:<code>" from the announce: the right code puts the listing in
+	// the fleet and claims it for the fleet's owner; none takes it out;
+	// a wrong one leaves it out and a moderator looks
+	void join_fleet(json::Value &l, const ss_ &line, ss_ pool)
+	{
+		const size_t colon = line.find(':');
+		const ss_ fid = colon == ss_::npos ? line : line.substr(0, colon);
+		const ss_ code = colon == ss_::npos ? "" : line.substr(colon + 1);
+		if(pool.size() > 32)
+			pool = pool.substr(0, 32);
+		if(fid.empty()){
+			l.set("fleet", "");
+			l.set("pool", "");
+			return;
+		}
+		const json::Value f = load("fleets", fid);
+		if(jstr(l, "fleet_removed") == fid)
+			return; // its operator took it out; the config still says it
+		if(f.is_object() && same(jstr(f, "code"), code) &&
+				!banned("account", jstr(f, "owner"))){
+			if(jstr(l, "fleet") != fid)
+				audit("", jstr(l, "id"), "fleet", "", "joined fleet "+fid,
+						true);
+			l.set("fleet", fid);
+			l.set("pool", pool);
+			l.set("owner", jstr(f, "owner"));
+			return;
+		}
+		// One the fleet's new code turned away just leaves; one that never
+		// was in it is looked at, once
+		if(jstr(l, "fleet") != fid && jstr(l, "fleet_flagged") != fid){
+			l.set("fleet_flagged", fid);
+			const ss_ gid = jstr(l, "id")+"|impersonation";
+			json::Value g = load("groups", gid);
+			if(!g.is_object() || jstr(g, "state") != "open")
+				open_group(gid, jstr(l, "id"), "impersonation",
+						"Starport: announced with a wrong code for fleet "+fid);
+		}
+		l.set("fleet", "");
+		l.set("pool", "");
+	}
+
+	// A pool's servers are one entry, so they have to be the same thing:
+	// one that differs from the others is shown on its own and looked at
+	void pool_check(json::Value l)
+	{
+		if(jstr(l, "pool").empty())
+			return;
+		const json::Value mine = effective(l);
+		for(const ss_ &id : store("listings")->list("")){
+			if(id == jstr(l, "id"))
+				continue;
+			const json::Value o = load("listings", id);
+			if(jstr(o, "fleet") != jstr(l, "fleet") ||
+					jstr(o, "pool") != jstr(l, "pool") ||
+					o.get("pool_mismatch").is_true())
+				continue;
+			const json::Value e = effective(o);
+			const bool differs = jstr(o, "app") != jstr(l, "app") ||
+					e.stringify() != mine.stringify();
+			if(differs != l.get("pool_mismatch").is_true()){
+				l.set("pool_mismatch", differs);
+				put("listings", jstr(l, "id"), l);
+				if(differs)
+					open_group(jstr(l, "id")+"|category", jstr(l, "id"),
+							"category", "Starport: not the app or the "
+							"categories of the rest of pool "+jstr(l, "pool"));
+			}
+			return;
+		}
+	}
+
+	// The listings a group is about: its listing's, or its fleet's
+	sv_<ss_> members_of(const json::Value &g)
+	{
+		const ss_ fid = jstr(g, "fleet");
+		if(fid.empty())
+			return {jstr(g, "listing")};
+		sv_<ss_> out;
+		for(const ss_ &id : store("listings")->list(""))
+			if(jstr(load("listings", id), "fleet") == fid)
+				out.push_back(id);
+		return out;
 	}
 
 	// What it says that a listing whose audience is everyone has
@@ -648,7 +747,9 @@ struct Module: public interface::Module
 			for(unsigned i = 0; i < ex.size(); i++){
 				const ss_ d = ex.at(i).is_string() ? ex.at(i).as_string() : "";
 				const ss_ v = jstr(e.get("descriptors"), d.c_str());
-				if(v == "yes" || v == "unmoderated" || v == "realistic")
+				// Unknown is left out with what it might be
+				if(v == "yes" || v == "unmoderated" || v == "realistic" ||
+						v == "unknown")
 					return "descriptor "+d;
 			}
 		}
@@ -753,6 +854,16 @@ struct Module: public interface::Module
 			for(const char *k : {"kind", "audience", "access", "descriptors"})
 				s.set(k, e.get(k));
 			s.set("restricted", st != "listed");
+			const ss_ fid = jstr(l, "fleet");
+			if(!fid.empty()){
+				const json::Value f = load("fleets", fid);
+				json::Value fs = json::object();
+				for(const char *k : {"id", "name", "description", "link"})
+					fs.set(k, jstr(f, k));
+				s.set("fleet", fs);
+				if(!l.get("pool_mismatch").is_true())
+					s.set("pool", jstr(l, "pool"));
+			}
 			servers.append(s);
 		}
 		json::Value v = json::object();
@@ -896,11 +1007,16 @@ struct Module: public interface::Module
 		rep.set("state", held.empty() ? "open" : "held");
 		if(!held.empty())
 			rep.set("held", held);
-		const ss_ gid = listing+"|"+reason;
+		// Of the whole fleet the listing is in, where the reporter said so
+		const ss_ fleet = b.get("whole_fleet").is_true() ? jstr(l, "fleet") :
+				ss_();
+		const ss_ gid = (fleet.empty() ? listing : "fleet:"+fleet)+"|"+reason;
 		rep.set("group", gid);
+		if(!fleet.empty())
+			rep.set("fleet", fleet);
 		put("reports", id, rep);
 		if(held.empty())
-			add_to_group(gid, listing, reason, id);
+			add_to_group(gid, listing, reason, id, fleet);
 		json::Value v = json::object();
 		v.set("ok", true);
 		v.set("receipt", id);
@@ -932,11 +1048,12 @@ struct Module: public interface::Module
 	// -- 7. Groups
 
 	json::Value open_group(const ss_ &gid, const ss_ &listing,
-			const ss_ &reason, const ss_ &note)
+			const ss_ &reason, const ss_ &note, const ss_ &fleet = "")
 	{
 		json::Value g = json::object();
 		g.set("id", gid);
 		g.set("listing", listing);
+		g.set("fleet", fleet);
 		g.set("reason", reason);
 		g.set("reports", json::array());
 		g.set("state", "open");
@@ -949,11 +1066,11 @@ struct Module: public interface::Module
 	}
 
 	void add_to_group(const ss_ &gid, const ss_ &listing, const ss_ &reason,
-			const ss_ &report_id)
+			const ss_ &report_id, const ss_ &fleet)
 	{
 		json::Value g = load("groups", gid);
 		if(!g.is_object() || jstr(g, "state") != "open")
-			g = open_group(gid, listing, reason, "");
+			g = open_group(gid, listing, reason, "", fleet);
 		json::Value reps = g.get("reports").deepcopy();
 		reps.append(report_id);
 		g.set("reports", reps);
@@ -1013,7 +1130,15 @@ struct Module: public interface::Module
 		if(want.empty() || want == jstr(g, "auto") ||
 				(want == "hide" && jstr(g, "auto") == "delist"))
 			return;
-		json::Value l = load("listings", jstr(g, "listing"));
+		g.set("auto", want);
+		put("groups", jstr(g, "id"), g);
+		for(const ss_ &id : members_of(g))
+			auto_act_on(g, load("listings", id), want, w);
+	}
+
+	void auto_act_on(const json::Value &g, json::Value l, const ss_ &want,
+			double w)
+	{
 		if(!l.is_object())
 			return;
 		const ss_ reason = jstr(g, "reason");
@@ -1044,8 +1169,6 @@ struct Module: public interface::Module
 			l.set("status", want == "delist" ? "delisted" : "hidden");
 		l.set("status_auto", true);
 		put("listings", jstr(l, "id"), l);
-		g.set("auto", want);
-		put("groups", jstr(g, "id"), g);
 		const ss_ text = "Automatic, pending a moderator's review: reports of "
 				"\""+reason+"\" weighing "+std::to_string(w).substr(0, 4)+
 				" passed this instance's threshold to "+want+".";
@@ -1094,6 +1217,18 @@ struct Module: public interface::Module
 		s.set("appeal", "Appeal from your account on this Starport; another "
 				"moderator than the one who acted decides.");
 		put("statements", id, s);
+		const json::Value o = owner.empty() ? json::Value() :
+				load("operators", owner);
+		if(!jstr(o, "email").empty() && can_mail()){
+			const ss_ sp = jstr(m_settings, "name");
+			mail(owner, jstr(o, "email"), sp+": "+action+": "+
+					jstr(l, "name"),
+					"Your listing \""+jstr(l, "name")+"\" ("+jstr(l, "id")+
+					") on "+sp+":\n\n"
+					"    "+action+", for "+reason+"\n\n"+text+"\n\n"+
+					"Appeal from your account on "+sp+"; another moderator "
+					"than the one who acted decides.\n");
+		}
 		log_i(MODULE, "Statement of reasons to %s: listing %s %s (%s)",
 				owner.empty() ? "(unclaimed)" : cs(owner), cs(jstr(l, "id")),
 				cs(action), cs(reason));
@@ -1303,6 +1438,7 @@ struct Module: public interface::Module
 		json::Value s = json::object();
 		for(const char *k : {"id", "name", "description", "host", "port",
 				"app", "status", "owner", "verify", "players", "relabel",
+				"fleet", "pool", "pool_mismatch",
 				"status_until"})
 			s.set(k, l.get(k));
 		const json::Value e = effective(l);
@@ -1324,6 +1460,11 @@ struct Module: public interface::Module
 			return cmd_confirm_email(name, jstr(q, "code"));
 		if(cmd == "claim")
 			return cmd_claim(name, q);
+		if(cmd == "fleet_create" || cmd == "fleet_update" ||
+				cmd == "fleet_new_code")
+			return cmd_fleet(name, cmd, q);
+		if(cmd == "fleet_remove_server")
+			return cmd_fleet_remove_server(name, q);
 		if(cmd == "appeal")
 			return cmd_appeal(name, q);
 		if(!mod)
@@ -1350,6 +1491,8 @@ struct Module: public interface::Module
 			return m_settings;
 		if(cmd == "set_settings")
 			return cmd_set_settings(q);
+		if(cmd == "trust_reporter")
+			return cmd_trust_reporter(q);
 		throw Exception("no such command: "+cmd);
 	}
 
@@ -1378,6 +1521,13 @@ struct Module: public interface::Module
 				st.append(s);
 		}
 		r.set("statements", st);
+		json::Value fleets = json::array();
+		for(const ss_ &id : store("fleets")->list("")){
+			const json::Value f = load("fleets", id);
+			if(jstr(f, "owner") == name)
+				fleets.append(f);
+		}
+		r.set("fleets", fleets);
 		r.set("starport", jstr(m_settings, "name"));
 		return r;
 	}
@@ -1415,37 +1565,64 @@ struct Module: public interface::Module
 		o.set("email_code", code);
 		o.set("email_code_ts", now_s());
 		put("operators", name, o);
+		const ss_ sp = jstr(m_settings, "name");
+		mail(name, email, sp+": confirming your e-mail address",
+				"The account "+name+" on "+sp+" gave this address as its\n"
+				"contact. To confirm it, enter this code there:\n"
+				"\n"
+				"    "+code+"\n"
+				"\n"
+				"If that was not you, nothing needs doing.\n");
+		return json::Value("sent");
+	}
+
+	// Whether mail can go: the setting's server, and a libcurl that has SMTP
+	bool can_mail()
+	{
+		const json::Value &smtp = setting("smtp");
+		return !jstr(smtp, "url").empty() && !jstr(smtp, "from").empty() &&
+				interface::mail_supported();
+	}
+
+	// A mail to an account's address, on a thread of its own holding
+	// copies only: the mail server may be slow, and this module may be
+	// gone before it answers. `to` is an address set_email let through:
+	// nothing in it ends a header line
+	void mail(const ss_ &account, const ss_ &to, const ss_ &subject,
+			const ss_ &text)
+	{
+		const json::Value &smtp = setting("smtp");
 		char date[64];
 		const time_t t = time(nullptr);
 		struct tm tm;
 		gmtime_r(&t, &tm);
 		strftime(date, sizeof date, "%a, %d %b %Y %H:%M:%S +0000", &tm);
-		const ss_ sp = jstr(m_settings, "name");
+		ss_ body;
+		for(char c : text){
+			if(c == '\n')
+				body += "\r\n";
+			else if(c != '\r')
+				body += c;
+		}
+		ss_ subj;
+		for(char c : subject)
+			subj += c == '\r' || c == '\n' ? ' ' : c;
 		const ss_ message = ss_("Date: ")+date+"\r\n"
 				"From: "+jstr(smtp, "from")+"\r\n"
-				"To: "+email+"\r\n"
-				"Subject: "+sp+": confirming your e-mail address\r\n"
-				"\r\n"
-				"The account "+name+" on "+sp+" gave this address as its\r\n"
-				"contact. To confirm it, enter this code there:\r\n"
-				"\r\n"
-				"    "+code+"\r\n"
-				"\r\n"
-				"If that was not you, nothing needs doing.\r\n";
-		// A thread of its own, holding copies only: the mail server may be
-		// slow, and this module may be gone before it answers
+				"To: "+to+"\r\n"
+				"Subject: "+subj+"\r\n"
+				"Content-Type: text/plain; charset=utf-8\r\n"
+				"\r\n"+body;
 		const ss_ url = jstr(smtp, "url"), user = jstr(smtp, "user"),
 				password = jstr(smtp, "password"), from = jstr(smtp, "from");
 		std::thread([=](){
 			try {
-				interface::send_mail(url, user, password, from, email, message);
-				log_i(MODULE, "Sent a confirmation code to %s's address",
-						cs(name));
+				interface::send_mail(url, user, password, from, to, message);
+				log_i(MODULE, "Mailed %s: %s", cs(account), cs(subj));
 			} catch(std::exception &e){
-				log_w(MODULE, "Mail to %s's address: %s", cs(name), e.what());
+				log_w(MODULE, "Mail to %s: %s", cs(account), e.what());
 			}
 		}).detach();
-		return json::Value("sent");
 	}
 
 	json::Value cmd_confirm_email(const ss_ &name, const ss_ &code)
@@ -1494,6 +1671,61 @@ struct Module: public interface::Module
 		l.set("owner", name);
 		put("listings", jstr(l, "id"), l);
 		audit(name, jstr(l, "id"), "claim", "", "", false);
+		return listing_summary(l);
+	}
+
+	// -- 2b. An operator's fleets: made, renamed, a new code
+
+	json::Value cmd_fleet(const ss_ &name, const ss_ &cmd, const json::Value &q)
+	{
+		json::Value f;
+		if(cmd == "fleet_create"){
+			const json::Value o = load("operators", name);
+			if(!o.is_object() || jstr(o, "email").empty())
+				throw Exception("set your contact e-mail first");
+			if(banned("account", name))
+				throw Exception("this account may not make fleets");
+			int n = 0;
+			for(const ss_ &id : store("fleets")->list(""))
+				n += jstr(load("fleets", id), "owner") == name;
+			if(n >= 20)
+				throw Exception("20 fleets an account");
+			f = json::object();
+			f.set("id", random_hex(6));
+			f.set("owner", name);
+			f.set("code", random_hex(8));
+		} else {
+			f = load("fleets", jstr(q, "fleet"));
+			if(!f.is_object() || jstr(f, "owner") != name)
+				throw Exception("no such fleet of yours");
+			if(cmd == "fleet_new_code")
+				f.set("code", random_hex(8));
+		}
+		if(cmd != "fleet_new_code"){
+			const ss_ fname = jstr(q, "name");
+			if(fname.empty() || fname.size() > 60)
+				throw Exception("name: 1 to 60 characters");
+			if(jstr(q, "description").size() > 500 || jstr(q, "link").size() > 200)
+				throw Exception("description: at most 500 characters, link 200");
+			f.set("name", fname);
+			f.set("description", jstr(q, "description"));
+			f.set("link", jstr(q, "link"));
+		}
+		put("fleets", jstr(f, "id"), f);
+		audit(name, "", cmd, "", "fleet "+jstr(f, "id"), false);
+		return f;
+	}
+
+	json::Value cmd_fleet_remove_server(const ss_ &name, const json::Value &q)
+	{
+		json::Value l = load("listings", jstr(q, "listing"));
+		const json::Value f = load("fleets", jstr(l, "fleet"));
+		if(!l.is_object() || jstr(f, "owner") != name)
+			throw Exception("no such server in a fleet of yours");
+		l.set("fleet_removed", jstr(l, "fleet"));
+		l.set("fleet", "");
+		l.set("pool", "");
+		put("listings", jstr(l, "id"), l);
 		return listing_summary(l);
 	}
 
@@ -1691,24 +1923,28 @@ struct Module: public interface::Module
 		const ss_ decision = jstr(q, "decision");
 		if(decision != "dismiss" && decision != "uphold")
 			throw Exception("decision: dismiss or uphold");
-		json::Value l = load("listings", jstr(g, "listing"));
 		const ss_ reason = jstr(g, "reason");
-		if(decision == "uphold"){
+		const sv_<ss_> members = members_of(g);
+		if(decision == "uphold" && members.empty())
+			throw Exception("the listing has gone");
+		for(const ss_ &id : members){
+			json::Value l = load("listings", id);
 			if(!l.is_object())
-				throw Exception("the listing has gone");
-			apply_action(by, l, q, reason);
-		} else if(l.is_object() && l.get("status_auto").is_true()){
-			// What was done automatically is undone
-			l.set("status", "active");
-			l.set("status_auto", false);
-			if(reason == "category")
-				l.set("relabel", json::Value());
-			put("listings", jstr(l, "id"), l);
-			audit(by, jstr(l, "id"), "restore", reason,
-					"the automatic action undone: reports dismissed", false);
-		} else
-			audit(by, jstr(g, "listing"), "dismiss", reason, jstr(q, "text"),
-					false);
+				continue;
+			if(decision == "uphold"){
+				apply_action(by, l, q, reason);
+			} else if(l.get("status_auto").is_true()){
+				// What was done automatically is undone
+				l.set("status", "active");
+				l.set("status_auto", false);
+				if(reason == "category")
+					l.set("relabel", json::Value());
+				put("listings", id, l);
+				audit(by, id, "restore", reason,
+						"the automatic action undone: reports dismissed", false);
+			} else
+				audit(by, id, "dismiss", reason, jstr(q, "text"), false);
+		}
 		// The reporters' records
 		const json::Value &reps = g.get("reports");
 		const int64_t t = now_s();
@@ -1744,6 +1980,19 @@ struct Module: public interface::Module
 
 	json::Value cmd_act(const ss_ &by, const json::Value &q)
 	{
+		if(!jstr(q, "fleet").empty()){
+			const ss_ reason = jstr(q, "reason");
+			if(!in_set(reason, REASONS))
+				throw Exception("reason: one of the report reasons");
+			json::Value g = json::object();
+			g.set("fleet", jstr(q, "fleet"));
+			const sv_<ss_> members = members_of(g);
+			if(members.empty())
+				throw Exception("no servers in that fleet");
+			for(const ss_ &id : members)
+				apply_action(by, load("listings", id), q, reason);
+			return json::Value((int64_t)members.size());
+		}
 		json::Value l = load("listings", jstr(q, "listing"));
 		if(!l.is_object())
 			throw Exception("no such listing");
@@ -1822,6 +2071,27 @@ struct Module: public interface::Module
 		a.set("decided_by", by);
 		a.set("answer", jstr(q, "text"));
 		put("appeals", jstr(a, "id"), a);
+		return json::Value(true);
+	}
+
+	// The key that made a report becomes a trusted flagger's ([STARPORT]
+	// 6), and nobody had to see its hash
+	json::Value cmd_trust_reporter(const json::Value &q)
+	{
+		const json::Value rep = load("reports", jstr(q, "report"));
+		const ss_ h = jstr(rep, "key");
+		if(h.empty())
+			throw Exception("no such report, or it was made without a key");
+		if(trusted(h))
+			return json::Value(false);
+		json::Value next = m_settings.deepcopy();
+		json::Value t = setting("trusted_flaggers").deepcopy();
+		if(!t.is_array())
+			t = json::array();
+		t.append(h);
+		next.set("trusted_flaggers", t);
+		m_settings = next;
+		put("settings", "settings", m_settings);
 		return json::Value(true);
 	}
 

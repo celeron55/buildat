@@ -1851,6 +1851,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(local_server_running)
 		DEF_BUILDAT_FUNC(local_server_port)
 		DEF_BUILDAT_FUNC(game_storage_dir)
+		DEF_BUILDAT_FUNC(server_address)
 		DEF_BUILDAT_FUNC(local_server_status)
 		DEF_BUILDAT_FUNC(local_server_log_tail)
 		DEF_BUILDAT_FUNC(send_packet);
@@ -3892,6 +3893,20 @@ struct CApp: public App, public magic::Application
 	// page's localStorage, one per origin. A server this client started is
 	// its game's (the port changes every launch); any other its address's,
 	// so a server cannot read what another one, or a local game, stored.
+	// server_address() -> the address the client is connected to, or nil.
+	// Trusted only: extensions/starport's report of the server one is on
+	static int l_server_address(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ address = self->m_state ? self->m_state->get_address() : "";
+		if(address.empty())
+			return 0;
+		lua_pushlstring(L, address.c_str(), address.size());
+		return 1;
+	}
+
 	static int l_game_storage_dir(lua_State *L)
 	{
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");

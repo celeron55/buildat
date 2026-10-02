@@ -9,6 +9,8 @@
 #      setup code) claims it with the claim code, and then it is.
 #   3. A report by a key gets a receipt; the moderator rejects it; the
 #      reporter's key asks and gets the outcome.
+#   4. The admin makes a fleet; a second server with the fleet's line in
+#      its starport.json is served in it without anyone claiming it.
 #
 #   KEEP_TMP=1 apps/starport/check.sh
 set -u
@@ -16,6 +18,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_starport.XXXXXX")
 SP=29641
 AN=29642
+AN2=29643
 pids=()
 cleanup() {
 	for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
@@ -25,7 +28,8 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 api() { curl -s -m 10 "$@"; }
 
-mkdir -p "$tmp/sp" "$tmp/an/apps/floorplanner" "$tmp/cl"
+mkdir -p "$tmp/sp" "$tmp/an/apps/floorplanner" "$tmp/an2/apps/floorplanner" \
+	"$tmp/cl"
 cat > "$tmp/an/apps/floorplanner/starport.json" <<EOF
 {"starports": ["http://127.0.0.1:$SP"], "name": "Check house",
  "kind": "app", "audience": "everyone", "access": "open",
@@ -73,11 +77,12 @@ BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}
-{\"cmd\":\"decide\",\"group\":\"$id|spam\",\"decision\":\"dismiss\"}" \
+{\"cmd\":\"decide\",\"group\":\"$id|spam\",\"decision\":\"dismiss\"}
+{\"cmd\":\"fleet_create\",\"name\":\"Check fleet\"}" \
 	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/cl.log" 2>&1
 n=$(grep -c 'sp: {"id":[0-9]*,"ok":true' "$tmp/cl.log")
-[ "$n" -ge 4 ] || fail "$n of 4 commands went through (cl.log)"
+[ "$n" -ge 5 ] || fail "$n of 5 commands went through (cl.log)"
 
 api "localhost:$SP/api/list" | grep -q "\"$id\"" ||
 	fail "the claimed listing is not served"
@@ -87,4 +92,24 @@ api -d "{\"key\":\"$key\",\"receipts\":[\"$receipt\"]}" \
 	"localhost:$SP/api/report_status" | grep -q '"state":"rejected"' ||
 	fail "the reporter does not see the outcome"
 echo "ok: the reporter sees the report rejected"
+
+fleet=$(grep -o '"code":"[0-9a-f]*","description":"","id":"[0-9a-f]*"' \
+	"$tmp/cl.log" | head -1 | sed 's/"code":"\([0-9a-f]*\)".*"id":"\([0-9a-f]*\)"/\2:\1/')
+[ -n "$fleet" ] || fail "no fleet made (cl.log)"
+sed "s/\"Check house\"/\"Check main\", \"fleet\": \"$fleet\", \"pool\": \"main\"/" \
+	"$tmp/an/apps/floorplanner/starport.json" \
+	> "$tmp/an2/apps/floorplanner/starport.json"
+Build/bin/buildat_server -m apps/floorplanner -D "$tmp/an2" -P $AN2 -l 3 \
+	> "$tmp/an2.log" 2>&1 &
+pids+=($!)
+for _ in $(seq 120); do
+	[ "$(grep -c "verified ok" "$tmp/sp.log")" -ge 2 ] && break
+	sleep 1
+done
+api "localhost:$SP/api/list" | python3 -c "
+import json, sys
+s = [x for x in json.load(sys.stdin)['servers'] if x['name'] == 'Check main']
+assert s and s[0]['fleet']['name'] == 'Check fleet' and s[0]['pool'] == 'main', s
+" || fail "the fleet's server is not served in the fleet (sp.log, an2.log)"
+echo "ok: a server joined the fleet by its config line"
 echo PASS

@@ -7187,6 +7187,11 @@ do
 			panel.button(w, "Change password...", function()
 				account_page(doc.accounts.password_page)
 			end)
+			-- To the Starports that list it ([STARPORT] 5); the dialog is
+			-- the client's own
+			panel.button(w, "Report this server...", function()
+				require("buildat/extension/starport").open_report_here()
+			end)
 		end
 		-- Anyone makes a copy, which is theirs, and goes back to the plans
 		-- ([FP_PLANS] 4, 5)

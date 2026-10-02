@@ -23,6 +23,7 @@ local log = buildat.Logger("extension/starport")
 local network = require("buildat/extension/network")
 local uistack = require("buildat/extension/uistack")
 local magic = require("buildat/extension/urho3d").safe
+local group = dofile(__buildat_extension_path("starport") .. "/group.lua")
 local M = {safe = {}}
 
 local DEFAULT_STARPORT = "https://starport.buildat.org"
@@ -206,7 +207,10 @@ local function passes(f, x)
 		return false
 	end
 	for _, d in ipairs(DESCRIPTORS) do
-		if f.hide[d[1]] and d[3][(x.descriptors or {})[d[1]] or ""] then
+		-- A server whose version does not know a descriptor says
+		-- "unknown", which a filter hiding it hides too ([STARPORT] 3)
+		local v = (x.descriptors or {})[d[1]] or "unknown"
+		if f.hide[d[1]] and (d[3][v] or v == "unknown") then
 			return false
 		end
 	end
@@ -652,17 +656,78 @@ function M.safe.open_settings()
 	end)
 end
 
--- open_report(address): the report dialog for a listing of the last fetch
-function M.safe.open_report(address)
-	local row = nil
-	for _, x in ipairs(last_rows) do
-		if x.address == address then
-			row = x
+-- Base64, for the evidence a report carries in its JSON
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local function base64(data)
+	local out = {}
+	for i = 1, #data, 3 do
+		local a, b, c = data:byte(i, i + 2)
+		local n = a * 65536 + (b or 0) * 256 + (c or 0)
+		local q = {}
+		for k = 4, 1, -1 do
+			q[k] = n % 64 + 1
+			n = math.floor(n / 64)
+		end
+		out[#out + 1] = B64:sub(q[1], q[1]) .. B64:sub(q[2], q[2]) ..
+				(b and B64:sub(q[3], q[3]) or "=") ..
+				(c and B64:sub(q[4], q[4]) or "=")
+	end
+	return table.concat(out)
+end
+assert(base64("Ma") == "TWE=" and base64("Man") == "TWFu" and
+		base64("M") == "TQ==")
+
+local MAX_EVIDENCE = 48 * 1024
+
+-- **The evidence**: the newest screenshot the player took in the last ten
+-- minutes (the screenshot key, before opening the report), made small
+-- enough for a report. -> base64 JPEG and the file's name, or nil and why
+-- simplified: found by trying the names the client gives a screenshot,
+-- second by second, as there is no directory listing here; one taken
+-- twice in a second is found by its first name only
+local function latest_screenshot_evidence()
+	local dir = __buildat_get_path("user") .. "/screenshots/"
+	local now = os.time()
+	local path, name = nil, nil
+	for t = now, now - 600, -1 do
+		local n = os.date("screenshot_%Y%m%d_%H%M%S.png", t)
+		local f = io.open(dir .. n, "rb")
+		if f then
+			f:close()
+			path, name = dir .. n, n
+			break
 		end
 	end
-	if not row then
-		return false
+	if not path then
+		return nil, "No screenshot from the last ten minutes: take one "..
+				"with the screenshot key, then attach it"
 	end
+	local img = Image:new()
+	if not img:Load(path) or img.width == 0 then
+		return nil, "Could not read " .. name
+	end
+	local tmp = __buildat_get_path("user") .. "/starport_evidence.jpg"
+	for _, try in ipairs({{640, 60}, {480, 50}, {360, 40}, {240, 35}}) do
+		local w = math.min(try[1], img.width)
+		local h = math.max(1, math.floor(img.height * w / img.width))
+		img:Resize(w, h)
+		if img:SaveJPG(tmp, try[2]) then
+			local f = io.open(tmp, "rb")
+			local data = f and f:read("*a") or ""
+			if f then
+				f:close()
+			end
+			os.remove(tmp)
+			local b64 = base64(data)
+			if #b64 <= MAX_EVIDENCE and #data > 0 then
+				return b64, name
+			end
+		end
+	end
+	return nil, "Could not make " .. name .. " small enough"
+end
+
+local function open_report_row(row)
 	local root, w = open_window("starport report", 620)
 	add_text(w, "Report " .. tostring(row.name) .. " (" .. row.address .. ")")
 	local reason = nil
@@ -681,6 +746,26 @@ function M.safe.open_report(address)
 	local suggest = add_edit(sr, "")
 	add_text(w, "What is wrong (optional):")
 	local text = add_edit(w, "")
+	-- 2b: the whole fleet, where the server is in one
+	local whole_fleet = false
+	if type(row.fleet) == "table" and row.fleet.name then
+		local fb
+		fb = add_button(w, "[ ] The whole fleet: " .. tostring(row.fleet.name),
+				function()
+			whole_fleet = not whole_fleet
+			fb:GetChild(0).text = (whole_fleet and "[x]" or "[ ]") ..
+					" The whole fleet: " .. tostring(row.fleet.name)
+		end)
+	end
+	local evidence = nil
+	local er = add_row(w)
+	local ev_text
+	add_button(er, "Attach my latest screenshot", function()
+		local b64, what = latest_screenshot_evidence()
+		evidence = b64
+		ev_text.text = b64 and "Attached: " .. what or what
+	end)
+	ev_text = add_label(er, "", 0)
 	local status = add_text(w, "")
 	local r = add_row(w)
 	add_button(r, "Send", function()
@@ -692,7 +777,8 @@ function M.safe.open_report(address)
 		local n = 0
 		for url, id in pairs(row.ids) do
 			n = n + 1
-			local body = {listing = id, reason = reason, text = text:GetText()}
+			local body = {listing = id, reason = reason, text = text:GetText(),
+				whole_fleet = whole_fleet, evidence = evidence}
 			local a = suggest:GetText()
 			if reason == "category" and a ~= "" then
 				body.suggest = {audience = a}
@@ -721,12 +807,65 @@ function M.safe.open_report(address)
 		status.text = "Sending to " .. n .. " Starport(s)..."
 	end)
 	add_button(r, "Close", function() uistack.main:pop(root) end)
+end
+
+local function row_of(address)
+	for _, x in ipairs(last_rows) do
+		if x.address == address then
+			return x
+		end
+	end
+	return nil
+end
+
+-- open_report(address): the report dialog for a listing of the last fetch
+function M.safe.open_report(address)
+	local row = row_of(address)
+	if not row then
+		return false
+	end
+	open_report_row(row)
 	return true
 end
+
+-- open_report_here(): the report dialog for the server this client is on,
+-- for a server's own page ([STARPORT] 5); found in the Starports' lists,
+-- which are fetched when the last fetch does not have it
+-- simplified: by the address connected to, which is the listing's only
+-- when the player connected by the address the listing has
+function M.safe.open_report_here()
+	local address = __buildat_server_address()
+	if not address then
+		return false
+	end
+	local function go()
+		local row = row_of(address)
+		if row then
+			open_report_row(row)
+		else
+			local root, w = open_window("starport report", 520)
+			add_text(w, address .. " is not listed on your Starports, so "..
+					"there is nobody to report it to.")
+			add_button(w, "Close", function() uistack.main:pop(root) end)
+		end
+	end
+	if row_of(address) then
+		go()
+	else
+		M.safe.fetch(function() go() end, true)
+	end
+	return true
+end
+
+-- group(servers[, fleet_id]): a fetch's servers as fleet, pool and
+-- server rows (group.lua)
+M.safe.group = group.group
 
 M.fetch = M.safe.fetch
 M.direct_connect_allowed = M.safe.direct_connect_allowed
 M.open_settings = M.safe.open_settings
 M.open_report = M.safe.open_report
+M.open_report_here = M.safe.open_report_here
+M.group = M.safe.group
 return M
 -- vim: set noet ts=4 sw=4:

@@ -200,6 +200,30 @@ assert(when(0) == "1970-01-01 00:00" and
 		when(1790926649) == "2026-10-02 07:37" and
 		when(951782400) == "2000-02-29 00:00")
 
+-- The evidence a report carries, back to the JPEG it was
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64_AT = {}
+for i = 1, 64 do
+	B64_AT[B64:sub(i, i)] = i - 1
+end
+local function unbase64(text)
+	local out = {}
+	local n, bits = 0, 0
+	for c in text:gmatch("[%w%+/]") do
+		n = n * 64 + B64_AT[c]
+		bits = bits + 6
+		if bits >= 8 then
+			bits = bits - 8
+			local byte = math.floor(n / 2 ^ bits)
+			out[#out + 1] = string.char(byte)
+			n = n - byte * 2 ^ bits
+		end
+	end
+	return table.concat(out)
+end
+assert(unbase64("TWFu") == "Man" and unbase64("TWE=") == "Ma" and
+		unbase64("TQ==") == "M")
+
 local function categories(l)
 	local d = {}
 	for k, v in pairs(l.descriptors or {}) do
@@ -213,7 +237,7 @@ local function categories(l)
 end
 
 local home, queue_page, group_page, listings_page, listing_page
-local audit_page, appeals_page, settings_page, appeal_page
+local audit_page, appeals_page, settings_page, appeal_page, fleets_page
 
 -- What a moderator does to a listing ([STARPORT] 6), for a group's
 -- reports (decide) or on its own (act)
@@ -284,7 +308,16 @@ home = function()
 		local l = list(w, 0.3)
 		for _, x in ipairs(me.listings or {}) do
 			l.text(s(x.name) .. " (" .. s(x.id) .. ", " .. s(x.host) .. ":" ..
-					s(x.port) .. "): " .. s(x.served))
+					s(x.port) .. "): " .. s(x.served) ..
+					(s(x.fleet) ~= "" and "; fleet " .. x.fleet ..
+					(s(x.pool) ~= "" and ", pool " .. x.pool or "") ..
+					(x.pool_mismatch and " (differs from its pool)" or "")
+					or ""))
+			if s(x.fleet) ~= "" then
+				l.button("Remove from the fleet", function()
+					req("fleet_remove_server", {listing = x.id}, home)
+				end)
+			end
 		end
 		for _, st in ipairs(me.statements or {}) do
 			l.text(when(st.ts) .. " " .. s(st.listing_name) .. ": " ..
@@ -293,6 +326,7 @@ home = function()
 			l.button("Appeal", function() appeal_page(st) end)
 		end
 		local b = row(w)
+		button(b, "Fleets", function() fleets_page(me) end)
 		if me.moderator then
 			button(b, "Queue", queue_page)
 			button(b, "Listings", function() listings_page("") end)
@@ -313,6 +347,39 @@ home = function()
 			accounts.password_page(home)
 		end)
 	end)
+end
+
+-- An operator's fleets ([STARPORT] 2b): a server joins one by the line
+-- shown here in its starport.json
+fleets_page = function(me)
+	local w = open("Fleets", function() fleets_page(me) end)
+	text(w, "A server joins a fleet by a line in its starport.json; "..
+			"servers that only split the load also name the same pool.",
+			GREY)
+	local l = list(w, 0.3)
+	for _, f in ipairs(me.fleets or {}) do
+		l.text(s(f.name) .. ": " .. s(f.description) .. " " .. s(f.link))
+		l.text('"fleet": "' .. s(f.id) .. ":" .. s(f.code) ..
+				'", "pool": "main"', YELLOW)
+		local r = l.row()
+		button(r, "New code (servers with the old one leave)", function()
+			req("fleet_new_code", {fleet = f.id}, function()
+				req("me", {}, fleets_page)
+			end)
+		end)
+	end
+	local name = edit(w, "Name", "")
+	local description = edit(w, "Description", "")
+	local link = edit(w, "Link", "")
+	local r = row(w)
+	button(r, "Make a fleet", function()
+		req("fleet_create", {name = name:GetText(),
+			description = description:GetText(), link = link:GetText()},
+				function()
+			req("me", {}, fleets_page)
+		end)
+	end)
+	button(r, "Back", home)
 end
 
 appeal_page = function(st)
@@ -359,11 +426,33 @@ group_page = function(gid)
 				categories(x) .. "; " .. s(x.served) .. ". " ..
 				s(x.description), GREY)
 		local l = list(w, 0.3)
+		if s(g.fleet) ~= "" then
+			text(w, "Reports of the whole fleet " .. g.fleet ..
+					": an action applies to all its servers.", YELLOW)
+		end
 		for _, rep in ipairs(r.reports or {}) do
 			l.text(string.format("%s weight %.2f%s%s: %s", when(rep.ts),
 					rep.weight or 0, rep.trusted and ", trusted flagger" or "",
 					rep.state ~= "open" and ", " .. s(rep.state) or "",
 					s(rep.text)))
+			local rr = l.row()
+			if s(rep.evidence) ~= "" then
+				button(rr, "Save the screenshot", function()
+					local path = buildat.save_file("evidence_" .. rep.id ..
+							".jpg", unbase64(rep.evidence))
+					message = path and "Saved: " .. path or
+							"Could not save it"
+					group_page(gid)
+				end)
+			end
+			if s(rep.key) ~= "" and not rep.trusted then
+				button(rr, "Trust this reporter (admin)", function()
+					req("trust_reporter", {report = rep.id}, function()
+						message = "Their reports now go first."
+						group_page(gid)
+					end)
+				end)
+			end
 		end
 		for _, a in ipairs(r.history or {}) do
 			l.text(when(a.ts) .. " " .. s(a.action) .. " by " ..
@@ -404,8 +493,24 @@ listing_page = function(x)
 			s(x.app) .. ", operator " .. s(x.owner) .. "\n" .. categories(x) ..
 			"\n" .. s(x.served) .. "\n" .. s(x.description), GREY)
 	local reason = edit(w, "Reason", "other")
+	local whole = false
+	if s(x.fleet) ~= "" then
+		local fb
+		fb = button(row(w), "[ ] On the whole fleet " .. x.fleet, function()
+			whole = not whole
+			fb:GetChild(0):SetText((whole and "[x]" or "[ ]") ..
+					" On the whole fleet " .. x.fleet)
+		end)
+	end
 	action_rows(w, function(q)
 		q.listing, q.reason = x.id, reason:GetText()
+		if whole then
+			q.fleet = x.fleet
+			return req("act", q, function(n)
+				message = "Done on " .. s(n) .. " server(s)."
+				listings_page("")
+			end)
+		end
 		req("act", q, function(nx)
 			message = "Done."
 			listing_page(nx)

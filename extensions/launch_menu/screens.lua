@@ -148,7 +148,9 @@ end
 
 -- The connect runs on a worker and this screen polls it
 -- ([BOX_PLAYTEST_2] 12): a blocking connect froze the frame
-local function connect_or_show_error(address)
+-- `fallbacks`: the addresses to try next when this one fails, a pool's
+-- other servers ([STARPORT] 2b)
+local function connect_or_show_error(address, fallbacks)
 	local ok, why = api.connect_start(address)
 	if not ok then
 		show_error(why)
@@ -180,6 +182,13 @@ local function connect_or_show_error(address)
 			-- launcher leaving a game pops the whole stack.
 			uistack.main:push({desc = GAME_RUNNING})
 			magic.ui:SetFocusElement(nil)
+		elseif fallbacks and #fallbacks > 0 then
+			log:info("connect_server() failed; the pool's next server")
+			local rest = {}
+			for i = 2, #fallbacks do
+				rest[#rest + 1] = fallbacks[i]
+			end
+			connect_or_show_error(fallbacks[1], rest)
 		else
 			log:info("connect_server() failed")
 			show_error(err)
@@ -219,7 +228,16 @@ function M.show_connect_to_server()
 	end
 	local do_connect
 	local picked = nil
+	-- The fleet open, or nil for the top ([STARPORT] 2b); the public list's
+	-- drawing, which a fleet's row opens
+	local open_fleet, show_public = nil, nil
 	local function pick(row, second)
+		if row.back or row.fleet_id then
+			open_fleet = row.fleet_id
+			picked = row.fleet_id and row or nil
+			show_public()
+			return
+		end
 		picked = row
 		if direct then
 			address_edit:SetText(row.host)
@@ -243,30 +261,58 @@ function M.show_connect_to_server()
 	local sp_list = ui_utils.server_list(left, {width = 440,
 			height = direct and 220 or 440}, pick)
 	local sp_rows = {}
-	local function show_public()
-		local q = search:GetText():lower()
-		local rows = {}
-		for _, x in ipairs(sp_rows) do
-			local hay = (tostring(x.name) .. " " .. tostring(x.description) ..
-					" " .. table.concat(x.tags or {}, " ")):lower()
-			if q == "" or hay:find(q, 1, true) then
-				local host, port = x.address:match("^(.*):(%d+)$")
-				local d = {}
-				for k, v in pairs(x.descriptors or {}) do
-					if v ~= "no" and v ~= "none" then
-						d[#d + 1] = k .. " " .. tostring(v)
-					end
-				end
-				table.sort(d)
-				rows[#rows + 1] = {name = tostring(x.name) .. "   " ..
-						tostring(x.players or 0) .. " playing",
-					host = host, port = port, address = x.address,
-					line = tostring(x.description or "") .. "\n" ..
-						tostring(x.kind) .. ", " .. tostring(x.audience) ..
-						", " .. tostring(x.access) ..
-						(#d > 0 and " (" .. table.concat(d, ", ") .. ")" or "") ..
-						"  via " .. table.concat(x.starports or {}, ", ")}
+	local function categories(x)
+		local d = {}
+		for k, v in pairs(x.descriptors or {}) do
+			if v ~= "no" and v ~= "none" then
+				d[#d + 1] = k .. " " .. tostring(v)
 			end
+		end
+		table.sort(d)
+		return tostring(x.kind) .. ", " .. tostring(x.audience) .. ", " ..
+				tostring(x.access) ..
+				(#d > 0 and " (" .. table.concat(d, ", ") .. ")" or "")
+	end
+	show_public = function()
+		local q = search:GetText():lower()
+		local shown = {}
+		for _, x in ipairs(sp_rows) do
+			local f = type(x.fleet) == "table" and x.fleet or {}
+			local hay = (tostring(x.name) .. " " .. tostring(x.description) ..
+					" " .. table.concat(x.tags or {}, " ") .. " " ..
+					tostring(f.name or "")):lower()
+			if q == "" or hay:find(q, 1, true) then
+				shown[#shown + 1] = x
+			end
+		end
+		local rows = {}
+		if open_fleet then
+			rows[1] = {name = "< All public servers", back = true}
+		end
+		for _, g in ipairs(starport.group(shown, open_fleet)) do
+			local x = g.server
+			local row = {group = g}
+			if g.kind == "fleet" then
+				row.name = tostring(g.name) .. "   fleet of " .. g.count ..
+						", " .. g.players .. " playing"
+				row.line = tostring(g.description or "")
+				row.fleet_id = g.fleet.id
+			else
+				row.host, row.port = x.address:match("^(.*):(%d+)$")
+				row.address = x.address
+				row.name = (g.kind == "pool" and tostring(g.name) .. "   " ..
+						g.count .. " servers, " or tostring(x.name) .. "   ") ..
+						g.players .. " playing"
+				row.line = tostring(x.description or "") .. "\n" ..
+						categories(x) .. "  via " ..
+						table.concat(x.starports or {}, ", ")
+				-- A pool: its best first, the others to fall back on
+				row.fallbacks = {}
+				for i = 2, #g.servers do
+					row.fallbacks[#row.fallbacks + 1] = g.servers[i].address
+				end
+			end
+			rows[#rows + 1] = row
 		end
 		sp_list:set_rows(rows)
 	end
@@ -290,8 +336,9 @@ function M.show_connect_to_server()
 	for _, b in ipairs({
 		{"Refresh", function() refresh(true) end},
 		{"Report...", function()
-			if not picked or not picked.address or
-					not starport.open_report(picked.address) then
+			local address = picked and (picked.address or (picked.group and
+					picked.group.servers[1].address))
+			if not address or not starport.open_report(address) then
 				show_error("Pick a public server to report")
 			end
 		end},
@@ -329,7 +376,12 @@ function M.show_connect_to_server()
 				show_error("Pick a server from the list")
 				return
 			end
-			connect_or_show_error(picked.host .. ":" .. picked.port)
+			if not picked.host then
+				show_error("Pick a server of the fleet")
+				return
+			end
+			connect_or_show_error(picked.host .. ":" .. picked.port,
+					picked.fallbacks)
 			return
 		end
 		local host = address_edit:GetText()
@@ -342,7 +394,8 @@ function M.show_connect_to_server()
 		if port ~= "" then
 			address = host..":"..port
 		end
-		connect_or_show_error(address)
+		connect_or_show_error(address, picked and
+				picked.address == address and picked.fallbacks or nil)
 	end
 
 	local connect_button = make_button(window, "Connect")
