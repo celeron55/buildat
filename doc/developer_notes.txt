@@ -1,0 +1,34 @@
+Developer notes
+===============
+Small things worth knowing when working on the engine itself. Conventions
+are in conventions.txt; the bundled Urho3D's patches in urho3d_fork.txt.
+
+Urho3D: scene replication
+-------------------------
+Always pass LOCAL or REPLICATED as the CreateMode to Node::CreateChild() and
+Node::CreateComponent(). Leaving it to the default causes wrong replication
+at a point far from the call.
+
+Urho3D: the "magic" alias
+-------------------------
+Urho3D's namespace is aliased to "magic" in buildat's C++ and Lua; a
+symbol named magic.X is Urho3D::X.
+
+Profiling the client under callgrind
+------------------------------------
+The client's stack is deep with Lua bindings, and callgrind folds it into
+one <Cycle N> unless told to separate:
+
+  valgrind --tool=callgrind --separate-threads=yes --separate-recs=10 \
+      --separate-callers=5 bin/buildat -s localhost
+
+Profiling a Luanti game's Lua
+-----------------------------
+See "Finding out what is slow" in luanti_module.txt: BUILDAT_LUANTI_LUAPROF,
+the per-mod load times, and util/bench_worldgen.sh.
+
+Backtraces
+----------
+A crash prints a symbolised backtrace on Linux (src/impl/linux/debug.cpp). Under a
+scripted run the client's log carries it; fuzz.sh and drive.sh read
+"Crash:" as a failure.
