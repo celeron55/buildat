@@ -1786,7 +1786,11 @@ struct Module: public interface::Module
 		json::Value scopes = id.get("scopes").is_object() ?
 				id.get("scopes").deepcopy() : json::object();
 		ss_ shown = jstr(scopes.get(scope), "name");
-		if(shown.empty()){
+		// The name changed: the community's server has an account of its
+		// own by the one it had (the client asks the player for another)
+		const bool rename = b.get("rename").is_true() &&
+				!jstr(b, "name").empty() && jstr(b, "name") != shown;
+		if(shown.empty() || rename){
 			const ss_ want = jstr(b, "name");
 			if(want.empty()){
 				json::Value out = json::object();
@@ -1803,6 +1807,8 @@ struct Module: public interface::Module
 			if(taken.is_string() && taken.as_string() != name)
 				throw Exception("that name is taken in this community");
 			put("scope_names", taken_key, json::Value(name));
+			if(!shown.empty())
+				store("scope_names")->remove(scope+"|"+shown);
 			json::Value s = json::object();
 			s.set("name", want);
 			scopes.set(scope, s);

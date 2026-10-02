@@ -83,7 +83,7 @@ local token_tried = false
 local last_login = nil
 
 local function send_login(name, password, code, token, keep, totp, starport)
-	last_login = {name, password, code, token, keep}
+	last_login = {name, password, code, token, keep, starport}
 	buildat.send_packet("accounts:login", cereal.binary_output(
 			{name = name, password = password, code = code or "",
 			token = token or "", keep = keep and 1 or 0, totp = totp or "",
@@ -364,6 +364,24 @@ buildat.sub_packet("accounts:login_result", function(data)
 			show_totp(err == "TOTP: enter the code from your authenticator "..
 					"app" and "" or err:sub(7))
 			return
+		end
+		-- A Starport ID whose name here is a local account's: another
+		-- name for this community, asked here, and the login again
+		if last_login and (last_login[6] or "") ~= "" and
+				err:find("is taken on this server", 1, true) then
+			local ok, starport = pcall(require, "buildat/extension/starport")
+			if ok and starport.id_token_here then
+				local code, keep = last_login[3], last_login[5]
+				starport.id_token_here(function(token, why)
+					if not token then
+						return show_login(why ~= "cancelled" and why or nil)
+					end
+					send_login("", "", code, nil, keep, "", token)
+				end, "The name you have in this community is taken here by "..
+						"an account of this server. Pick another; it is kept "..
+						"for this community on the Starport.")
+				return
+			end
 		end
 		show_login(err)
 		return

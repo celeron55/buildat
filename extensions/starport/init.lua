@@ -1292,10 +1292,6 @@ function M.id_page(url, message)
 	end)
 end
 
--- id_token_here(cb): a token for the server this client is on, from the
--- Starport ID of a Starport that lists it ([STARPORT] 10c); cb(token) or
--- cb(nil, why). The name used in the server's community is asked the
--- first time, in this side's own dialog.
 -- The age an ID has not said yet, asked where a join needs it (user,
 -- 2026-10-02: "say your age on the ID's page first" left a newcomer
 -- stuck); on_done(true) once the Starport has it
@@ -1336,7 +1332,13 @@ local function ask_age(url, session, on_done)
 	end)
 end
 
-function M.safe.id_token_here(cb)
+-- id_token_here(cb[, rename_reason]): a token for the server this client
+-- is on, from the Starport ID of a Starport that lists it ([STARPORT]
+-- 10c); cb(token) or cb(nil, why). The name used in the server's
+-- community is asked the first time, in this side's own dialog; with
+-- rename_reason, a new one is asked first, the reason shown (the server
+-- has an account of its own by the name the ID had there)
+function M.safe.id_token_here(cb, rename_reason)
 	local address = __buildat_server_address()
 	if address then
 		address = canonical(address)
@@ -1368,7 +1370,9 @@ function M.safe.id_token_here(cb)
 			for u, l in pairs(ids) do
 				url, listing = u, l or nil
 			end
-			return M.id_login(url, function() M.safe.id_token_here(cb) end)
+			return M.id_login(url, function()
+				M.safe.id_token_here(cb, rename_reason)
+			end)
 		end
 		-- The Starport away: a kept token, opened by the password
 		local function offline(why)
@@ -1404,10 +1408,33 @@ function M.safe.id_token_here(cb)
 			end))
 			e:SetFocus(true)
 		end
-		local function ask(name)
+		local community = tostring(row and (type(row.fleet) == "table" and
+				row.fleet.name or row.name) or address)
+		local ask
+		-- The name to use in the community, the reason first if any
+		local function name_prompt(reason, suggest, rename)
+			local root, w = open_window("starport id name", 520)
+			if reason then
+				add_text(w, reason, YELLOW)
+			end
+			add_text(w, "The name to use in " .. community .. ". Only this "..
+					"community sees it; others do not see which name you "..
+					"use here.")
+			local e = add_edit(w, suggest or "")
+			local rr = add_row(w)
+			add_button(rr, "Use it", function()
+				local n = e:GetText()
+				uistack.main:pop(root)
+				ask(n, rename)
+			end)
+			add_button(rr, "Cancel", close_and(root, function()
+				cb(nil, "cancelled")
+			end))
+		end
+		ask = function(name, rename)
 			id_call(url, "token", {session = s.ids[url].session,
 				listing = listing, address = address:gsub("^https://", ""),
-				name = name},
+				name = name, rename = rename or nil},
 					function(res, err, away)
 				if not res and away then
 					return offline(err)
@@ -1415,7 +1442,7 @@ function M.safe.id_token_here(cb)
 				if not res then
 					if err == "session" then
 						return M.id_login(url, function()
-							M.safe.id_token_here(cb)
+							M.safe.id_token_here(cb, rename_reason)
 						end, "Log in again")
 					end
 					-- An ID made without an age (one made by joining the
@@ -1423,38 +1450,31 @@ function M.safe.id_token_here(cb)
 					if tostring(err):lower():find("say your age", 1, true) then
 						return ask_age(url, s.ids[url].session, function(ok)
 							if ok then
-								ask(name)
+								ask(name, rename)
 							else
 								cb(nil, "cancelled")
 							end
 						end)
 					end
+					-- A name the community has, or not a name: another
+					if name and (tostring(err):find("is taken", 1, true) or
+							tostring(err):find("a name is", 1, true)) then
+						return name_prompt(err, name, rename)
+					end
 					return cb(nil, err)
 				end
 				if res.need_name then
-					local root, w = open_window("starport id name", 520)
-					add_text(w, "The name to use in " .. tostring(
-							row and (type(row.fleet) == "table" and
-							row.fleet.name or row.name) or address) ..
-							". Only this community sees it; "..
-							"others do not see which name you use here.")
-					local e = add_edit(w, res.suggest or "")
-					local rr = add_row(w)
-					add_button(rr, "Use it", function()
-						local n = e:GetText()
-						uistack.main:pop(root)
-						ask(n)
-					end)
-					add_button(rr, "Cancel", close_and(root, function()
-						cb(nil, "cancelled")
-					end))
-					return
+					return name_prompt(nil, res.suggest)
 				end
 				keep_token(url, address, res.token, res.exp)
 				cb(res.token)
 			end)
 		end
-		ask(nil)
+		if rename_reason then
+			name_prompt(rename_reason, "", true)
+		else
+			ask(nil)
+		end
 	end
 	local row = row_of(address)
 	if row then
