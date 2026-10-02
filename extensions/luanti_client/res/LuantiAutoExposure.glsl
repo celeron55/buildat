@@ -77,7 +77,16 @@ void PS()
 
     #ifdef ADAPTLUMINANCE
     float adaptedLum = texture2D(sDiffMap, vTexCoord).r;
-    float lum = clamp(texture2D(sNormalMap, vTexCoord).r, cAutoExposureLumRange.x, cAutoExposureLumRange.y);
+    float lum = texture2D(sNormalMap, vTexCoord).r;
+    lum = lum == lum ? clamp(lum, cAutoExposureLumRange.x, cAutoExposureLumRange.y) :
+            cAutoExposureLumRange.x;
+    // **Adapted from the start, not from what the target held**: it is
+    // made with each viewport and nothing writes it first, and what is in
+    // it is anything -- a frame metered to black, the eye taking seconds
+    // to come back from it (user, 2026-10-02: a random dark start). Once
+    // running it never leaves the range, so out of it is that.
+    if (!(adaptedLum >= cAutoExposureLumRange.x && adaptedLum <= cAutoExposureLumRange.y))
+        adaptedLum = lum;
     gl_FragColor.r = adaptedLum + (lum - adaptedLum) * (1.0 - exp(-cDeltaTimePS * cAutoExposureAdaptRate));
     #endif
 
