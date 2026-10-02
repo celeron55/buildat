@@ -5,7 +5,7 @@
 -- TCP and UDP sockets for scripts, with the user in the loop: the first
 -- connection or datagram to an address in a week needs the user to accept the
 -- address and name it. Answers are remembered in
--- cache/network_addresses.csv.
+-- user/network_addresses.csv.
 --
 --   local socket = require("buildat/extension/network")
 --   socket.udp_connect("localhost", 30001, function(sock, err)
@@ -34,7 +34,7 @@ local M = {safe = {}}
 
 local ACCEPTANCE_VALID_S = 7 * 24 * 3600
 
-local store_path = __buildat_get_path("cache").."/network_addresses.csv"
+local store_path = __buildat_get_path("user").."/network_addresses.csv"
 
 -- Addresses this session has already notified about
 local notified = {}
@@ -47,7 +47,9 @@ local notified = {}
 
 local csv = dofile(__buildat_extension_path("network").."/csv.lua")
 
--- uri -> {accepted=, uri=, description=, created=, last_attempt=}
+-- uri -> {accepted=, uri=, description=, created=, last_attempt=, name=}
+-- name is the player name last used on that server ([BOX_PLAYTEST_2] 4),
+-- "" for none; a row written before the column has none.
 local function load_store()
 	local entries = {}
 	local file = io.open(store_path, "r")
@@ -64,6 +66,7 @@ local function load_store()
 					description = f[3] or "",
 					created = tonumber(f[4]) or 0,
 					last_attempt = tonumber(f[5]) or 0,
+					name = f[6] or "",
 				}
 			end
 		end
@@ -83,7 +86,7 @@ local function save_store(entries)
 		log:error("Cannot write "..store_path..": "..tostring(err))
 		return
 	end
-	file:write("accepted,address,description,created,last_attempt\n")
+	file:write("accepted,address,description,created,last_attempt,name\n")
 	for _, uri in ipairs(uris) do
 		local e = entries[uri]
 		file:write(table.concat({
@@ -92,6 +95,7 @@ local function save_store(entries)
 			csv.quote(e.description),
 			csv.quote(math.floor(e.created)),
 			csv.quote(math.floor(e.last_attempt)),
+			csv.quote(e.name or ""),
 		}, ",").."\n")
 	end
 	file:close()
@@ -128,11 +132,18 @@ local function format_time(t)
 	return os.date("%Y-%m-%d %H:%M", t)
 end
 
--- on_answer(accepted: boolean, description: string)
-local function ask_user(uri, entry, on_answer)
+-- on_answer(accepted: boolean, description: string). suggested is the
+-- caller's own description ([NET_DESC]): the field starts with it --
+-- what the caller is asking for is what the caller knows -- editable,
+-- and the accept or the decline is still the user's. An entry's own
+-- description wins: that is what the user left there.
+local function ask_user(uri, entry, on_answer, suggested)
 	local root = uistack.main:push({desc="network permission dialog"})
 	root.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "__menu/res/main_style.xml")
+			"XMLFile", "launch_menu/res/main_style.xml")
+	-- Over whatever a server draws (a join window is at 100): the user has
+	-- to see what they are asked
+	root.priority = 1000
 
 	local menu = ui_utils.vertical_menu(root, {min_width = 400})
 	local window = menu.window
@@ -158,9 +169,13 @@ local function ask_user(uri, entry, on_answer)
 
 	local edit = window:CreateChild("LineEdit")
 	edit:SetStyleAuto()
+	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
+	edit.textCopyable = true
+	edit.textSelectable = true
 	edit.minHeight = 24
 	edit.minWidth = 380
-	edit:SetText(entry and entry.description or "")
+	edit:SetText((entry and entry.description ~= "" and entry.description) or
+			suggested or "")
 	edit:SetFocus(true)
 
 	local answered = false
@@ -179,6 +194,7 @@ local function ask_user(uri, entry, on_answer)
 	menu:on_key(function(key)
 		if key == KEY_ESCAPE then
 			answer(false)
+			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)
 end
@@ -402,10 +418,12 @@ end
 
 -- cb(socket, error): socket is nil if the connection was not made or the user
 -- declined the address
-local function connect(is_udp, host, port, cb)
+local function connect(is_udp, host, port, cb, options)
 	if type(host) ~= "string" or not tonumber(port) or type(cb) ~= "function" then
 		error("network: connect(host: string, port: number, cb: function)")
 	end
+	local suggested = type(options) == "table" and
+			type(options.description) == "string" and options.description or nil
 	local uri = (is_udp and "udp://" or "tcp://")..host..":"..port
 	local entry = load_store()[uri]
 	if entry and entry.accepted and
@@ -422,15 +440,300 @@ local function connect(is_udp, host, port, cb)
 			return
 		end
 		open_socket(is_udp, host, port, cb)
+	end, suggested)
+end
+
+function M.safe.tcp_connect(host, port, cb, options)
+	connect(false, host, port, cb, options)
+end
+
+function M.safe.udp_connect(host, port, cb, options)
+	connect(true, host, port, cb, options)
+end
+
+-- http_get(url, cb): the body of a GET over HTTPS, cb(body) or
+-- cb(nil, error), asked of the user through the same dialog and file as a
+-- socket is -- the uri is the url's scheme and host ([SERVER_LIST]:
+-- Luanti's official server list). Fetched on a thread in the client
+-- (__buildat_http_get); read back on Update.
+local http_pending = {}
+local http_polling = false
+-- **HTTPS through the server** ([STARPORT] 10c): the web client has no
+-- HTTP of its own. Its server relays a TCP connection to a Starport it
+-- announces to, and the TLS is this client's (Mbed TLS, __buildat_tls_*),
+-- so the server carries bytes it cannot read. One request at a time.
+-- BUILDAT_HTTP_RELAY=1 takes this way on a native client too, for a check.
+-- simplified: for a Starport only, as the server relays to nothing else
+local relay_queue = {}
+local relay_busy = false
+local ca_pem = nil
+
+local function relay_next()
+	if relay_busy or #relay_queue == 0 then
+		return
+	end
+	relay_busy = true
+	local job = table.remove(relay_queue, 1)
+	local function done(body, err)
+		relay_busy = false
+		job.cb(body, err)
+		relay_next()
+	end
+	if not __buildat_server_address() then
+		return done(nil, "not connected to a server to relay through")
+	end
+	local scheme, host, port, path = job.url:match(
+			"^(https?)://([^/:]+):?(%d*)(.*)$")
+	if scheme ~= "https" then
+		return done(nil, "the relay takes https only")
+	end
+	if not ca_pem then
+		local f = io.open(__buildat_extension_path("network") ..
+				"/ca-bundle.pem", "rb")
+		ca_pem = f and f:read("*a") or ""
+		if f then
+			f:close()
+		end
+	end
+	local h, err = __buildat_tls_new(host, ca_pem)
+	if not h then
+		return done(nil, err)
+	end
+	local origin = scheme .. "://" .. host .. (port ~= "" and ":" .. port or "")
+	local request = (job.body and "POST " or "GET ") ..
+			(path ~= "" and path or "/") .. " HTTP/1.1\r\n" ..
+			"Host: " .. host .. "\r\n" ..
+			"User-Agent: buildat (relay)\r\n" ..
+			"Connection: close\r\n" ..
+			(job.body and ("Content-Type: application/json\r\n" ..
+			"Content-Length: " .. #job.body .. "\r\n") or "") ..
+			"\r\n" .. (job.body or "")
+	local sent_request = false
+	local response = ""
+	local finished = false
+	-- The body of a whole response, or nil while more is to come
+	local function parse(final)
+		local head_end = response:find("\r\n\r\n", 1, true)
+		if not head_end then
+			return nil
+		end
+		local head = response:sub(1, head_end - 1)
+		local rest = response:sub(head_end + 4)
+		local status = tonumber(head:match("^HTTP/%d%.%d (%d+)"))
+		local body = nil
+		if head:lower():find("transfer%-encoding:%s*chunked") then
+			local out, at = {}, 1
+			while true do
+				local line_end = rest:find("\r\n", at, true)
+				if not line_end then
+					break
+				end
+				local size = tonumber(rest:sub(at, line_end - 1):match(
+						"^%x+"), 16)
+				if not size then
+					break
+				end
+				if size == 0 then
+					body = table.concat(out)
+					break
+				end
+				if #rest < line_end + 1 + size then
+					break
+				end
+				out[#out + 1] = rest:sub(line_end + 2, line_end + 1 + size)
+				at = line_end + 2 + size + 2
+			end
+		else
+			local len = tonumber(head:lower():match(
+					"content%-length:%s*(%d+)"))
+			if len and #rest >= len then
+				body = rest:sub(1, len)
+			elseif final then
+				body = rest
+			end
+		end
+		if not body then
+			return nil
+		end
+		return body, status
+	end
+	local function finish(body, why)
+		if finished then
+			return
+		end
+		finished = true
+		log:info("relay " .. job.url .. ": " .. (why or ("ok, " .. #body ..
+				" bytes")))
+		__buildat_tls_free(h)
+		buildat.send_packet("starport:relay_close", "")
+		done(body, why)
+	end
+	local state_open = false
+	local function pump(cipher_in)
+		if finished then
+			return
+		end
+		local out, plain, state = __buildat_tls_step(h, cipher_in or "",
+				(state_open and not sent_request) and request or nil)
+		if state_open and not sent_request then
+			sent_request = true
+		end
+		if out ~= "" then
+			buildat.send_packet("starport:relay_send", out)
+		end
+		response = response .. plain
+		if state:sub(1, 6) == "error:" then
+			return finish(nil, "TLS " .. state)
+		end
+		if state == "open" and not state_open then
+			state_open = true
+			return pump("")
+		end
+		local body, status = parse(state == "closed")
+		if body then
+			if status and status >= 200 and status < 300 then
+				finish(body)
+			else
+				finish(nil, "HTTP " .. tostring(status))
+			end
+		elseif state == "closed" then
+			finish(nil, "closed before a whole response")
+		end
+	end
+	buildat.sub_packet("starport:relay_data", function(data) pump(data) end)
+	buildat.sub_packet("starport:relay_closed", function(why)
+		local body, status = parse(true)
+		if body and status and status >= 200 and status < 300 then
+			finish(body)
+		else
+			finish(nil, "relay: " .. tostring(why))
+		end
 	end)
+	buildat.send_packet("starport:relay_open", origin)
+	pump("")
 end
 
-function M.safe.tcp_connect(host, port, cb)
-	connect(false, host, port, cb)
+local function use_relay()
+	return buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil or
+			buildat.get_env("BUILDAT_HTTP_RELAY") == "1"
 end
 
-function M.safe.udp_connect(host, port, cb)
-	connect(true, host, port, cb)
+local function http_start(url, cb, body)
+	if use_relay() then
+		relay_queue[#relay_queue + 1] = {url = url, body = body, cb = cb}
+		relay_next()
+		return
+	end
+	local id = __buildat_http_get(url, body)
+	http_pending[id] = cb
+	if not http_polling then
+		http_polling = true
+		magic.SubscribeToEvent("Update", function()
+			for jid, callback in pairs(http_pending) do
+				local ok, body = __buildat_http_poll(jid)
+				if ok ~= nil then
+					http_pending[jid] = nil
+					if ok then
+						callback(body)
+					else
+						callback(nil, body)
+					end
+				end
+			end
+		end)
+	end
+end
+
+-- The user's leave for the url's host, then the fetch: a GET, or with a
+-- body a POST of JSON
+local function gated_http(url, cb, options, body)
+	local scheme, host = url:match("^(https?)://([^/:]+)")
+	if not scheme then
+		cb(nil, "not an http(s) url: "..url)
+		return
+	end
+	local uri = scheme.."://"..host
+	local entry = load_store()[uri]
+	if entry and entry.accepted and
+			os.time() - entry.last_attempt < ACCEPTANCE_VALID_S then
+		touch_entry(uri)
+		http_start(url, cb, body)
+		return
+	end
+	log:info("Asking the user about "..uri)
+	ask_user(uri, entry, function(accepted, description)
+		store_answer(uri, accepted, description, entry)
+		if not accepted then
+			cb(nil, "Declined by user: "..uri)
+			return
+		end
+		http_start(url, cb, body)
+	end, type(options) == "table" and options.description or nil)
+end
+
+function M.safe.http_get(url, cb, options)
+	if type(url) ~= "string" or type(cb) ~= "function" then
+		error("network: http_get(url: string, cb: function)")
+	end
+	gated_http(url, cb, options)
+end
+
+-- http_post(url, body, cb[, options]): http_get's, a POST of the JSON
+-- `body` ([STARPORT]: a report)
+function M.safe.http_post(url, body, cb, options)
+	if type(url) ~= "string" or type(body) ~= "string" or
+			type(cb) ~= "function" then
+		error("network: http_post(url: string, body: string, cb: function)")
+	end
+	gated_http(url, cb, options, body)
+end
+
+-- The addresses this client has used, for a list to pick from: the
+-- store's entries as {uri, description, created, last_attempt, accepted},
+-- the last used first
+function M.safe.known_addresses()
+	local out = {}
+	for uri, e in pairs(load_store()) do
+		out[#out + 1] = {uri = uri, description = e.description or "",
+				created = e.created or 0, last_attempt = e.last_attempt or 0,
+				accepted = e.accepted and true or false, name = e.name or ""}
+	end
+	table.sort(out, function(a, b) return a.last_attempt > b.last_attempt end)
+	return out
+end
+
+-- set_address_name(uri, name): the player name used on a server, kept on
+-- its row for the next connect screen; a uri with no row is ignored
+function M.safe.set_address_name(uri, name)
+	if type(uri) ~= "string" or type(name) ~= "string" or #name > 64 then
+		return false
+	end
+	local entries = load_store()
+	local e = entries[uri]
+	if not e then
+		return false
+	end
+	e.name = name
+	save_store(entries)
+	return true
+end
+
+-- parse_json(text) -> table or nil, error: the module's own reader
+-- (json.lua beside this file), which defines onto a `core` table
+local parse_json, write_json
+do
+	local saved = rawget(_G, "core")
+	rawset(_G, "core", {log = function(_, message) log:warning(message) end})
+	dofile(__buildat_extension_path("network").."/json.lua")
+	parse_json, write_json = core.parse_json, core.write_json
+	rawset(_G, "core", saved)
+end
+function M.safe.parse_json(text)
+	return parse_json(text, nil, true)
+end
+-- write_json(value) -> text, or nil and why not
+function M.safe.write_json(value)
+	return write_json(value)
 end
 
 -- LuaSocket's socket.gettime()
@@ -441,6 +744,12 @@ end
 M.tcp_connect = M.safe.tcp_connect
 M.udp_connect = M.safe.udp_connect
 M.gettime = M.safe.gettime
+M.http_get = M.safe.http_get
+M.http_post = M.safe.http_post
+M.known_addresses = M.safe.known_addresses
+M.set_address_name = M.safe.set_address_name
+M.parse_json = M.safe.parse_json
+M.write_json = M.safe.write_json
 
 return M
 -- vim: set noet ts=4 sw=4:
