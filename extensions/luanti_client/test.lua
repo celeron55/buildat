@@ -19,9 +19,19 @@ end
 
 -- The engine's own; connection.lua times how long it spends handing
 -- assembled payloads over
+-- And the sandbox's verbs these files use, over plain files
 buildat = {
 	get_time_us = function()
 		return math.floor(os.clock() * 1000000)
+	end,
+	run_extension_file = function(name)
+		return dofile(dir.."/"..name)
+	end,
+	get_env = function(name)
+		return os.getenv(name)
+	end,
+	get_locale = function()
+		return os.getenv("LANG") or ""
 	end,
 }
 
@@ -661,11 +671,12 @@ assert(media.server_key("..", 1) == ".._1")
 -- cache does not have, which is what the client does with an announcement:
 -- working out which files a game reaches costs more than the bytes do
 do
-	local dir = os.getenv("TMPDIR") or "/tmp"
-	dir = dir.."/luanti_client_media_test"
-	__buildat_mkdir = function() end
+	-- The extension's cache, in memory
+	local files = {}
+	buildat.cache_read = function(name) return files[name] end
+	buildat.cache_write = function(name, data) files[name] = data return true end
 	buildat.sha1 = function(data) return "sha1:"..data end
-	local store = media.new(buildat, {warning = function() end}, dir)
+	local store = media.new(buildat, {warning = function() end}, "server")
 	local announced = {
 		{name = "a.png", sha1 = "sha1:a"},
 		{name = "b.png", sha1 = "sha1:b"},

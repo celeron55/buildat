@@ -12,46 +12,63 @@
 -- says what the server sent. Rendering the world, formspecs, the HUD and input
 -- come next; see doc/luanti_client.txt.
 local log = buildat.Logger("luanti_client")
-local magic = require("buildat/extension/urho3d").safe
+local magic = require("buildat/extension/urho3d")
+-- The engine's constants come from magic in the sandbox; globals of this
+-- file's own environment, since as locals they took init.lua's big
+-- functions past LuaJIT's 60 upvalues
+HA_CENTER, HA_LEFT, HA_RIGHT, KEY_1, KEY_8, KEY_A, KEY_C,
+		KEY_CTRL, KEY_D, KEY_ESCAPE, KEY_F1, KEY_F11, KEY_F12, KEY_F2, KEY_F3,
+		KEY_F5, KEY_F6, KEY_H, KEY_I, KEY_K, KEY_Q, KEY_S, KEY_SHIFT,
+		KEY_SPACE, KEY_T, KEY_V, KEY_W, KEY_Z, LM_HORIZONTAL, LM_VERTICAL,
+		MOUSEB_LEFT, MOUSEB_MIDDLE, MOUSEB_RIGHT, SOUND_MASTER, VA_CENTER,
+		VA_TOP =
+	magic.HA_CENTER, magic.HA_LEFT, magic.HA_RIGHT, magic.KEY_1,
+	magic.KEY_8, magic.KEY_A, magic.KEY_C, magic.KEY_CTRL, magic.KEY_D,
+	magic.KEY_ESCAPE, magic.KEY_F1, magic.KEY_F11, magic.KEY_F12,
+	magic.KEY_F2, magic.KEY_F3, magic.KEY_F5, magic.KEY_F6, magic.KEY_H,
+	magic.KEY_I, magic.KEY_K, magic.KEY_Q, magic.KEY_S, magic.KEY_SHIFT,
+	magic.KEY_SPACE, magic.KEY_T, magic.KEY_V, magic.KEY_W, magic.KEY_Z,
+	magic.LM_HORIZONTAL, magic.LM_VERTICAL, magic.MOUSEB_LEFT,
+	magic.MOUSEB_MIDDLE, magic.MOUSEB_RIGHT, magic.SOUND_MASTER,
+	magic.VA_CENTER, magic.VA_TOP
 local uistack = require("buildat/extension/uistack")
-local ui_utils = require("buildat/extension/ui_utils").safe
+local ui_utils = require("buildat/extension/ui_utils")
 local network = require("buildat/extension/network")
-local path = __buildat_extension_path("luanti_client")
-local srp = dofile(path.."/srp.lua")
-local engine_test = dofile(path.."/engine_test.lua")
-local luanti = dofile(path.."/client.lua")
+local srp = buildat.run_extension_file("srp.lua")
+local engine_test = buildat.run_extension_file("engine_test.lua")
+local luanti = buildat.run_extension_file("client.lua")
 -- The extension's settings file ([EXT_SETTINGS]); the BUILDAT_* variables
 -- below stay one-run overrides
-local settings = dofile(path.."/settings.lua")
+local settings = buildat.run_extension_file("settings.lua")
 local SETTINGS = settings.load()
 -- View bobbing as official's ([VIEW_BOB]), the module both clients share;
 -- BUILDAT_VIEW_BOBBING is the amount for a run (the shooters' 0), 1 else
-local camera_motion = dofile(path.."/res/camera_motion.lua")
-local VIEW_BOBBING = tonumber(os.getenv("BUILDAT_VIEW_BOBBING") or "") or SETTINGS.view_bobbing
-local world = dofile(path.."/world.lua")
-local nodedef = dofile(path.."/nodedef.lua")
-local media = dofile(path.."/media.lua")
-local player = dofile(path.."/player.lua")
-local texmod = dofile(path.."/texmod.lua")
-local itemdef = dofile(path.."/itemdef.lua")
-local inventory = dofile(path.."/inventory.lua")
-local objmesh = dofile(path.."/objmesh.lua")
-local b3dmesh = dofile(path.."/b3dmesh.lua")
-local luanti_hud = dofile(path.."/hud.lua")
+local camera_motion = buildat.run_extension_file("res/camera_motion.lua")
+local VIEW_BOBBING = tonumber(buildat.get_env("BUILDAT_VIEW_BOBBING") or "") or SETTINGS.view_bobbing
+local world = buildat.run_extension_file("world.lua")
+local nodedef = buildat.run_extension_file("nodedef.lua")
+local media = buildat.run_extension_file("media.lua")
+local player = buildat.run_extension_file("player.lua")
+local texmod = buildat.run_extension_file("texmod.lua")
+local itemdef = buildat.run_extension_file("itemdef.lua")
+local inventory = buildat.run_extension_file("inventory.lua")
+local objmesh = buildat.run_extension_file("objmesh.lua")
+local b3dmesh = buildat.run_extension_file("b3dmesh.lua")
+local luanti_hud = buildat.run_extension_file("hud.lua")
 -- On the HUD module's table rather than a local of its own: the connect
 -- callback below is at Lua's 60-upvalue line ([EXT_HUD_PARITY])
-luanti_hud.minimap = dofile(path.."/res/minimap.lua")
-luanti_hud.hotbar = dofile(path.."/res/hotbar.lua")
-local sounds = dofile(path.."/sounds.lua")
-local formspec = dofile(path.."/formspec.lua")
-local formspec_ui = dofile(path.."/formspec_ui.lua")
-local objects = dofile(path.."/objects.lua")
+luanti_hud.minimap = buildat.run_extension_file("res/minimap.lua")
+luanti_hud.hotbar = buildat.run_extension_file("res/hotbar.lua")
+local sounds = buildat.run_extension_file("sounds.lua")
+local formspec = buildat.run_extension_file("formspec.lua")
+local formspec_ui = buildat.run_extension_file("formspec_ui.lua")
+local objects = buildat.run_extension_file("objects.lua")
 local M = {safe = nil}
 
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat -c ...),
 -- which cannot easily clear a text field
-local DEFAULT_ADDRESS = os.getenv("BUILDAT_LUANTI_ADDRESS") or SETTINGS.address
-local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or SETTINGS.name
+local DEFAULT_ADDRESS = buildat.get_env("BUILDAT_LUANTI_ADDRESS") or SETTINGS.address
+local DEFAULT_NAME = buildat.get_env("BUILDAT_LUANTI_NAME") or SETTINGS.name
 -- The PBR checkbox's starting state. A scripted run has to hit the box by
 -- pixel coordinates otherwise, and a miss looks like the shader not working
 -- rather than like a missed click.
@@ -62,7 +79,7 @@ local DEFAULT_NAME = os.getenv("BUILDAT_LUANTI_NAME") or SETTINGS.name
 -- variable with the same answers, its own default being pbr -- see
 -- [RENDER_MODES] in doc/plan/rendering_plan.md.
 local DEFAULT_MODE = (function()
-	local v = os.getenv("BUILDAT_LUANTI_PBR") or ""
+	local v = buildat.get_env("BUILDAT_LUANTI_PBR") or ""
 	if v == "" then
 		return SETTINGS.mode
 	elseif v == "0" then
@@ -119,7 +136,7 @@ local CRACK_FRAMES_DEFAULT = 5
 -- gets looked at without waiting for the world to turn, or asking a server for
 -- the privilege of setting its clock. BUILDAT_LUANTI_FORCE_DAY, in
 -- daynight_ratio() below, is the same kind of thing for the light.
-local FORCE_TIME = tonumber(os.getenv("BUILDAT_LUANTI_FORCE_TIME") or "")
+local FORCE_TIME = tonumber(buildat.get_env("BUILDAT_LUANTI_FORCE_TIME") or "")
 
 local HOTBAR_SLOTS = 8
 
@@ -134,7 +151,9 @@ local MEDIA_WAIT_S = 15
 -- Where the server's media goes. The whole directory is one resource dir and
 -- the files inside it are addressed as "<server>/<name>", so two servers with
 -- a same-named texture do not collide.
-local MEDIA_ROOT = __buildat_get_path("cache").."/luanti_media"
+-- It is the extension's cache (buildat.cache_read and cache_write take
+-- names under it).
+local MEDIA_ROOT = buildat.get_cache_path().."/luanti_client"
 
 -- What a form calls the inventory it is a form *of*: a chest writes
 -- list[current_name;main;...] and a furnace list[context;src;...]. Luanti
@@ -258,7 +277,7 @@ local function daynight_ratio(time_of_day, override, height)
 	-- An environment variable that is set but empty is a variable that is
 	-- not set: a script that passes it through unconditionally passes an
 	-- empty one, and "" is true in Lua
-	local force = os.getenv("BUILDAT_LUANTI_FORCE_DAY")
+	local force = buildat.get_env("BUILDAT_LUANTI_FORCE_DAY")
 	if force and force ~= "" then
 		return 1.0
 	end
@@ -503,7 +522,7 @@ local function show_client(host, port, name, password, mode)
 		-- palettes and the sky's own textures both want a texture asked for
 		local media_texture
 
-		local view = world.new(magic, buildat.safe, log, {
+		local view = world.new(magic, buildat, log, {
 				far_clip = FAR_CLIP,
 				mode = mode,
 				read_image = buildat.read_image,
@@ -537,10 +556,12 @@ local function show_client(host, port, name, password, mode)
 
 		-- The server's media, and what the node definitions make of it
 		local server_key = media.server_key(host, port)
-		local store = media.new(buildat, log, MEDIA_ROOT.."/"..server_key)
+		local store = media.new(buildat, log, server_key)
 		-- One resource dir for all servers; see MEDIA_ROOT
 		if not media_root_added then
-			__buildat_mkdir(MEDIA_ROOT)
+			-- A file in it makes it: a resource dir has to exist
+			buildat.cache_write("README.txt",
+					"Luanti servers' media, a directory a server\n")
 			buildat.add_resource_dir(MEDIA_ROOT)
 			media_root_added = true
 		end
@@ -564,7 +585,6 @@ local function show_client(host, port, name, password, mode)
 		-- nothing the server sends can collide with: a media name is a file
 		-- name and never a path.
 		local COMPOSED_DIR = MEDIA_ROOT.."/"..server_key.."/composed"
-		__buildat_mkdir(COMPOSED_DIR)
 
 		-- Expression -> the resource name it was composed under. The files
 		-- outlive the run, so a second one composes nothing.
@@ -598,10 +618,7 @@ local function show_client(host, port, name, password, mode)
 				local file = hex_hash(expr)..".png"
 				resource = server_key.."/composed/"..file
 				local path = COMPOSED_DIR.."/"..file
-				local f = io.open(path, "rb")
-				if f then
-					f:close()
-				else
+				if not buildat.cache_read(resource) then
 					local ok, err = pcall(buildat.compose_image,
 							{size = size, ops = ops, write = path})
 					if not ok then
@@ -620,19 +637,15 @@ local function show_client(host, port, name, password, mode)
 			png = function(bytes)
 				local file = "png_"..hex_hash(bytes)..".png"
 				local resource = server_key.."/composed/"..file
-				local path = COMPOSED_DIR.."/"..file
-				local f = io.open(path, "rb")
-				if f then
-					f:close()
+				if buildat.cache_read(resource) then
 					return resource
 				end
-				f = io.open(path, "wb")
-				if not f then
-					log:warning("could not write "..path)
+				local ok, err = buildat.cache_write(resource, bytes)
+				if not ok then
+					log:warning("could not write "..resource..": "..
+							tostring(err))
 					return nil
 				end
-				f:write(bytes)
-				f:close()
 				return resource
 			end,
 		}
@@ -776,14 +789,11 @@ local function show_client(host, port, name, password, mode)
 					meshes[key] = false
 					return nil
 				end
-				local file = io.open(MEDIA_ROOT.."/"..server_key.."/"..
-						name, "rb")
-				if not file then
+				local text = buildat.cache_read(server_key.."/"..name)
+				if not text then
 					meshes[key] = false
 					return nil
 				end
-				local text = file:read("*all")
-				file:close()
 				local parsed, why, skipped = read(text)
 				if not parsed or #parsed == 0 then
 					log:warning("mesh "..name.." has no faces this reads"..
@@ -4064,12 +4074,12 @@ function M.boot()
 	-- with the address and the name the environment already supplies -- see
 	-- DEFAULT_ADDRESS above, which says those two are for scripted runs. The
 	-- reference shot harness is what wants it; a person still gets the dialog.
-	if (os.getenv("BUILDAT_LUANTI_CONNECT") or "") ~= "" then
+	if (buildat.get_env("BUILDAT_LUANTI_CONNECT") or "") ~= "" then
 		local host, port = split_address(DEFAULT_ADDRESS)
 		log:info("connecting to " .. host .. ":" .. port ..
 				" without the dialog, as BUILDAT_LUANTI_CONNECT asks")
 		show_client(host, port, DEFAULT_NAME,
-				os.getenv("BUILDAT_LUANTI_PASSWORD") or "", DEFAULT_MODE)
+				buildat.get_env("BUILDAT_LUANTI_PASSWORD") or "", DEFAULT_MODE)
 		return
 	end
 	show_connect_dialog()

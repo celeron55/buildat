@@ -18,21 +18,18 @@ local M = {}
 
 local log = buildat.Logger("luanti_client/settings")
 local uistack = require("buildat/extension/uistack")
-local ui_utils = require("buildat/extension/ui_utils").safe
-local magic = require("buildat/extension/urho3d").safe
+local ui_utils = require("buildat/extension/ui_utils")
+local magic = require("buildat/extension/urho3d")
+-- The engine's constants come from magic in the sandbox
+local KEY_ESCAPE =
+	magic.KEY_ESCAPE
 
 -- The JSON reader and writer the network extension carries
-local json
-do
-	local saved = rawget(_G, "core")
-	rawset(_G, "core", {log = function(_, message) log:warning(message) end})
-	dofile(__buildat_extension_path("network").."/json.lua")
-	json = {parse = core.parse_json, write = core.write_json}
-	rawset(_G, "core", saved)
-end
+local network = require("buildat/extension/network")
+local json = {parse = network.parse_json, write = network.write_json}
 
-local dir = __buildat_get_path("user").."/luanti_client"
-local path = dir.."/settings.json"
+-- In the extension's own storage: <user>/luanti_client/settings.json
+local path = "settings.json"
 
 -- The initial player name is made up once, two words ([BOX_PLAYTEST_2]
 -- 4): every player called "buildat" on a public server is a name taken
@@ -43,9 +40,8 @@ local NOUNS = {"otter", "heron", "badger", "finch", "lynx", "marten", "newt",
 		"osprey", "pike", "raven", "stoat", "tern", "vole", "wren", "beaver",
 		"crane", "dace", "elk", "fox", "grouse"}
 local function random_name()
-	math.randomseed(os.time())
-	return ADJECTIVES[math.random(#ADJECTIVES)] .. "-" ..
-			NOUNS[math.random(#NOUNS)]
+	local a, n = buildat.random_bytes(2):byte(1, 2)
+	return ADJECTIVES[a % #ADJECTIVES + 1] .. "-" .. NOUNS[n % #NOUNS + 1]
 end
 
 M.DEFAULTS = {mode = "unlit", view_range = 120, view_bobbing = 1,
@@ -63,10 +59,9 @@ function M.load()
 	for k, v in pairs(M.DEFAULTS) do
 		out[k] = type(v) == "table" and {} or v
 	end
-	local f = io.open(path, "rb")
-	if f then
-		local data = json.parse(f:read("*a"))
-		f:close()
+	local text = buildat.storage_read(path)
+	if text then
+		local data = json.parse(text)
 		for k, _ in pairs(M.DEFAULTS) do
 			if data and data[k] ~= nil and type(data[k]) == type(M.DEFAULTS[k]) then
 				out[k] = data[k]
@@ -77,19 +72,11 @@ function M.load()
 end
 
 function M.save(settings)
-	-- Through the engine, not a shell: mkdir -p is no Windows command,
-	-- and the settings never saved on the box ([BOX_PLAYTEST_2] 1)
-	if not buildat.create_directories(dir) then
-		log:warning("cannot make "..dir)
+	local ok, err = buildat.storage_write(path, json.write(settings, true))
+	if not ok then
+		log:warning("cannot write "..path..": "..tostring(err))
 		return false
 	end
-	local f = io.open(path, "wb")
-	if not f then
-		log:warning("cannot write "..path)
-		return false
-	end
-	f:write(json.write(settings, true))
-	f:close()
 	return true
 end
 
@@ -119,8 +106,7 @@ end
 -- The shared editor over the bindings table; a change writes the map of
 -- what differs from the defaults. on_back is what the back row does.
 function M.show_keys(bindings, on_back)
-	local editor = dofile(__buildat_extension_path("luanti_client")..
-			"/res/key_editor.lua")
+	local editor = buildat.run_extension_file("res/key_editor.lua")
 	return editor.draw{magic = magic, uistack = uistack, ui_utils = ui_utils,
 			bindings = bindings,
 			save = function()

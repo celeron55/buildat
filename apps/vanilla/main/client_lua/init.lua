@@ -2583,7 +2583,7 @@ function frame_peak.note(dt)
 	frame_peak.last_us = now
 	frame_peak.wall = wall
 	local vw = voxelworld.frame_us
-	local pk = buildat.packet_us
+	local pk = buildat.take_packet_us()
 	local phases = {
 		{"mesh", vw.mesh}, {"horizon", vw.horizon}, {"physics", vw.physics},
 		-- **What "rest" was hiding** (2026-09-26): the three above are
@@ -2604,7 +2604,6 @@ function frame_peak.note(dt)
 	vw.mesh, vw.horizon, vw.physics, sky_cube.us = 0, 0, 0, 0
 	vw.update = 0
 	luanti.frame_us = 0
-	pk.total, pk.worst, pk.worst_name = 0, 0, ""
 	local accounted = 0
 	local longest, longest_phase = 0, "rest"
 	for _, ph in ipairs(phases) do

@@ -731,9 +731,10 @@ end
 function M.safe.parse_json(text)
 	return parse_json(text, nil, true)
 end
--- write_json(value) -> text, or nil and why not
-function M.safe.write_json(value)
-	return write_json(value)
+-- write_json(value[, styled]) -> text, or nil and why not; styled is
+-- indented, for a file a person reads
+function M.safe.write_json(value, styled)
+	return write_json(value, styled == true)
 end
 
 -- LuaSocket's socket.gettime()

@@ -16,15 +16,14 @@
 -- Commands that are not handled yet are counted and logged; see
 -- doc/luanti_client.txt for what is left.
 
-local path = __buildat_extension_path("luanti_client")
-local serialize = dofile(path.."/serialize.lua")
-local connection = dofile(path.."/connection.lua")
-local srp = dofile(path.."/srp.lua")
-local nodemeta = dofile(path.."/nodemeta.lua")
-local inventory = dofile(path.."/inventory.lua")
-local hud = dofile(path.."/hud.lua")
-local sounds = dofile(path.."/sounds.lua")
-local particles = dofile(path.."/particles.lua")
+local serialize = buildat.run_extension_file("serialize.lua")
+local connection = buildat.run_extension_file("connection.lua")
+local srp = buildat.run_extension_file("srp.lua")
+local nodemeta = buildat.run_extension_file("nodemeta.lua")
+local inventory = buildat.run_extension_file("inventory.lua")
+local hud = buildat.run_extension_file("hud.lua")
+local sounds = buildat.run_extension_file("sounds.lua")
+local particles = buildat.run_extension_file("particles.lua")
 
 local M = {}
 
@@ -62,8 +61,7 @@ function M.language_code(locale)
 end
 
 local function environment_language()
-	return M.language_code(os.getenv("LANGUAGE") or os.getenv("LC_ALL") or
-			os.getenv("LC_MESSAGES") or os.getenv("LANG") or "")
+	return M.language_code(buildat.get_locale())
 end
 
 local TOSERVER = {

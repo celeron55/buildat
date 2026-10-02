@@ -18,26 +18,20 @@
 -- world coordinates one for one. block_node_position() is the same arithmetic
 -- builtin/voxelworld does for its chunks.
 
-local sounds_proto = dofile(__buildat_extension_path("luanti_client")..
-		"/sounds.lua")
-local shapes = dofile(__buildat_extension_path("luanti_client")..
-		"/shapes.lua")
-local particles = dofile(__buildat_extension_path("luanti_client")..
-		"/particles.lua")
-local light_flood = dofile(__buildat_extension_path("luanti_client")..
-		"/light.lua")
-local skyvis = dofile(__buildat_extension_path("luanti_client")..
-		"/skyvis.lua")
+local sounds_proto = buildat.run_extension_file("sounds.lua")
+local shapes = buildat.run_extension_file("shapes.lua")
+local particles = buildat.run_extension_file("particles.lua")
+local light_flood = buildat.run_extension_file("light.lua")
+local skyvis = buildat.run_extension_file("skyvis.lua")
 -- BUILDAT_LUANTI_NO_SPOTS=1, the reference runs' switch: no sparkle on
 -- any surface, since the path-traced reference draws none. The module's
 -- bootstrap.lua honours the same variable.
-local NO_SPOTS = (os.getenv("BUILDAT_LUANTI_NO_SPOTS") or "") ~= ""
+local NO_SPOTS = (buildat.get_env("BUILDAT_LUANTI_NO_SPOTS") or "") ~= ""
 
-local surface = dofile(__buildat_extension_path("luanti_client")..
-		"/surface.lua")
+local surface = buildat.run_extension_file("surface.lua")
 -- The sky rendered into a cube for the world to reflect, shared with
 -- apps/vanilla; see [SKY_REFLECTIONS]
-local skycube = require("buildat/extension/skycube").safe
+local skycube = require("buildat/extension/skycube")
 
 local M = {}
 
@@ -834,7 +828,7 @@ function M.new(magic, buildat, log, options)
 	-- fov_for turns into the camera's vertical fov; set again each frame so
 	-- that a turned screen follows. Transitions run on the wanted one.
 	-- On self: this function is at Lua's 200 locals
-	self.fov_for = require("buildat/extension/urho3d").safe.fov_for
+	self.fov_for = require("buildat/extension/urho3d").fov_for
 	function self.apply_fov(v)
 		self.fov_now = v
 		camera.fov = self.fov_for(v)

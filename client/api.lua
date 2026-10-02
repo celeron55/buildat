@@ -322,7 +322,8 @@ local function calling_extension(level)
 	local src = info and info.source or ""
 	-- **A sandboxed chunk** is named `<extension>/<file>` by the loader
 	-- that ran it
-	local name = src:match("^@?([%w_]+)/[%w_%-%.]+$")
+	local name = src:match("^@?([%w_]+)/[%w_%-%.]+$") or
+			src:match("^@?([%w_]+)/[%w_%-]+/[%w_%-%.]+$")
 	if name then
 		return name
 	end
@@ -398,6 +399,68 @@ buildat.safe.storage_write = function(name, data)
 	local f = io.open(path, "wb")
 	if not f then
 		return false, "storage_write: could not open " .. name
+	end
+	f:write(data)
+	f:close()
+	return true
+end
+
+-- **An extension's cache** ([EXTENSIONS_SANDBOXED]): files under
+-- <cache>/<extension>/, which is also a place add_resource_dir() takes,
+-- so what is written can be loaded by name. A name is up to three
+-- segments of letters, digits, _ - and . ("server/composed/x.png").
+-- simplified: a cap per file and none on the whole; compose_image()
+-- already writes under the cache without one.
+local CACHE_FILE_MAX = 32 * 1024 * 1024
+local function cache_path(name)
+	if type(name) ~= "string" or #name > 256 or name:find("%.%.") or
+			not (name:match("^[%w_%-%.]+$") or
+				name:match("^[%w_%-%.]+/[%w_%-%.]+$") or
+				name:match("^[%w_%-%.]+/[%w_%-%.]+/[%w_%-%.]+$")) then
+		return nil, "cache: a name of up to three segments of letters, " ..
+				"digits, _ - and ."
+	end
+	-- 1 is this, 2 cache_read or cache_write, 3 who called that. **Not
+	-- a server's**: a module named like an extension would be writing
+	-- that extension's media.
+	local info = debug.getinfo(3, "S")
+	if __buildat_served_chunks[info and info.source or ""] then
+		return nil, "cache: an extension's, not a server's"
+	end
+	local who = calling_extension(4)
+	local root = __buildat_get_path("cache") .. "/" .. who
+	local path = root .. "/" .. name
+	return path, path:match("^(.*)/[^/]+$")
+end
+buildat.safe.cache_read = function(name)
+	local path = cache_path(name)
+	if not path then
+		return nil
+	end
+	local f = io.open(path, "rb")
+	if not f then
+		return nil
+	end
+	local data = f:read("*a")
+	f:close()
+	return data
+end
+buildat.safe.cache_write = function(name, data)
+	local path, dir = cache_path(name)
+	if not path then
+		return false, dir
+	end
+	if type(data) ~= "string" then
+		return false, "cache_write(name, data): data is a string"
+	end
+	if #data > CACHE_FILE_MAX then
+		return false, "cache_write: " .. #data .. " bytes is over the " ..
+				CACHE_FILE_MAX .. " a file may have"
+	end
+	__buildat_create_directories(dir)
+	local f = io.open(path, "wb")
+	if not f then
+		return false, "cache_write: could not open " .. name
 	end
 	f:write(data)
 	f:close()
@@ -494,10 +557,11 @@ end
 -- calling launch extension in the sandbox and answers what it returned,
 -- which is what `dofile` was being used for.
 --
--- A name is one file, `.lua`, and not a path: a launcher runs its own
--- code and nobody else's.
+-- A name is one file, `.lua`, or one in a subdirectory (`res/x.lua`),
+-- and not a path: an extension runs its own code and nobody else's.
 buildat.safe.run_extension_file = function(name)
-	if type(name) ~= "string" or not name:match("^[%w_%-]+%.lua$") then
+	if type(name) ~= "string" or not (name:match("^[%w_%-]+%.lua$") or
+			name:match("^[%w_%-]+/[%w_%-]+%.lua$")) then
 		return nil, "run_extension_file(name): one .lua file, not a path"
 	end
 	local who = calling_extension()
@@ -978,6 +1042,23 @@ end
 -- a harness sets on the client's process, such as the rendering mode. See
 -- l_get_env() in src/client/app.cpp.
 buildat.safe.get_env                  = __buildat_get_env
+-- get_locale() -> the user's language as the environment says it
+-- (LANGUAGE, LC_ALL, LC_MESSAGES, LANG, the first set), or ""
+buildat.safe.get_locale = function()
+	for _, k in ipairs({"LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"}) do
+		local v = os.getenv(k)
+		if v and v ~= "" then
+			return v
+		end
+	end
+	return ""
+end
+-- Harmless in the sandbox ([EXTENSIONS_SANDBOXED]): bytes from the
+-- system's generator, arithmetic on byte strings, and the pixels of a
+-- resource the sandbox could already load
+buildat.safe.random_bytes = buildat.random_bytes
+buildat.safe.bignum = buildat.bignum
+buildat.safe.read_image = buildat.read_image
 -- The cereal extension's two bindings ([EXTENSIONS_SANDBOXED]): a byte
 -- string and a type list in, values out, or the reverse
 buildat.safe.cereal_binary_input = function(data, types)

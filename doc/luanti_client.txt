@@ -241,7 +241,7 @@ srp.lua         The client half of the SRP-6a login, on buildat.bignum
 client.lua      The commands: the login, the map blocks, and dispatch for the
                 rest
 nodedef.lua     NODEDEF: what a node id is called, how it is drawn, its tiles
-media.lua       The server's media files, in cache/luanti_media/<server>/
+media.lua       The server's media files, in cache/luanti_client/<server>/ (buildat.cache_write)
 player.lua      The player's box: the keys, gravity, and collision against
                 the nodes
 shapes.lua      Luanti's node shapes, as the quads a voxel definition takes

@@ -8,7 +8,7 @@
 --
 -- The server announces what it has as name plus sha1, the client asks for what
 -- it wants by name, and the files come back in bunches. They are kept in
--- cache/luanti_media/<server>/, so a second run asks for nothing: a cached
+-- cache/luanti_client/<server>/, so a second run asks for nothing: a cached
 -- file is used when its sha1 is the one the server announced, and re-fetched
 -- when it is not. That check is also what keeps a file that was written
 -- half-way from being drawn.
@@ -45,30 +45,10 @@ function M.server_key(host, port)
 	return (host:gsub("[^%w%._%-]", "_")).."_"..tostring(port)
 end
 
-local function read_file(path)
-	local file = io.open(path, "rb")
-	if not file then
-		return nil
-	end
-	local data = file:read("*all")
-	file:close()
-	return data
-end
-
-local function write_file(path, data)
-	local file = io.open(path, "wb")
-	if not file then
-		return false
-	end
-	file:write(data)
-	file:close()
-	return true
-end
-
--- new(buildat, log, dir): dir is where this server's files go, and is created
+-- new(buildat, log, dir): dir is where this server's files go, a directory
+-- of the extension's cache (buildat.cache_read and cache_write)
 function M.new(buildat, log, dir)
 	local self = {dir = dir}
-	__buildat_mkdir(dir)
 
 	-- name -> true for files that are on disk with the announced sha1
 	local have = {}
@@ -89,7 +69,7 @@ function M.new(buildat, log, dir)
 				if not M.is_safe_name(file.name) then
 					skipped_unsafe = skipped_unsafe + 1
 				else
-					local data = read_file(dir.."/"..file.name)
+					local data = buildat.cache_read(dir.."/"..file.name)
 					if data and buildat.sha1(data) == file.sha1 then
 						have[file.name] = true
 					else
@@ -118,7 +98,7 @@ function M.new(buildat, log, dir)
 				log:warning("media: "..file.name..
 						" does not have the sha1 the server announced")
 				missing[file.name] = nil
-			elseif write_file(dir.."/"..file.name, file.data) then
+			elseif buildat.cache_write(dir.."/"..file.name, file.data) then
 				have[file.name] = true
 				missing[file.name] = nil
 				written = written + 1

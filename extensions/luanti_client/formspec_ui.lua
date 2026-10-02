@@ -23,9 +23,8 @@
 -- what says whether it is worth implementing the next one; styles and the
 -- list ring are deliberately ignored rather than missing.
 
-local formspec = dofile(__buildat_extension_path("luanti_client")..
-		"/formspec.lua")
-local hud = dofile(__buildat_extension_path("luanti_client").."/hud.lua")
+local formspec = buildat.run_extension_file("formspec.lua")
+local hud = buildat.run_extension_file("hud.lua")
 
 local M = {}
 

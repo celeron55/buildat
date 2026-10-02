@@ -38,7 +38,7 @@ end
 -- deserialize_volume() are the engine's other way round the same trip, so the
 -- two answers are independent.
 local function check_pack_voxel_volume()
-	local safe = buildat.safe
+	local safe = buildat
 	-- Samples that need every byte order and both fields: a 4x3x2 box of ids,
 	-- and the same box's light. The numbers are made up but the layout is
 	-- Luanti's: x fastest, then y, then z.
@@ -232,7 +232,7 @@ end
 -- and the assertion that matters is that reading through it gives what
 -- VoxelInstance's own accessors give.
 local function check_voxel_format()
-	local safe = buildat.safe
+	local safe = buildat
 
 	-- The default format: nothing said, nothing changed
 	local plain = safe.createVoxelRegistry()
@@ -316,7 +316,7 @@ end
 -- tint, a liquid level per param value. They travel with the registry, so the
 -- round trip through serialize/deserialize is what a client actually gets.
 local function check_voxel_variants()
-	local safe = buildat.safe
+	local safe = buildat
 	local reg = safe.createVoxelRegistry()
 	reg:set_format{
 		id = {shift = 0, width = 16},
@@ -372,7 +372,7 @@ end
 -- screen is which formats are accepted, what the format says it is, and that
 -- the definitions' own parameters reach a client.
 local function check_voxel_modifiers()
-	local safe = buildat.safe
+	local safe = buildat
 	local reg = safe.createVoxelRegistry()
 	reg:set_format{
 		id = {shift = 0, width = 8},
@@ -446,7 +446,7 @@ end
 -- Look rules: which definition a voxel wears, for a world with no voxel type
 -- id. The default is the id role, which is what the other checks here get.
 local function check_voxel_look_rules()
-	local safe = buildat.safe
+	local safe = buildat
 	local reg = safe.createVoxelRegistry()
 	reg:set_format{
 		id = {shift = 0, width = 4},
@@ -502,11 +502,9 @@ end
 -- can actually be checked. The files go where the client's own temporary
 -- resources go, which is a resource dir, so they can be loaded by name.
 local function check_compose_image()
-	-- The unsafe interface, because the sandbox does not whitelist Image:
-	-- it can save a file anywhere, which is not something game code gets.
-	-- This runs in an extension, where that is available.
-	local magic = require("buildat/extension/urho3d").unsafe
-	local dir = __buildat_get_path("cache").."/tmp"
+	-- Read back through read_image(), which is the sandbox's: four bytes a
+	-- pixel, row by row
+	local dir = buildat.get_cache_path().."/tmp"
 	local made = 0
 
 	-- Composes ops and hands back the image it wrote
@@ -514,19 +512,18 @@ local function check_compose_image()
 		args.write = dir.."/buildat_image_test_"..name..".png"
 		local w, h = buildat.compose_image(args)
 		made = made + 1
-		local img = magic.cache:GetResource("Image",
+		local iw, ih, rgba = buildat.read_image(
 				"buildat_image_test_"..name..".png")
-		assert(img, "compose_image: could not read back "..name)
-		assert(img.width == w and img.height == h,
+		assert(rgba, "compose_image: could not read back "..name)
+		assert(iw == w and ih == h,
 				"compose_image: "..name.." says "..w.."x"..h..
-				" but the file is "..img.width.."x"..img.height)
-		return img, w, h
+				" but the file is "..iw.."x"..ih)
+		return {width = iw, height = ih, rgba = rgba}, w, h
 	end
 
 	local function pixel(img, x, y)
-		local c = img:GetPixel(x, y)
-		return {math.floor(c.r * 255 + 0.5), math.floor(c.g * 255 + 0.5),
-				math.floor(c.b * 255 + 0.5), math.floor(c.a * 255 + 0.5)}
+		local i = (y * img.width + x) * 4
+		return {img.rgba:byte(i + 1, i + 4)}
 	end
 
 	local function same(img, x, y, want, what)

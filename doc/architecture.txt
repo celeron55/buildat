@@ -13,7 +13,11 @@ Built using Urho3D.
 
 Module code is transfered from the server and run in a safe Lua sandbox.
 
-Extensions are non-sandboxed code installed separately on each client.
+Extensions (extensions/) run in the same sandbox, with the safe interfaces
+and a few verbs of their own (storage, a cache, their own files). What
+needs trust -- the sandbox itself, the sockets and the user's per-host
+consent, the Starport identity -- is the client's own code, in
+client/extensions/.
 
 Server
 ------

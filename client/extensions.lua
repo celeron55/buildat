@@ -11,9 +11,6 @@ local loaded_extensions = {}
 -- client's own, in client/extensions, are trusted. What it returns is
 -- kept as it is, so trusted code reads its .safe as before, and the
 -- sandbox's require hands out a view of that.
--- simplified: the ones below are still loaded trusted until they are
--- converted; the list only shrinks.
-local NOT_YET_SANDBOXED = {luanti_client = true}
 
 local function load_trusted(name, path)
 	local script, err = loadfile(path)
@@ -53,7 +50,7 @@ function __buildat_require_extension(name)
 	local own = __buildat_get_path("share").."/client/extensions/"
 	local path = dir.."/init.lua"
 	local interface
-	if dir:sub(1, #own) == own or NOT_YET_SANDBOXED[name] then
+	if dir:sub(1, #own) == own then
 		interface = load_trusted(name, path)
 	else
 		interface = load_sandboxed(name, path)

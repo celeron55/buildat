@@ -20,8 +20,7 @@
 --
 -- Checked by test.lua in this directory, which runs it against a fake socket.
 
-local serialize = dofile(__buildat_extension_path("luanti_client")..
-		"/serialize.lua")
+local serialize = buildat.run_extension_file("serialize.lua")
 
 local M = {}
 
