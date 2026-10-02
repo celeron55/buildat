@@ -83,6 +83,9 @@ struct Peer
 	// Dropped once what is queued has gone: an HTTP response, the answer to
 	// a WebSocket close, or a game's disconnect()
 	bool closing = false;
+	// Http: a request under /api/ handed to the modules, its answer awaited
+	// (network:http_request)
+	bool api_waiting = false;
 	// disconnect()'s: dropped by then even if the peer does not read
 	int64_t close_by_us = 0;
 
@@ -224,6 +227,8 @@ namespace web {
 // taken for such a client and gets game bytes; its request later fails.
 static const int64_t SNIFF_US = 200000;
 static const size_t MAX_REQUEST_BYTES = 8 * 1024;
+// An app's POST body ([STARPORT])
+static const size_t MAX_API_BODY = 64 * 1024;
 // A request that does not arrive, or a response nobody reads
 static const int64_t HTTP_STALL_US = 10000000;
 static const size_t MAX_FRAME_BYTES = 16 * 1024 * 1024;
@@ -563,16 +568,24 @@ struct Module: public interface::Module, public network::Interface
 	// type 0: they never read as "GET " (which as a type is 0x4547).
 	bool sniff(Peer &peer)
 	{
-		static const ss_ get = "GET ";
-		const size_t n = std::min(peer.http_request.size(), get.size());
-		if(peer.http_request.compare(0, n, get, 0, n) != 0){
-			become_native(peer);
-			return true;
+		// "POST " as well, for an app's API ([STARPORT]): its first byte is
+		// not 0 either
+		static const ss_ methods[] = {"GET ", "POST "};
+		bool maybe = false;
+		for(const ss_ &m : methods){
+			const size_t n = std::min(peer.http_request.size(), m.size());
+			if(peer.http_request.compare(0, n, m, 0, n) != 0)
+				continue;
+			if(n < m.size()){
+				maybe = true;
+				continue;
+			}
+			peer.kind = Peer::Kind::Http;
+			return handle_http(peer);
 		}
-		if(n < get.size())
-			return true;
-		peer.kind = Peer::Kind::Http;
-		return handle_http(peer);
+		if(!maybe)
+			become_native(peer);
+		return true;
 	}
 
 	// Whether the peer is to be kept
@@ -584,14 +597,20 @@ struct Module: public interface::Module, public network::Interface
 			return req.size() <= web::MAX_REQUEST_BYTES;
 		if(end + 4 > web::MAX_REQUEST_BYTES)
 			return false;
-		// "GET <target> HTTP/1.1", then "Name: value" lines
+		// "<method> <target> HTTP/1.1", then "Name: value" lines
 		size_t eol = req.find("\r\n");
 		const ss_ line = req.substr(0, eol);
-		const size_t sp = line.find(' ', 4);
+		const size_t sp0 = line.find(' ');
+		if(sp0 == ss_::npos)
+			return false;
+		const ss_ method = line.substr(0, sp0);
+		const size_t sp = line.find(' ', sp0 + 1);
 		if(sp == ss_::npos || line.compare(sp, 6, " HTTP/") != 0)
 			return false;
-		ss_ target = line.substr(4, sp - 4);
-		target = target.substr(0, target.find('?'));
+		ss_ target = line.substr(sp0 + 1, sp - sp0 - 1);
+		const size_t qm = target.find('?');
+		const ss_ query = qm == ss_::npos ? ss_() : target.substr(qm + 1);
+		target = target.substr(0, qm);
 		sm_<ss_, ss_> headers;
 		for(size_t at = eol + 2; at < end; at = eol + 2){
 			eol = req.find("\r\n", at);
@@ -602,8 +621,39 @@ struct Module: public interface::Module, public network::Interface
 			headers[web::lower(web::trim(h.substr(0, colon)))] =
 					web::trim(h.substr(colon + 1));
 		}
+		// A POST's body, by its length, which may be still coming
+		size_t body_len = 0;
+		if(method == "POST"){
+			const ss_ &cl = headers["content-length"];
+			if(cl.empty() || cl.find_first_not_of("0123456789") != ss_::npos)
+				return false;
+			body_len = (size_t)stoi(cl);
+			if(body_len > web::MAX_API_BODY)
+				return false;
+			if(req.size() < end + 4 + body_len)
+				return true;
+		}
 		const ss_ rest = req.substr(end + 4);
 		peer.http_request.clear();
+
+		// **An app's API** ([STARPORT]): handed to the modules, whose
+		// answer is http_respond()'s
+		if(target.compare(0, 5, "/api/") == 0){
+			peer.api_waiting = true;
+			const ss_ address = forwarded_for(peer, headers["x-forwarded-for"]);
+			m_server->emit_event("network:http_request", new HttpRequest(
+					peer.id, method, target, query, rest.substr(0, body_len),
+					address.empty() ? peer.socket->get_remote_address() :
+					address));
+			return true;
+		}
+		if(method != "GET"){
+			peer.closing = true;
+			ss_ body = "Only GET here\n";
+			peer.queue_raw(web::response("405 Method Not Allowed",
+					"text/plain; charset=utf-8", body.size()) + body);
+			return true;
+		}
 
 		if(web::lower(headers["upgrade"]).find("websocket") != ss_::npos){
 			const ss_ &key = headers["sec-websocket-key"];
@@ -809,7 +859,9 @@ struct Module: public interface::Module, public network::Interface
 
 		auto it = m_peers_by_socket.find(event_fd);
 		if(it == m_peers_by_socket.end()){
-			log_w(MODULE, "network: Peer with fd=%i not found", event_fd);
+			// A peer dropped after the network thread listed its socket:
+			// an /api/ peer is dropped when its answer has gone (flush_peers)
+			log_v(MODULE, "network: Peer with fd=%i not found", event_fd);
 			return;
 		}
 		Peer &peer = *it->second;
@@ -844,7 +896,7 @@ struct Module: public interface::Module, public network::Interface
 			break;
 		case Peer::Kind::Http:
 			// What comes after the request is not read
-			if(!peer.closing){
+			if(!peer.closing && !peer.api_waiting){
 				peer.http_request.append(buf, r);
 				keep = handle_http(peer);
 			}
@@ -1106,6 +1158,24 @@ struct Module: public interface::Module, public network::Interface
 			return;
 		it->second.closing = true;
 		it->second.close_by_us = interface::os::time_us() + 2000000;
+	}
+
+	void http_respond(PeerInfo::Id id, int status, const ss_ &content_type,
+			const ss_ &body)
+	{
+		auto it = m_peers.find(id);
+		if(it == m_peers.end() || !it->second.api_waiting)
+			return;
+		Peer &peer = it->second;
+		peer.api_waiting = false;
+		peer.closing = true;
+		const char *text = status == 200 ? "OK" : status == 400 ?
+				"Bad Request" : status == 403 ? "Forbidden" : status == 404 ?
+				"Not Found" : status == 429 ? "Too Many Requests" : status == 503 ?
+				"Service Unavailable" : "Error";
+		peer.queue_raw(web::response(itos(status)+" "+text, content_type,
+				body.size()) + body);
+		flush_peer(peer);
 	}
 
 	void set_send_policy(SendPolicy policy, size_t max_queue_bytes,

@@ -14,6 +14,11 @@ namespace interface
 		throw Exception("HTTP is not available in the web client");
 	}
 
+	ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type)
+	{
+		throw Exception("HTTP is not available in the web client");
+	}
+
 	void http_download(const ss_ &url, const ss_ &path,
 			std::function<bool(uint64_t got, uint64_t total)> progress)
 	{

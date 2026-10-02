@@ -43,6 +43,26 @@ namespace network
 		OldClient(const PeerInfo &info): info(info){}
 	};
 
+	// **An HTTP request for an app** ([STARPORT]): what a GET or a POST to a
+	// path under /api/ on the server's port carries, as the event
+	// "network:http_request". The module whose path it is answers with
+	// Interface::http_respond(); one not answered within ten seconds is
+	// dropped. The address is the client's as the game would be told it
+	// (a trusted proxy's X-Forwarded-For).
+	struct HttpRequest: public interface::Event::Private
+	{
+		PeerInfo::Id peer = 0;
+		ss_ method;       // "GET" or "POST"
+		ss_ path;         // "/api/...", without the query
+		ss_ query;        // what follows "?", as it came
+		ss_ body;         // a POST's, at most 64 KiB
+		ss_ address;
+		HttpRequest(PeerInfo::Id peer, const ss_ &method, const ss_ &path,
+				const ss_ &query, const ss_ &body, const ss_ &address):
+			peer(peer), method(method), path(path), query(query), body(body),
+			address(address){}
+	};
+
 	// What a server does about a peer that will not read what it is sent.
 	// A peer's socket does not block any more, so what cannot go right away
 	// waits in a queue of its own -- and this says what happens when that
@@ -101,6 +121,10 @@ namespace network
 		// in two seconds if it does not read: a packet sent just before,
 		// such as why, still arrives. Nothing more is sent to it.
 		virtual void disconnect(PeerInfo::Id peer) = 0;
+		// The answer to a network:http_request; the connection closes
+		// after it. A peer that has gone, or was answered, is ignored.
+		virtual void http_respond(PeerInfo::Id peer, int status,
+				const ss_ &content_type, const ss_ &body) = 0;
 	};
 
 	inline bool access(interface::Server *server,

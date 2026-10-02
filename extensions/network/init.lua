@@ -455,8 +455,8 @@ end
 -- (__buildat_http_get); read back on Update.
 local http_pending = {}
 local http_polling = false
-local function http_start(url, cb)
-	local id = __buildat_http_get(url)
+local function http_start(url, cb, body)
+	local id = __buildat_http_get(url, body)
 	http_pending[id] = cb
 	if not http_polling then
 		http_polling = true
@@ -476,10 +476,9 @@ local function http_start(url, cb)
 	end
 end
 
-function M.safe.http_get(url, cb, options)
-	if type(url) ~= "string" or type(cb) ~= "function" then
-		error("network: http_get(url: string, cb: function)")
-	end
+-- The user's leave for the url's host, then the fetch: a GET, or with a
+-- body a POST of JSON
+local function gated_http(url, cb, options, body)
 	local scheme, host = url:match("^(https?)://([^/:]+)")
 	if not scheme then
 		cb(nil, "not an http(s) url: "..url)
@@ -490,7 +489,7 @@ function M.safe.http_get(url, cb, options)
 	if entry and entry.accepted and
 			os.time() - entry.last_attempt < ACCEPTANCE_VALID_S then
 		touch_entry(uri)
-		http_start(url, cb)
+		http_start(url, cb, body)
 		return
 	end
 	log:info("Asking the user about "..uri)
@@ -500,8 +499,25 @@ function M.safe.http_get(url, cb, options)
 			cb(nil, "Declined by user: "..uri)
 			return
 		end
-		http_start(url, cb)
+		http_start(url, cb, body)
 	end, type(options) == "table" and options.description or nil)
+end
+
+function M.safe.http_get(url, cb, options)
+	if type(url) ~= "string" or type(cb) ~= "function" then
+		error("network: http_get(url: string, cb: function)")
+	end
+	gated_http(url, cb, options)
+end
+
+-- http_post(url, body, cb[, options]): http_get's, a POST of the JSON
+-- `body` ([STARPORT]: a report)
+function M.safe.http_post(url, body, cb, options)
+	if type(url) ~= "string" or type(body) ~= "string" or
+			type(cb) ~= "function" then
+		error("network: http_post(url: string, body: string, cb: function)")
+	end
+	gated_http(url, cb, options, body)
 end
 
 -- The addresses this client has used, for a list to pick from: the
@@ -557,6 +573,7 @@ M.tcp_connect = M.safe.tcp_connect
 M.udp_connect = M.safe.udp_connect
 M.gettime = M.safe.gettime
 M.http_get = M.safe.http_get
+M.http_post = M.safe.http_post
 M.known_addresses = M.safe.known_addresses
 M.set_address_name = M.safe.set_address_name
 M.parse_json = M.safe.parse_json

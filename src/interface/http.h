@@ -11,6 +11,10 @@ namespace interface
 	// thread. Both throw with curl's message on any failure, a non-2xx
 	// status included.
 	ss_ http_get(const ss_ &url);
+	// The body of a POST of `body` as `content_type` ([STARPORT]: a server
+	// announcing itself, a client's report); throws as http_get does
+	ss_ http_post(const ss_ &url, const ss_ &body,
+			const ss_ &content_type = "application/json");
 	// The body straight to a file. progress(got, total) is called as it
 	// comes (total 0 when the server does not say); false from it aborts,
 	// which throws.

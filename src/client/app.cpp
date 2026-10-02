@@ -3578,7 +3578,7 @@ struct CApp: public App, public magic::Application
 	// outside the sandbox; the prefix is the fence, so a game cannot read
 	// the user's environment through this.
 	// HTTP for the extension environment ([SERVER_LIST]: Luanti's official
-	// server list): __buildat_http_get(url) starts a fetch on a thread of
+	// server list): __buildat_http_get(url[, body]) starts a fetch -- a POST of JSON with a body -- on a thread of
 	// its own and answers a job id; __buildat_http_poll(id) answers nil
 	// while it runs, then (true, body) or (false, error) once, and forgets
 	// the job. Who may fetch what is the network extension's question,
@@ -3679,13 +3679,17 @@ struct CApp: public App, public magic::Application
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 		const ss_ url = luaL_checkstring(L, 1);
+		// A second argument, a body, makes it a POST of JSON ([STARPORT])
+		const bool post = lua_isstring(L, 2);
+		const ss_ body = post ? lua_bindings::lua_tocppstring(L, 2) : ss_();
 		sp_<HttpJob> job(new HttpJob());
 		const int id = self->m_http_next_id++;
 		self->m_http_jobs[id] = job;
 		HttpJob *j = job.get();
-		j->thread = std::thread([j, url](){
+		j->thread = std::thread([j, url, post, body](){
 			try {
-				j->result = interface::http_get(url);
+				j->result = post ? interface::http_post(url, body) :
+						interface::http_get(url);
 				j->ok = true;
 			} catch(std::exception &e){
 				j->result = e.what();

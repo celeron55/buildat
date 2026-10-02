@@ -92,6 +92,28 @@ ss_ http_get(const ss_ &url)
 	return body;
 }
 
+ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type)
+{
+	char errbuf[CURL_ERROR_SIZE] = {0};
+	CURL *c = easy(url, errbuf);
+	ss_ out;
+	struct curl_slist *headers = curl_slist_append(nullptr,
+			("Content-Type: "+content_type).c_str());
+	curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(c, CURLOPT_POSTFIELDS, body.c_str());
+	curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)body.size());
+	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_string);
+	curl_easy_setopt(c, CURLOPT_WRITEDATA, &out);
+	try {
+		perform(c, url, errbuf);
+	} catch(...){
+		curl_slist_free_all(headers);
+		throw;
+	}
+	curl_slist_free_all(headers);
+	return out;
+}
+
 void http_download(const ss_ &url, const ss_ &path,
 		std::function<bool(uint64_t, uint64_t)> progress)
 {
