@@ -140,7 +140,7 @@ static int l_random_bytes(lua_State *L)
 	return 1;
 }
 
-// -- [STARPORT] 10f: Mbed TLS, for the trusted side (extensions/network,
+// -- [STARPORT] 10f: Mbed TLS, for the trusted side (client/extensions/network,
 // extensions/starport); not in the sandbox
 
 // seal(password, plain) -> a blob: a salt, PBKDF2-HMAC-SHA256 of the

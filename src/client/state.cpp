@@ -325,7 +325,7 @@ struct CState: public State
 		if(ok && m_wss){
 			const ss_ why = m_wss->start(address, port,
 					g_client_config.get<ss_>("share_path")+
-					"/extensions/network/ca-bundle.pem");
+					"/client/extensions/network/ca-bundle.pem");
 			if(!why.empty()){
 				log_w(MODULE, "client::State: %s", cs(why));
 				if(error)
