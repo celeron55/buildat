@@ -33,7 +33,10 @@ local STYLE = "launch_menu/res/main_style.xml"
 
 local AUDIENCES = {"everyone", "teen", "adult"}
 local KINDS = {"world", "arena", "app", "other"}
-local ACCESSES = {"open", "registration", "invite", "password"}
+local ACCESSES = {"open", "registration", "invite", "password", "external"}
+-- The last list each Starport gave, for when it cannot be reached
+-- ([STARPORT] 4): {url = {ts, servers}}
+local LIST_CACHE = __buildat_get_path("cache") .. "/starport_list.json"
 -- A descriptor the filter can hide, and the values it hides at
 local DESCRIPTORS = {
 	{"violence", "realistic violence", {realistic = true}},
@@ -68,7 +71,7 @@ local function default_filters()
 		audience = {everyone = true, teen = true, adult = false},
 		kind = {world = true, arena = true, app = true, other = true},
 		access = {open = true, registration = true, invite = true,
-			password = true},
+			password = true, external = true},
 		hide = {},
 		languages = "",
 	}
@@ -124,6 +127,14 @@ local function load_state()
 	for k, v in pairs(default_filters()) do
 		if state.filters[k] == nil then
 			state.filters[k] = v
+		elseif type(v) == "table" and type(state.filters[k]) == "table" then
+			-- A value added since these were saved (access external) is
+			-- the default's; a managed file's lists are taken as written
+			for kk, vv in pairs(v) do
+				if state.filters[k][kk] == nil then
+					state.filters[k][kk] = vv
+				end
+			end
 		end
 	end
 	if state.send_key == nil then
@@ -331,20 +342,25 @@ function M.safe.fetch(cb, ask)
 		end
 	end
 	local results, errors, waiting = {}, {}, #urls
-	if waiting == 0 then
-		last_rows = {}
-		cb({}, {hidden = 0, unasked = unasked, errors = #e.starports == 0 and
-				{"No Starports in the settings"} or {}})
-		return
-	end
-	local function done()
-		waiting = waiting - 1
-		if waiting > 0 then
-			return
+	local kept = read_json(LIST_CACHE) or {}
+	-- The oldest kept list shown, in seconds; 0 when all are fresh
+	local stale = 0
+	local function use_kept(url)
+		local k = kept[url]
+		if type(k) == "table" and type(k.servers) == "table" then
+			results[url] = k.servers
+			stale = math.max(stale, os.time() - (tonumber(k.ts) or 0))
 		end
-		-- In the settings' order, whichever answered first
+	end
+	-- One not asked yet shows what it said last time
+	for _, url in ipairs(e.starports) do
+		if not (ask or accepted(url)) then
+			use_kept(url)
+		end
+	end
+	if waiting == 0 then
 		local ordered = {}
-		for _, url in ipairs(urls) do
+		for _, url in ipairs(e.starports) do
 			if results[url] then
 				ordered[#ordered + 1] = {url, results[url]}
 			end
@@ -362,7 +378,39 @@ function M.safe.fetch(cb, ask)
 				hidden = hidden + 1
 			end
 		end
-		cb(shown, {hidden = hidden, unasked = unasked, errors = errors})
+		cb(shown, {hidden = hidden, unasked = unasked, stale = stale,
+				errors = #e.starports == 0 and
+				{"No Starports in the settings"} or {}})
+		return
+	end
+	local function done()
+		waiting = waiting - 1
+		if waiting > 0 then
+			return
+		end
+		-- In the settings' order, whichever answered first
+		local ordered = {}
+		for _, url in ipairs(e.starports) do
+			if results[url] then
+				ordered[#ordered + 1] = {url, results[url]}
+			end
+		end
+		write_json_file(LIST_CACHE, kept)
+		last_rows = merge(ordered)
+		local shown, hidden = {}, 0
+		for _, row in ipairs(last_rows) do
+			if passes(e.filters, row) then
+				local copy = {}
+				for k, v in pairs(row) do
+					copy[k] = v
+				end
+				shown[#shown + 1] = copy
+			else
+				hidden = hidden + 1
+			end
+		end
+		cb(shown, {hidden = hidden, unasked = unasked, stale = stale,
+				errors = errors})
 		poll_receipts()
 	end
 	for _, url in ipairs(urls) do
@@ -370,9 +418,11 @@ function M.safe.fetch(cb, ask)
 			local v = body and network.parse_json(body)
 			if type(v) == "table" and v.ok and type(v.servers) == "table" then
 				results[url] = v.servers
+				kept[url] = {ts = os.time(), servers = v.servers}
 			else
 				errors[#errors + 1] = url .. ": " .. tostring(
 						type(v) == "table" and v.error or err or "no answer")
+				use_kept(url)
 			end
 			done()
 		end

@@ -159,7 +159,7 @@ static const std::initializer_list<const char*> KINDS =
 static const std::initializer_list<const char*> AUDIENCES =
 		{"everyone", "teen", "adult"};
 static const std::initializer_list<const char*> ACCESSES =
-		{"open", "registration", "invite", "password"};
+		{"open", "registration", "invite", "password", "external"};
 static const std::initializer_list<const char*> REASONS = {"category",
 		"illegal", "csam", "harassment", "scam", "malware", "impersonation",
 		"spam", "other"};
@@ -198,7 +198,15 @@ static ss_ check_categories(const json::Value &b)
 	if(!in_set(jstr(b, "audience"), AUDIENCES))
 		return "audience: everyone, teen or adult";
 	if(!in_set(jstr(b, "access"), ACCESSES))
-		return "access: open, registration, invite or password";
+		return "access: open, registration, invite, password or external";
+	// An account made somewhere else first: where ([STARPORT] 3)
+	const ss_ signup = jstr(b, "signup_url");
+	if(jstr(b, "access") == "external" && (signup.size() > 200 ||
+			(signup.compare(0, 8, "https://") != 0 &&
+			signup.compare(0, 7, "http://") != 0) ||
+			signup.find_first_of(" \"<>\r\n") != ss_::npos))
+		return "signup_url: the http(s) address an account is made at, "
+				"for access external";
 	const json::Value &d = b.get("descriptors");
 	if(!d.is_object())
 		return "descriptors: an object";
@@ -565,7 +573,7 @@ struct Module: public interface::Module
 			host = r.address;
 		const bool moved = jstr(l, "host") != host || jint(l, "port") != port;
 		for(const char *k : {"name", "description", "kind", "audience",
-				"access", "region", "app", "version"})
+				"access", "region", "app", "version", "signup_url"})
 			l.set(k, b.get(k).is_string() ? b.get(k) : json::Value(""));
 		json::Value desc = b.get("descriptors").deepcopy();
 		for(const auto &pair : DESCRIPTORS)
@@ -847,7 +855,7 @@ struct Module: public interface::Module
 				continue;
 			json::Value s = json::object();
 			for(const char *k : {"id", "name", "description", "host", "port",
-					"app", "version", "tags", "languages", "region",
+					"app", "version", "tags", "languages", "region", "signup_url",
 					"players", "players_max"})
 				s.set(k, l.get(k));
 			const json::Value e = effective(l);

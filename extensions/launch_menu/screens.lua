@@ -309,6 +309,12 @@ function M.show_connect_to_server()
 				row.line = tostring(x.description or "") .. "\n" ..
 						categories(x) .. "  via " ..
 						table.concat(x.starports or {}, ", ")
+				-- [STARPORT] 3: said before the connect, not after
+				if x.access == "external" then
+					row.signup = tostring(x.signup_url or "")
+					row.line = row.line .. "\nSign up at " .. row.signup ..
+							" first"
+				end
 				-- A pool: its best first, the others to fall back on
 				row.fallbacks = {}
 				for i = 2, #g.servers do
@@ -328,6 +334,8 @@ function M.show_connect_to_server()
 					" hidden by your filters" or "") ..
 					(info.unasked > 0 and "; Refresh asks " .. info.unasked ..
 					" more Starport(s)" or "") ..
+					(info.stale > 0 and "; kept from " ..
+					math.floor(info.stale / 60) .. " min ago" or "") ..
 					(#info.errors > 0 and "\n" .. table.concat(info.errors,
 					"\n") or "")
 			show_public()
@@ -383,6 +391,13 @@ function M.show_connect_to_server()
 				show_error("Pick a server of the fleet")
 				return
 			end
+			if picked.signup and not picked.told then
+				picked.told = true
+				show_error("This server needs an account made at\n" ..
+						picked.signup .. " first.\nConnect again when you "..
+						"have one.")
+				return
+			end
 			connect_or_show_error(picked.host .. ":" .. picked.port,
 					picked.fallbacks)
 			return
@@ -396,6 +411,13 @@ function M.show_connect_to_server()
 		local address = host
 		if port ~= "" then
 			address = host..":"..port
+		end
+		if picked and picked.address == address and picked.signup and
+				not picked.told then
+			picked.told = true
+			show_error("This server needs an account made at\n" ..
+					picked.signup .. " first.\nConnect again when you have one.")
+			return
 		end
 		connect_or_show_error(address, picked and
 				picked.address == address and picked.fallbacks or nil)
