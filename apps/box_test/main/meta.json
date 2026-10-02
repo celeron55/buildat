@@ -1,0 +1,3 @@
+{
+	"ldflags_windows": "-luser32 -ladvapi32 -lshell32 -lole32 -lws2_32"
+}

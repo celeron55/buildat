@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 #include "core/types.h"
+#include <exception>
 extern "C" {
 #include <lua.h>
 #include <lauxlib.h>
@@ -13,5 +14,31 @@ namespace lua_bindings
 	ss_ lua_tocppstring(lua_State *L, int index);
 	ss_ lua_checkcppstring(lua_State *L, int index);
 	int handle_error(lua_State *L);
+
+	// Every binding is registered through this. A binding that lets a C++
+	// exception out -- lua_tocppstring() on an argument that is not a
+	// string is the everyday one -- throws it through Lua's own C frames,
+	// which nothing there catches, and the process goes down on
+	// std::terminate. That is reachable from sandboxed code by calling a
+	// binding with the wrong kind of argument, which is to say by any
+	// server a client connects to, and `extensions/sandbox_test` does it by
+	// accident every time it runs.
+	//
+	// What comes out instead is an ordinary Lua error, which a pcall
+	// catches and which says what went wrong.
+	template<lua_CFunction F>
+	int guarded(lua_State *L)
+	{
+		// The C++ stack is unwound before lua_error() is reached, which is
+		// what makes the long jump out of here safe
+		try {
+			return F(L);
+		} catch(std::exception &e){
+			lua_pushstring(L, e.what());
+		} catch(...){
+			lua_pushstring(L, "unknown C++ exception in a binding");
+		}
+		return lua_error(L);
+	}
 }
 // vim: set noet ts=4 sw=4:

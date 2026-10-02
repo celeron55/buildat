@@ -1,0 +1,6 @@
+<!-- Drawn into the sun's shadow map and nowhere else ([FP_DAYLIGHT]): the
+     slab over each room that seals the joint between its walls and its
+     ceiling, where thin casters leaked a line of daylight -->
+<technique vs="Shadow" ps="Shadow">
+	<pass name="shadow" cull="none" />
+</technique>
