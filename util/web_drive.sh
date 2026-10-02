@@ -44,18 +44,29 @@ cleanup(){
 }
 trap cleanup EXIT
 
-echo "web_drive: $browser, $game on port $port, out $out"
-cd "$here"
-setsid Build/bin/buildat_server -m "apps/$game" -D "$out/user" -P "$port" \
-		-W "$here/web" -l 3 > "$out/server.log" 2>&1 &
-pids+=($!)
-for i in $(seq 1 120); do
-	grep -q "Listening at" "$out/server.log" && break
-	sleep 1
-done
-grep -q "Listening at" "$out/server.log" ||
-	{ echo "web_drive: the server did not start" >&2; tail -20 "$out/server.log" >&2; exit 1; }
-code=$(grep -ao "setup code [A-Z0-9]*" "$out/server.log" | awk '{print $3}' | head -1)
+# WEB_DRIVE_URL: a server already running there (a package's smoke), and
+# none started here
+url=${WEB_DRIVE_URL:-}
+code=""
+if [ -z "$url" ]; then
+	echo "web_drive: $browser, $game on port $port, out $out"
+	cd "$here"
+	setsid Build/bin/buildat_server -m "apps/$game" -D "$out/user" -P "$port" \
+			-W "$here/web" -l 3 > "$out/server.log" 2>&1 &
+	pids+=($!)
+	for i in $(seq 1 120); do
+		grep -q "Listening at" "$out/server.log" && break
+		sleep 1
+	done
+	grep -q "Listening at" "$out/server.log" ||
+		{ echo "web_drive: the server did not start" >&2; tail -20 "$out/server.log" >&2; exit 1; }
+	code=$(grep -ao "setup code [A-Z0-9]*" "$out/server.log" | awk '{print $3}' | head -1)
+	url="http://127.0.0.1:$port/"
+else
+	cd "$here"
+	echo "web_drive: $browser, the server at $url, out $out"
+fi
+
 
 case "$browser" in
 	firefox)
@@ -82,7 +93,7 @@ grep -q "$ready" "$out/browser.log" ||
 	{ echo "web_drive: the browser did not start" >&2; tail -20 "$out/browser.log" >&2; exit 1; }
 
 node "$here/util/web_drive.js" --browser "$browser" --port "$bport" \
-		--steps "$steps" --log "$out/page.log" --var "URL=http://127.0.0.1:$port/" \
+		--steps "$steps" --log "$out/page.log" --var "URL=$url" \
 		--var "OUT=$out" --var "SETUP_CODE=$code"
 status=$?
 # Firefox writes its WebGL warnings to its own output, Chrome to the

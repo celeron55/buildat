@@ -21,6 +21,11 @@ jobs:
       # container ([LINUX_SERVER]); its transport test is python's
       - name: The web archives' smoke needs websockets
         run: sudo apt-get install -y python3-websockets
+      # And Node 22 for its page check in Firefox (util/web_drive.js),
+      # which the runner has
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       # Also the web archives ([LINUX_SERVER]): *-linux-x86_64-web
       # and -web-precompiled, which carry the web client and are in
       # the upload and the release by the same *.tar.gz
