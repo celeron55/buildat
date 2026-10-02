@@ -629,6 +629,13 @@ struct CState: public State
 			m_parsed.pop_front();
 			m_parsed_bytes -= p.second.size();
 			dispatch(p);
+			// **An announce stops the drain** until it has been checked:
+			// what follows it -- a run_script -- expects its files asked
+			// for. The guard in update() is a frame late for packets read
+			// in the same go, which a pipe's one big read is (the Wine
+			// smoke, 2026-10-03: main/init.lua run with nothing cached)
+			if(m_announce_checking)
+				break;
 			if(budget > 0 && get_timeofday_us() - t0 >= budget)
 				break;
 		}
