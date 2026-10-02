@@ -753,7 +753,51 @@ end
 local ROLE_TEXT = {admin = "admin", owner = "yours", editor = "can edit",
 		viewer = "can read"}
 
-local function show_plans(message)
+local show_plans
+local in_picker_menu = false
+
+-- **The menu without a plan** (user, 2026-10-02): what needs no plan
+-- open -- the chat, the server's accounts and Starport page, the user's
+-- own account -- from the plan picker. A plan's view settings (client
+-- settings, keys, viewports) are the editor's, in the plan's menu.
+local picker_menu
+picker_menu = function()
+	if login_window then
+		login_window:Remove()
+	end
+	in_picker_menu = true
+	local w = page_window(420)
+	login_window = w
+	page_text(w, "Floor planner")
+	local function page(open)
+		return function()
+			login_window:Remove()
+			login_window = nil
+			open(function() picker_menu() end)
+		end
+	end
+	local b = accounts.page_button
+	b(w, "Back to the plans", function() show_plans() end)
+	b(w, "Chat...", page(accounts.chat_page))
+	if doc.privs.admin then
+		b(w, "Accounts...", page(accounts.users_page))
+	end
+	if not doc.is_local then
+		b(w, "My account...", page(accounts.account_page))
+		b(w, "Report this server...", function()
+			require("buildat/extension/starport").open_report_here()
+		end)
+	end
+	if buildat.get_env("BUILDAT_PAGE_HTTPS") == nil then
+		b(w, "Leave to the launcher", function() buildat.leave() end)
+		b(w, "Quit", function() buildat.quit() end)
+	elseif not doc.is_local then
+		b(w, "Log out", accounts.logout)
+	end
+end
+
+show_plans = function(message)
+	in_picker_menu = false
 	if login_window then
 		login_window:Remove()
 	end
@@ -812,6 +856,7 @@ local function show_plans(message)
 	button("Import a plan...", function() doc.show_import() end)
 	-- The basics, step by step ([FP_TUTORIAL])
 	button("Tutorial", function() doc.tutorial.start() end)
+	button("Menu...", picker_menu)
 	e:SetFocus(true)
 end
 
@@ -1118,6 +1163,19 @@ local was_typing = false
 -- KeyDown and went into the new field, which then began with a "t"
 local chat_pending = false
 
+-- Esc before a plan has been open: back a page -- an account page to
+-- where it was opened from, the picker's menu to the plans -- and from
+-- the join or the plans, leaving
+local function escape_without_editor()
+	if accounts.page then
+		accounts.back()
+	elseif in_picker_menu then
+		show_plans()
+	else
+		buildat.leave()
+	end
+end
+
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
 	if chat_input then
@@ -1143,7 +1201,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 			if editor then
 				editor.refresh_panels()
 			else
-				buildat.leave()
+				escape_without_editor()
 			end
 		end
 		return
@@ -1157,7 +1215,7 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	elseif editor and key == editor.keys.key("chat") then
 		chat_pending = true
 	elseif key == magic.KEY_ESCAPE and not editor then
-		buildat.leave()
+		escape_without_editor()
 	elseif editor then
 		editor.key_down(key, event_data)
 	end

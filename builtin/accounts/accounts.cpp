@@ -897,7 +897,7 @@ struct Module: public interface::Module, public Interface
 							"by an account of its own: pick another for "
 							"this community on the Starport, or, if the "
 							"account is yours, log in with its password and "
-							"link your ID to it (Change password..., Link a "
+							"link your ID to it (My account..., Link a "
 							"Starport ID...)");
 				// No admin yet: as with a local account, only the setup
 				// code makes a new one, and makes it the admin (10g)

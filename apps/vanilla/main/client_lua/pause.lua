@@ -228,11 +228,8 @@ open = function()
 	end
 	if account.public then
 		if not account.is_local then
-			accounts.page_button(w, "Change password...", function()
-				page(function() accounts.password_page(open) end, open)
-			end)
-			accounts.page_button(w, "Two-step login...", function()
-				page(function() accounts.totp_page(open) end, open)
+			accounts.page_button(w, "My account...", function()
+				page(function() accounts.account_page(open) end, open)
 			end)
 			-- To the Starports that list it ([STARPORT] 5); the dialog is
 			-- the client's own

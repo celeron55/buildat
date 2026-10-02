@@ -348,10 +348,10 @@ home = function()
 			table.insert(buttons, {"Accounts",
 					account_page(accounts.users_page)})
 		end
-		table.insert(buttons, {"Password", account_page(accounts.password_page)})
-		-- [STARPORT] 10a: recommended to whoever moderates
-		table.insert(buttons, {"Two-step login",
-				account_page(accounts.totp_page)})
+		-- Password and two-step login ([STARPORT] 10a: recommended to
+		-- whoever moderates)
+		table.insert(buttons, {"My account",
+				account_page(accounts.account_page)})
 		-- Six to a row, which fits the window
 		local b
 		for i, x in ipairs(buttons) do

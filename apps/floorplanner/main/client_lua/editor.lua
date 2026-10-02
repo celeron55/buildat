@@ -7184,11 +7184,8 @@ do
 			end)
 		end
 		if not doc.is_local then
-			panel.button(w, "Change password...", function()
-				account_page(doc.accounts.password_page)
-			end)
-			panel.button(w, "Two-step login...", function()
-				account_page(doc.accounts.totp_page)
+			panel.button(w, "My account...", function()
+				account_page(doc.accounts.account_page)
 			end)
 			-- To the Starports that list it ([STARPORT] 5); the dialog is
 			-- the client's own

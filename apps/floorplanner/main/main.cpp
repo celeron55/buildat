@@ -2678,7 +2678,7 @@ struct Module: public interface::Module
 		// The chat commands are the pause menu's now ([FP_ACCESS] 4)
 		if(text[0] == '/'){
 			send_chat(packet.sender, "The commands are in the pause menu "
-					"(Esc): Users..., Plan members..., Change password...");
+					"(Esc): Accounts..., Plan members..., My account...");
 			return;
 		}
 		send_to_plan(plan->m_name, "fp:chat",

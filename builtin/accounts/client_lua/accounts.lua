@@ -64,6 +64,7 @@ local opts = {}
 local window = nil
 -- The account page open, for the packets that redraw it; see M.users_page
 local page_kind, page_back, users_page, passwd_page = nil, nil, nil, nil
+local account_page
 local ban_page
 
 local function notice(text)
@@ -381,7 +382,7 @@ buildat.sub_packet("accounts:login_result", function(data)
 						"an account of this server. Pick another; it is kept "..
 						"for this community on the Starport. If that account "..
 						"is yours, cancel instead: log in with its password, "..
-						"and link your ID to it in Change password..., Link a "..
+						"and link your ID to it in My account..., Link a "..
 						"Starport ID...; then your ID logs in as it.")
 				return
 			end
@@ -437,8 +438,8 @@ end)
 
 buildat.sub_packet("accounts:link_result", function(data)
 	local text = cereal.binary_input(data, TEXT).text
-	if page_kind == "passwd" then
-		passwd_page(page_back, text == "" and "The Starport ID is linked: "..
+	if page_kind == "account" then
+		account_page(page_back, text == "" and "The Starport ID is linked: "..
 				"it logs in as this account now" or text)
 	end
 end)
@@ -586,6 +587,8 @@ local function go_back()
 		page_back()
 	end
 end
+-- Back from the page open, as its Back button: for a game's Esc
+M.back = function() go_back() end
 
 -- A user's own password; `message` is what the last change came to
 passwd_page = function(back, message)
@@ -605,21 +608,6 @@ passwd_page = function(back, message)
 	new2 = field(w, "New again", true, change)
 	local r = row(w)
 	button(r, "Change", change)
-	-- [STARPORT] 10g: this account the one a Starport ID logs in as
-	if M.hello.starport == 1 then
-		button(r, "Link a Starport ID...", function()
-			local ok, starport = pcall(require, "buildat/extension/starport")
-			if not ok or not starport.id_token_here then
-				return passwd_page(back, "This client has no Starport extension")
-			end
-			starport.id_token_here(function(token, why)
-				if not token then
-					return passwd_page(back, why)
-				end
-				buildat.send_packet("accounts:link_starport", token)
-			end)
-		end)
-	end
 	button(r, "Back", go_back)
 	old:SetFocus(true)
 end
@@ -714,6 +702,45 @@ M.totp_page = function(back)
 			{cmd = "status", code = ""}, TOTP_REQ))
 	totp_page(back)
 end
+
+-- **My account** (user, 2026-10-02): what a user does with their own
+-- account, in one page, so that a game's menu has one button for it
+-- ("My account...") and guidance that names these buttons is right in
+-- every game. A game shows it where the account is the server's (not a
+-- local game's).
+account_page = function(back, message)
+	local w = open_page("account", "My account", back)
+	if M.name and M.name ~= "" then
+		page_text(w, "Logged in as " .. M.name, GREY)
+	end
+	if message then
+		page_text(w, message, YELLOW)
+	end
+	local here = function() account_page(back) end
+	button(w, "Change password...", function() passwd_page(here) end)
+	button(w, "Two-step login...", function() M.totp_page(here) end)
+	-- [STARPORT] 10g: this account the one a Starport ID logs in as
+	if M.hello.starport == 1 then
+		page_text(w, "A linked Starport ID logs in as this account.", GREY)
+		button(w, "Link a Starport ID...", function()
+			local ok, starport = pcall(require, "buildat/extension/starport")
+			if not ok or not starport.id_token_here then
+				return account_page(back, "This client has no Starport "..
+						"extension")
+			end
+			starport.id_token_here(function(token, why)
+				if not token then
+					return account_page(back, why ~= "cancelled" and why or
+							nil)
+				end
+				buildat.send_packet("accounts:link_starport", token)
+			end)
+		end)
+	end
+	button(w, "Log out", M.logout)
+	button(w, "Back", go_back)
+end
+M.account_page = function(back) account_page(back) end
 
 buildat.sub_packet("accounts:totp_result", function(data)
 	local r = cereal.binary_input(data, TOTP_RESULT)
