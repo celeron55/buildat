@@ -1,6 +1,6 @@
 /*
 ** C data arithmetic.
-** Copyright (C) 2005-2016 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2026 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #include "lj_obj.h"
@@ -44,9 +44,13 @@ static int carith_checkarg(lua_State *L, CTState *cts, CDArith *ca)
 	p = (uint8_t *)cdata_getptr(p, ct->size);
 	if (ctype_isref(ct->info)) ct = ctype_rawchild(cts, ct);
       } else if (ctype_isfunc(ct->info)) {
+	CTypeID id0 = i ? ctype_typeid(cts, ca->ct[0]) : 0;
 	p = (uint8_t *)*(void **)p;
 	ct = ctype_get(cts,
 	  lj_ctype_intern(cts, CTINFO(CT_PTR, CTALIGN_PTR|id), CTSIZE_PTR));
+	if (i) {  /* cts->tab may have been reallocated. */
+	  ca->ct[0] = ctype_get(cts, id0);
+	}
       }
       if (ctype_isenum(ct->info)) ct = ctype_child(cts, ct);
       ca->ct[i] = ct;
@@ -116,13 +120,13 @@ static int carith_ptr(lua_State *L, CTState *cts, CDArith *ca, MMS mm)
 	/* All valid pointer differences on x64 are in (-2^47, +2^47),
 	** which fits into a double without loss of precision.
 	*/
-	setintptrV(L->top-1, (int32_t)diff);
+	setintptrV(L->top-1, diff);
 	return 1;
       } else if (mm == MM_lt) {  /* Pointer comparison (unsigned). */
 	setboolV(L->top-1, ((uintptr_t)pp < (uintptr_t)pp2));
 	return 1;
       } else {
-	lua_assert(mm == MM_le);
+	lj_assertL(mm == MM_le, "bad metamethod %d", mm);
 	setboolV(L->top-1, ((uintptr_t)pp <= (uintptr_t)pp2));
 	return 1;
       }
@@ -131,7 +135,7 @@ static int carith_ptr(lua_State *L, CTState *cts, CDArith *ca, MMS mm)
       return 0;
     lj_cconv_ct_ct(cts, ctype_get(cts, CTID_INT_PSZ), ca->ct[1],
 		   (uint8_t *)&idx, ca->p[1], 0);
-    if (mm == MM_sub) idx = -idx;
+    if (mm == MM_sub) idx = (ptrdiff_t)(~(uintptr_t)idx+1u);
   } else if (mm == MM_add && ctype_isnum(ctp->info) &&
       (ctype_isptr(ca->ct[1]->info) || ctype_isrefarray(ca->ct[1]->info))) {
     /* Swap pointer and index. */
@@ -207,8 +211,10 @@ static int carith_int64(lua_State *L, CTState *cts, CDArith *ca, MMS mm)
       else
 	*up = lj_carith_powu64(u0, u1);
       break;
-    case MM_unm: *up = (uint64_t)-(int64_t)u0; break;
-    default: lua_assert(0); break;
+    case MM_unm: *up = ~u0+1u; break;
+    default:
+      lj_assertL(0, "bad metamethod %d", mm);
+      break;
     }
     lj_gc_check(L);
     return 1;
@@ -265,7 +271,7 @@ int lj_carith_op(lua_State *L, MMS mm)
 {
   CTState *cts = ctype_cts(L);
   CDArith ca;
-  if (carith_checkarg(L, cts, &ca)) {
+  if (carith_checkarg(L, cts, &ca) && mm != MM_len && mm != MM_concat) {
     if (carith_int64(L, cts, &ca, mm) || carith_ptr(L, cts, &ca, mm)) {
       copyTV(L, &G(L)->tmptv2, L->top-1);  /* Remember for trace recorder. */
       return 1;
@@ -301,7 +307,9 @@ uint64_t lj_carith_shift64(uint64_t x, int32_t sh, int op)
   case IR_BSAR-IR_BSHL: x = lj_carith_sar64(x, sh); break;
   case IR_BROL-IR_BSHL: x = lj_carith_rol64(x, sh); break;
   case IR_BROR-IR_BSHL: x = lj_carith_ror64(x, sh); break;
-  default: lua_assert(0); break;
+  default:
+    lj_assertX(0, "bad shift op %d", op);
+    break;
   }
   return x;
 }
@@ -341,12 +349,40 @@ uint64_t lj_carith_check64(lua_State *L, int narg, CTypeID *id)
   if (LJ_LIKELY(tvisint(o))) {
     return (uint32_t)intV(o);
   } else {
-    int32_t i = lj_num2bit(numV(o));
-    if (LJ_DUALNUM) setintV(o, i);
-    return (uint32_t)i;
+    return (uint32_t)lj_num2bit(numV(o));
   }
 }
 
+/* Check bit operator arguments. No coercion from strings. */
+uint64_t lj_carith_checkbit64(lua_State *L, cTValue *o, CTypeID *id)
+{
+  if (tviscdata(o)) {
+    CTState *cts = ctype_cts(L);
+    uint8_t *sp = (uint8_t *)cdataptr(cdataV(o));
+    CTypeID sid = cdataV(o)->ctypeid;
+    CType *s = ctype_get(cts, sid);
+    uint64_t x;
+    if (ctype_isref(s->info)) {
+      sp = *(void **)sp;
+      sid = ctype_cid(s->info);
+    }
+    s = ctype_raw(cts, sid);
+    if (ctype_isenum(s->info)) s = ctype_child(cts, s);
+    if ((s->info & (CTMASK_NUM|CTF_BOOL|CTF_FP|CTF_UNSIGNED)) ==
+	CTINFO(CT_NUM, CTF_UNSIGNED) && s->size == 8)
+      *id = CTID_UINT64;  /* Use uint64_t, since it has the highest rank. */
+    else if (!*id)
+      *id = CTID_INT64;  /* Use int64_t, unless already set. */
+    lj_cconv_ct_ct(cts, ctype_get(cts, *id), s,
+		   (uint8_t *)&x, sp, 0);
+    return x;
+  } else if (LJ_LIKELY(tvisint(o))) {
+    return (uint64_t)intV(o);  /* Sign-extended. */
+  } else {
+    if (!tvisnum(o)) lj_err_optype(L, o, LJ_ERR_OPARITH);
+    return (uint64_t)lj_num2bit(numV(o));  /* Sign-extended. */
+  }
+}
 
 /* -- 64 bit integer arithmetic helpers ----------------------------------- */
 

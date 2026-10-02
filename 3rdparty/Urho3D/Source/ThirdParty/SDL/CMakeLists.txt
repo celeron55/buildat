@@ -384,7 +384,8 @@ if(USE_GCC OR USE_CLANG)
   if(HAVE_GCC_WDECLARATION_AFTER_STATEMENT)
     check_c_compiler_flag(-Werror=declaration-after-statement HAVE_GCC_WERROR_DECLARATION_AFTER_STATEMENT)
     # Urho3D - bug fix - SDL does not build cleanly for Android platform with this flag on, make a tweak here rather than changing on their code
-    if(HAVE_GCC_WERROR_DECLARATION_AFTER_STATEMENT AND NOT ANDROID)
+    # buildat: nor for Emscripten, whose SDL backend mixes them too
+    if(HAVE_GCC_WERROR_DECLARATION_AFTER_STATEMENT AND NOT ANDROID AND NOT EMSCRIPTEN)
       list(APPEND EXTRA_CFLAGS "-Werror=declaration-after-statement")
     endif()
     list(APPEND EXTRA_CFLAGS "-Wdeclaration-after-statement")
@@ -1133,7 +1134,10 @@ elseif(WINDOWS)
       set(SOURCE_FILES ${SOURCE_FILES} ${DSOUND_AUDIO_SOURCES})
     endif()
 
-    if(HAVE_XAUDIO2_H)
+    # buildat: not under mingw-w64, whose current headers define XAudio2
+    # in a way this SDL's driver does not compile against (INTERFACE);
+    # DirectSound and WinMM remain, which is what a game needs
+    if(HAVE_XAUDIO2_H AND NOT MINGW)
       set(SDL_AUDIO_DRIVER_XAUDIO2 1)
       file(GLOB XAUDIO2_AUDIO_SOURCES ${SDL2_SOURCE_DIR}/src/audio/xaudio2/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${XAUDIO2_AUDIO_SOURCES})
