@@ -28,6 +28,12 @@
 	#include <netinet/in.h>
 	#include <cstring>
 #endif
+#ifdef _WIN32
+	#include "ports/windows_sockets.h"
+	#include <shlobj.h>
+	#include <tlhelp32.h>
+	#undef interface
+#endif
 #define MODULE "box_test"
 
 using interface::Event;
@@ -131,6 +137,109 @@ static bool resolves(const char *name)
 }
 #endif
 
+#ifdef _WIN32
+// [PROCESS_SANDBOX] B 4: the Windows set, for the user to run on a Windows
+// machine (Wine has no AppContainer)
+static bool w_can_list(const ss_ &dir)
+{
+	WIN32_FIND_DATAA fd;
+	HANDLE h = FindFirstFileA((dir+"\\*").c_str(), &fd);
+	if(h == INVALID_HANDLE_VALUE)
+		return false;
+	FindClose(h);
+	return true;
+}
+
+static bool w_can_write(const ss_ &path)
+{
+	HANDLE h = CreateFileA(path.c_str(), GENERIC_WRITE, 0, nullptr,
+			CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+	if(h == INVALID_HANDLE_VALUE)
+		return false;
+	CloseHandle(h);
+	return true;
+}
+
+static ss_ known_folder(int csidl)
+{
+	char buf[MAX_PATH] = {0};
+	SHGetFolderPathA(nullptr, csidl, nullptr, 0, buf);
+	return buf;
+}
+
+// The classic next-start escape: a value under HKCU\...\Run
+static bool w_run_key()
+{
+	HKEY k;
+	if(RegCreateKeyExA(HKEY_CURRENT_USER,
+			"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, nullptr, 0,
+			KEY_SET_VALUE, nullptr, &k, nullptr) != ERROR_SUCCESS)
+		return false;
+	bool ok = RegSetValueExA(k, "buildat_box_test", 0, REG_SZ,
+			(const BYTE*)"x", 2) == ERROR_SUCCESS;
+	if(ok)
+		RegDeleteValueA(k, "buildat_box_test");
+	RegCloseKey(k);
+	return ok;
+}
+
+static bool w_clipboard()
+{
+	if(!OpenClipboard(nullptr))
+		return false;
+	bool got = GetClipboardData(CF_TEXT) != nullptr;
+	CloseClipboard();
+	return got;
+}
+
+// The parent, or the user's explorer.exe, opened to read its memory
+static bool w_open_process(bool parent)
+{
+	const DWORD me = GetCurrentProcessId();
+	DWORD target = 0, ppid = 0;
+	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	PROCESSENTRY32 pe;
+	pe.dwSize = sizeof pe;
+	for(BOOL ok = Process32First(snap, &pe); ok; ok = Process32Next(snap, &pe)){
+		if(pe.th32ProcessID == me)
+			ppid = pe.th32ParentProcessID;
+		if(!parent && _stricmp(pe.szExeFile, "explorer.exe") == 0)
+			target = pe.th32ProcessID;
+	}
+	CloseHandle(snap);
+	if(parent)
+		target = ppid;
+	if(!target)
+		return false;
+	HANDLE h = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION,
+			FALSE, target);
+	if(!h)
+		return false;
+	CloseHandle(h);
+	return true;
+}
+
+// A loopback listener every Windows has: the RPC endpoint mapper
+static bool w_loopback(int port)
+{
+	SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
+	u_long nb = 1;
+	ioctlsocket(s, FIONBIO, &nb);
+	sockaddr_in a = {};
+	a.sin_family = AF_INET;
+	a.sin_port = htons(port);
+	a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	connect(s, (sockaddr*)&a, sizeof a);
+	fd_set w;
+	FD_ZERO(&w);
+	FD_SET(s, &w);
+	timeval tv = {3, 0};
+	bool ok = select(0, nullptr, &w, nullptr, &tv) > 0;
+	closesocket(s);
+	return ok;
+}
+#endif
+
 struct Module: public interface::Module
 {
 	interface::Server *m_server;
@@ -152,7 +261,53 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
-#ifndef __linux__
+#if defined(_WIN32)
+		const interface::ServerConfig &c = m_server->get_config();
+		const ss_ user = c.get<ss_>("user_path");
+		const ss_ cache = c.get<ss_>("cache_path")+"/../..";
+		const ss_ profile = known_folder(CSIDL_PROFILE);
+		struct Attempt { ss_ what; bool got_through; };
+		sv_<Attempt> tried = {
+			{"list your profile", w_can_list(profile)},
+			{"list Documents", w_can_list(known_folder(CSIDL_PERSONAL))},
+			{"write a file in your profile",
+				w_can_write(profile+"\\buildat_box_test.txt")},
+			{"write a file in your TEMP", w_can_write(
+				known_folder(CSIDL_LOCAL_APPDATA)+"\\Temp\\buildat_box_test.txt")},
+			{"write another app's directory",
+				w_can_write(user+"/apps/vanilla/box_test_was_here")},
+			{"write another app's shared directory",
+				w_can_write(user+"/shared/vanilla/box_test_was_here")},
+			{"write another app's cache",
+				w_can_write(cache+"/apps/vanilla/box_test_was_here")},
+			{"write the shared module build",
+				w_can_write(cache+"/rccpp_build/box_test_was_here")},
+			{"write the user path itself",
+				w_can_write(user+"/box_test_was_here")},
+			{"set a value under HKCU\\...\\Run", w_run_key()},
+			{"read the clipboard", w_clipboard()},
+			{"open the parent process", w_open_process(true)},
+			{"open explorer.exe", w_open_process(false)},
+			{"connect to 127.0.0.1:135", w_loopback(135)},
+		};
+		ss_ through;
+		int n = 0;
+		for(const Attempt &a : tried){
+			log_v(MODULE, "box_test: %s: %s", cs(a.what),
+					a.got_through ? "GOT THROUGH" : "refused");
+			if(a.got_through){
+				through += (n++ ? ", " : ": ")+a.what;
+				log_w(MODULE, "box_test: %s GOT THROUGH", cs(a.what));
+			}
+		}
+		const bool own = w_can_write(user+"/apps/box_test/save") &&
+				w_can_write(user+"/shared/box_test/shared") &&
+				w_can_list(user+"/shared/vanilla");
+		log_i(MODULE, "box_test: %zu reaches tried, %i got through%s; "
+				"its own files %s", tried.size(), n, cs(through),
+				own ? "work" : "DO NOT WORK");
+		m_server->shutdown(0, "box_test done");
+#elif !defined(__linux__)
 		log_i(MODULE, "box_test: not written for this platform");
 		m_server->shutdown(0, "box_test done");
 #else
