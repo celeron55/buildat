@@ -1225,9 +1225,22 @@ starport_page = function(back, confirm_remove)
 	for i, s in ipairs(info.starports or {}) do
 		page_text(w, tostring(s.url) .. ": " .. tostring(s.status ~= "" and
 				s.status or "not announced yet"))
-		page_text(w, "listing " .. tostring(s.listing or "-") ..
-				", claim code " .. tostring(s.claim or "-") .. "; " ..
-				tostring(s.linked or 0) .. " accounts linked to its IDs" ..
+		-- Read-only fields, not text: the two are copied to the
+		-- Starport's claim form
+		local cr = row(w)
+		for _, f in ipairs({{"Listing id", s.listing}, {"Claim code", s.claim}}) do
+			local l = page_text(cr, f[1])
+			l:SetWordwrap(false)
+			l:SetFixedWidth(100)
+			local e = cr:CreateChild("LineEdit")
+			e:SetStyleAuto()
+			e.minHeight = 26
+			e.editable = false
+			e.textCopyable = true
+			e.textSelectable = true
+			e:SetText(tostring(f[2] or "-"))
+		end
+		page_text(w, tostring(s.linked or 0) .. " accounts linked to its IDs" ..
 				((s.subscribed and #s.subscribed > 0) and "; follows " ..
 				table.concat(s.subscribed, ", ") or ""), GREY)
 		if confirm_remove == s.url then
