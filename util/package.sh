@@ -402,7 +402,10 @@ prebuild_modules() {
 				"$wine" bin/buildat_server.exe -u launcher=1 -m apps/vanilla -P "$port" -l 3 > "$log" 2>&1) &
 			;;
 		*)
+			# Unboxed ([PROCESS_SANDBOX]): this run is what writes the shared
+			# build, which a boxed server only reads
 			(cd "$stage" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
+				BUILDAT_UNCONFINED=1 \
 				bin/buildat_server -u launcher=1 -m apps/vanilla -P "$port" -l 3 > "$log" 2>&1) &
 			;;
 	esac
@@ -593,6 +596,7 @@ prebuild_apps() {
 		udir=$(mktemp -d "/tmp/buildat_package_prebuild_apps.XXXXXX")
 		PKG_TMP_DIRS="$PKG_TMP_DIRS $udir"
 		(cd "$stage" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=prebuild \
+			BUILDAT_UNCONFINED=1 \
 			bin/buildat_server -m "apps/$g" -D "$udir" -P "$port" -l 3 > "$log" 2>&1) &
 		srv=$!
 		if wait_for_line "$log" "$srv" "Listening at" 900 >/dev/null &&

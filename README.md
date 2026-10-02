@@ -156,6 +156,14 @@ Terminal 2:
     $ $wherever_buildat_is/Build
     $ bin/buildat -s localhost
 
+On Linux the server confines itself before it loads an app (Landlock and
+seccomp): the app writes `<user>/apps/<app>`, its own `<user>/shared/<app>`
+and its own cache, reads the install and the other apps' shared
+directories, and reaches nothing else of yours. Where the kernel cannot
+make the box the server refuses to start; `--unconfined` (or
+`BUILDAT_UNCONFINED=1`) runs it without one. `apps/box_test/check.sh` is
+the check.
+
 Client command sequence (CI / visual checks)
 --------------------------------------------
 

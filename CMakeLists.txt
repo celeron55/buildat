@@ -569,6 +569,7 @@ if(BUILD_SERVER)
 		src/server/rccpp.cpp
 		src/server/config.cpp
 		src/server/rccpp_util.cpp
+		src/server/confine.cpp
 	)
 	add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
 

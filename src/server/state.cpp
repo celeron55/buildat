@@ -838,6 +838,31 @@ struct CState: public State, public interface::Server
 
 		ss_ hashfile_path = build_dst+".hash";
 
+		// [PROCESS_SANDBOX]: a boxed server builds into its app's own
+		// cache, and the shared build -- what an unboxed run or the
+		// archive made -- is read, never written: a module whose hash
+		// matches there is loaded from it as it is
+		const ss_ prebuilt_dir = g_server_config.get<ss_>("rccpp_prebuilt_path");
+		if(!skip_compile && !prebuilt_dir.empty() &&
+				!std::ifstream(build_dst).good()){
+			// The same file name in the other directory
+			const ss_ prebuilt = prebuilt_dir+build_dst.substr(
+					g_server_config.get<ss_>("rccpp_build_path").size());
+			std::ifstream f(prebuilt+".hash");
+			ss_ previous_hash;
+			if(f.good())
+				previous_hash = ss_((std::istreambuf_iterator<char>(f)),
+						std::istreambuf_iterator<char>());
+			if(std::ifstream(prebuilt).good() &&
+					previous_hash == interface::sha1::hex(content_hash)){
+				log_v(MODULE, "%s: the shared build's is current; loading it",
+						cs(info.name));
+				build_dst = prebuilt;
+				hashfile_path = prebuilt+".hash";
+				skip_compile = true;
+			}
+		}
+
 		if(!skip_compile){
 			if(!std::ifstream(build_dst).good()){
 				// Result file does not exist at all, no need to check hashes

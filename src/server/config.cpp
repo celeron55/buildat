@@ -12,6 +12,9 @@ Config::Config()
 {
 	// Paths are filled in by autodetection
 	set_default("rccpp_build_path", "");
+	// The shared build a boxed server only reads ([PROCESS_SANDBOX]); set
+	// by server::confine()
+	set_default("rccpp_prebuilt_path", "");
 	set_default("interface_path", "");
 	set_default("share_path", "");
 	set_default("cache_path", "");

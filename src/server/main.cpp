@@ -9,6 +9,7 @@
 #include "boot/autodetect.h"
 #include "server/config.h"
 #include "server/state.h"
+#include "server/confine.h"
 #include "interface/server.h"
 #include "interface/debug.h"
 #include "interface/os.h"
@@ -82,8 +83,22 @@ int main(int argc, char *argv[])
 	std::string module_path;
 	bool port_given = false;
 
+	// [PROCESS_SANDBOX]: --unconfined, taken out before getopt, which
+	// knows no long options; BUILDAT_UNCONFINED=1 says the same
+	bool unconfined = getenv("BUILDAT_UNCONFINED") &&
+			ss_(getenv("BUILDAT_UNCONFINED")) == "1";
+	for(int i = 1; i < argc; i++){
+		if(ss_(argv[i]) != "--unconfined")
+			continue;
+		unconfined = true;
+		for(int j = i; j < argc - 1; j++)
+			argv[j] = argv[j + 1];
+		argc--;
+		i--;
+	}
+
 	const char opts[100] = "hm:r:i:S:D:U:c:l:L:C:A:P:W:T:wRu:x:";
-	const char usagefmt[1600] =
+	const char usagefmt[] =
 			"Usage: %s [OPTION]...\n"
 			"  -h                   Show this help\n"
 			"  -m [module_path]     Specify module path\n"
@@ -112,6 +127,9 @@ int main(int argc, char *argv[])
 			"  -u [key=value lines] What an untrusted launcher asked for\n"
 			"                       (the launch grid; a module reads it as it\n"
 			"                       would a packet)\n"
+			"  --unconfined         Run without the box (also\n"
+			"                       BUILDAT_UNCONFINED=1): the app reaches\n"
+			"                       all of your files\n"
 			;
 
 	int c;
@@ -251,6 +269,31 @@ int main(int argc, char *argv[])
 					port);
 			config.set("network_port", itos(port));
 		}
+	}
+
+	// [PROCESS_SANDBOX]: the box, before anything of the app is loaded.
+	// Where it cannot be made the server refuses to start (decided
+	// 2026-10-02), and says how to start it anyway.
+	if(unconfined){
+		log_w(MODULE, "Unconfined (--unconfined or BUILDAT_UNCONFINED=1): "
+				"the app can reach every file you can");
+	} else {
+		const ss_ why = server::confine(config, module_path);
+#ifdef __linux__
+		if(!why.empty()){
+			log_e(MODULE, "The server's box could not be made: %s. Starting "
+					"an app unboxed lets it reach every file you can; to do "
+					"that anyway, give --unconfined or set "
+					"BUILDAT_UNCONFINED=1.", cs(why));
+			return 1;
+		}
+#else
+		// simplified: the Windows box (an AppContainer) is not built yet,
+		// so a platform without one runs unboxed and says so rather than
+		// refusing ([PROCESS_SANDBOX]'s order: Linux first)
+		if(!why.empty())
+			log_w(MODULE, "Not boxed: %s", cs(why));
+#endif
 	}
 
 	int exit_status = 0;
