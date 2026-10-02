@@ -323,10 +323,11 @@ int main(int argc, char *argv[])
 				"the app can reach every file you can");
 	} else {
 		// Windows: the unboxed process is the box's parent, and is done
-		// when its child is
+		// when its child is -- whatever the child's code, never running
+		// the app itself
 		int child_exit = -1;
 		const ss_ why = server::confine(config, module_path, &child_exit);
-		if(child_exit >= 0)
+		if(child_exit != -1)
 			return child_exit;
 		if(!why.empty()){
 			log_e(MODULE, "The server's box could not be made: %s. Starting "

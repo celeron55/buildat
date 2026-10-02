@@ -367,7 +367,13 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	DWORD code = 1;
 	GetExitCodeProcess(pi.hProcess, &code);
 	CloseHandle(pi.hProcess);
-	*exit_code = (int)code;
+	// **Never a negative code**: the caller takes one as "no child", and
+	// a child that died at its load (an NTSTATUS such as 0xC0000135 is
+	// negative as an int) had the parent go on and run the app itself,
+	// unboxed (2026-10-03, on the Windows box over SSH)
+	if(code != 0)
+		log_w(MODULE, "The boxed server exited with 0x%08lx", (unsigned long)code);
+	*exit_code = code == 0 ? 0 : (code < 256 ? (int)code : 1);
 	return "";
 }
 
