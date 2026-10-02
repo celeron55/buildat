@@ -38,7 +38,10 @@ JSON
 # host it has not seen, which is the behaviour worth keeping -- a
 # launcher that reached the network quietly would be the wrong kind of
 # quiet. The store is the client's own file.
-printf 'accepted,address,description,created,last_attempt,name\n"true","http://localhost","a check'"'"'s own server list","1790000000","1790000000",""\n' \
+# Now, since an answer lasts a week
+now=$(date +%s)
+printf 'accepted,address,description,created,last_attempt,name\n"true","http://localhost","a check'"'"'s own server list","%s","%s",""\n' \
+	"$now" "$now" \
 	> "$out/user/network_addresses.csv"
 # **And a client that has not said yes fetches nothing at boot**: a
 # launcher that put a permission dialog in front of a first-time user
@@ -67,7 +70,7 @@ BUILDAT_SERVERLIST_URL=http://localhost:$port \
 	timeout 120 bin/buildat -m launch_world -D "$out/user" -w 640x360 -l 3 \
 	-L "$out/first.log" -c @"$out/cmds.txt" > /dev/null 2>&1
 # Rows, not newlines: the file's last row has none
-cached=$(grep -ac "|" "$out/user/serverlist.csv" 2>/dev/null || echo 0)
+cached=$(grep -ac "|" "$out/user/serverlist/serverlist.csv" 2>/dev/null || echo 0)
 echo "the first run cached $cached servers"
 if [ "${cached:-0}" -lt 1 ]; then
 	kill "$mirror" 2>/dev/null
@@ -86,7 +89,7 @@ line=$(grep -a "launch_w.*: servers: .* off a fetched list" "$out/second.log" |
 	head -1 | sed 's/.*servers: //')
 echo "the room says: ${line:-(nothing)}"
 fetched=$(echo "$line" | sed -n 's/.*, \([0-9]*\) off a fetched list.*/\1/p')
-examples=$(echo "$line" | sed -n 's/.*floor, \([0-9]*\) of them saying.*/\1/p')
+examples=$(echo "$line" | sed -n 's/.*floor, \([0-9]*\) of them .*/\1/p')
 named=$(grep -ac "launch_w.*: mark: the first server" "$out/second.log")
 ranked=$(grep -ac "launch_w.*: orb sizes: .*ranked within .*server" "$out/second.log")
 if [ "${fetched:-0}" -lt 2 ] || [ "$named" -lt 1 ]; then

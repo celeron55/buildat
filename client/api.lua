@@ -978,6 +978,26 @@ end
 -- a harness sets on the client's process, such as the rendering mode. See
 -- l_get_env() in src/client/app.cpp.
 buildat.safe.get_env                  = __buildat_get_env
+-- The cereal extension's two bindings ([EXTENSIONS_SANDBOXED]): a byte
+-- string and a type list in, values out, or the reverse
+buildat.safe.cereal_binary_input = function(data, types)
+	if type(data) ~= 'string' then
+		error("data not string")
+	end
+	if type(types) ~= 'table' then
+		error("types not table")
+	end
+	return __buildat_cereal_binary_input(data, types)
+end
+buildat.safe.cereal_binary_output = function(values, types)
+	if type(values) ~= 'table' then
+		error("values not table")
+	end
+	if type(types) ~= 'table' then
+		error("types not table")
+	end
+	return __buildat_cereal_binary_output(values, types)
+end
 -- connection_encrypted() -> whether the server connection is under TLS:
 -- a web client on an https page, or a native one joined by https://
 buildat.safe.connection_encrypted = function()

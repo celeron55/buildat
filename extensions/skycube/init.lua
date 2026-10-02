@@ -40,10 +40,13 @@ local FACES = {
 }
 
 local Cube = {}
-Cube.__index = Cube
 
 function M.safe.new(magic, material)
-	local self = setmetatable({}, Cube)
+	-- The methods copied in: the sandbox has no setmetatable
+	local self = {}
+	for k, v in pairs(Cube) do
+		self[k] = v
+	end
 	self.scene = magic.Scene()
 	self.scene:CreateComponent("Octree")
 	local node = self.scene:CreateChild("Sky")

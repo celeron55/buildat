@@ -25,7 +25,8 @@ local network = require("buildat/extension/network")
 -- than from a constant here. BUILDAT_SERVERLIST_URL overrides it, which
 -- is what the check serves its own list on.
 local DEFAULT_URL = "https://servers.luanti.org"
-local CACHE = __buildat_get_path("user") .. "/serverlist.csv"
+-- In the extension's own storage (user/serverlist/)
+local CACHE = "serverlist.csv"
 -- simplified: twelve, which is what a launcher's floor or grid has room
 -- for; the list has hundreds and a launcher that drew them all would be
 -- the list it is replacing. Ordered by players, so the twelve are the
@@ -49,18 +50,17 @@ end
 -- delete, as the room's own save is.
 local function read_cache()
 	local rows = {}
-	local f = io.open(CACHE, "rb")
-	if not f then
+	local data = buildat.storage_read(CACHE)
+	if not data then
 		return rows
 	end
-	for line in f:read("*a"):gmatch("[^\r\n]+") do
+	for line in data:gmatch("[^\r\n]+") do
 		local address, name, players = line:match("^(.-)|(.-)|(%d+)$")
 		if address and address ~= "" and #rows < MAX then
 			rows[#rows + 1] = {address = address, name = name,
 				players = tonumber(players)}
 		end
 	end
-	f:close()
 	return rows
 end
 
@@ -71,13 +71,11 @@ local function write_cache(rows)
 		out[#out + 1] = string.format("%s|%s|%d", r.address,
 				tostring(r.name):gsub("[|\r\n]", " "), r.players or 0)
 	end
-	local f = io.open(CACHE, "wb")
-	if not f then
-		log:warning("cannot write " .. CACHE)
+	local ok, err = buildat.storage_write(CACHE, table.concat(out, "\n"))
+	if not ok then
+		log:warning("cannot write " .. CACHE .. ": " .. tostring(err))
 		return
 	end
-	f:write(table.concat(out, "\n"))
-	f:close()
 	log:info(#rows .. " servers cached in " .. CACHE)
 end
 

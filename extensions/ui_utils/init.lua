@@ -1,7 +1,15 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("ui_utils")
-local magic = require("buildat/extension/urho3d").safe
+local magic = require("buildat/extension/urho3d")
+-- The engine's constants come from magic in the sandbox
+local FM_NOTFOCUSABLE, HA_CENTER, HA_LEFT, HA_RIGHT, KEY_DOWN,
+		KEY_ESCAPE, KEY_KP_ENTER, KEY_LEFT, KEY_RETURN, KEY_RETURN2,
+		KEY_RIGHT, KEY_UP, LM_VERTICAL, VA_CENTER, VA_TOP =
+	magic.FM_NOTFOCUSABLE, magic.HA_CENTER, magic.HA_LEFT, magic.HA_RIGHT,
+	magic.KEY_DOWN, magic.KEY_ESCAPE, magic.KEY_KP_ENTER, magic.KEY_LEFT,
+	magic.KEY_RETURN, magic.KEY_RETURN2, magic.KEY_RIGHT, magic.KEY_UP,
+	magic.LM_VERTICAL, magic.VA_CENTER, magic.VA_TOP
 local dump = buildat.dump
 local uistack = require("buildat/extension/uistack")
 local M = {safe = {}}

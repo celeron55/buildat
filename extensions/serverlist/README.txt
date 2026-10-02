@@ -11,7 +11,7 @@ Launching one hands its address to luanti_client, which opens its
 connect dialog on it. Nothing in that extension changed to make this
 work: its on_untrusted_launch has taken an address all along.
 
-    <user>/serverlist.csv    address|name|players, one a line
+    <user>/serverlist/serverlist.csv    address|name|players, one a line
 
 Why a cache and not a fetch
 ---------------------------

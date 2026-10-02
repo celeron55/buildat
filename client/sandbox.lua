@@ -17,6 +17,7 @@ __buildat_sandbox_environment = {
 	next = next,
 	pairs = pairs,
 	pcall = pcall,
+	select = select,
 	tonumber = tonumber,
 	tostring = tostring,
 	type = type,

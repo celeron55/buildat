@@ -10,7 +10,9 @@
 -- server), sends one datagram and shows whatever comes back.
 local log = buildat.Logger("extension/network_test")
 local dump = buildat.dump
-local magic = require("buildat/extension/urho3d").safe
+local magic = require("buildat/extension/urho3d")
+local HA_LEFT, LM_VERTICAL, VA_BOTTOM =
+		magic.HA_LEFT, magic.LM_VERTICAL, magic.VA_BOTTOM
 local uistack = require("buildat/extension/uistack")
 local network = require("buildat/extension/network")
 local M = {safe = nil}

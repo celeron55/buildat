@@ -6,19 +6,58 @@ local log = buildat.Logger("__client/extensions")
 -- Extension interfaces, indexed by extension name
 local loaded_extensions = {}
 
+-- [EXTENSIONS_SANDBOXED]: **an extension in extensions/ runs in the
+-- sandbox**, as a server's client Lua and a launch UI do; only the
+-- client's own, in client/extensions, are trusted. What it returns is
+-- kept as it is, so trusted code reads its .safe as before, and the
+-- sandbox's require hands out a view of that.
+-- simplified: the ones below are still loaded trusted until they are
+-- converted; the list only shrinks.
+local NOT_YET_SANDBOXED = {luanti_client = true, sandbox_test = true}
+
+local function load_trusted(name, path)
+	local script, err = loadfile(path)
+	if script == nil then
+		log:error("Extension could not be opened: "..name.." at "..path..": "..err)
+		return nil
+	end
+	return script()
+end
+
+local function load_sandboxed(name, path)
+	local f = io.open(path, "rb")
+	if not f then
+		log:error("Extension could not be opened: "..name.." at "..path)
+		return nil
+	end
+	local code = f:read("*a")
+	f:close()
+	-- The chunk's name is what run_extension_file and storage_read take
+	-- the calling extension from
+	local ok, err, interface = __buildat_run_code_in_sandbox(code,
+			name.."/init.lua")
+	if not ok then
+		log:error("Extension "..name.." raised: "..tostring(err))
+		return nil
+	end
+	return interface
+end
+
 -- Called by this file and client/sandbox.lua
 function __buildat_require_extension(name)
 	log:debug("__buildat_require_extension(\""..name.."\")")
 	if loaded_extensions[name] then
 		return loaded_extensions[name]
 	end
-	local path = __buildat_extension_path(name).."/init.lua"
-	local script, err = loadfile(path)
-	if script == nil then
-		log:error("Extension could not be opened: "..name.." at "..path..": "..err)
-		return nil
+	local dir = __buildat_extension_path(name)
+	local own = __buildat_get_path("share").."/client/extensions/"
+	local path = dir.."/init.lua"
+	local interface
+	if dir:sub(1, #own) == own or NOT_YET_SANDBOXED[name] then
+		interface = load_trusted(name, path)
+	else
+		interface = load_sandboxed(name, path)
 	end
-	local interface = script()
 	if interface == nil then
 		log:error("Extension returned nil: "..name.." at "..path)
 		return nil
