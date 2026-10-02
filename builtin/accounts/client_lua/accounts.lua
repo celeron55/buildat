@@ -379,7 +379,10 @@ buildat.sub_packet("accounts:login_result", function(data)
 					send_login("", "", code, nil, keep, "", token)
 				end, "The name you have in this community is taken here by "..
 						"an account of this server. Pick another; it is kept "..
-						"for this community on the Starport.")
+						"for this community on the Starport. If that account "..
+						"is yours, cancel instead: log in with its password, "..
+						"and link your ID to it in Change password..., Link a "..
+						"Starport ID...; then your ID logs in as it.")
 				return
 			end
 		end
