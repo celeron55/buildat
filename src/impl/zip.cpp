@@ -105,7 +105,9 @@ static ss_ entry_data(const ss_ &d, const RawEntry &e)
 		return raw;
 	std::istringstream is(raw, std::ios::binary);
 	std::ostringstream os(std::ios::binary);
-	decompress_deflate_raw(is, os);
+	// No more than the entry says it is: a few kilobytes of deflate made
+	// gigabytes before the size below was compared ([SECURITY_RUN_1])
+	decompress_deflate_raw(is, os, e.entry.size);
 	ss_ out = os.str();
 	if(out.size() != e.entry.size)
 		throw Exception("zip: "+e.entry.name+" inflated to "+
@@ -123,12 +125,18 @@ static bool name_is_safe(const ss_ &name)
 		return false;
 	if(name.find('\0') != ss_::npos || name.find('\\') != ss_::npos)
 		return false;
+	// Windows: a colon names a stream of a file (or a drive), and a
+	// trailing dot or space is dropped from a segment, so ".. /" is ".."
+	if(name.find(':') != ss_::npos)
+		return false;
 	size_t i = 0;
 	while(i <= name.size()){
 		size_t j = name.find('/', i);
 		if(j == ss_::npos)
 			j = name.size();
-		if(name.substr(i, j - i) == "..")
+		const ss_ seg = name.substr(i, j - i);
+		if(seg == ".." || (!seg.empty() &&
+				(seg.back() == '.' || seg.back() == ' ')))
 			return false;
 		i = j + 1;
 	}
@@ -159,10 +167,19 @@ size_t zip_extract(const ss_ &zip_path, const ss_ &into_dir)
 	const sv_<RawEntry> entries = read_directory(d);
 	// Every name checked before one byte is written, so a bad archive
 	// leaves nothing half done
+	// And what they come to, which a disk is filled with otherwise
+	// simplified: 2 GiB, past any game ContentDB has; a size per caller
+	// is the upgrade the day one needs more
+	static const uint64_t MAX_TOTAL = (uint64_t)2 * 1024 * 1024 * 1024;
+	uint64_t total = 0;
 	for(const RawEntry &e : entries){
 		if(!name_is_safe(e.entry.name))
 			throw Exception("zip: "+e.entry.name+" would leave "+into_dir);
+		total += e.entry.size;
 	}
+	if(total > MAX_TOTAL)
+		throw Exception("zip: "+itos((int64_t)total)+" bytes unpacked is "
+				"more than an archive here may be");
 	size_t files = 0;
 	for(const RawEntry &e : entries){
 		const ss_ path = into_dir+"/"+e.entry.name;
@@ -269,6 +286,34 @@ static void self_check(const ss_ &base)
 	}
 	if(refused == false || fs::path_exists(fs::strip_file_name(dir)+"/escape.txt"))
 		throw Exception("zip self_check: a name with .. must be refused");
+	// What Windows makes ".." of, and a stream of a file
+	for(const char *bad : {".. /escape.txt", "a/... /x", "a:b.txt"}){
+		if(name_is_safe(bad))
+			throw Exception(ss_()+"zip self_check: \""+bad+"\" must be "
+					"refused");
+	}
+	// An entry that says it is ten bytes and inflates to a hundred
+	// kilobytes stops at ten
+	{
+		ss_ d = make_zip({{"bomb.txt", ss_(100000, 'z')}}, true);
+		auto put_u32 = [&](size_t at, uint32_t v){
+			for(int k = 0; k < 4; k++)
+				d[at + k] = (char)((v >> (8 * k)) & 0xff);
+		};
+		put_u32(22, 10); // the local header's uncompressed size
+		put_u32(d.find("PK\x01\x02") + 24, 10); // the directory's
+		std::ofstream f(zip, std::ios::binary | std::ios::trunc);
+		f.write(d.data(), d.size());
+	}
+	refused = false;
+	try {
+		zip_extract(zip, dir);
+	} catch(Exception &e){
+		refused = true;
+	}
+	if(!refused)
+		throw Exception("zip self_check: an entry past its own size must be "
+				"refused");
 	fs::remove_all(dir);
 	fs::remove_all(zip);
 }
