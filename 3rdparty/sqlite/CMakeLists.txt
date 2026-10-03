@@ -28,6 +28,8 @@ target_compile_definitions(sqlite PRIVATE
 	SQLITE_OMIT_DEPRECATED
 	SQLITE_OMIT_PROGRESS_CALLBACK
 	SQLITE_OMIT_SHARED_CACHE
+	# Full-text search for an app that wants it ([HEARTH_MVP])
+	SQLITE_ENABLE_FTS5
 	# No sqlite3_load_extension(): a save file must not be able to bring code
 	# with it
 	SQLITE_OMIT_LOAD_EXTENSION

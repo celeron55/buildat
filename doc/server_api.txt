@@ -373,21 +373,22 @@ builtin/client_file/api.h: FilesTransmitted, Interface, add_file_content, add_fi
 builtin/ground_plane_lighting/api.h: SceneReference, Instance, set_yst, get_yst, Interface, create_instance, delete_instance, get_instance, access
 builtin/loader/api.h: Interface, activate, get_module_info, access
 builtin/luanti/api.h: SceneReference, GameLoaded, RegionMap, ~RegionMap, get, set, to_world, Interface, set_region_map, set_progress_handler, run_game, import_world_settings, load_lua, import_world, add_player, set_admin, chat_send, remove_player, set_player_pos, player_fell, dig_node, punch_node, place_node, drop_wielded, punch_object, set_wield_index, chat_message, get_scene, call_string_list, set_server_physics, access
-builtin/luanti_mapgen/api.h: Params, NodeProps, Biome, NoiseParams, Ore, Schematic, Decoration, LTree, GennotifyEvent, SectionMaps, BiomeQuery, ~BiomeQuery, biome_at, Interface, create_generator, list_mapgens, spawn_level, biome_query, take_gennotify, take_maps, access
+builtin/luanti_mapgen/api.h: chunk_index, chunk_blockseed, Params, NodeProps, Biome, NoiseParams, Ore, Schematic, Decoration, LTree, GennotifyEvent, SectionMaps, BiomeQuery, ~BiomeQuery, biome_at, Interface, create_generator, list_mapgens, spawn_level, biome_query, take_gennotify, take_maps, access
 builtin/main_context/api.h: SceneReference, SceneDeleted, Interface, get_context, find_scene, check_scene, create_scene, delete_scene, sub_magic_event, access
-builtin/network/api.h: PeerId, PeerInfo, Id, Packet, Type, NewClient, OldClient, HttpRequest, Interface, send, list_peers, pending_bytes, set_send_policy, declare, disconnect, http_respond, access
+builtin/network/api.h: PeerId, PeerInfo, Id, Packet, Type, NewClient, OldClient, HttpRequest, Interface, send, list_peers, pending_bytes, set_send_policy, declare, disconnect, http_respond, listen_on, claim_http_path, access
 builtin/replicate/api.h: SceneReference, PeerId, PeerJoinedScene, PeerLeftScene, Interface, assign_scene_to_peer, find_peers_on_scene, find_peers_that_know_node, set_node_filter, refresh_peer_nodes, emit_after_next_sync, sync_node_immediate, access
 builtin/starport_announce/api.h: IdLogin, Interface, accepts_ids, ids_mode, set_ids_mode, is_blocked, announce_soon, verify_id_token, access
 builtin/storage/api.h: Store, ~Store, get, set, remove, list, batch, Save, ~Save, store, path, SaveInfo, Interface, open, create, close, valid_name, access
 builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, SectionUnloaded, NodeVolumeUpdated, LoadPoint, CommitHook, ~CommitHook, in_thread, in_scene, Instance, get_voxel_reg, set_save, save, get_unknown_voxels, add_commit_hook, get_section_size_voxels, get_section_region_voxels, get_chunk_size_voxels, get_chunk_region_voxels, load_or_generate_section, load_section_no_generate, set_load_points, get_loaded_sections, set_stream_budget, unload_section, is_section_loaded, is_section_generated, set_section_generated, set_voxel, get_volume, set_volume, merge_volume, set_light_maintained, set_skylight_enabled, relight_region, relight_region_later, relight_stale, set_light_deferred, num_buffers_loaded, commit, get_voxel, set_sample, get_sample, Interface, create_instance, delete_instance, get_instance, access
 builtin/worldgen/api.h: SceneReference, QueueModifiedEvent, SectionGenerated, GeneratorInterface, ~GeneratorInterface, get_padding_voxels, generate, Instance, set_generator, enable, get_num_sections_queued, Interface, create_instance, delete_instance, get_instance, access
+interface/aitta.h: keygen, public_of, sign, verify, verify_hash, check_manifest, pack, install
 interface/atlas.h: AtlasSegmentReference, AtlasSegmentDefinition, AtlasSegmentCache, AtlasDefinition, AtlasCache, AtlasRegistry, ~AtlasRegistry, add_segment, find_or_add_segment, get_atlas_definition, get_segment_definition, get_atlas_cache, get_texture, set_surface_maps, describe_segments, update, createAtlasRegistry
 interface/atlas_cereal.h: serialize
 interface/bignum.h: add, mul, mod, sub_mod, mul_mod, mod_exp, random_bytes
 interface/block.h: BlockName, BlockTypeId, BlockDefinition, BlockSourceDefinition, BlockRegistry, ~BlockRegistry, add_block_with_predefined_segments, add_block_generate_segments, get, createBlockRegistry
 interface/compress.h: compress_zlib, decompress_zlib, compress_deflate_raw, decompress_deflate_raw, compress_zstd, decompress_zstd
-interface/debug.h: log_current_backtrace, log_exception_backtrace, StoredBacktrace, get_current_backtrace, get_exception_backtrace, log_backtrace, ThreadBacktrace, log_backtrace_chain, watchdog_alive, SigConfig, init_signal_handlers
-interface/event.h: EVENT_DISPATCH_VOID, EVENT_DISPATCH_TYPE, EVENT_VOID, EVENT_TYPE, EVENT_VOIDN, EVENT_TYPEN, Event, Type, Private, ~Private, t, EventRegistry, type, name, getGlobalEventRegistry
+interface/debug.h: log_current_backtrace, log_exception_backtrace, StoredBacktrace, get_current_backtrace, get_exception_backtrace, log_backtrace, ThreadBacktrace, log_backtrace_chain, watchdog_alive, watchdog_on_freeze, SigConfig, init_signal_handlers
+interface/event.h: EVENT_DISPATCH_VOID, EVENT_DISPATCH_TYPE, EVENT_VOID, EVENT_TYPE, EVENT_VOIDN, EVENT_TYPEN, Event, Type, Private, ~Private, t, EventRegistry, type, find, name, getGlobalEventRegistry
 interface/file_watch.h: FileWatch, ~FileWatch, add, get_fds, report_fd, update, createFileWatch
 interface/fs.h: Node, list_directory, create_directories, get_cwd, get_absolute_path, is_inside_path, path_exists, copy_file, remove_all, rename, migrate_user_apps, file_size, directory_tree_size, check_file_extension, strip_file_extension, strip_file_name
 interface/http.h: http_get, http_post, send_mail, mail_supported, http_download
@@ -410,7 +411,7 @@ interface/server.h: ServerConfig, TickEvent, ModuleModifiedEvent, ModuleLoadedEv
 interface/server_config.h: ServerConfig
 interface/sha1.h: calculate, hex
 interface/sha256.h: calculate, hex, hmac
-interface/tcpsocket.h: TCPSocket, ~TCPSocket, fd, good, release_fd, close_fd, listen_fd, connect_fd, bind_fd, accept_fd, send_fd, set_nonblocking, send_some, wait_data, get_local_address, get_remote_address, createTCPSocket, probe_connect
+interface/tcpsocket.h: TCPSocket, ~TCPSocket, fd, good, release_fd, close_fd, listen_fd, connect_fd, bind_fd, accept_fd, send_fd, set_nonblocking, send_some, wait_data, get_local_address, get_remote_address, createTCPSocket, probe_connect, local_lan_address
 interface/thread.h: ThreadedThing, ~ThreadedThing, run, on_crash, Thread, ~Thread, set_name, start, is_running, request_stop, stop_requested, join, get_name, ref_backtraces, set_caller_thread, get_caller_thread, get_current_thread, createThread, ThreadLocalKey, set, get
 interface/thread_pool.h: Task, ~Task, pre, thread, post, ThreadPool, ~ThreadPool, add_task, start, request_stop, join, run_post, createThreadPool
 interface/urho3d_cereal.h: save, load

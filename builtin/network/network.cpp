@@ -410,6 +410,21 @@ static ss_ base64(const ss_ &data)
 	return r;
 }
 
+// The web client's files: a closed list of names, and nothing else is
+// looked at. The file's name and its type, or null.
+static const std::pair<ss_, ss_>* web_file(const ss_ &target)
+{
+	static const sm_<ss_, std::pair<ss_, ss_>> files = {
+		{"/", {"index.html", "text/html; charset=utf-8"}},
+		{"/index.html", {"index.html", "text/html; charset=utf-8"}},
+		{"/buildat.js", {"buildat.js", "application/javascript"}},
+		{"/buildat.wasm", {"buildat.wasm", "application/wasm"}},
+		{"/buildat.data", {"buildat.data", "application/octet-stream"}},
+	};
+	auto it = files.find(target);
+	return it == files.end() ? nullptr : &it->second;
+}
+
 static ss_ lower(ss_ s)
 {
 	for(char &c : s)
@@ -486,6 +501,7 @@ struct Module: public interface::Module, public network::Interface
 		ss_ deflated;
 	};
 	sm_<ss_, WebFile> m_web_files;
+	std::set<ss_> m_claimed_paths;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -901,7 +917,7 @@ struct Module: public interface::Module, public network::Interface
 
 		// **An app's API** ([STARPORT]): handed to the modules, whose
 		// answer is http_respond()'s
-		if(target.compare(0, 5, "/api/") == 0){
+		if(target.compare(0, 5, "/api/") == 0 || claimed(target)){
 			peer.api_waiting = true;
 			const ss_ address = forwarded_for(peer, headers["x-forwarded-for"]);
 			m_server->emit_event("network:http_request", new HttpRequest(
@@ -955,30 +971,22 @@ struct Module: public interface::Module, public network::Interface
 			return deframe(peer);
 		}
 
-		// A closed list of names, and nothing else is looked at
-		static const sm_<ss_, std::pair<ss_, ss_>> files = {
-			{"/", {"index.html", "text/html; charset=utf-8"}},
-			{"/index.html", {"index.html", "text/html; charset=utf-8"}},
-			{"/buildat.js", {"buildat.js", "application/javascript"}},
-			{"/buildat.wasm", {"buildat.wasm", "application/wasm"}},
-			{"/buildat.data", {"buildat.data", "application/octet-stream"}},
-		};
 		peer.closing = true;
-		auto it = files.find(target);
-		if(it == files.end()){
+		const std::pair<ss_, ss_> *wf_name = web::web_file(target);
+		if(!wf_name){
 			ss_ body = "Not found\n";
 			peer.queue_raw(web::response("404 Not Found",
 					"text/plain; charset=utf-8", body.size()) + body);
 			return true;
 		}
-		const ss_ path = web_client_path()+"/"+it->second.first;
+		const ss_ path = web_client_path()+"/"+wf_name->first;
 		// **A reload does not download the client again** (user,
 		// 2026-10-01: a phone reloads the page each time it comes back): the
 		// browser asks with the ETag it has, and the same file is a 304
 		struct stat st;
 		const ss_ etag = stat(path.c_str(), &st) == 0 ? "\""+
 				itos((int64_t)st.st_mtime)+"-"+itos((int64_t)st.st_size)+"\"" : "";
-		WebFile &wf = m_web_files[it->second.first];
+		WebFile &wf = m_web_files[wf_name->first];
 		if(etag.empty() || wf.etag != etag){
 			wf = WebFile();
 			std::ifstream f(path, std::ios::binary);
@@ -989,7 +997,7 @@ struct Module: public interface::Module, public network::Interface
 			}
 			if(!f.good() || wf.body.empty()){
 				log_w(MODULE, "Web client file not found: %s", cs(path));
-				ss_ body = "The web client is not here: "+it->second.first+
+				ss_ body = "The web client is not here: "+wf_name->first+
 						" is not in the server's web_client_path.\n";
 				peer.queue_raw(web::response("404 Not Found",
 						"text/plain; charset=utf-8", body.size()) + body);
@@ -1022,7 +1030,7 @@ struct Module: public interface::Module, public network::Interface
 		// simplified: the whole file is kept in memory, and copied per
 		// download; tens of megabytes. Reading it as the queue drains is the
 		// upgrade.
-		peer.queue_raw(web::response("200 OK", it->second.second,
+		peer.queue_raw(web::response("200 OK", wf_name->second,
 				body.size(), cache+(deflate ? "Content-Encoding: deflate\r\n" :
 				"")+"Vary: Accept-Encoding\r\n"));
 		peer.queue_raw(ss_(body));
@@ -1553,6 +1561,23 @@ struct Module: public interface::Module, public network::Interface
 				s->fd());
 		m_extra_listeners.push_back(s);
 		return true;
+	}
+
+	void claim_http_path(const ss_ &prefix)
+	{
+		m_claimed_paths.insert(prefix);
+	}
+
+	bool claimed(const ss_ &target)
+	{
+		if(target == "/")
+			return m_claimed_paths.count("/") > 0;
+		if(web::web_file(target))
+			return false;
+		for(const ss_ &p : m_claimed_paths)
+			if(p != "/" && target.compare(0, p.size(), p) == 0)
+				return true;
+		return false;
 	}
 
 	void http_respond(PeerInfo::Id id, int status, const ss_ &content_type,

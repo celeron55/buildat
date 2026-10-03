@@ -56,7 +56,7 @@ namespace network
 	{
 		PeerInfo::Id peer = 0;
 		ss_ method;       // "GET" or "POST"
-		ss_ path;         // "/api/...", without the query
+		ss_ path;         // "/api/..." or a claimed path, without the query
 		ss_ query;        // what follows "?", as it came
 		ss_ body;         // a POST's, at most 64 KiB
 		ss_ address;
@@ -132,6 +132,11 @@ namespace network
 		// game, on 127.0.0.1, opened to the LAN at the machine's LAN
 		// address. false with why if it cannot.
 		virtual bool listen_on(const ss_ &address, ss_ *error) = 0;
+		// Paths besides /api/ that come as network:http_request: every
+		// target starting with `prefix` -- but "/" is the root page only,
+		// and the web client's own files are never an app's. An app that
+		// serves pages to read ([HEARTH_MVP]) claims its own at its start.
+		virtual void claim_http_path(const ss_ &prefix) = 0;
 	};
 
 	inline bool access(interface::Server *server,

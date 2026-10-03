@@ -1371,7 +1371,6 @@ magic.BT_STATIC:
 magic.BiasParameters: 
 magic.Billboard: color, enabled, position, rotation, size, uv
 magic.BillboardSet: Commit, GetBillboard, b, faceCameraMode, material, numBillboards, relative, sorted
-magic.Bone: animated, name, node, parentIndex
 magic.BorderImage: blendMode, border, hoverOffset, imageBorder, imageRect, texture, tiled
 magic.BoundingBox: max, min
 magic.BufferedSoundStream: AddData, Clear, bufferLength, bufferNumBytes, new
@@ -1824,7 +1823,7 @@ magic.REMOVE_NODE:
 magic.REPLICATED: 
 magic.Ray: Define, Distance, HitDistanceBox, HitDistanceSphere, Project, direction, origin
 magic.Rect: max, min
-magic.RenderPath: Append, Clone, GetCommand, GetNumCommands, Load, SetEnabled, SetShaderParameter, ToggleEnabled
+magic.RenderPath: Append, Clone, GetCommand, GetNumCommands, Load, SetEnabled, SetShaderParameter, ToggleEnabled, c, ok
 magic.RenderPathCommand: RemoveShaderParameter, SetShaderParameter, enabled, pass, type
 magic.RenderSurface: QueueUpdate, SetViewport, updateMode
 magic.Renderer: DrawDebugGeometry, GetViewport, HDRRendering, SetViewport, drawShadows, maxOccluderTriangles, numViewports, occluderSizeThreshold, ret, shadowMapSize, shadowQuality
@@ -2152,7 +2151,7 @@ magic.TextureCube: GetRenderSurface, SetData, SetSize, new
 magic.Time: GetElapsedTime, frameNumber, timeStep
 magic.ToolTip: delay
 magic.UI: GetScale, SetClipboardText, SetFocusElement, SetScale, SetUseSystemClipboard, element, focusElement, root, scale
-magic.UIElement: CreateChild, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyleAuto, SetText, SetVisible, border, child, class, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, spacing, tn, verticalAlignment, visible, width
+magic.UIElement: CreateChild, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyleAuto, SetText, SetVisible, border, c, child, class, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, i, m, maxHeight, maxWidth, minHeight, minSize, minWidth, name, opacity, position, priority, raw, screenPosition, selected, size, spacing, tn, verticalAlignment, visible, width
 magic.UnsubscribeFromEvent: 
 magic.VAR_BOOL: 
 magic.VAR_BUFFER: 
@@ -2185,7 +2184,7 @@ magic.VO_LOW_MATERIAL_QUALITY:
 magic.VO_NONE: 
 magic.VS: 
 magic.Variant: GetBool, GetBuffer, GetInt, GetString, IsEmpty
-magic.VariantMap: GetBool, GetBuffer, GetFloat, GetInt, GetPtr, GetString, SetBool, SetBuffer, SetFloat, SetInt, SetPtr, SetString, ptr, v
+magic.VariantMap: GetBool, GetBuffer, GetFloat, GetInt, GetPtr, GetString, SetBool, SetBuffer, SetFloat, SetInt, SetPtr, SetString, actual, obj, v
 magic.Vector2: Length, Normalized, x, y
 magic.Vector3: CrossProduct, Length, Normalized, from_buildat, x, y, z
 magic.Vector4: DotProduct, Length, w, x, y, z
