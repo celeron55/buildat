@@ -110,6 +110,12 @@ int main(int argc, char *argv[])
 			// The child a boxed parent started (Windows); see confine.h
 			config.set("boxed", true);
 			take = 1;
+		} else if(ss_(argv[i]) == "--compile-only"){
+			// [COMPILE_ONLY]: the modules compiled and loaded, then out
+			// before core:start opens the port; for runs whose clock a
+			// first start's compile would otherwise eat
+			config.set("compile_only", true);
+			take = 1;
 		} else if(ss_(argv[i]) == "--connect-ports" && i + 1 < argc){
 			config.set("connect_ports", ss_(argv[i + 1]));
 			take = 2;
@@ -159,6 +165,8 @@ int main(int argc, char *argv[])
 			"  --unconfined         Run without the box (also\n"
 			"                       BUILDAT_UNCONFINED=1): the app reaches\n"
 			"                       all of your files\n"
+			"  --compile-only       Compile and load the modules, then exit\n"
+			"                       (1 if one failed); nothing is opened\n"
 			;
 
 	int c;
@@ -357,6 +365,16 @@ int main(int argc, char *argv[])
 		server::boxed_step("main: loading the modules");
 
 		state->load_modules(module_path);
+		if(config.get<bool>("compile_only")){
+			// Nothing started, so nothing has anything to save: no
+			// core:shutdown. A module that failed shut the server down
+			// with its name logged
+			if(!state->is_shutdown_requested(&exit_status, &shutdown_reason))
+				log_i(MODULE, "--compile-only: every module compiled");
+			state->thread_request_stop();
+			state->thread_join();
+			return exit_status;
+		}
 		server::boxed_step("main: the modules loaded; the main loop");
 
 		// Main loop

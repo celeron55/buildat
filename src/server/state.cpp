@@ -1128,8 +1128,10 @@ struct CState: public State, public interface::Server
 		if(is_shutdown_requested())
 			return;
 
-		// Now that everyone is listening, we can fire the start event
-		emit_event(Event("core:start"));
+		// Now that everyone is listening, we can fire the start event;
+		// not for --compile-only, which leaves here ([COMPILE_ONLY])
+		if(!g_server_config.get<bool>("compile_only"))
+			emit_event(Event("core:start"));
 	}
 
 	// interface::Server version; doesn't directly unload

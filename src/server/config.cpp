@@ -63,6 +63,7 @@ Config::Config()
 	// photographs a world that restarted under it. On for development, off
 	// otherwise; see -R.
 	set_default("reload_modules", false);
+	set_default("compile_only", false);
 }
 
 bool Config::check_paths()

@@ -12,7 +12,8 @@
 # runs Build/asan's server (cmake -DSANITIZE=address there), whose
 # runtime-compiled modules are instrumented too. APP=floorplanner runs that
 # app instead, and the fuzzer logs in, opens a plan and sends batches and
-# plan files built from its schema (proto_fuzz.py).
+# plan files built from its schema (proto_fuzz.py). GAME=mineclone2 runs
+# vanilla's world on that game (VoxeLibre) instead of devtest.
 #
 #   util/fuzz/proto_fuzz.sh [seconds] [seed]
 set -u
@@ -21,12 +22,13 @@ out="$here/local/security/fuzz/proto"
 secs=${1:-120}
 seed=${2:-$RANDOM}
 app=${APP:-vanilla}
+game=${GAME:-devtest}
 mkdir -p "$out"
 user="$out/user"
 rm -rf "$user/apps"
 mkdir -p "$user/shared/vanilla/games"
-[ -d "$user/shared/vanilla/games/devtest" ] ||
-	cp -r "$here/user/shared/vanilla/games/devtest" "$user/shared/vanilla/games/"
+[ -d "$user/shared/vanilla/games/$game" ] ||
+	cp -r "$here/user/shared/vanilla/games/$game" "$user/shared/vanilla/games/"
 grep -rhoE '"network:packet_received/[a-z_]+:[a-z_0-9]+"' \
 	"$here/builtin" "$here/apps" --include=*.cpp |
 	sed 's/"network:packet_received\///; s/"//' | sort -u > "$out/names.txt"
@@ -51,7 +53,12 @@ launch=(-u launcher=1)
 # looked for from
 [ -n "${BUILD:-}" ] && launch+=(-U "$here/3rdparty/Urho3D" -S "$here"
 	-i "$here/src/interface" -C "$out/cache_$BUILD")
-BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=proto \
+# The modules compiled before the clock starts ([COMPILE_ONLY]): a
+# compile failure reads as one, not as a server that never came up
+bin/buildat_server --compile-only "${launch[@]}" -m "$here/apps/$app" \
+	-D "$user" > "$out/compile.log" 2>&1 ||
+	{ echo "a module failed to compile: $out/compile.log"; exit 2; }
+BUILDAT_LUANTI_GAME=$game BUILDAT_LUANTI_SAVE=proto_$game \
 	bin/buildat_server "${launch[@]}" -m "$here/apps/$app" -D "$user" \
 	-P "$port" > "$out/srv.log" 2>&1 &
 srv=$!
@@ -119,16 +126,27 @@ print(held)' "$lan" "$port" 2>/dev/null)
 	echo "40 connections from $lan: ${held:-?} held"
 	[ "${held:-0}" = 32 ] || bad="40 connections from one address: ${held:-?} held, not 32"
 fi
+# A peer's bytes reach the log as \xNN: past the logger's own colours, no
+# escape or carriage return of the fuzzer's is left for a terminal to run
+if [ -z "$bad" ] && ! python3 -c '
+import re, sys
+d = re.sub(rb"\x1b\[[0-9;]*m", b"", open(sys.argv[1], "rb").read())
+sys.exit(1 if b"\x1b" in d or b"\r" in d else 0)' "$out/srv.log"; then
+	bad="a control byte from a peer reached the log raw"
+fi
 # Still answering after it
 if [ -z "$bad" ] && ! timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/$port" 2>/dev/null; then
 	bad="the server stopped answering"
 fi
 # And it stops when asked: a deadlock shows here if nowhere else
 if [ -z "$bad" ]; then
+	# ASan's VoxeLibre generates a chunk a second, and a stop waits for
+	# what is queued: 30 s ran out where the ordinary build took 70 ms
+	stop=30; [ "${BUILD:-}" = asan ] && stop=120
 	kill $srv 2>/dev/null
-	for i in $(seq 1 30); do kill -0 $srv 2>/dev/null || break; sleep 1; done
+	for i in $(seq 1 $stop); do kill -0 $srv 2>/dev/null || break; sleep 1; done
 	if kill -0 $srv 2>/dev/null; then
-		bad="the server did not stop on SIGTERM"
+		bad="the server did not stop on SIGTERM in $stop s"
 		kill -9 $srv 2>/dev/null
 	fi
 fi

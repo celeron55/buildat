@@ -221,11 +221,40 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 			fprintf(stderr, "%s %c %s: ", timestr, levelcs[level], sysstr);
 		line_begin = false;
 	}
-	if(file){
+	// A peer's bytes reach the log in many a message (a name, a mode, a
+	// path), and a control byte in them is the reader's terminal's to
+	// act on: an escape sequence, a carriage return over the line. Each
+	// is written as \xNN; a tab and a line break stay ([SECURITY_RUN_1])
+	std::string text;
+	{
 		va_list copy;
 		va_copy(copy, va_args);
-		int n = vfprintf(file, fmt, copy);
+		char small[512];
+		int len = vsnprintf(small, sizeof small, fmt, copy);
 		va_end(copy);
+		if(len < 0)
+			len = 0;
+		if((size_t)len < sizeof small){
+			text.assign(small, len);
+		} else {
+			text.resize(len + 1);
+			va_copy(copy, va_args);
+			vsnprintf(&text[0], len + 1, fmt, copy);
+			va_end(copy);
+			text.resize(len);
+		}
+		for(size_t i = 0; i < text.size(); i++){
+			unsigned char c = text[i];
+			if((c >= 0x20 && c != 0x7f) || c == '\n' || c == '\t')
+				continue;
+			char hex[5];
+			snprintf(hex, sizeof hex, "\\x%02x", c);
+			text.replace(i, 1, hex);
+			i += 3;
+		}
+	}
+	if(file){
+		int n = fwrite(text.data(), 1, text.size(), file);
 		if(n > 0 && (log_written += n) >= LOG_CAP_BYTES && log_path_kept[0]){
 			// Rotated: the file so far to _1 (the one before it gone), and
 			// this one opened again empty
@@ -248,7 +277,7 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 		}
 	}
 	if(!file || tee)
-		vfprintf(stderr, fmt, va_args);
+		fwrite(text.data(), 1, text.size(), stderr);
 }
 
 // Does not require any locking
