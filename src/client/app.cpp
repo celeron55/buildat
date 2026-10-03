@@ -938,13 +938,14 @@ static void write_pidfile()
 	FILE *f = fopen(pidfile_path().c_str(), "w");
 	if(!f)
 		return;
-	fprintf(f, "%ld\n", (long)g_local_server.impl);
+	// The server, and the client that started it ([SERVER_ADOPTED])
+	fprintf(f, "%ld %ld\n", (long)g_local_server.impl, (long)getpid());
 	fclose(f);
 #endif
 }
 
 #ifndef _WIN32
-static bool exe_is_buildat_server(long pid)
+static bool exe_is(long pid, const char *name)
 {
 	char link[64];
 	snprintf(link, sizeof link, "/proc/%ld/exe", pid);
@@ -955,7 +956,7 @@ static bool exe_is_buildat_server(long pid)
 	buf[n] = 0;
 	const char *base = strrchr(buf, '/');
 	base = base ? base + 1 : buf;
-	return strcmp(base, "buildat_server") == 0;
+	return strcmp(base, name) == 0;
 }
 #endif
 
@@ -968,14 +969,20 @@ static void adopt_pidfile()
 	FILE *f = fopen(pidfile_path().c_str(), "r");
 	if(!f)
 		return;
-	long pid = 0;
-	if(fscanf(f, "%ld", &pid) != 1 || pid <= 0){
+	long pid = 0, client = 0;
+	if(fscanf(f, "%ld %ld", &pid, &client) < 1 || pid <= 0){
 		fclose(f);
 		clear_pidfile();
 		return;
 	}
 	fclose(f);
-	if(!exe_is_buildat_server(pid)){
+	// Another client's server, while that client runs, is that client's to
+	// stop: a scripted client quitting beside a person's launcher stopped
+	// the person's game ([SERVER_ADOPTED]). Only a server whose client is
+	// gone is taken, which is what a crash leaves.
+	if(client > 0 && client != (long)getpid() && exe_is(client, "buildat"))
+		return;
+	if(!exe_is(pid, "buildat_server")){
 		clear_pidfile();
 		return;
 	}

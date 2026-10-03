@@ -184,7 +184,8 @@ int main(int argc, char *argv[])
 			"  -s [address]         Specify server address: host[:port], or\n"
 			"                       https://host[:port] behind a TLS proxy\n"
 			"  -P [share_path]      Specify share/ path\n"
-			"  -C [cache_path]      Specify cache/ path\n"
+			"  -C [cache_path]      Specify cache/ path (with -c and no -C:\n"
+			"                       <cache>/scripted)\n"
 			"  -D [user_path]       Specify user/ path\n"
 			"  -U [urho3d_path]     Specify Urho3D path\n"
 			"  -l [level number]    Set maximum log level (0...5)\n"
@@ -208,6 +209,7 @@ int main(int argc, char *argv[])
 			;
 
 	int forced_w = 0, forced_h = 0;
+	bool cache_given = false;
 	ss_ preference_overrides;
 
 	int c;
@@ -231,6 +233,7 @@ int main(int argc, char *argv[])
 		case 'C':
 			log_i(MODULE, "config.cache_path: %s", c55_optarg);
 			config.set("cache_path", c55_optarg);
+			cache_given = true;
 			break;
 		case 'D':
 			log_i(MODULE, "config.user_path: %s", c55_optarg);
@@ -363,6 +366,13 @@ int main(int argc, char *argv[])
 
 	if(!boot::autodetect::detect_client_paths(config))
 		return 1;
+	// A scripted client keeps out of the cache a person's client uses: its
+	// log would push theirs out, and the pidfile there names their local
+	// server ([SERVER_ADOPTED])
+	if(config.get<bool>("command_seq_enabled") && !cache_given){
+		config.set("cache_path", config.get<ss_>("cache_path")+"/scripted");
+		interface::fs::create_directories(config.get<ss_>("cache_path"));
+	}
 	boot::autodetect::open_log(config, "buildat", argv[0]);
 
 	if(!config.check_paths()){
