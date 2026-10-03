@@ -1015,6 +1015,29 @@ local function keep_id(url, session, me)
 	save_state()
 end
 
+-- [ID_LINE]: the IDs logged in, for the launcher's trusted overlay
+-- (client/extensions/urho3d), as {url =, name =}; and logging one out
+-- from there, as the ID page's Log out does. On M and never in M.safe.
+function M.logged_in_ids()
+	local out = {}
+	for url, id in pairs(load_state().ids or {}) do
+		out[#out + 1] = {url = url, name = tostring(id.name)}
+	end
+	table.sort(out, function(a, b) return a.url < b.url end)
+	return out
+end
+
+function M.log_out(url)
+	local id = load_state().ids[url]
+	if not id then
+		return
+	end
+	id_call(url, "logout", {session = id.session}, function() end)
+	load_state().ids[url] = nil
+	save_state()
+	log:info("Logged out of the Starport ID at " .. url)
+end
+
 local function id_refresh(url, cb)
 	local id = load_state().ids[url]
 	if not id then

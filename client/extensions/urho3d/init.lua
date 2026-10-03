@@ -927,7 +927,66 @@ end
 -- (theirs stop at 999).
 local trust_sample = nil
 local trust_sample_shown = nil
-Safe.SubscribeToEvent("Update", function()
+-- [ID_LINE] (user, 2026-10-03): under the colour, "Starport ID: <name>"
+-- and a Log out button per ID logged in, in the same overlay -- no script
+-- can draw its look-alike over it, get it or press it (its elements are
+-- never wrapped, its Log out answers a raw event to a function here).
+-- Rebuilt when the IDs change, looked at twice a second.
+local id_rows = {}
+local id_signature = nil
+local id_timer = 0
+local id_logouts = 0
+local function starport_module()
+	local ok, sp = pcall(require, "buildat/extension/starport")
+	return ok and type(sp) == "table" and sp.logged_in_ids and sp or nil
+end
+local function rebuild_id_rows(ids, sp)
+	for _, r in ipairs(id_rows) do
+		r:Remove()
+	end
+	id_rows = {}
+	local several = #ids > 1
+	-- Each line its own element on the root, right-aligned under the one
+	-- before: a column of them stretched every line to the widest, and
+	-- the colour's line went across the screen
+	local y = trust_sample:GetPosition().y + trust_sample:GetHeight() + 6
+	for i, id in ipairs(ids) do
+		local r = ui.root:CreateChild("UIElement")
+		r:SetName("__trusted_hidden_id_" .. i)
+		r.defaultStyle = trust_sample.defaultStyle
+		r.priority = 1000
+		r:SetLayout(LM_HORIZONTAL, 8, IntRect(0, 0, 0, 0))
+		r:SetAlignment(HA_RIGHT, VA_TOP)
+		local t = r:CreateChild("Text")
+		t:SetStyleAuto()
+		local host = id.url:match("^%a+://([^/]+)") or id.url
+		t.text = "Starport ID: " .. id.name .. (several and (" (" .. host .. ")") or "")
+		t:SetVerticalAlignment(VA_CENTER)
+		-- A gap of its own, as the colour's line has
+		r:CreateChild("UIElement"):SetFixedSize(10, 4)
+		local b = r:CreateChild("Button")
+		b:SetStyleAuto()
+		local bt = b:CreateChild("Text")
+		bt:SetStyleAuto()
+		bt.text = "Log out"
+		bt:SetAlignment(HA_CENTER, VA_CENTER)
+		b:SetFixedSize(bt:GetWidth() + 16, math.max(20, bt:GetHeight() + 6))
+		id_logouts = id_logouts + 1
+		local fname = "__buildat_trust_logout_" .. id_logouts
+		local url = id.url
+		_G[fname] = function()
+			sp.log_out(url)
+			id_signature = nil -- rebuilt at the next look
+			id_timer = 1
+		end
+		urho_SubscribeToEvent(b, "Released", fname)
+		r:SetPosition(-8, y)
+		y = y + math.max(r:GetHeight(), b:GetHeight()) + 4
+		r.visible = trust_sample.visible
+		id_rows[#id_rows + 1] = r
+	end
+end
+Safe.SubscribeToEvent("Update", function(_, event_data)
 	if trust_sample == nil then
 		trust_sample = ui.root:CreateChild("UIElement")
 		trust_sample:SetName("__trusted_hidden_trust_color")
@@ -937,7 +996,8 @@ Safe.SubscribeToEvent("Update", function()
 		trust_sample:SetAlignment(HA_RIGHT, VA_TOP)
 		trust_sample:SetPosition(-8, 8)
 		trust_sample.priority = 1000
-		local label = trust_sample:CreateChild("Text")
+		local line = trust_sample
+		local label = line:CreateChild("Text")
 		label:SetStyleAuto()
 		label.text = "Starport trust color: "
 		local row = math.max(12, label.rowHeight)
@@ -945,8 +1005,8 @@ Safe.SubscribeToEvent("Update", function()
 		-- row's middle
 		local h = math.floor(row * 2 / 3 + 0.5)
 		-- A gap of its own: the layout's spacing left none here
-		trust_sample:CreateChild("UIElement"):SetFixedSize(8, h)
-		local swatch = trust_sample:CreateChild("BorderImage")
+		line:CreateChild("UIElement"):SetFixedSize(8, h)
+		local swatch = line:CreateChild("BorderImage")
 		swatch:SetFixedSize(2 * h, h)
 		swatch:SetVerticalAlignment(VA_CENTER)
 		swatch.color = Color(trust_rgb[1], trust_rgb[2], trust_rgb[3], 1)
@@ -963,6 +1023,27 @@ Safe.SubscribeToEvent("Update", function()
 				" (server address " .. tostring(address) .. ")")
 	end
 	trust_sample.visible = show
+	for _, r in ipairs(id_rows) do
+		r.visible = show
+	end
+	if show then
+		id_timer = id_timer + (event_data and event_data:GetFloat("TimeStep") or 0)
+		if id_timer >= 0.5 or id_signature == nil then
+			id_timer = 0
+			local sp = starport_module()
+			local ids = sp and sp.logged_in_ids() or {}
+			local sig = {}
+			for _, id in ipairs(ids) do
+				sig[#sig + 1] = id.url .. "|" .. id.name
+			end
+			sig = table.concat(sig, "\n")
+			if sig ~= id_signature then
+				id_signature = sig
+				rebuild_id_rows(ids, sp)
+				log:info("trusted overlay: " .. #ids .. " Starport ID line(s)")
+			end
+		end
+	end
 end)
 
 --
