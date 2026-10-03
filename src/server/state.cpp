@@ -79,6 +79,23 @@ struct ModuleContainer
 	// thread has handled or dropped: what emit_event_sync() waits on
 	uint64_t events_pushed = 0;
 	uint64_t events_done = 0;
+	// Packets a handler could not read: the first few are logged, then one
+	// every ten seconds with how many went unsaid (the module's thread
+	// only)
+	uint64_t packet_failures = 0;
+	uint64_t packet_failures_unlogged = 0;
+	int64_t packet_failure_logged_us = 0;
+	bool packet_failure_logged(){
+		packet_failures++;
+		const int64_t now = interface::os::time_us();
+		if(packet_failures <= 10 ||
+				now - packet_failure_logged_us >= 10000000){
+			packet_failure_logged_us = now;
+			return true;
+		}
+		packet_failures_unlogged++;
+		return false;
+	}
 	std::mutex events_done_mutex;
 	std::condition_variable events_done_cv;
 	// Protects direct_cb and event_queue
@@ -551,10 +568,24 @@ void ModuleThread::handle_event(Event &event)
 			if(!from_client){
 				mc->server->shutdown(1, "M["+mc->info.name+"]->event() "
 						"failed: "+e.what());
+			} else if(!mc->packet_failure_logged()){
+				// A peer sending what a handler cannot read is said a few
+				// times and then counted: each line came with a backtrace
+				// symbolised by a process of its own, 170 ms a packet, and
+				// a client's flood of small broken packets was minutes of
+				// the module's time and the log's disk ([SECURITY_RUN_1],
+				// util/fuzz/proto_fuzz.sh)
+				return;
 			}
 			log_w(MODULE, "M[%s]->event(\"%s\") failed%s: %s",
 					cs(mc->info.name), cs(name),
 					from_client ? " (the packet is dropped)" : "", e.what());
+			if(from_client && mc->packet_failures_unlogged > 0){
+				log_w(MODULE, "M[%s]: %llu more packets it could not read "
+						"were dropped without a line", cs(mc->info.name),
+						(unsigned long long)mc->packet_failures_unlogged);
+				mc->packet_failures_unlogged = 0;
+			}
 			if(!mc->thread->ref_backtraces().empty()){
 				interface::debug::log_backtrace_chain(
 						mc->thread->ref_backtraces(), e.what());
