@@ -340,7 +340,8 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path)
 		}
 		if(!fs::rename(incoming, dir))
 			throw Exception("cannot move it into "+dir);
-		write_file(dir+".sha256", sstr("sha256")+"\n");
+		// Inside, where the app's boxed server can read it to pin a save
+		write_file(dir+"/.aitta_sha256", sstr("sha256")+"\n");
 		return dir;
 	} catch(...){
 		fs::remove_all(incoming);

@@ -9,7 +9,9 @@
 #include "interface/fs.h"
 #include "interface/mutex.h"
 #include "interface/os.h"
+#include "core/json.h"
 #include <sqlite3.h>
+#include <fstream>
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -477,6 +479,43 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	// **The release a save was made with** ([AITTA_MVP]): an app
+	// installed from one is "<version> <sha256>" here, read from its own
+	// directory, and a tree app is "". A save keeps the release that made
+	// it, and another version of the app does not open it -- an update is
+	// a new version beside the old, and the save stays with the old.
+	ss_ this_release()
+	{
+		const ss_ dir = m_server->get_modules_path();
+		std::ifstream f(dir+"/.aitta_sha256");
+		ss_ hash;
+		if(!(f>>hash))
+			return "";
+		json::json_error_t e;
+		const json::Value m = json::load_file((dir+"/meta.json").c_str(), &e);
+		const json::Value &v = m.get("version");
+		return (v.is_string() ? v.as_string() : ss_("?"))+" "+hash;
+	}
+
+	// False where the save is another release's
+	bool pin(Save *save, const ss_ &name)
+	{
+		const ss_ release = this_release();
+		if(release.empty())
+			return true;
+		Store *s = save->store("_aitta");
+		ss_ was;
+		if(!s->get("release", was)){
+			s->set("release", release);
+			return true;
+		}
+		if(was == release)
+			return true;
+		log_w(MODULE, "The save \"%s\" was made with release %s of this app, "
+				"and this is %s: not opened", cs(name), cs(was), cs(release));
+		return false;
+	}
+
 	Save* open(const ss_ &name)
 	{
 		if(!valid_name(name)){
@@ -488,7 +527,12 @@ struct Module: public interface::Module, public Interface
 			log_v(MODULE, "open(): no save at [%s]", cs(path));
 			return nullptr;
 		}
-		return open_at(path);
+		Save *save = open_at(path);
+		if(!pin(save, name)){
+			close(save);
+			return nullptr;
+		}
+		return save;
 	}
 
 	Save* create(const ss_ &name)
@@ -503,7 +547,9 @@ struct Module: public interface::Module, public Interface
 			return nullptr;
 		}
 		interface::fs::create_directories(path);
-		return open_at(path);
+		Save *save = open_at(path);
+		pin(save, name);
+		return save;
 	}
 
 	Save* open_at(const ss_ &path)

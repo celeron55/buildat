@@ -39,5 +39,17 @@ The commands
         later version signed by another key is refused. A version already
         there is not replaced: an update is a new directory beside it.
 
-The key is ECDSA P-256 (Mbed TLS, in the tree). util/aitta_check.sh is
-the check.
+Running an installed app
+------------------------
+Every installed version is a tile on the launch grid, "<label> <version>",
+and starts a boxed server from its directory. To the client it is
+"<author>.<name>@<version>"; to its server, and to its save, shared and
+cache directories, "<author>.<name>": every version is one app.
+
+A save remembers the release that made it (version and sha256, from the
+.aitta_sha256 the install leaves in the version's directory), and another
+version of the app does not open it. Moving a save to a newer version is
+not built yet.
+
+The key is ECDSA P-256 (Mbed TLS, in the tree). util/aitta_check.sh and
+util/aitta_pin_check.sh are the checks.
