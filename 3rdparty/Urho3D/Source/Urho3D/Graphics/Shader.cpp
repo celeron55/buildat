@@ -193,6 +193,11 @@ bool Shader::ProcessSource(String& code, Deserializer& source)
                 if (graphics)
                     includeFile = cache->GetFile(graphics->GetShaderPath() + includeName, false);
             }
+            // buildat: and a game's own, by its resource name: its files
+            // are in the client's cache under names of their own, so the
+            // including file's directory is not theirs
+            if (!includeFile)
+                includeFile = cache->GetFile(includeName, false);
             if (!includeFile)
             {
                 URHO3D_LOGERROR("Could not find shader include " + includeName + " of " + source.GetName());

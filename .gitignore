@@ -1,4 +1,6 @@
 .*
+# but the workflows, which are the CI ([SQUASHED_BRANCH])
+!.github/
 !.gitignore
 *~
 
@@ -6,7 +8,12 @@ session.vim
 
 /build
 /Build
+# The web client build, and the web client it writes ([WEB_CLIENT])
+/Build-web
+/web
 /cache
+/user
 
 /tmp
 /local
+__pycache__/
