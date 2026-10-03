@@ -25,6 +25,10 @@
 #include <deque>
 #ifdef _WIN32
 	#include "ports/windows_sockets.h"
+	// Vista's, which older MinGW headers leave out
+	#ifndef PIPE_REJECT_REMOTE_CLIENTS
+		#define PIPE_REJECT_REMOTE_CLIENTS 0x00000008
+	#endif
 	#include "ports/windows_compat.h" // usleep()
 #else
 	#include <sys/socket.h>
@@ -131,8 +135,12 @@ static std::atomic<bool> g_pipe_started(false);
 static void pipe_listen(const ss_ &name)
 {
 	for(;;){
+		// This machine's client only: a named pipe is reachable over the
+		// network (\\host\pipe\...) unless it says otherwise, and its
+		// peer is taken as 127.0.0.1 ([SECURITY_RUN_1])
 		HANDLE p = CreateNamedPipeA(name.c_str(), PIPE_ACCESS_DUPLEX,
-				PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+				PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
+				PIPE_REJECT_REMOTE_CLIENTS,
 				PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, nullptr);
 		if(p == INVALID_HANDLE_VALUE){
 			log_w(MODULE, "The pipe %s could not be made (%i)", cs(name),
