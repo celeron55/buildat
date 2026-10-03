@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/test.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Checks serialize.lua and connection.lua against a fake socket. Wants no
 -- engine, so:
@@ -8,7 +9,7 @@
 --   $ lua extensions/luanti_client/test.lua
 --
 -- The parts that need the engine are checked elsewhere: srp.lua has
--- self_test() (run at boot, vectors from util/srp_reference.py), and the whole
+-- self_test() (run at boot, vectors from extensions/luanti_client/test/srp_reference.py), and the whole
 -- thing gets checked by logging into a Luanti server.
 
 local dir = arg[0]:match("^(.*)/[^/]*$") or "."
@@ -18,9 +19,19 @@ end
 
 -- The engine's own; connection.lua times how long it spends handing
 -- assembled payloads over
+-- And the sandbox's verbs these files use, over plain files
 buildat = {
 	get_time_us = function()
 		return math.floor(os.clock() * 1000000)
+	end,
+	run_extension_file = function(name)
+		return dofile(dir.."/"..name)
+	end,
+	get_env = function(name)
+		return os.getenv(name)
+	end,
+	get_locale = function()
+		return os.getenv("LANG") or ""
 	end,
 }
 
@@ -479,6 +490,9 @@ local function write_node(name, drawtype, tile_names, flags, animation, opts)
 	w:string("")       -- node_dig_prediction
 	w:u8(0)            -- leveled_max
 	w:u8(opts.alpha_mode or 2) -- ALPHAMODE_OPAQUE unless the test says
+	if opts.move_resistance then -- the >= 5.5 tail, when the test has one
+		w:u8(opts.move_resistance):u8(opts.liquid_move_physics and 1 or 0)
+	end
 	return w:data()
 end
 
@@ -523,7 +537,8 @@ local nodes = {
 			"water.png", "water.png", "water.png"}, 1, "vertical",
 			{walkable = false, liquid_type = 2, drowning = 1,
 			liquid_source = "test:water", palette = "water_palette.png",
-			post_effect_color = {a = 64, r = 100, g = 100, b = 200}})},
+			post_effect_color = {a = 64, r = 100, g = 100, b = 200},
+			move_resistance = 3, liquid_move_physics = true})},
 	-- A node the game asked to be blended rather than masked
 	{14, write_node("test:glass", 0, {"glass.png", "glass.png", "glass.png",
 			"glass.png", "glass.png", "glass.png"}, 0, nil,
@@ -564,6 +579,12 @@ assert(defs[7].alpha_mode == 2, "nodedef: alpha_mode is "..
 		tostring(defs[7].alpha_mode))
 assert(defs[14].alpha_mode == 0, "nodedef: blended alpha_mode is "..
 		tostring(defs[14] and defs[14].alpha_mode))
+-- The 5.5 tail read when there, and its defaults when not: a liquid without
+-- the tail swims, a stone does not
+assert(defs[7].move_resistance == 0 and defs[7].liquid_move_physics == false,
+		"nodedef: stone's defaults")
+assert(defs[11].move_resistance == 3 and defs[11].liquid_move_physics == true,
+		"nodedef: water's tail")
 assert(defs[7].groups.cracky == 3 and
 		defs[7].groups.oddly_breakable_by_hand == -1, "nodedef: groups")
 -- The flags on test:grass add a colour, a scale and an align style after the
@@ -650,11 +671,12 @@ assert(media.server_key("..", 1) == ".._1")
 -- cache does not have, which is what the client does with an announcement:
 -- working out which files a game reaches costs more than the bytes do
 do
-	local dir = os.getenv("TMPDIR") or "/tmp"
-	dir = dir.."/luanti_client_media_test"
-	__buildat_mkdir = function() end
+	-- The extension's cache, in memory
+	local files = {}
+	buildat.cache_read = function(name) return files[name] end
+	buildat.cache_write = function(name, data) files[name] = data return true end
 	buildat.sha1 = function(data) return "sha1:"..data end
-	local store = media.new(buildat, {warning = function() end}, dir)
+	local store = media.new(buildat, {warning = function() end}, "server")
 	local announced = {
 		{name = "a.png", sha1 = "sha1:a"},
 		{name = "b.png", sha1 = "sha1:b"},
@@ -748,14 +770,16 @@ for _ = 1, 200 do
 	p:update(1 / 60, NO_WISH)
 	if p.y > top then top = p.y end
 end
-assert(top > 1.5 and top < 3, "player: jumped to "..top)
+-- Luanti's apex: 6.5^2 / (2 * 2 * 9.81) = 1.08 nodes over the feet, the
+-- gravity being doubled there ([PLAYER_PHYSICS])
+assert(top > 1.55 and top < 1.65, "player: jumped to "..top)
 assert(math.abs(p.y - 0.5) < 1e-6, "player: landed at "..p.y)
 
--- Falling into the hole lands in the water and stops sinking at its bottom,
--- and the jump key swims back out of it
+-- Falling into the hole lands in the water and sinks -- slowly, as an idle
+-- player in Luanti does -- to its bottom, and the jump key swims back out
 local w = player.new(is_solid, is_liquid)
 w:set_position(0, 0.5, 6)
-settle(w, 300)
+settle(w, 1500)
 assert(w.in_liquid, "player: not in the water")
 assert(math.abs(w.y - (-2.5)) < 1e-6, "player: sank to "..w.y)
 settle(w, 300, {x = 0, z = 0, jump = true})
@@ -772,10 +796,15 @@ settle(f, 300, {x = 0, z = 0, sneak = true, fast = true})
 assert(math.abs(f.y - 0.5) < 1e-6, "player: flew down to "..f.y)
 
 -- Going through walls takes the player out of anything they are inside, and
--- gravity does not apply while it is on
+-- gravity does not apply while it is on -- noclip acts while flying, as
+-- official's does ([FLY_MODES]); on its own it is nothing
 local n = player.new(is_solid)
 n:set_position(3, 0.5, 0)
 n.noclip = true
+settle(n, 60, {x = 0, z = 0, jump = true})
+assert(n.y < 5, "player: noclip without fly went through the wall, y = "..n.y)
+n:set_position(3, 0.5, 0)
+n.fly = true
 settle(n, 120)
 assert(math.abs(n.y - 0.5) < 1e-6, "player: fell while noclipping to "..n.y)
 settle(n, 120, {x = 0, z = 0, jump = true})
@@ -858,6 +887,53 @@ do
 	local before = air.vx
 	air:update(0.5, wish)
 	assert(air.vx < before, "player: the push decays")
+end
+
+-- The standing node's groups ([PLAYER_PHYSICS]): the ground at x <= -6 is
+-- ice (slippery 3), at x >= 6 a trampoline (bouncy 80), at z = -6 a node
+-- that refuses jumps
+do
+	local function groups_at(x, y, z)
+		if y ~= 0 then return nil end
+		if z == -6 then return {disable_jump = true} end
+		if x <= -6 then return {slippery = 3} end
+		if x >= 6 then return {bouncy = 80} end
+		return nil
+	end
+	local flat = function(x, y, z) return y <= 0 end
+	local g = player.new(flat, nil, nil, nil, groups_at)
+	-- Ice: walking for a second gets a slower start than dirt does
+	g:set_position(0, 0.5, 0)
+	settle(g, 12, {x = 1, z = 0})
+	local dirt_vx = g.vx
+	g:set_position(-10, 0.5, 0)
+	g.vx, g.vz = 0, 0
+	settle(g, 12, {x = 1, z = 0})
+	assert(g.vx > 0 and g.vx < dirt_vx / 2,
+			"player: ice accelerates like dirt, "..g.vx.." vs "..dirt_vx)
+	-- and the stop is slower still, twice as slippery with no key held
+	local sliding = g.vx
+	settle(g, 6)
+	assert(g.vx > sliding * 0.6, "player: ice stops like dirt, "..g.vx)
+	-- The trampoline: a fall from four nodes comes back up, lower each
+	-- time, and settles in the end
+	g:set_position(10, 4.5, 0)
+	g.vx, g.vz = 0, 0
+	local bounced, top = false, 0
+	for _ = 1, 600 do
+		g:update(1 / 60, NO_WISH)
+		if g.vy > 0 and not g.on_ground then bounced = true end
+		if bounced and g.y > top then top = g.y end
+	end
+	assert(bounced and top > 1.5 and top < 4,
+			"player: the trampoline bounced to "..top)
+	assert(math.abs(g.y - 0.5) < 1e-6 and g.on_ground,
+			"player: the bounce did not settle, y = "..g.y)
+	-- No jump from a node that refuses it
+	g:set_position(0, 0.5, -6)
+	g.vx, g.vz = 0, 0
+	settle(g, 30, {x = 0, z = 0, jump = true})
+	assert(math.abs(g.y - 0.5) < 1e-6, "player: jumped where refused, y = "..g.y)
 end
 
 print("player: ok")
@@ -1324,6 +1400,24 @@ assert(obj.position[1] > -320 and obj.position[1] < -319.4,
 objects.interpolate({obj}, 1.0)
 assert(math.abs(obj.position[1] - -319) < 1e-3,
 		"objects: it did not arrive, at "..obj.position[1])
+
+-- Attached to a bone: parent and bone are read, and what rides on
+-- something else is marked so nothing draws it at its own position
+-- ([OVER_SHOULDER])
+local att = serialize.writer()
+att:u8(objects.CMD_ATTACH_TO)
+att:s16(7) -- the parent object
+att:string("Arm_Right")
+att:v3f(0, 0, 0)  -- position in the bone's frame
+att:v3f(0, 0, 0)  -- rotation
+att:u8(1)         -- force_visible
+objects.apply_message(obj, serialize.reader(att:data()))
+assert(obj.attached_to == 7, "objects: the parent it rides on")
+assert(obj.attach_bone == "Arm_Right", "objects: the bone")
+local det = serialize.writer():u8(objects.CMD_ATTACH_TO):s16(0)
+		:string(""):v3f(0, 0, 0):v3f(0, 0, 0):u8(1):data()
+objects.apply_message(obj, serialize.reader(det))
+assert(obj.attached_to == nil, "objects: detaching brings it back")
 
 -- A message this does not implement leaves the object alone
 local unknown = serialize.writer():u8(objects.CMD_SET_ANIMATION)

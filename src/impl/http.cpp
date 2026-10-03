@@ -1,0 +1,226 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+#include "interface/http.h"
+#include "core/log.h"
+#include "core/version.h"
+#include <curl/curl.h>
+#ifdef _WIN32
+	// curl.h brings windows.h in, and windows.h #defines interface, which
+	// is the namespace below
+	#undef interface
+#endif
+#include <algorithm>
+#include <cstring>
+#include <fstream>
+#include <mutex>
+#define MODULE "http"
+
+namespace interface {
+
+static void global_init_once()
+{
+	static std::once_flag once;
+	std::call_once(once, [](){ curl_global_init(CURL_GLOBAL_DEFAULT); });
+}
+
+static size_t to_string(char *p, size_t size, size_t n, void *user)
+{
+	((ss_*)user)->append(p, size * n);
+	return size * n;
+}
+static size_t to_file(char *p, size_t size, size_t n, void *user)
+{
+	std::ofstream &f = *(std::ofstream*)user;
+	f.write(p, size * n);
+	return f.good() ? size * n : 0;
+}
+
+struct Progress {
+	std::function<bool(uint64_t, uint64_t)> f;
+};
+static int on_progress(void *user, curl_off_t total, curl_off_t got,
+		curl_off_t, curl_off_t)
+{
+	Progress &p = *(Progress*)user;
+	if(p.f && !p.f((uint64_t)got, total > 0 ? (uint64_t)total : 0))
+		return 1;
+	return 0;
+}
+
+static void set_protocols(CURL *c, const char *list)
+{
+#if LIBCURL_VERSION_NUM >= 0x075500
+	curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, list);
+	curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, list);
+#else
+	const long p = strstr(list, "smtp") ?
+			(CURLPROTO_SMTP | CURLPROTO_SMTPS) :
+			(CURLPROTO_HTTP | CURLPROTO_HTTPS);
+	curl_easy_setopt(c, CURLOPT_PROTOCOLS, p);
+	curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS, p);
+#endif
+}
+
+static CURL *easy(const ss_ &url, char *errbuf)
+{
+	global_init_once();
+	CURL *c = curl_easy_init();
+	if(!c)
+		throw Exception("http: curl_easy_init failed");
+	curl_easy_setopt(c, CURLOPT_URL, url.c_str());
+	curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(c, CURLOPT_MAXREDIRS, 8L);
+	// http and https, asked for and redirected to: a URL comes from a
+	// ContentDB listing or a game's script, and libcurl's own default
+	// includes file:// ([SECURITY_RUN_1]). send_mail() says smtp.
+	set_protocols(c, "http,https");
+	curl_easy_setopt(c, CURLOPT_FAILONERROR, 1L);
+	// **Who is calling** ([LICENSE_DUAL]'s second courtesy): ContentDB's
+	// and the serverlist's bandwidth is donated, and an operator reading
+	// a log should see a name and a version rather than libcurl's
+	// default. A project URL belongs here the day there is a public one.
+	static const ss_ user_agent = ss_("buildat/")+BUILDAT_VERSION;
+	curl_easy_setopt(c, CURLOPT_USERAGENT, user_agent.c_str());
+	curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 20L);
+	curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1L);
+	curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 60L);
+	curl_easy_setopt(c, CURLOPT_ERRORBUFFER, errbuf);
+	return c;
+}
+
+static void perform(CURL *c, const ss_ &url, const char *errbuf)
+{
+	const CURLcode r = curl_easy_perform(c);
+	long status = 0, os_errno = 0, port = 0;
+	curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
+	curl_easy_getinfo(c, CURLINFO_OS_ERRNO, &os_errno);
+	curl_easy_getinfo(c, CURLINFO_PRIMARY_PORT, &port);
+	curl_easy_cleanup(c);
+	// [PROCESS_SANDBOX]: a port the server's box refuses
+	if(r == CURLE_COULDNT_CONNECT && os_errno == EACCES){
+		// The URL's own: curl's primary port is -1 with no connection made
+		const size_t at = url.find("://");
+		const ss_ rest = at == ss_::npos ? url : url.substr(at + 3);
+		const ss_ hostport = rest.substr(0, rest.find('/'));
+		const size_t colon = hostport.rfind(':');
+		port = colon != ss_::npos && hostport.find(']', colon) == ss_::npos ?
+				atol(hostport.c_str() + colon + 1) :
+				(url.compare(0, 6, "https:") == 0 ? 443 : 80);
+		log_w(MODULE, "%s: the server's box refused port %li; its admin "
+				"allows it with --connect-ports or BUILDAT_CONNECT_PORTS",
+				cs(url), port);
+	}
+	if(r != CURLE_OK){
+		throw Exception("http: "+url+": "+
+				(errbuf[0] ? ss_(errbuf) : ss_(curl_easy_strerror(r)))+
+				(status ? " (status "+itos(status)+")" : ss_()));
+	}
+}
+
+ss_ http_get(const ss_ &url)
+{
+	char errbuf[CURL_ERROR_SIZE] = {0};
+	CURL *c = easy(url, errbuf);
+	ss_ body;
+	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_string);
+	curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
+	perform(c, url, errbuf);
+	return body;
+}
+
+ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type)
+{
+	char errbuf[CURL_ERROR_SIZE] = {0};
+	CURL *c = easy(url, errbuf);
+	ss_ out;
+	struct curl_slist *headers = curl_slist_append(nullptr,
+			("Content-Type: "+content_type).c_str());
+	curl_easy_setopt(c, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(c, CURLOPT_POSTFIELDS, body.c_str());
+	curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)body.size());
+	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_string);
+	curl_easy_setopt(c, CURLOPT_WRITEDATA, &out);
+	try {
+		perform(c, url, errbuf);
+	} catch(...){
+		curl_slist_free_all(headers);
+		throw;
+	}
+	curl_slist_free_all(headers);
+	return out;
+}
+
+struct ReadState {
+	const ss_ *data;
+	size_t at;
+};
+static size_t from_string(char *p, size_t size, size_t n, void *user)
+{
+	ReadState &r = *(ReadState*)user;
+	const size_t len = std::min(size * n, r.data->size() - r.at);
+	memcpy(p, r.data->data() + r.at, len);
+	r.at += len;
+	return len;
+}
+
+void send_mail(const ss_ &url, const ss_ &user, const ss_ &password,
+		const ss_ &from, const ss_ &to, const ss_ &message)
+{
+	char errbuf[CURL_ERROR_SIZE] = {0};
+	CURL *c = easy(url, errbuf);
+	set_protocols(c, "smtp,smtps");
+	if(!user.empty()){
+		curl_easy_setopt(c, CURLOPT_USERNAME, user.c_str());
+		curl_easy_setopt(c, CURLOPT_PASSWORD, password.c_str());
+	}
+	curl_easy_setopt(c, CURLOPT_USE_SSL, (long)CURLUSESSL_TRY);
+	curl_easy_setopt(c, CURLOPT_MAIL_FROM, ("<"+from+">").c_str());
+	struct curl_slist *rcpt = curl_slist_append(nullptr,
+			("<"+to+">").c_str());
+	curl_easy_setopt(c, CURLOPT_MAIL_RCPT, rcpt);
+	ReadState r{&message, 0};
+	curl_easy_setopt(c, CURLOPT_READFUNCTION, from_string);
+	curl_easy_setopt(c, CURLOPT_READDATA, &r);
+	curl_easy_setopt(c, CURLOPT_UPLOAD, 1L);
+	try {
+		perform(c, url, errbuf);
+	} catch(...){
+		curl_slist_free_all(rcpt);
+		throw;
+	}
+	curl_slist_free_all(rcpt);
+}
+
+bool mail_supported()
+{
+	global_init_once();
+	const curl_version_info_data *v = curl_version_info(CURLVERSION_NOW);
+	for(const char * const *p = v->protocols; p && *p; p++){
+		if(strcmp(*p, "smtp") == 0)
+			return true;
+	}
+	return false;
+}
+
+void http_download(const ss_ &url, const ss_ &path,
+		std::function<bool(uint64_t, uint64_t)> progress)
+{
+	char errbuf[CURL_ERROR_SIZE] = {0};
+	std::ofstream f(path, std::ios::binary | std::ios::trunc);
+	if(!f.good())
+		throw Exception("http: cannot write "+path);
+	CURL *c = easy(url, errbuf);
+	Progress p{progress};
+	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_file);
+	curl_easy_setopt(c, CURLOPT_WRITEDATA, &f);
+	curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+	curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, on_progress);
+	curl_easy_setopt(c, CURLOPT_XFERINFODATA, &p);
+	perform(c, url, errbuf);
+	f.close();
+	if(!f.good())
+		throw Exception("http: could not finish writing "+path);
+}
+
+} // namespace interface
+// vim: set noet ts=4 sw=4:
