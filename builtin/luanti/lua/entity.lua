@@ -2398,6 +2398,43 @@ local function inventory_at(ref, playername, location)
 	return meta and meta:get_inventory() or nil, pos
 end
 
+-- Whether a player may move items in or out of an inventory that is not
+-- their own, as Luanti's server decides it (handleCommand_InventoryAction):
+-- not at all without interact; a node's only within reach -- from the eye,
+-- the wielded tool's range (or the hand's, or 4) and 2.6 for the node's
+-- extent, checkInteractDistance's numbers -- and a detached one only if it
+-- is for everyone or for them. A client says which inventory, and any
+-- position or name was taken as given ([SECURITY_RUN_1]).
+local function may_reach(ref, playername, pos, detached)
+	if not pos and not detached then
+		return true
+	end
+	if not core.check_player_privs(playername, {interact = true}) then
+		return false
+	end
+	if detached then
+		local for_whom = core.__detached_players[detached]
+		if for_whom and for_whom ~= playername then
+			return false
+		end
+	end
+	if pos then
+		local p = ref:get_pos()
+		local props = ref:get_properties() or {}
+		local eye = {x = p.x, y = p.y + (props.eye_height or 1.625), z = p.z}
+		local def = ref:get_wielded_item():get_definition()
+		local range = def and def.range
+		if type(range) ~= "number" or range < 0 then
+			local hand = core.registered_items[""]
+			range = hand and type(hand.range) == "number" and hand.range or 4
+		end
+		if vector.distance(eye, pos) > range + 2.6 then
+			return false
+		end
+	end
+	return true
+end
+
 local function same_pos(a, b)
 	return a and b and a.x == b.x and a.y == b.y and a.z == b.z
 end
@@ -2680,6 +2717,18 @@ function core.__inventory_action(playername, a)
 	end
 	local from_list, from_i = a[3] or "", tonumber(a[4]) or 0
 	local to_list, to_i = a[6] or "", tonumber(a[7]) or 0
+	-- The grid's answer is taken by a craft action, never moved, and
+	-- nothing is put into it or into craftresult (Luanti refuses the same)
+	if from_list == "craftpreview" or to_list == "craftpreview" or
+			to_list == "craftresult" then
+		return
+	end
+	if not may_reach(ref, playername, from_pos, from_detached) or
+			not may_reach(ref, playername, to_pos, to_detached) then
+		core.log("action", playername .. " may not reach " ..
+				tostring(a[2]) .. " -> " .. tostring(a[5]))
+		return
+	end
 	local count = tonumber(a[8]) or 0
 	local stack = from_inv:get_stack(from_list, from_i)
 	if stack:is_empty() then

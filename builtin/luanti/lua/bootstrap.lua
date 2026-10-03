@@ -2179,15 +2179,24 @@ end
 -- the callbacks of in core.detached_inventories
 core.__detached_inventories = {}
 
+-- Who a detached inventory is for: a player's name, or nil for everyone.
+-- Luanti sends one made for a player to that player alone, and takes
+-- actions on it from nobody else (checkDetachedInventoryAccess).
+core.__detached_players = {}
+
 function core.create_detached_inventory_raw(name, player_name)
 	local inv = core.__new_inventory({type = "detached", name = name})
 	core.__detached_inventories[name] = inv
+	core.__detached_players[name] =
+			(type(player_name) == "string" and player_name ~= "") and
+			player_name or nil
 	return inv
 end
 
 function core.remove_detached_inventory_raw(name)
 	local existed = core.__detached_inventories[name] ~= nil
 	core.__detached_inventories[name] = nil
+	core.__detached_players[name] = nil
 	return existed
 end
 
