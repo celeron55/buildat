@@ -858,7 +858,9 @@ sleep 1
 	echo "wait_log 30000 game: back in the room"
 	echo "delay 1500"; echo "quit"; } > "$out/cmds_cdb.txt"
 rm -f "$out/cdb_cli.log" "$out/cdb_cli_server.log"
-BUILDAT_CONTENTDB_URL=http://localhost:30211 \
+# The mirror's port is not one the server's box connects to by default
+# ([PROCESS_SANDBOX] A); the local server inherits this from the client
+BUILDAT_CONNECT_PORTS=30211 BUILDAT_CONTENTDB_URL=http://localhost:30211 \
 	timeout 150 bin/buildat -m launch_world -D ../user -w 960x540 -l 3 \
 	-L "$out/cdb_cli.log" -c @"$out/cmds_cdb.txt" > /dev/null 2>&1
 kill "$mirror" 2>/dev/null; wait "$mirror" 2>/dev/null
@@ -1241,7 +1243,11 @@ print("the search's arrows moved the camera by %.2f and %.2f of a level"
 # three to five: a hop between two dark corners of the room moves fewer
 # levels than one across the lit wall, and 7.8 was a real move read by
 # an insensitive measure (2026-09-23)
-search_ok = hop1 > 6.0 and hop2 > 6.0
+# Three, not the six of the four-wall room: in the one wall's formation
+# two matches can be neighbouring pockets, which look alike -- devtest,
+# realtest and Minetest Game read 11.0 and 4.9 (2026-10-03) -- and a
+# room left still drifts by about 0.9 between two frames (core.sh)
+search_ok = hop1 > 3.0 and hop2 > 3.0
 print("PASS: the search walks its matches and the camera follows"
 		if search_ok
 		else "FAIL: the arrows do not move the camera between matches")

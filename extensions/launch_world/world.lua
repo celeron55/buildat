@@ -5085,6 +5085,7 @@ function launch_anim_start(b, to, name)
 		-- Out of the mouth: the pocket's depth and a voxel and a half
 		out = depth * 2 + 1.5 * VOXEL_M}
 	a.base_bright = b and lights[b] and lights[b].brightness or 1
+	a.vp = launch_viewports
 	launch_anim = a
 	-- **Muted at the click** (section 0): the feedback for the click,
 	-- and a cleared palette for the game to take over
@@ -5105,7 +5106,17 @@ end
 
 function handle_launch_anim(event_type, event_data)
 	local a = launch_anim
-	if not a or in_app then return end
+	if not a then return end
+	-- **Until the game's view replaces the room's**, and not until the
+	-- room stands down: a game with a menu of its own has the room stand
+	-- down after LAUNCH_WAIT_S with the room still on the screen behind
+	-- the menu, and the animation goes on there. The white is the
+	-- room's: the game's first frame is not drawn under it.
+	local vp = magic.viewport_generation and magic.viewport_generation() or 0
+	if vp ~= a.vp then
+		launch_overlay.visible = false
+		return
+	end
 	-- In the wall's time and not the engine's step: a world loading makes
 	-- long frames, and a step clamped per frame left the glow short of
 	-- the white when the game's view arrived (2026-10-03)
@@ -5441,14 +5452,20 @@ function handle_keydown(event_type, event_data)
 				backed = true
 			end
 		end
+		if backed then
+			fly_to(HOME_FROM, HOME_AT)
+		end
+		-- **The prompt closes where it is**: the camera stays on what the
+		-- search found, the thing browsed now, which a click or Enter can
+		-- take (the formation has nothing at the standing place's middle
+		-- for a camera flown home to point at)
 		if prompt_open or prompt_str ~= "" then
 			prompt_open = false
 			prompt_str = ""
 			show_prompt()
-			backed = true
+			return
 		end
 		if backed then
-			fly_to(HOME_FROM, HOME_AT)
 			return
 		end
 		open_pause()
@@ -5655,9 +5672,6 @@ end
 function stand_down(why)
 	if in_app then return end
 	in_app = true
-	-- The white is the room's: the game's own first frame is not drawn
-	-- under it
-	launch_overlay.visible = false
 	launching = false
 	log:info("game: the room stands down (" .. why .. ")")
 end
@@ -5665,12 +5679,6 @@ end
 -- Asked once a frame while a launch is in flight; see LAUNCH_WAIT_S
 function launch_watch()
 	if not launching then return end
-	-- Held behind the game's own menu: the wait for its view has not
-	-- begun ([LAUNCH_WORLD] section 12)
-	if launch_anim and launch_anim.held then
-		launch_started_us = buildat.get_time_us()
-		return
-	end
 	local now = magic.viewport_generation and magic.viewport_generation() or 0
 	if now ~= launch_viewports then
 		stand_down("the game has the view")
