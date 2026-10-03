@@ -721,7 +721,7 @@ buildat.safe.local_server_log_tail = __buildat_local_server_log_tail
 -- Whether a launch UI asks to be run in the sandbox: a "sandboxed" line
 -- in its launch_ui.txt ([LAUNCH_SANDBOX]). Trusted, and read by the
 -- client's boot rather than by anything in the sandbox.
-function buildat.launch_ui_sandboxed(name)
+local function launch_ui_says(name, word)
 	if type(name) ~= "string" or not name:match("^[%w_]+$") then
 		return false
 	end
@@ -732,11 +732,14 @@ function buildat.launch_ui_sandboxed(name)
 	local text = f:read("*a")
 	f:close()
 	for line in text:gmatch("[^\r\n]+") do
-		if line:match("^%s*sandboxed%s*$") then
+		if line:match("^%s*" .. word .. "%s*$") then
 			return true
 		end
 	end
 	return false
+end
+function buildat.launch_ui_sandboxed(name)
+	return launch_ui_says(name, "sandboxed")
 end
 buildat.safe.list_launch_uis = function()
 	local out = {}
@@ -773,7 +776,10 @@ end
 -- is booted now, so the switch is one action rather than a restart. A
 -- name that is not one of the listed ones is refused here -- the
 -- preference would take it, but a slot is picked from what there is.
+-- The launch UIs booted in this client, the one it started with too
+local booted_launch_uis = {}
 buildat.safe.set_launch_ui = function(name)
+	booted_launch_uis[__buildat_menu_extension_name or "launch_menu"] = true
 	local found = nil
 	for _, e in ipairs(buildat.safe.list_launch_uis()) do
 		if e.name == name then
@@ -787,12 +793,40 @@ buildat.safe.set_launch_ui = function(name)
 	if not ok then
 		return false, err
 	end
-	local m = __buildat_require_extension(name)
-	if type(m) ~= "table" or type(m.boot) ~= "function" then
-		return false, "set_launch_ui: " .. name .. " has no boot()"
+	-- **A "persistent" launch UI is booted once**: the room keeps running
+	-- under another launch UI and takes the screen back by itself, so a
+	-- second boot was a second room with every key acted on twice
+	-- (2026-10-03). The stack is cleared and the name taken all the same.
+	local again = booted_launch_uis[name] and launch_ui_says(name, "persistent")
+	local m = nil
+	if not again then
+		m = __buildat_require_extension(name)
+		if type(m) ~= "table" or type(m.boot) ~= "function" then
+			return false, "set_launch_ui: " .. name .. " has no boot()"
+		end
+	end
+	-- **Nothing of the old one's stays on the screen** ([LAUNCH_WORLD]
+	-- stage 2, 2026-10-03): the switch is often made from the old one's
+	-- own settings window, which was left drawn over the new one and
+	-- kept the input. Everything on the main stack is the old launch
+	-- UI's, so all of it goes before the new one boots.
+	local us = __buildat_require_extension("uistack")
+	local stack = us and us.main and us.main.stack
+	if stack and stack[1] then
+		local ok_pop, why = pcall(function()
+			us.main:pop_to(stack[1], true)
+		end)
+		if not ok_pop then
+			log:warning("set_launch_ui: clearing the stack: " .. tostring(why))
+		end
 	end
 	__buildat_menu_extension_name = name
-	m.boot()
+	booted_launch_uis[name] = true
+	if again then
+		log:info("set_launch_ui: " .. name .. " is running; it has the screen again")
+	else
+		m.boot()
+	end
 	return true
 end
 

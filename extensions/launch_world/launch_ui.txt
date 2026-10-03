@@ -1,3 +1,4 @@
 The launch world
 A room you stand in, where every game is a sphere in the wall.
 sandboxed
+persistent
