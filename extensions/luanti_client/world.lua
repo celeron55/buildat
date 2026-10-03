@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/world.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Luanti's mapblocks on screen: a scene with a camera in it, and a node per
 -- block with buildat's voxel mesher on it.
@@ -17,18 +18,20 @@
 -- world coordinates one for one. block_node_position() is the same arithmetic
 -- builtin/voxelworld does for its chunks.
 
-local sounds_proto = dofile(__buildat_extension_path("luanti_client")..
-		"/sounds.lua")
-local shapes = dofile(__buildat_extension_path("luanti_client")..
-		"/shapes.lua")
-local particles = dofile(__buildat_extension_path("luanti_client")..
-		"/particles.lua")
-local light_flood = dofile(__buildat_extension_path("luanti_client")..
-		"/light.lua")
-local skyvis = dofile(__buildat_extension_path("luanti_client")..
-		"/skyvis.lua")
-local surface = dofile(__buildat_extension_path("luanti_client")..
-		"/surface.lua")
+local sounds_proto = buildat.run_extension_file("sounds.lua")
+local shapes = buildat.run_extension_file("shapes.lua")
+local particles = buildat.run_extension_file("particles.lua")
+local light_flood = buildat.run_extension_file("light.lua")
+local skyvis = buildat.run_extension_file("skyvis.lua")
+-- BUILDAT_LUANTI_NO_SPOTS=1, the reference runs' switch: no sparkle on
+-- any surface, since the path-traced reference draws none. The module's
+-- bootstrap.lua honours the same variable.
+local NO_SPOTS = (buildat.get_env("BUILDAT_LUANTI_NO_SPOTS") or "") ~= ""
+
+local surface = buildat.run_extension_file("surface.lua")
+-- The sky rendered into a cube for the world to reflect, shared with
+-- apps/vanilla; see [SKY_REFLECTIONS]
+local skycube = require("buildat/extension/skycube")
 
 local M = {}
 
@@ -353,14 +356,25 @@ function M.new(magic, buildat, log, options)
 	-- moon are the ones here that want it, and their names can be texture
 	-- expressions like any other.
 	local media_texture = options.media_texture
-	-- Whether the world is drawn with res/PBRVoxel -- normal and surface
-	-- maps, reflections of the sky, the sun as a real light -- instead of
-	-- the Luanti-native VoxelUnlit. Chosen in the connect dialog and fixed
-	-- for the session: the atlas's surface maps have to be on from the first
-	-- texture it builds, and they are two thirds of what adding one costs.
-	local pbr = options.pbr and true or false
+	-- Which of the three rendering modes the world is drawn in, fixed for the
+	-- session: the atlas's surface maps have to be on from the first texture
+	-- it builds, and they are two thirds of what adding one costs.
+	--
+	--   unlit    the baked light and nothing else, which is official Luanti
+	--            with its dynamic shadows off
+	--   shadows  the same with the sun's shadow map multiplying it, which is
+	--            official Luanti as it is usually played
+	--   pbr      res/PBRVoxel: normal and surface maps, reflections of the
+	--            sky, the sun as a real light. A deliberate deviation.
+	--
+	-- See [RENDER_MODES] in doc/plan/rendering_plan.md. `pbr` stays a boolean
+	-- beside it because everything below that asks about surface maps, sky
+	-- visibility or the light curve is asking about that mode alone.
+	local mode = options.mode or "unlit"
+	local pbr = mode == "pbr"
 
 	local self = {}
+	self.mode = mode
 	self.pbr = pbr
 
 	-- One of the game's own textures, drawn without smoothing. A Luanti
@@ -496,19 +510,32 @@ function M.new(magic, buildat, log, options)
 	-- directional light to reach. The PBR path reads the same vertex colours
 	-- as its ambient, so that is true of it as well -- what it adds on top is
 	-- the sky it reflects.
-	local technique = magic.cache:GetResource("Technique", pbr and
-			"luanti_client/res/PBRVoxel.xml" or
-			"luanti_client/res/VoxelUnlit.xml")
-	local alpha_technique = magic.cache:GetResource("Technique", pbr and
-			"luanti_client/res/PBRVoxelAlpha.xml" or
-			"luanti_client/res/VoxelUnlitAlpha.xml")
+	-- shadows differs from unlit in one file: LuantiVoxelUnlit adds a light
+	-- pass that multiplies by the shadow factor and writes nothing else.
+	-- Water is shadowed on the shadows path as the module's is, through
+	-- LuantiVoxelUnlitAlpha's multiplied light pass ([PARITY_LEFTOVERS]);
+	-- unlit's VoxelUnlitAlpha has no light pass.
+	local opaque_name = "luanti_client/res/VoxelUnlit.xml"
+	local alpha_name = "luanti_client/res/VoxelUnlitAlpha.xml"
 	if pbr then
-		-- What the reflections are of: one static noon gradient, multiplied
-		-- in the shader by the colour the sky is now, so a sunset and being
-		-- under water follow without anything being rebaked. See set_sky_tint
-		-- below and the note on cSkyColor in res/PBRVoxel.glsl.
-		zone.zoneTexture = magic.cache:GetResource("TextureCube",
-				"luanti_client/res/VoxelSky.xml")
+		opaque_name = "luanti_client/res/PBRVoxel.xml"
+		alpha_name = "luanti_client/res/PBRVoxelAlpha.xml"
+	elseif mode == "shadows" then
+		opaque_name = "luanti_client/res/LuantiVoxelUnlit.xml"
+		alpha_name = "luanti_client/res/LuantiVoxelUnlitAlpha.xml"
+	end
+	local technique = magic.cache:GetResource("Technique", opaque_name)
+	local alpha_technique = magic.cache:GetResource("Technique", alpha_name)
+	local sky_cube = nil
+	if pbr then
+		-- What the reflections are of: the sky as it is drawn, rendered
+		-- into a cube of its own from the same material, and re-rendered
+		-- when the hour moves it -- the sun, the moon and dawn where they
+		-- are. The shader still multiplies it by the colour the sky is now
+		-- (set_sky_tint below, cSkyColor in res/PBRVoxel.glsl), which is
+		-- what being under water follows.
+		sky_cube = skycube.new(magic, sky_material)
+		zone.zoneTexture = sky_cube.texture
 	end
 
 	-- The sun, on the PBR path only. The vanilla path has no light in the
@@ -529,7 +556,7 @@ function M.new(magic, buildat, log, options)
 	-- number is large because Urho's PBR direct lighting is normalized -- the
 	-- BRDF is divided by pi and so is the diffuse term inside it -- and
 	-- because the frame is tone mapped, so a sun well past white is what
-	-- white is for. games/voxel_lighting arrived at the same number for the
+	-- white is for. apps/voxel_lighting arrived at the same number for the
 	-- same reasons.
 	local SUN_BRIGHTNESS = 50.0
 	-- How far past the tone curve's middle the frame is exposed
@@ -714,7 +741,10 @@ function M.new(magic, buildat, log, options)
 	local sun_light = nil
 	local moon_node = nil
 	local moon_light = nil
-	if pbr then
+	-- In shadows they are here for the shadow map alone: the technique's
+	-- light pass multiplies by the shadow factor and never reads the light's
+	-- colour or brightness. In unlit there is nothing to cast one from.
+	if mode ~= "unlit" then
 		sun_node = scene:CreateChild("Sun")
 		sun_light = sun_node:CreateComponent("Light")
 		sun_light.lightType = magic.LIGHT_DIRECTIONAL
@@ -762,7 +792,7 @@ function M.new(magic, buildat, log, options)
 		-- Urho3D's drawables cast no shadow unless told to, one by one. On
 		-- the vanilla path there is no light to cast one from; on the PBR
 		-- path this is what puts the world in the sun's shadow map.
-		cg.castShadows = pbr
+		cg.castShadows = mode ~= "unlit"
 		local i = 0
 		while true do
 			local m = cg:GetMaterial(i)
@@ -793,7 +823,17 @@ function M.new(magic, buildat, log, options)
 	-- else. TOCLIENT_FOV can ask for degrees or for a multiplier of this,
 	-- over a transition time, which is what a game zooms with.
 	local BASE_FOV = 72
-	camera.fov = BASE_FOV
+	-- **The fov wanted, and the camera's** (user, 2026-09-30): the degrees
+	-- are of the screen's short side, a portrait phone's width, which
+	-- fov_for turns into the camera's vertical fov; set again each frame so
+	-- that a turned screen follows. Transitions run on the wanted one.
+	-- On self: this function is at Lua's 200 locals
+	self.fov_for = require("buildat/extension/urho3d").fov_for
+	function self.apply_fov(v)
+		self.fov_now = v
+		camera.fov = self.fov_for(v)
+	end
+	self.apply_fov(BASE_FOV)
 	self.camera_node = camera_node
 	self.camera = camera
 
@@ -804,7 +844,32 @@ function M.new(magic, buildat, log, options)
 
 	-- set_fov(fov, is_multiplier, transition_time), out of TOCLIENT_FOV. A
 	-- fov of zero means back to the client's own.
+	-- Zoom ([VIEW_KEYS]): official's zoom_fov, 15 degrees, while held;
+	-- the server's last fov is kept on self (the function is at the
+	-- 200-local line) so a zoom's end goes back to it
+	function self:set_zoom(on, zoom_fov)
+		if on then
+			fov_step = nil
+			self.apply_fov(zoom_fov or 15)
+		else
+			local f = self.fov_server or {}
+			self:set_fov(f.fov, f.is_multiplier, 0)
+		end
+	end
+
+	-- Fog off ([VIEW_KEYS]'s F3): the fog pushed past the far clip
+	function self:set_fog(on)
+		if not on then
+			zone.fogStart = far_clip * 10
+			zone.fogEnd = far_clip * 10 + 1
+		else
+			zone.fogStart = far_clip * 0.7
+			zone.fogEnd = far_clip
+		end
+	end
+
 	function self:set_fov(fov, is_multiplier, transition_time)
+		self.fov_server = {fov = fov, is_multiplier = is_multiplier}
 		local want = BASE_FOV
 		if fov and fov > 0 then
 			want = is_multiplier and BASE_FOV * fov or fov
@@ -813,24 +878,25 @@ function M.new(magic, buildat, log, options)
 		want = math.min(math.max(want, 5), 160)
 		fov_target = want
 		if transition_time and transition_time > 0 then
-			fov_step = math.abs(want - camera.fov) / transition_time
+			fov_step = math.abs(want - self.fov_now) / transition_time
 		else
 			fov_step = nil
-			camera.fov = want
+			self.apply_fov(want)
 		end
 	end
 
 	function self:update_fov(dtime)
 		if not fov_step then
+			self.apply_fov(self.fov_now)
 			return
 		end
-		local at = camera.fov
+		local at = self.fov_now
 		if at < fov_target then
 			at = math.min(fov_target, at + fov_step * dtime)
 		else
 			at = math.max(fov_target, at - fov_step * dtime)
 		end
-		camera.fov = at
+		self.apply_fov(at)
 		if at == fov_target then
 			fov_step = nil
 		end
@@ -841,10 +907,10 @@ function M.new(magic, buildat, log, options)
 	-- Lua collects garbage
 	local viewport = magic.Viewport:new(scene, camera)
 	self.viewport = viewport
-	magic.renderer:SetViewport(0, viewport)
+	magic.set_preferred_viewports({viewport})
 
 	-- On the PBR path the frame is rendered in HDR and tone mapped, the way
-	-- games/voxel_lighting does it. Nothing else makes the sun read as the
+	-- apps/voxel_lighting does it. Nothing else makes the sun read as the
 	-- sun: in a frame that clips at one, a sun strong enough to put a real
 	-- shadow on the ground flattens every lit surface to white, and one weak
 	-- enough not to do that is a sun whose colour and whose shadow are both
@@ -1147,6 +1213,10 @@ function M.new(magic, buildat, log, options)
 			double_sided, turns, liquid_group, connect, masked, variants,
 			blend, solid_base, surf)
 		surf = surf or surface.for_node(nil)
+		if NO_SPOTS then
+			surf.spots = 0
+			surf.static_spots = 0
+		end
 		local vdef = buildat.VoxelDefinition()
 		vdef.name.block_name = name
 		vdef.handler_module = ""
@@ -1355,6 +1425,7 @@ function M.new(magic, buildat, log, options)
 	-- arrived and everything but air is solid; see is_solid().
 	self.node_solid = nil
 	self.node_liquid = {}
+	self.node_resistance = {}
 	-- The screen tint of the node the camera is in, per node id; see
 	-- post_effect_at(). Only the nodes that have one are in here.
 	self.node_post_effect = {}
@@ -1726,9 +1797,11 @@ function M.new(magic, buildat, log, options)
 		-- is rebuilt from the block the next time it is wanted
 		vis_volumes_drop(key)
 		local node = block.node
+		-- The seventh is the horizon the vanilla client packs into its
+		-- meshes ([PBR_FIT] 2c); none here, and luabind wants every argument
 		buildat.set_voxel_geometry(node, data, self.voxel_reg,
 				self.atlas_reg, self.use_skylight,
-				function() apply_technique(node) end)
+				function() apply_technique(node) end, "")
 		self.last_mesh_us = buildat.get_time_us() - t0
 		-- The worst single block of the frame, for the slow-frame line: one
 		-- block that costs ten times what the others do is a different
@@ -2059,6 +2132,12 @@ function M.new(magic, buildat, log, options)
 		return id ~= nil and self.node_liquid[id] == true
 	end
 
+	-- The node's move_resistance, 0 where there is no node yet
+	function self:resistance_at(x, y, z)
+		local id = self:node_at(x, y, z)
+		return (id ~= nil and self.node_resistance[id]) or 0
+	end
+
 	-- Whether a ray stops at a node. Air does not stop one and neither does
 	-- a node the game says is not pointable; a node whose block has not
 	-- arrived does not either, because pointing at nothing is better than
@@ -2079,7 +2158,7 @@ function M.new(magic, buildat, log, options)
 	-- where a placed node would go, or nil for nothing in range.
 	--
 	-- Marching in steps a tenth of a node long and rounding to the nearest
-	-- integer, which is what games/digger does: a node is the cube around
+	-- integer, which is what apps/digger does: a node is the cube around
 	-- its coordinate, so rounding is the whole test. A step that lands in the
 	-- same node as the last one is skipped rather than asked about twice.
 	local POINT_STEP = 0.1
@@ -2121,7 +2200,11 @@ function M.new(magic, buildat, log, options)
 		for id, obj in pairs(objects) do
 			local props = obj.props
 			local pointable = props and props.pointable or 0
+			-- An object riding on a bone is not drawn ([OVER_SHOULDER]),
+			-- and what is not drawn is not pointed at either: the wieldview
+			-- at a player's feet took every punch aimed past it
 			if obj.position and pointable ~= 0 and not obj.is_self and
+					not obj.attached_to and
 					props.is_visible ~= false and
 					props.selection_min and props.selection_max then
 				local lo = {
@@ -2170,7 +2253,7 @@ function M.new(magic, buildat, log, options)
 
 	-- The outline of the face the ray came through, on the node it stopped
 	-- in. One flat outline that gets turned to whichever face it is, which is
-	-- what games/digger does; NoTextureVColMultiply darkens what is behind it
+	-- what apps/digger does; NoTextureVColMultiply darkens what is behind it
 	-- rather than drawing over it, so it reads on any texture.
 	-- What is pointed at: a frame around every face of the voxel, which
 	-- together read as the wire box Luanti draws around it. Two triangles
@@ -3129,14 +3212,31 @@ function M.new(magic, buildat, log, options)
 	-- standing still at any one time, so what has not moved is left alone.
 	-- The light an object is drawn in only changes when it moves or when the
 	-- day does.
+	-- Where the player's own model stands and which way it faces while a
+	-- third-person view is on ([BOX_PLAYTEST_4] 4, 5): the client's own
+	-- feet and look, since the server's echo of them is a round trip old
+	-- and its yaw is never the local player's. Set by init.lua per frame.
+	self.self_pose = nil
+
 	function self:place_objects(objects, dtime)
 		for id, obj in pairs(objects) do
 			local entry = object_nodes[id]
-			if entry and obj.position then
-				local x = obj.position[1]
-				local y = obj.position[2]
-				local z = obj.position[3]
+			-- The player's own object carries no position from the server
+			-- (it is the client's own), so it is placed from self_pose
+			-- alone ([BOX_PLAYTEST_4] 4, 5): before that it stood wherever
+			-- it was built -- at the camera -- and filled a third-person
+			-- frame with itself
+			if entry and (obj.position or (obj.is_self and self.self_pose)) then
+				local p = obj.position or {0, 0, 0}
+				local x, y, z = p[1], p[2], p[3]
 				local yaw = obj.yaw or 0
+				if obj.is_self and self.self_pose then
+					x, y, z = self.self_pose[1], self.self_pose[2],
+							self.self_pose[3]
+					yaw = -self.self_pose[4]
+					-- Marked so that camera_report() can find it
+					entry.is_self_node = true
+				end
 				if x ~= entry.at_x or y ~= entry.at_y or z ~= entry.at_z then
 					entry.at_x, entry.at_y, entry.at_z = x, y, z
 					entry.node.position = magic.Vector3(x,
@@ -3526,6 +3626,7 @@ function M.new(magic, buildat, log, options)
 		night_horizon = {64, 144, 255},
 		indoors = {100, 100, 100},
 		sun_tint = {244, 125, 29},
+		moon_tint = {127, 153, 204},
 	}
 
 	-- Where the sun is, as a direction to it. Luanti's own: the day is
@@ -3553,7 +3654,7 @@ function M.new(magic, buildat, log, options)
 	-- is left for the sun is what the sun is. Only a little warm: what makes
 	-- sunlight read as golden is the blue ambient beside it, and a light
 	-- warmer than this shows up undisguised in what a glint reflects.
-	-- games/voxel_lighting's sun is the same colour.
+	-- apps/voxel_lighting's sun is the same colour.
 	local SUN_COLOR = {1.0, 0.96, 0.88}
 	-- How much of the horizon's own tint the light takes when the sun is down
 	-- among it. Not all of it: sun_tint is the colour a band of sky is
@@ -3882,6 +3983,19 @@ function M.new(magic, buildat, log, options)
 			if moon_up > 0 then
 				moon_node.direction = magic.Vector3(sx, sy, sz)
 				moon_light.brightness = MOON_BRIGHTNESS * moon_up
+				-- And the moon takes the horizon's colour the way the sun
+				-- does, on the other side of the sky and at the same hours:
+				-- it is crossing the horizon whenever the sun is. Luanti's
+				-- fog_moon_tint, which a game sets beside fog_sun_tint and
+				-- which this read off the wire and never used; see
+				-- [SKY_KNOBS] in doc/plan/rendering_plan.md.
+				local tint = sky_color("moon_tint", 1)
+				local low = low_sun(daylight_time)
+				low = (1 - (1 - low) * (1 - low)) * SUN_TINT_SHARE
+				moon_light.color = magic.Color(
+						MOON_COLOR[1] * (1 - low) + tint.r * low,
+						MOON_COLOR[2] * (1 - low) + tint.g * low,
+						MOON_COLOR[3] * (1 - low) + tint.b * low)
 			end
 			-- What the two are worth to something drawn unlit, which has no
 			-- normal to take a share of them by: the colour of whichever is
@@ -3901,6 +4015,29 @@ function M.new(magic, buildat, log, options)
 			-- rather than the sky's: it is what dawn and dusk are
 			sky_material:SetShaderParameter("SunTint",
 					sky_color("sun_tint", 0.35 + brightness * 0.65))
+			-- What a direction that cannot see the sky is drawn as: Luanti's
+			-- indoors colour, dimmed with the day, mixed by the sky
+			-- visibility cube skyvis.lua already keeps. A seam is a place
+			-- where the rasteriser shows sky where the voxel data says rock,
+			-- so the cube is near zero there by construction and the hole
+			-- goes dark without anything having to detect it. See [CAVE_SKY]
+			-- in doc/plan/rendering_plan.md.
+			--
+			-- auto_dim_skybox is the game's switch for this and nothing
+			-- else; client.lua reads it off SET_SKY, and a game that says
+			-- false keeps its sky undimmed -- the same knob the launcher
+			-- turns through set_auto_dim() ([SKY_KNOBS])
+			sky_material:SetShaderParameter("SkyIndoors",
+					sky_color("indoors", brightness))
+			sky_material:SetShaderParameter("SkyAutoDim",
+					(sky and sky.auto_dim_skybox == false) and 0.0 or 1.0)
+			-- **A parameter a material never sets reads as zero**, and zero
+			-- here means "in a cave", which would draw this client's sky as
+			-- the indoors colour everywhere. Set to one until this client
+			-- computes the scalar for itself; it has the cube that would
+			-- give it -- see skyvis.lua -- and the sky is then edited only
+			-- once there is no sky to see. [CAVE_SKY].
+			sky_material:SetShaderParameter("SkyOutside", 1.0)
 			-- Luanti's clouds are the daylight's own colour, unless the
 			-- game gave them one; either way they go dark with the day. And
 			-- over the hour the sun spends crossing the horizon they take its
@@ -4014,12 +4151,26 @@ function M.new(magic, buildat, log, options)
 			sky_material:SetShaderParameter("CloudCoverage",
 					(sky and sky.clouds == false) and 0 or
 					(sky_bodies.clouds.density or CLOUD_DENSITY_DEFAULT))
+			-- And the reflections follow, once a second at most: the sun
+			-- moves every frame and the cube is six renders
+			if sky_cube and scene.elapsedTime >= (self.sky_cube_due or 0) then
+				self.sky_cube_due = scene.elapsedTime + 1
+				sky_cube:update()
+			end
 		end
 	end
 
 	-- What the light and the time are now. Nothing is drawn from here: the
 	-- sky is drawn every frame by apply_daylight(), easing towards whatever
 	-- this last said, which is what makes the day pass rather than step.
+	-- Where the sun is, as the sine of its elevation: what the pre-dawn
+	-- light is measured against ([DAWN_LIGHT]), asked for by the code that
+	-- decides the day factor
+	function self:sun_height(time_of_day)
+		local _, y = sun_direction(time_of_day)
+		return y
+	end
+
 	function self:set_daylight(factor, time_of_day)
 		daylight = factor
 		daylight_time = time_of_day or daylight_time
@@ -4027,6 +4178,12 @@ function M.new(magic, buildat, log, options)
 
 	function self:set_sky(new_sky)
 		sky = new_sky
+		-- Where the fog starts is the game's to say, as a fraction of the
+		-- range; 0.7 is this client's own when it says nothing. The
+		-- reference fixture says 0.99, which is the fog off. [SKY_KNOBS].
+		if zone and type(sky.fog_start) == "number" and sky.fog_start >= 0 then
+			zone.fogStart = far_clip * math.min(sky.fog_start, 0.99)
+		end
 	end
 
 	-- What the game says is in the sky, each out of its own packet. The
@@ -4196,6 +4353,7 @@ function M.new(magic, buildat, log, options)
 		local collision = {}
 		local solid = {}
 		local liquid = {}
+		local resistance = {}
 		local post_effect = {}
 		local selection = {}
 		local pointable = {}
@@ -4243,8 +4401,10 @@ function M.new(magic, buildat, log, options)
 			-- stops a ray without being pointed at. Those two values are
 			-- that way round because they used to be a boolean.
 			pointable[id] = def.pointable ~= 0
-			liquid[id] = def.liquid_type ~= nil and
-					def.liquid_type ~= NODEDEF_LIQUID_NONE
+			-- What a body swims in is the node's liquid_move_physics, as
+			-- LocalPlayer has it; a game sets it either way
+			liquid[id] = def.liquid_move_physics == true
+			resistance[id] = def.move_resistance or 0
 			if def.post_effect_color and def.post_effect_color.a > 0 then
 				post_effect[id] = def.post_effect_color
 			end
@@ -4359,6 +4519,7 @@ function M.new(magic, buildat, log, options)
 			self.node_collision = collision
 			self.node_solid = solid
 			self.node_liquid = liquid
+			self.node_resistance = resistance
 			self.node_post_effect = post_effect
 			self.node_selection = selection
 			self.node_pointable = pointable
@@ -4429,6 +4590,17 @@ function M.new(magic, buildat, log, options)
 	-- session -- and the first blocks it sends are the ones around the
 	-- player, which is exactly where a hole is worst.
 	function self:update(dtime, drop_distance)
+		-- A device reset -- a change of screen mode on Windows -- loses
+		-- what was filled by hand; the registry puts its Images back
+		-- ([BOX_PLAYTEST_3] 1)
+		self.atlas_reg:update()
+		-- The reflection cube's faces go out one a frame, and `tick` is
+		-- what sends them: `update()` above only says that a refresh is
+		-- due ([CLIENT_FRAME]). Without this the cube is asked for and
+		-- never drawn.
+		if sky_cube then
+			sky_cube:tick()
+		end
 		-- Every frame, because easing towards a target is what it is for
 		if daylight then
 			apply_daylight(dtime)
@@ -4520,8 +4692,8 @@ function M.new(magic, buildat, log, options)
 			object_nodes[id] = nil
 		end
 		-- Dropping the viewport rather than replacing it: there is nothing
-		-- else to show, and SetViewport() takes no nil
-		magic.renderer.numViewports = 0
+		-- else to show
+		magic.set_preferred_viewports({})
 		-- HDR and the render path are the renderer's, not the viewport's, so
 		-- a world that has gone has to hand them back or the menu after it is
 		-- drawn through a tone curve with nothing to tone map
@@ -4550,9 +4722,46 @@ function M.new(magic, buildat, log, options)
 	-- that one is negated. Getting either sense wrong is not just a mirrored
 	-- view: the server sends the blocks it thinks the player can see, so it
 	-- would send the ones the player is looking away from.
-	function self:set_camera(x, y, z, pitch, yaw)
+	-- What set_camera() last placed, for camera_report()
+	local camera_placed = nil
+
+	-- Where the camera and the player's own model actually are, as the
+	-- frame was drawn: [OVER_SHOULDER]'s open reading, which is that the
+	-- model's feet land in the shot as if the camera were nearer than the
+	-- setback loop's own last value. Said on demand rather than per frame,
+	-- and read beside the shot.
+	function self:camera_report()
+		-- What set_camera() was last given rather than what the node
+		-- reads back: a Quaternion's pitch and yaw are not on the
+		-- sandbox's whitelist, and these are the numbers that placed it
+		local c = camera_placed or {}
+		local out = string.format(
+				"camera at %.2f,%.2f,%.2f pitch %.1f yaw %.1f fov %.1f",
+				c[1] or 0, c[2] or 0, c[3] or 0, c[4] or 0, c[5] or 0,
+				camera and camera.fov or 0)
+		local p = {x = c[1] or 0, y = c[2] or 0, z = c[3] or 0}
+		local pose = self.self_pose
+		if pose then
+			local dx, dy, dz = p.x - pose[1], p.y - pose[2], p.z - pose[3]
+			out = out .. string.format(
+					"; feet %.2f,%.2f,%.2f, %.2f from the eye",
+					pose[1], pose[2], pose[3],
+					math.sqrt(dx * dx + dy * dy + dz * dz))
+		end
+		for _, entry in pairs(object_nodes) do
+			if entry.is_self_node then
+				local q = entry.node.position
+				out = out .. string.format("; own node at %.2f,%.2f,%.2f",
+						q.x, q.y, q.z)
+			end
+		end
+		return out
+	end
+
+	function self:set_camera(x, y, z, pitch, yaw, roll)
+		camera_placed = {x, y, z, pitch or 0, yaw or 0}
 		camera_node.position = magic.Vector3(x, y, z)
-		camera_node.rotation = magic.Quaternion(pitch or 0, -(yaw or 0), 0)
+		camera_node.rotation = magic.Quaternion(pitch or 0, -(yaw or 0), roll or 0)
 		-- Kept for the light refresh, which only asks for blocks near enough
 		-- to be worth a resend; see refresh_wanted()
 		camera_at = {x, y, z}
