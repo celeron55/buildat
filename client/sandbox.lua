@@ -337,10 +337,10 @@ local function wrap_globals(base_sandbox)
 	return sandbox
 end
 
-local function run_function_in_sandbox(untrusted_function, sandbox, own_buildat)
+local function run_function_in_sandbox(untrusted_function, sandbox, own_globals)
 	sandbox = wrap_globals(sandbox)
-	if own_buildat then
-		rawset(sandbox, "buildat", own_buildat)
+	for k, v in pairs(own_globals or {}) do
+		rawset(sandbox, k, v)
 	end
 	setfenv(untrusted_function, sandbox)
 	local retval = nil
@@ -402,7 +402,7 @@ function __buildat_run_function_in_sandbox(untrusted_function)
 end
 
 local function run_code_in_sandbox(untrusted_code, sandbox, chunkname,
-		own_buildat)
+		own_globals)
 	if untrusted_code:byte(1) == 27 then
 		return false, "binary bytecode prohibited", nil
 	end
@@ -410,7 +410,7 @@ local function run_code_in_sandbox(untrusted_code, sandbox, chunkname,
 	if not untrusted_function then
 		return false, message, nil
 	end
-	return run_function_in_sandbox(untrusted_function, sandbox, own_buildat)
+	return run_function_in_sandbox(untrusted_function, sandbox, own_globals)
 end
 
 function __buildat_run_code_in_sandbox(untrusted_code, chunkname)
@@ -429,12 +429,12 @@ end
 -- What core:run_script runs is a server's too (app.cpp's run_script)
 __buildat_served_chunks["=server"] = true
 
--- What a server sends runs with the served buildat (below) as its own:
--- core:run_script (app.cpp) and every file it runs by name
-local served_buildat
+-- What a server sends runs with the served buildat and require (below) as
+-- its own: core:run_script (app.cpp) and every file it runs by name
+local served_globals = {}
 function __buildat_run_served_code(code, chunkname)
 	local status, err, retval = run_code_in_sandbox(
-			code, __buildat_sandbox_environment, chunkname, served_buildat)
+			code, __buildat_sandbox_environment, chunkname, served_globals)
 	if status == false then
 		log:error("Failed to run script:\n"..err)
 		local ok, why = pcall(__buildat_report_error, err)
@@ -484,7 +484,34 @@ do
 	for k, v in pairs(__buildat_served_overrides) do
 		t[k] = v
 	end
-	served_buildat = view(t)
+	served_globals.buildat = view(t)
+end
+
+-- And require: the extensions as anyone gets them, but the network one
+-- without what is the user's alone -- the addresses they have been to,
+-- with the descriptions and the names they used there, and the name kept
+-- per address -- which any server's script read ([SECURITY_RUN_1]). Only
+-- the launch UIs and the client's own extensions ask for them.
+do
+	local real_require = __buildat_sandbox_environment.require
+	local withheld = {known_addresses = true, set_address_name = true}
+	local network_for_servers
+	served_globals.require = function(name)
+		local m = real_require(name)
+		if name ~= "buildat/extension/network" then
+			return m
+		end
+		if not network_for_servers then
+			local t = {}
+			for k, v in pairs(real_of[m] or m) do
+				if not withheld[k] then
+					t[k] = v
+				end
+			end
+			network_for_servers = view(t)
+		end
+		return network_for_servers
+	end
 end
 __buildat_sandbox_environment.buildat =
 		view(__buildat_sandbox_environment.buildat)
