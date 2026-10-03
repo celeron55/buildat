@@ -4753,6 +4753,13 @@ function core.__dig_node(pos, digger)
 	if node.name == "ignore" then
 		return false
 	end
+	-- A player digs what they could reach, and with interact; the node goes
+	-- back to their client either way, as below
+	if digger and core.__may_interact and
+			not core.__may_interact(digger, pos) then
+		core.swap_node(pos, node)
+		return false
+	end
 	local dug = core.node_dig(pos, node, digger) and true or false
 	-- The node as it is now goes back to the clients whatever happened,
 	-- so a client that predicted the dig ([PREDICTION]) is put right when
@@ -4775,6 +4782,10 @@ end
 function core.__punch_node(pos, puncher)
 	local node = core.get_node(pos)
 	if node.name == "ignore" then
+		return false
+	end
+	if puncher and core.__may_interact and
+			not core.__may_interact(puncher, pos) then
 		return false
 	end
 	core.node_punch(pos, node, puncher, pointed_at(pos))

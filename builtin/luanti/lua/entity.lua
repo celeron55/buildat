@@ -2238,6 +2238,12 @@ function core.__punch_object(playername, id)
 	if ref == nil or puncher == nil then
 		return false
 	end
+	-- Anything, from anywhere, was a punch: an object id is all the
+	-- client sends ([SECURITY_RUN_1])
+	local at = ref:get_pos()
+	if not at or not core.__may_interact(puncher, at) then
+		return false
+	end
 	local wielded = puncher.get_hand_item and puncher:get_hand_item() or
 			puncher:get_wielded_item()
 	local caps = wielded:get_tool_capabilities()
@@ -2279,6 +2285,11 @@ function core.__use_node_inner(playername, under, above, sneak)
 	local id = players[playername]
 	local ref = id and core.object_refs[id]
 	if not ref then
+		return false
+	end
+	-- The node clicked, within reach and with interact (__use_node puts
+	-- the client right either way)
+	if not core.__may_interact(ref, under) then
 		return false
 	end
 	-- What the client was holding when it clicked. Luanti's own
@@ -2456,6 +2467,17 @@ local function may_reach(ref, playername, pos, detached)
 		end
 	end
 	return true
+end
+
+-- The same rule for what a player does to the world: dig, punch, place
+-- and punch an object all need interact and to be within reach, as in
+-- Luanti's handleCommand_Interact. Called from bootstrap.lua's dig and
+-- punch, and below.
+function core.__may_interact(ref, pos)
+	if not ref or not ref.is_player or not ref:is_player() then
+		return true -- nobody: a mod's own dig_node()
+	end
+	return may_reach(ref, ref:get_player_name(), pos, nil)
 end
 
 local function same_pos(a, b)
@@ -3027,7 +3049,10 @@ function core.__add_player(name)
 		acc = {x = 0, y = 0, z = 0},
 		rot = {x = 0, y = 0, z = 0},
 		props = table.copy(DEFAULT_PROPERTIES),
-		armor_groups = {},
+		-- What PlayerSAO's constructor gives every player: a punch does
+		-- damage through a group, and with none no player was ever hurt
+		-- by one
+		armor_groups = {fleshy = 100},
 		hp = 20,
 		player_name = name,
 		meta = core.__new_metadata({}),
@@ -3934,6 +3959,39 @@ end
 local function immortal(o)
 	return (o.armor_groups and (tonumber(o.armor_groups.immortal) or 0) ~= 0)
 			or not core.settings:get_bool("enable_damage", true)
+end
+
+-- A punched player, as Luanti's PlayerSAO::punch has it: nothing from
+-- another player while this one is immortal or PvP is off; otherwise the
+-- registered on_punchplayer callbacks hear it -- all of them, any one
+-- saying it dealt with it -- and the damage is done if none did. It was
+-- the entity's punch, which knows none of the three ([SECURITY_RUN_1]).
+function PlayerRef:punch(puncher, time_from_last_punch, tool_capabilities,
+		dir)
+	local o = state_of(self)
+	if not o then
+		return
+	end
+	local by_player = puncher and puncher.is_player and puncher:is_player()
+	if by_player and (immortal(o) or
+			not core.settings:get_bool("enable_pvp", true)) then
+		return
+	end
+	local hit = core.get_hit_params(o.armor_groups, tool_capabilities,
+			time_from_last_punch)
+	local handled = false
+	for _, cb in ipairs(core.registered_on_punchplayers or {}) do
+		local ok, r = pcall(cb, self, puncher, time_from_last_punch,
+				tool_capabilities, dir, hit.hp)
+		if not ok then
+			core.log("error", "on_punchplayer: " .. tostring(r))
+		elseif r then
+			handled = true
+		end
+	end
+	if not handled and hit.hp > 0 then
+		self:set_hp((o.hp or 0) - hit.hp, {type = "punch", object = puncher})
+	end
 end
 
 -- Air, and the want of it. Luanti's own intervals and its own order: the
