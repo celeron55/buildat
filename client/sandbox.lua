@@ -167,6 +167,11 @@ for _, k in ipairs({"coroutine", "string", "table", "math", "os"}) do
 	real_of[p] = t
 	__buildat_sandbox_environment[k] = p
 end
+-- **And the string metatable**, which every string shares with the host:
+-- ("").dump was string.dump past the curated table above ([SANDBOX_HUNT],
+-- 2026-10-03). Strings' methods are the curated ones, in and out of the
+-- sandbox; the host keeps the whole library as `string`.
+getmetatable("").__index = real_of[__buildat_sandbox_environment.string]
 
 --
 -- Sandbox require
