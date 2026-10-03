@@ -82,7 +82,15 @@ struct RCCPP_Info {
 // this engine does constantly.
 ss_ cxxflags_optimize()
 {
+#ifdef BUILDAT_SANITIZE
+	// A sanitizer build's modules are instrumented too: they are where a
+	// client's packet is handled, and a fuzz run against an uninstrumented
+	// module sees a crash and nothing short of one. In the module hash as
+	// well, so neither build is handed the other's.
+	return "-O1 -fsanitize=" BUILDAT_SANITIZE " -fno-omit-frame-pointer";
+#else
 	return "-O1";
+#endif
 }
 
 struct CCompiler: public Compiler

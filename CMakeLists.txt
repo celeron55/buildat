@@ -78,8 +78,9 @@ endif()
 # -DSANITIZE=address builds with AddressSanitizer, and the option is passed
 # to the bundled Urho3D's own build below, because the engine is where a
 # use-after-free of a scene node would be. Build it in a directory of its
-# own -- Build/asan -- so that the ordinary build is untouched, and run it
-# with ASAN_OPTIONS=detect_leaks=0:abort_on_error=1, a long-lived engine's
+# own -- Build/asan -- so that the ordinary build is untouched, and build
+# and run it with ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 (LuaJIT's
+# build-time host tool leaks, and LeakSanitizer fails the build), a long-lived engine's
 # exit leaks being what would otherwise bury the report. It costs about
 # twice the CPU and three times the memory, which is why it is not the
 # default. See doc/plan/master_plan.md, "Catching a use-after-free before it
@@ -93,6 +94,8 @@ if(SANITIZE)
 	set(CMAKE_SHARED_LINKER_FLAGS
 			"${CMAKE_SHARED_LINKER_FLAGS} ${SANITIZE_FLAGS}")
 	message(STATUS "Building with -fsanitize=${SANITIZE}")
+	# For rccpp to build the runtime-compiled modules the same way
+	add_definitions(-DBUILDAT_SANITIZE="${SANITIZE}")
 endif()
 
 # The bundled Urho3D is built in one directory, shared by every buildat
