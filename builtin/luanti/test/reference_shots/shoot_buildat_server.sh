@@ -89,14 +89,12 @@ cd "$here/Build"
 srv=""; cli=""
 trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 # A leftover server from a picker or a killed run still holds the save
-# sqlite. A random port does not help: two of them fight over the same
-# database. Kill ours rather than wait twenty minutes for someone else's.
+# sqlite, and a random port does not help: two of them fight over the same
+# database. **Refused rather than killed** (2026-10-03): killall took every
+# buildat on the machine, the user's own and other runs' included.
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
-	echo "killing leftover buildat" >&2
-	killall -TERM buildat_server buildat 2>/dev/null || true
-	sleep 1
-	killall -KILL buildat_server buildat 2>/dev/null || true
-	sleep 1
+	echo "a buildat server or client is already running; stop it first" >&2
+	exit 2
 fi
 rm -rf "../user/apps/vanilla/saves/$save"
 port=$(( 29600 + (RANDOM % 90) ))
@@ -118,11 +116,17 @@ case " $modes " in
 	esac ;;
 *) tilt=0 ;;
 esac
+# Where the boxed server can read it ([PROCESS_SANDBOX]): the user path's
+# shared part, which every app reads; a fixture under /tmp stopped the
+# server at "Cannot read" (2026-10-03)
+boxed_fixture="$here/user/shared/vanilla/refshots_fixture.lua"
+mkdir -p "$here/user/shared/vanilla"
+cp "$fixture" "$boxed_fixture"
 BUILDAT_LUANTI_ORBIT_TILT="${BUILDAT_LUANTI_ORBIT_TILT:-$tilt}" \
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_IMPORT="$world" BUILDAT_LUANTI_PBR="$first_mode" \
 	BUILDAT_VOXELWORLD_KEEP_LOADED=1 \
-	BUILDAT_LUANTI_LUA="$fixture" \
+	BUILDAT_LUANTI_LUA="$boxed_fixture" \
 	BUILDAT_VIEW_RANGE="$RANGE" BUILDAT_VIEW_BOBBING=0 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/srv.log" &

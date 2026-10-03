@@ -25,6 +25,10 @@ uniform vec3 cSkyTop;
 uniform vec3 cSkyHorizon;
 uniform vec3 cSunDirection;
 uniform vec3 cSunTint;
+// [DAWN_LIGHT]: the sky's light before the sun, a radiance added on the band
+// along the horizon in the sun's half -- so the glow lights the cube the
+// reflections are drawn from, as the band does. Unset reads as zero.
+uniform vec3 cDawnGlow;
 uniform vec3 cCloudColor;
 uniform float cStarFade;
 // What the game says is up there: half the width of the sun's and the moon's
@@ -322,6 +326,8 @@ void PS()
         float band = pow(max(towards, 0.0), 3.0) *
                 pow(1.0 - min(abs(d.y), 1.0), 2.5) * low;
         color = mix(color, cSunTint, band * 0.8);
+        color += cDawnGlow * pow(max(towards, 0.0), 2.0) *
+                pow(1.0 - min(abs(d.y), 1.0), 4.0);
     }
 
     // The stars, behind everything else up there and only when the sky is

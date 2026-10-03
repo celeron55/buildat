@@ -237,6 +237,35 @@ function M.predawn(height)
 	return PREDAWN_PEAK * (height - PREDAWN_LOW) / -PREDAWN_LOW
 end
 
+-- **The dawn glow** ([DAWN_LIGHT], the term the user set the two ramps
+-- aside for, 2026-09-25): the light of the sky before the sun, as a
+-- radiance of its own on the same window as predawn() -- nothing below
+-- PREDAWN_LOW, the most at the horizon, nothing above it -- in the sky's
+-- units (noon's dome is about 5.4). It does not raise the sun or the sky
+-- curve: the sky's band is brightened by it as a radiance, and the
+-- ambient, the bounce and the ground light take a share of it, in the
+-- glow's orange. Dusk is the mirror, the sun's height being the same.
+--   BUILDAT_LUANTI_DAWN_GLOW     the band's radiance at the horizon
+--   BUILDAT_LUANTI_DAWN_AMBIENT  the share of it the ambient terms take
+-- simplified: the picks below are a first guess named as one, until the
+-- user picks off local/options_for_DAWN_LIGHT/glow/
+M.DAWN_GLOW = tonumber(buildat.get_env("BUILDAT_LUANTI_DAWN_GLOW") or "") or 1.0
+M.DAWN_AMBIENT = tonumber(buildat.get_env("BUILDAT_LUANTI_DAWN_AMBIENT") or "")
+		or 0.15
+M.DAWN_COLOR = {r = 1.0, g = 0.55, b = 0.25}
+
+-- The glow's radiance at a sun's height, 0 outside the window
+function M.dawn_glow(height)
+	if height >= 0 or height <= PREDAWN_LOW then
+		return 0
+	end
+	return M.DAWN_GLOW * (height - PREDAWN_LOW) / -PREDAWN_LOW
+end
+assert(M.dawn_glow(0.1) == 0 and M.dawn_glow(-0.4) == 0,
+		"no glow with the sun up or before the window")
+assert(math.abs(M.dawn_glow(-0.0001) - M.DAWN_GLOW) < 0.001,
+		"the most at the horizon")
+
 if not (buildat.get_env("BUILDAT_LUANTI_NO_PREDAWN") or ""):find("%S") then
 	assert(M.predawn(0.2) == 0 and M.predawn(-0.5) == 0,
 			"nothing above the horizon and nothing before it begins")
@@ -425,6 +454,11 @@ function M.new(scene, sun_dir, defaults)
 					color.r or color[1] or 1, color.g or color[2] or 1,
 					color.b or color[3] or 1))
 		end
+	end
+
+	-- [DAWN_LIGHT]'s glow on the band along the horizon, a radiance
+	function self:set_dawn_glow(r, g, b)
+		material:SetShaderParameter("DawnGlow", magic.Vector3(r, g, b))
 	end
 
 	-- The game's own picture of it, or nil for the shader's painted square.

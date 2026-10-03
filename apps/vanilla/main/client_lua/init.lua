@@ -1941,14 +1941,24 @@ local function update_sky(dt)
 		local c = sky_now.dome or blend(NIGHT_AMBIENT, SKY_AMBIENT, day)
 		local lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 		local k = lum > 1e-6 and mean / lum or 0
-		zone.ambientColor = magic.Color(c.r * k, c.g * k, c.b * k)
+		-- [DAWN_LIGHT]'s glow: on the sky's band, and a share of it added
+		-- to the three ambient terms in its orange -- each of which the
+		-- shader gates by the face's sky, so a sealed chamber keeps its
+		-- dark; never into the cave floor
+		local glow = luanti_sky.dawn_glow(height)
+		local gc = luanti_sky.DAWN_COLOR
+		local ga = glow * luanti_sky.DAWN_AMBIENT
+		world_sky:set_dawn_glow(glow * gc.r, glow * gc.g, glow * gc.b)
+		zone.ambientColor = magic.Color(c.r * k + ga * gc.r,
+				c.g * k + ga * gc.g, c.b * k + ga * gc.b)
 		-- And what a face the sky does not reach gets instead: light off
 		-- the surroundings, a share of the sky's mean in its hue -- the
 		-- second term ([PBR_FIT] term 2), fitted to the render's cave
 		-- mouth. simplified: one share for the whole day; the render's
 		-- cave at other hours is what would fit it further.
-		voxel_shading.set_bounce_light(c.r * k * PHYS.bounce,
-				c.g * k * PHYS.bounce, c.b * k * PHYS.bounce)
+		voxel_shading.set_bounce_light((c.r * k + ga * gc.r) * PHYS.bounce,
+				(c.g * k + ga * gc.g) * PHYS.bounce,
+				(c.b * k + ga * gc.b) * PHYS.bounce)
 		-- A lamp at full in the sky's units: PHYS.lamp, in the glowstone's
 		-- own orange, fitted to the render's LAMP_RADIANCE on the ceiling
 		-- above it ([LAMP_REF], lamp_wall). simplified: one level and one
@@ -1983,9 +1993,9 @@ local function update_sky(dt)
 		local sun = PHYS.sun(height) * math.max(height, 0) * 1.0 / math.pi
 		local sc = sky_lights.sun.color
 		voxel_shading.set_ground_light(
-				PHYS.ground.r * (sun * sc.r + c.r * k),
-				PHYS.ground.g * (sun * sc.g + c.g * k),
-				PHYS.ground.b * (sun * sc.b + c.b * k))
+				PHYS.ground.r * (sun * sc.r + c.r * k + ga * gc.r),
+				PHYS.ground.g * (sun * sc.g + c.g * k + ga * gc.g),
+				PHYS.ground.b * (sun * sc.b + c.b * k + ga * gc.b))
 		-- [CAVE_AO]: a constant light under the ambient so a cave at both
 		-- nibbles nought keeps its corners. The same at every hour, which
 		-- is what [UNDERGROUND_LIGHT]'s invariant needs. **0.04, picked by
