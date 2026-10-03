@@ -389,6 +389,9 @@ static const size_t MAX_PEERS = FD_SETSIZE > 80 ? 900 : FD_SETSIZE - 16;
 #else
 static const size_t MAX_PEERS = 900;
 #endif
+// From one address that is not loopback or a trusted proxy: a household
+// behind one NAT, with room to spare
+static const size_t MAX_PEERS_PER_ADDRESS = 32;
 
 static ss_ base64(const ss_ &data)
 {
@@ -670,8 +673,6 @@ struct Module: public interface::Module, public network::Interface
 		// No more peers than the wait can watch: select() takes fds under
 		// FD_SETSIZE, and every peer is one. Past the cap a connection is
 		// accepted and closed, which empties the backlog as it goes.
-		// simplified: one cap for all; a cap per address is the upgrade
-		// for a server that sees one address flood it.
 		if(m_peers.size() >= web::MAX_PEERS){
 			if(m_peers_full_logged_us + 10000000 < interface::os::time_us()){
 				m_peers_full_logged_us = interface::os::time_us();
@@ -680,6 +681,24 @@ struct Module: public interface::Module, public network::Interface
 			}
 			socket->close_fd();
 			return;
+		}
+		// And no more than MAX_PEERS_PER_ADDRESS from one address, so that
+		// one host cannot take every place ([SECURITY_RUN_1]). Loopback and
+		// the trusted proxies carry many players each and are not counted.
+		const ss_ from = socket->get_remote_address();
+		if(!loopback(from) && !trusted_proxy(from)){
+			size_t same = 0;
+			for(auto &pair : m_peers)
+				same += pair.second.socket->get_remote_address() == from;
+			if(same >= web::MAX_PEERS_PER_ADDRESS){
+				if(m_peers_full_logged_us + 10000000 < interface::os::time_us()){
+					m_peers_full_logged_us = interface::os::time_us();
+					log_w(MODULE, "%s has %zu connections: refusing more from it",
+							cs(from), same);
+				}
+				socket->close_fd();
+				return;
+			}
 		}
 		// A peer's socket must not block: a send that waits for a client to
 		// read holds this module, and everything that wants to send
@@ -702,24 +721,31 @@ struct Module: public interface::Module, public network::Interface
 	// addresses web_trusted_proxies names (comma separated; loopback by
 	// default, which is nginx on the same box). The last entry is the one
 	// the proxy added; one that is not an address is ignored.
-	ss_ forwarded_for(const Peer &peer, const ss_ &header)
+	bool trusted_proxy(const ss_ &from)
 	{
-		if(header.empty())
-			return "";
-		const ss_ from = peer.socket->get_remote_address();
 		const ss_ trusted = m_server->get_config().get<ss_>(
 				"web_trusted_proxies");
-		bool ok = false;
 		size_t at = 0;
 		while(at <= trusted.size()){
 			size_t comma = trusted.find(',', at);
 			if(comma == ss_::npos)
 				comma = trusted.size();
 			if(web::trim(trusted.substr(at, comma - at)) == from)
-				ok = true;
+				return true;
 			at = comma + 1;
 		}
-		if(!ok)
+		return false;
+	}
+	static bool loopback(const ss_ &a)
+	{
+		return a.compare(0, 4, "127.") == 0 || a == "::1" ||
+				a.compare(0, 11, "::ffff:127.") == 0;
+	}
+	ss_ forwarded_for(const Peer &peer, const ss_ &header)
+	{
+		if(header.empty())
+			return "";
+		if(!trusted_proxy(peer.socket->get_remote_address()))
 			return "";
 		size_t comma = header.find_last_of(',');
 		ss_ last = web::trim(comma == ss_::npos ? header : header.substr(comma + 1));

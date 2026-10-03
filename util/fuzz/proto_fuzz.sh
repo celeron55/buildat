@@ -100,6 +100,25 @@ while True: s.sendall(chunk)' "$port" "$flood" 2>/dev/null
 	echo "a flood from one peer grew the server by $grow MB"
 	[ "$grow" -gt 150 ] && bad="a flood from one peer grew the server by $grow MB"
 fi
+# One address holds no more than 32 places; from this machine's LAN
+# address, which is not loopback
+lan=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+')
+if [ -z "$bad" ] && [ -n "$lan" ]; then
+	held=$(timeout 20 python3 -c '
+import socket, sys, time
+ss = [socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=3)
+		for _ in range(40)]
+time.sleep(1.5)
+held = 0
+for s in ss:
+	s.setblocking(False)
+	try: held += s.recv(1) != b""
+	except BlockingIOError: held += 1
+	except OSError: pass
+print(held)' "$lan" "$port" 2>/dev/null)
+	echo "40 connections from $lan: ${held:-?} held"
+	[ "${held:-0}" = 32 ] || bad="40 connections from one address: ${held:-?} held, not 32"
+fi
 # Still answering after it
 if [ -z "$bad" ] && ! timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/$port" 2>/dev/null; then
 	bad="the server stopped answering"
