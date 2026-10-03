@@ -3683,7 +3683,14 @@ apply_camera()
 -- hums is the list of games ([LAUNCH_WORLD]'s own reason for generating
 -- the audio rather than looping a file).
 log:info(synth.self_check(magic))
-local bed = synth.new(magic, log)
+-- **The sound as an options round** (stage 3; see synth.lua's STYLES and
+-- local/options_for_LOBBY_sound/): BUILDAT_LAUNCH_SOUND=<name>, "today"
+-- until the user's pick. Only "today" keeps the orbs' voices, which
+-- section 13 cuts.
+sound_style = synth.STYLES[env("BUILDAT_LAUNCH_SOUND")] and
+		env("BUILDAT_LAUNCH_SOUND") or "today"
+log:info("sound: " .. sound_style)
+local bed = synth.new(magic, log, sound_style)
 bed:set_voices(#orb_nodes)
 bed:play(scene:CreateChild("sound"))
 kept.bed = bed
@@ -3698,7 +3705,8 @@ kept.bed = bed
 -- pitches costs one loop of Lua.
 -- One table, not eight locals: a Lua chunk may have two hundred and
 -- this room's main function is near it
-local drone = {VOICES = 6, LOW = 40.0, HIGH = 160.0, t = 0, voices = {},
+local drone = {VOICES = sound_style == "today" and 6 or 0, LOW = 40.0,
+	HIGH = 160.0, t = 0, voices = {},
 	}
 -- What the save said, if it said anything
 if saved_sound then
@@ -3751,7 +3759,7 @@ log:info(("the room hums: %d voices of %d orbs, %.1f to %.1f Hz, " ..
 		magic.audio and (magic.audio.playing and "playing" or "silent")
 				or "missing",
 		(magic.audio and magic.audio.listener) and "placed" or "none",
-		tostring(drone.voices[1].dark.source.playing)))
+		tostring(drone.voices[1] and drone.voices[1].dark.source.playing)))
 
 -- **A pitch is a hash of the orb's name**, not its index, so an orb
 -- sounds the same every boot and moving things about does not retune

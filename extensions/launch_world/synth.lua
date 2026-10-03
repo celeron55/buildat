@@ -53,8 +53,43 @@ local function note_hz(semitones)
 	return 55 * 2 ^ (semitones / 12)
 end
 
-function M.new(magic, log)
+-- **The sound, as an options round** ([LAUNCH_WORLD] stage 3, the sound;
+-- local/options_for_LOBBY_sound/): M.new's `style`, which the room takes
+-- from BUILDAT_LAUNCH_SOUND. "today" is the bed and the drone as stage 2
+-- left them, and stays the default until the user's pick. The others play
+-- no beat and no orb voices -- both cut in section 13 -- but a soft
+-- music, and the thunk and the desk's beep softened:
+--   pad       a slow four-voice pad, Cmaj7 Am7 Fmaj7 Gadd9, 8 s a chord
+--   pad_dark  the same, lower and slower: Dm9 Bbmaj7 Gm7 Am7, 12 s
+--   chimes    no pad: a bell note on a pentatonic scale every few seconds
+--   quiet     nothing but the soft thunk and the soft beep
+M.STYLES = {today = true, pad = true, pad_dark = true, chimes = true,
+	quiet = true}
+local SOFT = {
+	pad = {base = 130.81, dur = 8.0, gain = 0.055, chords = {
+		{0, 4, 7, 11}, {-3, 0, 4, 7}, {-7, -3, 0, 4}, {-5, -1, 2, 7}}},
+	pad_dark = {base = 73.42, dur = 12.0, gain = 0.06, chords = {
+		{0, 7, 12, 16}, {-4, 3, 7, 14}, {-7, 3, 7, 10}, {-5, 2, 7, 12}}},
+	chimes = {chimes = true},
+	quiet = {},
+}
+-- A sine by table: the pads' four voices and their overtones a sample
+local SINE = {}
+for i = 0, 1023 do
+	SINE[i] = math.sin(i / 1024 * 6.2831853)
+end
+local function sine(phase)
+	return SINE[math.floor((phase % 1) * 1024)]
+end
+local PENTA = {0, 2, 4, 7, 9, 12, 14, 16}
+
+function M.new(magic, log, style)
 	local s = {
+		style = M.STYLES[style or ""] and style or "today",
+		chimes = {},        -- {f, age} of the bells ringing
+		next_chime = 0,     -- samples until the next one
+		thunk_age = 0,
+		beep_age = 0,
 		magic = magic,
 		log = log,
 		t = 0,              -- samples generated since the start
@@ -128,7 +163,103 @@ function M.new(magic, log)
 	end
 
 	-- One block of samples, mixed and written
+	-- The soft styles' block: no beat, no drone, a pad or the bells, and
+	-- the softened thunk and beep
+	function s:fill_soft()
+		local buf = self.buffer
+		buf:Clear()
+		local cfg = SOFT[self.style]
+		if self.thunk_wanted then
+			self.thunk_wanted = false
+			self.env.thunk = 1
+			self.thunk_age = 0
+		end
+		if self.beep_wanted then
+			self.beep_wanted = false
+			self.env.beep = 1
+			self.beep_age = 0
+		end
+		local xf = 2.5 * RATE
+		for i = 0, BLOCK - 1 do
+			local t = self.t + i
+			local x = 0
+			if cfg.chords then
+				local dur = cfg.dur * RATE
+				local c = math.floor(t / dur)
+				-- This chord, and the last one fading under it
+				for back = 0, 1 do
+					local ci = c - back
+					if ci >= 0 then
+						local tc = t - ci * dur
+						local e
+						if tc < xf then
+							e = tc / xf
+						elseif tc < dur then
+							e = 1
+						else
+							e = 1 - (tc - dur) / xf
+						end
+						if e > 0 then
+							e = e * e * (3 - 2 * e)
+							local chord = cfg.chords[ci % #cfg.chords + 1]
+							for _, semi in ipairs(chord) do
+								local f = cfg.base * 2 ^ (semi / 12)
+								local ph = f * t / RATE
+								x = x + (sine(ph) + 0.12 * sine(ph * 2) +
+										0.04 * sine(ph * 3)) * e * cfg.gain
+							end
+						end
+					end
+				end
+			end
+			if cfg.chimes then
+				self.next_chime = self.next_chime - 1
+				if self.next_chime <= 0 then
+					local n = PENTA[math.floor((rand(self) + 1) * 4) % #PENTA + 1]
+					self.chimes[#self.chimes + 1] = {f = 523.25 * 2 ^ (n / 12),
+						age = 0}
+					if #self.chimes > 4 then table.remove(self.chimes, 1) end
+					self.next_chime = math.floor(RATE * (3 + (rand(self) + 1) * 2))
+				end
+				for _, ch in ipairs(self.chimes) do
+					local a = ch.age / RATE
+					local e = math.min(1, ch.age / 60) * math.exp(-a / 1.6)
+					local ph = ch.f * ch.age / RATE
+					x = x + (sine(ph) + 0.25 * sine(ph * 2.76)) * e * 0.10
+					ch.age = ch.age + 1
+				end
+			end
+			-- The thunk, softened: a low sine falling from 140 to 80 Hz, a
+			-- few milliseconds' rise and a short tail, no noise
+			if self.env.thunk > 0.0005 then
+				local a = self.thunk_age / RATE
+				local f = 80 + 60 * math.exp(-a / 0.05)
+				self.phase[4] = (self.phase[4] + f / RATE) % 1
+				x = x + sine(self.phase[4]) * self.env.thunk *
+						math.min(1, self.thunk_age / 90) * 0.35
+				self.env.thunk = self.env.thunk * 0.99970
+				self.thunk_age = self.thunk_age + 1
+			end
+			-- The beep, softened: a sine at E5 with a quiet octave, a bell
+			-- shape rather than a square
+			if self.env.beep > 0.0005 then
+				self.phase[5] = (self.phase[5] + 659.25 / RATE) % 1
+				x = x + (sine(self.phase[5]) + 0.2 * sine(self.phase[5] * 2)) *
+						self.env.beep * math.min(1, self.beep_age / 60) * 0.16
+				self.env.beep = self.env.beep * 0.99985
+				self.beep_age = self.beep_age + 1
+			end
+			x = x / (1 + math.abs(x))
+			buf:WriteShort(math.floor(x * 20000))
+		end
+		self.t = self.t + BLOCK
+		self.stream:AddData(buf)
+	end
+
 	function s:fill()
+		if self.style ~= "today" then
+			return self:fill_soft()
+		end
 		local buf = self.buffer
 		buf:Clear()
 		local step_len = RATE * CYCLE / STEPS
