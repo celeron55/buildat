@@ -176,6 +176,26 @@ static ss_ confine_child(core::Config &config, const ss_ &module_path)
 	if(!in_app_container())
 		return "started --boxed and not in an AppContainer";
 	boxed_step("in its AppContainer");
+	// What the compiler is pointed at, read from in here: the boxed
+	// compile found no include directory (2026-10-03), and this says how
+	// each looks to the box itself
+	{
+		const ss_ share = config.get<ss_>("share_path");
+		for(const ss_ &p : {share, share+"/src", share+"/src/interface",
+				share+"/builtin", ss_(module_path), share+"/compiler"}){
+			const DWORD a = GetFileAttributesA(p.c_str());
+			const DWORD ea = a == INVALID_FILE_ATTRIBUTES ? GetLastError() : 0;
+			WIN32_FIND_DATAA fd;
+			HANDLE h = FindFirstFileA((p+"\\*").c_str(), &fd);
+			const DWORD el = h == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+			if(h != INVALID_HANDLE_VALUE)
+				FindClose(h);
+			const ss_ line = "seen from the box: "+p+": attributes "+
+					(ea ? "error "+itos((int)ea) : ss_("ok"))+", listing "+
+					(el ? "error "+itos((int)el) : ss_("ok"));
+			boxed_step(line.c_str());
+		}
+	}
 	const ss_ app = app_of(module_path);
 	const ss_ cache = config.get<ss_>("cache_path");
 	const ss_ prebuilt = config.get<ss_>("rccpp_build_path");
