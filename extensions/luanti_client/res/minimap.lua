@@ -75,6 +75,26 @@ function M.new(o)
 	end
 	m.view, m.camera = view, node
 
+	-- **No fog in the map** ([BOX_MINIMAP_GREY], 2026-10-03): the camera
+	-- is HEIGHT over the player, and the world's fog ends at the view
+	-- range, so at the default 120 a player on a hill drew the fog's
+	-- colour where the ground is -- one flat grey square. A zone that
+	-- overrides every other while the camera is in it, around the camera
+	-- and nothing else, with the fog out of reach and the world zone's
+	-- light copied at each stamp. Its priority is over the world zone's,
+	-- or the camera's zone would be that one.
+	if o.zone then
+		local zn = node:CreateChild("minimap_zone")
+		local z = zn:CreateComponent("Zone")
+		z.boundingBox = magic.BoundingBox(magic.Vector3(-2, -2, -2),
+				magic.Vector3(2, 2, 2))
+		z.override = true
+		z.priority = o.zone.priority + 1
+		z.fogStart = 1000000
+		z.fogEnd = 2000000
+		m.zone, m.world_zone = z, o.zone
+	end
+
 	function m:set_mode(i)
 		self.mode = i
 		local mode = M.MODES[i]
@@ -100,6 +120,10 @@ function M.new(o)
 			return
 		end
 		self.timer = 0
+		if self.zone then
+			self.zone.ambientColor = self.world_zone.ambientColor
+			self.zone.zoneTexture = self.world_zone.zoneTexture
+		end
 		self.view:QueueUpdate()
 	end
 

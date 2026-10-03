@@ -3396,7 +3396,8 @@ local function draw_hud_minimap(e)
 		return
 	end
 	local m = sky_now.minimap.new{magic = magic, scene = scene,
-			parent = hud_root, render_path = world_render_path, w = w, h = h}
+			parent = hud_root, render_path = world_render_path, w = w, h = h,
+			zone = zone}
 	hud_place(m.view, e, w, h)
 	minimaps[#minimaps + 1] = m
 	sky_now.apply_minimap_mode()
