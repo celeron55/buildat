@@ -15,7 +15,9 @@
 // **To take part**: the buildat client, joined by builtin/accounts (a local
 // account or a Starport ID, as the admin set up its logins). "hr:req"
 // carries a JSON {id, cmd, ...} and "hr:res" the answer {id, ok, result |
-// error}; handle() says who may do what.
+// error}; handle() says who may do what. Pushed to a client: "hr:new"
+// {thread, message} when the thread it has open gets a message (a chat
+// runs on it), and "hr:notify" {unseen} when it has a notification.
 //
 // The records are one SQLite file, <user>/apps/<app>/hearth.sqlite, with
 // a full-text index beside them; every statement binds its values.
@@ -32,6 +34,8 @@
 #include <sqlite3.h>
 #include <ctime>
 #include <cstring>
+#include <set>
+#include <tuple>
 #define MODULE "main"
 
 using interface::Event;
@@ -217,7 +221,9 @@ static const char *SCHEMA =
 	"CREATE TABLE IF NOT EXISTS threads(id INTEGER PRIMARY KEY, "
 		"topic INTEGER NOT NULL, title TEXT NOT NULL, author TEXT NOT NULL, "
 		"created INTEGER NOT NULL, last INTEGER NOT NULL, "
-		"subject TEXT NOT NULL DEFAULT '');"
+		"subject TEXT NOT NULL DEFAULT '', "
+		// "This answered it": the message the asker marked, or 0
+		"answer INTEGER NOT NULL DEFAULT 0);"
 	"CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, "
 		"thread INTEGER NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL, "
 		"created INTEGER NOT NULL, edited INTEGER NOT NULL DEFAULT 0);"
@@ -227,7 +233,19 @@ static const char *SCHEMA =
 		"body TEXT NOT NULL, time INTEGER NOT NULL, editor TEXT NOT NULL);"
 	// A row per message, its rowid the message's id; a thread's title is
 	// on its first message
-	"CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(title, body);";
+	"CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(title, body);"
+	// Who follows a thread: whoever started it or wrote in it, and whoever
+	// asked to
+	"CREATE TABLE IF NOT EXISTS follows(account TEXT NOT NULL, "
+		"thread INTEGER NOT NULL, PRIMARY KEY(account, thread));"
+	// kind: "reply" (in a followed thread), "mention" (@name), "answer"
+	// (a message of theirs answered a thread)
+	"CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, "
+		"account TEXT NOT NULL, kind TEXT NOT NULL, thread INTEGER NOT NULL, "
+		"message INTEGER NOT NULL, by TEXT NOT NULL, time INTEGER NOT NULL, "
+		"seen INTEGER NOT NULL DEFAULT 0);"
+	"CREATE INDEX IF NOT EXISTS notifications_account ON "
+		"notifications(account, id);";
 
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search"};
 static const size_t TITLE_MAX = 200;
@@ -238,6 +256,11 @@ struct Module: public interface::Module
 {
 	interface::Server *m_server;
 	sqlite3 *m_db = nullptr;
+	// The thread each client has open, for "hr:new"
+	sm_<network::PeerId, int64_t> m_viewing;
+	// What a request changed, sent once it is committed
+	sv_<int64_t> m_new_messages;
+	std::set<ss_> m_notified;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -256,6 +279,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:http_request"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("network:packet_received/hr:req"));
+		m_server->sub_event(this, Event::t("network:client_disconnected"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -265,6 +289,13 @@ struct Module: public interface::Module
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/hr:req", on_req, network::Packet)
+		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
+				network::OldClient)
+	}
+
+	void on_client_disconnected(const network::OldClient &old)
+	{
+		m_viewing.erase(old.info.id);
 	}
 
 	void on_start()
@@ -281,6 +312,13 @@ struct Module: public interface::Module
 			sqlite3_free(err);
 			throw Exception("hearth: the schema: "+e);
 		}
+		// A file from before the answer column (2026-10-04's first one)
+		Q cols(m_db, "SELECT count(*) FROM pragma_table_info('threads') "
+				"WHERE name = 'answer'");
+		cols.step();
+		if(cols.i(0) == 0)
+			exec("ALTER TABLE threads ADD COLUMN answer INTEGER NOT NULL "
+					"DEFAULT 0");
 		network::access(m_server, [&](network::Interface *iface){
 			iface->claim_http_path("/");
 			for(const char *p : CLAIMED)
@@ -344,17 +382,19 @@ struct Module: public interface::Module
 		t.set("last", q.i(5));
 		t.set("subject", q.s(6));
 		t.set("messages", q.i(7));
+		t.set("answer", q.i(8));
 		return t;
 	}
 #define THREAD_COLUMNS "id, topic, title, author, created, last, subject, " \
-		"(SELECT count(*) FROM messages WHERE thread = threads.id)"
+		"(SELECT count(*) FROM messages WHERE thread = threads.id), answer"
 
-	// simplified: the latest 200; paging when a topic has more
+	// Answered ones first, then by the latest message
+	// simplified: 200; paging when a topic has more
 	json::Value threads(int64_t topic_id)
 	{
 		json::Value list = json::array();
 		Q q(m_db, "SELECT " THREAD_COLUMNS " FROM threads WHERE topic = ? "
-				"ORDER BY last DESC LIMIT 200");
+				"ORDER BY answer != 0 DESC, last DESC LIMIT 200");
 		q.b(topic_id);
 		while(q.step())
 			list.append(thread_row(q));
@@ -411,7 +451,102 @@ struct Module: public interface::Module
 		s.b(id).b(title).b(body).step();
 		Q u(m_db, "UPDATE threads SET last = ? WHERE id = ?");
 		u.b(t).b(thread_id).step();
+		// Who is told: those mentioned, then the thread's other followers
+		std::set<ss_> told;
+		for(const ss_ &n : mentions(body)){
+			if(n == author || told.count(n))
+				continue;
+			bool exists = false;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				exists = a->exists(n);
+			});
+			if(exists){
+				notify(n, "mention", thread_id, id, author);
+				told.insert(n);
+			}
+		}
+		Q f(m_db, "SELECT account FROM follows WHERE thread = ?");
+		f.b(thread_id);
+		while(f.step())
+			if(f.s(0) != author && !told.count(f.s(0)))
+				notify(f.s(0), "reply", thread_id, id, author);
+		Q fo(m_db, "INSERT OR IGNORE INTO follows(account, thread) VALUES(?, ?)");
+		fo.b(author).b(thread_id).step();
+		m_new_messages.push_back(thread_id);
+		m_new_messages.push_back(id);
 		return id;
+	}
+
+	// "@name" in a message: a name's characters after an @ that does not
+	// follow a word (an address's @ is not one)
+	static std::set<ss_> mentions(const ss_ &body)
+	{
+		std::set<ss_> r;
+		for(size_t i = 0; i < body.size(); i++){
+			if(body[i] != '@' || (i > 0 && (isalnum((unsigned char)body[i - 1]) ||
+					body[i - 1] == '_')))
+				continue;
+			size_t e = i + 1;
+			while(e < body.size() && e - i <= NAME_MAX &&
+					(isalnum((unsigned char)body[e]) || body[e] == '_' ||
+					body[e] == '-'))
+				e++;
+			if(e > i + 1)
+				r.insert(body.substr(i + 1, e - i - 1));
+			if(r.size() >= 20)
+				break;
+		}
+		return r;
+	}
+
+	void notify(const ss_ &account, const char *kind, int64_t thread_id,
+			int64_t message_id, const ss_ &by)
+	{
+		Q n(m_db, "INSERT INTO notifications(account, kind, thread, message, "
+				"by, time) VALUES(?, ?, ?, ?, ?, ?)");
+		n.b(account).b(ss_(kind)).b(thread_id).b(message_id).b(by).b(now_s())
+				.step();
+		m_notified.insert(account);
+	}
+
+	int64_t unseen(const ss_ &account)
+	{
+		Q q(m_db, "SELECT count(*) FROM notifications WHERE account = ? "
+				"AND seen = 0");
+		q.b(account);
+		q.step();
+		return q.i(0);
+	}
+
+	// After a commit: "hr:new" to whoever has the thread open, "hr:notify"
+	// to whoever was notified
+	void push()
+	{
+		sv_<std::tuple<network::PeerId, ss_, ss_>> out;
+		for(size_t i = 0; i + 1 < m_new_messages.size(); i += 2){
+			json::Value v = json::object();
+			v.set("thread", m_new_messages[i]);
+			v.set("message", m_new_messages[i + 1]);
+			for(auto &pv : m_viewing)
+				if(pv.second == m_new_messages[i])
+					out.emplace_back(pv.first, "hr:new", v.stringify());
+		}
+		for(const ss_ &account : m_notified){
+			sv_<network::PeerId> peers;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				peers = a->find_peers(account);
+			});
+			json::Value v = json::object();
+			v.set("unseen", unseen(account));
+			for(network::PeerId p : peers)
+				out.emplace_back(p, "hr:notify", v.stringify());
+		}
+		m_new_messages.clear();
+		m_notified.clear();
+		network::access(m_server, [&](network::Interface *iface){
+			for(auto &o : out)
+				iface->send(std::get<0>(o), std::get<1>(o), std::get<2>(o));
+		});
 	}
 
 	json::Value search(const ss_ &text)
@@ -420,13 +555,15 @@ struct Module: public interface::Module
 		const ss_ match = fts_query(text);
 		if(match.empty())
 			return list;
-		// simplified: BM25 alone, the title weighed 5 to the body's 1; the
-		// signals and recency join it as boosts with the computed portal
+		// simplified: BM25, the title weighed 5 to the body's 1, and an
+		// answer counted twice (BM25 is better the more negative); the other
+		// signals and recency join it with the computed portal
 		Q q(m_db, "SELECT m.id, m.thread, t.title, m.author, m.created, "
 				"snippet(search, 1, '\x01', '\x02', '...', 24) "
 				"FROM search JOIN messages m ON m.id = search.rowid "
 				"JOIN threads t ON t.id = m.thread "
-				"WHERE search MATCH ? ORDER BY bm25(search, 5.0, 1.0) LIMIT 50");
+				"WHERE search MATCH ? ORDER BY bm25(search, 5.0, 1.0) * "
+				"(CASE WHEN t.answer = m.id THEN 2.0 ELSE 1.0 END) LIMIT 50");
 		q.b(match);
 		while(q.step()){
 			json::Value v = json::object();
@@ -466,6 +603,7 @@ struct Module: public interface::Module
 				".box{border:1px solid #999;border-radius:4px;padding:.5em 1em;"
 				"margin:1em 0}"
 				".meta{color:#555;font-size:.9em}"
+				".answer{border:2px solid #2a7a2a}"
 				"ul.list{padding-left:1.2em}"
 				"mark{background:#fe8}"
 				"input,button{font:inherit}"
@@ -482,14 +620,17 @@ struct Module: public interface::Module
 	{
 		return "<li><a href=\"/t/"+itos(jint(t, "id"))+"\">"+
 				html(jstr(t, "title"))+"</a> <span class=\"meta\">"+
+				(jint(t, "answer") ? "answered, " : "")+
 				html(jstr(t, "author"))+", "+itos(jint(t, "messages"))+
 				" messages, last "+time_text(jint(t, "last"))+"</span></li>\n";
 	}
 
-	ss_ message_box(const json::Value &m)
+	ss_ message_box(const json::Value &m, bool answer = false)
 	{
 		const ss_ id = itos(jint(m, "id"));
-		return "<div class=\"box\" id=\"m"+id+"\"><p class=\"meta\"><b>"+
+		return "<div class=\"box"+ss_(answer ? " answer" : "")+"\" id=\"m"+id+
+				"\"><p class=\"meta\">"+(answer ? "<b>This answered it:</b> " :
+				"")+"<b>"+
 				html(jstr(m, "author"))+"</b>, <a href=\"/m/"+id+"\">"+
 				time_text(jint(m, "created"))+"</a>"+(jint(m, "edited") ?
 				" (edited "+time_text(jint(m, "edited"))+")" : "")+"</p>"+
@@ -576,9 +717,17 @@ struct Module: public interface::Module
 			body = "<p class=\"meta\"><a href=\"/topic/"+
 					itos(jint(t, "topic"))+"\">"+html(jstr(top, "name"))+
 					"</a></p>\n<h1>"+html(jstr(t, "title"))+"</h1>\n";
+			// The question, its answer, then the rest in order
 			const json::Value &list = t.get("list");
-			for(unsigned i = 0; i < list.size(); i++)
+			const int64_t answer = jint(t, "answer");
+			for(unsigned i = 0; i < list.size(); i++){
+				if(jint(list.at(i), "id") == answer)
+					continue;
 				body += message_box(list.at(i));
+				for(unsigned j = 0; i == 0 && j < list.size(); j++)
+					if(jint(list.at(j), "id") == answer)
+						body += message_box(list.at(j), true);
+			}
 		} else if((id = path_id(path, "/m/")) >= 0){
 			Q q(m_db, "SELECT m.id, m.author, m.body, m.created, m.edited, "
 					"m.thread, t.title FROM messages m "
@@ -651,10 +800,12 @@ struct Module: public interface::Module
 		else {
 			try {
 				exec("BEGIN");
-				result = handle(name, admin, jstr(q, "cmd"), q);
+				result = handle(name, admin, jstr(q, "cmd"), q, packet.sender);
 				exec("COMMIT");
 			} catch(std::exception &e){
 				sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
+				m_new_messages.clear();
+				m_notified.clear();
 				error = e.what();
 			}
 		}
@@ -666,6 +817,7 @@ struct Module: public interface::Module
 		network::access(m_server, [&](network::Interface *iface){
 			iface->send(packet.sender, "hr:res", res.stringify());
 		});
+		push();
 	}
 
 	static void need(const ss_ &why)
@@ -675,14 +827,18 @@ struct Module: public interface::Module
 	}
 
 	json::Value handle(const ss_ &name, bool admin, const ss_ &cmd,
-			const json::Value &q)
+			const json::Value &q, network::PeerId peer)
 	{
 		if(cmd == "me"){
 			json::Value v = json::object();
 			v.set("account", name);
 			v.set("admin", admin);
+			v.set("unseen", unseen(name));
 			return v;
 		}
+		if(cmd != "thread" && cmd != "reply" && cmd != "edit" &&
+				cmd != "answered" && cmd != "follow")
+			m_viewing.erase(peer);
 		if(cmd == "topics"){
 			json::Value v = json::object();
 			v.set("topics", topics());
@@ -700,6 +856,10 @@ struct Module: public interface::Module
 			json::Value t = thread(jint(q, "thread"), jint(q, "after"));
 			if(!t.is_object())
 				throw Exception("no such thread");
+			m_viewing[peer] = jint(q, "thread");
+			Q f(m_db, "SELECT 1 FROM follows WHERE account = ? AND thread = ?");
+			f.b(name).b(jint(q, "thread"));
+			t.set("following", f.step());
 			return t;
 		}
 		if(cmd == "search"){
@@ -770,6 +930,70 @@ struct Module: public interface::Module
 			Q s(m_db, "UPDATE search SET body = ? WHERE rowid = ?");
 			s.b(body).b(id).step();
 			return json::Value(true);
+		}
+		if(cmd == "answered"){
+			// By whoever asked (or the admin); message 0 takes it back
+			const int64_t thread_id = jint(q, "thread"),
+					message_id = jint(q, "message");
+			Q t(m_db, "SELECT author, (SELECT min(id) FROM messages "
+					"WHERE thread = threads.id) FROM threads WHERE id = ?");
+			t.b(thread_id);
+			if(!t.step())
+				throw Exception("no such thread");
+			if(t.s(0) != name && !admin)
+				throw Exception("only whoever started the thread says what "
+						"answered it");
+			ss_ by;
+			if(message_id != 0){
+				Q m(m_db, "SELECT author FROM messages WHERE id = ? AND "
+						"thread = ?");
+				m.b(message_id).b(thread_id);
+				if(!m.step() || message_id == t.i(1))
+					throw Exception("not a reply in this thread");
+				by = m.s(0);
+			}
+			Q u(m_db, "UPDATE threads SET answer = ? WHERE id = ?");
+			u.b(message_id).b(thread_id).step();
+			if(!by.empty() && by != name)
+				notify(by, "answer", thread_id, message_id, name);
+			return json::Value(true);
+		}
+		if(cmd == "follow"){
+			const int64_t thread_id = jint(q, "thread");
+			if(q.get("on").is_true()){
+				Q f(m_db, "INSERT OR IGNORE INTO follows(account, thread) "
+						"SELECT ?, id FROM threads WHERE id = ?");
+				f.b(name).b(thread_id).step();
+			} else {
+				Q f(m_db, "DELETE FROM follows WHERE account = ? AND thread = ?");
+				f.b(name).b(thread_id).step();
+			}
+			return json::Value(true);
+		}
+		if(cmd == "notifications"){
+			// The latest 50, and they are seen now
+			json::Value list = json::array();
+			Q n(m_db, "SELECT n.id, n.kind, n.thread, n.message, n.by, n.time, "
+					"n.seen, t.title FROM notifications n JOIN threads t ON "
+					"t.id = n.thread WHERE n.account = ? ORDER BY n.id DESC "
+					"LIMIT 50");
+			n.b(name);
+			while(n.step()){
+				json::Value v = json::object();
+				v.set("id", n.i(0));
+				v.set("kind", n.s(1));
+				v.set("thread", n.i(2));
+				v.set("message", n.i(3));
+				v.set("by", n.s(4));
+				v.set("time", n.i(5));
+				v.set("seen", n.i(6) != 0);
+				v.set("title", n.s(7));
+				list.append(v);
+			}
+			Q u(m_db, "UPDATE notifications SET seen = 1 WHERE account = ? "
+					"AND seen = 0");
+			u.b(name).step();
+			return list;
 		}
 		throw Exception("no such command: "+cmd);
 	}

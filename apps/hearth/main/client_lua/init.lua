@@ -7,8 +7,9 @@
 -- {id, cmd, ...}, answered by "hr:res" (main.cpp decides who may do what).
 -- Reading is also the server's plain HTML, at its address in a browser.
 --
--- A scripted client sends BUILDAT_HEARTH_REQS, JSON requests a line each,
--- after the join, and logs each answer as "hr: <json>".
+-- A scripted client sends BUILDAT_HEARTH_REQS, JSON requests a line each
+-- numbered from 1001, after the join, and logs each answer as "hr: <json>"
+-- and each notification as "hr notify: <json>".
 local log = buildat.Logger("hearth")
 local magic = require("buildat/extension/urho3d")
 
@@ -36,7 +37,8 @@ local function encode(v)
 	return tostring(v)
 end
 
-local scripted = (buildat.get_env("BUILDAT_HEARTH_REQS") or "") ~= ""
+local scripted = (buildat.get_env("BUILDAT_HEARTH_REQS") or "") ~= "" or
+		(buildat.get_env("BUILDAT_HEARTH_OPEN") or "") ~= ""
 local next_id = 1
 local waiting = {}
 local message = nil
@@ -132,11 +134,25 @@ local function edit(parent, label)
 	return e
 end
 
-local show_topic, show_thread
+local show_topic, show_thread, show_notifications
+-- Who this client is ("me"), and the thread it has open: the server pushes
+-- that thread's new messages ("hr:new"), which are added to it in place
+local me = {account = "", unseen = 0}
+local open_thread = nil
+local on_home = false
+
+local function thread_line(th)
+	return th.title .. "  -- " .. (th.answer ~= 0 and "answered, " or "") ..
+			th.author .. ", " .. th.messages .. " messages"
+end
 
 home = function()
+	open_thread = nil
 	req("topics", nil, function(r)
-		local w = new_page("Hearth")
+		local w = new_page("Hearth, as " .. me.account)
+		on_home = true
+		button(w, "Notifications" .. (me.unseen > 0 and
+				" (" .. me.unseen .. " new)" or ""), show_notifications)
 		local _, add = list(w)
 		for _, t in ipairs(r.topics) do
 			add((t.parent ~= 0 and "    " or "") .. t.name .. "  (" ..
@@ -146,15 +162,43 @@ home = function()
 		end
 		add("Latest", GREY)
 		for _, t in ipairs(r.latest) do
-			add(t.title .. "  -- " .. t.author .. ", " .. t.messages ..
-					" messages", nil, function()
+			add(thread_line(t), nil, function()
 				show_thread(t.id)
 			end)
 		end
 	end)
 end
 
+local function leave_home()
+	on_home = false
+end
+
+show_notifications = function()
+	leave_home()
+	open_thread = nil
+	req("notifications", nil, function(items)
+		me.unseen = 0
+		local w = new_page("Notifications")
+		local _, add = list(w)
+		local said = {reply = "replied in", mention = "mentioned you in",
+				answer = "marked your message the answer in"}
+		for _, n in ipairs(items) do
+			add((n.seen and "" or "* ") .. n.by .. " " ..
+					(said[n.kind] or n.kind) .. " " .. n.title, nil, function()
+				show_thread(n.thread)
+			end)
+		end
+		if #items == 0 then
+			add("None yet. Replies in the threads you follow, mentions " ..
+					"(@" .. me.account .. ") and answers come here.", GREY)
+		end
+		button(w, "Back", home)
+	end)
+end
+
 show_topic = function(id)
+	leave_home()
+	open_thread = nil
 	req("topic", {topic = id}, function(t)
 		local w = new_page(t.name)
 		if t.about ~= "" then
@@ -162,8 +206,7 @@ show_topic = function(id)
 		end
 		local _, add = list(w)
 		for _, th in ipairs(t.threads) do
-			add(th.title .. "  -- " .. th.author .. ", " .. th.messages ..
-					" messages", nil, function()
+			add(thread_line(th), nil, function()
 				show_thread(th.id)
 			end)
 		end
@@ -181,26 +224,67 @@ show_topic = function(id)
 	end)
 end
 
+-- A message's rows; whoever started the thread can mark a reply the answer
+local function add_message(t, add, m, is_answer)
+	add((is_answer and "This answered it -- " or "") .. m.author ..
+			(m.edited ~= 0 and "  (edited)" or ""), is_answer and YELLOW or GREY)
+	add(m.body)
+	if not is_answer and m.id ~= t.first and t.answer ~= m.id and
+			(t.author == me.account or me.admin) then
+		add("This answered it", nil, function()
+			req("answered", {thread = t.id, message = m.id}, function()
+				show_thread(t.id)
+			end)
+		end)
+	end
+end
+
 show_thread = function(id)
+	leave_home()
 	req("thread", {thread = id}, function(t)
 		local w = new_page(t.title)
 		local l, add = list(w)
+		t.first = t.list[1] and t.list[1].id or 0
+		-- The question, its answer, then the rest in order
+		local answer = nil
 		for _, m in ipairs(t.list) do
-			add(m.author .. (m.edited ~= 0 and "  (edited)" or ""), GREY)
-			add(m.body)
+			if m.id == t.answer then
+				answer = m
+			end
+		end
+		for i, m in ipairs(t.list) do
+			if m ~= answer then
+				add_message(t, add, m, false)
+			end
+			if i == 1 and answer then
+				add_message(t, add, answer, true)
+			end
 		end
 		l.viewPosition = magic.IntVector2(0, 1000000)
+		local last = t.list[#t.list] and t.list[#t.list].id or 0
+		open_thread = {id = id, last = last, append = function(list)
+			for _, m in ipairs(list) do
+				add_message(t, add, m, false)
+				open_thread.last = m.id
+			end
+			l.viewPosition = magic.IntVector2(0, 1000000)
+		end}
 		local e = edit(w, "Reply")
 		local function send()
 			if e:GetText() == "" then
 				return
 			end
-			req("reply", {thread = id, body = e:GetText()}, function()
-				show_thread(id)
-			end)
+			-- It comes back as "hr:new", as anyone else's does
+			req("reply", {thread = id, body = e:GetText()})
+			e:SetText("")
 		end
 		magic.SubscribeToEvent(e, "TextFinished", send)
 		button(w, "Send", send)
+		button(w, t.following and "Stop following" or "Follow", function()
+			req("follow", {thread = id, on = not t.following}, function()
+				show_thread(id)
+			end)
+		end)
 		button(w, "Back", function() show_topic(t.topic) end)
 		-- A touchscreen's keyboard would cover the thread: it opens on a tap
 		if buildat.get_env("BUILDAT_TOUCH") ~= "1" then
@@ -209,17 +293,57 @@ show_thread = function(id)
 	end)
 end
 
-accounts.on_joined = function()
-	local script = buildat.get_env("BUILDAT_HEARTH_REQS") or ""
-	for line in script:gmatch("[^\n]+") do
-		local q = buildat.parse_json(line)
-		if type(q) == "table" then
-			q.id = next_id
-			next_id = next_id + 1
-			buildat.send_packet("hr:req", encode(q))
-		end
+buildat.sub_packet("hr:new", function(data)
+	local v = buildat.parse_json(data)
+	if type(v) ~= "table" or not open_thread or v.thread ~= open_thread.id then
+		return
 	end
-	home()
+	local o = open_thread
+	req("thread", {thread = o.id, after = o.last}, function(t)
+		if open_thread == o then
+			o.append(t.list)
+		end
+	end)
+end)
+
+buildat.sub_packet("hr:notify", function(data)
+	local v = buildat.parse_json(data)
+	if type(v) ~= "table" then
+		return
+	end
+	if scripted then
+		log:info("hr notify: " .. data)
+	end
+	me.unseen = tonumber(v.unseen) or 0
+	if on_home then
+		home()
+	end
+end)
+
+accounts.on_joined = function()
+	req("me", nil, function(r)
+		me = r
+		-- BUILDAT_HEARTH_OPEN=<thread>: a scripted client opens it, as a
+		-- click on it would
+		local open = tonumber(buildat.get_env("BUILDAT_HEARTH_OPEN") or "")
+		if open then
+			show_thread(open)
+		else
+			home()
+		end
+		-- After the page's own requests, so a scripted "thread" is the one
+		-- left open; numbered from 1001
+		local script = buildat.get_env("BUILDAT_HEARTH_REQS") or ""
+		local i = 1000
+		for line in script:gmatch("[^\n]+") do
+			local q = buildat.parse_json(line)
+			if type(q) == "table" then
+				i = i + 1
+				q.id = i
+				buildat.send_packet("hr:req", encode(q))
+			end
+		end
+	end)
 end
 
 accounts.start({title = "Hearth", env = "BUILDAT_HEARTH"})
