@@ -429,6 +429,13 @@ target_link_libraries(${BUILDAT_CORE_NAME}
 	mbedtls
 	${CURL_LIBRARIES}
 )
+# Mbed TLS for the Aitta signatures ([AITTA_MVP]) stays inside the core
+# library: exported from it, the client's own static copy is a second
+# definition of every symbol to mingw's linker
+if(NOT BUILDAT_WEB)
+	set_property(TARGET ${BUILDAT_CORE_NAME} APPEND_STRING PROPERTY
+		LINK_FLAGS " -Wl,--exclude-libs,libmbedtls.a")
+endif()
 if(WIN32)
 	target_compile_definitions(${BUILDAT_CORE_NAME} PRIVATE CURL_STATICLIB)
 	# libcurl.pc's Libs.private for the schannel build
