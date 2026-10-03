@@ -816,10 +816,8 @@ end
 --
 -- Random and noise
 --
--- PseudoRandom is Luanti's own generator and its numbers are part of what a
--- world looks like, so it is the one written out exactly. PcgRandom is Lua's
--- own randomness behind Luanti's interface, which is honest for anything that
--- is not a map.
+-- PseudoRandom and PcgRandom are Luanti's own generators and their numbers
+-- are part of what a world looks like, so both are written out exactly.
 --
 
 local Pseudo = {}
@@ -878,50 +876,116 @@ end
 local Pcg = {}
 Pcg.__index = Pcg
 
--- simplified: not Luanti's PCG32, so the numbers a mod gets out of this are
--- not the ones Luanti would give it. What it is instead is the generator
--- above behind PcgRandom's interface, including a state string that goes
--- out and comes back. Anything that is the map -- decorations, ores -- is
--- mapgen's, and the mapgen is a milestone away; when it arrives this is the
--- thing to write out exactly, in sixteen-bit limbs the way lcg32 above is.
+-- Luanti's PCG32 (noise.cpp), exactly: what a game draws from it is part of
+-- its world -- VoxeLibre's mesa strata are a PcgRandom of the seed. The
+-- state is 64 bits, which LuaJIT's uint64_t cdata wraps the way C does.
+local ffi = require("ffi")
+local U64 = ffi.typeof("uint64_t")
+local PCG_MULT = 6364136223846793005ULL
+local TWO32 = 4294967296
+
+-- A seed as Luanti reads it: a Lua number cast to u64, through s64 when
+-- it is negative, which is what the cast does on the machines it runs on
+local function u64_of(n)
+	n = tonumber(n) or 0
+	if n < 0 then
+		return ffi.cast("uint64_t", ffi.cast("int64_t", n))
+	end
+	return U64(n)
+end
+
+local function pcg_next(self)
+	local old = self.state
+	self.state = old * PCG_MULT + self.inc
+	local xs = tonumber(bit.rshift(bit.bxor(bit.rshift(old, 18), old), 27) %
+			4294967296ULL)
+	local rot = tonumber(bit.rshift(old, 59))
+	return bit.ror(xs, rot) % TWO32
+end
+
+local function pcg_bounded(self, bound)
+	if bound == 0 then
+		return pcg_next(self)
+	elseif bound == 1 then
+		return 0
+	end
+	local threshold = (TWO32 - bound) % bound
+	local r = pcg_next(self)
+	while r < threshold do
+		r = pcg_next(self)
+	end
+	return r % bound
+end
+
+-- An argument as l_next reads it: lua_tointeger, then u32, then s32
+local function s32_of(n)
+	n = tonumber(n) or 0
+	n = (n >= 0 and math.floor(n) or -math.floor(-n)) % TWO32
+	return n >= 2147483648 and n - TWO32 or n
+end
+
+local function pcg_range(self, min, max)
+	if max < min then
+		error("PcgRandom:next(): invalid range (max < min)")
+	end
+	local r = pcg_bounded(self, (max - min + 1) % TWO32) + min
+	return s32_of(r)
+end
+
 function PcgRandom(seed, sequence)
 	local self = setmetatable({}, Pcg)
-	self.rng = PseudoRandom(seed)
+	local seq = sequence ~= nil and u64_of(sequence) or
+			0xda3e39cb94b95bdbULL
+	self.state = U64(0)
+	self.inc = bit.bor(bit.lshift(seq, 1), 1ULL)
+	pcg_next(self)
+	self.state = self.state + u64_of(seed)
+	pcg_next(self)
 	return self
 end
 
 function Pcg:next(min, max)
-	if min == nil then
-		return self.rng:next() * 65536 + self.rng:next() * 2
-	end
-	local span = max - min
-	if span <= 32767 then
-		return min + (self.rng:next() % (span + 1))
-	end
-	return min + (self.rng:next() * 32768 + self.rng:next()) % (span + 1)
+	min = min ~= nil and s32_of(min) or -2147483648
+	max = max ~= nil and s32_of(max) or 2147483647
+	return pcg_range(self, min, max)
 end
 
 function Pcg:rand_normal_dist(min, max, num_trials)
+	min = min ~= nil and s32_of(min) or -2147483648
+	max = max ~= nil and s32_of(max) or 2147483647
 	num_trials = num_trials or 6
 	local sum = 0
 	for _ = 1, num_trials do
-		sum = sum + self:next(min, max)
+		sum = sum + pcg_range(self, min, max)
 	end
-	return math.floor(sum / num_trials + 0.5)
+	-- simplified: Luanti divides in float; this divides in double, which
+	-- rounds differently only a hair from .5
+	local f = sum / num_trials
+	return f < 0 and -math.floor(-f + 0.5) or math.floor(f + 0.5)
 end
 
--- Luanti's is two 64-bit numbers as thirty-two hex digits. This one has
--- thirty-two bits of state, so it goes in the last eight of them and the
--- rest are zeroes -- which round-trips, which is what the interface is for.
+local function hex64(v)
+	return string.format("%08x%08x", tonumber(bit.rshift(v, 32)),
+			tonumber(v % 4294967296ULL))
+end
+
+-- Luanti's string: the state padded to sixteen digits, the increment not
+-- (std::setw lasts one field), so it is 32 long when the increment's top
+-- digit is not zero -- which is what set_state() wants back
 function Pcg:get_state()
-	return string.format("%024d%08x", 0, self.rng.state)
+	return hex64(self.state) .. (hex64(self.inc):gsub("^0+(.)", "%1"))
 end
 
 function Pcg:set_state(str)
 	if type(str) ~= "string" or #str ~= 32 then
 		error("PcgRandom:set_state(): expected 32 hex characters")
 	end
-	self.rng.state = tonumber(string.sub(str, 25), 16) or 0
+	local function u64_hex(h)
+		return U64(tonumber(h:sub(1, 8), 16)) * 4294967296ULL +
+				U64(tonumber(h:sub(9, 16), 16))
+	end
+	self.state = u64_hex(str:sub(1, 16))
+	self.inc = u64_hex(str:sub(17, 32))
 end
 
 function SecureRandom()
