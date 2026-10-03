@@ -1,0 +1,43 @@
+Aitta packages: an app packed, signed and installed
+===================================================
+[AITTA_MVP], step 1 of doc/plan/aitta_plan.md. There is no registry yet;
+a release is passed around as two files and installed from them.
+
+The manifest
+------------
+An app's meta.json, at the app directory's root (apps/<app>/meta.json):
+
+    {
+        "author": "celeron55",        a-z, 0-9 and _, 1 to 40
+        "name": "digger",             the same
+        "version": "1.0.0",           letters, digits, . - + _, 1 to 40
+        "engine_api": 1,              the engine API its C++ is written for
+        "license_code": "Apache-2.0",
+        "license_media": "CC-BY-SA-4.0",
+        "description": "Dig down."    300 characters at most
+    }
+
+engine_api is interface::aitta::ENGINE_API (src/interface/aitta.h), which
+the engine bumps when a change breaks modules. A release that asks for
+more than the running engine has is not packed or installed.
+
+The commands
+------------
+    bin/buildat aitta keygen <key file>
+        A new author key. Prints its public half. The file is the secret:
+        whoever has it publishes as you. It is never overwritten.
+
+    bin/buildat aitta pack <app dir> <key file> <out dir>
+        Writes <author>-<name>-<version>.zip, the app directory (names
+        starting with '.' left out), and .sig beside it: the zip's
+        sha256, the public key and its signature over the hash.
+
+    bin/buildat aitta install <release .zip> <user path>
+        Checks the hash, the signature and the manifest, and unpacks into
+        <user>/installed/<author>/<name>/<version>/. The first version
+        installed keeps its key in <user>/installed/<author>/<name>/key; a
+        later version signed by another key is refused. A version already
+        there is not replaced: an update is a new directory beside it.
+
+The key is ECDSA P-256 (Mbed TLS, in the tree). util/aitta_check.sh is
+the check.

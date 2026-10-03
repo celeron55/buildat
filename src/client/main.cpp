@@ -19,6 +19,9 @@
 #include <sstream>
 #include <signal.h>
 #include <malloc.h> // mallopt(), M_PERTURB
+#include <fstream>
+#include "interface/aitta.h"
+#include "interface/fs.h"
 #define MODULE "__main"
 namespace magic = Urho3D;
 
@@ -52,9 +55,55 @@ void signal_handler_init()
 #endif
 }
 
+// `buildat aitta ...` ([AITTA_MVP]): an author's key, a signed release of
+// an app, and installing one, from a terminal
+static int aitta_main(int argc, char *argv[])
+{
+	const ss_ verb = argc >= 1 ? argv[0] : "";
+	try {
+		if(verb == "keygen" && argc == 2){
+			if(interface::fs::path_exists(argv[1])){
+				fprintf(stderr, "%s exists; not overwriting a key\n", argv[1]);
+				return 1;
+			}
+			ss_ key, pub;
+			interface::aitta::keygen(key, pub);
+			std::ofstream f(argv[1], std::ios::binary);
+			f<<key;
+			if(!f.good())
+				throw Exception(ss_("cannot write ")+argv[1]);
+			printf("%s\n", pub.c_str());
+			return 0;
+		}
+		if(verb == "pack" && argc == 4){
+			printf("%s\n", interface::aitta::pack(argv[1], argv[2],
+					argv[3]).c_str());
+			return 0;
+		}
+		if(verb == "install" && argc == 3){
+			ss_ zip = argv[1];
+			const ss_ sig = interface::fs::strip_file_extension(zip)+".sig";
+			printf("%s\n", interface::aitta::install(zip, sig,
+					argv[2]).c_str());
+			return 0;
+		}
+	} catch(std::exception &e){
+		fprintf(stderr, "aitta %s: %s\n", verb.c_str(), e.what());
+		return 1;
+	}
+	fprintf(stderr,
+			"Usage: buildat aitta keygen <key file>\n"
+			"       buildat aitta pack <app dir> <key file> <out dir>\n"
+			"       buildat aitta install <release .zip> <user path>\n"
+			"An app's meta.json: doc/aitta.txt\n");
+	return 1;
+}
+
 int main(int argc, char *argv[])
 {
 	boot::BasicInitScope basic_init_scope;
+	if(argc >= 2 && ss_(argv[1]) == "aitta")
+		return aitta_main(argc - 2, argv + 2);
 
 	// glibc fills a freed block with 0x5a and a fresh one with 0xa5 when
 	// this is set, which turns a read of a freed object from a value that

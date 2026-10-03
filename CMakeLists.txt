@@ -357,6 +357,7 @@ set(BUILDAT_CORE_SRCS
 	src/impl/voxel_volume.cpp
 	src/impl/compress.cpp
 	src/impl/zip.cpp
+	src/impl/aitta.cpp
 	src/impl/http.cpp
 	src/impl/thread_pool.cpp
 	src/impl/thread.cpp
@@ -425,6 +426,7 @@ target_link_libraries(${BUILDAT_CORE_NAME}
 	PolyVoxCore
 	zlib
 	zstd
+	mbedtls
 	${CURL_LIBRARIES}
 )
 if(WIN32)
