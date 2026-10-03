@@ -97,9 +97,15 @@ struct CThreadPool: public ThreadPool
 			}
 		}
 		log_d(MODULE, "Worker thread %p exit", arg);
-		interface::MutexScope ms(thread->mutex);
-		thread->running = false;
-		pthread_exit(NULL);
+		// The scope ends before the thread does: winpthreads' pthread_exit()
+		// runs no C++ destructors, so a MutexScope still open at it left the
+		// mutex locked for good, and join() waited on it forever -- the
+		// Windows server's hang at exit (2026-10-03)
+		{
+			interface::MutexScope ms(thread->mutex);
+			thread->running = false;
+		}
+		return NULL;
 	}
 
 	// Interface

@@ -664,10 +664,9 @@ struct CState: public State, public interface::Server
 	}
 	~CState()
 	{
-		// Torn down by hand, in this order and a step a line: left to the
-		// members' own order a Windows server hung past its modules' stop
-		// with nothing logged, and in this one it exits (2026-10-03); which
-		// step it hung in is not known
+		// Torn down by hand, a step a line: a Windows server hung past its
+		// modules' stop with nothing logged, and these lines named the
+		// thread pool's join (2026-10-03; the cause is in thread_pool.cpp)
 		log_d(MODULE, "Teardown: the thread pool");
 		m_thread_pool.reset();
 		log_d(MODULE, "Teardown: the file watch thread");
