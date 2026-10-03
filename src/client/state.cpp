@@ -28,6 +28,7 @@
 #include <cstring>
 #include <fstream>
 #include <deque>
+#include <set>
 #include <thread>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -874,6 +875,30 @@ void CState::setup_packet_handlers()
 
 			auto type = msg.ReadStringHash();
 			uint c_id = msg.ReadNetID();
+			// Only components that draw, sound, collide or hold the scene:
+			// a component is made by the type hash the server sends and
+			// its network attributes applied, and a LuaScriptInstance's
+			// script file runs in the client's own Lua state, outside the
+			// sandbox ([SECURITY_RUN_1]). The rest of the node is not
+			// readable past a refused one, so the node ends there.
+			static const std::set<magic::StringHash> replicable = []{
+				std::set<magic::StringHash> s;
+				for(const char *n : {"Octree", "PhysicsWorld", "Zone",
+						"Light", "Camera", "StaticModel", "AnimatedModel",
+						"AnimationController", "StaticModelGroup",
+						"CustomGeometry", "BillboardSet", "ParticleEmitter",
+						"RibbonTrail", "DecalSet", "Text3D", "Skybox",
+						"Terrain", "RigidBody", "CollisionShape", "Constraint",
+						"SoundSource", "SoundSource3D", "SmoothedTransform"})
+					s.insert(magic::StringHash(n));
+				return s;
+			}();
+			if(!replicable.count(type)){
+				log_w(MODULE, "replicate:create_node: component type %s is"
+						" not one a server may create; node %i ends there",
+						type.ToString().CString(), node_id);
+				return;
+			}
 
 			Component *c = scene->GetComponent(c_id);
 			if(!c || c->GetType() != type || c->GetNode() != node){
