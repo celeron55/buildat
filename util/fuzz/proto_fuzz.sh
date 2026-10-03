@@ -32,6 +32,10 @@ cd "$here/Build${BUILD:+/$BUILD}"
 export ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=0:abort_on_error=1}
 launch=(-u launcher=1)
 [ "${PUBLIC:-}" = 1 ] && launch=()
+# A build directory below Build/ is one level deeper than the paths are
+# looked for from
+[ -n "${BUILD:-}" ] && launch+=(-U "$here/3rdparty/Urho3D" -S "$here"
+	-i "$here/src/interface" -C "$out/cache_$BUILD")
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=proto \
 	bin/buildat_server "${launch[@]}" -m "$here/apps/vanilla" -D "$user" \
 	-P "$port" > "$out/srv.log" 2>&1 &
@@ -43,6 +47,10 @@ for i in $(seq 1 180); do
 done
 sleep 5
 echo "seed $seed, port $port, $(wc -l < "$out/names.txt") packet names"
+# Only what the server logs from here on: a module compiling at start makes
+# the loader wait, which is not two modules waiting for each other
+start=$(wc -l < "$out/srv.log")
+since() { tail -n +"$((start + 1))" "$out/srv.log"; }
 python3 "$here/util/fuzz/proto_fuzz.py" "$port" "$secs" "$out/names.txt" \
 	"$seed" > "$out/client.log" 2>&1 &
 cli=$!
@@ -50,11 +58,11 @@ bad=""
 while kill -0 $cli 2>/dev/null; do
 	sleep 5
 	if ! kill -0 $srv 2>/dev/null; then bad="the server exited"; break; fi
-	grep -aq "Crash: SIG\|AddressSanitizer\|runtime error" "$out/srv.log" &&
+	since | grep -aq "Crash: SIG\|AddressSanitizer\|runtime error" &&
 		{ bad="a crash in the log"; break; }
 	# Two modules waiting for each other: the server answers a connect
 	# and nothing else (accounts and starport_announce, 2026-10-03)
-	grep -aq "has been waiting [0-9]* s" "$out/srv.log" &&
+	since | grep -aq "has been waiting [0-9]* s" &&
 		{ bad="modules waiting for each other"; break; }
 done
 wait $cli 2>/dev/null
