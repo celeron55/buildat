@@ -918,7 +918,7 @@ void CState::setup_packet_handlers()
 
 		// Read initial user variables
 		uint num_vars = msg.ReadVLE();
-		while(num_vars){
+		while(num_vars && !msg.IsEof()){
 			auto key = msg.ReadStringHash();
 			node->SetVar(key, msg.ReadVariant());
 			num_vars--;
@@ -926,7 +926,7 @@ void CState::setup_packet_handlers()
 
 		// Read components
 		uint num_c = msg.ReadVLE();
-		while(num_c){
+		while(num_c && !msg.IsEof()){
 			num_c--;
 
 			auto type = msg.ReadStringHash();
@@ -1032,7 +1032,7 @@ void CState::setup_packet_handlers()
 			log_d(MODULE, "Updating node %i (DeltaUpdate)", node_id);
 			node->ReadDeltaUpdate(msg);
 			uint num_vars = msg.ReadVLE();
-			while(num_vars){
+			while(num_vars && !msg.IsEof()){
 				auto key = msg.ReadStringHash();
 				node->SetVar(key, msg.ReadVariant());
 				num_vars--;

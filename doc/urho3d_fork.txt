@@ -315,3 +315,18 @@ stb_image.h is upstream's v2.30 (2024-05-31; was 1.7.1's v2.12, whose
 JPEG decoder read past its Huffman table on a crafted file), and a side
 is 8192 at most (STBI_MAX_DIMENSIONS; stb's own 2^24 let 25 bytes of TGA
 ask for gigabytes). util/fuzz/fuzz.sh image fuzzes what is left.
+
+What a server replicates to the client ([SECURITY_RUN_1])
+---------------------------------------------------------
+Source/Urho3D/Container/Vector.h, Container/VectorBase.{h,cpp}
+Source/Urho3D/IO/Deserializer.cpp
+Source/Urho3D/Physics/PhysicsWorld.cpp
+
+Vector allocates capacity * sizeof(T) as a size_t; it was cast to
+unsigned and wrapped, and the elements were constructed past the buffer.
+Deserializer holds a count it reads (ReadBuffer, ReadStringVector,
+ReadVariantVector, ReadResourceRefList, ReadVariantMap) to the bytes left
+in a stream of known size: an element takes one byte at least.
+PhysicsWorld's "Physics FPS" attribute goes through SetFps and its
+clamp, and with Max Substeps 0 a frame simulates 0.1 s at most instead
+of whatever the frame took. util/fuzz/client_fuzz.sh found the three.
