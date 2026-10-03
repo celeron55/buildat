@@ -622,6 +622,11 @@ local function add_edit(parent, value, secret)
 	e.textSelectable = true
 	if secret then
 		e.echoCharacter = string.byte("*")
+		-- A secret field: no wrapper but this one reads what is typed into
+		-- it, and no script hears the keys while it has the focus
+		-- (magic_sandbox.is_secret_field)
+		e:SetName("__trusted_secret")
+		getmetatable(e).trusted_reader = true
 	else
 		e.textCopyable = true
 	end

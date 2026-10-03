@@ -3,6 +3,7 @@
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local dump = buildat.dump
 local log = buildat.Logger("safe_classes")
+local magic_sandbox = require("buildat/extension/magic_sandbox")
 local M = {}
 
 function M.define(dst, util)
@@ -1894,7 +1895,19 @@ function M.define(dst, util)
 			-- full of elements from scratch wants
 			RemoveAllChildren = util.self_function(
 					"RemoveAllChildren", {}, {"UIElement"}),
-			SetName = util.self_function("SetName", {}, {"UIElement", "string"}),
+			-- Not a client's secret field's name taken away: that name is what
+			-- keeps what is typed into it from other scripts
+			SetName = function(self, name)
+				local m = getmetatable(self)
+				local raw = m and m.unsafe
+				if raw == nil or type(name) ~= "string" then
+					error("SetName(name): an element and a string")
+				end
+				if magic_sandbox.is_secret_field(raw) then
+					return
+				end
+				raw:SetName(name)
+			end,
 			SetText = util.self_function("SetText", {}, {"UIElement", "string"}),
 			-- Text::SetFont(Font*, float size), and **the size is the
 			-- argument that was missing**: without it in the signature the
@@ -1942,7 +1955,17 @@ function M.define(dst, util)
 			-- rest; see button_menu_nav() in extensions/ui_utils
 			GetTypeName = util.self_function(
 					"GetTypeName", {"string"}, {"UIElement"}),
-			GetText = util.self_function("GetText", {"string"}, {"UIElement"}),
+			GetText = function(self)
+				local m = getmetatable(self)
+				local raw = m and m.unsafe
+				if raw == nil then
+					error("GetText: not an element")
+				end
+				if magic_sandbox.is_secret_field(raw) and not m.trusted_reader then
+					return ""
+				end
+				return raw:GetText()
+			end,
 		},
 		properties = {
 			-- Where the element is in its parent. Note that this is an
@@ -2127,7 +2150,16 @@ function M.define(dst, util)
 			-- what was typed into it ([LAUNCH_CONSOLE] found this). The
 			-- field is the user's own and its contents are what they
 			-- just typed into this program.
-			text = util.simple_property("string"),
+			text = {
+				get = function(v, raw, meta)
+					if magic_sandbox.is_secret_field(raw) and
+							not (meta and meta.trusted_reader) then
+						return ""
+					end
+					return v
+				end,
+				set = util.simple_property("string").set,
+			},
 			cursorPosition = util.simple_property("number"),
 			-- **The two elements a field is made of**, read-only, so a
 			-- screen can give a field a font and a colour of its own:

@@ -326,7 +326,19 @@ function Safe.SubscribeToEvent(x, y, z)
 	next_sandbox_global_function_i = next_sandbox_global_function_i + 1
 	local global_callback_name = "__buildat_sandbox_callback_"..global_function_i
 	sandbox_callback_to_global_function_name[callback] = global_callback_name
+	-- A script's own function, as against the client's: what a sandbox
+	-- makes runs in a sandbox environment, never in this one
+	local callback_is_sandboxed = getfenv(callback) ~= _G
 	_G[global_callback_name] = function(event_type_thing, unsafe_event_data)
+		-- **Keys typed into a secret field are nobody else's**
+		-- ([SECURITY_RUN_1]): a script's KeyDown is every key pressed,
+		-- with its shift, so it read a Starport password as it was typed
+		-- into the client's own login dialog
+		if callback_is_sandboxed and (sub_event_type == "KeyDown" or
+				sub_event_type == "KeyUp") and
+				magic_sandbox.is_secret_field(ui:GetFocusElement()) then
+			return
+		end
 		local error = error
 		local f = function()
 			-- How the hell does one get a string out of event_type_thing?

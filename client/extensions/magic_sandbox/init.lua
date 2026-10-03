@@ -29,6 +29,20 @@ end
 
 -- The resulting value from this function should be placed directly in the
 -- sandbox environment's global environment as _G[type_name]
+-- **A secret field** ([SECURITY_RUN_1]): a LineEdit the client's own
+-- code made for a password, named "__trusted..." by it. What is in one is
+-- read only through the wrapper that code made it with (its metatable's
+-- trusted_reader); any other wrapper of it -- from a script that walked the
+-- UI tree to it -- reads "". Without this a server's script read the
+-- Starport password out of the login dialog.
+function M.is_secret_field(unsafe)
+	if unsafe == nil or unsafe:GetTypeName() ~= "LineEdit" then
+		return false
+	end
+	local name = unsafe:GetName()
+	return name ~= nil and name:sub(1, 9) == "__trusted"
+end
+
 function M.wrap_class(type_name, def)
 	local class = {}
 	local class_meta = {}
@@ -68,7 +82,8 @@ function M.wrap_class(type_name, def)
 						local property_def = super_def.properties[key]
 						if property_def.get then
 							local current_unsafe_value = unsafe[key]
-							local safe_v = property_def.get(current_unsafe_value)
+							local safe_v = property_def.get(current_unsafe_value,
+									unsafe, meta)
 							__buildat_sandbox_debug_check_value(safe_v)
 							return safe_v
 						end
@@ -93,7 +108,8 @@ function M.wrap_class(type_name, def)
 						error("Property \""..name.."\" of "..type_name.." cannot be read")
 					end
 					local current_unsafe_value = unsafe[key]
-					local safe_v = property_def.get(current_unsafe_value)
+					local safe_v = property_def.get(current_unsafe_value,
+							unsafe, meta)
 					__buildat_sandbox_debug_check_value(safe_v)
 					return safe_v
 				end
