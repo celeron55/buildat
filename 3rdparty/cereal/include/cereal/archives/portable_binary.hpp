@@ -137,9 +137,11 @@ namespace cereal
         itsStream(stream),
         itsConvertEndianness( false )
       {
-        bool streamLittleEndian;
+        // buildat: a byte, not a bool -- it is the stream's first, and the
+        // stream comes from the wire
+        std::uint8_t streamLittleEndian = 0;
         this->operator()( streamLittleEndian );
-        itsConvertEndianness = portable_binary_detail::is_little_endian() ^ streamLittleEndian;
+        itsConvertEndianness = portable_binary_detail::is_little_endian() ^ (streamLittleEndian != 0);
       }
 
       //! Reads size bytes of data from the input stream
@@ -212,6 +214,15 @@ namespace cereal
     static_assert( !std::is_floating_point<T>::value ||
                    (std::is_floating_point<T>::value && std::numeric_limits<T>::is_iec559),
                    "Portable binary only supports IEEE 754 standardized floating point" );
+    // buildat: a bool is read as a byte and made a bool, since a byte that
+    // is neither 0 nor 1 is not a value a bool may hold (UBSan, util/fuzz,
+    // [SECURITY_RUN_1]) and it comes from the wire
+    if(std::is_same<T, bool>::value){
+      std::uint8_t b = 0;
+      ar.template loadBinary<1>(&b, 1);
+      t = (b != 0);
+      return;
+    }
     ar.template loadBinary<sizeof(T)>(std::addressof(t), sizeof(t));
   }
 

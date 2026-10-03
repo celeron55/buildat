@@ -564,6 +564,9 @@ template<typename T>
 	return os.str();
 }
 
+static void check_region(const pv::Vector3DInt32 &lc,
+		const pv::Vector3DInt32 &uc);
+
 template<typename T>
 		up_<pv::RawVolume<T>> generic_deserialize_volume(const ss_ &data)
 {
@@ -574,6 +577,10 @@ template<typename T>
 	if(format == 2){
 		pv::Vector3DInt32 lc, uc;
 		ar(lc, uc);
+		// The same bounds as deserialize_volume(): these reach Lua too
+		// (deserialize_volume_int32/_8bit), and a reversed region was
+		// PolyVox's assert, a huge one gigabytes (util/fuzz)
+		check_region(lc, uc);
 		pv::Region region(lc, uc);
 		up_<pv::RawVolume<T>> volume(
 				new pv::RawVolume<T>(region));
@@ -587,6 +594,10 @@ template<typename T>
 	if(format == 3){
 		pv::Vector3DInt32 lc, uc;
 		ar(lc, uc);
+		// The same bounds as deserialize_volume(): these reach Lua too
+		// (deserialize_volume_int32/_8bit), and a reversed region was
+		// PolyVox's assert, a huge one gigabytes (util/fuzz)
+		check_region(lc, uc);
 		pv::Region region(lc, uc);
 		up_<pv::RawVolume<T>> volume(
 				new pv::RawVolume<T>(region));
