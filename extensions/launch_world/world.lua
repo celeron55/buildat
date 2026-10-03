@@ -5156,8 +5156,9 @@ function handle_keydown(event_type, event_data)
 		return
 	end
 	-- Then the desk, which eats the arrows and Enter while it is open;
-	-- Escape below stands you up
-	if key ~= magic.KEY_ESCAPE and terminal_key(key) then
+	-- Escape below stands you up, and Tab goes on to the next station
+	if key ~= magic.KEY_ESCAPE and key ~= magic.KEY_TAB and
+			terminal_key(key) then
 		return
 	end
 	-- **Escape closes what is open, and the pause dialog when nothing
