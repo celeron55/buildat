@@ -11,8 +11,8 @@
 -- -- with the hit points going down by what the sword does to its armour
 -- group, and "died" when they run out:
 --
---   punch check: target punched by client1, 16 hp left
---   punch check: target punched by client1, 12 hp left
+--   punch check: target punched by singleplayer, 16 hp left
+--   punch check: target punched by singleplayer, 12 hp left
 --   punch check: the target died
 --
 -- The node behind it is not dug meanwhile, which is the other half of it:

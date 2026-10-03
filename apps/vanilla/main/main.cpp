@@ -254,12 +254,14 @@ struct Module: public interface::Module
 	// is to be the key everything about the player hangs off, and a mod
 	// that prints it gets something it can tell apart.
 	//
-	// BUILDAT_LUANTI_NAME names the first client that connects instead,
-	// spelled the way extensions/luanti_client spells it. An imported
-	// world's own player is somebody the save already knows -- where they
-	// stood, what they carry, what they are allowed to do -- and nothing
-	// ever logs in as them otherwise. Only the first client gets the name,
-	// because a name is one player and two clients cannot both be them.
+	// The first client that connects is "singleplayer", the name Luanti's
+	// own singleplayer always plays as: games written for one player look
+	// it up by that name (citadel's get_player_by_name("singleplayer")),
+	// and an imported singleplayer world's own player is that one -- where
+	// they stood, what they carry. BUILDAT_LUANTI_NAME names them instead,
+	// spelled the way extensions/luanti_client spells it. Only the first
+	// client gets the name, because a name is one player and two clients
+	// cannot both be them; the next to connect after they leave gets it.
 	//
 	// simplified: an environment variable is not how a player picks
 	// themselves. The menu lists the saves and a save knows its players, so
@@ -273,7 +275,7 @@ struct Module: public interface::Module
 		}
 		const char *name = getenv("BUILDAT_LUANTI_NAME");
 		if(name == nullptr || name[0] == '\0')
-			return "client"+itos(peer);
+			name = "singleplayer";
 		if(m_named_peer == 0)
 			m_named_peer = peer;
 		if(m_named_peer != peer)
@@ -285,11 +287,13 @@ struct Module: public interface::Module
 	{
 		m_shown_world.erase(old_client.info.id);
 		m_shown_menu.erase(old_client.info.id);
-		if(!m_scene)
-			return;
-		luanti::access(m_server, [&](luanti::Interface *i){
-			i->remove_player(player_name_of(old_client.info.id));
-		});
+		if(m_scene){
+			luanti::access(m_server, [&](luanti::Interface *i){
+				i->remove_player(player_name_of(old_client.info.id));
+			});
+		}
+		if(m_named_peer == old_client.info.id)
+			m_named_peer = 0;
 		m_names.erase(old_client.info.id);
 		m_join_sent.erase(old_client.info.id);
 		m_chat_bucket.erase(old_client.info.id);
