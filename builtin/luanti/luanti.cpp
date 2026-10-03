@@ -1753,27 +1753,6 @@ struct Module: public interface::Module, public luanti::Interface
 		update_load_points();
 		if(m_game_running)
 			run_completed_chunks();
-		{
-			static int64_t probe_t = 0;
-			const int64_t now = interface::os::time_us();
-			if(now - probe_t > 10000000){
-				probe_t = now;
-				ss_ st;
-				int n = 0;
-				voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
-					for(uint64_t k : m_completion_sections){
-						if(n++ >= 6) break;
-						const pv::Vector3DInt16 sp = section_from_key(k);
-						st += " ("+itos(sp.getX())+","+itos(sp.getY())+","+itos(sp.getZ())+")"+
-								(world->is_section_loaded(sp) ? "L" : "-")+
-								(world->is_section_generated(sp) ? "G" : "-");
-					}
-				});
-				log_w(MODULE, "PROBE pending %zu completion %zu pins %zu forceloaded %zu to_run %zu:%s",
-						m_chunks_pending.size(), m_completion_sections.size(),
-						m_chunk_pins.size(), m_forceloaded.size(), m_chunks_to_run.size(), cs(st));
-			}
-		}
 		check_map_when_ready(dtime);
 		step_environment(dtime);
 		flush_node_writes();
