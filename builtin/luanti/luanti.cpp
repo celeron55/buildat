@@ -6906,7 +6906,7 @@ struct Module: public interface::Module, public luanti::Interface
 			log_w(MODULE, "luanti:get_model: %s", e.what());
 			return;
 		}
-		if(asked.empty() || asked[0].empty())
+		if(asked.empty() || asked[0].empty() || !m_lua)
 			return;
 		const ss_ name = asked[0];
 		// The second value, if any, is the frame the model is wanted
@@ -7082,6 +7082,10 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		sv_<ss_> flat;
 		interface::MutexScope ms(m_lua_mutex);
+		// No game yet -- a server at its world menu -- and a client may
+		// ask anyway: an empty answer, not a null state
+		if(!m_lua)
+			return flat;
 		lua_State *L = m_lua;
 		int base = lua_gettop(L);
 		lua_getglobal(L, "core");
@@ -7148,6 +7152,8 @@ struct Module: public interface::Module, public luanti::Interface
 		sv_<ss_> flat;
 		{
 			interface::MutexScope ms(m_lua_mutex);
+			if(!m_lua)
+				return;
 			lua_State *L = m_lua;
 			int base = lua_gettop(L);
 			lua_getglobal(L, "core");

@@ -500,11 +500,22 @@ void ModuleThread::handle_event(Event &event)
 					cs(mc->info.name));
 		} catch(std::exception &e){
 			// If event handling results in an uncatched exception, the
-			// server shall shut down.
-			mc->server->shutdown(1, "M["+mc->info.name+"]->event() "
-					"failed: "+e.what());
-			log_w(MODULE, "M[%s]->event() failed: %s",
-					cs(mc->info.name), e.what());
+			// server shall shut down -- unless the event is a client's
+			// packet: what a client sends is for anyone to make, and a
+			// packet a handler cannot read (a short cereal archive, a size
+			// it cannot allocate) is that packet's failure and not the
+			// server's. It is dropped and said, backtrace and all.
+			const ss_ name = interface::getGlobalEventRegistry()->name(
+					event.type);
+			const bool from_client =
+					name.compare(0, 24, "network:packet_received/") == 0;
+			if(!from_client){
+				mc->server->shutdown(1, "M["+mc->info.name+"]->event() "
+						"failed: "+e.what());
+			}
+			log_w(MODULE, "M[%s]->event(\"%s\") failed%s: %s",
+					cs(mc->info.name), cs(name),
+					from_client ? " (the packet is dropped)" : "", e.what());
 			if(!mc->thread->ref_backtraces().empty()){
 				interface::debug::log_backtrace_chain(
 						mc->thread->ref_backtraces(), e.what());
