@@ -164,10 +164,31 @@ namespace cereal
         }
       }
 
+      //! buildat: a container's size off the wire is checked against what
+      //! is left to read before the container is made that size -- every
+      //! element of a binary archive takes at least a byte, so a size past
+      //! the bytes left is not a real one, and a packet of twenty bytes
+      //! claiming 2^30 strings made them all first ([SECURITY_RUN_1]). A
+      //! string stream only: a file's in_avail() is not what is left.
+      void checkSize( std::uint64_t size )
+      {
+        auto * sb = dynamic_cast<std::stringbuf *>( itsStream.rdbuf() );
+        if( sb && size > static_cast<std::uint64_t>( sb->in_avail() ) )
+          throw Exception("A size of " + std::to_string(size) + " past the " +
+              std::to_string(sb->in_avail()) + " bytes left in the input stream");
+      }
+
     private:
       std::istream & itsStream;
       bool itsConvertEndianness; //!< If set to true, we will need to swap bytes upon loading
   };
+
+  namespace portable_binary_detail
+  {
+    template <class T> inline void check_size( PortableBinaryOutputArchive &, T const & ) {}
+    template <class T> inline void check_size( PortableBinaryInputArchive & ar, T const & size )
+    { ar.checkSize( static_cast<std::uint64_t>( size ) ); }
+  }
 
   // ######################################################################
   // Common BinaryArchive serialization functions
@@ -208,6 +229,7 @@ namespace cereal
   serialize( Archive & ar, SizeTag<T> & t )
   {
     ar( t.size );
+    portable_binary_detail::check_size( ar, t.size );
   }
 
   //! Saving binary data to portable binary
