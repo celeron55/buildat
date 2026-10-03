@@ -14,6 +14,12 @@
 # fields and values at the edges, so the checks past the decoding are
 # what is driven.
 #
+# CORPUS=<file> (record_proxy.py's) is every app's shapes the same way: a
+# connection first replays the session's first packet of each name, in
+# order -- the login and the join -- and half of what it sends is a
+# recorded payload mutated (bits flipped, edge values written over it,
+# cut, grown, spliced).
+#
 #   proto_fuzz.py <port> <seconds> <names file> [seed] [words file]
 import os, random, socket, struct, sys, time
 
@@ -25,6 +31,23 @@ if len(sys.argv) > 5:
     words = {l.split()[0]: l.split()[1:] for l in open(sys.argv[5])
             if l.split()}
     all_fields = sorted(set(f for v in words.values() for f in v))
+
+corpus = []
+if os.environ.get("CORPUS"):
+    d = open(os.environ["CORPUS"], "rb").read()
+    i = 0
+    while i < len(d):
+        nl = struct.unpack("<H", d[i:i + 2])[0]
+        name = d[i + 2:i + 2 + nl].decode()
+        i += 2 + nl
+        size = struct.unpack("<I", d[i:i + 4])[0]
+        corpus.append((name, d[i + 4:i + 4 + size]))
+        i += 4 + size
+    firsts, seen = [], set()
+    for name, data in corpus:
+        if name not in seen:
+            seen.add(name)
+            firsts.append((name, data))
 
 def packet(t, data):
     return struct.pack("<HI", t, len(data)) + data
@@ -131,6 +154,28 @@ def plan_file():
                 b"\xff\xd8\xff" + os.urandom(10), b""]))
     return out
 
+def mutate(data):
+    b = bytearray(data)
+    for _ in range(rnd.choice([1, 1, 2, 4])):
+        k = rnd.randrange(6)
+        at = rnd.randrange(len(b) + 1)
+        if k == 0 and b:
+            b[min(at, len(b) - 1)] ^= 1 << rnd.randrange(8)
+        elif k == 1:
+            v = rnd.choice([struct.pack("<i", edge_int()), u64(rnd.choice(
+                    [0, 2**31, 2**32 + 5, 2**63, 2**64 - 1])),
+                    struct.pack("<d", rnd.choice([float("nan"), 1e308,
+                    -1e308, float("inf")])), bytes([rnd.randrange(256)])])
+            b[at:at + len(v)] = v
+        elif k == 2:
+            del b[at:]
+        elif k == 3:
+            b[at:at] = os.urandom(rnd.choice([1, 8, 100]))
+        elif k == 4:
+            other = rnd.choice(corpus)[1]
+            b[at:] = other[rnd.randrange(len(other) + 1):]
+    return bytes(b)
+
 def shaped():
     if rnd.random() < 0.5:
         return "fp:batch", bytes([1]) + i32(edge_int()) + \
@@ -152,6 +197,8 @@ class Conn:
             self.send("fp:open", bytes([1]) + s_("p%d" % rnd.randrange(5)) +
                     bytes([rnd.randrange(2)]))
             self.send("fp:set_editing", bytes([1, 1]))
+        for name, data in firsts if corpus else []:
+            self.send(name, data)
 
     def send(self, name, data):
         out = b""
@@ -184,6 +231,9 @@ while time.time() < end:
             for _ in range(rnd.randrange(1, 20)):
                 if words and rnd.random() < 0.33:
                     c.send(*shaped())
+                elif corpus and rnd.random() < 0.5:
+                    name, data = rnd.choice(corpus)
+                    c.send(name, mutate(data))
                 else:
                     c.send(rnd.choice(names), payload())
                 sent += 1
