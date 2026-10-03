@@ -2836,14 +2836,21 @@ local function blit_schematic(sch, pos, rotation, replacements,
 	end
 	local p = {x = math.floor(pos.x), y = math.floor(pos.y),
 			z = math.floor(pos.z)}
-	flags = flags or ""
-	if flags:find("place_center_x") then
+	-- A string, or a table of flag = true, the way Luanti's read_flags
+	-- takes either
+	local function flag(f)
+		if type(flags) == "table" then
+			return flags[f] == true
+		end
+		return type(flags) == "string" and flags:find(f) ~= nil
+	end
+	if flag("place_center_x") then
 		p.x = p.x - math.floor((ex - 1) / 2)
 	end
-	if flags:find("place_center_y") then
+	if flag("place_center_y") then
 		p.y = p.y - math.floor((sy - 1) / 2)
 	end
-	if flags:find("place_center_z") then
+	if flag("place_center_z") then
 		p.z = p.z - math.floor((ez - 1) / 2)
 	end
 	local ystride, zstride = sx, sx * sy

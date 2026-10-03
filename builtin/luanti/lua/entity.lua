@@ -3017,6 +3017,25 @@ function core.__add_player(name)
 			pcall(handler.create_auth, name, "")
 		end
 	end
+	-- Luanti runs on_newplayer for a player with nothing saved, before
+	-- on_joinplayer. A game that puts its newcomers somewhere (citadel's
+	-- arena, a skyblock island) does it here, and where it put them is
+	-- their spawn: the ground placement below leaves them alone.
+	if new_here then
+		local was = {x = o.pos.x, y = o.pos.y, z = o.pos.z}
+		for _, cb in ipairs(core.registered_on_newplayers or {}) do
+			local ok, err = xpcall(function() return cb(ref) end,
+					function(e)
+						return tostring(e) .. "\n" .. debug.traceback("", 2)
+					end)
+			if not ok then
+				core.log("error", "on_newplayer: " .. tostring(err))
+			end
+		end
+		if was.x ~= o.pos.x or was.y ~= o.pos.y or was.z ~= o.pos.z then
+			o.spawn_known = true
+		end
+	end
 	if new_here and not o.spawn_known then
 		unplaced[name] = {x = o.pos.x, y = o.pos.y, z = o.pos.z}
 	end
