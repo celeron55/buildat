@@ -1009,17 +1009,26 @@ struct Module: public interface::Module, public network::Interface
 		static char buf[100000];
 		ssize_t r = recv(fd, buf, 100000, 0);
 		if(r == -1){
-#ifdef ECONNRESET // No idea why this isn't defined on MinGW
-			if(errno == ECONNRESET){
-				log_v(MODULE, "Peer %zu: Connection reset by peer", peer.id);
-				return;
-			}
-#endif
 			// Nothing to read after all: a readiness listed for the fd's
 			// previous peer, which a new connection took over
+#ifdef _WIN32
+			// Winsock says why in WSAGetLastError() and leaves errno alone
+			if(WSAGetLastError() == WSAEWOULDBLOCK ||
+					WSAGetLastError() == WSAEINTR)
+				return;
+			const ss_ why = "WSA error "+itos(WSAGetLastError());
+#else
 			if(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
 				return;
-			throw Exception(ss_()+"Receive failed: "+strerror(errno));
+			const ss_ why = strerror(errno);
+#endif
+			// Anything else is this peer's connection gone -- reset, timed
+			// out, unreachable -- and the peer leaves. It was thrown, and a
+			// throw here ends the network thread and the server with it
+			// ([SECURITY_RUN_1]).
+			log_v(MODULE, "Peer %zu: receive failed: %s", peer.id, cs(why));
+			take_input(peer, buf, 0);
+			return;
 		}
 		take_input(peer, buf, r);
 	}
