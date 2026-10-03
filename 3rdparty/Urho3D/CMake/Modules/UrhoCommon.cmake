@@ -142,6 +142,9 @@ cmake_dependent_option (URHO3D_NETWORK "Enable networking support" TRUE "NOT WEB
 option (URHO3D_PHYSICS "Enable physics support" TRUE)
 option (URHO3D_URHO2D "Enable 2D graphics and physics support" TRUE)
 option (URHO3D_WEBP "Enable WebP support" TRUE)
+# buildat [WEB_GLES3]: GLES3 / WebGL 2, backported from upstream PR #2536;
+# only the web build uses it
+cmake_dependent_option (URHO3D_GLES3 "Enable GLES3 (WebGL 2 on the web)" FALSE "WEB" FALSE)
 if (ARM AND NOT ANDROID AND NOT RPI AND NOT APPLE)
     set (ARM_ABI_FLAGS "" CACHE STRING "Specify ABI compiler flags (ARM on Linux platform only); e.g. Orange-Pi Mini 2 could use '-mcpu=cortex-a7 -mfpu=neon-vfpv4'")
 endif ()
@@ -449,6 +452,7 @@ foreach (OPT
         URHO3D_PROFILING
         URHO3D_THREADING
         URHO3D_URHO2D
+        URHO3D_GLES3
         URHO3D_WEBP
         URHO3D_WIN32_CONSOLE)
     if (${OPT})
@@ -678,14 +682,14 @@ else ()
                 # Prior to version 1.31.3 emcc does not consistently add the cpp standard and remove Emscripten-specific compiler flags
                 # before passing on the work to the underlying LLVM/Clang compiler, this has resulted in preprocessing error when enabling the PCH and ccache
                 # (See https://github.com/kripken/emscripten/issues/3365 for more detail)
-                if (EMSCRIPTEN_EMCC_VERSION VERSION_LESS 1.31.3)
-                    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++03")
-                endif ()
+                # buildat [WEB_EMSDK]: emsdk's own toolchain file (emcmake) sets
+                # no EMSCRIPTEN_EMCC_VERSION, and the engine is C++17 as it is
+                # natively (GCC's default)
+                set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
                 set (CMAKE_C_FLAGS_RELEASE "-Oz -DNDEBUG")
                 set (CMAKE_CXX_FLAGS_RELEASE "-Oz -DNDEBUG")
-                # Remove variables to make the -O3 regalloc easier, embed data in asm.js to reduce number of moving part
-                set (CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -O3 -s AGGRESSIVE_VARIABLE_ELIMINATION=1 --memory-init-file 0")
-                set (CMAKE_MODULE_LINKER_FLAGS_RELEASE "${CMAKE_MODULE_LINKER_FLAGS_RELEASE} -O3 -s AGGRESSIVE_VARIABLE_ELIMINATION=1 --memory-init-file 0")
+                set (CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -O3")
+                set (CMAKE_MODULE_LINKER_FLAGS_RELEASE "${CMAKE_MODULE_LINKER_FLAGS_RELEASE} -O3")
                 # Preserve LLVM debug information, show line number debug comments, and generate source maps; always disable exception handling codegen
                 set (CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -g4 -s DISABLE_EXCEPTION_CATCHING=1")
                 set (CMAKE_MODULE_LINKER_FLAGS_DEBUG "${CMAKE_MODULE_LINKER_FLAGS_DEBUG} -g4 -s DISABLE_EXCEPTION_CATCHING=1")

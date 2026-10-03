@@ -9,6 +9,11 @@
 // Self-check (it wants no Urho3D, so it builds on its own):
 //   g++ -std=c++11 -DBIGNUM_SELF_TEST -Isrc -o /tmp/bignum_test \
 //       src/impl/bignum.cpp && /tmp/bignum_test
+#ifdef _WIN32
+	// rand_s() is under _CRT_RAND_S, before the first <stdlib.h> -- which
+	// core/types.h pulls in through bignum.h; mingw-w64 has it
+	#define _CRT_RAND_S
+#endif
 #include "interface/bignum.h"
 #include <vector>
 #include <cstring>

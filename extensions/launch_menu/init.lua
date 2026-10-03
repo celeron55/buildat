@@ -1,367 +1,505 @@
 -- Buildat: extension/launch_menu/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
--- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+--
+-- The launch menu: what the client shows when it is started with nothing to
+-- connect to, which is what starting buildat does.
+--
+-- The screens a game is started through are screens.lua beside this,
+-- which every launch UI's game starts end in (client/launch_grid.lua).
+-- **This menu runs in the sandbox** ([LAUNCH_SANDBOX]), which is what
+-- its launch_ui.txt asks for. Three shapes come with that: the safe API
+-- is `buildat` itself here and `buildat.safe` outside, `require`
+-- answers an extension's safe half inside and the whole extension
+-- outside, and a file of its own is loaded by a verb rather than by
+-- `dofile` and a path.
+local api = buildat.safe or buildat
 local log = buildat.Logger("extension/launch_menu")
-local magic = require("buildat/extension/urho3d").safe
+local dump = api.dump
+local urho3d = require("buildat/extension/urho3d")
+local magic = urho3d.Vector3 and urho3d or urho3d.safe
 local uistack = require("buildat/extension/uistack")
-local ui_utils = require("buildat/extension/ui_utils").safe
+uistack = uistack.main and uistack or uistack.safe
+local ui_utils = require("buildat/extension/ui_utils")
+ui_utils = ui_utils.bind_button_menu and ui_utils or ui_utils.safe
+local preferences = api.run_extension_file("preferences.lua")
+local screens = api.run_extension_file("screens.lua")
+-- **The constants are globals in trusted Lua and fields of the safe
+-- table in the sandbox**, so they are named once here and the code
+-- below reads the same on both sides ([LAUNCH_SANDBOX])
+local FILTER_NEAREST, HA_CENTER, HA_LEFT, KEY_ESCAPE, LM_VERTICAL, VA_CENTER, VA_TOP =
+		magic.FILTER_NEAREST, magic.HA_CENTER, magic.HA_LEFT, magic.KEY_ESCAPE, magic.LM_VERTICAL, magic.VA_CENTER, magic.VA_TOP
+local KEY_BACKSPACE, KEY_RETURN, KEY_RETURN2, KEY_KP_ENTER =
+		magic.KEY_BACKSPACE, magic.KEY_RETURN, magic.KEY_RETURN2, magic.KEY_KP_ENTER
+
 local M = {safe = nil}
 
-local function show_error(message)
-	ui_utils.show_message_dialog(message)
-end
+-- The launch grid ([LAUNCH_GRID]): the tiles come from the tree, any number
+-- from every games/*, builtin/* and extensions/* that ships
+-- launcher/init.lua, found by buildat.list_launchers() and run in the
+-- sandbox -- module client-Lua trust, since the file is on the way into a
+-- game and a whole-server sandbox is only as good as the least-trusted code
+-- on that path. A file that errors, returns a non-table or an action with
+-- no label or run is one warning naming it, and the rest of the grid draws.
+-- The one way out of a file is ctx.launch, below, whose params cross as
+-- plain data and whose target is entered through on_untrusted_launch().
+-- **The grid comes through the verb**, not through the trusted file:
+-- `launch_actions()` answers the same tiles as plain data with a key,
+-- and `launch(key)` is what runs one ([LAUNCH_SANDBOX]).
 
-local function format_bytes(n)
-	n = math.floor(tonumber(n) or 0)
-	if n < 1024 then
-		return n.." B"
+local DIM = 0.55
+
+-- One entry is this wide, which is what centring the row of them needs to be
+-- arithmetic rather than a guess: a vertical layout stretches its children to
+-- its own width, so a row left to itself is as wide as the menu and its icons
+-- sit at the left of it while everything else is centred.
+local ENTRY_WIDTH = 190
+local ENTRY_SPACING = 24
+-- The icon plus the label under it, which is what the row has to be tall
+-- enough for; a row with nothing laying it out does not work it out itself
+local ENTRY_HEIGHT = 160
+
+-- **Typing searches the grid** (user, 2026-09-29): the tiles whose label
+-- starts with what is typed first, then the ones that only contain it, each
+-- in the grid's order; the first is selected, so "floo" and Enter starts
+-- the floor planner. A key that is a letter, a digit, a space or - types;
+-- Backspace takes one off and Escape clears what is typed before it quits.
+-- Pure, so the check below can run it.
+local function search(items, query)
+	if query == "" then
+		return items
 	end
-	local kb = n / 1024
-	if kb < 1024 then
-		if kb < 10 then
-			return string.format("%.1f KB", kb)
+	local q = query:lower()
+	local starts, contains = {}, {}
+	for _, item in ipairs(items) do
+		local label = item.label:lower()
+		local at = label:find(q, 1, true)
+		if at == 1 then
+			starts[#starts + 1] = item
+		elseif at then
+			contains[#contains + 1] = item
 		end
-		return math.floor(kb + 0.5).." KB"
 	end
-	local mb = kb / 1024
-	if mb < 10 then
-		return string.format("%.1f MB", mb)
+	for _, item in ipairs(contains) do
+		starts[#starts + 1] = item
 	end
-	return math.floor(mb + 0.5).." MB"
+	return starts
 end
 
--- Same min width as the local-game list, so the boot menu is as wide.
-local MENU_BUTTON_WIDTH = 200
-
-local function make_button(parent, label)
-	local button = parent:CreateChild("Button")
-	button:SetStyleAuto()
-	button:SetName("Button")
-	button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
-	button.minHeight = 24
-	button.minWidth = MENU_BUTTON_WIDTH
-	local text = button:CreateChild("Text")
-	text:SetName("ButtonText")
-	text:SetStyleAuto()
-	text.text = label
-	text:SetTextAlignment(HA_CENTER)
-	return button
+do
+	local items = {{label = "Floor planner"}, {label = "Engine settings"},
+			{label = "Fleet"}, {label = "A floor mat"}}
+	local r = search(items, "f")
+	assert(#r == 3 and r[1].label == "Floor planner" and r[2].label == "Fleet"
+			and r[3].label == "A floor mat", "search: starts first")
+	r = search(items, "FLOO")
+	assert(#r == 2 and r[1].label == "Floor planner" and
+			r[2].label == "A floor mat", "search: case, then contains")
+	assert(#search(items, "") == 4, "search: nothing typed is everything")
 end
 
--- Name + size as separate texts so the size can be smaller and duller.
--- minWidth is ~30% over the old single-line content width.
-local function make_game_button(parent, name, size)
-	local button = parent:CreateChild("Button")
-	button:SetStyleAuto()
-	button:SetName("Button")
-	button:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(12, 2, 12, 2))
-	button.minHeight = 24
-	button.minWidth = MENU_BUTTON_WIDTH
-	local text = button:CreateChild("Text")
-	text:SetName("ButtonText")
-	text:SetStyleAuto()
-	text.text = name
-	if text.width > 0 then
-		-- So the size beside it does not squeeze the name: a function
-		-- because the fixedWidth property has no setter in the bindings
-		text:SetFixedWidth(text.width)
+-- The character a key types into the search, or nil: key codes are SDL's,
+-- which are the lower case ASCII of what the key says
+local function search_char(key)
+	if (key >= 97 and key <= 122) or (key >= 48 and key <= 57) or
+			key == 32 or key == 45 then
+		return string.char(key)
 	end
-	local size_text = button:CreateChild("Text")
-	size_text:SetStyleAuto()
-	size_text.text = format_bytes(size)
-	size_text:SetFontSize(12)
-	size_text.color = magic.Color(0.5, 0.5, 0.5)
-	size_text:SetTextAlignment(HA_RIGHT)
-	return button
+	return nil
 end
 
-local function make_labeled_edit(parent, label, value, width)
-	local text = parent:CreateChild("Text")
-	text:SetStyleAuto()
-	text.text = label
-	local edit = parent:CreateChild("LineEdit")
-	edit:SetStyleAuto()
-	edit.minHeight = 24
-	edit.minWidth = width or 300
-	edit:SetText(value)
-	return edit
-end
+-- launch_action is -a's kind/name/id: the grid is drawn and that one
+-- action is run on top of it, the way picking its tile would. query is what
+-- the search has typed so far.
+function M.boot(launch_action, query)
+	-- The search's own rebuilds say nothing the first boot said already
+	local first = query == nil
+	query = query or ""
+	local root = uistack.main:push({desc = "boot"})
 
-local function connect_or_show_error(address)
-	local ok, err = buildat.connect_server(address)
-	if ok then
-		log:info("connect_server() ok")
-		uistack.main:push({desc="empty (game is running)"})
-		magic.ui:SetFocusElement(nil)
-	else
-		log:info("connect_server() failed")
-		show_error(err)
-	end
-end
-
-local function show_connect_to_server()
-	buildat.request_stop_local_server()
-	local root = uistack.main:push({desc="connect_to_server"})
-
-	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
+	local style = magic.cache:GetResource("XMLFile", "launch_menu/res/boot_style.xml")
 	root.defaultStyle = style
 
-	local window = root:CreateChild("Window")
-	window:SetStyleAuto()
-	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
-	window:SetAlignment(HA_LEFT, VA_CENTER)
+	local layout = root:CreateChild("Window")
+	layout:SetStyleAuto()
+	layout:SetName("Layout")
+	layout:SetLayout(LM_VERTICAL, 16, magic.IntRect(20, 20, 20, 20))
+	-- HA_LEFT, because the UI stack's own element is a horizontal layout and
+	-- refuses anything else -- with a warning on every boot. Centring the
+	-- whole menu on the screen would mean giving that element a different
+	-- layout; centring what is *inside* the menu is what the logo and the
+	-- row of entries below do.
+	layout:SetAlignment(HA_LEFT, VA_CENTER)
 
-	local address_edit = make_labeled_edit(window, "Address", "localhost")
-	local port_edit = make_labeled_edit(window, "Port (optional)", "29500")
-	address_edit:SetFocus(true)
-
-	local function do_connect()
-		local host = address_edit:GetText()
-		local port = port_edit:GetText()
-		if host == "" then
-			show_error("Enter a server address")
-			return
-		end
-		local address = host
-		if port ~= "" then
-			address = host..":"..port
-		end
-		connect_or_show_error(address)
-	end
-
-	local connect_button = make_button(window, "Connect")
-	magic.SubscribeToEvent(connect_button, "Released",
-	function(self, event_type, event_data)
-		do_connect()
-	end)
-	magic.SubscribeToEvent(address_edit, "TextFinished",
-	function(self, event_type, event_data)
-		do_connect()
-	end)
-	magic.SubscribeToEvent(port_edit, "TextFinished",
-	function(self, event_type, event_data)
-		do_connect()
-	end)
-
-	local back_button = make_button(window, "Back")
-	magic.SubscribeToEvent(back_button, "Released",
-	function(self, event_type, event_data)
-		uistack.main:pop(root)
-	end)
-
-	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-		local key = event_data:GetInt("Key")
-		if key == KEY_ESCAPE then
-			uistack.main:pop(root)
-		end
-	end)
-end
-
-local function show_starting(game)
-	local root = uistack.main:push({desc="starting_local_server"})
-
-	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
-	root.defaultStyle = style
-
-	local window = root:CreateChild("Window")
-	window:SetStyleAuto()
-	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
-	window:SetAlignment(HA_LEFT, VA_CENTER)
-
-	local status = window:CreateChild("Text")
-	status:SetStyleAuto()
-	status.text = "Starting "..game.."..."
-
-	local t0 = buildat.get_time_us()
-	local done = false
-	root:SubscribeToStackEvent("Update", function(event_type, event_data)
-		if done then
-			return
-		end
-		if buildat.local_server_ready() then
-			done = true
-			connect_or_show_error("localhost:"..buildat.local_server_port())
-			return
-		end
-		if not buildat.local_server_running() then
-			done = true
-			show_error("Server exited")
-			uistack.main:pop(root)
-			return
-		end
-		if buildat.get_time_us() - t0 > 90 * 1000000 then
-			done = true
-			buildat.request_stop_local_server()
-			show_error("Server did not start")
-			uistack.main:pop(root)
-		end
-	end)
-
-	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-		local key = event_data:GetInt("Key")
-		if key == KEY_ESCAPE then
-			done = true
-			buildat.request_stop_local_server()
-			uistack.main:pop(root)
-		end
-	end)
-end
-
-local function do_start_local_game(game)
-	local ok, err = buildat.start_local_server(game)
-	if not ok then
-		show_error(err)
-		return
-	end
-	show_starting(game)
-end
-
-local function show_waiting_for_old_server(game)
-	local root = uistack.main:push({desc="stopping_old_server"})
-
-	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
-	root.defaultStyle = style
-
-	local window = root:CreateChild("Window")
-	window:SetStyleAuto()
-	window:SetLayout(LM_VERTICAL, 10, magic.IntRect(10, 10, 10, 10))
-	window:SetAlignment(HA_LEFT, VA_CENTER)
-
-	local status = window:CreateChild("Text")
-	status:SetStyleAuto()
-	status.text = "Stopping previous server..."
-
-	local t0 = buildat.get_time_us()
-	local done = false
-	root:SubscribeToStackEvent("Update", function(event_type, event_data)
-		if done then
-			return
-		end
-		if not buildat.local_server_running() then
-			done = true
-			uistack.main:pop(root)
-			do_start_local_game(game)
-			return
-		end
-		if buildat.get_time_us() - t0 > 10 * 1000000 then
-			done = true
-			uistack.main:pop(root)
-			ui_utils.show_confirm_dialog(
-				"The previous local server is still running.\n"..
-				"It may be saving. Force kill it?",
-				function()
-					buildat.force_kill_local_server()
-					do_start_local_game(game)
-				end,
-				function()
-				end)
-		end
-	end)
-
-	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-		local key = event_data:GetInt("Key")
-		if key == KEY_ESCAPE then
-			done = true
-			uistack.main:pop(root)
-		end
-	end)
-end
-
-local function start_local_game(game)
-	buildat.request_stop_local_server()
-	if not buildat.local_server_running() then
-		do_start_local_game(game)
-		return
-	end
-	show_waiting_for_old_server(game)
-end
-
-local function show_local_game()
-	local root = uistack.main:push({desc="local_game"})
-
-	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
-	root.defaultStyle = style
-
-	local menu = ui_utils.vertical_menu(root, {min_width = MENU_BUTTON_WIDTH})
-
-	local title = menu.window:CreateChild("Text")
-	title:SetStyleAuto()
-	title.text = "Local game"
-
-	local games = buildat.list_games()
-	if #games == 0 then
-		local empty = menu.window:CreateChild("Text")
-		empty:SetStyleAuto()
-		empty.text = "No games found"
-	else
-		for _, game in ipairs(games) do
-			local name = game.name
-			local button = make_game_button(menu.window, name, game.size)
-			menu:add(button, function()
-				start_local_game(name)
-			end)
-		end
-	end
-
-	menu:add("Back", function()
-		uistack.main:pop(root)
-	end)
-	menu:on_key(function(key)
-		if key == KEY_ESCAPE then
-			uistack.main:pop(root)
-		end
-	end)
-end
-
--- The two things this extension knows how to do, for the launch menu to put
--- in front of a player: the list of local games, and connecting to a remote
--- server. Both push a screen of their own and come back on their own.
-M.show_local_game = show_local_game
-M.show_connect_to_server = show_connect_to_server
-
--- Kept so that `-m launch_menu` still starts something: the launch menu
--- itself is extensions/__menu, which is what the client boots by default.
--- Required here rather than at the top, because that one requires this one.
-function M.boot()
-	require("buildat/extension/__menu").boot()
-end
-
--- The vertical-menu version of the launch menu, which is what the `buildat`
--- launcher binary used to run. Kept because it is a working menu with
--- keyboard selection and no icons to load, and it is one call away if the
--- icon menu ever needs replacing.
-function M.boot_plain()
-	local root = uistack.main:push("boot")
-
-	local style = magic.cache:GetResource("XMLFile", "__menu/res/main_style.xml")
-	root.defaultStyle = style
-
-	local menu = ui_utils.vertical_menu(root, {
-		spacing = 16,
-		padding = magic.IntRect(10, 20, 10, 20),
-		min_width = MENU_BUTTON_WIDTH,
-	})
-
-	local logo = menu.window:CreateChild("Sprite")
-	logo:SetTexture(magic.cache:GetResource("Texture2D", "buildat_logo.png"))
+	-- The logo, centred over the rest. It needs an element of its own to be
+	-- centred in: a child of a layout does not get its horizontal alignment
+	-- honoured -- Urho3D's UIElement::GetLayoutChildPosition() only reads it
+	-- to decide which border to apply -- so the holder is what the layout
+	-- stretches to the full width, and the logo centres inside that.
+	local logo_holder = layout:CreateChild("UIElement")
+	logo_holder:SetFixedHeight(160)
+	-- A BorderImage rather than a Sprite: a Sprite works out its own screen
+	-- position from a hotspot and a transform, so an alignment does not
+	-- centre it, while a BorderImage is a plain element with a texture on it
+	local logo = logo_holder:CreateChild("BorderImage")
+	logo.texture = magic.cache:GetResource("Texture2D", "buildat_logo.png")
 	logo:SetFixedSize(160, 160)
+	logo:SetAlignment(HA_CENTER, VA_TOP)
 
-	local title = menu.window:CreateChild("Text")
+	-- What this is, top left, small ([VERSION]): the version and the hash
+	-- of the tree it was built from, "-dirty" when that was nobody's commit
+	-- The first child of the menu's own layout: the stack's root is a
+	-- horizontal layout that argues with anything placed by hand
+	local version, hash = api.version()
+	local label = layout:CreateChild("Text")
+	label:SetStyleAuto()
+	label.text = version .. " " .. hash
+	label:SetFontSize(11)
+	label.color = magic.Color(0.6, 0.6, 0.6)
+	label:SetTextAlignment(HA_LEFT)
+
+	local title = layout:CreateChild("Text")
 	title:SetStyleAuto()
-	title.text = "Buildat"
+	title.text = query == "" and "Buildat" or ("Buildat: " .. query .. "_")
 	title:SetFontSize(28)
 	title:SetTextAlignment(HA_CENTER)
+	title.color = magic.Color(0.867, 0.867, 0.867)
 
-	menu:add("Local game", show_local_game)
-	menu:add("Connect to server", show_connect_to_server)
-	menu:add("Exit", function()
-		engine:Exit()
-	end)
-	menu:on_key(function(key)
+	-- The grid, inside a viewport that is as tall as the window allows
+	-- and clips the rest: a grid of more lines than fit scrolls by the
+	-- selection, below
+	local viewport = layout:CreateChild("UIElement")
+	viewport:SetAlignment(HA_LEFT, VA_TOP)
+	viewport.clipChildren = true
+	viewport.enabled = true
+	-- The entries side by side, because there are several of them
+	local row = viewport:CreateChild("UIElement")
+	-- HA_LEFT rather than HA_CENTER: inside a layout the alignment only says
+	-- which border to apply, and the row is made exactly as wide as its
+	-- entries below, so the left border is what lines it up with the rest
+	row:SetAlignment(HA_LEFT, VA_TOP)
+	-- No layout on it: the entries are placed by hand below. A horizontal
+	-- layout re-applies its children's own alignments, and a button whose
+	-- style gives it any alignment but the left is then a warning from
+	-- Urho3D on every boot -- for a row of three fixed-width things, saying
+	-- where they go is less machinery than arguing with the layout.
+	-- An element Urho3D has not been told is enabled is not hit by a click,
+	-- and neither is anything inside it
+	row.enabled = true
+
+	-- One entry: an icon, a word for it, and what picking it does. The
+	-- selected one is drawn bright and the rest dim, which is what the
+	-- keyboard and the mouse both move.
+	-- Tiles whose icon is named and does not resolve; a tile that quietly
+	-- falls back to a blank square is how twenty-two games shared one
+	-- picture without anybody noticing ([LAUNCH_API])
+	local icons_drawn, icons_missing = 0, 0
+	local function menu_entry(icon, text)
+		local button = row:CreateChild("Button")
+		button:SetStyleAuto()
+		button:SetName("Button")
+		button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+		button:SetFixedWidth(ENTRY_WIDTH)
+		button:SetAlignment(HA_LEFT, VA_TOP)
+		local button_image = button:CreateChild("Sprite")
+		button_image:SetName("ButtonImage")
+		local tex = icon and
+				magic.cache:GetResource("Texture2D", icon) or nil
+		if tex then
+			-- The icons are drawn at the size they are painted, and a
+			-- game's own icon is pixel art
+			tex.filterMode = magic.FILTER_NEAREST
+			button_image:SetTexture(tex)
+			icons_drawn = icons_drawn + 1
+		elseif icon then
+			icons_missing = icons_missing + 1
+			log:warning("launch_menu: tile "..dump(text).." names an icon that "..
+					"does not resolve: "..dump(icon))
+		end
+		button_image.color = magic.Color(DIM, DIM, DIM)
+		button_image:SetFixedSize(120, 120)
+		local button_text = button:CreateChild("Text")
+		button_text:SetName("ButtonText")
+		button_text:SetStyleAuto()
+		button_text.text = text
+		button_text.color = magic.Color(DIM, DIM, DIM)
+		button_text:SetAlignment(HA_CENTER, VA_TOP)
+		button_text:SetTextAlignment(HA_CENTER)
+		return button
+	end
+
+	local items = {}
+	local function add(icon, text, action, description)
+		items[#items + 1] = {button = menu_entry(icon, text),
+				label = text, description = description,
+				action = function()
+					log:info("Menu entry: "..dump(text))
+					action()
+				end}
+	end
+
+	-- What the user sets once and every game honours; not a launch, so
+	-- the menu's own rather than a tile from the tree
+	add("launch_menu/res/icon_preferences.png", "Engine settings", preferences.show,
+			"What every app honours: the window, the sound, the mouse.")
+	-- **The console offers its screen and the menu takes it too**
+	-- ([LAUNCH_CONSOLE]: it is offered to every launch UI, and the room
+	-- already had it). Not a launch either: it draws over this screen
+	-- and hands it back. The menu's own keys stand down by themselves
+	-- while it is up -- a stack subscription only fires for the element
+	-- with the focus, and the console takes it.
+	local console = require("buildat/extension/launch_console")
+	console = console and (console.show and console or console.safe)
+	if not (console and console.show) then
+		log:warning("launch_menu: no developer console to offer")
+	end
+	if console and console.show then
+		add("launch_menu/res/icon_console.png", "Developer console", function()
+			console.show(function() end)
+		end, "A Lua console in the sandbox, with the API document beside it.")
+	end
+	-- And every launch action the tree offers, in the grid's order
+	local actions = api.launch_actions()
+	local played = 0
+	for _, action in ipairs(actions) do
+		if action.last_launched then played = played + 1 end
+		add(action.icon, action.label, function()
+			local ok, why = api.launch(action.key)
+			if not ok then
+				log:warning("launch_menu: "..tostring(why))
+			end
+		end, action.description)
+	end
+
+	log:info("launch_menu: "..#items.." tiles, "..icons_drawn..
+			" of them with a picture and "..icons_missing.." without, "..
+			played.." launched before")
+
+	-- What the search leaves, in its order; the rest are not drawn
+	local shown = search(items, query)
+	local kept = {}
+	for _, item in ipairs(shown) do
+		kept[item] = true
+	end
+	for _, item in ipairs(items) do
+		if not kept[item] then
+			item.button:Remove()
+		end
+	end
+	items = shown
+	if #items == 0 then
+		local none = layout:CreateChild("Text")
+		none:SetStyleAuto()
+		none.text = "Nothing matches \"" .. query .. "\" (Backspace, Escape)"
+		none:SetTextAlignment(HA_CENTER)
+		none.color = magic.Color(0.7, 0.7, 0.7)
+	end
+
+	-- The selected entry's name and description, to the right of the logo
+	-- in the logo's row ([LAUNCH_DESC]): the label on the first line,
+	-- larger, the description under it, wrapping to the window's right
+	-- edge; set as the selection moves, by keys or by the mouse, and
+	-- cleared when nothing is selected
+	local DESC_MARGIN = 24
+	local desc_x = math.floor(magic.ui.root.width / 2) + 80 + DESC_MARGIN
+	local desc_w = math.max(100, magic.ui.root.width - desc_x - DESC_MARGIN)
+	local desc_name = logo_holder:CreateChild("Text")
+	desc_name:SetStyleAuto()
+	desc_name:SetFontSize(22)
+	desc_name:SetPosition(desc_x, 40)
+	desc_name:SetFixedWidth(desc_w)
+	desc_name.color = magic.Color(0.867, 0.867, 0.867)
+	local desc_text = logo_holder:CreateChild("Text")
+	desc_text:SetStyleAuto()
+	desc_text:SetFontSize(14)
+	desc_text:SetPosition(desc_x, 72)
+	desc_text:SetFixedWidth(desc_w)
+	desc_text:SetWordwrap(true)
+	desc_text.color = magic.Color(0.7, 0.7, 0.7)
+	local function show_description(item)
+		desc_name.text = item and item.label or ""
+		desc_text.text = item and item.description or ""
+	end
+
+	-- Now that the entries are known: a grid wrapping by the window's
+	-- width and the row exactly as wide as its columns, so that the
+	-- layout's own border lines it up with the title above
+	local columns = math.max(1, math.min(#items, math.floor(
+			(magic.ui.root.width - 2 * 20 + ENTRY_SPACING) /
+			(ENTRY_WIDTH + ENTRY_SPACING))))
+	for i, item in ipairs(items) do
+		local col = (i - 1) % columns
+		local line = math.floor((i - 1) / columns)
+		item.button:SetPosition(col * (ENTRY_WIDTH + ENTRY_SPACING),
+				line * (ENTRY_HEIGHT + ENTRY_SPACING))
+	end
+	local lines = math.ceil(#items / columns)
+	local grid_w = columns * ENTRY_WIDTH +
+			math.max(0, columns - 1) * ENTRY_SPACING
+	local grid_h = lines * ENTRY_HEIGHT +
+			math.max(0, lines - 1) * ENTRY_SPACING
+	row:SetFixedWidth(grid_w)
+	row:SetFixedHeight(grid_h)
+	-- What the window leaves for the grid under the logo and the title,
+	-- in whole lines; the viewport is that tall and the row moves inside
+	-- it so the selected line is always in view
+	local line_step = ENTRY_HEIGHT + ENTRY_SPACING
+	local room = magic.ui.root.height - 2 * 20 - 160 - 16 - 40 - 16
+	local visible_lines = math.max(1, math.min(lines,
+			math.floor((room + ENTRY_SPACING) / line_step)))
+	viewport:SetFixedWidth(grid_w)
+	viewport:SetFixedHeight(visible_lines * ENTRY_HEIGHT +
+			math.max(0, visible_lines - 1) * ENTRY_SPACING)
+	local first_line = 0
+	local function scroll_to(i)
+		local line = math.floor((i - 1) / columns)
+		if line < first_line then
+			first_line = line
+		elseif line >= first_line + visible_lines then
+			first_line = line - visible_lines + 1
+		end
+		row:SetPosition(0, -first_line * line_step)
+	end
+
+	-- Keyboard selection: up and down, left and right, enter, and the
+	-- mouse moving the same selection
+	local selected_index = 1
+	local function research(q)
+		uistack.main:pop(root)
+		M.boot(nil, q)
+	end
+	local nav = ui_utils.bind_button_menu(root, items, function(key)
 		if key == KEY_ESCAPE then
-			engine:Exit()
+			if query ~= "" then
+				research("")
+				return true
+			end
+			log:info("KEY_ESCAPE pressed at top level")
+			api.quit()
+			return
+		end
+		local c = search_char(key)
+		if c and magic.input:GetKeyPress(key) then
+			research(query .. c)
+			return true
+		elseif key == KEY_BACKSPACE and query ~= "" then
+			research(query:sub(1, -2))
+			return true
+		elseif (key == KEY_RETURN or key == KEY_RETURN2 or
+				key == KEY_KP_ENTER) and query ~= "" then
+			-- Here rather than the menu's own Enter, which waits a moment
+			-- after a screen is made, and every letter makes one
+			if magic.input:GetKeyPress(key) and items[selected_index] then
+				items[selected_index].action()
+			end
+			return true
+		end
+	-- Its letters are the search's, not a button's
+	end, {letters = false})
+	nav:set_columns(columns)
+	nav:on_change(function(button, selected, index)
+		local c = selected and 1 or DIM
+		button:GetChild("ButtonImage").color = magic.Color(c, c, c)
+		button:GetChild("ButtonText").color = magic.Color(c, c, c)
+		if selected and index then
+			selected_index = index
+			scroll_to(index)
+			show_description(items[index])
+		elseif not selected and index and desc_name.text == items[index].label then
+			show_description(nil)
 		end
 	end)
+
+	-- **The setting said another launch UI and it did not load**, so
+	-- this one says so rather than leaving the player wondering why
+	-- their choice did nothing ([LAUNCH_SANDBOX]'s fallback)
+	local fell_back = first and api.launch_ui_fell_back and
+			api.launch_ui_fell_back()
+	if fell_back then
+		ui_utils.show_message_dialog("The launch UI \"" .. fell_back ..
+				"\" did not load, so this is the menu.\n\n" ..
+				"The log has the error.")
+	end
+
+	if launch_action then
+		-- An app's was game/<name>/<id> before apps were called apps
+		launch_action = launch_action:gsub("^game/", "app/")
+		local found = nil
+		for _, action in ipairs(actions) do
+			if action.key == launch_action or
+					action.from.."/"..tostring(action.id) == launch_action then
+				found = action
+			end
+		end
+		if found then
+			log:info("Launch action: "..launch_action)
+			api.launch(found.key)
+		else
+			log:warning("Launch action "..dump(launch_action)..
+					" is not on the grid")
+		end
+	end
+end
+
+-- **What the client asks a launcher for** ([MENU_CONTEXT]): a game's
+-- own menu offers "back to the launcher" and calls `buildat.leave()`,
+-- which comes here. This grid had none of these, so that call found
+-- nothing and fell through to a plain disconnect -- the client sat with
+-- no server and no menu, which is what [FIRST_RUN] had been failing on
+-- since ContentDB's install was driven (2026-09-24).
+--
+-- The screens a game is started through are pushed onto the same stack
+-- this grid is on, so leaving is the stack coming back down to the grid.
+
+-- **A game that was launched into a menu of its own says when the
+-- choosing is over** ([LAUNCH_API]'s fourth ask). The grid has no
+-- animation to resume, so it says so and no more; the room is what
+-- wants this.
+function M.app_loading(what)
+	log:info("launch_menu: the game is loading a " .. tostring(what))
+end
+
+M.in_app = screens.in_app
+
+-- A local server that died: the last lines of its log and where the
+-- whole of it is, so a crash's backtrace is on the screen and not just
+-- gone ([START_PROGRESS]). The client asks the launcher for this when
+-- the server it started goes away, and a launcher that cannot answer
+-- leaves the player with a shutdown and no reason for it -- which is
+-- what the grid did until 2026-09-24.
+M.show_dead_server = screens.show_dead_server
+
+-- The grid drawn again, as at boot: what it lists has changed under it
+-- (an app installed from Aitta, [AITTA_MVP])
+function M.refresh()
+	if uistack.main.stack[1] then
+		pcall(function()
+			uistack.main:pop_to(uistack.main.stack[1], true)
+		end)
+	end
+	M.boot()
+end
+
+function M.leave_app()
+	if not screens.in_app() and not api.local_server_running() then
+		return false
+	end
+	-- **The stack comes down before the sweep, not after it.** The
+	-- screens over the grid are the game's own -- vanilla's menu pushes
+	-- onto this same stack -- and `leave_to_menu` takes the game's
+	-- elements with it, so popping afterwards is popping things that
+	-- are already gone ("UIElement ... was removed", 2026-09-24).
+	if uistack.main.stack[1] then
+		pcall(function()
+			uistack.main:pop_to(uistack.main.stack[1], true)
+		end)
+	end
+	-- The connection, the server and the sandbox's leavings
+	api.leave_to_menu()
+	magic.input:SetMouseVisible(true, "back to the launcher")
+	M.boot()
+	log:info("back to the grid")
+	return true
 end
 
 return M
