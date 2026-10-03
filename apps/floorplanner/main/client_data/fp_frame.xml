@@ -1,0 +1,21 @@
+<!-- The eye's adaptation to the light's colour and the tone map, after
+     the meter (FpFrame.glsl; daylight.lua's M.pbr_render_path): the eye's
+     white moved to the scene's, as AutoExposure moves its luminance, then
+     the frame -->
+<renderpath>
+    <rendertarget name="fpWhite" tag="FpFrame" size="1 1" format="rgba16f" filter="false" persistent="true" />
+    <rendertarget name="fpPrevWhite" tag="FpFrame" size="1 1" format="rgba16f" filter="false" />
+    <command type="quad" tag="FpFrame" vs="CopyFramebuffer" ps="CopyFramebuffer" output="fpPrevWhite">
+        <texture unit="diffuse" name="fpWhite" />
+    </command>
+    <command type="quad" tag="FpFrame" vs="main/FpFrame" ps="main/FpFrame" psdefines="WHITE" output="fpWhite">
+        <texture unit="diffuse" name="fpPrevWhite" />
+        <texture unit="specular" name="generated/fp_probe_reduce" />
+        <texture unit="emissive" name="generated/fp_wb" />
+    </command>
+    <command type="quad" tag="FpFrame" vs="main/FpFrame" ps="main/FpFrame" output="viewport">
+        <texture unit="diffuse" name="viewport" />
+        <texture unit="normal" name="adaptedLum" />
+        <texture unit="specular" name="fpWhite" />
+    </command>
+</renderpath>

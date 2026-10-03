@@ -31,6 +31,18 @@ namespace Urho3D
 
 static const float invQ = 1.0f / 32767.0f;
 
+// A count of elements read off a stream, held to the bytes left in it: an
+// element takes one at least, and a larger count from a hostile server
+// asked for gigabytes. A stream of unknown size (0) is taken at its word
+static unsigned ReadCount(Deserializer& source)
+{
+    unsigned num = source.ReadVLE();
+    unsigned size = source.GetSize(), pos = source.GetPosition();
+    if (size && num > (pos < size ? size - pos : 0))
+        num = pos < size ? size - pos : 0;
+    return num;
+}
+
 Deserializer::Deserializer() :
     position_(0),
     size_(0)
@@ -277,7 +289,7 @@ StringHash Deserializer::ReadStringHash()
 
 PODVector<unsigned char> Deserializer::ReadBuffer()
 {
-    PODVector<unsigned char> ret(ReadVLE());
+    PODVector<unsigned char> ret(ReadCount(*this));
     if (ret.Size())
         Read(&ret[0], ret.Size());
     return ret;
@@ -295,7 +307,7 @@ ResourceRefList Deserializer::ReadResourceRefList()
 {
     ResourceRefList ret;
     ret.type_ = ReadStringHash();
-    ret.names_.Resize(ReadVLE());
+    ret.names_.Resize(ReadCount(*this));
     for (unsigned i = 0; i < ret.names_.Size(); ++i)
         ret.names_[i] = ReadString();
     return ret;
@@ -393,7 +405,7 @@ Variant Deserializer::ReadVariant(VariantType type)
 
 VariantVector Deserializer::ReadVariantVector()
 {
-    VariantVector ret(ReadVLE());
+    VariantVector ret(ReadCount(*this));
     for (unsigned i = 0; i < ret.Size(); ++i)
         ret[i] = ReadVariant();
     return ret;
@@ -401,7 +413,7 @@ VariantVector Deserializer::ReadVariantVector()
 
 StringVector Deserializer::ReadStringVector()
 {
-    StringVector ret(ReadVLE());
+    StringVector ret(ReadCount(*this));
     for (unsigned i = 0; i < ret.Size(); ++i)
         ret[i] = ReadString();
     return ret;
@@ -410,7 +422,7 @@ StringVector Deserializer::ReadStringVector()
 VariantMap Deserializer::ReadVariantMap()
 {
     VariantMap ret;
-    unsigned num = ReadVLE();
+    unsigned num = ReadCount(*this);
 
     for (unsigned i = 0; i < num; ++i)
     {
