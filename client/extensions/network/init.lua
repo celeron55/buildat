@@ -192,16 +192,103 @@ local function ask_user(uri, entry, on_answer, suggested)
 			suggested or "")
 	edit:SetFocus(true)
 
+	-- **What the user sees is what they answer** ([SECURITY_RUN_1]): the
+	-- dialog is in the UI tree every script shares and on the stack they
+	-- read, so a server's script could rewrite the address it shows, swap
+	-- the buttons' labels, or make Accept invisible over a Decline of its
+	-- own. The dialog is taken down to its raw elements once laid out --
+	-- what each shows, where, how visible, how many children -- and
+	-- compared every frame and at the answer; any change is declined.
+	-- Read fresh from the root each time, so an element a script removed
+	-- is never touched; the field's own text is the user's and not read.
+	local function raw(w)
+		local m = getmetatable(w)
+		return m and m.unsafe
+	end
+	local function picture()
+		local m = getmetatable(root)
+		if not m or m.dead or not m.unsafe then
+			return nil
+		end
+		local out = {}
+		local function walk(e, depth)
+			local t = e:GetTypeName()
+			local rec = {t, tostring(e:IsVisible()),
+					string.format("%.3f", e:GetOpacity()), e:GetPriority(),
+					e:GetNumChildren(false)}
+			if depth >= 2 then
+				-- The root fills the screen and the window is centred on
+				-- it: those two move with a resize, what is in them does not
+				local p = e:GetPosition()
+				rec[#rec + 1] = p.x .. "," .. p.y
+			end
+			if depth >= 1 then
+				rec[#rec + 1] = e:GetWidth() .. "x" .. e:GetHeight()
+			end
+			if t == "Text" then
+				local c = e:GetColor(C_TOPLEFT)
+				rec[#rec + 1] = string.format("%s %.2f,%.2f,%.2f,%.2f",
+						e:GetText(), c.r, c.g, c.b, c.a)
+			end
+			out[#out + 1] = table.concat(rec, "|")
+			if t == "LineEdit" then
+				return
+			end
+			for i = 0, e:GetNumChildren(false) - 1 do
+				walk(e:GetChild(i), depth + 1)
+			end
+		end
+		walk(m.unsafe, 0)
+		return table.concat(out, "\n")
+	end
+	local seen = nil  -- the picture once laid out
+	local frames = 0
+	local guard_sub = nil
+
 	local answered = false
 	local function answer(accepted)
 		if answered then
 			return
 		end
 		answered = true
+		if guard_sub then
+			magic.UnsubscribeFromEvent("Update", guard_sub)
+		end
+		if accepted and (not seen or picture() ~= seen) then
+			log:warning("The permission dialog for "..uri.." was changed "..
+					"while it was up; taken as declined")
+			accepted = false
+		end
 		local description = edit:GetText()
-		uistack.main:pop(root)
+		-- Off the stack whatever was put over it since: a script can push
+		-- a screen of its own on top, and pop() takes the top only
+		local st = uistack.main.stack
+		if st[#st] == root then
+			uistack.main:pop(root)
+		else
+			for _, e in ipairs(st) do
+				if e == root then
+					uistack.main:pop_to(root, true)
+					break
+				end
+			end
+		end
 		on_answer(accepted, description)
 	end
+	guard_sub = magic.SubscribeToEvent("Update", function()
+		if answered then
+			return
+		end
+		frames = frames + 1
+		-- Laid out by then: a layout settles in the first frame or two
+		if frames == 3 then
+			seen = picture()
+		elseif frames > 3 and picture() ~= seen then
+			log:warning("The permission dialog for "..uri.." was changed "..
+					"while it was up; declined")
+			answer(false)
+		end
+	end)
 
 	menu:add("Accept", function() answer(true) end)
 	menu:add("Decline", function() answer(false) end)
