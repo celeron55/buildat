@@ -1020,9 +1020,19 @@ struct Module: public interface::Module, public network::Interface
 		try {
 			peer.packet_stream.input(peer.socket_buffer,
 			[&](const ss_ &name, const ss_ &data){
-				// Emit event
-				m_server->emit_event(ss_()+"network:packet_received/"+name,
-						new Packet(peer.id, name, data));
+				// To whoever subscribed to it. A name nobody did has no
+				// event type, and is dropped rather than given one: every
+				// type is kept for the life of the process, and a client
+				// names its packets ([SECURITY_RUN_1])
+				const interface::Event::Type t =
+						interface::getGlobalEventRegistry()->find(
+								"network:packet_received/"+name);
+				if(t == 0){
+					log_v(MODULE, "Peer %zu: %s is no one's; dropped",
+							peer.id, cs(name));
+					return;
+				}
+				m_server->emit_event(t, new Packet(peer.id, name, data));
 			});
 		} catch(interface::UnknownPacketReceived &e){
 			// A stream that cannot be read on from here: the peer goes,
