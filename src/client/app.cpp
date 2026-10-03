@@ -767,6 +767,66 @@ static bool valid_app_name(const ss_ &name)
 	return true;
 }
 
+// **An app installed from a release** ([AITTA_MVP]) is named on the grid
+// and to start_local_server() "<author>.<name>@<version>", and lives in
+// <user>/installed/<author>/<name>/<version>/; its server calls it
+// "<author>.<name>" (server::app_of()). Each part as the install checked
+// it (interface::aitta::check_manifest()); "" for anything else.
+static ss_ installed_app_dir(const ss_ &id)
+{
+	const size_t dot = id.find('.'), at = id.find('@');
+	if(dot == ss_::npos || at == ss_::npos || at < dot)
+		return "";
+	const ss_ author = id.substr(0, dot), name = id.substr(dot + 1, at - dot - 1),
+			version = id.substr(at + 1);
+	auto plain = [](const ss_ &p, bool dots){
+		if(p.empty() || p.size() > 40 || p == "." || p == "..")
+			return false;
+		for(char c : p)
+			if(!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' ||
+					(dots && (isalnum((unsigned char)c) || c == '.' ||
+					c == '-' || c == '+'))))
+				return false;
+		return true;
+	};
+	if(!plain(author, false) || !plain(name, false) || !plain(version, true))
+		return "";
+	return g_client_config.get<ss_>("user_path")+"/installed/"+author+"/"+
+			name+"/"+version;
+}
+
+// Every installed version's id, sorted
+static sv_<ss_> installed_app_ids()
+{
+	const ss_ installed = g_client_config.get<ss_>("user_path")+"/installed";
+	sv_<ss_> ids;
+	for(const auto &a : interface::fs::list_directory(installed))
+		for(const auto &n : interface::fs::list_directory(installed+"/"+a.name))
+			for(const auto &v : interface::fs::list_directory(
+					installed+"/"+a.name+"/"+n.name)){
+				const ss_ id = a.name+"."+n.name+"@"+v.name;
+				if(v.is_directory && !installed_app_dir(id).empty())
+					ids.push_back(id);
+			}
+	std::sort(ids.begin(), ids.end());
+	return ids;
+}
+
+// A tree app's directory or an installed one's, "" for neither
+static ss_ app_dir(const ss_ &id)
+{
+	if(valid_app_name(id))
+		return g_client_config.get<ss_>("share_path")+"/apps/"+id;
+	return installed_app_dir(id);
+}
+
+// What the app's server calls it: an installed one without its version
+static ss_ server_app_id(const ss_ &id)
+{
+	const size_t at = id.find('@');
+	return installed_app_dir(id).empty() ? id : id.substr(0, at);
+}
+
 // Survives CApp reboot so disconnect can kill the server we started.
 static interface::process::Handle g_local_server;
 // Port the local server was told to listen on ("" if none was started)
@@ -3094,6 +3154,23 @@ struct CApp: public App, public magic::Application
 				lua_rawseti(L, -2, i++);
 			}
 		}
+		// And the apps installed from releases, every version a tile
+		sv_<ss_> ids = installed_app_ids();
+		for(const ss_ &id : ids){
+			const ss_ path = interface::fs::get_absolute_path(
+					installed_app_dir(id));
+			lua_newtable(L);
+			lua_pushstring(L, "installed");
+			lua_setfield(L, -2, "kind");
+			lua_pushstring(L, id.c_str());
+			lua_setfield(L, -2, "name");
+			lua_pushstring(L, path.c_str());
+			lua_setfield(L, -2, "path");
+			lua_pushboolean(L, interface::fs::path_exists(
+					path+"/launcher/init.lua"));
+			lua_setfield(L, -2, "launcher");
+			lua_rawseti(L, -2, i++);
+		}
 		return 1;
 	}
 
@@ -3267,10 +3344,12 @@ struct CApp: public App, public magic::Application
 			names.push_back(n.name);
 		}
 		std::sort(names.begin(), names.end());
+		for(const ss_ &id : installed_app_ids())
+			names.push_back(id);
 		lua_newtable(L);
 		int i = 1;
 		for(const ss_ &name : names){
-			ss_ game_path = games_dir+"/"+name;
+			ss_ game_path = app_dir(name);
 			lua_newtable(L);
 			lua_pushstring(L, name.c_str());
 			lua_setfield(L, -2, "name");
@@ -3291,13 +3370,13 @@ struct CApp: public App, public magic::Application
 	{
 		ss_ game = lua_bindings::lua_tocppstring(L, 1);
 		ss_ launch = lua_isstring(L, 2) ? lua_bindings::lua_tocppstring(L, 2) : "";
-		if(!valid_app_name(game)){
+		ss_ game_path = app_dir(game);
+		if(game_path.empty()){
 			lua_pushboolean(L, false);
 			lua_pushstring(L, "Invalid app name");
 			return 2;
 		}
 
-		ss_ game_path = g_client_config.get<ss_>("share_path")+"/apps/"+game;
 		if(!interface::fs::path_exists(game_path)){
 			lua_pushboolean(L, false);
 			lua_pushstring(L, "Game not found");
@@ -3334,7 +3413,7 @@ struct CApp: public App, public magic::Application
 #endif
 
 		game_path = interface::fs::get_absolute_path(game_path);
-		g_local_server_app = game;
+		g_local_server_app = server_app_id(game);
 		g_local_server_port = pick_free_local_port();
 		log_i(MODULE, "Starting local server on port %s", cs(g_local_server_port));
 		sv_<ss_> args{"-m", game_path, "-P", g_local_server_port,

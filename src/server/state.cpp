@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "state.h"
+#include "confine.h"
 #include "core/log.h"
 #include "rccpp.h"
 #include "rccpp_util.h"
@@ -1573,17 +1574,7 @@ struct CState: public State, public interface::Server
 
 	ss_ get_app_id()
 	{
-		// Trailing slashes and "." are what a shell's tab completion leaves
-		// behind, so strip them before taking the last component
-		ss_ path = m_modules_path;
-		while(!path.empty() && (path[path.size()-1] == '/' ||
-				path[path.size()-1] == '\\'))
-			path.resize(path.size() - 1);
-		size_t sep = path.find_last_of("/\\");
-		ss_ name = (sep == ss_::npos) ? path : path.substr(sep + 1);
-		if(name.empty() || name == "." || name == "..")
-			return "unnamed";
-		return name;
+		return server::app_of(m_modules_path);
 	}
 
 	const interface::ServerConfig& get_config()

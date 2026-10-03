@@ -35,18 +35,30 @@ namespace server
 	// lines back. Nothing where no file was named.
 	void boxed_step(const char *what);
 
-	// The app's name, as the server's get_app_id() takes it
+	// The app's name, which get_app_id() answers: the directory's name, or
+	// for an app installed from a release ([AITTA_MVP]),
+	// .../installed/<author>/<name>/<version>, "<author>.<name>" -- every
+	// version one app, with one save directory, and no tree app's name
+	// has a dot in it
 	inline ss_ app_of(const ss_ &module_path)
 	{
-		ss_ app = module_path;
-		while(!app.empty() && (app.back() == '/' || app.back() == '\\'))
-			app.pop_back();
-		const size_t sep = app.find_last_of("/\\");
-		if(sep != ss_::npos)
-			app = app.substr(sep + 1);
-		if(app.empty() || app == "." || app == "..")
-			app = "unnamed";
-		return app;
+		sv_<ss_> parts;
+		ss_ part;
+		for(char c : module_path + "/"){
+			if(c == '/' || c == '\\'){
+				if(!part.empty() && part != ".")
+					parts.push_back(part);
+				part.clear();
+			} else {
+				part += c;
+			}
+		}
+		const size_t n = parts.size();
+		if(n >= 4 && parts[n - 4] == "installed")
+			return parts[n - 3]+"."+parts[n - 2];
+		if(n == 0 || parts[n - 1] == "..")
+			return "unnamed";
+		return parts[n - 1];
 	}
 }
 // vim: set noet ts=4 sw=4:

@@ -135,6 +135,12 @@ local function run_launcher(log, source)
 			if type(request) ~= "table" then
 				error("ctx.launch: wants a table")
 			end
+			-- An app installed from a release launches itself and nothing
+			-- else: its launcher names the app as it is in its tree, and
+			-- the tile is that version of it ([AITTA_MVP])
+			if source.kind == "installed" then
+				request = {app = source.name, params = request.params}
+			end
 			do_launch(log, from, request)
 		end,
 	}
@@ -161,7 +167,7 @@ local function run_launcher(log, source)
 	return actions, from
 end
 
-local KIND_ORDER = {menu = 0, app = 1, builtin = 2, extension = 3}
+local KIND_ORDER = {menu = 0, app = 1, installed = 1, builtin = 2, extension = 3}
 
 -- Every action the tree offers, checked and in the grid's order: explicit
 -- order first, then by kind -- apps, builtins, extensions -- then label
@@ -226,6 +232,12 @@ function M.actions(log)
 				local icon = ICON_FALLBACK
 				if a.resolved_icon then
 					icon = a.icon
+				elseif source.kind == "installed" then
+					-- simplified: an installed app's icon is the fallback,
+					-- as <user>/installed is no resource dir; the upgrade
+					-- is copying it under the cache as
+					-- installed_game_icon() does a Luanti game's
+					icon = ICON_FALLBACK
 				elseif type(a.icon) == "string" and
 						not a.icon:find("[/\\]") then
 					-- Resolved here, never by the file: <name>/launcher/<icon>
@@ -235,13 +247,17 @@ function M.actions(log)
 				end
 				local run = a.run
 				out[#out + 1] = {
-					id = a.id, label = a.label, icon = icon,
+					id = a.id, icon = icon,
+					-- Every installed version is a tile, and says which
+					label = source.kind == "installed" and
+							a.label.." "..source.name:match("@(.*)$") or a.label,
 					description = type(a.description) == "string" and
 							a.description or nil,
 					order = tonumber(a.order),
 					kind = source.kind, from = from,
 					category = category_of(a) or
-							(source.kind == "app" and "app" or "action"),
+							((source.kind == "app" or source.kind == "installed")
+							and "app" or "action"),
 					significance = significance_of(a, source, app_sizes),
 					run = function()
 						local ok, err = pcall(run)
