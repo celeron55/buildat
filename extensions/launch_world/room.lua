@@ -156,10 +156,53 @@ end
 -- around a regular formation reads as calm or as noise is stage 3's.
 -- The rectangle is set by set_pockets(); until then there is none.
 M.form = nil
+
+-- **The architecture, as an options round** ([LAUNCH_WORLD] stage 3, the
+-- architecture; local/options_for_LOBBY_arch/): one knob in world.lua,
+-- BUILDAT_LAUNCH_ARCH=<name>, each a whole wall rather than a slider, so
+-- the user's pick is a one-word default. "tomb" is the wall as stage 2
+-- left it and stays the default until the pick.
+--   random    the hashed slabs, at the proof's density
+--   insets    the hashed rectangles cut back
+--   margin    voxels round the formation kept clear of both
+--   edges     the random relief only where the wall is left and right of
+--             the formation's frame, the middle bare
+--   frame     a cornice over the top row, a plinth under the bottom one
+--             and a pilaster of stacked slabs either side, standing out
+--   shelves   a ledge one voxel proud under every row of pockets, the
+--             frieze along it: the ornament as the rows' own line
+--   ornament  the frieze on proud faces and the columns down a mouth;
+--             false is the same stone everywhere
+M.ARCHES = {
+	tomb = {random = true, insets = true, margin = 1, ornament = true},
+	-- Random relief around a regular framing, nothing random inside it
+	calm = {random = true, insets = true, margin = 5, frame = true,
+		shelves = true, ornament = true},
+	-- The same framing in plain stone: the ornament is none of it
+	plain = {random = true, insets = true, margin = 5, frame = true,
+		shelves = true, ornament = false},
+	-- The wall plain stone, its relief only at the two edges
+	bare = {random = true, edges = true, margin = 6, ornament = true},
+}
+M.ARCH, M.arch = "tomb", M.ARCHES.tomb
+-- Answers the name it took, "tomb" for one there is none by
+function M.set_arch(name)
+	if not M.ARCHES[name] then name = "tomb" end
+	M.ARCH, M.arch = name, M.ARCHES[name]
+	return name
+end
 local function in_form(x0, x1, y0, y1)
 	local f = M.form
-	return f ~= nil and x1 >= f.x0 - 1 and x0 <= f.x1 + 1 and
-			y1 >= f.y0 - 1 and y0 <= f.y1 + 1
+	local m = M.arch.margin or 1
+	return f ~= nil and x1 >= f.x0 - m and x0 <= f.x1 + m and
+			y1 >= f.y0 - m and y0 <= f.y1 + m
+end
+-- Whether a slab would stand in the middle a bare wall keeps clear: the
+-- formation's columns, top to bottom
+local function in_middle(x0, x1)
+	local f = M.form
+	local m = M.arch.margin or 1
+	return f ~= nil and x1 >= f.x0 - m and x0 <= f.x1 + m
 end
 -- **As many as the wall is tall**: sixty to the proof's 27 voxels, the
 -- same density on a wall that grows with its rows
@@ -175,11 +218,43 @@ local function make_slabs()
 				(M.SLAB_THIN_MAX - M.SLAB_THIN_MIN + 1)
 		local x0 = M.X_MIN + h2 % (M.X_MAX - M.X_MIN - sx + 1)
 		local y0 = math.floor(h2 / 2048) % (M.Y_TOP - sy + 1)
-		if not in_form(x0, x0 + sx - 1, y0, y0 + sy - 1) then
+		if M.arch.random and not in_form(x0, x0 + sx - 1, y0, y0 + sy - 1)
+				and not (M.arch.edges and in_middle(x0, x0 + sx - 1)) then
 			M.slabs[#M.slabs + 1] = {x0 = x0, x1 = x0 + sx - 1, y0 = y0,
 				y1 = y0 + sy - 1,
 				out = M.SLAB_OUT_MIN + math.floor(h1 / 1048576) %
 						(M.SLAB_OUT_MAX - M.SLAB_OUT_MIN + 1)}
+		end
+	end
+	-- **The framing** (calm, plain): built slabs, aligned to the
+	-- formation, so the regular thing on the wall has a regular edge.
+	-- They are drawn as any slab is: proud, the frieze on their front.
+	local f = M.form
+	if f and M.arch.frame then
+		local function add(x0, x1, y, out)
+			if y >= 0 and y <= M.Y_TOP then
+				M.slabs[#M.slabs + 1] = {x0 = x0, x1 = x1, y0 = y,
+					y1 = y, out = out, built = true}
+			end
+		end
+		-- A cornice over the top row and a plinth under the bottom one
+		add(f.x0 - 3, f.x1 + 3, f.y1 + 2, 3)
+		add(f.x0 - 3, f.x1 + 3, f.y0 - 1, 2)
+		-- A pilaster either side, one stacked slab a voxel of height
+		for y = f.y0, f.y1 + 1 do
+			add(f.x0 - 3, f.x0 - 2, y, 2)
+			add(f.x1 + 2, f.x1 + 3, y, 2)
+		end
+	end
+	if f and M.arch.shelves then
+		-- A ledge under every row, across the formation: the row's own
+		-- line, and where the frieze reads as a band
+		for r = 1, (M.rows or 0) do
+			local p = M.pockets[(r - 1) * M.cols + 1]
+			if p then
+				M.slabs[#M.slabs + 1] = {x0 = f.x0, x1 = f.x1,
+					y0 = p.y0 - 1, y1 = p.y0 - 1, out = 1, built = true}
+			end
 		end
 	end
 end
@@ -220,7 +295,7 @@ function slab_face(x, y)
 	-- enough to read black once the overhead light is the only thing
 	-- reaching them
 	local c3 = hash2(floor_div(x + 2, 6), floor_div(y + 1, 6), 3)
-	if c3 % 16 < 2 and not in_form(x, x, y, y) then
+	if M.arch.insets and c3 % 16 < 2 and not in_form(x, x, y, y) then
 		out = out - (1 + math.floor(c3 / 16) % M.INSET_IN)
 	end
 	return M.BAY_Z + out
@@ -418,7 +493,7 @@ function M.voxel_at(x, y, z)
 		for _, d in ipairs(NEIGHBOURS) do
 			local a, ac, aw = M.in_pocket(x + d[1], y, z + d[2])
 			if a and ac and ((M.WALL_U[aw] == "x") == (d[1] ~= 0)) then
-				return id.column
+				return M.arch.ornament and id.column or id.stone
 			end
 		end
 		-- **The slab's own edge wears the frieze.** A slab is one voxel
@@ -427,7 +502,7 @@ function M.voxel_at(x, y, z)
 		-- stone. A voxel is that edge when it is the front of a face
 		-- that stands proud of the wall's nominal surface.
 		local _, n = M.wall_un(w, x, y, z)
-		if n == face and
+		if n == face and M.arch.ornament and
 				(face - M.nominal_face(w)) * M.WALL_IN[w] < 0 then
 			return id.frieze
 		end
@@ -509,7 +584,7 @@ function M.self_check()
 	for i = 1, #M.slabs do
 		local s = M.slabs[i]
 		local sx, sy = s.x1 - s.x0 + 1, s.y1 - s.y0 + 1
-		assert(sx >= M.SLAB_MIN and sx <= M.SLAB_MAX,
+		assert(s.built or sx >= M.SLAB_MIN and sx <= M.SLAB_MAX,
 				"slab " .. i .. " is " .. sx .. " across")
 		assert(sy >= M.SLAB_THIN_MIN and sy <= M.SLAB_THIN_MAX,
 				"slab " .. i .. " is " .. sy .. " thick")
@@ -614,6 +689,46 @@ function M.self_check()
 	assert(M.voxel_at(0, -1, 0) == M.voxel_at(1, -1, 1) or
 			M.voxel_at(0, -1, 0) == M.voxel_at(0, -1, 1),
 			"a checker square is two voxels")
+	-- **The architectures** (stage 3's round): each builds, and each is
+	-- what its line in M.ARCHES says
+	for name in pairs(M.ARCHES) do
+		assert(M.set_arch(name) == name, "the arch " .. name)
+		M.set_pockets(11)
+		local f = M.form
+		local p = M.pockets[1]
+		local shelf = M.face_z(f.x0 + 1, p.y0 - 1)
+		if M.arch.shelves then
+			assert(shelf == M.BAY_Z + 1, name .. ": a ledge under the row")
+			assert(M.voxel_at(f.x0 + 1, p.y0 - 1, shelf) ==
+					(M.arch.ornament and M.id.frieze or M.id.stone),
+					name .. ": the ledge's front")
+		end
+		if M.arch.frame then
+			assert(M.face_z(f.x0, f.y1 + 2) == M.BAY_Z + 3,
+					name .. ": a cornice over the top row")
+		end
+		if not M.arch.ornament then
+			for x = f.x0 - 4, f.x1 + 4 do
+				for y = 0, M.Y_TOP do
+					local v = M.voxel_at(x, y, M.face_z(x, y))
+					assert(v ~= M.id.frieze and v ~= M.id.column,
+							name .. ": no ornament")
+				end
+			end
+		end
+		if M.arch.edges then
+			for x = f.x0 - 5, f.x1 + 5 do
+				for y = 0, M.Y_TOP do
+					if not M.in_pocket(x, y, M.BAY_Z) then
+						assert(M.face_z(x, y) == M.BAY_Z,
+								name .. ": flat between the edges")
+					end
+				end
+			end
+		end
+	end
+	M.set_arch("tomb")
+	M.set_pockets(11)
 	local rows = M.build()
 	assert(#rows == M.H * M.D, "one row a (y, z): " .. #rows)
 	assert(#rows[1] == M.W, "a row is the room across: " .. #rows[1])

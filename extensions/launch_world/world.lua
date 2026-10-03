@@ -273,6 +273,12 @@ do
 	room.COL_PITCH = tonumber(env("BUILDAT_LAUNCH_PITCH")) or
 			room.COL_PITCH
 	room.COLS = tonumber(env("BUILDAT_LAUNCH_COLS")) or room.COLS
+	-- **The architecture, as an options round** ([LAUNCH_WORLD] stage 3;
+	-- local/options_for_LOBBY_arch/): BUILDAT_LAUNCH_ARCH=<name> picks a
+	-- whole wall out of room.lua's M.ARCHES -- tomb (the default until
+	-- the user's pick), calm, plain, bare. Before set_pockets(), which
+	-- builds the slabs off it.
+	log:info("arch: " .. room.set_arch(env("BUILDAT_LAUNCH_ARCH")))
 	local want = tonumber(env("BUILDAT_LAUNCH_POCKETS")) or #GAMES
 	local made = room.set_pockets(math.min(#GAMES, want))
 	if made < #GAMES then
