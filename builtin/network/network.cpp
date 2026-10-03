@@ -323,9 +323,14 @@ struct Peer
 		out_queue.push_back(Queued{ss_(), std::move(data), false});
 	}
 
-	Peer(){}
+	// What a client sends is at most this a packet: the largest anything
+	// here takes is the floorplanner's import, 64 MiB
+	static const size_t MAX_PACKET_BYTES = 80 * 1024 * 1024;
+	Peer(){ packet_stream.m_max_packet_bytes = MAX_PACKET_BYTES; }
 	Peer(Id id, sp_<interface::TCPSocket> socket):
-		id(id), socket(socket){}
+		id(id), socket(socket){
+		packet_stream.m_max_packet_bytes = MAX_PACKET_BYTES;
+	}
 };
 
 // The server half of RFC 6455 and the little of HTTP that serves the web
@@ -1020,7 +1025,11 @@ struct Module: public interface::Module, public network::Interface
 						new Packet(peer.id, name, data));
 			});
 		} catch(interface::UnknownPacketReceived &e){
-			log_w(MODULE, "%s", e.what());
+			// A stream that cannot be read on from here: the peer goes,
+			// rather than its buffer growing behind the bad header
+			log_w(MODULE, "Peer %zu: %s; dropping it", peer.id, e.what());
+			peer.socket_buffer.clear();
+			peer.closing = true;
 		}
 	}
 
@@ -1098,8 +1107,11 @@ struct Module: public interface::Module, public network::Interface
 			}
 			break;
 		case Peer::Kind::Native:
-			peer.socket_buffer.insert(peer.socket_buffer.end(), buf, buf + r);
-			input_packets(peer);
+			if(!peer.closing){
+				peer.socket_buffer.insert(peer.socket_buffer.end(), buf,
+						buf + r);
+				input_packets(peer);
+			}
 			break;
 		}
 		if(keep)

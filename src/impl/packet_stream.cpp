@@ -46,6 +46,12 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 				(socket_buffer[4] & 0xff)<<16 |
 				(socket_buffer[5] & 0xff)<<24;
 		//log_d(MODULE, "size=%zu", size);
+		if(size > m_max_packet_bytes){
+			throw UnknownPacketReceived("A packet of "+itos((int64_t)size)+
+					" bytes, over the "+itos((int64_t)m_max_packet_bytes)+
+					" this stream takes (at byte "+
+					itos((int64_t)m_input_offset)+")");
+		}
 		if(socket_buffer.size() < 6 + size)
 			return;
 		char header[6];
@@ -111,14 +117,24 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 			PacketType ptype = d[8] | d[9]<<8;
 			if(count == 0 || index >= count)
 				continue;
+			// The name first: an unknown one throws, and must not leave an
+			// empty sequence behind
+			const ss_ fname = m_incoming_types.get_name(ptype);
 			Fragments &f = m_incoming_fragments[id];
 			if(f.count == 0){
-				f.name = m_incoming_types.get_name(ptype);
+				f.name = fname;
 				f.count = count;
 				f.parts.resize(count);
 			}
 			if(f.count != count || !f.parts[index].empty())
 				continue;
+			f.bytes += data.size() - 10;
+			if(f.bytes > m_max_packet_bytes){
+				m_incoming_fragments.erase(id);
+				throw UnknownPacketReceived("A fragmented "+fname+
+						" over the "+itos((int64_t)m_max_packet_bytes)+
+						" bytes this stream takes");
+			}
 			f.parts[index] = data.substr(10);
 			f.have++;
 			if(f.have < f.count){
@@ -275,6 +291,41 @@ static void self_check()
 	if(!buf.empty())
 		throw Exception("packet_stream self_check: the reader left bytes "
 				"behind");
+
+	// Over the reader's limit, whole or in fragments, is refused before it is
+	// buffered: a size off the wire was waited for up to 4 GB
+	{
+		PacketStream w3, r3;
+		r3.m_max_packet_bytes = 100;
+		ss_ s3;
+		auto write3 = [&](const ss_ &d, bool droppable){ s3 += d; };
+		w3.output("test:big", ss_(150, 'x'), write3, false);
+		std::deque<char> b3(s3.begin(), s3.end());
+		bool refused = false;
+		try {
+			r3.input(b3, [&](const ss_&, const ss_&){});
+		} catch(UnknownPacketReceived &e){
+			refused = true;
+		}
+		if(!refused)
+			throw Exception("packet_stream self_check: a packet over the "
+					"limit was taken");
+		PacketStream w4, r4;
+		r4.m_max_packet_bytes = PacketStream::FRAGMENT_BYTES + 100;
+		ss_ s4;
+		auto write4 = [&](const ss_ &d, bool droppable){ s4 += d; };
+		w4.output("test:frag", ss_(PacketStream::FRAGMENT_BYTES * 3, 'y'), write4, true);
+		std::deque<char> b4(s4.begin(), s4.end());
+		refused = false;
+		try {
+			r4.input(b4, [&](const ss_&, const ss_&){});
+		} catch(UnknownPacketReceived &e){
+			refused = true;
+		}
+		if(!refused)
+			throw Exception("packet_stream self_check: fragments over the "
+					"limit were taken");
+	}
 
 	// Past 127, which is where a signed char used to turn the type number in
 	// a definition negative: the definition went in under a number nothing

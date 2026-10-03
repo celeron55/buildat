@@ -76,6 +76,12 @@ namespace interface
 		// definition that went missing and one after megabytes of traffic
 		// is framing.
 		uint64_t m_input_offset = 0;
+		// The largest packet, or fragment sequence, the reader takes: a
+		// size comes off the wire as 32 bits, and a peer that announced
+		// 4 GB was buffered until it came ([SECURITY_RUN_1]). Over it is
+		// an UnknownPacketReceived, as an unreadable stream is. A server
+		// sets its own (builtin/network).
+		size_t m_max_packet_bytes = 256 * 1024 * 1024;
 
 		// Bulk is sliced ([NET_CHANNELS]): a payload over FRAGMENT_BYTES
 		// goes down the wire as core:fragment packets of that size, each
@@ -92,6 +98,7 @@ namespace interface
 			size_t count = 0;
 			sv_<ss_> parts;
 			size_t have = 0;
+			size_t bytes = 0;
 		};
 		sm_<uint32_t, Fragments> m_incoming_fragments;
 
