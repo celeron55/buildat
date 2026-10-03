@@ -234,6 +234,13 @@ struct CState: public State
 	void reset()
 	{
 		log_i(MODULE, "client::State: reset for another connection");
+		// Not connected anywhere any more: the address read as the left
+		// server's, and what keys on "not connected" -- the launcher's
+		// trust colour sample ([TRUST_OVERLAY_LEAVE]) -- never came back
+		{
+			std::lock_guard<std::mutex> lock(m_address_mutex);
+			m_address.clear();
+		}
 		if(m_connect_thread.joinable())
 			m_connect_thread.join();
 		m_connect_result.store(0);

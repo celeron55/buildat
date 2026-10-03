@@ -2875,6 +2875,12 @@ struct CApp: public App, public magic::Application
 			magic::UIElement *e = cs[i];
 			if(!e || e == m_preferred_image)
 				continue;
+			// **The client's own trusted overlay**, whenever it was made
+			// ([TRUST_OVERLAY_LEAVE]): the trust colour's sample is made on
+			// the first frame, and one made during a connection was taken
+			// for the game's -- and its handler holds it
+			if(e->GetName().StartsWith("__trusted"))
+				continue;
 			bool theirs = true;
 			for(const auto &k : m_menu_ui_children){
 				if(k == e){

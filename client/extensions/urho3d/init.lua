@@ -926,6 +926,7 @@ end
 -- Made of raw elements under a hidden name, over anything a script draws
 -- (theirs stop at 999).
 local trust_sample = nil
+local trust_sample_shown = nil
 Safe.SubscribeToEvent("Update", function()
 	if trust_sample == nil then
 		trust_sample = ui.root:CreateChild("UIElement")
@@ -950,7 +951,18 @@ Safe.SubscribeToEvent("Update", function()
 		swatch:SetVerticalAlignment(VA_CENTER)
 		swatch.color = Color(trust_rgb[1], trust_rgb[2], trust_rgb[3], 1)
 	end
-	trust_sample.visible = __buildat_server_address() == nil
+	-- No value at all when not connected, which tostring() refuses
+	local address = __buildat_server_address()
+	local show = address == nil
+	if show ~= trust_sample_shown then
+		trust_sample_shown = show
+		-- Said when it changes ([TRUST_OVERLAY_LEAVE]): the sample gone
+		-- after a leave was the user's report, and this is the first
+		-- thing to read
+		log:info("trust colour sample " .. (show and "shown" or "hidden") ..
+				" (server address " .. tostring(address) .. ")")
+	end
+	trust_sample.visible = show
 end)
 
 --
