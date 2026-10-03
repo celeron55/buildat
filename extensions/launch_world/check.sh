@@ -105,68 +105,6 @@ if [ "$snd" != "the orbs at -9 dB, the bed at -6 dB" ]; then
 	exit 1
 fi
 
-# **A tight target wins over a generous one** (user): an orb in front of
-# the player is what they want -- unless they are pointing at a voxel
-# they placed, and then they want the voxel. The room's contents are the
-# tree's, so the run is aimed off what the room says about itself: one
-# floor orb and where it stands, and a placed voxel written into the
-# room's own save on the line between the two. The same look one way and
-# the other settles it -- through the voxel, the voxel wins; over it, the
-# orb does.
-mkdir -p "$out/tieruser/launch_world"
-{ echo "wait_log_any 30000 orb sample:"; echo "quit"
-	} > "$out/cmds_tier0.txt"
-timeout 120 bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
-	-L "$out/tier0.log" -c @"$out/cmds_tier0.txt" > /dev/null 2>&1
-sample=$(grep -a "launch_w.*: orb sample: " "$out/tier0.log" | head -1 |
-	sed 's/.*orb sample: //')
-if [ -z "$sample" ]; then
-	echo "FAIL: the room names no floor orb to aim at"
-	exit 1
-fi
-python3 - "$sample" "$out/tieruser/launch_world/room.txt" "$out/aim.txt" <<'PYAIM' || exit 1
-import math, sys
-# "<name> at x y z from sx sy sz", in voxels
-text = sys.argv[1]
-at = text.split(" at ")[1]
-o, st = at.split(" from ")
-ox, oy, oz = (float(v) for v in o.split())
-sx, sy, sz = (float(v) for v in st.split())
-dx, dy, dz = ox - sx, oy - sy, oz - sz
-d = math.sqrt(dx * dx + dy * dy + dz * dz)
-# Urho3D's forward at a yaw is (sin, 0, cos); pitch is negative upward
-# here, which is what the room's own look command takes
-yaw = math.degrees(math.atan2(dx, dz)) % 360.0
-pitch = math.degrees(math.atan2(-dy, math.sqrt(dx * dx + dz * dz)))
-# On the line, inside the five metres the player can reach: six voxels
-t = 6.0 / d
-vx = round(sx + dx * t)
-vy = round(sy + dy * t)
-vz = round(sz + dz * t)
-open(sys.argv[2], "w").write("%d,%d,%d\n" % (vx, vy, vz))
-# The two looks: through the voxel, and a little over it
-open(sys.argv[3], "w").write("%.2f %.2f %.2f\n" % (yaw, pitch, pitch - 8.0))
-print("aiming at the orb: yaw %.1f pitch %.1f, a placed voxel at %d,%d,%d"
-		% (yaw, pitch, vx, vy, vz))
-PYAIM
-read -r tyaw tpitch tover < "$out/aim.txt"
-{ echo "wait_log_any 90000 the room hums"
-	echo "delay 800"
-	echo "look $tyaw $tpitch"; echo "delay 1500"
-	echo "look $tyaw $tover"; echo "delay 1500"; echo "quit"
-	} > "$out/cmds_tier.txt"
-timeout 120 bin/buildat -m launch_world -D "$out/tieruser" -w 640x360 -l 3 \
-	-L "$out/tier.log" -c @"$out/cmds_tier.txt" > /dev/null 2>&1
-wins=$(grep -ac "launch_w.*: pointing: the voxel at .* wins over orb" "$out/tier.log")
-takes=$(grep -ac "launch_w.*: pointing at orb .*(up its column)" "$out/tier.log")
-echo "the voxel won $wins times and the orb was taken over it $takes times"
-rm -f "$out/tieruser/launch_world/room.txt"
-if [ "$wins" -lt 1 ] || [ "$takes" -lt 1 ]; then
-	echo "FAIL: a placed voxel does not win over the orb behind it," \
-			"or winning it costs the orb beside it"
-	exit 1
-fi
-
 # **The room is a launch UI the setting can name** ([LAUNCH_SANDBOX]:
 # the launch UI is a slot). Two short runs before the long one: the
 # preference picks the room, and a name that is not there falls back to
@@ -212,11 +150,9 @@ if [ "$slot" -lt 1 ] || [ "$back" -lt 1 ]; then
 			"or a missing one does not fall back to the menu"
 	exit 1
 fi
-# **A game to go into** ([CI_RUNS]): the hold starts whichever game the
-# mouse is on, and a machine with none installed has nothing to start --
-# in a container the hold itself landed three minutes after the mouse
-# let go, which is a frame rate rather than a fault. Where there is no
-# game, the drive leaves that block out and the assertions below say so.
+# **A game to go into** ([CI_RUNS]): the drive goes into digger by name
+# where the tree has games installed, and leaves that block out where it
+# has none -- a container -- and the assertions below say so.
 games_installed=$(ls "$here/user/shared/vanilla/games" 2>/dev/null | wc -l)
 
 # **The modules are compiled before any drive starts.** A server whose
@@ -250,100 +186,20 @@ fi
 # the line wherever it appeared in the run.
 { echo "wait_log_any 90000 the room hums"
 	echo "delay 1200"
-	# **It starts in FPS mode**, so the walking is checked first and then
-	# Tab goes to menu mode, where the prompt and the digits live. A held
-	# key needs keydown/delay/keyup; keypress is one frame and moves
-	# nothing.
-	echo "screenshot $out/fps-stood.png"
-	echo "wait_log 20000 Wrote screenshot $out/fps-stood.png"
-	# **A glowing orb stays in its pocket** ([POCKETS_ROUND]: the
-	# pockets are stonework and the floor is where things move). The
-	# crosshair at the standing place is on a pocketed orb, so E here
-	# has to refuse it -- the carrying below takes a floor orb instead.
-	echo "keypress E"
-	echo "delay 400"
-	# **Carrying**: an orb the crosshair is on comes into the hand with E
-	# and goes back down with right click. A scripted run cannot aim with
-	# the mouse -- SetMouseVisible(false) stands down in one, so
-	# GetMouseMove reads zero -- which is why the look is said outright.
-	# **A floor orb, not the one straight ahead** ([POCKETS_ROUND]: a
-	# glowing orb in a pocket is stonework and does not come out), so the
-	# aim is the one worked out off the room's own orb sample above.
-	echo "look $tyaw $tpitch"
-	echo "delay 600"
-	echo "keypress E"
-	echo "delay 500"
-	echo "screenshot $out/carried.png"
-	echo "wait_log 20000 Wrote screenshot $out/carried.png"
-	echo "mouse_click right"
-	echo "delay 500"
-	# Back to the standing place, the walk below being measured from it
-	echo "event mode fps"
+	# **It starts at the wall, and Tab moves between the stations**
+	# ([LAUNCH_WORLD] section 11): the floor, the desk, and the wall
+	# again. The first two shots are what says the camera moved.
+	echo "screenshot $out/stood.png"
+	echo "wait_log 20000 Wrote screenshot $out/stood.png"
+	echo "keypress Tab"
 	echo "wait_log 15000 camera: landed"
 	echo "delay 250"
-	echo "keydown W"
-	echo "delay 1400"
-	echo "keyup W"
-	echo "delay 600"
-	echo "screenshot $out/fps-walked.png"
-	echo "wait_log 20000 Wrote screenshot $out/fps-walked.png"
-	# **Placing and digging**: walk up to the wall, put one of the
-	# player's own voxels on it and prise it out again. The room's own
-	# stone has no wireframe and cannot be dug, so what is dug here is
-	# what was just placed.
-	echo "keydown W"
-	echo "delay 3600"
-	echo "keyup W"
-	echo "delay 700"
-	# **Look at the floor first**: flush against the wall the ray starts
-	# inside the stone, so there is no empty voxel in front of what is
-	# pointed at and nothing to place against -- which is what the
-	# standing pitch changing by a few degrees did to this step
-	# (2026-09-23).
-	# **From a known spot, not from wherever the walk ended**
-	# (2026-09-24): the step used to place and dig where the walk above
-	# had left the player, and a walk ends somewhere different on every
-	# machine -- flush against a wall on a slow one, where the ray lands
-	# on stone at head height and there is nothing to place. So the
-	# event puts the player back at the standing place, one short step
-	# clears the orbs standing around it, and fifty degrees down is the
-	# floor in front of them. Measured over the whole band: from there
-	# every pitch from thirty to eighty places on the floor.
-	echo "event mode fps"
+	echo "screenshot $out/station-floor.png"
+	echo "wait_log 20000 Wrote screenshot $out/station-floor.png"
+	echo "keypress Tab"
 	echo "wait_log 15000 camera: landed"
 	echo "delay 250"
-	echo "keydown W"
-	echo "delay 700"
-	echo "keyup W"
-	echo "delay 600"
-	# **Steeply down, so the floor is what is hit** and not the wall's
-	# own base: the pockets fill the middle of the faced wall now
-	# ([POCKETS_ROUND]) and a shallower aim placed into one, which the
-	# room refuses. Thirty to eighty degrees all place on the floor.
-	echo "look 180 -70"
-	echo "delay 500"
-	echo "mouse_click right"
-	echo "delay 700"
-	# **A dig let go of inside the second puts the voxel back**, so this
-	# short hold has to leave the count where it was
-	echo "mouse_down left"
-	echo "delay 300"
-	echo "mouse_up left"
-	echo "delay 600"
-	# **Three seconds for a one-second dig** (2026-09-24): the dig ends
-	# on the frame that finds the button a second down, and a machine
-	# drawing a frame a second has few frames to offer -- 1.5 s of hold
-	# was one or two of them and it caught neither. A long hold costs
-	# this desk nothing: the dig ends at its second and the rest of the
-	# hold is spent.
-	echo "mouse_down left"
-	echo "delay 3000"
-	echo "mouse_up left"
-	echo "delay 900"
-	# And one left behind, for the second run below to find
-	echo "mouse_click right"
-	echo "delay 700"
-	echo "event mode menu"
+	echo "keypress Tab"
 	echo "wait_log 15000 camera: landed"
 	echo "delay 250"
 	# **A server is connected to, and says so when it cannot be.**
@@ -378,7 +234,7 @@ fi
 	echo "delay 400"
 	# Back to the standing place, so every frame below has the same
 	# viewpoint as the one Escape returns to
-	echo "event mode fps"
+	echo "event mode menu"
 	echo "wait_log 15000 camera: landed"
 	echo "delay 250"
 	# **The room is never static** -- the era reference's own rule, and
@@ -388,7 +244,7 @@ fi
 	echo "wait_log 20000 Wrote screenshot $out/drift-a.png"
 	echo "screenshot $out/drift-b.png"
 	echo "wait_log 20000 Wrote screenshot $out/drift-b.png"
-	echo "keypress F7"
+	echo "event room still"
 	echo "delay 800"
 	# The dissolve: a bay opens and closes again. What is checked is that
 	# the wall moves and comes back -- states being configurations of one
@@ -399,19 +255,12 @@ fi
 	# whatever the arrows above left selected -- which may be a game with
 	# a server to start. Three letters name the empty pocket and Enter
 	# opens that one, every run.
-	echo "keypress F1"
+	echo "event room preset 1"
 	echo "delay 800"
-	# **Menu mode first, and before the reference picture**: every
-	# Escape above pops back to walking, and in FPS these three letters
-	# are movement and Return opens the desk -- which is what this step
-	# was doing for a while, with the assertion passing on the
-	# terminal's own arrival. The closed picture has to be taken in the
-	# mode the reopened one will be, or "it comes back" compares two
-	# cameras (2026-09-23).
-	# **The mode is said, not guessed** ([CMD_EVENT]): menu mode at the
-	# standing place, which is also where the reopened picture is taken
-	# from -- the player walked to the wall to dig, and a reference
-	# frame from there compares two cameras rather than two walls.
+	# **The standing place first, and before the reference picture**
+	# ([CMD_EVENT]): the reopened picture is taken from there too, or
+	# "it comes back" compares two cameras rather than two walls
+	# (2026-09-23).
 	echo "event mode menu"
 	echo "wait_log 15000 camera: landed"
 	echo "delay 250"
@@ -503,18 +352,19 @@ fi
 	# The ornament, stripped: the friezes go plain and the frame has to
 	# change. The generator's own check passed for a day while nothing in
 	# the room wore what it made.
-	# **F6 re-meshes the whole room**, the ornament being voxels now, and
+	# **The ornament's toggle re-meshes the whole room**, the ornament
+	# being voxels now, and
 	# a shot 900 ms later sometimes landed before the mesh did -- which
 	# read as "nothing wears the generated maps" (2026-09-23). The room
 	# says which way the toggle went once it has rebuilt
 	# (set_8bit_voxel_geometry is done when rebuild_room returns), so the
 	# wait is on that and the delay after it is the frame's.
-	echo "keypress F6"
+	echo "event room ornament"
 	echo "wait_log 15000 ornament off"
 	echo "delay 500"
 	echo "screenshot $out/no-ornament.png"
 	echo "wait_log 20000 Wrote screenshot $out/no-ornament.png"
-	echo "keypress F6"
+	echo "event room ornament"
 	echo "wait_log 15000 ornament on"
 	echo "delay 500"
 	# The room as it is, and then the same frame with the reflection
@@ -522,12 +372,12 @@ fi
 	# metals
 	echo "screenshot $out/room.png"
 	echo "wait_log 20000 Wrote screenshot $out/room.png"
-	echo "keypress F5"
+	echo "event room probe"
 	echo "delay 800"
 	echo "screenshot $out/room-noprobe.png"
 	# The attract mode: left alone the room shows itself off. The drift
 	# is unfrozen for it and BUILDAT_LAUNCH_ATTRACT makes the wait short.
-	echo "keypress F7"
+	echo "event room still"
 	echo "delay 600"
 	# **Where the camera is, said rather than assumed** (2026-09-24):
 	# this step compares "home" against "back from the attract mode",
@@ -540,7 +390,7 @@ fi
 	echo "delay 250"
 	echo "screenshot $out/attract-home.png"
 	echo "wait_log 20000 Wrote screenshot $out/attract-home.png"
-	echo "keypress F8"
+	echo "event room attract"
 	# The sweep says when it starts and which wall it is showing; the
 	# delay after it is the camera's own flight, not a guess at when the
 	# room noticed the key
@@ -555,12 +405,12 @@ fi
 	echo "screenshot $out/attract-back.png"
 	echo "wait_log 20000 Wrote screenshot $out/attract-back.png"
 	# **The pause dialog**, which is the room's own way out of the
-	# program: in FPS with nothing left to pop, Escape comes up with it;
-	# Escape again takes it away.
+	# program: at the standing place with nothing open, Escape comes up
+	# with it; Escape again takes it away.
 	#
 	# **The mode is said** ([CMD_EVENT]), so the Escape below is the one
 	# that pauses rather than the one that pops a level.
-	echo "event mode fps"
+	echo "event mode menu"
 	echo "wait_log 15000 camera: landed"
 	echo "delay 250"
 	echo "screenshot $out/prepause.png"
@@ -591,7 +441,7 @@ fi
 	echo "delay 600"
 	echo "screenshot $out/pause-hover.png"
 	echo "wait_log 20000 Wrote screenshot $out/pause-hover.png"
-	echo "mouse_pos 640 290"
+	echo "mouse_pos 640 263"
 	echo "delay 400"
 	echo "mouse_click left"
 	echo "delay 700"
@@ -618,40 +468,18 @@ fi
 	echo "delay 1000"
 	echo "screenshot $out/search3.png"
 	echo "wait_log 20000 Wrote screenshot $out/search3.png"
-	echo "event mode fps"
-	echo "wait_log 15000 camera: landed"
-	echo "delay 250"
-	# **Menu mode's furniture is menu mode's** (the second playtest, 3
-	# and 4): a term in the prompt, Tab away, and nothing of the search
-	# is on screen in FPS -- and Tab back finds the term again.
 	echo "event mode menu"
 	echo "wait_log 15000 camera: landed"
 	echo "delay 250"
-	echo "keypress D"
-	echo "keypress I"
-	echo "keypress G"
-	echo "delay 400"
-	echo "screenshot $out/term-menu.png"
-	echo "wait_log 20000 Wrote screenshot $out/term-menu.png"
-	echo "keypress Tab"
-	echo "delay 700"
-	echo "screenshot $out/term-fps.png"
-	echo "wait_log 20000 Wrote screenshot $out/term-fps.png"
-	echo "keypress Tab"
-	echo "delay 700"
-	echo "screenshot $out/term-back.png"
-	echo "wait_log 20000 Wrote screenshot $out/term-back.png"
-	# **Not Escape**: with a term in the prompt Escape clears the term
-	# and stays in menu mode, so the console's own Escape below would
-	# pop the mode instead of opening the dialog
-	echo "event mode fps"
+	echo "event mode menu"
 	echo "wait_log 15000 camera: landed"
 	echo "delay 250"
 	# **The developer console, over the room** ([LAUNCH_CONSOLE] offers
-	# its screen and the room takes it): the pause dialog's third item,
+	# its screen and the room takes it): the pause dialog's fourth item,
 	# a line typed at it, and Escape to put the room back.
 	echo "keypress Escape"
 	echo "delay 600"
+	echo "keypress Down"
 	echo "keypress Down"
 	echo "keypress Down"
 	echo "delay 300"
@@ -667,23 +495,19 @@ fi
 	echo "keypress Escape"
 	echo "delay 1200"
 	echo "delay 400"
-	# **A hold on a game's sphere launches it** (the playtest's first
-	# finding: it looped and started nothing). Last of all, because it
-	# starts a server and takes the client into the game.
+	# **A game launched by name** -- digger, which every tree has. Last
+	# but one, because it starts a server and takes the client into the
+	# game.
 	if [ "${games_installed:-0}" -gt 0 ]; then
-	# **Home first, and in FPS mode** (2026-09-24): fourteen seconds of
-	# quiet starts the attract mode and the camera leaves the standing
-	# place, so on a machine where the steps above take longer than
-	# this desk's the hold landed on nothing at all -- which read as "a
-	# hold started nothing" and was the room flying about. The event
-	# puts it back and resets the idle clock, and it is what the drive
-	# uses everywhere else it needs a known viewpoint.
-	echo "event mode fps"
+	# **Home first** (2026-09-24): fourteen seconds of quiet starts the
+	# attract mode and the camera leaves the standing place; the event
+	# puts it back and resets the idle clock.
+	echo "event mode menu"
 	echo "wait_log 15000 camera: landed"
 	echo "delay 250"
-	echo "mouse_down left"
-	echo "delay 1400"
-	echo "mouse_up left"
+	for c in D I G G E R; do echo "keypress $c"; done
+	echo "delay 600"
+	echo "keypress Return"
 	# **Wait for the launch rather than guessing at it**: on a slow
 	# machine -- a container under llvmpipe is one -- nine seconds was
 	# not enough, and the key went before the game had started, so the room
@@ -711,7 +535,7 @@ fi
 	# **And an orb answers the mouse** (the third playtest's rule, in
 	# the room rather than in a dialog): a click on one launches it, the
 	# way Enter launches what is browsed. Last, because it starts
-	# something -- the same reason the hold above is last.
+	# something -- the same reason the game above is last.
 	# **Tab, not the mode event**: the room answering a key at all after
 	# a game is half of what this step proves -- its own handlers used
 	# to go with the game's ([LAUNCH_SANDBOX]'s reset dropped every
@@ -781,9 +605,6 @@ grep -a "launch_w.*: bays " "$out/cli.log" | head -1 | sed 's/.*: //'
 # pockets are the launch grid's games and the floor is everything else
 # that launches. A room that found nothing would still draw, and would
 # still pass every picture check above.
-# **The player's own voxels**: one placed, one dug, and the save written
-# both times. The save is a diff against a generated room, so a room that
-# forgot it would look exactly the same.
 # **The arrows walk the room's own grid**: a row along the wall and the
 # floor's ranks after it, read off where the things are rather than off a
 # second list. Four different things for four presses.
@@ -865,15 +686,6 @@ echo "the search found ${matched:-0} matches and the arrows walked $walked"
 if [ "${matched:-0}" -lt 3 ] || [ "$walked" -lt 2 ]; then
 	echo "FAIL: the search does not find several matches, or the arrows" \
 			"do not walk them"
-	exit 1
-fi
-
-hidden=$(grep -ac "launch_w.*: prompt: hidden with the mode" "$out/cli.log")
-backagain=$(grep -ac "launch_w.*: prompt: back, \"dig\"" "$out/cli.log")
-echo "the search term was hidden $hidden and came back $backagain"
-if [ "$hidden" -lt 1 ] || [ "$backagain" -lt 1 ]; then
-	echo "FAIL: the prompt does not hide with the mode, or does not" \
-			"come back with its term"
 	exit 1
 fi
 
@@ -960,14 +772,11 @@ if [ "$gave" -lt 1 ] || [ "$took" -lt 1 ]; then
 	exit 1
 fi
 
-# **Coming back from a game, where a game could be gone into.** The
-# hold starts whichever game the mouse is on, and on a machine with no
-# game installed -- a container is one -- there is nothing to start; at
-# a container's frame rate the hold itself landed three minutes after
-# the mouse let go (2026-09-24). So the room standing down is the
-# condition, not the assertion: where it happened, coming back is
-# asserted; where it did not, the run says so and the desk's own run is
-# what covers it.
+# **Coming back from a game, where a game could be gone into.** On a
+# machine whose drive leaves the game out -- a container -- there is
+# nothing to start, so the room standing down is the condition, not the
+# assertion: where it happened, coming back is asserted; where it did
+# not, the run says so and the desk's own run is what covers it.
 went=$(grep -ac "launch_w.*: game: the room stands down" "$out/cli.log")
 back=$(grep -ac "launch_w.*: game: back in the room" "$out/cli.log")
 swept=$(grep -a "forget_game_ui" "$out/cli.log" | tail -1 |
@@ -980,102 +789,22 @@ if [ "$went" -ge 1 ] && [ "$back" -lt 1 ]; then
 fi
 if [ "$went" -lt 1 ]; then
 	if [ "${games_installed:-0}" -gt 0 ]; then
-		echo "FAIL: a hold on a game's sphere started nothing"
+		echo "FAIL: launching digger by name started nothing"
 		exit 1
 	fi
-	echo "note: no game is installed here, so the hold and the way back"\
+	echo "note: no game is installed here, so the game and the way back"\
 		"were not driven"
 fi
 
-# **A hold launches once** -- the playtest's first finding was that it
-# looped and started nothing. More than once is the fault; none at all
-# is a machine whose frame rate never reached the hold, which the line
-# above already says.
-held=$(grep -ac "launch_w.*: hold: launching " "$out/cli.log")
-echo "a hold on a sphere launched $held times"
-if [ "$held" -gt 1 ]; then
-	echo "FAIL: holding on a game's sphere launched $held times, not once"
-	exit 1
-fi
-if [ "$held" -lt 1 ] && [ "$went" -ge 1 ]; then
-	echo "FAIL: the room went into a game without a hold launching one"
-	exit 1
-fi
-
 # **The opening hint**, which is the room's whole answer to a first-time
-# user who does not know it is a first-person game: one line, and the
-# first step takes it away again. A line that stayed would be a HUD.
-hint_up=$(grep -ac "launch_w.*: hint: the three keys" "$out/cli.log")
+# user: one line naming Tab and typing, and the first key takes it away
+# again. A line that stayed would be a HUD.
+hint_up=$(grep -ac "launch_w.*: hint: Tab and typing" "$out/cli.log")
 hint_gone=$(grep -ac "launch_w.*: hint: taken away" "$out/cli.log")
 echo "the hint was shown $hint_up and taken away $hint_gone"
 if [ "$hint_up" -lt 1 ] || [ "$hint_gone" -lt 1 ]; then
-	echo "FAIL: the hint does not appear, or does not leave when the" \
-			"player moves"
-	exit 1
-fi
-
-picked=$(grep -ac "launch_w.*: carry: picked up" "$out/cli.log")
-putdown=$(grep -ac "launch_w.*: carry: put down" "$out/cli.log")
-# **A sphere rests on what it is put on** (user): a carried orb used to
-# be let go at arm's length and hang there at eye height. The room says
-# what height it came to rest at, in voxels, and the standing eye is
-# 3.56 of them -- so anything at or above that is floating.
-resty=$(grep -a "launch_w.*: carry: put down .* at y " "$out/cli.log" |
-	head -1 | sed -n 's/.* at y \([0-9.-]*\),.*/\1/p')
-echo "the orb was put down at y ${resty:-(nothing)} voxels"
-if [ -z "$resty" ] || [ "$(python3 -c "print(1 if float('${resty:-9}') < 3.2 else 0)")" != "1" ]; then
-	echo "FAIL: a sphere put down floats instead of resting on the floor"
-	exit 1
-fi
-stone=$(grep -ac "launch_w.*: carry: .* is stonework, not a piece" \
-	"$out/cli.log")
-echo "the player carried $picked spheres and put down $putdown," \
-		"and was refused a pocketed one $stone times"
-if [ "$stone" -lt 1 ]; then
-	echo "FAIL: a glowing orb can be taken out of its pocket"
-	exit 1
-fi
-if [ "$picked" -lt 1 ] || [ "$putdown" -lt 1 ]; then
-	echo "FAIL: E picks nothing up, or right click puts nothing down"
-	exit 1
-fi
-
-placed=$(grep -ac "launch_w.*: place: " "$out/cli.log")
-dug=$(grep -ac "launch_w.*: dig: " "$out/cli.log")
-wrote=$(grep -ac "launch_w.*: save: .* written" "$out/cli.log")
-echo "the player placed $placed voxels, dug $dug, and the save was written $wrote times"
-if [ "$placed" -lt 2 ] || [ "$dug" -lt 1 ] || [ "$wrote" -lt 3 ]; then
-	echo "FAIL: placing or digging did nothing"
-	exit 1
-fi
-# **Exactly what the sequence asks for, and nothing more.** Two right
-# clicks place and one hold digs; the third right click puts a carried
-# sphere down and must not leave a voxel behind it, and the short hold
-# above must not dig. Both were bugs (user, 2026-09-23).
-if [ "$placed" -ne 2 ] || [ "$dug" -ne 1 ]; then
-	echo "FAIL: putting a sphere down also placed a voxel," \
-			"or a dig let go of early still dug"
-	exit 1
-fi
-
-# **And it survives a restart**, which is the whole point of a diff
-# against a generated room: a second client, booted and closed, has to
-# find the voxel the first one left.
-# **Wait for the room to say what it read**, not for two and a half
-# seconds: the room takes about eleven to build itself here and the
-# save line comes with it, so a fixed wait reads an empty log on a
-# slower moment (2026-09-24)
-{ echo "wait_log_any 90000 save: "; echo "delay 800"; echo "quit"
-	} > "$out/cmds2.txt"
-timeout 180 bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
-	-c @"$out/cmds2.txt" 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli2.log"
-read_back=$(grep -a "launch_w.*: save: .* rows read" "$out/cli2.log" |
-	head -1 | sed 's/.*save: //')
-echo "a second client read back: ${read_back:-(nothing)}"
-put=$(echo "$read_back" | sed -n 's/.*, \([0-9]*\) spheres put back.*/\1/p')
-if [ -z "$read_back" ] || [ "${put:-0}" -lt 1 ]; then
-	echo "FAIL: the room forgot what the player placed or moved"
+	echo "FAIL: the hint does not appear, or does not leave at the" \
+			"first key"
 	exit 1
 fi
 
@@ -1441,16 +1170,6 @@ if ! grep -aq "pointing at orb" "$out/cli.log"; then
 	echo "FAIL: no orb is ever pointed at"
 	exit 1
 fi
-# **And the selection volume is not the drawn volume** (user): close to a
-# floor orb the player points over it, which is where the horizon sits,
-# and the crosshair used to leave it. The room says when it answered up
-# an orb's column rather than at its middle.
-column=$(grep -ac "pointing at orb .*(up its column)" "$out/cli.log")
-echo "the crosshair took an orb up its column $column times"
-if [ "$column" -lt 1 ]; then
-	echo "FAIL: pointing over a floor orb loses it"
-	exit 1
-fi
 grep -a "pointing at orb" "$out/cli.log" | head -1 | sed 's/.*launch_w[a-z]*: //'
 for what in "ornament" "synth"; do
 	if ! grep -aq "$what ok" "$out/cli.log"; then
@@ -1609,15 +1328,15 @@ terminal_ok = dark < 40 and bright > 1500
 print("PASS: the terminal is flat, dark and readable" if terminal_ok
 		else "FAIL: the terminal panel is not on screen")
 
-# **The two control modes**: walking has to move the room, and it is
-# the mode the player lands in
-stood, ds = mean_of("fps-stood")
-walked, dw = mean_of("fps-walked")
+# **The stations**: Tab has to move the camera from the wall to the
+# floor ([LAUNCH_WORLD] section 11)
+stood, ds = mean_of("stood")
+walked, dw = mean_of("station-floor")
 walk = sum(abs(p - q) for p, q in zip(ds, dw)) / float(len(ds))
-print("walking forward moves the frame by %.2f of a level" % walk)
+print("Tab to the floor moves the frame by %.2f of a level" % walk)
 walk_ok = walk > 3.0
-print("PASS: FPS mode walks" if walk_ok
-		else "FAIL: holding W moves nothing -- the room does not start in FPS")
+print("PASS: Tab moves between the stations" if walk_ok
+		else "FAIL: Tab moves nothing")
 
 # **The pause dialog**: it has to appear over the room and go away
 # again. A room whose only way out is killing the process is not a

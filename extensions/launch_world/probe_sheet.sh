@@ -32,7 +32,7 @@ whites="${WHITES:-0.95 1.15 1.45}"
 for sky in $skies; do
 	for white in $whites; do
 		name="sky${sky}_white${white}"
-		{ echo "delay 5000"; echo "keypress F7"; echo "delay 400"
+		{ echo "delay 5000"; echo "event room still"; echo "delay 400"
 			echo "screenshot $out/$name.png"; echo "delay 400"
 			echo "quit"; } > "$out/cmds.txt"
 		BUILDAT_LAUNCH_PROBEBOX=1 BUILDAT_LAUNCH_SKY="$sky" \

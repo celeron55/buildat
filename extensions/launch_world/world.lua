@@ -2737,14 +2737,6 @@ local HOME_FROM = {x = 0.0, y = 1.6,
 -- white share come from, not from the sources.
 	z = tonumber(env("BUILDAT_LAUNCH_STAND")) or 8.0}
 local HOME_AT = {x = 0, y = 1.1, z = -6.0}
--- **The pitch the standing place looks at**, worked out from the two
--- above rather than picked: a flight ends looking at HOME_AT and the
--- walk then applies its own pitch, so a pitch that disagrees with the
--- flight makes the camera jump the moment the flight hands over --
--- which read as "the pause menu moves the camera" (2026-09-23), the
--- dialog being the first thing after a flight that takes a picture.
-local HOME_PITCH = math.deg(math.atan2(HOME_FROM.y - HOME_AT.y,
-		math.abs(HOME_AT.z - HOME_FROM.z)))
 local cam = {
 	from = {x = HOME_FROM.x, y = HOME_FROM.y, z = HOME_FROM.z},
 	at = {x = HOME_AT.x, y = HOME_AT.y, z = HOME_AT.z},
@@ -2881,106 +2873,36 @@ function handle_frame_watch(event_type, event_data)
 end
 magic.SubscribeToEvent("Update", "handle_frame_watch")
 
--- **Two control modes, and it starts in the immersive one** (user,
--- 2026-09-23). Menu mode is what was built -- the prompt, the digits,
--- the camera flying to what was picked. FPS mode is the standing player
--- the scale rule is about, who walks up to a pocket and reaches into it.
--- Tab toggles, and the mouse is captured in FPS and free in menu.
---
--- **Both, in the end**: Tab is the one keystroke straight between the
--- two, and **Escape pops one level** -- a screen, then browsing, then
--- back to walking -- which is the stack's rule without the stack
--- (the plan, 2026-09-23). The playtest that was to choose between them
--- is what the third launch option argued out: if `launch_menu` sits
--- over the room as a screen, then menu mode over FPS mode is the same
--- machinery one depth down.
-local FPS_EYE = 1.6           -- metres, the standing eye the room is judged from
+-- **One mode** ([LAUNCH_WORLD] stage 2, section 11): point-and-click
+-- with the keyboard, the mouse always free. The proof's FPS body -- the
+-- walk, the look, the collision, the captured mouse, the crosshair, the
+-- hold, digging, carrying and placing -- is cut, and the camera is the
+-- only eye: it stands at stations and flies to what is picked.
 
--- One floor orb said out loud, with where it stands: the tie-break
--- between a placed voxel and an orb can only be driven by a run that
--- knows where an orb is, and the room's contents are the tree's rather
--- than a fixture's ([LAUNCH_WORLD]: a tight target wins over a
--- generous one).
+-- One floor orb said out loud, with where it stands, so a run needs no
+-- constant of this room's to aim at it
 for i = 1, #orb_places do
 	if ORBS[i] and ORBS[i].floor and orb_places[i] then
 		local o = orb_places[i]
-		-- With the standing place beside it, so a run needs no constant
-		-- of this room's to aim at the orb
 		log:info(string.format("orb sample: %s at %.2f %.2f %.2f from " ..
 				"%.2f %.2f %.2f", ORBS[i].name, o.x * U, o.y * U, o.z * U,
-				HOME_FROM.x * U, FPS_EYE * U, HOME_FROM.z * U))
+				HOME_FROM.x * U, HOME_FROM.y * U, HOME_FROM.z * U))
 		break
 	end
 end
 
-local FPS_SPEED = 4.2
-local FPS_GRAVITY = 18.0
-local FPS_JUMP = 5.0
-local LOOK_SPEED = 0.12
 terminal_open = false
-mode = "fps"
--- When the walk last counted its time ([LAUNCH_WORLD], 2026-09-24);
--- file-scope state, this chunk being at Lua's limit of 200 locals
-fps_last_us = nil
-local fps = {x = HOME_FROM.x, y = FPS_EYE, z = HOME_FROM.z,
-	-- Urho3D's yaw 0 looks down +z and the wall is at -z
-	yaw = 180.0, pitch = HOME_PITCH, vy = 0.0}
-
--- The room's own voxels are the collision: there is no physics here and
--- no body, just the description in room.lua asked whether a point is
--- stone. simplified: the player is a column half a metre across and the
--- floor is flat at y = 0, which is true of this room and of no other.
-local PLAYER_R = 0.25
-local function solid_at(x, y, z)
-	-- Metres in, and the same rounding the ray uses
-	return room.voxel_at(voxel_of(x / VOXEL_M), voxel_of(y / VOXEL_M),
-			voxel_of(z / VOXEL_M)) ~= room.id.air
-end
-local function blocked(x, y, z)
-	for _, dx in ipairs({-PLAYER_R, PLAYER_R}) do
-		for _, dz in ipairs({-PLAYER_R, PLAYER_R}) do
-			-- Knee, waist and head, which is what stops a player walking
-			-- into a slab that starts above the floor
-			for _, dy in ipairs({0.3, 0.9, y - 0.1 > 1.5 and 1.5 or 0.9}) do
-				if solid_at(x + dx, y - FPS_EYE + dy, z + dz) then
-					return true
-				end
-			end
-		end
-	end
-	return false
-end
 
 -- **A scripted run never touches the mouse.** The whitelist stands down
--- on hiding the cursor and on MM_RELATIVE in one ([SCRIPTED_CURSOR]),
--- but a check shares a desk with the person whose mouse it is and the
--- room should not be asking at all (user, 2026-09-23: "I can't use my
--- mouse during your tests"). Asked each time: at load a command
--- sequence is not up yet.
-local function mouse_for(fps_now, reason)
+-- on cursor changes in one ([SCRIPTED_CURSOR]), but a check shares a
+-- desk with the person whose mouse it is and the room should not be
+-- asking at all (user, 2026-09-23: "I can't use my mouse during your
+-- tests"). The mouse is free and visible, always: what this does is
+-- take it back from whatever left it otherwise.
+local function mouse_for(reason)
 	if api.is_scripted() then return end
-	magic.input:SetMouseVisible(not fps_now, reason)
-	magic.input:SetMouseMode(fps_now and magic.MM_RELATIVE or
-			magic.MM_ABSOLUTE)
-end
-
--- **What a mode change does to menu mode's own furniture**, filled in
--- where the prompt and the browser are made, hundreds of lines below --
--- everything it touches is a local down there
-local mode_changed
-local function set_mode(m)
-	mode = m
-	local fps_now = (m == "fps")
-	mouse_for(fps_now, "launch_world: " .. m .. " mode")
-	if fps_now then
-		-- Walking starts from wherever the camera was left, so a mode
-		-- change is not a teleport
-		fps.x, fps.y, fps.z = cam.from.x, FPS_EYE, cam.from.z
-	end
-	if mode_changed then
-		mode_changed(fps_now)
-	end
-	log:info("mode: " .. m)
+	magic.input:SetMouseVisible(true, reason)
+	magic.input:SetMouseMode(magic.MM_ABSOLUTE)
 end
 
 -- Whether somebody else held the screen last frame ([LAUNCH_WORLD]'s
@@ -3058,16 +2980,16 @@ function hand_over_if_needed()
 	held_was = held
 	if held then
 		log:info("input: handed to whatever holds the screen")
-		mouse_for(false, "launch_world: somebody else's screen")
+		mouse_for("launch_world: somebody else's screen")
 	else
 		log:info("input: the room has the screen again")
-		set_mode(mode)
+		mouse_for("launch_world: the room has the screen")
 	end
 	return held
 end
 
 
-function handle_fps_update(event_type, event_data)
+function handle_room_update(event_type, event_data)
 	-- A backdrop takes no input ([TWO_AUDIENCES]' composition)
 	if backdrop then return end
 	-- A launch in flight: the room draws on until the game takes the
@@ -3076,121 +2998,15 @@ function handle_fps_update(event_type, event_data)
 	-- **The one gate, asked once a frame** ([LAUNCH_WORLD]: whatever
 	-- holds the screen owns the input). This is the asking; every other
 	-- handler below reads the answer it left.
-	if hand_over_if_needed() then return end
-	-- **The camera stays still while a screen is up -- any screen**
-	-- (user, 2026-09-23: the pause menu turned the mouse into yaw and
-	-- pitch). The rule is not "is something drawn over the scene": a
-	-- crosshair, a notice and an orb's name are overlays and they are
-	-- there on purpose. It is **is a screen on the stack** -- the pause
-	-- dialog, the desk, the console -- and this room's answer to the
-	-- same fault [BOX_PLAYTEST_3] found in the Luanti client, where the
-	-- look ran under the settings and key screens.
-	-- **The clock is read before the gate, not after it** (2026-09-25):
-	-- the walk is paid for in wall time, so a gate that returns without
-	-- reading it leaves the whole time it was closed for sitting in the
-	-- next dt -- a camera flying home with W held walked the player
-	-- into the wall the moment it landed.
-	local now_us = buildat.get_time_us()
-	local dt = fps_last_us and (now_us - fps_last_us) / 1000000 or 0
-	fps_last_us = now_us
-	if mode ~= "fps" or cam.to_from or terminal_open or pause_open or
-			probe_pending() then
-		return
-	end
-	-- Two seconds of catch-up at most: a frame that took longer than
-	-- that is a stall, and a player does not want a stall walked out
-	dt = math.min(2.0, dt)
-	local mm = magic.input:GetMouseMove()
-	if hint_left > 0 and (mm.x ~= 0 or mm.y ~= 0 or
-			magic.input:GetKeyDown(magic.KEY_W) or
-			magic.input:GetKeyDown(magic.KEY_A) or
-			magic.input:GetKeyDown(magic.KEY_S) or
-			magic.input:GetKeyDown(magic.KEY_D)) then
-		drop_hint()
-	end
-	fps.yaw = fps.yaw + mm.x * LOOK_SPEED
-	fps.pitch = math.max(-85, math.min(85, fps.pitch + mm.y * LOOK_SPEED))
-	-- **The arrows turn too**, which is an accessibility basic rather
-	-- than a convenience: a player without a mouse, or one whose mouse
-	-- cannot be captured, can still look. The arrows are menu mode's
-	-- and free here. It is also the only way a scripted run can aim --
-	-- SetMouseVisible(false) stands down in one ([SCRIPTED_CURSOR]), so
-	-- Urho3D accumulates no relative motion and GetMouseMove reads zero.
-	local TURN = 90.0
-	if magic.input:GetKeyDown(magic.KEY_LEFT) then
-		fps.yaw = fps.yaw - TURN * dt
-	end
-	if magic.input:GetKeyDown(magic.KEY_RIGHT) then
-		fps.yaw = fps.yaw + TURN * dt
-	end
-	if magic.input:GetKeyDown(magic.KEY_UP) then
-		fps.pitch = math.max(-85, fps.pitch - TURN * dt)
-	end
-	if magic.input:GetKeyDown(magic.KEY_DOWN) then
-		fps.pitch = math.min(85, fps.pitch + TURN * dt)
-	end
-	local sy, cy = math.sin(math.rad(fps.yaw)), math.cos(math.rad(fps.yaw))
-	local dx, dz = 0, 0
-	local function held(k) return magic.input:GetKeyDown(k) end
-	if held(magic.KEY_W) then dx, dz = dx + sy, dz + cy end
-	if held(magic.KEY_S) then dx, dz = dx - sy, dz - cy end
-	if held(magic.KEY_D) then dx, dz = dx + cy, dz - sy end
-	if held(magic.KEY_A) then dx, dz = dx - cy, dz + sy end
-	local l = math.sqrt(dx * dx + dz * dz)
-	if l > 0 then
-		dx, dz = dx / l, dz / l
-	end
-	-- **In slices**: the step is checked against the wall at its end
-	-- and nowhere in between, so a step the size of a long frame walks
-	-- through the stone. A tenth of a second is the step the room was
-	-- written against.
-	local left = dt
-	while left > 0 do
-		local step = math.min(0.1, left)
-		left = left - step
-		if l > 0 then
-			local mx, mz = dx * FPS_SPEED * step, dz * FPS_SPEED * step
-			-- One axis at a time, so a wall slides rather than stops
-			if not blocked(fps.x + mx, fps.y, fps.z) then fps.x = fps.x + mx end
-			if not blocked(fps.x, fps.y, fps.z + mz) then fps.z = fps.z + mz end
-		end
-		if held(magic.KEY_SPACE) and fps.y <= FPS_EYE + 0.001 then
-			fps.vy = FPS_JUMP
-		end
-		fps.vy = fps.vy - FPS_GRAVITY * step
-		fps.y = fps.y + fps.vy * step
-		if fps.y < FPS_EYE then fps.y, fps.vy = FPS_EYE, 0 end
-	end
-	cam.from.x, cam.from.y, cam.from.z = fps.x, fps.y, fps.z
-	local cp = math.cos(math.rad(fps.pitch))
-	cam.at.x = fps.x + sy * cp
-	cam.at.y = fps.y - math.sin(math.rad(fps.pitch))
-	cam.at.z = fps.z + cy * cp
-	apply_camera()
+	hand_over_if_needed()
 end
-magic.SubscribeToEvent("Update", "handle_fps_update")
+magic.SubscribeToEvent("Update", "handle_room_update")
 
--- **Digging and placing** ([LAUNCH_WORLD] step 8). The room is generated
--- and the player's voxels are a diff against it, which is the whole
--- save: room.placed is the only thing in here that is not a function of
--- (x, y, z).
---
--- **No pointing indication means no interaction** (user): a placed voxel
--- wears a wireframe and the room's own stone wears nothing, because it
--- cannot be dug -- the absence of the box says so before the click does.
-local REACH = 5.0              -- metres
-local DIG_SECONDS = 1.0
 -- **The launcher's own storage** ([LAUNCH_SANDBOX]): one name, and the
 -- client puts it under this launch extension's directory. The room used
 -- to build the path itself and open it.
 local SAVE_NAME = "room.txt"
 
--- **And where the player moved a sphere to.** The room's own layout is
--- generated, so a sphere that has not been moved is not in the file at
--- all; a line is "@<name> x y z" and the name is the thing's own, since
--- the tree's list can change order between boots and an index cannot
--- survive a game being installed.
-moved = {}
 
 -- **What the player pinned** ([LAUNCH_WORLD] section 14: the room's save
 -- holds the bookmarks row, and pinning is the player's only organising).
@@ -3264,8 +3080,10 @@ function place_bookmarks()
 	log:info("bookmarks: " .. #row .. " in the row at the standing place")
 end
 
--- The player's own voxels and moved spheres, read at boot. One row a
--- line, which is a file a person can read and delete.
+-- The room's save, read at boot: the bookmarks and the sound levels,
+-- one row a line, which is a file a person can read and delete. Rows of
+-- placed voxels, moved spheres and the field of view, which the proof
+-- wrote, are read past ([LAUNCH_WORLD] section 14 cuts them).
 do
 	-- BUILDAT_LAUNCH_BARE=1 reads no save either: what a look reading
 	-- compares against the reference is the room as it is generated,
@@ -3275,17 +3093,7 @@ do
 	if text then
 		local n = 0
 		for line in text:gmatch("[^\n]+") do
-			local x, y, z = line:match("^(-?%d+),(-?%d+),(-?%d+)$")
-			local name, mx, my, mz =
-					line:match("^@(.-) (-?[%d%.]+) (-?[%d%.]+) (-?[%d%.]+)$")
-			if x then
-				room.placed[room.key(tonumber(x), tonumber(y), tonumber(z))] = true
-				n = n + 1
-			elseif name then
-				moved[name] = {x = tonumber(mx), y = tonumber(my),
-					z = tonumber(mz)}
-				n = n + 1
-			elseif line:match("^!sound_db ") then
+			if line:match("^!sound_db ") then
 				-- The room's own levels, kept where its voxels are
 				local a, b = line:match("^!sound_db (-?%d+) (-?%d+)$")
 				if a then
@@ -3320,33 +3128,10 @@ do
 					bookmark_order[#bookmark_order + 1] = key
 					n = n + 1
 				end
-			elseif line:match("^!fov %d+$") then
-				-- The room's own setting, kept where its voxels are
-				fov = tonumber(line:match("(%d+)"))
-				n = n + 1
-			end
-		end
-		-- The spheres are already placed by the time this is read, so a
-		-- remembered one is moved rather than placed there: the room's
-		-- own layout is what a sphere has until the player touches it
-		local put = 0
-		for name, m in pairs(moved) do
-			for i, o in ipairs(ORBS) do
-				if o.name == name and orb_nodes[i] then
-					orb_nodes[i].position = magic.Vector3(m.x, m.y, m.z)
-					if light_nodes[i] then
-						light_nodes[i].position = magic.Vector3(m.x, m.y, m.z)
-					end
-					orb_places[i] = {x = m.x * VOXEL_M, y = m.y * VOXEL_M,
-						z = m.z * VOXEL_M}
-					put = put + 1
-					break
-				end
 			end
 		end
 		log:info("save: " .. n .. " rows read, " ..
-				#bookmark_order .. " of them bookmarks, " .. put ..
-				" spheres put back where the player left them")
+				#bookmark_order .. " of them bookmarks")
 	end
 	place_bookmarks()
 end
@@ -3374,24 +3159,11 @@ end
 local save_dirty = false
 local function write_save()
 	local keys = {}
-	for k, v in pairs(room.placed) do
-		if v then keys[#keys + 1] = k end
-	end
-	table.sort(keys)
-	local names = {}
-	for name in pairs(moved) do names[#names + 1] = name end
-	table.sort(names)
-	for _, name in ipairs(names) do
-		local m = moved[name]
-		keys[#keys + 1] = string.format("@%s %.3f %.3f %.3f", name,
-				m.x, m.y, m.z)
-	end
 	for _, key in ipairs(bookmark_order) do
 		if bookmarks[key] then
 			keys[#keys + 1] = "!bookmark " .. key
 		end
 	end
-	keys[#keys + 1] = string.format("!fov %d", fov)
 	keys[#keys + 1] = string.format("!sound_db %d %d", levels.orbs,
 			levels.bed)
 	local ok, why = api.storage_write(SAVE_NAME,
@@ -3403,310 +3175,16 @@ local function write_save()
 	log:info("save: " .. #keys .. " rows written")
 end
 
--- The voxel the crosshair is on, and the empty one in front of it. A
--- march in small steps rather than a proper DDA: the reach is eleven
--- voxels and this is a room, not a renderer.
-local function ray_voxel()
-	-- **view_from is already in voxels**: one scene unit is one voxel,
-	-- and apply_camera() multiplies the camera's metres on the way in
-	local px, py, pz = view_from.x, view_from.y, view_from.z
-	local lx, ly, lz
-	local t = 0
-	while t <= REACH / VOXEL_M do
-		local x = voxel_of(px + view_dir.x * t)
-		local y = voxel_of(py + view_dir.y * t)
-		local z = voxel_of(pz + view_dir.z * t)
-		if x ~= lx or y ~= ly or z ~= lz then
-			if room.voxel_at(x, y, z) ~= room.id.air then
-				return x, y, z, lx, ly, lz
-			end
-			lx, ly, lz = x, y, z
-		end
-		t = t + 0.08
-	end
-	return nil
-end
-
--- The selection box, one wireframe cube moved about
-local wire = scene:CreateChild("wireframe")
--- Wide enough that its lines are outside the voxel's own faces; at 1.02
--- the box was inside the cube and invisible
-wire.scale = magic.Vector3(1.04, 1.04, 1.04)
-do
-	local o = wire:CreateComponent("StaticModel")
-	o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
-	local m = material(magic.Color(1.0, 0.85, 0.5, 1), 1.0, 0.0)
-	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTextureUnlit.xml"))
-	m.fillMode = magic.FILL_WIREFRAME
-	o.material = m
-	o.castShadows = false
-	wire.enabled = false
-end
-
--- A second candidate box, for settling where a voxel actually is
-wire2 = scene:CreateChild("wireframe2")
-wire2.scale = magic.Vector3(0.8, 0.8, 0.8)
-do
-	local o = wire2:CreateComponent("StaticModel")
-	o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
-	local m = material(magic.Color(0.3, 1.0, 0.4, 1), 1.0, 0.0)
-	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTextureUnlit.xml"))
-	m.fillMode = magic.FILL_WIREFRAME
-	o.material = m
-	o.castShadows = false
-	wire2.enabled = false
-end
-
--- One voxel prised out of its slot: the lift is the progress, as it is
--- for a sphere, and at a second it goes.
---
--- **It is the voxel, not a stand-in** (user, 2026-09-23: the animation
--- intersected the voxel and wore a different material). A box with a
--- flat grey material read as a second object sliding through the first;
--- this is one voxel put through the same mesher, with the same atlas and
--- the same technique, meshed at the index it came from so [WORLD_UV]
--- gives it the slice of the pattern it had in the wall.
-local lift = scene:CreateChild("lifted")
-lift.enabled = false
--- Which voxel is out of the room and riding the lift, if any, and the
--- way it dislodges: {x, y, z, dx, dy, dz}
-local digging = nil
-local hold_t = 0
--- When the hold began ([LAUNCH_WORLD], 2026-09-24); file-scope state,
--- this chunk being at Lua's limit of 200 locals
-hold_started_us = nil
--- **One hold, one launch** (user, 2026-09-23: holding on a game's
--- sphere looped the animation and started nothing). A hold that reaches
--- its second is spent, and the button has to come up before the next
--- one begins -- otherwise the frame after a launch starts the same
--- launch again.
-local left_spent = false
-local function mesh_lift(x, y, z)
-	api.set_8bit_voxel_geometry(lift, 1, 1, 1,
-			string.char(room.id.placed), voxel_reg, atlas_reg, x, y, z)
-	apply_technique(lift)
-	lift:GetComponent("CustomGeometry").castShadows = false
-end
-
--- Let go inside the second, or walk into a menu mid-hold, and the voxel
--- goes back where it was: nothing is lost by starting a dig and
--- stopping. Called on every frame that is not digging, so it does
--- nothing unless there is something out of the room.
-local function stop_dig()
-	lift.enabled = false
-	if not digging then return end
-	local d = digging
-	digging = nil
-	room.placed[room.key(d[1], d[2], d[3])] = true
-	rewrite_box(d[1], d[1], d[2], d[2], d[3], d[3], false)
-end
-
--- **Which way it dislodges** (user): upwards by preference, sideways if
--- the voxel above is taken, downwards if that is taken too -- and among
--- the sideways ones the free neighbour most across the view, never the
--- one straight at the camera, since a voxel moving at the eye reads as a
--- zoom rather than as a movement.
-local SIDES = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}}
-local function dislodge_dir(x, y, z)
-	if room.voxel_at(x, y + 1, z) == room.id.air then
-		return 0, 1, 0
-	end
-	local best, best_across = nil, -1
-	for _, d in ipairs(SIDES) do
-		if room.voxel_at(x + d[1], y, z + d[3]) == room.id.air then
-			-- Most perpendicular to the view, and never toward it
-			local toward = d[1] * view_dir.x + d[3] * view_dir.z
-			local across = 1 - math.abs(toward)
-			if toward > -0.4 and across > best_across then
-				best, best_across = d, across
-			end
-		end
-	end
-	if best then return best[1], 0, best[3] end
-	if room.voxel_at(x, y - 1, z) == room.id.air then
-		return 0, -1, 0
-	end
-	return 0, 1, 0
-end
-
--- The dust a dug voxel becomes: boxes falling ballistically in Lua,
--- since nothing here needs them to collide, each on its own randomly
--- drawn lifetime so they do not blink out together. Capped, so digging
--- quickly does not accumulate them.
-local MAX_MOTES = 60
-local motes = {}
-local function burst(x, y, z)
-	for _ = 1, 8 do
-		if #motes >= MAX_MOTES then break end
-		local n = scene:CreateChild("mote")
-		n.position = magic.Vector3(x - 0.5 + math.random(),
-				y - 0.5 + math.random(), z - 0.5 + math.random())
-		n.scale = magic.Vector3(0.22, 0.22, 0.22)
-		local o = n:CreateComponent("StaticModel")
-		o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
-		o.material = stone
-		o.castShadows = false
-		-- In voxels a second, the scene's own unit
-		motes[#motes + 1] = {node = n, vx = (math.random() - 0.5) * 6,
-			vy = math.random() * 6, vz = (math.random() - 0.5) * 6,
-			life = 1.5 + math.random() * 2.5}
-	end
-end
-
-pointed_voxel = nil
--- Where a lifted sphere came from, so an early release settles it back
-local orb_home = {}
--- The sphere a hold started on, until the button comes up
-orb_holding = nil
-function handle_dig_update(event_type, event_data)
-	-- A backdrop takes no input ([TWO_AUDIENCES]' composition)
-	if backdrop then return end
-	-- The room stands down while a game, or a console, is over it
-	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if held_was or held_by_others() then return end
-	local dt = math.min(0.1, event_data:GetFloat("TimeStep"))
-	-- **A hold is a second of the player's time, not ten frames of it**
-	-- (2026-09-24): a frame's TimeStep is clamped by the engine at
-	-- 1/min_fps -- a tenth of a second -- so on a machine drawing a
-	-- frame a second a held button counted a tenth of what it was held
-	-- for, and a dig or a launch took ten seconds of real holding.
-	-- Under llvmpipe neither could be done at all, and the room's check
-	-- read it as "the hold started nothing". So the hold has a clock of
-	-- its own: wall time since the frame before, which is what the
-	-- player is actually measuring out.
-	local now_us = buildat.get_time_us()
-	-- The motes fall whatever the mode is
-	for i = #motes, 1, -1 do
-		local m = motes[i]
-		m.life = m.life - dt
-		m.vy = m.vy - 31.0 * dt
-		local p = m.node.position
-		local y = p.y + m.vy * dt
-		if y < 0.11 then y, m.vy = 0.11, -m.vy * 0.25 end
-		m.node.position = magic.Vector3(p.x + m.vx * dt, y, p.z + m.vz * dt)
-		if m.life <= 0 then
-			m.node:Remove()
-			table.remove(motes, i)
-		end
-	end
-	-- The save is flushed before the early return, not after it: the
-	-- terminal's own rows set it dirty, and in menu mode this handler
-	-- used to leave without writing -- so a level or a fov changed at
-	-- the desk lived until the next dig and no longer (2026-09-24)
-	if save_dirty and hold_t == 0 then
-		save_dirty = false
-		write_save()
-	end
-	if mode ~= "fps" or terminal_open or pause_open then
-		wire.enabled = false
-		stop_dig()
-		return
-	end
-	local x, y, z, ex, ey, ez = ray_voxel()
-	local mine = x and room.placed[room.key(x, y, z)]
-	pointed_voxel = mine and {x, y, z, ex, ey, ez} or
-			(x and {nil, nil, nil, ex, ey, ez} or nil)
-	wire.enabled = mine and true or false
-	if mine then
-		wire.position = at_voxel(x, y, z)
-	end
-	-- **Left held on a sphere lifts it, and at a second it launches**
-	-- (user): the lift *is* the progress -- no bar, no ring -- and it is
-	-- "pulling one forward is launching it" made literal. Releasing
-	-- early settles it back, as a dug voxel settles back into its slot.
-	local left_down = magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT)
-	if not left_down then
-		left_spent = false
-	end
-	local holding = left_down and not left_spent
-	if not holding then
-		hold_t = 0
-		hold_started_us = nil
-	end
-	-- **The sphere the hold started on** is the one that launches: it
-	-- moves toward the player as it is pulled, which is enough to hand
-	-- the crosshair to its neighbour halfway through
-	if not holding then
-		orb_holding = nil
-	elseif orb_holding == nil and pointed_orb > 0 then
-		orb_holding = pointed_orb
-	end
-	local ob = orb_holding
-	if ob and ob > 0 and orb_nodes[ob] and holding then
-		hold_started_us = hold_started_us or now_us
-		hold_t = (now_us - hold_started_us) / 1000000
-		local e = math.min(1, hold_t / DIG_SECONDS)
-		local n = orb_nodes[ob]
-		if not orb_home[ob] then
-			local p = n.position
-			orb_home[ob] = {p.x, p.y, p.z}
-		end
-		local h = orb_home[ob]
-		-- Toward the player, which is what "pulled forward" means from
-		-- inside the room
-		n.position = magic.Vector3(h[1] - view_dir.x * e * 1.6,
-				h[2] - view_dir.y * e * 1.6 + e * 0.6,
-				h[3] - view_dir.z * e * 1.6)
-		if hold_t >= DIG_SECONDS then
-			hold_t = 0
-			hold_started_us = nil
-			left_spent = true
-			n.position = magic.Vector3(h[1], h[2], h[3])
-			orb_home[ob] = nil
-			log:info("hold: launching " ..
-					(ORBS[ob] and ORBS[ob].name or "?"))
-			launch(ob)
-		end
-		wire.enabled = false
-		stop_dig()
-		return
-	end
-	for i, h in pairs(orb_home) do
-		local n = orb_nodes[i]
-		if n then n.position = magic.Vector3(h[1], h[2], h[3]) end
-		orb_home[i] = nil
-		hold_t = 0
-		hold_started_us = nil
-	end
-	-- The hold: a second, the same second a sphere takes. The voxel
-	-- leaves the room the moment it starts and the lift stands where it
-	-- stood, so there is one cube throughout rather than two in the same
-	-- place; letting go inside the second puts it back.
-	if (mine or digging) and holding then
-		if not digging then
-			digging = {x, y, z, dislodge_dir(x, y, z)}
-			room.placed[room.key(x, y, z)] = nil
-			rewrite_box(x, x, y, y, z, z, false)
-			mesh_lift(x, y, z)
-		end
-		local dg = digging
-		hold_started_us = hold_started_us or now_us
-		hold_t = (now_us - hold_started_us) / 1000000
-		local e = math.min(1, hold_t / DIG_SECONDS)
-		lift.enabled = true
-		lift.position = at_voxel(dg[1] + dg[4] * e * 0.5,
-				dg[2] + dg[5] * e * 0.5, dg[3] + dg[6] * e * 0.5)
-		if hold_t >= DIG_SECONDS then
-			hold_t = 0
-			hold_started_us = nil
-			left_spent = true
-			lift.enabled = false
-			digging = nil
-			burst(dg[1], dg[2], dg[3])
-			save_dirty = true
-			log:info("dig: " .. room.key(dg[1], dg[2], dg[3]))
-		end
-	else
-		stop_dig()
-	end
-	if save_dirty and hold_t == 0 then
+-- **The save is written a frame after it is dirtied**, not at once: the
+-- terminal's rows set it while a level is being stepped, and one write
+-- for a run of steps is enough
+function handle_save_update()
+	if save_dirty then
 		save_dirty = false
 		write_save()
 	end
 end
-magic.SubscribeToEvent("Update", "handle_dig_update")
+magic.SubscribeToEvent("Update", "handle_save_update")
 
 
 -- **The name is an overlay, not geometry** ([ORB_LABEL], user
@@ -3850,20 +3328,6 @@ end
 -- instant the crosshair crosses it.
 local ORB_STEP = 1.18
 local orb_base_scale = {}
--- Walking up to a sphere means the crosshair has to be on it, not merely
--- nearest to it: about ten degrees, which is a sphere at arm's length
--- **Two ways to be pointed at, and either will do.** The angle alone
--- was the rule (ten degrees, a dot of 0.985), which is right for an orb
--- across the room and wrong for one at arm's length, where the
--- crosshair can sit on the ball and be twenty degrees off its centre.
--- So an orb also counts as pointed at when the crosshair is **on its
--- disc** -- the angle in units of its own angular radius, a little over
--- one. Nothing that was pointable stops being pointable, which matters
--- because the room's own drives hold the mouse over the floor to dig:
--- the disc rule alone made a floor orb beside the crosshair the thing
--- being held, and the hold launched it.
-local POINT_ON = 1.2
-local POINT_DOT = 0.985
 -- A node nobody draws, borrowed for the arithmetic of "which way is
 -- that": LookAt writes a rotation and nothing else builds one
 local turner = scene:CreateChild("turner")
@@ -3918,12 +3382,6 @@ function handle_orb_update(event_type, event_data)
 			local r = 0.5 * orb_across(ORBS[i])
 			local bottom = p.y - r
 			local top = p.y + r
-			if ORBS[i] and ORBS[i].floor then
-				-- The eye in scene units: a node's position is voxels and
-				-- FPS_EYE is metres ([LAUNCH_WORLD]: part() multiplies
-				-- metres by U on the way in)
-				top = math.max(top, FPS_EYE * U)
-			end
 			-- **Measured against the orb's own size, not by the angle
 			-- alone** ([POINT_LOW]'s other half, 2026-09-25): a dot
 			-- says nothing about how big a thing looks, so a distant
@@ -3985,31 +3443,6 @@ function handle_orb_update(event_type, event_data)
 					1 - math.exp(-7.0 * dt))
 		end
 	end
-	-- In FPS the crosshair is the pointer, so a sphere off to the side is
-	-- not pointed at; in menu mode the camera is flown to look at what
-	-- was chosen, and the nearest to the middle is the answer
-	if mode == "fps" and best_score > POINT_ON and best_dot < POINT_DOT then
-		best = 0
-	end
-	-- **A tight target wins over a generous one** (user, 2026-09-23):
-	-- an orb in front of the player means they want it -- **unless they
-	-- are pointing at a player-placed voxel**, in which case they want
-	-- the voxel. The tight class holds only those today, and this is
-	-- the whole of the rule; the orb's volume can be as large as it
-	-- likes because of it.
-	--
-	-- pointed_voxel is this frame's, the dig handler having run first,
-	-- and it names a placed voxel only when the crosshair is on one
-	-- within reach.
-	if best > 0 and mode == "fps" and pointed_voxel and pointed_voxel[1] then
-		if pointed_orb ~= 0 then
-			log:info("pointing: the voxel at " ..
-					room.key(pointed_voxel[1], pointed_voxel[2],
-							pointed_voxel[3]) .. " wins over orb " .. best)
-		end
-		best = 0
-	end
-
 	if best ~= pointed_orb then
 		-- The step, in both directions
 		local was = orb_nodes[pointed_orb]
@@ -4036,7 +3469,6 @@ function handle_orb_update(event_type, event_data)
 				(best_up and " (up its column)" or "") ..
 				string.format(" [%.2f of its disc]", best_score))
 	end
-	carry_draw()
 	if best > 0 then
 		label_orb, label_lift = best, 1.5
 	end
@@ -4044,189 +3476,6 @@ function handle_orb_update(event_type, event_data)
 end
 magic.SubscribeToEvent("Update", "handle_orb_update")
 
--- **The player carries spheres, and that is the only inventory** (user):
--- E picks one up, any number can be carried, it is one mixed stack, and
--- right click places the top. It is drawn as spheres held around the
--- centre of the right half of the screen -- a held thing in the world
--- rather than a panel of slots, which is how it stays off the HUD.
-carried = {}
--- **Held under the camera, not placed in front of it.** A hand-computed
--- offset from view_from and view_dir kept landing off the bottom of the
--- frame whatever the arithmetic said, so the held sphere is a child of
--- the camera node and its local position is what it looks like: right,
--- down, forward, in the camera's own axes.
-function carry_draw()
-	for i, c in ipairs(carried) do
-		if light_nodes[c.index] then
-			light_nodes[c.index].position = c.held.worldPosition
-		end
-	end
-end
-
-function pick_up(i)
-	local node = orb_nodes[i]
-	if not node or not ORBS[i] or ORBS[i].empty then
-		return
-	end
-	-- **The pockets are stonework and the floor is where things move**
-	-- (user, 2026-09-24, [POCKETS_ROUND]): a game is part of the wall,
-	-- not a piece the player arranges. Saves and servers stand on the
-	-- floor and are the things that can be carried.
-	if not ORBS[i].floor then
-		notice(ORBS[i].name .. " is part of the wall")
-		log:info("carry: " .. ORBS[i].name .. " is stonework, not a piece")
-		return
-	end
-	local sc = orb_base_scale[i] or node.scale
-	-- A copy under the camera: the one in the room is switched off
-	-- rather than reparented, which keeps its place for putting down
-	local held = camera_node:CreateChild("held")
-	-- **Held, not pressed against the lens** (2026-09-23): at 2.4 units
-	-- and a third of its size the sphere filled the corner and was cut
-	-- off by the frame's edge. Further out and smaller is a thing in a
-	-- hand; the stack walks further out again so the second one is
-	-- behind the first rather than inside it.
-	held.position = magic.Vector3(0.85, -0.52 - (#carried) * 0.06,
-			3.3 + (#carried) * 0.45)
-	held.scale = magic.Vector3(sc.x * 0.26, sc.y * 0.26, sc.z * 0.26)
-	local o = held:CreateComponent("StaticModel")
-	o.model = magic.cache:GetResource("Model", "Models/Sphere.mdl")
-	o.material = node:GetComponent("StaticModel").material
-	o.castShadows = false
-	node.enabled = false
-	carried[#carried + 1] = {node = node, held = held, orb = ORBS[i],
-		index = i, scale = magic.Vector3(sc.x, sc.y, sc.z)}
-	orb_nodes[i] = nil
-	orb_base_scale[i] = nil
-	pointed_orb = 0
-	name_text.text = ""
-	log:info("carry: picked up " .. ORBS[i].name .. ", " .. #carried ..
-			" in hand")
-end
-
--- **Placing pops the top**, and the last thing picked up is the first
--- put down
-function place_carried()
-	local c = carried[#carried]
-	if not c then return false end
-	local pv = pointed_voxel
-	-- Nothing goes into a pocket ([POCKETS_ROUND]), and the orb stays in
-	-- the hand rather than falling somewhere else: the click was about
-	-- the carried thing, so it is taken either way
-	if pv and pv[4] and room.in_pocket(pv[4], pv[5], pv[6]) then
-		notice("nothing goes into a pocket")
-		return true
-	end
-	table.remove(carried)
-	c.held:Remove()
-	-- Where the crosshair is, a little out of the surface, or at arm's
-	-- length when it is pointing at nothing
-	local x, y, z
-	if pv and pv[4] then
-		x, y, z = pv[4] + 0.5, pv[5] + 0.5, pv[6] + 0.5
-	else
-		x = view_from.x + view_dir.x * 4
-		y = view_from.y + view_dir.y * 4
-		z = view_from.z + view_dir.z * 4
-	end
-	-- **A sphere rests on what it is put on** (user, 2026-09-23: a
-	-- glowing orb put down on the floor floats at eye height). The
-	-- generator stands the floor's own spheres their own radius above
-	-- it, and a carried one should land the same way: settle the point
-	-- down onto the first solid voxel under it and sit the sphere's
-	-- underside on that face.
-	--
-	-- Nothing under it -- put down over a hole, or into a pocket's air
-	-- from below -- leaves the point where the crosshair was, which is
-	-- what "at arm's length" was for.
-	do
-		local r = (c.scale and c.scale.y or 1.0) / 2
-		local vx, vz = voxel_of(x), voxel_of(z)
-		local vy = voxel_of(y)
-		for k = 0, 24 do
-			-- room.voxel_at takes voxel indices; solid_at beside it
-			-- takes metres, and the position here is in voxels
-			if room.voxel_at(vx, vy - k, vz) ~= room.id.air then
-				-- The top face of that voxel, in the same units the
-				-- position is in: a voxel centred on its index is half a
-				-- voxel deep either way
-				y = (vy - k) + 0.5 + r
-				break
-			end
-		end
-	end
-	c.node.position = magic.Vector3(x, y, z)
-	c.node.scale = c.scale
-	c.node.enabled = true
-	-- **A game's orb glows wherever it is put down** (user,
-	-- 2026-09-23). "The orbs on the floor should not glow, just
-	-- reflect" is about the floor's *own* spheres -- the launch actions
-	-- and the saves, which are plain white and never were sources -- and
-	-- not about a game carried out of its pocket. An orb is its own
-	-- light made visible, so its light comes with it.
-	if light_nodes[c.index] then
-		light_nodes[c.index].position = magic.Vector3(x, y, z)
-	end
-	orb_nodes[c.index] = c.node
-	orb_places[c.index] = {x = x * VOXEL_M, y = y * VOXEL_M, z = z * VOXEL_M}
-	-- Where the player left it, by name: the tree's list can change
-	-- order between boots and an index cannot survive a game being
-	-- installed
-	moved[c.orb.name] = {x = x, y = y, z = z}
-	write_save()
-	log:info(string.format("carry: put down %s at y %.2f, %d in hand",
-			c.orb.name, y, #carried))
-	return true
-end
-
--- Right click places one, into the empty voxel in front of what is
--- pointed at -- or the top of the held stack, which takes precedence:
--- stone is what is left when the hands are free.
-function place_voxel()
-	local pv = pointed_voxel
-	-- Said out loud: "nothing happened" is the hardest thing to read out
-	-- of a drive's log afterwards, and the ray finding no face is the
-	-- usual reason -- standing flush against stone is one
-	if not pv or not pv[4] then
-		log:info("place: nothing to place against")
-		return
-	end
-	local x, y, z = pv[4], pv[5], pv[6]
-	if room.voxel_at(x, y, z) ~= room.id.air then return end
-	-- Nothing is put into a pocket, whether it holds an orb or not
-	-- ([POCKETS_ROUND]): a pocket is not a shelf with a free slot
-	if room.in_pocket(x, y, z) then
-		notice("nothing goes into a pocket")
-		log:info("place: " .. room.key(x, y, z) .. " is in a pocket")
-		return
-	end
-	-- Not inside the player, who has no body to be pushed out of one
-	local px = voxel_of(cam.from.x / VOXEL_M)
-	local pz = voxel_of(cam.from.z / VOXEL_M)
-	local py = voxel_of((cam.from.y - 1.6) / VOXEL_M)
-	if x == px and z == pz and (y == py or y == py + 1 or y == py + 2) then
-		return
-	end
-	room.placed[room.key(x, y, z)] = true
-	rewrite_box(x, x, y, y, z, z, false)
-	write_save()
-	log:info("place: " .. room.key(x, y, z))
-end
-
-function handle_mousedown(event_type, event_data)
-	-- A backdrop takes no input ([TWO_AUDIENCES]' composition)
-	if backdrop then return end
-	-- The room stands down while a game, or a console, is over it
-	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
-	if held_was or held_by_others() then return end
-	if mode ~= "fps" or terminal_open or pause_open then return end
-	if event_data:GetInt("Button") == magic.MOUSEB_RIGHT then
-		if not place_carried() then
-			place_voxel()
-		end
-	end
-end
-magic.SubscribeToEvent("MouseButtonDown", "handle_mousedown")
 
 -- simplified: the pointer is read where it is clicked, not followed.
 -- `MouseMove` never fires for a pointer put somewhere by a command
@@ -4240,7 +3489,7 @@ magic.SubscribeToEvent("MouseButtonDown", "handle_mousedown")
 -- way its dialogs do.
 function handle_orb_click(event_type, event_data)
 	if held_was or held_by_others() then return end
-	if mode ~= "menu" or terminal_open or pause_open or prompt_open then
+	if terminal_open or pause_open or prompt_open then
 		return
 	end
 	if event_data:GetInt("Button") ~= magic.MOUSEB_LEFT then return end
@@ -4645,10 +3894,10 @@ end
 -- simplified: one path, a slow sweep across the room and back, rather
 -- than a tour of the objects. A tour wants the objects to say where
 -- they are, which they will when there is a launcher behind them.
--- Long enough that it never fires while the room is being used, and
--- **F8 starts it at once**, which is how a run gets at it without
--- waiting: a short timer for the check's sake would fire between the
--- check's own keys and eat the next one, which is exactly what it did.
+-- Long enough that it never fires while the room is being used; a run
+-- gets at it at once with `event room attract` rather than a short
+-- timer, which would fire between the check's own keys and eat the next
+-- one -- which is exactly what it did.
 -- How long the sweep spends on one wall before turning to the next
 local ATTRACT_WALL_S = tonumber(env("BUILDAT_LAUNCH_ATTRACT_WALL_S")) or 14
 local ATTRACT_AFTER = tonumber(
@@ -4714,10 +3963,9 @@ function handle_idle_update(event_type, event_data)
 	end
 	local dt = event_data:GetFloat("TimeStep")
 	idle_quiet = idle_quiet + dt
-	-- Not while somebody is walking: the room shows itself off when it is
-	-- left alone, and FPS mode is a player standing in it
-	if not attracting and not terminal_open and not cam.to_from and
-			mode ~= "fps" and idle_quiet > ATTRACT_AFTER then
+	-- The room shows itself off when it is left alone
+	if not attracting and not terminal_open and not pause_open and
+			not cam.to_from and idle_quiet > ATTRACT_AFTER then
 		attracting = true
 		drop_hint()
 		log:info("attract: the room is showing itself off")
@@ -4782,7 +4030,10 @@ magic.SubscribeToEvent("Update", "handle_idle_update")
 
 
 
-set_preset(1)
+-- The palette preset: the first, or BUILDAT_LAUNCH_PRESET's (scaffold,
+-- [LAUNCH_WORLD] section 11; stage 3 sets the light)
+set_preset(math.max(1, math.min(#PRESETS,
+		tonumber(env("BUILDAT_LAUNCH_PRESET")) or 1)))
 
 -- **The keyboard path, untouched**: typing anywhere opens a one-line
 -- prompt that fuzzy-matches a game or a server, Enter launches it, and
@@ -4795,25 +4046,6 @@ set_preset(1)
 -- load, no focus to take and give back, and a room whose whole point is
 -- how much it leaves out can spell twenty-six letters itself. The
 -- upgrade is a LineEdit the moment anything needs a caret or paste.
--- **A crosshair, thin and white and small** (user, 2026-09-23). FPS
--- mode aims with it -- placing, digging, picking a sphere up -- and
--- without one a player is guessing where the middle is. Two one-pixel
--- bars rather than a texture: it needs no resource.
-do
-	local function bar(w, h)
-		local e = room_ui_child("BorderImage")
-		e.texture = checker_texture(2, 1, magic.Color(1, 1, 1, 1),
-				magic.Color(1, 1, 1, 1))
-		e.imageRect = magic.IntRect(0, 0, 2, 2)
-		e.size = magic.IntVector2(w, h)
-		e.horizontalAlignment = magic.HA_CENTER
-		e.verticalAlignment = magic.VA_CENTER
-		e.color = magic.Color(1, 1, 1, 0.7)
-		e.priority = 40
-		return e
-	end
-	crosshair = {bar(9, 1), bar(1, 9)}
-end
 
 local prompt_text = room_ui_child("Text")
 prompt_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 26)
@@ -4864,22 +4096,17 @@ function notice(text)
 	hint_left = 0
 end
 
--- **One line, and it leaves when the player moves** (the gate on this
--- room becoming the default is whether a first-time user meets it and
--- stays, and the room tells nobody how to walk). Not a HUD: it is the
--- notice line the room already has, it says the three keys, and the
--- first step or the first key takes it away -- so it is gone before it
+-- **One line, gone at the first key** ([LAUNCH_WORLD] section 11). Not
+-- a HUD: it is the notice line the room already has, it names Tab and
+-- typing, and the first key takes it away -- so it is gone before it
 -- can become furniture, and a player who already knows never reads it.
--- simplified: it says nothing about digging, carrying or the desk.
--- Those are for the player who is still there a minute later, and the
--- room is what teaches them.
-local HINT = "W A S D  to walk   -   Tab for the list   -   " ..
-		"Escape for the way out"
+local HINT = "Tab  moves between the wall, the floor and the desk   -   " ..
+		"type to search"
 local HINT_SECONDS = 20
 function show_hint()
 	notice_text.text = HINT
 	hint_left = HINT_SECONDS
-	log:info("hint: the three keys, until the player uses one")
+	log:info("hint: Tab and typing, until the first key")
 end
 function drop_hint()
 	if hint_left > 0 then
@@ -4986,7 +4213,7 @@ end
 
 -- Returns true when the key was the browser's
 function browse_key(key)
-	if mode ~= "menu" or prompt_open or terminal_open or pause_open then
+	if prompt_open or terminal_open or pause_open then
 		return false
 	end
 	local row = browse_rows[browse_row]
@@ -5166,7 +4393,6 @@ end
 -- The room's own, which no preference file knows about
 settings[#settings + 1] = {room = "palette"}
 settings[#settings + 1] = {room = "probe"}
-settings[#settings + 1] = {room = "fov"}
 settings[#settings + 1] = {room = "drone"}
 settings[#settings + 1] = {room = "bed"}
 settings[#settings + 1] = {room = "contentdb"}
@@ -5189,11 +4415,12 @@ local function setting_value(sg)
 			return v <= -33 and "off" or (string.format("%d", v) .. " dB")
 		end
 		local st = STEPS[sg.pref]
-		return st and string.format(st[4], v) or tostring(v)
+		-- A number is stepped; render_scale may be "auto", which is not
+		return (st and type(v) == "number") and string.format(st[4], v) or
+				tostring(v)
 	end
 	if sg.room == "palette" then return PRESETS[current].name end
 	if sg.room == "probe" then return probe_on and "on" or "off" end
-	if sg.room == "fov" then return tostring(fov) .. " degrees" end
 	if sg.room == "drone" then
 		return levels.orbs <= -33 and "off" or (levels.orbs .. " dB")
 	end
@@ -5208,7 +4435,6 @@ local function setting_label(sg)
 	if sg.pref then return sg.pref:gsub("_", " ") end
 	if sg.room == "palette" then return "palette" end
 	if sg.room == "probe" then return "reflection probe" end
-	if sg.room == "fov" then return "field of view" end
 	if sg.room == "drone" then return "the orbs' level" end
 	if sg.room == "bed" then return "the bed's level" end
 	return "contentdb"
@@ -5225,7 +4451,9 @@ setting_change = function(sg, dir)
 		else
 			local st = STEPS[sg.pref]
 			if not st then return end
-			local nv = math.max(st[1], math.min(st[2], v + dir * st[3]))
+			-- "auto" steps from the scale it stands for
+			local nv = math.max(st[1], math.min(st[2],
+					(tonumber(v) or 1.0) + dir * st[3]))
 			local ok, err = api.set_preference(sg.pref, tostring(nv))
 			if not ok then log:warning("setting: " .. tostring(err)) end
 		end
@@ -5235,12 +4463,6 @@ setting_change = function(sg, dir)
 	end
 	if sg.room == "palette" then
 		set_preset((current - 1 + dir) % #PRESETS + 1)
-	elseif sg.room == "fov" then
-		-- Luanti's own range, and the room is judged from a standing eye
-		fov = math.max(60, math.min(100, fov + dir * 2))
-		camera_node:GetComponent("Camera").fov = fov
-		save_dirty = true
-		log:info("setting: fov = " .. fov)
 	elseif sg.room == "drone" or sg.room == "bed" then
 		-- 3 dB at a time on the settings' own steps, never above 0:
 		-- there is no master limiter under these ([ROOM_SOUND]), and a
@@ -5332,8 +4554,11 @@ end
 -- styled dialog, because a style is a resource to load and a focus to
 -- take and give back, and this has two rows.
 local PAUSE_ITEMS = {
-	{"Back to the room", nil},
-	{"Switch to the menu", function()
+	{"Continue", nil},
+	-- The settings are the desk's ([LAUNCH_WORLD] section 11): the dialog
+	-- sends the camera there, which is a station like the others
+	{"Settings", function() go_station("terminal") end},
+	{"2D menu", function()
 		-- **The slot, through its verb** ([LAUNCH_SANDBOX]): the choice
 		-- is remembered as a preference and the other UI is booted now,
 		-- so switching is one action from either side ([TWO_AUDIENCES])
@@ -5359,10 +4584,10 @@ local PAUSE_ITEMS = {
 		log:info("console: over the room")
 		c.show(function()
 			console_open = false
-			set_mode(mode)
+			mouse_for("launch_world: the console closed")
 		end)
 	end},
-	{"Leave buildat", function() api.disconnect() end},
+	{"Exit Buildat", function() api.disconnect() end},
 }
 local pause_panel = room_ui_child("BorderImage")
 pause_panel.visible = false
@@ -5373,7 +4598,8 @@ pause_panel.color = magic.Color(0.02, 0.05, 0.07, 0.96)
 pause_panel.texture = checker_texture(2, 1, magic.Color(1, 1, 1, 1),
 		magic.Color(1, 1, 1, 1))
 pause_panel.imageRect = magic.IntRect(0, 0, 2, 2)
-pause_panel.size = magic.IntVector2(420, 210)
+-- As tall as its rows, a row 48 apart from 14 down
+pause_panel.size = magic.IntVector2(420, 14 + #PAUSE_ITEMS * 48 + 8)
 -- **An element Urho3D has not been told is enabled is not hit by the
 -- mouse, and neither is anything inside it** -- which is why the rows
 -- below answered the keyboard only
@@ -5439,15 +4665,13 @@ local function open_pause()
 	pause_sel = 1
 	draw_pause()
 	pause_panel.visible = true
-	-- The mouse comes back while the dialog is up, whatever mode it is
-	mouse_for(false, "launch_world: paused")
+	mouse_for("launch_world: paused")
 	log:info("pause: open")
 end
 close_pause = function()
 	if not pause_open then return false end
 	pause_open = false
 	pause_panel.visible = false
-	set_mode(mode)
 	log:info("pause: closed")
 	return true
 end
@@ -5505,31 +4729,60 @@ local function leave_terminal()
 	return true
 end
 
--- **Menu mode's furniture belongs to menu mode** (user, 2026-09-23: the
--- prompt, a live search term and its results all stayed on screen in
--- FPS, where there is no search). It is **hidden, not thrown away**:
--- the term is still there, and Tab back finds it again with its match.
--- The orb's name and description follow the crosshair in FPS, so they
--- are cleared and the next frame's pointing writes them --
--- `pointed_orb = -1` is "whatever is pointed at now, say it again".
-mode_changed = function(fps_now)
-	if fps_now then
-		prompt_text.text = ""
-		name_text.text = ""
-		desc_text.text = ""
-		pointed_orb = -1
-		if prompt_str ~= "" then
-			log:info("prompt: hidden with the mode, keeping \"" ..
-					prompt_str .. "\"")
+-- **The stations** ([LAUNCH_WORLD] sections 3 and 11): the camera stands
+-- at one of three places and Tab cycles them -- the wall, near
+-- horizontal; the floor, about -45 degrees over its ranks; and the desk,
+-- square on. The numbers are stage 2's first picks, to be adjusted once
+-- playtested.
+-- simplified: the floor station is placed once, over the middle of the
+-- floor's spheres as they stand at the first Tab; a room whose floor
+-- changes under it keeps the old place until the next boot.
+station = "wall"
+floor_station = nil
+STATIONS = {"wall", "floor", "terminal"}
+function go_station(name)
+	if name ~= "terminal" then
+		leave_terminal()
+	end
+	if name == "wall" then
+		fly_to(HOME_FROM, HOME_AT)
+	elseif name == "floor" then
+		if not floor_station then
+			-- The middle of the floor's spheres, in metres as orb_places is
+			local sx, sz, n = 0, 0, 0
+			for i = BAYS + 1, #orb_places do
+				local o = orb_places[i]
+				if o and orb_nodes[i] then
+					sx, sz, n = sx + o.x, sz + o.z, n + 1
+				end
+			end
+			local cx = n > 0 and sx / n or HOME_FROM.x
+			local cz = n > 0 and sz / n or HOME_FROM.z - 3.0
+			-- Far enough to hold the ranks: the widest reach from the
+			-- middle, in metres, decides it
+			local spread = 0
+			for i = BAYS + 1, #orb_places do
+				local o = orb_places[i]
+				if o and orb_nodes[i] then
+					spread = math.max(spread, math.abs(o.x - cx),
+							math.abs(o.z - cz))
+				end
+			end
+			-- Back toward the standing place and up by as much: 45 degrees
+			local h = math.max(4.0, spread * 0.8)
+			floor_station = {from = {x = cx, y = h, z = cz + h},
+				at = {x = cx, y = 0.0, z = cz}}
+		end
+		fly_to(floor_station.from, floor_station.at)
+	elseif name == "terminal" then
+		if not terminal_open then
+			sit_at_terminal()
 		end
 	else
-		show_prompt()
-		if prompt_str == "" then
-			browse_show()
-		else
-			log:info("prompt: back, \"" .. prompt_str .. "\"")
-		end
+		return
 	end
+	station = name
+	log:info("station: " .. name)
 end
 
 -- **Every match, not the best one** (user, 2026-09-23: a term like
@@ -5857,23 +5110,16 @@ function handle_keydown(event_type, event_data)
 	-- The room stands down while a game, or a console, is over it
 	-- ([MENU_CONTEXT], [LAUNCH_CONSOLE])
 	if held_was or held_by_others() then return end
-	-- F8 starts the attract mode; any other key ends it and brings the
-	-- camera home, the room being in use again
-	if key == magic.KEY_F8 then
-		attracting = true
-		idle_quiet = ATTRACT_AFTER
-		-- Nobody is being told which keys to press while the room is
-		-- showing itself off
-		drop_hint()
-		log:info("attract: the room is showing itself off")
-		return
-	end
+	-- The first key takes the hint away, whatever it was
+	drop_hint()
 	-- **B pins what is pointed at** ([LAUNCH_WORLD] section 14: the
 	-- player's only organising). A toggle, so the same key takes it
 	-- back; written through at once rather than on a timer, a pin being
 	-- a rare thing the player will expect to survive a crash.
-	if key == magic.KEY_B and pointed_orb > 0 and ORBS[pointed_orb] then
-		local o = ORBS[pointed_orb]
+	-- What is browsed: there is no crosshair to point with any more
+	if key == magic.KEY_B and not prompt_open and browsed > 0 and
+			ORBS[browsed] then
+		local o = ORBS[browsed]
 		if o.key then
 			if bookmarks[o.key] then
 				bookmarks[o.key] = nil
@@ -5914,13 +5160,13 @@ function handle_keydown(event_type, event_data)
 	if key ~= magic.KEY_ESCAPE and terminal_key(key) then
 		return
 	end
-	-- **Escape is the way back, and the pause dialog when there is
-	-- nothing to go back from**: out of the terminal, out of a bay, back
-	-- to the standing place -- and only then the dialog, which is the
-	-- room's own way out of the program.
+	-- **Escape closes what is open, and the pause dialog when nothing
+	-- is** ([LAUNCH_WORLD] section 11): out of the desk, out of a bay,
+	-- the prompt cleared -- and at the room's top level the dialog,
+	-- which is the room's own way out of the program.
 	if key == magic.KEY_ESCAPE then
-		if leave_terminal() then
-			fly_to(HOME_FROM, HOME_AT)
+		if terminal_open then
+			go_station("wall")
 			return
 		end
 		local backed = false
@@ -5940,119 +5186,85 @@ function handle_keydown(event_type, event_data)
 			fly_to(HOME_FROM, HOME_AT)
 			return
 		end
-		-- **Escape pops one level, and it is one rule for all three**
-		-- (the plan, 2026-09-23, arguing the stack): out of a screen,
-		-- out of browsing, and back to walking -- and only with nothing
-		-- left to pop is it the way out of the program. Tab stays the
-		-- one keystroke straight between the two modes, so nothing is
-		-- taken away from the toggle the user asked for.
-		if mode == "menu" then
-			set_mode("fps")
-			-- The standing place, not wherever the camera was flown to:
-			-- popping out of a pocket the browser flew into would
-			-- otherwise stand the player inside the wall
-			fps.x, fps.y, fps.z = HOME_FROM.x, FPS_EYE, HOME_FROM.z
-			fps.yaw, fps.pitch = 180.0, HOME_PITCH
-			fly_to(HOME_FROM, HOME_AT)
-			return
-		end
 		open_pause()
 		return
 	end
-	-- **E picks a sphere up**, which is the only inventory there is
-	if key == magic.KEY_E and mode == "fps" and pointed_orb > 0 then
-		pick_up(pointed_orb)
-		return
-	end
-	-- **Tab toggles the two modes**, and is the only key that means the
-	-- same thing in both
+	-- **Tab cycles the stations** ([LAUNCH_WORLD] section 11): the wall,
+	-- the floor, the desk, and round again
 	if key == magic.KEY_TAB then
-		set_mode(mode == "fps" and "menu" or "fps")
+		local next_i = 1
+		for k, name in ipairs(STATIONS) do
+			if name == (terminal_open and "terminal" or station) then
+				next_i = k % #STATIONS + 1
+			end
+		end
+		go_station(STATIONS[next_i])
 		return
 	end
-	-- **In FPS mode the letters are movement**, so the prompt is menu
-	-- mode's alone -- which is the same collision the checks found from
-	-- the other side when the prompt ate the probe's key. Enter and
-	-- Backspace both go to the terminal here: one way out that always
-	-- works, which matters most in the mode a player lands in.
-	if mode == "fps" then
-		if key == magic.KEY_RETURN or key == magic.KEY_BACKSPACE then
-			if not leave_terminal() then
-				sit_at_terminal()
-			end
-			return
-		end
-	elseif browse_key(key) then
+	if browse_key(key) then
 		-- The arrows browse while the prompt is empty; with text in it
 		-- they are the prompt's own, which is what prompt_key does
 		return
 	elseif prompt_key(key) then
-		-- The prompt eats what it wants first, so a name with a "p" in
-		-- it does not toggle the probe halfway through being typed
 		return
 	end
-	-- The palette presets are on F1 to F4: the digits are the room's
-	-- own, for picking a slot without walking to it
-	for n = 1, #PRESETS do
-		if key == magic["KEY_F" .. n] then
-			set_preset(n)
-		end
-	end
-	-- **F5** takes the probe off the zone and puts it back, which is how
-	-- a run shoots the same frame with and without it. A letter would be
-	-- eaten by the prompt -- and was: for a day the probe's own check
-	-- was passing on the prompt text "> p" appearing at the bottom of
-	-- the frame rather than on anything the probe did.: a metal with nothing to
-	-- reflect is black but for its highlight, and that difference is the
-	-- whole of what the probe is for
 	-- **Enter launches, always** (user): the browsed thing when the
 	-- prompt is empty, the match when it is not -- one key for "do the
 	-- thing" and no rule to remember. prompt_key takes the second case.
-	if key == magic.KEY_RETURN and mode == "menu" and browsed > 0 then
+	if key == magic.KEY_RETURN and browsed > 0 then
 		launch(browsed)
 		return
 	end
-	-- **Opening a bay by hand is gone** ([LAUNCH_FROZEN], 2026-09-25).
-	-- It was unreachable: in FPS mode Return and Backspace go to the
-	-- terminal and that branch returns first, and in menu mode Return
-	-- launches what is browsed, checked above. What is left of it is
-	-- the rule -- **the dissolve belongs to activation, however it is
-	-- done**, and `launch()` is the one door that starts one.
-	-- **F6 strips the ornament**, and not a letter: the prompt eats
-	-- every letter before the room sees it, which is what it is for. The generator has its own check and it
-	-- passed for a whole day while nothing in the room wore what it
-	-- made: the bays carried the meander until they became voxels, and
-	-- then the materials sat in the file drawing nothing. So a run
-	-- shoots the frame with the friezes plain and asserts it changed.
 	if key == magic.KEY_RETURN or key == magic.KEY_ESCAPE then
 		if kept.bed then
 			kept.bed:thunk()
 		end
 	end
-	if key == magic.KEY_F7 then
-		still = not still
-		log:info("idle drift " .. (still and "frozen" or "running"))
-	end
-	if key == magic.KEY_F6 then
+end
+magic.SubscribeToEvent("KeyDown", "handle_keydown")
+
+-- **The proof's switches, off the F keys** ([LAUNCH_WORLD] section 11):
+-- the F keys are the client's and behave as vanilla's, so the room's
+-- own -- the probe, the ornament, the freeze, the attract mode and the
+-- palette preset -- are knobs read at boot and `event room <what>` for a
+-- scripted run, which is how a check shoots a frame with one on and off.
+function room_switch(what, arg)
+	if what == "probe" then
+		-- The probe off the zone and back: a metal with nothing to
+		-- reflect is black but for its highlight, and that difference is
+		-- the whole of what the probe is for
+		probe_on = not probe_on
+		zone.zoneTexture = probe_on and kept.probe or kept.dark_probe
+		log:info("reflection probe " .. (probe_on and "on" or "off"))
+	elseif what == "ornament" then
 		-- **The ornament is on the pockets' columns and nowhere else**,
 		-- so stripping it is making those voxels plain stone and meshing
-		-- the room again. It used to enable and disable a pair of frieze
-		-- nodes, and those went when the wall became voxels: the toggle
-		-- did nothing at all for a day and the check passed on the
-		-- room's own drift (2026-09-23).
+		-- the room again
 		ornament_on = not ornament_on
 		room.id.column = ornament_on and column_id or room.id.stone
 		rebuild_room()
 		log:info("ornament " .. (ornament_on and "on" or "off"))
-	end
-	if key == magic.KEY_F5 then
-		probe_on = not probe_on
-		zone.zoneTexture = probe_on and kept.probe or kept.dark_probe
-		log:info("reflection probe " .. (probe_on and "on" or "off"))
-		return
+	elseif what == "still" then
+		still = not still
+		log:info("idle drift " .. (still and "frozen" or "running"))
+	elseif what == "attract" then
+		attracting = true
+		idle_quiet = ATTRACT_AFTER
+		drop_hint()
+		log:info("attract: the room is showing itself off")
+	elseif what == "preset" then
+		set_preset(tonumber(arg) or 1)
+	elseif what == "station" then
+		go_station(arg)
+	else
+		log:warning("event room: \"" .. tostring(what) .. "\" is not a switch")
 	end
 end
-magic.SubscribeToEvent("KeyDown", "handle_keydown")
+function handle_seq_room(event_type, event_data)
+	local what, arg = event_data:GetString("Param"):match("^(%S+)%s*(.*)$")
+	room_switch(what, arg)
+end
+magic.SubscribeToEvent("command_seq:room", "handle_seq_room")
 
 -- **What a scripted run says instead of guessing at Tab** ([CMD_EVENT]:
 -- `event mode menu`). Tab is a toggle and Escape pops a level, so a
@@ -6064,7 +5276,7 @@ magic.SubscribeToEvent("KeyDown", "handle_keydown")
 -- driven run drives.
 function handle_seq_mode(event_type, event_data)
 	local want = event_data:GetString("Param")
-	if want ~= "fps" and want ~= "menu" then
+	if want ~= "menu" then
 		log:warning("event mode: \"" .. tostring(want) .. "\" is not a mode")
 		return
 	end
@@ -6081,15 +5293,7 @@ function handle_seq_mode(event_type, event_data)
 			dissolve_bay(b, false)
 		end
 	end
-	-- **After the mode, not before it** (2026-09-25): `set_mode` starts
-	-- the walk from wherever the camera was left, so a mode change is
-	-- not a teleport -- and setting the standing place first meant this
-	-- event, whose whole job is to be one, put the player back wherever
-	-- they had walked to. A drive that walked to the wall and asked for
-	-- the standing place dug at the wall.
-	set_mode(want)
-	fps.x, fps.y, fps.z = HOME_FROM.x, FPS_EYE, HOME_FROM.z
-	fps.yaw, fps.pitch = 180.0, HOME_PITCH
+	station = "wall"
 	fly_to(HOME_FROM, HOME_AT)
 	log:info("event mode: " .. want .. ", at the standing place")
 end
@@ -6143,7 +5347,6 @@ function be_backdrop()
 	for _, e in ipairs(room_ui) do
 		e.visible = false
 	end
-	mode = "menu"
 	attracting = true
 	idle_quiet = ATTRACT_AFTER
 	log:info("room: a backdrop for somebody else's screen")
@@ -6229,24 +5432,28 @@ function leave_app()
 	pause_panel.visible = false
 	terminal_open = false
 	pause_open = false
-	-- Back to the room's own mode, which takes the mouse the way the
-	-- room takes it rather than the way the game left it
-	set_mode(mode)
+	-- The mouse the way the room takes it rather than the way the game
+	-- left it
+	mouse_for("launch_world: back in the room")
 	log:info("game: back in the room")
 	return true
 end
 
 magic.ui:SetFocusElement(nil)
 
--- **It starts in FPS mode**: the first impression is the room, not a
--- list. A scripted run cannot take the mouse relative -- the whitelist
--- refuses it, which is [BOX_PLAYTEST_3]'s own rule -- so a check drives
--- the keys and the camera stands still.
-set_mode("fps")
--- The browser starts on the first thing in the first row, so menu mode
--- has a selection the moment it is entered
+-- **It starts at the wall, with the mouse free** ([LAUNCH_WORLD]
+-- section 11): one mode, point-and-click with the keyboard.
+mouse_for("launch_world: the room")
+show_prompt()
+-- The browser starts on the first thing in the first row, so there is
+-- a selection from the first frame
 browse_show()
 show_hint()
+-- The room's switches from the environment ([LAUNCH_WORLD] section 11):
+-- each one the same toggle `event room <what>` makes
+if env("BUILDAT_LAUNCH_NO_PROBE") ~= "" then room_switch("probe") end
+if env("BUILDAT_LAUNCH_NO_ORNAMENT") ~= "" then room_switch("ornament") end
+if env("BUILDAT_LAUNCH_STILL") ~= "" then room_switch("still") end
 
 -- **What the client asks a launcher for** ([MENU_CONTEXT]): init.lua
 -- hands these on as the extension's own.
@@ -6267,8 +5474,7 @@ show_hint()
 	end
 	handle_probe_update = timed("probe", handle_probe_update)
 	handle_camera_update = timed("camera", handle_camera_update)
-	handle_fps_update = timed("fps", handle_fps_update)
-	handle_dig_update = timed("dig", handle_dig_update)
+	handle_room_update = timed("room", handle_room_update)
 	handle_orb_update = timed("orb", handle_orb_update)
 	handle_synth_update = timed("synth", handle_synth_update)
 	handle_dissolve_update = timed("dissolve", handle_dissolve_update)

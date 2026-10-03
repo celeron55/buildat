@@ -8,10 +8,8 @@ light source and nothing is on a HUD. It is to be the default launch
 mode once it is polished enough, with launch_menu kept for the audience
 that wants a list; and it is a showcase of what a buildat program can
 be, not of how little one can be. There is no server, no mapgen, no streaming, no sky, no day or night and
-no entities -- the room is generated from a table every boot. The one
-thing it does keep is what the player changed: the voxels they placed,
-the spheres they moved, the field of view and the sound levels, as a
-diff against the generated room.
+no entities -- the room is generated from a table every boot. What it
+keeps is the player's bookmarks row and its sound levels.
 
 The reference the room is held to -- every element, interaction,
 transition, look and sound, and where the room differs from it -- is
@@ -52,61 +50,39 @@ lights, and the dissolve is a rewrite of the block and a re-mesh.
 Keys
 ----
 
-It starts in FPS mode, where you walk; Tab goes to menu mode, where you
-type. The mouse is captured in FPS and free in menu.
+One mode: point-and-click with full keyboard support, the mouse always
+free ([LAUNCH_WORLD] section 11).
 
-    Tab         swap the two modes
-
-FPS mode:
-
-    W A S D     walk, mouse looks
-    Space       jump
-    right click place one of your own voxels against what you point at
-    left hold   on one of your own voxels, prise it out: it lifts for a
-                second and then breaks into dust. On a sphere, it lifts
-                toward you and launches at a second. The room's own
-                stone wears no wireframe and cannot be dug -- no
-                pointing indication means no interaction
-    E           pick the sphere you are pointing at up; any number, one
-                mixed stack, held in the right of the view
-    right click place the top of the stack, or a voxel when it is empty
-    arrows      turn, for a player without a mouse
-    Return      the terminal, and back out of it
-    Backspace   the same -- one way out that always works
-
-Menu mode:
-
+    Tab         the next station: the wall, the floor, the desk
+    click       on a sphere, launch it
     arrows      browse the room: along the wall, then the floor's ranks
     Return      take what is browsed -- or, with text in the prompt,
                 what it matched: the bay comes apart and the camera
                 flies in
     (type)      any letter opens a one-line prompt that fuzzy-matches a
-                game, a launch action or a save by name
-    1-9         pick a slot without typing
+                game, a launch action or a save by name; Backspace edits
+                it and nothing else
+    B           pin what is browsed to the bookmarks row, or unpin it
+    Escape      closes what is open -- the desk, a bay, the prompt --
+                and with nothing open the pause dialog: Continue,
+                Settings (the desk), 2D menu, the developer console,
+                Exit Buildat
 
-Both:
+The F keys are the client's (F5 the debug line, F6 the profiler, F12 a
+screenshot). The room's own switches are for runs: BUILDAT_LAUNCH_PRESET,
+BUILDAT_LAUNCH_NO_PROBE, BUILDAT_LAUNCH_NO_ORNAMENT and
+BUILDAT_LAUNCH_STILL at boot, and in a command sequence
+`event room probe|ornament|still|attract`, `event room preset <n>` and
+`event room station wall|floor|terminal`. The attract mode starts after
+fourteen seconds of quiet.
 
-    Escape      the way back -- stand up from the terminal, shut a bay,
-                fly to the standing place -- and, with nothing left to
-                go back from, the pause dialog: back to the room, switch
-                to the old menu, or leave buildat
-    F1-F4       the four palette presets ([LAUNCH_WORLD]'s own
-                experiment; the pick is the user's, and check.sh leaves
-                all four in one picture at
-                local/options_for_LAUNCH_WORLD/presets_sheet.png)
-    F5          the reflection probe off and on
-    F6          the generated ornament off and on
-    F7          freeze the idle drift, which is what the checks need
-    F8          start the attract mode at once
-
-Type "set" and press Return to sit at the terminal -- or, in FPS mode,
-press Return anywhere. At the desk, up and down walk the rows and left
-and right change them: the client's own preferences, then the room's
-own -- the palette, the reflection probe, the field of view, and the
-levels of the orbs and of the bed under them, which is where the sound
-is meant to be tuned by ear. The room's rows are kept in its own save,
-not in the client's preferences, because they are its taste rather than
-the client's. Escape stands up.
+Type "set" and press Return, or Tab to the desk, to sit at the terminal.
+At the desk, up and down walk the rows and left and right change them:
+the client's own preferences, then the room's own -- the palette, the
+reflection probe, and the levels of the orbs and of the bed under them,
+which is where the sound is meant to be tuned by ear. The levels are
+kept in the room's own save, not in the client's preferences, because
+they are its taste rather than the client's. Escape stands up.
 
 Environment
 -----------
@@ -214,7 +190,8 @@ What is where
 
     core.sh                  the check an edit runs: one client, about
                              a minute -- the room boots, draws,
-                             walks, launches a game and comes back, and
+                             moves between stations, launches a game
+                             and comes back, and
                              the log is read for a sandbox error.
                              check.sh is the whole of it and is what a
                              push runs ([CHECK_COST])
@@ -256,33 +233,25 @@ line is a thing that has been seen to fail:
     nothing in the room is static          -- the era's own rule
     the room shows itself off when left alone
     the generated ornament is on something -- it once was not
-    FPS mode walks                         -- it is the mode you land in
+    Tab moves between the stations
     Escape pauses and Escape comes back
     a source is brighter than a lit wall   -- the top end, in HDR
     the room found launch actions at all   -- not a list written here
-    placing and digging do something       -- and write the save
-    E picks up and right click puts down
     the terminal changes a setting         -- and changes it back
     the arrows browse the room's own grid
-    a second client reads the save back    -- voxels and a moved sphere
     a save opens by name                   -- the floor's, and one past
                                               the floor's cap
     ContentDB opens from the room          -- against a local mirror
     the orbs are sized within their kind   -- and none wears an empty
                                               mark
-    a placed voxel wins over the orb       -- and an orb is pointed at
-                                              anywhere up its column
-    a sphere put down rests on the floor
     the floor's made-up servers say so     -- on a client with no
                                               history of its own
     every launch UI this tree ships boots  -- extensions/launch_menu/check.sh
 
-What the player changed is a diff against the generated room, in
-user/launch_world/room.txt: a voxel they placed is "x,y,z" on a line, a
-sphere they moved is "@<name> x y z" -- by name rather than by index,
-since installing a game changes the order of the list -- and the room's
-own settings are "!fov <degrees>" and "!sound <orbs> <bed>". A file a
-person can read and delete.
+The room's save is user/launch_world/room.txt: the bookmarks row,
+"!bookmark <key>" a line, and the levels, "!sound_db <orbs> <bed>". A
+file a person can read and delete. Placed voxels, moved spheres and the
+field of view, which the proof saved, are read past and not written.
 
 Two of them exist because a feature drew nothing for a day while its own
 log line said otherwise, and two more were passing on the HUD's text

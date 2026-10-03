@@ -51,47 +51,36 @@ user="$out/user"; rm -rf "$user"; mkdir -p "$user"
 		echo "delay 400"
 		# **The prompt is typed at and cleared, never entered.** A
 		# launch from here is not worth what it costs to keep
-		# deterministic: three turns in, a mode event that did not take
-		# left the room in FPS, the letters were movement, and Enter
-		# launched whatever the arrows had browsed -- a game, after
-		# which this measured a world loading rather than the room
-		# (2026-09-24). The dissolve and the launch are the room's own
+		# deterministic: Enter launches whatever the arrows had browsed
+		# -- a game, after which this measured a world loading rather
+		# than the room (2026-09-24). The dissolve and the launch are the room's own
 		# check's to drive, where the state is known at every step.
 		for c in I N S T A L L; do echo "keypress $c"; done
 		echo "delay 600"
 		echo "keypress Escape"
 		echo "delay 500"
-		# FPS: walk, look, place and dig
-		echo "event mode fps"
-		echo "delay 400"
-		# Up to the wall before placing: the reach is five metres and
-		# the standing place is eight from it, so a short step leaves
-		# the crosshair on nothing and the voxel path -- the re-mesh,
-		# which is the biggest thing this room allocates -- goes
-		# untouched
-		echo "look 180 -20"
-		echo "keydown W"; echo "delay 2600"; echo "keyup W"
-		echo "delay 500"
-		echo "mouse_click right"
-		echo "delay 600"
-		echo "mouse_down left"; echo "delay 1300"; echo "mouse_up left"
-		echo "delay 600"
-		# And back, so the next turn starts where this one did
-		echo "look 0 0"
-		echo "keydown W"; echo "delay 2600"; echo "keyup W"
-		echo "delay 400"
-		# The terminal, and out again
-		echo "keypress Return"
-		echo "delay 1200"
+		# The stations: the floor, the desk and back to the wall
+		echo "keypress Tab"
+		echo "delay 1800"
+		echo "keypress Tab"
+		echo "delay 1800"
+		echo "keypress Tab"
+		echo "delay 1800"
+		# The desk through the dialog's Settings, and out again
 		echo "keypress Escape"
 		echo "delay 600"
+		echo "keypress Down"
+		echo "keypress Return"
+		echo "delay 1500"
+		echo "keypress Escape"
+		echo "delay 1200"
 		# The pause dialog, and out again
 		echo "keypress Escape"
 		echo "delay 800"
 		echo "keypress Escape"
 		echo "delay 600"
 		# The attract mode, which runs the camera and the sound
-		echo "keypress F8"
+		echo "event room attract"
 		echo "delay 2500"
 	done
 	echo "quit"

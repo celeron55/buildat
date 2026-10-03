@@ -1,7 +1,7 @@
 #!/bin/bash
 # extensions/launch_world: the room's **core** check -- the one to run
 # after touching `world.lua`. One client, about a minute: the room boots,
-# draws, walks, browses, launches a game and comes back from it, and
+# draws, moves between its stations, launches a game and comes back from it, and
 # nothing in the sandbox raised while it did.
 #
 #   extensions/launch_world/core.sh
@@ -38,15 +38,14 @@ fi
 { echo "wait_log_any 60000 the room hums"
 	echo "delay 500"
 	echo "screenshot $out/stood.png"
-	# It starts in FPS mode: a held key walks, and a held key is frames
-	echo "keydown W"
-	echo "delay 900"
-	echo "keyup W"
-	echo "delay 400"
-	echo "screenshot $out/walked.png"
-	# Menu mode: typing a name flies to that orb and Return launches it
+	# Tab is the next station, the floor: the camera flies there
+	echo "keypress Tab"
+	echo "wait_log 10000 camera: landed"
+	echo "screenshot $out/moved.png"
+	# Back at the wall, typing a name flies to that orb and Return
+	# launches it
 	echo "event mode menu"
-	echo "delay 400"
+	echo "wait_log 10000 camera: landed"
 	for c in D I G G E R; do echo "keypress $c"; done
 	echo "delay 800"
 	echo "keypress Return"
@@ -110,7 +109,7 @@ def px(name):
 		print("no picture: " + name)
 		return None
 	return Image.open(p).convert("L")
-a, b = px("stood.png"), px("walked.png")
+a, b = px("stood.png"), px("moved.png")
 if a is None or b is None:
 	sys.exit(1)
 def moved_between(x, y):
@@ -121,7 +120,7 @@ def moved_between(x, y):
 moved = moved_between(a, b)
 lit = sum(i * n for i, n in enumerate(a.histogram())) / float(a.width * a.height)
 drift = moved_between(px("back.png"), px("back2.png"))
-print("the room is lit to %.1f of a level, walking moved it by %.1f, and "
+print("the room is lit to %.1f of a level, Tab moved it by %.1f, and "
 		"it drifts by %.1f after a game" % (lit, moved, drift))
 # A black window is 0 either way; a frozen one moves by nothing
 sys.exit(0 if lit > 5.0 and moved > 1.0 and drift > 0.5 else 1)
@@ -136,6 +135,6 @@ if [ "$verdict_rc" -ne 0 ] || [ "$raised" -gt 0 ] ||
 	echo "FAIL: the room does not boot, draw, launch and come back"
 	exit 1
 fi
-echo "PASS: the room boots, walks, launches a game and comes back"
+echo "PASS: the room boots, moves between stations, launches a game and comes back"
 exit 0
 # vim: set noet ts=4 sw=4:
