@@ -2178,8 +2178,10 @@ struct CApp: public App, public magic::Application
 			ss_ action = g_client_config.get<ss_>("launch_action");
 			for(char c : action)
 				if(!(isalnum((unsigned char)c) || c == '_' || c == '-' ||
-						c == '/' || c == '.' || c == '@' || c == '+'))
+						c == '/' || c == '.' || c == '@' || c == '+')){
 					action = "";
+					break;
+				}
 			// **A launch UI that asks to be sandboxed is run in the
 			// sandbox** ([LAUNCH_SANDBOX]): its own init.lua goes
 			// through run_extension_file, which is the same door its
