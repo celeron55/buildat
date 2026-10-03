@@ -1899,15 +1899,20 @@ struct Module: public interface::Module, public luanti::Interface
 		ss_ out;
 		accounts::access(self->m_server, [&](accounts::Interface *i){
 			const accounts::PeerId peer = a.empty() ? 0 : i->find_peer(a);
+			// A world's privileges reach this server's accounts: kick and
+			// ban leave an admin alone, and unban lifts what a world banned,
+			// not an admin's ban ([SECURITY_RUN_1])
 			if(cmd == "kick"){
 				if(!peer)
 					out = a+" is not here";
+				else if(i->is_admin(a))
+					out = "An admin is not kicked";
 				else
 					i->kick(peer, b.empty() ? "Kicked" : b);
 			} else if(cmd == "ban"){
 				out = i->ban(a, "the game");
 			} else if(cmd == "unban"){
-				out = i->unban(a);
+				out = i->unban(a, "the game");
 			} else if(cmd == "ban_list"){
 				for(const ss_ &ban : i->ban_list())
 					out += (out.empty() ? "" : ", ")+ban;

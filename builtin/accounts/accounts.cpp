@@ -648,12 +648,24 @@ struct Module: public interface::Module, public Interface
 		return "";
 	}
 
-	ss_ unban(const ss_ &name_or_address)
+	ss_ unban(const ss_ &name_or_address, const ss_ &only_by)
 	{
 		if(!m_store)
 			return "No accounts yet";
 		ss_ data;
 		bool found = false;
+		if(!only_by.empty()){
+			// Whose ban it is, by the name it is under
+			ss_ name = name_or_address;
+			ss_ bd;
+			if(!m_store->get("ban/"+name, bd) &&
+					m_store->get("banaddr/"+name_or_address, data))
+				name = data;
+			Ban b;
+			if(m_store->get("ban/"+name, bd) && unpack(bd, b) &&
+					b.by != only_by)
+				return "Banned by "+b.by+"; an admin lifts it";
+		}
 		if(m_store->get("ban/"+name_or_address, data)){
 			Ban b;
 			if(unpack(data, b) && !b.address.empty())
@@ -1168,7 +1180,7 @@ struct Module: public interface::Module, public Interface
 			}
 			result(why.empty() ? r.name+" was banned" : why);
 		} else if(r.cmd == "unban"){
-			const ss_ why = unban(r.name);
+			const ss_ why = unban(r.name, "");
 			result(why.empty() ? r.name+" was unbanned" : why);
 		} else if(r.cmd == "password"){
 			if(!exists)

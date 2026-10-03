@@ -72,8 +72,11 @@ namespace accounts
 		// registration is open.
 		// "" when done, else why not.
 		virtual ss_ ban(const ss_ &name, const ss_ &by) = 0;
-		// A name or an address; "" when done, else why not
-		virtual ss_ unban(const ss_ &name_or_address) = 0;
+		// A name or an address; "" when done, else why not. With only_by,
+		// only a ban that one made: a game's /unban lifts the game's bans
+		// and not an admin's
+		virtual ss_ unban(const ss_ &name_or_address,
+				const ss_ &only_by = "") = 0;
 		// "name|address" per ban, as Luanti's get_ban_list says them
 		virtual sv_<ss_> ban_list() = 0;
 
