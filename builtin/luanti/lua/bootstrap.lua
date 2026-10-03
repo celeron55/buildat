@@ -3276,8 +3276,10 @@ core.__forceload_free_block_raw = core.forceload_free_block
 -- EMERGE_CANCELLED, which is what a mod asking about the edge is told.
 local emerge_requests = {}
 -- How long a block is waited for before it is called an error. Generating a
--- section is tens of milliseconds; this is the runaway case.
-local EMERGE_TIMEOUT = 30
+-- section is tens of milliseconds; this is the runaway case. Not 30: with a
+-- request's blocks asked for together, the last chunk of a box waits for
+-- its sections behind the box's whole queue.
+local EMERGE_TIMEOUT = 120
 
 local function emerge_blockpos_list(pos1, pos2)
 	local x1, y1, z1 = to_pos(pos1)
@@ -3359,30 +3361,46 @@ core.__emerge_detail = emerge_detail
 -- and leaves the rest for the next step. See [STEP_PEAK].
 local EMERGE_BUDGET_US = 50000
 
+-- How many blocks ahead of the one a request is on are asked for. One at
+-- a time, a box's sections were generated one after another, a block a
+-- step; Luanti asks for all of a request's blocks at once.
+local EMERGE_WINDOW = 32
+
 local function step_emerge(dtime)
-	-- Which block each waiting request is on, asked all at once. This used
-	-- to be a core.get_node() per request per step, and a read that crosses
-	-- the Lua boundary costs a module lock and its hierarchy validated --
-	-- with a mapgen's worth of requests outstanding that was up to two
-	-- seconds of a step. The work inside voxelworld is nearly free beside
-	-- the crossing, so one crossing for the lot is the whole fix.
+	-- Which of each waiting request's next blocks are there, asked all at
+	-- once. This used to be a core.get_node() per request per step, and a
+	-- read that crosses the Lua boundary costs a module lock and its
+	-- hierarchy validated -- with a mapgen's worth of requests outstanding
+	-- that was up to two seconds of a step. The work inside voxelworld is
+	-- nearly free beside the crossing, so one crossing for the lot is the
+	-- whole fix.
 	local ask = {}
 	local ask_of = {}
 	for i = 1, #emerge_requests do
 		local r = emerge_requests[i]
-		local bp = r.blocks[r.next_i]
-		if bp ~= nil and emerge_in_bounds(bp) then
+		ask_of[r] = #ask / 3 + 1
+		-- What was asked for before this step is what voxelworld has been
+		-- told to keep: a forceload reaches it with the next push of the
+		-- load points, and a block asked for now can be unloaded under
+		-- the read in between
+		r.kept_upto = r.asked_upto or 0
+		for j = r.next_i, math.min(#r.blocks, r.next_i + EMERGE_WINDOW - 1) do
+			local bp = r.blocks[j]
+			if emerge_in_bounds(bp) then
+				-- Asked once and kept until its callback has run
+				if (r.asked_upto or r.next_i - 1) < j then
+					r.asked_upto = j
+					core.__forceload_block_raw(bp)
+				end
+			end
 			ask[#ask + 1] = bp.x * 16
 			ask[#ask + 1] = bp.y * 16
 			ask[#ask + 1] = bp.z * 16
-			-- Keyed by the request and not by its index: the loop below
-			-- removes finished requests and everything after one shifts
-			ask_of[r] = #ask / 3
 		end
 	end
 	local t_ids = core.get_us_time()
-	-- Whether the section is loaded, per section: what "generated" means
-	-- here, since an ungenerated section reads as ignore everywhere
+	-- Whether the block's section is there, per block: what "generated"
+	-- means here, since an ungenerated section reads as ignore everywhere
 	local ids = #ask > 0 and __luanti_loaded_at(ask) or {}
 	emerge_detail.ids = emerge_detail.ids + (core.get_us_time() - t_ids)
 	emerge_detail.asked = emerge_detail.asked + #ask / 3
@@ -3394,30 +3412,32 @@ local function step_emerge(dtime)
 			break
 		end
 		local r = emerge_requests[i]
-		local bp = r.blocks[r.next_i]
-		local action = nil
-		if not emerge_in_bounds(bp) then
-			action = core.EMERGE_CANCELLED
-		else
-			if not r.asked then
-				r.asked = true
-				core.__forceload_block_raw(bp)
+		r.waited = r.waited + dtime
+		-- The blocks in order, as many as are there and the budget allows
+		local at = ask_of[r]
+		local first = r.next_i
+		while r.next_i <= #r.blocks and
+				r.next_i < first + EMERGE_WINDOW and
+				(r.next_i <= r.kept_upto or
+				not emerge_in_bounds(r.blocks[r.next_i])) do
+			if core.get_us_time() - t_start > EMERGE_BUDGET_US then
+				break
 			end
-			r.waited = r.waited + dtime
-			-- A block that is there reads as something; a section that has
-			-- not been generated reads as ignore everywhere
-			local at = ask_of[r]
-			if at ~= nil and ids[at] then
+			local bp = r.blocks[r.next_i]
+			local action = nil
+			if not emerge_in_bounds(bp) then
+				action = core.EMERGE_CANCELLED
+			elseif at ~= nil and ids[at + r.next_i - first] then
 				action = core.EMERGE_GENERATED
 			elseif r.waited > EMERGE_TIMEOUT then
 				action = core.EMERGE_ERRORED
 			end
-		end
-		if action ~= nil then
-			if r.asked then
+			if action == nil then
+				break
+			end
+			if emerge_in_bounds(bp) and (r.asked_upto or 0) >= r.next_i then
 				core.__forceload_free_block_raw(bp)
 			end
-			r.asked = false
 			r.waited = 0
 			r.next_i = r.next_i + 1
 			local left = #r.blocks - r.next_i + 1
@@ -3443,12 +3463,12 @@ local function step_emerge(dtime)
 			if not ok then
 				core.log("error", "emerge_area callback: " .. tostring(err))
 			end
-			if r.next_i > #r.blocks then
-				table.remove(emerge_requests, i)
-				i = i - 1
-			end
 		end
-		i = i + 1
+		if r.next_i > #r.blocks then
+			table.remove(emerge_requests, i)
+		else
+			i = i + 1
+		end
 	end
 end
 

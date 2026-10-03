@@ -70,19 +70,61 @@ if os.getenv("DENSITY_NO_ONGEN") == "1" then
 		core.log("action", "DENSITY no on_generated")
 	end)
 end
+-- DENSITY_SETTLE=<s>: the box emerged, then counted again that many
+-- seconds later through a second emerge (a block already there answers
+-- at once), so what the game placed after its chunk -- VoxeLibre's geodes
+-- and dungeons go through emerge_area callbacks of their own -- is in it
+local settle = tonumber(os.getenv("DENSITY_SETTLE") or "")
+local function emerge_and_count(done)
+	local t0 = core.get_us_time()
+	core.emerge_area(P1, P2, function(bp, _, left)
+		count_block(bp)
+		if left % 50 == 0 then
+			core.log("action", "DENSITY emerging, " .. left .. " blocks left")
+		end
+		if left == 0 then
+			core.log("action", string.format("DENSITY emerged in %.0f s",
+					(core.get_us_time() - t0) / 1e6))
+			done()
+		end
+	end)
+end
+-- DENSITY_MARGIN=<nodes>: the box and this much around it emerged first,
+-- uncounted, so that what reaches into the box from around it -- a tree's
+-- crown, a mineshaft's corridors -- is there in both
+local margin = tonumber(os.getenv("DENSITY_MARGIN") or "")
 core.register_on_mods_loaded(function()
 	core.after(2, function()
-		local t0 = core.get_us_time()
-		core.emerge_area(P1, P2, function(bp, _, left)
-			count_block(bp)
-			if left % 50 == 0 then
-				core.log("action", "DENSITY emerging, " .. left .. " blocks left")
-			end
-			if left == 0 then
-				core.log("action", string.format("DENSITY emerged in %.0f s",
-						(core.get_us_time() - t0) / 1e6))
-				report()
-			end
+		if margin then
+			local m = vector.new(margin, margin, margin)
+			local left_logged = false
+			core.emerge_area(vector.subtract(P1, m), vector.add(P2, m),
+					function(_, _, left)
+				if left % 200 == 0 then
+					core.log("action", "DENSITY emerging the margin, " ..
+							left .. " blocks left")
+				end
+				if left == 0 and not left_logged then
+					left_logged = true
+					core.after(settle or 0, function()
+						emerge_and_count(report)
+					end)
+				end
+			end)
+			return
+		end
+		if not settle then
+			emerge_and_count(report)
+			return
+		end
+		emerge_and_count(function()
+			core.after(settle, function()
+				n, blocks = {}, 0
+				if by_y then
+					by_y = {}
+				end
+				emerge_and_count(report)
+			end)
 		end)
 	end)
 end)
