@@ -88,9 +88,10 @@ void PS()
     if (!(adaptedLum >= cAutoExposureLumRange.x && adaptedLum <= cAutoExposureLumRange.y))
         adaptedLum = lum;
     // The exponent clamped: the minimap's clone adapts at a rate of a
-    // million, and exp() of minus sixteen thousand came out of the Windows
-    // box's driver as something other than zero -- the map one flat grey
-    // ([BOX_MINIMAP_GREY], 2026-10-03). exp(-30) is "at once" already.
+    // million, and exp() of minus sixteen thousand is a driver's to get
+    // right or not; exp(-30) is "at once" already. (Put in for
+    // [BOX_MINIMAP_GREY] on a reading that turned out to compare two
+    // worlds; kept as a guard.)
     gl_FragColor.r = adaptedLum + (lum - adaptedLum) *
             (1.0 - exp(-min(cDeltaTimePS * cAutoExposureAdaptRate, 30.0)));
     #endif

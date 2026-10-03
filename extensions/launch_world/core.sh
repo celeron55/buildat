@@ -62,6 +62,12 @@ fi
 	# it ([MENU_STUCK]) or an animation stood down ([LAUNCH_FROZEN])
 	echo "delay 700"
 	echo "screenshot $out/back2.png"
+	# **The attract drift** ([LAUNCH_WORLD] section 12): started at once
+	# rather than after 14 s of quiet, and stopped by a key
+	echo "event room attract"
+	echo "wait_log 10000 attract: over the wall"
+	echo "keypress Down"
+	echo "wait_log 5000 attract: back to the standing place"
 	echo "quit"
 	} > "$out/cmds.txt"
 # **A user directory of its own**: the desk's has saves and servers and
@@ -99,6 +105,11 @@ raised=$(grep -ac "Assignment to undeclared global\|pcall(): Runtime error" \
 	"$out/cli.log")
 launched=$(grep -ac "game: the room stands down" "$out/cli.log")
 back=$(grep -ac "game: back in the room" "$out/cli.log")
+# The launch animation began ([LAUNCH_WORLD] section 0): digger takes the
+# view within a second, so the pull is all of it this run sees
+pulled=$(grep -ac "launch: pull (" "$out/cli.log")
+attract=$(grep -ac "attract: over the wall" "$out/cli.log")
+attract_back=$(grep -ac "attract: back to the standing place" "$out/cli.log")
 python3 - "$out" <<'PY'
 import sys, os
 from PIL import Image, ImageChops
@@ -127,14 +138,17 @@ sys.exit(0 if lit > 5.0 and moved > 1.0 and drift > 0.5 else 1)
 PY
 verdict_keep
 if [ "$verdict_rc" -ne 0 ] || [ "$raised" -gt 0 ] ||
-		[ "$launched" -lt 1 ] || [ "$back" -lt 1 ] ||
+		[ "$launched" -lt 1 ] || [ "$back" -lt 1 ] || [ "$pulled" -lt 1 ] ||
+		[ "$attract" -lt 1 ] || [ "$attract_back" -lt 1 ] ||
 		[ -z "$contents" ]; then
 	echo "the sandbox raised $raised times;" \
-			"a game was launched $launched and left $back times"
+			"a game was launched $launched and left $back times;" \
+			"the animation pulled $pulled times; the attract drift" \
+			"started $attract and stopped $attract_back times"
 	grep -a "Runtime error\|undeclared global" "$out/cli.log" | head -3
 	echo "FAIL: the room does not boot, draw, launch and come back"
 	exit 1
 fi
-echo "PASS: the room boots, moves between stations, launches a game and comes back"
+echo "PASS: the room boots, moves between stations, launches a game with its animation and comes back, and drifts until a key"
 exit 0
 # vim: set noet ts=4 sw=4:

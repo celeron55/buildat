@@ -268,15 +268,13 @@ fi
 	# A screenshot lands a frame or two after the command, so the next
 	# key has to wait or it is in the picture (2026-09-23)
 	echo "delay 600"
-	echo "keypress I"
-	echo "keypress N"
-	echo "keypress S"
-	echo "delay 300"
-	echo "keypress Return"
+	# **By the room's own switch** ([LAUNCH_WORLD] stage 2): a launch is
+	# the animation now, and the dissolve is kept for stage 3 as an effect
+	echo "event room dissolve"
 	echo "delay 1600"
 	echo "screenshot $out/dissolve-open.png"
 	echo "wait_log 20000 Wrote screenshot $out/dissolve-open.png"
-	echo "keypress Escape"
+	echo "event room dissolve"
 	# The cubes land in 0.9 s, but the voxels coming back have to be
 	# remeshed and relit before the picture is the picture it was.
 	# **The room does say when a bay is back** -- "dissolve: bay N
@@ -309,12 +307,14 @@ fi
 	echo "delay 600"
 	echo "screenshot $out/typed.png"
 	echo "wait_log 20000 Wrote screenshot $out/typed.png"
+	# The typing has already hopped the camera to the match; Enter on the
+	# empty pocket launches nothing (it has no action yet) and says so
 	echo "keypress Return"
-	echo "wait_log 20000 camera: landed"
+	echo "wait_log 20000 launch: install a game"
 	echo "delay 400"
 	echo "screenshot $out/launched.png"
 	echo "wait_log 20000 Wrote screenshot $out/launched.png"
-	echo "keypress Escape"
+	echo "event mode menu"
 	echo "wait_log 20000 camera: landed"
 	echo "delay 400"
 	echo "screenshot $out/back-home.png"
@@ -394,7 +394,7 @@ fi
 	# The sweep says when it starts and which wall it is showing; the
 	# delay after it is the camera's own flight, not a guess at when the
 	# room noticed the key
-	echo "wait_log 20000 attract: showing the"
+	echo "wait_log 20000 attract: over the wall"
 	echo "delay 1800"
 	echo "screenshot $out/attract-away.png"
 	echo "wait_log 20000 Wrote screenshot $out/attract-away.png"
@@ -1287,7 +1287,7 @@ came_back = sum(abs(p - q) for p, q in zip(dc, dh)) / float(len(dc))
 print("the launch moves the frame by %.2f of a level and Escape comes "
 		"back to within %.2f" % (flew, came_back))
 typing_ok = flew > 8.0 and came_back < flew / 2.0
-print("PASS: typing a name flies the camera in, and Escape flies it out"
+print("PASS: typing a name flies the camera in, and the room comes back"
 		if typing_ok else
 		"FAIL: the typing path does not launch, or does not come back")
 

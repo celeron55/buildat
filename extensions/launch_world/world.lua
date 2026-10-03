@@ -1711,34 +1711,6 @@ end
 log:info("bays " .. BAYS .. " " .. BAY_Z .. " " ..
 		table.concat(bay_desc, " "))
 
--- **The walls the attract sweep shows** ([POCKETS_ROUND]: the pockets
--- fill the faced wall first and reach round as the tree grows, so a
--- room whose contents are behind the player hides them from anybody who
--- does not walk). One entry per wall that holds pockets, in the
--- allocation's own order, with the middle of what it holds: the sweep
--- turns to each in turn. A tree that fills one wall -- this one --
--- gives one entry, and the sweep is the sweep it always was.
-attract_walls = {}
-do
-	local by = {}
-	for b = 1, BAYS do
-		local p, o = room.pockets[b], orb_places[b]
-		if p and o then
-			local e = by[p.wall]
-			if not e then
-				e = {wall = p.wall, x = 0, y = 0, z = 0, n = 0}
-				by[p.wall] = e
-				attract_walls[#attract_walls + 1] = e
-			end
-			e.x, e.y, e.z = e.x + o.x, e.y + o.y, e.z + o.z
-			e.n = e.n + 1
-		end
-	end
-	for _, e in ipairs(attract_walls) do
-		e.x, e.y, e.z = e.x / e.n, e.y / e.n, e.z / e.n
-	end
-	log:info("attract: " .. #attract_walls .. " walls to show")
-end
 -- Where the sweep is looking now, eased toward the wall it is showing
 attract_aim = nil
 attract_shown = nil
@@ -3709,7 +3681,8 @@ function handle_synth_update(event_type, event_data)
 	-- off rather than continuous. So the sound follows *in_app*, not
 	-- the input gate -- and when the room does go, the drone **fades**.
 	local dt = event_data:GetFloat("TimeStep")
-	local want_sound = (in_app or console_open or backdrop) and 0 or 1
+	local want_sound = (in_app or launching or console_open or backdrop)
+			and 0 or 1
 	sound_fade = sound_fade + (want_sound - sound_fade) *
 			(1 - math.exp(-dt / 0.35))
 	if want_sound == 0 and sound_fade < 0.01 then
@@ -4083,35 +4056,42 @@ function handle_idle_update(event_type, event_data)
 		-- it is the corridor to the wall -- so the sweep stays in it
 		-- and moves toward the wall and back instead, which is the
 		-- view the room was composed for.
-		local sway = math.sin(a * 0.17)
-		cam.from.x = HOME_FROM.x + sway * 3.5
-		cam.from.y = HOME_FROM.y + 1.1 + math.sin(a * 0.13) * 0.7
-		cam.from.z = HOME_FROM.z - 1.0 + math.cos(a * 0.17) * 5.0
-		-- **And it turns to each wall that holds something**
-		-- ([POCKETS_ROUND]): the faced wall for the first stretch, then
-		-- the sides, then the wall behind the player -- which is the
-		-- order they fill in, so the sweep shows the room the way it
-		-- grew. With one wall filled it looks where it always looked.
-		local want = {x = HOME_AT.x, y = HOME_AT.y + 0.9, z = HOME_AT.z}
-		if #attract_walls > 0 then
-			local i = math.floor(a / ATTRACT_WALL_S) % #attract_walls + 1
-			local w = attract_walls[i]
-			want.x, want.y, want.z = w.x, w.y + 0.9, w.z
-			if attract_shown ~= w.wall then
-				attract_shown = w.wall
-				log:info("attract: showing the " .. w.wall .. " wall")
-			end
+		-- **Over the wall's formation and down to the floor and back**
+		-- ([LAUNCH_WORLD] section 12, one wall): four places, eased
+		-- from each to the next, ATTRACT_WALL_S on each leg, slow
+		local wall_z = HOME_AT.z
+		local back = HOME_FROM.z - wall_z
+		local span = math.max(1.0, math.abs(HOME_FROM.x - (orb_places[1]
+				and orb_places[1].x or HOME_FROM.x)))
+		local top = orb_places[1] and orb_places[1].y or HOME_AT.y
+		local bottom = orb_places[BAYS] and orb_places[BAYS].y or HOME_AT.y
+		local mid = launch_floor_middle()
+		local keys = {
+			{"over the wall", {x = HOME_AT.x + span * 0.5, y = top,
+				z = wall_z + back * 0.55}, {x = HOME_AT.x + span * 0.5,
+				y = top, z = wall_z}},
+			{"along the rows", {x = HOME_AT.x - span * 0.5, y = bottom,
+				z = wall_z + back * 0.55}, {x = HOME_AT.x - span * 0.5,
+				y = bottom, z = wall_z}},
+			{"down to the floor", {x = mid.x, y = 4.5, z = mid.z + 6.0},
+				{x = mid.x, y = 0.0, z = mid.z + 1.0}},
+			{"back up", {x = HOME_FROM.x, y = HOME_FROM.y, z = HOME_FROM.z},
+				{x = HOME_AT.x, y = HOME_AT.y, z = HOME_AT.z}},
+		}
+		local leg = a / ATTRACT_WALL_S
+		local n = math.floor(leg) % #keys + 1
+		local k0 = keys[(n - 2) % #keys + 1]
+		local k1 = keys[n]
+		local f = leg - math.floor(leg)
+		f = f * f * (3 - 2 * f)
+		if attract_shown ~= k1[1] then
+			attract_shown = k1[1]
+			log:info("attract: " .. k1[1])
 		end
-		attract_aim = attract_aim or {x = want.x, y = want.y, z = want.z}
-		-- Eased in the player's own time, not in frames: a turn that
-		-- takes a second on this desk takes a second under llvmpipe
-		local k = 1 - math.exp(-dt * 1.2)
-		attract_aim.x = attract_aim.x + (want.x - attract_aim.x) * k
-		attract_aim.y = attract_aim.y + (want.y - attract_aim.y) * k
-		attract_aim.z = attract_aim.z + (want.z - attract_aim.z) * k
-		cam.at.x = attract_aim.x + sway * 1.5
-		cam.at.y = attract_aim.y
-		cam.at.z = attract_aim.z
+		for _, c in ipairs({"x", "y", "z"}) do
+			cam.from[c] = k0[2][c] + (k1[2][c] - k0[2][c]) * f
+			cam.at[c] = k0[3][c] + (k1[3][c] - k0[3][c]) * f
+		end
 		apply_camera()
 	end
 	idle_t = idle_t + dt
@@ -5056,6 +5036,159 @@ function prompt_walk(by)
 	return true
 end
 
+-- The floor's middle, in front of the formation, in metres
+function launch_floor_middle()
+	local wall_z = BAY_Z * VOXEL_M
+	return {x = HOME_AT.x, y = 0, z = wall_z + (HOME_FROM.z - wall_z) * 0.45}
+end
+
+-- **The launch animation** ([LAUNCH_WORLD] section 0, user 2026-09-28):
+-- played while the game is already loading, the camera following the orb
+-- through all of it. The orb pulls out of its pocket, falls to three
+-- voxels over the floor, moves to the floor's middle -- or into the save's
+-- sphere, for a save -- and there its glow rises without bound until the
+-- frame saturates, which is what the game's first frame replaces. It
+-- holds while the game has a menu of its own up and goes on when that
+-- goes or the game says it is loading (`app_loading`). Each phase is a
+-- log line a drive waits on. Globals: the chunk is at its 200 locals.
+LAUNCH_PHASES = {pull = 0.7, fall = 0.55, move = 1.1}
+-- How far the glow gets before the game has said it is loading: lit
+-- well up, the white not begun
+LAUNCH_HOLD_T = 0.9
+launch_anim = nil
+launch_overlay = magic.ui.root:CreateChild("BorderImage")
+launch_overlay.visible = false
+launch_overlay.priority = 900
+launch_overlay.texture = checker_texture(2, 1, magic.Color(1, 1, 1, 1),
+		magic.Color(1, 1, 1, 1))
+launch_overlay.imageRect = magic.IntRect(0, 0, 2, 2)
+launch_overlay.color = magic.Color(1, 1, 1, 1)
+
+local function anim_phase(a, name)
+	a.phase, a.t = name, 0
+	a.from = {x = a.p.x, y = a.p.y, z = a.p.z}
+	log:info("launch: " .. name .. " (" .. a.name .. ")")
+end
+
+-- b: the wall orb that moves (nil for a save whose game is not on the
+-- wall: then the save's own sphere glows where it stands); to: where it
+-- comes to rest, in metres; name: what the log says
+function launch_anim_start(b, to, name)
+	local o = b and orb_places[b] or to
+	local ox, oz, depth = 0, 1, 0
+	if b then ox, oz, depth = orb_out(b) end
+	local a = {b = b, name = name, to = to, ox = ox, oz = oz,
+		home = {x = o.x, y = o.y, z = o.z},
+		p = {x = o.x, y = o.y, z = o.z}, glow = 1, held = false,
+		loading = false,
+		radius = b and orb_across(ORBS[b]) * VOXEL_M / 2 or 0,
+		-- Out of the mouth: the pocket's depth and a voxel and a half
+		out = depth * 2 + 1.5 * VOXEL_M}
+	a.base_bright = b and lights[b] and lights[b].brightness or 1
+	launch_anim = a
+	-- **Muted at the click** (section 0): the feedback for the click,
+	-- and a cleared palette for the game to take over
+	sound_fade = 0
+	cam.to_from, cam.to_at = nil, nil
+	anim_phase(a, b and "pull" or "glow")
+end
+
+local function anim_camera(a)
+	-- Behind the orb as seen from the room, a little above: the wall is
+	-- behind it while it pulls out and falls, the floor under it after
+	cam.from.x = a.p.x + a.ox * 4.5
+	cam.from.y = a.p.y + 1.6
+	cam.from.z = a.p.z + a.oz * 4.5
+	cam.at.x, cam.at.y, cam.at.z = a.p.x, a.p.y, a.p.z
+	apply_camera()
+end
+
+function handle_launch_anim(event_type, event_data)
+	local a = launch_anim
+	if not a or in_app then return end
+	-- In the wall's time and not the engine's step: a world loading makes
+	-- long frames, and a step clamped per frame left the glow short of
+	-- the white when the game's view arrived (2026-10-03)
+	local now = buildat.get_time_us()
+	local dt = a.last_us and (now - a.last_us) / 1000000 or 0
+	a.last_us = now
+	a.t = a.t + math.min(dt, 0.5)
+	-- **Held at a glow short of the white until the game says it is
+	-- loading** (section 12: a game in a menu of its own pauses it).
+	-- simplified: the room cannot see the game's menu -- the game's UI
+	-- stack is its own sandbox's and the root's children come back as new
+	-- wrappers every time -- so the hold is on the launch API's word
+	-- (`launch_loading`, which vanilla says when a world is picked). A
+	-- game that never says it holds there until its view replaces the
+	-- room's, which is the end of the animation anyway.
+	if a.phase == "glow" and not a.loading and a.t > LAUNCH_HOLD_T then
+		a.t = LAUNCH_HOLD_T
+		if not a.held then
+			a.held = true
+			log:info("launch: held until the game says it is loading")
+		end
+	elseif a.held and a.loading then
+		a.held = false
+		log:info("launch: going on")
+	end
+	local d = LAUNCH_PHASES[a.phase]
+	local k = d and math.min(1, a.t / d) or 0
+	local e = k * k * (3 - 2 * k)
+	if a.phase == "pull" then
+		a.p.x = a.from.x + a.ox * a.out * e
+		a.p.z = a.from.z + a.oz * a.out * e
+		if k >= 1 then anim_phase(a, "fall") end
+	elseif a.phase == "fall" then
+		-- Three voxels over the floor, by gravity's curve
+		local y1 = 3 * VOXEL_M + a.radius
+		a.p.y = a.from.y + (y1 - a.from.y) * k * k
+		if k >= 1 then anim_phase(a, "move") end
+	elseif a.phase == "move" then
+		a.p.x = a.from.x + (a.to.x - a.from.x) * e
+		a.p.z = a.from.z + (a.to.z - a.from.z) * e
+		if k >= 1 then anim_phase(a, "glow") end
+	elseif a.phase == "glow" then
+		-- Without bound: the light and the orb's own emissive multiply
+		-- up, and a white over the frame finishes what the exposure
+		-- would -- the game's first frame is what replaces it
+		a.glow = math.exp(a.t * 1.6)
+		local w = math.max(0, math.min(1, (a.t - 1.2) / 1.6))
+		launch_overlay.size = magic.IntVector2(magic.ui.root.width,
+				magic.ui.root.height)
+		launch_overlay.visible = w > 0
+		launch_overlay.opacity = w
+		if w >= 1 and not a.saturated then
+			a.saturated = true
+			log:info("launch: the frame is saturated (" .. a.name .. ")")
+		end
+	end
+	if a.b then
+		move_orb_to(a.b, a.p.x, a.p.y, a.p.z)
+		if lights[a.b] then
+			lights[a.b].brightness = (a.base_bright or 1) * a.glow
+		end
+		if orb_mats[a.b] and orb_bright[a.b] then
+			local c = orb_bright[a.b]
+			orb_mats[a.b]:SetShaderParameter("MatDiffColor",
+					magic.Color(c.r * a.glow, c.g * a.glow, c.b * a.glow, 1))
+		end
+	end
+	anim_camera(a)
+end
+magic.SubscribeToEvent("Update", "handle_launch_anim")
+
+-- Back in the room: the orb in its pocket, its light and colour as the
+-- preset has them, the white gone
+function launch_anim_reset()
+	local a = launch_anim
+	launch_anim = nil
+	launch_overlay.visible = false
+	if a and a.b then
+		move_orb_to(a.b, a.home.x, a.home.y, a.home.z)
+		set_preset(current)
+	end
+end
+
 -- Launching, in this room, is the bay coming apart and the camera going
 -- in: there is nothing behind it to run yet, and the transition is the
 -- content.
@@ -5087,11 +5220,6 @@ function launch(b)
 	if not b or not orb_places[b] then
 		return
 	end
-	local o = orb_places[b]
-	local ox, oz = orb_out(b)
-	fly_to({x = o.x + ox * 7.0, y = o.y + 0.8, z = o.z + oz * 7.0},
-			{x = o.x, y = o.y, z = o.z})
-	dissolve_bay(b, true)
 	log:info("launch: " .. (ORBS[b] and ORBS[b].name or "?") ..
 			" (bay " .. b .. ")")
 	-- **And it launches.** The action came out of the launch grid, which
@@ -5111,6 +5239,11 @@ function launch(b)
 		-- up rather than assuming one did.
 		if api.local_server_running() then
 			entered_app()
+			-- A wall orb plays the animation; the floor's actions do not
+			-- (section 0 is the games')
+			if b <= BAYS then
+				launch_anim_start(b, launch_floor_middle(), ORBS[b].name)
+			end
 		end
 	elseif ORBS[b] and ORBS[b].server then
 		connect_to(ORBS[b].name, ORBS[b].address)
@@ -5126,6 +5259,21 @@ function launch(b)
 		local ok, why = api.launch_save(o.app, o.name)
 		if ok then
 			entered_app()
+			-- **The save's own game, brought to it** (section 0): the
+			-- orb of the app the save belongs to pulls out and moves
+			-- into the save's sphere; a save whose app has no orb on the
+			-- wall glows where it stands
+			local g = nil
+			for i = 1, BAYS do
+				local k = ORBS[i] and ORBS[i].key
+				if k and k:sub(1, #("app/" .. o.app .. "/")) ==
+						"app/" .. o.app .. "/" then
+					g = i
+					break
+				end
+			end
+			local at = orb_places[b]
+			launch_anim_start(g, {x = at.x, y = at.y, z = at.z}, o.name)
 		else
 			log:warning("launch: " .. tostring(why))
 		end
@@ -5373,6 +5521,21 @@ function room_switch(what, arg)
 		set_preset(tonumber(arg) or 1)
 	elseif what == "station" then
 		go_station(arg)
+	elseif what == "dissolve" then
+		-- **The dissolve, kept for stage 3** ([LAUNCH_WORLD] section 12:
+		-- a possible effect on a pocket at a launch, undecided, and no
+		-- transition of its own any more): a check opens and shuts a bay
+		-- by this, the empty pocket's unless a number says which
+		local b = tonumber(arg)
+		if not b then
+			for i = 1, BAYS do
+				if ORBS[i] and ORBS[i].empty then b = i end
+			end
+		end
+		local st = b and bay_state[b]
+		if st then
+			dissolve_bay(b, st.target == 0)
+		end
 	else
 		log:warning("event room: \"" .. tostring(what) .. "\" is not a switch")
 	end
@@ -5492,6 +5655,9 @@ end
 function stand_down(why)
 	if in_app then return end
 	in_app = true
+	-- The white is the room's: the game's own first frame is not drawn
+	-- under it
+	launch_overlay.visible = false
 	launching = false
 	log:info("game: the room stands down (" .. why .. ")")
 end
@@ -5499,6 +5665,12 @@ end
 -- Asked once a frame while a launch is in flight; see LAUNCH_WAIT_S
 function launch_watch()
 	if not launching then return end
+	-- Held behind the game's own menu: the wait for its view has not
+	-- begun ([LAUNCH_WORLD] section 12)
+	if launch_anim and launch_anim.held then
+		launch_started_us = buildat.get_time_us()
+		return
+	end
 	local now = magic.viewport_generation and magic.viewport_generation() or 0
 	if now ~= launch_viewports then
 		stand_down("the game has the view")
@@ -5549,6 +5721,13 @@ function leave_app()
 	pause_panel.visible = false
 	terminal_open = false
 	pause_open = false
+	-- The orb back in its pocket and the camera at the wall
+	launch_anim_reset()
+	cam.to_from, cam.to_at = nil, nil
+	cam.from = {x = HOME_FROM.x, y = HOME_FROM.y, z = HOME_FROM.z}
+	cam.at = {x = HOME_AT.x, y = HOME_AT.y, z = HOME_AT.z}
+	apply_camera()
+	station = "wall"
 	-- The mouse the way the room takes it rather than the way the game
 	-- left it
 	mouse_for("launch_world: back in the room")
@@ -5616,9 +5795,19 @@ if env("BUILDAT_LAUNCH_STILL") ~= "" then room_switch("still") end
 	magic.SubscribeToEvent("Update", "handle_frame_trace")
 end)()
 
+-- **The game says it is loading** (the launch API's `launch_loading`):
+-- the animation goes on even with the game's menu still up
+function app_loading(what)
+	if launch_anim and not launch_anim.loading then
+		launch_anim.loading = true
+		log:info("launch: the game is loading a " .. tostring(what))
+	end
+end
+
 return {
 	entered_app = entered_app,
 	leave_app = leave_app,
+	app_loading = app_loading,
 	in_app = function() return in_app end,
 	be_backdrop = be_backdrop,
 }

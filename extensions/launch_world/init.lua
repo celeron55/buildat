@@ -33,6 +33,7 @@ function M.boot(action)
 		M.entered_app = room.entered_app
 		M.leave_app = room.leave_app
 		M.in_app = room.in_app
+		M.app_loading = room.app_loading
 		if backdrop and room.be_backdrop then
 			room.be_backdrop()
 		end
