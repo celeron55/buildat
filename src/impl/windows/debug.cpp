@@ -229,6 +229,10 @@ void init_signal_handlers(const SigConfig &config)
 		SetUnhandledExceptionFilter(unhandled_exception);
 }
 
+// simplified: the Linux watchdog's interrupt is not here; a frozen
+// thread is logged and left alone
+void watchdog_on_freeze(void (*f)()){}
+
 void watchdog_alive(int stall_seconds)
 {
 	g_watched_alive_us = (LONG64)GetTickCount64() * 1000;

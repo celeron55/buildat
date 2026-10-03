@@ -193,6 +193,24 @@ do
 	log:info("wrapped: a cursor shape came off a game's own image")
 end
 
+-- VariantMap:GetPtr ([SECURITY_RUN_1], 2026-10-03): a Ptr comes back
+-- as what it is or a base of it. Variant:GetPtr() casts to the name it
+-- is given, and a Node read as a UIElement had its methods reading
+-- past the Node (found by util/fuzz/sandbox_fuzz.lua)
+do
+	local scene = magic.Scene()
+	local vm = magic.VariantMap()
+	vm:SetPtr("n", scene:CreateChild("x"))
+	assert(vm:GetPtr("Node", "n"), "a Node reads back as a Node")
+	vm:SetPtr("s", scene)
+	assert(vm:GetPtr("Node", "s"), "a Scene reads back as a Node")
+	assert(not pcall(vm.GetPtr, vm, "UIElement", "n"),
+			"a Node does not read back as a UIElement")
+	assert(not pcall(vm.GetPtr, vm, "Scene", "n"),
+			"a Node does not read back as a Scene")
+	log:info("wrapped: a Ptr reads back only as its own class or a base")
+end
+
 -- buildat.parse_json (2026-09-25): the shapes a fetched body arrives in
 do
 	local v = buildat.parse_json(

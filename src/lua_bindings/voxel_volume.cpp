@@ -70,7 +70,7 @@ sp_<CommonVolume> deserialize_volume(
 	if(buf == nullptr)
 		data = lua_checkcppstring(L, 1);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	return interface::deserialize_volume(data);
 }
@@ -84,10 +84,13 @@ sp_<CommonVolume> deserialize_volume_int32(
 	if(buf == nullptr)
 		data = lua_checkcppstring(L, 1);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	up_<pv::RawVolume<int32_t>> volume_int32 =
 			interface::deserialize_volume_int32(data);
+	// Data it could not read: nil, as deserialize_volume answers
+	if(!volume_int32)
+		return nullptr;
 
 	auto region = volume_int32->getEnclosingRegion();
 
@@ -117,10 +120,13 @@ sp_<CommonVolume> deserialize_volume_8bit(
 	if(buf == nullptr)
 		data = lua_checkcppstring(L, 1);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	up_<pv::RawVolume<uint8_t>> volume_8bit =
 			interface::deserialize_volume_8bit(data);
+	// Data it could not read: nil, as deserialize_volume answers
+	if(!volume_8bit)
+		return nullptr;
 
 	auto region = volume_8bit->getEnclosingRegion();
 

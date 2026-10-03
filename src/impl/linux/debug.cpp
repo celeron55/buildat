@@ -399,6 +399,13 @@ static pthread_t g_watched_thread;
 static std::atomic<int64_t> g_watched_alive_us(0);
 static int g_watchdog_stall_s = 10;
 static std::atomic_bool g_watchdog_started(false);
+static void (*g_watchdog_on_freeze)() = nullptr;
+// The next SIGUSR2 is the freeze's, not a report's
+static std::atomic_bool g_watchdog_freeze(false);
+static const int WATCHDOG_FREEZE_S = 30;
+// Where the freeze's signal found the thread: in machine code LuaJIT
+// compiled, which no hook reaches
+static std::atomic_bool g_watchdog_in_jit(false);
 
 static int64_t watchdog_now_us()
 {
@@ -411,6 +418,25 @@ static void watchdog_sighandler(int sig, siginfo_t *info, void *secret)
 {
 	(void)sig; (void)info;
 	ucontext_t *uc = (ucontext_t*)secret;
+	// **Not unwound from machine code LuaJIT made**: it has no unwind
+	// tables, and the unwinder walking off it aborted the client -- the
+	// watchdog turning a stall into a crash. Such code is in no object.
+	// simplified: dladdr() is not async-signal-safe; it takes the loader's
+	// lock, so a thread frozen inside dlopen() would hang here as well
+	Dl_info dl;
+	const bool in_jit = !dladdr((void*)uc->uc_mcontext.gregs[REG_EIP], &dl);
+	if(g_watchdog_freeze.exchange(false)){
+		g_watchdog_in_jit = in_jit;
+		if(g_watchdog_on_freeze)
+			g_watchdog_on_freeze();
+		return;
+	}
+	if(in_jit){
+		fprintf(stderr, "  The main thread is in no loaded object (%p): "
+				"machine code LuaJIT compiled from a script\n",
+				(void*)uc->uc_mcontext.gregs[REG_EIP]);
+		return;
+	}
 	void *trace[BACKTRACE_SIZE];
 	int trace_size = backtrace(trace, BACKTRACE_SIZE);
 	trace[1] = (void*)uc->uc_mcontext.gregs[REG_EIP];
@@ -421,6 +447,7 @@ static void *watchdog_main(void*)
 {
 	int64_t next_report = 0;
 	bool stalled = false;
+	bool freeze_sent = false;
 	for(;;){
 		sleep(1);
 		const int64_t now = watchdog_now_us();
@@ -431,7 +458,28 @@ static void *watchdog_main(void*)
 		}
 		if(!stalled){
 			stalled = true;
+			freeze_sent = false;
 			next_report = now;
+		}
+		// **A compiled loop ends the client rather than its window**: the
+		// hook did not reach it, nothing else will, and a window frozen
+		// for good -- full screen, perhaps -- is worse than a client that
+		// says why it left
+		if(freeze_sent && g_watchdog_in_jit &&
+				now - alive >= (int64_t)WATCHDOG_FREEZE_S * 2 * 1000000){
+			fprintf(stderr, "\nWatchdog: no frame for %d s, in Lua that "
+					"LuaJIT compiled and the interrupt does not reach; "
+					"exiting\n", (int)((now - alive) / 1000000));
+			_exit(3);
+		}
+		if(!freeze_sent && g_watchdog_on_freeze &&
+				now - alive >= (int64_t)WATCHDOG_FREEZE_S * 1000000){
+			freeze_sent = true;
+			fprintf(stderr, "\nWatchdog: no frame for %d s; interrupting "
+					"the main thread's Lua\n", (int)((now - alive) / 1000000));
+			g_watchdog_freeze = true;
+			pthread_kill(g_watched_thread, SIGUSR2);
+			continue;
 		}
 		if(now < next_report)
 			continue;
@@ -441,6 +489,11 @@ static void *watchdog_main(void*)
 		pthread_kill(g_watched_thread, SIGUSR2);
 	}
 	return nullptr;
+}
+
+void watchdog_on_freeze(void (*f)())
+{
+	g_watchdog_on_freeze = f;
 }
 
 void watchdog_alive(int stall_seconds)

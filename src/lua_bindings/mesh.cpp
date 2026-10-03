@@ -64,7 +64,7 @@ void set_simple_voxel_model(const luabind::object &node_o,
 	if(buf == nullptr)
 		data = lua_tocppstring(L, 5);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	if((int)data.size() != w * h * d){
 		throw Exception(ss_()+"set_simple_voxel_model(): Data size does not match"
@@ -100,7 +100,7 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 	if(buf == nullptr)
 		data = lua_tocppstring(L, 5);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	if((int)data.size() != w * h * d){
 		throw Exception(ss_()+"set_8bit_voxel_geometry(): Data size does not match"
@@ -553,7 +553,7 @@ void set_voxel_geometry(const luabind::object &node_o,
 	if(buf == nullptr)
 		data = lua_checkcppstring(L, 2);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
@@ -590,7 +590,7 @@ void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 	if(buf == nullptr)
 		data = lua_tocppstring(L, 2);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
@@ -640,7 +640,7 @@ void set_voxel_physics_boxes(const luabind::object &node_o,
 	if(buf == nullptr)
 		data = lua_tocppstring(L, 2);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
@@ -689,7 +689,7 @@ ss_ column_heights(const luabind::object &buffer_o,
 	if(buf == nullptr)
 		data = lua_checkcppstring(L, 1);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 	up_<VoxelVolume> volume = interface::deserialize_volume(data);
 	sv_<int16_t> h = interface::mesh::column_heights(*volume, voxel_reg.get());
 	return ss_((const char*)h.data(), h.size() * sizeof(int16_t));

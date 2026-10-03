@@ -55,11 +55,22 @@ static int l_hex(lua_State *L)
 // Bignum primitives; numbers are big-endian byte strings. The composition on
 // top of these -- SRP's hashing and padding, say -- belongs in Lua.
 
+// An operand: 1024 bytes at most, twice SRP's 4096-bit group. A server's
+// Lua handing mod_exp 70 kB numbers held the client's frame for minutes
+static ss_ operand(lua_State *L, int i)
+{
+	ss_ v = lua_checkcppstring(L, i);
+	if(v.size() > 1024)
+		luaL_error(L, "bignum: an operand of 1024 bytes at most, got %d",
+				(int)v.size());
+	return v;
+}
+
 // bignum_add(a, b) -> a + b
 static int l_bignum_add(lua_State *L)
 {
-	ss_ r = interface::bignum::add(lua_checkcppstring(L, 1),
-			lua_checkcppstring(L, 2));
+	ss_ r = interface::bignum::add(operand(L, 1),
+			operand(L, 2));
 	lua_pushlstring(L, r.c_str(), r.size());
 	return 1;
 }
@@ -67,8 +78,8 @@ static int l_bignum_add(lua_State *L)
 // bignum_mul(a, b) -> a * b
 static int l_bignum_mul(lua_State *L)
 {
-	ss_ r = interface::bignum::mul(lua_checkcppstring(L, 1),
-			lua_checkcppstring(L, 2));
+	ss_ r = interface::bignum::mul(operand(L, 1),
+			operand(L, 2));
 	lua_pushlstring(L, r.c_str(), r.size());
 	return 1;
 }
@@ -77,8 +88,8 @@ static int l_bignum_mul(lua_State *L)
 static int l_bignum_mod(lua_State *L)
 {
 	try {
-		ss_ r = interface::bignum::mod(lua_checkcppstring(L, 1),
-				lua_checkcppstring(L, 2));
+		ss_ r = interface::bignum::mod(operand(L, 1),
+				operand(L, 2));
 		lua_pushlstring(L, r.c_str(), r.size());
 	} catch(std::exception &e){
 		return luaL_error(L, "bignum_mod(): %s", e.what());
@@ -90,8 +101,8 @@ static int l_bignum_mod(lua_State *L)
 static int l_bignum_sub_mod(lua_State *L)
 {
 	try {
-		ss_ r = interface::bignum::sub_mod(lua_checkcppstring(L, 1),
-				lua_checkcppstring(L, 2), lua_checkcppstring(L, 3));
+		ss_ r = interface::bignum::sub_mod(operand(L, 1),
+				operand(L, 2), operand(L, 3));
 		lua_pushlstring(L, r.c_str(), r.size());
 	} catch(std::exception &e){
 		return luaL_error(L, "bignum_sub_mod(): %s", e.what());
@@ -103,8 +114,8 @@ static int l_bignum_sub_mod(lua_State *L)
 static int l_bignum_mul_mod(lua_State *L)
 {
 	try {
-		ss_ r = interface::bignum::mul_mod(lua_checkcppstring(L, 1),
-				lua_checkcppstring(L, 2), lua_checkcppstring(L, 3));
+		ss_ r = interface::bignum::mul_mod(operand(L, 1),
+				operand(L, 2), operand(L, 3));
 		lua_pushlstring(L, r.c_str(), r.size());
 	} catch(std::exception &e){
 		return luaL_error(L, "bignum_mul_mod(): %s", e.what());
@@ -116,8 +127,8 @@ static int l_bignum_mul_mod(lua_State *L)
 static int l_bignum_mod_exp(lua_State *L)
 {
 	try {
-		ss_ r = interface::bignum::mod_exp(lua_checkcppstring(L, 1),
-				lua_checkcppstring(L, 2), lua_checkcppstring(L, 3));
+		ss_ r = interface::bignum::mod_exp(operand(L, 1),
+				operand(L, 2), operand(L, 3));
 		lua_pushlstring(L, r.c_str(), r.size());
 	} catch(std::exception &e){
 		return luaL_error(L, "bignum_mod_exp(): %s", e.what());

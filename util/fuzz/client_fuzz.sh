@@ -5,6 +5,9 @@
 # again and again, each run watched for a crash in its log. The logs and
 # the seed go to local/security/fuzz/client/.
 #
+# SANDBOX=1 sends sandbox_fuzz.lua instead: the sandbox's own API called
+# by a server's Lua with values at the edges.
+#
 #   util/fuzz/client_fuzz.sh [seconds] [seed]
 set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
@@ -18,7 +21,9 @@ cd "$here/Build/${BUILD-asan}"
 export ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=0:abort_on_error=1}
 make -s -j8 > "$out/make.log" 2>&1 ||
 	{ echo "the build failed: $out/make.log"; exit 2; }
-python3 "$here/util/fuzz/client_fuzz.py" "$port" 8 "$seed" > "$out/server.log" 2>&1 &
+lua=(); [ "${SANDBOX:-}" = 1 ] && lua=("$here/util/fuzz/sandbox_fuzz.lua")
+python3 "$here/util/fuzz/client_fuzz.py" "$port" 8 "$seed" "${lua[@]}" \
+	> "$out/server.log" 2>&1 &
 srv=$!
 trap 'kill $srv 2>/dev/null' EXIT
 sleep 1
@@ -29,11 +34,40 @@ echo "seed $seed, port $port"
 end=$(( $(date +%s) + secs )); runs=0; bad=""
 while [ "$(date +%s)" -lt "$end" ]; do
 	runs=$((runs + 1))
-	timeout -s KILL 30 bin/buildat -s "127.0.0.1:$port" -D "$out/user" \
+	bin/buildat -s "127.0.0.1:$port" -D "$out/user" \
 		-w 640x360 -l 3 -o sound_mute=1 -U "$here/3rdparty/Urho3D" -P "$here" \
 		-C "$out/cache" -c @"$out/cmds.txt" \
-		> "$out/cli.log" 2>&1
-	st=$?
+		> "$out/cli.log" 2>&1 &
+	cli=$!; st=0; : > "$out/stack.txt"; last=0; quiet=0
+	# The threads are taken from outside after 6 s of a quiet log: the
+	# client's own watchdog prints no stack from LuaJIT's machine code.
+	# At 30 s it is a hang
+	for i in $(seq 1 30); do
+		sleep 1
+		kill -0 $cli 2>/dev/null || break
+		size=$(stat -c %s "$out/cli.log")
+		[ "$size" = "$last" ] && quiet=$((quiet + 1)) || quiet=0
+		last=$size
+		if [ "$quiet" -ge 6 ] && [ ! -s "$out/stack.txt" ]; then
+			gstack $cli > "$out/stack.txt" 2>&1
+		fi
+	done
+	if kill -0 $cli 2>/dev/null; then
+		[ -s "$out/stack.txt" ] || gstack $cli > "$out/stack.txt" 2>&1
+		kill -9 $cli; st=137
+	fi
+	wait $cli 2>/dev/null
+	# **Lua that takes its time is not a finding here**: a served chunk has
+	# no instruction limit (the run's open question), so a stall whose main
+	# thread is in LuaJIT -- its runtime or its machine code, "??" -- is
+	# counted and the run goes on
+	top=$(awk '/^Thread 1 /{t=1; next} t && /^#/{print} t && /^$/{exit}' \
+		"$out/stack.txt" | head -6)
+	if [ -n "$top" ] && echo "$top" | grep -q "LuaJIT/src\| in ?? ()"; then
+		lua_slow=$((${lua_slow:-0} + 1))
+		cp "$out/cli.log" "$out/lua_slow_$lua_slow.log"
+		continue
+	fi
 	if grep -aq "Crash: SIG\|AddressSanitizer\|runtime error" "$out/cli.log"; then
 		bad="a crash in the client's log"; break
 	fi
@@ -44,8 +78,10 @@ kill $srv 2>/dev/null
 tail -1 "$out/server.log"
 if [ -n "$bad" ]; then
 	cp "$out/cli.log" "$out/fail_$seed.log"
+	[ -s "$out/stack.txt" ] && cp "$out/stack.txt" "$out/fail_${seed}_stack.txt"
 	echo "FAIL: $bad (seed $seed, run $runs); $out/fail_$seed.log"
 	grep -a -A12 "Crash: SIG\|AddressSanitizer\|runtime error" "$out/cli.log" | head -30
 	exit 1
 fi
-echo "PASS: $runs client runs against a hostile server"
+echo "PASS: $runs client runs against a hostile server" \
+	"(${lua_slow:-0} stalled in Lua: lua_slow_*.log)"

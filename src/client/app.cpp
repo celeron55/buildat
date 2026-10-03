@@ -841,6 +841,29 @@ static ss_ g_local_server_port;
 static ss_ g_local_server_app;
 // The watchdog's stall, in seconds; a screen may lower it ([BOX_PLAYTEST_2] 12)
 static int g_watchdog_seconds = 10;
+// **A script that does not return is stopped, not waited out**: a
+// server's Lua has no instruction limit, and `while true do end` froze
+// the client for good. After 30 s without a frame the watchdog sets this
+// hook from its signal handler, the way luajit's own Ctrl-C does, and
+// the first Lua instruction after it errors out to the nearest pcall.
+// simplified: a loop LuaJIT has compiled never returns to the
+// interpreter, so the hook does not reach it, and a freeze in C++ leaves
+// the hook to fire in whatever Lua runs next before the frame clears it
+static lua_State *g_watchdog_L = nullptr;
+static std::atomic_bool g_watchdog_hooked(false);
+static void watchdog_lua_hook(lua_State *L, lua_Debug *ar)
+{
+	(void)ar;
+	lua_sethook(L, nullptr, 0, 0);
+	g_watchdog_hooked = false;
+	luaL_error(L, "the watchdog stopped Lua that ran for 30 s without a frame");
+}
+static void watchdog_freeze()
+{
+	g_watchdog_hooked = true;
+	lua_sethook(g_watchdog_L, watchdog_lua_hook,
+			LUA_MASKCALL | LUA_MASKRET | LUA_MASKCOUNT, 1);
+}
 // The local server's log, tailed for its STATUS lines ([START_PROGRESS])
 static ss_ g_local_server_log;
 static size_t g_local_server_log_offset = 0;
@@ -2025,6 +2048,8 @@ struct CApp: public App, public magic::Application
 		L = m_script->GetState();
 		if(L == nullptr)
 			throw Exception("m_script.GetState() returned null");
+		g_watchdog_L = L;
+		interface::debug::watchdog_on_freeze(watchdog_freeze);
 
 		// Store current CApp instance in registry
 		lua_pushlightuserdata(L, (void*)this);
@@ -2738,6 +2763,8 @@ struct CApp: public App, public magic::Application
 		// worldgen, and the stack says what this thread was doing;
 		// [BOX_PLAYTEST_2] 12)
 		interface::debug::watchdog_alive(g_watchdog_seconds);
+		if(g_watchdog_hooked.exchange(false))
+			lua_sethook(L, nullptr, 0, 0);
 #ifdef __EMSCRIPTEN__
 		web_text_sync(GetSubsystem<magic::UI>());
 #endif
@@ -3719,7 +3746,9 @@ struct CApp: public App, public magic::Application
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 		double s = lua_tonumber(L, 1);
-		self->m_ui_scale_lua = (s > 0) ? (float)s : 0.f;
+		// 0.25 to 8: a server's Lua asking for 1e308 made every glyph a
+		// page of its own that failed, a frame in tens of seconds
+		self->m_ui_scale_lua = (s > 0) ? (float)std::max(0.25, std::min(s, 8.0)) : 0.f;
 		self->apply_ui_scale();
 		return 0;
 	}

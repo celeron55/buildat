@@ -162,12 +162,22 @@ function M.define(dst, util)
 						error("VariantMap:GetPtr("..tostring(key)..
 								"): missing or empty")
 					end
-					local ptr = v:GetPtr(type)
-					if ptr == nil then
+					-- **As what it is, or a base of it** ([SECURITY_RUN_1]):
+					-- Variant:GetPtr() casts to whatever it is told, so a
+					-- Node read back as a UIElement had UIElement's methods
+					-- reading past it. Every Ptr here is an Object: what
+					-- SetPtr takes and what the whitelisted events carry
+					local obj = v:GetPtr("Object")
+					if obj == nil then
 						error("VariantMap:GetPtr("..tostring(key)..", "..
 								tostring(type).."): ptr is nil")
 					end
-					return util.wrap_instance(type, ptr)
+					-- simplified: a class the sandbox does not wrap is
+					-- refused even when it derives from the asked one
+					local actual = util.wrap_instance(obj:GetTypeName(), obj)
+					if actual == nil then return nil end
+					magic_sandbox.safe_to_unsafe(actual, type)
+					return util.wrap_instance(type, v:GetPtr(type))
 				end),
 		}
 	})

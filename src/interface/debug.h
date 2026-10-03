@@ -39,6 +39,10 @@ namespace interface
 		// freeze reads like a crash in the log -- and again every minute
 		// of the same freeze. Started on the first call.
 		void watchdog_alive(int stall_seconds = 10);
+		// What a freeze of 30 s does besides the logging (Linux; nothing
+		// elsewhere): f is called on the frozen thread from a signal
+		// handler, so it may do only what a handler may
+		void watchdog_on_freeze(void (*f)());
 
 		struct SigConfig {
 			bool catch_segfault = true;

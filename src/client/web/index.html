@@ -41,11 +41,20 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	var args = ['-P', '/buildat', '-U', '/urho', '-C', '/buildat/cache',
 		'-D', '/buildat/user', '-s', host + ':' + port,
 		'-w', window.innerWidth + 'x' + window.innerHeight];
-	// Anything after ? is passed on as more arguments, space separated:
-	// ?-l 4 for a verbose log
-	var extra = decodeURIComponent(location.search.substring(1));
-	if(extra)
-		args = args.concat(extra.split(' ').filter(function(a){ return a; }));
+	// After ? come more arguments, space separated: ?-l 4 for a verbose
+	// log. **The log level, the UI scale and the preferences only**
+	// ([SECURITY_RUN_1]): a link is anybody's to write, and with every
+	// flag a link to a real server's page ran its command sequence --
+	// keys and text in the user's session, typed into an admin's chat --
+	// or connected to another server inside this one's origin
+	var extra = decodeURIComponent(location.search.substring(1))
+			.split(' ').filter(function(a){ return a; });
+	for(var i = 0; i + 1 < extra.length; i += 2){
+		if(['-l', '-u', '-o'].indexOf(extra[i]) >= 0)
+			args.push(extra[i], extra[i + 1]);
+		else
+			console.log('Not taken from the address: ' + extra[i]);
+	}
 	// **Back in by itself** (user, 2026-09-30): a phone's browser drops
 	// the connection of a page that has been in the background for some
 	// seconds (Vivaldi on Android, another app in front). A disconnect after

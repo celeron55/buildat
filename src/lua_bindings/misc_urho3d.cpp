@@ -43,7 +43,9 @@ namespace lua_bindings {
 
 static int l_profiler_block_begin(lua_State *L)
 {
-	const char *name = lua_tostring(L, 1);
+	// A name, which Urho3D's profiler reads without asking whether there
+	// is one; a server's Lua passing none crashed the next profiler_data
+	const char *name = luaL_checkstring(L, 1);
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
@@ -51,8 +53,15 @@ static int l_profiler_block_begin(lua_State *L)
 	Context *context = buildat_app->get_scene()->GetContext();
 
 	Profiler *profiler = context->GetSubsystem<magic::Profiler>();
-	if(profiler)
-		profiler->BeginBlock(name);
+	if(!profiler)
+		return 0;
+	// And 64 deep at most: each frame walks the blocks recursively, so a
+	// script's million unended begins would have been the stack's end
+	int depth = 0;
+	for(const ProfilerBlock *b = profiler->GetCurrentBlock(); b; b = b->parent_)
+		if(++depth > 64)
+			return luaL_error(L, "profiler_block_begin: 64 blocks deep at most");
+	profiler->BeginBlock(name);
 
 	return 0;
 }

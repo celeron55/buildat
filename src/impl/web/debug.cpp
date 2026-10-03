@@ -22,6 +22,7 @@ void log_backtrace_chain(const std::list<ThreadBacktrace> &chain,
 	log_w(MODULE, "%s", reason);
 }
 void watchdog_alive(int stall_seconds){}
+void watchdog_on_freeze(void (*f)()){}
 void init_signal_handlers(const SigConfig &config){}
 
 }

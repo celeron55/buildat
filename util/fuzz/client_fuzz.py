@@ -9,11 +9,15 @@
 # connection, then closes it. It watches nothing; client_fuzz.sh watches
 # the client.
 #
-#   client_fuzz.py <port> <seconds per connection> <seed>
+# With a Lua file as a fourth argument it sends only that, as
+# core:run_script with SEED set, a run every half a second.
+#
+#   client_fuzz.py <port> <seconds per connection> <seed> [script.lua]
 import os, random, socket, struct, sys, time
 
 port, seconds = int(sys.argv[1]), float(sys.argv[2])
 rnd = random.Random(int(sys.argv[3]))
+script = open(sys.argv[4], "rb").read() if len(sys.argv) > 4 else None
 
 NAMES = ["core:announce_files", "core:file_contents", "core:run_script",
         "core:tell_after_all_files_transferred", "core:unordered",
@@ -111,6 +115,20 @@ while True:
             except BlockingIOError:
                 pass
             out = b""
+            if script:
+                if "core:run_script" not in types:
+                    types["core:run_script"] = nxt
+                    n = b"core:run_script"
+                    out += packet(0, struct.pack("<HI", nxt, len(n)) + n)
+                    nxt += 1
+                seed = b"SEED = %d\n" % rnd.randrange(1, 2**31)
+                out += packet(types["core:run_script"], seed + script)
+                sent += 1
+                c.setblocking(True)
+                c.sendall(out)
+                c.setblocking(False)
+                time.sleep(0.5)
+                continue
             for _ in range(rnd.randrange(1, 10)):
                 name = rnd.choice(NAMES)
                 if name not in types:

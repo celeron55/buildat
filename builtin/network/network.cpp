@@ -757,6 +757,31 @@ struct Module: public interface::Module, public network::Interface
 		return last;
 	}
 
+	// **A WebSocket from this server's own page only** ([SECURITY_RUN_1]):
+	// a browser lets any site's script open one to any address and says
+	// which site in Origin, so without this a page out on the web joined
+	// the game a launcher keeps on 127.0.0.1 as a player. A request with
+	// no Origin is no browser's; one through the trusted proxy has come
+	// past the deployment's public face, which is anyone's anyway.
+	// Otherwise the page's origin is the address it was asked for, and an
+	// address that reached loopback is a loopback name -- a name rebound
+	// to 127.0.0.1 is the same site to the browser, and not to this
+	static bool ws_origin_ok(const ss_ &origin, const ss_ &host,
+			const ss_ &local_address, bool through_proxy)
+	{
+		if(origin.empty() || through_proxy)
+			return true;
+		const size_t s = origin.find("://");
+		if(s == ss_::npos || web::lower(origin.substr(s + 3)) != web::lower(host))
+			return false;
+		if(!loopback(local_address))
+			return true;
+		const ss_ name = web::lower(host.substr(0, host[0] == '[' ?
+				host.find(']') + 1 : host.find(':')));
+		return name == "localhost" || name == "[::1]" ||
+				name.compare(0, 4, "127.") == 0;
+	}
+
 	void emit_connected(Peer &peer)
 	{
 		log_i(MODULE, "Client %zu from %s connected%s%s",
@@ -897,6 +922,18 @@ struct Module: public interface::Module, public network::Interface
 			const ss_ &key = headers["sec-websocket-key"];
 			if(key.empty())
 				return false;
+			if(!ws_origin_ok(headers["origin"], headers["host"],
+					peer.socket->get_local_address(),
+					!forwarded_for(peer, headers["x-forwarded-for"]).empty())){
+				log_w(MODULE, "Refused a WebSocket from %s: a page of %s, "
+						"asking for %s", cs(peer.socket->get_remote_address()),
+						cs(headers["origin"]), cs(headers["host"]));
+				peer.closing = true;
+				ss_ body = "Not from this server's page\n";
+				peer.queue_raw(web::response("403 Forbidden",
+						"text/plain; charset=utf-8", body.size()) + body);
+				return true;
+			}
 			ss_ r = "HTTP/1.1 101 Switching Protocols\r\n"
 					"Upgrade: websocket\r\n"
 					"Connection: Upgrade\r\n"
