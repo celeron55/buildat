@@ -247,11 +247,11 @@ end
 -- glow's orange. Dusk is the mirror, the sun's height being the same.
 --   BUILDAT_LUANTI_DAWN_GLOW     the band's radiance at the horizon
 --   BUILDAT_LUANTI_DAWN_AMBIENT  the share of it the ambient terms take
--- simplified: the picks below are a first guess named as one, until the
--- user picks off local/options_for_DAWN_LIGHT/glow/
+-- The defaults are the user's pick off local/options_for_DAWN_LIGHT/glow/,
+-- g1.0_a0.3 (2026-10-03).
 M.DAWN_GLOW = tonumber(buildat.get_env("BUILDAT_LUANTI_DAWN_GLOW") or "") or 1.0
 M.DAWN_AMBIENT = tonumber(buildat.get_env("BUILDAT_LUANTI_DAWN_AMBIENT") or "")
-		or 0.15
+		or 0.3
 M.DAWN_COLOR = {r = 1.0, g = 0.55, b = 0.25}
 
 -- The glow's radiance at a sun's height, 0 outside the window

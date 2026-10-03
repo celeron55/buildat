@@ -34,8 +34,8 @@ end
 -- **The light, as an options round** ([LAUNCH_WORLD] stage 3, the light;
 -- local/options_for_LOBBY_light/): one knob, BUILDAT_LAUNCH_LIGHT=<name>,
 -- each a whole look rather than a slider, so the user's pick is a
--- one-word default. "tomb" is the room as stage 2 left it and stays the
--- default until the pick.
+-- one-word default. "ambient" is the user's pick (2026-10-03) and the
+-- default; "tomb" is the room as stage 2 left it.
 --   cave     a floor of light on every voxel, the shader's cCaveAmbient
 --            (nought in the tomb: the room's vertex colours carry none)
 --   zone     the zone's ambient, which lights the spheres and the desk
@@ -73,7 +73,7 @@ LIGHT_LOOKS = {
 		shadows = false, opening = 1.0},
 }
 light_look_name = LIGHT_LOOKS[env("BUILDAT_LAUNCH_LIGHT")] and
-		env("BUILDAT_LAUNCH_LIGHT") or "tomb"
+		env("BUILDAT_LAUNCH_LIGHT") or "ambient"
 light_look = LIGHT_LOOKS[light_look_name]
 -- require answers the safe interface inside the sandbox and the whole
 -- extension outside it; the safe table raises on a name it does not
