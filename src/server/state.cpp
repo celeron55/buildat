@@ -200,9 +200,24 @@ struct ModuleContainer
 		event_queue.push_back(event);
 		event_queue_sem.post();
 	}
+	// Handled in the module's own thread, as a direct callback, and
+	// waited for: run from the caller's thread it ran beside whatever the
+	// module's thread was doing for another module -- voxelworld's save at
+	// shutdown beside a relight luanti had asked for, both in its section
+	// cache. mutex is held by neither of those.
 	void emit_event_sync(const Event &event){
-		interface::MutexScope ms(mutex);
-		module->event(event.type, event.p.get());
+		std::exception_ptr e;
+		try {
+			execute_direct_cb([&](interface::Module *module){
+				module->event(event.type, event.p.get());
+			}, e, nullptr);
+		} catch(interface::ModuleAskedToStop &stop){
+			log_w(MODULE, "M[%s]: stopping; a synchronous event is not "
+					"handled: %s", cs(info.name), stop.what());
+			return;
+		}
+		if(e)
+			std::rethrow_exception(e);
 	}
 	// If returns false, the module thread is stopping and cannot be called
 	// NOTE: It's not possible for the caller module to be deleted while this is
