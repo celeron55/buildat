@@ -30,6 +30,9 @@ tmp=$(mktemp -d "/tmp/buildat_starport.XXXXXX")
 SP=29641
 AN=29642
 AN2=29643
+# The box lets a server connect to the usual ports only ([PROCESS_SANDBOX]
+# A); these are this check's own
+export BUILDAT_CONNECT_PORTS="$SP,$AN,$AN2"
 pids=()
 cleanup() {
 	for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
@@ -70,6 +73,11 @@ done
 grep -q "verified ok" "$tmp/sp.log" || fail "no verified listing (sp.log, an.log)"
 read -r _ _ id _ _ ccode < <(grep -v "^#" "$claim")
 echo "ok: listed as $id and verified"
+# The challenge signs a Starport's nonce and nothing else: the same secret
+# makes the claim code and ID tokens ([SECURITY_RUN_1])
+[ "$(api -o /dev/null -w '%{http_code}' \
+	"localhost:$AN/api/starport/challenge?listing=$id&nonce=claim")" = 404 ] ||
+	fail "the challenge answered for the nonce \"claim\""
 
 api "localhost:$SP/api/list" | grep -q "\"$id\"" &&
 	fail "an unclaimed listing was served"

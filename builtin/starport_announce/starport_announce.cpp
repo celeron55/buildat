@@ -1018,8 +1018,14 @@ struct Module: public interface::Module, public Interface
 			return;
 		const ss_ id = query_value(r.query, "listing");
 		const ss_ nonce = query_value(r.query, "nonce");
+		// Only the nonce a Starport sends: 32 lowercase hex digits. The
+		// same secret signs the claim code (HMAC of "claim") and Starport
+		// ID tokens (HMAC of a base64url payload), and neither is ever
+		// that shape -- an answer to any string was both, for anyone.
+		const bool nonce_ok = nonce.size() == 32 &&
+				nonce.find_first_not_of("0123456789abcdef") == ss_::npos;
 		ss_ response;
-		{
+		if(nonce_ok){
 			std::lock_guard<std::mutex> lock(m_mutex);
 			for(auto &pair : m_listings){
 				if(pair.second.id == id && !id.empty())
