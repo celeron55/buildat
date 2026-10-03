@@ -490,7 +490,7 @@ struct CTCPSocket: public TCPSocket
 			return "";
 		struct sockaddr_storage sa;
 		socklen_t sa_len = sizeof(sa);
-		if(getpeername(m_fd, (sockaddr*)&sa, &sa_len) == -1)
+		if(getsockname(m_fd, (sockaddr*)&sa, &sa_len) == -1)
 			return "";
 		sv_<uchar> a;
 		if(!sockaddr_to_bytes(&sa, a))
@@ -503,7 +503,7 @@ struct CTCPSocket: public TCPSocket
 			return "";
 		struct sockaddr_storage sa;
 		socklen_t sa_len = sizeof(sa);
-		if(getsockname(m_fd, (sockaddr*)&sa, &sa_len) == -1)
+		if(getpeername(m_fd, (sockaddr*)&sa, &sa_len) == -1)
 			return "";
 		sv_<uchar> a;
 		if(!sockaddr_to_bytes(&sa, a))
