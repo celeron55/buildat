@@ -38,6 +38,18 @@ namespace interface
 	// This machine's IPv4 address on the network its default route is on,
 	// what someone on the LAN reaches it by; "" without one. Sends nothing.
 	ss_ local_lan_address();
+
+	// [LAN_DISCOVERY]: the group a LAN game is announced to, IPv4 only.
+	// lan_socket(true) is joined to the group and bound to its port, to
+	// hear; lan_socket(false) only sends (TTL 1). Non-blocking; -1 if not.
+	// lan_recv() takes one datagram and the address it came from, false
+	// when none is waiting.
+	static const char *LAN_GROUP = "239.255.29.50";
+	static const int LAN_PORT = 29599;
+	int lan_socket(bool listen);
+	bool lan_send(int fd, const ss_ &data);
+	bool lan_recv(int fd, ss_ *data, ss_ *from);
+	void lan_close(int fd);
 }
 
 // vim: set noet ts=4 sw=4:

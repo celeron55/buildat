@@ -262,7 +262,7 @@ function M.show_connect_to_server()
 	search.textCopyable = true
 	search.textSelectable = true
 	local sp_list = ui_utils.server_list(left, {width = 440,
-			height = direct and 220 or 440}, pick)
+			height = direct and 170 or 440}, pick)
 	local sp_rows = {}
 	local function categories(x)
 		local d = {}
@@ -363,11 +363,50 @@ function M.show_connect_to_server()
 		magic.SubscribeToEvent(button, "Released", b[2])
 	end
 
+	-- **On this network** ([LAN_DISCOVERY]): what announces itself on
+	-- the LAN, asked every second; redrawn only when it changed, so a
+	-- pick and the scroll stay. Anyone on the network can announce, so
+	-- it is said as heard, and the join is the ordinary connect.
 	if direct then
+		local lan_title = left:CreateChild("Text")
+		lan_title:SetStyleAuto()
+		local lan_list = ui_utils.server_list(left, {width = 440,
+				height = 110}, pick)
+		local shown, next_us = nil, 0
+		root:SubscribeToStackEvent("Update", function()
+			local now = api.get_time_us()
+			if now < next_us then
+				return
+			end
+			next_us = now + 1000000
+			local rows = {}
+			for _, e in ipairs(api.lan_servers()) do
+				rows[#rows + 1] = {host = e.host, port = e.port,
+						name = (e.name ~= "" and e.name or e.host) .. "   " ..
+						e.players .. " playing",
+						line = e.app .. " " .. e.version .. "  at " .. e.host ..
+						":" .. e.port .. (e.account and
+						"; needs an account there" or "")}
+			end
+			table.sort(rows, function(a, b) return a.name < b.name end)
+			local sig = {}
+			for _, r in ipairs(rows) do
+				sig[#sig + 1] = r.name .. r.line
+			end
+			sig = table.concat(sig, "\n")
+			if sig ~= shown then
+				shown = sig
+				lan_title.text = #rows == 0 and
+						"On this network: nothing heard yet" or
+						"On this network (as announced):"
+				lan_list:set_rows(rows)
+			end
+		end)
+
 		local used = left:CreateChild("Text")
 		used:SetStyleAuto()
 		used.text = "Servers used:"
-		local list = ui_utils.server_list(left, {width = 440, height = 220},
+		local list = ui_utils.server_list(left, {width = 440, height = 170},
 				pick)
 		local rows = {}
 		for _, e in ipairs(network.known_addresses()) do

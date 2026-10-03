@@ -7,7 +7,8 @@
 # with (BUILDAT_OWNER_TOKEN), and only the owner opens it to the LAN.
 # Started here as the launcher starts it; a raw client without the token
 # asks for the LAN and is ignored, one with it asks and the server listens
-# at the machine's LAN address too; and it stops on SIGTERM after. Prints
+# at the machine's LAN address too, announcing itself there; and it stops
+# on SIGTERM after. Prints
 # PASS or FAIL.
 #
 #   apps/vanilla/lan_check.sh
@@ -73,11 +74,14 @@ for i in $(seq 1 30); do
 done
 owners=$(grep -ac "is this server's owner" "$out/srv.log")
 wrong=$(grep -ac "wrong owner token" "$out/srv.log")
-echo "listening without the token: $before, with it: $after; owners $owners, wrong tokens $wrong; stopped on SIGTERM: $stopped"
+# [LAN_DISCOVERY]: opened, it announces itself (util/lan_check.sh hears it)
+announced=$(grep -ac "Announced to the LAN as" "$out/srv.log")
+echo "listening without the token: $before, with it: $after; owners $owners, wrong tokens $wrong; announced $announced; stopped on SIGTERM: $stopped"
 lan=$(echo "$after" | tr ' ' '\n' | grep -v "^127.0.0.1:" | head -1)
 if [ "$before" = "127.0.0.1:$port" ] && echo "$after" | grep -q "127.0.0.1:$port" &&
 		[ -n "$lan" ] &&
-		[ "$owners" = 1 ] && [ "$wrong" = 1 ] && [ "$stopped" = yes ]; then
+		[ "$owners" = 1 ] && [ "$wrong" = 1 ] && [ "$announced" = 1 ] &&
+		[ "$stopped" = yes ]; then
 	echo PASS
 else
 	echo "logs in $out"

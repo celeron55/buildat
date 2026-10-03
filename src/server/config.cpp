@@ -43,6 +43,10 @@ Config::Config()
 	// What an untrusted launcher asked for, key=value a line, through -u;
 	// a module reads it as it would a packet ([LAUNCH_GRID])
 	set_default("untrusted_launch", "");
+	// The name a dedicated server announces itself to the LAN under
+	// ([LAN_DISCOVERY]; --lan-announce, BUILDAT_LAN_ANNOUNCE); "" is not
+	// announced
+	set_default("lan_announce", "");
 
 	set_default("skip_compiling_modules", json::object());
 

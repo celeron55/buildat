@@ -12,6 +12,7 @@
 	#include <fcntl.h>
 	#include <netinet/in.h>
 	#include <netdb.h>
+	#include <arpa/inet.h>
 	#define closesocket close
 //typedef int socket_t;
 #endif
@@ -553,6 +554,92 @@ ss_ local_lan_address()
 	}
 	closesocket(fd);
 	return out;
+}
+
+int lan_socket(bool listen)
+{
+	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if(fd == -1)
+		return -1;
+#ifdef _WIN32
+	u_long on = 1;
+	ioctlsocket(fd, FIONBIO, &on);
+#else
+	fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+#endif
+	bool ok = true;
+	if(listen){
+		// Two clients on one machine both hear it
+		int one = 1;
+		setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&one,
+				sizeof(one));
+#ifdef SO_REUSEPORT
+		setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, (const char*)&one,
+				sizeof(one));
+#endif
+		struct sockaddr_in a;
+		memset(&a, 0, sizeof(a));
+		a.sin_family = AF_INET;
+		a.sin_port = htons(LAN_PORT);
+		a.sin_addr.s_addr = htonl(INADDR_ANY);
+		struct ip_mreq m;
+		memset(&m, 0, sizeof(m));
+		m.imr_multiaddr.s_addr = inet_addr(LAN_GROUP);
+		m.imr_interface.s_addr = htonl(INADDR_ANY);
+		ok = bind(fd, (struct sockaddr*)&a, sizeof(a)) == 0 &&
+				setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+				(const char*)&m, sizeof(m)) == 0;
+	} else {
+		int ttl = 1;
+		ok = setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, (const char*)&ttl,
+				sizeof(ttl)) == 0;
+	}
+	if(!ok){
+#ifdef _WIN32
+		const int err = WSAGetLastError();
+#else
+		const int err = errno;
+#endif
+		log_w("lan", "lan_socket(%s): error %i", listen ? "listen" : "send",
+				err);
+		closesocket(fd);
+		return -1;
+	}
+	return fd;
+}
+
+bool lan_send(int fd, const ss_ &data)
+{
+	struct sockaddr_in to;
+	memset(&to, 0, sizeof(to));
+	to.sin_family = AF_INET;
+	to.sin_port = htons(LAN_PORT);
+	to.sin_addr.s_addr = inet_addr(LAN_GROUP);
+	return sendto(fd, data.c_str(), (int)data.size(), 0,
+			(struct sockaddr*)&to, sizeof(to)) == (int)data.size();
+}
+
+bool lan_recv(int fd, ss_ *data, ss_ *from)
+{
+	char buf[1500];
+	struct sockaddr_in a;
+	socklen_t len = sizeof(a);
+	int n = recvfrom(fd, buf, sizeof(buf), 0, (struct sockaddr*)&a, &len);
+	if(n < 0 || a.sin_family != AF_INET)
+		return false;
+	data->assign(buf, n);
+	const uint32_t h = ntohl(a.sin_addr.s_addr);
+	char s[32];
+	snprintf(s, sizeof s, "%u.%u.%u.%u", (h >> 24) & 255, (h >> 16) & 255,
+			(h >> 8) & 255, h & 255);
+	*from = s;
+	return true;
+}
+
+void lan_close(int fd)
+{
+	if(fd != -1)
+		closesocket(fd);
 }
 
 bool probe_connect(const ss_ &address, const ss_ &port)

@@ -900,6 +900,12 @@ struct Module: public interface::Module
 		} else {
 			network::access(m_server, [&](network::Interface *inetwork){
 				ok = inetwork->listen_on(lan, &error);
+				// Found on the LAN without the address typed
+				// ([LAN_DISCOVERY]); the others are ordinary players, no
+				// account
+				if(ok)
+					inetwork->lan_announce(m_world_name.empty() ? "Luanti" :
+							m_world_name, false);
 			});
 		}
 		m_lan_open = ok;

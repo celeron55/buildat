@@ -1409,6 +1409,18 @@ struct CApp: public App, public magic::Application
 	// The launch UI that was asked for and did not load, so that the one
 	// that did can say why it is not the one the setting names
 	ss_ m_launch_ui_fell_back;
+	// [LAN_DISCOVERY]: the group's socket, opened by the first
+	// lan_servers(), and what was heard, by "host:port"
+	struct LanEntry {
+		ss_ name, app, version;
+		int64_t players = 0;
+		bool account = false;
+		int64_t heard_us = 0;
+	};
+	int m_lan_fd = -1;
+	bool m_lan_tried = false;
+	bool m_lan_full_said = false;
+	sm_<ss_, LanEntry> m_lan;
 
 	sp_<interface::thread_pool::ThreadPool> m_thread_pool;
 
@@ -1421,6 +1433,12 @@ struct CApp: public App, public magic::Application
 		m_thread_pool(interface::thread_pool::createThreadPool())
 	{
 		log_v(MODULE, "constructor()");
+		// [LAN_DISCOVERY]: a launcher listens from the client's start,
+		// so one built in its first frames (launch_world's floor) has
+		// heard the 2 s announcements by then: the window takes ~2 s.
+		// No address given is a launcher (boot_to_menu, set after this).
+		if(g_client_config.get<ss_>("server_address").empty())
+			lan_listen();
 		check_pick_default_window_size();
 		check_parse_preference_options();
 		check_scaled_viewport_size();
@@ -2100,6 +2118,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(game_storage_dir)
 		DEF_BUILDAT_FUNC(server_address)
 		DEF_BUILDAT_FUNC(lan_address)
+		DEF_BUILDAT_FUNC(lan_servers)
 		DEF_BUILDAT_FUNC(local_server_status)
 		DEF_BUILDAT_FUNC(local_server_log_tail)
 		DEF_BUILDAT_FUNC(send_packet);
@@ -4305,6 +4324,127 @@ struct CApp: public App, public magic::Application
 		if(lan.empty())
 			return 0;
 		lua_pushlstring(L, lan.c_str(), lan.size());
+		return 1;
+	}
+
+	// lan_servers() -> {{host, port, name, app, version, players,
+	// account}, ...}: the servers announcing themselves on the LAN
+	// ([LAN_DISCOVERY]), heard within 6 s. Empty while connected to a
+	// server: what is on this machine's network is not a server's
+	// business. An announcement is anyone's to send, so every field is
+	// cleaned and capped, a sender is heard once a second, and the list
+	// holds 32.
+	// simplified: the socket stays open once the launcher has asked; the
+	// kernel drops what is not read. Closing it on a connect when a
+	// game's long session makes that matter.
+	void lan_listen()
+	{
+		if(m_lan_fd != -1 || m_lan_tried)
+			return;
+		m_lan_tried = true;
+		m_lan_fd = interface::lan_socket(true);
+		log_i(MODULE, "Listening for LAN games on %s:%i%s",
+				interface::LAN_GROUP, interface::LAN_PORT,
+				m_lan_fd == -1 ? ": cannot" :
+#ifdef _WIN32
+				" (Windows may ask whether to let this program hear "
+				"the network: that is what for)"
+#else
+				""
+#endif
+				);
+	}
+
+	static ss_ lan_clean(const json::Value &v, size_t max, bool ident)
+	{
+		if(!v.is_string())
+			return "";
+		ss_ out;
+		for(unsigned char c : v.as_string()){
+			if(out.size() >= max)
+				break;
+			if(ident ? (isalnum(c) || c == '_' || c == '-' || c == '.' ||
+					c == '+') : (c >= 0x20 && c != 0x7f))
+				out += (char)c;
+		}
+		// A cut multibyte character goes
+		while(!out.empty() && ((unsigned char)out.back() & 0xc0) == 0x80)
+			out.pop_back();
+		if(!out.empty() && ((unsigned char)out.back() & 0xc0) == 0xc0)
+			out.pop_back();
+		return out;
+	}
+
+	static int l_lan_servers(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		lua_newtable(L);
+		if(self->m_state && !self->m_state->get_address().empty())
+			return 1;
+		self->lan_listen();
+		const int64_t now = interface::os::time_us();
+		ss_ data, from;
+		for(int i = 0; i < 256 && self->m_lan_fd != -1 &&
+				interface::lan_recv(self->m_lan_fd, &data, &from); i++){
+			const json::Value v = json::load_string(data.c_str());
+			if(!v.is_object() || !v.get("buildat_lan").is_integer() ||
+					v.get("buildat_lan").as_integer() != 1 ||
+					!v.get("port").is_integer())
+				continue;
+			const int64_t port = v.get("port").as_integer();
+			if(port < 1 || port > 65535)
+				continue;
+			const ss_ key = from+":"+itos(port);
+			auto it = self->m_lan.find(key);
+			if(it == self->m_lan.end()){
+				if(self->m_lan.size() >= 32){
+					if(!self->m_lan_full_said)
+						log_w(MODULE, "LAN list full (32): %s and others "
+								"not shown", cs(key));
+					self->m_lan_full_said = true;
+					continue;
+				}
+			} else if(now - it->second.heard_us < 1000000){
+				continue;
+			}
+			LanEntry &e = self->m_lan[key];
+			e.name = lan_clean(v.get("name"), 64, false);
+			e.app = lan_clean(v.get("app"), 32, true);
+			e.version = lan_clean(v.get("version"), 32, true);
+			const json::Value &pl = v.get("players");
+			e.players = pl.is_integer() ? std::max<int64_t>(0,
+					std::min<int64_t>(pl.as_integer(), 100000)) : 0;
+			e.account = v.get("account").is_true();
+			e.heard_us = now;
+		}
+		int n = 0;
+		for(auto it = self->m_lan.begin(); it != self->m_lan.end();){
+			if(now - it->second.heard_us > 6000000){
+				it = self->m_lan.erase(it);
+				continue;
+			}
+			const LanEntry &e = it->second;
+			const size_t colon = it->first.rfind(':');
+			lua_newtable(L);
+			lua_pushstring(L, it->first.substr(0, colon).c_str());
+			lua_setfield(L, -2, "host");
+			lua_pushstring(L, it->first.substr(colon + 1).c_str());
+			lua_setfield(L, -2, "port");
+			lua_pushstring(L, e.name.c_str());
+			lua_setfield(L, -2, "name");
+			lua_pushstring(L, e.app.c_str());
+			lua_setfield(L, -2, "app");
+			lua_pushstring(L, e.version.c_str());
+			lua_setfield(L, -2, "version");
+			lua_pushinteger(L, e.players);
+			lua_setfield(L, -2, "players");
+			lua_pushboolean(L, e.account);
+			lua_setfield(L, -2, "account");
+			lua_rawseti(L, -2, ++n);
+			++it;
+		}
 		return 1;
 	}
 

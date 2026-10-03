@@ -101,6 +101,8 @@ int main(int argc, char *argv[])
 		unsetenv("BUILDAT_OWNER_TOKEN");
 #endif
 	}
+	if(getenv("BUILDAT_LAN_ANNOUNCE"))
+		config.set("lan_announce", ss_(getenv("BUILDAT_LAN_ANNOUNCE")));
 	for(int i = 1; i < argc; i++){
 		int take = 0;
 		if(ss_(argv[i]) == "--unconfined"){
@@ -116,6 +118,9 @@ int main(int argc, char *argv[])
 			// first start's compile would otherwise eat
 			config.set("compile_only", true);
 			take = 1;
+		} else if(ss_(argv[i]) == "--lan-announce" && i + 1 < argc){
+			config.set("lan_announce", ss_(argv[i + 1]));
+			take = 2;
 		} else if(ss_(argv[i]) == "--connect-ports" && i + 1 < argc){
 			config.set("connect_ports", ss_(argv[i + 1]));
 			take = 2;
@@ -162,6 +167,8 @@ int main(int argc, char *argv[])
 			"                       beyond 80, 443, 465, 587, 29500 and\n"
 			"                       29595, or \"any\" (also\n"
 			"                       BUILDAT_CONNECT_PORTS)\n"
+			"  --lan-announce NAME  Announce this server to the LAN under\n"
+			"                       NAME (also BUILDAT_LAN_ANNOUNCE)\n"
 			"  --unconfined         Run without the box (also\n"
 			"                       BUILDAT_UNCONFINED=1): the app reaches\n"
 			"                       all of your files\n"

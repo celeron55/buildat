@@ -210,6 +210,31 @@ do
 		end
 	end
 	log:info("servers: " .. #SERVERS .. " of the client's own")
+	-- **The games on this network** ([LAN_DISCOVERY]): what announced
+	-- itself before the room was built (the client listens from its
+	-- start), as heard -- anyone on the LAN can announce.
+	-- simplified: heard once, at the build; a game opened to the LAN
+	-- after it stands on the floor the next time the room is entered.
+	-- Spheres added to a built floor when that is not soon enough.
+	local lan = 0
+	for _, e in ipairs(api.lan_servers()) do
+		local address = e.host .. ":" .. e.port
+		local known = false
+		for _, sv in ipairs(SERVERS) do
+			-- A used one is "<scheme>://host:port"
+			if sv.address:sub(-#address - 3) == "://" .. address then
+				known = true
+			end
+		end
+		if #SERVERS < 10 and not known then
+			SERVERS[#SERVERS + 1] = {address = address,
+				name = (e.name ~= "" and e.name or address) ..
+						" (on this network)",
+				players = e.players}
+			lan = lan + 1
+		end
+	end
+	log:info("servers: " .. lan .. " heard on this network")
 end
 -- **The proof's padding is gone** ([LAUNCH_WORLD] stage 1(b), 2026-09-28).
 -- Nine invented hostnames -- buildat.example.org, "the long night",

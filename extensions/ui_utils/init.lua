@@ -732,6 +732,9 @@ function M.safe.server_list(parent, options, on_pick)
 			name:SetStyleAuto()
 			name.text = row.name or ""
 			name:SetTextAlignment(HA_LEFT)
+			-- A name is the server's own and may be long; it wraps
+			name:SetFixedWidth((options.width or 520) - 56)
+			name:SetWordwrap(true)
 			if row.line and row.line ~= "" then
 				local line = b:CreateChild("Text")
 				line:SetStyleAuto()

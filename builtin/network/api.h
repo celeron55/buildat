@@ -137,6 +137,10 @@ namespace network
 		// and the web client's own files are never an app's. An app that
 		// serves pages to read ([HEARTH_MVP]) claims its own at its start.
 		virtual void claim_http_path(const ss_ &prefix) = 0;
+		// [LAN_DISCOVERY]: say every 2 s on the LAN's group (tcpsocket.h)
+		// that this server is here, under `name`; "" stops. `account`:
+		// whether joining needs one.
+		virtual void lan_announce(const ss_ &name, bool account) = 0;
 	};
 
 	inline bool access(interface::Server *server,

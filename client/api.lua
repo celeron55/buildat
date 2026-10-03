@@ -993,6 +993,11 @@ end
 -- only while connected to the server this client started (the pause
 -- menu's "Open to LAN" says it)
 buildat.safe.lan_address = __buildat_lan_address
+-- lan_servers() -> {{host, port, name, app, version, players, account},
+-- ...}: the games announcing themselves on this network, heard within
+-- 6 s ([LAN_DISCOVERY]); empty while connected to a server. Ask it every
+-- second or so while the list is on the screen.
+buildat.safe.lan_servers = __buildat_lan_servers
 
 buildat.safe.local_server_state = function()
 	local port = __buildat_local_server_ready() and

@@ -2,6 +2,8 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "network/api.h"
 #include "core/log.h"
+#include "core/json.h"
+#include "core/version.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/server_config.h"
@@ -502,6 +504,12 @@ struct Module: public interface::Module, public network::Interface
 	};
 	sm_<ss_, WebFile> m_web_files;
 	std::set<ss_> m_claimed_paths;
+	// [LAN_DISCOVERY]: what lan_announce() said, sent every 2 s while the
+	// name is not ""
+	ss_ m_lan_name;
+	bool m_lan_account = false;
+	int m_lan_fd = -1;
+	int64_t m_lan_next_us = 0;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -514,6 +522,7 @@ struct Module: public interface::Module, public network::Interface
 	~Module()
 	{
 		log_d(MODULE, "network destruct");
+		interface::lan_close(m_lan_fd);
 
 		m_thread->request_stop();
 		m_thread->join();
@@ -537,6 +546,7 @@ struct Module: public interface::Module, public network::Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:unload"));
 		m_server->sub_event(this, Event::t("core:continue"));
+		m_server->sub_event(this, Event::t("core:tick"));
 
 		// Don't start thread in constructor because in there this module is not
 		// guaranteed to be available by server->access_module()
@@ -550,6 +560,57 @@ struct Module: public interface::Module, public network::Interface
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:continue", on_continue)
+		EVENT_VOIDN("core:tick", on_tick)
+	}
+
+	// A dedicated server announces itself to the LAN only when its admin
+	// said so (--lan-announce NAME); a launcher's game through
+	// lan_announce(), when its owner opens it to the LAN.
+	// simplified: "account" is whether the app has builtin/accounts at
+	// all; an open server with accounts says it needs one. The accounts
+	// module's own rule when someone needs the true answer.
+	void start_lan_from_config()
+	{
+		const ss_ name = m_server->get_config().get<ss_>("lan_announce");
+		if(!name.empty())
+			lan_announce(name, m_server->has_module("accounts"));
+	}
+
+	void on_tick()
+	{
+		if(m_lan_name.empty())
+			return;
+		const int64_t now = interface::os::time_us();
+		if(now < m_lan_next_us)
+			return;
+		m_lan_next_us = now + 2000000;
+		if(m_lan_fd == -1){
+			m_lan_fd = interface::lan_socket(false);
+			if(m_lan_fd == -1)
+				return;
+		}
+		json::Value v = json::object();
+		v.set("buildat_lan", (int64_t)1);
+		v.set("name", m_lan_name);
+		v.set("app", m_server->get_app_id());
+		v.set("version", ss_(BUILDAT_VERSION));
+		v.set("port", (int64_t)atoi(m_server->get_config().get<ss_>(
+				"network_port").c_str()));
+		v.set("players", (int64_t)list_peers().size());
+		v.set("account", json::Value(m_lan_account));
+		if(!interface::lan_send(m_lan_fd, v.stringify()))
+			log_d(MODULE, "LAN announce not sent");
+	}
+
+	void lan_announce(const ss_ &name, bool account)
+	{
+		if(name != m_lan_name)
+			log_i(MODULE, "%s", name.empty() ? "Not announced to the LAN" :
+					("Announced to the LAN as \""+name+"\" on "+
+					interface::LAN_GROUP+":"+itos(interface::LAN_PORT)).c_str());
+		m_lan_name = name.substr(0, 64);
+		m_lan_account = account;
+		m_lan_next_us = 0;
 	}
 
 	void on_start()
@@ -591,6 +652,7 @@ struct Module: public interface::Module, public network::Interface
 #endif
 			log_i(MODULE, "STATUS Listening");
 		}
+		start_lan_from_config();
 	}
 
 	void on_unload()
@@ -633,6 +695,7 @@ struct Module: public interface::Module, public network::Interface
 	void on_continue()
 	{
 		log_v(MODULE, "on_continue");
+		start_lan_from_config();
 		ss_ data = m_server->tmp_restore_data("network:restore_info");
 		// name, content, path
 		int listening_fd;
