@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/light.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The light around a node that changed, worked out here rather than asked for
 -- again. This is Luanti's own algorithm: take away the light that came from
