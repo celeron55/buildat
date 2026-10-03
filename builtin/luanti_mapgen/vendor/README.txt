@@ -15,6 +15,10 @@ quoted #include looks beside the file that wrote it.
 Luanti's own, unchanged (upstream: git master, 2026-09):
 
     voxel.h, voxel.cpp                  <- compiled
+    noise.h, noise.cpp                  <- compiled (replaced an adapter
+                                           over buildat's noise in 2026-10,
+                                           which made other terrain and
+                                           ores; [MAPGEN_DENSITY])
     objdef.h, objdef.cpp                <- vendored, not yet compiled
     mapgen.h, mapgen.cpp                <- vendored, not yet compiled
     mapgen_singlenode, _v5, _v6, _v7, _flat, _fractal, _valleys,
@@ -28,7 +32,7 @@ Where the port stopped (2026-09-13)
 -----------------------------------
 
 luanti_mapgen.cpp compiles the bottom of the tree: the voxel manipulator,
-the serialization helpers, the noise adapter and the node definitions, all
+the serialization helpers and the node definitions, all
 with the shims under them. What is left out of that list is the generators
 themselves and the four managers.
 

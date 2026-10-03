@@ -88,6 +88,9 @@ namespace luanti_mapgen
 			int32_t depth_top = 0, depth_filler = 0, depth_water_top = 0,
 					depth_riverbed = 0;
 			int32_t y_min = -31000, y_max = 31000;
+			// min_pos and max_pos, which y_min and y_max are the Y of
+			int32_t x_min = -31000, x_max = 31000, z_min = -31000,
+					z_max = 31000;
 			float heat_point = 0.0f, humidity_point = 0.0f;
 			int32_t vertical_blend = 0;
 			float weight = 1.0f;

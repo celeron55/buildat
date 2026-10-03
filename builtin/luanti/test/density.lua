@@ -14,6 +14,10 @@ end
 local P1 = {x = box[1], y = box[2], z = box[3]}
 local P2 = {x = box[4], y = box[5], z = box[6]}
 local n = {}
+-- DENSITY_BY_Y=1: also per row of blocks, lines "DENSITY y<bp.y> <name> <count>";
+-- DENSITY_BY_Y=block: per block, "DENSITY yx,y,z <name> <count>"
+local by_block = os.getenv("DENSITY_BY_Y") == "block"
+local by_y = (os.getenv("DENSITY_BY_Y") == "1" or by_block) and {} or nil
 local blocks = 0
 local function count_block(bp)
 	local lo = {x = bp.x * 16, y = bp.y * 16, z = bp.z * 16}
@@ -27,6 +31,12 @@ local function count_block(bp)
 			for x = lo.x, hi.x do
 				local c = data[area:index(x, y, z)]
 				n[c] = (n[c] or 0) + 1
+				if by_y then
+					local key = by_block and bp.x .. "," .. bp.y .. "," .. bp.z or bp.y
+					local r = by_y[key] or {}
+					by_y[key] = r
+					r[c] = (r[c] or 0) + 1
+				end
 			end
 		end
 	end
@@ -41,8 +51,24 @@ local function report()
 	for _, p in ipairs(names) do
 		core.log("action", "DENSITY " .. p[1] .. " " .. p[2])
 	end
+	for y, r in pairs(by_y or {}) do
+		for c, k in pairs(r) do
+			core.log("action", "DENSITY y" .. y .. " " ..
+					core.get_name_from_content_id(c) .. " " .. k)
+		end
+	end
 	core.log("action", "DENSITY " .. blocks .. " blocks counted")
 	core.log("action", "DENSITY done")
+end
+-- DENSITY_NO_ONGEN=1: no game's on_generated runs, the C++ mapgen alone
+-- -- which says whether a difference is made there or by the game's Lua
+if os.getenv("DENSITY_NO_ONGEN") == "1" then
+	core.register_on_mods_loaded(function()
+		for i = #core.registered_on_generateds, 1, -1 do
+			table.remove(core.registered_on_generateds, i)
+		end
+		core.log("action", "DENSITY no on_generated")
+	end)
 end
 core.register_on_mods_loaded(function()
 	core.after(2, function()

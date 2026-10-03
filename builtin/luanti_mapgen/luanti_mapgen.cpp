@@ -194,39 +194,12 @@ static void read_noise_params(const luanti_mapgen::Params::NoiseParams &src,
 	out.octaves = (u16)src.octaves;
 	out.persist = src.persist;
 	out.lacunarity = src.lacunarity;
-	// Luanti parses these with flagdesc_noiseparams, which lives in the
-	// noise.cpp this build replaced; the words are the same three, and a
-	// "no" in front of one clears it. This build's noise reads none of them
-	// -- see the note at the top of vendor/noise.h -- so what this is for
-	// is that a mod's flags arrive as the mod wrote them.
+	// As Luanti's getflagsfield: the words a mod wrote set or clear their
+	// bits, and the rest stay at the defaults
 	out.flags = NOISE_FLAG_DEFAULTS;
-	ss_ word;
-	ss_ text = src.flags;
-	text.push_back(',');
-	for(char c : text){
-		if(c != ',' && c != ' ' && c != '\t'){
-			word.push_back(c);
-			continue;
-		}
-		if(word.empty())
-			continue;
-		bool off = false;
-		if(word.size() > 2 && word.compare(0, 2, "no") == 0){
-			off = true;
-			word = word.substr(2);
-		}
-		u32 bit = 0;
-		if(word == "defaults") bit = NOISE_FLAG_DEFAULTS;
-		else if(word == "eased") bit = NOISE_FLAG_EASED;
-		else if(word == "absvalue") bit = NOISE_FLAG_ABSVALUE;
-		if(bit != 0){
-			if(off)
-				out.flags &= ~bit;
-			else
-				out.flags |= bit;
-		}
-		word.clear();
-	}
+	u32 mask = 0;
+	const u32 set = readFlagString(src.flags, flagdesc_noiseparams, &mask);
+	out.flags = (out.flags & ~mask) | set;
 }
 
 static bool deco_type_of(const ss_ &name, DecorationType &out)
@@ -422,8 +395,10 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 			b->depth_filler = (s16)src.depth_filler;
 			b->depth_water_top = (s16)src.depth_water_top;
 			b->depth_riverbed = (s16)src.depth_riverbed;
-			b->min_pos.Y = (s16)src.y_min;
-			b->max_pos.Y = (s16)src.y_max;
+			b->min_pos = v3s16((s16)src.x_min, (s16)src.y_min,
+					(s16)src.z_min);
+			b->max_pos = v3s16((s16)src.x_max, (s16)src.y_max,
+					(s16)src.z_max);
 			b->heat_point = src.heat_point;
 			b->humidity_point = src.humidity_point;
 			b->vertical_blend = (s16)src.vertical_blend;
@@ -431,7 +406,11 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 			// A biome that is already resolved says so, or the manager
 			// waits for a resolution that never comes
 			b->reset(true);
-			m_emerge->biomemgr->add(b);
+			if(m_emerge->biomemgr->add(b) == OBJDEF_INVALID_HANDLE){
+				log_w(MODULE, "Biome \"%s\": the name is taken",
+						cs(b->name));
+				delete b;
+			}
 		}
 		log_v(MODULE, "%zu biomes", params.biomes.size());
 
@@ -522,7 +501,11 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 			}
 			// Already resolved, like the biomes above
 			o->reset(true);
-			m_emerge->oremgr->add(o);
+			if(m_emerge->oremgr->add(o) == OBJDEF_INVALID_HANDLE){
+				log_w(MODULE, "Ore \"%s\": the name is taken", cs(src.name));
+				delete o;
+				continue;
+			}
 			ores_added++;
 		}
 		if(!params.ores.empty())
@@ -639,7 +622,12 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 				continue;
 			}
 			d->reset(true);
-			m_emerge->decomgr->add(d);
+			if(m_emerge->decomgr->add(d) == OBJDEF_INVALID_HANDLE){
+				log_w(MODULE, "Decoration \"%s\": the name is taken",
+						cs(d->name));
+				delete d;
+				continue;
+			}
 			m_deco_source_of_index.push_back(this_source);
 			decos_added++;
 		}

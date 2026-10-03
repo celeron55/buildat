@@ -1232,6 +1232,7 @@ function core.__mapgen_biomes()
 	biome_index_of_name = {}
 	for _, b in pairs(core.registered_biomes or {}) do
 		local index = #out + 1
+		local min_pos, max_pos = b.min_pos or {}, b.max_pos or {}
 		biome_name_of_index[index] = b.name or ""
 		biome_index_of_name[b.name or ""] = index
 		out[#out + 1] = {
@@ -1256,8 +1257,16 @@ function core.__mapgen_biomes()
 			depth_filler = b.depth_filler or 0,
 			depth_water_top = b.depth_water_top or 0,
 			depth_riverbed = b.depth_riverbed or 0,
-			y_min = b.y_min or -31000,
-			y_max = b.y_max or 31000,
+			-- As Luanti: min_pos and max_pos bound a biome on all three
+			-- axes, and y_min and y_max replace their Y. VoxeLibre's End
+			-- island is bounded only by them; read as unbounded it is a
+			-- biome of air at the overworld's origin.
+			x_min = min_pos.x or -31000,
+			x_max = max_pos.x or 31000,
+			y_min = b.y_min or min_pos.y or -31000,
+			y_max = b.y_max or max_pos.y or 31000,
+			z_min = min_pos.z or -31000,
+			z_max = max_pos.z or 31000,
 			heat_point = b.heat_point or 0,
 			humidity_point = b.humidity_point or 0,
 			vertical_blend = b.vertical_blend or 0,
@@ -1331,7 +1340,10 @@ function core.__mapgen_ores()
 				biomes[#biomes + 1] = name
 			end
 			out[#out + 1] = {
-				name = o.name or o.ore or "",
+				-- Only the name the mod gave, as in Luanti: the manager
+				-- refuses a second ore by one name, and a game registers
+				-- the same node as several ores
+				name = o.name or "",
 				type = o.ore_type or "scatter",
 				c_ore = c_ore,
 				c_wherein = wherein,

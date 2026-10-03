@@ -2701,6 +2701,10 @@ struct Module: public interface::Module, public luanti::Interface
 			b.depth_riverbed = (int32_t)table_number(L, "depth_riverbed", 0);
 			b.y_min = (int32_t)table_number(L, "y_min", -31000);
 			b.y_max = (int32_t)table_number(L, "y_max", 31000);
+			b.x_min = (int32_t)table_number(L, "x_min", -31000);
+			b.x_max = (int32_t)table_number(L, "x_max", 31000);
+			b.z_min = (int32_t)table_number(L, "z_min", -31000);
+			b.z_max = (int32_t)table_number(L, "z_max", 31000);
 			b.heat_point = (float)table_number(L, "heat_point", 0);
 			b.humidity_point = (float)table_number(L, "humidity_point", 0);
 			b.vertical_blend = (int32_t)table_number(L, "vertical_blend", 0);

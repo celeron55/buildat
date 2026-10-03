@@ -25,5 +25,13 @@ LUANTI_SHIM_EXCEPTION(SettingNotFoundException);
 LUANTI_SHIM_EXCEPTION(ItemNotFoundException);
 LUANTI_SHIM_EXCEPTION(ServerError);
 LUANTI_SHIM_EXCEPTION(ModError);
+// What Luanti's own noise.cpp throws, now that it is the one here
+LUANTI_SHIM_EXCEPTION(PrngException);
+class InvalidNoiseParamsException: public BaseException {
+public:
+	InvalidNoiseParamsException(): BaseException("One or more noise "
+			"parameters were invalid or require too much memory") {}
+	InvalidNoiseParamsException(const std::string &s): BaseException(s) {}
+};
 
 #endif

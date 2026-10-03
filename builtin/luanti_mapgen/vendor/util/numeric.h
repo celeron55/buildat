@@ -21,15 +21,7 @@ template<typename T, typename U, typename V> inline T rangelim(T d, U min,
 	return d;
 }
 
-// -1...1 into 0...1 and back out again with the middle pulled apart, which
-// is what a cave's noise is read through
-inline float contour(float v)
-{
-	v = std::fabs(v);
-	if(v >= 1.0f)
-		return 0.0f;
-	return (1.0f - v);
-}
+// contour() is Luanti's own now, in noise.cpp beside this directory
 
 template<typename T> inline T myround(T f)
 {

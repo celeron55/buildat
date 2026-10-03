@@ -16,6 +16,7 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 seed=${1:-12345}
+# DENSITY_NO_ONGEN=1 and DENSITY_BY_Y=1 are passed on to both (density.lua)
 box=${2:--112,-64,-112,47,63,47}
 out="$here/local/density"
 games="$here/user/shared/vanilla/games"
