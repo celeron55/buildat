@@ -24,9 +24,16 @@ template<typename T> using sd_ = std::deque<T>;
 template<typename T> using set_ = std::set<T>;
 template<typename T1, typename T2> using sm_ = std::unordered_map<T1, T2>;
 typedef const char cc_;
-static inline cc_* cs(const ss_ &s){
-	return s.c_str();
+// cs(x): a C string of x for a printf-style format, x being a string or
+// anything dump() writes. A macro, so that the string dump() makes is a
+// temporary of the caller's full expression -- the log call it is an
+// argument of -- and not of a function that has returned by the time the
+// pointer is read: as a function it returned freed memory for everything
+// but a string (ASan, [SECURITY_RUN_1])
+static inline const ss_& cs_hold(const ss_ &s){
+	return s;
 }
+#define cs(x) (cs_hold(x).c_str())
 template<typename T> using up_ = std::unique_ptr<T>;
 template<typename T> using sp_ = std::shared_ptr<T>;
 template<typename T> using wp_ = std::weak_ptr<T>;
@@ -119,6 +126,14 @@ inline ss_ dump(const uint8_t &v){
 	return itos(v);
 }
 
+#ifdef __EMSCRIPTEN__
+// size_t on wasm32 is unsigned long, which is neither of the above
+template<>
+inline ss_ dump(const unsigned long &v){
+	return itos(v);
+}
+#endif
+
 template<typename T>
 static inline ss_ dump(const sv_<T> &vs){
 	std::ostringstream os(std::ios::binary);
@@ -150,8 +165,8 @@ static inline ss_ dump(const std::set<T> &vs){
 }
 
 template<typename T>
-static inline cc_* cs(const T &v){
-	return dump(v).c_str();
+static inline ss_ cs_hold(const T &v){
+	return dump(v);
 }
 
 // check()

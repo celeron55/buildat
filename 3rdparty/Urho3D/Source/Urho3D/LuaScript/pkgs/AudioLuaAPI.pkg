@@ -1,6 +1,8 @@
 $pfile "Audio/Audio.pkg"
 $pfile "Audio/Sound.pkg"
 $pfile "Audio/SoundListener.pkg"
+$pfile "Audio/SoundStream.pkg"
+$pfile "Audio/BufferedSoundStream.pkg"
 $pfile "Audio/SoundSource.pkg"
 $pfile "Audio/SoundSource3D.pkg"
 

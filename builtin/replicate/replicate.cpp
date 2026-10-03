@@ -7,6 +7,7 @@
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
+#include "interface/os.h"
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
 #include "interface/magic_event.h"
@@ -67,6 +68,11 @@ struct Module: public interface::Module, public replicate::Interface
 	sm_<PeerId, PeerState> m_peers;
 
 	sv_<Event> m_events_to_emit_after_next_sync;
+
+	// Per scene: which nodes a peer gets. Empty means every node, which is
+	// what every scene did before there was a filter.
+	sm_<main_context::SceneReference,
+			std::function<bool(PeerId, uint)>> m_node_filters;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -185,9 +191,30 @@ struct Module: public interface::Module, public replicate::Interface
 	{
 		// For a reference implementation of this kind of network
 		// synchronization, see Urho3D's Network/Connection.cpp
+		//
+		// What this costs is what every module that asks replicate for
+		// anything waits for, because it runs on replicate's own thread:
+		// voxelworld's commit does a replicate::access() per commit and was
+		// measured waiting seconds for it. So it says how long it took and
+		// over how much when it is slow; see SLOW_SYNC_US below.
+		const int64_t t0 = interface::os::time_us();
+		size_t n_peers = 0, n_nodes = 0;
+		int64_t prepare_us = 0;
+		m_collecting_sends = true;
 
+		// Every peer's backlog in one hop, before the pass (see the note
+		// at PendingSend on hops)
+		sm_<PeerId, size_t> pending;
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &pair: m_peers)
+				pending[pair.first] = inetwork->pending_bytes(pair.first);
+		});
+		int64_t t_inside = 0;
 		main_context::access(m_server, [&](main_context::Interface *imc)
 		{
+			// Where the time actually goes is the question: getting into
+			// main_context, or the walk once inside it
+			t_inside = interface::os::time_us();
 			// Send changes to each peer (each of which has its own replication
 			// state)
 			for(auto &pair: m_peers){
@@ -200,13 +227,33 @@ struct Module: public interface::Module, public replicate::Interface
 							ps.scene_ref);
 					continue;
 				}
+				// Backpressure ([NET_CHANNELS]): a peer with this much
+				// already waiting for its socket gets nothing more this
+				// tick; its nodes stay dirty and go when it has drained.
+				// Over a lossy link the world's chunks were queued as one
+				// burst, and everything behind them waited its length.
+				static const size_t PEER_BACKLOG_BYTES = 512 * 1024;
+				if(pending[ps.peer_id] > PEER_BACKLOG_BYTES){
+					// Said once every five seconds a peer is held
+					static int64_t said_us = 0;
+					if(t0 - said_us > 5000000){
+						said_us = t0;
+						log_v(MODULE, "peer %i held: %zu bytes behind its "
+								"socket, %u nodes dirty", ps.peer_id,
+								pending[ps.peer_id],
+								ps.scene_state.dirtyNodes_.Size());
+					}
+					continue;
+				}
 
 				// Compare attributes and set replication states dirty as needed;
 				// this accesses every replication state for every node.
 				// NOTE: This can be called multiple times per scene; only the
 				//       first call will do anything as it clears the
 				//       marked-for-update lists
+				const int64_t t_prepare = interface::os::time_us();
 				scene->PrepareNetworkUpdate();
+				prepare_us += interface::os::time_us() - t_prepare;
 
 				magic::HashSet<uint> nodes_to_process;
 				uint scene_id = scene->GetID();
@@ -217,13 +264,84 @@ struct Module: public interface::Module, public replicate::Interface
 				nodes_to_process.Insert(ps.scene_state.dirtyNodes_);
 				nodes_to_process.Erase(scene_id);
 
+				n_peers++;
+				// A budget, because this runs on replicate's own thread and
+				// everything that asks replicate for anything waits for it.
+				// A peer joining a VoxeLibre world was measured taking 1672
+				// nodes and 3.6 seconds in one pass -- the whole world's
+				// chunks, each carrying a compressed voxel buffer -- and
+				// voxelworld's commit, the luanti module behind it and the
+				// game behind that all stopped for the length of it.
+				//
+				// What is left over stays in dirtyNodes_ and is taken on the
+				// next tick, which is what the set is for; the world arrives
+				// over a few more ticks and nothing waits seconds.
+				//
+				// simplified: a node that is dirty because it *changed* --
+				// a dug voxel -- waits behind however many are merely new,
+				// the same way the client's own mesh queue does. A priority
+				// class is the fix if that ever shows.
+				static const int64_t SYNC_BUDGET_US = 20000;
 				while(!nodes_to_process.Empty()){
 					uint node_id = nodes_to_process.Front();
 					sync_node(ps.peer_id, node_id, nodes_to_process, scene,
 							ps.scene_state);
+					n_nodes++;
+					if((n_nodes & 15) == 0 &&
+							interface::os::time_us() - t0 > SYNC_BUDGET_US)
+						break;
 				}
 			}
 		});
+
+		m_collecting_sends = false;
+		const size_t n_sends = m_pending_sends.size();
+		const int64_t t_flush = interface::os::time_us();
+		flush_pending_sends();
+		const int64_t flush_us = interface::os::time_us() - t_flush;
+
+		static const int64_t SLOW_SYNC_US = 500000;
+		const int64_t took = interface::os::time_us() - t0;
+		if(took >= SLOW_SYNC_US){
+			log_w(MODULE, "sync_changes(): %zu nodes and %zu packets for %zu "
+					"peers took %.1f s -- %.1f s of it waiting to get into "
+					"main_context, %.1f s comparing every attribute of every "
+					"node, %.1f s handing the packets to network",
+					n_nodes, n_sends, n_peers, took / 1e6,
+					(t_inside - t0) / 1e6, prepare_us / 1e6, flush_us / 1e6);
+		}
+	}
+
+	// Whether this peer gets this node at all; see set_node_filter()
+	bool peer_wants_node(PeerId peer, uint node_id)
+	{
+		auto peer_it = m_peers.find(peer);
+		if(peer_it == m_peers.end())
+			return true;
+		auto it = m_node_filters.find(peer_it->second.scene_ref);
+		if(it == m_node_filters.end() || !it->second)
+			return true;
+		return it->second(peer, node_id);
+	}
+
+	// The peer had this node and should not any more: the packet a deleted
+	// node sends, and the replication states taken off the node and its
+	// components so that nothing points into the state about to be erased.
+	void drop_node_from_peer(PeerId peer, Node *node, uint node_id,
+			magic::SceneReplicationState &scene_state)
+	{
+		log_d(MODULE, "drop_node_from_peer(): peer=%zu, node_id=%zu",
+				peer, node_id);
+		magic::Connection *conn = (magic::Connection*)&scene_state;
+		node->CleanupConnection(conn);
+		auto &components = node->GetComponents();
+		for(uint i = 0; i < components.Size(); i++)
+			components[i]->CleanupConnection(conn);
+		magic::VectorBuffer buf;
+		buf.WriteNetID(node_id);
+		send_to_peer(peer, "replicate:remove_node", buf);
+		scene_state.nodeStates_.Erase(node_id);
+		scene_state.dirtyNodes_.Erase(node_id);
 	}
 
 	void sync_node(PeerId peer,
@@ -238,6 +356,11 @@ struct Module: public interface::Module, public replicate::Interface
 			// New node
 			Node *n = scene->GetNode(node_id);
 			if(n){
+				// Out of this peer's range: it gets it if it comes into one
+				if(!peer_wants_node(peer, node_id)){
+					scene_state.dirtyNodes_.Erase(node_id);
+					return;
+				}
 				sync_create_node(peer, n, nodes_to_process, scene, scene_state);
 			} else {
 				// Was already deleted
@@ -255,6 +378,8 @@ struct Module: public interface::Module, public replicate::Interface
 				send_to_peer(peer, "replicate:remove_node", buf);
 				scene_state.nodeStates_.Erase(node_id);
 				scene_state.dirtyNodes_.Erase(node_id);
+			} else if(!peer_wants_node(peer, node_id)){
+				drop_node_from_peer(peer, n, node_id, scene_state);
 			} else {
 				sync_existing_node(peer, n, node_state, nodes_to_process,
 						scene, scene_state);
@@ -481,13 +606,45 @@ struct Module: public interface::Module, public replicate::Interface
 		scene_state.dirtyNodes_.Erase(node->GetID());
 	}
 
+	// One packet to one peer. A sync pass sends several of these per node it
+	// walks, and a network::access() is a hop into another module's thread,
+	// so during a pass they are collected and sent in one hop at the end --
+	// see sync_changes(). Outside a pass there is nothing to collect them
+	// for, and the packet goes at once.
+	//
+	// The order is kept, which is what matters: a create before the update
+	// that follows it.
+	struct PendingSend
+	{
+		PeerId peer;
+		ss_ name;
+		ss_ data;
+	};
+	sv_<PendingSend> m_pending_sends;
+	bool m_collecting_sends = false;
+
 	void send_to_peer(PeerId peer, const ss_ &name, const magic::VectorBuffer &buf)
 	{
 		log_d(MODULE, "%s: Update size: %zu", cs(name), buf.GetBuffer().Size());
 		ss_ data = buf_to_string(buf);
+		if(m_collecting_sends){
+			m_pending_sends.push_back(PendingSend{peer, name, data});
+			return;
+		}
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, name, data);
 		});
+	}
+
+	void flush_pending_sends()
+	{
+		if(m_pending_sends.empty())
+			return;
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(const PendingSend &s : m_pending_sends)
+				inetwork->send(s.peer, s.name, s.data);
+		});
+		m_pending_sends.clear();
 	}
 
 	/*void send_to_all(const ss_ &name, const magic::VectorBuffer &buf)
@@ -558,6 +715,42 @@ struct Module: public interface::Module, public replicate::Interface
 			}
 		}
 		return result;
+	}
+
+	void set_node_filter(main_context::SceneReference scene_ref,
+			std::function<bool(PeerId, uint)> filter)
+	{
+		if(filter)
+			m_node_filters[scene_ref] = filter;
+		else
+			m_node_filters.erase(scene_ref);
+	}
+
+	// Every node of the scene goes back into the peer's dirty set, so that
+	// the next sync asks the filter about each of them: the ones it has and
+	// should not, and the ones it should have and does not.
+	void refresh_peer_nodes(
+			main_context::SceneReference scene_ref, PeerId peer)
+	{
+		auto peer_it = m_peers.find(peer);
+		if(peer_it == m_peers.end() || peer_it->second.scene_ref != scene_ref)
+			return;
+		PeerState &ps = peer_it->second;
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			magic::Scene *scene = imc->find_scene(scene_ref);
+			if(!scene){
+				log_w(MODULE, "refresh_peer_nodes(): Scene %p not found",
+						scene_ref);
+				return;
+			}
+			magic::PODVector<Node*> children;
+			scene->GetChildren(children, true);
+			for(uint i = 0; i < children.Size(); i++){
+				uint id = children[i]->GetID();
+				if(id < magic::FIRST_LOCAL_ID)
+					ps.scene_state.dirtyNodes_.Insert(id);
+			}
+		});
 	}
 
 	void emit_after_next_sync(Event event)
