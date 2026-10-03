@@ -1311,7 +1311,8 @@ struct Module: public interface::Module
 		ss << f.rdbuf();
 		const ss_ text = ss.str();
 		const sajson::document doc =
-				sajson::parse(sajson::string(text.c_str(), text.size()));
+				sajson::parse(sajson::dynamic_allocation(),
+					sajson::string(text.c_str(), text.size()));
 		if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_OBJECT)
 			return "";
 		sajson::value root = doc.get_root();
@@ -1384,7 +1385,8 @@ struct Module: public interface::Module
 		ss << f.rdbuf();
 		const ss_ text = ss.str();
 		const sajson::document doc =
-				sajson::parse(sajson::string(text.c_str(), text.size()));
+				sajson::parse(sajson::dynamic_allocation(),
+					sajson::string(text.c_str(), text.size()));
 		if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_OBJECT)
 			return out;
 		sajson::value root = doc.get_root();
@@ -1413,10 +1415,11 @@ struct Module: public interface::Module
 		ss << f.rdbuf();
 		const ss_ text = ss.str();
 		const sajson::document doc =
-				sajson::parse(sajson::string(text.c_str(), text.size()));
+				sajson::parse(sajson::dynamic_allocation(),
+					sajson::string(text.c_str(), text.size()));
 		if(!doc.is_valid()){
 			log_w(MODULE, "%s: %s", cs(settings_path()),
-					cs(doc.get_error_message()));
+					doc.get_error_message_as_cstring());
 			return out;
 		}
 		sajson::value root = doc.get_root();
@@ -1575,7 +1578,8 @@ struct Module: public interface::Module
 		static ss_ newest_release_url(const ss_ &json)
 		{
 			const sajson::document doc =
-					sajson::parse(sajson::string(json.c_str(), json.size()));
+					sajson::parse(sajson::dynamic_allocation(),
+					sajson::string(json.c_str(), json.size()));
 			if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_ARRAY ||
 					doc.get_root().get_length() == 0)
 				return "";
@@ -1778,7 +1782,8 @@ struct Module: public interface::Module
 	{
 		sv_<ss_> flat;
 		const sajson::document doc =
-				sajson::parse(sajson::string(json.c_str(), json.size()));
+				sajson::parse(sajson::dynamic_allocation(),
+				sajson::string(json.c_str(), json.size()));
 		if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_ARRAY){
 			menu_error(peer, "ContentDB answered with something that is not "
 					"a list");
