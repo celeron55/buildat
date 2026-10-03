@@ -32,6 +32,13 @@
 
 #include "../../DebugNew.h"
 
+// buildat [WEB_GLES3]: upstream PR #2536
+#ifdef GL_ES_VERSION_3_0
+#define GL_COMPARE_R_TO_TEXTURE GL_COMPARE_REF_TO_TEXTURE
+#define GL_SRGB_EXT GL_SRGB8
+#define GL_SRGB_ALPHA_EXT GL_SRGB8_ALPHA8
+#endif
+
 namespace Urho3D
 {
 
@@ -101,7 +108,7 @@ void Texture::UpdateParameters()
     // Wrapping
     glTexParameteri(target_, GL_TEXTURE_WRAP_S, GetWrapMode(addressMode_[COORD_U]));
     glTexParameteri(target_, GL_TEXTURE_WRAP_T, GetWrapMode(addressMode_[COORD_V]));
-#ifndef GL_ES_VERSION_2_0
+#ifndef URHO3D_GLES2
     glTexParameteri(target_, GL_TEXTURE_WRAP_R, GetWrapMode(addressMode_[COORD_W]));
 #endif
 
@@ -158,6 +165,10 @@ void Texture::UpdateParameters()
             (filterMode == FILTER_ANISOTROPIC || filterMode == FILTER_NEAREST_ANISOTROPIC) ? (float)maxAnisotropy : 1.0f);
     }
 
+    glTexParameterfv(target_, GL_TEXTURE_BORDER_COLOR, borderColor_.Data());
+#endif
+
+#ifndef URHO3D_GLES2
     // Shadow compare
     if (shadowCompare_)
     {
@@ -166,8 +177,6 @@ void Texture::UpdateParameters()
     }
     else
         glTexParameteri(target_, GL_TEXTURE_COMPARE_MODE, GL_NONE);
-
-    glTexParameterfv(target_, GL_TEXTURE_BORDER_COLOR, borderColor_.Data());
 #endif
 
     parametersDirty_ = false;
@@ -183,7 +192,11 @@ bool Texture::IsCompressed() const
     return format_ == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT || format_ == GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ||
            format_ == GL_COMPRESSED_RGBA_S3TC_DXT5_EXT || format_ == GL_ETC1_RGB8_OES ||
            format_ == COMPRESSED_RGB_PVRTC_4BPPV1_IMG || format_ == COMPRESSED_RGBA_PVRTC_4BPPV1_IMG ||
-           format_ == COMPRESSED_RGB_PVRTC_2BPPV1_IMG || format_ == COMPRESSED_RGBA_PVRTC_2BPPV1_IMG;
+           format_ == COMPRESSED_RGB_PVRTC_2BPPV1_IMG || format_ == COMPRESSED_RGBA_PVRTC_2BPPV1_IMG
+#ifdef GL_ES_VERSION_3_0
+           || format_ == GL_COMPRESSED_RGB8_ETC2 || format_ == GL_COMPRESSED_RGBA8_ETC2_EAC
+#endif
+           ;
 }
 
 unsigned Texture::GetRowDataSize(int width) const
@@ -207,6 +220,12 @@ unsigned Texture::GetRowDataSize(int width) const
     case GL_RG16F:
     case GL_R32F:
 #endif
+#ifdef GL_ES_VERSION_3_0
+    case GL_DEPTH24_STENCIL8:
+    case GL_RG16UI:
+    case GL_RG16F:
+    case GL_R32F:
+#endif
         return (unsigned)(width * 4);
 
 #ifndef GL_ES_VERSION_2_0
@@ -222,6 +241,21 @@ unsigned Texture::GetRowDataSize(int width) const
         return (unsigned)(width * 8);
 
     case GL_RGBA32F_ARB:
+        return (unsigned)(width * 16);
+#endif
+#ifdef GL_ES_VERSION_3_0
+    case GL_R8:
+        return (unsigned)width;
+
+    case GL_RG8:
+    case GL_R16F:
+        return (unsigned)(width * 2);
+
+    case GL_RGBA16UI:
+    case GL_RGBA16F:
+        return (unsigned)(width * 8);
+
+    case GL_RGBA32F:
         return (unsigned)(width * 16);
 #endif
 
@@ -270,6 +304,24 @@ unsigned Texture::GetExternalFormat(unsigned format)
     else
         return format;
 #else
+#ifdef GL_ES_VERSION_3_0
+    if (format == GL_DEPTH_COMPONENT16 || format == GL_DEPTH_COMPONENT24 || format == GL_DEPTH_COMPONENT32F)
+        return GL_DEPTH_COMPONENT;
+    else if (format == GL_DEPTH24_STENCIL8)
+        return GL_DEPTH_STENCIL;
+    else if (format == GL_R8 || format == GL_R16F || format == GL_R32F)
+        return GL_RED;
+    else if (format == GL_RG8 || format == GL_RG16F || format == GL_RG32F)
+        return GL_RG;
+    else if (format == GL_RGBA16F || format == GL_RGBA32F || format == GL_SRGB_ALPHA_EXT)
+        return GL_RGBA;
+    else if (format == GL_SRGB_EXT)
+        return GL_RGB;
+    else if (format == GL_RG16UI)
+        return GL_RG_INTEGER;
+    else if (format == GL_RGBA16UI)
+        return GL_RGBA_INTEGER;
+#endif
     return format;
 #endif
 }
@@ -288,6 +340,20 @@ unsigned Texture::GetDataType(unsigned format)
     else
         return GL_UNSIGNED_BYTE;
 #else
+#ifdef GL_ES_VERSION_3_0
+    if (format == GL_DEPTH_COMPONENT24)
+        return GL_UNSIGNED_INT;
+    else if (format == GL_DEPTH24_STENCIL8)
+        return GL_UNSIGNED_INT_24_8;
+    else if (format == GL_RGBA16UI || format == GL_RG16UI)
+        return GL_UNSIGNED_SHORT;
+    else if (format == GL_DEPTH_COMPONENT32F || format == GL_RGBA32F || format == GL_RG32F || format == GL_R32F)
+        return GL_FLOAT;
+    else if (format == GL_RGBA16F || format == GL_RG16F || format == GL_R16F)
+        return GL_HALF_FLOAT;
+    else if (format == GL_DEPTH_COMPONENT16)
+        return GL_UNSIGNED_SHORT;
+#endif
     if (format == GL_DEPTH_COMPONENT || format == GL_DEPTH_COMPONENT24_OES)
         return GL_UNSIGNED_INT;
     else if (format == GL_DEPTH_COMPONENT16)
@@ -299,7 +365,7 @@ unsigned Texture::GetDataType(unsigned format)
 
 unsigned Texture::GetSRGBFormat(unsigned format)
 {
-#ifndef GL_ES_VERSION_2_0
+#if !defined(GL_ES_VERSION_2_0) || defined(GL_ES_VERSION_3_0)
     if (!graphics_ || !graphics_->GetSRGBSupport())
         return format;
 
@@ -309,6 +375,7 @@ unsigned Texture::GetSRGBFormat(unsigned format)
         return GL_SRGB_EXT;
     case GL_RGBA:
         return GL_SRGB_ALPHA_EXT;
+#ifndef GL_ES_VERSION_3_0
     case GL_LUMINANCE:
         return GL_SLUMINANCE_EXT;
     case GL_LUMINANCE_ALPHA:
@@ -319,6 +386,7 @@ unsigned Texture::GetSRGBFormat(unsigned format)
         return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT;
     case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
         return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT;
+#endif
     default:
         return format;
     }

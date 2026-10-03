@@ -107,6 +107,18 @@ ss_ hex(const ss_ &raw)
 	return result;
 }
 
+ss_ hmac(const ss_ &key_in, const ss_ &msg)
+{
+	ss_ key = key_in.size() > 64 ? calculate(key_in) : key_in;
+	key.resize(64, '\0');
+	ss_ ipad(64, '\0'), opad(64, '\0');
+	for(int i = 0; i < 64; i++){
+		ipad[i] = key[i] ^ 0x36;
+		opad[i] = key[i] ^ 0x5c;
+	}
+	return calculate(opad + calculate(ipad + msg));
+}
+
 } // namespace sha256
 } // namespace interface
 // vim: set noet ts=4 sw=4:
