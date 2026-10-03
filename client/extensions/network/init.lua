@@ -91,16 +91,22 @@ local function save_store(entries)
 		return
 	end
 	file:write("accepted,address,description,created,last_attempt,name,icon\n")
+	-- A row is a line: the reader splits on them, and a field with a line
+	-- break in it -- a name a server's script set -- was a second row
+	-- nobody accepted ([SECURITY_RUN_1])
+	local function q(v)
+		return csv.quote((tostring(v):gsub("[\r\n]", " ")))
+	end
 	for _, uri in ipairs(uris) do
 		local e = entries[uri]
 		file:write(table.concat({
-			csv.quote(e.accepted and "true" or "false"),
-			csv.quote(e.uri),
-			csv.quote(e.description),
-			csv.quote(math.floor(e.created)),
-			csv.quote(math.floor(e.last_attempt)),
-			csv.quote(e.name or ""),
-			csv.quote(e.icon or ""),
+			q(e.accepted and "true" or "false"),
+			q(e.uri),
+			q(e.description),
+			q(math.floor(e.created)),
+			q(math.floor(e.last_attempt)),
+			q(e.name or ""),
+			q(e.icon or ""),
 		}, ",").."\n")
 	end
 	file:close()
