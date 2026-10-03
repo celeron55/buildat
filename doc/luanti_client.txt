@@ -279,7 +279,7 @@ settings.lua    The client's own settings in <user>/luanti_client/settings.json
                 (render mode, view range, view bobbing, name, address, the
                 rebound keys) and their screen; the BUILDAT_* environment
                 variables stay one-run overrides
-res/*.lua       The Lua both Luanti clients share, dofile'd here and served
+res/*.lua       The Lua both Luanti clients share, run here and served
                 by builtin/luanti as luanti/<name> to apps/vanilla's client
                 half: camera_motion.lua (view bobbing and the hand's
                 motion), key_editor.lua (the key bindings screen),
@@ -289,6 +289,14 @@ init.lua        The connect dialog and the status screen
 
 The engine side of this is nothing Luanti-specific: sockets (extension/network),
 SHA-256 and bignum arithmetic (buildat.sha256, buildat.bignum).
+
+**It runs in the Lua sandbox** since 2026-10-02 ([EXTENSIONS_SANDBOXED]), as
+a server's client Lua does: its own files through
+buildat.run_extension_file() ("world.lua", "res/hotbar.lua"), the server's
+media in its cache through buildat.cache_read() and cache_write()
+(<cache>/luanti_client/<server>/, composed textures under composed/), its
+settings through storage_read() and storage_write(), the locale through
+get_locale(), and the BUILDAT_* overrides through get_env().
 
 Checks
 ------

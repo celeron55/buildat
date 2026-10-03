@@ -54,3 +54,21 @@ Taken out of `extensions/launch_world` on purpose (user, 2026-09-24 and
 - The room's own key for leaving a game (F10). A game leaves through
   `buildat.leave()`, and the launcher does not rig anything up to make
   games behave.
+
+
+The server's box: what it is not built on
+-----------------------------------------
+Decided 2026-10-02 and 2026-10-03 ([PROCESS_SANDBOX]).
+
+- bubblewrap bundled with the archive. Ubuntu 23.10 and later refuse
+  unprivileged user namespaces to a program without an AppArmor profile,
+  so a copy at our own path fails exactly where it would matter. The
+  system's bwrap may be an extra layer; Landlock and seccomp are the box.
+- The Windows box's local client bridged through loopback. Loopback is
+  blocked between an AppContainer and the rest of the machine both ways
+  (the user's probe runs), and a bridge inside the box would need loopback
+  there too; the client joins by a named pipe in the container's
+  namespace, a second transport for the same byte stream.
+- Low integrity on Windows instead of an AppContainer: it does not
+  restrict reading, and reading the user's files is half of what the box
+  is for.
