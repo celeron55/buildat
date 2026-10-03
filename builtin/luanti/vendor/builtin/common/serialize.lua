@@ -242,6 +242,14 @@ function core.deserialize(str, safe)
 		error(("core.deserialize called with %s (expected string)."):format(t))
 	end
 
+	-- buildat: what is deserialized here comes from saves and imported
+	-- worlds, so it is data and is bounded like data ([SECURITY_RUN_1]):
+	-- bytecode refused, as Luanti does, and a budget of instructions for
+	-- what is left, run interpreted so the hook can count -- a
+	-- `while true do end` in a player's meta hung the server.
+	if str:byte(1) == 27 then
+		return nil, "Bytecode prohibited"
+	end
 	local func, err = loadstring(str)
 	if not func then return nil, err end
 
@@ -251,6 +259,9 @@ function core.deserialize(str, safe)
 		env.loadstring = dummy_func
 	else
 		env.loadstring = function(str, ...)
+			if type(str) == "string" and str:byte(1) == 27 then
+				return nil, "Bytecode prohibited"
+			end
 			local func, err = loadstring(str, ...)
 			if func then
 				setfenv(func, env)
@@ -260,7 +271,16 @@ function core.deserialize(str, safe)
 		end
 	end
 	setfenv(func, env)
-	local success, value_or_err = pcall(func)
+	-- buildat: the budget (see above). A serialized table is straight-line
+	-- code of about its own length, so a hundred instructions a byte is
+	-- far past any honest one.
+	local budget = 100000 + 100 * #str
+	local success, value_or_err
+	if __luanti_bounded_pcall then
+		success, value_or_err = __luanti_bounded_pcall(func, budget)
+	else
+		success, value_or_err = pcall(func)
+	end
 	if success then
 		return value_or_err
 	end

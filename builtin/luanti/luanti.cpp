@@ -51,6 +51,7 @@ extern "C" {
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
+#include <luajit.h>
 }
 // LuaJIT's bit library, which Luanti's mods use as if it were part of the
 // language. Luanti loads this same file -- Mike Pall's Lua BitOp -- when it
@@ -477,6 +478,34 @@ static void lua_step_watchdog(lua_State *L)
 				d.name != nullptr ? d.name : "?",
 				d.name != nullptr ? "()" : "");
 	}
+}
+
+// __luanti_bounded_pcall(f, budget) -> ok, result: f run interpreted --
+// LuaJIT's compiled loops do not reach a count hook -- with an error after
+// `budget` instructions, and the hook that was on (the watchdog, the
+// profiler) put back as it was. Lua's own debug.sethook cannot do the last
+// part: a C hook comes back from debug.gethook as a string. What
+// core.deserialize runs saved data through ([SECURITY_RUN_1]).
+static void bounded_hook(lua_State *L, lua_Debug *ar)
+{
+	luaL_error(L, "the data runs too long");
+}
+
+static int l_bounded_pcall(lua_State *L)
+{
+	luaL_checktype(L, 1, LUA_TFUNCTION);
+	const int budget = luaL_checkint(L, 2);
+	lua_Hook old = lua_gethook(L);
+	const int old_mask = lua_gethookmask(L);
+	const int old_count = lua_gethookcount(L);
+	luaJIT_setmode(L, 1, LUAJIT_MODE_ALLFUNC | LUAJIT_MODE_OFF);
+	lua_sethook(L, bounded_hook, LUA_MASKCOUNT, budget > 0 ? budget : 1);
+	lua_pushvalue(L, 1);
+	const int r = lua_pcall(L, 0, 1, 0);
+	lua_sethook(L, old, old_mask, old_count);
+	lua_pushboolean(L, r == 0);
+	lua_insert(L, -2);
+	return 2;
 }
 
 static void lua_prof_hook(lua_State *L, lua_Debug *ar)
@@ -8532,6 +8561,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_set_region_data", l_set_region_data);
 		set_global_cfunction("__luanti_noise_value", l_noise_value);
 		set_global_cfunction("__luanti_noise_map", l_noise_map);
+		set_global_cfunction("__luanti_bounded_pcall", l_bounded_pcall);
 		set_global_cfunction("__luanti_forceload", l_forceload);
 		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
 		set_global_cfunction("__luanti_loaded_boxes", l_loaded_boxes);
