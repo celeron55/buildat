@@ -87,7 +87,7 @@ for t in $targets; do
 	cov=$(grep -ao "cov: [0-9]*" "$out/$t/last.log" | tail -1)
 	if [ $r -ne 0 ]; then
 		echo "$t: CRASH ($(ls -t "$out/$t/crashes" | head -1)); $out/$t/last.log"
-		grep -a "ERROR: \|runtime error" "$out/$t/last.log" | head -3
+		grep -a "ERROR: \|: runtime error" "$out/$t/last.log" | head -3
 		status=1
 	else
 		echo "$t: ${execs:-?} runs in ${secs} s, $cov, $(ls "$out/$t/corpus" | wc -l) in the corpus"

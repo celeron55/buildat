@@ -32,13 +32,15 @@ end
 
 local funcs = {}
 local seen = {}
--- Objects met on the walk -- inside a game, its scene, nodes and UI --
--- are the calls' material as well as what calls return
+-- Tables met on the walk -- inside a game, its scene, nodes and UI
+-- among them -- are the calls' material as well as what calls return
+-- (the sandbox has no getmetatable to tell an object from a table)
 local found = {}
 local function walk(t, path, depth)
 	if depth > 3 or seen[t] then return end
 	seen[t] = true
-	local ok, err = pcall(function()
+	-- A table that will not be walked (a view's own refusal) is skipped
+	pcall(function()
 		for k, v in pairs(t) do
 			local p = path.."."..tostring(k)
 			if type(v) == "function" then
@@ -46,7 +48,7 @@ local function walk(t, path, depth)
 					table.insert(funcs, {p, v})
 				end
 			elseif type(v) == "table" then
-				if getmetatable(v) and #found < 50 then
+				if #found < 50 then
 					table.insert(found, v)
 				end
 				walk(v, p, depth + 1)
@@ -76,14 +78,15 @@ for _, v in ipairs(found) do
 	npool = npool + 1
 	pool[npool] = v
 end
--- Where a value in the pool came from, for the log
-local rindex = setmetatable({}, {__index = function() return "pool" end})
+-- Where a value in the pool came from, for the log (the sandbox has no
+-- setmetatable)
+local rindex = {}
 local function value()
 	return pool[rnd(npool)]
 end
 
 log:info("sandbox_fuzz: "..#funcs.." functions, "..#found..
-		" objects found, seed "..rnd_state)
+		" tables found, seed "..rnd_state)
 for i = 1, 400 do
 	if #funcs == 0 then break end
 	local f = funcs[rnd(#funcs)]
@@ -94,7 +97,8 @@ for i = 1, 400 do
 	for j = 1, n do
 		local v = args[j]
 		shown[j] = type(v) == "string" and string.format("%q", v:sub(1, 20)) or
-				type(v) == "number" and tostring(v) or type(v)..":"..rindex[v]
+				type(v) == "number" and tostring(v) or
+				type(v)..":"..(rindex[v] or "pool")
 	end
 	log:info("sandbox_fuzz: "..f[1].."("..table.concat(shown, ", ")..")")
 	local ok, r = pcall(f[2], unpack(args, 1, n))
@@ -102,7 +106,8 @@ for i = 1, 400 do
 	if ok and r ~= nil and npool < 200 then
 		npool = npool + 1
 		pool[npool] = r
-		rindex[r] = rindex[r] or f[1]
+		-- Not a number's: a NaN is no table key, and the log shows numbers
+		if type(r) ~= "number" then rindex[r] = rindex[r] or f[1] end
 	end
 end
 log:info("sandbox_fuzz: done")

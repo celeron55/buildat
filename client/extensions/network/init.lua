@@ -146,12 +146,101 @@ local function format_time(t)
 	return os.date("%Y-%m-%d %H:%M", t)
 end
 
+-- **What the user sees is what they answer** ([SECURITY_RUN_1]): a
+-- dialog is in the UI tree every script shares and on the stack they
+-- read, so a server's script could rewrite the address it shows, swap
+-- the buttons' labels, or make Accept invisible over a Decline of its
+-- own. The dialog is taken down to its raw elements once laid out --
+-- what each shows, where, how visible, how many children -- and
+-- compared every frame and at the answer; on_changed is called on any
+-- change. Read fresh from the root each time, so an element a script
+-- removed is never touched; a field's own text is the user's and not
+-- read. -> {intact(), stop()}
+local function guard_dialog(root, on_changed)
+	local function picture()
+		local m = getmetatable(root)
+		if not m or m.dead or not m.unsafe then
+			return nil
+		end
+		local out = {}
+		local function walk(e, depth)
+			local t = e:GetTypeName()
+			local rec = {t, tostring(e:IsVisible()),
+					string.format("%.3f", e:GetOpacity()), e:GetPriority(),
+					e:GetNumChildren(false)}
+			if depth >= 2 then
+				-- The root fills the screen and the window is centred on
+				-- it: those two move with a resize, what is in them does not
+				local p = e:GetPosition()
+				rec[#rec + 1] = p.x .. "," .. p.y
+			end
+			if depth >= 1 then
+				rec[#rec + 1] = e:GetWidth() .. "x" .. e:GetHeight()
+			end
+			if t == "Text" then
+				local c = e:GetColor(C_TOPLEFT)
+				rec[#rec + 1] = string.format("%s %.2f,%.2f,%.2f,%.2f",
+						e:GetText(), c.r, c.g, c.b, c.a)
+			end
+			out[#out + 1] = table.concat(rec, "|")
+			if t == "LineEdit" then
+				return
+			end
+			for i = 0, e:GetNumChildren(false) - 1 do
+				walk(e:GetChild(i), depth + 1)
+			end
+		end
+		walk(m.unsafe, 0)
+		return table.concat(out, "\n")
+	end
+	local seen = nil  -- the picture once laid out
+	local frames = 0
+	local sub = nil
+	local function stop()
+		if sub then
+			magic.UnsubscribeFromEvent("Update", sub)
+			sub = nil
+		end
+	end
+	sub = magic.SubscribeToEvent("Update", function()
+		frames = frames + 1
+		-- Laid out by then: a layout settles in the first frame or two
+		if frames == 3 then
+			seen = picture()
+		elseif frames > 3 and picture() ~= seen then
+			stop()
+			on_changed()
+		end
+	end)
+	return {
+		intact = function() return seen ~= nil and picture() == seen end,
+		stop = stop,
+	}
+end
+
+-- Off the stack whatever was put over a dialog since: a script can push
+-- a screen of its own on top, and pop() takes the top only
+local function close_dialog(root)
+	local st = uistack.main.stack
+	if st[#st] == root then
+		uistack.main:pop(root)
+	else
+		for _, e in ipairs(st) do
+			if e == root then
+				uistack.main:pop_to(root, true)
+				break
+			end
+		end
+	end
+end
+
 -- on_answer(accepted: boolean, description: string). suggested is the
 -- caller's own description ([NET_DESC]): the field starts with it --
 -- what the caller is asking for is what the caller knows -- editable,
 -- and the accept or the decline is still the user's. An entry's own
 -- description wins: that is what the user left there.
 local function ask_user(uri, entry, on_answer, suggested)
+	local answer
 	local root = uistack.main:push({desc="network permission dialog"})
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "launch_menu/res/main_style.xml")
@@ -192,103 +281,28 @@ local function ask_user(uri, entry, on_answer, suggested)
 			suggested or "")
 	edit:SetFocus(true)
 
-	-- **What the user sees is what they answer** ([SECURITY_RUN_1]): the
-	-- dialog is in the UI tree every script shares and on the stack they
-	-- read, so a server's script could rewrite the address it shows, swap
-	-- the buttons' labels, or make Accept invisible over a Decline of its
-	-- own. The dialog is taken down to its raw elements once laid out --
-	-- what each shows, where, how visible, how many children -- and
-	-- compared every frame and at the answer; any change is declined.
-	-- Read fresh from the root each time, so an element a script removed
-	-- is never touched; the field's own text is the user's and not read.
-	local function raw(w)
-		local m = getmetatable(w)
-		return m and m.unsafe
-	end
-	local function picture()
-		local m = getmetatable(root)
-		if not m or m.dead or not m.unsafe then
-			return nil
-		end
-		local out = {}
-		local function walk(e, depth)
-			local t = e:GetTypeName()
-			local rec = {t, tostring(e:IsVisible()),
-					string.format("%.3f", e:GetOpacity()), e:GetPriority(),
-					e:GetNumChildren(false)}
-			if depth >= 2 then
-				-- The root fills the screen and the window is centred on
-				-- it: those two move with a resize, what is in them does not
-				local p = e:GetPosition()
-				rec[#rec + 1] = p.x .. "," .. p.y
-			end
-			if depth >= 1 then
-				rec[#rec + 1] = e:GetWidth() .. "x" .. e:GetHeight()
-			end
-			if t == "Text" then
-				local c = e:GetColor(C_TOPLEFT)
-				rec[#rec + 1] = string.format("%s %.2f,%.2f,%.2f,%.2f",
-						e:GetText(), c.r, c.g, c.b, c.a)
-			end
-			out[#out + 1] = table.concat(rec, "|")
-			if t == "LineEdit" then
-				return
-			end
-			for i = 0, e:GetNumChildren(false) - 1 do
-				walk(e:GetChild(i), depth + 1)
-			end
-		end
-		walk(m.unsafe, 0)
-		return table.concat(out, "\n")
-	end
-	local seen = nil  -- the picture once laid out
-	local frames = 0
-	local guard_sub = nil
+	local guard = guard_dialog(root, function()
+		log:warning("The permission dialog for "..uri.." was changed "..
+				"while it was up; declined")
+		answer(false)
+	end)
 
 	local answered = false
-	local function answer(accepted)
+	function answer(accepted)
 		if answered then
 			return
 		end
 		answered = true
-		if guard_sub then
-			magic.UnsubscribeFromEvent("Update", guard_sub)
-		end
-		if accepted and (not seen or picture() ~= seen) then
+		if accepted and not guard.intact() then
 			log:warning("The permission dialog for "..uri.." was changed "..
 					"while it was up; taken as declined")
 			accepted = false
 		end
+		guard.stop()
 		local description = edit:GetText()
-		-- Off the stack whatever was put over it since: a script can push
-		-- a screen of its own on top, and pop() takes the top only
-		local st = uistack.main.stack
-		if st[#st] == root then
-			uistack.main:pop(root)
-		else
-			for _, e in ipairs(st) do
-				if e == root then
-					uistack.main:pop_to(root, true)
-					break
-				end
-			end
-		end
+		close_dialog(root)
 		on_answer(accepted, description)
 	end
-	guard_sub = magic.SubscribeToEvent("Update", function()
-		if answered then
-			return
-		end
-		frames = frames + 1
-		-- Laid out by then: a layout settles in the first frame or two
-		if frames == 3 then
-			seen = picture()
-		elseif frames > 3 and picture() ~= seen then
-			log:warning("The permission dialog for "..uri.." was changed "..
-					"while it was up; declined")
-			answer(false)
-		end
-	end)
 
 	menu:add("Accept", function() answer(true) end)
 	menu:add("Decline", function() answer(false) end)
@@ -297,6 +311,74 @@ local function ask_user(uri, entry, on_answer, suggested)
 			answer(false)
 			return true -- taken; the menu's own Escape = Back stands down
 		end
+	end)
+end
+
+-- **A file of <user>/exports, picked by the user** ([SECURITY_RUN_1]):
+-- the folder holds what every server's game exported and whatever the
+-- user put there, and a game listing and reading it all read another
+-- server's exports. A game gets the one file the user picks here, the
+-- web's file picker on native (buildat.safe.pick_file, client/api.lua).
+-- Beside the network dialog for its guard. cb(name, data), or cb(nil,
+-- why); accept is the end of a file's name (".fpplan"), "" for any.
+-- simplified: every file is a row; a folder of hundreds wants a scroll
+function M.pick_export(accept, cb)
+	local root = uistack.main:push({desc="file picker"})
+	root.defaultStyle = magic.cache:GetResource(
+			"XMLFile", "launch_menu/res/main_style.xml")
+	root.priority = 1000
+	local menu = ui_utils.vertical_menu(root, {min_width = 400})
+	local function add_text(text)
+		local t = menu.window:CreateChild("Text")
+		t:SetStyleAuto()
+		t.text = text
+		t:SetTextAlignment(HA_LEFT)
+	end
+	local guard
+	local finished = false
+	local function finish(name)
+		if finished then
+			return
+		end
+		finished = true
+		if name and not guard.intact() then
+			log:warning("The file picker was changed while it was up; "..
+					"nothing picked")
+			name = nil
+		end
+		guard.stop()
+		close_dialog(root)
+		if not name then
+			return cb(nil, "no file picked")
+		end
+		log:info("The user picked "..name.." from the exports")
+		local data, why = __buildat_read_exported(name)
+		cb(data and name or nil, data or why)
+	end
+	add_text("A game asks for a file. Pick one from <user>/exports:")
+	local files = __buildat_exported_files()
+	table.sort(files)
+	local any = false
+	for _, f in ipairs(files) do
+		if accept == "" or f:sub(-#accept) == accept then
+			any = true
+			menu:add(f, function() finish(f) end)
+		end
+	end
+	if not any then
+		add_text("(none" .. (accept ~= "" and " ending in " .. accept or "") ..
+				")")
+	end
+	menu:add("Cancel", function() finish(nil) end)
+	menu:on_key(function(key)
+		if key == KEY_ESCAPE then
+			finish(nil)
+			return true
+		end
+	end)
+	guard = guard_dialog(root, function()
+		log:warning("The file picker was changed while it was up; closed")
+		finish(nil)
 	end)
 end
 

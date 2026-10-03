@@ -276,6 +276,60 @@ static int l_get_voxel_data(lua_State *L)
 	return 1;
 }
 
+// hold_ref(unsafe) -> a userdata holding a reference to the object, or
+// nil for what is not reference counted. **A wrapper keeps its object**
+// ([SECURITY_RUN_1]): tolua's userdata is a bare pointer, so an object
+// the engine let go of -- a cloned RenderPath with its viewport -- was
+// freed under a script's wrapper, and a call through it used it (the
+// game fuzz). extension/magic_sandbox holds one of these per object
+// wrapped, for as long as a wrapper of it lives.
+// Reference counted by tolua's account (its RefCounted), or one of the
+// classes it registers without a base though Urho's are reference
+// counted. Subsystems are left out: they live as long as the client, and
+// a reference held into Lua's close would outlive the Context.
+static const char *const HELD_ROOTS[] = {"RefCounted", "Resource",
+		"RenderPath", "Viewport", "RenderSurface", "SoundStream"};
+static int l_held_ref_gc(lua_State *L)
+{
+	((SharedPtr<RefCounted>*)lua_touserdata(L, 1))->~SharedPtr();
+	return 0;
+}
+static int l_hold_ref(lua_State *L)
+{
+	tolua_Error err;
+	bool held = false;
+	for(const char *root : HELD_ROOTS)
+		if(tolua_isusertype(L, 1, root, 0, &err))
+			held = true;
+	for(const char *sub : {"Graphics", "Input", "UI", "Time", "Audio"})
+		if(tolua_isusertype(L, 1, sub, 0, &err))
+			held = false;
+	// simplified: the pointer is cast as tolua casts it, which holds while
+	// RefCounted is at the start of every class (Urho's single bases)
+	RefCounted *p = held ? (RefCounted*)tolua_tousertype(L, 1, 0) : nullptr;
+	if(!p)
+		return 0;
+	// One a script made (Node(), Scene()) is tolua's to delete when its
+	// userdata is collected, whatever else holds it -- the engine, or the
+	// reference below: the count decides from here
+	void *u = *(void**)lua_touserdata(L, 1);
+	lua_getfield(L, LUA_REGISTRYINDEX, "tolua_gc");
+	if(lua_istable(L, -1)){
+		lua_pushlightuserdata(L, u);
+		lua_pushnil(L);
+		lua_rawset(L, -3);
+	}
+	lua_pop(L, 1);
+	new(lua_newuserdata(L, sizeof(SharedPtr<RefCounted>)))
+			SharedPtr<RefCounted>(p);
+	if(luaL_newmetatable(L, "buildat_held_ref")){
+		lua_pushcfunction(L, l_held_ref_gc);
+		lua_setfield(L, -2, "__gc");
+	}
+	lua_setmetatable(L, -2);
+	return 1;
+}
+
 void init_misc_urho3d(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
@@ -291,6 +345,7 @@ void init_misc_urho3d(lua_State *L)
 	DEF_BUILDAT_FUNC(set_voxel_data);
 	DEF_BUILDAT_FUNC(get_voxel_data);
 	DEF_BUILDAT_FUNC(image_set_data);
+	DEF_BUILDAT_FUNC(hold_ref);
 }
 
 } // namespace lua_bindingss

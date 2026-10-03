@@ -4,6 +4,7 @@
 #include "core/log.h"
 #include "interface/fs.h"
 #include <ctime>
+#include <set>
 #include <c55/string_util.h>
 #include <Graphics.h>
 #include <Image.h>
@@ -895,6 +896,19 @@ bool inject_text(magic::Input *input, const ss_ &text, ss_ *error)
 	return true;
 }
 
+static std::mutex g_screenshot_mutex;
+// The shots handed to a writer thread and not on disk yet: a script
+// taking one a frame was given the name of the one still being written,
+// and half its shots were overwritten
+static std::set<ss_> g_screenshots_writing;
+
+static bool taken(const ss_ &path)
+{
+	std::lock_guard<std::mutex> lock(g_screenshot_mutex);
+	return interface::fs::path_exists(path) ||
+			g_screenshots_writing.count(interface::fs::get_absolute_path(path));
+}
+
 ss_ screenshot_name(const ss_ &dir)
 {
 	char stamp[32] = {};
@@ -912,12 +926,10 @@ ss_ screenshot_name(const ss_ &dir)
 	// enough for a script taking a set, and the collision would be silent:
 	// the second shot overwrites the first, and the caller is handed a name
 	// that no longer means what it did when it was given out.
-	for(int i = 2; i < 1000 && interface::fs::path_exists(dir+"/"+name); i++)
+	for(int i = 2; i < 1000 && taken(dir+"/"+name); i++)
 		name = base+"_"+itos(i)+".png";
 	return name;
 }
-
-static std::mutex g_screenshot_mutex;
 // Joined at exit as well as by finish_screenshots(): a std::thread still
 // joinable when its vector is destroyed calls terminate, which is what
 // the client did on quit three seconds after its last shot (the campaign
@@ -933,11 +945,15 @@ static struct ScreenshotThreads {
 
 void finish_screenshots()
 {
-	std::lock_guard<std::mutex> lock(g_screenshot_mutex);
-	for(std::thread &t : g_screenshot_threads.v)
+	// Joined outside the lock: a thread takes it to say it is done
+	sv_<std::thread> v;
+	{
+		std::lock_guard<std::mutex> lock(g_screenshot_mutex);
+		v.swap(g_screenshot_threads.v);
+	}
+	for(std::thread &t : v)
 		if(t.joinable())
 			t.join();
-	g_screenshot_threads.v.clear();
 }
 
 bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error,
@@ -1000,11 +1016,14 @@ bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error,
 			img.GetData() + (size_t)w * h * c);
 	{
 		std::lock_guard<std::mutex> lock(g_screenshot_mutex);
+		g_screenshots_writing.insert(abs);
 		g_screenshot_threads.v.emplace_back([abs, w, h, c, pixels](){
 			if(stbi_write_png(abs.c_str(), w, h, c, pixels.data(), w * c))
 				log_i(MODULE, "Wrote screenshot %s", cs(abs));
 			else
 				log_w(MODULE, "Failed to write \"%s\"", cs(abs));
+			std::lock_guard<std::mutex> lock(g_screenshot_mutex);
+			g_screenshots_writing.erase(abs);
 		});
 	}
 	return true;

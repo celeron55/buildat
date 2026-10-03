@@ -121,6 +121,17 @@ do
 			"an empty model has no bones")
 	assert(sk:GetBone("Hand_R") == nil, "and no bone by that name")
 	assert(sk:GetRootBone() == nil, "and no root")
+	-- A rig, then another model and the node gone ([SECURITY_RUN_1]): a
+	-- bone is copied out and the skeleton keeps its model, so what the
+	-- script holds stays readable where it read freed memory
+	am.model = magic.cache:GetResource("Model", "Models/Jack.mdl")
+	sk = am.skeleton
+	local bone = sk:GetBone(1)
+	assert(bone and bone.name ~= "" and bone.node, "Jack has bones")
+	am.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+	n:Remove()
+	assert(bone.name ~= "" and sk:GetNumBones() == 0,
+			"a bone read and a skeleton kept outlive the model's change")
 	log:info("wrapped: a model's skeleton answers about its bones")
 end
 
@@ -209,6 +220,29 @@ do
 	assert(not pcall(vm.GetPtr, vm, "Scene", "n"),
 			"a Node does not read back as a Scene")
 	log:info("wrapped: a Ptr reads back only as its own class or a base")
+end
+
+-- A wrapper keeps its object ([SECURITY_RUN_1], 2026-10-04): a cloned
+-- RenderPath is the viewport's to free, and a call through a wrapper of
+-- one it let go of used freed memory (util/fuzz/game_fuzz.sh, under ASan)
+do
+	local scene = magic.Scene()
+	local camera = scene:CreateChild("c"):CreateComponent("Camera")
+	local viewport = magic.Viewport:new(scene, camera)
+	local path = viewport.renderPath:Clone()
+	viewport.renderPath = path
+	viewport.renderPath = path:Clone()
+	assert(path:GetNumCommands() > 0, "the path let go of is still there")
+	path:SetShaderParameter("x", 1)
+	-- A command is a place in the path's vector, which Append moves
+	local command = path:GetCommand(0)
+	assert(command.type, "a command reads")
+	path:Append(magic.cache:GetResource("XMLFile", "PostProcess/FXAA2.xml"))
+	local ok, err = pcall(function() return command.type end)
+	assert(not ok and tostring(err):find("moved"),
+			"a command from before an Append is dead: " .. tostring(err))
+	assert(path:GetCommand(0).type, "and asked for again it reads")
+	log:info("wrapped: a RenderPath its viewport let go of is still there")
 end
 
 -- buildat.parse_json (2026-09-25): the shapes a fetched body arrives in

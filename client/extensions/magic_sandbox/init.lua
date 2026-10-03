@@ -18,11 +18,21 @@ local M = {safe = {}}
 -- to walk (a frame of 58 s in the objects packet). The meta is
 -- getmetatable(safe).
 M.live = setmetatable({}, {__mode = "k"})
+-- **And a reference to what it wraps** ([SECURITY_RUN_1]): unsafe -> a
+-- held reference (__buildat_hold_ref), so the object outlives the engine's
+-- last reference to it for as long as a wrapper of it does. A cloned
+-- RenderPath was freed with its viewport and a script's call through
+-- its wrapper used the freed memory. The holder reaches nothing in Lua,
+-- so the weak key goes when the last wrapper does.
+local held = setmetatable({}, {__mode = "k"})
 local function register(unsafe, safe)
 	local set = M.live[unsafe]
 	if not set then
 		set = setmetatable({}, {__mode = "k"})
 		M.live[unsafe] = set
+		if type(unsafe) == "userdata" then
+			held[unsafe] = __buildat_hold_ref(unsafe)
+		end
 	end
 	set[safe] = true
 end

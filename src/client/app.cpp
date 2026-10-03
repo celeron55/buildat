@@ -1297,6 +1297,9 @@ struct CApp: public App, public magic::Application
 	// shutdown() is not instant; the frames until the window closes must not
 	// each call it again
 	bool m_shutdown_signal_handled = false;
+	// The last key, button or touch the user gave, down or up
+	// (l_user_activated)
+	int64_t m_last_press_us = 0;
 	float m_ui_scale_lua = 0.f; // 0 = not set by Lua
 	// **What the scale is multiplied by for a menu to fit** (user,
 	// 2026-09-30: a phone in portrait showed part of a menu, its buttons
@@ -1535,6 +1538,9 @@ struct CApp: public App, public magic::Application
 		SubscribeToEvent(magic::E_ENDRENDERING,
 				URHO3D_HANDLER(CApp, on_end_rendering));
 		SubscribeToEvent(magic::E_KEYDOWN, URHO3D_HANDLER(CApp, on_keydown));
+		for(magic::StringHash e : {magic::E_KEYUP, magic::E_MOUSEBUTTONDOWN,
+				magic::E_MOUSEBUTTONUP, magic::E_TOUCHBEGIN, magic::E_TOUCHEND})
+			SubscribeToEvent(e, URHO3D_HANDLER(CApp, on_press));
 		SubscribeToEvent(magic::E_SCREENMODE, URHO3D_HANDLER(CApp, on_screenmode));
 		SubscribeToEvent(magic::E_INPUTFOCUS, URHO3D_HANDLER(CApp, on_inputfocus));
 		SubscribeToEvent(magic::E_LOGMESSAGE, URHO3D_HANDLER(CApp, on_logmessage));
@@ -1711,11 +1717,16 @@ struct CApp: public App, public magic::Application
 	// nor a pipe's.
 	// simplified: a TLS address (https://) is not kept; its row would
 	// need the scheme the room's list leaves out.
+	// **One a server** ([SECURITY_RUN_1]): each new PNG was a new file
+	// and a rewrite of the address store, so a server sending them in a
+	// loop filled the cache. The first one from an address in a run.
+	// simplified: a server's new icon is taken at the client's next run
+	ss_ m_icon_address;
 	void handle_server_icon(const ss_ &data)
 	{
 		const ss_ address = m_state ? m_state->get_address() : "";
 		if(address.empty() || address.compare(0, 5, "pipe:") == 0 ||
-				address.find("://") != ss_::npos)
+				address.find("://") != ss_::npos || address == m_icon_address)
 			return;
 		adopt_pidfile();
 		if(!g_local_server_app.empty() &&
@@ -1775,6 +1786,7 @@ struct CApp: public App, public magic::Application
 				return;
 			}
 		}
+		m_icon_address = address;
 		run_script_no_sandbox("require('buildat/extension/network')"
 				".remember_server_icon('tcp://"+hostport+"', '"+sha+"')");
 		log_i(MODULE, "server icon from %s kept as %s", cs(address),
@@ -2095,11 +2107,13 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_file_content)
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(create_directories)
+		DEF_BUILDAT_FUNC(count_files)
 		DEF_BUILDAT_FUNC(set_watchdog_seconds)
 		DEF_BUILDAT_FUNC(set_reload_on_return)
 		DEF_BUILDAT_FUNC(set_web_fullscreen)
 		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(set_ui_scale)
+		DEF_BUILDAT_FUNC(user_activated)
 		DEF_BUILDAT_FUNC(get_ui_scale)
 		DEF_BUILDAT_FUNC(logical_size)
 		DEF_BUILDAT_FUNC(get_preferred_render_scale)
@@ -2841,8 +2855,14 @@ struct CApp: public App, public magic::Application
 			command_seq_fail(err);
 	}
 
+	void on_press(magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		m_last_press_us = interface::os::time_us();
+	}
+
 	void on_keydown(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
+		m_last_press_us = interface::os::time_us();
 		int key = event_data["Key"].GetInt();
 		if(key == Urho3D::KEY_F11){
 			log_v(MODULE, "F11");
@@ -3739,6 +3759,20 @@ struct CApp: public App, public magic::Application
 		return 0;
 	}
 
+	// user_activated() -> bool: the window has the input and the user
+	// pressed or let go of a key, a button or the screen within a second
+	// -- what a browser calls user activation, for what may only follow
+	// the user's own action (the clipboard's write, safe_classes.lua)
+	static int l_user_activated(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		lua_pushboolean(L, self->GetSubsystem<magic::Input>()->HasFocus() &&
+				interface::os::time_us() - self->m_last_press_us < 1000000);
+		return 1;
+	}
+
 	// set_ui_scale(scale: number)  -- <=0 restores auto/config
 	static int l_set_ui_scale(lua_State *L)
 	{
@@ -4592,6 +4626,14 @@ struct CApp: public App, public magic::Application
 		return 1;
 	}
 
+	// count_files(path) -> the number of entries in the directory
+	static int l_count_files(lua_State *L)
+	{
+		ss_ path = lua_bindings::lua_tocppstring(L, 1);
+		lua_pushinteger(L, interface::fs::list_directory(path).size());
+		return 1;
+	}
+
 	// take_screenshot() -> the file name it was saved under, or nil and why
 	// not.
 	//
@@ -4622,6 +4664,16 @@ struct CApp: public App, public magic::Application
 			lua_pushstring(L, "a screenshot is already pending");
 			return 2;
 		}
+		// **A run's worth** ([SECURITY_RUN_1]): one a frame was a server's
+		// script filling the disk at a frame rate.
+		// simplified: per client run, as save_file's
+		static int s_shots = 0;
+		if(s_shots >= 1000){
+			lua_pushnil(L);
+			lua_pushstring(L, "1000 screenshots taken already in this run");
+			return 2;
+		}
+		s_shots++;
 		const ss_ dir = g_client_config.get<ss_>("user_path")+"/screenshots";
 		const ss_ name = client::command_seq::screenshot_name(dir);
 		self->m_pending_screenshot = dir+"/"+name;
@@ -4661,6 +4713,22 @@ struct CApp: public App, public magic::Application
 		const char *name_c = luaL_checklstring(L, 1, &name_len);
 		const char *data = luaL_checklstring(L, 2, &len);
 		const ss_ name = user_file_name(ss_(name_c, name_len));
+		// **A run's worth, not a disk's** ([SECURITY_RUN_1]): a server's
+		// script saving in a loop filled the user's disk with no one
+		// asking. Not the user's key or click as the clipboard's is: an
+		// export is the server's answer, a round trip after the click.
+		// simplified: per client run; a run that exports more starts again
+		static size_t s_files = 0, s_bytes = 0;
+		if(len > MAX_USER_FILE_BYTES || s_files >= 100 ||
+				s_bytes + len > 4 * MAX_USER_FILE_BYTES){
+			lua_pushnil(L);
+			lua_pushstring(L, len > MAX_USER_FILE_BYTES ?
+					"the file is over 64 MiB" :
+					"100 files or 256 MiB saved already in this run");
+			return 2;
+		}
+		s_files++;
+		s_bytes += len;
 #ifdef __EMSCRIPTEN__
 		EM_ASM({
 			if(window.buildatFiles)
@@ -4808,6 +4876,16 @@ struct CApp: public App, public magic::Application
 			lua_pushstring(L, "no scene");
 			return 2;
 		}
+		// **A run's worth** ([SECURITY_RUN_1]): a whole scene a call, as
+		// many calls as a server's script makes in a frame.
+		// simplified: per client run, as save_file's
+		static int s_dumps = 0;
+		if(s_dumps >= 20){
+			lua_pushnil(L);
+			lua_pushstring(L, "20 mesh dumps made already in this run");
+			return 2;
+		}
+		s_dumps++;
 
 		const ss_ dir = g_client_config.get<ss_>("user_path")+"/meshdumps";
 		if(!interface::fs::create_directories(dir)){

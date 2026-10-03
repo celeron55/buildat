@@ -80,7 +80,7 @@ bad=""
 while kill -0 $cli 2>/dev/null; do
 	sleep 5
 	if ! kill -0 $srv 2>/dev/null; then bad="the server exited"; break; fi
-	since | grep -aq "Crash: SIG\|AddressSanitizer\|runtime error" &&
+	since | grep -aq "Crash: SIG\|AddressSanitizer\|: runtime error" &&
 		{ bad="a crash in the log"; break; }
 	# Two modules waiting for each other: the server answers a connect
 	# and nothing else (accounts and starport_announce, 2026-10-03)
@@ -152,7 +152,7 @@ if [ -z "$bad" ]; then
 fi
 if [ -n "$bad" ]; then
 	echo "FAIL: $bad (seed $seed); $out/srv.log"
-	grep -a "Crash: SIG\|AddressSanitizer\|runtime error\|shutdown requested" "$out/srv.log" | head -5
+	grep -a "Crash: SIG\|AddressSanitizer\|: runtime error\|shutdown requested" "$out/srv.log" | head -5
 	exit 1
 fi
 echo "PASS: the server ran through it and answers"

@@ -863,10 +863,9 @@ show_plans = function(message)
 end
 
 -- **A plan from a file** ([FP_EXPORT] 3): on the web the browser's file
--- picker; on native the .fpplan files in <user>/exports, where an export
+-- picker; on native the client's list of <user>/exports, where an export
 -- goes. Then a name for it, which a new plan of this user's gets.
 local IMPORT = {"object", {"name", "string"}, {"file", "string"}}
-local web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
 local picking = false
 
 local function page(title)
@@ -932,36 +931,15 @@ function doc.show_import(message)
 	if message then
 		text(message, magic.Color(1.0, 0.4, 0.4))
 	end
-	if web then
-		button("Choose a file...", function()
-			picking = buildat.pick_file(".fpplan")
-		end)
-	else
-		local any = false
-		local files = buildat.exported_files()
-		table.sort(files)
-		for _, f in ipairs(files) do
-			if f:match("%.fpplan$") then
-				any = true
-				button(f, function()
-					local data, why = buildat.read_exported(f)
-					if data then
-						import_as(f, data)
-					else
-						doc.show_import(why)
-					end
-				end)
-			end
-		end
-		if not any then
-			text("No .fpplan files in the exports folder, where")
-			text("\"Export this plan\" puts them: <user>/exports")
-		end
-	end
+	-- The browser's picker, or on native the client's list of
+	-- <user>/exports, where "Export this plan" puts them
+	button("Choose a file...", function()
+		picking = buildat.pick_file(".fpplan")
+	end)
 	button("Back", function() show_plans() end)
 end
 
--- The web's picked file, once the browser has read it
+-- The picked file, once it has been read
 local function poll_picked()
 	if not picking then
 		return

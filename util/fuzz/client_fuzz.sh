@@ -68,11 +68,18 @@ while [ "$(date +%s)" -lt "$end" ]; do
 		cp "$out/cli.log" "$out/lua_slow_$lua_slow.log"
 		continue
 	fi
-	if grep -aq "Crash: SIG\|AddressSanitizer\|runtime error" "$out/cli.log"; then
+	if grep -aq "Crash: SIG\|AddressSanitizer\|: runtime error" "$out/cli.log"; then
 		bad="a crash in the client's log"; break
 	fi
 	# A client that the server's garbage keeps from ever leaving
 	[ $st = 137 ] && { bad="the client hung (30 s)"; break; }
+	# **Its own canary**: a script that dies of its own error before its
+	# first call fuzzes nothing and passes -- three seeds did, on a
+	# setmetatable the sandbox does not have
+	if [ "${SANDBOX:-}" = 1 ] &&
+			! grep -aq "I sandbox_: sandbox_fuzz: done" "$out/cli.log"; then
+		bad="sandbox_fuzz.lua never finished a round"; break
+	fi
 done
 kill $srv 2>/dev/null
 tail -1 "$out/server.log"
@@ -80,7 +87,7 @@ if [ -n "$bad" ]; then
 	cp "$out/cli.log" "$out/fail_$seed.log"
 	[ -s "$out/stack.txt" ] && cp "$out/stack.txt" "$out/fail_${seed}_stack.txt"
 	echo "FAIL: $bad (seed $seed, run $runs); $out/fail_$seed.log"
-	grep -a -A12 "Crash: SIG\|AddressSanitizer\|runtime error" "$out/cli.log" | head -30
+	grep -a -A12 "Crash: SIG\|AddressSanitizer\|: runtime error" "$out/cli.log" | head -30
 	exit 1
 fi
 echo "PASS: $runs client runs against a hostile server" \

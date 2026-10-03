@@ -85,7 +85,8 @@ buildat.add_resource_dir  = __buildat_add_resource_dir
 -- l_take_screenshot() in src/client/app.cpp for why this is in the sandbox.
 buildat.take_screenshot   = __buildat_take_screenshot
 -- save_file, exported_files, read_exported, pick_file, picked_file: files a
--- game hands the user and takes from them, as buildat.safe's below
+-- game hands the user and takes from them; buildat.safe's below has no
+-- listing or reading of <user>/exports
 buildat.save_file         = __buildat_save_file
 buildat.exported_files    = __buildat_exported_files
 buildat.read_exported     = __buildat_read_exported
@@ -310,6 +311,9 @@ end
 -- and the size is capped because a slot anybody can fill is a slot
 -- anybody can fill a disk from.
 local STORAGE_MAX = 4 * 1024 * 1024
+-- And the names: a server's script writing a new one in a loop filled
+-- the disk 4 MiB at a time ([SECURITY_RUN_1])
+local STORAGE_FILES_MAX = 64
 
 -- **Which extension is asking**, taken from the caller's chunk name
 -- rather than from which launch UI the client booted. The two are the
@@ -404,6 +408,13 @@ local function storage_write_in(name, data, domain)
 		return false, "storage_write: " .. #data .. " bytes is over the " ..
 				STORAGE_MAX .. " a launcher may keep"
 	end
+	local old = io.open(path, "rb")
+	if old then
+		old:close()
+	elseif __buildat_count_files(dir) >= STORAGE_FILES_MAX then
+		return false, "storage_write: " .. STORAGE_FILES_MAX ..
+				" names are kept already"
+	end
 	__buildat_create_directories(dir)
 	local f = io.open(path, "wb")
 	if not f then
@@ -440,6 +451,8 @@ __buildat_served_overrides = {
 	stop_local_server = refused("stop_local_server"),
 	launch = refused("launch"),
 	launch_save = refused("launch_save"),
+	set_launch_ui = refused("set_launch_ui"),
+	compose_launch_ui = refused("compose_launch_ui"),
 	cache_read = function() return nil end,
 	cache_write = refused("cache_write"),
 	storage_read = function(name)
@@ -1114,17 +1127,35 @@ buildat.safe.take_screenshot          = __buildat_take_screenshot
 -- <user>/exports; on the web, the browser's download and file picker.
 --   save_file(name, data) -> the path it went to ("" for a download), or
 --       nil and why not; never overwrites
---   exported_files() -> the names in <user>/exports; {} on the web
---   read_exported(name) -> the bytes of one of those, or nil and why not
---   pick_file([accept]) -> true when the web's picker opened; false on
---       native
---   picked_file() -> name, data once the picked file is read, else nil
+--   pick_file([accept]) -> true: the web's file picker, or on native the
+--       client's own list of <user>/exports (extension/network)
+--   picked_file() -> name, data once the picked file is read, else nil;
+--       nil and why once the user picked nothing or it could not be read
+-- **No listing or reading of <user>/exports** ([SECURITY_RUN_1]): every
+-- server's game exports there, so a game that read it all read another
+-- server's plans; it gets the file the user picks.
 -- Files are at most 64 MiB. See l_save_file() in src/client/app.cpp.
 buildat.safe.save_file                = __buildat_save_file
-buildat.safe.exported_files           = __buildat_exported_files
-buildat.safe.read_exported            = __buildat_read_exported
-buildat.safe.pick_file                = __buildat_pick_file
-buildat.safe.picked_file              = __buildat_picked_file
+local picked_export = nil
+buildat.safe.pick_file = function(accept)
+	if __buildat_pick_file(accept) then
+		return true
+	end
+	picked_export = nil
+	__buildat_require_extension("network").pick_export(
+			type(accept) == "string" and accept or "", function(name, data)
+		picked_export = {name, data}
+	end)
+	return true
+end
+buildat.safe.picked_file = function()
+	local p = picked_export
+	if p then
+		picked_export = nil
+		return p[1], p[2]
+	end
+	return __buildat_picked_file()
+end
 -- dump_meshes([atlas_json], [node]): node, a sandboxed Node, dumps what is
 -- under it rather than the replicated scene
 function buildat.safe.dump_meshes(atlas, safe_node)

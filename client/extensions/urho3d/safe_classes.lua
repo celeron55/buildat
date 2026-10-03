@@ -1678,6 +1678,18 @@ function M.define(dst, util)
 		},
 	})
 
+	-- **A command is a place in its path's vector** ([SECURITY_RUN_1]):
+	-- its wrapper keeps the path (so the path's held reference stays), and
+	-- Append and Load, which move the vector, mark the wrappers handed out
+	-- dead. path -> {command wrapper -> true}, weak both ways.
+	local path_commands = setmetatable({}, {__mode = "k"})
+	local function commands_moved(path)
+		for c in pairs(path_commands[path] or {}) do
+			getmetatable(c).dead = "the RenderPath's commands moved " ..
+					"(Append or Load); GetCommand again"
+		end
+		path_commands[path] = nil
+	end
 	util.wc("RenderPath", {
 		instance = {
 			GetNumCommands = util.self_function(
@@ -1685,8 +1697,15 @@ function M.define(dst, util)
 			-- 0-based, as Urho counts them
 			GetCommand = util.wrap_function({"RenderPath", "number"},
 				function(self, index)
-					return util.wrap_instance("RenderPathCommand",
+					local c = util.wrap_instance("RenderPathCommand",
 							self:GetCommand(index))
+					if c then
+						getmetatable(c).path = self
+						path_commands[self] = path_commands[self] or
+								setmetatable({}, {__mode = "k"})
+						path_commands[self][c] = true
+					end
+					return c
 				end
 			),
 			Clone = util.wrap_function({"RenderPath"},
@@ -1694,10 +1713,20 @@ function M.define(dst, util)
 					return util.wrap_instance("RenderPath", self:Clone())
 				end
 			),
-			Append = util.self_function(
-					"Append", {"boolean"}, {"RenderPath", "XMLFile"}),
-			Load = util.self_function(
-					"Load", {"boolean"}, {"RenderPath", "XMLFile"}),
+			Append = util.wrap_function({"boolean"}, {"RenderPath", "XMLFile"},
+				function(self, file)
+					local ok = self:Append(file)
+					commands_moved(self)
+					return ok
+				end
+			),
+			Load = util.wrap_function({"boolean"}, {"RenderPath", "XMLFile"},
+				function(self, file)
+					local ok = self:Load(file)
+					commands_moved(self)
+					return ok
+				end
+			),
 			SetEnabled = util.self_function(
 					"SetEnabled", {}, {"RenderPath", "string", "boolean"}),
 			ToggleEnabled = util.self_function(
@@ -2611,9 +2640,19 @@ function M.define(dst, util)
 			-- is a password as often as anything, and a sandbox that can
 			-- read it can send it. So `SetClipboardText` is here and
 			-- `GetClipboardText` is deliberately not, nor a property
-			-- that would read as one.
-			SetClipboardText = util.self_function(
-					"SetClipboardText", {}, {"UI", "string"}),
+			-- that would read as one. **And only right after the user's
+			-- key or click** ([SECURITY_RUN_1]): a server's script wrote
+			-- it every frame if it liked, the window in the background
+			-- included, and what the user then pasted into a terminal was
+			-- the script's command (a browser asks the same activation)
+			SetClipboardText = util.wrap_function({"UI", "string"},
+				function(self, text)
+					if not __buildat_user_activated() then
+						error("SetClipboardText: only right after the "..
+								"user's own key or click")
+					end
+					self:SetClipboardText(text)
+				end),
 			-- Whether Urho3D's own Ctrl+C and Ctrl+V in a LineEdit go
 			-- through the OS clipboard rather than a copy of its own.
 			-- The paste is read by the C++ side into the field the user
@@ -3048,33 +3087,39 @@ function M.define(dst, util)
 	-- simplified: reading, and the node. A bone's offset matrix, its
 	-- bounding shape and the skinning flags are the model's own business
 	-- and no game here sets them.
-	util.wc("Bone", {
-		properties = {
-			name = util.simple_property("string"),
-			parentIndex = util.simple_property("number"),
-			animated = util.simple_property("boolean"),
-			node = util.simple_property(dst.Node),
-		},
-	})
-
+	--
+	-- **A bone is read, not wrapped** ([SECURITY_RUN_1]): a Bone is a place
+	-- in its skeleton's vector, which a new model -- the game's, or the
+	-- server's replicated attribute -- puts somewhere else, and a wrapper
+	-- of one read freed memory. What a game wants of it is copied out; the
+	-- node is a wrapper of its own and held.
+	local function read_bone(b)
+		if b == nil then
+			return nil
+		end
+		return {name = b.name, parentIndex = b.parentIndex,
+				animated = b.animated, node = util.wrap_instance("Node", b.node)}
+	end
 	util.wc("Skeleton", {
 		instance = {
 			GetNumBones = util.self_function("GetNumBones", {"number"},
 					{"Skeleton"}),
-			GetRootBone = util.wrap_function({"Skeleton"}, function(self)
-				return util.wrap_instance("Bone", self:GetRootBone())
+			GetRootBone = util.wrap_function({{"table", "__nil"}}, {"Skeleton"},
+			function(self)
+				return read_bone(self:GetRootBone())
 			end),
 			-- By name or by index, which is what Urho3D offers and what a
 			-- game asks with: "Hand_R" from a model's own rig, or a walk
 			-- over the count
-			GetBone = util.wrap_function({"Skeleton", {"string", "number"}},
+			GetBone = util.wrap_function({{"table", "__nil"}},
+					{"Skeleton", {"string", "number"}},
 			function(self, which)
-				return util.wrap_instance("Bone", self:GetBone(which))
+				return read_bone(self:GetBone(which))
 			end),
 		},
 		properties = {
 			numBones = util.simple_property("number"),
-			rootBone = util.simple_property(dst.Bone),
+			rootBone = {get = function(b) return read_bone(b) end},
 		},
 	})
 
@@ -3082,8 +3127,15 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.StaticModel,
 		properties = {
 			-- Readonly in Urho3D and a reference: what comes back follows
-			-- the model, so it is asked for again rather than kept
-			skeleton = util.simple_property(dst.Skeleton),
+			-- the model, so it is asked for again rather than kept. It is
+			-- a part of the model, so its wrapper keeps the model's.
+			skeleton = {get = function(v, model)
+				local skeleton = util.wrap_instance("Skeleton", v)
+				if skeleton then
+					getmetatable(skeleton).model = model
+				end
+				return skeleton
+			end},
 		},
 	})
 
