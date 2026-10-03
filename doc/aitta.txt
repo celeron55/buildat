@@ -14,7 +14,10 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
         "engine_api": 1,              the engine API its C++ is written for
         "license_code": "Apache-2.0",
         "license_media": "CC-BY-SA-4.0",
-        "description": "Dig down."    300 characters at most
+        "description": "Dig down.",   300 characters at most
+        "home_hearth": "https://forum.buildat.org",   optional: where
+                                      its feedback and news go
+        "changelog": "CHANGELOG.md"   optional: a file in the archive
     }
 
 engine_api is interface::aitta::ENGINE_API (src/interface/aitta.h), which

@@ -12,10 +12,8 @@ namespace interface
 	// the zip's sha256, the author's public key and the key's signature
 	// over the hash.
 	//
-	// simplified: ECDSA P-256 through the Mbed TLS already in the tree,
-	// where doc/plan/aitta_plan.md names Ed25519; a key is its algorithm's,
-	// so a change is a new key format and every author's key again. The
-	// upgrade is an Ed25519 library in the tree and "aitta-key-2".
+	// The key is ECDSA P-256 through Mbed TLS (decided in
+	// doc/plan/aitta_plan.md), and signing is deterministic (RFC 6979).
 	namespace aitta
 	{
 		// The engine API an app's C++ is written against. **Bumped when a

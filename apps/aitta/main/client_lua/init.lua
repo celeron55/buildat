@@ -120,6 +120,7 @@ home = function()
 			local id = r.author .. "/" .. r.name .. "/" .. r.version
 			local line = id .. "  " .. r.license_code .. " / " ..
 					r.license_media .. "  " .. math.floor(r.size / 1000) .. " kB" ..
+					((r.home_hearth or "") ~= "" and "  home: " .. r.home_hearth or "") ..
 					(r.delisted and "  (delisted)" or "")
 			if me.admin then
 				button(page, line .. "  -- " ..

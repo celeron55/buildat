@@ -5,7 +5,8 @@
 # [AITTA_MVP] step 2: **Aitta takes a signed release and serves it**. The
 # admin joins (the setup code), binds the author name "tester" to a key;
 #   1. a key bound to nobody cannot start an upload;
-#   2. tester's release is published, listed, downloaded and installed;
+#   2. tester's release is published, listed (with its home Hearth and
+#      changelog), downloaded and installed;
 #   3. a licence the instance does not take, and a manifest whose author
 #      is not the key's, are refused;
 #   4. the admin delists it: off the list, and its archive not served.
@@ -32,10 +33,12 @@ code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 
 mkdir -p "$t/app/main"
 echo 'int x;' > "$t/app/main/main.cpp"
+echo "the changes" > "$t/app/CHANGELOG.md"
 manifest(){ # author version licence
 	printf '{"author": "%s", "name": "demo", "version": "%s",
 		"engine_api": 1, "license_code": "%s", "license_media": "CC0-1.0",
-		"description": "a check"}\n' "$1" "$2" "$3" > "$t/app/meta.json"
+		"description": "a check", "home_hearth": "https://forum.example",
+		"changelog": "CHANGELOG.md"}\n' "$1" "$2" "$3" > "$t/app/meta.json"
 }
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
 "$b" aitta keygen "$t/stranger" > /dev/null 2>&1 || fail "keygen 2"
@@ -63,6 +66,8 @@ out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
 echo "$out" | grep -q "listed: tester/demo/1.0" || fail "publish 1.0: $out"
 list=$(curl -s "http://127.0.0.1:$P/api/aitta/list")
 echo "$list" | grep -q '"version":"1.0"' || fail "1.0 is not listed: $list"
+echo "$list" | grep -q '"changelog":"CHANGELOG.md","delisted":false,.*"home_hearth":"https://forum.example"' ||
+	fail "the home Hearth and the changelog are not listed: $list"
 sha=$(sha256sum "$zip" | cut -d' ' -f1)
 curl -s -o "$t/dl.zip" "http://127.0.0.1:$P/api/aitta/archive/$sha.zip"
 curl -s -o "$t/dl.sig" "http://127.0.0.1:$P/api/aitta/archive/$sha.sig"

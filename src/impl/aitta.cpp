@@ -10,6 +10,7 @@
 #include "zlib.h"
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -196,6 +197,43 @@ static bool plain_name(const ss_ &s, bool dots)
 	return true;
 }
 
+// An http(s) address with no space, quote or angle bracket in it
+static bool address_ok(const ss_ &a)
+{
+	const size_t at = a.compare(0, 8, "https://") == 0 ? 8 :
+			a.compare(0, 7, "http://") == 0 ? 7 : 0;
+	if(at == 0 || a.size() == at || a.size() > 200)
+		return false;
+	for(char c : a)
+		if(c <= ' ' || c > '~' || c == '"' || c == '<' || c == '>' ||
+				c == '\\')
+			return false;
+	return true;
+}
+
+// A path inside the archive: '/' separated, no part empty or starting
+// with '.' (pack leaves those out), letters, digits, . - _
+static bool archive_path_ok(const ss_ &p)
+{
+	if(p.empty() || p.size() > 200)
+		return false;
+	bool part_start = true;
+	for(char c : p){
+		if(c == '/'){
+			if(part_start)
+				return false;
+			part_start = true;
+			continue;
+		}
+		if(part_start && c == '.')
+			return false;
+		if(!isalnum((unsigned char)c) && c != '.' && c != '-' && c != '_')
+			return false;
+		part_start = false;
+	}
+	return !part_start;
+}
+
 ss_ check_manifest(const json::Value &m)
 {
 	if(!m.is_object())
@@ -220,6 +258,14 @@ ss_ check_manifest(const json::Value &m)
 		return "\"license_code\" and \"license_media\": its licences";
 	if(str("description").size() > 300)
 		return "\"description\": 300 characters at most";
+	for(const char *k : {"home_hearth", "changelog"})
+		if(!m.get(k).is_undefined() && !m.get(k).is_string())
+			return ss_("\"")+k+"\": a string";
+	if(!str("home_hearth").empty() && !address_ok(str("home_hearth")))
+		return "\"home_hearth\": an http:// or https:// address, 200 "
+				"characters at most";
+	if(!str("changelog").empty() && !archive_path_ok(str("changelog")))
+		return "\"changelog\": a path inside the archive, like CHANGELOG.md";
 	return "";
 }
 
@@ -285,6 +331,11 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
 	const ss_ why = check_manifest(m);
 	if(!why.empty())
 		throw Exception(app_dir+"/meta.json: "+why);
+	const json::Value &changelog = m.get("changelog");
+	if(changelog.is_string() && !changelog.as_string().empty() &&
+			!fs::path_exists(app_dir+"/"+changelog.as_string()))
+		throw Exception(app_dir+"/meta.json: \"changelog\": "+
+				changelog.as_string()+" is not there");
 	const ss_ key = read_file(key_path);
 	const ss_ zip = zip_directory(app_dir);
 	const ss_ base = out_dir+"/"+m.get("author").as_string()+"-"+

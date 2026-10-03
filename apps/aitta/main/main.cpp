@@ -386,6 +386,8 @@ struct Module: public interface::Module
 			interface::fs::remove_all(zip);
 			return refuse(r, ss_("the archive: ")+e.what());
 		}
+		const bool changelog_there = jstr(m, "changelog").empty() ||
+				interface::fs::path_exists(dir+"/"+jstr(m, "changelog"));
 		interface::fs::remove_all(dir);
 		auto drop = [&](const ss_ &why){
 			interface::fs::remove_all(zip);
@@ -394,6 +396,9 @@ struct Module: public interface::Module
 		const ss_ why = interface::aitta::check_manifest(m);
 		if(!why.empty())
 			return drop("meta.json: "+why);
+		if(!changelog_there)
+			return drop("meta.json: \"changelog\": "+jstr(m, "changelog")+
+					" is not in the archive");
 		if(jstr(m, "author") != u.author)
 			return drop("the key is bound to the author \""+u.author+
 					"\", and the manifest says \""+jstr(m, "author")+"\"");
@@ -410,7 +415,7 @@ struct Module: public interface::Module
 			return drop("cannot store the archive");
 		json::Value rel = json::object();
 		for(const char *k : {"author", "name", "version", "description",
-				"license_code", "license_media"})
+				"license_code", "license_media", "home_hearth", "changelog"})
 			rel.set(k, jstr(m, k));
 		rel.set("engine_api", m.get("engine_api"));
 		rel.set("sha256", sha);
