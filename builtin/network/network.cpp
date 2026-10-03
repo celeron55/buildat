@@ -759,7 +759,10 @@ struct Module: public interface::Module, public network::Interface
 		size_t body_len = 0;
 		if(method == "POST"){
 			const ss_ &cl = headers["content-length"];
-			if(cl.empty() || cl.find_first_not_of("0123456789") != ss_::npos)
+			// At most nine digits: stoi() throws past INT_MAX, and a throw
+			// here ends the network thread and with it the server
+			if(cl.empty() || cl.size() > 9 ||
+					cl.find_first_not_of("0123456789") != ss_::npos)
 				return false;
 			body_len = (size_t)stoi(cl);
 			if(body_len > web::MAX_API_BODY)
