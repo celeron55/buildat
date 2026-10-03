@@ -19,6 +19,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <atomic>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/tuple.hpp>
@@ -174,6 +175,17 @@ struct NetworkThread: public interface::ThreadedThing
 	void on_crash(interface::Thread *thread);
 };
 
+// A packet that counts itself out of its peer's in-flight count when the
+// last module has handled it (Peer::in_flight)
+struct CountedPacket: public Packet
+{
+	sp_<std::atomic<int>> in_flight;
+	CountedPacket(const sp_<std::atomic<int>> &in_flight, PeerInfo::Id sender,
+			const ss_ &name, const ss_ &data):
+		Packet(sender, name, data), in_flight(in_flight){ ++*in_flight; }
+	~CountedPacket(){ --*in_flight; }
+};
+
 struct Peer
 {
 	typedef size_t Id;
@@ -190,6 +202,15 @@ struct Peer
 	}
 	std::deque<char> socket_buffer;
 	interface::PacketStream packet_stream;
+	// This peer's packets handed to the modules and not handled yet. Over
+	// MAX_IN_FLIGHT its socket is not read until they are; it is not
+	// dropped for it, so a module busy for seconds only holds a client
+	// back. One peer sending a cheap request at full speed queued 4.3
+	// million events in 20 s, 630 MB, and an answer to anyone else took
+	// over a minute ([SECURITY_RUN_1]); now its own TCP window holds it.
+	static const int MAX_IN_FLIGHT = 100;
+	sp_<std::atomic<int>> in_flight = std::make_shared<std::atomic<int>>(0);
+	bool held() const { return *in_flight > MAX_IN_FLIGHT; }
 
 	// One port takes the native client, a browser fetching the web client
 	// and the web client's WebSocket ([WEB_CLIENT]). A new connection is
@@ -1047,7 +1068,8 @@ struct Module: public interface::Module, public network::Interface
 							peer.id, cs(name));
 					return;
 				}
-				m_server->emit_event(t, new Packet(peer.id, name, data));
+				m_server->emit_event(t, new CountedPacket(
+						peer.in_flight, peer.id, name, data));
 			});
 		} catch(interface::UnknownPacketReceived &e){
 			// A stream that cannot be read on from here: the peer goes,
@@ -1203,7 +1225,7 @@ struct Module: public interface::Module, public network::Interface
 		for(auto &pair : m_peers){
 			const Peer &peer = pair.second;
 			// The web's peers also have clocks that flush_peers() keeps
-			if(peer.out_pending() > 0 || peer.closing ||
+			if(peer.out_pending() > 0 || peer.closing || peer.held() ||
 					peer.kind == Peer::Kind::Sniff || peer.kind == Peer::Kind::Http)
 				return true;
 		}
@@ -1351,7 +1373,7 @@ struct Module: public interface::Module, public network::Interface
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
 			// A pipe's peer has no fd to wait on; poll_pipes() reads it
-			if(peer.socket->fd() >= 0)
+			if(peer.socket->fd() >= 0 && !peer.held())
 				result.push_back(peer.socket->fd());
 		}
 		return result;
@@ -1381,7 +1403,7 @@ struct Module: public interface::Module, public network::Interface
 		}
 		sv_<Peer::Id> pipes;
 		for(auto &pair : m_peers)
-			if(pair.second.socket->fd() < 0)
+			if(pair.second.socket->fd() < 0 && !pair.second.held())
 				pipes.push_back(pair.first);
 		static char buf[100000];
 		for(Peer::Id id : pipes){

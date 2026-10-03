@@ -67,6 +67,21 @@ while kill -0 $cli 2>/dev/null; do
 done
 wait $cli 2>/dev/null
 cat "$out/client.log"
+# One peer at full speed waits for the modules rather than queueing in
+# memory: unbounded, 10 s of this grew the server by 300 MB
+if [ -z "$bad" ]; then
+	rss0=$(awk '/VmRSS/{print $2}' /proc/$srv/status)
+	timeout 10 python3 -c '
+import socket, struct, sys
+s = socket.create_connection(("127.0.0.1", int(sys.argv[1])))
+p = lambda t, d: struct.pack("<HI", t, len(d)) + d
+s.sendall(p(0, struct.pack("<HI", 100, 14) + b"main:get_saves"))
+chunk = p(100, b"") * 5000
+while True: s.sendall(chunk)' "$port" 2>/dev/null
+	grow=$(( ($(awk '/VmRSS/{print $2}' /proc/$srv/status) - rss0) / 1000 ))
+	echo "a flood from one peer grew the server by $grow MB"
+	[ "$grow" -gt 150 ] && bad="a flood from one peer grew the server by $grow MB"
+fi
 # Still answering after it
 if [ -z "$bad" ] && ! timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/$port" 2>/dev/null; then
 	bad="the server stopped answering"
