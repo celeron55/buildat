@@ -1,0 +1,273 @@
+builtin/luanti -- a Luanti game as a buildat module
+===================================================
+
+builtin/luanti runs an unmodified Luanti *game* -- its mods, its nodes, its
+items, its callbacks -- inside buildat_server, with none of Luanti's network
+protocol anywhere. The game logic is Luanti's; everything around it is
+buildat's. The other end of the telescope from extensions/luanti_client, which
+speaks the real protocol to a real Luanti server.
+
+The plan this is being built to is doc/plan/luanti_module_plan.md, which has the
+milestones and the reasoning. What is written down here is what exists.
+
+Where the content lives
+-----------------------
+
+Games are scanned from user/shared/vanilla/games, worlds from user/apps/vanilla/worlds.
+Those are buildat's own directories on purpose: nothing here reads the content
+of a real Luanti installation, and nothing here can write to one. A game is a
+directory with a game.conf; a world is a directory with a world.mt naming its
+gameid. (The user path, not the cache: a game somebody installed and a world
+they have played are things they chose. See doc/plan/world_persistence_plan.md.)
+
+buildat ships one Luanti game of its own, builtin/luanti/minimal_game: one
+mod, two node types and a floor made of them. It needs nothing installed and
+it is what the visual check runs, since a fixture somebody has to install is
+a fixture that is different on every machine.
+
+    $ cd Build
+    $ BUILDAT_LUANTI_GAME=minimal bin/buildat_server -m ../apps/vanilla
+    $ bin/buildat -s localhost           # in another terminal
+
+A real game, once there is one to point at:
+
+    $ mkdir -p user/shared/vanilla/games user/apps/vanilla/worlds
+    $ cp -r ~/projects/luanti/games/devtest user/shared/vanilla/games/devtest
+    $ mkdir user/apps/vanilla/worlds/devtest_world
+    $ printf 'gameid = devtest\n' > user/apps/vanilla/worlds/devtest_world/world.mt
+    $ cd Build && bin/buildat_server -m ../apps/vanilla
+
+apps/vanilla runs the first world it finds, the one
+BUILDAT_LUANTI_WORLD names, or the game BUILDAT_LUANTI_GAME names. It extends
+nothing; it is what the module is tested against.
+
+The environment variables it reads, since none of them are in the client's -h:
+
+    BUILDAT_LUANTI_GAME=<gameid>     Run this game at startup, no menu
+    BUILDAT_LUANTI_WORLD=<name>      Run this world under user/apps/vanilla/worlds
+    BUILDAT_LUANTI_SAVE=<name>       Which save the above two run in
+    BUILDAT_LUANTI_LUA=<path>        Lua to load into the environment
+    BUILDAT_LUANTI_IMPORT=<path>     Import ONE Luanti world directory into
+                                     the save at startup
+    BUILDAT_LUANTI_FORCE_TIME=<n>    Pin the clock at a Luanti time of day
+                                     (0..24000) and stop it running
+    BUILDAT_LUANTI_FORCE_DAY=1       The same thing at noon
+    BUILDAT_LUANTI_NAME=<player>     Name the first client that connects,
+                                     rather than client<peer>: an imported
+                                     world's own player is who the save
+                                     knows
+    BUILDAT_LUANTI_LUAPROF=<n>       Sample the module's Lua; see below
+    LUANTI_EXTRA_IMPORT_PATH=<paths> Where the import menu looks for games
+                                     and worlds, before ~/.luanti and
+                                     ~/.minetest. Colon separated, each one
+                                     a directory with games/ and worlds/ in
+                                     it -- a Luanti user directory or an
+                                     in-tree build
+
+The two that force the clock are spelled the way extensions/luanti_client
+spells them, because a comparison between the two takes its pictures at the
+same hour or not at all.
+
+LUANTI_EXTRA_IMPORT_PATH and BUILDAT_LUANTI_IMPORT are one word apart in
+meaning and are the easy mistake:
+BUILDAT_LUANTI_IMPORT takes one world, LUANTI_EXTRA_IMPORT_PATH takes a
+search path of installations. The launcher says which roots it looked at and
+what it found in them, so "0 games and 0 worlds from 2 roots" in the log is
+the path and not the feature.
+
+What you see is not the Luanti client. There is no player and no digging: the
+camera looks at the world from outside it and every node is a flat colour
+hashed from its name. That is M2 -- the nodes a mod placed are in voxelworld
+and on the screen. The real tiles, the drawtypes and the media are M3.
+
+The licence, and why this is allowed
+------------------------------------
+
+Luanti is LGPL-2.1-or-later and buildat is Apache-2.0. This works because a
+buildat module is dynamically linked at runtime -- src/server/rccpp.cpp
+compiles each one to its own -shared object and dlopens it -- so the vendored
+Luanti code lives in that object, which is LGPL, and buildat_server itself
+stays Apache and links none of it.
+
+What that obliges: builtin/luanti/ carries its own COPYING.LESSER, every
+vendored file keeps its licence header, the vendor tree is a directory of its
+own so the boundary is visible in a file listing, a modified vendored file
+says at the top which version it came from and what changed, and nothing under
+vendor/ is copied into buildat proper.
+
+What is vendored, and what is written
+-------------------------------------
+
+Vendored: Luanti's own builtin/*.lua -- init.lua and the common/ and game/
+trees it loads for a server. That is a large part of the API surface and it is
+already written. It is pinned at a commit, recorded in vendor/README.txt,
+rather than read out of whatever the user happens to have installed.
+
+Written against buildat: the C API underneath it. In Luanti that is 17.5k
+lines of lua_api/; here it is luanti.cpp and the Lua beside it, because the
+stateful half -- the environment, the map, objects, players, the network --
+is what the module is *for*, and vendoring Luanti's Server would produce
+Luanti with buildat bolted to the side.
+
+    luanti.cpp          The module. A Lua state, four functions Lua 5.1 does
+                        not have of its own -- a directory listing, the log,
+                        the clock, a PNG encoder -- and the order things are
+                        loaded in.
+    lua/bootstrap.lua   What the vendored builtin expects to find already
+                        registered: the core table, paths, settings, the
+                        content id allocator, mod storage, and the stub list.
+    lua/classes.lua     ItemStack, the inventory, and the random and noise
+                        generators: the globals a mod builds while it loads.
+    lua/colorspec.lua   Luanti's ColorSpec, names and all.
+    lua/misc.lua        base64 and the node position hash.
+    lua/png.lua         core.encode_png, including the colour reduction
+                        Luanti does and devtest checks for.
+    lua/modlist.lua     What a mod is and what order mods load in.
+    lua/modloader.lua   Finding the game's mods and running them.
+    lua/test.lua        The parts that are arithmetic rather than
+                        arrangement. Runs under plain lua, no engine:
+                        `lua builtin/luanti/lua/test.lua`.
+
+Lua 5.1 comes with io and os, so reading files, splitting paths and running
+chunks all happen in Lua. The Lua itself is Urho3D's, which buildat_server
+already links; the module needs no build step of its own, which the plan
+expected it to.
+
+Where it is
+-----------
+
+A Luanti game plays. devtest, minetest_game, VoxeLibre (mineclone2),
+nodecore, repixture, exile and capturetheflag load; VoxeLibre is the one
+played daily: its worldgen, mobs, crafting, furnaces, torches, death and
+respawn, forms and HUD run under this module, and a scripted player
+(builtin/luanti/test/drive.py) climbs its survival ladder from wood to
+an iron ingot and torches on its own. The remaining stubs -- what a mod
+calls that is not written yet answers as a stub that logs once and returns
+nothing -- are listed at the bottom of lua/bootstrap.lua, and are what the
+plan says is not in this at all: IPC, the async environment, SSCSM; HTTP is
+a stub until [HTTP_API].
+
+The map is buildat's voxel world (builtin/voxelworld) with Luanti's nodes
+as its voxels; the mapgen is Luanti's own, vendored in builtin/luanti_mapgen;
+the light is voxelworld's skylight and lamp floods, one level a voxel, as
+Luanti's. The client half (builtin/luanti/client_lua and apps/vanilla's
+client) draws the world in three modes -- unlit and shadows, held to
+official Luanti's pictures of the same world, and pbr, held to a path
+trace of it (doc/plan/rendering_plan.md, [RENDER_MODES]) -- with Luanti's
+HUD, forms, inventory, hotbar, wield item, particles, sounds and sky. It
+times a dig for itself and predicts a dig and a placement the way
+official's client does (the node changes on the click's frame; the
+server's answer overwrites it, and a refusal is a resend of the node),
+out of luanti:dig_props -- the groups, the tool capabilities and the
+prediction strings core.__dig_props() sends once.
+
+The plain game around it is apps/vanilla: a launch grid tile per
+installed game, worlds, imports from ~/.luanti, ContentDB, settings.
+
+What it is checked by: the fixtures in builtin/luanti/test/*.lua (one
+feature each, run against a server with BUILDAT_LUANTI_LUA), the fuzz run
+(test/fuzz.sh: a seeded random walk with invariants asserted on the server),
+the driven run (test/drive.sh: the ladder above, ended at a goal rung;
+both runners take GAME_DIR=<game> for a variant of vanilla), the
+reference shots (test/reference_shots/: the three modes against official
+Luanti and the path trace, read by probes.sh), and util/bench_worldgen.sh.
+The findings and the state of each are in doc/plan/luanti_module_plan.md.
+
+Environment variables the module and its runners read: BUILDAT_LUANTI_GAME,
+_SAVE, _LUA (a fixture file), _PBR (the render mode), _LINEAR, _TONEMAP,
+_CLOUD_N, _TRANSLUCENCY, _JIT, _LUAPROF, _ABLATE (diagnostics), and
+LUANTI_EXTRA_IMPORT_PATH; a player never sets any of them -- the settings
+menu holds what a player changes.
+
+The interface
+-------------
+
+    struct Interface
+    {
+        virtual void run_game(const ss_ &game_path, storage::Save *save) = 0;
+        virtual void load_lua(const ss_ &chunk, const ss_ &chunkname) = 0;
+    };
+
+The world is the save. The map, the clock and everything else the world is go
+into the save the caller opened and keeps open; a Luanti world directory is
+read for which game it wants, or imported, and is never written to.
+core.get_worldpath() is <save>/luanti/ rather than the save's own root, so
+that a mod writing through it -- which is normal, and which games depend on
+-- cannot land on save.sqlite.
+
+load_lua() is the whole extension story: a buildat module hands Lua into the
+Luanti environment and that Lua does whatever the Luanti API allows.
+
+One ordering rule rather than a lifecycle: **whatever extends the environment
+is registered before the game runs**, and when it runs is the caller's
+business. A launcher chooses its world from a menu after boot because it
+extends nothing; a game that does extend a Luanti game already knows which one
+at init, so its load_lua() calls come first. load_lua() after run_game() is an
+error, because Luanti loads its mods once, in order.
+
+import_world() is registered the same way and for the same kind of reason.
+It only records the path; the map is read from inside run_game(), once the
+mods have registered the nodes the blocks name and before a generator has
+been asked for any section. A section this engine has generated is a section
+whose generated volume wins over anything written into it, so an import that
+ran afterwards would be a fresh world of the same seed standing where the
+read one should be. The sections the map reaches into are not generated at
+all, which also means what the imported world did not hold is not there.
+
+Finding out what is slow
+------------------------
+
+Two things answer a porter's first questions on a build they already have.
+
+Which mod costs the startup: every mod is timed as it loads, and the slowest
+of them are one line at the end of it.
+
+    The mods that took longest to load: testnodes 2.9 s
+    Mods loaded in 3.2 s: 390 nodes, 26 craftitems, 81 tools, 499 items in all
+
+Which Lua function costs anything: BUILDAT_LUANTI_LUAPROF=<n> samples the
+module's Lua every n instructions -- 10000 is a sensible n and costs a few
+percent -- and the report comes at shutdown, most expensive first.
+
+Whether a change made the engine faster: util/bench_worldgen.sh. The server
+alone, no client, making a new world out of a fixed seed and a pinned box of
+sections, so that every run does the same work:
+
+    $ util/bench_worldgen.sh devtest 3
+    run 1: 111 sections in 9.0 s
+    run 2: 111 sections in 8.7 s
+    run 3: 111 sections in 8.9 s
+    median: 8.9 s of 3 runs
+
+Three runs of it land within a few percent of each other, which is what makes
+a difference between two versions worth believing. Counting what a server got
+through in a fixed *time* does not: the same code gave 95 and 145 sections in
+45 seconds an hour apart on the machine this was written on.
+
+The seed is Luanti's own fixed_map_seed, which the module honours when a
+world is made; the harness writes it into the save's world.mt. A world that
+already has a seed keeps it, as in Luanti.
+
+    BUILDAT_LUANTI_LUAPROF=10000 BUILDAT_LUANTI_GAME=mineclone2 \
+        bin/buildat_server -m ../apps/vanilla -D ../user
+
+    Lua profile: 361580 samples, every 10000 instructions
+    Lua profile:  27.1%  98029  lua/classes.lua:171 parse_itemstring()
+    Lua profile:   9.5%  34233  lua/craft.lua:348 output_matches()
+
+It samples rather than instruments, because an instrumenting hook distorts
+exactly the small hot functions worth finding. A sample is attributed to the
+function it landed in -- file:linedefined -- since a name means little once a
+mod builds its callbacks out of closures. A mod's own file is named the same
+way as the module's, so "which of my mods" and "which of yours" are the same
+question and the same answer.
+
+The C++ side is perf, with no rebuild either:
+
+    perf record -F 199 --call-graph dwarf -o prof.data -- bin/buildat_server ...
+    perf report -i prof.data --stdio --no-children -g none
+
+The two together are how the seventh round was worked: the C++ profile named
+the voxel read path, and the Lua profile named the craft lookup that made
+VoxeLibre's startup two minutes. What each one found is in
+doc/plan/performance_plan.md.
