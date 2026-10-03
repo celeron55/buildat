@@ -1893,8 +1893,23 @@ function M.define(dst, util)
 			Remove = util.self_function("Remove", {}, {"UIElement"}),
 			-- Everything under it at once, which is what redrawing a screen
 			-- full of elements from scratch wants
-			RemoveAllChildren = util.self_function(
-					"RemoveAllChildren", {}, {"UIElement"}),
+			-- But not the client's own ([TRUST_COLOR]): its dialogs and the
+			-- trust colour's sample are children of the same root, and a
+			-- script clearing the root took them with it
+			RemoveAllChildren = function(self)
+				local m = getmetatable(self)
+				local raw = m and m.unsafe
+				if raw == nil then
+					error("RemoveAllChildren: not an element")
+				end
+				for i = raw:GetNumChildren(false) - 1, 0, -1 do
+					local c = raw:GetChild(i)
+					local name = c and c:GetName() or ""
+					if name:sub(1, 9) ~= "__trusted" then
+						raw:RemoveChildAtIndex(i)
+					end
+				end
+			end,
 			-- Not a client's secret field's name taken away: that name is what
 			-- keeps what is typed into it from other scripts
 			SetName = function(self, name)
@@ -1979,7 +1994,19 @@ function M.define(dst, util)
 			height = util.simple_property("number"),
 			width = util.simple_property("number"),
 			size = util.simple_property(dst.IntVector2),
-			color = util.simple_property(dst.Color),
+			-- What a client's own trusted element is coloured is not a
+			-- script's to read ([TRUST_COLOR]): a Starport field's colour is
+			-- the trust colour, and with it a script drew a look-alike
+			color = {
+				get = function(v, raw)
+					local name = raw and raw:GetName() or ""
+					if name:sub(1, 9) == "__trusted" then
+						return util.simple_property(dst.Color).get(Color(1, 1, 1, 1))
+					end
+					return util.simple_property(dst.Color).get(v)
+				end,
+				set = util.simple_property(dst.Color).set,
+			},
 			-- Whether children outside the element are drawn: a viewport
 			-- over a grid taller than the window ([LAUNCH_GRID])
 			clipChildren = util.simple_property("boolean"),

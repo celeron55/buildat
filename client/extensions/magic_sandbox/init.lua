@@ -43,6 +43,49 @@ function M.is_secret_field(unsafe)
 	return name ~= nil and name:sub(1, 9) == "__trusted"
 end
 
+-- **The client's own UI that no script may see at all**: an element named
+-- "__trusted_hidden..." and everything under it is never handed to a
+-- script -- not by GetChild(), the focus or an event; wrap() gives nil.
+-- The Starport trust colour's sample is one: a script that read it could
+-- draw a look-alike Starport login in the right colour ([TRUST_COLOR]).
+-- Whether a class is a UIElement is worked out once a class.
+local ui_class = setmetatable({}, {__mode = "k"})
+local function is_ui_class(class_meta)
+	local v = ui_class[class_meta]
+	if v == nil then
+		v = false
+		local m = class_meta
+		for _ = 1, 16 do
+			if not m then
+				break
+			end
+			if m.type_name == "UIElement" then
+				v = true
+				break
+			end
+			local up = m.inherited_from_by_wrapper
+			m = up and getmetatable(up) or nil
+		end
+		ui_class[class_meta] = v
+	end
+	return v
+end
+
+function M.is_hidden_ui(unsafe)
+	local e = unsafe
+	for _ = 1, 64 do
+		if e == nil then
+			return false
+		end
+		local name = e:GetName()
+		if name and name:sub(1, 16) == "__trusted_hidden" then
+			return true
+		end
+		e = e:GetParent()
+	end
+	return false
+end
+
 function M.wrap_class(type_name, def)
 	local class = {}
 	local class_meta = {}
@@ -53,6 +96,9 @@ function M.wrap_class(type_name, def)
 	class_meta.wrap = function(unsafe)
 		if unsafe == nil then
 			error("magic_sandbox: class_meta.wrap(): Wrapping nil is not allowed")
+		end
+		if is_ui_class(class_meta) and M.is_hidden_ui(unsafe) then
+			return nil
 		end
 		local safe = {}
 		local meta = {

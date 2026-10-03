@@ -620,13 +620,22 @@ local function add_edit(parent, value, secret)
 	e.minHeight = 24
 	e.minWidth = 200
 	e.textSelectable = true
+	-- **Every field here is the client's own** ([TRUST_COLOR]): in the
+	-- trust colour the launcher shows, which no script can read, so a
+	-- look-alike login is told apart by its fields; and no wrapper but
+	-- this one reads what is typed into it, and no script hears the keys
+	-- while it has the focus (magic_sandbox.is_secret_field) -- not only
+	-- the password, or a script would move the name field into a window
+	-- of its own labelled "Password"
+	e:SetName(secret and "__trusted_secret" or "__trusted_field")
+	getmetatable(e).trusted_reader = true
+	-- A solid fill of the colour, the style's texture off: multiplied
+	-- into its dark texture, the colour came out near black
+	local r, g, b = require("buildat/extension/urho3d").trust_color()
+	getmetatable(e).unsafe:SetTexture(nil)
+	e.color = magic.Color(r, g, b, 1)
 	if secret then
 		e.echoCharacter = string.byte("*")
-		-- A secret field: no wrapper but this one reads what is typed into
-		-- it, and no script hears the keys while it has the focus
-		-- (magic_sandbox.is_secret_field)
-		e:SetName("__trusted_secret")
-		getmetatable(e).trusted_reader = true
 	else
 		e.textCopyable = true
 	end

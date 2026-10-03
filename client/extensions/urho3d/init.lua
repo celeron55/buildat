@@ -886,10 +886,79 @@ do
 end
 
 --
+-- **The Starport trust colour** ([TRUST_COLOR]; user, 2026-10-03)
+--
+-- Any script can draw a window that looks like the client's Starport ID
+-- login and ask for the password. So the client's own Starport fields
+-- are drawn in a colour picked at random when the client starts, which no
+-- script can read -- not from the fields (safe_classes' color getter), not
+-- from the sample (never wrapped, magic_sandbox.is_hidden_ui), not from
+-- the random source (the platform's, not math.random, whose state a
+-- script could work back from its own draws) -- and the launcher shows
+-- the sample at its top right. A login whose fields are not that colour
+-- is not the client's.
+--
+-- simplified: twelve hues at two brightnesses, which a person tells apart
+-- at a glance; a script guessing is right one time in 24. More colours
+-- are more guesses to make and fewer a person can name.
+local trust_rgb
+do
+	local b = buildat.random_bytes(2)
+	local hue = (b:byte(1) % 12) / 12
+	-- Dark enough under white text either way
+	local v = (b:byte(2) % 2 == 0) and 0.4 or 0.6
+	-- HSV with full saturation to RGB
+	local i = math.floor(hue * 6)
+	local f = hue * 6 - i
+	local p, q, t = 0, v * (1 - f), v * f
+	local rgb = ({{v, t, p}, {q, v, p}, {p, v, t}, {p, q, v}, {t, p, v},
+			{v, p, q}})[i % 6 + 1]
+	trust_rgb = {rgb[1], rgb[2], rgb[3]}
+end
+
+-- The colour, to the client's own code: never in Safe
+local function trust_color()
+	return trust_rgb[1], trust_rgb[2], trust_rgb[3]
+end
+
+-- The sample: "Starport trust color:" and a square a text row high, at the
+-- top right while the launcher has the screen (not connected anywhere).
+-- Made of raw elements under a hidden name, over anything a script draws
+-- (theirs stop at 999).
+local trust_sample = nil
+Safe.SubscribeToEvent("Update", function()
+	if trust_sample == nil then
+		trust_sample = ui.root:CreateChild("UIElement")
+		trust_sample:SetName("__trusted_hidden_trust_color")
+		trust_sample.defaultStyle = cache:GetResource("XMLFile",
+				"launch_menu/res/main_style.xml")
+		trust_sample:SetLayout(LM_HORIZONTAL, 6, IntRect(0, 0, 0, 0))
+		trust_sample:SetAlignment(HA_RIGHT, VA_TOP)
+		trust_sample:SetPosition(-8, 8)
+		trust_sample.priority = 1000
+		local label = trust_sample:CreateChild("Text")
+		label:SetStyleAuto()
+		label.text = "Starport trust color: "
+		local row = math.max(12, label.rowHeight)
+		-- Two thirds of a text row high and twice as wide (user), on the
+		-- row's middle
+		local h = math.floor(row * 2 / 3 + 0.5)
+		-- A gap of its own: the layout's spacing left none here
+		trust_sample:CreateChild("UIElement"):SetFixedSize(8, h)
+		local swatch = trust_sample:CreateChild("BorderImage")
+		swatch:SetFixedSize(2 * h, h)
+		swatch:SetVerticalAlignment(VA_CENTER)
+		swatch.color = Color(trust_rgb[1], trust_rgb[2], trust_rgb[3], 1)
+	end
+	trust_sample.visible = __buildat_server_address() == nil
+end)
+
+--
 -- Create the final interface
 --
 
 local M = {}
+M.trust_color = trust_color
 M.drop_sandbox_handlers = drop_sandbox_handlers
 M.safe = Safe
 M.unsafe = Unsafe
