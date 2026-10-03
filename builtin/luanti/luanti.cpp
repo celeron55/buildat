@@ -3380,15 +3380,15 @@ struct Module: public interface::Module, public luanti::Interface
 	// Inside the generate radius of the spawn's point or a player's
 	bool near_a_point(const pv::Vector3DInt16 &sp)
 	{
-		auto near = [&](const pv::Vector3DInt16 &c, int rxz, int ry){
+		auto in_reach = [&](const pv::Vector3DInt16 &c, int rxz, int ry){
 			return std::abs(sp.getX() - c.getX()) <= rxz &&
 					std::abs(sp.getZ() - c.getZ()) <= rxz &&
 					std::abs(sp.getY() - c.getY()) <= ry;
 		};
-		if(near(pv::Vector3DInt16(0, 0, 0), SPAWN_RADIUS, SPAWN_RADIUS_Y))
+		if(in_reach(pv::Vector3DInt16(0, 0, 0), SPAWN_RADIUS, SPAWN_RADIUS_Y))
 			return true;
 		for(const auto &pair : m_player_pos){
-			if(near(section_of(pair.second), m_generate_radius_xz,
+			if(in_reach(section_of(pair.second), m_generate_radius_xz,
 					GENERATE_RADIUS_Y))
 				return true;
 		}
