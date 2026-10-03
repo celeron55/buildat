@@ -1700,7 +1700,9 @@ struct Module: public interface::Module
 			ss_ top;
 			size_t tops = 0;
 			for(const auto &n : interface::fs::list_directory(job->into_dir)){
-				if(n.is_directory){
+				// A dot-name is nobody's game: what a zip carries beside it,
+				// or what something left ([CONTENTDB_FRESH])
+				if(n.is_directory && !n.name.empty() && n.name[0] != '.'){
 					top = n.name;
 					tops++;
 				}

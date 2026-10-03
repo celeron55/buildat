@@ -158,10 +158,15 @@ size_t zip_extract(const ss_ &zip_path, const ss_ &into_dir)
 	static bool checked = false;
 	if(!checked){
 		checked = true;
-		// In the directory being extracted to, which the caller can write:
-		// a boxed server's working directory is not its own (2026-10-03)
+		// Beside the directory being extracted to, whose parent the caller
+		// can write: a boxed server's working directory is not its own
+		// (2026-10-03). Not in it: on Windows the check's files were left
+		// there when deleting them raced whatever had them open, and the
+		// archive then had three top-level entries instead of its one --
+		// the game nested a level down, "no game called mineclone2"
+		// ([CONTENTDB_FRESH], 0.6.0 on the box).
 		fs::create_directories(into_dir);
-		self_check(into_dir+"/.zip_self_check");
+		self_check(into_dir+".zip_self_check");
 	}
 	const ss_ d = read_file(zip_path);
 	const sv_<RawEntry> entries = read_directory(d);
