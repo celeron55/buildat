@@ -1573,9 +1573,12 @@ struct CApp: public App, public magic::Application
 	{
 		log_v(MODULE, "run_script():\n%s", cs(script));
 
-		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_run_code_in_sandbox");
+		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_run_served_code");
 		lua_pushlstring(L, script.c_str(), script.size());
-		error_logging_pcall(L, 1, 1);
+		// A name of its own, which sandbox.lua counts as a server's chunk:
+		// unnamed, its name was its own text, which no gate knew
+		lua_pushstring(L, "=server");
+		error_logging_pcall(L, 2, 1);
 		bool status = lua_toboolean(L, -1);
 		lua_pop(L, 1);
 		if(status == false){

@@ -345,35 +345,42 @@ end
 -- The chunks servers served, by name (sandbox.lua's run_script_file)
 __buildat_served_chunks = {}
 
-local function storage_path(name)
+-- Whose storage a call is in: "server" for game code a server sent, or the
+-- launch extension's name. 1 is this, 2 the verb, 3 who called it.
+local function storage_domain()
+	local info = debug.getinfo(3, "S")
+	if __buildat_served_chunks[info and info.source or ""] then
+		return "server"
+	end
+	return calling_extension(4)
+end
+
+local function storage_path(name, domain)
 	if type(name) ~= "string" or not name:match("^[%w_%-%.]+$") or
 			name:find("%.%.") then
 		return nil, "storage: a name of letters, digits, _ - and ."
 	end
 	-- **Game code a server sent** keeps its things where the server's
 	-- game_storage_dir() says, like a web page's localStorage: a game
-	-- started here has its game's, anything else its address's. Taken by
-	-- the chunk's name, as a launch extension's is; a served chunk and an
-	-- extension's are named alike, so the loader writes down which is which.
-	-- 1 is this, 2 storage_read or storage_write, 3 who called that
-	local info = debug.getinfo(3, "S")
-	local src = info and info.source or ""
-	if __buildat_served_chunks[src] then
+	-- started here has its game's, anything else its address's. A server's
+	-- chunks have a buildat of their own that says so (sandbox.lua's
+	-- __buildat_run_served_code); a launch extension is told by its
+	-- chunk's name.
+	if domain == "server" then
 		local dir = __buildat_game_storage_dir()
 		if not dir then
 			return nil, "storage: not connected to a server"
 		end
 		return dir .. "/" .. name, dir
 	end
-	local who = calling_extension(4)
-	if not who:match("^[%w_]+$") then
+	if not domain:match("^[%w_]+$") then
 		return nil, "storage: the launch extension has an odd name"
 	end
-	return __buildat_get_path("user") .. "/" .. who .. "/" .. name,
-			__buildat_get_path("user") .. "/" .. who
+	return __buildat_get_path("user") .. "/" .. domain .. "/" .. name,
+			__buildat_get_path("user") .. "/" .. domain
 end
-buildat.safe.storage_read = function(name)
-	local path = storage_path(name)
+local function storage_read_in(name, domain)
+	local path = storage_path(name, domain)
 	if not path then
 		return nil
 	end
@@ -385,8 +392,8 @@ buildat.safe.storage_read = function(name)
 	f:close()
 	return data
 end
-buildat.safe.storage_write = function(name, data)
-	local path, dir = storage_path(name)
+local function storage_write_in(name, data, domain)
+	local path, dir = storage_path(name, domain)
 	if not path then
 		return false, dir
 	end
@@ -406,6 +413,42 @@ buildat.safe.storage_write = function(name, data)
 	f:close()
 	return true
 end
+buildat.safe.storage_read = function(name)
+	local domain = storage_domain()
+	return storage_read_in(name, domain)
+end
+buildat.safe.storage_write = function(name, data)
+	local domain = storage_domain()
+	return storage_write_in(name, data, domain)
+end
+
+-- **What a server's chunks get instead** ([SECURITY_RUN_1]): the gates
+-- below read the calling frame, and a tail call or a verb passed as a
+-- callback leaves no frame of the server's to read -- `return
+-- buildat.set_preference(...)` at a chunk's top set any preference. So a
+-- chunk a server sent is run with a buildat of its own
+-- (sandbox.lua's __buildat_run_served_code), in which the user's verbs
+-- refuse whoever is on the stack and storage is the server's.
+local function refused(verb)
+	return function()
+		return false, verb .. ": the user's, not a server's"
+	end
+end
+__buildat_served_overrides = {
+	set_preference = refused("set_preference"),
+	start_local_server = refused("start_local_server"),
+	stop_local_server = refused("stop_local_server"),
+	launch = refused("launch"),
+	launch_save = refused("launch_save"),
+	cache_read = function() return nil end,
+	cache_write = refused("cache_write"),
+	storage_read = function(name)
+		return storage_read_in(name, "server")
+	end,
+	storage_write = function(name, data)
+		return storage_write_in(name, data, "server")
+	end,
+}
 
 -- **An extension's cache** ([EXTENSIONS_SANDBOXED]): files under
 -- <cache>/<extension>/, which is also a place add_resource_dir() takes,
@@ -609,16 +652,33 @@ buildat.safe.eval = function(code, chunkname)
 	if code:byte(1) == 27 then
 		return false, "binary bytecode prohibited"
 	end
-	if type(chunkname) ~= "string" then
-		chunkname = "=eval"
+	-- **The chunk is the caller's, by name too**: every gate that tells a
+	-- server's code from the user's -- set_preference, storage, the local
+	-- server -- reads the calling chunk's name, so a name of the caller's
+	-- choosing was a way to be someone else ([SECURITY_RUN_1]). The name
+	-- asked for is only what an error message says.
+	local info = debug.getinfo(2, "S")
+	local own = info and info.source or "=eval"
+	local f, err = loadstring(code, own)
+	local function shown(e)
+		if type(chunkname) ~= "string" or type(e) ~= "string" then
+			return e
+		end
+		local short = info and info.short_src or ""
+		if short ~= "" and e:sub(1, #short) == short then
+			return chunkname:gsub("^[=@]", "") .. e:sub(#short + 1)
+		end
+		return e
 	end
-	local f, err = loadstring(code, chunkname)
 	if not f then
-		return false, err
+		return false, shown(err)
 	end
 	setfenv(f, getfenv(2))
 	local r = {pcall(f)}
 	local ok = table.remove(r, 1)
+	if not ok then
+		r[1] = shown(r[1])
+	end
 	return ok, unpack(r)
 end
 -- **The API document**, for a launch UI that shows it beside a console

@@ -337,8 +337,11 @@ local function wrap_globals(base_sandbox)
 	return sandbox
 end
 
-local function run_function_in_sandbox(untrusted_function, sandbox)
+local function run_function_in_sandbox(untrusted_function, sandbox, own_buildat)
 	sandbox = wrap_globals(sandbox)
+	if own_buildat then
+		rawset(sandbox, "buildat", own_buildat)
+	end
 	setfenv(untrusted_function, sandbox)
 	local retval = nil
 	local status, err = __buildat_pcall(function()
@@ -398,7 +401,8 @@ function __buildat_run_function_in_sandbox(untrusted_function)
 	return status, err, retval
 end
 
-local function run_code_in_sandbox(untrusted_code, sandbox, chunkname)
+local function run_code_in_sandbox(untrusted_code, sandbox, chunkname,
+		own_buildat)
 	if untrusted_code:byte(1) == 27 then
 		return false, "binary bytecode prohibited", nil
 	end
@@ -406,12 +410,31 @@ local function run_code_in_sandbox(untrusted_code, sandbox, chunkname)
 	if not untrusted_function then
 		return false, message, nil
 	end
-	return run_function_in_sandbox(untrusted_function, sandbox)
+	return run_function_in_sandbox(untrusted_function, sandbox, own_buildat)
 end
 
 function __buildat_run_code_in_sandbox(untrusted_code, chunkname)
 	local status, err, retval = run_code_in_sandbox(
 			untrusted_code, __buildat_sandbox_environment, chunkname)
+	if status == false then
+		log:error("Failed to run script:\n"..err)
+		local ok, why = pcall(__buildat_report_error, err)
+		if not ok then
+			log:warning("the error could not be shown: "..tostring(why))
+		end
+	end
+	return status, err, retval
+end
+
+-- What core:run_script runs is a server's too (app.cpp's run_script)
+__buildat_served_chunks["=server"] = true
+
+-- What a server sends runs with the served buildat (below) as its own:
+-- core:run_script (app.cpp) and every file it runs by name
+local served_buildat
+function __buildat_run_served_code(code, chunkname)
+	local status, err, retval = run_code_in_sandbox(
+			code, __buildat_sandbox_environment, chunkname, served_buildat)
 	if status == false then
 		log:error("Failed to run script:\n"..err)
 		local ok, why = pcall(__buildat_report_error, err)
@@ -429,11 +452,9 @@ function buildat.run_script_file(name)
 		return false
 	end
 	log:info("buildat.run_script_file("..name.."): code length: "..#code)
-	-- A chunk a server served, which is what storage_read and
-	-- storage_write look at to give it the server's storage and not a
-	-- launch extension's
+	-- A chunk a server served, which the gates in api.lua read as well
 	__buildat_served_chunks[name] = true
-	return __buildat_run_code_in_sandbox(code, name)
+	return __buildat_run_served_code(code, name)
 end
 buildat.safe.run_script_file = buildat.run_script_file
 
@@ -453,6 +474,18 @@ __buildat_sandbox_environment.buildat.is_in_sandbox = true
 
 -- A view, as the extensions' tables are: a game rewriting buildat.launch
 -- would have rewritten it under the launch UI
+-- The served buildat: the same, with the user's verbs refusing
+-- (api.lua's __buildat_served_overrides)
+do
+	local t = {}
+	for k, v in pairs(__buildat_sandbox_environment.buildat) do
+		t[k] = v
+	end
+	for k, v in pairs(__buildat_served_overrides) do
+		t[k] = v
+	end
+	served_buildat = view(t)
+end
 __buildat_sandbox_environment.buildat =
 		view(__buildat_sandbox_environment.buildat)
 
