@@ -56,6 +56,17 @@ settings), the size -- and listed, unreviewed. The admin can delist.
     GET  /api/aitta/list                      the listed releases, JSON
     GET  /api/aitta/archive/<sha256>.zip|.sig a listed release's files
 
+Browsing and installing in the client
+-------------------------------------
+"Apps from Aitta" on the launch grid lists the Aitta in the Starport
+settings (https://aitta.buildat.org by default; the managed file's
+"aitta" overrides it), each release with Install, or Update where
+another version of it is installed. The client fetches the release and
+its .sig and checks them itself before installing; the new version is on
+the grid at once. Aitta's list is unreviewed content: where the Starport
+filters hide that ("Apps from Aitta (unreviewed)", under the lock, or the
+managed file's filters.unreviewed), there is no tile at all.
+
 Running an installed app
 ------------------------
 Every installed version is a tile on the launch grid, "<label> <version>",

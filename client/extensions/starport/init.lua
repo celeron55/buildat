@@ -27,6 +27,8 @@ local group = dofile(__buildat_extension_path("starport") .. "/group.lua")
 local M = {safe = {}}
 
 local DEFAULT_STARPORT = "https://starport.buildat.org"
+-- [AITTA_MVP]: the registry of apps this client browses
+local DEFAULT_AITTA = "https://aitta.buildat.org"
 local STATE_PATH = __buildat_get_path("user") .. "/starport.json"
 local EXPORT_PATH = __buildat_get_path("user") .. "/starport_keys.json"
 local STYLE = "launch_menu/res/main_style.xml"
@@ -74,6 +76,9 @@ local function default_filters()
 			password = true, external = true},
 		hide = {},
 		languages = "",
+		-- [AITTA_MVP]: Aitta lists unreviewed apps, so it is a filter too,
+		-- and the lock covers it
+		unreviewed = true,
 	}
 end
 
@@ -178,6 +183,7 @@ local function load_state()
 	state.keys = type(state.keys) == "table" and state.keys or {}
 	state.receipts = type(state.receipts) == "table" and state.receipts or {}
 	state.pin = state.pin or ""
+	state.aitta = type(state.aitta) == "string" and state.aitta or DEFAULT_AITTA
 	-- [STARPORT] 10: the Starport IDs logged in, by Starport: {session,
 	-- name, band, key}
 	state.ids = type(state.ids) == "table" and state.ids or {}
@@ -212,8 +218,9 @@ local function effective()
 		direct_connect = (m.direct_connect == nil) and s.direct_connect or
 				m.direct_connect == true,
 		send_key = s.send_key,
+		aitta = normalize_url(type(m.aitta) == "string" and m.aitta or s.aitta),
 		managed = {starports = m.starports ~= nil, filters = m.filters ~= nil,
-			direct_connect = m.direct_connect ~= nil},
+			direct_connect = m.direct_connect ~= nil, aitta = m.aitta ~= nil},
 	}
 end
 
@@ -747,6 +754,21 @@ settings_page = function(can, again, message)
 		save_state()
 		settings_page(can, true)
 	end, can and not e.managed.direct_connect)
+	-- [AITTA_MVP]
+	add_button(w, "Apps from Aitta (unreviewed): " ..
+			(f.unreviewed and "shown" or "hidden"), function()
+		f.unreviewed = not f.unreviewed
+		save_state()
+		settings_page(can, true)
+	end, fc)
+	r = add_row(w)
+	add_label(r, "Aitta", 240)
+	local aitta = add_edit(r, e.aitta)
+	add_button(r, "Set", function()
+		s.aitta = normalize_url(aitta:GetText())
+		save_state()
+		settings_page(can, true)
+	end, can and not e.managed.aitta)
 
 	-- 2b: a pool's server in the same region goes first
 	r = add_row(w)
@@ -1501,6 +1523,107 @@ end
 
 -- open_settings([on_closed]): the settings dialog, behind the PIN where
 -- one is set; on_closed() at its Back
+-- **Aitta's apps** ([AITTA_MVP]): the list from the Aitta in the
+-- settings, each release with Install, or Update where an older version
+-- of it is installed. Installing fetches the release and its signature
+-- and checks both on this side (__buildat_aitta_install); a version is
+-- installed beside the others, never over one. Hidden entirely where the
+-- filters hide unreviewed content.
+local function aitta_installed()
+	local have = {}
+	for _, g in ipairs(buildat.list_apps() or {}) do
+		local author, name, version = tostring(g.name):match("^([%w_]+)%.([%w_]+)@(.+)$")
+		if author then
+			local k = author .. "/" .. name
+			have[k] = have[k] or {}
+			have[k][version] = true
+		end
+	end
+	return have
+end
+
+local function aitta_page(message)
+	local e = effective()
+	local root, w = open_window("aitta", 900)
+	add_text(w, "Apps from Aitta: " .. e.aitta)
+	if not e.filters.unreviewed then
+		add_text(w, "This client's filters hide unreviewed content, and " ..
+				"everything on Aitta is unreviewed.", YELLOW)
+		add_button(w, "Back", function() uistack.main:pop(root) end)
+		return
+	end
+	add_text(w, "Nobody has reviewed these. An app runs in the server's " ..
+			"box: it cannot reach your files, only its own saves.", GREY)
+	if message then
+		add_text(w, message, YELLOW)
+	end
+	local status = add_text(w, "Fetching the list...", GREY)
+	add_button(w, "Back", function() uistack.main:pop(root) end)
+	network.http_get(e.aitta .. "/api/aitta/list", function(body, err)
+		if not body then
+			status:SetText("Could not fetch the list: " .. tostring(err))
+			return
+		end
+		local v = network.parse_json(body)
+		if type(v) ~= "table" or not v.ok or type(v.releases) ~= "table" then
+			status:SetText("Aitta's answer was not a list")
+			return
+		end
+		status:SetText(#v.releases .. " releases")
+		local have = aitta_installed()
+		for _, rel in ipairs(v.releases) do
+			local k = tostring(rel.author) .. "/" .. tostring(rel.name)
+			local mine = have[k]
+			local r = add_row(w)
+			add_label(r, k .. " " .. tostring(rel.version) .. "  " ..
+					tostring(rel.license_code) .. " / " ..
+					tostring(rel.license_media) .. "  " ..
+					math.floor((tonumber(rel.size) or 0) / 1000) .. " kB", 560)
+			local installed = mine and mine[tostring(rel.version)]
+			add_button(r, installed and "Installed" or
+					(mine and "Update" or "Install"), function()
+				local base = e.aitta .. "/api/aitta/archive/" ..
+						tostring(rel.sha256)
+				status:SetText("Fetching " .. k .. "...")
+				network.http_get(base .. ".sig", function(sig, err1)
+					if not sig then
+						status:SetText("Could not fetch: " .. tostring(err1))
+						return
+					end
+					network.http_get(base .. ".zip", function(zip, err2)
+						if not zip then
+							status:SetText("Could not fetch: " .. tostring(err2))
+							return
+						end
+						local dir, why = __buildat_aitta_install(zip, sig)
+						uistack.main:pop(root)
+						-- The grid behind, with the new tile on it
+						local menu = dir and buildat.menu_extension()
+						if menu and type(menu.refresh) == "function" then
+							menu.refresh()
+						end
+						aitta_page(dir and ("Installed " .. k .. " " ..
+								tostring(rel.version) .. ": it is on the " ..
+								"grid") or ("Not installed: " .. tostring(why)))
+					end)
+				end)
+			end, not installed)
+			if rel.description and rel.description ~= "" then
+				add_text(w, "    " .. tostring(rel.description), GREY)
+			end
+		end
+	end)
+end
+
+function M.safe.open_aitta()
+	aitta_page()
+end
+
+-- Whether Aitta is shown at all: the filters' "unreviewed"
+function M.safe.aitta_shown()
+	return effective().filters.unreviewed == true
+end
+
 function M.safe.open_settings(on_closed)
 	settings_closed = on_closed
 	ask_pin(function(ok)

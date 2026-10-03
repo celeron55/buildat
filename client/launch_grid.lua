@@ -36,7 +36,7 @@ end
 -- The launch menu's own two tiles, which every launch UI's grid has:
 -- the local game list and connecting to a server
 local function menu_actions()
-	return {
+	local out = {
 		{id = "local", label = "Local app", order = 1,
 			icon = "launch_menu/res/icon_local.png", resolved_icon = true,
 			description = "Start an app on this machine",
@@ -46,6 +46,17 @@ local function menu_actions()
 			description = "Join a buildat server",
 			run = function() M.screens().show_connect_to_server() end},
 	}
+	-- [AITTA_MVP]: Aitta's list is unreviewed content, so where the
+	-- filters (under Starport's lock) hide that, there is no tile at all
+	local ok, starport = pcall(require, "buildat/extension/starport")
+	if ok and type(starport) == "table" and starport.safe.aitta_shown() then
+		out[#out + 1] = {id = "aitta", label = "Apps from Aitta", order = 3,
+			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
+			description = "Install apps others made: unreviewed, each in " ..
+					"the server's box",
+			run = function() starport.safe.open_aitta() end}
+	end
+	return out
 end
 local MAX_PARAMS_DEPTH = 8
 

@@ -469,6 +469,17 @@ M.in_app = screens.in_app
 -- what the grid did until 2026-09-24.
 M.show_dead_server = screens.show_dead_server
 
+-- The grid drawn again, as at boot: what it lists has changed under it
+-- (an app installed from Aitta, [AITTA_MVP])
+function M.refresh()
+	if uistack.main.stack[1] then
+		pcall(function()
+			uistack.main:pop_to(uistack.main.stack[1], true)
+		end)
+	end
+	M.boot()
+end
+
 function M.leave_app()
 	if not screens.in_app() and not api.local_server_running() then
 		return false

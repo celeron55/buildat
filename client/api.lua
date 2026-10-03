@@ -128,7 +128,9 @@ local launch_ui_interface = nil
 -- anything else in the table is ignored rather than refused, since a
 -- launch UI's module is its own and may hold whatever it likes.
 local LAUNCH_INTERFACE = {entered_app = true, leave_app = true,
-	in_app = true, show_dead_server = true, app_loading = true}
+	in_app = true, show_dead_server = true, app_loading = true,
+	-- [AITTA_MVP]: the grid drawn again after an install
+	refresh = true}
 -- **Merged, not replaced**, because a launch UI may be a composition
 -- ([TWO_AUDIENCES]: the menu over the room). The composing extension's
 -- own module usually has none of these -- it boots two others and that

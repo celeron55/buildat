@@ -34,6 +34,9 @@
 #include <condition_variable>
 #include <deque>
 #include <fstream>
+#include "interface/aitta.h"
+#include "interface/sha256.h"
+#include "interface/bignum.h"
 #include <sstream>
 #include <c55/getopt.h>
 #include <c55/os.h>
@@ -1926,6 +1929,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(connect_server_poll)
 		DEF_BUILDAT_FUNC(disconnect)
 		DEF_BUILDAT_FUNC(list_apps)
+		DEF_BUILDAT_FUNC(aitta_install)
 		DEF_BUILDAT_FUNC(start_local_server)
 		DEF_BUILDAT_FUNC(list_launchers)
 		DEF_BUILDAT_FUNC(list_installed_games)
@@ -3330,6 +3334,40 @@ struct CApp: public App, public magic::Application
 			lua_rawseti(L, -2, i++);
 		}
 		return 1;
+	}
+
+	// aitta_install(zip, sig) -> the directory, or nil and why: a release
+	// fetched from an Aitta, checked and installed under <user>/installed
+	// ([AITTA_MVP]). Trusted only: client/extensions/starport.
+	static int l_aitta_install(lua_State *L)
+	{
+		const ss_ zip = lua_bindings::lua_tocppstring(L, 1);
+		const ss_ sig = lua_bindings::lua_tocppstring(L, 2);
+		const ss_ tmp = g_client_config.get<ss_>("cache_path")+"/tmp/aitta-"+
+				interface::sha256::hex(interface::bignum::random_bytes(8));
+		try {
+			interface::fs::create_directories(
+					g_client_config.get<ss_>("cache_path")+"/tmp");
+			for(const auto &f : {std::make_pair(tmp+".zip", zip),
+					std::make_pair(tmp+".sig", sig)}){
+				std::ofstream o(f.first, std::ios::binary);
+				o<<f.second;
+				if(!o.good())
+					throw Exception("cannot write "+f.first);
+			}
+			const ss_ dir = interface::aitta::install(tmp+".zip", tmp+".sig",
+					g_client_config.get<ss_>("user_path"));
+			interface::fs::remove_all(tmp+".zip");
+			interface::fs::remove_all(tmp+".sig");
+			lua_pushstring(L, dir.c_str());
+			return 1;
+		} catch(std::exception &e){
+			interface::fs::remove_all(tmp+".zip");
+			interface::fs::remove_all(tmp+".sig");
+			lua_pushnil(L);
+			lua_pushstring(L, e.what());
+			return 2;
+		}
 	}
 
 	// list_apps() -> {{name=, size=}, ...}
