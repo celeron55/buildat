@@ -3179,6 +3179,12 @@ function core.__add_player(name)
 end
 
 function core.__remove_player(name)
+	-- An admin is one while connected (apps/vanilla says so at each join):
+	-- kept after, the name was still an admin's to whoever registered it
+	-- next ([SECURITY_RUN_1])
+	if core.__admins then
+		core.__admins[name] = nil
+	end
 	local id = players[name]
 	if id == nil then
 		return

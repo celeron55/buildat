@@ -38,4 +38,31 @@ do
 	end
 end
 
+-- **/grant and /revoke on a server's admin** ([SECURITY_RUN_1]): the
+-- builtin reads the player's privileges, changes one and writes the lot
+-- back -- and an admin's are every privilege there is (get_player_privs),
+-- so a /grant of one wrote all of them into the world's own auth entry,
+-- where they stayed after the account stopped being an admin or was made
+-- again by someone else. For an admin the only news in what comes back
+-- is what is missing from it, a revoke: the stored entry loses that and
+-- gains nothing.
+do
+	local set_privs = core.set_player_privs
+	core.set_player_privs = function(name, privs)
+		if core.__admins and core.__admins[name] and
+				not core.is_singleplayer() then
+			local handler = core.get_auth_handler()
+			local entry = handler and handler.get_auth(name)
+			local stored = table.copy(entry and entry.privileges or {})
+			for priv in pairs(core.registered_privileges) do
+				if not privs[priv] then
+					stored[priv] = nil
+				end
+			end
+			return set_privs(name, stored)
+		end
+		return set_privs(name, privs)
+	end
+end
+
 -- vim: set noet ts=4 sw=4:
