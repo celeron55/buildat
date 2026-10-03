@@ -3556,8 +3556,9 @@ struct CInstance: public voxelworld::Instance
 	// and the check passes, water_light.sh still falls a level a node and
 	// diglight.sh still reads its gradient.
 	//
-	// BUILDAT_SKY_COLUMN=0 puts the old rule back: the top of the section
-	// region and nothing else, which on a Luanti-sized map never fires.
+	// The old rule was the top of the section region and nothing else,
+	// which on a Luanti-sized map never fires; BUILDAT_SKY_COLUMN=0 put it
+	// back until [SKY_COLUMN_CAVE] was closed (2026-10-03).
 	// **The column is only asked for a relight** (from_relight): during
 	// worldgen the column above a voxel is half made and open_sky_from()
 	// then calls a cave open sky. The region's own top row is asked for
@@ -3567,14 +3568,12 @@ struct CInstance: public voxelworld::Instance
 	// (2026-09-28).
 	bool is_below_open_sky(const pv::Vector3DInt32 &p, bool from_relight)
 	{
-		static const bool off = getenv("BUILDAT_SKY_COLUMN") != nullptr &&
-				ss_(getenv("BUILDAT_SKY_COLUMN")) == "0";
 		const int section_h = m_section_size_chunks.getY() *
 				m_chunk_size_voxels.getY();
 		if(p.getY() == (m_section_region.getUpperCorner().getY() + 1) *
 				section_h - 1)
 			return true;
-		if(off || !from_relight)
+		if(!from_relight)
 			return false;
 		return p.getY() >= open_sky_from(p.getX(), p.getZ());
 	}

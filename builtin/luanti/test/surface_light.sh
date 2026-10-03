@@ -11,8 +11,8 @@
 # assertion and it is real. The second -- after `core.fix_light` over a
 # box whose top is under the loaded column, which is the shape
 # [SKY_COLUMN_CAVE]'s fault had -- **has not been seen to fail**: run
-# with `BUILDAT_SKY_COLUMN=0`, which is the broken rule put back, this
-# world still reads 15 across the board. devtest's world is small and
+# with the broken rule put back (`BUILDAT_SKY_COLUMN=0`, removed since),
+# this world still read 15 across the board. devtest's world is small and
 # flat and its region top is near the player, so the relight finds a sky
 # source either way. Reproducing the fault wants a played VoxeLibre
 # world, which is [SKY_COLUMN_CAVE]'s own drive and not a quick check.
