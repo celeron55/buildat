@@ -1,5 +1,9 @@
 # Buildat sub-build
 /Build/
+# ...and the web client's ([WEB_CLIENT])
+/Build-web/
+# A place for a separate build with address sanitization instrumentation
+/Build-address
 
 # Output directories
 /bin/*

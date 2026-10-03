@@ -15,6 +15,8 @@
 #include <signal.h>
 #include <sys/ucontext.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <time.h>
 #define MODULE "debug"
 
 namespace interface {
@@ -210,9 +212,14 @@ void log_current_backtrace(const ss_ &title)
 #include <cxxabi.h>
 #include <dlfcn.h>
 
-static void *last_exception_frames[BACKTRACE_SIZE];
-static int last_exception_num_frames = 0;
-static ss_ last_exception_name;
+// Per thread: every throw on every thread writes these, and a thrown
+// exception is caught and read on the thread that threw it. Shared, two
+// module threads refusing a malformed packet at once assigned the one
+// string together -- a double free a client could cause (ASan,
+// util/fuzz/proto_fuzz.sh, [SECURITY_RUN_1]).
+static thread_local void *last_exception_frames[BACKTRACE_SIZE];
+static thread_local int last_exception_num_frames = 0;
+static thread_local ss_ last_exception_name;
 
 // GCC-specific
 static ss_ demangle(const char *name)
@@ -383,6 +390,131 @@ static void debug_sighandler(int sig, siginfo_t *info, void *secret)
 
 	g_signal_handlers_active--;
 	exit(1);
+}
+
+// The watchdog ([WIN8_START] 14): the watched thread is sent SIGUSR2
+// once it has said nothing for stall_seconds, and the handler, on that
+// thread, prints its own backtrace to stderr the way a crash's is
+static pthread_t g_watched_thread;
+static std::atomic<int64_t> g_watched_alive_us(0);
+static int g_watchdog_stall_s = 10;
+static std::atomic_bool g_watchdog_started(false);
+static void (*g_watchdog_on_freeze)() = nullptr;
+// The next SIGUSR2 is the freeze's, not a report's
+static std::atomic_bool g_watchdog_freeze(false);
+static const int WATCHDOG_FREEZE_S = 30;
+// Where the freeze's signal found the thread: in machine code LuaJIT
+// compiled, which no hook reaches
+static std::atomic_bool g_watchdog_in_jit(false);
+
+static int64_t watchdog_now_us()
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+static void watchdog_sighandler(int sig, siginfo_t *info, void *secret)
+{
+	(void)sig; (void)info;
+	ucontext_t *uc = (ucontext_t*)secret;
+	// **Not unwound from machine code LuaJIT made**: it has no unwind
+	// tables, and the unwinder walking off it aborted the client -- the
+	// watchdog turning a stall into a crash. Such code is in no object.
+	// simplified: dladdr() is not async-signal-safe; it takes the loader's
+	// lock, so a thread frozen inside dlopen() would hang here as well
+	Dl_info dl;
+	const bool in_jit = !dladdr((void*)uc->uc_mcontext.gregs[REG_EIP], &dl);
+	if(g_watchdog_freeze.exchange(false)){
+		g_watchdog_in_jit = in_jit;
+		if(g_watchdog_on_freeze)
+			g_watchdog_on_freeze();
+		return;
+	}
+	if(in_jit){
+		fprintf(stderr, "  The main thread is in no loaded object (%p): "
+				"machine code LuaJIT compiled from a script\n",
+				(void*)uc->uc_mcontext.gregs[REG_EIP]);
+		return;
+	}
+	void *trace[BACKTRACE_SIZE];
+	int trace_size = backtrace(trace, BACKTRACE_SIZE);
+	trace[1] = (void*)uc->uc_mcontext.gregs[REG_EIP];
+	stderr_backtrace(trace, trace_size, SIGUSR2);
+}
+
+static void *watchdog_main(void*)
+{
+	int64_t next_report = 0;
+	bool stalled = false;
+	bool freeze_sent = false;
+	for(;;){
+		sleep(1);
+		const int64_t now = watchdog_now_us();
+		const int64_t alive = g_watched_alive_us;
+		if(now - alive < (int64_t)g_watchdog_stall_s * 1000000){
+			stalled = false;
+			continue;
+		}
+		if(!stalled){
+			stalled = true;
+			freeze_sent = false;
+			next_report = now;
+		}
+		// **A compiled loop ends the client rather than its window**: the
+		// hook did not reach it, nothing else will, and a window frozen
+		// for good -- full screen, perhaps -- is worse than a client that
+		// says why it left
+		if(freeze_sent && g_watchdog_in_jit &&
+				now - alive >= (int64_t)WATCHDOG_FREEZE_S * 2 * 1000000){
+			fprintf(stderr, "\nWatchdog: no frame for %d s, in Lua that "
+					"LuaJIT compiled and the interrupt does not reach; "
+					"exiting\n", (int)((now - alive) / 1000000));
+			_exit(3);
+		}
+		if(!freeze_sent && g_watchdog_on_freeze &&
+				now - alive >= (int64_t)WATCHDOG_FREEZE_S * 1000000){
+			freeze_sent = true;
+			fprintf(stderr, "\nWatchdog: no frame for %d s; interrupting "
+					"the main thread's Lua\n", (int)((now - alive) / 1000000));
+			g_watchdog_freeze = true;
+			pthread_kill(g_watched_thread, SIGUSR2);
+			continue;
+		}
+		if(now < next_report)
+			continue;
+		next_report = now + 60000000;
+		fprintf(stderr, "\nWatchdog: no frame for %d s; the main thread's stack:\n",
+				(int)((now - alive) / 1000000));
+		pthread_kill(g_watched_thread, SIGUSR2);
+	}
+	return nullptr;
+}
+
+void watchdog_on_freeze(void (*f)())
+{
+	g_watchdog_on_freeze = f;
+}
+
+void watchdog_alive(int stall_seconds)
+{
+	g_watched_alive_us = watchdog_now_us();
+	// Every call, so a screen may lower it for its own stay
+	g_watchdog_stall_s = stall_seconds;
+	if(g_watchdog_started.exchange(true))
+		return;
+	g_watched_thread = pthread_self();
+	struct sigaction sa;
+	memset(&sa, 0, sizeof sa);
+	sa.sa_sigaction = watchdog_sighandler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART | SA_SIGINFO;
+	sigaction(SIGUSR2, &sa, NULL);
+	pthread_t t;
+	if(pthread_create(&t, NULL, watchdog_main, NULL) == 0)
+		pthread_detach(t);
+	log_i(MODULE, "Watchdog: the main thread's stack is logged after %d s "
+			"without a frame", stall_seconds);
 }
 
 void init_signal_handlers(const SigConfig &config)
