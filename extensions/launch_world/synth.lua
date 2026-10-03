@@ -73,6 +73,51 @@ local SOFT = {
 	chimes = {chimes = true},
 	quiet = {},
 }
+-- **`pad` grown into downtempo techno** ([LAUNCH_WORLD] stage 3, section
+-- 13): `pad`'s chords under a beat, two pads with their own LFOs and
+-- their own ducking under the kick, a sub bass, a riff into a delay, and
+-- wind and chimes, arranged in sections. The first options round is the
+-- tempo and the beat's character, so those are the style's name --
+-- m<bpm>_<beat> -- and the pads and the riff are held:
+--   four    a soft kick on every beat, an open hat between, a rim on 2 and 4
+--   broken  a kick on 1, the and of 2 and 3, a snare on 2 and 4, swung hats
+for _, bpm in ipairs({92, 104, 116}) do
+	for _, beat in ipairs({"four", "broken"}) do
+		local name = "m" .. bpm .. "_" .. beat
+		M.STYLES[name] = true
+		SOFT[name] = {music = {bpm = bpm, beat = beat}}
+	end
+end
+-- Steps of a bar, a velocity each; 0 is a rest
+local BEATS = {
+	four = {swing = 0,
+		kick = {1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0},
+		open = {0, 0, .6, 0, 0, 0, .6, 0, 0, 0, .6, 0, 0, 0, .6, 0},
+		hat = {.2, .12, 0, .12, .2, .12, 0, .12, .2, .12, 0, .12, .2, .12, 0, .2},
+		rim = {0, 0, 0, 0, .5, 0, 0, 0, 0, 0, 0, 0, .5, 0, 0, .15},
+		snare = {}},
+	broken = {swing = 0.16,
+		kick = {1, 0, 0, 0, 0, 0, .75, 0, 0, 0, .9, 0, 0, 0, 0, .35},
+		open = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, .45, 0},
+		hat = {.35, .12, .3, .15, .35, .12, .3, .2, .35, .12, .3, .15, .35, .2, 0, .15},
+		rim = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, .2, 0, 0, 0, 0},
+		snare = {0, 0, 0, 0, .7, 0, 0, 0, 0, 0, 0, 0, .7, 0, 0, .2}},
+}
+-- The riff: two bars of steps, each an index into the chord (an octave
+-- up), nil a rest -- dotted eighths, so it turns against the beat
+local RIFF = {1, nil, nil, 3, nil, nil, 2, nil, nil, 4, nil, nil, 3, nil, 2, nil,
+	1, nil, nil, 3, nil, nil, 2, nil, 4, nil, 3, nil, nil, 2, nil, nil}
+-- The arrangement: sixteen bars a section, a target level per layer,
+-- looping. A layer not named is out.
+local SECTIONS = {
+	{padA = 1, wind = 1},                                   -- intro
+	{padA = 1, kick = 1, hats = 1, bass = 1},               -- the beat
+	{padA = 1, kick = 1, hats = 1, bass = 1, riff = 1},     -- the riff in
+	{padB = 1, kick = 1, hats = 1, bass = 1, riff = 1, chimes = 1},
+	{padB = 1, wind = 1, chimes = 1, hats = 0.3},           -- the break
+	{padA = 1, padB = 0.5, kick = 1, hats = 1, bass = 1},   -- back, no riff
+}
+local LAYERS = {"padA", "padB", "kick", "hats", "bass", "riff", "wind", "chimes"}
 -- A sine by table: the pads' four voices and their overtones a sample
 local SINE = {}
 for i = 0, 1023 do
@@ -180,9 +225,15 @@ function M.new(magic, log, style)
 			self.beep_age = 0
 		end
 		local xf = 2.5 * RATE
+		if cfg.music then
+			self:music_block(cfg.music)
+		end
 		for i = 0, BLOCK - 1 do
 			local t = self.t + i
 			local x = 0
+			if cfg.music then
+				x = self:music_sample(t)
+			end
 			if cfg.chords then
 				local dur = cfg.dur * RATE
 				local c = math.floor(t / dur)
@@ -212,7 +263,7 @@ function M.new(magic, log, style)
 					end
 				end
 			end
-			if cfg.chimes then
+			if cfg.chimes or cfg.music and self.lv.chimes > 0.01 then
 				self.next_chime = self.next_chime - 1
 				if self.next_chime <= 0 then
 					local n = PENTA[math.floor((rand(self) + 1) * 4) % #PENTA + 1]
@@ -225,7 +276,8 @@ function M.new(magic, log, style)
 					local a = ch.age / RATE
 					local e = math.min(1, ch.age / 60) * math.exp(-a / 1.6)
 					local ph = ch.f * ch.age / RATE
-					x = x + (sine(ph) + 0.25 * sine(ph * 2.76)) * e * 0.10
+					x = x + (sine(ph) + 0.25 * sine(ph * 2.76)) * e * 0.10 *
+							(cfg.music and self.lv.chimes * 0.6 or 1)
 					ch.age = ch.age + 1
 				end
 			end
@@ -254,6 +306,160 @@ function M.new(magic, log, style)
 		end
 		self.t = self.t + BLOCK
 		self.stream:AddData(buf)
+	end
+
+	-- **The music**: a function of the sample count like the rest, so a
+	-- slow frame does not move the beat. Per block, the layers' levels
+	-- move a step towards the section's; per sample, the voices.
+	--
+	-- simplified: one delay line and no reverb. A reverb is the upgrade
+	-- if the room sounds dry -- a few comb filters, which cost a sample
+	-- each.
+	function s:music_block(m)
+		if not self.lv then
+			local spb = RATE * 60 / m.bpm
+			self.lv = {}
+			for _, k in ipairs(LAYERS) do self.lv[k] = 0 end
+			self.mu = {beat = BEATS[m.beat], step_len = spb / 4, k = -1,
+				kick = 0, kick_f = 50, hat = 0, hat_decay = 0.997,
+				rim = 0, snare = 0, snare_ph = 0, duckA = 0, duckB = 0,
+				riff = 0, riff_f = 0, riff_lp = 0, riff_cut = 0,
+				padB_lp1 = 0, padB_lp2 = 0, wind1 = 0, wind2 = 0, last_n = 0,
+				dl = {}, dl_i = 1, dl_n = math.floor(spb / 4 * 3)}
+			for i = 1, self.mu.dl_n do self.mu.dl[i] = 0 end
+		end
+		local mu = self.mu
+		local bar = math.floor(self.t / (mu.step_len * 16))
+		local sec = SECTIONS[math.floor(bar / 16) % #SECTIONS + 1]
+		mu.bar = bar
+		-- About four seconds from nothing to full: a layer comes and goes
+		-- across a bar or two rather than on the downbeat
+		for _, k in ipairs(LAYERS) do
+			local want = sec[k] or 0
+			local d = want - self.lv[k]
+			self.lv[k] = self.lv[k] + math.max(-1 / 170, math.min(1 / 170, d))
+		end
+	end
+
+	function s:music_sample(t)
+		local mu, lv = self.mu, self.lv
+		local b = mu.beat
+		local sl = mu.step_len
+		-- The step this sample is in; an odd step starts late by `swing`
+		local pair = math.floor(t / (2 * sl))
+		local within = t - pair * 2 * sl
+		local k = pair * 2 + (within < sl * (1 + b.swing) and 0 or 1)
+		local chord_i = math.floor(t / (sl * 64))
+		local chord = SOFT.pad.chords[chord_i % 4 + 1]
+		if k ~= mu.k then
+			mu.k = k
+			local st = k % 16 + 1
+			local v = b.kick[st]
+			if v > 0 and lv.kick > 0.01 then
+				mu.kick = v * lv.kick
+				mu.kick_f = 150
+				mu.duckA = mu.kick
+				mu.duckB = mu.kick
+			end
+			v = b.open[st]
+			if v > 0 then mu.hat = v; mu.hat_decay = 0.9994 end
+			v = b.hat[st]
+			if v > 0 and b.open[st] == 0 then mu.hat = v; mu.hat_decay = 0.997 end
+			if b.rim[st] > 0 then mu.rim = b.rim[st] end
+			if (b.snare[st] or 0) > 0 then mu.snare = b.snare[st] end
+			local r = RIFF[k % 32 + 1]
+			if r then
+				mu.riff = 1
+				mu.riff_cut = 1
+				mu.riff_f = 261.63 * 2 ^ (chord[r] / 12)
+			end
+		end
+		local n = (self.noise * 16807) % 2147483647
+		self.noise = n
+		n = n / 1073741823.5 - 1
+		local sec = t / RATE
+		local x = 0
+		-- The kick: a sine falling from 150 to 50 Hz, soft at the front
+		mu.kick_f = 50 + (mu.kick_f - 50) * 0.9992
+		self.phase[1] = (self.phase[1] + mu.kick_f / RATE) % 1
+		x = x + sine(self.phase[1]) * mu.kick * 0.39
+		mu.kick = mu.kick * 0.99968
+		mu.duckA = mu.duckA * 0.99987   -- padA lets go in a third of a second
+		mu.duckB = mu.duckB * 0.99975   -- padB and the bass, quicker
+		-- Hats, rim, snare: differenced noise, which is bright
+		local dn = n - mu.last_n
+		mu.last_n = n
+		x = x + dn * mu.hat * 0.2 * lv.hats
+		mu.hat = mu.hat * mu.hat_decay
+		mu.snare_ph = (mu.snare_ph + 185 / RATE) % 1
+		x = x + (n * 0.5 + sine(mu.snare_ph) * 0.5) * mu.snare * 0.22 * lv.kick
+		mu.snare = mu.snare * 0.9993
+		x = x + (dn * 0.6 + sine(sec * 820) * 0.4) * mu.rim * 0.18 * lv.hats
+		mu.rim = mu.rim * 0.998
+		-- The chords: this one, and the last fading under it over a bar
+		local xf = sl * 16
+		local tc = t - chord_i * sl * 64
+		local e = tc < xf and tc / xf or 1
+		e = e * e * (3 - 2 * e)
+		local prev = SOFT.pad.chords[(chord_i - 1) % 4 + 1]
+		-- padA: `pad`'s sines, a slow tremolo and a slower brightness
+		if lv.padA > 0.001 then
+			local trem = 1 - 0.25 * (0.5 + 0.5 * sine(sec * 0.11))
+			local bright = 0.05 + 0.2 * (0.5 + 0.5 * sine(sec * 0.07))
+			local a = 0
+			for ci = 1, 4 do
+				local ph = 130.81 * 2 ^ (chord[ci] / 12) * sec
+				a = a + (sine(ph) + bright * sine(ph * 2) + 0.04 * sine(ph * 3)) * e
+				if e < 1 and chord_i > 0 then
+					ph = 130.81 * 2 ^ (prev[ci] / 12) * sec
+					a = a + (sine(ph) + bright * sine(ph * 2)) * (1 - e)
+				end
+			end
+			x = x + a * 0.05 * trem * lv.padA * (1 - 0.4 * mu.duckA)
+		end
+		-- padB: detuned saws through two poles whose cutoff an LFO sweeps
+		if lv.padB > 0.001 then
+			local a = 0
+			for ci = 1, 4 do
+				local f = 130.81 * 2 ^ (chord[ci] / 12)
+				a = a + ((f * 1.004 * sec) % 1 + (f * 0.996 * sec) % 1 - 1) * e
+				if e < 1 and chord_i > 0 then
+					f = 130.81 * 2 ^ (prev[ci] / 12)
+					a = a + ((f * 1.004 * sec) % 1 + (f * 0.996 * sec) % 1 - 1) *
+							(1 - e)
+				end
+			end
+			local c = 0.05 + 0.15 * (0.5 + 0.5 * sine(sec * 0.045))
+			mu.padB_lp1 = mu.padB_lp1 + (a - mu.padB_lp1) * c
+			mu.padB_lp2 = mu.padB_lp2 + (mu.padB_lp1 - mu.padB_lp2) * c
+			x = x + mu.padB_lp2 * 0.10 * lv.padB * (1 - 0.65 * mu.duckB)
+		end
+		-- The sub bass: the chord's root two octaves down, held, ducked
+		if lv.bass > 0.001 then
+			x = x + sine(65.41 * 2 ^ (chord[1] / 12) * sec) * 0.09 * lv.bass *
+					(1 - 0.75 * mu.duckB)
+		end
+		-- The riff: a saw plucked through a closing filter, into the delay
+		local wet = 0
+		if lv.riff > 0.001 then
+			mu.riff_cut = mu.riff_cut * 0.9995
+			local saw = (mu.riff_f * sec) % 1 * 2 - 1
+			mu.riff_lp = mu.riff_lp + (saw - mu.riff_lp) * (0.02 + 0.25 * mu.riff_cut)
+			wet = mu.riff_lp * mu.riff * 0.18 * lv.riff
+			mu.riff = mu.riff * 0.99985
+		end
+		local d = mu.dl[mu.dl_i]
+		mu.dl[mu.dl_i] = wet + d * 0.42
+		mu.dl_i = mu.dl_i % mu.dl_n + 1
+		x = x + wet + d * 0.5
+		-- Wind: noise through two slow poles, swelling on an LFO
+		if lv.wind > 0.001 then
+			local c = 0.01 + 0.02 * (0.5 + 0.5 * sine(sec * 0.031))
+			mu.wind1 = mu.wind1 + (n - mu.wind1) * c
+			mu.wind2 = mu.wind2 + (mu.wind1 - mu.wind2) * c
+			x = x + mu.wind2 * (0.6 + 0.4 * sine(sec * 0.083)) * 0.8 * lv.wind
+		end
+		return x
 	end
 
 	function s:fill()
@@ -492,8 +698,26 @@ function M.self_check(magic)
 	s:fill()
 	assert(s.env.thunk > 0.5, "the thunk rang")
 	assert(s.stream.bufferNumBytes - quiet == a * 2, "and wrote a block")
+	-- **The music's kick lands on its steps, swung or not**: one bar of
+	-- `broken`, the beat only, the steps where the kick's level jumps
+	local m = M.new(magic, nil, "m116_broken")
+	m:music_block(SOFT.m116_broken.music)
+	for k in pairs(m.lv) do m.lv[k] = 0 end
+	m.lv.kick = 1
+	local got, want, last = {}, {}, 0
+	for st, v in ipairs(BEATS.broken.kick) do
+		if v > 0 then want[#want + 1] = st - 1 end
+	end
+	for t = 0, math.floor(m.mu.step_len * 16) - 1 do
+		m:music_sample(t)
+		if m.mu.kick > last + 0.1 then got[#got + 1] = m.mu.k end
+		last = m.mu.kick
+	end
+	assert(table.concat(got, " ") == table.concat(want, " "),
+			"the kick fell on " .. table.concat(got, " "))
 	return string.format("synth ok: %d samples a block, %d kicks in a bar, " ..
-			"the thunk rings, %.2f s buffered, a drone loop of %d samples",
+			"the thunk rings, %.2f s buffered, a drone loop of %d samples, " ..
+			"the music's kick on its steps",
 			BLOCK, #hits, s.stream.bufferLength, loop.samples)
 end
 
