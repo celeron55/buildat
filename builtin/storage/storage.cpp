@@ -476,6 +476,17 @@ struct Module: public interface::Module, public Interface
 					c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
 				return false;
 		}
+		// Nor a Windows device: "CON" or "nul.txt" is the console or
+		// nothing, not a directory ([SECURITY_RUN_1])
+		ss_ stem = name.substr(0, name.find('.'));
+		for(char &c : stem)
+			c = (char)toupper((unsigned char)c);
+		if(stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL")
+			return false;
+		if(stem.size() == 4 && (stem.compare(0, 3, "COM") == 0 ||
+				stem.compare(0, 3, "LPT") == 0) && stem[3] >= '0' &&
+				stem[3] <= '9')
+			return false;
 		return true;
 	}
 

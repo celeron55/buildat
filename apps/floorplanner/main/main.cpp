@@ -1425,6 +1425,25 @@ struct Module: public interface::Module
 			pair.second->flush();
 	}
 
+	// Whether a plan of this name, in any case, is there: a new plan's name
+	// must not be one, because Windows' and macOS' file systems take "ALICE"
+	// for "alice" and an exact compare let a new plan open, own and
+	// overwrite another's ([SECURITY_RUN_1]). Opening one is by its exact
+	// name.
+	bool name_taken(const ss_ &name)
+	{
+		auto lower = [](ss_ s){
+			for(char &c : s)
+				c = (char)tolower((unsigned char)c);
+			return s;
+		};
+		const ss_ l = lower(name);
+		for(const ss_ &n : plan_names())
+			if(lower(n) == l)
+				return true;
+		return false;
+	}
+
 	sv_<ss_> plan_names()
 	{
 		sv_<ss_> names;
@@ -1773,7 +1792,7 @@ struct Module: public interface::Module
 		bool exists = false;
 		for(const ss_ &n : plan_names())
 			exists |= n == req.name;
-		if(req.create && exists)
+		if(req.create && (exists || name_taken(req.name)))
 			return refuse("There is a plan called "+req.name+" already");
 		if(!req.create && !exists)
 			return refuse("There is no plan called "+req.name);
@@ -1826,9 +1845,8 @@ struct Module: public interface::Module
 		};
 		if(!valid_plan_name(name))
 			return refuse("\""+name+"\" is not a name a plan can have");
-		for(const ss_ &n : plan_names())
-			if(n == name)
-				return refuse("There is a plan called \""+name+"\" already");
+		if(name_taken(name))
+			return refuse("There is a plan called \""+name+"\" already");
 		namespace fs = interface::fs;
 		from_plan->flush();
 		const ss_ from = from_plan->m_save->path();
@@ -2117,9 +2135,8 @@ struct Module: public interface::Module
 			return;
 		if(!valid_plan_name(req.name))
 			return refuse("\""+req.name+"\" is not a name a plan can have");
-		for(const ss_ &n : plan_names())
-			if(n == req.name)
-				return refuse("There is a plan called \""+req.name+"\" already");
+		if(name_taken(req.name))
+			return refuse("There is a plan called \""+req.name+"\" already");
 		PlanFile f;
 		if(!unpack(req.file, f) || f.magic != EXPORT_MAGIC)
 			return refuse("That is not a plan file");
