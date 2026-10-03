@@ -212,9 +212,14 @@ void log_current_backtrace(const ss_ &title)
 #include <cxxabi.h>
 #include <dlfcn.h>
 
-static void *last_exception_frames[BACKTRACE_SIZE];
-static int last_exception_num_frames = 0;
-static ss_ last_exception_name;
+// Per thread: every throw on every thread writes these, and a thrown
+// exception is caught and read on the thread that threw it. Shared, two
+// module threads refusing a malformed packet at once assigned the one
+// string together -- a double free a client could cause (ASan,
+// util/fuzz/proto_fuzz.sh, [SECURITY_RUN_1]).
+static thread_local void *last_exception_frames[BACKTRACE_SIZE];
+static thread_local int last_exception_num_frames = 0;
+static thread_local ss_ last_exception_name;
 
 // GCC-specific
 static ss_ demangle(const char *name)
