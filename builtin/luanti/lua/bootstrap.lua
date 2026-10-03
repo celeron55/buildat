@@ -1156,6 +1156,31 @@ end
 local biome_name_of_index = {[0] = "default"}
 local biome_index_of_name = {}
 
+-- An ore's or a decoration's biomes as names, from whatever Luanti's
+-- get_biome_list takes: nil, one name, one biome table, a biome number, or
+-- a list of those. A single name read as nothing would put the thing in
+-- every biome.
+local function biome_names(v)
+	local function one(b)
+		if type(b) == "number" then
+			return biome_name_of_index[b]
+		elseif type(b) == "table" then
+			return b.name
+		end
+		return b
+	end
+	if v == nil then
+		return {}
+	elseif type(v) ~= "table" or v.name ~= nil then
+		return {one(v)}
+	end
+	local out = {}
+	for _, b in pairs(v) do
+		out[#out + 1] = one(b)
+	end
+	return out
+end
+
 -- Where the mapgen's noise puts a biome, whether or not anything has been
 -- generated there -- which is what Luanti answers too, its own
 -- get_biome_data() asking the biome generator rather than the map.
@@ -1335,10 +1360,7 @@ function core.__mapgen_ores()
 					end
 				end
 			end
-			local biomes = {}
-			for _, name in ipairs(o.biomes or {}) do
-				biomes[#biomes + 1] = name
-			end
+			local biomes = biome_names(o.biomes)
 			out[#out + 1] = {
 				-- Only the name the mod gave, as in Luanti: the manager
 				-- refuses a second ore by one name, and a game registers
@@ -1550,7 +1572,7 @@ function core.__mapgen_decorations()
 			y_max = d.y_max or d.height_max or 31000,
 			flags = d.flags or "",
 			np = np_of(d.noise_params),
-			biomes = d.biomes or {},
+			biomes = biome_names(d.biomes),
 			c_spawnby = id_list(d.spawn_by),
 			nspawnby = d.num_spawn_by or -1,
 			place_offset_y = d.place_offset_y or 0,
