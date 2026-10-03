@@ -47,6 +47,20 @@ static int on_progress(void *user, curl_off_t total, curl_off_t got,
 	return 0;
 }
 
+static void set_protocols(CURL *c, const char *list)
+{
+#if LIBCURL_VERSION_NUM >= 0x075500
+	curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, list);
+	curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, list);
+#else
+	const long p = strstr(list, "smtp") ?
+			(CURLPROTO_SMTP | CURLPROTO_SMTPS) :
+			(CURLPROTO_HTTP | CURLPROTO_HTTPS);
+	curl_easy_setopt(c, CURLOPT_PROTOCOLS, p);
+	curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS, p);
+#endif
+}
+
 static CURL *easy(const ss_ &url, char *errbuf)
 {
 	global_init_once();
@@ -56,6 +70,10 @@ static CURL *easy(const ss_ &url, char *errbuf)
 	curl_easy_setopt(c, CURLOPT_URL, url.c_str());
 	curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(c, CURLOPT_MAXREDIRS, 8L);
+	// http and https, asked for and redirected to: a URL comes from a
+	// ContentDB listing or a game's script, and libcurl's own default
+	// includes file:// ([SECURITY_RUN_1]). send_mail() says smtp.
+	set_protocols(c, "http,https");
 	curl_easy_setopt(c, CURLOPT_FAILONERROR, 1L);
 	// **Who is calling** ([LICENSE_DUAL]'s second courtesy): ContentDB's
 	// and the serverlist's bandwidth is donated, and an operator reading
@@ -150,6 +168,7 @@ void send_mail(const ss_ &url, const ss_ &user, const ss_ &password,
 {
 	char errbuf[CURL_ERROR_SIZE] = {0};
 	CURL *c = easy(url, errbuf);
+	set_protocols(c, "smtp,smtps");
 	if(!user.empty()){
 		curl_easy_setopt(c, CURLOPT_USERNAME, user.c_str());
 		curl_easy_setopt(c, CURLOPT_PASSWORD, password.c_str());

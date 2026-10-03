@@ -86,7 +86,8 @@ end
 -- So a boot fetches only where the answer is already on file, and
 -- asking is what the list's own launch action is for.
 local function accepted(url)
-	local uri = url:match("^(https?://[^/:]+)")
+	-- The host and the port, which is what network's consent is keyed on
+	local uri = url:match("^(https?://[^/?#]+)")
 	for _, a in ipairs(network.known_addresses()) do
 		if a.uri == uri then
 			return a.accepted

@@ -38,10 +38,10 @@ JSON
 # host it has not seen, which is the behaviour worth keeping -- a
 # launcher that reached the network quietly would be the wrong kind of
 # quiet. The store is the client's own file.
-# Now, since an answer lasts a week
+# Now, since an answer lasts a week; the port is the consent's too
 now=$(date +%s)
-printf 'accepted,address,description,created,last_attempt,name\n"true","http://localhost","a check'"'"'s own server list","%s","%s",""\n' \
-	"$now" "$now" \
+printf 'accepted,address,description,created,last_attempt,name\n"true","http://localhost:%s","a check'"'"'s own server list","%s","%s",""\n' \
+	"$port" "$now" "$now" \
 	> "$out/user/network_addresses.csv"
 # **And a client that has not said yes fetches nothing at boot**: a
 # launcher that put a permission dialog in front of a first-time user

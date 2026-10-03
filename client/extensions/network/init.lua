@@ -661,12 +661,20 @@ end
 -- The user's leave for the url's host, then the fetch: a GET, or with a
 -- body a POST of JSON
 local function gated_http(url, cb, options, body)
-	local scheme, host = url:match("^(https?)://([^/:]+)")
-	if not scheme then
-		cb(nil, "not an http(s) url: "..url)
+	-- The authority is what libcurl connects to, so it is what the user is
+	-- asked about, port included: a host and a port and nothing else. A
+	-- `user@` part or a backslash was read as one host here and another
+	-- by libcurl ([SECURITY_RUN_1]).
+	local scheme, authority = url:match("^(https?)://([^/?#]*)")
+	if not scheme or authority == "" or
+			not authority:match("^[%w%.%-]+$") and
+			not authority:match("^[%w%.%-]+:%d+$") and
+			not authority:match("^%[[%x:%.]+%]$") and
+			not authority:match("^%[[%x:%.]+%]:%d+$") then
+		cb(nil, "not an http(s) url with a plain host: "..url)
 		return
 	end
-	local uri = scheme.."://"..host
+	local uri = scheme.."://"..authority
 	local entry = load_store()[uri]
 	if entry and entry.accepted and
 			os.time() - entry.last_attempt < ACCEPTANCE_VALID_S then
