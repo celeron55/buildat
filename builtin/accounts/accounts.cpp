@@ -371,6 +371,7 @@ struct Peer
 {
 	ss_ name; // empty until joined
 	ss_ address;
+	bool web = false;
 	int failures = 0;
 };
 
@@ -498,6 +499,7 @@ struct Module: public interface::Module, public Interface
 	{
 		Peer peer;
 		peer.address = client.info.address;
+		peer.web = client.info.web;
 		m_peers[client.info.id] = peer;
 	}
 
@@ -571,10 +573,14 @@ struct Module: public interface::Module, public Interface
 		return out;
 	}
 
+	// The launcher's own client, which connects by TCP or the pipe and
+	// never by a WebSocket: a WebSocket from 127.0.0.1 is whatever page
+	// the user's browser has open, and the WebSocket upgrade takes any
+	// Origin ([SECURITY_RUN_1])
 	bool is_local(PeerId peer)
 	{
 		auto it = m_peers.find(peer);
-		return m_launched && it != m_peers.end() &&
+		return m_launched && it != m_peers.end() && !it->second.web &&
 				(it->second.address == "127.0.0.1" ||
 				it->second.address == "::1");
 	}

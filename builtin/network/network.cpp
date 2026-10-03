@@ -668,6 +668,7 @@ struct Module: public interface::Module, public network::Interface
 		PeerInfo pinfo;
 		pinfo.id = peer.id;
 		pinfo.address = peer.address();
+		pinfo.web = peer.kind == Peer::Kind::WebSocket;
 		m_server->emit_event("network:client_connected", new NewClient(pinfo));
 	}
 
@@ -1195,6 +1196,7 @@ struct Module: public interface::Module, public network::Interface
 			PeerInfo pinfo;
 			pinfo.id = peer.id;
 			pinfo.address = peer.address();
+			pinfo.web = peer.kind == Peer::Kind::WebSocket;
 			m_server->emit_event("network:client_disconnected",
 					new OldClient(pinfo));
 		}

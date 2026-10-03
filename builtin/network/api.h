@@ -17,6 +17,9 @@ namespace network
 
 		Id id = 0;
 		ss_ address;
+		// Came in through a WebSocket: a browser's page, which any site
+		// the user visits can open to 127.0.0.1 ([SECURITY_RUN_1])
+		bool web = false;
 	};
 
 	struct Packet: public interface::Event::Private
