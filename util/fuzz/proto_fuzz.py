@@ -7,12 +7,24 @@
 # reconnecting when the server drops one. It watches nothing itself;
 # proto_fuzz.sh watches the server.
 #
-#   proto_fuzz.py <port> <seconds> <names file> [seed]
+# With a words file (floorplanner's schema: a line per type, its name and
+# then its fields), each connection logs in as a local user and opens a plan first,
+# and a third of what it sends is fp:batch or fp:import shaped like the
+# real thing: valid cereal around entities of those types with those
+# fields and values at the edges, so the checks past the decoding are
+# what is driven.
+#
+#   proto_fuzz.py <port> <seconds> <names file> [seed] [words file]
 import os, random, socket, struct, sys, time
 
 port, seconds = int(sys.argv[1]), float(sys.argv[2])
 names = [l.strip() for l in open(sys.argv[3]) if l.strip()]
 rnd = random.Random(int(sys.argv[4]) if len(sys.argv) > 4 else None)
+words = None
+if len(sys.argv) > 5:
+    words = {l.split()[0]: l.split()[1:] for l in open(sys.argv[5])
+            if l.split()}
+    all_fields = sorted(set(f for v in words.values() for f in v))
 
 def packet(t, data):
     return struct.pack("<HI", t, len(data)) + data
@@ -64,12 +76,82 @@ def payload():
         out = bytes(b)
     return out
 
+def s_(b):
+    if isinstance(b, str):
+        b = b.encode()
+    return u64(len(b)) + b
+
+def i32(n):
+    return struct.pack("<i", n)
+
+def edge_int():
+    return rnd.choice([0, 1, -1, 2, 7, 100, 1000, 2**31 - 1, -2**31,
+            rnd.randrange(-2**31, 2**31), rnd.randrange(-50, 50)])
+
+def entity():
+    t = rnd.choice(list(words))
+    fields = words[t] if words[t] and rnd.random() < 0.9 else all_fields
+    out = i32(rnd.choice([rnd.randrange(-5, 40), edge_int()]))
+    out += s_(t if rnd.random() < 0.95 else "x")
+    n = rnd.randrange(0, 8)
+    out += u64(n) + b"".join(s_(rnd.choice(fields)) + i32(edge_int())
+            for _ in range(n))
+    n = rnd.randrange(0, 3)
+    out += u64(n) + b"".join(s_(rnd.choice(fields)) +
+            s_(rnd.choice(["", "a", "x" * 300, "\u00e4", "../../x"]))
+            for _ in range(n))
+    n = rnd.randrange(0, 3)
+    out += u64(n)
+    for _ in range(n):
+        k = rnd.randrange(0, 6)
+        out += s_(rnd.choice(fields)) + u64(k) + b"".join(
+                i32(edge_int()) for _ in range(k))
+    return out
+
+def ops(n):
+    return u64(n) + b"".join(bytes([rnd.randrange(5)]) + entity()
+            for _ in range(n))
+
+def plan_file():
+    out = bytes([1]) + s_("buildat-floorplan") + i32(rnd.choice([1, 1, 2])) + \
+            i32(rnd.choice([3, 3, 3, 2, 99]))
+    n = rnd.randrange(0, 12)
+    out += u64(n) + b"".join(entity() for _ in range(n))
+    n = rnd.randrange(0, 3)
+    out += u64(n)
+    for _ in range(n):
+        k = rnd.randrange(0, 5)
+        out += i32(edge_int()) + u64(k) + b"".join(
+                i32(edge_int()) + i32(edge_int()) for _ in range(k))
+    n = rnd.randrange(0, 3)
+    out += u64(n)
+    for _ in range(n):
+        out += s_(rnd.choice(["a.png", "b.jpg", "../c.png", ".png", "d.PNG"]))
+        out += s_(rnd.choice([b"\x89PNG\r\n\x1a\n" + os.urandom(20),
+                b"\xff\xd8\xff" + os.urandom(10), b""]))
+    return out
+
+def shaped():
+    if rnd.random() < 0.5:
+        return "fp:batch", bytes([1]) + i32(edge_int()) + \
+                ops(rnd.choice([0, 1, 3, 10]))
+    return "fp:import", bytes([1]) + s_("i%d" % rnd.randrange(1000)) + \
+            s_(plan_file())
+
 class Conn:
     def __init__(self):
         self.s = socket.create_connection(("127.0.0.1", port), timeout=5)
         self.s.setblocking(False)
         self.types = {}
         self.next = 100
+        if words:
+            # A local peer's login takes any new name and no password
+            self.send("accounts:login", bytes([1]) +
+                    s_("fz%d" % rnd.randrange(10**6)) + s_("") + s_("") +
+                    s_("") + b"\0" + s_("") + s_(""))
+            self.send("fp:open", bytes([1]) + s_("p%d" % rnd.randrange(5)) +
+                    bytes([rnd.randrange(2)]))
+            self.send("fp:set_editing", bytes([1, 1]))
 
     def send(self, name, data):
         out = b""
@@ -100,7 +182,10 @@ while time.time() < end:
         try:
             c.drain()
             for _ in range(rnd.randrange(1, 20)):
-                c.send(rnd.choice(names), payload())
+                if words and rnd.random() < 0.33:
+                    c.send(*shaped())
+                else:
+                    c.send(rnd.choice(names), payload())
                 sent += 1
         except (OSError, BrokenPipeError, ConnectionResetError):
             conns.remove(c)

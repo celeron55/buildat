@@ -10,7 +10,9 @@
 # PUBLIC=1 starts it as a public server (no -u): the fuzzer is then any
 # peer on the internet, with no door of the launcher's open. BUILD=asan
 # runs Build/asan's server (cmake -DSANITIZE=address there), whose
-# runtime-compiled modules are instrumented too.
+# runtime-compiled modules are instrumented too. APP=floorplanner runs that
+# app instead, and the fuzzer logs in, opens a plan and sends batches and
+# plan files built from its schema (proto_fuzz.py).
 #
 #   util/fuzz/proto_fuzz.sh [seconds] [seed]
 set -u
@@ -18,6 +20,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/security/fuzz/proto"
 secs=${1:-120}
 seed=${2:-$RANDOM}
+app=${APP:-vanilla}
 mkdir -p "$out"
 user="$out/user"
 rm -rf "$user/apps"
@@ -27,9 +30,21 @@ mkdir -p "$user/shared/vanilla/games"
 grep -rhoE '"network:packet_received/[a-z_]+:[a-z_0-9]+"' \
 	"$here/builtin" "$here/apps" --include=*.cpp |
 	sed 's/"network:packet_received\///; s/"//' | sort -u > "$out/names.txt"
+# floorplanner's schema: a line per type, its name and then its fields
+words=()
+if [ "$app" = floorplanner ]; then
+	awk 'match($0, /^\t\{"[a-z_]+", \{/){ if(t) print t; t = substr($0, 4, RLENGTH - 7) }
+		t && match($0, /^\t\t\{"[a-z_0-9]+",/){ t = t " " substr($0, 5, RLENGTH - 6) }
+		END { print t }' "$here/apps/floorplanner/main/main.cpp" > "$out/words.txt"
+	words=("$out/words.txt")
+fi
 port=$(( 29700 + (RANDOM % 90) ))
 cd "$here/Build${BUILD:+/$BUILD}"
 export ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=0:abort_on_error=1}
+# A build left behind the tree fuzzes code that is gone: the ASan one
+# lacked a fix to the server's logging for a run, 2026-10-03
+make -s -j8 > "$out/make.log" 2>&1 ||
+	{ echo "the build failed: $out/make.log"; exit 2; }
 launch=(-u launcher=1)
 [ "${PUBLIC:-}" = 1 ] && launch=()
 # A build directory below Build/ is one level deeper than the paths are
@@ -37,7 +52,7 @@ launch=(-u launcher=1)
 [ -n "${BUILD:-}" ] && launch+=(-U "$here/3rdparty/Urho3D" -S "$here"
 	-i "$here/src/interface" -C "$out/cache_$BUILD")
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=proto \
-	bin/buildat_server "${launch[@]}" -m "$here/apps/vanilla" -D "$user" \
+	bin/buildat_server "${launch[@]}" -m "$here/apps/$app" -D "$user" \
 	-P "$port" > "$out/srv.log" 2>&1 &
 srv=$!
 trap 'kill -9 $srv 2>/dev/null' EXIT
@@ -46,13 +61,13 @@ for i in $(seq 1 180); do
 	sleep 1
 done
 sleep 5
-echo "seed $seed, port $port, $(wc -l < "$out/names.txt") packet names"
+echo "$app, seed $seed, port $port, $(wc -l < "$out/names.txt") packet names"
 # Only what the server logs from here on: a module compiling at start makes
 # the loader wait, which is not two modules waiting for each other
 start=$(wc -l < "$out/srv.log")
 since() { tail -n +"$((start + 1))" "$out/srv.log"; }
 python3 "$here/util/fuzz/proto_fuzz.py" "$port" "$secs" "$out/names.txt" \
-	"$seed" > "$out/client.log" 2>&1 &
+	"$seed" "${words[@]}" > "$out/client.log" 2>&1 &
 cli=$!
 bad=""
 while kill -0 $cli 2>/dev/null; do
@@ -71,13 +86,16 @@ cat "$out/client.log"
 # memory: unbounded, 10 s of this grew the server by 300 MB
 if [ -z "$bad" ]; then
 	rss0=$(awk '/VmRSS/{print $2}' /proc/$srv/status)
+	flood=main:get_saves
+	[ "$app" = floorplanner ] && flood=fp:presence
 	timeout 10 python3 -c '
 import socket, struct, sys
 s = socket.create_connection(("127.0.0.1", int(sys.argv[1])))
 p = lambda t, d: struct.pack("<HI", t, len(d)) + d
-s.sendall(p(0, struct.pack("<HI", 100, 14) + b"main:get_saves"))
+n = sys.argv[2].encode()
+s.sendall(p(0, struct.pack("<HI", 100, len(n)) + n))
 chunk = p(100, b"") * 5000
-while True: s.sendall(chunk)' "$port" 2>/dev/null
+while True: s.sendall(chunk)' "$port" "$flood" 2>/dev/null
 	grow=$(( ($(awk '/VmRSS/{print $2}' /proc/$srv/status) - rss0) / 1000 ))
 	echo "a flood from one peer grew the server by $grow MB"
 	[ "$grow" -gt 150 ] && bad="a flood from one peer grew the server by $grow MB"
