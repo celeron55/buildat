@@ -2351,8 +2351,14 @@ struct Module: public interface::Module
 	// for those who manage it the list
 	void plan_rights_changed(Plan *plan)
 	{
+		// The plan's peers, and those in one of its backups: a backup view
+		// answers to the plan's rights too (peer_role), and a reader
+		// taken off the plan stayed in its backups ([SECURITY_RUN_1])
+		const ss_ backups = "_backup-"+plan->m_name+"-";
 		for(auto &pair : m_peers){
-			if(pair.second.plan != plan->m_name || pair.second.name.empty())
+			const ss_ &in = pair.second.plan;
+			if((in != plan->m_name && in.compare(0, backups.size(), backups) != 0)
+					|| pair.second.name.empty())
 				continue;
 			const ss_ role = peer_role(pair.first);
 			if(role.empty()){
