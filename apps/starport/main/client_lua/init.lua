@@ -7,6 +7,11 @@
 -- with a JSON "sp:req" {id, cmd, ...} and draws its "sp:res"; the server
 -- (main.cpp) decides who may do what.
 --
+-- **One window** ([STARPORT_UI]): a sidebar of every page, grouped under
+-- grey headers, on the left; the page on the right, scrolling inside the
+-- window, which keeps its size. Under 560 px the sidebar is a screen of
+-- its own. The Overview comes first.
+--
 -- A scripted client sends BUILDAT_SP_REQS, JSON requests a line each, in
 -- order after the join, and logs each answer as "sp: <json>".
 local log = buildat.Logger("starport")
@@ -123,20 +128,70 @@ local function edit(parent, label, value)
 	return e
 end
 
--- A page: its window, the title, and the message the last request left.
--- `draw` draws it again, as after a failed request
-local function open(title, draw)
-	if page then
-		page:Remove()
+local frame, sidebar, view = nil, nil, nil
+local narrow = magic.ui.root.width < 560
+local page_width = 100
+
+local function build_frame()
+	frame = accounts.page_window(880)
+	frame:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(8, 8, 8, 8))
+	frame:SetFixedHeight(math.floor(magic.ui.root.height * 0.8))
+	local inner = frame.width - 16
+	sidebar = frame:CreateChild("UIElement")
+	sidebar:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
+	sidebar:SetFixedWidth(narrow and inner or 150)
+	view = frame:CreateChild("ScrollView")
+	view:SetStyleAuto()
+	view:SetFixedWidth(narrow and inner or inner - 150 - 8)
+	view.scrollBarsAutoVisible = true
+	-- Less the vertical bar and a margin
+	page_width = view.width - 24
+	if narrow then
+		view.visible = false
 	end
-	redraw = draw
-	page = accounts.page_window(720)
-	text(page, title)
-	if message then
-		text(page, message, YELLOW)
-		message = nil
+end
+
+-- On a narrow screen, the sidebar's screen again
+local function show_sidebar()
+	sidebar.visible = true
+	view.visible = false
+end
+
+-- A page: drawn into the window's right side, with the title, a Back for
+-- a step inside a page (`back`), and the message the last request left.
+-- `draw` draws it again, as after a failed request
+local function page_element()
+	if not frame then
+		build_frame()
+	end
+	-- builtin/accounts removes the pages it drew itself
+	if page then
+		pcall(function() page:Remove() end)
+	end
+	page = view:CreateChild("UIElement")
+	page:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(4, 4, 4, 4))
+	page:SetFixedWidth(page_width)
+	view.contentElement = page
+	view.viewPosition = magic.IntVector2(0, 0)
+	if narrow then
+		sidebar.visible = false
+		view.visible = true
 	end
 	return page
+end
+
+local function open(title, draw, back)
+	local w = page_element()
+	redraw = draw
+	if back or narrow then
+		button(row(w), "Back", back or show_sidebar)
+	end
+	text(w, title)
+	if message then
+		text(w, message, YELLOW)
+		message = nil
+	end
+	return w
 end
 
 -- A list that scrolls, rows wrapping to its width
@@ -266,101 +321,240 @@ local function action_rows(w, on_action)
 	button(r, "Restore", function() go("restore") end)
 end
 
-home = function()
-	req("me", {}, function(me)
-		local w = open(s(me.starport) .. ": " .. s(me.name), home)
-		-- The operator's part ([STARPORT] 2a)
-		if s(me.email) ~= "" then
-			text(w, "Contact e-mail (not shown to users): " .. me.email, GREY)
-		end
-		local email = edit(w, "Contact e-mail", me.email_pending ~= "" and
-				me.email_pending or me.email)
-		local r = row(w)
-		button(r, "Set e-mail", function()
-			req("set_email", {email = email:GetText()}, function(how)
-				message = how == "sent" and "A code went to that address;"..
-						" enter it below." or "Set."
-				home()
-			end)
+-- The last "me": the sidebar's entries and counts, and the Overview's
+local me = {}
+local current = "overview"
+local overview_page, servers_page, account_page, pages
+
+local function side_button(label, color, on_click)
+	local b = sidebar:CreateChild("Button")
+	b:SetStyleAuto()
+	b:SetFixedHeight(26)
+	local t = b:CreateChild("Text")
+	t:SetStyleAuto()
+	t:SetText(label)
+	t:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+	t.position = magic.IntVector2(8, 0)
+	if color then
+		t:SetColor(color)
+	end
+	magic.SubscribeToEvent(b, "Released", function() on_click() end)
+end
+
+-- A sidebar entry carries a count of what waits on it, in the highlight
+-- colour while there is any. simplified: "any" stands for "any unseen";
+-- per-item seen times are the upgrade
+local function draw_sidebar()
+	sidebar:RemoveAllChildren()
+	local function entry(label, key, count)
+		count = tonumber(count) or 0
+		side_button((key == current and "> " or "") .. label ..
+				(count > 0 and " (" .. count .. ")" or ""),
+				count > 0 and YELLOW or nil, function()
+			current = key
+			draw_sidebar()
+			pages[key]()
 		end)
-		if s(me.email_pending) ~= "" then
-			local code = edit(w, "Code from the mail", "")
-			button(row(w), "Confirm", function()
-				req("confirm_email", {code = code:GetText()}, function()
-					message = "Confirmed."
-					home()
-				end)
-			end)
+	end
+	local function header(t)
+		text(sidebar, t, GREY)
+	end
+	entry("Overview", "overview", me.unseen_events)
+	header("Mine")
+	entry("Servers", "servers", 0)
+	entry("Fleets", "fleets", 0)
+	entry("Blocklists", "blocklists", me.blocklist_offers)
+	entry("Account", "account", 0)
+	if me.moderator then
+		header("Moderation")
+		entry("Queue", "queue", me.queue)
+		entry("Listings", "listings", 0)
+		entry("Appeals", "appeals", me.open_appeals)
+		entry("Audit log", "audit", 0)
+	end
+	if me.admin then
+		header("Admin")
+		entry("Settings", "settings", 0)
+		entry("Accounts", "accounts", 0)
+	end
+end
+
+-- "me" asked again, the sidebar drawn with it, and `draw` after
+local function refresh(draw)
+	req("me", {}, function(r)
+		me = r
+		if not frame then
+			build_frame()
 		end
-		text(w, "Claiming a listing: its id and claim code are in "..
-				"starport_claim.txt beside the server's starport.json.", GREY)
-		text(w, "A server with a new key: the listing it replaces too.",
-				GREY)
-		local cl = edit(w, "Listing id", "")
-		local cc = edit(w, "Claim code", "")
-		local cr = edit(w, "Replaces (optional)", "")
-		button(row(w), "Claim", function()
-			req("claim", {listing = cl:GetText(), code = cc:GetText(),
-				replaces = cr:GetText()}, function()
-				message = "Claimed."
-				home()
-			end)
-		end)
-		local l = list(w, 0.3)
-		for _, x in ipairs(me.listings or {}) do
-			l.text(s(x.name) .. " (" .. s(x.id) .. ", " .. s(x.host) .. ":" ..
-					s(x.port) .. "): " .. s(x.served) ..
-					(s(x.fleet) ~= "" and "; fleet " .. x.fleet ..
-					(s(x.pool) ~= "" and ", pool " .. x.pool or "") ..
-					(x.pool_mismatch and " (differs from its pool)" or "")
-					or ""))
-			if s(x.fleet) ~= "" then
-				l.button("Remove from the fleet", function()
-					req("fleet_remove_server", {listing = x.id}, home)
-				end)
-			end
-		end
-		for _, st in ipairs(me.statements or {}) do
-			l.text(when(st.ts) .. " " .. s(st.listing_name) .. ": " ..
-					s(st.action) .. " for " .. s(st.reason) .. ". " ..
-					s(st.text), YELLOW)
-			l.button("Appeal", function() appeal_page(st) end)
-		end
-		local function account_page(open_it)
-			return function()
-				page:Remove()
-				page = nil
-				open_it(home)
-			end
-		end
-		local buttons = {
-			{"Fleets", function() fleets_page(me) end},
-			{"Blocklists", function() blocklists_page(me) end},
-		}
-		if me.moderator then
-			table.insert(buttons, {"Queue", queue_page})
-			table.insert(buttons, {"Listings", function() listings_page("") end})
-			table.insert(buttons, {"Audit log", audit_page})
-			table.insert(buttons, {"Appeals", appeals_page})
-		end
-		if me.admin then
-			table.insert(buttons, {"Settings", settings_page})
-			table.insert(buttons, {"Accounts",
-					account_page(accounts.users_page)})
-		end
-		-- Password and two-step login ([STARPORT] 10a: recommended to
-		-- whoever moderates)
-		table.insert(buttons, {"My account",
-				account_page(accounts.account_page)})
-		-- Six to a row, which fits the window
-		local b
-		for i, x in ipairs(buttons) do
-			if (i - 1) % 6 == 0 then
-				b = row(w)
-			end
-			button(b, x[1], x[2])
+		draw_sidebar()
+		if draw then
+			draw()
 		end
 	end)
+end
+
+-- The page open drawn again, with "me" asked again first
+home = function()
+	refresh(pages[current])
+end
+
+overview_page = function()
+	req("overview", {}, function(ov)
+		local w = open("Overview", overview_page)
+		local n = me.notice
+		if type(n) == "table" and s(n.text) ~= "" then
+			text(w, "Admin notice: " .. n.text,
+					n.priority == "high" and YELLOW or nil)
+		end
+		-- The standing
+		text(w, s(me.starport) .. " account " .. s(me.name) ..
+				(me.suspended and ", suspended until " ..
+				when(me.suspended_until) or ", in good standing") ..
+				". Two-step login " .. (me.totp and "on" or "off") ..
+				". E-mail " .. (s(me.email_pending) ~= "" and
+				"not confirmed yet" or s(me.email) ~= "" and "confirmed" or
+				"not set") .. ".", GREY)
+		-- What waits: while it lasts, never as an event
+		local waiting = {}
+		local function wait(t, key, open_it)
+			waiting[#waiting + 1] = {t, open_it or function()
+				current = key
+				draw_sidebar()
+				pages[key]()
+			end}
+		end
+		for _, st in ipairs(me.statements or {}) do
+			if not st.appealed then
+				wait(s(st.listing_name) .. ": " .. s(st.action) ..
+						" -- a statement you may appeal", nil, function()
+					appeal_page(st)
+				end)
+			end
+		end
+		if (tonumber(me.blocklist_offers) or 0) > 0 then
+			wait(me.blocklist_offers .. " offer(s) to your blocklists",
+					"blocklists")
+		end
+		if s(me.email_pending) ~= "" then
+			wait("Your e-mail is not confirmed", "account")
+		end
+		for _, x in ipairs(me.listings or {}) do
+			if s(x.served) ~= "listed" or x.pool_mismatch then
+				wait(s(x.name) .. ": " .. (x.pool_mismatch and
+						"differs from its pool" or s(x.served)), "servers")
+			end
+		end
+		if me.moderator then
+			if (tonumber(me.queue) or 0) > 0 then
+				wait(me.queue .. " report group(s) in the queue", "queue")
+			end
+			if (tonumber(me.open_appeals) or 0) > 0 then
+				wait(me.open_appeals .. " open appeal(s)", "appeals")
+			end
+			if not me.totp then
+				-- [STARPORT] 10a: recommended to whoever moderates
+				wait("Turn two-step login on", "account")
+			end
+		end
+		if #waiting > 0 then
+			text(w, "Waiting for you")
+			for _, x in ipairs(waiting) do
+				button(row(w), x[1], x[2])
+			end
+		end
+		text(w, "Recent events")
+		local l = list(w, 0.4)
+		for _, e in ipairs(ov.events or {}) do
+			l.text(when(e.ts) .. "  " .. s(e.text),
+					(tonumber(e.ts) or 0) > (tonumber(ov.seen) or 0) and
+					YELLOW or nil)
+		end
+		if #(ov.events or {}) == 0 then
+			l.text("Nothing yet.", GREY)
+		end
+		if (tonumber(me.unseen_events) or 0) > 0 then
+			me.unseen_events = 0
+			draw_sidebar()
+		end
+	end)
+end
+
+-- The operator's servers ([STARPORT] 2a): claiming, the listings and
+-- their statements
+servers_page = function()
+	local w = open("Servers", servers_page)
+	text(w, "Claiming a listing: its id and claim code are in "..
+			"starport_claim.txt beside the server's starport.json.", GREY)
+	text(w, "A server with a new key: the listing it replaces too.",
+			GREY)
+	local cl = edit(w, "Listing id", "")
+	local cc = edit(w, "Claim code", "")
+	local cr = edit(w, "Replaces (optional)", "")
+	button(row(w), "Claim", function()
+		req("claim", {listing = cl:GetText(), code = cc:GetText(),
+			replaces = cr:GetText()}, function()
+			message = "Claimed."
+			home()
+		end)
+	end)
+	local l = list(w, 0.3)
+	for _, x in ipairs(me.listings or {}) do
+		l.text(s(x.name) .. " (" .. s(x.id) .. ", " .. s(x.host) .. ":" ..
+				s(x.port) .. "): " .. s(x.served) ..
+				(s(x.fleet) ~= "" and "; fleet " .. x.fleet ..
+				(s(x.pool) ~= "" and ", pool " .. x.pool or "") ..
+				(x.pool_mismatch and " (differs from its pool)" or "")
+				or ""))
+		if s(x.fleet) ~= "" then
+			l.button("Remove from the fleet", function()
+				req("fleet_remove_server", {listing = x.id}, home)
+			end)
+		end
+	end
+	for _, st in ipairs(me.statements or {}) do
+		l.text(when(st.ts) .. " " .. s(st.listing_name) .. ": " ..
+				s(st.action) .. " for " .. s(st.reason) .. ". " ..
+				s(st.text), YELLOW)
+		l.button(st.appealed and "Appeal again" or "Appeal", function()
+			appeal_page(st)
+		end)
+	end
+end
+
+-- The account: the contact e-mail ([STARPORT] 2a), the password and
+-- two-step login (builtin/accounts' pages, drawn in this window)
+account_page = function()
+	local w = open("Account", account_page)
+	if s(me.email) ~= "" then
+		text(w, "Contact e-mail (not shown to users): " .. me.email, GREY)
+	end
+	local email = edit(w, "Contact e-mail", s(me.email_pending) ~= "" and
+			me.email_pending or me.email)
+	button(row(w), "Set e-mail", function()
+		req("set_email", {email = email:GetText()}, function(how)
+			message = how == "sent" and "A code went to that address;"..
+					" enter it below." or "Set."
+			home()
+		end)
+	end)
+	if s(me.email_pending) ~= "" then
+		local code = edit(w, "Code from the mail", "")
+		button(row(w), "Confirm", function()
+			req("confirm_email", {code = code:GetText()}, function()
+				message = "Confirmed."
+				home()
+			end)
+		end)
+	end
+	local r = row(w)
+	button(r, "Change password...", function()
+		accounts.password_page(account_page)
+	end)
+	-- [STARPORT] 10a: recommended to whoever moderates
+	button(r, "Two-step login...", function()
+		accounts.totp_page(home)
+	end)
+	button(r, "Log out", accounts.logout)
 end
 
 -- An operator's fleets ([STARPORT] 2b): a server joins one by the line
@@ -393,7 +587,6 @@ fleets_page = function(me)
 			req("me", {}, fleets_page)
 		end)
 	end)
-	button(r, "Back", home)
 end
 
 -- 10d: blocklists, public within the Starport. A server publishes its
@@ -455,13 +648,12 @@ blocklists_page = function(me)
 				req("me", {}, blocklists_page)
 			end)
 		end)
-		button(r, "Back", home)
 	end)
 end
 
 appeal_page = function(st)
 	local w = open("Appeal: " .. s(st.listing_name) .. ", " .. s(st.action),
-			function() appeal_page(st) end)
+			function() appeal_page(st) end, home)
 	text(w, s(st.text))
 	local why = edit(w, "Why", "")
 	local r = row(w)
@@ -471,7 +663,6 @@ appeal_page = function(st)
 			home()
 		end)
 	end)
-	button(r, "Back", home)
 end
 
 queue_page = function()
@@ -490,7 +681,6 @@ queue_page = function()
 				l.text(g.note, GREY)
 			end
 		end
-		button(row(w), "Back", home)
 	end)
 end
 
@@ -498,7 +688,7 @@ group_page = function(gid)
 	req("group", {group = gid}, function(r)
 		local g, x = r.group, r.listing or {}
 		local w = open("Reports of " .. s(g.reason) .. ": " .. s(x.name),
-				function() group_page(gid) end)
+				function() group_page(gid) end, queue_page)
 		text(w, s(x.id) .. " " .. s(x.host) .. ":" .. s(x.port) .. ", " ..
 				categories(x) .. "; " .. s(x.served) .. ". " ..
 				s(x.description), GREY)
@@ -559,7 +749,6 @@ group_page = function(gid)
 		button(b, "Dismiss", function()
 			req("decide", {group = gid, decision = "dismiss"}, queue_page)
 		end)
-		button(b, "Back", queue_page)
 	end)
 end
 
@@ -575,12 +764,12 @@ listings_page = function(search)
 			l.button(s(x.name) .. " (" .. s(x.owner) .. "): " .. s(x.served),
 					function() listing_page(x) end)
 		end
-		button(row(w), "Back", home)
 	end)
 end
 
 listing_page = function(x)
-	local w = open(s(x.name), function() listing_page(x) end)
+	local w = open(s(x.name), function() listing_page(x) end,
+			function() listings_page("") end)
 	text(w, s(x.id) .. " " .. s(x.host) .. ":" .. s(x.port) .. ", app " ..
 			s(x.app) .. ", operator " .. s(x.owner) .. "\n" .. categories(x) ..
 			"\n" .. s(x.served) .. "\n" .. s(x.description), GREY)
@@ -608,7 +797,6 @@ listing_page = function(x)
 			listing_page(nx)
 		end)
 	end)
-	button(row(w), "Back", function() listings_page("") end)
 end
 
 audit_page = function()
@@ -621,7 +809,6 @@ audit_page = function()
 					s(a.reason) .. " by " .. (s(a.by) ~= "" and a.by or
 					"Starport") .. ": " .. s(a.text))
 		end
-		button(row(w), "Back", home)
 	end)
 end
 
@@ -646,7 +833,6 @@ appeals_page = function()
 				end)
 			end
 		end
-		button(row(w), "Back", home)
 	end)
 end
 
@@ -685,7 +871,6 @@ settings_page = function()
 				end)
 			end)
 		end
-		button(row(w), "Back", home)
 	end)
 end
 
@@ -701,8 +886,27 @@ accounts.on_joined = function()
 			end
 		end
 	end
-	home()
+	-- builtin/accounts' pages (the password, two-step login, Accounts)
+	-- in this window
+	accounts.page_parent = function()
+		return page_element()
+	end
+	refresh(overview_page)
 end
+
+pages = {
+	overview = overview_page,
+	servers = servers_page,
+	fleets = function() fleets_page(me) end,
+	blocklists = function() blocklists_page(me) end,
+	account = account_page,
+	queue = queue_page,
+	listings = function() listings_page("") end,
+	appeals = appeals_page,
+	audit = audit_page,
+	settings = settings_page,
+	accounts = function() accounts.users_page(home) end,
+}
 
 accounts.start({title = "Starport", env = "BUILDAT_SP"})
 -- vim: set noet ts=4 sw=4:

@@ -22,6 +22,9 @@
 #      and keep the ID login, found by address; a new ID waits for
 #      approval; a Starport removed from the file withdraws the listing at
 #      once. (5 has the setup code make an ID the server's first admin.)
+#   8. The Overview ([STARPORT_UI]): the admin sets a high notice, makes
+#      "mod" a moderator and hides the first listing; mod's Overview has
+#      the notice and the hide, unseen, and the next one has it seen.
 #
 #   KEEP_TMP=1 apps/starport/check.sh
 set -u
@@ -287,4 +290,35 @@ api "localhost:$SP/api/list" | grep -q '"Check house"' &&
 grep -q "Withdrawn from" "$tmp/an.log" ||
 	fail "no withdrawal in an.log"
 echo "ok: a Starport removed from the file withdraws the listing at once"
+
+# 8
+BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
+BUILDAT_SP_ADMIN="add mod modpass1234" \
+BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"moderators\":[\"mod\"],\"notice\":{\"text\":\"Check notice\",\"priority\":\"high\"}}}
+{\"cmd\":\"act\",\"listing\":\"$id\",\"action\":\"hide\",\"reason\":\"other\",\"text\":\"for the check\",\"days\":0}" \
+	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl6.log" 2>&1
+[ "$(grep -c 'sp: {"id":[0-9]*,"ok":true' "$tmp/cl6.log")" -ge 2 ] ||
+	fail "the notice, the moderator or the hide (cl6.log)"
+BUILDAT_SP_NAME=mod BUILDAT_SP_PASSWORD=modpass1234 \
+BUILDAT_SP_REQS='{"cmd":"me"}
+{"cmd":"overview"}
+{"cmd":"overview"}' \
+	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl7.log" 2>&1
+python3 - "$tmp/cl7.log" <<'PY' || fail "mod's Overview (cl7.log)"
+import json, re, sys
+res = {}
+for line in open(sys.argv[1], errors="replace"):
+    m = re.search(r'sp: (\{.*\})\s*$', line)
+    if m:
+        r = json.loads(m.group(1))
+        res[r["id"]] = r
+me, first, second = res[1]["result"], res[2]["result"], res[3]["result"]
+assert me["moderator"] and me["notice"] == {"text": "Check notice", "priority": "high"}, me
+hide = [e for e in first["events"] if "admin hide" in e["text"]]
+assert hide and hide[0]["ts"] > first["seen"], first
+assert second["seen"] >= hide[0]["ts"], second
+PY
+echo "ok: the Overview: the notice, another's hide unseen, then seen"
 echo PASS

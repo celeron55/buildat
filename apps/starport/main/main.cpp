@@ -37,6 +37,7 @@
 #include <cmath>
 #include <ctime>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <set>
@@ -287,6 +288,12 @@ static json::Value default_settings()
 	s.set("thresholds", th);
 	// How long an address is kept ([STARPORT] 8)
 	s.set("retention_days", (int64_t)7);
+	// A line at the top of everyone's Overview ([STARPORT_UI]); "high"
+	// draws it in the highlight colour, an empty text not at all
+	json::Value notice = json::object();
+	notice.set("text", "");
+	notice.set("priority", "low");
+	s.set("notice", notice);
 	// Who moderates, and whose reports go first ([STARPORT] 6)
 	// Whether an operator's e-mail address is confirmed by a code mailed
 	// to it ([STARPORT] 2a); off for a test instance, the address then
@@ -360,6 +367,12 @@ struct Module: public interface::Module
 	std::deque<VerifyResult> m_vresults;
 	std::thread m_vthread;
 	bool m_vstop = false;
+
+	// Mail that failed to send, from mail()'s threads, which may outlive
+	// the module: turned into the admins' events on a tick
+	struct MailFailures { std::mutex m; sv_<ss_> lines; };
+	std::shared_ptr<MailFailures> m_mail_failures =
+			std::make_shared<MailFailures>();
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -682,9 +695,12 @@ struct Module: public interface::Module
 			return; // its operator took it out; the config still says it
 		if(f.is_object() && same(jstr(f, "code"), code) &&
 				!banned("account", jstr(f, "owner"))){
-			if(jstr(l, "fleet") != fid)
+			if(jstr(l, "fleet") != fid){
 				audit("", jstr(l, "id"), "fleet", "", "joined fleet "+fid,
 						true);
+				event({jstr(f, "owner")}, "", jstr(l, "name")+" joined your "
+						"fleet "+jstr(f, "name"));
+			}
 			l.set("fleet", fid);
 			l.set("pool", pool);
 			l.set("owner", jstr(f, "owner"));
@@ -692,6 +708,9 @@ struct Module: public interface::Module
 		}
 		// One the fleet's new code turned away just leaves; one that never
 		// was in it is looked at, once
+		if(jstr(l, "fleet") == fid && f.is_object())
+			event({jstr(f, "owner")}, "", jstr(l, "name")+" left your fleet "+
+					jstr(f, "name")+" (its code is no longer the fleet's)");
 		if(jstr(l, "fleet") != fid && jstr(l, "fleet_flagged") != fid){
 			l.set("fleet_flagged", fid);
 			const ss_ gid = jstr(l, "id")+"|impersonation";
@@ -1294,6 +1313,62 @@ struct Module: public interface::Module
 		snprintf(key, sizeof key, "%012lld-%s", (long long)t,
 				random_hex(3).c_str());
 		put("audit", key, a);
+		// The moderators see one another's decisions and the automatic
+		// ones; an operator's own claims and fleets are not theirs
+		static const char *const MODERATION[] = {"relabel", "hide", "delist",
+				"csam", "ban", "restore", "dismiss", "suspend"};
+		for(const char *m : MODERATION)
+			if(action == m){
+				const json::Value l = load("listings", listing);
+				event({"@moderators"}, by, (by.empty() ? ss_("Starport") : by)+
+						" "+action+(automatic ? " (automatic) " : " ")+
+						(l.is_object() ? jstr(l, "name")+" ("+listing+")" :
+						listing)+(reason.empty() ? "" : ", "+reason)+
+						(text.empty() ? "" : ": "+text));
+				break;
+			}
+	}
+
+	// An event on the Overview ([STARPORT_UI]): for the accounts and roles
+	// ("@moderators", "@admins") in `to`; whoever did it (`by`) does not
+	// see their own. Kept 90 days (daily()).
+	void event(const sv_<ss_> &to, const ss_ &by, const ss_ &text)
+	{
+		json::Value e = json::object();
+		const int64_t t = now_s();
+		e.set("ts", t);
+		json::Value who = json::array();
+		for(const ss_ &x : to)
+			who.append(x);
+		e.set("to", who);
+		e.set("by", by);
+		e.set("text", text);
+		char key[40];
+		snprintf(key, sizeof key, "%012lld-%s", (long long)t,
+				random_hex(3).c_str());
+		put("events", key, e);
+	}
+
+	// The latest events for `name`, newest first
+	json::Value events_for(const ss_ &name, bool mod, bool admin, size_t max)
+	{
+		json::Value out = json::array();
+		sv_<ss_> keys = store("events")->list("");
+		for(size_t i = keys.size(); i > 0 && out.size() < max; i--){
+			const json::Value e = load("events", keys[i - 1]);
+			if(jstr(e, "by") == name)
+				continue;
+			const json::Value &to = e.get("to");
+			for(unsigned j = 0; to.is_array() && j < to.size(); j++){
+				const ss_ x = to.at(j).is_string() ? to.at(j).as_string() : "";
+				if(x == name || (x == "@moderators" && mod) ||
+						(x == "@admins" && admin)){
+					out.append(e);
+					break;
+				}
+			}
+		}
+		return out;
 	}
 
 	// To the operator who claimed it: what was done, why, how to appeal
@@ -1315,6 +1390,9 @@ struct Module: public interface::Module
 		s.set("appeal", "Appeal from your account on this Starport; another "
 				"moderator than the one who acted decides.");
 		put("statements", id, s);
+		if(!owner.empty())
+			event({owner}, by, jstr(l, "name")+": "+action+", for "+reason+
+					(text.empty() ? "" : ". "+text));
 		const json::Value o = owner.empty() ? json::Value() :
 				load("operators", owner);
 		if(!jstr(o, "email").empty() && can_mail()){
@@ -1887,6 +1965,13 @@ struct Module: public interface::Module
 		if(!m_save)
 			return;
 		apply_verify_results();
+		sv_<ss_> failed;
+		{
+			std::lock_guard<std::mutex> lock(m_mail_failures->m);
+			failed.swap(m_mail_failures->lines);
+		}
+		for(const ss_ &line : failed)
+			event({"@admins"}, "", line);
 		const int64_t t = now_s();
 		if(t >= m_next_reverify){
 			m_next_reverify = t + 6 * 3600;
@@ -1916,6 +2001,12 @@ struct Module: public interface::Module
 					cleared++;
 				}
 			}
+		});
+		// simplified: events are dropped after 90 days, seen or not
+		store("events")->batch([&](){
+			for(const ss_ &k : store("events")->list(""))
+				if(t - jint(load("events", k), "ts") > 90 * 86400)
+					store("events")->remove(k);
 		});
 		// Listings not heard from in 30 days go, unless moderation has a
 		// record of them
@@ -2063,6 +2154,17 @@ struct Module: public interface::Module
 			return cmd_blocklist(name, cmd, q);
 		if(cmd == "appeal")
 			return cmd_appeal(name, q);
+		if(cmd == "overview"){
+			// The events, and the time they were last seen, which moves on
+			json::Value r = json::object();
+			const json::Value seen = load("seen", name);
+			r.set("seen", jint(seen, "ts"));
+			r.set("events", events_for(name, mod, admin, 100));
+			json::Value now = json::object();
+			now.set("ts", now_s());
+			put("seen", name, now);
+			return r;
+		}
 		if(!mod)
 			throw Exception("for moderators");
 		if(cmd == "queue")
@@ -2091,7 +2193,7 @@ struct Module: public interface::Module
 		if(cmd == "settings")
 			return m_settings;
 		if(cmd == "set_settings")
-			return cmd_set_settings(q);
+			return cmd_set_settings(name, q);
 		if(cmd == "trust_reporter")
 			return cmd_trust_reporter(q);
 		throw Exception("no such command: "+cmd);
@@ -2130,6 +2232,51 @@ struct Module: public interface::Module
 		}
 		r.set("fleets", fleets);
 		r.set("starport", jstr(m_settings, "name"));
+		// The Overview's ([STARPORT_UI]): the notice, the standing, what
+		// waits, and how many events are unseen
+		r.set("notice", setting("notice"));
+		const json::Value id = load("ids", name);
+		r.set("suspended_until", jint(id, "suspended_until"));
+		r.set("suspended", jint(id, "suspended_until") > now_s());
+		bool totp = false;
+		accounts::access(m_server, [&](accounts::Interface *a){
+			totp = a->totp_on(name);
+		});
+		r.set("totp", totp);
+		std::set<ss_> appealed;
+		int64_t open_appeals = 0;
+		for(const ss_ &aid : store("appeals")->list("")){
+			const json::Value a = load("appeals", aid);
+			if(jstr(a, "by") == name)
+				appealed.insert(jstr(a, "statement"));
+			open_appeals += jstr(a, "state") == "open";
+		}
+		for(unsigned i = 0; i < st.size(); i++){
+			json::Value x = st.at(i);
+			x.set("appealed", appealed.count(jstr(x, "id")) > 0);
+			st.set_at(i, x);
+		}
+		r.set("statements", st);
+		int64_t offers = 0;
+		for(const ss_ &bid : store("blocklists")->list("")){
+			const json::Value b = load("blocklists", bid);
+			if(jstr(b, "owner") == name && b.get("offers").is_array())
+				offers += b.get("offers").size();
+		}
+		r.set("blocklist_offers", offers);
+		if(mod){
+			int64_t groups = 0;
+			for(const ss_ &gid : store("groups")->list(""))
+				groups += jstr(load("groups", gid), "state") == "open";
+			r.set("queue", groups);
+			r.set("open_appeals", open_appeals);
+		}
+		const int64_t seen = jint(load("seen", name), "ts");
+		const json::Value ev = events_for(name, mod, admin, 100);
+		int64_t unseen = 0;
+		for(unsigned i = 0; i < ev.size(); i++)
+			unseen += jint(ev.at(i), "ts") > seen;
+		r.set("unseen_events", unseen);
 		return r;
 	}
 
@@ -2216,12 +2363,16 @@ struct Module: public interface::Module
 				"\r\n"+body;
 		const ss_ url = jstr(smtp, "url"), user = jstr(smtp, "user"),
 				password = jstr(smtp, "password"), from = jstr(smtp, "from");
+		std::shared_ptr<MailFailures> failures = m_mail_failures;
 		std::thread([=](){
 			try {
 				interface::send_mail(url, user, password, from, to, message);
 				log_i(MODULE, "Mailed %s: %s", cs(account), cs(subj));
 			} catch(std::exception &e){
 				log_w(MODULE, "Mail to %s: %s", cs(account), e.what());
+				std::lock_guard<std::mutex> lock(failures->m);
+				failures->lines.push_back("Mail to "+account+" failed: "+
+						e.what());
 			}
 		}).detach();
 	}
@@ -2455,6 +2606,15 @@ struct Module: public interface::Module
 			if(!own_list)
 				throw Exception("not your blocklist");
 			list.set("offers", without(list.get("offers"), scope));
+			const size_t colon = scope.find(':');
+			const ss_ kind = scope.substr(0, colon), sid = colon ==
+					ss_::npos ? "" : scope.substr(colon + 1);
+			const ss_ offerer = jstr(load(kind == "fleet" ? "fleets" :
+					"listings", sid), "owner");
+			if(!offerer.empty())
+				event({offerer}, name, "Your offer of "+scope+" to the "
+						"blocklist "+jstr(list, "name")+" was "+
+						(cmd == "blocklist_accept" ? "accepted" : "refused"));
 			if(cmd == "blocklist_accept")
 				list.set("publishers", with(list.get("publishers"), scope));
 			else
@@ -2578,6 +2738,9 @@ struct Module: public interface::Module
 		a.set("ts", now_s());
 		a.set("state", "open");
 		put("appeals", id, a);
+		if(!jstr(s, "by").empty())
+			event({jstr(s, "by")}, name, name+" appealed your decision on "+
+					jstr(s, "listing_name")+" ("+jstr(s, "action")+"): "+text);
 		return json::Value(id);
 	}
 
@@ -2925,6 +3088,14 @@ struct Module: public interface::Module
 		a.set("decided_by", by);
 		a.set("answer", jstr(q, "text"));
 		put("appeals", jstr(a, "id"), a);
+		const json::Value st = load("statements", jstr(a, "statement"));
+		const ss_ what = jstr(st, "listing_name")+" ("+jstr(st, "action")+
+				"): "+(outcome == "reverse" ? "reversed" : "kept")+
+				(jstr(q, "text").empty() ? "" : ". "+jstr(q, "text"));
+		event({jstr(a, "by")}, by, "Your appeal on "+what);
+		if(!jstr(a, "acted_by").empty())
+			event({jstr(a, "acted_by")}, by, "The appeal of your decision on "+
+					what+", by "+by);
 		return json::Value(true);
 	}
 
@@ -2949,7 +3120,7 @@ struct Module: public interface::Module
 		return json::Value(true);
 	}
 
-	json::Value cmd_set_settings(const json::Value &q)
+	json::Value cmd_set_settings(const ss_ &by, const json::Value &q)
 	{
 		const json::Value &s = q.get("settings");
 		if(!s.is_object())
@@ -2960,6 +3131,8 @@ struct Module: public interface::Module
 			if(default_settings().get(k).is_undefined())
 				throw Exception("no such setting: "+k);
 			next.set(k, it.value());
+			event({"@admins"}, by, by+" set "+k+" to "+
+					it.value().stringify());
 		}
 		m_settings = next;
 		put("settings", "settings", m_settings);

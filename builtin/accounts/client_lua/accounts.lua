@@ -577,7 +577,10 @@ end
 local function open_page(kind, title, back, width, help)
 	M.close_page()
 	page_kind, page_back = kind, back
-	M.page = page_window(width or 560)
+	-- An app with a window of its own for its pages (Starport's) sets
+	-- M.page_parent(width) to give what a page is drawn into instead
+	M.page = M.page_parent and M.page_parent(width or 560) or
+			page_window(width or 560)
 	if help then
 		local r = M.page:CreateChild("UIElement")
 		r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
