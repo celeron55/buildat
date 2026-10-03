@@ -2038,6 +2038,8 @@ struct Module: public interface::Module, public luanti::Interface
 
 	void buffer_node_write(int32_t x, int32_t y, int32_t z, uint32_t word)
 	{
+		if(!coord_ok(x) || !coord_ok(y) || !coord_ok(z))
+			return;
 		// A body's voxel ([BODY_INTERACT]): written straight to its owner,
 		// which is not the map and has no buffer to land in
 		if(y >= REGION_Y){
@@ -2080,6 +2082,9 @@ struct Module: public interface::Module, public luanti::Interface
 	// box reads it with read_region() below.
 	uint32_t read_node(int32_t x, int32_t y, int32_t z)
 	{
+		// Ignore, past anything that can be there
+		if(!coord_ok(x) || !coord_ok(y) || !coord_ok(z))
+			return 0;
 		// A buffered write answers with the word that went in. The read
 		// used to flush the buffer first so that a mod placing a lamp and
 		// asking what the room is lit by saw the flood -- but every flush
@@ -2160,6 +2165,27 @@ struct Module: public interface::Module, public luanti::Interface
 	// mistake, and quietly building a table of that many numbers is not the
 	// way to tell it so.
 	static const size_t MAX_REGION_VOXELS = 4096000;
+	// How far from the origin a node can be, the bodies' band at REGION_Y
+	// included. Past it nothing is read or written: a coordinate from a
+	// mod's arithmetic on what a client sent reached 2^30, where a box's
+	// "y <= y1" loop never ended and wrote past its buffer, and past 2^21
+	// a section's 16-bit index wraps ([SECURITY_RUN_1], util/fuzz).
+	static const int32_t COORD_LIMIT = 2000000;
+	static bool coord_ok(int32_t v)
+	{
+		return v >= -COORD_LIMIT && v <= COORD_LIMIT;
+	}
+	// A box: a node's 16^3 block or a mod's area round one, so a little
+	// past COORD_LIMIT
+	static bool box_ok(int32_t x0, int32_t y0, int32_t z0,
+			int32_t x1, int32_t y1, int32_t z1)
+	{
+		const int32_t L = COORD_LIMIT + 64;
+		for(int32_t v : {x0, y0, z0, x1, y1, z1})
+			if(v < -L || v > L)
+				return false;
+		return true;
+	}
 
 	// A box of voxel words in one access(), x fastest and then y and then z.
 	//
@@ -2171,6 +2197,11 @@ struct Module: public interface::Module, public luanti::Interface
 	void read_region(int32_t x0, int32_t y0, int32_t z0,
 			int32_t x1, int32_t y1, int32_t z1, sv_<uint32_t> &out)
 	{
+		// See box_ok(): every caller bounds its box first
+		if(!box_ok(x0, y0, z0, x1, y1, z1) || x1 < x0 || y1 < y0 || z1 < z0){
+			out.clear();
+			return;
+		}
 		// What core.set_node has written and not yet flushed is part of the
 		// map as far as a mod is concerned -- Luanti's semantics are that a
 		// write is visible immediately. A small box has the buffer laid
@@ -2218,6 +2249,13 @@ struct Module: public interface::Module, public luanti::Interface
 	void read_region_uncached(int32_t x0, int32_t y0, int32_t z0,
 			int32_t x1, int32_t y1, int32_t z1, sv_<uint32_t> &out)
 	{
+		// The callers bound it (box_ok() at the Lua entries, read_node()
+		// for its block); a box past it here is a caller's bug, and an
+		// empty answer is what a short read gets
+		if(!box_ok(x0, y0, z0, x1, y1, z1) || x1 < x0 || y1 < y0 || z1 < z0){
+			out.clear();
+			return;
+		}
 		size_t w = (size_t)(x1 - x0 + 1);
 		size_t h = (size_t)(y1 - y0 + 1);
 		size_t d = (size_t)(z1 - z0 + 1);
@@ -5940,7 +5978,8 @@ struct Module: public interface::Module, public luanti::Interface
 		int32_t p[6];
 		for(int i = 0; i < 6; i++)
 			p[i] = luaL_checkinteger(L, i + 1);
-		if(p[3] < p[0] || p[4] < p[1] || p[5] < p[2]){
+		if(p[3] < p[0] || p[4] < p[1] || p[5] < p[2] ||
+				!box_ok(p[0], p[1], p[2], p[3], p[4], p[5])){
 			for(int i = 0; i < 3; i++)
 				lua_newtable(L);
 			return 3;
@@ -5988,7 +6027,8 @@ struct Module: public interface::Module, public luanti::Interface
 		luaL_checktype(L, 7, LUA_TTABLE);
 		const bool has_p1 = !lua_isnoneornil(L, 8);
 		const bool has_p2 = !lua_isnoneornil(L, 9);
-		if(p[3] < p[0] || p[4] < p[1] || p[5] < p[2])
+		if(p[3] < p[0] || p[4] < p[1] || p[5] < p[2] ||
+				!box_ok(p[0], p[1], p[2], p[3], p[4], p[5]))
 			return 0;
 		const double volume = (double)(p[3] - p[0] + 1) *
 				(double)(p[4] - p[1] + 1) * (double)(p[5] - p[2] + 1);
@@ -7485,7 +7525,8 @@ struct Module: public interface::Module, public luanti::Interface
 			lua_newtable(L);
 			lua_rawseti(L, -2, (int)si);
 		}
-		if(n_sets == 0 || x1 < x0 || y1 < y0 || z1 < z0)
+		if(n_sets == 0 || x1 < x0 || y1 < y0 || z1 < z0 ||
+				!box_ok(x0, y0, z0, x1, y1, z1))
 			return 1;
 		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
 				(double)(z1 - z0 + 1);
@@ -7564,7 +7605,8 @@ struct Module: public interface::Module, public luanti::Interface
 		luaL_checktype(L, 7, LUA_TTABLE);
 		luaL_checktype(L, 8, LUA_TTABLE);
 		lua_newtable(L);
-		if(x1 - x0 < 2 || z1 - z0 < 2 || y1 < y0)
+		if(!box_ok(x0, y0, z0, x1, y1, z1) || x1 - x0 < 2 || z1 - z0 < 2 ||
+				y1 < y0)
 			return 1;
 		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
 				(double)(z1 - z0 + 1);
@@ -7657,7 +7699,7 @@ struct Module: public interface::Module, public luanti::Interface
 		luaL_checktype(L, 7, LUA_TTABLE);
 		lua_newtable(L); // positions
 		lua_newtable(L); // ids at each
-		if(x1 < x0 || y1 < y0 || z1 < z0)
+		if(x1 < x0 || y1 < y0 || z1 < z0 || !box_ok(x0, y0, z0, x1, y1, z1))
 			return 2;
 		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
 				(double)(z1 - z0 + 1);
@@ -7715,7 +7757,7 @@ struct Module: public interface::Module, public luanti::Interface
 		int32_t x1 = luaL_checkinteger(L, 4);
 		int32_t y1 = luaL_checkinteger(L, 5);
 		int32_t z1 = luaL_checkinteger(L, 6);
-		if(x1 < x0 || y1 < y0 || z1 < z0){
+		if(x1 < x0 || y1 < y0 || z1 < z0 || !box_ok(x0, y0, z0, x1, y1, z1)){
 			lua_newtable(L);
 			return 1;
 		}
