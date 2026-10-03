@@ -1,7 +1,7 @@
 ----------------------------------------------------------------------------
 -- LuaJIT profiler.
 --
--- Copyright (C) 2005-2016 Mike Pall. All rights reserved.
+-- Copyright (C) 2005-2026 Mike Pall. All rights reserved.
 -- Released under the MIT license. See Copyright Notice in luajit.h
 ----------------------------------------------------------------------------
 --
@@ -41,7 +41,6 @@
 
 -- Cache some library functions and objects.
 local jit = require("jit")
-assert(jit.version_num == 20100, "LuaJIT core/library version mismatch")
 local profile = require("jit.profile")
 local vmdef = require("jit.vmdef")
 local math = math
@@ -120,8 +119,8 @@ end
 -- Show top N list.
 local function prof_top(count1, count2, samples, indent)
   local t, n = {}, 0
-  for k, v in pairs(count1) do
-    n = n + 1
+  for k in pairs(count1) do
+    n += 1
     t[n] = k
   end
   sort(t, function(a, b) return count1[a] > count1[b] end)
@@ -156,6 +155,7 @@ local function prof_annotate(count1, samples)
     ms = math.max(ms, v)
     if pct >= prof_min then
       local file, line = k:match("^(.*):(%d+)$")
+      if not file then file = k; line = 0 end
       local fl = files[file]
       if not fl then fl = {}; files[file] = fl; files[#files+1] = file end
       line = tonumber(line)
@@ -184,7 +184,7 @@ local function prof_annotate(count1, samples)
     out:write(format("\n====== %s ======\n", file))
     local fl = files[file]
     local n, show = 1, false
-    if ann ~= 0 then
+    if ann != 0 then
       for i=1,ann do
 	if fl[i] then show = true; out:write("@@ 1 @@\n"); break end
       end
@@ -195,7 +195,7 @@ local function prof_annotate(count1, samples)
 	break
       end
       local v = fl[n]
-      if ann ~= 0 then
+      if ann != 0 then
 	local v2 = fl[n+ann]
 	if show then
 	  if v2 then show = n+ann elseif v then show = n
@@ -212,7 +212,7 @@ local function prof_annotate(count1, samples)
 	out:write(format(fmtn, line))
       end
     ::next::
-      n = n + 1
+      n += 1
     end
     fp:close()
   end
@@ -226,10 +226,8 @@ local function prof_finish()
     profile.stop()
     local samples = prof_samples
     if samples == 0 then
-      if prof_raw ~= true then out:write("[No samples collected]\n") end
-      return
-    end
-    if prof_ann then
+      if prof_raw != true then out:write("[No samples collected]\n") end
+    elseif prof_ann then
       prof_annotate(prof_count1, samples)
     else
       prof_top(prof_count1, prof_count2, samples, "")
@@ -237,6 +235,7 @@ local function prof_finish()
     prof_count1 = nil
     prof_count2 = nil
     prof_ud = nil
+    if out != stdout then out:close() end
   end
 end
 
@@ -271,7 +270,7 @@ local function prof_start(mode)
     prof_fmt = "pl"
     prof_split = 0
     prof_depth = 1
-  elseif m.G and scope ~= "" then
+  elseif m.G and scope != "" then
     prof_fmt = flags..scope.."Z;"
     prof_depth = -100
     prof_raw = true

@@ -80,6 +80,21 @@ endif ()
 if (LUAJIT_ENABLE_GC64)
     add_definitions (-DLUAJIT_ENABLE_GC64)
 endif ()
+# buildat: rolling v2.1's lj_err.c refuses an x64 build without external
+# unwinding; the Makefile sets this when the toolchain emits unwind tables,
+# which GCC and Clang on Linux and macOS always do. Windows has SEH instead.
+if (NOT WIN32)
+    add_definitions (-DLUAJIT_UNWIND_EXTERNAL)
+endif ()
+# buildat: the VM's C is optimised in every build type -- Urho3D's Debug has
+# no -O at all, and rolling v2.1's string and buffer code assumes one
+if (NOT MSVC)
+    add_compile_options (-O2)
+endif ()
+# buildat: rolling v2.1 turns GC64 on by default for x64, and it stays on:
+# measured on VoxeLibre's worldgen the two modes are the same, and the
+# non-GC64 VM wants its memory in the low 2 GB, which the Windows client
+# under Wine could not give it (a fault on the first Lua call, 2026-09-19).
 
 # Permanently disable the FFI extension to reduce the size of the LuaJIT
 # executable. But please consider that the FFI library is compiled-in,
@@ -284,6 +299,12 @@ if (NOT LUAJIT_CACHE STREQUAL "${URHO3D_64BIT}-${LUAJIT_DISABLE_FFI}-${LUAJIT_DI
     if (HASJIT)
         set (DASM_AFLAGS ${DASM_AFLAGS} -D JIT)
     endif ()
+    # buildat: rolling v2.1 is GC64 on x64 by default and the VM assembly
+    # has to be generated for it, as src/Makefile does
+    find_string ("LJ_GC64 (1)" GC64)
+    if (GC64)
+        set (DASM_AFLAGS ${DASM_AFLAGS} -D GC64)
+    endif ()
     find_string ("LJ_HASFFI (1)" HASFFI)
     if (HASFFI)
         set (DASM_AFLAGS ${DASM_AFLAGS} -D FFI)
@@ -442,8 +463,12 @@ else ()
         set (LJVM_MODE elfasm)
     endif ()
 endif ()
+# buildat: the tree is LuaJIT's rolling v2.1 ([LUAJIT]); lib_buffer.c,
+# lj_assert.c, lj_prng.c and lj_serialize.c are what it added over the
+# 2.1.0-beta2 Urho3D shipped. The lists are src/Makefile's LJLIB_O and LJCORE_O.
 set (LJLIB_C src/lib_base.c src/lib_math.c src/lib_bit.c src/lib_string.c src/lib_table.c
-    src/lib_io.c src/lib_os.c src/lib_package.c src/lib_debug.c src/lib_jit.c src/lib_ffi.c)
+    src/lib_io.c src/lib_os.c src/lib_package.c src/lib_debug.c src/lib_jit.c src/lib_ffi.c
+    src/lib_buffer.c)
 generate_source (${LJVM_BOUT} ${LJVM_MODE})
 foreach (MODE bcdef ffdef libdef recdef)
     generate_source (lj_${MODE}.h ${MODE} ${LJLIB_C})
@@ -455,10 +480,10 @@ generate_source (lj_folddef.h folddef src/lj_opt_fold.c)
 if (URHO3D_LUAJIT_AMALG)
     set (LJCORE_C src/ljamalg.c)
 else ()
-    set (LJCORE_C src/lj_gc.c src/lj_err.c src/lj_char.c src/lj_bc.c src/lj_obj.c src/lj_buf.c
+    set (LJCORE_C src/lj_assert.c src/lj_gc.c src/lj_err.c src/lj_char.c src/lj_bc.c src/lj_obj.c src/lj_buf.c
         src/lj_str.c src/lj_tab.c src/lj_func.c src/lj_udata.c src/lj_meta.c src/lj_debug.c
-        src/lj_state.c src/lj_dispatch.c src/lj_vmevent.c src/lj_vmmath.c src/lj_strscan.c
-        src/lj_strfmt.c src/lj_strfmt_num.c src/lj_api.c src/lj_profile.c
+        src/lj_prng.c src/lj_state.c src/lj_dispatch.c src/lj_vmevent.c src/lj_vmmath.c src/lj_strscan.c
+        src/lj_strfmt.c src/lj_strfmt_num.c src/lj_serialize.c src/lj_api.c src/lj_profile.c
         src/lj_lex.c src/lj_parse.c src/lj_bcread.c src/lj_bcwrite.c src/lj_load.c
         src/lj_ir.c src/lj_opt_mem.c src/lj_opt_fold.c src/lj_opt_narrow.c
         src/lj_opt_dce.c src/lj_opt_loop.c src/lj_opt_split.c src/lj_opt_sink.c
