@@ -31,6 +31,50 @@ local function env(name)
 	end
 	return buildat.get_env(name) or ""
 end
+-- **The light, as an options round** ([LAUNCH_WORLD] stage 3, the light;
+-- local/options_for_LOBBY_light/): one knob, BUILDAT_LAUNCH_LIGHT=<name>,
+-- each a whole look rather than a slider, so the user's pick is a
+-- one-word default. "tomb" is the room as stage 2 left it and stays the
+-- default until the pick.
+--   cave     a floor of light on every voxel, the shader's cCaveAmbient
+--            (nought in the tomb: the room's vertex colours carry none)
+--   zone     the zone's ambient, which lights the spheres and the desk
+--   orb, sky the orbs' and the opening's light, times the preset's
+--   fill     the cool fill's, times the preset's
+--   fov      the overhead spot's cone; spot_shadow whether it casts
+--   shadows  whether anything casts (the renderer's switch)
+--   opening  the opening's emitter, times its own white
+--   far      a bright disc high over the formation, for the eye to rest
+--            on, and its light; nil for none
+LIGHT_LOOKS = {
+	tomb = {cave = {0, 0, 0}, zone = {0.01, 0.01, 0.015}, orb = 1.0,
+		sky = 1.0, fill = 1.0, fov = 140, spot_shadow = true,
+		shadows = true, opening = 1.0},
+	-- Nothing pure black, the contrast down: a cool floor every face
+	-- gets, the spheres the same, the key lights a little lower so the
+	-- room does not just get brighter
+	ambient = {cave = {0.080, 0.085, 0.105}, zone = {0.16, 0.17, 0.21},
+		orb = 0.8, sky = 0.75, fill = 0.6, fov = 140, spot_shadow = true,
+		shadows = true, opening = 1.0},
+	-- The opening as a soft skylight: a wide cone that casts nothing,
+	-- brighter, its square bright overhead, and a little floor of light
+	skylight = {cave = {0.012, 0.014, 0.020}, zone = {0.06, 0.07, 0.09},
+		orb = 0.8, sky = 1.6, fill = 0.4, fov = 170, spot_shadow = false,
+		shadows = true, opening = 1.6},
+	-- Low room light and one bright thing far up, over the formation
+	far = {cave = {0.006, 0.006, 0.008}, zone = {0.03, 0.03, 0.04},
+		orb = 0.7, sky = 0.35, fill = 0.5, fov = 140, spot_shadow = true,
+		shadows = true, opening = 0.5,
+		far = {color = {1.0, 0.86, 0.66}, emissive = 18, light = 6.0}},
+	-- The tomb without its shadow maps: what the shadows cost and what
+	-- the room is without them
+	noshadow = {cave = {0, 0, 0}, zone = {0.01, 0.01, 0.015}, orb = 1.0,
+		sky = 1.0, fill = 1.0, fov = 140, spot_shadow = false,
+		shadows = false, opening = 1.0},
+}
+light_look_name = LIGHT_LOOKS[env("BUILDAT_LAUNCH_LIGHT")] and
+		env("BUILDAT_LAUNCH_LIGHT") or "tomb"
+light_look = LIGHT_LOOKS[light_look_name]
 -- require answers the safe interface inside the sandbox and the whole
 -- extension outside it; the safe table raises on a name it does not
 -- know, so it is asked with something it has
@@ -727,7 +771,8 @@ local function apply_technique(node)
 		m:SetShaderParameter("BounceLight", 0.0)
 		m:SetShaderParameter("GroundLight", 0.0)
 		m:SetShaderParameter("LampLight", 0.0)
-		m:SetShaderParameter("CaveAmbient", 0.0)
+		m:SetShaderParameter("CaveAmbient", magic.Vector3(light_look.cave[1],
+				light_look.cave[2], light_look.cave[3]))
 		m:SetShaderParameter("TranslucencyGain", 0.0)
 		i = i + 1
 	end
@@ -920,7 +965,8 @@ zone.boundingBox = magic.BoundingBox(-200, 200)
 -- ambient by the skylight share, which in a sealed room is nought
 -- everywhere, so raising this moves nothing at all. What stands for the
 -- bounce is the pair of directional lights below.
-zone.ambientColor = magic.Color(0.01, 0.01, 0.015, 1)
+zone.ambientColor = magic.Color(light_look.zone[1], light_look.zone[2],
+		light_look.zone[3], 1)
 zone.fogColor = magic.Color(0, 0, 0, 1)
 zone.fogStart = 26 * U
 zone.fogEnd = 64 * U
@@ -1991,7 +2037,8 @@ do
 	local m = magic.Material:new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
 			"Techniques/NoTextureUnlit.xml"))
-	m:SetShaderParameter("MatDiffColor", magic.Color(5.2, 5.6, 6.4, 1))
+	m:SetShaderParameter("MatDiffColor", magic.Color(5.2 * light_look.opening,
+			5.6 * light_look.opening, 6.4 * light_look.opening, 1))
 	kept[#kept + 1] = m
 	local node = scene:CreateChild("opening")
 	node.position = magic.Vector3(
@@ -2121,7 +2168,8 @@ local PBR_INTENSITY = 25
 -- required rather than optional here ([LAUNCH_WORLD]'s wall)
 -- BUILDAT_LAUNCH_NOSHADOW=1 turns them off, which is how [PBR_HDR]
 -- asked whether the shadow maps were what a float probe breaks
-magic.renderer.drawShadows = (env("BUILDAT_LAUNCH_NOSHADOW") == "")
+magic.renderer.drawShadows = (env("BUILDAT_LAUNCH_NOSHADOW") == "") and
+		light_look.shadows
 -- **1024, not 2048.** Eleven shadow-casting lights -- ten cube maps for
 -- the orbs and the spot overhead -- at 2048 dropped the frame rate by
 -- half (2026-09-23).
@@ -2149,8 +2197,8 @@ for i, place in ipairs(LIGHT_PLACES) do
 	light.lightType = overhead and magic.LIGHT_SPOT or magic.LIGHT_POINT
 	if overhead then
 		node.direction = magic.Vector3(0, -1, 0.12)
-		light.fov = 140
-		light.castShadows = true
+		light.fov = light_look.fov
+		light.castShadows = light_look.spot_shadow
 		light.shadowBias = magic.BiasParameters(0.00006, 0.6)
 	else
 		-- **The pocket's walls have to contain its orb** (user,
@@ -2204,7 +2252,11 @@ local function set_preset(n)
 			orb_bright[i] = bright
 			orb_mats[i]:SetShaderParameter("MatDiffColor", bright)
 		end
-		light.brightness = e[2] * PBR_INTENSITY *
+		-- The light look's share ([LAUNCH_WORLD] stage 3): the orbs, the
+		-- opening overhead, then the fill
+		local look_k = (i <= BAYS and light_look.orb) or
+				(i == BAYS + 1 and light_look.sky) or light_look.fill
+		light.brightness = e[2] * PBR_INTENSITY * look_k *
 				((spec and spec.empty) and 0.22 or 1.0)
 		light.range = e[3]
 	end
@@ -2729,6 +2781,38 @@ do
 			"the formation %d by %d", HOME_FROM.z - wall_z,
 			room.cols or 0, room.rows or 0))
 end
+-- **The far thing** (light look "far", stage 3): a bright disc just over
+-- the formation's top row, a little proud of the wall, and the light it
+-- throws -- one place for the eye to rest above the names
+if light_look.far then
+	local f = light_look.far
+	local top = -1e9
+	for b = 1, BAYS do
+		if orb_places[b] then top = math.max(top, orb_places[b].y) end
+	end
+	local node = scene:CreateChild("far_thing")
+	node.position = magic.Vector3(HOME_AT.x * U, (top + 1.8) * U,
+			(HOME_AT.z + 0.3) * U)
+	node.rotation = magic.Quaternion(90, magic.Vector3(1, 0, 0))
+	node.scale = magic.Vector3(1.6 * U, 0.06 * U, 1.6 * U)
+	local o = node:CreateComponent("StaticModel")
+	o.model = magic.cache:GetResource("Model", "Models/Cylinder.mdl")
+	local m = magic.Material:new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTextureUnlit.xml"))
+	m:SetShaderParameter("MatDiffColor", magic.Color(f.color[1] * f.emissive,
+			f.color[2] * f.emissive, f.color[3] * f.emissive, 1))
+	kept[#kept + 1] = m
+	o.material = m
+	o.castShadows = false
+	local light = node:CreateComponent("Light")
+	light.lightType = magic.LIGHT_POINT
+	light.color = magic.Color(f.color[1], f.color[2], f.color[3], 1)
+	light.brightness = f.light * PBR_INTENSITY
+	light.range = 22 * U
+	light.castShadows = false
+end
+log:info("light: " .. light_look_name)
 local cam = {
 	from = {x = HOME_FROM.x, y = HOME_FROM.y, z = HOME_FROM.z},
 	at = {x = HOME_AT.x, y = HOME_AT.y, z = HOME_AT.z},

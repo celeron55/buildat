@@ -267,6 +267,13 @@ void VS()
     // it, and voxel_lighting's pond moved by seven times its own noise
     // floor ([LOOK_CHECK], 2026-09-24). One flag, set beside the box.
     uniform float cProbeBox;
+    // [LAUNCH_WORLD] stage 3: a floor of light for a sealed room, the
+    // luanti_client fork's cCaveAmbient carried across -- the room's
+    // vertex colours are nought (no skylight, no flood), so neither the
+    // zone's ambient nor the bounce in them reaches a voxel there. Added
+    // in the ambient pass times the albedo. Nought unless the room sets
+    // it, so its look does not move by default.
+    uniform vec3 cCaveAmbient;
     uniform vec3 cProbePos;
     uniform vec3 cProbeBoxMin;
     uniform vec3 cProbeBoxMax;
@@ -662,6 +669,9 @@ void PS()
 
         #ifdef AMBIENT
             finalColor += cAmbientColor.rgb * diffColor.rgb;
+            #ifdef VOXELROOMPROBE
+                finalColor += cCaveAmbient * diffColor.rgb;
+            #endif
             finalColor += cMatEmissiveColor;
             gl_FragColor = vec4(GetFog(finalColor, fogFactor), diffColor.a);
         #else
