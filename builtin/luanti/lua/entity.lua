@@ -2109,6 +2109,13 @@ local form_nodes = {}
 -- nobody and the client has to be sent them the way a node's are. Read out
 -- of the spec: a list[] naming one is the only way a form can show one.
 local form_detached = {}
+-- The name of the form last shown to each player, by core.show_formspec:
+-- fields under any other name are dropped, as Luanti's server drops them
+-- (handleCommand_InventoryFields, m_formspec_state_data). "" -- the
+-- player's own inventory, a node's form -- always passes. A mod's form
+-- for admins was answerable by anyone who knew its name
+-- ([SECURITY_RUN_1]).
+local shown_forms = {}
 
 local function detached_in_spec(spec)
 	local out = {}
@@ -2129,6 +2136,8 @@ function core.show_formspec(playername, formname, formspec)
 	end
 	form_nodes[playername] = nil
 	form_detached[playername] = detached_in_spec(formspec)
+	shown_forms[playername] = formspec ~= "" and tostring(formname or "") or
+			nil
 	__show_formspec(playername, tostring(formname or ""), formspec, "")
 	return true
 end
@@ -2152,6 +2161,10 @@ function core.close_formspec(playername, formname)
 	end
 	form_nodes[playername] = nil
 	form_detached[playername] = nil
+	if formname == nil or formname == "" or
+			shown_forms[playername] == formname then
+		shown_forms[playername] = nil
+	end
 	__show_formspec(playername, tostring(formname or ""), "", "")
 	return true
 end
@@ -2181,6 +2194,16 @@ function core.__player_receive_fields(playername, formname, fields)
 			form_nodes[playername] = nil
 		end
 		return
+	end
+	if formname ~= "" then
+		if shown_forms[playername] ~= formname then
+			core.log("action", playername .. " submitted the form \"" ..
+					tostring(formname):sub(1, 80) .. "\", which was not shown")
+			return
+		end
+		if fields.quit then
+			shown_forms[playername] = nil
+		end
 	end
 	for _, cb in ipairs(core.registered_on_player_receive_fields or {}) do
 		local ok, handled = pcall(cb, ref, formname, fields)
