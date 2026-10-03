@@ -90,8 +90,12 @@ done
 wait $cli 2>/dev/null
 cat "$out/client.log"
 # One peer at full speed waits for the modules rather than queueing in
-# memory: unbounded, 10 s of this grew the server by 300 MB
-if [ -z "$bad" ]; then
+# memory: unbounded, 10 s of this grew the server by 300 MB. Not under
+# ASan, whose quarantine keeps 256 MB of freed memory: a public vanilla
+# "grew" 276 MB there and 0 in the ordinary build (2026-10-04)
+if [ -z "$bad" ] && [ "${BUILD:-}" = asan ]; then
+	echo "a flood from one peer: not measured under ASan"
+elif [ -z "$bad" ]; then
 	rss0=$(awk '/VmRSS/{print $2}' /proc/$srv/status)
 	flood=main:get_saves
 	[ "$app" = floorplanner ] && flood=fp:presence
