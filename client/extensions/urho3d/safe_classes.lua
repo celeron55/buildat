@@ -1988,7 +1988,20 @@ function M.define(dst, util)
 			enabled = util.simple_property("boolean"),
 			visible = util.simple_property("boolean"),
 			opacity = util.simple_property("number"),
-			priority = util.simple_property("number"),
+			-- Under the client's own dialogs (the network permission one
+			-- is at 1000): a script's element drawn over one could put its
+			-- own buttons where the user's answer goes ([SECURITY_RUN_1])
+			priority = {
+				get = function(v)
+					return v
+				end,
+				set = function(v)
+					if type(v) ~= "number" then
+						error("priority: a number")
+					end
+					return math.min(v, 999)
+				end,
+			},
 		},
 	})
 
