@@ -20,7 +20,7 @@
 # writes the six-line drive that aims at what it changed.
 #
 # **And read what it asserts before trusting it about your change.** It
-# checks the presets, the pointing (which orb the crosshair wins), the
+# checks the presets, the pointing (which orb is selected), the
 # slot, the saves, the ornament and the sounds. It says **nothing**
 # about whether an orb's name is drawn or where it sits -- a session
 # once ran the whole thing after moving the labels, having already seen

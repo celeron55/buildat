@@ -804,8 +804,7 @@ local function mesh_chunk(cx, cy, cz)
 	local blob = table.concat(data)
 	local key = blk.key(cx, cy, cz)
 	local node = blk.nodes[key]
-	-- Most of a room is the air in it: a block of nothing gets no node,
-	-- and a dig that fills one builds it then
+	-- Most of a room is the air in it: a block of nothing gets no node
 	if node == nil and blob == string.rep(blk.air, #blob) then
 		return
 	end
@@ -1726,9 +1725,6 @@ attract_shown = nil
 -- grid. The middle is left open, because anything standing there stands
 -- in front of the pockets the room is lit by.
 --
--- The layout is where they start, not where they stay: E picks one up
--- and right click puts it down, and the save remembers where the player
--- left it ([LAUNCH_WORLD] step 8).
 local FLOOR_COLS = {-13.0, -9.0, -5.0, 5.0, 9.0, 13.0}
 local FLOOR_ROWS = {-4.0, -0.5, 3.0, 6.5, 10.0}
 for i, a in ipairs(FLOOR_ACTIONS) do
@@ -2110,9 +2106,8 @@ local PBR_INTENSITY = 25
 -- asked whether the shadow maps were what a float probe breaks
 magic.renderer.drawShadows = (env("BUILDAT_LAUNCH_NOSHADOW") == "")
 -- **1024, not 2048.** Eleven shadow-casting lights -- ten cube maps for
--- the orbs and the spot overhead -- at 2048 dropped the frame rate far
--- enough that the walker's own dt clamp halved its speed, and a timed
--- walk in a check stopped reaching the wall (2026-09-23).
+-- the orbs and the spot overhead -- at 2048 dropped the frame rate by
+-- half (2026-09-23).
 magic.renderer.shadowMapSize = 1024
 
 local lights = {}
@@ -2378,16 +2373,15 @@ reflection_probe(V(0, 2.0, 0.0))
 -- floor was missing. Two frames, both inside the boot's own burst,
 -- rather than four spread over three seconds of a player's time.
 --
--- **And the room does not move under the player until it is done**
--- (user, 2026-09-26): a slow frame is worst when it is the player's own
--- movement that stutters. `probe_pending()` below holds the walk and
--- the look for those two frames. The deadline is the safety: if the
--- bake never happens -- a launch UI over the room at boot, the probe
--- turned off -- the player is not held hostage to it.
+-- **And the camera does not move until it is done** (user, 2026-09-26):
+-- a slow frame is worst when it is the player's own movement that
+-- stutters. `probe_pending()` below holds the camera for those two
+-- frames. The deadline is the safety: if the bake never happens -- a
+-- launch UI over the room at boot, the probe turned off -- the player is
+-- not held hostage to it.
 probe_bake = {queued = false, left = 2, done = false, started = nil,
 		hold = 2.0}
--- Whether the room is still waiting for its one bake. Read by the FPS
--- handler, which stands still while it is true.
+-- Whether the room is still waiting for its one bake.
 function probe_pending()
 	if probe_bake.done then return false end
 	local since = probe_bake.started and
@@ -2678,12 +2672,8 @@ readout("b" .. api.version(), {x = 9.0, y = 0.25, z = -1.0}, 0.34,
 -- over the one being pointed at only -- not always on, which is what
 -- keeps the room from being a label wall.
 --
--- "Pointed at" is the smallest angle to the view direction -- the
--- crosshair's own ray, as long as the crosshair is the screen's middle
--- -- taken against the best point up the orb's own column rather than
--- against its centre, and losing to a player-placed voxel under the
--- crosshair ([LAUNCH_WORLD]: the selection volume is not the drawn
--- volume, and a tight target wins over a generous one).
+-- "Pointed at" is what the arrows browse, or what a click is on: the
+-- stations and the keys choose it, not the middle of the screen.
 -- **The camera is a state, not a constant**, because the fast path flies
 -- it: where it is and what it looks at are numbers that get lerped, and
 -- the pointing below reads them rather than the two it was set up with.
@@ -2909,8 +2899,8 @@ held_was = false
 -- than being told.
 --
 -- What is *not* in here: the room's own screens. The pause dialog, the
--- desk and a flight are the room's, and it keeps the keyboard for them
--- -- they stop the look where they are read. This is only about
+-- desk and a flight are the room's, and it keeps the keyboard for them.
+-- This is only about
 -- somebody else's screen.
 -- **The stack knows what is on the screen and the room does not push to
 -- it** ([MENU_STUCK], user 2026-09-24: a game's ContentDB menu was still
@@ -3013,7 +3003,7 @@ bookmark_home = {}
 -- The three things a move is: the sphere, its light, and where the room
 -- thinks the sphere is. `part()` takes metres and multiplies by U on the
 -- way in; a node's own position is in those units and `orb_places` is in
--- metres, which is the pair the carry code already keeps in step.
+-- metres, and the two are kept in step here.
 function move_orb_to(i, mx, my, mz)
 	if orb_nodes[i] then
 		orb_nodes[i].position = magic.Vector3(mx * U, my * U, mz * U)
@@ -3393,7 +3383,7 @@ end
 -- **The step change is the indicator** (user): a sphere is lit and is a
 -- sphere, so it says "selected" in its own vocabulary rather than in a
 -- wireframe's -- and it is a discrete jump, not a fade, so it reads the
--- instant the crosshair crosses it.
+-- instant it is selected.
 local ORB_STEP = 1.18
 local orb_base_scale = {}
 -- A node nobody draws, borrowed for the arithmetic of "which way is
@@ -3406,7 +3396,7 @@ function handle_orb_update(event_type, event_data)
 	if screen_taken() then return end
 	-- **Nothing is pointed at while the room shows itself off**: the
 	-- sweep is not a player looking at an orb, and the name of whatever
-	-- was under the crosshair when they walked away hung over the
+	-- was in the middle of the screen when the drift began hung over the
 	-- showcase until they came back (2026-09-25). The same rule the
 	-- hint follows -- nobody is being told anything while this runs.
 	if attracting then
@@ -3430,7 +3420,7 @@ function handle_orb_update(event_type, event_data)
 			-- **The selection volume is not the drawn volume** (user,
 			-- 2026-09-23): close to a floor orb a player points *over*
 			-- it, since that is where the horizon sits comfortably, and
-			-- the crosshair left it. So the thing is pointed at
+			-- the middle of the screen left it. So the thing is pointed at
 			-- anywhere up its own column -- its footprint extruded from
 			-- where it stands to eye height -- and the best point on
 			-- that column answers rather than its centre.
@@ -3453,11 +3443,11 @@ function handle_orb_update(event_type, event_data)
 			-- **Measured against the orb's own size, not by the angle
 			-- alone** ([POINT_LOW]'s other half, 2026-09-25): a dot
 			-- says nothing about how big a thing looks, so a distant
-			-- orb a little off the axis beat a near one the crosshair
-			-- was on -- which is how a portrait of one orb came back
+			-- orb a little off the axis beat a near one the screen's
+			-- middle was on -- which is how a portrait of one orb came back
 			-- with its neighbour's name over it. The score is the angle
 			-- in units of the orb's own angular radius: under one is
-			-- the crosshair on the disc, and a near orb is forgiven the
+			-- the screen's middle on the disc, and a near orb is forgiven the
 			-- degrees it fills.
 			local score, dot, up = math.huge, -1, false
 			for k = 0, 4 do
@@ -3511,10 +3501,10 @@ function handle_orb_update(event_type, event_data)
 					1 - math.exp(-7.0 * dt))
 		end
 	end
-	-- **What is browsed is what is pointed at** ([LAUNCH_WORLD] stage 2:
-	-- one mode, no crosshair). The middle of the screen was the
-	-- crosshair's rule; with the stations the keys choose, and a click
-	-- launches whatever is under the cursor without pointing first
+	-- **What is browsed is what is pointed at** ([LAUNCH_WORLD] stage 2):
+	-- the screen's middle is the fallback for when nothing is browsed;
+	-- the keys choose, and a click launches whatever is under the cursor
+	-- without pointing first
 	if (browsed or 0) > 0 then
 		best = browsed
 	end

@@ -117,7 +117,7 @@ function M.new(magic, log)
 
 	-- **Rises quickly and falls slowly**: rising is what gives the
 	-- pace, and the slow fall is the hysteresis that stops the level
-	-- strobing as the crosshair crosses a rank of orbs. One number,
+	-- strobing as the selection crosses a rank of orbs. One number,
 	-- ramped per block rather than per sample -- 23 ms is smooth
 	-- enough for a gain and costs nothing.
 	function s:set_engagement(x)
