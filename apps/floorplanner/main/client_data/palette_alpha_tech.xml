@@ -1,0 +1,4 @@
+<!-- Glass: the palette's surfaces blended over what is behind them -->
+<technique vs="main/Palette" ps="main/Palette">
+	<pass name="alpha" depthwrite="false" blend="alpha" />
+</technique>
