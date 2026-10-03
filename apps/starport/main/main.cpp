@@ -857,6 +857,14 @@ struct Module: public interface::Module
 		j.expect = hex(interface::sha256::hmac(unhex(jstr(l, "secret")), nonce));
 		{
 			std::lock_guard<std::mutex> lock(m_vmutex);
+			// One thread checks them in turn, each up to http_get's two
+			// minutes: past a thousand waiting, a new one waits for its
+			// listing's next announce ([SECURITY_RUN_1])
+			if(m_vjobs.size() >= 1000){
+				log_w(MODULE, "Listing %s: a thousand checks are waiting; "
+						"not checked this time", cs(j.listing));
+				return;
+			}
 			m_vjobs.push_back(j);
 		}
 		m_vwake.notify_all();
