@@ -1456,7 +1456,24 @@ local function mark_texture(mark, icon, one_bit, invert, slot)
 		-- the launch grid resolves an icon to a resource name on the
 		-- trusted side, and a game that ships one has said what it looks
 		-- like better than a hash of its name can
-		local src = magic.cache:GetResource("Image", icon)
+		-- **The pixels in one crossing** ([ROOM_BOOT], 2026-10-03): a
+		-- picture read through Image:GetPixel is a wrapped call a pixel,
+		-- times the one-bit mask's supersampling -- a second for nineteen
+		-- icons, half the room's boot. read_image hands the RGBA over as
+		-- one string and the same GetPixel is answered from it here.
+		local ok, w, h, rgba = pcall(buildat.read_image, icon)
+		local src
+		if ok and w and rgba then
+			src = {width = w, height = h}
+			function src:GetPixel(x, y)
+				local i = (y * w + x) * 4
+				local r, g, b, a = rgba:byte(i + 1, i + 4)
+				return {r = (r or 0) / 255, g = (g or 0) / 255,
+						b = (b or 0) / 255, a = (a or 255) / 255}
+			end
+		else
+			src = magic.cache:GetResource("Image", icon)
+		end
 		if src then
 			image = mark_image(src, one_bit, invert, slot)
 		end
