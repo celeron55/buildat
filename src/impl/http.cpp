@@ -100,13 +100,22 @@ static CURL *easy(const ss_ &url, char *errbuf)
 	return c;
 }
 
-static void perform(CURL *c, const ss_ &url, const char *errbuf)
+static void perform(CURL *c, const ss_ &url, const char *errbuf,
+		ss_ *redirect = nullptr)
 {
+	if(redirect)
+		curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 0L);
 	const CURLcode r = curl_easy_perform(c);
 	long status = 0, os_errno = 0, port = 0;
 	curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
 	curl_easy_getinfo(c, CURLINFO_OS_ERRNO, &os_errno);
 	curl_easy_getinfo(c, CURLINFO_PRIMARY_PORT, &port);
+	if(redirect){
+		char *to = nullptr;
+		curl_easy_getinfo(c, CURLINFO_REDIRECT_URL, &to);
+		*redirect = r == CURLE_OK && status >= 300 && status < 400 && to ?
+				ss_(to) : ss_();
+	}
 	curl_easy_cleanup(c);
 	// [PROCESS_SANDBOX]: a port the server's box refuses
 	if(r == CURLE_COULDNT_CONNECT && os_errno == EACCES){
@@ -129,7 +138,7 @@ static void perform(CURL *c, const ss_ &url, const char *errbuf)
 	}
 }
 
-ss_ http_get(const ss_ &url)
+ss_ http_get(const ss_ &url, ss_ *redirect)
 {
 	char errbuf[CURL_ERROR_SIZE] = {0};
 	CURL *c = easy(url, errbuf);
@@ -137,11 +146,12 @@ ss_ http_get(const ss_ &url)
 	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_string);
 	curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
 	curl_easy_setopt(c, CURLOPT_TIMEOUT, STRING_TIMEOUT_S);
-	perform(c, url, errbuf);
-	return body;
+	perform(c, url, errbuf, redirect);
+	return redirect && !redirect->empty() ? ss_() : body;
 }
 
-ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type)
+ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type,
+		ss_ *redirect)
 {
 	char errbuf[CURL_ERROR_SIZE] = {0};
 	CURL *c = easy(url, errbuf);
@@ -155,13 +165,13 @@ ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type)
 	curl_easy_setopt(c, CURLOPT_WRITEDATA, &out);
 	curl_easy_setopt(c, CURLOPT_TIMEOUT, STRING_TIMEOUT_S);
 	try {
-		perform(c, url, errbuf);
+		perform(c, url, errbuf, redirect);
 	} catch(...){
 		curl_slist_free_all(headers);
 		throw;
 	}
 	curl_slist_free_all(headers);
-	return out;
+	return redirect && !redirect->empty() ? ss_() : out;
 }
 
 struct ReadState {

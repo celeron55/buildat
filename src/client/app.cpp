@@ -3886,7 +3886,8 @@ struct CApp: public App, public magic::Application
 	// server list): __buildat_http_get(url[, body]) starts a fetch -- a POST of JSON with a body -- on a thread of
 	// its own and answers a job id; __buildat_http_poll(id) answers nil
 	// while it runs, then (true, body) or (false, error) once, and forgets
-	// the job. Who may fetch what is the network extension's question,
+	// the job. A redirect is not followed: (false, why, target) says where
+	// it led, and the extension asks about that host as about any other. Who may fetch what is the network extension's question,
 	// which gates this behind its permission dialog the way it gates a
 	// socket; the sandbox never sees these two names.
 	struct HttpJob {
@@ -3894,6 +3895,7 @@ struct CApp: public App, public magic::Application
 		std::atomic<bool> done{false};
 		bool ok = false;
 		ss_ result;
+		ss_ redirect;
 	};
 	std::map<int, sp_<HttpJob>> m_http_jobs;
 	int m_http_next_id = 1;
@@ -3993,9 +3995,12 @@ struct CApp: public App, public magic::Application
 		HttpJob *j = job.get();
 		j->thread = std::thread([j, url, post, body](){
 			try {
-				j->result = post ? interface::http_post(url, body) :
-						interface::http_get(url);
-				j->ok = true;
+				j->result = post ? interface::http_post(url, body,
+						"application/json", &j->redirect) :
+						interface::http_get(url, &j->redirect);
+				j->ok = j->redirect.empty();
+				if(!j->ok)
+					j->result = "redirected to "+j->redirect;
 			} catch(std::exception &e){
 				j->result = e.what();
 			}
@@ -4026,7 +4031,10 @@ struct CApp: public App, public magic::Application
 		job->thread.join();
 		lua_pushboolean(L, job->ok);
 		lua_pushlstring(L, job->result.c_str(), job->result.size());
-		return 2;
+		if(job->redirect.empty())
+			return 2;
+		lua_pushlstring(L, job->redirect.c_str(), job->redirect.size());
+		return 3;
 	}
 
 	static int l_get_env(lua_State *L)

@@ -731,13 +731,13 @@ local function http_start(url, cb, body)
 		http_polling = true
 		magic.SubscribeToEvent("Update", function()
 			for jid, callback in pairs(http_pending) do
-				local ok, body = __buildat_http_poll(jid)
+				local ok, body, redirect = __buildat_http_poll(jid)
 				if ok ~= nil then
 					http_pending[jid] = nil
 					if ok then
 						callback(body)
 					else
-						callback(nil, body)
+						callback(nil, body, redirect)
 					end
 				end
 			end
@@ -747,7 +747,7 @@ end
 
 -- The user's leave for the url's host, then the fetch: a GET, or with a
 -- body a POST of JSON
-local function gated_http(url, cb, options, body)
+local function gated_http(url, cb, options, body, hops)
 	-- The authority is what libcurl connects to, so it is what the user is
 	-- asked about, port included: a host and a port and nothing else. A
 	-- `user@` part or a backslash was read as one host here and another
@@ -762,6 +762,20 @@ local function gated_http(url, cb, options, body)
 		return
 	end
 	local uri = scheme.."://"..authority
+	-- A redirect is the engine's to report and ours to follow, through
+	-- this same gate: libcurl following it went to a host the user never
+	-- saw ([SECURITY_RUN_1]). GETs only, 8 at most; a POST's is an error.
+	local user_cb = cb
+	cb = function(got, err, redirect)
+		if got or not redirect or body or (hops or 0) >= 8 then
+			return user_cb(got, err)
+		end
+		local to = redirect
+		if not to:match("^https?://") then
+			return user_cb(nil, "a redirect to "..to.." is not followed")
+		end
+		gated_http(to, user_cb, options, nil, (hops or 0) + 1)
+	end
 	local entry = load_store()[uri]
 	if entry and entry.accepted and
 			os.time() - entry.last_attempt < ACCEPTANCE_VALID_S then

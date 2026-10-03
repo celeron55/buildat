@@ -107,5 +107,46 @@ if [ "${examples:-99}" -ge 9 ]; then
 			"it has real ones"
 	exit 1
 fi
+# **A redirect goes through the same gate** ([SECURITY_RUN_1]): the
+# accepted host answers with a redirect to a port nobody accepted, and the
+# user is asked about that one while it hears nothing -- libcurl used to
+# follow it on its own
+other=$((port + 1))
+rm -rf "$out/user/serverlist"; : > "$out/redirect_http.log"
+python3 -c '
+import http.server, sys
+port, to = int(sys.argv[1]), sys.argv[2]
+class H(http.server.BaseHTTPRequestHandler):
+	def do_GET(self):
+		sys.stderr.write("%d %s\n" % (port, self.path)); sys.stderr.flush()
+		self.send_response(302 if to != "-" else 200)
+		if to != "-": self.send_header("Location", to)
+		self.send_header("Content-Length", "0"); self.end_headers()
+	def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()' \
+	$port "http://localhost:$other/list" 2>> "$out/redirect_http.log" &
+r1=$!
+python3 -c '
+import http.server, sys
+class H(http.server.BaseHTTPRequestHandler):
+	def do_GET(self):
+		sys.stderr.write("reached %s\n" % self.path); sys.stderr.flush()
+		self.send_response(200); self.send_header("Content-Length", "0"); self.end_headers()
+	def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()' \
+	$other 2>> "$out/redirect_http.log" &
+r2=$!
+sleep 1
+BUILDAT_SERVERLIST_URL=http://localhost:$port \
+	timeout 120 bin/buildat -m launch_world -D "$out/user" -w 640x360 -l 3 \
+	-L "$out/redirect.log" -c @"$out/cmds.txt" > /dev/null 2>&1
+kill "$r1" "$r2" 2>/dev/null; wait "$r1" "$r2" 2>/dev/null
+asked=$(grep -ac "Asking the user about http://localhost:$other" "$out/redirect.log")
+reached=$(grep -ac "^reached" "$out/redirect_http.log")
+echo "a redirect to a port nobody accepted: asked $asked times, reached $reached times"
+if [ "$asked" -lt 1 ] || [ "$reached" -gt 0 ]; then
+	echo "FAIL: a redirect steps around the user's leave for a host"
+	exit 1
+fi
 echo "PASS: a fetched serverlist reaches a launch UI as ranked actions"
 exit 0

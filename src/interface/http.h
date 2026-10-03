@@ -10,11 +10,17 @@ namespace interface
 	// later). Both block: a caller that must not wait puts them on a
 	// thread. Both throw with curl's message on any failure, a non-2xx
 	// status included.
-	ss_ http_get(const ss_ &url);
+	//
+	// With `redirect`, a redirect is not followed: its target goes there
+	// and the body answered is "" -- for a caller that asks the user about
+	// every host it fetches from, which a redirect would step around
+	// ([SECURITY_RUN_1]). Without it up to 8 are followed.
+	ss_ http_get(const ss_ &url, ss_ *redirect = nullptr);
 	// The body of a POST of `body` as `content_type` ([STARPORT]: a server
 	// announcing itself, a client's report); throws as http_get does
 	ss_ http_post(const ss_ &url, const ss_ &body,
-			const ss_ &content_type = "application/json");
+			const ss_ &content_type = "application/json",
+			ss_ *redirect = nullptr);
 	// A mail through an SMTP server (smtp:// or smtps://; STARTTLS when the
 	// server offers it): `message` is the whole of it, headers and all,
 	// lines ending in CRLF. user empty: no login. Throws as http_get does.
