@@ -40,6 +40,7 @@
 #include <sstream>
 #include <thread>
 #include <mutex>
+#include <deque>
 #include <condition_variable>
 #include <set>
 #include <memory>
@@ -644,14 +645,55 @@ struct Module: public interface::Module, public Interface
 					soon |= !announce(url, c);
 			std::unique_lock<std::mutex> lock(m_mutex);
 			const ss_ text = m_config_text;
-			m_wake.wait_for(lock, std::chrono::seconds(soon ? 25 :
-					ANNOUNCE_INTERVAL_S),
-					[&](){ return m_stop || !m_delist.empty() ||
-					m_config_text != text || m_announce_now; });
+			const auto until = std::chrono::steady_clock::now() +
+					std::chrono::seconds(soon ? 25 : ANNOUNCE_INTERVAL_S);
+			for(;;){
+				const bool woken = m_wake.wait_until(lock, until, [&](){
+					return m_stop || !m_delist.empty() ||
+						m_config_text != text || m_announce_now ||
+						!m_config_requests.empty(); });
+				if(m_stop)
+					return;
+				if(m_config_requests.empty())
+					break;
+				// The admin page's requests, here and not in the module's
+				// thread: they ask builtin/accounts, which asks this module
+				// in turn, and the two asking each other at once was a
+				// server hung by two packets (util/fuzz, [SECURITY_RUN_1])
+				std::deque<ConfigRequest> reqs;
+				reqs.swap(m_config_requests);
+				lock.unlock();
+				for(const ConfigRequest &r : reqs)
+					handle_config_request(r);
+				lock.lock();
+				if(!woken || !m_delist.empty() || m_config_text != text ||
+						m_announce_now)
+					break;
+			}
 			m_announce_now = false;
-			if(m_stop)
-				return;
 		}
+	}
+
+	struct ConfigRequest
+	{
+		network::PeerInfo::Id peer = 0;
+		bool set = false;
+		ss_ data;
+	};
+	// Under m_mutex, taken by run()
+	std::deque<ConfigRequest> m_config_requests;
+
+	void handle_config_request(const ConfigRequest &r)
+	{
+		if(!peer_is_admin(r.peer))
+			return;
+		if(!r.set){
+			send_config(r.peer, "");
+			return;
+		}
+		json::json_error_t err;
+		const json::Value c = json::load_string(r.data.c_str(), &err);
+		send_config(r.peer, write_config(c));
 	}
 
 	// 10g: off that Starport's list at once, not after its timeout
@@ -946,19 +988,30 @@ struct Module: public interface::Module, public Interface
 		relay_send_packet(peer, "starport:config", out.stringify());
 	}
 
+	// Handed to the announce thread; see handle_config_request()
 	void on_config_get(const network::Packet &p)
 	{
-		if(peer_is_admin(p.sender))
-			send_config(p.sender, "");
+		queue_config_request(p.sender, false, "");
 	}
 
 	void on_config_set(const network::Packet &p)
 	{
-		if(!peer_is_admin(p.sender))
+		queue_config_request(p.sender, true, p.data);
+	}
+
+	void queue_config_request(network::PeerInfo::Id peer, bool set,
+			const ss_ &data)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		// A few at a time: a peer's flood is not the thread's work queue
+		if(m_config_requests.size() >= 16)
 			return;
-		json::json_error_t err;
-		const json::Value c = json::load_string(p.data.c_str(), &err);
-		send_config(p.sender, write_config(c));
+		ConfigRequest r;
+		r.peer = peer;
+		r.set = set;
+		r.data = data;
+		m_config_requests.push_back(r);
+		m_wake.notify_all();
 	}
 
 	ss_ verify_id_token(const ss_ &token, IdLogin *out)
