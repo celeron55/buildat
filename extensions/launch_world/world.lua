@@ -196,8 +196,17 @@ do
 		-- simplified: ten, the most recently used first, which is what
 		-- the floor has room for without becoming a heap
 		if a.uri:sub(1, 4) ~= "http" and #SERVERS < 10 then
+			-- [LAUNCH_WORLD] (4): the icon the server sent at its last
+			-- connect, kept by the client under the cache's server_icons/
+			-- by its hash; a resource of that name, or nil and a sigil
+			local icon = (a.icon or "") ~= "" and (a.icon .. ".png") or nil
+			if icon and not magic.cache:Exists(icon) then icon = nil end
+			if icon then
+				log:info("marks: server " .. a.uri .. " wears its stored icon")
+			end
 			SERVERS[#SERVERS + 1] = {
-				name = a.name ~= "" and a.name or a.uri, address = a.uri}
+				name = a.name ~= "" and a.name or a.uri, address = a.uri,
+				icon = icon}
 		end
 	end
 	log:info("servers: " .. #SERVERS .. " of the client's own")
@@ -1827,6 +1836,7 @@ for i, sv in ipairs(SERVERS) do
 	local col = SERVER_COLS[(i - 1) % #SERVER_COLS + 1]
 	local row = 0.5 + math.floor((i - 1) / #SERVER_COLS) * 4.5
 	local o = {name = sv.name, address = sv.address, server = true,
+		icon = sv.icon,
 		description = sv.address ..
 				(sv.example and "   (the room's suggestion)" or ""),
 		floor = true, category = "server",
@@ -1941,7 +1951,8 @@ for i, o in ipairs(orb_places) do
 		-- which is the whole of why the reflection probe is here
 		local node = part("Sphere", magic.Vector3(o.x, o.y, o.z),
 				across(orb_across(spec)),
-				etched(0.92, 0.94, 0.97, 0.06, 1.0, spec.name) or chrome)
+				etched(0.92, 0.94, 0.97, 0.06, 1.0, spec.name, spec.icon) or
+				chrome)
 		node:GetComponent("StaticModel").castShadows = true
 		orb_nodes[i] = node
 	elseif spec and spec.save then

@@ -67,6 +67,10 @@ local function load_store()
 					created = tonumber(f[4]) or 0,
 					last_attempt = tonumber(f[5]) or 0,
 					name = f[6] or "",
+					-- [LAUNCH_WORLD] (4): the sha256 of the icon the
+					-- server sent at its last connect, under the cache's
+					-- server_icons/; "" for none
+					icon = f[7] or "",
 				}
 			end
 		end
@@ -86,7 +90,7 @@ local function save_store(entries)
 		log:error("Cannot write "..store_path..": "..tostring(err))
 		return
 	end
-	file:write("accepted,address,description,created,last_attempt,name\n")
+	file:write("accepted,address,description,created,last_attempt,name,icon\n")
 	for _, uri in ipairs(uris) do
 		local e = entries[uri]
 		file:write(table.concat({
@@ -96,6 +100,7 @@ local function save_store(entries)
 			csv.quote(math.floor(e.created)),
 			csv.quote(math.floor(e.last_attempt)),
 			csv.quote(e.name or ""),
+			csv.quote(e.icon or ""),
 		}, ",").."\n")
 	end
 	file:close()
@@ -111,6 +116,9 @@ local function store_answer(uri, accepted, description, old_entry)
 		description = tostring(description or ""):gsub("[\r\n]", " "),
 		created = (old_entry and old_entry.created ~= 0) and old_entry.created or now,
 		last_attempt = now,
+		-- What the row had besides the answer is kept with it
+		name = old_entry and old_entry.name or "",
+		icon = old_entry and old_entry.icon or "",
 	}
 	save_store(entries)
 end
@@ -696,10 +704,34 @@ function M.safe.known_addresses()
 	for uri, e in pairs(load_store()) do
 		out[#out + 1] = {uri = uri, description = e.description or "",
 				created = e.created or 0, last_attempt = e.last_attempt or 0,
-				accepted = e.accepted and true or false, name = e.name or ""}
+				accepted = e.accepted and true or false, name = e.name or "",
+				icon = e.icon or ""}
 	end
 	table.sort(out, function(a, b) return a.last_attempt > b.last_attempt end)
 	return out
+end
+
+-- remember_server_icon(uri, sha): a native server's icon, which the
+-- client kept under the cache at connect ([LAUNCH_WORLD] (4)); its row is
+-- made if the address has none, the player having connected to it. The
+-- trusted side's alone: a server's script must not name what a row wears.
+function M.remember_server_icon(uri, sha)
+	if type(uri) ~= "string" or not uri:match("^tcp://[%w%.%-:%[%]]+$") or
+			type(sha) ~= "string" or not sha:match("^%x+$") or #sha ~= 64 then
+		return false
+	end
+	local entries = load_store()
+	local e = entries[uri]
+	local now = os.time()
+	if not e then
+		e = {accepted = true, uri = uri, description = "", created = now,
+				name = ""}
+		entries[uri] = e
+	end
+	e.last_attempt = now
+	e.icon = sha
+	save_store(entries)
+	return true
 end
 
 -- set_address_name(uri, name): the player name used on a server, kept on

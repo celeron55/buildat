@@ -62,6 +62,8 @@
 #include <Audio.h>
 #include <RenderSurface.h>
 #include <Texture2D.h>
+#include <Image.h>
+#include <MemoryBuffer.h>
 #include <zlib.h>
 #include <VertexBuffer.h>
 #include <Geometry.h>
@@ -1426,9 +1428,14 @@ struct CApp: public App, public magic::Application
 		m_thread_pool->start(4); // TODO: Configurable
 #endif
 
+		interface::fs::create_directories(
+				g_client_config.get<ss_>("cache_path")+"/server_icons");
 		sv_<ss_> resource_paths = {
 			g_client_config.get<ss_>("share_path")+"/client/data",
 			g_client_config.get<ss_>("cache_path")+"/tmp",
+			// The icons native servers sent ([LAUNCH_WORLD] (4)): a PNG a
+			// file, named by its sha256, checked before it was kept
+			g_client_config.get<ss_>("cache_path")+"/server_icons",
 			g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
 			// The launch grid's icons: <name>/launcher/<icon>.png and a
 			// game's icon.png, resolved by the menu on the trusted side
@@ -1649,8 +1656,76 @@ struct CApp: public App, public magic::Application
 		return true;
 	}
 
+	// **A server's icon** ([LAUNCH_WORLD] (4), 2026-10-03): what a native
+	// server sends at connect, kept for the lobby's list of servers after
+	// the connection is gone. Checked here and not trusted from the wire
+	// -- a PNG of 64 KB at most and 512 pixels a side -- kept under the
+	// cache by its sha256, and its hash written against the address the
+	// client connected to in network_addresses.csv (the network
+	// extension's own store, a column of its own). Not for the local
+	// server the client started, whose address is a port of the moment,
+	// nor a pipe's.
+	// simplified: a TLS address (https://) is not kept; its row would
+	// need the scheme the room's list leaves out.
+	void handle_server_icon(const ss_ &data)
+	{
+		const ss_ address = m_state ? m_state->get_address() : "";
+		if(address.empty() || address.compare(0, 5, "pipe:") == 0 ||
+				address.find("://") != ss_::npos)
+			return;
+		adopt_pidfile();
+		if(!g_local_server_app.empty() &&
+				interface::process::is_running(g_local_server) &&
+				(address == "localhost:"+g_local_server_port ||
+				address == "127.0.0.1:"+g_local_server_port))
+			return;
+		if(data.size() > 64 * 1024 ||
+				data.compare(0, 8, "\x89PNG\r\n\x1a\n") != 0){
+			log_w(MODULE, "server icon from %s: not a PNG of 64 KB or less",
+					cs(address));
+			return;
+		}
+		magic::MemoryBuffer buf(data.data(), (unsigned)data.size());
+		magic::SharedPtr<magic::Image> img(new magic::Image(context_));
+		if(!img->Load(buf) || img->GetWidth() < 1 || img->GetHeight() < 1 ||
+				img->GetWidth() > 512 || img->GetHeight() > 512){
+			log_w(MODULE, "server icon from %s: not a picture of 512 "
+					"pixels a side or less", cs(address));
+			return;
+		}
+		// The address as the network extension writes it: tcp://host:port
+		ss_ hostport = address;
+		if(hostport.find(':', hostport[0] == '[' ? hostport.find(']') : 0) ==
+				ss_::npos)
+			hostport += ":29500";
+		for(char c : hostport)
+			if(!(isalnum((unsigned char)c) || c == '.' || c == '-' ||
+					c == ':' || c == '[' || c == ']'))
+				return; // not an address the store's rows can carry
+		const ss_ sha = interface::sha256::hex(interface::sha256::calculate(data));
+		const ss_ dir = g_client_config.get<ss_>("cache_path")+"/server_icons";
+		const ss_ path = dir+"/"+sha+".png";
+		if(!interface::fs::path_exists(path)){
+			interface::fs::create_directories(dir);
+			std::ofstream f(path, std::ios::binary);
+			f<<data;
+			if(!f.good()){
+				log_w(MODULE, "server icon: cannot write %s", cs(path));
+				return;
+			}
+		}
+		run_script_no_sandbox("require('buildat/extension/network')"
+				".remember_server_icon('tcp://"+hostport+"', '"+sha+"')");
+		log_i(MODULE, "server icon from %s kept as %s", cs(address),
+				cs(sha.substr(0, 12)));
+	}
+
 	void handle_packet(const ss_ &name, const ss_ &data)
 	{
+		if(name == "core:server_icon"){
+			handle_server_icon(data);
+			return;
+		}
 		log_v(MODULE, "handle_packet(): %s", cs(name));
 		magic::AutoProfileBlock profiler_block(
 				GetSubsystem<magic::Profiler>(), "Buildat|handle_packet");

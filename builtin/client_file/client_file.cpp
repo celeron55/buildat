@@ -19,6 +19,7 @@
 #include <cereal/types/tuple.hpp>
 #include <fstream>
 #include <streambuf>
+#include <algorithm>
 #define MODULE "client_file"
 
 using interface::Event;
@@ -153,6 +154,7 @@ struct Module: public interface::Module, public client_file::Interface
 
 	void on_start()
 	{
+		server_icon(); // read now, so the log says at start which icon is handed over
 	}
 
 	void on_unload()
@@ -222,8 +224,57 @@ struct Module: public interface::Module, public client_file::Interface
 		});
 	}
 
+	// **The server's icon, for the client's list of servers** ([LAUNCH_WORLD]
+	// (4), 2026-10-03): what the admin puts at <user>/apps/<app>/
+	// server_icon.png, else the first picture in the app's launcher/ --
+	// the one its tile on the grid wears. A PNG of 64 KB at most, read
+	// once, sent once a connect as core:server_icon; the client checks it
+	// again and keeps it by its hash. Nothing is sent where there is none.
+	ss_ m_server_icon;
+	bool m_server_icon_read = false;
+	const ss_& server_icon()
+	{
+		if(m_server_icon_read)
+			return m_server_icon;
+		m_server_icon_read = true;
+		sv_<ss_> candidates;
+		candidates.push_back(m_server->get_config().get<ss_>("user_path")+
+				"/apps/"+m_server->get_app_id()+"/server_icon.png");
+		const ss_ launcher = m_server->get_modules_path()+"/launcher";
+		sv_<ss_> pngs;
+		for(const interface::fs::Node &n : interface::fs::list_directory(launcher))
+			if(!n.is_directory && n.name.size() > 4 &&
+					n.name.compare(n.name.size() - 4, 4, ".png") == 0)
+				pngs.push_back(launcher+"/"+n.name);
+		std::sort(pngs.begin(), pngs.end());
+		candidates.insert(candidates.end(), pngs.begin(), pngs.end());
+		for(const ss_ &path : candidates){
+			std::ifstream f(path, std::ios::binary);
+			if(!f.good())
+				continue;
+			ss_ data((std::istreambuf_iterator<char>(f)),
+					std::istreambuf_iterator<char>());
+			if(data.size() > 64 * 1024 || data.compare(0, 8, "\x89PNG\r\n\x1a\n") != 0){
+				log_w(MODULE, "%s is not a PNG of 64 KB or less; not the "
+						"server's icon", cs(path));
+				continue;
+			}
+			m_server_icon = data;
+			log_i(MODULE, "The server's icon: %s (%zu bytes)", cs(path),
+					data.size());
+			break;
+		}
+		return m_server_icon;
+	}
+
 	void on_client_connected(const network::NewClient &client_connected)
 	{
+		if(!server_icon().empty()){
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(client_connected.info.id, "core:server_icon",
+						server_icon());
+			});
+		}
 		log_v(MODULE, "Announcing %zu files to new client %zu", m_files.size(),
 				client_connected.info.id);
 
