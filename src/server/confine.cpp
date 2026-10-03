@@ -217,7 +217,8 @@ static int count_threads()
 // kill, tgkill, the sigqueue pair and pidfd_open are let through for this
 // pid alone, which a child (a mod's os.execute, the compiler) inherits as
 // it is: it signals nothing outside either. tkill, which glibc does not
-// use, is refused. The rest is Landlock's.
+// use, is refused, and truncate by path (see below). The rest is
+// Landlock's.
 static ss_ install_seccomp()
 {
 #if defined(__x86_64__)
@@ -263,6 +264,10 @@ static ss_ install_seccomp()
 	jeq(__NR_io_uring_enter, L_ENOSYS, NONE);
 	jeq(__NR_io_uring_register, L_ENOSYS, NONE);
 	jeq(__NR_tkill, L_PERM, NONE);
+	// truncate(2) by path: Landlock governs it from ABI 3 (Linux 6.2) only,
+	// and nothing here needs it -- sqlite, the compiler and the linker
+	// truncate what they have open, which the write rules cover
+	jeq(__NR_truncate, L_PERM, NONE);
 	jeq(__NR_socket, L_SOCKET, NONE);
 	jeq(__NR_kill, L_PIDCHECK, NONE);
 	jeq(__NR_tgkill, L_PIDCHECK, NONE);
