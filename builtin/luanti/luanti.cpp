@@ -8795,6 +8795,17 @@ struct Module: public interface::Module, public luanti::Interface
 	void set_player_pos(const ss_ &name, float x, float y, float z,
 			float look_h, float look_v, int32_t controls)
 	{
+		// Off the network: a NaN or a 1e30 was undefined in the cast below
+		// and "nan" or a cut-off chunk in the Lua one ([SECURITY_RUN_1]).
+		// Luanti's world ends at 31007; past 32000 is no position.
+		for(float v : {x, y, z, look_h, look_v}){
+			if(!std::isfinite(v))
+				return;
+		}
+		if(std::fabs(x) > 32000 || std::fabs(y) > 32000 ||
+				std::fabs(z) > 32000 || std::fabs(look_h) > 1e6 ||
+				std::fabs(look_v) > 1e6)
+			return;
 		// What the world streams around and what is active near; the step
 		// reads it, so this only writes it down
 		m_player_pos[name] = pv::Vector3DInt32(
@@ -8811,6 +8822,8 @@ struct Module: public interface::Module, public luanti::Interface
 
 	void player_fell(const ss_ &name, float speed)
 	{
+		if(!std::isfinite(speed) || std::fabs(speed) > 1e6)
+			return;
 		char buf[256];
 		snprintf(buf, sizeof buf,
 				"core.__player_fell(\"%s\", %f) return true",
