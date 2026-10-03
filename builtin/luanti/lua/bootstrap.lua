@@ -3413,6 +3413,14 @@ core.get_node_metadata = core.get_meta
 -- import is a one-shot into a world that normally has none, and a second
 -- import should not take a mod's memory back to what the Luanti world had.
 function core.__import_mod_storage(modname, fields)
+	-- A mod's name, as Luanti spells them: it comes out of the imported
+	-- world's database and is joined into a path below, and "../.." was a
+	-- file anywhere the server can write ([SECURITY_RUN_1])
+	if type(modname) ~= "string" or not modname:match("^[%w_]+$") then
+		core.log("warning", "mod storage import: not a mod's name: " ..
+				string.format("%q", tostring(modname)):sub(1, 80))
+		return 0
+	end
 	local dir = world_path .. "/mod_storage"
 	local path = dir .. "/" .. modname
 	local have = {}

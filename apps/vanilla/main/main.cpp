@@ -2389,6 +2389,14 @@ struct Module: public interface::Module
 		// random one: Luanti's own fixed_map_seed, written into the world's
 		// world.mt where the module reads it when the world is made
 		const ss_ seed = values.size() > 2 ? values[2] : "";
+		// One line of world.mt: a line break was a key of the sender's
+		// choosing after it
+		for(char c : seed){
+			if((unsigned char)c < 0x20 || c == 0x7f){
+				menu_error(packet.sender, "A seed is one line of text");
+				return;
+			}
+		}
 		storage::Save *save = nullptr;
 		storage::access(m_server, [&](storage::Interface *istorage){
 			save = istorage->create(name);
@@ -2577,6 +2585,13 @@ struct Module: public interface::Module
 
 	ss_ find_game(const ss_ &gameid)
 	{
+		// A directory's name and nothing else: a client sends it, and
+		// "../.." was any directory with a game.conf, whose mods then ran
+		// ([SECURITY_RUN_1])
+		if(gameid.empty() || gameid.find_first_not_of(
+				"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+				"0123456789_-") != ss_::npos)
+			return "";
 		ss_ path = luanti_path()+"/games/"+gameid;
 		if(interface::fs::path_exists(path+"/game.conf"))
 			return path;
