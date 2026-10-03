@@ -168,6 +168,13 @@ make the box the server refuses to start; `--unconfined` (or
 `BUILDAT_UNCONFINED=1`) runs it without one. `apps/box_test/check.sh` is
 the check.
 
+On Windows (8 or newer) the server restarts itself inside a per-app
+AppContainer with a job object, with the same directories. A local
+client joins it by a named pipe, since an AppContainer cannot reach
+loopback; other players connect over the network as before. A server
+started with no desktop, from a service or an SSH login, cannot be boxed
+yet and says so. `BUILDAT_WINDOWS_BOX=0` turns the box off.
+
 Client command sequence (CI / visual checks)
 --------------------------------------------
 

@@ -216,15 +216,14 @@ static ss_ confine_child(core::Config &config, const ss_ &module_path)
 	return "";
 }
 
-// **Opt-in until the user's run on Windows** (2026-10-03): the box is
-// built and has not run on real Windows (Wine has no AppContainer), and a
-// fault in it would stop every local game there. BUILDAT_WINDOWS_BOX=1
-// turns it on, for the client too (client/pipe_stream.cpp); otherwise
-// the server runs as before and says so.
+// **On by default since its runs on Windows 10** (2026-10-03: box_test,
+// a local floorplanner and vanilla world by the pipe, a LAN join).
+// BUILDAT_WINDOWS_BOX=0 turns it off, for the client too
+// (client/pipe_stream.cpp), and the server runs as before and says so.
 bool windows_box_wanted()
 {
 	const char *on = getenv("BUILDAT_WINDOWS_BOX");
-	return on && ss_(on) == "1";
+	return !(on && ss_(on) == "0");
 }
 
 ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
@@ -232,9 +231,8 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	if(config.get<bool>("boxed"))
 		return confine_child(config, module_path);
 	if(!windows_box_wanted()){
-		log_w(MODULE, "Not boxed: the Windows box is BUILDAT_WINDOWS_BOX=1 "
-				"until it has been run on Windows; the app can reach every "
-				"file you can");
+		log_w(MODULE, "Not boxed (BUILDAT_WINDOWS_BOX=0): the app can "
+				"reach every file you can");
 		return "";
 	}
 
@@ -400,6 +398,13 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	// unboxed (2026-10-03, on the Windows box over SSH)
 	if(code != 0)
 		log_w(MODULE, "The boxed server exited with 0x%08lx", (unsigned long)code);
+	// STATUS_DLL_INIT_FAILED: what the box dies with in session 0, where
+	// an SSH login or a service runs and there is no desktop (2026-10-03)
+	if(code == 0xC0000142)
+		log_e(MODULE, "The box could not start here: a server started with "
+				"no desktop -- from a service or an SSH login -- cannot be "
+				"boxed yet. Start it from a desktop session, or give "
+				"--unconfined to run the app unboxed.");
 	*exit_code = code == 0 ? 0 : (code < 256 ? (int)code : 1);
 	return "";
 }
