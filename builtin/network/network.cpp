@@ -346,6 +346,15 @@ static const size_t MAX_API_BODY = 64 * 1024;
 // A request that does not arrive, or a response nobody reads
 static const int64_t HTTP_STALL_US = 10000000;
 static const size_t MAX_FRAME_BYTES = 16 * 1024 * 1024;
+// Peers at once, under what select() can watch (FD_SETSIZE, 1024 on Linux,
+// and the module's own fds besides); see on_listen_event()
+// On Windows FD_SETSIZE is a count of sockets, 64 unless raised, and a socket
+// past it is never waited on at all.
+#ifdef _WIN32
+static const size_t MAX_PEERS = FD_SETSIZE > 80 ? 900 : FD_SETSIZE - 16;
+#else
+static const size_t MAX_PEERS = 900;
+#endif
 
 static ss_ base64(const ss_ &data)
 {
@@ -419,6 +428,9 @@ struct Module: public interface::Module, public network::Interface
 	sm_<Peer::Id, Peer> m_peers;
 	sm_<int, Peer*> m_peers_by_socket;
 	size_t m_next_peer_id = 1;
+	// When the listening socket is waited on again (on_listen_event)
+	int64_t m_accept_paused_until_us = 0;
+	int64_t m_peers_full_logged_us = 0;
 	// The game's answer to a peer that will not read; see SendPolicy in
 	// api.h. Buffer is what a game that never says anything gets, because
 	// it is the one that neither loses data nor makes anybody wait.
@@ -605,8 +617,29 @@ struct Module: public interface::Module, public network::Interface
 		log_v(MODULE, "network: on_listen_event(): fd=%i", event_fd);
 		// Create socket
 		sp_<interface::TCPSocket> socket(interface::createTCPSocket());
-		// Accept connection
-		socket->accept_fd(*m_listening_socket.get());
+		// Accept connection. One that cannot be accepted -- out of file
+		// descriptors -- stays in the backlog and keeps the listening
+		// socket readable, so the listening socket is left out of the
+		// wait for a moment rather than spun on; and nothing is stored,
+		// where a peer with no socket was ([SECURITY_RUN_1]).
+		if(!socket->accept_fd(*m_listening_socket.get())){
+			m_accept_paused_until_us = interface::os::time_us() + 200000;
+			return;
+		}
+		// No more peers than the wait can watch: select() takes fds under
+		// FD_SETSIZE, and every peer is one. Past the cap a connection is
+		// accepted and closed, which empties the backlog as it goes.
+		// simplified: one cap for all; a cap per address is the upgrade
+		// for a server that sees one address flood it.
+		if(m_peers.size() >= web::MAX_PEERS){
+			if(m_peers_full_logged_us + 10000000 < interface::os::time_us()){
+				m_peers_full_logged_us = interface::os::time_us();
+				log_w(MODULE, "%zu peers: refusing new connections",
+						m_peers.size());
+			}
+			socket->close_fd();
+			return;
+		}
 		// A peer's socket must not block: a send that waits for a client to
 		// read holds this module, and everything that wants to send
 		// anything waits behind it. What does not fit waits in the peer's
@@ -1272,7 +1305,8 @@ struct Module: public interface::Module, public network::Interface
 	sv_<int> get_sockets()
 	{
 		sv_<int> result;
-		result.push_back(m_listening_socket->fd());
+		if(interface::os::time_us() >= m_accept_paused_until_us)
+			result.push_back(m_listening_socket->fd());
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
 			// A pipe's peer has no fd to wait on; poll_pipes() reads it

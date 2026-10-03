@@ -56,6 +56,13 @@ namespace interface
 			for(int fd : sockets){
 				if(fd < 0 || attempt_bad_fds.count(fd) || bad_fds.count(fd))
 					continue;
+#ifndef _WIN32
+				// An fd past FD_SETSIZE is a write past the end of rfds,
+				// which is on the stack. Winsock's fd_set is a list and
+				// ignores what does not fit.
+				if(fd >= FD_SETSIZE)
+					continue;
+#endif
 				FD_SET(fd, &rfds);
 				if(fd > fd_max)
 					fd_max = fd;
