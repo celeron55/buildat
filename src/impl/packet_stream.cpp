@@ -44,7 +44,7 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 				(socket_buffer[2] & 0xff)<<0 |
 				(socket_buffer[3] & 0xff)<<8 |
 				(socket_buffer[4] & 0xff)<<16 |
-				(socket_buffer[5] & 0xff)<<24;
+				(size_t)(socket_buffer[5] & 0xff)<<24;
 		//log_d(MODULE, "size=%zu", size);
 		if(size > m_max_packet_bytes){
 			throw UnknownPacketReceived("A packet of "+itos((int64_t)size)+
@@ -97,7 +97,7 @@ void PacketStream::input(std::deque<char> &socket_buffer,
 					(data[2] & 0xff)<<0 |
 					(data[3] & 0xff)<<8 |
 					(data[4] & 0xff)<<16 |
-					(data[5] & 0xff)<<24;
+					(size_t)(data[5] & 0xff)<<24;
 			if(data.size() < 6 + name1_size)
 				continue;
 			ss_ name1(&data.c_str()[6], name1_size);
