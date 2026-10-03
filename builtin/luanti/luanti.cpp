@@ -3102,8 +3102,9 @@ struct Module: public interface::Module, public luanti::Interface
 		int base = lua_gettop(L);
 		lua_getglobal(L, "core");
 		lua_getfield(L, -1, "__mapgen_name");
+		lua_pushboolean(L, m_world_is_new);
 		ss_ out;
-		if(lua_pcall(L, 0, 1, 0) == 0){
+		if(lua_pcall(L, 1, 1, 0) == 0){
 			size_t len = 0;
 			const char *s = lua_tolstring(L, -1, &len);
 			if(s && len)

@@ -1076,8 +1076,42 @@ function core.__chat_message(name, message)
 	return false
 end
 
-function core.__mapgen_name()
-	return core.settings.values["mg_name"] or ""
+-- And for a new world, what its game asks for: Luanti's world-creation
+-- dialog offers only game.conf's allowed_mapgens and none of its
+-- disallowed_mapgens, with the game's minetest.conf choice selected, and
+-- prang and citadel name singlenode nowhere else.
+local function game_mapgen_name()
+	local conf = parse_conf(read_file(game_path .. "/game.conf"))
+	local function list(s)
+		local out = {}
+		for name in (s or ""):gmatch("[^,%s]+") do
+			out[#out + 1] = name
+		end
+		return out
+	end
+	local allowed, disallowed = list(conf.allowed_mapgens),
+			list(conf.disallowed_mapgens)
+	local function ok(name)
+		for _, d in ipairs(disallowed) do
+			if d == name then return false end
+		end
+		if #allowed == 0 then return true end
+		for _, a in ipairs(allowed) do
+			if a == name then return true end
+		end
+		return false
+	end
+	-- The dialog's order, v7 first as the default
+	local candidates = {DEFAULTS["mg_name"], "v7", "valleys", "carpathian",
+			"v5", "flat", "fractal", "singlenode", "v6"}
+	for _, name in ipairs(candidates) do
+		if ok(name) then return name end
+	end
+end
+
+function core.__mapgen_name(world_is_new)
+	return core.settings.values["mg_name"] or
+			(world_is_new and game_mapgen_name()) or ""
 end
 
 -- What a mapgen asks about a node, by content id. Without these the shim on
