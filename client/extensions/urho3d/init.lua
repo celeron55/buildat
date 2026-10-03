@@ -948,13 +948,16 @@ local function rebuild_id_rows(ids, sp)
 	local several = #ids > 1
 	-- Each line its own element on the root, right-aligned under the one
 	-- before: a column of them stretched every line to the widest, and
-	-- the colour's line went across the screen
-	local y = trust_sample:GetPosition().y + trust_sample:GetHeight() + 6
+	-- the colour's line went across the screen. **While logged in the
+	-- colour is behind the lines** (user): no colour line, the lines from
+	-- the top where it was, and one rectangle of the colour reaching the
+	-- extents of all of them.
+	local y = trust_sample:GetPosition().y
 	for i, id in ipairs(ids) do
 		local r = ui.root:CreateChild("UIElement")
 		r:SetName("__trusted_hidden_id_" .. i)
 		r.defaultStyle = trust_sample.defaultStyle
-		r.priority = 1000
+		r.priority = 1001
 		r:SetLayout(LM_HORIZONTAL, 8, IntRect(0, 0, 0, 0))
 		r:SetAlignment(HA_RIGHT, VA_TOP)
 		local t = r:CreateChild("Text")
@@ -982,8 +985,25 @@ local function rebuild_id_rows(ids, sp)
 		urho_SubscribeToEvent(b, "Released", fname)
 		r:SetPosition(-8, y)
 		y = y + math.max(r:GetHeight(), b:GetHeight()) + 4
-		r.visible = trust_sample.visible
+		r.visible = trust_sample_shown == true
 		id_rows[#id_rows + 1] = r
+	end
+	if #id_rows > 0 then
+		local pad = 4
+		local w = 0
+		for _, r in ipairs(id_rows) do
+			w = math.max(w, r:GetWidth())
+		end
+		local top = trust_sample:GetPosition().y
+		local bg = ui.root:CreateChild("BorderImage")
+		bg:SetName("__trusted_hidden_id_bg")
+		bg.priority = 1000
+		bg:SetAlignment(HA_RIGHT, VA_TOP)
+		bg:SetPosition(-8 + pad, top - pad)
+		bg:SetFixedSize(w + 2 * pad, (y - 4 - top) + 2 * pad)
+		bg.color = Color(trust_rgb[1], trust_rgb[2], trust_rgb[3], 1)
+		bg.visible = trust_sample_shown == true
+		id_rows[#id_rows + 1] = bg
 	end
 end
 Safe.SubscribeToEvent("Update", function(_, event_data)
@@ -1022,7 +1042,9 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 		log:info("trust colour sample " .. (show and "shown" or "hidden") ..
 				" (server address " .. tostring(address) .. ")")
 	end
-	trust_sample.visible = show
+	-- The colour's own line only while nobody is logged in: then the
+	-- lines' background is the colour
+	trust_sample.visible = show and #id_rows == 0
 	for _, r in ipairs(id_rows) do
 		r.visible = show
 	end
