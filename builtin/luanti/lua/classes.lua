@@ -1011,14 +1011,14 @@ end
 function NoiseMap:get_2d_map_flat(pos, buffer)
 	local x, y = to_v(pos, "x", "y", "z")
 	self.flat = __luanti_noise_map(self.np, self.seed, x, y, 0,
-			self.sx, self.sy, 0)
+			self.sx, self.sy, 0, buffer)
 	return self.flat
 end
 
 function NoiseMap:get_3d_map_flat(pos, buffer)
 	local x, y, z = to_v(pos, "x", "y", "z")
 	self.flat = __luanti_noise_map(self.np, self.seed, x, y, z,
-			self.sx, self.sy, self.sz)
+			self.sx, self.sy, self.sz, buffer)
 	return self.flat
 end
 
@@ -1099,6 +1099,16 @@ function PerlinNoiseMap(np, size)
 end
 
 ValueNoiseMap = PerlinNoiseMap
+
+-- A mod's buffer is filled, not only a fresh array returned: mapgens read
+-- the buffer they passed (extra_ordinance, 2026-10-03)
+if __luanti_noise_map then
+	local m = PerlinNoiseMap({offset = 0, scale = 1, seed = 1, octaves = 1,
+			persist = 0.5, spread = {x = 10, y = 10, z = 10}}, {x = 2, y = 3})
+	local buf = {}
+	local got = m:get_2d_map_flat({x = 0, y = 0}, buf)
+	assert(got == buf and #buf == 6, "a noise map fills the buffer it is given")
+end
 
 -- The same, seeded with the world's: what a mod means by core.get_perlin is
 -- noise that is this world's and not the same everywhere

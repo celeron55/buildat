@@ -5651,10 +5651,13 @@ struct Module: public interface::Module, public luanti::Interface
 		return 1;
 	}
 
-	// __luanti_noise_map(np, seed, x, y, z, sx, sy, sz) -> a flat array, x
-	// fastest and then y and then z. sz of 0 is the two-dimensional map,
-	// where y is the second axis -- which is the world's z, the way
-	// Luanti's own 2D maps are laid out.
+	// __luanti_noise_map(np, seed, x, y, z, sx, sy, sz[, buffer]) -> a flat
+	// array, x fastest and then y and then z. sz of 0 is the
+	// two-dimensional map, where y is the second axis -- which is the
+	// world's z, the way Luanti's own 2D maps are laid out. A buffer is
+	// filled and returned, as Luanti fills the one a mod passes: a mod
+	// that reads its buffer and not the return value got nothing from an
+	// array made fresh (extra_ordinance's mapgen, 2026-10-03).
 	static int l_noise_map(lua_State *L)
 	{
 		interface::NoiseParams np;
@@ -5686,7 +5689,10 @@ struct Module: public interface::Module, public luanti::Interface
 		else
 			result = noise.fbmMap2D(x, y);
 		noise.transformNoiseMap();
-		lua_createtable(L, (int)n, 0);
+		if(lua_istable(L, 9))
+			lua_pushvalue(L, 9);
+		else
+			lua_createtable(L, (int)n, 0);
 		for(int i = 0; i < (int)n; i++){
 			lua_pushnumber(L, result[i]);
 			lua_rawseti(L, -2, i + 1);
