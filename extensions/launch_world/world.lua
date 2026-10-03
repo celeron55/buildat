@@ -223,12 +223,12 @@ do
 	-- BUILDAT_LAUNCH_POCKETS=<n> holds the wall to fewer than it could,
 	-- which is how the spill is driven on a tree with nine games rather
 	-- than waited for until somebody installs twenty.
-	-- **BUILDAT_LAUNCH_PITCH=<voxels> widens the spacing**, which is how
-	-- the other walls are driven ([POCKETS_ROUND]): each wall holds
-	-- (its span - 12) / pitch, so a wide pitch reaches the side walls
-	-- with the games this tree has instead of waiting for forty of them
-	room.POCKET_PITCH = tonumber(env("BUILDAT_LAUNCH_PITCH")) or
-			room.POCKET_PITCH
+	-- **BUILDAT_LAUNCH_PITCH=<voxels> and BUILDAT_LAUNCH_COLS=<n>** are
+	-- the formation's column pitch and its spheres to a row, for reading
+	-- other picks at the wall station ([LAUNCH_WORLD] stage 2)
+	room.COL_PITCH = tonumber(env("BUILDAT_LAUNCH_PITCH")) or
+			room.COL_PITCH
+	room.COLS = tonumber(env("BUILDAT_LAUNCH_COLS")) or room.COLS
 	local want = tonumber(env("BUILDAT_LAUNCH_POCKETS")) or #GAMES
 	local made = room.set_pockets(math.min(#GAMES, want))
 	if made < #GAMES then
@@ -2024,7 +2024,9 @@ do
 end
 
 -- The light sits just under the opening, which is where it would be
-local OVERHEAD_Y = 25         -- voxels above the floor
+-- Voxels above the floor: under the ceiling, which is as high as the
+-- formation makes it
+local OVERHEAD_Y = room.Y_TOP - 1
 -- **The pockets' orbs and nothing else**: a thing on the floor is a
 -- glossy white sphere and takes the room's light rather than making any,
 -- so the sources are the games and the opening overhead
@@ -2715,28 +2717,39 @@ readout("b" .. api.version(), {x = 9.0, y = 0.25, z = -1.0}, 0.34,
 -- the pointing below reads them rather than the two it was set up with.
 -- Copies, not the node's own vectors -- a position property hands back a
 -- reference that follows the node.
--- **A standing eye, and the room is judged from nowhere else** (user,
--- 2026-09-23: the options renders read as too small a voxel against the
--- eye). The grid was not the fault -- 45 cm as asked -- the viewpoint
--- was: this stood at 2.75 m and 21 m back, so every voxel read 1.7
--- times too small. 1.6 m it is, and close enough to reach the pockets,
--- whose floors are at Y 0 to 3.
--- BUILDAT_LAUNCH_STAND=<metres> moves the standing place along z, which
--- is how the fov and the stand get read together ([LAUNCH_WORLD]: "change
--- the two together and read the look once") rather than argued about
-local HOME_FROM = {x = 0.0, y = 1.6,
--- **Eight metres, read 2026-09-24** with the 72 degree fov, the two
--- together as this plan asked. At fourteen the wall was a strip across
--- a frame of floor (mean 40, 90th 138); at eight it is the subject and
--- every rank of floor spheres is still in the frame, which is the
--- composition's own lower bound; at six the middle ranks leave. The
--- numbers moved toward the reference frame's with it -- mean 40 to 54
--- against 61, the 90th 138 to 227 against 172 -- and what is left over
--- the reference is the floor: its light squares are the brightest
--- surface in the room and they clip, which is where the 90th and the
--- white share come from, not from the sources.
-	z = tonumber(env("BUILDAT_LAUNCH_STAND")) or 8.0}
-local HOME_AT = {x = 0, y = 1.1, z = -6.0}
+-- **The wall station frames the formation** ([LAUNCH_WORLD] stage 2,
+-- section 3): near horizontal, square on to the middle of the rows, and
+-- back far enough that every sphere and the name beside it is in the
+-- frame with a margin round it -- the neighbours as context. The fov is
+-- the 72 degrees set below, and the frame is taken as 16:9.
+-- BUILDAT_LAUNCH_STAND=<metres> overrides how far back it stands.
+local HOME_FROM, HOME_AT
+do
+	local x0, x1, y0, y1 = 1e9, -1e9, 1e9, -1e9
+	for b = 1, BAYS do
+		local o = orb_places[b]
+		if o then
+			x0, x1 = math.min(x0, o.x), math.max(x1, o.x)
+			y0, y1 = math.min(y0, o.y), math.max(y1, o.y)
+		end
+	end
+	-- The last column's names reach most of a pitch past its spheres,
+	-- toward -x, which is the screen's right
+	local names = (room.COL_PITCH - room.POCKET) * VOXEL_M
+	local cx = (x0 - names + x1) / 2
+	local cy = (y0 + y1) / 2
+	local half_w = (x1 - x0 + names) / 2 + 2.0
+	local half_h = (y1 - y0) / 2 + 1.5
+	local t = math.tan(math.rad(72 / 2))
+	local back = math.max(half_h / t, half_w / (t * 16 / 9), 6.0)
+	local wall_z = BAY_Z * VOXEL_M
+	HOME_FROM = {x = cx, y = cy,
+		z = tonumber(env("BUILDAT_LAUNCH_STAND")) or wall_z + back}
+	HOME_AT = {x = cx, y = cy, z = wall_z}
+	log:info(string.format("wall station: %.1f m back from the wall, " ..
+			"the formation %d by %d", HOME_FROM.z - wall_z,
+			room.cols or 0, room.rows or 0))
+end
 local cam = {
 	from = {x = HOME_FROM.x, y = HOME_FROM.y, z = HOME_FROM.z},
 	at = {x = HOME_AT.x, y = HOME_AT.y, z = HOME_AT.z},
@@ -3234,9 +3247,16 @@ label_orb = 0
 label_lift = 1.5
 function label_place()
 	local n = orb_nodes[label_orb or 0]
-	if not n or name_text.text == "" then
+	-- **Not at the desk, and not for a sphere on the wall**: the wall's
+	-- spheres carry their names beside them (wall_labels below), and the
+	-- browsed one's lights up there with its caption under it -- a big
+	-- name over the formation lay across its neighbours
+	if not n or name_text.text == "" or terminal_open or
+			(label_orb >= 1 and label_orb <= BAYS) then
 		name_text.visible = false
-		desc_text.visible = false
+		desc_text.visible = label_orb >= 1 and label_orb <= BAYS and
+				not terminal_open and desc_text.text ~= "" and
+				station == "wall"
 		return
 	end
 	local p = n.position
@@ -3292,6 +3312,82 @@ function label_place()
 	local at = bounded(name_text, x, y - 30)
 	bounded(desc_text, x, at + name_text.height / 2 + 4)
 end
+
+-- **Every game's name beside its sphere, always** ([LAUNCH_WORLD]
+-- stage 2: "every sphere's name rendered permanently beside it,
+-- left-aligned"). The same overlay the big label is, for the same
+-- reason -- a Text3D in a pocket is occluded by its stone -- one per
+-- pocket, hung off the sphere's right edge so the names line up into
+-- columns with the formation. Placed every frame: an overlay follows
+-- the camera. A global table, this chunk being at Lua's local limit.
+wall_labels = {}
+-- Declared here: the handler below runs while the chunk is still
+-- building, and the stations are set up a long way down
+station = "wall"
+for b = 1, BAYS do
+	local o = ORBS[b]
+	if o and orb_places[b] then
+		local t = room_ui_child("Text")
+		t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 18)
+		t:SetColor(o.empty and magic.Color(0.75, 0.62, 0.45, 1) or
+				magic.Color(0.92, 0.90, 0.86, 1))
+		t.horizontalAlignment = magic.HA_LEFT
+		t.verticalAlignment = magic.VA_TOP
+		t.priority = 30
+		-- simplified: a name past eighteen letters is cut, so the
+		-- columns stay columns; the browsed one's full name is the big
+		-- label over it
+		t.text = #o.name > 18 and (o.name:sub(1, 16) .. "..") or o.name
+		wall_labels[#wall_labels + 1] = {b = b, text = t}
+	end
+end
+function handle_wall_labels()
+	-- At the wall's station only: from the floor's the names stood in a
+	-- row along the top of the frame
+	local hide = terminal_open or held_was or station ~= "wall"
+	local lw = math.max(1, magic.ui.root.width)
+	local lh = math.max(1, magic.ui.root.height)
+	local cc = camera_node:GetComponent("Camera")
+	for _, l in ipairs(wall_labels) do
+		-- Where the sphere is, or would be: the empty pocket has none
+		local op = orb_places[l.b]
+		local n = orb_nodes[l.b]
+		local show = not hide and op ~= nil
+		if show then
+			local p = n and n.position or V(op.x, op.y, op.z)
+			local dx, dy, dz = p.x - view_from.x, p.y - view_from.y,
+					p.z - view_from.z
+			show = dx * view_dir.x + dy * view_dir.y + dz * view_dir.z > 0
+			if show then
+				local c = cc:WorldToScreenPoint(p)
+				-- The sphere's right edge: a voxel and a half to the
+				-- right of its middle, which clears every size there is
+				local e = cc:WorldToScreenPoint(magic.Vector3(p.x - 1.5,
+						p.y, p.z))
+				local x = math.floor(e.x * lw + 4)
+				local y = math.floor(c.y * lh - l.text.height / 2)
+				l.text:SetPosition(x, y)
+				-- The one browsed or pointed at is lit, and its caption
+				-- hangs under it, left-aligned with it
+				local lit = l.b == label_orb
+				l.text:SetColor(lit and magic.Color(1.0, 0.82, 0.45, 1) or
+						(ORBS[l.b] and ORBS[l.b].empty and
+						magic.Color(0.75, 0.62, 0.45, 1) or
+						magic.Color(0.92, 0.90, 0.86, 1)))
+				if lit and desc_text.visible then
+					-- The caption is centred by its alignment: from the
+					-- middle of the root, and its own middle
+					desc_text:SetPosition(
+							math.floor(x - lw / 2 + desc_text.width / 2),
+							math.floor(y + l.text.height + 2 - lh / 2 +
+							desc_text.height / 2))
+				end
+			end
+		end
+		l.text.visible = show
+	end
+end
+magic.SubscribeToEvent("Update", "handle_wall_labels")
 
 pointed_orb = 0
 -- How near the pointer counts as on an orb, as a fraction of the screen
@@ -3442,6 +3538,13 @@ function handle_orb_update(event_type, event_data)
 					turner.rotation * magic.Quaternion(0, extra, 0),
 					1 - math.exp(-7.0 * dt))
 		end
+	end
+	-- **What is browsed is what is pointed at** ([LAUNCH_WORLD] stage 2:
+	-- one mode, no crosshair). The middle of the screen was the
+	-- crosshair's rule; with the stations the keys choose, and a click
+	-- launches whatever is under the cursor without pointing first
+	if (browsed or 0) > 0 then
+		best = browsed
 	end
 	if best ~= pointed_orb then
 		-- The step, in both directions
@@ -4149,30 +4252,28 @@ end
 -- second description of it.
 local browse_rows = {}
 do
-	-- **The wall is one row**, whatever a pocket's own depth is -- a
-	-- mouth stands where the slabs put it, so the pockets differ by a
-	-- voxel or two and a bucket by depth split them up. Then the floor,
-	-- its ranks in the order they stand, nearest the wall first.
-	-- **The wall's row is walked wall by wall** ([POCKETS_ROUND]): the
-	-- pockets are on four of them now, so "along the wall" is the
-	-- allocation's own order -- the faced wall first, then the sides,
-	-- then the one behind -- and within a wall the way it runs.
-	local wall_rank = {}
-	for k, w in ipairs(room.WALL_ORDER) do wall_rank[w] = k end
-	local wall = {}
+	-- **The wall's rows are the formation's** ([LAUNCH_WORLD] stage 2,
+	-- section 11: the arrows browse the room's own grid): top to bottom,
+	-- each left to right, then the floor's ranks below the last of them,
+	-- nearest the wall first.
+	local by_row = {}
 	for i = 1, BAYS do
 		local p = room.pockets[i]
 		if orb_places[i] and p then
-			wall[#wall + 1] = {i = i, w = wall_rank[p.wall] or 9, u = p.u0}
+			by_row[p.row] = by_row[p.row] or {}
+			table.insert(by_row[p.row], {i = i, u = p.u0})
 		end
 	end
-	table.sort(wall, function(a, b)
-		if a.w ~= b.w then return a.w < b.w end
-		return a.u < b.u
-	end)
-	local row = {}
-	for _, e in ipairs(wall) do row[#row + 1] = e.i end
-	if #row > 0 then browse_rows[1] = row end
+	for r = 1, room.rows or 0 do
+		local e = by_row[r]
+		if e then
+			-- Left to right on the screen, which is down x
+			table.sort(e, function(a, b) return a.u > b.u end)
+			local row = {}
+			for _, x in ipairs(e) do row[#row + 1] = x.i end
+			browse_rows[#browse_rows + 1] = row
+		end
+	end
 
 	local by_z = {}
 	for i = BAYS + 1, #orb_places do
@@ -4207,6 +4308,14 @@ function browse_show()
 			or ""
 	label_orb, label_lift = browsed, 2.6
 	label_place()
+	-- **The camera goes where the browsing is**: down off the wall's
+	-- last row is the floor's station, and back up is the wall's
+	local on_wall = browsed >= 1 and browsed <= BAYS
+	if on_wall and station == "floor" then
+		go_station("wall")
+	elseif not on_wall and station == "wall" then
+		go_station("floor")
+	end
 	log:info("browse: row " .. browse_row .. " of " .. #browse_rows ..
 			", " .. (o and o.name or "?"))
 end
@@ -4283,13 +4392,20 @@ end
 -- middle: a seven-metre ring in the corridor to the wall stands in
 -- front of the lights the room is lit by, which the check read as the
 -- room going still and dark (drift 5.6 to 0.9 of a level).
-local TERMINAL = {x = -7.4, y = 0.0, z = 6.2}
+-- **At the junction of the wall and the floor** ([LAUNCH_WORLD] stage 2,
+-- section 10): at the foot of the wall, to the right of the formation
+-- where nothing stands in front of a pocket, and the ring brought in to
+-- what fits between the desk and the stone.
+local TERMINAL = {
+	-- The screen's right is -x
+	x = math.max((room.form.x0 - 1) * VOXEL_M - 3.0,
+			room.X_MIN * VOXEL_M + 2.6),
+	y = 0.0, z = BAY_Z * VOXEL_M + 2.6}
 do
 	local t = TERMINAL
-	-- Wide enough that the desk stands inside it and the seat the camera
-	-- takes is inside it too, rather than behind the tube
+	-- The desk stands inside the ring, and the ring clear of the wall
 	part("Torus", magic.Vector3(t.x, t.y + 0.40, t.z),
-			magic.Vector3(7.0, 7.0, 7.0), chrome)
+			magic.Vector3(4.6, 4.6, 4.6), chrome)
 	part("Box", magic.Vector3(t.x, t.y + 0.45, t.z),
 			magic.Vector3(3.0, 0.9, 1.7), stone)
 	part("Box", magic.Vector3(t.x, t.y + 0.95, t.z + 0.55),

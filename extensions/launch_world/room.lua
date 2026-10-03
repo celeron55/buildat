@@ -67,28 +67,20 @@ M.SLAB_MIN, M.SLAB_MAX = 4, 10            -- across, in voxels
 M.SLAB_THIN_MIN, M.SLAB_THIN_MAX = 1, 1   -- and how thick it is
 M.SLAB_OUT_MIN, M.SLAB_OUT_MAX = 3, 8     -- and how far it stands out
 
--- **Every wall carries pockets, and each answers in its own frame**
--- ([POCKETS_ROUND], user 2026-09-24). A wall has an axis it runs along
--- (u), an axis it is cut into (the normal), and a direction into the
--- stone. A pocket is described in its own wall's frame -- u0, y0, su,
--- sy, sd and the mouth -- and everything that used to be an x and a z
--- is that question asked of the pocket's wall.
---
--- front is the wall the player faces at BAY_Z, back the one behind
--- them at Z_MAX, left and right the two at X_MIN and X_MAX.
-M.WALL_ORDER = {"front", "left", "right", "back"}
+-- **One wall** ([LAUNCH_WORLD] stage 2, sections 4 and 5: the three
+-- other walls are cut). A pocket is still described in its wall's frame
+-- -- u along it, n on its normal, and which way is into the stone -- so
+-- the questions below keep their shape; there is one wall to ask them
+-- of. The room's other three sides are the plain stone boundary.
+M.WALL_ORDER = {"front"}
 -- Which room axis runs along the wall; the other one is its normal
-M.WALL_U = {front = "x", back = "x", left = "z", right = "z"}
+M.WALL_U = {front = "x"}
 -- Which way is into the stone, on the normal axis
-M.WALL_IN = {front = -1, back = 1, left = -1, right = 1}
+M.WALL_IN = {front = -1}
 
--- The plane a wall's relief is measured from: the front wall's nominal
--- surface, and SIDE_IN inside the boundary for the other three
+-- The plane the wall's relief is measured from
 function M.nominal_face(w)
-	if w == "front" then return M.BAY_Z end
-	if w == "left" then return M.X_MIN + M.SIDE_IN - 1 end
-	if w == "right" then return M.X_MAX - M.SIDE_IN + 1 end
-	return M.Z_MAX - M.SIDE_IN + 1
+	return M.BAY_Z
 end
 
 -- (u, y, n) in a wall's frame back to a voxel: u along the wall, n on
@@ -158,99 +150,45 @@ end
 -- seen: the mass behind the nominal surface is the same stone, so what a
 -- slab is, to the eye, is the rectangle it covers and how far it stands
 -- out of it.
-M.slabs = {}
-for i = 1, M.SLABS do
-	local h1 = hash2(i, 1, 11)
-	local h2 = hash2(i, 2, 22)
-	local span = M.SLAB_MAX - M.SLAB_MIN + 1
-	local sx = M.SLAB_MIN + math.floor(h1 / 8) % span
-	local sy = M.SLAB_THIN_MIN + math.floor(h1 / 4096) %
-			(M.SLAB_THIN_MAX - M.SLAB_THIN_MIN + 1)
-	local x0 = M.X_MIN + h2 % (M.X_MAX - M.X_MIN - sx + 1)
-	local y0 = math.floor(h2 / 2048) % (M.Y_TOP - sy + 1)
-	M.slabs[i] = {x0 = x0, x1 = x0 + sx - 1, y0 = y0, y1 = y0 + sy - 1,
-		out = M.SLAB_OUT_MIN + math.floor(h1 / 1048576) %
-				(M.SLAB_OUT_MAX - M.SLAB_OUT_MIN + 1)}
+-- **Not over the formation** ([LAUNCH_WORLD] stage 2): the games stand
+-- in rows on a flat face, so a slab or an inset inside the formation's
+-- rectangle (and a voxel round it) is left out -- whether random relief
+-- around a regular formation reads as calm or as noise is stage 3's.
+-- The rectangle is set by set_pockets(); until then there is none.
+M.form = nil
+local function in_form(x0, x1, y0, y1)
+	local f = M.form
+	return f ~= nil and x1 >= f.x0 - 1 and x0 <= f.x1 + 1 and
+			y1 >= f.y0 - 1 and y0 <= f.y1 + 1
 end
-M.SLAB_OUT = M.SLAB_OUT_MAX     -- the furthest any slab comes out
-
--- **The other three walls exist too** (user, 2026-09-23: only the wall
--- the player faces was generated, and the rest were one flat plane of
--- stone). They are the same stone with the same slabs and insets and
--- **no pockets** -- the bays belong to the wall that has them, and these
--- are the dark mass the room's light-on-dark contrast is made of.
---
--- **Each seeded by its own name**, which is the trick the ornament
--- generator already uses, so they are not rotated copies of the front
--- wall or of each other.
---
--- A side wall's slabs are laid out along the axis it runs in -- z for
--- the two sides, x for the back -- and stand *into* the room from a
--- nominal face a little inside the boundary, so an inset has somewhere
--- to cut back to. Outside the boundary is solid stone either way.
-M.SIDE_IN = 3           -- how far the nominal side face stands inward
-M.side_slabs = {}
-local function name_salt(name)
-	local h = 0
-	for i = 1, #name do
-		h = (h * 31 + string.byte(name, i)) % 4294967296
-	end
-	return h
-end
-for _, name in ipairs({"left", "right", "back"}) do
-	local salt = name_salt(name)
-	local list = {}
-	for i = 1, M.SLABS do
-		local h1 = hash2(i, 1, salt % 100000 + 11)
-		local h2 = hash2(i, 2, salt % 100000 + 22)
+-- **As many as the wall is tall**: sixty to the proof's 27 voxels, the
+-- same density on a wall that grows with its rows
+local function make_slabs()
+	M.slabs = {}
+	local n = math.floor(M.SLABS * (M.Y_TOP + 1) / 27)
+	for i = 1, n do
+		local h1 = hash2(i, 1, 11)
+		local h2 = hash2(i, 2, 22)
 		local span = M.SLAB_MAX - M.SLAB_MIN + 1
-		local su = M.SLAB_MIN + math.floor(h1 / 8) % span
+		local sx = M.SLAB_MIN + math.floor(h1 / 8) % span
 		local sy = M.SLAB_THIN_MIN + math.floor(h1 / 4096) %
 				(M.SLAB_THIN_MAX - M.SLAB_THIN_MIN + 1)
-		-- Along the wall's own axis, in the room's coordinates; the
-		-- range is the widest either axis has, and what falls outside a
-		-- shorter wall simply never matches
-		local u0 = M.X_MIN + h2 % (M.X_MAX - M.X_MIN - su + 1)
+		local x0 = M.X_MIN + h2 % (M.X_MAX - M.X_MIN - sx + 1)
 		local y0 = math.floor(h2 / 2048) % (M.Y_TOP - sy + 1)
-		list[i] = {u0 = u0, u1 = u0 + su - 1, y0 = y0, y1 = y0 + sy - 1,
-			out = M.SLAB_OUT_MIN + math.floor(h1 / 1048576) %
-					(M.SLAB_OUT_MAX - M.SLAB_OUT_MIN + 1)}
-	end
-	M.side_slabs[name] = {list = list, salt = salt}
-end
-
--- How far a side wall stands into the room at (u, y): the nominal face
--- plus its slabs, less its insets, and never less than nothing -- a wall
--- that receded past the boundary would open a hole into the stone
--- outside.
-local side_cache = {}
-function M.side_in(name, u, y)
-	local key = name .. ":" .. u .. ":" .. y
-	local c = side_cache[key]
-	if c then return c end
-	local w = M.side_slabs[name]
-	local out = 0
-	for i = 1, #w.list do
-		local sl = w.list[i]
-		if u >= sl.u0 and u <= sl.u1 and y >= sl.y0 and y <= sl.y1 and
-				sl.out > out then
-			out = sl.out
+		if not in_form(x0, x0 + sx - 1, y0, y0 + sy - 1) then
+			M.slabs[#M.slabs + 1] = {x0 = x0, x1 = x0 + sx - 1, y0 = y0,
+				y1 = y0 + sy - 1,
+				out = M.SLAB_OUT_MIN + math.floor(h1 / 1048576) %
+						(M.SLAB_OUT_MAX - M.SLAB_OUT_MIN + 1)}
 		end
 	end
-	local c3 = hash2(floor_div(u + 2, 6), floor_div(y + 1, 6),
-			w.salt % 100000 + 3)
-	if c3 % 16 < 2 then
-		out = out - (1 + math.floor(c3 / 16) % M.INSET_IN)
-	end
-	local d = M.SIDE_IN + out
-	if d < 0 then d = 0 end
-	side_cache[key] = d
-	return d
 end
+make_slabs()
+M.SLAB_OUT = M.SLAB_OUT_MAX     -- the furthest any slab comes out
 
--- **The pockets, in the numbers the user gave 2026-09-23.** A pocket's
--- floor is at Y 0 to 3 and no higher, because the player reaches into
--- these; it is usually 3x3x3 with a 2 or a 4 turning up in any dimension.
+-- **The pockets, one size, in a formation** ([LAUNCH_WORLD] stage 2,
+-- section 5): 3 by 3 by 3 on a regular pitch, so the names beside them
+-- line up into columns.
 --
 -- **How many there are is how many things there are to put in them**,
 -- which is why M.set_pockets() below is a function and not a table: the
@@ -282,7 +220,7 @@ function slab_face(x, y)
 	-- enough to read black once the overhead light is the only thing
 	-- reaching them
 	local c3 = hash2(floor_div(x + 2, 6), floor_div(y + 1, 6), 3)
-	if c3 % 16 < 2 then
+	if c3 % 16 < 2 and not in_form(x, x, y, y) then
 		out = out - (1 + math.floor(c3 / 16) % M.INSET_IN)
 	end
 	return M.BAY_Z + out
@@ -293,10 +231,7 @@ end
 -- wall's slabs and insets, or a side wall's own relief off its
 -- boundary.
 function M.wall_face_raw(w, u, y)
-	if w == "front" then return slab_face(u, y) end
-	if w == "left" then return M.X_MIN + M.side_in("left", u, y) - 1 end
-	if w == "right" then return M.X_MAX - M.side_in("right", u, y) + 1 end
-	return M.Z_MAX - M.side_in("back", u, y) + 1
+	return slab_face(u, y)
 end
 
 -- **A pocket gets a surround.** Where the wall beside a mouth stands
@@ -337,80 +272,73 @@ function M.face_z(x, y)
 	return z
 end
 
--- **The pockets, one per thing the room holds.** Called before build(),
--- with however many launch actions the tree offered.
--- **How many pockets the wall can hold** ([LAUNCH_WORLD]: nine fit
--- across 93 voxels and thirty would not, and ContentDB can install a
--- game at any time). A pocket is at most four voxels across and wants a
--- column of wall either side, so six voxels apiece is what fits between
--- the margins -- and what does not fit stands on the floor instead,
--- which is the room's own answer for everything that is not in the
--- wall. Asking for more than this is not an error: it is answered with
--- what the wall can do.
--- **Six voxels apiece**: a pocket is at most four voxels across and
--- wants a column of wall either side, and that pitch is what a wall's
--- capacity is counted in. What does not fit stands on the floor
--- instead, which is the room's answer for everything not in a wall.
-M.POCKET_PITCH = 6
-function M.wall_capacity(w)
-	local lo, hi = M.wall_span(w)
-	return math.max(1, math.floor((hi - lo - 12) / M.POCKET_PITCH))
+-- **The formation** ([LAUNCH_WORLD] stage 2, sections 3 to 5): the games
+-- in the launch API's order, in rows read left to right and top to
+-- bottom, the way a menu is read. A name stands beside every sphere, to
+-- its right, so a column is a sphere and the room its name needs.
+--
+-- **No height limit**: as many rows as the games need, and the wall,
+-- the ceiling and the room's height follow (Y_TOP below). The width is
+-- the proof's room's, 93 voxels, which holds six columns at most; more wants a
+-- wider room, a constant away.
+-- First picks, in voxels, to be read at the wall station once
+-- playtested:
+-- Five, because a name's room on the screen is the screen's width over
+-- the columns whatever the pitch: at six a fifteen-letter name ran into
+-- the next sphere at the wall station's distance
+M.COLS = 5           -- spheres to a row
+M.COL_PITCH = 13     -- a sphere and its name
+M.ROW_PITCH = 5      -- a pocket and two voxels of wall
+M.FORM_BASE = 3      -- the bottom row's pocket floor, over the floor
+M.POCKET = 3         -- one size: across, up and deep
+M.TOP_MARGIN = 7     -- wall over the top row
+M.MIN_Y_TOP = 26     -- the proof's height, which a small tree keeps
+M.POCKET_PITCH = M.COL_PITCH
+
+-- How many columns the room's width holds, the names included
+function M.max_cols()
+	return math.max(1, math.floor((M.X_MAX - M.X_MIN - 8) / M.COL_PITCH))
 end
--- How many the four walls hold between them. Asking for more than this
--- is not an error: it is answered with what the room can do.
+-- No limit: rows are added as needed
 function M.max_pockets()
-	local n = 0
-	for _, w in ipairs(M.WALL_ORDER) do
-		n = n + M.wall_capacity(w)
-	end
-	return n
+	return 100000
 end
 
--- Answers how many it made, which may be fewer than it was asked for.
---
--- **The pockets are allocated in a fixed order** (user, 2026-09-24),
--- which is what makes a room with four games and a room with forty both
--- look deliberate: the wall the player faces first, **filling from its
--- middle outwards**, then the side walls, and last the wall behind the
--- player. So a small tree fills the middle of one wall and nothing
--- else, and nothing is behind the player until everything in front of
--- them is taken. **It is a sequence and not a share**: the n-th pocket
--- has a place, so growth reads as a room filling up rather than as a
--- different room.
+-- Answers how many it made, which is how many it was asked for. Each
+-- pocket knows its row (1 at the top) and column (1 at the left).
 function M.set_pockets(n)
-	n = math.max(1, math.min(n, M.max_pockets()))
+	n = math.max(1, n)
 	M.BAYS = n
 	M.pockets = {}
-	local b = 0
-	for _, w in ipairs(M.WALL_ORDER) do
-		local lo, hi = M.wall_span(w)
-		local mid = math.floor((lo + hi) / 2)
-		local cap = M.wall_capacity(w)
-		for k = 0, cap - 1 do
-			if b >= n then break end
-			-- Outwards from the middle: 0, +1, -1, +2, -2 ...
-			local step = math.ceil(k / 2) * ((k % 2 == 1) and 1 or -1)
-			local h = hash2(b, 7, 33)
-			-- 3 usually, 2 or 4 now and then: five draws, one of each end
-			local function dim(shift)
-				local d = math.floor(h / shift) % 5
-				if d == 0 then return 2 end
-				if d == 4 then return 4 end
-				return 3
-			end
-			local su, sy, sd = dim(1), dim(8), dim(64)
-			local y0 = math.floor(h / 512) % 4
-			local cu = mid + step * M.POCKET_PITCH
-			M.pockets[b + 1] = {wall = w, u0 = cu - math.floor(su / 2),
-				y0 = y0, su = su, sy = sy, sd = sd}
-			b = b + 1
-		end
+	local cols = math.min(M.COLS, M.max_cols(), n)
+	local rows = math.ceil(n / cols)
+	-- Centred on the room with the names' room counted: a column is a
+	-- pocket and the name beside it, a pitch in all. **The screen's
+	-- right is -x** (the camera looks down -z, and Urho3D is
+	-- left-handed), so the first column is at the highest x and its
+	-- name is on its lower-x side
+	local span = cols * M.COL_PITCH
+	local left = -math.floor(span / 2)
+	for b = 0, n - 1 do
+		local row, col = math.floor(b / cols), b % cols
+		M.pockets[b + 1] = {wall = "front",
+			u0 = left + span - M.POCKET - col * M.COL_PITCH,
+			y0 = M.FORM_BASE + (rows - 1 - row) * M.ROW_PITCH,
+			su = M.POCKET, sy = M.POCKET, sd = M.POCKET,
+			row = row + 1, col = col + 1}
 	end
-	-- **A pocket has one mouth, not a mouth per column.** Taking the
-	-- face at each (u, y) sheared the pocket wherever a slab covered
-	-- half of it, and a sheared hole does not read as a pocket. So the
-	-- mouth is the face at the pocket's own middle, settled once. The
-	-- face caches go with it: the faces answer the surround of these.
+	M.rows, M.cols = rows, cols
+	M.form = {x0 = left - 1, x1 = left + span - 1, y0 = M.FORM_BASE - 1,
+		y1 = M.FORM_BASE + (rows - 1) * M.ROW_PITCH + M.POCKET}
+	-- **The room is as tall as the formation wants**, and what is built
+	-- off the height is measured again
+	M.Y_TOP = math.max(M.MIN_Y_TOP, M.form.y1 + M.TOP_MARGIN)
+	M.H = M.Y_TOP - M.FLOOR_BOTTOM + 3
+	make_slabs()
+	face_cache = {}
+	wall_cache = {}
+	-- **A pocket has one mouth**: the face at its middle, settled once;
+	-- the formation's face is flat, so every mouth is the nominal plane
 	for i = 1, n do
 		local p = M.pockets[i]
 		p.mouth = M.wall_face_raw(p.wall, p.u0 + math.floor(p.su / 2),
@@ -420,7 +348,6 @@ function M.set_pockets(n)
 	wall_cache = {}
 	return n
 end
-M.set_pockets(M.BAYS)
 
 -- Whether (x, y, z) is inside a pocket, and whether it is one of the side
 -- columns that carry the ornament
@@ -512,31 +439,6 @@ function M.voxel_at(x, y, z)
 		local v = wall_voxel("front", face)
 		if v then return v end
 	end
-	-- **The three walls that are not the one with the pockets**: mass
-	-- standing in from each boundary by its own relief. Decided after
-	-- the pocket wall, which wins where they meet at a corner -- its
-	-- frieze and its columns are what the room is read by.
-	if y >= 0 and y <= M.Y_TOP then
-		-- **Their slabs wear the frieze too** (user, 2026-09-24: the
-		-- other walls' slabs have no ornament on their sides). The rule
-		-- is the pocket wall's: the outermost voxel of a face that
-		-- stands proud of the wall's nominal plane is the strip a
-		-- player sees, and that is where the ornament goes. `side_in`
-		-- is SIDE_IN plus the slab, less an inset, so a face is proud
-		-- when it stands further in than the nominal SIDE_IN.
-		-- **And they carry pockets too** ([POCKETS_ROUND]): a wall is a
-		-- mass up to the face its relief leaves, with pockets cut into
-		-- it and their columns beside them, whichever wall it is.
-		for _, w in ipairs({"left", "right", "back"}) do
-			local u, n = M.wall_un(w, x, y, z)
-			local face = M.wall_face(w, u, y)
-			-- Inside the mass: from the boundary to the face
-			if (n - face) * M.WALL_IN[w] >= 0 then
-				local v = wall_voxel(w, face)
-				if v then return v end
-			end
-		end
-	end
 	if y > M.Y_TOP then
 		-- The square is cut right through: what is above the room is
 		-- outside it
@@ -556,6 +458,9 @@ M.OX, M.OY, M.OZ = M.X_MIN - 1, M.FLOOR_BOTTOM - 1, M.Z_MIN - 1
 M.W = M.X_MAX - M.X_MIN + 3
 M.H = M.Y_TOP - M.FLOOR_BOTTOM + 3
 M.D = M.Z_MAX - M.Z_MIN + 3
+-- The formation for the default count, so that this file runs alone; it
+-- sets the room's height, which the block above is measured with
+M.set_pockets(M.BAYS)
 
 -- The room as the byte-per-voxel block set_8bit_voxel_geometry wants, x
 -- fastest and z slowest. Returned as an array of rows so the dissolve can
@@ -587,6 +492,7 @@ end
 function M.self_check()
 	M.id = {air = 1, stone = 2, dark = 3, floor_light = 4, floor_dark = 5,
 		column = 6, frieze = 7, placed = 8}
+	M.set_pockets(11)
 	assert(M.face_z(3, 4) == M.face_z(3, 4), "the wall is the same twice")
 	local out_min, out_max = 99, -99
 	for x = M.X_MIN, M.X_MAX do
@@ -600,7 +506,6 @@ function M.self_check()
 			"slabs stand out: " .. out_max)
 	assert(out_min < 0 and out_min >= -M.INSET_IN - M.SLAB_OUT_MAX,
 			"insets cut in: " .. out_min)
-	assert(#M.slabs == M.SLABS, "thirty slabs")
 	for i = 1, #M.slabs do
 		local s = M.slabs[i]
 		local sx, sy = s.x1 - s.x0 + 1, s.y1 - s.y0 + 1
@@ -612,27 +517,67 @@ function M.self_check()
 		assert(s.x0 >= M.X_MIN and s.x1 <= M.X_MAX and s.y0 >= 0 and
 				s.y1 <= M.Y_TOP, "slab " .. i .. " is on the wall")
 	end
-	for b = 1, M.BAYS do
-		local p = M.pockets[b]
-		assert(p.y0 >= 0 and p.y0 <= 3, "a pocket's floor is at Y 0 to 3")
-		for _, d in ipairs({p.su, p.sy, p.sd}) do
-			assert(d >= 2 and d <= 4, "a pocket is 2 to 4 voxels")
+	-- **The formation**: rows of five read left to right and top down,
+	-- every pocket one size, on one pitch, on a flat face, each a hole
+	-- with an ornamented column down each side of its mouth
+	local function formation_ok(n)
+		local made = M.set_pockets(n)
+		assert(made == n, n .. " things, " .. made .. " pockets")
+		assert(M.rows == math.ceil(n / M.cols), "as many rows as needed")
+		for b = 1, n do
+			local p = M.pockets[b]
+			assert(p.su == M.POCKET and p.sy == M.POCKET and
+					p.sd == M.POCKET, "one size of pocket")
+			assert(p.mouth == M.BAY_Z, "pocket " .. b .. " is on the face")
+			assert(p.u0 - 1 >= M.X_MIN and p.u0 + p.su <= M.X_MAX,
+					"pocket " .. b .. " is on the wall")
+			assert(p.y0 + p.sy <= M.Y_TOP, "pocket " .. b .. " is under the ceiling")
+			if b > 1 then
+				local q = M.pockets[b - 1]
+				if p.row == q.row then
+					assert(q.u0 - p.u0 == M.COL_PITCH and p.y0 == q.y0,
+							"a row on one pitch, toward -x")
+				else
+					assert(p.row == q.row + 1 and p.col == 1 and
+							q.y0 - p.y0 == M.ROW_PITCH,
+							"the next row is below, from the left")
+				end
+			end
+			local u, y = M.bay_u(b - 1), M.bay_y(b - 1)
+			local nn = p.mouth + M.WALL_IN[p.wall]
+			local x, yy, z = M.wall_xyz(p.wall, u, y, nn)
+			assert(M.voxel_at(x, yy, z) == M.id.air,
+					"pocket " .. b .. " is a hole")
+			local ax, ay, az = M.wall_xyz(p.wall, p.u0 - 1, y, nn)
+			local bx, by, bz = M.wall_xyz(p.wall, p.u0 + p.su, y, nn)
+			assert(M.voxel_at(ax, ay, az) == M.id.column and
+					M.voxel_at(bx, by, bz) == M.id.column,
+					"pocket " .. b .. " has a column down each side")
 		end
-		-- A voxel one in from the mouth is inside the pocket, and the
-		-- one beside each edge of the mouth is its ornamented column --
-		-- asked in the pocket's own wall's frame
-		local u, y = M.bay_u(b - 1), M.bay_y(b - 1)
-		local n = p.mouth + M.WALL_IN[p.wall]
-		local x, yy, z = M.wall_xyz(p.wall, u, y, n)
-		assert(M.voxel_at(x, yy, z) == M.id.air,
-				"bay " .. b .. " (" .. p.wall .. ") has a pocket")
-		local ax, ay, az = M.wall_xyz(p.wall, p.u0 - 1, y, n)
-		local bx, by, bz = M.wall_xyz(p.wall, p.u0 + p.su, y, n)
-		assert(M.voxel_at(ax, ay, az) == M.id.column and
-				M.voxel_at(bx, by, bz) == M.id.column,
-				"bay " .. b .. " (" .. p.wall ..
-				") has an ornamented column down each side")
+		-- No slab or inset inside the formation's rectangle
+		local f = M.form
+		for x = f.x0, f.x1 do
+			for y = f.y0, f.y1 do
+				if not M.in_pocket(x, y, M.BAY_Z) then
+					assert(M.face_z(x, y) == M.BAY_Z,
+							"the formation's face is flat at " .. x .. "," .. y)
+				end
+			end
+		end
 	end
+	formation_ok(1)
+	formation_ok(5)
+	formation_ok(6)
+	formation_ok(30)
+	-- **No height limit**: sixty games stand in twelve rows, and the
+	-- room is as tall as that
+	formation_ok(60)
+	assert(M.rows == 12 and M.Y_TOP >= M.form.y1 + M.TOP_MARGIN,
+			"the wall grows with its rows")
+	local tall = M.Y_TOP
+	M.set_pockets(5)
+	assert(M.Y_TOP == M.MIN_Y_TOP and M.Y_TOP < tall,
+			"and a small tree keeps the proof's height")
 	do
 		-- Somewhere on the wall a slab stands proud, and its outermost
 		-- voxel is the frieze while the one behind it is not
@@ -653,32 +598,14 @@ function M.self_check()
 		end
 		assert(found, "some slab stands proud of the wall")
 	end
-	do
-		-- **And the other three walls wear it as well** (user,
-		-- 2026-09-24: their slabs had no ornament on their sides). The
-		-- left wall's face is SIDE_IN plus its slab, so the voxel at
-		-- the face of a proud one is the frieze and the voxel behind it
-		-- is stone.
-		-- Past the pocket wall's own face: that wall is one mass at
-		-- every z in front of it and wins where they meet
-		local found = false
-		for z = M.Z_MIN + 1, M.Z_MAX - 1 do
-			for y = 0, M.Y_TOP do
-				local into = M.side_in("left", z, y)
-				local x = M.X_MIN + into - 1
-				if into > M.SIDE_IN and z > M.face_z(x, y) then
-					assert(M.voxel_at(x, y, z) == M.id.frieze,
-							"a side wall's slab wears the frieze")
-					assert(M.voxel_at(x - 1, y, z) == M.id.stone,
-							"and the stone behind it does not")
-					found = true
-					break
-				end
-			end
-			if found then break end
-		end
-		assert(found, "some slab of a side wall stands proud")
-	end
+	-- **The three other walls are cut**: from the pocket wall to the
+	-- boundary the room is open, at every side
+	assert(M.voxel_at(M.X_MIN, 5, 10) == M.id.air and
+			M.voxel_at(M.X_MAX, 5, 10) == M.id.air and
+			M.voxel_at(0, 5, M.Z_MAX) == M.id.air,
+			"no wall but the pocket wall")
+	assert(M.voxel_at(M.X_MIN - 1, 5, 10) == M.id.stone,
+			"and the boundary is stone")
 	assert(M.voxel_at(0, M.Y_TOP + 2, 4) == M.id.air,
 			"the opening is cut through the ceiling")
 	assert(M.voxel_at(M.OPEN_X1 + 2, M.Y_TOP + 2, 4) == M.id.stone,
@@ -689,96 +616,6 @@ function M.self_check()
 			"a checker square is two voxels")
 	local rows = M.build()
 	assert(#rows == M.H * M.D, "one row a (y, z): " .. #rows)
-	-- The pockets follow the count they are given, and they still fit
-	local function pockets_fit(made)
-		for b = 1, made do
-			local p = M.pockets[b]
-			local lo, hi = M.wall_span(p.wall)
-			assert(p.u0 - 1 >= lo and p.u0 + p.su <= hi,
-					"pocket " .. b .. " and its columns are on the " ..
-					p.wall .. " wall")
-			for c = 1, b - 1 do
-				local q = M.pockets[c]
-				if q.wall == p.wall then
-					assert(p.u0 + p.su <= q.u0 - 1 or
-							q.u0 + q.su <= p.u0 - 1,
-							"pocket " .. b .. " overlaps pocket " .. c)
-				end
-			end
-		end
-	end
-	M.set_pockets(11)
-	assert(#M.pockets == 11, "eleven things, eleven pockets")
-	pockets_fit(11)
-	-- **The order is the wall the player faces, from its middle
-	-- outwards** ([POCKETS_ROUND]): a small tree fills the middle of
-	-- one wall and nothing else, and nothing is behind the player until
-	-- everything in front of them is taken
-	do
-		M.set_pockets(3)
-		for b = 1, 3 do
-			assert(M.pockets[b].wall == "front",
-					"three pockets are all on the faced wall")
-		end
-		local lo, hi = M.wall_span("front")
-		local mid = math.floor((lo + hi) / 2)
-		assert(math.abs(M.bay_u(0) - mid) <= 2,
-				"the first pocket is in the middle of the faced wall")
-		local made = M.set_pockets(M.max_pockets())
-		local seen = {}
-		for b = 1, made do seen[M.pockets[b].wall] = true end
-		for _, w in ipairs(M.WALL_ORDER) do
-			assert(seen[w], "a full room has pockets on the " .. w .. " wall")
-		end
-		assert(M.pockets[made].wall == "back",
-				"the wall behind the player fills last")
-	end
-	-- **A pocket on any wall is a pocket**: cut into the stone, with an
-	-- ornamented column down each side of its mouth, wherever the
-	-- allocation put it -- including the corners, where the front
-	-- wall's mass claims the voxels a side wall's pocket is cut into
-	do
-		local made = M.set_pockets(30)
-		for b = 1, made do
-			local p = M.pockets[b]
-			local u, y = M.bay_u(b - 1), M.bay_y(b - 1)
-			local n = p.mouth + M.WALL_IN[p.wall]
-			local x, yy, z = M.wall_xyz(p.wall, u, y, n)
-			assert(M.voxel_at(x, yy, z) == M.id.air,
-					"pocket " .. b .. " (" .. p.wall .. ") is a hole")
-			local ax, ay, az = M.wall_xyz(p.wall, p.u0 - 1, y, n)
-			local bx, byy, bz = M.wall_xyz(p.wall, p.u0 + p.su, y, n)
-			assert(M.voxel_at(ax, ay, az) == M.id.column and
-					M.voxel_at(bx, byy, bz) == M.id.column,
-					"pocket " .. b .. " (" .. p.wall ..
-					") has a column down each side")
-		end
-	end
-	-- **More things than the walls can hold** is answered, not broken:
-	-- the pockets that are made still fit and do not overlap, and the
-	-- count says how many the room may put in its walls
-	do
-		local made = M.set_pockets(200)
-		assert(made == M.max_pockets(), "the walls say what they hold")
-		pockets_fit(made)
-	end
-	M.set_pockets(M.BAYS)
-	-- **The other three walls have relief of their own**, and are not
-	-- copies of each other: each one's depth has to vary along it, and
-	-- the three have to disagree somewhere
-	local depths = {}
-	for _, name in ipairs({"left", "right", "back"}) do
-		local lo, hi = nil, nil
-		for u = M.X_MIN, M.X_MAX do
-			local d = M.side_in(name, u, 4)
-			lo = (lo == nil or d < lo) and d or lo
-			hi = (hi == nil or d > hi) and d or hi
-		end
-		assert(hi > lo, "the " .. name .. " wall is flat")
-		depths[name] = hi .. ":" .. lo
-	end
-	assert(depths.left ~= depths.right or depths.left ~= depths.back,
-			"the three walls are the same wall")
 	assert(#rows[1] == M.W, "a row is the room across: " .. #rows[1])
 	assert(M.row_index(M.OY, M.OZ) == 1, "the first row is the first row")
 	return true
