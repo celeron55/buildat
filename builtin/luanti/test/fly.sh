@@ -20,7 +20,10 @@ rm -rf ../user/apps/vanilla/saves/buildat_test_fly
 srv=""; cli=""
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 port=$(( 29500 + (RANDOM % 90) ))
-cat > "$tmp/fixture.lua" <<'LUA'
+# Under the repo, not $tmp: the boxed server reads nothing in /tmp
+out="$here/local/fly"
+mkdir -p "$out"
+cat > "$out/fixture.lua" <<'LUA'
 -- fly.sh's server half: twenty seconds after the join, the player's fly
 -- privilege goes, and the position is logged every second for the runner
 core.register_on_joinplayer(function(player)
@@ -46,7 +49,7 @@ core.register_on_joinplayer(function(player)
 end)
 LUA
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_fly \
-	BUILDAT_LUANTI_LUA="$tmp/fixture.lua" \
+	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/srv.log" &
 for i in $(seq 1 200); do

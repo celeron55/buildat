@@ -1094,6 +1094,17 @@ struct Module: public interface::Module, public luanti::Interface
 
 	~Module()
 	{
+		// The generator is luanti_mapgen's code and worldgen's to run.
+		// Taken out while luanti_mapgen is still loaded -- it unloads
+		// after this, and worldgen after both -- and set_generator()
+		// waits for a generate() in progress to return.
+		if(m_scene){
+			worldgen::access(m_server, [&](worldgen::Interface *iw){
+				worldgen::Instance *instance = iw->get_instance(m_scene);
+				if(instance)
+					instance->set_generator(nullptr);
+			});
+		}
 		lua_prof_report();
 		if(m_lua)
 			lua_close(m_lua);
@@ -1740,6 +1751,29 @@ struct Module: public interface::Module, public luanti::Interface
 			}
 		}
 		update_load_points();
+		if(m_game_running)
+			run_completed_chunks();
+		{
+			static int64_t probe_t = 0;
+			const int64_t now = interface::os::time_us();
+			if(now - probe_t > 10000000){
+				probe_t = now;
+				ss_ st;
+				int n = 0;
+				voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+					for(uint64_t k : m_completion_sections){
+						if(n++ >= 6) break;
+						const pv::Vector3DInt16 sp = section_from_key(k);
+						st += " ("+itos(sp.getX())+","+itos(sp.getY())+","+itos(sp.getZ())+")"+
+								(world->is_section_loaded(sp) ? "L" : "-")+
+								(world->is_section_generated(sp) ? "G" : "-");
+					}
+				});
+				log_w(MODULE, "PROBE pending %zu completion %zu pins %zu forceloaded %zu to_run %zu:%s",
+						m_chunks_pending.size(), m_completion_sections.size(),
+						m_chunk_pins.size(), m_forceloaded.size(), m_chunks_to_run.size(), cs(st));
+			}
+		}
 		check_map_when_ready(dtime);
 		step_environment(dtime);
 		flush_node_writes();
@@ -3212,7 +3246,183 @@ struct Module: public interface::Module, public luanti::Interface
 			m_generated_sections.insert(section_key(event.section_p));
 		if(!m_game_running || event.scene != m_scene)
 			return;
-		run_on_generated(event.section_p);
+		for(const pv::Vector3DInt16 &c : chunks_completed(event.section_p))
+			run_on_generated_chunk(c);
+	}
+
+	// The chunks run_on_generated_chunk() has been over in this run. Not
+	// saved: a chunk is complete when its last section is generated, and
+	// that happens once.
+	std::set<int64_t> m_chunks_run;
+	// The chunks a generated section is in that are still missing one,
+	// so their on_generated has not run: emerge_area() does not call a
+	// block of one there yet, as Luanti calls it after on_generated.
+	// simplified: a section between its merge and its event here reads
+	// as there already; the window is one event dispatch.
+	std::set<int64_t> m_chunks_pending;
+	// Sections asked for only to complete a chunk. One of them arriving
+	// completes what it can and asks for nothing more: asking again would
+	// complete the next chunk out, and the next, without end.
+	std::set<uint64_t> m_completion_sections;
+	// A pending chunk's sections, pinned the way a forceload pins one
+	// until its on_generated has run: the streamer unloads what no point
+	// holds, and the game's writes into an unloaded section are dropped --
+	// VoxeLibre's bedrock and void were, under the box a test asked for.
+	sm_<int64_t, sv_<uint64_t>> m_chunk_pins;
+
+	static int64_t chunk_key(int x, int y, int z)
+	{
+		return ((int64_t)(int16_t)x << 32) | ((int64_t)(uint16_t)y << 16) |
+				(int64_t)(uint16_t)z;
+	}
+
+	// Luanti runs a game's on_generated once per mapchunk, over all of
+	// it, and a game's chances and boxes are written against that. A
+	// chunk is in up to eight sections; this returns the ones this section
+	// completed. Near a player or the spawn, the sections a chunk is still
+	// missing are asked for too, so the ground there is finished; anywhere
+	// else a chunk waits until something wants a block of it (see
+	// ask_chunk() in l_loaded_at). Completing every chunk a section touches
+	// is what Luanti does not do -- an emerge there generates one chunk --
+	// and with VoxeLibre's dungeons, which emerge their own surroundings,
+	// it never stopped spreading.
+	sv_<pv::Vector3DInt16> chunks_completed(const pv::Vector3DInt16 &section_p)
+	{
+		using luanti_mapgen::chunk_index;
+		sv_<pv::Vector3DInt16> out;
+		const int sx = m_section_size.getX(), sy = m_section_size.getY(),
+				sz = m_section_size.getZ();
+		if(sx <= 0)
+			return out;
+		const int x0 = section_p.getX() * sx, y0 = section_p.getY() * sy,
+				z0 = section_p.getZ() * sz;
+		const bool asked = m_completion_sections.erase(section_key(section_p));
+		const bool may_ask = !asked && near_a_point(section_p);
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
+			for(int cz = chunk_index(z0); cz <= chunk_index(z0 + sz - 1); cz++)
+			for(int cy = chunk_index(y0); cy <= chunk_index(y0 + sy - 1); cy++)
+			for(int cx = chunk_index(x0); cx <= chunk_index(x0 + sx - 1); cx++){
+				if(m_chunks_run.count(chunk_key(cx, cy, cz)))
+					continue;
+				if(ask_chunk(world, cx, cy, cz, may_ask))
+					out.push_back(pv::Vector3DInt16(cx, cy, cz));
+			}
+		});
+		if(m_load_points_changed){
+			m_load_points_changed = false;
+			update_load_points();
+		}
+		return out;
+	}
+
+	// Whether a chunk not yet run has all its sections generated; true
+	// marks it run, and the caller runs it. With ask, the missing ones are
+	// asked for -- from the save, which is synchronous, or from the
+	// generator, whose answer comes back through on_section_generated().
+	bool ask_chunk(voxelworld::Instance *world, int cx, int cy, int cz,
+			bool ask)
+	{
+		using luanti_mapgen::CHUNK_NODES;
+		using luanti_mapgen::CHUNK_OFFSET;
+		const int sx = m_section_size.getX(), sy = m_section_size.getY(),
+				sz = m_section_size.getZ();
+		const int nx = cx * CHUNK_NODES + CHUNK_OFFSET;
+		const int ny = cy * CHUNK_NODES + CHUNK_OFFSET;
+		const int nz = cz * CHUNK_NODES + CHUNK_OFFSET;
+		const int64_t key = chunk_key(cx, cy, cz);
+		bool complete = true;
+		const bool pin = ask && !m_chunk_pins.count(key);
+		for(int z = floordiv(nz, sz); z <= floordiv(nz + CHUNK_NODES - 1, sz); z++)
+		for(int y = floordiv(ny, sy); y <= floordiv(ny + CHUNK_NODES - 1, sy); y++)
+		for(int x = floordiv(nx, sx); x <= floordiv(nx + CHUNK_NODES - 1, sx); x++){
+			const pv::Vector3DInt16 sp(x, y, z);
+			if(pin){
+				m_forceloaded[section_key(sp)]++;
+				m_chunk_pins[key].push_back(section_key(sp));
+				m_load_points_changed = true;
+			}
+			if(world->is_section_generated(sp))
+				continue;
+			if(ask){
+				world->load_or_generate_section(sp);
+				if(world->is_section_generated(sp))
+					continue;
+				m_completion_sections.insert(section_key(sp));
+			}
+			complete = false;
+		}
+		if(complete){
+			m_chunks_run.insert(key);
+			m_chunks_pending.erase(key);
+		} else {
+			m_chunks_pending.insert(key);
+		}
+		return complete;
+	}
+
+	// Inside the generate radius of the spawn's point or a player's
+	bool near_a_point(const pv::Vector3DInt16 &sp)
+	{
+		auto near = [&](const pv::Vector3DInt16 &c, int rxz, int ry){
+			return std::abs(sp.getX() - c.getX()) <= rxz &&
+					std::abs(sp.getZ() - c.getZ()) <= rxz &&
+					std::abs(sp.getY() - c.getY()) <= ry;
+		};
+		if(near(pv::Vector3DInt16(0, 0, 0), SPAWN_RADIUS, SPAWN_RADIUS_Y))
+			return true;
+		for(const auto &pair : m_player_pos){
+			if(near(section_of(pair.second), m_generate_radius_xz,
+					GENERATE_RADIUS_Y))
+				return true;
+		}
+		return false;
+	}
+
+	// Chunks an emerge completed, run on the next tick: l_loaded_at is
+	// called from Lua, and a mod's on_generated is not run inside it
+	sv_<pv::Vector3DInt16> m_chunks_to_run;
+	// Pins changed inside a voxelworld access, where the points cannot be
+	// pushed: whoever made the access pushes them after it
+	bool m_load_points_changed = false;
+
+	void run_completed_chunks()
+	{
+		sv_<pv::Vector3DInt16> list;
+		list.swap(m_chunks_to_run);
+		for(const pv::Vector3DInt16 &c : list)
+			run_on_generated_chunk(c);
+	}
+
+	// A mod's on_generated over one mapchunk, as Luanti calls it: the
+	// chunk's corners, the blockseed its mapgen used, and what the mapgen
+	// reported and mapped there
+	void run_on_generated_chunk(const pv::Vector3DInt16 &c)
+	{
+		using luanti_mapgen::CHUNK_NODES;
+		using luanti_mapgen::CHUNK_OFFSET;
+		sv_<luanti_mapgen::GennotifyEvent> events;
+		luanti_mapgen::SectionMaps maps;
+		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
+			im->take_gennotify(c.getX(), c.getY(), c.getZ(), events);
+			im->take_maps(c.getX(), c.getY(), c.getZ(), maps);
+		});
+		const int x0 = c.getX() * CHUNK_NODES + CHUNK_OFFSET;
+		const int y0 = c.getY() * CHUNK_NODES + CHUNK_OFFSET;
+		const int z0 = c.getZ() * CHUNK_NODES + CHUNK_OFFSET;
+		run_on_generated_box(x0, y0, z0, x0 + CHUNK_NODES - 1,
+				y0 + CHUNK_NODES - 1, z0 + CHUNK_NODES - 1,
+				luanti_mapgen::chunk_blockseed(c.getX(), c.getY(), c.getZ(),
+						m_seed),
+				gennotify_string(events), maps);
+		auto pins = m_chunk_pins.find(chunk_key(c.getX(), c.getY(), c.getZ()));
+		if(pins != m_chunk_pins.end()){
+			for(uint64_t k : pins->second){
+				auto it = m_forceloaded.find(k);
+				if(it != m_forceloaded.end() && --it->second <= 0)
+					m_forceloaded.erase(it);
+			}
+			m_chunk_pins.erase(pins);
+		}
 	}
 
 	// The world create_instance() just made, asked for before anything reads
@@ -3295,6 +3505,10 @@ struct Module: public interface::Module, public luanti::Interface
 	//
 	// Not inside a voxelworld access: what a mod does here is a VoxelManip,
 	// which reaches into voxelworld itself.
+	//
+	// simplified: per section, with a section's own blockseed. What calls
+	// this is a singlenode world's fill, where there is no mapgen chunk;
+	// a generated world runs run_on_generated_chunk() instead.
 	void run_on_generated(const pv::Vector3DInt16 &section_p)
 	{
 		if(!m_scene || m_section_size.getX() <= 0)
@@ -3304,13 +3518,17 @@ struct Module: public interface::Module, public luanti::Interface
 		const int32_t x0 = (int32_t)section_p.getX() * sx;
 		const int32_t y0 = (int32_t)section_p.getY() * sy;
 		const int32_t z0 = (int32_t)section_p.getZ() * sz;
-		// Taken before the lock, because it is another module's answer
-		const ss_ gennotify = gennotify_of(section_p);
-		luanti_mapgen::SectionMaps maps;
-		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
-			im->take_maps(section_p.getX(), section_p.getY(),
-					section_p.getZ(), maps);
-		});
+		run_on_generated_box(x0, y0, z0, x0 + sx - 1, y0 + sy - 1,
+				z0 + sz - 1, (uint32_t)block_seed(section_p), "",
+				luanti_mapgen::SectionMaps());
+	}
+
+	void run_on_generated_box(int x0, int y0, int z0, int x1, int y1, int z1,
+			uint32_t blockseed, const ss_ &gennotify,
+			const luanti_mapgen::SectionMaps &maps)
+	{
+		if(!m_scene)
+			return;
 		{
 			interface::MutexScope ms(m_lua_mutex);
 			set_global_string("__luanti_gennotify", gennotify);
@@ -3318,10 +3536,8 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		char buf[256];
 		snprintf(buf, sizeof buf,
-				"core.__run_on_generated(%i, %i, %i, %i, %i, %i, %i)",
-				(int)x0, (int)y0, (int)z0,
-				(int)(x0 + sx - 1), (int)(y0 + sy - 1), (int)(z0 + sz - 1),
-				(int)block_seed(section_p));
+				"core.__run_on_generated(%i, %i, %i, %i, %i, %i, %u)",
+				x0, y0, z0, x1, y1, z1, (unsigned)blockseed);
 		// Timed because it is a mod's code over a quarter of a million
 		// voxels on the server's own thread: Luanti generates on an emerge
 		// thread of its own, and this module has one Lua state and no
@@ -3348,8 +3564,7 @@ struct Module: public interface::Module, public luanti::Interface
 		const int64_t took = interface::os::time_us() - t0;
 		if(took > 1000){
 			log_v(MODULE, "on_generated (%i, %i, %i): %i ms",
-					(int)section_p.getX(), (int)section_p.getY(),
-					(int)section_p.getZ(), (int)(took / 1000));
+					x0, y0, z0, (int)(took / 1000));
 		}
 		// A generator that takes longer than a step is one the streamer
 		// should ask less of: one section a pass instead of two, until it
@@ -3358,17 +3573,13 @@ struct Module: public interface::Module, public luanti::Interface
 		m_stream_budget = (took > (int64_t)(STEP_S * 1000000.0)) ? 1 : 2;
 	}
 
-	// What the mapgen made in this section and was asked to report, as a
+	// What the mapgen made in a chunk and was asked to report, as a
 	// line per event: the name, and where it is. A string because that is
 	// the boundary the rest of this crossing uses, and because a section
 	// with three hundred decorations in it is ten kilobytes of it.
-	ss_ gennotify_of(const pv::Vector3DInt16 &section_p)
+	static ss_ gennotify_string(
+			const sv_<luanti_mapgen::GennotifyEvent> &events)
 	{
-		sv_<luanti_mapgen::GennotifyEvent> events;
-		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
-			im->take_gennotify(section_p.getX(), section_p.getY(),
-					section_p.getZ(), events);
-		});
 		ss_ out;
 		for(const luanti_mapgen::GennotifyEvent &e : events){
 			out += e.name;
@@ -6068,14 +6279,44 @@ struct Module: public interface::Module, public luanti::Interface
 					p[i * 3], p[i * 3 + 1], p[i * 3 + 2])));
 			loaded[keys[i]] = false;
 		}
+		// Generated, in a world with a mapgen: a section can be loaded
+		// and not generated, holding only what a neighbour's padding
+		// handed it -- the bare terrain under a chunk whose on_generated
+		// has not run. A singlenode world's fill marks nothing generated,
+		// and there loaded is all there is to wait for.
+		const bool fill_only = (self->mapgen_name() == "singlenode");
 		voxelworld::access(self->m_server, self->m_scene,
 				[&](voxelworld::Instance *world){
-			for(auto &pair : loaded)
-				pair.second = world->is_section_loaded(
-						section_from_key(pair.first));
+			for(auto &pair : loaded){
+				const pv::Vector3DInt16 sp = section_from_key(pair.first);
+				pair.second = fill_only ? world->is_section_loaded(sp) :
+						world->is_section_generated(sp);
+			}
 		});
 		for(size_t i = 0; i < n; i++){
-			lua_pushboolean(L, loaded[keys[i]] ? 1 : 0);
+			bool ready = loaded[keys[i]];
+			if(ready && !self->m_chunks_pending.empty()){
+				using luanti_mapgen::chunk_index;
+				const int cx = chunk_index(p[i * 3]);
+				const int cy = chunk_index(p[i * 3 + 1]);
+				const int cz = chunk_index(p[i * 3 + 2]);
+				if(self->m_chunks_pending.count(chunk_key(cx, cy, cz))){
+					// Wanted now, so finished: what Luanti's emerge of a
+					// block does with its chunk
+					ready = false;
+					voxelworld::access(self->m_server, self->m_scene,
+							[&](voxelworld::Instance *world){
+						if(self->ask_chunk(world, cx, cy, cz, true))
+							self->m_chunks_to_run.push_back(
+									pv::Vector3DInt16(cx, cy, cz));
+					});
+					if(self->m_load_points_changed){
+						self->m_load_points_changed = false;
+						self->update_load_points();
+					}
+				}
+			}
+			lua_pushboolean(L, ready ? 1 : 0);
 			lua_rawseti(L, -2, (int)i + 1);
 		}
 		return 1;

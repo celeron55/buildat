@@ -561,25 +561,44 @@ end
 function core.set_mapgen_params(params)
 end
 
--- In mapblocks of sixteen, which is the unit Luanti answers this in: its own
--- chunk is five of them each way and a section here is four.
+-- In mapblocks of sixteen. Five, Luanti's default: luanti_mapgen generates
+-- in Luanti's chunks and cuts the sections out of them, and VoxeLibre works
+-- its world's edges out of this.
+-- simplified: the chunksize setting is not read; the generator's
+-- CHUNK_BLOCKS is what to make of it if a game ever sets one.
 function core.get_mapgen_chunksize()
-	local s = math.floor((tonumber(__luanti_section_size) or 64) / 16)
-	return vector.new(s, s, s)
+	return vector.new(5, 5, 5)
 end
 
--- The world's own edges, which is what a mod asks before it generates past
--- them. The module's region is the map's limits; see create_world().
+-- Luanti's get_mapgen_edges (mapgen.cpp), exactly: the outermost whole
+-- chunks inside the mapgen limit, per axis
 function core.get_mapgen_edges(mapgen_limit, chunksize)
-	local limit = tonumber(core.settings:get("mapgen_limit")) or 31000
-	if mapgen_limit ~= nil then
-		limit = mapgen_limit
+	local limit = tonumber(core.settings:get("mapgen_limit")) or 31007
+	if type(mapgen_limit) == "number" then
+		limit = math.floor(mapgen_limit)
 	end
-	local s = tonumber(__luanti_section_size) or 64
-	-- Whole sections, because a section is what is loaded and generated
-	local n = math.floor(limit / s)
-	return vector.new(-n * s, -n * s, -n * s),
-			vector.new((n + 1) * s - 1, (n + 1) * s - 1, (n + 1) * s - 1)
+	local cs = core.get_mapgen_chunksize()
+	if type(chunksize) == "number" then
+		cs = vector.new(chunksize, chunksize, chunksize)
+	elseif type(chunksize) == "table" then
+		cs = chunksize
+	end
+	local limit_b = math.floor(math.max(0, math.min(limit, 31007)) / 16)
+	local limit_min = -limit_b * 16
+	local limit_max = (limit_b + 1) * 16 - 1
+	local function calculate(c)
+		local ccoff_b = -math.floor(c / 2)
+		local csize_n = c * 16
+		local ccmin = ccoff_b * 16
+		local ccmax = ccmin + csize_n - 1
+		local numcmin = math.max(math.floor((ccmin - 16 - limit_min) / csize_n), 0)
+		local numcmax = math.max(math.floor((limit_max - ccmax - 16) / csize_n), 0)
+		return ccmin - numcmin * csize_n, ccmax + numcmax * csize_n
+	end
+	local x0, x1 = calculate(cs.x)
+	local y0, y1 = calculate(cs.y)
+	local z0, z1 = calculate(cs.z)
+	return vector.new(x0, y0, z0), vector.new(x1, y1, z1)
 end
 
 -- vim: set noet ts=4 sw=4:

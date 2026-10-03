@@ -20,6 +20,32 @@
 // generator may touch a module -- worldgen runs it in a thread.
 namespace luanti_mapgen
 {
+	// Luanti's mapchunk, which is what a world is generated in: five
+	// mapblocks of sixteen each way, on a grid that starts two mapblocks
+	// below zero (EmergeManager::getContainingChunk). The generator makes
+	// these and cuts the sections out of them, and the game's on_generated
+	// runs once per chunk, as in Luanti.
+	static const int CHUNK_NODES = 80;
+	static const int CHUNK_OFFSET = -32;
+	// The chunk a node is in, counted from the one at CHUNK_OFFSET
+	inline int chunk_index(int node)
+	{
+		const int n = node - CHUNK_OFFSET;
+		return (n >= 0 ? n : n - (CHUNK_NODES - 1)) / CHUNK_NODES;
+	}
+	// Luanti's Mapgen::getBlockSeed2 over the chunk's corner one mapblock
+	// out, which is the blockseed its mapgen used and on_generated is given
+	inline uint32_t chunk_blockseed(int cx, int cy, int cz, int64_t seed)
+	{
+		const int x = cx * CHUNK_NODES + CHUNK_OFFSET - 16;
+		const int y = cy * CHUNK_NODES + CHUNK_OFFSET - 16;
+		const int z = cz * CHUNK_NODES + CHUNK_OFFSET - 16;
+		uint32_t n = 1619U * (uint32_t)x + 31337U * (uint32_t)y +
+				52591U * (uint32_t)z + 1013U * (uint32_t)(int32_t)seed;
+		n = (n >> 13) ^ n;
+		return n * (n * n * 60493 + 19990303) + 1376312589;
+	}
+
 	// Which mapgen, and everything it is a function of. The names are
 	// Luanti's own: "singlenode" is a node everywhere, and what the rest
 	// will be is v7 and its friends.
@@ -295,16 +321,16 @@ namespace luanti_mapgen
 		// of this module.
 		virtual BiomeQuery* biome_query(const Params &params) = 0;
 
-		// What the generator made in a section and was asked to report,
-		// taken away: a generator runs in worldgen's thread and cannot
-		// reach a module, so it leaves its gennotify here and whoever runs
-		// the game's on_generated over that section picks it up. Nothing is
-		// kept for a section no flag was on for.
-		virtual void take_gennotify(int section_x, int section_y,
-				int section_z, sv_<GennotifyEvent> &out) = 0;
-		// The section's maps the same way, once
-		virtual void take_maps(int section_x, int section_y,
-				int section_z, SectionMaps &out) = 0;
+		// What the generator made in a chunk (chunk_index() of its
+		// corner) and was asked to report, taken away: a generator runs in
+		// worldgen's thread and cannot reach a module, so it leaves its
+		// gennotify here and whoever runs the game's on_generated over that
+		// chunk picks it up. Nothing is kept for a chunk no flag was on for.
+		virtual void take_gennotify(int chunk_x, int chunk_y, int chunk_z,
+				sv_<GennotifyEvent> &out) = 0;
+		// The chunk's maps the same way, once
+		virtual void take_maps(int chunk_x, int chunk_y, int chunk_z,
+				SectionMaps &out) = 0;
 	};
 
 	inline bool access(interface::Server *server,

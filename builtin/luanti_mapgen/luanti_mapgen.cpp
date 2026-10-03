@@ -11,6 +11,8 @@
 #include "worldgen/api.h"
 #include "core/log.h"
 #include <unordered_map>
+#include <list>
+#include <set>
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -229,13 +231,14 @@ template<class T>
 struct SectionStore
 {
 	interface::Mutex mutex;
-	// Push back, take from anywhere: a section is generated once and its
-	// events are taken once, so this is short unless nobody is taking them
+	// Push back, take from anywhere: a chunk is reported once and its
+	// events are taken once all of it is in the world, so this is the
+	// chunks at the edge of what is generated unless nobody is taking them
 	sv_<std::pair<int64_t, T>> sections;
 	// What is kept when nobody takes them, which is what a game that asks
 	// to be told and then never looks does. Luanti drops them the same way
 	// -- the emerge thread's events go with the chunk.
-	static const size_t MAX_SECTIONS = 256;
+	static const size_t MAX_SECTIONS = 512;
 
 	static int64_t key_of(int x, int y, int z)
 	{
@@ -279,8 +282,8 @@ typedef SectionStore<SectionMaps> MapsStore;
 struct VendoredGenerator: public worldgen::GeneratorInterface,
 		public luanti_mapgen::BiomeQuery
 {
-	// Luanti's mapgens write a chunk plus one mapblock of padding around
-	// it, which is where a tree at the edge or a cave's mouth lands
+	// Luanti's mapgens write a chunk plus one mapblock around it, which is
+	// where a tree at the edge or a cave's mouth lands
 	static const int PADDING = MAP_BLOCKSIZE;
 
 	NodeDefManager m_ndef;
@@ -293,9 +296,17 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 	MapgenParams *m_params = nullptr;
 	BiomeParams *m_bparams = nullptr;
 	Mapgen *m_mapgen = nullptr;
-	// How many mapblocks a section is; a section is sixty-four voxels and
-	// a mapblock sixteen
-	int m_chunk_blocks = 4;
+	// How many voxels a section is (sixty-four)
+	int m_section_nodes = 64;
+	// Luanti's mapchunk: five mapblocks, and the grid starts two mapblocks
+	// below zero on every axis (EmergeManager::getContainingChunk). A
+	// world is generated in these and the sections are cut out of them,
+	// because a mapgen's output depends on its chunk: an ore's or a large
+	// cave's y range is checked against it, and every chance a decoration
+	// takes comes from a seed made of its corner. Sections of their own,
+	// aligned at zero, put a boundary at sea level and made other worlds
+	// ([MAPGEN_DENSITY]).
+	static const int CHUNK_BLOCKS = CHUNK_NODES / MAP_BLOCKSIZE;
 
 	// Where what this made goes for the module to pick up, and the key it
 	// goes under; null when the game asked to be told about nothing
@@ -345,9 +356,7 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 			}
 			m_ndef.set_content(pair.first, (content_t)pair.second, f);
 		}
-		m_chunk_blocks = section_size / MAP_BLOCKSIZE;
-		if(m_chunk_blocks < 1)
-			m_chunk_blocks = 1;
+		m_section_nodes = section_size > 0 ? section_size : 64;
 
 		// The managers ask the server for the node definitions, and they
 		// ask while they are being built
@@ -652,7 +661,7 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 		const MapgenType type = Mapgen::getMapgenType(params.mgname);
 		m_params = Mapgen::createMapgenParams(type);
 		m_params->mgtype = type;
-		m_params->chunksize = v3s16(m_chunk_blocks);
+		m_params->chunksize = v3s16(CHUNK_BLOCKS);
 		m_params->seed = (u64)params.seed;
 		m_params->water_level = (s16)params.water_level;
 		// Which of the things a mapgen makes it is told to make. A world
@@ -679,7 +688,7 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 			m_bparams->seed = m_params->seed;
 			m_emerge->biomegen = m_emerge->biomemgr->createBiomeGen(
 					BIOMEGEN_ORIGINAL, m_bparams,
-					v3s16((s16)(m_chunk_blocks * MAP_BLOCKSIZE)));
+					v3s16((s16)CHUNK_NODES));
 		}
 
 		m_mapgen = Mapgen::createMapgen(type, m_params, m_emerge);
@@ -801,6 +810,13 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 		}
 	}
 
+	// The volume has it; generate() leaves it undefined, which the merge
+	// skips. A section is cut whole out of its chunks, what crossed a
+	// chunk's edge included, and the same voxels handed to a neighbour as
+	// padding only came back over what the game's on_generated had carved
+	// there since -- VoxeLibre's void filled with stone.
+	// simplified: a padding of zero would say so, and it made worldgen
+	// merge nothing at all; not looked into.
 	pv::Vector3DInt32 get_padding_voxels()
 	{
 		return pv::Vector3DInt32(PADDING, PADDING, PADDING);
@@ -875,19 +891,56 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 		return true;
 	}
 
-	void generate(main_context::SceneReference scene_ref,
-			const pv::Vector3DInt16 &section_p,
-			interface::VoxelVolume &volume)
+	// One mapchunk as the mapgen left it: its own voxels, what it wrote
+	// into the mapblock of padding around them, and what it reported
+	struct Chunk
 	{
-		if(!m_mapgen)
-			return;
-		// The section in mapblocks, which is what a mapgen counts in
-		const v3s16 blockpos_min(
-				(s16)(section_p.getX() * m_chunk_blocks),
-				(s16)(section_p.getY() * m_chunk_blocks),
-				(s16)(section_p.getZ() * m_chunk_blocks));
+		v3s16 node_min;
+		sv_<MapNode> nodes; // CHUNK_NODES^3, x fastest, then y
+		// What crossed the edge: a tree's crown, the top of a structure.
+		// Not the plain stone and water a mapgen overgenerates a layer of,
+		// which is the neighbour's own terrain before its caves.
+		sv_<std::pair<v3s16, MapNode>> spill;
+	};
+	// The chunks whose gennotify and maps have been left for the module.
+	// A chunk made again after the cache dropped it is the same chunk, and
+	// its on_generated has run or is still waiting for what was left the
+	// first time.
+	std::set<int64_t> m_reported;
+	// simplified: the last CHUNK_CACHE chunks (2 MB each) and nothing
+	// saved; a section after them makes its chunks again, which gives the
+	// same chunk at the cost of making it. A save of them is what to add
+	// if the generator's time ever shows up.
+	static const size_t CHUNK_CACHE = 32;
+	std::list<sp_<Chunk>> m_chunks;
+
+	const Chunk& get_chunk(const v3s16 &node_min)
+	{
+		for(auto it = m_chunks.begin(); it != m_chunks.end(); ++it){
+			if((*it)->node_min == node_min){
+				m_chunks.splice(m_chunks.begin(), m_chunks, it);
+				return *m_chunks.front();
+			}
+		}
+		m_chunks.push_front(make_chunk(node_min));
+		if(m_chunks.size() > CHUNK_CACHE)
+			m_chunks.pop_back();
+		return *m_chunks.front();
+	}
+
+	// How often a section's chunk had to be made, against how many
+	// sections there were: more than one or two a section is the cache
+	// being too small for the order the sections come in
+	size_t m_chunks_made = 0, m_sections_made = 0;
+
+	sp_<Chunk> make_chunk(const v3s16 &node_min)
+	{
+		m_chunks_made++;
+		sp_<Chunk> ch(new Chunk());
+		ch->node_min = node_min;
+		const v3s16 blockpos_min = getNodeBlockPos(node_min);
 		const v3s16 blockpos_max = blockpos_min +
-				v3s16((s16)(m_chunk_blocks - 1));
+				v3s16((s16)(CHUNK_BLOCKS - 1));
 		const v3s16 full_min = (blockpos_min - 1) * MAP_BLOCKSIZE;
 		const v3s16 full_max = (blockpos_max + 2) * MAP_BLOCKSIZE -
 				v3s16(1);
@@ -906,13 +959,40 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 
 		m_mapgen->makeChunk(&data);
 
-		// What it made and was asked to report, left where the module can
-		// pick it up when it runs the game's on_generated over this section
-		if(m_gennotify){
+		const v3s16 node_max = node_min + v3s16(CHUNK_NODES - 1);
+		const content_t c_stone = m_ndef.getId("mapgen_stone");
+		const content_t c_water = m_ndef.getId("mapgen_water_source");
+		const content_t c_river = m_ndef.getId("mapgen_river_water_source");
+		ch->nodes.resize((size_t)CHUNK_NODES * CHUNK_NODES * CHUNK_NODES);
+		size_t i = 0;
+		for(s16 z = full_min.Z; z <= full_max.Z; z++)
+		for(s16 y = full_min.Y; y <= full_max.Y; y++)
+		for(s16 x = full_min.X; x <= full_max.X; x++){
+			const v3s16 p(x, y, z);
+			const MapNode n = data.vmanip->getNodeNoExNoEmerge(p);
+			if(p.X >= node_min.X && p.X <= node_max.X &&
+					p.Y >= node_min.Y && p.Y <= node_max.Y &&
+					p.Z >= node_min.Z && p.Z <= node_max.Z){
+				ch->nodes[i++] = n;
+				continue;
+			}
+			const content_t c = n.getContent();
+			if(c == CONTENT_IGNORE || c == CONTENT_AIR || c == c_stone ||
+					c == c_water || c == c_river)
+				continue;
+			ch->spill.emplace_back(p, n);
+		}
+
+		// What it made and was asked to report, for the on_generated the
+		// module runs over this chunk once all of it is in the world
+		const int64_t key = GennotifyStore::key_of(chunk_index(node_min.X),
+				chunk_index(node_min.Y), chunk_index(node_min.Z));
+		const bool report = m_reported.insert(key).second;
+		if(report && m_gennotify){
+			sv_<GennotifyEvent> out;
 			std::map<std::string, std::vector<v3s16>> events;
 			m_mapgen->gennotify.getEvents(events);
 			m_mapgen->gennotify.clearEvents();
-			sv_<GennotifyEvent> out;
 			for(const auto &pair : events){
 				const ss_ name = deco_name_of(pair.first);
 				for(const v3s16 &p : pair.second){
@@ -922,19 +1002,19 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 					out.push_back(e);
 				}
 			}
-			m_gennotify->put(GennotifyStore::key_of(section_p.getX(),
-					section_p.getY(), section_p.getZ()), std::move(out));
+			m_gennotify->put(key, std::move(out));
+		} else if(m_gennotify){
+			m_mapgen->gennotify.clearEvents();
 		}
 
-		// The section's maps, for get_mapgen_object("heightmap") and its
+		// The chunk's maps, for get_mapgen_object("heightmap") and its
 		// three: VoxeLibre sets its grass and foliage palettes off the
 		// biomemap at generation and its villages read the heightmap
-		if(m_maps){
+		if(report && m_maps){
 			SectionMaps maps;
-			const v3s16 &cs = m_mapgen->csize;
-			maps.size_x = cs.X;
-			maps.size_z = cs.Z;
-			const size_t n = (size_t)cs.X * (size_t)cs.Z;
+			maps.size_x = CHUNK_NODES;
+			maps.size_z = CHUNK_NODES;
+			const size_t n = (size_t)CHUNK_NODES * CHUNK_NODES;
 			if(m_mapgen->heightmap)
 				maps.heightmap.assign(m_mapgen->heightmap,
 						m_mapgen->heightmap + n);
@@ -947,39 +1027,114 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 				maps.heatmap.assign(bg->heatmap, bg->heatmap + n);
 			if(bg && bg->humidmap)
 				maps.humidmap.assign(bg->humidmap, bg->humidmap + n);
-			m_maps->put(MapsStore::key_of(section_p.getX(),
-					section_p.getY(), section_p.getZ()), std::move(maps));
+			m_maps->put(key, std::move(maps));
 		}
+		return ch;
+	}
 
-		// And into the volume, which is the same box in the same order:
-		// what a MapNode holds is what VoxelFormat::luanti() binds
+	void generate(main_context::SceneReference scene_ref,
+			const pv::Vector3DInt16 &section_p,
+			interface::VoxelVolume &volume)
+	{
+		if(!m_mapgen)
+			return;
+		const int S = m_section_nodes;
+		const v3s16 sec_min((s16)(section_p.getX() * S),
+				(s16)(section_p.getY() * S), (s16)(section_p.getZ() * S));
+		const v3s16 sec_max = sec_min + v3s16((s16)(S - 1));
+		// The chunks the section is in, made or remembered
+		sv_<const Chunk*> chunks;
+		for(int cz = chunk_index(sec_min.Z); cz <= chunk_index(sec_max.Z); cz++)
+		for(int cy = chunk_index(sec_min.Y); cy <= chunk_index(sec_max.Y); cy++)
+		for(int cx = chunk_index(sec_min.X); cx <= chunk_index(sec_max.X); cx++){
+			const v3s16 node_min(
+					(s16)(cx * CHUNK_NODES + CHUNK_OFFSET),
+					(s16)(cy * CHUNK_NODES + CHUNK_OFFSET),
+					(s16)(cz * CHUNK_NODES + CHUNK_OFFSET));
+			chunks.push_back(&get_chunk(node_min));
+		}
+		// And the ones around them whose mapblock of padding reaches into
+		// the section, for what crossed their edge
+		sv_<const Chunk*> spilling = chunks;
+		for(int cz = chunk_index(sec_min.Z - PADDING); cz <= chunk_index(sec_max.Z + PADDING); cz++)
+		for(int cy = chunk_index(sec_min.Y - PADDING); cy <= chunk_index(sec_max.Y + PADDING); cy++)
+		for(int cx = chunk_index(sec_min.X - PADDING); cx <= chunk_index(sec_max.X + PADDING); cx++){
+			if(cx >= chunk_index(sec_min.X) && cx <= chunk_index(sec_max.X) &&
+					cy >= chunk_index(sec_min.Y) && cy <= chunk_index(sec_max.Y) &&
+					cz >= chunk_index(sec_min.Z) && cz <= chunk_index(sec_max.Z))
+				continue;
+			const v3s16 node_min(
+					(s16)(cx * CHUNK_NODES + CHUNK_OFFSET),
+					(s16)(cy * CHUNK_NODES + CHUNK_OFFSET),
+					(s16)(cz * CHUNK_NODES + CHUNK_OFFSET));
+			spilling.push_back(&get_chunk(node_min));
+		}
+		// get_chunk() may drop a chunk from the cache while later ones are
+		// made; CHUNK_CACHE is more than the 27 a section can reach
+		static_assert(CHUNK_CACHE >= 27, "a section's chunks must stay");
+
+		// Into the volume's section, from the chunks that cover it: what a
+		// MapNode holds is what
+		// VoxelFormat::luanti() binds
 		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
-		size_t written = 0;
-		const pv::Region &region = volume.getEnclosingRegion();
-		const pv::Vector3DInt32 lc = region.getLowerCorner();
-		const pv::Vector3DInt32 uc = region.getUpperCorner();
-		for(int32_t z = lc.getZ(); z <= uc.getZ(); z++)
-		for(int32_t y = lc.getY(); y <= uc.getY(); y++)
-		for(int32_t x = lc.getX(); x <= uc.getX(); x++){
-			const v3s16 p((s16)x, (s16)y, (s16)z);
-			if(!data.vmanip->m_area.contains(p))
-				continue;
-			const MapNode n = data.vmanip->getNodeNoExNoEmerge(p);
-			if(n.getContent() == CONTENT_IGNORE)
-				continue;
+		auto word_of = [&](const MapNode &n){
 			uint32_t word = 0;
 			f.id.set(word, n.getContent());
 			f.light_sky.set(word, n.param1 & 0x0f);
 			f.light_lamp.set(word, (n.param1 >> 4) & 0x0f);
 			f.param.set(word, n.param2);
-			volume.setVoxelAt(x, y, z, interface::VoxelInstance(word));
-			written++;
+			return word;
+		};
+		// The section only; see get_padding_voxels()
+		const pv::Vector3DInt32 lc(sec_min.X, sec_min.Y, sec_min.Z);
+		const pv::Vector3DInt32 uc(sec_max.X, sec_max.Y, sec_max.Z);
+		size_t written = 0;
+		for(const Chunk *ch : chunks){
+			const int x0 = std::max<int>(lc.getX(), ch->node_min.X);
+			const int y0 = std::max<int>(lc.getY(), ch->node_min.Y);
+			const int z0 = std::max<int>(lc.getZ(), ch->node_min.Z);
+			const int x1 = std::min<int>(uc.getX(), ch->node_min.X + CHUNK_NODES - 1);
+			const int y1 = std::min<int>(uc.getY(), ch->node_min.Y + CHUNK_NODES - 1);
+			const int z1 = std::min<int>(uc.getZ(), ch->node_min.Z + CHUNK_NODES - 1);
+			for(int z = z0; z <= z1; z++)
+			for(int y = y0; y <= y1; y++)
+			for(int x = x0; x <= x1; x++){
+				const MapNode &n = ch->nodes[
+						((size_t)(z - ch->node_min.Z) * CHUNK_NODES +
+						(y - ch->node_min.Y)) * CHUNK_NODES +
+						(x - ch->node_min.X)];
+				if(n.getContent() == CONTENT_IGNORE)
+					continue;
+				volume.setVoxelAt(x, y, z, interface::VoxelInstance(word_of(n)));
+				written++;
+			}
+		}
+		// What crossed a chunk's edge lands where its neighbour left air
+		// or nothing, which is how Luanti's map ends up too: a schematic
+		// places over air, and a mapgen leaves alone what it finds there
+		for(const Chunk *ch : spilling){
+			for(const auto &pair : ch->spill){
+				const v3s16 &p = pair.first;
+				if(p.X < lc.getX() || p.Y < lc.getY() || p.Z < lc.getZ() ||
+						p.X > uc.getX() || p.Y > uc.getY() || p.Z > uc.getZ())
+					continue;
+				const uint32_t here = volume.getVoxelAt(p.X, p.Y, p.Z).data;
+				if(here != 0 && f.id.get(here) != CONTENT_AIR)
+					continue;
+				volume.setVoxelAt(p.X, p.Y, p.Z,
+						interface::VoxelInstance(word_of(pair.second)));
+			}
+		}
+
+		if(++m_sections_made % 50 == 0){
+			log_i(MODULE, "%zu sections out of %zu chunks made",
+					m_sections_made, m_chunks_made);
 		}
 		if(m_logged < 3){
 			m_logged++;
-			log_v(MODULE, "section (%i, %i, %i): %zu voxels",
+			log_v(MODULE, "section (%i, %i, %i): %zu voxels from %zu chunks",
 					(int)section_p.getX(), (int)section_p.getY(),
-					(int)section_p.getZ(), written);
+					(int)section_p.getZ(), written, chunks.size());
 		}
 	}
 

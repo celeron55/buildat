@@ -1255,7 +1255,7 @@ function core.__mapgen_biomes()
 	-- core.get_biome_name() and core.get_biome_id().
 	biome_name_of_index = {[0] = "default"}
 	biome_index_of_name = {}
-	for _, b in pairs(core.registered_biomes or {}) do
+	for _, b in ipairs(core.__mapgen_registered.biome) do
 		local index = #out + 1
 		local min_pos, max_pos = b.min_pos or {}, b.max_pos or {}
 		biome_name_of_index[index] = b.name or ""
@@ -1336,7 +1336,7 @@ function core.__mapgen_ores()
 		}
 	end
 	local out = {}
-	for _, o in pairs(core.registered_ores or {}) do
+	for _, o in ipairs(core.__mapgen_registered.ore) do
 		local c_ore = id_of(o.ore)
 		if c_ore == nil then
 			core.log("warning", "Ore \"" .. tostring(o.ore) ..
@@ -1561,7 +1561,7 @@ function core.__mapgen_decorations()
 		}
 	end
 	local out = {}
-	for _, d in pairs(core.registered_decorations or {}) do
+	for _, d in ipairs(core.__mapgen_registered.decoration) do
 		out[#out + 1] = {
 			name = d.name or "",
 			type = d.deco_type or "simple",
@@ -2543,9 +2543,8 @@ core.object_refs = {}
 core.luaentities = {}
 
 -- The few whose nil would take a caller down where an empty one will not
--- The mapgen registrations are recorded rather than stubbed: the terrain is
--- a milestone away, and when it arrives this is the data it wants. The
--- handles are indices, which is what Luanti's are.
+-- The mapgen registrations are recorded rather than stubbed. The handles
+-- are indices, which is what Luanti's are.
 core.registered_biomes = {}
 core.registered_ores = {}
 core.registered_decorations = {}
@@ -2555,19 +2554,37 @@ core.registered_decorations = {}
 -- VoxeLibre's mapgen mod does for every decoration it wants to hear about.
 core.__mapgen_handles = {biome = {}, ore = {}, decoration = {}}
 
+-- What the mapgen is built from is this module's own record, in the order
+-- they came: the public table is the game's to change, and a change there
+-- does not reach Luanti's managers either. Walked out of the public one,
+-- VoxeLibre's decorations crossed in another order, the numbers gennotify
+-- reports named other decorations, and every structure was a shipwreck.
+core.__mapgen_registered = {biome = {}, ore = {}, decoration = {}}
+
 local function recording_registration(kind)
 	local list = core["registered_" .. kind .. "s"]
+	local own = core.__mapgen_registered[kind]
 	local handles = core.__mapgen_handles[kind]
 	core["register_" .. kind] = function(def)
-		list[#list + 1] = def
-		if def.name ~= nil and def.name ~= "" then
-			handles[def.name] = #list
+		own[#own + 1] = def
+		-- By name, as Luanti's builtin keys it (make_registration_wrap):
+		-- VoxeLibre reads registered_biomes[name]
+		if def.name ~= nil then
+			list[def.name] = def
+		else
+			list[#own] = def
 		end
-		return #list
+		if def.name ~= nil and def.name ~= "" then
+			handles[def.name] = #own
+		end
+		return #own
 	end
 	core["clear_registered_" .. kind .. "s"] = function()
-		for i = #list, 1, -1 do
-			list[i] = nil
+		for i = #own, 1, -1 do
+			own[i] = nil
+		end
+		for k in pairs(list) do
+			list[k] = nil
 		end
 		for k in pairs(handles) do
 			handles[k] = nil
