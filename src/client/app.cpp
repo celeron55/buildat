@@ -2020,10 +2020,12 @@ struct CApp: public App, public magic::Application
 			ss_ extname = launch_ui_name();
 			// -a kind/name/id: the menu boots and runs that one action of
 			// its grid ([LAUNCH_GRID]); the string goes in quoted, and it
-			// is a path's shape or nothing
+			// is a path's shape or nothing -- with an installed app's
+			// "<author>.<name>@<version>" in it ([AITTA_MVP])
 			ss_ action = g_client_config.get<ss_>("launch_action");
 			for(char c : action)
-				if(!(isalnum((unsigned char)c) || c == '_' || c == '-' || c == '/'))
+				if(!(isalnum((unsigned char)c) || c == '_' || c == '-' ||
+						c == '/' || c == '.' || c == '@' || c == '+'))
 					action = "";
 			// **A launch UI that asks to be sandboxed is run in the
 			// sandbox** ([LAUNCH_SANDBOX]): its own init.lua goes
