@@ -187,7 +187,14 @@ void send_mail(const ss_ &url, const ss_ &user, const ss_ &password,
 		curl_easy_setopt(c, CURLOPT_USERNAME, user.c_str());
 		curl_easy_setopt(c, CURLOPT_PASSWORD, password.c_str());
 	}
-	curl_easy_setopt(c, CURLOPT_USE_SSL, (long)CURLUSESSL_TRY);
+	// TLS or no mail: with "try", whoever is between here and the mail
+	// server strips STARTTLS and reads the reset codes and the password
+	// ([SECURITY_RUN_1]). A relay on this machine is the exception, which
+	// is where a mail server without TLS still makes sense.
+	const bool local = url.find("://localhost") != ss_::npos ||
+			url.find("://127.") != ss_::npos || url.find("://[::1]") != ss_::npos;
+	curl_easy_setopt(c, CURLOPT_USE_SSL,
+			(long)(local ? CURLUSESSL_TRY : CURLUSESSL_ALL));
 	curl_easy_setopt(c, CURLOPT_MAIL_FROM, ("<"+from+">").c_str());
 	struct curl_slist *rcpt = curl_slist_append(nullptr,
 			("<"+to+">").c_str());
