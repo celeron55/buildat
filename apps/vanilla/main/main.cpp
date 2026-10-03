@@ -930,7 +930,26 @@ struct Module: public interface::Module
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(flat);
 		}
+		// Each game's mapgens for the new-world screen, ahead of the lists
+		// that screen is reached from: [gameid, "v7,v5,...", ...]
+		sv_<ss_> mapgens;
+		for(const ss_ &id : list_apps()){
+			const ss_ game_path = find_game(id);
+			if(game_path.empty())
+				continue;
+			ss_ joined;
+			for(const ss_ &m : game_mapgens(game_path))
+				joined += (joined.empty() ? "" : ",")+m;
+			mapgens.push_back(id);
+			mapgens.push_back(joined);
+		}
+		std::ostringstream mos(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(mos);
+			ar(mapgens);
+		}
 		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "main:game_mapgens", mos.str());
 			inetwork->send(packet.sender, "main:saves", os.str());
 		});
 	}
@@ -1921,7 +1940,13 @@ struct Module: public interface::Module
 	// the gameid and is what the game is installed as
 	static ss_ read_game_title(const ss_ &game_path)
 	{
-		std::ifstream f(game_path+"/game.conf");
+		return read_conf_value(game_path+"/game.conf", {"name", "title"});
+	}
+
+	// The first of `keys` a Luanti .conf file sets, or ""
+	static ss_ read_conf_value(const ss_ &file, const sv_<ss_> &keys)
+	{
+		std::ifstream f(file);
 		if(!f.good())
 			return "";
 		ss_ line;
@@ -1939,10 +1964,43 @@ struct Module: public interface::Module
 			};
 			trim(key);
 			trim(value);
-			if(key == "name" || key == "title")
+			if(std::find(keys.begin(), keys.end(), key) != keys.end())
 				return value;
 		}
 		return "";
+	}
+
+	// The mapgens a new world of this game may have, the one it gets
+	// unless told otherwise first: Luanti's world-creation dialog offers
+	// game.conf's allowed_mapgens less its disallowed_mapgens and selects
+	// the game's minetest.conf mg_name ([GAME_CONF_MAPGENS]). In the menu's
+	// order, official's default first.
+	static sv_<ss_> game_mapgens(const ss_ &game_path)
+	{
+		auto list = [&](const char *key){
+			std::set<ss_> out;
+			std::istringstream is(read_conf_value(game_path+"/game.conf", {key}));
+			ss_ name;
+			while(std::getline(is, name, ',')){
+				name.erase(0, name.find_first_not_of(" \t"));
+				name.erase(name.find_last_not_of(" \t") + 1);
+				if(!name.empty())
+					out.insert(name);
+			}
+			return out;
+		};
+		const std::set<ss_> allowed = list("allowed_mapgens");
+		const std::set<ss_> disallowed = list("disallowed_mapgens");
+		sv_<ss_> out;
+		for(const char *name : {"v7", "v5", "valleys", "carpathian", "flat",
+				"fractal", "v6", "singlenode"})
+			if((allowed.empty() || allowed.count(name)) && !disallowed.count(name))
+				out.push_back(name);
+		const ss_ chosen = read_conf_value(game_path+"/minetest.conf", {"mg_name"});
+		auto it = std::find(out.begin(), out.end(), chosen);
+		if(it != out.end())
+			std::rotate(out.begin(), it, it + 1);
+		return out;
 	}
 
 	// A game to import, found by its id. The first root that has one wins,
@@ -2591,7 +2649,7 @@ struct Module: public interface::Module
 			for(const char *name : {"main:menu", "main:saves", "main:save_info",
 					"main:imports", "main:settings", "main:progress",
 					"main:contentdb_list", "main:menu_message",
-					"main:menu_error"})
+					"main:menu_error", "main:game_mapgens"})
 				inetwork->declare(name,
 						network::Interface::Channel::LatestOnly);
 		});

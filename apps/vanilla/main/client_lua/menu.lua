@@ -920,6 +920,20 @@ end)
 -- upgrade path is the luanti module answering a main:get_mapgens packet.
 local MAPGENS = {"v7", "v5", "valleys", "carpathian", "flat", "fractal",
 		"v6", "singlenode"}
+-- What each game offers of them, the server's reading of its game.conf
+-- and minetest.conf, the one to pick first ([GAME_CONF_MAPGENS])
+local game_mapgens = {}
+buildat.sub_packet("main:game_mapgens", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	game_mapgens = {}
+	for i = 1, #values - 1, 2 do
+		local list = {}
+		for name in values[i + 1]:gmatch("[^,]+") do
+			list[#list + 1] = name
+		end
+		game_mapgens[values[i]] = list
+	end
+end)
 
 -- What the screen was holding when a create failed, so that a name already
 -- taken does not throw the rest away ([NEW_WORLD_FORM]); nil when no create
@@ -977,9 +991,13 @@ function draw_new_save_name(gameid, state)
 	end
 	-- Which mapgen, one button each with the picked one marked: the same
 	-- shape as the flags above, and the sandbox has no dropdown
-	local mapgen = state.mapgen or MAPGENS[1]
+	local offered = game_mapgens[gameid] or MAPGENS
+	if #offered == 0 then
+		offered = MAPGENS
+	end
+	local mapgen = state.mapgen or offered[1]
 	local mapgen_buttons = {}
-	for _, name in ipairs(MAPGENS) do
+	for _, name in ipairs(offered) do
 		local b
 		b = menu:add((mapgen == name and "[x] " or "[ ] ") .. "mapgen " ..
 				name, function()
