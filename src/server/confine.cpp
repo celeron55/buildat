@@ -59,6 +59,7 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 #include <stdlib.h>
 #include <dirent.h>
 #include <fstream>
+#include <vector>
 
 // What older headers lack: the build box is older than the kernels the
 // server runs on
@@ -88,6 +89,9 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 #ifndef LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET
 	#define LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET (1ULL << 0)
 	#define LANDLOCK_SCOPE_SIGNAL (1ULL << 1)
+#endif
+#ifndef __NR_pidfd_open
+	#define __NR_pidfd_open 434
 #endif
 #ifndef __NR_io_uring_setup
 	#define __NR_io_uring_setup 425
@@ -207,7 +211,13 @@ static int count_threads()
 
 // seccomp: no unix socket -- Landlock does not govern a named socket's
 // connect(), and D-Bus, X11 and docker.sock are all one -- and no io_uring,
-// which goes around both. The rest is Landlock's.
+// which goes around both. And no signal to anything but this process
+// ([SECURITY_RUN_1]): Landlock scopes signals only from ABI 6 (Linux 6.12),
+// and before that a boxed server could kill any of the user's processes.
+// kill, tgkill, the sigqueue pair and pidfd_open are let through for this
+// pid alone, which a child (a mod's os.execute, the compiler) inherits as
+// it is: it signals nothing outside either. tkill, which glibc does not
+// use, is refused. The rest is Landlock's.
 static ss_ install_seccomp()
 {
 #if defined(__x86_64__)
@@ -219,31 +229,84 @@ static ss_ install_seccomp()
 #endif
 	const uint32_t deny_unix = SECCOMP_RET_ERRNO | (EAFNOSUPPORT & SECCOMP_RET_DATA);
 	const uint32_t deny_enosys = SECCOMP_RET_ERRNO | (ENOSYS & SECCOMP_RET_DATA);
-	struct sock_filter filter[] = {
-		BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, arch, 1, 0),
-		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS),
-		BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
-#if defined(__x86_64__)
-		// The x32 numbers are the same calls under other names
-		BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0x40000000, 0, 1),
-		BPF_STMT(BPF_RET | BPF_K, deny_enosys),
-#endif
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_io_uring_setup, 3, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_io_uring_enter, 2, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_io_uring_register, 1, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_socket, 2, 1),
-		BPF_STMT(BPF_RET | BPF_K, deny_enosys),
-		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-		// socket(domain, ...): the low word of the first argument
-		BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_UNIX, 0, 1),
-		BPF_STMT(BPF_RET | BPF_K, deny_unix),
-		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+	const uint32_t deny_perm = SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA);
+	const uint32_t pid = (uint32_t)getpid();
+	const uint32_t arg0_lo = offsetof(struct seccomp_data, args[0]);
+	const uint32_t arg0_hi = arg0_lo + 4; // little-endian, both arches
+
+	// Written with named targets and the offsets worked out after: a
+	// hand-counted jump is how a filter goes to the wrong place
+	enum Label { NONE = -1, L_ENOSYS, L_PERM, L_SOCKET, L_PIDCHECK, NUM_LABELS };
+	struct Ins { struct sock_filter f; int jt, jf; };
+	std::vector<Ins> prog;
+	int at[NUM_LABELS];
+	auto stmt = [&](uint16_t code, uint32_t k){
+		prog.push_back({BPF_STMT(code, k), NONE, NONE});
 	};
-	struct sock_fprog prog = {
-		(unsigned short)(sizeof(filter) / sizeof(filter[0])), filter};
-	if(prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) != 0)
+	// Equal goes to `jt`, else to `jf`; NONE is the next instruction
+	auto jeq = [&](uint32_t k, int jt, int jf){
+		prog.push_back({BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, k, 0, 0), jt, jf});
+	};
+	auto label = [&](Label l){ at[l] = (int)prog.size(); };
+
+	stmt(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch));
+	prog.push_back({BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, arch, 1, 0), NONE, NONE});
+	stmt(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS);
+	stmt(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr));
+#if defined(__x86_64__)
+	// The x32 numbers are the same calls under other names
+	prog.push_back({BPF_JUMP(BPF_JMP | BPF_JGE | BPF_K, 0x40000000, 0, 1),
+			NONE, NONE});
+	stmt(BPF_RET | BPF_K, deny_enosys);
+#endif
+	jeq(__NR_io_uring_setup, L_ENOSYS, NONE);
+	jeq(__NR_io_uring_enter, L_ENOSYS, NONE);
+	jeq(__NR_io_uring_register, L_ENOSYS, NONE);
+	jeq(__NR_tkill, L_PERM, NONE);
+	jeq(__NR_socket, L_SOCKET, NONE);
+	jeq(__NR_kill, L_PIDCHECK, NONE);
+	jeq(__NR_tgkill, L_PIDCHECK, NONE);
+	jeq(__NR_rt_sigqueueinfo, L_PIDCHECK, NONE);
+	jeq(__NR_rt_tgsigqueueinfo, L_PIDCHECK, NONE);
+	jeq(__NR_pidfd_open, L_PIDCHECK, NONE);
+	stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+	// socket(domain, ...): the low word of the first argument
+	label(L_SOCKET);
+	stmt(BPF_LD | BPF_W | BPF_ABS, arg0_lo);
+	prog.push_back({BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_UNIX, 0, 1),
+			NONE, NONE});
+	stmt(BPF_RET | BPF_K, deny_unix);
+	stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+	// The first argument is this pid, all 64 bits of it: not 0 (the
+	// group), not -1 (everyone), not another process
+	label(L_PIDCHECK);
+	stmt(BPF_LD | BPF_W | BPF_ABS, arg0_lo);
+	jeq(pid, NONE, L_PERM);
+	stmt(BPF_LD | BPF_W | BPF_ABS, arg0_hi);
+	jeq(0, NONE, L_PERM);
+	stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+	// Last: a classic BPF jump only goes forward
+	label(L_ENOSYS);
+	stmt(BPF_RET | BPF_K, deny_enosys);
+	label(L_PERM);
+	stmt(BPF_RET | BPF_K, deny_perm);
+
+	std::vector<struct sock_filter> filter;
+	for(size_t i = 0; i < prog.size(); i++){
+		struct sock_filter f = prog[i].f;
+		for(int which = 0; which < 2; which++){
+			const int l = which == 0 ? prog[i].jt : prog[i].jf;
+			if(l == NONE)
+				continue;
+			const int off = at[l] - (int)i - 1;
+			if(off < 0 || off > 255)
+				return "seccomp: a jump the filter cannot make";
+			(which == 0 ? f.jt : f.jf) = (uint8_t)off;
+		}
+		filter.push_back(f);
+	}
+	struct sock_fprog fprog = {(unsigned short)filter.size(), filter.data()};
+	if(prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &fprog) != 0)
 		return ss_("seccomp: ")+strerror(errno);
 	return "";
 }

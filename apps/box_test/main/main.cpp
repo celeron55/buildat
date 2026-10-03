@@ -352,6 +352,9 @@ struct Module: public interface::Module
 			{"read the parent's environment",
 				can_read("/proc/"+itos((int)getppid())+"/environ")},
 			{"signal the parent", kill(getppid(), 0) == 0},
+			// Everyone the user owns but this process; seccomp refuses it
+			// whatever the kernel, Landlock from ABI 6 ([SECURITY_RUN_1])
+			{"signal every process (kill -1)", kill(-1, 0) == 0},
 			{"a shell writing $HOME", [&](){
 				const ss_ f = home+"/.buildat_box_test_shell";
 				int r = system(("touch '"+f+"' 2>/dev/null").c_str());
@@ -380,7 +383,9 @@ struct Module: public interface::Module
 		// And what an app has: its own save and its own shared directory
 		const bool own = can_write(user+"/apps/box_test/save") &&
 				can_write(user+"/shared/box_test/shared") &&
-				can_list(user+"/shared/vanilla") && resolves("localhost");
+				can_list(user+"/shared/vanilla") && resolves("localhost") &&
+				// and signal itself, which raise() and abort() do
+				kill(getpid(), 0) == 0;
 		// Not asserted: it needs the network
 		log_i(MODULE, "box_test: resolving buildat.org %s",
 				resolves("buildat.org") ? "works" : "FAILED");
