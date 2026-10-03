@@ -3376,6 +3376,20 @@ struct CApp: public App, public magic::Application
 			lua_pushstring(L, "Invalid app name");
 			return 2;
 		}
+		// An app from a release is someone else's code: never started with
+		// the box off ([AITTA_MVP])
+		{
+			const char *u = getenv("BUILDAT_UNCONFINED");
+			const char *w = getenv("BUILDAT_WINDOWS_BOX");
+			if(!installed_app_dir(game).empty() &&
+					((u && ss_(u) == "1") || (w && ss_(w) == "0"))){
+				lua_pushboolean(L, false);
+				lua_pushstring(L, "An installed app runs only in the server's\n"
+						"box, and it is off here\n(BUILDAT_UNCONFINED=1 or "
+						"BUILDAT_WINDOWS_BOX=0).");
+				return 2;
+			}
+		}
 
 		if(!interface::fs::path_exists(game_path)){
 			lua_pushboolean(L, false);
