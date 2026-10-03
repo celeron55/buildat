@@ -253,6 +253,20 @@ static bool valid_name(const ss_ &name)
 	return true;
 }
 
+// A name no new account takes: "client<digits>" is what an app calls a
+// peer that has not logged in (apps/vanilla's player_name_of), and an
+// account of that name was the same player to it ([SECURITY_RUN_1]).
+// One already made keeps logging in.
+static bool reserved_name(const ss_ &name)
+{
+	if(name.size() < 7 || upper(name.substr(0, 6)) != "CLIENT")
+		return false;
+	for(size_t i = 6; i < name.size(); i++)
+		if(!isdigit((unsigned char)name[i]))
+			return false;
+	return true;
+}
+
 struct Hello
 {
 	uint8_t local = 0;      // no password asked
@@ -987,6 +1001,9 @@ struct Module: public interface::Module, public Interface
 						cs(name));
 			}
 		} else {
+			if(reserved_name(name))
+				return reply("\""+name+"\" is kept for a client that has "
+						"not logged in; choose another name");
 			sv_<ss_> privs;
 			if(local){
 				// The first admin of the launcher's server is its own user
@@ -1189,8 +1206,9 @@ struct Module: public interface::Module, public Interface
 			log_i(MODULE, "%s deleted the account %s", cs(by), cs(r.name));
 			result("The account "+r.name+" was deleted");
 		} else if(r.cmd == "add"){
-			if(!valid_name(r.name))
-				return result("A name is 1 to 20 letters, digits, _ or -");
+			if(!valid_name(r.name) || reserved_name(r.name))
+				return result("A name is 1 to 20 letters, digits, _ or -, "
+						"and not client<digits>");
 			if(exists)
 				return result("There is an account "+r.name+" already");
 			if(r.arg.size() < MIN_PASSWORD || r.arg.size() > 100)
@@ -1521,8 +1539,9 @@ struct Module: public interface::Module, public Interface
 	{
 		if(!m_store)
 			return "Not ready";
-		if(!valid_name(name))
-			return "A name is 1 to 20 letters, digits, _ or -";
+		if(!valid_name(name) || reserved_name(name))
+			return "A name is 1 to 20 letters, digits, _ or -, and not "
+					"client<digits>";
 		if(exists(name))
 			return "That name is taken";
 		if(password.size() < MIN_PASSWORD || password.size() > 100)
