@@ -1094,9 +1094,13 @@ local function draw_wielded(item_name, stack)
 			wield_shapes[key] = shape
 		end
 	end
+	-- Only in first person: a child is drawn whatever its parent says,
+	-- so the third-person views have to be said here too
+	-- ([THIRD_PERSON_WIELD])
+	local first = WIELD.camera_mode == 1
 	for name, sh in pairs(wield_shapes) do
 		if sh then
-			sh.node.enabled = (name == key)
+			sh.node.enabled = first and (name == key)
 		end
 	end
 	if shape then
@@ -1112,7 +1116,7 @@ local function draw_wielded(item_name, stack)
 		return
 	end
 	wield_material:SetTexture(magic.TU_DIFFUSE, tex)
-	wield_node:GetChild("box").enabled = true
+	wield_node:GetChild("box").enabled = first
 	WIELD.shown_wanted = true
 	wield_node.enabled = WIELD.camera_mode == 1
 end
@@ -4352,10 +4356,15 @@ keys.on_key = function(key)
 		end
 		WIELD.camera_mode = next_mode
 		luanti.set_draw_self(next_mode ~= 1)
+		-- **Deep, and drawn again on the way back** ([THIRD_PERSON_WIELD],
+		-- 2026-10-03): a node's enabled does not reach its children, so
+		-- turning off wield_node alone left the held block and the bare
+		-- hand drawn at the screen's corner in third person. First person
+		-- puts back exactly what the item in hand draws.
 		if next_mode == 1 then
-			wield_node.enabled = WIELD.shown_wanted == true
+			draw_hotbar()
 		else
-			wield_node.enabled = false
+			wield_node:SetDeepEnabled(false)
 		end
 		luanti.chat_local(({"First person view", "Third person view",
 				"Third person view (front)"})[next_mode])
