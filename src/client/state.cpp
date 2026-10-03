@@ -118,6 +118,8 @@ struct CState: public State
 	interface::PacketStream m_packet_stream;
 	sp_<app::App> m_app;
 	ss_ m_remote_cache_path;
+	// What this connection has written into it, against REMOTE_WRITE_MAX
+	uint64_t m_remote_written = 0;
 	ss_ m_tmp_path;
 	sm_<ss_, ss_> m_file_hashes; // name -> hash
 	set_<ss_> m_waiting_files; // name
@@ -372,6 +374,29 @@ struct CState: public State
 		{
 			std::lock_guard<std::mutex> lock(m_address_mutex);
 			m_address = address;
+		}
+		// **A cache of its own per server** ([SECURITY_RUN_1]): the files
+		// are kept by their hash and a client asks only for those it does
+		// not have, so in one cache every server learned which of another
+		// server's files this client held -- where it had been. This
+		// machine's own servers share one, the launcher's game being on a
+		// new port each time. And what a connection may write into it is
+		// bounded (file_contents).
+		{
+			ss_ name = "local";
+			if(address.compare(0, 10, "localhost:") != 0 &&
+					address.compare(0, 10, "127.0.0.1:") != 0 &&
+					address.compare(0, 6, "[::1]:") != 0 &&
+					address.compare(0, 5, "pipe:") != 0){
+				name = "server_"+address;
+				for(char &c : name)
+					if(!(isalnum((unsigned char)c) || c == '-' || c == '.'))
+						c = '_';
+			}
+			m_remote_cache_path = g_client_config.get<ss_>("cache_path")+
+					"/remote/"+name;
+			interface::fs::create_directories(m_remote_cache_path);
+			m_remote_written = 0;
 		}
 		if(address.empty()){
 			if(error)
@@ -810,9 +835,20 @@ void CState::setup_packet_handlers()
 						cs(interface::sha1::hex(file_hash2)));
 				continue;
 			}
+			// simplified: a ceiling per connection, not on the cache: a
+			// server sends at most this much a session, and the disk is the
+			// user's to clear (the cache directory)
+			static const uint64_t REMOTE_WRITE_MAX =
+					(uint64_t)2 * 1024 * 1024 * 1024;
+			if(m_remote_written + file_content.size() > REMOTE_WRITE_MAX){
+				log_w(MODULE, "The server has sent %s of files this "
+						"connection; \"%s\" is not kept", "2 GiB",
+						cs(file_name));
+				continue;
+			}
+			m_remote_written += file_content.size();
 			ss_ file_hash_hex = interface::sha1::hex(file_hash);
-			ss_ path = g_client_config.get<ss_>("cache_path")+"/remote/"+
-					file_hash_hex;
+			ss_ path = m_remote_cache_path+"/"+file_hash_hex;
 			log_d(MODULE, "Saving %s to %s", cs(file_name), cs(path));
 			std::ofstream of(path, std::ios::binary);
 			of<<file_content;
