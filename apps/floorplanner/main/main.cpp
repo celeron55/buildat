@@ -517,6 +517,10 @@ struct Peer
 	bool has_presence = false;
 	// Rate limit: a bucket of operations refilled per second
 	double op_budget = 0;
+	// And one for what is passed on to everyone in the plan or is heavy to
+	// make -- presence, previews, chat, an export -- which had none
+	// ([SECURITY_RUN_1]). Taken by spend_msg().
+	double msg_budget = 0;
 };
 
 template<typename T>
@@ -545,6 +549,10 @@ static bool unpack(const ss_ &data, T &value)
 
 static const double OPS_PER_SECOND = 400;
 static const double OPS_BURST = 4000;
+// A presence or a preview costs 1 (a drag sends both at its frame rate), a
+// chat line 20, an export 100: five lines a second, one export a second
+static const double MSGS_PER_SECOND = 100;
+static const double MSGS_BURST = 200;
 
 struct VoxelEdit
 {
@@ -1096,6 +1104,35 @@ struct Plan
 		return "";
 	}
 
+	// A drag as another user's client will draw it ([SECURITY_RUN_1]):
+	// what the client previews is an entity already here and its plain
+	// coordinates -- x, z, along -- so that is all a preview may be, in
+	// the schema's range. It went to every peer in the plan unchecked, and
+	// their editors merge it over the real entity.
+	ss_ check_preview(const Entity &in)
+	{
+		auto it = m_ents.find(in.id);
+		if(it == m_ents.end())
+			return "No entity "+itos(in.id);
+		const Entity &e = it->second;
+		if(!in.type.empty() && in.type != e.type)
+			return "Entity "+itos(in.id)+" is a "+e.type;
+		if(!in.strs.empty() || !in.lists.empty())
+			return "A preview moves things and changes nothing else";
+		const TypeSchema *s = find_schema(e.type);
+		for(auto &pair : in.ints){
+			const IntField *f = nullptr;
+			for(const IntField &ff : s->ints)
+				if(pair.first == ff.name)
+					f = &ff;
+			if(!f || f->ref)
+				return "A "+e.type+" previews no field "+pair.first;
+			if(pair.second < f->min || pair.second > f->max)
+				return e.type+"."+pair.first+" out of range";
+		}
+		return "";
+	}
+
 	ss_ check_refs(const Entity &e)
 	{
 		const TypeSchema *s = find_schema(e.type);
@@ -1472,6 +1509,16 @@ struct Module: public interface::Module
 	static bool role_manages(const ss_ &role)
 	{
 		return role == "admin" || role == "owner";
+	}
+
+	// Whether `cost` of the peer's message budget is there, taken if so
+	bool spend_msg(network::PeerId peer, double cost)
+	{
+		auto it = m_peers.find(peer);
+		if(it == m_peers.end() || it->second.msg_budget < cost)
+			return false;
+		it->second.msg_budget -= cost;
+		return true;
 	}
 
 	Plan* plan_of(network::PeerId peer)
@@ -2002,7 +2049,7 @@ struct Module: public interface::Module
 	void on_export(const network::Packet &packet)
 	{
 		Plan *plan = plan_of(packet.sender);
-		if(!plan)
+		if(!plan || !spend_msg(packet.sender, 100))
 			return;
 		PlanFile f;
 		f.magic = EXPORT_MAGIC;
@@ -2383,6 +2430,8 @@ struct Module: public interface::Module
 		for(auto &pair : m_peers){
 			pair.second.op_budget = std::min(OPS_BURST,
 					pair.second.op_budget + OPS_PER_SECOND * event.dtime);
+			pair.second.msg_budget = std::min(MSGS_BURST,
+					pair.second.msg_budget + MSGS_PER_SECOND * event.dtime);
 		}
 		// Each hour a plan stays open and is changed, a backup
 		const int64_t now = (int64_t)time(nullptr);
@@ -2417,6 +2466,7 @@ struct Module: public interface::Module
 	{
 		Peer peer;
 		peer.op_budget = OPS_BURST;
+		peer.msg_budget = MSGS_BURST;
 		peer.address = client.info.address;
 		m_peers[client.info.id] = peer;
 	}
@@ -2578,13 +2628,24 @@ struct Module: public interface::Module
 		if(!can_edit(packet.sender) || !unpack(packet.data, ents) ||
 				ents.size() > MAX_OPS_PER_BATCH)
 			return;
+		Plan *plan = plan_of(packet.sender);
+		if(!plan || !spend_msg(packet.sender, 1))
+			return;
+		for(const Entity &e : ents){
+			const ss_ err = plan->check_preview(e);
+			if(!err.empty()){
+				log_v(MODULE, "fp:preview from %zu dropped: %s",
+						(size_t)packet.sender, cs(err));
+				return;
+			}
+		}
 		relay_preview(packet.sender, ents);
 	}
 
 	void on_presence(const network::Packet &packet)
 	{
 		Plan *plan = plan_of(packet.sender);
-		if(!plan)
+		if(!plan || !spend_msg(packet.sender, 1))
 			return;
 		Peer &peer = m_peers[packet.sender];
 		Presence p;
@@ -2676,7 +2737,7 @@ struct Module: public interface::Module
 	void on_chat(const network::Packet &packet)
 	{
 		Plan *plan = plan_of(packet.sender);
-		if(!plan)
+		if(!plan || !spend_msg(packet.sender, 20))
 			return;
 		ss_ text;
 		if(!unpack(packet.data, text) || text.empty() || text.size() > 500 ||
