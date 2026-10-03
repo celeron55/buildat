@@ -21,6 +21,15 @@
 //
 // The records are one SQLite file, <user>/apps/<app>/hearth.sqlite, with
 // a full-text index beside them; every statement binds its values.
+//
+// **Before the public** ([HEARTH_MVP] step 6): automatic trust -- a new
+// account posts less and no links until a day has passed, it has read
+// five threads and three of its messages stand (a message hidden in the
+// last 30 days puts it back) -- with rate limits by level; reports of a
+// message, a queue for the moderators (the server's admins), a hidden
+// message's statement of reasons to its author, and the author's appeal.
+// simplified: Hearth's own queue; Starport's reports, appeals and audit
+// log shared as a builtin is the upgrade, once a third app wants them.
 #include "core/log.h"
 #include "core/json.h"
 #include "interface/module.h"
@@ -223,11 +232,17 @@ static const char *SCHEMA =
 		"created INTEGER NOT NULL, last INTEGER NOT NULL, "
 		"subject TEXT NOT NULL DEFAULT '', "
 		// "This answered it": the message the asker marked, or 0
-		"answer INTEGER NOT NULL DEFAULT 0);"
+		"answer INTEGER NOT NULL DEFAULT 0, "
+		// Its first message hidden: the thread with it
+		"hidden INTEGER NOT NULL DEFAULT 0);"
 	"CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, "
 		"thread INTEGER NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL, "
-		"created INTEGER NOT NULL, edited INTEGER NOT NULL DEFAULT 0);"
+		"created INTEGER NOT NULL, edited INTEGER NOT NULL DEFAULT 0, "
+		// A moderator's hiding, and its statement of reasons
+		"hidden INTEGER NOT NULL DEFAULT 0, "
+		"hidden_reason TEXT NOT NULL DEFAULT '');"
 	"CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread, id);"
+	"CREATE INDEX IF NOT EXISTS messages_author ON messages(author, created);"
 	// What an edit replaced, and who made the edit
 	"CREATE TABLE IF NOT EXISTS edits(message INTEGER NOT NULL, "
 		"body TEXT NOT NULL, time INTEGER NOT NULL, editor TEXT NOT NULL);"
@@ -243,11 +258,43 @@ static const char *SCHEMA =
 	"CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, "
 		"account TEXT NOT NULL, kind TEXT NOT NULL, thread INTEGER NOT NULL, "
 		"message INTEGER NOT NULL, by TEXT NOT NULL, time INTEGER NOT NULL, "
-		"seen INTEGER NOT NULL DEFAULT 0);"
+		"seen INTEGER NOT NULL DEFAULT 0, "
+		// A moderator's statement of reasons, for "hidden" and "appeal"
+		"note TEXT NOT NULL DEFAULT '');"
 	"CREATE INDEX IF NOT EXISTS notifications_account ON "
-		"notifications(account, id);";
+		"notifications(account, id);"
+	// When an account first joined Hearth, and the threads it has read:
+	// what its trust grows from
+	"CREATE TABLE IF NOT EXISTS members(account TEXT PRIMARY KEY, "
+		"first_seen INTEGER NOT NULL);"
+	"CREATE TABLE IF NOT EXISTS reads(account TEXT NOT NULL, "
+		"thread INTEGER NOT NULL, PRIMARY KEY(account, thread));"
+	// kind "report" (of a message, by anyone) or "appeal" (of its hiding,
+	// by its author); state "open", "upheld" or "dismissed"
+	"CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY, "
+		"kind TEXT NOT NULL, message INTEGER NOT NULL, by TEXT NOT NULL, "
+		"reason TEXT NOT NULL, time INTEGER NOT NULL, "
+		"state TEXT NOT NULL DEFAULT 'open', handled_by TEXT NOT NULL DEFAULT '', "
+		"handled_time INTEGER NOT NULL DEFAULT 0, "
+		"statement TEXT NOT NULL DEFAULT '');";
 
+static const char *const COLUMNS_ADDED[][3] = {
+	{"threads", "answer", "INTEGER NOT NULL DEFAULT 0"},
+	{"threads", "hidden", "INTEGER NOT NULL DEFAULT 0"},
+	{"messages", "hidden", "INTEGER NOT NULL DEFAULT 0"},
+	{"messages", "hidden_reason", "TEXT NOT NULL DEFAULT ''"},
+	{"notifications", "note", "TEXT NOT NULL DEFAULT ''"},
+};
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search"};
+
+// Trust ([HEARTH_MVP] step 6): what a level may post. Level 0 is a new
+// account, 1 one that has stood a while, 2 the admin
+struct Limits { int threads_a_day, messages_an_hour; bool links; };
+static const Limits LIMITS[3] = {{2, 10, false}, {10, 60, true},
+		{1000000, 1000000, true}};
+static const int REPORTS_A_DAY = 10;
+// The search page, per address: a search is a full-text query
+static const int SEARCHES_A_MINUTE = 30;
 static const size_t TITLE_MAX = 200;
 static const size_t BODY_MAX = 20000;
 static const size_t NAME_MAX = 80;
@@ -258,6 +305,9 @@ struct Module: public interface::Module
 	sqlite3 *m_db = nullptr;
 	// The thread each client has open, for "hr:new"
 	sm_<network::PeerId, int64_t> m_viewing;
+	// Searches per address in the current minute
+	sm_<ss_, int> m_searches;
+	int64_t m_searches_minute = 0;
 	// What a request changed, sent once it is committed
 	sv_<int64_t> m_new_messages;
 	std::set<ss_> m_notified;
@@ -312,13 +362,15 @@ struct Module: public interface::Module
 			sqlite3_free(err);
 			throw Exception("hearth: the schema: "+e);
 		}
-		// A file from before the answer column (2026-10-04's first one)
-		Q cols(m_db, "SELECT count(*) FROM pragma_table_info('threads') "
-				"WHERE name = 'answer'");
-		cols.step();
-		if(cols.i(0) == 0)
-			exec("ALTER TABLE threads ADD COLUMN answer INTEGER NOT NULL "
-					"DEFAULT 0");
+		// A file from before a column (2026-10-04's first ones)
+		for(const char *const *c : COLUMNS_ADDED){
+			Q cols(m_db, (ss_("SELECT count(*) FROM pragma_table_info('")+
+					c[0]+"') WHERE name = '"+c[1]+"'").c_str());
+			cols.step();
+			if(cols.i(0) == 0)
+				exec((ss_("ALTER TABLE ")+c[0]+" ADD COLUMN "+c[1]+" "+c[2])
+						.c_str());
+		}
 		network::access(m_server, [&](network::Interface *iface){
 			iface->claim_http_path("/");
 			for(const char *p : CLAIMED)
@@ -343,7 +395,7 @@ struct Module: public interface::Module
 	{
 		json::Value list = json::array();
 		Q q(m_db, "SELECT t.id, t.parent, t.name, t.about, "
-				"(SELECT count(*) FROM threads WHERE topic = t.id) "
+				"(SELECT count(*) FROM threads WHERE topic = t.id AND hidden = 0) "
 				"FROM topics t ORDER BY t.parent, t.id");
 		while(q.step()){
 			json::Value t = json::object();
@@ -383,10 +435,12 @@ struct Module: public interface::Module
 		t.set("subject", q.s(6));
 		t.set("messages", q.i(7));
 		t.set("answer", q.i(8));
+		t.set("hidden", q.i(9) != 0);
 		return t;
 	}
 #define THREAD_COLUMNS "id, topic, title, author, created, last, subject, " \
-		"(SELECT count(*) FROM messages WHERE thread = threads.id), answer"
+		"(SELECT count(*) FROM messages WHERE thread = threads.id), answer, " \
+		"hidden"
 
 	// Answered ones first, then by the latest message
 	// simplified: 200; paging when a topic has more
@@ -394,7 +448,7 @@ struct Module: public interface::Module
 	{
 		json::Value list = json::array();
 		Q q(m_db, "SELECT " THREAD_COLUMNS " FROM threads WHERE topic = ? "
-				"ORDER BY answer != 0 DESC, last DESC LIMIT 200");
+				"AND hidden = 0 ORDER BY answer != 0 DESC, last DESC LIMIT 200");
 		q.b(topic_id);
 		while(q.step())
 			list.append(thread_row(q));
@@ -404,7 +458,7 @@ struct Module: public interface::Module
 	json::Value latest_threads(int n)
 	{
 		json::Value list = json::array();
-		Q q(m_db, "SELECT " THREAD_COLUMNS " FROM threads "
+		Q q(m_db, "SELECT " THREAD_COLUMNS " FROM threads WHERE hidden = 0 "
 				"ORDER BY last DESC LIMIT ?");
 		q.b((int64_t)n);
 		while(q.step())
@@ -412,10 +466,12 @@ struct Module: public interface::Module
 		return list;
 	}
 
-	// The thread and its messages after `after` (0: all of them)
+	// The thread and its messages after `after` (0: all of them). A hidden
+	// message's body is its author's and the admin's to see
 	// simplified: 1000 messages at most a call; a longer thread is read on
 	// with `after`
-	json::Value thread(int64_t id, int64_t after)
+	json::Value thread(int64_t id, int64_t after, const ss_ &viewer = "",
+			bool admin = false)
 	{
 		Q q(m_db, "SELECT " THREAD_COLUMNS " FROM threads WHERE id = ?");
 		q.b(id);
@@ -423,16 +479,20 @@ struct Module: public interface::Module
 			return json::Value();
 		json::Value t = thread_row(q);
 		json::Value list = json::array();
-		Q m(m_db, "SELECT id, author, body, created, edited FROM messages "
+		Q m(m_db, "SELECT id, author, body, created, edited, hidden, "
+				"hidden_reason FROM messages "
 				"WHERE thread = ? AND id > ? ORDER BY id LIMIT 1000");
 		m.b(id).b(after);
 		while(m.step()){
 			json::Value v = json::object();
+			const bool hidden = m.i(5) != 0;
 			v.set("id", m.i(0));
 			v.set("author", m.s(1));
-			v.set("body", m.s(2));
+			v.set("body", hidden && !admin && viewer != m.s(1) ? ss_() : m.s(2));
 			v.set("created", m.i(3));
 			v.set("edited", m.i(4));
+			v.set("hidden", hidden);
+			v.set("hidden_reason", m.s(6));
 			list.append(v);
 		}
 		t.set("list", list);
@@ -500,12 +560,12 @@ struct Module: public interface::Module
 	}
 
 	void notify(const ss_ &account, const char *kind, int64_t thread_id,
-			int64_t message_id, const ss_ &by)
+			int64_t message_id, const ss_ &by, const ss_ &note = "")
 	{
 		Q n(m_db, "INSERT INTO notifications(account, kind, thread, message, "
-				"by, time) VALUES(?, ?, ?, ?, ?, ?)");
+				"by, time, note) VALUES(?, ?, ?, ?, ?, ?, ?)");
 		n.b(account).b(ss_(kind)).b(thread_id).b(message_id).b(by).b(now_s())
-				.step();
+				.b(note).step();
 		m_notified.insert(account);
 	}
 
@@ -562,7 +622,8 @@ struct Module: public interface::Module
 				"snippet(search, 1, '\x01', '\x02', '...', 24) "
 				"FROM search JOIN messages m ON m.id = search.rowid "
 				"JOIN threads t ON t.id = m.thread "
-				"WHERE search MATCH ? ORDER BY bm25(search, 5.0, 1.0) * "
+				"WHERE search MATCH ? AND m.hidden = 0 AND t.hidden = 0 "
+				"ORDER BY bm25(search, 5.0, 1.0) * "
 				"(CASE WHEN t.answer = m.id THEN 2.0 ELSE 1.0 END) LIMIT 50");
 		q.b(match);
 		while(q.step()){
@@ -628,6 +689,10 @@ struct Module: public interface::Module
 	ss_ message_box(const json::Value &m, bool answer = false)
 	{
 		const ss_ id = itos(jint(m, "id"));
+		if(m.get("hidden").is_true())
+			return "<div class=\"box\" id=\"m"+id+"\"><p class=\"meta\">"
+					"Hidden by a moderator: "+html(jstr(m, "hidden_reason"))+
+					"</p></div>\n";
 		return "<div class=\"box"+ss_(answer ? " answer" : "")+"\" id=\"m"+id+
 				"\"><p class=\"meta\">"+(answer ? "<b>This answered it:</b> " :
 				"")+"<b>"+
@@ -659,6 +724,15 @@ struct Module: public interface::Module
 			return;
 		if(!m_db)
 			return respond(r, 503, page("Hearth", "<p>Starting.</p>"));
+		if(r.path == "/search"){
+			if(now_s() / 60 != m_searches_minute){
+				m_searches_minute = now_s() / 60;
+				m_searches.clear();
+			}
+			if(++m_searches[r.address] > SEARCHES_A_MINUTE)
+				return respond(r, 429, page("Hearth", "<p>Too many searches "
+						"from this address; try again in a minute.</p>"));
+		}
 		ss_ title, body;
 		if(r.method == "GET")
 			http_page(r.path, r.query, title, body);
@@ -713,6 +787,13 @@ struct Module: public interface::Module
 			if(!t.is_object())
 				return;
 			const json::Value top = topic(jint(t, "topic"));
+			if(t.get("hidden").is_true()){
+				// Its title too, which is what a spammer's thread is
+				title = "A hidden thread - Hearth";
+				body = "<h1>A hidden thread</h1>\n"+
+						message_box(t.get("list").at(0));
+				return;
+			}
 			title = jstr(t, "title")+" - Hearth";
 			body = "<p class=\"meta\"><a href=\"/topic/"+
 					itos(jint(t, "topic"))+"\">"+html(jstr(top, "name"))+
@@ -730,7 +811,8 @@ struct Module: public interface::Module
 			}
 		} else if((id = path_id(path, "/m/")) >= 0){
 			Q q(m_db, "SELECT m.id, m.author, m.body, m.created, m.edited, "
-					"m.thread, t.title FROM messages m "
+					"m.thread, t.title, m.hidden, m.hidden_reason, t.hidden "
+					"FROM messages m "
 					"JOIN threads t ON t.id = m.thread WHERE m.id = ?");
 			q.b(id);
 			if(!q.step())
@@ -738,12 +820,16 @@ struct Module: public interface::Module
 			json::Value m = json::object();
 			m.set("id", q.i(0));
 			m.set("author", q.s(1));
-			m.set("body", q.s(2));
+			m.set("body", q.i(7) ? ss_() : q.s(2));
 			m.set("created", q.i(3));
 			m.set("edited", q.i(4));
-			title = q.s(6)+" - Hearth";
+			m.set("hidden", q.i(7) != 0);
+			m.set("hidden_reason", q.s(8));
+			const ss_ thread_title = q.i(9) ? ss_("A hidden thread") : q.s(6);
+			title = thread_title+" - Hearth";
 			body = "<p class=\"meta\">In <a href=\"/t/"+itos(q.i(5))+"#m"+
-					itos(id)+"\">"+html(q.s(6))+"</a></p>\n"+message_box(m);
+					itos(id)+"\">"+html(thread_title)+"</a></p>\n"+
+					message_box(m);
 		} else if(path == "/search"){
 			const ss_ text = query_value(query, "q").substr(0, 200);
 			title = text+" - Hearth search";
@@ -820,6 +906,89 @@ struct Module: public interface::Module
 		push();
 	}
 
+	// 0 a new account, 1 one that has stood a while, 2 the admin
+	int level(const ss_ &name, bool admin)
+	{
+		if(admin)
+			return 2;
+		const int64_t now = now_s();
+		Q h(m_db, "SELECT count(*) FROM messages WHERE author = ? AND "
+				"hidden = 0");
+		h.b(name).step();
+		const int64_t stood = h.i(0);
+		Q hd(m_db, "SELECT count(*) FROM messages WHERE author = ? AND "
+				"hidden != 0 AND created > ?");
+		hd.b(name).b(now - 30 * 86400).step();
+		Q f(m_db, "SELECT first_seen FROM members WHERE account = ?");
+		f.b(name);
+		const int64_t first = f.step() ? f.i(0) : now;
+		Q r(m_db, "SELECT count(*) FROM reads WHERE account = ?");
+		r.b(name).step();
+		return now - first >= 86400 && r.i(0) >= 5 && stood >= 3 &&
+				hd.i(0) == 0 ? 1 : 0;
+	}
+
+	static bool has_link(const ss_ &text)
+	{
+		ss_ t = text;
+		for(char &c : t)
+			c = tolower((unsigned char)c);
+		return t.find("://") != ss_::npos || t.find("www.") != ss_::npos;
+	}
+
+	// Whether `name` may post this now, by its level; why not
+	void check_limits(const ss_ &name, bool admin, bool new_thread,
+			const ss_ &text)
+	{
+		const int lv = level(name, admin);
+		const Limits &l = LIMITS[lv];
+		const char *how = lv == 0 ? " (a new account's limit, until a day "
+				"has passed, five threads are read and three of its messages "
+				"stand)" : "";
+		if(!l.links && has_link(text))
+			throw Exception(ss_("no links yet")+how);
+		Q m(m_db, "SELECT count(*) FROM messages WHERE author = ? AND "
+				"created > ?");
+		m.b(name).b(now_s() - 3600).step();
+		if(m.i(0) >= l.messages_an_hour)
+			throw Exception(itos(l.messages_an_hour)+" messages an hour at "
+					"most"+how);
+		if(new_thread){
+			Q t(m_db, "SELECT count(*) FROM threads WHERE author = ? AND "
+					"created > ?");
+			t.b(name).b(now_s() - 86400).step();
+			if(t.i(0) >= l.threads_a_day)
+				throw Exception(itos(l.threads_a_day)+" new threads a day at "
+						"most"+how);
+		}
+	}
+
+	// Hidden or shown again: the message, its thread if it is the first,
+	// and the search index
+	void set_hidden(int64_t message_id, bool hidden, const ss_ &reason)
+	{
+		Q m(m_db, "SELECT m.thread, m.body, t.title, (SELECT min(id) FROM "
+				"messages WHERE thread = m.thread) FROM messages m JOIN threads t "
+				"ON t.id = m.thread WHERE m.id = ?");
+		m.b(message_id);
+		if(!m.step())
+			throw Exception("no such message");
+		const bool first = m.i(3) == message_id;
+		Q u(m_db, "UPDATE messages SET hidden = ?, hidden_reason = ? "
+				"WHERE id = ?");
+		u.b((int64_t)hidden).b(hidden ? reason : ss_()).b(message_id).step();
+		if(first){
+			Q t(m_db, "UPDATE threads SET hidden = ? WHERE id = ?");
+			t.b((int64_t)hidden).b(m.i(0)).step();
+		}
+		Q d(m_db, "DELETE FROM search WHERE rowid = ?");
+		d.b(message_id).step();
+		if(!hidden){
+			Q i(m_db, "INSERT INTO search(rowid, title, body) VALUES(?, ?, ?)");
+			i.b(message_id).b(first ? m.s(2) : ss_()).b(m.s(1)).step();
+		}
+	}
+
 	static void need(const ss_ &why)
 	{
 		if(!why.empty())
@@ -834,6 +1003,15 @@ struct Module: public interface::Module
 			v.set("account", name);
 			v.set("admin", admin);
 			v.set("unseen", unseen(name));
+			Q mb(m_db, "INSERT OR IGNORE INTO members(account, first_seen) "
+					"VALUES(?, ?)");
+			mb.b(name).b(now_s()).step();
+			v.set("level", (int64_t)level(name, admin));
+			if(admin){
+				Q o(m_db, "SELECT count(*) FROM reports WHERE state = 'open'");
+				o.step();
+				v.set("open_reports", o.i(0));
+			}
 			return v;
 		}
 		if(cmd != "thread" && cmd != "reply" && cmd != "edit" &&
@@ -853,10 +1031,14 @@ struct Module: public interface::Module
 			return t;
 		}
 		if(cmd == "thread"){
-			json::Value t = thread(jint(q, "thread"), jint(q, "after"));
+			json::Value t = thread(jint(q, "thread"), jint(q, "after"), name,
+					admin);
 			if(!t.is_object())
 				throw Exception("no such thread");
 			m_viewing[peer] = jint(q, "thread");
+			Q rd(m_db, "INSERT OR IGNORE INTO reads(account, thread) "
+					"VALUES(?, ?)");
+			rd.b(name).b(jint(q, "thread")).step();
 			Q f(m_db, "SELECT 1 FROM follows WHERE account = ? AND thread = ?");
 			f.b(name).b(jint(q, "thread"));
 			t.set("following", f.step());
@@ -893,6 +1075,7 @@ struct Module: public interface::Module
 			need(text_ok(body, BODY_MAX, true, "the message"));
 			if(!subject.empty())
 				need(text_ok(subject, 400, false, "the subject"));
+			check_limits(name, admin, true, title+"\n"+body);
 			const int64_t t = now_s();
 			Q i(m_db, "INSERT INTO threads(topic, title, author, created, last, "
 					"subject) VALUES(?, ?, ?, ?, ?, ?)");
@@ -909,6 +1092,11 @@ struct Module: public interface::Module
 			if(!t.step())
 				throw Exception("no such thread");
 			need(text_ok(body, BODY_MAX, true, "the message"));
+			Q th(m_db, "SELECT hidden FROM threads WHERE id = ?");
+			th.b(thread_id).step();
+			if(th.i(0) && !admin)
+				throw Exception("the thread is hidden");
+			check_limits(name, admin, false, body);
 			return json::Value(add_message(thread_id, name, body, ""));
 		}
 		if(cmd == "edit"){
@@ -921,6 +1109,8 @@ struct Module: public interface::Module
 			if(m.s(0) != name && !admin)
 				throw Exception("only its author edits a message");
 			need(text_ok(body, BODY_MAX, true, "the message"));
+			if(!admin && level(name, admin) == 0 && has_link(body))
+				throw Exception("no links yet (a new account's limit)");
 			const int64_t t = now_s();
 			Q h(m_db, "INSERT INTO edits(message, body, time, editor) "
 					"VALUES(?, ?, ?, ?)");
@@ -974,7 +1164,7 @@ struct Module: public interface::Module
 			// The latest 50, and they are seen now
 			json::Value list = json::array();
 			Q n(m_db, "SELECT n.id, n.kind, n.thread, n.message, n.by, n.time, "
-					"n.seen, t.title FROM notifications n JOIN threads t ON "
+					"n.seen, t.title, n.note FROM notifications n JOIN threads t ON "
 					"t.id = n.thread WHERE n.account = ? ORDER BY n.id DESC "
 					"LIMIT 50");
 			n.b(name);
@@ -988,12 +1178,117 @@ struct Module: public interface::Module
 				v.set("time", n.i(5));
 				v.set("seen", n.i(6) != 0);
 				v.set("title", n.s(7));
+				v.set("note", n.s(8));
 				list.append(v);
 			}
 			Q u(m_db, "UPDATE notifications SET seen = 1 WHERE account = ? "
 					"AND seen = 0");
 			u.b(name).step();
 			return list;
+		}
+		if(cmd == "report" || cmd == "appeal"){
+			// A report: someone else's shown message. An appeal: one's own
+			// hidden message. One open of each per account and message.
+			const bool appeal = cmd == "appeal";
+			const int64_t id = jint(q, "message");
+			const ss_ reason = jstr(q, appeal ? "text" : "reason");
+			need(text_ok(reason, 1000, true, appeal ? "the appeal" :
+					"the reason"));
+			Q m(m_db, "SELECT author, hidden FROM messages WHERE id = ?");
+			m.b(id);
+			if(!m.step())
+				throw Exception("no such message");
+			if(appeal && m.s(0) != name)
+				throw Exception("only its author appeals");
+			if(appeal && !m.i(1))
+				throw Exception("the message is not hidden");
+			if(!appeal && m.s(0) == name)
+				throw Exception("one's own message is edited, not reported");
+			if(!appeal && m.i(1))
+				throw Exception("the message is hidden already");
+			Q o(m_db, "SELECT 1 FROM reports WHERE kind = ? AND message = ? AND "
+					"by = ? AND state = 'open'");
+			o.b(cmd).b(id).b(name);
+			if(o.step())
+				throw Exception(appeal ? "the appeal is waiting already" :
+						"the report is waiting already");
+			Q d(m_db, "SELECT count(*) FROM reports WHERE by = ? AND time > ?");
+			d.b(name).b(now_s() - 86400).step();
+			if(!admin && d.i(0) >= REPORTS_A_DAY)
+				throw Exception(itos(REPORTS_A_DAY)+" reports a day at most");
+			Q i(m_db, "INSERT INTO reports(kind, message, by, reason, time) "
+					"VALUES(?, ?, ?, ?, ?)");
+			i.b(cmd).b(id).b(name).b(reason).b(now_s()).step();
+			return json::Value((int64_t)sqlite3_last_insert_rowid(m_db));
+		}
+		if(cmd == "queue"){
+			if(!admin)
+				throw Exception("only the admin moderates");
+			json::Value list = json::array();
+			Q r(m_db, "SELECT r.id, r.kind, r.message, r.by, r.reason, r.time, "
+					"m.author, m.body, m.thread, t.title, m.hidden_reason FROM "
+					"reports r JOIN messages m ON m.id = r.message JOIN threads t "
+					"ON t.id = m.thread WHERE r.state = 'open' ORDER BY r.id");
+			while(r.step()){
+				json::Value v = json::object();
+				v.set("id", r.i(0));
+				v.set("kind", r.s(1));
+				v.set("message", r.i(2));
+				v.set("by", r.s(3));
+				v.set("reason", r.s(4));
+				v.set("time", r.i(5));
+				v.set("author", r.s(6));
+				v.set("body", r.s(7));
+				v.set("thread", r.i(8));
+				v.set("title", r.s(9));
+				v.set("hidden_reason", r.s(10));
+				list.append(v);
+			}
+			return list;
+		}
+		if(cmd == "moderate"){
+			// hide (a report), restore (an appeal), dismiss (either). Hiding
+			// and refusing an appeal say why: the author is told it.
+			if(!admin)
+				throw Exception("only the admin moderates");
+			const ss_ action = jstr(q, "action"), statement = jstr(q, "statement");
+			Q r(m_db, "SELECT r.kind, r.message, m.author, m.thread FROM reports r "
+					"JOIN messages m ON m.id = r.message WHERE r.id = ? AND "
+					"r.state = 'open'");
+			r.b(jint(q, "report"));
+			if(!r.step())
+				throw Exception("no such open report");
+			const bool appeal = r.s(0) == "appeal";
+			const int64_t message_id = r.i(1), thread_id = r.i(3);
+			const ss_ author = r.s(2);
+			if(action != "dismiss" && action != (appeal ? "restore" : "hide"))
+				throw Exception(appeal ? "an appeal is restored or dismissed" :
+						"a report is hidden or dismissed");
+			if(action == "hide" || (appeal && action == "dismiss"))
+				need(text_ok(statement, 1000, true, "the statement"));
+			else if(!statement.empty())
+				need(text_ok(statement, 1000, true, "the statement"));
+			if(action == "hide"){
+				set_hidden(message_id, true, statement);
+				notify(author, "hidden", thread_id, message_id, name, statement);
+			}else if(action == "restore"){
+				set_hidden(message_id, false, "");
+				notify(author, "restored", thread_id, message_id, name, statement);
+			}else if(appeal){
+				notify(author, "appeal_dismissed", thread_id, message_id, name,
+						statement);
+			}
+			// A hide settles the other reports of the message too
+			Q u(m_db, action == "dismiss" ?
+					"UPDATE reports SET state = ?, handled_by = ?, handled_time = ?, "
+					"statement = ? WHERE id = ?" :
+					"UPDATE reports SET state = ?, handled_by = ?, handled_time = ?, "
+					"statement = ? WHERE state = 'open' AND kind = (SELECT kind "
+					"FROM reports WHERE id = ?5) AND message = (SELECT message "
+					"FROM reports WHERE id = ?5)");
+			u.b(ss_(action == "dismiss" ? "dismissed" : "upheld")).b(name)
+					.b(now_s()).b(statement).b(jint(q, "report")).step();
+			return json::Value(true);
 		}
 		throw Exception("no such command: "+cmd);
 	}

@@ -134,10 +134,10 @@ local function edit(parent, label)
 	return e
 end
 
-local show_topic, show_thread, show_notifications
+local show_topic, show_thread, show_notifications, show_queue, show_report
 -- Who this client is ("me"), and the thread it has open: the server pushes
 -- that thread's new messages ("hr:new"), which are added to it in place
-local me = {account = "", unseen = 0}
+local me = {account = "", unseen = 0, level = 0, open_reports = 0}
 local open_thread = nil
 local on_home = false
 
@@ -149,10 +149,15 @@ end
 home = function()
 	open_thread = nil
 	req("topics", nil, function(r)
-		local w = new_page("Hearth, as " .. me.account)
+		local w = new_page("Hearth, as " .. me.account ..
+				(me.level == 0 and " (new account)" or ""))
 		on_home = true
 		button(w, "Notifications" .. (me.unseen > 0 and
 				" (" .. me.unseen .. " new)" or ""), show_notifications)
+		if me.admin then
+			button(w, "Moderation (" .. (me.open_reports or 0) .. " open)",
+					show_queue)
+		end
 		local _, add = list(w)
 		for _, t in ipairs(r.topics) do
 			add((t.parent ~= 0 and "    " or "") .. t.name .. "  (" ..
@@ -181,10 +186,14 @@ show_notifications = function()
 		local w = new_page("Notifications")
 		local _, add = list(w)
 		local said = {reply = "replied in", mention = "mentioned you in",
-				answer = "marked your message the answer in"}
+				answer = "marked your message the answer in",
+				hidden = "hid your message in",
+				restored = "restored your message in",
+				appeal_dismissed = "kept your message hidden in"}
 		for _, n in ipairs(items) do
 			add((n.seen and "" or "* ") .. n.by .. " " ..
-					(said[n.kind] or n.kind) .. " " .. n.title, nil, function()
+					(said[n.kind] or n.kind) .. " " .. n.title ..
+					(n.note ~= "" and ": " .. n.note or ""), nil, function()
 				show_thread(n.thread)
 			end)
 		end
@@ -224,11 +233,22 @@ show_topic = function(id)
 	end)
 end
 
--- A message's rows; whoever started the thread can mark a reply the answer
+-- A message's rows; whoever started the thread can mark a reply the answer.
+-- Others' messages can be reported; a hidden one's author appeals.
 local function add_message(t, add, m, is_answer)
 	add((is_answer and "This answered it -- " or "") .. m.author ..
 			(m.edited ~= 0 and "  (edited)" or ""), is_answer and YELLOW or GREY)
-	add(m.body)
+	if m.hidden then
+		add("Hidden by a moderator: " .. m.hidden_reason, YELLOW)
+	end
+	if m.body ~= "" then
+		add(m.body)
+	end
+	if m.hidden and m.author == me.account then
+		add("Appeal", nil, function() show_report(t.id, m, "appeal") end)
+	elseif not m.hidden and m.author ~= me.account then
+		add("Report", nil, function() show_report(t.id, m, "report") end)
+	end
 	if not is_answer and m.id ~= t.first and t.answer ~= m.id and
 			(t.author == me.account or me.admin) then
 		add("This answered it", nil, function()
@@ -290,6 +310,60 @@ show_thread = function(id)
 		if buildat.get_env("BUILDAT_TOUCH") ~= "1" then
 			e:SetFocus(true)
 		end
+	end)
+end
+
+-- A report of someone's message, or an appeal of one's own hidden one
+show_report = function(thread_id, m, kind)
+	leave_home()
+	open_thread = nil
+	local w = new_page(kind == "appeal" and "Appeal: why it should be shown" or
+			"Report: what is wrong with it")
+	text(w, m.author .. ": " .. m.body, GREY)
+	local e = edit(w, kind == "appeal" and "Your appeal" or "The reason")
+	button(w, "Send", function()
+		req(kind, {message = m.id, [kind == "appeal" and "text" or "reason"] =
+				e:GetText()}, function()
+			message = kind == "appeal" and "The appeal is waiting for the admin." or
+					"Reported; the admin will look at it."
+			show_thread(thread_id)
+		end)
+	end)
+	button(w, "Back", function() show_thread(thread_id) end)
+end
+
+-- The admin's queue: open reports (hide or dismiss) and appeals (restore
+-- or dismiss), with a statement of reasons the author is shown
+show_queue = function()
+	leave_home()
+	open_thread = nil
+	req("queue", nil, function(items)
+		me.open_reports = #items
+		local w = new_page("Moderation")
+		local statement = edit(w, "Statement of reasons (shown to the author)")
+		local _, add = list(w)
+		local function act(r, action)
+			req("moderate", {report = r.id, action = action,
+					statement = statement:GetText()}, show_queue)
+		end
+		for _, r in ipairs(items) do
+			add((r.kind == "appeal" and "Appeal by " or "Report by ") .. r.by ..
+					" in " .. r.title .. ": " .. r.reason, YELLOW)
+			if r.kind == "appeal" then
+				add("Hidden for: " .. r.hidden_reason, GREY)
+			end
+			add(r.author .. ": " .. r.body)
+			if r.kind == "appeal" then
+				add("Restore", nil, function() act(r, "restore") end)
+			else
+				add("Hide", nil, function() act(r, "hide") end)
+			end
+			add("Dismiss", nil, function() act(r, "dismiss") end)
+		end
+		if #items == 0 then
+			add("Nothing open.", GREY)
+		end
+		button(w, "Back", home)
 	end)
 end
 

@@ -14,7 +14,12 @@
 #   5. the HTML face: the portal, the topic, the thread (every message,
 #      the markup escaped, the edit shown), a message's own page, search
 #      (with a hostile query), a 404 for what is not there -- and the web
-#      client's page still the web client's.
+#      client's page still the web client's;
+#   6. a new account's limits (no links, two threads a day) and a report's
+#      handling: carol reports bob's thread, the admin hides it with a
+#      statement (gone from the portal and search, the notice on its page,
+#      bob notified with the statement), bob appeals, the admin restores;
+#      then the search limit per address.
 #
 #   apps/hearth/check.sh
 set -u
@@ -96,7 +101,8 @@ echo "$n" | grep -q '"kind":"mention"' && echo "$n" | grep -q '"kind":"answer"' 
 MS=14000 client bob bobpass1234 "$t/watch.log" '' BUILDAT_HEARTH_OPEN=1 &
 w=$!
 sleep 7
-client admin checkpass12 "$t/admin3.log" '{"cmd":"reply","thread":1,"body":"a live line"}'
+client admin checkpass12 "$t/admin3.log" '{"cmd":"reply","thread":1,"body":"a live line"}' \
+	"BUILDAT_HEARTH_ADMIN=add carol carolpass1234"
 wait $w
 ms(){ # the first log line matching, as milliseconds of the day
 	grep -a "$2" "$1" | head -1 | grep -o "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9]*" |
@@ -132,4 +138,62 @@ for p in /t/99 /t/x /topic/ /m/; do
 	[ "$(get $p)" = 404 ] || fail "$p is not a 404"
 done
 grep -q "Hearth" <(curl -s "$U/index.html") && fail "/index.html is Hearth's"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; found by search"
+
+# 6. A new account's limits, a report, a hide, an appeal
+client bob bobpass1234 "$t/bob6.log" '{"cmd":"new_thread","topic":1,"title":"Lamps","body":"see www.lamps.example"}
+{"cmd":"new_thread","topic":1,"title":"Cheap lamps","body":"Cheap lamps for everyone"}
+{"cmd":"new_thread","topic":1,"title":"More","body":"one more"}
+{"cmd":"new_thread","topic":1,"title":"Again","body":"and again"}
+{"cmd":"report","message":3,"reason":"mine"}'
+grep -aq 'hr: {.*"level":0' "$t/bob6.log" || fail "bob is not a new account"
+answer "$t/bob6.log" 1001 | grep -q "no links yet (a new account" || fail "a new account's link"
+answer "$t/bob6.log" 1002 | grep -q '"result":2' || fail "bob's thread: $(answer "$t/bob6.log" 1002)"
+answer "$t/bob6.log" 1003 | grep -q '"ok":true' || fail "bob's second thread"
+answer "$t/bob6.log" 1004 | grep -q "2 new threads a day" || fail "a third thread in a day"
+answer "$t/bob6.log" 1005 | grep -q "one's own" || fail "bob reported his own"
+client carol carolpass1234 "$t/carol.log" '{"cmd":"report","message":6,"reason":"spam"}
+{"cmd":"report","message":6,"reason":"spam!"}
+{"cmd":"report","message":2,"reason":"rude"}'
+answer "$t/carol.log" 1001 | grep -q '"result":1' || fail "carol's report: $(answer "$t/carol.log" 1001)"
+answer "$t/carol.log" 1002 | grep -q "waiting already" || fail "a report twice"
+answer "$t/carol.log" 1003 | grep -q '"result":2' || fail "carol's second report"
+client admin checkpass12 "$t/admin6.log" '{"cmd":"queue"}
+{"cmd":"moderate","report":1,"action":"hide"}
+{"cmd":"moderate","report":1,"action":"hide","statement":"Advertising"}
+{"cmd":"moderate","report":2,"action":"dismiss"}
+{"cmd":"queue"}'
+answer "$t/admin6.log" 1001 | grep -q '"body":"Cheap lamps for everyone".*"reason":"rude"' ||
+	fail "the queue: $(answer "$t/admin6.log" 1001)"
+answer "$t/admin6.log" 1002 | grep -q "the statement" || fail "a hide without a statement"
+answer "$t/admin6.log" 1003 | grep -q '"ok":true' || fail "the hide: $(answer "$t/admin6.log" 1003)"
+answer "$t/admin6.log" 1004 | grep -q '"ok":true' || fail "the dismissal"
+answer "$t/admin6.log" 1005 | grep -q '"result":\[\]' || fail "the queue after"
+get / > /dev/null; grep -q 'href="/t/2"' "$t/page" && fail "a hidden thread on the portal"
+[ "$(get /t/2)" = 200 ] && grep -q "Hidden by a moderator: Advertising" "$t/page" ||
+	fail "the hidden thread's page"
+grep -q "Cheap lamps" "$t/page" && fail "a hidden message's text on its page"
+get "/search?q=cheap" > /dev/null; grep -q '/t/2#' "$t/page" && fail "search finds a hidden message"
+client bob bobpass1234 "$t/bob7.log" '{"cmd":"notifications"}
+{"cmd":"thread","thread":2}
+{"cmd":"appeal","message":6,"text":"It is a real offer"}
+{"cmd":"appeal","message":6,"text":"really"}' BUILDAT_HEARTH_OPEN=2
+grep -a "attempt to\|stack traceback" "$t/bob7.log" && fail "the hidden thread's page"
+answer "$t/bob7.log" 1001 | grep -q '"kind":"hidden".*"note":"Advertising"' ||
+	fail "bob's notification of the hide: $(answer "$t/bob7.log" 1001)"
+answer "$t/bob7.log" 1002 | grep -q '"body":"Cheap lamps for everyone"' ||
+	fail "the author does not see his hidden message"
+answer "$t/bob7.log" 1003 | grep -q '"result":3' || fail "the appeal: $(answer "$t/bob7.log" 1003)"
+answer "$t/bob7.log" 1004 | grep -q "waiting already" || fail "an appeal twice"
+client admin checkpass12 "$t/admin7.log" '{"cmd":"moderate","report":3,"action":"hide","statement":"x"}
+{"cmd":"moderate","report":3,"action":"restore"}'
+answer "$t/admin7.log" 1001 | grep -q "restored or dismissed" || fail "an appeal hidden"
+answer "$t/admin7.log" 1002 | grep -q '"ok":true' || fail "the restore: $(answer "$t/admin7.log" 1002)"
+get /t/2 > /dev/null; grep -q "Cheap lamps for everyone" "$t/page" &&
+	! grep -q "Hidden by a moderator" "$t/page" || fail "the restored thread"
+get "/search?q=cheap" > /dev/null; grep -q '/t/2#m6' "$t/page" || fail "search after the restore"
+n429=0
+for _ in $(seq 40); do
+	[ "$(get "/search?q=x")" = 429 ] && n429=$((n429 + 1))
+done
+[ $n429 -gt 0 ] || fail "no search limit per address"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; found by search; a new account limited; reported, hidden with a statement, appealed, restored"
