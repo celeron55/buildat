@@ -68,6 +68,32 @@ fi
 	echo "wait_log 10000 attract: over the wall"
 	echo "keypress Down"
 	echo "wait_log 5000 attract: back to the standing place"
+	# **The 2D menu and back** ([LAUNCH_WORLD] stage 2's done-when): the
+	# dialog's third row, then launch_menu's Engine settings by the
+	# keyboard -- typed and taken, the Launch UI row stepped twice
+	# (launch_menu, the menu over the room, the room) and used. One Tab
+	# afterwards is one station: a window of the menu's left on top, or
+	# a second room booted, makes it none or two.
+	echo "delay 1500"
+	echo "keypress Escape"
+	echo "wait_log 5000 pause: open"
+	echo "keypress Down"
+	echo "keypress Down"
+	echo "keypress Return"
+	echo "wait_log 10000 input: handed to whatever holds the screen"
+	echo "delay 1500"
+	for c in E N G I N E; do echo "keypress $c"; done
+	echo "delay 500"
+	echo "keypress Return"
+	echo "delay 1500"
+	for i in 1 2; do echo "keypress L"; echo "keypress Return"; echo "delay 300"; done
+	echo "keypress U"
+	echo "keypress Return"
+	echo "wait_log 10000 has the screen again"
+	echo "delay 1500"
+	echo "keypress Tab"
+	echo "wait_log 10000 camera: landed"
+	echo "delay 1000"
 	echo "quit"
 	} > "$out/cmds.txt"
 # **A user directory of its own**: the desk's has saves and servers and
@@ -110,6 +136,10 @@ back=$(grep -ac "game: back in the room" "$out/cli.log")
 pulled=$(grep -ac "launch: pull (" "$out/cli.log")
 attract=$(grep -ac "attract: over the wall" "$out/cli.log")
 attract_back=$(grep -ac "attract: back to the standing place" "$out/cli.log")
+# After the switch back: the screen is the room's again, and one Tab is
+# one station
+switched=$(grep -ac "set_launch_ui: launch_world is running; it has the screen again" "$out/cli.log")
+tabs_after=$(sed -n '/it has the screen again/,$p' "$out/cli.log" | grep -ac "station: floor")
 python3 - "$out" <<'PY'
 import sys, os
 from PIL import Image, ImageChops
@@ -140,15 +170,18 @@ verdict_keep
 if [ "$verdict_rc" -ne 0 ] || [ "$raised" -gt 0 ] ||
 		[ "$launched" -lt 1 ] || [ "$back" -lt 1 ] || [ "$pulled" -lt 1 ] ||
 		[ "$attract" -lt 1 ] || [ "$attract_back" -lt 1 ] ||
+		[ "$switched" -ne 1 ] || [ "$tabs_after" -ne 1 ] ||
 		[ -z "$contents" ]; then
 	echo "the sandbox raised $raised times;" \
 			"a game was launched $launched and left $back times;" \
 			"the animation pulled $pulled times; the attract drift" \
-			"started $attract and stopped $attract_back times"
+			"started $attract and stopped $attract_back times;" \
+			"the room had the screen back $switched times and one Tab" \
+			"after it moved $tabs_after times"
 	grep -a "Runtime error\|undeclared global" "$out/cli.log" | head -3
 	echo "FAIL: the room does not boot, draw, launch and come back"
 	exit 1
 fi
-echo "PASS: the room boots, moves between stations, launches a game with its animation and comes back, and drifts until a key"
+echo "PASS: the room boots, moves between stations, launches a game with its animation and comes back, drifts until a key, and goes to the 2D menu and back"
 exit 0
 # vim: set noet ts=4 sw=4:
