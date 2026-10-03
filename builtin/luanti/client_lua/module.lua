@@ -1594,23 +1594,35 @@ end
 -- fields that differ between a spawner and a single particle: assigning the
 -- same effect twice is a no-op in Urho3D, so everything has to be on it
 -- before it goes on.
+local particle_materials = {}
 local function particle_effect(resource, amount, ttl_min, ttl_max, size_min,
 		size_max, vel_min, vel_max, acc, active_time, anim)
 	local effect = magic.ParticleEffect.new()
-	local material = magic.Material.new()
-	local tex = magic.cache:GetResource("Texture2D", resource)
-	if tex then
-		-- Nearest magnification and mipmapped minification, the way
-		-- extensions/luanti_client's particles are: crisp up close, and a
-		-- particle far away is not a sparkle of whichever texel won
-		-- ([RENDER_SURVEY], texture filtering)
-		tex.filterMode = magic.FILTER_NEAREST_ANISOTROPIC
-		material:SetTexture(0, tex)
+	-- One material a texture, made the first time it is drawn and kept
+	-- here, which is also what keeps it alive: every particle of a snow
+	-- storm made its own, and that was half of what a particle cost
+	-- ([PACKET_STALL], 2026-10-03)
+	local cached = particle_materials[resource]
+	local material = cached and cached.material
+	local tex = cached and cached.tex
+	if not cached then
+		material = magic.Material.new()
+		tex = magic.cache:GetResource("Texture2D", resource)
+		if tex then
+			-- Nearest magnification and mipmapped minification, the way
+			-- extensions/luanti_client's particles are: crisp up close, and
+			-- a particle far away is not a sparkle of whichever texel won
+			-- ([RENDER_SURVEY], texture filtering)
+			tex.filterMode = magic.FILTER_NEAREST_ANISOTROPIC
+			material:SetTexture(0, tex)
+		end
+		-- Particles are blended rather than cut out -- smoke and a spark
+		-- are soft-edged -- and unlit, like the objects. Urho3D ships the
+		-- technique.
+		material:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/DiffUnlitParticleAlpha.xml"))
+		particle_materials[resource] = {material = material, tex = tex}
 	end
-	-- Particles are blended rather than cut out -- smoke and a spark are
-	-- soft-edged -- and unlit, like the objects. Urho3D ships the technique.
-	material:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/DiffUnlitParticleAlpha.xml"))
 	effect.material = material
 	effect.numParticles = amount
 	effect.relative = false
