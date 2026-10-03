@@ -80,6 +80,14 @@ static void perform(CURL *c, const ss_ &url, const char *errbuf)
 	curl_easy_cleanup(c);
 	// [PROCESS_SANDBOX]: a port the server's box refuses
 	if(r == CURLE_COULDNT_CONNECT && os_errno == EACCES){
+		// The URL's own: curl's primary port is -1 with no connection made
+		const size_t at = url.find("://");
+		const ss_ rest = at == ss_::npos ? url : url.substr(at + 3);
+		const ss_ hostport = rest.substr(0, rest.find('/'));
+		const size_t colon = hostport.rfind(':');
+		port = colon != ss_::npos && hostport.find(']', colon) == ss_::npos ?
+				atol(hostport.c_str() + colon + 1) :
+				(url.compare(0, 6, "https:") == 0 ? 443 : 80);
 		log_w(MODULE, "%s: the server's box refused port %li; its admin "
 				"allows it with --connect-ports or BUILDAT_CONNECT_PORTS",
 				cs(url), port);
