@@ -513,8 +513,11 @@ struct Module: public interface::Module, public Interface
 		r->last_us = interface::os::time_us();
 		if(r->connected && r->sock)
 			r->sock->send_fd(p.data);
-		else
+		else if(r->pending.size() + p.data.size() <= RELAY_MAX_BYTES)
 			r->pending += p.data;
+		// simplified: past the relay's ceiling before the Starport answers,
+		// what more a client sends is dropped rather than kept
+		// ([SECURITY_RUN_1]); the relay ends on the receive side's count
 	}
 
 	void on_relay_close(const network::Packet &p)
@@ -975,7 +978,12 @@ struct Module: public interface::Module, public Interface
 			for(auto &pair : m_listings){
 				const ss_ want = interface::sha256::hex(
 						interface::sha256::hmac(pair.second.secret, payload));
-				if(want.size() == sig.size() && want == sig){
+				// Compared in full whatever matches: an early-out compare
+				// says by its time how much of a guess was right
+				unsigned char d = want.size() == sig.size() ? 0 : 1;
+				for(size_t i = 0; i < want.size() && i < sig.size(); i++)
+					d |= (unsigned char)(want[i] ^ sig[i]);
+				if(d == 0){
 					host = pair.first;
 					listing = pair.second.id;
 				}

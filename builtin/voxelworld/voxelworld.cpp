@@ -605,6 +605,10 @@ struct CInstance: public voxelworld::Instance
 		int distance_voxels = atoi(packet.data.c_str());
 		if(distance_voxels < 0)
 			return;
+		// A client's number: past a million voxels the sum below wrapped
+		// (the radius is clamped to what is loaded further on anyway)
+		if(distance_voxels > 1000000)
+			distance_voxels = 1000000;
 		int section_w = m_chunk_size_voxels.getX() *
 				m_section_size_chunks.getX();
 		// A section the point is anywhere in is one the client can see into;

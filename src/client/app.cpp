@@ -1688,6 +1688,23 @@ struct CApp: public App, public magic::Application
 					cs(address));
 			return;
 		}
+		// The size the PNG says it is, before decoding: a 64 KB file can
+		// say 65535 pixels a side and be given the memory for it
+		// ([SECURITY_RUN_1]). IHDR's width and height, big-endian, at 16.
+		if(data.size() < 24){
+			log_w(MODULE, "server icon from %s: too short", cs(address));
+			return;
+		}
+		auto be32 = [&](size_t at){
+			const unsigned char *d = (const unsigned char*)data.data() + at;
+			return (uint32_t)d[0] << 24 | (uint32_t)d[1] << 16 |
+					(uint32_t)d[2] << 8 | (uint32_t)d[3];
+		};
+		if(be32(16) < 1 || be32(16) > 512 || be32(20) < 1 || be32(20) > 512){
+			log_w(MODULE, "server icon from %s: not a picture of 512 "
+					"pixels a side or less", cs(address));
+			return;
+		}
 		magic::MemoryBuffer buf(data.data(), (unsigned)data.size());
 		magic::SharedPtr<magic::Image> img(new magic::Image(context_));
 		if(!img->Load(buf) || img->GetWidth() < 1 || img->GetHeight() < 1 ||
