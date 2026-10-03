@@ -87,7 +87,12 @@ void PS()
     // running it never leaves the range, so out of it is that.
     if (!(adaptedLum >= cAutoExposureLumRange.x && adaptedLum <= cAutoExposureLumRange.y))
         adaptedLum = lum;
-    gl_FragColor.r = adaptedLum + (lum - adaptedLum) * (1.0 - exp(-cDeltaTimePS * cAutoExposureAdaptRate));
+    // The exponent clamped: the minimap's clone adapts at a rate of a
+    // million, and exp() of minus sixteen thousand came out of the Windows
+    // box's driver as something other than zero -- the map one flat grey
+    // ([BOX_MINIMAP_GREY], 2026-10-03). exp(-30) is "at once" already.
+    gl_FragColor.r = adaptedLum + (lum - adaptedLum) *
+            (1.0 - exp(-min(cDeltaTimePS * cAutoExposureAdaptRate, 30.0)));
     #endif
 
     #ifdef EXPOSE
