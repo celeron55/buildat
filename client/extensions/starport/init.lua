@@ -545,6 +545,82 @@ end
 -- Dialogs: this side's own, so only the player fills them in
 --
 
+-- **A dialog a script added to is closed** ([TRUST_COLOR]): the trust
+-- colour tells a look-alike window from this side's own, but a script can
+-- reach this side's own through the UI stack and put a field of its own
+-- beside a coloured one. Each dialog is taken down to its shape -- types,
+-- names, children, every element's opacity and visibility but the root's,
+-- which the stack hides under a newer screen -- and compared every frame;
+-- what this file adds or shows re-seals it (reseal()), and any other
+-- change closes the dialog. No text and no size: a status line changes
+-- both, and the window centres itself again. A field's insides are its
+-- own (the cursor blinks).
+local guards = {} -- {root = wrapper, raw = unsafe, seen = picture}
+local function raw_of(w)
+	local m = getmetatable(w)
+	return m and m.unsafe
+end
+local function shape(e, depth, out)
+	local t = e:GetTypeName()
+	out[#out + 1] = table.concat({depth, t, e:GetName(),
+			e:GetNumChildren(false), string.format("%.3f", e:GetOpacity()),
+			depth > 0 and tostring(e:IsVisible()) or ""}, "|")
+	if t == "LineEdit" then
+		return
+	end
+	for i = 0, e:GetNumChildren(false) - 1 do
+		shape(e:GetChild(i), depth + 1, out)
+	end
+end
+local function picture(g)
+	local m = getmetatable(g.root)
+	if not m or m.dead then
+		return nil
+	end
+	local out = {}
+	shape(g.raw, 0, out)
+	return table.concat(out, "\n")
+end
+-- After this file changed a dialog: the dialog `w` is in, as it is now
+local function reseal(w)
+	local e = raw_of(w)
+	for _ = 1, 64 do
+		if e == nil then
+			return
+		end
+		for _, g in ipairs(guards) do
+			if g.raw == e then
+				g.seen = picture(g)
+				return
+			end
+		end
+		e = e:GetParent()
+	end
+end
+magic.SubscribeToEvent("Update", function()
+	local i = 1
+	while i <= #guards do
+		local g = guards[i]
+		local now = picture(g)
+		if now == nil then
+			table.remove(guards, i) -- closed
+		elseif now ~= g.seen then
+			table.remove(guards, i)
+			log:warning("A script changed the Starport dialog \""..g.desc..
+					"\"; it is closed")
+			local st = uistack.main.stack
+			for _, e in ipairs(st) do
+				if e == g.root then
+					uistack.main:pop_to(g.root, true)
+					break
+				end
+			end
+		else
+			i = i + 1
+		end
+	end
+end)
+
 local function open_window(desc, width)
 	local root = uistack.main:push({desc = desc})
 	root.defaultStyle = magic.cache:GetResource("XMLFile", STYLE)
@@ -564,6 +640,9 @@ local function open_window(desc, width)
 	end)
 	-- By the keyboard ([MENU_KEYS])
 	require("buildat/extension/ui_utils").safe.keyboard_page(w)
+	local g = {root = root, raw = raw_of(root), desc = desc}
+	guards[#guards + 1] = g
+	g.seen = picture(g)
 	return root, w
 end
 
@@ -580,6 +659,7 @@ local function add_text(parent, text, color)
 	if color then
 		t.color = color
 	end
+	reseal(t)
 	return t
 end
 
@@ -588,12 +668,14 @@ local function add_label(parent, text, min_width)
 	local t = add_text(parent, text)
 	t:SetWordwrap(false)
 	t.minWidth = min_width or 0
+	reseal(t)
 	return t
 end
 
 local function add_row(parent)
 	local r = parent:CreateChild("UIElement")
 	r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
+	reseal(r)
 	return r
 end
 
@@ -611,6 +693,7 @@ local function add_button(parent, label, on_click, enabled)
 	else
 		magic.SubscribeToEvent(b, "Released", function() on_click() end)
 	end
+	reseal(b)
 	return b
 end
 
@@ -640,6 +723,7 @@ local function add_edit(parent, value, secret)
 		e.textCopyable = true
 	end
 	e:SetText(value or "")
+	reseal(e)
 	return e
 end
 
@@ -983,6 +1067,7 @@ local function qr_image(parent, text)
 	local b = parent:CreateChild("BorderImage")
 	b.texture = tex
 	b:SetFixedSize(side, side)
+	reseal(b)
 	return b
 end
 
@@ -1098,6 +1183,7 @@ local function age_rows(w)
 		no:GetChild(0).text = (age.adult == false and "[x]" or "[ ]") .. " No"
 		year_row.visible = age.adult == false
 		consent_b.visible = age.adult == false
+		reseal(year_row)
 		consent_b:GetChild(0).text = (age.consent and "[x]" or "[ ]") ..
 				" Under 13: I have a parent's consent"
 	end
