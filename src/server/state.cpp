@@ -1,5 +1,8 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+#include <condition_variable>
+#include <mutex>
+#include <cstdint>
 #include "state.h"
 #include "confine.h"
 #include "core/log.h"
@@ -72,6 +75,12 @@ struct ModuleContainer
 	std::exception_ptr direct_cb_exception = nullptr;
 	// The actual event queue
 	std::deque<Event> event_queue; // Push back, pop front
+	// How many events have gone into event_queue and how many the module's
+	// thread has handled or dropped: what emit_event_sync() waits on
+	uint64_t events_pushed = 0;
+	uint64_t events_done = 0;
+	std::mutex events_done_mutex;
+	std::condition_variable events_done_cv;
 	// Protects direct_cb and event_queue
 	interface::Mutex event_queue_mutex;
 	// Counts queued events, and +1 for direct_cb
@@ -198,26 +207,34 @@ struct ModuleContainer
 			}
 		}
 		event_queue.push_back(event);
+		events_pushed++;
 		event_queue_sem.post();
 	}
-	// Handled in the module's own thread, as a direct callback, and
-	// waited for: run from the caller's thread it ran beside whatever the
+	void event_done(){
+		{
+			std::lock_guard<std::mutex> lock(events_done_mutex);
+			events_done++;
+		}
+		events_done_cv.notify_all();
+	}
+	// Handled in the module's own thread, as any event is, and waited
+	// for: run from the caller's thread it ran beside whatever the
 	// module's thread was doing for another module -- voxelworld's save at
 	// shutdown beside a relight luanti had asked for, both in its section
-	// cache. mutex is held by neither of those.
+	// cache. Not as a direct callback either: that holds the module's slot
+	// for the whole handler, and a handler that calls a module which is
+	// itself waiting for this one deadlocks (network's shutdown and
+	// client_file's).
 	void emit_event_sync(const Event &event){
-		std::exception_ptr e;
-		try {
-			execute_direct_cb([&](interface::Module *module){
-				module->event(event.type, event.p.get());
-			}, e, nullptr);
-		} catch(interface::ModuleAskedToStop &stop){
-			log_w(MODULE, "M[%s]: stopping; a synchronous event is not "
-					"handled: %s", cs(info.name), stop.what());
-			return;
+		uint64_t mine;
+		{
+			interface::MutexScope ms(event_queue_mutex);
+			event_queue.push_back(event);
+			mine = ++events_pushed;
+			event_queue_sem.post();
 		}
-		if(e)
-			std::rethrow_exception(e);
+		std::unique_lock<std::mutex> lock(events_done_mutex);
+		events_done_cv.wait(lock, [&]{ return events_done >= mine; });
 	}
 	// If returns false, the module thread is stopping and cannot be called
 	// NOTE: It's not possible for the caller module to be deleted while this is
@@ -396,6 +413,12 @@ void ModuleThread::run(interface::Thread *thread)
 			if(got_event){
 				log_t(MODULE, "M[%s]: Discarding event", cs(mc->info.name));
 			}
+			// Nothing queued will be handled now; nobody waits for it
+			{
+				std::lock_guard<std::mutex> lock(mc->events_done_mutex);
+				mc->events_done = UINT64_MAX;
+			}
+			mc->events_done_cv.notify_all();
 			// Stop
 			break;
 		}
@@ -405,6 +428,7 @@ void ModuleThread::run(interface::Thread *thread)
 		} else if(got_event){
 			// Handle the event
 			handle_event(event);
+			mc->event_done();
 		} else {
 			log_w(MODULE, "M[%s]: Event semaphore indicated something happened,"
 					" but there was no event, direct callback nor was the thread"
