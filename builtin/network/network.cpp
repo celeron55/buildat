@@ -438,6 +438,8 @@ struct Module: public interface::Module, public network::Interface
 {
 	interface::Server *m_server;
 	sp_<interface::TCPSocket> m_listening_socket;
+	// What listen_on() added
+	sv_<sp_<interface::TCPSocket>> m_extra_listeners;
 	sm_<Peer::Id, Peer> m_peers;
 	sm_<int, Peer*> m_peers_by_socket;
 	size_t m_next_peer_id = 1;
@@ -635,7 +637,12 @@ struct Module: public interface::Module, public network::Interface
 		// socket readable, so the listening socket is left out of the
 		// wait for a moment rather than spun on; and nothing is stored,
 		// where a peer with no socket was ([SECURITY_RUN_1]).
-		if(!socket->accept_fd(*m_listening_socket.get())){
+		interface::TCPSocket *listener = m_listening_socket.get();
+		for(auto &l : m_extra_listeners){
+			if(l->fd() == event_fd)
+				listener = l.get();
+		}
+		if(!socket->accept_fd(*listener)){
 			m_accept_paused_until_us = interface::os::time_us() + 200000;
 			return;
 		}
@@ -1337,6 +1344,10 @@ struct Module: public interface::Module, public network::Interface
 		sv_<int> result;
 		if(interface::os::time_us() >= m_accept_paused_until_us)
 			result.push_back(m_listening_socket->fd());
+		if(interface::os::time_us() >= m_accept_paused_until_us){
+			for(auto &l : m_extra_listeners)
+				result.push_back(l->fd());
+		}
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
 			// A pipe's peer has no fd to wait on; poll_pipes() reads it
@@ -1395,7 +1406,12 @@ struct Module: public interface::Module, public network::Interface
 
 	void handle_active_socket(int fd)
 	{
-		if(fd == m_listening_socket->fd()){
+		bool listener = fd == m_listening_socket->fd();
+		for(auto &l : m_extra_listeners){
+			if(l->fd() == fd)
+				listener = true;
+		}
+		if(listener){
 			on_listen_event(fd);
 		} else {
 			on_incoming_data(fd);
@@ -1429,6 +1445,29 @@ struct Module: public interface::Module, public network::Interface
 			return;
 		it->second.closing = true;
 		it->second.close_by_us = interface::os::time_us() + 2000000;
+	}
+
+	// One more listening socket, on another address and the same port --
+	// the machine's LAN address beside 127.0.0.1. Not the one there is
+	// closed and bound anew on every interface: the main thread's select()
+	// holds a closed socket bound until it returns, so the bind was "in
+	// use" or not by luck, and retrying it held this module long enough
+	// for the main thread and client_file to deadlock behind it.
+	bool listen_on(const ss_ &address, ss_ *error)
+	{
+		const ss_ port = m_server->get_config().get<ss_>("network_port");
+		sp_<interface::TCPSocket> s(interface::createTCPSocket());
+		if(!s->bind_fd(address, port) || !s->listen_fd()){
+			if(error)
+				*error = "cannot listen at "+address+":"+port;
+			log_w(MODULE, "Cannot listen at %s:%s too", cs(address),
+					cs(port));
+			return false;
+		}
+		log_i(MODULE, "Listening at %s:%s too, fd=%i", cs(address), cs(port),
+				s->fd());
+		m_extra_listeners.push_back(s);
+		return true;
 	}
 
 	void http_respond(PeerInfo::Id id, int status, const ss_ &content_type,

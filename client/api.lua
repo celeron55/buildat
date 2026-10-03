@@ -976,6 +976,11 @@ buildat.safe.stop_local_server = function(force)
 end
 -- local_server_state() -> port or nil, status: the port once it
 -- answers, and the last status line of its log
+-- lan_address() -> "a.b.c.d" or nil: this machine's address on the LAN,
+-- only while connected to the server this client started (the pause
+-- menu's "Open to LAN" says it)
+buildat.safe.lan_address = __buildat_lan_address
+
 buildat.safe.local_server_state = function()
 	local port = __buildat_local_server_ready() and
 			__buildat_local_server_port() or nil

@@ -376,12 +376,16 @@ struct CState: public State
 		return m_address;
 	}
 
+	// accounts:owner_token sent on this connection
+	bool m_owner_sent = false;
+
 	bool connect(const ss_ &address, ss_ *error)
 	{
 		{
 			std::lock_guard<std::mutex> lock(m_address_mutex);
 			m_address = address;
 		}
+		m_owner_sent = false;
 		// **A cache of its own per server** ([SECURITY_RUN_1]): the files
 		// are kept by their hash and a client asks only for those it does
 		// not have, so in one cache every server learned which of another
@@ -769,6 +773,15 @@ void CState::setup_packet_handlers()
 			ar(files);
 		}
 		log_v(MODULE, "Server announces %zu files", files.size());
+		// Our own server: say so, once per connection, with the token it
+		// was started with. The server's first packet is this one, so the
+		// connection is up by now.
+		if(!m_owner_sent){
+			m_owner_sent = true;
+			const ss_ token = m_app->owner_token_for(get_address());
+			if(!token.empty())
+				send_packet("accounts:owner_token", token);
+		}
 		// The names and their hashes are the main thread's, because
 		// get_file_path() answers out of this the moment anything asks
 		for(const auto &pair : files)

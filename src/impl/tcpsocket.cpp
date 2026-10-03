@@ -315,7 +315,7 @@ struct CTCPSocket: public TCPSocket
 						sizeof(val));
 			}
 			if(bind(try_fd, res->ai_addr, res->ai_addrlen) == -1){
-				//std::cerr<<"bind: "<<strerror(errno)<<std::endl;
+				std::cerr<<"bind(): "<<strerror(errno)<<std::endl;
 				closesocket(try_fd);
 				continue;
 			}
@@ -524,6 +524,37 @@ TCPSocket* createTCPSocket(int fd)
 // first-run prompt the connect timeout -- so the screen froze and the
 // client never came back ([WIN8_START]). A port that is not listening
 // yet answers "no" inside the 50 ms on every platform.
+ss_ local_lan_address()
+{
+	// A UDP socket connected anywhere outside the LAN has the address the
+	// route out of it uses; connect() on UDP sends nothing. 192.0.2.1 is
+	// TEST-NET-1, which no one answers to.
+	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if(fd == -1)
+		return "";
+	struct sockaddr_in to;
+	memset(&to, 0, sizeof(to));
+	to.sin_family = AF_INET;
+	to.sin_port = htons(9);
+	to.sin_addr.s_addr = htonl(0xc0000201);
+	ss_ out;
+	if(connect(fd, (struct sockaddr*)&to, sizeof(to)) == 0){
+		struct sockaddr_in me;
+		socklen_t len = sizeof(me);
+		if(getsockname(fd, (struct sockaddr*)&me, &len) == 0){
+			const uint32_t a = ntohl(me.sin_addr.s_addr);
+			if(a != 0 && (a >> 24) != 127){
+				char buf[32];
+				snprintf(buf, sizeof buf, "%u.%u.%u.%u", (a >> 24) & 255,
+						(a >> 16) & 255, (a >> 8) & 255, a & 255);
+				out = buf;
+			}
+		}
+	}
+	closesocket(fd);
+	return out;
+}
+
 bool probe_connect(const ss_ &address, const ss_ &port)
 {
 	struct addrinfo hints;

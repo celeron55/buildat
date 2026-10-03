@@ -34,6 +34,10 @@ namespace interface
 
 	// Quiet connect attempt; does not keep the socket.
 	bool probe_connect(const ss_ &address, const ss_ &port);
+
+	// This machine's IPv4 address on the network its default route is on,
+	// what someone on the LAN reaches it by; "" without one. Sends nothing.
+	ss_ local_lan_address();
 }
 
 // vim: set noet ts=4 sw=4:

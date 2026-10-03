@@ -17,6 +17,7 @@
 #include <cereal/types/vector.hpp>
 #include <cereal/types/utility.hpp>
 #include <random>
+#include <set>
 #include <sstream>
 #include <map>
 #define MODULE "accounts"
@@ -397,6 +398,13 @@ struct Module: public interface::Module, public Interface
 	AccessSettings m_access;
 	ss_ m_setup_code;
 	bool m_launched = false;
+	// The token the launcher started this server with (main.cpp takes it
+	// out of the environment), and the peers that showed it: the
+	// launcher's own client, which is this server's owner and admin.
+	// Without a token -- a server started by hand with launcher=1, which
+	// the tests do -- a loopback peer is local, as it was.
+	ss_ m_owner_token;
+	std::set<PeerId> m_owners;
 	std::map<PeerId, Peer> m_peers;
 	std::map<ss_, Failures> m_name_failures;
 	std::map<ss_, Failures> m_address_failures;
@@ -422,7 +430,8 @@ struct Module: public interface::Module, public Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
-		for(const char *name : {"accounts:get_hello", "accounts:login",
+		for(const char *name : {"accounts:owner_token",
+				"accounts:get_hello", "accounts:login",
 				"accounts:admin", "accounts:passwd", "accounts:logout",
 				"accounts:totp", "accounts:link_starport"})
 			m_server->sub_event(this,
@@ -436,6 +445,8 @@ struct Module: public interface::Module, public Interface
 				network::NewClient)
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
 				network::OldClient)
+		EVENT_TYPEN("network:packet_received/accounts:owner_token",
+				on_owner_token, network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:get_hello",
 				on_get_hello, network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:login", on_login,
@@ -472,6 +483,7 @@ struct Module: public interface::Module, public Interface
 	void on_start()
 	{
 		m_launched = launch_param("launcher") == "1";
+		m_owner_token = m_server->get_config().get<ss_>("owner_token");
 		// **Answers go ahead of a game's bulk** ([NET_CHANNELS]; user,
 		// 2026-09-30: a new invite never showed, behind a world streaming to
 		// a slow link). Each is the whole of what it says, so a newer one
@@ -519,6 +531,7 @@ struct Module: public interface::Module, public Interface
 
 	void on_client_disconnected(const network::OldClient &client)
 	{
+		m_owners.erase(client.info.id);
 		auto it = m_peers.find(client.info.id);
 		if(it == m_peers.end())
 			return;
@@ -594,9 +607,33 @@ struct Module: public interface::Module, public Interface
 	bool is_local(PeerId peer)
 	{
 		auto it = m_peers.find(peer);
-		return m_launched && it != m_peers.end() && !it->second.web &&
-				(it->second.address == "127.0.0.1" ||
-				it->second.address == "::1");
+		if(!m_launched || it == m_peers.end() || it->second.web)
+			return false;
+		if(!m_owner_token.empty())
+			return m_owners.count(peer) != 0;
+		return it->second.address == "127.0.0.1" ||
+				it->second.address == "::1";
+	}
+
+	// Another user or program on this machine reaches 127.0.0.1 too, and
+	// once the owner opens the game to the LAN everyone there does: what
+	// makes a peer the owner is the token, compared in constant time
+	void on_owner_token(const network::Packet &packet)
+	{
+		if(m_owner_token.empty() || !m_peers.count(packet.sender))
+			return;
+		const ss_ &got = packet.data;
+		unsigned diff = got.size() ^ m_owner_token.size();
+		for(size_t i = 0; i < m_owner_token.size(); i++)
+			diff |= (unsigned char)m_owner_token[i] ^
+					(unsigned char)(i < got.size() ? got[i] : 0);
+		if(diff != 0){
+			log_w(MODULE, "Peer %i sent a wrong owner token",
+					(int)packet.sender);
+			return;
+		}
+		m_owners.insert(packet.sender);
+		log_i(MODULE, "Peer %i is this server's owner", (int)packet.sender);
 	}
 
 	bool launched()

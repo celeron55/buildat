@@ -845,6 +845,12 @@ static int g_watchdog_seconds = 10;
 static ss_ g_local_server_log;
 static size_t g_local_server_log_offset = 0;
 static bool g_local_server_listening = false;
+// What makes this client the local server's owner and admin, and nobody
+// else who reaches its port ([SECURITY_RUN_1], decided by the user): made
+// fresh per server, handed over in its environment -- a command line is
+// every local user's to read -- and sent once connected. Not a script's
+// to see.
+static ss_ g_local_server_token;
 static int64_t g_local_server_started_s = 0;
 static ss_ g_local_server_status;
 
@@ -1592,6 +1598,18 @@ struct CApp: public App, public magic::Application
 	// might be what went with it; see lost_connection() and on_update()
 	int64_t m_lost_connection_us = 0;
 
+	ss_ owner_token_for(const ss_ &address)
+	{
+		if(g_local_server_token.empty() || g_local_server_port.empty() ||
+				!interface::process::is_running(g_local_server))
+			return "";
+		if(address == "localhost:"+g_local_server_port ||
+				address == "127.0.0.1:"+g_local_server_port ||
+				(!local_pipe().empty() && address == "pipe:"+local_pipe()))
+			return g_local_server_token;
+		return "";
+	}
+
 	void lost_connection(const ss_ &reason)
 	{
 #ifdef __EMSCRIPTEN__
@@ -2037,6 +2055,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(local_server_port)
 		DEF_BUILDAT_FUNC(game_storage_dir)
 		DEF_BUILDAT_FUNC(server_address)
+		DEF_BUILDAT_FUNC(lan_address)
 		DEF_BUILDAT_FUNC(local_server_status)
 		DEF_BUILDAT_FUNC(local_server_log_tail)
 		DEF_BUILDAT_FUNC(send_packet);
@@ -3571,7 +3590,24 @@ struct CApp: public App, public magic::Application
 		g_local_server_app = server_app_id(game);
 		g_local_server_port = pick_free_local_port();
 		log_i(MODULE, "Starting local server on port %s", cs(g_local_server_port));
+		{
+			const ss_ raw = interface::bignum::random_bytes(16);
+			g_local_server_token.clear();
+			static const char *hex = "0123456789abcdef";
+			for(unsigned char c : raw){
+				g_local_server_token += hex[c >> 4];
+				g_local_server_token += hex[c & 15];
+			}
+#ifdef _WIN32
+			_putenv_s("BUILDAT_OWNER_TOKEN", g_local_server_token.c_str());
+#else
+			setenv("BUILDAT_OWNER_TOKEN", g_local_server_token.c_str(), 1);
+#endif
+		}
 		sv_<ss_> args{"-m", game_path, "-P", g_local_server_port,
+				// This machine only, until its owner opens it to the LAN
+				// from the pause menu (the user's call, [SECURITY_RUN_1])
+				"-A", "127.0.0.1",
 				// The client's own paths, so that a client started on other
 				// paths than the build's (-D, -C, the same letters both sides: a test on empty ones,
 				// [FIRST_RUN]) has its server on the same
@@ -3650,6 +3686,12 @@ struct CApp: public App, public magic::Application
 		// click on the exe) every path it forms would be off by one
 		g_local_server = interface::process::start(server_path, args,
 				g_client_config.get<ss_>("root_path"));
+		// The child has it; nothing started later inherits it
+#ifdef _WIN32
+		_putenv_s("BUILDAT_OWNER_TOKEN", "");
+#else
+		unsetenv("BUILDAT_OWNER_TOKEN");
+#endif
 		if(!g_local_server.valid()){
 			lua_pushboolean(L, false);
 			lua_pushstring(L, "Failed to start server");
@@ -4164,6 +4206,25 @@ struct CApp: public App, public magic::Application
 		if(address.empty())
 			return 0;
 		lua_pushlstring(L, address.c_str(), address.size());
+		return 1;
+	}
+
+	// lan_address() -> "a.b.c.d" or nothing: this machine's address on the
+	// LAN, for the pause menu's "Open to LAN" to say. Only while connected
+	// to the server this client started: to any other, where this machine
+	// is on its network is not that server's business.
+	static int l_lan_address(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ address = self->m_state ? self->m_state->get_address() : "";
+		if(self->owner_token_for(address).empty())
+			return 0;
+		const ss_ lan = interface::local_lan_address();
+		if(lan.empty())
+			return 0;
+		lua_pushlstring(L, lan.c_str(), lan.size());
 		return 1;
 	}
 

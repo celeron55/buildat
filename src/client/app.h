@@ -119,6 +119,9 @@ namespace app
 		// this client started has died, show its log's tail first
 		// ([START_PROGRESS])
 		virtual void lost_connection(const ss_ &reason) = 0;
+		// The owner token of the local server this client started, when
+		// address is that server; "" for any other ([SECURITY_RUN_1])
+		virtual ss_ owner_token_for(const ss_ &address) = 0;
 		virtual void run_script(const ss_ &script) = 0;
 		virtual bool run_script_no_sandbox(const ss_ &script) = 0;
 		virtual void handle_packet(const ss_ &name, const ss_ &data) = 0;

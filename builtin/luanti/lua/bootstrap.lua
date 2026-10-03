@@ -5889,8 +5889,19 @@ function core.__set_admin(name, on)
 	core.__send_privs(name)
 end
 
+-- The singleplayer's name, which vanilla gives only to the launcher's own
+-- client (the owner token, builtin/accounts): every other peer is
+-- client<n>, and singleplayer mode's every privilege is the owner's alone
+-- -- another user on the machine reaches 127.0.0.1 too, and the LAN does
+-- once the game is opened to it ([SECURITY_RUN_1])
+local singleplayer_name = os.getenv("BUILDAT_LUANTI_NAME")
+if singleplayer_name == nil or singleplayer_name == "" then
+	singleplayer_name = "singleplayer"
+end
+
 function core.get_player_privs(name)
-	if core.is_singleplayer() or core.__admins[name] then
+	if (core.is_singleplayer() and name == singleplayer_name) or
+			core.__admins[name] then
 		local all = {}
 		for priv, _ in pairs(core.registered_privileges or {}) do
 			all[priv] = true

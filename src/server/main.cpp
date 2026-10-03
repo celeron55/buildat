@@ -91,6 +91,16 @@ int main(int argc, char *argv[])
 	// buildat's own ports; also BUILDAT_CONNECT_PORTS
 	if(getenv("BUILDAT_CONNECT_PORTS"))
 		config.set("connect_ports", ss_(getenv("BUILDAT_CONNECT_PORTS")));
+	// The launcher's owner token: kept in the config, where no game's Lua
+	// reaches, and out of the environment, where os.getenv() would
+	if(const char *token = getenv("BUILDAT_OWNER_TOKEN")){
+		config.set("owner_token", ss_(token));
+#ifdef _WIN32
+		_putenv_s("BUILDAT_OWNER_TOKEN", "");
+#else
+		unsetenv("BUILDAT_OWNER_TOKEN");
+#endif
+	}
 	for(int i = 1; i < argc; i++){
 		int take = 0;
 		if(ss_(argv[i]) == "--unconfined"){

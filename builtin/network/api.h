@@ -128,6 +128,10 @@ namespace network
 		// after it. A peer that has gone, or was answered, is ignored.
 		virtual void http_respond(PeerInfo::Id peer, int status,
 				const ss_ &content_type, const ss_ &body) = 0;
+		// Listen on another address too, the same port: the launcher's
+		// game, on 127.0.0.1, opened to the LAN at the machine's LAN
+		// address. false with why if it cannot.
+		virtual bool listen_on(const ss_ &address, ss_ *error) = 0;
 	};
 
 	inline bool access(interface::Server *server,

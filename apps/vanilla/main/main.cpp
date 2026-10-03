@@ -13,6 +13,7 @@
 #include "core/log.h"
 #include "interface/module.h"
 #include "interface/server.h"
+#include "interface/tcpsocket.h"
 #include "interface/server_config.h"
 #include "interface/event.h"
 #include "interface/fs.h"
@@ -154,6 +155,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:get_saves"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:open_lan"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:open"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:save_info"));
@@ -206,6 +209,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/main:punch_object",
 				on_punch_object, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:place", on_place,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:open_lan", on_open_lan,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_saves", on_get_saves,
 				network::Packet)
@@ -276,7 +281,11 @@ struct Module: public interface::Module
 		const char *name = getenv("BUILDAT_LUANTI_NAME");
 		if(name == nullptr || name[0] == '\0')
 			name = "singleplayer";
-		if(m_named_peer == 0)
+		// The singleplayer is the launcher's own client (its owner token,
+		// builtin/accounts); anyone else who reaches the game -- another
+		// user on this machine, or the LAN once it is opened -- is an
+		// ordinary player ([SECURITY_RUN_1])
+		if(m_named_peer == 0 && is_owner(peer))
 			m_named_peer = peer;
 		if(m_named_peer != peer)
 			return "client"+itos(peer);
@@ -308,6 +317,19 @@ struct Module: public interface::Module
 		return !name.empty() && name[0] != '_';
 	}
 
+	// Open to the LAN already ("Open to LAN" in the pause menu)
+	bool m_lan_open = false;
+
+	// The launcher's own client, on the launcher's server
+	bool is_owner(network::PeerInfo::Id peer)
+	{
+		bool local = false;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			local = i->is_local(peer);
+		});
+		return local;
+	}
+
 	bool is_admin(network::PeerInfo::Id peer)
 	{
 		auto it = m_names.find(peer);
@@ -324,7 +346,7 @@ struct Module: public interface::Module
 	// admin's on a public one
 	bool may_manage(network::PeerInfo::Id peer)
 	{
-		if(!m_public || is_admin(peer))
+		if(m_public ? is_admin(peer) : is_owner(peer))
 			return true;
 		menu_error(peer, "Only an admin manages this server's worlds");
 		return false;
@@ -333,9 +355,10 @@ struct Module: public interface::Module
 	// The launcher's server's alone: the server's own disk and settings
 	bool local_only(network::PeerInfo::Id peer)
 	{
-		if(!m_public)
+		if(!m_public && is_owner(peer))
 			return true;
-		menu_error(peer, "Not on a public server");
+		menu_error(peer, m_public ? "Not on a public server" :
+				"Only the player who started this game");
 		return false;
 	}
 
@@ -857,6 +880,36 @@ struct Module: public interface::Module
 	// game each one says it needs, and every Luanti game there is to choose
 	// from. Flat, with the number of saves leading, because that is what one
 	// array of strings can carry.
+	// "Open to LAN" (the user's call, [SECURITY_RUN_1]): the launcher's
+	// game listens on 127.0.0.1 until the player who started it opens it
+	// from the pause menu; then on the machine's LAN address too, the same
+	// port. Who comes in from there is an ordinary player
+	// (player_name_of()). The answer, main:lan, is "1" or why not.
+	// simplified: the address the default route leaves by, one of them;
+	// a machine on two LANs is opened on that one. Every interface would
+	// be getifaddrs(), which the box's seccomp may not allow.
+	void on_open_lan(const network::Packet &packet)
+	{
+		if(m_public || !is_owner(packet.sender) || m_lan_open)
+			return;
+		ss_ error;
+		bool ok = false;
+		const ss_ lan = interface::local_lan_address();
+		if(lan.empty()){
+			error = "this machine is on no network";
+		} else {
+			network::access(m_server, [&](network::Interface *inetwork){
+				ok = inetwork->listen_on(lan, &error);
+			});
+		}
+		m_lan_open = ok;
+		log_i(MODULE, "Open to LAN: %s", ok ? ("listening at "+lan+" too").c_str() :
+				cs(error));
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "main:lan", ok ? ss_("1") : error);
+		});
+	}
+
 	void on_get_saves(const network::Packet &packet)
 	{
 		if(!may_manage(packet.sender))
