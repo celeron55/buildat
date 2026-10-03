@@ -96,10 +96,15 @@ Directory structure
 -------------------
 ├── 3rdparty    << Bundled 3rd-party libraries
 ├── Build       << Build files; "mkdir Build; cmake ..; make"
-├── cache       << Runtime directory used by Buildat
+├── cache       << Runtime directory used by Buildat; a boxed server's
+│                  is cache/apps/<app>, and cache/rccpp_build only the
+│                  unboxed build's, read by the boxes
 ├── builtin     << Built-in modules
 ├── client      << Built-in client files
-├── extensions  << Built-in client extensions
+│   └── extensions << The client's own extensions, trusted: the sandbox
+│                  itself (urho3d, magic_sandbox, uistack, replicate),
+│                  network, starport, sandbox_scan
+├── extensions  << Client extensions, run in the Lua sandbox
 ├── src
 │   ├── client  << Client-specific code
 │   ├── core    << Core code (must be kept minimal but sufficient)
@@ -108,8 +113,10 @@ Directory structure
 │   └── server  << Server-specific code
 ├── apps       << Apps that can be run using buildat_server -m <path>
 ├── doc         << This documentation; doc/plan is the plan and its history
-├── user        << The user's data: saves, imported Luanti games and worlds,
-│                  engine settings -- never in git
+├── user        << The user's data -- never in git: apps/<app> an app's own
+│                  (its saves, vanilla's imported worlds), shared/<app>
+│                  what it shares read-only with the others (vanilla's
+│                  Luanti games and settings), and the engine settings
 ├── local       << Runs' outputs: fuzz and driven runs, reference shots,
 │                  options filed for the user -- never in git
 └── util        << Development utilities: packaging, the squash push, benches
@@ -226,3 +233,12 @@ screen with a capture of its own (the key editor listening for a key)
 takes Escape first by returning true from its on_key handler, and Escape
 is then that capture's cancel. A screen never adds a second Escape handler
 that pops itself -- with the menu's own, that was the pop twice.
+
+Every menu is by the keyboard without a line of its own ([MENU_KEYS]): a
+page made with ui_utils.keyboard_page (every Accounts page through its
+page_window, floorplanner's pages) or a menu through bind_button_menu /
+vertical_menu gets the arrows, Tab, Enter, and a letter for each button,
+drawn in brackets in its label. A maker writes the plain label; "&" in it
+picks the letter, and a button whose label is a key's name (a key editor)
+is named "no_letter". A label is read without its letter's brackets
+(ui_utils.unmark) wherever code compares one.
