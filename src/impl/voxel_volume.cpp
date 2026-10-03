@@ -492,6 +492,29 @@ bool voxel_volume_self_test()
 		assert(!empty.plane_is_materialised(0));
 	}
 
+	// A region off the wire that no volume has -- reversed, or a voxel
+	// count of gigabytes -- is refused before it is allocated
+	{
+		auto refused = [](pv::Vector3DInt32 lc, pv::Vector3DInt32 uc){
+			std::ostringstream os(std::ios::binary);
+			{
+				cereal::PortableBinaryOutputArchive ar(os);
+				ar((uint8_t)4, lc, uc, (uint8_t)0, (uint8_t)0, ss_());
+			}
+			try {
+				deserialize_volume(os.str());
+			} catch(Exception &e){
+				return true;
+			}
+			return false;
+		};
+		assert(refused(pv::Vector3DInt32(5, 0, 0), pv::Vector3DInt32(0, 0, 0)));
+		assert(refused(pv::Vector3DInt32(0, 0, 0),
+				pv::Vector3DInt32(4000, 4000, 4000)));
+		assert(!refused(pv::Vector3DInt32(0, 0, 0),
+				pv::Vector3DInt32(63, 63, 63)));
+	}
+
 	return true;
 }
 
@@ -638,6 +661,26 @@ ss_ serialize_volume_compressed(const VoxelVolume &volume)
 	return serialize_volume_planes(volume, true);
 }
 
+// What a serialized volume may claim to be, checked before anything is
+// made that size: the region comes off the wire (a server's packet, a save
+// on disk), and a reversed or huge one was a voxel count of gigabytes,
+// zero-filled -- the OOM killer, not an exception ([SECURITY_RUN_1]).
+// simplified: one ceiling for every volume, 256^3 voxels, sixty-four
+// sections; a format that needs more names its own.
+static const size_t MAX_SERIALIZED_VOXELS = (size_t)1 << 24;
+
+static void check_region(const pv::Vector3DInt32 &lc,
+		const pv::Vector3DInt32 &uc)
+{
+	const int64_t w = (int64_t)uc.getX() - lc.getX() + 1;
+	const int64_t h = (int64_t)uc.getY() - lc.getY() + 1;
+	const int64_t d = (int64_t)uc.getZ() - lc.getZ() + 1;
+	if(w < 1 || h < 1 || d < 1 || w > 4096 || h > 4096 || d > 4096 ||
+			(uint64_t)(w * h * d) > MAX_SERIALIZED_VOXELS)
+		throw Exception(ss_()+"deserialize_volume(): a region of "+
+				itos(w)+"x"+itos(h)+"x"+itos(d)+" is not one a volume has");
+}
+
 up_<VoxelVolume> deserialize_volume(const ss_ &data)
 {
 	std::istringstream is(data, std::ios::binary);
@@ -648,6 +691,7 @@ up_<VoxelVolume> deserialize_volume(const ss_ &data)
 		// One 32-bit plane, written a voxel at a time
 		pv::Vector3DInt32 lc, uc;
 		ar(lc, uc);
+		check_region(lc, uc);
 		up_<VoxelVolume> volume(new VoxelVolume(pv::Region(lc, uc)));
 		const size_t n = volume->voxel_count();
 		if(format == 2){
@@ -685,6 +729,7 @@ up_<VoxelVolume> deserialize_volume(const ss_ &data)
 	if(format == 4){
 		pv::Vector3DInt32 lc, uc;
 		ar(lc, uc);
+		check_region(lc, uc);
 		uint8_t compressed = 0;
 		ar(compressed);
 		uint8_t num_planes = 0;
@@ -695,6 +740,9 @@ up_<VoxelVolume> deserialize_volume(const ss_ &data)
 			VoxelPlane p;
 			uint8_t has = 0;
 			ar(p.name, p.bits, has);
+			if(p.bits != 8 && p.bits != 16 && p.bits != 32)
+				throw Exception(ss_()+"deserialize_volume(): a plane of "+
+						itos((int)p.bits)+" bits");
 			planes.push_back(p);
 			present.push_back(has != 0);
 		}
