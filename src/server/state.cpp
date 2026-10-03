@@ -663,6 +663,20 @@ struct CState: public State, public interface::Server
 	}
 	~CState()
 	{
+		// Torn down by hand, a step a line: a Windows server hung somewhere
+		// past its modules' stop with nothing logged (2026-10-03)
+		log_d(MODULE, "Teardown: the thread pool");
+		m_thread_pool.reset();
+		log_d(MODULE, "Teardown: the file watch thread");
+		m_file_watch_thread.reset();
+		log_d(MODULE, "Teardown: the module containers");
+		m_event_subs.clear();
+		m_modules.clear();
+		log_d(MODULE, "Teardown: the module file watches");
+		m_module_file_watches.clear();
+		log_d(MODULE, "Teardown: the compiler");
+		m_compiler.reset();
+		log_d(MODULE, "Teardown: the rest");
 	}
 
 	sv_<sp_<ModuleContainer>> get_modules_in_unload_order()

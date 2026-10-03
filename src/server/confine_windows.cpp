@@ -85,6 +85,11 @@ static bool in_app_container()
 
 static const DWORD READ_RIGHTS = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
 static const DWORD FULL_RIGHTS = FILE_ALL_ACCESS;
+// A directory granted around: its names and nothing in it. msvcrt's stat()
+// of a directory lists its parent, so without this gcc calls src/ under a
+// root that holds user/ and cache/ "nonexistent" (2026-10-03).
+static const DWORD LIST_RIGHTS = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES |
+		FILE_TRAVERSE | SYNCHRONIZE;
 
 struct Grants
 {
@@ -94,7 +99,8 @@ struct Grants
 
 	// An inheritable ACE for the container on `path`, where one with these
 	// rights is not there already: a start after the first touches nothing
-	void grant(const ss_ &path, DWORD rights)
+	void grant(const ss_ &path, DWORD rights,
+			DWORD inheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT)
 	{
 		const std::wstring w = wide(path);
 		if(GetFileAttributesW(w.c_str()) == INVALID_FILE_ATTRIBUTES)
@@ -120,7 +126,7 @@ struct Grants
 			EXPLICIT_ACCESSW ea = {};
 			ea.grfAccessPermissions = rights;
 			ea.grfAccessMode = GRANT_ACCESS;
-			ea.grfInheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
+			ea.grfInheritance = inheritance;
 			ea.Trustee.TrusteeForm = TRUSTEE_IS_SID;
 			ea.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
 			ea.Trustee.ptstrName = (LPWSTR)sid;
@@ -160,6 +166,7 @@ struct Grants
 			grant(d, rights);
 			return;
 		}
+		grant(d, LIST_RIGHTS, NO_INHERITANCE);
 		for(const interface::fs::Node &n : interface::fs::list_directory(d)){
 			if(n.name == "." || n.name == "..")
 				continue;

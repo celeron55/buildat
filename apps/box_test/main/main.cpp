@@ -272,8 +272,10 @@ struct Module: public interface::Module
 			{"list Documents", w_can_list(known_folder(CSIDL_PERSONAL))},
 			{"write a file in your profile",
 				w_can_write(profile+"\\buildat_box_test.txt")},
+			// The profile's, not CSIDL_LOCAL_APPDATA's: in the container that
+			// answers the container's own directory
 			{"write a file in your TEMP", w_can_write(
-				known_folder(CSIDL_LOCAL_APPDATA)+"\\Temp\\buildat_box_test.txt")},
+				profile+"\\AppData\\Local\\Temp\\buildat_box_test.txt")},
 			{"write another app's directory",
 				w_can_write(user+"/apps/vanilla/box_test_was_here")},
 			{"write another app's shared directory",

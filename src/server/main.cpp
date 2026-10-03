@@ -398,6 +398,7 @@ int main(int argc, char *argv[])
 	} catch(server::ServerShutdownRequest &e){
 		log_v(MODULE, "ServerShutdownRequest: %s", e.what());
 	}
+	log_d(MODULE, "The state is gone");
 
 	if(shutdown_reason != ""){
 		if(exit_status != 0)
