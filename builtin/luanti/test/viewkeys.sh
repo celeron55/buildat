@@ -9,6 +9,10 @@
 # keys made.
 #
 #   builtin/luanti/test/viewkeys.sh
+#
+# VIEWKEYS_USER=<dir> runs it on another user directory than ../user (a
+# scratch one has the default view range; it needs
+# shared/vanilla/games/mineclone2 in it).
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
@@ -20,13 +24,16 @@ mkdir -p "$out"
 rm -f "$out"/*.png
 save=buildat_test_viewkeys
 cd "$here/Build"
+user=${VIEWKEYS_USER:-../user}
+cli_user=()
+[ -n "${VIEWKEYS_USER:-}" ] && cli_user=(-D "$VIEWKEYS_USER")
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
-rm -rf "../user/apps/vanilla/saves/$save"
+rm -rf "$user/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/camera.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P 29778 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$user" -P 29778 \
 	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break
@@ -79,7 +86,7 @@ $(fullscreen_section "$out")
 delay 500
 quit
 CMDS
-bin/buildat -s localhost:29778 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 \
+bin/buildat "${cli_user[@]}" -s localhost:29778 -w 1280x720 -o sound_mute=1 -l 3 -c @"$out/cmds.txt" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 sleep 2
 kill -INT "$srv" 2>/dev/null
