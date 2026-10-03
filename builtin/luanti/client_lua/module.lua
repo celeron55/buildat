@@ -1621,6 +1621,13 @@ local function particle_effect(resource, amount, ttl_min, ttl_max, size_min,
 		-- technique.
 		material:SetTechnique(0, magic.cache:GetResource("Technique",
 				"Techniques/DiffUnlitParticleAlpha.xml"))
+		-- **Held by the resource cache, not by this table** ([PARTICLE_SEGV]):
+		-- a Material made in Lua lives only while the engine holds it, so
+		-- when the last effect using one went it was freed, and the next
+		-- particle of that texture handed the freed one to SetMaterial --
+		-- SIGSEGV in RefCounted. The cache's reference keeps it.
+		magic.cache:AddManualResource(material, "luanti_particle/" ..
+				resource:gsub("[^%w%._%-/]", "_"):gsub("%.%.", "_"))
 		particle_materials[resource] = {material = material, tex = tex}
 	end
 	effect.material = material
