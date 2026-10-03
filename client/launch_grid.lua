@@ -219,7 +219,16 @@ function M.actions(log)
 	for _, g in ipairs(buildat.list_apps() or {}) do
 		app_sizes[g.name] = tonumber(g.size)
 	end
-	for _, source in ipairs(buildat.list_launchers()) do
+	local sources = buildat.list_launchers()
+	-- How many versions of each installed app are here ([AITTA_MVP])
+	local versions = {}
+	for _, source in ipairs(sources) do
+		if source.kind == "installed" then
+			local app = source.name:match("^(.-)@")
+			versions[app] = (versions[app] or 0) + 1
+		end
+	end
+	for _, source in ipairs(sources) do
 		local actions, from = nil, source.kind.."/"..source.name
 		-- One rule: a directory is on the grid if it has launcher/init.lua.
 		-- The default tile for a game without one put the test scenes on
@@ -228,6 +237,21 @@ function M.actions(log)
 			actions = menu_actions()
 		elseif source.launcher then
 			actions = run_launcher(log, source)
+		end
+		-- **A save stays with the version that made it**, and moves to
+		-- another when the player says so: this tile is the saying
+		if source.kind == "installed" and actions and actions[1] and
+				versions[source.name:match("^(.-)@")] > 1 then
+			local first = actions[1]
+			actions[#actions + 1] = {id = "move_saves",
+				label = tostring(first.label) .. " " ..
+						source.name:match("@(.*)$") .. ": move saves here",
+				description = "Play this version, moving the saves another " ..
+						"version made to it",
+				run = function()
+					do_launch(log, from, {app = source.name,
+						params = {aitta_move_saves = 1}})
+				end}
 		end
 		local seen = {}
 		for i, a in ipairs(actions or {}) do
@@ -260,7 +284,7 @@ function M.actions(log)
 				out[#out + 1] = {
 					id = a.id, icon = icon,
 					-- Every installed version is a tile, and says which
-					label = source.kind == "installed" and
+					label = (source.kind == "installed" and a.id ~= "move_saves") and
 							a.label.." "..source.name:match("@(.*)$") or a.label,
 					description = type(a.description) == "string" and
 							a.description or nil,

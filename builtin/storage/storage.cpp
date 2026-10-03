@@ -511,6 +511,15 @@ struct Module: public interface::Module, public Interface
 		}
 		if(was == release)
 			return true;
+		// The player said so: launched with aitta_move_saves=1, from the
+		// grid's "move saves here" tile of this version
+		const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
+		if(("\n"+u+"\n").find("\naitta_move_saves=1\n") != ss_::npos){
+			s->set("release", release);
+			log_i(MODULE, "The save \"%s\" moved from release %s to %s",
+					cs(name), cs(was), cs(release));
+			return true;
+		}
 		log_w(MODULE, "The save \"%s\" was made with release %s of this app, "
 				"and this is %s: not opened", cs(name), cs(was), cs(release));
 		return false;

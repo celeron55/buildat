@@ -76,8 +76,10 @@ cache directories, "<author>.<name>": every version is one app.
 
 A save remembers the release that made it (version and sha256, from the
 .aitta_sha256 the install leaves in the version's directory), and another
-version of the app does not open it. Moving a save to a newer version is
-not built yet.
+version of the app does not open it. Where two versions of an app are
+installed, each has a second tile, "<label> <version>: move saves here",
+which plays that version and moves the saves another version made to it
+(the launch parameter aitta_move_saves=1).
 
 The key is ECDSA P-256 (Mbed TLS, in the tree). util/aitta_check.sh,
 util/aitta_pin_check.sh and apps/aitta/check.sh are the checks.

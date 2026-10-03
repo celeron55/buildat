@@ -5,8 +5,8 @@
 # [AITTA_MVP] step 1: **a save stays with the release that made it**. A
 # small app that opens its save "s" or makes it, packed as 1.0 and 1.1 and
 # both installed: 1.0 makes the save, 1.1 is refused it, 1.0 opens it
-# again -- each a boxed server from <user>/installed, under its one app
-# directory, apps/tester.pin.
+# again; moved to 1.1 when told, 1.0 is refused it -- each a boxed server
+# from <user>/installed, under its one app directory, apps/tester.pin.
 #
 #   util/aitta_pin_check.sh
 set -u
@@ -64,10 +64,10 @@ for v in 1.0 1.1; do
 	zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack $v"
 	"$b" aitta install "$zip" "$t/user" > /dev/null 2>&1 || fail "install $v"
 done
-run(){ # version -> the line
+run(){ # version [launch lines] -> the line
 	(cd "$here/Build" && timeout 120 bin/buildat_server \
 		-m "$t/user/installed/tester/pin/$1" -D "$t/user" -C "$t/cache" \
-		-P 29873 -l 3 2>&1) | sed 's/\x1b\[[0-9;]*m//g' > "$t/srv_$1.log"
+		-P 29873 -l 3 ${2:+-u "$2"} 2>&1) | sed 's/\x1b\[[0-9;]*m//g' > "$t/srv_$1.log"
 	grep -ao "pin_check: [a-z]*" "$t/srv_$1.log" | tail -1
 }
 r=$(run 1.0); [ "$r" = "pin_check: made" ] || fail "1.0 did not make its save: '$r' (srv_1.0.log: $(tail -3 "$t/srv_1.0.log"))"
@@ -75,4 +75,8 @@ r=$(run 1.1); [ "$r" = "pin_check: refused" ] || fail "1.1 was not refused 1.0's
 grep -aq "was made with release 1.0" "$t/srv_1.1.log" || fail "1.1 did not say why"
 r=$(run 1.0); [ "$r" = "pin_check: opened" ] || fail "1.0 did not open its save again: '$r'"
 [ -d "$t/user/apps/tester.pin/saves/s" ] || fail "the save is not under apps/tester.pin"
-echo "PASS: a save made by 1.0 opens in 1.0 and not in 1.1, under apps/tester.pin"
+# The player moves it: the grid's "move saves here" launches with this
+r=$(run 1.1 "aitta_move_saves=1"); [ "$r" = "pin_check: opened" ] ||
+	fail "1.1 did not take the save when told to: '$r'"
+r=$(run 1.0); [ "$r" = "pin_check: refused" ] || fail "1.0 still opens the moved save: '$r'"
+echo "PASS: a save made by 1.0 opens in 1.0 and not in 1.1, under apps/tester.pin, and moves to 1.1 when told"
