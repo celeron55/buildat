@@ -1068,6 +1068,13 @@ function core.__chat_message(name, message)
 			return true
 		end
 	end
+	-- Said to everyone only with shout, after the callbacks and the
+	-- commands among them, as Luanti's handleChat orders it; it was never
+	-- asked, so a /revoke of shout did nothing ([SECURITY_RUN_1])
+	if not core.check_player_privs(name, {shout = true}) then
+		core.chat_send_player(name, "-!- You don't have permission to shout.")
+		return true
+	end
 	local line = core.format_chat_message and
 			core.format_chat_message(name, message) or
 			("<" .. name .. "> " .. message)
