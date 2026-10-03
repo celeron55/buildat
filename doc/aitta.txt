@@ -39,6 +39,23 @@ The commands
         later version signed by another key is refused. A version already
         there is not replaced: an update is a new directory beside it.
 
+    bin/buildat aitta publish <release .zip> <Aitta's host:port>
+        Uploads a release to an Aitta (apps/aitta). Its key has to be bound
+        to its author name there first.
+
+Aitta, the registry
+-------------------
+apps/aitta is a buildat app. An author joins it (its accounts: a local
+account, or a Starport ID where its admin set that up), and binds an
+author name to the public key keygen printed; the name and the key do
+not change after. A published release is checked -- the signature by a
+bound key, the hash, the manifest, its author being the key's, the
+licences against the instance's list (free ones by default, in its
+settings), the size -- and listed, unreviewed. The admin can delist.
+
+    GET  /api/aitta/list                      the listed releases, JSON
+    GET  /api/aitta/archive/<sha256>.zip|.sig a listed release's files
+
 Running an installed app
 ------------------------
 Every installed version is a tile on the launch grid, "<label> <version>",
@@ -51,5 +68,5 @@ A save remembers the release that made it (version and sha256, from the
 version of the app does not open it. Moving a save to a newer version is
 not built yet.
 
-The key is ECDSA P-256 (Mbed TLS, in the tree). util/aitta_check.sh and
-util/aitta_pin_check.sh are the checks.
+The key is ECDSA P-256 (Mbed TLS, in the tree). util/aitta_check.sh,
+util/aitta_pin_check.sh and apps/aitta/check.sh are the checks.

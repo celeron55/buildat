@@ -135,7 +135,7 @@ static bool name_is_safe(const ss_ &name)
 	return true;
 }
 
-static void self_check();
+static void self_check(const ss_ &base);
 
 sv_<ZipEntry> zip_list(const ss_ &zip_path)
 {
@@ -150,7 +150,10 @@ size_t zip_extract(const ss_ &zip_path, const ss_ &into_dir)
 	static bool checked = false;
 	if(!checked){
 		checked = true;
-		self_check();
+		// In the directory being extracted to, which the caller can write:
+		// a boxed server's working directory is not its own (2026-10-03)
+		fs::create_directories(into_dir);
+		self_check(into_dir+"/.zip_self_check");
 	}
 	const ss_ d = read_file(zip_path);
 	const sv_<RawEntry> entries = read_directory(d);
@@ -228,9 +231,9 @@ static ss_ make_zip(const sv_<std::pair<ss_, ss_>> &files, bool deflate)
 	return body + dir + eocd;
 }
 
-static void self_check()
+static void self_check(const ss_ &base)
 {
-	const ss_ dir = fs::get_cwd()+"/zip_self_check.tmp";
+	const ss_ dir = base+".tmp";
 	const ss_ zip = dir+".zip";
 	sv_<std::pair<ss_, ss_>> files = {
 		{"game/", ""},
@@ -264,7 +267,7 @@ static void self_check()
 	} catch(Exception &e){
 		refused = true;
 	}
-	if(refused == false || fs::path_exists(fs::get_cwd()+"/escape.txt"))
+	if(refused == false || fs::path_exists(fs::strip_file_name(dir)+"/escape.txt"))
 		throw Exception("zip self_check: a name with .. must be refused");
 	fs::remove_all(dir);
 	fs::remove_all(zip);

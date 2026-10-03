@@ -65,10 +65,13 @@ static int rng(void*, unsigned char *out, size_t len)
 
 // What is signed: the format and the data's hash, so that a signature
 // over something else is never one over a release
+static ss_ digest_of_hash(const ss_ &sha256_hex)
+{
+	return sha256::calculate(ss_(SIG_FORMAT)+"\n"+sha256_hex);
+}
 static ss_ digest(const ss_ &data)
 {
-	return sha256::calculate(ss_(SIG_FORMAT)+"\n"+
-			sha256::hex(sha256::calculate(data)));
+	return digest_of_hash(sha256::hex(sha256::calculate(data)));
 }
 
 struct Keypair {
@@ -142,6 +145,13 @@ ss_ sign(const ss_ &key_file_text, const ss_ &data)
 
 bool verify(const ss_ &public_hex, const ss_ &data, const ss_ &signature_hex)
 {
+	return verify_hash(public_hex, sha256::hex(sha256::calculate(data)),
+			signature_hex);
+}
+
+bool verify_hash(const ss_ &public_hex, const ss_ &sha256_hex,
+		const ss_ &signature_hex)
+{
 	ss_ q, sig;
 	try {
 		q = unhex(public_hex);
@@ -156,7 +166,7 @@ bool verify(const ss_ &public_hex, const ss_ &data, const ss_ &signature_hex)
 	mbedtls_ecp_point_init(&pt);
 	mbedtls_ecdsa_context ctx;
 	mbedtls_ecdsa_init(&ctx);
-	const ss_ h = digest(data);
+	const ss_ h = digest_of_hash(sha256_hex);
 	bool ok = mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1) == 0 &&
 			mbedtls_ecp_point_read_binary(&grp, &pt,
 				(const unsigned char*)q.data(), q.size()) == 0 &&

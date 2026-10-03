@@ -31,6 +31,10 @@ namespace interface
 		ss_ sign(const ss_ &key_file_text, const ss_ &data);
 		bool verify(const ss_ &public_hex, const ss_ &data,
 				const ss_ &signature_hex);
+		// The same, given the data's sha256 as hex: a registry checks who
+		// signed a release before the archive has arrived
+		bool verify_hash(const ss_ &public_hex, const ss_ &sha256_hex,
+				const ss_ &signature_hex);
 
 		// The manifest's fields checked; "" or why not
 		ss_ check_manifest(const json::Value &m);

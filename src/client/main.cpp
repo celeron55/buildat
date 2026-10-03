@@ -21,6 +21,8 @@
 #include <malloc.h> // mallopt(), M_PERTURB
 #include <fstream>
 #include "interface/aitta.h"
+#include "interface/http.h"
+#include "core/json.h"
 #include "interface/fs.h"
 #define MODULE "__main"
 namespace magic = Urho3D;
@@ -80,6 +82,52 @@ static int aitta_main(int argc, char *argv[])
 					argv[3]).c_str());
 			return 0;
 		}
+		if(verb == "publish" && argc == 3){
+			// The release to an Aitta: its .sig first, which says who
+			// signed what, then the archive in pieces under the server's
+			// 64 KiB POST limit
+			const ss_ zip_path = argv[1];
+			const ss_ sig_path =
+					interface::fs::strip_file_extension(zip_path)+".sig";
+			ss_ base = argv[2];
+			if(base.find("://") == ss_::npos)
+				base = "http://"+base;
+			while(!base.empty() && base.back() == '/')
+				base.pop_back();
+			base += "/api/aitta/";
+			auto read_all = [](const ss_ &path){
+				std::ifstream f(path, std::ios::binary);
+				if(!f.good())
+					throw Exception("cannot read "+path);
+				std::ostringstream os;
+				os<<f.rdbuf();
+				return os.str();
+			};
+			const ss_ zip = read_all(zip_path), sig = read_all(sig_path);
+			json::json_error_t e;
+			const json::Value sigv = json::load_string(sig.c_str(), &e);
+			const ss_ sha = sigv.get("sha256").is_string() ?
+					sigv.get("sha256").as_string() : "";
+			auto call = [&](const ss_ &url, const ss_ &body, const char *type){
+				const ss_ out = interface::http_post(url, body, type);
+				const json::Value v = json::load_string(out.c_str(), &e);
+				if(!v.get("ok").is_true())
+					throw Exception(v.get("error").is_string() ?
+							v.get("error").as_string() : "Aitta said: "+out);
+				return v;
+			};
+			call(base+"upload_begin?size="+itos((int64_t)zip.size()), sig,
+					"application/json");
+			const size_t piece = 60000;
+			for(size_t at = 0; at < zip.size(); at += piece)
+				call(base+"upload_part?sha256="+sha+"&offset="+itos((int64_t)at),
+						zip.substr(at, piece), "application/octet-stream");
+			const json::Value v = call(base+"upload_end?sha256="+sha, "",
+					"application/octet-stream");
+			printf("listed: %s\n", v.get("result").is_string() ?
+					v.get("result").as_cstring() : "?");
+			return 0;
+		}
 		if(verb == "install" && argc == 3){
 			ss_ zip = argv[1];
 			const ss_ sig = interface::fs::strip_file_extension(zip)+".sig";
@@ -95,6 +143,7 @@ static int aitta_main(int argc, char *argv[])
 			"Usage: buildat aitta keygen <key file>\n"
 			"       buildat aitta pack <app dir> <key file> <out dir>\n"
 			"       buildat aitta install <release .zip> <user path>\n"
+			"       buildat aitta publish <release .zip> <Aitta's host:port>\n"
 			"An app's meta.json: doc/aitta.txt\n");
 	return 1;
 }
