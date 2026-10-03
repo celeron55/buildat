@@ -595,7 +595,7 @@ function draw_settings(paths)
 	local view_range = "120"
 	local view_bobbing = "1"
 	local shoulder = "0"
-	local lod_detail = "full"
+	local lod_detail = "half"
 	local kept = {}
 	local key_rows = {}
 	for _, p in ipairs(paths) do
