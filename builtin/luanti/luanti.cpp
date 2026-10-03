@@ -1158,11 +1158,14 @@ struct Module: public interface::Module, public luanti::Interface
 				"network:packet_received/luanti:fields"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:inv_action"));
+		m_server->sub_event(this, Event::t("network:client_disconnected"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_VOIDN("core:start", on_start)
+		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
+				network::OldClient)
 		EVENT_TYPEN("core:module_unloaded", on_module_unloaded,
 				interface::ModuleUnloadedEvent)
 		EVENT_VOIDN("core:unload", on_unload)
@@ -7007,8 +7010,8 @@ struct Module: public interface::Module, public luanti::Interface
 	void on_get_world_info(const network::Packet &packet)
 	{
 		// Remembered per peer, so the packet can be sent again unasked
-		// when the step peak moves ([STEP_PEAK])
-		m_peer_mode[packet.sender] = packet.data;
+		// when the step peak moves ([STEP_PEAK]); a mode's name, so short
+		m_peer_mode[packet.sender] = packet.data.substr(0, 32);
 		send_world_info(packet.sender, packet.data);
 	}
 
@@ -7027,6 +7030,16 @@ struct Module: public interface::Module, public luanti::Interface
 	}
 
 	sm_<network::PeerInfo::Id, ss_> m_peer_mode;
+
+	// What is kept per peer goes with it: a peer that never became a
+	// player was never removed from these, and the step peak's re-send
+	// went on to it ([SECURITY_RUN_1])
+	void on_client_disconnected(const network::OldClient &old)
+	{
+		m_peer_mode.erase(old.info.id);
+		m_files_transmitted.erase(old.info.id);
+		m_texmods_waiting.erase(old.info.id);
+	}
 
 	void send_world_info(network::PeerInfo::Id peer, const ss_ &asked_mode)
 	{
