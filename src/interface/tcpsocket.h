@@ -18,6 +18,13 @@ namespace interface
 		virtual bool bind_fd(const ss_ &address, const ss_ &port) = 0;
 		virtual bool accept_fd(const TCPSocket &listener) = 0;
 		virtual bool send_fd(const ss_ &data) = 0;
+		// What a socket that must not block needs: the fd stops waiting for
+		// room, and a send says how much of the data actually went so the
+		// caller can keep the rest. send_some() writes what fits and sets
+		// `sent`; it is not an error for that to be zero.
+		virtual bool set_nonblocking(bool nonblocking) = 0;
+		virtual bool send_some(const ss_ &data, size_t offset,
+				size_t *sent) = 0;
 		virtual bool wait_data(int timeout_us) = 0;
 		virtual ss_ get_local_address() const = 0;
 		virtual ss_ get_remote_address() const = 0;
@@ -27,6 +34,10 @@ namespace interface
 
 	// Quiet connect attempt; does not keep the socket.
 	bool probe_connect(const ss_ &address, const ss_ &port);
+
+	// This machine's IPv4 address on the network its default route is on,
+	// what someone on the LAN reaches it by; "" without one. Sends nothing.
+	ss_ local_lan_address();
 }
 
 // vim: set noet ts=4 sw=4:

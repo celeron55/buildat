@@ -1,0 +1,6 @@
+<material>
+	<technique name="main/palette_alpha_tech.xml" />
+	<parameter name="PaletteRows" value="2" />
+	<parameter name="PlanLook" value="0" />
+	<cull value="none" />
+</material>
