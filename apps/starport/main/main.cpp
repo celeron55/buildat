@@ -349,7 +349,9 @@ struct Module: public interface::Module
 	int64_t m_last_day = 0;
 	int64_t m_next_reverify = 0;
 	// Rate limits, in memory only: by key, a count and when it started
-	sm_<ss_, std::pair<int, int64_t>> m_rates;
+	// key -> count, window start, window length
+	struct Rate { int count = 0; int64_t start = 0; int64_t per = 0; };
+	sm_<ss_, Rate> m_rates;
 
 	// The verifier: a thread of its own, as it waits on other servers
 	std::mutex m_vmutex;
@@ -446,15 +448,38 @@ struct Module: public interface::Module
 	// Rate limits
 
 	// Whether one more of `what` from `who` fits in `per` seconds
-	bool rate_ok(const ss_ &what, const ss_ &who, int max, int64_t per)
+	//
+	// The table is bounded ([SECURITY_RUN_1]): `who` is often what a
+	// request says -- an announce's id, a login's name -- and every new
+	// one was a new entry, never removed. A long key is kept as its hash,
+	// windows that have passed are swept when the table is large, and
+	// past a ceiling of live ones a new key is refused: under a flood of
+	// made-up keys this fails closed.
+	bool rate_ok(const ss_ &what, ss_ who, int max, int64_t per)
 	{
-		auto &r = m_rates[what+"|"+who];
+		if(who.size() > 64)
+			who = hex(interface::sha256::calculate(who));
+		const ss_ key = what+"|"+who;
 		const int64_t t = now_s();
-		if(t - r.second >= per)
-			r = std::make_pair(0, t);
-		if(r.first >= max)
+		if(m_rates.size() >= 50000 && m_rates.count(key) == 0){
+			for(auto it = m_rates.begin(); it != m_rates.end();){
+				if(t - it->second.start >= it->second.per)
+					it = m_rates.erase(it);
+				else
+					++it;
+			}
+			if(m_rates.size() >= 200000)
+				return false;
+		}
+		Rate &r = m_rates[key];
+		if(t - r.start >= per){
+			r.count = 0;
+			r.start = t;
+		}
+		r.per = per;
+		if(r.count >= max)
 			return false;
-		r.first++;
+		r.count++;
 		return true;
 	}
 
@@ -1303,6 +1328,11 @@ struct Module: public interface::Module
 
 	void api_report_status(const network::HttpRequest &r, const json::Value &b)
 	{
+		// Up to a hundred lookups a request, and nobody needs to log in
+		if(!rate_ok("report_status", r.address, 30, 60)){
+			refuse(r, "asked too often");
+			return;
+		}
 		const ss_ key = jstr(b, "key");
 		if(!is_hex(key, 64)){
 			refuse(r, "key: 64 hex digits");
@@ -1333,6 +1363,11 @@ struct Module: public interface::Module
 
 	void api_transparency(const network::HttpRequest &r)
 	{
+		// Every report read, for anyone: once a few seconds an address
+		if(!rate_ok("transparency", r.address, 10, 60)){
+			refuse(r, "asked too often");
+			return;
+		}
 		json::Value by_reason = json::object(), by_action = json::object();
 		sv_<int64_t> times;
 		int64_t reports = 0;

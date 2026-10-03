@@ -23,9 +23,21 @@ static void global_init_once()
 	std::call_once(once, [](){ curl_global_init(CURL_GLOBAL_DEFAULT); });
 }
 
+// A body read into memory is at most this, and the request at most
+// STRING_TIMEOUT_S long: what answers a game's script, a Starport's
+// challenge or a ContentDB listing is small and quick, and a server that
+// streamed forever or a byte a minute held a thread and its memory
+// ([SECURITY_RUN_1]). A download to a file has its own ceiling below.
+static const size_t STRING_MAX = 64 * 1024 * 1024;
+static const long STRING_TIMEOUT_S = 120;
+static const curl_off_t DOWNLOAD_MAX = (curl_off_t)2 * 1024 * 1024 * 1024;
+
 static size_t to_string(char *p, size_t size, size_t n, void *user)
 {
-	((ss_*)user)->append(p, size * n);
+	ss_ &s = *(ss_*)user;
+	if(s.size() + size * n > STRING_MAX)
+		return 0; // libcurl stops with a write error
+	s.append(p, size * n);
 	return size * n;
 }
 static size_t to_file(char *p, size_t size, size_t n, void *user)
@@ -124,6 +136,7 @@ ss_ http_get(const ss_ &url)
 	ss_ body;
 	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_string);
 	curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
+	curl_easy_setopt(c, CURLOPT_TIMEOUT, STRING_TIMEOUT_S);
 	perform(c, url, errbuf);
 	return body;
 }
@@ -140,6 +153,7 @@ ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type)
 	curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)body.size());
 	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_string);
 	curl_easy_setopt(c, CURLOPT_WRITEDATA, &out);
+	curl_easy_setopt(c, CURLOPT_TIMEOUT, STRING_TIMEOUT_S);
 	try {
 		perform(c, url, errbuf);
 	} catch(...){
@@ -213,6 +227,7 @@ void http_download(const ss_ &url, const ss_ &path,
 	Progress p{progress};
 	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_file);
 	curl_easy_setopt(c, CURLOPT_WRITEDATA, &f);
+	curl_easy_setopt(c, CURLOPT_MAXFILESIZE_LARGE, DOWNLOAD_MAX);
 	curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
 	curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, on_progress);
 	curl_easy_setopt(c, CURLOPT_XFERINFODATA, &p);
