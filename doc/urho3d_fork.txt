@@ -298,11 +298,20 @@ secure, else with execCommand('copy').
 Images a server can hand the client ([SECURITY_RUN_1])
 -----------------------------------------------------
 Source/Urho3D/Resource/Image.cpp
+Source/ThirdParty/STB/stb_image.h
+bin/Data/Materials/Stone*.xml, bin/Data/Textures/Stone{Diffuse,Normal}.png
 
 Image::BeginLoad refuses DDS, KTX, PVR and WebP by their first bytes, and
 stb_image is compiled for PNG, JPEG, TGA and BMP only (STBI_ONLY_*): the
 formats a Luanti game's textures come in. A server hands the client any
-file as a texture; nothing buildat ships uses the others, and their
-loaders are not safe on such input -- KTX's level sizes wrap past its
-size check and write past the buffer, a DDS bit count of 0 divides by
-it, and the bundled libwebp 0.6.0 predates CVE-2023-4863's fix.
+file as a texture, and those loaders are not safe on such input -- KTX's
+level sizes wrap past its size check and write past the buffer, a DDS bit
+count of 0 divides by it, and the bundled libwebp 0.6.0 predates
+CVE-2023-4863's fix. The Stone materials, the only ones of Data that
+buildat uses, point at PNG copies of their two DDS textures (pixel for
+pixel); the rest of Data's materials still name DDS files and do not load.
+
+stb_image.h is upstream's v2.30 (2024-05-31; was 1.7.1's v2.12, whose
+JPEG decoder read past its Huffman table on a crafted file), and a side
+is 8192 at most (STBI_MAX_DIMENSIONS; stb's own 2^24 let 25 bytes of TGA
+ask for gigabytes). util/fuzz/fuzz.sh image fuzzes what is left.

@@ -36,6 +36,9 @@ declare -A srcs=(
 	[voxel_volume]="src/impl/voxel_volume.cpp src/impl/compress.cpp src/core/log.cpp 3rdparty/c55lib/c55/os.cpp 3rdparty/polyvox/library/PolyVoxCore/source/Region.cpp src/impl/voxel.cpp src/impl/linux/os.cpp src/impl/fs.cpp src/impl/linux/fs.cpp 3rdparty/c55lib/c55/filesys.cpp"
 	[json]="src/core/json.cpp src/core/log.cpp 3rdparty/c55lib/c55/os.cpp"
 	[zip]="src/impl/zip.cpp src/impl/compress.cpp src/impl/fs.cpp src/impl/linux/fs.cpp src/core/log.cpp 3rdparty/c55lib/c55/os.cpp 3rdparty/c55lib/c55/filesys.cpp"
+	# The decoders compiled in, instrumented; the rest of Urho3D from its
+	# library (image_fuzz.cpp)
+	[image]="3rdparty/Urho3D/Source/Urho3D/Resource/Image.cpp 3rdparty/Urho3D/Source/Urho3D/Resource/Decompress.cpp"
 )
 declare -A libs=(
 	[compress]="-lz -lzstd"
@@ -43,13 +46,22 @@ declare -A libs=(
 	[voxel_volume]="-lz -lzstd"
 	[json]=""
 	[zip]="-lz -lzstd"
+	[image]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
+)
+# Urho3D's own defines and include paths for the files compiled from it;
+# stb_image's JPEG decoder shifts negative values left, and a PNG's empty
+# first IDAT copies 0 bytes to a null buffer: both done as intended by
+# every compiler here, and UBSan would stop on them
+uflags=$here/3rdparty/Urho3D/Build/Source/Urho3D/CMakeFiles/Urho3D.dir/flags.make
+declare -A extra=(
+	[image]="$(sed -n 's/^CXX_\(DEFINES\|INCLUDES\) = //p' "$uflags" 2>/dev/null) -fno-sanitize=shift,nonnull-attribute -w"
 )
 targets=${*:-${!srcs[@]}}
 
 build() {
 	local t=$1 s=""
 	for f in ${srcs[$t]}; do s="$s $here/$f"; done
-	clang++ $flags "$me/${t}_fuzz.cpp" $s ${libs[$t]} -o "$out/bin/$t" \
+	clang++ $flags ${extra[$t]:-} "$me/${t}_fuzz.cpp" $s ${libs[$t]} -o "$out/bin/$t" \
 		2> "$out/bin/$t.build.log" || {
 		echo "$t: build failed, $out/bin/$t.build.log"; tail -5 "$out/bin/$t.build.log"
 		return 1

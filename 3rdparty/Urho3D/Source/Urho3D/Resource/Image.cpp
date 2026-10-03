@@ -38,6 +38,10 @@
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_TGA
 #define STBI_ONLY_BMP
+// and no side over 8192: stb's own limit is 2^24, so 25 bytes of TGA
+// header asked for gigabytes. simplified: 256 MB of RGBA at most; a
+// texture past 8192 a side would need this raised
+#define STBI_MAX_DIMENSIONS 8192
 #include <STB/stb_image.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <STB/stb_image_write.h>
