@@ -95,7 +95,10 @@ declare -A extra=(
 	[image]="$urho_extra"
 	[model]="$urho_extra -fno-sanitize=pointer-overflow -I$here/3rdparty/Urho3D/Source/ThirdParty/tinygltf"
 	[xml]="$urho_extra -fno-sanitize=pointer-overflow"
-	[sound]="$urho_extra"
+	# stb_vorbis's sample conversion overflows a signed int in its
+	# float-to-int trick and casts inf to int on a garbage stream; the
+	# result is clamped (noise out), no memory is touched
+	[sound]="$urho_extra -fno-sanitize=signed-integer-overflow,float-cast-overflow"
 	[font]="-I$here/$ft/include -w"
 )
 # A client loader a server feeds is fuzzed for memory corruption only. A
@@ -105,8 +108,23 @@ declare -A extra=(
 # of stopping on it; a real crash still stops the run.
 declare -A opts=(
 	[model]="-fork=1 -ignore_timeouts=1 -ignore_ooms=1 -ignore_crashes=0"
-	[sound]="-fork=1 -ignore_timeouts=1 -ignore_ooms=1 -ignore_crashes=0"
 )
+# ASan options per target, for the replays too. [sound]: a request over
+# 256 MiB gets NULL, as a release build's malloc gives one it cannot
+# meet, so the error path after it runs (it freed garbage once) and a
+# huge setup allocation fails at once -- which lets [sound] run plain:
+# its fork parent SEGVs in libFuzzer (secondsSinceProcessStartUp) before
+# the first job, and -malloc_limit_mb does the same
+declare -A asan=(
+	[sound]="allocator_may_return_null=1:max_allocation_size_mb=256"
+)
+# A plain-mode target that may hit an out-of-scope OOM or timeout (a
+# count from the file sizing many allocations: 18 GB in 8379 chunks once)
+# and is started again on it, for what is left of its time
+declare -A restart=(
+	[sound]=1
+)
+declare -A rss=()
 targets=${*:-${!srcs[@]}}
 
 build() {
@@ -139,13 +157,31 @@ for t in $targets; do
 	# replay would only hit again (doc/plan/security_review_plan.md)
 	for c in "$out/$t/crashes"/crash-* "$out/$t/crashes"/leak-*; do
 		[ -e "$c" ] || continue
-		"$out/bin/$t" "$c" > /dev/null 2>&1 || {
+		ASAN_OPTIONS=${asan[$t]:-} "$out/bin/$t" "$c" > /dev/null 2>&1 || {
 			echo "$t: a kept crash still crashes: $c"; status=1; }
 	done
-	"$out/bin/$t" ${opts[$t]:-} -max_total_time="$secs" -rss_limit_mb=2048 -timeout=10 -print_final_stats=1 \
-		-artifact_prefix="$out/$t/crashes/" "$out/$t/corpus" \
-		> "$out/$t/last.log" 2>&1
-	r=$?
+	end=$((SECONDS + secs))
+	execs_sum=0 oomto=0
+	while :; do
+		ASAN_OPTIONS=${asan[$t]:-} "$out/bin/$t" ${opts[$t]:-} -max_total_time=$((end - SECONDS)) -rss_limit_mb=${rss[$t]:-2048} -timeout=10 -print_final_stats=1 \
+			-artifact_prefix="$out/$t/crashes/" "$out/$t/corpus" \
+			> "$out/$t/last.log" 2>&1
+		r=$?
+		n=$(grep -ao "stat::number_of_executed_units: [0-9]*" "$out/$t/last.log" | grep -o "[0-9]*$")
+		execs_sum=$((execs_sum + ${n:-0}))
+		# A restart target (plain mode, as its fork parent fails) steps
+		# past an out-of-scope OOM or timeout by starting again
+		[ -n "${restart[$t]:-}" ] && [ $r -ne 0 ] && [ $((end - SECONDS)) -gt 5 ] &&
+			grep -aq "SUMMARY: libFuzzer: \(out-of-memory\|timeout\)" "$out/$t/last.log" || break
+		oomto=$((oomto + 1))
+		find "$out/$t/crashes" -maxdepth 1 \( -name 'oom-*' -o -name 'timeout-*' \) -delete
+	done
+	if [ -n "${restart[$t]:-}" ] && [ $r -ne 0 ] &&
+			grep -aq "SUMMARY: libFuzzer: \(out-of-memory\|timeout\)" "$out/$t/last.log"; then
+		oomto=$((oomto + 1))
+		find "$out/$t/crashes" -maxdepth 1 \( -name 'oom-*' -o -name 'timeout-*' \) -delete
+		r=0
+	fi
 	# A fork-mode target's oom/timeout artifacts are out of scope and
 	# recorded only as the counts in the log; do not keep them
 	[ -n "${opts[$t]:-}" ] && find "$out/$t/crashes" -maxdepth 1 \
@@ -166,7 +202,7 @@ for t in $targets; do
 			r=1
 		fi
 	fi
-	execs=$(grep -ao "stat::number_of_executed_units: [0-9]*" "$out/$t/last.log" | grep -o "[0-9]*$")
+	execs=$execs_sum
 	cov=$(grep -ao "cov: [0-9]*" "$out/$t/last.log" | tail -1)
 	if [ $r -ne 0 ]; then
 		echo "$t: CRASH ($(ls -t "$out/$t/crashes" | head -1)); $out/$t/last.log"
@@ -174,6 +210,7 @@ for t in $targets; do
 		status=1
 	else
 		otc=$(grep -aoE "oom/timeout/crash: [0-9/]+" "$out/$t/last.log" | tail -1)
+		[ -n "${restart[$t]:-}" ] && otc="restarted past $oomto OOM/timeout"
 		echo "$t: ${execs:-?} runs in ${secs} s, $cov, $(ls "$out/$t/corpus" | wc -l) in the corpus${otc:+, $otc}"
 	fi
 done

@@ -27,6 +27,10 @@ Source changes vs 1.7.1:
 - Assimp thirdparty and AssetImporter tool removed
 - ThirdParty/STB/stb_vorbis.h: upstream v1.09 -> v1.22, for the fuzzer's
   stack-buffer-overflow in compute_codewords (security review, 2026-10-04)
+  and a local patch over v1.22 in start_decoder's comment header: a
+  crafted count wrapped setup_malloc's int to a short list written past,
+  and after a failed allocation vorbis_deinit freed the list's
+  uninitialized pointers (security run 2, 2026-10-04)
 - Graphics/Model.cpp, Geometry.cpp, IndexBuffer.cpp: a crafted .mdl from a
   server crashed the client -- a vertex element type and a primitive type
   read from the file indexed tables sized by their enums out of bounds,

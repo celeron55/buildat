@@ -11,12 +11,17 @@
 // from Build/lib uninstrumented.
 //
 // **What this looks for is memory corruption only.** It is the guard on
-// the stb_vorbis fix of 2026-10-04 (a 4-byte stack write in
-// compute_codewords, v1.09 -> v1.22, Urho3D_version.txt). The residual
-// in v1.22 is a leak on an error path and an unbounded setup allocation
-// from a 32-bit length in the file -- both a server exhausting its
-// client, out of scope (doc/plan/security_review_plan.md). So fuzz.sh
-// runs this in fork mode past OOM and timeout, and leaks are off here.
+// the stb_vorbis fixes of 2026-10-04 (a 4-byte stack write in
+// compute_codewords, v1.09 -> v1.22; then the comment header's wrapped
+// count and the uninitialized pointers freed after a failed allocation,
+// patched over v1.22; Urho3D_version.txt). An allocation the file sizes
+// is a server exhausting its client, out of scope
+// (doc/plan/security_review_plan.md) -- **but look at what follows its
+// failure**: the second fix was found by replaying with
+// ASAN_OPTIONS=allocator_may_return_null=1, as a release build's malloc
+// returns NULL. So fuzz.sh runs this with ASan returning NULL for a
+// request over 256 MiB (the same, and a huge setup allocation fails at
+// once instead of an OOM), and leaks are off here.
 #include <Urho3D/Core/Context.h>
 #include <Urho3D/IO/MemoryBuffer.h>
 #include <Urho3D/Audio/Sound.h>

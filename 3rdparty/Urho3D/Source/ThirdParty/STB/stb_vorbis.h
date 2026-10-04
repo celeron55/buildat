@@ -3648,8 +3648,13 @@ static int start_decoder(vorb *f)
    if (get8_packet(f) != VORBIS_packet_comment)            return error(f, VORBIS_invalid_setup);
    for (i=0; i < 6; ++i) header[i] = get8_packet(f);
    if (!vorbis_validate(header))                    return error(f, VORBIS_invalid_setup);
+   // buildat: a length or a count past what any file has is refused before
+   // it is allocated (setup_malloc takes an int: a large count wrapped to a
+   // short buffer the loop wrote past), and the comment list starts zeroed
+   // with its length 0 on a failure, so vorbis_deinit frees no garbage
    //file vendor
    len = get32_packet(f);
+   if (len < 0 || len > (1 << 24))                  return error(f, VORBIS_invalid_setup);
    f->vendor = (char*)setup_malloc(f, sizeof(char) * (len+1));
    if (f->vendor == NULL)                           return error(f, VORBIS_outofmem);
    for(i=0; i < len; ++i) {
@@ -3659,14 +3664,23 @@ static int start_decoder(vorb *f)
    //user comments
    f->comment_list_length = get32_packet(f);
    f->comment_list = NULL;
+   if (f->comment_list_length < 0 || f->comment_list_length > (1 << 20)) {
+      f->comment_list_length = 0;
+      return error(f, VORBIS_invalid_setup);
+   }
    if (f->comment_list_length > 0)
    {
       f->comment_list = (char**) setup_malloc(f, sizeof(char*) * (f->comment_list_length));
-      if (f->comment_list == NULL)                  return error(f, VORBIS_outofmem);
+      if (f->comment_list == NULL) {
+         f->comment_list_length = 0;
+         return error(f, VORBIS_outofmem);
+      }
+      memset(f->comment_list, 0, sizeof(char*) * f->comment_list_length);
    }
 
    for(i=0; i < f->comment_list_length; ++i) {
       len = get32_packet(f);
+      if (len < 0 || len > (1 << 24))               return error(f, VORBIS_invalid_setup);
       f->comment_list[i] = (char*)setup_malloc(f, sizeof(char) * (len+1));
       if (f->comment_list[i] == NULL)               return error(f, VORBIS_outofmem);
 
