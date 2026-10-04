@@ -1,6 +1,6 @@
 /*
 ** Bytecode dump definitions.
-** Copyright (C) 2005-2016 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2026 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_BCDUMP_H
@@ -43,8 +43,11 @@
 #define BCDUMP_F_STRIP		0x02
 #define BCDUMP_F_FFI		0x04
 #define BCDUMP_F_FR2		0x08
+#define BCDUMP_F_BITOP		0x10
 
-#define BCDUMP_F_KNOWN		(BCDUMP_F_FR2*2-1)
+#define BCDUMP_F_KNOWN		(BCDUMP_F_BITOP*2-1)
+
+#define BCDUMP_F_DETERMINISTIC	0x80000000
 
 /* Type codes for the GC constants of a prototype. Plus length for strings. */
 enum {
@@ -61,7 +64,7 @@ enum {
 /* -- Bytecode reader/writer ---------------------------------------------- */
 
 LJ_FUNC int lj_bcwrite(lua_State *L, GCproto *pt, lua_Writer writer,
-		       void *data, int strip);
+		       void *data, uint32_t flags);
 LJ_FUNC GCproto *lj_bcread_proto(LexState *ls);
 LJ_FUNC GCproto *lj_bcread(LexState *ls);
 

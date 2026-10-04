@@ -85,6 +85,8 @@ public:
     void SetTextSelectable(bool enable);
     /// Set whether copy-paste operations are allowed, default true.
     void SetTextCopyable(bool enable);
+    /// buildat [HEARTH_MVP]: set multi-line: Enter breaks the line, Ctrl+Enter finishes, the text wraps to the width and Up, Down, Home and End move by rows.
+    void SetMultiLine(bool enable);
 
     /// Return text.
     const String& GetText() const { return line_; }
@@ -110,6 +112,9 @@ public:
     /// Return whether copy-paste operations are allowed.
     bool IsTextCopyable() const { return textCopyable_; }
 
+    /// buildat: return whether multi-line.
+    bool IsMultiLine() const { return multiLine_; }
+
     /// Return text element.
     Text* GetTextElement() const { return text_; }
 
@@ -125,6 +130,8 @@ protected:
     void UpdateCursor();
     /// Return char index corresponding to position within element, or M_MAX_UNSIGNED if not found.
     unsigned GetCharIndex(const IntVector2& position);
+    /// buildat: the character nearest a position in the text's own coordinates, on its row.
+    unsigned GetCharIndexOnRow(const IntVector2& textPosition);
 
     /// Text element.
     SharedPtr<Text> text_;
@@ -154,6 +161,8 @@ protected:
     bool textSelectable_;
     /// Copy-paste enable flag.
     bool textCopyable_;
+    /// buildat: multi-line flag.
+    bool multiLine_;
 
 private:
     /// Handle being focused.

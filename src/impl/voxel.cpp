@@ -4,10 +4,12 @@
 #include "interface/voxel_selector.h"
 #include "interface/voxel_volume.h"
 #include "core/log.h"
+#include "interface/os.h"
 #include "interface/voxel_cereal.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <mutex>
+#include <atomic>
 #include <cassert>
 #define MODULE "voxel"
 
@@ -61,19 +63,108 @@ struct CVoxelRegistry: public VoxelRegistry
 	sd_<CachedVoxelDefinition> m_cached_defs;
 	sm_<VoxelName, VoxelTypeId> m_name_to_id;
 	VoxelFormat m_format = VoxelFormat::legacy();
+	// What add_plane() was asked for, appended again to every format set
+	sv_<VoxelPlane> m_added_planes;
 	// How a voxel's definition is found; the default is the id role
 	VoxelSelector m_look;
 	bool m_is_dirty = false;
 	std::mutex m_mutex;
 
+	// What get_cached() answers from without taking the mutex.
+	//
+	// It is asked once per voxel -- the light flood and the mesher both walk
+	// a quarter of a million of them per section -- and a lock and unlock
+	// around a table lookup was 6% of the whole server in a devtest profile,
+	// more than the lookup itself. Nearly every one of those calls is about
+	// an id whose cache entry was finished long ago.
+	//
+	// A pointer into m_cached_defs stays good for the life of the registry,
+	// since a deque never moves an element, and every caller of this already
+	// reads the entry after the lock is dropped. So what the fast path needs
+	// is a way to learn that an id is cached without touching the deque's
+	// own bookkeeping, which a concurrent add_voxel() may be writing: a
+	// table of pointers, published entry by entry with a release store and
+	// read with an acquire load.
+	//
+	// simplified: two levels of fixed size, so 65536 voxel types are fast
+	// and anything above that takes the lock. A game with more types than
+	// that has other problems.
+	static const uint32_t FAST_SHIFT = 8;
+	static const uint32_t FAST_IN_BLOCK = 1 << FAST_SHIFT;
+	static const uint32_t FAST_MASK = FAST_IN_BLOCK - 1;
+	static const uint32_t FAST_BLOCKS = 256;
+	static const uint32_t FAST_IDS = FAST_BLOCKS * FAST_IN_BLOCK;
+	typedef std::atomic<CachedVoxelDefinition*> FastSlot;
+	std::atomic<FastSlot*> m_fast[FAST_BLOCKS];
+	// **And the same table again for the callers that need the textures**
+	// ([CLIENT_FRAME], 2026-09-26). The one above is published as soon as
+	// an entry's basic fields are filled, which is why a caller carrying
+	// an atlas could not use it: its textures may not be built yet. So it
+	// took the mutex for every voxel of a chunk -- 39 thousand of them --
+	// against three or four workers meshing at the same time, and the
+	// waiting was 70 to 825 ms inside `set_voxel_geometry()`, on a chunk
+	// of 177 bytes. An entry lands in this one only once its textures are
+	// there, so the atlas path can read it with no lock at all.
+	std::atomic<FastSlot*> m_fast_tex[FAST_BLOCKS];
+	// The blocks themselves, kept until the registry goes: a reader may be
+	// in one. There are at most 256 of them.
+	sv_<sp_<FastSlot>> m_fast_blocks;
+
+	// Called with the mutex held, once an entry is finished
+	void publish_fast_in(std::atomic<FastSlot*> *table, VoxelTypeId id,
+			CachedVoxelDefinition *cache)
+	{
+		if(id >= FAST_IDS)
+			return;
+		const uint32_t bi = id >> FAST_SHIFT;
+		FastSlot *block = table[bi].load(std::memory_order_relaxed);
+		if(block == nullptr){
+			m_fast_blocks.push_back(sp_<FastSlot>(
+					new FastSlot[FAST_IN_BLOCK](),
+					std::default_delete<FastSlot[]>()));
+			block = m_fast_blocks.back().get();
+			table[bi].store(block, std::memory_order_release);
+		}
+		block[id & FAST_MASK].store(cache, std::memory_order_release);
+	}
+	void publish_fast(VoxelTypeId id, CachedVoxelDefinition *cache)
+	{
+		publish_fast_in(m_fast, id, cache);
+	}
+	// The entry is complete down to its atlas segments
+	void publish_fast_tex(VoxelTypeId id, CachedVoxelDefinition *cache)
+	{
+		publish_fast_in(m_fast_tex, id, cache);
+	}
+
+	// Nothing is fast any more: the entries these point at are about to go
+	void forget_fast()
+	{
+		std::atomic<FastSlot*> *tables[2] = {m_fast, m_fast_tex};
+		for(int t = 0; t < 2; t++){
+			for(uint32_t i = 0; i < FAST_BLOCKS; i++){
+				FastSlot *block = tables[t][i].load(std::memory_order_relaxed);
+				if(block == nullptr)
+					continue;
+				for(uint32_t j = 0; j < FAST_IN_BLOCK; j++)
+					block[j].store(nullptr, std::memory_order_release);
+			}
+		}
+	}
+
 	CVoxelRegistry()
 	{
+		for(uint32_t i = 0; i < FAST_BLOCKS; i++){
+			m_fast[i].store(nullptr, std::memory_order_relaxed);
+			m_fast_tex[i].store(nullptr, std::memory_order_relaxed);
+		}
 		m_defs.resize(1); // Id 0 is VOXELTYPEID_UNDEFINEDD
 	}
 
 	void clear()
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
+		forget_fast();
 		m_defs.clear();
 		m_cached_defs.clear();
 		m_name_to_id.clear();
@@ -99,9 +190,41 @@ struct CVoxelRegistry: public VoxelRegistry
 					itos(m_defs.size() - 1)+" voxels have already been "
 					"added under "+m_format.dump());
 		m_format = format;
+		for(const VoxelPlane &p : m_added_planes)
+			append_plane(p);
 		m_is_dirty = true;
 		log_v(MODULE, "CVoxelRegistry::set_format(): %s",
 				cs(m_format.dump()));
+	}
+
+	// Under the lock
+	int append_plane(const VoxelPlane &p)
+	{
+		int i = m_format.plane_of_name(p.name);
+		if(i >= 0){
+			if(m_format.planes[i].bits != p.bits)
+				throw Exception(ss_()+"add_plane(): \""+p.name+"\" is "+
+						itos(m_format.planes[i].bits)+" bits already, not "+
+						itos(p.bits));
+			return i;
+		}
+		VoxelFormat f = m_format;
+		f.planes.push_back(p);
+		ss_ why;
+		if(!f.validate(&why))
+			throw Exception(ss_()+"add_plane(): "+why);
+		m_format = f;
+		return (int)m_format.planes.size() - 1;
+	}
+
+	int add_plane(const ss_ &name, uint8_t bits)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_added_planes.push_back(VoxelPlane(name, bits));
+		int i = append_plane(m_added_planes.back());
+		m_is_dirty = true;
+		log_v(MODULE, "CVoxelRegistry::add_plane(): %s", cs(m_format.dump()));
+		return i;
 	}
 
 	const VoxelSelector& get_look_selector()
@@ -131,6 +254,20 @@ struct CVoxelRegistry: public VoxelRegistry
 		return result;
 	}
 
+	// Without id 0, which is VOXELTYPEID_UNDEFINED and not a type anything
+	// registered
+	size_t get_count()
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_defs.size() - 1;
+	}
+
+	VoxelTypeId num_voxels()
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_defs.size() - 1;
+	}
+
 	VoxelTypeId add_voxel(const VoxelDefinition &def)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
@@ -145,10 +282,35 @@ struct CVoxelRegistry: public VoxelRegistry
 		m_defs[id] = def;
 		m_defs[id].id = id;
 		m_name_to_id[def.name] = id;
-		log_v(MODULE, "CVoxelRegistyr::add_voxel(): Added id=%i name=%s",
-				id, cs(def.name.dump()));
+		// The level is asked first because the name is built by dumping
+		// it, and the arguments of a log call are worked out whether or
+		// not the line is printed -- a registry's worth of them is a
+		// tenth of a second ([CLIENT_FRAME])
+		if(log_get_max_level() >= CORE_VERBOSE)
+			log_v(MODULE, "CVoxelRegistry::add_voxel(): Added id=%i name=%s",
+					id, cs(def.name.dump()));
 		m_is_dirty = true;
 		return id;
+	}
+
+	// A whole registry at once: one lock, one allocation, and the
+	// definitions moved rather than copied. See the interface.
+	void add_voxels(sv_<VoxelDefinition> &defs)
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		for(VoxelDefinition &def : defs){
+			const VoxelTypeId id = m_defs.size();
+			if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
+				throw Exception(ss_()+"add_voxels(): def.id="+itos(def.id)+
+						"; should be "+itos(id));
+			if(m_name_to_id.count(def.name) != 0)
+				throw Exception(ss_()+"add_voxels(): Already exists: "+
+						cs(def.name.dump()));
+			m_name_to_id[def.name] = id;
+			m_defs.push_back(std::move(def));
+			m_defs[id].id = id;
+		}
+		m_is_dirty = true;
 	}
 
 	const VoxelDefinition* get(const VoxelTypeId &id)
@@ -179,10 +341,48 @@ struct CVoxelRegistry: public VoxelRegistry
 		return get_unlocked(id);
 	}
 
+	// The fast path: an id whose entry is finished. `table` says finished
+	// for what -- the basic fields, or those and the atlas segments.
+	const CachedVoxelDefinition* fast_cached_in(
+			std::atomic<FastSlot*> *table, VoxelTypeId id)
+	{
+		if(id >= FAST_IDS)
+			return nullptr;
+		FastSlot *block = table[id >> FAST_SHIFT].load(
+				std::memory_order_acquire);
+		if(block == nullptr)
+			return nullptr;
+		return block[id & FAST_MASK].load(std::memory_order_acquire);
+	}
+	const CachedVoxelDefinition* fast_cached(VoxelTypeId id)
+	{
+		return fast_cached_in(m_fast, id);
+	}
+	// Finished down to its textures: what the mesher's preload asks for,
+	// and the reason it no longer takes the mutex once a voxel has been
+	// seen once
+	const CachedVoxelDefinition* fast_cached_tex(VoxelTypeId id)
+	{
+		return fast_cached_in(m_fast_tex, id);
+	}
+
 	const CachedVoxelDefinition* get_cached(const VoxelTypeId &id,
 			AtlasRegistry *atlas_reg, bool with_lod)
 	{
+		const CachedVoxelDefinition *fast = (atlas_reg == nullptr) ?
+				fast_cached(id) :
+				// With an atlas the entry has to carry its segments, and
+				// the LOD ones only when those are what is asked for
+				(with_lod ? nullptr : fast_cached_tex(id));
+		if(fast != nullptr)
+			return fast;
 		std::lock_guard<std::mutex> lock(m_mutex);
+		return get_cached_locked(id, atlas_reg, with_lod);
+	}
+
+	const CachedVoxelDefinition* get_cached_locked(const VoxelTypeId &id,
+			AtlasRegistry *atlas_reg, bool with_lod)
+	{
 		if(id >= m_defs.size()){
 			log_w(MODULE, "CVoxelRegistry::get_cached(): id=%i not found", id);
 			return NULL;
@@ -195,10 +395,25 @@ struct CVoxelRegistry: public VoxelRegistry
 		if(!cache.valid){
 			update_cache_basic(cache, def);
 			cache.valid = true;
+			// Finished, so the next caller need not come here at all
+			publish_fast(id, &cache);
 		}
 		if(!cache.textures_valid && atlas_reg){
+			// **What one voxel's first sight costs** ([CLIENT_FRAME],
+			// 2026-09-26): its faces' segments are added to the atlases
+			// and uploaded here, and a chunk that meets 800 ms of this is
+			// a chunk that blocks the frame for 800 ms.
+			const int64_t tex_t0 = interface::os::time_us();
 			update_cache_textures(cache, def, atlas_reg);
+			const int64_t tex_took = interface::os::time_us() - tex_t0;
+			if(tex_took >= 25000){
+				log_w(MODULE, "one voxel's textures took %i ms: %s",
+						(int)(tex_took / 1000), cs(def.name.block_name));
+			}
 			cache.textures_valid = true;
+			// Complete for a caller that carries an atlas, and published
+			// after the segments are there rather than before
+			publish_fast_tex(id, &cache);
 		}
 		if(with_lod && !cache.lod_textures_valid && atlas_reg){
 			update_cache_lod_textures(cache, def, atlas_reg);
@@ -218,12 +433,23 @@ struct CVoxelRegistry: public VoxelRegistry
 	const CachedVoxelDefinition* get_cached(const VoxelSample &v,
 			AtlasRegistry *atlas_reg, bool with_lod)
 	{
-		VoxelTypeId id;
+		// Which id a sample is took a lock of its own, so this call -- the
+		// one the light flood and the mesher make per voxel -- locked twice.
+		// The selector and the format are set while the registry is being
+		// built and not after (set_format() refuses once anything is
+		// registered), so the fast path reads them the way it reads the
+		// entry they lead to: without the lock.
 		{
-			std::lock_guard<std::mutex> lock(m_mutex);
-			id = m_look.id_of(v, m_format);
+			const VoxelTypeId id = m_look.id_of(v, m_format);
+			const CachedVoxelDefinition *fast = (atlas_reg == nullptr) ?
+					fast_cached(id) :
+					(with_lod ? nullptr : fast_cached_tex(id));
+			if(fast != nullptr)
+				return fast;
 		}
-		return get_cached(id, atlas_reg, with_lod);
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return get_cached_locked(m_look.id_of(v, m_format), atlas_reg,
+				with_lod);
 	}
 
 	bool is_dirty()
@@ -247,6 +473,8 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.edge_material_id = def.edge_material_id;
 		cache.physically_solid = def.physically_solid;
 		cache.fully_empty = def.fully_empty;
+		cache.transmits_light = def.transmits_light;
+		cache.light_source = def.light_source;
 		cache.shape = def.shape;
 		cache.variants = def.variants;
 		for(size_t i = 0; i < 256; i++)
@@ -256,10 +484,21 @@ struct CVoxelRegistry: public VoxelRegistry
 		cache.sag_extent = def.sag_extent;
 		cache.shape_double_sided = def.shape_double_sided;
 		cache.shape_lit_from_above = def.shape_lit_from_above;
+		cache.uv_scale = def.uv_scale < 1 ? 1 : def.uv_scale;
+		// Nought is "the same as across", which is every definition
+		// written before the two axes were told apart ([SIGIL_ROUND])
+		cache.uv_scale_v = def.uv_scale_v < 1 ? cache.uv_scale :
+				def.uv_scale_v;
 		cache.translucent = def.translucent;
+		cache.alpha_masked = def.alpha_masked;
 		cache.shape_group = def.shape_group;
 		cache.is_liquid = def.is_liquid;
+		cache.climbable = def.climbable;
+		cache.move_resistance = def.move_resistance;
+		cache.swimmable = def.swimmable;
+		cache.pointable = def.pointable;
 		cache.liquid_top = def.liquid_top;
+		cache.liquid_is_source = def.liquid_is_source;
 		cache.connect_group = def.connect_group;
 		cache.connect_mask = def.connect_mask;
 		cache.connect_to_solid = def.connect_to_solid;
@@ -290,6 +529,21 @@ struct CVoxelRegistry: public VoxelRegistry
 			cache.extra_textures[i] = seg_def.resource_name == "" ?
 					AtlasSegmentReference() :
 					atlas_reg->find_or_add_segment(seg_def);
+		}
+		// And the ones a variant wears instead of the definition's, which is
+		// how a palette entry gets its own tinted tiles; see
+		// VoxelVariant::textures
+		for(size_t vi = 0; vi < cache.variants.size() &&
+				vi < def.variants.size(); vi++){
+			const VoxelVariant &def_variant = def.variants[vi];
+			VoxelVariant &variant = cache.variants[vi];
+			variant.texture_refs.resize(def_variant.textures.size());
+			for(size_t i = 0; i < def_variant.textures.size(); i++){
+				const AtlasSegmentDefinition &seg_def = def_variant.textures[i];
+				variant.texture_refs[i] = seg_def.resource_name == "" ?
+						AtlasSegmentReference() :
+						atlas_reg->find_or_add_segment(seg_def);
+			}
 		}
 		// Caller sets cache.textures_valid = true
 	}
@@ -378,28 +632,25 @@ bool VoxelFormat::validate(ss_ *why) const
 		}
 	}
 
-	struct Named { cc_ *name; const VoxelField &f; };
-	const Named fields[] = {
-		{"id", id}, {"light_sky", light_sky}, {"light_lamp", light_lamp},
-		{"param", param}, {"color", color},
-		{"tint", tint}, {"wetness", wetness}, {"grain", grain},
-		{"gloss", gloss}, {"speckle", speckle}, {"emission", emission},
-		{"sag_top", sag_top}, {"sag_bottom", sag_bottom},
-	};
+	// One list of roles, in roles(), so that a role added to the format is
+	// validated here and migrated by migrate_volume() without a second list
+	// anywhere to keep in step with it
+	const sv_<Role> &fields = roles();
 
-	for(const Named &n : fields){
-		if(!n.f.bound())
+	for(const Role &n : fields){
+		const VoxelField &f = this->*(n.field);
+		if(!f.bound())
 			continue;
-		if(n.f.plane >= planes.size())
+		if(f.plane >= planes.size())
 			return fail(ss_(n.name)+": there is no plane "+
-					itos((int)n.f.plane));
-		if(n.f.width > 32)
-			return fail(ss_(n.name)+": width "+itos((int)n.f.width)+" > 32");
-		const int bits = (int)plane_bits(n.f.plane);
-		if((int)n.f.shift + (int)n.f.width > bits)
-			return fail(ss_(n.name)+": bits "+itos((int)n.f.shift)+"..."+
-					itos((int)n.f.shift + (int)n.f.width - 1)+" reach past the "+
-					itos(bits)+"-bit plane "+itos((int)n.f.plane));
+					itos((int)f.plane));
+		if(f.width > 32)
+			return fail(ss_(n.name)+": width "+itos((int)f.width)+" > 32");
+		const int bits = (int)plane_bits(f.plane);
+		if((int)f.shift + (int)f.width > bits)
+			return fail(ss_(n.name)+": bits "+itos((int)f.shift)+"..."+
+					itos((int)f.shift + (int)f.width - 1)+" reach past the "+
+					itos(bits)+"-bit plane "+itos((int)f.plane));
 	}
 
 	// VOXELTYPEID_MAX is not a mask -- it is a lower cap inside 21 bits --
@@ -416,15 +667,17 @@ bool VoxelFormat::validate(ss_ *why) const
 		return fail("id: width "+itos((int)id.width)+" > 21, the bits a "
 				"voxel type id has");
 
-	for(size_t i = 0; i < sizeof fields / sizeof fields[0]; i++){
-		for(size_t j = i + 1; j < sizeof fields / sizeof fields[0]; j++){
-			const Named &a = fields[i], &b = fields[j];
-			if(!a.f.bound() || !b.f.bound())
+	for(size_t i = 0; i < fields.size(); i++){
+		for(size_t j = i + 1; j < fields.size(); j++){
+			const VoxelField &a = this->*(fields[i].field);
+			const VoxelField &b = this->*(fields[j].field);
+			if(!a.bound() || !b.bound())
 				continue;
-			if(a.f.plane != b.f.plane)
+			if(a.plane != b.plane)
 				continue;
-			if((a.f.mask() << a.f.shift) & (b.f.mask() << b.f.shift))
-				return fail(ss_(a.name)+" and "+b.name+" overlap");
+			if((a.mask() << a.shift) & (b.mask() << b.shift))
+				return fail(ss_(fields[i].name)+" and "+fields[j].name+
+						" overlap");
 		}
 	}
 
@@ -583,6 +836,26 @@ bool voxel_selector_self_test()
 	}
 
 	return true;
+}
+
+const sv_<VoxelFormat::Role>& VoxelFormat::roles()
+{
+	static const sv_<Role> a = {
+		{"id", &VoxelFormat::id},
+		{"light_sky", &VoxelFormat::light_sky},
+		{"light_lamp", &VoxelFormat::light_lamp},
+		{"param", &VoxelFormat::param},
+		{"color", &VoxelFormat::color},
+		{"tint", &VoxelFormat::tint},
+		{"wetness", &VoxelFormat::wetness},
+		{"grain", &VoxelFormat::grain},
+		{"gloss", &VoxelFormat::gloss},
+		{"speckle", &VoxelFormat::speckle},
+		{"emission", &VoxelFormat::emission},
+		{"sag_top", &VoxelFormat::sag_top},
+		{"sag_bottom", &VoxelFormat::sag_bottom},
+	};
+	return a;
 }
 
 bool voxel_format_self_test()
@@ -780,8 +1053,9 @@ void VoxelRegistry::deserialize(std::istream &is)
 	archive(format, defs, look);
 	clear();
 	set_format(format);
-	for(auto &def : defs)
-		add_voxel(def);
+	// In one go: a registry arriving over the network is thousands of
+	// definitions and this is the client's own frame ([CLIENT_FRAME])
+	add_voxels(defs);
 	// After the definitions, because the selector points at them
 	set_look_selector(look);
 }
