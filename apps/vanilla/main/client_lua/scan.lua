@@ -281,6 +281,18 @@ return function(ctx)
 					"scan %s: self model at %.2f,%.2f,%.2f yaw %.1f;"..
 					" feet %.2f,%.2f,%.2f look %.1f", label,
 					own.x, own.y, own.z, own.yaw, fx, fy, fz, (ctx.view()))
+			-- What rides it, in the model's own frame: right, up, ahead
+			-- of where the model stands, which stays put as the player
+			-- walks and turns if it is drawn with the player
+			-- ([WIELD_AT_FEET])
+			local yr = math.rad(own.yaw)
+			for _, r in ipairs(luanti.riders()) do
+				local rx, rz = r.x - own.x, r.z - own.z
+				lines[#lines + 1] = string.format(
+						"scan %s: rider %s right %.2f up %.2f ahead %.2f",
+						label, r.id, rx * math.cos(yr) - rz * math.sin(yr),
+						r.y - own.y, rx * math.sin(yr) + rz * math.cos(yr))
+			end
 			-- And where the camera ended up, which is what says whether a
 			-- third-person view was pulled in by a wall behind the player
 			-- or is drawing at its own distance ([OVER_SHOULDER])

@@ -3757,6 +3757,20 @@ local BONE_HAND_UP = 0.8
 local BONE_HAND_RIGHT = 0.3
 local BONE_HAND_FWD = 0.2
 
+-- The yaw a bone attachment's offset is turned by: its parent's. nil for
+-- an object on no bone.
+local function bone_yaw_of(o)
+	local a = o.attached_to
+	local parent = a and state_of(a.ref) or nil
+	if parent == nil or not a.bone or a.bone == "" then
+		return nil
+	end
+	-- A player turns by its look (its rot stays 0); either is
+	-- counter-clockwise from +Z, so forward is (-sin, cos) as in
+	-- get_look_dir() and the right hand (cos, sin)
+	return parent.look and parent.look.h or parent.rot and parent.rot.y or 0
+end
+
 local function drawn_pos_of(o, depth)
 	local a = o.attached_to
 	local parent = a and state_of(a.ref) or nil
@@ -3764,12 +3778,8 @@ local function drawn_pos_of(o, depth)
 		return o.pos
 	end
 	local at = drawn_pos_of(parent, (depth or 0) + 1)
-	if a.bone and a.bone ~= "" then
-		-- A player turns by its look (its rot stays 0); either is
-		-- counter-clockwise from +Z, so forward is (-sin, cos) as in
-		-- get_look_dir() and the right hand (cos, sin)
-		local yaw = parent.look and parent.look.h or
-				parent.rot and parent.rot.y or 0
+	local yaw = bone_yaw_of(o)
+	if yaw then
 		local s, c = math.sin(yaw), math.cos(yaw)
 		return {
 			x = at.x + BONE_HAND_RIGHT * c - BONE_HAND_FWD * s,
@@ -3879,6 +3889,10 @@ local function show_objects(dtime)
 			local a = o.attached_to
 			v[#v + 1] = a and (ref_ids[a.ref] or 0) or 0
 			v[#v + 1] = (a and a.forced_visible) and 1 or 0
+			-- The yaw a bone attachment was turned by, -1000 for none: the
+			-- client turns it on to its own player's yaw every frame
+			-- ([WIELD_AT_FEET])
+			v[#v + 1] = bone_yaw_of(o) or -1000
 			local kind, texture, detail = appearance_of(o)
 			detail = detail or ""
 			-- Whether a ray may hit it: Luanti's pointable. VoxeLibre's

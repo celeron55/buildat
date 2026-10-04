@@ -986,7 +986,7 @@ local function object_same(prev, v, i)
 	if prev == nil then
 		return false
 	end
-	for k = 1, 11 do
+	for k = 1, 12 do
 		if prev[k] ~= v[i + k] then
 			return false
 		end
@@ -1126,6 +1126,40 @@ function M.set_draw_self(on)
 	M.draw_self = on and true or false
 end
 
+-- **A thing riding the player's own object is drawn from where the client
+-- has the player now** ([WIELD_AT_FEET]): the server's place for it is as
+-- old as its last step, and in third person the held item trailed the
+-- player. Its offset from the player as the server had it, turned on by
+-- how far the client has turned since (a bone attachment only: one by
+-- position keeps world axes, as drawn_pos_of() does), from the client's
+-- own place for the player. Each packet, and each set_self_pose().
+-- simplified: the player's box is taken to stand on its feet (its middle
+-- half its height up); a box whose bottom is not at the feet moves the
+-- item by that much
+-- set_self_pose() comes only while the player's own object is drawn, so
+-- in first person what rides it stays at the server's place
+local self_pose = nil
+local riders = {} -- id -> true: what rides the player's own object
+local function follow_self(id)
+	local have, prev, me = object_nodes[id], object_last[id],
+			object_last[M.self_id]
+	riders[id] = (have and prev and id ~= M.self_id and
+			tostring(math.floor(prev[10])) == M.self_id) or nil
+	if not (riders[id] and me and self_pose and M.draw_self) then
+		return
+	end
+	local dx, dy, dz = prev[1] - me[1], prev[2] - me[2], prev[3] - me[3]
+	if prev[12] ~= -1000 then
+		-- Luanti's yaw is counter-clockwise from +Z and the client's the
+		-- other way round (vanilla's sub_player_pos)
+		local d = -math.rad(self_pose.yaw) - prev[12]
+		local s, c = math.sin(d), math.cos(d)
+		dx, dz = dx * c - dz * s, dx * s + dz * c
+	end
+	have.node.position = magic.Vector3(self_pose.x + dx,
+			self_pose.y + me[5] / 2 + dy, self_pose.z + dz)
+end
+
 local function place_object(id, v, i)
 	-- The id this rides and whether it is forced visible ride the last two
 	-- of the stride ([WIELD_AT_FEET] (1)); "0" is nothing.
@@ -1160,7 +1194,7 @@ local function place_object(id, v, i)
 	-- no packet pays for more than a few.
 	if not posed and object_nodes[id] and object_same(object_last[id], v, i)
 			and id ~= M.self_id then
-		if ((i - 1) / 12 + object_light_turn) % LIGHT_TURNS == 0 then
+		if ((i - 1) / 13 + object_light_turn) % LIGHT_TURNS == 0 then
 			light_object(object_nodes[id], v[i + 1], v[i + 2], v[i + 3])
 		end
 		return
@@ -1210,9 +1244,10 @@ local function place_object(id, v, i)
 		prev = {}
 		object_last[id] = prev
 	end
-	for k = 1, 11 do
+	for k = 1, 12 do
 		prev[k] = v[i + k]
 	end
+	follow_self(id)
 end
 
 buildat.sub_packet("luanti:objects", function(data)
@@ -1223,7 +1258,7 @@ buildat.sub_packet("luanti:objects", function(data)
 	local v = cereal.binary_input(data, {"array", "double"})
 	local t1 = buildat.get_time_us()
 	local seen = {}
-	local STRIDE = 12
+	local STRIDE = 13
 	local i = 1
 	object_build_left_us = OBJECT_BUILD_BUDGET_US
 	objects_deferred = 0
@@ -3453,13 +3488,15 @@ end
 -- position the player *reported* -- on the box the model floated about
 -- a node above the ground and never turned. Official's client draws its
 -- own model from its LocalPlayer the same way.
-local self_pose = nil
 function M.set_self_pose(x, y, z, yaw)
 	self_pose = {x = x, y = y, z = z, yaw = yaw}
 	local have = object_nodes[M.self_id]
 	if have and M.draw_self then
 		have.node.position = magic.Vector3(x, y, z)
 		have.node.rotation = magic.Quaternion(0, yaw, 0)
+	end
+	for id, _ in pairs(riders) do
+		follow_self(id)
 	end
 end
 
@@ -3473,6 +3510,16 @@ function M.self_object()
 	end
 	local p = have.node.position
 	return {x = p.x, y = p.y, z = p.z, yaw = have.node.rotation:YawAngle()}
+end
+
+-- What rides the player's own object, where it is drawn ([WIELD_AT_FEET])
+function M.riders()
+	local out = {}
+	for id, _ in pairs(riders) do
+		local p = object_nodes[id].node.position
+		out[#out + 1] = {id = id, x = p.x, y = p.y, z = p.z}
+	end
+	return out
 end
 
 function M.objects()
