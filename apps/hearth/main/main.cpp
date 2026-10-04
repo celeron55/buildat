@@ -37,6 +37,7 @@
 #include "interface/server_config.h"
 #include "interface/event.h"
 #include "interface/fs.h"
+#include "interface/markup.h"
 #include "client_file/api.h"
 #include "network/api.h"
 #include "accounts/api.h"
@@ -91,26 +92,6 @@ static ss_ html(const ss_ &s)
 		}
 	}
 	return r;
-}
-
-// simplified: paragraphs at blank lines and a break at each line, all of
-// it escaped. CommonMark through md4c is the plan's markup; it waits for
-// the library to be brought in
-static ss_ render_body(const ss_ &body)
-{
-	ss_ r = "<p>";
-	for(size_t i = 0; i < body.size(); i++){
-		if(body[i] == '\n' && i + 1 < body.size() && body[i + 1] == '\n'){
-			while(i + 1 < body.size() && body[i + 1] == '\n')
-				i++;
-			r += "</p>\n<p>";
-		} else if(body[i] == '\n'){
-			r += "<br>\n";
-		} else {
-			r += html(ss_(1, body[i]));
-		}
-	}
-	return r+"</p>";
 }
 
 static ss_ url_decode(const ss_ &s)
@@ -667,6 +648,13 @@ struct Module: public interface::Module
 				".answer{border:2px solid #2a7a2a}"
 				"ul.list{padding-left:1.2em}"
 				"mark{background:#fe8}"
+				"pre{overflow-x:auto;background:#f4f4f4;padding:.5em}"
+				"code{background:#f4f4f4}"
+				"blockquote{border-left:3px solid #999;margin:0;padding-left:1em}"
+				"td,th{border:1px solid #999;padding:0 .4em}"
+				"table{border-collapse:collapse}"
+				".spoiler{background:#222;color:#222}"
+				".spoiler:hover,.spoiler:focus{background:none;color:inherit}"
 				"input,button{font:inherit}"
 				"</style></head><body><header><a href=\"/\">Hearth</a>"
 				"<form action=\"/search\"><input name=\"q\" size=\"24\" "
@@ -699,7 +687,7 @@ struct Module: public interface::Module
 				html(jstr(m, "author"))+"</b>, <a href=\"/m/"+id+"\">"+
 				time_text(jint(m, "created"))+"</a>"+(jint(m, "edited") ?
 				" (edited "+time_text(jint(m, "edited"))+")" : "")+"</p>"+
-				render_body(jstr(m, "body"))+"</div>\n";
+				interface::markup::to_html(jstr(m, "body"))+"</div>\n";
 	}
 
 	// The id after a prefix, or -1

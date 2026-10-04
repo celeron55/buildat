@@ -56,6 +56,10 @@ smallsha1 -- 3rdparty/smallsha1
 SQLite 3.50.2 -- 3rdparty/sqlite
   In the public domain. https://sqlite.org/copyright.html
 
+md4c 0.6.0 -- 3rdparty/md4c
+  Copyright (c) 2016-2026 Martin Mitáš. MIT.
+  Full text: 3rdparty/md4c/LICENSE
+
 c55lib -- 3rdparty/c55lib
   Copyright 2014 Perttu Ahola <celeron55@gmail.com>. Apache-2.0, the same
   terms as Buildat; it lives under 3rdparty because it is maintained apart.

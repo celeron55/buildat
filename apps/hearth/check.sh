@@ -196,4 +196,23 @@ for _ in $(seq 40); do
 	[ "$(get "/search?q=x")" = 429 ] && n429=$((n429 + 1))
 done
 [ $n429 -gt 0 ] || fail "no search limit per address"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; found by search; a new account limited; reported, hidden with a statement, appealed, restored"
+
+# 7. The markup: CommonMark with GitHub's additions, raw HTML as text, no
+# link or image to anything but http, https, mailto or a relative path
+client admin checkpass12 "$t/admin8.log" '{"cmd":"reply","thread":1,"body":"**bold** _em_ ~~del~~ `code`\n\n<script>x()</script> <img src=x onerror=y()>\n\n[js](javascript:alert(1)) [tab](<java\tscript:alert(2)>) [up](JAVASCRIPT:alert(4)) [ent](java&#115;cript:alert(3)) [ok](https://buildat.org/a?b=1&c=2) ![pic](https://img.example/p.png \"t\")\n\n| a | b |\n|---|--:|\n| 1 | 2 |\n\n- [x] done\n- [ ] not\n\n> quoted ||secret||\n\n```\n<b>raw</b>\n```\n\nsee www.lamps.example"}'
+answer "$t/admin8.log" 1001 | grep -q '"ok":true' || fail "the markup reply: $(answer "$t/admin8.log" 1001)"
+get /t/1 > /dev/null
+for want in "<strong>bold</strong> <em>em</em> <del>del</del> <code>code</code>" \
+		"<p>&lt;script&gt;x()&lt;/script&gt; &lt;img src=x onerror=y()&gt;</p>" \
+		'<a href="https://buildat.org/a?b=1&amp;c=2" rel="nofollow ugc">ok</a>' \
+		'<a href="https://img.example/p.png" title="t" rel="nofollow ugc">[image: pic]</a>' \
+		'<th>a</th><th style="text-align:right">b</th>' \
+		'<li><input type="checkbox" disabled checked> done</li>' \
+		'<span class="spoiler" tabindex="0">secret</span>' \
+		'<pre><code>&lt;b&gt;raw&lt;/b&gt;' \
+		'<a href="http://www.lamps.example" rel="nofollow ugc">www.lamps.example</a>'; do
+	grep -qF "$want" "$t/page" || fail "the markup: no $want ($(grep -a -A3 'bold' "$t/page" | head -12))"
+done
+grep -qi 'href="[^"]*script\|<script\|<img' "$t/page" &&
+	fail "the markup let through: $(grep -aio 'href="[^"]*script[^"]*"\|<script\|<img' "$t/page")"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; found by search; a new account limited; reported, hidden with a statement, appealed, restored"

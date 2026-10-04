@@ -292,6 +292,7 @@ add_subdirectory("3rdparty/zstd")
 add_subdirectory("3rdparty/mbedtls")
 add_subdirectory("3rdparty/qrcodegen")
 add_subdirectory("3rdparty/sqlite")
+add_subdirectory("3rdparty/md4c")
 add_subdirectory("3rdparty/luabind-deboostified")
 
 include_directories("src")
@@ -303,6 +304,7 @@ include_directories("3rdparty/zlib")
 include_directories("${CMAKE_BINARY_DIR}/3rdparty/zlib")
 include_directories("3rdparty/zstd/lib")
 include_directories("3rdparty/sqlite/src")
+include_directories("3rdparty/md4c")
 # SYSTEM gets rid of annoying warnings that we're not going to fix
 include_directories(SYSTEM "3rdparty/luabind-deboostified")
 
@@ -349,6 +351,7 @@ set(BUILDAT_CORE_SRCS
 	src/impl/tcpsocket.cpp
 	src/impl/module.cpp
 	src/impl/sha1.cpp
+	src/impl/markup.cpp
 	src/impl/sha256.cpp
 	src/impl/bignum.cpp
 	src/impl/packet_stream.cpp
@@ -411,7 +414,7 @@ else()
 	set(BUILDAT_CORE_TYPE SHARED)
 endif()
 add_library(${BUILDAT_CORE_NAME} ${BUILDAT_CORE_TYPE} ${BUILDAT_CORE_SRCS}
-	$<TARGET_OBJECTS:sqlite>)
+	$<TARGET_OBJECTS:sqlite> $<TARGET_OBJECTS:md4c>)
 add_dependencies(${BUILDAT_CORE_NAME} buildat_version)
 # libcurl, required ([CONTENTDB]): ContentDB is HTTPS only and the tree has
 # no TLS of its own. The system's on Linux; on the mingw cross build a
