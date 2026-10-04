@@ -3765,12 +3765,16 @@ local function drawn_pos_of(o, depth)
 	end
 	local at = drawn_pos_of(parent, (depth or 0) + 1)
 	if a.bone and a.bone ~= "" then
-		local yaw = parent.rot and parent.rot.y or 0
+		-- A player turns by its look (its rot stays 0); either is
+		-- counter-clockwise from +Z, so forward is (-sin, cos) as in
+		-- get_look_dir() and the right hand (cos, sin)
+		local yaw = parent.look and parent.look.h or
+				parent.rot and parent.rot.y or 0
 		local s, c = math.sin(yaw), math.cos(yaw)
 		return {
-			x = at.x + BONE_HAND_RIGHT * c + BONE_HAND_FWD * s,
+			x = at.x + BONE_HAND_RIGHT * c - BONE_HAND_FWD * s,
 			y = at.y + BONE_HAND_UP,
-			z = at.z - BONE_HAND_RIGHT * s + BONE_HAND_FWD * c,
+			z = at.z + BONE_HAND_RIGHT * s + BONE_HAND_FWD * c,
 		}
 	end
 	local offset = a.position or {x = 0, y = 0, z = 0}
@@ -3779,6 +3783,33 @@ local function drawn_pos_of(o, depth)
 		y = at.y + (offset.y or offset[2] or 0) / 10,
 		z = at.z + (offset.z or offset[3] or 0) / 10,
 	}
+end
+
+-- The hand turns with its player: at each of four looks it is to the
+-- right of and ahead of where that look faces (get_look_dir())
+function core.__check_bone_hand()
+	local pid, cid = "__check_holder", "__check_held"
+	local holder = {pos = {x = 5, y = 0, z = -3}, rot = {x = 0, y = 0, z = 0},
+			look = {h = 0, v = 0}}
+	objects[pid] = holder
+	local ref = new_ref(PlayerRef_proto, pid)
+	objects[cid] = {pos = {x = 0, y = 0, z = 0}, attached_to = {ref = ref,
+			bone = "Wield_Item"}}
+	for i = 0, 3 do
+		holder.look.h = i * math.pi / 2
+		local d = ref:get_look_dir()
+		local p = drawn_pos_of(objects[cid])
+		local dx, dz = p.x - 5, p.z + 3
+		-- Ahead: along the look; right: the look turned clockwise from
+		-- above, (d.z, -d.x) with +X east and +Z north
+		local fwd = dx * d.x + dz * d.z
+		local right = dx * d.z - dz * d.x
+		assert(math.abs(fwd - BONE_HAND_FWD) < 1e-6 and
+				math.abs(right - BONE_HAND_RIGHT) < 1e-6,
+				"check_bone_hand: at look "..i.." the hand is "..fwd..
+				" ahead and "..right.." right")
+	end
+	objects[pid], objects[cid] = nil, nil
 end
 
 -- **How often the whole list goes out** ([PACKET_STALL] (2),
