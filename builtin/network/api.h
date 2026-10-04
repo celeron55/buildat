@@ -137,6 +137,10 @@ namespace network
 		// and the web client's own files are never an app's. An app that
 		// serves pages to read ([HEARTH_MVP]) claims its own at its start.
 		virtual void claim_http_path(const ss_ &prefix) = 0;
+		// [FAVICON] the PNG served for /favicon.ico, ahead of the default
+		// Buildat logo; "" restores the default. An app sets its own icon
+		// (vanilla, the game's) at any time.
+		virtual void set_favicon(const ss_ &png) = 0;
 		// [LAN_DISCOVERY]: say every 2 s on the LAN's group (tcpsocket.h)
 		// that this server is here, under `name`; "" stops. `account`:
 		// whether joining needs one.

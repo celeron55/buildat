@@ -2835,6 +2835,19 @@ struct Module: public interface::Module
 		if(m_public)
 			write_public_world(world_name);
 
+		// [FAVICON] the game's own icon in the browser tab, when it has one
+		{
+			std::ifstream ic(game_path+"/menu/icon.png", std::ios::binary);
+			if(ic.good()){
+				std::ostringstream os(std::ios::binary);
+				os<<ic.rdbuf();
+				const ss_ png = os.str();
+				network::access(m_server, [&](network::Interface *inetwork){
+					inetwork->set_favicon(png);
+				});
+			}
+		}
+
 		// The world runs in a buildat save and never in a Luanti world
 		// directory. Nothing here writes to user/luanti at any point: a
 		// Luanti world is read, or imported, and that is all. It has to be

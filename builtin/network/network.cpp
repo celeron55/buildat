@@ -425,6 +425,9 @@ static const std::pair<ss_, ss_>* web_file(const ss_ &target)
 		{"/buildat.js", {"buildat.js", "application/javascript"}},
 		{"/buildat.wasm", {"buildat.wasm", "application/wasm"}},
 		{"/buildat.data", {"buildat.data", "application/octet-stream"}},
+		// [FAVICON] in the list so an app claiming "/" does not take it;
+		// its default file lives beside the logo, not in the web client dir
+		{"/favicon.ico", {"favicon.png", "image/png"}},
 	};
 	auto it = files.find(target);
 	return it == files.end() ? nullptr : &it->second;
@@ -507,6 +510,9 @@ struct Module: public interface::Module, public network::Interface
 	};
 	sm_<ss_, WebFile> m_web_files;
 	std::set<ss_> m_claimed_paths;
+	// [FAVICON] an app's override of /favicon.ico, served from memory; ""
+	// falls back to the default PNG beside the logo
+	ss_ m_favicon;
 	// [LAN_DISCOVERY]: what lan_announce() said, sent every 2 s while the
 	// name is not ""
 	ss_ m_lan_name;
@@ -1044,6 +1050,12 @@ struct Module: public interface::Module, public network::Interface
 		}
 
 		peer.closing = true;
+		// [FAVICON] an app's own icon, kept in memory, wins over the default
+		if(target == "/favicon.ico" && !m_favicon.empty()){
+			peer.queue_raw(web::response("200 OK", "image/png",
+					m_favicon.size()) + m_favicon);
+			return true;
+		}
 		const std::pair<ss_, ss_> *wf_name = web::web_file(target);
 		if(!wf_name){
 			ss_ body = "Not found\n";
@@ -1051,7 +1063,12 @@ struct Module: public interface::Module, public network::Interface
 					"text/plain; charset=utf-8", body.size()) + body);
 			return true;
 		}
-		const ss_ path = web_client_path()+"/"+wf_name->first;
+		// The default favicon lives beside the logo (always installed),
+		// not in the optional web client dir
+		const ss_ base = target == "/favicon.ico" ?
+				m_server->get_config().get<ss_>("share_path")+"/client/data" :
+				web_client_path();
+		const ss_ path = base+"/"+wf_name->first;
 		// **A reload does not download the client again** (user,
 		// 2026-10-01: a phone reloads the page each time it comes back): the
 		// browser asks with the ETag it has, and the same file is a 304
@@ -1659,6 +1676,11 @@ struct Module: public interface::Module, public network::Interface
 	void claim_http_path(const ss_ &prefix)
 	{
 		m_claimed_paths.insert(prefix);
+	}
+
+	void set_favicon(const ss_ &png)
+	{
+		m_favicon = png;
 	}
 
 	bool claimed(const ss_ &target)
