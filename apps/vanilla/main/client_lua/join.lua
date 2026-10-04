@@ -38,6 +38,8 @@ buildat.sub_packet("main:menu_done", close_wait)
 -- right after starting this script
 buildat.sub_packet("main:join_title", function(data)
 	local title = cereal.binary_input(data, {"array", "string"})[1] or ""
+	-- The pause menu has "My account..."; no corner button ([ACCOUNT_BUTTON])
+	accounts.no_account_button()
 	accounts.start({title = title ~= "" and title or "Luanti"})
 end)
 -- vim: set noet ts=4 sw=4:

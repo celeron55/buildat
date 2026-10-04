@@ -71,6 +71,10 @@ local window = nil
 local page_kind, page_back, users_page, passwd_page = nil, nil, nil, nil
 local account_page
 local ban_page
+-- [ACCOUNT_BUTTON]: the corner button, whether an app turned it off, and the
+-- shower (forward-declared: the login handler above its definition calls it)
+local account_button, account_button_off = nil, false
+local show_account_button
 
 local function notice(text)
 	if M.notice then
@@ -506,6 +510,9 @@ buildat.sub_packet("accounts:login_result", function(data)
 	if M.on_joined then
 		M.on_joined(M.name)
 	end
+	-- [ACCOUNT_BUTTON]: the corner way in, unless the app placed its own
+	-- (it calls M.no_account_button(), by now if so)
+	show_account_button()
 end)
 
 buildat.sub_packet("accounts:users", function(data)
@@ -513,6 +520,11 @@ buildat.sub_packet("accounts:users", function(data)
 	log:info(#M.users.users .. " accounts listed")
 	if page_kind == "users" then
 		users_page(page_back)
+	end
+	-- [ACCOUNT_BUTTON]: the list arriving means this client is an admin, so
+	-- account_page can now show its "Accounts..." button
+	if page_kind == "account" then
+		account_page(page_back)
 	end
 	if M.on_users then
 		M.on_users()
@@ -827,6 +839,13 @@ account_page = function(back, message)
 	if message then
 		page_text(w, message, YELLOW)
 	end
+	-- [ACCOUNT_BUTTON]: ask for the users once to learn admin-ness. The
+	-- server answers only an admin (on_admin drops the rest), so M.users
+	-- arriving means admin; the accounts:users handler redraws this page.
+	if not M.users and not M.list_asked then
+		M.list_asked = true
+		M.admin("list")
+	end
 	local here = function() account_page(back) end
 	button(w, "Change password...", function() passwd_page(here) end)
 	button(w, "Two-step login...", function() M.totp_page(here) end)
@@ -846,6 +865,12 @@ account_page = function(back, message)
 				end
 				buildat.send_packet("accounts:link_starport", token)
 			end)
+		end)
+	end
+	-- [ACCOUNT_BUTTON]: an admin goes on to the server's accounts from here
+	if M.users then
+		button(w, "Accounts...", function()
+			users_page(function() account_page(back) end)
 		end)
 	end
 	button(w, "Log out", M.logout)
@@ -1625,6 +1650,44 @@ function M.chat_page(back)
 	if buildat.get_env("BUILDAT_TOUCH") ~= "1" then
 		e:SetFocus(true)
 	end
+end
+
+-- [ACCOUNT_BUTTON]: a way into the account page the app does not have to
+-- place. Drawn in a corner once joined, unless the app has its own entry and
+-- turned it off. Aitta and Hearth, which place none, reach their accounts by
+-- it. An admin goes on from account_page's "Accounts..." (users_page).
+function M.no_account_button()
+	account_button_off = true
+	if account_button then
+		account_button:Remove()
+		account_button = nil
+	end
+end
+
+show_account_button = function()
+	if account_button_off or account_button then
+		return
+	end
+	local b = magic.ui.root:CreateChild("Button")
+	-- Its own style, like page_window, for a game whose root has none
+	b.defaultStyle = magic.cache:GetResource("XMLFile",
+			"launch_menu/res/main_style.xml")
+	b:SetStyleAuto()
+	b.minHeight = 28
+	b.priority = 100
+	b:SetFocusMode(magic.FM_FOCUSABLE)
+	local t = b:CreateChild("Text")
+	t:SetStyleAuto()
+	t:SetText("Account")
+	t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	b:SetFixedWidth(t.width + 24)
+	b:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
+	b:SetPosition(-8, 8)
+	magic.SubscribeToEvent(b, "Released", function()
+		-- Back just closes the page; the app's own UI is under it
+		account_page(function() end)
+	end)
+	account_button = b
 end
 
 -- The join: the server's hello brings the dialog, or the scripted login

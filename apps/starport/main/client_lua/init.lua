@@ -955,5 +955,7 @@ pages = {
 	accounts = function() accounts.users_page(home) end,
 }
 
+-- Starport has its own account pages; no corner button ([ACCOUNT_BUTTON])
+accounts.no_account_button()
 accounts.start({title = "Starport", env = "BUILDAT_SP"})
 -- vim: set noet ts=4 sw=4:

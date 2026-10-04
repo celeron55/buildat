@@ -256,10 +256,12 @@ open = function()
 		end)
 	end
 	if account.public then
+		-- My account... local or not ([ACCOUNT_BUTTON]); the way to
+		-- Accounts... is through it now (account_page's own button)
+		accounts.page_button(w, "My account...", function()
+			page(function() accounts.account_page(open) end, open)
+		end)
 		if not account.is_local then
-			accounts.page_button(w, "My account...", function()
-				page(function() accounts.account_page(open) end, open)
-			end)
 			-- To the Starports that list it ([STARPORT] 5); the dialog is
 			-- the client's own
 			accounts.page_button(w, "Report this server...", function()
@@ -267,9 +269,6 @@ open = function()
 			end)
 		end
 		if account.admin then
-			accounts.page_button(w, "Accounts...", function()
-				page(function() accounts.users_page(open) end, open)
-			end)
 			accounts.page_button(w, "Worlds...", worlds)
 		end
 	end

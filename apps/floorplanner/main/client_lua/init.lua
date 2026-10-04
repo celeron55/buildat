@@ -781,11 +781,10 @@ picker_menu = function()
 	local b = accounts.page_button
 	b(w, "Back to the plans", function() show_plans() end)
 	b(w, "Chat...", page(accounts.chat_page))
-	if doc.privs.admin then
-		b(w, "Accounts...", page(accounts.users_page))
-	end
+	-- My account... local or not ([ACCOUNT_BUTTON]); Accounts... is reached
+	-- through it now (account_page's own button)
+	b(w, "My account...", page(accounts.account_page))
 	if not doc.is_local then
-		b(w, "My account...", page(accounts.account_page))
 		b(w, "Report this server...", function()
 			require("buildat/extension/starport").open_report_here()
 		end)
@@ -1133,6 +1132,8 @@ end
 buildat.sub_packet("fp:launch", function(data)
 	doc.launch_plan = cereal.binary_input(data, TEXT).text
 end)
+-- The plan picker menu has "My account..."; no corner button ([ACCOUNT_BUTTON])
+accounts.no_account_button()
 accounts.start({title = "Floor planner", env = "BUILDAT_FP"})
 
 -- Whether a field had the focus last frame: Urho's UI takes a LineEdit's
