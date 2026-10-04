@@ -33,6 +33,7 @@
 #include "interface/http.h"
 #include "interface/sha256.h"
 #include "network/api.h"
+#include "client_file/api.h"
 #include "starport_announce/api.h"
 #include "accounts/api.h"
 #include <algorithm>
@@ -573,6 +574,14 @@ struct Module: public interface::Module, public Interface
 			return true;
 		}
 		body.set("players", (int64_t)player_count());
+		// The icon a client gets at a connect, in hex, so the listing
+		// shows it before any connect ([SERVER_ICONS])
+		if(m_server->has_module("client_file"))
+			client_file::access(m_server, [&](client_file::Interface *cf){
+				const ss_ icon = cf->get_server_icon();
+				if(!icon.empty())
+					body.set("icon", interface::sha256::hex(icon));
+			});
 		// 10d: the whole of the bans reported to this Starport, so a ban
 		// taken back is gone from it too
 		const ss_ host = host_of(url);

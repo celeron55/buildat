@@ -34,6 +34,9 @@ namespace client_file
 		// client already connected as thousands of announce, request and
 		// transfer round trips ([FIRST_RUN])
 		virtual void add_file_paths(const sv_<std::pair<ss_, ss_>> &name_paths) = 0;
+		// The server's icon as clients get it at a connect, "" for none;
+		// Starport's listing carries it too ([SERVER_ICONS])
+		virtual ss_ get_server_icon() = 0;
 	};
 
 	inline bool access(interface::Server *server,

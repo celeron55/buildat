@@ -13,6 +13,7 @@
 //   POST /api/report         a report ([STARPORT] 5)
 //   POST /api/report_status  a reporter's receipts' outcomes
 //   GET /api/transparency    the numbers ([STARPORT] 6)
+//   GET /api/icon/<sha256>   a listing's icon, a PNG ([SERVER_ICONS])
 //   POST /api/id/<call>      a Starport ID's calls ([STARPORT] 10)
 //   GET /authorize, GET /id  the pages a web client signs in by and an
 //                            ID's settings are on ([WEB_ID_TRUST])
@@ -32,6 +33,7 @@
 #include "interface/event.h"
 #include "interface/http.h"
 #include "interface/sha256.h"
+#include "interface/fs.h"
 #include "interface/bignum.h"
 #include "client_file/api.h"
 #include "network/api.h"
@@ -838,6 +840,8 @@ struct Module: public interface::Module
 			api_id(r, body);
 		else if(r.path == "/api/transparency")
 			api_transparency(r);
+		else if(r.path.compare(0, 10, "/api/icon/") == 0 && r.method == "GET")
+			api_icon(r, r.path.substr(10));
 		else if((r.path == "/authorize" || r.path == "/id") &&
 				r.method == "GET"){
 			// Never in a frame: its Allow would be clicked through one
@@ -855,6 +859,27 @@ struct Module: public interface::Module
 			v.set("error", "no such call");
 			respond(r, 404, v);
 		}
+	}
+
+	// A listing's icon by its hash ([SERVER_ICONS]), kept for a day
+	void api_icon(const network::HttpRequest &r, const ss_ &sha)
+	{
+		ss_ hex;
+		if(sha.size() != 64 || !store("icons")->get(sha, hex)){
+			json::Value v = json::object();
+			v.set("ok", false);
+			v.set("error", "no such icon");
+			respond(r, 404, v);
+			return;
+		}
+		ss_ png;
+		for(size_t i = 0; i + 1 < hex.size(); i += 2)
+			png += (char)std::stoi(hex.substr(i, 2), nullptr, 16);
+		network::access(m_server, [&](network::Interface *iface){
+			iface->http_respond(r.peer, 200, "image/png", png,
+					"Access-Control-Allow-Origin: *\r\n"
+					"Cache-Control: max-age=86400\r\n");
+		});
 	}
 
 	bool banned(const ss_ &kind, const ss_ &what)
@@ -885,6 +910,30 @@ struct Module: public interface::Module
 		if(port < 1 || port > 65535){
 			refuse(r, "port: 1 to 65535");
 			return;
+		}
+		// [SERVER_ICONS] The server's icon, in hex: a PNG of 64 pixels a
+		// side or less, kept by its hash and served at /api/icon/<hash>.
+		// It is the listing's content and goes with it.
+		// simplified: an icon no listing names any more stays in the store
+		ss_ icon_sha;
+		if(!jstr(b, "icon").empty()){
+			const ss_ hex = jstr(b, "icon");
+			ss_ png;
+			if(hex.size() <= 2 * 64 * 1024 &&
+					hex.find_first_not_of("0123456789abcdef") == ss_::npos)
+				for(size_t i = 0; i + 1 < hex.size(); i += 2)
+					png += (char)std::stoi(hex.substr(i, 2), nullptr, 16);
+			const unsigned side = interface::fs::SERVER_ICON_SIDE;
+			if(png.size() * 2 != hex.size() ||
+					!interface::fs::icon_png_ok(png, side)){
+				refuse(r, "icon: a PNG of 64 KB or less and "+
+						itos((int64_t)side)+" pixels a side or less, in hex");
+				return;
+			}
+			icon_sha = interface::sha256::hex(interface::sha256::calculate(png));
+			ss_ have;
+			if(!store("icons")->get(icon_sha, have))
+				store("icons")->set(icon_sha, hex);
 		}
 		const ss_ id = jstr(b, "id");
 		json::Value l;
@@ -963,6 +1012,7 @@ struct Module: public interface::Module
 				json::array());
 		l.set("players", jint(b, "players"));
 		l.set("players_max", jint(b, "players_max"));
+		l.set("icon", icon_sha);
 		l.set("host", host);
 		l.set("port", port);
 		l.set("last_announce", t);
@@ -1276,6 +1326,8 @@ struct Module: public interface::Module
 					"login", "tls",
 					"players", "players_max"})
 				s.set(k, l.get(k));
+			if(!jstr(l, "icon").empty())
+				s.set("icon", jstr(l, "icon"));
 			const json::Value e = effective(l);
 			for(const char *k : {"kind", "audience", "access", "descriptors"})
 				s.set(k, e.get(k));

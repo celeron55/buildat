@@ -418,13 +418,62 @@ end
 
 -- Whether the network extension has the user's yes for a url's host
 local function accepted(url)
-	local origin = url:match("^(https?://[^/:]+)")
+	local origin = url:match("^(https?://[^/]+)")
 	for _, a in ipairs(network.known_addresses()) do
 		if a.uri == origin and a.accepted then
 			return true
 		end
 	end
 	return false
+end
+
+-- **A listing's icon** ([SERVER_ICONS]): its hash in the list, the PNG
+-- at /api/icon/<hash>, fetched once into the cache's server_icons/ where
+-- the handshake's go, checked there the same way; the lobby's floor
+-- wears it. One that does not hash to its name is not kept.
+local ICON_DIR = __buildat_get_path("cache") .. "/server_icons/"
+local icon_asked = {}
+local function fetch_icons(url, servers)
+	for _, x in ipairs(servers) do
+		local sha = type(x) == "table" and type(x.icon) == "string" and
+				x.icon:match("^%x+$") and #x.icon == 64 and x.icon:lower()
+		local f = sha and not icon_asked[sha] and io.open(ICON_DIR .. sha .. ".png", "rb")
+		if f then
+			f:close()
+		elseif sha and not icon_asked[sha] then
+			icon_asked[sha] = true
+			network.http_get(url .. "/api/icon/" .. sha, function(body)
+				local got = body and __buildat_keep_server_icon(body)
+				if got ~= sha then
+					log:warning("Starport " .. url .. ": icon " .. sha ..
+							" not kept (" .. tostring(got) .. ")")
+				end
+			end, {description = "Starport (server icon)"})
+		end
+	end
+end
+
+-- The merged rows of the lists kept from the last fetch, the filters'
+-- way, without asking anything: the lobby's floor, built in one frame
+function M.safe.kept_rows()
+	local e = effective()
+	local kept = read_json(LIST_CACHE) or {}
+	local ordered = {}
+	for _, url in ipairs(e.starports) do
+		local k = kept[url]
+		if type(k) == "table" and type(k.servers) == "table" then
+			ordered[#ordered + 1] = {url, k.servers}
+		end
+	end
+	local shown = {}
+	for _, row in ipairs(merge(ordered)) do
+		if passes(e.filters, row) then
+			shown[#shown + 1] = {name = row.name, address = row.address,
+				icon = type(row.icon) == "string" and row.icon:lower() or nil,
+				players = row.players}
+		end
+	end
+	return shown
 end
 
 -- fetch(cb[, ask]): cb(rows, info) once every Starport has answered or
@@ -533,6 +582,7 @@ function M.safe.fetch(cb, ask, extra)
 			if type(v) == "table" and v.ok and type(v.servers) == "table" then
 				results[url] = v.servers
 				kept[url] = {ts = os.time(), servers = v.servers}
+				fetch_icons(url, v.servers)
 			else
 				errors[#errors + 1] = url .. ": " .. tostring(
 						type(v) == "table" and v.error or err or "no answer")

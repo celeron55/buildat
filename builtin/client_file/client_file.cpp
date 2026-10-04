@@ -13,6 +13,11 @@
 #include "interface/select_handler.h"
 #include "client_file/api.h"
 #include "network/api.h"
+#include "main_context/api.h"
+#include <Image.h>
+#include <MemoryBuffer.h>
+#include <VectorBuffer.h>
+namespace magic = Urho3D;
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
@@ -230,6 +235,9 @@ struct Module: public interface::Module, public client_file::Interface
 	// the one its tile on the grid wears. A PNG of 64 KB at most, read
 	// once, sent once a connect as core:server_icon; the client checks it
 	// again and keeps it by its hash. Nothing is sent where there is none.
+	// 64 pixels a side at most, as the client and Starport take
+	// ([SERVER_ICONS]): a larger one is scaled down where the server has
+	// main_context (Urho3D's Image), else passed over with a warning.
 	ss_ m_server_icon;
 	bool m_server_icon_read = false;
 	const ss_& server_icon()
@@ -249,7 +257,7 @@ struct Module: public interface::Module, public client_file::Interface
 		std::sort(pngs.begin(), pngs.end());
 		candidates.insert(candidates.end(), pngs.begin(), pngs.end());
 		for(const ss_ &path : candidates){
-			const ss_ data = interface::fs::read_icon_png(path);
+			const ss_ data = fit_icon(interface::fs::read_icon_png(path), path);
 			if(data.empty())
 				continue;
 			m_server_icon = data;
@@ -258,6 +266,43 @@ struct Module: public interface::Module, public client_file::Interface
 			break;
 		}
 		return m_server_icon;
+	}
+	// The PNG as it is when it fits, else scaled to fit and saved as a
+	// PNG again; "" when it cannot be
+	ss_ fit_icon(const ss_ &data, const ss_ &path)
+	{
+		const unsigned side = interface::fs::SERVER_ICON_SIDE;
+		if(data.empty() || interface::fs::icon_png_ok(data, side))
+			return data;
+		ss_ out;
+		if(m_server->has_module("main_context"))
+			main_context::access(m_server, [&](main_context::Interface *imc){
+				magic::Image img(imc->get_context());
+				magic::MemoryBuffer in(data.data(), (unsigned)data.size());
+				if(!img.Load(in) || img.IsCompressed())
+					return;
+				const int w = img.GetWidth(), h = img.GetHeight();
+				const int big = std::max(w, h);
+				if(!img.Resize(std::max(1, (int)(w * side / big)),
+						std::max(1, (int)(h * side / big))))
+					return;
+				magic::VectorBuffer buf;
+				if(!img.Save(buf))
+					return;
+				out.assign((const char*)buf.GetData(), buf.GetSize());
+			});
+		if(!interface::fs::icon_png_ok(out, side)){
+			log_w(MODULE, "%s is larger than %u pixels a side and could not "
+					"be scaled down; not the server's icon", cs(path), side);
+			return "";
+		}
+		log_i(MODULE, "%s scaled down to %u pixels a side", cs(path), side);
+		return out;
+	}
+
+	ss_ get_server_icon()
+	{
+		return server_icon();
 	}
 
 	void on_client_connected(const network::NewClient &client_connected)

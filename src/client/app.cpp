@@ -1898,6 +1898,45 @@ struct CApp: public App, public magic::Application
 	// and a rewrite of the address store, so a server sending them in a
 	// loop filled the cache. The first one from an address in a run.
 	// simplified: a server's new icon is taken at the client's next run
+	// **A server's icon, checked and kept** under the cache's
+	// server_icons/ by its hash, which it returns; "" when it is not a
+	// picture of SERVER_ICON_SIDE pixels a side or less. The handshake's
+	// and Starport's listings' ([SERVER_ICONS]) both; from names the
+	// source for the log.
+	ss_ keep_icon(const ss_ &data, const ss_ &from)
+	{
+		// The size the PNG says it is, before decoding: a 64 KB file can
+		// say 65535 pixels a side and be given the memory for it
+		// ([SECURITY_RUN_1])
+		const unsigned side = interface::fs::SERVER_ICON_SIDE;
+		if(!interface::fs::icon_png_ok(data, side)){
+			log_w(MODULE, "server icon from %s: not a PNG of 64 KB or less "
+					"and %u pixels a side or less", cs(from), side);
+			return "";
+		}
+		magic::MemoryBuffer buf(data.data(), (unsigned)data.size());
+		magic::SharedPtr<magic::Image> img(new magic::Image(context_));
+		if(!img->Load(buf) || img->GetWidth() < 1 || img->GetHeight() < 1 ||
+				img->GetWidth() > (int)side || img->GetHeight() > (int)side){
+			log_w(MODULE, "server icon from %s: not a picture of %u "
+					"pixels a side or less", cs(from), side);
+			return "";
+		}
+		const ss_ sha = interface::sha256::hex(interface::sha256::calculate(data));
+		const ss_ dir = g_client_config.get<ss_>("cache_path")+"/server_icons";
+		const ss_ path = dir+"/"+sha+".png";
+		if(!interface::fs::path_exists(path)){
+			interface::fs::create_directories(dir);
+			std::ofstream f(path, std::ios::binary);
+			f<<data;
+			if(!f.good()){
+				log_w(MODULE, "server icon: cannot write %s", cs(path));
+				return "";
+			}
+		}
+		return sha;
+	}
+
 	ss_ m_icon_address;
 	void handle_server_icon(const ss_ &data)
 	{
@@ -1911,37 +1950,6 @@ struct CApp: public App, public magic::Application
 				(address == "localhost:"+g_local_server_port ||
 				address == "127.0.0.1:"+g_local_server_port))
 			return;
-		if(data.size() > 64 * 1024 ||
-				data.compare(0, 8, "\x89PNG\r\n\x1a\n") != 0){
-			log_w(MODULE, "server icon from %s: not a PNG of 64 KB or less",
-					cs(address));
-			return;
-		}
-		// The size the PNG says it is, before decoding: a 64 KB file can
-		// say 65535 pixels a side and be given the memory for it
-		// ([SECURITY_RUN_1]). IHDR's width and height, big-endian, at 16.
-		if(data.size() < 24){
-			log_w(MODULE, "server icon from %s: too short", cs(address));
-			return;
-		}
-		auto be32 = [&](size_t at){
-			const unsigned char *d = (const unsigned char*)data.data() + at;
-			return (uint32_t)d[0] << 24 | (uint32_t)d[1] << 16 |
-					(uint32_t)d[2] << 8 | (uint32_t)d[3];
-		};
-		if(be32(16) < 1 || be32(16) > 512 || be32(20) < 1 || be32(20) > 512){
-			log_w(MODULE, "server icon from %s: not a picture of 512 "
-					"pixels a side or less", cs(address));
-			return;
-		}
-		magic::MemoryBuffer buf(data.data(), (unsigned)data.size());
-		magic::SharedPtr<magic::Image> img(new magic::Image(context_));
-		if(!img->Load(buf) || img->GetWidth() < 1 || img->GetHeight() < 1 ||
-				img->GetWidth() > 512 || img->GetHeight() > 512){
-			log_w(MODULE, "server icon from %s: not a picture of 512 "
-					"pixels a side or less", cs(address));
-			return;
-		}
 		// The address as the network extension writes it: tcp://host:port
 		ss_ hostport = address;
 		if(hostport.find(':', hostport[0] == '[' ? hostport.find(']') : 0) ==
@@ -1951,18 +1959,9 @@ struct CApp: public App, public magic::Application
 			if(!(isalnum((unsigned char)c) || c == '.' || c == '-' ||
 					c == ':' || c == '[' || c == ']'))
 				return; // not an address the store's rows can carry
-		const ss_ sha = interface::sha256::hex(interface::sha256::calculate(data));
-		const ss_ dir = g_client_config.get<ss_>("cache_path")+"/server_icons";
-		const ss_ path = dir+"/"+sha+".png";
-		if(!interface::fs::path_exists(path)){
-			interface::fs::create_directories(dir);
-			std::ofstream f(path, std::ios::binary);
-			f<<data;
-			if(!f.good()){
-				log_w(MODULE, "server icon: cannot write %s", cs(path));
-				return;
-			}
-		}
+		const ss_ sha = keep_icon(data, address);
+		if(sha.empty())
+			return;
 		m_icon_address = address;
 		run_script_no_sandbox("require('buildat/extension/network')"
 				".remember_server_icon('tcp://"+hostport+"', '"+sha+"')");
@@ -2252,6 +2251,7 @@ struct CApp: public App, public magic::Application
 }
 
 		DEF_BUILDAT_FUNC(connect_server)
+		DEF_BUILDAT_FUNC(keep_server_icon)
 		DEF_BUILDAT_FUNC(connect_server_start)
 		DEF_BUILDAT_FUNC(connect_server_poll)
 		DEF_BUILDAT_FUNC(disconnect)
@@ -4525,6 +4525,22 @@ struct CApp: public App, public magic::Application
 	// LAN, for the pause menu's "Open to LAN" to say. Only while connected
 	// to the server this client started: to any other, where this machine
 	// is on its network is not that server's business.
+	// keep_server_icon(png) -> its hash, or nil: a Starport listing's icon
+	// ([SERVER_ICONS]), checked and kept as the handshake's is
+	static int l_keep_server_icon(lua_State *L)
+	{
+		size_t n = 0;
+		const char *d = luaL_checklstring(L, 1, &n);
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ sha = self->keep_icon(ss_(d, n), "a Starport");
+		if(sha.empty())
+			return 0;
+		lua_pushstring(L, sha.c_str());
+		return 1;
+	}
+
 	static int l_lan_address(lua_State *L)
 	{
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");

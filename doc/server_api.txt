@@ -326,7 +326,10 @@ is the server's icon in the client's list of servers (sent as
 core:server_icon on connect; without it, the first picture in the app's
 launcher/) and its /favicon.ico in a browser tab (without it, what the
 app set with set_favicon, else the Buildat logo). A file that is not
-such a PNG is skipped with a warning in the log.
+such a PNG is skipped with a warning in the log. As the server's icon it
+is 64 pixels a side at most: a larger one is scaled down where the
+server has main_context, else skipped. starport_announce sends it with
+each announce, so a Starport's listing carries it ([SERVER_ICONS]).
 
 What the module enforces on its own ([SECURITY_RUN_1], [PEER_TIMEOUT]):
 32 connections from one address at most, peers capped under what select()

@@ -235,6 +235,40 @@ do
 		end
 	end
 	log:info("servers: " .. lan .. " heard on this network")
+	-- **Starport's listings** ([SERVER_ICONS]): the lists kept from the
+	-- last fetch, as the filters let them through, each with the icon
+	-- its listing carries; a fetch now (of the Starports the user said
+	-- yes to) refreshes them, and its icons, for the next build.
+	-- simplified: last time's list, as the room is built in one frame
+	local ok, sp = pcall(require, "buildat/extension/starport")
+	sp = ok and type(sp) == "table" and (sp.kept_rows and sp or sp.safe)
+	local listed = 0
+	for _, r in ipairs(sp and sp.kept_rows() or {}) do
+		local address = tostring(r.address)
+		local known = false
+		for _, sv in ipairs(SERVERS) do
+			if sv.address == address or
+					sv.address:sub(-#address - 3) == "://" .. address then
+				known = true
+			end
+		end
+		if #SERVERS < 10 and not known then
+			local icon = r.icon and r.icon:match("^%x+$") and #r.icon == 64 and
+					(r.icon .. ".png") or nil
+			if icon and not magic.cache:Exists(icon) then icon = nil end
+			if icon then
+				log:info("marks: server " .. address .. " wears its listing's icon")
+			end
+			SERVERS[#SERVERS + 1] = {address = address,
+				name = tostring(r.name or address), players = r.players,
+				icon = icon}
+			listed = listed + 1
+		end
+	end
+	if sp then
+		sp.fetch(function() end)
+	end
+	log:info("servers: " .. listed .. " listed on Starport")
 end
 -- **The proof's padding is gone** ([LAUNCH_WORLD] stage 1(b), 2026-09-28).
 -- Nine invented hostnames -- buildat.example.org, "the long night",

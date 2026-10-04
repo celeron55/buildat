@@ -52,10 +52,16 @@ namespace interface
 		// Sum of file_size for every regular file under path, recursively.
 		uint64_t directory_tree_size(const ss_ &path);
 
-		// A server's icon at path ([FAVICON_SERVER_ICON]): the file when it is
-		// a PNG of 64 KB at most, else "" (a warning when it is there but
-		// not one). The client's list of servers and /favicon.ico both.
-		ss_ read_icon_png(const ss_ &path);
+		// A server's icon in the client's list and in Starport's is this
+		// many pixels a side at most ([SERVER_ICONS])
+		static const unsigned SERVER_ICON_SIDE = 64;
+		// A PNG of 64 KB at most whose header says max_side pixels a side
+		// or less (0: any size); the header is read, nothing is decoded
+		bool icon_png_ok(const ss_ &data, unsigned max_side);
+		// A server's icon at path ([FAVICON_SERVER_ICON]): the file when
+		// icon_png_ok(), else "" (a warning when it is there but not one).
+		// The client's list of servers and /favicon.ico both.
+		ss_ read_icon_png(const ss_ &path, unsigned max_side = 0);
 
 		// "image.png", "png" -> true
 		bool check_file_extension(const char *path, const char *ext);

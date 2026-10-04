@@ -278,16 +278,32 @@ uint64_t directory_tree_size(const ss_ &path)
 	return total;
 }
 
-ss_ read_icon_png(const ss_ &path)
+bool icon_png_ok(const ss_ &data, unsigned max_side)
+{
+	// IHDR's width and height, big-endian, at 16 and 20
+	if(data.size() < 24 || data.size() > 64 * 1024 ||
+			data.compare(0, 8, "\x89PNG\r\n\x1a\n") != 0 ||
+			data.compare(12, 4, "IHDR") != 0)
+		return false;
+	auto be32 = [&](size_t at){
+		const unsigned char *d = (const unsigned char*)data.data() + at;
+		return (uint32_t)d[0] << 24 | (uint32_t)d[1] << 16 |
+				(uint32_t)d[2] << 8 | (uint32_t)d[3];
+	};
+	const uint32_t w = be32(16), h = be32(20);
+	return w >= 1 && h >= 1 && (max_side == 0 || (w <= max_side && h <= max_side));
+}
+
+ss_ read_icon_png(const ss_ &path, unsigned max_side)
 {
 	std::ifstream f(path, std::ios::binary);
 	if(!f.good())
 		return "";
 	ss_ data((std::istreambuf_iterator<char>(f)),
 			std::istreambuf_iterator<char>());
-	if(data.size() > 64 * 1024 || data.compare(0, 8, "\x89PNG\r\n\x1a\n") != 0){
-		log_w("fs", "%s is not a PNG of 64 KB or less; not the server's icon",
-				cs(path));
+	if(!icon_png_ok(data, max_side)){
+		log_w("fs", "%s is not a PNG of 64 KB or less%s; not the server's icon",
+				cs(path), max_side ? (" and "+itos((int64_t)max_side)+" pixels a side").c_str() : "");
 		return "";
 	}
 	return data;
