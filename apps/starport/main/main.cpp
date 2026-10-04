@@ -439,6 +439,10 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
+		// One user's clients at once, as in floorplanner
+		accounts::access(m_server, [&](accounts::Interface *i){
+			i->set_multiple_logins(true);
+		});
 		storage::access(m_server, [&](storage::Interface *s){
 			m_save = s->open("starport");
 			if(!m_save)
