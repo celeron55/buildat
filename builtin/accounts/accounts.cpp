@@ -962,8 +962,11 @@ struct Module: public interface::Module, public Interface
 					[&](starport_announce::Interface *s){
 				why = s->verify_id_token(cred.starport, &id);
 			});
-			if(!why.empty())
+			if(!why.empty()){
+				log_i(MODULE, "Starport ID login from %s refused: %s",
+						cs(peer.address), cs(why));
 				return reply(why);
+			}
 			// 10g: an ID linked to an account logs in as that account,
 			// whatever name it picked for the community
 			ss_ linked;
@@ -1010,6 +1013,12 @@ struct Module: public interface::Module, public Interface
 					cs(peer.address), cs(why));
 			reply(why);
 		};
+		// A Starport ID's refusal that is no failure, logged as one is
+		auto refused = [&](const ss_ &why){
+			log_i(MODULE, "Starport ID login of %s from %s refused: %s",
+					cs(name), cs(peer.address), cs(why));
+			reply(why);
+		};
 
 		Account account;
 		if(!id.sub.empty()){
@@ -1022,11 +1031,11 @@ struct Module: public interface::Module, public Interface
 			});
 			if(m_store->get(link, linked)){
 				if(!get_account(name, account))
-					return reply("This Starport ID's account here is gone; "
+					return refused("This Starport ID's account here is gone; "
 							"ask an admin");
 			} else {
 				if(exists(name))
-					return reply("The name "+name+" is taken on this server "
+					return refused("The name "+name+" is taken on this server "
 							"by an account of its own: pick another for "
 							"this community on the Starport, or, if the "
 							"account is yours, log in with its password and "
@@ -1053,7 +1062,7 @@ struct Module: public interface::Module, public Interface
 			}
 			ss_ pending;
 			if(m_store->get("approval/"+name, pending))
-				return reply("Your Starport ID waits for an admin of this "
+				return refused("Your Starport ID waits for an admin of this "
 						"server to let it in");
 			// The first admin by ID, as by a local login (10g)
 			if(!m_setup_code.empty() && !code.empty()){

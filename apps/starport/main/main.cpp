@@ -362,6 +362,9 @@ const authorize = location.pathname == "/authorize";
 const q = new URLSearchParams(location.search);
 const want = {listing: q.get("listing") || "", address: q.get("address") || "",
 	origin: q.get("origin") || "", web: true};
+// The server has an account of its own by this ID's name there: another
+const rename = q.get("rename") == "1";
+if(rename) want.rename = true;
 const $ = id => document.getElementById(id);
 let session = null, me = null, secret = "";
 try { session = localStorage.getItem("buildat_sp_session"); } catch(e){}
@@ -405,7 +408,18 @@ function list(ul, xs){
 async function signed_in(){
 	me = await call("me", {session});
 	for(const e of document.querySelectorAll(".me")) e.textContent = me.name;
-	if(authorize) return show("allow");
+	if(authorize){
+		show("allow");
+		if(rename){
+			$("fleetl").firstChild.textContent = "The name you have on this "
+				+ "server is taken there by an account of its own. Pick "
+				+ "another: ";
+			$("fleetl").classList.remove("hide");
+			$("fleet").required = true;
+			$("fleet").focus();
+		}
+		return;
+	}
 	const s = await call("sessions", {session});
 	list($("sessions"), s.sessions);
 	list($("recent"), s.recent.slice().reverse());

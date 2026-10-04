@@ -13,9 +13,11 @@
 # neither the listing's nor in web_clients is refused, and so is a password
 # login from any page but the Starport's own (an Origin header not its
 # Host). Then the ID's own page, /id, in the same browser: logged in still,
-# its sessions, and "Log out everywhere else" leaving this one.
+# its sessions, and "Log out everywhere else" leaving this one. Then an ID
+# whose name in the community is a local account's: the refusal logged,
+# the reason shown, another name picked in the Starport's window.
 # Needs web/ from util/build_web.sh.
-#   util/web_id_window_check.sh [steps.json]   (default: the check's own)
+#   util/web_id_window_check.sh [steps.json [rename_steps.json]]
 set -u
 . "$(dirname "$0")/check_paths.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -131,4 +133,26 @@ grep -aq "Settings of webid: 1 sessions" "$tmp/drive/page.log" ||
 	fail "Starport's /id page ($tmp/drive/page.log)"
 grep -aq "Joined as webname" "$tmp/drive/page.log" ||
 	fail "the web client did not join by the ID ($tmp/drive/page.log)"
-echo "PASS: a web client signs in by the Starport's window"
+
+# The name the ID has in this community is a local account's here: the
+# refusal is logged, the client's dialog says why above Open, and the
+# Starport's window asks for another name, which joins (the local account
+# is the admin's)
+python3 - "$SP" "$id" <<'PY' || fail "the second ID"
+import json, sys, time, urllib.request
+B = "http://127.0.0.1:%s/api/id/" % sys.argv[1]
+def call(w, **k):
+    return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
+s = call("register", name="webid2", password="secret1",
+        birth_year=time.gmtime().tm_year - 40)["result"]["session"]
+r = call("token", session=s, listing=sys.argv[2], name="admin")
+assert r["ok"], r
+PY
+WEB_DRIVE_URL="http://127.0.0.1:$AN/" "$here/util/web_drive.sh" firefox hearth \
+	"${2:-$here/util/web_id_rename.json}" "$tmp/drive2" > "$tmp/drive2.txt" 2>&1 ||
+	fail "the rename drive ($tmp/drive2.txt, $tmp/drive2)"
+grep -q "Starport ID login of admin from .* refused: The name admin is taken" \
+	"$tmp/h.log" || fail "the refusal is not logged ($tmp/h.log)"
+grep -aq "Joined as other" "$tmp/drive2/page.log" ||
+	fail "the ID did not join by another name ($tmp/drive2/page.log)"
+echo "PASS: a web client signs in by the Starport's window, and by another name where its own is taken"

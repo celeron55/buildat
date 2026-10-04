@@ -1665,12 +1665,20 @@ function M.safe.set_web_starports(rows)
 end
 M.set_web_starports = M.safe.set_web_starports
 
-local function web_authorize(url, listing, address, cb)
+-- rename_reason: the name this ID has here is refused; the Starport's
+-- window asks for another
+local function web_authorize(url, listing, address, cb, rename_reason)
 	local q = "/authorize?address=" .. address
 	if listing then
 		q = q .. "&listing=" .. listing
 	end
+	if rename_reason then
+		q = q .. "&rename=1"
+	end
 	local root, w = open_window("starport id web", 520)
+	if rename_reason then
+		add_text(w, rename_reason)
+	end
 	add_text(w, "Sign in with your Starport ID at " .. url .. ". Its page "..
 			"opens in a window of its own; your password goes there only.")
 	local st = add_text(w, "")
@@ -1732,7 +1740,8 @@ function M.safe.id_token_here(cb, rename_reason)
 				return cb(nil, "No Starports in your settings")
 			end
 			return web_authorize(u, l or nil,
-					address:gsub("^https://", ""):gsub("^wss://", ""), cb)
+					address:gsub("^https://", ""):gsub("^wss://", ""), cb,
+					rename_reason)
 		end
 		for u, l in pairs(ids) do
 			if s.ids[u] then
@@ -1857,7 +1866,8 @@ function M.safe.id_token_here(cb, rename_reason)
 	local ws = web_starports[1]
 	if ws then
 		return web_authorize(ws.url, ws.listing,
-				address:gsub("^https://", ""):gsub("^wss://", ""), cb)
+				address:gsub("^https://", ""):gsub("^wss://", ""), cb,
+				rename_reason)
 	end
 	local row = row_of(address)
 	if row then
