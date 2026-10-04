@@ -1338,9 +1338,9 @@ struct Module: public interface::Module, public Interface
 				why = s->set_ids_mode(r.arg.substr(0, sp), sp == ss_::npos ?
 						"" : r.arg.substr(sp + 1));
 			});
+			// Everyone: a joined client's My account links an ID by it
 			for(auto &pair : m_peers)
-				if(pair.second.name.empty())
-					send_hello(pair.first);
+				send_hello(pair.first);
 			result(why);
 		} else if(r.cmd == "approve" || r.cmd == "turn_away"){
 			ss_ pending;

@@ -512,7 +512,14 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		json::json_error_t err;
-		const json::Value c = json::load_string(r.data.c_str(), &err);
+		json::Value c = json::load_string(r.data.c_str(), &err);
+		// "ids" is the users page's (set_ids_mode): a save from a page
+		// opened before it changed does not take it back
+		const json::Value now = config();
+		if(c.is_object() && now.is_object()){
+			c.del_key("ids");
+			c.set("ids", now.get("ids"));
+		}
 		send_config(r.peer, write_config(c));
 	}
 
@@ -767,6 +774,14 @@ struct Module: public interface::Module, public Interface
 				c.set("address", address);
 			note = "Announced, unlisted, to "+default_starport()+
 					"; change it under Starport...";
+		}
+		// IDs on need the announce on: a file with "enabled": false read
+		// as IDs off whatever "ids" said
+		if(mode != "off" && !is_on(c)){
+			c.set("enabled", true);
+			if(note.empty())
+				note = "Starport turned on: announced to "+urls_of(c)[0]+
+						(urls_of(c).size() > 1 ? " and others" : "");
 		}
 		c.set("ids", mode);
 		c.del_key("login");

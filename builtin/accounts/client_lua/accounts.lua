@@ -418,6 +418,8 @@ end)
 
 buildat.sub_packet("accounts:hello", function(data)
 	M.hello = cereal.binary_input(data, HELLO)
+	log:info("hello: Starport IDs " ..
+			(M.hello.starport == 1 and "taken" or "not taken"))
 	if M.hello.starport == 1 then
 		buildat.send_packet("starport:where_get", "")
 	end
@@ -1214,6 +1216,8 @@ buildat.sub_packet("starport:config", function(data)
 	starport_info = buildat.parse_json(data)
 	-- What the server has now is what is edited
 	draft = nil
+	-- Starport on or off changes whether IDs are taken: My account's link
+	buildat.send_packet("accounts:get_hello", "")
 	if page_kind == "starport" then
 		starport_page(page_back)
 	end

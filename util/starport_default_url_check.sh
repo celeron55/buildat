@@ -8,7 +8,9 @@
 # to the default Starport (BUILDAT_STARPORT_DEFAULT: a local one here) at
 # that address, with no name, kind or audience set and the listing never
 # claimed; it is verified over TLS, is not in the list, and an ID joins.
-# An announce naming its address from elsewhere gets no ID token.
+# An announce naming its address from elsewhere gets no ID token. Starport
+# turned off in starport.json reads as IDs off, and IDs turned on again turn
+# it on; a joined admin is told each time.
 #   util/starport_default_url_check.sh
 set -u
 . "$(dirname "$0")/check_paths.sh"
@@ -73,6 +75,8 @@ read -r _ _ id _ < <(grep -v "^#" "$tmp/an/apps/hearth/starport_claim.txt")
 [ -n "$id" ] || fail "no listing id"
 curl -s -m 10 "localhost:$SP/api/list" | grep -q "\"$id\"" &&
 	fail "the unlisted listing is in the list"
+grep -q "hello: Starport IDs taken" "$tmp/admin.log" ||
+	fail "the joined admin was not told IDs are taken ($tmp/admin.log)"
 echo "ok: announced unlisted to the default Starport at the admin's https address"
 
 token=$(python3 - "$SP" "$id" <<'PY'
@@ -117,4 +121,28 @@ for k in ({}, {"web": True, "origin": "https://127.0.0.1:" + sys.argv[2]}):
 r = call("id/authorize_info", session=s, listing=a["id"], web=True)
 assert not r.get("ok"), r
 PY
-echo "PASS: IDs turned on announce to the default Starport, unlisted and unclaimed, an ID joins, and a look-alike listing gets no token"
+
+# Starport turned off on its page ("enabled": false) reads as IDs off; IDs
+# turned on again turn it on, and a joined client hears of it
+python3 - "$json" <<'PY'
+import json, sys
+c = json.load(open(sys.argv[1])); c["enabled"] = False
+json.dump(c, open(sys.argv[1], "w"))
+PY
+sleep 2
+BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
+	BUILDAT_HEARTH_ADMIN="setting starport_ids anyone" \
+	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	-s 127.0.0.1:$AN -c @"$tmp/cmds.txt" > "$tmp/admin2.log" 2>&1
+grep -q "hello: Starport IDs not taken" "$tmp/admin2.log" ||
+	fail "\"enabled\": false did not read as IDs off ($tmp/admin2.log)"
+python3 - "$json" <<'PY' || fail "IDs on left Starport off ($json)"
+import json, sys
+c = json.load(open(sys.argv[1]))
+assert c["enabled"] is True and c["ids"] == "anyone", c
+PY
+grep -q "hello: Starport IDs taken" "$tmp/admin2.log" ||
+	fail "the joined admin was not told IDs are taken again ($tmp/admin2.log)"
+echo "ok: IDs on from \"enabled\": false turn Starport on"
+
+echo "PASS: IDs turned on announce to the default Starport, unlisted and unclaimed, an ID joins, a look-alike listing gets no token, and IDs turned on turn a Starport that was off on"
