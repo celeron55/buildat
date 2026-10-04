@@ -60,6 +60,7 @@
 #include <Camera.h>
 #include <Renderer.h>
 #include <Audio.h>
+#include <SoundSource.h>
 #include <RenderSurface.h>
 #include <Texture2D.h>
 #include <Image.h>
@@ -4532,6 +4533,23 @@ struct CApp: public App, public magic::Application
 			error_logging_pcall(L, 0, 0);
 		else
 			lua_pop(L, 1);
+		// **The game's sounds go with the game** ([MENU_MUSIC], 2026-10-04):
+		// a SoundSource is mixed from its construction to its destruction,
+		// scene or no scene, so a looped one whose node the reset took out
+		// of the scene -- held by the game's Lua until a collection --
+		// went on playing in the launch menu. Everything playing now is
+		// the game's: the launch menu plays nothing.
+		// simplified: all of them; a launch UI that plays its own sounds
+		// through a game would need to keep those apart.
+		if(magic::Audio *audio = self->GetSubsystem<magic::Audio>()){
+			unsigned n = 0;
+			for(magic::SoundSource *s : audio->GetSoundSources()){
+				if(s->IsPlaying())
+					n++;
+				s->Stop();
+			}
+			log_i(MODULE, "leave_to_menu(): %u sounds stopped", n);
+		}
 		self->say_what_is_left("leave_to_menu");
 		return 0;
 	}
