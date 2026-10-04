@@ -129,6 +129,35 @@ local function list(parent)
 	return l, add
 end
 
+-- The markup's buttons under a message's field, for whoever does not know
+-- Markdown: each puts its Markdown in at the cursor.
+-- simplified: never wraps a selection -- a field's selection cannot be
+-- read from here; that needs Text's selectionStart and selectionLength in
+-- safe_classes.lua
+local MARKUP = {{"Bold", "**bold**"}, {"List", "\n- "},
+	{"Link", "[text](https://)"}, {"Image", "![what it shows](https://)"},
+	{"Code", "`code`"}}
+local function markup_buttons(parent, e)
+	local r = parent:CreateChild("UIElement")
+	r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
+	for _, b in ipairs(MARKUP) do
+		button(r, b[1], function()
+			-- The cursor counts characters, the string bytes
+			local s, at, i = e:GetText(), e.cursorPosition, 1
+			for _ = 1, at do
+				local c = s:byte(i)
+				if not c then
+					break
+				end
+				i = i + (c >= 0xF0 and 4 or c >= 0xE0 and 3 or c >= 0xC0 and 2 or 1)
+			end
+			e:SetText(s:sub(1, i - 1) .. b[2] .. s:sub(i))
+			e.cursorPosition = at + #b[2]
+			e:SetFocus(true)
+		end)
+	end
+end
+
 -- multi: a message's field -- Enter breaks the line, Ctrl+Enter finishes
 local function edit(parent, label, multi)
 	text(parent, label)
@@ -138,6 +167,9 @@ local function edit(parent, label, multi)
 	e.multiLine = multi == true
 	e.textSelectable = true
 	e.textCopyable = true
+	if multi then
+		markup_buttons(parent, e)
+	end
 	return e
 end
 
