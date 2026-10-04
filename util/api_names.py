@@ -47,7 +47,11 @@ def client_buildat():
 
 def block_members(text, start):
     """The keys of the table literal opening at text[start] ('{'),
-    top level only."""
+    top level only. A key is a name and '=' right after '{' or ',':
+    a function value's body is at the same depth, and its locals and
+    assignments are not keys. Comments are blanked to the same length
+    so that the indices stay those of text."""
+    text = re.sub(r"--[^\n]*", lambda m: " " * len(m.group(0)), text)
     depth = 0
     keys = set()
     i = start
@@ -62,7 +66,7 @@ def block_members(text, start):
                 return keys, i
         elif depth == 1:
             m = re.match(r"\s*([A-Za-z_]\w*)\s*=", text[i:i + 80])
-            if m and (text[i - 1] in "{,\n\t "):
+            if m and text[:i + m.start(1)].rstrip()[-1:] in ("{", ","):
                 keys.add(m.group(1))
                 i += m.end() - 1
         i += 1

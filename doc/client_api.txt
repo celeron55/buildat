@@ -1449,7 +1449,7 @@ magic.Animatable:
 magic.AnimatedModel: skeleton
 magic.Animation: 
 magic.AnimationController: IsPlaying, Play, SetSpeed, Stop
-magic.Audio: Play, SetMasterGain, Stop, listener, playing, type_name
+magic.Audio: Play, SetMasterGain, Stop, listener, playing
 magic.BEZIER_CURVE: 
 magic.BLEND_ADD: 
 magic.BLEND_ADDALPHA: 
@@ -1465,7 +1465,7 @@ magic.BT_KINEMATIC:
 magic.BT_STATIC: 
 magic.BiasParameters: 
 magic.Billboard: color, enabled, position, rotation, size, uv
-magic.BillboardSet: Commit, GetBillboard, b, faceCameraMode, material, numBillboards, relative, sorted
+magic.BillboardSet: Commit, GetBillboard, faceCameraMode, material, numBillboards, relative, sorted
 magic.BorderImage: blendMode, border, hoverOffset, imageBorder, imageRect, texture, tiled
 magic.BoundingBox: max, min
 magic.BufferedSoundStream: AddData, Clear, bufferLength, bufferNumBytes, new
@@ -1555,7 +1555,7 @@ magic.Color: a, b, g, r
 magic.Component: enabled
 magic.Constraint: GetWorldPosition, SetWorldPosition, axis, cfm, constraintType, disableCollision, erp, highLimit, lowLimit, otherAxis, otherBody, otherPosition, otherRotation, position, rotation
 magic.Cursor: DefineShape, shape, useSystemShapes
-magic.CustomGeometry: BeginGeometry, Commit, DefineColor, DefineNormal, DefineTexCoord, DefineVertex, GetMaterial, SetMaterial, SetNumGeometries, dynamic, material
+magic.CustomGeometry: BeginGeometry, Commit, DefineColor, DefineNormal, DefineTexCoord, DefineVertex, GetMaterial, SetMaterial, SetNumGeometries, dynamic
 magic.DD_DISABLED: 
 magic.DD_SOURCE: 
 magic.DD_SOURCE_AND_TARGET: 
@@ -1662,7 +1662,7 @@ magic.INSIDE:
 magic.INTERSECTS: 
 magic.Image: Clear, FlipHorizontal, FlipVertical, GetPixel, Resize, SetPixel, SetPixelInt, SetSize, components, compressed, height, new, width
 magic.IndexBuffer: SetData, SetShadowed, SetSize, indexCount, indexSize, new
-magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, GetMousePosition, IsMouseVisible, SetMouseMode, SetMouseVisible, mode, mouseVisible
+magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, GetMousePosition, IsMouseVisible, SetMouseMode, SetMouseVisible, mouseVisible
 magic.IntRect: bottom, left, right, top
 magic.IntVector2: x, y
 magic.IntVector3: Length, from_buildat, x, y, z
@@ -1867,7 +1867,7 @@ magic.Menu: SetAccelerator, ShowPopup, acceleratorKey, acceleratorQualifiers, po
 magic.Model: GetNumGeometries, SetBoundingBox, SetGeometry, SetGeometryCenter, SetNumGeometries, SetNumGeometryLodLevels, new
 magic.NUM_FRUSTUM_PLANES: 
 magic.NUM_FRUSTUM_VERTICES: 
-magic.Node: Clone, CreateChild, CreateComponent, GetChild, GetComponent, GetID, GetName, GetNumChildren, GetRotation, GetVar, GetWorldDirection, GetWorldPosition, LookAt, Pitch, Remove, RemoveChild, Roll, Rotate, SetDeepEnabled, SetEnabled, SetScale, SetTransform, SetVar, Translate, Yaw, component, direction, enabled, new, position, rotation, scale, transform, worldDirection, worldPosition, worldTransform
+magic.Node: Clone, CreateChild, CreateComponent, GetChild, GetComponent, GetID, GetName, GetNumChildren, GetRotation, GetVar, GetWorldDirection, GetWorldPosition, LookAt, Pitch, Remove, RemoveChild, Roll, Rotate, SetDeepEnabled, SetEnabled, SetScale, SetTransform, SetVar, Translate, Yaw, direction, enabled, new, position, rotation, scale, transform, worldDirection, worldPosition, worldTransform
 magic.OP_DECR: 
 magic.OP_INCR: 
 magic.OP_KEEP: 
@@ -1885,7 +1885,7 @@ magic.O_ISOMETRIC:
 magic.O_ORTHOGONAL: 
 magic.O_STAGGERED: 
 magic.O_VERTICAL: 
-magic.Octree: GetDrawables, result, unsafe_result
+magic.Octree: GetDrawables
 magic.PIXEL_SIZE: 
 magic.PLANE_DOWN: 
 magic.PLANE_FAR: 
@@ -1918,12 +1918,12 @@ magic.REMOVE_NODE:
 magic.REPLICATED: 
 magic.Ray: Define, Distance, HitDistanceBox, HitDistanceSphere, Project, direction, origin
 magic.Rect: max, min
-magic.RenderPath: Append, Clone, GetCommand, GetNumCommands, Load, SetEnabled, SetShaderParameter, ToggleEnabled, c, ok
+magic.RenderPath: Append, Clone, GetCommand, GetNumCommands, Load, SetEnabled, SetShaderParameter, ToggleEnabled
 magic.RenderPathCommand: RemoveShaderParameter, SetShaderParameter, enabled, pass, type
 magic.RenderSurface: QueueUpdate, SetViewport, updateMode
-magic.Renderer: DrawDebugGeometry, GetViewport, HDRRendering, SetViewport, drawShadows, maxOccluderTriangles, numViewports, occluderSizeThreshold, ret, shadowMapSize, shadowQuality
+magic.Renderer: DrawDebugGeometry, GetViewport, HDRRendering, SetViewport, drawShadows, maxOccluderTriangles, numViewports, occluderSizeThreshold, shadowMapSize, shadowQuality
 magic.Resource: name
-magic.ResourceCache: AddManualResource, Exists, GetResource, name, res
+magic.ResourceCache: AddManualResource, Exists, GetResource
 magic.RibbonTrail: emitting, endColor, endScale, lifetime, material, sorted, startColor, startScale, trailType, vertexDistance, width
 magic.RigidBody: ApplyForce, ApplyImpulse, angularDamping, angularFactor, angularVelocity, collisionEventMode, collisionLayer, collisionMask, friction, gravityOverride, kinematic, linearDamping, linearVelocity, mass, restitution, useGravity
 magic.SCANCODE_0: 
@@ -2245,8 +2245,8 @@ magic.Texture2D: GetRenderSurface, SetData, SetSize, new
 magic.TextureCube: GetRenderSurface, SetData, SetSize, new
 magic.Time: GetElapsedTime, frameNumber, timeStep
 magic.ToolTip: delay
-magic.UI: GetScale, SetClipboardText, SetFocusElement, SetScale, SetUseSystemClipboard, element, focusElement, root, scale
-magic.UIElement: CreateChild, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyleAuto, SetText, SetVisible, border, c, child, class, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, i, m, maxHeight, maxWidth, minHeight, minSize, minWidth, name, opacity, position, priority, raw, screenPosition, selected, size, spacing, tn, verticalAlignment, visible, width
+magic.UI: GetScale, SetClipboardText, SetFocusElement, SetScale, SetUseSystemClipboard, focusElement, root, scale
+magic.UIElement: CreateChild, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyleAuto, SetText, SetVisible, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, verticalAlignment, visible, width
 magic.UnsubscribeFromEvent: 
 magic.VAR_BOOL: 
 magic.VAR_BUFFER: 
@@ -2279,7 +2279,7 @@ magic.VO_LOW_MATERIAL_QUALITY:
 magic.VO_NONE: 
 magic.VS: 
 magic.Variant: GetBool, GetBuffer, GetInt, GetString, IsEmpty
-magic.VariantMap: GetBool, GetBuffer, GetFloat, GetInt, GetPtr, GetString, SetBool, SetBuffer, SetFloat, SetInt, SetPtr, SetString, actual, obj, v
+magic.VariantMap: GetBool, GetBuffer, GetFloat, GetInt, GetPtr, GetString, SetBool, SetBuffer, SetFloat, SetInt, SetPtr, SetString
 magic.Vector2: Length, Normalized, x, y
 magic.Vector3: CrossProduct, Length, Normalized, from_buildat, x, y, z
 magic.Vector4: DotProduct, Length, w, x, y, z
