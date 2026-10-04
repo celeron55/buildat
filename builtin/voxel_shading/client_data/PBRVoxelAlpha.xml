@@ -1,0 +1,24 @@
+<!-- PBRVoxel for the faces the mesher put on the chunk's "alpha" child:
+     water, and anything else a game gave a real alpha to. The same shader as
+     PBRVoxel.xml, blended instead of cut out, and with culling off so that a
+     water surface is still there when the camera is under it.
+
+     The blended pass is the ambient one and litalpha is the sun on top of
+     it, which is what puts a highlight on water. Urho3D runs the pair the
+     way it runs base and light on an opaque surface, so the light is added
+     once rather than the surface being drawn twice -- which matters here,
+     because a blended quad drawn twice blends twice and reads as opaque.
+
+     No depth or shadow pass, so water and glass cast none. That is the right
+     default: a transparent thing casting an opaque shadow looks worse than
+     it casting none, and it does mean a glass roof lets full sun through.
+
+     simplified: no VOXELMODIFIERS variant, so a world that binds the voxel
+     format's surface modifiers loses them on its translucent voxels. Nothing
+     binds both yet; the upgrade path is the same copy PBRVoxelModifiers.xml
+     is of PBRVoxel.xml. -->
+<technique vs="voxel_shading/PBRVoxel" ps="voxel_shading/PBRVoxel"
+        psdefines="DIFFMAP PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY">
+    <pass name="alpha" blend="alpha" depthwrite="false" cull="none" />
+    <pass name="litalpha" blend="addalpha" depthwrite="false" cull="none" />
+</technique>

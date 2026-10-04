@@ -1,0 +1,214 @@
+Buildat architecture
+====================
+What the engine is made of and how the parts talk: the client, the server,
+modules, extensions, the launch grid, the network, the voxel world. What is
+being built next is doc/plan/master_plan.md; the client's Lua API is
+client_api.txt and a C++ module's is server_api.txt.
+
+A small engine for networked 3D apps. License: Apache 2.0.
+
+Client
+------
+Built using Urho3D.
+
+Module code is transfered from the server and run in a safe Lua sandbox.
+
+Extensions (extensions/) run in the same sandbox, with the safe interfaces
+and a few verbs of their own (storage, a cache, their own files). What
+needs trust -- the sandbox itself, the sockets and the user's per-host
+consent, the Starport identity -- is the client's own code, in
+client/extensions/.
+
+What a script cannot imitate is marked ([TRUST_COLOR]): a colour picked at
+random at client start fills every Starport field, and the launcher shows
+it at the top right with the Starport IDs logged in and a Log out, in an
+overlay of elements no script is handed. A field the client makes for a
+secret (named __trusted...) reads empty to scripts and takes keys no
+script hears, a Starport dialog a script adds to is closed, and a script's
+element is drawn under the client's own dialogs.
+
+Server
+------
+Built using C++, with suitable parts from Urho3D, with most functionality in
+runtime-compiled C++ modules.
+
+Module structure
+----------------
+module
+|-- meta.json     << Dependencies and build flags (see below)
+|-- <module>.cpp  << Server-side code
+|-- api.h         << Structures for interfacing between modules
+|-- client_lua
+|   `-- init.lua  << Client-side code (by convention)
+`-- client_data
+    `-- media.png << Data files (by convention)
+
+Module behavior
+---------------
+No script or data transfer to the client is initiated by the core. Conventions
+followed by builtin modules:
+- module/client_lua/{init,*}.lua - builtin/client_lua
+- module/client_data/*           - builtin/client_data
+
+Modules can be unloaded at runtime. Handling of client-side state is left up to
+the C++ modules themselves.
+
+The first module to be loaded is called __loader. It loads all other modules.
+
+C++ modules can use the core/ and interface/ headers. Everything else is
+considered unstable.
+
+C++ modules are run in threads, and everything they can officially access is
+thread-safe.
+
+C++ modules can provide direct library functionality inlined in their include/
+files. See builtin/network as an example.
+
+Startup sequence and what the module should do:
+- constructor     : Don't access other modules. Throw on fatal errors.
+- init()          : Subscribe to events; access other external things.
+- "core:start"    : Start doing whatever the module wants to actively do.
+- "core:unload"   : Module will be unloaded immediately after event handler.
+- "core:continue" : Continue doing stuff after a reload.
+
+Metainformation: meta.json
+-------------------------
+Example:
+{
+	"cxxflags": "",
+	"ldflags": "-lsasl2",
+	"dependencies": [
+		{"module": "network"},
+		{"module": "plants", "optional": true},
+	],
+	"reverse_dependencies": [
+		{"module": "stuff", "optional": true},
+	],
+}
+
+Any fields can be left out. The minimum meta.json content is an empty object {}.
+
+Extension structure
+-------------------
+extension
+`-- init.lua  << Loaded when the module is required
+`-- init.cpp  << Compiled as a Lua module and loaded if init.lua doesn't exist
+
+Extension behavior
+------------------
+Extensions use the new Lua 5.1/5.2 module interface.
+
+If an extension wish to provide an interface to sandboxed code, it should
+implement table "safe", which contains the safe interface.
+
+Extensions and modules use require "buildat/extension/<name>" to use extensions.
+
+The launch UI is loaded automatically at client startup if no server address
+is provided on the command line, which is what running `buildat` with no
+arguments does. By default it is extensions/launch_menu, which runs in the
+sandbox: a grid of a local app, a remote server, and whatever the tree's
+launcher files offer. Its screens.lua is where every launch UI's app starts
+end: the local app list, connecting, and the screens a local server starts
+behind, run in the sandbox by client/launch_grid.lua. When disconnecting from
+a server, the whole client window is closed and reopened.
+
+The launch grid
+---------------
+The client's start screen is a grid of launch actions, and they come from
+the tree: any number, zero or more, from every apps/<name>, builtin/<name>
+and extensions/<name> that ships launcher/init.lua, and from every app
+installed under <user>/installed (doc/aitta.txt). Nothing else is
+scanned. The file runs in the sandbox as a module's client Lua does, with
+buildat.safe, the sandboxed magic and a require that hands out an
+extension's .safe table and nothing else -- it is on the way into an app,
+and a whole-server sandbox is only as good as the least-trusted code on
+that path. It is called every time the menu is shown and answers within a
+frame.
+
+    -- extensions/<name>/launcher/init.lua
+    return function(ctx)
+        return {
+            { id = "play", label = "Devtest", icon = "devtest.png",
+              description = "A fresh world",      -- optional, a tooltip
+              order = 10,                          -- optional, sorts first
+              run = function() ctx.launch{app = "devtest"} end },
+        }
+    end
+
+label and run are required; id is a stable name within the source; icon
+is a file name inside launcher/, resolved on the trusted side to
+<source>/launcher/<icon> (the buildat logo when absent). run is a callback
+with the menu underneath it on the UI stack: push a screen and come back,
+never Exit(). A file that errors, returns a non-table or an action without
+label or run is one warning naming it, and the rest of the grid draws. A
+app without launcher/ gets one tile, its name and its icon.png; an app
+with one replaces that and may return zero.
+
+The one way out of a file is ctx.launch:
+
+    ctx.launch{ extension = "luanti_client", params = { address = "..." } }
+    ctx.launch{ app = "digger" }
+
+params cross as plain data -- strings, numbers, booleans and tables of
+them, copied; a function or a userdata is an error at the call. An
+extension is entered through M.on_untrusted_launch(request), request =
+{ from = "extension/<name>", params = {...} }: the name says what it is,
+and the rule is to treat request.params as a packet from a server --
+validate, default, ignore the rest. An extension without that function is
+not a target. An extension that can also be the client's whole reason for
+running -- `buildat -m <name>` -- keeps M.boot() for that case; the two
+differ in what leaving means, back to the menu or quitting. An app starts
+a local server the way the local-app screen does, with the params' top
+level as key=value lines through the server's -u, kept as
+`untrusted_launch` in its config for a module to read as it would a
+packet -- never the environment. A builtin module is not a target yet.
+
+`buildat -a kind/name/id` runs one action on boot, with the grid
+underneath it. The grid's order: explicit order first, then by kind -- the menu's own,
+apps and installed apps, builtins, extensions -- then label.
+The sandbox's refusal checks are not on the grid: they run in the packaging
+smoke test and the weekly hunt (extensions/sandbox_test/tests/), never at a
+player's start ([UI_UAF] in the master plan).
+
+Network protocol
+----------------
+(Type, length, data) tuples on TCP, one ordered stream per peer. A
+name->type registry gives packet names their numeric types; types 0...99 are
+reserved for initialization. Core uses cereal's portable binary
+serialization, except for low-level packet streaming. A queue per peer with
+one send policy is what exists; channels with a policy each, and the
+transport after TCP (ENet with a Noise handshake), are designed in
+doc/plan/network_plan.md. A peer that sends nothing for 60 s is dropped,
+so a client with nothing to say sends network:keepalive. A game on the LAN
+is found without its address: a server announces itself every 2 s to a
+UDP multicast group, and the launcher lists what it hears
+([LAN_DISCOVERY]).
+
+Voxels
+------
+Terminology:
+- "voxel": one cell of a voxel volume, stored in large amounts
+- "block": defines an arrangement of voxels (often 1x1x1)
+- "volume": a 3-dimensional volume of voxels
+- "node": a scene node
+- "static node": a stationary voxel-aligned node containing a volume; most of
+  the generated world is these
+- "chunk": the volume in a static node
+- "dynamic node": a freely positioned node containing a volume
+- "section": the unit the world is saved, loaded and generated in -- a box
+  of chunks
+
+builtin/voxelworld owns the world on the server and the client: the voxel
+registry (interface::VoxelRegistry, one named "main"), the sections and
+their chunks, generation through the "voxelworld:generation_request" event,
+saving through builtin/storage, and the light -- a skylight and a lamp
+flood, a level a voxel, kept in each voxel's high bits. A voxel is an
+interface::VoxelInstance, a uint32_t with a 21-bit type id in the low bits;
+the client meshes chunks in src/impl/mesh.cpp and shades them with
+builtin/voxel_shading. Chunk data crosses the network as a node attribute,
+compressed, replicated by builtin/replicate.
+
+The data model -- what a voxel is allowed to hold, how an app's own ids map
+onto it, what a section is -- is doc/plan/buildat_voxel_data_model.md; the
+persistence of it is doc/plan/world_persistence_plan.md. The 2014 design
+notes this section used to carry are in git history.

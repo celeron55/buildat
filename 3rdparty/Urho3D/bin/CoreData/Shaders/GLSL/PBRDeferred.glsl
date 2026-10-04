@@ -87,7 +87,7 @@ void PS()
 
     vec3 lightDir;
 
-    float atten = 1;
+    float atten = 1.0;
 
     #if defined(DIRLIGHT)
         atten = GetAtten(normal, worldPos, lightDir);
@@ -97,7 +97,7 @@ void PS()
         atten = GetAttenPoint(normal, worldPos, lightDir);
     #endif
 
-    float shadow = 1;
+    float shadow = 1.0;
     #ifdef SHADOW
         shadow *= GetShadowDeferred(projWorldPos, normal, depth);
     #endif

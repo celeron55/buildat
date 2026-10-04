@@ -27,13 +27,19 @@ namespace interface
 		bool check(int timeout_us, const sv_<int> &sockets,
 				sv_<int> &active_sockets)
 		{
-#ifdef _WIN32
-			// On Windows select() returns an error if no sockets are supplied
-			if(sockets.empty()){
+			// Nothing to wait on -- no socket, or none that is open yet (a
+			// listening socket before bind is fd -1, and a server shutting
+			// down before it listened has that and nothing else) -- is a
+			// sleep and not a select: on Winsock a select over an empty set
+			// is an error, and the shutdown loop spun on it forever with
+			// the client waiting out its timeout ([WIN_MAPGEN_BUILD])
+			bool any = false;
+			for(int fd : sockets)
+				if(fd >= 0) any = true;
+			if(!any){
 				usleep(timeout_us);
 				return true;
 			}
-#endif
 
 			struct timeval tv;
 			tv.tv_sec = 0;
@@ -48,8 +54,15 @@ namespace interface
 						cs(dump(sockets)));
 			}
 			for(int fd : sockets){
-				if(attempt_bad_fds.count(fd) || bad_fds.count(fd))
+				if(fd < 0 || attempt_bad_fds.count(fd) || bad_fds.count(fd))
 					continue;
+#ifndef _WIN32
+				// An fd past FD_SETSIZE is a write past the end of rfds,
+				// which is on the stack. Winsock's fd_set is a list and
+				// ignores what does not fit.
+				if(fd >= FD_SETSIZE)
+					continue;
+#endif
 				FD_SET(fd, &rfds);
 				if(fd > fd_max)
 					fd_max = fd;
