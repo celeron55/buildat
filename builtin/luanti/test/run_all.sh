@@ -1,0 +1,233 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# Runs every runner of a tier, one at a time, and says what each did
+# ([CI_RUNS] (2)). The tier is named in the runner itself, on a
+# "# tier:" line near the top:
+#
+#   quick  needs no downloaded game -- what a push runs
+#   full   wants the game media (mineclone2, VoxeLibre)
+#   long   the fuzz, the drives, the reference shots
+#
+#   builtin/luanti/test/run_all.sh quick
+#   builtin/luanti/test/run_all.sh full --list
+#   ONLY='keys.*|focus' builtin/luanti/test/run_all.sh quick
+#
+# **--changed [range] is the regular check** ([SMOKE_PICK]): it takes
+# what git says changed and runs the cheapest runners that cover it,
+# which is one runner under a minute for most commits. The whole tier
+# is what a push runs.
+#
+#   builtin/luanti/test/run_all.sh --changed
+#   builtin/luanti/test/run_all.sh --changed origin/dev..HEAD --list
+#
+# **What a runner covers is where it lives**, so most of them say
+# nothing: a check under extensions/<x>/ covers extensions/<x>/**, one
+# under games/<g>/ covers games/<g>/**, and one in this directory
+# covers builtin/luanti/**. A "# covers:" line *adds* paths a runner
+# also proves -- the client's own sources, mostly -- and only the
+# runners that prove something outside their own tree carry one. A
+# central table of paths to runners would be a second place to forget.
+# **What a runner costs** is measured: every run appends its seconds to
+# local/run_all/costs, and a "# cost:" line seeds one that has never
+# run here. An unknown runner is assumed to cost a minute.
+#
+# The exit status is the run's: 0 if every runner passed or skipped, 1 if
+# any failed. A runner is never retried -- a check run three times and
+# taken at its best is how a real fault becomes a known flake
+# ([CI_RUNS] (6)); a known flake is marked "# flaky:" in the runner and
+# is run and reported but does not decide the status.
+set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
+here=$(cd "$(dirname "$0")" && pwd)
+tier="${1:-quick}"
+list_only=""
+changed_range=""
+changed=""
+if [ "$tier" = "--changed" ]; then
+	changed=1
+	tier="${TIER:-quick}"
+	changed_range="${2:-}"
+	[ "$changed_range" = "--list" ] && changed_range=""
+fi
+for a in "$@"; do [ "$a" = "--list" ] && list_only=1; done
+out="$here/../../../local/run_all"
+mkdir -p "$out"
+# **Every runner in the tree, not only this directory's** ([CI_RUNS]:
+# "every drive and run on CI"). The harness lives here for historical
+# reasons; a check under extensions/ or games/ that names a tier is run
+# the same way. A runner is named by its path from the root, so the two
+# kinds are told apart in the output and in the log names.
+root=$(cd "$here/../../.." && pwd)
+runners=""
+# **core.sh beside a check.sh** is the cheap runner an edit runs
+# ([CHECK_COST]): where the full one is dear, its tree carries a second
+# one, and --changed picks whichever is cheaper for what changed
+for f in "$here"/*.sh "$root"/extensions/*/check.sh "$root"/extensions/*/core.sh \
+		"$root"/games/*/check.sh; do
+	[ -f "$f" ] || continue
+	case "$(basename "$f")" in
+	lib.sh|contract.sh|fullscreen_gate.sh|run_all.sh) continue;;
+	esac
+	t=$(sed -n 's/^# tier: *//p' "$f" | head -1)
+	[ "$t" = "$tier" ] || continue
+	name=${f#"$root"/}
+	case "$f" in "$here"/*) name=$(basename "$f");; esac
+	[ -n "${ONLY:-}" ] && { echo "$name" | grep -qE "$ONLY" || continue; }
+	runners="$runners $name"
+done
+costs="$out/costs"
+# What a runner covers: where it lives, plus whatever its own header
+# adds. "**" is written for readability and is a plain glob here --
+# a shell case pattern's * crosses directories already.
+covers_of() {   # $1 path, $2 name
+	sed -n 's/^# covers: *//p' "$1" | tr ' ' '\n'
+	case "$2" in
+	extensions/*/*.sh|games/*/*.sh) echo "${2%/*}/**" ;;
+	*) echo "builtin/luanti/**" ;;
+	esac
+}
+# What it costs: the last measured run, else its own seed, else a minute
+cost_of() {   # $1 path, $2 name
+	c=$(grep -a "^$2 " "$costs" 2>/dev/null | tail -1 | awk '{print $2}')
+	[ -n "$c" ] || c=$(sed -n 's/^# cost: *\([0-9]*\).*/\1/p' "$1" | head -1)
+	echo "${c:-60}"
+}
+if [ -n "$changed" ]; then
+	# **The cheapest runner for each changed file**, and their union is
+	# the set: a greedy answer, and the one a person would give. A file
+	# nothing covers is reported rather than quietly dropped.
+	files=$(git -C "$root" diff --name-only ${changed_range:-HEAD} 2>/dev/null)
+	[ -n "$files" ] || files=$(git -C "$root" diff --name-only HEAD~1 HEAD)
+	picked=""
+	uncovered=""
+	# **No globbing while the patterns are handled**: "**" in a covers
+	# line would otherwise be expanded against the directory it names
+	# the moment it leaves a command substitution
+	set -f
+	for f in $files; do
+		# **A document is not code and wants no runner** ([SMOKE_PICK]):
+		# doc/ and the plan are read by people, and listing them as
+		# uncovered every time is noise that teaches everyone to skim
+		# the line that also names a source file nothing covers
+		case "$f" in
+		doc/*|*.md|LICENSE*|MIT.txt|CONTRIBUTING*) continue;;
+		esac
+		best=""; best_cost=999999
+		for name in $runners; do
+			path="$here/$name"; [ -f "$path" ] || path="$root/$name"
+			for pat in $(covers_of "$path" "$name"); do
+				pat=$(echo "$pat" | sed 's/\*\*/*/g')
+				# shellcheck disable=SC2254
+				case "$f" in
+				$pat)
+					c=$(cost_of "$path" "$name")
+					if [ "$c" -lt "$best_cost" ]; then best=$name; best_cost=$c; fi
+					;;
+				esac
+			done
+		done
+		if [ -n "$best" ]; then
+			echo "$picked" | grep -qx "$best" || picked="$picked
+$best"
+		else
+			uncovered="$uncovered $f"
+		fi
+	done
+	set +f
+	# **The always-run ones do not compete, they are appended**: a check
+	# cheap enough to run whatever changed -- the tree's Lua parsing, a
+	# second -- would otherwise be the cheapest runner covering half the
+	# tree and push every deep one out of the pick
+	for name in $runners; do
+		path="$here/$name"; [ -f "$path" ] || path="$root/$name"
+		grep -q "^# always: *yes" "$path" || continue
+		picked="$picked
+$name"
+	done
+	picked=$(echo "$picked" | grep -v '^$' | sort -u)
+	if [ -z "$picked" ]; then
+		# **Nothing matched**, so the named chain runs instead of the
+		# whole tier: a cold client, the room drawn behind a menu, a
+		# game started and left. It is a name and not a computed answer.
+		picked="${SMOKE_FALLBACK:-extensions/launch_menu_attract/check.sh}"
+		echo "nothing the runners cover changed; the named chain instead"
+	fi
+	[ -n "$uncovered" ] && echo "covered by nothing:$uncovered"
+	runners=$picked
+	total=0
+	for name in $runners; do
+		path="$here/$name"; [ -f "$path" ] || path="$root/$name"
+		total=$((total + $(cost_of "$path" "$name")))
+	done
+	echo "$(echo "$runners" | wc -w) runners, about ${total}s"
+	[ "$total" -gt "${BUDGET:-60}" ] &&
+		echo "(over the ${BUDGET:-60}s budget; the diff touches that much)"
+fi
+if [ -n "$list_only" ]; then
+	for r in $runners; do echo "$r"; done
+	exit 0
+fi
+pass=0; fail=0; skip=0; flaky=0
+failed_names=""
+started=$(date +%s)
+for name in $runners; do
+	printf '%-34s ' "$name"
+	log="$out/$(echo "${name%.sh}" | tr / _).log"
+	path="$here/$name"
+	[ -f "$path" ] || path="$root/$name"
+	t0=$(date +%s)
+	"$path" > "$log" 2>&1
+	rc=$?
+	t1=$(date +%s)
+	# **A runner's leavings are not the next runner's condition.** Every
+	# runner refuses to start while a client or a server is up, and one
+	# that exits while its own client is still shutting down makes the
+	# next one skip -- seven of the eight skips in the first container
+	# run of this tier were that, which reads as "not run here" and is
+	# really "run too soon after the last". So: wait for the tree to be
+	# quiet, and take down what this tier itself started, which is
+	# anything younger than the tier. A client somebody else is using is
+	# older than that and is left alone ([CI_RUNS] (6): a flake is
+	# quarantined, not papered over -- this is neither, it is the
+	# harness cleaning up after itself).
+	for w in $(seq 1 30); do
+		check_pgrep buildat >/dev/null || check_pgrep buildat_server >/dev/null ||
+			break
+		sleep 1
+	done
+	for p in $(check_pgrep buildat) $(check_pgrep buildat_server); do
+		age=$(ps -o etimes= -p "$p" 2>/dev/null | tr -d ' ')
+		[ -n "$age" ] || continue
+		if [ "$age" -lt "$((t1 - started + 60))" ]; then
+			echo "  (the tier's own $p was still up after $name; taken down)" \
+				>> "$log"
+			kill -9 "$p" 2>/dev/null
+		fi
+	done
+	verdict=$(grep -aE "^(PASS|FAIL|SKIP):" "$log" | tail -1)
+	known_flaky=$(grep -c "^# flaky:" "$path")
+	case "$rc" in
+	0) pass=$((pass + 1)); state=pass ;;
+	# 77 is the contract's "could not run"; 2 is what the runners have
+	# always used for "a server or client is already up", which is the
+	# same thing said the old way
+	77|2) skip=$((skip + 1)); state=skip ;;
+	*) if [ "$known_flaky" -gt 0 ]; then
+			flaky=$((flaky + 1)); state=flaky
+		else
+			fail=$((fail + 1)); state=FAIL
+			failed_names="$failed_names $name"
+		fi ;;
+	esac
+	printf '%-6s %4ss  %s\n' "$state" "$((t1 - t0))" "${verdict:-(no verdict line)}"
+	# What it cost here, for the next --changed pick
+	echo "$name $((t1 - t0))" >> "$costs"
+done
+echo "---"
+echo "$pass passed, $fail failed, $skip skipped, $flaky known-flaky, in $(( $(date +%s) - started ))s"
+[ -n "$failed_names" ] && echo "failed:$failed_names"
+echo "logs in $out"
+what=$([ -n "$changed" ] && echo "set the diff picked" || echo "$tier tier")
+[ "$fail" -eq 0 ] && echo "PASS: the $what is green" ||
+	echo "FAIL: $fail runners of the $what failed"
+exit $([ "$fail" -eq 0 ] && echo 0 || echo 1)
