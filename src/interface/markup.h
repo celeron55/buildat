@@ -11,7 +11,8 @@ namespace interface
 		// tables, strikethrough, task lists and URL autolinks, and
 		// ||spoilers||. Raw HTML is text, everything is escaped, and a
 		// link or an image that is not http, https, mailto or relative is
-		// its text alone. An image is a link to it, never loaded.
+		// its text alone. An image is a link to it, never loaded. "#1234"
+		// is a link to /t/1234 of class "ref".
 		ss_ to_html(const ss_ &md);
 	}
 }

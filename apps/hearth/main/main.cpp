@@ -1230,7 +1230,7 @@ struct Module: public interface::Module
 		for(char &c : t)
 			c = tolower((unsigned char)c);
 		return t.find("://") != ss_::npos || t.find("www.") != ss_::npos ||
-				interface::markup::to_html(text).find("<a ") != ss_::npos;
+				interface::markup::to_html(text).find("<a href") != ss_::npos;
 	}
 
 	// Whether `name` may post this now, by its level; why not
