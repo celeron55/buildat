@@ -144,14 +144,22 @@ return function(ctx)
 		local px, py, pz = ctx.player_pos()
 		local yaw0, pitch0, fov0 = ctx.view()
 		local stacks = ctx.hotbar()
+		-- A stack as its name and count: the wear and the metadata of an
+		-- itemstring are not a reader's, and a tool's carries its
+		-- translated description, escapes and all -- VoxeLibre's wooden
+		-- pickaxe made every self line after its craft unreadable
+		-- ([DRIVE_CYCLE], seed 4, 2026-10-04)
+		local function short(stack)
+			return ((tostring(stack or ""):match("^%S+ ?%d*") or ""):gsub(" $", ""))
+		end
 		local hot = {}
 		for i = 1, math.min(#stacks, luanti.hotbar.count or 9) do
-			hot[#hot + 1] = i .. ":" .. tostring(stacks[i] or "")
+			hot[#hot + 1] = i .. ":" .. short(stacks[i])
 		end
 		lines[#lines + 1] = string.format(
 				"scan %s: self at %.1f,%.1f,%.1f yaw %.1f pitch %.1f fov %.1f hp ? wield %s hotbar %s",
 				label, px, py, pz, yaw0, pitch0, fov0,
-				buildat.dump(ctx.wield() or ""), table.concat(hot, " | "))
+				buildat.dump(short(ctx.wield())), table.concat(hot, " | "))
 		-- The key bindings as they stand, action=key, the rebound ones
 		-- marked ([KEY_BINDINGS])
 		local keys = {}
