@@ -30,6 +30,8 @@
 
 #include "../Container/Swap.h"
 
+#include <cstddef>
+
 namespace Urho3D
 {
 
@@ -308,7 +310,7 @@ public:
     }
 
 protected:
-    static unsigned char* AllocateBuffer(unsigned size);
+    static unsigned char* AllocateBuffer(size_t size);
 
     /// Size of vector.
     unsigned size_;

@@ -1,0 +1,6 @@
+[
+	["nav", "${URL}"],
+	["waitlog", "run_script_file\\(accounts/accounts.lua\\)", 120],
+	["wait", 5000],
+	["shot", "${OUT}/page.png"]
+]

@@ -97,7 +97,8 @@ bool IndexBuffer::GetUsedVertexRange(unsigned start, unsigned count, unsigned& m
         return false;
     }
 
-    if (start + count > indexCount_)
+    // Buildat: as two comparisons, so that start + count cannot wrap past the check
+    if (start > indexCount_ || count > indexCount_ - start)
     {
         URHO3D_LOGERROR("Illegal index range for querying used vertices");
         return false;
