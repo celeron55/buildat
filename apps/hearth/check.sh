@@ -15,11 +15,11 @@
 #      the markup escaped, the edit shown), a message's own page, search
 #      (with a hostile query), a 404 for what is not there -- and the web
 #      client's page still the web client's;
-#   6. a new account's limits (no links, two threads a day) and a report's
-#      handling: carol reports bob's thread, the admin hides it with a
-#      statement (gone from the portal and search, the notice on its page,
-#      bob notified with the statement), bob appeals, the admin restores;
-#      then the search limit per address.
+#   6. a new account's limits (no links, two threads a day, edits count
+#      as messages) and a report's handling: carol reports bob's thread,
+#      the admin hides it with a statement (gone from the portal and search,
+#      the notice on its page, bob notified with the statement), bob
+#      appeals, the admin restores; then the search limit per address.
 #
 #   apps/hearth/check.sh
 set -u
@@ -144,13 +144,17 @@ client bob bobpass1234 "$t/bob6.log" '{"cmd":"new_thread","topic":1,"title":"Lam
 {"cmd":"new_thread","topic":1,"title":"Cheap lamps","body":"Cheap lamps for everyone"}
 {"cmd":"new_thread","topic":1,"title":"More","body":"one more"}
 {"cmd":"new_thread","topic":1,"title":"Again","body":"and again"}
-{"cmd":"report","message":3,"reason":"mine"}'
+{"cmd":"report","message":3,"reason":"mine"}
+{"cmd":"reply","thread":1,"body":"[lamps](//lamps.example)"}'"$(
+	for i in $(seq 10); do printf '\n{"cmd":"edit","message":3,"body":"b%s"}' $i; done)"
 grep -aq 'hr: {.*"level":0' "$t/bob6.log" || fail "bob is not a new account"
 answer "$t/bob6.log" 1001 | grep -q "no links yet (a new account" || fail "a new account's link"
 answer "$t/bob6.log" 1002 | grep -q '"result":2' || fail "bob's thread: $(answer "$t/bob6.log" 1002)"
 answer "$t/bob6.log" 1003 | grep -q '"ok":true' || fail "bob's second thread"
 answer "$t/bob6.log" 1004 | grep -q "2 new threads a day" || fail "a third thread in a day"
 answer "$t/bob6.log" 1005 | grep -q "one's own" || fail "bob reported his own"
+answer "$t/bob6.log" 1006 | grep -q "no links yet" || fail "a link the markup makes"
+answer "$t/bob6.log" 1016 | grep -q "messages an hour" || fail "edits without a limit"
 client carol carolpass1234 "$t/carol.log" '{"cmd":"report","message":6,"reason":"spam"}
 {"cmd":"report","message":6,"reason":"spam!"}
 {"cmd":"report","message":2,"reason":"rude"}'

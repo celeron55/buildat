@@ -916,12 +916,15 @@ struct Module: public interface::Module
 				hd.i(0) == 0 ? 1 : 0;
 	}
 
+	// An address in the text, or a link the markup makes ("//host",
+	// "mailto:", a reference definition) without one
 	static bool has_link(const ss_ &text)
 	{
 		ss_ t = text;
 		for(char &c : t)
 			c = tolower((unsigned char)c);
-		return t.find("://") != ss_::npos || t.find("www.") != ss_::npos;
+		return t.find("://") != ss_::npos || t.find("www.") != ss_::npos ||
+				interface::markup::to_html(text).find("<a ") != ss_::npos;
 	}
 
 	// Whether `name` may post this now, by its level; why not
@@ -935,9 +938,11 @@ struct Module: public interface::Module
 				"stand)" : "";
 		if(!l.links && has_link(text))
 			throw Exception(ss_("no links yet")+how);
-		Q m(m_db, "SELECT count(*) FROM messages WHERE author = ? AND "
-				"created > ?");
-		m.b(name).b(now_s() - 3600).step();
+		// An edit counts as a message: each keeps the old body
+		Q m(m_db, "SELECT (SELECT count(*) FROM messages WHERE author = ? "
+				"AND created > ?) + (SELECT count(*) FROM edits WHERE "
+				"editor = ? AND time > ?)");
+		m.b(name).b(now_s() - 3600).b(name).b(now_s() - 3600).step();
 		if(m.i(0) >= l.messages_an_hour)
 			throw Exception(itos(l.messages_an_hour)+" messages an hour at "
 					"most"+how);
@@ -1097,8 +1102,7 @@ struct Module: public interface::Module
 			if(m.s(0) != name && !admin)
 				throw Exception("only its author edits a message");
 			need(text_ok(body, BODY_MAX, true, "the message"));
-			if(!admin && level(name, admin) == 0 && has_link(body))
-				throw Exception("no links yet (a new account's limit)");
+			check_limits(name, admin, false, body);
 			const int64_t t = now_s();
 			Q h(m_db, "INSERT INTO edits(message, body, time, editor) "
 					"VALUES(?, ?, ?, ?)");
