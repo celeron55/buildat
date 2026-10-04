@@ -8,6 +8,7 @@
 # to the default Starport (BUILDAT_STARPORT_DEFAULT: a local one here) at
 # that address, with no name, kind or audience set and the listing never
 # claimed; it is verified over TLS, is not in the list, and an ID joins.
+# An announce naming its address from elsewhere gets no ID token.
 #   util/starport_default_url_check.sh
 set -u
 . "$(dirname "$0")/check_paths.sh"
@@ -37,6 +38,8 @@ cp "$tmp/cert.pem" "$tmp/sp/shared/check_ca.pem"
 BUILDAT_CA_FILE=$tmp/sp/shared/check_ca.pem Build/bin/buildat_server \
 	-m apps/starport -D "$tmp/sp" -P $SP -l 3 > "$tmp/sp.log" 2>&1 &
 pids+=($!)
+# Up before Hearth's first announce, which is not tried again for a while
+for _ in $(seq 180); do grep -q "setup code" "$tmp/sp.log" && break; sleep 1; done
 BUILDAT_STARPORT_DEFAULT=http://127.0.0.1:$SP Build/bin/buildat_server \
 	-m apps/hearth -D "$tmp/an" -P $AN -l 3 > "$tmp/hearth.log" 2>&1 &
 pids+=($!)
@@ -90,4 +93,28 @@ BUILDAT_HEARTH_STARPORT=$token timeout 90 Build/bin/buildat -D "$tmp/cl" \
 	-w 800x600 -l 3 -s 127.0.0.1:$AN -c @"$tmp/cmds.txt" > "$tmp/id.log" 2>&1
 grep -q "Joined as fromid" "$tmp/id.log" ||
 	fail "the ID did not join ($tmp/id.log, $tmp/hearth.log)"
-echo "PASS: IDs turned on announce to the default Starport, unlisted and unclaimed, and an ID joins"
+echo "ok: an ID joined"
+
+# [SECURITY_RUN_2]: an announce naming Hearth's address from elsewhere never
+# verifies, and no token is made for it -- a web one to Hearth's origin
+# included
+python3 - "$SP" "$ANTLS" <<'PY' || fail "a look-alike listing's token ($tmp/sp.log)"
+import json, sys, time, urllib.request, urllib.error
+B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+def call(w, **k):
+    try:
+        return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
+    except urllib.error.HTTPError as e:
+        return json.loads(e.read())
+a = call("announce", address="127.0.0.1", port=int(sys.argv[2]), tls=True,
+        unlisted=True, login="both", access="starport")
+assert a.get("ok"), a
+time.sleep(5)
+s = call("id/login", name="defid", password="secret1")["result"]["session"]
+for k in ({}, {"web": True, "origin": "https://127.0.0.1:" + sys.argv[2]}):
+    r = call("id/token", session=s, listing=a["id"], name="lookalike", **k)
+    assert not r.get("ok") and "not verified" in r.get("error", ""), r
+r = call("id/authorize_info", session=s, listing=a["id"], web=True)
+assert not r.get("ok"), r
+PY
+echo "PASS: IDs turned on announce to the default Starport, unlisted and unclaimed, an ID joins, and a look-alike listing gets no token"

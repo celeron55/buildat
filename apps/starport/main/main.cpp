@@ -2369,6 +2369,13 @@ struct Module: public interface::Module
 		}
 		if(!l.is_object())
 			throw Exception("no such listing");
+		// By its id too, only what the address lookup finds: a listing
+		// that never proved its address could name another server's
+		// ([SECURITY_RUN_2]; that server refuses the token, but the
+		// sign-in window would show its host)
+		if(jstr(l, "verify") != "ok" || jstr(l, "status") == "banned")
+			throw Exception("this listing is not verified (yet): its server "
+					"has not answered the Starport at its address");
 		return l;
 	}
 
