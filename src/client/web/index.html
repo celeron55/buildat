@@ -168,6 +168,11 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			// Whether the pointer is a finger ([FP_TOUCH]): the client's UI
 			// scale, and the game's touch controls
 			Module.ENV.BUILDAT_TOUCH = coarse ? '1' : '0';
+			// [PLAY_PAGE] (c): the page with no game of its own is
+			// apps/play's, whose bridge carries luanti_client's datagrams
+			if(!server)
+				Module.ENV.BUILDAT_LUANTI_BRIDGE = (https ? 'wss://' :
+						'ws://') + location.host + '/luanti';
 		}],
 		buildatSyncFullscreen: sync_fullscreen,
 		buildatInputAt: Date.now(),

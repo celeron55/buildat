@@ -145,6 +145,14 @@ namespace network
 		// and the web client's own files are never an app's. An app that
 		// serves pages to read ([HEARTH_MVP]) claims its own at its start.
 		virtual void claim_http_path(const ss_ &prefix) = 0;
+		// [PLAY_PAGE] (c): a WebSocket to a path starting with `prefix` is
+		// the app's, not a game client: "network:ws_open" (an HttpRequest:
+		// its path, query, address, Origin and Host), then each message as
+		// "network:ws_message" (a Packet, name ""), and "network:ws_closed"
+		// (an OldClient). ws_send() sends one binary message; disconnect()
+		// closes it. Origin is checked as for a game's WebSocket.
+		virtual void claim_ws_path(const ss_ &prefix) = 0;
+		virtual void ws_send(PeerInfo::Id peer, const ss_ &data) = 0;
 		// [FAVICON] the PNG served for /favicon.ico, ahead of the default
 		// Buildat logo; "" restores the default. An app sets its own icon
 		// (vanilla, the game's) at any time.

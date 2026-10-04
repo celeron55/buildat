@@ -32,6 +32,63 @@ EM_JS(void, web_fetch, (int id, const char *url_p, int post,
 		jobs[id] = {ok: false, data: text(String(e && e.message || e))};
 	});
 });
+// [PLAY_PAGE] (c): a datagram socket on the web, a WebSocket to apps/play's
+// bridge whose each message is one datagram, in Module.buildatDgram
+EM_JS(int, web_dgram_open, (const char *url_p), {
+	var all = Module['buildatDgram'] = Module['buildatDgram'] || {n: 0};
+	var id = ++all.n;
+	var d = all[id] = {q: [], out: [], state: 'connecting'};
+	try {
+		d.ws = new WebSocket(UTF8ToString(url_p));
+	} catch(e){
+		d.state = 'closed: ' + e.message;
+		return id;
+	}
+	d.ws.binaryType = 'arraybuffer';
+	d.ws.onopen = function(){
+		d.state = 'open';
+		d.out.forEach(function(m){ d.ws.send(m); });
+		d.out = [];
+	};
+	// simplified: what the game does not read in 4096 datagrams is lost,
+	// as a full UDP buffer loses it
+	d.ws.onmessage = function(e){
+		if(d.q.length < 4096)
+			d.q.push(new Uint8Array(e.data));
+	};
+	d.ws.onclose = function(e){
+		d.state = 'closed: the bridge closed the connection (' + e.code + ')';
+	};
+	return id;
+});
+EM_JS(void, web_dgram_send, (int id, const char *p, int n), {
+	var d = (Module['buildatDgram'] || {})[id];
+	if(!d)
+		return;
+	var m = HEAPU8.slice(p, p + n);
+	if(d.state === 'open')
+		d.ws.send(m);
+	else if(d.state === 'connecting' && d.out.length < 256)
+		d.out.push(m);
+});
+EM_JS(int, web_dgram_peek, (int id), {
+	var d = (Module['buildatDgram'] || {})[id];
+	return d && d.q.length ? d.q[0].length : -1;
+});
+EM_JS(void, web_dgram_take, (int id, char *p), {
+	HEAPU8.set(Module['buildatDgram'][id].q.shift(), p);
+});
+EM_JS(char*, web_dgram_state, (int id), {
+	var d = (Module['buildatDgram'] || {})[id];
+	return stringToNewUTF8(d ? d.state : 'closed: closed');
+});
+EM_JS(void, web_dgram_close, (int id), {
+	var all = Module['buildatDgram'] || {};
+	if(all[id]){
+		try { all[id].ws.close(); } catch(e){}
+		delete all[id];
+	}
+});
 #endif
 #include "core/log.h"
 #include "core/json.h"
@@ -2228,6 +2285,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(set_web_fullscreen)
 		DEF_BUILDAT_FUNC(web_authorize)
 		DEF_BUILDAT_FUNC(web_authorized)
+		DEF_BUILDAT_FUNC(web_dgram)
 		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(set_ui_scale)
 		DEF_BUILDAT_FUNC(user_activated)
@@ -4972,6 +5030,43 @@ struct CApp: public App, public magic::Application
 #endif
 		lua_pushnil(L);
 		return 1;
+	}
+
+	// [PLAY_PAGE] (c) web_dgram(op, ...): the web's datagram socket (see
+	// web_dgram_open above); trusted Lua's (the network extension).
+	// ("open", url) -> id; ("send", id, data); ("recv", id) -> a datagram,
+	// "" when none; ("state", id) -> "connecting", "open" or "closed: why";
+	// ("close", id). Nothing natively.
+	static int l_web_dgram(lua_State *L)
+	{
+#ifdef __EMSCRIPTEN__
+		const ss_ op = luaL_checkstring(L, 1);
+		if(op == "open"){
+			lua_pushinteger(L, web_dgram_open(luaL_checkstring(L, 2)));
+			return 1;
+		}
+		const int id = (int)luaL_checkinteger(L, 2);
+		if(op == "send"){
+			size_t n = 0;
+			const char *p = luaL_checklstring(L, 3, &n);
+			web_dgram_send(id, p, (int)n);
+		} else if(op == "recv"){
+			const int n = web_dgram_peek(id);
+			ss_ d(n > 0 ? n : 0, '\0');
+			if(n >= 0)
+				web_dgram_take(id, &d[0]);
+			lua_pushlstring(L, d.data(), d.size());
+			return 1;
+		} else if(op == "state"){
+			char *s = web_dgram_state(id);
+			lua_pushstring(L, s);
+			free(s);
+			return 1;
+		} else if(op == "close"){
+			web_dgram_close(id);
+		}
+#endif
+		return 0;
 	}
 
 	// set_watchdog_seconds(n): how long without a frame before the

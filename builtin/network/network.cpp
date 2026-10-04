@@ -218,13 +218,17 @@ struct Peer
 	// and the web client's WebSocket ([WEB_CLIENT]). A new connection is
 	// Sniff until its first bytes say which; only Native and WebSocket are
 	// game peers, and the game hears of a peer when it becomes one.
-	enum class Kind { Sniff, Http, Native, WebSocket };
+	// RawWebSocket: one on a path an app claimed (claim_ws_path()), its
+	// messages the app's and not a game stream
+	enum class Kind { Sniff, Http, Native, WebSocket, RawWebSocket };
 	Kind kind = Kind::Native;
 	int64_t accepted_us = 0;
 	// Sniff and Http: what has come of the request so far
 	ss_ http_request;
 	// WebSocket: what has come and is not a whole frame yet
 	ss_ ws_in;
+	// RawWebSocket: a message's frames so far, until its last
+	ss_ ws_message;
 	// Dropped once what is queued has gone: an HTTP response, the answer to
 	// a WebSocket close, or a game's disconnect()
 	bool closing = false;
@@ -1042,9 +1046,16 @@ struct Module: public interface::Module, public network::Interface
 			// Ahead of anything the game sends, which only starts on the
 			// event below
 			peer.queue_raw(std::move(r));
-			peer.kind = Peer::Kind::WebSocket;
 			peer.ws_in = rest;
 			peer.forwarded_for = forwarded_for(peer, headers["x-forwarded-for"]);
+			if(ws_claimed(target)){
+				peer.kind = Peer::Kind::RawWebSocket;
+				m_server->emit_event("network:ws_open", new HttpRequest(
+						peer.id, method, target, query, "", peer.address(),
+						headers["origin"], headers["host"]));
+				return deframe(peer);
+			}
+			peer.kind = Peer::Kind::WebSocket;
 			emit_connected(peer);
 			return deframe(peer);
 		}
@@ -1184,6 +1195,18 @@ struct Module: public interface::Module, public network::Interface
 			case 0: // continuation
 			case 1: // text
 			case 2: // binary
+				if(peer.kind == Peer::Kind::RawWebSocket){
+					peer.ws_message += payload;
+					if(peer.ws_message.size() > web::MAX_FRAME_BYTES)
+						return false;
+					if(fin){
+						m_server->emit_event("network:ws_message",
+								new CountedPacket(peer.in_flight, peer.id, "",
+								peer.ws_message));
+						peer.ws_message.clear();
+					}
+					break;
+				}
 				// simplified: the order of a message's frames is not checked;
 				// every data frame is more of the stream
 				peer.socket_buffer.insert(peer.socket_buffer.end(),
@@ -1309,6 +1332,7 @@ struct Module: public interface::Module, public network::Interface
 			}
 			break;
 		case Peer::Kind::WebSocket:
+		case Peer::Kind::RawWebSocket:
 			if(!peer.closing){
 				peer.ws_in.append(buf, r);
 				keep = deframe(peer);
@@ -1465,13 +1489,15 @@ struct Module: public interface::Module, public network::Interface
 		if(it == m_peers.end())
 			return;
 		Peer &peer = it->second;
-		if(peer.game()){
+		if(peer.game() || peer.kind == Peer::Kind::RawWebSocket){
 			PeerInfo pinfo;
 			pinfo.id = peer.id;
 			pinfo.address = peer.address();
-			pinfo.web = peer.kind == Peer::Kind::WebSocket;
-			m_server->emit_event("network:client_disconnected",
-					new OldClient(pinfo));
+			pinfo.web = true;
+			if(peer.game())
+				pinfo.web = peer.kind == Peer::Kind::WebSocket;
+			m_server->emit_event(peer.game() ? "network:client_disconnected" :
+					"network:ws_closed", new OldClient(pinfo));
 		}
 		m_peers_by_socket.erase(peer.socket->fd());
 		peer.socket->close_fd();
@@ -1676,6 +1702,31 @@ struct Module: public interface::Module, public network::Interface
 	void claim_http_path(const ss_ &prefix)
 	{
 		m_claimed_paths.insert(prefix);
+	}
+
+	std::set<ss_> m_ws_paths;
+
+	void claim_ws_path(const ss_ &prefix)
+	{
+		m_ws_paths.insert(prefix);
+	}
+
+	bool ws_claimed(const ss_ &target)
+	{
+		for(const ss_ &p : m_ws_paths)
+			if(target.compare(0, p.size(), p) == 0)
+				return true;
+		return false;
+	}
+
+	void ws_send(PeerInfo::Id id, const ss_ &data)
+	{
+		auto it = m_peers.find(id);
+		if(it == m_peers.end() || it->second.closing ||
+				it->second.kind != Peer::Kind::RawWebSocket)
+			return;
+		it->second.queue_raw(web::frame(2, data));
+		flush_peer(it->second);
 	}
 
 	void set_favicon(const ss_ &png)

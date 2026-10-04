@@ -622,9 +622,42 @@ local function wrap_udp(socket, uri)
 	return w
 end
 
+-- [PLAY_PAGE] (c): on apps/play's page a datagram socket is a WebSocket to
+-- the page's own server, which sends each message on as a datagram to
+-- host:port -- if that is on Luanti's list. The methods are the native
+-- socket's (src/lua_bindings/network.cpp) that the wrappers above use.
+local function web_dgram(bridge, host, port)
+	local id = __buildat_web_dgram("open", bridge.."?to="..host..":"..port)
+	local function state()
+		return __buildat_web_dgram("state", id)
+	end
+	local s = {}
+	function s:good() return state():sub(1, 6) ~= "closed" end
+	function s:error()
+		local st = state()
+		return st:sub(1, 6) == "closed" and st:sub(9) or ""
+	end
+	function s:address() return host..":"..port end
+	function s:peer_ip() return host end
+	function s:peer_port() return tonumber(port) end
+	function s:local_ip() return "" end
+	function s:local_port() return 0 end
+	function s:send(data)
+		if not s:good() then
+			return -1
+		end
+		__buildat_web_dgram("send", id, data)
+		return #data
+	end
+	function s:receive() return __buildat_web_dgram("recv", id) end
+	function s:close() __buildat_web_dgram("close", id) end
+	return s
+end
+
 local function open_socket(is_udp, host, port, cb)
-	local socket = is_udp and
-			__buildat_udp_connect(host, tostring(port)) or
+	local bridge = is_udp and __buildat_get_env("BUILDAT_LUANTI_BRIDGE")
+	local socket = bridge and web_dgram(bridge, host, tostring(port)) or
+			is_udp and __buildat_udp_connect(host, tostring(port)) or
 			__buildat_tcp_connect(host, tostring(port))
 	if not socket:good() then
 		cb(nil, socket:error())

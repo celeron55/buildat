@@ -33,7 +33,8 @@ fail() { echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 cd "$here"
 
 util/web_play_dir.sh "$tmp/play" || fail "the play directory"
-Build/bin/buildat_server -m apps/play -D "$tmp/playsrv" -P $PLAYSRV \
+BUILDAT_LUANTI_LIST=http://127.0.0.1:9 \
+	Build/bin/buildat_server -m apps/play -D "$tmp/playsrv" -P $PLAYSRV \
 	-W "$tmp/play" -l 3 > "$tmp/play.log" 2>&1 &
 pids+=($!)
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 \
