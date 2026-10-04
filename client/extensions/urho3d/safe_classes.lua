@@ -6,6 +6,20 @@ local log = buildat.Logger("safe_classes")
 local magic_sandbox = require("buildat/extension/magic_sandbox")
 local M = {}
 
+-- A resource name a sandboxed script may ask the cache for. Urho3D's
+-- ResourceCache resolves an absolute path and falls back to it outside
+-- every resource dir (SearchResourceDirs, Exists), and its "../" strip is
+-- one non-recursive pass; without this an app could read or probe any
+-- file on the machine (GetResource("Image", "/home/.../x.png") +
+-- Image:GetPixel exfiltrates it; Exists("/home/.../.ssh/id_rsa") tells it
+-- the file is there). A legitimate name is relative and has no "..":
+-- textures, fonts, UI styles, "generated/..." from AddManualResource.
+local function resource_name_ok(name)
+	return type(name) == "string" and name ~= "" and
+			name:sub(1, 1) ~= "/" and name:sub(1, 1) ~= "\\" and
+			not name:find("%.%.") and not name:find(":")
+end
+
 function M.define(dst, util)
 	util.wc("StringHash", {
 		unsafe_constructor = util.wrap_function({{"string"}},
@@ -1621,16 +1635,9 @@ function M.define(dst, util)
 			),
 			GetResource = util.wrap_function({"ResourceCache", "string", "string"},
 			function(self, resource_type, unsafe_resource_name)
-				--[[
-				-- NOTE: resource_type=XMLFile can refer to other resources even
-				-- in absolute and arbitrary relative paths. Make sure file
-				-- access (fopen()) is sandboxed appropriately.
-				resource_name = util.check_safe_resource_name(unsafe_resource_name)
-				log:debug("GetResource: "..dump(unsafe_resource_name)..
-						" -> "..dump(resource_name))
-				local saved_path = util.resave_file(resource_name)
-				-- Note: saved_path is ignored
-				--]]
+				if not resource_name_ok(unsafe_resource_name) then
+					return nil
+				end
 				-- Nil, and no error in the log, for what is not there: a
 				-- game's texture asked for before its media arrived on a
 				-- cold cache is not an error, it is later, and the caller
@@ -1646,6 +1653,9 @@ function M.define(dst, util)
 			end),
 			Exists = util.wrap_function({"ResourceCache", "string"},
 			function(self, unsafe_resource_name)
+				if not resource_name_ok(unsafe_resource_name) then
+					return false
+				end
 				return cache:Exists(unsafe_resource_name)
 			end),
 		},

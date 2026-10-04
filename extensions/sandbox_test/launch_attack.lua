@@ -62,6 +62,20 @@ local ATTEMPTS = {
 		function() return buildat.launch("extension/nothing/0") end},
 	{"set_launch_ui to something that is not one",
 		function() return buildat.set_launch_ui("nosuchthing") end},
+	-- The resource cache resolves an absolute or parent-traversal path
+	-- outside its dirs, so these would read or probe any file on the
+	-- machine; the wrapper refuses a name that is not plainly relative.
+	{"cache:Exists an absolute path", function()
+		return require("buildat/extension/urho3d").cache:Exists("/etc/hostname")
+	end},
+	{"cache:GetResource an absolute path", function()
+		return require("buildat/extension/urho3d").cache
+				:GetResource("Image", "/etc/hostname")
+	end},
+	{"cache:Exists a parent-traversal path", function()
+		return require("buildat/extension/urho3d").cache
+				:Exists("....//....//....//....//etc/hostname")
+	end},
 	-- [SAFE_TABLE_PATCH]: the tables trusted code calls through. The
 	-- network permission dialog is drawn by ui_utils.vertical_menu on
 	-- uistack.main; a write that lands is a game drawing that dialog.
