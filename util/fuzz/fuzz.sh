@@ -103,12 +103,12 @@ declare -A extra=(
 )
 # A client loader a server feeds is fuzzed for memory corruption only. A
 # slow parse or a huge allocation sized by the file is a server denying
-# its client service, out of scope (doc/plan/security_review_plan.md), so
-# these targets run in fork mode and step past a timeout or an OOM instead
-# of stopping on it; a real crash still stops the run.
-declare -A opts=(
-	[model]="-fork=1 -ignore_timeouts=1 -ignore_ooms=1 -ignore_crashes=0"
-)
+# its client service, out of scope (doc/plan/security_review_plan.md). Fork
+# mode (-fork=1 -ignore_timeouts=1 -ignore_ooms=1) would step past those,
+# but its parent SEGVs in libFuzzer (secondsSinceProcessStartUp) within
+# minutes and the run ends looking clean, so these run plain and restart
+# (below)
+declare -A opts=()
 # ASan options per target, for the replays too. [sound]: a request over
 # 256 MiB gets NULL, as a release build's malloc gives one it cannot
 # meet, so the error path after it runs (it freed garbage once) and a
@@ -117,12 +117,14 @@ declare -A opts=(
 # the first job, and -malloc_limit_mb does the same
 declare -A asan=(
 	[sound]="allocator_may_return_null=1:max_allocation_size_mb=256"
+	[model]="allocator_may_return_null=1:max_allocation_size_mb=256"
 )
 # A plain-mode target that may hit an out-of-scope OOM or timeout (a
 # count from the file sizing many allocations: 18 GB in 8379 chunks once)
 # and is started again on it, for what is left of its time
 declare -A restart=(
 	[sound]=1
+	[model]=1
 )
 declare -A rss=()
 targets=${*:-${!srcs[@]}}
