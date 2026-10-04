@@ -1118,7 +1118,29 @@ local function qr_image(parent, text)
 end
 
 -- id_login(url[, then_cb]): the login dialog; then_cb() once logged in
+-- [WEB_ID_TRUST]: on the web an ID is logged in to and changed on the
+-- Starport's own page (/id), in a window of its own: a password typed into
+-- this page would be typed into code the game server sent
+local function is_web()
+	return __buildat_get_env("BUILDAT_PAGE_HTTPS") ~= nil
+end
+local function web_id_page(url)
+	local root, w = open_window("starport id web page", 520)
+	add_text(w, "Your Starport ID at " .. url .. " is on the Starport's own "..
+			"page, which opens in a window of its own.")
+	local st = add_text(w, "")
+	local rr = add_row(w)
+	add_button(rr, "Open", function()
+		st.text = __buildat_web_authorize(url .. "/id") and "Opened" or
+				"The browser blocked the window: allow pop-ups for this page"
+	end)
+	add_button(rr, "Close", close_and(root))
+end
+
 function M.id_login(url, then_cb, message)
+	if is_web() then
+		return web_id_page(url)
+	end
 	local root, w = open_window("starport id login", 520)
 	add_text(w, "Starport ID at " .. url)
 	if message then
@@ -1327,6 +1349,9 @@ end
 
 -- The ID's own page: e-mail, TOTP, password, age, log out, delete
 function M.id_page(url, message)
+	if is_web() then
+		return web_id_page(url)
+	end
 	id_refresh(url, function(me, err)
 		local root, w = open_window("starport id", 680)
 		if not me then
@@ -1352,14 +1377,20 @@ function M.id_page(url, message)
 			add_text(w, tostring(st.action) .. " for " .. tostring(st.reason) ..
 					": " .. tostring(st.text), YELLOW)
 		end
+		-- With TOTP on, the e-mail's and the password's changes take a code
+		-- from its row too ([WEB_ID_TRUST] (b))
+		local code
+		local function totp()
+			return me.totp and code:GetText() or nil
+		end
 		-- The e-mail
 		local r = add_row(w)
 		add_label(r, "Recovery e-mail", 160)
 		local email = add_edit(r, me.email_pending ~= "" and me.email_pending
 				or me.email)
 		add_button(r, "Set", function()
-			id_call(url, "email", {session = session, email = email:GetText()},
-					function(res, e2)
+			id_call(url, "email", {session = session, email = email:GetText(),
+				totp = totp()}, function(res, e2)
 				again(res == "sent" and "A code went to the address" or
 						res and "Set" or e2)
 			end)
@@ -1377,8 +1408,8 @@ function M.id_page(url, message)
 		end
 		-- TOTP
 		r = add_row(w)
-		add_label(r, me.totp and "TOTP: on" or "TOTP: off", 160)
-		local code = add_edit(r, "")
+		add_label(r, me.totp and "TOTP: on, code" or "TOTP: off", 160)
+		code = add_edit(r, "")
 		if me.totp then
 			add_button(r, "Turn off (code)", function()
 				id_call(url, "totp", {session = session, cmd = "off",
@@ -1421,7 +1452,7 @@ function M.id_page(url, message)
 		local new = add_edit(r, "", true)
 		add_button(r, "Change", function()
 			id_call(url, "password", {session = session, old = old:GetText(),
-				new = new:GetText()}, function(res, e2)
+				new = new:GetText(), totp = totp()}, function(res, e2)
 				again(res and "Password changed" or e2)
 			end)
 		end)
@@ -1449,6 +1480,43 @@ function M.id_page(url, message)
 					end)
 				end)
 				add_button(rr, "Close", close_and(root2))
+			end)
+		end)
+		-- (b): where the ID is logged in, and its last logins
+		add_button(w, "Sessions and recent logins...", function()
+			id_call(url, "sessions", {session = session}, function(res, e2)
+				if not res then
+					return again(e2)
+				end
+				uistack.main:pop(root)
+				local root2, w2 = open_window("starport id sessions", 680)
+				local function line(x)
+					return os.date("!%Y-%m-%d %H:%M UTC", tonumber(x.created)
+							or 0) .. ", " .. tostring(x.how) ..
+							(x.address ~= "" and ", from " ..
+							tostring(x.address) or "")
+				end
+				add_text(w2, "Logged in now:")
+				for _, x in ipairs(res.sessions or {}) do
+					add_text(w2, line(x) .. (x.this and " (this one)" or ""),
+							x.this and GREY or nil)
+				end
+				add_text(w2, "The last logins:")
+				for i = #(res.recent or {}), 1, -1 do
+					add_text(w2, line(res.recent[i]))
+				end
+				local rr = add_row(w2)
+				add_button(rr, "Log out everywhere else", function()
+					id_call(url, "logout_others", {session = session},
+							function(n, e3)
+						uistack.main:pop(root2)
+						M.id_page(url, n and ("Logged out of " .. tostring(n) ..
+								" other sessions") or e3)
+					end)
+				end)
+				add_button(rr, "Close", close_and(root2, function()
+					M.id_page(url)
+				end))
 			end)
 		end)
 		r = add_row(w)

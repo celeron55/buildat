@@ -14,8 +14,8 @@
 //   POST /api/report_status  a reporter's receipts' outcomes
 //   GET /api/transparency    the numbers ([STARPORT] 6)
 //   POST /api/id/<call>      a Starport ID's calls ([STARPORT] 10)
-//   GET /authorize           the page a web client signs in by
-//                            ([WEB_ID_TRUST]); the only HTML
+//   GET /authorize, GET /id  the pages a web client signs in by and an
+//                            ID's settings are on ([WEB_ID_TRUST])
 // The API answers any origin (CORS *): it takes no cookies.
 // In the app, "sp:req" carries a JSON {id, cmd, ...} from a joined client
 // and "sp:res" the answer {id, ok, result | error}.
@@ -259,28 +259,35 @@ static ss_ check_categories(const json::Value &b)
 }
 
 // ---------------------------------------------------------------------------
-// [WEB_ID_TRUST] /authorize?listing=<id>[&address=<host:port>][&origin=<o>]:
-// a web client opens this in a window to sign in to a server with a
-// Starport ID. The ID logs in here, on Starport's own page (its session
-// kept in this page's storage), says Allow, and the token goes to the
-// window that opened this by postMessage -- only to the listed server's own
-// web client, or a page of the setting web_clients ("origin"), which the
-// API checks. Made in the client: an ID is registered there.
-// simplified: no registration or password reset here; the client has them
+// [WEB_ID_TRUST] **Starport's own page**, the only place a web page logs a
+// Starport ID in (the API refuses an ID call from another origin):
+//   /authorize?listing=<id>[&address=<host:port>][&origin=<o>]  a web client
+//     opens this in a window to sign in to a server: the ID logs in, says
+//     Allow, and the token goes to the window that opened this by
+//     postMessage -- only to the listed server's own web client, or a page
+//     of the setting web_clients ("origin"), which the API checks.
+//   /id  the ID's settings, (b): its sessions and recent logins with "log
+//     out everywhere else", the e-mail, the password, TOTP and the age.
+// One page for both; the session is kept in this origin's storage.
+// simplified: no password reset here (the client has it); TOTP's key is
+// shown as text, no QR code; the age is changed without the client's PIN,
+// which a browser does not have.
 
-static const char *authorize_page = R"PAGE(<!doctype html>
+static const char *id_page_html = R"PAGE(<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in with a Starport ID</title>
+<title>Starport ID</title>
 <style>
 body{font-family:sans-serif;background:#1d2128;color:#e6e6e6;margin:0;
-padding:16px;max-width:28em;margin:auto}
-input,button{font-size:1em;padding:.4em;margin:.2em 0;box-sizing:border-box}
+padding:16px;max-width:34em;margin:auto}
+input,button,select{font-size:1em;padding:.4em;margin:.2em 0;box-sizing:border-box}
 input{width:100%}button{min-width:7em;margin-right:.5em}
-#err{color:#ff8a80}.hide{display:none}b{color:#fff}
+#err{color:#ff8a80}#ok{color:#a5d6a7}.hide{display:none}b{color:#fff}
+fieldset{border:1px solid #444;margin:1em 0}li{margin:.2em 0}
 </style></head><body>
-<h2>Sign in with a Starport ID</h2>
-<p id="what">...</p>
+<h2 id="title">Starport ID</h2>
+<p id="what"></p>
+<p id="err" role="alert"></p><p id="ok" role="status"></p>
 <form id="login" class="hide">
 <label>ID <input id="name" autocomplete="username" required></label>
 <label>Password <input id="password" type="password"
@@ -288,23 +295,63 @@ input{width:100%}button{min-width:7em;margin-right:.5em}
 <label id="totpl" class="hide">TOTP code <input id="totp"
  autocomplete="one-time-code" inputmode="numeric"></label>
 <button>Log in</button>
-<p>No ID? Make one in the Buildat client: Starport settings..., Starport ID...</p>
+<button type="button" id="toreg">Make an ID...</button>
+</form>
+<form id="register" class="hide">
+<label>ID <input id="rname" autocomplete="username" required></label>
+<label>Password <input id="rpassword" type="password"
+ autocomplete="new-password" required></label>
+<label>The year you were born <input id="ryear" inputmode="numeric"
+ required></label>
+<label><input id="rconsent" type="checkbox" style="width:auto"> Under 13:
+ a parent consents</label>
+<button>Make the ID</button><button type="button" id="tologin">Back</button>
 </form>
 <form id="allow" class="hide">
-<p>Signed in as <b id="me"></b>.</p>
+<p>Signed in as <b class="me"></b>.</p>
 <label id="fleetl" class="hide">Your name on this server
  <input id="fleet"></label>
 <button>Allow</button><button type="button" id="cancel">Cancel</button>
-<button type="button" id="logout">Log out</button>
+<button type="button" class="logout">Log out</button>
 </form>
-<p id="err"></p>
+<div id="settings" class="hide">
+<p>Signed in as <b class="me"></b>. <button type="button"
+ class="logout">Log out</button></p>
+<fieldset><legend>Sessions</legend><ul id="sessions"></ul>
+<button type="button" id="others">Log out everywhere else</button>
+<p>The last logins:</p><ul id="recent"></ul></fieldset>
+<fieldset id="totpbox"><legend>TOTP</legend>
+<p id="totpstate"></p><div id="totpkey" class="hide"></div>
+<label id="ccodel">Code <input id="ccode" inputmode="numeric"
+ autocomplete="one-time-code"></label>
+<button type="button" id="totpgo"></button></fieldset>
+<fieldset><legend>Recovery e-mail</legend>
+<input id="email" type="email" autocomplete="email">
+<button type="button" id="setemail">Set</button>
+<div id="confirmbox" class="hide"><label>Code from the mail
+ <input id="ecode"></label>
+<button type="button" id="confirmemail">Confirm</button></div></fieldset>
+<fieldset><legend>Password</legend>
+<label>Old <input id="old" type="password" autocomplete="current-password">
+</label><label>New <input id="new" type="password"
+ autocomplete="new-password"></label>
+<button type="button" id="setpw">Change</button></fieldset>
+<fieldset><legend>Age</legend><p id="band"></p>
+<label>The year you were born <input id="year" inputmode="numeric"></label>
+<label><input id="consent" type="checkbox" style="width:auto"> Under 13: a
+ parent consents</label>
+<button type="button" id="setage">Save</button></fieldset>
+<p>With TOTP on, a change of the e-mail, the password or TOTP takes a
+code: put it in TOTP's Code first.</p>
+</div>
 <script>
 "use strict";
+const authorize = location.pathname == "/authorize";
 const q = new URLSearchParams(location.search);
 const want = {listing: q.get("listing") || "", address: q.get("address") || "",
 	origin: q.get("origin") || "", web: true};
 const $ = id => document.getElementById(id);
-let session = null, target = "";
+let session = null, me = null, secret = "";
 try { session = localStorage.getItem("buildat_sp_session"); } catch(e){}
 function keep(s){
 	session = s;
@@ -321,40 +368,76 @@ async function call(what, body){
 	return v.result;
 }
 function show(id){
-	for(const f of ["login", "allow"]) $(f).classList.toggle("hide", f != id);
+	for(const f of ["login", "register", "allow", "settings"])
+		$(f).classList.toggle("hide", f != id);
 	$("err").textContent = "";
 }
-function fail(e){ $("err").textContent = e.message || e; }
+function fail(e){
+	if(e.message == "session"){ keep(null); show("login"); }
+	$("err").textContent = e.message == "totp" ?
+		"Put a code from your authenticator in TOTP's Code" : e.message || e;
+	$("ok").textContent = "";
+}
+function done(t){ $("ok").textContent = t; $("err").textContent = ""; }
+function when(x){
+	return new Date(x.created * 1000).toLocaleString() + ", " + x.how +
+		(x.address ? ", from " + x.address : "");
+}
+function list(ul, xs){
+	ul.replaceChildren(...xs.map(x => {
+		const li = document.createElement("li");
+		li.textContent = when(x) + (x.this ? " (this one)" : "");
+		return li;
+	}));
+}
+async function signed_in(){
+	me = await call("me", {session});
+	for(const e of document.querySelectorAll(".me")) e.textContent = me.name;
+	if(authorize) return show("allow");
+	const s = await call("sessions", {session});
+	list($("sessions"), s.sessions);
+	list($("recent"), s.recent.slice().reverse());
+	$("email").value = me.email_pending || me.email;
+	$("confirmbox").classList.toggle("hide", !me.email_pending);
+	$("band").textContent = "Now: " + me.band;
+	$("totpstate").textContent = me.totp ? "On." : "Off.";
+	$("totpgo").textContent = me.totp ? "Turn off" : secret ? "Turn on" :
+		"Turn on...";
+	$("ccodel").classList.toggle("hide", !me.totp && !secret);
+	show("settings");
+}
 async function start(){
-	if(!window.opener){
-		$("what").textContent = "Open this from a Buildat web client.";
-		return;
-	}
-	try {
-		const i = await call("authorize_info", want);
-		target = i.origin;
-		$("what").textContent = "";
-		const b = document.createElement("b");
-		b.textContent = i.name || "a server";
-		$("what").append(b, " at " + target + " asks who you are. Allowing "
-			+ "signs you in there, by the name you have on it.");
-	} catch(e){ $("what").textContent = ""; return fail(e); }
-	if(session){
+	if(authorize){
+		$("title").textContent = "Sign in with a Starport ID";
+		if(!window.opener){
+			$("what").textContent = "Open this from a Buildat web client.";
+			return;
+		}
 		try {
-			$("me").textContent = (await call("me", {session})).name;
-			return show("allow");
-		} catch(e){ if(e.message == "session") keep(null); else return fail(e); }
+			const i = await call("authorize_info", want);
+			const b = document.createElement("b");
+			b.textContent = i.name || "a server";
+			$("what").append(b, " at " + i.origin + " asks who you are. "
+				+ "Allowing signs you in there, by the name you have on it.");
+		} catch(e){ return fail(e); }
+	}
+	if(session){
+		try { return await signed_in(); }
+		catch(e){ if(e.message != "session") return fail(e); keep(null); }
 	}
 	show("login");
 }
+const act = f => async ev => {
+	if(ev) ev.preventDefault();
+	try { await f(); } catch(e){ fail(e); }
+};
 $("login").onsubmit = async ev => {
 	ev.preventDefault();
 	try {
 		const r = await call("login", {name: $("name").value,
 			password: $("password").value, totp: $("totp").value});
 		keep(r.session);
-		$("me").textContent = r.me.name;
-		show("allow");
+		await signed_in();
 	} catch(e){
 		if(e.message == "totp"){
 			$("totpl").classList.remove("hide");
@@ -364,31 +447,84 @@ $("login").onsubmit = async ev => {
 		fail(e);
 	}
 };
-$("allow").onsubmit = async ev => {
-	ev.preventDefault();
-	try {
-		const r = await call("token", Object.assign({session,
-			name: $("fleet").value}, want));
-		if(r.need_name){
-			$("fleetl").classList.remove("hide");
-			if(!$("fleet").value) $("fleet").value = r.suggest;
-			$("fleet").focus();
-			return;
-		}
-		window.opener.postMessage({buildat_starport_token: r.token,
-			name: r.name, listing: r.listing}, r.origin);
-		window.close();
-	} catch(e){
-		if(e.message == "session"){ keep(null); show("login"); }
-		fail(e);
+$("toreg").onclick = () => show("register");
+$("tologin").onclick = () => show("login");
+$("register").onsubmit = act(async () => {
+	const r = await call("register", {name: $("rname").value,
+		password: $("rpassword").value, birth_year: +$("ryear").value,
+		consent: $("rconsent").checked});
+	keep(r.session);
+	await signed_in();
+});
+$("allow").onsubmit = act(async () => {
+	const r = await call("token", Object.assign({session,
+		name: $("fleet").value}, want));
+	if(r.need_name){
+		$("fleetl").classList.remove("hide");
+		if(!$("fleet").value) $("fleet").value = r.suggest;
+		$("fleet").focus();
+		return;
 	}
-};
+	window.opener.postMessage({buildat_starport_token: r.token,
+		name: r.name, listing: r.listing}, r.origin);
+	window.close();
+});
 $("cancel").onclick = () => window.close();
-$("logout").onclick = async () => {
-	try { await call("logout", {session}); } catch(e){}
-	keep(null);
-	show("login");
-};
+for(const b of document.querySelectorAll(".logout"))
+	b.onclick = async () => {
+		try { await call("logout", {session}); } catch(e){}
+		keep(null);
+		show("login");
+	};
+const code = () => $("ccode").value;
+$("others").onclick = act(async () => {
+	const n = await call("logout_others", {session});
+	await signed_in();
+	done("Logged out of " + n + " other sessions");
+});
+$("totpgo").onclick = act(async () => {
+	if(me.totp){
+		await call("totp", {session, cmd: "off", code: code()});
+		await signed_in();
+		return done("TOTP is off");
+	}
+	if(!secret){
+		const r = await call("totp", {session, cmd: "begin"});
+		secret = r.secret;
+		$("totpkey").textContent = "Add this key to an authenticator app, "
+			+ "then put the code it shows in Code: " + r.secret;
+		$("totpkey").classList.remove("hide");
+		return signed_in();
+	}
+	await call("totp", {session, cmd: "confirm", code: code()});
+	secret = "";
+	$("totpkey").classList.add("hide");
+	await signed_in();
+	done("TOTP is on");
+});
+$("setemail").onclick = act(async () => {
+	const r = await call("email", {session, email: $("email").value,
+		totp: code()});
+	await signed_in();
+	done(r == "sent" ? "A code went to the address" : "Set");
+});
+$("confirmemail").onclick = act(async () => {
+	await call("confirm_email", {session, code: $("ecode").value});
+	await signed_in();
+	done("Confirmed");
+});
+$("setpw").onclick = act(async () => {
+	await call("password", {session, old: $("old").value,
+		new: $("new").value, totp: code()});
+	$("old").value = $("new").value = "";
+	done("Password changed");
+});
+$("setage").onclick = act(async () => {
+	await call("age", {session, birth_year: +$("year").value,
+		consent: $("consent").checked});
+	await signed_in();
+	done("Saved");
+});
 start();
 </script></body></html>
 )PAGE";
@@ -596,6 +732,7 @@ struct Module: public interface::Module
 		}
 		network::access(m_server, [&](network::Interface *iface){
 			iface->claim_http_path("/authorize");
+			iface->claim_http_path("/id");
 		});
 		m_last_day = day_of(now_s());
 		m_vthread = std::thread([this](){ verifier(); });
@@ -691,11 +828,12 @@ struct Module: public interface::Module
 			api_id(r, body);
 		else if(r.path == "/api/transparency")
 			api_transparency(r);
-		else if(r.path == "/authorize" && r.method == "GET"){
+		else if((r.path == "/authorize" || r.path == "/id") &&
+				r.method == "GET"){
 			// Never in a frame: its Allow would be clicked through one
 			network::access(m_server, [&](network::Interface *iface){
 				iface->http_respond(r.peer, 200, "text/html; charset=utf-8",
-						authorize_page, "X-Frame-Options: DENY\r\n"
+						id_page_html, "X-Frame-Options: DENY\r\n"
 						"Content-Security-Policy: frame-ancestors 'none'\r\n");
 			});
 		}
@@ -1742,14 +1880,50 @@ struct Module: public interface::Module
 		return me;
 	}
 
-	ss_ new_session(const ss_ &name)
+	// A session, kept by its hash. [WEB_ID_TRUST] (b): when, from where
+	// and how ("login" or "register", on "page" -- Starport's own -- or
+	// a client), which the ID sees with its recent logins
+	ss_ new_session(const ss_ &name, const network::HttpRequest &r,
+			const char *how)
 	{
 		const ss_ session = random_hex(32);
 		json::Value s = json::object();
 		s.set("name", name);
 		s.set("expires", now_s() + 30 * 86400);
+		s.set("created", now_s());
+		s.set("address", r.address);
+		s.set("how", ss_(how)+(r.origin.empty() ? " in a client" :
+				" on the Starport's page"));
 		put("sessions", hex(interface::sha256::calculate(session)), s);
+		// The last 20 logins
+		json::Value id = load("ids", name);
+		if(id.is_object()){
+			json::Value recent = json::array();
+			const json::Value &old = id.get("recent");
+			const unsigned n = old.is_array() ? old.size() : 0;
+			for(unsigned i = n > 19 ? n - 19 : 0; i < n; i++)
+				recent.append(old.at(i));
+			json::Value e = json::object();
+			for(const char *k : {"created", "address", "how"})
+				e.set(k, s.get(k));
+			recent.append(e);
+			id.set("recent", recent);
+			put("ids", name, id);
+		}
 		return session;
+	}
+
+	// A session's or a login's record as the ID sees it: the address only
+	// while the retention keeps addresses ([STARPORT] 8)
+	json::Value seen(const json::Value &x)
+	{
+		json::Value e = json::object();
+		e.set("created", jint(x, "created"));
+		e.set("how", jstr(x, "how"));
+		const bool keep = now_s() - jint(x, "created") <
+				(int64_t)(setting_num("retention_days") * 86400);
+		e.set("address", keep ? jstr(x, "address") : ss_());
+		return e;
 	}
 
 	// The ID a session is of, or ""
@@ -1881,7 +2055,7 @@ struct Module: public interface::Module
 					out.set("email_error", e.what());
 				}
 			}
-			out.set("session", new_session(name));
+			out.set("session", new_session(name, r, "register"));
 			out.set("me", id_me(name));
 			return out;
 		}
@@ -1915,7 +2089,7 @@ struct Module: public interface::Module
 			id.set("logins", jint(id, "logins") + 1);
 			put("ids", name, id);
 			json::Value out = json::object();
-			out.set("session", new_session(name));
+			out.set("session", new_session(name, r, "login"));
 			out.set("me", id_me(name));
 			out.set("remind_email", jstr(load("operators", name),
 					"email").empty() && remind_login(jint(id, "logins")));
@@ -1976,6 +2150,48 @@ struct Module: public interface::Module
 			throw Exception("session");
 		if(what == "me")
 			return id_me(name);
+		// [WEB_ID_TRUST] (b): the sessions and the recent logins, and an
+		// end to every session but this one
+		const ss_ this_key = hex(interface::sha256::calculate(
+				jstr(b, "session")));
+		if(what == "sessions"){
+			json::Value out = json::object();
+			json::Value ss = json::array();
+			for(const ss_ &k : store("sessions")->list("")){
+				const json::Value x = load("sessions", k);
+				if(jstr(x, "name") != name || jint(x, "expires") < now_s())
+					continue;
+				json::Value e = seen(x);
+				e.set("this", k == this_key);
+				ss.append(e);
+			}
+			out.set("sessions", ss);
+			json::Value rs = json::array();
+			const json::Value &recent = id.get("recent");
+			for(unsigned i = 0; recent.is_array() && i < recent.size(); i++)
+				rs.append(seen(recent.at(i)));
+			out.set("recent", rs);
+			return out;
+		}
+		if(what == "logout_others"){
+			int64_t n = 0;
+			for(const ss_ &k : store("sessions")->list(""))
+				if(k != this_key && jstr(load("sessions", k), "name") == name){
+					store("sessions")->remove(k);
+					n++;
+				}
+			return json::Value(n);
+		}
+		// (b): with TOTP on, a change of the password, the e-mail or the
+		// TOTP takes a fresh code too, in "totp": a session alone is not
+		// enough. Turning it off takes one already ("code").
+		if((what == "password" || what == "email" || (what == "totp" &&
+				jstr(b, "cmd") == "begin")) && acc->totp_on(name)){
+			if(jstr(b, "totp").empty())
+				throw Exception("totp");
+			if(!acc->check_totp(name, jstr(b, "totp")))
+				throw Exception("wrong TOTP code");
+		}
 		if(what == "logout"){
 			store("sessions")->remove(hex(interface::sha256::calculate(
 					jstr(b, "session"))));

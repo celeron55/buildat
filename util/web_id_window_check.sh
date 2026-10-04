@@ -12,7 +12,8 @@
 # never framed, the API answers any origin, a token for an origin that is
 # neither the listing's nor in web_clients is refused, and so is a password
 # login from any page but the Starport's own (an Origin header not its
-# Host).
+# Host). Then the ID's own page, /id, in the same browser: logged in still,
+# its sessions, and "Log out everywhere else" leaving this one.
 # Needs web/ from util/build_web.sh.
 #   util/web_id_window_check.sh [steps.json]   (default: the check's own)
 set -u
@@ -81,6 +82,37 @@ r = from_page("http://127.0.0.1:" + sys.argv[1], "login", name="webid",
         password="secret1")
 assert r["ok"], r
 print("ok: a password login from a game server's page is refused")
+# (b): sessions, logging out the others, and TOTP over the changes
+s2 = call("login", name="webid", password="secret1")["result"]["session"]
+r = call("sessions", session=s2)["result"]
+assert len(r["sessions"]) >= 3 and len(r["recent"]) >= 3, r
+assert sum(1 for x in r["sessions"] if x["this"]) == 1, r
+assert r["recent"][-1]["address"] == "127.0.0.1", r
+assert r["recent"][-1]["how"] == "login in a client", r
+r = call("logout_others", session=s2)
+assert r["ok"] and r["result"] >= 2, r
+r = call("sessions", session=s2)["result"]["sessions"]
+assert len(r) == 1 and r[0]["this"], r
+assert call("me", session=s)["error"] == "session"
+import base64, hashlib, hmac, struct
+def code(secret, step):
+    k = base64.b32decode(secret + "=" * (-len(secret) % 8))
+    h = hmac.new(k, struct.pack(">Q", step), hashlib.sha1).digest()
+    o = h[-1] & 15
+    return "%06d" % ((struct.unpack(">I", h[o:o + 4])[0] & 0x7fffffff) % 1000000)
+t = call("register", name="totpid", password="secret1",
+        birth_year=time.gmtime().tm_year - 40)["result"]["session"]
+sec = call("totp", session=t, cmd="begin")["result"]["secret"]
+now = int(time.time()) // 30
+assert call("totp", session=t, cmd="confirm", code=code(sec, now))["ok"]
+r = call("password", session=t, old="secret1", new="secret2")
+assert r["error"] == "totp", r
+r = call("email", session=t, email="x@example.org")
+assert r["error"] == "totp", r
+r = call("password", session=t, old="secret1", new="secret2",
+        totp=code(sec, now + 1))
+assert r["ok"], r
+print("ok: sessions, logging out the others, and TOTP over a change")
 PY
 
 # The first admin, natively, so the web join is an ID's ordinary one
@@ -95,6 +127,8 @@ grep -q "Joined as admin" "$tmp/admin.log" || fail "the admin's join ($tmp/admin
 WEB_DRIVE_URL="http://127.0.0.1:$AN/" "$here/util/web_drive.sh" firefox hearth \
 	"${1:-$here/util/web_id_window.json}" "$tmp/drive" > "$tmp/drive.txt" 2>&1 ||
 	fail "the drive ($tmp/drive.txt, $tmp/drive)"
+grep -aq "Settings of webid: 1 sessions" "$tmp/drive/page.log" ||
+	fail "Starport's /id page ($tmp/drive/page.log)"
 grep -aq "Joined as webname" "$tmp/drive/page.log" ||
 	fail "the web client did not join by the ID ($tmp/drive/page.log)"
 echo "PASS: a web client signs in by the Starport's window"
