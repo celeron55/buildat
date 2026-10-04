@@ -87,19 +87,48 @@ they are its taste rather than the client's. Escape stands up.
 Environment
 -----------
 
+Read once at boot, through buildat.get_env; with no get_env (sandboxed,
+[LAUNCH_SANDBOX]) every knob is its default. A flag is on when set to
+anything non-empty.
+
+The options rounds, each a whole look picked by name; an unknown name is
+the default:
+
+    BUILDAT_LAUNCH_PRESET    the palette preset, 1 to 4 (1):
+                             cold_in_warm_out, warm_in_cold_out,
+                             all_cold, wrong
+    BUILDAT_LAUNCH_LIGHT     the light: ambient (the default), tomb,
+                             skylight, far, noshadow. LIGHT_LOOKS in
+                             world.lua says what each sets
+    BUILDAT_LAUNCH_ARCH      the wall: tomb (the default), calm, plain,
+                             bare. M.ARCHES in room.lua
+    BUILDAT_LAUNCH_SOUND     the sound: today (the default, the only one
+                             with the orbs' voices), pad, pad_dark,
+                             chimes, quiet. M.STYLES in synth.lua
+
+The switches `event room probe|ornament|still` make, at boot:
+
+    BUILDAT_LAUNCH_NO_PROBE  the reflection probe off
+    BUILDAT_LAUNCH_NO_ORNAMENT
+                             the generated ornament off
+    BUILDAT_LAUNCH_STILL     the idle drift frozen
+
+The rest:
+
     BUILDAT_LAUNCH_TONEMAP   which of Urho3D's post-process effects to
                              append, comma separated. "Tonemap" by
                              default; "" for none
     BUILDAT_LAUNCH_BIAS      the tonemap's exposure bias (1.15)
     BUILDAT_LAUNCH_WHITE     its white point -- where the curve reaches
-                             255
+                             255 (1.15)
     BUILDAT_LAUNCH_NOHDR     go back to LDR rendering. HDR is on: a
                              renderer that clips every radiance at 1.0
                              before the tonemap measures a clamp rather
                              than light
     BUILDAT_LAUNCH_SUN       add a directional light
     BUILDAT_LAUNCH_SKY       how bright the cold light from above is
-                             (2.2), and BUILDAT_LAUNCH_ORB the orbs (16)
+                             (2.2), and BUILDAT_LAUNCH_ORB the orbs (16).
+                             Preset 1's only; the others carry their own
     BUILDAT_LAUNCH_NOSHADOW  the lights without their shadow maps
     BUILDAT_LAUNCH_PROBEBOX  stand a probe box of known albedos in the
                              room: 90, 50, 18 and 4 per cent grey and
@@ -107,6 +136,7 @@ Environment
     BUILDAT_LAUNCH_PROBE8    an eight-bit reflection probe instead of
                              the float16 one, which is what the two were
                              compared with ([PBR_HDR])
+    BUILDAT_LAUNCH_PROBE32   a float32 probe instead; PROBE8 wins over it
     BUILDAT_LAUNCH_PROBEMIPS leave the probe's mip chain on. The
                              eight-bit probe then blurs its rough
                              surfaces correctly; the float16 one takes
@@ -117,23 +147,27 @@ Environment
                              bind the probe's cube map without ever
                              rendering into it, which is how the two
                              halves of that fault were told apart
-    BUILDAT_LAUNCH_MARK      A or B, the orb's mark: the icon in the
-                             diffuse, or one bit in the roughness.
-                             mark_sheet.sh draws both
+    BUILDAT_LAUNCH_MARK      A (the default) or B, the orb's mark: the
+                             icon in the diffuse, or one bit in the
+                             roughness. mark_sheet.sh draws both
     BUILDAT_LAUNCH_FLOOR_VALUE
-                             scale the floor's light squares. They are
-                             the brightest surface in the room and they
-                             clip; floor_sheet.sh draws four values
+                             scale the floor's light squares (0.60).
+                             They are the brightest surface in the room
+                             and they clip; floor_sheet.sh draws four
+                             values
     BUILDAT_LAUNCH_FLOOR_GLOSS
                              their roughness (0.04), lower being
                              glossier
-    BUILDAT_LAUNCH_STAND     where the player stands, in metres from the
-                             room's middle (8). Read together with the
-                             field of view and nothing else
+    BUILDAT_LAUNCH_STAND     the wall station's camera z, in metres in
+                             the room's coordinates. By default it is
+                             worked out from the formation and the
+                             72-degree field of view: far enough back
+                             that every sphere and its name fit, and no
+                             less than 6 m from the wall
     BUILDAT_LAUNCH_POCKETS   hold the wall to fewer pockets than it
-                             could take, which is how the spill onto the
-                             floor is looked at on a tree with nine
-                             games
+                             could take (all of them), which is how the
+                             spill onto the floor is looked at on a tree
+                             with nine games
     BUILDAT_LAUNCH_SAVES     how many saves stand on the floor (12). The
                              rest are still the prompt's to find, and
                              this is how that path is driven
@@ -145,10 +179,12 @@ Environment
                              The pockets fill the faced wall first and
                              reach round as the tree grows, and this is
                              the sweep that shows them
-    BUILDAT_LAUNCH_PITCH     the spacing between pockets along a wall,
-                             in voxels (6). A wide pitch gives each wall
-                             fewer, which is how the other three are
-                             reached with the games this tree has
+    BUILDAT_LAUNCH_PITCH     the formation's column pitch, a sphere and
+                             its name, in voxels (13). A wide pitch gives
+                             each wall fewer, which is how the other
+                             three are reached with the games this tree
+                             has
+    BUILDAT_LAUNCH_COLS      the formation's spheres to a row (5)
     BUILDAT_LAUNCH_GLOW_CUT  what survives under the mark on a glowing
                              orb, as the fraction of its emissive (0.04,
                              picked off the [GLOW_MARK] sheet). The
@@ -169,12 +205,25 @@ Environment
                              lives"
     BUILDAT_LAUNCH_FACE_YAW  the quarter turn between "-Z at the viewer"
                              and "the middle of the UV map at the
-                             viewer", for measuring it again
+                             viewer", in degrees (270), for measuring it
+                             again
     BUILDAT_LAUNCH_BARE      leave the floor empty: the wall, its
-                             pockets and nothing else
-    BUILDAT_LAUNCH_WHITE_V   the white sphere's value
+                             pockets and nothing else. The room's save
+                             is not read either
+    BUILDAT_LAUNCH_WHITE_V   the white sphere's value (0.60)
     BUILDAT_LAUNCH_FLOOR_SPEC
                              the floor's specular level (1.0)
+    BUILDAT_LAUNCH_FRAME_CEILING
+                             the frame time, in seconds, over which the
+                             frame watch logs a second's worst frame
+                             and the engine's profiler table (0.1)
+    BUILDAT_LAUNCH_FRAME_DUMP_AFTER
+                             seconds after start before that profiler
+                             table is logged (0), so a reading of the
+                             settled frame skips the bake's
+    BUILDAT_LAUNCH_FRAME_TRACE
+                             log every second's worst frame, and time
+                             each Update handler by name
     BUILDAT_MARK_OUT         mark_sheet.sh shoots into another
                              directory, so a re-shoot does not write
                              over a sheet somebody is still looking at

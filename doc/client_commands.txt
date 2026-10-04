@@ -217,7 +217,11 @@ event <name> [param]
     event room preset <n>
     event room station wall|floor|terminal
         The room's switches for a scripted run, in place of keys:
-        extensions/launch_world/README.txt.
+        extensions/launch_world/README.txt. The same switches at boot,
+        and the room's other knobs (the options rounds ARCH, LIGHT,
+        SOUND, PRESET; PITCH, the probe, the tonemap, ...), are
+        BUILDAT_LAUNCH_* environment variables, listed there under
+        "Environment".
 
     event mode menu
         Closes whatever is over the room and goes to the standing place,

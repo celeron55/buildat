@@ -2931,15 +2931,13 @@ frame_watch = {worst = 0, worst_at = 0, due = 0, started = nil,
 		said = 0,
 		-- A settled room's frame is well under the engine's own clamp, so
 		-- a reading of the settled frame asks for a lower bar
-		ceiling = tonumber(buildat.get_env("BUILDAT_LAUNCH_FRAME_CEILING") or
-				"") or 0.1,
+		ceiling = tonumber(env("BUILDAT_LAUNCH_FRAME_CEILING")) or 0.1,
 		young = 45, over = 0, summed = false,
 		-- A young room's frames are the bake's, not the room's: a reading
 		-- of the settled frame waits this many seconds for its table
-		dump_after = tonumber(buildat.get_env(
-				"BUILDAT_LAUNCH_FRAME_DUMP_AFTER") or "") or 0,
+		dump_after = tonumber(env("BUILDAT_LAUNCH_FRAME_DUMP_AFTER")) or 0,
 		-- Every second, for an A/B of what a frame is spent on
-		every = (buildat.get_env("BUILDAT_LAUNCH_FRAME_TRACE") or "") ~= ""}
+		every = env("BUILDAT_LAUNCH_FRAME_TRACE") ~= ""}
 -- Declared here and filled at the end of the file: the sandbox refuses
 -- an assignment to a global that the main chunk has not made
 frame_trace = {us = {}, due = 0}
@@ -5906,7 +5904,7 @@ if env("BUILDAT_LAUNCH_STILL") ~= "" then room_switch("still") end
 -- handler wrapped by name, since the sandbox has no _G to walk. Off
 -- unless BUILDAT_LAUNCH_FRAME_TRACE is set: this is a measurement.
 ;(function()
-	if (buildat.get_env("BUILDAT_LAUNCH_FRAME_TRACE") or "") == "" then
+	if env("BUILDAT_LAUNCH_FRAME_TRACE") == "" then
 		return
 	end
 	local function timed(name, f)
