@@ -981,12 +981,12 @@ local object_last = {}
 -- still, and which slice this packet does
 local LIGHT_TURNS = 8
 local object_light_turn = 0
--- The nine doubles after the id, against what was placed last time
+-- The doubles after the id, against what was placed last time
 local function object_same(prev, v, i)
 	if prev == nil then
 		return false
 	end
-	for k = 1, 9 do
+	for k = 1, 11 do
 		if prev[k] ~= v[i + k] then
 			return false
 		end
@@ -996,15 +996,12 @@ end
 
 startup_packet("luanti:object_props", "luanti_data/object_props.bin", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
-	for i = 1, #values - 6, 7 do
+	for i = 1, #values - 4, 5 do
 		object_looks[values[i]] = parse_look(values[i + 1], values[i + 2],
 				values[i + 3])
 		object_looks[values[i]].pointable = values[i + 4] ~= "0"
-		-- What it rides, and whether it is forced visible ([WIELD_AT_FEET])
-		object_looks[values[i]].parent_id = values[i + 5]
-		object_looks[values[i]].forced_visible = values[i + 6] ~= "0"
 		-- A look that changed is a node made again, and the next packet
-		-- has to do it rather than recognise the same nine doubles
+		-- has to do it rather than recognise the same doubles
 		object_last[values[i]] = nil
 	end
 end)
@@ -1130,9 +1127,10 @@ function M.set_draw_self(on)
 end
 
 local function place_object(id, v, i)
-	local look = object_looks[id]
-	local attached_to_self = look and look.parent_id == M.self_id and
-			not look.forced_visible
+	-- The id this rides and whether it is forced visible ride the last two
+	-- of the stride ([WIELD_AT_FEET] (1)); "0" is nothing.
+	local parent_id = tostring(math.floor(v[i + 10]))
+	local attached_to_self = parent_id == M.self_id and v[i + 11] == 0
 	if (id == M.self_id or attached_to_self) and not M.draw_self then
 		-- The player's own object is not drawn: the camera is inside it, so
 		-- what a game's own player model comes to is a column of itself up
@@ -1162,7 +1160,7 @@ local function place_object(id, v, i)
 	-- no packet pays for more than a few.
 	if not posed and object_nodes[id] and object_same(object_last[id], v, i)
 			and id ~= M.self_id then
-		if ((i - 1) / 10 + object_light_turn) % LIGHT_TURNS == 0 then
+		if ((i - 1) / 12 + object_light_turn) % LIGHT_TURNS == 0 then
 			light_object(object_nodes[id], v[i + 1], v[i + 2], v[i + 3])
 		end
 		return
@@ -1212,7 +1210,7 @@ local function place_object(id, v, i)
 		prev = {}
 		object_last[id] = prev
 	end
-	for k = 1, 9 do
+	for k = 1, 11 do
 		prev[k] = v[i + k]
 	end
 end
@@ -1225,7 +1223,7 @@ buildat.sub_packet("luanti:objects", function(data)
 	local v = cereal.binary_input(data, {"array", "double"})
 	local t1 = buildat.get_time_us()
 	local seen = {}
-	local STRIDE = 10
+	local STRIDE = 12
 	local i = 1
 	object_build_left_us = OBJECT_BUILD_BUDGET_US
 	objects_deferred = 0

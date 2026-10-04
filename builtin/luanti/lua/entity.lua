@@ -3840,6 +3840,14 @@ local function show_objects(dtime)
 			-- dead mob lies down (lua_api.md "Coordinate System")
 			v[#v + 1] = o.rot and o.rot.x or 0
 			v[#v + 1] = o.rot and o.rot.z or 0
+			-- Which object it rides and whether forced visible
+			-- ([WIELD_AT_FEET] (1)): the client leaves a thing attached to
+			-- its own player out of the first-person view unless forced.
+			-- In the per-step list, not the props, so the client re-reads
+			-- it every packet rather than missing it once the list settles.
+			local a = o.attached_to
+			v[#v + 1] = a and (ref_ids[a.ref] or 0) or 0
+			v[#v + 1] = (a and a.forced_visible) and 1 or 0
 			local kind, texture, detail = appearance_of(o)
 			detail = detail or ""
 			-- Whether a ray may hit it: Luanti's pointable. VoxeLibre's
@@ -3847,25 +3855,15 @@ local function show_objects(dtime)
 			-- and a client that did not know stood punching it instead of
 			-- digging the ground (2026-09-19)
 			local pointable = (o.props.pointable ~= false) and "1" or "0"
-			-- Which object this rides and whether it is forced visible
-			-- ([WIELD_AT_FEET] (1)): the client hides what is attached to
-			-- its own player in first person unless the game forces it.
-			local a = o.attached_to
-			local parent_id = a and tostring(ref_ids[a.ref] or 0) or "0"
-			local forced = (a and a.forced_visible) and "1" or "0"
 			local was = sent_appearance[id]
 			if not was or was[1] ~= kind or was[2] ~= texture or
-					was[3] ~= detail or was[4] ~= pointable or
-					was[5] ~= parent_id or was[6] ~= forced then
-				sent_appearance[id] = {kind, texture, detail, pointable,
-						parent_id, forced}
+					was[3] ~= detail or was[4] ~= pointable then
+				sent_appearance[id] = {kind, texture, detail, pointable}
 				props_changed[#props_changed + 1] = tostring(id)
 				props_changed[#props_changed + 1] = kind
 				props_changed[#props_changed + 1] = texture
 				props_changed[#props_changed + 1] = detail
 				props_changed[#props_changed + 1] = pointable
-				props_changed[#props_changed + 1] = parent_id
-				props_changed[#props_changed + 1] = forced
 			end
 		end
 	end
