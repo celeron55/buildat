@@ -125,6 +125,10 @@ declare -A asan=(
 declare -A restart=(
 	[sound]=1
 	[model]=1
+	# FreeType and stb_image under ASan: kept inputs take 3-18 s on a
+	# quiet machine (2026-10-05), a slow parse and not a finding
+	[font]=1
+	[image]=1
 )
 declare -A rss=()
 targets=${*:-${!srcs[@]}}
