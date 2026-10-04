@@ -13,6 +13,10 @@
 //   POST /api/report         a report ([STARPORT] 5)
 //   POST /api/report_status  a reporter's receipts' outcomes
 //   GET /api/transparency    the numbers ([STARPORT] 6)
+//   POST /api/id/<call>      a Starport ID's calls ([STARPORT] 10)
+//   GET /authorize           the page a web client signs in by
+//                            ([WEB_ID_TRUST]); the only HTML
+// The API answers any origin (CORS *): it takes no cookies.
 // In the app, "sp:req" carries a JSON {id, cmd, ...} from a joined client
 // and "sp:res" the answer {id, ok, result | error}.
 //
@@ -255,6 +259,141 @@ static ss_ check_categories(const json::Value &b)
 }
 
 // ---------------------------------------------------------------------------
+// [WEB_ID_TRUST] /authorize?listing=<id>[&address=<host:port>][&origin=<o>]:
+// a web client opens this in a window to sign in to a server with a
+// Starport ID. The ID logs in here, on Starport's own page (its session
+// kept in this page's storage), says Allow, and the token goes to the
+// window that opened this by postMessage -- only to the listed server's own
+// web client, or a page of the setting web_clients ("origin"), which the
+// API checks. Made in the client: an ID is registered there.
+// simplified: no registration or password reset here; the client has them
+
+static const char *authorize_page = R"PAGE(<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in with a Starport ID</title>
+<style>
+body{font-family:sans-serif;background:#1d2128;color:#e6e6e6;margin:0;
+padding:16px;max-width:28em;margin:auto}
+input,button{font-size:1em;padding:.4em;margin:.2em 0;box-sizing:border-box}
+input{width:100%}button{min-width:7em;margin-right:.5em}
+#err{color:#ff8a80}.hide{display:none}b{color:#fff}
+</style></head><body>
+<h2>Sign in with a Starport ID</h2>
+<p id="what">...</p>
+<form id="login" class="hide">
+<label>ID <input id="name" autocomplete="username" required></label>
+<label>Password <input id="password" type="password"
+ autocomplete="current-password" required></label>
+<label id="totpl" class="hide">TOTP code <input id="totp"
+ autocomplete="one-time-code" inputmode="numeric"></label>
+<button>Log in</button>
+<p>No ID? Make one in the Buildat client: Starport settings..., Starport ID...</p>
+</form>
+<form id="allow" class="hide">
+<p>Signed in as <b id="me"></b>.</p>
+<label id="fleetl" class="hide">Your name on this server
+ <input id="fleet"></label>
+<button>Allow</button><button type="button" id="cancel">Cancel</button>
+<button type="button" id="logout">Log out</button>
+</form>
+<p id="err"></p>
+<script>
+"use strict";
+const q = new URLSearchParams(location.search);
+const want = {listing: q.get("listing") || "", address: q.get("address") || "",
+	origin: q.get("origin") || "", web: true};
+const $ = id => document.getElementById(id);
+let session = null, target = "";
+try { session = localStorage.getItem("buildat_sp_session"); } catch(e){}
+function keep(s){
+	session = s;
+	try {
+		if(s) localStorage.setItem("buildat_sp_session", s);
+		else localStorage.removeItem("buildat_sp_session");
+	} catch(e){}
+}
+async function call(what, body){
+	const r = await fetch("/api/id/" + what, {method: "POST",
+		headers: {"Content-Type": "text/plain"}, body: JSON.stringify(body)});
+	const v = await r.json();
+	if(!v.ok) throw new Error(v.error);
+	return v.result;
+}
+function show(id){
+	for(const f of ["login", "allow"]) $(f).classList.toggle("hide", f != id);
+	$("err").textContent = "";
+}
+function fail(e){ $("err").textContent = e.message || e; }
+async function start(){
+	if(!window.opener){
+		$("what").textContent = "Open this from a Buildat web client.";
+		return;
+	}
+	try {
+		const i = await call("authorize_info", want);
+		target = i.origin;
+		$("what").textContent = "";
+		const b = document.createElement("b");
+		b.textContent = i.name || "a server";
+		$("what").append(b, " at " + target + " asks who you are. Allowing "
+			+ "signs you in there, by the name you have on it.");
+	} catch(e){ $("what").textContent = ""; return fail(e); }
+	if(session){
+		try {
+			$("me").textContent = (await call("me", {session})).name;
+			return show("allow");
+		} catch(e){ if(e.message == "session") keep(null); else return fail(e); }
+	}
+	show("login");
+}
+$("login").onsubmit = async ev => {
+	ev.preventDefault();
+	try {
+		const r = await call("login", {name: $("name").value,
+			password: $("password").value, totp: $("totp").value});
+		keep(r.session);
+		$("me").textContent = r.me.name;
+		show("allow");
+	} catch(e){
+		if(e.message == "totp"){
+			$("totpl").classList.remove("hide");
+			$("totp").focus();
+			return;
+		}
+		fail(e);
+	}
+};
+$("allow").onsubmit = async ev => {
+	ev.preventDefault();
+	try {
+		const r = await call("token", Object.assign({session,
+			name: $("fleet").value}, want));
+		if(r.need_name){
+			$("fleetl").classList.remove("hide");
+			if(!$("fleet").value) $("fleet").value = r.suggest;
+			$("fleet").focus();
+			return;
+		}
+		window.opener.postMessage({buildat_starport_token: r.token,
+			name: r.name, listing: r.listing}, r.origin);
+		window.close();
+	} catch(e){
+		if(e.message == "session"){ keep(null); show("login"); }
+		fail(e);
+	}
+};
+$("cancel").onclick = () => window.close();
+$("logout").onclick = async () => {
+	try { await call("logout", {session}); } catch(e){}
+	keep(null);
+	show("login");
+};
+start();
+</script></body></html>
+)PAGE";
+
+// ---------------------------------------------------------------------------
 // The instance's settings, with their defaults ([STARPORT] 5a, 7, 8)
 
 static json::Value default_settings()
@@ -301,6 +440,9 @@ static json::Value default_settings()
 	s.set("email_confirmation", true);
 	// Whether players can make Starport IDs here (10)
 	s.set("id_registration", true);
+	// [WEB_ID_TRUST]: web pages besides a listed server's own that
+	// /authorize sends a token to, as origins ("https://play.example.org")
+	s.set("web_clients", json::array());
 	// How the codes go: url smtp://host:587 or smtps://host:465
 	json::Value smtp = json::object();
 	for(const char *k : {"url", "from", "user", "password"})
@@ -452,6 +594,9 @@ struct Module: public interface::Module
 			m_settings = default_settings();
 			put("settings", "settings", m_settings);
 		}
+		network::access(m_server, [&](network::Interface *iface){
+			iface->claim_http_path("/authorize");
+		});
 		m_last_day = day_of(now_s());
 		m_vthread = std::thread([this](){ verifier(); });
 		log_i(MODULE, "Starport \"%s\": %zu listings", cs(jstr(m_settings,
@@ -503,8 +648,10 @@ struct Module: public interface::Module
 	void respond(const network::HttpRequest &r, int status, const json::Value &v)
 	{
 		network::access(m_server, [&](network::Interface *iface){
+			// The API takes no cookies, a session is in the body: any page
+			// may call it ([WEB_ID_TRUST], the web client's fetch)
 			iface->http_respond(r.peer, status, "application/json",
-					v.stringify());
+					v.stringify(), "Access-Control-Allow-Origin: *\r\n");
 		});
 	}
 	void refuse(const network::HttpRequest &r, const ss_ &why)
@@ -544,6 +691,14 @@ struct Module: public interface::Module
 			api_id(r, body);
 		else if(r.path == "/api/transparency")
 			api_transparency(r);
+		else if(r.path == "/authorize" && r.method == "GET"){
+			// Never in a frame: its Allow would be clicked through one
+			network::access(m_server, [&](network::Interface *iface){
+				iface->http_respond(r.peer, 200, "text/html; charset=utf-8",
+						authorize_page, "X-Frame-Options: DENY\r\n"
+						"Content-Security-Policy: frame-ancestors 'none'\r\n");
+			});
+		}
 		else if(r.path.compare(0, 14, "/api/starport/") == 0)
 			return; // builtin/starport_announce's, were this listed itself
 		else {
@@ -1757,6 +1912,14 @@ struct Module: public interface::Module
 					"email").empty() && remind_login(jint(id, "logins")));
 			return out;
 		}
+		// [WEB_ID_TRUST]: what /authorize shows before its Allow
+		if(what == "authorize_info"){
+			const json::Value l = find_listing(b);
+			json::Value out = json::object();
+			out.set("name", jstr(l, "name"));
+			out.set("origin", web_origin(l, b));
+			return out;
+		}
 		if(what == "reset_request"){
 			const ss_ name = jstr(b, "name");
 			const json::Value o = load("operators", name);
@@ -1881,23 +2044,8 @@ struct Module: public interface::Module
 					"have age limits, so an ID says whether its owner is 18 "
 					"or over (in the client: Starport settings..., Starport "
 					"ID..., Change the age...)");
-		json::Value l = load("listings", jstr(b, "listing"));
-		// 10g: an unlisted server is found by the address the client is
-		// connected to, among the verified listings -- never by an id the
-		// server names, which could be another server's
-		const ss_ address = jstr(b, "address");
-		if(!l.is_object() && !address.empty()){
-			for(const ss_ &lid : store("listings")->list("")){
-				const json::Value o = load("listings", lid);
-				if(jstr(o, "verify") == "ok" && jstr(o, "status") != "banned" &&
-						jstr(o, "host")+":"+itos(jint(o, "port")) == address){
-					l = o;
-					break;
-				}
-			}
-		}
-		if(!l.is_object())
-			throw Exception("no such listing");
+		const json::Value l = find_listing(b);
+		const ss_ origin = web_origin(l, b);
 		// 10b: the age band against the listing's audience
 		const ss_ aud = jstr(effective(l), "audience");
 		const int64_t age = age_low(id);
@@ -1954,7 +2102,53 @@ struct Module: public interface::Module
 		out.set("listing", jstr(l, "id"));
 		out.set("name", shown);
 		out.set("exp", jint(p, "exp"));
+		if(!origin.empty())
+			out.set("origin", origin);
 		return out;
+	}
+
+	// A token's listing: by its id, or else (10g) an unlisted server by the
+	// address the client is connected to, among the verified listings --
+	// never by an id the server names, which could be another server's
+	json::Value find_listing(const json::Value &b)
+	{
+		json::Value l = load("listings", jstr(b, "listing"));
+		const ss_ address = jstr(b, "address");
+		if(!l.is_object() && !address.empty()){
+			for(const ss_ &lid : store("listings")->list("")){
+				const json::Value o = load("listings", lid);
+				if(jstr(o, "verify") == "ok" && jstr(o, "status") != "banned" &&
+						jstr(o, "host")+":"+itos(jint(o, "port")) == address){
+					l = o;
+					break;
+				}
+			}
+		}
+		if(!l.is_object())
+			throw Exception("no such listing");
+		return l;
+	}
+
+	// [WEB_ID_TRUST]: the web page a token for `l` may go to, for /authorize
+	// ("web": true): the web client the listed server serves itself, or one
+	// of the setting web_clients (a fixed page that joins any server). ""
+	// when not asked for the web.
+	ss_ web_origin(const json::Value &l, const json::Value &b)
+	{
+		if(!b.get("web").is_true())
+			return "";
+		const bool tls = l.get("tls").is_true();
+		const int64_t port = jint(l, "port");
+		const ss_ own = ss_(tls ? "https://" : "http://")+jstr(l, "host")+
+				(port == (tls ? 443 : 80) ? ss_() : ":"+itos(port));
+		const ss_ want = jstr(b, "origin");
+		if(want.empty() || want == own)
+			return own;
+		const json::Value &c = setting("web_clients");
+		for(unsigned i = 0; c.is_array() && i < c.size(); i++)
+			if(c.at(i).is_string() && c.at(i).as_string() == want)
+				return want;
+		throw Exception("this Starport sends no tokens to "+want);
 	}
 
 	// -----------------------------------------------------------------------

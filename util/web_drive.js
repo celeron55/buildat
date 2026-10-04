@@ -22,6 +22,9 @@
 //   ["mouse", x, y]         the pointer there, no button
 //   ["shot", path]          a PNG of the page
 //   ["eval", js]            print what the expression gives
+//   ["window", n]           the steps after go to the nth top-level window
+//                           (0 the first; one a page opened is 1), Firefox
+//                           only
 // ${NAME} in a string is a --var's value. The page's console goes to the
 // log, a line each. Exits 1 when a step fails.
 "use strict";
@@ -101,7 +104,9 @@ async function firefox() {
 			logLine(d.params.text);
 	});
 	await c.send("session.subscribe", {events: ["log.entryAdded"]});
-	const ctx = (await c.send("browsingContext.getTree", {})).contexts[0].context;
+	const top = async n => (await c.send("browsingContext.getTree",
+			{maxDepth: 0})).contexts[n].context;
+	let ctx = await top(0);
 	await c.send("browsingContext.setViewport", {context: ctx,
 			viewport: {width: 1200, height: 800}});
 	const keys = list => c.send("input.performActions", {context: ctx,
@@ -125,6 +130,7 @@ async function firefox() {
 			const r = await c.send("browsingContext.captureScreenshot", {context: ctx});
 			fs.writeFileSync(p, Buffer.from(r.data, "base64"));
 		},
+		window: async n => { ctx = await top(n); },
 		eval: async js => {
 			const r = await c.send("script.evaluate", {expression: js,
 					target: {context: ctx}, awaitPromise: true});

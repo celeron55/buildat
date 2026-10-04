@@ -240,7 +240,7 @@ struct Module: public interface::Module, public Interface
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		for(const char *n : {"starport:relay_open", "starport:relay_send",
 				"starport:relay_close", "starport:config_get",
-				"starport:config_set"})
+				"starport:config_set", "starport:where_get"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+n));
 	}
@@ -263,6 +263,8 @@ struct Module: public interface::Module, public Interface
 				on_config_get, network::Packet)
 		EVENT_TYPEN("network:packet_received/starport:config_set",
 				on_config_set, network::Packet)
+		EVENT_TYPEN("network:packet_received/starport:where_get",
+				on_where_get, network::Packet)
 	}
 
 	void on_start()
@@ -1006,6 +1008,28 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// Handed to the announce thread; see handle_config_request()
+	// [WEB_ID_TRUST]: where this server is listed with IDs on, for anyone:
+	// a web client signs in on that Starport's page (its own settings name
+	// starport.buildat.org, and nothing here). The listings are public.
+	void on_where_get(const network::Packet &p)
+	{
+		json::Value rows = json::array();
+		const json::Value c = config();
+		if(ids_mode_of(c) != "off"){
+			std::lock_guard<std::mutex> lock(m_mutex);
+			for(const ss_ &url : urls_of(c)){
+				auto it = m_listings.find(url);
+				if(it == m_listings.end())
+					continue;
+				json::Value r = json::object();
+				r.set("url", url);
+				r.set("listing", it->second.id);
+				rows.append(r);
+			}
+		}
+		relay_send_packet(p.sender, "starport:where", rows.stringify());
+	}
+
 	void on_config_get(const network::Packet &p)
 	{
 		queue_config_request(p.sender, false, "");

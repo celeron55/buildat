@@ -597,7 +597,16 @@ local function reseal(w)
 		e = e:GetParent()
 	end
 end
+local web_wait = nil -- web_authorize's, for the Starport window's message
 magic.SubscribeToEvent("Update", function()
+	if web_wait then
+		local m = __buildat_web_authorized()
+		if m then
+			local f = web_wait
+			web_wait = nil
+			f(m)
+		end
+	end
 	local i = 1
 	while i <= #guards do
 		local g = guards[i]
@@ -1492,6 +1501,67 @@ local function ask_age(url, session, on_done)
 	end)
 end
 
+-- [WEB_ID_TRUST] The web client's way to a token: the Starport's own page
+-- (/authorize), in a window of its own, logs the ID in and posts the token
+-- back to this page. The password is typed on the Starport's page only, and
+-- the token goes to this page's origin only if it is the listed server's
+-- (or one of the Starport's web_clients). The window opens at a click of
+-- this dialog's: the browser blocks one opened otherwise.
+local web_starports = {}
+-- set_web_starports({{url =, listing =}, ...}): where the server says it is
+-- listed. Taken on the web only: there the server's code is the client
+-- anyway; natively the user's own Starports are the ones asked.
+function M.safe.set_web_starports(rows)
+	if __buildat_get_env("BUILDAT_PAGE_HTTPS") == nil or
+			type(rows) ~= "table" then
+		return
+	end
+	web_starports = {}
+	for _, r in ipairs(rows) do
+		if type(r) == "table" and type(r.url) == "string" and
+				type(r.listing) == "string" and
+				r.url:match("^https?://[%w%.%-%[%]:]+$") and
+				r.listing:match("^%x+$") then
+			web_starports[#web_starports + 1] = r
+		end
+	end
+end
+M.set_web_starports = M.safe.set_web_starports
+
+local function web_authorize(url, listing, address, cb)
+	local q = "/authorize?address=" .. address
+	if listing then
+		q = q .. "&listing=" .. listing
+	end
+	local root, w = open_window("starport id web", 520)
+	add_text(w, "Sign in with your Starport ID at " .. url .. ". Its page "..
+			"opens in a window of its own; your password goes there only.")
+	local st = add_text(w, "")
+	local rr = add_row(w)
+	add_button(rr, "Open", function()
+		st.text = __buildat_web_authorize(url .. q) and
+				"Waiting for the Starport's window..." or
+				"The browser blocked the window: allow pop-ups for this page"
+	end)
+	add_button(rr, "Cancel", close_and(root, function()
+		web_wait = nil
+		cb(nil, "cancelled")
+	end))
+	web_wait = function(m)
+		for _, e in ipairs(uistack.main.stack) do
+			if e == root then
+				uistack.main:pop(root)
+				break
+			end
+		end
+		local v = network.parse_json(m)
+		if type(v) ~= "table" or type(v.buildat_starport_token) ~= "string" then
+			return cb(nil, "the Starport's window sent no token")
+		end
+		cb(v.buildat_starport_token)
+	end
+end
+
 -- id_token_here(cb[, rename_reason]): a token for the server this client
 -- is on, from the Starport ID of a Starport that lists it ([STARPORT]
 -- 10c); cb(token) or cb(nil, why). The name used in the server's
@@ -1516,6 +1586,16 @@ function M.safe.id_token_here(cb, rename_reason)
 			for _, u in ipairs(effective().starports) do
 				ids[u] = false
 			end
+		end
+		if __buildat_get_env("BUILDAT_PAGE_HTTPS") ~= nil then
+			-- simplified: the first Starport of several; a choice when
+			-- web clients list on more than one
+			local u, l = next(ids)
+			if not u then
+				return cb(nil, "No Starports in your settings")
+			end
+			return web_authorize(u, l or nil,
+					address:gsub("^https://", ""):gsub("^wss://", ""), cb)
 		end
 		for u, l in pairs(ids) do
 			if s.ids[u] then
@@ -1635,6 +1715,12 @@ function M.safe.id_token_here(cb, rename_reason)
 		else
 			ask(nil)
 		end
+	end
+	-- The web, by where the server says it is listed: no list to fetch
+	local ws = web_starports[1]
+	if ws then
+		return web_authorize(ws.url, ws.listing,
+				address:gsub("^https://", ""):gsub("^wss://", ""), cb)
 	end
 	local row = row_of(address)
 	if row then

@@ -126,8 +126,11 @@ namespace network
 		virtual void disconnect(PeerInfo::Id peer) = 0;
 		// The answer to a network:http_request; the connection closes
 		// after it. A peer that has gone, or was answered, is ignored.
+		// extra_headers: more header lines, each ending in \r\n (CORS, a
+		// page's framing policy)
 		virtual void http_respond(PeerInfo::Id peer, int status,
-				const ss_ &content_type, const ss_ &body) = 0;
+				const ss_ &content_type, const ss_ &body,
+				const ss_ &extra_headers = "") = 0;
 		// Listen on another address too, the same port: the launcher's
 		// game, on 127.0.0.1, opened to the LAN at the machine's LAN
 		// address. false with why if it cannot.

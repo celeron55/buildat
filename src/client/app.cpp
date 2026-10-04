@@ -2199,6 +2199,8 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(set_watchdog_seconds)
 		DEF_BUILDAT_FUNC(set_reload_on_return)
 		DEF_BUILDAT_FUNC(set_web_fullscreen)
+		DEF_BUILDAT_FUNC(web_authorize)
+		DEF_BUILDAT_FUNC(web_authorized)
 		DEF_BUILDAT_FUNC(extension_path)
 		DEF_BUILDAT_FUNC(set_ui_scale)
 		DEF_BUILDAT_FUNC(user_activated)
@@ -4845,6 +4847,57 @@ struct CApp: public App, public magic::Application
 #endif
 		(void)L;
 		return 0;
+	}
+
+	// [WEB_ID_TRUST] web_authorize(url) -> whether a window opened (the
+	// browser blocks one not right after a click): a Starport's /authorize
+	// page, which posts a token back to this page. web_authorized() -> the
+	// message as JSON once that page has sent it, from that page's origin
+	// only; nil until then. Trusted Lua's (the starport extension); nothing
+	// natively.
+	static int l_web_authorize(lua_State *L)
+	{
+#ifdef __EMSCRIPTEN__
+		const char *url = luaL_checkstring(L, 1);
+		int ok = EM_ASM_INT({
+			var url = UTF8ToString($0);
+			Module['buildatAuthMsg'] = null;
+			Module['buildatAuthOrigin'] = new URL(url).origin;
+			if(!Module['buildatAuthListen']){
+				Module['buildatAuthListen'] = true;
+				window.addEventListener('message', function(e){
+					var d = e.data;
+					if(e.origin === Module['buildatAuthOrigin'] && d &&
+							typeof d.buildat_starport_token === 'string')
+						Module['buildatAuthMsg'] = JSON.stringify(d);
+				});
+			}
+			return window.open(url, 'buildat_starport',
+					'popup,width=480,height=680') ? 1 : 0;
+		}, url);
+		lua_pushboolean(L, ok);
+#else
+		(void)L;
+		lua_pushboolean(L, 0);
+#endif
+		return 1;
+	}
+	static int l_web_authorized(lua_State *L)
+	{
+#ifdef __EMSCRIPTEN__
+		char *msg = (char*)EM_ASM_PTR({
+			var m = Module['buildatAuthMsg'];
+			Module['buildatAuthMsg'] = null;
+			return m ? stringToNewUTF8(m) : 0;
+		});
+		if(msg){
+			lua_pushstring(L, msg);
+			free(msg);
+			return 1;
+		}
+#endif
+		lua_pushnil(L);
+		return 1;
 	}
 
 	// set_watchdog_seconds(n): how long without a frame before the

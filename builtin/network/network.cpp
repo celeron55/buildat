@@ -1696,7 +1696,7 @@ struct Module: public interface::Module, public network::Interface
 	}
 
 	void http_respond(PeerInfo::Id id, int status, const ss_ &content_type,
-			const ss_ &body)
+			const ss_ &body, const ss_ &extra_headers)
 	{
 		auto it = m_peers.find(id);
 		if(it == m_peers.end() || !it->second.api_waiting)
@@ -1709,7 +1709,7 @@ struct Module: public interface::Module, public network::Interface
 				"Not Found" : status == 429 ? "Too Many Requests" : status == 503 ?
 				"Service Unavailable" : "Error";
 		peer.queue_raw(web::response(itos(status)+" "+text, content_type,
-				body.size()) + body);
+				body.size(), extra_headers) + body);
 		flush_peer(peer);
 	}
 

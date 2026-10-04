@@ -407,8 +407,20 @@ function show_create(error_text)
 	name:SetFocus(true)
 end
 
+-- [WEB_ID_TRUST]: the Starports this server is listed on, for a web
+-- client's sign-in window (the extension takes them on the web only)
+buildat.sub_packet("starport:where", function(data)
+	local ok, starport = pcall(require, "buildat/extension/starport")
+	if ok and starport.set_web_starports then
+		starport.set_web_starports(buildat.parse_json(data))
+	end
+end)
+
 buildat.sub_packet("accounts:hello", function(data)
 	M.hello = cereal.binary_input(data, HELLO)
+	if M.hello.starport == 1 then
+		buildat.send_packet("starport:where_get", "")
+	end
 	-- Said again when an admin changes who may register: a user who has
 	-- joined already has nothing to do with it
 	if M.logged_in then
