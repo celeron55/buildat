@@ -39,6 +39,11 @@ declare -A srcs=(
 	# The decoders compiled in, instrumented; the rest of Urho3D from its
 	# library (image_fuzz.cpp)
 	[image]="3rdparty/Urho3D/Source/Urho3D/Resource/Image.cpp 3rdparty/Urho3D/Source/Urho3D/Resource/Decompress.cpp"
+	[markup]="src/impl/markup.cpp"
+)
+# C sources, compiled apart with the same sanitizers and linked in
+declare -A csrcs=(
+	[markup]="3rdparty/md4c/md4c.c"
 )
 declare -A libs=(
 	[compress]="-lz -lzstd"
@@ -47,6 +52,7 @@ declare -A libs=(
 	[json]=""
 	[zip]="-lz -lzstd"
 	[image]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
+	[markup]="-I$here/3rdparty/md4c"
 )
 # Urho3D's own defines and include paths for the files compiled from it;
 # stb_image's JPEG decoder shifts negative values left, and a PNG's empty
@@ -61,6 +67,13 @@ targets=${*:-${!srcs[@]}}
 build() {
 	local t=$1 s=""
 	for f in ${srcs[$t]}; do s="$s $here/$f"; done
+	for f in ${csrcs[$t]:-}; do
+		clang -g -O1 -fsanitize=fuzzer-no-link,address,undefined \
+			-fno-sanitize-recover=undefined -c "$here/$f" \
+			-o "$out/bin/$t.$(basename "$f").o" 2> "$out/bin/$t.build.log" || {
+			echo "$t: build failed, $out/bin/$t.build.log"; return 1; }
+		s="$s $out/bin/$t.$(basename "$f").o"
+	done
 	clang++ $flags ${extra[$t]:-} "$me/${t}_fuzz.cpp" $s ${libs[$t]} -o "$out/bin/$t" \
 		2> "$out/bin/$t.build.log" || {
 		echo "$t: build failed, $out/bin/$t.build.log"; tail -5 "$out/bin/$t.build.log"
