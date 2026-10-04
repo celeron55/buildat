@@ -3,7 +3,7 @@
 # tier: quick
 # cost: 20s (this desk, 2026-09-26; local/run_all/costs corrects it per machine)
 # [CLIENT_FRAME]: the distant terrain row, driven -- the launcher's menu,
-# its "Luanti settings", "Reduced past half range" picked, and then the
+# its "Luanti settings", "Reduced past a third" picked, and then the
 # row marked and the settings file written. What this guards is the row
 # reaching the far end: the pick goes to the server as a `lod_detail=`
 # row, is kept in settings.json, comes back in the settings packet and
@@ -78,20 +78,22 @@ click(b)
 row = None
 for i in range(20):
     els = scan("b%d" % i)
-    row = els and find(els, "Reduced past half range")
+    row = els and find(els, "Reduced past a third")
     if row: break
     time.sleep(2)
 if not row:
     fail("no distant terrain row; saw " + ", ".join(e[5] for e in els or [])[:300])
+# Not the default (half, since 68044b3d): a pick that is already made
+# proves nothing
 if not row[5].startswith("[ ]"):
-    fail("half is already the pick, so this proves nothing: " + row[5])
+    fail("third is already the pick, so this proves nothing: " + row[5])
 click(row)
 # The pick goes to the server, which writes the file and answers with the
 # settings again; the screen is drawn from that answer
 marked = None
 for i in range(20):
     els = scan("c%d" % i)
-    marked = els and find(els, "Reduced past half range")
+    marked = els and find(els, "Reduced past a third")
     if marked and marked[5].startswith("[x]"): break
     time.sleep(1)
 if not marked or not marked[5].startswith("[x]"):
@@ -100,7 +102,7 @@ try:
     kept = open(settings).read()
 except IOError as e:
     fail("no settings file: %s" % e)
-if '"lod_detail": "half"' not in kept:
+if '"lod_detail": "third"' not in kept:
     fail("the file does not carry the pick: " + kept[:200])
 print("PASS")
 write("quit")
