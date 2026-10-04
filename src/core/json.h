@@ -38,6 +38,8 @@ namespace json
 		friend const Value array();
 		friend const Value null();
 		friend const Value load_sajson(const sajson::value &src);
+		friend const Value load_sajson_depth(const sajson::value &src,
+				int depth);
 		friend class Iterator;
 
 		mutable ValuePrivate *p;
@@ -210,6 +212,7 @@ namespace json
 	const Value null();
 
 	const Value load_sajson(const sajson::value &src);
+	const Value load_sajson_depth(const sajson::value &src, int depth);
 
 	struct json_error_t {
 		int line;

@@ -66,6 +66,16 @@ public:
     /// Draw to occlusion buffer. Return true if did not run out of triangles.
     virtual bool DrawOcclusion(OcclusionBuffer* buffer);
 
+    /// Set a separate, cheap shape to rasterise into the occlusion buffer instead of the drawn geometry: a
+    /// plain triangle list in the same local space, rasterised from both sides. A voxel chunk is a bad
+    /// occluder -- its mesh is thousands of triangles of surface detail expressing a silhouette a few quads
+    /// would, and Urho3D's occluder triangle budget is spent on the first chunk it comes to. The shape must
+    /// be conservative (inside the solid it stands for) or the buffer will cull what is visible. Empty,
+    /// which Clear() restores, means the drawn geometry is used as before.
+    void SetOcclusionGeometry(const PODVector<Vector3>& triangles);
+    /// Return the separate occlusion shape, if one was set.
+    const PODVector<Vector3>& GetOcclusionGeometry() const { return occlusionVertices_; }
+
     /// Clear all geometries.
     void Clear();
     /// Set number of geometries.
@@ -131,6 +141,8 @@ private:
     PODVector<PrimitiveType> primitiveTypes_;
     /// Source vertices per geometry.
     Vector<PODVector<CustomGeometryVertex> > vertices_;
+    /// A cheap stand-in shape for the occlusion buffer; empty when the drawn geometry is used.
+    PODVector<Vector3> occlusionVertices_;
     /// All geometries.
     Vector<SharedPtr<Geometry> > geometries_;
     /// Vertex buffer.

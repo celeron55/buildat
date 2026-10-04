@@ -376,7 +376,7 @@ public:
 
             if (capacity_)
             {
-                newBuffer = reinterpret_cast<T*>(AllocateBuffer((unsigned)(capacity_ * sizeof(T))));
+                newBuffer = reinterpret_cast<T*>(AllocateBuffer(capacity_ * sizeof(T)));
                 // Move the data into the new buffer
                 ConstructElements(newBuffer, Buffer(), size_);
             }
@@ -494,7 +494,7 @@ private:
                         capacity_ += (capacity_ + 1) >> 1;
                 }
 
-                buffer_ = AllocateBuffer((unsigned)(capacity_ * sizeof(T)));
+                buffer_ = AllocateBuffer(capacity_ * sizeof(T));
                 if (tempBuffer.Buffer())
                 {
                     ConstructElements(Buffer(), tempBuffer.Buffer(), size_);
@@ -937,7 +937,7 @@ public:
                     capacity_ += (capacity_ + 1) >> 1;
             }
 
-            unsigned char* newBuffer = AllocateBuffer((unsigned)(capacity_ * sizeof(T)));
+            unsigned char* newBuffer = AllocateBuffer(capacity_ * sizeof(T));
             // Move the data into the new buffer and delete the old
             if (buffer_)
             {
@@ -963,7 +963,7 @@ public:
 
             if (capacity_)
             {
-                newBuffer = AllocateBuffer((unsigned)(capacity_ * sizeof(T)));
+                newBuffer = AllocateBuffer(capacity_ * sizeof(T));
                 // Move the data into the new buffer
                 CopyElements(reinterpret_cast<T*>(newBuffer), Buffer(), size_);
             }

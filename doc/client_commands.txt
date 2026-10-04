@@ -14,6 +14,19 @@ exits after the sequence finishes (exit status 1 if a command fails).
 -w WxH runs windowed at a fixed size without changing the size the client
 remembers between runs. Use it for anything that compares images between runs.
 
+-c ignores user/settings.json entirely and runs on the built-in defaults,
+so a preference someone left at render_scale=0.5 can never change what a
+screenshot looks like, and a run never writes the file. A -c run is also muted
+unless -o says otherwise: nothing captures audio, and a driven run playing a
+app's music through whoever's speakers is a small recurring annoyance with no
+upside. -o still wins, which is how a preference itself gets tested:
+
+    $ bin/buildat -s localhost -w 1600x900 -o render_scale=0.5 -c @check.txt
+
+A -c run without -C keeps its cache in <cache>/scripted, apart from the
+one a person's client uses: its log would push theirs out, and the pidfile
+there names their local server ([SERVER_ADOPTED]).
+
 @path reads the commands from a file. Empty lines and lines starting with # are
 ignored.
 
@@ -31,13 +44,13 @@ rather than ending the run.
 The writer has to stay open -- the sleep above is what keeps it so -- because
 closing the last writer of a fifo is end of input.
 
-delay is wall-clock milliseconds of game time continuing to run. Use it to wait
+delay is wall-clock milliseconds of app time continuing to run. Use it to wait
 for startup, network, or for a held key to have an effect. Input is queued as
 SDL events at the start of the frame (before Urho3D Input::Update). Screenshots
 are taken after the current frame has been rendered (3D + UI), before buffer
 swap.
 
-The OS mouse is never captured or grabbed in -c mode, even if the game calls
+The OS mouse is never captured or grabbed in -c mode, even if the app calls
 SetMouseVisible(false). Use mouse_move for look (GetMouseMove); that is
 relative and does not use a cursor position. mouse_pos is for a visible UI
 cursor. look does the same pushing for you and waits for the camera to arrive,
@@ -57,7 +70,38 @@ flag. Under Xvfb that is normally fine.
 Commands
 --------
 delay <ms>
-    Wait this many milliseconds before the next command. Game keeps running.
+    Wait this many milliseconds before the next command. App keeps running.
+
+A driven client is a window the desk did not ask for, and says so: its
+WM_CLASS is "buildat-scripted" where a client somebody opened is
+"buildat", its title is "Buildat Client (scripted)", and it maps
+without raising and with _NET_WM_USER_TIME = 0, which a window manager
+reads as do-not-activate. So a run does not take the focus of whatever
+the desk is doing, and a window manager can put it somewhere else --
+in icewm's winoptions:
+
+    buildat-scripted.buildat-scripted.workspace: 3
+
+SDL_VIDEO_X11_WMCLASS set by the caller is left alone.
+
+wait_log <ms> <text>
+    Hold the sequence until the client's own log has a line containing the
+    text, or the time passes; either way a log line says so and the sequence
+    goes on. A wait for a screen or a moment instead of a guessed delay:
+    "wait_log 60000 the server put the player" and then "wait_log 60000 0
+    undrawn within 2" is the world being playable; "wait_log 90000 voxel
+    types have their own textures" the same for the luanti_client extension.
+
+    It waits for the *next* such line: what was logged before it started
+    does not count, which is what makes "wait for it to happen again"
+    work.
+
+wait_log_any <ms> <text>
+    The same, but the line counts wherever it appeared in this run. For
+    something a program says once, and says while the sequence is still
+    being read -- a launch UI that is slow to build says it is ready
+    before the first command runs, and wait_log then sits out its whole
+    timeout and every step after it runs that much late.
 
 screenshot <path>
     Write a PNG of the current framebuffer. Parent directories are created.
@@ -73,16 +117,36 @@ keypress <key>
     keydown / delay / keyup to hold a key across frames (movement).
 
 mouse_pos <x> <y>
-    Move the visible cursor to window pixel coordinates (backbuffer). For UI.
+    Set the client's mouse position to window pixel coordinates (backbuffer). For UI.
 
 mouse_move <dx> <dy>
-    Relative motion in pixels (GetMouseMove). Use this to look around. Does
-    not move the OS cursor.
+    Relative motion in pixels (GetMouseMove). Does not move the OS cursor.
+
+    It goes straight into the frame's motion accumulator rather than onto
+    the SDL queue, so the app reads exactly what was asked for; a pushed
+    SDL_MOUSEMOTION could be flushed back out of the queue before Urho3D
+    ever saw it, and something does that to the first one of a run. That
+    one is still lost (2026-09-23): the delta reaches the accumulator and
+    the app reads zero that frame, by a route that is neither
+    SuppressNextMouseMove() nor ResetInputAccumulation(), both of which
+    were instrumented and never fire for it.
+
+    **So prefer `look` for aiming.** It pushes motion and measures what
+    the camera did with it, over as many frames as that takes, which is
+    immune to a lost push and does not need to know the app's
+    sensitivity. `mouse_move` is the primitive under it, for an app whose
+    camera `look` cannot read.
 
 mouse_down <button>
 mouse_up <button>
 mouse_click <button>
     Buttons: left, middle, right (or 1, 2, 3). click is down+up same frame.
+
+    A mouse_up waits for the frame that read its own down, so a hold is a
+    hold of frames and not of milliseconds: on a client drawing a frame a
+    second, a 1.4-second hold otherwise put its down and its up into one
+    event poll and nothing polling the button ever saw it down. A held
+    button the input dropped is pressed again, as a held key is.
 
 mouse_wheel <delta>
     Wheel ticks. Positive is away from the user.
@@ -93,22 +157,76 @@ look_dir <x> <y> <z>
     +X, pitch positive upwards; look_dir takes a direction and works out the
     same two angles.
 
-    Nothing here knows what game is running. The camera is turned by injecting
+    Nothing here knows what app is running. The camera is turned by injecting
     mouse movement and watching what the camera of viewport 0 does about it:
     how far a pixel turns it, and which way round, is measured from what the
-    last frame's push actually did, so a game with its own sensitivity or its
+    last frame's push actually did, so an app with its own sensitivity or its
     mouse look inverted is aimed as well as any other. A push that changes
     nothing is tried the other way before it is believed.
 
     The command ends when the camera is there, which is usually three or four
     frames. An axis that has moved and then stops answering in both directions
-    is against a limit the game keeps -- a pitch clamp, most of the time -- and
+    is against a limit the app keeps -- a pitch clamp, most of the time -- and
     the command ends with a warning naming where it stopped. A camera that
-    never moves at all, or a viewport with no camera on it, is not a game this
+    never moves at all, or a viewport with no camera on it, is not an app this
     can aim: the sequence fails and the client exits non-zero.
 
 text <string>
     SDL text input (UI text fields). Rest of the line is the string.
+
+event <name> [param]
+    Send the Urho3D event command_seq:<name> on the client, with the rest of
+    the line as its string field Param, at this point in the sequence. Any
+    client Lua may subscribe to it (the command_seq: prefix is on the
+    sandbox's safe list); the runner knows nothing of the names. The reply,
+    if any, is a line in the log, which is what a test reads.
+
+    The receivers in apps/vanilla's client (builtin/luanti):
+
+    event scan <resolution> <label>
+        Logs, under `scan <label>:` lines and ending in `scan <label>: end`,
+        what the client sees: a `self` line (position, yaw, pitch, hp, the
+        wielded item, the hotbar), the eye voxel's `light sky`/`lamp`, one
+        `hud` line per HUD element with its rectangle, the crosshair's hit,
+        a <resolution>x<resolution> grid of bins with the voxel each bin's
+        ray hits within ten voxels (and what it passed through), one
+        `object` line per object on the screen with its screen position,
+        and every element of an open form with its text, image and
+        rectangle. All rectangles are in window pixels, the coordinates
+        mouse_pos takes. A screenshot in the same sequence line pairs with
+        it; drive.py reads the block after every turn.
+
+    event scan_volume <radius> <label> [light]
+        Logs the voxels in a cube of that radius around the player, one
+        row per column, as names -- or the light nibbles with `light` --
+        which drive.py keeps as its map.
+
+    event look_body
+        Turns the view to the nearest fallen body's centre and logs
+        `look_body: at x, y, z` or `look_body: no body`.
+
+    event status_text <text>
+        Shows the text at the top right of the screen in the harness's
+        pale yellow, replacing the previous one; an empty text clears it.
+        drive.py writes the rule it is about to act on, so a person
+        watching the run sees what it is attempting.
+
+    The receivers in extensions/launch_world (the launcher room):
+
+    event room probe|ornament|still|attract|dissolve [bay]
+    event room preset <n>
+    event room station wall|floor|terminal
+        The room's switches for a scripted run, in place of keys:
+        extensions/launch_world/README.txt. The same switches at boot,
+        and the room's other knobs (the options rounds ARCH, LIGHT,
+        SOUND, PRESET; PITCH, the probe, the tonemap, ...), are
+        BUILDAT_LAUNCH_* environment variables, listed there under
+        "Environment".
+
+    event mode menu
+        Closes whatever is over the room and goes to the standing place,
+        so a sequence does not have to know which mode it left the room
+        in.
 
 quit
     Stop the sequence early. The client always exits at the end of -c anyway.

@@ -1,0 +1,3 @@
+<material>
+	<technique name="main/shadow_only_tech.xml" />
+</material>

@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/objects.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- The things in the world that are not nodes: other players, mobs, dropped
 -- items, and whatever else a game's mods put there.
@@ -25,6 +26,8 @@ M.CMD_SET_SPRITE = 3
 M.CMD_PUNCHED = 4
 M.CMD_UPDATE_ARMOR_GROUPS = 5
 M.CMD_SET_ANIMATION = 6
+M.CMD_ATTACH_TO = 8
+M.CMD_SET_PHYSICS_OVERRIDE = 9
 
 local PROPERTIES_VERSION = 4
 
@@ -78,7 +81,7 @@ function M.read_properties(r)
 	props.glow = r:u8()
 	props.breath_max = r:u16()
 	props.eye_height = r:f32()
-	r:f32() -- zoom_fov
+	props.zoom_fov = r:f32()
 	props.use_texture_alpha = r:u8() ~= 0
 	return props
 end
@@ -111,6 +114,44 @@ function M.apply_message(obj, r)
 	elseif cmd == M.CMD_SET_TEXTURE_MOD then
 		obj.texture_mod = r:string()
 		obj.visual_stale = true
+	elseif cmd == M.CMD_ATTACH_TO then
+		-- **What rides on something else** (AO_CMD_ATTACH_TO): the parent
+		-- object, the bone of its model, and the offset in that bone's
+		-- frame. Nothing here follows a bone -- a b3d skeleton's bones are
+		-- not reachable from this side -- so an attached object has no
+		-- position this can compute, and its own last one is wrong:
+		-- VoxeLibre's wieldview then rides at its player's feet rather
+		-- than in the hand, which is what the box saw ([OVER_SHOULDER]).
+		-- Luanti puts it in the hand or not at all, so this takes the
+		-- second: parent 0 detaches and the object is drawn again.
+		local parent = r:s16()
+		obj.attach_bone = r:string()
+		obj.attached_to = parent ~= 0 and parent or nil
+		-- Both ways round: attaching takes the drawn object away and
+		-- detaching brings it back, and both go through the same queue
+		obj.visual_stale = true
+	elseif cmd == M.CMD_SET_PHYSICS_OVERRIDE then
+		-- A mod's physics_override for the player this object is
+		-- (PlayerSAO::getPropertyPacket's AO_CMD_SET_PHYSICS_OVERRIDE):
+		-- the three multipliers, then the three flags as "not", then the
+		-- rest (5.9+); the player's physics multiplies by them. The
+		-- fixture's gravity 0 held nowhere here, and a game's speed
+		-- potion did nothing ([DIG_PARITY], 2026-09-22).
+		local ov = {speed = r:f32(), jump = r:f32(), gravity = r:f32()}
+		if r:remaining() >= 3 then
+			ov.sneak = r:u8() == 0 and 1 or 0
+			ov.sneak_glitch = r:u8() == 0 and 1 or 0
+			ov.new_move = r:u8() == 0
+		end
+		if r:remaining() >= 4 * 5 then
+			ov.speed_climb = r:f32(); ov.speed_crouch = r:f32()
+			ov.liquid_fluidity = r:f32(); ov.liquid_fluidity_smooth = r:f32()
+			ov.liquid_sink = r:f32()
+		end
+		if r:remaining() >= 4 * 2 then
+			ov.acceleration_default = r:f32(); ov.acceleration_air = r:f32()
+		end
+		obj.physics_override = ov
 	end
 end
 
