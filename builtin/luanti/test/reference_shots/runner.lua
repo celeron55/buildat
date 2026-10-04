@@ -580,7 +580,11 @@ core.register_on_joinplayer(function(player)
 		player:set_pos(v.pos)
 		player:set_velocity({x = 0, y = 0, z = 0})
 		player:set_acceleration({x = 0, y = 0, z = 0})
-		core.set_timeofday(HOURS[st.hour])
+		-- An hour not named in set.lua is read as its HHMM, for a STATES
+		-- ladder at steps the set has no names for ([DUSK_SKY]'s five
+		-- minutes)
+		core.set_timeofday(HOURS[st.hour] or (tonumber(st.hour:sub(1, 2)) *
+				60 + tonumber(st.hour:sub(3, 4))) / 1440)
 		hold_weather(st.weather)
 		still_objects(v.pos)
 		pin_view(player)

@@ -29,9 +29,9 @@ uniform vec3 cSunTint;
 // along the horizon in the sun's half -- so the glow lights the cube the
 // reflections are drawn from, as the band does. Unset reads as zero.
 uniform vec3 cDawnGlow;
-// [DUSK_SKY]: the pbr band's level over the sky's own, and the share of
-// the glow the dome away from the sun gets
-uniform vec2 cDuskBand;
+// [DUSK_SKY]: the pbr band's level over the sky's own, the share of the
+// glow the dome away from the sun gets, and the band's share of orange
+uniform vec3 cDuskBand;
 uniform vec3 cCloudColor;
 uniform float cStarFade;
 // What the game says is up there: half the width of the sun's and the moon's
@@ -333,10 +333,11 @@ void PS()
         // band is a radiance and not a colour. Mixed towards the sun's
         // tint at a fixed value it was a white patch on a black sky; an
         // orange at a few times the sky's own level dims as the sky
-        // does. Faded in across the horizon, so with the sun up -- the
+        // does. The share of orange is vanilla's (luanti_sky.dusk_tint():
+        // none at 18:40, all of it from 19:30), so with the sun high -- the
         // probed 05:45 among those hours -- it is the band it was.
         float dusk = cSkyPhysical > 0.5 && cDuskBand.x > 0.0 ?
-                1.0 - smoothstep(-0.03, 0.03, sun.y) : 0.0;
+                cDuskBand.z : 0.0;
         const vec3 LUM = vec3(0.2126, 0.7152, 0.0722);
         vec3 orange = vec3(1.0, 0.55, 0.25) / 0.6246 *
                 dot(color, LUM) * cDuskBand.x;

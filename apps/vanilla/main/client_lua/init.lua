@@ -1953,7 +1953,8 @@ local function update_sky(dt)
 		local glow = luanti_sky.dawn_glow(height)
 		local gc = luanti_sky.DAWN_COLOR
 		local ga = glow * luanti_sky.DAWN_AMBIENT
-		world_sky:set_dawn_glow(glow * gc.r, glow * gc.g, glow * gc.b)
+		world_sky:set_dawn_glow(glow * gc.r, glow * gc.g, glow * gc.b,
+				luanti_sky.dusk_tint(height))
 		zone.ambientColor = magic.Color(c.r * k + ga * gc.r,
 				c.g * k + ga * gc.g, c.b * k + ga * gc.b)
 		-- And what a face the sky does not reach gets instead: light off

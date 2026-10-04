@@ -217,10 +217,13 @@ end
 -- at all above it, where the day's own ramp is larger anyway and takes over
 -- without a step. height is the sine of the sun's elevation.
 --
--- -18 degrees is where the stretched day puts 4:00, which is where the user
--- saw a bright halo over black ground; the peak is official's
--- time_to_daynight_ratio around daybreak (0.25 at 4:52, 0.35 at 5:07).
-local PREDAWN_LOW = -0.309
+-- It opened at -18 degrees, where the stretched day puts 4:00 and the user
+-- saw a bright halo over black ground; [DUSK_SKY] opens it at -24, 03:40
+-- and 20:20, where the user put the starry sky fully uncovered -- the stars
+-- are (1 - day)^2 -- rather than ten minutes before the glow is gone. The
+-- peak is official's time_to_daynight_ratio around daybreak (0.25 at 4:52,
+-- 0.35 at 5:07).
+local PREDAWN_LOW = -0.403
 local PREDAWN_PEAK = 0.3
 
 function M.predawn(height)
@@ -239,13 +242,12 @@ end
 
 -- **The dawn glow** ([DAWN_LIGHT], the term the user set the two ramps
 -- aside for, 2026-09-25): the light of the sky before the sun, as a
--- radiance of its own on the same window as predawn() -- nothing below
--- PREDAWN_LOW, the most at the horizon, nothing above it -- in the sky's
+-- radiance of its own on [DUSK_SKY]'s ramp below -- in the sky's
 -- units (noon's dome is about 5.4). It does not raise the sun or the sky
 -- curve: the sky's band is brightened by it as a radiance, and the
 -- ambient, the bounce and the ground light take a share of it, in the
 -- glow's orange. Dusk is the mirror, the sun's height being the same.
---   BUILDAT_LUANTI_DAWN_GLOW     the band's radiance at the horizon
+--   BUILDAT_LUANTI_DAWN_GLOW     the band's radiance at its peak
 --   BUILDAT_LUANTI_DAWN_AMBIENT  the share of it the ambient terms take
 -- The defaults are the user's pick off local/options_for_DAWN_LIGHT/glow/,
 -- g1.0_a0.3 (2026-10-03).
@@ -261,17 +263,53 @@ M.DAWN_COLOR = {r = 1.0, g = 0.55, b = 0.25}
 M.DUSK_BAND = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_BAND") or "") or 2.0
 M.DUSK_AWAY = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_AWAY") or "") or 0.3
 
--- The glow's radiance at a sun's height, 0 outside the window
-function M.dawn_glow(height)
-	if height >= 0 or height <= PREDAWN_LOW then
-		return 0
+-- **The dusk as one ramp** ([DUSK_SKY], the user's anchors, 2026-10-04):
+-- blue sky with the sun -> bright orange -> orange -> dark orange -> dark.
+-- 18:40 as it was, the orange up from there, at its peak at 19:30, and the
+-- starry night fully uncovered at 20:20; the dawn the same mirrored about
+-- noon (03:40, 04:30, 05:20), which is the same sun heights. The glow was
+-- at its most just under the horizon and nothing just over it: a step at
+-- 19:00, and the band's tint turned orange within those same minutes.
+-- simplified: the heights are the untilted orbit's at those hours; a game
+-- that tilts it moves the hours a little.
+M.DUSK_FROM = 0.079   -- 18:40, 05:20
+M.DUSK_PEAK = -0.151  -- 19:30, 04:30
+M.DUSK_TO = PREDAWN_LOW  -- 20:20, 03:40
+-- How each part of it is crossed, the options round's two:
+--   BUILDAT_LUANTI_DUSK_CURVE=linear|eased
+M.DUSK_CURVE = buildat.get_env("BUILDAT_LUANTI_DUSK_CURVE") or "eased"
+local function dusk_shape(u)
+	u = clamp01(u)
+	if M.DUSK_CURVE == "linear" then
+		return u
 	end
-	return M.DAWN_GLOW * (height - PREDAWN_LOW) / -PREDAWN_LOW
+	return u * u * (3 - 2 * u)
 end
-assert(M.dawn_glow(0.1) == 0 and M.dawn_glow(-0.4) == 0,
-		"no glow with the sun up or before the window")
-assert(math.abs(M.dawn_glow(-0.0001) - M.DAWN_GLOW) < 0.001,
-		"the most at the horizon")
+
+-- The share of orange in the band round the sun: none at 18:40, all of it
+-- from 19:30 on (LuantiSky's cDuskBand.z)
+function M.dusk_tint(height)
+	return dusk_shape((M.DUSK_FROM - height) / (M.DUSK_FROM - M.DUSK_PEAK))
+end
+
+-- The glow's radiance at a sun's height: up from 18:40, the most at 19:30,
+-- gone at 20:20
+function M.dawn_glow(height)
+	if height >= M.DUSK_FROM or height <= M.DUSK_TO then
+		return 0
+	elseif height >= M.DUSK_PEAK then
+		return M.DAWN_GLOW * M.dusk_tint(height)
+	end
+	return M.DAWN_GLOW * dusk_shape((height - M.DUSK_TO) /
+			(M.DUSK_PEAK - M.DUSK_TO))
+end
+assert(M.dawn_glow(0.1) == 0 and M.dawn_glow(-0.45) == 0,
+		"no glow before 18:40 or after 20:20")
+assert(math.abs(M.dawn_glow(M.DUSK_PEAK) - M.DAWN_GLOW) < 0.001,
+		"the most at 19:30")
+assert(math.abs(M.dawn_glow(-0.001) - M.dawn_glow(0.001)) < 0.02 * M.DAWN_GLOW,
+		"no step where the sun crosses the horizon")
+assert(M.dusk_tint(0.2) == 0 and M.dusk_tint(-0.3) == 1, "the tint's ends")
 
 if not (buildat.get_env("BUILDAT_LUANTI_NO_PREDAWN") or ""):find("%S") then
 	assert(M.predawn(0.2) == 0 and M.predawn(-0.5) == 0,
@@ -464,10 +502,11 @@ function M.new(scene, sun_dir, defaults)
 	end
 
 	-- [DAWN_LIGHT]'s glow on the band along the horizon, a radiance
-	function self:set_dawn_glow(r, g, b)
+	-- and tint, the band's share of orange (M.dusk_tint())
+	function self:set_dawn_glow(r, g, b, tint)
 		material:SetShaderParameter("DawnGlow", magic.Vector3(r, g, b))
-		material:SetShaderParameter("DuskBand", magic.Vector2(
-				M.DUSK_BAND, M.DUSK_AWAY))
+		material:SetShaderParameter("DuskBand", magic.Vector3(
+				M.DUSK_BAND, M.DUSK_AWAY, tint or 0))
 	end
 
 	-- The game's own picture of it, or nil for the shader's painted square.
