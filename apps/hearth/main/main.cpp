@@ -588,7 +588,8 @@ struct Module: public interface::Module
 				text_ok(body, BODY_MAX, true, "the message");
 		if(!why.empty())
 			throw Exception(why);
-		const int64_t topic_id = releases_topic();
+		const int64_t topic_id = top_topic("Releases",
+				"Packages released on Aitta, posted from there");
 		const int64_t t = now_s();
 		Q i(m_db, "INSERT INTO threads(topic, title, author, created, last, "
 				"subject, kind) VALUES(?, ?, ?, ?, ?, ?, 'release')");
@@ -602,15 +603,16 @@ struct Module: public interface::Module
 				cs(f.aitta), (long long)id);
 	}
 
-	// The top-level topic "Releases", made the first time
-	int64_t releases_topic()
+	// A top-level topic Hearth posts in by itself, made the first time
+	int64_t top_topic(const char *name, const char *about)
 	{
-		Q q(m_db, "SELECT id FROM topics WHERE parent = 0 AND name = 'Releases' "
+		Q q(m_db, "SELECT id FROM topics WHERE parent = 0 AND name = ? "
 				"ORDER BY id LIMIT 1");
+		q.b(ss_(name));
 		if(q.step())
 			return q.i(0);
-		exec("INSERT INTO topics(parent, name, about) VALUES(0, 'Releases', "
-				"'Packages released on Aitta, posted from there')");
+		Q i(m_db, "INSERT INTO topics(parent, name, about) VALUES(0, ?, ?)");
+		i.b(ss_(name)).b(ss_(about)).step();
 		return sqlite3_last_insert_rowid(m_db);
 	}
 
@@ -1371,7 +1373,12 @@ struct Module: public interface::Module
 			return v;
 		}
 		if(cmd == "new_thread"){
-			const int64_t topic_id = jint(q, "topic");
+			// "feedback": the client's Feedback... on an app, which knows
+			// the app's subject and not this Hearth's topics
+			// ([PACKAGE_SUBJECT])
+			const int64_t topic_id = q.get("feedback").is_true() ?
+					top_topic("Feedback", "About the packages at home here, "
+					"from their users' clients") : jint(q, "topic");
 			const ss_ title = jstr(q, "title"), body = jstr(q, "body"),
 					subject = jstr(q, "subject");
 			if(!topic(topic_id).is_object())

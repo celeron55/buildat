@@ -196,6 +196,12 @@ local function connect_or_show_error(address, fallbacks)
 	end)
 end
 
+-- A connect asked for by the launch grid ("Feedback..." on an app)
+function M.connect(address)
+	api.stop_local_server()
+	connect_or_show_error(address)
+end
+
 function M.show_connect_to_server()
 	api.stop_local_server()
 	local root = uistack.main:push({desc="connect_to_server"})

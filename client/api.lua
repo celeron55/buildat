@@ -529,9 +529,13 @@ end
 -- polls from a frame handler: the blocking one freezes the frame for as
 -- long as it takes ([BOX_PLAYTEST_2] 12). An address is a string and
 -- the client is what parses it.
+local feedback = nil
 buildat.safe.connect_start = function(address)
 	if type(address) ~= "string" or #address > 256 then
 		return false, "connect_start(address): a string"
+	end
+	if feedback and feedback.address ~= address then
+		feedback = nil
 	end
 	__buildat_connect_server_start(address)
 	return true
@@ -550,6 +554,21 @@ buildat.safe.parse_json = function(text)
 	return __buildat_parse_json(text)
 end
 buildat.safe.connect_poll = __buildat_connect_server_poll
+-- **"Feedback..." on an installed app** ([PACKAGE_SUBJECT]): the grid
+-- (trusted) sets what the user is about to tell the app's home Hearth
+-- and connects there; the Hearth's client takes it once -- the package,
+-- its version, this engine's and the platform, nothing else. A connect
+-- to another address drops it.
+buildat.set_feedback = function(f)
+	feedback = f
+end
+-- feedback() -> {subject, package, version, engine, platform} or nil
+buildat.safe.feedback = function()
+	local f = feedback
+	feedback = nil
+	return f and {subject = f.subject, package = f.package,
+			version = f.version, engine = f.engine, platform = f.platform}
+end
 -- **Back to the launcher from a game** ([MENU_CONTEXT]): the connection
 -- dropped, the local server stopped and the sandbox's leavings cleared.
 -- The launcher's own screens are its business; this is the client half.

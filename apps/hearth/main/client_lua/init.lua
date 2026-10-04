@@ -455,13 +455,42 @@ buildat.sub_packet("hr:notify", function(data)
 	end
 end)
 
+-- **"Feedback..." on an app** ([PACKAGE_SUBJECT]): the launch grid came
+-- here with the app's package and versions, which start the message and
+-- go with the thread as its subject
+local function show_feedback(f)
+	leave_home()
+	open_thread = nil
+	local w = new_page("Feedback about " .. f.package .. " " .. f.version)
+	text(w, "Goes to this Hearth's Feedback topic, which its makers read",
+			GREY)
+	local title = edit(w, "A title")
+	local body = edit(w, "The message (Markdown)", true)
+	body:SetText("App: " .. f.package .. " " .. f.version .. "\nEngine: " ..
+			f.engine .. "\nPlatform: " .. f.platform .. "\n\n")
+	button(w, "Send", function()
+		req("new_thread", {feedback = true, subject = f.subject,
+				title = title:GetText(), body = body:GetText()},
+				function(new_id)
+			show_thread(new_id)
+		end)
+	end)
+	button(w, "Back", home)
+end
+
 accounts.on_joined = function()
 	req("me", nil, function(r)
 		me = r
 		-- BUILDAT_HEARTH_OPEN=<thread>: a scripted client opens it, as a
 		-- click on it would
 		local open = tonumber(buildat.get_env("BUILDAT_HEARTH_OPEN") or "")
-		if open then
+		local f = buildat.feedback()
+		if f then
+			if scripted then
+				log:info("hr feedback: " .. encode(f))
+			end
+			show_feedback(f)
+		elseif open then
 			show_thread(open)
 		else
 			home()

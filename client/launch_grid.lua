@@ -213,6 +213,37 @@ local function category_of(a)
 	return nil
 end
 
+-- An installed app's home Hearth from its meta.json, as the address the
+-- client connects to: Hearth answers the web and the client on one port
+-- ("http://h:p/" is "h:p"; "https://h/" stays, a proxy with TLS)
+local function feedback_target(source)
+	local f = io.open(source.path .. "/meta.json", "rb")
+	if not f then
+		return nil
+	end
+	local m = __buildat_parse_json(f:read("*a"))
+	f:close()
+	if type(m) ~= "table" or type(m.home_hearth) ~= "string" then
+		return nil
+	end
+	local scheme, host = m.home_hearth:match("^(https?)://([^/?#]+)")
+	if not scheme then
+		return nil
+	end
+	local kf = io.open(source.path .. "/../key", "rb")
+	local key = kf and kf:read("*a"):match("%x+") or ""
+	if kf then kf:close() end
+	local author, name, version = source.name:match("^(.-)%.(.-)@(.*)$")
+	return {
+		url = m.home_hearth,
+		address = scheme == "https" and "https://" .. host or
+				(host:find(":%d+$") and host or host .. ":80"),
+		subject = author .. "/" .. name .. " " .. key,
+		package = author .. "/" .. name, version = version,
+		engine = tostring(buildat.version()), platform = GetPlatform(),
+	}
+end
+
 function M.actions(log)
 	local out = {}
 	local app_sizes = {}
@@ -251,6 +282,21 @@ function M.actions(log)
 				run = function()
 					do_launch(log, from, {app = source.name,
 						params = {aitta_move_saves = 1}})
+				end}
+		end
+		-- **"Feedback..." to the app's home Hearth** ([PACKAGE_SUBJECT]),
+		-- the package and versions filled in there
+		local home = source.kind == "installed" and actions and actions[1] and
+				feedback_target(source)
+		if home then
+			actions[#actions + 1] = {id = "feedback",
+				label = tostring(actions[1].label) .. " " ..
+						source.name:match("@(.*)$") .. ": feedback...",
+				description = "Tell the app's makers about it, at " ..
+						home.url,
+				run = function()
+					buildat.set_feedback(home)
+					M.screens().connect(home.address)
 				end}
 		end
 		local seen = {}

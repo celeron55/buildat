@@ -8,7 +8,8 @@
 # naming another. Hearth's admin sets the release sources (the Aitta, and
 # the Hearth's own address): demo 1.0 becomes one thread in "Releases",
 # by "tester (Aitta)", with the changelog; elsewhere does not; a restart
-# makes no second thread.
+# makes no second thread. "Feedback..." on the installed demo's tile
+# opens the composer there with the package and versions.
 #
 #   util/release_thread_check.sh
 set -u
@@ -52,6 +53,9 @@ grep -aq 'ai: {"id":1,"ok":true' "$t/cl_a.log" || fail "the bind did not go thro
 publish(){ # name home
 	mkdir -p "$t/$1/main"
 	echo 'int x;' > "$t/$1/main/main.cpp"
+	mkdir -p "$t/$1/launcher"
+	echo "return function(ctx) return {{id = 'play', label = '$1',
+		run = function() ctx.launch{} end}} end" > "$t/$1/launcher/init.lua"
 	printf '# 1.0\r\n\r\n- the first **release** of %s\r\n' "$1" > "$t/$1/CHANGELOG.md"
 	printf '{"author": "tester", "name": "%s", "version": "1.0",
 		"engine_api": 1, "license_code": "MIT", "license_media": "CC0-1.0",
@@ -61,7 +65,9 @@ publish(){ # name home
 	zip=$("$b" aitta pack "$t/$1" "$t/key" "$t/out_$1" 2>/dev/null) || fail "pack $1"
 	"$b" aitta publish "$zip" 127.0.0.1:$A 2>&1 | grep -q "listed: tester/$1/1.0" ||
 		fail "publish $1"
+	zips="$zips $zip"
 }
+zips=
 publish demo "http://127.0.0.1:$H/"
 publish elsewhere "https://forum.example"
 curl -s "http://127.0.0.1:$A/api/aitta/release?id=tester/demo/1.0" |
@@ -90,6 +96,25 @@ echo "$page" | grep -q "<strong>release</strong> of demo" || fail "the changelog
 curl -s "http://127.0.0.1:$H/" | grep -q "Releases" || fail "no Releases topic"
 grep -q "tester/elsewhere" "$t/hearth.log" && fail "a release of another Hearth got a thread"
 
+# "Feedback..." on the installed demo's tile: the client connects to its
+# home Hearth, and the composer there has the package and versions
+for z in $zips; do
+	"$b" aitta install "$z" "$t/user" > /dev/null 2>&1 || fail "install $z"
+done
+BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
+BUILDAT_HEARTH_REQS='{"cmd":"new_thread","feedback":true,"subject":"tester/demo k","title":"It hums","body":"a check"}' \
+	timeout 90 bin/buildat -D "$t/user" -C "$t/cache_f" -w 800x600 -l 3 \
+	-o sound_mute=1 -a installed/tester.demo@1.0/feedback -c @"$t/cmds_h" \
+	> "$t/cl_f.log" 2>&1
+f=$(grep -a "hr feedback: " "$t/cl_f.log")
+[ -n "$f" ] || fail "no feedback composer ($(grep -a "ERROR\|WARNING" "$t/cl_f.log" | tail -3))"
+for want in '"package":"tester/demo"' '"version":"1.0"' \
+		"\"subject\":\"tester/demo $(cat "$t/pub")\"" '"platform":"'; do
+	echo "$f" | grep -qF "$want" || fail "the composer lacks $want: $f"
+done
+grep -aq 'hr: {"id":1001,"ok":true' "$t/cl_f.log" || fail "the feedback thread: $(grep -a 'hr: ' "$t/cl_f.log" | tail -1)"
+curl -s "http://127.0.0.1:$H/" | grep -q "Feedback" || fail "no Feedback topic"
+
 # A restart reads the Aitta again and makes no second thread
 kill $ph; wait $ph 2>/dev/null
 ph=$(start hearth $H "$t/hearth2.log")
@@ -99,6 +124,6 @@ for _ in $(seq 60); do
 done
 sleep 5
 grep -q "is the thread" "$t/hearth2.log" && fail "a second thread after the restart"
-n=$(curl -s "http://127.0.0.1:$H/t/2" | grep -c "demo 1.0")
-[ "$n" = 0 ] || fail "a second thread after the restart (/t/2)"
-echo "PASS: demo 1.0 is one release thread with its changelog; elsewhere is not"
+n=$(curl -s "http://127.0.0.1:$H/t/3" | grep -c "demo 1.0")
+[ "$n" = 0 ] || fail "a second thread after the restart (/t/3)"
+echo "PASS: demo 1.0 is one release thread with its changelog; elsewhere is not; Feedback... reaches the composer"
