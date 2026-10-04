@@ -44,7 +44,7 @@ code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 client(){ # name password log requests [env...]
 	local n=$1 pw=$2 log=$3 reqs=$4 ms=${MS:-8000}
 	shift 4
-	printf 'delay %s\nquit\n' $ms > "$t/cmds_$n"
+	printf "${CMDS:-delay %s\\nquit\\n}" $ms > "$t/cmds_$n"
 	env BUILDAT_HEARTH_NAME=$n BUILDAT_HEARTH_PASSWORD=$pw \
 		BUILDAT_HEARTH_CODE=$code BUILDAT_HEARTH_REQS="$reqs" "$@" \
 		timeout 90 bin/buildat -D "$t/cl_$n" -w 800x600 -l 3 -o sound_mute=1 \
@@ -215,4 +215,13 @@ for want in "<strong>bold</strong> <em>em</em> <del>del</del> <code>code</code>"
 done
 grep -qi 'href="[^"]*script\|<script\|<img' "$t/page" &&
 	fail "the markup let through: $(grep -aio 'href="[^"]*script[^"]*"\|<script\|<img' "$t/page")"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; found by search; a new account limited; reported, hidden with a statement, appealed, restored"
+
+# 8. The reply field is multi-line: Enter breaks the line, Up moves a row
+# (the field's, not the buttons' -- ui_utils' keyboard page), Ctrl+Enter
+# sends
+CMDS='delay 5000\ntext one two\ndelay 200\nkeypress Return\ndelay 200\ntext three\ndelay 200\nkeypress Return\ndelay 200\nkeypress Return\ndelay 200\ntext four\ndelay 200\nkeypress Up\ndelay 200\nkeypress Up\ndelay 200\ntext X\ndelay 200\nkeydown ctrl\ndelay 100\nkeypress Return\ndelay 100\nkeyup ctrl\ndelay 1500\nquit\n' \
+	client admin checkpass12 "$t/admin9.log" '' BUILDAT_HEARTH_OPEN=1
+get /t/1 > /dev/null
+grep -qPz '<p>one two\nXthree</p>\n<p>four</p>' "$t/page" ||
+	fail "the multi-line reply: $(grep -a -B1 -A2 'Xthree\|one two' "$t/page" | head -6)"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored"

@@ -124,11 +124,13 @@ local function list(parent)
 	return l, add
 end
 
-local function edit(parent, label)
+-- multi: a message's field -- Enter breaks the line, Ctrl+Enter finishes
+local function edit(parent, label, multi)
 	text(parent, label)
 	local e = parent:CreateChild("LineEdit")
 	e:SetStyleAuto()
-	e.minHeight = 26
+	e.minHeight = multi and 96 or 26
+	e.multiLine = multi == true
 	e.textSelectable = true
 	e.textCopyable = true
 	return e
@@ -220,9 +222,9 @@ show_topic = function(id)
 			end)
 		end
 		local title = edit(w, "A new thread's title")
-		-- simplified: one line; a multi-line editor with the markup's
-		-- buttons and a preview comes with the markup
-		local body = edit(w, "Its first message")
+		-- simplified: no markup buttons and no preview yet; the text is
+		-- CommonMark, which reads as it is
+		local body = edit(w, "Its first message (Markdown)", true)
 		button(w, "Start the thread", function()
 			req("new_thread", {topic = id, title = title:GetText(),
 					body = body:GetText()}, function(new_id)
@@ -289,7 +291,7 @@ show_thread = function(id)
 			end
 			l.viewPosition = magic.IntVector2(0, 1000000)
 		end}
-		local e = edit(w, "Reply")
+		local e = edit(w, "Reply (Markdown; Ctrl+Enter sends)", true)
 		local function send()
 			if e:GetText() == "" then
 				return

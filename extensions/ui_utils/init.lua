@@ -541,7 +541,9 @@ function M.safe.keyboard_page(win)
 		local key = event_data:GetInt("Key")
 		local focus = magic.ui.focusElement
 		local typing = focus ~= nil and focus:GetTypeName() == "LineEdit"
-		if key == KEY_UP or key == KEY_DOWN or
+		-- A multi-line field's rows are its up and down ([HEARTH_MVP])
+		local rows = typing and focus:IsMultiLine()
+		if (not rows and (key == KEY_UP or key == KEY_DOWN)) or
 				(not typing and (key == KEY_LEFT or key == KEY_RIGHT)) then
 			local at = 0
 			for i, e in ipairs(page.items) do

@@ -2009,6 +2009,17 @@ function M.define(dst, util)
 			-- rest; see button_menu_nav() in extensions/ui_utils
 			GetTypeName = util.self_function(
 					"GetTypeName", {"string"}, {"UIElement"}),
+			-- Whether this is a multi-line LineEdit, asked of the focus,
+			-- which reads as a UIElement here ([HEARTH_MVP]: its rows own
+			-- up and down, see keyboard_page() in extensions/ui_utils)
+			IsMultiLine = function(self)
+				local m = getmetatable(self)
+				local raw = m and m.unsafe
+				if raw == nil then
+					error("IsMultiLine: not an element")
+				end
+				return raw:GetTypeName() == "LineEdit" and raw:IsMultiLine()
+			end,
 			GetText = function(self)
 				local m = getmetatable(self)
 				local raw = m and m.unsafe
@@ -2248,6 +2259,9 @@ function M.define(dst, util)
 			textSelectable = util.simple_property("boolean"),
 			-- A field to read and copy from, not to type into
 			editable = util.simple_property("boolean"),
+			-- Enter breaks the line, Ctrl+Enter finishes, the text wraps
+			-- ([HEARTH_MVP]: a message has paragraphs)
+			multiLine = util.simple_property("boolean"),
 		},
 	})
 
