@@ -6,15 +6,21 @@
 #include <c55/string_util.h>
 #include <c55/filesys.h>
 #include <fstream>
+#include <set>
 #define MODULE "rccpp_util"
 
 namespace server {
 
-sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
+// Every file a module's source includes, and what those include in turn:
+// the build cache is keyed on all of them, and a header two steps away --
+// interface/compress.h through luanti_mapgen's vendor/serialization.cpp --
+// changed a function's signature and left a cached module that no longer
+// linked (2026-10-03). Each file once, in the order first reached.
+static void list_includes_of(const ss_ &path, const sv_<ss_> &include_dirs,
+		std::set<ss_> &seen, sv_<ss_> &result)
 {
 	ss_ base_dir = c55fs::stripFilename(path);
 	std::ifstream ifs(path);
-	sv_<ss_> result;
 	ss_ line;
 	while(std::getline(ifs, line)){
 		c55::Strfnd f(line);
@@ -33,13 +39,17 @@ sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 			include_dirs_now.insert(include_dirs_now.begin(), base_dir);
 		else
 			include_dirs_now.push_back(base_dir);
-		for(const ss_ &dir : include_dirs){
+		for(const ss_ &dir : include_dirs_now){
 			ss_ include_path = dir+"/"+include;
 			//log_v(MODULE, "Trying %s", cs(include_path));
 			std::ifstream ifs2(include_path);
 			if(ifs2.good()){
-				result.push_back(include_path);
 				found = true;
+				if(seen.insert(include_path).second){
+					result.push_back(include_path);
+					list_includes_of(include_path, include_dirs, seen,
+							result);
+				}
 				break;
 			}
 		}
@@ -48,6 +58,13 @@ sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
 			log_d(MODULE, "Include file not found for watching: %s", cs(include));
 		}
 	}
+}
+
+sv_<ss_> list_includes(const ss_ &path, const sv_<ss_> &include_dirs)
+{
+	std::set<ss_> seen;
+	sv_<ss_> result;
+	list_includes_of(path, include_dirs, seen, result);
 	return result;
 }
 

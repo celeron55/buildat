@@ -90,7 +90,9 @@ bool Geometry::SetDrawRange(PrimitiveType type, unsigned indexStart, unsigned in
         URHO3D_LOGERROR("Null index buffer and no raw index data, can not define indexed draw range");
         return false;
     }
-    if (indexBuffer_ && indexStart + indexCount > indexBuffer_->GetIndexCount())
+    // Buildat: as two comparisons, so that start + count cannot wrap past the check
+    if (indexBuffer_ && (indexStart > indexBuffer_->GetIndexCount() ||
+            indexCount > indexBuffer_->GetIndexCount() - indexStart))
     {
         URHO3D_LOGERROR("Illegal draw range " + String(indexStart) + " to " + String(indexStart + indexCount - 1) + ", index buffer has " +
                  String(indexBuffer_->GetIndexCount()) + " indices");
@@ -125,7 +127,8 @@ bool Geometry::SetDrawRange(PrimitiveType type, unsigned indexStart, unsigned in
     if (indexBuffer_)
     {
         // We can allow setting an illegal draw range now if the caller guarantees to resize / fill the buffer later
-        if (checkIllegal && indexStart + indexCount > indexBuffer_->GetIndexCount())
+        if (checkIllegal && (indexStart > indexBuffer_->GetIndexCount() ||
+                indexCount > indexBuffer_->GetIndexCount() - indexStart))
         {
             URHO3D_LOGERROR("Illegal draw range " + String(indexStart) + " to " + String(indexStart + indexCount - 1) +
                      ", index buffer has " + String(indexBuffer_->GetIndexCount()) + " indices");

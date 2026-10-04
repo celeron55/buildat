@@ -1,6 +1,6 @@
 /*
 ** Table library.
-** Copyright (C) 2005-2016 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2026 Mike Pall. See Copyright Notice in luajit.h
 **
 ** Major portions taken verbatim or adapted from the Lua interpreter.
 ** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
@@ -129,6 +129,26 @@ LJLIB_LUA(table_remove) /*
   end
 */
 
+LJLIB_LUA(table_move) /*
+  function(a1, f, e, t, a2)
+    CHECK_tab(a1)
+    CHECK_int(f)
+    CHECK_int(e)
+    CHECK_int(t)
+    if a2 == nil then a2 = a1 end
+    CHECK_tab(a2)
+    if e >= f then
+      local d = t - f
+      if t > e or t <= f or a2 ~= a1 then
+	for i=f,e do a2[i+d] = a1[i] end
+      else
+	for i=e,f,-1 do a2[i+d] = a1[i] end
+      end
+    end
+    return a2
+  end
+*/
+
 LJLIB_CF(table_concat)		LJLIB_REC(.)
 {
   GCtab *t = lj_lib_checktab(L, 1);
@@ -139,7 +159,7 @@ LJLIB_CF(table_concat)		LJLIB_REC(.)
   SBuf *sb = lj_buf_tmp_(L);
   SBuf *sbx = lj_buf_puttab(sb, t, sep, i, e);
   if (LJ_UNLIKELY(!sbx)) {  /* Error: bad element type. */
-    int32_t idx = (int32_t)(intptr_t)sbufP(sb);
+    int32_t idx = (int32_t)(intptr_t)sb->w;
     cTValue *o = lj_tab_getint(t, idx);
     lj_err_callerv(L, LJ_ERR_TABCAT,
 		   lj_obj_itypename[o ? itypemap(o) : ~LJ_TNIL], idx);
