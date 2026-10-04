@@ -238,8 +238,8 @@ struct Module: public interface::Module, public replicate::Interface
 					static int64_t said_us = 0;
 					if(t0 - said_us > 5000000){
 						said_us = t0;
-						log_v(MODULE, "peer %i held: %zu bytes behind its "
-								"socket, %u nodes dirty", ps.peer_id,
+						log_i(MODULE, "peer %i held: %zu bytes queued for it or "
+								"unhandled by it, %u nodes dirty", ps.peer_id,
 								pending[ps.peer_id],
 								ps.scene_state.dirtyNodes_.Size());
 					}

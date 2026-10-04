@@ -289,6 +289,11 @@ struct Peer
 	size_t out_pending() const {
 		return out_buf.size() - out_sent + out_queued_bytes;
 	}
+	// What the client says it has read and not yet handled
+	// (network:backlog, [CHUNK_RELOAD]): its read-ahead empties the
+	// socket, so out_pending() alone reads a client 64 MB behind as
+	// caught up. A peer's claim slows only its own world.
+	size_t client_backlog = 0;
 	// The next packet into out_buf, if it is empty and there is one
 	void refill()
 	{
@@ -1261,6 +1266,12 @@ struct Module: public interface::Module, public network::Interface
 		try {
 			peer.packet_stream.input(peer.socket_buffer,
 			[&](const ss_ &name, const ss_ &data){
+				if(name == "network:backlog"){
+					peer.client_backlog = data.size() <= 10 &&
+							data.find_first_not_of("0123456789") == ss_::npos ?
+							strtoull(data.c_str(), nullptr, 10) : 0;
+					return;
+				}
 				// To whoever subscribed to it. A name nobody did has no
 				// event type, and is dropped rather than given one: every
 				// type is kept for the life of the process, and a client
@@ -1830,7 +1841,8 @@ struct Module: public interface::Module, public network::Interface
 	size_t pending_bytes(PeerInfo::Id peer)
 	{
 		auto it = m_peers.find(peer);
-		return it == m_peers.end() ? 0 : it->second.out_pending();
+		return it == m_peers.end() ? 0 :
+				it->second.out_pending() + it->second.client_backlog;
 	}
 
 	void* get_interface()

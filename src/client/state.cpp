@@ -158,6 +158,18 @@ struct CState: public State
 	// that case
 	static const int64_t KEEPALIVE_US = 5000000;
 	int64_t m_last_send_us = 0;
+	// **What this end has read and not handled, told to the server**
+	// ([CHUNK_RELOAD]): the read-ahead below takes the socket dry, so the
+	// server's queue for this client looked empty while 64 MB of it waited
+	// here, and replicate never held back. The view range stepped up and
+	// down for a minute sent every chunk's create and remove, and the
+	// client played them back for minutes after, clearing and reloading
+	// the world around a player standing still. With the backlog counted
+	// the server holds the nodes dirty, and a chunk dropped and wanted
+	// again before it goes is not sent at all.
+	static const int64_t BACKLOG_REPORT_US = 100000;
+	size_t m_backlog_said = 0;
+	int64_t m_backlog_said_us = 0;
 	// The connect running on a worker ([BOX_PLAYTEST_2] 12). The thread
 	// touches m_socket and nothing else of this, and the main thread keeps
 	// off the socket while m_connect_result says 0; the result is stored
@@ -270,6 +282,8 @@ struct CState: public State
 		m_keepalive_seen = false;
 		m_last_data_us = 0;
 		m_last_send_us = 0;
+		m_backlog_said = 0;
+		m_backlog_said_us = 0;
 	}
 
 	void update()
@@ -320,6 +334,13 @@ struct CState: public State
 		// would sit on them until the server spoke again.
 		if(!m_socket_buffer.empty() || !m_parsed.empty())
 			handle_socket_buffer();
+		if(m_connected && !m_disconnected &&
+				backlog_bytes() != m_backlog_said &&
+				now - m_backlog_said_us >= BACKLOG_REPORT_US){
+			m_backlog_said = backlog_bytes();
+			m_backlog_said_us = now;
+			send_packet("network:backlog", itos(m_backlog_said));
+		}
 	}
 
 	// The server is gone. There is nothing to reconnect to and no way to put
