@@ -940,6 +940,43 @@ ban_page = function(name, back)
 	button(r, "Back", function() users_page(back) end)
 end
 
+-- [STARPORT_DEFAULT_URL]: "https://host[:port]", the address the admin
+-- reached the server by, when it is under TLS and a public one -- not this
+-- machine's or the LAN's, which no player elsewhere reaches. nil if not.
+-- simplified: the private ranges by the host's text; a public name that
+-- resolves to a LAN address passes
+local function public_https(a)
+	a = a:gsub("^%a+://", ""):gsub("/.*$", "")
+	local host = (a:match("^%[(.-)%]") or a:match("^[^:]*")):lower()
+	local port = a:match("^%[.-%]:(%d+)$") or a:match("^[^:]*:(%d+)$")
+	local private = host == "" or host == "localhost" or host == "::1" or
+			not host:find("[%.:]") or host:match("%.local$") or
+			host:match("%.lan$") or host:match("^127%.") or
+			host:match("^10%.") or host:match("^192%.168%.") or
+			host:match("^169%.254%.") or host:match("^0%.") or
+			host:match("^172%.1[6-9]%.") or host:match("^172%.2%d%.") or
+			host:match("^172%.3[01]%.") or host:match("^f[cd]%x*:") or
+			host:match("^fe80:")
+	if private then
+		return nil
+	end
+	if host:find(":") then
+		host = "[" .. host .. "]"
+	end
+	return "https://" .. host .. ((port and port ~= "443") and ":" .. port or "")
+end
+assert(public_https("https://Forum.Example.org:443") == "https://forum.example.org")
+assert(public_https("fp.example.org:8443") == "https://fp.example.org:8443")
+assert(public_https("wss://[2001:db8::1]:30000/x") == "https://[2001:db8::1]:30000")
+for _, a in ipairs({"127.0.0.1:443", "localhost", "192.168.1.5:80",
+		"https://172.20.0.1", "[::1]:443", "[fd00::1]:5", "box.local", "box"}) do
+	assert(public_https(a) == nil, a)
+end
+local function admin_public_address()
+	return buildat.connection_encrypted() and
+			public_https(buildat.server_address() or "") or nil
+end
+
 -- A page of fields under the users page: a password for an account, or a
 -- new account's name and password
 local function ask_page(title, labels, on_done)
@@ -1122,7 +1159,11 @@ users_page = function(back)
 	button(w, ({off = "Starport IDs: off",
 		anyone = "Starport IDs: anyone may join",
 		approved = "Starport IDs: approved only"})[ids] or ids, function()
-		M.admin("setting", "starport_ids", next_ids[ids] or "off")
+		-- Turned on: where the admin reached the server goes along, the
+		-- public address of a starport.json that names no Starport yet
+		local mode = next_ids[ids] or "off"
+		local addr = ids == "off" and admin_public_address()
+		M.admin("setting", "starport_ids", addr and mode .. " " .. addr or mode)
 	end)
 	local r2 = row(w)
 	button(r2, "Starport...", function() M.starport_page(back) end)
@@ -1287,11 +1328,14 @@ local STARPORT_HELP = {
 	"Add a Starport: its address. A host name alone, like "..
 	"starport.example.org, means http://starport.example.org:29595, "..
 	"Starport's own port. A Starport behind an https proxy is written "..
-	"https://starport.example.org.",
+	"https://starport.example.org. With none added, the field has "..
+	"https://starport.buildat.org in it; turning Starport IDs on with none "..
+	"added adds that one, unlisted.",
 	"# The listing",
 	"What the Starport shows of this server. Nothing is sent until Save the "..
 	"listing; a dropdown with a red ? is a choice not made yet, which the "..
-	"Starport refuses (its status then says which).",
+	"Starport refuses (its status then says which). Unlisted, they may be "..
+	"left out: the name is then the server's address.",
 	"Name: what the list shows, 1 to 60 characters. Example: Torkkola "..
 	"builders' plans.",
 	"Description: a sentence or two, up to 500 characters. Example: A shared "..
@@ -1300,7 +1344,9 @@ local STARPORT_HELP = {
 	"the announce comes from, and this server's own port. Behind a proxy "..
 	"with TLS, its https:// address, which clients join by a secure "..
 	"WebSocket; the Starport checks the server through it. Examples: "..
-	"https://fp.example.org, fp.example.org:30000.",
+	"https://fp.example.org, fp.example.org:30000. Empty, and this page "..
+	"reached by https at an address that is not this machine's or the "..
+	"LAN's, the field has that address in it.",
 	"Sign-up address: with access \"external\" only, where an account is "..
 	"made before joining. Example: https://example.org/join.",
 	"Region: where the server is, for players choosing a near one and for a "..
@@ -1457,7 +1503,8 @@ starport_page = function(back, confirm_remove)
 		end
 	end
 	local add = field(w, "Add a Starport", false, function() end)
-	add:SetText("https://")
+	-- One press of Add while none is named ([STARPORT_DEFAULT_URL])
+	add:SetText(#c.starports == 0 and info.default_starport or "https://")
 	button(w, "Add", function()
 		local url = add:GetText():gsub("/+$", "")
 		if url:match("^https?://[%w%.%-]+[:%d]*$") then
@@ -1483,6 +1530,10 @@ starport_page = function(back, confirm_remove)
 		end
 		for _, f in ipairs(CHOICES) do
 			draft.choice[f[1]] = valid(c[f[1]], f[3])
+		end
+		-- Offered, saved with the listing ([STARPORT_DEFAULT_URL])
+		if draft.text.address == "" then
+			draft.text.address = admin_public_address() or ""
 		end
 		-- Access is derived unless the file says one of its two
 		if draft.choice.access == nil then

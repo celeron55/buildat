@@ -194,14 +194,22 @@ static int severity(const ss_ &reason)
 // "" when the announce's categories are whole and right, else why not
 static ss_ check_categories(const json::Value &b)
 {
+	// [STARPORT_DEFAULT_URL]: an unlisted announce may leave out its name,
+	// kind, audience and descriptors (none of it is in the list; the name
+	// falls back to the host). Rating its audience for the admin would be
+	// a claim made in their name. Listing it asks for them.
+	const bool unlisted = b.get("unlisted").is_true();
+	auto missing = [&](const ss_ &v){
+		return unlisted && (v.empty() || v == "?");
+	};
 	const ss_ name = jstr(b, "name");
-	if(name.empty() || name.size() > 60)
+	if(!missing(name) && (name.empty() || name.size() > 60))
 		return "name: 1 to 60 characters";
 	if(jstr(b, "description").size() > 500)
 		return "description: at most 500 characters";
-	if(!in_set(jstr(b, "kind"), KINDS))
+	if(!missing(jstr(b, "kind")) && !in_set(jstr(b, "kind"), KINDS))
 		return "kind: world, arena, app or other";
-	if(!in_set(jstr(b, "audience"), AUDIENCES))
+	if(!missing(jstr(b, "audience")) && !in_set(jstr(b, "audience"), AUDIENCES))
 		return "audience: everyone, teen or adult";
 	if(!in_set(jstr(b, "access"), ACCESSES))
 		return "access: open, invite, starport, password or external";
@@ -218,13 +226,15 @@ static ss_ check_categories(const json::Value &b)
 		return "signup_url: the http(s) address an account is made at, "
 				"for access external";
 	const json::Value &d = b.get("descriptors");
-	if(!d.is_object())
+	if(!d.is_object() && !(unlisted && d.is_undefined()))
 		return "descriptors: an object";
 	for(const auto &pair : DESCRIPTORS){
+		if(!d.is_object())
+			break;
 		const ss_ v = jstr(d, pair.first.c_str());
 		// One a server's version does not know yet is "unknown" ([STARPORT]
 		// 3: categories are versioned)
-		if(d.get(pair.first).is_undefined())
+		if(d.get(pair.first).is_undefined() || missing(v))
 			continue;
 		if(std::find(pair.second.begin(), pair.second.end(), v) ==
 				pair.second.end())
@@ -930,14 +940,22 @@ struct Module: public interface::Module
 		for(const char *k : {"name", "description", "kind", "audience",
 				"access", "region", "app", "version", "signup_url"})
 			l.set(k, b.get(k).is_string() ? b.get(k) : json::Value(""));
+		// Left out by an unlisted one (check_categories)
+		for(const char *k : {"kind", "audience"})
+			if(jstr(l, k) == "?")
+				l.set(k, "");
+		if(jstr(l, "name").empty() || jstr(l, "name") == "?")
+			l.set("name", host);
 		l.set("login", jstr(b, "login", "local"));
 		// 10g: verified and taking IDs, not served in the list
 		l.set("unlisted", b.get("unlisted").is_true());
 		// Announcing again ends a withdrawal
 		l.del_key("withdrawn");
-		json::Value desc = b.get("descriptors").deepcopy();
+		json::Value desc = b.get("descriptors").is_object() ?
+				b.get("descriptors").deepcopy() : json::object();
 		for(const auto &pair : DESCRIPTORS)
-			if(desc.get(pair.first).is_undefined())
+			if(desc.get(pair.first).is_undefined() ||
+					jstr(desc, pair.first.c_str()) == "?")
 				desc.set(pair.first, "unknown");
 		l.set("descriptors", desc);
 		l.set("tags", b.get("tags").is_array() ? b.get("tags") : json::array());

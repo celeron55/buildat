@@ -24,8 +24,11 @@ namespace starport_announce
 		// anyone or approved; Starport off is off)
 		virtual bool accepts_ids() = 0;
 		virtual ss_ ids_mode() = 0;
-		// Writes "ids" into starport.json; "" when done, else why not
-		virtual ss_ set_ids_mode(const ss_ &mode) = 0;
+		// Writes "ids" into starport.json; what it did ("" for nothing to
+		// tell), else why not. IDs on with no Starport named adds the
+		// default one, unlisted, and `address` (the admin's, or "") as
+		// the public address if the file has none ([STARPORT_DEFAULT_URL])
+		virtual ss_ set_ids_mode(const ss_ &mode, const ss_ &address) = 0;
 		// 10g: whether a blocklist this server follows bans the identity
 		// `sub` of the Starport at `host`
 		virtual bool is_blocked(const ss_ &host, const ss_ &sub) = 0;

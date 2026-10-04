@@ -1223,6 +1223,11 @@ buildat.safe.connection_encrypted = function()
 	return __buildat_get_env("BUILDAT_PAGE_HTTPS") == "1" or
 			a:match("^https://") ~= nil or a:match("^wss://") ~= nil
 end
+-- server_address() -> the address the server was joined by, as it was given
+-- ("host:port", "https://host:port"); nil when not joined
+buildat.safe.server_address = function()
+	return __buildat_server_address()
+end
 -- get_cache_path() -> the directory those two work in. The share and user
 -- paths stay out of the sandbox; this is here because writing a file under
 -- the cache means knowing where the cache is.

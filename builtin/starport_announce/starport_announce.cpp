@@ -36,6 +36,7 @@
 #include "starport_announce/api.h"
 #include "accounts/api.h"
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <thread>
@@ -716,7 +717,18 @@ struct Module: public interface::Module, public Interface
 		return "";
 	}
 
-	ss_ set_ids_mode(const ss_ &mode)
+	// [STARPORT_DEFAULT_URL]: what the admin's page offers to add, and
+	// what turning IDs on with no Starport named announces to, unlisted
+	// (BUILDAT_STARPORT_DEFAULT: a check's local one)
+	static ss_ default_starport()
+	{
+		const char *e = getenv("BUILDAT_STARPORT_DEFAULT");
+		return e && *e ? e : "https://starport.buildat.org";
+	}
+
+	// `address`: where the admin reached the server, for a starport.json
+	// that has none ("" when not a public one)
+	ss_ set_ids_mode(const ss_ &mode, const ss_ &address)
 	{
 		if(mode != "off" && mode != "anyone" && mode != "approved")
 			return "Starport IDs: off, anyone or approved";
@@ -724,11 +736,27 @@ struct Module: public interface::Module, public Interface
 		if(!c.is_object()){
 			if(mode == "off")
 				return "";
-			return "No Starport set up: set one up on the Starport page first";
+			c = json::object();
+		}
+		ss_ note;
+		// An ID join needs a verified listing; unlisted keeps the server
+		// out of the public list. A Starport already named is left be.
+		if(mode != "off" && urls_of(c).empty()){
+			json::Value u = json::array();
+			u.append(default_starport());
+			c.set("starports", u);
+			c.set("unlisted", true);
+			json::Value scratch = json::object();
+			if(!c.get("address").is_string() && !address.empty() &&
+					public_address(address, 0, scratch))
+				c.set("address", address);
+			note = "Announced, unlisted, to "+default_starport()+
+					"; change it under Starport...";
 		}
 		c.set("ids", mode);
 		c.del_key("login");
-		return write_config(c);
+		const ss_ why = write_config(c);
+		return why.empty() ? note : why;
 	}
 
 	bool m_announce_now = false;
@@ -770,6 +798,7 @@ struct Module: public interface::Module, public Interface
 		out.set("path", config_path());
 		out.set("access_now", access_of(c));
 		out.set("message", message);
+		out.set("default_starport", default_starport());
 		json::Value rows = json::array();
 		for(const ss_ &url : urls_of(c)){
 			json::Value r = json::object();

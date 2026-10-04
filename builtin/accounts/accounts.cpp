@@ -1332,7 +1332,11 @@ struct Module: public interface::Module, public Interface
 			ss_ why = "This server has no Starport module";
 			starport_announce::access(m_server,
 					[&](starport_announce::Interface *s){
-				why = s->set_ids_mode(r.arg);
+				// "anyone", or "anyone https://host": the address the
+				// admin reached the server by, from the page
+				const size_t sp = r.arg.find(' ');
+				why = s->set_ids_mode(r.arg.substr(0, sp), sp == ss_::npos ?
+						"" : r.arg.substr(sp + 1));
 			});
 			for(auto &pair : m_peers)
 				if(pair.second.name.empty())
