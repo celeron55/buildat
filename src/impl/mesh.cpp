@@ -4,6 +4,8 @@
 #include "interface/voxel.h"
 #include "interface/voxel_selector.h"
 #include "core/log.h"
+#include "interface/os.h"
+#include <cstdlib>
 #include <PolyVoxCore/SimpleVolume.h>
 #include <PolyVoxCore/SurfaceMesh.h>
 #include <PolyVoxCore/CubicSurfaceExtractorWithNormals.h>
@@ -24,6 +26,9 @@
 #include <RigidBody.h>
 #include <climits>
 #include <cmath>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
 #define MODULE "mesh"
 
 namespace magic = Urho3D;
@@ -268,7 +273,8 @@ Model* create_8bit_voxel_physics_model(Context *context,
 // Set custom geometry from 8-bit voxel data, using a voxel registry
 void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 		int w, int h, int d, const ss_ &source_data,
-		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg)
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+		const pv::Vector3DInt32 &uv_origin)
 {
 	if(w < 0 || h < 0 || d < 0)
 		throw Exception("Negative dimension");
@@ -300,7 +306,8 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 		}
 	}
 
-	return set_voxel_geometry(cg, context, volume, voxel_reg, atlas_reg, true);
+	return set_voxel_geometry(cg, context, volume, voxel_reg, atlas_reg, true,
+			&uv_origin);
 }
 
 template<typename VoxelType>
@@ -535,6 +542,111 @@ static const float FACE_SHADE[6] = {
 // corner that are solid. Applied to ambient only, which is where it is
 // visible: a face in direct sun is shaped by the sun, not by this.
 static const float AO_LEVELS[4] = {1.0f, 0.72f, 0.52f, 0.38f};
+// The pbr path's own table ([SHADE_NIBBLE]): fitted per factor against
+// the path trace's crease, which darkens harder than every game's table
+// -- vp1's pit face read 1.4 to 1.6 times the render's with the table
+// above ([PBR_FIT] 2c, contrast_dirt_pit). Chosen by the mode the client
+// asked for, read here since the mesher runs in the client. simplified:
+// only a mode asked for by name selects it -- unset, which the launcher
+// takes as pbr, keeps every game's table, since the other games set
+// nothing and their look must not move; the upgrade is the launcher
+// telling the mesher through set_voxel_geometry().
+// The deep entries lowered 2026-09-20 (0.26, 0.16 before; grass_occluded
+// 2.2 -> 2.05 of the render, nothing else moved). The one-occluder entry
+// is the open shade's as much as the corner's: at 0.30 the cliff top's
+// shaded face fell to 0.37 of the render for a corner at 1.2, so the
+// cave corner's 1.5 (cave_ao 0.49 against 0.128) is not this table's.
+static const float AO_LEVELS_PBR[4] = {1.0f, 0.55f, 0.20f, 0.10f};
+// [WATER_LIGHT]: every liquid's surface sits this far under the top of its
+// node. Official draws a source flush as it ships, because
+// enable_waving_water is off; with it on, its vertex shader moves every
+// vertex of a waving liquid by (noise - 1) * water_wave_height * 5 units of
+// ten -- the noise in 0..1, so the liquid sits between nought and half a node
+// down and a quarter on average. **This is that look, static and less** (user,
+// 2026-09-25): an eighth of a node, since a quarter is the room an animation
+// needs and there is no animation; the constant grows with one if it is ever
+// built.
+//
+// Taken off the corners after liquid_corner_top() has measured them, not off
+// the levels it measures: those are compared against half a node to decide
+// which corners a flow reaches, and a sag in them would misread that. Every
+// vertex that sits on the surface follows the corner it stands at, so the
+// sides come with it and nothing gapes at the bottom.
+//
+// **Every liquid, not only what official's waving = 3 would move, and no
+// setting to turn it off**: the sag is the look (user, 2026-09-25). Source
+// and flowing alike, so the flow's own dip still reads against the source.
+static const float LIQUID_SAG = 1.0f / 8.0f;
+
+// How far a hemisphere ray is walked to ask whether a surface under the
+// terrain reaches the sky at all; 0 turns the term off. See [DARK_INVARIANT]
+// and face_vertex_colors() below.
+static const int SKY_REACH = []{
+	const char *s = getenv("BUILDAT_SKY_REACH");
+	int v = s ? atoi(s) : 0;
+	return v < 0 ? 0 : (v > 64 ? 64 : v);
+}();
+// [UNDERGROUND_LIGHT] (a): what the term actually computed. A picture read
+// backwards cannot tell a face that found the sky from one whose rays ran
+// out of meshed volume -- both draw black -- so BUILDAT_SKY_REACH_LOG=1
+// counts every face the term was asked about: how open its hemisphere came
+// out, and whether the rays that stopped hit rock or the edge of the data.
+// The second number is the one that says whether the walk can see far
+// enough to mean anything, since a volume is one chunk and its padding.
+static const bool SKY_REACH_LOG = getenv("BUILDAT_SKY_REACH_LOG") != nullptr;
+static std::atomic<uint64_t> sky_reach_faces[10];
+static std::atomic<uint64_t> sky_reach_stop_solid(0);
+static std::atomic<uint64_t> sky_reach_stop_rock_beyond(0);
+static std::atomic<uint64_t> sky_reach_stop_edge(0);
+
+// Called on every face the term was asked about; prints the tally at most
+// once every five seconds, from whichever mesher thread gets there first.
+static void tally_sky_reach(float open)
+{
+	int b = (int)(open * 9.0f + 0.5f);
+	sky_reach_faces[b < 0 ? 0 : (b > 9 ? 9 : b)]
+			.fetch_add(1, std::memory_order_relaxed);
+	static std::atomic<int64_t> said_at_ms(0);
+	int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now().time_since_epoch()).count();
+	int64_t was = said_at_ms.load(std::memory_order_relaxed);
+	if(now - was < 5000)
+		return;
+	if(!said_at_ms.compare_exchange_strong(was, now))
+		return;
+	uint64_t total = 0;
+	for(int i = 0; i < 10; i++)
+		total += sky_reach_faces[i].load(std::memory_order_relaxed);
+	if(total == 0)
+		return;
+	ss_ hist;
+	for(int i = 0; i < 10; i++){
+		uint64_t n = sky_reach_faces[i].load(std::memory_order_relaxed);
+		if(n == 0)
+			continue;
+		char buf[64];
+		snprintf(buf, sizeof buf, "%s%d/9 %.1f%%", hist.empty() ? "" : ", ",
+				i, 100.0 * (double)n / (double)total);
+		hist += buf;
+	}
+	uint64_t solid = sky_reach_stop_solid.load(std::memory_order_relaxed);
+	uint64_t beyond = sky_reach_stop_rock_beyond.load(std::memory_order_relaxed);
+	uint64_t edge = sky_reach_stop_edge.load(std::memory_order_relaxed);
+	uint64_t stops = solid + beyond + edge;
+	log_i(MODULE, "sky reach %d: %llu faces asked; open %s; of %llu rays "
+			"stopped, %.1f%% on rock, %.1f%% under the terrain past the "
+			"volume and %.1f%% where the map says nothing",
+			SKY_REACH, (unsigned long long)total, cs(hist),
+			(unsigned long long)stops,
+			stops ? 100.0 * (double)solid / (double)stops : 0.0,
+			stops ? 100.0 * (double)beyond / (double)stops : 0.0,
+			stops ? 100.0 * (double)edge / (double)stops : 0.0);
+}
+
+static const bool PBR_MODE = getenv("BUILDAT_LUANTI_PBR") != nullptr && (
+		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr" ||
+		ss_(getenv("BUILDAT_LUANTI_PBR")) == "1" ||
+		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr_debug_shadows");
 
 // How much of that occlusion the bounce term takes. Occlusion is a statement
 // about how much of the sky a corner can see, which is the wrong question to
@@ -555,6 +667,50 @@ static bool occludes(VoxelVolume &volume,
 	if(def == nullptr)
 		return false;
 	return def->edge_material_id != interface::EDGEMATERIALID_EMPTY;
+}
+
+// The same, for the hemisphere rays: a cutout -- leaves, a plant -- lets
+// most of the sky through and does not block like rock. The corner table
+// keeps occludes(): a leaf block against a face is a crease either way.
+static bool occludes_sky(VoxelVolume &volume,
+		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
+		const pv::Vector3DInt32 &p)
+{
+	VoxelSample v = volume.sample_at(p);
+	if(fmt.undefined(v))
+		return false;
+	const interface::CachedVoxelDefinition *def = voxel_reg->get_cached(v);
+	if(def == nullptr)
+		return false;
+	return def->edge_material_id != interface::EDGEMATERIALID_EMPTY &&
+			!def->alpha_masked;
+}
+
+// The vertex alpha, in the two layouts a client can ask for. Plain: the sky
+// share, nibble times shade, as interface/mesh.h has had it. **Packed**, for
+// a client that passes a horizon map: the nibble alone in the high four
+// bits and the shade -- corner occlusion, the hemisphere rays, the terrain,
+// the face's shade -- in the low four, sixteen levels each, so a shader can
+// gate the sun by the nibble (a cave) without the shade taking the sun off
+// a lit wall in a trench, which one number cannot help doing. See
+// [PBR_FIT] 2c.
+// 0.3 until 2026-09-20 21:30; 0.1 read better on every row it touches
+// with the vertex terms live: the pit (contrast_dirt_pit 7.0 of 12, was
+// 5.9), the corner (cave_ao_corner 0.85-1.23, was 1.25-1.97), the bore's
+// walls (a shaft's rays are nought its whole length, so the floor is
+// its level: 1.17/3.2/6.6 of the render at the near wall, was 2/5/11)
+static const float SHADE_FLOOR = 0.1f;
+
+static float sky_alpha(float sky_f, float shade, bool packed)
+{
+	if(!packed)
+		return sky_f * shade;
+	float s = shade / 1.15f; // FACE_SHADE's top, so a lit top is full
+	if(s > 1.0f) s = 1.0f;
+	if(s < 0.0f) s = 0.0f;
+	int hi = (int)std::floor(sky_f * 15.0f + 0.5f);
+	int lo = (int)std::floor(s * 15.0f + 0.5f);
+	return (float)(hi * 16 + lo) / 255.0f;
 }
 
 // The voxel a face belongs to: half a voxel behind the face's centre, against
@@ -710,10 +866,84 @@ static unsigned modulate_color(unsigned lit, uint32_t rgb)
 // next to it. It cannot always: a neighbour that is not in memory leaves its
 // side undefined. Those faces fall back to the skylight of the solid voxel,
 // which the world stores as a per-voxel approximation for exactly this case.
+// How much of the dome a face at world (x, y, z) sees past the terrain
+// around it, out of the horizon map: eight directions, the highest
+// elevation the terrain reaches in each within HORIZON_PAD columns, and the
+// cap above it -- cos^2 of that elevation, which is the share of a uniform
+// dome's irradiance on a horizontal face from above that angle. A wall
+// takes the five directions of its facing half. 1 with no map.
+static float terrain_sky(const HorizonMap *horizon,
+		int wx, int wy, int wz, const pv::Vector3DFloat &n)
+{
+	if(!horizon)
+		return 1.0f;
+	static const int DX[8] = {1, 1, 0, -1, -1, -1, 0, 1};
+	static const int DZ[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+	static const float LEN[8] = {1, 1.4142f, 1, 1.4142f, 1, 1.4142f, 1, 1.4142f};
+	float sum = 0, weight = 0;
+	for(int d = 0; d < 8; d++){
+		// A wall sees only the half of the horizon it faces; a floor or
+		// a ceiling sees all of it
+		float facing = n.getX() * DX[d] + n.getZ() * DZ[d];
+		if(std::fabs(n.getY()) < 0.5f && facing < -0.01f)
+			continue;
+		float tan_max = 0;
+		// Doubling steps out to the map's edge: six looks per direction
+		// rather than thirty-two, since a far ridge subtends about the
+		// same angle a column either way and a near one is looked at
+		// closely. Meshing with a look per column took long enough that
+		// the far chunks were not in the frame by the time a reference
+		// shot was taken.
+		// From four columns out: nearer is the hemisphere rays' (reach
+		// 4), and a tree crown one column away -- five wide, so the 3x3
+		// erosion keeps it -- read as a wall at 83 degrees and left vp5's
+		// snow field at a sixtieth of the open sky while the tree tops
+		// beyond the forest read full: the field went black at 02:00,
+		// the meter keyed on it and the far tops came out white
+		// ([LOD_LIGHT]'s finding, at last).
+		for(int k = 4; k <= HORIZON_PAD; k *= 2){
+			int cx = wx + DX[d] * k - horizon->origin_x;
+			int cz = wz + DZ[d] * k - horizon->origin_z;
+			if(cx < 0 || cz < 0 || cx >= HORIZON_SIZE || cz >= HORIZON_SIZE)
+				break;
+			int16_t h = horizon->heights[cz * HORIZON_SIZE + cx];
+			if(h == HORIZON_NONE)
+				continue;
+			float t = (float)(h - wy) / (LEN[d] * k);
+			if(t > tan_max)
+				tan_max = t;
+		}
+		// The share of the sky above the elevation, weighted toward the
+		// horizon: 1 - sin(e), from its tangent. cos^2(e) is a uniform
+		// dome's, and it left a terrace under a mountain flank at 0.9 of
+		// an open one where the render reads 0.3 -- the light a low sun
+		// leaves in the sky is in the horizon band the flank hides
+		// ([PBR_FIT] 2c). simplified: one profile for every hour.
+		float cap = 1.0f - tan_max / std::sqrt(1.0f + tan_max * tan_max);
+		sum += cap;
+		weight += 1;
+	}
+	return weight > 0 ? sum / weight : 1.0f;
+}
+
+// The pbr_debug_shadows render mode -- BUILDAT_LUANTI_PBR on this client's
+// process, the same variable the mode is asked with ([RENDER_MODES]) -- is
+// the shadow-kind diagnostic ([PBR_FIT] 2c). Each occlusion term goes into
+// its own channel of the vertex colour instead of into the shade -- the
+// terrain cap in red, the corner table in green, the hemisphere rays in
+// blue -- and the shader draws that colour as it is, with the albedo and
+// the lights out (cShadowKinds). What the picture says is where a term is
+// lost between here and the frame. Read here because the mesher runs in
+// the client and the sandbox has no getenv.
+// simplified: the custom-shape path (plants, stairs) is not coloured.
+static const bool SHADOW_KINDS = getenv("BUILDAT_LUANTI_PBR") != nullptr &&
+		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr_debug_shadows";
+
 static void face_vertex_colors(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		const pv::Vector3DFloat *quad,
-		const pv::Vector3DFloat &n, uint face_id, unsigned out[4])
+		const pv::Vector3DFloat &n, uint face_id, unsigned out[4],
+		const HorizonMap *horizon, int lod = 1)
 {
 	pv::Vector3DFloat centre(0, 0, 0);
 	for(size_t i = 0; i < 4; i++)
@@ -749,6 +979,144 @@ static void face_vertex_colors(VoxelVolume &volume,
 		return c < 0 ? -1 : 1;
 	};
 
+	// How much of its hemisphere the face can see past the next few voxels:
+	// the normal and the eight directions a step out from it along the face's
+	// axes and diagonals, each walked HEMI_REACH voxels from the voxel in
+	// front and stopped by the first solid one. A wall between a block and two
+	// terraces sees a fifth of the sky, and the corner table below, which
+	// looks one voxel along the face, said it saw all of it; the path-traced
+	// reference is exact and read that wall at a third of what the corner
+	// table lit it to ([PBR_FIT] 2c). Multiplied into the sky share, so the
+	// corner table keeps the crease and this keeps the surroundings.
+	// simplified: nine rays, four voxels; a cutout block (leaves, plants)
+	// does not block, rock and anything else with an edge material does.
+	// The packed layout's term only: the plain one is the parity modes',
+	// and official Luanti's baked light has no such term -- with it the
+	// shaded probes read at a third of official's ([PARITY_LEFTOVERS],
+	// 2026-09-21: stone 18 against 61, the cave floor 23 against 46).
+	static const int HEMI_REACH = 4;
+	const pv::Vector3DInt32 ni((int)std::round(n.getX()),
+			(int)std::round(n.getY()), (int)std::round(n.getZ()));
+	const pv::Vector3DInt32 dirs[9] = {
+		ni, ni + u, ni - u, ni + v, ni - v,
+		ni + u + v, ni + u - v, ni - u + v, ni - u - v,
+	};
+	// unknown_blocks: a voxel the meshed volume has no data for stops the
+	// ray instead of letting it through. The shade's own rays (four voxels,
+	// inside the padding) never meet one and keep the old answer; the long
+	// walk below leaves the volume often, and there "no data" has to read
+	// as "not sky" or a sealed room at a chunk's edge is lit through the
+	// seam ([DARK_INVARIANT]: the left half of the sealed shot, 2026-09-22).
+	// Where a ray leaves the meshed volume, the horizon map answers instead
+	// of the walk ([UNDERGROUND_LIGHT] (d)): the column's terrain height
+	// against the ray's own height says whether it has walked out into the
+	// open air or into the rock next door. Before this, "no data" was read
+	// as "not sky" whatever was there -- necessary, or a sealed room leaks
+	// at the seam, but a volume is one chunk and its padding, so seven rays
+	// in ten stopped at the edge rather than on anything (2026-09-25,
+	// BUILDAT_SKY_REACH_LOG) and every deep face read shut. Returns 1 for
+	// the open air, 0 for rock, -1 where the map has nothing to say and the
+	// old answer stands.
+	const pv::Vector3DInt32 vol_lc = volume.getEnclosingRegion().getLowerCorner();
+	auto horizon_says = [&](const pv::Vector3DInt32 &p) -> int {
+		if(!horizon)
+			return -1;
+		const int wx = horizon->origin_x + HORIZON_PAD +
+				(p.getX() - vol_lc.getX() - 1) * lod;
+		const int wy = horizon->origin_y + (p.getY() - vol_lc.getY() - 1) * lod;
+		const int wz = horizon->origin_z + HORIZON_PAD +
+				(p.getZ() - vol_lc.getZ() - 1) * lod;
+		const int cx = wx - horizon->origin_x, cz = wz - horizon->origin_z;
+		if(cx < 0 || cz < 0 || cx >= HORIZON_SIZE || cz >= HORIZON_SIZE)
+			return -1;
+		const int16_t h = horizon->heights[cz * HORIZON_SIZE + cx];
+		if(h == HORIZON_NONE)
+			return -1;
+		return wy > h ? 1 : 0;
+	};
+	auto open_fraction = [&](int reach, bool unknown_blocks){
+		int open = 0;
+		for(const pv::Vector3DInt32 &d : dirs){
+			bool blocked = false;
+			pv::Vector3DInt32 p = front_p;
+			for(int k = 0; k < reach && !blocked; k++){
+				p += d;
+				if(unknown_blocks && fmt.undefined(volume.sample_at(p))){
+					const int says = horizon_says(p);
+					if(says == 1)
+						break; // walked out under the open sky
+					blocked = true;
+					if(SKY_REACH_LOG)
+						(says == 0 ? sky_reach_stop_rock_beyond :
+								sky_reach_stop_edge)
+								.fetch_add(1, std::memory_order_relaxed);
+					continue;
+				}
+				blocked = occludes_sky(volume, voxel_reg, fmt, p);
+				if(blocked && unknown_blocks && SKY_REACH_LOG)
+					sky_reach_stop_solid.fetch_add(1,
+							std::memory_order_relaxed);
+			}
+			if(!blocked)
+				open++;
+		}
+		return (float)open / 9.0f;
+	};
+	float hemi = 1.0f;
+	if(horizon || SHADOW_KINDS)
+		hemi = open_fraction(HEMI_REACH, false);
+	// And the terrain beyond the chunk, out of the horizon map: the voxel
+	// in front, in world coordinates. The volume's lower corner is the
+	// chunk's origin less its padding, and the map's origin says where
+	// the chunk is (its x and z less HORIZON_PAD). A LOD volume is the
+	// chunk at one voxel per lod^3, so its offsets are times lod.
+	float terrain = 1.0f;
+	// Whether the face is under its own column's surface -- the map's
+	// height there above the voxel in front -- which is the underground
+	// rule ([STAIR_DARK]): the cap looks out from four columns and reads
+	// a cave wall facing its mouth as open. Underground the packed g
+	// carries nought, so the shader's ground term is the interior's
+	// (the flood's nibble, [INTERIOR_FALLOFF]) and not the open's.
+	bool under = false;
+	if(horizon){
+		const pv::Vector3DInt32 lc = volume.getEnclosingRegion().getLowerCorner();
+		int wx = horizon->origin_x + HORIZON_PAD + (front_p.getX() - lc.getX() - 1) * lod;
+		int wy = horizon->origin_y + (front_p.getY() - lc.getY() - 1) * lod;
+		int wz = horizon->origin_z + HORIZON_PAD + (front_p.getZ() - lc.getZ() - 1) * lod;
+		terrain = terrain_sky(horizon, wx, wy, wz, n);
+		int cx = wx - horizon->origin_x, cz = wz - horizon->origin_z;
+		if(cx >= 0 && cz >= 0 && cx < HORIZON_SIZE && cz < HORIZON_SIZE){
+			int16_t h = horizon->heights[cz * HORIZON_SIZE + cx];
+			under = h != HORIZON_NONE && h > wy;
+		}
+	}
+
+	// [DARK_INVARIANT]: how much of the face's hemisphere still reaches the
+	// sky, asked over a long walk rather than the shade's four voxels. The
+	// bounce floor in the shader stands for the light the four-bit nibble
+	// cannot carry into a cave, and it follows the hour -- so a sealed room
+	// at noon is lit as if outside. The rule the item states is that where
+	// no ray reaches the sky, nothing the sky does may reach the surface;
+	// the sky's three terms in the shader (the bounce, the ground and the
+	// interior) all take the local shade in b, so multiplying b by this is
+	// the whole of it and no shader reads a new channel. Asked only where
+	// the flood's nibble is nought, which is the invariant's own domain and
+	// the only place the floor is the whole of the light; a face in the open
+	// that happens to sit at nibble nought finds the sky along its rays and
+	// reads one, so nothing above ground moves.
+	// simplified: a ray that walks out of the meshed volume counts as
+	// reaching the sky, which errs towards today's look at a chunk's edge;
+	// the upgrade is the horizon map consulted where the volume ends.
+	// Off (0) unless BUILDAT_SKY_REACH says how far to walk, because which
+	// length is right moves every cave in the game and is the user's pick
+	// off an options_for_DARK_INVARIANT/ sheet.
+	float sky_reach = 1.0f;
+	if(SKY_REACH > 0 && sky_f <= 0.0f){
+		sky_reach = open_fraction(SKY_REACH, true);
+		if(SKY_REACH_LOG)
+			tally_sky_reach(sky_reach);
+	}
+
 	for(size_t i = 0; i < 4; i++){
 		pv::Vector3DFloat d = quad[i] - centre;
 		pv::Vector3DInt32 du = u * along(d, u);
@@ -758,16 +1126,69 @@ static void face_vertex_colors(VoxelVolume &volume,
 		// Two solid sides bury the corner whatever is diagonally behind it
 		int occluders = (s1 && s2) ? 3 : (s1 ? 1 : 0) + (s2 ? 1 : 0) +
 				(occludes(volume, voxel_reg, fmt, front_p + du + dv) ? 1 : 0);
-		float ao = AO_LEVELS[occluders];
-		float sky_shade = ao * FACE_SHADE[face_id];
+		float ao = (PBR_MODE ? AO_LEVELS_PBR : AO_LEVELS)[occluders];
+		// The shade -- corners, rays, terrain cap -- multiplies the flood's
+		// nibble, and in a one-wide shaft the rays and the cap are nought:
+		// a wall the flood says sees 11 of 15 drew black, in both paths
+		// ([STAIR_DARK], drive/5 2026-09-20). The nibble already carries an
+		// interior's enclosure (one level a node), so the shade is floored
+		// under it: a shaft's walls read nibble x 0.3, lit at the lip,
+		// dimming with the flood, black at 0; the fitted probes stand
+		// (pit_dirt's 0.55 x 0.63 = 0.35 is above the floor). simplified:
+		// a constant, so a three-deep pit and a thirty-deep shaft get the
+		// same floor and the double count stays; the principled version
+		// takes the rays and the cap only at or above the column's surface.
+		float enclosure = ao * hemi * terrain;
+		if(enclosure < SHADE_FLOOR)
+			enclosure = SHADE_FLOOR;
+		float sky_shade = enclosure * FACE_SHADE[face_id];
 		float bounce_shade = (1.0f - BOUNCE_AO + BOUNCE_AO * ao) *
 				FACE_SHADE[face_id] * (1.0f - sky_f);
-		float lamp_shade = lamp_f * sky_shade;
+		// A lamp is shaded by the corner it sits in and the face, not by
+		// the terrain cap: the cap is the hill on the sky, and under a
+		// cave's roof it is zero, which put out every lamp in a cave
+		// ([LAMP_REF]: the glowstone lit nothing).
+		float lamp_shade = lamp_f * ao * hemi * FACE_SHADE[face_id];
+		// A client with a horizon map lights the enclosed by its own bounce
+		// term, in the sky's units of the hour; the constant here is in
+		// display units and at night, when the sky is a fifty-thousandth of
+		// it, it lit every canopy like a lamp ([NO_SPOTS_REF]'s check).
+		if(horizon)
+			bounce_shade = 0;
+		if(SHADOW_KINDS){
+			out[i] = Color(terrain, ao, hemi,
+					sky_alpha(sky_f, sky_shade, horizon != nullptr)).ToUInt();
+			continue;
+		}
+		// The packed layout's rgb: the lamp in r (LAMP_COLOR is white, so
+		// one channel is the three), the terrain cap in g and the local
+		// shade -- corner table, rays, face -- in b, so the shader can put
+		// the local shade alone on the bounce and the ground: light from
+		// the surroundings is blocked by the corner it sits in, not by the
+		// mountain behind the ridge, and a cave wall under a terrain cap
+		// of zero still bounces ([PBR_FIT] 2c, the shadow-kind run). The
+		// alpha's low nibble keeps the product for the sky's share.
+		if(horizon){
+			// Floored like the enclosure above: a wall in a cave's fold has
+			// all nine rays blocked, and at nought it took the bounce and
+			// the ground with it and drew black where the render has the
+			// mouth's bounce (vp7's right wall, 2026-09-20; [PBRI] owns the
+			// level, the floor owns the black)
+			float local_ao = ao * hemi;
+			if(local_ao < SHADE_FLOOR)
+				local_ao = SHADE_FLOOR;
+			float local = local_ao * FACE_SHADE[face_id] / 1.15f *
+					sky_reach;
+			out[i] = Color(lamp_shade, under ? 0.0f : terrain,
+					local > 1.0f ? 1.0f : local,
+					sky_alpha(sky_f, sky_shade, true)).ToUInt();
+			continue;
+		}
 		out[i] = Color(
 				BOUNCE_COLOR.r_ * bounce_shade + LAMP_COLOR.r_ * lamp_shade,
 				BOUNCE_COLOR.g_ * bounce_shade + LAMP_COLOR.g_ * lamp_shade,
 				BOUNCE_COLOR.b_ * bounce_shade + LAMP_COLOR.b_ * lamp_shade,
-				sky_f * sky_shade).ToUInt();
+				sky_alpha(sky_f, sky_shade, horizon != nullptr)).ToUInt();
 	}
 }
 
@@ -875,6 +1296,54 @@ void assign_txcoords(size_t pv_vertex_i1, const AtlasSegmentCache *aseg,
 	}
 }
 
+// See the note in interface/mesh.h. The cursor walks the same order the
+// whole-volume version does, so a run that is interrupted and resumed
+// covers exactly what one pass would have.
+bool preload_textures_sliced(VoxelVolume &volume,
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg, bool with_lod,
+		int64_t deadline_us, PreloadCursor &cursor)
+{
+	const VoxelFmt fmt(voxel_reg);
+	auto region = volume.getEnclosingRegion();
+	auto &lc = region.getLowerCorner();
+	auto &uc = region.getUpperCorner();
+	if(!cursor.started){
+		cursor.x = lc.getX();
+		cursor.y = lc.getY();
+		cursor.z = lc.getZ();
+		cursor.started = true;
+	}
+	// **The clock is read inside the row.** A voxel whose definition is
+	// cached is a table lookup, but one seen for the first time has its
+	// atlas segment built here -- image, normal map, surface map, upload
+	// -- and that is milliseconds. A check every row let one row run to
+	// 80 ms ([CLIENT_FRAME], measured 2026-09-26); every eighth voxel
+	// costs a few thousand clock reads over a chunk and bounds it.
+	const int CLOCK_EVERY = 8;
+	for(; cursor.z <= uc.getZ(); cursor.z++){
+		for(; cursor.y <= uc.getY(); cursor.y++){
+			for(; cursor.x <= uc.getX(); cursor.x++){
+				VoxelSample v = volume.sample_at(cursor.x, cursor.y, cursor.z);
+				const interface::CachedVoxelDefinition *def =
+						voxel_reg->get_cached(v, atlas_reg, with_lod);
+				if(!def)
+					throw Exception(ss_()+"Undefined voxel: "+
+							itos(fmt.id_of(v)));
+				if(++cursor.since_clock >= CLOCK_EVERY){
+					cursor.since_clock = 0;
+					if(interface::os::time_us() >= deadline_us){
+						cursor.x++;
+						return false;
+					}
+				}
+			}
+			cursor.x = lc.getX();
+		}
+		cursor.y = lc.getY();
+	}
+	return true;
+}
+
 void preload_textures(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg, bool with_lod)
 {
@@ -902,13 +1371,218 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		AtlasRegistry *atlas_reg,
 		bool use_skylight,
-		sm_<uint, TemporaryGeometry> *translucent_result);
+		sm_<uint, TemporaryGeometry> *translucent_result,
+		sm_<uint, TemporaryGeometry> *masked_result,
+		const HorizonMap *horizon);
+
+// Which of the three geometries a voxel's faces go in: the solid one, the
+// blended one, or the one cut out by its texture. A definition is at most
+// one of the two special kinds; being both is a game's mistake and
+// translucent is what it gets.
+static sm_<uint, TemporaryGeometry>& geometry_for(
+		sm_<uint, TemporaryGeometry> &result,
+		sm_<uint, TemporaryGeometry> *translucent_result,
+		sm_<uint, TemporaryGeometry> *masked_result,
+		const interface::CachedVoxelDefinition *def)
+{
+	if(translucent_result && def->translucent)
+		return *translucent_result;
+	if(masked_result && def->alpha_masked)
+		return *masked_result;
+	return result;
+}
+
+// **A cheap stand-in shape for the occlusion buffer** ([CLIENT_FRAME]).
+// See interface/mesh.h for why, and for the promise this keeps: a cell
+// counts only when every voxel in it is opaque and fills its own space,
+// so the shape lies inside the solid it stands for and can never hide
+// what is visible.
+static const int OCC_CELL = 4;
+
+// Does this voxel fill itself and stop light? A shape of its own (a
+// slab, a plant, a fence) does not, whatever its edge material says, and
+// neither does anything translucent or cut out with an alpha mask.
+static bool occ_solid(const interface::CachedVoxelDefinition *def)
+{
+	return def != nullptr &&
+			def->edge_material_id != interface::EDGEMATERIALID_EMPTY &&
+			def->face_draw_type == interface::FaceDrawType::ON_EDGE &&
+			!def->translucent && !def->alpha_masked && def->shape.empty();
+}
+
+void generate_occluder(PODVector<Vector3> &result,
+		VoxelVolume &volume, VoxelRegistry *voxel_reg)
+{
+	result.Clear();
+	const VoxelFmt fmt(voxel_reg);
+	// The volume is padded by one voxel on each side; the chunk itself is
+	// what is inside that, and PolyVox coordinate k + 1 is inner voxel k
+	const int w = volume.getWidth() - 2;
+	const int h = volume.getHeight() - 2;
+	const int d = volume.getDepth() - 2;
+	const int nx = w / OCC_CELL, ny = h / OCC_CELL, nz = d / OCC_CELL;
+	if(nx < 1 || ny < 1 || nz < 1)
+		return;
+	const auto &lc = volume.getEnclosingRegion().getLowerCorner();
+
+	// Which cells are wholly solid
+	sv_<uint8_t> solid((size_t)nx * ny * nz, 0);
+	auto cell = [&](int x, int y, int z) -> bool {
+		if(x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz)
+			return false;
+		return solid[((size_t)z * ny + y) * nx + x] != 0;
+	};
+	bool any = false;
+	for(int cz = 0; cz < nz; cz++)
+	for(int cy = 0; cy < ny; cy++)
+	for(int cx = 0; cx < nx; cx++){
+		bool all = true;
+		for(int z1 = 0; z1 < OCC_CELL && all; z1++)
+		for(int y1 = 0; y1 < OCC_CELL && all; y1++)
+		for(int x1 = 0; x1 < OCC_CELL && all; x1++){
+			const VoxelSample v = volume.sample_at(
+					lc.getX() + 1 + cx * OCC_CELL + x1,
+					lc.getY() + 1 + cy * OCC_CELL + y1,
+					lc.getZ() + 1 + cz * OCC_CELL + z1);
+			if(fmt.undefined(v) || !occ_solid(voxel_reg->get_cached(v)))
+				all = false;
+		}
+		if(all){
+			solid[((size_t)cz * ny + cy) * nx + cx] = 1;
+			any = true;
+		}
+	}
+	if(!any)
+		return;
+
+	// The boundary of that set, a slice at a time, each slice's quads
+	// merged greedily so that a chunk of solid rock is six of them rather
+	// than six hundred
+	const int dim[3] = {nx, ny, nz};
+	const float span[3] = {(float)w, (float)h, (float)d};
+	sv_<uint8_t> mask;
+	for(int axis = 0; axis < 3; axis++){
+		const int u = (axis + 1) % 3, v = (axis + 2) % 3;
+		for(int side = 0; side < 2; side++){
+			const int step = side ? 1 : -1;
+			for(int s = 0; s < dim[axis]; s++){
+				mask.assign((size_t)dim[u] * dim[v], 0);
+				for(int b = 0; b < dim[v]; b++)
+				for(int a = 0; a < dim[u]; a++){
+					int c[3];
+					c[axis] = s; c[u] = a; c[v] = b;
+					if(!cell(c[0], c[1], c[2]))
+						continue;
+					c[axis] = s + step;
+					if(cell(c[0], c[1], c[2]))
+						continue;
+					mask[(size_t)b * dim[u] + a] = 1;
+				}
+				// Greedy rectangles over the slice's mask
+				for(int b = 0; b < dim[v]; b++)
+				for(int a = 0; a < dim[u]; a++){
+					if(!mask[(size_t)b * dim[u] + a])
+						continue;
+					int aw = 1;
+					while(a + aw < dim[u] && mask[(size_t)b * dim[u] + a + aw])
+						aw++;
+					int bh = 1;
+					for(; b + bh < dim[v]; bh++){
+						bool row = true;
+						for(int k = 0; k < aw && row; k++)
+							if(!mask[(size_t)(b + bh) * dim[u] + a + k])
+								row = false;
+						if(!row)
+							break;
+					}
+					for(int y1 = 0; y1 < bh; y1++)
+						for(int x1 = 0; x1 < aw; x1++)
+							mask[(size_t)(b + y1) * dim[u] + a + x1] = 0;
+					// A boundary at inner index k sits at local k - span/2;
+					// the face of cell s on this side is at s or s + 1
+					const float p = (float)((side ? s + 1 : s) * OCC_CELL) -
+							span[axis] / 2.0f;
+					const float u0 = (float)(a * OCC_CELL) - span[u] / 2.0f;
+					const float u1 = (float)((a + aw) * OCC_CELL) -
+							span[u] / 2.0f;
+					const float v0 = (float)(b * OCC_CELL) - span[v] / 2.0f;
+					const float v1 = (float)((b + bh) * OCC_CELL) -
+							span[v] / 2.0f;
+					Vector3 corner[4];
+					const float uu[4] = {u0, u1, u1, u0};
+					const float vv[4] = {v0, v0, v1, v1};
+					for(int i = 0; i < 4; i++){
+						float c3[3];
+						c3[axis] = p; c3[u] = uu[i]; c3[v] = vv[i];
+						corner[i] = Vector3(c3[0], c3[1], c3[2]);
+					}
+					// Two triangles; the winding does not matter, the
+					// buffer rasterises this shape from both sides
+					static const int TRI[6] = {0, 1, 2, 0, 2, 3};
+					for(int i = 0; i < 6; i++)
+						result.Push(corner[TRI[i]]);
+				}
+			}
+		}
+	}
+}
+
+sv_<int16_t> column_heights(VoxelVolume &volume, VoxelRegistry *voxel_reg)
+{
+	const VoxelFmt fmt(voxel_reg);
+	const pv::Region r = volume.getEnclosingRegion();
+	// The inside of the padded volume
+	const pv::Vector3DInt32 lc = r.getLowerCorner(), uc = r.getUpperCorner();
+	const int x0 = lc.getX() + 1, x1 = uc.getX() - 1;
+	const int y0 = lc.getY() + 1, y1 = uc.getY() - 1;
+	const int z0 = lc.getZ() + 1, z1 = uc.getZ() - 1;
+	const int w = x1 - x0 + 1, d = z1 - z0 + 1;
+	sv_<int16_t> raw((size_t)w * d, HORIZON_NONE);
+	for(int z = z0; z <= z1; z++){
+		for(int x = x0; x <= x1; x++){
+			for(int y = y1; y >= y0; y--){
+				if(occludes_sky(volume, voxel_reg, fmt,
+						pv::Vector3DInt32(x, y, z))){
+					raw[(size_t)(z - z0) * w + (x - x0)] = (int16_t)(y - y0);
+					break;
+				}
+			}
+		}
+	}
+	// Eroded by a 3x3 minimum: a tree trunk is one column and a bush a
+	// few, and a single column in the map blocks a whole eighth of the
+	// horizon from the next column over, which darkened a meadow beside
+	// its trees as much as a terrace under a mountain. Terrain is wide
+	// and survives; anything a column wide goes. simplified: a one-wide
+	// ridge goes with it.
+	sv_<int16_t> out((size_t)w * d, HORIZON_NONE);
+	for(int z = 0; z < d; z++){
+		for(int x = 0; x < w; x++){
+			int16_t m = 32767;
+			for(int dz = -1; dz <= 1; dz++){
+				for(int dx = -1; dx <= 1; dx++){
+					int xx = x + dx, zz = z + dz;
+					if(xx < 0 || zz < 0 || xx >= w || zz >= d)
+						continue;
+					int16_t h = raw[(size_t)zz * w + xx];
+					if(h < m)
+						m = h;
+				}
+			}
+			out[(size_t)z * w + x] = m;
+		}
+	}
+	return out;
+}
 
 void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 		bool use_skylight,
-		sm_<uint, TemporaryGeometry> *translucent_result)
+		sm_<uint, TemporaryGeometry> *translucent_result,
+		sm_<uint, TemporaryGeometry> *masked_result,
+		const HorizonMap *horizon,
+		const pv::Vector3DInt32 *uv_origin)
 {
 	const VoxelFmt fmt(voxel_reg);
 	IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg);
@@ -991,7 +1665,11 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		// Get texture coordinates (contained in AtlasSegmentCache)
 		const uint tile = variant ? (variant->tile_order[face_id] < 6 ?
 				variant->tile_order[face_id] : face_id) : face_id;
-		AtlasSegmentReference seg_ref = voxel_def0->textures[tile];
+		// A variant that names textures of its own wears those; see
+		// VoxelVariant::textures, which a palette entry is made of
+		AtlasSegmentReference seg_ref =
+				(variant && tile < variant->texture_refs.size()) ?
+				variant->texture_refs[tile] : voxel_def0->textures[tile];
 		if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED){
 			// This is usually intentional for invisible voxels
 			//log_t(MODULE, "Voxel %i face %i atlas undefined", voxel_id0, face_id);
@@ -1048,9 +1726,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		}
 #else
 		// Get or create the appropriate temporary geometry for this atlas
-		sm_<uint, TemporaryGeometry> &into =
-				(translucent_result && voxel_def0->translucent) ?
-				*translucent_result : result;
+		sm_<uint, TemporaryGeometry> &into = geometry_for(
+				result, translucent_result, masked_result, voxel_def0);
 		TemporaryGeometry &tg = into[seg_ref.atlas_id];
 		if(tg.vertex_data.Empty()){
 			tg.atlas_id = seg_ref.atlas_id;
@@ -1065,7 +1742,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		};
 		if(use_skylight){
 			face_vertex_colors(volume, voxel_reg, fmt, quad, n, face_id,
-					corner_colors);
+					corner_colors, horizon);
 		}
 		// The voxel's own colour, and then what its param says about it,
 		// combined before either is packed
@@ -1108,6 +1785,66 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				}
 			}
 		}
+		// **[WORLD_UV]: a texture that spans more than one voxel.** A face
+		// repeats its texture once per voxel, so a feature larger than a
+		// voxel cannot exist and a big wall reads as a grid of identical
+		// stamps. At uv_scale > 1 a face takes its own slice of the
+		// repeat from where the voxel sits in the world, and the voxel
+		// beside it takes the next one, so the picture crosses them.
+		//
+		// The wrap falls on a voxel boundary and never inside a quad, so
+		// the coordinates stay inside this segment's own rect and the
+		// atlas is untouched.
+		//
+		// The world position comes from the horizon map when the mesher is
+		// a world's, and from uv_origin when it is one block standing on
+		// its own -- the client-side mesh call, which has no horizon.
+		AtlasSegmentCache sliced;
+		const AtlasSegmentCache *useg = aseg;
+		// **Across and up are two numbers** ([SIGIL_ROUND], 2026-09-24):
+		// a frieze along a wall is eight voxels across and one tall, and
+		// wrapping both axes with one number made a slab's edge show one
+		// eighth of the texture's height, picked by where the slab sat.
+		const int uvn = voxel_def0->uv_scale < 1 ? 1 : voxel_def0->uv_scale;
+		const int uvm = voxel_def0->uv_scale_v < 1 ? uvn :
+				voxel_def0->uv_scale_v;
+		if((uvn > 1 || uvm > 1) && (horizon != nullptr || uv_origin != nullptr)){
+			const pv::Vector3DInt32 uvp = face_back_pos(volume, quad, n);
+			const pv::Vector3DInt32 uvlc =
+					volume.getEnclosingRegion().getLowerCorner();
+			const int ox = horizon ? horizon->origin_x + HORIZON_PAD :
+					uv_origin->getX();
+			const int oy = horizon ? horizon->origin_y : uv_origin->getY();
+			const int oz = horizon ? horizon->origin_z + HORIZON_PAD :
+					uv_origin->getZ();
+			const int wx = ox + (uvp.getX() - uvlc.getX() - 1);
+			const int wy = oy + (uvp.getY() - uvlc.getY() - 1);
+			const int wz = oz + (uvp.getZ() - uvlc.getZ() - 1);
+			auto wrap = [](int v, int m){ return ((v % m) + m) % m; };
+			int ui, vi;
+			if(n.getY() != 0.0f){
+				// A floor or a ceiling: the two axes are both across the
+				// world, so the second number is the depth one
+				ui = wrap(wx, uvn);
+				vi = wrap(wz, uvm);
+			} else if(n.getX() != 0.0f){
+				ui = wrap(wz, uvn);
+				// The segment's v grows downwards, so a voxel higher in
+				// the world takes a slice further up the texture
+				vi = uvm - 1 - wrap(wy, uvm);
+			} else {
+				ui = wrap(wx, uvn);
+				vi = uvm - 1 - wrap(wy, uvm);
+			}
+			sliced = *aseg;
+			const float du = (aseg->coord1.x_ - aseg->coord0.x_) / (float)uvn;
+			const float dv = (aseg->coord1.y_ - aseg->coord0.y_) / (float)uvm;
+			sliced.coord0.x_ = aseg->coord0.x_ + du * (float)ui;
+			sliced.coord1.x_ = sliced.coord0.x_ + du;
+			sliced.coord0.y_ = aseg->coord0.y_ + dv * (float)vi;
+			sliced.coord1.y_ = sliced.coord0.y_ + dv;
+			useg = &sliced;
+		}
 		// Go through indices of the face and mangle vertices according to them
 		// into the temporary vertex buffer
 		size_t pv_index_i0 = pv_face_i * 6;
@@ -1129,8 +1866,8 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			tg_vert.normal_.z_ = pv_vert.normal.getZ();
 			// Figure out texture coordinates
 			size_t pv_vertex_i1 = pv_vertex_i - pv_vertex_i0;
-			assign_txcoords(pv_vertex_i1, aseg, tg_vert);
-			turn_txcoord(aseg, variant ? variant->tile_turns[face_id] :
+			assign_txcoords(pv_vertex_i1, useg, tg_vert);
+			turn_txcoord(useg, variant ? variant->tile_turns[face_id] :
 					voxel_def0->tile_turns[face_id], tg_vert);
 			tg_vert.color_ = corner_colors[pv_vertex_i1];
 			if(fmt.n_surface != 0){
@@ -1142,7 +1879,20 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 	}
 
 	generate_voxel_shapes(result, volume, voxel_reg, fmt, atlas_reg,
-			use_skylight, translucent_result);
+			use_skylight, translucent_result, masked_result, horizon);
+}
+
+// [WATER_LIGHT] 3: BUILDAT_LIQUID_CORNER_AVG=1 averages a source column in
+// with the flowing ones instead of answering the corner with it, which is
+// what this did before. It is here so that liquid_shore.sh can read the
+// same shore both ways in one run of the world.
+static bool liquid_corner_avg()
+{
+	static const bool v = [](){
+		const char *s = getenv("BUILDAT_LIQUID_CORNER_AVG");
+		return s != nullptr && s[0] != '\0';
+	}();
+	return v;
 }
 
 // How high a liquid's surface stands at one corner of a voxel: the average
@@ -1179,21 +1929,35 @@ static float liquid_corner_top(VoxelVolume &volume,
 		if(cdef == nullptr)
 			continue;
 		if(cdef->is_liquid && cdef->shape_group == def->shape_group){
-			// How high this column stands is its own param's business, the
-			// same as the voxel being meshed: Luanti puts a flowing liquid's
-			// level in param2
+			// A source stands full height and says so for the whole corner,
+			// without being averaged in: Luanti's getCornerLevel() returns
+			// there and then ("Source always has the full height"). A
+			// source whose param2 is something else -- VoxeLibre's water
+			// carries its palette index there -- used to be read as a
+			// variant and averaged with the flow beside it, and the shore
+			// sagged into the flow ([WATER_LIGHT] 3).
+			if(cdef->liquid_is_source && !liquid_corner_avg())
+				return 0.5f;
+			// How high a flowing column stands is its own param's business:
+			// Luanti puts the level in param2. The mean is of the flowing
+			// columns alone.
 			const interface::VoxelVariant *cvar = fmt.param.bound() ?
 					cdef->variant(fmt.param.get(cv)) : nullptr;
-			sum += cvar ? cvar->liquid_top : cdef->liquid_top;
+			if(!cvar)
+				return 0.5f;
+			sum += cvar->liquid_top;
 			count++;
 		} else if(cdef->fully_empty){
 			empty++;
-			if(empty >= 2)
-				return -0.5f;
 		}
 	}
+	// Luanti's numbers: two air columns and the corner is at the bottom,
+	// a fiftieth up (0.2 / BS); no flowing column at all and it is at the
+	// middle
+	if(empty >= 2)
+		return -0.5f + 0.02f;
 	if(count == 0)
-		return def_top;
+		return 0.0f;
 	return sum / count;
 }
 
@@ -1279,8 +2043,11 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,
 		AtlasRegistry *atlas_reg,
 		bool use_skylight,
-		sm_<uint, TemporaryGeometry> *translucent_result)
+		sm_<uint, TemporaryGeometry> *translucent_result,
+		sm_<uint, TemporaryGeometry> *masked_result,
+		const HorizonMap *horizon)
 {
+	const bool packed_alpha = horizon != nullptr;
 	const pv::Region &region = volume.getEnclosingRegion();
 	const pv::Vector3DInt32 lc = region.getLowerCorner();
 	const pv::Vector3DInt32 uc = region.getUpperCorner();
@@ -1331,10 +2098,59 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 				// above it -- a rooted plant -- in which case its own voxel
 				// is solid ground and carries no light worth having; see
 				// VoxelDefinition::shape_lit_from_above.
-				const VoxelSample lv = def->shape_lit_from_above ?
+				//
+				// And unless the shape *blocks* light, which a slab, a stair
+				// and a snow layer do: light does not enter a voxel it
+				// cannot pass through, so such a voxel's own light is zero
+				// and the shape would be drawn black. A cube in the same
+				// place is lit face by face from the voxel each face points
+				// into; the nearest thing a shape has to that is the
+				// brightest of the six around it, which is what a face of it
+				// would have found. Measured in minetest_game: a snow slab
+				// over lit ground under an open sky, own light 0 against the
+				// 15 of the air on top of it.
+				VoxelSample lv = def->shape_lit_from_above ?
 						volume.sample_at(x, y + 1, z) : v;
+				if(!def->shape_lit_from_above && !def->transmits_light){
+					static const int NB[6][3] = {
+						{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
+						{-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+					};
+					float best = fmt.sky_f(lv) + fmt.lamp_f(lv);
+					for(size_t k = 0; k < 6; k++){
+						const VoxelSample nv = volume.sample_at(
+								x + NB[k][0], y + NB[k][1], z + NB[k][2]);
+						// Nothing generated there yet reads as full light
+						// in both banks, and a snow layer at the edge of
+						// the loaded world took it: the far tree tops of
+						// vp5 at 02:00 drawn white ([LOD_LIGHT]'s finding)
+						if(fmt.undefined(nv))
+							continue;
+						const float nb = fmt.sky_f(nv) + fmt.lamp_f(nv);
+						if(nb > best){
+							best = nb;
+							lv = nv;
+						}
+					}
+				}
 				float sky_f = fmt.sky_f(lv);
 				float lamp_f = fmt.lamp_f(lv);
+				// The terrain beyond the chunk for a shape, as for a cube
+				// face (face_vertex_colors()): the sea, a plant, a snow
+				// layer under a mountain see the same horizon. Looked up
+				// as a floor does, the whole ring, since a shape's quads
+				// point every way. Without it the sea read as the most
+				// occluded thing in the diagnostic's frame -- it was the
+				// packed layout's terrain of one drawn cyan, not a reading
+				// -- and had no cap at all in the light.
+				float terrain = 1.0f;
+				if(horizon){
+					terrain = terrain_sky(horizon,
+							horizon->origin_x + HORIZON_PAD + x - lc.getX() - 1,
+							horizon->origin_y + y - lc.getY() - 1,
+							horizon->origin_z + HORIZON_PAD + z - lc.getZ() - 1,
+							pv::Vector3DFloat(0, 1, 0));
+				}
 				// Which directions this voxel connects in, once per voxel
 				// rather than once per quad that asks. Only a voxel that
 				// reaches out at all pays for it.
@@ -1378,7 +2194,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 						for(int iz = 0; iz < 2; iz++){
 							corner[ix][iz] = liquid_corner_top(volume,
 									voxel_reg, fmt, x, y, z, def, liquid_top,
-									ix == 0 ? -1 : 1, iz == 0 ? -1 : 1);
+									ix == 0 ? -1 : 1, iz == 0 ? -1 : 1) -
+									LIQUID_SAG;
 						}
 					}
 				}
@@ -1398,7 +2215,11 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					// one of its extra textures; see
 					// VoxelDefinition::extra_textures
 					AtlasSegmentReference seg_ref;
-					if(quad.tile < 6){
+					if(variant && quad.tile < variant->texture_refs.size()){
+						// The variant's own, which is a palette entry's
+						// tinted tile; see VoxelVariant::textures
+						seg_ref = variant->texture_refs[quad.tile];
+					} else if(quad.tile < 6){
 						seg_ref = def->textures[quad.tile];
 					} else {
 						const size_t i = quad.tile - 6;
@@ -1464,9 +2285,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 								interface::EDGEMATERIALID_EMPTY)))
 							continue;
 					}
-					sm_<uint, TemporaryGeometry> &into =
-							(translucent_result && def->translucent) ?
-							*translucent_result : result;
+					sm_<uint, TemporaryGeometry> &into = geometry_for(
+							result, translucent_result, masked_result, def);
 					TemporaryGeometry &tg = into[seg_ref.atlas_id];
 					if(tg.vertex_data.Empty()){
 						tg.atlas_id = seg_ref.atlas_id;
@@ -1476,14 +2296,24 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					unsigned color = 0xffffffff;
 					if(use_skylight){
 						float shade = FACE_SHADE[face_id];
-						color = Color(
-								BOUNCE_COLOR.r_ * shade * (1.0f - sky_f) +
+						// No constant bounce for a packed client; see
+						// face_vertex_colors()
+						float bshade = packed_alpha ? 0.0f : shade * (1.0f - sky_f);
+						// The packed layout as face_vertex_colors() writes
+						// it: lamp, terrain, local shade; the sky's share
+						// takes the terrain, the local shade does not
+						color = SHADOW_KINDS ? Color(terrain, 1.0f, 1.0f,
+								sky_alpha(sky_f, shade * terrain, true)).ToUInt() :
+							packed_alpha ? Color(lamp_f * shade, terrain,
+								shade / 1.15f > 1.0f ? 1.0f : shade / 1.15f,
+								sky_alpha(sky_f, shade * terrain, true)).ToUInt() : Color(
+								BOUNCE_COLOR.r_ * bshade +
 										LAMP_COLOR.r_ * lamp_f * shade,
-								BOUNCE_COLOR.g_ * shade * (1.0f - sky_f) +
+								BOUNCE_COLOR.g_ * bshade +
 										LAMP_COLOR.g_ * lamp_f * shade,
-								BOUNCE_COLOR.b_ * shade * (1.0f - sky_f) +
+								BOUNCE_COLOR.b_ * bshade +
 										LAMP_COLOR.b_ * lamp_f * shade,
-								sky_f * shade).ToUInt();
+								sky_alpha(sky_f, shade, packed_alpha)).ToUInt();
 					}
 					uint32_t tint = 0xffffff;
 					if(fmt.color.bound())
@@ -1593,20 +2423,20 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 void set_voxel_geometry(CustomGeometry *cg, Context *context,
 		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-		bool use_skylight)
+		bool use_skylight, const pv::Vector3DInt32 *uv_origin)
 {
 	preload_textures(volume, voxel_reg, atlas_reg);
 
 	sm_<uint, TemporaryGeometry> temp_geoms;
 	generate_voxel_geometry(temp_geoms, volume, voxel_reg, atlas_reg,
-			use_skylight);
+			use_skylight, nullptr, nullptr, nullptr, uv_origin);
 
 	set_voxel_geometry(cg, context, temp_geoms, atlas_reg);
 }
 
 up_<VoxelVolume> generate_voxel_lod_volume(
 		int lod, VoxelVolume&volume_orig,
-		VoxelRegistry *voxel_reg)
+		VoxelRegistry *voxel_reg, bool inside)
 {
 	const VoxelFmt fmt(voxel_reg);
 	pv::Region region_orig = volume_orig.getEnclosingRegion();
@@ -1629,6 +2459,7 @@ up_<VoxelVolume> generate_voxel_lod_volume(
 				// air in it is a block a face is lit through, and the voxel
 				// that wins is a solid one with no light in it at all.
 				uint8_t max_sky = 0, max_lamp = 0;
+				bool all_cast = true;
 				for(int x1 = 0; x1 < lod; x1++){
 					for(int y1 = 0; y1 < lod; y1++){
 						for(int z1 = 0; z1 < lod; z1++){
@@ -1642,6 +2473,16 @@ up_<VoxelVolume> generate_voxel_lod_volume(
 							VoxelSample v1 = volume_orig.sample_at(p_orig);
 							if(fmt.undefined(v1))
 								continue;
+							if(inside){
+								// What the near mesh casts with: not the
+								// translucent, which casts nothing
+								const interface::CachedVoxelDefinition *def =
+										voxel_reg->get_cached(v1);
+								if(def == nullptr || def->translucent ||
+										def->edge_material_id ==
+										interface::EDGEMATERIALID_EMPTY)
+									all_cast = false;
+							}
 							// TODO: Prioritize voxel types better
 							// Higher is probably more interesting
 							// Which definition it wears rather than which
@@ -1661,6 +2502,8 @@ up_<VoxelVolume> generate_voxel_lod_volume(
 						}
 					}
 				}
+				if(inside && !all_cast)
+					v_orig = VoxelSample();
 				if(fmt.light_sky.bound())
 					fmt.light_sky.set(v_orig, max_sky);
 				if(fmt.light_lamp.bound())
@@ -1677,7 +2520,7 @@ void generate_voxel_lod_geometry(int lod,
 		sm_<uint, TemporaryGeometry> &result,
 		VoxelVolume &lod_volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-		bool use_skylight)
+		bool use_skylight, const HorizonMap *horizon)
 {
 	const VoxelFmt fmt(voxel_reg);
 	IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg);
@@ -1720,11 +2563,55 @@ void generate_voxel_lod_geometry(int lod,
 			face_id = 4;
 		else if(n.getZ() < 0)
 			face_id = 5;
+		pv::Vector3DFloat quad[4] = {
+			pv_vertices[pv_vertex_i0 + 0].position,
+			pv_vertices[pv_vertex_i0 + 1].position,
+			pv_vertices[pv_vertex_i0 + 2].position,
+			pv_vertices[pv_vertex_i0 + 3].position,
+		};
+		if(face_owned_by_padding(lod_volume, quad, n))
+			continue;
+		// The voxel behind the face: which variant it wears, the colour it
+		// is drawn in and its surface modifiers, read the way
+		// generate_voxel_geometry() reads them.
+		const interface::VoxelVariant *variant = nullptr;
+		uint32_t voxel_color = 0xffffff;
+		float mods[interface::VOXEL_SURFACE_MODIFIERS] = {};
+		if((fmt.param.bound() && !voxel_def0->variants.empty()) ||
+				fmt.color.bound() || fmt.n_surface != 0){
+			VoxelSample back = face_back_voxel(lod_volume, quad, n);
+			if(fmt.param.bound() && !voxel_def0->variants.empty())
+				variant = voxel_def0->variant(fmt.param.get(back));
+			if(fmt.color.bound())
+				voxel_color = fmt.color.get(back) & 0xffffffUL;
+			if(fmt.n_surface != 0){
+				fmt.surface_of(back, mods);
+				if(fmt.tint.bound()){
+					mods[0] = pack_tint565(
+							tint_ramp_color(voxel_def0, fmt.tint_f(back)));
+				}
+			}
+		}
 		// Get texture coordinates (contained in AtlasSegmentCache)
 		size_t lod_i = lod - 2;
 		if(lod_i >= interface::VOXELDEF_NUM_LOD)
 			lod_i = interface::VOXELDEF_NUM_LOD - 1;
-		AtlasSegmentReference seg_ref = voxel_def0->lod_textures[lod_i][face_id];
+		// **A variant wears its own texture at every distance.** A palette
+		// is a variant whose tiles are the definition's through a multiply
+		// -- VoxeLibre colours every leaf and every blade of grass that way
+		// -- and the definition's own LOD segments are the untinted ones,
+		// so a LOD chunk drew the whole living world grey ([CLIENT_FRAME]).
+		// There are no LOD segments for a variant's tiles: three of them
+		// per palette entry per face is an atlas nobody can afford, and
+		// what the LOD simulation buys -- a texture pre-averaged for
+		// minification -- the mip chain buys again. So a variant's own
+		// full-resolution tile is what a far chunk wears.
+		const uint tile = variant ? (variant->tile_order[face_id] < 6 ?
+				variant->tile_order[face_id] : face_id) : face_id;
+		AtlasSegmentReference seg_ref =
+				(variant && tile < variant->texture_refs.size()) ?
+				variant->texture_refs[tile] :
+				voxel_def0->lod_textures[lod_i][face_id];
 		if(seg_ref.atlas_id == interface::ATLAS_UNDEFINED){
 			// This is usually intentional for invisible voxels
 			//log_t(MODULE, "Voxel %i face %i atlas undefined", voxel_id0, face_id);
@@ -1749,31 +2636,25 @@ void generate_voxel_lod_geometry(int lod,
 			// memory, so let's do only one big memory allocation
 			tg.vertex_data.Reserve(pv_vertices.size() / 4 * 6);
 		}
-		pv::Vector3DFloat quad[4] = {
-			pv_vertices[pv_vertex_i0 + 0].position,
-			pv_vertices[pv_vertex_i0 + 1].position,
-			pv_vertices[pv_vertex_i0 + 2].position,
-			pv_vertices[pv_vertex_i0 + 3].position,
-		};
-		if(face_owned_by_padding(lod_volume, quad, n))
-			continue;
-		// The surface modifiers of the voxel behind the face; see
-		// generate_voxel_geometry(), which reads them the same way
-		float mods[interface::VOXEL_SURFACE_MODIFIERS] = {};
-		if(fmt.n_surface != 0){
-			VoxelSample back = face_back_voxel(lod_volume, quad, n);
-			fmt.surface_of(back, mods);
-			if(fmt.tint.bound()){
-				mods[0] = pack_tint565(
-						tint_ramp_color(voxel_def0, fmt.tint_f(back)));
-			}
-		}
 		unsigned corner_colors[4] = {
 			0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
 		};
 		if(use_skylight){
 			face_vertex_colors(lod_volume, voxel_reg, fmt, quad, n, face_id,
-					corner_colors);
+					corner_colors, horizon, lod);
+		}
+		// The voxel's own colour and what its param says about it, combined
+		// before either is packed -- generate_voxel_geometry()'s own lines
+		if(voxel_color != 0xffffff ||
+				(variant && variant->color != 0xffffff)){
+			uint32_t tint = variant ?
+					mul_rgb(voxel_color, variant->color) : voxel_color;
+			for(size_t i = 0; i < 4; i++){
+				corner_colors[i] = use_skylight ?
+						modulate_color(corner_colors[i], tint) :
+						plain_color(tint);
+			}
+			tg.has_colors = true;
 		}
 		// Go through indices of the face and mangle vertices according to them
 		// into the temporary vertex buffer

@@ -401,7 +401,7 @@ bool View::Define(RenderSurface* renderTarget, Viewport* viewport)
     geometriesUpdated_ = false;
 
 #ifdef URHO3D_OPENGL
-#ifdef GL_ES_VERSION_2_0
+#ifdef URHO3D_GLES2
     // On OpenGL ES we assume a stencil is not available or would not give a good performance, and disable light stencil
     // optimizations in any case
     noStencil_ = true;
@@ -613,7 +613,7 @@ void View::Render()
         camera_->SetAspectRatioInternal((float)(viewSize_.x_) / (float)(viewSize_.y_));
 
     // Bind the face selection and indirection cube maps for point light shadows
-#ifndef GL_ES_VERSION_2_0
+#ifndef URHO3D_GLES2
     if (renderer_->GetDrawShadows())
     {
         graphics_->SetTexture(TU_FACESELECT, renderer_->GetFaceSelectCubeMap());
@@ -2049,7 +2049,7 @@ void View::AllocateScreenBuffers()
 
         // If OpenGL ES, use substitute target to avoid resolve from the backbuffer, which may be slow. However if multisampling
         // is specified, there is no choice
-#ifdef GL_ES_VERSION_2_0
+#ifdef URHO3D_GLES2
         if (!renderTarget_ && graphics_->GetMultiSample() < 2)
             needSubstitute = true;
 #endif
@@ -2305,7 +2305,7 @@ void View::ProcessLight(LightQueryResult& query, unsigned threadIndex)
     if (isShadowed && light->GetShadowDistance() > 0.0f && light->GetDistance() > light->GetShadowDistance())
         isShadowed = false;
     // OpenGL ES can not support point light shadows
-#ifdef GL_ES_VERSION_2_0
+#ifdef URHO3D_GLES2
     if (isShadowed && type == LIGHT_POINT)
         isShadowed = false;
 #endif
@@ -2433,6 +2433,8 @@ void View::ProcessShadowCasters(LightQueryResult& query, const PODVector<Drawabl
         // In case this is a point or spot light query result reused for optimization, we may have non-shadowcasters included.
         // Check for that first
         if (!drawable->GetCastShadows())
+            continue;
+        if (type == LIGHT_DIRECTIONAL && !(drawable->GetShadowSplitMask() & (1u << splitIndex)))
             continue;
         // Check shadow mask
         if (!(GetShadowMask(drawable) & lightMask))
@@ -3124,7 +3126,7 @@ void View::RenderShadowMap(const LightBatchQueue& queue)
 
         // Perform further modification of depth bias on OpenGL ES, as shadow calculations' precision is limited
         float addition = 0.0f;
-#ifdef GL_ES_VERSION_2_0
+#ifdef MOBILE_GRAPHICS
         multiplier *= renderer_->GetMobileShadowBiasMul();
         addition = renderer_->GetMobileShadowBiasAdd();
 #endif

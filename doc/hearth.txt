@@ -1,0 +1,159 @@
+Hearth: a community forum as an app
+===================================
+[HEARTH_MVP], doc/plan/forum_plan.md. apps/hearth is a buildat app:
+topics, threads under them and messages in those, each at a permanent
+address. It is read as plain HTML in a browser and taken part in from
+the buildat client.
+
+Running it
+----------
+    bin/buildat_server -m ../apps/hearth -D <user path> -P <port>
+
+The server serves both faces on its one port: the game protocol to the
+client, and HTTP to a browser. The app itself is main/ (main.cpp on the
+server, client_lua/init.lua sent to the client and run there through
+"client_main" in main/meta.json). It needs the builtins network, client_lua, client_data,
+storage and accounts.
+
+The data
+--------
+One SQLite file, <user path>/apps/hearth/hearth.sqlite (WAL; the
+directory is the app's id, "<author>.<name>" for an installed release),
+made on the first start; a file from before a column gets it added. Tables:
+topics (a parent topic, 0 at the top), threads, messages, edits (what
+an edit replaced, when and by whom), follows, notifications, members
+(when an account first came), reads (the threads an account has
+opened), reports, and search, an FTS5 index over every message (a
+thread's title on its first message). Every statement binds its
+values.
+
+A thread's subject (a package's "author/name" and key, [PACKAGE_SUBJECT])
+is stored when given and read by nothing yet.
+
+Accounts and admins
+-------------------
+Joining is builtin/accounts: a local account or a Starport ID, as the
+server's admin set up its logins. A server with no admin logs "setup
+code <code>"; whoever joins with it is the admin. The server's admins
+are Hearth's admins and its moderators. Nothing is posted without
+joining; the HTML face needs no account.
+
+The HTML face
+-------------
+Claimed from builtin/network (claim_http_path); /index.html and the rest
+stay the web client's.
+
+    /                the topics (one level of subtopics) and the latest
+                     20 threads
+    /topic/<id>      a topic's threads, answered ones first, then by the
+                     latest message, 200 at most
+    /t/<id>          a thread: the question, the reply that answered it,
+                     then the rest in order; every message at #m<id>
+    /m/<id>          one message and a link to it in its thread
+    /search?q=...    50 best matches, titles weighed 5 to a body's 1, an
+                     answer counted twice
+
+Anything else under those paths is a 404; a POST is a 404. A message is
+CommonMark with GitHub's tables, strikethrough, task lists and URL
+autolinks, and ||spoilers|| (interface::markup::to_html, md4c): raw HTML
+is text, a link or an image to anything but http, https, mailto or a
+relative path is its text alone, an image is a link to it and never
+loaded, and every link is rel="nofollow ugc". A search's words are each
+quoted, so nothing typed is FTS5's query language; the last word is a
+prefix. A hidden message shows "Hidden by a moderator: <statement>" and
+not its text; a thread whose first message is hidden is hidden with it,
+title too, and gone from the portal, its topic and search.
+
+Taking part: the client
+-----------------------
+The client's pages: the topics and the latest threads, a topic (its
+threads, and a new thread's title and first message), a thread (its
+messages, a reply, Follow, "This answered it", Report or Appeal),
+notifications, and for an admin the moderation queue and a new topic
+(a name, what it is about, and a parent: none, or a top-level topic --
+subtopics are one level deep). The client shows
+a message's source text; it does not draw the markup. A message's field
+is multi-line: Enter breaks the line, Ctrl+Enter sends.
+
+Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
+"hr:res" {id, ok, result | error}. The commands and who may use them:
+
+    me                     who this is: account, admin, unseen, level,
+                           open_reports (admin)
+    topics, topic, thread  read; "thread" with after=<id> gives the
+                           messages after it, 1000 a call
+    search                 30 a minute per account
+    new_topic              the admin; name, about, parent (0, or a
+                           top-level topic)
+    new_thread             anyone; topic, title, body, subject
+    reply                  anyone; not in a hidden thread but the admin
+    edit                   the message's author or the admin
+    answered               whoever started the thread, or the admin;
+                           message 0 takes it back; not the first message
+    follow                 on true or false
+    notifications          the latest 50; they are seen after
+    report                 someone else's shown message, with a reason
+    appeal                 one's own hidden message, with a text
+    queue                  the admin: the open reports and appeals
+    moderate               the admin: a report hidden or dismissed, an
+                           appeal restored or dismissed; a hide and an
+                           appeal's dismissal need a statement, which its
+                           author is notified with
+
+Pushed by the server: "hr:new" {thread, message} to every client that
+has that thread open (a chat runs on it), and "hr:notify" {unseen} to
+an account that was notified. A notification is a reply in a followed
+thread (one follows what one started or wrote in), an @name mention, a
+message marked the answer, a hide, a restore or a refused appeal.
+
+The client has no page to edit a message or search: those are requests
+only (a scripted client's, below), and search is the HTML face's.
+
+Limits
+------
+A title is 200 bytes at most, a message 20000, a topic's name 80; no
+control characters but a tab, and a line break where lines are allowed.
+A level is worked out at each post:
+
+    0  a new account: 2 threads a day, 10 messages an hour, no links
+    1  a day since it first came, 5 threads read, 3 of its messages
+       shown, none hidden in the last 30 days: 10 threads a day, 60
+       messages an hour
+    2  an admin: no limit
+
+An edit counts as a message. A link is "://", "www." or anything the
+markup makes a link of. An account reports 10 a day at most (an admin
+any number), and has one open report or appeal per message. Search on
+the HTML face is 30 a minute per address (429 after).
+
+The environment
+---------------
+Hearth has no settings file of its own. Its variables are read by the
+client, for a scripted client (a check):
+
+    BUILDAT_HEARTH_NAME       join as this account (accounts.lua, as every
+    BUILDAT_HEARTH_PASSWORD   <env>_ variable here); no default: the join
+    BUILDAT_HEARTH_CODE       dialog. CODE is the setup code or an invite
+    BUILDAT_HEARTH_TOTP       code, TOTP an authenticator's code
+    BUILDAT_HEARTH_KEEP       1: keep the login on this client
+    BUILDAT_HEARTH_STARPORT   join with this Starport ID token instead
+    BUILDAT_HEARTH_ADMIN      admin requests after the join, a line each,
+                              "cmd name [arg]" (e.g. "add bob bobpass1234")
+    BUILDAT_HEARTH_REQS       Hearth requests after the join, JSON a line
+                              each, numbered from 1001; every answer is
+                              logged "hr: <json>" and every "hr:notify"
+                              "hr notify: <json>". Default empty
+    BUILDAT_HEARTH_OPEN       a thread's id: open it after the join
+                              instead of the topics. Default unset
+
+The check
+---------
+    apps/hearth/check.sh
+
+Needs a built tree (Build/bin) and curl; about a minute. It starts a
+server on port 29881 in a temporary directory, takes the setup code from
+its log and drives clients with the variables above: posting, editing
+and refusals, an answer, a mention and notifications, a chat line
+within two seconds, every HTML page with escaped and hostile markup, a
+new account's limits, a report, a hide with a statement, an appeal and
+a restore, both search limits, and the multi-line reply field.

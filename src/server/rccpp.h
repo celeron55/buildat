@@ -21,6 +21,12 @@ namespace rccpp
 				const ss_ &extra_cxxflags = "", const ss_ &extra_ldflags = "",
 				bool skip_compile = false) = 0;
 
+		// The compile alone, without loading the result; safe to call from
+		// several threads at once while include_directories is not changed
+		virtual bool compile(const std::string &in_path,
+				const std::string &out_path,
+				const ss_ &extra_cxxflags, const ss_ &extra_ldflags) = 0;
+
 		virtual void* construct(const char *name, interface::Server *server) = 0;
 
 		virtual void unload(const std::string &module_name) = 0;

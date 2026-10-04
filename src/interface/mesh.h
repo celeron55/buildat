@@ -33,10 +33,14 @@ namespace interface
 				int w, int h, int d, const ss_ &source_data,
 				VoxelRegistry *voxel_reg);
 
-		// Set custom geometry from 8-bit voxel data, using a voxel registry
+		// Set custom geometry from 8-bit voxel data, using a voxel registry.
+		// uv_origin is where this block's (0, 0, 0) sits in the world, which
+		// is what a voxel of uv_scale > 1 takes its slice of the repeat from
+		// ([WORLD_UV]); without it every voxel gets the whole texture.
 		void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 				int w, int h, int d, const ss_ &source_data,
-				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg);
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				const pv::Vector3DInt32 &uv_origin = pv::Vector3DInt32(0, 0, 0));
 
 		// Create a model from voxel volume, using a voxel registry, without
 		// textures or normals, based on the physically_solid flag.
@@ -74,6 +78,25 @@ namespace interface
 
 		// with_lod also builds the atlas segments a LOD mesh samples; see
 		// VoxelRegistry::get_cached()
+		// **A chunk's preload, a slice at a time** ([CLIENT_FRAME],
+		// 2026-09-26). Building an atlas segment for a voxel seen for the
+		// first time is what a join's 858 to 1265 ms first chunk is made
+		// of, and it happens on the thread that asked for the mesh. This
+		// carries a cursor, does what it can before the deadline and says
+		// whether it is done, so the caller can come back next frame.
+		struct PreloadCursor
+		{
+			int x = 0, y = 0, z = 0;
+			bool started = false;
+			// Voxels done since the clock was last read: building one
+			// voxel's atlas segment is milliseconds, so the deadline has
+			// to be looked at inside a row and not only between rows
+			int since_clock = 0;
+		};
+		bool preload_textures_sliced(VoxelVolume &volume,
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				bool with_lod, int64_t deadline_us, PreloadCursor &cursor);
+
 		void preload_textures(VoxelVolume &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				bool with_lod = false);
@@ -107,7 +130,7 @@ namespace interface
 		// interface/atlas.h says what fills the two maps. No technique is set:
 		// a game picks one for its chunks in voxelworld.sub_material_update(),
 		// and skylit geometry stays invisible until it does. The reference
-		// implementation is PBRVoxel in games/voxel_lighting.
+		// implementation is PBRVoxel in apps/voxel_lighting.
 
 		// A voxel whose definition has a shape contributes that shape's quads
 		// instead of cube faces; see VoxelDefinition::shape in
@@ -127,11 +150,58 @@ namespace interface
 		// drawable so that they can be drawn after the solid world, and so
 		// that the renderer sorts them against the other chunks' by
 		// distance. Left out, everything goes in one geometry as before.
+		//
+		// masked_result is the same arrangement for the voxels the registry
+		// says are alpha masked -- leaves, a plant, anything whose picture
+		// has holes in it. Those are drawn with the solid world and only
+		// want a material of their own, and a material is per drawable.
+		// The terrain's own occlusion of the sky, at the scale the corner
+		// table and a chunk's padding cannot see: the highest solid voxel
+		// of every column in a HORIZON_SIZE-square neighbourhood of the
+		// chunk, world y, HORIZON_NONE where nothing is loaded, laid out
+		// [z][x] from `origin` (the chunk's world origin minus HORIZON_PAD
+		// on x and z; origin_y is the chunk's own). The mesher walks it eight ways from each face and
+		// folds the dome's unobstructed cap into the sky share; a client
+		// that passes none gets the whole dome. See [PBR_FIT] 2c.
+		static const int HORIZON_PAD = 32;
+		static const int HORIZON_SIZE = 32 + 2 * HORIZON_PAD;
+		static const int16_t HORIZON_NONE = -32768;
+		struct HorizonMap
+		{
+			int32_t origin_x = 0, origin_y = 0, origin_z = 0;
+			int16_t heights[HORIZON_SIZE * HORIZON_SIZE];
+		};
+
 		void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				bool use_skylight = false,
-				sm_<uint, TemporaryGeometry> *translucent_result = nullptr);
+				sm_<uint, TemporaryGeometry> *translucent_result = nullptr,
+				sm_<uint, TemporaryGeometry> *masked_result = nullptr,
+				const HorizonMap *horizon = nullptr,
+				const pv::Vector3DInt32 *uv_origin = nullptr);
+
+		// **A cheap stand-in shape for the occlusion buffer**
+		// ([CLIENT_FRAME]). A chunk's drawn mesh is thousands of triangles
+		// of surface detail saying what a few quads would, and Urho3D
+		// rasterises occluders on the processor out of a triangle budget,
+		// so the whole budget goes on the first chunk that comes along.
+		// This is the same silhouette at four voxels to a cell: a cell
+		// counts only when every voxel in it is opaque and fills itself,
+		// so the shape lies *inside* the solid it stands for and can never
+		// hide what is visible. A plain triangle list in the same local
+		// space as the chunk's mesh, for
+		// CustomGeometry::SetOcclusionGeometry(); empty when the chunk has
+		// no solid worth the name.
+		void generate_occluder(PODVector<Vector3> &result,
+				VoxelVolume &volume, VoxelRegistry *voxel_reg);
+
+		// A chunk's column heights for a HorizonMap: the local y of the
+		// highest voxel with an edge material that is not a cutout, per
+		// column, HORIZON_NONE where the column has none; w*d int16_t in
+		// [z][x] order over the volume's inside (its padding left out).
+		sv_<int16_t> column_heights(VoxelVolume &volume,
+				VoxelRegistry *voxel_reg);
 
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,
@@ -143,23 +213,29 @@ namespace interface
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-				bool use_skylight = false);
+				bool use_skylight = false,
+				const pv::Vector3DInt32 *uv_origin = nullptr);
 
 		// Voxel LOD geometry generation (lod=1 -> 1:1, lod=3 -> 1:3)
 
 		// Can be called from any thread
 		// voxel_reg is only read for its voxel format: which bits of a voxel
-		// are the type id the downsampling picks by
+		// are the type id the downsampling picks by.
+		// inside: a block is solid only when every voxel in it casts a
+		// shadow, so the surface lies inside the real one -- the shape a
+		// shadow caster can take without shadowing itself ([CLIENT_FRAME]);
+		// otherwise any voxel makes it solid, the shape that is drawn
 		up_<VoxelVolume> generate_voxel_lod_volume(
 				int lod, VoxelVolume&volume_orig,
-				VoxelRegistry *voxel_reg);
+				VoxelRegistry *voxel_reg, bool inside = false);
 
 		// Can be called from any thread
 		void generate_voxel_lod_geometry(int lod,
 				sm_<uint, TemporaryGeometry> &result,
 				VoxelVolume &lod_volume,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
-				bool use_skylight = false);
+				bool use_skylight = false,
+				const HorizonMap *horizon = nullptr);
 
 		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,

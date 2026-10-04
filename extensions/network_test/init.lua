@@ -10,7 +10,9 @@
 -- server), sends one datagram and shows whatever comes back.
 local log = buildat.Logger("extension/network_test")
 local dump = buildat.dump
-local magic = require("buildat/extension/urho3d").safe
+local magic = require("buildat/extension/urho3d")
+local HA_LEFT, LM_VERTICAL, VA_BOTTOM =
+		magic.HA_LEFT, magic.LM_VERTICAL, magic.VA_BOTTOM
 local uistack = require("buildat/extension/uistack")
 local network = require("buildat/extension/network")
 local M = {safe = nil}
@@ -21,7 +23,7 @@ local PORT = 30001
 function M.boot()
 	local root = uistack.main:push({desc="network_test"})
 	root.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "__menu/res/main_style.xml")
+			"XMLFile", "launch_menu/res/main_style.xml")
 
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
