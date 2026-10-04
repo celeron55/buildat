@@ -558,6 +558,10 @@ local function show_starting(game)
 			done = true
 			api.stop_local_server()
 			uistack.main:pop(root)
+			-- **The launcher hears the cancel** ([RELEASE_RED] core.sh,
+			-- 2026-10-04): the room had stood down for the launch and
+			-- stayed stood down, its input with nobody, until told
+			api.leave()
 			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)

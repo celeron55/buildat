@@ -1406,6 +1406,10 @@ struct CApp: public App, public magic::Application
 	// are remembered when a connection starts, and the way back removes
 	// the difference.
 	sv_<magic::SharedPtr<magic::UIElement>> m_menu_ui_children;
+	// No connection since the last leave, so no game put anything there:
+	// a launch cancelled while its server compiled left through the same
+	// leave and took the launcher's own elements ([RELEASE_RED] core.sh)
+	bool m_menu_ui_remembered = false;
 	// The launch UI that was asked for and did not load, so that the one
 	// that did can say why it is not the one the setting names
 	ss_ m_launch_ui_fell_back;
@@ -2943,6 +2947,7 @@ struct CApp: public App, public magic::Application
 	void remember_menu_ui()
 	{
 		m_menu_ui_children.clear();
+		m_menu_ui_remembered = true;
 		magic::UI *ui = GetSubsystem<magic::UI>();
 		if(!ui || !ui->GetRoot())
 			return;
@@ -2959,6 +2964,9 @@ struct CApp: public App, public magic::Application
 	// there when the connection started -- it carries the world.
 	void forget_game_ui()
 	{
+		if(!m_menu_ui_remembered)
+			return;
+		m_menu_ui_remembered = false;
 		magic::UI *ui = GetSubsystem<magic::UI>();
 		if(!ui || !ui->GetRoot())
 			return;

@@ -145,6 +145,9 @@ tabs_after=$(sed -n '/it has the screen again/,$p' "$out/cli.log" | grep -ac "st
 # gone for good after the first leave: the client kept the left
 # server's address.
 trust_shown=$(grep -ac "trust colour sample shown" "$out/cli.log")
+# Hidden only by a connection: a launch cancelled while its server
+# compiles (a cold cache, as on a runner) leaves without one
+trust_hidden=$(grep -ac "trust colour sample hidden" "$out/cli.log")
 # The room's own line: $back also counts the command file's wait_log
 # lines, which name it
 returns=$(grep -ac "launch_w.*: game: back in the room" "$out/cli.log")
@@ -181,7 +184,7 @@ if [ "$verdict_rc" -ne 0 ] || [ "$raised" -gt 0 ] ||
 		[ "$launched" -lt 1 ] || [ "$back" -lt 1 ] || [ "$pulled" -lt 1 ] ||
 		[ "$attract" -lt 1 ] || [ "$attract_back" -lt 1 ] ||
 		[ "$switched" -ne 1 ] || [ "$tabs_after" -ne 1 ] ||
-		[ "$returns" -lt 1 ] || [ "$trust_shown" -lt $((returns + 1)) ] ||
+		[ "$returns" -lt 1 ] || [ "$trust_shown" -lt $((trust_hidden + 1)) ] ||
 		[ "$trust_last" -ne 1 ] ||
 		[ -z "$contents" ]; then
 	echo "the trust colour sample was shown $trust_shown times for" \
