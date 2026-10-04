@@ -178,6 +178,88 @@ function M.new(magic, buildat, log, ctx)
 		return magic.Color(part(1, 2), part(3, 2), part(5, 2))
 	end
 
+	-- A hypertext's text as lines, each with the style in effect where its
+	-- text starts ({text, size, color, center}). Sizes are Luanti's pixels
+	-- at 16 for normal text, drawn at 12 like the rest of a form.
+	local HYPERTEXT_TAGS = {big = {size = 24}, bigger = {size = 36},
+			center = {halign = "center"}, left = {halign = "left"},
+			right = {halign = "left"}, justify = {halign = "left"},
+			normal = {size = 16}}
+	local function hypertext_lines(raw)
+		local global, defs, stack = {size = 16}, {}, {}
+		local function attrs(s)
+			local a = {}
+			for k, v in s:gmatch("([%w_]+)=([^%s>]+)") do
+				a[k] = v
+			end
+			return a
+		end
+		local function style()
+			local st = {}
+			for k, v in pairs(global) do
+				st[k] = v
+			end
+			for _, e in ipairs(stack) do
+				for k, v in pairs(e.props) do
+					st[k] = v
+				end
+			end
+			return {size = math.max(6, math.floor(
+						(tonumber(st.size) or 16) * 12 / 16 + 0.5)),
+					color = st.color and formspec.color_of(st.color),
+					center = st.halign == "center"}
+		end
+		local lines, line = {}, nil
+		local function add_text(t)
+			for piece, nl in t:gmatch("([^\n]*)(\n?)") do
+				if piece ~= "" then
+					if not line then
+						line = style()
+						line.text = ""
+					end
+					line.text = line.text .. piece
+				end
+				if nl ~= "" then
+					lines[#lines + 1] = line or {text = "", size = style().size}
+					line = nil
+				end
+			end
+		end
+		local at = 1
+		while at <= #raw do
+			local s, e, close, name, rest = raw:find("<(/?)([%w_]+)([^>]*)>", at)
+			add_text(raw:sub(at, (s or #raw + 1) - 1))
+			if not s then
+				break
+			end
+			at = e + 1
+			if close == "/" then
+				for i = #stack, 1, -1 do
+					if stack[i].name == name then
+						table.remove(stack, i)
+						break
+					end
+				end
+			elseif name == "global" then
+				for k, v in pairs(attrs(rest)) do
+					global[k] = v
+				end
+			elseif name == "tag" then
+				local a = attrs(rest)
+				if a.name then
+					defs[a.name] = a
+				end
+			elseif name == "style" or defs[name] or HYPERTEXT_TAGS[name] then
+				stack[#stack + 1] = {name = name, props = name == "style" and
+						attrs(rest) or defs[name] or HYPERTEXT_TAGS[name]}
+			end
+		end
+		if line then
+			lines[#lines + 1] = line
+		end
+		return lines
+	end
+
 	local function label(parent, x, y, w, text, size, color)
 		local e = parent:CreateChild("Text")
 		e:SetStyleAuto()
@@ -1066,8 +1148,15 @@ function M.new(magic, buildat, log, ctx)
 				-- one sends the element's name with "action:<the action's
 				-- name>", which is what Luanti's own client sends.
 				--
-				-- simplified: no styling from the tags -- no colour, size,
-				-- bold, italic, image or table -- and the actions are
+				-- Each line is drawn in the style in effect where its
+				-- text starts: <center>, <big>, <bigger>, <style color=
+				-- size=>, <global color= size= halign=>, and a <tag name=>
+				-- the text defines.
+				--
+				-- simplified: a style is a whole line's -- a word coloured
+				-- inside a line is drawn in the line's colour -- and there
+				-- is no bold, italic, image or table; spans need a layout
+				-- of runs that a Text element is not. The actions are
 				-- gathered under the text rather than staying inline where
 				-- they were written.
 				local x, y = at(e, 1)
@@ -1083,11 +1172,31 @@ function M.new(magic, buildat, log, ctx)
 						actions[#actions + 1] = {name = aname,
 								text = atext:gsub("<[^>]*>", "")}
 					end
-					local text = raw:gsub("<[^>]*>", "")
-					text = formspec.strip_escapes(text)
-					local t = label(window, x + 2, y + 2, w - 4, text, 12)
-					t:SetWordwrap(true)
-					local by = y + h
+					local by = y + h - 20 * #actions
+					local ty = y + 2
+					for _, line in ipairs(hypertext_lines(raw)) do
+						local size = line.size
+						if ty + size > by then
+							break
+						end
+						local text = formspec.strip_escapes(line.text)
+						if text:match("%S") then
+							local c = line.color
+							local t = label(window, x + 2, ty, w - 4, text,
+									size, c and magic.Color(c.r, c.g, c.b))
+							-- Wrapping on first, or the Text sizes itself to
+							-- its one row and the width is lost
+							t:SetWordwrap(true)
+							t.width = math.floor(w - 4)
+							if line.center then
+								t:SetTextAlignment(1)
+							end
+							ty = ty + math.max(t.height, size)
+						else
+							ty = ty + size
+						end
+					end
+					by = y + h
 					for i = #actions, 1, -1 do
 						local a = actions[i]
 						by = by - 20
