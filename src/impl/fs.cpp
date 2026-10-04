@@ -278,6 +278,21 @@ uint64_t directory_tree_size(const ss_ &path)
 	return total;
 }
 
+ss_ read_icon_png(const ss_ &path)
+{
+	std::ifstream f(path, std::ios::binary);
+	if(!f.good())
+		return "";
+	ss_ data((std::istreambuf_iterator<char>(f)),
+			std::istreambuf_iterator<char>());
+	if(data.size() > 64 * 1024 || data.compare(0, 8, "\x89PNG\r\n\x1a\n") != 0){
+		log_w("fs", "%s is not a PNG of 64 KB or less; not the server's icon",
+				cs(path));
+		return "";
+	}
+	return data;
+}
+
 }
 }
 // vim: set noet ts=4 sw=4:

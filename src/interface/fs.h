@@ -52,6 +52,11 @@ namespace interface
 		// Sum of file_size for every regular file under path, recursively.
 		uint64_t directory_tree_size(const ss_ &path);
 
+		// A server's icon at path ([FAVICON_SERVER_ICON]): the file when it is
+		// a PNG of 64 KB at most, else "" (a warning when it is there but
+		// not one). The client's list of servers and /favicon.ico both.
+		ss_ read_icon_png(const ss_ &path);
+
 		// "image.png", "png" -> true
 		bool check_file_extension(const char *path, const char *ext);
 		ss_ strip_file_extension(const ss_ &path);

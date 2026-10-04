@@ -15,6 +15,7 @@
 #include "interface/select_handler.h"
 #include "interface/sha1.h"
 #include "interface/compress.h"
+#include "interface/fs.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <deque>
 #include <set>
@@ -517,6 +518,10 @@ struct Module: public interface::Module, public network::Interface
 	// [FAVICON] an app's override of /favicon.ico, served from memory; ""
 	// falls back to the default PNG beside the logo
 	ss_ m_favicon;
+	// [FAVICON_SERVER_ICON] the admin's <user>/apps/<app>/server_icon.png,
+	// read at start: the server's icon in the client's list and, ahead of
+	// the app's, its favicon
+	ss_ m_admin_favicon;
 	// [LAN_DISCOVERY]: what lan_announce() said, sent every 2 s while the
 	// name is not ""
 	ss_ m_lan_name;
@@ -628,6 +633,9 @@ struct Module: public interface::Module, public network::Interface
 
 	void on_start()
 	{
+		m_admin_favicon = interface::fs::read_icon_png(
+				m_server->get_config().get<ss_>("user_path")+"/apps/"+
+				m_server->get_app_id()+"/server_icon.png");
 		ss_ address = m_server->get_config().get<ss_>("network_address");
 		ss_ port = m_server->get_config().get<ss_>("network_port");
 
@@ -1061,10 +1069,13 @@ struct Module: public interface::Module, public network::Interface
 		}
 
 		peer.closing = true;
-		// [FAVICON] an app's own icon, kept in memory, wins over the default
-		if(target == "/favicon.ico" && !m_favicon.empty()){
+		// [FAVICON] the admin's icon, then the app's own, kept in memory, win
+		// over the default
+		const ss_ &favicon = !m_admin_favicon.empty() ? m_admin_favicon :
+				m_favicon;
+		if(target == "/favicon.ico" && !favicon.empty()){
 			peer.queue_raw(web::response("200 OK", "image/png",
-					m_favicon.size()) + m_favicon);
+					favicon.size()) + favicon);
 			return true;
 		}
 		const std::pair<ss_, ss_> *wf_name = web::web_file(target);

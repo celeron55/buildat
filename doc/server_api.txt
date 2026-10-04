@@ -319,6 +319,15 @@ data); a packet no module subscribed to is dropped. PeerInfo (id, address,
 web: came through a WebSocket, which any page the user visits can open to
 127.0.0.1) and PeerId.
 
+**The server's icon** ([FAVICON_SERVER_ICON]): the admin puts a PNG of
+64 KB at most at <user>/apps/<app>/server_icon.png (the -D directory's
+apps/<app>/, beside the app's save), and it is read at server start. It
+is the server's icon in the client's list of servers (sent as
+core:server_icon on connect; without it, the first picture in the app's
+launcher/) and its /favicon.ico in a browser tab (without it, what the
+app set with set_favicon, else the Buildat logo). A file that is not
+such a PNG is skipped with a warning in the log.
+
 What the module enforces on its own ([SECURITY_RUN_1], [PEER_TIMEOUT]):
 32 connections from one address at most, peers capped under what select()
 can watch, a peer's socket not read while 100 of its packets wait, a peer
