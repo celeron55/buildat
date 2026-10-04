@@ -56,7 +56,7 @@ end
 -- **The sound, as an options round** ([LAUNCH_WORLD] stage 3, the sound;
 -- local/options_for_LOBBY_sound/): M.new's `style`, which the room takes
 -- from BUILDAT_LAUNCH_SOUND. "today" is the bed and the drone as stage 2
--- left them, and stays the default until the user's pick. The others play
+-- left them; the room's default is m116_broken (below). The others play
 -- no beat and no orb voices -- both cut in section 13 -- but a soft
 -- music, and the thunk and the desk's beep softened:
 --   pad       a slow four-voice pad, Cmaj7 Am7 Fmaj7 Gadd9, 8 s a chord
