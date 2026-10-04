@@ -776,6 +776,12 @@ up_<VoxelVolume> deserialize_volume(const ss_ &data)
 		const uint8_t *src = nullptr;
 		up_<uint8_t[]> buf;
 		if(compressed){
+			// The frame's own size first: a few bytes of header could
+			// otherwise ask for 255 planes of the largest volume (util/fuzz)
+			if(zstd_frame_size(raw) != (int64_t)want)
+				throw Exception(ss_()+"deserialize_volume(): the planes are "+
+						itos(want)+" bytes and the frame says "+
+						itos(zstd_frame_size(raw)));
 			// new[] without parentheses: not cleared, because every byte of
 			// it is about to be written
 			buf.reset(new uint8_t[want]);

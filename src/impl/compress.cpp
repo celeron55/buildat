@@ -212,6 +212,14 @@ size_t decompress_zstd(const ss_ &data_in, uint8_t *out, size_t out_size)
 	return got;
 }
 
+int64_t zstd_frame_size(const ss_ &data_in)
+{
+	const unsigned long long n = ZSTD_getFrameContentSize(data_in.c_str(),
+			data_in.size());
+	return n == ZSTD_CONTENTSIZE_UNKNOWN || n == ZSTD_CONTENTSIZE_ERROR ||
+			n > INT64_MAX ? -1 : (int64_t)n;
+}
+
 size_t decompress_zstd(const ss_ &data_in, std::ostream &os, size_t max_out)
 {
 	size_t total_out = 0;

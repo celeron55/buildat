@@ -34,5 +34,9 @@ namespace interface
 	// scratch buffer and no copy on the way out. Returns how many bytes came
 	// out, and throws if the frame does not fit in what was given.
 	size_t decompress_zstd(const ss_ &data_in, uint8_t *out, size_t out_size);
+	// The size the frame at the front of data_in says it decompresses to
+	// (compress_zstd writes it), or -1 when it says none: what a buffer for
+	// the one above is checked against before it is allocated
+	int64_t zstd_frame_size(const ss_ &data_in);
 }
 // vim: set noet ts=4 sw=4:
