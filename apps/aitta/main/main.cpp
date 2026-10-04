@@ -43,6 +43,7 @@
 #include "storage/api.h"
 #include "accounts/api.h"
 #include <ctime>
+#include <map>
 #include <fstream>
 #include <sstream>
 #define MODULE "main"
@@ -122,6 +123,8 @@ static json::Value default_settings()
 		l.append(n);
 	s.set("licences", l);
 	s.set("max_size", (int64_t)50 * 1000 * 1000);
+	// Seconds before a package's next release is listed (http_list)
+	s.set("update_delay", (int64_t)0);
 	return s;
 }
 
@@ -281,11 +284,32 @@ struct Module: public interface::Module
 		return list;
 	}
 
+	// A release is listed once it is "update_delay" seconds old (the
+	// instance's setting, 0 if not set), so a compromised key's release
+	// can be reported and delisted before it reaches everybody. A
+	// package's first listed release is listed at once: it updates nothing.
 	void http_list(const network::HttpRequest &r)
 	{
+		const json::Value &d = m_settings.get("update_delay");
+		const int64_t delay = d.is_number() ? (int64_t)d.as_number() : 0;
+		const json::Value all = releases(false);
+		auto pkg = [&](unsigned i){
+			return jstr(all.at(i), "author")+"/"+jstr(all.at(i), "name");
+		};
+		auto time = [&](unsigned i){
+			return (int64_t)all.at(i).get("time").as_number();
+		};
+		std::map<ss_, unsigned> first;
+		for(unsigned i = 0; i < all.size(); i++)
+			if(!first.count(pkg(i)) || time(i) < time(first[pkg(i)]))
+				first[pkg(i)] = i;
+		json::Value list = json::array();
+		for(unsigned i = 0; i < all.size(); i++)
+			if(first[pkg(i)] == i || now_s() - time(i) >= delay)
+				list.append(all.at(i));
 		json::Value v = json::object();
 		v.set("ok", true);
-		v.set("releases", releases(false));
+		v.set("releases", list);
 		respond(r, v);
 	}
 
