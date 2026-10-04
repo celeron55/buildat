@@ -982,8 +982,14 @@ struct Module: public interface::Module, public network::Interface
 		peer.http_request.clear();
 
 		// **An app's API** ([STARPORT]): handed to the modules, whose
-		// answer is http_respond()'s
-		if(target.compare(0, 5, "/api/") == 0 || claimed(target)){
+		// answer is http_respond()'s. A WebSocket upgrade wins over a
+		// claimed path, though: the web client connects to "/", which an
+		// app like Hearth claims for its HTML ([FORUM_WEB_CLIENT]) -- the
+		// upgrade below must get it, not the page. /api/ is never upgraded.
+		const bool ws_upgrade =
+				web::lower(headers["upgrade"]).find("websocket") != ss_::npos;
+		if(target.compare(0, 5, "/api/") == 0 ||
+				(claimed(target) && !ws_upgrade)){
 			peer.api_waiting = true;
 			const ss_ address = forwarded_for(peer, headers["x-forwarded-for"]);
 			m_server->emit_event("network:http_request", new HttpRequest(
@@ -1000,7 +1006,7 @@ struct Module: public interface::Module, public network::Interface
 			return true;
 		}
 
-		if(web::lower(headers["upgrade"]).find("websocket") != ss_::npos){
+		if(ws_upgrade){
 			const ss_ &key = headers["sec-websocket-key"];
 			if(key.empty())
 				return false;
