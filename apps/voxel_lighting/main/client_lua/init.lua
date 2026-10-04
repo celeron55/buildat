@@ -6,8 +6,6 @@ local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
--- Nothing here waits for anything before the world may come ([TEXMOD_RACE])
-voxelworld.allow_streaming()
 local voxel_shading = require("buildat/module/voxel_shading")
 
 local scene = replicate.main_scene

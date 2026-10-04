@@ -21,15 +21,19 @@ M.physics_distance = 100
 -- server sends the smaller of this and what it keeps loaded, so asking for
 -- more than the game has is not an error. Set it before the world arrives.
 M.send_distance = 1000
--- Whether the game has said the world may be sent yet ([TEXMOD_RACE]):
--- until it does the client asks for nothing (a send distance of nought),
--- so no chunk is meshed before the game's textures are there -- a chunk
--- that wants a texture modifier not yet composed is not drawn at all. A
--- game that has nothing to wait for says so at load
--- (voxelworld.allow_streaming()); builtin/luanti's client half says so
--- once its modifiers are composed.
-M.streaming_allowed = false
+-- Whether the world may be sent yet ([TEXMOD_RACE]). It may by default;
+-- a game that composes textures before a chunk should mesh holds it back
+-- at load (voxelworld.hold_streaming()) and allows it once they are there
+-- (builtin/luanti). While held the client asks for nothing (a send
+-- distance of nought), so no chunk is meshed before its textures are --
+-- a chunk that wants a texture modifier not yet composed is not drawn.
+M.streaming_allowed = true
 local init_seen = false
+-- Held back by a game not yet ready for the world (luanti until its
+-- texture modifiers are composed); call before voxelworld:init arrives
+function M.hold_streaming()
+	M.streaming_allowed = false
+end
 function M.allow_streaming()
 	if M.streaming_allowed then
 		return

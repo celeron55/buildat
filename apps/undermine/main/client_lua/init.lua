@@ -10,8 +10,6 @@ local replicate = require("buildat/extension/replicate")
 local ui_utils = require("buildat/extension/ui_utils")
 local uistack = require("buildat/extension/uistack")
 local voxelworld = require("buildat/module/voxelworld")
--- Nothing here waits for anything before the world may come ([TEXMOD_RACE])
-voxelworld.allow_streaming()
 local voxel_shading = require("buildat/module/voxel_shading")
 
 --local RENDER_DISTANCE = 640

@@ -20,6 +20,9 @@ local log = buildat.Logger("luanti")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local voxelworld = require("buildat/module/voxelworld")
+-- No chunk is meshed before this client's texture modifiers are composed
+-- ([TEXMOD_RACE]); allow_streaming() below lifts this once they are
+voxelworld.hold_streaming()
 
 local M = {}
 
