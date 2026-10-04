@@ -10,6 +10,7 @@
 #
 #   extensions/launch_console/check.sh
 set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_console"; mkdir -p "$out"
 cd "$here/Build"
@@ -63,7 +64,7 @@ fi
 	echo "keypress Return"
 	echo "delay 500"
 	echo "quit"; } > "$out/cmds.txt"
-bin/buildat -m launch_console -D ../user -w 1280x720 -l 3 \
+bin/buildat -m launch_console -w 1280x720 -l 3 \
 	-c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 back=$(grep -ac "console: 7\*6 = 42" "$out/cli.log")

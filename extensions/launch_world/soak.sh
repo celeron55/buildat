@@ -26,6 +26,7 @@
 # It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0
 # passed, 1 failed, 2 could not run, and a last line saying which.
 set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_world_soak"; mkdir -p "$out"
 rm -f "$out"/*.log "$out"/*.txt

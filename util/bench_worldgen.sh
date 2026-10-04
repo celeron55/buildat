@@ -25,6 +25,7 @@
 # before the server opens it. Anything else that needs to be the same between
 # runs goes in the same place.
 set -u
+. "$(dirname "$0")/check_paths.sh"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
@@ -34,7 +35,7 @@ seed="${3:-20260915}"
 across="${4:-6}"
 save="${5:-bench_worldgen}"
 build="$root/Build"
-saves="$root/user/apps/vanilla/saves"
+saves="$BUILDAT_USER_PATH/apps/vanilla/saves"
 out="$(mktemp -d /tmp/buildat_bench_worldgen.XXXXXX)"
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $out" >&2 || rm -rf "$out"' EXIT
 
@@ -103,7 +104,7 @@ for i in $(seq 1 "$runs"); do
 	BUILDAT_LUANTI_GAME="$game" BUILDAT_LUANTI_SAVE="$save" \
 		BUILDAT_LUANTI_LUA="$probe" \
 		"$build/bin/buildat_server" -u launcher=1 -m "$root/apps/vanilla" \
-		-D "$root/user" -P "$port" -l 4 2>&1 \
+		-D "$BUILDAT_USER_PATH" -P "$port" -l 4 2>&1 \
 		| sed -e 's/\x1b\[[0-9;]*m//g' > "$log" &
 	# Generation is over when no new section has been started for a while.
 	# Five seconds of quiet, and a cap so that a server that never settles

@@ -13,6 +13,7 @@
 #
 # The table goes to local/density/<seed>_<box>.txt as well.
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 seed=${1:-12345}
@@ -20,7 +21,7 @@ seed=${1:-12345}
 # on to both (density.lua)
 box=${2:--112,-64,-112,47,63,47}
 out="$here/local/density"
-games="$here/user/shared/vanilla/games"
+games="$BUILDAT_USER_PATH/shared/vanilla/games"
 mkdir -p "$out"
 run="$out/run"
 rm -rf "$run/off_w" "$run/bu/apps/vanilla/saves/density"

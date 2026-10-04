@@ -16,6 +16,7 @@
 # which file of the group played. minetest_game because its nodes carry
 # sounds; devtest's do not, which is why this is not the game to ask.
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 . "$me/lib.sh"
@@ -24,7 +25,7 @@ save=buildat_test_footstep
 port=31997
 GAME="${GAME:-minetest_game}"
 cd "$here/Build"
-[ -d "$here/user/shared/vanilla/games/$GAME" ] || {
+[ -d "$BUILDAT_USER_PATH/shared/vanilla/games/$GAME" ] || {
 	echo "SKIP: $GAME is not installed" >&2; exit "$SKIP"; }
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2
@@ -60,10 +61,10 @@ core.register_on_joinplayer(function(player)
 	core.log("action", "footstep: the player is on " .. dirt)
 end)
 LUA
-rm -rf "$here/user/apps/vanilla/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" -l 3 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" -l 3 \
 	> "$out/srv.log" 2>&1 &
 srv=$!
 for i in $(seq 1 300); do

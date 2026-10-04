@@ -10,21 +10,22 @@
 #
 #   builtin/luanti/test/keys.sh
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_keys.XXXXXX")
 cd "$here/Build"
-settings=../user/shared/vanilla/settings.json
-mkdir -p ../user/shared/vanilla
+settings=$BUILDAT_USER_PATH/shared/vanilla/settings.json
+mkdir -p $BUILDAT_USER_PATH/shared/vanilla
 [ -f "$settings" ] && cp "$settings" "$tmp/settings.json.bak"
 trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null;
 	if [ -f "$tmp/settings.json.bak" ]; then cp "$tmp/settings.json.bak" "$settings"; else rm -f "$settings"; fi;
 	[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"' EXIT
 echo '{"render_mode": "pbr", "import_paths": [], "keys": {"forward": "U"}}' > "$settings"
-rm -rf ../user/apps/vanilla/saves/buildat_test_keys
+rm -rf $BUILDAT_USER_PATH/apps/vanilla/saves/buildat_test_keys
 srv=""; cli=""
 port=$(( 29500 + (RANDOM % 90) ))
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_keys \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" 2>&1 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/srv.log" &
 for i in $(seq 1 200); do
 	grep -q "Mods loaded" "$tmp/srv.log" 2>/dev/null && break

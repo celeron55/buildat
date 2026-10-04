@@ -34,6 +34,7 @@
 # It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0
 # passed, 1 failed, 2 could not run, and a last line saying which.
 set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 # run_client: a drive that has stopped logging is taken down rather than
 # waited out (user, 2026-09-24)
@@ -44,7 +45,7 @@ out="$here/local/options_for_LAUNCH_WORLD"; mkdir -p "$out"
 # behind by the run before (2026-09-23).
 rm -f "$out"/*.png
 # The player's own voxels are a save, so a run starts from none
-rm -f "$here/user/launch_world/room.txt"
+rm -f "$BUILDAT_USER_PATH/launch_world/room.txt"
 # The room's description asserts itself first: it is a function of
 # (x, y, z), and a wall with no slabs in it fails here rather than in a
 # picture nobody reads
@@ -117,9 +118,9 @@ fi
 	} > "$out/cmds_back.txt"
 { echo "wait_log_any 30000 could not start a launch UI"; echo "quit"
 	} > "$out/cmds_nolauncher.txt"
-slot=$(bin/buildat -D ../user -w 640x360 -l 3 -o launch_ui=launch_world 	-c @"$out/cmds_slot.txt" 2>&1 |
+slot=$(bin/buildat -w 640x360 -l 3 -o launch_ui=launch_world 	-c @"$out/cmds_slot.txt" 2>&1 |
 	sed -e 's/\x1b\[[0-9;]*m//g' | grep -ac "launch_w.*: contents: ")
-back=$(bin/buildat -D ../user -w 640x360 -l 3 -o launch_ui=nosuchthing 	-c @"$out/cmds_back.txt" 2>&1 |
+back=$(bin/buildat -w 640x360 -l 3 -o launch_ui=nosuchthing 	-c @"$out/cmds_back.txt" 2>&1 |
 	sed -e 's/\x1b\[[0-9;]*m//g' | grep -av "wait_log" |
 	grep -ac "the launch UI is launch_menu")
 # **And the room runs in the sandbox** ([LAUNCH_SANDBOX]), which is what
@@ -135,7 +136,7 @@ fi
 # with the chosen one missing *and* the fallback failing, the client says
 # so in its own window and keeps running -- it used to abort, which is
 # the one failure a slot anybody can fill must not have.
-last=$(BUILDAT_TEST_NO_LAUNCHER=1 bin/buildat -D ../user -w 640x360 -l 3 \
+last=$(BUILDAT_TEST_NO_LAUNCHER=1 bin/buildat -w 640x360 -l 3 \
 	-o launch_ui=nosuchthing -c @"$out/cmds_nolauncher.txt" 2>&1 |
 	sed -e 's/\x1b\[[0-9;]*m//g' | grep -av "wait_log" |
 	grep -acE "could not start a launch UI|Crash: SIG")
@@ -153,7 +154,7 @@ fi
 # **A game to go into** ([CI_RUNS]): the drive goes into digger by name
 # where the tree has games installed, and leaves that block out where it
 # has none -- a container -- and the assertions below say so.
-games_installed=$(ls "$here/user/shared/vanilla/games" 2>/dev/null | wc -l)
+games_installed=$(ls "$BUILDAT_USER_PATH/shared/vanilla/games" 2>/dev/null | wc -l)
 
 # **The modules are compiled before any drive starts.** A server whose
 # rccpp cache is cold spends seven seconds compiling `main`, and in this
@@ -167,7 +168,7 @@ if [ ! -f "$here/cache/rccpp_build/main.so" ] ||
 		"$here/cache/rccpp_build/main.so" ]; then
 	echo "warming the module cache (a cold compile is seven seconds)"
 	BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=zz_warm \
-		bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P 31877 -l 3 \
+		bin/buildat_server -u launcher=1 -m ../apps/vanilla -P 31877 -l 3 \
 		> "$out/warm.log" 2>&1 &
 	warm=$!
 	for i in $(seq 1 120); do
@@ -175,7 +176,7 @@ if [ ! -f "$here/cache/rccpp_build/main.so" ] ||
 		sleep 1
 	done
 	kill -9 "$warm" 2>/dev/null; wait "$warm" 2>/dev/null
-	rm -rf "$here/user/apps/vanilla/saves/zz_warm"
+	rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/zz_warm"
 fi
 
 # **wait_log_any, not wait_log**: the room says it is humming once, at
@@ -573,7 +574,7 @@ wait_quiet 40 || true
 # and waiting out the rest of the ten is ten minutes to learn what a
 # minute already said.
 run_client 60 "$out/cli.log" timeout 600 bin/buildat -m launch_world \
-	-D ../user -w 1280x720 -l 3 -c @"$out/cmds.txt"
+ -w 1280x720 -l 3 -c @"$out/cmds.txt"
 sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli.log"
 # And the client has to have got to the end of the sequence
 if grep -aq "Crash: SIG" "$out/cli.log"; then
@@ -820,14 +821,14 @@ fi
 # The drive before this one ends by launching a game, so its client and
 # its server are on their way out while this one starts
 wait_quiet 40 || true
-cdb_game=$(ls "$here/user/shared/vanilla/games" 2>/dev/null | head -1)
+cdb_game=$(ls "$BUILDAT_USER_PATH/shared/vanilla/games" 2>/dev/null | head -1)
 if [ -z "$cdb_game" ]; then
 	echo "SKIP: no installed Luanti game to mirror for ContentDB" >&2
 	exit 2
 fi
 rm -rf "$out/cdb_mirror"; mkdir -p "$out/cdb_mirror"
 "$here/util/contentdb_mirror.sh" "$out/cdb_mirror" \
-	"$here/user/shared/vanilla/games/$cdb_game" Wuzzy "$cdb_game" "$cdb_game" \
+	"$BUILDAT_USER_PATH/shared/vanilla/games/$cdb_game" Wuzzy "$cdb_game" "$cdb_game" \
 	> /dev/null || { echo "SKIP: no ContentDB mirror" >&2; exit 2; }
 pkill -f "http.server 30211" 2>/dev/null || true
 (cd "$out/cdb_mirror" && exec python3 -m http.server 30211 \
@@ -861,7 +862,7 @@ rm -f "$out/cdb_cli.log" "$out/cdb_cli_server.log"
 # The mirror's port is not one the server's box connects to by default
 # ([PROCESS_SANDBOX] A); the local server inherits this from the client
 BUILDAT_CONNECT_PORTS=30211 BUILDAT_CONTENTDB_URL=http://localhost:30211 \
-	timeout 150 bin/buildat -m launch_world -D ../user -w 960x540 -l 3 \
+	timeout 150 bin/buildat -m launch_world -w 960x540 -l 3 \
 	-L "$out/cdb_cli.log" -c @"$out/cmds_cdb.txt" > /dev/null 2>&1
 kill "$mirror" 2>/dev/null; wait "$mirror" 2>/dev/null
 asked=$(grep -ac "launch_w.*: launch: ContentDB" "$out/cdb_cli.log")
@@ -898,7 +899,7 @@ fi
 	echo "delay 800"; echo "quit"; } > "$out/cmds_rows.txt"
 wait_quiet 40 || true
 run_client 60 "$out/rows_cli.log" \
-	timeout 300 bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
+	timeout 300 bin/buildat -m launch_world -w 640x400 -l 3 \
 	-c @"$out/cmds_rows.txt" > /dev/null 2>&1
 sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/rows_cli.log"
 bays=$(grep -a "launch_w.*: bays " "$out/rows_cli.log" | head -1 |
@@ -1041,10 +1042,10 @@ PYMARK
 # finds a save by the start of its name, and this desk has other saves
 # beginning "zz" from a session's own driving
 save=zza_launch_world_test
-rm -rf "$here/user/apps/vanilla/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 port=31879
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE="$save" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" -l 3 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" -l 3 \
 	> "$out/save_server.log" 2>&1 &
 maker=$!
 # What this run is for is the save's own record of which game it needs,
@@ -1081,7 +1082,7 @@ fi
 rm -f "$out/save_cli.log" "$out/save_cli_server.log"
 # A client that entered a game does not always get to its own quit
 # quickly; the tier's minute is not spent waiting for one that will not
-timeout 120 bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
+timeout 120 bin/buildat -m launch_world -w 640x400 -l 3 \
 	-L "$out/save_cli.log" -c @"$out/cmds_save.txt" > /dev/null 2>&1
 # **And a save the floor has no room for opens the same way**: the cap
 # is about what is drawn, not about what can be reached, and a client
@@ -1094,7 +1095,7 @@ timeout 120 bin/buildat -m launch_world -D ../user -w 640x400 -l 3 \
 	echo "wait_log 40000 game: the room stands down"
 	echo "delay 1500"; echo "quit"; } > "$out/cmds_hidden.txt"
 rm -f "$out/hidden_cli.log" "$out/hidden_cli_server.log"
-BUILDAT_LAUNCH_SAVES=0 timeout 120 bin/buildat -m launch_world -D ../user \
+BUILDAT_LAUNCH_SAVES=0 timeout 120 bin/buildat -m launch_world \
 	-w 640x400 -l 3 -L "$out/hidden_cli.log" \
 	-c @"$out/cmds_hidden.txt" > /dev/null 2>&1
 hidden=$(grep -ac "launch_w.*: launch: save $save of vanilla (not on the floor)" \
@@ -1123,7 +1124,7 @@ dialog=$(grep -ac "A world is already starting" \
 	"$out/save_cli_server.log" "$out/hidden_cli_server.log" 2>/dev/null |
 	sed 's/.*://' | awk '{n += $1} END {print n + 0}')
 echo "\"already starting\" said to the client: ${dialog:-0} times"
-rm -rf "$here/user/apps/vanilla/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 if [ "${dialog:-0}" -gt 0 ]; then
 	echo "FAIL: opening a save by name puts a dialog over the world"
 	grep -a "already starting\|opening save " "$out/save_cli_server.log" |

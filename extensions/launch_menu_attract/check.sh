@@ -8,6 +8,7 @@
 #
 #   extensions/launch_menu_attract/check.sh
 set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_menu_attract"; mkdir -p "$out"
 cd "$here/Build"
@@ -23,7 +24,7 @@ fi
 	echo "screenshot $out/menu-over-room.png"
 	echo "delay 400"
 	echo "quit"; } > "$out/cmds.txt"
-bin/buildat -m launch_menu_attract -D ../user -w 1280x720 -l 3 \
+bin/buildat -m launch_menu_attract -w 1280x720 -l 3 \
 	-c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 if grep -aq "Crash: SIG" "$out/cli.log"; then
@@ -68,7 +69,7 @@ fi
 	echo "delay 2000"; echo "quit"; } > "$out/cmds_back.txt"
 rm -f "$out/back.log" "$out/back_server.log"
 bin/buildat -o launch_ui=launch_menu_attract -a app/vanilla/contentdb \
-	-D ../user -w 1280x720 -l 3 -L "$out/back.log" \
+ -w 1280x720 -l 3 -L "$out/back.log" \
 	-c @"$out/cmds_back.txt" > /dev/null 2>&1
 grid=$(grep -ac "back to the grid" "$out/back.log")
 lost=$(grep -ac "leave: no launcher to go back to" "$out/back.log")

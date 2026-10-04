@@ -14,6 +14,7 @@
 # its server binary the way reference_shots/shoot_luanti_server.sh does,
 # and nothing else running.
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 EPISODE="${EPISODE:-dig}"
@@ -167,11 +168,11 @@ kill -9 "$srv" 2>/dev/null
 # --- the module, with the launcher in front of it
 cd "$here/Build"
 save=buildat_test_episode
-rm -rf "../user/apps/vanilla/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 port=$(( 29900 + (RANDOM % 90) ))
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" BUILDAT_LUANTI_SEED=1 \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" 2>&1 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/module_srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/module_srv.log" 2>/dev/null && break

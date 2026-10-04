@@ -9,10 +9,11 @@
 #
 #   builtin/luanti/test/ext_settings.sh
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_ext_settings.XXXXXX")
 cd "$here/Build"
-file=../user/luanti_client/settings.json
+file=$BUILDAT_USER_PATH/luanti_client/settings.json
 [ -f "$file" ] && cp "$file" "$tmp/settings.bak"
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; if [ -f "$tmp/settings.bak" ]; then cp "$tmp/settings.bak" "$file"; else rm -f "$file"; fi' EXIT
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"

@@ -8,6 +8,7 @@
 #
 #   SEED=5 GAME=mineclone2 apps/vanilla_voxel_physics/test/hill.sh
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 GAME="${GAME:-mineclone2}"
 SEED="${SEED:-5}"
@@ -18,7 +19,7 @@ cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
-rm -rf "../user/apps/vanilla_voxel_physics/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla_voxel_physics/saves/$save"
 cat > "$out/fixture.lua" <<LUA
 rawset(_G, "FUZZ_SEED", $SEED)
 LUA
@@ -139,7 +140,7 @@ end)
 LUA
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla_voxel_physics -D ../user -P 29781 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla_voxel_physics -P 29781 \
 	-l "${LOG_LEVEL:-3}" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/hill_srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/hill_srv.log" 2>/dev/null && break

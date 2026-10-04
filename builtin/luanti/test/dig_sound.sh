@@ -27,6 +27,7 @@
 # on the system's hardware). What is read here is the module's own line,
 # not the mix; sound.sh is the one that measures the samples.
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 . "$me/lib.sh"
@@ -35,7 +36,7 @@ save=buildat_test_digsound
 port=31996
 GAME="${GAME:-minetest_game}"
 cd "$here/Build"
-[ -d "$here/user/shared/vanilla/games/$GAME" ] || {
+[ -d "$BUILDAT_USER_PATH/shared/vanilla/games/$GAME" ] || {
 	echo "SKIP: $GAME is not installed" >&2; exit "$SKIP"; }
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2
@@ -109,10 +110,10 @@ core.register_on_dignode(function(pos, node, digger)
 			type(__luanti_send_sound))
 end)
 LUA
-rm -rf "$here/user/apps/vanilla/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" -l 3 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" -l 3 \
 	> "$out/srv.log" 2>&1 &
 srv=$!
 for i in $(seq 1 300); do

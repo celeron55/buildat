@@ -10,6 +10,7 @@
 #
 #   util/fuzz/client_fuzz.sh [seconds] [seed]
 set -u
+. "$(dirname "$0")/../check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/security/fuzz/client"
 secs=${1:-120}

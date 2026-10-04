@@ -21,6 +21,7 @@
 # cost: 75s
 # covers: extensions/launch_world/world.lua
 set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 . "$here/builtin/luanti/test/lib.sh"
 out="$here/local/options_for_LAUNCH_WORLD/device_reset"; mkdir -p "$out/user"

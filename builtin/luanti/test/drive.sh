@@ -19,6 +19,7 @@
 # scan block of the same stem in cli.log. Never beside another
 # buildat_server. LOG_LEVEL and CLIENT_LOG_LEVEL as in fuzz.sh.
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 # Seed 1 is no playtest world under mapgen v7, whatever the game: a sea at
@@ -49,7 +50,7 @@ if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 fi
 # KEEP_SAVE=1 rejoins the run before's world: the player is a returning
 # one, placed at join ([PLAYER_POS_RACE])
-[ -n "${KEEP_SAVE:-}" ] || rm -rf "../user/apps/$GAME_DIR/saves/$save"
+[ -n "${KEEP_SAVE:-}" ] || rm -rf "$BUILDAT_USER_PATH/apps/$GAME_DIR/saves/$save"
 port=$(( 29800 + (SEED % 90) ))
 srv=""; cli=""; drv=""; netsim=""
 # The run's temp dir goes with it: 200 MB of game and cache a run, and
@@ -70,7 +71,7 @@ cold=""
 if [ -n "${MENU_RUN:-}" ]; then
 	srv=""
 	START_WAIT="${START_WAIT:-8}"
-	rm -rf "../user/apps/vanilla/saves/menu_run_$SEED"
+	rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/menu_run_$SEED"
 	if [ "$MENU_RUN" = full ]; then
 		# Empty user and cache directories, given to the client (-D, -C)
 		# and by it to the server it starts, and ContentDB as a mirror of
@@ -78,7 +79,7 @@ if [ -n "${MENU_RUN:-}" ]; then
 		tmp=$(mktemp -d /tmp/buildat_menu_run.XXXXXX)
 		mkdir -p "$tmp/data" "$tmp/cache" "$tmp/mirror"
 		"$here/util/contentdb_mirror.sh" "$tmp/mirror" \
-			"$here/user/shared/vanilla/games/$GAME" Wuzzy "$GAME" VoxeLibre >/dev/null
+			"$BUILDAT_USER_PATH/shared/vanilla/games/$GAME" Wuzzy "$GAME" VoxeLibre >/dev/null
 		# A mirror left by an interrupted run answers 404 from a deleted
 		# directory; exec, so the trap's kill reaches python itself
 		pkill -f "http.server $((port + 200))" 2>/dev/null || true
@@ -93,7 +94,7 @@ else
 { echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; echo "rawset(_G, \"FUZZ_DRIVEN\", true)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -u launcher=1 -m "../apps/$GAME_DIR" -D ../user -P "$port" \
+	bin/buildat_server -u launcher=1 -m "../apps/$GAME_DIR" -P "$port" \
 	-l "${LOG_LEVEL:-4}" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do

@@ -9,11 +9,12 @@
 #
 #   builtin/luanti/test/texture_pack.sh
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/texture_pack"
 mkdir -p "$out"
-pack="$here/user/shared/vanilla/texture_packs/buildat_check_pack"
+pack="$BUILDAT_USER_PATH/shared/vanilla/texture_packs/buildat_check_pack"
 [ -e "$pack" ] && { echo "$pack is in the way" >&2; exit 2; }
 save=buildat_test_texture_pack
 cd "$here/Build"
@@ -27,10 +28,10 @@ import sys
 from PIL import Image
 Image.new("RGB", (16, 16), (255, 0, 255)).save(sys.argv[1] + "/default_stone.png")
 PY
-rm -rf "../user/apps/vanilla/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/camera.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P 29784 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P 29784 \
 	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break

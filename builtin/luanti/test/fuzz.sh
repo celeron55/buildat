@@ -19,6 +19,7 @@
 # Never beside another buildat_server: the save's sqlite and the desktop
 # are one each.
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 # Seed 1 is no playtest world under mapgen v7, whatever the game: a sea at
@@ -127,14 +128,14 @@ cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
-rm -rf "../user/apps/$GAME_DIR/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/$GAME_DIR/saves/$save"
 port=$(( 29800 + (SEED % 90) ))
 srv=""; cli=""; netsim=""
 trap 'kill "$cli" 2>/dev/null; kill "${netsim:-}" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 { echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -m "../apps/$GAME_DIR" -D ../user -P "$port" \
+	bin/buildat_server -m "../apps/$GAME_DIR" -P "$port" \
 	-l "${LOG_LEVEL:-4}" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do

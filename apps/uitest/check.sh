@@ -6,13 +6,14 @@
 #
 #   apps/uitest/check.sh
 set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/uitest"; mkdir -p "$out"
 cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
-bin/buildat_server -m ../apps/uitest -D ../user -P 29793 -l 3 2>&1 |
+bin/buildat_server -m ../apps/uitest -P 29793 -l 3 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 60); do
 	grep -q "Server::start\|Mods loaded" "$out/srv.log" 2>/dev/null && break

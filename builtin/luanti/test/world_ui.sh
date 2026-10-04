@@ -10,12 +10,13 @@
 #
 #   builtin/luanti/test/world_ui.sh
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_world_ui.XXXXXX")
 out="$here/local/world_ui"; mkdir -p "$out"
 cd "$here/Build"
 SAVE="${SAVE:-buildat_test_sprites}"
-save=../user/apps/vanilla/saves/$SAVE
+save=$BUILDAT_USER_PATH/apps/vanilla/saves/$SAVE
 [ -d "$save" ] || { echo "FAIL: no save $SAVE; a drive or fixture run makes one" >&2; exit 1; }
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""

@@ -8,6 +8,7 @@
 #
 #   builtin/luanti/test/scroll_ext.sh
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/scroll_ext"; mkdir -p "$out"

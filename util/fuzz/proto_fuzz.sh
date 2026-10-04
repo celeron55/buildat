@@ -17,6 +17,7 @@
 #
 #   util/fuzz/proto_fuzz.sh [seconds] [seed]
 set -u
+. "$(dirname "$0")/../check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/security/fuzz/proto"
 secs=${1:-120}
@@ -28,7 +29,7 @@ user="$out/user"
 rm -rf "$user/apps"
 mkdir -p "$user/shared/vanilla/games"
 [ -d "$user/shared/vanilla/games/$game" ] ||
-	cp -r "$here/user/shared/vanilla/games/$game" "$user/shared/vanilla/games/"
+	cp -r "$BUILDAT_USER_PATH/shared/vanilla/games/$game" "$user/shared/vanilla/games/"
 grep -rhoE '"network:packet_received/[a-z_]+:[a-z_0-9]+"' \
 	"$here/builtin" "$here/apps" --include=*.cpp |
 	sed 's/"network:packet_received\///; s/"//' | sort -u > "$out/names.txt"

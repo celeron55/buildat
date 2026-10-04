@@ -124,6 +124,15 @@ ss_ platform_cache_path()
 // wins over both.
 static void set_platform_data_paths(core::Config &config)
 {
+	// A check's own paths (util/check_paths.sh), so that a run never shares
+	// the desk's; under -C and -D, over the rest
+	// (set only when there: an empty one set reads as given)
+	const ss_ env_cache = env_or("BUILDAT_CACHE_PATH", "");
+	const ss_ env_user = env_or("BUILDAT_USER_PATH", "");
+	if(!env_cache.empty() && config.get<ss_>("cache_path").empty())
+		config.set("cache_path", env_cache);
+	if(!env_user.empty() && config.get<ss_>("user_path").empty())
+		config.set("user_path", env_user);
 #ifndef BUILDAT_PORTABLE
 	if(config.get<ss_>("cache_path").empty())
 		config.set("cache_path", platform_cache_path());

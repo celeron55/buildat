@@ -15,6 +15,7 @@
 # Not a check: it makes a picture for a person, and says nothing about
 # pass or fail. That is why it carries no tier line.
 set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/options_for_LAUNCH_WORLD/probe"
 mkdir -p "$out"; rm -f "$out"/*.png
@@ -22,7 +23,7 @@ cd "$here/Build"
 if pgrep -x buildat >/dev/null; then
 	echo "a buildat client is already running" >&2; exit 2
 fi
-rm -f "$here/user/launch_world/room.txt"
+rm -f "$BUILDAT_USER_PATH/launch_world/room.txt"
 # **The two that decide the top end.** The light from above is what the
 # floor's white tiles read, and the tonemap's white point is where the
 # curve reaches 255 -- and it was the white point, not the lighting,
@@ -37,7 +38,7 @@ for sky in $skies; do
 			echo "quit"; } > "$out/cmds.txt"
 		BUILDAT_LAUNCH_PROBEBOX=1 BUILDAT_LAUNCH_SKY="$sky" \
 			BUILDAT_LAUNCH_WHITE="$white" \
-			timeout 120 bin/buildat -m launch_world -D ../user -w 960x540 \
+			timeout 120 bin/buildat -m launch_world -w 960x540 \
 			-l 3 -c @"$out/cmds.txt" >/dev/null 2>&1
 		[ -f "$out/$name.png" ] && echo "shot $name" || echo "missing $name"
 	done

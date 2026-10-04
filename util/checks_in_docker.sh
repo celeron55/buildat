@@ -38,10 +38,11 @@ git -C "$here" archive --format=tar HEAD > "$tarball"
 # speed nobody chose (builtin/luanti/test/verdict.sh)
 # The game media the full and long tiers want, from the host rather
 # than fetched again per run ([CI_RUNS] (4)): util/media_fetch.sh fills
-# it, and CI caches it keyed on the release ids that script prints
+# it, and CI caches it keyed on the release ids that script prints; it
+# goes where util/check_paths.sh puts the checks' user path
 media="${BUILDAT_MEDIA_DIR:-$here/user/shared/vanilla}"
 mount_media=""
-[ -d "$media/games" ] && mount_media="-v $media:/work/buildat/user/shared/vanilla:z"
+[ -d "$media/games" ] && mount_media="-v $media:/work/buildat/local/check/user/shared/vanilla:z"
 docker run --rm -i \
 	-v "$out:/out:z" \
 	$mount_media \

@@ -36,21 +36,22 @@
 # driven run playing a game's music through the developer's speakers"),
 # and with the disk driver there are no speakers to play through.
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/sound"; mkdir -p "$out"
 save=buildat_test_sound
 port=31998
 cd "$here/Build"
-[ -d "$here/user/shared/vanilla/games/devtest" ] || {
+[ -d "$BUILDAT_USER_PATH/shared/vanilla/games/devtest" ] || {
 	echo "SKIP: devtest is not installed" >&2; exit 77; }
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2; exit 77
 fi
-rm -rf "$here/user/apps/vanilla/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=$save \
 	BUILDAT_LUANTI_LUA="$me/sound.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" -l 3 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" -l 3 \
 	> "$out/srv.log" 2>&1 &
 srv=$!
 for i in $(seq 1 120); do
@@ -63,7 +64,7 @@ fi
 { echo "delay 90000"; echo "quit"; } > "$out/cmds.txt"
 rm -f "$out/mix.raw"
 SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE="$out/mix.raw" \
-	timeout 200 bin/buildat -s localhost:"$port" -D ../user -o sound_mute=0 \
+	timeout 200 bin/buildat -s localhost:"$port" -o sound_mute=0 \
 	-w 640x400 -l 3 -L "$out/cli.log" -c @"$out/cmds.txt" > /dev/null 2>&1 &
 cli=$!
 # The join is a minute of world loading away; the fixture then asks
@@ -94,7 +95,7 @@ PYEOF
 )
 kill -9 "$cli" 2>/dev/null; wait "$cli" 2>/dev/null
 kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
-rm -rf "$here/user/apps/vanilla/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 asked=$(grep -ac "sound check: three asked" "$out/srv.log")
 echo "the server asked $asked times; the mix peaked at ${peak:-0}"
 if [ ! -s "$out/mix.raw" ]; then

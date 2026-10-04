@@ -10,10 +10,11 @@
 #
 #   builtin/luanti/test/new_world.sh
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/new_world"; mkdir -p "$out"
-saves="$here/user/apps/vanilla/saves"
+saves="$BUILDAT_USER_PATH/apps/vanilla/saves"
 if pgrep -x buildat >/dev/null || pgrep -x buildat_server >/dev/null; then
 	echo "a client or a server is already running" >&2; exit 2
 fi

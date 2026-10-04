@@ -15,6 +15,7 @@
 #   apps/starport/report_here.sh ADDR JOIN  one: the public address
 #                                           ("" for none) and -s
 set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 if [ $# -lt 2 ]; then
 	fail=0

@@ -14,6 +14,7 @@
 #
 # Every extension that ships a launch_ui.txt is booted by name.
 set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_uis"; mkdir -p "$out"
 cd "$here/Build"
@@ -36,7 +37,7 @@ for n in $names; do
 	# hang in X11_ShowWindow waiting for the window manager to map its
 	# window, and a boot check that waits forever on the desk's weather
 	# reports nothing at all
-	timeout 90 bin/buildat -m "$n" -D ../user -w 640x360 -l 3 \
+	timeout 90 bin/buildat -m "$n" -w 640x360 -l 3 \
 		-c @"$out/cmds.txt" 2>&1 |
 		sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/$n.log"
 	why=""
@@ -69,7 +70,7 @@ echo "$(echo "$names" | wc -w) launch UIs booted, $bad of them badly"
 	echo "mouse_pos 639 608"; echo "delay 300"; echo "mouse_click left"
 	echo "delay 6000"; echo "event scan 8 b"
 	echo "delay 2000"; echo "quit"; } > "$out/cmds_back.txt"
-timeout 180 bin/buildat -o launch_ui=launch_menu -a app/vanilla/contentdb -D ../user 	-w 1280x720 -l 3 -L "$out/back.log" -c @"$out/cmds_back.txt" 	> /dev/null 2>&1
+timeout 180 bin/buildat -o launch_ui=launch_menu -a app/vanilla/contentdb 	-w 1280x720 -l 3 -L "$out/back.log" -c @"$out/cmds_back.txt" 	> /dev/null 2>&1
 # **A dead client is not a leave that did not work** ([CONTENTDB_SCAN]):
 # the scan below answers nothing when the client has taken a signal, and
 # the leave's own verdict then named the wrong fault
@@ -85,7 +86,7 @@ echo "leaving a game: back to the grid $grid times, $alive elements" 		"drawn af
 # **And the launch was remembered** ([LAUNCH_API]): the history is the
 # API's, so "recently played" is one list every launch UI reads rather
 # than one per launcher that disagrees with the next
-hist="$here/user/launch_history.csv"
+hist="$BUILDAT_USER_PATH/launch_history.csv"
 if ! grep -aq " game/vanilla/contentdb$" "$hist" 2>/dev/null; then
 	echo "FAIL: the launch history does not hold the action that was run"
 	tail -3 "$hist" 2>/dev/null
@@ -116,7 +117,7 @@ fi
 	echo "keypress Escape"; echo "delay 1500"; echo "quit"; } \
 	> "$out/cmds_console.txt"
 rm -f "$out/console.log"
-timeout 120 bin/buildat -m launch_menu -D ../user -w 1024x640 -l 3 \
+timeout 120 bin/buildat -m launch_menu -w 1024x640 -l 3 \
 	-L "$out/console.log" -c @"$out/cmds_console.txt" > /dev/null 2>&1
 copened=$(grep -ac "console: .* lines of the API document" "$out/console.log")
 cclosed=$(grep -ac "console: closed" "$out/console.log")
@@ -143,7 +144,7 @@ fi
 # it was the run before's, so the kill took nothing and the assertion
 # failed on a server that was never touched)
 rm -f "$out/dead.log" "$out/dead_server.log"
-bin/buildat -o launch_ui=launch_menu -a app/vanilla/contentdb -D ../user \
+bin/buildat -o launch_ui=launch_menu -a app/vanilla/contentdb \
 	-w 1280x720 -l 3 -L "$out/dead.log" -c @"$out/cmds_dead.txt" \
 	> /dev/null 2>&1 &
 client=$!

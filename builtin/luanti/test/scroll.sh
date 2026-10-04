@@ -10,6 +10,7 @@
 #
 #   builtin/luanti/test/scroll.sh
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/scroll"
@@ -19,10 +20,10 @@ cd "$here/Build"
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
-rm -rf "../user/apps/vanilla/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/scroll.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P 29786 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P 29786 \
 	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break

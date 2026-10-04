@@ -16,6 +16,7 @@
 # The client is driven by a command sequence and takes no mouse or
 # keyboard from the desk it shares.
 set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/sandbox_test"; mkdir -p "$out"
 cd "$here/Build"
@@ -23,7 +24,7 @@ if pgrep -x buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 { echo "delay 2500"; echo "quit"; } > "$out/cmds.txt"
-bin/buildat -m sandbox_test -D ../user -w 640x360 -l 3 \
+bin/buildat -m sandbox_test -w 640x360 -l 3 \
 	-c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 if grep -aq "Crash: SIG" "$out/cli.log"; then

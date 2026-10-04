@@ -14,6 +14,7 @@
 # scratch one has the default view range; it needs
 # shared/vanilla/games/mineclone2 in it).
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 . "$me/fullscreen_gate.sh"
@@ -24,7 +25,7 @@ mkdir -p "$out"
 rm -f "$out"/*.png
 save=buildat_test_viewkeys
 cd "$here/Build"
-user=${VIEWKEYS_USER:-../user}
+user=${VIEWKEYS_USER:-$BUILDAT_USER_PATH}
 cli_user=()
 [ -n "${VIEWKEYS_USER:-}" ] && cli_user=(-D "$VIEWKEYS_USER")
 if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then

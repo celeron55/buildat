@@ -12,6 +12,7 @@
 #
 #   util/fuzz/game_fuzz.sh [rounds] [seed]
 set -u
+. "$(dirname "$0")/../check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/security/fuzz/game"
 rounds=${1:-5}
@@ -22,7 +23,7 @@ mkdir -p "$out"
 # Its own copy and user dir, both remade: nothing of the run's lingers
 rm -rf "$out/$app" "$out/user"
 mkdir -p "$out/user/shared/vanilla/games"
-cp -r "$here/user/shared/vanilla/games/$game" "$out/user/shared/vanilla/games/"
+cp -r "$BUILDAT_USER_PATH/shared/vanilla/games/$game" "$out/user/shared/vanilla/games/"
 cp -r "$here/apps/$app" "$out/$app"
 # The script's body in the handler itself: a served file run on its own
 # has an environment of its own, and SEED set here did not reach it

@@ -8,6 +8,7 @@
 #
 #   builtin/luanti/test/form_enter_ext.sh
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/form_enter_ext"; mkdir -p "$out"

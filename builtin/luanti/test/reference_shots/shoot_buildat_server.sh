@@ -33,6 +33,7 @@
 # starts when it launches -- and between the two is a mineclone2 world's
 # loading, which is a minute and a half on this machine and is not a constant.
 set -u
+. "$(dirname "$0")/../../../../util/check_paths.sh"
 
 # The repository root, from builtin/luanti/test/reference_shots/
 here=$(cd "$(dirname "$0")/../../../.." && pwd)
@@ -96,7 +97,7 @@ if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
 	echo "a buildat server or client is already running; stop it first" >&2
 	exit 2
 fi
-rm -rf "../user/apps/vanilla/saves/$save"
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 port=$(( 29600 + (RANDOM % 90) ))
 # **The orbit's tilt is the set's for pbr and zero for the parity modes.**
 # This client tilts the sun and the moon when the game has no opinion,
@@ -119,8 +120,8 @@ esac
 # Where the boxed server can read it ([PROCESS_SANDBOX]): the user path's
 # shared part, which every app reads; a fixture under /tmp stopped the
 # server at "Cannot read" (2026-10-03)
-boxed_fixture="$here/user/shared/vanilla/refshots_fixture.lua"
-mkdir -p "$here/user/shared/vanilla"
+boxed_fixture="$BUILDAT_USER_PATH/shared/vanilla/refshots_fixture.lua"
+mkdir -p "$BUILDAT_USER_PATH/shared/vanilla"
 cp "$fixture" "$boxed_fixture"
 BUILDAT_LUANTI_ORBIT_TILT="${BUILDAT_LUANTI_ORBIT_TILT:-$tilt}" \
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
@@ -128,7 +129,7 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_VOXELWORLD_KEEP_LOADED=1 \
 	BUILDAT_LUANTI_LUA="$boxed_fixture" \
 	BUILDAT_VIEW_RANGE="$RANGE" BUILDAT_VIEW_BOBBING=0 \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D ../user -P "$port" 2>&1 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/srv.log" &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$tmp/srv.log" 2>/dev/null && break
@@ -157,7 +158,7 @@ srv=$(pgrep -x buildat_server | head -1)
 { [ -n "${CMDS:-}" ] && printf '%b\n' "$CMDS"; echo "delay 3600000"; echo "quit"; } > "$tmp/cmds.txt"
 
 status=0
-shots_dir="$here/user/screenshots"
+shots_dir="$BUILDAT_USER_PATH/screenshots"
 # One client per mode against the one server. Each client's set is the
 # part of the server log written while it ran: the fixture starts a set on
 # every join, so the log is sliced from where this client came in.
@@ -223,7 +224,7 @@ echo "$taken pictures into $out"
 if [ -n "${PATHTRACE:-}" ]; then
 	mesh_out="$shots_root/pathtrace_r$RANGE"
 	mkdir -p "$mesh_out"
-	dumps=$here/user/meshdumps
+	dumps=$BUILDAT_USER_PATH/meshdumps
 	mesh_n=0
 	while read -r stem file; do
 		[ -n "$stem" ] || continue

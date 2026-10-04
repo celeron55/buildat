@@ -13,6 +13,7 @@
 #
 #   util/lan_check.sh    (SHOT=x.png keeps the screenshot)
 set -u
+. "$(dirname "$0")/check_paths.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 t=$(mktemp -d)
 s=

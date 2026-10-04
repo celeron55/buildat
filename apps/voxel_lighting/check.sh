@@ -43,6 +43,7 @@
 # cost: 35s
 # covers: builtin/voxel_shading/** src/impl/mesh.cpp src/impl/voxel.cpp src/impl/voxel_volume.cpp builtin/voxelworld/**
 set -u
+. "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 . "$here/builtin/luanti/test/lib.sh"
 out="$here/local/voxel_lighting"; mkdir -p "$out"
@@ -67,7 +68,7 @@ shoot()
 	rm -rf "$shots"; mkdir -p "$shots"
 	rm -rf "$dir"; mkdir -p "$dir"
 	rm -f "$out/server.log"
-	bin/buildat_server -m ../apps/voxel_lighting -D ../user -P "$port" \
+	bin/buildat_server -m ../apps/voxel_lighting -P "$port" \
 		-l 3 > "$out/server.log" 2>&1 &
 	local server=$!
 	local i
