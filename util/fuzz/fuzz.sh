@@ -46,6 +46,9 @@ declare -A srcs=(
 	# latter pulls in header-only rapidjson); the rest from the library
 	# (xml_fuzz.cpp)
 	[xml]="3rdparty/Urho3D/Source/Urho3D/Resource/XMLFile.cpp 3rdparty/Urho3D/Source/Urho3D/Resource/JSONFile.cpp 3rdparty/Urho3D/Source/ThirdParty/PugiXml/src/pugixml.cpp"
+	# The sound loaders stb_vorbis (.ogg) and LoadWav (.wav), compiled in
+	# over the library (sound_fuzz.cpp)
+	[sound]="3rdparty/Urho3D/Source/Urho3D/Audio/Sound.cpp 3rdparty/Urho3D/Source/Urho3D/Audio/OggVorbisSoundStream.cpp"
 	[markup]="src/impl/markup.cpp"
 	# FreeType compiled in whole (font_fuzz.cpp), its source list taken
 	# from its CMakeLists; no Urho3D needed
@@ -78,6 +81,7 @@ declare -A libs=(
 	[image]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[model]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[xml]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
+	[sound]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[markup]="-I$here/3rdparty/md4c"
 	[font]="-I$here/$ft/include -lz"
 )
@@ -91,6 +95,7 @@ declare -A extra=(
 	[image]="$urho_extra"
 	[model]="$urho_extra -fno-sanitize=pointer-overflow -I$here/3rdparty/Urho3D/Source/ThirdParty/tinygltf"
 	[xml]="$urho_extra -fno-sanitize=pointer-overflow"
+	[sound]="$urho_extra"
 	[font]="-I$here/$ft/include -w"
 )
 # A client loader a server feeds is fuzzed for memory corruption only. A
@@ -100,6 +105,7 @@ declare -A extra=(
 # of stopping on it; a real crash still stops the run.
 declare -A opts=(
 	[model]="-fork=1 -ignore_timeouts=1 -ignore_ooms=1 -ignore_crashes=0"
+	[sound]="-fork=1 -ignore_timeouts=1 -ignore_ooms=1 -ignore_crashes=0"
 )
 targets=${*:-${!srcs[@]}}
 
