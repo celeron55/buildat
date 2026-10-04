@@ -52,7 +52,9 @@ cd "$here"
 Build/bin/buildat_server -m apps/starport -D $tmp/sp -P $SP -l 3 > $tmp/sp.log 2>&1 & pids+=($!)
 for _ in $(seq 120); do grep -q "setup code" $tmp/sp.log && break; sleep 1; done
 code=$(grep -o "setup code [A-Z0-9]*" $tmp/sp.log | cut -d' ' -f3)
-Build/bin/buildat_server -m apps/floorplanner -D $tmp/an -P $AN -l 3 > $tmp/an.log 2>&1 & pids+=($!)
+# The announce is to a Starport on a port of the moment, which the
+# server's box refuses unless told ([PROCESS_SANDBOX])
+BUILDAT_CONNECT_PORTS=$SP Build/bin/buildat_server -m apps/floorplanner -D $tmp/an -P $AN -l 3 > $tmp/an.log 2>&1 & pids+=($!)
 for _ in $(seq 120); do grep -q "verified ok" $tmp/sp.log && break; sleep 1; done
 read -r _ _ id _ _ ccode < <(grep -v "^#" $tmp/an/apps/floorplanner/starport_claim.txt)
 printf 'delay 6000\nquit\n' > $tmp/cmds.txt
@@ -65,7 +67,7 @@ curl -s 127.0.0.1:$SP/api/list | python3 -c "import json,sys; print('listed:', [
 # The player's client: this Starport only, accepted
 now=$(date +%s)
 echo "{\"starports\": [\"http://127.0.0.1:$SP\"]}" > $tmp/fc/starport.json
-printf 'accepted,address,description,created,last_attempt,name\n"true","http://127.0.0.1","","%s","%s",""\n' $now $now > $tmp/fc/network_addresses.csv
+printf 'accepted,address,description,created,last_attempt,name,icon,server\n"true","http://127.0.0.1:%s","","%s","%s","","",""\n' $SP $now $now > $tmp/fc/network_addresses.csv
 fpcode=$(grep -ao "setup code [A-Z0-9]*" $tmp/an.log | tail -1 | awk '{print $3}')
 cat > $tmp/fcmds.txt <<C
 delay 7000
