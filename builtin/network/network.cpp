@@ -277,6 +277,9 @@ struct Peer
 	// so that a client busy with a world knows it is to expect them
 	int64_t last_send_us = 0;
 	bool keepalive_sent = false;
+	// When the peer last sent anything: a game peer silent for
+	// PEER_SILENCE_US is dropped ([PEER_TIMEOUT])
+	int64_t last_recv_us = 0;
 
 	size_t out_pending() const {
 		return out_buf.size() - out_sent + out_queued_bytes;
@@ -1268,6 +1271,7 @@ struct Module: public interface::Module, public network::Interface
 			return;
 		}
 		log_v(MODULE, "Received %zu bytes", r);
+		peer.last_recv_us = interface::os::time_us();
 		bool keep = true;
 		switch(peer.kind){
 		case Peer::Kind::Sniff:
@@ -1341,17 +1345,37 @@ struct Module: public interface::Module, public network::Interface
 	// died without closing (src/client/state.cpp, SILENCE_US). On this
 	// thread, which goes round whatever the game's modules are doing.
 	static const int64_t KEEPALIVE_US = 5000000;
+	static const int64_t PEER_SILENCE_US = 60000000;
 	void keepalive()
 	{
 		const int64_t now = interface::os::time_us();
+		sv_<Peer::Id> silent;
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
+			// **A peer silent for a minute is gone** ([PEER_TIMEOUT], user
+			// 2026-10-04): a client sends network:keepalive every few
+			// seconds when it has nothing else to say, so this is a
+			// crashed client, a dropped NAT mapping, or a slot held on
+			// purpose.
+			// simplified: an address that keeps sending is not stopped by
+			// this; the per-address cap bounds those
+			if(peer.game() && now - std::max(peer.accepted_us,
+					peer.last_recv_us) >= PEER_SILENCE_US){
+				log_i(MODULE, "Peer %zu from %s: nothing in %.0f s; "
+						"dropping it", peer.id,
+						cs(peer.socket->get_remote_address()),
+						PEER_SILENCE_US / 1e6);
+				silent.push_back(peer.id);
+				continue;
+			}
 			if(peer.game() && !peer.closing && (!peer.keepalive_sent ||
 					now - peer.last_send_us >= KEEPALIVE_US)){
 				peer.keepalive_sent = true;
 				send_u(peer, "network:keepalive", "");
 			}
 		}
+		for(Peer::Id id : silent)
+			drop_peer(id);
 	}
 
 	bool any_peer_pending()

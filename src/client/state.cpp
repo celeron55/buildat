@@ -149,6 +149,15 @@ struct CState: public State
 	static const int64_t SILENCE_US = 30000000;
 	bool m_keepalive_seen = false;
 	int64_t m_last_data_us = 0;
+	// **And the server hears from this end** ([PEER_TIMEOUT], user
+	// 2026-10-04): the same empty packet when nothing has gone for this
+	// long, so that the server can drop a peer silent for 60 s (a crashed
+	// client, a dropped NAT mapping) and keep an idle one
+	// simplified: from update(), so a main thread stalled for a minute is
+	// dropped too; a browser's background tab, whose frames stop, is
+	// that case
+	static const int64_t KEEPALIVE_US = 5000000;
+	int64_t m_last_send_us = 0;
 	// The connect running on a worker ([BOX_PLAYTEST_2] 12). The thread
 	// touches m_socket and nothing else of this, and the main thread keeps
 	// off the socket while m_connect_result says 0; the result is stored
@@ -260,6 +269,7 @@ struct CState: public State
 		m_disconnected = false;
 		m_keepalive_seen = false;
 		m_last_data_us = 0;
+		m_last_send_us = 0;
 	}
 
 	void update()
@@ -294,6 +304,8 @@ struct CState: public State
 					itos(SILENCE_US / 1000000)+" s");
 			return;
 		}
+		if(m_connected && now - m_last_send_us >= KEEPALIVE_US)
+			send_packet("network:keepalive", "");
 		// **Nothing after the announce is read until it has been checked**
 		// ([CLIENT_FRAME]): the packets that follow it -- the scripts that
 		// a module's client half is made of -- expect the files to have
@@ -457,6 +469,7 @@ struct CState: public State
 
 	void send_raw(const ss_ &data)
 	{
+		m_last_send_us = get_timeofday_us();
 		if(m_wss)
 			m_wss->send(data);
 		else
