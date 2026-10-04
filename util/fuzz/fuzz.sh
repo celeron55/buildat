@@ -18,8 +18,7 @@ secs=${1:-60}
 shift || true
 mkdir -p "$out/bin"
 
-flags="-std=c++17 -g -O1 -fsanitize=fuzzer,address,undefined
-	-fno-sanitize-recover=undefined -I$here/src -I$here
+flags="-std=c++17 -g -O1 -I$here/src -I$here
 	-I$here/3rdparty/c55lib -I$here/3rdparty/cereal/include
 	-I$here/3rdparty/polyvox/library/PolyVoxCore/include
 	-I$here/3rdparty/sajson/include -DBUILDAT_FUZZ
@@ -40,10 +39,27 @@ declare -A srcs=(
 	# library (image_fuzz.cpp)
 	[image]="3rdparty/Urho3D/Source/Urho3D/Resource/Image.cpp 3rdparty/Urho3D/Source/Urho3D/Resource/Decompress.cpp"
 	[markup]="src/impl/markup.cpp"
+	# FreeType compiled in whole (font_fuzz.cpp), its source list taken
+	# from its CMakeLists; no Urho3D needed
+	[font]=""
 )
-# C sources, compiled apart with the same sanitizers and linked in
+ft=3rdparty/Urho3D/Source/ThirdParty/FreeType
+# C sources, compiled apart with the sanitizers and linked in
 declare -A csrcs=(
 	[markup]="3rdparty/md4c/md4c.c"
+	[font]="$(sed -n '/^set (SOURCE_FILES/,/)/p' "$here/$ft/CMakeLists.txt" |
+			tr -d ' )' | grep '\.c$' | sed "s,^,$ft/,")"
+)
+# Per-target sanitizers (undefined dropped where a dependency trips its
+# harmless checks). Default: address and undefined.
+declare -A san=(
+	# FreeType 2.8.0 casts module-init function pointers and does null +
+	# offset; both are UBSan noise, not bugs
+	[font]="address"
+)
+# Extra flags for this target's C sources (csrcs)
+declare -A cflags=(
+	[font]="-DFT2_BUILD_LIBRARY -I$here/$ft/include -fno-sanitize=shift -w"
 )
 declare -A libs=(
 	[compress]="-lz -lzstd"
@@ -53,28 +69,33 @@ declare -A libs=(
 	[zip]="-lz -lzstd"
 	[image]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[markup]="-I$here/3rdparty/md4c"
+	[font]="-I$here/$ft/include -lz"
 )
 # Urho3D's own defines and include paths for the files compiled from it;
 # stb_image's JPEG decoder shifts negative values left, and a PNG's empty
 # first IDAT copies 0 bytes to a null buffer: both done as intended by
 # every compiler here, and UBSan would stop on them
 uflags=$here/3rdparty/Urho3D/Build/Source/Urho3D/CMakeFiles/Urho3D.dir/flags.make
+urho_extra="$(sed -n 's/^CXX_\(DEFINES\|INCLUDES\) = //p' "$uflags" 2>/dev/null) -fno-sanitize=shift,nonnull-attribute -w"
 declare -A extra=(
-	[image]="$(sed -n 's/^CXX_\(DEFINES\|INCLUDES\) = //p' "$uflags" 2>/dev/null) -fno-sanitize=shift,nonnull-attribute -w"
+	[image]="$urho_extra"
+	[font]="-I$here/$ft/include -w"
 )
 targets=${*:-${!srcs[@]}}
 
 build() {
-	local t=$1 s=""
+	local t=$1 s="" sa="${san[$t]:-address,undefined}"
+	local rec=""; [[ $sa == *undefined* ]] && rec="-fno-sanitize-recover=undefined"
 	for f in ${srcs[$t]}; do s="$s $here/$f"; done
 	for f in ${csrcs[$t]:-}; do
-		clang -g -O1 -fsanitize=fuzzer-no-link,address,undefined \
-			-fno-sanitize-recover=undefined -c "$here/$f" \
+		clang -g -O1 -fsanitize=fuzzer-no-link,$sa $rec ${cflags[$t]:-} \
+			-c "$here/$f" \
 			-o "$out/bin/$t.$(basename "$f").o" 2> "$out/bin/$t.build.log" || {
 			echo "$t: build failed, $out/bin/$t.build.log"; return 1; }
 		s="$s $out/bin/$t.$(basename "$f").o"
 	done
-	clang++ $flags ${extra[$t]:-} "$me/${t}_fuzz.cpp" $s ${libs[$t]} -o "$out/bin/$t" \
+	clang++ $flags -fsanitize=fuzzer,$sa $rec ${extra[$t]:-} \
+		"$me/${t}_fuzz.cpp" $s ${libs[$t]} -o "$out/bin/$t" \
 		2> "$out/bin/$t.build.log" || {
 		echo "$t: build failed, $out/bin/$t.build.log"; tail -5 "$out/bin/$t.build.log"
 		return 1
