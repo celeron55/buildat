@@ -26,25 +26,9 @@ namespace pv = PolyVox;
 using interface::Event;
 using interface::VoxelInstance;
 
-// TODO: Move to a header (core/types_polyvox.h or something)
-#define PV3I_FORMAT "(%i, %i, %i)"
-#define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
+#include "interface/polyvox_std.h"
 
-// TODO: Move to a header (core/cereal_polyvox.h or something)
-namespace cereal {
-
-template<class Archive>
-void save(Archive &archive, const pv::Vector3DInt32 &v){
-	archive((int32_t)v.getX(), (int32_t)v.getY(), (int32_t)v.getZ());
-}
-template<class Archive>
-void load(Archive &archive, pv::Vector3DInt32 &v){
-	int32_t x, y, z;
-	archive(x, y, z);
-	v.setX(x); v.setY(y); v.setZ(z);
-}
-
-}
+#include "interface/polyvox_cereal.h"
 
 namespace worldgen {
 

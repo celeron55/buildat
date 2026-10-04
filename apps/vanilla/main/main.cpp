@@ -50,8 +50,7 @@ using interface::Event;
 
 namespace pv = PolyVox;
 
-#define PV3I_FORMAT "(%i, %i, %i)"
-#define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
+#include "interface/polyvox_std.h"
 
 namespace vanilla {
 

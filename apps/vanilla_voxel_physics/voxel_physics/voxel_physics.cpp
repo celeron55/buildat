@@ -47,17 +47,9 @@ using interface::VoxelInstance;
 using interface::VoxelSample;
 using main_context::SceneReference;
 
-#define PV3I_FORMAT "(%i, %i, %i)"
-#define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
+#include "interface/polyvox_std.h"
 
-namespace cereal {
-template<class Archive>
-void load(Archive &archive, pv::Vector3DInt32 &v){
-	int32_t x, y, z;
-	archive(x, y, z);
-	v.setX(x); v.setY(y); v.setZ(z);
-}
-}
+#include "interface/polyvox_cereal.h"
 
 namespace voxel_physics {
 
