@@ -20,6 +20,10 @@
 #include <algorithm>
 #include <CollisionShape.h>
 #include <RigidBody.h>
+#include <Context.h>
+#include <ResourceCache.h>
+#include <Technique.h>
+#include <Material.h>
 #define MODULE "lua_bindings"
 
 namespace magic = Urho3D;
@@ -194,6 +198,69 @@ static up_<interface::mesh::HorizonMap> parse_horizon(const ss_ &horizon_data,
 	return horizon;
 }
 
+// [CLIENT_FRAME] the shadow LOD options round: which shape the sun's shadow
+// map draws the chunks with. 'c' (unset): the drawn mesh. 'a': the drawn
+// mesh in the first cascade and an inside-downsampled LOD mesh past it.
+// 'b': the inside-downsampled LOD mesh in every cascade.
+// simplified: an environment variable read once, for the round; the pick
+// becomes a setting or the only way.
+static char shadow_lod_mode()
+{
+	static const char mode = [](){
+		const char *e = getenv("BUILDAT_SHADOW_LOD");
+		return (e && (e[0] == 'a' || e[0] == 'b')) ? e[0] : 'c';
+	}();
+	return mode;
+}
+
+// A technique with only a shadow pass, on one shared material
+static Material* shadow_only_material(Context *context)
+{
+	ResourceCache *cache = context->GetSubsystem<ResourceCache>();
+	const String name = "buildat/ShadowOnly";
+	Material *m = cache->GetExistingResource<Material>(name);
+	if(m)
+		return m;
+	SharedPtr<Technique> tech = cache->GetResource<Technique>(
+			"Techniques/NoTexture.xml")->Clone(name);
+	for(const String &pass : tech->GetPassNames()){
+		if(pass != "shadow")
+			tech->RemovePass(pass);
+	}
+	SharedPtr<Material> mat(new Material(context));
+	mat->SetName(name);
+	mat->SetTechnique(0, tech);
+	cache->AddManualResource(mat);
+	return mat;
+}
+
+// The chunk's shadow caster as a child of its own, from an inside LOD
+// volume's geometry; removed when there is none
+static void set_shadow_child(Node *node, int lod,
+		const sm_<uint, interface::mesh::TemporaryGeometry> &geoms,
+		AtlasRegistry *atlas_reg, unsigned split_mask)
+{
+	Node *child = node->GetChild("shadow");
+	if(geoms.empty()){
+		if(child)
+			child->Remove();
+		return;
+	}
+	if(!child)
+		child = node->CreateChild("shadow", LOCAL);
+	Context *context = node->GetContext();
+	CustomGeometry *cg = child->GetOrCreateComponent<CustomGeometry>(LOCAL);
+	interface::mesh::set_voxel_lod_geometry(lod, cg, context, geoms,
+			atlas_reg);
+	Material *mat = shadow_only_material(context);
+	for(unsigned i = 0; i < cg->GetNumGeometries(); i++)
+		cg->SetMaterial(i, mat);
+	cg->SetOccluder(false);
+	cg->SetCastShadows(true);
+	cg->SetShadowSplitMask(split_mask);
+	cg->SetZoneMask(magic::DEFAULT_ZONEMASK);
+}
+
 struct SetVoxelGeometryTask: public interface::thread_pool::Task
 {
 	WeakPtr<Node> node;
@@ -219,6 +286,11 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	// ([CLIENT_FRAME]); built in the worker beside the mesh
 	magic::PODVector<magic::Vector3> occluder;
 
+	// The shadow LOD round's caster, when BUILDAT_SHADOW_LOD asks for one
+	up_<VoxelVolume> shadow_volume;
+	sm_<uint, interface::mesh::TemporaryGeometry> shadow_geoms;
+	bool preloaded = false;
+
 	// The terrain's horizon around the chunk, when the caller has one:
 	// three int32 (the map's origin) and HORIZON_SIZE^2 int16 heights, as
 	// interface/mesh.h lays them out. See [PBR_FIT] 2c.
@@ -237,17 +309,28 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 		// the textures are the part that used to take most of a second
 		// and they are pre()'s now, a slice at a time ([CLIENT_FRAME])
 		volume = interface::deserialize_volume(data);
+		if(shadow_lod_mode() != 'c')
+			shadow_volume = interface::mesh::generate_voxel_lod_volume(
+					2, *volume, voxel_reg.get(), true);
 	}
 	interface::mesh::PreloadCursor preload_cursor;
+	interface::mesh::PreloadCursor shadow_preload_cursor;
 	// Called repeatedly from the main thread until it returns true: the
 	// chunk's voxels have to be in the atlas before a worker meshes it,
 	// and building a segment for one seen for the first time is what a
 	// join's first chunks were paying for in one go.
 	bool pre()
 	{
-		return interface::mesh::preload_textures_sliced(
-				*volume, voxel_reg.get(), atlas_reg.get(), false,
-				interface::os::time_us() + 1500, preload_cursor);
+		if(!preloaded){
+			preloaded = interface::mesh::preload_textures_sliced(
+					*volume, voxel_reg.get(), atlas_reg.get(), false,
+					interface::os::time_us() + 1500, preload_cursor);
+			if(!preloaded)
+				return false;
+		}
+		return !shadow_volume || interface::mesh::preload_textures_sliced(
+				*shadow_volume, voxel_reg.get(), atlas_reg.get(), true,
+				interface::os::time_us() + 1500, shadow_preload_cursor);
 	}
 	// Called repeatedly from worker thread until returns true
 	bool thread()
@@ -257,6 +340,9 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 				use_skylight, &alpha_geoms, &masked_geoms, horizon.get());
 		interface::mesh::generate_occluder(occluder, *volume,
 				voxel_reg.get());
+		if(shadow_volume)
+			generate_voxel_lod_geometry(2, shadow_geoms, *shadow_volume,
+					voxel_reg.get(), atlas_reg.get(), use_skylight, nullptr);
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -305,7 +391,8 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 			// Not an occluder: an occluder is rasterised as solid, and this
 			// one is full of holes
 			mcg->SetOccluder(false);
-			mcg->SetCastShadows(true);
+			mcg->SetCastShadows(shadow_lod_mode() != 'b');
+			mcg->SetShadowSplitMask(shadow_lod_mode() == 'a' ? 1 : M_MAX_UNSIGNED);
 			mcg->SetZoneMask(magic::DEFAULT_ZONEMASK);
 		}
 		call_material_cb(material_cb);
@@ -314,7 +401,10 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 		// mesh's own thousands of triangles ([CLIENT_FRAME]); after
 		// set_voxel_geometry(), whose Clear() drops the last one
 		cg->SetOcclusionGeometry(occluder);
-		cg->SetCastShadows(true);
+		cg->SetCastShadows(shadow_lod_mode() != 'b');
+		cg->SetShadowSplitMask(shadow_lod_mode() == 'a' ? 1 : M_MAX_UNSIGNED);
+		set_shadow_child(node, 2, shadow_geoms, atlas_reg.get(),
+				shadow_lod_mode() == 'a' ? ~1u : M_MAX_UNSIGNED);
 		// Octree update: Trigger CustomGeometry::OnWorldBoundingBoxUpdate()
 		cg->SetZoneMask(magic::DEFAULT_ZONEMASK);
 		return true;
@@ -335,6 +425,10 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 
 	up_<VoxelVolume> lod_volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
+	// The shadow LOD round's caster, as on the near chunks
+	up_<VoxelVolume> shadow_volume;
+	sm_<uint, interface::mesh::TemporaryGeometry> shadow_geoms;
+	bool preloaded = false;
 
 	SetVoxelLodGeometryTask(int lod, Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
@@ -353,14 +447,26 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 				interface::deserialize_volume(data);
 		lod_volume = interface::mesh::generate_voxel_lod_volume(
 				lod, *volume_orig, voxel_reg.get());
+		if(shadow_lod_mode() != 'c' &&
+				lod <= interface::MAX_LOD_WITH_SHADOWS)
+			shadow_volume = interface::mesh::generate_voxel_lod_volume(
+					lod, *volume_orig, voxel_reg.get(), true);
 	}
 	interface::mesh::PreloadCursor preload_cursor;
+	interface::mesh::PreloadCursor shadow_preload_cursor;
 	// The far chunks' textures, on the same terms as the near ones'
 	bool pre()
 	{
-		return interface::mesh::preload_textures_sliced(
-				*lod_volume, voxel_reg.get(), atlas_reg.get(), true,
-				interface::os::time_us() + 1500, preload_cursor);
+		if(!preloaded){
+			preloaded = interface::mesh::preload_textures_sliced(
+					*lod_volume, voxel_reg.get(), atlas_reg.get(), true,
+					interface::os::time_us() + 1500, preload_cursor);
+			if(!preloaded)
+				return false;
+		}
+		return !shadow_volume || interface::mesh::preload_textures_sliced(
+				*shadow_volume, voxel_reg.get(), atlas_reg.get(), true,
+				interface::os::time_us() + 1500, shadow_preload_cursor);
 	}
 	// Called repeatedly from worker thread until returns true
 	bool thread()
@@ -368,6 +474,9 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 		generate_voxel_lod_geometry(
 				lod, temp_geoms, *lod_volume, voxel_reg.get(), atlas_reg.get(),
 				use_skylight, horizon.get());
+		if(shadow_volume)
+			generate_voxel_lod_geometry(lod, shadow_geoms, *shadow_volume,
+					voxel_reg.get(), atlas_reg.get(), use_skylight, nullptr);
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -383,9 +492,11 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 		call_material_cb(material_cb);
 		cg->SetOccluder(true);
 		if(lod <= interface::MAX_LOD_WITH_SHADOWS)
-			cg->SetCastShadows(true);
+			cg->SetCastShadows(shadow_lod_mode() == 'c');
 		else
 			cg->SetCastShadows(false);
+		set_shadow_child(node, lod, shadow_geoms, atlas_reg.get(),
+				M_MAX_UNSIGNED);
 		// Octree update: Trigger CustomGeometry::OnWorldBoundingBoxUpdate()
 		cg->SetZoneMask(magic::DEFAULT_ZONEMASK);
 		return true;
@@ -623,6 +734,9 @@ void clear_voxel_geometry(const luabind::object &node_o)
 	Node *masked_node = node->GetChild("masked");
 	if(masked_node)
 		masked_node->Remove();
+	Node *shadow_node = node->GetChild("shadow");
+	if(shadow_node)
+		shadow_node->Remove();
 }
 
 void set_voxel_physics_boxes(const luabind::object &node_o,
