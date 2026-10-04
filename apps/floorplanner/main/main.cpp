@@ -1325,6 +1325,10 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
+		// [PAGE_TITLE] the web page's title, when the admin gave none
+		network::access(m_server, [&](network::Interface *i){
+			i->set_page_title("Floor planner", false);
+		});
 		// One user's two clients, one editing and one viewing
 		// ([FP_TWO_CLIENTS])
 		accounts::access(m_server, [&](accounts::Interface *i){

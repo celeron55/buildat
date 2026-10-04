@@ -1628,6 +1628,12 @@ struct CApp: public App, public magic::Application
 		engineParameters_["WindowTitle"] =
 				g_client_config.get<bool>("command_seq_enabled") ?
 				"Buildat Client (scripted)" : "Buildat Client";
+#ifdef __EMSCRIPTEN__
+		// [PAGE_TITLE] SDL's window title is the page's: the one the server
+		// wrote stays
+		engineParameters_["WindowTitle"] = emscripten_run_script_string(
+				"document.title");
+#endif
 		engineParameters_["Headless"] = false;
 		engineParameters_["ResourcePaths"] = resource_paths_s.c_str();
 		engineParameters_["AutoloadPaths"] = "";

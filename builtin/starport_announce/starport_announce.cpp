@@ -352,6 +352,12 @@ struct Module: public interface::Module, public Interface
 			m_config = c;
 			m_config_text = text;
 		}
+		// [PAGE_TITLE] the admin's name is the web page's title, announced
+		// or not
+		network::access(m_server, [&](network::Interface *iface){
+			iface->set_page_title(c.get("name").is_string() ?
+					c.get("name").as_string() : "", true);
+		});
 		if(is_on(c))
 			log_i(MODULE, "Announcing to %u Starport(s)", c.get("starports").size());
 		else

@@ -522,6 +522,8 @@ struct Module: public interface::Module, public network::Interface
 	// read at start: the server's icon in the client's list and, ahead of
 	// the app's, its favicon
 	ss_ m_admin_favicon;
+	// [PAGE_TITLE] set_page_title()'s two names
+	ss_ m_admin_title, m_app_title;
 	// [LAN_DISCOVERY]: what lan_announce() said, sent every 2 s while the
 	// name is not ""
 	ss_ m_lan_name;
@@ -1095,8 +1097,13 @@ struct Module: public interface::Module, public network::Interface
 		// 2026-10-01: a phone reloads the page each time it comes back): the
 		// browser asks with the ETag it has, and the same file is a 304
 		struct stat st;
+		// [PAGE_TITLE] index.html carries the server's title: in its ETag too
+		const bool index = wf_name->first == "index.html";
+		const ss_ title = index ? page_title() : "";
 		const ss_ etag = stat(path.c_str(), &st) == 0 ? "\""+
-				itos((int64_t)st.st_mtime)+"-"+itos((int64_t)st.st_size)+"\"" : "";
+				itos((int64_t)st.st_mtime)+"-"+itos((int64_t)st.st_size)+
+				(index ? "-"+itos((int64_t)(std::hash<ss_>()(title) >> 1)) : "")+
+				"\"" : "";
 		WebFile &wf = m_web_files[wf_name->first];
 		if(etag.empty() || wf.etag != etag){
 			wf = WebFile();
@@ -1114,6 +1121,10 @@ struct Module: public interface::Module, public network::Interface
 						"text/plain; charset=utf-8", body.size()) + body);
 				return true;
 			}
+			const size_t at = index ? wf.body.find("<title>Buildat</title>") :
+					ss_::npos;
+			if(at != ss_::npos)
+				wf.body.replace(at, 22, "<title>"+title+"</title>");
 			// Compressed once per build; about a second for the wasm, in
 			// this thread
 			// simplified: zlib's stream, which is what HTTP's "deflate"
@@ -1743,6 +1754,21 @@ struct Module: public interface::Module, public network::Interface
 	void set_favicon(const ss_ &png)
 	{
 		m_favicon = png;
+	}
+
+	void set_page_title(const ss_ &name, bool admin)
+	{
+		(admin ? m_admin_title : m_app_title) = name;
+	}
+
+	ss_ page_title()
+	{
+		const ss_ &name = !m_admin_title.empty() ? m_admin_title : m_app_title;
+		ss_ r;
+		for(char c : name.empty() ? ss_() : name+" | ")
+			r += c == '&' ? "&amp;" : c == '<' ? "&lt;" : c == '>' ? "&gt;" :
+					ss_(1, c);
+		return r+"Buildat";
 	}
 
 	bool claimed(const ss_ &target)

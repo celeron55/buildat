@@ -157,6 +157,11 @@ namespace network
 		// Buildat logo; "" restores the default. An app sets its own icon
 		// (vanilla, the game's) at any time.
 		virtual void set_favicon(const ss_ &png) = 0;
+		// [PAGE_TITLE] the web client page's <title>, "<name> | Buildat":
+		// the admin's name (starport.json's, set by starport_announce)
+		// ahead of the app's (vanilla, its game's title); "" unsets one,
+		// and with neither it is "Buildat"
+		virtual void set_page_title(const ss_ &name, bool admin) = 0;
 		// [LAN_DISCOVERY]: say every 2 s on the LAN's group (tcpsocket.h)
 		// that this server is here, under `name`; "" stops. `account`:
 		// whether joining needs one.

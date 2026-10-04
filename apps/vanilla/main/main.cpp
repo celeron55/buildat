@@ -2835,17 +2835,22 @@ struct Module: public interface::Module
 		if(m_public)
 			write_public_world(world_name);
 
-		// [FAVICON] the game's own icon in the browser tab, when it has one
+		// [FAVICON] the game's own icon in the browser tab, when it has one,
+		// and [PAGE_TITLE] its title on the tab
 		{
 			std::ifstream ic(game_path+"/menu/icon.png", std::ios::binary);
+			ss_ png;
 			if(ic.good()){
 				std::ostringstream os(std::ios::binary);
 				os<<ic.rdbuf();
-				const ss_ png = os.str();
-				network::access(m_server, [&](network::Interface *inetwork){
-					inetwork->set_favicon(png);
-				});
+				png = os.str();
 			}
+			const ss_ title = read_game_title(game_path);
+			network::access(m_server, [&](network::Interface *inetwork){
+				if(!png.empty())
+					inetwork->set_favicon(png);
+				inetwork->set_page_title(title, false);
+			});
 		}
 
 		// The world runs in a buildat save and never in a Luanti world
