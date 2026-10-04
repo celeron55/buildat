@@ -90,6 +90,10 @@ local function close()
 	end
 	accounts.close_page()
 	luanti.hold(nil)
+	-- A control clicked here stays the UI's focus element after its window
+	-- is gone, and then Space and Enter work it from the world -- a jump
+	-- cycled the volume and the view range ([PAUSE_VOLUME_KEYS])
+	magic.ui:SetFocusElement(nil)
 end
 
 -- Each click: muted -> 0 dB, then down the ladder in 6 dB steps, then
