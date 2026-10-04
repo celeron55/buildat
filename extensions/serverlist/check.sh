@@ -40,7 +40,7 @@ JSON
 # quiet. The store is the client's own file.
 # Now, since an answer lasts a week; the port is the consent's too
 now=$(date +%s)
-printf 'accepted,address,description,created,last_attempt,name\n"true","http://localhost:%s","a check'"'"'s own server list","%s","%s",""\n' \
+printf 'accepted,address,description,created,last_attempt,name,icon,server\n"true","http://localhost:%s","a check'"'"'s own server list","%s","%s","","",""\n' \
 	"$port" "$now" "$now" \
 	> "$out/user/network_addresses.csv"
 # **And a client that has not said yes fetches nothing at boot**: a

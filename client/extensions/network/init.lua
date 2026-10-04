@@ -5,7 +5,10 @@
 -- TCP and UDP sockets for scripts, with the user in the loop: the first
 -- connection or datagram to an address in a week needs the user to accept the
 -- address and name it. Answers are remembered in
--- user/network_addresses.csv.
+-- user/network_addresses.csv, **one per asking server and address**
+-- ([CONSENT_PER_SERVER]): what the user gave server A's scripts, server
+-- B's ask for again. The client's own extensions (the `M.*` functions,
+-- not `M.safe`) ask as the client, "".
 --
 --   local socket = require("buildat/extension/network")
 --   socket.udp_connect("localhost", 30001, function(sock, err)
@@ -47,9 +50,27 @@ local notified = {}
 
 local csv = dofile(__buildat_extension_path("network").."/csv.lua")
 
--- uri -> {accepted=, uri=, description=, created=, last_attempt=, name=}
+-- The server whose scripts are asking: a server this client started is
+-- its game's, "local:<app>", as its port changes every launch (the same
+-- origin as game_storage_dir); any other its address. "" for none.
+local function asking_server()
+	local dir = __buildat_game_storage_dir()
+	if not dir then
+		return ""
+	end
+	local app = dir:match("/apps/([^/]+)/client$")
+	return app and "local:"..app or __buildat_server_address() or ""
+end
+
+local function key(server, uri)
+	return server.." "..uri
+end
+
+-- key(server, uri) -> {accepted=, uri=, description=, created=,
+-- last_attempt=, name=, icon=, server=}
 -- name is the player name last used on that server ([BOX_PLAYTEST_2] 4),
--- "" for none; a row written before the column has none.
+-- "" for none. A row with no server column is from before
+-- [CONSENT_PER_SERVER] and is dropped: it was every server's.
 local function load_store()
 	local entries = {}
 	local file = io.open(store_path, "r")
@@ -59,8 +80,8 @@ local function load_store()
 	for line in file:lines() do
 		if line ~= "" and not line:match("^accepted,") then
 			local f = csv.parse_line(line)
-			if f[2] and f[2] ~= "" then
-				entries[f[2]] = {
+			if f[2] and f[2] ~= "" and f[8] then
+				entries[key(f[8], f[2])] = {
 					accepted = (f[1] == "true"),
 					uri = f[2],
 					description = f[3] or "",
@@ -71,6 +92,7 @@ local function load_store()
 					-- server sent at its last connect, under the cache's
 					-- server_icons/; "" for none
 					icon = f[7] or "",
+					server = f[8],
 				}
 			end
 		end
@@ -80,25 +102,25 @@ local function load_store()
 end
 
 local function save_store(entries)
-	local uris = {}
-	for uri, _ in pairs(entries) do
-		table.insert(uris, uri)
+	local keys = {}
+	for k, _ in pairs(entries) do
+		table.insert(keys, k)
 	end
-	table.sort(uris)
+	table.sort(keys)
 	local file, err = io.open(store_path, "w")
 	if not file then
 		log:error("Cannot write "..store_path..": "..tostring(err))
 		return
 	end
-	file:write("accepted,address,description,created,last_attempt,name,icon\n")
+	file:write("accepted,address,description,created,last_attempt,name,icon,server\n")
 	-- A row is a line: the reader splits on them, and a field with a line
 	-- break in it -- a name a server's script set -- was a second row
 	-- nobody accepted ([SECURITY_RUN_1])
 	local function q(v)
 		return csv.quote((tostring(v):gsub("[\r\n]", " ")))
 	end
-	for _, uri in ipairs(uris) do
-		local e = entries[uri]
+	for _, k in ipairs(keys) do
+		local e = entries[k]
 		file:write(table.concat({
 			q(e.accepted and "true" or "false"),
 			q(e.uri),
@@ -107,15 +129,16 @@ local function save_store(entries)
 			q(math.floor(e.last_attempt)),
 			q(e.name or ""),
 			q(e.icon or ""),
+			q(e.server),
 		}, ",").."\n")
 	end
 	file:close()
 end
 
-local function store_answer(uri, accepted, description, old_entry)
+local function store_answer(server, uri, accepted, description, old_entry)
 	local entries = load_store()
 	local now = os.time()
-	entries[uri] = {
+	entries[key(server, uri)] = {
 		accepted = accepted,
 		uri = uri,
 		-- A description is one line of text
@@ -125,14 +148,16 @@ local function store_answer(uri, accepted, description, old_entry)
 		-- What the row had besides the answer is kept with it
 		name = old_entry and old_entry.name or "",
 		icon = old_entry and old_entry.icon or "",
+		server = server,
 	}
 	save_store(entries)
 end
 
-local function touch_entry(uri)
+local function touch_entry(server, uri)
 	local entries = load_store()
-	if entries[uri] then
-		entries[uri].last_attempt = os.time()
+	local e = entries[key(server, uri)]
+	if e then
+		e.last_attempt = os.time()
 		save_store(entries)
 	end
 end
@@ -239,7 +264,7 @@ end
 -- what the caller is asking for is what the caller knows -- editable,
 -- and the accept or the decline is still the user's. An entry's own
 -- description wins: that is what the user left there.
-local function ask_user(uri, entry, on_answer, suggested)
+local function ask_user(server, uri, entry, on_answer, suggested)
 	local answer
 	local root = uistack.main:push({desc="network permission dialog"})
 	root.defaultStyle = magic.cache:GetResource(
@@ -259,8 +284,18 @@ local function ask_user(uri, entry, on_answer, suggested)
 		return t
 	end
 
-	add_text("A script wants to use the network:")
-	add_text(uri)
+	-- **Who is asking** ([CONSENT_PER_SERVER]): the answer is that
+	-- server's alone
+	if server == "" then
+		add_text("Buildat itself")
+	elseif server:match("^local:") then
+		add_text("Your local game "..server:sub(7))
+	else
+		add_text("A script of the server")
+		add_text("  "..server)
+	end
+	add_text("wants to use the network:")
+	add_text("  "..uri)
 	if entry then
 		add_text("You have seen this address before:")
 		add_text("  Answer: "..(entry.accepted and "accepted" or "declined"))
@@ -601,23 +636,23 @@ end
 
 -- cb(socket, error): socket is nil if the connection was not made or the user
 -- declined the address
-local function connect(is_udp, host, port, cb, options)
+local function connect(server, is_udp, host, port, cb, options)
 	if type(host) ~= "string" or not tonumber(port) or type(cb) ~= "function" then
 		error("network: connect(host: string, port: number, cb: function)")
 	end
 	local suggested = type(options) == "table" and
 			type(options.description) == "string" and options.description or nil
 	local uri = (is_udp and "udp://" or "tcp://")..host..":"..port
-	local entry = load_store()[uri]
+	local entry = load_store()[key(server, uri)]
 	if entry and entry.accepted and
 			os.time() - entry.last_attempt < ACCEPTANCE_VALID_S then
-		touch_entry(uri)
+		touch_entry(server, uri)
 		open_socket(is_udp, host, port, cb)
 		return
 	end
-	log:info("Asking the user about "..uri)
-	ask_user(uri, entry, function(accepted, description)
-		store_answer(uri, accepted, description, entry)
+	log:info("Asking the user about "..uri.." for \""..server.."\"")
+	ask_user(server, uri, entry, function(accepted, description)
+		store_answer(server, uri, accepted, description, entry)
 		if not accepted then
 			cb(nil, "Declined by user: "..uri)
 			return
@@ -627,11 +662,19 @@ local function connect(is_udp, host, port, cb, options)
 end
 
 function M.safe.tcp_connect(host, port, cb, options)
-	connect(false, host, port, cb, options)
+	connect(asking_server(), false, host, port, cb, options)
 end
 
 function M.safe.udp_connect(host, port, cb, options)
-	connect(true, host, port, cb, options)
+	connect(asking_server(), true, host, port, cb, options)
+end
+
+function M.tcp_connect(host, port, cb, options)
+	connect("", false, host, port, cb, options)
+end
+
+function M.udp_connect(host, port, cb, options)
+	connect("", true, host, port, cb, options)
 end
 
 -- http_get(url, cb): the body of a GET over HTTPS, cb(body) or
@@ -829,7 +872,7 @@ end
 
 -- The user's leave for the url's host, then the fetch: a GET, or with a
 -- body a POST of JSON
-local function gated_http(url, cb, options, body, hops)
+local function gated_http(server, url, cb, options, body, hops)
 	-- The authority is what libcurl connects to, so it is what the user is
 	-- asked about, port included: a host and a port and nothing else. A
 	-- `user@` part or a backslash was read as one host here and another
@@ -856,18 +899,18 @@ local function gated_http(url, cb, options, body, hops)
 		if not to:match("^https?://") then
 			return user_cb(nil, "a redirect to "..to.." is not followed")
 		end
-		gated_http(to, user_cb, options, nil, (hops or 0) + 1)
+		gated_http(server, to, user_cb, options, nil, (hops or 0) + 1)
 	end
-	local entry = load_store()[uri]
+	local entry = load_store()[key(server, uri)]
 	if entry and entry.accepted and
 			os.time() - entry.last_attempt < ACCEPTANCE_VALID_S then
-		touch_entry(uri)
+		touch_entry(server, uri)
 		http_start(url, cb, body)
 		return
 	end
-	log:info("Asking the user about "..uri)
-	ask_user(uri, entry, function(accepted, description)
-		store_answer(uri, accepted, description, entry)
+	log:info("Asking the user about "..uri.." for \""..server.."\"")
+	ask_user(server, uri, entry, function(accepted, description)
+		store_answer(server, uri, accepted, description, entry)
 		if not accepted then
 			cb(nil, "Declined by user: "..uri)
 			return
@@ -876,29 +919,51 @@ local function gated_http(url, cb, options, body, hops)
 	end, type(options) == "table" and options.description or nil)
 end
 
-function M.safe.http_get(url, cb, options)
+local function http_get(server, url, cb, options)
 	if type(url) ~= "string" or type(cb) ~= "function" then
 		error("network: http_get(url: string, cb: function)")
 	end
-	gated_http(url, cb, options)
+	gated_http(server, url, cb, options)
+end
+function M.safe.http_get(url, cb, options)
+	http_get(asking_server(), url, cb, options)
+end
+function M.http_get(url, cb, options)
+	http_get("", url, cb, options)
 end
 
 -- http_post(url, body, cb[, options]): http_get's, a POST of the JSON
 -- `body` ([STARPORT]: a report)
-function M.safe.http_post(url, body, cb, options)
+local function http_post(server, url, body, cb, options)
 	if type(url) ~= "string" or type(body) ~= "string" or
 			type(cb) ~= "function" then
 		error("network: http_post(url: string, body: string, cb: function)")
 	end
-	gated_http(url, cb, options, body)
+	gated_http(server, url, cb, options, body)
+end
+function M.safe.http_post(url, body, cb, options)
+	http_post(asking_server(), url, body, cb, options)
+end
+function M.http_post(url, body, cb, options)
+	http_post("", url, body, cb, options)
 end
 
 -- The addresses this client has used, for a list to pick from: the
 -- store's entries as {uri, description, created, last_attempt, accepted},
--- the last used first
+-- the last used first, an address once -- its last used row
+-- simplified: an address another server's scripts were refused shows as
+-- refused if that was the last asking; the list is the user's own, and
+-- the consent is still asked per server.
 function M.safe.known_addresses()
 	local out = {}
-	for uri, e in pairs(load_store()) do
+	local latest = {}
+	for _, e in pairs(load_store()) do
+		local l = latest[e.uri]
+		if not l or e.last_attempt > l.last_attempt then
+			latest[e.uri] = e
+		end
+	end
+	for uri, e in pairs(latest) do
 		out[#out + 1] = {uri = uri, description = e.description or "",
 				created = e.created or 0, last_attempt = e.last_attempt or 0,
 				accepted = e.accepted and true or false, name = e.name or "",
@@ -918,12 +983,12 @@ function M.remember_server_icon(uri, sha)
 		return false
 	end
 	local entries = load_store()
-	local e = entries[uri]
+	local e = entries[key("", uri)]
 	local now = os.time()
 	if not e then
 		e = {accepted = true, uri = uri, description = "", created = now,
-				name = ""}
-		entries[uri] = e
+				name = "", server = ""}
+		entries[key("", uri)] = e
 	end
 	e.last_attempt = now
 	e.icon = sha
@@ -932,19 +997,23 @@ function M.remember_server_icon(uri, sha)
 end
 
 -- set_address_name(uri, name): the player name used on a server, kept on
--- its row for the next connect screen; a uri with no row is ignored
+-- its rows for the next connect screen; a uri with no row is ignored
 function M.safe.set_address_name(uri, name)
 	if type(uri) ~= "string" or type(name) ~= "string" or #name > 64 then
 		return false
 	end
 	local entries = load_store()
-	local e = entries[uri]
-	if not e then
-		return false
+	local found = false
+	for _, e in pairs(entries) do
+		if e.uri == uri then
+			e.name = name
+			found = true
+		end
 	end
-	e.name = name
-	save_store(entries)
-	return true
+	if found then
+		save_store(entries)
+	end
+	return found
 end
 
 -- parse_json(text) -> table or nil, error: the module's own reader
@@ -971,11 +1040,7 @@ function M.safe.gettime()
 	return buildat.get_time_us() / 1000000
 end
 
-M.tcp_connect = M.safe.tcp_connect
-M.udp_connect = M.safe.udp_connect
 M.gettime = M.safe.gettime
-M.http_get = M.safe.http_get
-M.http_post = M.safe.http_post
 M.known_addresses = M.safe.known_addresses
 M.set_address_name = M.safe.set_address_name
 M.parse_json = M.safe.parse_json

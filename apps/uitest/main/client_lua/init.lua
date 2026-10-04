@@ -128,4 +128,12 @@ function handle_keydown(event_type, event_data)
 end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")
 
+
+-- [CONSENT_PER_SERVER]: a script asks for an address, as this server.
+-- util/consent_check.sh reads whether the client asked the user or took
+-- the answer the user gave this server. Port 9 has nobody on it.
+require("buildat/extension/network").tcp_connect("localhost", 9,
+		function(socket, err)
+	log:info("uitest: tcp_connect: "..tostring(err or "connected"))
+end, {description = "uitest's consent probe"})
 -- vim: set noet ts=4 sw=4:
