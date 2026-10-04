@@ -1,0 +1,20 @@
+$#include "Audio/SoundStream.h"
+
+class SoundStream
+{
+    void SetFormat(unsigned frequency, bool sixteenBit, bool stereo);
+    void SetStopAtEnd(bool enable);
+
+    unsigned GetSampleSize() const;
+    float GetFrequency() const;
+    unsigned GetIntFrequency() const;
+    bool GetStopAtEnd() const;
+    bool IsSixteenBit() const;
+    bool IsStereo() const;
+
+    tolua_readonly tolua_property__get_set unsigned sampleSize;
+    tolua_readonly tolua_property__get_set float frequency;
+    tolua_property__get_set bool stopAtEnd;
+    tolua_readonly tolua_property__is_set bool sixteenBit;
+    tolua_readonly tolua_property__is_set bool stereo;
+};

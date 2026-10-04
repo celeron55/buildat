@@ -59,6 +59,9 @@ namespace interface
 	{
 		// Allocates new type if needed
 		virtual Event::Type type(const ss_ &name) = 0;
+		// The type a name has, or 0 if it has none yet -- without making
+		// one: a name from the network is not to become a type forever
+		virtual Event::Type find(const ss_ &name) = 0;
 		// Returns "" if type is not allocated to a name
 		virtual ss_ name(const Event::Type &type) = 0;
 	};
