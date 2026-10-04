@@ -20,14 +20,42 @@ namespace interface
 
 		ss_ get_absolute_path(const ss_ &path);
 
+		// Whether path is dir itself or something under it, both taken as
+		// absolute paths with "." and ".." collapsed. What asks is code
+		// that has been given a path by somebody it does not trust -- the
+		// client's image and resource calls, which sandboxed game code can
+		// reach -- so a name that merely starts with the directory's is not
+		// inside it.
+		//
+		// Lexical, so a symlink under dir that points elsewhere is still
+		// "inside": what this keeps out is a path, not a filesystem.
+		bool is_inside_path(const ss_ &path, const ss_ &dir);
+
 		bool path_exists(const ss_ &path);
 
 		bool copy_file(const ss_ &from, const ss_ &to);
+
+		// A file or a directory tree, gone; false when something stayed
+		bool remove_all(const ss_ &path);
+		// A file or a directory to another name on the same filesystem
+		bool rename(const ss_ &from, const ss_ &to);
+		// **Apps were games** (2026-10-02): <user>/games, where what an
+		// app keeps lived, to <user>/apps, once, when there is no apps yet.
+		// Both the server and the client do it as they start, so a save or
+		// a setting kept by an older version is where this one looks. And
+		// <user>/luanti ([PROCESS_SANDBOX], 2026-10-02): its worlds to
+		// <user>/apps/vanilla/worlds, the rest to <user>/shared/vanilla.
+		void migrate_user_apps(const ss_ &user_path);
 
 		// Bytes in a regular file; 0 if missing or not a regular file.
 		uint64_t file_size(const ss_ &path);
 		// Sum of file_size for every regular file under path, recursively.
 		uint64_t directory_tree_size(const ss_ &path);
+
+		// A server's icon at path ([FAVICON_SERVER_ICON]): the file when it is
+		// a PNG of 64 KB at most, else "" (a warning when it is there but
+		// not one). The client's list of servers and /favicon.ico both.
+		ss_ read_icon_png(const ss_ &path);
 
 		// "image.png", "png" -> true
 		bool check_file_extension(const char *path, const char *ext);

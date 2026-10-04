@@ -1,0 +1,73 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# tier: full
+# [OBJECT_MESH] step 0: mobmesh.lua's server beside a client that looks at
+# the mobs and shoots them. Prints the mobs' properties from the
+# server's log and the model lines from the client's; the shot is
+# local/mobmesh/mobs.png.
+#
+#   builtin/luanti/test/mobmesh.sh
+#   FIXTURE=connected builtin/luanti/test/mobmesh.sh   (another fixture with
+#                                                       the same stage and shots)
+set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
+FIXTURE="${FIXTURE:-mobmesh}"
+here=$(cd "$(dirname "$0")/../../.." && pwd)
+me=$(cd "$(dirname "$0")" && pwd)
+out="$here/local/$FIXTURE"
+mkdir -p "$out"
+save="buildat_test_$FIXTURE"
+cd "$here/Build"
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
+	echo "a buildat server or client is already running" >&2; exit 2
+fi
+rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
+BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
+	BUILDAT_LUANTI_LUA="$me/$FIXTURE.lua" \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P 29778 \
+	-l "${LOG_LEVEL:-4}" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
+for i in $(seq 1 400); do
+	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break
+	sleep 1
+done
+sleep 5
+srv=$(check_pgrep buildat_server | head -1)
+[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+cat > "$out/cmds.txt" <<CMDS
+delay 20000
+look_dir 1 -0.15 0
+delay 2000
+screenshot $out/mobs.png
+event scan
+delay 12000
+look_dir 2.5 0.2 1
+delay 1500
+screenshot $out/zombie_side.png
+event scan
+delay 1000
+quit
+CMDS
+bin/buildat -s localhost:29778 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
+	-c @"$out/cmds.txt" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+sleep 2
+kill -INT "$srv" 2>/dev/null
+for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+grep "$FIXTURE:" "$out/srv.log" | sed "s/.*$FIXTURE: //"
+grep "model \"" "$out/srv.log" | sed 's/.*C1: //'
+grep "luanti:model\|scan.*object\|scan.*obj " "$out/cli.log" | sed 's/.*luanti  : //'
+# **The verdict is that the mobs were drawn**, not what they look like
+# ([CI_RUNS]'s contract, 2026-09-25): the picture is the reading this
+# exists to give, and a run where the fixture spawned nothing or the
+# client drew no model is a failure nobody needs to open the picture
+# for. The exit status was the last grep's until now.
+models=$(grep -ac "luanti:model" "$out/cli.log")
+models=${models:-0}
+shot=$(ls "$out"/*.png 2>/dev/null | wc -l)
+echo "the client took $models model lines and $shot pictures"
+if [ "$models" -lt 1 ] || [ "$shot" -lt 1 ]; then
+	echo "FAIL: no mob model reached the client, or nothing was drawn"
+	exit 1
+fi
+echo "PASS: the mobs' models reached the client and the shot was taken"
+exit 0
+# vim: set noet ts=4 sw=4:

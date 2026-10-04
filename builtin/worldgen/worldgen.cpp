@@ -9,6 +9,8 @@
 #include "interface/noise.h"
 #include "interface/voxel_volume.h"
 #include "interface/thread.h"
+#include <mutex>
+#include <map>
 #include "interface/semaphore.h"
 #include "interface/os.h"
 #include <Vector2.h>
@@ -24,25 +26,9 @@ namespace pv = PolyVox;
 using interface::Event;
 using interface::VoxelInstance;
 
-// TODO: Move to a header (core/types_polyvox.h or something)
-#define PV3I_FORMAT "(%i, %i, %i)"
-#define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
+#include "interface/polyvox_std.h"
 
-// TODO: Move to a header (core/cereal_polyvox.h or something)
-namespace cereal {
-
-template<class Archive>
-void save(Archive &archive, const pv::Vector3DInt32 &v){
-	archive((int32_t)v.getX(), (int32_t)v.getY(), (int32_t)v.getZ());
-}
-template<class Archive>
-void load(Archive &archive, pv::Vector3DInt32 &v){
-	int32_t x, y, z;
-	archive(x, y, z);
-	v.setX(x); v.setY(y); v.setZ(z);
-}
-
-}
+#include "interface/polyvox_cereal.h"
 
 namespace worldgen {
 
@@ -60,12 +46,18 @@ struct GenerateThread: public interface::ThreadedThing
 	void on_crash(interface::Thread *thread);
 };
 
+struct CInstance;
+
 // One section of one instance: what has to be known before generating it
 struct GenerateTask
 {
 	SceneReference scene_ref;
 	pv::Vector3DInt16 section_p = pv::Vector3DInt16(0, 0, 0);
 	GeneratorInterface *generator = nullptr;
+	// The instance's generator epoch when the task was taken; see
+	// CInstance::m_epoch
+	uint64_t epoch = 0;
+	CInstance *instance = nullptr;
 };
 
 struct CInstance: public worldgen::Instance
@@ -74,6 +66,13 @@ struct CInstance: public worldgen::Instance
 	SceneReference m_scene_ref;
 
 	up_<GeneratorInterface> m_generator;
+	// Bumped whenever m_generator is replaced, under the module's
+	// m_generate_mutex: a task taken before that is not run, because its
+	// generator is gone. A generator's code is often another module's,
+	// which unloads after this one has stopped using it -- not while
+	// generate() is still running in it.
+	std::mutex *m_generate_mutex = nullptr;
+	uint64_t m_epoch = 0;
 	bool m_enabled = false;
 
 	std::deque<pv::Vector3DInt16> m_queued_sections;
@@ -105,12 +104,13 @@ struct CInstance: public worldgen::Instance
 	// Take one section off the queue. Called with the module held; the
 	// generation itself is done outside it.
 	bool take_next_section(pv::Vector3DInt16 *section_p_out,
-			GeneratorInterface **generator_out)
+			GeneratorInterface **generator_out, uint64_t *epoch_out)
 	{
 		if(!m_enabled || m_queued_sections.empty())
 			return false;
 		*section_p_out = m_queued_sections.front();
 		*generator_out = m_generator.get();
+		*epoch_out = m_epoch;
 		m_queued_sections.pop_front();
 		return true;
 	}
@@ -125,6 +125,8 @@ struct CInstance: public worldgen::Instance
 
 	void set_generator(GeneratorInterface *generator)
 	{
+		std::lock_guard<std::mutex> lock(*m_generate_mutex);
+		m_epoch++;
 		m_generator.reset(generator);
 	}
 
@@ -146,6 +148,12 @@ struct Module: public interface::Module, public Interface
 	sm_<SceneReference, up_<CInstance>> m_instances;
 	sp_<interface::Thread> m_thread;
 	interface::Semaphore m_queued_sections_sem;
+	// Held while a generator runs; see CInstance::m_epoch. Nothing that
+	// holds it reaches for a module, so whoever holds this module and
+	// waits for it cannot deadlock with the thread.
+	std::mutex m_generate_mutex;
+	// Requests for a scene with no instance yet, queued when it gets one
+	std::map<SceneReference, sv_<pv::Vector3DInt16>> m_early_requests;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -195,8 +203,13 @@ struct Module: public interface::Module, public Interface
 	void on_generation_request(const voxelworld::GenerationRequest &event)
 	{
 		auto it = m_instances.find(event.scene);
-		if(it == m_instances.end())
+		if(it == m_instances.end()){
+			// voxelworld asks as soon as its own instance exists, and the
+			// game makes this one after it: a request dropped here left
+			// the section asked for and never generated
+			m_early_requests[event.scene].push_back(event.section_p);
 			return;
+		}
 		up_<CInstance> &instance = it->second;
 		instance->on_generation_request(event.section_p);
 		m_queued_sections_sem.post();
@@ -212,7 +225,20 @@ struct Module: public interface::Module, public Interface
 			throw Exception("create_instance(): Scene already has worldgen");
 
 		up_<CInstance> instance(new CInstance(m_server, scene_ref));
-		m_instances[scene_ref] = std::move(instance);
+		instance->m_generate_mutex = &m_generate_mutex;
+		CInstance *created = instance.get();
+		{
+			std::lock_guard<std::mutex> lock(m_generate_mutex);
+			m_instances[scene_ref] = std::move(instance);
+		}
+		auto early = m_early_requests.find(scene_ref);
+		if(early != m_early_requests.end()){
+			for(const pv::Vector3DInt16 &sp : early->second){
+				created->on_generation_request(sp);
+				m_queued_sections_sem.post();
+			}
+			m_early_requests.erase(early);
+		}
 	}
 
 	void delete_instance(SceneReference scene_ref)
@@ -220,7 +246,15 @@ struct Module: public interface::Module, public Interface
 		auto it = m_instances.find(scene_ref);
 		if(it == m_instances.end())
 			throw Exception("delete_instance(): Scene does not have worldgen");
-		m_instances.erase(it);
+		// Out of the map under the lock, so the thread sees it gone, and
+		// destructed after it, so a generator never goes mid-generate()
+		m_early_requests.erase(scene_ref);
+		up_<CInstance> gone;
+		{
+			std::lock_guard<std::mutex> lock(m_generate_mutex);
+			gone = std::move(it->second);
+			m_instances.erase(it);
+		}
 	}
 
 	Instance* get_instance(SceneReference scene_ref)
@@ -245,12 +279,14 @@ struct Module: public interface::Module, public Interface
 
 			// The section grown by whatever the generator needs to place a
 			// thing that crosses the section boundary
-			pv::Region region;
+			pv::Region section_region;
 			voxelworld::access(m_server, task.scene_ref,
 					[&](voxelworld::Instance *world)
 			{
-				region = world->get_section_region_voxels(task.section_p);
+				section_region =
+						world->get_section_region_voxels(task.section_p);
 			});
+			pv::Region region = section_region;
 			pv::Vector3DInt32 pad = task.generator->get_padding_voxels();
 			region.setLowerCorner(region.getLowerCorner() - pad);
 			region.setUpperCorner(region.getUpperCorner() + pad);
@@ -264,7 +300,26 @@ struct Module: public interface::Module, public Interface
 			// them being allocated
 			VoxelVolume volume(region);
 
-			task.generator->generate(task.scene_ref, task.section_p, volume);
+			{
+				// The instance may be gone by now: it is looked for under
+				// the lock, and its generator used only if it is still the
+				// one the task was taken with
+				std::lock_guard<std::mutex> lock(m_generate_mutex);
+				bool current = false;
+				for(auto &pair : m_instances){
+					if(pair.second.get() == task.instance &&
+							task.instance->m_epoch == task.epoch)
+						current = true;
+				}
+				if(!current){
+					log_v(MODULE, "Section " PV3I_FORMAT " not generated: "
+							"its generator was replaced",
+							PV3I_PARAMS(task.section_p));
+					return;
+				}
+				task.generator->generate(task.scene_ref, task.section_p,
+						volume);
+			}
 
 			// Only this part needs voxelworld. A section the padding reaches
 			// into that does not exist yet is created ungenerated, so that it
@@ -272,8 +327,16 @@ struct Module: public interface::Module, public Interface
 			voxelworld::access(m_server, task.scene_ref,
 					[&](voxelworld::Instance *world)
 			{
-				world->merge_volume(volume, true);
+				// The section itself is this generator's to write; the
+				// padding around it is only a gift to whoever owns that,
+				// and loses to what is already there
+				world->merge_volume(volume, true, &section_region);
 			});
+
+			// On the main thread, after the merge: what a game runs over
+			// terrain that has just appeared goes here
+			m_server->emit_event("worldgen:section_generated",
+					new SectionGenerated(task.scene_ref, task.section_p));
 
 			worldgen::access(m_server, task.scene_ref,
 					[&](worldgen::Instance *instance)
@@ -315,8 +378,9 @@ void GenerateThread::run(interface::Thread *thread)
 				}
 				GenerateTask task;
 				task.scene_ref = instance->m_scene_ref;
+				task.instance = instance.get();
 				if(instance->take_next_section(&task.section_p,
-						&task.generator))
+						&task.generator, &task.epoch))
 					tasks.push_back(task);
 			}
 		});

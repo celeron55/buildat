@@ -31,7 +31,10 @@ ss_ zerr(int ret)
 	}
 }
 
-void compress_zlib(const ss_ &data_in, std::ostream &os, int level)
+// Negative window bits is zlib's way of saying "no header and no checksum",
+// which is what a raw deflate stream is
+static void compress_deflate(const ss_ &data_in, std::ostream &os, int level,
+		int window_bits)
 {
 	z_stream z;
 	const size_t bufsize = 16384;
@@ -43,7 +46,8 @@ void compress_zlib(const ss_ &data_in, std::ostream &os, int level)
 	z.zfree = Z_NULL;
 	z.opaque = Z_NULL;
 
-	ret = deflateInit(&z, level);
+	ret = deflateInit2(&z, level, Z_DEFLATED, window_bits, 8,
+			Z_DEFAULT_STRATEGY);
 	if(ret != Z_OK)
 		throw Exception("compress_zlib: deflateInit failed");
 
@@ -74,8 +78,20 @@ void compress_zlib(const ss_ &data_in, std::ostream &os, int level)
 	deflateEnd(&z);
 }
 
-void decompress_zlib(std::istream &is, std::ostream &os)
+void compress_zlib(const ss_ &data_in, std::ostream &os, int level)
 {
+	compress_deflate(data_in, os, level, MAX_WBITS);
+}
+
+void compress_deflate_raw(const ss_ &data_in, std::ostream &os, int level)
+{
+	compress_deflate(data_in, os, level, -MAX_WBITS);
+}
+
+static void decompress_deflate(std::istream &is, std::ostream &os,
+		int window_bits, size_t max_out)
+{
+	size_t total_out = 0;
 	z_stream z;
 	const size_t bufsize = 16384;
 	char input_buffer[bufsize];
@@ -89,7 +105,7 @@ void decompress_zlib(std::istream &is, std::ostream &os)
 	z.zfree = Z_NULL;
 	z.opaque = Z_NULL;
 
-	ret = inflateInit(&z);
+	ret = inflateInit2(&z, window_bits);
 	if(ret != Z_OK)
 		throw Exception("dcompress_zlib: inflateInit failed");
 
@@ -125,10 +141,17 @@ void decompress_zlib(std::istream &is, std::ostream &os)
 				|| status == Z_MEM_ERROR)
 		{
 			zerr(status);
+			inflateEnd(&z);
 			throw Exception("decompress_zlib: inflate failed");
 		}
 		int count = bufsize - z.avail_out;
 		//dstream<<"count="<<count<<std::endl;
+		total_out += count;
+		if(total_out > max_out){
+			inflateEnd(&z);
+			throw Exception("decompress_zlib: more than "+
+					itos((int64_t)max_out)+" bytes out");
+		}
 		if(count)
 			os.write(output_buffer, count);
 		if(status == Z_STREAM_END)
@@ -145,6 +168,7 @@ void decompress_zlib(std::istream &is, std::ostream &os)
 				{
 					log_w(MODULE, "unget #%zu failed", i);
 					log_w(MODULE, "fail=%i bad=%i", is.fail(), is.bad());
+					inflateEnd(&z);
 					throw Exception("decompress_zlib: unget failed");
 				}
 			}
@@ -154,6 +178,17 @@ void decompress_zlib(std::istream &is, std::ostream &os)
 	}
 
 	inflateEnd(&z);
+}
+
+void decompress_zlib(std::istream &is, std::ostream &os, size_t max_out)
+{
+	decompress_deflate(is, os, MAX_WBITS, max_out);
+}
+
+void decompress_deflate_raw(std::istream &is, std::ostream &os,
+		size_t max_out)
+{
+	decompress_deflate(is, os, -MAX_WBITS, max_out);
 }
 
 
@@ -168,8 +203,26 @@ void compress_zstd(const ss_ &data_in, std::ostream &os, int level)
 	os.write(buffer.c_str(), size);
 }
 
-size_t decompress_zstd(const ss_ &data_in, std::ostream &os)
+size_t decompress_zstd(const ss_ &data_in, uint8_t *out, size_t out_size)
 {
+	const size_t got = ZSTD_decompress(out, out_size,
+			data_in.c_str(), data_in.size());
+	if(ZSTD_isError(got))
+		throw Exception(ss_("decompress_zstd: ") + ZSTD_getErrorName(got));
+	return got;
+}
+
+int64_t zstd_frame_size(const ss_ &data_in)
+{
+	const unsigned long long n = ZSTD_getFrameContentSize(data_in.c_str(),
+			data_in.size());
+	return n == ZSTD_CONTENTSIZE_UNKNOWN || n == ZSTD_CONTENTSIZE_ERROR ||
+			n > INT64_MAX ? -1 : (int64_t)n;
+}
+
+size_t decompress_zstd(const ss_ &data_in, std::ostream &os, size_t max_out)
+{
+	size_t total_out = 0;
 	ZSTD_DStream *stream = ZSTD_createDStream();
 	if(stream == nullptr)
 		throw Exception("decompress_zstd: ZSTD_createDStream failed");
@@ -183,6 +236,12 @@ size_t decompress_zstd(const ss_ &data_in, std::ostream &os)
 			ss_ error = ZSTD_getErrorName(ret);
 			ZSTD_freeDStream(stream);
 			throw Exception("decompress_zstd: " + error);
+		}
+		total_out += output.pos;
+		if(total_out > max_out){
+			ZSTD_freeDStream(stream);
+			throw Exception("decompress_zstd: more than "+
+					itos((int64_t)max_out)+" bytes out");
 		}
 		if(output.pos)
 			os.write(buffer.c_str(), output.pos);

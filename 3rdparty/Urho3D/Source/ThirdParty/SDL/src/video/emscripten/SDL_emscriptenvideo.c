@@ -334,12 +334,10 @@ Emscripten_SetWindowFullscreen(_THIS, SDL_Window * window, SDL_VideoDisplay * di
 
 static void
 Emscripten_SetWindowTitle(_THIS, SDL_Window * window) {
-    EM_ASM_INT({
-      if (typeof Module['setWindowTitle'] !== 'undefined') {
-        Module['setWindowTitle'](Module['Pointer_stringify']($0));
-      }
-      return 0;
-    }, window->title);
+    /* buildat [WEB_EMSDK]: Module.setWindowTitle is gone; as U3D does */
+    if (window->title) {
+        emscripten_set_window_title(window->title);
+    }
 }
 
 #endif /* SDL_VIDEO_DRIVER_EMSCRIPTEN */
