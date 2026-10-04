@@ -124,6 +124,14 @@ bool Model::BeginLoad(Deserializer& source)
             for (unsigned j = 0; j < numElements; ++j)
             {
                 unsigned elementDesc = source.ReadUInt();
+                // Buildat: a type or a semantic past its enum indexes the
+                // tables kept by them (ELEMENT_TYPESIZES) out of bounds
+                if ((elementDesc & 0xff) >= MAX_VERTEX_ELEMENT_TYPES ||
+                        ((elementDesc >> 8) & 0xff) >= MAX_VERTEX_ELEMENT_SEMANTICS)
+                {
+                    URHO3D_LOGERROR("Model " + GetName() + " has an invalid vertex element");
+                    return false;
+                }
                 VertexElementType type = (VertexElementType)(elementDesc & 0xff);
                 VertexElementSemantic semantic = (VertexElementSemantic)((elementDesc >> 8) & 0xff);
                 unsigned char index = (unsigned char)((elementDesc >> 16) & 0xff);
@@ -217,7 +225,17 @@ bool Model::BeginLoad(Deserializer& source)
         for (unsigned j = 0; j < numLodLevels; ++j)
         {
             float distance = source.ReadFloat();
-            PrimitiveType type = (PrimitiveType)source.ReadUInt();
+            // Buildat: no primitive type past the enum
+            unsigned typeValue = source.ReadUInt();
+            if (typeValue > TRIANGLE_FAN)
+            {
+                URHO3D_LOGERROR("Model " + GetName() + " has an invalid primitive type");
+                loadVBData_.Clear();
+                loadIBData_.Clear();
+                loadGeometries_.Clear();
+                return false;
+            }
+            PrimitiveType type = (PrimitiveType)typeValue;
 
             unsigned vbRef = source.ReadUInt();
             unsigned ibRef = source.ReadUInt();

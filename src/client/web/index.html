@@ -1,0 +1,446 @@
+<!doctype html>
+<!-- The web client's page ([WEB_CLIENT] in doc/plan/web_client_plan.md).
+The game server serves this, buildat.js, buildat.wasm and buildat.data, and
+the client connects back to the server the page came from. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1,
+	maximum-scale=1, user-scalable=no">
+<title>Buildat</title>
+<style>
+html, body { margin: 0; height: 100%; background: #202020; overflow: hidden;
+	touch-action: none; }
+/* 100dvh: the viewport that is visible. 100vh is the one with a phone
+   browser's toolbar away, and what the toolbar covered was cut off. */
+canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
+	outline: none; touch-action: none; }
+#text, #password { position: fixed; display: none; margin: 0; padding: 0; border: 0;
+	resize: none; overflow: hidden; white-space: pre; opacity: 0;
+	font-size: 16px; pointer-events: none; }
+#status { position: fixed; left: 0; right: 0; top: 40%; text-align: center;
+	color: #ddd; font: 16px sans-serif; white-space: pre-wrap; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+<textarea id="text" autocomplete="off" autocorrect="off" autocapitalize="off"
+	spellcheck="false" tabindex="-1"></textarea>
+<input id="password" type="password" autocomplete="off" tabindex="-1">
+<div id="status">Loading...</div>
+<script>
+(function(){
+	var status = document.getElementById('status');
+	var canvas = document.getElementById('canvas');
+	var https = location.protocol === 'https:';
+	// The server that served this page; behind a reverse proxy the port is
+	// the page's, 443 or 80 when the address has none
+	var port = location.port || (https ? '443' : '80');
+	var host = location.hostname.indexOf(':') >= 0 ?
+			'[' + location.hostname + ']' : location.hostname;
+	// [WEB_ID_TRUST] (d): a page with no game of its own says null here
+	// (util/web_play_dir.sh) and starts on the launch menu, which connects
+	// in place to the server the user picks
+	var server = host + ':' + port;
+	var args = ['-P', '/buildat', '-U', '/urho', '-C', '/buildat/cache',
+		'-D', '/buildat/user',
+		'-w', window.innerWidth + 'x' + window.innerHeight];
+	if(server)
+		args.push('-s', server);
+	// After ? come more arguments, space separated: ?-l 4 for a verbose
+	// log. **The log level, the UI scale and the preferences only**
+	// ([SECURITY_RUN_1]): a link is anybody's to write, and with every
+	// flag a link to a real server's page ran its command sequence --
+	// keys and text in the user's session, typed into an admin's chat --
+	// or connected to another server inside this one's origin
+	var extra = decodeURIComponent(location.search.substring(1))
+			.split(' ').filter(function(a){ return a; });
+	for(var i = 0; i + 1 < extra.length; i += 2){
+		if(['-l', '-u', '-o'].indexOf(extra[i]) >= 0)
+			args.push(extra[i], extra[i + 1]);
+		else
+			console.log('Not taken from the address: ' + extra[i]);
+	}
+	// **Back in by itself** (user, 2026-09-30): a phone's browser drops
+	// the connection of a page that has been in the background for some
+	// seconds (Vivaldi on Android, another app in front). A disconnect after
+	// the page was away reloads it once it is in front again; one while it
+	// was in front waits for the user to go away and come back, so that a
+	// server that is down is not reloaded over and over. Only for a game
+	// that asked, with buildat.set_reload_on_return(true): a heavy one
+	// (vanilla) is not loaded again without the user saying so.
+	var away_now = false, back_at = 0, disconnected = false;
+	function present(){
+		return document.visibilityState === 'visible' && document.hasFocus();
+	}
+	function away(){
+		away_now = true;
+	}
+	function back(){
+		if(!present() || !away_now)
+			return;
+		away_now = false;
+		back_at = Date.now();
+		if(disconnected && Module.buildatReloadOnReturn)
+			location.reload();
+	}
+	document.addEventListener('visibilitychange', function(){
+		if(document.visibilityState === 'hidden')
+			away();
+		else
+			back();
+	});
+	window.addEventListener('blur', away);
+	window.addEventListener('focus', back);
+	// **The last input, for the idle frame rate** ([WEB_IDLE_FPS], app.cpp
+	// web_idle_step): the client reads buildatInputAt each frame, and while
+	// it is slow it leaves buildatWake here for the first input to call
+	function input(){
+		var m = window.Module;
+		if(!m)
+			return;
+		m.buildatInputAt = Date.now();
+		if(m.buildatWake)
+			m.buildatWake();
+	}
+	['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'focus']
+			.forEach(function(e){
+		window.addEventListener(e, input, {capture: true, passive: true});
+	});
+	// **Fullscreen on a touchscreen while the game wants it** (user,
+	// 2026-09-30): a phone browser's address bar covers a page that does
+	// not scroll, and only fullscreen puts it away. A game says when, with
+	// buildat.set_web_fullscreen() (the floorplanner: whenever its menu is
+	// not up, which then brings the bar back). Entering takes a tap, so
+	// each tap asks; leaving is at once.
+	var coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+	function sync_fullscreen(){
+		var want = coarse && Module.buildatFullscreen;
+		var el = document.documentElement;
+		try {
+			if(want && !document.fullscreenElement && el.requestFullscreen)
+				el.requestFullscreen().catch(function(){});
+			else if(!want && document.fullscreenElement && document.exitFullscreen)
+				document.exitFullscreen().catch(function(){});
+		} catch(e){}
+	}
+	document.addEventListener('touchend', sync_fullscreen, true);
+	window.Module = {
+		canvas: canvas,
+		arguments: args,
+		// Emscripten's sockets are WebSockets to this address and port
+		websocket: { url: https ? 'wss://' : 'ws://', subprotocol: 'binary' },
+		preRun: [function(){
+			FS.mkdir('/buildat/cache');
+			FS.mkdir('/buildat/user');
+			// **Kept between loads** ([WEB_PERSIST]): the files the server
+			// sent, and what games store on the client, in IndexedDB. Read
+			// back before the client starts, written out every few seconds
+			// and when the page is hidden.
+			// simplified: the cache grows until the browser evicts the site
+			FS.mount(FS.filesystems.IDBFS, {}, '/buildat/cache');
+			FS.mount(FS.filesystems.IDBFS, {}, '/buildat/user');
+			Module.addRunDependency('idbfs');
+			FS.syncfs(true, function(err){
+				if(err)
+					console.warn('IndexedDB read: ' + err);
+				Module.removeRunDependency('idbfs');
+			});
+			var syncing = false;
+			function save(){
+				if(syncing)
+					return;
+				syncing = true;
+				FS.syncfs(false, function(err){
+					syncing = false;
+					if(err)
+						console.warn('IndexedDB write: ' + err);
+				});
+			}
+			setInterval(save, 5000);
+			document.addEventListener('visibilitychange', function(){
+				if(document.visibilityState === 'hidden')
+					save();
+			});
+			// Whether the page, and so its WebSocket, is TLS: what a game
+			// tells its user about a password it sends ([FP_ACCESS])
+			Module.ENV.BUILDAT_PAGE_HTTPS = https ? '1' : '0';
+			// Whether the pointer is a finger ([FP_TOUCH]): the client's UI
+			// scale, and the game's touch controls
+			Module.ENV.BUILDAT_TOUCH = coarse ? '1' : '0';
+		}],
+		buildatSyncFullscreen: sync_fullscreen,
+		buildatInputAt: Date.now(),
+		print: function(t){ console.log(t); },
+		printErr: function(t){ console.warn(t); },
+		setStatus: function(t){ status.textContent = t; },
+		onRuntimeInitialized: function(){ status.textContent = ''; },
+		onAbort: function(what){
+			status.textContent = 'The client stopped: ' + what +
+				'\nReload the page to start again.';
+		},
+		// The client calls this when the server has gone, and stops;
+		// reason is what it saw
+		onDisconnected: function(reason){
+			disconnected = true;
+			// Gone while the page was away, or noticed just after it came
+			// back (a page in the background does not run): the browser's
+			// doing. Away, back() reloads it on the return.
+			if(Module.buildatReloadOnReturn && !away_now &&
+					Date.now() - back_at < 10000)
+				location.reload();
+			status.innerHTML = '';
+			status.appendChild(document.createTextNode(
+				'Disconnected: ' + (reason || 'the connection was lost') +
+				'.\n\n'));
+			var b = document.createElement('button');
+			b.textContent = 'Reconnect';
+			b.style.font = 'inherit';
+			b.style.padding = '8px 24px';
+			b.style.pointerEvents = 'auto';
+			b.onclick = function(){ location.reload(); };
+			status.appendChild(b);
+			status.style.background = 'rgba(0,0,0,0.75)';
+			status.style.padding = '16px';
+			if(document.exitPointerLock)
+				document.exitPointerLock();
+			if(document.fullscreenElement && document.exitFullscreen)
+				document.exitFullscreen();
+		},
+	};
+	// The focused text field's stand-in ([WEB_KEYS] steps 2 and 4): the
+	// browser's focus is on it while a LineEdit has the game's, holding the
+	// field's text and selection. An IME and a touchscreen's keyboard type
+	// into it, and its right click menu, select all, copy, cut and paste are
+	// the browser's own. A password's is a password input, so a phone's
+	// keyboard neither suggests nor learns it and nothing copies it.
+	// src/client/app.cpp syncs it each frame and takes what it did:
+	//   "v<caret>,<text>"  the field is now this: whatever the browser did
+	//                      to the stand-in (typing that is not a keypress,
+	//                      deleting, a composition, a cut, the menu's Delete)
+	//   "i<text>"          type this (a paste, made one line)
+	//   "s<start>,<len>"   select
+	//   "e"                Enter (a touchscreen keyboard's)
+	// Indices there are characters, here UTF-16. A desktop's typing never
+	// reaches the stand-in: SDL takes its keypress and prevents it.
+	// **The pointer lock asked for in the click itself** (user, Firefox):
+	// the engine asks a frame after a click, which a browser may take as no
+	// longer the user's doing. While the game wants the lock (Urho3D's
+	// relative mouse mode sets buildatWantLock), a press on the canvas asks
+	// for it here, before the engine sees the press.
+	canvas.addEventListener('mousedown', function(){
+		if(window.Module && Module.buildatWantLock &&
+				document.pointerLockElement !== canvas && canvas.requestPointerLock){
+			try {
+				var r = canvas.requestPointerLock();
+				if(r && r.catch)
+					r.catch(function(){});
+			} catch(e) {}
+		}
+	}, true);
+	// **Sound starts with the user's doing** (user, 2026-09-30: silent in
+	// Firefox): a browser makes an audio context suspended until the page
+	// resumes it from a click, a tap or a key, and the SDL this is built on
+	// makes its context at the start and never resumes it. Every such event
+	// asks while it is still suspended.
+	function resume_audio(){
+		if(typeof SDL2 !== 'undefined' && SDL2.audioContext &&
+				SDL2.audioContext.state === 'suspended'){
+			var r = SDL2.audioContext.resume();
+			if(r && r.catch)
+				r.catch(function(){});
+		}
+	}
+	['mousedown', 'keydown', 'touchend'].forEach(function(type){
+		document.addEventListener(type, resume_audio, true);
+	});
+	// **Two fingers are the game's at once** (user, a playtest: a two
+	// finger drag started a second late): a phone's browser holds a
+	// multi-touch move back while it decides whether the page is being
+	// zoomed, which user-scalable=no does not stop where the browser forces
+	// zoom on. Cancelled here, before it can decide.
+	document.addEventListener('touchmove', function(e){
+		if(e.touches.length > 1)
+			e.preventDefault();
+	}, {passive: false});
+	var ta = document.getElementById('text');
+	var pw = document.getElementById('password');
+	var el = ta, active = false, composing = false, actions = [];
+	function units(s, chars){ return Array.from(s).slice(0, chars).join('').length; }
+	function chars(s, u){ return Array.from(s.slice(0, u)).length; }
+	function selected(){
+		// The user's own selection (Ctrl+A, the menu's Select All) is the field's
+		var v = el.value;
+		if(!active || composing || document.activeElement !== el)
+			return;
+		var a = el.selectionStart, b = el.selectionEnd;
+		if(a + ',' + b === el.dataset.sel)
+			return;
+		el.dataset.sel = a + ',' + b;
+		actions.push('s' + chars(v, a) + ',' + (chars(v, b) - chars(v, a)));
+	}
+	window.buildatText = {
+		take: function(){ return actions.length ? actions.shift() : null; },
+		sync: function(x, y, w, h, text, start, len, editable, secret){
+			if(x === null){
+				if(active){
+					active = false;
+					el.style.display = 'none';
+					el.value = '';
+					canvas.focus();
+				}
+				return;
+			}
+			var want = secret ? pw : ta;
+			if(want !== el){
+				el.style.display = 'none';
+				el.value = '';
+				el = want;
+				active = false;
+				composing = false;
+			}
+			var k = canvas.clientWidth / canvas.width;
+			var st = el.style;
+			var box = [x * k, y * k, w * k, h * k].map(Math.round).join(',');
+			if(el.dataset.box !== box){
+				el.dataset.box = box;
+				var b = box.split(',');
+				st.left = b[0] + 'px'; st.top = b[1] + 'px';
+				st.width = b[2] + 'px'; st.height = b[3] + 'px';
+			}
+			if(!active){
+				active = true;
+				st.display = 'block';
+			}
+			if(document.activeElement !== el)
+				el.focus({preventScroll: true});
+			el.readOnly = !editable;
+			// Setting the value would end an IME's composition
+			if(composing)
+				return;
+			if(el.value !== text)
+				el.value = text;
+			var a = units(text, start), b = units(text, start + len);
+			if(el.selectionStart !== a || el.selectionEnd !== b)
+				el.setSelectionRange(a, b);
+			el.dataset.sel = a + ',' + b;
+		},
+	};
+	document.addEventListener('selectionchange', selected);
+	[ta, pw].forEach(function(e){
+		e.addEventListener('select', selected);
+		e.addEventListener('compositionstart', function(){ composing = true; });
+		e.addEventListener('compositionend', function(){ composing = false; });
+		e.addEventListener('paste', function(ev){
+			ev.preventDefault();
+			// A line edit is one line
+			var t = ev.clipboardData.getData('text/plain').replace(/[\r\n\t]+/g, ' ');
+			if(t && !e.readOnly)
+				actions.push('i' + t);
+		});
+		e.addEventListener('input', function(){
+			if(e !== el || e.readOnly)
+				return;
+			var v = e.value;
+			// A touchscreen keyboard's Enter is a line break in the text:
+			// taken out, and the field's Enter (user, 2026-09-30)
+			var enter = /[\r\n]/.test(v);
+			if(enter)
+				v = e.value = v.replace(/[\r\n]+/g, '');
+			// One line, whatever a suggestion put in
+			if(/\t/.test(v))
+				v = e.value = v.replace(/\t+/g, ' ');
+			var caret = chars(v, e.selectionEnd);
+			e.dataset.sel = e.selectionStart + ',' + e.selectionEnd;
+			actions.push('v' + caret + ',' + v);
+			if(enter)
+				actions.push('e');
+		});
+		// And a password input's, which puts nothing in the text
+		e.addEventListener('keydown', function(ev){
+			if(ev.key === 'Enter' && e === pw){
+				ev.preventDefault();
+				actions.push('e');
+			}
+		});
+	});
+	// A right click on the focused field opens the browser's menu for it:
+	// the textarea takes the press, and the game does not see it
+	canvas.addEventListener('mousedown', function(e){
+		if(e.button !== 2 || !active)
+			return;
+		var r = el.getBoundingClientRect();
+		if(e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top ||
+				e.clientY >= r.bottom)
+			return;
+		e.stopImmediatePropagation();
+		el.style.pointerEvents = 'auto';
+	});
+	[ta, pw].forEach(function(e){
+		e.addEventListener('contextmenu', function(){
+			setTimeout(function(){ e.style.pointerEvents = 'none'; }, 0);
+		});
+	});
+	canvas.addEventListener('click', function(){
+		(active ? el : canvas).focus({preventScroll: true});
+	});
+	// Text a game puts on the clipboard ([WEB_KEYS] step 3; Urho3D's
+	// UI::SetClipboardText): the Clipboard API where the page is secure,
+	// else execCommand('copy') on a selection of its own, which works only
+	// soon after a click or key -- as the game's copy button is
+	window.buildatClipboard = function(t){
+		function old(){
+			var had = document.activeElement;
+			var x = document.createElement('textarea');
+			x.value = t;
+			x.style.position = 'fixed';
+			x.style.opacity = '0';
+			document.body.appendChild(x);
+			x.select();
+			try { document.execCommand('copy'); } catch(e){}
+			x.remove();
+			if(had)
+				had.focus({preventScroll: true});
+		}
+		if(navigator.clipboard && window.isSecureContext)
+			navigator.clipboard.writeText(t).catch(old);
+		else
+			old();
+	};
+	// Files a game hands the user and takes from them ([FP_EXPORT] 4): the
+	// browser's download, and its file picker, whose file the client takes
+	// with picked_file() once it has been read. src/client/app.cpp
+	// l_save_file() and the ones after it.
+	window.buildatFiles = {
+		picked: null,
+		save: function(name, bytes){
+			var a = document.createElement('a');
+			a.href = URL.createObjectURL(new Blob([bytes]));
+			a.download = name;
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			setTimeout(function(){ URL.revokeObjectURL(a.href); }, 60000);
+		},
+		pick: function(accept){
+			var input = document.createElement('input');
+			input.type = 'file';
+			if(accept)
+				input.accept = accept;
+			input.addEventListener('change', function(){
+				var f = input.files[0];
+				if(f)
+					f.arrayBuffer().then(function(b){
+						buildatFiles.picked = {name: f.name, data: new Uint8Array(b)};
+					});
+			});
+			input.click();
+		},
+	};
+	// A middle click is the game's, not the browser's paste or autoscroll
+	canvas.addEventListener('auxclick', function(e){ e.preventDefault(); });
+})();
+</script>
+<script src="buildat.js"></script>
+</body>
+</html>

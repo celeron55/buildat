@@ -26,6 +26,13 @@ struct CEventRegistry: public EventRegistry
 		return m_next_type - 1;
 	}
 
+	Event::Type find(const ss_ &name)
+	{
+		interface::MutexScope ms(m_mutex);
+		auto it = m_types.find(name);
+		return it != m_types.end() ? it->second : 0;
+	}
+
 	ss_ name(const Event::Type &type)
 	{
 		interface::MutexScope ms(m_mutex);

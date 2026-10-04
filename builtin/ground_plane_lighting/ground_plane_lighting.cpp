@@ -35,21 +35,7 @@ using interface::VoxelInstance;
 using interface::container_coord;
 using interface::container_coord16;
 
-namespace std {
-
-// TODO: Move to a header (core/types_polyvox.h or something)
-template<> struct hash<pv::Vector<2u, int16_t>>{
-	std::size_t operator()(const pv::Vector<2u, int16_t> &v) const {
-		return ((std::hash<int16_t>() (v.getX()) << 0) ^
-				(std::hash<int16_t>() (v.getY()) << 1));
-	}
-};
-
-}
-
-// TODO: Move to a header (core/types_polyvox.h or something)
-#define PV3I_FORMAT "(%i, %i, %i)"
-#define PV3I_PARAMS(p) p.getX(), p.getY(), p.getZ()
+#include "interface/polyvox_std.h"
 
 namespace ground_plane_lighting {
 

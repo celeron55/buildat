@@ -186,7 +186,7 @@ void PhysicsWorld::RegisterObject(Context* context)
     context->RegisterFactory<PhysicsWorld>(SUBSYSTEM_CATEGORY);
 
     URHO3D_MIXED_ACCESSOR_ATTRIBUTE("Gravity", GetGravity, SetGravity, Vector3, DEFAULT_GRAVITY, AM_DEFAULT);
-    URHO3D_ATTRIBUTE("Physics FPS", int, fps_, DEFAULT_FPS, AM_DEFAULT);
+    URHO3D_ACCESSOR_ATTRIBUTE("Physics FPS", GetFps, SetFps, int, DEFAULT_FPS, AM_DEFAULT);
     URHO3D_ATTRIBUTE("Max Substeps", int, maxSubSteps_, 0, AM_DEFAULT);
     URHO3D_ACCESSOR_ATTRIBUTE("Solver Iterations", GetNumIterations, SetNumIterations, int, 10, AM_DEFAULT);
     URHO3D_ATTRIBUTE("Net Max Angular Vel.", float, maxNetworkAngularVelocity_, DEFAULT_MAX_NETWORK_ANGULAR_VELOCITY, AM_DEFAULT);
@@ -249,6 +249,11 @@ void PhysicsWorld::Update(float timeStep)
     }
     else if (maxSubSteps_ > 0)
         maxSubSteps = Min(maxSubSteps, maxSubSteps_);
+    // No limit set: a tenth of a second a frame at most, or a slow frame asks
+    // for more steps and the next one is slower still -- the server's 1000
+    // fps on a slow client took it down
+    else
+        maxSubSteps = Min(maxSubSteps, (int)fps_ / 10 + 1);
 
     delayedWorldTransforms_.Clear();
     simulating_ = true;
