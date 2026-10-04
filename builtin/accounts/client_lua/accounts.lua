@@ -18,7 +18,8 @@
 --   on_kicked(text)        before the client disconnects
 --   notice(text)           a line the game shows; the log's by default
 -- A scripted client joins by the environment: <env>_NAME, <env>_PASSWORD,
--- <env>_CODE and <env>_TOTP, or by a Starport ID's token in <env>_STARPORT
+-- <env>_CODE and <env>_TOTP, or by a Starport ID's token in <env>_STARPORT;
+-- <env>_CREATE=1 makes the account (else an unknown name is refused).
 -- (env is "BUILDAT_JOIN" by default).
 local log = buildat.Logger("accounts")
 local magic = require("buildat/extension/urho3d")
@@ -36,9 +37,12 @@ local M = {
 }
 
 local TEXT = {"object", {"text", "string"}}
-local LOGIN = {"object", {"name", "string"}, {"password", "string"},
-		{"code", "string"}, {"token", "string"}, {"keep", "byte"},
-		{"totp", "string"}, {"starport", "string"}}
+-- [ACCOUNT_CREATE]: a leading version byte, then "create" at the end; add
+-- version-gated fields rather than breaking the format again
+local LOGIN = {"object", {"version", "byte"}, {"name", "string"},
+		{"password", "string"}, {"code", "string"}, {"token", "string"},
+		{"keep", "byte"}, {"totp", "string"}, {"starport", "string"},
+		{"create", "byte"}}
 local TOTP_REQ = {"object", {"cmd", "string"}, {"code", "string"}}
 local TOTP_RESULT = {"object", {"error", "string"}, {"secret", "string"},
 		{"uri", "string"}, {"on", "byte"}}
@@ -84,12 +88,13 @@ local token_tried = false
 -- The last login sent, for the TOTP code it may turn out to need
 local last_login = nil
 
-local function send_login(name, password, code, token, keep, totp, starport)
-	last_login = {name, password, code, token, keep, starport}
+local function send_login(name, password, code, token, keep, totp, starport,
+		create)
+	last_login = {name, password, code, token, keep, starport, create}
 	buildat.send_packet("accounts:login", cereal.binary_output(
-			{name = name, password = password, code = code or "",
+			{version = 1, name = name, password = password, code = code or "",
 			token = token or "", keep = keep and 1 or 0, totp = totp or "",
-			starport = starport or ""}, LOGIN))
+			starport = starport or "", create = create and 1 or 0}, LOGIN))
 end
 M.send_login = send_login
 
@@ -150,7 +155,7 @@ local function show_totp(error_text)
 	end
 	local function go()
 		local l = last_login
-		send_login(l[1], l[2], l[3], l[4], l[5], e:GetText())
+		send_login(l[1], l[2], l[3], l[4], l[5], e:GetText(), l[6], l[7])
 	end
 	magic.SubscribeToEvent(e, "TextFinished", go)
 	local b = w:CreateChild("Button")
@@ -163,6 +168,8 @@ local function show_totp(error_text)
 	magic.SubscribeToEvent(b, "Released", go)
 	e:SetFocus(true)
 end
+
+local show_create -- [ACCOUNT_CREATE]: defined after show_login
 
 local function show_login(error_text)
 	M.close()
@@ -213,8 +220,7 @@ local function show_login(error_text)
 				end
 				-- With the setup code, the first admin is an ID (10g); and
 				-- kept logged in as a local login is
-				send_login("", "", code and code:GetText() or "", nil,
-						keep and keep.on, "", token)
+				send_login("", "", "", nil, keep and keep.on, "", token)
 			end)
 		end)
 		label("or with an account of this server:")
@@ -230,18 +236,11 @@ local function show_login(error_text)
 		-- The saves are on this machine: no password to ask
 		label("On this computer: no password needed")
 	else
-		label(M.hello.open_registration == 1 and
-				"Password (a new name makes an account)" or "Password")
+		-- [ACCOUNT_CREATE]: the login window logs in only; making an account
+		-- is its own window (show_create), with the setup/invite code and a
+		-- password typed twice
+		label("Password")
 		password = field("", true)
-		-- The server's first admin claims it with the code in the server's
-		-- log; while registration is closed a new account needs an invite
-		if M.hello.setup == 1 then
-			label("Setup code (see the server's log)")
-			code = field("", false)
-		elseif M.hello.open_registration ~= 1 then
-			label("Invite code (only for a new account)")
-			code = field("", false)
-		end
 		if not buildat.connection_encrypted() then
 			local warn = label("The password is sent unencrypted: use a " ..
 					"trusted network")
@@ -309,6 +308,98 @@ local function show_login(error_text)
 	if code then
 		magic.SubscribeToEvent(code, "TextFinished", function() join() end)
 	end
+	-- [ACCOUNT_CREATE]: making an account is its own window
+	if not is_local then
+		local cb = w:CreateChild("Button")
+		cb:SetStyleAuto()
+		cb.minHeight = 30
+		cb:SetFocusMode(magic.FM_FOCUSABLE)
+		local ct = cb:CreateChild("Text")
+		ct:SetStyleAuto()
+		ct:SetText("Create a new account")
+		ct:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		magic.SubscribeToEvent(cb, "Released", function() show_create(nil) end)
+	end
+	name:SetFocus(true)
+end
+
+-- [ACCOUNT_CREATE]: the account-making window -- name, the password twice,
+-- and the setup or invite code; the server makes the account only on create=1
+function show_create(error_text)
+	M.close()
+	local w = page_window(380)
+	window = w
+	local function label(text)
+		return page_text(w, text)
+	end
+	local function field(text, secret)
+		local e = w:CreateChild("LineEdit")
+		e:SetStyleAuto()
+		e.minHeight = 26
+		e.textCopyable = not secret
+		e.textSelectable = true
+		if secret then
+			e.echoCharacter = string.byte("*")
+		end
+		e:SetText(text)
+		return e
+	end
+	label("Create a new account")
+	label("Name")
+	local name = field(buildat.storage_read("name") or "", false)
+	label("Password (at least 6 characters)")
+	local password = field("", true)
+	label("Password again")
+	local password2 = field("", true)
+	-- The server's first admin claims it with the code in the server's log;
+	-- while registration is closed a new account needs an invite
+	local code = nil
+	if M.hello.setup == 1 then
+		label("Setup code (see the server's log)")
+		code = field("", false)
+	elseif M.hello.open_registration ~= 1 then
+		label("Invite code (from an admin)")
+		code = field("", false)
+	end
+	if not buildat.connection_encrypted() then
+		local warn = label("The password is sent unencrypted: use a trusted "..
+				"network")
+		warn:SetColor(magic.Color(1.0, 0.8, 0.4))
+	end
+	if error_text then
+		local e = label(error_text)
+		e:SetColor(magic.Color(1.0, 0.4, 0.4))
+	end
+	local function create()
+		local n = name:GetText()
+		local pw = password:GetText()
+		if pw ~= password2:GetText() then
+			return show_create("The two passwords are not the same")
+		end
+		buildat.storage_write("name", n)
+		M.name = n
+		-- create=1: the server makes the account; a plain login would refuse
+		-- an unknown name
+		send_login(n, pw, code and code:GetText() or "", nil, nil, "", "", true)
+	end
+	local button = w:CreateChild("Button")
+	button:SetStyleAuto()
+	button.minHeight = 30
+	button:SetFocusMode(magic.FM_FOCUSABLE)
+	local bt = button:CreateChild("Text")
+	bt:SetStyleAuto()
+	bt:SetText("Create account")
+	bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	magic.SubscribeToEvent(button, "Released", function() create() end)
+	local back = w:CreateChild("Button")
+	back:SetStyleAuto()
+	back.minHeight = 30
+	back:SetFocusMode(magic.FM_FOCUSABLE)
+	local backt = back:CreateChild("Text")
+	backt:SetStyleAuto()
+	backt:SetText("Back to login")
+	backt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	magic.SubscribeToEvent(back, "Released", function() show_login(nil) end)
 	name:SetFocus(true)
 end
 
@@ -337,7 +428,8 @@ buildat.sub_packet("accounts:hello", function(data)
 		send_login(auto_name, buildat.get_env(env .. "_PASSWORD") or "",
 				buildat.get_env(env .. "_CODE") or "", nil,
 				buildat.get_env(env .. "_KEEP") == "1",
-				buildat.get_env(env .. "_TOTP") or "")
+				buildat.get_env(env .. "_TOTP") or "", "",
+				buildat.get_env(env .. "_CREATE") == "1")
 	elseif token ~= "" and not token_tried then
 		token_tried = true
 		M.name = buildat.storage_read("name") or ""

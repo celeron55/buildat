@@ -296,9 +296,16 @@ struct LoginRequest
 	// server in place of a name and a password
 	ss_ totp;
 	ss_ starport;
+	// [ACCOUNT_CREATE]: this login is allowed to make the account if the name
+	// does not exist; a plain login (0) refuses an unknown name instead
+	uint8_t create = 0;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(name, password, code, token, keep, totp, starport);
+		// A leading version byte: add version-gated fields below it rather
+		// than breaking the wire format again (voxel_cereal.h pattern)
+		uint8_t version = 1;
+		archive(version);
+		archive(name, password, code, token, keep, totp, starport, create);
 	}
 };
 
@@ -1090,6 +1097,11 @@ struct Module: public interface::Module, public Interface
 						cs(name));
 			}
 		} else {
+			// [ACCOUNT_CREATE]: a plain login does not make an account; a
+			// mistyped name is refused as unknown. Local still auto-creates.
+			if(!local && !cred.create)
+				return reply("There is no account named \""+name+"\". Use "
+						"\"Create a new account\" to make one.");
 			if(reserved_name(name))
 				return reply("\""+name+"\" is kept for a client that has "
 						"not logged in; choose another name");
