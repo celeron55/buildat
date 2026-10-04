@@ -692,6 +692,7 @@ local http_polling = false
 -- simplified: for a Starport only, as the server relays to nothing else
 local relay_queue = {}
 local relay_busy = false
+local relay_gen = 0
 local ca_pem = nil
 
 local function relay_next()
@@ -700,6 +701,14 @@ local function relay_next()
 	end
 	relay_busy = true
 	local job = table.remove(relay_queue, 1)
+	-- The relay is one connection per peer, reused back to back. A finished
+	-- connection's last relay_data/relay_closed can arrive after the next job
+	-- has taken over the single packet handler; tag each job so the handler
+	-- ignores what is not its own (else a prior call's "closed by the
+	-- Starport" fails this one before its own response -- [WEB_ID_RELAY]).
+	relay_gen = relay_gen + 1
+	local gen = relay_gen
+	local gen_hex = string.format("%08x", gen)
 	local function done(body, err)
 		relay_busy = false
 		job.cb(body, err)
@@ -826,8 +835,17 @@ local function relay_next()
 			finish(nil, "closed before a whole response")
 		end
 	end
-	buildat.sub_packet("starport:relay_data", function(data) pump(data) end)
+	buildat.sub_packet("starport:relay_data", function(data)
+		if data:sub(1, 8) ~= gen_hex then
+			return
+		end
+		pump(data:sub(9))
+	end)
 	buildat.sub_packet("starport:relay_closed", function(why)
+		if why:sub(1, 8) ~= gen_hex then
+			return
+		end
+		why = why:sub(9)
 		local body, status = parse(true)
 		if body and status and status >= 200 and status < 300 then
 			finish(body)
@@ -835,7 +853,7 @@ local function relay_next()
 			finish(nil, "relay: " .. tostring(why))
 		end
 	end)
-	buildat.send_packet("starport:relay_open", origin)
+	buildat.send_packet("starport:relay_open", gen_hex .. origin)
 	pump("")
 end
 

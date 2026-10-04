@@ -149,7 +149,18 @@ struct Relay
 	ss_ why;
 	size_t total = 0;
 	int64_t last_us = 0;
+	uint32_t gen = 0;  // the client's connection id, echoed on data/closed
 };
+
+// An 8-hex-char prefix the relay tags data/closed with, so a client ignores
+// what belongs to a connection it has already finished (the relay is one per
+// peer and reused back to back, with no other per-connection identity).
+static ss_ relay_gen_hex(uint32_t g)
+{
+	char b[9];
+	snprintf(b, sizeof b, "%08x", g);
+	return ss_(b, 8);
+}
 static const size_t RELAY_MAX_BYTES = 4 * 1024 * 1024;
 static const int64_t RELAY_IDLE_US = 30 * 1000000LL;
 
@@ -430,7 +441,11 @@ struct Module: public interface::Module, public Interface
 	void on_relay_open(const network::Packet &p)
 	{
 		end_relay(p.sender);
-		const ss_ url = p.data;
+		if(p.data.size() < 8)
+			return;
+		const uint32_t gen = (uint32_t)strtoul(p.data.substr(0, 8).c_str(),
+				nullptr, 16);
+		const ss_ url = p.data.substr(8);
 		bool allowed = false;
 		const json::Value c = config();
 		if(is_on(c))
@@ -438,7 +453,7 @@ struct Module: public interface::Module, public Interface
 				allowed |= u == url;
 		if(!allowed){
 			relay_send_packet(p.sender, "starport:relay_closed",
-					"not a Starport this server is on");
+					relay_gen_hex(gen) + "not a Starport this server is on");
 			return;
 		}
 		const size_t s = url.find("://");
@@ -453,6 +468,7 @@ struct Module: public interface::Module, public Interface
 		}
 		std::unique_ptr<Relay> r(new Relay());
 		r->peer = p.sender;
+		r->gen = gen;
 		r->last_us = interface::os::time_us();
 		Relay *rp = r.get();
 		r->thread = std::thread([rp, host, port](){
@@ -546,10 +562,11 @@ struct Module: public interface::Module, public Interface
 					why = "idle";
 				}
 			}
+			const ss_ g = relay_gen_hex(r->gen);
 			if(!data.empty())
-				relay_send_packet(r->peer, "starport:relay_data", data);
+				relay_send_packet(r->peer, "starport:relay_data", g + data);
 			if(closed){
-				relay_send_packet(r->peer, "starport:relay_closed", why);
+				relay_send_packet(r->peer, "starport:relay_closed", g + why);
 				done.push_back(pair.first);
 			}
 		}
