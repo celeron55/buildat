@@ -53,7 +53,7 @@ followed by builtin modules:
 Modules can be unloaded at runtime. Handling of client-side state is left up to
 the C++ modules themselves.
 
-The first module to be loaded is called __loader. It loads all other modules.
+The engine loads builtin/loader first. It loads all other modules.
 
 C++ modules can use the core/ and interface/ headers. Everything else is
 considered unstable.

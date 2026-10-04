@@ -10,9 +10,9 @@ Running it
     bin/buildat_server -m ../apps/hearth -D <user path> -P <port>
 
 The server serves both faces on its one port: the game protocol to the
-client, and HTTP to a browser. __loader only loads builtin/loader; the
-app itself is main/ (main.cpp on the server, client_lua/init.lua sent to
-the client). It needs the builtins network, client_lua, client_data,
+client, and HTTP to a browser. The app itself is main/ (main.cpp on the
+server, client_lua/init.lua sent to the client and run there through
+"client_main" in main/meta.json). It needs the builtins network, client_lua, client_data,
 storage and accounts.
 
 The data

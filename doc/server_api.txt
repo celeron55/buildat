@@ -20,8 +20,8 @@ by the server at start through RCC++ and cached under cache/rccpp_build by
 the hash of its sources), an optional api.h other modules include to talk
 to it, and by convention client_lua/ and client_data/ that builtin/client_lua
 and builtin/client_data ship to the client. Modules under builtin/ are the
-engine's own; an app's are under apps/<app>/, and the first one loaded is
-__loader, which reads the rest through builtin/loader.
+engine's own; an app's are under apps/<app>/. The engine loads
+builtin/loader first, and it reads the rest.
 
 <module>.cpp defines a struct deriving from interface::Module and exports
 one function:
@@ -62,10 +62,12 @@ with how many went unsaid.
 
 meta.json: {"cxxflags": "", "ldflags": "", "dependencies": [{"module":
 "network"}, {"module": "x", "optional": true}], "reverse_dependencies":
-[...], "disable_cpp": false}. Any field may be left out; {} is the minimum.
-A dependency is loaded first; a reverse dependency is loaded after this
-module and says the other may use this one. disable_cpp is a module with
-client halves only.
+[...], "disable_cpp": false, "client_main": "init.lua"}. Any field may be
+left out; {} is the minimum. A dependency is loaded first; a reverse
+dependency is loaded after this module and says the other may use this
+one. disable_cpp is a module with client halves only. client_main names a
+script in the module's client_lua/ that the engine runs once on each
+client, when its files first arrive (modules in load order).
 
 
 src/interface, the core
@@ -279,8 +281,8 @@ builtin, the modules' interfaces
 builtin/loader/api.h -- loader::Interface: activate(), get_module_info(name).
 The first module; it reads meta.json files, resolves the order and loads
 the rest; on -R it reloads a module whose sources changed. An app whose
-__loader/meta.json has "base": "<app>" is a variant of that sibling
-app: the base's modules load as the variant's own, a module directory in
+own meta.json (apps/<app>/meta.json) has "base": "<app>" is a variant
+of that sibling app: the base's modules load as the variant's own, a module directory in
 both is the variant's, and the variant is its own app everywhere else
 (its tile, its saves). apps/vanilla_voxel_physics is one.
 
