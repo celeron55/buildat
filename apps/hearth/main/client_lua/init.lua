@@ -137,6 +137,7 @@ local function edit(parent, label, multi)
 end
 
 local show_topic, show_thread, show_notifications, show_queue, show_report
+local show_new_topic
 -- Who this client is ("me"), and the thread it has open: the server pushes
 -- that thread's new messages ("hr:new"), which are added to it in place
 local me = {account = "", unseen = 0, level = 0, open_reports = 0}
@@ -159,13 +160,25 @@ home = function()
 		if me.admin then
 			button(w, "Moderation (" .. (me.open_reports or 0) .. " open)",
 					show_queue)
+			button(w, "New topic...", function() show_new_topic(r.topics) end)
 		end
 		local _, add = list(w)
-		for _, t in ipairs(r.topics) do
+		-- Each subtopic under its parent; the server gives the top level first
+		local function add_topic(t)
 			add((t.parent ~= 0 and "    " or "") .. t.name .. "  (" ..
 					t.threads .. " threads)", nil, function()
 				show_topic(t.id)
 			end)
+		end
+		for _, t in ipairs(r.topics) do
+			if t.parent == 0 then
+				add_topic(t)
+				for _, s in ipairs(r.topics) do
+					if s.parent == t.id then
+						add_topic(s)
+					end
+				end
+			end
 		end
 		add("Latest", GREY)
 		for _, t in ipairs(r.latest) do
@@ -332,6 +345,36 @@ show_report = function(thread_id, m, kind)
 		end)
 	end)
 	button(w, "Back", function() show_thread(thread_id) end)
+end
+
+-- The admin's new topic: a name, what it is about, and a parent -- none, or
+-- one of the top-level topics, so subtopics are one level deep
+show_new_topic = function(topics)
+	leave_home()
+	open_thread = nil
+	local w = new_page("New topic")
+	local name = edit(w, "Name (80 bytes at most)")
+	local about = edit(w, "What it is about (optional)")
+	local parents = {{id = 0, name = "none, a top-level topic"}}
+	for _, t in ipairs(topics) do
+		if t.parent == 0 then
+			parents[#parents + 1] = t
+		end
+	end
+	local at = 1
+	local pick
+	pick = button(w, "Under: " .. parents[at].name, function()
+		at = at % #parents + 1
+		pick:GetChild(0):SetText("Under: " .. parents[at].name)
+	end)
+	button(w, "Create", function()
+		req("new_topic", {name = name:GetText(), about = about:GetText(),
+				parent = parents[at].id}, function()
+			home()
+		end)
+	end)
+	button(w, "Back", home)
+	name:SetFocus(true)
 end
 
 -- The admin's queue: open reports (hide or dismiss) and appeals (restore

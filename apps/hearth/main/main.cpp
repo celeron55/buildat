@@ -1051,8 +1051,14 @@ struct Module: public interface::Module
 			if(!about.empty())
 				need(text_ok(about, 400, false, "the description"));
 			const int64_t parent = jint(q, "parent");
-			if(parent != 0 && !topic(parent).is_object())
-				throw Exception("no such parent topic");
+			if(parent != 0){
+				const json::Value p = topic(parent);
+				if(!p.is_object())
+					throw Exception("no such parent topic");
+				// One level of subtopics: the pages show no deeper
+				if(p.get("parent").as_integer() != 0)
+					throw Exception("a subtopic cannot have subtopics");
+			}
 			Q i(m_db, "INSERT INTO topics(parent, name, about) VALUES(?, ?, ?)");
 			i.b(parent).b(topic_name).b(about).step();
 			log_i(MODULE, "%s added the topic %s", cs(name), cs(topic_name));

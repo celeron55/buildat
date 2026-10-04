@@ -3,7 +3,8 @@
 # cost: 1 min (a first run compiles the app, 2026-10-04)
 # covers: apps/hearth/** builtin/network/** 3rdparty/sqlite/CMakeLists.txt
 # [HEARTH_MVP] step 1, **the groundwork**:
-#   1. the admin (the setup code) adds a topic, starts a thread whose title
+#   1. the admin (the setup code) adds a topic and a subtopic (not a
+#      subtopic's subtopic), starts a thread whose title
 #      and message carry markup, replies and edits the reply; adds bob;
 #   2. bob replies, and may neither add a topic nor edit the admin's
 #      message, nor post a control character, nor say what answered it;
@@ -47,7 +48,8 @@ client(){ # name password log requests [env...]
 	local n=$1 pw=$2 log=$3 reqs=$4 ms=${MS:-8000}
 	shift 4
 	printf "${CMDS:-delay %s\\nquit\\n}" $ms > "$t/cmds_$n"
-	env BUILDAT_HEARTH_NAME=$n BUILDAT_HEARTH_PASSWORD=$pw \
+	# CREATE: an unknown name is made rather than refused; a known one logs in
+	env BUILDAT_HEARTH_NAME=$n BUILDAT_HEARTH_PASSWORD=$pw BUILDAT_HEARTH_CREATE=1 \
 		BUILDAT_HEARTH_CODE=$code BUILDAT_HEARTH_REQS="$reqs" "$@" \
 		timeout 90 bin/buildat -D "$t/cl_$n" -w 800x600 -l 3 -o sound_mute=1 \
 		-s 127.0.0.1:$P -c @"$t/cmds_$n" > "$log" 2>&1
@@ -61,7 +63,9 @@ client admin checkpass12 "$t/admin.log" '{"cmd":"new_topic","name":"Help","about
 {"cmd":"new_thread","topic":1,"title":"Lights <b>out</b>","body":"My <script>alert(1)</script> lamp\n\nsecond paragraph about shadows"}
 {"cmd":"reply","thread":1,"body":"Try pbr"}
 {"cmd":"edit","message":2,"body":"Try the pbr render mode"}
-{"cmd":"new_thread","topic":9,"title":"x","body":"y"}' \
+{"cmd":"new_thread","topic":9,"title":"x","body":"y"}
+{"cmd":"new_topic","name":"Lamps","parent":1}
+{"cmd":"new_topic","name":"Deeper","parent":2}' \
 	"BUILDAT_HEARTH_ADMIN=add bob bobpass1234"
 for i in 1001 1002 1003 1004; do
 	answer "$t/admin.log" $i | grep -q '"ok":true' ||
@@ -69,6 +73,10 @@ for i in 1001 1002 1003 1004; do
 done
 answer "$t/admin.log" 1005 | grep -q "no such topic" ||
 	fail "a thread in no topic: $(answer "$t/admin.log" 1005)"
+answer "$t/admin.log" 1006 | grep -q '"ok":true' ||
+	fail "a subtopic: $(answer "$t/admin.log" 1006)"
+answer "$t/admin.log" 1007 | grep -q "cannot have subtopics" ||
+	fail "a subtopic's subtopic: $(answer "$t/admin.log" 1007)"
 
 # 2. bob
 client bob bobpass1234 "$t/bob.log" '{"cmd":"reply","thread":1,"body":"bob was here"}

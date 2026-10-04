@@ -69,7 +69,9 @@ Taking part: the client
 The client's pages: the topics and the latest threads, a topic (its
 threads, and a new thread's title and first message), a thread (its
 messages, a reply, Follow, "This answered it", Report or Appeal),
-notifications, and for an admin the moderation queue. The client shows
+notifications, and for an admin the moderation queue and a new topic
+(a name, what it is about, and a parent: none, or a top-level topic --
+subtopics are one level deep). The client shows
 a message's source text; it does not draw the markup. A message's field
 is multi-line: Enter breaks the line, Ctrl+Enter sends.
 
@@ -81,7 +83,8 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
     topics, topic, thread  read; "thread" with after=<id> gives the
                            messages after it, 1000 a call
     search                 30 a minute per account
-    new_topic              the admin; name, about, parent
+    new_topic              the admin; name, about, parent (0, or a
+                           top-level topic)
     new_thread             anyone; topic, title, body, subject
     reply                  anyone; not in a hidden thread but the admin
     edit                   the message's author or the admin
@@ -103,9 +106,8 @@ an account that was notified. A notification is a reply in a followed
 thread (one follows what one started or wrote in), an @name mention, a
 message marked the answer, a hide, a restore or a refused appeal.
 
-The client has no page to add a topic, edit a message or search: those
-are requests only (a scripted client's, below), and search is the HTML
-face's.
+The client has no page to edit a message or search: those are requests
+only (a scripted client's, below), and search is the HTML face's.
 
 Limits
 ------
