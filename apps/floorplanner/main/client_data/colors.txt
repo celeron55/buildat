@@ -1,0 +1,77 @@
+# The colour picker's named colours: group|name|rrggbb, a line each.
+# The picker offers a group where it fits the field: wood and stone for a
+# wood's or a stone's own colour, stain for a stained finish, paint for
+# paint, grout for tile grout, and so on. A paint maker's range goes in
+# as more paint lines, e.g. "paint|Tikkurila F497 ...|rrggbb".
+# The values are approximate, for looks on the screen.
+wood|Spruce|e6cfa6
+wood|Birch|d8c3a0
+wood|Pine|dcb57f
+wood|Ash|d4bf98
+wood|Maple|e0c79f
+wood|Beech|d3a77a
+wood|Oak|c49a6c
+wood|Smoked oak|7a5a3f
+wood|Teak|a47441
+wood|Cherry|a0613f
+wood|Walnut|6b4a33
+wood|Mahogany|6e3524
+wood|Wenge|3e2c22
+wood|Weathered grey|8f877a
+stone|Carrara marble|e8e6e1
+stone|Limestone|d6ccb4
+stone|Travertine|d9c9a8
+stone|Sandstone|c9a57a
+stone|Grey granite|8d8b88
+stone|Red granite|9b5a4c
+stone|Black granite|2e2e30
+stone|Black marble|1f1f22
+stone|Slate|4f5357
+stone|Soapstone|6e726e
+stone|Basalt|45474a
+stone|Concrete|a3a29d
+stone|Terracotta|b5653f
+stone|Red brick|9c4a36
+stone|Vein white|f2f0ea
+stone|Vein gold|b89a5a
+stain|Clear|f4ead8
+stain|Light oak|d9b27c
+stain|Honey|c8913f
+stain|Teak|9a6230
+stain|Walnut|5e3d24
+stain|Ebony|2b221c
+stain|Grey wash|a09a90
+stain|White wash|ece6da
+paint|Pure white|f8f8f5
+paint|Warm white|f3efe4
+paint|Off-white|ece8dd
+paint|Light grey|d2d2cf
+paint|Greige|c2b8a8
+paint|Mid grey|9a9a98
+paint|Charcoal|3f4144
+paint|Black|1c1c1d
+metal|Steel|b8bcc0
+metal|Stainless|c9ccce
+metal|Aluminium|d0d2d4
+metal|Brass|c8a45a
+metal|Copper|b87350
+metal|Bronze|8c6a3e
+metal|Black iron|36383a
+glass|Clear|a8c8e0
+glass|Green edge|9cc8b0
+glass|Bronze tint|a08870
+glass|Grey tint|8a9096
+glass|Frosted|dde6ea
+tile|White glaze|f0f0ec
+tile|Ivory|ece4d0
+tile|Pale grey|cfd1d0
+tile|Sage|a9b59a
+tile|Ocean blue|4c7a94
+tile|Terracotta|b5653f
+tile|Black glaze|222324
+grout|White|efefea
+grout|Light grey|c4c4c0
+grout|Mid grey|9a9890
+grout|Dark grey|5e5e5c
+grout|Anthracite|3a3b3c
+grout|Beige|cbbfa8

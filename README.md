@@ -2,7 +2,7 @@
 
 Buildat
 =======
-A small engine for networked 3D games.
+A small engine for networked 3D apps.
 
 The server runs C++ modules compiled at runtime. The client runs a
 whitelisted subset of Urho3D's Lua API in a sandbox; scripts and data
@@ -14,11 +14,27 @@ streams an infinite world with the same modules.
 
 Further reading:
 
-* [doc/design.txt](doc/design.txt)
-* [doc/conventions.txt](doc/conventions.txt)
-* [doc/client_api.txt](doc/client_api.txt)
-* [doc/client_commands.txt](doc/client_commands.txt)
-* [doc/todo.txt](doc/todo.txt)
+* [doc/architecture.txt](doc/architecture.txt) -- what the engine is made of:
+  client, server, modules, extensions, the launch grid, the network, voxels
+* [doc/conventions.txt](doc/conventions.txt) -- coding style, naming, commit
+  messages, coordinates
+* [doc/client_api.txt](doc/client_api.txt) -- the Lua API an app's client
+  code and an extension see (out of date; a full pass is planned)
+* [doc/client_commands.txt](doc/client_commands.txt) -- driving the client from
+  a command file: keys, mouse, look, screenshot, the scan events
+* [doc/luanti_module.txt](doc/luanti_module.txt) -- builtin/luanti: a Luanti
+  app running inside buildat_server, and how it is checked
+* [doc/luanti_client.txt](doc/luanti_client.txt) -- extensions/luanti_client:
+  playing on a real Luanti server over its own protocol
+* [doc/aitta.txt](doc/aitta.txt) -- an app packed, signed, published to an
+  Aitta registry (apps/aitta) and installed
+* [doc/hearth.txt](doc/hearth.txt) -- apps/hearth, a forum: its HTML
+  face, the client's requests, its limits, its variables and its check
+* [doc/urho3d_fork.txt](doc/urho3d_fork.txt) -- what the bundled Urho3D
+  carries that upstream does not
+* [doc/developer_notes.txt](doc/developer_notes.txt) -- small things worth
+  knowing when working on the engine
+* [doc/whynot.txt](doc/whynot.txt) -- decisions against, and why
 
 Buildat Linux How-To
 ====================
@@ -28,12 +44,14 @@ Install dependencies
 
 	$ # A compiler and cmake, plus the X, sound and GL headers Urho3D needs
 	$ sudo apt-get install build-essential cmake \
-	        libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev
+	        libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev \
+	        libcurl4-openssl-dev
 	$ sudo dnf install gcc-c++ cmake \
-	        libX11-devel libXrandr-devel alsa-lib-devel mesa-libGL-devel
+	        libX11-devel libXrandr-devel alsa-lib-devel mesa-libGL-devel \
+	        libcurl-devel
 
 The server also needs a C++ compiler at run time, not just at build time: it
-compiles game modules as it loads them. It looks for `c++` in PATH.
+compiles app modules as it loads them. It looks for `c++` in PATH.
 
 Build
 -------
@@ -48,30 +66,84 @@ required for the module interface.
     $ cmake .. -DCMAKE_BUILD_TYPE=Debug
     $ make -j4
 
-The bundled Urho3D is built by a sub-build that uses every core regardless of
-the `-j` given here, which is where the `-j0 forced in submake` warning comes
-from.
-
 You can use -DBUILD_SERVER=false or -DBUILD_CLIENT=false if you don't need the
 server or the client, respectively.
 
+`-DPORTABLE=TRUE`, the default, keeps the cache and the user's own things
+beside the program, in `cache/` and `user/`. That is what development wants.
+`-DPORTABLE=FALSE` puts them where the platform says instead
+(`$XDG_DATA_HOME/buildat` and `$XDG_CACHE_HOME/buildat` on Linux,
+`%APPDATA%\buildat` and `%LOCALAPPDATA%\buildat\cache` on Windows,
+`~/Library/Application Support/buildat` and `~/Library/Caches/buildat` on
+macOS), which is what an installed copy wants. `-C` and `-D` override either.
+
 Optional: `-DURHO3D_LUAJIT=TRUE` builds the bundled LuaJIT instead of Lua.
 `URHO3D_HOME` still overrides the bundled tree if you need an external build.
+
+### The web client
+
+A server also serves a client for web browsers, on its own port: open
+`http://<server>:<port>/` and it connects back to the server it came from
+(see doc/plan/web_client_plan.md). It is built separately, with
+[emsdk](https://emscripten.org/docs/getting_started/downloads.html) 3.1.60:
+
+    $ ~/emsdk/emsdk install 3.1.60 && ~/emsdk/emsdk activate 3.1.60
+    $ util/build_web.sh
+
+It builds in `Build-web/` and writes `web/`, which the server serves from by
+default; `buildat_server -W <dir>` serves another. Behind an https reverse
+proxy the page connects over wss. The page takes more arguments after `?`
+in its address (`?-l 4` for a verbose log), but only `-l`, `-u` and `-o`:
+a link is anybody's to write. The server accepts a WebSocket only from its
+own page's origin.
 
 Play
 ----
 
     $ $wherever_buildat_is/Build/bin/buildat
 
-The launch menu: a local game, a server to connect to, or one of the
+The launch menu: a local app, a server to connect to, or one of the
 extensions that can be launched on their own -- a Luanti client, so far.
 Arrows or the mouse to pick, enter to go.
 
-Debug keys, in any game:
+Debug keys, in any app:
 
 * F8: draw debug geometry
 * F9: on-screen profiler, render and resource stats
-* F10: sandbox test extension
+* Ctrl+F12: sandbox test extension
+
+Engine settings
+---------------
+
+What the user sets once and every app honours: `render_scale` (3D viewports
+drawn at a fraction of the window size, with the UI left at native
+resolution), `vsync`, `max_fps`, `multisampling`, `sound_volume`,
+`sound_mute`, and `default_username`, the name an app offers when it asks for
+one. They live in `user/settings.json` beside the remembered
+window size; the launch grid's "Engine settings" tile edits them, or set
+them for one run with `-o`, which is not written back:
+
+    $ bin/buildat -o render_scale=0.5,vsync=0,sound_mute=1
+
+`user/` is where what the user made, chose or downloaded deliberately goes, as
+against `cache/`, which is what the program can recreate by itself. In the
+default portable build both sit in the buildat directory; `-D` and `-C` move
+them, and `-DPORTABLE=FALSE` puts them where the platform says (see Build).
+
+See [doc/client_api.txt](doc/client_api.txt) for what an app does to honour
+`render_scale`, and what the client does not get to decide.
+
+Saves
+-----
+
+An app can persist its world. `apps/digger` does: it opens or creates the
+save `user/apps/digger/saves/world`, and what you dig is there next time.
+Delete that directory to start over. Every other app generates and forgets,
+which is what they did before saves existed -- persistence is opt-in, and an
+arena game whose world is gone when the match ends should not have one.
+
+Behind it is a key-to-blob store per save, in one vendored SQLite database,
+namespaced per module. See `builtin/storage/api.h`.
 
 Server and client
 -----------------
@@ -81,12 +153,40 @@ For development or hosting, run the two binaries separately:
 Terminal 1:
 
     $ $wherever_buildat_is/Build
-    $ bin/buildat_server -m ../games/minigame
+    $ bin/buildat_server -m ../apps/minigame
 
 Terminal 2:
 
     $ $wherever_buildat_is/Build
     $ bin/buildat -s localhost
+
+A game started from the launcher listens on 127.0.0.1 only, and the
+launcher's client is its owner by a token the two share; apps/vanilla's
+pause menu has "Open to LAN", which opens it to the network. A dedicated
+server announces itself to the LAN with `--lan-announce NAME` (or
+`BUILDAT_LAN_ANNOUNCE`), and the launcher's connect screen lists what it
+hears under "On this network". `--compile-only` compiles and loads the
+app's modules and exits, 1 naming the module that failed: for a run whose
+clock a first compile would eat.
+
+On Linux the server confines itself before it loads an app (Landlock and
+seccomp): the app writes `<user>/apps/<app>`, its own `<user>/shared/<app>`
+and its own cache, reads the install and the other apps' shared
+directories, and reaches nothing else of yours. It binds TCP only on its
+own port and connects only to ports 80, 443, 465, 587, 29500 and 29595,
+plus what `--connect-ports`, `BUILDAT_CONNECT_PORTS` or a line in
+`<user>/connect_ports` adds ("any", or "8080,30000"): the
+services on 127.0.0.1 are other programs of yours. Where the kernel cannot
+make the box the server refuses to start; `--unconfined` (or
+`BUILDAT_UNCONFINED=1`) runs it without one. `apps/box_test/check.sh` is
+the check.
+
+On Windows (8 or newer) the server restarts itself inside a per-app
+AppContainer with a job object, with the same directories. A local
+client joins it by a named pipe, since an AppContainer cannot reach
+loopback; other players connect over the network as before. A server
+started with no desktop, from a service or an SSH login, cannot be boxed
+yet and says so. `BUILDAT_WINDOWS_BOX=0` turns the box off.
 
 Client command sequence (CI / visual checks)
 --------------------------------------------
@@ -105,9 +205,15 @@ Modify something and see stuff happen
 Edit something and then restart the client (CTRL+C in terminal 2):
 
     $ cd $wherever_buildat_is
-    $ vim games/minigame/main/client_lua/init.lua
-    $ vim games/minigame/main/main.cpp
+    $ vim apps/minigame/main/client_lua/init.lua
+    $ vim apps/minigame/main/main.cpp
     $ vim builtin/network/network.cpp
+
+The server can do that part for you while you develop: `-R` makes it restart
+a module when its source changes, and `-w` pushes an edited client script to
+the clients that have it. Both are off by default -- a restart throws away
+whatever the module was holding, and neither belongs in a run whose output
+is being measured.
 
 Buildat Windows How-To
 ======================
@@ -122,5 +228,5 @@ Use Mingw-w64 in an MSYS environment. Make sure to use a pthreads version of Min
 
 Running the server:
 
-    $ bin/buildat_server.exe -m ../games/minigame -c "c++ -Lbin -lbuildat_server_core"
+    $ bin/buildat_server.exe -m ../apps/minigame -c "c++ -Lbin -lbuildat_server_core"
 
