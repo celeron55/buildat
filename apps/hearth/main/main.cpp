@@ -332,6 +332,10 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
+		// One user's clients at once, as in floorplanner
+		accounts::access(m_server, [&](accounts::Interface *i){
+			i->set_multiple_logins(true);
+		});
 		const interface::ServerConfig &c = m_server->get_config();
 		const ss_ dir = c.get<ss_>("user_path")+"/apps/"+m_server->get_app_id();
 		interface::fs::create_directories(dir);
