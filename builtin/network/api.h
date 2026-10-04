@@ -60,10 +60,15 @@ namespace network
 		ss_ query;        // what follows "?", as it came
 		ss_ body;         // a POST's, at most 64 KiB
 		ss_ address;
+		// The Origin header, as it came: a browser's page says where it is
+		// from on every cross-origin request; "" from anything else
+		ss_ origin;
+		ss_ host;  // the Host header: what the request was sent to
 		HttpRequest(PeerInfo::Id peer, const ss_ &method, const ss_ &path,
-				const ss_ &query, const ss_ &body, const ss_ &address):
+				const ss_ &query, const ss_ &body, const ss_ &address,
+				const ss_ &origin = "", const ss_ &host = ""):
 			peer(peer), method(method), path(path), query(query), body(body),
-			address(address){}
+			address(address), origin(origin), host(host){}
 	};
 
 	// What a server does about a peer that will not read what it is sent.

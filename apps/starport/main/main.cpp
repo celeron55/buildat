@@ -1822,6 +1822,15 @@ struct Module: public interface::Module
 		json::Value result;
 		ss_ error;
 		try {
+			// [WEB_ID_TRUST]: a page of another origin -- a web client a
+			// game server served, which could keep the password -- gets
+			// no ID call but authorize_info: an ID logs in on this
+			// Starport's own page. A native client sends no Origin.
+			const size_t sep = r.origin.find("://");
+			if(!r.origin.empty() && what != "authorize_info" &&
+					(sep == ss_::npos || r.origin.substr(sep + 3) != r.host))
+				throw Exception("a web page logs in to a Starport ID on "
+						"the Starport's own page");
 			result = id_call(r, what, b);
 		} catch(std::exception &e){
 			error = e.what();

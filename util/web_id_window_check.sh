@@ -9,8 +9,10 @@
 # your Starport ID", Open, and in the Starport's /authorize window logs in,
 # allows, names itself and allows; the token comes back to Hearth's page
 # by postMessage and the join is by it. Also by the API: /authorize is
-# never framed, the API answers any origin, and a token for an origin
-# that is neither the listing's nor in web_clients is refused.
+# never framed, the API answers any origin, a token for an origin that is
+# neither the listing's nor in web_clients is refused, and so is a password
+# login from any page but the Starport's own (an Origin header not its
+# Host).
 # Needs web/ from util/build_web.sh.
 #   util/web_id_window_check.sh [steps.json]   (default: the check's own)
 set -u
@@ -69,6 +71,16 @@ r = call("token", session=s, listing=sys.argv[2], web=True,
         origin="https://evil.example", name="x")
 assert not r["ok"] and "sends no tokens" in r["error"], r
 print("ok: a token for another origin is refused")
+def from_page(origin, w, **k):
+    q = urllib.request.Request(B + w, json.dumps(k).encode(),
+            {"Origin": origin})
+    return json.loads(urllib.request.urlopen(q).read())
+r = from_page(own, "login", name="webid", password="secret1")
+assert not r["ok"] and "own page" in r["error"], r
+r = from_page("http://127.0.0.1:" + sys.argv[1], "login", name="webid",
+        password="secret1")
+assert r["ok"], r
+print("ok: a password login from a game server's page is refused")
 PY
 
 # The first admin, natively, so the web join is an ID's ordinary one

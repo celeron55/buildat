@@ -210,8 +210,11 @@ struct Module: public interface::Module
 	void respond(const network::HttpRequest &r, int status,
 			const ss_ &type, const ss_ &body)
 	{
+		// Any page may read it: no cookies, and the web client fetches the
+		// list, .sig and .zip from its own origin ([WEB_ID_TRUST] (c))
 		network::access(m_server, [&](network::Interface *iface){
-			iface->http_respond(r.peer, status, type, body);
+			iface->http_respond(r.peer, status, type, body,
+					"Access-Control-Allow-Origin: *\r\n");
 		});
 	}
 	void respond(const network::HttpRequest &r, const json::Value &v)

@@ -5,6 +5,33 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
+// [WEB_ID_TRUST] (c): l_http_get's on the web, a job in
+// Module.buildatHttp that l_http_poll reads back
+EM_JS(void, web_fetch, (int id, const char *url_p, int post,
+		const char *body, int len), {
+	var jobs = Module['buildatHttp'] = Module['buildatHttp'] || {};
+	var url = UTF8ToString(url_p);
+	var init = {redirect: 'manual'};
+	if(post){
+		init.method = 'POST';
+		init.headers = {'Content-Type': 'text/plain'};
+		init.body = HEAPU8.slice(body, body + len);
+	}
+	var text = function(t){ return new TextEncoder().encode(t); };
+	jobs[id] = null;
+	fetch(url, init).then(function(r){
+		if(r.type === 'opaqueredirect'){
+			jobs[id] = {ok: false, data: text('redirected')};
+			return;
+		}
+		return r.arrayBuffer().then(function(b){
+			jobs[id] = r.ok ? {ok: true, data: new Uint8Array(b)} :
+				{ok: false, data: text('HTTP ' + r.status)};
+		});
+	}).catch(function(e){
+		jobs[id] = {ok: false, data: text(String(e && e.message || e))};
+	});
+});
 #endif
 #include "core/log.h"
 #include "core/json.h"
@@ -4158,6 +4185,17 @@ struct CApp: public App, public magic::Application
 		// A second argument, a body, makes it a POST of JSON ([STARPORT])
 		const bool post = lua_isstring(L, 2);
 		const ss_ body = post ? lua_bindings::lua_tocppstring(L, 2) : ss_();
+#ifdef __EMSCRIPTEN__
+		// [WEB_ID_TRUST] (c): the browser's fetch(), under its rules -- the
+		// other origin answers with CORS or the fetch fails. text/plain so
+		// a POST is a simple request (no preflight; Starport reads the
+		// body whatever its type). A redirect is not followed and says
+		// no target: the browser does not tell it.
+		const int id = self->m_http_next_id++;
+		web_fetch(id, url.c_str(), post ? 1 : 0, body.data(), (int)body.size());
+		lua_pushinteger(L, id);
+		return 1;
+#else
 		sp_<HttpJob> job(new HttpJob());
 		const int id = self->m_http_next_id++;
 		self->m_http_jobs[id] = job;
@@ -4177,6 +4215,7 @@ struct CApp: public App, public magic::Application
 		});
 		lua_pushinteger(L, id);
 		return 1;
+#endif
 	}
 
 	static int l_http_poll(lua_State *L)
@@ -4185,6 +4224,37 @@ struct CApp: public App, public magic::Application
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 		const int id = (int)luaL_checkinteger(L, 1);
+#ifdef __EMSCRIPTEN__
+		// -1 no such job, -2 running, else the length; ok in the sign of
+		// a second call's answer
+		const int len = EM_ASM_INT({
+			var jobs = Module['buildatHttp'] || {};
+			if(!(($0) in jobs)) return -1;
+			var j = jobs[$0];
+			return j ? j.data.length : -2;
+		}, id);
+		if(len == -2){
+			lua_pushnil(L);
+			return 1;
+		}
+		if(len == -1){
+			lua_pushboolean(L, false);
+			lua_pushstring(L, "no such fetch");
+			return 2;
+		}
+		ss_ data(len, '\0');
+		const int ok = EM_ASM_INT({
+			var jobs = Module['buildatHttp'];
+			var j = jobs[$0];
+			delete jobs[$0];
+			HEAPU8.set(j.data, $1);
+			return j.ok ? 1 : 0;
+		}, id, &data[0]);
+		(void)self;
+		lua_pushboolean(L, ok);
+		lua_pushlstring(L, data.data(), data.size());
+		return 2;
+#else
 		auto it = self->m_http_jobs.find(id);
 		if(it == self->m_http_jobs.end()){
 			lua_pushboolean(L, false);
@@ -4204,6 +4274,7 @@ struct CApp: public App, public magic::Application
 			return 2;
 		lua_pushlstring(L, job->redirect.c_str(), job->redirect.size());
 		return 3;
+#endif
 	}
 
 	static int l_get_env(lua_State *L)

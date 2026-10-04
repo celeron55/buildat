@@ -1001,7 +1001,7 @@ struct Module: public interface::Module, public network::Interface
 			m_server->emit_event("network:http_request", new HttpRequest(
 					peer.id, method, target, query, rest.substr(0, body_len),
 					address.empty() ? peer.socket->get_remote_address() :
-					address));
+					address, headers["origin"], headers["host"]));
 			return true;
 		}
 		if(method != "GET"){

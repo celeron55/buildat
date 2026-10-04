@@ -131,39 +131,6 @@ static ss_ unbase64url(const ss_ &in)
 	return out;
 }
 
-// **A relay to a Starport** ([STARPORT] 10c): the web client has no HTTPS of
-// its own, so its server carries its TLS connection to a Starport, as bytes
-// it cannot read, to the Starports this server announces to only (anything
-// else would make every server an open proxy)
-struct Relay
-{
-	network::PeerInfo::Id peer = 0;
-	std::unique_ptr<interface::TCPSocket> sock;
-	std::thread thread;
-	std::mutex mutex;
-	ss_ inbox;    // from the Starport, for the client
-	ss_ pending;  // from the client, before the connection is up
-	bool connected = false;
-	bool closed = false;
-	bool stop = false;
-	ss_ why;
-	size_t total = 0;
-	int64_t last_us = 0;
-	uint32_t gen = 0;  // the client's connection id, echoed on data/closed
-};
-
-// An 8-hex-char prefix the relay tags data/closed with, so a client ignores
-// what belongs to a connection it has already finished (the relay is one per
-// peer and reused back to back, with no other per-connection identity).
-static ss_ relay_gen_hex(uint32_t g)
-{
-	char b[9];
-	snprintf(b, sizeof b, "%08x", g);
-	return ss_(b, 8);
-}
-static const size_t RELAY_MAX_BYTES = 4 * 1024 * 1024;
-static const int64_t RELAY_IDLE_US = 30 * 1000000LL;
-
 struct Module: public interface::Module, public Interface
 {
 	interface::Server *m_server;
@@ -196,9 +163,6 @@ struct Module: public interface::Module, public Interface
 
 	~Module()
 	{
-		// A thread left joinable ends the process
-		while(!m_relays.empty())
-			end_relay(m_relays.begin()->first);
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
 			m_stop = true;
@@ -237,9 +201,7 @@ struct Module: public interface::Module, public Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("network:http_request"));
-		m_server->sub_event(this, Event::t("network:client_disconnected"));
-		for(const char *n : {"starport:relay_open", "starport:relay_send",
-				"starport:relay_close", "starport:config_get",
+		for(const char *n : {"starport:config_get",
 				"starport:config_set", "starport:where_get"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+n));
@@ -251,14 +213,6 @@ struct Module: public interface::Module, public Interface
 		EVENT_VOIDN("core:tick", on_tick)
 		EVENT_TYPEN("network:http_request", on_http_request,
 				network::HttpRequest)
-		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
-				network::OldClient)
-		EVENT_TYPEN("network:packet_received/starport:relay_open",
-				on_relay_open, network::Packet)
-		EVENT_TYPEN("network:packet_received/starport:relay_send",
-				on_relay_send, network::Packet)
-		EVENT_TYPEN("network:packet_received/starport:relay_close",
-				on_relay_close, network::Packet)
 		EVENT_TYPEN("network:packet_received/starport:config_get",
 				on_config_get, network::Packet)
 		EVENT_TYPEN("network:packet_received/starport:config_set",
@@ -408,11 +362,7 @@ struct Module: public interface::Module, public Interface
 	// The first announce waits for the first tick: every module has
 	// started by then, builtin/accounts and its reported bans (10d) too
 	bool m_start_announcing = false;
-	// -- The relay (10c)
-
-	sm_<network::PeerInfo::Id, std::unique_ptr<Relay>> m_relays;
-
-	void relay_send_packet(network::PeerInfo::Id peer, const ss_ &name,
+	void send_packet(network::PeerInfo::Id peer, const ss_ &name,
 			const ss_ &data)
 	{
 		network::access(m_server, [&](network::Interface *iface){
@@ -420,165 +370,8 @@ struct Module: public interface::Module, public Interface
 		});
 	}
 
-	void end_relay(network::PeerInfo::Id peer)
-	{
-		auto it = m_relays.find(peer);
-		if(it == m_relays.end())
-			return;
-		Relay *r = it->second.get();
-		{
-			std::lock_guard<std::mutex> lock(r->mutex);
-			r->stop = true;
-		}
-		if(r->thread.joinable())
-			r->thread.join();
-		m_relays.erase(it);
-	}
-
-	void on_client_disconnected(const network::OldClient &c)
-	{
-		end_relay(c.info.id);
-	}
-
-	void on_relay_open(const network::Packet &p)
-	{
-		end_relay(p.sender);
-		if(p.data.size() < 8)
-			return;
-		const uint32_t gen = (uint32_t)strtoul(p.data.substr(0, 8).c_str(),
-				nullptr, 16);
-		const ss_ url = p.data.substr(8);
-		bool allowed = false;
-		const json::Value c = config();
-		if(is_on(c))
-			for(const ss_ &u : urls_of(c))
-				allowed |= u == url;
-		if(!allowed){
-			relay_send_packet(p.sender, "starport:relay_closed",
-					relay_gen_hex(gen) + "not a Starport this server is on");
-			return;
-		}
-		const size_t s = url.find("://");
-		const ss_ scheme = url.substr(0, s);
-		ss_ hostport = url.substr(s + 3);
-		hostport = hostport.substr(0, hostport.find('/'));
-		ss_ host = hostport, port = scheme == "https" ? "443" : "80";
-		const size_t colon = hostport.rfind(':');
-		if(colon != ss_::npos && hostport.find(']') == ss_::npos){
-			host = hostport.substr(0, colon);
-			port = hostport.substr(colon + 1);
-		}
-		std::unique_ptr<Relay> r(new Relay());
-		r->peer = p.sender;
-		r->gen = gen;
-		r->last_us = interface::os::time_us();
-		Relay *rp = r.get();
-		r->thread = std::thread([rp, host, port](){
-			std::unique_ptr<interface::TCPSocket> sock(
-					interface::createTCPSocket());
-			if(!sock->connect_fd(host, port)){
-				std::lock_guard<std::mutex> lock(rp->mutex);
-				rp->closed = true;
-				rp->why = "could not connect to "+host+":"+port;
-				return;
-			}
-			{
-				std::lock_guard<std::mutex> lock(rp->mutex);
-				rp->sock = std::move(sock);
-				rp->connected = true;
-				if(!rp->pending.empty())
-					rp->sock->send_fd(rp->pending);
-				rp->pending.clear();
-			}
-			for(;;){
-				{
-					std::lock_guard<std::mutex> lock(rp->mutex);
-					if(rp->stop)
-						break;
-				}
-				if(!rp->sock->wait_data(100000))
-					continue;
-				char buf[16384];
-				const int n = (int)recv(rp->sock->fd(), buf, sizeof buf, 0);
-				std::lock_guard<std::mutex> lock(rp->mutex);
-				if(n <= 0){
-					rp->closed = true;
-					rp->why = "closed by the Starport";
-					break;
-				}
-				rp->inbox.append(buf, n);
-				rp->total += n;
-				if(rp->total > RELAY_MAX_BYTES){
-					rp->closed = true;
-					rp->why = "too much";
-					break;
-				}
-			}
-			std::lock_guard<std::mutex> lock(rp->mutex);
-			if(rp->sock)
-				rp->sock->close_fd();
-		});
-		m_relays[p.sender] = std::move(r);
-	}
-
-	void on_relay_send(const network::Packet &p)
-	{
-		auto it = m_relays.find(p.sender);
-		if(it == m_relays.end())
-			return;
-		Relay *r = it->second.get();
-		std::lock_guard<std::mutex> lock(r->mutex);
-		r->total += p.data.size();
-		r->last_us = interface::os::time_us();
-		if(r->connected && r->sock)
-			r->sock->send_fd(p.data);
-		else if(r->pending.size() + p.data.size() <= RELAY_MAX_BYTES)
-			r->pending += p.data;
-		// simplified: past the relay's ceiling before the Starport answers,
-		// what more a client sends is dropped rather than kept
-		// ([SECURITY_RUN_1]); the relay ends on the receive side's count
-	}
-
-	void on_relay_close(const network::Packet &p)
-	{
-		end_relay(p.sender);
-	}
-
-	void flush_relays()
-	{
-		sv_<network::PeerInfo::Id> done;
-		const int64_t now = interface::os::time_us();
-		for(auto &pair : m_relays){
-			Relay *r = pair.second.get();
-			ss_ data, why;
-			bool closed;
-			{
-				std::lock_guard<std::mutex> lock(r->mutex);
-				data.swap(r->inbox);
-				closed = r->closed;
-				why = r->why;
-				if(!data.empty())
-					r->last_us = now;
-				if(!closed && now - r->last_us > RELAY_IDLE_US){
-					closed = true;
-					why = "idle";
-				}
-			}
-			const ss_ g = relay_gen_hex(r->gen);
-			if(!data.empty())
-				relay_send_packet(r->peer, "starport:relay_data", g + data);
-			if(closed){
-				relay_send_packet(r->peer, "starport:relay_closed", g + why);
-				done.push_back(pair.first);
-			}
-		}
-		for(auto peer : done)
-			end_relay(peer);
-	}
-
 	void on_tick()
 	{
-		flush_relays();
 		const int64_t now = interface::os::time_us();
 		if(!m_dir.empty() && now >= m_next_read_us){
 			m_next_read_us = now + 2000000;
@@ -1004,7 +797,7 @@ struct Module: public interface::Module, public Interface
 			rows.append(r);
 		}
 		out.set("starports", rows);
-		relay_send_packet(peer, "starport:config", out.stringify());
+		send_packet(peer, "starport:config", out.stringify());
 	}
 
 	// Handed to the announce thread; see handle_config_request()
@@ -1027,7 +820,7 @@ struct Module: public interface::Module, public Interface
 				rows.append(r);
 			}
 		}
-		relay_send_packet(p.sender, "starport:where", rows.stringify());
+		send_packet(p.sender, "starport:where", rows.stringify());
 	}
 
 	void on_config_get(const network::Packet &p)

@@ -200,9 +200,24 @@ local function managed()
 	return read_json(managed_path()) or {}
 end
 
--- What is in effect: the user's settings, under the managed file's
+-- [WEB_ID_TRUST]: where the server says it is listed (set_web_starports)
+local web_starports = {}
+
+-- What is in effect: the user's settings, under the managed file's, and
+-- on the web the Starports the server is listed on
 local function effective()
 	local s, m = load_state(), managed()
+	local starports = normalize_urls(type(m.starports) == "table" and
+			m.starports or s.starports)
+	for _, r in ipairs(web_starports) do
+		local have = false
+		for _, u in ipairs(starports) do
+			have = have or u == normalize_url(r.url)
+		end
+		if not have then
+			starports[#starports + 1] = normalize_url(r.url)
+		end
+	end
 	local filters = s.filters
 	if type(m.filters) == "table" then
 		-- What the file leaves out is the default's, not the user's
@@ -212,8 +227,7 @@ local function effective()
 		end
 	end
 	return {
-		starports = normalize_urls(type(m.starports) == "table" and
-				m.starports or s.starports),
+		starports = starports,
 		filters = filters,
 		direct_connect = (m.direct_connect == nil) and s.direct_connect or
 				m.direct_connect == true,
@@ -1507,7 +1521,6 @@ end
 -- the token goes to this page's origin only if it is the listed server's
 -- (or one of the Starport's web_clients). The window opens at a click of
 -- this dialog's: the browser blocks one opened otherwise.
-local web_starports = {}
 -- set_web_starports({{url =, listing =}, ...}): where the server says it is
 -- listed. Taken on the web only: there the server's code is the client
 -- anyway; natively the user's own Starports are the ones asked.
