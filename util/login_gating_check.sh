@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~120s (2026-10-04)
+# cost: ~180s (2026-10-04)
 # covers: builtin/accounts/accounts.cpp on_login's non-local wiring and is_local
 # [SECURITY_RUN_2]: the login rate limit end-to-end over a real network, the
 # residual that accounts.cpp's rate_limit_self_check() leaves (the self-check
@@ -18,7 +18,11 @@
 #   4. the other counted fail() paths of a new account: a wrong setup code,
 #      and an invite code that does not exist;
 #   5. the same server without a token takes the loopback client as local
-#      (no password, no code): the contrast that gives 3 its teeth.
+#      (no password, no code): the contrast that gives 3 its teeth;
+#   6. a kept login logs in by its token, and an admin's password reset
+#      ends it ("The saved login has ended");
+#   7. with TOTP on (the secret put in the store), a wrong code is refused
+#      and counted, and the right one joins.
 # That a correct password is refused while the wait is non-zero (on_login
 # checks the wait before the password) is covered by accounts.cpp's
 # rate_limit_self_check(); it is not driven here because catching a client
@@ -148,5 +152,68 @@ c=$(join l1 dave "" 0 "")
 echo "$c" | grep -qF "Joined as dave" ||
 	fail "without a token a loopback client was not local
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+kill $srv; wait $srv 2>/dev/null
 
-echo "PASS: wrong passwords counted and locked; the owner token gates is_local; wrong setup and invite codes refused and counted"
+# 6. A kept login ([ACC_KEEP]) ends with the password: the client that kept
+# it is told so, and the token is gone
+app=vanilla jp=BUILDAT_JOIN
+port=29597
+start keep $port
+srv_log=$t/keep.log
+c=$(BUILDAT_JOIN_KEEP=1 join k1 erin rightpass123 1 "$code")
+echo "$c" | grep -qF "Joined as erin" || fail "the kept login's account
+$(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+# rejoin <userdir>: the stored token only, as a client with no name set
+rejoin(){
+	timeout 40 bin/buildat -s "127.0.0.1:$port" -D "$t/$1" -w 640x480 -u 1 \
+		-l 3 -o sound_mute=1 -c @"$t/seq" > "$t/$1.re.log" 2>&1
+	nolog "$t/$1.re.log"
+}
+c=$(rejoin k1)
+echo "$c" | grep -qF "Joined as erin" || fail "the kept login did not log in
+$(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+c=$(BUILDAT_JOIN_ADMIN="password erin otherpass123" join k2 erin rightpass123 0 "")
+nolog "$srv_log" | grep -q "reset the password of erin" || fail "the reset
+$(echo "$c" | grep -iE 'login|joined|refused|admin' | tail -5)"
+c=$(rejoin k1)
+echo "$c" | grep -qF 'Login refused: The saved login has ended: log in again' ||
+	fail "a kept login outlived the password
+$(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+kill $srv; wait $srv 2>/dev/null
+
+# 7. TOTP: a wrong code is refused and counted, the right one joins. The
+# secret goes into the store directly (turning it on is the UI's).
+db=$(find "$t/keep" -path '*_server*' -name save.sqlite | head -1)
+[ -n "$db" ] || fail "no _server save.sqlite under $t/keep"
+python3 - "$db" <<'PY' || fail "the TOTP secret"
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.execute("INSERT INTO store(store, key, value) VALUES('accounts', 'totp/erin', ?)",
+        (b"12345678901234567890",))
+c.commit()
+PY
+totp(){ # the code of the RFC 6238 test secret now, or one that is not
+	python3 - "$1" <<'PY'
+import hmac, hashlib, struct, sys, time
+h = hmac.new(b"12345678901234567890", struct.pack(">Q", int(time.time()) // 30),
+        hashlib.sha1).digest()
+o = h[19] & 15
+v = (struct.unpack(">I", h[o:o + 4])[0] & 0x7fffffff) % 1000000
+print("%06d" % ((v + int(sys.argv[1])) % 1000000))
+PY
+}
+port=$((port+1))
+start keep $port # the same save, the secret in it
+srv_log=$t/keep.log
+c=$(BUILDAT_JOIN_TOTP=$(totp 500000) join o1 erin otherpass123 0 "")
+echo "$c" | grep -qF 'Login refused: TOTP: wrong code' ||
+	fail "a wrong TOTP code was not refused
+$(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+nolog "$srv_log" | grep -q "failed: TOTP: wrong code" ||
+	fail "the server did not count the wrong TOTP code"
+sleep 2 # the counted failure's wait
+c=$(BUILDAT_JOIN_TOTP=$(totp 0) join o2 erin otherpass123 0 "")
+echo "$c" | grep -qF "Joined as erin" || fail "the right TOTP code did not join
+$(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+
+echo "PASS: wrong passwords counted and locked; the owner token gates is_local; wrong setup and invite codes refused and counted; a kept login ends with the password; a wrong TOTP code refused and counted"
