@@ -144,6 +144,12 @@ namespace interface
 		// applies to atlases created after it.
 		virtual void set_surface_maps(bool enabled) = 0;
 
+		// Every segment of every atlas as a JSON array -- atlas id, pixel
+		// rect in the atlas image, resource name, select_segment -- for
+		// reading a dumped atlas back to the texture that owns a tile.
+		// dump_meshes() writes it beside the dump.
+		virtual ss_ describe_segments() = 0;
+
 		virtual void update() = 0;
 	};
 

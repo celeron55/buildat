@@ -1,0 +1,13 @@
+Luanti's base texture pack, copied unchanged from
+https://github.com/luanti-org/luanti (textures/base/pack), so that a game's
+HUD -- heart.png, bubble.png, blank.png and the rest -- draws on a fresh
+install without the user copying anything ([FIRST_RUN]).
+
+License of Luanti textures and sounds
+---------------------------------------
+
+Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0)
+http://creativecommons.org/licenses/by-sa/3.0/
+
+textures/base/pack/refresh.png is under the Apache 2 license
+https://www.apache.org/licenses/LICENSE-2.0.html

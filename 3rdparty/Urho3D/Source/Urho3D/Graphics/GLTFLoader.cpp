@@ -129,6 +129,29 @@ bool ReadFileBytes(Deserializer& source, PODVector<unsigned char>& bytes)
     return source.Read(&bytes[0], size) == size;
 }
 
+// A model comes over the network from an untrusted server; it must not
+// reach the filesystem. tinygltf's default callbacks resolve a buffer or
+// image uri as a path -- ExpandFilePath runs it through wordexp(3), which
+// executes $(...) and backticks even quoted -- so these refuse every
+// external file. Only embedded buffers (data: uris, or the glb binary
+// chunk) and embedded images load; a uri that is a path fails the load.
+static bool GLTFNoFileExists(const std::string&, void*) { return false; }
+static std::string GLTFNoExpand(const std::string& p, void*) { return p; }
+static bool GLTFNoReadFile(std::vector<unsigned char>*, std::string* err,
+    const std::string&, void*)
+{
+    if (err)
+        *err = "external files are not allowed in a loaded glTF";
+    return false;
+}
+static bool GLTFNoWriteFile(std::string* err, const std::string&,
+    const std::vector<unsigned char>&, void*)
+{
+    if (err)
+        *err = "writing is not allowed";
+    return false;
+}
+
 bool ParseTinyGLTF(Deserializer& source, tg::Model& model)
 {
     PODVector<unsigned char> bytes;
@@ -136,6 +159,9 @@ bool ParseTinyGLTF(Deserializer& source, tg::Model& model)
         return false;
 
     tg::TinyGLTF loader;
+    tg::FsCallbacks fs = { &GLTFNoFileExists, &GLTFNoExpand, &GLTFNoReadFile,
+        &GLTFNoWriteFile, nullptr };
+    loader.SetFsCallbacks(fs);
     std::string err;
     std::string warn;
     String baseDir = GetPath(source.GetName());
