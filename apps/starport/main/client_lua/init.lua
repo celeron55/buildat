@@ -181,6 +181,12 @@ local function page_element()
 end
 
 local function open(title, draw, back)
+	-- [STARPORT_ACCOUNTS_TAB]: a Starport-native page takes over the view, so
+	-- drop any accounts-module page first. Otherwise its M.page is left
+	-- pointing at the element page_element() is about to remove, and the next
+	-- open of the Accounts tab aborts in accounts' close_page on the stale
+	-- handle -- the tab's button lights up but the view stays this page's.
+	accounts.close_page()
 	local w = page_element()
 	redraw = draw
 	if back or narrow then

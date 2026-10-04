@@ -658,7 +658,10 @@ local chat_width = 100
 function M.close_page()
 	close_popup()
 	if M.page then
-		M.page:Remove()
+		-- An app may have removed the element already (its own page_element
+		-- replaced it); a raw handle does not keep it alive, so Remove on the
+		-- freed one must not abort the caller
+		pcall(function() M.page:Remove() end)
 		M.page = nil
 	end
 	page_kind = nil
