@@ -53,7 +53,7 @@ echo "$out" | grep -q "not bound" || fail "the unbound key's refusal: $out"
 
 # The admin binds tester to the key
 printf 'delay 8000\nquit\n' > "$t/cmds"
-BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
+BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_CODE=$code \
 BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}" \
 	timeout 90 bin/buildat -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
@@ -87,7 +87,7 @@ zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.2"
 	fail "another author's manifest was not refused"
 
 # 4. Delisted
-BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
+BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_REQS='{"cmd":"delist","release":"tester/demo/1.0"}' \
 	timeout 90 bin/buildat -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
 	-c @"$t/cmds" > "$t/cl2.log" 2>&1

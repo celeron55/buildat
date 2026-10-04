@@ -59,7 +59,7 @@ BUILDAT_CONNECT_PORTS=$SP Build/bin/buildat_server -m apps/floorplanner -D $tmp/
 for _ in $(seq 120); do grep -q "verified ok" $tmp/sp.log && break; sleep 1; done
 read -r _ _ id _ _ ccode < <(grep -v "^#" $tmp/an/apps/floorplanner/starport_claim.txt)
 printf 'delay 6000\nquit\n' > $tmp/cmds.txt
-BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
+BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
@@ -82,7 +82,7 @@ delay 4000
 screenshot $tmp/report.png
 quit
 C
-BUILDAT_FP_NAME=op BUILDAT_FP_PASSWORD=pw123456 BUILDAT_FP_CODE=$fpcode \
+BUILDAT_FP_CREATE=1 BUILDAT_FP_NAME=op BUILDAT_FP_PASSWORD=pw123456 BUILDAT_FP_CODE=$fpcode \
 	timeout 90 Build/bin/buildat -D $tmp/fc -w 800x500 -l 3 -s "$2" -c @$tmp/fcmds.txt 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > $tmp/fc.log
 grep -a "report here" $tmp/fc.log | sed 's/.*extensio: //'

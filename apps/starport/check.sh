@@ -96,7 +96,7 @@ echo "ok: report receipt $receipt"
 
 # The admin's client: claim, then reject the report
 printf 'delay 8000\nquit\n' > "$tmp/cmds.txt"
-BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
+BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}
@@ -205,14 +205,14 @@ print(json.dumps({"listing": st["id"]}))
 PY
 	fail "announcing a ban"
 printf 'delay 8000\nquit\n' > "$tmp/cmds3.txt"
-BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
+BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
 BUILDAT_SP_REQS='{"cmd":"blocklist_create","name":"Check list"}' \
 	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl3.log" 2>&1
 list=$(grep -o '"id":"[0-9a-f]*","name":"Check list"' "$tmp/cl3.log" |
 	head -1 | cut -d'"' -f4)
 [ -n "$list" ] || fail "no blocklist made (cl3.log)"
-BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
+BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
 BUILDAT_SP_REQS="{\"cmd\":\"blocklist_publish\",\"list\":\"$list\",\"scope\":\"listing:$id\"}
 {\"cmd\":\"blocklist_subscribe\",\"list\":\"$list\",\"scope\":\"fleet:${fleet%%:*}\"}
 {\"cmd\":\"queue\"}" \
@@ -293,7 +293,7 @@ grep -q "Withdrawn from" "$tmp/an.log" ||
 echo "ok: a Starport removed from the file withdraws the listing at once"
 
 # 8
-BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
+BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
 BUILDAT_SP_ADMIN="add mod modpass1234" \
 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"moderators\":[\"mod\"],\"notice\":{\"text\":\"Check notice\",\"priority\":\"high\"}}}
 {\"cmd\":\"act\",\"listing\":\"$id\",\"action\":\"hide\",\"reason\":\"other\",\"text\":\"for the check\",\"days\":0}" \
@@ -301,7 +301,7 @@ BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"moderators\":[\"mod\"
 	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl6.log" 2>&1
 [ "$(grep -c 'sp: {"id":[0-9]*,"ok":true' "$tmp/cl6.log")" -ge 2 ] ||
 	fail "the notice, the moderator or the hide (cl6.log)"
-BUILDAT_SP_NAME=mod BUILDAT_SP_PASSWORD=modpass1234 \
+BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=mod BUILDAT_SP_PASSWORD=modpass1234 \
 BUILDAT_SP_REQS='{"cmd":"me"}
 {"cmd":"overview"}
 {"cmd":"overview"}' \
