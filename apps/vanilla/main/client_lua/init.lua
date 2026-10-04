@@ -1644,8 +1644,9 @@ local function apply_sky_of_hour(force)
 
 	local moon_picture = body_picture_of("moon", game_sky.moon_texture)
 	world_sky:set_moon_texture(moon_picture)
-	world_sky:set_moon_look((game_sky.moon_visible ~= false) and
-			luanti_sky.MOON_HALF * (game_sky.moon_scale or 1) or 0)
+	-- The disc's size is update_sky()'s: the moon is out in its hours
+	-- only, and until the server has said the hour there are none
+	world_sky:set_moon_look(0)
 
 	-- The stars come out as the light goes: Luanti's day_opacity is zero by
 	-- default, which is a sky with none in it until the sun is down
@@ -1753,6 +1754,13 @@ local function update_sky(dt)
 	time_of_day = (time_of_day + dt * time_speed / (24 * 60 * 60)) % 1.0
 
 	local daylight = time_of_day * 24000
+	-- The moon's disc is drawn in the moon's hours only, the ones its
+	-- light is on in (moon_amount()), so it is never on a day sky
+	-- ([MOON_BY_DAY])
+	local moon_half = (game_sky.moon_visible ~= false and
+			luanti_sky.moon_amount(daylight) > 0) and
+			luanti_sky.MOON_HALF * (game_sky.moon_scale or 1) or 0
+	world_sky:set_moon_look(moon_half)
 
 	-- Where the sun is. Luanti's own stretched day, out of luanti_sky, and
 	-- with it the clocks the two lights fade on. The tilt out of the
@@ -1861,9 +1869,10 @@ local function update_sky(dt)
 	-- ([NIGHT_LIGHT], 2026-09-20), and this is the first thing to ask
 	if sky_now.moon_on ~= sky_lights.moon_node.enabled then
 		sky_now.moon_on = sky_lights.moon_node.enabled
-		log:info(string.format("moon light %s: amount %.2f, elevation %.2f, cloud %.2f, visible %s",
+		log:info(string.format("moon light %s: amount %.2f, elevation %.2f, cloud %.2f, visible %s, disc %.3f",
 				sky_now.moon_on and "on" or "off", luanti_sky.moon_amount(daylight),
-				-smooth_sy, game_sky.cloud_cover or 0, tostring(game_sky.moon_visible)))
+				-smooth_sy, game_sky.cloud_cover or 0, tostring(game_sky.moon_visible),
+				moon_half))
 	end
 	if moon_up > 0 then
 		sky_lights.moon_node.direction =
