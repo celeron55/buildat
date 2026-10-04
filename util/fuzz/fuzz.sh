@@ -38,6 +38,9 @@ declare -A srcs=(
 	# The decoders compiled in, instrumented; the rest of Urho3D from its
 	# library (image_fuzz.cpp)
 	[image]="3rdparty/Urho3D/Source/Urho3D/Resource/Image.cpp 3rdparty/Urho3D/Source/Urho3D/Resource/Decompress.cpp"
+	# The model and animation parsers and the glTF loader, the same way
+	# (model_fuzz.cpp)
+	[model]="3rdparty/Urho3D/Source/Urho3D/Graphics/Model.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/Geometry.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/IndexBuffer.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/Animation.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/GLTFLoader.cpp"
 	[markup]="src/impl/markup.cpp"
 	# FreeType compiled in whole (font_fuzz.cpp), its source list taken
 	# from its CMakeLists; no Urho3D needed
@@ -68,6 +71,7 @@ declare -A libs=(
 	[json]=""
 	[zip]="-lz -lzstd"
 	[image]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
+	[model]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[markup]="-I$here/3rdparty/md4c"
 	[font]="-I$here/$ft/include -lz"
 )
@@ -79,7 +83,16 @@ uflags=$here/3rdparty/Urho3D/Build/Source/Urho3D/CMakeFiles/Urho3D.dir/flags.mak
 urho_extra="$(sed -n 's/^CXX_\(DEFINES\|INCLUDES\) = //p' "$uflags" 2>/dev/null) -fno-sanitize=shift,nonnull-attribute -w"
 declare -A extra=(
 	[image]="$urho_extra"
+	[model]="$urho_extra -fno-sanitize=pointer-overflow -I$here/3rdparty/Urho3D/Source/ThirdParty/tinygltf"
 	[font]="-I$here/$ft/include -w"
+)
+# A client loader a server feeds is fuzzed for memory corruption only. A
+# slow parse or a huge allocation sized by the file is a server denying
+# its client service, out of scope (doc/plan/security_review_plan.md), so
+# these targets run in fork mode and step past a timeout or an OOM instead
+# of stopping on it; a real crash still stops the run.
+declare -A opts=(
+	[model]="-fork=1 -ignore_timeouts=1 -ignore_ooms=1 -ignore_crashes=0"
 )
 targets=${*:-${!srcs[@]}}
 
@@ -107,16 +120,39 @@ for t in $targets; do
 	build "$t" || { status=1; continue; }
 	mkdir -p "$out/$t/corpus" "$out/$t/crashes"
 	[ -d "$me/seeds/$t" ] && cp -n "$me/seeds/$t"/* "$out/$t/corpus/" 2>/dev/null
-	# Every crash kept before is replayed first
-	for c in "$out/$t/crashes"/*; do
+	# Every crash kept before is replayed first. Only crash- and leak-:
+	# a fork-mode target (a client loader) keeps oom- and timeout-
+	# artifacts for the out-of-scope inputs it stepped past, which a plain
+	# replay would only hit again (doc/plan/security_review_plan.md)
+	for c in "$out/$t/crashes"/crash-* "$out/$t/crashes"/leak-*; do
 		[ -e "$c" ] || continue
 		"$out/bin/$t" "$c" > /dev/null 2>&1 || {
 			echo "$t: a kept crash still crashes: $c"; status=1; }
 	done
-	"$out/bin/$t" -max_total_time="$secs" -rss_limit_mb=2048 -timeout=10 -print_final_stats=1 \
+	"$out/bin/$t" ${opts[$t]:-} -max_total_time="$secs" -rss_limit_mb=2048 -timeout=10 -print_final_stats=1 \
 		-artifact_prefix="$out/$t/crashes/" "$out/$t/corpus" \
 		> "$out/$t/last.log" 2>&1
 	r=$?
+	# A fork-mode target's oom/timeout artifacts are out of scope and
+	# recorded only as the counts in the log; do not keep them
+	[ -n "${opts[$t]:-}" ] && find "$out/$t/crashes" -maxdepth 1 \
+		\( -name 'oom-*' -o -name 'timeout-*' \) -delete
+	# Fork mode exits non-zero when the last job merely hit an ignored
+	# timeout, so a fork target's verdict is the crash count and whether a
+	# real crash/leak artifact was left -- not the exit code
+	if [ -n "${opts[$t]:-}" ]; then
+		find "$out/$t/crashes" -maxdepth 1 \
+			\( -name 'oom-*' -o -name 'timeout-*' \) -delete
+		crashn=$(grep -aoE "oom/timeout/crash: [0-9]+/[0-9]+/[0-9]+" \
+			"$out/$t/last.log" | tail -1 | grep -oE "[0-9]+$")
+		if [ "${crashn:-0}" = 0 ] &&
+				! ls "$out/$t/crashes"/crash-* "$out/$t/crashes"/leak-* \
+					>/dev/null 2>&1; then
+			r=0
+		else
+			r=1
+		fi
+	fi
 	execs=$(grep -ao "stat::number_of_executed_units: [0-9]*" "$out/$t/last.log" | grep -o "[0-9]*$")
 	cov=$(grep -ao "cov: [0-9]*" "$out/$t/last.log" | tail -1)
 	if [ $r -ne 0 ]; then
@@ -124,7 +160,8 @@ for t in $targets; do
 		grep -a "ERROR: \|: runtime error" "$out/$t/last.log" | head -3
 		status=1
 	else
-		echo "$t: ${execs:-?} runs in ${secs} s, $cov, $(ls "$out/$t/corpus" | wc -l) in the corpus"
+		otc=$(grep -aoE "oom/timeout/crash: [0-9/]+" "$out/$t/last.log" | tail -1)
+		echo "$t: ${execs:-?} runs in ${secs} s, $cov, $(ls "$out/$t/corpus" | wc -l) in the corpus${otc:+, $otc}"
 	fi
 done
 exit $status

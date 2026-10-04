@@ -27,6 +27,12 @@ Source changes vs 1.7.1:
 - Assimp thirdparty and AssetImporter tool removed
 - ThirdParty/STB/stb_vorbis.h: upstream v1.09 -> v1.22, for the fuzzer's
   stack-buffer-overflow in compute_codewords (security review, 2026-10-04)
+- Graphics/Model.cpp, Geometry.cpp, IndexBuffer.cpp: a crafted .mdl from a
+  server crashed the client -- a vertex element type and a primitive type
+  read from the file indexed tables sized by their enums out of bounds,
+  and an index draw-range check (start + count > size) could wrap. The
+  types are refused past their enum, the range check is done without the
+  sum (security review, 2026-10-04)
 
 Buildat cmake configures this tree as a sub-build of the Urho root:
   URHO3D_LIB_TYPE=SHARED URHO3D_LUA=TRUE URHO3D_SAFE_LUA=TRUE
