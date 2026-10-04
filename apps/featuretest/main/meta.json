@@ -1,4 +1,6 @@
 {
+	"disable_cpp": true,
+	"client_main": "init.lua",
 	"dependencies": [
 		{"module": "network"},
 		{"module": "client_lua"},

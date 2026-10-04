@@ -8,6 +8,8 @@
 #include "interface/module_info.h"
 #include "interface/os.h"
 #include "loader/api.h"
+#include "network/api.h"
+#include "client_file/api.h"
 #include "core/json.h"
 #include <fstream>
 #define MODULE "loader"
@@ -28,6 +30,7 @@ static interface::ModuleMeta load_module_meta(const json::Value &v)
 {
 	interface::ModuleMeta r;
 	r.disable_cpp = v.get("disable_cpp").as_boolean();
+	r.client_main = v.get("client_main").as_string();
 	r.cxxflags = v.get("cxxflags").as_string();
 	r.ldflags = v.get("ldflags").as_string();
 	r.cxxflags_windows = v.get("cxxflags_windows").as_string();
@@ -269,6 +272,11 @@ struct Module: public interface::Module, public loader::Interface
 	sv_<ss_> m_module_load_paths; // In order of preference
 	ss_ m_base_path; // The base game's directory, or "" ([GAME_BASE])
 
+	// Client scripts named by modules' "client_main", in load order, run
+	// once per peer when its files first arrive ([ENGINE_LOADER])
+	sv_<ss_> m_client_mains; // "<module>/<script>"
+	set_<network::PeerInfo::Id> m_scripted_peers;
+
 	// Buffer names of modules that should be reloaded in this until modules
 	// aren't being modified for a period of time, and then reload them
 	set_<ss_> m_modules_to_reload;
@@ -337,6 +345,8 @@ struct Module: public interface::Module, public loader::Interface
 		m_server->sub_event(this, Event::t("core:load_modules"));
 		m_server->sub_event(this, Event::t("core:module_modified"));
 		m_server->sub_event(this, Event::t("core:tick"));
+		m_server->sub_event(this,
+				Event::t("client_file:files_transmitted"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -345,6 +355,24 @@ struct Module: public interface::Module, public loader::Interface
 		EVENT_TYPEN("core:module_modified", on_module_modified,
 				interface::ModuleModifiedEvent)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
+		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
+				client_file::FilesTransmitted)
+	}
+
+	// A module's "client_main" is run here once per peer; an app used to
+	// carry a main.cpp whose only job was this send ([ENGINE_LOADER])
+	void on_files_transmitted(const client_file::FilesTransmitted &event)
+	{
+		if(m_client_mains.empty())
+			return;
+		if(!m_scripted_peers.insert(event.recipient).second)
+			return; // Already ran for this peer
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(const ss_ &script : m_client_mains){
+				inetwork->send(event.recipient, "core:run_script",
+						"buildat.run_script_file(\""+script+"\")");
+			}
+		});
 	}
 
 	sm_<ss_, interface::ModuleInfo> m_module_info;
@@ -458,6 +486,8 @@ struct Module: public interface::Module, public loader::Interface
 				m_server->shutdown(1, ss_()+"loader: Error loading module "+name);
 				return;
 			}
+			if(!info->meta.client_main.empty())
+				m_client_mains.push_back(name+"/"+info->meta.client_main);
 		}
 	}
 
