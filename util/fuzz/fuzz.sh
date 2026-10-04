@@ -41,6 +41,11 @@ declare -A srcs=(
 	# The model and animation parsers and the glTF loader, the same way
 	# (model_fuzz.cpp)
 	[model]="3rdparty/Urho3D/Source/Urho3D/Graphics/Model.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/Geometry.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/IndexBuffer.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/Animation.cpp 3rdparty/Urho3D/Source/Urho3D/Graphics/GLTFLoader.cpp"
+	# The XML and JSON parsers a server's Material/Technique/XMLFile/
+	# JSONFile run: pugixml 1.7 and XMLFile/JSONFile compiled in (the
+	# latter pulls in header-only rapidjson); the rest from the library
+	# (xml_fuzz.cpp)
+	[xml]="3rdparty/Urho3D/Source/Urho3D/Resource/XMLFile.cpp 3rdparty/Urho3D/Source/Urho3D/Resource/JSONFile.cpp 3rdparty/Urho3D/Source/ThirdParty/PugiXml/src/pugixml.cpp"
 	[markup]="src/impl/markup.cpp"
 	# FreeType compiled in whole (font_fuzz.cpp), its source list taken
 	# from its CMakeLists; no Urho3D needed
@@ -72,6 +77,7 @@ declare -A libs=(
 	[zip]="-lz -lzstd"
 	[image]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[model]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
+	[xml]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[markup]="-I$here/3rdparty/md4c"
 	[font]="-I$here/$ft/include -lz"
 )
@@ -84,6 +90,7 @@ urho_extra="$(sed -n 's/^CXX_\(DEFINES\|INCLUDES\) = //p' "$uflags" 2>/dev/null)
 declare -A extra=(
 	[image]="$urho_extra"
 	[model]="$urho_extra -fno-sanitize=pointer-overflow -I$here/3rdparty/Urho3D/Source/ThirdParty/tinygltf"
+	[xml]="$urho_extra -fno-sanitize=pointer-overflow"
 	[font]="-I$here/$ft/include -w"
 )
 # A client loader a server feeds is fuzzed for memory corruption only. A
