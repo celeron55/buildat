@@ -501,8 +501,6 @@ struct Module: public interface::Module
 			queue_size = instance->get_num_sections_queued();
 		});
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(event.recipient, "core:run_script",
-					"buildat.run_script_file(\"main/init.lua\")");
 			inetwork->send(event.recipient, "main:worldgen_queue_size",
 					itos(queue_size));
 		});

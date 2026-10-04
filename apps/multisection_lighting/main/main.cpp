@@ -602,8 +602,6 @@ struct Module: public interface::Module
 			ireplicate->assign_scene_to_peer(m_main_scene, event.recipient);
 		});
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(event.recipient, "core:run_script",
-					"buildat.run_script_file(\"main/init.lua\")");
 			// Generation normally finishes long before anyone connects; if it
 			// has not, on_worldgen_queue_modified() sends this instead
 			if(m_worldgen && m_worldgen->cave_valid)

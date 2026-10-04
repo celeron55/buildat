@@ -195,10 +195,6 @@ struct Module: public interface::Module
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
 			ireplicate->assign_scene_to_peer(m_main_scene, event.recipient);
 		});
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(event.recipient, "core:run_script",
-					"buildat.run_script_file(\"main/init.lua\")");
-		});
 	}
 };
 
