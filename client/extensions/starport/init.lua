@@ -1884,7 +1884,8 @@ end
 -- of it is installed. Installing fetches the release and its signature
 -- and checks both on this side (__buildat_aitta_install); a version is
 -- installed beside the others, never over one. Hidden entirely where the
--- filters hide unreviewed content.
+-- filters hide unreviewed content. `query`: only the releases whose
+-- author/name or description has it, case aside.
 local function aitta_installed()
 	local have = {}
 	for _, g in ipairs(buildat.list_apps() or {}) do
@@ -1898,7 +1899,7 @@ local function aitta_installed()
 	return have
 end
 
-local function aitta_page(message)
+local function aitta_page(message, query)
 	local e = effective()
 	local root, w = open_window("aitta", 900)
 	add_text(w, "Apps from Aitta: " .. e.aitta)
@@ -1913,8 +1914,16 @@ local function aitta_page(message)
 	if message then
 		add_text(w, message, YELLOW)
 	end
+	local sr = add_row(w)
+	local search = add_edit(sr, query or "")
+	add_button(sr, "Search", function()
+		local text = search:GetText()
+		uistack.main:pop(root)
+		aitta_page(nil, text)
+	end)
 	local status = add_text(w, "Fetching the list...", GREY)
 	add_button(w, "Back", function() uistack.main:pop(root) end)
+	local q = (query or ""):lower()
 	network.http_get(e.aitta .. "/api/aitta/list", function(body, err)
 		if not body then
 			status:SetText("Could not fetch the list: " .. tostring(err))
@@ -1925,10 +1934,15 @@ local function aitta_page(message)
 			status:SetText("Aitta's answer was not a list")
 			return
 		end
-		status:SetText(#v.releases .. " releases")
 		local have = aitta_installed()
+		local shown = 0
 		for _, rel in ipairs(v.releases) do
 			local k = tostring(rel.author) .. "/" .. tostring(rel.name)
+			if q ~= "" and not (k:lower():find(q, 1, true) or
+					tostring(rel.description or ""):lower():find(q, 1, true)) then
+				goto continue
+			end
+			shown = shown + 1
 			local mine = have[k]
 			local r = add_row(w)
 			add_label(r, k .. " " .. tostring(rel.version) .. "  " ..
@@ -1967,7 +1981,10 @@ local function aitta_page(message)
 			if rel.description and rel.description ~= "" then
 				add_text(w, "    " .. tostring(rel.description), GREY)
 			end
+			::continue::
 		end
+		status:SetText(q == "" and #v.releases .. " releases" or
+				shown .. " of " .. #v.releases .. " releases match")
 	end)
 end
 
