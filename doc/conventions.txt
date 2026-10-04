@@ -45,6 +45,8 @@ Naming:
 Logging:
 - Use core/log.h. Only use stdout directly in case of an interactive command
   line interface (like printing errors for command line arguments).
+  The logger writes a control byte other than a tab or a line break as
+  \xNN, so a peer's bytes in a line cannot move the terminal.
 
 Ordering of #include directives:
 1) The interface that the current file implements, ""
@@ -98,7 +100,10 @@ Directory structure
 ├── Build       << Build files; "mkdir Build; cmake ..; make"
 ├── cache       << Runtime directory used by Buildat; a boxed server's
 │                  is cache/apps/<app>, and cache/rccpp_build only the
-│                  unboxed build's, read by the boxes
+│                  unboxed build's, read by the boxes; the client keeps
+│                  a server's files in cache/remote/server_<address>
+│                  (this machine's servers share cache/remote/local),
+│                  and a client run with -c and no -C uses cache/scripted
 ├── builtin     << Built-in modules
 ├── client      << Built-in client files
 │   └── extensions << The client's own extensions, trusted: the sandbox
@@ -116,10 +121,14 @@ Directory structure
 ├── user        << The user's data -- never in git: apps/<app> an app's own
 │                  (its saves, vanilla's imported worlds), shared/<app>
 │                  what it shares read-only with the others (vanilla's
-│                  Luanti games and settings), and the engine settings
+│                  Luanti games and settings), installed/<author>/<name>/
+│                  <version> the Aitta apps (aitta.txt), and the engine
+│                  settings
 ├── local       << Runs' outputs: fuzz and driven runs, reference shots,
 │                  options filed for the user -- never in git
-└── util        << Development utilities: packaging, the squash push, benches
+└── util        << Development utilities: packaging, the squash push, benches,
+                   the fuzzers (util/fuzz/fuzz.sh: libFuzzer targets;
+                   proto_fuzz, client_fuzz, game_fuzz: whole programs)
 
 Checks
 ------

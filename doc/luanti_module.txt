@@ -52,10 +52,16 @@ The environment variables it reads, since none of them are in the client's -h:
     BUILDAT_LUANTI_FORCE_TIME=<n>    Pin the clock at a Luanti time of day
                                      (0..24000) and stop it running
     BUILDAT_LUANTI_FORCE_DAY=1       The same thing at noon
-    BUILDAT_LUANTI_NAME=<player>     Name the first client that connects,
-                                     rather than client<peer>: an imported
-                                     world's own player is who the save
-                                     knows
+    BUILDAT_LUANTI_NAME=<player>     Name the launcher's own client
+                                     something else than "singleplayer"
+                                     (the name Luanti's singleplayer plays
+                                     as, and an imported singleplayer
+                                     world's player); anyone else is
+                                     client<peer>
+    BUILDAT_LUANTI_SEED=<seed>       A new save's fixed_map_seed, so a
+                                     scripted run on both engines is of
+                                     one world
+    BUILDAT_CONTENTDB_URL=<url>      ContentDB, or a test's mirror of it
     BUILDAT_LUANTI_LUAPROF=<n>       Sample the module's Lua; see below
     LUANTI_EXTRA_IMPORT_PATH=<paths> Where the import menu looks for games
                                      and worlds, before ~/.luanti and
@@ -148,7 +154,12 @@ plan says is not in this at all: IPC, the async environment, SSCSM; HTTP is
 a stub until [HTTP_API].
 
 The map is buildat's voxel world (builtin/voxelworld) with Luanti's nodes
-as its voxels; the mapgen is Luanti's own, vendored in builtin/luanti_mapgen;
+as its voxels; the mapgen is Luanti's own, vendored in builtin/luanti_mapgen
+with Luanti's noise and PCG32, and generates in Luanti's 80-node mapchunks,
+so a game's on_generated runs once per chunk with Luanti's blockseed. A new
+world's mapgen is the game's mg_name within game.conf's allowed and
+disallowed mapgens, which the new-world screen offers, the game's pick
+first;
 the light is voxelworld's skylight and lamp floods, one level a voxel, as
 Luanti's. The client half (builtin/luanti/client_lua and apps/vanilla's
 client) draws the world in three modes -- unlit and shadows, held to
@@ -160,6 +171,16 @@ official's client does (the node changes on the click's frame; the
 server's answer overwrites it, and a refusal is a resend of the node),
 out of luanti:dig_props -- the groups, the tool capabilities and the
 prediction strings core.__dig_props() sends once.
+
+What a client asks for is held to what Luanti's server lets it do: a dig,
+a placement or a punch within reach, PvP as Luanti decides it, an
+inventory action only on what the player may reach, a form's fields only
+for the form shown, chat to everyone only with shout, and a position that
+is not finite or is past the world dropped. Nothing is read or written
+more than 2,000,000 from the origin, core.deserialize refuses bytecode and
+runs within a budget, an admin's privileges are not written into the
+world, and a game's kick spares an admin and its unban lifts only its own
+bans.
 
 The plain game around it is apps/vanilla: a launch grid tile per
 installed game, worlds, imports from ~/.luanti, ContentDB, settings.
@@ -175,7 +196,9 @@ The findings and the state of each are in doc/plan/luanti_module_plan.md.
 
 Environment variables the module and its runners read: BUILDAT_LUANTI_GAME,
 _SAVE, _LUA (a fixture file), _PBR (the render mode), _LINEAR, _TONEMAP,
-_CLOUD_N, _TRANSLUCENCY, _JIT, _LUAPROF, _ABLATE (diagnostics), and
+_CLOUD_N, _TRANSLUCENCY, _JIT, _LUAPROF, _ABLATE (diagnostics),
+_DAWN_GLOW, _DAWN_AMBIENT, _DUSK_BAND, _DUSK_AWAY (the pbr sky's dawn and
+dusk glow, apps/vanilla/main/client_lua/luanti_sky.lua), and
 LUANTI_EXTRA_IMPORT_PATH; a player never sets any of them -- the settings
 menu holds what a player changes.
 

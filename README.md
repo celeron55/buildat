@@ -26,6 +26,8 @@ Further reading:
   app running inside buildat_server, and how it is checked
 * [doc/luanti_client.txt](doc/luanti_client.txt) -- extensions/luanti_client:
   playing on a real Luanti server over its own protocol
+* [doc/aitta.txt](doc/aitta.txt) -- an app packed, signed, published to an
+  Aitta registry (apps/aitta) and installed
 * [doc/urho3d_fork.txt](doc/urho3d_fork.txt) -- what the bundled Urho3D
   carries that upstream does not
 * [doc/developer_notes.txt](doc/developer_notes.txt) -- small things worth
@@ -91,7 +93,10 @@ A server also serves a client for web browsers, on its own port: open
 
 It builds in `Build-web/` and writes `web/`, which the server serves from by
 default; `buildat_server -W <dir>` serves another. Behind an https reverse
-proxy the page connects over wss.
+proxy the page connects over wss. The page takes more arguments after `?`
+in its address (`?-l 4` for a verbose log), but only `-l`, `-u` and `-o`:
+a link is anybody's to write. The server accepts a WebSocket only from its
+own page's origin.
 
 Play
 ----
@@ -155,6 +160,15 @@ Terminal 2:
 
     $ $wherever_buildat_is/Build
     $ bin/buildat -s localhost
+
+A game started from the launcher listens on 127.0.0.1 only, and the
+launcher's client is its owner by a token the two share; apps/vanilla's
+pause menu has "Open to LAN", which opens it to the network. A dedicated
+server announces itself to the LAN with `--lan-announce NAME` (or
+`BUILDAT_LAN_ANNOUNCE`), and the launcher's connect screen lists what it
+hears under "On this network". `--compile-only` compiles and loads the
+app's modules and exits, 1 naming the module that failed: for a run whose
+clock a first compile would eat.
 
 On Linux the server confines itself before it loads an app (Landlock and
 seccomp): the app writes `<user>/apps/<app>`, its own `<user>/shared/<app>`

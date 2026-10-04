@@ -114,13 +114,19 @@ buildat.save_file(name, data) -> the path it went to ("" for a download),
   or nil and why not
 buildat.exported_files() -> {name, ...}
 buildat.read_exported(name) -> data, or nil and why not
-buildat.pick_file([accept]) -> true when the web's file picker opened
-buildat.picked_file() -> name, data once a picked file is read, else nil
+buildat.pick_file([accept]) -> true
+buildat.picked_file() -> name, data once a picked file is read, else nil;
+  nil and why once the user picked nothing or it could not be read
 - Files a game hands the user and takes from them ([FP_EXPORT] 4), on the
   take_screenshot rule: the client picks where. Natively <user>/exports
-  (save_file never overwrites; exported_files lists it, {} on the web);
-  on the web the browser's download and file picker (pick_file is false
-  natively). At most 64 MiB a file.
+  (save_file never overwrites); on the web the browser's download and file
+  picker. At most 64 MiB a file.
+- exported_files and read_exported are the extension environment's only
+  ([SECURITY_RUN_1]): every server's game exports into the one directory,
+  so the sandbox gets the file the user picks and no listing. Its
+  pick_file opens the browser's picker on the web and natively the
+  client's own list of <user>/exports (client/extensions/network's
+  pick_export).
 buildat.qr_code(text) -> modules, side; or nil
 - The QR code of text as a string of "0" and "1", row by row from the top,
   and its side; reads and writes nothing. What a TOTP secret's otpauth://
@@ -146,7 +152,10 @@ buildat.create_directories(path) -> bool (unsafe Lua only)
   under the user path; a path is not a thing an app gets to name
 buildat.set_watchdog_seconds(n) (unsafe Lua only)
 - How long without a frame before the watchdog logs this thread's stack;
-  0 puts the default (10) back. A screen that waits lowers it
+  0 puts the default (10) back. A screen that waits lowers it. Apart from
+  that, on Linux 30 s without a frame errors the running script out to its
+  pcall, and a compiled loop that does not stop then ends the client at
+  60 s (exit 3).
 - In the sandbox as they are (decided 2026-09-13): what they give sandboxed
   code is "write files under the cache and make them loadable", which a server
   can already do through client_file. The cache-path check in each is
@@ -420,6 +429,14 @@ buildat.safe.local_server_state() -> port or nil, status
 - The port once the local server answers, and the last status line of its
   log. extensions/launch_menu/screens.lua is these three's user: the screens
   every launch UI's app starts go through.
+buildat.safe.lan_address() -> "a.b.c.d" or nil
+- This machine's address on the LAN, only while connected to the server this
+  client started: what the pause menu's "Open to LAN" says.
+buildat.safe.lan_servers() -> {{host, port, name, app, version, players,
+  account}, ...}
+- The games announcing themselves on this network by UDP multicast, heard
+  within 6 s ([LAN_DISCOVERY]); empty while connected to a server. Asked every
+  second or so while the list is on the screen.
 buildat.safe.connect_start(address) -> true, or false and why
 buildat.safe.connect_poll() -> the connect's state
 - Connecting on a worker, polled from a frame handler.
@@ -458,19 +475,26 @@ buildat.safe.run_extension_file(name) -> what the file returned
 buildat.safe.eval(code [, chunkname]) -> ok, results...
 - A line of Lua in the caller's own environment ([LAUNCH_CONSOLE]), so a
   local on one line means what it means everywhere else. Bytecode is refused.
+  The chunk is named as its caller's whatever chunkname says, which only
+  names it in an error message: the gates above read the chunk's name.
 buildat.safe.client_api_text() -> this document, or nil
 - For a launch UI that shows it beside a console. One named file, read-only.
 buildat.safe.storage_read(name) -> data or nil
 buildat.safe.storage_write(name, data) -> true, or false and why
 - One directory per launch extension under the user path. A name is one file,
-  not a path, and there is a size limit.
+  not a path; there is a size limit, and 64 names a directory at most.
 - App code a server sent gets the same two as buildat.storage_read and
   buildat.storage_write, kept per server like a web page's localStorage:
   <user>/apps/<app>/client for a server this client started (its port
   changes every launch, its app does not), <user>/servers/<address> for any
   other, so a server cannot read what another one or a local app stored.
-  Which is which is told by the chunk's name: run_script_file notes the
-  chunks a server served.
+- A chunk a server sent runs with a buildat of its own ([SECURITY_RUN_1];
+  sandbox.lua's __buildat_run_served_code, api.lua's
+  __buildat_served_overrides) rather than being told by the calling frame,
+  which a tail call leaves out: there set_preference, start_local_server,
+  stop_local_server, launch, launch_save, set_launch_ui,
+  compose_launch_ui and cache_write refuse, cache_read answers nil, and
+  storage is the server's.
 buildat.safe.cache_read(name) -> data or nil
 buildat.safe.cache_write(name, data) -> true, or false and why
 - An extension's cache, <cache>/<extension>/, which add_resource_dir() takes
@@ -554,8 +578,16 @@ What is refused, and why:
 - Audio:SetMasterGain("Master") -- the user's volume, see "Engine settings"
 - Renderer:SetViewport() and its siblings -- magic.set_preferred_viewports()
   is the way, so the user's render scale applies
-- Anything that reaches a file path, the environment or another process;
-  resource names are checked (util.check_safe_resource_name)
+- Anything that reaches a file path, the environment or another process. A
+  resource name the cache is asked for is relative, with no ".." and no ":"
+  (safe_classes.lua's resource_name_ok): Urho3D's ResourceCache falls back
+  to an absolute path outside every resource dir.
+- UI:SetClipboardText() except within a second of the user's own key or
+  click ([SECURITY_RUN_1]), as a browser asks.
+- A UIElement's priority above 999: the client's own dialogs are drawn over
+  every script's element. RemoveAllChildren() leaves the client's own
+  elements (named "__trusted..."), their color reads as white, and a
+  client's secret field reads "" and keeps its name ([TRUST_COLOR]).
 - A property whose Urho3D type is a const reference has no setter (see the
   replicate section below); where it matters the class's own setter function
   is exposed instead
@@ -563,6 +595,15 @@ What is refused, and why:
 A removed UIElement is dead to the sandbox ([UI_UAF]): a wrapper held past
 its element's removal raises on any access instead of reading freed memory.
 A re-parent (AddChild of an element that has a parent) is not a removal.
+
+A wrapper holds a reference to what it wraps ([SECURITY_RUN_1];
+magic_sandbox and src/lua_bindings/misc_urho3d.cpp's hold_ref), so an object
+the engine lets go of -- a cloned RenderPath with its viewport -- lives as
+long as a wrapper of it does. What is a place in another object's vector is
+not wrapped that way: a RenderPathCommand dies when its path's Append or
+Load moves the vector (GetCommand again), and a Bone is read out as a table
+{name, parentIndex, animated, node}. A Variant's Ptr is handed back only
+as what the object is, or a base of it.
 
 The client sends Urho3D's ExitRequested event when it is shutting down, for
 any reason and not only a closed window, so that a module can close what it
@@ -638,6 +679,12 @@ Cursor:DefineShape(shape, image, rect, hot_spot)
 - The image has to come out of the resource cache: Urho3D hands it to a
   SharedPtr, which would free an image the sandbox built from under the
   collector. An image with no name is refused for that reason.
+
+LineEdit.multiLine, UIElement:IsMultiLine()
+- The fork's multi-line LineEdit (urho3d_fork.txt): Enter breaks the line,
+  Ctrl+Enter sends TextFinished, the text wraps. IsMultiLine() is asked of
+  the focus, which reads as a UIElement: ui_utils' keyboard_page leaves Up
+  and Down to such a field.
 
 XMLFile:GetRoot([name]) -> XMLElement, XMLFile:ToString([indentation])
 - An app's own XML, read: the file comes out of the resource cache like any
@@ -750,6 +797,14 @@ Note:
 
 	Example: apps/entitytest/main/client_lua/init.lua
 
+	The client makes only the component types that hold the scene, draw,
+	collide or sound (src/client/state.cpp, `replicable`): Octree,
+	PhysicsWorld, Zone, Light, Camera, the models and geometries, the
+	billboards, particles, trails, decals, Text3D, Skybox, Terrain, the
+	physics bodies, shapes and constraints, the sound sources and
+	SmoothedTransform. Anything else -- a LuaScriptInstance would run
+	outside the sandbox -- is logged and ends the node there.
+
 replicate.main_scene
 - Main replicated scene instance. To show it on screen, add a camera and a
   viewport. Add your local stuff to this as needed.
@@ -786,7 +841,13 @@ network
 -------
 TCP and UDP sockets, with the user in the loop: the first connection or
 datagram to an address in a week needs the user to accept the address and give
-it a description. Answers live in cache/network_addresses.csv.
+it a description. Answers live in user/network_addresses.csv, one row per
+asking server and address ([CONSENT_PER_SERVER]): a server's scripts ask as
+their origin (local:<app> for a server this client started, its address
+otherwise) and the client's own extensions as "", so what the user gave one
+server's scripts another's ask for again. The dialog names who asks, and
+declines by itself when a script changes any of its elements or pushes
+something over it.
 
 The socket objects are LuaSocket's, as far as the safety layer allows. What
 differs from LuaSocket:
@@ -809,9 +870,22 @@ udp_connect(host: string, port: number, cb: function [, options])
   connection was not made or the user declined. options.description fills the
   permission dialog's description field, editable, the answer still the
   user's ([NET_DESC]); http_get takes the same.
+http_get(url, cb [, options])
+http_post(url, json_body, cb [, options])
+- cb(body) or cb(nil, error), fetched on a thread and read back on Update.
+  http and https only; the consent is for the url's host and port, and a
+  redirect (a GET's, 8 at most) goes through the same consent for its own
+  host rather than being followed by libcurl.
+known_addresses() -> {{uri, description, created, last_attempt, accepted},
+  ...}
 set_address_name(uri, name)
-- The player name last used on that server, kept on its row for the next
-  connect screen ([BOX_PLAYTEST_2] 4)
+- The addresses this client has used, the last used first and each once,
+  and the player name last used on one, kept on its rows for the next
+  connect screen ([BOX_PLAYTEST_2] 4). The user's address book: launch UIs
+  and the client's own extensions have these two, and the network a
+  server's chunks require does not.
+parse_json(text) -> table, or nil and error
+write_json(value [, styled]) -> text, or nil and why not
 
 gettime() -> seconds
 
@@ -831,6 +905,27 @@ Socket methods, as in LuaSocket:
 
 See extensions/network_test for a working example:
   $ bin/buildat -m network_test
+
+starport
+--------
+The Starport side of the client (client/extensions/starport): the server
+lists, the Starport ID and its settings, in the client's own dialogs. Its
+safe interface:
+
+fetch(cb [, ask]) -> cb(rows, info)
+- The merged list of the Starports in the settings, through the filters;
+  info {hidden, unasked, errors}. Without ask, a Starport whose host the
+  user has not accepted is left out rather than asked about.
+group(servers [, fleet_id]) -> fleet, pool and server rows
+direct_connect_allowed() -> bool, whether a typed address may be joined
+id_token_here(cb [, rename_reason]) -> cb(token) or cb(nil, why)
+- A token for the server this client is on, from the Starport ID of a
+  Starport that lists it; the name used there is asked in the client's own
+  dialog.
+open_settings([on_closed]), open_report(address), open_report_here()
+open_aitta(), aitta_shown() -> bool
+- The Aitta browser ([AITTA_MVP], doc/aitta.txt), and whether the filters
+  show unreviewed content at all.
 
 ui_utils
 --------
@@ -1722,7 +1817,7 @@ magic.LT_INVALID:
 magic.LT_OBJECT_GROUP: 
 magic.LT_TILE_LAYER: 
 magic.Light: brightness, color, fadeDistance, fov, lightType, rampTexture, range, shadowBias, shadowCascade, shadowIntensity, specularIntensity
-magic.LineEdit: cursor, cursorPosition, echoCharacter, editable, maxLength, text, textCopyable, textElement, textSelectable
+magic.LineEdit: cursor, cursorPosition, echoCharacter, editable, maxLength, multiLine, text, textCopyable, textElement, textSelectable
 magic.ListView: AddItem, AddSelection, ChangeSelection, ClearSelection, Expand, FindItem, GetItem, InsertItem, IsExpanded, IsSelected, RemoveAllItems, RemoveItem, RemoveSelection, SetSelection, ToggleExpand, ToggleSelection, baseIndent, clearSelectionOnDefocus, hierarchyMode, highlightMode, multiselect, numItems, selectOnClickEnd, selectedItem, selection
 magic.MASK_COLOR: 
 magic.MASK_NORMAL: 
@@ -1828,7 +1923,7 @@ magic.RenderPathCommand: RemoveShaderParameter, SetShaderParameter, enabled, pas
 magic.RenderSurface: QueueUpdate, SetViewport, updateMode
 magic.Renderer: DrawDebugGeometry, GetViewport, HDRRendering, SetViewport, drawShadows, maxOccluderTriangles, numViewports, occluderSizeThreshold, ret, shadowMapSize, shadowQuality
 magic.Resource: name
-magic.ResourceCache: AddManualResource, Exists, GetResource, name, res, resource_name, resource_type, saved_path
+magic.ResourceCache: AddManualResource, Exists, GetResource, name, res
 magic.RibbonTrail: emitting, endColor, endScale, lifetime, material, sorted, startColor, startScale, trailType, vertexDistance, width
 magic.RigidBody: ApplyForce, ApplyImpulse, angularDamping, angularFactor, angularVelocity, collisionEventMode, collisionLayer, collisionMask, friction, gravityOverride, kinematic, linearDamping, linearVelocity, mass, restitution, useGravity
 magic.SCANCODE_0: 
@@ -2151,7 +2246,7 @@ magic.TextureCube: GetRenderSurface, SetData, SetSize, new
 magic.Time: GetElapsedTime, frameNumber, timeStep
 magic.ToolTip: delay
 magic.UI: GetScale, SetClipboardText, SetFocusElement, SetScale, SetUseSystemClipboard, element, focusElement, root, scale
-magic.UIElement: CreateChild, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyleAuto, SetText, SetVisible, border, c, child, class, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, i, m, maxHeight, maxWidth, minHeight, minSize, minWidth, name, opacity, position, priority, raw, screenPosition, selected, size, spacing, tn, verticalAlignment, visible, width
+magic.UIElement: CreateChild, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyleAuto, SetText, SetVisible, border, c, child, class, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, i, m, maxHeight, maxWidth, minHeight, minSize, minWidth, name, opacity, position, priority, raw, screenPosition, selected, size, spacing, tn, verticalAlignment, visible, width
 magic.UnsubscribeFromEvent: 
 magic.VAR_BOOL: 
 magic.VAR_BUFFER: 

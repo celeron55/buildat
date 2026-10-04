@@ -32,3 +32,22 @@ Backtraces
 A crash prints a symbolised backtrace on Linux (src/impl/linux/debug.cpp). Under a
 scripted run the client's log carries it; fuzz.sh and drive.sh read
 "Crash:" as a failure.
+
+Sanitizers and fuzzing
+----------------------
+cmake -DSANITIZE=address in a build directory of its own (Build/asan)
+builds with ASan; the server then compiles its runtime-compiled modules
+with the same -fsanitize (BUILDAT_SANITIZE in src/server/rccpp.cpp), and
+the module cache keeps the two builds apart. Run it with
+ASAN_OPTIONS=detect_leaks=0:abort_on_error=1.
+
+util/fuzz/ ([SECURITY_RUN_1]), its corpora and crashes kept under
+local/security/fuzz/:
+- fuzz.sh [seconds] [target ...]: libFuzzer harnesses (clang, ASan and
+  UBSan) for compress, packet_stream, voxel_volume, json, zip, image,
+  markup (with an oracle for tags, attributes and link schemes) and font
+- proto_fuzz.sh: a server fuzzed by a peer (PUBLIC=1, APP=floorplanner,
+  GAME=, BUILD=asan; CORPUS= mutates a session record_proxy.py recorded)
+- client_fuzz.sh: a client fuzzed by a hostile server; SANDBOX=1 sends
+  sandbox_fuzz.lua, which calls the sandbox's API with values at the edges
+- game_fuzz.sh: sandbox_fuzz.lua from inside a loaded vanilla game

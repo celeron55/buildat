@@ -23,6 +23,10 @@ upside. -o still wins, which is how a preference itself gets tested:
 
     $ bin/buildat -s localhost -w 1600x900 -o render_scale=0.5 -c @check.txt
 
+A -c run without -C keeps its cache in <cache>/scripted, apart from the
+one a person's client uses: its log would push theirs out, and the pidfile
+there names their local server ([SERVER_ADOPTED]).
+
 @path reads the commands from a file. Empty lines and lines starting with # are
 ignored.
 
@@ -197,11 +201,28 @@ event <name> [param]
         row per column, as names -- or the light nibbles with `light` --
         which drive.py keeps as its map.
 
+    event look_body
+        Turns the view to the nearest fallen body's centre and logs
+        `look_body: at x, y, z` or `look_body: no body`.
+
     event status_text <text>
         Shows the text at the top right of the screen in the harness's
         pale yellow, replacing the previous one; an empty text clears it.
         drive.py writes the rule it is about to act on, so a person
         watching the run sees what it is attempting.
+
+    The receivers in extensions/launch_world (the launcher room):
+
+    event room probe|ornament|still|attract|dissolve [bay]
+    event room preset <n>
+    event room station wall|floor|terminal
+        The room's switches for a scripted run, in place of keys:
+        extensions/launch_world/README.txt.
+
+    event mode menu
+        Closes whatever is over the room and goes to the standing place,
+        so a sequence does not have to know which mode it left the room
+        in.
 
 quit
     Stop the sequence early. The client always exits at the end of -c anyway.

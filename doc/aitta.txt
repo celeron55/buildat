@@ -1,7 +1,8 @@
 Aitta packages: an app packed, signed and installed
 ===================================================
-[AITTA_MVP], step 1 of doc/plan/aitta_plan.md. There is no registry yet;
-a release is passed around as two files and installed from them.
+[AITTA_MVP], doc/plan/aitta_plan.md. A release is two files, the archive
+and its signature; it is installed from them, from the command line or
+from an Aitta registry through the client.
 
 The manifest
 ------------
@@ -75,7 +76,8 @@ Running an installed app
 Every installed version is a tile on the launch grid, "<label> <version>",
 and starts a boxed server from its directory. To the client it is
 "<author>.<name>@<version>"; to its server, and to its save, shared and
-cache directories, "<author>.<name>": every version is one app.
+cache directories, "<author>.<name>": every version is one app. `buildat -a
+installed/<author>.<name>@<version>/<id>` runs its tile on boot.
 
 A save remembers the release that made it (version and sha256, from the
 .aitta_sha256 the install leaves in the version's directory), and another
@@ -84,5 +86,6 @@ installed, each has a second tile, "<label> <version>: move saves here",
 which plays that version and moves the saves another version made to it
 (the launch parameter aitta_move_saves=1).
 
-The key is ECDSA P-256 (Mbed TLS, in the tree). util/aitta_check.sh,
+The key is ECDSA P-256 (Mbed TLS, in the tree); signing is deterministic
+(RFC 6979), so a release packed twice is the same .sig. util/aitta_check.sh,
 util/aitta_pin_check.sh and apps/aitta/check.sh are the checks.

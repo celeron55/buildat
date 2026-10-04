@@ -19,6 +19,14 @@ needs trust -- the sandbox itself, the sockets and the user's per-host
 consent, the Starport identity -- is the client's own code, in
 client/extensions/.
 
+What a script cannot imitate is marked ([TRUST_COLOR]): a colour picked at
+random at client start fills every Starport field, and the launcher shows
+it at the top right with the Starport IDs logged in and a Log out, in an
+overlay of elements no script is handed. A field the client makes for a
+secret (named __trusted...) reads empty to scripts and takes keys no
+script hears, a Starport dialog a script adds to is closed, and a script's
+element is drawn under the client's own dialogs.
+
 Server
 ------
 Built using C++, with suitable parts from Urho3D, with most functionality in
@@ -108,7 +116,8 @@ The launch grid
 ---------------
 The client's start screen is a grid of launch actions, and they come from
 the tree: any number, zero or more, from every apps/<name>, builtin/<name>
-and extensions/<name> that ships launcher/init.lua. Nothing else is
+and extensions/<name> that ships launcher/init.lua, and from every app
+installed under <user>/installed (doc/aitta.txt). Nothing else is
 scanned. The file runs in the sandbox as a module's client Lua does, with
 buildat.safe, the sandboxed magic and a require that hands out an
 extension's .safe table and nothing else -- it is on the way into an app,
@@ -156,7 +165,7 @@ packet -- never the environment. A builtin module is not a target yet.
 
 `buildat -a kind/name/id` runs one action on boot, with the grid
 underneath it. The grid's order: explicit order first, then by kind -- the menu's own,
-apps, builtins, extensions -- then label.
+apps and installed apps, builtins, extensions -- then label.
 The sandbox's refusal checks are not on the grid: they run in the packaging
 smoke test and the weekly hunt (extensions/sandbox_test/tests/), never at a
 player's start ([UI_UAF] in the master plan).
@@ -169,7 +178,11 @@ reserved for initialization. Core uses cereal's portable binary
 serialization, except for low-level packet streaming. A queue per peer with
 one send policy is what exists; channels with a policy each, and the
 transport after TCP (ENet with a Noise handshake), are designed in
-doc/plan/network_plan.md.
+doc/plan/network_plan.md. A peer that sends nothing for 60 s is dropped,
+so a client with nothing to say sends network:keepalive. A game on the LAN
+is found without its address: a server announces itself every 2 s to a
+UDP multicast group, and the launcher lists what it hears
+([LAN_DISCOVERY]).
 
 Voxels
 ------

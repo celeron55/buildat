@@ -30,6 +30,11 @@ Model and Animation load .gltf/.glb at runtime through tinygltf, so a game can
 ship a glTF file as client data with no conversion step. The parse path follows
 rbfx's Utility/GLTFImporter. Assimp was removed with it; nothing else used it.
 
+Only embedded buffers and images load (87b5d2fc): ParseTinyGLTF installs
+FsCallbacks that refuse every external file and expand nothing.
+tinygltf's default ExpandFilePath ran wordexp(3) on a uri, so a model a
+server sent could read a path or run a command on the client.
+
 The right-handed to left-handed conversion is an X mirror applied in several
 places at once, and the comment above MirrorX in GLTFLoader.cpp says which and
 why. Read it before touching any of them.
@@ -275,6 +280,16 @@ turned input off. The focus that would have turned it back on does not
 bubble, so it stayed off until the browser window itself was focused
 again.
 
+A multi-line LineEdit ([HEARTH_MVP], 204f0b26)
+----------------------------------------------
+UI/LineEdit.{cpp,h}, LuaScript/pkgs/UI/LineEdit.pkg
+
+LineEdit::SetMultiLine / IsMultiLine, the Lua property multiLine: Enter
+inserts a line break and Ctrl+Enter sends TextFinished, the text wraps at
+the field's width, the cursor and the scroll follow its row, and Up, Down,
+Home and End move by rows (GetCharIndexOnRow). Hearth's message fields are
+multi-line.
+
 The web's touch: the first finger's mouse in pixels ([FP_TOUCH])
 ----------------------------------------------------------------
 Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c
@@ -330,3 +345,11 @@ in a stream of known size: an element takes one byte at least.
 PhysicsWorld's "Physics FPS" attribute goes through SetFps and its
 clamp, and with Max Substeps 0 a frame simulates 0.1 s at most instead
 of whatever the frame took. util/fuzz/client_fuzz.sh found the three.
+
+stb_vorbis v1.22 ([SECURITY_RUN_1], 68de2dd0)
+---------------------------------------------
+Source/ThirdParty/STB/stb_vorbis.h
+
+Upstream v1.22, unmodified, in place of v1.09, whose compute_codewords
+wrote past a 32-entry stack array on a crafted .ogg -- a file a server can
+hand the client as a sound.
