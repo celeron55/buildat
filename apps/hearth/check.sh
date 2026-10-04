@@ -20,7 +20,8 @@
 #      as messages) and a report's handling: carol reports bob's thread,
 #      the admin hides it with a statement (gone from the portal and search,
 #      the notice on its page, bob notified with the statement), bob
-#      appeals, the admin restores; then the search limit per
+#      appeals (and may not edit it while hidden), carol sees neither
+#      its title nor its messages by packet or /m/, the admin restores; then the search limit per
 #      address and per account.
 #
 #   apps/hearth/check.sh
@@ -95,7 +96,9 @@ answer "$t/bob.log" 1005 | grep -q "only whoever started" || fail "bob marked th
 client admin checkpass12 "$t/admin2.log" '{"cmd":"answered","thread":1,"message":3}
 {"cmd":"answered","thread":1,"message":1}
 {"cmd":"reply","thread":1,"body":"thanks @bob, and mail@bob.example is no one"}
-{"cmd":"notifications"}'
+{"cmd":"notifications"}
+{"cmd":"answered","thread":1,"message":0}
+{"cmd":"answered","thread":1,"message":3}'
 answer "$t/admin2.log" 1001 | grep -q '"ok":true' || fail "the answer: $(answer "$t/admin2.log" 1001)"
 answer "$t/admin2.log" 1002 | grep -q "not a reply" || fail "the question as its own answer"
 answer "$t/admin2.log" 1004 | grep -q '"by":"bob","id":[0-9]*,"kind":"reply"' ||
@@ -105,7 +108,7 @@ n=$(answer "$t/bob2.log" 1001)
 echo "$n" | grep -q '"kind":"mention"' && echo "$n" | grep -q '"kind":"answer"' ||
 	fail "bob's notifications: $n"
 [ "$(echo "$n" | grep -o '"kind"' | wc -l)" = 2 ] ||
-	fail "bob has other than the mention and the answer: $n"
+	fail "bob has other than the mention and the answer (given twice, told once): $n"
 
 # 4. A chat: bob has thread 1 open, the admin writes in it
 MS=14000 client bob bobpass1234 "$t/watch.log" '' BUILDAT_HEARTH_OPEN=1 &
@@ -187,10 +190,16 @@ get / > /dev/null; grep -q 'href="/t/2"' "$t/page" && fail "a hidden thread on t
 	fail "the hidden thread's page"
 grep -q "Cheap lamps" "$t/page" && fail "a hidden message's text on its page"
 get "/search?q=cheap" > /dev/null; grep -q '/t/2#' "$t/page" && fail "search finds a hidden message"
+[ "$(get /m/6)" = 200 ] && fail "a hidden thread's message has a page"
+client carol carolpass1234 "$t/carol3.log" '{"cmd":"thread","thread":2}'
+answer "$t/carol3.log" 1001 | grep -q '"title":"A hidden thread"' &&
+	! answer "$t/carol3.log" 1001 | grep -q "Cheap lamps" ||
+	fail "a hidden thread by packet: $(answer "$t/carol3.log" 1001)"
 client bob bobpass1234 "$t/bob7.log" '{"cmd":"notifications"}
 {"cmd":"thread","thread":2}
 {"cmd":"appeal","message":6,"text":"It is a real offer"}
-{"cmd":"appeal","message":6,"text":"really"}' BUILDAT_HEARTH_OPEN=2
+{"cmd":"appeal","message":6,"text":"really"}
+{"cmd":"edit","message":6,"body":"An honest offer"}' BUILDAT_HEARTH_OPEN=2
 grep -a "attempt to\|stack traceback" "$t/bob7.log" && fail "the hidden thread's page"
 answer "$t/bob7.log" 1001 | grep -q '"kind":"hidden".*"note":"Advertising"' ||
 	fail "bob's notification of the hide: $(answer "$t/bob7.log" 1001)"
@@ -198,6 +207,8 @@ answer "$t/bob7.log" 1002 | grep -q '"body":"Cheap lamps for everyone"' ||
 	fail "the author does not see his hidden message"
 answer "$t/bob7.log" 1003 | grep -q '"result":3' || fail "the appeal: $(answer "$t/bob7.log" 1003)"
 answer "$t/bob7.log" 1004 | grep -q "waiting already" || fail "an appeal twice"
+answer "$t/bob7.log" 1005 | grep -q "a hidden message is not edited" ||
+	fail "a hidden message edited: $(answer "$t/bob7.log" 1005)"
 client admin checkpass12 "$t/admin7.log" '{"cmd":"moderate","report":3,"action":"hide","statement":"x"}
 {"cmd":"moderate","report":3,"action":"restore"}'
 answer "$t/admin7.log" 1001 | grep -q "restored or dismissed" || fail "an appeal hidden"

@@ -88,7 +88,9 @@ static ss_ norm_url(ss_ u)
 static int64_t jint(const json::Value &v, const char *k)
 {
 	const json::Value &x = v.get(k);
-	return x.is_number() ? (int64_t)x.as_number() : 0;
+	// out of int64's range (or NaN): 0, not undefined behaviour
+	const double d = x.is_number() ? x.as_number() : 0;
+	return d > -9e18 && d < 9e18 ? (int64_t)d : 0;
 }
 
 // What a user writes: up to `max` bytes, no control bytes but a tab and,
@@ -499,36 +501,65 @@ struct Module: public interface::Module
 		const std::set<ss_> addresses(addr.begin(), addr.end());
 		if(addresses.empty())
 			return found;
+		// simplified: twenty releases asked for a minute, found or not; the
+		// rest the next minute
+		int asked = 0;
 		for(const ss_ &base : url_list(src.get("aittas"))){
+			json::Value list;
 			try {
-				const json::Value list = json::load_string(
+				list = json::load_string(
 						interface::http_get(base+"/api/aitta/list").c_str());
-				const json::Value &rels = list.get("releases");
-				for(unsigned i = 0; rels.is_array() && i < rels.size(); i++){
-					const json::Value &rel = rels.at(i);
-					if(!addresses.count(norm_url(jstr(rel, "home_hearth"))) ||
-							known.count(release_key(rel)))
-						continue;
-					const ss_ id = jstr(rel, "author")+"/"+jstr(rel, "name")+
-							"/"+jstr(rel, "version");
+			} catch(std::exception &e){
+				log_w(MODULE, "Releases from %s: %s", cs(base), e.what());
+				continue;
+			}
+			const json::Value &rels = list.get("releases");
+			for(unsigned i = 0; rels.is_array() && i < rels.size(); i++){
+				const json::Value &rel = rels.at(i);
+				const ss_ key = release_key(rel);
+				if(!addresses.count(norm_url(jstr(rel, "home_hearth"))) ||
+						known.count(key))
+					continue;
+				if(asked++ >= 20 || stopping())
+					return found;
+				// Asked once, found or not; not again until a restart
+				// simplified: a failed fetch is not retried until a restart
+				known.insert(key);
+				forget_release(key);
+				const ss_ id = jstr(rel, "author")+"/"+jstr(rel, "name")+
+						"/"+jstr(rel, "version");
+				if(id.find_first_not_of("abcdefghijklmnopqrstuvwxyz"
+						"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-/") != ss_::npos)
+					continue;
+				try {
 					const json::Value one = json::load_string(
-							interface::http_get(base+"/api/aitta/release?id="+id)
-							.c_str());
+							interface::http_get(base+"/api/aitta/release?id="+
+							id).c_str());
 					const json::Value &r = one.get("release");
 					if(!one.get("ok").is_true() || !r.is_object() ||
 							!addresses.count(norm_url(jstr(r, "home_hearth"))))
 						continue;
 					known.insert(release_key(r));
 					found.push_back({base, r, jstr(one, "changelog")});
-					// simplified: twenty a minute; the rest the next minute
-					if(found.size() >= 20)
-						return found;
+				} catch(std::exception &e){
+					log_w(MODULE, "The release %s from %s: %s", cs(id),
+							cs(base), e.what());
 				}
-			} catch(std::exception &e){
-				log_w(MODULE, "Releases from %s: %s", cs(base), e.what());
 			}
 		}
 		return found;
+	}
+
+	void forget_release(const ss_ &key)
+	{
+		std::lock_guard<std::mutex> lock(m_rmutex);
+		m_rknown.insert(key);
+	}
+
+	bool stopping()
+	{
+		std::lock_guard<std::mutex> lock(m_rmutex);
+		return m_rstop;
 	}
 
 	void on_tick(const interface::TickEvent &)
@@ -596,7 +627,8 @@ struct Module: public interface::Module
 		i.b(topic_id).b(title).b(author).b(t).b(t)
 				.b(pkg+" "+jstr(rel, "key")).step();
 		const int64_t id = sqlite3_last_insert_rowid(m_db);
-		add_message(id, author, body, title);
+		// Whoever publishes on the Aitta mentions no one
+		add_message(id, author, body, title, false);
 		Q r(m_db, "INSERT INTO release_threads(release, thread) VALUES(?, ?)");
 		r.b(key).b(id).step();
 		log_i(MODULE, "The release %s from %s is the thread %lld", cs(key),
@@ -744,7 +776,7 @@ struct Module: public interface::Module
 	}
 
 	int64_t add_message(int64_t thread_id, const ss_ &author, const ss_ &body,
-			const ss_ &title)
+			const ss_ &title, bool mention = true)
 	{
 		const int64_t t = now_s();
 		Q q(m_db, "INSERT INTO messages(thread, author, body, created) "
@@ -757,7 +789,7 @@ struct Module: public interface::Module
 		u.b(t).b(thread_id).step();
 		// Who is told: those mentioned, then the thread's other followers
 		std::set<ss_> told;
-		for(const ss_ &n : mentions(body)){
+		for(const ss_ &n : mention ? mentions(body) : std::set<ss_>()){
 			if(n == author || told.count(n))
 				continue;
 			bool exists = false;
@@ -1074,7 +1106,8 @@ struct Module: public interface::Module
 					"FROM messages m "
 					"JOIN threads t ON t.id = m.thread WHERE m.id = ?");
 			q.b(id);
-			if(!q.step())
+			// A hidden thread is seen on its own page only
+			if(!q.step() || q.i(9))
 				return;
 			json::Value m = json::object();
 			m.set("id", q.i(0));
@@ -1084,7 +1117,7 @@ struct Module: public interface::Module
 			m.set("edited", q.i(4));
 			m.set("hidden", q.i(7) != 0);
 			m.set("hidden_reason", q.s(8));
-			const ss_ thread_title = q.i(9) ? ss_("A hidden thread") : q.s(6);
+			const ss_ thread_title = q.s(6);
 			title = thread_title+" - Hearth";
 			body = "<p class=\"meta\">In <a href=\"/t/"+itos(q.i(5))+"#m"+
 					itos(id)+"\">"+html(thread_title)+"</a></p>\n"+
@@ -1301,6 +1334,16 @@ struct Module: public interface::Module
 					admin);
 			if(!t.is_object())
 				throw Exception("no such thread");
+			// Hidden: as its page shows it, the first message without its
+			// title, but to the admin and whoever started it
+			if(t.get("hidden").is_true() && !admin && jstr(t, "author") != name){
+				t.set("title", "A hidden thread");
+				json::Value first = json::array();
+				if(jint(q, "after") == 0 && t.get("list").size() > 0)
+					first.append(t.get("list").at(0));
+				t.set("list", first);
+				t.set("more", false);
+			}
 			m_viewing[peer] = jint(q, "thread");
 			Q rd(m_db, "INSERT OR IGNORE INTO reads(account, thread) "
 					"VALUES(?, ?)");
@@ -1414,12 +1457,16 @@ struct Module: public interface::Module
 		if(cmd == "edit"){
 			const int64_t id = jint(q, "message");
 			const ss_ body = jstr(q, "body");
-			Q m(m_db, "SELECT author, body FROM messages WHERE id = ?");
+			Q m(m_db, "SELECT m.author, m.body, m.hidden, t.hidden FROM "
+					"messages m JOIN threads t ON t.id = m.thread WHERE m.id = ?");
 			m.b(id);
 			if(!m.step())
 				throw Exception("no such message");
 			if(m.s(0) != name && !admin)
 				throw Exception("only its author edits a message");
+			// What the moderator hid stays what the appeal is read against
+			if((m.i(2) || m.i(3)) && !admin)
+				throw Exception("a hidden message is not edited");
 			need(text_ok(body, BODY_MAX, true, "the message"));
 			check_limits(name, admin, false, body);
 			const int64_t t = now_s();
@@ -1455,7 +1502,12 @@ struct Module: public interface::Module
 			}
 			Q u(m_db, "UPDATE threads SET answer = ? WHERE id = ?");
 			u.b(message_id).b(thread_id).step();
-			if(!by.empty() && by != name)
+			// Once a message: taking it back and giving it again tells no
+			// one twice
+			Q told(m_db, "SELECT 1 FROM notifications WHERE account = ? AND "
+					"kind = 'answer' AND message = ?");
+			told.b(by).b(message_id);
+			if(!by.empty() && by != name && !told.step())
 				notify(by, "answer", thread_id, message_id, name);
 			return json::Value(true);
 		}
@@ -1475,10 +1527,11 @@ struct Module: public interface::Module
 			// The latest 50, and they are seen now
 			json::Value list = json::array();
 			Q n(m_db, "SELECT n.id, n.kind, n.thread, n.message, n.by, n.time, "
-					"n.seen, t.title, n.note FROM notifications n JOIN threads t ON "
-					"t.id = n.thread WHERE n.account = ? ORDER BY n.id DESC "
-					"LIMIT 50");
-			n.b(name);
+					"n.seen, CASE WHEN t.hidden AND t.author != ? THEN "
+					"'A hidden thread' ELSE t.title END, n.note FROM "
+					"notifications n JOIN threads t ON t.id = n.thread WHERE "
+					"n.account = ? ORDER BY n.id DESC LIMIT 50");
+			n.b(name).b(name);
 			while(n.step()){
 				json::Value v = json::object();
 				v.set("id", n.i(0));
