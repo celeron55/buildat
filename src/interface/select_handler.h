@@ -10,7 +10,10 @@
 	#include <unistd.h> // usleep()
 #endif
 #include <cstring> // strerror()
-#include <cstdlib> // rand()
+#include <cerrno>
+#ifndef _WIN32
+	#include <fcntl.h> // fcntl()
+#endif
 
 namespace interface
 {
@@ -18,15 +21,52 @@ namespace interface
 	{
 		static constexpr const char *MODULE = "SelectHandler";
 
-		set_<int> attempt_bad_fds;
-		int last_added_attempt_bad_fd = -42;
-		set_<int> bad_fds;
-		size_t num_consequent_valid_selects = 0;
+		// Fds in the caller's list that were found closed after a select()
+		// failed on one ([SELECT_BAD_FD]). Left out while they stay closed
+		// and taken back the moment one is open again: fd numbers are
+		// reused, and the next socket opened -- a listener, a new peer --
+		// may well get the number of the one that went away.
+		set_<int> closed_fds;
+
+		static bool fd_open(int fd)
+		{
+#ifdef _WIN32
+			int type = 0;
+			int len = sizeof type;
+			return getsockopt(fd, SOL_SOCKET, SO_TYPE, (char*)&type,
+					&len) == 0 || WSAGetLastError() != WSAENOTSOCK;
+#else
+			return fcntl(fd, F_GETFD) != -1 || errno != EBADF;
+#endif
+		}
+
+		static bool bad_fd_error()
+		{
+#ifdef _WIN32
+			return WSAGetLastError() == WSAENOTSOCK;
+#else
+			return errno == EBADF;
+#endif
+		}
 
 		// Returns false if there is some sort of error (no errors are fatal)
 		bool check(int timeout_us, const sv_<int> &sockets,
 				sv_<int> &active_sockets)
 		{
+			// What was closed and is open again, or is not asked about any
+			// more, is not set aside
+			set_<int> still_closed;
+			for(int fd : sockets){
+				if(closed_fds.count(fd) && !fd_open(fd))
+					still_closed.insert(fd);
+			}
+			if(still_closed != closed_fds){
+				if(!still_closed.empty())
+					log_w(MODULE, "Leaving out closed fds %s of %s",
+							cs(dump(still_closed)), cs(dump(sockets)));
+				closed_fds = still_closed;
+			}
+
 			// Nothing to wait on -- no socket, or none that is open yet (a
 			// listening socket before bind is fd -1, and a server shutting
 			// down before it listened has that and nothing else) -- is a
@@ -35,7 +75,7 @@ namespace interface
 			// the client waiting out its timeout ([WIN_MAPGEN_BUILD])
 			bool any = false;
 			for(int fd : sockets)
-				if(fd >= 0) any = true;
+				if(fd >= 0 && !closed_fds.count(fd)) any = true;
 			if(!any){
 				usleep(timeout_us);
 				return true;
@@ -48,13 +88,8 @@ namespace interface
 			fd_set rfds;
 			FD_ZERO(&rfds);
 			int fd_max = 0;
-			if(!attempt_bad_fds.empty() || !bad_fds.empty()){
-				log_w(MODULE, "Ignoring fds %s and %s out of all %s",
-						cs(dump(attempt_bad_fds)), cs(dump(bad_fds)),
-						cs(dump(sockets)));
-			}
 			for(int fd : sockets){
-				if(fd < 0 || attempt_bad_fds.count(fd) || bad_fds.count(fd))
+				if(fd < 0 || closed_fds.count(fd))
 					continue;
 #ifndef _WIN32
 				// An fd past FD_SETSIZE is a write past the end of rfds,
@@ -74,48 +109,39 @@ namespace interface
 					// The process is probably quitting
 					return false;
 				}
-				// Error
-				num_consequent_valid_selects = 0;
-				log_w(MODULE, "select() returned -1: %s (fds: %s)",
-						strerror(errno), cs(dump(sockets)));
-				if(errno == EBADF){
-					// These are temporary errors
-					// Try to find out which socket is doing this
-					if(attempt_bad_fds.size() == sockets.size()){
-						throw Exception("All fds are bad");
-					} else {
-						for(;;){
-							int fd = sockets[rand() % sockets.size()];
-							if(attempt_bad_fds.count(fd) == 0){
-								log_w(MODULE, "Trying to ignore fd=%i", fd);
-								attempt_bad_fds.insert(fd);
-								last_added_attempt_bad_fd = fd;
-								return false;
-							}
-						}
+				if(bad_fd_error()){
+					// A socket in the list was closed after the list was
+					// made. Which one is asked of each, not guessed: the
+					// guess used to set the listener aside for good.
+					set_<int> found;
+					for(int fd : sockets){
+						if(fd >= 0 && !fd_open(fd))
+							found.insert(fd);
 					}
-				} else {
-					// Don't consume 100% CPU and flood logs
-					usleep(1000 * 100);
+					log_w(MODULE, "select(): closed fds %s in %s; left out "
+							"until open again", cs(dump(found)),
+							cs(dump(sockets)));
+					closed_fds.insert(found.begin(), found.end());
+					// Closed and open again before the check: the next
+					// round has a fresh list
 					return false;
 				}
-			} else if(r == 0){
-				// Nothing happened
-				num_consequent_valid_selects++;
-			} else {
-				// Something happened
-				num_consequent_valid_selects++;
+				log_w(MODULE, "select() returned -1: %s (fds: %s)",
+						strerror(errno), cs(dump(sockets)));
+				// Don't consume 100% CPU and flood logs
+				usleep(1000 * 100);
+				return false;
+			} else if(r > 0){
 				for(int fd : sockets){
-					if(FD_ISSET(fd, &rfds)){
+					if(fd >= 0 && !closed_fds.count(fd) &&
+#ifndef _WIN32
+							fd < FD_SETSIZE &&
+#endif
+							FD_ISSET(fd, &rfds)){
 						log_d(MODULE, "FD_ISSET: %i", fd);
 						active_sockets.push_back(fd);
 					}
 				}
-			}
-			if(!attempt_bad_fds.empty() && num_consequent_valid_selects > 5){
-				log_w(MODULE, "Found bad fd: %d", last_added_attempt_bad_fd);
-				bad_fds.insert(last_added_attempt_bad_fd);
-				attempt_bad_fds.clear();
 			}
 			return true;
 		}

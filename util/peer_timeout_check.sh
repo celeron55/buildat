@@ -1,10 +1,13 @@
 #!/bin/bash
 # tier: full
-# cost: 160s (2026-10-04)
-# covers: builtin/network/network.cpp src/client/state.cpp
+# cost: 165s (2026-10-04)
+# covers: builtin/network/network.cpp src/client/state.cpp src/interface/select_handler.h
 # [PEER_TIMEOUT]: a peer the server has not heard from in 60 s is dropped,
 # and a client with nothing to say keeps its slot by its keepalive.
 #   1. A raw TCP peer that sends nothing: the server closes it at 60 s.
+#      [SELECT_BAD_FD]: the drop closed its fd under the select that came
+#      next, and the select's failure set the listener aside for good; so
+#      the server must still accept after it, and say nothing of select().
 #   2. Beside it, a native client on digger, idle for 150 s: still on at
 #      the end, and the server dropped nobody else.
 #   3. With WEB=firefox or WEB=chrome: the web client (web/, from
@@ -47,6 +50,13 @@ print("%.0f" % (time.time() - t0))
 PY
 )
 [ "$raw" -ge 58 ] && [ "$raw" -le 66 ] || fail "the raw peer went after ${raw} s, not 60"
+sleep 2
+n0=$(grep -c "connected" "$t/srv.log")
+python3 -c "import socket,sys,time; s=socket.create_connection(('127.0.0.1',$P)); time.sleep(3)"
+[ "$(grep -c "connected" "$t/srv.log")" -gt "$n0" ] ||
+	fail "nothing accepted after the drop: $(grep -i "select\|fd" "$t/srv.log" | tail -3)"
+grep -q "select()\|Ignoring fds" "$t/srv.log" &&
+	fail "the drop upset select(): $(grep "select()\|Ignoring fds" "$t/srv.log" | head -2)"
 # 2
 wait $c
 grep -q "Disconnected from server" "$t/c.log" &&
@@ -66,4 +76,4 @@ J
 		fail "the idle web client was dropped: $(grep 'nothing in 60 s; dropping it' "$t/web/server.log")"
 	web="; the $WEB client too"
 fi
-echo "PASS: a silent peer dropped at ${raw} s; a client idle for 150 s kept$web"
+echo "PASS: a silent peer dropped at ${raw} s and the next accepted; a client idle for 150 s kept$web"

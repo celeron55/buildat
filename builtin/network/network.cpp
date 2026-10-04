@@ -502,6 +502,12 @@ struct Module: public interface::Module, public network::Interface
 	size_t m_next_peer_id = 1;
 	// When the listening socket is waited on again (on_listen_event)
 	int64_t m_accept_paused_until_us = 0;
+	// When the select whose readable sockets were all read last returned
+	// (the network thread sets it): what had arrived by then is in the
+	// peers' buffers. A sniff's deadline counts to this and not to the
+	// clock, so a stalled thread does not take a request it has not read
+	// yet for a quiet native client ([SELECT_BAD_FD])
+	int64_t m_read_until_us = 0;
 	int64_t m_peers_full_logged_us = 0;
 	// The game's answer to a peer that will not read; see SendPolicy in
 	// api.h. Buffer is what a game that never says anything gets, because
@@ -1477,7 +1483,7 @@ struct Module: public interface::Module, public network::Interface
 			Peer &peer = pair.second;
 			const int64_t now = interface::os::time_us();
 			if(peer.kind == Peer::Kind::Sniff &&
-					now - peer.accepted_us >= web::SNIFF_US)
+					m_read_until_us - peer.accepted_us >= web::SNIFF_US)
 				become_native(peer);
 			flush_peer(peer);
 			if(peer.closing && (peer.out_pending() == 0 ||
@@ -1856,13 +1862,6 @@ void NetworkThread::run(interface::Thread *thread)
 	interface::SelectHandler handler;
 
 	while(!thread->stop_requested()){
-		sv_<int> sockets;
-		// We can avoid implementing our own mutex locking in Module by using
-		// interface::Server::access_module() instead of directly accessing it.
-		network::access(m_module->m_server, [&](network::Interface *inetwork){
-			sockets = m_module->get_sockets();
-		});
-
 		// A peer that is behind has bytes waiting for room in its socket,
 		// and nothing wakes this loop when that room appears -- the select
 		// is on readability only. So while anything is waiting it comes
@@ -1872,18 +1871,25 @@ void NetworkThread::run(interface::Thread *thread)
 		// what SelectHandler would have to grow. It costs a wakeup every
 		// five milliseconds and only while a peer is actually behind.
 		bool pending = false;
+		sv_<int> sockets;
+		// We can avoid implementing our own mutex locking in Module by using
+		// interface::Server::access_module() instead of directly accessing it.
 		network::access(m_module->m_server, [&](network::Interface *inetwork){
 			m_module->keepalive();
 			pending = m_module->any_peer_pending();
 			// A pipe's peer is read here, not by the select
 			if(m_module->poll_pipes())
 				pending = true;
+			// After keepalive(), which closes the peers it drops: a list
+			// taken before it held their fds, and the select over it
+			// failed ([SELECT_BAD_FD])
+			sockets = m_module->get_sockets();
 		});
 
 		sv_<int> active_sockets;
 		bool ok = handler.check(pending ? 5000 : 500000, sockets,
 				active_sockets);
-		(void)ok; // Unused
+		const int64_t selected_us = interface::os::time_us();
 
 		if(pending){
 			network::access(m_module->m_server,
@@ -1892,13 +1898,13 @@ void NetworkThread::run(interface::Thread *thread)
 			});
 		}
 
-		if(active_sockets.empty())
-			continue;
-
 		network::access(m_module->m_server, [&](network::Interface *inetwork){
 			for(int fd: active_sockets){
 				m_module->handle_active_socket(fd);
 			}
+			// A failed select read nothing
+			if(ok)
+				m_module->m_read_until_us = selected_us;
 		});
 	}
 }
