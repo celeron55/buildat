@@ -10,6 +10,7 @@
 	#undef interface
 #endif
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -97,6 +98,17 @@ static CURL *easy(const ss_ &url, char *errbuf)
 	curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1L);
 	curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 60L);
 	curl_easy_setopt(c, CURLOPT_ERRORBUFFER, errbuf);
+	// BUILDAT_CA_FILE: the CAs trusted in place of the system's, for a
+	// check's own CA (util/web_play_check.sh); never in a deployment
+	static const char *ca_file = getenv("BUILDAT_CA_FILE");
+	if(ca_file){
+		static std::once_flag said;
+		std::call_once(said, [](){
+			log_w(MODULE, "BUILDAT_CA_FILE: trusting %s instead of the "
+					"system's CAs", ca_file);
+		});
+		curl_easy_setopt(c, CURLOPT_CAINFO, ca_file);
+	}
 	return c;
 }
 

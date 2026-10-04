@@ -243,10 +243,14 @@ function M.show_connect_to_server()
 			address_edit:SetText(row.host)
 			port_edit:SetText(row.port)
 		end
-		if second then
+		if second and not row.native_only then
 			do_connect()
 		end
 	end
+
+	-- [PLAY_PAGE] (b): an https page reaches a server by a secure
+	-- WebSocket only, so one with no TLS in front is the native client's
+	local web_tls_only = buildat.get_env("BUILDAT_PAGE_HTTPS") == "1"
 
 	-- **Public servers** from the Starports in the settings, merged and
 	-- filtered by the extension; a search narrows what came
@@ -314,6 +318,11 @@ function M.show_connect_to_server()
 					row.signup = tostring(x.signup_url or "")
 					row.line = row.line .. "\nSign up at " .. row.signup ..
 							" first"
+				end
+				if web_tls_only and not x.tls then
+					row.native_only = true
+					row.line = "Native client only: no TLS in front of " ..
+							"it, which a web page needs\n" .. row.line
 				end
 				-- A pool: its best first, the others to fall back on
 				row.fallbacks = {}
