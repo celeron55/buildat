@@ -98,7 +98,10 @@ function connect(url) {
 // What each step does, in each protocol
 async function firefox() {
 	const c = await connect(`ws://127.0.0.1:${args.port}/session`);
-	await c.send("session.new", {capabilities: {}});
+	// WEB_DRIVE_INSECURE=1: a certificate of a check's own CA is taken
+	// simplified: the browser's override, not the CA put in the profile
+	await c.send("session.new", {capabilities: {alwaysMatch:
+			{acceptInsecureCerts: !!process.env.WEB_DRIVE_INSECURE}}});
 	c.on(d => {
 		if (d.method === "log.entryAdded")
 			logLine(d.params.text);

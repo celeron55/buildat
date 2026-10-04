@@ -38,9 +38,15 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	var port = location.port || (https ? '443' : '80');
 	var host = location.hostname.indexOf(':') >= 0 ?
 			'[' + location.hostname + ']' : location.hostname;
+	// [WEB_ID_TRUST] (d): a page with no game of its own says null here
+	// (util/web_play_dir.sh) and starts on the launch menu, which connects
+	// in place to the server the user picks
+	var server = host + ':' + port;
 	var args = ['-P', '/buildat', '-U', '/urho', '-C', '/buildat/cache',
-		'-D', '/buildat/user', '-s', host + ':' + port,
+		'-D', '/buildat/user',
 		'-w', window.innerWidth + 'x' + window.innerHeight];
+	if(server)
+		args.push('-s', server);
 	// After ? come more arguments, space separated: ?-l 4 for a verbose
 	// log. **The log level, the UI scale and the preferences only**
 	// ([SECURITY_RUN_1]): a link is anybody's to write, and with every

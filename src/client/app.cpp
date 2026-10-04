@@ -4931,7 +4931,10 @@ struct CApp: public App, public magic::Application
 #ifdef __EMSCRIPTEN__
 		const char *url = luaL_checkstring(L, 1);
 		int ok = EM_ASM_INT({
-			var url = UTF8ToString($0);
+			// The page's own origin, so a page with no game of its own
+			// (play.buildat.org, the Starport's web_clients) is told apart
+			var url = UTF8ToString($0) + '&origin=' +
+					encodeURIComponent(location.origin);
 			Module['buildatAuthMsg'] = null;
 			Module['buildatAuthOrigin'] = new URL(url).origin;
 			if(!Module['buildatAuthListen']){
