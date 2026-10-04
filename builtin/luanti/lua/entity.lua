@@ -3746,6 +3746,17 @@ end
 -- the node, and the chain can be more than one deep -- a player on a seat
 -- on a cart -- so this follows it up, with a bound in case a mod makes a
 -- ring of them.
+-- Where a bone attachment is drawn ([WIELD_AT_FEET] (2)): the bone's own
+-- transform is not read yet, so every bone lands at one place on the
+-- model -- about the hand: halfway between the eyes and the feet, 0.3
+-- nodes to the model's right and 0.2 forward, turned with its yaw. Real
+-- bone transforms come with [OBJECT_MESH] step 1.
+-- simplified: the fixed offsets and the yaw's right/forward signs are
+-- tuned against a VoxeLibre shot (BUILDAT_LUANTI_TRACE_OBJECT).
+local BONE_HAND_UP = 0.8
+local BONE_HAND_RIGHT = 0.3
+local BONE_HAND_FWD = 0.2
+
 local function drawn_pos_of(o, depth)
 	local a = o.attached_to
 	local parent = a and state_of(a.ref) or nil
@@ -3753,6 +3764,15 @@ local function drawn_pos_of(o, depth)
 		return o.pos
 	end
 	local at = drawn_pos_of(parent, (depth or 0) + 1)
+	if a.bone and a.bone ~= "" then
+		local yaw = parent.rot and parent.rot.y or 0
+		local s, c = math.sin(yaw), math.cos(yaw)
+		return {
+			x = at.x + BONE_HAND_RIGHT * c + BONE_HAND_FWD * s,
+			y = at.y + BONE_HAND_UP,
+			z = at.z - BONE_HAND_RIGHT * s + BONE_HAND_FWD * c,
+		}
+	end
 	local offset = a.position or {x = 0, y = 0, z = 0}
 	return {
 		x = at.x + (offset.x or offset[1] or 0) / 10,
@@ -3827,15 +3847,25 @@ local function show_objects(dtime)
 			-- and a client that did not know stood punching it instead of
 			-- digging the ground (2026-09-19)
 			local pointable = (o.props.pointable ~= false) and "1" or "0"
+			-- Which object this rides and whether it is forced visible
+			-- ([WIELD_AT_FEET] (1)): the client hides what is attached to
+			-- its own player in first person unless the game forces it.
+			local a = o.attached_to
+			local parent_id = a and tostring(ref_ids[a.ref] or 0) or "0"
+			local forced = (a and a.forced_visible) and "1" or "0"
 			local was = sent_appearance[id]
 			if not was or was[1] ~= kind or was[2] ~= texture or
-					was[3] ~= detail or was[4] ~= pointable then
-				sent_appearance[id] = {kind, texture, detail, pointable}
+					was[3] ~= detail or was[4] ~= pointable or
+					was[5] ~= parent_id or was[6] ~= forced then
+				sent_appearance[id] = {kind, texture, detail, pointable,
+						parent_id, forced}
 				props_changed[#props_changed + 1] = tostring(id)
 				props_changed[#props_changed + 1] = kind
 				props_changed[#props_changed + 1] = texture
 				props_changed[#props_changed + 1] = detail
 				props_changed[#props_changed + 1] = pointable
+				props_changed[#props_changed + 1] = parent_id
+				props_changed[#props_changed + 1] = forced
 			end
 		end
 	end

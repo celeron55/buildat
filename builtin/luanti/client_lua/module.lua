@@ -996,10 +996,13 @@ end
 
 startup_packet("luanti:object_props", "luanti_data/object_props.bin", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
-	for i = 1, #values - 4, 5 do
+	for i = 1, #values - 6, 7 do
 		object_looks[values[i]] = parse_look(values[i + 1], values[i + 2],
 				values[i + 3])
 		object_looks[values[i]].pointable = values[i + 4] ~= "0"
+		-- What it rides, and whether it is forced visible ([WIELD_AT_FEET])
+		object_looks[values[i]].parent_id = values[i + 5]
+		object_looks[values[i]].forced_visible = values[i + 6] ~= "0"
 		-- A look that changed is a node made again, and the next packet
 		-- has to do it rather than recognise the same nine doubles
 		object_last[values[i]] = nil
@@ -1127,13 +1130,19 @@ function M.set_draw_self(on)
 end
 
 local function place_object(id, v, i)
-	if id == M.self_id and not M.draw_self then
+	local look = object_looks[id]
+	local attached_to_self = look and look.parent_id == M.self_id and
+			not look.forced_visible
+	if (id == M.self_id or attached_to_self) and not M.draw_self then
 		-- The player's own object is not drawn: the camera is inside it, so
 		-- what a game's own player model comes to is a column of itself up
 		-- the middle of the screen. Luanti's client leaves it out of a
-		-- first-person view for the same reason. It may have been drawn
-		-- already -- which object is the player's own arrives after the
-		-- objects themselves do -- so it goes now if it was.
+		-- first-person view for the same reason, and so is a thing attached
+		-- to it unless the game forces it visible ([WIELD_AT_FEET] (1)):
+		-- VoxeLibre's wieldview rides the player and must not sit in the
+		-- camera. It may have been drawn already -- which object is the
+		-- player's own arrives after the objects themselves do -- so it
+		-- goes now if it was.
 		local had = object_nodes[id]
 		if had then
 			had.node:Remove()
