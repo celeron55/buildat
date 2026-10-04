@@ -32,6 +32,16 @@
 #include <JO/jo_jpeg.h>
 #include <SDL/SDL_surface.h>
 #define STB_IMAGE_IMPLEMENTATION
+// buildat: the formats a Luanti game's textures come in, and no others: a
+// server hands the client any file as a texture ([SECURITY_RUN_1])
+#define STBI_ONLY_PNG
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_TGA
+#define STBI_ONLY_BMP
+// and no side over 8192: stb's own limit is 2^24, so 25 bytes of TGA
+// header asked for gigabytes. simplified: 256 MB of RGBA at most; a
+// texture past 8192 a side would need this raised
+#define STBI_MAX_DIMENSIONS 8192
 #include <STB/stb_image.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <STB/stb_image_write.h>
@@ -270,6 +280,20 @@ bool Image::BeginLoad(Deserializer& source)
 {
     // Check for DDS, KTX or PVR compressed format
     String fileID = source.ReadFileID();
+
+    // buildat: DDS, KTX, PVR and WebP are refused. A server hands the
+    // client any file as a texture, nothing buildat ships uses them, and
+    // their loaders are not safe on such input ([SECURITY_RUN_1]): KTX's
+    // level sizes wrap past its size check and write past the buffer, a
+    // DDS bit count of 0 divides by it, and the bundled libwebp is 0.6.0,
+    // before CVE-2023-4863's heap overflow was fixed.
+    if (fileID == "DDS " || fileID == "\253KTX" || fileID == "PVR\3" ||
+            fileID == "RIFF")
+    {
+        URHO3D_LOGERROR("Image " + source.GetName() + ": DDS, KTX, PVR and "
+                "WebP are not loaded");
+        return false;
+    }
 
     if (fileID == "DDS ")
     {

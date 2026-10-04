@@ -57,6 +57,9 @@ namespace interface
 		virtual void shutdown(int exit_status = 0, const ss_ &reason = "") = 0;
 
 		virtual bool load_module(const interface::ModuleInfo &info) = 0;
+		// How many modules the loader is about to load, for the STATUS
+		// lines a start is followed by ([START_PROGRESS])
+		virtual void set_module_count(size_t count) = 0;
 		virtual void unload_module(const ss_ &module_name) = 0;
 		virtual void reload_module(const interface::ModuleInfo &info) = 0;
 		virtual void reload_module(const ss_ &module_name) = 0;
@@ -90,6 +93,11 @@ namespace interface
 		virtual ss_ get_file_path(const ss_ &name) = 0;
 
 		virtual const ServerConfig& get_config() = 0;
+
+		// The last path component of -m: "minigame" for
+		// -m ../apps/minigame. It namespaces what the server keeps under the
+		// user path, so that one game cannot name another's saves.
+		virtual ss_ get_app_id() = 0;
 
 		virtual void access_thread_pool(std::function<void(
 				interface::thread_pool::ThreadPool*pool)> cb) = 0;
