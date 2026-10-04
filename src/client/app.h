@@ -60,6 +60,9 @@ namespace app
 		// Frame limiter. 200 is Urho3D's own desktop default, so leaving it
 		// alone changes nothing; 0 is unlimited.
 		int max_fps = 200;
+		// The web client's frame rate while the page is unfocused, hidden or
+		// left without input ([WEB_IDLE_FPS]): 1, 5, 10, 30 or 60
+		int web_idle_fps = 5;
 		// Set by -w: the size came from the command line, so it is not
 		// remembered across runs and the saved size is left alone
 		bool size_forced = false;

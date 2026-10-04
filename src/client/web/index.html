@@ -86,6 +86,21 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	});
 	window.addEventListener('blur', away);
 	window.addEventListener('focus', back);
+	// **The last input, for the idle frame rate** ([WEB_IDLE_FPS], app.cpp
+	// web_idle_step): the client reads buildatInputAt each frame, and while
+	// it is slow it leaves buildatWake here for the first input to call
+	function input(){
+		var m = window.Module;
+		if(!m)
+			return;
+		m.buildatInputAt = Date.now();
+		if(m.buildatWake)
+			m.buildatWake();
+	}
+	['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'focus']
+			.forEach(function(e){
+		window.addEventListener(e, input, {capture: true, passive: true});
+	});
 	// **Fullscreen on a touchscreen while the game wants it** (user,
 	// 2026-09-30): a phone browser's address bar covers a page that does
 	// not scroll, and only fullscreen puts it away. A game says when, with
@@ -149,6 +164,7 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			Module.ENV.BUILDAT_TOUCH = coarse ? '1' : '0';
 		}],
 		buildatSyncFullscreen: sync_fullscreen,
+		buildatInputAt: Date.now(),
 		print: function(t){ console.log(t); },
 		printErr: function(t){ console.warn(t); },
 		setStatus: function(t){ status.textContent = t; },

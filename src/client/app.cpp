@@ -360,6 +360,9 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 		} else if(key == "max_fps"){
 			in_range = (v >= 0 && v <= 1000);
 			opt->graphics.max_fps = (int)v;
+		} else if(key == "web_idle_fps"){
+			in_range = (v == 1 || v == 5 || v == 10 || v == 30 || v == 60);
+			opt->graphics.web_idle_fps = (int)v;
 		} else if(key == "multisampling"){
 			in_range = (v == 1 || v == 2 || v == 4 || v == 8 || v == 16);
 			opt->graphics.multisampling = (int)v;
@@ -413,6 +416,10 @@ static void check_parse_preference_options()
 		throw Exception("parse_preference_options: took an out-of-range value");
 	if(app::parse_preference_options("multisampling=3", &o, &err))
 		throw Exception("parse_preference_options: took a bad sample count");
+	if(app::parse_preference_options("web_idle_fps=7", &o, &err) ||
+			!app::parse_preference_options("web_idle_fps=10", &o, &err) ||
+			o.graphics.web_idle_fps != 10)
+		throw Exception("parse_preference_options: web_idle_fps's choices");
 	if(app::parse_preference_options("nonesuch=1", &o, &err))
 		throw Exception("parse_preference_options: took an unknown key");
 }
@@ -561,6 +568,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jrs = o.get("render_scale");
 	const json::Value &jvs = o.get("vsync");
 	const json::Value &jmf = o.get("max_fps");
+	const json::Value &jwf = o.get("web_idle_fps");
 	const json::Value &jms = o.get("multisampling");
 	const json::Value &jsv = o.get("sound_volume_db");
 	// **The old key, read once** ([VOLUME_LAW]): a `sound_volume` in a
@@ -590,6 +598,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 		items += ss_()+(items.empty()?"":",")+"vsync="+(jvs.as_boolean()?"1":"0");
 	if(jmf.is_integer())
 		items += ss_()+(items.empty()?"":",")+"max_fps="+itos(jmf.as_integer());
+	if(jwf.is_integer())
+		items += ss_()+(items.empty()?"":",")+"web_idle_fps="+itos(jwf.as_integer());
 	if(jms.is_integer())
 		items += ss_()+(items.empty()?"":",")+"multisampling="+itos(jms.as_integer());
 	if(jsv.is_number()){
@@ -683,6 +693,7 @@ static void save_preferences(const app::Options &opt)
 		o.set("render_scale", opt.graphics.render_scale);
 	o.set("vsync", opt.graphics.vsync);
 	o.set("max_fps", opt.graphics.max_fps);
+	o.set("web_idle_fps", opt.graphics.web_idle_fps);
 	o.set("multisampling", opt.graphics.multisampling);
 	o.set("sound_volume_db", opt.sound_volume_db);
 	o.set("sound_mute", opt.sound_mute);
@@ -1668,6 +1679,52 @@ struct CApp: public App, public magic::Application
 			return g_local_server_token;
 		return "";
 	}
+
+#ifdef __EMSCRIPTEN__
+	// **A web client left alone draws at web_idle_fps** ([WEB_IDLE_FPS]):
+	// while the page is hidden or unfocused, or has had no input for a
+	// minute. The frame is the browser's animation callback there, and
+	// Urho3D's own limits (max_fps, the unfocused rate) are skipped under
+	// __EMSCRIPTEN__, so the callback's timing is what changes. The page's
+	// input listener (index.html) calls buildatWake, which puts the full
+	// rate back on that input rather than on the next slow frame.
+	bool m_web_idle = false;
+	int m_web_idle_rate = 0;
+	void web_idle_step()
+	{
+		const int rate = m_options.graphics.web_idle_fps;
+		const int st = EM_ASM_INT({
+			var idle = !(document.visibilityState === 'visible' &&
+					document.hasFocus()) ||
+					Date.now() - (Module['buildatInputAt'] || 0) > 60000;
+			return (idle ? 1 : 0) | (Module['buildatWake'] ? 0 : 2);
+		});
+		const bool idle = st & 1;
+		// The page's input woke it: the rate is full again, whatever this
+		// side last set, and an unfocused page goes back to slow from there
+		if(m_web_idle && (st & 2))
+			m_web_idle = false;
+		if(idle == m_web_idle && rate == m_web_idle_rate)
+			return;
+		m_web_idle = idle;
+		m_web_idle_rate = rate;
+		if(idle){
+			emscripten_set_main_loop_timing(EM_TIMING_SETTIMEOUT,
+					1000 / (rate > 0 ? rate : 5));
+			EM_ASM({
+				Module['buildatWake'] = function(){
+					Module['buildatWake'] = null;
+					_emscripten_set_main_loop_timing(1, 1); // EM_TIMING_RAF
+				};
+			});
+		} else {
+			emscripten_set_main_loop_timing(EM_TIMING_RAF, 1);
+			EM_ASM({ Module['buildatWake'] = null; });
+		}
+		log_v(MODULE, "web: %s", idle ? cs("idle, "+itos(rate)+" frames a second") :
+				"full rate");
+	}
+#endif
 
 	void lost_connection(const ss_ &reason)
 	{
@@ -2816,6 +2873,7 @@ struct CApp: public App, public magic::Application
 			lua_sethook(L, nullptr, 0, 0);
 #ifdef __EMSCRIPTEN__
 		web_text_sync(GetSubsystem<magic::UI>());
+		web_idle_step();
 #endif
 		update_ui_fit();
 		// A local server on its way out is reaped here rather than in
@@ -3886,9 +3944,14 @@ struct CApp: public App, public magic::Application
 	// and knows nothing about the file.
 	static const char** preference_names()
 	{
-		static const char *names[9] = {"render_scale", "vsync", "max_fps",
+		static const char *names[] = {"render_scale", "vsync", "max_fps",
 				"multisampling", "sound_volume_db", "sound_mute", "launch_ui",
-				"default_username", nullptr};
+				"default_username",
+#ifdef __EMSCRIPTEN__
+				// Only where it does something
+				"web_idle_fps",
+#endif
+				nullptr};
 		return names;
 	}
 
@@ -3925,6 +3988,8 @@ struct CApp: public App, public magic::Application
 			lua_pushboolean(L, o.graphics.vsync);
 		else if(name == "max_fps")
 			lua_pushinteger(L, o.graphics.max_fps);
+		else if(name == "web_idle_fps")
+			lua_pushinteger(L, o.graphics.web_idle_fps);
 		else if(name == "multisampling")
 			lua_pushinteger(L, o.graphics.multisampling);
 		else if(name == "sound_volume_db")
