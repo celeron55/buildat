@@ -41,11 +41,8 @@
 #include <errno.h>
 #include <sys/stat.h>
 #define MODULE "network"
-#ifdef _WIN32
-	#include <thread>
-	#include <mutex>
-	#include <atomic>
-#endif
+#include <thread>
+#include <mutex>
 
 using interface::Event;
 
@@ -519,12 +516,21 @@ struct Module: public interface::Module, public network::Interface
 	up_<interface::Thread> m_thread;
 	// The web client's files as last read, by name, kept while the file's
 	// modification time and size are the same (its ETag)
+	struct Deflated {
+		std::mutex mutex;
+		bool done = false;
+		sp_<const ss_> data;
+	};
 	struct WebFile {
 		ss_ etag;
-		ss_ body;
-		ss_ deflated;
+		sp_<const ss_> body;
+		// Made beside the module ([SELECT_BAD_FD]): about a second for the
+		// wasm and as much for the data held the network module, and every
+		// peer with it, on the first page load after a start
+		sp_<Deflated> deflated;
 	};
 	sm_<ss_, WebFile> m_web_files;
+	sv_<std::thread> m_deflaters;
 	std::set<ss_> m_claimed_paths;
 	// [FAVICON] an app's override of /favicon.ico, served from memory; ""
 	// falls back to the default PNG beside the logo
@@ -557,6 +563,8 @@ struct Module: public interface::Module, public network::Interface
 
 		m_thread->request_stop();
 		m_thread->join();
+		for(std::thread &t : m_deflaters)
+			t.join();
 
 		if(m_will_restore_after_unload){
 			if(m_listening_socket->good()){
@@ -651,6 +659,13 @@ struct Module: public interface::Module, public network::Interface
 				m_server->get_app_id()+"/server_icon.png");
 		ss_ address = m_server->get_config().get<ss_>("network_address");
 		ss_ port = m_server->get_config().get<ss_>("network_port");
+		// Deflated before the first page load asks
+		for(const char *name : {"buildat.js", "buildat.wasm", "buildat.data"}){
+			const ss_ path = web_client_path()+"/"+name;
+			struct stat st;
+			if(stat(path.c_str(), &st) == 0)
+				load_web_file(name, path, "");
+		}
 
 		if(!m_listening_socket->bind_fd(address, port) ||
 				!m_listening_socket->listen_fd()){
@@ -1107,44 +1122,18 @@ struct Module: public interface::Module, public network::Interface
 		// **A reload does not download the client again** (user,
 		// 2026-10-01: a phone reloads the page each time it comes back): the
 		// browser asks with the ETag it has, and the same file is a 304
-		struct stat st;
 		// [PAGE_TITLE] index.html carries the server's title: in its ETag too
 		const bool index = wf_name->first == "index.html";
-		const ss_ title = index ? page_title() : "";
-		const ss_ etag = stat(path.c_str(), &st) == 0 ? "\""+
-				itos((int64_t)st.st_mtime)+"-"+itos((int64_t)st.st_size)+
-				(index ? "-"+itos((int64_t)(std::hash<ss_>()(title) >> 1)) : "")+
-				"\"" : "";
-		WebFile &wf = m_web_files[wf_name->first];
-		if(etag.empty() || wf.etag != etag){
-			wf = WebFile();
-			std::ifstream f(path, std::ios::binary);
-			if(f.good()){
-				std::ostringstream os(std::ios::binary);
-				os<<f.rdbuf();
-				wf.body = os.str();
-			}
-			if(!f.good() || wf.body.empty()){
-				log_w(MODULE, "Web client file not found: %s", cs(path));
-				ss_ body = "The web client is not here: "+wf_name->first+
-						" is not in the server's web_client_path.\n";
-				peer.queue_raw(web::response("404 Not Found",
-						"text/plain; charset=utf-8", body.size()) + body);
-				return true;
-			}
-			const size_t at = index ? wf.body.find("<title>Buildat</title>") :
-					ss_::npos;
-			if(at != ss_::npos)
-				wf.body.replace(at, 22, "<title>"+title+"</title>");
-			// Compressed once per build; about a second for the wasm, in
-			// this thread
-			// simplified: zlib's stream, which is what HTTP's "deflate"
-			// is and every browser takes; gzip only adds a header and a CRC
-			std::ostringstream os(std::ios::binary);
-			interface::compress_zlib(wf.body, os, 6);
-			wf.deflated = os.str();
-			wf.etag = etag;
+		const WebFile *wf = load_web_file(wf_name->first, path,
+				index ? page_title() : "");
+		if(!wf){
+			ss_ body = "The web client is not here: "+wf_name->first+
+					" is not in the server's web_client_path.\n";
+			peer.queue_raw(web::response("404 Not Found",
+					"text/plain; charset=utf-8", body.size()) + body);
+			return true;
 		}
+		const ss_ &etag = wf->etag;
 		const ss_ cache = etag.empty() ? "" : "ETag: "+etag+"\r\n";
 		if(!etag.empty() && headers["if-none-match"].find(etag) != ss_::npos){
 			log_v(MODULE, "Peer %zu: %s not modified", peer.id, cs(path));
@@ -1153,21 +1142,77 @@ struct Module: public interface::Module, public network::Interface
 			return true;
 		}
 		// simplified: a substring match; "deflate;q=0" would still get it
-		const bool deflate =
+		// Until its deflated copy is made, a file goes as it is
+		bool deflate =
 				web::lower(headers["accept-encoding"]).find("deflate") != ss_::npos;
-		const ss_ &body = deflate ? wf.deflated : wf.body;
+		sp_<const ss_> body = wf->body;
+		if(deflate){
+			std::lock_guard<std::mutex> lock(wf->deflated->mutex);
+			if(wf->deflated->done)
+				body = wf->deflated->data;
+			else
+				deflate = false;
+		}
 		log_v(MODULE, "Peer %zu: serving %s (%zu bytes%s)", peer.id,
-				cs(path), body.size(), deflate ? ", deflated" : "");
+				cs(path), body->size(), deflate ? ", deflated" : "");
 		// It goes out through the peer's queue like anything else, as far as
 		// the socket takes it at a time.
 		// simplified: the whole file is kept in memory, and copied per
 		// download; tens of megabytes. Reading it as the queue drains is the
 		// upgrade.
 		peer.queue_raw(web::response("200 OK", wf_name->second,
-				body.size(), cache+(deflate ? "Content-Encoding: deflate\r\n" :
+				body->size(), cache+(deflate ? "Content-Encoding: deflate\r\n" :
 				"")+"Vary: Accept-Encoding\r\n"));
-		peer.queue_raw(ss_(body));
+		peer.queue_raw(ss_(*body));
 		return true;
+	}
+
+	// A web client file, read again when its ETag changes, and its deflated
+	// copy started on a thread of its own; null if it cannot be read.
+	// title: index.html's ([PAGE_TITLE]), "" for the others
+	const WebFile* load_web_file(const ss_ &name, const ss_ &path,
+			const ss_ &title)
+	{
+		const bool index = name == "index.html";
+		struct stat st;
+		const ss_ etag = stat(path.c_str(), &st) == 0 ? "\""+
+				itos((int64_t)st.st_mtime)+"-"+itos((int64_t)st.st_size)+
+				(index ? "-"+itos((int64_t)(std::hash<ss_>()(title) >> 1)) : "")+
+				"\"" : "";
+		WebFile &wf = m_web_files[name];
+		if(!etag.empty() && wf.etag == etag)
+			return &wf;
+		wf = WebFile();
+		std::ifstream f(path, std::ios::binary);
+		ss_ body;
+		if(f.good()){
+			std::ostringstream os(std::ios::binary);
+			os<<f.rdbuf();
+			body = os.str();
+		}
+		if(!f.good() || body.empty()){
+			log_w(MODULE, "Web client file not found: %s", cs(path));
+			return nullptr;
+		}
+		const size_t at = index ? body.find("<title>Buildat</title>") :
+				ss_::npos;
+		if(at != ss_::npos)
+			body.replace(at, 22, "<title>"+title+"</title>");
+		wf.body.reset(new ss_(std::move(body)));
+		wf.deflated.reset(new Deflated());
+		wf.etag = etag;
+		// simplified: zlib's stream, which is what HTTP's "deflate" is and
+		// every browser takes; gzip only adds a header and a CRC
+		sp_<const ss_> in = wf.body;
+		sp_<Deflated> out = wf.deflated;
+		m_deflaters.emplace_back([in, out](){
+			std::ostringstream os(std::ios::binary);
+			interface::compress_zlib(*in, os, 6);
+			std::lock_guard<std::mutex> lock(out->mutex);
+			out->data.reset(new ss_(os.str()));
+			out->done = true;
+		});
+		return &wf;
 	}
 
 	ss_ web_client_path()
