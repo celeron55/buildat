@@ -52,7 +52,8 @@ LineEdit::LineEdit(Context* context) :
     echoCharacter_(0),
     cursorMovable_(true),
     textSelectable_(true),
-    textCopyable_(true)
+    textCopyable_(true),
+    multiLine_(false)
 {
     clipChildren_ = true;
     SetEnabled(true);
@@ -208,8 +209,57 @@ bool LineEdit::OnDragDropFinish(UIElement* source)
 
 void LineEdit::OnKey(int key, int buttons, int qualifiers)
 {
+#ifdef __EMSCRIPTEN__
+    // buildat [WEB_KEYS]: in the browser, its own copy, cut and paste do
+    // these through the page's textarea (src/client/app.cpp); doing them
+    // here as well would paste twice
+    if ((key == KEY_X || key == KEY_C || key == KEY_V) && (qualifiers & QUAL_CTRL))
+        return;
+#endif
     bool changed = false;
     bool cursorMoved = false;
+
+    // buildat [HEARTH_MVP]: a multi-line edit moves by rows, and Enter is a
+    // line break; Ctrl+Enter is what finishes it
+    if (multiLine_)
+    {
+        IntVector2 at = VectorRoundToInt(text_->GetCharPosition(cursorPosition_));
+        int row = text_->GetRowHeight();
+        unsigned target = M_MAX_UNSIGNED;
+        if (key == KEY_UP)
+            target = at.y_ < row ? 0 : GetCharIndexOnRow(IntVector2(at.x_, at.y_ - row));
+        else if (key == KEY_DOWN)
+            target = GetCharIndexOnRow(IntVector2(at.x_, at.y_ + row));
+        else if (key == KEY_HOME && !(qualifiers & QUAL_CTRL))
+            target = GetCharIndexOnRow(IntVector2(0, at.y_));
+        else if (key == KEY_END && !(qualifiers & QUAL_CTRL))
+            target = GetCharIndexOnRow(IntVector2(M_MAX_INT / 2, at.y_));
+        else if ((key == KEY_RETURN || key == KEY_RETURN2 || key == KEY_KP_ENTER) && !(qualifiers & QUAL_CTRL))
+        {
+            OnTextInput("\n");
+            return;
+        }
+        if (target != M_MAX_UNSIGNED)
+        {
+            if (!cursorMovable_)
+                return;
+            if (textSelectable_ && qualifiers & QUAL_SHIFT)
+            {
+                if (!text_->GetSelectionLength())
+                    dragBeginCursor_ = cursorPosition_;
+                unsigned start = dragBeginCursor_;
+                if (start < target)
+                    text_->SetSelection(start, target - start);
+                else
+                    text_->SetSelection(target, start - target);
+            }
+            else
+                text_->ClearSelection();
+            cursorPosition_ = target;
+            UpdateCursor();
+            return;
+        }
+    }
 
     switch (key)
     {
@@ -564,6 +614,13 @@ bool LineEdit::FilterImplicitAttributes(XMLElement& dest) const
     return true;
 }
 
+void LineEdit::SetMultiLine(bool enable)
+{
+    multiLine_ = enable;
+    text_->SetWordwrap(enable);
+    UpdateCursor();
+}
+
 void LineEdit::UpdateText()
 {
     unsigned utf8Length = line_.LengthUTF8();
@@ -593,10 +650,17 @@ void LineEdit::UpdateText()
 
 void LineEdit::UpdateCursor()
 {
-    int x = text_->GetCharPosition(cursorPosition_).x_;
+    // buildat: the text wraps at the edit's width, so it is set before
+    // the cursor's place is read
+    if (multiLine_)
+        text_->SetFixedWidth(Max(GetWidth() - GetIndentWidth() - clipBorder_.left_ - clipBorder_.right_ -
+            cursor_->GetWidth(), 1));
+    IntVector2 at = VectorRoundToInt(text_->GetCharPosition(cursorPosition_));
+    int x = at.x_;
+    int y = multiLine_ ? at.y_ : 0;
 
     text_->SetPosition(GetIndentWidth() + clipBorder_.left_, clipBorder_.top_);
-    cursor_->SetPosition(text_->GetPosition() + IntVector2(x, 0));
+    cursor_->SetPosition(text_->GetPosition() + IntVector2(x, y));
     cursor_->SetSize(cursor_->GetWidth(), text_->GetRowHeight());
 
     IntVector2 screenPosition = ElementToScreen(cursor_->GetPosition());
@@ -613,7 +677,20 @@ void LineEdit::UpdateCursor()
         sx = x - left;
     if (sx < 0)
         sx = 0;
-    SetChildOffset(IntVector2(-sx, 0));
+    // buildat: and vertically, for a multi-line edit
+    int sy = 0;
+    if (multiLine_)
+    {
+        sy = -GetChildOffset().y_;
+        int bottom = GetHeight() - clipBorder_.top_ - clipBorder_.bottom_ - text_->GetRowHeight();
+        if (y - sy > bottom)
+            sy = y - bottom;
+        if (y - sy < 0)
+            sy = y;
+        if (sy < 0)
+            sy = 0;
+    }
+    SetChildOffset(IntVector2(-sx, -sy));
 
     // Restart blinking
     cursorBlinkTimer_ = 0.0f;
@@ -623,6 +700,9 @@ unsigned LineEdit::GetCharIndex(const IntVector2& position)
 {
     IntVector2 screenPosition = ElementToScreen(position);
     IntVector2 textPosition = text_->ScreenToElement(screenPosition);
+
+    if (multiLine_)
+        return GetCharIndexOnRow(textPosition);
 
     if (textPosition.x_ < 0)
         return 0;
@@ -634,6 +714,22 @@ unsigned LineEdit::GetCharIndex(const IntVector2& position)
     }
 
     return M_MAX_UNSIGNED;
+}
+
+unsigned LineEdit::GetCharIndexOnRow(const IntVector2& textPosition)
+{
+    unsigned n = text_->GetNumChars();
+    int row = text_->GetRowHeight();
+    // Above the first row is the first, below the last the last
+    int y = Clamp(textPosition.y_, 0, (int)text_->GetCharPosition(n).y_);
+    unsigned best = M_MAX_UNSIGNED;
+    for (unsigned i = 0; i <= n; ++i)
+    {
+        IntVector2 p = VectorRoundToInt(text_->GetCharPosition(i));
+        if (y >= p.y_ && y < p.y_ + row && (best == M_MAX_UNSIGNED || p.x_ <= textPosition.x_))
+            best = i;
+    }
+    return best == M_MAX_UNSIGNED ? n : best;
 }
 
 void LineEdit::HandleFocused(StringHash /*eventType*/, VariantMap& eventData)

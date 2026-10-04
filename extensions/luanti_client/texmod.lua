@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/texmod.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Luanti's texture modifier language, turned into buildat.compose_image()
 -- operations.
@@ -295,6 +296,7 @@ function M.resolve(expr, ctx, extra)
 	end
 	local ops, size = M.build(expr, {
 		resource = ctx.resource,
+		png = ctx.png,
 		compose = function(sub) return M.resolve(sub, ctx) end,
 	})
 	if not ops then

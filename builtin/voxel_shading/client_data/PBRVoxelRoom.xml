@@ -1,0 +1,33 @@
+<!-- **The same shading for a cube map that holds a room rather than a
+     sky** ([LAUNCH_WORLD], 2026-09-24). VOXELROOMPROBE adds two things a
+     room-shaped probe wants and a sky does not: the reflected ray is
+     followed to the box the cube map covers, so a wide flat floor
+     reflects the room from where it is rather than from the probe's own
+     point; and the sky visibility gating is off, since a room is
+     visible from inside it by definition -- a sealed room has no
+     skylight, and gating by it switched the floor's reflection off
+     altogether.
+
+     A game with a sky keeps PBRVoxel.xml, whose shader has none of this
+     compiled in: the two halves of "is this cube map the sky, or this
+     room?" are one define, and [LOOK_CHECK]'s rule is that a game's look
+     does not change.
+
+     Voxel geometry shaded by the skylight the mesher packed into vertex
+     colors. See PBRVoxel.glsl beside this file for what the colors mean.
+
+     METALLIC reads the roughness/metalness atlas the atlas registry derives
+     from each texture, VOXELNORMALMAP the normal atlas beside it, VOXELIBL
+     reflects the zone cube map, dimmed in the directions the camera cannot see
+     the sky along, VOXELSPOTS moves the glossy parts of a surface around over
+     time and VOXELTRANSLUCENCY lets light through them from behind.
+     A world that sets no zone cube map gets black reflections, so IBL is only
+     useful together with Zone.zoneTexture, and the client has to keep the
+     SkyVis parameter up to date; builtin/voxel_shading's module.lua does. -->
+<technique vs="voxel_shading/PBRVoxel" ps="voxel_shading/PBRVoxel"
+        psdefines="DIFFMAP PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY VOXELROOMPROBE">
+    <pass name="base" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>

@@ -6,6 +6,7 @@
 #include "interface/mesh.h"
 #include "interface/voxel_volume.h"
 #include "interface/thread_pool.h"
+#include "interface/os.h"
 #include <c55/os.h>
 #include <tolua++.h>
 #include <luabind/luabind.hpp>
@@ -15,6 +16,8 @@
 #include <StaticModel.h>
 #include <Model.h>
 #include <CustomGeometry.h>
+#include <Image.h>
+#include <algorithm>
 #include <CollisionShape.h>
 #include <RigidBody.h>
 #define MODULE "lua_bindings"
@@ -61,7 +64,7 @@ void set_simple_voxel_model(const luabind::object &node_o,
 	if(buf == nullptr)
 		data = lua_tocppstring(L, 5);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	if((int)data.size() != w * h * d){
 		throw Exception(ss_()+"set_simple_voxel_model(): Data size does not match"
@@ -82,7 +85,8 @@ void set_simple_voxel_model(const luabind::object &node_o,
 
 void set_8bit_voxel_geometry(const luabind::object &node_o,
 		int w, int h, int d, const luabind::object &buffer_o,
-		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg)
+		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
+		int ox, int oy, int oz)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -96,7 +100,7 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 	if(buf == nullptr)
 		data = lua_tocppstring(L, 5);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	if((int)data.size() != w * h * d){
 		throw Exception(ss_()+"set_8bit_voxel_geometry(): Data size does not match"
@@ -110,8 +114,11 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 
 	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 
+	// Where this block's (0, 0, 0) sits in the world, which is what a
+	// voxel of uv_scale > 1 takes its slice of the repeat from ([WORLD_UV])
 	interface::mesh::set_8bit_voxel_geometry(cg, context, w, h, d, data,
-			voxel_reg.get(), atlas_reg.get());
+			voxel_reg.get(), atlas_reg.get(),
+			PolyVox::Vector3DInt32(ox, oy, oz));
 
 	cg->SetOccluder(true);
 	cg->SetCastShadows(true);
@@ -162,6 +169,31 @@ static void call_material_cb(const luabind::object &cb)
 // chunk while the task for it is still in the queue, which is what happens
 // every time a chunk goes out of view or a world is closed. A raw pointer
 // there is a use-after-free in post().
+// The horizon map out of the string a caller hands over: three int32 (the
+// map's origin) and HORIZON_SIZE^2 int16 heights, as interface/mesh.h lays
+// them out. See [PBR_FIT] 2c. Nothing for an empty string.
+static up_<interface::mesh::HorizonMap> parse_horizon(const ss_ &horizon_data,
+		const char *who)
+{
+	using interface::mesh::HorizonMap;
+	using interface::mesh::HORIZON_SIZE;
+	up_<HorizonMap> horizon;
+	const size_t want = 3 * sizeof(int32_t) +
+			(size_t)HORIZON_SIZE * HORIZON_SIZE * sizeof(int16_t);
+	if(horizon_data.size() == want){
+		horizon.reset(new HorizonMap());
+		const char *p = horizon_data.data();
+		memcpy(&horizon->origin_x, p, 4);
+		memcpy(&horizon->origin_y, p + 4, 4);
+		memcpy(&horizon->origin_z, p + 8, 4);
+		memcpy(horizon->heights, p + 12, want - 12);
+	} else if(!horizon_data.empty()){
+		log_w(MODULE, "%s: horizon of %zu bytes, wanted %zu; ignored",
+				who, horizon_data.size(), want);
+	}
+	return horizon;
+}
+
 struct SetVoxelGeometryTask: public interface::thread_pool::Task
 {
 	WeakPtr<Node> node;
@@ -177,32 +209,54 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	// own so that Urho3D sorts them against the other chunks' translucent
 	// geometry rather than against the opaque geometry they are mixed with.
 	sm_<uint, interface::mesh::TemporaryGeometry> alpha_geoms;
+	// And the faces of the alpha-masked ones -- leaves, a plant -- which go
+	// on a child of their own for a plainer reason: they are drawn with the
+	// solid world and only need a material whose technique cuts the texture
+	// out, and a material is per drawable.
+	sm_<uint, interface::mesh::TemporaryGeometry> masked_geoms;
+
+	// The cheap shape the occlusion buffer rasterises instead of the mesh
+	// ([CLIENT_FRAME]); built in the worker beside the mesh
+	magic::PODVector<magic::Vector3> occluder;
+
+	// The terrain's horizon around the chunk, when the caller has one:
+	// three int32 (the map's origin) and HORIZON_SIZE^2 int16 heights, as
+	// interface/mesh.h lays them out. See [PBR_FIT] 2c.
+	up_<interface::mesh::HorizonMap> horizon;
 
 	SetVoxelGeometryTask(Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-			bool use_skylight, const luabind::object &material_cb):
+			bool use_skylight, const luabind::object &material_cb,
+			const ss_ &horizon_data):
 		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg),
-		use_skylight(use_skylight), material_cb(material_cb)
+		use_skylight(use_skylight), material_cb(material_cb),
+		horizon(parse_horizon(horizon_data, "set_voxel_geometry()"))
 	{
 		ScopeTimer timer("pre geometry");
-		// NOTE: Do the pre-processing here so that the calling code can
-		//       meaasure how long its execution takes
-		// NOTE: Could be split in two calls
+		// The deserialise is one shot and cheap beside what follows it;
+		// the textures are the part that used to take most of a second
+		// and they are pre()'s now, a slice at a time ([CLIENT_FRAME])
 		volume = interface::deserialize_volume(data);
-		interface::mesh::preload_textures(
-				*volume, voxel_reg.get(), atlas_reg.get());
 	}
-	// Called repeatedly from main thread until returns true
+	interface::mesh::PreloadCursor preload_cursor;
+	// Called repeatedly from the main thread until it returns true: the
+	// chunk's voxels have to be in the atlas before a worker meshes it,
+	// and building a segment for one seen for the first time is what a
+	// join's first chunks were paying for in one go.
 	bool pre()
 	{
-		return true;
+		return interface::mesh::preload_textures_sliced(
+				*volume, voxel_reg.get(), atlas_reg.get(), false,
+				interface::os::time_us() + 1500, preload_cursor);
 	}
 	// Called repeatedly from worker thread until returns true
 	bool thread()
 	{
 		generate_voxel_geometry(
 				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get(),
-				use_skylight, &alpha_geoms);
+				use_skylight, &alpha_geoms, &masked_geoms, horizon.get());
+		interface::mesh::generate_occluder(occluder, *volume,
+				voxel_reg.get());
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -234,8 +288,32 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 			acg->SetCastShadows(false);
 			acg->SetZoneMask(magic::DEFAULT_ZONEMASK);
 		}
+		// The masked faces, the same way. These are solid world: they cast
+		// shadows like anything else, and whether the shadow has the
+		// texture's holes in it is the technique's business.
+		Node *masked_node = node->GetChild("masked");
+		if(masked_geoms.empty()){
+			if(masked_node)
+				masked_node->Remove();
+		} else {
+			if(!masked_node)
+				masked_node = node->CreateChild("masked", LOCAL);
+			CustomGeometry *mcg =
+					masked_node->GetOrCreateComponent<CustomGeometry>(LOCAL);
+			interface::mesh::set_voxel_geometry(
+					mcg, context, masked_geoms, atlas_reg.get());
+			// Not an occluder: an occluder is rasterised as solid, and this
+			// one is full of holes
+			mcg->SetOccluder(false);
+			mcg->SetCastShadows(true);
+			mcg->SetZoneMask(magic::DEFAULT_ZONEMASK);
+		}
 		call_material_cb(material_cb);
 		cg->SetOccluder(true);
+		// The chunk's silhouette at four voxels to a cell, rather than the
+		// mesh's own thousands of triangles ([CLIENT_FRAME]); after
+		// set_voxel_geometry(), whose Clear() drops the last one
+		cg->SetOcclusionGeometry(occluder);
 		cg->SetCastShadows(true);
 		// Octree update: Trigger CustomGeometry::OnWorldBoundingBoxUpdate()
 		cg->SetZoneMask(magic::DEFAULT_ZONEMASK);
@@ -252,16 +330,20 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	sp_<AtlasRegistry> atlas_reg;
 	bool use_skylight;
 	luabind::object material_cb;
+	// The same map the near path takes ([LOD_LIGHT])
+	up_<interface::mesh::HorizonMap> horizon;
 
 	up_<VoxelVolume> lod_volume;
 	sm_<uint, interface::mesh::TemporaryGeometry> temp_geoms;
 
 	SetVoxelLodGeometryTask(int lod, Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-			bool use_skylight, const luabind::object &material_cb):
+			bool use_skylight, const luabind::object &material_cb,
+			const ss_ &horizon_data):
 		lod(lod), node(node), data(data),
 		voxel_reg(voxel_reg), atlas_reg(atlas_reg), use_skylight(use_skylight),
-		material_cb(material_cb)
+		material_cb(material_cb),
+		horizon(parse_horizon(horizon_data, "set_voxel_lod_geometry()"))
 	{
 		ScopeTimer timer("pre lod geometry");
 		// NOTE: Do the pre-processing here so that the calling code can
@@ -271,20 +353,21 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 				interface::deserialize_volume(data);
 		lod_volume = interface::mesh::generate_voxel_lod_volume(
 				lod, *volume_orig, voxel_reg.get());
-		interface::mesh::preload_textures(
-				*lod_volume, voxel_reg.get(), atlas_reg.get(), true);
 	}
-	// Called repeatedly from main thread until returns true
+	interface::mesh::PreloadCursor preload_cursor;
+	// The far chunks' textures, on the same terms as the near ones'
 	bool pre()
 	{
-		return true;
+		return interface::mesh::preload_textures_sliced(
+				*lod_volume, voxel_reg.get(), atlas_reg.get(), true,
+				interface::os::time_us() + 1500, preload_cursor);
 	}
 	// Called repeatedly from worker thread until returns true
 	bool thread()
 	{
 		generate_voxel_lod_geometry(
 				lod, temp_geoms, *lod_volume, voxel_reg.get(), atlas_reg.get(),
-				use_skylight);
+				use_skylight, horizon.get());
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -451,9 +534,14 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 void set_voxel_geometry(const luabind::object &node_o,
 		const luabind::object &buffer_o,
 		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-		bool use_skylight, const luabind::object &material_cb)
+		bool use_skylight, const luabind::object &material_cb,
+		const luabind::object &horizon_o)
 {
 	lua_State *L = node_o.interpreter();
+	// The horizon map, a string, or nothing
+	ss_ horizon_data;
+	if(horizon_o.is_valid() && luabind::type(horizon_o) == LUA_TSTRING)
+		horizon_data = luabind::object_cast<ss_>(horizon_o);
 
 	GET_TOLUA_STUFF(node, 1, Node);
 	log_d(MODULE, "set_voxel_geometry(): node=%p", node);
@@ -465,15 +553,15 @@ void set_voxel_geometry(const luabind::object &node_o,
 	if(buf == nullptr)
 		data = lua_checkcppstring(L, 2);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
 
 	up_<SetVoxelGeometryTask> task(new SetVoxelGeometryTask(
-			node, data, voxel_reg, atlas_reg, use_skylight, material_cb
-			));
+			node, data, voxel_reg, atlas_reg, use_skylight, material_cb,
+			horizon_data));
 
 	auto *thread_pool = buildat_app->get_thread_pool();
 
@@ -483,9 +571,13 @@ void set_voxel_geometry(const luabind::object &node_o,
 void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 		const luabind::object &buffer_o,
 		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-		bool use_skylight, const luabind::object &material_cb)
+		bool use_skylight, const luabind::object &material_cb,
+		const luabind::object &horizon_o)
 {
 	lua_State *L = node_o.interpreter();
+	ss_ horizon_data;
+	if(horizon_o.is_valid() && luabind::type(horizon_o) == LUA_TSTRING)
+		horizon_data = luabind::object_cast<ss_>(horizon_o);
 
 	GET_TOLUA_STUFF(node, 2, Node);
 	TRY_GET_TOLUA_STUFF(buf, 3, const VectorBuffer);
@@ -498,15 +590,15 @@ void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 	if(buf == nullptr)
 		data = lua_tocppstring(L, 2);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
 
 	up_<SetVoxelLodGeometryTask> task(new SetVoxelLodGeometryTask(
-			lod, node, data, voxel_reg, atlas_reg, use_skylight, material_cb
-			));
+			lod, node, data, voxel_reg, atlas_reg, use_skylight, material_cb,
+			horizon_data));
 
 	auto *thread_pool = buildat_app->get_thread_pool();
 
@@ -528,6 +620,9 @@ void clear_voxel_geometry(const luabind::object &node_o)
 	Node *alpha_node = node->GetChild("alpha");
 	if(alpha_node)
 		alpha_node->Remove();
+	Node *masked_node = node->GetChild("masked");
+	if(masked_node)
+		masked_node->Remove();
 }
 
 void set_voxel_physics_boxes(const luabind::object &node_o,
@@ -545,7 +640,7 @@ void set_voxel_physics_boxes(const luabind::object &node_o,
 	if(buf == nullptr)
 		data = lua_tocppstring(L, 2);
 	else
-		data.assign((const char*)&buf->GetBuffer()[0], buf->GetBuffer().Size());
+		data.assign((const char*)buf->GetData(), buf->GetSize());
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
@@ -581,10 +676,270 @@ void clear_voxel_physics_boxes(const luabind::object &node_o)
 
 #define LUABIND_FUNC(name) def("__buildat_" #name, name)
 
+// column_heights(buffer, voxel_reg) -> a string of w*d int16, the local y
+// of each column's highest solid non-cutout voxel, HORIZON_NONE for none;
+// [z][x] over the chunk's inside. What a horizon map is built from; see
+// interface/mesh.h and [PBR_FIT] 2c.
+ss_ column_heights(const luabind::object &buffer_o,
+		sp_<VoxelRegistry> voxel_reg)
+{
+	lua_State *L = buffer_o.interpreter();
+	TRY_GET_TOLUA_STUFF(buf, 1, const VectorBuffer);
+	ss_ data;
+	if(buf == nullptr)
+		data = lua_checkcppstring(L, 1);
+	else
+		data.assign((const char*)buf->GetData(), buf->GetSize());
+	up_<VoxelVolume> volume = interface::deserialize_volume(data);
+	sv_<int16_t> h = interface::mesh::column_heights(*volume, voxel_reg.get());
+	return ss_((const char*)h.data(), h.size() * sizeof(int16_t));
+}
+
+// set_cell_geometry(node, cells, size, r, g, b, a, v): a volume of cubic cells
+// as the node's CustomGeometry, one geometry, a face wherever a cell's
+// neighbour is empty -- a face's normal, the colour (r, g, b, a) and the
+// texture coordinate (row, v) on each vertex, one winding. `cells` is a
+// flat list of key, row: a key is (x+128) + (y+128)*256 + (z+128)*65536,
+// each of x, y and z from -128 to 127, and a cell is `size` across. The
+// floorplanner's voxel volumes; in C++ because a face at a time from Lua
+// was 24 sandbox calls, a quarter of a second for 4000 voxels natively and
+// a freeze on the web (user, 2026-09-30).
+void set_cell_geometry(const luabind::object &node_o,
+		const luabind::object &cells, float size, float r, float g, float b,
+		float a, float tv)
+{
+	lua_State *L = node_o.interpreter();
+	GET_TOLUA_STUFF(node, 1, Node);
+	std::unordered_map<int, int> row_of;
+	sv_<int> flat;
+	for(luabind::iterator it(cells), end; it != end; ++it)
+		flat.push_back(luabind::object_cast<int>(*it));
+	for(size_t i = 0; i + 1 < flat.size(); i += 2)
+		row_of[flat[i]] = flat[i + 1];
+	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
+	cg->SetNumGeometries(1);
+	cg->BeginGeometry(0, TRIANGLE_LIST);
+	static const int F[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0},
+			{0, 0, 1}, {0, 0, -1}};
+	const Color col(r, g, b, a);
+	for(const auto &pair : row_of){
+		const int key = pair.first;
+		const int x = key % 256 - 128, y = (key / 256) % 256 - 128,
+				z = key / 65536 - 128;
+		const Vector2 uv((float)pair.second, tv);
+		for(const auto &f : F){
+			const int nx = x + f[0], ny = y + f[1], nz = z + f[2];
+			if(nx >= -128 && nx <= 127 && ny >= -128 && ny <= 127 &&
+					nz >= -128 && nz <= 127 && row_of.count(
+					(nx + 128) + (ny + 128) * 256 + (nz + 128) * 65536))
+				continue;
+			const Vector3 n((float)f[0], (float)f[1], (float)f[2]);
+			// The face's middle, and two axes across it
+			const Vector3 c((x + 0.5f + f[0] * 0.5f), (y + 0.5f + f[1] * 0.5f),
+					(z + 0.5f + f[2] * 0.5f));
+			Vector3 u = f[0] != 0 ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
+			Vector3 v = f[2] != 0 ? Vector3(0, 1, 0) : Vector3(0, 0, 1);
+			if(f[1] != 0){
+				u = Vector3(1, 0, 0);
+				v = Vector3(0, 0, 1);
+			}
+			auto C = [&](float s, float t){
+				return (c + (u * s + v * t) * 0.5f) * size;
+			};
+			const Vector3 q[4] = {C(-1, -1), C(1, -1), C(1, 1), C(-1, 1)};
+			const int tris[2][3] = {{0, 1, 2}, {0, 2, 3}};
+			for(const auto &t : tris){
+				Vector3 pa = q[t[0]], pb = q[t[1]], pc = q[t[2]];
+				// Wound to face the normal, as editor.lua's tri() winds
+				if((pb - pa).CrossProduct(pc - pa).DotProduct(n) < 0)
+					std::swap(pb, pc);
+				for(const Vector3 &p : {pa, pb, pc}){
+					cg->DefineVertex(p);
+					cg->DefineNormal(n);
+					cg->DefineColor(col);
+					cg->DefineTexCoord(uv);
+				}
+			}
+		}
+	}
+	cg->Commit();
+}
+
+// set_triangle_geometry(node, verts): a triangle list as the node's
+// CustomGeometry, one geometry: `verts` is a flat list of 12 numbers a
+// vertex -- position, normal, colour (r, g, b, a) and texture coordinate --
+// three vertices a triangle. What the floorplanner builds its walls and
+// objects into, in Lua, and hands over at once: a triangle defined a call
+// at a time from the sandbox was a dozen calls, and a window 10 to 20 ms
+// natively, several times that on the web (user, 2026-09-30).
+void set_triangle_geometry(const luabind::object &node_o,
+		const luabind::object &verts)
+{
+	lua_State *L = node_o.interpreter();
+	GET_TOLUA_STUFF(node, 1, Node);
+	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
+	cg->SetNumGeometries(1);
+	cg->BeginGeometry(0, TRIANGLE_LIST);
+	verts.push(L);
+	const int t = lua_gettop(L);
+	const size_t n = lua_objlen(L, t) / 12;
+	float f[12];
+	for(size_t i = 0; i < n; i++){
+		for(int k = 0; k < 12; k++){
+			lua_rawgeti(L, t, (int)(i * 12 + k + 1));
+			f[k] = (float)lua_tonumber(L, -1);
+			lua_pop(L, 1);
+		}
+		cg->DefineVertex(Vector3(f[0], f[1], f[2]));
+		cg->DefineNormal(Vector3(f[3], f[4], f[5]));
+		cg->DefineColor(Color(f[6], f[7], f[8], f[9]));
+		cg->DefineTexCoord(Vector2(f[10], f[11]));
+	}
+	lua_pop(L, 1);
+	cg->Commit();
+}
+
+// set_line_geometry(node, verts): a line list as the node's CustomGeometry,
+// one geometry: `verts` is a flat list of 7 numbers a vertex -- position and
+// colour (r, g, b, a) -- two vertices a line. What the floorplanner's plan
+// view draws its lines that only change with the plan or the zoom into,
+// once, where the debug renderer took two sandboxed vectors a line a frame
+// (user, 2026-10-01: panning a big plan in Firefox was slow).
+void set_line_geometry(const luabind::object &node_o,
+		const luabind::object &verts)
+{
+	lua_State *L = node_o.interpreter();
+	GET_TOLUA_STUFF(node, 1, Node);
+	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
+	cg->SetNumGeometries(1);
+	cg->BeginGeometry(0, LINE_LIST);
+	verts.push(L);
+	const int t = lua_gettop(L);
+	const size_t n = lua_objlen(L, t) / 7;
+	float f[7];
+	for(size_t i = 0; i < n; i++){
+		for(int k = 0; k < 7; k++){
+			lua_rawgeti(L, t, (int)(i * 7 + k + 1));
+			f[k] = (float)lua_tonumber(L, -1);
+			lua_pop(L, 1);
+		}
+		cg->DefineVertex(Vector3(f[0], f[1], f[2]));
+		cg->DefineColor(Color(f[3], f[4], f[5], f[6]));
+		// **A texture coordinate, though no line has a texture** (user,
+		// 2026-10-01: the grid was missing in Firefox): Urho3D's Unlit
+		// vertex shader reads one whatever its defines, and without one
+		// in this buffer the attribute was left on whatever buffer was
+		// bound before. Firefox refuses such a draw outright when that
+		// one is shorter ("Vertex fetch requires 52, but attribs only
+		// supply 6"), so whether a line list showed went by draw order.
+		cg->DefineTexCoord(Vector2(0.f, 0.f));
+	}
+	lua_pop(L, 1);
+	cg->Commit();
+}
+
+// set_image_data(image, values): all of an Image's bytes from a flat list
+// of numbers from 0 to 1, components at a time, rows from the top. One
+// call for what was a SetPixel and a Color a texel from the sandbox: the
+// floorplanner's room table, 2048 texels, was 20 to 60 ms of that on the
+// web each time the daylight moved (user, 2026-10-02). The list is the
+// image's size exactly; a value that is not a number from 0 to 1 is
+// clamped, and one that is not a number at all is 0.
+void set_image_data(const luabind::object &image_o,
+		const luabind::object &values)
+{
+	lua_State *L = image_o.interpreter();
+	GET_TOLUA_STUFF(image, 1, Image);
+	if(image->IsCompressed() || image->GetDepth() != 1)
+		throw Exception("set_image_data: a compressed or 3D image");
+	const size_t n = (size_t)image->GetWidth() * image->GetHeight() *
+			image->GetComponents();
+	values.push(L);
+	const int t = lua_gettop(L);
+	if(!lua_istable(L, t) || lua_objlen(L, t) != n){
+		lua_pop(L, 1);
+		throw Exception("set_image_data: the list is not the image's size");
+	}
+	unsigned char *d = image->GetData();
+	for(size_t i = 0; i < n; i++){
+		lua_rawgeti(L, t, (int)(i + 1));
+		const double v = lua_tonumber(L, -1);
+		lua_pop(L, 1);
+		d[i] = v > 0.0 ? (v < 1.0 ? (unsigned char)(v * 255.0 + 0.5) : 255) : 0;
+	}
+	lua_pop(L, 1);
+}
+
+// set_quad_geometry(node, quads) -> {tile, ...}: a model's quads -- a Lua
+// list of {tile=, p={12 numbers}, uv={8 numbers}} -- as the node's
+// CustomGeometry, one geometry per distinct tile in ascending tile order
+// (the answer says which tile each geometry is), both windings of every
+// quad. In C++ because a VoxeLibre skeleton was 250 ms of sandbox calls
+// built quad by quad from Lua, and a posed model is one build per frame
+// ([OBJECT_MESH] step 1).
+luabind::object set_quad_geometry(const luabind::object &node_o,
+		const luabind::object &quads)
+{
+	lua_State *L = node_o.interpreter();
+	GET_TOLUA_STUFF(node, 1, Node);
+	struct Quad { int tile; float p[12]; float uv[8]; };
+	sv_<Quad> all;
+	for(luabind::iterator it(quads), end; it != end; ++it){
+		luabind::object q = *it;
+		Quad quad;
+		quad.tile = luabind::object_cast<int>(q["tile"]);
+		luabind::object p = q["p"], uv = q["uv"];
+		for(int i = 0; i < 12; i++)
+			quad.p[i] = luabind::object_cast<float>(p[i + 1]);
+		for(int i = 0; i < 8; i++)
+			quad.uv[i] = luabind::object_cast<float>(uv[i + 1]);
+		all.push_back(quad);
+	}
+	sv_<int> tiles;
+	for(const Quad &q : all)
+		if(std::find(tiles.begin(), tiles.end(), q.tile) == tiles.end())
+			tiles.push_back(q.tile);
+	std::sort(tiles.begin(), tiles.end());
+	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
+	cg->SetNumGeometries(tiles.size());
+	static const int corners[12] = {0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2};
+	for(size_t g = 0; g < tiles.size(); g++){
+		cg->BeginGeometry(g, TRIANGLE_LIST);
+		for(const Quad &q : all){
+			if(q.tile != tiles[g])
+				continue;
+			// The face's normal, for a lit technique (the held item under
+			// pbr, [WIELD_MESH]); the back winding's is the other way
+			Vector3 p0(q.p[0], q.p[1], q.p[2]);
+			Vector3 n = (Vector3(q.p[3], q.p[4], q.p[5]) - p0).CrossProduct(
+					Vector3(q.p[6], q.p[7], q.p[8]) - p0).Normalized();
+			for(int i = 0; i < 12; i++){
+				int c = corners[i];
+				cg->DefineVertex(Vector3(q.p[c * 3], q.p[c * 3 + 1],
+						q.p[c * 3 + 2]));
+				cg->DefineNormal(i < 6 ? n : -n);
+				cg->DefineTexCoord(Vector2(q.uv[c * 2], q.uv[c * 2 + 1]));
+			}
+		}
+	}
+	cg->Commit();
+	cg->SetCastShadows(false);
+	luabind::object out = luabind::newtable(L);
+	for(size_t i = 0; i < tiles.size(); i++)
+		out[i + 1] = tiles[i];
+	return out;
+}
+
 void init_mesh(lua_State *L)
 {
 	using namespace luabind;
 	module(L)[
+			LUABIND_FUNC(set_quad_geometry),
+			LUABIND_FUNC(set_cell_geometry),
+			LUABIND_FUNC(set_triangle_geometry),
+			LUABIND_FUNC(set_line_geometry),
+			LUABIND_FUNC(set_image_data),
+			LUABIND_FUNC(column_heights),
 			LUABIND_FUNC(set_simple_voxel_model),
 			LUABIND_FUNC(set_8bit_voxel_geometry),
 			LUABIND_FUNC(set_voxel_geometry),
