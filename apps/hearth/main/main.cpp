@@ -274,7 +274,8 @@ struct Limits { int threads_a_day, messages_an_hour; bool links; };
 static const Limits LIMITS[3] = {{2, 10, false}, {10, 60, true},
 		{1000000, 1000000, true}};
 static const int REPORTS_A_DAY = 10;
-// The search page, per address: a search is a full-text query
+// Searches a minute, per address on the HTTP face and per account by
+// packet: a search is a full-text query
 static const int SEARCHES_A_MINUTE = 30;
 static const size_t TITLE_MAX = 200;
 static const size_t BODY_MAX = 20000;
@@ -712,15 +713,9 @@ struct Module: public interface::Module
 			return;
 		if(!m_db)
 			return respond(r, 503, page("Hearth", "<p>Starting.</p>"));
-		if(r.path == "/search"){
-			if(now_s() / 60 != m_searches_minute){
-				m_searches_minute = now_s() / 60;
-				m_searches.clear();
-			}
-			if(++m_searches[r.address] > SEARCHES_A_MINUTE)
-				return respond(r, 429, page("Hearth", "<p>Too many searches "
-						"from this address; try again in a minute.</p>"));
-		}
+		if(r.path == "/search" && !search_allowed(r.address))
+			return respond(r, 429, page("Hearth", "<p>Too many searches "
+					"from this address; try again in a minute.</p>"));
 		ss_ title, body;
 		if(r.method == "GET")
 			http_page(r.path, r.query, title, body);
@@ -916,6 +911,16 @@ struct Module: public interface::Module
 				hd.i(0) == 0 ? 1 : 0;
 	}
 
+	// `who`: an address, or "@" and an account
+	bool search_allowed(const ss_ &who)
+	{
+		if(now_s() / 60 != m_searches_minute){
+			m_searches_minute = now_s() / 60;
+			m_searches.clear();
+		}
+		return ++m_searches[who] <= SEARCHES_A_MINUTE;
+	}
+
 	// An address in the text, or a link the markup makes ("//host",
 	// "mailto:", a reference definition) without one
 	static bool has_link(const ss_ &text)
@@ -1040,6 +1045,8 @@ struct Module: public interface::Module
 		if(cmd == "search"){
 			const ss_ text = jstr(q, "q");
 			need(text_ok(text, 200, false, "the search"));
+			if(!search_allowed("@"+name))
+				throw Exception("too many searches; try again in a minute");
 			return search(text);
 		}
 		if(cmd == "new_topic"){

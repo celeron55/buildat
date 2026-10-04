@@ -19,7 +19,8 @@
 #      as messages) and a report's handling: carol reports bob's thread,
 #      the admin hides it with a statement (gone from the portal and search,
 #      the notice on its page, bob notified with the statement), bob
-#      appeals, the admin restores; then the search limit per address.
+#      appeals, the admin restores; then the search limit per
+#      address and per account.
 #
 #   apps/hearth/check.sh
 set -u
@@ -200,6 +201,11 @@ for _ in $(seq 40); do
 	[ "$(get "/search?q=x")" = 429 ] && n429=$((n429 + 1))
 done
 [ $n429 -gt 0 ] || fail "no search limit per address"
+client carol carolpass1234 "$t/carol2.log" "$(
+	for i in $(seq 31); do echo '{"cmd":"search","q":"lamps"}'; done)"
+answer "$t/carol2.log" 1030 | grep -q '"ok":true' || fail "carol's search"
+answer "$t/carol2.log" 1031 | grep -q "too many searches" ||
+	fail "no search limit per account"
 
 # 7. The markup: CommonMark with GitHub's additions, raw HTML as text, no
 # link or image to anything but http, https, mailto or a relative path
