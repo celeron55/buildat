@@ -2742,8 +2742,10 @@ struct CApp: public App, public magic::Application
 					m_wait_log_since = c.type == Type::WaitLogAny ? 0 :
 							log_line_count();
 					m_wait_log_until_us = now + c.n * 1000;
+					log_watch(c.s.c_str());
 				}
-				if(log_lines_since_contain(m_wait_log_since, c.s.c_str())){
+				if(log_watch_seen() ||
+						log_lines_since_contain(m_wait_log_since, c.s.c_str())){
 					log_i(MODULE, "wait_log: \"%s\" seen", cs(c.s));
 				} else if(now < m_wait_log_until_us){
 					// **A wait says it is waiting**, every ten seconds:

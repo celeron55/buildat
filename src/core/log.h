@@ -27,6 +27,9 @@ void log_raw(const char *data, size_t n);
 // by, and whether one since that count holds the text
 long long log_line_count();
 bool log_lines_since_contain(long long since, const char *text);
+// Watch for one text in the lines logged from now on; one watch at a time
+void log_watch(const char *text);
+bool log_watch_seen();
 
 // Try to stop using malloc() and other heavyweight interfaces. Call when
 // SIGSEGV or SIGABRT occurs to make the program much more likely to be able to

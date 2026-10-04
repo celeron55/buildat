@@ -300,6 +300,11 @@ static void print(int level, const char *sys, const char *fmt, va_list va_args)
 static const size_t RECENT_MAX = 400;
 static std::deque<std::string> recent_lines;
 static long long recent_count = 0;
+// The text one wait_log is waiting for, checked on every line as it is
+// remembered: a world's load logs thousands of lines in one frame, and the
+// line waited for rolled out of the last 400 before the wait looked
+static std::string watch_text;
+static bool watch_seen = false;
 
 static void remember_line(const char *fmt, va_list va_args)
 {
@@ -312,6 +317,22 @@ static void remember_line(const char *fmt, va_list va_args)
 	if(recent_lines.size() > RECENT_MAX)
 		recent_lines.pop_front();
 	recent_count++;
+	if(!watch_text.empty() && recent_lines.back().find(watch_text) !=
+			std::string::npos)
+		watch_seen = true;
+}
+
+void log_watch(const char *text)
+{
+	interface::MutexScope ms(log_mutex);
+	watch_text = text;
+	watch_seen = false;
+}
+
+bool log_watch_seen()
+{
+	interface::MutexScope ms(log_mutex);
+	return watch_seen;
 }
 
 long long log_line_count()
