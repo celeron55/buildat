@@ -128,6 +128,32 @@ local function edit(parent, label, value)
 	return e
 end
 
+-- [STARPORT_COPY_IDS]: an id or line the operator pastes elsewhere (a
+-- fleet's join line, a listing id, a blocklist scope), as a read-only but
+-- selectable/copyable field with a Copy button (accounts.lua's pattern).
+-- Fills the row `r`; copy_field makes the row under `parent` first.
+local function copy_into(r, label, value, maxw)
+	value = value == nil and "" or tostring(value)
+	if label then
+		local l = text(r, label)
+		l:SetWordwrap(false)
+		l.minWidth = 100
+	end
+	local e = r:CreateChild("LineEdit")
+	e:SetStyleAuto()
+	e.minHeight = 26
+	e.minWidth = math.min(maxw or 260, 260)
+	e.editable = false
+	e.textCopyable = true
+	e.textSelectable = true
+	e:SetText(value)
+	button(r, "Copy", function() magic.ui:SetClipboardText(value) end)
+	return e
+end
+local function copy_field(parent, label, value)
+	return copy_into(row(parent), label, value)
+end
+
 local frame, sidebar, view = nil, nil, nil
 local narrow = magic.ui.root.width < 560
 local page_width = 100
@@ -232,6 +258,10 @@ local function list(w, height_share)
 		r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
 		l:AddItem(r)
 		return r
+	end
+	-- [STARPORT_COPY_IDS]: a copyable id/line as a list item
+	function add.copy(label, value)
+		return copy_into(add.row(), label, value, width)
 	end
 	return add
 end
@@ -383,6 +413,10 @@ local function draw_sidebar()
 		entry("Settings", "settings", 0)
 		entry("Accounts", "accounts", 0)
 	end
+	-- [STARPORT_COPY_IDS]: the Starport server's version, the one an
+	-- operator asks about
+	text(sidebar, "Buildat v" .. (me.version == nil and "?" or
+			tostring(me.version)), GREY)
 end
 
 -- "me" asked again, the sidebar drawn with it, and `draw` after
@@ -505,12 +539,13 @@ servers_page = function()
 	end)
 	local l = list(w, 0.3)
 	for _, x in ipairs(me.listings or {}) do
-		l.text(s(x.name) .. " (" .. s(x.id) .. ", " .. s(x.host) .. ":" ..
+		l.text(s(x.name) .. " (" .. s(x.host) .. ":" ..
 				s(x.port) .. "): " .. s(x.served) ..
 				(s(x.fleet) ~= "" and "; fleet " .. x.fleet ..
 				(s(x.pool) ~= "" and ", pool " .. x.pool or "") ..
 				(x.pool_mismatch and " (differs from its pool)" or "")
 				or ""))
+		l.copy("listing id", s(x.id))
 		if s(x.fleet) ~= "" then
 			l.button("Remove from the fleet", function()
 				req("fleet_remove_server", {listing = x.id}, home)
@@ -573,8 +608,8 @@ fleets_page = function(me)
 	local l = list(w, 0.3)
 	for _, f in ipairs(me.fleets or {}) do
 		l.text(s(f.name) .. ": " .. s(f.description) .. " " .. s(f.link))
-		l.text('"fleet": "' .. s(f.id) .. ":" .. s(f.code) ..
-				'", "pool": "main"', YELLOW)
+		l.copy("starport.json line", '"fleet": "' .. s(f.id) .. ":" ..
+				s(f.code) .. '", "pool": "main"')
 		local r = l.row()
 		button(r, "New code (servers with the old one leave)", function()
 			req("fleet_new_code", {fleet = f.id}, function()
@@ -611,8 +646,14 @@ blocklists_page = function(me)
 				scopes[#scopes + 1] = "listing:" .. s(x.id)
 			end
 		end
-		text(w, "Yours: " .. (#scopes > 0 and table.concat(scopes, ", ") or
-				"no fleets or servers"), GREY)
+		if #scopes > 0 then
+			text(w, "Yours (copy one into Acting for):", GREY)
+			for _, sc in ipairs(scopes) do
+				copy_field(w, nil, sc)
+			end
+		else
+			text(w, "Yours: no fleets or servers", GREY)
+		end
 		local scope = edit(w, "Acting for", scopes[1] or "")
 		local l = list(w, 0.4)
 		for _, b in ipairs(lists) do

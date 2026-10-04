@@ -2209,6 +2209,9 @@ struct Module: public interface::Module
 		r.set("name", name);
 		r.set("moderator", mod);
 		r.set("admin", admin);
+		// [STARPORT_COPY_IDS]: the Starport server's own version, for a
+		// label in the client's navigation bar (no hash)
+		r.set("version", ss_(BUILDAT_VERSION));
 		const json::Value o = load("operators", name);
 		r.set("email", o.is_object() ? jstr(o, "email") : ss_());
 		r.set("email_pending", o.is_object() ? jstr(o, "email_pending") :
