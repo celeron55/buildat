@@ -30,6 +30,15 @@
 // message's statement of reasons to its author, and the author's appeal.
 // simplified: Hearth's own queue; Starport's reports, appeals and audit
 // log shared as a builtin is the upgrade, once a third app wants them.
+//
+// **A release is a thread** ([PACKAGE_SUBJECT], the first slice): the
+// admin names the Aittas this Hearth reads and the addresses it is known
+// by ("release_sources"). Each minute a thread of its own asks those
+// Aittas for their lists, and a release whose manifest names one of the
+// addresses as its home Hearth gets a thread of kind "release" in the
+// topic "Releases" -- its version, its description and its changelog --
+// by "<author> (Aitta)", which no account can be called. Nothing is sent
+// to Hearth: it fetches, and only from where its admin said.
 #include "core/log.h"
 #include "core/json.h"
 #include "interface/module.h"
@@ -46,6 +55,12 @@
 #include <cstring>
 #include <set>
 #include <tuple>
+#include <thread>
+#include <algorithm>
+#include <chrono>
+#include <mutex>
+#include <condition_variable>
+#include "interface/http.h"
 #define MODULE "main"
 
 using interface::Event;
@@ -56,6 +71,18 @@ static ss_ jstr(const json::Value &v, const char *k)
 {
 	const json::Value &x = v.get(k);
 	return x.is_string() ? x.as_string() : "";
+}
+
+// An address as compared: the scheme and host in lower case, no trailing /
+static ss_ norm_url(ss_ u)
+{
+	while(!u.empty() && u.back() == '/')
+		u.pop_back();
+	const size_t path = u.find('/', u.find("://") == ss_::npos ? 0 :
+			u.find("://") + 3);
+	for(size_t i = 0; i < u.size() && i < path; i++)
+		u[i] = tolower((unsigned char)u[i]);
+	return u;
 }
 
 static int64_t jint(const json::Value &v, const char *k)
@@ -215,13 +242,21 @@ static const char *SCHEMA =
 		// "This answered it": the message the asker marked, or 0
 		"answer INTEGER NOT NULL DEFAULT 0, "
 		// Its first message hidden: the thread with it
-		"hidden INTEGER NOT NULL DEFAULT 0);"
+		"hidden INTEGER NOT NULL DEFAULT 0, "
+		// "" a discussion, "release" a package's release
+		"kind TEXT NOT NULL DEFAULT '');"
 	"CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, "
 		"thread INTEGER NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL, "
 		"created INTEGER NOT NULL, edited INTEGER NOT NULL DEFAULT 0, "
 		// A moderator's hiding, and its statement of reasons
 		"hidden INTEGER NOT NULL DEFAULT 0, "
 		"hidden_reason TEXT NOT NULL DEFAULT '');"
+	// The admin's: "release_sources" -> {aittas: [url], addresses: [url]}
+	"CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, "
+		"value TEXT NOT NULL);"
+	// A release's thread, by "author/name/version key", made once
+	"CREATE TABLE IF NOT EXISTS release_threads(release TEXT PRIMARY KEY, "
+		"thread INTEGER NOT NULL);"
 	"CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread, id);"
 	"CREATE INDEX IF NOT EXISTS messages_author ON messages(author, created);"
 	// What an edit replaced, and who made the edit
@@ -265,6 +300,7 @@ static const char *const COLUMNS_ADDED[][3] = {
 	{"messages", "hidden", "INTEGER NOT NULL DEFAULT 0"},
 	{"messages", "hidden_reason", "TEXT NOT NULL DEFAULT ''"},
 	{"notifications", "note", "TEXT NOT NULL DEFAULT ''"},
+	{"threads", "kind", "TEXT NOT NULL DEFAULT ''"},
 };
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search"};
 
@@ -300,6 +336,17 @@ struct Module: public interface::Module
 	// What a request changed, sent once it is committed
 	sv_<int64_t> m_new_messages;
 	std::set<ss_> m_notified;
+	// [PACKAGE_SUBJECT]: the release poller's thread and what it shares,
+	// under m_rmutex
+	struct ReleaseFound { ss_ aitta; json::Value rel; ss_ changelog; };
+	std::mutex m_rmutex;
+	std::condition_variable m_rwake;
+	bool m_rstop = false;
+	bool m_rkick = true;          // poll now, not in a minute
+	json::Value m_rsources;       // the admin's "release_sources"
+	std::set<ss_> m_rknown;       // releases with a thread, or given up on
+	sv_<ReleaseFound> m_rfound;
+	std::thread m_rthread;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -308,6 +355,13 @@ struct Module: public interface::Module
 
 	~Module()
 	{
+		{
+			std::lock_guard<std::mutex> lock(m_rmutex);
+			m_rstop = true;
+		}
+		m_rwake.notify_all();
+		if(m_rthread.joinable())
+			m_rthread.join();
 		if(m_db)
 			sqlite3_close(m_db);
 	}
@@ -318,6 +372,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:http_request"));
 		m_server->sub_event(this, Event::t("network:packet_received/hr:req"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
+		m_server->sub_event(this, Event::t("core:tick"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -327,6 +382,7 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/hr:req", on_req, network::Packet)
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
 				network::OldClient)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 	}
 
 	void on_client_disconnected(const network::OldClient &old)
@@ -370,6 +426,192 @@ struct Module: public interface::Module
 		q.step();
 		log_i(MODULE, "Hearth: %lld messages in %s", (long long)q.i(0),
 				cs(path));
+		{
+			std::lock_guard<std::mutex> lock(m_rmutex);
+			m_rsources = setting("release_sources");
+			Q k(m_db, "SELECT release FROM release_threads");
+			while(k.step())
+				m_rknown.insert(k.s(0));
+		}
+		m_rthread = std::thread([this](){ release_poller(); });
+	}
+
+	json::Value setting(const ss_ &key)
+	{
+		Q q(m_db, "SELECT value FROM settings WHERE key = ?");
+		q.b(key);
+		if(!q.step())
+			return json::object();
+		return json::load_string(q.s(0).c_str());
+	}
+
+	// -----------------------------------------------------------------------
+	// [PACKAGE_SUBJECT]: releases into threads
+
+	// On its own thread: it waits on the Aittas, the module does not
+	void release_poller()
+	{
+		for(;;){
+			json::Value src;
+			std::set<ss_> known;
+			{
+				std::unique_lock<std::mutex> lock(m_rmutex);
+				m_rwake.wait_for(lock, std::chrono::seconds(60), [this](){
+					return m_rstop || m_rkick;
+				});
+				if(m_rstop)
+					return;
+				m_rkick = false;
+				src = m_rsources;
+				known = m_rknown;
+			}
+			sv_<ReleaseFound> found = poll_releases(src, known);
+			std::lock_guard<std::mutex> lock(m_rmutex);
+			for(ReleaseFound &f : found)
+				m_rfound.push_back(f);
+		}
+	}
+
+	static sv_<ss_> url_list(const json::Value &v)
+	{
+		sv_<ss_> r;
+		if(v.is_array())
+			for(unsigned i = 0; i < v.size(); i++)
+				if(v.at(i).is_string())
+					r.push_back(norm_url(v.at(i).as_string()));
+		return r;
+	}
+
+	static ss_ release_key(const json::Value &rel)
+	{
+		return jstr(rel, "author")+"/"+jstr(rel, "name")+"/"+
+				jstr(rel, "version")+" "+jstr(rel, "key");
+	}
+
+	// The releases new to this Hearth whose home it is
+	// simplified: the whole list of each Aitta every minute; a "since"
+	// on Aitta's list is the upgrade once lists are long
+	sv_<ReleaseFound> poll_releases(const json::Value &src,
+			std::set<ss_> known)
+	{
+		sv_<ReleaseFound> found;
+		const sv_<ss_> addr = url_list(src.get("addresses"));
+		const std::set<ss_> addresses(addr.begin(), addr.end());
+		if(addresses.empty())
+			return found;
+		for(const ss_ &base : url_list(src.get("aittas"))){
+			try {
+				const json::Value list = json::load_string(
+						interface::http_get(base+"/api/aitta/list").c_str());
+				const json::Value &rels = list.get("releases");
+				for(unsigned i = 0; rels.is_array() && i < rels.size(); i++){
+					const json::Value &rel = rels.at(i);
+					if(!addresses.count(norm_url(jstr(rel, "home_hearth"))) ||
+							known.count(release_key(rel)))
+						continue;
+					const ss_ id = jstr(rel, "author")+"/"+jstr(rel, "name")+
+							"/"+jstr(rel, "version");
+					const json::Value one = json::load_string(
+							interface::http_get(base+"/api/aitta/release?id="+id)
+							.c_str());
+					const json::Value &r = one.get("release");
+					if(!one.get("ok").is_true() || !r.is_object() ||
+							!addresses.count(norm_url(jstr(r, "home_hearth"))))
+						continue;
+					known.insert(release_key(r));
+					found.push_back({base, r, jstr(one, "changelog")});
+					// simplified: twenty a minute; the rest the next minute
+					if(found.size() >= 20)
+						return found;
+				}
+			} catch(std::exception &e){
+				log_w(MODULE, "Releases from %s: %s", cs(base), e.what());
+			}
+		}
+		return found;
+	}
+
+	void on_tick(const interface::TickEvent &)
+	{
+		sv_<ReleaseFound> found;
+		{
+			std::lock_guard<std::mutex> lock(m_rmutex);
+			found.swap(m_rfound);
+		}
+		if(found.empty() || !m_db)
+			return;
+		for(const ReleaseFound &f : found){
+			try {
+				exec("BEGIN");
+				post_release(f);
+				exec("COMMIT");
+			} catch(std::exception &e){
+				sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
+				m_new_messages.clear();
+				m_notified.clear();
+				log_w(MODULE, "The release %s from %s: %s",
+						cs(release_key(f.rel)), cs(f.aitta), e.what());
+			}
+			// Made or refused, not asked for again until a restart
+			std::lock_guard<std::mutex> lock(m_rmutex);
+			m_rknown.insert(release_key(f.rel));
+		}
+		push();
+	}
+
+	void post_release(const ReleaseFound &f)
+	{
+		const json::Value &rel = f.rel;
+		const ss_ key = release_key(rel);
+		Q k(m_db, "SELECT 1 FROM release_threads WHERE release = ?");
+		k.b(key);
+		if(k.step())
+			return;
+		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name");
+		const ss_ title = jstr(rel, "name")+" "+jstr(rel, "version");
+		const ss_ author = jstr(rel, "author")+" (Aitta)";
+		ss_ body = jstr(rel, "description")+"\n\nVersion **"+
+				jstr(rel, "version")+"** of `"+pkg+"`, published on "+f.aitta+
+				".\n\n## Changelog\n\n";
+		ss_ log = f.changelog.empty() ? ss_("No changelog came with it.") :
+				f.changelog;
+		// A CRLF file's \r is a control character to text_ok
+		log.erase(std::remove(log.begin(), log.end(), '\r'), log.end());
+		if(body.size() + log.size() > BODY_MAX){
+			size_t n = BODY_MAX > body.size() + 40 ? BODY_MAX - body.size() - 40 : 0;
+			while(n > 0 && (log[n] & 0xc0) == 0x80)
+				n--;
+			log = log.substr(0, n)+"\n\n(The rest is in the release.)";
+		}
+		body += log;
+		const ss_ why = text_ok(title, TITLE_MAX, false, "the title") +
+				text_ok(body, BODY_MAX, true, "the message");
+		if(!why.empty())
+			throw Exception(why);
+		const int64_t topic_id = releases_topic();
+		const int64_t t = now_s();
+		Q i(m_db, "INSERT INTO threads(topic, title, author, created, last, "
+				"subject, kind) VALUES(?, ?, ?, ?, ?, ?, 'release')");
+		i.b(topic_id).b(title).b(author).b(t).b(t)
+				.b(pkg+" "+jstr(rel, "key")).step();
+		const int64_t id = sqlite3_last_insert_rowid(m_db);
+		add_message(id, author, body, title);
+		Q r(m_db, "INSERT INTO release_threads(release, thread) VALUES(?, ?)");
+		r.b(key).b(id).step();
+		log_i(MODULE, "The release %s from %s is the thread %lld", cs(key),
+				cs(f.aitta), (long long)id);
+	}
+
+	// The top-level topic "Releases", made the first time
+	int64_t releases_topic()
+	{
+		Q q(m_db, "SELECT id FROM topics WHERE parent = 0 AND name = 'Releases' "
+				"ORDER BY id LIMIT 1");
+		if(q.step())
+			return q.i(0);
+		exec("INSERT INTO topics(parent, name, about) VALUES(0, 'Releases', "
+				"'Packages released on Aitta, posted from there')");
+		return sqlite3_last_insert_rowid(m_db);
 	}
 
 	void exec(const char *sql)
@@ -1094,6 +1336,39 @@ struct Module: public interface::Module
 			i.b(parent).b(topic_name).b(about).step();
 			log_i(MODULE, "%s added the topic %s", cs(name), cs(topic_name));
 			return json::Value((int64_t)sqlite3_last_insert_rowid(m_db));
+		}
+		if(cmd == "release_sources"){
+			// [PACKAGE_SUBJECT]: the Aittas read and this Hearth's own
+			// addresses, set by the admin; without either, the current
+			if(!admin)
+				throw Exception("only the admin sets the release sources");
+			json::Value v = setting("release_sources");
+			for(const char *k : {"aittas", "addresses"}){
+				const json::Value &l = q.get(k);
+				if(l.is_undefined())
+					continue;
+				if(!l.is_array() || l.size() > 10)
+					throw Exception(ss_(k)+": a list of ten addresses at most");
+				json::Value out = json::array();
+				for(unsigned i = 0; i < l.size(); i++){
+					const ss_ u = l.at(i).is_string() ? l.at(i).as_string() : "";
+					if(u.size() > 200 || (u.compare(0, 7, "http://") != 0 &&
+							u.compare(0, 8, "https://") != 0))
+						throw Exception(ss_(k)+": not an http(s) address: "+u);
+					out.append(norm_url(u));
+				}
+				v.set(k, out);
+			}
+			Q i(m_db, "INSERT OR REPLACE INTO settings(key, value) "
+					"VALUES('release_sources', ?)");
+			i.b(v.stringify()).step();
+			{
+				std::lock_guard<std::mutex> lock(m_rmutex);
+				m_rsources = v;
+				m_rkick = true;
+			}
+			m_rwake.notify_all();
+			return v;
 		}
 		if(cmd == "new_thread"){
 			const int64_t topic_id = jint(q, "topic");

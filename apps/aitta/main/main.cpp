@@ -10,6 +10,9 @@
 // The HTTP API, under /api/aitta/ on the server's port, JSON out, a
 // refusal {"ok": false, "error": ...} with status 200:
 //   GET  list                       the listed releases
+//   GET  release?id=author/name/version  one, with its changelog's text
+//                                   ([PACKAGE_SUBJECT]: what a Hearth
+//                                   posts as the release's thread)
 //   GET  archive/<sha256>.zip|.sig  a release's two files
 //   POST upload_begin?size=N        body: the release's .sig. Its key must
 //                                   be bound to an author, and the
@@ -22,7 +25,7 @@
 // The records are in the save "aitta": stores authors (author -> its key
 // and account), keys (key -> author), owners (account -> author),
 // releases ("author/name/version" -> the manifest's fields, sha256, size,
-// key, time, delisted), settings. The archives are files, by hash, in
+// key, time, delisted), changelogs (the same key -> {text}), settings. The archives are files, by hash, in
 // <user>/apps/<app>/archives.
 #include "core/log.h"
 #include "core/json.h"
@@ -64,7 +67,7 @@ static ss_ query_value(const ss_ &query, const ss_ &key)
 		const ss_ part = query.substr(at, amp - at);
 		const size_t eq = part.find('=');
 		if(eq != ss_::npos && part.substr(0, eq) == key)
-			return part.substr(eq + 1); // simplified: hex and digits only here
+			return part.substr(eq + 1); // simplified: hex, digits and a release id here
 		at = amp + 1;
 	}
 	return "";
@@ -248,6 +251,8 @@ struct Module: public interface::Module
 		try {
 			if(call == "list")
 				return http_list(r);
+			if(call == "release")
+				return http_release(r);
 			if(call.compare(0, 8, "archive/") == 0)
 				return http_archive(r, call.substr(8));
 			if(r.method != "POST")
@@ -281,6 +286,20 @@ struct Module: public interface::Module
 		json::Value v = json::object();
 		v.set("ok", true);
 		v.set("releases", releases(false));
+		respond(r, v);
+	}
+
+	void http_release(const network::HttpRequest &r)
+	{
+		const ss_ id = query_value(r.query, "id");
+		const json::Value rel = load("releases", id);
+		if(!rel.is_object() || rel.get("delisted").is_true())
+			return refuse(r, "no such release");
+		json::Value v = json::object();
+		v.set("ok", true);
+		v.set("release", rel);
+		const json::Value c = load("changelogs", id);
+		v.set("changelog", c.is_object() ? jstr(c, "text") : ss_());
 		respond(r, v);
 	}
 
@@ -392,6 +411,12 @@ struct Module: public interface::Module
 		}
 		const bool changelog_there = jstr(m, "changelog").empty() ||
 				interface::fs::path_exists(dir+"/"+jstr(m, "changelog"));
+		// Its text kept for the release's thread ([PACKAGE_SUBJECT]), the
+		// first 64 KiB: a Hearth message holds less than that anyway
+		ss_ changelog;
+		if(!jstr(m, "changelog").empty() && changelog_there)
+			changelog = read_file(dir+"/"+jstr(m, "changelog")).substr(0,
+					64 * 1024);
 		interface::fs::remove_all(dir);
 		auto drop = [&](const ss_ &why){
 			interface::fs::remove_all(zip);
@@ -428,6 +453,11 @@ struct Module: public interface::Module
 		rel.set("time", now_s());
 		rel.set("delisted", false);
 		put("releases", id, rel);
+		if(!changelog.empty()){
+			json::Value c = json::object();
+			c.set("text", changelog);
+			put("changelogs", id, c);
+		}
 		log_i(MODULE, "Listed %s (%zu bytes) from %s", cs(id), u.size,
 				cs(r.address));
 		ok(r, id);

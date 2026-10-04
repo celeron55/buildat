@@ -29,6 +29,11 @@ local function encode(v)
 		end) .. '"'
 	elseif type(v) == "table" then
 		local out = {}
+		-- simplified: a table with v[1] is an array (no holes, no mixed keys)
+		if v[1] ~= nil then
+			for _, x in ipairs(v) do out[#out + 1] = encode(x) end
+			return "[" .. table.concat(out, ",") .. "]"
+		end
 		for k, x in pairs(v) do
 			out[#out + 1] = encode(tostring(k)) .. ":" .. encode(x)
 		end
