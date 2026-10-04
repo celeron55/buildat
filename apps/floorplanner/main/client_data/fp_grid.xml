@@ -1,0 +1,11 @@
+<!-- The rooms' light on a grid (GridBake.glsl; editor.lua's M.grid_bake):
+     from the drawn probes' cells (emissive) or the worked out ones
+     (normal), as RoomCubes says -->
+<renderpath>
+    <command type="quad" vs="main/GridBake" ps="main/GridBake" output="viewport">
+        <parameter name="RoomCubes" value="1" />
+        <texture unit="specular" name="generated/fp_room_table" />
+        <texture unit="emissive" name="generated/fp_probe_reduce" />
+        <texture unit="normal" name="generated/fp_cpu_cubes" />
+    </command>
+</renderpath>

@@ -33,6 +33,17 @@ namespace interface
 		void log_backtrace_chain(const std::list<ThreadBacktrace> &chain,
 				const char *reason, bool cut_at_api = true);
 
+		// A watchdog for the thread that calls this ([WIN8_START] 14): every
+		// call says the thread is alive; a thread of its own logs the
+		// caller's backtrace once no call has come for stall_seconds -- a
+		// freeze reads like a crash in the log -- and again every minute
+		// of the same freeze. Started on the first call.
+		void watchdog_alive(int stall_seconds = 10);
+		// What a freeze of 30 s does besides the logging (Linux; nothing
+		// elsewhere): f is called on the frozen thread from a signal
+		// handler, so it may do only what a handler may
+		void watchdog_on_freeze(void (*f)());
+
 		struct SigConfig {
 			bool catch_segfault = true;
 			bool catch_abort = true;

@@ -14,6 +14,10 @@ namespace interface
 	struct ModuleMeta
 	{
 		bool disable_cpp = false;
+		// A client-side script the engine runs once per peer when the
+		// client's files first arrive, named relative to the module
+		// (e.g. "init.lua" runs "<module>/init.lua") ([ENGINE_LOADER])
+		ss_ client_main;
 		ss_ cxxflags;
 		ss_ ldflags;
 		ss_ cxxflags_linux;
