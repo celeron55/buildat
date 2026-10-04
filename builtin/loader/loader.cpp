@@ -281,14 +281,14 @@ struct Module: public interface::Module, public loader::Interface
 		log_d(MODULE, "loader construct");
 
 		m_module_load_paths.push_back(m_server->get_modules_path());
-		// A game that is a variant of another ([GAME_BASE]): its
-		// __loader/meta.json names the base, whose modules are loaded as
-		// the variant's own after the variant's -- a module directory in
-		// both is the variant's, since its path is looked in first
+		// A game that is a variant of another ([GAME_BASE]): its root
+		// meta.json (the Aitta manifest) names the base, whose modules are
+		// loaded as the variant's own after the variant's -- a module
+		// directory in both is the variant's, since its path is first
 		ss_ base = read_base_game(m_server->get_modules_path());
 		if(!base.empty()){
 			m_base_path = m_server->get_modules_path()+"/../"+base;
-			if(!interface::fs::path_exists(m_base_path+"/__loader/meta.json")){
+			if(!interface::fs::path_exists(m_base_path+"/main/meta.json")){
 				m_server->shutdown(1, ss_()+"loader: base game \""+base+
 						"\" not found beside this one");
 				return;
@@ -299,10 +299,10 @@ struct Module: public interface::Module, public loader::Interface
 		m_module_load_paths.push_back(m_server->get_builtin_modules_path());
 	}
 
-	// The "base" of <game>/__loader/meta.json, or "" (no file, no field)
+	// The "base" of <game>/meta.json, or "" (no file, no field)
 	static ss_ read_base_game(const ss_ &modules_path)
 	{
-		ss_ meta_path = modules_path+"/__loader/meta.json";
+		ss_ meta_path = modules_path+"/meta.json";
 		std::ifstream f(meta_path, std::ios::binary);
 		if(!f.good())
 			return "";
@@ -332,12 +332,16 @@ struct Module: public interface::Module, public loader::Interface
 	void init()
 	{
 		log_d(MODULE, "loader init");
+		// [ENGINE_LOADER]: the server loads this module and fires this; it
+		// used to be an app-carried __loader that did the loading on it
+		m_server->sub_event(this, Event::t("core:load_modules"));
 		m_server->sub_event(this, Event::t("core:module_modified"));
 		m_server->sub_event(this, Event::t("core:tick"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
+		EVENT_VOIDN("core:load_modules", activate)
 		EVENT_TYPEN("core:module_modified", on_module_modified,
 				interface::ModuleModifiedEvent)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)

@@ -1111,16 +1111,18 @@ struct CState: public State, public interface::Server
 	{
 		m_modules_path = path;
 
+		// builtin/loader loads the app's own modules; it used to be reached
+		// through an __loader module every app carried ([ENGINE_LOADER])
 		interface::ModuleInfo info;
-		info.name = "__loader";
-		info.path = path+"/"+info.name;
+		info.name = "loader";
+		info.path = get_builtin_modules_path()+"/"+info.name;
 
 		if(!load_module(info)){
-			shutdown(1, "Failed to load __loader module");
+			shutdown(1, "Failed to load builtin/loader");
 			return;
 		}
 
-		// Allow loader to load other modules.
+		// Let loader load the other modules (it activates on this).
 		// Emit synchronously because threading doesn't matter at this point in
 		// initialization and we have to wait for it to complete.
 		emit_event(Event("core:load_modules"), true);
@@ -1247,7 +1249,7 @@ struct CState: public State, public interface::Server
 
 	void set_module_count(size_t count)
 	{
-		// The loader's list plus what is loaded already (__loader, loader)
+		// The loader's list plus what is loaded already (builtin/loader)
 		m_module_count = m_module_load_order.size() + count;
 	}
 

@@ -44,8 +44,6 @@ fail(){ echo "FAIL: $*"; exit 1; }
 # makes the back-to-back calls.
 app="$t/relay_test"
 mkdir -p "$app/main/client_lua"
-# The generic loader-invoker every app has; copied, not generated
-cp -r "$here/apps/featuretest/__loader" "$app/__loader"
 cat > "$app/main/meta.json" <<'EOF'
 {
 	"dependencies": [

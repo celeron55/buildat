@@ -18,7 +18,6 @@ trap 'rm -rf "$t"' EXIT
 fail(){ echo "FAIL: $*"; exit 1; }
 
 mkdir -p "$t/app/main" "$t/user"
-cp -r "$here/apps/box_test/__loader" "$t/app/"
 echo '{"dependencies": [{"module": "storage"}]}' > "$t/app/main/meta.json"
 cat > "$t/app/main/main.cpp" <<'EOF'
 #include "core/log.h"
