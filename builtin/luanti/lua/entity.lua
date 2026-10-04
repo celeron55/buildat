@@ -1907,6 +1907,20 @@ end
 -- changes the field of view at once. Luanti eases it over that many
 -- seconds; the upgrade path is the client easing it, since the number is
 -- already there.
+-- The modes the player left on in this world, back to their client on
+-- join ([FLY_STATE_SAVE]); it says each toggle as fields of MODES_FORM
+local MODES_FORM = "__buildat:modes"
+local function send_modes(o)
+	if not (o and o.player_name and __luanti_send_modes) then
+		return
+	end
+	local list = {}
+	for m in string.gmatch(o.meta:get_string("buildat:modes"), "[^,]+") do
+		list[#list + 1] = m
+	end
+	__luanti_send_modes(o.player_name, list)
+end
+
 local function send_camera(o)
 	if not (o and o.player_name and __luanti_send_camera) then
 		return
@@ -2187,6 +2201,19 @@ function core.__player_receive_fields(playername, formname, fields)
 	local id = players[playername]
 	local ref = id and core.object_refs[id]
 	if not ref then
+		return
+	end
+	-- The client's fly, fast and noclip as they are toggled, kept in the
+	-- player's meta, which the world's save keeps ([FLY_STATE_SAVE]); no
+	-- mod's form, so no mod's callback
+	if formname == MODES_FORM then
+		local on = {}
+		for _, m in ipairs({"fly", "fast", "noclip"}) do
+			if fields[m] == "1" then
+				on[#on + 1] = m
+			end
+		end
+		ref:get_meta():set_string("buildat:modes", table.concat(on, ","))
 		return
 	end
 	-- A form a node carries goes to that node, which is where Luanti sends
@@ -3159,6 +3186,7 @@ function core.__add_player(name)
 	send_day_night(o)
 	send_sky(o)
 	core.__send_privs(o.player_name)
+	send_modes(o)
 	-- And what time it is. The module sends this to everyone every few
 	-- seconds of the world's own clock, which under load is a good deal
 	-- longer than a few seconds of anyone else's -- and a client with no

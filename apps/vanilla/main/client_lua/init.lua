@@ -4262,6 +4262,7 @@ end)
 -- holds the player down
 keys.toggle_mode = function(mode, word)
 	player[mode] = not player[mode]
+	luanti.send_modes(player.fly, player.fast, player.noclip)
 	local line = word .. (player[mode] and " enabled" or " disabled")
 	if player[mode] and not luanti.privs[mode] then
 		line = line .. " (note: no '" .. mode .. "' privilege)"
@@ -4269,6 +4270,13 @@ keys.toggle_mode = function(mode, word)
 	luanti.chat_local(line)
 	log:info(line)
 end
+
+-- And as the player left them in this world ([FLY_STATE_SAVE])
+luanti.sub_modes(function(modes)
+	player.fly, player.fast, player.noclip = modes.fly, modes.fast, modes.noclip
+	log:info("modes as left: fly " .. tostring(player.fly) .. ", fast " ..
+			tostring(player.fast) .. ", noclip " .. tostring(player.noclip))
+end)
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	keys.on_key(event_data:GetInt("Key"))

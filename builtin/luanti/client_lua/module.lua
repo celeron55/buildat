@@ -2397,6 +2397,32 @@ buildat.sub_packet("luanti:privs", function(data)
 	end
 end)
 
+-- The fly, fast and noclip the player left on in this world, once on join
+-- ([FLY_STATE_SAVE]); f(modes) is called with it at once if it came already.
+-- M.send_modes() tells the server a toggle.
+local modes = nil
+local modes_subs = {}
+function M.sub_modes(f)
+	modes_subs[#modes_subs + 1] = f
+	if modes then
+		f(modes)
+	end
+end
+buildat.sub_packet("luanti:modes", function(data)
+	modes = {}
+	for _, m in ipairs(cereal.binary_input(data, {"array", "string"})) do
+		modes[m] = true
+	end
+	for _, f in ipairs(modes_subs) do
+		f(modes)
+	end
+end)
+function M.send_modes(fly, fast, noclip)
+	buildat.send_packet("luanti:fields", cereal.binary_output({
+		"__buildat:modes", "fly", fly and "1" or "", "fast", fast and "1" or "",
+		"noclip", noclip and "1" or ""}, {"array", "string"}))
+end
+
 local ok_ui, err_ui, formspec_ui =
 		buildat.run_script_file("luanti/formspec_ui.lua")
 if not ok_ui or type(formspec_ui) ~= "table" then

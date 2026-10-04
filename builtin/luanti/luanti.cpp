@@ -6738,6 +6738,27 @@ struct Module: public interface::Module, public luanti::Interface
 		return 0;
 	}
 
+	// __luanti_send_modes(player_name, {"fly", "fast", "noclip"}): the
+	// modes the player left on in this world, on join ([FLY_STATE_SAVE]).
+	// See send_modes() in lua/entity.lua.
+	static int l_send_modes(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		sv_<ss_> flat;
+		for(size_t i = 0; i < lua_objlen(L, 2); i++){
+			lua_rawgeti(L, 2, (int)i + 1);
+			size_t len = 0;
+			const char *p = lua_tolstring(L, -1, &len);
+			flat.push_back(ss_(p ? p : "", p ? len : 0));
+			lua_pop(L, 1);
+		}
+		self->send_to_player(ss_(name_p, name_len), "luanti:modes", flat);
+		return 0;
+	}
+
 	// __luanti_send_camera(player_name, {fov, is_multiplier, transition,
 	// eye_x, eye_y, eye_z}): how wide the view is and where the eyes are,
 	// which are the client's to draw and the game's to decide. See
@@ -8872,6 +8893,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_send_physics", l_send_physics);
 		set_global_cfunction("__luanti_send_privs", l_send_privs);
 		set_global_cfunction("__luanti_send_camera", l_send_camera);
+		set_global_cfunction("__luanti_send_modes", l_send_modes);
 		set_global_cfunction("__luanti_send_day_night", l_send_day_night);
 		set_global_cfunction("__luanti_send_sound", l_send_sound);
 		set_global_cfunction("__luanti_sound_file", l_sound_file);
