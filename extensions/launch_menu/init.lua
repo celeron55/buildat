@@ -431,9 +431,20 @@ function M.boot(launch_action, query)
 				found = action
 			end
 		end
+		-- An app with no launcher/ is on no tile ([LAUNCH_ANY_APP]):
+		-- app/<name> starts it as a tile's app is started, the server
+		-- this client's own
+		local app = not found and launch_action:match("^app/([^/]+)$")
+		local is_app = false
+		for _, g in ipairs(app and api.list_apps() or {}) do
+			is_app = is_app or g.name == app
+		end
 		if found then
 			log:info("Launch action: "..launch_action)
 			api.launch(found.key)
+		elseif is_app then
+			log:info("Launch action: "..launch_action..", the app itself")
+			screens.start_local_app(app, nil)
 		else
 			log:warning("Launch action "..dump(launch_action)..
 					" is not on the grid")
