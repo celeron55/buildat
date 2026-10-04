@@ -291,8 +291,10 @@ static void self_check(const ss_ &base)
 	}
 	if(refused == false || fs::path_exists(fs::strip_file_name(dir)+"/escape.txt"))
 		throw Exception("zip self_check: a name with .. must be refused");
-	// What Windows makes ".." of, and a stream of a file
-	for(const char *bad : {".. /escape.txt", "a/... /x", "a:b.txt"}){
+	// What Windows makes ".." of, and a stream of a file; an absolute
+	// name and a backslash (a separator on Windows) each leave the dir
+	for(const char *bad : {".. /escape.txt", "a/... /x", "a:b.txt",
+			"/abs.txt", "\\abs.txt", "a\\b.txt"}){
 		if(name_is_safe(bad))
 			throw Exception(ss_()+"zip self_check: \""+bad+"\" must be "
 					"refused");
