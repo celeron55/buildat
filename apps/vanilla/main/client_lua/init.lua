@@ -1005,7 +1005,7 @@ function WIELD.show(on)
 	-- What is wanted is kept apart from what is drawn: the third-person
 	-- views hide the hand, and first person puts back what was wanted
 	WIELD.shown_wanted = on
-	on = on and WIELD.camera_mode == 1
+	on = on and WIELD.camera_mode == 1 and hud_shown
 	wield_node.enabled = on
 	if not on then
 		for i = 0, wield_node:GetNumChildren() - 1 do
@@ -1094,10 +1094,11 @@ local function draw_wielded(item_name, stack)
 			wield_shapes[key] = shape
 		end
 	end
-	-- Only in first person: a child is drawn whatever its parent says,
-	-- so the third-person views have to be said here too
+	-- Only in first person, and only with the HUD on: the corner item goes
+	-- with the HUD ([HUD_HIDES_HAND]). A child is drawn whatever its parent
+	-- says, so the third-person views have to be said here too
 	-- ([THIRD_PERSON_WIELD])
-	local first = WIELD.camera_mode == 1
+	local first = WIELD.camera_mode == 1 and hud_shown
 	for name, sh in pairs(wield_shapes) do
 		if sh then
 			sh.node.enabled = first and (name == key)
@@ -1106,7 +1107,7 @@ local function draw_wielded(item_name, stack)
 	if shape then
 		wield_node:GetChild("box").enabled = false
 		WIELD.shown_wanted = true
-		wield_node.enabled = WIELD.camera_mode == 1
+		wield_node.enabled = first
 		return
 	end
 	-- No shape: the box wearing one face of the picture, as before
@@ -1118,7 +1119,7 @@ local function draw_wielded(item_name, stack)
 	wield_material:SetTexture(magic.TU_DIFFUSE, tex)
 	wield_node:GetChild("box").enabled = first
 	WIELD.shown_wanted = true
-	wield_node.enabled = WIELD.camera_mode == 1
+	wield_node.enabled = first
 end
 
 
@@ -4376,6 +4377,11 @@ keys.on_key = function(key)
 	elseif key == BIND.hud.key then
 		hud_shown = not hud_shown
 		draw_hud(hud_elements)
+		-- The first-person item in the corner goes with the HUD
+		-- ([HUD_HIDES_HAND]); the third-person item is the world's and
+		-- stays. draw_hotbar() puts back exactly what is in hand, now that
+		-- draw_wielded() reads hud_shown.
+		draw_hotbar()
 	elseif key == BIND.chatlog.key then
 		chat_shown = not chat_shown
 		draw_hud(hud_elements)
