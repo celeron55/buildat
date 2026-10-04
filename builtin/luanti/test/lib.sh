@@ -26,6 +26,9 @@
 # the verdict, since it reads $?.
 SKIP=77
 
+# The checks' own user and cache paths, and check_pgrep/check_pkill
+. "$(dirname "${BASH_SOURCE[0]}")/../../../util/check_paths.sh"
+
 verdict_keep()
 {
 	verdict_rc=$?
@@ -96,7 +99,7 @@ run_client()
 wait_quiet()
 {
 	local s=${1:-30} i=0
-	while pgrep -x buildat >/dev/null || pgrep -x buildat_server >/dev/null; do
+	while check_pgrep buildat >/dev/null || check_pgrep buildat_server >/dev/null; do
 		i=$((i + 1))
 		if [ "$i" -ge "$s" ]; then
 			echo "wait_quiet: a client or server is still up after ${s}s" >&2

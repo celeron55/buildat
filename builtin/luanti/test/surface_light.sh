@@ -27,7 +27,7 @@ me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/surface_light"; mkdir -p "$out"
 save=buildat_test_surface_light
 cd "$here/Build"
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2; exit 77
 fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
@@ -40,7 +40,7 @@ for i in $(seq 1 400); do
 	sleep 1
 done
 sleep 5
-srv=$(pgrep -x buildat_server | head -1)
+srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "FAIL: the server did not come up" >&2; exit 1; }
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 # A client is what makes the world around the player load, which is what

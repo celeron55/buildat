@@ -10,7 +10,7 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/uitest"; mkdir -p "$out"
 cd "$here/Build"
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
 bin/buildat_server -m ../apps/uitest -P 29793 -l 3 2>&1 |
@@ -19,7 +19,7 @@ for i in $(seq 1 60); do
 	grep -q "Server::start\|Mods loaded" "$out/srv.log" 2>/dev/null && break
 	sleep 1
 done
-srv=$(pgrep -x buildat_server | head -1)
+srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 { echo "delay 4000"; echo "screenshot $out/uitest.png"; echo "delay 500"

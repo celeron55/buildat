@@ -15,11 +15,11 @@ tmp=$(mktemp -d "/tmp/buildat_leave_ui.XXXXXX")
 cd "$here/Build"
 # A server of an earlier run still shutting down would be read as this
 # run's; wait for it
-for i in $(seq 1 60); do pgrep -x buildat_server >/dev/null || break; sleep 1; done
-pgrep -x buildat_server >/dev/null && { echo "FAIL: a buildat_server is running" >&2; exit 2; }
+for i in $(seq 1 60); do check_pgrep buildat_server >/dev/null || break; sleep 1; done
+check_pgrep buildat_server >/dev/null && { echo "FAIL: a buildat_server is running" >&2; exit 2; }
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
-trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; pkill -INT -x buildat_server 2>/dev/null' EXIT
+trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; check_pkill -INT buildat_server 2>/dev/null' EXIT
 # **The grid by name, not by preference** (2026-09-24): this drives
 # the launch menu's own screens, and a desk whose `launch_ui` is set
 # to something else -- the room, the console -- booted that instead
@@ -68,7 +68,7 @@ def click(e):
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
 def server_up():
-    return subprocess.run(["pgrep", "-x", "buildat_server"], capture_output=True).returncode == 0
+    return subprocess.run(["bash", "-c", "check_pgrep buildat_server"], capture_output=True).returncode == 0
 def open_worlds(tag):
     els = scan("grid" + tag)
     # The tile, not the selected entry's name in the logo row (the same
@@ -97,7 +97,7 @@ for i in range(40):
     if not server_up(): break
     time.sleep(1)
 if server_up():
-    pid = subprocess.run(["pgrep", "-x", "buildat_server"], capture_output=True, text=True).stdout.split()[0]
+    pid = subprocess.run(["bash", "-c", "check_pgrep buildat_server"], capture_output=True, text=True).stdout.split()[0]
     bt = subprocess.run(["gdb", "-batch", "-p", pid, "-ex", "thread apply all bt 8"], capture_output=True, text=True).stdout
     open(log + ".server_stack", "w").write(bt)
     fail("the local server is still running after leaving; its stack is in " + log + ".server_stack")

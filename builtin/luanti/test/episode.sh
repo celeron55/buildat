@@ -80,7 +80,7 @@ esac
 	echo "rawset(_G, \"EPISODE_SECONDS\", $SECONDS_GIVEN)"
 	cat "$me/episode.lua"; } > "$out/fixture.lua"
 
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null ||
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null ||
 		pgrep -x luanti-refshots >/dev/null; then
 	echo "a server or client is already running" >&2; exit 2
 fi
@@ -180,7 +180,7 @@ for i in $(seq 1 400); do
 	sleep 1
 done
 sleep 5
-srv=$(pgrep -x buildat_server | head -1)
+srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the module's server did not come up" >&2; exit 1; }
 fifo="$out/module_stdin"; rm -f "$fifo"; mkfifo "$fifo"
 bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c - < "$fifo" \

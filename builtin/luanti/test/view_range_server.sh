@@ -22,11 +22,11 @@ me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/view_range_server"; mkdir -p "$out"
 save="buildat_test_view_range"
 cd "$here/Build"
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2; exit "$SKIP"
 fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
-trap 'pkill -INT -x buildat_server 2>/dev/null; true' EXIT
+trap 'check_pkill -INT buildat_server 2>/dev/null; true' EXIT
 
 # A world of its own and no player: what is measured is what the server
 # builds the world with, which it says at create_world()
@@ -43,9 +43,9 @@ run_one() {
 		grep -aq "world kept" "$out/srv_$name.log" 2>/dev/null && break
 		sleep 1
 	done
-	pkill -INT -x buildat_server 2>/dev/null
+	check_pkill -INT buildat_server 2>/dev/null
 	for i in $(seq 1 60); do
-		pgrep -x buildat_server >/dev/null || break
+		check_pgrep buildat_server >/dev/null || break
 		sleep 1
 	done
 	sed -n 's/.*world kept \([0-9]*\) sections out and generated \([0-9]*\).*/\1 \2/p' \

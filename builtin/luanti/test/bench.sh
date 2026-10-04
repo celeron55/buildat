@@ -22,7 +22,7 @@ for i in $(seq 1 200); do
 	sleep 1
 done
 sleep 3
-srv=$(pgrep -x buildat_server | head -1)
+srv=$(check_pgrep buildat_server | head -1)
 { echo "delay 600000"; echo "quit"; } > "$tmp/cmds.txt"
 bin/buildat -s "localhost:$port" -w 640x360 -l 2 -c @"$tmp/cmds.txt" \
 	> "$tmp/cli.log" 2>&1 &

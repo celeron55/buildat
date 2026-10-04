@@ -93,7 +93,7 @@ trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 # sqlite, and a random port does not help: two of them fight over the same
 # database. **Refused rather than killed** (2026-10-03): killall took every
 # buildat on the machine, the user's own and other runs' included.
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "a buildat server or client is already running; stop it first" >&2
 	exit 2
 fi
@@ -137,7 +137,7 @@ for i in $(seq 1 400); do
 	sleep 1
 done
 sleep 10
-srv=$(pgrep -x buildat_server | head -1)
+srv=$(check_pgrep buildat_server | head -1)
 [ -z "$srv" ] && { echo "the server did not come up" >&2
 	tail -3 "$tmp/srv.log" >&2; exit 1; }
 

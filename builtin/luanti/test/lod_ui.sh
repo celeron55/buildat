@@ -24,7 +24,7 @@ mkdir -p $BUILDAT_USER_PATH/shared/vanilla
 [ -f "$settings" ] && cp "$settings" "$tmp/settings.json.bak"
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
-trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; pkill -INT -x buildat_server 2>/dev/null;
+trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; check_pkill -INT buildat_server 2>/dev/null;
 	if [ -f "$tmp/settings.json.bak" ]; then cp "$tmp/settings.json.bak" "$settings"; else rm -f "$settings"; fi;
 	[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"' EXIT
 # The grid by name, not by preference: keys_ui.sh says why ([MENU_FALLBACK])

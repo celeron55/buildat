@@ -27,7 +27,7 @@ GAME="${GAME:-minetest_game}"
 cd "$here/Build"
 [ -d "$BUILDAT_USER_PATH/shared/vanilla/games/$GAME" ] || {
 	echo "SKIP: $GAME is not installed" >&2; exit "$SKIP"; }
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2
 	exit "$SKIP"
 fi

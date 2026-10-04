@@ -46,7 +46,7 @@ for i in $(seq 1 200); do
 	sleep 1
 done
 sleep 3
-srv=$(pgrep -x buildat_server | head -1)
+srv=$(check_pgrep buildat_server | head -1)
 # Not a scripted client: one under -c keeps the cursor visible and its
 # focus forced, which is the opposite of what is tested. Killed at the end.
 bin/buildat -s "localhost:$port" -w 640x360 -l 3 \
@@ -59,7 +59,7 @@ done
 sleep 2
 # This run's client and no other window: by the client's pid, never by a
 # title, which another buildat or an editor may carry
-pid=$(pgrep -n -x buildat)
+pid=$(check_pgrep buildat | tail -1)
 win=""
 for i in $(seq 1 20); do
 	win=$(xdotool search --pid "$pid" --onlyvisible 2>/dev/null | head -1)

@@ -15,7 +15,7 @@ here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/new_world"; mkdir -p "$out"
 saves="$BUILDAT_USER_PATH/apps/vanilla/saves"
-if pgrep -x buildat >/dev/null || pgrep -x buildat_server >/dev/null; then
+if check_pgrep buildat >/dev/null || check_pgrep buildat_server >/dev/null; then
 	echo "a client or a server is already running" >&2; exit 2
 fi
 # The name the screen is refused: a directory under the saves is enough,
@@ -34,15 +34,15 @@ fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 ( cd "$here/Build" && bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" ) &
 cli=$!
-trap 'kill "$cli" 2>/dev/null; pkill -x buildat_server 2>/dev/null' EXIT
+trap 'kill "$cli" 2>/dev/null; check_pkill buildat_server 2>/dev/null' EXIT
 exec 3> "$fifo"
 python3 "$me/new_world.py" "$out/cli.log" "$fifo" "$saves"
 status=$?
 exec 3>&-
 sleep 2
-pkill -x buildat 2>/dev/null
-pkill -x buildat_server 2>/dev/null
-for i in $(seq 1 30); do pgrep -x buildat_server >/dev/null || break; sleep 1; done
+check_pkill buildat 2>/dev/null
+check_pkill buildat_server 2>/dev/null
+for i in $(seq 1 30); do check_pgrep buildat_server >/dev/null || break; sleep 1; done
 # What this run made goes with it
 rm -rf "$saves/taken" "$saves/mgtest"
 exit $status

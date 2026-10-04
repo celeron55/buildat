@@ -28,7 +28,7 @@ out="$here/local/options_for_LAUNCH_WORLD_floor"; mkdir -p "$out"
 rm -f "$out"/*.png
 mkdir -p "$out/emptyuser"
 cd "$here/Build"
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 # **Wait for the probe** (user, 2026-09-24): it renders its ninety

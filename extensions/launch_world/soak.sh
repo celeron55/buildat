@@ -33,7 +33,7 @@ rm -f "$out"/*.log "$out"/*.txt
 MINUTES="${MINUTES:-3}"
 GROW="${GROW:-25}"
 cd "$here/Build"
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 # The room's own save is left alone: this places and digs a great many
@@ -90,7 +90,7 @@ bin/buildat -m launch_world -D "$user" -w 800x500 -l 3 \
 	-L "$out/cli.log" -c @"$out/cmds.txt" > /dev/null 2>&1 &
 run=$!
 sleep 8
-pid=$(pgrep -x buildat | head -1)
+pid=$(check_pgrep buildat | head -1)
 if [ -z "$pid" ]; then
 	echo "SKIP: the client did not come up" >&2; exit 2
 fi

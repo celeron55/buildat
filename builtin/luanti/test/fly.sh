@@ -58,7 +58,7 @@ for i in $(seq 1 200); do
 	sleep 1
 done
 sleep 3
-srv=$(pgrep -x buildat_server | head -1)
+srv=$(check_pgrep buildat_server | head -1)
 # Join, fly up 8 s in, keep flying; at 22 s (fly revoked at 20) press K
 # twice: off, then on again without the privilege
 { echo "delay 8000"; echo "keypress K"; echo "delay 300"; echo "keydown Space"; echo "delay 2000"

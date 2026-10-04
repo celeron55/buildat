@@ -12,7 +12,7 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_menu_attract"; mkdir -p "$out"
 cd "$here/Build"
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 # Escape would quit the menu; Right and Return move and pick, which is

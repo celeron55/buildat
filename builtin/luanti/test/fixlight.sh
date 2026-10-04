@@ -36,13 +36,13 @@ out="$here/local/fixlight_check"; mkdir -p "$out"
 save=buildat_test_fixlight
 port=29793
 cd "$here/Build"
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2; exit "$SKIP"
 fi
 # A world of its own, made fresh: what is measured is the light a made world
 # has, so a save from an earlier run would be measuring that run instead
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
-trap 'pkill -INT -x buildat_server 2>/dev/null; true' EXIT
+trap 'check_pkill -INT buildat_server 2>/dev/null; true' EXIT
 { echo 'core.settings:set("time_speed", "0")'
   echo 'core.after(0, function() core.set_timeofday(0.5) end)'
   cat "$me/fixlight.lua"; } > "$out/fixture.lua"
@@ -63,7 +63,7 @@ for i in $(seq 1 60); do
 	grep -aq "fixcheck: done" "$out/srv.log" 2>/dev/null && break
 	sleep 1
 done
-pkill -INT -x buildat_server 2>/dev/null
+check_pkill -INT buildat_server 2>/dev/null
 if ! grep -aq "fixcheck: done" "$out/srv.log"; then
 	echo "SKIP: the run never got to its end; see $out/srv.log" >&2
 	exit "$SKIP"

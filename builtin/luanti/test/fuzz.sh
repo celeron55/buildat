@@ -125,7 +125,7 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" -v wait="$((START_
 [ -n "${CMDS:-}" ] && cp "$CMDS" "$out/cmds.txt"
 
 cd "$here/Build"
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
 rm -rf "$BUILDAT_USER_PATH/apps/$GAME_DIR/saves/$save"
@@ -144,7 +144,7 @@ for i in $(seq 1 400); do
 	sleep 1
 done
 sleep 5
-srv=$(pgrep -x buildat_server | head -1)
+srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; tail -3 "$out/srv.log" >&2; exit 1; }
 
 # NETSIM="--delay 80 --rate 2000 --loss 2": the client goes through

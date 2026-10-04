@@ -18,7 +18,7 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_uis"; mkdir -p "$out"
 cd "$here/Build"
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 { echo "delay 2500"; echo "quit"; } > "$out/cmds.txt"

@@ -51,7 +51,7 @@ rm -f "$BUILDAT_USER_PATH/launch_world/room.txt"
 # picture nobody reads
 lua "$here/extensions/launch_world/room.lua" || exit 1
 cd "$here/Build"
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 

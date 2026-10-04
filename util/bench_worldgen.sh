@@ -123,7 +123,7 @@ for i in $(seq 1 "$runs"); do
 		fi
 		last_n=$n
 	done
-	pkill -x buildat_server
+	check_pkill buildat_server
 	sleep 2
 	read -r n span <<< "$(span_of "$log")"
 	printf 'run %d: %s sections in %s s\n' "$i" "$n" "$span"

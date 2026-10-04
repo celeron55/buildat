@@ -21,7 +21,7 @@ out="$here/local/pause_screens"; mkdir -p "$out"
 rm -f "$out"/*.png
 luanti=~/projects/luanti
 bin=${LUANTI_BIN:-$luanti/bin/luanti-refshots}
-if pgrep -x buildat >/dev/null || pgrep -x luanti-refshots >/dev/null; then
+if check_pgrep buildat >/dev/null || pgrep -x luanti-refshots >/dev/null; then
 	echo "a client or a Luanti server is already running" >&2; exit 2
 fi
 work="$out/luanti_world"

@@ -14,7 +14,7 @@ set -u
 . "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out="$here/local/connect_async"; mkdir -p "$out"
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "a client is already running" >&2; exit 2
 fi
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
@@ -125,5 +125,5 @@ PY
 status=$?
 exec 3>&-
 sleep 2
-pkill -x buildat 2>/dev/null
+check_pkill buildat 2>/dev/null
 exit $status

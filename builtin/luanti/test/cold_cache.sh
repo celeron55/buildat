@@ -22,10 +22,10 @@ me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/cold_cache"
 rm -rf "$out"; mkdir -p "$out/cache"
 cd "$here/Build"
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2; exit "$SKIP"
 fi
-trap 'pkill -INT -x buildat_server 2>/dev/null; true' EXIT
+trap 'check_pkill -INT buildat_server 2>/dev/null; true' EXIT
 echo 'core.settings:set("time_speed", "0")' > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE=buildat_test_cold \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \

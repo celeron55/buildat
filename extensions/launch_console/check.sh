@@ -14,7 +14,7 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_console"; mkdir -p "$out"
 cd "$here/Build"
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 # **`text`, not `keypress`**: a LineEdit fills from SDL's text input

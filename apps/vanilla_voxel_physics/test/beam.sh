@@ -15,7 +15,7 @@ out="$here/local/voxel_physics"
 mkdir -p "$out"
 save="buildat_test_beam"
 cd "$here/Build"
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla_voxel_physics/saves/$save"
@@ -123,7 +123,7 @@ for i in $(seq 1 400); do
 	sleep 1
 done
 sleep 5
-srv=$(pgrep -x buildat_server | head -1)
+srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
 cat > "$out/cmds.txt" <<CMDS
 wait_log 60000 the server put the player

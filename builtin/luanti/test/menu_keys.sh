@@ -32,7 +32,7 @@ tmp=$(mktemp -d "/tmp/buildat_menu_keys.XXXXXX")
 # moved between two of them, and the answer is only in the pictures.
 trap 'if [ -n "${KEEP_TMP:-}" ]; then echo "kept $tmp" >&2; else rm -rf "$tmp"; fi' EXIT
 cd "$here/Build"
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "a client is already running" >&2; exit 2
 fi
 fifo="$tmp/cmds.fifo"; mkfifo "$fifo"
@@ -133,5 +133,5 @@ PY
 status=$?
 exec 3>&-
 sleep 2
-pkill -x buildat 2>/dev/null
+check_pkill buildat 2>/dev/null
 exit $status

@@ -24,7 +24,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 out="${BUILDAT_MARK_OUT:-$here/local/options_for_LAUNCH_WORLD_mark}"
 mkdir -p "$out"
 cd "$here/Build"
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 # **One shot of each kind of sphere, each presenting its face** (user,

@@ -45,7 +45,7 @@ port=31998
 cd "$here/Build"
 [ -d "$BUILDAT_USER_PATH/shared/vanilla/games/devtest" ] || {
 	echo "SKIP: devtest is not installed" >&2; exit 77; }
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat server or client is already running" >&2; exit 77
 fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"

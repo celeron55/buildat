@@ -32,13 +32,13 @@ me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/leave_world"; mkdir -p "$out"; rm -f "$out"/*.png
 tmp=$(mktemp -d "/tmp/buildat_leave_world.XXXXXX")
 cd "$here/Build"
-for i in $(seq 1 60); do pgrep -x buildat_server >/dev/null || break; sleep 1; done
-if pgrep -x buildat_server >/dev/null; then
+for i in $(seq 1 60); do check_pgrep buildat_server >/dev/null || break; sleep 1; done
+if check_pgrep buildat_server >/dev/null; then
 	echo "SKIP: a buildat_server is already running" >&2; exit "$SKIP"
 fi
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
-trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; pkill -INT -x buildat_server 2>/dev/null; rm -rf "$tmp"' EXIT
+trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; check_pkill -INT buildat_server 2>/dev/null; rm -rf "$tmp"' EXIT
 # The grid by name, not by preference ([MENU_FALLBACK]); leave_ui.sh says why
 bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
@@ -91,7 +91,7 @@ def fail(why):
     write("quit")
     sys.exit(1)
 def server_up():
-    return subprocess.run(["pgrep", "-x", "buildat_server"],
+    return subprocess.run(["bash", "-c", "check_pgrep buildat_server"],
                           capture_output=True).returncode == 0
 def waitlog(text, secs):
     t0 = time.time()

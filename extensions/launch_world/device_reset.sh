@@ -27,7 +27,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/options_for_LAUNCH_WORLD/device_reset"; mkdir -p "$out/user"
 rm -f "$out"/*.png
 cd "$here/Build"
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit "$SKIP"
 fi
 # The desk's rows in order: render scale, vsync, max fps, multisampling.

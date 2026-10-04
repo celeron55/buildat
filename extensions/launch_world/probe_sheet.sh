@@ -20,7 +20,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/options_for_LAUNCH_WORLD/probe"
 mkdir -p "$out"; rm -f "$out"/*.png
 cd "$here/Build"
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "a buildat client is already running" >&2; exit 2
 fi
 rm -f "$BUILDAT_USER_PATH/launch_world/room.txt"

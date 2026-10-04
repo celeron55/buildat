@@ -23,4 +23,36 @@ for _d in games texture_packs textures; do
 			"$BUILDAT_USER_PATH/shared/vanilla/$_d"
 done
 unset _d
+
+# **The checks' own processes, never the desk's.** A check's client and
+# server -- and a server its client starts -- carry BUILDAT_USER_PATH in
+# their environment from here; a playtest's do not. So "is a server up",
+# "which pid is the server" and "stop the server" ask about these alone,
+# and a check neither waits on, nor reads, nor kills the user's game. A
+# scripted client's window is told apart by its WM_CLASS
+# (doc/client_commands.txt), so a playtest is no reason to skip a check.
+#
+#   check_pgrep buildat_server         the pids, one a line; 1 if none
+#   check_pkill [-SIG] buildat_server
+check_pgrep()
+{
+	local p found=1
+	for p in $(pgrep -x "$1"); do
+		grep -qzxF "BUILDAT_USER_PATH=$BUILDAT_USER_PATH" \
+				"/proc/$p/environ" 2>/dev/null || continue
+		echo "$p"
+		found=0
+	done
+	return $found
+}
+
+check_pkill()
+{
+	local sig=-TERM pids
+	[ "${1#-}" != "$1" ] && { sig=$1; shift; }
+	pids=$(check_pgrep "$1") || return 1
+	kill "$sig" $pids
+}
+# For a python body's subprocess: bash -c "check_pgrep buildat_server"
+export -f check_pgrep check_pkill
 # vim: set noet ts=4 sw=4:

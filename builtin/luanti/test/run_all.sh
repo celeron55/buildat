@@ -37,6 +37,7 @@
 # ([CI_RUNS] (6)); a known flake is marked "# flaky:" in the runner and
 # is run and reported but does not decide the status.
 set -u
+. "$(dirname "$0")/../../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")" && pwd)
 tier="${1:-quick}"
 list_only=""
@@ -190,11 +191,11 @@ for name in $runners; do
 	# quarantined, not papered over -- this is neither, it is the
 	# harness cleaning up after itself).
 	for w in $(seq 1 30); do
-		pgrep -x buildat >/dev/null || pgrep -x buildat_server >/dev/null ||
+		check_pgrep buildat >/dev/null || check_pgrep buildat_server >/dev/null ||
 			break
 		sleep 1
 	done
-	for p in $(pgrep -x buildat) $(pgrep -x buildat_server); do
+	for p in $(check_pgrep buildat) $(check_pgrep buildat_server); do
 		age=$(ps -o etimes= -p "$p" 2>/dev/null | tr -d ' ')
 		[ -n "$age" ] || continue
 		if [ "$age" -lt "$((t1 - started + 60))" ]; then

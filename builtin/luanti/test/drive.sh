@@ -45,7 +45,7 @@ fi
 save="buildat_test_drive_$SEED"
 
 cd "$here/Build"
-if pgrep -x buildat_server >/dev/null || pgrep -x buildat >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
 # KEEP_SAVE=1 rejoins the run before's world: the player is a returning
@@ -103,7 +103,7 @@ for i in $(seq 1 400); do
 	sleep 1
 done
 sleep 5
-srv=$(pgrep -x buildat_server | head -1)
+srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; tail -3 "$out/srv.log" >&2; exit 1; }
 fi
 
@@ -203,8 +203,8 @@ sleep 2
 if [ -n "${MENU_RUN:-}" ]; then
 	# The client's own server: it ends with the client; its log is the
 	# verdict's srv.log
-	for i in $(seq 1 30); do pgrep -x buildat_server >/dev/null || break; sleep 1; done
-	pkill -INT -x buildat_server 2>/dev/null || true
+	for i in $(seq 1 30); do check_pgrep buildat_server >/dev/null || break; sleep 1; done
+	check_pkill -INT buildat_server 2>/dev/null || true
 	local_log=$(grep -o "server log: .*" "$out/cli.log" | head -1 | sed 's/server log: //')
 	cp "$local_log" "$out/srv.log" 2>/dev/null || : > "$out/srv.log"
 else

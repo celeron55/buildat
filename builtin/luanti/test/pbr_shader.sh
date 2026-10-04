@@ -36,7 +36,7 @@ me="$here/builtin/luanti/test/reference_shots"
 ref="$here/local/reference_shots/module_pbr_r150"
 out="$here/local/pbr_shader"; mkdir -p "$out"
 . "$here/builtin/luanti/test/lib.sh" 2>/dev/null || true
-if pgrep -x buildat >/dev/null; then
+if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 77
 fi
 if [ ! -d "$ref" ]; then
