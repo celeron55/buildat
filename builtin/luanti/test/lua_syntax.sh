@@ -8,10 +8,9 @@
 #   builtin/luanti/test/lua_syntax.sh
 #
 # **What it is not**: a check that the code works. It parses, nothing
-# more. And it parses with the desk's own Lua, which is 5.4 here while
-# the client runs LuaJIT (5.1), so a file using 5.3's `//` or `goto`
-# passes this and fails there; what this catches is the broken file, not
-# the wrong dialect.
+# more. It parses with LuaJIT where the desk has it, which is the
+# dialect the game runs; with only luac (5.4), a file using 5.3's `//`
+# passes this and fails there.
 #
 # tier: quick
 # cost: 3s
@@ -27,8 +26,18 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 . "$here/builtin/luanti/test/lib.sh"
 cd "$here"
-if ! command -v luac >/dev/null 2>&1; then
-	echo "SKIP: no luac to parse with" >&2; exit 2
+# **LuaJIT's own parser first**: it is what the client and the server
+# run, and 5.4's luac refuses LuaJIT's 64-bit literals (classes.lua's
+# PCG multiplier, `ULL`). The desk's, or the one Urho3D's build makes
+# (the CI image has only lua5.1); luac where there is neither. loadfile
+# parses without running, and needs none of LuaJIT's jit.* modules.
+luajit=$(command -v luajit || ls 3rdparty/Urho3D/Build/bin/luajit 2>/dev/null)
+if [ -n "$luajit" ]; then
+	parse(){ F="$1" "$luajit" -e 'assert(loadfile(os.getenv("F")))'; }
+elif command -v luac >/dev/null 2>&1; then
+	parse(){ luac -p "$1"; }
+else
+	echo "SKIP: no luajit or luac to parse with" >&2; exit 2
 fi
 # **The tree is not always a git checkout**: the packaging image builds
 # from a git archive, where `git ls-files` answers nothing and this
@@ -46,7 +55,7 @@ n=0
 bad=0
 for f in $files; do
 	n=$((n + 1))
-	if ! out=$(luac -p "$f" 2>&1); then
+	if ! out=$(parse "$f" 2>&1); then
 		bad=$((bad + 1))
 		echo "$out"
 	fi
