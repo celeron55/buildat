@@ -1239,7 +1239,6 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("accounts:login"));
 		m_server->sub_event(this, Event::t("accounts:privs"));
 		for(const char *name : {"fp:open", "fp:leave_plan",
@@ -1263,8 +1262,6 @@ struct Module: public interface::Module
 				network::NewClient)
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
 				network::OldClient)
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
 		EVENT_TYPEN("accounts:login", on_accounts_login, accounts::Login)
 		EVENT_TYPEN("accounts:privs", on_accounts_privs, accounts::Login)
 		EVENT_TYPEN("network:packet_received/fp:open", on_open,
@@ -2685,14 +2682,6 @@ struct Module: public interface::Module
 			if(!pair.second.name.empty() && pair.second.plan == plan->m_name &&
 					pair.first != packet.sender)
 				send(pair.first, "fp:presence", data);
-	}
-
-	void on_files_transmitted(const client_file::FilesTransmitted &event)
-	{
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(event.recipient, "core:run_script",
-					"buildat.run_script_file(\"main/init.lua\")");
-		});
 	}
 
 	void send(network::PeerId peer, const ss_ &name, const ss_ &data)

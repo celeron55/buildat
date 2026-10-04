@@ -148,7 +148,6 @@ struct Module: public interface::Module
 	{
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:http_request"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("network:packet_received/ai:req"));
 	}
 
@@ -156,8 +155,6 @@ struct Module: public interface::Module
 	{
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_TYPEN("network:http_request", on_http, network::HttpRequest)
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/ai:req", on_req, network::Packet)
 	}
 
@@ -450,14 +447,6 @@ struct Module: public interface::Module
 
 	// -----------------------------------------------------------------------
 	// The app: an author binds a key; the admin delists
-
-	void on_files_transmitted(const client_file::FilesTransmitted &event)
-	{
-		network::access(m_server, [&](network::Interface *iface){
-			iface->send(event.recipient, "core:run_script",
-					"buildat.run_script_file(\"main/init.lua\")");
-		});
-	}
 
 	void on_req(const network::Packet &packet)
 	{
