@@ -409,6 +409,17 @@ function ObjectRef:get_player_name()
 	return ""
 end
 
+-- Any object's, as Luanti's (l_object.cpp): an entity wields nothing, and
+-- VoxeLibre's mob on_punch asks an arrow that hit it (seed 4's drive,
+-- 2026-10-05)
+function ObjectRef:get_wielded_item()
+	return ItemStack()
+end
+
+function ObjectRef:set_wielded_item(item)
+	return false
+end
+
 function ObjectRef:remove()
 	local o = state_of(self)
 	if not o then
