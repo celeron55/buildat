@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
-# cost: ~70s (2026-10-04)
-# covers: builtin/accounts/accounts.cpp on_login's non-local wiring
+# cost: ~120s (2026-10-04)
+# covers: builtin/accounts/accounts.cpp on_login's non-local wiring and is_local
 # [SECURITY_RUN_2]: the login rate limit end-to-end over a real network, the
 # residual that accounts.cpp's rate_limit_self_check() leaves (the self-check
 # drives note_failure/failure_wait with its own clock; this drives on_login
@@ -12,6 +12,13 @@
 #      the server counts it (note_failure);
 #   2. the accumulated failures lock the name/address ("Too many failed
 #      logins"), the login rate limit working end-to-end.
+#   3. on the launcher's server (floorplanner) started with an owner token, a
+#      loopback client without the token is not local: a new account needs
+#      the setup code ("no admin yet"), and nobody is made the owner;
+#   4. the other counted fail() paths of a new account: a wrong setup code,
+#      and an invite code that does not exist;
+#   5. the same server without a token takes the loopback client as local
+#      (no password, no code): the contrast that gives 3 its teeth.
 # That a correct password is refused while the wait is non-zero (on_login
 # checks the wait before the password) is covered by accounts.cpp's
 # rate_limit_self_check(); it is not driven here because catching a client
@@ -32,25 +39,33 @@ trap '[ -n "$srv" ] && kill $srv 2>/dev/null; rm -rf "$t"' EXIT
 nolog(){ sed 's/\x1b\[[0-9;]*m//g' "$1"; }
 fail(){ echo "FAIL: $*"; exit 1; }
 
+# start <dir> <port> [server args...]: a server, its log in $t/<dir>.log;
+# sets $srv and $code
+start(){
+	local d=$1 p=$2; shift 2
+	bin/buildat_server -m "../apps/$app" -D "$t/$d" -P "$p" -l 3 "$@" \
+		> "$t/$d.log" 2>&1 &
+	srv=$!
+	for _ in $(seq 180); do
+		grep -q "STATUS Listening" "$t/$d.log" && break
+		kill -0 $srv 2>/dev/null || fail "server died ($(tail -5 "$t/$d.log"))"
+		sleep 0.5
+	done
+	grep -q "STATUS Listening" "$t/$d.log" || fail "server did not listen"
+	code=$(nolog "$t/$d.log" | grep -oP 'setup code \K[A-Z0-9]+' | head -1)
+}
+
+app=vanilla jp=BUILDAT_JOIN
 port=29591
 # No launcher param: a public server where loopback is non-local.
-bin/buildat_server -m ../apps/vanilla -D "$t/srv" -P "$port" -l 3 \
-	> "$t/srv.log" 2>&1 &
-srv=$!
-for _ in $(seq 180); do
-	grep -q "STATUS Listening" "$t/srv.log" && break
-	kill -0 $srv 2>/dev/null || fail "server died ($(tail -5 "$t/srv.log"))"
-	sleep 0.5
-done
-grep -q "STATUS Listening" "$t/srv.log" || fail "server did not listen"
-code=$(nolog "$t/srv.log" | grep -oP 'setup code \K[A-Z0-9]+' | head -1)
+start srv "$port"
+srv_log=$t/srv.log
 [ -n "$code" ] || fail "no setup code in the server log"
 
 # join <userdir> <NAME> <PASSWORD> <CREATE> <CODE>: one scripted client.
 join(){
 	printf 'delay 1500\nquit\n' > "$t/seq"
-	BUILDAT_JOIN_NAME="$2" BUILDAT_JOIN_PASSWORD="$3" \
-		BUILDAT_JOIN_CREATE="$4" BUILDAT_JOIN_CODE="$5" \
+	env "${jp}_NAME=$2" "${jp}_PASSWORD=$3" "${jp}_CREATE=$4" "${jp}_CODE=$5" \
 		timeout 40 bin/buildat -s "127.0.0.1:$port" -D "$t/$1" \
 		-w 640x480 -u 1 -l 3 -o sound_mute=1 -c @"$t/seq" \
 		> "$t/$1.log" 2>&1
@@ -68,7 +83,7 @@ c1=$(join w1 alice wrongpass000 0 "")
 echo "$c1" | grep -qF 'Login refused: Wrong password' ||
 	fail "a wrong password was not refused as Wrong password
 $(echo "$c1" | grep -iE 'login|refused' | tail -5)"
-nolog "$t/srv.log" | grep -q "failed: Wrong password" ||
+nolog "$srv_log" | grep -q "failed: Wrong password" ||
 	fail "the server did not log the wrong password as a counted failure"
 
 # 2. the accumulated failures lock the name/address
@@ -82,6 +97,56 @@ for i in $(seq 2 11); do
 done
 [ "$locked" = 1 ] ||
 	fail "repeated wrong logins did not lock the name/address (no 'Too many failed logins')
-$(nolog "$t/srv.log" | grep -iE 'failed|refused' | tail -8)"
+$(nolog "$srv_log" | grep -iE 'failed|refused' | tail -8)"
 
-echo "PASS: a wrong password is refused and counted; accumulated failures lock the login"
+kill $srv; wait $srv 2>/dev/null
+
+# 3. The owner token gates is_local: on the launcher's server started with
+# one, a loopback client that did not send it is a stranger (it gets the
+# setup-code path), and without a token the same client is the local user.
+# A scripted client cannot send the right token (only a client that started
+# the server has it), so the owner's side is the launcher's, not this check's.
+# Floorplanner, as vanilla on the launcher's server has no login to gate.
+app=floorplanner jp=BUILDAT_FP
+BUILDAT_OWNER_TOKEN=check-owner-token start tok $((port+1)) -u launcher=1
+srv_log=$t/tok.log
+port=$((port+1))
+[ -n "$code" ] || fail "the token server has no setup code"
+c=$(join t1 bob rightpass123 1 "")
+echo "$c" | grep -qF 'Login refused: This server has no admin yet' ||
+	fail "a loopback client without the owner token was taken as local
+$(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+nolog "$srv_log" | grep -q "is this server's owner" &&
+	fail "a peer without the token was made the owner"
+sleep 2 # each counted failure makes the address wait (1, 2, 4 s)
+
+# 4. The other counted fail() paths of a new account: a wrong setup code,
+# and once the server has an admin, an invite code that does not exist
+c=$(join t2 bob rightpass123 1 WRONGCODE)
+echo "$c" | grep -qF 'Login refused: Wrong setup code' ||
+	fail "a wrong setup code was not refused
+$(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+sleep 3
+c=$(join t3 bob rightpass123 1 "$code")
+echo "$c" | grep -qF "Joined as bob" ||
+	fail "the setup code did not make the admin
+$(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+c=$(join t4 carol rightpass123 1 NOSUCHINVITE)
+echo "$c" | grep -qF 'Login refused: No such invite code' ||
+	fail "a made-up invite code was not refused
+$(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+n=$(nolog "$srv_log" | grep -cE 'failed: (This server has no admin|Wrong setup code|No such invite code)')
+[ "$n" = 3 ] || fail "the server counted $n of the 3 failures"
+kill $srv; wait $srv 2>/dev/null
+
+# 5. The same launcher server without a token: loopback is local, and joins
+# with no password or setup code
+start loc $((port+1)) -u launcher=1
+srv_log=$t/loc.log
+port=$((port+1))
+c=$(join l1 dave "" 0 "")
+echo "$c" | grep -qF "Joined as dave" ||
+	fail "without a token a loopback client was not local
+$(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+
+echo "PASS: wrong passwords counted and locked; the owner token gates is_local; wrong setup and invite codes refused and counted"
