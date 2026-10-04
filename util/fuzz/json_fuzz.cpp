@@ -28,6 +28,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	try {
 		json::Value v = json::load_string(in.c_str());
 		(void)v.desc_type();
+		// read twice, as Hearth's pages do: an integer's as_number leaked
+		(void)v.as_number(); (void)v.as_number();
 	} catch(std::exception &e){
 	}
 	return 0;

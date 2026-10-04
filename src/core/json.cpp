@@ -355,7 +355,7 @@ const double& json::Value::as_number() const {
 	default:
 		return default_value;
 	case T_INT:
-		p = new ValuePrivate();
+		if(!p) p = new ValuePrivate();
 		p->number = value.i;
 		return p->number;
 	case T_FLOAT:
