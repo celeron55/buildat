@@ -478,6 +478,19 @@ struct Module: public interface::Module, public loader::Interface
 				cs(dump(resolve.m_module_load_order)));
 
 		m_server->set_module_count(resolve.m_module_load_order.size());
+		// [PARALLEL_COMPILE]: the builds side by side first; the loads
+		// below then find each current and stay one by one in order
+		sv_<interface::ModuleInfo> infos;
+		for(const ss_ &name : resolve.m_module_load_order){
+			interface::ModuleInfo *info = get_module_info(name);
+			if(info)
+				infos.push_back(*info);
+		}
+		ss_ failed;
+		if(!m_server->compile_modules(infos, &failed)){
+			m_server->shutdown(1, ss_()+"loader: Error compiling module "+failed);
+			return;
+		}
 		for(const ss_ &name : resolve.m_module_load_order){
 			interface::ModuleInfo *info = get_module_info(name);
 			if(!info)

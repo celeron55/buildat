@@ -60,6 +60,11 @@ namespace interface
 		// How many modules the loader is about to load, for the STATUS
 		// lines a start is followed by ([START_PROGRESS])
 		virtual void set_module_count(size_t count) = 0;
+		// [PARALLEL_COMPILE]: compile, side by side, those of the modules
+		// whose build is not current, so that load_module() finds each one
+		// current. false with the module's name if one did not compile.
+		virtual bool compile_modules(const sv_<interface::ModuleInfo> &infos,
+				ss_ *failed_module) = 0;
 		virtual void unload_module(const ss_ &module_name) = 0;
 		virtual void reload_module(const interface::ModuleInfo &info) = 0;
 		virtual void reload_module(const ss_ &module_name) = 0;

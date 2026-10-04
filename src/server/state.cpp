@@ -28,6 +28,16 @@
 #include <fstream>
 #include <deque>
 #include <list>
+#include <thread>
+#include <cstdlib>
+#ifdef _WIN32
+	#ifndef NOMINMAX
+		#define NOMINMAX // std::max below
+	#endif
+	#include <windows.h>
+#else
+	#include <sched.h>
+#endif
 #define MODULE "__state"
 
 #ifdef _WIN32
@@ -40,6 +50,44 @@ extern server::Config g_server_config;
 extern bool g_sigint_received;
 
 namespace server {
+
+// [PARALLEL_COMPILE] the cores this process may run on: taskset and a
+// cpuset are respected on Linux.
+// simplified: a cgroup's CPU quota (cpu.max) is not read; read it once
+// servers run under one
+static size_t usable_cores()
+{
+#ifdef _WIN32
+	return std::max(1u, std::thread::hardware_concurrency());
+#else
+	cpu_set_t set;
+	if(sched_getaffinity(0, sizeof set, &set) == 0)
+		return std::max(1, CPU_COUNT(&set));
+	return std::max(1u, std::thread::hardware_concurrency());
+#endif
+}
+
+// The memory the system says is available, in bytes; -1 if unknown
+static int64_t available_memory()
+{
+#ifdef _WIN32
+	MEMORYSTATUSEX ms;
+	ms.dwLength = sizeof ms;
+	if(!GlobalMemoryStatusEx(&ms))
+		return -1;
+	return ms.ullAvailPhys;
+#else
+	std::ifstream f("/proc/meminfo");
+	ss_ key;
+	int64_t kb;
+	while(f >> key >> kb){
+		if(key == "MemAvailable:")
+			return kb * 1024;
+		f.ignore(1000, '\n');
+	}
+	return -1;
+#endif
+}
 
 using interface::Event;
 
@@ -842,45 +890,22 @@ struct CState: public State, public interface::Server
 		return m_shutdown_requested;
 	}
 
-	interface::Module* build_module_u(const interface::ModuleInfo &info)
+	// What building a module takes, and whether its build is current
+	struct BuildJob
+	{
+		ss_ init_cpp_path;
+		ss_ build_dst;
+		ss_ hashfile_path;
+		ss_ hash_hex;
+		ss_ extra_cxxflags;
+		ss_ extra_ldflags;
+		bool skip_compile = false;
+	};
+
+	BuildJob plan_build_u(const interface::ModuleInfo &info,
+			const sv_<ss_> &includes)
 	{
 		ss_ init_cpp_path = info.path+"/"+info.name+".cpp";
-
-		// What this module is built out of. The build cache is keyed on all
-		// of it, so the scan happens whether or not anything is watched.
-		sv_<ss_> include_dirs = m_compiler->include_directories;
-		include_dirs.push_back(m_modules_path);
-		sv_<ss_> includes = list_includes(init_cpp_path, include_dirs);
-		log_d(MODULE, "Includes: %s", cs(dump(includes)));
-
-		// And the watch that restarts the module when one of them changes,
-		// if this server is one that does that. Off by default: see
-		// "reload_modules" in server/config.cpp for why, and -R for turning
-		// it on. No inotify watch exists at all when it is off.
-		if(g_server_config.get<bool>("reload_modules")){
-			sv_<ss_> files_to_watch = {init_cpp_path};
-			files_to_watch.insert(files_to_watch.end(), includes.begin(),
-					includes.end());
-
-			if(m_module_file_watches.count(info.name) == 0){
-				sp_<interface::FileWatch> w(interface::createFileWatch());
-				for(const ss_ &watch_path : files_to_watch){
-					ss_ dir_path = interface::fs::strip_file_name(watch_path);
-					w->add(dir_path, [this, info, watch_path](
-							const ss_ &modified_path){
-						if(modified_path != watch_path)
-							return;
-						log_i(MODULE, "Module modified: %s: %s",
-								cs(info.name), cs(info.path));
-						m_modified_modules.insert(info.name);
-					});
-				}
-				m_module_file_watches[info.name] = w;
-			}
-		}
-
-		// Build
-
 		ss_ extra_cxxflags = info.meta.cxxflags;
 		ss_ extra_ldflags = info.meta.ldflags;
 #ifdef _WIN32
@@ -997,6 +1022,59 @@ struct CState: public State, public interface::Server
 			}
 		}
 
+		BuildJob job;
+		job.init_cpp_path = init_cpp_path;
+		job.build_dst = build_dst;
+		job.hashfile_path = hashfile_path;
+		job.hash_hex = interface::sha1::hex(content_hash);
+		job.extra_cxxflags = extra_cxxflags;
+		job.extra_ldflags = extra_ldflags;
+		job.skip_compile = skip_compile;
+		return job;
+	}
+
+	interface::Module* build_module_u(const interface::ModuleInfo &info)
+	{
+		ss_ init_cpp_path = info.path+"/"+info.name+".cpp";
+
+		// What this module is built out of. The build cache is keyed on all
+		// of it, so the scan happens whether or not anything is watched.
+		sv_<ss_> include_dirs = m_compiler->include_directories;
+		include_dirs.push_back(m_modules_path);
+		sv_<ss_> includes = list_includes(init_cpp_path, include_dirs);
+		log_d(MODULE, "Includes: %s", cs(dump(includes)));
+
+		// And the watch that restarts the module when one of them changes,
+		// if this server is one that does that. Off by default: see
+		// "reload_modules" in server/config.cpp for why, and -R for turning
+		// it on. No inotify watch exists at all when it is off.
+		if(g_server_config.get<bool>("reload_modules")){
+			sv_<ss_> files_to_watch = {init_cpp_path};
+			files_to_watch.insert(files_to_watch.end(), includes.begin(),
+					includes.end());
+
+			if(m_module_file_watches.count(info.name) == 0){
+				sp_<interface::FileWatch> w(interface::createFileWatch());
+				for(const ss_ &watch_path : files_to_watch){
+					ss_ dir_path = interface::fs::strip_file_name(watch_path);
+					w->add(dir_path, [this, info, watch_path](
+							const ss_ &modified_path){
+						if(modified_path != watch_path)
+							return;
+						log_i(MODULE, "Module modified: %s: %s",
+								cs(info.name), cs(info.path));
+						m_modified_modules.insert(info.name);
+					});
+				}
+				m_module_file_watches[info.name] = w;
+			}
+		}
+
+		// Build
+
+		BuildJob job = plan_build_u(info, includes);
+		const bool skip_compile = job.skip_compile;
+
 		// The status line a start is read by ([START_PROGRESS]): the
 		// client's waiting screen tails the log for "STATUS ", and a
 		// shell start reads the same. A cache hit is a "Loading", a
@@ -1011,8 +1089,8 @@ struct CState: public State, public interface::Server
 					m_module_load_order.size() + 1);
 
 		m_compiler->include_directories.push_back(m_modules_path);
-		bool build_ok = m_compiler->build(info.name, init_cpp_path, build_dst,
-				extra_cxxflags, extra_ldflags, skip_compile);
+		bool build_ok = m_compiler->build(info.name, job.init_cpp_path,
+				job.build_dst, job.extra_cxxflags, job.extra_ldflags, skip_compile);
 		m_compiler->include_directories.pop_back();
 
 		if(!build_ok){
@@ -1022,8 +1100,8 @@ struct CState: public State, public interface::Server
 
 		// Update hash file
 		if(!skip_compile){
-			std::ofstream f(hashfile_path);
-			f<<interface::sha1::hex(content_hash);
+			std::ofstream f(job.hashfile_path);
+			f<<job.hash_hex;
 		}
 
 		// Construct instance
@@ -1251,6 +1329,131 @@ struct CState: public State, public interface::Server
 	{
 		// The loader's list plus what is loaded already (builtin/loader)
 		m_module_count = m_module_load_order.size() + count;
+	}
+
+	bool compile_modules(const sv_<interface::ModuleInfo> &infos,
+			ss_ *failed_module)
+	{
+		sv_<std::pair<ss_, BuildJob>> todo;
+		{
+			interface::MutexScope ms(m_modules_mutex);
+			sv_<ss_> include_dirs = m_compiler->include_directories;
+			include_dirs.push_back(m_modules_path);
+			for(const interface::ModuleInfo &info : infos){
+				if(info.meta.disable_cpp || m_modules.count(info.name))
+					continue;
+				BuildJob job = plan_build_u(info, list_includes(
+						info.path+"/"+info.name+".cpp", include_dirs));
+				if(!job.skip_compile)
+					todo.emplace_back(info.name, job);
+			}
+		}
+		// One is compiled by load_module() as it always was
+		if(todo.size() < 2)
+			return true;
+		// The longest first, so it is not the one left running alone at the
+		// end. simplified: the source file's size stands for the compile's
+		// time; the last compile's time per module if it misjudges
+		auto size_of = [](const ss_ &path){
+			std::ifstream f(path, std::ios::binary | std::ios::ate);
+			return f.good() ? (int64_t)f.tellg() : (int64_t)0;
+		};
+		sm_<ss_, int64_t> sizes;
+		for(auto &item : todo)
+			sizes[item.first] = size_of(item.second.init_cpp_path);
+		std::stable_sort(todo.begin(), todo.end(),
+				[&](const std::pair<ss_, BuildJob> &a,
+						const std::pair<ss_, BuildJob> &b){
+					return sizes[a.first] > sizes[b.first];
+				});
+
+		// One compiler's peak: builtin/luanti's, the largest, measured
+		// 860 MB with /usr/bin/time (2026-10-04), rounded up.
+		// simplified: one fixed peak for every module; per-module peaks if
+		// this holds back too much
+		const int64_t peak = 1024LL * 1024 * 1024;
+		// What is left free besides; BUILDAT_COMPILE_RESERVE_MB raises it
+		// (the check of the one-at-a-time path does)
+		int64_t reserve = 1024LL * 1024 * 1024;
+		if(const char *v = getenv("BUILDAT_COMPILE_RESERVE_MB"))
+			reserve = atoll(v) * 1024 * 1024;
+		const size_t cores = usable_cores();
+		const size_t max_running = std::max((size_t)1, cores / 2);
+		log_i(MODULE, "Compiling %zu modules, at most %zu at once (%zu cores)",
+				todo.size(), max_running, cores);
+
+		std::mutex mutex;
+		std::condition_variable cv;
+		std::set<ss_> running;
+		size_t most_running = 0;
+		size_t done = 0;
+		ss_ failed;
+		ss_ held_by;  // why no more ran, the last time it held
+		sv_<std::thread> threads;
+
+		// compile() reads the include directories; nothing changes them
+		// until every thread is joined
+		m_compiler->include_directories.push_back(m_modules_path);
+		for(auto &item : todo){
+			std::unique_lock<std::mutex> lock(mutex);
+			// The running ones counted again on purpose: one just started
+			// has not reached its peak
+			for(;;){
+				if(!failed.empty() || running.empty())
+					break;
+				if(running.size() >= max_running){
+					held_by = "the cores";
+				} else {
+					const int64_t avail = available_memory();
+					if(avail < 0 || avail >=
+							(int64_t)(running.size() + 1) * peak + reserve)
+						break;
+					held_by = "memory ("+itos(avail / 1024 / 1024)+
+							" MiB available)";
+				}
+				cv.wait(lock);
+			}
+			if(!failed.empty())
+				break;
+			running.insert(item.first);
+			most_running = std::max(most_running, running.size());
+			ss_ names;
+			for(const ss_ &name : running)
+				names += (names.empty() ? "" : ", ") + name;
+			log_i(MODULE, "STATUS Compiling %s (%zu of %zu)",
+					cs(names), done + running.size(), todo.size());
+			threads.emplace_back([&, item](){
+				const BuildJob &job = item.second;
+				interface::fs::create_directories(
+						interface::fs::strip_file_name(job.build_dst));
+				bool ok = m_compiler->compile(job.init_cpp_path, job.build_dst,
+						job.extra_cxxflags, job.extra_ldflags);
+				if(ok){
+					std::ofstream f(job.hashfile_path);
+					f<<job.hash_hex;
+				}
+				std::unique_lock<std::mutex> lock(mutex);
+				running.erase(item.first);
+				done++;
+				if(!ok && failed.empty())
+					failed = item.first;
+				cv.notify_all();
+			});
+		}
+		for(std::thread &t : threads)
+			t.join();
+		m_compiler->include_directories.pop_back();
+
+		log_i(MODULE, "Compiled %zu of %zu modules, at most %zu at once%s",
+				done, todo.size(), most_running, held_by.empty() ? "" :
+				cs(", no more for "+held_by));
+		if(!failed.empty()){
+			log_w(MODULE, "Failed to build module %s", cs(failed));
+			if(failed_module)
+				*failed_module = failed;
+			return false;
+		}
+		return true;
 	}
 
 	ss_ get_modules_path()
