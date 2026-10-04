@@ -423,10 +423,50 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
+	// The failure counter is what stops a password being guessed, so it
+	// is checked at every start as the PBKDF2 and TOTP vectors are. It
+	// drives note_failure/failure_wait with a clock of its own (both take
+	// `now`), so it is deterministic and touches no real account.
+	void rate_limit_self_check()
+	{
+		const int64_t s = 1000000; // one second in us
+		std::map<ss_, Failures> m;
+		// An unknown key waits for nothing
+		if(failure_wait(m, "a", 0) != 0)
+			throw Exception("accounts: rate-limit self-check: a fresh key");
+		// The wait doubles to a minute, then FAIL_LOCK of them in the
+		// window locks it for the window's length
+		const int64_t want[] = {1, 2, 4, 8, 16, 32, 60, 60, 60, 600};
+		for(int i = 0; i < FAIL_LOCK; i++){
+			note_failure(m, "a", 0);
+			if(failure_wait(m, "a", 0) != want[i] * s)
+				throw Exception("accounts: rate-limit self-check: the wait "
+						"after "+itos(i + 1)+" failures is "+
+						itos((int)(failure_wait(m, "a", 0) / s))+" s, not "+
+						itos((int)want[i]));
+		}
+		// Locked at FAIL_LOCK: still waiting just before the window ends,
+		// cleared once both the window has passed and the wait is over
+		if(failure_wait(m, "a", 599 * s) <= 0)
+			throw Exception("accounts: rate-limit self-check: unlocked early");
+		if(failure_wait(m, "a", 601 * s) != 0)
+			throw Exception("accounts: rate-limit self-check: still locked "
+					"after the window");
+		// A failure outside the window starts the count over, not doubling
+		// from where an old one left off
+		std::map<ss_, Failures> m2;
+		note_failure(m2, "b", 0);
+		note_failure(m2, "b", 601 * s);
+		if(failure_wait(m2, "b", 601 * s) != 1 * s)
+			throw Exception("accounts: rate-limit self-check: the window did "
+					"not reset the count");
+	}
+
 	void init()
 	{
 		check_pbkdf2();
 		totp_self_check();
+		rate_limit_self_check();
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
