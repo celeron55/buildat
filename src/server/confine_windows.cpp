@@ -253,11 +253,18 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	Grants g;
 	HRESULT hr = CreateAppContainerProfile(name.c_str(), name.c_str(),
 			L"A buildat server's box", nullptr, 0, &g.sid);
-	if(hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS))
+	const bool new_box = hr != HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS);
+	if(!new_box)
 		hr = DeriveAppContainerSidFromAppContainerName(name.c_str(), &g.sid);
 	if(FAILED(hr))
 		return "the AppContainer could not be made (HRESULT "+
 				itos((unsigned)hr)+"; Windows 8 or newer has them)";
+	// [SEC_WIN_NET] A container has no port rules; the firewall's, per box,
+	// are an administrator's to add, and a box exists only from here on
+	if(new_box)
+		log_w(MODULE, "A new box, buildat.%s: it connects to any host and "
+				"port until an administrator runs bin\\box_firewall.ps1 "
+				"again", cs(app));
 
 	// The grants: the install, the compiler and the shared build read;
 	// the app's three directories full; the shared directories read

@@ -189,7 +189,11 @@ AppContainer with a job object, with the same directories. A local
 client joins it by a named pipe, since an AppContainer cannot reach
 loopback; other players connect over the network as before. A server
 started with no desktop, from a service or an SSH login, cannot be boxed
-yet and says so. `BUILDAT_WINDOWS_BOX=0` turns the box off.
+yet and says so. `BUILDAT_WINDOWS_BOX=0` turns the box off. A container
+has no port rules: a boxed server connects to any host and port until an
+administrator runs `bin\box_firewall.ps1` (`-ConnectPorts 8080,30000`
+for more), which gives each box the Linux ports by a firewall rule. A box
+is made at its app's first boxed start; the script is run again after it.
 
 Client command sequence (CI / visual checks)
 --------------------------------------------

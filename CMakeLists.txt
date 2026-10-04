@@ -647,6 +647,9 @@ install(FILES "${CMAKE_SOURCE_DIR}/README.md" DESTINATION ".")
 install(TARGETS ${BUILDAT_CORE_NAME} DESTINATION "${DST_LIB}")
 if(WIN32)
 	install(FILES "${URHO3D_LIBRARY_FILE}" DESTINATION "${DST_LIB}")
+	# [SEC_WIN_NET]: an administrator's step that gives the boxes Linux's ports
+	install(FILES "${CMAKE_SOURCE_DIR}/util/windows/box_firewall.ps1"
+		DESTINATION "${DST_BIN}")
 else()
 	# libUrho3D.so is a symlink chain to libUrho3D.so.0.1.x: the real
 	# file and the links with it, or the archive links to nothing
