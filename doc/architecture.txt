@@ -21,9 +21,12 @@ client/extensions/.
 
 What a script cannot imitate is marked ([TRUST_COLOR]): a colour picked at
 random at client start fills every Starport field, and the launcher shows
-it at the top right with the Starport IDs logged in and a Log out, in an
-overlay of elements no script is handed. A field the client makes for a
-secret (named __trusted...) reads empty to scripts and takes keys no
+it at the top right as the background of its Starport buttons, in an
+overlay of elements no script is handed: "Starport ID..." and "Starport
+settings..." while no ID is logged in, and each ID logged in with a Log
+out, and the settings under them, while one is ([ID_OVERLAY]); a script's
+window, even raised by a click, stays under it. A field the client makes
+for a secret (named __trusted...) reads empty to scripts and takes keys no
 script hears, a Starport dialog a script adds to is closed, and a script's
 element is drawn under the client's own dialogs.
 

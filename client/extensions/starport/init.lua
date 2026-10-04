@@ -1050,6 +1050,12 @@ function M.logged_in_ids()
 	return out
 end
 
+-- [ID_OVERLAY]: the Starports this client uses, for the overlay's
+-- "Starport ID..." (one: its login; more: the settings, which list them)
+function M.starport_urls()
+	return effective().starports
+end
+
 function M.log_out(url)
 	local id = load_state().ids[url]
 	if not id then

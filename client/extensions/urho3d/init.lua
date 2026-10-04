@@ -940,6 +940,34 @@ local function starport_module()
 	local ok, sp = pcall(require, "buildat/extension/starport")
 	return ok and type(sp) == "table" and sp.logged_in_ids and sp or nil
 end
+-- A button of the overlay: raw, its Released answered by a global
+-- function of a name no script knows to call
+local function overlay_button(parent, text, fn)
+	local b = parent:CreateChild("Button")
+	b:SetStyleAuto()
+	local bt = b:CreateChild("Text")
+	bt:SetStyleAuto()
+	bt.text = text
+	bt:SetAlignment(HA_CENTER, VA_CENTER)
+	b:SetFixedSize(bt:GetWidth() + 16, math.max(20, bt:GetHeight() + 6))
+	id_logouts = id_logouts + 1
+	local fname = "__buildat_trust_button_" .. id_logouts
+	_G[fname] = fn
+	urho_SubscribeToEvent(b, "Released", fname)
+	return b
+end
+-- [ID_OVERLAY] (user, 2026-10-04): the launcher's Starport buttons are
+-- here, on the colour: "Starport ID..." and "Starport settings..." while
+-- no ID is logged in; an ID's lines when one is, and the settings under
+-- them.
+local function open_id(sp)
+	local urls = sp.starport_urls and sp.starport_urls() or {}
+	if #urls == 1 then
+		sp.id_login(urls[1])
+	else
+		sp.open_settings()
+	end
+end
 local function rebuild_id_rows(ids, sp)
 	for _, r in ipairs(id_rows) do
 		r:Remove()
@@ -948,18 +976,32 @@ local function rebuild_id_rows(ids, sp)
 	local several = #ids > 1
 	-- Each line its own element on the root, right-aligned under the one
 	-- before: a column of them stretched every line to the widest, and
-	-- the colour's line went across the screen. **While logged in the
-	-- colour is behind the lines** (user): no colour line, the lines from
-	-- the top where it was, and one rectangle of the colour reaching the
-	-- extents of all of them.
+	-- the colour's line went across the screen. **The colour is behind
+	-- the lines** (user): one rectangle of it reaching the extents of
+	-- all of them.
 	local y = trust_sample:GetPosition().y
-	for i, id in ipairs(ids) do
+	local function line(i)
 		local r = ui.root:CreateChild("UIElement")
 		r:SetName("__trusted_hidden_id_" .. i)
 		r.defaultStyle = trust_sample.defaultStyle
-		r.priority = 1001
+		r.priority = 2001
 		r:SetLayout(LM_HORIZONTAL, 8, IntRect(0, 0, 0, 0))
 		r:SetAlignment(HA_RIGHT, VA_TOP)
+		return r
+	end
+	local function place(r, b)
+		r:SetPosition(-8, y)
+		y = y + math.max(r:GetHeight(), b:GetHeight()) + 4
+		r.visible = trust_sample_shown == true
+		id_rows[#id_rows + 1] = r
+	end
+	local function settings(r)
+		return overlay_button(r, "Starport settings...", function()
+			sp.open_settings()
+		end)
+	end
+	for i, id in ipairs(ids) do
+		local r = line(i)
 		local t = r:CreateChild("Text")
 		t:SetStyleAuto()
 		local host = id.url:match("^%a+://([^/]+)") or id.url
@@ -967,44 +1009,37 @@ local function rebuild_id_rows(ids, sp)
 		t:SetVerticalAlignment(VA_CENTER)
 		-- A gap of its own, as the colour's line has
 		r:CreateChild("UIElement"):SetFixedSize(10, 4)
-		local b = r:CreateChild("Button")
-		b:SetStyleAuto()
-		local bt = b:CreateChild("Text")
-		bt:SetStyleAuto()
-		bt.text = "Log out"
-		bt:SetAlignment(HA_CENTER, VA_CENTER)
-		b:SetFixedSize(bt:GetWidth() + 16, math.max(20, bt:GetHeight() + 6))
-		id_logouts = id_logouts + 1
-		local fname = "__buildat_trust_logout_" .. id_logouts
 		local url = id.url
-		_G[fname] = function()
+		local b = overlay_button(r, "Log out", function()
 			sp.log_out(url)
 			id_signature = nil -- rebuilt at the next look
 			id_timer = 1
-		end
-		urho_SubscribeToEvent(b, "Released", fname)
-		r:SetPosition(-8, y)
-		y = y + math.max(r:GetHeight(), b:GetHeight()) + 4
-		r.visible = trust_sample_shown == true
-		id_rows[#id_rows + 1] = r
+		end)
+		place(r, b)
 	end
-	if #id_rows > 0 then
-		local pad = 4
-		local w = 0
-		for _, r in ipairs(id_rows) do
-			w = math.max(w, r:GetWidth())
-		end
-		local top = trust_sample:GetPosition().y
-		local bg = ui.root:CreateChild("BorderImage")
-		bg:SetName("__trusted_hidden_id_bg")
-		bg.priority = 1000
-		bg:SetAlignment(HA_RIGHT, VA_TOP)
-		bg:SetPosition(-8 + pad, top - pad)
-		bg:SetFixedSize(w + 2 * pad, (y - 4 - top) + 2 * pad)
-		bg.color = Color(trust_rgb[1], trust_rgb[2], trust_rgb[3], 1)
-		bg.visible = trust_sample_shown == true
-		id_rows[#id_rows + 1] = bg
+	local r = line(#ids + 1)
+	if #ids == 0 then
+		overlay_button(r, "Starport ID...", function() open_id(sp) end)
 	end
+	place(r, settings(r))
+	local pad = 4
+	local w = 0
+	for _, x in ipairs(id_rows) do
+		w = math.max(w, x:GetWidth())
+	end
+	local top = trust_sample:GetPosition().y
+	local bg = ui.root:CreateChild("BorderImage")
+	bg:SetName("__trusted_hidden_id_bg")
+	-- Over the client's own dialogs (1000): a script's window clicked
+	-- while one is up is raised to its priority (BringToFront), and a
+	-- script sets 999 at most
+	bg.priority = 2000
+	bg:SetAlignment(HA_RIGHT, VA_TOP)
+	bg:SetPosition(-8 + pad, top - pad)
+	bg:SetFixedSize(w + 2 * pad, (y - 4 - top) + 2 * pad)
+	bg.color = Color(trust_rgb[1], trust_rgb[2], trust_rgb[3], 1)
+	bg.visible = trust_sample_shown == true
+	id_rows[#id_rows + 1] = bg
 end
 Safe.SubscribeToEvent("Update", function(_, event_data)
 	if trust_sample == nil then
@@ -1015,7 +1050,7 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 		trust_sample:SetLayout(LM_HORIZONTAL, 6, IntRect(0, 0, 0, 0))
 		trust_sample:SetAlignment(HA_RIGHT, VA_TOP)
 		trust_sample:SetPosition(-8, 8)
-		trust_sample.priority = 1000
+		trust_sample.priority = 2000
 		local line = trust_sample
 		local label = line:CreateChild("Text")
 		label:SetStyleAuto()
@@ -1042,8 +1077,8 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 		log:info("trust colour sample " .. (show and "shown" or "hidden") ..
 				" (server address " .. tostring(address) .. ")")
 	end
-	-- The colour's own line only while nobody is logged in: then the
-	-- lines' background is the colour
+	-- The colour's own line only until the starport extension is there
+	-- to build the buttons on the colour
 	trust_sample.visible = show and #id_rows == 0
 	for _, r in ipairs(id_rows) do
 		r.visible = show
@@ -1054,12 +1089,12 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 			id_timer = 0
 			local sp = starport_module()
 			local ids = sp and sp.logged_in_ids() or {}
-			local sig = {}
+			local sig = {sp and "" or "no extension"}
 			for _, id in ipairs(ids) do
 				sig[#sig + 1] = id.url .. "|" .. id.name
 			end
 			sig = table.concat(sig, "\n")
-			if sig ~= id_signature then
+			if sig ~= id_signature and sp then
 				id_signature = sig
 				rebuild_id_rows(ids, sp)
 				log:info("trusted overlay: " .. #ids .. " Starport ID line(s)")
