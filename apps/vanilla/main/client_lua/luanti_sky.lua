@@ -253,6 +253,13 @@ M.DAWN_GLOW = tonumber(buildat.get_env("BUILDAT_LUANTI_DAWN_GLOW") or "") or 1.0
 M.DAWN_AMBIENT = tonumber(buildat.get_env("BUILDAT_LUANTI_DAWN_AMBIENT") or "")
 		or 0.3
 M.DAWN_COLOR = {r = 1.0, g = 0.55, b = 0.25}
+-- [DUSK_SKY], pbr only: the band round the low sun is this many times the
+-- sky's own level, in the glow's orange (a fixed white before, which was
+-- a white patch on a black sky after sunset), and the glow reaches the
+-- dome away from the sun at this share of what it is towards it.
+--   BUILDAT_LUANTI_DUSK_BAND, BUILDAT_LUANTI_DUSK_AWAY
+M.DUSK_BAND = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_BAND") or "") or 2.0
+M.DUSK_AWAY = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_AWAY") or "") or 0.3
 
 -- The glow's radiance at a sun's height, 0 outside the window
 function M.dawn_glow(height)
@@ -459,6 +466,8 @@ function M.new(scene, sun_dir, defaults)
 	-- [DAWN_LIGHT]'s glow on the band along the horizon, a radiance
 	function self:set_dawn_glow(r, g, b)
 		material:SetShaderParameter("DawnGlow", magic.Vector3(r, g, b))
+		material:SetShaderParameter("DuskBand", magic.Vector2(
+				M.DUSK_BAND, M.DUSK_AWAY))
 	end
 
 	-- The game's own picture of it, or nil for the shader's painted square.

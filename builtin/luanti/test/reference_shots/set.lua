@@ -113,6 +113,10 @@ rawset(_G, "REFSET", {
 		-- hours, so the set a run takes by default does not grow.
 		["0400"] = 0.1667, ["0430"] = 0.1875, ["0500"] = 0.2083,
 		["1900"] = 0.7917, ["1930"] = 0.8125, ["2000"] = 0.8333,
+		-- [DUSK_SKY]'s ten-minute steps from 18:30 to 20:30
+		["1840"] = 0.7778, ["1850"] = 0.7847, ["1910"] = 0.7986,
+		["1920"] = 0.8056, ["1940"] = 0.8194, ["1950"] = 0.8264,
+		["2010"] = 0.8403, ["2020"] = 0.8472,
 	},
 
 	-- Which hours each viewpoint is shot at, clear. Viewpoint 5 is the snow
