@@ -12,6 +12,7 @@
 //   /t/<id>          a thread, every message under its anchor #m<id>
 //   /m/<id>          one message, with the way to its thread
 //   /search?q=...    FTS5 over the titles and the messages
+//   /f/<id>          an uploaded file ([FORUM] step 5), kept by its use
 // **To take part**: the buildat client, joined by builtin/accounts (a local
 // account or a Starport ID, as the admin set up its logins). "hr:req"
 // carries a JSON {id, cmd, ...} and "hr:res" the answer {id, ok, result |
@@ -61,6 +62,23 @@
 #include <mutex>
 #include <condition_variable>
 #include "interface/http.h"
+#include <vector>
+// [FORUM] step 5: an upload is read and written again. stb_image reads only
+// PNG and JPEG here; Urho3D's stb_image_write (1.02) has no JPEG, so 1.16 is
+// vendored beside this file. Both static, apart from libUrho3D's copies.
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_STATIC
+#define STBI_ONLY_PNG
+#define STBI_ONLY_JPEG
+#define STBI_NO_STDIO
+#define STBI_MAX_DIMENSIONS 16384
+#include <STB/stb_image.h>
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_STATIC
+#define STBI_WRITE_NO_STDIO
+#include "vendor/stb_image_write.h"
+// stb_image's <limits.h> has a NAME_MAX of its own; Hearth's is below
+#undef NAME_MAX
 #define MODULE "main"
 
 using interface::Event;
@@ -181,6 +199,94 @@ static ss_ fts_query(const ss_ &q)
 	return out;
 }
 
+// [FORUM] step 5: an upload, and what is held of it
+static const size_t UPLOAD_MAX = 16 * 1024 * 1024;
+static const int64_t PIXELS_MAX = 40 * 1000 * 1000;
+static const int UPLOADS_AN_HOUR = 20;
+// The admin's "files": the budget in bytes, and the seconds unused after
+// which an image is crushed again and a file is deleted
+static const char *const FILE_SETTINGS[3] = {"budget", "lod2_after",
+		"delete_after"};
+
+static ss_ unhex(const ss_ &h)
+{
+	auto val = [](char c){
+		return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ?
+				c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+	};
+	if(h.size() % 2)
+		throw Exception("the file is not hex");
+	ss_ r(h.size() / 2, '\0');
+	for(size_t i = 0; i < r.size(); i++){
+		const int a = val(h[2 * i]), b = val(h[2 * i + 1]);
+		if(a < 0 || b < 0)
+			throw Exception("the file is not hex");
+		r[i] = (char)(a << 4 | b);
+	}
+	return r;
+}
+
+static void append_cb(void *to, void *data, int size)
+{
+	((ss_*)to)->append((const char*)data, size);
+}
+
+// An image read and written again, its long side at most `long_max` and
+// its short side at most `short_max`, each pixel the mean of those it
+// covers: nothing of the upload's encoding is kept, its metadata (where a
+// photo was taken) with it. A JPEG stays a JPEG at `quality`; a PNG stays
+// a PNG.
+// simplified: one quality for every JPEG, and a PNG as stb writes it; the
+// plan's per-image perceptual check and pngcrush's palette are the upgrade.
+// A photo's EXIF orientation is dropped with the rest, so a phone's shot
+// that relied on it stands on its side.
+static ss_ crush(const ss_ &in, bool jpeg, int long_max, int short_max,
+		int quality)
+{
+	int w, h, n;
+	const stbi_uc *src = (const stbi_uc*)in.data();
+	if(in.size() > INT_MAX ||
+			!stbi_info_from_memory(src, (int)in.size(), &w, &h, &n))
+		throw Exception("not an image Hearth can read");
+	if((int64_t)w * h > PIXELS_MAX)
+		throw Exception("the image has over "+itos(PIXELS_MAX / 1000000)+
+				" million pixels");
+	stbi_uc *p = stbi_load_from_memory(src, (int)in.size(), &w, &h, &n, 0);
+	if(!p)
+		throw Exception(ss_("the image cannot be read: ")+
+				stbi_failure_reason());
+	const double s = std::min(1.0, std::min((double)long_max /
+			std::max(w, h), (double)short_max / std::min(w, h)));
+	const int nw = std::max(1, (int)(w * s + 0.5));
+	const int nh = std::max(1, (int)(h * s + 0.5));
+	std::vector<stbi_uc> out((size_t)nw * nh * n);
+	std::vector<uint64_t> sum(n);
+	for(int y = 0; y < nh; y++){
+		const int y0 = (int)((int64_t)y * h / nh);
+		const int y1 = std::max(y0 + 1, (int)((int64_t)(y + 1) * h / nh));
+		for(int x = 0; x < nw; x++){
+			const int x0 = (int)((int64_t)x * w / nw);
+			const int x1 = std::max(x0 + 1, (int)((int64_t)(x + 1) * w / nw));
+			std::fill(sum.begin(), sum.end(), 0);
+			for(int yy = y0; yy < y1; yy++)
+				for(int xx = x0; xx < x1; xx++)
+					for(int c = 0; c < n; c++)
+						sum[c] += p[((size_t)yy * w + xx) * n + c];
+			const uint64_t area = (uint64_t)(y1 - y0) * (x1 - x0);
+			for(int c = 0; c < n; c++)
+				out[((size_t)y * nw + x) * n + c] =
+						(stbi_uc)((sum[c] + area / 2) / area);
+		}
+	}
+	stbi_image_free(p);
+	ss_ r;
+	if(!(jpeg ? stbi_write_jpg_to_func(append_cb, &r, nw, nh, n,
+			out.data(), quality) : stbi_write_png_to_func(append_cb, &r,
+			nw, nh, n, out.data(), nw * n)))
+		throw Exception("the image could not be written");
+	return r;
+}
+
 static ss_ time_text(int64_t t)
 {
 	time_t tt = (time_t)t;
@@ -208,6 +314,11 @@ struct Q
 	}
 	~Q(){ sqlite3_finalize(st); }
 	Q& b(int64_t v){ sqlite3_bind_int64(st, ++n, v); return *this; }
+	Q& blob(const ss_ &v)
+	{
+		sqlite3_bind_blob(st, ++n, v.data(), (int)v.size(), SQLITE_TRANSIENT);
+		return *this;
+	}
 	Q& b(const ss_ &v)
 	{
 		sqlite3_bind_text(st, ++n, v.data(), (int)v.size(), SQLITE_TRANSIENT);
@@ -294,7 +405,14 @@ static const char *SCHEMA =
 		"reason TEXT NOT NULL, time INTEGER NOT NULL, "
 		"state TEXT NOT NULL DEFAULT 'open', handled_by TEXT NOT NULL DEFAULT '', "
 		"handled_time INTEGER NOT NULL DEFAULT 0, "
-		"statement TEXT NOT NULL DEFAULT '');";
+		"statement TEXT NOT NULL DEFAULT '');"
+	// [FORUM] step 5: what was uploaded, at /f/<id>. lod 0 a file kept as
+	// it came (not an image), 1 an image as crushed on upload, 2 crushed
+	// again; "used" when a person last fetched it (or its upload)
+	"CREATE TABLE IF NOT EXISTS files(id INTEGER PRIMARY KEY, "
+		"name TEXT NOT NULL, type TEXT NOT NULL, data BLOB NOT NULL, "
+		"lod INTEGER NOT NULL, uploader TEXT NOT NULL, "
+		"created INTEGER NOT NULL, used INTEGER NOT NULL);";
 
 static const char *const COLUMNS_ADDED[][3] = {
 	{"threads", "answer", "INTEGER NOT NULL DEFAULT 0"},
@@ -304,7 +422,8 @@ static const char *const COLUMNS_ADDED[][3] = {
 	{"notifications", "note", "TEXT NOT NULL DEFAULT ''"},
 	{"threads", "kind", "TEXT NOT NULL DEFAULT ''"},
 };
-static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search"};
+static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
+		"/robots.txt"};
 
 // Trust ([HEARTH_MVP] step 6): what a level may post. Level 0 is a new
 // account, 1 one that has stood a while, 2 the admin
@@ -335,6 +454,8 @@ struct Module: public interface::Module
 	// Searches and pages per address (or account) in the current minute
 	sm_<ss_, int> m_searches;
 	int64_t m_searches_minute = 0;
+	// When the files were last held to their budget (sweep_files)
+	int64_t m_files_swept = 0;
 	// What a request changed, sent once it is committed
 	sv_<int64_t> m_new_messages;
 	std::set<ss_> m_notified;
@@ -445,6 +566,67 @@ struct Module: public interface::Module
 		if(!q.step())
 			return json::object();
 		return json::load_string(q.s(0).c_str());
+	}
+
+	// -----------------------------------------------------------------------
+	// [FORUM] step 5: files, kept by use
+
+	// The admin's "files" (FILE_SETTINGS), defaults filled in
+	json::Value file_settings()
+	{
+		static const int64_t def[3] = {1LL << 30, 182 * 86400, 365 * 86400};
+		json::Value v = setting("files");
+		for(int i = 0; i < 3; i++)
+			if(!v.get(FILE_SETTINGS[i]).is_number())
+				v.set(FILE_SETTINGS[i], def[i]);
+		return v;
+	}
+
+	// While the files take more than the budget, the longest unused go
+	// first -- an image unused for lod2_after crushed again, one unused for
+	// delete_after deleted, any other file deleted at lod2_after -- and
+	// nothing more once they are under it. Under the budget nothing goes.
+	// simplified: an image the portal can still be browsed to is not held
+	// apart; use alone keeps a file, and a link from a thread nobody reads
+	// keeps none, as the plan says
+	void sweep_files()
+	{
+		m_files_swept = now_s();
+		try {
+			exec("BEGIN");
+			const json::Value s = file_settings();
+			const int64_t now = now_s(), budget = jint(s, "budget");
+			const int64_t gone = now - jint(s, "delete_after");
+			Q t(m_db, "SELECT coalesce(sum(length(data)), 0) FROM files");
+			t.step();
+			int64_t total = t.i(0);
+			Q f(m_db, "SELECT id, lod, used, type, data FROM files "
+					"WHERE used <= ? ORDER BY used");
+			f.b(now - jint(s, "lod2_after"));
+			while(total > budget && f.step()){
+				const int64_t id = f.i(0), lod = f.i(1);
+				const ss_ data = f.s(4);
+				if(lod == 1 && f.i(2) > gone){
+					const ss_ c = crush(data, f.s(3) == "image/jpeg", 960, 540,
+							60);
+					Q u(m_db, "UPDATE files SET data = ?, lod = 2 WHERE id = ?");
+					u.blob(c).b(id).step();
+					total -= (int64_t)data.size() - (int64_t)c.size();
+					log_i(MODULE, "Hearth: file %lld crushed to %zu bytes",
+							(long long)id, c.size());
+				} else if(lod != 2 || f.i(2) <= gone){
+					Q d(m_db, "DELETE FROM files WHERE id = ?");
+					d.b(id).step();
+					total -= (int64_t)data.size();
+					log_i(MODULE, "Hearth: file %lld deleted, unused",
+							(long long)id);
+				}
+			}
+			exec("COMMIT");
+		} catch(std::exception &e){
+			sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
+			log_w(MODULE, "Hearth: the files' sweep: %s", e.what());
+		}
 	}
 
 	// -----------------------------------------------------------------------
@@ -564,6 +746,8 @@ struct Module: public interface::Module
 
 	void on_tick(const interface::TickEvent &)
 	{
+		if(m_db && now_s() - m_files_swept >= 3600)
+			sweep_files();
 		sv_<ReleaseFound> found;
 		{
 			std::lock_guard<std::mutex> lock(m_rmutex);
@@ -918,11 +1102,11 @@ struct Module: public interface::Module
 	// -----------------------------------------------------------------------
 	// The HTML face
 
-	void respond(const network::HttpRequest &r, int status, const ss_ &body)
+	void respond(const network::HttpRequest &r, int status, const ss_ &body,
+			const ss_ &type = "text/html; charset=utf-8")
 	{
 		network::access(m_server, [&](network::Interface *iface){
-			iface->http_respond(r.peer, status, "text/html; charset=utf-8",
-					body);
+			iface->http_respond(r.peer, status, type, body);
 		});
 	}
 
@@ -1011,6 +1195,24 @@ struct Module: public interface::Module
 				!allowed("page "+r.address, PAGES_A_MINUTE))
 			return respond(r, 429, page("Hearth", "<p>Too many requests "
 					"from this address; try again in a minute.</p>"));
+		// [FORUM] step 5: a file's use is a person's fetch, so crawlers are
+		// asked to keep off them
+		// simplified: by robots.txt alone; one that ignores it counts
+		if(r.path == "/robots.txt")
+			return respond(r, 200, "User-agent: *\nDisallow: /f/\n",
+					"text/plain");
+		if(r.path.compare(0, 3, "/f/") == 0 && r.method == "GET"){
+			// /f/<id>, and anything after another / is the name it is saved as
+			const int64_t id = path_id(r.path.substr(0, r.path.find('/', 3)),
+					"/f/");
+			Q f(m_db, "SELECT type, data FROM files WHERE id = ?");
+			f.b(id);
+			if(id >= 0 && f.step()){
+				Q u(m_db, "UPDATE files SET used = ? WHERE id = ?");
+				u.b(now_s()).b(id).step();
+				return respond(r, 200, f.s(1), f.s(0));
+			}
+		}
 		ss_ title, body;
 		if(r.method == "GET")
 			http_page(r.path, r.query, title, body);
@@ -1381,6 +1583,77 @@ struct Module: public interface::Module
 			i.b(parent).b(topic_name).b(about).step();
 			log_i(MODULE, "%s added the topic %s", cs(name), cs(topic_name));
 			return json::Value((int64_t)sqlite3_last_insert_rowid(m_db));
+		}
+		if(cmd == "upload"){
+			// [FORUM] step 5: {name, data (hex)} -> {id, image}; at /f/<id>
+			const int lv = level(name, admin);
+			if(!LIMITS[lv].links)
+				throw Exception("no files yet (a new account's limit, until a "
+						"day has passed, five threads are read and three of its "
+						"messages stand)");
+			Q c(m_db, "SELECT count(*) FROM files WHERE uploader = ? AND "
+					"created > ?");
+			c.b(name).b(now_s() - 3600).step();
+			if(lv < 2 && c.i(0) >= UPLOADS_AN_HOUR)
+				throw Exception(itos(UPLOADS_AN_HOUR)+" files an hour at most");
+			const ss_ file_name = jstr(q, "name");
+			need(text_ok(file_name, NAME_MAX, false, "the file's name"));
+			const ss_ hex = jstr(q, "data");
+			if(hex.size() > UPLOAD_MAX * 2)
+				throw Exception("a file is "+itos(UPLOAD_MAX >> 20)+
+						" MiB at most");
+			ss_ data = unhex(hex), type = "application/octet-stream";
+			if(data.empty())
+				throw Exception("the file is empty");
+			int64_t lod = 0;
+			if(data.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0){
+				data = crush(data, false, 1920, 1080, 0);
+				type = "image/png";
+				lod = 1;
+			} else if(data.compare(0, 3, "\xff\xd8\xff") == 0){
+				data = crush(data, true, 1920, 1080, 85);
+				type = "image/jpeg";
+				lod = 1;
+			}
+			Q i(m_db, "INSERT INTO files(name, type, data, lod, uploader, "
+					"created, used) VALUES(?, ?, ?, ?, ?, ?, ?)");
+			i.b(file_name).b(type).blob(data).b(lod).b(name).b(now_s())
+					.b(now_s()).step();
+			json::Value v = json::object();
+			v.set("id", (int64_t)sqlite3_last_insert_rowid(m_db));
+			v.set("image", lod == 1);
+			v.set("bytes", (int64_t)data.size());
+			return v;
+		}
+		if(cmd == "file_settings"){
+			if(!admin)
+				throw Exception("only the admin sets the files' budget");
+			json::Value v = file_settings();
+			for(const char *k : FILE_SETTINGS){
+				const json::Value &x = q.get(k);
+				if(x.is_undefined())
+					continue;
+				if(!x.is_number() || !(x.as_number() >= 0 &&
+						x.as_number() < 9e15))
+					throw Exception(ss_(k)+": a number, 0 or more");
+				v.set(k, (int64_t)x.as_number());
+			}
+			Q i(m_db, "INSERT OR REPLACE INTO settings(key, value) "
+					"VALUES('files', ?)");
+			i.b(v.stringify()).step();
+			m_files_swept = 0;
+			return v;
+		}
+		if(cmd == "delete_file"){
+			// A claim of copyright or personal data the admin has upheld:
+			// gone at once, whatever its use
+			if(!admin)
+				throw Exception("only the admin deletes a file");
+			Q d(m_db, "DELETE FROM files WHERE id = ?");
+			d.b(jint(q, "file")).step();
+			if(sqlite3_changes(m_db) == 0)
+				throw Exception("no such file");
+			return json::Value(true);
 		}
 		if(cmd == "release_sources"){
 			// [PACKAGE_SUBJECT]: the Aittas read and this Hearth's own

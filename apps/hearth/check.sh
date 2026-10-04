@@ -23,6 +23,9 @@
 #      appeals (and may not edit it while hidden), carol sees neither
 #      its title nor its messages by packet or /m/, the admin restores; then the search limit per
 #      address and per account.
+#   7. files: a new account uploads none; a JPEG comes back within 1080p
+#      and without its EXIF; over the budget an unused one is crushed again,
+#      and past its time deleted.
 #
 #   apps/hearth/check.sh
 set -u
@@ -256,7 +259,63 @@ get /t/1 > /dev/null
 grep -qPz '<p>one two\nXthree</p>\n<p>four</p>' "$t/page" ||
 	fail "the multi-line reply: $(grep -a -B1 -A2 'Xthree\|one two' "$t/page" | head -6)"
 
-# 9. A long thread is read a part at a time: the page links on to the
+# 9. Files ([FORUM] step 5): a new account uploads none; the admin's JPEG
+# comes back within 1080p without its EXIF, a PNG as a PNG, another file
+# as it came, a fake PNG refused; robots.txt keeps crawlers off /f/; over
+# the budget an unused image is crushed again and another file deleted,
+# and past delete_after the rest go
+python3 - "$t" <<'PY' || fail "the test files"
+import io, sys
+from PIL import Image
+d = sys.argv[1]
+exif = Image.Exif()
+exif[0x010e] = "SECRETPLACE"
+b = io.BytesIO()
+Image.linear_gradient("L").resize((2400, 600)).convert("RGB").save(
+        b, "JPEG", quality=30, exif=exif.tobytes())
+assert b"SECRETPLACE" in b.getvalue()
+open(d + "/up_jpg", "w").write(b.getvalue().hex())
+b = io.BytesIO()
+Image.new("RGBA", (3, 2), (10, 20, 30, 128)).save(b, "PNG")
+open(d + "/up_png", "w").write(b.getvalue().hex())
+PY
+client bob bobpass1234 "$t/bob_files.log" '{"cmd":"upload","name":"a.txt","data":"68690a"}
+{"cmd":"file_settings","budget":0}'
+answer "$t/bob_files.log" 1001 | grep -q "no files yet" ||
+	fail "a new account's upload: $(answer "$t/bob_files.log" 1001)"
+answer "$t/bob_files.log" 1002 | grep -q "only the admin" ||
+	fail "bob set the budget: $(answer "$t/bob_files.log" 1002)"
+client admin checkpass12 "$t/admin_files.log" "{\"cmd\":\"upload\",\"name\":\"far.jpg\",\"data\":\"$(cat "$t/up_jpg")\"}
+{\"cmd\":\"upload\",\"name\":\"dot.png\",\"data\":\"$(cat "$t/up_png")\"}
+{\"cmd\":\"upload\",\"name\":\"notes.txt\",\"data\":\"68656c6c6f\"}
+{\"cmd\":\"upload\",\"name\":\"fake.png\",\"data\":\"89504e470d0a1a0a6e6f\"}"
+for i in 1001 1002 1003; do
+	answer "$t/admin_files.log" $i | grep -q '"ok":true' ||
+		fail "the admin's upload $i: $(answer "$t/admin_files.log" $i)"
+done
+answer "$t/admin_files.log" 1004 | grep -q "not an image Hearth can read" ||
+	fail "a fake PNG: $(answer "$t/admin_files.log" 1004)"
+image(){ # path -> "format WxH", or why not
+	python3 -c 'import sys; from PIL import Image; d = open(sys.argv[1], "rb").read()
+im = Image.open(sys.argv[1]); print(im.format, "%dx%d" % im.size, "EXIF" if b"SECRETPLACE" in d else "")' "$t/page" 2>&1
+}
+[ "$(get /f/1/far.jpg)" = 200 ] && [ "$(image)" = "JPEG 1920x480 " ] ||
+	fail "the JPEG as served: $(image)"
+[ "$(get /f/2)" = 200 ] && [ "$(image)" = "PNG 3x2 " ] || fail "the PNG: $(image)"
+[ "$(get /f/3)" = 200 ] && [ "$(cat "$t/page")" = hello ] || fail "the other file"
+[ "$(get /robots.txt)" = 200 ] && grep -q "Disallow: /f/" "$t/page" ||
+	fail "robots.txt: $(cat "$t/page")"
+MS=4000 client admin checkpass12 "$t/admin_files2.log" '{"cmd":"file_settings","budget":0,"lod2_after":0}'
+answer "$t/admin_files2.log" 1001 | grep -q '"ok":true' ||
+	fail "the budget: $(answer "$t/admin_files2.log" 1001)"
+[ "$(get /f/1)" = 200 ] && [ "$(image)" = "JPEG 960x240 " ] ||
+	fail "the JPEG over the budget: $(image)"
+[ "$(get /f/3)" = 404 ] || fail "the other file over the budget was kept"
+MS=4000 client admin checkpass12 "$t/admin_files3.log" '{"cmd":"file_settings","delete_after":0}'
+[ "$(get /f/1)" = 404 ] && [ "$(get /f/2)" = 404 ] ||
+	fail "past delete_after an image was kept"
+
+# 10. A long thread is read a part at a time: the page links on to the
 # rest, the client reads on by itself; and pages are limited per address.
 # 20 messages of 20 kB, put in the file (the API's limits make them slow).
 kill $pid; wait $pid 2>/dev/null
@@ -282,4 +341,4 @@ grep -a '^.*hr: ' "$t/admin10.log" | grep -q '"more":true' &&
 n429=0
 for _ in $(seq 130); do [ "$(get /)" = 429 ] && n429=$((n429 + 1)); done
 [ $n429 -gt 0 ] || fail "no page limit per address"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; a long thread read in parts; pages limited"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept; a long thread read in parts; pages limited"

@@ -50,11 +50,12 @@ local message = nil
 local page = nil
 local home
 
-local function req(cmd, args, on)
+-- on_error(why): instead of home() and the error over it
+local function req(cmd, args, on, on_error)
 	local q = args or {}
 	q.cmd = cmd
 	q.id = next_id
-	waiting[next_id] = on or function() end
+	waiting[next_id] = {on or function() end, on_error}
 	next_id = next_id + 1
 	buildat.send_packet("hr:req", encode(q))
 end
@@ -70,11 +71,14 @@ buildat.sub_packet("hr:res", function(data)
 	local on = waiting[res.id]
 	waiting[res.id] = nil
 	if not res.ok then
+		if on and on[2] then
+			return on[2](tostring(res.error))
+		end
 		message = tostring(res.error)
 		return home()
 	end
 	if on then
-		on(res.result)
+		on[1](res.result)
 	end
 end)
 
@@ -137,26 +141,72 @@ end
 local MARKUP = {{"Bold", "**bold**"}, {"List", "\n- "},
 	{"Link", "[text](https://)"}, {"Image", "![what it shows](https://)"},
 	{"Code", "`code`"}}
+local function insert_at_cursor(e, text)
+	-- The cursor counts characters, the string bytes
+	local s, at, i = e:GetText(), e.cursorPosition, 1
+	for _ = 1, at do
+		local c = s:byte(i)
+		if not c then
+			break
+		end
+		i = i + (c >= 0xF0 and 4 or c >= 0xE0 and 3 or c >= 0xC0 and 2 or 1)
+	end
+	e:SetText(s:sub(1, i - 1) .. text .. s:sub(i))
+	e.cursorPosition = at + #text
+	e:SetFocus(true)
+end
+
+-- [FORUM] step 5: File... picks a file (the browser's picker, or on native
+-- the client's list of <user>/exports); once read it is uploaded, and its
+-- link goes in at the cursor of the field it was picked for
+local picking_into = nil
 local function markup_buttons(parent, e)
 	local r = parent:CreateChild("UIElement")
 	r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
 	for _, b in ipairs(MARKUP) do
 		button(r, b[1], function()
-			-- The cursor counts characters, the string bytes
-			local s, at, i = e:GetText(), e.cursorPosition, 1
-			for _ = 1, at do
-				local c = s:byte(i)
-				if not c then
-					break
-				end
-				i = i + (c >= 0xF0 and 4 or c >= 0xE0 and 3 or c >= 0xC0 and 2 or 1)
-			end
-			e:SetText(s:sub(1, i - 1) .. b[2] .. s:sub(i))
-			e.cursorPosition = at + #b[2]
-			e:SetFocus(true)
+			insert_at_cursor(e, b[2])
 		end)
 	end
+	button(r, "File...", function()
+		picking_into = e
+		buildat.pick_file("")
+	end)
 end
+
+magic.SubscribeToEvent("Update", function()
+	if not picking_into then
+		return
+	end
+	local name, data = buildat.picked_file()
+	if not name and not data then
+		return
+	end
+	local e = picking_into
+	picking_into = nil
+	-- A page left meanwhile: e is held, detached, and nothing shows
+	local function fail(why)
+		local parent = e:GetParent()
+		if parent then
+			text(parent, "The file: " .. why, YELLOW)
+		end
+	end
+	if not name then
+		return fail(tostring(data))
+	end
+	if #data > 16 * 1024 * 1024 then
+		return fail("a file is 16 MiB at most")
+	end
+	-- simplified: hex, twice the file's size on the wire
+	local hex = data:gsub(".", function(c)
+		return string.format("%02x", c:byte())
+	end)
+	req("upload", {name = name, data = hex}, function(r)
+		insert_at_cursor(e, (r.image and "!" or "") .. "[" ..
+				name:gsub("[%[%]]", "") .. "](/f/" .. r.id .. "/" ..
+				name:gsub("[^%w%.%-_]", "_") .. ")")
+	end, fail)
+end)
 
 -- multi: a message's field -- Enter breaks the line, Ctrl+Enter finishes
 local function edit(parent, label, multi)

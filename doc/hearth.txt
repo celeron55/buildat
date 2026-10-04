@@ -52,6 +52,9 @@ stay the web client's.
     /m/<id>          one message and a link to it in its thread
     /search?q=...    50 best matches, titles weighed 5 to a body's 1, an
                      answer counted twice
+    /f/<id>[/<name>] an uploaded file (below); the name is only what a
+                     browser saves it as
+    /robots.txt      keeps crawlers off /f/
 
 Anything else under those paths is a 404; a POST is a 404. A message is
 CommonMark with GitHub's tables, strikethrough, task lists and URL
@@ -109,6 +112,28 @@ message marked the answer, a hide, a restore or a refused appeal.
 The client has no page to edit a message or search: those are requests
 only (a scripted client's, below), and search is the HTML face's.
 
+Files
+-----
+File... under a message's field picks a file (the browser's picker; on
+native the client's list of <user>/exports) and uploads it as the
+request "upload" {name, data in hex}; its link goes in at the cursor,
+![name](/f/<id>/name) for an image. A file is 16 MiB at most, 20 an hour
+(an admin any number), and a new account uploads none. A PNG or JPEG is
+read (stb_image, those two only, 40 million pixels at most) and written
+again within 1920x1080 (the short side 1080), a JPEG at quality 85:
+nothing else of the upload is kept, its metadata with it. Any other
+file is kept as it came and served as application/octet-stream.
+
+A file's use is a fetch of /f/<id>, which robots.txt asks crawlers not
+to make. The admin's request "file_settings" {budget, lod2_after,
+delete_after} (bytes and seconds; 1 GiB, 182 and 365 days) says what is
+kept: once an hour, while the files take more than the budget, the
+longest unused go first -- an image unused for lod2_after is written
+again within 960x540 (a JPEG at 60), any other file is deleted then, an
+image unused for delete_after is deleted -- until they are under it.
+"delete_file" {file} deletes one at once (an upheld claim of copyright
+or personal data); the admin has no page for either yet.
+
 Limits
 ------
 A title is 200 bytes at most, a message 20000, a topic's name 80; no
@@ -156,4 +181,5 @@ its log and drives clients with the variables above: posting, editing
 and refusals, an answer, a mention and notifications, a chat line
 within two seconds, every HTML page with escaped and hostile markup, a
 new account's limits, a report, a hide with a statement, an appeal and
-a restore, both search limits, and the multi-line reply field.
+a restore, both search limits, the multi-line reply field, and files
+crushed, served and swept.
