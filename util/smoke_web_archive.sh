@@ -67,7 +67,7 @@ if [ -n "$browser" ] && [ "${node_major:-0}" -ge 22 ]; then
 			grep -aq "Failed to run" "$page_out/page.log"; then
 		echo "smoke: the web client's page did not run its scripts:" >&2
 		grep -a "Failed to run\| E \|rror" "$page_out/page.log" | head -10 >&2
-		[ -n "${SMOKE_LOG:-}" ] && cp "$page_out"/*.log "$(dirname "$SMOKE_LOG")/" 2>/dev/null
+		[ -n "${SMOKE_LOG:-}" ] && cp "$page_out"/*.log "$(dirname "$SMOKE_LOG")/" 2>/dev/null || true
 		# simplified: a warning on CI, not a failure, until the runner's
 		# headless browsers are shown to load the page at all -- Firefox
 		# made no WebGL context there and Chrome got an invalid HTTP
@@ -79,7 +79,10 @@ if [ -n "$browser" ] && [ "${node_major:-0}" -ge 22 ]; then
 			exit 1
 		fi
 	fi
-	[ -n "${SMOKE_LOG:-}" ] && cp "$page_out/page.png" "$(dirname "$SMOKE_LOG")/page.png"
+	# A failed page on CI has no screenshot
+	if [ -n "${SMOKE_LOG:-}" ] && [ -f "$page_out/page.png" ]; then
+		cp "$page_out/page.png" "$(dirname "$SMOKE_LOG")/page.png"
+	fi
 	# Chrome may still be writing its profile as it goes
 	rm -rf "$page_out" 2>/dev/null || true
 	echo "smoke: the web client's page ran its scripts in $browser"
