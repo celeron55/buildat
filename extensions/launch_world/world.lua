@@ -3718,11 +3718,11 @@ apply_camera()
 -- the audio rather than looping a file).
 log:info(synth.self_check(magic))
 -- **The sound as an options round** (stage 3; see synth.lua's STYLES and
--- local/options_for_LOBBY_sound/): BUILDAT_LAUNCH_SOUND=<name>, "today"
--- until the user's pick. Only "today" keeps the orbs' voices, which
--- section 13 cuts.
+-- local/options_for_LOBBY_music/): BUILDAT_LAUNCH_SOUND=<name>, and
+-- "m116_broken", the user's pick of 2026-10-04, without it. Only "today"
+-- keeps the orbs' voices, which section 13 cuts.
 sound_style = synth.STYLES[env("BUILDAT_LAUNCH_SOUND")] and
-		env("BUILDAT_LAUNCH_SOUND") or "today"
+		env("BUILDAT_LAUNCH_SOUND") or "m116_broken"
 log:info("sound: " .. sound_style)
 local bed = synth.new(magic, log, sound_style)
 bed:set_voices(#orb_nodes)
