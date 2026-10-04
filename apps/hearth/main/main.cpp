@@ -277,6 +277,13 @@ static const int REPORTS_A_DAY = 10;
 // Searches a minute, per address on the HTTP face and per account by
 // packet: a search is a full-text query
 static const int SEARCHES_A_MINUTE = 30;
+// Pages a minute per address, and the bodies of a thread's part (a page,
+// an answer): one request a bounded render, so a long thread cannot hold
+// the server
+// simplified: per address; many addresses get many times it, and a
+// limit over all of them (a budget of render time) is the upgrade
+static const int PAGES_A_MINUTE = 120;
+static const size_t THREAD_PART = 256 * 1024;
 static const size_t TITLE_MAX = 200;
 static const size_t BODY_MAX = 20000;
 static const size_t NAME_MAX = 80;
@@ -287,7 +294,7 @@ struct Module: public interface::Module
 	sqlite3 *m_db = nullptr;
 	// The thread each client has open, for "hr:new"
 	sm_<network::PeerId, int64_t> m_viewing;
-	// Searches per address in the current minute
+	// Searches and pages per address (or account) in the current minute
 	sm_<ss_, int> m_searches;
 	int64_t m_searches_minute = 0;
 	// What a request changed, sent once it is committed
@@ -449,10 +456,10 @@ struct Module: public interface::Module
 		return list;
 	}
 
-	// The thread and its messages after `after` (0: all of them). A hidden
-	// message's body is its author's and the admin's to see
-	// simplified: 1000 messages at most a call; a longer thread is read on
-	// with `after`
+	// The thread and its messages after `after` (0: all of them), until
+	// their bodies pass THREAD_PART bytes: then "more" is set, and the rest is
+	// read on with `after`. A hidden message's body is its author's and the
+	// admin's to see
 	json::Value thread(int64_t id, int64_t after, const ss_ &viewer = "",
 			bool admin = false)
 	{
@@ -464,9 +471,15 @@ struct Module: public interface::Module
 		json::Value list = json::array();
 		Q m(m_db, "SELECT id, author, body, created, edited, hidden, "
 				"hidden_reason FROM messages "
-				"WHERE thread = ? AND id > ? ORDER BY id LIMIT 1000");
+				"WHERE thread = ? AND id > ? ORDER BY id");
 		m.b(id).b(after);
+		size_t bytes = 0;
+		bool more = false;
 		while(m.step()){
+			if(bytes >= THREAD_PART){
+				more = true;
+				break;
+			}
 			json::Value v = json::object();
 			const bool hidden = m.i(5) != 0;
 			v.set("id", m.i(0));
@@ -476,9 +489,13 @@ struct Module: public interface::Module
 			v.set("edited", m.i(4));
 			v.set("hidden", hidden);
 			v.set("hidden_reason", m.s(6));
+			// A message's own bytes besides its body: many short ones fill
+			// a part too
+			bytes += 256 + jstr(v, "body").size();
 			list.append(v);
 		}
 		t.set("list", list);
+		t.set("more", more);
 		return t;
 	}
 
@@ -714,8 +731,9 @@ struct Module: public interface::Module
 			return;
 		if(!m_db)
 			return respond(r, 503, page("Hearth", "<p>Starting.</p>"));
-		if(r.path == "/search" && !search_allowed(r.address))
-			return respond(r, 429, page("Hearth", "<p>Too many searches "
+		if((r.path == "/search" && !allowed(r.address, SEARCHES_A_MINUTE)) ||
+				!allowed("page "+r.address, PAGES_A_MINUTE))
+			return respond(r, 429, page("Hearth", "<p>Too many requests "
 					"from this address; try again in a minute.</p>"));
 		ss_ title, body;
 		if(r.method == "GET")
@@ -767,8 +785,12 @@ struct Module: public interface::Module
 				body += thread_line(list.at(i));
 			body += "</ul>\n";
 		} else if((id = path_id(path, "/t/")) >= 0){
-			const json::Value t = thread(id, 0);
-			if(!t.is_object())
+			const ss_ after = query_value(query, "after");
+			if(after.size() > 15 || after.find_first_not_of("0123456789") !=
+					ss_::npos)
+				return;
+			const json::Value t = thread(id, atoll(after.c_str()));
+			if(!t.is_object() || (!after.empty() && t.get("hidden").is_true()))
 				return;
 			const json::Value top = topic(jint(t, "topic"));
 			if(t.get("hidden").is_true()){
@@ -782,17 +804,26 @@ struct Module: public interface::Module
 			body = "<p class=\"meta\"><a href=\"/topic/"+
 					itos(jint(t, "topic"))+"\">"+html(jstr(top, "name"))+
 					"</a></p>\n<h1>"+html(jstr(t, "title"))+"</h1>\n";
-			// The question, its answer, then the rest in order
+			// The question, its answer, then the rest in order; a later page
+			// marks the answer where it is
+			// simplified: an answer past the first page is not lifted under
+			// the question
 			const json::Value &list = t.get("list");
 			const int64_t answer = jint(t, "answer");
+			const bool first = after.empty();
 			for(unsigned i = 0; i < list.size(); i++){
-				if(jint(list.at(i), "id") == answer)
+				const bool is_answer = jint(list.at(i), "id") == answer;
+				if(first && is_answer)
 					continue;
-				body += message_box(list.at(i));
-				for(unsigned j = 0; i == 0 && j < list.size(); j++)
+				body += message_box(list.at(i), is_answer);
+				for(unsigned j = 0; first && i == 0 && j < list.size(); j++)
 					if(jint(list.at(j), "id") == answer)
 						body += message_box(list.at(j), true);
 			}
+			if(t.get("more").is_true())
+				body += "<p><a href=\"/t/"+itos(id)+"?after="+
+						itos(jint(list.at(list.size() - 1), "id"))+
+						"\">Later messages</a></p>\n";
 		} else if((id = path_id(path, "/m/")) >= 0){
 			Q q(m_db, "SELECT m.id, m.author, m.body, m.created, m.edited, "
 					"m.thread, t.title, m.hidden, m.hidden_reason, t.hidden "
@@ -904,14 +935,14 @@ struct Module: public interface::Module
 				hd.i(0) == 0 ? 1 : 0;
 	}
 
-	// `who`: an address, or "@" and an account
-	bool search_allowed(const ss_ &who)
+	// `who`: an address, "@" and an account, or "page " and an address
+	bool allowed(const ss_ &who, int a_minute)
 	{
 		if(now_s() / 60 != m_searches_minute){
 			m_searches_minute = now_s() / 60;
 			m_searches.clear();
 		}
-		return ++m_searches[who] <= SEARCHES_A_MINUTE;
+		return ++m_searches[who] <= a_minute;
 	}
 
 	// An address in the text, or a link the markup makes ("//host",
@@ -1038,7 +1069,7 @@ struct Module: public interface::Module
 		if(cmd == "search"){
 			const ss_ text = jstr(q, "q");
 			need(text_ok(text, 200, false, "the search"));
-			if(!search_allowed("@"+name))
+			if(!allowed("@"+name, SEARCHES_A_MINUTE))
 				throw Exception("too many searches; try again in a minute");
 			return search(text);
 		}

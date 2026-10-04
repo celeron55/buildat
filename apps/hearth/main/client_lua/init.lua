@@ -136,7 +136,7 @@ local function edit(parent, label, multi)
 	return e
 end
 
-local show_topic, show_thread, show_notifications, show_queue, show_report
+local show_topic, show_thread, read_on, show_notifications, show_queue, show_report
 local show_new_topic
 -- Who this client is ("me"), and the thread it has open: the server pushes
 -- that thread's new messages ("hr:new"), which are added to it in place
@@ -274,6 +274,19 @@ local function add_message(t, add, m, is_answer)
 	end
 end
 
+-- The open thread's messages after the last one it has, a part ("more")
+-- at a time
+read_on = function(o)
+	req("thread", {thread = o.id, after = o.last}, function(t)
+		if open_thread == o then
+			o.append(t.list)
+			if t.more then
+				read_on(o)
+			end
+		end
+	end)
+end
+
 show_thread = function(id)
 	leave_home()
 	req("thread", {thread = id}, function(t)
@@ -304,6 +317,9 @@ show_thread = function(id)
 			end
 			l.viewPosition = magic.IntVector2(0, 1000000)
 		end}
+		if t.more then
+			read_on(open_thread)
+		end
 		local e = edit(w, "Reply (Markdown; Ctrl+Enter sends)", true)
 		local function send()
 			if e:GetText() == "" then
@@ -417,12 +433,7 @@ buildat.sub_packet("hr:new", function(data)
 	if type(v) ~= "table" or not open_thread or v.thread ~= open_thread.id then
 		return
 	end
-	local o = open_thread
-	req("thread", {thread = o.id, after = o.last}, function(t)
-		if open_thread == o then
-			o.append(t.list)
-		end
-	end)
+	read_on(open_thread)
 end)
 
 buildat.sub_packet("hr:notify", function(data)

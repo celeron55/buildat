@@ -29,7 +29,7 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 t=$(mktemp -d)
 pid=
-trap '[ -n "$pid" ] && kill $pid 2>/dev/null; rm -rf "$t"' EXIT
+trap '[ -n "$pid" ] && kill $pid 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "$t"' EXIT
 fail(){ echo "FAIL: $*"; exit 1; }
 P=29881
 U=http://127.0.0.1:$P
@@ -243,4 +243,31 @@ CMDS='delay 5000\ntext one two\ndelay 200\nkeypress Return\ndelay 200\ntext thre
 get /t/1 > /dev/null
 grep -qPz '<p>one two\nXthree</p>\n<p>four</p>' "$t/page" ||
 	fail "the multi-line reply: $(grep -a -B1 -A2 'Xthree\|one two' "$t/page" | head -6)"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored"
+
+# 9. A long thread is read a part at a time: the page links on to the
+# rest, the client reads on by itself; and pages are limited per address.
+# 20 messages of 20 kB, put in the file (the API's limits make them slow).
+kill $pid; wait $pid 2>/dev/null
+python3 - "$t/srv/apps/hearth/hearth.sqlite" <<'PY' || fail "the long thread"
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.executemany("INSERT INTO messages(thread, author, body, created) "
+        "VALUES(1, 'admin', ?, 1)", [("x" * 19990 + " END%d" % i,) for i in range(1, 21)])
+c.commit()
+PY
+bin/buildat_server -m ../apps/hearth -D "$t/srv" -P $P -l 3 > "$t/srv2.log" 2>&1 &
+pid=$!
+for _ in $(seq 120); do grep -q "Hearth: " "$t/srv2.log" && break; sleep 1; done
+u=/t/1 pages=0
+while [ "$(get "$u")" = 200 ] && pages=$((pages + 1)) &&
+		u=$(grep -o '/t/1?after=[0-9]*' "$t/page"); do :; done
+[ $pages -ge 2 ] && grep -q "END20" "$t/page" && ! grep -q "END1<" "$t/page" ||
+	fail "the long thread's pages ($pages, the last: $(grep -o 'END[0-9]*' "$t/page" | tr '\n' ' '))"
+client admin checkpass12 "$t/admin10.log" '' BUILDAT_HEARTH_OPEN=1
+grep -a '^.*hr: ' "$t/admin10.log" | grep -q '"more":true' &&
+	grep -a 'hr: ' "$t/admin10.log" | grep -q 'END20' ||
+	fail "the client did not read the long thread on"
+n429=0
+for _ in $(seq 130); do [ "$(get /)" = 429 ] && n429=$((n429 + 1)); done
+[ $n429 -gt 0 ] || fail "no page limit per address"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; a long thread read in parts; pages limited"
