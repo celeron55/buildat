@@ -1,5 +1,8 @@
 Buildat conventions
 ===================
+Coding style, naming, exceptions, threads, the directory layout, commit
+messages and the coordinate convention. Read before the first commit.
+
 C++ Coding style
 ----------------
 Using the correct coding style is important. If you are asked to fix your style
@@ -7,16 +10,6 @@ to follow the one defined here in every detail, do it carefully.
 
 If something is found to be missing from this document, such additions shall be
 made.
-
-util/codestyle.sh:
-A code formatting script. Always run before committing. It handles most
-whitespace issues. Requires Uncrustify (http://uncrustify.sourceforge.net/).
-
-Commit your changes temporarily before running the script, as it will not save
-any kind of backups of the files.
-
-If something seems wrong or weird, use the -a flag to enable annotations in code
-to check if the script knows what it's doing or not.
 
 Identifiers:
 - Class and struct names are CamelCase,
@@ -52,6 +45,8 @@ Naming:
 Logging:
 - Use core/log.h. Only use stdout directly in case of an interactive command
   line interface (like printing errors for command line arguments).
+  The logger writes a control byte other than a tab or a line break as
+  \xNN, so a peer's bytes in a line cannot move the terminal.
 
 Ordering of #include directives:
 1) The interface that the current file implements, ""
@@ -103,33 +98,112 @@ Directory structure
 -------------------
 ├── 3rdparty    << Bundled 3rd-party libraries
 ├── Build       << Build files; "mkdir Build; cmake ..; make"
-├── cache       << Runtime directory used by Buildat
+├── cache       << Runtime directory used by Buildat; a boxed server's
+│                  is cache/apps/<app>, and cache/rccpp_build only the
+│                  unboxed build's, read by the boxes; the client keeps
+│                  a server's files in cache/remote/server_<address>
+│                  (this machine's servers share cache/remote/local),
+│                  and a client run with -c and no -C uses cache/scripted
 ├── builtin     << Built-in modules
 ├── client      << Built-in client files
-├── extensions  << Built-in client extensions
+│   └── extensions << The client's own extensions, trusted: the sandbox
+│                  itself (urho3d, magic_sandbox, uistack, replicate),
+│                  network, starport, sandbox_scan
+├── extensions  << Client extensions, run in the Lua sandbox
 ├── src
 │   ├── client  << Client-specific code
 │   ├── core    << Core code (must be kept minimal but sufficient)
 │   ├── impl    << Interface implementations
 │   ├── interface << Interface available to modules
 │   └── server  << Server-specific code
-├── games       << Games that can be run using buildat_server -m <path>
-└── util        << Miscellaneous development utilities
+├── apps       << Apps that can be run using buildat_server -m <path>
+├── doc         << This documentation; doc/plan is the plan and its history
+├── user        << The user's data -- never in git: apps/<app> an app's own
+│                  (its saves, vanilla's imported worlds), shared/<app>
+│                  what it shares read-only with the others (vanilla's
+│                  Luanti games and settings), installed/<author>/<name>/
+│                  <version> the Aitta apps (aitta.txt), and the engine
+│                  settings
+├── local       << Runs' outputs: fuzz and driven runs, reference shots,
+│                  options filed for the user -- never in git
+└── util        << Development utilities: packaging, the squash push, benches,
+                   the fuzzers (util/fuzz/fuzz.sh: libFuzzer targets;
+                   proto_fuzz, client_fuzz, game_fuzz: whole programs)
+
+Checks
+------
+A check is one shell script that runs the thing and decides for itself.
+builtin/luanti/test/lib.sh carries the contract: exit 0 passed, 1 failed, 77
+could not run, and the last line is "PASS: ", "FAIL: " or "SKIP: " with what
+was actually measured in it. A check that prints a failure and exits 0 is the
+fault this contract exists for.
+
+Four header lines say the rest, and only the first is required:
+
+  # tier: quick        quick (no downloaded game, what a push runs), full
+                       (wants the game media), long (fuzz, drives, shots)
+  # cost: 24s          a seed; local/run_all/costs is measured per machine
+  # covers: <paths>    what it proves OUTSIDE its own tree; where it lives
+                       is covered already -- extensions/<x>/check.sh, and a
+                       core.sh beside it, cover extensions/<x>/**
+  # flaky: <why>       run and reported, but it does not decide the status
+  # always: yes        appended to every --changed pick instead of competing
+                       to be the cheapest runner for a file; for a check so
+                       cheap it may as well run (lua_syntax.sh, under a
+                       second), which would otherwise push the deep runners
+                       out of the pick by costing less than all of them
+
+builtin/luanti/test/run_all.sh <tier> runs a tier; --changed [range] runs the
+cheapest runners that cover what git says changed, which is the regular check.
+A runner is never retried: a check run three times and taken at its best is
+how a real fault becomes a known flake.
+
+A check is run to learn something, not to perform diligence: a change already
+verified directly -- a probe that drove it, a screenshot of the thing itself,
+a number read out of the log -- does not then run the suite that covers
+neighbouring behaviour. Run the runner for what the change might have broken
+that you did not look at. Watching a twenty-minute suite re-prove what a
+screenshot already showed is the cost the tier exists to avoid (user,
+2026-09-25).
+
+A change runs the runner that covers it, and the tier is what a push runs.
+Twenty minutes is never the right answer to a one-word change. Where the full
+runner is dear, the tree carries a core one beside it -- one client and well
+under a minute, the paths an edit breaks (extensions/launch_world/core.sh
+against check.sh) -- and that is what an edit runs.
+
+An app's look is checked by a runner and not by memory: a change under
+builtin/voxel_shading, the mesher or voxelworld picks
+apps/voxel_lighting/check.sh through its "covers" line. That one compares the
+fourteen framings against the reference run kept in local/voxel_lighting/ref/
+-- taken with --accept on a tree whose look somebody has confirmed -- and says
+which view moved and by how much. With no reference on the machine it skips
+and says so; a committed baseline is [CHECK_BASELINE]'s and wants a commit
+hash the user has picked.
+
+A drive's waits say what they are waiting for, and the line they print is in
+the log the verdict greps: a grep whose pattern the drive also carries counts
+the wait's own line and passes by itself. Filter wait_log out, or grep for the
+line's own source (launch_w:, not the text alone).
+
+Under BUILDAT_CI=1 a timing is a row and never a verdict -- what CI asserts is
+behaviour, since a threshold argued against a desk's GPU fails every run under
+llvmpipe and teaches everyone to ignore the result.
 
 Commit messages
 ---------------
-Commit messages must be formatted in the following way:
+Present tense, describing what the commit leaves in the tree rather than the
+work it took. Where it fits, start with the place (a module, a script, a
+directory) and end with the plan item's codename in brackets, so the history
+and the plan read each other:
 
-In present tense. Prepend a location to the message where possible. When adding
-something, the "add" verb should be left out. Fine enough examples:
-- client/sandbox.lua: Fix string concatenation when creating an error message
-- interface::Server::check_module
-- doc: conventions.txt, todo.txt
-- Remove Module::test_add
-- client, 3rdparty/c55lib: Command-line parameters
-- 3rdparty/cereal
-- client: Disable Urho3D log file
-- extensions/__menu: Fix UI warnings
+- voxelworld: a dug blocker starts dark and the flood fills it from around it [DIG_LIGHT]
+- drive: a run has a goal rung and ends when it is met [DRIVE_GOAL]
+- plan: the list re-cut -- the unit gap and the hand first
+- 3rdparty/Urho3D: a virtual mouse position for the scripted client [SEQ_MOUSE_FREE]
+
+No marketing. A message describes the final diff: a fix that was made and
+undone before the commit is not in it.
 
 Coordinates
 -----------
@@ -155,3 +229,25 @@ Urho3D's namespace should generally be aliased to be "magic".
 
 The bundled copy is patched. See urho3d_fork.txt before updating it.
 
+
+Menu screens
+------------
+
+Escape is Back, on every screen the launcher and the apps draw: what the
+screen's "< back", "Back", "Cancel" or "Ok" button does, Escape does,
+whether or not a text field has the focus. The one place it is is
+ui_utils.bind_button_menu (extensions/ui_utils), which every vertical_menu
+and grid goes through: it presses the item labelled as the way back. A
+screen with a capture of its own (the key editor listening for a key)
+takes Escape first by returning true from its on_key handler, and Escape
+is then that capture's cancel. A screen never adds a second Escape handler
+that pops itself -- with the menu's own, that was the pop twice.
+
+Every menu is by the keyboard without a line of its own ([MENU_KEYS]): a
+page made with ui_utils.keyboard_page (every Accounts page through its
+page_window, floorplanner's pages) or a menu through bind_button_menu /
+vertical_menu gets the arrows, Tab, Enter, and a letter for each button,
+drawn in brackets in its label. A maker writes the plain label; "&" in it
+picks the letter, and a button whose label is a key's name (a key editor)
+is named "no_letter". A label is read without its letter's brackets
+(ui_utils.unmark) wherever code compares one.

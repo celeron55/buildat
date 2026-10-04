@@ -8,6 +8,8 @@
 #include "interface/module_info.h"
 #include "interface/os.h"
 #include "loader/api.h"
+#include "network/api.h"
+#include "client_file/api.h"
 #include "core/json.h"
 #include <fstream>
 #define MODULE "loader"
@@ -28,6 +30,7 @@ static interface::ModuleMeta load_module_meta(const json::Value &v)
 {
 	interface::ModuleMeta r;
 	r.disable_cpp = v.get("disable_cpp").as_boolean();
+	r.client_main = v.get("client_main").as_string();
 	r.cxxflags = v.get("cxxflags").as_string();
 	r.ldflags = v.get("ldflags").as_string();
 	r.cxxflags_windows = v.get("cxxflags_windows").as_string();
@@ -267,6 +270,12 @@ struct Module: public interface::Module, public loader::Interface
 	interface::Server *m_server;
 	bool m_activated = false;
 	sv_<ss_> m_module_load_paths; // In order of preference
+	ss_ m_base_path; // The base game's directory, or "" ([GAME_BASE])
+
+	// Client scripts named by modules' "client_main", in load order, run
+	// once per peer when its files first arrive ([ENGINE_LOADER])
+	sv_<ss_> m_client_mains; // "<module>/<script>"
+	set_<network::PeerInfo::Id> m_scripted_peers;
 
 	// Buffer names of modules that should be reloaded in this until modules
 	// aren't being modified for a period of time, and then reload them
@@ -280,7 +289,47 @@ struct Module: public interface::Module, public loader::Interface
 		log_d(MODULE, "loader construct");
 
 		m_module_load_paths.push_back(m_server->get_modules_path());
+		// A game that is a variant of another ([GAME_BASE]): its root
+		// meta.json (the Aitta manifest) names the base, whose modules are
+		// loaded as the variant's own after the variant's -- a module
+		// directory in both is the variant's, since its path is first
+		ss_ base = read_base_game(m_server->get_modules_path());
+		if(!base.empty()){
+			m_base_path = m_server->get_modules_path()+"/../"+base;
+			if(!interface::fs::path_exists(m_base_path+"/main/meta.json")){
+				m_server->shutdown(1, ss_()+"loader: base game \""+base+
+						"\" not found beside this one");
+				return;
+			}
+			log_i(MODULE, "A variant of %s", cs(base));
+			m_module_load_paths.push_back(m_base_path);
+		}
 		m_module_load_paths.push_back(m_server->get_builtin_modules_path());
+	}
+
+	// The "base" of <game>/meta.json, or "" (no file, no field)
+	static ss_ read_base_game(const ss_ &modules_path)
+	{
+		ss_ meta_path = modules_path+"/meta.json";
+		std::ifstream f(meta_path, std::ios::binary);
+		if(!f.good())
+			return "";
+		std::string content((std::istreambuf_iterator<char>(f)),
+				std::istreambuf_iterator<char>());
+		json::json_error_t json_error;
+		json::Value v = json::load_string(content.c_str(), &json_error);
+		if(v.is_undefined() || !v.is_object())
+			return "";
+		const json::Value &base = v.get("base");
+		if(!base.is_string())
+			return "";
+		ss_ name = base.as_string();
+		// A directory name and nothing else: a base is a sibling game
+		for(char c : name){
+			if(!isalnum((unsigned char)c) && c != '_' && c != '-')
+				return "";
+		}
+		return name;
 	}
 
 	~Module()
@@ -291,15 +340,39 @@ struct Module: public interface::Module, public loader::Interface
 	void init()
 	{
 		log_d(MODULE, "loader init");
+		// [ENGINE_LOADER]: the server loads this module and fires this; it
+		// used to be an app-carried __loader that did the loading on it
+		m_server->sub_event(this, Event::t("core:load_modules"));
 		m_server->sub_event(this, Event::t("core:module_modified"));
 		m_server->sub_event(this, Event::t("core:tick"));
+		m_server->sub_event(this,
+				Event::t("client_file:files_transmitted"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
 	{
+		EVENT_VOIDN("core:load_modules", activate)
 		EVENT_TYPEN("core:module_modified", on_module_modified,
 				interface::ModuleModifiedEvent)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
+		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
+				client_file::FilesTransmitted)
+	}
+
+	// A module's "client_main" is run here once per peer; an app used to
+	// carry a main.cpp whose only job was this send ([ENGINE_LOADER])
+	void on_files_transmitted(const client_file::FilesTransmitted &event)
+	{
+		if(m_client_mains.empty())
+			return;
+		if(!m_scripted_peers.insert(event.recipient).second)
+			return; // Already ran for this peer
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(const ss_ &script : m_client_mains){
+				inetwork->send(event.recipient, "core:run_script",
+						"buildat.run_script_file(\""+script+"\")");
+			}
+		});
 	}
 
 	sm_<ss_, interface::ModuleInfo> m_module_info;
@@ -361,14 +434,18 @@ struct Module: public interface::Module, public loader::Interface
 		ss_ current = m_server->get_modules_path();
 
 		// Get a list of required modules; that is, everything in the main
-		// module path
+		// module path, and in the base game's when this is a variant
 		set_<ss_> required_modules;
-		auto list = interface::fs::list_directory(current);
-		for(const interface::fs::Node &n : list){
+		sv_<ss_> game_paths = {current};
+		if(!m_base_path.empty())
+			game_paths.push_back(m_base_path);
+		for(const ss_ &game_path : game_paths)
+		for(const interface::fs::Node &n :
+				interface::fs::list_directory(game_path)){
 			if(n.name == "__loader" || !n.is_directory)
 				continue;
 			// This is a module if it contains a file named "meta.json"
-			ss_ module_path = current+"/"+n.name;
+			ss_ module_path = game_path+"/"+n.name;
 			ss_ meta_path = module_path+"/meta.json";
 			if(!interface::fs::path_exists(meta_path)){
 				// Not a module
@@ -400,6 +477,20 @@ struct Module: public interface::Module, public loader::Interface
 		log_i(MODULE, "Module load order: %s",
 				cs(dump(resolve.m_module_load_order)));
 
+		m_server->set_module_count(resolve.m_module_load_order.size());
+		// [PARALLEL_COMPILE]: the builds side by side first; the loads
+		// below then find each current and stay one by one in order
+		sv_<interface::ModuleInfo> infos;
+		for(const ss_ &name : resolve.m_module_load_order){
+			interface::ModuleInfo *info = get_module_info(name);
+			if(info)
+				infos.push_back(*info);
+		}
+		ss_ failed;
+		if(!m_server->compile_modules(infos, &failed)){
+			m_server->shutdown(1, ss_()+"loader: Error compiling module "+failed);
+			return;
+		}
 		for(const ss_ &name : resolve.m_module_load_order){
 			interface::ModuleInfo *info = get_module_info(name);
 			if(!info)
@@ -408,6 +499,8 @@ struct Module: public interface::Module, public loader::Interface
 				m_server->shutdown(1, ss_()+"loader: Error loading module "+name);
 				return;
 			}
+			if(!info->meta.client_main.empty())
+				m_client_mains.push_back(name+"/"+info->meta.client_main);
 		}
 	}
 

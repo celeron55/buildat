@@ -3,12 +3,27 @@
 #include "client/command_seq.h"
 #include "core/log.h"
 #include "interface/fs.h"
+#include <ctime>
+#include <set>
 #include <c55/string_util.h>
 #include <Graphics.h>
 #include <Image.h>
 #include <Input.h>
 #include <FileSystem.h>
 #include <SDL/SDL.h>
+// The PNG encoder, ours in this file: Urho3D's Image::SavePNG is 180-210 ms
+// of the frame for a 1280x720 shot, on the main thread, and every
+// scripted run's screenshot was a "rest" peak in the frame column
+// ([FRAME_PEAK]); the pixels are copied out and written on a thread.
+// The web client links the engine statically, and its archive has the
+// encoder already ([WEB_CLIENT]).
+#ifndef __EMSCRIPTEN__
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STBIW_ASSERT(x)
+#endif
+#include <STB/stb_image_write.h>
+#include <thread>
+#include <mutex>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
@@ -17,6 +32,7 @@
 #include <climits>
 #include <fcntl.h>
 #include <unistd.h>
+#include <map>
 #define MODULE "cmdseq"
 namespace magic = Urho3D;
 
@@ -155,8 +171,11 @@ static bool parse_direction(const ss_ &rest, double *yaw, double *pitch,
 		*error = "The direction has no length";
 		return false;
 	}
-	*yaw = atan2(x, z) * 180.0 / M_PI;
-	*pitch = asin(y / len) * 180.0 / M_PI;
+	// Not M_PI: Urho3D's MathDefs.h #undefs it, which with Emscripten's
+	// headers leaves it undefined here ([WEB_CLIENT])
+	const double deg = 180.0 / 3.14159265358979323846;
+	*yaw = atan2(x, z) * deg;
+	*pitch = asin(y / len) * deg;
 	return true;
 }
 
@@ -197,11 +216,32 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			c.type = Type::Delay;
 			if(!parse_i64(rest, &c.n) || c.n < 0)
 				return fail("delay <ms> (non-negative integer)");
+		} else if(cmd == "wait_log"){
+			c.type = Type::WaitLog;
+			ss_ ms, text;
+			split_cmd(rest, &ms, &text);
+			if(!parse_i64(ms, &c.n) || c.n < 0 || text.empty())
+				return fail("wait_log <ms> <text>");
+			c.s = text;
+		} else if(cmd == "wait_log_any"){
+			c.type = Type::WaitLogAny;
+			ss_ ms, text;
+			split_cmd(rest, &ms, &text);
+			if(!parse_i64(ms, &c.n) || c.n < 0 || text.empty())
+				return fail("wait_log_any <ms> <text>");
+			c.s = text;
 		} else if(cmd == "screenshot"){
 			c.type = Type::Screenshot;
 			c.s = rest;
 			if(c.s.empty())
 				return fail("screenshot <path>");
+		} else if(cmd == "event"){
+			c.type = Type::Event;
+			size_t sp = rest.find(' ');
+			c.s = rest.substr(0, sp);
+			c.param = sp == ss_::npos ? "" : rest.substr(sp + 1);
+			if(c.s.empty())
+				return fail("event <name> [param]");
 		} else if(cmd == "keydown"){
 			c.type = Type::KeyDown;
 			c.s = rest;
@@ -277,6 +317,15 @@ void read_stdin_lines(sv_<ss_> *out_lines, bool *eof)
 		*eof = true;
 		return;
 	}
+#ifdef _WIN32
+	// simplified: no non-blocking stdin on Windows -- a pipe there cannot
+	// be polled the way a Unix fd can; the stdin-driven run is a Linux
+	// tool for now, and here stdin is simply never read
+	(void)buf; (void)nonblock_set;
+	done = true;
+	*eof = true;
+	return;
+#else
 	if(!nonblock_set){
 		nonblock_set = true;
 		int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
@@ -316,6 +365,7 @@ void read_stdin_lines(sv_<ss_> *out_lines, bool *eof)
 		buf.clear();
 	}
 	*eof = done;
+#endif
 }
 
 static void self_check()
@@ -349,6 +399,18 @@ static void self_check()
 		throw Exception("command_seq self_check mouse_move");
 	if(cs[6].x != SDL_BUTTON_LEFT || cs[8].x != SDL_BUTTON_RIGHT)
 		throw Exception("command_seq self_check buttons");
+
+	// The name is the date and the time, it carries no directory, and it
+	// does not change between two calls in one second unless the file is
+	// already there
+	const ss_ name = screenshot_name("/nonexistent");
+	if(name.size() != ss_("screenshot_20250713_130617.png").size() ||
+			name.compare(0, 11, "screenshot_") != 0 ||
+			name.compare(name.size() - 4, 4, ".png") != 0 ||
+			name.find('/') != ss_::npos)
+		throw Exception("command_seq self_check screenshot_name "+name);
+	if(screenshot_name("/nonexistent") != name)
+		throw Exception("command_seq self_check screenshot_name twice");
 	if(cs[12].type != Type::Look || cs[12].yaw != 10.0 || cs[12].pitch != -20.0)
 		throw Exception("command_seq self_check look");
 	// Straight along +X is a quarter turn from +Z, and level
@@ -386,8 +448,14 @@ ss_ dump_command(const Command &c)
 	switch(c.type){
 	case Type::Delay:
 		return "delay "+itos(c.n);
+	case Type::WaitLog:
+		return "wait_log "+itos(c.n)+" "+c.s;
+	case Type::WaitLogAny:
+		return "wait_log_any "+itos(c.n)+" "+c.s;
 	case Type::Screenshot:
 		return "screenshot "+c.s;
+	case Type::Event:
+		return "event "+c.s+(c.param.empty() ? "" : " "+c.param);
 	case Type::KeyDown:
 		return "keydown "+c.s;
 	case Type::KeyUp:
@@ -542,6 +610,17 @@ void inhibit_real_input(bool enable)
 // including an injected one, so a mouse_move issued after the game toggled the
 // mouse would silently do nothing. Feed it one pixel of motion to swallow
 // instead. It is dropped by definition, so it moves nothing.
+// The motion asked for, waiting for the top of the next frame
+static magic::IntVector2 g_pending_mouse_move(0, 0);
+
+void apply_pending_mouse_move(magic::Input *input)
+{
+	if(g_pending_mouse_move == magic::IntVector2::ZERO)
+		return;
+	input->AddMouseMove(g_pending_mouse_move.x_, g_pending_mouse_move.y_);
+	g_pending_mouse_move = magic::IntVector2::ZERO;
+}
+
 void absorb_mouse_move_suppression(magic::Input *input)
 {
 	SDL_Event e;
@@ -562,6 +641,15 @@ void absorb_mouse_move_suppression(magic::Input *input)
 // instead; see Input::SetForceInputFocus.
 void show_window(magic::Graphics *graphics, magic::Input *input)
 {
+	// **A driven window does not take the desk's focus** (user,
+	// 2026-09-24: a check "popping up the window open and closed and
+	// open repeatedly, taking my input focus away from what I'm
+	// doing"). The vendored SDL reads this hint when it maps a window
+	// and, with it set, says _NET_WM_USER_TIME = 0 first -- EWMH for
+	// "the user did not ask for this window" -- and maps without
+	// raising. A client somebody started themselves is unaffected:
+	// this is only ever set for a command sequence.
+	SDL_SetHint("BUILDAT_WINDOW_NO_ACTIVATION", "1");
 	if(graphics){
 		SDL_Window *w = graphics->GetWindow();
 		if(w)
@@ -597,6 +685,27 @@ static bool push_key(magic::Input *input, int key, bool down, ss_ *error)
 	return true;
 }
 
+// The keys a sequence holds (keydown without its keyup), so that a key
+// Urho's input has dropped can be pressed again: Input::ResetState()
+// clears every key on a focus change, and a scripted run's held key
+// read as not held one run in ten with nothing downstream to say why
+// ([HELD_KEY_FLAKE]). reassert_held_keys() runs every frame.
+// A key is only pressed again once Urho has read it as down: the event
+// a keydown pushes is read on the next frame, and a second KeyDown before
+// that would be a second press (a toggle key toggled back).
+static std::map<int, bool> g_held_keys; // key -> seen down
+
+// The buttons a sequence holds, the same way g_held_keys holds its keys
+// and for the same reason: Input::ResetState() clears the mouse buttons
+// as well as the keys, and a hold that spans a focus change comes back
+// with the button up. A hold on a sphere in the launcher room is a
+// second and a half of held button, and it read as no button at all in
+// a container (2026-09-24). Urho's mask is 1 << (SDL button - 1).
+static std::map<int, bool> g_held_buttons; // sdl button -> seen down
+
+static bool push_mouse_button(magic::Input *input, int sdl_button,
+		bool down, ss_ *error);
+
 bool inject_key(magic::Input *input, const ss_ &name, bool down, bool up_too,
 		ss_ *error)
 {
@@ -609,7 +718,57 @@ bool inject_key(magic::Input *input, const ss_ &name, bool down, bool up_too,
 		return false;
 	if(up_too && !push_key(input, key, false, error))
 		return false;
+	if(down && !up_too)
+		g_held_keys[key] = false;
+	else
+		g_held_keys.erase(key);
 	return true;
+}
+
+void reassert_held_keys(magic::Input *input)
+{
+	for(auto &held : g_held_keys){
+		int key = held.first;
+		if(input->GetKeyDown(key)){
+			held.second = true;
+			continue;
+		}
+		if(!held.second)
+			continue;
+		ss_ error;
+		if(push_key(input, key, true, &error)){
+			held.second = false;
+			log_w(MODULE, "held key %s read as not held; pressed again",
+					cs(ss_(SDL_GetKeyName((SDL_Keycode)key))));
+		}
+	}
+	for(auto &held : g_held_buttons){
+		int button = held.first;
+		if(input->GetMouseButtonDown(1 << (button - 1))){
+			held.second = true;
+			continue;
+		}
+		if(!held.second)
+			continue;
+		ss_ error;
+		if(push_mouse_button(input, button, true, &error)){
+			held.second = false;
+			log_w(MODULE, "held mouse button %i read as not held; "
+					"pressed again", button);
+		}
+	}
+}
+
+bool button_held_unseen(int sdl_button)
+{
+	auto it = g_held_buttons.find(sdl_button);
+	return it != g_held_buttons.end() && !it->second;
+}
+
+void release_held_keys()
+{
+	g_held_keys.clear();
+	g_held_buttons.clear();
 }
 
 static bool push_mouse_button(magic::Input *input, int sdl_button, bool down,
@@ -640,13 +799,22 @@ bool inject_mouse_button(magic::Input *input, int sdl_button, bool down,
 		return false;
 	if(up_too && !push_mouse_button(input, sdl_button, false, error))
 		return false;
+	if(down && !up_too)
+		g_held_buttons[sdl_button] = false;
+	else
+		g_held_buttons.erase(sdl_button);
 	return true;
 }
 
 bool inject_mouse_pos(magic::Input *input, int x, int y, ss_ *error)
 {
 	magic::IntVector2 old = input->GetMousePosition();
-	input->SetMousePosition(magic::IntVector2(x, y));
+	// The scripted client's mouse is not the desk's ([SEQ_MOUSE_FREE]):
+	// a virtual position the UI reads for its clicks and hover, so the
+	// real cursor stays wherever the user left it. Set from the first
+	// mouse_pos on; the real mouse's own events are dropped by the
+	// filter below either way.
+	input->SetVirtualMousePosition(magic::IntVector2(x, y));
 	SDL_Event e;
 	memset(&e, 0, sizeof(e));
 	e.type = SDL_MOUSEMOTION;
@@ -665,18 +833,26 @@ bool inject_mouse_pos(magic::Input *input, int x, int y, ss_ *error)
 
 bool inject_mouse_move(magic::Input *input, int dx, int dy, ss_ *error)
 {
-	// Relative only. No warp: captured look has no persistent cursor position.
-	SDL_Event e;
-	memset(&e, 0, sizeof(e));
-	e.type = SDL_MOUSEMOTION;
-	e.motion.windowID = window_id(input);
-	e.motion.which = INJECTED_MOUSE_ID;
-	e.motion.xrel = dx;
-	e.motion.yrel = dy;
-	if(SDL_PushEvent(&e) != 1){
-		*error = "SDL_PushEvent failed";
-		return false;
-	}
+	// **Into the accumulator, and not through the SDL queue at all.**
+	// mouse_move is for the look, which reads GetMouseMove(), and the
+	// queue served it badly: the first motion of a run vanished between
+	// the push and Urho3D -- it never reached HandleSDLEvent, never
+	// accumulated and was dropped by no suppression -- so every sequence
+	// lost its first mouse_move and a scripted look began one command
+	// late (2026-09-23). Pushing it as well as adding it counted it
+	// twice on the frames where it did arrive. mouse_pos is what a UI
+	// wants, and it still goes through the queue.
+	//
+	// Relative only. No warp: captured look has no persistent cursor
+	// position.
+	// Held for the top of the next frame: Urho3D clears the accumulator
+	// at the start of every frame, so a delta added while commands are
+	// being stepped is seen by a handler only if that handler happens to
+	// run later in the same frame -- and whether it does is subscription
+	// order. Applied a frame later it is seen by all of them, always.
+	g_pending_mouse_move += magic::IntVector2(dx, dy);
+	(void)input;
+	(void)error;
 	return true;
 }
 
@@ -720,7 +896,68 @@ bool inject_text(magic::Input *input, const ss_ &text, ss_ *error)
 	return true;
 }
 
-bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error)
+static std::mutex g_screenshot_mutex;
+// The shots handed to a writer thread and not on disk yet: a script
+// taking one a frame was given the name of the one still being written,
+// and half its shots were overwritten
+static std::set<ss_> g_screenshots_writing;
+
+static bool taken(const ss_ &path)
+{
+	std::lock_guard<std::mutex> lock(g_screenshot_mutex);
+	return interface::fs::path_exists(path) ||
+			g_screenshots_writing.count(interface::fs::get_absolute_path(path));
+}
+
+ss_ screenshot_name(const ss_ &dir)
+{
+	char stamp[32] = {};
+	const time_t t = time(nullptr);
+	struct tm tmv;
+#ifdef _WIN32
+	localtime_s(&tmv, &t);
+#else
+	localtime_r(&t, &tmv);
+#endif
+	strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", &tmv);
+	const ss_ base = ss_("screenshot_")+stamp;
+	ss_ name = base+".png";
+	// A second is plenty of resolution for somebody pressing a key and not
+	// enough for a script taking a set, and the collision would be silent:
+	// the second shot overwrites the first, and the caller is handed a name
+	// that no longer means what it did when it was given out.
+	for(int i = 2; i < 1000 && taken(dir+"/"+name); i++)
+		name = base+"_"+itos(i)+".png";
+	return name;
+}
+// Joined at exit as well as by finish_screenshots(): a std::thread still
+// joinable when its vector is destroyed calls terminate, which is what
+// the client did on quit three seconds after its last shot (the campaign
+// rerun's seed 1, 2026-09-19)
+static struct ScreenshotThreads {
+	sv_<std::thread> v;
+	~ScreenshotThreads(){
+		for(std::thread &t : v)
+			if(t.joinable())
+				t.join();
+	}
+} g_screenshot_threads;
+
+void finish_screenshots()
+{
+	// Joined outside the lock: a thread takes it to say it is done
+	sv_<std::thread> v;
+	{
+		std::lock_guard<std::mutex> lock(g_screenshot_mutex);
+		v.swap(g_screenshot_threads.v);
+	}
+	for(std::thread &t : v)
+		if(t.joinable())
+			t.join();
+}
+
+bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error,
+		int logical_w, int logical_h, int ox, int oy, float s)
 {
 	if(!graphics){
 		*error = "Graphics not available";
@@ -731,6 +968,39 @@ bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error)
 		*error = "TakeScreenShot failed";
 		return false;
 	}
+	// The logical frame out of the window: cropped to the letterbox and
+	// resampled to the logical size (bilinear), so a picture is the scan's
+	// pixels whatever the window is
+	if(logical_w > 0 && logical_h > 0 &&
+			(img.GetWidth() != logical_w || img.GetHeight() != logical_h ||
+			ox != 0 || oy != 0)){
+		const int c = (int)img.GetComponents();
+		const int sw = img.GetWidth(), sh = img.GetHeight();
+		const unsigned char *src = img.GetData();
+		sv_<unsigned char> out((size_t)logical_w * logical_h * c);
+		for(int y = 0; y < logical_h; y++){
+			float fy = oy + (y + 0.5f) * s - 0.5f;
+			int y0 = (int)fy; if(y0 < 0) y0 = 0; if(y0 > sh - 1) y0 = sh - 1;
+			int y1 = y0 + 1 < sh ? y0 + 1 : y0;
+			float ty = fy - y0; if(ty < 0) ty = 0; if(ty > 1) ty = 1;
+			for(int x = 0; x < logical_w; x++){
+				float fx = ox + (x + 0.5f) * s - 0.5f;
+				int x0 = (int)fx; if(x0 < 0) x0 = 0; if(x0 > sw - 1) x0 = sw - 1;
+				int x1 = x0 + 1 < sw ? x0 + 1 : x0;
+				float tx = fx - x0; if(tx < 0) tx = 0; if(tx > 1) tx = 1;
+				for(int k = 0; k < c; k++){
+					float a = src[((size_t)y0 * sw + x0) * c + k] * (1 - tx) +
+							src[((size_t)y0 * sw + x1) * c + k] * tx;
+					float b = src[((size_t)y1 * sw + x0) * c + k] * (1 - tx) +
+							src[((size_t)y1 * sw + x1) * c + k] * tx;
+					out[((size_t)y * logical_w + x) * c + k] =
+							(unsigned char)(a * (1 - ty) + b * ty + 0.5f);
+				}
+			}
+		}
+		img.SetSize(logical_w, logical_h, c);
+		img.SetData(out.data());
+	}
 	ss_ abs = interface::fs::get_absolute_path(path);
 	ss_ parent = interface::fs::strip_file_name(abs);
 	if(!parent.empty() && !interface::fs::create_directories(parent)){
@@ -740,11 +1010,22 @@ bool save_screenshot(magic::Graphics *graphics, const ss_ &path, ss_ *error)
 	magic::FileSystem *fs = graphics->GetSubsystem<magic::FileSystem>();
 	if(fs && !parent.empty())
 		fs->RegisterPath(parent.c_str());
-	if(!img.SavePNG(abs.c_str())){
-		*error = "Failed to write \""+abs+"\"";
-		return false;
+	const int w = img.GetWidth(), h = img.GetHeight(),
+			c = (int)img.GetComponents();
+	sv_<unsigned char> pixels(img.GetData(),
+			img.GetData() + (size_t)w * h * c);
+	{
+		std::lock_guard<std::mutex> lock(g_screenshot_mutex);
+		g_screenshots_writing.insert(abs);
+		g_screenshot_threads.v.emplace_back([abs, w, h, c, pixels](){
+			if(stbi_write_png(abs.c_str(), w, h, c, pixels.data(), w * c))
+				log_i(MODULE, "Wrote screenshot %s", cs(abs));
+			else
+				log_w(MODULE, "Failed to write \"%s\"", cs(abs));
+			std::lock_guard<std::mutex> lock(g_screenshot_mutex);
+			g_screenshots_writing.erase(abs);
+		});
 	}
-	log_i(MODULE, "Wrote screenshot %s", cs(abs));
 	return true;
 }
 
