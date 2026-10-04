@@ -28,6 +28,8 @@ Further reading:
   playing on a real Luanti server over its own protocol
 * [doc/aitta.txt](doc/aitta.txt) -- an app packed, signed, published to an
   Aitta registry (apps/aitta) and installed
+* [doc/hearth.txt](doc/hearth.txt) -- apps/hearth, a forum: its HTML
+  face, the client's requests, its limits, its variables and its check
 * [doc/urho3d_fork.txt](doc/urho3d_fork.txt) -- what the bundled Urho3D
   carries that upstream does not
 * [doc/developer_notes.txt](doc/developer_notes.txt) -- small things worth
