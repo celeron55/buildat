@@ -144,7 +144,8 @@ BUILDAT_HEARTH_REQS='{"cmd":"notifications"}
 {"cmd":"subject","subject":"tester/demo '"$(cat "$t/pub")"'"}
 {"cmd":"new_thread","topic":1,"title":"Started elsewhere","body":"x"}
 {"cmd":"link","thread":4,"subject":"tester/demo '"$(cat "$t/pub")"'"}
-{"cmd":"link","thread":4,"subject":"tester/nothing k"}' \
+{"cmd":"link","thread":4,"subject":"tester/nothing k"}
+{"cmd":"new_thread","topic":1,"title":"Same name","body":"x","subject":"tester/demo otherkey"}' \
 	timeout 90 bin/buildat -D "$t/cl_h" -w 800x600 -l 3 -o sound_mute=1 \
 	-s 127.0.0.1:$H -c @"$t/cmds_h" > "$t/cl_n.log" 2>&1
 grep -a '"id":1001' "$t/cl_n.log" | grep -q '"kind":"fixed","message":0,"note":"1.1"' ||
@@ -161,6 +162,10 @@ page=$(curl -s "http://127.0.0.1:$H/p/tester/demo")
 for want in "It hums" "demo 1.1" "demo 1.0" "Started elsewhere"; do
 	echo "$page" | grep -q "$want" || fail "/p/tester/demo lacks $want: $page"
 done
+# A poster names a thread's subject: only a release's key counts as
+# another key under the name
+echo "$page" | grep -q "Same name" || fail "/p/tester/demo lacks the thread named after it"
+echo "$page" | grep -q "Published under" && fail "a poster's subject counted as a second key"
 curl -s "http://127.0.0.1:$H/t/2" | grep -q 'About <a href="/p/tester/demo">' ||
 	fail "the problem's page does not link its package's place"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$H/p/tester/demo/x")" = 404 ] ||
@@ -178,6 +183,6 @@ done
 grep -q "STATUS Listening" "$t/hearth2.log" || fail "Hearth did not start again ($(tail -3 "$t/hearth2.log"))"
 sleep 5
 grep -q "is the thread" "$t/hearth2.log" && fail "a second thread after the restart"
-n=$(curl -s "http://127.0.0.1:$H/t/5" | grep -c "demo 1\.")
-[ "$n" = 0 ] || fail "a second thread after the restart (/t/5)"
+n=$(curl -s "http://127.0.0.1:$H/t/6" | grep -c "demo 1\.")
+[ "$n" = 0 ] || fail "a second thread after the restart (/t/6)"
 echo "PASS: demo 1.0 is one release thread with its changelog; elsewhere is not; Feedback... reaches the composer"

@@ -1341,7 +1341,9 @@ struct Module: public interface::Module
 			std::set<ss_> keys;
 			while(q.step()){
 				const json::Value t = thread_row(q);
-				keys.insert(jstr(t, "subject"));
+				// A release's key only: a poster names a thread's subject
+				if(jstr(t, "kind") == "release")
+					keys.insert(jstr(t, "subject"));
 				lines += thread_line(t);
 			}
 			title = pkg+" - Hearth";
