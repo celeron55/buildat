@@ -35,9 +35,6 @@ Further reading:
 * [doc/developer_notes.txt](doc/developer_notes.txt) -- small things worth
   knowing when working on the engine
 * [doc/whynot.txt](doc/whynot.txt) -- decisions against, and why
-* [doc/plan/master_plan.md](doc/plan/master_plan.md) -- what is being built, in
-  what order, and the reasoning behind each decision. The other files in
-  `doc/plan/` are the detail it points at.
 
 Buildat Linux How-To
 ====================

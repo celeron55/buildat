@@ -30,7 +30,7 @@ Model and Animation load .gltf/.glb at runtime through tinygltf, so a game can
 ship a glTF file as client data with no conversion step. The parse path follows
 rbfx's Utility/GLTFImporter. Assimp was removed with it; nothing else used it.
 
-Only embedded buffers and images load (87b5d2fc): ParseTinyGLTF installs
+Only embedded buffers and images load (33637049): ParseTinyGLTF installs
 FsCallbacks that refuse every external file and expand nothing.
 tinygltf's default ExpandFilePath ran wordexp(3) on a uri, so a model a
 server sent could read a path or run a command on the client.
@@ -132,7 +132,7 @@ X11_SetWindowGrab() retried XGrabPointer forever; another client holding
 a grab (a locked screen, an open menu) froze the process for as long as
 that lasted. It gives up after a second, as upstream SDL does.
 
-SDL: the wait for MapNotify is bounded (c25eb289)
+SDL: the wait for MapNotify is bounded (ba5b81cd)
 -------------------------------------------------
 Source/ThirdParty/SDL/src/video/x11/SDL_x11window.c
 
@@ -280,7 +280,7 @@ turned input off. The focus that would have turned it back on does not
 bubble, so it stayed off until the browser window itself was focused
 again.
 
-A multi-line LineEdit ([HEARTH_MVP], 204f0b26)
+A multi-line LineEdit ([HEARTH_MVP], 752c6246)
 ----------------------------------------------
 UI/LineEdit.{cpp,h}, LuaScript/pkgs/UI/LineEdit.pkg
 
@@ -346,7 +346,7 @@ PhysicsWorld's "Physics FPS" attribute goes through SetFps and its
 clamp, and with Max Substeps 0 a frame simulates 0.1 s at most instead
 of whatever the frame took. util/fuzz/client_fuzz.sh found the three.
 
-stb_vorbis v1.22 ([SECURITY_RUN_1], 68de2dd0)
+stb_vorbis v1.22 ([SECURITY_RUN_1], ad570799)
 ---------------------------------------------
 Source/ThirdParty/STB/stb_vorbis.h
 

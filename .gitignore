@@ -17,4 +17,6 @@ session.vim
 
 /tmp
 /local
+# The plans: a repository of their own, checked out here
+/doc/plan
 __pycache__/

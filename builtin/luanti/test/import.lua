@@ -34,7 +34,7 @@
 -- map says and what the mapgen was allowed to touch.
 --
 -- Against the reference world
--- (/home/celeron55/projects/luanti/worlds/mc2_2026-09-14_2333) the column
+-- (a VoxeLibre world, mc2_2026-09-14_2333) the column
 -- at (1,*,1) is air down to y=5, mcl_core:sand at 4 and 3, sandstone at 2
 -- and 1 and stone from 0 down, and there are cacti within forty of the
 -- origin. A column of sand over three sandstone with no cactus anywhere is

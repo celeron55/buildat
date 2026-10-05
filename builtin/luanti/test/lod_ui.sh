@@ -84,7 +84,7 @@ for i in range(20):
     time.sleep(2)
 if not row:
     fail("no distant terrain row; saw " + ", ".join(e[5] for e in els or [])[:300])
-# Not the default (half, since 68044b3d): a pick that is already made
+# Not the default (half, since d2ba2f08): a pick that is already made
 # proves nothing
 if not row[5].startswith("[ ]"):
     fail("third is already the pick, so this proves nothing: " + row[5])

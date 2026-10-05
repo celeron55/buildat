@@ -2,8 +2,7 @@
 # [SQUASHED_BRANCH]: the development branch's tree as one commit on top of
 # master, on a branch named for it, the version and the source hash, pushed
 # to github.
-# No history crosses: the branch is master plus one diff, and doc/plan/ --
-# which narrates the history -- is left out of it. A new branch per
+# No history crosses: the branch is master plus one diff. A new branch per
 # release; nothing is reset or force-pushed.
 #
 #   util/squash_push.sh            # from a clean checkout of the dev branch
@@ -48,10 +47,6 @@ git checkout -q "$b"
 # tip, and nothing master had that it has not
 git rm -r -q .
 git checkout "$src" -- .
-git rm -r -q --cached doc/plan && rm -rf doc/plan
-# The README's bullet pointing at the plans (three lines, the two
-# continuation lines indented) goes with them
-sed -i '/doc\/plan\/master_plan.md/{N;N;d}' README.md
 git add -A
 git commit -q -m "$src at $h, $(date +%F), version $v"
 # And a tag on it, v<version>-<hash>: package.yml fires on the tag and
