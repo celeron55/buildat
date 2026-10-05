@@ -8,6 +8,7 @@
 #include <tolua++.h>
 #include <Context.h>
 #include <Scene.h>
+#include <Image.h>
 #include <Profiler.h>
 #include <ResourceCache.h>
 #include <Camera.h>
@@ -42,7 +43,9 @@ namespace lua_bindings {
 
 static int l_profiler_block_begin(lua_State *L)
 {
-	const char *name = lua_tostring(L, 1);
+	// A name, which Urho3D's profiler reads without asking whether there
+	// is one; a server's Lua passing none crashed the next profiler_data
+	const char *name = luaL_checkstring(L, 1);
 
 	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
@@ -50,10 +53,39 @@ static int l_profiler_block_begin(lua_State *L)
 	Context *context = buildat_app->get_scene()->GetContext();
 
 	Profiler *profiler = context->GetSubsystem<magic::Profiler>();
-	if(profiler)
-		profiler->BeginBlock(name);
+	if(!profiler)
+		return 0;
+	// And 64 deep at most: each frame walks the blocks recursively, so a
+	// script's million unended begins would have been the stack's end
+	int depth = 0;
+	for(const ProfilerBlock *b = profiler->GetCurrentBlock(); b; b = b->parent_)
+		if(++depth > 64)
+			return luaL_error(L, "profiler_block_begin: 64 blocks deep at most");
+	profiler->BeginBlock(name);
 
 	return 0;
+}
+
+// profiler_data(max_depth) -> string: Urho3D's profiler table for the
+// interval since the last call (a block's average and max per frame), which
+// is what says where a frame went when the script's own marks do not
+// ([FRAME_PEAK]). Each call starts the next interval.
+static int l_profiler_data(lua_State *L)
+{
+	int max_depth = luaL_optinteger(L, 1, 3);
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	Context *context = buildat_app->get_scene()->GetContext();
+
+	Profiler *profiler = context->GetSubsystem<magic::Profiler>();
+	if(!profiler)
+		return 0;
+	magic::String data = profiler->PrintData(false, false, max_depth);
+	profiler->BeginInterval();
+	lua_pushstring(L, data.CString());
+	return 1;
 }
 
 static int l_profiler_block_end(lua_State *L)
@@ -82,9 +114,8 @@ static int l_profiler_block_end(lua_State *L)
 static int l_add_resource_dir(lua_State *L)
 {
 	ss_ path = interface::fs::get_absolute_path(lua_checkcppstring(L, 1));
-	ss_ cache_path = interface::fs::get_absolute_path(
-			g_client_config.get<ss_>("cache_path"));
-	if(path.substr(0, cache_path.size()) != cache_path)
+	if(!interface::fs::is_inside_path(path,
+			g_client_config.get<ss_>("cache_path")))
 		return luaL_error(L, "add_resource_dir(): \"%s\" is not under the "
 				"cache path", path.c_str());
 	if(!interface::fs::path_exists(path))
@@ -157,16 +188,164 @@ static int l_render_scene_to_texture(lua_State *L)
 	return 1;
 }
 
+// set_preferred_viewports({viewport, ...}). An empty table is teardown.
+// The engine draws these at the user's render_scale; see
+// CApp::apply_preferred_viewports() in src/client/app.cpp.
+static int l_set_preferred_viewports(lua_State *L)
+{
+	tolua_Error tolua_err;
+	if(!lua_istable(L, 1))
+		return luaL_error(L, "set_preferred_viewports(): expected a table");
+
+	sv_<Viewport*> viewports;
+	size_t n = lua_objlen(L, 1);
+	for(size_t i = 1; i <= n; i++){
+		lua_rawgeti(L, 1, i);
+		GET_TOLUA_STUFF(viewport, -1, Viewport);
+		lua_pop(L, 1);
+		viewports.push_back(viewport);
+	}
+
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	buildat_app->set_preferred_viewports(viewports);
+	return 0;
+}
+
+// set_voxel_data(node, data: string)
+// A chunk node's buildat_voxel_data from a string, which is what a volume
+// serializes to; the mesher reads the var and a string has no way into a
+// Variant from the sandbox. For a client's predicted dig or place
+// ([PREDICTION]); the server's replication of the var overwrites it.
+static int l_set_voxel_data(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(node, 1, Node);
+	size_t len = 0;
+	const char *data = lua_tolstring(L, 2, &len);
+	if(!data)
+		throw Exception("set_voxel_data: data must be a string");
+	node->SetVar(StringHash("buildat_voxel_data"), Variant(
+			PODVector<uint8_t>((const uint8_t*)data, len)));
+	return 0;
+}
+
+// image_set_data(image, w, h, components, data: string)
+// **A generated tile in one call** ([ROOM_BOOT], 2026-09-24): the room
+// draws seventy marks at boot and each was four thousand wrapped
+// SetPixel calls -- a quarter of a million crossings of the sandbox for
+// pictures that are built in Lua and never read back. Image::SetData
+// takes the whole buffer, and a Lua string is already one; it is not in
+// Urho3D's own .pkg, so it is bound here rather than regenerated there.
+// components is 1 to 4: luminance, luminance and alpha, rgb, rgba.
+static int l_image_set_data(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(image, 1, Image);
+	int w = lua_tointeger(L, 2);
+	int h = lua_tointeger(L, 3);
+	int comps = lua_tointeger(L, 4);
+	size_t len = 0;
+	const char *data = lua_tolstring(L, 5, &len);
+	if(!data)
+		throw Exception("image_set_data: data must be a string");
+	if(w < 1 || h < 1 || comps < 1 || comps > 4)
+		throw Exception("image_set_data: w, h >= 1 and components 1..4");
+	if(len != (size_t)w * (size_t)h * (size_t)comps)
+		throw Exception("image_set_data: the string is not w * h * "
+				"components bytes");
+	if(!image->SetSize(w, h, comps))
+		throw Exception("image_set_data: SetSize failed");
+	image->SetData((const unsigned char*)data);
+	return 0;
+}
+
+// get_voxel_data(node) -> string, or nil for a node without the var
+static int l_get_voxel_data(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(node, 1, Node);
+	const Variant &var = node->GetVar(StringHash("buildat_voxel_data"));
+	if(var.GetType() != VAR_BUFFER){
+		lua_pushnil(L);
+		return 1;
+	}
+	const PODVector<uint8_t> &buf = var.GetBuffer();
+	lua_pushlstring(L, buf.Size() ? (const char*)&buf[0] : "", buf.Size());
+	return 1;
+}
+
+// hold_ref(unsafe) -> a userdata holding a reference to the object, or
+// nil for what is not reference counted. **A wrapper keeps its object**
+// ([SECURITY_RUN_1]): tolua's userdata is a bare pointer, so an object
+// the engine let go of -- a cloned RenderPath with its viewport -- was
+// freed under a script's wrapper, and a call through it used it (the
+// game fuzz). extension/magic_sandbox holds one of these per object
+// wrapped, for as long as a wrapper of it lives.
+// Reference counted by tolua's account (its RefCounted), or one of the
+// classes it registers without a base though Urho's are reference
+// counted. Subsystems are left out: they live as long as the client, and
+// a reference held into Lua's close would outlive the Context.
+static const char *const HELD_ROOTS[] = {"RefCounted", "Resource",
+		"RenderPath", "Viewport", "RenderSurface", "SoundStream"};
+static int l_held_ref_gc(lua_State *L)
+{
+	((SharedPtr<RefCounted>*)lua_touserdata(L, 1))->~SharedPtr();
+	return 0;
+}
+static int l_hold_ref(lua_State *L)
+{
+	tolua_Error err;
+	bool held = false;
+	for(const char *root : HELD_ROOTS)
+		if(tolua_isusertype(L, 1, root, 0, &err))
+			held = true;
+	for(const char *sub : {"Graphics", "Input", "UI", "Time", "Audio"})
+		if(tolua_isusertype(L, 1, sub, 0, &err))
+			held = false;
+	// simplified: the pointer is cast as tolua casts it, which holds while
+	// RefCounted is at the start of every class (Urho's single bases)
+	RefCounted *p = held ? (RefCounted*)tolua_tousertype(L, 1, 0) : nullptr;
+	if(!p)
+		return 0;
+	// One a script made (Node(), Scene()) is tolua's to delete when its
+	// userdata is collected, whatever else holds it -- the engine, or the
+	// reference below: the count decides from here
+	void *u = *(void**)lua_touserdata(L, 1);
+	lua_getfield(L, LUA_REGISTRYINDEX, "tolua_gc");
+	if(lua_istable(L, -1)){
+		lua_pushlightuserdata(L, u);
+		lua_pushnil(L);
+		lua_rawset(L, -3);
+	}
+	lua_pop(L, 1);
+	new(lua_newuserdata(L, sizeof(SharedPtr<RefCounted>)))
+			SharedPtr<RefCounted>(p);
+	if(luaL_newmetatable(L, "buildat_held_ref")){
+		lua_pushcfunction(L, l_held_ref_gc);
+		lua_setfield(L, -2, "__gc");
+	}
+	lua_setmetatable(L, -2);
+	return 1;
+}
+
 void init_misc_urho3d(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
-		lua_pushcfunction(L, l_##name); \
+		lua_pushcfunction(L, guarded<l_##name>); \
 		lua_setglobal(L, "__buildat_" #name); \
 }
 	DEF_BUILDAT_FUNC(profiler_block_begin);
 	DEF_BUILDAT_FUNC(profiler_block_end);
+	DEF_BUILDAT_FUNC(profiler_data);
 	DEF_BUILDAT_FUNC(add_resource_dir);
 	DEF_BUILDAT_FUNC(render_scene_to_texture);
+	DEF_BUILDAT_FUNC(set_preferred_viewports);
+	DEF_BUILDAT_FUNC(set_voxel_data);
+	DEF_BUILDAT_FUNC(get_voxel_data);
+	DEF_BUILDAT_FUNC(image_set_data);
+	DEF_BUILDAT_FUNC(hold_ref);
 }
 
 } // namespace lua_bindingss

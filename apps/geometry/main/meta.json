@@ -1,0 +1,10 @@
+{
+	"client_main": "init.lua",
+	"dependencies": [
+		{"module": "network"},
+		{"module": "client_lua"},
+		{"module": "client_data"},
+		{"module": "main_context"},
+		{"module": "replicate"}
+	]
+}
