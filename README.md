@@ -142,18 +142,20 @@ The launch menu: a local app, a server to connect to, or one of the
 extensions that can be launched on their own -- a Luanti client, so far.
 Arrows or the mouse to pick, enter to go.
 
-Keys, in any app:
+Keys, in any app -- F9 to F12 are the client's, every other key the
+app's, and no script hears these four:
 
 * F9: the client's own overlay -- the Starport trust colour, the IDs
   logged in and a three-character code at its bottom left -- on and off.
   It is shown whenever the launcher comes up and hidden when a game
-  starts.
-  No script hears F9, so an overlay that does not go away on it is not
-  the client's. The same code is in the window title and at the top
-  right of every Starport field; no script can read it.
-* F8: draw debug geometry
-* F6: on-screen profiler, render and resource stats
-* Ctrl+F12: sandbox test extension
+  starts. No script hears F9, so an overlay that does not go away on it
+  is not the client's. The same code is in the window title and at the
+  top right of every Starport field; no script can read it.
+* F10: on-screen profiler, render and resource stats; Ctrl+F10: draw
+  physics debug geometry
+* F11: fullscreen on and off
+* F12: a screenshot under the user path's `screenshots`; Ctrl+F12: the
+  sandbox test extension
 
 Engine settings
 ---------------

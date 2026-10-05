@@ -64,8 +64,8 @@ free ([LAUNCH_WORLD] section 11).
                 Settings (the desk), 2D menu, the developer console,
                 Exit Buildat
 
-The F keys are the client's (F5 the debug line, F6 the profiler, F12 a
-screenshot). The room's own switches are for runs: BUILDAT_LAUNCH_PRESET,
+F9 to F12 are the client's (F9 the trusted overlay, F10 the profiler,
+F11 fullscreen, F12 a screenshot). The room's own switches are for runs: BUILDAT_LAUNCH_PRESET,
 BUILDAT_LAUNCH_NO_PROBE, BUILDAT_LAUNCH_NO_ORNAMENT and
 BUILDAT_LAUNCH_STILL at boot, and in a command sequence
 `event room probe|ornament|still|attract`, `event room preset <n>` and

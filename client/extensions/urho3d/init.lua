@@ -287,6 +287,11 @@ local function remove_global_event_handler(event_type, cb_name)
 	end
 end
 
+-- The keys the client keeps ([CLIENT_KEYS]); safe_classes' Input reads
+-- them as up
+__buildat_client_keys = {[KEY_F9] = true, [KEY_F10] = true, [KEY_F11] = true,
+		[KEY_F12] = true}
+
 function Safe.SubscribeToEvent(x, y, z)
 	log:debug("Safe.SubscribeToEvent("..dump(x)..", "..dump(y)..", "..dump(z)..")")
 	-- Whether the subscriber is sandboxed game code: its environment's
@@ -339,13 +344,14 @@ function Safe.SubscribeToEvent(x, y, z)
 				magic_sandbox.is_secret_field(ui:GetFocusElement()) then
 			return
 		end
-		-- **F9 is the trusted overlay's alone** ([TRUST_CODE]): nobody
-		-- here hears it, the client's own extensions included, as a
-		-- script's callback can be called through one of theirs
-		-- (uistack's SubscribeToStackEvent). The overlay's own handler is
-		-- subscribed on the mux directly.
+		-- **F9 to F12 are the client's alone** ([TRUST_CODE],
+		-- [CLIENT_KEYS]): nobody here hears them, the client's own
+		-- extensions included, as a script's callback can be called
+		-- through one of theirs (uistack's SubscribeToStackEvent); so an
+		-- app cannot bind one and have it do two things. The overlay's
+		-- own handler is subscribed on the mux directly.
 		if (sub_event_type == "KeyDown" or sub_event_type == "KeyUp") and
-				unsafe_event_data["Key"]:GetInt() == KEY_F9 then
+				__buildat_client_keys[unsafe_event_data["Key"]:GetInt()] then
 			return
 		end
 		local error = error

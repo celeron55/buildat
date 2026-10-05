@@ -46,7 +46,7 @@ game that needs one is a game that needs official.
 - Pitch move (the fly mode that follows the pitch).
 - Autoforward (the toggled forward key).
 - Block bounds (the mapblock outline overlay).
-- New profiler features of any kind: the engine's own DebugHud on F6
+- New profiler features of any kind: the engine's own DebugHud on F10
   is the whole of it.
 
 The launcher room's discarded pieces, not to be rebuilt

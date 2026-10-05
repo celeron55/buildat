@@ -3097,12 +3097,20 @@ struct CApp: public App, public magic::Application
 				log_e(MODULE, "Failed to load and run extension %s", cs(extname));
 			}
 		}
-		// F6, official's profiler key ([VIEW_KEYS]); the engine's DebugHud
-		// is the profiler there is. F9 is the trusted overlay's
-		// ([TRUST_CODE], client/extensions/urho3d)
-		if(key == Urho3D::KEY_F6){
+		// **F9 to F12 are the client's, every other key an app's**
+		// ([CLIENT_KEYS]); no script hears these four
+		// (client/extensions/urho3d). F9 is the trusted overlay's.
+		const bool ctrl = event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL;
+		// F10: the engine's DebugHud, the profiler there is; Ctrl+F10 the
+		// physics debug geometry
+		if(key == Urho3D::KEY_F10 && !ctrl){
 			magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
 			dhud->ToggleAll();
+		}
+		if(key == Urho3D::KEY_F10 && ctrl){
+			m_draw_debug_geometry = !m_draw_debug_geometry;
+			log_i(MODULE, "Ctrl+F10: physics debug geometry %s",
+					m_draw_debug_geometry ? "on" : "off");
 		}
 		// F12 alone: a screenshot under <user>/screenshots, as official's
 		// ([VIEW_KEYS]); Ctrl+F12 stays the sandbox test's
@@ -3113,9 +3121,6 @@ struct CApp: public App, public magic::Application
 				m_pending_screenshot = dir+"/"+name;
 				log_i(MODULE, "F12: screenshot %s", cs(name));
 			}
-		}
-		if(key == Urho3D::KEY_F8){
-			m_draw_debug_geometry = !m_draw_debug_geometry;
 		}
 	}
 

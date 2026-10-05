@@ -2748,10 +2748,10 @@ function M.define(dst, util)
 					end
 					self:SetMouseMode(mode)
 				end),
-			-- F9 is the trusted overlay's ([TRUST_CODE]): never down
+			-- F9 to F12 are the client's ([CLIENT_KEYS]): never down
 			GetKeyDown = util.wrap_function({"Input", "number"},
 				function(self, key)
-					return key ~= KEY_F9 and self:GetKeyDown(key)
+					return not __buildat_client_keys[key] and self:GetKeyDown(key)
 				end),
 			IsMouseVisible = util.self_function("IsMouseVisible", {"boolean"},
 					{"Input"}),
@@ -2761,7 +2761,7 @@ function M.define(dst, util)
 			GetKeyFromName = util.self_function("GetKeyFromName", {"number"}, {"Input", "string"}),
 			GetKeyPress = util.wrap_function({"Input", "number"},
 				function(self, key)
-					return key ~= KEY_F9 and self:GetKeyPress(key)
+					return not __buildat_client_keys[key] and self:GetKeyPress(key)
 				end),
 			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),
 			-- Where the pointer is, in window pixels: what the MouseMove

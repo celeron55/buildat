@@ -60,7 +60,7 @@ M.BINDINGS = {
 	-- The engine's own, listed for the player and not rebindable here
 	{action = "screenshot", key = magic.KEY_F12, name = "F12", engine = true,
 			what = "A screenshot (the engine's)"},
-	{action = "profiler", key = magic.KEY_F6, name = "F6", engine = true,
+	{action = "profiler", key = magic.KEY_F10, name = "F10", engine = true,
 			what = "The engine's profiler on and off"},
 	{action = "fullscreen", key = magic.KEY_F11, name = "F11", engine = true,
 			what = "Fullscreen on and off (the engine's)"},
