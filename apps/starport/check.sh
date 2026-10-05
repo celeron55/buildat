@@ -25,6 +25,8 @@
 #   8. The Overview ([STARPORT_UI]): the admin sets a high notice, makes
 #      "mod" a moderator and hides the first listing; mod's Overview has
 #      the notice and the hide, unseen, and the next one has it seen.
+#   9. The hide's second appeal waits for the first; mod's list cannot
+#      make the admin's listing a publisher it did not offer.
 #
 #   KEEP_TMP=1 apps/starport/check.sh
 set -u
@@ -322,4 +324,27 @@ assert hide and hide[0]["ts"] > first["seen"], first
 assert second["seen"] >= hide[0]["ts"], second
 PY
 echo "ok: the Overview: the notice, another's hide unseen, then seen"
+# 9
+sp_reqs(){ # account password requests log
+	BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=$1 BUILDAT_SP_PASSWORD=$2 \
+	BUILDAT_SP_REQS=$3 timeout 90 Build/bin/buildat -D "$tmp/cl" \
+		-w 800x600 -l 3 -s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/$4" 2>&1
+}
+sp_reqs admin checkpass '{"cmd":"me"}' cl8.log
+st=$(grep -o '"id":"[0-9a-f]*","listing":"'"$id"'"' "$tmp/cl8.log" |
+	head -1 | cut -d'"' -f4)
+[ -n "$st" ] || fail "no statement of the hide (cl8.log)"
+sp_reqs mod modpass1234 '{"cmd":"blocklist_create","name":"Mod list"}' cl9.log
+list2=$(grep -o '"id":"[0-9a-f]*","name":"Mod list"' "$tmp/cl9.log" |
+	head -1 | cut -d'"' -f4)
+[ -n "$list2" ] || fail "no blocklist made (cl9.log)"
+sp_reqs admin checkpass "{\"cmd\":\"appeal\",\"statement\":\"$st\",\"text\":\"one\"}
+{\"cmd\":\"appeal\",\"statement\":\"$st\",\"text\":\"two\"}" cl10.log
+sp_reqs mod modpass1234 "{\"cmd\":\"blocklist_accept\",\"list\":\"$list2\",\"scope\":\"listing:$id\"}" cl11.log
+grep -Eq '"ok":true,"result":"[0-9a-f]{12}"' "$tmp/cl10.log" &&
+	grep -q '"error":"this statement has an open appeal"' "$tmp/cl10.log" ||
+	fail "an open appeal is not the only one (cl10.log)"
+grep -q '"error":"no such offer"' "$tmp/cl11.log" ||
+	fail "a list took a listing that was not offered (cl11.log)"
+echo "ok: one open appeal a statement; a list takes only what is offered"
 echo PASS

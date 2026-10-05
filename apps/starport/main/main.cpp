@@ -3093,6 +3093,13 @@ struct Module: public interface::Module
 			const ss_ lname = jstr(q, "name");
 			if(lname.empty() || lname.size() > 60)
 				throw Exception("name: 1 to 60 characters");
+			if(banned("account", name))
+				throw Exception("this account may not make blocklists");
+			int n = 0;
+			for(const ss_ &id : store("blocklists")->list(""))
+				n += jstr(load("blocklists", id), "owner") == name;
+			if(n >= 20)
+				throw Exception("20 blocklists an account");
 			json::Value list = json::object();
 			list.set("id", random_hex(6));
 			list.set("name", lname);
@@ -3111,6 +3118,12 @@ struct Module: public interface::Module
 		if(cmd == "blocklist_accept" || cmd == "blocklist_drop"){
 			if(!own_list)
 				throw Exception("not your blocklist");
+			// A publisher's bans reach the list's subscribers: only what
+			// its owner offered
+			if(cmd == "blocklist_accept" &&
+					without(list.get("offers"), scope).size() ==
+					list.get("offers").size())
+				throw Exception("no such offer");
 			list.set("offers", without(list.get("offers"), scope));
 			const size_t colon = scope.find(':');
 			const ss_ kind = scope.substr(0, colon), sid = colon ==
@@ -3233,6 +3246,12 @@ struct Module: public interface::Module
 		const ss_ text = jstr(q, "text");
 		if(text.empty() || text.size() > 4000)
 			throw Exception("say why, in at most 4000 characters");
+		for(const ss_ &aid : store("appeals")->list("")){
+			const json::Value o = load("appeals", aid);
+			if(jstr(o, "statement") == jstr(s, "id") &&
+					jstr(o, "state") == "open")
+				throw Exception("this statement has an open appeal");
+		}
 		json::Value a = json::object();
 		const ss_ id = random_hex(6);
 		a.set("id", id);
