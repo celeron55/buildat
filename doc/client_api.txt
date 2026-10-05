@@ -923,6 +923,11 @@ set_address_name(uri, name)
   connect screen ([BOX_PLAYTEST_2] 4). The user's address book: launch UIs
   and the client's own extensions have these two, and the network a
   server's chunks require does not.
+unseen_counts(cb)
+- cb(address, count) for each Buildat server joined (tcp) that this
+  client keeps a login for and that answers POST /unseen with that login
+  (a Hearth: its notifications waiting). Native only; withheld from a
+  server's chunks like the two above.
 parse_json(text) -> table, or nil and error
 write_json(value [, styled]) -> text, or nil and why not
 

@@ -116,12 +116,18 @@ end
 -- Continue: what was used, the most recent first, at most n.
 -- simplified: recency alone. The launch history keeps one line per key
 -- (its last time), so frequency would need a count it does not have.
+-- What has something new waiting (a Hearth's notifications) comes first
 local function recent(entries, n)
 	local used = {}
 	for _, e in ipairs(entries) do
-		if e.last then used[#used + 1] = e end
+		if e.last or e.unseen then used[#used + 1] = e end
 	end
-	table.sort(used, function(a, b) return a.last > b.last end)
+	table.sort(used, function(a, b)
+		if (a.unseen ~= nil) ~= (b.unseen ~= nil) then
+			return a.unseen ~= nil
+		end
+		return (a.last or 0) > (b.last or 0)
+	end)
 	local out = {}
 	for i = 1, math.min(n, #used) do out[i] = used[i] end
 	return out
@@ -159,6 +165,12 @@ do
 	assert(ago(100, 100) == "just now" and ago(0, 7200) == "2 h ago" and
 			ago(0, 3 * 86400) == "3 days ago", "ago")
 end
+
+-- **Notifications waiting** ([FORUM] 4): address -> count, from each
+-- Buildat server this client keeps a login for (a Hearth answers),
+-- asked at most once a minute
+local unseen = {}
+local unseen_asked = nil
 
 -- Every source, as entries of one shape: {label, kind, badge,
 -- description, last (unix s or nil), size, actions = {{label, run}}};
@@ -282,7 +294,9 @@ local function gather()
 			local address = host .. ":" .. port
 			known[address] = true
 			add({label = a.name ~= "" and a.name or address,
-				kind = "server", badge = "Buildat",
+				kind = "server", unseen = unseen[address],
+				badge = unseen[address] and "Buildat, " .. unseen[address] ..
+						" new" or "Buildat",
 				description = address .. (a.description ~= "" and
 						"   " .. a.description or ""),
 				last = a.last_attempt > 0 and a.last_attempt or nil,
@@ -830,6 +844,24 @@ end
 function M.boot(launch_action)
 	entries = gather()
 	home("")
+	local net = require("buildat/extension/network")
+	net = net.unseen_counts and net or net.safe
+	local t = os.time()
+	if not web and net.unseen_counts and
+			(unseen_asked == nil or t - unseen_asked >= 60) then
+		unseen_asked = t
+		net.unseen_counts(function(address, n)
+			local was = unseen[address]
+			unseen[address] = n > 0 and n or nil
+			log:info("launch_menu_v2: " .. address .. " has " .. n .. " new")
+			-- Home drawn again with the mark, if it is what is shown
+			local top = uistack.main:top()
+			if was ~= unseen[address] and top and
+					top:GetName():find(": launch_menu_v2$") then
+				M.refresh()
+			end
+		end)
+	end
 	local fell_back = api.launch_ui_fell_back and api.launch_ui_fell_back()
 	if fell_back then
 		ui_utils.show_message_dialog("The launch UI \"" .. fell_back ..

@@ -556,7 +556,7 @@ static bool is_patch(const ss_ &name, const ss_ &data)
 	return false;
 }
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
-		"/robots.txt", "/p/", "/brand/", "/u/"};
+		"/robots.txt", "/p/", "/brand/", "/u/", "/unseen"};
 
 // Trust ([HEARTH_MVP] step 6): what a level may post. Level 0 is a new
 // account, 1 one that has stood a while, 2 the admin
@@ -1459,6 +1459,23 @@ struct Module: public interface::Module
 				!allowed("page "+r.address, PAGES_A_MINUTE))
 			return respond(r, 429, page("Hearth", "<p>Too many requests "
 					"from this address; try again in a minute.</p>"));
+		// **The launcher's mark** ([FORUM] 4): a POST of {name, token}, the
+		// client's kept login for this Hearth, answers {unseen} without a
+		// join
+		if(r.path == "/unseen"){
+			if(r.method != "POST")
+				return respond(r, 405, "{}", "application/json");
+			const json::Value q = json::load_string(r.body.c_str());
+			const ss_ who = jstr(q, "name");
+			bool ok = false;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				ok = !who.empty() && a->check_kept(who, jstr(q, "token"));
+			});
+			if(!ok)
+				return respond(r, 403, "{}", "application/json");
+			return respond(r, 200, "{\"unseen\":"+itos(unseen(who))+"}",
+					"application/json");
+		}
 		// [FORUM] step 5: a file's use is a person's fetch, so crawlers are
 		// asked to keep off them
 		// simplified: by robots.txt alone; one that ignores it counts

@@ -114,6 +114,16 @@ echo "$n" | grep -q '"kind":"mention"' && echo "$n" | grep -q '"kind":"answer"' 
 	fail "bob's notifications: $n"
 [ "$(echo "$n" | grep -o '"kind"' | wc -l)" = 2 ] ||
 	fail "bob has other than the mention and the answer (given twice, told once): $n"
+# The launcher's count ([FORUM] 4): bob's kept login asks /unseen without
+# a join; another token is refused
+client bob bobpass1234 "$t/bob_keep.log" '' BUILDAT_HEARTH_KEEP=1
+tok=$(cat "$(find "$t/cl_bob" -path '*/servers/*/token' | head -1)" 2>/dev/null)
+[ -n "$tok" ] || fail "bob's kept login: $(find "$t/cl_bob" -name token)"
+curl -s -X POST -d "{\"name\":\"bob\",\"token\":\"$tok\"}" "$U/unseen" |
+	grep -q '^{"unseen":[0-9]*}$' || fail "the launcher's count"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+		-d '{"name":"bob","token":"x"}' "$U/unseen")" = 403 ] ||
+	fail "a count for a token that is no login"
 
 # 4. A chat: bob has thread 1 open, the admin writes in it
 MS=14000 client bob bobpass1234 "$t/watch.log" '' BUILDAT_HEARTH_OPEN=1 &

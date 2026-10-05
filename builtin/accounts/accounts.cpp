@@ -638,6 +638,20 @@ struct Module: public interface::Module, public Interface
 		return !name.empty() && get_account(name, account);
 	}
 
+	bool check_kept(const ss_ &name, const ss_ &token)
+	{
+		KeptLogin kept;
+		Account account;
+		ss_ data;
+		if(token.empty() || token.size() > 100)
+			return false;
+		return m_store->get("token/"+interface::sha256::hex(
+					interface::sha256::calculate(token)), data) &&
+				unpack(data, kept) && kept.name == name &&
+				kept.expires_us >= interface::os::time_us() &&
+				get_account(name, account) && kept.hash == account.hash;
+	}
+
 	sv_<ss_> account_names()
 	{
 		sv_<ss_> out;

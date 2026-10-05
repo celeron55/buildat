@@ -843,6 +843,41 @@ function M.safe.known_addresses()
 	return out
 end
 
+-- unseen_counts(cb): **the notifications waiting** on each server this
+-- client keeps a login for ([FORUM] 4, the launcher's way in): a POST of
+-- the kept login (the accounts builtin's "name" and "token", in the
+-- server's storage) to the server's /unseen, which a Hearth answers;
+-- cb(address, count) for each that does. Only to the address that gave
+-- the login, so no dialog; a server that is not a Hearth answers 404.
+-- simplified: native only -- the web's fetch needs CORS from the Hearth
+-- -- and the addresses joined by tcp, not a local app's
+function M.safe.unseen_counts(cb)
+	local user = __buildat_get_path("user")
+	local function read(path)
+		local f = io.open(path, "rb")
+		if not f then return "" end
+		local s = f:read("*a") or ""
+		f:close()
+		return s
+	end
+	for _, a in ipairs(M.safe.known_addresses()) do
+		local address = a.uri:match("^tcp://(.+)$")
+		if address and a.accepted then
+			local dir = user .. "/servers/" ..
+					address:gsub("[^%w%-%.]", "_")
+			local name, token = read(dir .. "/name"), read(dir .. "/token")
+			if name ~= "" and token ~= "" then
+				http_start("http://" .. address .. "/unseen", function(body)
+					local r = body and M.safe.parse_json(body)
+					if type(r) == "table" and type(r.unseen) == "number" then
+						cb(address, r.unseen)
+					end
+				end, M.safe.write_json({name = name, token = token}))
+			end
+		end
+	end
+end
+
 -- remember_server_icon(uri, sha): a native server's icon, which the
 -- client kept under the cache at connect ([LAUNCH_WORLD] (4)); its row is
 -- made if the address has none, the player having connected to it. The

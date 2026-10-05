@@ -494,7 +494,8 @@ end
 -- the launch UIs and the client's own extensions ask for them.
 do
 	local real_require = __buildat_sandbox_environment.require
-	local withheld = {known_addresses = true, set_address_name = true}
+	local withheld = {known_addresses = true, set_address_name = true,
+		unseen_counts = true}
 	local network_for_servers
 	served_globals.require = function(name)
 		local m = real_require(name)

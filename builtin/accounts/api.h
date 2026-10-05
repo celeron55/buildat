@@ -61,6 +61,10 @@ namespace accounts
 		virtual ss_ address_of(PeerId peer) = 0;
 		virtual bool is_admin(const ss_ &name) = 0;
 		virtual bool exists(const ss_ &name) = 0;
+		// Whether `token` is a kept login of `name` that stands
+		// ([ACC_KEEP]): what the client holds for this server, for a
+		// request that is not a join ([FORUM]'s notifications)
+		virtual bool check_kept(const ss_ &name, const ss_ &token) = 0;
 		virtual sv_<ss_> account_names() = 0;
 		// The launcher's own user of a server it started
 		virtual bool is_local(PeerId peer) = 0;
