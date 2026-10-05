@@ -58,6 +58,12 @@ function M.new(magic, buildat, log, ctx)
 	-- in whatever order the sort happens to leave them in -- a background
 	-- over the slots one run and under them the next. Every element gets the
 	-- priority its turn to be drawn is instead.
+	-- Counted from 0 again for each holder drawn (a form, the HUD, the
+	-- health bar): an element's priority is clamped at 999, under the
+	-- client's own dialogs, and a count kept for the session reached that
+	-- within a minute of HUD updates -- every element of a form then tied,
+	-- and the background was drawn over its lists ([LUANTI_INV_LISTS]).
+	-- simplified: a holder with over 999 elements ties again past that.
 	local depth = 0
 	local function next_priority()
 		depth = depth + 1
@@ -262,6 +268,7 @@ function M.new(magic, buildat, log, ctx)
 	-- above it. Returns the element it went under, for the caller to take
 	-- away again when it changes.
 	function self:health_bar(root, hp, hp_max, x0, y0, width, slot)
+		depth = 0
 		local holder = root:CreateChild("UIElement")
 		if ctx.style then
 			holder.defaultStyle = ctx.style
@@ -298,6 +305,7 @@ function M.new(magic, buildat, log, ctx)
 	-- element of several lines is one block aligned as a whole, where Luanti
 	-- aligns each line on its own.
 	function self:hud_elements(root, elements, screen_w, screen_h, scale)
+		depth = 0
 		-- What a screen pixel is in this UI's units: Luanti's own
 		-- m_scale_factor, which every size and offset below is multiplied
 		-- by ([EXT_HOTBAR])
@@ -477,6 +485,7 @@ function M.new(magic, buildat, log, ctx)
 	end
 
 	function self:show(root, elements, layout, screen_w, screen_h, state)
+		depth = 0
 		state = state or {}
 		state.scroll = state.scroll or {}
 		state.open = state.open or {}

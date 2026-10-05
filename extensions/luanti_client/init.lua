@@ -1852,7 +1852,14 @@ local function show_client(host, port, name, password, mode)
 						lists = name and detached[name] or nil
 					end
 				end
-				return lists and lists[list_name] or nil
+				local list = lists and lists[list_name] or nil
+				if not list then
+					-- A list with nowhere to come from is drawn as nothing,
+					-- and the form only looks emptier ([LUANTI_INV_LISTS])
+					log:verbose("form: list[" .. location .. ";" ..
+							list_name .. "] has no inventory")
+				end
+				return list
 			end,
 		})
 

@@ -1111,6 +1111,10 @@ function M.safe.scan_ui(label, element, depth, out)
 			if child.visible == false then
 				line = line .. " hidden"
 			end
+			-- What draws over what among siblings
+			if child.priority ~= 0 then
+				line = line .. " priority " .. child.priority
+			end
 			out[#out + 1] = line
 			M.safe.scan_ui(label, child, depth + 1, out)
 		end
