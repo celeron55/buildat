@@ -5599,7 +5599,7 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		std::sort(names.begin(), names.end());
 		for(const ss_ &name : names){
-			dirs.push_back(root+"/"+name);
+			recursive_dirs(root+"/"+name, dirs, 0);
 			log_i(MODULE, "texture pack: %s", cs(name));
 		}
 	}
@@ -5613,14 +5613,19 @@ struct Module: public interface::Module, public luanti::Interface
 		// The player's packs first: what they hold wins
 		collect_texture_packs(dirs);
 		// The game's own textures/, beside its mods' (src/server.cpp)
-		if(interface::fs::path_exists(game_path+"/textures"))
-			dirs.push_back(game_path+"/textures");
-		collect_dirs_named(game_path+"/mods", wanted, dirs, 0);
+		recursive_dirs(game_path+"/textures", dirs, 0);
+		// [MEDIA_OVERRIDE_ORDER] The mods in reverse load order, as
+		// Luanti's getModsMediaPaths: a mod loaded later overrides a
+		// dependency's media of the same name
+		const sv_<ss_> mods = mod_paths_in_load_order();
+		for(auto it = mods.rbegin(); it != mods.rend(); ++it)
+			for(const ss_ &w : wanted)
+				recursive_dirs(*it+"/"+w, dirs, 0);
 		// Last, so that the first-one-wins rule below leaves a game's own
 		// version of a name in front of the engine's
 		const ss_ base_path = base_textures_path();
 		if(interface::fs::path_exists(base_path)){
-			dirs.push_back(base_path);
+			recursive_dirs(base_path, dirs, 0);
 		} else {
 			log_w(MODULE, "No Luanti base textures at %s: a game's HUD asks "
 					"for the engine's own textures -- blank.png, heart.png, "
@@ -5630,7 +5635,7 @@ struct Module: public interface::Module, public luanti::Interface
 		}
 		sm_<ss_, ss_> files;
 		for(const ss_ &dir : dirs)
-			collect_files(dir, files, 0);
+			collect_files(dir, files);
 		// One announce for the lot: a client already connected (the
 		// launcher's own, [FIRST_RUN]) fetches them as one batch
 		sv_<std::pair<ss_, ss_>> name_paths;
@@ -5650,20 +5655,42 @@ struct Module: public interface::Module, public luanti::Interface
 				files.size(), dirs.size(), cs(game_path));
 	}
 
-	// A mod is a directory with a textures/ or a models/ in it, and a modpack
-	// is a directory of those, so this goes a few levels deep and no further
-	void collect_dirs_named(const ss_ &path, const sv_<ss_> &wanted,
-			sv_<ss_> &out, int depth)
+	// The mods' directories in the order lua/modloader.lua loaded them
+	sv_<ss_> mod_paths_in_load_order()
 	{
-		if(depth > 3)
+		sv_<ss_> paths;
+		interface::MutexScope ms(m_lua_mutex);
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__mod_names");
+		lua_getfield(L, -2, "__mod_paths");
+		if(lua_istable(L, -2) && lua_istable(L, -1)){
+			for(int i = 1; ; i++){
+				lua_rawgeti(L, -2, i);
+				if(!lua_isstring(L, -1))
+					break;
+				lua_gettable(L, -2);
+				if(lua_isstring(L, -1))
+					paths.push_back(lua_tostring(L, -1));
+				lua_pop(L, 1);
+			}
+		}
+		lua_settop(L, base);
+		return paths;
+	}
+
+	// Luanti's fs::GetRecursiveDirs: a directory before its subfolders,
+	// and a subfolder whose name starts with '_' or '.' left out
+	void recursive_dirs(const ss_ &dir, sv_<ss_> &out, int depth)
+	{
+		if(depth > 4 || !interface::fs::path_exists(dir))
 			return;
-		for(const interface::fs::Node &n : interface::fs::list_directory(path)){
-			if(!n.is_directory || n.name == "." || n.name == "..")
-				continue;
-			if(std::find(wanted.begin(), wanted.end(), n.name) != wanted.end())
-				out.push_back(path+"/"+n.name);
-			else
-				collect_dirs_named(path+"/"+n.name, wanted, out, depth + 1);
+		out.push_back(dir);
+		for(const interface::fs::Node &n : interface::fs::list_directory(dir)){
+			if(n.is_directory && !n.name.empty() && n.name[0] != '.' &&
+					n.name[0] != '_')
+				recursive_dirs(dir+"/"+n.name, out, depth + 1);
 		}
 	}
 
@@ -5706,20 +5733,21 @@ struct Module: public interface::Module, public luanti::Interface
 	}
 
 	// The first one under a name wins, which is what Luanti does with a
-	// clash as well
-	void collect_files(const ss_ &dir, sm_<ss_, ss_> &files, int depth)
+	// clash as well; a directory's own files only, its subfolders being
+	// in the list after it (recursive_dirs)
+	void collect_files(const ss_ &dir, sm_<ss_, ss_> &files)
 	{
-		if(depth > 4)
-			return;
 		for(const interface::fs::Node &n : interface::fs::list_directory(dir)){
-			if(n.name == "." || n.name == "..")
+			if(n.is_directory)
 				continue;
-			if(n.is_directory){
-				collect_files(dir+"/"+n.name, files, depth + 1);
+			if(!is_media_name(n.name))
+				continue;
+			auto it = files.find(n.name);
+			if(it != files.end()){
+				log_v(MODULE, "media %s: %s, not %s/%s", cs(n.name),
+						cs(it->second), cs(dir), cs(n.name));
 				continue;
 			}
-			if(files.count(n.name) || !is_media_name(n.name))
-				continue;
 			files[n.name] = dir+"/"+n.name;
 		}
 	}
