@@ -33,6 +33,8 @@
 #include <set>
 #include <sstream>
 #include <algorithm>
+#include <functional>
+#include <cmath>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/string.hpp>
@@ -139,6 +141,7 @@ struct Module: public interface::Module
 
 	void init()
 	{
+		game_settings_self_check();
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("luanti:game_loaded"));
@@ -161,6 +164,10 @@ struct Module: public interface::Module
 				"network:packet_received/main:save_info"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:set_world_flags"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:get_game_settings"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:set_game_settings"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:delete"));
 		m_server->sub_event(this, Event::t(
@@ -217,6 +224,10 @@ struct Module: public interface::Module
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:set_world_flags",
 				on_set_world_flags, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:get_game_settings",
+				on_get_game_settings, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:set_game_settings",
+				on_set_game_settings, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:delete", on_delete,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:open", on_open,
@@ -1065,6 +1076,264 @@ struct Module: public interface::Module
 		std::ofstream f(path, std::ios::trunc);
 		for(const auto &kv : all)
 			f << kv.first << " = " << kv.second << "\n";
+	}
+
+	// [GAME_SETTINGS]: an option a game's mods declare in settingtypes.txt,
+	// set per world in its world.mt, which core.settings reads
+	struct GameSetting {
+		ss_ name, label, type, dflt, min, max;
+		sv_<ss_> values; // an enum's
+	};
+	// One line: "name (Label) type default", an int's or a float's
+	// "min max" after it, an enum's "a,b,c". False for a comment, a
+	// [section] and a type not offered here.
+	// simplified: bool, int, float, enum and string; flags, v3f, noise
+	// parameters and the rest are left to a conf until a game wants one
+	static bool parse_setting_line(ss_ line, GameSetting &s)
+	{
+		while(!line.empty() && isspace((unsigned char)line.back()))
+			line.pop_back();
+		size_t i = 0;
+		while(i < line.size() && isspace((unsigned char)line[i]))
+			i++;
+		line = line.substr(i);
+		if(line.empty() || line[0] == '#' || line[0] == '[')
+			return false;
+		const size_t sp = line.find(' ');
+		if(sp == ss_::npos)
+			return false;
+		s = GameSetting();
+		s.name = line.substr(0, sp);
+		// A world.mt key: nothing that could end the line or the key
+		for(char c : s.name)
+			if(!isalnum((unsigned char)c) && c != '_' && c != '.' && c != '-')
+				return false;
+		if(s.name.compare(0, 7, "secure.") == 0)
+			return false;
+		// The label ends at the first ')' a space follows, as Luanti's
+		// pattern "%((.-)%)%s+(%S+)" reads it: a label may hold parentheses
+		const size_t lp = line.find('(', sp);
+		if(lp == ss_::npos)
+			return false;
+		size_t rp = lp;
+		do
+			rp = line.find(')', rp + 1);
+		while(rp != ss_::npos && rp + 1 < line.size() &&
+				!isspace((unsigned char)line[rp + 1]));
+		if(rp == ss_::npos || rp + 1 >= line.size())
+			return false;
+		s.label = line.substr(lp + 1, rp - lp - 1);
+		std::istringstream is(line.substr(rp + 1));
+		is >> s.type;
+		if(s.type == "string"){
+			std::getline(is, s.dflt);
+			while(!s.dflt.empty() && isspace((unsigned char)s.dflt[0]))
+				s.dflt.erase(0, 1);
+			return true;
+		}
+		if(!(is >> s.dflt))
+			return false;
+		if(s.type == "bool")
+			return s.dflt == "true" || s.dflt == "false";
+		if(s.type == "int" || s.type == "float"){
+			is >> s.min >> s.max;
+			return true;
+		}
+		if(s.type == "enum"){
+			ss_ list, v;
+			is >> list;
+			std::istringstream ls(list);
+			while(std::getline(ls, v, ','))
+				if(!v.empty())
+					s.values.push_back(v);
+			return !s.values.empty();
+		}
+		return false;
+	}
+	// Whether a player's value is one the setting takes: the bounds a
+	// game declared, and never a line break into world.mt
+	static bool setting_value_ok(const GameSetting &s, const ss_ &v)
+	{
+		if(v.find_first_of("\r\n") != ss_::npos)
+			return false;
+		if(s.type == "bool")
+			return v == "true" || v == "false";
+		if(s.type == "enum")
+			return std::find(s.values.begin(), s.values.end(), v) !=
+					s.values.end();
+		if(s.type == "int" || s.type == "float"){
+			if(v.empty())
+				return false;
+			char *end = nullptr;
+			const double d = s.type == "int" ?
+					(double)strtoll(v.c_str(), &end, 10) :
+					strtod(v.c_str(), &end);
+			if(*end != 0 || !std::isfinite(d))
+				return false;
+			if(!s.min.empty() && d < atof(s.min.c_str()))
+				return false;
+			if(!s.max.empty() && d > atof(s.max.c_str()))
+				return false;
+			return true;
+		}
+		return s.type == "string";
+	}
+	static void game_settings_self_check()
+	{
+		GameSetting s;
+		auto fail = [](const char *what){
+			throw Exception(ss_("vanilla: settingtypes self-check: ")+what);
+		};
+		if(!parse_setting_line("mobs_spawn (Spawn mobs naturally) bool true", s) ||
+				s.name != "mobs_spawn" || s.label != "Spawn mobs naturally" ||
+				!setting_value_ok(s, "false") || setting_value_ok(s, "1"))
+			fail("bool");
+		if(!parse_setting_line("n (A (b)) int 5 0 10", s) || s.dflt != "5" ||
+				!setting_value_ok(s, "10") || setting_value_ok(s, "11") ||
+				setting_value_ok(s, "2x") || setting_value_ok(s, ""))
+			fail("int");
+		if(!parse_setting_line("m (Mode) enum b a,b,c", s) ||
+				s.values.size() != 3 || setting_value_ok(s, "d"))
+			fail("enum");
+		if(!parse_setting_line("t (Text) string", s) || s.dflt != "" ||
+				setting_value_ok(s, "a\nb = c"))
+			fail("string");
+		if(parse_setting_line("# c (x) bool true", s) ||
+				parse_setting_line("[Section]", s) ||
+				parse_setting_line("a=b (x) bool true", s) ||
+				parse_setting_line("v (V) v3f (0, 0, 0)", s))
+			fail("not a setting");
+	}
+	// Every setting of a game: its own settingtypes.txt and each mod's,
+	// a modpack's mods too; the first of a name wins
+	static sv_<GameSetting> game_settings(const ss_ &game_path)
+	{
+		sv_<GameSetting> out;
+		std::set<ss_> seen;
+		std::function<void(const ss_ &, int)> walk =
+				[&](const ss_ &dir, int depth){
+			std::ifstream f(dir+"/settingtypes.txt");
+			ss_ line;
+			GameSetting s;
+			while(std::getline(f, line))
+				if(parse_setting_line(line, s) && seen.insert(s.name).second)
+					out.push_back(s);
+			if(depth == 0)
+				return;
+			for(const interface::fs::Node &n :
+					interface::fs::list_directory(dir))
+				if(n.is_directory && n.name[0] != '.')
+					walk(dir+"/"+n.name, depth - 1);
+		};
+		walk(game_path, 0);
+		walk(game_path+"/mods", 3);
+		return out;
+	}
+	// The save's directory and its game's settings, or false
+	bool save_settings(const ss_ &name, ss_ &path, sv_<GameSetting> &out)
+	{
+		if(!is_world_name(name))
+			return false;
+		ss_ gameid;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			storage::Save *save = istorage->open(name);
+			if(save){
+				path = save->path();
+				save->store("main")->get("gameid", gameid);
+				istorage->close(save);
+			}
+		});
+		const ss_ game_path = gameid.empty() ? "" : find_game(gameid);
+		if(path.empty() || game_path.empty())
+			return false;
+		out = game_settings(game_path);
+		return true;
+	}
+	sv_<ss_> read_packet_strings(const network::Packet &packet)
+	{
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "%s: %s", cs(packet.name), e.what());
+			values.clear();
+		}
+		return values;
+	}
+	// main:game_settings {name, note, then per setting name, label, type,
+	// default, the enum's values or "min max", the world's value or ""}
+	void send_game_settings(const network::Packet &packet, const ss_ &name,
+			const ss_ &note)
+	{
+		if(!is_world_name(name))
+			return;
+		ss_ path;
+		sv_<GameSetting> settings;
+		// An answer either way: the client waits on it
+		const bool found = save_settings(name, path, settings);
+		const std::map<ss_, ss_> mt = found ?
+				read_world_mt(path+"/luanti/world.mt") :
+				std::map<ss_, ss_>();
+		sv_<ss_> flat{name, found ? note :
+				"This world's game is not installed here."};
+		for(const GameSetting &s : settings){
+			ss_ extra;
+			for(const ss_ &v : s.values)
+				extra += (extra.empty() ? "" : ",")+v;
+			if(s.type == "int" || s.type == "float")
+				extra = s.min+" "+s.max;
+			auto it = mt.find(s.name);
+			for(const ss_ &x : {s.name, s.label, s.type, s.dflt, extra,
+					it == mt.end() ? ss_() : it->second})
+				flat.push_back(x);
+		}
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(flat);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(packet.sender, "main:game_settings", os.str());
+		});
+	}
+	// main:get_game_settings {name}
+	void on_get_game_settings(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		if(!values.empty())
+			send_game_settings(packet, values[0], "");
+	}
+	// main:set_game_settings {name, key, value, ...}: into world.mt, each
+	// key one the game declares and each value one it takes
+	void on_set_game_settings(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		ss_ path;
+		sv_<GameSetting> settings;
+		if(values.empty() || !save_settings(values[0], path, settings))
+			return;
+		std::map<ss_, ss_> set;
+		ss_ refused;
+		for(size_t i = 1; i + 1 < values.size(); i += 2){
+			auto it = std::find_if(settings.begin(), settings.end(),
+					[&](const GameSetting &s){ return s.name == values[i]; });
+			if(it != settings.end() && setting_value_ok(*it, values[i + 1]))
+				set[values[i]] = values[i + 1];
+			else
+				refused += (refused.empty() ? "" : ", ")+values[i];
+		}
+		if(!set.empty())
+			write_world_mt(path+"/luanti/world.mt", set);
+		log_i(MODULE, "%s: %zu game settings set%s", cs(values[0]), set.size(),
+				refused.empty() ? "" : cs(", refused: "+refused));
+		send_game_settings(packet, values[0], refused.empty() ?
+				"Saved." : "Not saved, out of range: "+refused);
 	}
 
 	// main:save_info <name>: what a save answers at a glance, as a flat

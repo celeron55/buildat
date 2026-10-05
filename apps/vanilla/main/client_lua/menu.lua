@@ -482,6 +482,13 @@ function draw(saves, save_games)
 	end
 	flag_row("creative_mode", "Creative mode")
 	flag_row("enable_damage", "Enable damage")
+	button_on(menu, right, "Game settings...", function()
+		if selected_save then
+			waiting("Reading the settings of " .. selected_save .. "...")
+			buildat.send_packet("main:get_game_settings",
+					cereal.binary_output({selected_save}, {"array", "string"}))
+		end
+	end, fit(420))
 	button_on(menu, right, "Play", function()
 		if selected_save then
 			play(selected_save)
@@ -1186,6 +1193,131 @@ end
 
 -- The selected save's glance, into the panel; the flags' buttons say
 -- their state
+-- [GAME_SETTINGS]: a world's options from its game's settingtypes.txt,
+-- the world's own value over the declared default; the server keeps them
+-- in the world's world.mt, which the game reads when the world starts.
+-- What was changed and not saved yet outlives a redraw by the filter.
+-- simplified: the label only; the comment lines above a setting in
+-- settingtypes.txt, its help, are not read
+local game_settings = {filter = "", changed = {}}
+local function draw_game_settings(flat)
+	local save, note = flat[1], flat[2]
+	local menu = import_menu(save .. ": its game's settings")
+	if note ~= "" then
+		local t = menu.window:CreateChild("Text")
+		t:SetStyleAuto()
+		t:SetText(note)
+		if note ~= "Saved." then
+			t.color = magic.Color(1, 0.5, 0.5)
+		end
+	end
+	local items = {}
+	for i = 3, #flat - 5, 6 do
+		items[#items + 1] = {name = flat[i], type = flat[i + 2],
+				label = flat[i + 1] .. "  (" .. flat[i] .. ")",
+				extra = flat[i + 4],
+				value = flat[i + 5] ~= "" and flat[i + 5] or flat[i + 3]}
+	end
+	if #items == 0 and note == "" then
+		local t = menu.window:CreateChild("Text")
+		t:SetStyleAuto()
+		t:SetText("This game declares no settings.")
+	end
+	local changed = game_settings.changed
+	local edits = {}
+	-- A field's text into `changed` where it differs from what was shown
+	local function collect()
+		for name, e in pairs(edits) do
+			if e.edit:GetText() ~= e.shown then
+				changed[name] = e.edit:GetText()
+			end
+		end
+	end
+	local shown = filtered(items, game_settings.filter)
+	if #items > 0 then
+		add_filter(menu, game_settings.filter, #items, #shown, function(f)
+			collect()
+			game_settings.filter = f
+			draw_game_settings(flat)
+		end)
+		local list = menu.window:CreateChild("ListView")
+		list:SetStyleAuto()
+		list:SetFixedSize(fit(860), math.min(520,
+				math.floor(magic.ui.root.height * 0.55)))
+		local row_w = fit(860) - 40
+		local control_w = math.min(220, math.floor(row_w / 3))
+		for _, it in ipairs(shown) do
+			local value = changed[it.name] or it.value
+			local row = list.contentElement:CreateChild("UIElement")
+			row:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(4, 2, 4, 2))
+			row:SetFixedWidth(row_w)
+			local label = row:CreateChild("Text")
+			label:SetStyleAuto()
+			label:SetFixedWidth(row_w - control_w - 20)
+			label:SetWordwrap(true)
+			label:SetText(it.label .. (changed[it.name] and "  *" or ""))
+			label:SetTextAlignment(magic.HA_LEFT)
+			if it.type == "bool" or it.type == "enum" then
+				local values = {}
+				if it.type == "bool" then
+					values = {"true", "false"}
+				else
+					for v in it.extra:gmatch("[^,]+") do
+						values[#values + 1] = v
+					end
+				end
+				local b
+				b = button_on(menu, row, value, function()
+					local now = changed[it.name] or it.value
+					local next_v = values[1]
+					for k, v in ipairs(values) do
+						if v == now then
+							next_v = values[k % #values + 1]
+						end
+					end
+					changed[it.name] = next_v
+					b:GetChild("ButtonText"):SetText(next_v)
+					label:SetText(it.label .. "  *")
+				end, control_w)
+			else
+				local edit = row:CreateChild("LineEdit")
+				edit:SetStyleAuto()
+				edit.textCopyable = true
+				edit.textSelectable = true
+				edit:SetFixedSize(control_w, 26)
+				edit.enabled = true
+				edit:SetText(value)
+				edits[it.name] = {edit = edit, shown = value}
+			end
+		end
+		menu:add("Save", function()
+			collect()
+			local out = {save}
+			for name, v in pairs(changed) do
+				out[#out + 1] = name
+				out[#out + 1] = v
+			end
+			waiting("Saving the settings of " .. save .. "...")
+			buildat.send_packet("main:set_game_settings",
+					cereal.binary_output(out, {"array", "string"}))
+		end)
+	end
+	menu:add("< back", function()
+		draw(last_saves, last_save_games)
+	end)
+	magic.input:SetMouseVisible(true, "a menu screen")
+end
+
+buildat.sub_packet("main:game_settings", function(data)
+	local flat = cereal.binary_input(data, {"array", "string"})
+	-- What the server has now: a fresh screen, or one just saved
+	game_settings.changed = {}
+	if flat[2] == "" then
+		game_settings.filter = ""
+	end
+	draw_game_settings(flat)
+end)
+
 buildat.sub_packet("main:save_info", function(data)
 	if done or not panel then
 		return
