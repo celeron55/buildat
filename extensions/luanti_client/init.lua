@@ -855,6 +855,21 @@ local function show_client(host, port, name, password, mode)
 		local detached = {}
 		local form = nil
 		local screen_was_above = false -- a stack screen over the session
+		-- The cursor hidden for mouse look, or shown for a form, chat or a
+		-- screen. **A browser holds the pointer only in relative mode**:
+		-- Urho3D asks for the pointer lock with MM_RELATIVE and leaves it
+		-- with anything else, where a hidden cursor is all a native window
+		-- needs; the browser grants it just after a click or a key, so a
+		-- click in the world asks again (MouseButtonDown below). The same
+		-- as vanilla's keys.web_lock.
+		local web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
+		local function mouse_look(enable, reason)
+			magic.input:SetMouseVisible(not enable, reason)
+			if web then
+				magic.input:SetMouseMode(enable and magic.MM_RELATIVE or
+						magic.MM_ABSOLUTE)
+			end
+		end
 		local form_stale = false
 		-- Whether the form was drawn with a texture that had not arrived
 		local form_missed = false
@@ -2196,7 +2211,7 @@ local function show_client(host, port, name, password, mode)
 			form.drawn.window:Remove()
 			form = nil
 			held = nil
-			magic.input:SetMouseVisible(false)
+			mouse_look(true, "the form closed")
 		end
 
 		-- Pressing enter in a field sends the form the way a button does,
@@ -2283,7 +2298,7 @@ local function show_client(host, port, name, password, mode)
 					at = at, state = {scroll = {}}}
 			held = nil
 			draw_form()
-			magic.input:SetMouseVisible(true)
+			mouse_look(false, "a form opened")
 		end
 
 		-- A form this client draws for itself: the fields its buttons make
@@ -2783,7 +2798,7 @@ local function show_client(host, port, name, password, mode)
 
 		-- Mouse look, so the cursor is out of the way and does not stop at the
 		-- edge of the window
-		magic.input:SetMouseVisible(false)
+		mouse_look(true, "the session started")
 
 
 		-- WASD on the horizontal plane whatever the camera is pitched at,
@@ -2841,8 +2856,8 @@ local function show_client(host, port, name, password, mode)
 			if screen_above ~= screen_was_above then
 				screen_was_above = screen_above
 				if not form and not chat_input then
-					magic.input:SetMouseVisible(screen_above,
-							screen_above and "a screen over the game" or nil)
+					mouse_look(not screen_above, screen_above and
+							"a screen over the game" or "back in the game")
 				end
 			end
 			if form or chat_input or screen_above then
@@ -3302,7 +3317,7 @@ local function show_client(host, port, name, password, mode)
 			chat_input = nil
 			chat_buttons = nil
 			if not form then
-				magic.input:SetMouseVisible(false)
+				mouse_look(true, "the chat closed")
 			end
 		end
 
@@ -3395,7 +3410,7 @@ local function show_client(host, port, name, password, mode)
 						{x = b[2], y = by, w = bw, h = bh, action = b[3]}
 			end
 
-			magic.input:SetMouseVisible(true)
+			mouse_look(false, "the chat opened")
 			chat_input_cb = magic.SubscribeToEvent(chat_input, "TextFinished",
 					send_chat)
 			-- Escape cancels. A plain subscription, because the line edit has
@@ -3429,6 +3444,12 @@ local function show_client(host, port, name, password, mode)
 				function(event_type, event_data)
 			if form then
 				return -- The click goes to the form; see UIMouseClick
+			end
+			-- The pointer lock asked for again, which a browser grants on a
+			-- click (lost to Escape, or asked for at the join with no click
+			-- to go on); Urho3D asks only while it is not held
+			if web and not chat_input and not screen_was_above then
+				magic.input:SetMouseMode(magic.MM_RELATIVE)
 			end
 			if event_data:GetInt("Button") == MOUSEB_LEFT then
 				if held_usable() then
@@ -3637,7 +3658,7 @@ local function show_client(host, port, name, password, mode)
 				held_element:Remove()
 				held_element = nil
 			end
-			magic.input:SetMouseVisible(true)
+			mouse_look(false, "the session ended")
 			client:disconnect()
 			view:close()
 			uistack.main:pop(root)
