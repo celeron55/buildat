@@ -1313,6 +1313,10 @@ function M.new(socket, options, log)
 	-- without this, a client that connects to an address nothing answers
 	-- sits there for good, resending its INIT.
 	local SILENCE_LIMIT_S = 20
+	-- How long a server that answers (its peer id, its pings) may leave the
+	-- INIT without a HELLO. A Minetest 0.4 server (protocol 27 at most, still
+	-- on Luanti's list) says nothing to an INIT asking for 37 or newer.
+	local HELLO_LIMIT_S = 10
 
 	function self:update(dtime)
 		-- The day goes on between the times the server says what it is.
@@ -1350,6 +1354,14 @@ function M.new(socket, options, log)
 						"Is that the right address?" or
 						"The connection seems to be gone."), true)
 			end
+		end
+		if not self.failure and self.state == "init_sent" and
+				conn.last_receive_us and
+				buildat.get_time_us() - started_us >= HELLO_LIMIT_S * 1000000 then
+			fail("The server answers but does not take the login.\nIt may be "..
+					"older than Luanti 5.0: this client\nspeaks protocol "..
+					CLIENT_PROTOCOL_VERSION_MIN.." to "..LATEST_PROTOCOL_VERSION..
+					".", true)
 		end
 		if self.failure and not failure_told then
 			failure_told = true

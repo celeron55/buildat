@@ -25,6 +25,7 @@
  ["wait", 3000],
  ["click", 600, 479],
  ["waitlog", "Logged in", 60],
+ ["waitlog", "Spawned at", 60],
  ["wait", 8000],
  ["shot", "${OUT}/03_in.png"]
 ]

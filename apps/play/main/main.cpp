@@ -11,9 +11,11 @@
 // luanti_client sends its datagrams as the messages of a WebSocket to
 // /luanti?to=host:port, and this sends them on from one UDP socket per
 // WebSocket. Only to an address on the last fetch of Luanti's server list
-// (BUILDAT_LUANTI_LIST overrides https://servers.luanti.org), only from
-// this server's own page, and capped per client so that it is not an open
-// UDP relay. Every web player reaches a Luanti server from this server's
+// (BUILDAT_LUANTI_LIST overrides https://servers.luanti.org) -- or this
+// machine's own, for a page on it ([WEB_LUANTI_JOIN]) -- only from this
+// server's own page, and capped per client so that it is not an open UDP
+// relay. A refusal closes the WebSocket with the reason, which the page
+// shows. Every web player reaches a Luanti server from this server's
 // address: a ban there bans all of them (the user's call, 2026-10-04).
 #include "core/log.h"
 #include "core/json.h"
@@ -160,12 +162,14 @@ struct Module: public interface::Module
 		}
 	}
 
-	void refuse(network::PeerId peer, const char *why, const ss_ &what)
+	// tell: what the page shows; "" is the reason as logged
+	void refuse(network::PeerId peer, const char *why, const ss_ &what,
+			const ss_ &tell = "")
 	{
 		log_i(MODULE, "Bridge refused for peer %zu: %s (%s)", peer, why,
 				cs(what));
 		network::access(m_server, [&](network::Interface *i){
-			i->disconnect(peer);
+			i->ws_close(peer, tell.empty() ? ss_(why) : tell);
 		});
 	}
 
@@ -184,8 +188,22 @@ struct Module: public interface::Module
 		if(colon == ss_::npos || to.find_first_not_of(
 				"abcdefghijklmnopqrstuvwxyz0123456789.-:") != ss_::npos)
 			return refuse(r.peer, "not host:port", to);
-		if(!m_allowed.count(to))
-			return refuse(r.peer, "not on Luanti's list", to);
+		// **A local page reaches this machine's own servers**
+		// ([WEB_LUANTI_JOIN]): asked for as localhost or 127.0.0.1, by a
+		// browser on this machine. Host alone is the request's say; the
+		// address is the socket's, or behind the trusted proxy the client
+		// it names, so a public page's visitor is never loopback.
+		// simplified: a trusted proxy on this machine that sets no
+		// X-Forwarded-For makes every visitor loopback; the proxy sets it
+		const ss_ to_host = to.substr(0, colon);
+		const ss_ page_host = lower(r.host.substr(0, r.host.rfind(':')));
+		const bool local = (to_host == "localhost" || to_host == "127.0.0.1") &&
+				(page_host == "localhost" || page_host == "127.0.0.1") &&
+				r.address.compare(0, 4, "127.") == 0;
+		if(!local && !m_allowed.count(to))
+			return refuse(r.peer, "not on Luanti's list", to,
+					"this page reaches only the servers on Luanti's public "
+					"list (and this machine's, from a page on it)");
 		if(m_bridges.size() >= MAX_BRIDGES)
 			return refuse(r.peer, "full", to);
 		size_t mine = 0;
@@ -202,6 +220,13 @@ struct Module: public interface::Module
 				&hints, &res) != 0 || !res)
 			return refuse(r.peer, "cannot resolve", to);
 		int fd = socket(res->ai_family, SOCK_DGRAM, 0);
+		// What a server sends between two ticks waits here: a media burst
+		// overflowed the default (~200 KiB) and each loss stalls Luanti's
+		// reliable channel until it is resent ([WEB_LUANTI_JOIN])
+		int rcvbuf = 4 * 1024 * 1024;
+		if(fd >= 0)
+			setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const char*)&rcvbuf,
+					sizeof rcvbuf);
 		bool ok = fd >= 0 && connect(fd, res->ai_addr, res->ai_addrlen) == 0;
 		freeaddrinfo(res);
 #ifdef _WIN32

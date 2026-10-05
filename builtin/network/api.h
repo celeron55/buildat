@@ -159,6 +159,9 @@ namespace network
 		// its own (apps/play)
 		virtual void set_page_has_no_game() = 0;
 		virtual void ws_send(PeerInfo::Id peer, const ss_ &data) = 0;
+		// A claimed WebSocket closed with a reason the page's onclose reads
+		// (code 1008); the peer is disconnected after it
+		virtual void ws_close(PeerInfo::Id peer, const ss_ &reason) = 0;
 		// [FAVICON] the PNG served for /favicon.ico, ahead of the default
 		// Buildat logo; "" restores the default. An app sets its own icon
 		// (vanilla, the game's) at any time.

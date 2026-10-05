@@ -57,7 +57,8 @@ EM_JS(int, web_dgram_open, (const char *url_p), {
 			d.q.push(new Uint8Array(e.data));
 	};
 	d.ws.onclose = function(e){
-		d.state = 'closed: the bridge closed the connection (' + e.code + ')';
+		d.state = 'closed: ' + (e.reason ? 'the bridge refused it: ' + e.reason :
+				'the bridge closed the connection (' + e.code + ')');
 	};
 	return id;
 });

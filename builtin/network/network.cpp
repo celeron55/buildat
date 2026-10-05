@@ -1909,6 +1909,19 @@ struct Module: public interface::Module, public network::Interface
 		flush_peer(it->second);
 	}
 
+	void ws_close(PeerInfo::Id id, const ss_ &reason)
+	{
+		auto it = m_peers.find(id);
+		if(it != m_peers.end() && !it->second.closing &&
+				it->second.kind == Peer::Kind::RawWebSocket){
+			// 1008, policy violation; a control frame's payload is at most 125
+			it->second.queue_raw(web::frame(8, ss_("\x03\xf0", 2)+
+					reason.substr(0, 123)));
+			flush_peer(it->second);
+		}
+		disconnect(id);
+	}
+
 	void set_favicon(const ss_ &png)
 	{
 		m_favicon = png;

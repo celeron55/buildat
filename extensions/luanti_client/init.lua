@@ -4002,21 +4002,26 @@ show_connect_dialog = function(address, name)
 			local data = network.parse_json(body)
 			local rows = {}
 			for _, srv in ipairs(data and data.list or {}) do
-				local flags = {}
-				if srv.creative then flags[#flags + 1] = "creative" end
-				if srv.damage then flags[#flags + 1] = "damage" end
-				if srv.pvp then flags[#flags + 1] = "pvp" end
-				local addr = tostring(srv.address or "") .. ":" .. tostring(srv.port or 30000)
-				rows[#rows + 1] = {
-					name = string.format("%s   %s   %s/%s", tostring(srv.name or addr),
-							addr, tostring(srv.clients or 0), tostring(srv.clients_max or "?")),
-					address = addr,
-					-- Two lines of it; the whole is the server's own page
-					line = tostring(srv.description or ""):sub(1, 150) ..
-							(#tostring(srv.description or "") > 150 and "..." or "") ..
-							(#flags > 0 and ("  [" .. table.concat(flags, ", ") .. "]") or "") ..
-							(srv.version and ("  " .. srv.version) or ""),
-				}
+				-- simplified: a server older than this client can speak to
+				-- (Minetest 0.4, protocol 27 at most) is left out, not
+				-- shown greyed
+				if (tonumber(srv.proto_max) or 99) >= 37 then
+					local flags = {}
+					if srv.creative then flags[#flags + 1] = "creative" end
+					if srv.damage then flags[#flags + 1] = "damage" end
+					if srv.pvp then flags[#flags + 1] = "pvp" end
+					local addr = tostring(srv.address or "") .. ":" .. tostring(srv.port or 30000)
+					rows[#rows + 1] = {
+						name = string.format("%s   %s   %s/%s", tostring(srv.name or addr),
+								addr, tostring(srv.clients or 0), tostring(srv.clients_max or "?")),
+						address = addr,
+						-- Two lines of it; the whole is the server's own page
+						line = tostring(srv.description or ""):sub(1, 150) ..
+								(#tostring(srv.description or "") > 150 and "..." or "") ..
+								(#flags > 0 and ("  [" .. table.concat(flags, ", ") .. "]") or "") ..
+								(srv.version and ("  " .. srv.version) or ""),
+					}
+				end
 			end
 			official_rows = rows
 			show()
