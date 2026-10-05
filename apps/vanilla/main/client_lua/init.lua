@@ -887,9 +887,9 @@ hotbar_ui = (function(ok, err, lib)
 			return hotbar_picture(name)
 		end,
 		stack = function(stack)
-			local resource, count_text, name = luanti.stack_look(stack)
+			local resource, count_text, name, wear = luanti.stack_look(stack)
 			return resource and game_texture(resource) or nil,
-					count_text, name
+					count_text, name, wear
 		end,
 	}
 end)(buildat.run_script_file("luanti/hotbar.lua"))

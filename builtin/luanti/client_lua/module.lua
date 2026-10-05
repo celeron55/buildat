@@ -2810,13 +2810,15 @@ function M.wield_look(str)
 end
 
 -- The whole of a stack's look from its itemstring, for a client that keeps
--- its own hotbar: the texture, what the count should read, and the name
+-- its own hotbar: the texture, what the count should read, the name and the
+-- wear
 function M.stack_look(str)
 	local stack = parse_stack(str)
 	if stack == nil then
 		return nil
 	end
-	return M.stack_texture(stack), M.stack_count_text(stack), stack.name
+	return M.stack_texture(stack), M.stack_count_text(stack), stack.name,
+			stack.wear
 end
 
 -- And what the count under it says: count_meta names the meta key whose

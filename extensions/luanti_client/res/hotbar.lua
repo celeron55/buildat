@@ -17,7 +17,8 @@
 --       font = <Font>, priority = <over the rest of the caller's UI>,
 --       max = <slots built, default 32>, white = <a 1x1 white Texture2D>,
 --       texture = function(name) -> Texture2D or nil,   -- a hotbar image
---       stack = function(stack) -> Texture2D or nil, count_text, item_name}
+--       stack = function(stack) -> Texture2D or nil, count_text, item_name,
+--               wear (0 to 65535, or nil)}
 -- texture and stack are the caller's, because what an item looks like and
 -- how a texture modifier expression is composed is each client's own.
 --   h:draw{list =, wield =, count =, image =, selected_image =, shown =}
@@ -105,14 +106,8 @@ function M.new(o)
 		backgrounds[r] = bg
 	end
 	for i = 1, max do
-		local frame = root:CreateChild("BorderImage")
+		local frame = root:CreateChild("UIElement")
 		frame.priority = 1
-		if o.white then
-			frame.texture = o.white
-		end
-		-- What a slot wears when the game has given no hotbar image, which
-		-- is Luanti's own fallback: half-transparent black, per slot
-		frame.color = magic.Color(0, 0, 0, 0.5)
 		frame.horizontalAlignment = magic.HA_CENTER
 		frame.verticalAlignment = magic.VA_BOTTOM
 		frame.visible = false
@@ -122,11 +117,39 @@ function M.new(o)
 		marker.blendMode = magic.BLEND_ALPHA
 		marker.visible = false
 		marker.priority = 0
+		-- Luanti's own mark when the game names none: a red ring a
+		-- padding wide around the picture, one side at a time
+		local ring = {}
+		for k = 1, 4 do
+			ring[k] = frame:CreateChild("BorderImage")
+			if o.white then
+				ring[k].texture = o.white
+			end
+			ring[k].color = magic.Color(1, 0, 0)
+			ring[k].priority = 0
+		end
+		-- What a slot wears when the game has given no hotbar image, which
+		-- is Luanti's own fallback: half-transparent black under the
+		-- picture, the padding between left clear
+		local back = frame:CreateChild("BorderImage")
+		if o.white then
+			back.texture = o.white
+		end
+		back.priority = 1
 		local image = frame:CreateChild("BorderImage")
 		image.visible = false
-		image.priority = 1
+		image.priority = 2
+		-- A worn tool's bar, the worn part black ([UI_PARITY] 5)
+		local bar = {}
+		for k = 1, 2 do
+			bar[k] = frame:CreateChild("BorderImage")
+			if o.white then
+				bar[k].texture = o.white
+			end
+			bar[k].priority = 3
+		end
 		local count = frame:CreateChild("Text")
-		count.priority = 2
+		count.priority = 4
 		if o.font then
 			count:SetFont(o.font, 12)
 		end
@@ -134,9 +157,8 @@ function M.new(o)
 		count.effectColor = magic.Color(0, 0, 0, 0.9)
 		count.horizontalAlignment = magic.HA_RIGHT
 		count.verticalAlignment = magic.VA_BOTTOM
-		count:SetPosition(-3, -2)
 		slots[i] = {frame = frame, image = image, count = count,
-				marker = marker}
+				marker = marker, ring = ring, bar = bar, back = back}
 	end
 
 	-- The row the window changed size under: the root is the parent's size
@@ -213,10 +235,22 @@ function M.new(o)
 						imagesize + padding * 4, imagesize + padding * 4)
 				slot.image:SetPosition(padding, padding)
 				slot.image.size = magic.IntVector2(imagesize, imagesize)
+				slot.back:SetPosition(padding, padding)
+				slot.back.size = magic.IntVector2(imagesize, imagesize)
+				local far = padding + imagesize
+				for k, r in ipairs{{0, 0, slot_size, padding},
+						{0, far, slot_size, padding},
+						{0, padding, padding, imagesize},
+						{far, padding, padding, imagesize}} do
+					slot.ring[k]:SetPosition(r[1], r[2])
+					slot.ring[k].size = magic.IntVector2(r[3], r[4])
+				end
+				-- The count's corner is the picture's ([UI_PARITY] 4)
+				slot.count:SetPosition(-padding, -padding)
 			end
 			-- The stack's own look when its metadata gives it one
 			-- ([ITEM_META_LOOK]); the name is still what the tooltip reads
-			local tex, count_text, name = o.stack(list[i])
+			local tex, count_text, name, wear = o.stack(list[i])
 			-- Assigned only when there is one: the sandbox takes a Texture
 			-- and not a nil, and an empty slot is an image that is not
 			-- drawn.
@@ -240,11 +274,34 @@ function M.new(o)
 			-- behind the whole row instead, so the slots themselves are
 			-- not drawn
 			local marked = i == wield
-			slot.frame.color = (name and tex == nil) and
+			slot.back.color = (name and tex == nil) and
 					magic.Color(0.5, 0.3, 0.5, 0.75) or
 					magic.Color(0, 0, 0, bg and 0 or 0.5)
-			if marked and selected == nil then
-				slot.frame.color = magic.Color(0.9, 0.9, 0.7, 0.55)
+			for _, r in ipairs(slot.ring) do
+				r.visible = marked and selected == nil
+			end
+			-- Luanti's drawItemStack(): a sixteenth of the picture high, a
+			-- sixteenth in from the sides and the bottom, green through
+			-- yellow to red over what is left
+			wear = (wear or 0) / 65535
+			slot.bar[1].visible = wear > 0 and i <= n
+			slot.bar[2].visible = wear > 0 and i <= n
+			if wear > 0 and i <= n then
+				local x0 = padding + math.floor(imagesize / 16)
+				local w = imagesize - 2 * math.floor(imagesize / 16)
+				local h = math.max(1, math.floor(imagesize / 16))
+				local y = padding + imagesize - math.floor(imagesize / 16) - h
+				local left = math.floor(w * (1 - wear))
+				local wi = math.min(math.min(math.floor(wear * 600), 511) + 10,
+						511)
+				slot.bar[1].color = wi <= 255 and
+						magic.Color(wi / 255, 1, 0) or
+						magic.Color(1, (511 - wi) / 255, 0)
+				slot.bar[1]:SetPosition(x0, y)
+				slot.bar[1].size = magic.IntVector2(left, h)
+				slot.bar[2].color = magic.Color(0, 0, 0)
+				slot.bar[2]:SetPosition(x0 + left, y)
+				slot.bar[2].size = magic.IntVector2(w - left, h)
 			end
 			if selected then
 				slot.marker.texture = selected
