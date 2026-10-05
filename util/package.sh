@@ -459,12 +459,16 @@ prebuild_modules() {
 # The CPU time, in seconds, of a process and everything under it, and of
 # every Windows process there is: under Wine each process is reparented
 # to pid 1 -- the server, its compiler, conhost -- so the tree says
-# nothing there and the .exe's are counted wherever they hang. simplified:
-# on a host running other Wine programs their CPU counts too; the
-# container runs nothing else
+# nothing there and the .exe's are counted wherever they hang. A Windows
+# process is told by its command line: comm is cut at 15 bytes, and
+# "buildat_server.exe" is "buildat_server." there, so the server's own
+# work before its first compile counted for nothing and a slow runner
+# failed it as a hang ([WIN_PREBUILD_STALL]). simplified: on a host
+# running other Wine programs their CPU counts too; the container runs
+# nothing else
 tree_cpu() {
-	ps -eo pid=,ppid=,times=,comm= | awk -v root="$1" '
-		{ pp[$1] = $2; t[$1] = $3; exe[$1] = ($NF ~ /\.exe$/) }
+	ps -eo pid=,ppid=,times=,args= | awk -v root="$1" '
+		{ pp[$1] = $2; t[$1] = $3; exe[$1] = (tolower($0) ~ /\.exe( |$)/) }
 		END {
 			for (p in pp) {
 				q = p
