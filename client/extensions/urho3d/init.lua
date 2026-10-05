@@ -1153,8 +1153,14 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 	end
 	-- No value at all when not connected, which tostring() refuses
 	local address = __buildat_server_address()
-	if (address ~= nil) ~= trust_in_game then
-		trust_in_game = address ~= nil
+	-- **A game with no Buildat server is a game too**
+	-- ([OVERLAY_IN_LUANTI]): luanti_client's connection is its own, and
+	-- it says it has a world up through ui_utils.set_in_game, which the
+	-- error dialogs read as well (client/sandbox.lua)
+	local uu = package.loaded["buildat/extension/ui_utils"]
+	local in_game = address ~= nil or (uu ~= nil and uu.in_app == true)
+	if in_game ~= trust_in_game then
+		trust_in_game = in_game
 		trust_shown = not trust_in_game
 	end
 	local show = trust_shown
@@ -1164,7 +1170,8 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 		-- after a leave was the user's report, and this is the first
 		-- thing to read
 		log:info("trust colour sample " .. (show and "shown" or "hidden") ..
-				" (server address " .. tostring(address) .. ")")
+				" (server address " .. tostring(address) .. ", in game " ..
+				tostring(trust_in_game) .. ")")
 	end
 	-- The colour's own line only until the starport extension is there
 	-- to build the buttons on the colour
