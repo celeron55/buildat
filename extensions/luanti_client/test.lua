@@ -167,6 +167,9 @@ print("serialize: ok")
 local function fake_socket()
 	local s = {sent = {}, incoming = {}}
 	function s:send(data)
+		if self.blocked then
+			return nil, "timeout" -- would block
+		end
 		self.sent[#self.sent + 1] = data
 		return #data
 	end
@@ -378,6 +381,30 @@ end
 conn_update(0.01)
 assert(disconnect_reason == "closed", "connection: did not notice the close")
 assert(conn.connected == false)
+
+-- A send that would block waits, in order, for the next update; nothing
+-- is dropped ([LUANTI_JOIN_LOSS])
+do
+	local bs = fake_socket()
+	local bc = connection.new(bs, log)
+	bs.blocked = true
+	assert(bc:send(0, false, "one") and bc:send(0, false, "two"),
+			"connection: a send that would block was taken as failed")
+	assert(#bs.sent == 0)
+	bc:update(0.01)
+	assert(#bs.sent == 0, "connection: sent while the socket blocks")
+	bs.blocked = false
+	bc:send(0, false, "three") -- behind the two, not ahead of them
+	assert(#bs.sent == 0, "connection: a new send jumped the queue")
+	bc:update(0.01)
+	assert(#bs.sent == 3, "connection: the queue was not sent, got "..#bs.sent)
+	for i, want in ipairs({"one", "two", "three"}) do
+		assert(bs.sent[i]:sub(-#want) == want,
+				"connection: the queue came out of order")
+	end
+	bc:update(0.01)
+	assert(#bs.sent == 3, "connection: the queue was sent twice")
+end
 
 print("connection: ok")
 -- nodedef.lua

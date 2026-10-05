@@ -180,6 +180,18 @@ struct LuaSocket
 				continue;
 			}
 			m_fd = fd;
+			if(m_udp){
+				// The game reads its socket once a frame: what a server
+				// sends in a slow frame waits here, and the default (~200
+				// KiB) overflowed under a Luanti server's media burst
+				// ([LUANTI_JOIN_LOSS]). The send side for the acks' bursts.
+				// simplified: the OS may cap it (Linux rmem_max/wmem_max)
+				int size = 4 * 1024 * 1024;
+				setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const char*)&size,
+						sizeof size);
+				setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (const char*)&size,
+						sizeof size);
+			}
 			// UDP connect() only sets the default peer; it does not block.
 			// It also makes the socket drop datagrams from anyone else.
 			if(connect(fd, res->ai_addr, res->ai_addrlen) == 0)

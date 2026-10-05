@@ -81,6 +81,9 @@ function M.new(socket, log)
 	end
 	local time_since_send = 0
 
+	-- Datagrams the socket would not take yet, oldest first
+	local outgoing = {}
+	local MAX_OUTGOING = 8192
 	local function send_datagram(channel, packet)
 		local w = serialize.writer()
 		w:u32(M.PROTOCOL_ID):u16(self.peer_id):u8(channel):raw(packet)
@@ -89,13 +92,48 @@ function M.new(socket, log)
 			error("luanti_client/connection: packet of "..#data..
 					" bytes is too big to send")
 		end
+		-- A send that would block waits here, in order, for the next
+		-- update: dropped, it was an ack mostly, and the server resent what
+		-- it covered ([LUANTI_JOIN_LOSS]: 4646 in 35 s on Wi-Fi)
+		if #outgoing > 0 then
+			if #outgoing >= MAX_OUTGOING then
+				log:warning("send queue full; a datagram dropped")
+				return false
+			end
+			outgoing[#outgoing + 1] = data
+			return true
+		end
 		local sent, err = socket:send(data)
 		if not sent then
-			log:warning("send failed: "..tostring(err))
-			return false
+			if err ~= "timeout" then
+				log:warning("send failed: "..tostring(err))
+				return false
+			end
+			outgoing[1] = data
 		end
 		time_since_send = 0
 		return true
+	end
+
+	-- What waited sent, until the socket would block again
+	local function flush_outgoing()
+		local n = 0
+		for i = 1, #outgoing do
+			local sent, err = socket:send(outgoing[i])
+			if not sent and err == "timeout" then
+				break
+			end
+			if not sent then
+				log:warning("send failed: "..tostring(err))
+			end
+			n = i
+		end
+		if n > 0 then
+			local len = #outgoing
+			for i = 1, len do
+				outgoing[i] = outgoing[i + n]
+			end
+		end
 	end
 
 	local function send_control(channel, controltype, seqnum_or_nil)
@@ -336,6 +374,7 @@ function M.new(socket, log)
 		if not self.connected then
 			return
 		end
+		flush_outgoing()
 		while true do
 			local data, err = socket:receive()
 			if data then
