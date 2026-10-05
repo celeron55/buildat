@@ -5047,6 +5047,14 @@ function go_station(name)
 		if not terminal_open then
 			sit_at_terminal()
 		end
+	elseif name == "overview" then
+		-- **For a scripted shot only** (`event room station overview`; not
+		-- in Tab's cycle): the room's back corner under the ceiling,
+		-- looking at the wall, so the room's size and the wall's relief
+		-- are in one frame ([LAUNCH_WORLD] stage 3's architecture axes)
+		fly_to({x = room.X_MAX * 0.85 * VOXEL_M, y = (room.Y_TOP - 2) * VOXEL_M,
+				z = room.Z_MAX * 0.85 * VOXEL_M},
+			{x = 0, y = room.Y_TOP * 0.35 * VOXEL_M, z = room.BAY_Z * VOXEL_M})
 	else
 		return
 	end

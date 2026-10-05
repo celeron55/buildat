@@ -183,12 +183,41 @@ M.ARCHES = {
 		shelves = true, ornament = false},
 	-- The wall plain stone, its relief only at the two edges
 	bare = {random = true, edges = true, margin = 6, ornament = true},
+	-- **The round again, by axis** (user, 2026-10-03: the four above
+	-- showed almost no difference): tomb with one thing pushed far
+	-- enough to be told apart in a thumbnail, for the user to say which
+	-- axes matter. `size` sets room constants (defaults in DEFAULT_SIZE)
+	--   deep    the relief's depth: slabs 10 to 18 out, not 3 to 8
+	deep = {random = true, insets = true, margin = 1, ornament = true,
+		size = {SLAB_OUT_MIN = 10, SLAB_OUT_MAX = 18}},
+	--   rhythm  the relief's rhythm: every slab 8 wide on a 12-voxel grid
+	--           and every fourth course, none random in place or size
+	rhythm = {random = true, insets = false, margin = 1, ornament = true,
+		rhythm = true},
+	--   tall    the room's height: the ceiling at 44, not 26
+	tall = {random = true, insets = true, margin = 1, ornament = true,
+		size = {MIN_Y_TOP = 44}},
+	--   wide    the room's width: 145 voxels across, not 93
+	wide = {random = true, insets = true, margin = 1, ornament = true,
+		size = {X_MIN = -72, X_MAX = 72}},
 }
+-- What an arch's `size` may set, as the room is without one: taken at
+-- the first set_arch(), as some are set further down this file
+local DEFAULT_SIZE = nil
 M.ARCH, M.arch = "tomb", M.ARCHES.tomb
--- Answers the name it took, "tomb" for one there is none by
+-- Answers the name it took, "tomb" for one there is none by. Before
+-- set_pockets() and before anything reads the room's size
 function M.set_arch(name)
 	if not M.ARCHES[name] then name = "tomb" end
 	M.ARCH, M.arch = name, M.ARCHES[name]
+	DEFAULT_SIZE = DEFAULT_SIZE or {SLAB_OUT_MIN = M.SLAB_OUT_MIN,
+		SLAB_OUT_MAX = M.SLAB_OUT_MAX, MIN_Y_TOP = M.MIN_Y_TOP,
+		X_MIN = M.X_MIN, X_MAX = M.X_MAX}
+	for k, v in pairs(DEFAULT_SIZE) do
+		M[k] = (M.arch.size or {})[k] or v
+	end
+	M.OX = M.X_MIN - 1
+	M.W = M.X_MAX - M.X_MIN + 3
 	return name
 end
 local function in_form(x0, x1, y0, y1)
@@ -218,6 +247,12 @@ local function make_slabs()
 				(M.SLAB_THIN_MAX - M.SLAB_THIN_MIN + 1)
 		local x0 = M.X_MIN + h2 % (M.X_MAX - M.X_MIN - sx + 1)
 		local y0 = math.floor(h2 / 2048) % (M.Y_TOP - sy + 1)
+		if M.arch.rhythm then
+			sx, sy = 8, 1
+			x0 = M.X_MIN + 2 + 12 * (h2 % math.floor((M.X_MAX - M.X_MIN - 10) / 12))
+			y0 = 4 * (math.floor(h2 / 2048) % math.floor(M.Y_TOP / 4 + 1))
+			h1 = 3 * 1048576 -- one depth: 6 out
+		end
 		if M.arch.random and not in_form(x0, x0 + sx - 1, y0, y0 + sy - 1)
 				and not (M.arch.edges and in_middle(x0, x0 + sx - 1)) then
 			M.slabs[#M.slabs + 1] = {x0 = x0, x1 = x0 + sx - 1, y0 = y0,
@@ -716,6 +751,15 @@ function M.self_check()
 				end
 			end
 		end
+		for k, v in pairs(M.arch.size or {}) do
+			assert(M[k] == v, name .. ": " .. k)
+		end
+		if M.arch.rhythm then
+			for _, sl in ipairs(M.slabs) do
+				assert(sl.x1 - sl.x0 == 7 and (sl.x0 - M.X_MIN - 2) % 12 == 0 and
+						sl.y0 % 4 == 0, name .. ": a slab on the grid")
+			end
+		end
 		if M.arch.edges then
 			for x = f.x0 - 5, f.x1 + 5 do
 				for y = 0, M.Y_TOP do
@@ -728,6 +772,8 @@ function M.self_check()
 		end
 	end
 	M.set_arch("tomb")
+	assert(M.X_MIN == -46 and M.W == 95 and M.MIN_Y_TOP == 26,
+			"tomb puts the size back")
 	M.set_pockets(11)
 	local rows = M.build()
 	assert(#rows == M.H * M.D, "one row a (y, z): " .. #rows)
