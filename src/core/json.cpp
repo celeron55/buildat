@@ -355,7 +355,7 @@ const double& json::Value::as_number() const {
 	default:
 		return default_value;
 	case T_INT:
-		p = new ValuePrivate();
+		if(!p) p = new ValuePrivate();
 		p->number = value.i;
 		return p->number;
 	case T_FLOAT:
@@ -643,8 +643,25 @@ const Value json::null(){
 	return v;
 }
 
+// What a document may nest to: a loader that goes down one call per level
+// is a stack overflow away from a run of brackets otherwise
+// ([SECURITY_RUN_1]). Deeper is a document refused, not cut.
+static const int MAX_DEPTH = 256;
+struct TooDeep {};
+
 const Value json::load_sajson(const sajson::value &src)
 {
+	try {
+		return load_sajson_depth(src, 0);
+	} catch(TooDeep&){
+		return Value();
+	}
+}
+
+const Value json::load_sajson_depth(const sajson::value &src, int depth)
+{
+	if(depth > MAX_DEPTH)
+		throw TooDeep();
 	switch(src.get_type()){
 	case sajson::TYPE_INTEGER:
 		return Value(src.get_integer_value());
@@ -662,14 +679,16 @@ const Value json::load_sajson(const sajson::value &src)
 			Value dst = array();
 			dst.p->a.resize(src.get_length());
 			for(size_t i = 0; i < src.get_length(); i++)
-				dst.p->a[i] = load_sajson(src.get_array_element(i));
+				dst.p->a[i] = load_sajson_depth(src.get_array_element(i),
+						depth + 1);
 			return dst;
 		}
 	case sajson::TYPE_OBJECT: {
 			Value dst = object();
 			for(size_t i = 0; i < src.get_length(); i++){
 				std::string skey = src.get_object_key(i).as_string();
-				dst.p->o[skey] = load_sajson(src.get_object_value(i));
+				dst.p->o[skey] = load_sajson_depth(src.get_object_value(i),
+						depth + 1);
 			}
 			return dst;
 		}
@@ -684,19 +703,42 @@ const Value json::load_string(const char *string, json_error_t *error){
 		error->column = -1;
 		error->text[0] = '\0';
 	}
-	const sajson::document doc =
-			sajson::parse(sajson::string(string, strlen(string)));
-	if(!doc.is_valid()){
+	// Separate stacks: the single buffer the 2013 copy shared between
+	// them let one run into the other on a crafted document, and key
+	// offsets read past the input ([SECURITY_RUN_1], util/fuzz). Wrapped
+	// in brackets, because sajson takes only an array or an object at the
+	// root and a document here can be any value -- Starport stores a bare
+	// string -- and exactly one element is a document of one value.
+	const size_t len = strlen(string);
+	std::string wrapped;
+	wrapped.reserve(len + 2);
+	wrapped += '[';
+	wrapped.append(string, len);
+	wrapped += ']';
+	const sajson::document doc = sajson::parse(sajson::dynamic_allocation(),
+			sajson::string(wrapped.data(), wrapped.size()));
+	const bool one = doc.is_valid() && doc.get_root().get_length() == 1;
+	if(!one){
 		if(error){
-			error->line = doc.get_error_line();
-			error->column = doc.get_error_column();
-			snprintf(error->text, sizeof(error->text), "%s",
-					doc.get_error_message().c_str());
+			// The bracket put in front is not the document's
+			error->line = doc.is_valid() ? 1 : doc.get_error_line();
+			error->column = doc.is_valid() ? 1 :
+					(doc.get_error_line() == 1 && doc.get_error_column() > 0 ?
+					doc.get_error_column() - 1 : doc.get_error_column());
+			snprintf(error->text, sizeof(error->text), "%s", doc.is_valid() ?
+					"more than one value" : doc.get_error_message_as_cstring());
 		}
 		return Value();
 	}
-	sajson::value root = doc.get_root();
-	return load_sajson(root);
+	sajson::value root = doc.get_root().get_array_element(0);
+	try {
+		return load_sajson_depth(root, 0);
+	} catch(TooDeep&){
+		if(error)
+			snprintf(error->text, sizeof(error->text), "nested deeper "
+					"than %i", MAX_DEPTH);
+		return Value();
+	}
 }
 
 const Value json::load_file(const char *path, json_error_t *error){

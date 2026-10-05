@@ -1,0 +1,67 @@
+#!/bin/bash
+# tier: full
+# cost: ~70s (2026-10-04)
+# covers: builtin/luanti/client_lua/module.lua builtin/luanti/lua/entity.lua apps/vanilla/main/client_lua/scan.lua
+# [WIELD_AT_FEET]: what rides the player's own object -- VoxeLibre's held
+# item -- is drawn from where the client has the player now, so in third
+# person it stays at the hand as the player turns and walks, where the
+# server's place for it trailed. VoxeLibre in third person with a stone in
+# hand: turned to four yaws, scanned right after each turn and after it
+# settles, then walking; every scan has the item at the same place in the
+# model's own frame.
+# Needs mineclone2 in the desk's games.
+#   util/wield_follow_check.sh
+set -u
+. "$(dirname "$0")/check_paths.sh"
+here=$(cd "$(dirname "$0")/.." && pwd)
+G="$BUILDAT_USER_PATH/shared/vanilla/games/mineclone2"
+[ -d "$G" ] || { echo "SKIP: no mineclone2"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+t=$(mktemp -d)
+s=
+trap '[ -n "$s" ] && kill $s 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "${t:?}"' EXIT
+fail(){ echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
+mkdir -p "$t/srv/shared/vanilla/games"
+cp -r "$G" "$t/srv/shared/vanilla/games/"
+M=$t/srv/shared/vanilla/games/mineclone2/mods/zz_give
+mkdir -p "$M"
+echo "name = zz_give" > "$M/mod.conf"
+cat > "$M/init.lua" <<'L'
+core.register_on_joinplayer(function(player)
+	core.after(2, function()
+		player:get_inventory():set_stack("main", 1, "mcl_core:stone 10")
+		player:set_wield_index(1)
+	end)
+end)
+L
+echo "fixed_map_seed = 1727923235850308" >> "$t/srv/shared/vanilla/games/mineclone2/minetest.conf"
+cd "$here/Build"
+P=29585
+BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=wield BUILDAT_LUANTI_FORCE_TIME=9000 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/srv" -P $P -l 3 \
+	> "$t/srv.log" 2>&1 &
+s=$!
+for _ in $(seq 240); do
+	grep -q "STATUS Listening" "$t/srv.log" && break
+	kill -0 $s 2>/dev/null || fail "server died ($(tail -3 "$t/srv.log"))"
+	sleep 0.5
+done
+{
+	echo "wait_log 300000 the server put the player"
+	echo "delay 15000"; echo "keypress c"; echo "delay 3000"
+	for y in 0 90 180 270; do
+		echo "look $y -10"; echo "delay 30"; echo "event scan 4 y${y}a"
+		echo "delay 1500"; echo "event scan 4 y${y}b"
+	done
+	echo "keydown w"; echo "delay 400"; echo "event scan 4 walk1"
+	echo "delay 300"; echo "event scan 4 walk2"; echo "keyup w"
+	echo "delay 500"; echo "quit"
+} > "$t/seq"
+timeout 400 bin/buildat -s 127.0.0.1:$P -D "$t/cl" -w 800x600 -u 1 -l 3 \
+	-o sound_mute=1 -c @"$t/seq" > "$t/cl.log" 2>&1
+grep -a "scan [a-z0-9]*: rider" "$t/cl.log" | sed 's/.*: rider [^ ]* //' > "$t/riders"
+n=$(wc -l < "$t/riders")
+[ "$n" -ge 5 ] || fail "$n rider lines, wanted 5 or more (third person, the item made)"
+[ "$(sort -u "$t/riders" | wc -l)" = 1 ] ||
+	fail "the item moved on the model: $(sort "$t/riders" | uniq -c | tr '\n' ';')"
+echo "PASS: the held item at $(head -1 "$t/riders") in $n scans, turning and walking"

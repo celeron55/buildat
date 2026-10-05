@@ -14,6 +14,7 @@ class LineEdit : public BorderImage
     void SetCursorMovable(bool enable);
     void SetTextSelectable(bool enable);
     void SetTextCopyable(bool enable);
+    void SetMultiLine(bool enable);
 
     const String GetText() const;
     unsigned GetCursorPosition() const;
@@ -23,6 +24,7 @@ class LineEdit : public BorderImage
     bool IsCursorMovable() const;
     bool IsTextSelectable() const;
     bool IsTextCopyable() const;
+    bool IsMultiLine() const;
     Text* GetTextElement() const;
     BorderImage* GetCursor() const;
 
@@ -34,6 +36,7 @@ class LineEdit : public BorderImage
     tolua_property__is_set bool cursorMovable;
     tolua_property__is_set bool textSelectable;
     tolua_property__is_set bool textCopyable;
+    tolua_property__is_set bool multiLine;
     tolua_readonly tolua_property__get_set Text* textElement;
     tolua_readonly tolua_property__get_set BorderImage* cursor;
 };

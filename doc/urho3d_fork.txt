@@ -1,5 +1,5 @@
-Urho3D fork
-===========
+The bundled Urho3D, and how it differs from upstream
+====================================================
 3rdparty/Urho3D is official Urho3D 1.7.1 with the changes below. They are not
 upstream and will not survive an update of the bundled copy unless carried
 over. Keep this list current when patching further.
@@ -29,6 +29,11 @@ Source/ThirdParty/tinygltf (added), Source/ThirdParty/Assimp (removed)
 Model and Animation load .gltf/.glb at runtime through tinygltf, so a game can
 ship a glTF file as client data with no conversion step. The parse path follows
 rbfx's Utility/GLTFImporter. Assimp was removed with it; nothing else used it.
+
+Only embedded buffers and images load (33637049): ParseTinyGLTF installs
+FsCallbacks that refuse every external file and expand nothing.
+tinygltf's default ExpandFilePath ran wordexp(3) on a uri, so a model a
+server sent could read a path or run a command on the client.
 
 The right-handed to left-handed conversion is an X mirror applied in several
 places at once, and the comment above MirrorX in GLTFLoader.cpp says which and
@@ -75,3 +80,276 @@ reports img_out_n, which is what the buffer holds. Image::GetImageData is the
 only caller in the tree and passes req_comp 0; a caller that asks for a
 specific count is unaffected, because the conversion just above sets
 img_out_n = req_comp.
+
+The Linux file watcher polls (c6947d4b)
+---------------------------------------
+IO/FileWatcher.cpp
+
+The inotify thread read() with no timeout and stopped only when an event
+came; a directory deleted during the run took its watch with it, the
+IN_IGNORED it counted on never came, and the client sat at exit until
+killed (a fuzz run sat twelve minutes). It polls the fd with a 200 ms
+timeout and checks shouldRun_.
+
+A virtual mouse position (a3915694)
+-----------------------------------
+Input/Input.{cpp,h}
+
+Input::SetVirtualMousePosition(): while set, GetMousePosition() returns it
+and SetMousePosition() moves it instead of warping the OS cursor, so a
+scripted client's mouse_pos and clicks land where the sequence says and
+the desk's pointer stays where the user left it. The command sequence sets
+it from the first mouse_pos; see client_commands.txt.
+
+LuaJIT pinned to rolling v2.1 (5f8f8ab7, 8a5ab12f)
+--------------------------------------------------
+Source/ThirdParty/LuaJIT/{src,dynasm,CMakeLists.txt}
+
+src/ and dynasm/ replaced with LuaJIT v2.1 at c6ffc14 (2.1.0-beta2 aborted
+a trace on every pairs() loop and every closure in a hot path, which is
+what VoxeLibre's mapgen Lua is made of). Urho3D's lua_getmainthread and
+the luaL_reg, luaL_getn and lua_ref aliases re-applied to the new lj_api.c
+and headers; lib_buffer.c, lj_assert.c, lj_prng.c and lj_serialize.c added
+to the lists; LUAJIT_UNWIND_EXTERNAL as the Makefile sets it on Linux; the
+VM's C at -O2 in every build type. GC64 is on: the non-GC64 VM wants its
+memory in the low 2 GB, which the Windows build under Wine could not give
+it. After a LuaJIT change delete LUAJIT_CACHE from the Urho3D build tree's
+CMakeCache.txt, or the VM assembly is made for the wrong mode.
+
+The mingw-w64 build (9daa6ee0, 4a1c1164)
+----------------------------------------
+Source/Urho3D/CMakeLists.txt, Source/ThirdParty/SDL/CMakeLists.txt
+
+Urho3D.dll exports all symbols under MinGW, since buildat calls SDL through
+it; SDL's XAudio2 driver is left out, as its source does not compile
+against current mingw-w64's headers (DirectSound and WinMM remain).
+
+SDL: the mouse grab gives up after a second (1470b190)
+------------------------------------------------------
+Source/ThirdParty/SDL/src/video/x11/SDL_x11window.c
+
+X11_SetWindowGrab() retried XGrabPointer forever; another client holding
+a grab (a locked screen, an open menu) froze the process for as long as
+that lasted. It gives up after a second, as upstream SDL does.
+
+SDL: the wait for MapNotify is bounded (ba5b81cd)
+-------------------------------------------------
+Source/ThirdParty/SDL/src/video/x11/SDL_x11window.c
+
+X11_ShowWindow() blocked in X11_XIfEvent until the window was mapped. A
+window manager that puts a window on a workspace nobody is looking at
+never sends MapNotify, so the client wedged at startup with nothing in
+its log. It waits two seconds and carries on; the window maps when the
+workspace is next looked at, and a driven run does not need it mapped.
+
+SDL: a window can ask not to be activated
+-----------------------------------------
+Source/ThirdParty/SDL/src/video/x11/SDL_x11window.c
+Source/ThirdParty/SDL/src/video/x11/SDL_x11sym.h
+
+X11_ShowWindow() always mapped with XMapRaised, so every driven client
+took the focus of the session it was started from -- a check maps
+fifteen of them. With the hint BUILDAT_WINDOW_NO_ACTIVATION set, it
+sets _NET_WM_USER_TIME to 0 first (EWMH for "the user did not ask for
+this window") and maps without raising. The client sets the hint only
+for a command sequence. XMapWindow was added to the X11 symbol list.
+
+SDL: no dbus_shutdown() at quit (1e1de29c)
+------------------------------------------
+Source/ThirdParty/SDL/src/core/linux/SDL_dbus.c
+
+dbus_shutdown() bumps libdbus's global generation counter, after which any
+other library holding a D-Bus connection fails its own exit cleanup
+(libGLX_nvidia aborted on the assertion). Upstream removed it too.
+
+The Lua GC stepped, not collected, per frame (3eaa6e93)
+-------------------------------------------------------
+LuaScript/LuaScript.cpp
+
+LuaScript::HandlePostUpdate ran a full lua_gc(LUA_GCCOLLECT) every frame,
+20 ms with the bindings and the voxel geometry in the heap; an incremental
+step costs what was allocated, 0.05 ms.
+
+.soversion (29c4a049)
+---------------------
+Source/Urho3D/.soversion
+
+Needed by the bundled build; not in the 1.7.1 tarball.
+
+A current Emscripten: emcmake and SDL's web backend ([WEB_EMSDK])
+-----------------------------------------------------------------
+CMake/Modules/UrhoCommon.cmake, Source/ThirdParty/SDL/CMakeLists.txt,
+Source/ThirdParty/SDL/src/{audio,video}/emscripten/
+
+The web build is configured with emsdk's own toolchain (emcmake), which
+sets no EMSCRIPTEN_EMCC_VERSION, so the 1.7.1 check that added -std=c++03
+for an emcc older than 1.31.3 always fired: the engine is compiled as
+gnu++17 for the web as it is natively, and the removed link option
+--memory-init-file is gone. SDL 2.0.5's Emscripten backend called JS that
+Emscripten no longer has: Runtime.dynCall became wasmTable.get(f)(arg),
+Module['Pointer_stringify'] became UTF8ToString. Current clang rejects its
+mixed declarations under -Werror (now not an error on EMSCRIPTEN) and one
+EGL function pointer assignment (cast). Built with emsdk 3.1.60.
+
+GLES3 and WebGL 2 ([WEB_GLES3])
+-------------------------------
+Graphics/GraphicsDefs.h, Graphics/{Batch,Renderer,View,ShaderPrecache,
+Texture2DArray,Texture3D}.cpp, Graphics/OpenGL/OGL*.{cpp,h},
+bin/CoreData/Shaders/GLSL/{Basic,Lighting,LitSolid,PostProcess,Samplers,
+Text,Transform,Uniforms}.glsl, bin/CoreData/RenderPaths/DeferredHWDepth.xml,
+CMake/Modules/UrhoCommon.cmake
+
+Upstream's GLES3 support (urho3d/Urho3D PR #2536, 508c281a4, merged after
+1.9.0) ported by hand to 1.7.1's file layout. URHO3D_GLES3 (web only)
+includes GLES3/gl3.h, asks SDL for a 3.0 context, sets gl3Support and
+compiles shaders as "#version 300 es". URHO3D_GLES2 now marks the GLES2-only
+paths that GL_ES_VERSION_2_0 used to (GLES3's header defines both), and
+DESKTOP_GRAPHICS_OR_GLES3 what desktop GL and GLES3 share. The shaders are
+upstream's, applied as a patch; they read DESKTOP_GRAPHICS/MOBILE_GRAPHICS,
+which ShaderVariation now defines on every platform -- without it desktop
+directional lights would drop to one shadow cascade. Two departures from
+upstream: Texture2D::Create_OGL keeps the WebGL 1 depth path under
+URHO3D_GLES2 (upstream's DESKTOP_GRAPHICS_OR_GLES3 switched WebGL 1 to the
+desktop one), and the GLES3 path draws instanced and sets divisors with the
+core functions. The engine sample and gradle parts of the PR are left out.
+
+More of SDL's Emscripten backend, and the browser's Esc ([WEB_CLIENT])
+----------------------------------------------------------------------
+Source/ThirdParty/SDL/src/joystick/emscripten/SDL_sysjoystick.c,
+Source/ThirdParty/SDL/src/video/emscripten/SDL_emscripten{opengles,video,
+events}.c, Input/Input.cpp
+
+What the web client ran into at run time: the gamepads are sampled before
+they are counted or read (Emscripten asserts it); eglQueryString is loaded
+with the other EGL functions (SDL_EGL_HasExtension called it through a
+null pointer); the window title goes through emscripten_set_window_title;
+a resizable window follows the canvas's CSS size on a resize even when the
+two were equal at the start. In Input.cpp, when the browser ends a pointer
+lock that the game still wants (MM_RELATIVE, not an exit Urho asked for),
+an Esc down and up is pushed: the browser does that on Esc and keeps the
+key, and the game should see what the user pressed.
+
+The web mouse: the pointer lock follows MM_RELATIVE ([WEB_CLIENT])
+------------------------------------------------------------------
+Input/Input.cpp, Input/Input.h,
+Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c
+
+1.7.1's web input deferred a mode change until the browser answered, asked
+for the lock through emscripten_request_pointerlock(NULL, true) -- which
+waits for the next click or key -- and took a hidden cursor in MM_ABSOLUTE
+for a lock too. A drag asks on its button press, so its lock came at the
+release, after the game had gone back to MM_ABSOLUTE, and stayed; and the
+cursor hidden in the crosshair left a half state behind an Esc. Now: the
+mode is the game's at once; MM_RELATIVE asks for the lock there and then
+(canvas.requestPointerLock, which a recent user activation allows) and any
+other mode leaves it; a lock granted after the game stopped wanting it is
+left at once; the cursor hides while locked and is otherwise what the game
+set. SetMouseModeEmscriptenFinal and the deferred-request bookkeeping are
+gone. SDL's mouse button handler asked SDL_GetEventState about
+SDL_PRESSED/SDL_RELEASED instead of the event types, so the browser was
+never told to leave a button alone: a middle press in Firefox began its
+autoscroll or paste.
+
+The web keyboard: which keys the page claims ([WEB_KEYS])
+--------------------------------------------------------
+Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c
+
+Emscripten_HandleKey claimed no key while text events were enabled, which
+is always, so F1 to F3 went to the browser. Now a key is claimed unless it
+is an IME's (key code 229, "Process", a dead key -- not sent as a game
+key either), Ctrl, Alt or Meta is held (the browser's shortcuts, and its
+copy and paste), or text input is active and the key types a character.
+The web client keeps text input off except while a LineEdit has focus
+(src/client/app.cpp); see doc/plan/web_client_plan.md [WEB_KEYS].
+
+The web text fields: LineEdit's own clipboard keys ([WEB_KEYS] step 2)
+--------------------------------------------------------------------
+Source/Urho3D/UI/LineEdit.cpp
+
+In the browser LineEdit::OnKey leaves Ctrl+C, Ctrl+X and Ctrl+V alone. The
+page's hidden textarea does them through the browser's own copy, cut and
+paste (src/client/app.cpp, src/client/web/index.html), and LineEdit
+pasting its in-page clipboard as well would paste twice.
+
+Source/Urho3D/Input/Input.cpp
+
+EmscriptenInput::HandleFocusChange takes only the window's own focus and
+blur. Its focusout listener is on the window, where a focusout from any
+element arrives: the page's textarea giving its focus back to the canvas
+turned input off. The focus that would have turned it back on does not
+bubble, so it stayed off until the browser window itself was focused
+again.
+
+A multi-line LineEdit ([HEARTH_MVP], 752c6246)
+----------------------------------------------
+UI/LineEdit.{cpp,h}, LuaScript/pkgs/UI/LineEdit.pkg
+
+LineEdit::SetMultiLine / IsMultiLine, the Lua property multiLine: Enter
+inserts a line break and Ctrl+Enter sends TextFinished, the text wraps at
+the field's width, the cursor and the scroll follow its row, and Up, Down,
+Home and End move by rows (GetCharIndexOnRow). Hearth's message fields are
+multi-line.
+
+The web's touch: the first finger's mouse in pixels ([FP_TOUCH])
+----------------------------------------------------------------
+Source/ThirdParty/SDL/src/video/emscripten/SDL_emscriptenevents.c
+
+Emscripten_HandleTouch sends the first finger as the left mouse button.
+It gave SDL_SendMouseMotion the touch's 0..1 position, which is pixels
+there, so the press and the release were at the top left corner. A
+button tapped on a touchscreen was pressed through the UI's own touch
+handling and never released. The finger is now scaled to the window, as
+the mouse handler scales the mouse.
+
+The web's clipboard ([WEB_KEYS] step 3)
+--------------------------------------
+Source/Urho3D/UI/UI.cpp
+
+UI::SetClipboardText also hands the text to the page's buildatClipboard
+(src/client/web/index.html), since SDL's clipboard on the web is the
+page's own. The page writes it with the Clipboard API where the page is
+secure, else with execCommand('copy').
+
+Images a server can hand the client ([SECURITY_RUN_1])
+-----------------------------------------------------
+Source/Urho3D/Resource/Image.cpp
+Source/ThirdParty/STB/stb_image.h
+bin/Data/Materials/Stone*.xml, bin/Data/Textures/Stone{Diffuse,Normal}.png
+
+Image::BeginLoad refuses DDS, KTX, PVR and WebP by their first bytes, and
+stb_image is compiled for PNG, JPEG, TGA and BMP only (STBI_ONLY_*): the
+formats a Luanti game's textures come in. A server hands the client any
+file as a texture, and those loaders are not safe on such input -- KTX's
+level sizes wrap past its size check and write past the buffer, a DDS bit
+count of 0 divides by it, and the bundled libwebp 0.6.0 predates
+CVE-2023-4863's fix. The Stone materials, the only ones of Data that
+buildat uses, point at PNG copies of their two DDS textures (pixel for
+pixel); the rest of Data's materials still name DDS files and do not load.
+
+stb_image.h is upstream's v2.30 (2024-05-31; was 1.7.1's v2.12, whose
+JPEG decoder read past its Huffman table on a crafted file), and a side
+is 8192 at most (STBI_MAX_DIMENSIONS; stb's own 2^24 let 25 bytes of TGA
+ask for gigabytes). util/fuzz/fuzz.sh image fuzzes what is left.
+
+What a server replicates to the client ([SECURITY_RUN_1])
+---------------------------------------------------------
+Source/Urho3D/Container/Vector.h, Container/VectorBase.{h,cpp}
+Source/Urho3D/IO/Deserializer.cpp
+Source/Urho3D/Physics/PhysicsWorld.cpp
+
+Vector allocates capacity * sizeof(T) as a size_t; it was cast to
+unsigned and wrapped, and the elements were constructed past the buffer.
+Deserializer holds a count it reads (ReadBuffer, ReadStringVector,
+ReadVariantVector, ReadResourceRefList, ReadVariantMap) to the bytes left
+in a stream of known size: an element takes one byte at least.
+PhysicsWorld's "Physics FPS" attribute goes through SetFps and its
+clamp, and with Max Substeps 0 a frame simulates 0.1 s at most instead
+of whatever the frame took. util/fuzz/client_fuzz.sh found the three.
+
+stb_vorbis v1.22 ([SECURITY_RUN_1], ad570799)
+---------------------------------------------
+Source/ThirdParty/STB/stb_vorbis.h
+
+Upstream v1.22, unmodified, in place of v1.09, whose compute_codewords
+wrote past a 32-entry stack array on a crafted .ogg -- a file a server can
+hand the client as a sound.

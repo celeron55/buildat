@@ -21,7 +21,7 @@
 #define MODULE "lua_bindings"
 
 // Sockets for Lua. This is the raw layer; it does not ask the user about
-// anything. The extension environment guards it (extensions/network).
+// anything. The extension environment guards it (client/extensions/network).
 //
 // The connect functions always return a socket object; if the connection could
 // not be made, socket:good() is false and socket:error() tells why.
@@ -367,5 +367,4 @@ void init_network(lua_State *L)
 
 } // namespace lua_bindings
 
-// codestyle:disable (currently util/codestyle.sh screws up the .def formatting)
 // vim: set noet ts=4 sw=4:
