@@ -3149,10 +3149,20 @@ local function draw_hud_text(e)
 	if sx > 0 then
 		size = math.floor(HUD_FONT * sx)
 	end
+	local lines = {}
 	for line in (tostring(e.text or "") .. "\n"):gmatch("([^\n]*)\n") do
-		local lw, lh = draw_text_line(block, line, 0, h, base, size)
+		local row = block:CreateChild("UIElement")
+		local lw, lh = draw_text_line(row, line, 0, 0, base, size)
+		lines[#lines + 1] = {row, lw, math.floor(h)}
 		w = math.max(w, lw)
 		h = h + (lh > 0 and lh or size)
+	end
+	-- Each line aligned on its own about the point, as Luanti's
+	-- (align - 1) * line width / 2 ([UI_PARITY] 9): inside the block that
+	-- is its share of what it is short of the widest
+	local ax = parse_v2(e.align, 0, 0)
+	for _, l in ipairs(lines) do
+		l[1]:SetPosition(math.floor((1 - ax) * (w - l[2]) / 2), l[3])
 	end
 	block.size = magic.IntVector2(math.floor(w), math.floor(h))
 	hud_place(block, e, w, h)

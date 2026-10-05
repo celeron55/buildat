@@ -3,7 +3,7 @@
 # tier: full
 # [UI_PARITY] 1 and 2: the two coordinate systems and the slot pitch,
 # against official Luanti; 3 to 5 a list's stacks; 8 bgcolor[] and
-# background9[]; 7 a tooltip, against
+# background9[]; 9 a HUD text's lines; 7 a tooltip, against
 # the number in Luanti's source (official Luanti takes no cursor moved by
 # xdotool, so it is not shot). ui_parity.lua shows a legacy form and then a
 # real_coordinates one, each with three box[]es and a list whose slots
@@ -106,6 +106,9 @@ def measure(path, span, vspan, items, tips=False, bg=False):
 	green = block((g > 130) & (r < 60) & (b < 60), -1)
 	blue = rect((b > 140) & (r < 80) & (g < 80))
 	mag = (r > 200) & (g < 60) & (b > 200)
+	# The slots below the HUD's texts, which are magenta too
+	slotmag = mag.copy()
+	slotmag[:int(a.shape[0] * 0.33)] = False
 	if not red or not green:
 		return None
 	ux, uy = (green[0] - red[0]) / span, (green[1] - red[1]) / vspan
@@ -114,7 +117,7 @@ def measure(path, span, vspan, items, tips=False, bg=False):
 	m = {"red": f(red)}
 	if blue:
 		m["blue"] = f(blue)
-	xr, yr = runs(mag.any(axis=0)), runs(mag.any(axis=1))
+	xr, yr = runs(slotmag.any(axis=0)), runs(slotmag.any(axis=1))
 	if not items:
 		m["slots"] = [len(xr)]
 	if xr and yr and not items:
@@ -144,6 +147,21 @@ def measure(path, span, vspan, items, tips=False, bg=False):
 		m["count 99"] = [inslot(2, white)[i] for i in (2, 1, 3)]
 		m["wear bar"] = inslot(3, bar)
 		m["flat picture"] = inslot(4, ~mag)
+		# [UI_PARITY] 9: the second HUD text line's centre (the one at
+		# 0.3) and right edge (the one at 0.8) from the first's, in units:
+		# each line is aligned on its own. Where the block lands is off by
+		# the font's ink against its advance, about 0.15 units, which is
+		# the engine's font and not measured
+		top = mag[:int(a.shape[0] * 0.33)]
+		for name, x0, x1, at in (("hud centred", 0, 512, 0.5),
+				("hud left of", 512, 1024, 1)):
+			lines = runs(top[:, x0:x1].any(axis=1))
+			m[name] = []
+			for l0, l1 in lines[:2]:
+				xs = np.nonzero(top[l0:l1, x0:x1].any(axis=0))[0] + x0
+				x = xs.min() + (xs.max() + 1 - xs.min()) * at
+				m[name].append(x / ux)
+			m[name] = [m[name][1] - m[name][0]] if len(m[name]) == 2 else None
 	if tips:
 		m = {}
 		# [UI_PARITY] 7: the tooltip's corner from the cursor, in units, and
@@ -187,7 +205,7 @@ for form, span, vspan in (("legacy", 7, 5), ("real", 9.75, 6.5),
 		print("%s %-7s official %s buildat %s%s" % (form, k,
 				" ".join("%.3f" % x for x in (o[k] or [])),
 				" ".join("%.3f" % x for x in (b.get(k) or [])), "" if ok else "  <-- differs"))
-print("PASS: both coordinate systems, the slot pitch, the stacks, the tooltip and the backgrounds as official's" if not bad
+print("PASS: both coordinate systems, the slot pitch, the stacks, the tooltip, the backgrounds and the HUD text as official's" if not bad
 		else "FAIL: %d differ" % bad)
 sys.exit(1 if bad else 0)
 PY

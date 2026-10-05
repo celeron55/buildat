@@ -1,7 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [UI_PARITY] 1 and 2: boxes and a list's slots at known units, in
 -- legacy and in real coordinates; 3 to 5 the stacks; 7 a tooltip; 8 the
--- form's and the screen's colours and an auto_clip background9
+-- form's and the screen's colours and an auto_clip background9; 9 two HUD
+-- texts of two lines, one centred on its point and one left of it
 local FORMS = {
 	legacy = "size[8,6]" ..
 		"box[0,0;1,1;#ff0000]box[7,5;1,1;#00ff00]box[2,1;3,2;#0000ff]" ..
@@ -29,6 +30,12 @@ local FORMS = {
 core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
 	player:get_inventory():set_list("main", {})
+	player:hud_add({type = "text", position = {x = 0.3, y = 0.2},
+			text = "II\nIIIIIIIIII", number = 0xFF00FF,
+			alignment = {x = 0, y = 0}})
+	player:hud_add({type = "text", position = {x = 0.8, y = 0.2},
+			text = "II\nIIIIIIIIII", number = 0xFF00FF,
+			alignment = {x = -1, y = 0}})
 	core.after(4, function()
 		core.show_formspec(name, "uip", FORMS.legacy)
 		core.log("action", "UIP legacy")
