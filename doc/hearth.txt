@@ -88,7 +88,16 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
     search                 30 a minute per account
     new_topic              the admin; name, about, parent (0, or a
                            top-level topic)
-    new_thread             anyone; topic, title, body, subject
+    new_thread             anyone; topic, title, body, subject, kind
+                           ("", question, problem, idea, or patch in a
+                           tracker topic), version
+    status                 the admin: a problem's (open, confirmed,
+                           fixed, wontfix) or a patch's (open, applied,
+                           wontfix), fixed_in a version
+    topic_tracker          the admin: topic, on -- its threads are tickets
+    tracker_link           a ticket's starter or the admin: thread, link
+                           ("" takes it off); below
+    tracker_domains        the list; the admin: add, remove (domains)
     reply                  anyone; not in a hidden thread but the admin
     edit                   the message's author or the admin
     answered               whoever started the thread, or the admin;
@@ -99,7 +108,8 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
     appeal                 one's own hidden message, with a text
     queue                  the admin: the open reports and appeals
     moderate               the admin: a report hidden or dismissed, an
-                           appeal restored or dismissed; a hide and an
+                           appeal restored or dismissed, a tracker
+                           domain accepted or dismissed; a hide and an
                            appeal's dismissal need a statement, which its
                            author is notified with
 
@@ -112,13 +122,38 @@ message marked the answer, a hide, a restore or a refused appeal.
 The client has no page to edit a message or search: those are requests
 only (a scripted client's, below), and search is the HTML face's.
 
+Tickets
+-------
+A topic the admin marks a tracker holds tickets: problems and patches,
+each with its status, its id the thread's #1234. A ticket has one
+tracker link -- a branch, a pull request, an issue elsewhere, http(s)
+only -- shown above the discussion ("Tracker:" on its page), set by
+whoever started it or the admin.
+
+Hearth keeps a list of tracker domains (exact host names). A link to a
+listed domain is shown. A link to another is shown when whoever set it
+may post links now (level 1 or the admin, looked up when it is shown),
+and setting it adds its domain to the list; a new account's waits in
+the moderation queue as a domain, and accepting it adds the domain.
+Removing a domain hides every new account's link to it; the admin also
+takes a single link off. A new account's links in a message are allowed
+to the listed domains and to Hearth's own pages, and refused elsewhere.
+
+A patch is a file named .patch or .diff of text whose first 10 lines
+have "From ", "diff --git ", "--- ", "+++ " or "@@ " at a line's start,
+10,000 lines at most. Anyone uploads one, a new account too; it is
+served as text/plain, so it is applied as it is fetched (git am), and a
+message linking to it shows it inline below the message, 256 kB of
+patches a message at most, on both faces.
+
 Files
 -----
 File... under a message's field picks a file (the browser's picker; on
 native the client's list of <user>/exports) and uploads it as the
 request "upload" {name, data in hex}; its link goes in at the cursor,
 ![name](/f/<id>/name) for an image. A file is 16 MiB at most, 20 an hour
-(an admin any number), and a new account uploads none. A PNG or JPEG is
+(an admin any number), and a new account uploads none but a patch
+(Tickets, above). A PNG or JPEG is
 read (stb_image, those two only, 40 million pixels at most) and written
 again within 1920x1080 (the short side 1080), a JPEG at quality 85:
 nothing else of the upload is kept, its metadata with it. Any other
@@ -140,7 +175,8 @@ A title is 200 bytes at most, a message 20000, a topic's name 80; no
 control characters but a tab, and a line break where lines are allowed.
 A level is worked out at each post:
 
-    0  a new account: 2 threads a day, 10 messages an hour, no links
+    0  a new account: 2 threads a day, 10 messages an hour, links to
+       the tracker domains only
     1  a day since it first came, 5 threads read, 3 of its messages
        shown, none hidden in the last 30 days: 10 threads a day, 60
        messages an hour
@@ -181,5 +217,7 @@ its log and drives clients with the variables above: posting, editing
 and refusals, an answer, a mention and notifications, a chat line
 within two seconds, every HTML page with escaped and hostile markup, a
 new account's limits, a report, a hide with a statement, an appeal and
-a restore, both search limits, the multi-line reply field, and files
-crushed, served and swept.
+a restore, both search limits, the multi-line reply field, files
+crushed, served and swept, and a tracker: a new account's patch shown
+inline and applied with git am, its links and its tracker link by the
+domains.

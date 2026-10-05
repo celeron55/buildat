@@ -224,7 +224,7 @@ local function edit(parent, label, multi)
 end
 
 local show_topic, show_thread, read_on, show_notifications, show_queue, show_report
-local show_new_topic, show_link
+local show_new_topic, show_link, show_domains
 -- Who this client is ("me"), and the thread it has open: the server pushes
 -- that thread's new messages ("hr:new"), which are added to it in place
 local me = {account = "", unseen = 0, level = 0, open_reports = 0}
@@ -232,25 +232,27 @@ local open_thread = nil
 local on_home = false
 
 -- What a thread is, as main.cpp's kind_text() says it: "problem, fixed in
--- 1.3", "question", or "" for a discussion
+-- 1.3", "patch, applied", "question", or "" for a discussion
 local function kind_text(th)
-	if th.kind ~= "problem" then
+	if th.kind ~= "problem" and th.kind ~= "patch" then
 		return th.kind or ""
 	end
-	if th.status == "fixed" then
-		return "problem, fixed" .. (th.fixed_in ~= "" and " in " .. th.fixed_in or "")
+	if th.status == "fixed" or th.status == "applied" then
+		return th.kind .. ", " .. th.status ..
+				(th.fixed_in ~= "" and " in " .. th.fixed_in or "")
 	end
-	return "problem, " .. (th.status == "wontfix" and "won't fix" or th.status)
+	return th.kind .. ", " .. (th.status == "wontfix" and "won't fix" or th.status)
 end
 
 -- A button that cycles through what a new thread is ([PACKAGE_SUBJECT]);
 -- returns a function giving the kind picked
+-- A patch only in a tracker topic ([HEARTH_TRACKER])
 local KINDS = {{"", "a discussion"}, {"question", "a question"},
-		{"problem", "a problem"}, {"idea", "an idea"}}
-local function kind_pick(parent, at)
+		{"problem", "a problem"}, {"idea", "an idea"}, {"patch", "a patch"}}
+local function kind_pick(parent, at, tracker)
 	local pick
 	pick = button(parent, "It is " .. KINDS[at][2], function()
-		at = at % #KINDS + 1
+		at = at % (tracker and #KINDS or #KINDS - 1) + 1
 		pick:GetChild(0):SetText("It is " .. KINDS[at][2])
 	end)
 	return function() return KINDS[at][1] end
@@ -275,6 +277,7 @@ home = function()
 			button(w, "Moderation (" .. (me.open_reports or 0) .. " open)",
 					show_queue)
 			button(w, "New topic...", function() show_new_topic(r.topics) end)
+			button(w, "Tracker domains...", show_domains)
 		end
 		local _, add = list(w)
 		-- Each subtopic under its parent; the server gives the top level first
@@ -354,13 +357,20 @@ show_topic = function(id)
 		-- simplified: no markup buttons and no preview yet; the text is
 		-- CommonMark, which reads as it is
 		local body = edit(w, "Its first message (Markdown)", true)
-		local kind = kind_pick(w, 1)
+		local kind = kind_pick(w, 1, t.tracker)
 		button(w, "Start the thread", function()
 			req("new_thread", {topic = id, title = title:GetText(),
 					body = body:GetText(), kind = kind()}, function(new_id)
 				show_thread(new_id)
 			end)
 		end)
+		if me.admin then
+			button(w, t.tracker and "Not a tracker" or "Make it a tracker",
+					function()
+				req("topic_tracker", {topic = id, on = not t.tracker},
+						function() show_topic(id) end)
+			end)
+		end
 		button(w, "Back", home)
 	end)
 end
@@ -375,6 +385,11 @@ local function add_message(t, add, m, is_answer)
 	end
 	if m.body ~= "" then
 		add(m.body)
+	end
+	-- Its patches inline: the review is in the thread ([HEARTH_TRACKER])
+	for _, p in ipairs(m.patches or {}) do
+		add(p.name, GREY)
+		add(p.text)
 	end
 	if m.hidden and m.author == me.account then
 		add("Appeal", nil, function() show_report(t.id, m, "appeal") end)
@@ -412,6 +427,12 @@ show_thread = function(id)
 		if kind ~= "" then
 			text(w, kind .. (t.version ~= "" and ", reported in " .. t.version or
 					""), GREY)
+		end
+		if t.link ~= "" then
+			text(w, "Tracker: " .. t.link, GREY)
+		elseif t.link_waiting ~= "" then
+			text(w, "Tracker: " .. t.link_waiting ..
+					" (its domain waits for a moderator)", YELLOW)
 		end
 		local l, add = list(w)
 		t.first = t.list[1] and t.list[1].id or 0
@@ -461,17 +482,31 @@ show_thread = function(id)
 		if t.subject == "" and (t.author == me.account or me.admin) then
 			button(w, "About a package...", function() show_link(t) end)
 		end
-		-- A problem's status, the admin's to set ([PACKAGE_SUBJECT])
-		if t.kind == "problem" and me.admin then
+		-- A ticket's tracker link, by whoever started it or the admin
+		-- ([HEARTH_TRACKER])
+		if t.ticket and (t.author == me.account or me.admin) then
+			local link = edit(w, "Tracker link (a branch, a pull request, " ..
+					"an issue elsewhere)")
+			link:SetText(t.link ~= "" and t.link or t.link_waiting)
+			button(w, "Set the tracker link", function()
+				req("tracker_link", {thread = id, link = link:GetText()},
+						function() show_thread(id) end)
+			end)
+		end
+		-- A problem's or a patch's status, the admin's to set
+		-- ([PACKAGE_SUBJECT], [HEARTH_TRACKER])
+		if (t.kind == "problem" or t.kind == "patch") and me.admin then
 			-- One button, to the next status: a page that fits a small window
-			local fixed_in = edit(w, "Fixed in (a version, for fixed)")
-			local next = {open = "confirmed", confirmed = "fixed",
-					fixed = "wontfix", wontfix = "open"}
+			local fixed_in = edit(w, "In version (for fixed or applied)")
+			local next = t.kind == "patch" and {open = "applied",
+					applied = "wontfix", wontfix = "open"} or {open = "confirmed",
+					confirmed = "fixed", fixed = "wontfix", wontfix = "open"}
 			local to = next[t.status] or "open"
 			button(w, "Make it " .. (to == "wontfix" and "won't fix" or to),
 					function()
 				req("status", {thread = id, status = to, fixed_in =
-						to == "fixed" and fixed_in:GetText() or ""},
+						(to == "fixed" or to == "applied") and fixed_in:GetText() or
+						""},
 						function() show_thread(id) end)
 			end)
 		end
@@ -555,6 +590,30 @@ show_new_topic = function(topics)
 	name:SetFocus(true)
 end
 
+-- The tracker domains ([HEARTH_TRACKER]): a link to one is shown whoever
+-- posted it; removing one hides a new account's links to it
+show_domains = function()
+	leave_home()
+	open_thread = nil
+	req("tracker_domains", nil, function(domains)
+		local w = new_page("Tracker domains")
+		local _, add = list(w)
+		for _, d in ipairs(domains) do
+			add(d .. "  (remove)", nil, function()
+				req("tracker_domains", {remove = {d}}, show_domains)
+			end)
+		end
+		if #domains == 0 then
+			add("None yet.", GREY)
+		end
+		local e = edit(w, "A domain to add (codeberg.org)")
+		button(w, "Add", function()
+			req("tracker_domains", {add = {e:GetText()}}, show_domains)
+		end)
+		button(w, "Back", home)
+	end)
+end
+
 -- The admin's queue: open reports (hide or dismiss) and appeals (restore
 -- or dismiss), with a statement of reasons the author is shown
 show_queue = function()
@@ -570,18 +629,27 @@ show_queue = function()
 					statement = statement:GetText()}, show_queue)
 		end
 		for _, r in ipairs(items) do
-			add((r.kind == "appeal" and "Appeal by " or "Report by ") .. r.by ..
-					" in " .. r.title .. ": " .. r.reason, YELLOW)
-			if r.kind == "appeal" then
-				add("Hidden for: " .. r.hidden_reason, GREY)
-			end
-			add(r.author .. ": " .. r.body)
-			if r.kind == "appeal" then
-				add("Restore", nil, function() act(r, "restore") end)
+			-- [HEARTH_TRACKER]: a new account's tracker link on a domain
+			-- not whitelisted; accepting whitelists the domain
+			if r.kind == "domain" then
+				add("Tracker domain " .. r.reason .. ", linked by " .. r.by ..
+						" in " .. r.title, YELLOW)
+				add("Accept the domain", nil, function() act(r, "accept") end)
+				add("Dismiss", nil, function() act(r, "dismiss") end)
 			else
-				add("Hide", nil, function() act(r, "hide") end)
+				add((r.kind == "appeal" and "Appeal by " or "Report by ") .. r.by ..
+						" in " .. r.title .. ": " .. r.reason, YELLOW)
+				if r.kind == "appeal" then
+					add("Hidden for: " .. r.hidden_reason, GREY)
+				end
+				add(r.author .. ": " .. r.body)
+				if r.kind == "appeal" then
+					add("Restore", nil, function() act(r, "restore") end)
+				else
+					add("Hide", nil, function() act(r, "hide") end)
+				end
+				add("Dismiss", nil, function() act(r, "dismiss") end)
 			end
-			add("Dismiss", nil, function() act(r, "dismiss") end)
 		end
 		if #items == 0 then
 			add("Nothing open.", GREY)

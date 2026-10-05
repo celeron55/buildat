@@ -348,7 +348,9 @@ static const char *SCHEMA =
 	"PRAGMA journal_mode=WAL;"
 	"CREATE TABLE IF NOT EXISTS topics(id INTEGER PRIMARY KEY, "
 		"parent INTEGER NOT NULL DEFAULT 0, name TEXT NOT NULL, "
-		"about TEXT NOT NULL DEFAULT '');"
+		"about TEXT NOT NULL DEFAULT '', "
+		// [HEARTH_TRACKER]: its threads are tickets, and a patch is one
+		"tracker INTEGER NOT NULL DEFAULT 0);"
 	// subject: what the thread is about, a package's "author/name" and key
 	// ([PACKAGE_SUBJECT]); stored, and nothing reads it yet
 	"CREATE TABLE IF NOT EXISTS threads(id INTEGER PRIMARY KEY, "
@@ -366,7 +368,10 @@ static const char *SCHEMA =
 		// version it was reported in, and the one that fixed it
 		"status TEXT NOT NULL DEFAULT '', "
 		"version TEXT NOT NULL DEFAULT '', "
-		"fixed_in TEXT NOT NULL DEFAULT '');"
+		"fixed_in TEXT NOT NULL DEFAULT '', "
+		// A ticket's tracker link ([HEARTH_TRACKER]) and who set it
+		"link TEXT NOT NULL DEFAULT '', "
+		"link_by TEXT NOT NULL DEFAULT '');"
 	"CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, "
 		"thread INTEGER NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL, "
 		"created INTEGER NOT NULL, edited INTEGER NOT NULL DEFAULT 0, "
@@ -433,11 +438,17 @@ static const char *const COLUMNS_ADDED[][3] = {
 	{"threads", "status", "TEXT NOT NULL DEFAULT ''"},
 	{"threads", "version", "TEXT NOT NULL DEFAULT ''"},
 	{"threads", "fixed_in", "TEXT NOT NULL DEFAULT ''"},
+	{"topics", "tracker", "INTEGER NOT NULL DEFAULT 0"},
+	{"threads", "link", "TEXT NOT NULL DEFAULT ''"},
+	{"threads", "link_by", "TEXT NOT NULL DEFAULT ''"},
 };
 // What a poster picks a thread to be ([PACKAGE_SUBJECT]); "release" is
 // Hearth's own
-static const std::set<ss_> POSTED_KINDS = {"", "question", "problem", "idea"};
+static const std::set<ss_> POSTED_KINDS = {"", "question", "problem", "idea",
+		"patch"};
+// A ticket's statuses ([HEARTH_TRACKER]): a problem's, and a patch's
 static const std::set<ss_> STATUSES = {"open", "confirmed", "fixed", "wontfix"};
+static const std::set<ss_> PATCH_STATUSES = {"open", "applied", "wontfix"};
 
 // A package's version as a report names it: 1 to 40 of [A-Za-z0-9.+_-]
 static bool version_ok(const ss_ &v)
@@ -447,16 +458,102 @@ static bool version_ok(const ss_ &v)
 			== ss_::npos;
 }
 
-// What a thread's line says it is: "problem, fixed in 1.3", "question", ""
+// What a thread's line says it is: "problem, fixed in 1.3", "patch,
+// applied in 1.4", "question", ""
 static ss_ kind_text(const json::Value &t)
 {
 	const ss_ kind = jstr(t, "kind"), status = jstr(t, "status");
-	if(kind != "problem")
+	if(kind != "problem" && kind != "patch")
 		return kind;
-	if(status == "fixed")
-		return "problem, fixed" + (jstr(t, "fixed_in").empty() ? ss_() :
+	if(status == "fixed" || status == "applied")
+		return kind+", "+status + (jstr(t, "fixed_in").empty() ? ss_() :
 				" in "+jstr(t, "fixed_in"));
-	return "problem, "+ss_(status == "wontfix" ? "won't fix" : status);
+	return kind+", "+ss_(status == "wontfix" ? "won't fix" : status);
+}
+
+// [HEARTH_TRACKER]: a link's host, lower case, or "" for none: an http(s)
+// address only, and none with a user part ("https://a.org@b.org")
+static ss_ url_host(const ss_ &u)
+{
+	const size_t at = u.find("://");
+	if(at == ss_::npos)
+		return "";
+	ss_ scheme = u.substr(0, at);
+	for(char &c : scheme)
+		c = tolower((unsigned char)c);
+	if(scheme != "http" && scheme != "https")
+		return "";
+	const size_t end = u.find_first_of("/?#", at + 3);
+	ss_ host = u.substr(at + 3, end == ss_::npos ? ss_::npos : end - at - 3);
+	if(host.find('@') != ss_::npos)
+		return "";
+	host = host.substr(0, host.find(':'));
+	for(char &c : host)
+		c = tolower((unsigned char)c);
+	if(host.empty() || host.find_first_not_of(
+			"abcdefghijklmnopqrstuvwxyz0123456789.-") != ss_::npos)
+		return "";
+	return host;
+}
+
+// Where the links in a message go: each href and image of its markup, and
+// every bare "scheme://" or "www." in its text; "" for one that is not an
+// http(s) host (mailto:, //host). One to this Hearth's own pages ("/t/1",
+// "/f/2", "#m3") is left out
+static sv_<ss_> link_hosts(const ss_ &text)
+{
+	sv_<ss_> out;
+	const ss_ h = interface::markup::to_html(text);
+	for(const char *attr : {"href=\"", "src=\""}){
+		for(size_t at = 0; (at = h.find(attr, at)) != ss_::npos;){
+			at += strlen(attr);
+			const ss_ u = h.substr(at, h.find('"', at) - at);
+			if(u.empty() || u[0] == '#' || (u[0] == '/' && u.compare(0, 2, "//")))
+				continue;
+			out.push_back(url_host(u));
+		}
+	}
+	ss_ t = text;
+	for(char &c : t)
+		c = tolower((unsigned char)c);
+	for(size_t at = 0; (at = t.find("://", at)) != ss_::npos; at += 3){
+		size_t b = at;
+		while(b > 0 && isalpha((unsigned char)t[b - 1]))
+			b--;
+		const size_t e = t.find_first_of(" \t\n<>()[]\"'", at);
+		out.push_back(url_host(t.substr(b, e == ss_::npos ? ss_::npos : e - b)));
+	}
+	for(size_t at = 0; (at = t.find("www.", at)) != ss_::npos; at += 4)
+		if(at == 0 || t[at - 1] != '/')
+			out.push_back(url_host("http://"+t.substr(at,
+					t.find_first_of(" \t\n<>()[]\"'", at) - at)));
+	return out;
+}
+
+// [HEARTH_TRACKER]: a patch as uploaded -- a .patch or .diff of text whose
+// first lines look like one (what a reader sees first), 10,000 lines at
+// most; shown inline and served as text
+static const size_t PATCH_LINES = 10000;
+static const char *PATCH_TYPE = "text/plain; charset=utf-8";
+static bool is_patch(const ss_ &name, const ss_ &data)
+{
+	ss_ n = name;
+	for(char &c : n)
+		c = tolower((unsigned char)c);
+	const bool named = (n.size() > 6 && n.compare(n.size() - 6, 6, ".patch")
+			== 0) || (n.size() > 5 && n.compare(n.size() - 5, 5, ".diff") == 0);
+	if(!named || data.find('\0') != ss_::npos ||
+			(size_t)std::count(data.begin(), data.end(), '\n') > PATCH_LINES)
+		return false;
+	size_t at = 0;
+	for(int i = 0; i < 10 && at < data.size(); i++){
+		const ss_ line = data.substr(at, data.find('\n', at) - at);
+		for(const char *m : {"From ", "diff --git ", "--- ", "+++ ", "@@ "})
+			if(line.compare(0, strlen(m), m) == 0)
+				return true;
+		at += line.size() + 1;
+	}
+	return false;
 }
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
 		"/robots.txt", "/p/", "/brand/"};
@@ -602,6 +699,87 @@ struct Module: public interface::Module
 		if(!q.step())
 			return json::object();
 		return json::load_string(q.s(0).c_str());
+	}
+
+	// -----------------------------------------------------------------------
+	// [HEARTH_TRACKER]: tickets, their tracker links and patches
+
+	// The tracker domains: a link to one is shown, whoever posted it
+	std::set<ss_> tracker_domains()
+	{
+		std::set<ss_> out;
+		const json::Value v = setting("tracker_domains");
+		const json::Value &l = v.get("domains");
+		for(unsigned i = 0; l.is_array() && i < l.size(); i++)
+			if(l.at(i).is_string())
+				out.insert(l.at(i).as_string());
+		return out;
+	}
+	void set_tracker_domains(const std::set<ss_> &domains)
+	{
+		json::Value l = json::array();
+		for(const ss_ &d : domains)
+			l.append(d);
+		json::Value v = json::object();
+		v.set("domains", l);
+		Q i(m_db, "INSERT OR REPLACE INTO settings(key, value) "
+				"VALUES('tracker_domains', ?)");
+		i.b(v.stringify()).step();
+	}
+
+	// An account's level, the admin's included, for a link it posted:
+	// looked up when the link is shown, so one trusted now has its old
+	// links trusted too
+	int level_of(const ss_ &name)
+	{
+		bool admin = false;
+		accounts::access(m_server, [&](accounts::Interface *a){
+			admin = !name.empty() && a->is_admin(name);
+		});
+		return level(name, admin);
+	}
+
+	// A ticket's link is shown when its domain is whitelisted, or whoever
+	// set it may post links now
+	bool link_shown(const ss_ &link, const ss_ &by)
+	{
+		return !link.empty() && (tracker_domains().count(url_host(link)) ||
+				level_of(by) >= 1);
+	}
+
+	// The patches a message links to (/f/<id>), their text inline, at most
+	// PATCH_INLINE bytes of them; shown is a use, as a fetch is
+	static const size_t PATCH_INLINE = 256 * 1024;
+	json::Value patches_in(const ss_ &body)
+	{
+		json::Value out = json::array();
+		std::set<int64_t> seen;
+		size_t total = 0;
+		for(size_t at = 0; (at = body.find("/f/", at)) != ss_::npos; at += 3){
+			size_t e = at + 3;
+			while(e < body.size() && e - at < 18 && isdigit((unsigned char)body[e]))
+				e++;
+			const int64_t id = atoll(body.substr(at + 3, e - at - 3).c_str());
+			if(e == at + 3 || !seen.insert(id).second)
+				continue;
+			Q f(m_db, "SELECT name, data FROM files WHERE id = ? AND type = ?");
+			f.b(id).b(ss_(PATCH_TYPE));
+			if(!f.step())
+				continue;
+			ss_ text = f.s(1);
+			if(total + text.size() > PATCH_INLINE)
+				text = text.substr(0, total < PATCH_INLINE ? PATCH_INLINE -
+						total : 0)+"\n[the rest is at /f/"+itos(id)+"]\n";
+			total += text.size();
+			Q u(m_db, "UPDATE files SET used = ? WHERE id = ?");
+			u.b(now_s()).b(id).step();
+			json::Value v = json::object();
+			v.set("id", id);
+			v.set("name", f.s(0));
+			v.set("text", text);
+			out.append(v);
+		}
+		return out;
 	}
 
 	// -----------------------------------------------------------------------
@@ -904,8 +1082,8 @@ struct Module: public interface::Module
 	{
 		json::Value list = json::array();
 		Q q(m_db, "SELECT t.id, t.parent, t.name, t.about, "
-				"(SELECT count(*) FROM threads WHERE topic = t.id AND hidden = 0) "
-				"FROM topics t ORDER BY t.parent, t.id");
+				"(SELECT count(*) FROM threads WHERE topic = t.id AND hidden = 0), "
+				"t.tracker FROM topics t ORDER BY t.parent, t.id");
 		while(q.step()){
 			json::Value t = json::object();
 			t.set("id", q.i(0));
@@ -913,6 +1091,7 @@ struct Module: public interface::Module
 			t.set("name", q.s(2));
 			t.set("about", q.s(3));
 			t.set("threads", q.i(4));
+			t.set("tracker", q.i(5) != 0);
 			list.append(t);
 		}
 		return list;
@@ -920,7 +1099,7 @@ struct Module: public interface::Module
 
 	json::Value topic(int64_t id)
 	{
-		Q q(m_db, "SELECT name, about, parent FROM topics WHERE id = ?");
+		Q q(m_db, "SELECT name, about, parent, tracker FROM topics WHERE id = ?");
 		q.b(id);
 		if(!q.step())
 			return json::Value();
@@ -929,6 +1108,7 @@ struct Module: public interface::Module
 		t.set("name", q.s(0));
 		t.set("about", q.s(1));
 		t.set("parent", q.i(2));
+		t.set("tracker", q.i(3) != 0);
 		return t;
 	}
 
@@ -991,6 +1171,14 @@ struct Module: public interface::Module
 		if(!q.step())
 			return json::Value();
 		json::Value t = thread_row(q);
+		// The tracker link, where it is shown; the one waiting for its
+		// domain to its setter and the admin
+		Q l(m_db, "SELECT link, link_by FROM threads WHERE id = ?");
+		l.b(id).step();
+		const bool shown = link_shown(l.s(0), l.s(1));
+		t.set("link", shown ? l.s(0) : ss_());
+		t.set("link_waiting", !shown && (admin || viewer == l.s(1)) ?
+				l.s(0) : ss_());
 		json::Value list = json::array();
 		Q m(m_db, "SELECT id, author, body, created, edited, hidden, "
 				"hidden_reason FROM messages "
@@ -1012,9 +1200,12 @@ struct Module: public interface::Module
 			v.set("edited", m.i(4));
 			v.set("hidden", hidden);
 			v.set("hidden_reason", m.s(6));
+			v.set("patches", patches_in(jstr(v, "body")));
 			// A message's own bytes besides its body: many short ones fill
 			// a part too
 			bytes += 256 + jstr(v, "body").size();
+			for(unsigned i = 0; i < v.get("patches").size(); i++)
+				bytes += jstr(v.get("patches").at(i), "text").size();
 			list.append(v);
 		}
 		t.set("list", list);
@@ -1212,7 +1403,22 @@ struct Module: public interface::Module
 				html(jstr(m, "author"))+"</b>, <a href=\"/m/"+id+"\">"+
 				time_text(jint(m, "created"))+"</a>"+(jint(m, "edited") ?
 				" (edited "+time_text(jint(m, "edited"))+")" : "")+"</p>"+
-				interface::markup::to_html(jstr(m, "body"))+"</div>\n";
+				interface::markup::to_html(jstr(m, "body"))+patches_html(m)+
+				"</div>\n";
+	}
+
+	// A message's patches inline, the review being in the thread
+	ss_ patches_html(const json::Value &m)
+	{
+		const json::Value ps = m.get("patches").is_array() ? m.get("patches") :
+				patches_in(jstr(m, "body"));
+		ss_ out;
+		for(unsigned i = 0; i < ps.size(); i++)
+			out += "<p class=\"meta\"><a href=\"/f/"+
+					itos(jint(ps.at(i), "id"))+"\">"+html(jstr(ps.at(i), "name"))+
+					"</a></p><pre><code>"+html(jstr(ps.at(i), "text"))+
+					"</code></pre>";
+		return out;
 	}
 
 	// The id after a prefix, or -1
@@ -1378,6 +1584,10 @@ struct Module: public interface::Module
 				body += "<p class=\"meta\">"+html(kind_text(t))+
 						(jstr(t, "version").empty() ? ss_() :
 						", reported in "+html(jstr(t, "version")))+"</p>\n";
+			if(!jstr(t, "link").empty())
+				body += "<p class=\"meta\">Tracker: <a rel=\"nofollow ugc\" "
+						"href=\""+html(jstr(t, "link"))+"\">"+html(jstr(t, "link"))+
+						"</a></p>\n";
 			const ss_ pkg = jstr(t, "subject").substr(0,
 					jstr(t, "subject").find(' '));
 			if(!pkg.empty())
@@ -1545,8 +1755,15 @@ struct Module: public interface::Module
 		const char *how = lv == 0 ? " (a new account's limit, until a day "
 				"has passed, five threads are read and three of its messages "
 				"stand)" : "";
-		if(!l.links && has_link(text))
-			throw Exception(ss_("no links yet")+how);
+		// [HEARTH_TRACKER]: a new account's links go to the tracker domains
+		// only, refused elsewhere rather than queued
+		if(!l.links && has_link(text)){
+			const std::set<ss_> domains = tracker_domains();
+			for(const ss_ &h : link_hosts(text))
+				if(!domains.count(h))
+					throw Exception(ss_("no links yet, but to the tracker "
+							"domains")+how);
+		}
 		// An edit counts as a message: each keeps the old body
 		Q m(m_db, "SELECT (SELECT count(*) FROM messages WHERE author = ? "
 				"AND created > ?) + (SELECT count(*) FROM edits WHERE "
@@ -1647,6 +1864,9 @@ struct Module: public interface::Module
 				t.set("list", first);
 				t.set("more", false);
 			}
+			// [HEARTH_TRACKER]: a problem or a patch in a tracker topic
+			t.set("ticket", (jstr(t, "kind") == "problem" || jstr(t, "kind") ==
+					"patch") && topic(jint(t, "topic")).get("tracker").is_true());
 			m_viewing[peer] = jint(q, "thread");
 			Q rd(m_db, "INSERT OR IGNORE INTO reads(account, thread) "
 					"VALUES(?, ?)");
@@ -1726,34 +1946,124 @@ struct Module: public interface::Module
 				if(p.get("parent").as_integer() != 0)
 					throw Exception("a subtopic cannot have subtopics");
 			}
-			Q i(m_db, "INSERT INTO topics(parent, name, about) VALUES(?, ?, ?)");
-			i.b(parent).b(topic_name).b(about).step();
+			Q i(m_db, "INSERT INTO topics(parent, name, about, tracker) "
+					"VALUES(?, ?, ?, ?)");
+			i.b(parent).b(topic_name).b(about)
+					.b((int64_t)q.get("tracker").is_true()).step();
 			log_i(MODULE, "%s added the topic %s", cs(name), cs(topic_name));
 			return json::Value((int64_t)sqlite3_last_insert_rowid(m_db));
+		}
+		// [HEARTH_TRACKER]: a topic made a tracker, or not
+		if(cmd == "topic_tracker"){
+			if(!admin)
+				throw Exception("only the admin marks a tracker");
+			Q u(m_db, "UPDATE topics SET tracker = ? WHERE id = ?");
+			u.b((int64_t)q.get("on").is_true()).b(jint(q, "topic")).step();
+			if(sqlite3_changes(m_db) == 0)
+				throw Exception("no such topic");
+			return json::Value(true);
+		}
+		// The tracker domains: {add, remove} -> the list. A removed one
+		// takes with it every link a new account posted to it
+		if(cmd == "tracker_domains"){
+			std::set<ss_> domains = tracker_domains();
+			if(!q.get("add").is_undefined() || !q.get("remove").is_undefined()){
+				if(!admin)
+					throw Exception("only the admin sets the tracker domains");
+				for(const char *k : {"add", "remove"}){
+					const json::Value &l = q.get(k);
+					for(unsigned i = 0; l.is_array() && i < l.size(); i++){
+						const ss_ h = l.at(i).is_string() ? url_host("http://"+
+								l.at(i).as_string()) : ss_();
+						if(h.empty() || h.size() > 100)
+							throw Exception(ss_(k)+": not a domain");
+						if(k[0] == 'a')
+							domains.insert(h);
+						else
+							domains.erase(h);
+					}
+				}
+				if(domains.size() > 200)
+					throw Exception("200 tracker domains at most");
+				set_tracker_domains(domains);
+			}
+			json::Value l = json::array();
+			for(const ss_ &d : domains)
+				l.append(d);
+			return l;
+		}
+		// A ticket's tracker link, by whoever started it or the admin; ""
+		// takes it off. On a domain not whitelisted: an account that may
+		// post links whitelists it, anyone else's waits in the queue
+		if(cmd == "tracker_link"){
+			const int64_t thread_id = jint(q, "thread");
+			const ss_ link = jstr(q, "link");
+			Q t(m_db, "SELECT t.author, t.kind, p.tracker, (SELECT min(id) "
+					"FROM messages WHERE thread = t.id) FROM threads t JOIN "
+					"topics p ON p.id = t.topic WHERE t.id = ?");
+			t.b(thread_id);
+			if(!t.step())
+				throw Exception("no such thread");
+			if(t.s(0) != name && !admin)
+				throw Exception("only whoever started the ticket links it");
+			if(!t.i(2) || (t.s(1) != "problem" && t.s(1) != "patch"))
+				throw Exception("only a ticket (a problem or a patch in a "
+						"tracker) has a tracker link");
+			const ss_ host = url_host(link);
+			if(!link.empty()){
+				need(text_ok(link, 300, false, "the link"));
+				if(host.empty())
+					throw Exception("a tracker link is an http(s) address");
+			}
+			Q u(m_db, "UPDATE threads SET link = ?, link_by = ? WHERE id = ?");
+			u.b(link).b(link.empty() ? ss_() : name).b(thread_id).step();
+			std::set<ss_> domains = tracker_domains();
+			if(link.empty() || domains.count(host))
+				return json::Value(true);
+			if(LIMITS[level(name, admin)].links){
+				domains.insert(host);
+				set_tracker_domains(domains);
+				log_i(MODULE, "%s added the tracker domain %s", cs(name),
+						cs(host));
+				return json::Value(true);
+			}
+			Q o(m_db, "SELECT 1 FROM reports WHERE kind = 'domain' AND "
+					"reason = ? AND state = 'open'");
+			o.b(host);
+			if(!o.step()){
+				Q i(m_db, "INSERT INTO reports(kind, message, by, reason, time) "
+						"VALUES('domain', ?, ?, ?, ?)");
+				i.b(t.i(3)).b(name).b(host).b(now_s()).step();
+			}
+			return json::Value(false);
 		}
 		if(cmd == "upload"){
 			// [FORUM] step 5: {name, data (hex)} -> {id, image}; at /f/<id>
 			const int lv = level(name, admin);
-			if(!LIMITS[lv].links)
-				throw Exception("no files yet (a new account's limit, until a "
-						"day has passed, five threads are read and three of its "
-						"messages stand)");
-			Q c(m_db, "SELECT count(*) FROM files WHERE uploader = ? AND "
-					"created > ?");
-			c.b(name).b(now_s() - 3600).step();
-			if(lv < 2 && c.i(0) >= UPLOADS_AN_HOUR)
-				throw Exception(itos(UPLOADS_AN_HOUR)+" files an hour at most");
 			const ss_ file_name = jstr(q, "name");
-			need(text_ok(file_name, NAME_MAX, false, "the file's name"));
 			const ss_ hex = jstr(q, "data");
 			if(hex.size() > UPLOAD_MAX * 2)
 				throw Exception("a file is "+itos(UPLOAD_MAX >> 20)+
 						" MiB at most");
 			ss_ data = unhex(hex), type = "application/octet-stream";
+			// [HEARTH_TRACKER]: a patch, a new account's too
+			const bool patch = is_patch(file_name, data);
+			if(!LIMITS[lv].links && !patch)
+				throw Exception("no files yet but a patch (a new account's "
+						"limit, until a day has passed, five threads are read "
+						"and three of its messages stand)");
+			Q c(m_db, "SELECT count(*) FROM files WHERE uploader = ? AND "
+					"created > ?");
+			c.b(name).b(now_s() - 3600).step();
+			if(lv < 2 && c.i(0) >= UPLOADS_AN_HOUR)
+				throw Exception(itos(UPLOADS_AN_HOUR)+" files an hour at most");
+			need(text_ok(file_name, NAME_MAX, false, "the file's name"));
 			if(data.empty())
 				throw Exception("the file is empty");
 			int64_t lod = 0;
-			if(data.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0){
+			if(patch){
+				type = PATCH_TYPE;
+			} else if(data.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0){
 				data = crush(data, false, 1920, 1080, 0);
 				type = "image/png";
 				lod = 1;
@@ -1769,6 +2079,7 @@ struct Module: public interface::Module
 			json::Value v = json::object();
 			v.set("id", (int64_t)sqlite3_last_insert_rowid(m_db));
 			v.set("image", lod == 1);
+			v.set("patch", patch);
 			v.set("bytes", (int64_t)data.size());
 			return v;
 		}
@@ -1845,11 +2156,14 @@ struct Module: public interface::Module
 			const ss_ title = jstr(q, "title"), body = jstr(q, "body"),
 					subject = jstr(q, "subject"), kind = jstr(q, "kind"),
 					version = jstr(q, "version");
-			if(!topic(topic_id).is_object())
+			const json::Value top = topic(topic_id);
+			if(!top.is_object())
 				throw Exception("no such topic");
 			if(!POSTED_KINDS.count(kind))
 				throw Exception("a thread is a discussion, a question, a "
-						"problem or an idea");
+						"problem, an idea or a patch");
+			if(kind == "patch" && !top.get("tracker").is_true())
+				throw Exception("a patch is a ticket, in a tracker topic");
 			if(!version.empty() && !version_ok(version))
 				throw Exception("a version is 1 to 40 of letters, digits "
 						"and .+_-");
@@ -1863,7 +2177,8 @@ struct Module: public interface::Module
 					"subject, kind, status, version) VALUES(?, ?, ?, ?, ?, ?, ?, "
 					"?, ?)");
 			i.b(topic_id).b(title).b(name).b(t).b(t).b(subject).b(kind)
-					.b(ss_(kind == "problem" ? "open" : "")).b(version).step();
+					.b(ss_(kind == "problem" || kind == "patch" ? "open" : ""))
+					.b(version).step();
 			const int64_t id = sqlite3_last_insert_rowid(m_db);
 			add_message(id, name, body, title);
 			return json::Value(id);
@@ -1878,19 +2193,24 @@ struct Module: public interface::Module
 				throw Exception("only the admin sets a problem's status");
 			Q t(m_db, "SELECT kind FROM threads WHERE id = ?");
 			t.b(thread_id);
-			if(!t.step() || t.s(0) != "problem")
-				throw Exception("no such problem");
-			if(!STATUSES.count(status))
+			if(!t.step() || (t.s(0) != "problem" && t.s(0) != "patch"))
+				throw Exception("no such problem or patch");
+			const ss_ kind = t.s(0);
+			if(kind == "problem" && !STATUSES.count(status))
 				throw Exception("a status is open, confirmed, fixed or wontfix");
-			if(!fixed_in.empty() && (status != "fixed" || !version_ok(fixed_in)))
-				throw Exception("fixed_in is a version, and only with fixed");
+			if(kind == "patch" && !PATCH_STATUSES.count(status))
+				throw Exception("a patch is open, applied or wontfix");
+			if(!fixed_in.empty() && ((status != "fixed" && status != "applied")
+					|| !version_ok(fixed_in)))
+				throw Exception("fixed_in is a version, and only with fixed or "
+						"applied");
 			Q u(m_db, "UPDATE threads SET status = ?, fixed_in = ? WHERE id = ?");
 			u.b(status).b(fixed_in).b(thread_id).step();
 			// Whoever reported it learns the outcome without a reply
 			Q a(m_db, "SELECT author FROM threads WHERE id = ?");
 			a.b(thread_id).step();
 			json::Value now = json::object();
-			now.set("kind", "problem");
+			now.set("kind", kind);
 			now.set("status", status);
 			now.set("fixed_in", fixed_in);
 			if(a.s(0) != name)
@@ -2085,6 +2405,24 @@ struct Module: public interface::Module
 			const bool appeal = r.s(0) == "appeal";
 			const int64_t message_id = r.i(1), thread_id = r.i(3);
 			const ss_ author = r.s(2);
+			// [HEARTH_TRACKER]: a tracker link's domain, accepted onto the
+			// whitelist or dismissed
+			if(r.s(0) == "domain"){
+				if(action != "accept" && action != "dismiss")
+					throw Exception("a domain is accepted or dismissed");
+				Q d(m_db, "SELECT reason FROM reports WHERE id = ?");
+				d.b(jint(q, "report")).step();
+				if(action == "accept"){
+					std::set<ss_> domains = tracker_domains();
+					domains.insert(d.s(0));
+					set_tracker_domains(domains);
+				}
+				Q u(m_db, "UPDATE reports SET state = ?, handled_by = ?, "
+						"handled_time = ? WHERE id = ?");
+				u.b(ss_(action == "accept" ? "upheld" : "dismissed")).b(name)
+						.b(now_s()).b(jint(q, "report")).step();
+				return json::Value(true);
+			}
 			if(action != "dismiss" && action != (appeal ? "restore" : "hide"))
 				throw Exception(appeal ? "an appeal is restored or dismissed" :
 						"a report is hidden or dismissed");

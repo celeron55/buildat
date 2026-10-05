@@ -26,6 +26,8 @@
 #   7. files: a new account uploads none; a JPEG comes back within 1080p
 #      and without its EXIF; over the budget an unused one is crushed again,
 #      and past its time deleted.
+#   8. a tracker ([HEARTH_TRACKER]): a new account's patch, shown inline
+#      and applied with git am; links and tracker links by the domains.
 #
 #   apps/hearth/check.sh
 set -u
@@ -169,7 +171,7 @@ client bob bobpass1234 "$t/bob6.log" '{"cmd":"new_thread","topic":1,"title":"Lam
 {"cmd":"reply","thread":1,"body":"[lamps](//lamps.example)"}'"$(
 	for i in $(seq 10); do printf '\n{"cmd":"edit","message":3,"body":"b%s"}' $i; done)"
 grep -aq 'hr: {.*"level":0' "$t/bob6.log" || fail "bob is not a new account"
-answer "$t/bob6.log" 1001 | grep -q "no links yet (a new account" || fail "a new account's link"
+answer "$t/bob6.log" 1001 | grep -q "no links yet, but to the tracker domains (a new account" || fail "a new account's link"
 answer "$t/bob6.log" 1002 | grep -q '"result":2' || fail "bob's thread: $(answer "$t/bob6.log" 1002)"
 answer "$t/bob6.log" 1003 | grep -q '"ok":true' || fail "bob's second thread"
 answer "$t/bob6.log" 1004 | grep -q "2 new threads a day" || fail "a third thread in a day"
@@ -322,6 +324,65 @@ MS=4000 client admin checkpass12 "$t/admin_files3.log" '{"cmd":"file_settings","
 [ "$(get /f/1)" = 404 ] && [ "$(get /f/2)" = 404 ] ||
 	fail "past delete_after an image was kept"
 
+# 8. [HEARTH_TRACKER]: a tracker topic; a new account attaches a patch
+# (git format-patch) to a patch ticket, which shows it inline, and links
+# only to a tracker domain; its tracker link to a domain not on the list
+# waits for the admin, who accepts the domain; removing the domain hides
+# the link again; and the patch, fetched, applies with git am
+res(){ # log id python-expression-of-r
+	answer "$1" $2 | sed 's/^hr: //' | python3 -c 'import json, sys
+r = json.load(sys.stdin); print(eval(sys.argv[1]))' "$3"
+}
+g="git -c user.name=Dave -c user.email=dave@example.org"
+mkdir "$t/repo" && cd "$t/repo" && $g init -q && echo one > f.txt &&
+	$g add f.txt && $g commit -qm base && $g clone -q . ../repo2 &&
+	echo two >> f.txt && $g commit -qam "f.txt: two" &&
+	$g format-patch -q -1 -o .. && cd "$here/Build" ||
+	fail "the test repository"
+mv "$t"/0001-*.patch "$t/fix.patch"
+MS=4000 client admin checkpass12 "$t/tr_admin.log" '{"cmd":"file_settings","budget":1000000000,"lod2_after":86400,"delete_after":8640000}
+{"cmd":"new_topic","name":"Tracker","about":"Tickets","tracker":true}
+{"cmd":"tracker_domains","add":["codeberg.org"]}' \
+	"BUILDAT_HEARTH_ADMIN=add dave davepass1234"
+T=$(res "$t/tr_admin.log" 1002 'r["result"]')
+[ -n "$T" ] || fail "the tracker topic: $(answer "$t/tr_admin.log" 1002)"
+MS=4000 client dave davepass1234 "$t/tr_dave1.log" "{\"cmd\":\"upload\",\"name\":\"fix.patch\",\"data\":\"$(xxd -p "$t/fix.patch" | tr -d '\n')\"}
+{\"cmd\":\"upload\",\"name\":\"fake.patch\",\"data\":\"68690a\"}"
+F=$(res "$t/tr_dave1.log" 1001 'r["result"]["id"] if r["result"]["patch"] else ""')
+[ -n "$F" ] || fail "a new account's patch: $(answer "$t/tr_dave1.log" 1001)"
+answer "$t/tr_dave1.log" 1002 | grep -q "no files yet" ||
+	fail "a .patch that is not one: $(answer "$t/tr_dave1.log" 1002)"
+MS=4000 client dave davepass1234 "$t/tr_dave2.log" "{\"cmd\":\"new_thread\",\"topic\":$T,\"kind\":\"patch\",\"title\":\"f.txt: two\",\"body\":\"[fix.patch](/f/$F/fix.patch), also at https://codeberg.org/dave/buildat\"}
+{\"cmd\":\"new_thread\",\"topic\":1,\"kind\":\"patch\",\"title\":\"x\",\"body\":\"y\"}"
+D=$(res "$t/tr_dave2.log" 1001 'r["result"]')
+[ -n "$D" ] || fail "a new account's patch ticket: $(answer "$t/tr_dave2.log" 1001)"
+answer "$t/tr_dave2.log" 1002 | grep -q "in a tracker topic" ||
+	fail "a patch outside a tracker: $(answer "$t/tr_dave2.log" 1002)"
+MS=4000 client dave davepass1234 "$t/tr_dave3.log" "{\"cmd\":\"reply\",\"thread\":$D,\"body\":\"see https://evil.example/x\"}
+{\"cmd\":\"tracker_link\",\"thread\":$D,\"link\":\"https://git.dave.example/buildat/tree/fix\"}
+{\"cmd\":\"thread\",\"thread\":$D}"
+answer "$t/tr_dave3.log" 1001 | grep -q "no links yet" ||
+	fail "a new account's link off the tracker domains: $(answer "$t/tr_dave3.log" 1001)"
+[ "$(res "$t/tr_dave3.log" 1002 'r["result"]')" = False ] &&
+	[ "$(res "$t/tr_dave3.log" 1003 'r["result"]["link"] + "|" + r["result"]["link_waiting"] + "|" + str(r["result"]["ticket"]) + "|" + str(len(r["result"]["list"][0]["patches"]))')" = "|https://git.dave.example/buildat/tree/fix|True|1" ] ||
+	fail "the waiting tracker link: $(answer "$t/tr_dave3.log" 1003 | cut -c1-300)"
+[ "$(get /t/$D)" = 200 ] && grep -q "^+two" "$t/page" && grep -q "codeberg.org/dave" "$t/page" &&
+	! grep -q "Tracker:" "$t/page" ||
+	fail "the ticket's page before the domain: $(grep -c . "$t/page") lines"
+MS=4000 client admin checkpass12 "$t/tr_admin2.log" '{"cmd":"queue"}'
+R=$(res "$t/tr_admin2.log" 1001 '[x["id"] for x in r["result"] if x["kind"] == "domain" and x["reason"] == "git.dave.example"][0]')
+[ -n "$R" ] || fail "the domain is not queued: $(answer "$t/tr_admin2.log" 1001 | cut -c1-300)"
+MS=4000 client admin checkpass12 "$t/tr_admin3.log" "{\"cmd\":\"moderate\",\"report\":$R,\"action\":\"accept\"}"
+[ "$(get /t/$D)" = 200 ] && grep -q 'Tracker: <a rel="nofollow ugc" href="https://git.dave.example/buildat/tree/fix"' "$t/page" ||
+	fail "the accepted domain's link is not shown: $(answer "$t/tr_admin3.log" 1001)"
+MS=4000 client admin checkpass12 "$t/tr_admin4.log" '{"cmd":"tracker_domains","remove":["git.dave.example"]}'
+[ "$(get /t/$D)" = 200 ] && ! grep -q "Tracker:" "$t/page" ||
+	fail "a removed domain's link is still shown"
+[ "$(get /f/$F/fix.patch)" = 200 ] && cd "$t/repo2" && $g am -q "$t/page" &&
+	grep -q two f.txt && cd "$here/Build" ||
+	fail "the patch as served does not apply with git am"
+echo "ok: a new account's patch ticket, inline and applied with git am; its links and its tracker link by the domains"
+
 # 10. A long thread is read a part at a time: the page links on to the
 # rest, the client reads on by itself; and pages are limited per address.
 # 20 messages of 20 kB, put in the file (the API's limits make them slow).
@@ -348,4 +409,4 @@ grep -a '^.*hr: ' "$t/admin10.log" | grep -q '"more":true' &&
 n429=0
 for _ in $(seq 130); do [ "$(get /)" = 429 ] && n429=$((n429 + 1)); done
 [ $n429 -gt 0 ] || fail "no page limit per address"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept; a long thread read in parts; pages limited"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept; a patch ticket by a new account applied with git am; a long thread read in parts; pages limited"
