@@ -552,13 +552,14 @@ function M.new(magic, buildat, log, options)
 	-- single-tap filter.
 	local SHADOW_NEAR = 24    -- nodes; the first cascade
 	local SHADOW_FAR = 96     -- and the second, which is the shadow distance
-	-- What a lit face gets from the sun, against the sky as the ambient. The
-	-- number is large because Urho's PBR direct lighting is normalized -- the
-	-- BRDF is divided by pi and so is the diffuse term inside it -- and
-	-- because the frame is tone mapped, so a sun well past white is what
-	-- white is for. apps/voxel_lighting arrived at the same number for the
-	-- same reasons.
-	local SUN_BRIGHTNESS = 50.0
+	-- What a lit face gets from the sun, against the sky as the ambient.
+	-- res/PBRVoxel's light pass is albedo * E * n.l / pi, so sunlit sand
+	-- at this exposure is about 0.4 * 3 / pi * 1.6, on the tone curve's
+	-- shoulder and not past it. It was 50 for Urho's own chain, which
+	-- divided by pi twice; under the one pi that whitened every sunlit
+	-- face at noon ([LUANTI_PBR_EXPOSURE], 2026-10-05: 95% of the ground
+	-- clipped at 50, 35% at 5, none at 3).
+	local SUN_BRIGHTNESS = 3.0
 	-- How far past the tone curve's middle the frame is exposed
 	local TONEMAP_EXPOSURE = 1.6
 	-- What the sun's disc is drawn at, in the same units: well past white, so
@@ -568,8 +569,7 @@ function M.new(magic, buildat, log, options)
 	-- What the moon is worth, in the same units. Not a measurement of
 	-- anything -- real moonlight is a millionth of sunlight and would render
 	-- as nothing -- but a night lit from where the moon is, coldly, and far
-	-- enough above the sky's own light that the moon casts a shadow. A
-	-- fiftieth of the sun.
+	-- enough above the sky's own light that the moon casts a shadow.
 	local MOON_BRIGHTNESS = 1.0
 	local MOON_COLOR = {0.55, 0.68, 1.0}
 
@@ -4000,9 +4000,10 @@ function M.new(magic, buildat, log, options)
 			-- What the two are worth to something drawn unlit, which has no
 			-- normal to take a share of them by: the colour of whichever is
 			-- up, and in the alpha how much of it there is, the moon counted
-			-- at what it is worth against the sun
+			-- at what it is worth against the sun: a fiftieth, the two
+			-- lights' ratio before the sun came down from 50 to 3
 			object_sun = magic.Color(sun_color.r, sun_color.g, sun_color.b,
-					up + moon_up * MOON_BRIGHTNESS / SUN_BRIGHTNESS)
+					up + moon_up / 50)
 		end
 
 		if sky_material then
