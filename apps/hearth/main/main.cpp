@@ -556,7 +556,7 @@ static bool is_patch(const ss_ &name, const ss_ &data)
 	return false;
 }
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
-		"/robots.txt", "/p/", "/brand/"};
+		"/robots.txt", "/p/", "/brand/", "/u/"};
 
 // Trust ([HEARTH_MVP] step 6): what a level may post. Level 0 is a new
 // account, 1 one that has stood a while, 2 the admin
@@ -1399,8 +1399,8 @@ struct Module: public interface::Module
 					"</p></div>\n";
 		return "<div class=\"box"+ss_(answer ? " answer" : "")+"\" id=\"m"+id+
 				"\"><p class=\"meta\">"+(answer ? "<b>This answered it:</b> " :
-				"")+"<b>"+
-				html(jstr(m, "author"))+"</b>, <a href=\"/m/"+id+"\">"+
+				"")+"<b><a href=\"/u/"+html(jstr(m, "author"))+"\">"+
+				html(jstr(m, "author"))+"</a></b>, <a href=\"/m/"+id+"\">"+
 				time_text(jint(m, "created"))+"</a>"+(jint(m, "edited") ?
 				" (edited "+time_text(jint(m, "edited"))+")" : "")+"</p>"+
 				interface::markup::to_html(jstr(m, "body"))+patches_html(m)+
@@ -1635,6 +1635,34 @@ struct Module: public interface::Module
 			body = "<p class=\"meta\">In <a href=\"/t/"+itos(q.i(5))+"#m"+
 					itos(id)+"\">"+html(thread_title)+"</a></p>\n"+
 					message_box(m);
+		} else if(path.compare(0, 3, "/u/") == 0){
+			// **An account's page**, where an @name goes: its last
+			// messages that stand, newest first
+			// simplified: the last 50 and no more pages; no profile
+			const ss_ who = path.substr(3);
+			if(who.empty() || who.size() > NAME_MAX ||
+					who.find_first_not_of("abcdefghijklmnopqrstuvwxyz"
+					"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != ss_::npos)
+				return;
+			title = who+" - Hearth";
+			body = "<h1>"+html(who)+"</h1>\n<ul class=\"list\">\n";
+			Q q(m_db, "SELECT m.id, m.thread, t.title, m.created, "
+					"substr(m.body, 1, 200) FROM messages m "
+					"JOIN threads t ON t.id = m.thread WHERE m.author = ? "
+					"AND m.hidden = 0 AND t.hidden = 0 "
+					"ORDER BY m.id DESC LIMIT 50");
+			q.b(who);
+			int n = 0;
+			while(q.step()){
+				body += "<li><a href=\"/t/"+itos(q.i(1))+"#m"+itos(q.i(0))+
+						"\">"+html(q.s(2))+"</a> <span class=\"meta\">"+
+						html(time_text(q.i(3)))+"</span><br>"+html(q.s(4))+
+						"</li>\n";
+				n++;
+			}
+			if(n == 0)
+				body += "<li>Nothing written here.</li>\n";
+			body += "</ul>\n";
 		} else if(path == "/search"){
 			const ss_ text = query_value(query, "q").substr(0, 200);
 			title = text+" - Hearth search";

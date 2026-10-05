@@ -193,13 +193,29 @@ static int leave_span(MD_SPANTYPE t, void *d, void *u)
 }
 
 // Text with "#1234", a thread's number after a # that does not follow a
-// word, as a link to the thread. Its class tells it from a link the
-// writer made (Hearth's limits count those).
+// word, as a link to the thread, and "@name" (a name's characters after
+// an @ that does not follow a word, as Hearth's mentions read it) as one
+// to the account's page. Their class tells them from a link the writer
+// made (Hearth's limits count those).
 static void refs(Out *o, const char *s, size_t n)
 {
 	size_t done = 0;
 	for(size_t i = 0; i < n; i++){
 		char before = i > 0 ? s[i - 1] : o->r.empty() ? ' ' : o->r.back();
+		if(s[i] == '@' && !isalnum((unsigned char)before) && before != '_'){
+			size_t e = i + 1;
+			while(e < n && e - i <= 80 && (isalnum((unsigned char)s[e]) ||
+					s[e] == '_' || s[e] == '-'))
+				e++;
+			if(e == i + 1)
+				continue;
+			escape(o->r, s + done, i - done);
+			const ss_ name(s + i + 1, e - i - 1);
+			o->r += "<a class=\"ref\" href=\"/u/"+name+"\">@"+name+"</a>";
+			done = i = e;
+			i--;
+			continue;
+		}
 		if(s[i] != '#' || isalnum((unsigned char)before) || before == '_')
 			continue;
 		size_t e = i + 1;

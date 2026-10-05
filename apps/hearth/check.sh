@@ -239,7 +239,7 @@ answer "$t/carol2.log" 1031 | grep -q "too many searches" ||
 
 # 7. The markup: CommonMark with GitHub's additions, raw HTML as text, no
 # link or image to anything but http, https, mailto or a relative path
-client admin checkpass12 "$t/admin8.log" '{"cmd":"reply","thread":1,"body":"**bold** _em_ ~~del~~ `code`\n\n<script>x()</script> <img src=x onerror=y()>\n\n[js](javascript:alert(1)) [tab](<java\tscript:alert(2)>) [up](JAVASCRIPT:alert(4)) [ent](java&#115;cript:alert(3)) [ok](https://buildat.org/a?b=1&c=2) ![pic](https://img.example/p.png \"t\")\n\n| a | b |\n|---|--:|\n| 1 | 2 |\n\n- [x] done\n- [ ] not\n\n> quoted ||secret||\n\n```\n<b>raw</b>\n```\n\nsee www.lamps.example\n\n#1 and not a#2, #3x or `#4`"}'
+client admin checkpass12 "$t/admin8.log" '{"cmd":"reply","thread":1,"body":"**bold** _em_ ~~del~~ `code`\n\n<script>x()</script> <img src=x onerror=y()>\n\n[js](javascript:alert(1)) [tab](<java\tscript:alert(2)>) [up](JAVASCRIPT:alert(4)) [ent](java&#115;cript:alert(3)) [ok](https://buildat.org/a?b=1&c=2) ![pic](https://img.example/p.png \"t\")\n\n| a | b |\n|---|--:|\n| 1 | 2 |\n\n- [x] done\n- [ ] not\n\n> quoted ||secret||\n\n```\n<b>raw</b>\n```\n\nsee www.lamps.example\n\n#1 and not a#2, #3x or `#4`\n\nhi @carol, not me@x.example"}'
 answer "$t/admin8.log" 1001 | grep -q '"ok":true' || fail "the markup reply: $(answer "$t/admin8.log" 1001)"
 get /t/1 > /dev/null
 for want in "<strong>bold</strong> <em>em</em> <del>del</del> <code>code</code>" \
@@ -251,9 +251,15 @@ for want in "<strong>bold</strong> <em>em</em> <del>del</del> <code>code</code>"
 		'<span class="spoiler" tabindex="0">secret</span>' \
 		'<pre><code>&lt;b&gt;raw&lt;/b&gt;' \
 		'<a href="http://www.lamps.example" rel="nofollow ugc">www.lamps.example</a>' \
-		'<p><a class="ref" href="/t/1">#1</a> and not a#2, #3x or <code>#4</code></p>'; do
+		'<p><a class="ref" href="/t/1">#1</a> and not a#2, #3x or <code>#4</code></p>' \
+		'<p>hi <a class="ref" href="/u/carol">@carol</a>, not me@x.example</p>'; do
 	grep -qF "$want" "$t/page" || fail "the markup: no $want ($(grep -a -A3 'bold' "$t/page" | head -12))"
 done
+# An @name's page: the account's messages that stand
+[ "$(get /u/admin)" = 200 ] && grep -q 'href="/t/1#m' "$t/page" ||
+	fail "the account's page"
+[ "$(get '/u/a%3Cb')" = 404 ] || fail "an account's page for a name that is none"
+get /t/1 > /dev/null
 # (the header's logo is the page's own)
 sed -i 's|<img src="/brand/logo.png" alt="">||' "$t/page"
 grep -qi 'href="[^"]*script\|<script\|<img' "$t/page" &&
