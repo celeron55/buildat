@@ -521,6 +521,13 @@ local function show_client(host, port, name, password, mode)
 		-- Assigned with the rest of the media handling, further down; the
 		-- palettes and the sky's own textures both want a texture asked for
 		local media_texture
+		-- How many times a texture or a model was wanted and had not arrived.
+		-- An object or a form built while this went up wears a placeholder
+		-- and is built again when media arrives; the rest are not: every
+		-- object and the form rebuilt on every batch was a mob's model and
+		-- an 80 ms form a frame on the web, the whole download long
+		-- ([LUANTI_NO_WORLD])
+		local media_misses = 0
 
 		local view = world.new(magic, buildat, log, {
 				far_clip = FAR_CLIP,
@@ -769,7 +776,11 @@ local function show_client(host, port, name, password, mode)
 
 		read_mesh = function(def)
 			local name = def.mesh
-			if name == nil or name == "" or not store:have_file(name) then
+			if name == nil or name == "" then
+				return nil
+			end
+			if not store:have_file(name) then
+				media_misses = media_misses + 1
 				return nil
 			end
 			local scale = def.visual_scale ~= 0 and def.visual_scale or 1
@@ -845,6 +856,8 @@ local function show_client(host, port, name, password, mode)
 		local form = nil
 		local screen_was_above = false -- a stack screen over the session
 		local form_stale = false
+		-- Whether the form was drawn with a texture that had not arrived
+		local form_missed = false
 
 		-- Pointing, digging and placing
 		local item_defs = nil
@@ -916,6 +929,12 @@ local function show_client(host, port, name, password, mode)
 			-- before the world is there, which is what anything driving the
 			-- client waits for
 			log:info(line)
+			-- A dropped node and a form's item are drawn from the registry:
+			-- what was drawn before this build is drawn again
+			for _, obj in pairs(world_objects) do
+				obj.visual_stale = true
+			end
+			form_stale = true
 			if loading then
 				loading = false
 				if loading_panel then
@@ -1020,10 +1039,14 @@ local function show_client(host, port, name, password, mode)
 			end
 			-- An object that was waiting for its texture can have it now
 			for _, obj in pairs(world_objects) do
-				obj.visual_stale = true
+				if obj.media_missed then
+					obj.visual_stale = true
+				end
 			end
 			-- And so can a form: its textures are asked for when it is drawn
-			form_stale = true
+			if form_missed then
+				form_stale = true
+			end
 		end
 
 		-- The player's own box in the world. It asks the world what stops it;
@@ -1071,9 +1094,12 @@ local function show_client(host, port, name, password, mode)
 				-- Planning counts a file that is already in the cache as had,
 				-- and then nothing will arrive to ask for a second look: what
 				-- was on disk resolves now or not at all
-				return texmod.resolve(name, texmod_ctx)
+				resolved = texmod.resolve(name, texmod_ctx)
 			end
-			return nil
+			if not resolved then
+				media_misses = media_misses + 1
+			end
+			return resolved
 		end
 
 		-- Declared before what uses it; the definition is further down, with
@@ -1206,7 +1232,9 @@ local function show_client(host, port, name, password, mode)
 					view:remove_object(id)
 				elseif obj and (not obj.is_self or camera_mode ~= 1) then
 					local t1 = buildat.get_time_us()
+					local misses = media_misses
 					view:set_object(obj, object_resource)
+					obj.media_missed = media_misses > misses
 					built = built + 1
 					-- One object that costs a frame of its own is worth a
 					-- line: which it was, and whether its model had to be
@@ -2190,6 +2218,7 @@ local function show_client(host, port, name, password, mode)
 		end
 
 		local function draw_form()
+			local misses = media_misses
 			if form.drawn then
 				clear_field_hooks()
 				form.drawn.window:Remove()
@@ -2238,6 +2267,7 @@ local function show_client(host, port, name, password, mode)
 						end)
 			end
 			form_stale = false
+			form_missed = media_misses > misses
 		end
 
 		-- source says which form this is, which decides whether a new

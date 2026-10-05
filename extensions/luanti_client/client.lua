@@ -1306,6 +1306,15 @@ function M.new(socket, options, log)
 	-- what does not fit in this waits for the next frame; the counters say
 	-- how many are waiting.
 	local COMMAND_BUDGET_US = 4000
+	-- Or this share of the last frame, measured on the clock, when that is
+	-- more: a slow frame (the web's, a weak GPU's) left the commands 4 ms
+	-- of every 100 or more, and a busy server's backlog grew without end
+	-- ([LUANTI_NO_WORLD]: 2044 waiting on the web). Luanti's own client
+	-- gives them up to 100 ms a frame. The frame grows by a third at most,
+	-- and it cannot feed back further: the share of a longer frame is the
+	-- same share. TimeStep is no measure: Urho3D caps it at 100 ms.
+	local COMMAND_FRAME_SHARE = 0.25
+	local last_update_us = nil
 
 	-- How long the server may say nothing at all before this gives up on it.
 	-- A live server acknowledges the position we send it several times a
@@ -1335,8 +1344,14 @@ function M.new(socket, options, log)
 		local handled_before = self.commands_handled
 		self.worst_command_us = 0
 		self.worst_command = nil
+		local budget = COMMAND_BUDGET_US
+		if last_update_us then
+			budget = math.max(budget,
+					(t0 - last_update_us) * COMMAND_FRAME_SHARE)
+		end
+		last_update_us = t0
 		self.commands_waiting = conn:pump(
-				self.failure and 1000000000 or COMMAND_BUDGET_US)
+				self.failure and 1000000000 or budget)
 		-- What this frame spent on what the server said, for the slow-frame
 		-- line in init.lua: a spike is either this or the meshing
 		self.last_command_us = buildat.get_time_us() - t0

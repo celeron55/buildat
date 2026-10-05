@@ -1430,6 +1430,9 @@ struct CApp: public App, public magic::Application
 	// out of reach): 1, or less while a top-level element is bigger than
 	// the screen; see update_ui_fit()
 	float m_fit_factor = 1.f;
+	// The root's size before the fit last changed the scale: what a
+	// root-sized element still is for a frame after it ([LUANTI_NO_WORLD])
+	magic::IntVector2 m_fit_prev_root;
 	// When a button, a finger or a key was last down: the scale is not
 	// changed under a press or a gesture, nor for FIT_QUIET_US after one
 	int64_t m_input_busy_us = 0;
@@ -2182,6 +2185,9 @@ struct CApp: public App, public magic::Application
 		const float room_w = g->GetWidth() * 0.98f;
 		const float room_h = g->GetHeight() * 0.98f;
 		float need = base;
+		// What set `need`, for the line: a fit that flips is a size that
+		// follows the scale, and the line has to say whose
+		magic::UIElement *by = nullptr;
 		// A layer the size of the screen (a launcher's stack of screens)
 		// is looked into: what is in it is what has to fit
 		std::function<void(magic::UIElement *, int)> scan =
@@ -2190,9 +2196,16 @@ struct CApp: public App, public magic::Application
 				if(!c || !c->IsVisible())
 					continue;
 				const magic::IntVector2 sz = c->GetSize();
-				// The root's own size, give or take its rounding
-				const bool fill_w = std::abs(sz.x_ - rs.x_) <= 1;
-				const bool fill_h = std::abs(sz.y_ - rs.y_) <= 1;
+				// The root's own size, give or take its rounding -- or its
+				// size before the last fit: an element that follows the
+				// root (a loading panel, a HUD) is resized after it, and
+				// counted at its old size it moved the fit, which moved the
+				// root, and the scale flipped between two values for good
+				// ([LUANTI_NO_WORLD], x0.5 and x0.658 twice a second)
+				const bool fill_w = std::abs(sz.x_ - rs.x_) <= 1 ||
+						std::abs(sz.x_ - m_fit_prev_root.x_) <= 1;
+				const bool fill_h = std::abs(sz.y_ - rs.y_) <= 1 ||
+						std::abs(sz.y_ - m_fit_prev_root.y_) <= 1;
 				if(fill_w && fill_h){
 					if(depth < 4)
 						scan(c, depth + 1);
@@ -2207,17 +2220,32 @@ struct CApp: public App, public magic::Application
 				if(c->GetVerticalAlignment() == magic::VA_TOP &&
 						at.y_ > 0 && at.y_ < rs.y_ / 2)
 					ext_h += at.y_;
-				if(ext_w > 0 && !fill_w && ext_w * base > room_w)
-					need = std::min(need, room_w / ext_w);
-				if(ext_h > 0 && !fill_h && ext_h * base > room_h)
-					need = std::min(need, room_h / ext_h);
+				if(ext_w > 0 && !fill_w && ext_w * base > room_w &&
+						room_w / ext_w < need){
+					need = room_w / ext_w;
+					by = c;
+				}
+				if(ext_h > 0 && !fill_h && ext_h * base > room_h &&
+						room_h / ext_h < need){
+					need = room_h / ext_h;
+					by = c;
+				}
 			}
 		};
 		scan(root, 0);
 		float f = std::max(FIT_FLOOR, std::min(1.f, need / base));
 		if(std::fabs(f - m_fit_factor) > 0.02f){
 			m_fit_factor = f;
-			log_i(MODULE, "UI scale fitted to the screen: x%g", f);
+			m_fit_prev_root = rs;
+			if(by)
+				log_i(MODULE, "UI scale fitted to the screen: x%g, by %s"
+						" \"%s\" %ix%i at %i,%i in a root of %ix%i", f,
+						by->GetTypeName().CString(), by->GetName().CString(),
+						by->GetSize().x_, by->GetSize().y_,
+						by->GetPosition().x_, by->GetPosition().y_,
+						rs.x_, rs.y_);
+			else
+				log_i(MODULE, "UI scale fitted to the screen: x%g", f);
 			apply_ui_scale();
 		}
 	}

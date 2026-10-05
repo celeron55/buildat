@@ -115,8 +115,14 @@ async function firefox() {
 	const top = async n => (await c.send("browsingContext.getTree",
 			{maxDepth: 0})).contexts[n].context;
 	let ctx = await top(0);
+	// WEB_DRIVE_VIEWPORT=WxH[@dpr]: another screen, a high-DPI one with @2
+	const vp = (process.env.WEB_DRIVE_VIEWPORT || "1200x800")
+			.match(/^(\d+)x(\d+)(?:@([\d.]+))?$/);
+	if (!vp)
+		throw new Error("WEB_DRIVE_VIEWPORT is WxH or WxH@dpr");
 	await c.send("browsingContext.setViewport", {context: ctx,
-			viewport: {width: 1200, height: 800}});
+			viewport: {width: +vp[1], height: +vp[2]},
+			...(vp[3] ? {devicePixelRatio: +vp[3]} : {})});
 	const keys = list => c.send("input.performActions", {context: ctx,
 			actions: [{type: "key", id: "k", actions: list}]});
 	const press = v => [{type: "keyDown", value: v}, {type: "keyUp", value: v}];
