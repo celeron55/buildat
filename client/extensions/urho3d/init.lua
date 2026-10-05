@@ -339,6 +339,15 @@ function Safe.SubscribeToEvent(x, y, z)
 				magic_sandbox.is_secret_field(ui:GetFocusElement()) then
 			return
 		end
+		-- **F9 is the trusted overlay's alone** ([TRUST_CODE]): nobody
+		-- here hears it, the client's own extensions included, as a
+		-- script's callback can be called through one of theirs
+		-- (uistack's SubscribeToStackEvent). The overlay's own handler is
+		-- subscribed on the mux directly.
+		if (sub_event_type == "KeyDown" or sub_event_type == "KeyUp") and
+				unsafe_event_data["Key"]:GetInt() == KEY_F9 then
+			return
+		end
 		local error = error
 		local f = function()
 			-- How the hell does one get a string out of event_type_thing?
@@ -921,6 +930,28 @@ local function trust_color()
 	return trust_rgb[1], trust_rgb[2], trust_rgb[3]
 end
 
+-- **The trust code** ([TRUST_CODE]; user, 2026-10-05): three characters
+-- stamped small in the overlay's bottom left, picked like the colour, so a
+-- look-alike overlay in a game has 1 in 32768 of getting it right. No
+-- 0, O, 1 or I; re-drawn if it spells a word on the list.
+local trust_code
+do
+	local alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+	-- simplified: a few words that would be unpleasant to be shown; a
+	-- longer list when someone gets one
+	local blocked = {ASS = 1, FUK = 1, FUC = 1, FAG = 1, SEX = 1, KKK = 1,
+			NAZ = 1, DIE = 1, CUM = 1, TIT = 1, WTF = 1, GAY = 1, SUX = 1}
+	repeat
+		local b = buildat.random_bytes(3)
+		local c = {}
+		for i = 1, 3 do
+			local n = b:byte(i) % 32 + 1
+			c[i] = alphabet:sub(n, n)
+		end
+		trust_code = table.concat(c)
+	until not blocked[trust_code]
+end
+
 -- The sample: "Starport trust color:" and a square a text row high, at the
 -- top right while the launcher has the screen (not connected anywhere).
 -- Made of raw elements under a hidden name, over anything a script draws
@@ -1018,6 +1049,24 @@ local function rebuild_id_rows(ids, sp)
 		place(r, b)
 	end
 	local r = line(#ids + 1)
+	-- The code at the bottom left, the last line's first element, in the
+	-- room left of its buttons when a line above is wider. Its colour is
+	-- the trust colour halfway to black on the bright ones and halfway to
+	-- white on the dark: black alone is ~1.4:1 on (0, 0, 0.4).
+	-- simplified: with no ID logged in the last line is the only one and
+	-- the code widens it; a corner of its own when that is not wanted
+	local code = r:CreateChild("Text")
+	code:SetFont(cache:GetResource("Font", "Fonts/Overpass-Regular.ttf"), 9)
+	code.text = trust_code
+	code:SetVerticalAlignment(VA_BOTTOM)
+	local bright = math.max(trust_rgb[1], trust_rgb[2], trust_rgb[3]) > 0.5
+	local function mix(c)
+		return bright and c * 0.5 or c + (1 - c) * 0.5
+	end
+	code.color = Color(mix(trust_rgb[1]), mix(trust_rgb[2]), mix(trust_rgb[3]), 1)
+	-- Pushes the buttons to the right edge, under the line above
+	local gap = r:CreateChild("UIElement")
+	gap:SetFixedSize(0, 1)
 	if #ids == 0 then
 		overlay_button(r, "Starport ID...", function() open_id(sp) end)
 	end
@@ -1027,6 +1076,7 @@ local function rebuild_id_rows(ids, sp)
 	for _, x in ipairs(id_rows) do
 		w = math.max(w, x:GetWidth())
 	end
+	gap:SetFixedSize(w - r:GetWidth(), 1)
 	local top = trust_sample:GetPosition().y
 	local bg = ui.root:CreateChild("BorderImage")
 	bg:SetName("__trusted_hidden_id_bg")
@@ -1041,6 +1091,18 @@ local function rebuild_id_rows(ids, sp)
 	bg.visible = trust_sample_shown == true
 	id_rows[#id_rows + 1] = bg
 end
+-- **F9 shows the overlay in a game** ([TRUST_CODE]): a fake does not
+-- answer the key, so it is still there after the second press. On the
+-- event's mux directly, as Safe.SubscribeToEvent's handlers never get F9.
+local trust_f9 = false
+add_global_event_handler("KeyDown", "__buildat_trust_f9", function(_, event_data)
+	if event_data["Key"]:GetInt() == KEY_F9 and
+			not event_data["Repeat"]:GetBool() and
+			__buildat_server_address() ~= nil then
+		trust_f9 = not trust_f9
+		log:info("F9: trusted overlay " .. (trust_f9 and "shown" or "hidden"))
+	end
+end)
 Safe.SubscribeToEvent("Update", function(_, event_data)
 	if trust_sample == nil then
 		trust_sample = ui.root:CreateChild("UIElement")
@@ -1068,7 +1130,10 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 	end
 	-- No value at all when not connected, which tostring() refuses
 	local address = __buildat_server_address()
-	local show = address == nil
+	if address == nil then
+		trust_f9 = false
+	end
+	local show = address == nil or trust_f9
 	if show ~= trust_sample_shown then
 		trust_sample_shown = show
 		-- Said when it changes ([TRUST_OVERLAY_LEAVE]): the sample gone

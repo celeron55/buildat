@@ -142,10 +142,14 @@ The launch menu: a local app, a server to connect to, or one of the
 extensions that can be launched on their own -- a Luanti client, so far.
 Arrows or the mouse to pick, enter to go.
 
-Debug keys, in any app:
+Keys, in any app:
 
+* F9: the client's own overlay -- the Starport trust colour, the IDs
+  logged in and a three-character code at its bottom left -- on and off.
+  No script hears F9, so an overlay that does not go away on it is not
+  the client's.
 * F8: draw debug geometry
-* F9: on-screen profiler, render and resource stats
+* F6: on-screen profiler, render and resource stats
 * Ctrl+F12: sandbox test extension
 
 Engine settings

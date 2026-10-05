@@ -2748,14 +2748,21 @@ function M.define(dst, util)
 					end
 					self:SetMouseMode(mode)
 				end),
-			GetKeyDown = util.self_function("GetKeyDown", {"boolean"}, {"Input", "number"}),
+			-- F9 is the trusted overlay's ([TRUST_CODE]): never down
+			GetKeyDown = util.wrap_function({"Input", "number"},
+				function(self, key)
+					return key ~= KEY_F9 and self:GetKeyDown(key)
+				end),
 			IsMouseVisible = util.self_function("IsMouseVisible", {"boolean"},
 					{"Input"}),
 			-- A key's name and back, for a bindings file a person can read
 			-- ([KEY_BINDINGS])
 			GetKeyName = util.self_function("GetKeyName", {"string"}, {"Input", "number"}),
 			GetKeyFromName = util.self_function("GetKeyFromName", {"number"}, {"Input", "string"}),
-			GetKeyPress = util.self_function("GetKeyPress", {"boolean"}, {"Input", "number"}),
+			GetKeyPress = util.wrap_function({"Input", "number"},
+				function(self, key)
+					return key ~= KEY_F9 and self:GetKeyPress(key)
+				end),
 			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),
 			-- Where the pointer is, in window pixels: what the MouseMove
 			-- events add up to, read when a click needs it

@@ -3097,9 +3097,10 @@ struct CApp: public App, public magic::Application
 				log_e(MODULE, "Failed to load and run extension %s", cs(extname));
 			}
 		}
-		// F6 as official's profiler key beside the F9 this always had
-		// ([VIEW_KEYS]); the engine's DebugHud is the profiler there is
-		if(key == Urho3D::KEY_F9 || key == Urho3D::KEY_F6){
+		// F6, official's profiler key ([VIEW_KEYS]); the engine's DebugHud
+		// is the profiler there is. F9 is the trusted overlay's
+		// ([TRUST_CODE], client/extensions/urho3d)
+		if(key == Urho3D::KEY_F6){
 			magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
 			dhud->ToggleAll();
 		}
