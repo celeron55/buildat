@@ -897,9 +897,12 @@ end
 local function pcg_next(self)
 	local old = self.state
 	self.state = old * PCG_MULT + self.inc
-	local xs = tonumber(bit.rshift(bit.bxor(bit.rshift(old, 18), old), 27) %
-			4294967296ULL)
-	local rot = tonumber(bit.rshift(old, 59))
+	-- ((old >> 18) ^ old) >> 27 to 32 bits is bits 27..58 of old xor bits
+	-- 45..76. A shift is a uint64 division and the xor 32-bit, because the
+	-- Windows build's bit library takes no cdata
+	local xs = bit.bxor(tonumber(old / 134217728ULL % 4294967296ULL),
+			tonumber(old / 35184372088832ULL)) % TWO32
+	local rot = tonumber(old / 576460752303423488ULL)
 	return bit.ror(xs, rot) % TWO32
 end
 
@@ -937,7 +940,7 @@ function PcgRandom(seed, sequence)
 	local seq = sequence ~= nil and u64_of(sequence) or
 			0xda3e39cb94b95bdbULL
 	self.state = U64(0)
-	self.inc = bit.bor(bit.lshift(seq, 1), 1ULL)
+	self.inc = seq * 2ULL + 1ULL
 	pcg_next(self)
 	self.state = self.state + u64_of(seed)
 	pcg_next(self)
@@ -965,7 +968,7 @@ function Pcg:rand_normal_dist(min, max, num_trials)
 end
 
 local function hex64(v)
-	return string.format("%08x%08x", tonumber(bit.rshift(v, 32)),
+	return string.format("%08x%08x", tonumber(v / 4294967296ULL),
 			tonumber(v % 4294967296ULL))
 end
 
