@@ -22,6 +22,23 @@ Why not allow making arbitrary number of instances of any module?
 - Instead there should be easy mechanisms for launching new server processes at
   runtime, and routing clients to different processes.
 
+The server's box: what it is not built on
+-----------------------------------------
+Decided 2026-10-02 and 2026-10-03 ([PROCESS_SANDBOX]).
+
+- bubblewrap bundled with the archive. Ubuntu 23.10 and later refuse
+  unprivileged user namespaces to a program without an AppArmor profile,
+  so a copy at our own path fails exactly where it would matter. The
+  system's bwrap may be an extra layer; Landlock and seccomp are the box.
+- The Windows box's local client bridged through loopback. Loopback is
+  blocked between an AppContainer and the rest of the machine both ways
+  (the user's probe runs), and a bridge inside the box would need loopback
+  there too; the client joins by a named pipe in the container's
+  namespace, a second transport for the same byte stream.
+- Low integrity on Windows instead of an AppContainer: it does not
+  restrict reading, and reading the user's files is half of what the box
+  is for.
+
 Luanti features left out on purpose, not to be added
 -----------------------------------------------------
 Official Luanti's client has these; buildat's two Luanti clients do
@@ -34,7 +51,6 @@ game that needs one is a game that needs official.
 - Block bounds (the mapblock outline overlay).
 - New profiler features of any kind: the engine's own DebugHud on F6
   is the whole of it.
-
 
 The launcher room's discarded pieces, not to be rebuilt
 -------------------------------------------------------
@@ -63,21 +79,3 @@ Taken out of `extensions/launch_world` on purpose (user, 2026-09-24 and
   games stand in a formation on one wall, each with its name beside it.
 - The room as the default launch UI is not a goal (user, 2026-10-04);
   launch_menu stays the default.
-
-
-The server's box: what it is not built on
------------------------------------------
-Decided 2026-10-02 and 2026-10-03 ([PROCESS_SANDBOX]).
-
-- bubblewrap bundled with the archive. Ubuntu 23.10 and later refuse
-  unprivileged user namespaces to a program without an AppArmor profile,
-  so a copy at our own path fails exactly where it would matter. The
-  system's bwrap may be an extra layer; Landlock and seccomp are the box.
-- The Windows box's local client bridged through loopback. Loopback is
-  blocked between an AppContainer and the rest of the machine both ways
-  (the user's probe runs), and a bridge inside the box would need loopback
-  there too; the client joins by a named pipe in the container's
-  namespace, a second transport for the same byte stream.
-- Low integrity on Windows instead of an AppContainer: it does not
-  restrict reading, and reading the user's files is half of what the box
-  is for.
