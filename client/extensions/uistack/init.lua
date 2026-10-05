@@ -161,6 +161,12 @@ function M.UIStack(root)
 	end
 	-- Everything above `root` popped, top down, root itself included when
 	-- inclusive; the launcher leaving a menu-only game ([MENU_CONTEXT])
+	-- The top entry, or nil. A sandboxed caller sees self.stack through a
+	-- read-only view, whose # is 0 on Lua 5.1 (no __len for tables), so
+	-- stack[#stack] there was always nil ([LUANTI_NO_WORLD])
+	function self:top()
+		return self.stack[#self.stack]
+	end
 	function self:pop_to(root, inclusive)
 		while #self.stack > 0 do
 			local top = self.stack[#self.stack]

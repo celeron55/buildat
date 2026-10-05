@@ -3102,7 +3102,7 @@ function screen_taken()
 		return true
 	end
 	local st = room_stack and room_stack.main and room_stack.main.stack
-	if st and #st > 0 then
+	if st and st[1] then -- not #st: see leave_app below
 		return true
 	end
 	local who = api.launch_ui_name and api.launch_ui_name() or nil
@@ -5894,8 +5894,10 @@ function leave_app()
 	-- **Before the client's leave**, which removes the elements under
 	-- the stack's entries: popping after it reaches a UIElement that is
 	-- already gone, and the sandbox raises on it.
+	-- stack[1], not #stack: a sandboxed caller gets a read-only view,
+	-- whose # is 0 on Lua 5.1 ([LUANTI_NO_WORLD])
 	local st = room_stack and room_stack.main
-	if st and #st.stack > 0 then
+	if st and st.stack[1] then
 		st:pop_to(st.stack[1], true)
 	end
 	api.leave_to_menu()

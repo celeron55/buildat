@@ -2807,7 +2807,7 @@ local function show_client(host, port, name, password, mode)
 			-- menu's settings and key screens -- with the cursor shown and
 			-- free while one is up: on the box the view turned under them
 			-- and the cursor vanished ([BOX_PLAYTEST_3] 2).
-			local screen_above = uistack.main.stack[#uistack.main.stack] ~= root
+			local screen_above = uistack.main:top() ~= root
 			if screen_above ~= screen_was_above then
 				screen_was_above = screen_above
 				if not form and not chat_input then
