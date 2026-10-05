@@ -12,10 +12,15 @@
 	#define _WIN32_WINNT 0x0A00
 #endif
 #include "ports/windows_minimal.h"
+#include <winsock2.h>
 #include <userenv.h>
 #include <sddl.h>
 #undef interface
+#include "interface/tcpsocket.h"
 #include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <thread>
 #define MODULE "pipe"
 
 namespace client {
@@ -125,12 +130,109 @@ bool pipe_ready(const ss_ &path)
 	return WaitNamedPipeA(path.c_str(), 1) != 0;
 }
 
+// **The boxed server's LAN port, the client's** ([LAN_PLAY]): Windows's
+// firewall prompt lets in this program by its path, and the box's process
+// is not it. Each player accepted here gets a pipe of its own to the
+// server, started "BUILDAT-RELAY <address>\n" (network.cpp relay_head()),
+// and the bytes go both ways as they come.
+// simplified: a thread a player, polling the pipe every 2 ms as the server
+// polls its end; overlapped I/O when a LAN game has more than a handful
+struct CLanRelay: public LanRelay
+{
+	sp_<interface::TCPSocket> m_listener;
+	ss_ m_pipe;
+	std::atomic<bool> m_stop{false};
+	std::thread m_accept;
+	std::mutex m_mutex;
+	sv_<std::thread> m_players;
+
+	~CLanRelay()
+	{
+		m_stop = true;
+		if(m_accept.joinable())
+			m_accept.join();
+		std::lock_guard<std::mutex> lock(m_mutex);
+		for(auto &t : m_players)
+			t.join();
+	}
+
+	void accept_loop()
+	{
+		while(!m_stop){
+			fd_set rs;
+			FD_ZERO(&rs);
+			FD_SET((SOCKET)m_listener->fd(), &rs);
+			timeval tv = {0, 200000};
+			if(select(0, &rs, nullptr, nullptr, &tv) <= 0)
+				continue;
+			sp_<interface::TCPSocket> s(interface::createTCPSocket());
+			if(!s->accept_fd(*m_listener))
+				continue;
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_players.emplace_back([this, s](){ relay(s); });
+		}
+	}
+
+	void relay(sp_<interface::TCPSocket> s)
+	{
+		const ss_ from = s->get_remote_address();
+		std::unique_ptr<Wss> pipe(create_pipe_stream());
+		const ss_ err = pipe->start(m_pipe, "", "");
+		if(!err.empty() || !pipe->send("BUILDAT-RELAY "+from+"\n")){
+			log_w(MODULE, "LAN player %s not relayed: %s", cs(from),
+					cs(err.empty() ? ss_("the pipe went") : err));
+			return;
+		}
+		log_i(MODULE, "LAN player %s relayed to the server", cs(from));
+		const SOCKET fd = (SOCKET)s->fd();
+		char buf[65536];
+		ss_ out, why;
+		while(!m_stop){
+			fd_set rs;
+			FD_ZERO(&rs);
+			FD_SET(fd, &rs);
+			timeval tv = {0, 2000};
+			if(select(0, &rs, nullptr, nullptr, &tv) > 0){
+				const int n = recv(fd, buf, sizeof buf, 0);
+				if(n <= 0 || !pipe->send(ss_(buf, n)))
+					break;
+			}
+			out.clear();
+			if(pipe->read(out, &why) < 0)
+				break;
+			if(!out.empty() && !s->send_fd(out))
+				break;
+		}
+		log_i(MODULE, "LAN player %s gone", cs(from));
+	}
+};
+
+LanRelay* start_lan_relay(const ss_ &address, const ss_ &port,
+		const ss_ &pipe, ss_ *error)
+{
+	std::unique_ptr<CLanRelay> r(new CLanRelay());
+	r->m_pipe = pipe;
+	r->m_listener.reset(interface::createTCPSocket());
+	if(!r->m_listener->bind_fd(address, port) || !r->m_listener->listen_fd()){
+		*error = "cannot listen at "+address+":"+port;
+		return nullptr;
+	}
+	CLanRelay *p = r.get();
+	r->m_accept = std::thread([p](){ p->accept_loop(); });
+	return r.release();
+}
+
 }
 #else
 #include "client/wss.h"
 namespace client {
 ss_ local_server_pipe(const ss_ &, const ss_ &){ return ""; }
 bool pipe_ready(const ss_ &){ return false; }
+LanRelay* start_lan_relay(const ss_ &, const ss_ &, const ss_ &, ss_ *error)
+{
+	*error = "a relay is for a server reached by a pipe, on Windows";
+	return nullptr;
+}
 }
 #endif
 // vim: set noet ts=4 sw=4:

@@ -41,7 +41,8 @@ namespace interface
 
 	// [LAN_DISCOVERY]: the group a LAN game is announced to, IPv4 only.
 	// lan_socket(true) is joined to the group and bound to its port, to
-	// hear; lan_socket(false) only sends (TTL 1). Non-blocking; -1 if not.
+	// hear; lan_socket(false) only sends (TTL 1), to the group and as a
+	// broadcast to LAN_PORT. Non-blocking; -1 if not.
 	// lan_recv() takes one datagram and the address it came from, false
 	// when none is waiting.
 	static const char *LAN_GROUP = "239.255.29.50";

@@ -591,8 +591,11 @@ int lan_socket(bool listen)
 				(const char*)&m, sizeof(m)) == 0;
 	} else {
 		int ttl = 1;
+		int one = 1;
 		ok = setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, (const char*)&ttl,
-				sizeof(ttl)) == 0;
+				sizeof(ttl)) == 0 &&
+				setsockopt(fd, SOL_SOCKET, SO_BROADCAST, (const char*)&one,
+				sizeof(one)) == 0;
 	}
 	if(!ok){
 #ifdef _WIN32
@@ -608,15 +611,27 @@ int lan_socket(bool listen)
 	return fd;
 }
 
+// To the group and as a broadcast ([LAN_PLAY]): a home router's IGMP
+// snooping without a querier drops the group between its radios, and a
+// broadcast passes it. The listener on LAN_PORT hears both and keys by
+// sender. True when either went.
+// simplified: 255.255.255.255 leaves by the default route's interface
+// only; a machine on two LANs announces on that one, as
+// local_lan_address() picks it
 bool lan_send(int fd, const ss_ &data)
 {
-	struct sockaddr_in to;
-	memset(&to, 0, sizeof(to));
-	to.sin_family = AF_INET;
-	to.sin_port = htons(LAN_PORT);
-	to.sin_addr.s_addr = inet_addr(LAN_GROUP);
-	return sendto(fd, data.c_str(), (int)data.size(), 0,
-			(struct sockaddr*)&to, sizeof(to)) == (int)data.size();
+	bool ok = false;
+	for(const char *a : {LAN_GROUP, "255.255.255.255"}){
+		struct sockaddr_in to;
+		memset(&to, 0, sizeof(to));
+		to.sin_family = AF_INET;
+		to.sin_port = htons(LAN_PORT);
+		to.sin_addr.s_addr = inet_addr(a);
+		if(sendto(fd, data.c_str(), (int)data.size(), 0,
+				(struct sockaddr*)&to, sizeof(to)) == (int)data.size())
+			ok = true;
+	}
+	return ok;
 }
 
 bool lan_recv(int fd, ss_ *data, ss_ *from)

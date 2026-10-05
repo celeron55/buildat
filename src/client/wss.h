@@ -44,6 +44,13 @@ namespace client
 	// Whether the server is listening on it
 	bool pipe_ready(const ss_ &path);
 
+	// [LAN_PLAY]: the LAN port of a local server reached by a pipe, taken
+	// by this client, each player relayed to the server by a pipe of its
+	// own. Deleting it stops it. nullptr with why if it cannot listen.
+	struct LanRelay { virtual ~LanRelay(){} };
+	LanRelay* start_lan_relay(const ss_ &address, const ss_ &port,
+			const ss_ &pipe, ss_ *error);
+
 	// "https://host[:port][/]" or "wss://...": the host and the port (443
 	// unless said); false for any other address
 	bool parse_secure_address(const ss_ &address, ss_ *host, ss_ *port);

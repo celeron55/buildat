@@ -112,6 +112,9 @@ struct CState: public State
 	// A server behind a proxy with TLS: the stream is in a WebSocket over
 	// TLS on m_socket (client/wss.h)
 	std::unique_ptr<client::Wss> m_wss;
+	// The LAN port this client keeps for the local server it started
+	// ([LAN_PLAY]), while connected to it
+	std::unique_ptr<client::LanRelay> m_lan_relay;
 	// m_wss is a pipe, not TLS over m_socket
 	bool m_pipe = false;
 	std::deque<char> m_socket_buffer;
@@ -266,6 +269,7 @@ struct CState: public State
 			m_connect_thread.join();
 		m_connect_result.store(0);
 		m_connect_error = "";
+		m_lan_relay.reset();
 		m_wss.reset();
 		m_pipe = false;
 		m_socket = sp_<interface::TCPSocket>(interface::createTCPSocket());
@@ -783,6 +787,38 @@ void CState::setup_packet_handlers()
 		m_unordered = set_<ss_>(names.begin(), names.end());
 		log_v(MODULE, "%zu packet names may be handled out of order",
 				names.size());
+	};
+
+	// **Its LAN port is this client's** ([LAN_PLAY]): the local server,
+	// boxed and reached by its pipe, opened to the LAN; "<address> <port>".
+	// Only from that server, and only this machine's LAN address and the
+	// pipe's own port.
+	m_packet_handlers["core:lan_relay"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		const ss_ address = get_address();
+		const size_t sp = data.find(' ');
+		if(!m_pipe || address.compare(0, 5, "pipe:") != 0 ||
+				sp == ss_::npos)
+			return;
+		const ss_ lan = data.substr(0, sp);
+		const ss_ port = data.substr(sp + 1);
+		const ss_ tail = "buildat-"+port;
+		if(lan != interface::local_lan_address() || port.empty() ||
+				address.size() < tail.size() ||
+				address.compare(address.size() - tail.size(), ss_::npos,
+						tail) != 0){
+			log_w(MODULE, "core:lan_relay \"%s\" refused", cs(data));
+			return;
+		}
+		ss_ error;
+		m_lan_relay.reset(client::start_lan_relay(lan, port,
+				address.substr(5), &error));
+		if(m_lan_relay)
+			log_i(MODULE, "Listening at %s:%s for the local server",
+					cs(lan), cs(port));
+		else
+			log_w(MODULE, "LAN relay: %s", cs(error));
 	};
 
 	m_packet_handlers["core:run_script"] =

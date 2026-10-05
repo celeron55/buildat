@@ -63,6 +63,12 @@ struct PipeSocket: public interface::TCPSocket
 {
 	HANDLE m_pipe;
 	int m_id;
+	// The client that started this server, on this machine; or the LAN
+	// player it relays ([LAN_PLAY]), named by the line it starts with
+	ss_ m_remote = "127.0.0.1";
+	// What came before that line is known to be there or not
+	ss_ m_head;
+	bool m_head_done = false;
 	PipeSocket(HANDLE pipe, int id): m_pipe(pipe), m_id(id){}
 	~PipeSocket(){ close_fd(); }
 	int fd() const { return m_id; }
@@ -83,8 +89,7 @@ struct PipeSocket: public interface::TCPSocket
 	bool set_nonblocking(bool){ return true; }
 	bool wait_data(int){ return false; }
 	ss_ get_local_address() const { return "pipe"; }
-	// The client that started this server, on this machine
-	ss_ get_remote_address() const { return "127.0.0.1"; }
+	ss_ get_remote_address() const { return m_remote; }
 	bool send_fd(const ss_ &data)
 	{
 		size_t at = 0;
@@ -1706,6 +1711,11 @@ struct Module: public interface::Module, public network::Interface
 				const int r = ps->read_some(buf, sizeof buf);
 				if(r < 0)
 					break;
+				if(r > 0 && !ps->m_head_done){
+					if(!relay_head(it->second, *ps, buf, r))
+						drop_peer(id);
+					continue;
+				}
 				take_input(it->second, buf, r);
 				if(r == 0)
 					break;
@@ -1716,6 +1726,48 @@ struct Module: public interface::Module, public network::Interface
 		return false;
 #endif
 	}
+
+#ifdef _WIN32
+	// **A LAN player the client relays** ([LAN_PLAY]): a boxed server's
+	// LAN port is the client's (the firewall lets the client in, not the
+	// box), which hands each player over by a pipe of its own, starting it
+	// "BUILDAT-RELAY <address>\n". The client writes that before any of
+	// the player's bytes, so a player cannot write it, nor leave it out.
+	// Anything else is the client's own stream, taken as it is. False to
+	// drop the peer.
+	bool relay_head(Peer &peer, PipeSocket &ps, const char *buf, int r)
+	{
+		static const ss_ MARK = "BUILDAT-RELAY ";
+		ps.m_head.append(buf, r);
+		const ss_ &h = ps.m_head;
+		const size_t n = std::min(h.size(), MARK.size());
+		if(h.compare(0, n, MARK, 0, n) != 0){
+			ps.m_head_done = true;
+			ss_ all;
+			all.swap(ps.m_head);
+			take_input(peer, all.data(), (int)all.size());
+			return true;
+		}
+		const size_t nl = h.find('\n');
+		if(nl == ss_::npos)
+			return h.size() < MARK.size() + 46;
+		const ss_ address = h.substr(MARK.size(), nl - MARK.size());
+		if(address.empty() || address.size() > 45)
+			return false;
+		for(char c : address)
+			if(!(isxdigit((unsigned char)c) || c == '.' || c == ':'))
+				return false;
+		ps.m_remote = address;
+		ps.m_head_done = true;
+		const ss_ rest = h.substr(nl + 1);
+		ps.m_head.clear();
+		log_v(MODULE, "Peer %zu by the pipe: relayed from %s", peer.id,
+				cs(address));
+		if(!rest.empty())
+			take_input(peer, rest.data(), (int)rest.size());
+		return true;
+	}
+#endif
 
 	void handle_active_socket(int fd)
 	{
@@ -1769,6 +1821,34 @@ struct Module: public interface::Module, public network::Interface
 	bool listen_on(const ss_ &address, ss_ *error)
 	{
 		const ss_ port = m_server->get_config().get<ss_>("network_port");
+#ifdef _WIN32
+		// **Reached by a pipe, the LAN port is the client's** ([LAN_PLAY]):
+		// the firewall's prompt allows a program by its path, and a boxed
+		// server's process is not matched by the client's. The client
+		// that started this server listens there and relays each player
+		// by a pipe (relay_head()).
+		// simplified: told to the clients by the pipe now; one that
+		// connects later is not, as the launcher's own is there already
+		if(g_pipe_started){
+			int told = 0;
+			for(auto &pair : m_peers){
+				Peer &peer = pair.second;
+				if(peer.socket->fd() < 0 && peer.game() &&
+						peer.socket->get_remote_address() == "127.0.0.1"){
+					send_u(peer, "core:lan_relay", address+" "+port);
+					told++;
+				}
+			}
+			if(told == 0){
+				if(error)
+					*error = "no client by the pipe to listen for it";
+				return false;
+			}
+			log_i(MODULE, "Listening at %s:%s through the client's relay",
+					cs(address), cs(port));
+			return true;
+		}
+#endif
 		sp_<interface::TCPSocket> s(interface::createTCPSocket());
 		if(!s->bind_fd(address, port) || !s->listen_fd()){
 			if(error)
