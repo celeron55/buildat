@@ -14,6 +14,7 @@
 //   /search?q=...    FTS5 over the titles and the messages
 //   /f/<id>          an uploaded file ([FORUM] step 5), kept by its use
 //   /p/<author>/<name>  a package's place: the threads about it
+//   /brand/<file>    the pages' font and logo ([HTML_BRAND])
 // **To take part**: the buildat client, joined by builtin/accounts (a local
 // account or a Starport ID, as the admin set up its logins). "hr:req"
 // carries a JSON {id, cmd, ...} and "hr:res" the answer {id, ok, result |
@@ -49,6 +50,7 @@
 #include "interface/event.h"
 #include "interface/fs.h"
 #include "interface/markup.h"
+#include "interface/web_brand.h"
 #include "client_file/api.h"
 #include "network/api.h"
 #include "accounts/api.h"
@@ -457,7 +459,7 @@ static ss_ kind_text(const json::Value &t)
 	return "problem, "+ss_(status == "wontfix" ? "won't fix" : status);
 }
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
-		"/robots.txt", "/p/"};
+		"/robots.txt", "/p/", "/brand/"};
 
 // Trust ([HEARTH_MVP] step 6): what a level may post. Level 0 is a new
 // account, 1 one that has stood a while, 2 the admin
@@ -1175,28 +1177,10 @@ struct Module: public interface::Module
 	{
 		return "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
 				"<meta name=\"viewport\" content=\"width=device-width, "
-				"initial-scale=1\"><title>"+html(title)+"</title><style>"
-				"body{max-width:46em;margin:0 auto;padding:0 1em;"
-				"font:16px/1.5 sans-serif;color:#222;background:#fff}"
-				"header{border-bottom:2px solid #444;padding:.5em 0;"
-				"display:flex;gap:1em;align-items:center;flex-wrap:wrap}"
-				"header a{font-weight:bold}"
-				"a{color:#1a4fa0}"
-				".box{border:1px solid #999;border-radius:4px;padding:.5em 1em;"
-				"margin:1em 0}"
-				".meta{color:#555;font-size:.9em}"
-				".answer{border:2px solid #2a7a2a}"
-				"ul.list{padding-left:1.2em}"
-				"mark{background:#fe8}"
-				"pre{overflow-x:auto;background:#f4f4f4;padding:.5em}"
-				"code{background:#f4f4f4}"
-				"blockquote{border-left:3px solid #999;margin:0;padding-left:1em}"
-				"td,th{border:1px solid #999;padding:0 .4em}"
-				"table{border-collapse:collapse}"
-				".spoiler{background:#222;color:#222}"
-				".spoiler:hover,.spoiler:focus{background:none;color:inherit}"
-				"input,button{font:inherit}"
-				"</style></head><body><header><a href=\"/\">Hearth</a>"
+				"initial-scale=1\"><title>"+html(title)+"</title><style>"+
+				interface::web_brand::css+"</style></head><body><header>"
+				"<a class=\"brand\" href=\"/\">"+interface::web_brand::logo+
+				"Hearth</a>"
 				"<form action=\"/search\"><input name=\"q\" size=\"24\" "
 				"aria-label=\"Search\"> <button>Search</button></form>"
 				"</header>\n"+content+
@@ -1251,6 +1235,18 @@ struct Module: public interface::Module
 			ours = ours || r.path.compare(0, strlen(p), p) == 0;
 		if(!ours)
 			return;
+		// [HTML_BRAND]'s font and logo, before the pages' rate: each page
+		// fetches them
+		ss_ data, type;
+		if(r.path.compare(0, 7, "/brand/") == 0 && interface::web_brand::file(
+				m_server->get_config().get<ss_>("share_path"), r.path.substr(7),
+				data, type)){
+			network::access(m_server, [&](network::Interface *iface){
+				iface->http_respond(r.peer, 200, type, data,
+						"Cache-Control: max-age=86400\r\n");
+			});
+			return;
+		}
 		if(!m_db)
 			return respond(r, 503, page("Hearth", "<p>Starting.</p>"));
 		if((r.path == "/search" && !allowed(r.address, SEARCHES_A_MINUTE)) ||

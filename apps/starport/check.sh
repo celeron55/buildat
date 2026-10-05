@@ -67,6 +67,8 @@ for _ in $(seq 120); do
 done
 code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "the Starport did not start (sp.log)"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SP/brand/overpass.ttf")" = 200 ] ||
+	fail "the ID page's font ([HTML_BRAND])"
 
 Build/bin/buildat_server -m apps/floorplanner -D "$tmp/an" -P $AN -l 3 \
 	> "$tmp/an.log" 2>&1 &

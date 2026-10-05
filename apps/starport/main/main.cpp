@@ -17,6 +17,7 @@
 //   POST /api/id/<call>      a Starport ID's calls ([STARPORT] 10)
 //   GET /authorize, GET /id  the pages a web client signs in by and an
 //                            ID's settings are on ([WEB_ID_TRUST])
+//   GET /brand/<file>        the pages' font and logo ([HTML_BRAND])
 // The API answers any origin (CORS *): it takes no cookies.
 // In the app, "sp:req" carries a JSON {id, cmd, ...} from a joined client
 // and "sp:res" the answer {id, ok, result | error}.
@@ -35,6 +36,7 @@
 #include "interface/sha256.h"
 #include "interface/fs.h"
 #include "interface/bignum.h"
+#include "interface/web_brand.h"
 #include "client_file/api.h"
 #include "network/api.h"
 #include "storage/api.h"
@@ -285,19 +287,20 @@ static ss_ check_categories(const json::Value &b)
 // shown as text, no QR code; the age is changed without the client's PIN,
 // which a browser does not have.
 
-static const char *id_page_html = R"PAGE(<!doctype html>
+// [HTML_BRAND]: id_page() puts the shared sheet between these two, the
+// page's own rules after it, and the logo at LOGO
+static const char *id_page_head = R"PAGE(<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Starport ID</title>
-<style>
-body{font-family:sans-serif;background:#1d2128;color:#e6e6e6;margin:0;
-padding:16px;max-width:34em;margin:auto}
-input,button,select{font-size:1em;padding:.4em;margin:.2em 0;box-sizing:border-box}
-input{width:100%}button{min-width:7em;margin-right:.5em}
-#err{color:#ff8a80}#ok{color:#a5d6a7}.hide{display:none}b{color:#fff}
-fieldset{border:1px solid #444;margin:1em 0}li{margin:.2em 0}
+<style>)PAGE";
+static const char *id_page_html = R"PAGE(
+body{max-width:34em}input{width:100%;box-sizing:border-box;margin:.2em 0}
+button{min-width:7em;margin:.4em .5em .2em 0}.hide{display:none}
+li{margin:.2em 0}
 </style></head><body>
-<h2 id="title">Starport ID</h2>
+<header><span class="brand">LOGO<span id="title">Starport ID</span></span>
+</header>
 <p id="what"></p>
 <p id="err" role="alert"></p><p id="ok" role="status"></p>
 <form id="login" class="hide">
@@ -555,6 +558,13 @@ start();
 </script></body></html>
 )PAGE";
 
+static ss_ id_page()
+{
+	ss_ h = id_page_html;
+	h.replace(h.find("LOGO"), 4, interface::web_brand::logo);
+	return id_page_head+ss_(interface::web_brand::css)+h;
+}
+
 // ---------------------------------------------------------------------------
 // The instance's settings, with their defaults ([STARPORT] 5a, 7, 8)
 
@@ -759,6 +769,7 @@ struct Module: public interface::Module
 		network::access(m_server, [&](network::Interface *iface){
 			iface->claim_http_path("/authorize");
 			iface->claim_http_path("/id");
+			iface->claim_http_path("/brand/");
 		});
 		m_last_day = day_of(now_s());
 		m_vthread = std::thread([this](){ verifier(); });
@@ -840,6 +851,7 @@ struct Module: public interface::Module
 		} else {
 			body = json::object();
 		}
+		ss_ data, type;
 		if(r.path == "/api/announce" && r.method == "POST")
 			api_announce(r, body);
 		else if(r.path == "/api/delist" && r.method == "POST")
@@ -861,8 +873,16 @@ struct Module: public interface::Module
 			// Never in a frame: its Allow would be clicked through one
 			network::access(m_server, [&](network::Interface *iface){
 				iface->http_respond(r.peer, 200, "text/html; charset=utf-8",
-						id_page_html, "X-Frame-Options: DENY\r\n"
+						id_page(), "X-Frame-Options: DENY\r\n"
 						"Content-Security-Policy: frame-ancestors 'none'\r\n");
+			});
+		}
+		else if(r.path.compare(0, 7, "/brand/") == 0 && r.method == "GET" &&
+				interface::web_brand::file(m_server->get_config().get<ss_>(
+				"share_path"), r.path.substr(7), data, type)){
+			network::access(m_server, [&](network::Interface *iface){
+				iface->http_respond(r.peer, 200, type, data,
+						"Cache-Control: max-age=86400\r\n");
 			});
 		}
 		else if(r.path.compare(0, 14, "/api/starport/") == 0)

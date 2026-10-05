@@ -711,6 +711,13 @@ endif()
 if(BUILD_SERVER)
 	install(TARGETS ${SERVER_EXE_NAME} DESTINATION "${DST_BIN}")
 	install(DIRECTORY "${CMAKE_SOURCE_DIR}/builtin" DESTINATION "${DST_SHARE}")
+	# The font and the logo an app's HTML is served with ([HTML_BRAND],
+	# src/interface/web_brand.h), in a server build without the client too
+	install(FILES "${CMAKE_SOURCE_DIR}/client/data/buildat_logo.png"
+		DESTINATION "${DST_SHARE}/client/data")
+	install(FILES "${CMAKE_SOURCE_DIR}/client/data/Fonts/Overpass-Regular.ttf"
+		"${CMAKE_SOURCE_DIR}/client/data/Fonts/OverpassMono-Regular.ttf"
+		DESTINATION "${DST_SHARE}/client/data/Fonts")
 	# BUILDAT_LUANTI_ONLY ([LUANTI_BUILD]): the "Luanti only" archive --
 	# apps/vanilla and no other app, and no compiler; its modules come
 	# prebuilt in its cache (util/package.sh copies them from the full

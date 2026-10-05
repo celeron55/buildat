@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 1 min (a first run compiles the app, 2026-10-04)
-# covers: apps/hearth/** builtin/network/** 3rdparty/sqlite/CMakeLists.txt
+# covers: apps/hearth/** src/interface/web_brand.h builtin/network/** 3rdparty/sqlite/CMakeLists.txt
 # [HEARTH_MVP] step 1, **the groundwork**:
 #   1. the admin (the setup code) adds a topic and a subtopic (not a
 #      subtopic's subtopic), starts a thread whose title
@@ -154,6 +154,11 @@ for p in /t/99 /t/x /topic/ /m/; do
 	[ "$(get $p)" = 404 ] || fail "$p is not a 404"
 done
 grep -q "Hearth" <(curl -s "$U/index.html") && fail "/index.html is Hearth's"
+# [HTML_BRAND]: the font and the logo from the page's own origin
+[ "$(get /brand/overpass.ttf)" = 200 ] && [ "$(get /brand/logo.png)" = 200 ] ||
+	fail "the brand's files"
+[ "$(get /)" = 200 ] && grep -Eq '(src=|url\()"?(https?:)?//' "$t/page" &&
+	fail "the portal loads from another origin"
 
 # 6. A new account's limits, a report, a hide, an appeal
 client bob bobpass1234 "$t/bob6.log" '{"cmd":"new_thread","topic":1,"title":"Lamps","body":"see www.lamps.example"}
@@ -247,6 +252,8 @@ for want in "<strong>bold</strong> <em>em</em> <del>del</del> <code>code</code>"
 		'<p><a class="ref" href="/t/1">#1</a> and not a#2, #3x or <code>#4</code></p>'; do
 	grep -qF "$want" "$t/page" || fail "the markup: no $want ($(grep -a -A3 'bold' "$t/page" | head -12))"
 done
+# (the header's logo is the page's own)
+sed -i 's|<img src="/brand/logo.png" alt="">||' "$t/page"
 grep -qi 'href="[^"]*script\|<script\|<img' "$t/page" &&
 	fail "the markup let through: $(grep -aio 'href="[^"]*script[^"]*"\|<script\|<img' "$t/page")"
 
