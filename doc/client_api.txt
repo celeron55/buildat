@@ -415,6 +415,12 @@ buildat.safe.list_saves(app) -> {{name, ...}, ...}
 buildat.safe.launch_save(app, name) -> true, or false and why
 - Open a save. The pair has to be one list_saves() answers, so what reaches
   the server's -u is a save that is on the disk.
+buildat.safe.join_server(address) -> true, or false and why
+- Join a server through the launch menu's connecting screen: the local server
+  stopped, the wait shown, a failure a dialog, and on success the placeholder
+  a leave pops. For a launch UI that is not launch_menu.
+buildat.safe.show_engine_settings() -> true
+- The launch menu's Engine settings screen, pushed on the main UI stack.
 buildat.safe.launch_loading(what) -> true, or false and why
 - An app launched into a menu of its own says here that it has stopped
   being a menu and is loading: what is "world" or "server". Reaches the
@@ -498,7 +504,8 @@ buildat.safe.storage_write(name, data) -> true, or false and why
   sandbox.lua's __buildat_run_served_code, api.lua's
   __buildat_served_overrides) rather than being told by the calling frame,
   which a tail call leaves out: there set_preference, start_local_server,
-  stop_local_server, launch, launch_save, set_launch_ui,
+  stop_local_server, launch, launch_save, join_server,
+  show_engine_settings, set_launch_ui,
   compose_launch_ui and cache_write refuse, cache_read answers nil, and
   storage is the server's.
 buildat.safe.cache_read(name) -> data or nil
@@ -940,7 +947,9 @@ UI utilities over uistack.
 show_message_dialog(message [, on_close])
 - A modal dialog with an Ok button; a second call while one is up appends to
   it. Escape closes it.
-show_confirm_dialog(message, on_yes, on_no)
+show_confirm_dialog(message, on_yes, on_no[, yes_label])
+- Two buttons, yes_label ("Force kill" when absent) and Cancel, which has the
+  focus.
 show_notice(text)
 - A line at the top of the screen for six seconds, taking neither the mouse
   nor the focus: what a caught error is shown as in an app ([MENU_ERRORS])

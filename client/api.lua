@@ -451,6 +451,8 @@ __buildat_served_overrides = {
 	stop_local_server = refused("stop_local_server"),
 	launch = refused("launch"),
 	launch_save = refused("launch_save"),
+	join_server = refused("join_server"),
+	show_engine_settings = refused("show_engine_settings"),
 	set_launch_ui = refused("set_launch_ui"),
 	compose_launch_ui = refused("compose_launch_ui"),
 	cache_read = function() return nil end,
@@ -955,6 +957,23 @@ buildat.safe.launch_save = function(game, name)
 				"): no such save"
 	end
 	launch_grid.screens().start_local_app(game, "save=" .. name)
+	return true
+end
+-- **The launch menu's screens for any launch UI** ([LAUNCH_MENU_V2]): a
+-- launch UI runs its own files and nobody else's, so these two are how
+-- another one joins a server and shows the Engine settings without a
+-- copy of launch_menu's. The connect is screens.lua's: the stopped
+-- local server, the connecting screen, the error dialog and the
+-- "game is running" placeholder a leave pops.
+buildat.safe.join_server = function(address)
+	if type(address) ~= "string" or address:find("%c") then
+		return false, "join_server(address): a string"
+	end
+	launch_grid.screens().connect(address)
+	return true
+end
+buildat.safe.show_engine_settings = function()
+	launch_grid.screens("preferences.lua").show()
 	return true
 end
 -- Whether the client has a local server up, which is how a launcher

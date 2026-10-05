@@ -945,7 +945,8 @@ function M.safe.show_message_dialog(message, on_close)
 	end)
 end
 
-function M.safe.show_confirm_dialog(message, on_yes, on_no)
+-- yes_label is the first button's, "Force kill" when absent (its first user)
+function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label)
 	local root = uistack.main:push({desc="show_confirm_dialog"})
 
 	local style = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
@@ -975,7 +976,7 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no)
 	yes_button.minHeight = 20
 	local yes_text = yes_button:CreateChild("Text")
 	yes_text:SetStyleAuto()
-	yes_text.text = "Force kill"
+	yes_text.text = yes_label or "Force kill"
 	yes_text:SetTextAlignment(HA_CENTER)
 
 	local no_button = window:CreateChild("Button")

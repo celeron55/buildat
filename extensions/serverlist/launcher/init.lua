@@ -18,7 +18,10 @@ return function(ctx)
 	for i, s in ipairs(sl.servers()) do
 		local icon = s.game and icons[s.game]
 		out[#out + 1] = {
-			id = "s" .. i,
+			-- By address, not by place in the list: the key is what the
+			-- launch history keeps, and a list fetched again reorders
+			-- ([LAUNCH_MENU_V2]'s Continue). -a's characters only.
+			id = "s_" .. tostring(s.address):gsub("[^%w%.%-]", "_"),
 			label = s.name,
 			icon = icon, resolved_icon = icon ~= nil,
 			-- **A server, and how much it matters** ([LAUNCH_SIGNIFY]):

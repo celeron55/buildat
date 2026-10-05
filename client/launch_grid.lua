@@ -16,19 +16,21 @@ local ICON_FALLBACK = "buildat_logo.png"
 -- screens.lua, run in the sandbox for each launch: every launch UI's game
 -- starts end there, and the file keeps no state, so a fresh copy is the
 -- same as a kept one. Named after the extension, as its own loader
--- names it, so the verbs know whose file it is.
-function M.screens()
+-- names it, so the verbs know whose file it is. file is another of
+-- launch_menu's own the same way (preferences.lua).
+function M.screens(file)
+	file = file or "screens.lua"
 	local f = io.open(__buildat_extension_path("launch_menu") ..
-			"/screens.lua", "rb")
+			"/" .. file, "rb")
 	if not f then
-		error("launch_grid: no launch_menu/screens.lua")
+		error("launch_grid: no launch_menu/" .. file)
 	end
 	local code = f:read("*a")
 	f:close()
 	local ok, err, m = __buildat_run_code_in_sandbox(code,
-			"launch_menu/screens.lua")
+			"launch_menu/" .. file)
 	if not ok or type(m) ~= "table" then
-		error("launch_grid: launch_menu/screens.lua: " .. tostring(err))
+		error("launch_grid: launch_menu/" .. file .. ": " .. tostring(err))
 	end
 	return m
 end
