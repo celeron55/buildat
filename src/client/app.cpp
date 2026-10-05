@@ -314,7 +314,8 @@ static ss_ preferences_path()
 // its right click menu, select all, copy, cut and paste then work on it,
 // and what they did comes back as actions, taken here once a frame:
 //   "v<caret>,<text>"  the field's text is now this, the caret there
-//   "i<text>"          type the text (a paste)
+//   "i<text>"          type the text (a paste; its lines kept in a
+//                      multi-line field)
 //   "s<start>,<len>"   select
 //   "e"                Enter, from a touchscreen's keyboard
 // Positions are in characters.
@@ -366,9 +367,11 @@ static void web_text_sync(magic::UI *ui)
 	bool secret = !e->IsTextCopyable() || e->GetEchoCharacter();
 	EM_ASM({
 		if(window.buildatText)
-			buildatText.sync($0, $1, $2, $3, UTF8ToString($4), $5, $6, $7, $8);
+			buildatText.sync($0, $1, $2, $3, UTF8ToString($4), $5, $6, $7, $8,
+					$9);
 	}, p.x_ * k, p.y_ * k, size.x_ * k, size.y_ * k, e->GetText().CString(),
-			start, len, e->IsEditable() ? 1 : 0, secret ? 1 : 0);
+			start, len, e->IsEditable() ? 1 : 0, secret ? 1 : 0,
+			e->IsMultiLine() ? 1 : 0);
 }
 #endif
 

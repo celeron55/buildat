@@ -223,7 +223,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	//   "v<caret>,<text>"  the field is now this: whatever the browser did
 	//                      to the stand-in (typing that is not a keypress,
 	//                      deleting, a composition, a cut, the menu's Delete)
-	//   "i<text>"          type this (a paste, made one line)
+	//   "i<text>"          type this (a paste, made one line but in a
+	//                      multi-line field, [HEARTH_TRACKER])
 	//   "s<start>,<len>"   select
 	//   "e"                Enter (a touchscreen keyboard's)
 	// Indices there are characters, here UTF-16. A desktop's typing never
@@ -286,7 +287,7 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	}
 	window.buildatText = {
 		take: function(){ return actions.length ? actions.shift() : null; },
-		sync: function(x, y, w, h, text, start, len, editable, secret){
+		sync: function(x, y, w, h, text, start, len, editable, secret, multi){
 			if(x === null){
 				if(active){
 					active = false;
@@ -320,6 +321,7 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			if(document.activeElement !== el)
 				el.focus({preventScroll: true});
 			el.readOnly = !editable;
+			el.dataset.multi = multi ? '1' : '';
 			// Setting the value would end an IME's composition
 			if(composing)
 				return;
@@ -338,8 +340,10 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		e.addEventListener('compositionend', function(){ composing = false; });
 		e.addEventListener('paste', function(ev){
 			ev.preventDefault();
-			// A line edit is one line
-			var t = ev.clipboardData.getData('text/plain').replace(/[\r\n\t]+/g, ' ');
+			// A line edit is one line; a multi-line one keeps its lines
+			var t = ev.clipboardData.getData('text/plain');
+			t = e.dataset.multi ? t.replace(/\r\n?/g, '\n') :
+					t.replace(/[\r\n\t]+/g, ' ');
 			if(t && !e.readOnly)
 				actions.push('i' + t);
 		});
@@ -349,11 +353,12 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			var v = e.value;
 			// A touchscreen keyboard's Enter is a line break in the text:
 			// taken out, and the field's Enter (user, 2026-09-30)
-			var enter = /[\r\n]/.test(v);
+			// In a multi-line field the line break is the text's own
+			var enter = !e.dataset.multi && /[\r\n]/.test(v);
 			if(enter)
 				v = e.value = v.replace(/[\r\n]+/g, '');
 			// One line, whatever a suggestion put in
-			if(/\t/.test(v))
+			if(!e.dataset.multi && /\t/.test(v))
 				v = e.value = v.replace(/\t+/g, ' ');
 			var caret = chars(v, e.selectionEnd);
 			e.dataset.sel = e.selectionStart + ',' + e.selectionEnd;
