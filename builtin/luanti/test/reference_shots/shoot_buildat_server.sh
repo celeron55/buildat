@@ -57,6 +57,10 @@ export BUILDAT_LUANTI_NO_SPOTS=1
 # instead (curve and bloom on), which is what a grade check looks at
 # ([BLOOM_PLACE]); such a set goes under REFSHOT_SHOTS_DIR, not the fit's.
 export BUILDAT_LUANTI_LINEAR="${BUILDAT_LUANTI_LINEAR:-1}"
+# And full detail to the end of the range: the server's default "half"
+# meshes the far half from a downsampled volume, which has no water in it
+# and coarsens the distant buildings -- a set of the light, not of the LOD
+export BUILDAT_LOD_DETAIL="${BUILDAT_LOD_DETAIL:-full}"
 built=$(mktemp -d /tmp/refshots_build.XXXXXX)
 KEEP=1 "$me/build.sh" "$built" || exit 2
 . "$built/env.sh"
