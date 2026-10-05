@@ -220,14 +220,10 @@ namespace interface
 
 		// Can be called from any thread
 		// voxel_reg is only read for its voxel format: which bits of a voxel
-		// are the type id the downsampling picks by.
-		// inside: a block is solid only when every voxel in it casts a
-		// shadow, so the surface lies inside the real one -- the shape a
-		// shadow caster can take without shadowing itself ([CLIENT_FRAME]);
-		// otherwise any voxel makes it solid, the shape that is drawn
+		// are the type id the downsampling picks by
 		up_<VoxelVolume> generate_voxel_lod_volume(
 				int lod, VoxelVolume&volume_orig,
-				VoxelRegistry *voxel_reg, bool inside = false);
+				VoxelRegistry *voxel_reg);
 
 		// Can be called from any thread
 		void generate_voxel_lod_geometry(int lod,

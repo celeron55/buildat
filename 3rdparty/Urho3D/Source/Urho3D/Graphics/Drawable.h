@@ -163,8 +163,6 @@ public:
     void SetMaxLights(unsigned num);
     /// Set shadowcaster flag.
     void SetCastShadows(bool enable);
-    /// Set which cascades of a directional light's shadow this is drawn into, bit per split. Default all.
-    void SetShadowSplitMask(unsigned mask) { shadowSplitMask_ = mask; }
     /// Set occlusion flag.
     void SetOccluder(bool enable);
     /// Set occludee flag.
@@ -198,9 +196,6 @@ public:
 
     /// Return shadow mask.
     unsigned GetShadowMask() const { return shadowMask_; }
-
-    /// Return shadow split mask.
-    unsigned GetShadowSplitMask() const { return shadowSplitMask_; }
 
     /// Return zone mask.
     unsigned GetZoneMask() const { return zoneMask_; }
@@ -389,8 +384,6 @@ protected:
     PODVector<Light*> lights_;
     /// Per-vertex lights affecting this drawable.
     PODVector<Light*> vertexLights_;
-    /// Shadow splits this is drawn into, bit per split.
-    unsigned shadowSplitMask_ = M_MAX_UNSIGNED;
 };
 
 inline bool CompareDrawables(Drawable* lhs, Drawable* rhs)

@@ -2436,7 +2436,7 @@ void set_voxel_geometry(CustomGeometry *cg, Context *context,
 
 up_<VoxelVolume> generate_voxel_lod_volume(
 		int lod, VoxelVolume&volume_orig,
-		VoxelRegistry *voxel_reg, bool inside)
+		VoxelRegistry *voxel_reg)
 {
 	const VoxelFmt fmt(voxel_reg);
 	pv::Region region_orig = volume_orig.getEnclosingRegion();
@@ -2459,7 +2459,6 @@ up_<VoxelVolume> generate_voxel_lod_volume(
 				// air in it is a block a face is lit through, and the voxel
 				// that wins is a solid one with no light in it at all.
 				uint8_t max_sky = 0, max_lamp = 0;
-				bool all_cast = true;
 				for(int x1 = 0; x1 < lod; x1++){
 					for(int y1 = 0; y1 < lod; y1++){
 						for(int z1 = 0; z1 < lod; z1++){
@@ -2473,16 +2472,6 @@ up_<VoxelVolume> generate_voxel_lod_volume(
 							VoxelSample v1 = volume_orig.sample_at(p_orig);
 							if(fmt.undefined(v1))
 								continue;
-							if(inside){
-								// What the near mesh casts with: not the
-								// translucent, which casts nothing
-								const interface::CachedVoxelDefinition *def =
-										voxel_reg->get_cached(v1);
-								if(def == nullptr || def->translucent ||
-										def->edge_material_id ==
-										interface::EDGEMATERIALID_EMPTY)
-									all_cast = false;
-							}
 							// TODO: Prioritize voxel types better
 							// Higher is probably more interesting
 							// Which definition it wears rather than which
@@ -2502,8 +2491,6 @@ up_<VoxelVolume> generate_voxel_lod_volume(
 						}
 					}
 				}
-				if(inside && !all_cast)
-					v_orig = VoxelSample();
 				if(fmt.light_sky.bound())
 					fmt.light_sky.set(v_orig, max_sky);
 				if(fmt.light_lamp.bound())

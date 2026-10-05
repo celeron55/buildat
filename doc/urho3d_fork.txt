@@ -353,14 +353,3 @@ Source/ThirdParty/STB/stb_vorbis.h
 Upstream v1.22, unmodified, in place of v1.09, whose compute_codewords
 wrote past a 32-entry stack array on a crafted .ogg -- a file a server can
 hand the client as a sound.
-
-A drawable's shadow cascades ([CLIENT_FRAME], 9c11b62b)
--------------------------------------------------------
-Source/Urho3D/Graphics/Drawable.h, Graphics/View.cpp
-
-Drawable::SetShadowSplitMask(): a bit per split of a directional light,
-the cascades the drawable casts into (default all). View's
-ProcessShadowCasters skips a drawable whose bit for the split is not
-set; point and spot lights ignore it, a point light's splits being its
-cube's faces. The client's BUILDAT_SHADOW_LOD=a casts the full mesh in
-the first cascade and a coarser one past it.

@@ -2434,8 +2434,6 @@ void View::ProcessShadowCasters(LightQueryResult& query, const PODVector<Drawabl
         // Check for that first
         if (!drawable->GetCastShadows())
             continue;
-        if (type == LIGHT_DIRECTIONAL && !(drawable->GetShadowSplitMask() & (1u << splitIndex)))
-            continue;
         // Check shadow mask
         if (!(GetShadowMask(drawable) & lightMask))
             continue;
