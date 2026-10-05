@@ -9,7 +9,8 @@
 # the Hearth's own address): demo 1.0 becomes one thread in "Releases",
 # by "tester (Aitta)", with the changelog; elsewhere does not; a restart
 # makes no second thread. "Feedback..." on the installed demo's tile
-# opens the composer there with the package and versions.
+# opens the composer there with the package and versions; its thread is a
+# problem reported in 1.0, which the admin marks fixed in 1.1.
 #
 #   util/release_thread_check.sh
 set -u
@@ -102,7 +103,10 @@ for z in $zips; do
 	"$b" aitta install "$z" "$t/user" > /dev/null 2>&1 || fail "install $z"
 done
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
-BUILDAT_HEARTH_REQS='{"cmd":"new_thread","feedback":true,"subject":"tester/demo k","title":"It hums","body":"a check"}' \
+BUILDAT_HEARTH_REQS='{"cmd":"new_thread","feedback":true,"subject":"tester/demo k","title":"It hums","body":"a check","kind":"problem","version":"1.0"}
+{"cmd":"status","thread":2,"status":"fixed","fixed_in":"1.1"}
+{"cmd":"status","thread":1,"status":"fixed"}
+{"cmd":"new_thread","topic":1,"title":"x","body":"x","kind":"bug"}' \
 	timeout 90 bin/buildat -D "$t/user" -C "$t/cache_f" -w 800x600 -l 3 \
 	-o sound_mute=1 -a installed/tester.demo@1.0/feedback -c @"$t/cmds_h" \
 	> "$t/cl_f.log" 2>&1
@@ -114,14 +118,24 @@ for want in '"package":"tester/demo"' '"version":"1.0"' \
 done
 grep -aq 'hr: {"id":1001,"ok":true' "$t/cl_f.log" || fail "the feedback thread: $(grep -a 'hr: ' "$t/cl_f.log" | tail -1)"
 curl -s "http://127.0.0.1:$H/" | grep -q "Feedback" || fail "no Feedback topic"
+# A problem: its status the admin's, its version the report's; a release
+# has no status, and a kind is one of four
+grep -aq 'hr: {"id":1002,"ok":true' "$t/cl_f.log" || fail "the status: $(grep -a '"id":1002' "$t/cl_f.log")"
+grep -aq '"id":1003,"ok":false' "$t/cl_f.log" || fail "a release took a status"
+grep -aq '"id":1004,"ok":false' "$t/cl_f.log" || fail "a kind \"bug\" was taken"
+page=$(curl -s "http://127.0.0.1:$H/t/2")
+echo "$page" | grep -q "problem, fixed in 1.1, reported in 1.0" || fail "the problem's page: $page"
 
 # A restart reads the Aitta again and makes no second thread
-kill $ph; wait $ph 2>/dev/null
+# start() ran in $(...): the server is not this shell's child to wait for
+kill $ph
+while kill -0 $ph 2>/dev/null; do sleep 0.2; done
 ph=$(start hearth $H "$t/hearth2.log")
 for _ in $(seq 60); do
-	grep -q "Hearth: .* messages" "$t/hearth2.log" && break
+	grep -q "STATUS Listening" "$t/hearth2.log" && break
 	sleep 1
 done
+grep -q "STATUS Listening" "$t/hearth2.log" || fail "Hearth did not start again ($(tail -3 "$t/hearth2.log"))"
 sleep 5
 grep -q "is the thread" "$t/hearth2.log" && fail "a second thread after the restart"
 n=$(curl -s "http://127.0.0.1:$H/t/3" | grep -c "demo 1.0")

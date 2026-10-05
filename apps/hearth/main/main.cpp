@@ -356,8 +356,14 @@ static const char *SCHEMA =
 		"answer INTEGER NOT NULL DEFAULT 0, "
 		// Its first message hidden: the thread with it
 		"hidden INTEGER NOT NULL DEFAULT 0, "
-		// "" a discussion, "release" a package's release
-		"kind TEXT NOT NULL DEFAULT '');"
+		// "" a discussion, "question", "problem", "idea", or "release" a
+		// package's release
+		"kind TEXT NOT NULL DEFAULT '', "
+		// A problem's: "open", "confirmed", "fixed" or "wontfix"; the
+		// version it was reported in, and the one that fixed it
+		"status TEXT NOT NULL DEFAULT '', "
+		"version TEXT NOT NULL DEFAULT '', "
+		"fixed_in TEXT NOT NULL DEFAULT '');"
 	"CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY, "
 		"thread INTEGER NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL, "
 		"created INTEGER NOT NULL, edited INTEGER NOT NULL DEFAULT 0, "
@@ -421,7 +427,34 @@ static const char *const COLUMNS_ADDED[][3] = {
 	{"messages", "hidden_reason", "TEXT NOT NULL DEFAULT ''"},
 	{"notifications", "note", "TEXT NOT NULL DEFAULT ''"},
 	{"threads", "kind", "TEXT NOT NULL DEFAULT ''"},
+	{"threads", "status", "TEXT NOT NULL DEFAULT ''"},
+	{"threads", "version", "TEXT NOT NULL DEFAULT ''"},
+	{"threads", "fixed_in", "TEXT NOT NULL DEFAULT ''"},
 };
+// What a poster picks a thread to be ([PACKAGE_SUBJECT]); "release" is
+// Hearth's own
+static const std::set<ss_> POSTED_KINDS = {"", "question", "problem", "idea"};
+static const std::set<ss_> STATUSES = {"open", "confirmed", "fixed", "wontfix"};
+
+// A package's version as a report names it: 1 to 40 of [A-Za-z0-9.+_-]
+static bool version_ok(const ss_ &v)
+{
+	return !v.empty() && v.size() <= 40 && v.find_first_not_of(
+			"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.+_-")
+			== ss_::npos;
+}
+
+// What a thread's line says it is: "problem, fixed in 1.3", "question", ""
+static ss_ kind_text(const json::Value &t)
+{
+	const ss_ kind = jstr(t, "kind"), status = jstr(t, "status");
+	if(kind != "problem")
+		return kind;
+	if(status == "fixed")
+		return "problem, fixed" + (jstr(t, "fixed_in").empty() ? ss_() :
+				" in "+jstr(t, "fixed_in"));
+	return "problem, "+ss_(status == "wontfix" ? "won't fix" : status);
+}
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
 		"/robots.txt"};
 
@@ -886,11 +919,15 @@ struct Module: public interface::Module
 		t.set("messages", q.i(7));
 		t.set("answer", q.i(8));
 		t.set("hidden", q.i(9) != 0);
+		t.set("kind", q.s(10));
+		t.set("status", q.s(11));
+		t.set("version", q.s(12));
+		t.set("fixed_in", q.s(13));
 		return t;
 	}
 #define THREAD_COLUMNS "id, topic, title, author, created, last, subject, " \
 		"(SELECT count(*) FROM messages WHERE thread = threads.id), answer, " \
-		"hidden"
+		"hidden, kind, status, version, fixed_in"
 
 	// Answered ones first, then by the latest message
 	// simplified: 200; paging when a topic has more
@@ -1148,6 +1185,7 @@ struct Module: public interface::Module
 	{
 		return "<li><a href=\"/t/"+itos(jint(t, "id"))+"\">"+
 				html(jstr(t, "title"))+"</a> <span class=\"meta\">"+
+				(kind_text(t).empty() ? ss_() : html(kind_text(t))+", ")+
 				(jint(t, "answer") ? "answered, " : "")+
 				html(jstr(t, "author"))+", "+itos(jint(t, "messages"))+
 				" messages, last "+time_text(jint(t, "last"))+"</span></li>\n";
@@ -1282,6 +1320,10 @@ struct Module: public interface::Module
 			body = "<p class=\"meta\"><a href=\"/topic/"+
 					itos(jint(t, "topic"))+"\">"+html(jstr(top, "name"))+
 					"</a></p>\n<h1>"+html(jstr(t, "title"))+"</h1>\n";
+			if(!kind_text(t).empty())
+				body += "<p class=\"meta\">"+html(kind_text(t))+
+						(jstr(t, "version").empty() ? ss_() :
+						", reported in "+html(jstr(t, "version")))+"</p>\n";
 			// The question, its answer, then the rest in order; a later page
 			// marks the answer where it is
 			// simplified: an answer past the first page is not lifted under
@@ -1696,9 +1738,16 @@ struct Module: public interface::Module
 					top_topic("Feedback", "About the packages at home here, "
 					"from their users' clients") : jint(q, "topic");
 			const ss_ title = jstr(q, "title"), body = jstr(q, "body"),
-					subject = jstr(q, "subject");
+					subject = jstr(q, "subject"), kind = jstr(q, "kind"),
+					version = jstr(q, "version");
 			if(!topic(topic_id).is_object())
 				throw Exception("no such topic");
+			if(!POSTED_KINDS.count(kind))
+				throw Exception("a thread is a discussion, a question, a "
+						"problem or an idea");
+			if(!version.empty() && !version_ok(version))
+				throw Exception("a version is 1 to 40 of letters, digits "
+						"and .+_-");
 			need(text_ok(title, TITLE_MAX, false, "the title"));
 			need(text_ok(body, BODY_MAX, true, "the message"));
 			if(!subject.empty())
@@ -1706,11 +1755,35 @@ struct Module: public interface::Module
 			check_limits(name, admin, true, title+"\n"+body);
 			const int64_t t = now_s();
 			Q i(m_db, "INSERT INTO threads(topic, title, author, created, last, "
-					"subject) VALUES(?, ?, ?, ?, ?, ?)");
-			i.b(topic_id).b(title).b(name).b(t).b(t).b(subject).step();
+					"subject, kind, status, version) VALUES(?, ?, ?, ?, ?, ?, ?, "
+					"?, ?)");
+			i.b(topic_id).b(title).b(name).b(t).b(t).b(subject).b(kind)
+					.b(ss_(kind == "problem" ? "open" : "")).b(version).step();
 			const int64_t id = sqlite3_last_insert_rowid(m_db);
 			add_message(id, name, body, title);
 			return json::Value(id);
+		}
+		// A problem's status. simplified: the admin's; the package's owners
+		// hold it once a Hearth account can be tied to an Aitta author
+		// ([PACKAGE_SUBJECT], a question to the user)
+		if(cmd == "status"){
+			const int64_t thread_id = jint(q, "thread");
+			const ss_ status = jstr(q, "status"), fixed_in = jstr(q, "fixed_in");
+			if(!admin)
+				throw Exception("only the admin sets a problem's status");
+			Q t(m_db, "SELECT kind FROM threads WHERE id = ?");
+			t.b(thread_id);
+			if(!t.step() || t.s(0) != "problem")
+				throw Exception("no such problem");
+			if(!STATUSES.count(status))
+				throw Exception("a status is open, confirmed, fixed or wontfix");
+			if(!fixed_in.empty() && (status != "fixed" || !version_ok(fixed_in)))
+				throw Exception("fixed_in is a version, and only with fixed");
+			Q u(m_db, "UPDATE threads SET status = ?, fixed_in = ? WHERE id = ?");
+			u.b(status).b(fixed_in).b(thread_id).step();
+			log_i(MODULE, "%s set the thread %lld %s", cs(name),
+					(long long)thread_id, cs(status));
+			return json::Value(true);
 		}
 		if(cmd == "reply"){
 			const int64_t thread_id = jint(q, "thread");

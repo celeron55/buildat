@@ -231,8 +231,35 @@ local me = {account = "", unseen = 0, level = 0, open_reports = 0}
 local open_thread = nil
 local on_home = false
 
+-- What a thread is, as main.cpp's kind_text() says it: "problem, fixed in
+-- 1.3", "question", or "" for a discussion
+local function kind_text(th)
+	if th.kind ~= "problem" then
+		return th.kind or ""
+	end
+	if th.status == "fixed" then
+		return "problem, fixed" .. (th.fixed_in ~= "" and " in " .. th.fixed_in or "")
+	end
+	return "problem, " .. (th.status == "wontfix" and "won't fix" or th.status)
+end
+
+-- A button that cycles through what a new thread is ([PACKAGE_SUBJECT]);
+-- returns a function giving the kind picked
+local KINDS = {{"", "a discussion"}, {"question", "a question"},
+		{"problem", "a problem"}, {"idea", "an idea"}}
+local function kind_pick(parent, at)
+	local pick
+	pick = button(parent, "It is " .. KINDS[at][2], function()
+		at = at % #KINDS + 1
+		pick:GetChild(0):SetText("It is " .. KINDS[at][2])
+	end)
+	return function() return KINDS[at][1] end
+end
+
 local function thread_line(th)
-	return th.title .. "  -- " .. (th.answer ~= 0 and "answered, " or "") ..
+	local kind = kind_text(th)
+	return th.title .. "  -- " .. (kind ~= "" and kind .. ", " or "") ..
+			(th.answer ~= 0 and "answered, " or "") ..
 			th.author .. ", " .. th.messages .. " messages"
 end
 
@@ -325,9 +352,10 @@ show_topic = function(id)
 		-- simplified: no markup buttons and no preview yet; the text is
 		-- CommonMark, which reads as it is
 		local body = edit(w, "Its first message (Markdown)", true)
+		local kind = kind_pick(w, 1)
 		button(w, "Start the thread", function()
 			req("new_thread", {topic = id, title = title:GetText(),
-					body = body:GetText()}, function(new_id)
+					body = body:GetText(), kind = kind()}, function(new_id)
 				show_thread(new_id)
 			end)
 		end)
@@ -378,6 +406,11 @@ show_thread = function(id)
 	leave_home()
 	req("thread", {thread = id}, function(t)
 		local w = new_page(t.title)
+		local kind = kind_text(t)
+		if kind ~= "" then
+			text(w, kind .. (t.version ~= "" and ", reported in " .. t.version or
+					""), GREY)
+		end
 		local l, add = list(w)
 		t.first = t.list[1] and t.list[1].id or 0
 		-- The question, its answer, then the rest in order
@@ -423,6 +456,20 @@ show_thread = function(id)
 				show_thread(id)
 			end)
 		end)
+		-- A problem's status, the admin's to set ([PACKAGE_SUBJECT])
+		if t.kind == "problem" and me.admin then
+			-- One button, to the next status: a page that fits a small window
+			local fixed_in = edit(w, "Fixed in (a version, for fixed)")
+			local next = {open = "confirmed", confirmed = "fixed",
+					fixed = "wontfix", wontfix = "open"}
+			local to = next[t.status] or "open"
+			button(w, "Make it " .. (to == "wontfix" and "won't fix" or to),
+					function()
+				req("status", {thread = id, status = to, fixed_in =
+						to == "fixed" and fixed_in:GetText() or ""},
+						function() show_thread(id) end)
+			end)
+		end
 		button(w, "Back", function() show_topic(t.topic) end)
 		-- A touchscreen's keyboard would cover the thread: it opens on a tap
 		if buildat.get_env("BUILDAT_TOUCH") ~= "1" then
@@ -550,9 +597,13 @@ local function show_feedback(f)
 	local body = edit(w, "The message (Markdown)", true)
 	body:SetText("App: " .. f.package .. " " .. f.version .. "\nEngine: " ..
 			f.engine .. "\nPlatform: " .. f.platform .. "\n\n")
+	local kind = kind_pick(w, 3)
 	button(w, "Send", function()
 		req("new_thread", {feedback = true, subject = f.subject,
-				title = title:GetText(), body = body:GetText()},
+				title = title:GetText(), body = body:GetText(), kind = kind(),
+				-- one the server would refuse leaves the report without it
+				version = #f.version <= 40 and
+						f.version:match("^[%w%.%+_%-]+$") or nil},
 				function(new_id)
 			show_thread(new_id)
 		end)
