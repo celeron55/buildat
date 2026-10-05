@@ -224,7 +224,7 @@ local function edit(parent, label, multi)
 end
 
 local show_topic, show_thread, read_on, show_notifications, show_queue, show_report
-local show_new_topic
+local show_new_topic, show_link
 -- Who this client is ("me"), and the thread it has open: the server pushes
 -- that thread's new messages ("hr:new"), which are added to it in place
 local me = {account = "", unseen = 0, level = 0, open_reports = 0}
@@ -458,6 +458,9 @@ show_thread = function(id)
 				show_thread(id)
 			end)
 		end)
+		if t.subject == "" and (t.author == me.account or me.admin) then
+			button(w, "About a package...", function() show_link(t) end)
+		end
 		-- A problem's status, the admin's to set ([PACKAGE_SUBJECT])
 		if t.kind == "problem" and me.admin then
 			-- One button, to the next status: a page that fits a small window
@@ -477,6 +480,29 @@ show_thread = function(id)
 		if buildat.get_env("BUILDAT_TOUCH") ~= "1" then
 			e:SetFocus(true)
 		end
+	end)
+end
+
+-- Which package a thread is about, out of those released here
+show_link = function(t)
+	leave_home()
+	open_thread = nil
+	req("subjects", nil, function(subjects)
+		local w = new_page("What is \"" .. t.title .. "\" about?")
+		local _, add = list(w)
+		for _, s in ipairs(subjects) do
+			local pkg, key = s:match("^(%S+) (%x*)")
+			add((pkg or s) .. "  (key " .. (key or ""):sub(1, 12) .. "...)",
+					nil, function()
+				req("link", {thread = t.id, subject = s}, function()
+					show_thread(t.id)
+				end)
+			end)
+		end
+		if #subjects == 0 then
+			add("No package has a release here yet.", GREY)
+		end
+		button(w, "Back", function() show_thread(t.id) end)
 	end)
 end
 

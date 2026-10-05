@@ -1672,6 +1672,38 @@ struct Module: public interface::Module
 				list.append(thread_row(t));
 			return list;
 		}
+		// The packages this Hearth has threads about, to link a thread to
+		if(cmd == "subjects"){
+			json::Value list = json::array();
+			Q t(m_db, "SELECT DISTINCT subject FROM threads WHERE "
+					"kind = 'release' ORDER BY subject LIMIT 200");
+			while(t.step())
+				list.append(t.s(0));
+			return list;
+		}
+		// A thread started elsewhere, linked to a package afterwards by its
+		// poster or the admin; only to a package already known here, so a
+		// link names a real release's key
+		if(cmd == "link"){
+			const int64_t thread_id = jint(q, "thread");
+			const ss_ subject = jstr(q, "subject");
+			Q t(m_db, "SELECT author, subject FROM threads WHERE id = ?");
+			t.b(thread_id);
+			if(!t.step())
+				throw Exception("no such thread");
+			if(t.s(0) != name && !admin)
+				throw Exception("only whoever started the thread links it");
+			if(!t.s(1).empty() && !admin)
+				throw Exception("the thread is about a package already");
+			Q k(m_db, "SELECT 1 FROM threads WHERE kind = 'release' AND "
+					"subject = ?");
+			k.b(subject);
+			if(!k.step())
+				throw Exception("no release here is that package");
+			Q u(m_db, "UPDATE threads SET subject = ? WHERE id = ?");
+			u.b(subject).b(thread_id).step();
+			return json::Value(true);
+		}
 		if(cmd == "search"){
 			const ss_ text = jstr(q, "q");
 			need(text_ok(text, 200, false, "the search"));

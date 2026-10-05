@@ -141,7 +141,10 @@ curl -s "http://127.0.0.1:$H/t/$n" | grep -q 'It hums <a class="ref" href="/t/2"
 	fail "the 1.1 release thread does not link the problem it fixes"
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
 BUILDAT_HEARTH_REQS='{"cmd":"notifications"}
-{"cmd":"subject","subject":"tester/demo '"$(cat "$t/pub")"'"}' \
+{"cmd":"subject","subject":"tester/demo '"$(cat "$t/pub")"'"}
+{"cmd":"new_thread","topic":1,"title":"Started elsewhere","body":"x"}
+{"cmd":"link","thread":4,"subject":"tester/demo '"$(cat "$t/pub")"'"}
+{"cmd":"link","thread":4,"subject":"tester/nothing k"}' \
 	timeout 90 bin/buildat -D "$t/cl_h" -w 800x600 -l 3 -o sound_mute=1 \
 	-s 127.0.0.1:$H -c @"$t/cmds_h" > "$t/cl_n.log" 2>&1
 grep -a '"id":1001' "$t/cl_n.log" | grep -q '"kind":"fixed","message":0,"note":"1.1"' ||
@@ -150,8 +153,12 @@ grep -a '"id":1001' "$t/cl_n.log" | grep -q '"kind":"fixed","message":0,"note":"
 # the problem
 n=$(grep -a '"id":1002' "$t/cl_n.log" | grep -o '"subject":"tester/demo ' | wc -l)
 [ "$n" = 3 ] || fail "the package's place has $n threads, not 3"
+# A thread started elsewhere, linked afterwards; only to a released package
+grep -aq '"id":1003,"ok":true,"result":4' "$t/cl_n.log" || fail "the thread to link: $(grep -a '"id":1003' "$t/cl_n.log")"
+grep -aq '"id":1004,"ok":true' "$t/cl_n.log" || fail "the link: $(grep -a '"id":1004' "$t/cl_n.log")"
+grep -aq '"id":1005,"ok":false' "$t/cl_n.log" || fail "a link to a package not released here was taken"
 page=$(curl -s "http://127.0.0.1:$H/p/tester/demo")
-for want in "It hums" "demo 1.1" "demo 1.0"; do
+for want in "It hums" "demo 1.1" "demo 1.0" "Started elsewhere"; do
 	echo "$page" | grep -q "$want" || fail "/p/tester/demo lacks $want: $page"
 done
 curl -s "http://127.0.0.1:$H/t/2" | grep -q 'About <a href="/p/tester/demo">' ||
@@ -171,6 +178,6 @@ done
 grep -q "STATUS Listening" "$t/hearth2.log" || fail "Hearth did not start again ($(tail -3 "$t/hearth2.log"))"
 sleep 5
 grep -q "is the thread" "$t/hearth2.log" && fail "a second thread after the restart"
-n=$(curl -s "http://127.0.0.1:$H/t/4" | grep -c "demo 1\.")
-[ "$n" = 0 ] || fail "a second thread after the restart (/t/4)"
+n=$(curl -s "http://127.0.0.1:$H/t/5" | grep -c "demo 1\.")
+[ "$n" = 0 ] || fail "a second thread after the restart (/t/5)"
 echo "PASS: demo 1.0 is one release thread with its changelog; elsewhere is not; Feedback... reaches the composer"
