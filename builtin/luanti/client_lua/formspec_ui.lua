@@ -179,12 +179,15 @@ function M.new(magic, buildat, log, ctx)
 	end
 
 	-- A hypertext's text as lines, each with the style in effect where its
-	-- text starts ({text, size, color, center}). Sizes are Luanti's pixels
-	-- at 16 for normal text, drawn at 12 like the rest of a form.
+	-- text starts ({text, size, color, center, mono}), and each <img> a
+	-- line of its own ({img, w, h, center}). Sizes are Luanti's pixels at
+	-- 16 for normal text, drawn at 12 like the rest of a form.
+	-- simplified: bold and italic are drawn plain (no such font here), and
+	-- a style changed inside a line waits for the next line
 	local HYPERTEXT_TAGS = {big = {size = 24}, bigger = {size = 36},
 			center = {halign = "center"}, left = {halign = "left"},
 			right = {halign = "left"}, justify = {halign = "left"},
-			normal = {size = 16}}
+			normal = {size = 16}, mono = {font = "mono"}}
 	local function hypertext_lines(raw)
 		local global, defs, stack = {size = 16}, {}, {}
 		local function attrs(s)
@@ -207,7 +210,7 @@ function M.new(magic, buildat, log, ctx)
 			return {size = math.max(6, math.floor(
 						(tonumber(st.size) or 16) * 12 / 16 + 0.5)),
 					color = st.color and formspec.color_of(st.color),
-					center = st.halign == "center"}
+					center = st.halign == "center", mono = st.font == "mono"}
 		end
 		local lines, line = {}, nil
 		local function add_text(t)
@@ -248,6 +251,16 @@ function M.new(magic, buildat, log, ctx)
 				local a = attrs(rest)
 				if a.name then
 					defs[a.name] = a
+				end
+			elseif name == "img" then
+				local a = attrs(rest)
+				if a.name then
+					if line then
+						lines[#lines + 1] = line
+						line = nil
+					end
+					lines[#lines + 1] = {img = a.name, w = tonumber(a.width),
+							h = tonumber(a.height), center = style().center}
 				end
 			elseif name == "style" or defs[name] or HYPERTEXT_TAGS[name] then
 				stack[#stack + 1] = {name = name, props = name == "style" and
@@ -1174,16 +1187,39 @@ function M.new(magic, buildat, log, ctx)
 					end
 					local by = y + h - 20 * #actions
 					local ty = y + 2
-					for _, line in ipairs(hypertext_lines(raw)) do
+					for _, line in ipairs(hypertext_lines((raw:gsub(
+							"<action%s+name=[%w_]+%s*>.-</action>", "")))) do
 						local size = line.size
-						if ty + size > by then
+						local text = line.text and
+								formspec.strip_escapes(line.text) or ""
+						if line.img then
+							-- Its own size where it says none, at a form's
+							-- 12 to Luanti's 16 as the text, no wider than
+							-- the box
+							local tex = texture(line.img)
+							local iw = (line.w or (tex and tex.width > 0 and
+									tex.width) or 32) * 12 / 16
+							local ih = (line.h or (tex and tex.height > 0 and
+									tex.height) or 32) * 12 / 16
+							if iw > w - 4 then
+								iw, ih = w - 4, ih * (w - 4) / iw
+							end
+							if ty + ih > by then
+								break
+							end
+							image(window, x + 2 + (line.center and
+									(w - 4 - iw) / 2 or 0), ty, iw, ih, line.img)
+							ty = ty + ih
+						elseif ty + size > by then
 							break
-						end
-						local text = formspec.strip_escapes(line.text)
-						if text:match("%S") then
+						elseif text:match("%S") then
 							local c = line.color
 							local t = label(window, x + 2, ty, w - 4, text,
 									size, c and magic.Color(c.r, c.g, c.b))
+							if line.mono then
+								t:SetFont(magic.cache:GetResource("Font",
+										buildat.font_mono), size)
+							end
 							-- Wrapping on first, or the Text sizes itself to
 							-- its one row and the width is lost
 							t:SetWordwrap(true)
