@@ -684,26 +684,26 @@ function M.band(size, style, i)
 						and not path[P(cx + d[1], cy + d[2])] then
 					w = 0
 				end
-				if w <= 0 then goto skip end
-				-- **Pack tight.** Of the moves left, prefer the one
-				-- with the least room around it: a cell whose own
-				-- neighbours are already the worm, or the band's edge,
-				-- is a cell that fills a gap rather than opening a new
-				-- one. It is the same instinct that solves a knight's
-				-- tour -- go where the choices are fewest -- and here
-				-- it makes the worm fold back into its own space
-				-- instead of sprawling along the band.
-				local nx, ny = cx + d[1], cy + d[2]
-				local blocked = 0
-				for _, e in ipairs({{-1, 0}, {1, 0}, {0, -1}, {0, 1}}) do
-					local ax, ay = nx + e[1], ny + e[2]
-					if ax < 0 or ax >= half or ay < lo or ay > hi
-							or path[P(ax, ay)] then
-						blocked = blocked + 1
+				if w > 0 then
+					-- **Pack tight.** Of the moves left, prefer the one
+					-- with the least room around it: a cell whose own
+					-- neighbours are already the worm, or the band's edge,
+					-- is a cell that fills a gap rather than opening a new
+					-- one. It is the same instinct that solves a knight's
+					-- tour -- go where the choices are fewest -- and here
+					-- it makes the worm fold back into its own space
+					-- instead of sprawling along the band.
+					local nx, ny = cx + d[1], cy + d[2]
+					local blocked = 0
+					for _, e in ipairs({{-1, 0}, {1, 0}, {0, -1}, {0, 1}}) do
+						local ax, ay = nx + e[1], ny + e[2]
+						if ax < 0 or ax >= half or ay < lo or ay > hi
+								or path[P(ax, ay)] then
+							blocked = blocked + 1
+						end
 					end
+					try(d[1], d[2], w + W_PACK * blocked)
 				end
-				try(d[1], d[2], w + W_PACK * blocked)
-				::skip::
 			end
 			if #moves == 0 then moves = back end
 			if #moves == 0 then break end

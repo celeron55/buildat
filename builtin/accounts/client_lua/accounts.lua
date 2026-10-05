@@ -216,7 +216,10 @@ local function show_login(error_text)
 		magic.SubscribeToEvent(sb, "Released", function()
 			local ok, starport = pcall(require, "buildat/extension/starport")
 			if not ok or not starport.id_token_here then
-				return show_login("This client has no Starport extension")
+				-- The require's own error says why ([WEB_ID_NO_EXT]: a
+				-- parse error on the web's Lua 5.1 read as "none")
+				return show_login("This client's Starport extension did " ..
+						"not load" .. (ok and "" or ": " .. tostring(starport)))
 			end
 			starport.id_token_here(function(token, why)
 				if not token then

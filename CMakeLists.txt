@@ -703,6 +703,37 @@ if(WIN32)
 	target_link_options(loadprobe PRIVATE -static)
 	install(TARGETS loadprobe DESTINATION "${DST_BIN}")
 endif()
+if(NOT CMAKE_CROSSCOMPILING)
+	# [WEB_ID_NO_EXT]: client-side Lua runs on LuaJIT natively and on PUC
+	# Lua 5.1 in the web build, which cannot parse `goto` and the like.
+	# A host luac from Urho3D's own Lua 5.1 parses each client-side file,
+	# and a file it cannot parse fails the build with its file and line.
+	# simplified: syntax only; a LuaJIT-only library (`bit`) still fails
+	# at run time on the web
+	set(LUA51_SRC "${URHO3D_BUNDLED_HOME}/Source/ThirdParty/Lua/src")
+	file(GLOB LUAC51_SRCS "${LUA51_SRC}/*.c")
+	foreach(f lua linit lbaselib ldblib liolib lmathlib loadlib loslib
+			lstrlib ltablib)
+		list(REMOVE_ITEM LUAC51_SRCS "${LUA51_SRC}/${f}.c")
+	endforeach()
+	add_executable(luac51 ${LUAC51_SRCS})
+	if(NOT WIN32)
+		target_link_libraries(luac51 m)
+	endif()
+	file(GLOB_RECURSE CLIENT_SIDE_LUA CONFIGURE_DEPENDS
+		"${CMAKE_SOURCE_DIR}/client/*.lua"
+		"${CMAKE_SOURCE_DIR}/extensions/*.lua"
+		"${CMAKE_SOURCE_DIR}/builtin/*.lua" "${CMAKE_SOURCE_DIR}/apps/*.lua")
+	list(FILTER CLIENT_SIDE_LUA INCLUDE REGEX
+		"/(client|extensions)/|/client_lua/")
+	set(LUA51_STAMP "${CMAKE_BINARY_DIR}/lua51_parse.stamp")
+	add_custom_command(OUTPUT "${LUA51_STAMP}"
+		COMMAND luac51 -p ${CLIENT_SIDE_LUA}
+		COMMAND ${CMAKE_COMMAND} -E touch "${LUA51_STAMP}"
+		DEPENDS luac51 ${CLIENT_SIDE_LUA}
+		COMMENT "Parsing the client-side Lua as Lua 5.1 (the web build's)")
+	add_custom_target(lua51_parse ALL DEPENDS "${LUA51_STAMP}")
+endif()
 if(BUILD_CLIENT)
 	install(TARGETS ${CLIENT_EXE_NAME} buildat DESTINATION "${DST_BIN}")
 	install(DIRECTORY "${CMAKE_SOURCE_DIR}/client" DESTINATION "${DST_SHARE}")

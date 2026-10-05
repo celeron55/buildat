@@ -1946,63 +1946,61 @@ local function aitta_page(message, query, on_discuss)
 		local shown = 0
 		for _, rel in ipairs(v.releases) do
 			local k = tostring(rel.author) .. "/" .. tostring(rel.name)
-			if q ~= "" and not (k:lower():find(q, 1, true) or
-					tostring(rel.description or ""):lower():find(q, 1, true)) then
-				goto continue
-			end
-			shown = shown + 1
-			local mine = have[k]
-			local r = add_row(w)
-			add_label(r, k .. " " .. tostring(rel.version) ..
-					(rel.kind == "extension" and " (extension)" or "") .. "  " ..
-					tostring(rel.license_code) .. " / " ..
-					tostring(rel.license_media) .. "  " ..
-					math.floor((tonumber(rel.size) or 0) / 1000) .. " kB", 560)
-			local installed = mine and mine[tostring(rel.version)]
-			add_button(r, installed and "Installed" or
-					(mine and "Update" or "Install"), function()
-				local base = e.aitta .. "/api/aitta/archive/" ..
-						tostring(rel.sha256)
-				status:SetText("Fetching " .. k .. "...")
-				network.http_get(base .. ".sig", function(sig, err1)
-					if not sig then
-						status:SetText("Could not fetch: " .. tostring(err1))
-						return
-					end
-					network.http_get(base .. ".zip", function(zip, err2)
-						if not zip then
-							status:SetText("Could not fetch: " .. tostring(err2))
+			if q == "" or k:lower():find(q, 1, true) or
+					tostring(rel.description or ""):lower():find(q, 1, true) then
+				shown = shown + 1
+				local mine = have[k]
+				local r = add_row(w)
+				add_label(r, k .. " " .. tostring(rel.version) ..
+						(rel.kind == "extension" and " (extension)" or "") .. "  " ..
+						tostring(rel.license_code) .. " / " ..
+						tostring(rel.license_media) .. "  " ..
+						math.floor((tonumber(rel.size) or 0) / 1000) .. " kB", 560)
+				local installed = mine and mine[tostring(rel.version)]
+				add_button(r, installed and "Installed" or
+						(mine and "Update" or "Install"), function()
+					local base = e.aitta .. "/api/aitta/archive/" ..
+							tostring(rel.sha256)
+					status:SetText("Fetching " .. k .. "...")
+					network.http_get(base .. ".sig", function(sig, err1)
+						if not sig then
+							status:SetText("Could not fetch: " .. tostring(err1))
 							return
 						end
-						local dir, why = __buildat_aitta_install(zip, sig)
-						uistack.main:pop(root)
-						-- The grid behind, with the new tile on it
-						local menu = dir and buildat.menu_extension()
-						if menu and type(menu.refresh) == "function" then
-							menu.refresh()
-						end
-						aitta_page(dir and ("Installed " .. k .. " " ..
-								tostring(rel.version) .. (rel.kind ==
-								"extension" and (": the extension " ..
-								tostring(rel.author) .. "__" ..
-								tostring(rel.name) .. ", in the sandbox") or
-								": it is on the grid")) or
-								("Not installed: " .. tostring(why)), nil,
-								on_discuss)
+						network.http_get(base .. ".zip", function(zip, err2)
+							if not zip then
+								status:SetText("Could not fetch: " .. tostring(err2))
+								return
+							end
+							local dir, why = __buildat_aitta_install(zip, sig)
+							uistack.main:pop(root)
+							-- The grid behind, with the new tile on it
+							local menu = dir and buildat.menu_extension()
+							if menu and type(menu.refresh) == "function" then
+								menu.refresh()
+							end
+							aitta_page(dir and ("Installed " .. k .. " " ..
+									tostring(rel.version) .. (rel.kind ==
+									"extension" and (": the extension " ..
+									tostring(rel.author) .. "__" ..
+									tostring(rel.name) .. ", in the sandbox") or
+									": it is on the grid")) or
+									("Not installed: " .. tostring(why)), nil,
+									on_discuss)
+						end)
 					end)
-				end)
-			end, not installed)
-			if on_discuss and type(rel.home_hearth) == "string" and
-					rel.home_hearth:match("^https?://") then
-				add_button(r, "Discuss", function()
-					uistack.main:pop(root)
-					on_discuss(rel)
-				end)
+				end, not installed)
+				if on_discuss and type(rel.home_hearth) == "string" and
+						rel.home_hearth:match("^https?://") then
+					add_button(r, "Discuss", function()
+						uistack.main:pop(root)
+						on_discuss(rel)
+					end)
+				end
+				if rel.description and rel.description ~= "" then
+					add_text(w, "    " .. tostring(rel.description), GREY)
+				end
 			end
-			if rel.description and rel.description ~= "" then
-				add_text(w, "    " .. tostring(rel.description), GREY)
-			end
-			::continue::
 		end
 		status:SetText(q == "" and #v.releases .. " releases" or
 				shown .. " of " .. #v.releases .. " releases match")
