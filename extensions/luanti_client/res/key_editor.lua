@@ -21,6 +21,55 @@
 -- says otherwise; the rest are listed for the player's sake.
 local M = {}
 
+-- **The key store** ([LAUNCH_MENU_V2] step 3): the bindings declared
+-- under app_id (a served game's id is its own, whatever is passed) with
+-- the shared names in `shared` (action -> name), and the keys the store
+-- resolves put in the table. What the editor calls a default becomes the
+-- key without the app's override -- the shared one, else the default.
+function M.declare(magic, app_id, label, bindings, bindable, shared)
+	local actions = {}
+	for _, b in ipairs(bindings) do
+		-- The code's key by Urho3D's name for it: the table's names are
+		-- for the player ("Shift" is "Left Shift")
+		b.code_key = b.code_key or b.key
+		if b.code_key ~= nil and b.default_key ~= nil and
+				(bindable == nil or bindable(b)) then
+			actions[#actions + 1] = {id = b.action, label = b.what,
+				default = magic.input:GetKeyName(b.code_key),
+				shared = shared[b.action]}
+		end
+	end
+	local keys, base = buildat.declare_keys(app_id, label, actions)
+	if type(keys) ~= "table" then
+		return false
+	end
+	local function code(name)
+		return name and magic.input:GetKeyFromName(name) or 0
+	end
+	for _, b in ipairs(bindings) do
+		if keys[b.action] and code(keys[b.action]) ~= 0 then
+			b.key, b.name = code(keys[b.action]), keys[b.action]
+			if code(base[b.action]) ~= 0 then
+				b.default_key = code(base[b.action])
+				b.default_name = base[b.action]
+			end
+		end
+	end
+	return true
+end
+
+-- The editor's save: every bindable row's key as the app's, which the
+-- store keeps only where it differs
+function M.store(app_id, bindings, bindable)
+	local map = {}
+	for _, b in ipairs(bindings) do
+		if b.default_key ~= nil and (bindable == nil or bindable(b)) then
+			map[b.action] = b.name
+		end
+	end
+	return buildat.set_app_keys(app_id, map)
+end
+
 function M.draw(o)
 	local magic, uistack, ui_utils = o.magic, o.uistack, o.ui_utils
 	local BINDINGS = o.bindings

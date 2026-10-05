@@ -421,6 +421,31 @@ buildat.safe.join_server(address) -> true, or false and why
   a leave pops. For a launch UI that is not launch_menu.
 buildat.safe.show_engine_settings() -> true
 - The launch menu's Engine settings screen, pushed on the main UI stack.
+buildat.safe.declare_keys(app, label, actions) -> {action = key name},
+    {action = key name without the app's override}
+- The client's key store ([LAUNCH_MENU_V2] step 3, <user>/keys.txt), the
+  player's and not any server's. actions is {{id =, label =, default = an
+  Urho3D key name, shared = one of the shared names}, ...}; an action's key
+  is the app's own override, else the shared name's binding, else the
+  default. The shared names: move.forward, move.back, move.left,
+  move.right, jump, sneak, sprint, fly, noclip, camera, zoom, chat,
+  inventory, drop, hud, menu. Served code declares under its own identity
+  (app/<name> for a server this client started, server/<address> for any
+  other) whatever app it passes, and a default on one of the client's own
+  keys is dropped.
+buildat.safe.set_app_keys(app, {action = key name or false}) -> true, or
+    false and why
+- The app's overrides; false, or the key the action has anyway, clears one.
+  Served code sets its own app's only.
+buildat.safe.set_shared_key(name, key name or nil) -> true, or false and why
+buildat.safe.set_client_key(which, key name or nil) -> true, or false and why
+- which is overlay, profiler, fullscreen or screenshot (F9 to F12 by
+  default). No app hears a key the client keeps; nil gives it back to the
+  apps. The overlay keeps a key.
+buildat.safe.key_store() -> {shared_names, shared = {name = key},
+    client = {{which, key, default}}, apps = {{id, label, actions = {{id,
+    label, default, shared, key, from = "app"|"shared"|"default"}}}}}
+- The whole store, for an editor. Not for served code (nil).
 buildat.safe.launch_loading(what) -> true, or false and why
 - An app launched into a menu of its own says here that it has stopped
   being a menu and is loading: what is "world" or "server". Reaches the
@@ -505,9 +530,10 @@ buildat.safe.storage_write(name, data) -> true, or false and why
   __buildat_served_overrides) rather than being told by the calling frame,
   which a tail call leaves out: there set_preference, start_local_server,
   stop_local_server, launch, launch_save, join_server,
-  show_engine_settings, set_launch_ui,
-  compose_launch_ui and cache_write refuse, cache_read answers nil, and
-  storage is the server's.
+  show_engine_settings, set_shared_key, set_client_key, set_launch_ui,
+  compose_launch_ui and cache_write refuse, cache_read and key_store
+  answer nil, declare_keys and set_app_keys are the server's own app's,
+  and storage is the server's.
 buildat.safe.cache_read(name) -> data or nil
 buildat.safe.cache_write(name, data) -> true, or false and why
 - An extension's cache, <cache>/<extension>/, which add_resource_dir() takes

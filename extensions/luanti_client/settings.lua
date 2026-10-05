@@ -10,9 +10,9 @@
 -- harness (init.lua reads those first). The screen is show(), a trusted
 -- menu on the UI stack: back pops it, no server behind it.
 --
--- The key bindings are init.lua's table; what differs from its defaults is
--- the "keys" map here (action -> Urho3D key name), applied at load, and
--- the editor is the one apps/vanilla shares (res/key_editor.lua).
+-- The key bindings are init.lua's table, resolved by the client's key
+-- store at load (apply_keys), and the editor is the one apps/vanilla
+-- shares (res/key_editor.lua).
 
 local M = {}
 
@@ -80,44 +80,46 @@ function M.save(settings)
 	return true
 end
 
--- The saved names applied to the bindings table: a name that is no key
--- here leaves the default
+-- **The keys are the client's key store's** ([LAUNCH_MENU_V2] step 3),
+-- as the app "luanti_client", its common actions under the shared names.
+-- The engine's own rows are the client's keys, listed and not bindable
+-- here. A "keys" map left in settings.json from before is moved into the
+-- store once.
+-- simplified: its own app beside vanilla's rather than one "Luanti" app:
+-- the two tables differ ("fast" is a held key here and a toggle there);
+-- the shared names are what binds both at once
+local editor = buildat.run_extension_file("res/key_editor.lua")
+local KEY_APP = "luanti_client"
+local SHARED = {forward = "move.forward", back = "move.back",
+	left = "move.left", right = "move.right", jump = "jump",
+	sneak = "sneak", fast = "sprint", fly = "fly", noclip = "noclip",
+	camera = "camera", zoom = "zoom", chat = "chat",
+	inventory = "inventory", drop = "drop", hud = "hud", menu = "menu"}
+local ENGINE = {screenshot = true, profiler = true, fullscreen = true}
+local function bindable(b)
+	return b.default_key ~= nil and not ENGINE[b.action]
+end
 function M.apply_keys(bindings)
-	local keys = M.load().keys
-	local changed = 0
-	for _, b in ipairs(bindings) do
-		if b.default_key ~= nil then
-			local name = keys[b.action]
-			local key = type(name) == "string" and
-					magic.input:GetKeyFromName(name) or 0
-			if key ~= 0 then
-				b.key, b.name = key, name
-				changed = changed + 1
-			else
-				b.key, b.name = b.default_key, b.default_name
-			end
-		end
-	end
-	if changed > 0 then
-		log:info(changed.." key bindings from the settings")
+	editor.declare(magic, KEY_APP, "Luanti client", bindings, bindable,
+			SHARED)
+	local s = M.load()
+	if type(s.keys) == "table" and next(s.keys) then
+		buildat.set_app_keys(KEY_APP, s.keys)
+		s.keys = nil
+		M.save(s)
+		log:info("key bindings moved from settings.json to the key store")
+		editor.declare(magic, KEY_APP, "Luanti client", bindings, bindable,
+				SHARED)
 	end
 end
 
--- The shared editor over the bindings table; a change writes the map of
--- what differs from the defaults. on_back is what the back row does.
+-- The shared editor over the bindings table; a change goes to the
+-- store. on_back is what the back row does.
 function M.show_keys(bindings, on_back)
-	local editor = buildat.run_extension_file("res/key_editor.lua")
 	return editor.draw{magic = magic, uistack = uistack, ui_utils = ui_utils,
-			bindings = bindings,
+			bindings = bindings, bindable = bindable,
 			save = function()
-				local s = M.load()
-				s.keys = {}
-				for _, b in ipairs(bindings) do
-					if b.default_key ~= nil and b.key ~= b.default_key then
-						s.keys[b.action] = b.name
-					end
-				end
-				M.save(s)
+				editor.store(KEY_APP, bindings, bindable)
 			end,
 			on_back = on_back or function() end}
 end

@@ -595,16 +595,19 @@ end
 -- variable) are the server's and not in the list.
 function draw_settings(paths)
 	local menu = import_menu("Luanti settings")
-	-- The render mode rides in the list as "render_mode=<mode>", and the
-	-- key bindings as "key.<action>=<name>" rows ([KEY_BINDINGS]), which
-	-- keys.lua reads and the editor writes; both go back with the paths
+	-- The render mode rides in the list as "render_mode=<mode>", and goes
+	-- back with the paths. Key rows from before the client's key store
+	-- are moved there (keys.lua's apply, which sends the list without
+	-- them; the server's answer draws this again).
+	if keys_editor.apply(paths) > 0 then
+		return
+	end
 	local mode = "pbr"
 	local view_range = "120"
 	local view_bobbing = "1"
 	local shoulder = "0"
 	local lod_detail = "half"
 	local kept = {}
-	local key_rows = {}
 	for _, p in ipairs(paths) do
 		local m = p:match("^render_mode=(.*)$")
 		local r = p:match("^view_range=(%d+)$")
@@ -621,8 +624,6 @@ function draw_settings(paths)
 			view_range = r
 		elseif b then
 			view_bobbing = b
-		elseif p:match("^key%.") then
-			key_rows[#key_rows + 1] = p
 		else
 			kept[#kept + 1] = p
 		end
@@ -635,28 +636,12 @@ function draw_settings(paths)
 		list[#list + 1] = "lod_detail=" .. lod_detail
 		list[#list + 1] = "view_bobbing_amount=" .. view_bobbing
 		list[#list + 1] = "third_person_shoulder=" .. shoulder
-		for _, r in ipairs(key_rows) do
-			list[#list + 1] = r
-		end
 		buildat.send_packet("main:set_settings",
 				cereal.binary_output(list, {"array", "string"}))
 	end
-	-- The key bindings editor, keys.lua's screen; the server's answer to
-	-- its save draws this screen again, so back comes here with the rows
+	-- The key bindings editor, keys.lua's screen over the client's key
+	-- store; back asks for the settings again
 	menu:add("Key bindings...", function()
-		local all = {}
-		for _, p in ipairs(paths) do
-			all[#all + 1] = p
-		end
-		all[#all + 1] = "render_mode=" .. mode
-		all[#all + 1] = "view_range=" .. view_range
-		all[#all + 1] = "lod_detail=" .. lod_detail
-		all[#all + 1] = "view_bobbing_amount=" .. view_bobbing
-		all[#all + 1] = "third_person_shoulder=" .. shoulder
-		for _, r in ipairs(key_rows) do
-			all[#all + 1] = r
-		end
-		keys_editor.apply(all)
 		close()
 		keys_open = true
 		keys_editor.draw(function()

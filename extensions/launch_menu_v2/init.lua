@@ -11,9 +11,11 @@
 -- (the connecting screen, the Engine settings) are launch_menu's,
 -- reached by verb.
 --
--- simplified: steps 1 and 2 of the plan's four -- no settings tree or
--- key store yet (step 3), no pins and none of the actions that do not
--- exist anywhere yet (step 4).
+-- Settings is one tree (Display and sound, Controls, Luanti, Developer),
+-- and Controls edits the client's key store (client/api.lua's
+-- declare_keys).
+-- simplified: no pins and none of the actions that do not exist anywhere
+-- yet (the plan's step 4, when someone asks for them).
 local api = buildat.safe or buildat
 local log = buildat.Logger("extension/launch_menu_v2")
 local urho3d = require("buildat/extension/urho3d")
@@ -58,8 +60,7 @@ local CATALOG_KEYS = {["extension/launch_menu/aitta"] = true,
 local SERVER_KEYS = {["extension/launch_menu/connect"] = "Buildat",
 		["extension/luanti_client/connect"] = "Luanti",
 		["extension/serverlist/refresh"] = "Luanti"}
--- And the settings screens that are tiles, which go with Home's menu
--- simplified: until step 3's one settings tree takes them in
+-- And the settings screens that are tiles, which the Settings tree has
 local SETTINGS_KEYS = {["app/vanilla/settings"] = true,
 		["extension/luanti_client/settings"] = true}
 
@@ -173,8 +174,8 @@ local function gather()
 	local function warn_if(ok, why)
 		if not ok then log:warning(tostring(why)) end
 	end
-	add({label = "Engine settings", kind = "action", badge = "Settings",
-		menu = true,
+	add({label = "Display and sound", kind = "action", badge = "Settings",
+		section = "Display and sound",
 		description = "What every app honours: the window, the sound, " ..
 				"the mouse, and which launch UI this is.",
 		run = function() api.show_engine_settings() end})
@@ -182,7 +183,7 @@ local function gather()
 	console = console and (console.show and console or console.safe)
 	if console and console.show then
 		add({label = "Developer console", kind = "action",
-			badge = "Developer", menu = true,
+			badge = "Developer", section = "Developer",
 			description = "A Lua console in the sandbox, with the API " ..
 					"document beside it.",
 			run = function() console.show(function() end) end})
@@ -217,7 +218,8 @@ local function gather()
 					"Luanti" or nil
 			local e = add({label = a.label, kind = kind,
 				badge = SETTINGS_KEYS[a.key] and "Settings" or badge,
-				menu = SETTINGS_KEYS[a.key], key = a.key, from = a.from,
+				section = SETTINGS_KEYS[a.key] and "Luanti", key = a.key,
+				from = a.from,
 				id = a.from .. "/" .. tostring(a.id),
 				size = kind == "app" and a.kind ~= "builtin" and
 						a.significance or nil,
@@ -391,7 +393,7 @@ local function search_key(key, query)
 	return nil
 end
 
-local browse
+local browse, settings
 
 local function home(query)
 	local width = math.min(magic.ui.root.width - 40, 760)
@@ -427,9 +429,9 @@ local function home(query)
 			end
 		end
 		view:header("Menu")
-		for _, e in ipairs(entries) do
-			if e.menu then row(e, nil, e.run) end
-		end
+		row({label = "Settings", kind = "settings", description =
+				"Display and sound, the keys, Luanti's, the developer's."},
+				nil, function() settings() end)
 	else
 		for _, group in ipairs(search(entries, query)) do
 			view:header(KIND_TITLE[group.kind])
@@ -619,6 +621,197 @@ browse = function(kind, query, by)
 	log:info("launch_menu_v2: " .. kind .. ", " .. #items .. " rows" ..
 			(query ~= "" and " for \"" .. query .. "\"" or "") ..
 			", by " .. by)
+end
+
+-- **Settings**, one tree: each part once
+local controls
+settings = function()
+	local width = math.min(magic.ui.root.width - 40, 760)
+	local root, window = screen("launch_menu_v2 settings", width,
+			"Settings", "")
+	local view = list_view(window, width - 32, magic.ui.root.height - 200)
+	local items = {}
+	local function row(e, run)
+		items[#items + 1] = {button = view:row(e), entry = e, action = run}
+	end
+	local by_section = {}
+	for _, e in ipairs(entries) do
+		if e.section then
+			by_section[e.section] = by_section[e.section] or {}
+			table.insert(by_section[e.section], e)
+		end
+	end
+	for _, section in ipairs({"Display and sound", "Controls", "Luanti",
+			"Developer"}) do
+		if section == "Controls" then
+			view:header(section)
+			row({label = "Keys", description = "Every app's keys, the " ..
+					"shared ones that bind them all at once, and the " ..
+					"client's own."}, function() controls(1) end)
+		elseif by_section[section] then
+			view:header(section)
+			for _, e in ipairs(by_section[section]) do row(e, e.run) end
+		end
+	end
+	view:fit()
+	local desc = text(window, "", 13, 0.7)
+	desc:SetWordwrap(true)
+	desc:SetFixedWidth(width - 32)
+	desc:SetFixedHeight(40)
+	local nav = ui_utils.bind_button_menu(root, items, function(key)
+		if key == KEY_ESCAPE then
+			uistack.main:pop(root)
+			return true
+		end
+	end, {letters = false})
+	nav:on_change(function(button, selected, index)
+		local item = index and items[index]
+		if selected and item then
+			desc.text = item.entry.description or ""
+		end
+	end)
+end
+
+-- **The keys** ([LAUNCH_MENU_V2] step 3): the client's own, the shared
+-- names (most used first), and every app that declared its keys, each
+-- action with its key and where that comes from. Enter on a row and then
+-- a key binds it; Backspace on a row puts it back -- a shared name to
+-- each app's own, an app's action to the shared or default key, a
+-- client key to its default -- and Delete unbinds a client key (not the
+-- overlay's, which the client refuses), giving it to the apps.
+-- simplified: one list, not the plan's two tabs; a key the client keeps
+-- cannot be captured here (no script hears it), so two client keys are
+-- swapped through a free one.
+local CLIENT_KEY_LABEL = {overlay = "Trusted overlay on and off",
+	profiler = "The engine's profiler (Ctrl: physics geometry)",
+	fullscreen = "Fullscreen on and off",
+	screenshot = "A screenshot (Ctrl: the sandbox scan)"}
+controls = function(focus)
+	local store = api.key_store()
+	local width = math.min(magic.ui.root.width - 40, 760)
+	local root, window = screen("launch_menu_v2 keys", width,
+			"Keys   (Enter and a key binds; Backspace resets)", "")
+	local view = list_view(window, width - 32, magic.ui.root.height - 200)
+	local rows = {}
+	local function row(label, key, note, set, reset, unbind)
+		rows[#rows + 1] = {button = view:row({label = label},
+				(key or "-") .. (note and "   " .. note or "")),
+			set = set, reset = reset, unbind = unbind, label = label}
+	end
+	view:header("This client's")
+	for _, c in ipairs(store.client) do
+		row(CLIENT_KEY_LABEL[c.which] or c.which, c.key ~= "" and c.key or nil,
+				c.key ~= c.default and "(default " .. c.default .. ")" or nil,
+				function(k) return api.set_client_key(c.which, k) end,
+				function() return api.set_client_key(c.which, c.default) end,
+				function() return api.set_client_key(c.which, nil) end)
+	end
+	-- The shared names, by how many apps use them
+	local users = {}
+	for _, a in ipairs(store.apps) do
+		for _, e in ipairs(a.actions) do
+			if e.shared then users[e.shared] = (users[e.shared] or 0) + 1 end
+		end
+	end
+	local names = {}
+	for i, n in ipairs(store.shared_names) do names[i] = n end
+	table.sort(names, function(x, y)
+		if (users[x] or 0) ~= (users[y] or 0) then
+			return (users[x] or 0) > (users[y] or 0)
+		end
+		return x < y
+	end)
+	view:header("Shared, for every app that has not its own")
+	for _, n in ipairs(names) do
+		row(n, store.shared[n], store.shared[n] == nil and
+				"each app's own, used by " .. (users[n] or 0) or
+				"used by " .. (users[n] or 0),
+				function(k) return api.set_shared_key(n, k) end,
+				function() return api.set_shared_key(n, nil) end)
+	end
+	for _, a in ipairs(store.apps) do
+		if #a.actions > 0 then
+			view:header(a.label .. "   (" .. a.id .. ")")
+			for _, e in ipairs(a.actions) do
+				row(e.label, e.key, e.from == "shared" and "shared " ..
+						e.shared or e.from == "app" and "this app's" or nil,
+						function(k) return api.set_app_keys(a.id, {[e.id] = k}) end,
+						function()
+							return api.set_app_keys(a.id, {[e.id] = false})
+						end)
+			end
+		end
+	end
+	view:fit()
+	local line = text(window, "", 13, 0.7)
+	line:SetFixedHeight(20)
+	local listening = nil
+	-- The Enter that started a capture reaches the screen's handler after
+	-- the button pressed itself on it; that one is not the key
+	local enter_down = nil
+	local selected = 1
+	local function redraw()
+		uistack.main:pop(root)
+		controls(selected)
+	end
+	local items = {}
+	for i, r in ipairs(rows) do
+		items[i] = {button = r.button, action = function()
+			listening = r
+			enter_down = magic.input:GetKeyDown(magic.KEY_RETURN) and
+					magic.KEY_RETURN or
+					magic.input:GetKeyDown(magic.KEY_KP_ENTER) and
+					magic.KEY_KP_ENTER or nil
+			line.text = "Press a key for \"" .. r.label ..
+					"\" (Escape leaves it)"
+		end}
+	end
+	local nav = ui_utils.bind_button_menu(root, items, function(key)
+		if listening and key == enter_down then
+			enter_down = nil
+			return true
+		end
+		if listening then
+			local r = listening
+			listening = nil
+			if key ~= KEY_ESCAPE then
+				local name = magic.input:GetKeyName(key)
+				local ok, why = r.set(name)
+				log:info("launch_menu_v2: " .. r.label .. " = " .. name ..
+						(ok and "" or ": " .. tostring(why)))
+				redraw()
+			else
+				line.text = ""
+			end
+			return true
+		end
+		local r = rows[selected]
+		if key == KEY_BACKSPACE and r then
+			r.reset()
+			log:info("launch_menu_v2: " .. r.label .. " reset")
+			redraw()
+			return true
+		end
+		if key == magic.KEY_DELETE and r and r.unbind then
+			local ok, why = r.unbind()
+			log:info("launch_menu_v2: " .. r.label .. " unbound" ..
+					(ok and "" or ": " .. tostring(why)))
+			if ok then redraw() else line.text = tostring(why) end
+			return true
+		end
+		if key == KEY_ESCAPE then
+			uistack.main:pop(root)
+			return true
+		end
+	end, {letters = false})
+	nav:on_change(function(button, sel, index)
+		if sel and index then
+			selected = index
+			view:show(button)
+		end
+	end)
+	if rows[focus] then rows[focus].button:SetFocus(true) end
+	log:info("launch_menu_v2: keys, " .. #rows .. " rows")
 end
 
 -- launch_action is -a's kind/name/id, run over Home as picking it would

@@ -6,12 +6,9 @@
 -- the Luanti settings screen of the launcher and the pause menu's "Key
 -- bindings" both draw this. The table is the code's own -- key_down() in
 -- init.lua reads it -- so a key cannot be bound here and missed there.
--- What differs from the defaults is kept as "key.<action>=<key name>" rows
--- in the launcher's settings list, which the server keeps in
--- user/shared/vanilla/settings.json and sends whole as main:settings; the client
--- applies the rows when they arrive and the editor sends the whole list
--- back through main:set_settings. Key names are Urho3D's, so the file is
--- readable; the mouse's buttons and wheel are not bindable.
+-- What the keys are is the client's key store's (client/api.lua's
+-- declare_keys), the player's for every server. Key names are Urho3D's;
+-- the mouse's buttons and wheel are not bindable.
 local magic = require("buildat/extension/urho3d")
 local uistack = require("buildat/extension/uistack")
 local ui_utils = require("buildat/extension/ui_utils")
@@ -94,60 +91,61 @@ end
 -- the whole of it back with its rows changed
 M.settings = {}
 
--- The rows applied to the table: what the server's list holds for each
--- bindable action, and the default for the rest. Returns how many differ
--- from the defaults.
+-- **The keys are the client's key store's** ([LAUNCH_MENU_V2] step 3):
+-- declared as this game's ("app/vanilla" for one this client started, the
+-- server's address for any other), the common actions under the shared
+-- names, so a player binds them once for every app.
+local editor = (function(ok, err, e)
+	if not ok or type(e) ~= "table" then
+		log:warning("key_editor.lua: " .. tostring(err))
+		return nil
+	end
+	return e
+end)(buildat.run_script_file("luanti/key_editor.lua"))
+local SHARED = {forward = "move.forward", back = "move.back",
+	left = "move.left", right = "move.right", jump = "jump",
+	sneak = "sneak", aux1 = "sprint", fly = "fly", noclip = "noclip",
+	camera = "camera", zoom = "zoom", chat = "chat",
+	inventory = "inventory", drop = "drop", hud = "hud", menu = "menu"}
+local function declare()
+	return editor ~= nil and
+			editor.declare(magic, nil, "Luanti", M.BINDINGS, bindable, SHARED)
+end
+declare()
+
+-- The settings list as the server sent it. The "key.<action>=<name>"
+-- rows it held before the store -- in the server's settings.json, or a
+-- public server's in this client's storage ("key_rows") -- are moved into
+-- the store once and dropped there. Returns how many there were.
 function M.apply(list)
-	M.settings = list
-	local given = {}
+	local rows, kept = {}, {}
 	for _, row in ipairs(list) do
 		local action, name = row:match("^key%.([%w_]+)=(.+)$")
 		if action then
-			given[action] = name
+			rows[action] = name
+		elseif not row:match("^key%.") then
+			kept[#kept + 1] = row
 		end
 	end
-	local changed = 0
-	for _, b in ipairs(M.BINDINGS) do
-		if bindable(b) then
-			local name = given[b.action]
-			local key = name and magic.input:GetKeyFromName(name) or 0
-			if name and key ~= 0 then
-				b.key, b.name = key, name
-				changed = changed + 1
-			else
-				b.key, b.name = b.default_key, b.default_name
-			end
-		end
+	M.settings = kept
+	if next(rows) == nil then
+		return 0
 	end
-	if changed > 0 then
-		log:info(changed .. " key bindings from the settings")
+	buildat.set_app_keys(nil, rows)
+	declare()
+	log:info("key bindings moved from the settings to the key store")
+	if M.public then
+		buildat.storage_write("key_rows", "")
+	else
+		buildat.send_packet("main:set_settings",
+				cereal.binary_output(kept, {"array", "string"}))
 	end
-	return changed
+	return 1
 end
 
--- The list with the key rows as the table stands: the other rows kept, a
--- key row for every binding that is not its default
-local function list_with_keys()
-	local out = {}
-	for _, row in ipairs(M.settings) do
-		if not row:match("^key%.") then
-			out[#out + 1] = row
-		end
-	end
-	for _, b in ipairs(M.BINDINGS) do
-		if bindable(b) and b.key ~= b.default_key then
-			out[#out + 1] = "key." .. b.action .. "=" .. b.name
-		end
-	end
-	return out
-end
-
--- **A public server's key rows are the client's own** ([VANILLA_PUBLIC]
--- 6): kept in the client's storage for that server, over the ones in the
--- server's list, which are its owner's. pause.lua sets M.public from
--- main:account.
--- simplified: per server; a player's keys for every server would be a
--- client preference
+-- **A public server's key rows were the client's own** ([VANILLA_PUBLIC]
+-- 6), kept in the client's storage for that server; read once more so
+-- that apply() moves them. pause.lua sets M.public from main:account.
 M.public = false
 
 function M.own_rows(list)
@@ -167,29 +165,14 @@ function M.own_rows(list)
 end
 
 local function save()
-	local list = list_with_keys()
-	if M.public then
-		local rows = {}
-		for _, row in ipairs(list) do
-			if row:match("^key%.") then
-				rows[#rows + 1] = row
-			end
-		end
-		buildat.storage_write("key_rows", table.concat(rows, "\n"))
-		M.apply(list)
-		return
-	end
-	buildat.send_packet("main:set_settings",
-			cereal.binary_output(list, {"array", "string"}))
+	editor.store(nil, M.BINDINGS, bindable)
 end
 
 -- The editor is the one both clients share, luanti_client/res/key_editor.lua,
 -- served by the module as luanti/key_editor.lua; on_back is what the back
 -- row does: the settings screen, or the pause menu
 function M.draw(on_back)
-	local ok, err, editor = buildat.run_script_file("luanti/key_editor.lua")
-	if not ok or type(editor) ~= "table" then
-		log:warning("key_editor.lua: " .. tostring(err))
+	if editor == nil then
 		return nil
 	end
 	return editor.draw{magic = magic, uistack = uistack, ui_utils = ui_utils,

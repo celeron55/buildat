@@ -453,6 +453,9 @@ __buildat_served_overrides = {
 	launch_save = refused("launch_save"),
 	join_server = refused("join_server"),
 	show_engine_settings = refused("show_engine_settings"),
+	set_shared_key = refused("set_shared_key"),
+	set_client_key = refused("set_client_key"),
+	key_store = function() return nil end,
 	set_launch_ui = refused("set_launch_ui"),
 	compose_launch_ui = refused("compose_launch_ui"),
 	cache_read = function() return nil end,
@@ -975,6 +978,291 @@ end
 buildat.safe.show_engine_settings = function()
 	launch_grid.screens("preferences.lua").show()
 	return true
+end
+
+-- **The key store** ([LAUNCH_MENU_V2] step 3): one client-side store of
+-- key bindings, the player's and not any server's. An app declares its
+-- actions -- an id, a label, a default key, and optionally a shared name
+-- from SHARED_KEY_NAMES -- and gets each one's key back: the app's own
+-- override, else the shared name's binding, else the default. A launch
+-- UI edits it: the shared names once for every app, an app's override
+-- for that app alone, and the client's own four keys.
+-- <user>/keys.txt, a line a fact, tab-separated:
+--   shared <name> <key>            override <app> <action> <key>
+--   client <which> <key or "">     app <app> <label>
+--   action <app> <action> <default> <shared> <label>
+-- Key names are Urho3D's (Input::GetKeyName).
+local SHARED_KEY_NAMES = {"move.forward", "move.back", "move.left",
+	"move.right", "jump", "sneak", "sprint", "fly", "noclip", "camera",
+	"zoom", "chat", "inventory", "drop", "hud", "menu"}
+local shared_key_name = {}
+for _, n in ipairs(SHARED_KEY_NAMES) do shared_key_name[n] = true end
+-- The client's own keys and their defaults; the overlay's cannot be
+-- unbound, so the client's trust signal always has a key
+local CLIENT_KEYS = {{"overlay", "F9"}, {"profiler", "F10"},
+	{"fullscreen", "F11"}, {"screenshot", "F12"}}
+local KEY_ID = "^[%w_%.%-/]+$"
+local key_store_cache = nil
+local function key_store_path()
+	return __buildat_get_path("user") .. "/keys.txt"
+end
+local function key_name_ok(name)
+	return type(name) == "string" and #name <= 32 and
+			not name:find("[%c]") and input:GetKeyFromName(name) ~= 0
+end
+local function key_label(v)
+	return (tostring(v or ""):gsub("[%c]", " ")):sub(1, 80)
+end
+local function key_store_load()
+	if key_store_cache then return key_store_cache end
+	local st = {shared = {}, client = {}, apps = {}, order = {}}
+	for _, c in ipairs(CLIENT_KEYS) do st.client[c[1]] = c[2] end
+	local function app(id)
+		if not st.apps[id] then
+			st.apps[id] = {id = id, label = id, actions = {}, by_id = {},
+				overrides = {}}
+			st.order[#st.order + 1] = id
+		end
+		return st.apps[id]
+	end
+	local f = io.open(key_store_path(), "r")
+	for line in (f and f:lines() or function() end) do
+		local t = {}
+		for x in (line .. "\t"):gmatch("([^\t]*)\t") do t[#t + 1] = x end
+		if t[1] == "shared" and shared_key_name[t[2]] then
+			st.shared[t[2]] = t[3]
+		elseif t[1] == "client" and st.client[t[2]] then
+			st.client[t[2]] = t[3] or ""
+		elseif t[1] == "app" and t[2] then
+			app(t[2]).label = t[3] or t[2]
+		elseif t[1] == "override" and t[3] then
+			app(t[2]).overrides[t[3]] = t[4]
+		elseif t[1] == "action" and t[3] then
+			local a = app(t[2])
+			local e = {id = t[3], default = t[4] ~= "" and t[4] or nil,
+				shared = t[5] ~= "" and t[5] or nil, label = t[6] or t[3]}
+			a.actions[#a.actions + 1] = e
+			a.by_id[e.id] = e
+		end
+	end
+	if f then f:close() end
+	key_store_cache = st
+	return st
+end
+local function key_store_save()
+	local st = key_store_load()
+	local out = {}
+	for _, c in ipairs(CLIENT_KEYS) do
+		out[#out + 1] = "client\t" .. c[1] .. "\t" .. st.client[c[1]]
+	end
+	for _, n in ipairs(SHARED_KEY_NAMES) do
+		if st.shared[n] then
+			out[#out + 1] = "shared\t" .. n .. "\t" .. st.shared[n]
+		end
+	end
+	for _, id in ipairs(st.order) do
+		local a = st.apps[id]
+		out[#out + 1] = "app\t" .. id .. "\t" .. a.label
+		for _, e in ipairs(a.actions) do
+			out[#out + 1] = table.concat({"action", id, e.id, e.default or "",
+				e.shared or "", e.label}, "\t")
+			if a.overrides[e.id] then
+				out[#out + 1] = "override\t" .. id .. "\t" .. e.id .. "\t" ..
+						a.overrides[e.id]
+			end
+		end
+	end
+	local f = io.open(key_store_path(), "w")
+	if not f then
+		log:warning("keys: cannot write " .. key_store_path())
+		return false
+	end
+	f:write(table.concat(out, "\n") .. "\n")
+	f:close()
+	return true
+end
+-- What an action's key is and where it comes from
+local function key_resolve(st, a, e)
+	if a.overrides[e.id] then return a.overrides[e.id], "app" end
+	if e.shared and st.shared[e.shared] then
+		return st.shared[e.shared], "shared"
+	end
+	return e.default, "default"
+end
+do
+	local e = {id = "j", shared = "jump", default = "Space"}
+	assert(key_resolve({shared = {}}, {overrides = {}}, e) == "Space")
+	assert(key_resolve({shared = {jump = "J"}}, {overrides = {}}, e) == "J")
+	assert(select(2, key_resolve({shared = {jump = "J"}},
+			{overrides = {j = "K"}}, e)) == "app")
+end
+-- The client's four as key codes, for the client's own handlers
+-- (client/extensions/urho3d/init.lua), which read this at start and
+-- after every change
+__buildat_client_key_names = function()
+	local st = key_store_load()
+	local out = {}
+	for _, c in ipairs(CLIENT_KEYS) do out[c[1]] = st.client[c[1]] end
+	return out
+end
+local function client_keys_changed()
+	if __buildat_apply_client_keys then
+		__buildat_apply_client_keys(__buildat_client_key_names())
+	end
+end
+local MAX_KEY_ACTIONS = 64
+-- declare_keys(app, label, actions) -> {action id = key name}, and
+-- {action id = the key it has without the app's override}
+local function declare_keys(app_id, label, actions, served)
+	if type(app_id) ~= "string" or not app_id:match(KEY_ID) or
+			#app_id > 64 or type(actions) ~= "table" then
+		return nil, "declare_keys(app, label, actions): an id, a " ..
+				"label and a list"
+	end
+	local st = key_store_load()
+	local client = {}
+	for _, c in ipairs(CLIENT_KEYS) do client[st.client[c[1]]] = true end
+	local a = st.apps[app_id]
+	if not a then
+		a = {id = app_id, actions = {}, by_id = {}, overrides = {}}
+		st.apps[app_id] = a
+		st.order[#st.order + 1] = app_id
+	end
+	a.label = key_label(label ~= nil and label or app_id)
+	a.actions, a.by_id = {}, {}
+	for i, x in ipairs(actions) do
+		if i > MAX_KEY_ACTIONS then break end
+		local id = type(x) == "table" and x.id
+		if type(id) == "string" and id:match(KEY_ID) and #id <= 64 and
+				not a.by_id[id] then
+			local default = key_name_ok(x.default) and x.default or nil
+			-- **A server may not propose the client's own keys**: what
+			-- the client's keys are bound to no app hears, and a
+			-- server's default there is a claim on them
+			if served and default and (client[default] or
+					default:match("^F9$") or default:match("^F1[012]$")) then
+				default = nil
+			end
+			local e = {id = id, default = default,
+				shared = shared_key_name[x.shared] and x.shared or nil,
+				label = key_label(x.label or id)}
+			a.actions[#a.actions + 1] = e
+			a.by_id[id] = e
+		end
+	end
+	key_store_save()
+	local out, base = {}, {}
+	for _, e in ipairs(a.actions) do
+		out[e.id] = (key_resolve(st, a, e))
+		base[e.id] = e.shared and st.shared[e.shared] or e.default
+	end
+	return out, base
+end
+-- set_app_keys(app, {action id = key name, or false for none of its own});
+-- a name that is the action's key without an override clears the override
+local function set_app_keys(app_id, map)
+	local st = key_store_load()
+	local a = type(app_id) == "string" and st.apps[app_id]
+	if not a or type(map) ~= "table" then
+		return false, "set_app_keys(app, map): a declared app and a table"
+	end
+	for id, name in pairs(map) do
+		local e = a.by_id[id]
+		if e then
+			-- The key it would have anyway is no override: it follows
+			-- the shared name when that changes
+			local base = e.shared and st.shared[e.shared] or e.default
+			if name == false or name == base then
+				a.overrides[id] = nil
+			elseif key_name_ok(name) then
+				a.overrides[id] = name
+			end
+		end
+	end
+	return key_store_save()
+end
+buildat.safe.declare_keys = function(app_id, label, actions)
+	return declare_keys(app_id, label, actions, false)
+end
+buildat.safe.set_app_keys = set_app_keys
+-- set_shared_key(name, key name or nil): the binding every app's action
+-- of that shared name has, unless the app overrides it
+buildat.safe.set_shared_key = function(name, key)
+	if not shared_key_name[name] then
+		return false, "set_shared_key: no shared name " .. tostring(name)
+	end
+	if key ~= nil and not key_name_ok(key) then
+		return false, "set_shared_key: no key " .. tostring(key)
+	end
+	key_store_load().shared[name] = key
+	return key_store_save()
+end
+-- set_client_key(which, key name or nil): overlay, profiler, fullscreen,
+-- screenshot. Unbinding the overlay is refused.
+buildat.safe.set_client_key = function(which, key)
+	local st = key_store_load()
+	if st.client[which] == nil then
+		return false, "set_client_key: no client key " .. tostring(which)
+	end
+	if key == nil and which == "overlay" then
+		return false, "set_client_key: the overlay keeps a key"
+	end
+	if key ~= nil and not key_name_ok(key) then
+		return false, "set_client_key: no key " .. tostring(key)
+	end
+	st.client[which] = key or ""
+	key_store_save()
+	client_keys_changed()
+	return true
+end
+-- key_store() -> the whole store as plain data, for an editor:
+-- {shared_names, shared = {name = key}, client = {{which, key}},
+--  apps = {{id, label, actions = {{id, label, default, shared, key,
+--  from = "app"|"shared"|"default"}}}}}
+buildat.safe.key_store = function()
+	local st = key_store_load()
+	local out = {shared_names = {}, shared = {}, client = {}, apps = {}}
+	for i, n in ipairs(SHARED_KEY_NAMES) do
+		out.shared_names[i] = n
+		out.shared[n] = st.shared[n]
+	end
+	for i, c in ipairs(CLIENT_KEYS) do
+		out.client[i] = {which = c[1], key = st.client[c[1]],
+			default = c[2]}
+	end
+	for _, id in ipairs(st.order) do
+		local a = st.apps[id]
+		local acts = {}
+		for i, e in ipairs(a.actions) do
+			local key, from = key_resolve(st, a, e)
+			acts[i] = {id = e.id, label = e.label, default = e.default,
+				shared = e.shared, key = key, from = from}
+		end
+		out.apps[#out.apps + 1] = {id = id, label = a.label, actions = acts}
+	end
+	return out
+end
+-- **An app on a server** declares and overrides under its own identity
+-- only -- the place game_storage_dir() keeps its storage, the app's name
+-- for a server this client started, the address for any other -- and
+-- never touches the shared names, the client's keys or the store.
+local function served_key_app()
+	local dir = __buildat_game_storage_dir()
+	if not dir then return nil end
+	local rel = dir:sub(#__buildat_get_path("user") + 2)
+	local app = rel:match("^apps/([^/]+)/client$")
+	if app then return "app/" .. app end
+	return "server/" .. (rel:match("^servers/(.+)$") or rel):gsub("[^%w_%.%-]", "_")
+end
+__buildat_served_overrides.declare_keys = function(_, label, actions)
+	local id = served_key_app()
+	if not id then return nil, "declare_keys: not connected" end
+	return declare_keys(id, label, actions, true)
+end
+__buildat_served_overrides.set_app_keys = function(_, map)
+	local id = served_key_app()
+	if not id then return false, "set_app_keys: not connected" end
+	return set_app_keys(id, map)
 end
 -- Whether the client has a local server up, which is how a launcher
 -- knows a launch action started a game rather than opening a screen

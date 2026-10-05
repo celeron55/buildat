@@ -1441,6 +1441,11 @@ struct CApp: public App, public magic::Application
 	bool m_restore_maximized = false;
 	Options m_options;
 	bool m_draw_debug_geometry = false;
+	// The client's own keys, the key store's (__buildat_set_client_keys);
+	// -1 is unbound
+	int m_key_profiler = Urho3D::KEY_F10;
+	int m_key_fullscreen = Urho3D::KEY_F11;
+	int m_key_screenshot = Urho3D::KEY_F12;
 	int64_t m_last_update_us;
 
 	sv_<client::command_seq::Command> m_commands;
@@ -2323,6 +2328,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(local_server_running)
 		DEF_BUILDAT_FUNC(local_server_port)
 		DEF_BUILDAT_FUNC(game_storage_dir)
+		DEF_BUILDAT_FUNC(set_client_keys)
 		DEF_BUILDAT_FUNC(server_address)
 		DEF_BUILDAT_FUNC(lan_address)
 		DEF_BUILDAT_FUNC(lan_servers)
@@ -3105,7 +3111,7 @@ struct CApp: public App, public magic::Application
 	{
 		m_last_press_us = interface::os::time_us();
 		int key = event_data["Key"].GetInt();
-		if(key == Urho3D::KEY_F11){
+		if(key == m_key_fullscreen){
 			log_v(MODULE, "F11");
 			magic::Graphics *magic_graphics = GetSubsystem<magic::Graphics>();
 			if(magic_graphics->GetFullscreen()){
@@ -3120,7 +3126,7 @@ struct CApp: public App, public magic::Application
 				m_options.graphics.apply(magic_graphics);
 			}
 		}
-		if(key == Urho3D::KEY_F12 && (event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL)){
+		if(key == m_key_screenshot && (event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL)){
 			ss_ extname = "sandbox_scan";
 			ss_ script = ss_() +
 					"local m = require('buildat/extension/"+extname+"')\n"
@@ -3134,22 +3140,23 @@ struct CApp: public App, public magic::Application
 		}
 		// **F9 to F12 are the client's, every other key an app's**
 		// ([CLIENT_KEYS]); no script hears these four
-		// (client/extensions/urho3d). F9 is the trusted overlay's.
+		// (client/extensions/urho3d). F9 is the trusted overlay's. The
+		// player can move them (the key store, client/api.lua).
 		const bool ctrl = event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL;
 		// F10: the engine's DebugHud, the profiler there is; Ctrl+F10 the
 		// physics debug geometry
-		if(key == Urho3D::KEY_F10 && !ctrl){
+		if(key == m_key_profiler && !ctrl){
 			magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
 			dhud->ToggleAll();
 		}
-		if(key == Urho3D::KEY_F10 && ctrl){
+		if(key == m_key_profiler && ctrl){
 			m_draw_debug_geometry = !m_draw_debug_geometry;
 			log_i(MODULE, "Ctrl+F10: physics debug geometry %s",
 					m_draw_debug_geometry ? "on" : "off");
 		}
 		// F12 alone: a screenshot under <user>/screenshots, as official's
 		// ([VIEW_KEYS]); Ctrl+F12 stays the sandbox test's
-		if(key == Urho3D::KEY_F12 && !(event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL)){
+		if(key == m_key_screenshot && !(event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL)){
 			if(m_pending_screenshot.empty()){
 				const ss_ dir = g_client_config.get<ss_>("user_path")+"/screenshots";
 				const ss_ name = client::command_seq::screenshot_name(dir);
@@ -4757,6 +4764,25 @@ struct CApp: public App, public magic::Application
 			++it;
 		}
 		return 1;
+	}
+
+	// set_client_keys(profiler, fullscreen, screenshot): key codes, 0 for
+	// none
+	static int l_set_client_keys(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		int k[3];
+		for(int i = 0; i < 3; i++){
+			k[i] = luaL_checkinteger(L, i + 1);
+			if(k[i] == 0)
+				k[i] = -1;
+		}
+		self->m_key_profiler = k[0];
+		self->m_key_fullscreen = k[1];
+		self->m_key_screenshot = k[2];
+		return 0;
 	}
 
 	static int l_game_storage_dir(lua_State *L)

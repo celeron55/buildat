@@ -169,8 +169,8 @@ local FORM_OWN_INVENTORY = {["current_name"] = true, ["context"] = true}
 -- rather than of the dialog. `name` is what the dialog shows, because a key
 -- constant is not something to put in front of a player.
 --
--- Not saved to disk and not editable yet: a list that is right is worth more
--- than one that can be changed and then lies.
+-- The keys here are the defaults; the client's key store has the say
+-- (settings.apply_keys), and the F10 to F12 rows are the client's own keys.
 local BINDINGS = {
 	{action = "forward", key = KEY_W, name = "W", what = "Walk forward"},
 	{action = "back", key = KEY_S, name = "S", what = "Walk back"},

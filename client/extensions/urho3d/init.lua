@@ -291,6 +291,25 @@ end
 -- them as up
 __buildat_client_keys = {[KEY_F9] = true, [KEY_F10] = true, [KEY_F11] = true,
 		[KEY_F12] = true}
+local overlay_key = KEY_F9
+-- **Rebound in the key store** ([LAUNCH_MENU_V2] step 3, api.lua's
+-- set_client_key): the set changes in place, as safe_classes reads it, and
+-- the engine's own three are told (app.cpp's on_keydown). A key unbound
+-- is 0 and goes back to the apps.
+function __buildat_apply_client_keys(names)
+	local function code(name)
+		return name and name ~= "" and input:GetKeyFromName(name) or 0
+	end
+	for k in pairs(__buildat_client_keys) do __buildat_client_keys[k] = nil end
+	local codes = {}
+	for _, which in ipairs({"overlay", "profiler", "fullscreen", "screenshot"}) do
+		codes[which] = code(names[which])
+		if codes[which] ~= 0 then __buildat_client_keys[codes[which]] = true end
+	end
+	overlay_key = codes.overlay ~= 0 and codes.overlay or KEY_F9
+	__buildat_set_client_keys(codes.profiler, codes.fullscreen, codes.screenshot)
+end
+__buildat_apply_client_keys(__buildat_client_key_names())
 
 function Safe.SubscribeToEvent(x, y, z)
 	log:debug("Safe.SubscribeToEvent("..dump(x)..", "..dump(y)..", "..dump(z)..")")
@@ -1120,10 +1139,10 @@ end
 local trust_shown = true
 local trust_in_game = nil
 add_global_event_handler("KeyDown", "__buildat_trust_f9", function(_, event_data)
-	if event_data["Key"]:GetInt() == KEY_F9 and
+	if event_data["Key"]:GetInt() == overlay_key and
 			not event_data["Repeat"]:GetBool() then
 		trust_shown = not trust_shown
-		log:info("F9: trusted overlay " .. (trust_shown and "shown" or "hidden"))
+		log:info("overlay key: trusted overlay " .. (trust_shown and "shown" or "hidden"))
 	end
 end)
 Safe.SubscribeToEvent("Update", function(_, event_data)
