@@ -1,22 +1,22 @@
 # [CI_RUNS] (5): the checks, run the one way they are run --
 # util/checks_in_docker.sh, the packaging image, Xvfb -- beside the
-# archives. On a push the quick tier, which is the bar for a commit; on
-# a schedule the full and long tiers on the branch's tip; on a tag the
-# quick tier, so a release is never cut over a red one. Every run's
+# archives. Started by hand only ([CI_GREEN], user, 2026-10-05): the
+# quick tier, or the full and long tiers, on the chosen branch; the push,
+# tag and schedule triggers come back once the quick tier is green. Every run's
 # local/ is an artifact, if: always(), because a failure that cannot be
 # read is a failure that gets ignored.
 name: checks
 on:
-  push:
-    branches: ['**']
-    tags: ['v*']
-  schedule:
-    # nightly, 03:17 UTC -- off the hour, where the queue is shorter
-    - cron: '17 3 * * *'
   workflow_dispatch:
+    inputs:
+      tier:
+        description: 'quick, or nightly (full and long)'
+        type: choice
+        options: [quick, nightly]
+        default: quick
 jobs:
   quick:
-    if: github.event_name != 'schedule'
+    if: inputs.tier == 'quick'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
           path: Build/checks/out/
           if-no-files-found: ignore
   nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: inputs.tier == 'nightly'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
