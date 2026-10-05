@@ -952,6 +952,31 @@ do
 	until not blocked[trust_code]
 end
 
+-- The code as a small Text on a raw element of the trust colour: the
+-- overlay's last line, every Starport field. Its colour is the trust
+-- colour halfway to black on the bright ones and halfway to white on the
+-- dark: black alone is ~1.4:1 on (0, 0, 0.4). Hidden from scripts by its
+-- name (magic_sandbox.is_hidden_ui), as inside a field a script could
+-- otherwise walk to it.
+local function trust_code_text(parent)
+	local t = parent:CreateChild("Text")
+	t:SetName("__trusted_hidden_trust_code")
+	t:SetFont(cache:GetResource("Font", "Fonts/Overpass-Regular.ttf"), 9)
+	t.text = trust_code
+	local bright = math.max(trust_rgb[1], trust_rgb[2], trust_rgb[3]) > 0.5
+	local function mix(c)
+		return bright and c * 0.5 or c + (1 - c) * 0.5
+	end
+	t.color = Color(mix(trust_rgb[1]), mix(trust_rgb[2]), mix(trust_rgb[3]), 1)
+	return t
+end
+
+-- And in the window title (user, 2026-10-05), which no script can read
+-- or set. Not on the web: the title there is the page's, the server's.
+if GetPlatform() ~= "Web" then
+	graphics:SetWindowTitle(graphics:GetWindowTitle() .. " [" .. trust_code .. "]")
+end
+
 -- The sample: "Starport trust color:" and a square a text row high, at the
 -- top right while the launcher has the screen (not connected anywhere).
 -- Made of raw elements under a hidden name, over anything a script draws
@@ -1050,20 +1075,10 @@ local function rebuild_id_rows(ids, sp)
 	end
 	local r = line(#ids + 1)
 	-- The code at the bottom left, the last line's first element, in the
-	-- room left of its buttons when a line above is wider. Its colour is
-	-- the trust colour halfway to black on the bright ones and halfway to
-	-- white on the dark: black alone is ~1.4:1 on (0, 0, 0.4).
+	-- room left of its buttons when a line above is wider.
 	-- simplified: with no ID logged in the last line is the only one and
 	-- the code widens it; a corner of its own when that is not wanted
-	local code = r:CreateChild("Text")
-	code:SetFont(cache:GetResource("Font", "Fonts/Overpass-Regular.ttf"), 9)
-	code.text = trust_code
-	code:SetVerticalAlignment(VA_BOTTOM)
-	local bright = math.max(trust_rgb[1], trust_rgb[2], trust_rgb[3]) > 0.5
-	local function mix(c)
-		return bright and c * 0.5 or c + (1 - c) * 0.5
-	end
-	code.color = Color(mix(trust_rgb[1]), mix(trust_rgb[2]), mix(trust_rgb[3]), 1)
+	trust_code_text(r):SetVerticalAlignment(VA_BOTTOM)
 	-- Pushes the buttons to the right edge, under the line above
 	local gap = r:CreateChild("UIElement")
 	gap:SetFixedSize(0, 1)
@@ -1174,6 +1189,7 @@ end)
 
 local M = {}
 M.trust_color = trust_color
+M.trust_code_text = trust_code_text
 M.drop_sandbox_handlers = drop_sandbox_handlers
 M.safe = Safe
 M.unsafe = Unsafe

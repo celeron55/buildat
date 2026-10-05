@@ -98,7 +98,8 @@ function M.UIStack(root)
 			local n = self:GetNumChildren()
 			for i = 0, n-1 do
 				local child = self:GetChild(i)
-				local child_has_focus = has_plain_recursive_focus(child)
+				-- nil for the client's own hidden UI
+				local child_has_focus = child and has_plain_recursive_focus(child)
 				if child_has_focus then return true end
 			end
 			return false

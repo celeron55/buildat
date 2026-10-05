@@ -72,19 +72,25 @@ local function page_items(e, out)
 			return out
 		end
 	end
+	-- A child of the client's own reads nil ([TRUST_CODE]: the code in a
+	-- Starport field)
 	for i = 0, e:GetNumChildren() - 1 do
-		page_items(e:GetChild(i), out)
+		local c = e:GetChild(i)
+		if c then
+			page_items(c, out)
+		end
 	end
 	return out
 end
 
 local function button_text(b)
 	for i = 0, b:GetNumChildren() - 1 do
+		-- nil for the client's own hidden UI
 		local c = b:GetChild(i)
-		if c:GetTypeName() == "Text" then
+		if c and c:GetTypeName() == "Text" then
 			return c
 		end
-		local d = button_text(c)
+		local d = c and button_text(c)
 		if d then
 			return d
 		end

@@ -147,7 +147,8 @@ Keys, in any app:
 * F9: the client's own overlay -- the Starport trust colour, the IDs
   logged in and a three-character code at its bottom left -- on and off.
   No script hears F9, so an overlay that does not go away on it is not
-  the client's.
+  the client's. The same code is in the window title and at the top
+  right of every Starport field; no script can read it.
 * F8: draw debug geometry
 * F6: on-screen profiler, render and resource stats
 * Ctrl+F12: sandbox test extension
