@@ -1950,6 +1950,12 @@ struct Module: public interface::Module
 			u.b(subject).b(thread_id).step();
 			return json::Value(true);
 		}
+		// The markup's preview: what the HTML face makes of a message
+		if(cmd == "preview"){
+			const ss_ body = jstr(q, "body");
+			need(text_ok(body, BODY_MAX, true, "the message"));
+			return json::Value(interface::markup::to_html(body));
+		}
 		if(cmd == "search"){
 			const ss_ text = jstr(q, "q");
 			need(text_ok(text, 200, false, "the search"));

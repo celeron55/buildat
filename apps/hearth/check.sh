@@ -255,6 +255,10 @@ for want in "<strong>bold</strong> <em>em</em> <del>del</del> <code>code</code>"
 		'<p>hi <a class="ref" href="/u/carol">@carol</a>, not me@x.example</p>'; do
 	grep -qF "$want" "$t/page" || fail "the markup: no $want ($(grep -a -A3 'bold' "$t/page" | head -12))"
 done
+# The preview: the same HTML, for a message not posted
+client bob bobpass1234 "$t/bob_preview.log" '{"cmd":"preview","body":"**b** @carol <i>"}'
+answer "$t/bob_preview.log" 1001 | grep -qF '<strong>b<\/strong> <a class=\"ref\" href=\"\/u\/carol\">@carol<\/a> &lt;i&gt;' ||
+	fail "the preview: $(answer "$t/bob_preview.log" 1001)"
 # An @name's page: the account's messages that stand
 [ "$(get /u/admin)" = 200 ] && grep -q 'href="/t/1#m' "$t/page" ||
 	fail "the account's page"

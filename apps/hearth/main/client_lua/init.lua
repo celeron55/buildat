@@ -160,6 +160,31 @@ end
 -- the client's list of <user>/exports); once read it is uploaded, and its
 -- link goes in at the cursor of the field it was picked for
 local picking_into = nil
+
+-- The server's HTML of a message as text to read: a link with its address
+-- after it, a spoiler and a task's box said, the entities back
+-- simplified: the five entities the server writes; another (&#123;) is
+-- shown as written
+local function html_text(h)
+	h = h:gsub('<a class="ref" href="[^"]*">(.-)</a>', "%1")
+	h = h:gsub('<a href="([^"]*)"[^>]*>(.-)</a>', function(u, t)
+		return t == u and t or t .. " (" .. u .. ")"
+	end)
+	h = h:gsub('<span class="spoiler"[^>]*>(.-)</span>', "[spoiler: %1]")
+	h = h:gsub('<input type="checkbox" disabled checked> ', "[x] ")
+	h = h:gsub('<input type="checkbox" disabled> ', "[ ] ")
+	h = h:gsub("<[ou]l[^>]*>\n", ""):gsub("</[ou]l>\n", "\n")
+	h = h:gsub("<li>", "  - "):gsub("<hr>", "----"):gsub("</p>\n", "\n\n")
+	h = h:gsub("</h%d>\n", "\n\n"):gsub("</t[hd]>", " | ")
+	h = h:gsub("<[^>]*>", "")
+	h = h:gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&quot;", '"')
+	h = h:gsub("&#39;", "'"):gsub("&amp;", "&")
+	return (h:gsub("%s+$", ""))
+end
+assert(html_text('<p><strong>b</strong> <a href="https://x/?a=1&amp;b">x</a> ' ..
+		'<a class="ref" href="/t/1">#1</a></p>\n<ul>\n<li>i</li>\n</ul>\n') ==
+		"b x (https://x/?a=1&b) #1\n\n  - i")
+
 local function markup_buttons(parent, e)
 	local r = parent:CreateChild("UIElement")
 	r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
@@ -171,6 +196,29 @@ local function markup_buttons(parent, e)
 	button(r, "File...", function()
 		picking_into = e
 		buildat.pick_file("")
+	end)
+	-- **The preview** ([FORUM]): what the page will show, under the
+	-- buttons, from the server's own markup
+	-- simplified: on the button, not live; a request a keystroke is a
+	-- parse of the whole message on the server each time
+	-- Made now, so it is under the buttons rather than after the page's
+	-- rows; shown when there is one
+	local shown = text(parent, "", GREY)
+	shown.visible = false
+	local function show(t)
+		shown.visible = true
+		shown:SetText(t)
+		if scripted then
+			log:info("hearth: preview " .. t)
+		end
+	end
+	button(r, "Preview", function()
+		req("preview", {body = e:GetText()}, function(h)
+			local t = html_text(tostring(h))
+			show(t ~= "" and t or "(nothing)")
+		end, function(why)
+			show("No preview: " .. why)
+		end)
 	end)
 end
 
