@@ -381,6 +381,7 @@ local function show_client(host, port, name, password, mode)
 	-- moves it as those lines grow and when F5 takes them away.
 	chat_text:SetAlignment(HA_LEFT, VA_TOP)
 	chat_text:SetPosition(8, 8)
+	chat_text:SetWordwrap(true)
 	chat_text.color = magic.Color(1.0, 1.0, 0.9)
 
 	-- Until the game's definitions and its media are in, the world is a field
@@ -2020,6 +2021,12 @@ local function show_client(host, port, name, password, mode)
 			if chat_y ~= chat_at_y then
 				chat_at_y = chat_y
 				chat_text:SetPosition(8, chat_y)
+			end
+			-- A line wraps at the screen's edge: one wider than the screen
+			-- was taken by the UI fit as content and scaled everything down
+			local chat_w = magic.ui.root.width - 16
+			if chat_text.width ~= chat_w then
+				chat_text.width = chat_w
 			end
 			-- Under the chat, which is where Luanti puts it
 			info_text.visible = on

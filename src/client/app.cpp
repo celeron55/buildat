@@ -2195,6 +2195,12 @@ struct CApp: public App, public magic::Application
 			for(magic::UIElement *c : parent->GetChildren()){
 				if(!c || !c->IsVisible())
 					continue;
+				// A wrapped text is as wide as it was made, never what is in
+				// it: a chat line follows the root's width, and counted it
+				// scaled the UI down to fit itself ([LUANTI_CHAT_WRAP])
+				if(c->GetType() == magic::Text::GetTypeStatic() &&
+						static_cast<magic::Text *>(c)->GetWordwrap())
+					continue;
 				const magic::IntVector2 sz = c->GetSize();
 				// The root's own size, give or take its rounding -- or its
 				// size before the last fit: an element that follows the
