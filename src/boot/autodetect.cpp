@@ -216,9 +216,16 @@ static void check_platform_data_paths()
 	if(config.get<ss_>("cache_path") != "/given/cache" ||
 			config.get<ss_>("user_path") != "/given/user")
 		throw Exception("set_platform_data_paths: overrode -C/-D");
-	config.set("cache_path", "/given/Build/../cache");
+	// A Windows path has a drive: get_absolute_path() gives "/given" there
+	// as "given"
+#ifdef _WIN32
+	const ss_ root = "C:";
+#else
+	const ss_ root = "";
+#endif
+	config.set("cache_path", root+"/given/Build/../cache");
 	set_platform_data_paths(config);
-	if(config.get<ss_>("cache_path") != "/given/cache")
+	if(config.get<ss_>("cache_path") != root+"/given/cache")
 		throw Exception("set_platform_data_paths: kept a \"..\": "+
 				config.get<ss_>("cache_path"));
 }
