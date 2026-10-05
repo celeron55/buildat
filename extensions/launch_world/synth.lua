@@ -88,18 +88,6 @@ for _, bpm in ipairs({92, 104, 116}) do
 		SOFT[name] = {music = {bpm = bpm, beat = beat}}
 	end
 end
--- **The second round, the pads** (2026-10-04), on m116_broken:
---   _glass  a third pad, padC: FM sines an octave up whose brightness an
---           LFO turns, a slow vibrato, ducked 20% and let go slowly
---   _pulse  padC and a fourth, padD: a hollow pulse whose width each
---           voice's LFO moves, through one pole, ducked 50%
---   _drift  the four, each also on an LFO of its own (37 to 61 s) that
---           takes it out and brings it back across the sections
-for _, pads in ipairs({"glass", "pulse", "drift"}) do
-	local name = "m116_broken_" .. pads
-	M.STYLES[name] = true
-	SOFT[name] = {music = {bpm = 116, beat = "broken", pads = pads}}
-end
 -- Steps of a bar, a velocity each; 0 is a rest
 local BEATS = {
 	four = {swing = 0,
@@ -129,30 +117,7 @@ local SECTIONS = {
 	{padB = 1, wind = 1, chimes = 1, hats = 0.3},           -- the break
 	{padA = 1, padB = 0.5, kick = 1, hats = 1, bass = 1},   -- back, no riff
 }
--- The second round's: padC and padD where the brief's texture changes
-local SECTIONS_PADS = {
-	glass = {
-		{padA = 1, padC = 0.6, wind = 1},
-		{padA = 1, kick = 1, hats = 1, bass = 1},
-		{padA = 1, kick = 1, hats = 1, bass = 1, riff = 1},
-		{padB = 1, padC = 1, kick = 1, hats = 1, bass = 1, riff = 1, chimes = 1},
-		{padB = 1, padC = 1, wind = 1, chimes = 1, hats = 0.3},
-		{padA = 1, padB = 0.5, kick = 1, hats = 1, bass = 1},
-	},
-	pulse = {
-		{padA = 1, padC = 0.6, wind = 1},
-		{padA = 1, kick = 1, hats = 1, bass = 1},
-		{padD = 1, kick = 1, hats = 1, bass = 1, riff = 1},
-		{padB = 1, padC = 1, kick = 1, hats = 1, bass = 1, riff = 1, chimes = 1},
-		{padB = 1, padC = 1, wind = 1, chimes = 1, hats = 0.3},
-		{padA = 1, padD = 0.6, kick = 1, hats = 1, bass = 1},
-	},
-}
-SECTIONS_PADS.drift = SECTIONS_PADS.pulse
--- _drift's own LFO per pad: a period in seconds and a phase
-local DRIFT = {padA = {47, 0}, padB = {61, 0.3}, padC = {37, 0.6}, padD = {53, 0.8}}
-local LAYERS = {"padA", "padB", "padC", "padD", "kick", "hats", "bass", "riff",
-	"wind", "chimes"}
+local LAYERS = {"padA", "padB", "kick", "hats", "bass", "riff", "wind", "chimes"}
 -- A sine by table: the pads' four voices and their overtones a sample
 local SINE = {}
 for i = 0, 1023 do
@@ -358,7 +323,6 @@ function M.new(magic, log, style)
 			self.mu = {beat = BEATS[m.beat], step_len = spb / 4, k = -1,
 				kick = 0, kick_f = 50, hat = 0, hat_decay = 0.997,
 				rim = 0, snare = 0, snare_ph = 0, duckA = 0, duckB = 0,
-				duckC = 0, duckD = 0, padD_lp = {0, 0, 0, 0},
 				riff = 0, riff_f = 0, riff_lp = 0, riff_cut = 0,
 				padB_lp1 = 0, padB_lp2 = 0, wind1 = 0, wind2 = 0, last_n = 0,
 				dl = {}, dl_i = 1, dl_n = math.floor(spb / 4 * 3)}
@@ -366,18 +330,12 @@ function M.new(magic, log, style)
 		end
 		local mu = self.mu
 		local bar = math.floor(self.t / (mu.step_len * 16))
-		local sections = SECTIONS_PADS[m.pads or ""] or SECTIONS
-		local sec = sections[math.floor(bar / 16) % #sections + 1]
+		local sec = SECTIONS[math.floor(bar / 16) % #SECTIONS + 1]
 		mu.bar = bar
 		-- About four seconds from nothing to full: a layer comes and goes
 		-- across a bar or two rather than on the downbeat
 		for _, k in ipairs(LAYERS) do
 			local want = sec[k] or 0
-			if m.pads == "drift" and DRIFT[k] then
-				local p = DRIFT[k]
-				want = want * math.max(0, math.min(1, 0.5 + 1.2 *
-						sine(self.t / RATE / p[1] + p[2])))
-			end
 			local d = want - self.lv[k]
 			self.lv[k] = self.lv[k] + math.max(-1 / 170, math.min(1 / 170, d))
 		end
@@ -402,8 +360,6 @@ function M.new(magic, log, style)
 				mu.kick_f = 150
 				mu.duckA = mu.kick
 				mu.duckB = mu.kick
-				mu.duckC = mu.kick
-				mu.duckD = mu.kick
 			end
 			v = b.open[st]
 			if v > 0 then mu.hat = v; mu.hat_decay = 0.9994 end
@@ -430,8 +386,6 @@ function M.new(magic, log, style)
 		mu.kick = mu.kick * 0.99968
 		mu.duckA = mu.duckA * 0.99987   -- padA lets go in a third of a second
 		mu.duckB = mu.duckB * 0.99975   -- padB and the bass, quicker
-		mu.duckC = mu.duckC * 0.99993   -- padC, slowly
-		mu.duckD = mu.duckD * 0.9998
 		-- Hats, rim, snare: differenced noise, which is bright
 		local dn = n - mu.last_n
 		mu.last_n = n
@@ -479,38 +433,6 @@ function M.new(magic, log, style)
 			mu.padB_lp1 = mu.padB_lp1 + (a - mu.padB_lp1) * c
 			mu.padB_lp2 = mu.padB_lp2 + (mu.padB_lp1 - mu.padB_lp2) * c
 			x = x + mu.padB_lp2 * 0.10 * lv.padB * (1 - 0.65 * mu.duckB)
-		end
-		-- padC: FM sines an octave up, the index on an LFO, a slow vibrato
-		if lv.padC > 0.001 then
-			local idx = 0.08 + 0.22 * (0.5 + 0.5 * sine(sec * 0.06))
-			local vib = 1 + 0.002 * sine(sec * 0.3)
-			local a = 0
-			for ci = 1, 4 do
-				local ph = 261.63 * 2 ^ (chord[ci] / 12) * sec * vib
-				a = a + sine(ph + idx * sine(ph * 3.5)) * e
-				if e < 1 and chord_i > 0 then
-					ph = 261.63 * 2 ^ (prev[ci] / 12) * sec * vib
-					a = a + sine(ph + idx * sine(ph * 3.5)) * (1 - e)
-				end
-			end
-			x = x + a * 0.045 * lv.padC * (1 - 0.2 * mu.duckC)
-		end
-		-- padD: a pulse per voice, its width on the voice's own LFO
-		if lv.padD > 0.001 then
-			local a = 0
-			for ci = 1, 4 do
-				local w = 0.5 + 0.35 * sine(sec * (0.07 + 0.013 * ci) + ci * 0.25)
-				local f = 130.81 * 2 ^ (chord[ci] / 12)
-				local v = ((f * sec) % 1 < w and 1 or -1) * e
-				if e < 1 and chord_i > 0 then
-					f = 130.81 * 2 ^ (prev[ci] / 12)
-					v = v + ((f * sec) % 1 < w and 1 or -1) * (1 - e)
-				end
-				local lp = mu.padD_lp
-				lp[ci] = lp[ci] + (v - lp[ci]) * 0.06
-				a = a + lp[ci]
-			end
-			x = x + a * 0.05 * lv.padD * (1 - 0.5 * mu.duckD)
 		end
 		-- The sub bass: the chord's root two octaves down, held, ducked
 		if lv.bass > 0.001 then
