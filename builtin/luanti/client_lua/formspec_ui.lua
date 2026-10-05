@@ -44,8 +44,9 @@ local IGNORED = {
 --
 -- ctx.texture(expression) -> a resource name for a texture modifier
 --   expression, or nil
--- ctx.item_image(item_name) -> a resource name for what an item looks like,
---   or nil
+-- ctx.item_image(item_name, stack) -> a resource name for what an item looks
+--   like, or nil, and true when it is the cube drawn for a node with no
+--   picture of its own
 -- ctx.inventory(location, list_name) -> the list to draw in a list[] element,
 --   as inventory.lua's {size =, items = {...}}, or nil
 -- ctx.model(parent, w, h, mesh, textures, rotation_x, rotation_y) -> a UI
@@ -314,13 +315,19 @@ function M.new(magic, buildat, log, ctx)
 
 	-- An item stack in a slot: what it looks like, and how many
 	local function draw_stack(parent, x, y, size, stack)
-		local resource = stack and ctx.item_image(stack.name, stack)
+		local resource, cube = nil, nil
+		if stack then
+			resource, cube = ctx.item_image(stack.name, stack)
+		end
 		if resource then
 			local e = parent:CreateChild("BorderImage")
-			e:SetPosition(math.floor(x + size * 0.1),
-					math.floor(y + size * 0.1))
-			e.size = magic.IntVector2(math.floor(size * 0.8),
-					math.floor(size * 0.8))
+			-- The whole slot, as Luanti's drawItemStack(), and a node's
+			-- cube a little inside it, where Luanti's camera puts its mesh
+			-- ([UI_PARITY] 3)
+			local inset = cube and size * 0.04 or 0
+			e:SetPosition(math.floor(x + inset / 2), math.floor(y + inset))
+			e.size = magic.IntVector2(math.floor(size - inset),
+					math.floor(size - inset))
 			local tex = game_texture(resource)
 			if tex then
 				set_picture(e, tex)
@@ -337,11 +344,34 @@ function M.new(magic, buildat, log, ctx)
 		local count_text = ctx.stack_count_text and
 				ctx.stack_count_text(stack) or
 				(stack and stack.count > 1 and tostring(stack.count) or nil)
+		-- A worn tool's bar: a sixteenth of the slot high, a sixteenth in
+		-- from the sides and the bottom, green through yellow to red over
+		-- what is left and black over what is worn ([UI_PARITY] 5)
+		-- simplified: any stack with wear gets it, where Luanti asks that
+		-- it be a tool, and a definition's wear_color is not read
+		if stack and (stack.wear or 0) > 0 then
+			local wear = stack.wear / 65535
+			local bx, bw, bh = x + size / 16, size * 14 / 16, size / 16
+			local by = y + size - size / 16 - bh
+			local mid = math.floor(bx + bw * (1 - wear))
+			local wi = math.min(math.min(math.floor(wear * 600), 511) + 10,
+					511)
+			local c = wi <= 255 and magic.Color(wi / 255, 1, 0) or
+					magic.Color(1, (511 - wi) / 255, 0)
+			box(parent, bx, by, mid - math.floor(bx), bh, c)
+			box(parent, mid, by, math.floor(bx + bw) - mid, bh,
+					magic.Color(0, 0, 0))
+		end
 		if count_text then
-			local t = label(parent, x + size * 0.05, y + size * 0.55,
-					size * 0.9, count_text,
-					math.max(8, math.floor(size * 0.32)))
+			-- Its bottom right corner on the slot's ([UI_PARITY] 4)
+			-- simplified: the digits land where Luanti's do by an offset
+			-- measured for our font; another font wants it measured again
+			-- (builtin/luanti/test/ui_parity.sh)
+			local t = label(parent, x, y, size, count_text,
+					math.max(8, math.floor(size * 0.245)))
 			t:SetTextAlignment(2) -- HA_RIGHT
+			t:SetPosition(math.floor(x + size * 0.025),
+					math.floor(y + size * 1.06 - t.height))
 		end
 	end
 

@@ -48,7 +48,7 @@ for _ in $(seq 40); do
 	[ -n "$win" ] && break
 done
 [ -n "$win" ] || { echo "FAIL: no window for official Luanti"; exit 1; }
-for f in legacy real; do
+for f in legacy real items; do
 	for _ in $(seq 90); do grep -q "UIP $f" "$out/luanti_srv.log" && break; sleep 1; done
 	sleep 2
 	import -window "$win" "$out/official_$f.png"
@@ -67,7 +67,7 @@ BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=uip BUILDAT_LUANTI_LUA="$t/srv/s
 	> "$out/buildat_srv.log" 2>&1 &
 pid=$!
 for _ in $(seq 120); do ss -ltn | grep -q ":$P " && break; sleep 1; done
-printf "wait_log 90000 the server put the player at\ndelay 6000\nscreenshot $out/buildat_legacy.png\ndelay 8000\nscreenshot $out/buildat_real.png\nquit\n" > "$t/c"
+printf "wait_log 90000 the server put the player at\ndelay 6000\nscreenshot $out/buildat_legacy.png\ndelay 8000\nscreenshot $out/buildat_real.png\ndelay 8000\nscreenshot $out/buildat_items.png\nquit\n" > "$t/c"
 timeout 150 bin/buildat -s 127.0.0.1:$P -w ${W}x$H -u 1 -l 3 -o sound_mute=1 \
 	-c @"$t/c" > "$out/buildat_cli.log" 2>&1
 
@@ -84,45 +84,82 @@ def runs(v):
 		if on and start is None: start = i
 		if not on and start is not None: r.append((start, i)); start = None
 	return [x for x in r if x[1] - x[0] > 3]
-def measure(path, span, vspan):
+def measure(path, span, vspan, items):
 	# Above the hotbar and the hand; by which channel leads, since a box's
 	# colour is drawn blended
 	a = np.asarray(Image.open(path).convert("RGB")).astype(int)
 	a = a[:int(a.shape[0] * 0.8)]
 	r, g, b = a[..., 0], a[..., 1], a[..., 2]
-	red = rect((r > 120) & (g < 70) & (b < 90))
-	green = rect((g > 130) & (r < 60) & (b < 60))
+	# The first red block and the last green one: an item's picture may
+	# carry either colour
+	def block(m, i):
+		xs = runs(m.any(axis=0))
+		if not xs:
+			return None
+		x0, x1 = xs[i]
+		y0, y1 = runs(m[:, x0:x1].any(axis=1))[i]
+		return (x0, y0, x1, y1)
+	red = block((r > 120) & (g < 70) & (b < 90), 0)
+	green = block((g > 130) & (r < 60) & (b < 60), -1)
 	blue = rect((b > 140) & (r < 80) & (g < 80))
 	mag = (r > 200) & (g < 60) & (b > 200)
-	if not red or not green or not blue:
+	if not red or not green:
 		return None
 	ux, uy = (green[0] - red[0]) / span, (green[1] - red[1]) / vspan
 	f = lambda q: [(q[0] - red[0]) / ux, (q[1] - red[1]) / uy,
 			(q[2] - q[0]) / ux, (q[3] - q[1]) / uy]
-	m = {"red": f(red), "blue": f(blue)}
+	m = {"red": f(red)}
+	if blue:
+		m["blue"] = f(blue)
 	xr, yr = runs(mag.any(axis=0)), runs(mag.any(axis=1))
-	m["slots"] = [len(xr)]
-	if xr and yr:
+	if not items:
+		m["slots"] = [len(xr)]
+	if xr and yr and not items:
 		m["slot 1"] = f((xr[0][0], yr[0][0], xr[0][1], yr[0][1]))
 		m["slot 8"] = f((xr[-1][0], yr[0][0], xr[-1][1], yr[0][1]))
+	if items:
+		# [UI_PARITY] 3 to 5, in units from each slot's drawn corner (its
+		# magenta about where the form puts it): the picture's extent, the
+		# count's white, the wear bar's colour and black
+		def inslot(i, q):
+			px, py = red[0] + (0.375 + 1.25 * i) * ux, red[1] + uy
+			x0, y0 = int(px - 0.1 * ux), int(py - 0.1 * uy)
+			x0, y0, x1, y1 = rect(mag[y0:int(py + 1.1 * uy),
+					x0:int(px + 1.1 * ux)]) + np.array([x0, y0, x0, y0])
+			if q is bar:
+				# its bottom quarter, below the pickaxe's dark lines
+				y0 = y1 - (y1 - y0) // 4
+			r = rect(q[y0:y1, x0:x1])
+			return r and [r[0] / ux, r[1] / uy, r[2] / ux, r[3] / uy]
+		white = (r > 215) & (g > 215) & (b > 215)
+		bar = ((r > 200) & (g > 120) & (b < 60)) | ((r < 30) & (g < 30) & (b < 30))
+		m["node picture"] = inslot(0, ~mag)
+		m["count 1"] = [0 if inslot(0, white) is None else 1]
+		# its right, top and bottom: the font's face and width are the
+		# engine's own
+		m["count 5"] = [inslot(1, white)[i] for i in (2, 1, 3)]
+		m["count 99"] = [inslot(2, white)[i] for i in (2, 1, 3)]
+		m["wear bar"] = inslot(3, bar)
+		m["flat picture"] = inslot(4, ~mag)
 	return m
 bad = 0
-for form, span, vspan in (("legacy", 7, 5), ("real", 9.75, 6.5)):
-	o = measure("%s/official_%s.png" % (out, form), span, vspan)
-	b = measure("%s/buildat_%s.png" % (out, form), span, vspan)
+for form, span, vspan in (("legacy", 7, 5), ("real", 9.75, 6.5),
+		("items", 9.75, 2)):
+	o = measure("%s/official_%s.png" % (out, form), span, vspan, form == "items")
+	b = measure("%s/buildat_%s.png" % (out, form), span, vspan, form == "items")
 	if not o or not b:
 		print("FAIL: %s: nothing measured in %s" % (form,
 				"official's" if not o else "buildat's"))
 		bad += 1
 		continue
 	for k in o:
-		ok = k in b and len(b[k]) == len(o[k]) and all(abs(x - y) <= 0.03
+		ok = o[k] and b.get(k) and len(b[k]) == len(o[k]) and all(abs(x - y) <= 0.03
 				for x, y in zip(o[k], b[k]))
 		bad += 0 if ok else 1
 		print("%s %-7s official %s buildat %s%s" % (form, k,
-				" ".join("%.3f" % x for x in o[k]),
-				" ".join("%.3f" % x for x in b.get(k, [])), "" if ok else "  <-- differs"))
-print("PASS: both coordinate systems and the slot pitch as official's" if not bad
+				" ".join("%.3f" % x for x in (o[k] or [])),
+				" ".join("%.3f" % x for x in (b.get(k) or [])), "" if ok else "  <-- differs"))
+print("PASS: both coordinate systems, the slot pitch and the stacks as official's" if not bad
 		else "FAIL: %d differ" % bad)
 sys.exit(1 if bad else 0)
 PY

@@ -2644,12 +2644,12 @@ local function parse_stack(str)
 	if str == nil or str == "" then
 		return nil
 	end
-	local name, count = string.match(str, "^([^ ]+) *(%d*)")
+	local name, count, wear = string.match(str, "^([^ ]+) *(%d*) *(%d*)")
 	if name == nil or name == "" then
 		return nil
 	end
 	return {name = name, count = tonumber(count) or 1,
-			meta = parse_stack_meta(str)}
+			wear = tonumber(wear) or 0, meta = parse_stack_meta(str)}
 end
 
 -- The colour a palette gives at an index, as "#rrggbb": the palette is a
@@ -3098,7 +3098,9 @@ local function make_ui()
 				imageless[item_name] = true
 				log:info("item: no image for \"" .. item_name .. "\"")
 			end
-			return resource
+			local expr = item_images[item_name]
+			return resource, not (stack and stack.meta) and expr ~= nil and
+					string.sub(expr, 1, #CUBE_MARK) == CUBE_MARK
 		end,
 		stack_count_text = function(stack)
 			return M.stack_count_text(stack)
