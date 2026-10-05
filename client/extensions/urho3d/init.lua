@@ -954,8 +954,8 @@ end
 
 -- The code as a small Text on a raw element of the trust colour: the
 -- overlay's last line, every Starport field. Its colour is the trust
--- colour halfway to black on the bright ones and halfway to white on the
--- dark: black alone is ~1.4:1 on (0, 0, 0.4). Hidden from scripts by its
+-- colour halfway to white: every trust colour is dark enough for the
+-- white labels on it (user, 2026-10-05). Hidden from scripts by its
 -- name (magic_sandbox.is_hidden_ui), as inside a field a script could
 -- otherwise walk to it.
 local function trust_code_text(parent)
@@ -963,9 +963,8 @@ local function trust_code_text(parent)
 	t:SetName("__trusted_hidden_trust_code")
 	t:SetFont(cache:GetResource("Font", "Fonts/Overpass-Regular.ttf"), 9)
 	t.text = trust_code
-	local bright = math.max(trust_rgb[1], trust_rgb[2], trust_rgb[3]) > 0.5
 	local function mix(c)
-		return bright and c * 0.5 or c + (1 - c) * 0.5
+		return c + (1 - c) * 0.5
 	end
 	t.color = Color(mix(trust_rgb[1]), mix(trust_rgb[2]), mix(trust_rgb[3]), 1)
 	return t
