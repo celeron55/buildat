@@ -1,6 +1,23 @@
 Contributing to buildat
 =======================
 
+Where things go
+---------------
+
+- **Problems, ideas and questions**: a ticket on the tracker at
+  https://forum.buildat.org. GitHub's issue tracker is off; GitHub holds
+  the repository, its pull requests and its release builds, and nothing
+  here needs a GitHub account.
+- **A change**, any of:
+  - a patch (`git format-patch`) attached to a ticket;
+  - a ticket whose tracker link points at your branch, on any git host;
+  - a pull request on GitHub.
+- **A vulnerability**: [SECURITY.md](SECURITY.md), by mail, not in a
+  public ticket.
+
+A commit that answers a ticket ends with its number, `[#1234]`
+(`doc/conventions.txt`).
+
 Terms
 -----
 
@@ -48,10 +65,12 @@ A change is expected to leave the quick tier green:
 
     builtin/luanti/test/run_all.sh quick
 
+CI on GitHub is not green yet; a local run is what counts.
+
 and, if it touches the Luanti module or a renderer, the full tier,
 which wants the game media (`util/media_fetch.sh`). The tiers are
-described in `doc/plan/maintenance_plan.md`; `util/checks_in_docker.sh`
-runs one the way CI does.
+described at the top of `builtin/luanti/test/run_all.sh`;
+`util/checks_in_docker.sh` runs one the way CI does.
 
 Non-trivial logic leaves one runnable check behind. A runner says
 `PASS:` or `FAIL:` on its last line and exits by it -- that contract is

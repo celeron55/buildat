@@ -117,7 +117,7 @@ Directory structure
 │   ├── interface << Interface available to modules
 │   └── server  << Server-specific code
 ├── apps       << Apps that can be run using buildat_server -m <path>
-├── doc         << This documentation; doc/plan is the plan and its history
+├── doc         << This documentation
 ├── user        << The user's data -- never in git: apps/<app> an app's own
 │                  (its saves, vanilla's imported worlds), shared/<app>
 │                  what it shares read-only with the others (vanilla's
@@ -194,13 +194,16 @@ Commit messages
 ---------------
 Present tense, describing what the commit leaves in the tree rather than the
 work it took. Where it fits, start with the place (a module, a script, a
-directory) and end with the plan item's codename in brackets, so the history
-and the plan read each other:
+directory). When the change belongs to something tracked, end with its
+reference in brackets -- a ticket's number or a plan codename -- so the
+history and what it answers lead to each other:
 
 - voxelworld: a dug blocker starts dark and the flood fills it from around it [DIG_LIGHT]
+- launch_menu: the local app list pages at fifteen [#42]
 - drive: a run has a goal rung and ends when it is met [DRIVE_GOAL]
-- plan: the list re-cut -- the unit gap and the hand first
 - 3rdparty/Urho3D: a virtual mouse position for the scripted client [SEQ_MOUSE_FREE]
+
+A change that answers nothing tracked needs no reference.
 
 No marketing. A message describes the final diff: a fix that was made and
 undone before the commit is not in it.
