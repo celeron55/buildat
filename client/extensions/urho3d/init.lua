@@ -1106,16 +1106,19 @@ local function rebuild_id_rows(ids, sp)
 	bg.visible = trust_sample_shown == true
 	id_rows[#id_rows + 1] = bg
 end
--- **F9 shows the overlay in a game** ([TRUST_CODE]): a fake does not
--- answer the key, so it is still there after the second press. On the
--- event's mux directly, as Safe.SubscribeToEvent's handlers never get F9.
-local trust_f9 = false
+-- **F9 shows and hides the overlay** ([TRUST_CODE]): a fake does not
+-- answer the key, so it is still there after the second press. Shown
+-- whenever the launcher gets the screen (the client's start, a leave),
+-- where F9 acknowledges it (user, 2026-10-05); hidden on entering a game.
+-- On the event's mux directly, as Safe.SubscribeToEvent's handlers never
+-- get F9.
+local trust_shown = true
+local trust_in_game = nil
 add_global_event_handler("KeyDown", "__buildat_trust_f9", function(_, event_data)
 	if event_data["Key"]:GetInt() == KEY_F9 and
-			not event_data["Repeat"]:GetBool() and
-			__buildat_server_address() ~= nil then
-		trust_f9 = not trust_f9
-		log:info("F9: trusted overlay " .. (trust_f9 and "shown" or "hidden"))
+			not event_data["Repeat"]:GetBool() then
+		trust_shown = not trust_shown
+		log:info("F9: trusted overlay " .. (trust_shown and "shown" or "hidden"))
 	end
 end)
 Safe.SubscribeToEvent("Update", function(_, event_data)
@@ -1145,10 +1148,11 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 	end
 	-- No value at all when not connected, which tostring() refuses
 	local address = __buildat_server_address()
-	if address == nil then
-		trust_f9 = false
+	if (address ~= nil) ~= trust_in_game then
+		trust_in_game = address ~= nil
+		trust_shown = not trust_in_game
 	end
-	local show = address == nil or trust_f9
+	local show = trust_shown
 	if show ~= trust_sample_shown then
 		trust_sample_shown = show
 		-- Said when it changes ([TRUST_OVERLAY_LEAVE]): the sample gone
