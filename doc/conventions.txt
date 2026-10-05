@@ -126,7 +126,7 @@ Directory structure
 │                  settings
 ├── local       << Runs' outputs: fuzz and driven runs, reference shots,
 │                  options filed for the user -- never in git
-└── util        << Development utilities: packaging, the squash push, benches,
+└── util        << Development utilities: packaging, the release, benches,
                    the fuzzers (util/fuzz/fuzz.sh: libFuzzer targets;
                    proto_fuzz, client_fuzz, game_fuzz: whole programs)
 
