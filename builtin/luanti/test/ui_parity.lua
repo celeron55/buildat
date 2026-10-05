@@ -1,6 +1,7 @@
 -- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [UI_PARITY] 1 and 2: boxes and a list's slots at known units, in
--- legacy and in real coordinates; 3 to 5 the stacks; 7 a tooltip
+-- legacy and in real coordinates; 3 to 5 the stacks; 7 a tooltip; 8 the
+-- form's and the screen's colours and an auto_clip background9
 local FORMS = {
 	legacy = "size[8,6]" ..
 		"box[0,0;1,1;#ff0000]box[7,5;1,1;#00ff00]box[2,1;3,2;#0000ff]" ..
@@ -18,6 +19,12 @@ local FORMS = {
 	tips = "formspec_version[6]size[10.75,3]" ..
 		"box[0,0;1,1;#ff0000]box[9.75,2;1,1;#00ff00]" ..
 		"tooltip[0,0;10.75,3;Tip text;#0000ff;#ffff00]",
+	-- 8: bgcolor[] for the form and the screen, and a background9 half a
+	-- unit inside the form by auto_clip
+	bg = "formspec_version[6]size[10.75,3]" ..
+		"bgcolor[#0000ff;both;#ffff00]" ..
+		"background9[0.5,0.5;0,0;testformspec_bg_9slice.png;true;4,6]" ..
+		"box[0,0;1,1;#ff0000ff]box[9.75,2;1,1;#00ff00ff]",
 }
 core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
@@ -42,5 +49,9 @@ core.register_on_joinplayer(function(player)
 	core.after(28, function()
 		core.show_formspec(name, "uip", FORMS.tips)
 		core.log("action", "UIP tips")
+	end)
+	core.after(36, function()
+		core.show_formspec(name, "uip", FORMS.bg)
+		core.log("action", "UIP bg")
 	end)
 end)

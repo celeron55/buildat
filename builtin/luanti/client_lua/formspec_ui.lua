@@ -34,7 +34,7 @@ local M = {}
 local IGNORED = {
 	listring = true, listcolors = true, style = true, style_type = true,
 	field_enter_after_edit = true,
-	no_prepend = true, bgcolor = true,
+	no_prepend = true,
 	allow_close = true, position = true,
 	tableoptions = true,
 	anchor = true, padding = true, ["scroll_container_end"] = true,
@@ -111,17 +111,23 @@ function M.new(magic, buildat, log, ctx)
 	-- stretches, which is what a formspec's background9 asks for. middle is
 	-- Luanti's own field: one number for every side, two for horizontal and
 	-- vertical, or four for left, top, right and bottom.
-	local function slice_border(middle)
+	-- As Luanti's parseMiddleRect(): x, or x,y, the same on both sides,
+	-- or x,y,x2,y2 where x2,y2 is the far corner in the texture's pixels, a
+	-- negative one from its right or bottom edge ([UI_PARITY] 8)
+	local function slice_border(middle, tw, th)
 		local n = {}
 		for v in tostring(middle or ""):gmatch("-?%d+%.?%d*") do
-			n[#n + 1] = math.floor(math.abs(tonumber(v)))
+			local x = tonumber(v)
+			n[#n + 1] = x >= 0 and math.floor(x) or math.ceil(x)
 		end
 		if #n == 1 then
 			return magic.IntRect(n[1], n[1], n[1], n[1])
 		elseif #n == 2 then
 			return magic.IntRect(n[1], n[2], n[1], n[2])
-		elseif #n >= 4 then
-			return magic.IntRect(n[1], n[2], n[3], n[4])
+		elseif #n == 4 then
+			return magic.IntRect(n[1], n[2],
+					n[3] < 0 and -n[3] or math.max(0, tw - n[3]),
+					n[4] < 0 and -n[4] or math.max(0, th - n[4]))
 		end
 		return nil
 	end
@@ -681,6 +687,10 @@ function M.new(magic, buildat, log, ctx)
 		window.size = magic.IntVector2(math.floor(layout.width),
 				math.floor(layout.height))
 		window:SetPosition(ox, oy)
+		-- Over the HUD and the hotbar (10), as Luanti draws a form after
+		-- the HUD -- a fullscreen bgcolor[] hides them ([UI_PARITY] 11) --
+		-- and under the touch controls (49) and the menus (100)
+		window.priority = 40
 		-- Urho3D leaves an element disabled unless told otherwise, and a
 		-- disabled element is not hit by a click: nothing is found under the
 		-- mouse and no click event is sent at all
@@ -932,10 +942,38 @@ function M.new(magic, buildat, log, ctx)
 		-- top of a sunlit hillside cannot be read.
 		local has_background = false
 		layout.slot_bg, layout.tip_bg, layout.tip_fg = nil, nil, nil
+		-- bgcolor[color;fullscreen;fbgcolor], as Luanti's
+		-- parseBackgroundColor(): the form's colour, whether it or the
+		-- screen's is drawn ("both", "neither", or yes for the screen's
+		-- only), and the screen's colour ([UI_PARITY] 8)
+		local bg = nil
 		for _, e in ipairs(elements) do
 			if e.name == "background" or e.name == "background9" then
 				has_background = true
-			elseif e.name == "listcolors" then
+			elseif e.name == "bgcolor" then
+				bg = bg or {form = true, color = {r = 0, g = 0, b = 0,
+						a = 140 / 255}, screen_color = {r = 0, g = 0, b = 0,
+						a = 140 / 255}}
+				local f = e.fields
+				local c = f[1] and f[1] ~= "" and formspec.color_of(f[1])
+				if c then
+					bg.color = c
+				end
+				local mode = f[2]
+				if mode == "both" then
+					bg.form, bg.screen = true, true
+				elseif mode == "neither" then
+					bg.form, bg.screen = false, false
+				elseif mode and mode ~= "" then
+					bg.screen = mode == "true" or mode == "yes" or mode == "1"
+					bg.form = not bg.screen
+				end
+				c = f[3] and f[3] ~= "" and formspec.color_of(f[3])
+				if c then
+					bg.screen_color = c
+				end
+			elseif e.name == "listcolors" and #e.fields ~= 4 then
+				-- (four fields is no listcolors at all to Luanti)
 				-- [UI_PARITY] Its slot colour, on every list of the form, as
 				-- Luanti's; opaque unless it says otherwise.
 				-- And the tooltips' colours, the fourth and fifth.
@@ -943,11 +981,23 @@ function M.new(magic, buildat, log, ctx)
 				-- drawn
 				local c = formspec.color_of(e.fields[1])
 				layout.slot_bg = c and magic.Color(c.r, c.g, c.b, c.a or 1)
-				layout.tip_bg = e.fields[4] and formspec.color_of(e.fields[4])
-				layout.tip_fg = e.fields[5] and formspec.color_of(e.fields[5])
+				if #e.fields >= 5 then
+					layout.tip_bg = formspec.color_of(e.fields[4])
+					layout.tip_fg = formspec.color_of(e.fields[5])
+				end
 			end
 		end
-		if not has_background then
+		local function rgba(c)
+			return magic.Color(c.r, c.g, c.b, c.a or 1)
+		end
+		if bg then
+			if bg.screen then
+				box(window, -ox, -oy, screen_w, screen_h, rgba(bg.screen_color))
+			end
+			if bg.form then
+				box(window, 0, 0, layout.width, layout.height, rgba(bg.color))
+			end
+		elseif not has_background then
 			box(window, 0, 0, layout.width, layout.height,
 					magic.Color(0.12, 0.12, 0.14, 0.94))
 		end
@@ -959,17 +1009,33 @@ function M.new(magic, buildat, log, ctx)
 			if e.name == "background" or e.name == "background9" then
 				local x, y = at(e, 1)
 				local w, h = geometry(e, 2)
-				if e.fields[4] == "true" then
-					-- auto_clip: the whole form, x and y being an offset
-					-- outwards and w and h not used at all.
-					-- simplified: the offset is dropped, so a background that
-					-- means to stick out past the form's edge does not.
-					x, y, w, h = 0, 0, layout.width, layout.height
+				local pos = formspec.parse_v2(e.fields[1])
+				local f4 = e.fields[4]
+				if pos and (f4 == "true" or f4 == "yes" or f4 == "1") then
+					-- auto_clip: the whole form, w and h not used, and x and
+					-- y as Luanti's parseBackground() takes them
+					-- ([UI_PARITY] 8): in real coordinates the form shrunk
+					-- by that many units on every side, in legacy ones
+					-- grown by that many whole pixels
+					local dx, dy
+					if layout.origin[1] == 0 then
+						dx = -(pos[1] + e.at[1]) * layout.scale[1]
+						dy = -(pos[2] + e.at[2]) * layout.scale[2]
+					else
+						dx = pos[1] >= 0 and math.floor(pos[1]) or
+								math.ceil(pos[1])
+						dy = pos[2] >= 0 and math.floor(pos[2]) or
+								math.ceil(pos[2])
+					end
+					x, y = -dx, -dy
+					w, h = layout.width + 2 * dx, layout.height + 2 * dy
 				end
 				if x and w then
 					local img = image(window, x, y, w, h, e.fields[3])
 					if img and e.name == "background9" then
-						local border = slice_border(e.fields[5])
+						local tex = img.texture
+						local border = slice_border(e.fields[5],
+								tex and tex.width or 0, tex and tex.height or 0)
 						if border then
 							img.imageBorder = border
 							img.border = border
@@ -1057,8 +1123,11 @@ function M.new(magic, buildat, log, ctx)
 						-- A styled button's image is nine-sliced too: the
 						-- middle is what stretches and the border of it
 						-- keeps its size, or the image comes out smeared
+						local tex = drawn and drawn.texture
 						local border = drawn and
-								slice_border(st.bgimg_middle)
+								slice_border(st.bgimg_middle,
+										tex and tex.width or 0,
+										tex and tex.height or 0)
 						if border then
 							drawn.imageBorder = border
 							drawn.border = border
