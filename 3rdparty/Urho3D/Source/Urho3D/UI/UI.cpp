@@ -60,6 +60,10 @@
 #include <assert.h>
 #include <SDL/SDL.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#endif
+
 #include "../DebugNew.h"
 
 #define TOUCHID_MASK(id) (1 << id)
@@ -542,6 +546,14 @@ void UI::SetClipboardText(const String& text)
     clipBoard_ = text;
     if (useSystemClipboard_)
         SDL_SetClipboardText(text.CString());
+#ifdef __EMSCRIPTEN__
+    // buildat [WEB_KEYS] step 3: SDL's clipboard is the page's own, so the
+    // text also goes to the browser's (src/client/web/index.html)
+    EM_ASM({
+        if (window.buildatClipboard)
+            buildatClipboard(UTF8ToString($0));
+    }, text.CString());
+#endif
 }
 
 void UI::SetDoubleClickInterval(float interval)

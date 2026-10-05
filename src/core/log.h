@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
+#include <cstddef>
 
 // The numeric values of these go from fatal=0 to trace=6 in ascending order.
 extern const int CORE_FATAL;
@@ -15,8 +16,20 @@ void log_init();
 
 void log_set_max_level(int level);
 int log_get_max_level();
-void log_set_file(const char *path);
+// tee: the file beside stderr rather than instead of it (the default log)
+void log_set_file(const char *path, bool tee = false);
 void log_close();
+// Bytes as they are, to the file and the terminal as a line would go: a
+// boxed child's output, carried by its parent ([PROCESS_SANDBOX])
+void log_raw(const char *data, size_t n);
+
+// The recent lines, for a wait on one ([START_WAIT]): how many have gone
+// by, and whether one since that count holds the text
+long long log_line_count();
+bool log_lines_since_contain(long long since, const char *text);
+// Watch for one text in the lines logged from now on; one watch at a time
+void log_watch(const char *text);
+bool log_watch_seen();
 
 // Try to stop using malloc() and other heavyweight interfaces. Call when
 // SIGSEGV or SIGABRT occurs to make the program much more likely to be able to
