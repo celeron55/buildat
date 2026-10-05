@@ -3300,6 +3300,8 @@ function M.update_tooltip(dtime)
 			over, over_text = t, t.text
 		end
 	end
+	-- A tooltip[]'s own colours, or else listcolors' for the form
+	local bg, fg = drawn.tip_bg, drawn.tip_fg
 	for _, slot in ipairs(drawn.slots or {}) do
 		if lx >= slot.x and lx < slot.x + slot.size and
 				ly >= slot.y and ly < slot.y + slot.size then
@@ -3321,7 +3323,8 @@ function M.update_tooltip(dtime)
 	tooltip_wait = tooltip_wait + dtime
 	if tooltip_wait >= TOOLTIP_DELAY then
 		make_ui():tooltip(magic.ui.root, over_text, mouse_at[1], mouse_at[2],
-				magic.ui.root.width, magic.ui.root.height)
+				magic.ui.root.width, magic.ui.root.height, drawn.tip_offset,
+				over.bg or bg, over.fg or fg)
 	end
 end
 

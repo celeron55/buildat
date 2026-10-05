@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- [UI_PARITY] 1 and 2: boxes and a list's slots at known units, in
--- legacy and in real coordinates
+-- legacy and in real coordinates; 3 to 5 the stacks; 7 a tooltip
 local FORMS = {
 	legacy = "size[8,6]" ..
 		"box[0,0;1,1;#ff0000]box[7,5;1,1;#00ff00]box[2,1;3,2;#0000ff]" ..
@@ -13,6 +13,11 @@ local FORMS = {
 	items = "formspec_version[6]size[10.75,3]" ..
 		"box[0,0;1,1;#ff0000]box[9.75,2;1,1;#00ff00]" ..
 		"listcolors[#ff00ff;#ff00ff]list[current_player;main;0.375,1;6,1;]",
+	-- 7: a tooltip[] over the whole form in colours of its own, the
+	-- cursor put in the middle of the screen
+	tips = "formspec_version[6]size[10.75,3]" ..
+		"box[0,0;1,1;#ff0000]box[9.75,2;1,1;#00ff00]" ..
+		"tooltip[0,0;10.75,3;Tip text;#0000ff;#ffff00]",
 }
 core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
@@ -33,5 +38,9 @@ core.register_on_joinplayer(function(player)
 				"testfood:good1", ""})
 		core.show_formspec(name, "uip", FORMS.items)
 		core.log("action", "UIP items")
+	end)
+	core.after(28, function()
+		core.show_formspec(name, "uip", FORMS.tips)
+		core.log("action", "UIP tips")
 	end)
 end)

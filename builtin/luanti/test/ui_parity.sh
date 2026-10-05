@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [UI_PARITY] 1 and 2: the two coordinate systems and the slot pitch,
-# against official Luanti. ui_parity.lua shows a legacy form and then a
+# against official Luanti; 3 to 5 a list's stacks; 7 a tooltip, against
+# the number in Luanti's source (official Luanti takes no cursor moved by
+# xdotool, so it is not shot). ui_parity.lua shows a legacy form and then a
 # real_coordinates one, each with three box[]es and a list whose slots
 # listcolors makes magenta; both clients are shot (official Luanti's window
 # by `import`, on the desktop, as reference_shots does) and every rectangle
@@ -67,7 +69,7 @@ BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=uip BUILDAT_LUANTI_LUA="$t/srv/s
 	> "$out/buildat_srv.log" 2>&1 &
 pid=$!
 for _ in $(seq 120); do ss -ltn | grep -q ":$P " && break; sleep 1; done
-printf "wait_log 90000 the server put the player at\ndelay 6000\nscreenshot $out/buildat_legacy.png\ndelay 8000\nscreenshot $out/buildat_real.png\ndelay 8000\nscreenshot $out/buildat_items.png\nquit\n" > "$t/c"
+printf "wait_log 90000 the server put the player at\ndelay 6000\nscreenshot $out/buildat_legacy.png\ndelay 8000\nscreenshot $out/buildat_real.png\ndelay 8000\nscreenshot $out/buildat_items.png\ndelay 6000\nmouse_pos 512 384\ndelay 500\nmouse_pos 513 384\ndelay 2000\nscreenshot $out/buildat_tips.png\nquit\n" > "$t/c"
 timeout 150 bin/buildat -s 127.0.0.1:$P -w ${W}x$H -u 1 -l 3 -o sound_mute=1 \
 	-c @"$t/c" > "$out/buildat_cli.log" 2>&1
 
@@ -84,7 +86,7 @@ def runs(v):
 		if on and start is None: start = i
 		if not on and start is not None: r.append((start, i)); start = None
 	return [x for x in r if x[1] - x[0] > 3]
-def measure(path, span, vspan, items):
+def measure(path, span, vspan, items, tips=False):
 	# Above the hotbar and the hand; by which channel leads, since a box's
 	# colour is drawn blended
 	a = np.asarray(Image.open(path).convert("RGB")).astype(int)
@@ -141,12 +143,24 @@ def measure(path, span, vspan, items):
 		m["count 99"] = [inslot(2, white)[i] for i in (2, 1, 3)]
 		m["wear bar"] = inslot(3, bar)
 		m["flat picture"] = inslot(4, ~mag)
+	if tips:
+		m = {}
+		# [UI_PARITY] 7: the tooltip's corner from the cursor, in units, and
+		# that it wears the form's colours
+		tip = rect((b > 200) & (r < 60) & (g < 60))
+		m["tooltip corner"] = tip and [(tip[0] - 513) / ux, (tip[1] - 384) / uy]
+		m["tooltip text"] = [int(((r > 200) & (g > 200) & (b < 60)).any())]
 	return m
 bad = 0
 for form, span, vspan in (("legacy", 7, 5), ("real", 9.75, 6.5),
-		("items", 9.75, 2)):
-	o = measure("%s/official_%s.png" % (out, form), span, vspan, form == "items")
-	b = measure("%s/buildat_%s.png" % (out, form), span, vspan, form == "items")
+		("items", 9.75, 2), ("tips", 9.75, 2)):
+	# A tooltip's corner is m_btn_height from the cursor, 15/13 * 0.35 of
+	# a unit (guiFormSpecMenu.cpp), in the form's own colours
+	o = {"tooltip corner": [15 / 13 * 0.35] * 2, "tooltip text": [1]} \
+			if form == "tips" else \
+			measure("%s/official_%s.png" % (out, form), span, vspan, form == "items")
+	b = measure("%s/buildat_%s.png" % (out, form), span, vspan, form == "items",
+			form == "tips")
 	if not o or not b:
 		print("FAIL: %s: nothing measured in %s" % (form,
 				"official's" if not o else "buildat's"))
@@ -159,7 +173,7 @@ for form, span, vspan in (("legacy", 7, 5), ("real", 9.75, 6.5),
 		print("%s %-7s official %s buildat %s%s" % (form, k,
 				" ".join("%.3f" % x for x in (o[k] or [])),
 				" ".join("%.3f" % x for x in (b.get(k) or [])), "" if ok else "  <-- differs"))
-print("PASS: both coordinate systems, the slot pitch and the stacks as official's" if not bad
+print("PASS: both coordinate systems, the slot pitch, the stacks and the tooltip as official's" if not bad
 		else "FAIL: %d differ" % bad)
 sys.exit(1 if bad else 0)
 PY

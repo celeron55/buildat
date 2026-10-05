@@ -582,7 +582,7 @@ function M.new(magic, buildat, log, ctx)
 	local tip_label = nil
 	local tip_text = nil
 
-	function self:tooltip(root, text, x, y, screen_w, screen_h)
+	function self:tooltip(root, text, x, y, screen_w, screen_h, offset, bg, fg)
 		if not text then
 			if tip then
 				tip.visible = false
@@ -596,11 +596,12 @@ function M.new(magic, buildat, log, ctx)
 				tip.defaultStyle = ctx.style
 			end
 			tip.texture = magic.cache:GetResource("Texture2D", WHITE)
-			tip.color = magic.Color(0.1, 0.1, 0.12, 0.95)
 			-- Over everything, and never in the way of a click
 			tip.priority = 30000
 			tip.enabled = false
 		end
+		tip.color = bg and magic.Color(bg.r, bg.g, bg.b, bg.a or 1) or
+				magic.Color(0.1, 0.1, 0.12, 0.95)
 		if text ~= tip_text then
 			tip_text = text
 			if tip_label then
@@ -610,23 +611,29 @@ function M.new(magic, buildat, log, ctx)
 			tip_label:SetStyleAuto()
 			tip_label:SetFontSize(12)
 			tip_label.text = text
-			tip_label.color = magic.Color(1, 1, 1)
 			tip_label:SetPosition(4, 3)
 			-- A Text works out its own size once it has text and a font, so
 			-- the box is what the text turned out to be plus a margin
 			tip.size = magic.IntVector2(tip_label.width + 8,
 					tip_label.height + 6)
 		end
-		-- Beside the cursor, and inside the screen
+		tip_label.color = fg and magic.Color(fg.r, fg.g, fg.b, fg.a or 1) or
+				magic.Color(1, 1, 1)
+		-- Right of and below the cursor by the offset, and where that is
+		-- off the screen, Luanti's showTooltip(): pushed in to the offset
+		-- from the edge, and over both edges, up by its own height again
+		-- ([UI_PARITY] 7)
+		offset = offset or 14
 		local w = tip.width
 		local h = tip.height
-		local px = x + 14
-		local py = y + 14
-		if px + w > screen_w then
-			px = math.max(0, x - w - 6)
-		end
-		if py + h > screen_h then
-			py = math.max(0, y - h - 6)
+		local px, py = x + offset, y + offset
+		local x_alt, y_alt = screen_w - w - offset, screen_h - h - offset
+		if px > x_alt and py > y_alt then
+			px, py = x_alt, screen_h - 2 * h - offset
+		elseif px > x_alt then
+			px = x_alt
+		elseif py > y_alt then
+			py = y_alt
 		end
 		tip:SetPosition(math.floor(px), math.floor(py))
 		tip.visible = true
@@ -924,17 +931,20 @@ function M.new(magic, buildat, log, ctx)
 		-- over the whole of it. A form is drawn over the world, and text on
 		-- top of a sunlit hillside cannot be read.
 		local has_background = false
-		layout.slot_bg = nil
+		layout.slot_bg, layout.tip_bg, layout.tip_fg = nil, nil, nil
 		for _, e in ipairs(elements) do
 			if e.name == "background" or e.name == "background9" then
 				has_background = true
 			elseif e.name == "listcolors" then
 				-- [UI_PARITY] Its slot colour, on every list of the form, as
 				-- Luanti's; opaque unless it says otherwise.
-				-- simplified: the hover colour, the slot border and the
-				-- tooltip's colours are not drawn
+				-- And the tooltips' colours, the fourth and fifth.
+				-- simplified: the hover colour and the slot border are not
+				-- drawn
 				local c = formspec.color_of(e.fields[1])
 				layout.slot_bg = c and magic.Color(c.r, c.g, c.b, c.a or 1)
+				layout.tip_bg = e.fields[4] and formspec.color_of(e.fields[4])
+				layout.tip_fg = e.fields[5] and formspec.color_of(e.fields[5])
 			end
 		end
 		if not has_background then
@@ -1579,9 +1589,8 @@ function M.new(magic, buildat, log, ctx)
 				end
 			elseif name == "tooltip" then
 				-- tooltip[X,Y;W,H;text;...] over an area, or
-				-- tooltip[element;text;...] over a named element. The
-				-- colours a tooltip may name are left out: what a form
-				-- says about them is never the interesting part of it.
+				-- tooltip[element;text;...] over a named element, either
+				-- with a background and a text colour after the text
 				local first = tostring(e.fields[1] or "")
 				if first:match("^%-?[%d.]+,%-?[%d.]+$") and #e.fields >= 3 then
 					local x, y = at(e, 1)
@@ -1589,10 +1598,17 @@ function M.new(magic, buildat, log, ctx)
 					if x and w then
 						tooltips[#tooltips + 1] = {x = x, y = y, w = w,
 								h = h, text = formspec.strip_escapes(
-										e.fields[3] or "")}
+										e.fields[3] or ""),
+								bg = e.fields[4] and
+										formspec.color_of(e.fields[4]),
+								fg = e.fields[5] and
+										formspec.color_of(e.fields[5])}
 					end
 				elseif e.fields[2] then
-					named_tooltips[first] = formspec.strip_escapes(e.fields[2])
+					named_tooltips[first] = {
+							text = formspec.strip_escapes(e.fields[2]),
+							bg = e.fields[3] and formspec.color_of(e.fields[3]),
+							fg = e.fields[4] and formspec.color_of(e.fields[4])}
 				end
 			elseif name == "model" then
 				-- model[X,Y;W,H;name;mesh;textures;rotation_X,rotation_Y;
@@ -1668,11 +1684,11 @@ function M.new(magic, buildat, log, ctx)
 					end
 				end
 			end
-			for element_name, text in pairs(named_tooltips) do
+			for element_name, t in pairs(named_tooltips) do
 				local r = rects[element_name]
 				if r then
 					tooltips[#tooltips + 1] = {x = r.x, y = r.y, w = r.w,
-							h = r.h, text = text}
+							h = r.h, text = t.text, bg = t.bg, fg = t.fg}
 				end
 			end
 		end
@@ -1683,6 +1699,12 @@ function M.new(magic, buildat, log, ctx)
 				buttons = buttons, fields = fields, tables = tables,
 				scrolls = scrolls, bars = bars,
 				taps = taps, tooltips = tooltips,
+				-- Luanti's m_btn_height, which a tooltip sits that far
+				-- right of and below the cursor by
+				-- simplified: a legacy form's is the font's line height
+				-- there, here the same share of a slot as in real ones
+				tip_offset = layout.slot * 15 / 13 * 0.35,
+				tip_bg = layout.tip_bg, tip_fg = layout.tip_fg,
 				close_on_enter = close_on_enter}
 	end
 
