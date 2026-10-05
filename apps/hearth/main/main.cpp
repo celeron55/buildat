@@ -1620,6 +1620,20 @@ struct Module: public interface::Module
 			t.set("following", f.step());
 			return t;
 		}
+		// A package's place ([PACKAGE_SUBJECT]): the threads about it, as
+		// "author/name key" names it
+		// simplified: 200, the latest; paging when a package has more
+		if(cmd == "subject"){
+			const ss_ subject = jstr(q, "subject");
+			need(text_ok(subject, 400, false, "the subject"));
+			json::Value list = json::array();
+			Q t(m_db, "SELECT " THREAD_COLUMNS " FROM threads WHERE subject = ? "
+					"AND hidden = 0 ORDER BY last DESC LIMIT 200");
+			t.b(subject);
+			while(t.step())
+				list.append(thread_row(t));
+			return list;
+		}
 		if(cmd == "search"){
 			const ss_ text = jstr(q, "q");
 			need(text_ok(text, 200, false, "the search"));

@@ -140,11 +140,16 @@ n=$(grep -o "tester/demo/1.1 .* is the thread [0-9]*" "$t/hearth.log" | grep -o 
 curl -s "http://127.0.0.1:$H/t/$n" | grep -q 'It hums <a class="ref" href="/t/2">' ||
 	fail "the 1.1 release thread does not link the problem it fixes"
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
-BUILDAT_HEARTH_REQS='{"cmd":"notifications"}' \
+BUILDAT_HEARTH_REQS='{"cmd":"notifications"}
+{"cmd":"subject","subject":"tester/demo '"$(cat "$t/pub")"'"}' \
 	timeout 90 bin/buildat -D "$t/cl_h" -w 800x600 -l 3 -o sound_mute=1 \
 	-s 127.0.0.1:$H -c @"$t/cmds_h" > "$t/cl_n.log" 2>&1
 grep -a '"id":1001' "$t/cl_n.log" | grep -q '"kind":"fixed","message":0,"note":"1.1"' ||
 	fail "the reporter was not told: $(grep -a '"id":1001' "$t/cl_n.log")"
+# The package's place ("Discuss" on Aitta's list): its two releases and
+# the problem
+n=$(grep -a '"id":1002' "$t/cl_n.log" | grep -o '"subject":"tester/demo ' | wc -l)
+[ "$n" = 3 ] || fail "the package's place has $n threads, not 3"
 
 # A restart reads the Aitta again and makes no second thread
 # start() ran in $(...): the server is not this shell's child to wait for

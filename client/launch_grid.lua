@@ -33,6 +33,24 @@ function M.screens()
 	return m
 end
 
+-- A package's home Hearth (its manifest's home_hearth), as the address the
+-- client connects to: Hearth answers the web and the client on one port
+-- ("http://h:p/" is "h:p"; "https://h/" stays, a proxy with TLS)
+local function hearth_target(url, author, name, version, key)
+	local scheme, host = tostring(url):match("^(https?)://([^/?#]+)")
+	if not scheme then
+		return nil
+	end
+	return {
+		url = url,
+		address = scheme == "https" and "https://" .. host or
+				(host:find(":%d+$") and host or host .. ":80"),
+		subject = author .. "/" .. name .. " " .. key,
+		package = author .. "/" .. name, version = version,
+		engine = tostring(buildat.version()), platform = GetPlatform(),
+	}
+end
+
 -- The launch menu's own two tiles, which every launch UI's grid has:
 -- the local game list and connecting to a server
 local function menu_actions()
@@ -54,7 +72,17 @@ local function menu_actions()
 			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
 			description = "Install apps others made: unreviewed, each in " ..
 					"the server's box",
-			run = function() starport.safe.open_aitta() end}
+			-- "Discuss" on a release: its home Hearth, at the package's place
+			run = function() starport.safe.open_aitta(function(rel)
+				local home = hearth_target(rel.home_hearth,
+						tostring(rel.author), tostring(rel.name),
+						tostring(rel.version), tostring(rel.key))
+				if home then
+					home.place = true
+					buildat.set_feedback(home)
+					M.screens().connect(home.address)
+				end
+			end) end}
 	end
 	return out
 end
@@ -213,9 +241,7 @@ local function category_of(a)
 	return nil
 end
 
--- An installed app's home Hearth from its meta.json, as the address the
--- client connects to: Hearth answers the web and the client on one port
--- ("http://h:p/" is "h:p"; "https://h/" stays, a proxy with TLS)
+-- An installed app's home Hearth, from its meta.json
 local function feedback_target(source)
 	local f = io.open(source.path .. "/meta.json", "rb")
 	if not f then
@@ -226,22 +252,11 @@ local function feedback_target(source)
 	if type(m) ~= "table" or type(m.home_hearth) ~= "string" then
 		return nil
 	end
-	local scheme, host = m.home_hearth:match("^(https?)://([^/?#]+)")
-	if not scheme then
-		return nil
-	end
 	local kf = io.open(source.path .. "/../key", "rb")
 	local key = kf and kf:read("*a"):match("%x+") or ""
 	if kf then kf:close() end
 	local author, name, version = source.name:match("^(.-)%.(.-)@(.*)$")
-	return {
-		url = m.home_hearth,
-		address = scheme == "https" and "https://" .. host or
-				(host:find(":%d+$") and host or host .. ":80"),
-		subject = author .. "/" .. name .. " " .. key,
-		package = author .. "/" .. name, version = version,
-		engine = tostring(buildat.version()), platform = GetPlatform(),
-	}
+	return hearth_target(m.home_hearth, author, name, version, key)
 end
 
 function M.actions(log)

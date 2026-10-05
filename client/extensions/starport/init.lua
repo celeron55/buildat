@@ -1905,7 +1905,9 @@ local function aitta_installed()
 	return have
 end
 
-local function aitta_page(message, query)
+-- on_discuss(release): "Discuss" on a release that names its home
+-- Hearth ([PACKAGE_SUBJECT]); the grid connects there
+local function aitta_page(message, query, on_discuss)
 	local e = effective()
 	local root, w = open_window("aitta", 900)
 	add_text(w, "Apps from Aitta: " .. e.aitta)
@@ -1925,7 +1927,7 @@ local function aitta_page(message, query)
 	add_button(sr, "Search", function()
 		local text = search:GetText()
 		uistack.main:pop(root)
-		aitta_page(nil, text)
+		aitta_page(nil, text, on_discuss)
 	end)
 	local status = add_text(w, "Fetching the list...", GREY)
 	add_button(w, "Back", function() uistack.main:pop(root) end)
@@ -1985,10 +1987,18 @@ local function aitta_page(message, query)
 								tostring(rel.author) .. "__" ..
 								tostring(rel.name) .. ", in the sandbox") or
 								": it is on the grid")) or
-								("Not installed: " .. tostring(why)))
+								("Not installed: " .. tostring(why)), nil,
+								on_discuss)
 					end)
 				end)
 			end, not installed)
+			if on_discuss and type(rel.home_hearth) == "string" and
+					rel.home_hearth:match("^https?://") then
+				add_button(r, "Discuss", function()
+					uistack.main:pop(root)
+					on_discuss(rel)
+				end)
+			end
 			if rel.description and rel.description ~= "" then
 				add_text(w, "    " .. tostring(rel.description), GREY)
 			end
@@ -1999,8 +2009,8 @@ local function aitta_page(message, query)
 	end)
 end
 
-function M.safe.open_aitta()
-	aitta_page()
+function M.safe.open_aitta(on_discuss)
+	aitta_page(nil, nil, type(on_discuss) == "function" and on_discuss or nil)
 end
 
 -- Whether Aitta is shown at all: the filters' "unreviewed"

@@ -613,6 +613,27 @@ local function show_feedback(f)
 	button(w, "Back", home)
 end
 
+-- **A package's place** ([PACKAGE_SUBJECT]): "Discuss" on Aitta's list
+-- came here; the threads about the package, and the way to report one
+local function show_place(f)
+	leave_home()
+	open_thread = nil
+	req("subject", {subject = f.subject}, function(threads)
+		local w = new_page(f.package .. " on this Hearth")
+		local _, add = list(w)
+		for _, th in ipairs(threads) do
+			add(thread_line(th), nil, function() show_thread(th.id) end)
+		end
+		if #threads == 0 then
+			add("Nothing about it here yet.", GREY)
+		end
+		button(w, "Report a problem or give feedback...", function()
+			show_feedback(f)
+		end)
+		button(w, "Back", home)
+	end)
+end
+
 accounts.on_joined = function()
 	req("me", nil, function(r)
 		me = r
@@ -624,7 +645,11 @@ accounts.on_joined = function()
 			if scripted then
 				log:info("hr feedback: " .. encode(f))
 			end
-			show_feedback(f)
+			if f.place then
+				show_place(f)
+			else
+				show_feedback(f)
+			end
 		elseif open then
 			show_thread(open)
 		else

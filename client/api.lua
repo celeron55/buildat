@@ -562,12 +562,15 @@ buildat.safe.connect_poll = __buildat_connect_server_poll
 buildat.set_feedback = function(f)
 	feedback = f
 end
--- feedback() -> {subject, package, version, engine, platform} or nil
+-- feedback() -> {subject, package, version, engine, platform, place} or
+-- nil; place: open the package's threads ("Discuss" on Aitta's list), not
+-- the composer
 buildat.safe.feedback = function()
 	local f = feedback
 	feedback = nil
 	return f and {subject = f.subject, package = f.package,
-			version = f.version, engine = f.engine, platform = f.platform}
+			version = f.version, engine = f.engine, platform = f.platform,
+			place = f.place == true}
 end
 -- **Back to the launcher from a game** ([MENU_CONTEXT]): the connection
 -- dropped, the local server stopped and the sandbox's leavings cleared.
