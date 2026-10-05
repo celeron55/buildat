@@ -537,6 +537,7 @@ struct Module: public interface::Module, public network::Interface
 	sm_<ss_, WebFile> m_web_files;
 	sv_<std::thread> m_deflaters;
 	std::set<ss_> m_claimed_paths;
+	bool m_page_has_no_game = false;
 	// [FAVICON] an app's override of /favicon.ico, served from memory; ""
 	// falls back to the default PNG beside the logo
 	ss_ m_favicon;
@@ -1182,7 +1183,8 @@ struct Module: public interface::Module, public network::Interface
 		struct stat st;
 		const ss_ etag = stat(path.c_str(), &st) == 0 ? "\""+
 				itos((int64_t)st.st_mtime)+"-"+itos((int64_t)st.st_size)+
-				(index ? "-"+itos((int64_t)(std::hash<ss_>()(title) >> 1)) : "")+
+				(index ? "-"+itos((int64_t)(std::hash<ss_>()(title+
+				(m_page_has_no_game ? "\n" : "")) >> 1)) : "")+
 				"\"" : "";
 		WebFile &wf = m_web_files[name];
 		if(!etag.empty() && wf.etag == etag)
@@ -1203,6 +1205,15 @@ struct Module: public interface::Module, public network::Interface
 				ss_::npos;
 		if(at != ss_::npos)
 			body.replace(at, 22, "<title>"+title+"</title>");
+		// [PLAY_OOTB] a page with no game of its own: index.html's server
+		// line made null, so the page starts on the launch menu
+		static const ss_ SERVER_LINE = "var server = host + ':' + port;";
+		const size_t sl = index && m_page_has_no_game ?
+				body.find(SERVER_LINE) : ss_::npos;
+		if(sl != ss_::npos)
+			body.replace(sl, SERVER_LINE.size(), "var server = null;");
+		else if(index && m_page_has_no_game)
+			log_w(MODULE, "%s has no server line to set null", cs(path));
 		wf.body.reset(new ss_(std::move(body)));
 		wf.deflated.reset(new Deflated());
 		wf.etag = etag;
@@ -1873,6 +1884,11 @@ struct Module: public interface::Module, public network::Interface
 	void claim_ws_path(const ss_ &prefix)
 	{
 		m_ws_paths.insert(prefix);
+	}
+
+	void set_page_has_no_game()
+	{
+		m_page_has_no_game = true;
 	}
 
 	bool ws_claimed(const ss_ &target)

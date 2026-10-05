@@ -1,10 +1,10 @@
 #!/bin/bash
 # tier: full
 # cost: 150s (2026-10-04)
-# covers: src/client/web/index.html util/web_play_dir.sh util/tls_proxy.py apps/play/** extensions/launch_menu/screens.lua
+# covers: src/client/web/index.html builtin/network/network.cpp util/tls_proxy.py apps/play/** extensions/launch_menu/screens.lua
 # [WEB_ID_TRUST] (d), [PLAY_PAGE] (a) and (b): the web client from a fixed
-# origin with no game of its own (apps/play serving util/web_play_dir.sh's
-# directory) lists a Starport's servers, joins the one behind TLS and
+# origin with no game of its own (apps/play serving web/ as any server
+# does, its page's server line null: [PLAY_OOTB]) lists a Starport's servers, joins the one behind TLS and
 # shows the other as the native client's, and signs in there by the
 # Starport's window. A TLS front (util/tls_proxy.py, a self-signed
 # certificate the Starport is told to trust) serves the page and Hearth;
@@ -32,10 +32,9 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 cd "$here"
 
-util/web_play_dir.sh "$tmp/play" || fail "the play directory"
 BUILDAT_LUANTI_LIST=http://127.0.0.1:9 \
 	Build/bin/buildat_server -m apps/play -D "$tmp/playsrv" -P $PLAYSRV \
-	-W "$tmp/play" -l 3 > "$tmp/play.log" 2>&1 &
+	-l 3 > "$tmp/play.log" 2>&1 &
 pids+=($!)
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 \
 	-addext subjectAltName=IP:127.0.0.1 -keyout "$tmp/key.pem" \
@@ -45,6 +44,10 @@ python3 util/tls_proxy.py "$tmp/cert.pem" "$tmp/key.pem" \
 pids+=($!)
 for _ in $(seq 20); do grep -q "up" "$tmp/proxy.log" && break; sleep 0.5; done
 sleep 1
+for _ in $(seq 120); do
+	page=$(curl -sfk "https://127.0.0.1:$PLAY/") && break; sleep 1; done
+grep -q "var server = null;" <<< "$page" ||
+	fail "the page does not start on the launch menu ($tmp/play.log)"
 
 # The Starport trusts the check's certificate when it verifies Hearth's
 # https address; under shared/, which the confined server reads

@@ -4,10 +4,10 @@
 # covers: apps/play/** builtin/network/network.cpp client/extensions/network/init.lua
 # [PLAY_PAGE] (c): the web client on apps/play's page reaches a Luanti
 # server through the bridge. A Luanti server (~/projects/luanti, devtest)
-# on a served Luanti list (BUILDAT_LUANTI_LIST), apps/play serving
-# util/web_play_dir.sh's directory; headless Firefox opens the page, picks
-# "Play on a Luanti server", connects and logs in, and is refused an
-# address that is not on the list.
+# on a served Luanti list (BUILDAT_LUANTI_LIST), apps/play serving web/;
+# headless Firefox opens the page, picks "Play on a Luanti server",
+# connects and logs in, and is refused an address that is not on the
+# list.
 # Needs web/ from util/build_web.sh.
 #   util/web_luanti_bridge_check.sh [steps.json]   (default: the check's own)
 set -u
@@ -40,10 +40,9 @@ printf '{"list": [{"address": "127.0.0.1", "port": %d, "name": "Bridged"}]}' \
 	$LUANTI > "$tmp/list/list"
 python3 -m http.server -b 127.0.0.1 -d "$tmp/list" $LIST > "$tmp/list.log" 2>&1 &
 pids+=($!)
-util/web_play_dir.sh "$tmp/play" || fail "the play directory"
 BUILDAT_CONNECT_PORTS=$LIST BUILDAT_LUANTI_LIST=http://127.0.0.1:$LIST \
 	Build/bin/buildat_server -m apps/play -D "$tmp/playsrv" -P $PLAY \
-	-W "$tmp/play" -l 3 > "$tmp/play.log" 2>&1 &
+	-l 3 > "$tmp/play.log" 2>&1 &
 pids+=($!)
 for _ in $(seq 120); do grep -q "Luanti's list: 1" "$tmp/play.log" && break; sleep 1; done
 grep -q "Luanti's list: 1" "$tmp/play.log" || fail "the list ($tmp/play.log)"

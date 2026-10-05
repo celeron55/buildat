@@ -34,7 +34,8 @@ Each directory in `apps/` is an app: pick it in the launch menu, or run
 
 * Services: `vanilla` (Luanti games), `starport`, `aitta`, `hearth`,
   `floorplanner`, and `play`, which serves the web client and has no game
-  of its own.
+  of its own: its page starts on the launch menu (a Starport lists its
+  origin in `web_clients`, doc/starport.txt).
 * Games and demos: `digger`, `infidigger`, `bomber_drone` (a drone over
   infidigger's terrain), `minigame`, `vanilla_voxel_physics` (vanilla with
   voxel bodies that fall).

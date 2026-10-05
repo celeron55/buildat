@@ -20,3 +20,10 @@ run their own. The official one is https://starport.buildat.org.
 - The address a login or a report came from is kept for `retention_days`,
   7 by default, which the Starport's admin sets; a daily pass then clears
   it. The ID sees its own recent logins with their addresses until then.
+- The admin's Settings page holds every setting, each as JSON, a setting
+  newer than the Starport's first start at its default. `web_clients`
+  lists the origins of web pages besides a listed server's own that
+  `/authorize` sends a Starport ID's token to: a page that serves the web
+  client with no game of its own, as `apps/play` does
+  (`https://play.buildat.org`), is listed there to let its players sign
+  in with an ID.

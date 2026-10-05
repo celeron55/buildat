@@ -39,8 +39,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	var host = location.hostname.indexOf(':') >= 0 ?
 			'[' + location.hostname + ']' : location.hostname;
 	// [WEB_ID_TRUST] (d): a page with no game of its own says null here
-	// (util/web_play_dir.sh) and starts on the launch menu, which connects
-	// in place to the server the user picks
+	// (the server serves it so: apps/play) and starts on the launch menu,
+	// which connects in place to the server the user picks
 	var server = host + ':' + port;
 	var args = ['-P', '/buildat', '-U', '/urho', '-C', '/buildat/cache',
 		'-D', '/buildat/user',

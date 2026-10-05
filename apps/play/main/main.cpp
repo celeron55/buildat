@@ -1,9 +1,10 @@
 // [PLAY_PAGE] play.buildat.org: a server that serves the web client and
 // has no game of its own. The page starts on the launch menu, which joins
 // any server in place, so the client code is from this one origin
-// ([WEB_ID_TRUST] (d)). Served from util/web_play_dir.sh's directory:
-//   util/web_play_dir.sh /srv/play
-//   buildat_server -m apps/play -W /srv/play
+// ([WEB_ID_TRUST] (d)). Run as any app, the web client where the release
+// archive puts it ([PLAY_OOTB]: the network module serves its page with
+// the server line null):
+//   buildat_server -m apps/play
 // behind a TLS proxy, and the origin in each Starport's web_clients.
 //
 // **The Luanti bridge** ((c)): a browser has no UDP, so the page's
@@ -114,6 +115,7 @@ struct Module: public interface::Module
 	{
 		network::access(m_server, [&](network::Interface *i){
 			i->claim_ws_path("/luanti");
+			i->set_page_has_no_game();
 		});
 		m_fetcher = std::thread([this](){ fetcher(); });
 	}

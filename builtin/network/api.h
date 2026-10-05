@@ -154,6 +154,10 @@ namespace network
 		// (an OldClient). ws_send() sends one binary message; disconnect()
 		// closes it. Origin is checked as for a game's WebSocket.
 		virtual void claim_ws_path(const ss_ &prefix) = 0;
+		// [PLAY_OOTB] the page served at / starts on the launch menu
+		// instead of joining this server: for a server with no game of
+		// its own (apps/play)
+		virtual void set_page_has_no_game() = 0;
 		virtual void ws_send(PeerInfo::Id peer, const ss_ &data) = 0;
 		// [FAVICON] the PNG served for /favicon.ico, ahead of the default
 		// Buildat logo; "" restores the default. An app sets its own icon

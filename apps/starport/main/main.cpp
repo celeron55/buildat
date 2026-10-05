@@ -748,6 +748,16 @@ struct Module: public interface::Module
 	}
 	double setting_num(const char *k){ return setting(k).as_number(); }
 
+	// [PLAY_OOTB] the defaults with the stored values over them: a setting
+	// newer than this Starport's first start is on its Settings page too
+	json::Value all_settings()
+	{
+		json::Value r = default_settings();
+		for(json::Iterator it(m_settings); it.valid(); it.next())
+			r.set(it.key(), it.value());
+		return r;
+	}
+
 	void on_start()
 	{
 		// One user's clients at once, as in floorplanner
@@ -2736,7 +2746,7 @@ struct Module: public interface::Module
 		if(!admin)
 			throw Exception("for the admin");
 		if(cmd == "settings")
-			return m_settings;
+			return all_settings();
 		if(cmd == "set_settings")
 			return cmd_set_settings(name, q);
 		if(cmd == "trust_reporter")
@@ -3703,7 +3713,7 @@ struct Module: public interface::Module
 		}
 		m_settings = next;
 		put("settings", "settings", m_settings);
-		return m_settings;
+		return all_settings();
 	}
 };
 
