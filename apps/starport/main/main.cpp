@@ -771,7 +771,8 @@ struct Module: public interface::Module
 			iface->claim_http_path("/id");
 			iface->claim_http_path("/brand/");
 		});
-		m_last_day = day_of(now_s());
+		// m_last_day stays 0: the daily pass runs at the first tick too, so a
+		// Starport down at midnight still clears what the retention ends
 		m_vthread = std::thread([this](){ verifier(); });
 		log_i(MODULE, "Starport \"%s\": %zu listings", cs(jstr(m_settings,
 				"name")), store("listings")->list("").size());
@@ -2551,19 +2552,40 @@ struct Module: public interface::Module
 				gone++;
 			}
 		}
-		// 10b: a year that has reached 18 is dropped for "18 or over"
+		// A login's or a session's address goes after the retention too
+		// ([STARPORT_ADDR_RETENTION]); seen() already hides it from the ID
+		auto clear_old = [&](json::Value &x){
+			if(jstr(x, "address").empty() || t - jint(x, "created") <= keep)
+				return false;
+			x.set("address", "");
+			cleared++;
+			return true;
+		};
 		for(const ss_ &name : store("ids")->list("")){
 			json::Value id = load("ids", name);
+			bool changed = false;
+			// 10b: a year that has reached 18 is dropped for "18 or over"
 			if(!id.get("adult").is_true() && age_low(id) >= 18){
 				id.set("adult", true);
 				id.del_key("birth_year");
 				id.del_key("consent");
-				put("ids", name, id);
+				changed = true;
 			}
+			json::Value recent = id.get("recent");
+			for(unsigned i = 0; recent.is_array() && i < recent.size(); i++)
+				changed |= clear_old(recent[i]);
+			if(recent.is_array())
+				id.set("recent", recent);
+			if(changed)
+				put("ids", name, id);
 		}
-		for(const ss_ &k : store("sessions")->list(""))
-			if(jint(load("sessions", k), "expires") < t)
+		for(const ss_ &k : store("sessions")->list("")){
+			json::Value s = load("sessions", k);
+			if(jint(s, "expires") < t)
 				store("sessions")->remove(k);
+			else if(clear_old(s))
+				put("sessions", k, s);
+		}
 		// A delisting for a time runs out
 		for(const ss_ &id : store("listings")->list("")){
 			json::Value l = load("listings", id);

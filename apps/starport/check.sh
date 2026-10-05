@@ -27,6 +27,8 @@
 #      the notice and the hide, unseen, and the next one has it seen.
 #   9. The hide's second appeal waits for the first; mod's list cannot
 #      make the admin's listing a publisher it did not offer.
+#  10. With retention_days 0, a restart's daily pass clears the IDs'
+#      login and session addresses ([STARPORT_ADDR_RETENTION]).
 #
 #   KEEP_TMP=1 apps/starport/check.sh
 set -u
@@ -349,4 +351,21 @@ grep -Eq '"ok":true,"result":"[0-9a-f]{12}"' "$tmp/cl10.log" &&
 grep -q '"error":"no such offer"' "$tmp/cl11.log" ||
 	fail "a list took a listing that was not offered (cl11.log)"
 echo "ok: one open appeal a statement; a list takes only what is offered"
+# 10
+addrs(){ sqlite3 "$tmp/sp/apps/starport/saves/starport/save.sqlite" "SELECT count(*) FROM
+	store WHERE store IN ('ids', 'sessions') AND value LIKE '%\"address\":\"1%'"; }
+[ "$(addrs)" -gt 0 ] || fail "no login addresses stored to clear"
+sp_reqs admin checkpass '{"cmd":"set_settings","settings":{"retention_days":0}}' cl12.log
+kill "${pids[0]}"
+wait "${pids[0]}" 2>/dev/null
+Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
+	> "$tmp/sp2.log" 2>&1 &
+pids+=($!)
+for _ in $(seq 60); do
+	grep -q "Daily:" "$tmp/sp2.log" && break
+	sleep 1
+done
+[ "$(addrs)" = 0 ] ||
+	fail "$(addrs) login or session addresses kept past retention_days (sp2.log)"
+echo "ok: the daily pass clears login and session addresses past the retention"
 echo PASS
