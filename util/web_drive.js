@@ -20,6 +20,11 @@
 //   ["selall"]              Ctrl+A
 //   ["click", x, y]         left button, in CSS pixels
 //   ["mouse", x, y]         the pointer there, no button
+//   ["tap", x, y]           a finger's touch there and up again
+//   ["drag", x0, y0, x1, y1, "touch"]
+//                           the left button (or a finger) down at x0, y0,
+//                           moved to x1, y1 over half a second, and up
+//                           (Firefox only)
 //   ["shot", path]          a PNG of the page
 //   ["eval", js]            print what the expression gives
 //   ["window", n]           the steps after go to the nth top-level window
@@ -129,6 +134,21 @@ async function firefox() {
 		mouse: (x, y) => c.send("input.performActions", {context: ctx,
 				actions: [{type: "pointer", id: "m", actions: [
 				{type: "pointerMove", x, y}]}]}),
+		tap: (x, y) => c.send("input.performActions", {context: ctx,
+				actions: [{type: "pointer", id: "t", parameters:
+				{pointerType: "touch"}, actions: [
+				{type: "pointerMove", x, y}, {type: "pointerDown", button: 0},
+				{type: "pause", duration: 50}, {type: "pointerUp", button: 0}]}]}),
+		drag: (x0, y0, x1, y1, kind) => c.send("input.performActions", {
+				context: ctx, actions: [{type: "pointer", id: kind === "touch" ?
+				"t" : "m", parameters: {pointerType: kind === "touch" ?
+				"touch" : "mouse"}, actions: [
+				{type: "pointerMove", x: x0, y: y0},
+				{type: "pointerDown", button: 0},
+				...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => ({type: "pointerMove",
+					duration: 50, x: Math.round(x0 + (x1 - x0) * i / 10),
+					y: Math.round(y0 + (y1 - y0) * i / 10)})),
+				{type: "pointerUp", button: 0}]}]}),
 		shot: async p => {
 			const r = await c.send("browsingContext.captureScreenshot", {context: ctx});
 			fs.writeFileSync(p, Buffer.from(r.data, "base64"));
@@ -196,6 +216,12 @@ async function chrome() {
 		},
 		mouse: (x, y) => c.send("Input.dispatchMouseEvent", {type: "mouseMoved",
 				x, y}),
+		tap: async (x, y) => {
+			await c.send("Input.dispatchTouchEvent", {type: "touchStart",
+					touchPoints: [{x, y}]});
+			await c.send("Input.dispatchTouchEvent", {type: "touchEnd",
+					touchPoints: []});
+		},
 		shot: async p => {
 			const r = await c.send("Page.captureScreenshot", {format: "png"});
 			fs.writeFileSync(p, Buffer.from(r.data, "base64"));
@@ -217,7 +243,8 @@ async function chrome() {
 		process.exit(2);
 	}
 	let failed = null;
-	for (const [op, a, c] of steps) {
+	for (const [op, ...args] of steps) {
+		const [a, c] = args;
 		console.log("step:", op, a !== undefined ? a : "", c !== undefined ? c : "");
 		try {
 			if (op === "wait") {
@@ -236,7 +263,7 @@ async function chrome() {
 					await new Promise(r => setTimeout(r, 200));
 				}
 			} else if (b.ops[op]) {
-				await b.ops[op](a, c);
+				await b.ops[op](...args);
 			} else {
 				throw new Error("no such step");
 			}

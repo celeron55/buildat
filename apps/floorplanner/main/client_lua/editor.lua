@@ -8499,15 +8499,17 @@ do
 		if f and f.stick then
 			S.stick = nil
 		end
-		-- Walking, a tap on a door, a window or a switch uses it (user: a
-		-- touchscreen had no way to)
+		-- Walking, a tap is the left click at the finger, as the guide says
+		-- ([FP_CEILING_MATERIAL]: Select and Material did nothing): with no
+		-- tool, a door, a window or a switch is used; held, it is anyway
 		if f and S.view == "walk" and not f.stick and not f.ui and
 				not f.moved and not S.paused and
 				buildat.get_time_us() - f.t0 < 500000 then
 			S.mx, S.my = x, y
-			local s = pick_surface(true)
-			if s and s.kind == "instance" and use_target() then
-				use()
+			begin_press(magic.MOUSEB_LEFT)
+			if S.press then
+				click()
+				S.press = nil
 			end
 		end
 		if not next(S.fingers) then
