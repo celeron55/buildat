@@ -178,12 +178,12 @@ function M.new(magic, buildat, log, ctx)
 		return magic.Color(part(1, 2), part(3, 2), part(5, 2))
 	end
 
-	-- A hypertext's text as lines, each with the style in effect where its
-	-- text starts ({text, size, color, center, mono}), and each <img> a
-	-- line of its own ({img, w, h, center}). Sizes are Luanti's pixels at
-	-- 16 for normal text, drawn at 12 like the rest of a form.
-	-- simplified: bold and italic are drawn plain (no such font here), and
-	-- a style changed inside a line waits for the next line
+	-- A hypertext's text as lines, each its runs of one style ({runs =
+	-- {{text, size, color, mono}...}, center} -- centred as its text
+	-- starts), and each <img> a line of its own ({img, w, h, center}).
+	-- Sizes are Luanti's pixels at 16 for normal text, drawn at 12 like the
+	-- rest of a form.
+	-- simplified: bold and italic are drawn plain (no such font here)
 	local HYPERTEXT_TAGS = {big = {size = 24}, bigger = {size = 36},
 			center = {halign = "center"}, left = {halign = "left"},
 			right = {halign = "left"}, justify = {halign = "left"},
@@ -216,14 +216,15 @@ function M.new(magic, buildat, log, ctx)
 		local function add_text(t)
 			for piece, nl in t:gmatch("([^\n]*)(\n?)") do
 				if piece ~= "" then
+					local st = style()
 					if not line then
-						line = style()
-						line.text = ""
+						line = {runs = {}, center = st.center}
 					end
-					line.text = line.text .. piece
+					st.text = piece
+					line.runs[#line.runs + 1] = st
 				end
 				if nl ~= "" then
-					lines[#lines + 1] = line or {text = "", size = style().size}
+					lines[#lines + 1] = line or {runs = {}, size = style().size}
 					line = nil
 				end
 			end
@@ -1161,17 +1162,15 @@ function M.new(magic, buildat, log, ctx)
 				-- one sends the element's name with "action:<the action's
 				-- name>", which is what Luanti's own client sends.
 				--
-				-- Each line is drawn in the style in effect where its
-				-- text starts: <center>, <big>, <bigger>, <style color=
-				-- size=>, <global color= size= halign=>, and a <tag name=>
-				-- the text defines.
+				-- The styles: <center>, <big>, <bigger>, <mono>, <style
+				-- color= size=>, <global color= size= halign=>, and a
+				-- <tag name=> the text defines, inside a line too -- its
+				-- runs are wrapped word by word, each word measured in its
+				-- run's font and size, and a row drawn a Text a run.
 				--
-				-- simplified: a style is a whole line's -- a word coloured
-				-- inside a line is drawn in the line's colour -- and there
-				-- is no bold, italic, image or table; spans need a layout
-				-- of runs that a Text element is not. The actions are
-				-- gathered under the text rather than staying inline where
-				-- they were written.
+				-- simplified: no bold, italic or table; a word wider than
+				-- the box runs over it. The actions are gathered under the
+				-- text rather than staying inline where they were written.
 				local x, y = at(e, 1)
 				local w, h = geometry(e, 2)
 				local hname = e.fields[3]
@@ -1187,11 +1186,20 @@ function M.new(magic, buildat, log, ctx)
 					end
 					local by = y + h - 20 * #actions
 					local ty = y + 2
+					local function font_of(run)
+						return magic.cache:GetResource("Font", run.mono and
+								buildat.font_mono or buildat.font_sans)
+					end
+					-- A word's width in its run's font, by a Text never shown
+					local meter = label(window, 0, 0, nil, "", 12)
+					meter.visible = false
+					local function measure(s_, run)
+						meter:SetFont(font_of(run), run.size)
+						meter.text = s_
+						return meter.width
+					end
 					for _, line in ipairs(hypertext_lines((raw:gsub(
 							"<action%s+name=[%w_]+%s*>.-</action>", "")))) do
-						local size = line.size
-						local text = line.text and
-								formspec.strip_escapes(line.text) or ""
 						if line.img then
 							-- Its own size where it says none, at a form's
 							-- 12 to Luanti's 16 as the text, no wider than
@@ -1210,26 +1218,64 @@ function M.new(magic, buildat, log, ctx)
 							image(window, x + 2 + (line.center and
 									(w - 4 - iw) / 2 or 0), ty, iw, ih, line.img)
 							ty = ty + ih
-						elseif ty + size > by then
-							break
-						elseif text:match("%S") then
-							local c = line.color
-							local t = label(window, x + 2, ty, w - 4, text,
-									size, c and magic.Color(c.r, c.g, c.b))
-							if line.mono then
-								t:SetFont(magic.cache:GetResource("Font",
-										buildat.font_mono), size)
-							end
-							-- Wrapping on first, or the Text sizes itself to
-							-- its one row and the width is lost
-							t:SetWordwrap(true)
-							t.width = math.floor(w - 4)
-							if line.center then
-								t:SetTextAlignment(1)
-							end
-							ty = ty + math.max(t.height, size)
+						elseif #line.runs == 0 then
+							ty = ty + line.size
 						else
-							ty = ty + size
+							-- The rows: each a list of {run, text, x}, a
+							-- run's words joined while they stay on it
+							local rows, row, rx = {}, {}, 0
+							local space = false
+							for _, run in ipairs(line.runs) do
+								local t = formspec.strip_escapes(run.text)
+								for sp, word in t:gmatch("(%s*)(%S*)") do
+									space = space or sp ~= ""
+									if word ~= "" then
+										local tok = (space and rx > 0) and
+												" " .. word or word
+										local tw = measure(tok, run)
+										if rx > 0 and rx + tw > w - 4 then
+											rows[#rows + 1] = {segs = row, w = rx}
+											row, rx, tok = {}, 0, word
+											tw = measure(tok, run)
+										end
+										local last = row[#row]
+										if last and last.run == run then
+											last.text = last.text .. tok
+										else
+											row[#row + 1] = {run = run,
+													text = tok, x = rx}
+										end
+										rx, space = rx + tw, false
+									end
+								end
+							end
+							if #row > 0 then
+								rows[#rows + 1] = {segs = row, w = rx}
+							end
+							for _, r in ipairs(rows) do
+								local rh, ts = 0, {}
+								for i, seg in ipairs(r.segs) do
+									local c = seg.run.color
+									ts[i] = label(window, 0, 0, nil, seg.text,
+											seg.run.size,
+											c and magic.Color(c.r, c.g, c.b))
+									ts[i]:SetFont(font_of(seg.run), seg.run.size)
+									rh = math.max(rh, ts[i].height)
+								end
+								if ty + rh > by then
+									for _, t in ipairs(ts) do
+										t:Remove()
+									end
+									break
+								end
+								local x0 = x + 2 + (line.center and
+										math.max(0, (w - 4 - r.w) / 2) or 0)
+								for i, seg in ipairs(r.segs) do
+									ts[i]:SetPosition(math.floor(x0 + seg.x),
+											math.floor(ty + rh - ts[i].height))
+								end
+								ty = ty + rh
+							end
 						end
 					end
 					by = y + h
