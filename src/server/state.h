@@ -41,6 +41,10 @@ namespace server
 		virtual void sub_event(struct interface::Module *module,
 				const interface::Event::Type &type) = 0;
 		virtual void emit_event(interface::Event event) = 0;
+		// Runs every subscriber's handler in the calling thread before
+		// returning. What "core:shutdown" needs: after it, the main loop is
+		// over and a queued event would never be handled.
+		virtual void emit_event_synchronously(interface::Event event) = 0;
 
 		virtual void handle_events() = 0;
 

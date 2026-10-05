@@ -1,6 +1,7 @@
 -- Buildat: extension/luanti_client/connection.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
 -- Luanti's UDP transport: three channels, each with its own reliable stream.
 -- A datagram is
@@ -19,8 +20,7 @@
 --
 -- Checked by test.lua in this directory, which runs it against a fake socket.
 
-local serialize = dofile(__buildat_extension_path("luanti_client")..
-		"/serialize.lua")
+local serialize = buildat.run_extension_file("serialize.lua")
 
 local M = {}
 
