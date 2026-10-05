@@ -150,6 +150,14 @@ grep -a '"id":1001' "$t/cl_n.log" | grep -q '"kind":"fixed","message":0,"note":"
 # the problem
 n=$(grep -a '"id":1002' "$t/cl_n.log" | grep -o '"subject":"tester/demo ' | wc -l)
 [ "$n" = 3 ] || fail "the package's place has $n threads, not 3"
+page=$(curl -s "http://127.0.0.1:$H/p/tester/demo")
+for want in "It hums" "demo 1.1" "demo 1.0"; do
+	echo "$page" | grep -q "$want" || fail "/p/tester/demo lacks $want: $page"
+done
+curl -s "http://127.0.0.1:$H/t/2" | grep -q 'About <a href="/p/tester/demo">' ||
+	fail "the problem's page does not link its package's place"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$H/p/tester/demo/x")" = 404 ] ||
+	fail "/p/ took a path of three parts"
 
 # A restart reads the Aitta again and makes no second thread
 # start() ran in $(...): the server is not this shell's child to wait for

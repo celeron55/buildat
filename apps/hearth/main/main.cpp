@@ -13,6 +13,7 @@
 //   /m/<id>          one message, with the way to its thread
 //   /search?q=...    FTS5 over the titles and the messages
 //   /f/<id>          an uploaded file ([FORUM] step 5), kept by its use
+//   /p/<author>/<name>  a package's place: the threads about it
 // **To take part**: the buildat client, joined by builtin/accounts (a local
 // account or a Starport ID, as the admin set up its logins). "hr:req"
 // carries a JSON {id, cmd, ...} and "hr:res" the answer {id, ok, result |
@@ -456,7 +457,7 @@ static ss_ kind_text(const json::Value &t)
 	return "problem, "+ss_(status == "wontfix" ? "won't fix" : status);
 }
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
-		"/robots.txt"};
+		"/robots.txt", "/p/"};
 
 // Trust ([HEARTH_MVP] step 6): what a level may post. Level 0 is a new
 // account, 1 one that has stood a while, 2 the admin
@@ -1323,6 +1324,38 @@ struct Module: public interface::Module
 			for(unsigned i = 0; i < list.size(); i++)
 				body += thread_line(list.at(i));
 			body += "</ul>\n";
+		} else if(path.compare(0, 3, "/p/") == 0){
+			// A package's place ([PACKAGE_SUBJECT]): the threads about
+			// "author/name", as the client's "Discuss" shows them
+			// simplified: every key's together; a second key under the same
+			// name is noted, not split
+			const ss_ pkg = path.substr(3);
+			const size_t slash = pkg.find('/');
+			if(pkg.size() > 81 || slash == ss_::npos || slash == 0 ||
+					slash + 1 == pkg.size() || pkg.find_first_not_of(
+					"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+					"0123456789_/") != ss_::npos || pkg.find('/', slash + 1) !=
+					ss_::npos)
+				return;
+			Q q(m_db, "SELECT " THREAD_COLUMNS " FROM threads WHERE "
+					"substr(subject, 1, ?) = ? AND hidden = 0 "
+					"ORDER BY last DESC LIMIT 200");
+			q.b((int64_t)pkg.size() + 1).b(pkg+" ");
+			ss_ lines;
+			std::set<ss_> keys;
+			while(q.step()){
+				const json::Value t = thread_row(q);
+				keys.insert(jstr(t, "subject"));
+				lines += thread_line(t);
+			}
+			title = pkg+" - Hearth";
+			body = "<h1>"+html(pkg)+"</h1>\n";
+			if(keys.size() > 1)
+				body += "<p class=\"meta\">Published under "+
+						itos((int64_t)keys.size())+" keys: the same name, "
+						"maybe not the same author.</p>\n";
+			body += lines.empty() ? ss_("<p>Nothing about it here yet.</p>\n") :
+					"<ul class=\"list\">\n"+lines+"</ul>\n";
 		} else if((id = path_id(path, "/t/")) >= 0){
 			const ss_ after = query_value(query, "after");
 			if(after.size() > 15 || after.find_first_not_of("0123456789") !=
@@ -1347,6 +1380,11 @@ struct Module: public interface::Module
 				body += "<p class=\"meta\">"+html(kind_text(t))+
 						(jstr(t, "version").empty() ? ss_() :
 						", reported in "+html(jstr(t, "version")))+"</p>\n";
+			const ss_ pkg = jstr(t, "subject").substr(0,
+					jstr(t, "subject").find(' '));
+			if(!pkg.empty())
+				body += "<p class=\"meta\">About <a href=\"/p/"+html(pkg)+"\">"+
+						html(pkg)+"</a></p>\n";
 			// The question, its answer, then the rest in order; a later page
 			// marks the answer where it is
 			// simplified: an answer past the first page is not lifted under
