@@ -87,7 +87,7 @@ echo "leaving a game: back to the grid $grid times, $alive elements" 		"drawn af
 # API's, so "recently played" is one list every launch UI reads rather
 # than one per launcher that disagrees with the next
 hist="$BUILDAT_USER_PATH/launch_history.csv"
-if ! grep -aq " game/vanilla/contentdb$" "$hist" 2>/dev/null; then
+if ! grep -aq " app/vanilla/contentdb$" "$hist" 2>/dev/null; then
 	echo "FAIL: the launch history does not hold the action that was run"
 	tail -3 "$hist" 2>/dev/null
 	exit 1

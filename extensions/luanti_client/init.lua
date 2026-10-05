@@ -3854,6 +3854,7 @@ show_connect_dialog = function(address, name)
 			address or DEFAULT_ADDRESS)
 	local name_edit = labeled_edit(window, "Player name", name or DEFAULT_NAME)
 	local password_edit = labeled_edit(window, "Password", "")
+	password_edit.echoCharacter = string.byte("*")
 
 	-- The render mode is the settings screen's ([BOX_PLAYTEST_2] 3), fixed
 	-- for the session before anything loads: the atlas's normal and
@@ -3910,6 +3911,18 @@ show_connect_dialog = function(address, name)
 
 	menu:add("Connect", connect)
 	menu:add("Cancel", cancel)
+
+	-- Enter in a field is the field's ([ONE_FOCUS]): on to the next one,
+	-- and the password's connects
+	magic.SubscribeToEvent(address_edit, "TextFinished", function()
+		name_edit:SetFocus(true)
+	end)
+	magic.SubscribeToEvent(name_edit, "TextFinished", function()
+		password_edit:SetFocus(true)
+	end)
+	magic.SubscribeToEvent(password_edit, "TextFinished", function()
+		connect()
+	end)
 
 	-- The left column: the source row, a filter, the list
 	local sources = left:CreateChild("UIElement")
@@ -4033,8 +4046,11 @@ show_connect_dialog = function(address, name)
 	end
 	source_button("recent", "Servers used")
 	source_button("official", "Official list")
-	magic.SubscribeToEvent(filter_edit, "TextFinished", function()
+	-- Filtered as it is typed; kept at Enter
+	magic.SubscribeToEvent(filter_edit, "TextChanged", function()
 		show()
+	end)
+	magic.SubscribeToEvent(filter_edit, "TextFinished", function()
 		-- Kept for the next time this screen opens
 		local kept = settings.load()
 		kept.server_filter = filter_edit:GetText()

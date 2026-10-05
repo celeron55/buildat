@@ -48,7 +48,7 @@ keypress return
 delay 1500
 quit
 CMDS
-BUILDAT_FP_NAME=op BUILDAT_FP_PASSWORD=pw123456 BUILDAT_FP_CODE=$code \
+BUILDAT_FP_CREATE=1 BUILDAT_FP_NAME=op BUILDAT_FP_PASSWORD=pw123456 BUILDAT_FP_CODE=$code \
 	timeout 120 bin/buildat -s localhost:$port -D "$out/cli" -w 800x500 -l 4 \
 	-c @"$out/cmds.txt" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 grep -a "ui_utils: keyboard" "$out/cli.log" | sed 's/.*ui_utils: //' > "$out/keys.txt"
@@ -61,7 +61,7 @@ expect() {
 }
 expect "letters nitm" "the picker's buttons have their letters"
 expect "keyboard: m to Menu..." "a letter focuses its button"
-expect "letters bcamrlq" "Enter opened the picker's menu"
+expect "letters bcmrlq" "Enter opened the picker's menu"
 expect "keyboard: m to My account..." "the menu by its letters"
 expect "keyboard: t to Two-step login..." "an Accounts page by its letters"
 expect "keyboard: b to Back" "Back by its letter"
@@ -69,7 +69,7 @@ expect "keyboard: b to Back" "Back by its letter"
 # account again by Down and Enter -- in that order, each page once
 after=$(sed -n '/keyboard: b to Back/,$p' "$out/keys.txt" | grep "letters" |
 	sed 's/.*letters //' | uniq | tr '\n' ' ')
-if [ "$after" != "ctlb tb ctlb " ]; then
+if [ "$after" != "ctalb tb ctalb " ]; then
 	echo "FAIL: after Back the pages were \"$after\", not My account," \
 			"Two-step login by Tab and Enter, My account by Down and Enter"
 	fail=1

@@ -214,24 +214,32 @@ local function letterer()
 	return L
 end
 
--- One selected index for mouse hover and arrow keys. Button.selected uses
--- pressedOffset; native hover would still highlight the mouse-over item if
--- arrows move elsewhere, so copy hoverOffset onto pressedOffset and clear it.
+-- **The selected item is the one with the focus** ([ONE_FOCUS]): one
+-- thing on a screen is selected, a field or a button, and Enter is its --
+-- a focused button presses itself on Enter or Space (Urho3D's
+-- Button::OnKey), a field finishes its line. A selection of the menu's own
+-- beside the focus had Enter in a field press a button: on the web a
+-- LineEdit drops its focus on Enter before a script hears the key (the
+-- screen keyboard, LineEdit.cpp), and the menu then pressed its own.
+-- Button.selected draws the focus, with pressedOffset; native hover would
+-- draw a second item, so hoverOffset moves onto pressedOffset, and hover
+-- moves the focus instead, unless a field is being typed in.
 -- options.letters = false: no letters, for a menu whose letters are its
 -- own (the launch grid's type-to-filter)
 local function button_menu_nav(root, options)
 	local use_letters = not (options and options.letters == false)
 	local items = {}
-	local selected = 1
-	-- When this menu came up: the Enter that finished a filter field on the
-	-- screen before this one arrives here too, in the same frame, and
-	-- pressed whichever button was first ([WORLD_LIST]: the world screen's
-	-- filter opened "New world..."); a key older than the menu is not its
-	local born_us = buildat.get_time_us()
+	-- The focused item's index, 0 for none: read from the focus
+	local selected = 0
 	local on_other_key = nil
 	local on_change = nil
 	-- [MENU_KEYS]: a letter selects its item, as keyboard_page's focuses
 	local letters = letterer()
+
+	local function typing()
+		local focus = magic.ui.focusElement
+		return focus ~= nil and focus:GetTypeName() == "LineEdit"
+	end
 
 	local function apply()
 		for i, item in ipairs(items) do
@@ -239,6 +247,21 @@ local function button_menu_nav(root, options)
 			if on_change then
 				on_change(item.button, i == selected, i)
 			end
+		end
+	end
+
+	-- The drawing follows the focus, wherever it moved it from: a click,
+	-- Tab, a field taking it
+	local function sync()
+		local at = 0
+		for i, item in ipairs(items) do
+			if not gone(item.button) and item.button:HasFocus() then
+				at = i
+			end
+		end
+		if at ~= selected then
+			selected = at
+			apply()
 		end
 	end
 
@@ -252,8 +275,8 @@ local function button_menu_nav(root, options)
 		elseif i > n then
 			i = 1
 		end
-		selected = i
-		apply()
+		items[i].button:SetFocus(true)
+		sync()
 	end
 
 	local nav = {}
@@ -270,13 +293,16 @@ local function button_menu_nav(root, options)
 		local hover = button.hoverOffset
 		button.pressedOffset = magic.IntVector2(hover.x, hover.y)
 		button.hoverOffset = magic.IntVector2(0, 0)
+		button:SetFocusMode(magic.FM_FOCUSABLE)
 		magic.SubscribeToEvent(button, "Released",
 		function(self, event_type, event_data)
 			action()
 		end)
 		magic.SubscribeToEvent(button, "HoverBegin",
 		function(self, event_type, event_data)
-			select_i(i)
+			if not typing() then
+				select_i(i)
+			end
 		end)
 		apply()
 		return button
@@ -354,13 +380,17 @@ local function button_menu_nav(root, options)
 				return
 			end
 		end
-		local focus = magic.ui.focusElement
-		if focus ~= nil and focus:GetTypeName() == "LineEdit" then
+		if typing() then
 			return
 		end
+		sync()
 		-- Left and right as well as up and down, because a menu can be a row
-		-- as well as a column and a player should not have to know which
-		if key == KEY_LEFT then
+		-- as well as a column and a player should not have to know which.
+		-- From none, the first. Enter is the focused button's own.
+		if selected == 0 and (key == KEY_LEFT or key == KEY_RIGHT or
+				key == KEY_UP or key == KEY_DOWN) then
+			select_i(1)
+		elseif key == KEY_LEFT then
 			select_i(selected - 1)
 		elseif key == KEY_RIGHT then
 			select_i(selected + 1)
@@ -369,10 +399,7 @@ local function button_menu_nav(root, options)
 		elseif key == KEY_DOWN then
 			select_i(selected + columns)
 		elseif key == KEY_RETURN or key == KEY_RETURN2 or key == KEY_KP_ENTER then
-			if magic.input:GetKeyPress(key) and items[selected] and
-					buildat.get_time_us() - born_us > 200000 then
-				items[selected].action()
-			end
+			return
 		else
 			local q = event_data:GetInt("Qualifiers")
 			local ch = key >= 0 and key < 256 and string.char(key):lower()
@@ -398,7 +425,8 @@ local function button_menu_nav(root, options)
 		if #items == 0 then
 			return
 		end
-		local i = selected - event_data:GetInt("Wheel") * columns
+		sync()
+		local i = math.max(selected, 1) - event_data:GetInt("Wheel") * columns
 		select_i(math.max(1, math.min(#items, i)))
 	end)
 
@@ -410,9 +438,18 @@ local function button_menu_nav(root, options)
 			letters:refresh()
 		end
 		if checked then
+			sync()
 			return
 		end
 		checked = true
+		-- The first item has the focus to start with, unless the screen gave
+		-- it to something of its own (a field to type in)
+		local focus = magic.ui.focusElement
+		local kind = focus and focus:GetTypeName()
+		if items[1] and kind ~= "LineEdit" and kind ~= "Button" then
+			items[1].button:SetFocus(true)
+		end
+		sync()
 		-- simplified: a wrapper is not the same table twice, so a button
 		-- is known by its label and where it is
 		local function id(b)

@@ -107,6 +107,10 @@ return {
 	},
 	TextFinished = {
 	},
+	-- A field's text changed as it is typed ([ONE_FOCUS]: a filter that
+	-- filters as it is typed); the handler reads the field
+	TextChanged = {
+	},
 	-- An element losing the UI's focus: a field left by a click elsewhere
 	Defocused = {
 	},

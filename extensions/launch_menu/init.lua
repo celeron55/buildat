@@ -29,8 +29,7 @@ local screens = api.run_extension_file("screens.lua")
 -- below reads the same on both sides ([LAUNCH_SANDBOX])
 local FILTER_NEAREST, HA_CENTER, HA_LEFT, KEY_ESCAPE, LM_VERTICAL, VA_CENTER, VA_TOP =
 		magic.FILTER_NEAREST, magic.HA_CENTER, magic.HA_LEFT, magic.KEY_ESCAPE, magic.LM_VERTICAL, magic.VA_CENTER, magic.VA_TOP
-local KEY_BACKSPACE, KEY_RETURN, KEY_RETURN2, KEY_KP_ENTER =
-		magic.KEY_BACKSPACE, magic.KEY_RETURN, magic.KEY_RETURN2, magic.KEY_KP_ENTER
+local KEY_BACKSPACE = magic.KEY_BACKSPACE
 
 local M = {safe = nil}
 
@@ -363,7 +362,6 @@ function M.boot(launch_action, query)
 
 	-- Keyboard selection: up and down, left and right, enter, and the
 	-- mouse moving the same selection
-	local selected_index = 1
 	local function research(q)
 		uistack.main:pop(root)
 		M.boot(nil, q)
@@ -385,15 +383,8 @@ function M.boot(launch_action, query)
 		elseif key == KEY_BACKSPACE and query ~= "" then
 			research(query:sub(1, -2))
 			return true
-		elseif (key == KEY_RETURN or key == KEY_RETURN2 or
-				key == KEY_KP_ENTER) and query ~= "" then
-			-- Here rather than the menu's own Enter, which waits a moment
-			-- after a screen is made, and every letter makes one
-			if magic.input:GetKeyPress(key) and items[selected_index] then
-				items[selected_index].action()
-			end
-			return true
 		end
+		-- Enter is the focused tile's own ([ONE_FOCUS])
 	-- Its letters are the search's, not a button's
 	end, {letters = false})
 	nav:set_columns(columns)
@@ -402,7 +393,6 @@ function M.boot(launch_action, query)
 		button:GetChild("ButtonImage").color = magic.Color(c, c, c)
 		button:GetChild("ButtonText").color = magic.Color(c, c, c)
 		if selected and index then
-			selected_index = index
 			scroll_to(index)
 			show_description(items[index])
 		elseif not selected and index and desc_name.text == items[index].label then
