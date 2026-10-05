@@ -8,7 +8,7 @@
 -- ctx.launch and the extension's on_untrusted_launch(), which treats the
 -- params as it would a packet from a server.
 return function(ctx)
-	return {
+	local out = {
 		{id = "connect", label = "Play on a Luanti server",
 			icon = "luanti.png", order = 20,
 			description = "Connect this client to a Luanti server",
@@ -22,4 +22,27 @@ return function(ctx)
 				ctx.launch{extension = "luanti_client", params = {menu = "settings"}}
 			end},
 	}
+	-- **The Luanti servers this client has joined** ([LAUNCH_MENU_V2]):
+	-- the network store's udp:// rows, keyed by address as serverlist's
+	-- are, with the name used there; the connect dialog opens filled in
+	local net = require("buildat/extension/network")
+	net = net.known_addresses and net or net.safe
+	for _, a in ipairs(net.known_addresses()) do
+		local address = a.uri:match("^udp://(.+)$")
+		if address and a.accepted then
+			out[#out + 1] = {
+				id = "s_" .. address:gsub("[^%w%.%-]", "_"),
+				label = address, icon = "luanti.png", category = "server",
+				order = 290,
+				description = address .. (a.name ~= "" and "   as " ..
+						a.name or ""),
+				run = function()
+					ctx.launch{extension = "luanti_client",
+						params = {address = address,
+							name = a.name ~= "" and a.name or nil}}
+				end,
+			}
+		end
+	end
+	return out
 end

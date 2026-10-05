@@ -214,8 +214,8 @@ local function gather()
 			local badge = SERVER_KEYS[a.key] or
 					cat == "game" and "Luanti" or
 					a.kind == "installed" and "Aitta" or
-					cat == "server" and a.from == "extension/serverlist" and
-					"Luanti" or nil
+					cat == "server" and (a.from == "extension/serverlist" or
+					a.from == "extension/luanti_client") and "Luanti" or nil
 			local e = add({label = a.label, kind = kind,
 				badge = SETTINGS_KEYS[a.key] and "Settings" or badge,
 				section = SETTINGS_KEYS[a.key] and "Luanti", key = a.key,
@@ -260,13 +260,25 @@ local function gather()
 				run = function() api.join_server(address) end})
 		end
 	end
-	-- The Buildat servers this client has joined, last joined first
+	-- The Buildat servers this client has joined, last joined first; a
+	-- Luanti one (udp) is luanti_client's tile, which is used when this
+	-- was, though its dialog rather than the tile was the way in
+	local by_key = {}
+	for _, e in ipairs(entries) do
+		if e.key then by_key[e.key] = e end
+	end
 	local known = {}
 	local net = require("buildat/extension/network")
 	net = net.known_addresses and net or net.safe
 	for _, a in ipairs(net.known_addresses()) do
 		local host, port = a.uri:match("^%a+://(.-):(%d+)$")
-		if host and a.accepted and a.uri:sub(1, 4) ~= "http" then
+		local tile = a.uri:sub(1, 6) == "udp://" and
+				by_key["extension/luanti_client/s_" ..
+					(host .. ":" .. tostring(port)):gsub("[^%w%.%-]", "_")]
+		if tile and a.last_attempt > (tile.last or 0) then
+			tile.last = a.last_attempt
+		end
+		if host and a.accepted and a.uri:sub(1, 6) == "tcp://" then
 			local address = host .. ":" .. port
 			known[address] = true
 			add({label = a.name ~= "" and a.name or address,
