@@ -3,14 +3,17 @@
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
 -- The launch menu organized by what a player does ([LAUNCH_MENU_V2]):
--- Home is a Continue list of what was last used and one search over every
--- source, results grouped by kind. Beside launch_menu, which it replaces
--- when the user says so. Runs in the sandbox, as launch_menu does; the
--- screens it does not draw itself (the connecting screen, the Engine
--- settings) are launch_menu's, reached by verb.
+-- Home is a Continue list of what was last used, the ways in, and one
+-- search over every source, results grouped by kind; Browse is one list
+-- per kind with a detail panel beside it holding the thing's actions.
+-- Beside launch_menu, which it replaces when the user says so. Runs in
+-- the sandbox, as launch_menu does; the screens it does not draw itself
+-- (the connecting screen, the Engine settings) are launch_menu's,
+-- reached by verb.
 --
--- simplified: step 1 of the plan's four -- no per-kind lists or detail
--- panel yet (step 2), no settings tree or key store (step 3), no pins.
+-- simplified: steps 1 and 2 of the plan's four -- no settings tree or
+-- key store yet (step 3), no pins and none of the actions that do not
+-- exist anywhere yet (step 4).
 local api = buildat.safe or buildat
 local log = buildat.Logger("extension/launch_menu_v2")
 local urho3d = require("buildat/extension/urho3d")
@@ -23,21 +26,42 @@ local HA_LEFT, VA_CENTER, LM_VERTICAL, LM_HORIZONTAL =
 		magic.HA_LEFT, magic.VA_CENTER, magic.LM_VERTICAL,
 		magic.LM_HORIZONTAL
 local KEY_ESCAPE, KEY_BACKSPACE = magic.KEY_ESCAPE, magic.KEY_BACKSPACE
+local KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_TAB =
+		magic.KEY_LEFT, magic.KEY_RIGHT, magic.KEY_UP, magic.KEY_DOWN,
+		magic.KEY_TAB
 
 local M = {safe = nil}
 
 -- In a browser there are no local apps, saves, LAN or Quit: what cannot
--- work there is left out by this one check
-local web = api.get_env("BUILDAT_PAGE_HTTPS") ~= nil
+-- work there is left out by this one check. "1" is an https page, which
+-- reaches a server only through TLS.
+local page = api.get_env("BUILDAT_PAGE_HTTPS")
+local web = page ~= nil
 
 local CONTINUE_MAX = 10
 local ROW_HEIGHT = 28
+local PANEL_WIDTH = 300
 local GAME_RUNNING = "empty (game is running)"
 
 -- The kinds, in the order the results show them
-local KINDS = {"app", "save", "server", "action"}
+local KINDS = {"app", "save", "server", "catalog", "action"}
 local KIND_TITLE = {app = "Apps", save = "Saves", server = "Servers",
-		action = "Other"}
+		catalog = "Get more", action = "Other"}
+local PRIMARY = {app = "Play", save = "Continue", server = "Join",
+		catalog = "Open", action = "Open"}
+-- Launch actions that are a catalog to get more from, or a server's
+-- address typed, rather than what their category says
+local CATALOG_KEYS = {["extension/launch_menu/aitta"] = true,
+		["app/vanilla/contentdb"] = true,
+		["builtin/luanti/import_game"] = true,
+		["builtin/luanti/import_world"] = true}
+local SERVER_KEYS = {["extension/launch_menu/connect"] = "Buildat",
+		["extension/luanti_client/connect"] = "Luanti",
+		["extension/serverlist/refresh"] = "Luanti"}
+-- And the settings screens that are tiles, which go with Home's menu
+-- simplified: until step 3's one settings tree takes them in
+local SETTINGS_KEYS = {["app/vanilla/settings"] = true,
+		["extension/luanti_client/settings"] = true}
 
 -- How well an entry matches what is typed: 2 its label starts with it, 1
 -- it is in the label or the badge, nil not at all
@@ -48,10 +72,25 @@ local function match(e, q)
 	return nil
 end
 
+-- The order of a list: "recent" is the player's own history first (most
+-- recent), then the better match, then the label; "name" the label alone
+local function sorted(list, by)
+	table.sort(list, function(a, b)
+		if by ~= "name" then
+			local la, lb = a.e.last or 0, b.e.last or 0
+			if la ~= lb then return la > lb end
+			if a.m ~= b.m then return a.m > b.m end
+		end
+		return a.e.label:lower() < b.e.label:lower()
+	end)
+	local out = {}
+	for _, x in ipairs(list) do out[#out + 1] = x.e end
+	return out
+end
+
 -- The search: every entry that matches, grouped by kind in KINDS' order,
--- and within a kind the player's own history first (most recent), then
--- the better match, then the label. Pure, so the check below runs it.
-local function search(entries, query)
+-- each group in `by`'s order. Pure, so the check below runs it.
+local function search(entries, query, by)
 	local q = query:lower()
 	local by_kind = {}
 	for _, e in ipairs(entries) do
@@ -64,16 +103,9 @@ local function search(entries, query)
 	end
 	local out = {}
 	for _, kind in ipairs(KINDS) do
-		local list = by_kind[kind]
-		if list then
-			table.sort(list, function(a, b)
-				local la, lb = a.e.last or 0, b.e.last or 0
-				if la ~= lb then return la > lb end
-				if a.m ~= b.m then return a.m > b.m end
-				return a.e.label:lower() < b.e.label:lower()
-			end)
-			local group = {kind = kind}
-			for _, x in ipairs(list) do group[#group + 1] = x.e end
+		if by_kind[kind] then
+			local group = sorted(by_kind[kind], by)
+			group.kind = kind
 			out[#out + 1] = group
 		end
 	end
@@ -94,6 +126,15 @@ local function recent(entries, n)
 	return out
 end
 
+-- "3 h ago": when a thing was last used, for the panel
+local function ago(t, now)
+	local d = math.max(0, now - t)
+	if d < 60 then return "just now" end
+	if d < 3600 then return math.floor(d / 60) .. " min ago" end
+	if d < 86400 then return math.floor(d / 3600) .. " h ago" end
+	return math.floor(d / 86400) .. " days ago"
+end
+
 do
 	local es = {
 		{label = "Floor planner", kind = "app", last = 5},
@@ -107,19 +148,33 @@ do
 			r[3].kind == "server", "search: grouped by kind, in order")
 	assert(r[1][1].label == "Floor planner" and r[1][2].label ==
 			"A floor mat", "search: used first, then the match")
+	r = search(es, "fl", "name")
+	assert(r[1][1].label == "A floor mat", "search: by name")
 	r = search(es, "planner")
 	assert(#r == 2 and r[2][1].label == "flat", "search: badges match")
 	assert(#search(es, "zz") == 0, "search: nothing")
 	r = recent(es, 1)
 	assert(#r == 1 and r[1].label == "flat", "recent: newest first")
+	assert(ago(100, 100) == "just now" and ago(0, 7200) == "2 h ago" and
+			ago(0, 3 * 86400) == "3 days ago", "ago")
 end
 
 -- Every source, as entries of one shape: {label, kind, badge,
--- description, last (unix s or nil), run}
+-- description, last (unix s or nil), size, actions = {{label, run}}};
+-- run is the first action's
 local function gather()
 	local entries = {}
-	local function add(e) entries[#entries + 1] = e end
+	local function add(e)
+		e.actions = e.actions or {}
+		table.insert(e.actions, 1, {label = PRIMARY[e.kind], run = e.run})
+		entries[#entries + 1] = e
+		return e
+	end
+	local function warn_if(ok, why)
+		if not ok then log:warning(tostring(why)) end
+	end
 	add({label = "Engine settings", kind = "action", badge = "Settings",
+		menu = true,
 		description = "What every app honours: the window, the sound, " ..
 				"the mouse, and which launch UI this is.",
 		run = function() api.show_engine_settings() end})
@@ -127,34 +182,58 @@ local function gather()
 	console = console and (console.show and console or console.safe)
 	if console and console.show then
 		add({label = "Developer console", kind = "action",
-			badge = "Developer",
+			badge = "Developer", menu = true,
 			description = "A Lua console in the sandbox, with the API " ..
 					"document beside it.",
 			run = function() console.show(function() end) end})
 	end
-	-- The launch actions: apps, Luanti games, the server list, tools
+	-- The launch actions: apps, Luanti games, the server list, catalogs,
+	-- tools. An app's other actions (vanilla's settings, an installed
+	-- release's feedback) are its panel's as well as their own entries.
 	local app_label = {vanilla = "Luanti"}
-	for _, a in ipairs(api.launch_actions()) do
+	local by_from = {}
+	local actions = api.launch_actions()
+	for _, a in ipairs(actions) do
 		local app = a.from:match("^app/(.+)$")
 		if app and not app_label[app] then app_label[app] = a.label end
+	end
+	for _, a in ipairs(actions) do
 		-- Locally started things need a local server, which a page has not
 		if not (web and (a.kind ~= "extension" or
 				a.key == "extension/launch_menu/local" or
-				a.key == "extension/launch_menu/aitta")) then
+				a.key == "extension/launch_menu/aitta")) and
+				-- Its lists are this menu's Apps and Servers
+				a.key ~= "extension/launch_menu/local" then
 			local cat = a.category or "action"
-			local kind = (cat == "app" or cat == "game") and "app" or
+			local kind = CATALOG_KEYS[a.key] and "catalog" or
+					SERVER_KEYS[a.key] and "server" or
+					SETTINGS_KEYS[a.key] and "action" or
+					(cat == "app" or cat == "game") and "app" or
 					cat == "server" and "server" or "action"
-			local badge = cat == "game" and "Luanti" or
+			local badge = SERVER_KEYS[a.key] or
+					cat == "game" and "Luanti" or
 					a.kind == "installed" and "Aitta" or
 					cat == "server" and a.from == "extension/serverlist" and
 					"Luanti" or nil
-			add({label = a.label, kind = kind, badge = badge, key = a.key,
+			local e = add({label = a.label, kind = kind,
+				badge = SETTINGS_KEYS[a.key] and "Settings" or badge,
+				menu = SETTINGS_KEYS[a.key], key = a.key, from = a.from,
 				id = a.from .. "/" .. tostring(a.id),
+				size = kind == "app" and a.kind ~= "builtin" and
+						a.significance or nil,
 				description = a.description, last = a.last_launched,
-				run = function()
-					local ok, why = api.launch(a.key)
-					if not ok then log:warning(tostring(why)) end
-				end})
+				run = function() warn_if(api.launch(a.key)) end})
+			if kind == "app" then
+				by_from[a.from] = by_from[a.from] or e
+			else
+				e.sibling_of = a.from
+			end
+		end
+	end
+	for _, e in ipairs(entries) do
+		local app = e.sibling_of and by_from[e.sibling_of]
+		if app then
+			app.actions[#app.actions + 1] = {label = e.label, run = e.run}
 		end
 	end
 	if not web then
@@ -166,32 +245,49 @@ local function gather()
 				description = "Continue this save of " .. parent .. ".",
 				last = sv.modified and math.floor(sv.modified / 1000000),
 				run = function()
-					local ok, why = api.launch_save(sv.app, sv.name)
-					if not ok then log:warning(tostring(why)) end
+					warn_if(api.launch_save(sv.app, sv.name))
 				end})
 		end
 		-- simplified: the LAN as heard at boot; the list is not polled
 		for _, s in ipairs(api.lan_servers()) do
 			local address = s.host .. ":" .. s.port
 			add({label = s.name ~= "" and s.name or address,
-				kind = "server", badge = "LAN",
+				kind = "server", badge = "Buildat, LAN",
 				description = address .. "   " .. tostring(s.app) .. ", " ..
 						tostring(s.players) .. " playing",
 				run = function() api.join_server(address) end})
 		end
 	end
 	-- The Buildat servers this client has joined, last joined first
+	local known = {}
 	local net = require("buildat/extension/network")
 	net = net.known_addresses and net or net.safe
 	for _, a in ipairs(net.known_addresses()) do
 		local host, port = a.uri:match("^%a+://(.-):(%d+)$")
 		if host and a.accepted and a.uri:sub(1, 4) ~= "http" then
 			local address = host .. ":" .. port
+			known[address] = true
 			add({label = a.name ~= "" and a.name or address,
 				kind = "server", badge = "Buildat",
 				description = address .. (a.description ~= "" and
 						"   " .. a.description or ""),
 				last = a.last_attempt > 0 and a.last_attempt or nil,
+				run = function() api.join_server(address) end})
+		end
+	end
+	-- And Starport's public list as last fetched (the connect screen
+	-- fetches it again); on an https page only those behind TLS
+	-- simplified: the kept list, not a fetch of this menu's own
+	local starport = require("buildat/extension/starport")
+	starport = starport and (starport.kept_rows and starport or
+			starport.safe)
+	for _, row in ipairs(starport and starport.kept_rows() or {}) do
+		local address = tostring(row.address)
+		if not known[address] and not (page == "1" and not row.tls) then
+			add({label = tostring(row.name), kind = "server",
+				badge = "Buildat, Starport",
+				description = address .. "   " ..
+						tostring(row.players or 0) .. " playing",
 				run = function() api.join_server(address) end})
 		end
 	end
@@ -210,47 +306,47 @@ end
 
 local entries = nil
 
-local function draw(query)
-	local root = uistack.main:push({desc = "launch_menu_v2"})
+local function text(parent, s, size, c)
+	local t = parent:CreateChild("Text")
+	t:SetStyleAuto()
+	t.text = s
+	if size then t:SetFontSize(size) end
+	if c then t.color = magic.Color(c, c, c) end
+	return t
+end
+
+-- A screen: a window on a stack root, a version line, and the line that
+-- says what is typed. The caller adds the rest.
+local function screen(desc, width, heading, query)
+	local root = uistack.main:push({desc = desc})
 	root.defaultStyle = magic.cache:GetResource("XMLFile",
 			"launch_menu/res/main_style.xml")
-	local width = math.min(magic.ui.root.width - 40, 760)
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
 	window:SetLayout(LM_VERTICAL, 8, magic.IntRect(16, 12, 16, 12))
 	window:SetAlignment(HA_LEFT, VA_CENTER)
 	window:SetFixedWidth(width)
-
-	local function text(parent, s, size, c)
-		local t = parent:CreateChild("Text")
-		t:SetStyleAuto()
-		t.text = s
-		if size then t:SetFontSize(size) end
-		if c then t.color = magic.Color(c, c, c) end
-		return t
-	end
 	local version, hash = api.version()
 	text(window, "Buildat " .. version .. " " .. hash, 11, 0.6)
-	text(window, query == "" and
-			"Type to search apps, saves and servers" or
-			"Search: " .. query .. "_", 20, query == "" and 0.6 or 0.9)
+	text(window, query == "" and heading or "Search: " .. query .. "_", 20,
+			query == "" and 0.6 or 0.9)
+	return root, window
+end
 
-	-- The list, in a viewport that clips it and scrolls by the selection
-	local room = magic.ui.root.height - 24 - 160
-	local viewport = window:CreateChild("UIElement")
+-- A list of rows in a viewport that clips it and scrolls by the selection
+local function list_view(parent, width, height)
+	local viewport = parent:CreateChild("UIElement")
 	viewport.clipChildren = true
 	viewport.enabled = true
 	local list = viewport:CreateChild("UIElement")
 	list:SetLayout(LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
-	list:SetFixedWidth(width - 32)
+	list:SetFixedWidth(width)
 	list.enabled = true
-
-	local items = {}
-	local function header(s)
-		local t = text(list, s, 13, 0.6)
-		t:SetFixedHeight(ROW_HEIGHT - 4)
+	local view = {viewport = viewport, list = list}
+	function view:header(s)
+		text(list, s, 13, 0.6):SetFixedHeight(ROW_HEIGHT - 4)
 	end
-	local function row(e)
+	function view:row(e, badge)
 		local b = list:CreateChild("Button")
 		b:SetStyleAuto()
 		b:SetName("Button")
@@ -258,42 +354,93 @@ local function draw(query)
 		b:SetFixedHeight(ROW_HEIGHT)
 		local label = text(b, e.label)
 		label:SetName("ButtonText")
-		label:SetFixedWidth(math.floor((width - 32) * 0.65))
+		label:SetFixedWidth(math.floor(width * 0.62))
 		label:SetAlignment(HA_LEFT, VA_CENTER)
-		local badge = text(b, e.badge or "", 12, 0.55)
-		badge:SetAlignment(HA_LEFT, VA_CENTER)
-		items[#items + 1] = {button = b, entry = e, action = function()
-			log:info("launch_menu_v2: " .. e.kind .. " " .. e.label)
-			e.run()
-		end}
+		text(b, badge or e.badge or "", 12, 0.55):SetAlignment(HA_LEFT,
+				VA_CENTER)
+		return b
 	end
+	function view:fit()
+		viewport:SetFixedSize(width, math.max(ROW_HEIGHT,
+				math.min(height, list.height)))
+	end
+	function view:show(button)
+		local y = button.position.y
+		local top = -list.position.y
+		local h = viewport.height
+		if y < top then
+			list:SetPosition(0, -y)
+		elseif y + ROW_HEIGHT > top + h then
+			list:SetPosition(0, -(y + ROW_HEIGHT - h))
+		end
+	end
+	return view
+end
 
+-- The keys a typed search takes: a character, Backspace, Escape to
+-- clear. Answers the new query, or nil for a key that is not the search's.
+local function search_key(key, query)
+	local c = search_char(key)
+	if c and magic.input:GetKeyPress(key) then
+		return query .. c
+	elseif key == KEY_BACKSPACE and query ~= "" then
+		return query:sub(1, -2)
+	elseif key == KEY_ESCAPE and query ~= "" then
+		return ""
+	end
+	return nil
+end
+
+local browse
+
+local function home(query)
+	local width = math.min(magic.ui.root.width - 40, 760)
+	local root, window = screen("launch_menu_v2", width,
+			"Type to search apps, saves and servers", query)
+	local view = list_view(window, width - 32,
+			magic.ui.root.height - 24 - 160)
+	local items = {}
+	local function row(e, badge, run)
+		items[#items + 1] = {button = view:row(e, badge), entry = e,
+			action = function()
+				log:info("launch_menu_v2: " .. e.kind .. " " .. e.label)
+				run()
+			end}
+	end
 	if query == "" then
 		local cont = recent(entries, CONTINUE_MAX)
 		if #cont > 0 then
-			header("Continue")
-			for _, e in ipairs(cont) do row(e) end
+			view:header("Continue")
+			for _, e in ipairs(cont) do row(e, nil, e.run) end
 		end
-		header("Menu")
-		for _, e in ipairs(entries) do
-			if e.kind == "action" and (e.badge == "Settings" or
-					e.badge == "Developer" or
-					(e.key or ""):find("^extension/launch_menu/")) then
-				row(e)
+		-- The ways in: one list per kind
+		view:header("Browse")
+		for _, kind in ipairs({"app", "save", "server", "catalog"}) do
+			local n = 0
+			for _, e in ipairs(entries) do
+				if e.kind == kind then n = n + 1 end
 			end
+			if n > 0 then
+				row({label = KIND_TITLE[kind], kind = "browse",
+					description = n .. " to choose from"}, tostring(n),
+					function() browse(kind, "", "recent") end)
+			end
+		end
+		view:header("Menu")
+		for _, e in ipairs(entries) do
+			if e.menu then row(e, nil, e.run) end
 		end
 	else
 		for _, group in ipairs(search(entries, query)) do
-			header(KIND_TITLE[group.kind])
-			for _, e in ipairs(group) do row(e) end
+			view:header(KIND_TITLE[group.kind])
+			for _, e in ipairs(group) do row(e, nil, e.run) end
 		end
 		if #items == 0 then
-			text(list, "Nothing matches \"" .. query ..
+			text(view.list, "Nothing matches \"" .. query ..
 					"\" (Backspace, Escape)", nil, 0.7)
 		end
 	end
-	viewport:SetFixedSize(width - 32, math.max(ROW_HEIGHT,
-			math.min(room, list.height)))
+	view:fit()
 
 	-- The selection's description, under the list
 	local desc = text(window, "", 13, 0.7)
@@ -301,28 +448,20 @@ local function draw(query)
 	desc:SetFixedWidth(width - 32)
 	desc:SetFixedHeight(40)
 
-	local function research(q)
-		uistack.main:pop(root)
-		draw(q)
-	end
 	local nav = ui_utils.bind_button_menu(root, items, function(key)
+		local q = search_key(key, query)
+		if q then
+			uistack.main:pop(root)
+			home(q)
+			return true
+		end
 		if key == KEY_ESCAPE then
-			if query ~= "" then
-				research("")
-			elseif not web then
+			-- On the web Escape on Home does nothing: the page is the
+			-- launcher, and a browser tab has its own close
+			if not web then
 				ui_utils.show_confirm_dialog("Quit Buildat?",
 						function() api.quit() end, nil, "Quit")
 			end
-			-- On the web Escape on Home does nothing: the page is the
-			-- launcher, and a browser tab has its own close
-			return true
-		end
-		local c = search_char(key)
-		if c and magic.input:GetKeyPress(key) then
-			research(query .. c)
-			return true
-		elseif key == KEY_BACKSPACE and query ~= "" then
-			research(query:sub(1, -2))
 			return true
 		end
 	end, {letters = false})
@@ -332,24 +471,160 @@ local function draw(query)
 		local e = item.entry
 		desc.text = (e.badge and e.badge .. ": " or "") ..
 				(e.description or "")
-		-- Scrolled so the selected row is in view
-		local y = button.position.y
-		local top = -list.position.y
-		local h = viewport.height
-		if y < top then
-			list:SetPosition(0, -y)
-		elseif y + ROW_HEIGHT > top + h then
-			list:SetPosition(0, -(y + ROW_HEIGHT - h))
-		end
+		view:show(button)
 	end)
 	log:info("launch_menu_v2: " .. #items .. " rows" ..
 			(query ~= "" and " for \"" .. query .. "\"" or ""))
 end
 
+-- One kind's list, searchable and sorted, with the selection's detail
+-- panel beside it: Enter or a double-click runs the primary action, Right
+-- or Tab moves into the panel's actions, Left or Escape back. On a narrow
+-- screen the panel is under the list.
+-- simplified: one scrolled list rather than pages; hundreds of rows are
+-- hundreds of buttons, which is fine at this size.
+browse = function(kind, query, by)
+	local narrow = magic.ui.root.width < 760
+	local width = math.min(magic.ui.root.width - 40, 1000)
+	local list_w = narrow and width - 32 or width - 32 - PANEL_WIDTH - 12
+	local root, window = screen("launch_menu_v2 " .. kind, width,
+			KIND_TITLE[kind] .. "   (type to search; Ctrl+S sorts by " ..
+			(by == "name" and "recent use" or "name") .. ")", query)
+	local body = window:CreateChild("UIElement")
+	body:SetLayout(narrow and LM_VERTICAL or LM_HORIZONTAL, 12,
+			magic.IntRect(0, 0, 0, 0))
+	local room = magic.ui.root.height - 24 - 120 - (narrow and 200 or 0)
+	local view = list_view(body, list_w, room)
+	local panel = body:CreateChild("UIElement")
+	panel:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+	panel:SetFixedWidth(narrow and width - 32 or PANEL_WIDTH)
+
+	local of_kind = {}
+	for _, e in ipairs(entries) do
+		if e.kind == kind then of_kind[#of_kind + 1] = e end
+	end
+	local shown = search(of_kind, query, by)[1] or {}
+	local items = {}
+	local action_buttons = {}
+	local current = nil
+	local last_click = {}
+	for _, e in ipairs(shown) do
+		local item = {entry = e}
+		item.button = view:row(e)
+		-- Enter runs it; a click selects it and a second one runs it
+		item.action = function()
+			local t = api.get_time_us()
+			local enter = magic.input:GetKeyDown(magic.KEY_RETURN) or
+					magic.input:GetKeyDown(magic.KEY_KP_ENTER)
+			if enter or (last_click[e] and t - last_click[e] < 500000) then
+				log:info("launch_menu_v2: " .. e.kind .. " " .. e.label)
+				e.run()
+			end
+			last_click[e] = t
+		end
+		items[#items + 1] = item
+	end
+	if #items == 0 then
+		text(view.list, query == "" and "Nothing here yet" or
+				"Nothing matches \"" .. query .. "\" (Backspace, Escape)",
+				nil, 0.7)
+	end
+	view:fit()
+
+	local now = os.time()
+	local function fill(e)
+		panel:RemoveAllChildren()
+		action_buttons = {}
+		text(panel, e.label, 18, 0.9)
+		text(panel, KIND_TITLE[kind] .. (e.badge and ", " .. e.badge or ""),
+				12, 0.55)
+		if e.description and e.description ~= "" then
+			local d = text(panel, e.description, 13, 0.75)
+			d:SetWordwrap(true)
+			d:SetFixedWidth(narrow and width - 32 or PANEL_WIDTH)
+		end
+		if e.size then
+			text(panel, string.format("Size: %.1f MB", e.size / 1048576),
+					12, 0.6)
+		end
+		text(panel, e.last and "Last used " .. ago(e.last, now) or
+				"Not used yet", 12, 0.6)
+		for _, a in ipairs(e.actions) do
+			local b = panel:CreateChild("Button")
+			b:SetStyleAuto()
+			b:SetLayout(LM_VERTICAL, 0, magic.IntRect(10, 3, 10, 3))
+			b:SetFixedHeight(ROW_HEIGHT)
+			b:SetFocusMode(magic.FM_FOCUSABLE)
+			local t = text(b, a.label)
+			t:SetName("ButtonText")
+			magic.SubscribeToEvent(b, "Released", function()
+				log:info("launch_menu_v2: " .. a.label .. " on " .. e.label)
+				a.run()
+			end)
+			action_buttons[#action_buttons + 1] = b
+		end
+	end
+	local function in_actions()
+		for i, b in ipairs(action_buttons) do
+			if b:HasFocus() then return i end
+		end
+		return nil
+	end
+
+	local nav = ui_utils.bind_button_menu(root, items, function(key)
+		local i = in_actions()
+		if i then
+			-- In the panel: up and down between its actions, Left or
+			-- Escape back to the row it is the panel of
+			if key == KEY_UP or key == KEY_DOWN then
+				local n = #action_buttons
+				local j = (i - 1 + (key == KEY_DOWN and 1 or -1)) % n + 1
+				action_buttons[j]:SetFocus(true)
+				return true
+			elseif key == KEY_LEFT or key == KEY_ESCAPE then
+				if current then current.button:SetFocus(true) end
+				return true
+			end
+			return key == KEY_RIGHT or key == KEY_TAB
+		end
+		if (key == KEY_RIGHT or key == KEY_TAB) and action_buttons[1] then
+			action_buttons[1]:SetFocus(true)
+			return true
+		end
+		if key == KEY_LEFT then return true end
+		if key == magic.KEY_S and
+				magic.input:GetQualifierDown(magic.QUAL_CTRL) then
+			uistack.main:pop(root)
+			browse(kind, query, by == "name" and "recent" or "name")
+			return true
+		end
+		local q = search_key(key, query)
+		if q then
+			uistack.main:pop(root)
+			browse(kind, q, by)
+			return true
+		end
+		if key == KEY_ESCAPE then
+			uistack.main:pop(root)
+			return true
+		end
+	end, {letters = false})
+	nav:on_change(function(button, selected, index)
+		local item = index and items[index]
+		if not (selected and item) or item == current then return end
+		current = item
+		fill(item.entry)
+		view:show(button)
+	end)
+	log:info("launch_menu_v2: " .. kind .. ", " .. #items .. " rows" ..
+			(query ~= "" and " for \"" .. query .. "\"" or "") ..
+			", by " .. by)
+end
+
 -- launch_action is -a's kind/name/id, run over Home as picking it would
 function M.boot(launch_action)
 	entries = gather()
-	draw("")
+	home("")
 	local fell_back = api.launch_ui_fell_back and api.launch_ui_fell_back()
 	if fell_back then
 		ui_utils.show_message_dialog("The launch UI \"" .. fell_back ..
@@ -391,7 +666,7 @@ function M.show_dead_server(title, on_close)
 			"\nThe full log is at " .. path, on_close)
 end
 
-local function home()
+local function to_home()
 	if uistack.main.stack[1] then
 		pcall(function()
 			uistack.main:pop_to(uistack.main.stack[1], true)
@@ -401,7 +676,7 @@ local function home()
 end
 
 -- Drawn again, as at boot: what it lists has changed under it
-M.refresh = home
+M.refresh = to_home
 
 function M.leave_app()
 	if not M.in_app() and not api.local_server_running() then

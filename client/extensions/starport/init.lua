@@ -470,7 +470,7 @@ function M.safe.kept_rows()
 		if passes(e.filters, row) then
 			shown[#shown + 1] = {name = row.name, address = row.address,
 				icon = type(row.icon) == "string" and row.icon:lower() or nil,
-				players = row.players}
+				players = row.players, tls = row.tls == true}
 		end
 	end
 	return shown
