@@ -39,7 +39,7 @@ Decided 2026-10-02 and 2026-10-03 ([PROCESS_SANDBOX]).
 Luanti features left out on purpose, not to be added
 -----------------------------------------------------
 Official Luanti's client has these; buildat's two Luanti clients do
-not, and the decision (user, 2026-09-22) is that they stay out. A
+not, and the decision (2026-09-22) is that they stay out. A
 game that needs one is a game that needs official.
 
 - Cinematic mode (F8, the smoothed camera).
@@ -51,7 +51,7 @@ game that needs one is a game that needs official.
 
 The launcher room's discarded pieces, not to be rebuilt
 -------------------------------------------------------
-Taken out of `extensions/launch_world` on purpose (user, 2026-09-24 and
+Taken out of `extensions/launch_world` on purpose (2026-09-24 and
 2026-09-25). Each was built, looked at, and decided against.
 
 - The loading reel: two chrome hubs with a spoke across each, turning
@@ -67,12 +67,12 @@ Taken out of `extensions/launch_world` on purpose (user, 2026-09-24 and
 - The room's own key for leaving a game (F10). A game leaves through
   `buildat.leave()`, and the launcher does not rig anything up to make
   games behave.
-- The FPS mode and its body (user, 2026-09-28; cut 2026-10-03): the
+- The FPS mode and its body (decided 2026-09-28; cut 2026-10-03): the
   walk, the look, the jump and collision, the captured mouse and
   crosshair, the one-second hold, digging, carrying and placing, and the
   two-mode toggle. The room is one mode, point-and-click with the
   keyboard, the mouse always free.
 - The three other walls and their pocket allocation (same dates): the
   games stand in a formation on one wall, each with its name beside it.
-- The room as the default launch UI is not a goal (user, 2026-10-04);
+- The room as the default launch UI is not a goal (2026-10-04);
   launch_menu stays the default.

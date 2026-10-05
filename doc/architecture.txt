@@ -1,9 +1,8 @@
 Buildat architecture
 ====================
 What the engine is made of and how the parts talk: the client, the server,
-modules, extensions, the launch grid, the network, the voxel world. What is
-being built next is doc/plan/master_plan.md; the client's Lua API is
-client_api.txt and a C++ module's is server_api.txt.
+modules, extensions, the launch grid, the network, the voxel world. The client's
+Lua API is client_api.txt and a C++ module's is server_api.txt.
 
 A small engine for networked 3D apps. License: Apache 2.0.
 
@@ -180,8 +179,7 @@ name->type registry gives packet names their numeric types; types 0...99 are
 reserved for initialization. Core uses cereal's portable binary
 serialization, except for low-level packet streaming. A queue per peer with
 one send policy is what exists; channels with a policy each, and the
-transport after TCP (ENet with a Noise handshake), are designed in
-doc/plan/network_plan.md. A peer that sends nothing for 60 s is dropped,
+transport after TCP (ENet with a Noise handshake), are designed, not built. A peer that sends nothing for 60 s is dropped,
 so a client with nothing to say sends network:keepalive. A game on the LAN
 is found without its address: a server announces itself every 2 s to a
 UDP multicast group, and the launcher lists what it hears
@@ -211,7 +209,4 @@ the client meshes chunks in src/impl/mesh.cpp and shades them with
 builtin/voxel_shading. Chunk data crosses the network as a node attribute,
 compressed, replicated by builtin/replicate.
 
-The data model -- what a voxel is allowed to hold, how an app's own ids map
-onto it, what a section is -- is doc/plan/buildat_voxel_data_model.md; the
-persistence of it is doc/plan/world_persistence_plan.md. The 2014 design
-notes this section used to carry are in git history.
+The 2014 design notes this section used to carry are in git history.

@@ -1,6 +1,6 @@
 Aitta packages: an app packed, signed and installed
 ===================================================
-[AITTA_MVP], doc/plan/aitta_plan.md. A release is two files, the archive
+A release is two files, the archive
 and its signature; it is installed from them, from the command line or
 from an Aitta registry through the client.
 

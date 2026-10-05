@@ -4,9 +4,7 @@ Luanti's mapgen, vendored, and the shim under it
 The files here are either Luanti's own, copied without changes, or a shim
 written for this module. The shims are what let Luanti's mapgen compile
 against buildat instead of against Luanti's engine; they answer the small
-part of Luanti's headers that the mapgen actually uses, and no more. See
-"Mapgen stage 3: how it lands" in doc/plan/luanti_module_plan.md for why
-each one is a shim rather than a vendoring.
+part of Luanti's headers that the mapgen actually uses, and no more.
 
 They sit in the same directory as the vendored code on purpose: a
 runtime-compiled module gets no include directories of its own, and a

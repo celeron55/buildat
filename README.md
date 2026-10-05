@@ -2,15 +2,49 @@
 
 Buildat
 =======
-A small engine for networked 3D apps.
+A small engine for networked 3D apps. The server runs C++ modules it
+compiles at runtime; the client runs the app's Lua in a sandbox, sent by
+the server, so joining a server is all a player installs.
 
-The server runs C++ modules compiled at runtime. The client runs a
-whitelisted subset of Urho3D's Lua API in a sandbox; scripts and data
-come from the server.
+What runs on it:
 
-Voxel worlds, replication, and worldgen are builtin modules. Nothing
-requires a block game. Digger is a finite voxel example. Infidigger
-streams an infinite world with the same modules.
+* **Luanti games** -- `apps/vanilla` runs a Luanti game and world
+  (VoxeLibre and others, installed from ContentDB) inside buildat_server,
+  and `extensions/luanti_client` plays on a real Luanti server.
+* **A web client** -- every server serves a browser client on its own
+  port.
+* **Starport** (`apps/starport`, https://starport.buildat.org) -- a public
+  server list and an optional login, the Starport ID. Both are opt-in and
+  designed with privacy in mind; see [doc/starport.txt](doc/starport.txt).
+* **Aitta** (`apps/aitta`) -- a registry of signed apps that a server
+  installs.
+* **Hearth** (`apps/hearth`) -- a forum.
+* **Floorplanner** (`apps/floorplanner`).
+* Voxel demos: `apps/digger` (a finite world), `apps/infidigger` (an
+  infinite one).
+
+Download a build for Linux or Windows from
+[Releases](https://github.com/celeron55/buildat/releases), or build it
+as below. More at https://www.buildat.org.
+
+The apps
+--------
+Each directory in `apps/` is an app: pick it in the launch menu, or run
+`bin/buildat_server -m ../apps/<name>`.
+
+* Services: `vanilla` (Luanti games), `starport`, `aitta`, `hearth`,
+  `floorplanner`, and `play`, which serves the web client and has no game
+  of its own.
+* Games and demos: `digger`, `infidigger`, `bomber_drone` (a drone over
+  infidigger's terrain), `minigame`, `vanilla_voxel_physics` (vanilla with
+  voxel bodies that fall).
+* Experiments, not developed now: `undermine` (digger's world, which
+  collapses), `aggregate` (undermine's world made of mixtures) and
+  `aggregate_look`.
+* Checks and test scenes: `box_test` (a hostile app the server's box
+  must contain), `voxel_lighting`, `multisection_lighting`,
+  `voxel_physics`, `geometry`, `geometry2`, `entitytest`, `featuretest`,
+  `uitest`, `test`.
 
 Further reading:
 
@@ -19,7 +53,7 @@ Further reading:
 * [doc/conventions.txt](doc/conventions.txt) -- coding style, naming, commit
   messages, coordinates
 * [doc/client_api.txt](doc/client_api.txt) -- the Lua API an app's client
-  code and an extension see (out of date; a full pass is planned)
+  code and an extension see
 * [doc/client_commands.txt](doc/client_commands.txt) -- driving the client from
   a command file: keys, mouse, look, screenshot, the scan events
 * [doc/luanti_module.txt](doc/luanti_module.txt) -- builtin/luanti: a Luanti
@@ -28,6 +62,8 @@ Further reading:
   playing on a real Luanti server over its own protocol
 * [doc/aitta.txt](doc/aitta.txt) -- an app packed, signed, published to an
   Aitta registry (apps/aitta) and installed
+* [doc/starport.txt](doc/starport.txt) -- the server list and the Starport
+  ID: what is opt-in, and what a Starport holds
 * [doc/hearth.txt](doc/hearth.txt) -- apps/hearth, a forum: its HTML
   face, the client's requests, its limits, its variables and its check
 * [doc/urho3d_fork.txt](doc/urho3d_fork.txt) -- what the bundled Urho3D
@@ -83,8 +119,8 @@ Optional: `-DURHO3D_LUAJIT=TRUE` builds the bundled LuaJIT instead of Lua.
 ### The web client
 
 A server also serves a client for web browsers, on its own port: open
-`http://<server>:<port>/` and it connects back to the server it came from
-(see doc/plan/web_client_plan.md). It is built separately, with
+`http://<server>:<port>/` and it connects back to the server it came from.
+It is built separately, with
 [emsdk](https://emscripten.org/docs/getting_started/downloads.html) 3.1.60:
 
     $ ~/emsdk/emsdk install 3.1.60 && ~/emsdk/emsdk activate 3.1.60
@@ -222,15 +258,12 @@ is being measured.
 Buildat Windows How-To
 ======================
 
-Use Mingw-w64 in an MSYS environment. Make sure to use a pthreads version of Mingw-w64. Windows threads are not supported ATM.
+The Windows build is a cross build from Linux, made in a container
+(Docker):
 
-    $ cd /path/to/buildat
-    $ mkdir Build
-    $ cd Build
-    $ cmake .. -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Debug -DURHO3D_LUAJIT=TRUE
-    $ make -j4
+    $ util/package_in_docker.sh windows
 
-Running the server:
-
-    $ bin/buildat_server.exe -m ../apps/minigame -c "c++ -Lbin -lbuildat_server_core"
-
+It writes `Build/package/out/buildat-<version>-<hash>-win64.zip`, which
+carries the compiler the server needs at run time. Unpack it and run
+`bin\buildat.exe`. A native build on Windows (MSYS2, Mingw-w64) is not
+tested.

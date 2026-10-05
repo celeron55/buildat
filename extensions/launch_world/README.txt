@@ -11,11 +11,7 @@ be, not of how little one can be. There is no server, no mapgen, no streaming, n
 no entities -- the room is generated from a table every boot. What it
 keeps is the player's bookmarks row and its sound levels.
 
-The reference the room is held to -- every element, interaction,
-transition, look and sound, and where the room differs from it -- is
-doc/plan/launch_world.md; how it was argued and everything tried on the
-way is doc/plan/launch_world_history.md. This file is how to run it and
-what the keys do.
+This file is how to run it and what the keys do.
 
 Running it
 ----------

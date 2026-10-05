@@ -260,7 +260,7 @@ is an IME's (key code 229, "Process", a dead key -- not sent as a game
 key either), Ctrl, Alt or Meta is held (the browser's shortcuts, and its
 copy and paste), or text input is active and the key types a character.
 The web client keeps text input off except while a LineEdit has focus
-(src/client/app.cpp); see doc/plan/web_client_plan.md [WEB_KEYS].
+(src/client/app.cpp).
 
 The web text fields: LineEdit's own clipboard keys ([WEB_KEYS] step 2)
 --------------------------------------------------------------------

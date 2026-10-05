@@ -1,6 +1,6 @@
 Hearth: a community forum as an app
 ===================================
-[HEARTH_MVP], doc/plan/forum_plan.md. apps/hearth is a buildat app:
+apps/hearth is a buildat app:
 topics, threads under them and messages in those, each at a permanent
 address. It is read as plain HTML in a browser and taken part in from
 the buildat client.

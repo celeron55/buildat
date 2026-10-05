@@ -4,8 +4,7 @@ This directory is the recipe; the pictures land in `local/reference_shots/`
 (and the generated world in `local/reference_worlds/`). One world, eight
 viewpoints, twenty-three pictures a client, taken by three clients so their
 rendering can be compared: official Luanti, `extensions/luanti_client`, and
-`builtin/luanti` with `apps/vanilla`. The plan is
-`doc/plan/rendering_plan.md`, [OFFICIAL_SHOTS] and [REFVIEWS_MOD].
+`builtin/luanti` with `apps/vanilla`.
 
 ## Which file holds which decision
 

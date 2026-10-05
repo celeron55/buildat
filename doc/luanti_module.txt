@@ -7,8 +7,7 @@ protocol anywhere. The game logic is Luanti's; everything around it is
 buildat's. The other end of the telescope from extensions/luanti_client, which
 speaks the real protocol to a real Luanti server.
 
-The plan this is being built to is doc/plan/luanti_module_plan.md, which has the
-milestones and the reasoning. What is written down here is what exists.
+What is written down here is what exists.
 
 Where the content lives
 -----------------------
@@ -18,7 +17,7 @@ Those are buildat's own directories on purpose: nothing here reads the content
 of a real Luanti installation, and nothing here can write to one. A game is a
 directory with a game.conf; a world is a directory with a world.mt naming its
 gameid. (The user path, not the cache: a game somebody installed and a world
-they have played are things they chose. See doc/plan/world_persistence_plan.md.)
+they have played are things they chose.)
 
 buildat ships one Luanti game of its own, builtin/luanti/minimal_game: one
 mod, two node types and a floor made of them. It needs nothing installed and
@@ -164,7 +163,7 @@ the light is voxelworld's skylight and lamp floods, one level a voxel, as
 Luanti's. The client half (builtin/luanti/client_lua and apps/vanilla's
 client) draws the world in three modes -- unlit and shadows, held to
 official Luanti's pictures of the same world, and pbr, held to a path
-trace of it (doc/plan/rendering_plan.md, [RENDER_MODES]) -- with Luanti's
+trace of it -- with Luanti's
 HUD, forms, inventory, hotbar, wield item, particles, sounds and sky. It
 times a dig for itself and predicts a dig and a placement the way
 official's client does (the node changes on the click's frame; the
@@ -192,7 +191,6 @@ the driven run (test/drive.sh: the ladder above, ended at a goal rung;
 both runners take GAME_DIR=<game> for a variant of vanilla), the
 reference shots (test/reference_shots/: the three modes against official
 Luanti and the path trace, read by probes.sh), and util/bench_worldgen.sh.
-The findings and the state of each are in doc/plan/luanti_module_plan.md.
 
 Environment variables the module and its runners read: BUILDAT_LUANTI_GAME,
 _SAVE, _LUA (a fixture file), _PBR (the render mode), _LINEAR, _TONEMAP,
@@ -292,5 +290,4 @@ The C++ side is perf, with no rebuild either:
 
 The two together are how the seventh round was worked: the C++ profile named
 the voxel read path, and the Lua profile named the craft lookup that made
-VoxeLibre's startup two minutes. What each one found is in
-doc/plan/performance_plan.md.
+VoxeLibre's startup two minutes.

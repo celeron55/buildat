@@ -1,0 +1,19 @@
+Starport: the server list and the Starport ID
+=============================================
+apps/starport is a public server list and an optional login, the Starport
+ID. Both are opt-in, and Starport is an app like the others, so anyone can
+run their own. The official one is https://starport.buildat.org.
+
+- A server is listed only if its admin names a Starport in
+  `starport.json`. Its announce carries its address, app and player count,
+  not who is playing.
+- A server accepts Starport IDs only if its admin turns them on; local
+  accounts work without one. A player uses an ID only by choosing "Sign in
+  with your Starport ID".
+- Each community sees a different identifier for the same ID, and a
+  display name the player picks for that community.
+- The client asks before it contacts a host, a Starport included. Its
+  Starport settings say which Starports it uses; with none left there, it
+  uses none.
+- A Starport ID holds a name, a password hash and, if given, a recovery
+  e-mail. It is deleted from its own settings.
