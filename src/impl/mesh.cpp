@@ -430,11 +430,36 @@ template<typename VoxelType>
 {
 	interface::VoxelRegistry *m_voxel_reg;
 	VoxelFmt m_fmt;
+	bool m_liquids_as_cubes = false;
 	// NOTE: The voxel type id is used directly as PolyVox material value
 public:
-	IsQuadNeededByRegistry(interface::VoxelRegistry *voxel_reg):
-		m_voxel_reg(voxel_reg), m_fmt(voxel_reg)
+	// `liquids_as_cubes`: the LOD mesh's. A liquid is drawn by the near
+	// mesher's own pass (its corners' heights) and has no cube faces
+	// here, so a far chunk drew no sea at all; there it is a cube.
+	// simplified: drawn with the LOD chunk's one opaque material, so a far
+	// sea is solid and brighter than the near one's blend; a translucent
+	// child node as the near mesher's would match it
+	IsQuadNeededByRegistry(interface::VoxelRegistry *voxel_reg,
+			bool liquids_as_cubes = false):
+		m_voxel_reg(voxel_reg), m_fmt(voxel_reg),
+		m_liquids_as_cubes(liquids_as_cubes)
 	{}
+	// simplified: every liquid shares one edge material, so no face is
+	// drawn where water meets lava far away; a liquid's shape_group would
+	// tell them apart if that is ever seen
+	static constexpr interface::EdgeMaterialId LIQUID_EDGE = 2;
+	interface::FaceDrawType draw_type(
+			const interface::CachedVoxelDefinition *def) const
+	{
+		return m_liquids_as_cubes && def->is_liquid ?
+				interface::FaceDrawType::ON_EDGE : def->face_draw_type;
+	}
+	interface::EdgeMaterialId edge(
+			const interface::CachedVoxelDefinition *def) const
+	{
+		return m_liquids_as_cubes && def->is_liquid ?
+				LIQUID_EDGE : def->edge_material_id;
+	}
 	IsQuadNeededByRegistry(): // PolyVox wants this
 		m_voxel_reg(nullptr)
 	{}
@@ -455,10 +480,10 @@ public:
 		/*if(!back_def){
 			return false;
 		}*/
-		else if(back_def->face_draw_type == interface::FaceDrawType::NEVER){
+		else if(draw_type(back_def) == interface::FaceDrawType::NEVER){
 			return false;
 		}
-		else if(back_def->face_draw_type == interface::FaceDrawType::ALWAYS){
+		else if(draw_type(back_def) == interface::FaceDrawType::ALWAYS){
 			materialToUse = m_fmt.look_id(back);
 			return true;
 		}
@@ -473,11 +498,10 @@ public:
 		// This is Luanti's rule that the more solid of two nodes owns the
 		// face between them.
 		if(back_def->translucent && !front_def->translucent &&
-				front_def->edge_material_id !=
-						interface::EDGEMATERIALID_EMPTY){
+				edge(front_def) != interface::EDGEMATERIALID_EMPTY){
 			return false;
 		}
-		if(back_def->edge_material_id != front_def->edge_material_id){
+		if(edge(back_def) != edge(front_def)){
 			materialToUse = m_fmt.look_id(back);
 			return true;
 		}
@@ -2510,7 +2534,7 @@ void generate_voxel_lod_geometry(int lod,
 		bool use_skylight, const HorizonMap *horizon)
 {
 	const VoxelFmt fmt(voxel_reg);
-	IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg);
+	IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg, true);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
 	VoxelSampleView lod_view(&lod_volume);
 	pv::CubicSurfaceExtractorWithNormals<VoxelSampleView,
