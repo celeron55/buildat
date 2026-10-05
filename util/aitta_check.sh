@@ -85,5 +85,57 @@ echo "1.5: the fields" > "$t/app/CHANGELOG.md"
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out") || fail "pack with the fields"
 "$b" aitta install "$zip" "$t/user" > /dev/null || fail "install with the fields"
 
+# [AITTA] step 3: a client extension, "kind": "extension". Its name in the
+# client is <author>__<name>, so neither part has "__" or an end "_"; it
+# has init.lua; a new version replaces the old; an app stays an app
+mkdir -p "$t/ext"
+ext(){ # version name [kind]
+	printf '{"author": "tester", "name": "%s", "version": "%s",
+		"kind": "%s", "engine_api": 1, "license_code": "MIT",
+		"license_media": "CC0-1.0", "description": "a check"}\n' \
+		"$2" "$1" "${3:-extension}" > "$t/ext/meta.json"
+}
+ext 1.0 ui
+"$b" aitta pack "$t/ext" "$t/key" "$t/out" 2>&1 | grep -q 'has init.lua' ||
+	fail "packed an extension with no init.lua"
+cat > "$t/ext/init.lua" <<'LUA'
+local M = {}
+function M.boot()
+	buildat.Logger("ext"):info("EXTBOOT io=" .. type(io))
+	buildat.quit()
+end
+return M
+LUA
+echo "A check's launch UI" > "$t/ext/launch_ui.txt"
+ext 1.0 ui widget
+"$b" aitta pack "$t/ext" "$t/key" "$t/out" 2>&1 | grep -q '"kind": "app" or' ||
+	fail "a kind that is neither"
+for n in a__b _ab ab_; do
+	ext 1.0 "$n"
+	"$b" aitta pack "$t/ext" "$t/key" "$t/out" 2>&1 | grep -q 'has no "__"' ||
+		fail "an extension named $n"
+done
+ext 1.0 ui
+zip=$("$b" aitta pack "$t/ext" "$t/key" "$t/out") || fail "pack an extension"
+"$b" aitta install "$zip" "$t/user" > /dev/null || fail "install an extension"
+ext 1.1 ui
+zip=$("$b" aitta pack "$t/ext" "$t/key" "$t/out") || fail "pack an extension 1.1"
+"$b" aitta install "$zip" "$t/user" > /dev/null || fail "install an extension 1.1"
+[ "$(ls "$t/user/installed/tester/ui")" = "$(printf '1.1\nkey')" ] ||
+	fail "an extension's old version stayed: $(ls "$t/user/installed/tester/ui")"
+ext 1.6 demo
+zip=$("$b" aitta pack "$t/ext" "$t/key" "$t/out") || fail "pack demo as an extension"
+"$b" aitta install "$zip" "$t/user" 2>&1 | grep -q "is installed as an app" ||
+	fail "an app became an extension"
+# The client boots it as a launch UI, in the sandbox though it does not
+# ask to be
+if [ "${AITTA_CHECK_CLIENT:-1}" = 1 ]; then
+	printf "delay 15000\nquit\n" > "$t/cmds.txt"
+	(cd "$here/Build" && timeout 30 bin/buildat -m tester__ui -D "$t/user" \
+		-w 640x360 -l 3 -c @"$t/cmds.txt" > "$t/cli.log" 2>&1)
+	grep -aq "EXTBOOT io=nil" "$t/cli.log" ||
+		fail "the installed launch UI did not boot in the sandbox: $(grep -a "EXTBOOT\|tester__ui" "$t/cli.log" | tail -2)"
+fi
+
 [ -z "$(ls -A "$t/user/installed" | grep incoming)" ] || fail "an .incoming directory was left"
-echo "PASS: packed, signed and installed; tampering, another key, a newer engine API and a path name refused"
+echo "PASS: packed, signed and installed; tampering, another key, a newer engine API and a path name refused; an extension installed over its old version and booted sandboxed"

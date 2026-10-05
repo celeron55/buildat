@@ -266,7 +266,24 @@ ss_ check_manifest(const json::Value &m)
 				"characters at most";
 	if(!str("changelog").empty() && !archive_path_ok(str("changelog")))
 		return "\"changelog\": a path inside the archive, like CHANGELOG.md";
+	const json::Value &kind = m.get("kind");
+	if(!kind.is_undefined() && str("kind") != "app" && str("kind") != "extension")
+		return "\"kind\": \"app\" or \"extension\"";
+	// An extension's name in the client is "<author>__<name>", which has to
+	// split one way only
+	if(kind_of(m) == "extension")
+		for(const char *k : {"author", "name"})
+			if(str(k).front() == '_' || str(k).back() == '_' ||
+					str(k).find("__") != ss_::npos)
+				return ss_("\"")+k+"\": an extension's has no \"__\" and "
+						"does not start or end with _";
 	return "";
+}
+
+ss_ kind_of(const json::Value &m)
+{
+	const json::Value &k = m.get("kind");
+	return k.is_string() && k.as_string() == "extension" ? "extension" : "app";
 }
 
 // A zip of every file under dir, deflated, '/' separated; names that start
@@ -336,6 +353,8 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
 			!fs::path_exists(app_dir+"/"+changelog.as_string()))
 		throw Exception(app_dir+"/meta.json: \"changelog\": "+
 				changelog.as_string()+" is not there");
+	if(kind_of(m) == "extension" && !fs::path_exists(app_dir+"/init.lua"))
+		throw Exception(app_dir+": an extension has init.lua at its root");
 	const ss_ key = read_file(key_path);
 	const ss_ zip = zip_directory(app_dir);
 	const ss_ base = out_dir+"/"+m.get("author").as_string()+"-"+
@@ -384,6 +403,16 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path)
 		const ss_ dir = app+"/"+m.get("version").as_string();
 		if(fs::path_exists(dir))
 			throw Exception("already installed: "+dir);
+		const ss_ kind = kind_of(m);
+		if(kind == "extension" && !fs::path_exists(incoming+"/init.lua"))
+			throw Exception("an extension with no init.lua at its root");
+		// An author/name stays the kind it was first installed as
+		for(const auto &n : fs::list_directory(app))
+			if(n.is_directory && kind_of(json::load_file(
+					(app+"/"+n.name+"/meta.json").c_str(), &e)) != kind)
+				throw Exception(m.get("author").as_string()+"/"+
+						m.get("name").as_string()+" is installed as an"+
+						(kind == "app" ? " extension" : " app"));
 		// The first install's key is the app's: a later version signed by
 		// another is someone else's (trust on first install)
 		fs::create_directories(app);
@@ -403,6 +432,13 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path)
 			throw Exception("cannot move it into "+dir);
 		// Inside, where the app's boxed server can read it to pin a save
 		write_file(dir+"/.aitta_sha256", sstr("sha256")+"\n");
+		// simplified: an extension has no saves to pin, so the new version
+		// replaces the others and the client loads the one there is; a
+		// version to go back to is installed again from its release
+		if(kind == "extension")
+			for(const auto &n : fs::list_directory(app))
+				if(n.is_directory && app+"/"+n.name != dir)
+					fs::remove_all(app+"/"+n.name);
 		return dir;
 	} catch(...){
 		fs::remove_all(incoming);

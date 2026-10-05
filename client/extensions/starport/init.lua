@@ -1896,6 +1896,12 @@ local function aitta_installed()
 			have[k][version] = true
 		end
 	end
+	for _, x in ipairs(buildat.list_launchers() or {}) do
+		local author, name = tostring(x.name):match("^([%w_]-)__([%w_]+)$")
+		if x.kind == "extension" and author and x.version then
+			have[author .. "/" .. name] = {[x.version] = true}
+		end
+	end
 	return have
 end
 
@@ -1945,7 +1951,8 @@ local function aitta_page(message, query)
 			shown = shown + 1
 			local mine = have[k]
 			local r = add_row(w)
-			add_label(r, k .. " " .. tostring(rel.version) .. "  " ..
+			add_label(r, k .. " " .. tostring(rel.version) ..
+					(rel.kind == "extension" and " (extension)" or "") .. "  " ..
 					tostring(rel.license_code) .. " / " ..
 					tostring(rel.license_media) .. "  " ..
 					math.floor((tonumber(rel.size) or 0) / 1000) .. " kB", 560)
@@ -1973,8 +1980,12 @@ local function aitta_page(message, query)
 							menu.refresh()
 						end
 						aitta_page(dir and ("Installed " .. k .. " " ..
-								tostring(rel.version) .. ": it is on the " ..
-								"grid") or ("Not installed: " .. tostring(why)))
+								tostring(rel.version) .. (rel.kind ==
+								"extension" and (": the extension " ..
+								tostring(rel.author) .. "__" ..
+								tostring(rel.name) .. ", in the sandbox") or
+								": it is on the grid")) or
+								("Not installed: " .. tostring(why)))
 					end)
 				end)
 			end, not installed)

@@ -36,6 +36,10 @@ namespace interface
 
 		// The manifest's fields checked; "" or why not
 		ss_ check_manifest(const json::Value &m);
+		// "app", or "extension" ([AITTA] step 3's second kind): a client
+		// extension, run in the client's sandbox under the name
+		// "<author>__<name>"
+		ss_ kind_of(const json::Value &m);
 
 		// Packs app_dir (meta.json at its root) into out_dir and signs it
 		// with the key in key_path. Returns the zip's path; throws why not.

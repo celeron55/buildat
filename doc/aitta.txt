@@ -18,8 +18,17 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
         "description": "Dig down.",   300 characters at most
         "home_hearth": "https://forum.buildat.org",   optional: where
                                       its feedback and news go
-        "changelog": "CHANGELOG.md"   optional: a file in the archive
+        "changelog": "CHANGELOG.md",  optional: a file in the archive
+        "kind": "app"                 optional: "app" or "extension"
     }
+
+A package of kind "extension" is a client extension: init.lua at its
+root, run in the client's sandbox like extensions/ (an app's client Lua
+requires it, or a launch_ui.txt beside it makes it a launch UI, always
+sandboxed). The client names it "<author>__<name>", so neither part may
+have "__" in it or start or end with _. It has no saves to pin, so an
+installed version replaces the one before it. An author/name stays the
+kind it was first installed as.
 
 engine_api is interface::aitta::ENGINE_API (src/interface/aitta.h), which
 the engine bumps when a change breaks modules. A release that asks for

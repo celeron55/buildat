@@ -831,7 +831,9 @@ local function launch_ui_says(name, word)
 	return false
 end
 function buildat.launch_ui_sandboxed(name)
-	return launch_ui_says(name, "sandboxed")
+	-- One installed from Aitta ("<author>__<name>") always is
+	return type(name) == "string" and name:find("__", 1, true) ~= nil or
+			launch_ui_says(name, "sandboxed")
 end
 buildat.safe.list_launch_uis = function()
 	local out = {}

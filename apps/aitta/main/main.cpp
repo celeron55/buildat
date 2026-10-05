@@ -471,6 +471,7 @@ struct Module: public interface::Module
 				"license_code", "license_media", "home_hearth", "changelog"})
 			rel.set(k, jstr(m, k));
 		rel.set("engine_api", m.get("engine_api"));
+		rel.set("kind", interface::aitta::kind_of(m));
 		rel.set("sha256", sha);
 		rel.set("size", (int64_t)u.size);
 		rel.set("key", jstr(u.sig, "key"));

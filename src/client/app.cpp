@@ -398,7 +398,7 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 		// extension's directory name, so letters, digits and
 		// underscores and nothing that could be a path
 		if(key == "launch_ui"){
-			bool ok = !value.empty() && value.size() <= 64;
+			bool ok = !value.empty() && value.size() <= 84;
 			for(char c : value)
 				if(!(isalnum((unsigned char)c) || c == '_'))
 					ok = false;
@@ -896,8 +896,8 @@ static ss_ installed_app_dir(const ss_ &id)
 			name+"/"+version;
 }
 
-// Every installed version's id, sorted
-static sv_<ss_> installed_app_ids()
+// Every installed version's id, sorted: the apps', or the extensions'
+static sv_<ss_> installed_app_ids(bool extensions = false)
 {
 	const ss_ installed = g_client_config.get<ss_>("user_path")+"/installed";
 	sv_<ss_> ids;
@@ -906,11 +906,28 @@ static sv_<ss_> installed_app_ids()
 			for(const auto &v : interface::fs::list_directory(
 					installed+"/"+a.name+"/"+n.name)){
 				const ss_ id = a.name+"."+n.name+"@"+v.name;
-				if(v.is_directory && !installed_app_dir(id).empty())
+				if(v.is_directory && !installed_app_dir(id).empty() &&
+						(interface::aitta::kind_of(json::load_file((
+						installed_app_dir(id)+"/meta.json").c_str())) ==
+						"extension") == extensions)
 					ids.push_back(id);
 			}
 	std::sort(ids.begin(), ids.end());
 	return ids;
+}
+
+// An installed extension's directory by its name in the client,
+// "<author>__<name>" ([AITTA]), or "" -- there is one version of it
+static ss_ installed_extension_dir(const ss_ &name)
+{
+	const size_t sep = name.find("__");
+	if(sep == ss_::npos)
+		return "";
+	const ss_ prefix = name.substr(0, sep)+"."+name.substr(sep + 2)+"@";
+	for(const ss_ &id : installed_app_ids(true))
+		if(id.compare(0, prefix.size(), prefix) == 0)
+			return installed_app_dir(id);
+	return "";
 }
 
 // A tree app's directory or an installed one's, "" for neither
@@ -3534,6 +3551,27 @@ struct CApp: public App, public magic::Application
 			lua_setfield(L, -2, "launcher");
 			lua_rawseti(L, -2, i++);
 		}
+		// And the installed extensions ([AITTA]), with no launcher: a
+		// launcher launches apps, and one from Aitta launches only itself
+		for(const ss_ &id : installed_app_ids(true)){
+			const size_t dot = id.find('.'), at = id.find('@');
+			const ss_ name = id.substr(0, dot)+"__"+
+					id.substr(dot + 1, at - dot - 1);
+			const ss_ path = interface::fs::get_absolute_path(
+					installed_app_dir(id));
+			lua_newtable(L);
+			lua_pushstring(L, "extension");
+			lua_setfield(L, -2, "kind");
+			lua_pushstring(L, name.c_str());
+			lua_setfield(L, -2, "name");
+			lua_pushstring(L, path.c_str());
+			lua_setfield(L, -2, "path");
+			lua_pushstring(L, id.substr(at + 1).c_str());
+			lua_setfield(L, -2, "version");
+			lua_pushboolean(L, false);
+			lua_setfield(L, -2, "launcher");
+			lua_rawseti(L, -2, i++);
+		}
 		return 1;
 	}
 
@@ -5607,6 +5645,10 @@ struct CApp: public App, public magic::Application
 		ss_ path = share+"/client/extensions/"+name;
 		if(!interface::fs::path_exists(path+"/init.lua"))
 			path = share+"/extensions/"+name;
+		// One from Aitta; "__" is in no name of the tree's
+		const ss_ installed = installed_extension_dir(name);
+		if(!installed.empty())
+			path = installed;
 		// TODO: Check if extension actually exists and do something suitable if
 		//       not
 		lua_pushlstring(L, path.c_str(), path.size());
