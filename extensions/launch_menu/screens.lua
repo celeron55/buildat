@@ -637,7 +637,7 @@ function M.start_local_app(game, launch)
 	show_waiting_for_old_server(game, launch)
 end
 
-function M.show_local_apps()
+function M.show_local_apps(page)
 	local root = uistack.main:push({desc="local_game"})
 	root.defaultStyle = magic.cache:GetResource("XMLFile", STYLE)
 
@@ -653,12 +653,31 @@ function M.show_local_apps()
 		empty:SetStyleAuto()
 		empty.text = "No apps found"
 	else
-		for _, game in ipairs(games) do
-			local name = game.name
-			local button = make_game_button(menu.window, name, game.size)
+		-- A page at a time: at 720 px high the whole list ran off the
+		-- screen, Back with it
+		-- simplified: 15 a page; a window under ~600 px high still clips
+		-- one, and the height read from the window is the upgrade
+		local per_page = 15
+		local pages = math.ceil(#games / per_page)
+		page = math.max(1, math.min(page or 1, pages))
+		for i = (page - 1) * per_page + 1, math.min(#games, page * per_page) do
+			local name = games[i].name
+			local button = make_game_button(menu.window, name, games[i].size)
 			menu:add(button, function()
 				M.start_local_app(name)
 			end)
+		end
+		local function redraw(p)
+			uistack.main:pop(root)
+			M.show_local_apps(p)
+		end
+		if page > 1 then
+			menu:add("^ previous   (page " .. (page - 1) .. " of " .. pages .. ")",
+					function() redraw(page - 1) end)
+		end
+		if page < pages then
+			menu:add("v more   (page " .. (page + 1) .. " of " .. pages .. ")",
+					function() redraw(page + 1) end)
 		end
 	end
 
