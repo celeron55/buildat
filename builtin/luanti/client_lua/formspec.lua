@@ -264,15 +264,18 @@ local function color_of(spec)
 		return nil
 	end
 	if #hex == 3 or #hex == 4 then
-		hex = string.gsub(string.sub(hex, 1, 3), "(%x)", "%1%1")
+		hex = string.gsub(hex, "(%x)", "%1%1")
 	end
 	if #hex ~= 6 and #hex ~= 8 then
 		return nil
 	end
+	-- a: the alpha the string gives, nil where it gives none (each element
+	-- has its own default, as Luanti's parseColorString)
 	return {
 		r = tonumber(string.sub(hex, 1, 2), 16) / 255,
 		g = tonumber(string.sub(hex, 3, 4), 16) / 255,
 		b = tonumber(string.sub(hex, 5, 6), 16) / 255,
+		a = #hex == 8 and tonumber(string.sub(hex, 7, 8), 16) / 255 or nil,
 	}
 end
 

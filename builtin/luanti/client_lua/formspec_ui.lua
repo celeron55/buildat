@@ -367,7 +367,7 @@ function M.new(magic, buildat, log, ctx)
 				local in_hand = held and held.location == e.fields[1] and
 						held.list == e.fields[2] and held.index == index
 				box(parent, x, y, slot, slot, in_hand and
-						magic.Color(0.6, 0.6, 0.2, 0.55) or
+						magic.Color(0.6, 0.6, 0.2, 0.55) or layout.slot_bg or
 						magic.Color(0, 0, 0, 0.45))
 				local stack = list and list.items[index] or nil
 				draw_stack(parent, x, y, slot, stack)
@@ -894,10 +894,17 @@ function M.new(magic, buildat, log, ctx)
 		-- over the whole of it. A form is drawn over the world, and text on
 		-- top of a sunlit hillside cannot be read.
 		local has_background = false
+		layout.slot_bg = nil
 		for _, e in ipairs(elements) do
 			if e.name == "background" or e.name == "background9" then
 				has_background = true
-				break
+			elseif e.name == "listcolors" then
+				-- [UI_PARITY] Its slot colour, on every list of the form, as
+				-- Luanti's; opaque unless it says otherwise.
+				-- simplified: the hover colour, the slot border and the
+				-- tooltip's colours are not drawn
+				local c = formspec.color_of(e.fields[1])
+				layout.slot_bg = c and magic.Color(c.r, c.g, c.b, c.a or 1)
 			end
 		end
 		if not has_background then
@@ -973,8 +980,12 @@ function M.new(magic, buildat, log, ctx)
 			elseif name == "box" then
 				local x, y = at(e, 1)
 				local w, h = geometry(e, 2)
-				if x and w then
-					box(window, x, y, w, h, magic.Color(0.3, 0.3, 0.35, 0.7))
+				-- Its colour at Luanti's alpha 0x8C where the string has
+				-- none; a colour it cannot read draws nothing, as Luanti's
+				local c = formspec.color_of(e.fields[3])
+				if x and w and c then
+					box(window, x, y, w, h,
+							magic.Color(c.r, c.g, c.b, c.a or 0x8C / 255))
 				end
 			elseif name == "item_image" or name == "item_image_button" then
 				local x, y = at(e, 1)
