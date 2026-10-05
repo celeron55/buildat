@@ -110,7 +110,9 @@ shared_icons = {}
 do
 	local seen = {}
 	for _, a in ipairs(api.launch_actions()) do
-		if a.icon then
+		-- A Luanti server wears its game's icon, as every other server
+		-- on that game does ([SERVER_ICONS]): that is not sharing a mark
+		if a.icon and a.category ~= "server" then
 			seen[a.icon] = (seen[a.icon] or 0) + 1
 			if seen[a.icon] > 1 then shared_icons[a.icon] = true end
 		end

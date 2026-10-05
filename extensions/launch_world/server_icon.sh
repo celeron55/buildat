@@ -10,7 +10,8 @@
 # [SERVER_ICONS]: **a Starport listing's icon on the floor**. A Starport
 # and a Hearth listed on it with a 64-pixel icon; an announce with a
 # larger one is refused; the room's first start fetches the list and the
-# icon, and the second wears it on the listing's sphere.
+# icon, and the second wears it on the listing's sphere. Luanti's
+# servers wear the icon of the game the list names, where it is installed.
 #
 #   extensions/launch_world/server_icon.sh
 set -u
@@ -108,4 +109,19 @@ grep -aq "servers: 1 listed on Starport" "$t/cl4.log" ||
 	fail "the listing is not on the floor ($(grep -a "servers:" "$t/cl4.log"))"
 grep -aq "marks: server 127.0.0.1:$AN wears its listing's icon" "$t/cl4.log" ||
 	fail "the listing's sphere does not wear its icon"
-echo "PASS: the server's icon came at one connect, scaled to 64, and the room wears it after a restart; a listing's icon reached the floor; a larger one was refused"
+
+# Luanti's list: a server wears the icon of the game the list names, when
+# that game is installed here; two on one game both wear it
+mkdir -p "$t/cl5/shared/vanilla/games/testgame/menu" "$t/cl5/serverlist"
+cp "$here/client/data/favicon.png" "$t/cl5/shared/vanilla/games/testgame/menu/icon.png"
+marks(){ # game -> the room's count of its own icons
+	printf '192.0.2.1:30000|One|3|%s\n192.0.2.2:30000|Two|2|%s\n' "$1" "$1" \
+		> "$t/cl5/serverlist/serverlist.csv"
+	timeout 90 bin/buildat -D "$t/cl5" -C "$t/cache5" -m launch_world -w 640x360 \
+		-l 3 -o sound_mute=1 -c @"$t/cmds" > "$t/cl5_$1.log" 2>&1
+	grep -ao "marks: [0-9]* of the room's own" "$t/cl5_$1.log" | cut -d' ' -f2
+}
+m0=$(marks "") m1=$(marks testgame)
+[ -n "$m0" ] && [ "$m1" = $((m0 + 2)) ] ||
+	fail "the list's servers do not wear their game's icon (marks $m0, then $m1)"
+echo "PASS: the server's icon came at one connect, scaled to 64, and the room wears it after a restart; a listing's icon reached the floor; a larger one was refused; Luanti servers wear their game's icon"

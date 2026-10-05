@@ -9,10 +9,18 @@
 return function(ctx)
 	local sl = require("buildat/extension/serverlist")
 	local out = {}
+	-- The installed Luanti games' icons, already resolved under the cache
+	-- (builtin/luanti/launcher does the same for the games' own tiles)
+	local icons = {}
+	for _, g in ipairs(buildat.list_installed_games("vanilla")) do
+		icons[g.name] = g.icon
+	end
 	for i, s in ipairs(sl.servers()) do
+		local icon = s.game and icons[s.game]
 		out[#out + 1] = {
 			id = "s" .. i,
 			label = s.name,
+			icon = icon, resolved_icon = icon ~= nil,
 			-- **A server, and how much it matters** ([LAUNCH_SIGNIFY]):
 			-- the player count, which a launch UI ranks and scales by
 			-- without having to know what a server is

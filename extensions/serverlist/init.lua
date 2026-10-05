@@ -55,10 +55,11 @@ local function read_cache()
 		return rows
 	end
 	for line in data:gmatch("[^\r\n]+") do
-		local address, name, players = line:match("^(.-)|(.-)|(%d+)$")
+		local address, name, players, game =
+				line:match("^(.-)|(.-)|(%d+)|?([%w_]*)$")
 		if address and address ~= "" and #rows < MAX then
 			rows[#rows + 1] = {address = address, name = name,
-				players = tonumber(players)}
+				players = tonumber(players), game = game}
 		end
 	end
 	return rows
@@ -68,8 +69,9 @@ local function write_cache(rows)
 	local out = {}
 	for _, r in ipairs(rows) do
 		-- A name with a bar or a newline in it would make a second row
-		out[#out + 1] = string.format("%s|%s|%d", r.address,
-				tostring(r.name):gsub("[|\r\n]", " "), r.players or 0)
+		out[#out + 1] = string.format("%s|%s|%d|%s", r.address,
+				tostring(r.name):gsub("[|\r\n]", " "), r.players or 0,
+				r.game or "")
 	end
 	local ok, err = buildat.storage_write(CACHE, table.concat(out, "\n"))
 	if not ok then
@@ -125,6 +127,10 @@ local function fetch(ask)
 					-- the last time it was played on), which is what a
 					-- launch UI ranks and scales by
 					players = tonumber(sv.clients) or 0,
+					-- The game it runs, by the list's word: its tile
+					-- wears that game's icon where it is installed here
+					-- ([SERVER_ICONS])
+					game = tostring(sv.gameid or ""):match("^[%w_]+$") or "",
 				}
 			end
 		end
@@ -138,7 +144,8 @@ end
 function M.safe.servers()
 	local out = {}
 	for i, r in ipairs(read_cache()) do
-		out[i] = {address = r.address, name = r.name, players = r.players}
+		out[i] = {address = r.address, name = r.name, players = r.players,
+			game = r.game}
 	end
 	return out
 end
