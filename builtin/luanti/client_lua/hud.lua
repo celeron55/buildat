@@ -238,9 +238,10 @@ end
 -- the whole of it left of and above the point, 1 right of and below it, 0
 -- centres it on the point. offset is pixels on top of that.
 function M.place(e, screen_w, screen_h, w, h)
-	local x = math.floor(e.pos[1] * screen_w) +
+	-- The point rounded, as Luanti's floor(pos * size + 0.5)
+	local x = math.floor(e.pos[1] * screen_w + 0.5) +
 			(e.align[1] - 1) * w / 2 + e.offset[1] * M.scale_factor
-	local y = math.floor(e.pos[2] * screen_h) +
+	local y = math.floor(e.pos[2] * screen_h + 0.5) +
 			(e.align[2] - 1) * h / 2 + e.offset[2] * M.scale_factor
 	return math.floor(x), math.floor(y)
 end
@@ -254,64 +255,66 @@ local STATBAR_STEP = {
 	[3] = {0, -1},
 }
 
--- A statbar's icons in the order they are drawn, each
--- {x, y, w, h, src, bg}: the background ones for its maximum first, marked
--- bg, and then the ones that are on over them. src is the part of the texture
--- the icon shows, as fractions of it, which is the whole of it except for the
--- half icon an odd count ends in.
+-- A statbar's icons, each {x, y, w, h, src, bg}: the value's, and then
+-- the background's (marked bg) over what is left of the maximum only, as
+-- Luanti's drawStatbar() -- so a picture with clear parts shows the world
+-- through them and not the background. src is the part of the texture the
+-- icon shows, as fractions of it: the whole of it, or for a half icon the
+-- half the icons come from, and the other half of the background beside it.
 --
 -- Luanti counts a statbar in halves -- number is twice the value and item
--- twice the maximum -- so an odd count ends in half an icon, cut on the side
--- the icons come from. size is the size to draw one at, or {0, 0} for the
+-- twice the maximum. size is the size to draw one at, or {0, 0} for the
 -- image's own, and has_bg says whether the element named a background
 -- texture, without which Luanti draws no maximum at all.
 function M.statbar_icons(e, screen_w, screen_h, image_w, image_h, has_bg)
 	local w = (e.size[1] > 0 and e.size[1] or image_w) * M.scale_factor
 	local h = (e.size[2] > 0 and e.size[2] or image_h) * M.scale_factor
 	local step = STATBAR_STEP[e.dir] or STATBAR_STEP[0]
-	local x0, y0 = M.place(e, screen_w, screen_h, 0, 0)
+	local x, y = M.place(e, screen_w, screen_h, 0, 0)
 	local out = {}
 
-	-- Half an icon is the half of it the icons come from, so a bar that
-	-- grows to the right keeps the left half of the image: dest is half as
-	-- wide and src is the half of the texture that half shows, as fractions
-	-- of it.
-	local half_src = {0, 0, 1, 1}
-	if step[1] > 0 then
-		half_src = {0, 0, 0.5, 1}
-	elseif step[1] < 0 then
-		half_src = {0.5, 0, 1, 1}
-	elseif step[2] > 0 then
-		half_src = {0, 0, 1, 0.5}
-	elseif step[2] < 0 then
-		half_src = {0, 0.5, 1, 1}
+	-- Luanti's calculate_clipping_rect(): the half of an icon on the side
+	-- the step comes from, as {dx, dy, w, h} in pixels and src fractions
+	local function half(sx, sy)
+		local hw = sx ~= 0 and w / 2 or w
+		local hh = sy ~= 0 and h / 2 or h
+		local fx = sx < 0 and 0.5 or 0
+		local fy = sy < 0 and 0.5 or 0
+		return {fx * w, fy * h, hw, hh},
+				{fx, fy, fx + hw / w, fy + hh / h}
+	end
+	local function add(d, src, bg)
+		out[#out + 1] = {x = x + d[1], y = y + d[2], w = d[3], h = d[4],
+				src = src, bg = bg}
+	end
+	local whole, all = {0, 0, w, h}, {0, 0, 1, 1}
+	local function advance()
+		x, y = x + step[1] * w, y + step[2] * h
 	end
 
-	local function icons(count)
-		for i = 0, math.floor(count / 2) - 1 do
-			out[#out + 1] = {x = x0 + step[1] * w * i, y = y0 + step[2] * h * i,
-					w = w, h = h, src = {0, 0, 1, 1}}
-		end
-		if count % 2 == 1 then
-			local i = math.floor(count / 2)
-			out[#out + 1] = {
-				x = x0 + step[1] * w * i + (step[1] < 0 and w / 2 or 0),
-				y = y0 + step[2] * h * i + (step[2] < 0 and h / 2 or 0),
-				w = step[1] ~= 0 and w / 2 or w,
-				h = step[2] ~= 0 and h / 2 or h,
-				src = half_src,
-			}
+	local count, max = e.number, has_bg and e.item or 0
+	for _ = 1, math.floor(count / 2) do
+		add(whole, all)
+		advance()
+	end
+	if count % 2 == 1 then
+		add(half(step[1], step[2]))
+		if max > count then
+			local d, src = half(-step[1], -step[2])
+			add(d, src, true)
+			advance()
 		end
 	end
-
-	-- The background is the maximum, drawn first so the value covers it
-	if has_bg then
-		icons(e.item)
-		for _, icon in ipairs(out) do
-			icon.bg = true
+	if max > count then
+		for _ = math.floor(count / 2) + count % 2, math.floor(max / 2) - 1 do
+			add(whole, all, true)
+			advance()
+		end
+		if max % 2 == 1 then
+			local d, src = half(step[1], step[2])
+			add(d, src, true)
 		end
 	end
-	icons(e.number)
 	return out
 end
 
