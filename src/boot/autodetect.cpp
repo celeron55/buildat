@@ -138,9 +138,16 @@ static void set_platform_data_paths(core::Config &config)
 		config.set("cache_path", platform_cache_path());
 	if(config.get<ss_>("user_path").empty())
 		config.set("user_path", platform_user_path());
-#else
-	(void)config;
 #endif
+	// "a/../b" collapsed: Urho3D's resource cache drops "../" out of a
+	// name, so a cached file under a path given with one is never found and
+	// the world draws black. simplified: only such a path is rewritten, so
+	// a Windows path keeps its backslashes.
+	for(const char *k : {"cache_path", "user_path"}){
+		const ss_ p = config.get<ss_>(k);
+		if(p.find("..") != ss_::npos)
+			config.set(k, interface::fs::get_absolute_path(p));
+	}
 }
 
 #ifndef _WIN32
@@ -209,6 +216,11 @@ static void check_platform_data_paths()
 	if(config.get<ss_>("cache_path") != "/given/cache" ||
 			config.get<ss_>("user_path") != "/given/user")
 		throw Exception("set_platform_data_paths: overrode -C/-D");
+	config.set("cache_path", "/given/Build/../cache");
+	set_platform_data_paths(config);
+	if(config.get<ss_>("cache_path") != "/given/cache")
+		throw Exception("set_platform_data_paths: kept a \"..\": "+
+				config.get<ss_>("cache_path"));
 }
 
 enum PathDefinitionType {PD_END, PD_READ, PD_WRITE, PD_RUN};
