@@ -132,10 +132,13 @@ rm -rf "$BUILDAT_USER_PATH/apps/$GAME_DIR/saves/$save"
 port=$(( 29800 + (SEED % 90) ))
 srv=""; cli=""; netsim=""
 trap 'kill "$cli" 2>/dev/null; kill "${netsim:-}" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
+# launcher=1: a launcher's own server, which its client joins without an
+# account; without it the server is a public one ([VANILLA_PUBLIC]) and
+# the walk waits at the login
 { echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -m "../apps/$GAME_DIR" -P "$port" \
+	bin/buildat_server -u launcher=1 -m "../apps/$GAME_DIR" -P "$port" \
 	-l "${LOG_LEVEL:-4}" 2>&1 \
 	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
 for i in $(seq 1 400); do
