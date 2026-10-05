@@ -818,9 +818,25 @@ struct Module: public interface::Module
 		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name");
 		const ss_ title = jstr(rel, "name")+" "+jstr(rel, "version");
 		const ss_ author = jstr(rel, "author")+" (Aitta)";
+		const ss_ subject = pkg+" "+jstr(rel, "key");
 		ss_ body = jstr(rel, "description")+"\n\nVersion **"+
 				jstr(rel, "version")+"** of `"+pkg+"`, published on "+f.aitta+
-				".\n\n## Changelog\n\n";
+				".\n\n";
+		// The problems marked fixed in this version, by the same package and
+		// key; their reporters and followers are told it is out
+		// simplified: the first 50
+		sv_<int64_t> fixed;
+		Q p(m_db, "SELECT id, title FROM threads WHERE kind = 'problem' AND "
+				"status = 'fixed' AND subject = ? AND fixed_in = ? AND "
+				"hidden = 0 ORDER BY id LIMIT 50");
+		p.b(subject).b(jstr(rel, "version"));
+		while(p.step()){
+			if(fixed.empty())
+				body += "## Problems it fixes\n\n";
+			fixed.push_back(p.i(0));
+			body += "- "+p.s(1)+" #"+itos(p.i(0))+"\n";
+		}
+		body += (fixed.empty() ? "" : "\n")+ss_("## Changelog\n\n");
 		ss_ log = f.changelog.empty() ? ss_("No changelog came with it.") :
 				f.changelog;
 		// A CRLF file's \r is a control character to text_ok
@@ -841,13 +857,20 @@ struct Module: public interface::Module
 		const int64_t t = now_s();
 		Q i(m_db, "INSERT INTO threads(topic, title, author, created, last, "
 				"subject, kind) VALUES(?, ?, ?, ?, ?, ?, 'release')");
-		i.b(topic_id).b(title).b(author).b(t).b(t)
-				.b(pkg+" "+jstr(rel, "key")).step();
+		i.b(topic_id).b(title).b(author).b(t).b(t).b(subject).step();
 		const int64_t id = sqlite3_last_insert_rowid(m_db);
 		// Whoever publishes on the Aitta mentions no one
 		add_message(id, author, body, title, false);
 		Q r(m_db, "INSERT INTO release_threads(release, thread) VALUES(?, ?)");
 		r.b(key).b(id).step();
+		for(int64_t problem : fixed){
+			Q w(m_db, "SELECT author FROM threads WHERE id = ? UNION "
+					"SELECT account FROM follows WHERE thread = ?");
+			w.b(problem).b(problem);
+			while(w.step())
+				notify(w.s(0), "fixed", problem, 0, author,
+						jstr(rel, "version"));
+		}
 		log_i(MODULE, "The release %s from %s is the thread %lld", cs(key),
 				cs(f.aitta), (long long)id);
 	}
@@ -1781,6 +1804,15 @@ struct Module: public interface::Module
 				throw Exception("fixed_in is a version, and only with fixed");
 			Q u(m_db, "UPDATE threads SET status = ?, fixed_in = ? WHERE id = ?");
 			u.b(status).b(fixed_in).b(thread_id).step();
+			// Whoever reported it learns the outcome without a reply
+			Q a(m_db, "SELECT author FROM threads WHERE id = ?");
+			a.b(thread_id).step();
+			json::Value now = json::object();
+			now.set("kind", "problem");
+			now.set("status", status);
+			now.set("fixed_in", fixed_in);
+			if(a.s(0) != name)
+				notify(a.s(0), "status", thread_id, 0, name, kind_text(now));
 			log_i(MODULE, "%s set the thread %lld %s", cs(name),
 					(long long)thread_id, cs(status));
 			return json::Value(true);

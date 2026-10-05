@@ -318,7 +318,9 @@ show_notifications = function()
 				answer = "marked your message the answer in",
 				hidden = "hid your message in",
 				restored = "restored your message in",
-				appeal_dismissed = "kept your message hidden in"}
+				appeal_dismissed = "kept your message hidden in",
+				status = "set the status of",
+				fixed = "released a version that fixes"}
 		for _, n in ipairs(items) do
 			add((n.seen and "" or "* ") .. n.by .. " " ..
 					(said[n.kind] or n.kind) .. " " .. n.title ..

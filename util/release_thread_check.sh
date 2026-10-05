@@ -10,7 +10,8 @@
 # by "tester (Aitta)", with the changelog; elsewhere does not; a restart
 # makes no second thread. "Feedback..." on the installed demo's tile
 # opens the composer there with the package and versions; its thread is a
-# problem reported in 1.0, which the admin marks fixed in 1.1.
+# problem reported in 1.0, which the admin marks fixed in 1.1; demo 1.1's
+# release thread links it and its reporter is told.
 #
 #   util/release_thread_check.sh
 set -u
@@ -51,20 +52,21 @@ BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/
 	timeout 90 bin/buildat -D "$t/cl_a" -w 800x600 -l 3 -o sound_mute=1 \
 	-s 127.0.0.1:$A -c @"$t/cmds" > "$t/cl_a.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl_a.log" || fail "the bind did not go through"
-publish(){ # name home
+publish(){ # name home [version]
+	local v=${3:-1.0}
 	mkdir -p "$t/$1/main"
 	echo 'int x;' > "$t/$1/main/main.cpp"
 	mkdir -p "$t/$1/launcher"
 	echo "return function(ctx) return {{id = 'play', label = '$1',
 		run = function() ctx.launch{} end}} end" > "$t/$1/launcher/init.lua"
-	printf '# 1.0\r\n\r\n- the first **release** of %s\r\n' "$1" > "$t/$1/CHANGELOG.md"
-	printf '{"author": "tester", "name": "%s", "version": "1.0",
+	printf '# %s\r\n\r\n- the first **release** of %s\r\n' "$v" "$1" > "$t/$1/CHANGELOG.md"
+	printf '{"author": "tester", "name": "%s", "version": "'$v'",
 		"engine_api": 1, "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "a check", "home_hearth": "%s",
 		"changelog": "CHANGELOG.md"}\n' "$1" "$2" > "$t/$1/meta.json"
 	local zip
 	zip=$("$b" aitta pack "$t/$1" "$t/key" "$t/out_$1" 2>/dev/null) || fail "pack $1"
-	"$b" aitta publish "$zip" 127.0.0.1:$A 2>&1 | grep -q "listed: tester/$1/1.0" ||
+	"$b" aitta publish "$zip" 127.0.0.1:$A 2>&1 | grep -q "listed: tester/$1/$v" ||
 		fail "publish $1"
 	zips="$zips $zip"
 }
@@ -103,7 +105,7 @@ for z in $zips; do
 	"$b" aitta install "$z" "$t/user" > /dev/null 2>&1 || fail "install $z"
 done
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
-BUILDAT_HEARTH_REQS='{"cmd":"new_thread","feedback":true,"subject":"tester/demo k","title":"It hums","body":"a check","kind":"problem","version":"1.0"}
+BUILDAT_HEARTH_REQS='{"cmd":"new_thread","feedback":true,"subject":"tester/demo '"$(cat "$t/pub")"'","title":"It hums","body":"a check","kind":"problem","version":"1.0"}
 {"cmd":"status","thread":2,"status":"fixed","fixed_in":"1.1"}
 {"cmd":"status","thread":1,"status":"fixed"}
 {"cmd":"new_thread","topic":1,"title":"x","body":"x","kind":"bug"}' \
@@ -126,6 +128,24 @@ grep -aq '"id":1004,"ok":false' "$t/cl_f.log" || fail "a kind \"bug\" was taken"
 page=$(curl -s "http://127.0.0.1:$H/t/2")
 echo "$page" | grep -q "problem, fixed in 1.1, reported in 1.0" || fail "the problem's page: $page"
 
+# demo 1.1 comes out: its release thread links the problem it fixes, and
+# whoever reported it is told
+publish demo "http://127.0.0.1:$H/" 1.1
+for _ in $(seq 90); do
+	grep -q "tester/demo/1.1 .* is the thread" "$t/hearth.log" && break
+	sleep 1
+done
+n=$(grep -o "tester/demo/1.1 .* is the thread [0-9]*" "$t/hearth.log" | grep -o "[0-9]*$")
+[ -n "$n" ] || fail "no thread for demo 1.1"
+curl -s "http://127.0.0.1:$H/t/$n" | grep -q 'It hums <a class="ref" href="/t/2">' ||
+	fail "the 1.1 release thread does not link the problem it fixes"
+BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
+BUILDAT_HEARTH_REQS='{"cmd":"notifications"}' \
+	timeout 90 bin/buildat -D "$t/cl_h" -w 800x600 -l 3 -o sound_mute=1 \
+	-s 127.0.0.1:$H -c @"$t/cmds_h" > "$t/cl_n.log" 2>&1
+grep -a '"id":1001' "$t/cl_n.log" | grep -q '"kind":"fixed","message":0,"note":"1.1"' ||
+	fail "the reporter was not told: $(grep -a '"id":1001' "$t/cl_n.log")"
+
 # A restart reads the Aitta again and makes no second thread
 # start() ran in $(...): the server is not this shell's child to wait for
 kill $ph
@@ -138,6 +158,6 @@ done
 grep -q "STATUS Listening" "$t/hearth2.log" || fail "Hearth did not start again ($(tail -3 "$t/hearth2.log"))"
 sleep 5
 grep -q "is the thread" "$t/hearth2.log" && fail "a second thread after the restart"
-n=$(curl -s "http://127.0.0.1:$H/t/3" | grep -c "demo 1.0")
-[ "$n" = 0 ] || fail "a second thread after the restart (/t/3)"
+n=$(curl -s "http://127.0.0.1:$H/t/4" | grep -c "demo 1\.")
+[ "$n" = 0 ] || fail "a second thread after the restart (/t/4)"
 echo "PASS: demo 1.0 is one release thread with its changelog; elsewhere is not; Feedback... reaches the composer"
