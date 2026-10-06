@@ -1559,6 +1559,32 @@ local function apply_sky_of_hour(force)
 	end
 	local horizon_now = dim(three(night_horizon, dawn_horizon, day_horizon, t))
 	local zenith_now = dim(three(night_zenith, dawn_zenith, day_zenith, t))
+	-- [DUSK_PARITY]: Luanti's dusk colours, mixed in by its shares: the
+	-- moon's all round, and the difference to the sun's as the glow term,
+	-- which is that towards the sun along the horizon and fades away from
+	-- it and upwards. The parity modes draw with no gamma correction, so
+	-- Luanti's display colour goes in as it stands. Its sunrisebg.png, an
+	-- orange glow on the horizon under the sun, is the band's orange here,
+	-- on the same clock: all orange from half of it, where the band was a
+	-- white patch.
+	local hb = sky_now.hb or 0
+	local glow = {r = 0, g = 0, b = 0}
+	if hb > 0 then
+		local pc = sky_now.point
+		local function mix(c, v, k)
+			return {r = c.r + (v.r - c.r) * k, g = c.g + (v.g - c.g) * k,
+					b = c.b + (v.b - c.b) * k}
+		end
+		local to = mix(horizon_now, pc.sun, hb * 0.5)
+		horizon_now = mix(horizon_now, pc.moon, hb * 0.5)
+		zenith_now = mix(zenith_now, pc.moon, hb * 0.25)
+		glow = {r = to.r - horizon_now.r, g = to.g - horizon_now.g,
+				b = to.b - horizon_now.b}
+	end
+	if sky_now.unlit then
+		world_sky:set_parity_band(luanti_sky.DUSK_BAND, math.min(1, 2 * hb),
+				glow)
+	end
 	if not sky_now.unlit then
 		-- pbr: Luanti's hue at the reference's radiance ([PBR_FIT] term 1)
 		local function at(c, radiance)
@@ -1701,7 +1727,14 @@ local function apply_sky_of_hour(force)
 	-- band measured 0.070, 0.080, 0.087 against official Luanti's 0.016,
 	-- 0.022, 0.032, where the gradient behind them computes to less than
 	-- official's on its own.
-	world_sky:set_cloud_light(sky_now.lit or 1)
+	-- [DUSK_PARITY]: Luanti lifts them by 0.15 of the blend and mixes a
+	-- quarter of it towards the point colour
+	world_sky:set_cloud_light(math.min((sky_now.lit or 1) + 0.15 * hb, 1))
+	if hb > 0 then
+		world_sky:set_cloud_tint(sky_now.point.mid, hb * 0.25)
+	else
+		world_sky:set_cloud_tint(nil)
+	end
 	if not sky_now.unlit then
 		-- pbr: the cloud is a reflectance lit by the sun and the sky
 		-- ([CLOUD_LIGHT]), not a display colour in a radiance sky. The
@@ -1848,6 +1881,20 @@ local function update_sky(dt)
 	-- Luanti's day/night ratio bottoms out at 0.175 rather than nothing, and
 	-- goes through its light curve, which a gamma of 2.2 is the shape of.
 	sky_now.lit = (0.175 + 0.825 * day) ^ 2.2
+	-- [DUSK_PARITY]: Luanti's dusk colours, on the parity modes. Luanti
+	-- picks one colour for the whole view by which way the camera faces --
+	-- the sun's straight at it, the moon's away -- which shifts the whole
+	-- sky as the player turns. Here the sky has both, the sun's towards
+	-- the sun (apply_sky_of_hour()), and the fog and the clouds, which
+	-- are one colour, take the two half and half (user, 2026-10-06).
+	sky_now.hb = sky_now.unlit and
+			luanti_sky.horizon_blend(time_of_day or 0.5) or 0
+	if sky_now.hb > 0 then
+		local sun, moon = luanti_sky.point_colors(sky_now.lit, game_sky)
+		sky_now.point = {sun = sun, moon = moon, mid = {
+				r = (sun.r + moon.r) / 2, g = (sun.g + moon.g) / 2,
+				b = (sun.b + moon.b) / 2}}
+	end
 
 	-- How much of each light there is: its own hour of the day, whether it
 	-- is over the horizon at all, what the cloud leaves of it, and whether
@@ -2160,6 +2207,12 @@ local function update_sky(dt)
 	base = magic.Color(base.r > 0 and base.r ^ 2.2 or 0,
 			base.g > 0 and base.g ^ 2.2 or 0,
 			base.b > 0 and base.b ^ 2.2 or 0)
+	-- [DUSK_PARITY]: half way to the point colour, as the sky's horizon is
+	-- (apply_sky_of_hour())
+	if not game_sky.fog_color and sky_now.hb > 0 then
+		local v = sky_now.point.mid
+		base = blend(base, magic.Color(v.r, v.g, v.b), sky_now.hb * 0.5)
+	end
 	-- On the pbr path the fog is the drawn horizon's radiance of the hour
 	-- (apply_sky_of_hour(), a frame behind): a display colour dimmed by
 	-- the hour sat at 0.004 under a night sky of 0.00005, and the meter

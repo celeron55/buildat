@@ -328,7 +328,7 @@ void PS()
         float towards = len > 0.0001 ? dot(flat_d, flat_sun) / len : 0.0;
         float band = pow(max(towards, 0.0), 3.0) *
                 pow(1.0 - min(abs(d.y), 1.0), 2.5) * low;
-        // [DUSK_SKY], vanilla's pbr (a sky that sets no DuskBand,
+        // [DUSK_SKY], vanilla's (a sky that sets no DuskBand,
         // floorplanner's, keeps the old band): once the sun is down the
         // band is a radiance and not a colour. Mixed towards the sun's
         // tint at a fixed value it was a white patch on a black sky; an
@@ -336,8 +336,7 @@ void PS()
         // does. The share of orange is vanilla's (luanti_sky.dusk_tint():
         // none at 18:40, all of it from 19:30), so with the sun high -- the
         // probed 05:45 among those hours -- it is the band it was.
-        float dusk = cSkyPhysical > 0.5 && cDuskBand.x > 0.0 ?
-                cDuskBand.z : 0.0;
+        float dusk = cDuskBand.x > 0.0 ? cDuskBand.z : 0.0;
         const vec3 LUM = vec3(0.2126, 0.7152, 0.0722);
         vec3 orange = vec3(1.0, 0.55, 0.25) / 0.6246 *
                 dot(color, LUM) * cDuskBand.x;

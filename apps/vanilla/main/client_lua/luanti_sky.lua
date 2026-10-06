@@ -269,6 +269,48 @@ M.DUSK_AWAY = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_AWAY") or "") or 0.3
 M.DUSK_SKY = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_SKY") or "") or 0.7
 M.DUSK_CLOUD = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_CLOUD") or "") or 1
 
+-- **Luanti's dusk colours** ([DUSK_PARITY], the parity modes): its
+-- directional coloured fog, on by default, mixes the horizon half way and
+-- the top a quarter towards a point colour -- the sun's facing the sun, the
+-- moon's away from it -- and the clouds a quarter. By the clock, not the
+-- sun: from 18:00 to 20:24, the most at 19:12; 03:36 to 06:00 at dawn.
+-- Sky::m_horizon_blend() as it stands. The sky here takes the two along
+-- its azimuth rather than by the camera's (init.lua, user 2026-10-06).
+function M.horizon_blend(tod)
+	local x = tod >= 0.5 and (1 - tod) * 2 or tod * 2
+	if x <= 0.3 or x > 0.5 then
+		return 0
+	elseif x <= 0.4 then
+		return (x - 0.3) * 10
+	end
+	return (0.5 - x) * 10
+end
+-- The two point colours at a time_brightness (Luanti's decode_light of the
+-- day/night ratio, display units): Sky::update()'s own formula for
+-- "default" tinting -- the sun's tonemap branch is left out, the base
+-- pack having no sun_tonemap.png -- and the game's two for "custom", where
+-- the sun's is not dimmed and the moon's is.
+function M.point_colors(tb, sky)
+	local function clamp(v, a, b) return math.max(a, math.min(b, v)) end
+	local pl = clamp(tb * 3, 0.2, 1)
+	local custom = sky and sky.fog_tint_type == "custom"
+	local sun
+	if custom and sky.sun_tint then
+		sun = sky.sun_tint
+	else
+		local b = pl * (0.25 + (clamp(tb, 0.25, 0.75) - 0.25) * 1.5)
+		sun = {r = pl, b = b,
+				g = pl * (b * 0.375 + (clamp(tb, 0.05, 0.15) - 0.05) * 6.25)}
+	end
+	local mt = custom and sky.moon_tint or {r = 0.5, g = 0.6, b = 0.8}
+	return sun, {r = mt.r * pl, g = mt.g * pl, b = mt.b * pl}
+end
+assert(math.abs(M.horizon_blend(0.8) - 1) < 1e-9 and
+		math.abs(M.horizon_blend(0.2) - 1) < 1e-9, "the most at 19:12 and 04:48")
+assert(M.horizon_blend(0.75) == 0 and M.horizon_blend(0.86) == 0 and
+		M.horizon_blend(0.5) == 0, "nothing by day or at night")
+assert(M.point_colors(0.1).b < M.point_colors(0.1).r * 0.5, "the low sun's is orange")
+
 -- **The dusk as one ramp** ([DUSK_SKY], the user's anchors, 2026-10-04):
 -- blue sky with the sun -> bright orange -> orange -> dark orange -> dark.
 -- 18:40 as it was, the orange up from there, at its peak at 19:30, and the
@@ -417,11 +459,19 @@ function M.new(scene, sun_dir, defaults)
 	local cloud_rgb = {r = 0.9, g = 0.92, b = 0.95}
 	local cloud_light = defaults.cloud_light or 1.0
 
+	-- And a colour mixed into it at a share, [DUSK_PARITY]'s
+	local cloud_tint, cloud_tint_k = nil, 0
+
 	local function put_cloud()
-		material:SetShaderParameter("CloudColor", magic.Vector3(
-				cloud_rgb.r * cloud_light,
-				cloud_rgb.g * cloud_light,
-				cloud_rgb.b * cloud_light))
+		local c = {r = cloud_rgb.r * cloud_light,
+				g = cloud_rgb.g * cloud_light, b = cloud_rgb.b * cloud_light}
+		if cloud_tint then
+			local k = cloud_tint_k
+			c = {r = c.r + (cloud_tint.r - c.r) * k,
+					g = c.g + (cloud_tint.g - c.g) * k,
+					b = c.b + (cloud_tint.b - c.b) * k}
+		end
+		material:SetShaderParameter("CloudColor", magic.Vector3(c.r, c.g, c.b))
 	end
 
 	-- Everything, at what the sky looked like before any game said anything
@@ -491,6 +541,11 @@ function M.new(scene, sun_dir, defaults)
 		put_cloud()
 	end
 
+	function self:set_cloud_tint(c, k)
+		cloud_tint, cloud_tint_k = c, k or 0
+		put_cloud()
+	end
+
 	function self:set_cloud_color(c)
 		if c == nil then
 			return
@@ -516,6 +571,15 @@ function M.new(scene, sun_dir, defaults)
 		material:SetShaderParameter("DawnGlow", magic.Vector3(r, g, b))
 		material:SetShaderParameter("DuskBand", magic.Vector3(
 				M.DUSK_BAND * M.DUSK_SKY, M.DUSK_AWAY, tint or 0))
+	end
+
+	-- [DUSK_PARITY]: the band round the low sun, share of it in the
+	-- glow's orange at this many times the sky's level, as on pbr, and
+	-- the glow towards the sun only
+	function self:set_parity_band(band, share, glow)
+		material:SetShaderParameter("DawnGlow",
+				magic.Vector3(glow.r, glow.g, glow.b))
+		material:SetShaderParameter("DuskBand", magic.Vector3(band, 0, share))
 	end
 
 	-- The game's own picture of it, or nil for the shader's painted square.
