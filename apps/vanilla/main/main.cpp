@@ -119,6 +119,12 @@ struct Module: public interface::Module
 	// and by no later one: vanilla's client sends that packet more than
 	// once, and a repeat is not a user asking twice
 	bool m_launched_param_save = false;
+	// The launch the owner's client last sent (launch:untrusted), which
+	// stands for -u from then on: the launcher keeps a server that holds
+	// no world and hands it the next launch of this app over the
+	// connection rather than starting another
+	ss_ m_launch;
+	bool m_launch_sent = false;
 	// [VANILLA_PUBLIC] 1: a server the launcher did not start is public. A
 	// client joins through builtin/accounts first, the worlds and ContentDB
 	// are an admin's, and the server's imports and settings nobody's.
@@ -156,6 +162,8 @@ struct Module: public interface::Module
 				"network:packet_received/main:place"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:get_saves"));
+		m_server->sub_event(this, Event::t(
+				"network:packet_received/launch:untrusted"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:open_lan"));
 		m_server->sub_event(this, Event::t(
@@ -220,6 +228,8 @@ struct Module: public interface::Module
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_saves", on_get_saves,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/launch:untrusted",
+				on_launch_untrusted, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:save_info", on_save_info,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:set_world_flags",
@@ -868,7 +878,8 @@ struct Module: public interface::Module
 	// a directory name has, or "" with a warning. The lines are key=value.
 	ss_ launch_param(const ss_ &key_name)
 	{
-		const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
+		const ss_ u = m_launch_sent ? m_launch :
+				m_server->get_config().get<ss_>("untrusted_launch");
 		const ss_ key = key_name + "=";
 		size_t at = u.find(key);
 		if(at == ss_::npos || !(at == 0 || u[at - 1] == '\n'))
@@ -926,10 +937,27 @@ struct Module: public interface::Module
 		});
 	}
 
+	// The same lines -u holds, read through launch_param() as those are;
+	// the owner's alone, since anyone else's would choose for the owner
+	void on_launch_untrusted(const network::Packet &packet)
+	{
+		if(m_public || !is_owner(packet.sender) || packet.data.size() > 4096)
+			return;
+		m_launch = packet.data;
+		m_launch_sent = true;
+	}
+
 	void on_get_saves(const network::Packet &packet)
 	{
 		if(!may_manage(packet.sender))
 			return;
+		// Holding no world, the launcher may keep this server for its
+		// next launch of the app (start_world() takes it back)
+		if(!m_public && !m_starting && is_owner(packet.sender)){
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(packet.sender, "launch:reusable", "1");
+			});
+		}
 		// **A launch that named a save opens it and never draws a menu**
 		// ([LAUNCH_WORLD]: a save opened through ctx.launch's params).
 		// The launcher hands "save=<name>" to the server's -u, which is
@@ -3101,6 +3129,12 @@ struct Module: public interface::Module
 		}
 		m_starting = true;
 		m_world_name = world_name;
+		// A world is left by stopping the server, as a dedicated one's is
+		if(peer != 0){
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(peer, "launch:reusable", "0");
+			});
+		}
 		if(m_public)
 			write_public_world(world_name);
 

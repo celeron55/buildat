@@ -636,6 +636,12 @@ end
 -- A game by name, with launch: key=value lines for the server's -u, or
 -- nil. What a tile on the launch grid ends in ([LAUNCH_GRID]).
 function M.start_local_app(game, launch)
+	-- A server of this app that holds no world takes the launch as it is
+	-- (launch:reusable); start refuses any other running one
+	if api.local_server_running() and api.start_local_server(game, launch) then
+		show_starting(game)
+		return
+	end
 	api.stop_local_server()
 	if not api.local_server_running() then
 		do_start_local_game(game, launch)

@@ -125,6 +125,9 @@ namespace app
 		// The owner token of the local server this client started, when
 		// address is that server; "" for any other ([SECURITY_RUN_1])
 		virtual ss_ owner_token_for(const ss_ &address) = 0;
+		// The -u lines of the latest launch of that server, sent after the
+		// token, since a reused server was started with another's
+		virtual ss_ local_server_launch() = 0;
 		virtual void run_script(const ss_ &script) = 0;
 		virtual bool run_script_no_sandbox(const ss_ &script) = 0;
 		virtual void handle_packet(const ss_ &name, const ss_ &data) = 0;

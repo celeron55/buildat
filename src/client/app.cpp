@@ -956,6 +956,14 @@ static ss_ g_local_server_port;
 // The game the local server was started with, for the storage of the game
 // code it serves
 static ss_ g_local_server_app;
+// What the launcher asked of it, the -u lines: sent again on each
+// connection (launch:untrusted), since a reused server was started with
+// another launch's
+static ss_ g_local_server_launch;
+// It said it holds no world (launch:reusable): leaving it keeps it
+// running, and the next launch of the same app connects to it instead of
+// starting another. Any stop clears it.
+static bool g_local_server_reusable = false;
 // The watchdog's stall, in seconds; a screen may lower it ([BOX_PLAYTEST_2] 12)
 static int g_watchdog_seconds = 10;
 // **A script that does not return is stopped, not waited out**: a
@@ -1115,6 +1123,7 @@ static void adopt_pidfile()
 
 static void request_stop_local_server()
 {
+	g_local_server_reusable = false;
 	adopt_pidfile();
 	if(!g_local_server.valid())
 		return;
@@ -1129,6 +1138,7 @@ static void request_stop_local_server()
 
 static void force_kill_local_server()
 {
+	g_local_server_reusable = false;
 	adopt_pidfile();
 	if(!g_local_server.valid())
 		return;
@@ -1154,6 +1164,7 @@ static int64_t g_stopping_since_us = 0;
 
 static void begin_stop_local_server()
 {
+	g_local_server_reusable = false;
 	adopt_pidfile();
 	if(!g_local_server.valid())
 		return;
@@ -1188,6 +1199,7 @@ static bool step_stop_local_server()
 
 static void stop_local_server()
 {
+	g_local_server_reusable = false;
 	adopt_pidfile();
 	if(!g_local_server.valid())
 		return;
@@ -1787,6 +1799,11 @@ struct CApp: public App, public magic::Application
 	// might be what went with it; see lost_connection() and on_update()
 	int64_t m_lost_connection_us = 0;
 
+	ss_ local_server_launch()
+	{
+		return g_local_server_launch;
+	}
+
 	ss_ owner_token_for(const ss_ &address)
 	{
 		if(g_local_server_token.empty() || g_local_server_port.empty() ||
@@ -2002,6 +2019,11 @@ struct CApp: public App, public magic::Application
 	{
 		if(name == "core:server_icon"){
 			handle_server_icon(data);
+			return;
+		}
+		if(name == "launch:reusable"){
+			if(m_state && !owner_token_for(m_state->get_address()).empty())
+				g_local_server_reusable = data == "1";
 			return;
 		}
 		log_v(MODULE, "handle_packet(): %s", cs(name));
@@ -3893,6 +3915,17 @@ struct CApp: public App, public magic::Application
 		}
 
 		adopt_pidfile();
+		const ss_ launch_lines = launch.empty() ? ss_("launcher=1") :
+				"launcher=1\n"+launch;
+		if(g_local_server_reusable && g_local_server_app == server_app_id(game) &&
+				interface::process::is_running(g_local_server)){
+			log_i(MODULE, "Reusing the local server on port %s",
+					cs(g_local_server_port));
+			g_local_server_launch = launch_lines;
+			lua_pushboolean(L, true);
+			lua_pushnil(L);
+			return 2;
+		}
 		if(interface::process::is_running(g_local_server)){
 			lua_pushboolean(L, false);
 			lua_pushstring(L, "Previous local server is still running");
@@ -4015,8 +4048,9 @@ struct CApp: public App, public magic::Application
 		// (builtin/accounts, [VANILLA_PUBLIC] 1). Whoever else starts a
 		// server gives it no -u, and it is a public one.
 		args.push_back("-u");
-		args.push_back(launch.empty() ? ss_("launcher=1") :
-				"launcher=1\n"+launch);
+		args.push_back(launch_lines);
+		g_local_server_launch = launch_lines;
+		g_local_server_reusable = false;
 		// Started in the root, whatever the client's cwd: from bin/ (a
 		// click on the exe) every path it forms would be off by one
 		g_local_server = interface::process::start(server_path, args,
@@ -4877,7 +4911,12 @@ struct CApp: public App, public magic::Application
 		// SIGTERM goes now and on_update() reaps the child and
 		// force-kills it if it will not go; a menu-only server is gone
 		// in a second anyway.
-		begin_stop_local_server();
+		// A server that holds no world stays for the next launch of
+		// its app (launch:reusable)
+		if(g_local_server_reusable)
+			log_i(MODULE, "Local server kept: it holds no world");
+		else
+			begin_stop_local_server();
 		self->m_state->reset();
 		self->m_lost_connection_us = 0;
 		// **The last frame of the game goes with the game** ([MENU_LEAVE],

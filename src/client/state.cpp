@@ -849,8 +849,10 @@ void CState::setup_packet_handlers()
 		if(!m_owner_sent){
 			m_owner_sent = true;
 			const ss_ token = m_app->owner_token_for(get_address());
-			if(!token.empty())
+			if(!token.empty()){
 				send_packet("accounts:owner_token", token);
+				send_packet("launch:untrusted", m_app->local_server_launch());
+			}
 		}
 		// The names and their hashes are the main thread's, because
 		// get_file_path() answers out of this the moment anything asks

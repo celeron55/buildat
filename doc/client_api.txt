@@ -466,7 +466,11 @@ buildat.safe.local_server_running() -> bool
 buildat.safe.start_local_server(app[, launch]) -> true, or false and why
 - Start a local server of an app list_apps() answers. launch is key=value
   lines for the server's -u. Refused to a chunk a server sent, as
-  stop_local_server is.
+  stop_local_server is. A running server of the same app that sent the
+  owner's client launch:reusable "1" (it holds no world; vanilla does) is
+  kept by leave_to_menu and reused here: true, and the launch goes to it as
+  launch:untrusted on the next connection, which the app reads in place of
+  -u. Any stop, and a "0" from it, ends that.
 buildat.safe.stop_local_server(force) -> true, or false and why
 - Ask the local server to stop, or kill it when force is true.
 buildat.safe.local_server_state() -> port or nil, status
