@@ -44,7 +44,6 @@ local CONTINUE_MAX = 10
 local SEARCH_MIN = 2
 local SEARCH_CAP = 20
 local ROW_HEIGHT = 28
-local ICON_SIZE = 20
 local PANEL_WIDTH = 300
 local GAME_RUNNING = "empty (game is running)"
 
@@ -425,64 +424,6 @@ local function screen(desc, width, heading, query)
 	return root, window
 end
 
--- A list of rows in a viewport that clips it and scrolls by the selection
-local function list_view(parent, width, height)
-	local viewport = parent:CreateChild("UIElement")
-	viewport.clipChildren = true
-	viewport.enabled = true
-	-- **The layout is set in fit(), once the rows are in**: a vertical
-	-- layout is redone for every child added, so 300 rows took 1.8 s
-	-- where 50 took 30 ms ([SEARCH_CAP])
-	local list = viewport:CreateChild("UIElement")
-	list:SetFixedWidth(width)
-	list.enabled = true
-	local view = {viewport = viewport, list = list}
-	function view:header(s)
-		text(list, s, 13, "dim"):SetFixedHeight(ROW_HEIGHT - 4)
-	end
-	function view:row(e, badge)
-		local b = list:CreateChild("Button")
-		b:SetStyleAuto()
-		b:SetName("Button")
-		b:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(10, 2, 10, 2))
-		b:SetFixedHeight(ROW_HEIGHT)
-		-- The action's own icon, small enough to keep the row's height;
-		-- an empty one where there is none, so that the labels line up
-		local tex = e.icon and magic.cache:GetResource("Texture2D", e.icon)
-		local icon = b:CreateChild(tex and "BorderImage" or "UIElement")
-		icon:SetFixedSize(ICON_SIZE, ICON_SIZE)
-		if tex then
-			-- A game's own icon is pixel art
-			tex.filterMode = magic.FILTER_NEAREST
-			icon.texture = tex
-			icon.blendMode = magic.BLEND_ALPHA
-		end
-		local label = text(b, e.label)
-		label:SetName("ButtonText")
-		label:SetFixedWidth(math.floor(width * 0.62))
-		label:SetAlignment(HA_LEFT, VA_CENTER)
-		text(b, badge or e.badge or "", 12, "dim"):SetAlignment(HA_LEFT,
-				VA_CENTER)
-		return b
-	end
-	function view:fit()
-		list:SetLayout(LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
-		viewport:SetFixedSize(width, math.max(ROW_HEIGHT,
-				math.min(height, list.height)))
-	end
-	function view:show(button)
-		local y = button.position.y
-		local top = -list.position.y
-		local h = viewport.height
-		if y < top then
-			list:SetPosition(0, -y)
-		elseif y + ROW_HEIGHT > top + h then
-			list:SetPosition(0, -(y + ROW_HEIGHT - h))
-		end
-	end
-	return view
-end
-
 -- The keys a typed search takes: a character, Backspace, Escape to
 -- clear. Answers the new query, or nil for a key that is not the search's.
 local function search_key(key, query)
@@ -504,7 +445,7 @@ local function home(query)
 	local width = math.min(magic.ui.root.width - 40, 760)
 	local root, window = screen("launch_menu_v2", width,
 			"Type to search apps, saves and servers", query)
-	local view = list_view(window, width - 32,
+	local view = ui_utils.list_view(window, width - 32,
 			magic.ui.root.height - 24 - 160)
 	local items = {}
 	local function row(e, badge, run)
@@ -654,7 +595,7 @@ browse = function(kind, query, by, filter)
 	body:SetLayout(narrow and LM_VERTICAL or LM_HORIZONTAL, 12,
 			magic.IntRect(0, 0, 0, 0))
 	local room = magic.ui.root.height - 24 - 120 - (narrow and 200 or 0)
-	local view = list_view(body, list_w, room)
+	local view = ui_utils.list_view(body, list_w, room)
 	local panel = body:CreateChild("UIElement")
 	panel:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
 	panel:SetFixedWidth(narrow and width - 32 or PANEL_WIDTH)
@@ -840,7 +781,8 @@ settings = function()
 	local width = math.min(magic.ui.root.width - 40, 760)
 	local root, window = screen("launch_menu_v2 settings", width,
 			"Settings", "")
-	local view = list_view(window, width - 32, magic.ui.root.height - 200)
+	local view = ui_utils.list_view(window, width - 32,
+			magic.ui.root.height - 200)
 	local items = {}
 	local function row(e, run)
 		items[#items + 1] = {button = view:row(e), entry = e, action = run}
@@ -902,7 +844,8 @@ controls = function(focus)
 	local width = math.min(magic.ui.root.width - 40, 760)
 	local root, window = screen("launch_menu_v2 keys", width,
 			"Keys   (Enter and a key binds; Backspace resets)", "")
-	local view = list_view(window, width - 32, magic.ui.root.height - 200)
+	local view = ui_utils.list_view(window, width - 32,
+			magic.ui.root.height - 200)
 	local rows = {}
 	local function row(label, key, note, set, reset, unbind)
 		rows[#rows + 1] = {button = view:row({label = label},

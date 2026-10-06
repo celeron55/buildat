@@ -782,6 +782,172 @@ function M.safe.vertical_menu(root, options)
 	return menu
 end
 
+-- **A list in a viewport that clips it** and scrolls by moving it
+-- (launch_menu_v2's, shared since [HEARTH_UI]). Its rows are anything:
+-- view:row() makes the menus' one-line button, and a caller with rows of
+-- its own (a forum message: a box of wrapped text, its height its own)
+-- creates them on view.list and calls fit().
+--
+--   local view = ui_utils.list_view(parent, width, height, {
+--       row_height = 28, icon_size = 20, label_share = 0.62, spacing = 2,
+--       wheel = nil, follow_focus = false})
+--   view:header(s, size, color)  a heading row; dim, 13 by default
+--   view:row(e, badge)           a Button: e.icon (a texture, or none),
+--                                e.label, and badge (or e.badge) dim after
+--   view:fit()                   lays the rows out; again after adding more
+--   view:show(e)                 scrolls so that e is in view
+--   view:scroll(dy)              by dy pixels, clamped; math.huge: the end
+--
+-- **The layout is set in fit(), once the rows are in**: a vertical layout
+-- is redone for every child added, so 300 rows took 1.8 s where 50 took
+-- 30 ms ([SEARCH_CAP]). Rows added after fit() are laid out one by one,
+-- which is fine for a few (a chat's new line).
+-- **What scrolls it**: the caller's show() and scroll() -- a menu's
+-- selection (bind_button_menu's on_change -> show), which owns the wheel
+-- there. options.wheel: the wheel over the list scrolls it, this many
+-- pixels a click, for a list read rather than walked. options.follow_focus:
+-- after a key, the row holding the focus is scrolled into view, for a list
+-- walked by keyboard_page.
+-- simplified: no scroll bar.
+function M.safe.list_view(parent, width, height, options)
+	options = options or {}
+	local row_height = options.row_height or 28
+	local icon_size = options.icon_size or 20
+	local viewport = parent:CreateChild("UIElement")
+	viewport.clipChildren = true
+	viewport.enabled = true
+	local list = viewport:CreateChild("UIElement")
+	list:SetFixedWidth(width)
+	list.enabled = true
+	local view = {viewport = viewport, list = list}
+	if options.wheel or options.follow_focus then
+		local subs = {}
+		local pending = false
+		local function on(event, fn)
+			subs[event] = magic.SubscribeToEvent(event, function(t, d)
+				if gone(viewport) then
+					for e, sub in pairs(subs) do
+						magic.UnsubscribeFromEvent(e, sub)
+					end
+					return
+				end
+				if shown(viewport) then
+					fn(d)
+				end
+			end)
+		end
+		if options.wheel then
+			on("MouseWheel", function(d)
+				local p, at = magic.input.mousePosition, viewport.screenPosition
+				if p.x >= at.x and p.x < at.x + viewport.width and
+						p.y >= at.y and p.y < at.y + viewport.height then
+					view:scroll(-d:GetInt("Wheel") * options.wheel)
+				end
+			end)
+		end
+		if options.follow_focus then
+			on("KeyDown", function() pending = true end)
+			-- The frame after the key, when the focus has moved
+			on("Update", function()
+				if not pending then
+					return
+				end
+				pending = false
+				-- Which row holds the focus: the focus named for a moment
+				-- and looked for under each row -- a script's element has
+				-- no parent to read, and its wrapper is not the same table
+				-- twice
+				local f = magic.ui.focusElement
+				if not f then
+					return
+				end
+				local was = f:GetName()
+				f:SetName("__list_view_focus")
+				local function has(e)
+					if e:GetName() == "__list_view_focus" then
+						return true
+					end
+					for i = 0, e:GetNumChildren() - 1 do
+						local c = e:GetChild(i)
+						if c and has(c) then
+							return true
+						end
+					end
+					return false
+				end
+				for i = 0, list:GetNumChildren() - 1 do
+					local r = list:GetChild(i)
+					if r and has(r) then
+						view:show(r)
+						break
+					end
+				end
+				f:SetName(was)
+			end)
+		end
+	end
+	local function text(at, s, size, color)
+		local t = at:CreateChild("Text")
+		t:SetStyleAuto()
+		t.text = s
+		if size then t:SetFontSize(size) end
+		if color then t.color = magic.Color(M.safe.rgb(color)) end
+		return t
+	end
+	function view:header(s, size, color)
+		local t = text(list, s, size or 13, color or "dim")
+		t:SetFixedHeight(math.max(t.height, row_height - 4))
+		return t
+	end
+	function view:row(e, badge)
+		local b = list:CreateChild("Button")
+		b:SetStyleAuto()
+		b:SetName("Button")
+		b:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(10, 2, 10, 2))
+		b:SetFixedHeight(row_height)
+		-- The row's own icon, small enough to keep its height; an empty
+		-- one where there is none, so that the labels line up
+		local tex = e.icon and magic.cache:GetResource("Texture2D", e.icon)
+		local icon = b:CreateChild(tex and "BorderImage" or "UIElement")
+		icon:SetFixedSize(icon_size, icon_size)
+		if tex then
+			-- A game's own icon is pixel art
+			tex.filterMode = magic.FILTER_NEAREST
+			icon.texture = tex
+			icon.blendMode = magic.BLEND_ALPHA
+		end
+		local label = text(b, e.label)
+		label:SetName("ButtonText")
+		label:SetFixedWidth(math.floor(width * (options.label_share or 0.62)))
+		label:SetAlignment(HA_LEFT, VA_CENTER)
+		text(b, badge or e.badge or "", 12, "dim"):SetAlignment(HA_LEFT,
+				VA_CENTER)
+		return b
+	end
+	function view:fit()
+		list:SetLayout(LM_VERTICAL, options.spacing or 2,
+				magic.IntRect(0, 0, 0, 0))
+		viewport:SetFixedSize(width, math.max(row_height,
+				math.min(height, list.height)))
+		view:scroll(0)
+	end
+	function view:scroll(dy)
+		local most = math.max(0, list.height - viewport.height)
+		local top = math.min(most, math.max(0, -list.position.y + dy))
+		list:SetPosition(0, -top)
+	end
+	function view:show(e)
+		local y = e.position.y
+		local top = -list.position.y
+		if y < top then
+			view:scroll(y - top)
+		elseif y + e.height > top + viewport.height then
+			view:scroll(y + e.height - top - viewport.height)
+		end
+	end
+	return view
+end
+
 -- A list too long for the screen, a page at a time.
 --
 -- The items are the menu's own buttons, so the keyboard walks them like any
