@@ -1218,6 +1218,33 @@ local function build_inst_data()
 	end
 end
 
+-- Where a selected thing is in the plan, as its X and Z fields have it:
+-- an instance's middle, a wall's or a room's nodes' average, a node; nil
+-- for anything else
+function M.sel_pos(id, kind)
+	local e = doc.ents[id]
+	if not e then
+		return nil
+	end
+	if kind == "instance" then
+		local it = inst_data[id]
+		return it and it.x, it and it.z
+	elseif kind == "node" then
+		return node_pos(id)
+	end
+	local ns = kind == "wall" and {e.ints.a, e.ints.b} or
+			kind == "room" and e.lists.nodes
+	if not ns or #ns == 0 then
+		return nil
+	end
+	local sx, sz = 0, 0
+	for _, n in ipairs(ns) do
+		local x, z = node_pos(n)
+		sx, sz = sx + x, sz + z
+	end
+	return sx / #ns, sz / #ns
+end
+
 local function instances_of(def)
 	local n = 0
 	for _, e in ipairs(doc.of_type("instance")) do
@@ -10437,6 +10464,26 @@ local function draw_overlay()
 				world_label(f.ax + f.ux * t, 0, f.az + f.uz * t,
 						k .. ": " .. mm_text(math.abs(b - a)))
 			end
+		end
+	end
+	-- **How far the selected thing has moved since it was selected** (user,
+	-- 2026-10-06), by drags and the movement keys alike, in X and Z
+	local pk = S.primary and S.sel[S.primary]
+	local px, pz
+	if pk then
+		px, pz = M.sel_pos(S.primary, pk)
+	end
+	local so = M.sel_origin
+	if not px then
+		M.sel_origin = nil
+	elseif not so or so.id ~= S.primary then
+		M.sel_origin = {id = S.primary, x = px, z = pz}
+	else
+		local dx, dz = px - so.x, pz - so.z
+		if math.abs(dx) >= 0.5 or math.abs(dz) >= 0.5 then
+			-- Off the middle, where a wall's length and a door's gap are
+			world_label(px, 0, pz + M.px(40), string.format("X %+d mm\nZ %+d mm",
+					math.floor(dx + 0.5), math.floor(dz + 0.5)))
 		end
 	end
 	-- The Measure tool's points: each segment's length on it, the total at
