@@ -575,6 +575,20 @@ local function rewalk(page)
 	end
 end
 
+-- An item of the page removed: the page was redrawn after the frame a
+-- click re-read it, as Hearth's is when its server answers, and the new
+-- buttons have no letters yet.
+-- simplified: items added with none removed are not noticed until the
+-- next key or click; ElementAdded (not in safe_events) would catch them.
+local function stale(page)
+	for _, e in ipairs(page.items) do
+		if gone(e) then
+			return true
+		end
+	end
+	return false
+end
+
 local function arrange(page)
 	rewalk(page)
 	local first, inside = nil, false
@@ -618,7 +632,7 @@ function M.safe.keyboard_page(win)
 			arrange(page)
 			log:verbose("keyboard_page: " .. #page.items ..
 					" buttons and fields, letters " .. page.letters:summary())
-		elseif dirty and shown(win) then
+		elseif shown(win) and (dirty or stale(page)) then
 			dirty = false
 			rewalk(page)
 		end
