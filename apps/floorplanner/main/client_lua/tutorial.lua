@@ -124,23 +124,27 @@ return function(doc)
 	-- {text, check, enter}: the text, or a function giving it, says what
 	-- to do and where it is
 	local STEPS = {
-		{"Welcome. This tutorial builds a small house step by step. Type a " ..
-				"name for a new plan in the field and press New plan.",
+		{"Welcome. This tutorial builds a small house step by step.\n" ..
+				"- Type a name for a new plan in the field\n" ..
+				"- Press \"New plan\"",
 				function() return doc.in_plan end},
-		{"A plan opens for viewing, so nothing changes by accident. Press " ..
-				"Start editing at the end of the toolbar.",
+		{"A plan opens for viewing, so nothing changes by accident.\n" ..
+				"- Press \"Start editing\" at the end of the toolbar",
 				function() return doc.can("edit") end},
-		{function() return "Go to the plan view: choose 2D" .. kk("view_2d") ..
-				" in the view dropdown at the left of the toolbar." end,
+		{function() return "Go to the plan view:\n- Choose \"2D\"" .. kk("view_2d") ..
+				" in the view dropdown at the left of the toolbar" end,
 				function() return S().view == "2d" end},
-		{function() return click("Draw a room: pick Room" .. kk("room") .. " in the " ..
-				"toolbar, then click its corners on the floor. Click the " ..
-				"first corner again" .. desk(", or press Enter,") .. " to close it. The room " ..
-				"gets walls and a lamp on its ceiling.") end,
+		{function() return click("Draw a room:\n- Pick \"Room\"" .. kk("room") ..
+				" in the toolbar\n- Click its corners on the floor\n" ..
+				"- Click the first corner again" .. desk(", or press Enter,") ..
+				" to close it\nThe room gets walls and a lamp on its ceiling. " ..
+				(touch and "\"Undo\" and \"Redo\" in the bar" or
+				"Ctrl+Z undoes and Ctrl+Y redoes") ..
+				" a step at a time.") end,
 				function() return #of("room") >= 1 end},
-		{function() return click("Draw a second room beside the first, " ..
-				"starting and ending on the first room's corners, so the two " ..
-				"share a wall.") end,
+		{function() return click("Draw a second room beside the first:\n" ..
+				"- Start and end it on the first room's corners, so the two " ..
+				"share a wall") end,
 				function()
 					local rooms = of("room")
 					for i = 1, #rooms do
@@ -159,18 +163,20 @@ return function(doc)
 					end
 					return false
 				end},
-		{function() return click("A door in the wall between the rooms: " ..
-				"pick Wall items" .. kk("hosted") .. ", check that Kind in its panel says " ..
-				"Door, and click on the wall.") .. props() end,
+		{function() return click("A door in the wall between the rooms:\n" ..
+				"- Pick \"Wall items\"" .. kk("hosted") .. "\n" ..
+				"- Check that \"Kind\" in its panel says \"Door\"\n" ..
+				"- Click on the wall") .. props() end,
 				function() return #instances(3) >= 1 end},
-		{function() return click("A window: with Wall items still picked, " ..
-				"set Kind to Window in the panel, then click an outside " ..
-				"wall.") .. props() end,
+		{function() return click("A window, with \"Wall items\" still picked:\n" ..
+				"- Set \"Kind\" to \"Window\" in the panel\n" ..
+				"- Click an outside wall") .. props() end,
 				function() return #instances(4) >= 1 end},
-		{function() return click("A linked clone shares its shape with the " ..
-				"original: pick Select" .. kk("select") .. ", click the window, press Linked " ..
-				"clone in its panel" .. desk(" (Ctrl+L)") .. ", then click another wall.") ..
-				props() end,
+		{function() return click("A linked clone shares its shape with the original:\n" ..
+				"- Pick \"Select\"" .. kk("select") .. "\n" ..
+				"- Click the window\n" ..
+				"- Press \"Linked clone\" in its panel" .. desk(" (Ctrl+L)") .. "\n" ..
+				"- Click another wall") .. props() end,
 				function()
 					local n = {}
 					for _, w in ipairs(instances(4)) do
@@ -181,9 +187,10 @@ return function(doc)
 					end
 					return false
 				end},
-		{function() return click("A dresser: pick Object" .. kk("box") .. " and drag its " ..
-				"footprint on the floor against a wall, about 1 m by 0.5 m. " ..
-				"Then type a height of 800 in the panel's Height mm.") ..
+		{function() return click("A dresser:\n- Pick \"Object\"" .. kk("box") .. "\n" ..
+				"- Drag its footprint on the floor against a wall, about 1 m " ..
+				"by 0.5 m\n" ..
+				"- Type a height of 800 in the panel's \"Height mm\"") ..
 				props() end,
 				function()
 					for _, i in ipairs(instances(0)) do
@@ -194,14 +201,15 @@ return function(doc)
 					end
 					return false
 				end},
-		{function() return click("Build the lamp from voxels on the " ..
-				"dresser: click the Lamp entry in the palette (the ceiling " ..
-				"lamps made it), pick " ..
-				"Voxels" .. kk("voxel") .. " and go to 3D in the view dropdown" ..
-				kk("view_3d") .. ". Click " ..
-				"the dresser's top to start a volume there, then click on " ..
-				"its voxels for more. The panel's Click says whether a click " ..
-				"places, digs or paints.") .. palette() .. props() end,
+		{function() return click("Build the lamp from voxels on the dresser:\n" ..
+				"- Click the \"Lamp\" entry in the palette (the ceiling " ..
+				"lamps made it)\n" ..
+				"- Pick \"Voxels\"" .. kk("voxel") .. "\n" ..
+				"- Choose \"3D\" in the view dropdown" .. kk("view_3d") .. "\n" ..
+				"- Click the dresser's top to start a volume there\n" ..
+				"- Click on its voxels for more\n" ..
+				"The panel's \"Click\" says whether a click places, digs or " ..
+				"paints.") .. palette() .. props() end,
 				function()
 					for _, i in ipairs(instances(1)) do
 						for _, m in pairs(doc.voxels[i.ints.def] or {}) do
@@ -210,31 +218,35 @@ return function(doc)
 					end
 					return false
 				end},
-		{function() return click("A switch for it: in 2D" .. kk("view_2d") .. ", pick " ..
-				"Wall items" .. kk("hosted") .. ", set Kind to Switch and click a wall. Then " ..
-				"click the switch to select it, press \"Link lamps\" in its " ..
-				"panel, " ..
-				"click the lamp and press Done linking.") .. props() end,
+		{function() return click("A switch for it:\n- Choose \"2D\"" .. kk("view_2d") .. "\n" ..
+				"- Pick \"Wall items\"" .. kk("hosted") .. "\n" ..
+				"- Set \"Kind\" to \"Switch\" and click a wall\n" ..
+				"- Click the switch to select it\n" ..
+				"- Press \"Link lamps\" in its panel\n" ..
+				"- Click the lamp and press \"Done linking\"") .. props() end,
 				function()
 					for _, sw in ipairs(instances(5)) do
 						if #sw.lists.lamps > 0 then return true end
 					end
 					return false
 				end},
-		{function() return click("Stairs: click the drywall entry in the " ..
-				"palette (what is made gets the entry chosen), pick Object" ..
-				kk("box") .. ", set Shape to stairs in its panel and drag their " ..
-				"footprint in a room. They climb along their depth.") ..
-				props() end,
+		{function() return click("Stairs:\n" ..
+				"- Click the \"drywall\" entry in the palette (what is made " ..
+				"gets the entry chosen)\n" ..
+				"- Pick \"Object\"" .. kk("box") .. "\n" ..
+				"- Set \"Shape\" to \"stairs\" in its panel\n" ..
+				"- Drag their footprint in a room\n" ..
+				"They climb along their depth.") .. props() end,
 				function() return #instances(6) >= 1 end},
-		{"A floor above: press the floor's button in the toolbar (it says " ..
-				"its name), then Add a floor above. The new floor is edited " ..
-				"now, the one below drawn under it.",
+		{"A floor above:\n" ..
+				"- Press the floor's button in the toolbar (it says its name)\n" ..
+				"- Press \"Add a floor above\"\n" ..
+				"The new floor is edited now, the one below drawn under it.",
 				function() return #of("layout") >= 2 end},
-		{function() return click("Draw a room on the new floor with the " ..
-				"Room tool, over the one below. In the plan view (2D" ..
-				desk(", " .. k("view_2d")) .. ") the floor below shows faintly under it to line up with.")
-				end,
+		{function() return click("- Draw a room on the new floor with \"Room\", over the " ..
+				"one below\nIn the plan view (\"2D\"" ..
+				desk(", " .. k("view_2d")) .. ") the floor below shows " ..
+				"faintly under it to line up with.") end,
 				function()
 					local cur = S().layout
 					for _, r in ipairs(of("room")) do
@@ -245,20 +257,20 @@ return function(doc)
 					end
 					return false
 				end},
-		{"Back to the ground floor: press the floor's button and choose the " ..
-				"first one in the list.",
+		{"Back to the ground floor:\n" ..
+				"- Press the floor's button\n" ..
+				"- Choose the first one in the list",
 				function() return S().layout == ground() end},
-		{function() return touch and "Walk in the house: choose Walk in the " ..
-				"view dropdown. A finger at the lower left walks, another " ..
-				"turns the view." or "Walk in the house: choose Walk" ..
-				kk("view_walk") .. " in the view dropdown. " .. k("forward") ..
+		{function() return touch and "Walk in the house:\n- Choose \"Walk\" in the " ..
+				"view dropdown\nA finger at the lower left walks, another " ..
+				"turns the view." or "Walk in the house:\n- Choose \"Walk\"" ..
+				kk("view_walk") .. " in the view dropdown\n" .. k("forward") ..
 				", " .. k("left") .. ", " .. k("back") .. " and " .. k("right") ..
-				" walk; drag with the " ..
-				"right mouse button to turn." end,
+				" walk; drag with the right mouse button to turn." end,
 				function() return S().view == "walk" end},
-		{function() return touch and "Open the door: walk to it and tap it." or
-				"Open the door: point at it and press " .. k("use") ..
-				" (or right click it)."
+		{function() return touch and "Open the door:\n- Walk to it and tap it" or
+				"Open the door:\n- Point at it and press " .. k("use") ..
+				" (or right click it)"
 				end,
 				function()
 					for _, d in ipairs(instances(3)) do
@@ -267,32 +279,34 @@ return function(doc)
 					end
 					return false
 				end},
-		{function() return touch and "Switch the lamp: tap the switch on the " ..
-				"wall." or "Switch the lamp: point at the switch and press " ..
-				k("use") .. "." end,
+		{function() return touch and "Switch the lamp:\n- Tap the switch on the " ..
+				"wall" or "Switch the lamp:\n- Point at the switch and press " ..
+				k("use") end,
 				function() return lamps_state() ~= mark.lamps end,
 				function() mark.lamps = lamps_state() end},
-		{function() return click("Switch the lamp on again if it is off. " ..
-				"The light is the plan's place and moment: open the Menu, " ..
-				"Plan settings, and type an evening time such as 22:00 in " ..
-				"Time, then look at the room in 3D.") end,
+		{function() return click("The light is the plan's place and moment:\n" ..
+				"- Switch the lamp on again if it is off\n" ..
+				"- Open \"Menu\", \"Plan settings\"\n" ..
+				"- Type an evening time such as 22:00 in \"Time\"\n" ..
+				"- Look at the room in 3D") end,
 				function() return math.abs(minute() - mark.minute) >= 60 end,
 				function() mark.minute = minute() end},
-		{"Menu, Client settings: set 3D lighting to Unlit, the plain look " ..
-				"that is lighter to draw.",
+		{"- In \"Menu\", \"Client settings\", set \"3D lighting\" to " ..
+				"\"Unlit\", the plain look that is lighter to draw",
 				function() return S().lighting == "unlit" end},
-		{"And back to PBR in the same place.",
+		{"- And back to \"PBR\" in the same place",
 				function() return S().lighting ~= "unlit" end},
-		{"Menu, Plan settings: set Time-lapse to 1 h/s and watch the day " ..
-				"go round in 3D; off stops it. Daylight: Temporary changes " ..
-				"only your own view, which anyone may do.",
+		{"- In \"Menu\", \"Plan settings\", set \"Time-lapse\" to " ..
+				"\"1 h/s\"\n- Watch the day go round in 3D; \"off\" stops it\n" ..
+				"\"Daylight: Temporary\" changes only your own view, which " ..
+				"anyone may do.",
 				function()
 					local st = doc.settings and doc.settings()
 					local t = S().sun_temp
 					return (st and st.ints.lapse ~= 0) or (t and t.lapse ~= 0)
 				end},
 		{"That is the basics. Backups, members, copying and exporting are " ..
-				"in the Menu. Press End to close this.",
+				"in \"Menu\".\n- Press \"End\" to close this",
 				function() return false end},
 	}
 

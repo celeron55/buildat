@@ -35,7 +35,7 @@ for i, t in ipairs(texts(true)) do
 	end
 end
 local all = table.concat(texts(false), "\n")
-assert(all:find("Room %(P%)"), "the rebound Room key")
+assert(all:find("\"Room\" %(P%)"), "the rebound Room key")
 assert(not all:find("%(R%)"), "the default Room key")
 assert(all:find("Ctrl%+L") and all:find("Enter"), "the desktop's shortcuts")
 print("tutorial_text: ok")

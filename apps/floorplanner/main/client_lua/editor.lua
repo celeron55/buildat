@@ -569,7 +569,9 @@ local function node_pos(id)
 			return d.x, d.z
 		elseif d.kind == "move" and d.nodes[id] then
 			local n = doc.ents[id].ints
-			return n.x + d.dx, n.z + d.dz
+			-- A node sliding along the walls it is on (drag_slides)
+			local o = d.nd and d.nd[id]
+			return n.x + (o and o[1] or d.dx), n.z + (o and o[2] or d.dz)
 		end
 	end
 	-- Where somebody else's drag has it
@@ -1044,6 +1046,50 @@ local function voxel_bounds(def)
 	return b
 end
 
+-- Whether anything is selected that the movement keys would move: the
+-- Nodes tool's nodes, else the selection
+function M.selected_any()
+	return next(S.tool == "node" and S.nodes or S.sel) ~= nil
+end
+
+-- **An opening keeps its place in the world when its wall's ends move**
+-- (a playtest, 2026-10-06): it keeps its distance from the end that
+-- stayed. With both ends moved by the same, the wall's own move, it goes
+-- with the wall. With both moved apart, its old place is projected onto
+-- the new line. Clamped into the wall.
+-- simplified: only while a drag here or a preview of another's moves the
+-- ends, and the drag's end sends the result; a node's X or Z typed in its
+-- panel moves the openings with the a end as before
+function M.kept_along(along, host, w)
+	local wd = wall_data[host]
+	local a, b = wd and doc.ents[wd.a_node], wd and doc.ents[wd.b_node]
+	if not (a and b) then
+		return along
+	end
+	local ax0, az0, bx0, bz0 = a.ints.x, a.ints.z, b.ints.x, b.ints.z
+	local dax, daz, dbx, dbz = wd.ax - ax0, wd.az - az0, wd.bx - bx0, wd.bz - bz0
+	local am, bm = dax ~= 0 or daz ~= 0, dbx ~= 0 or dbz ~= 0
+	if (not am and not bm) or (dax == dbx and daz == dbz) then
+		return along
+	end
+	local l = geom.len(wd.bx - wd.ax, wd.bz - wd.az)
+	local l0 = geom.len(bx0 - ax0, bz0 - az0)
+	if l == 0 or l0 == 0 then
+		return along
+	end
+	local t
+	if not am then
+		t = along
+	elseif not bm then
+		t = l - (l0 - along)
+	else
+		local px, pz = ax0 + (bx0 - ax0) * along / l0, az0 + (bz0 - az0) * along / l0
+		t = ((px - wd.ax) * (wd.bx - wd.ax) + (pz - wd.az) * (wd.bz - wd.az)) / l
+	end
+	local h = math.min(w / 2, l / 2)
+	return math.max(h, math.min(l - h, t))
+end
+
 local function build_inst_data()
 	inst_data = {}
 	local d = S.drag
@@ -1073,6 +1119,8 @@ local function build_inst_data()
 				elseif moved then
 					along = geom.snap(along + d.dx * f.ux + d.dz * f.uz,
 							grid_step())
+				elseif not (pv and pv.along) then
+					along = M.kept_along(along, i.host, p.w)
 				end
 				local mid = (f.lo - f.ro) / 2
 				local trim = p.kind == KIND.opening and 0 or p.trim
@@ -3685,15 +3733,20 @@ function M.angle_snap(x, z, ends)
 		local dx, dz = x - p[1], z - p[2]
 		local l = geom.len(dx, dz)
 		if l > 1 then
-			local a = math.rad(math.floor(math.deg(math.atan2(dz, dx)) / step + 0.5) *
-					step)
-			local ux, uz = math.cos(a), math.sin(a)
-			local t = dx * ux + dz * uz
-			local perp = math.abs(dx * uz - dz * ux)
-			local cap = math.max(t * tol, r)
-			if t > 0 and perp <= cap then
-				cands[#cands + 1] = {p = p, ux = ux, uz = uz, t = t, perp = perp,
-						cap = cap}
+			-- The step's angle nearest, and the wall's own (p.own, radians):
+			-- a node slides along its wall at any angle (a playtest,
+			-- 2026-10-06)
+			local angles = {math.rad(math.floor(math.deg(math.atan2(dz, dx)) /
+					step + 0.5) * step), p.own}
+			for _, a in ipairs(angles) do
+				local ux, uz = math.cos(a), math.sin(a)
+				local t = dx * ux + dz * uz
+				local perp = math.abs(dx * uz - dz * ux)
+				local cap = math.max(t * tol, r)
+				if t > 0 and perp <= cap then
+					cands[#cands + 1] = {p = p, ux = ux, uz = uz, t = t, perp = perp,
+							cap = cap}
+				end
 			end
 		end
 	end
@@ -5411,13 +5464,20 @@ local function build_props()
 			if v then set(id, {ints = {[name] = v}}) end
 		end)
 	end
+	-- **The panel's first line names what is selected and the part it was
+	-- picked by** (a playtest, 2026-10-06), in its own colour
+	local function heading(t)
+		return panel.label(props, t, magic.Color(1.0, 0.75, 0.3))
+	end
+	local PART_NAMES = {mat = "the frame", mat_leaf = "the leaf",
+			mat_glass = "the glass"}
 	local count = sel_count()
 	if S.tool == "node" then
 		local n = 0
 		for _ in pairs(S.nodes) do
 			n = n + 1
 		end
-		panel.label(props, n .. " nodes selected")
+		heading(n .. " nodes selected")
 		-- One node's place, to be read off another and typed in (user)
 		if n == 1 then
 			local id = next(S.nodes)
@@ -5439,7 +5499,7 @@ local function build_props()
 				delete_selected)
 		end
 	elseif count > 1 then
-		panel.label(props, count .. " selected")
+		heading(count .. " selected")
 		-- Two corners: a room split or two combined there
 		if count == 2 then
 			local a = next(S.sel)
@@ -5467,7 +5527,8 @@ local function build_props()
 		local i = sel.ints
 		local p = doc.ents[i.def].ints
 		local links = instances_of(i.def)
-		panel.label(props, KIND_NAMES[p.kind] .. " " .. sel.id ..
+		local part = PART_NAMES[S.sel_face[sel.id]]
+		heading(KIND_NAMES[p.kind] .. " " .. sel.id .. (part and ", " .. part or "") ..
 				(links > 1 and ("   linked x" .. links) or ""))
 		-- **A window's sizes as its frame's or its glass's** (user): the
 		-- frame's are what is stored, and the glass is inset from it by
@@ -5586,7 +5647,7 @@ local function build_props()
 		for _ in pairs(doc.voxels[i.def] or {}) do
 			n = n + 1
 		end
-		panel.label(props, "Voxels " .. sel.id .. ": " .. n .. (links > 1 and
+		heading("Voxels " .. sel.id .. ": " .. n .. (links > 1 and
 				("   linked x" .. links) or ""))
 		int_field(i.def, "Voxel mm", "voxel_size", p.voxel_size)
 		int_field(sel.id, "X mm", "x", i.x)
@@ -5637,7 +5698,7 @@ local function build_props()
 		local def = doc.ents[i.def]
 		local p = def.ints
 		local links = instances_of(i.def)
-		panel.label(props, KIND_NAMES[p.kind] .. " " .. sel.id .. (links > 1 and
+		heading(KIND_NAMES[p.kind] .. " " .. sel.id .. (links > 1 and
 				("   linked x" .. links) or ""))
 		int_field(i.def, "Width mm", "w", p.w)
 		if p.kind == KIND.stairs then
@@ -5747,7 +5808,9 @@ local function build_props()
 		local ax, az = node_pos(w.a)
 		local bx, bz = node_pos(w.b)
 		local l = geom.len(bx - ax, bz - az)
-		panel.label(props, "Wall " .. sel.id)
+		local face = S.sel_face[sel.id]
+		heading("Wall " .. sel.id .. (face and ", the " .. (face == "core" and
+				"top" or face .. " face") or ""))
 		panel.field(props, "Length mm", math.floor(l + 0.5), function(t)
 			local v = num(t)
 			if v and v > 0 and l > 0 then
@@ -5767,7 +5830,6 @@ local function build_props()
 		panel.check(props, "Hangs from the ceiling", w.hang == 1, function()
 			set(sel.id, {ints = {hang = 1 - w.hang}})
 		end)
-		local face = S.sel_face[sel.id]
 		local face_mat = face == "left" and w.mat_left or face == "right" and
 				w.mat_right or face == "core" and w.mat_core or nil
 		panel.label(props, face and ("Selected by its " .. (face == "core" and
@@ -5784,7 +5846,7 @@ local function build_props()
 				delete_selected)
 	elseif sel and sel.type == "image" then
 		local i = sel.ints
-		panel.label(props, "Picture: " .. sel.strs.file)
+		heading("Picture: " .. sel.strs.file)
 		int_field(sel.id, "mm per 1000 px", "scale", i.scale)
 		panel.field(props, "Opacity %", i.opacity / 10, function(t)
 			local v = tonumber(t)
@@ -5825,7 +5887,8 @@ local function build_props()
 				delete_selected)
 	elseif sel and sel.type == "room" then
 		local r = room_data[sel.id]
-		panel.label(props, "Room " .. sel.id)
+		heading("Room " .. sel.id .. " \"" .. sel.strs.name .. "\", the " ..
+				(S.sel_face[sel.id] == "ceiling" and "ceiling" or "floor"))
 		panel.field(props, "Name", sel.strs.name, function(t)
 			set(sel.id, {strs = {name = t}})
 		end, 120, true)
@@ -5844,7 +5907,7 @@ local function build_props()
 		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
 				delete_selected)
 	elseif sel and sel.type == "node" then
-		panel.label(props, "Node " .. sel.id)
+		heading("Node " .. sel.id)
 		int_field(sel.id, "X mm", "x", sel.ints.x)
 		int_field(sel.id, "Z mm", "z", sel.ints.z)
 		panel.button(props, "Delete (" .. keys.name("delete") .. ")",
@@ -7441,6 +7504,53 @@ do
 			local inst, nodes = moved_by(S.sel)
 			S.drag = {kind = "move", inst = inst, nodes = nodes, dx = 0, dz = 0,
 					moved = true}
+			M.drag_slides(S.drag, S.sel)
+		end
+	end
+
+	-- **A wall moved slides its ends along the walls they are on**
+	-- (a playtest, 2026-10-06): an end whose other walls lie on one line --
+	-- a corner's one, a T's two halves -- moves only along that line, so
+	-- that wall stays where it is. Only for a selection of walls alone: a
+	-- room moved takes its corners with it. None along a line the moved
+	-- wall itself lies on (a straight wall split in two).
+	function M.drag_slides(d, sel)
+		d.slide = {}
+		for _, kind in pairs(sel) do
+			if kind ~= "wall" then
+				return
+			end
+		end
+		for n in pairs(d.nodes) do
+			local ne = doc.ents[n]
+			local u, one_line, moved = nil, true, {}
+			for _, w in pairs(wall_data) do
+				local o = w.a_node == n and w.b_node or w.b_node == n and w.a_node
+				local oe = o and doc.ents[o]
+				if oe and ne then
+					local dx, dz = oe.ints.x - ne.ints.x, oe.ints.z - ne.ints.z
+					local l = geom.len(dx, dz)
+					if l > 0 then
+						dx, dz = dx / l, dz / l
+						if d.nodes[o] then
+							moved[#moved + 1] = {dx, dz}
+						elseif not u then
+							u = {dx, dz}
+						elseif math.abs(u[1] * dz - u[2] * dx) > 0.01 then
+							one_line = false
+						end
+					end
+				end
+			end
+			if u and one_line then
+				local along_moved = false
+				for _, m in ipairs(moved) do
+					along_moved = along_moved or math.abs(m[1] * u[2] - m[2] * u[1]) < 0.1
+				end
+				if not along_moved then
+					d.slide[n] = u
+				end
+			end
 		end
 	end
 
@@ -7520,13 +7630,30 @@ do
 			d.angle_lines = nil
 			-- Off nodes and edges, the walls' angles before the grid
 			if x and not ref.node and not ref.edge then
-				local ends = {}
-				for _, w in pairs(wall_data) do
-					local other = w.a_node == d.id and w.b_node or
-							w.b_node == d.id and w.a_node or nil
-					if other and other ~= d.id then
+				-- Its walls' other ends, and its rooms' corners either side
+				-- (a corner with no walls gets right angles too: a playtest,
+				-- 2026-10-06), each with the line it is on now
+				local ends, seen = {}, {}
+				local n0 = doc.ents[d.id].ints
+				local function add(other)
+					if other and other ~= d.id and not seen[other] then
+						seen[other] = true
 						local ox, oz = node_pos(other)
-						ends[#ends + 1] = {ox, oz}
+						ends[#ends + 1] = {ox, oz,
+								own = math.atan2(n0.z - oz, n0.x - ox)}
+					end
+				end
+				for _, w in pairs(wall_data) do
+					add(w.a_node == d.id and w.b_node or
+							w.b_node == d.id and w.a_node or nil)
+				end
+				for _, r in ipairs(of_type("room")) do
+					local ns = r.lists.nodes
+					for k, n in ipairs(ns) do
+						if n == d.id then
+							add(ns[(k - 2) % #ns + 1])
+							add(ns[k % #ns + 1])
+						end
 					end
 				end
 				local cx, cz = cursor_floor()
@@ -7545,6 +7672,7 @@ do
 				d.dx = geom.snap(x - S.press.x, g)
 				d.dz = geom.snap(z - S.press.z, g)
 			end
+			M.slide_deltas(d)
 			-- **A door, window or opening dragged onto another wall goes
 			-- into it** (user): where the pointer is on that wall
 			d.rehost = nil
@@ -7569,6 +7697,15 @@ do
 		S.dirty = true
 	end
 
+	-- The sliding ends' own moves: the drag's projected on their lines
+	function M.slide_deltas(d)
+		d.nd = {}
+		for n, u in pairs(d.slide or {}) do
+			local t = d.dx * u[1] + d.dz * u[2]
+			d.nd[n] = {math.floor(u[1] * t + 0.5), math.floor(u[2] * t + 0.5)}
+		end
+	end
+
 	-- The screen point of a plan point, in pixels
 	local function to_screen(x, z)
 		local cam = S.view == "2d" and cam2d or cam3d
@@ -7579,8 +7716,24 @@ do
 
 	-- simplified: a drag is sent when it is released, so others see it land
 	-- rather than move; streaming it goes with the drag locks in [FP_UNDO]
+	-- The openings not dragged that keep their place (M.kept_along): their
+	-- `along` as the drag's last build has it, where it changed
+	local function kept_ops(d, ops)
+		for id, it in pairs(inst_data) do
+			local e = doc.ents[id]
+			local a = it.hosted and math.floor(it.along + 0.5)
+			if a and e and not (d.inst and d.inst[id]) and a ~= e.ints.along then
+				ops[#ops + 1] = {op = "set", ent = {id = id, ints = {along = a}}}
+			end
+		end
+	end
+
 	local function end_drag()
 		local d = S.drag
+		-- Built with the drag's last move, which this frame may not have
+		if d.kind == "node" or d.kind == "move" then
+			rebuild()
+		end
 		S.drag = nil
 		S.dirty = true
 		if d.kind == "node" or d.kind == "move" then
@@ -7643,17 +7796,22 @@ do
 				send(merge_ops(d.id, d.onto))
 				S.nodes = {}
 			else
-				send({{op = "set", ent = {id = d.id, ints = {x = d.x, z = d.z}}}})
+				local ops = {{op = "set", ent = {id = d.id, ints = {x = d.x, z = d.z}}}}
+				kept_ops(d, ops)
+				send(ops)
 			end
 		elseif d.dx ~= 0 or d.dz ~= 0 or d.rehost then
 			local ops = {}
 			for n in pairs(d.nodes) do
 				local p = doc.ents[n] and doc.ents[n].ints
+				local o = d.nd and d.nd[n]
 				if p then
 					ops[#ops + 1] = {op = "set", ent = {id = n,
-							ints = {x = p.x + d.dx, z = p.z + d.dz}}}
+							ints = {x = p.x + (o and o[1] or d.dx),
+							z = p.z + (o and o[2] or d.dz)}}}
 				end
 			end
+			kept_ops(d, ops)
 			for id in pairs(d.inst) do
 				local i = doc.ents[id] and doc.ents[id].ints
 				local it = inst_data[id]
@@ -7671,6 +7829,33 @@ do
 			end
 			send(ops)
 		end
+	end
+
+	-- **The movement keys move the selection** in the plan view (a
+	-- playtest, 2026-10-06): by (dx, dz) as a drag would, one undo step.
+	-- False when nothing selected moves.
+	function M.move_selection(dx, dz)
+		if S.drag then
+			return true
+		end
+		local sel = S.sel
+		if S.tool == "node" then
+			sel = {}
+			for n in pairs(S.nodes) do
+				sel[n] = "node"
+			end
+		end
+		local inst, nodes = moved_by(sel)
+		if not next(inst) and not next(nodes) then
+			return false
+		end
+		local d = {kind = "move", inst = inst, nodes = nodes, dx = dx, dz = dz,
+				moved = true}
+		M.drag_slides(d, sel)
+		M.slide_deltas(d)
+		S.drag = d
+		end_drag()
+		return true
 	end
 
 	local function click()
@@ -8820,6 +9005,11 @@ do
 			doc.notice(S.walk.noclip and "Noclip: walls do not stop you; " ..
 					keys.name("up") .. " and " .. keys.name("down") ..
 					" go up and down" or "Noclip off")
+		elseif S.view == "2d" and doc.can("edit") and M.selected_any() and
+				(is("forward") or is("back") or is("left") or is("right")) then
+			local g = grid_step() * (S.shift and 10 or 1)
+			M.move_selection((is("right") and g or is("left") and -g or 0),
+					(is("forward") and g or is("back") and -g or 0))
 		elseif is("use") then
 			use()
 		elseif is("next_user") then
@@ -8966,6 +9156,10 @@ local function move_camera(dt)
 	if keys.down("right") then r = r + 1 end
 	if keys.down("left") then r = r - 1 end
 	if S.view == "2d" then
+		-- With a selection the keys move it (M.move_selection), a press at a time
+		if doc.can("edit") and M.selected_any() then
+			return
+		end
 		local k = S.span * dt
 		S.cx = S.cx + r * k
 		S.cz = S.cz + f * k
@@ -9716,6 +9910,25 @@ local function draw_overlay()
 			end
 		end
 	end
+	-- **A selection's lines thicker** in the plan view (a playtest,
+	-- 2026-10-06): each three times, a pixel apart across it
+	local function thick(pts, col, ys)
+		if S.view ~= "2d" then
+			return outline(pts, col, ys)
+		end
+		local k = mm_per_px()
+		for i = 1, #pts do
+			local p, q = pts[i], pts[i % #pts + 1]
+			local l = geom.len(q[1] - p[1], q[2] - p[2])
+			if l > 0 then
+				local nx, nz = -(q[2] - p[2]) / l * k, (q[1] - p[1]) / l * k
+				for o = -1, 1 do
+					line(p[1] + nx * o, p[2] + nz * o, q[1] + nx * o, q[2] + nz * o,
+							col)
+				end
+			end
+		end
+	end
 	local dark = magic.Color(0.2, 0.2, 0.25)
 	-- The grid, in the plan view: the snap step where it is at least 8
 	-- pixels, coarser where it is not, and every metre darker
@@ -9826,7 +10039,7 @@ local function draw_overlay()
 	for id, kind in pairs(S.sel) do
 		if kind == "wall" and outlines[id] then
 			local y0, y1 = wall_span(doc.ents[id].ints)
-			outline(outlines[id].pts, accent, S.view ~= "2d" and
+			thick(outlines[id].pts, accent, S.view ~= "2d" and
 					{W(y0) + 0.004, W(y1) + 0.004} or nil)
 			-- The face it was selected by, brighter
 			if S.sel_face[id] then
@@ -9837,15 +10050,29 @@ local function draw_overlay()
 			world_label((w.ax + w.bx) / 2, 0, (w.az + w.bz) / 2,
 					mm_text(geom.len(w.bx - w.ax, w.bz - w.az)))
 		elseif kind == "room" and room_data[id] then
-			outline(room_data[id].pts, accent, S.sel_face[id] == "ceiling" and
+			thick(room_data[id].pts, accent, S.sel_face[id] == "ceiling" and
 					S.view ~= "2d" and {W(room_ceiling(doc.ents[id])) - 0.004} or nil)
 			outline(room_data[id].inner, magic.Color(0.2, 0.6, 1.0))
 		elseif kind == "image" and image_data[id] then
-			outline(image_data[id].foot, accent)
+			thick(image_data[id].foot, accent)
 		elseif kind == "instance" and inst_data[id] then
 			local it = inst_data[id]
-			outline(it.foot, accent, S.view ~= "2d" and
+			thick(it.foot, accent, S.view ~= "2d" and
 					{W(it.y0) + 0.004, W(it.y1) + 0.004} or nil)
+		end
+	end
+	-- **The rooms on a dragged node, outlined** (a playtest, 2026-10-06)
+	local dg = S.drag
+	if dg and (dg.kind == "node" or dg.kind == "move" and next(dg.nodes)) then
+		for id, r in pairs(room_data) do
+			local e = doc.ents[id]
+			for _, n in ipairs(e and e.lists.nodes or {}) do
+				if (dg.kind == "node" and n == dg.id) or
+						(dg.kind == "move" and dg.nodes[n]) then
+					outline(r.pts, magic.Color(1.0, 0.8, 0.3))
+					break
+				end
+			end
 		end
 	end
 	-- The calibration's two points
@@ -10554,6 +10781,25 @@ function M.update(dt)
 	local text = guide_text(S.guide)
 	if hud.text ~= text then
 		hud:SetText(text)
+	end
+	-- **The plan's date and time while a time-lapse runs** (a playtest,
+	-- 2026-10-06), at the top in either view
+	if not M.clock then
+		M.clock = magic.ui.root:CreateChild("Text")
+		M.clock:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 18)
+		M.clock:SetAlignment(magic.HA_CENTER, magic.VA_TOP)
+		M.clock:SetPosition(0, 40)
+		M.clock:SetTextEffect(magic.TE_SHADOW)
+		M.clock.priority = 90
+	end
+	local clock = ""
+	if M.sun().lapse > 0 and not doc.ui_hidden then
+		local m = M.plan_minute()
+		clock = M.daylight.date_text(M.plan_day()) .. string.format("  %02d:%02d",
+				math.floor(m / 60), math.floor(m % 60))
+	end
+	if M.clock.text ~= clock then
+		M.clock:SetText(clock)
 	end
 	draw_overlay()
 	for i = label_i + 1, #label_nodes do
