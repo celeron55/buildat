@@ -2526,6 +2526,14 @@ end
 -- {h = its height in mm, mat = the palette entry}, else nil
 local foundation = nil
 
+-- The time since the last lap into M.laps[name], in ms, over a rebuild
+M.lap_order = {"ground", "data", "walls", "rooms", "openings", "objects",
+		"voxels", "lamps", "images", "rest"}
+function M.lap(name)
+	local t = buildat.get_time_us()
+	M.laps[name] = (M.laps[name] or 0) + (t - M.lap_t) / 1000
+	M.lap_t = t
+end
 local function build_layout(seen_voxels, wells)
 	solids = {}
 	wall_data = {}
@@ -2546,6 +2554,7 @@ local function build_layout(seen_voxels, wells)
 	build_room_data()
 	build_inst_data()
 	M.room_occlusion()
+	M.lap("data")
 	local cut = settings().cut
 	-- A part's triangles, gathered in Lua and handed to the engine by
 	-- commit() in one call (see tri())
@@ -2581,6 +2590,7 @@ local function build_layout(seen_voxels, wells)
 				list[k + 12], list[k + 24], list[k + 36] = occ, occ, occ
 			end
 		end
+		M.lap_tris = M.lap_tris + #list / 36
 		buildat.set_triangle_geometry(g.node, list)
 		TRI_LISTS[g] = nil
 		local cg = g.node:GetComponent("CustomGeometry")
@@ -2700,6 +2710,7 @@ local function build_layout(seen_voxels, wells)
 		end
 	end
 
+	M.lap("walls")
 	for id, r in pairs(room_data) do
 		local e = doc.ents[id]
 		-- The foundation under the floor too, where a room has no walls
@@ -2747,9 +2758,15 @@ local function build_layout(seen_voxels, wells)
 		end
 	end
 
+	M.lap("rooms")
 	local occ_fn = M.tri_occ_fn
 	M.tri_occ_fn = nil
+	local kind
 	for id, it in pairs(inst_data) do
+		if kind then
+			M.lap(kind)
+		end
+		kind = it.hosted and "openings" or "objects"
 		local def = doc.ents[it.def].ints
 		local e = doc.ents[id].ints
 		local occ, a, b = M.inst_occlusion(it)
@@ -2821,8 +2838,11 @@ local function build_layout(seen_voxels, wells)
 			solids[#solids + 1] = {pts = pts, y0 = 0, y1 = 0, floor = true}
 		end
 	end
+	M.lap(kind or "objects")
 	update_voxel_meshes(seen_voxels)
+	M.lap("voxels")
 	build_lamps(geometry)
+	M.lap("lamps")
 	-- The pictures traced over and the material ids are the current
 	-- layout's; seen from above another's are clutter
 	image_data = {}
@@ -2830,6 +2850,7 @@ local function build_layout(seen_voxels, wells)
 		build_images()
 		build_decals()
 	end
+	M.lap("images")
 end
 
 -- The layouts' own inst_data and where each is, for the walker's voxels:
@@ -2839,8 +2860,11 @@ place.layers = {}
 -- simplified: every layout is rebuilt on any change
 rebuild = function()
 	M.build_gen = M.build_gen + 1
+	M.lap_t, M.laps, M.lap_tris = buildat.get_time_us(), {}, 0
+	local t0 = M.lap_t
 	palette_texture()
 	M.build_ground()
+	M.lap("ground")
 	for _, n in ipairs(built) do
 		n:Remove()
 	end
@@ -2934,6 +2958,19 @@ rebuild = function()
 	caps_node.enabled = S.view == "2d"
 	S.daylight_key = nil
 	S.dirty = false
+	M.lap("rest")
+	-- A slow one in the log, by its parts, for what a drag costs
+	-- ([FP_DRAG_COST]); a drag rebuilds each frame
+	local ms = (buildat.get_time_us() - t0) / 1000
+	if ms > 30 then
+		local parts = {}
+		for _, k in ipairs(M.lap_order) do
+			parts[#parts + 1] = string.format("%s %.1f", k, M.laps[k] or 0)
+		end
+		log:info(string.format("rebuild %.1f ms%s, %d triangles: %s", ms,
+				S.drag and " (drag " .. tostring(S.drag.kind) .. ")" or "",
+				M.lap_tris, table.concat(parts, ", ")))
+	end
 end
 end
 
