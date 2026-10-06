@@ -338,10 +338,10 @@ local function build_frame()
 	local inner = frame.width - 16
 	sidebar = frame:CreateChild("UIElement")
 	sidebar:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
-	sidebar:SetFixedWidth(narrow and inner or 150)
+	sidebar:SetFixedWidth(narrow and inner or 180)
 	area = frame:CreateChild("UIElement")
 	area:SetLayout(magic.LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
-	W = narrow and inner or inner - 158
+	W = narrow and inner or inner - 188
 	H = frame.height - 16
 	area:SetFixedSize(W, H)
 	log:info("hearth: frame " .. frame.width .. "x" .. frame.height .. ", page " ..
@@ -561,10 +561,17 @@ local function side(label, key, count, page)
 	local b = sidebar:CreateChild("Button")
 	b:SetStyleAuto()
 	b:SetFixedHeight(24)
-	local t = text(b, (key == section and "> " or "") .. label ..
-			(count > 0 and " (" .. count .. ")" or ""), count > 0 and MAIN or nil)
+	local t = text(b, label .. (count > 0 and " (" .. count .. ")" or ""),
+			count > 0 and MAIN or nil)
 	t:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
 	t.position = magic.IntVector2(6, 0)
+	-- The section shown: an arrow at the right, after the label (the first
+	-- Text, which keyboard_page letters), so the label does not move
+	if key == section then
+		local m = text(b, "►", t.color)
+		m:SetAlignment(magic.HA_RIGHT, magic.VA_CENTER)
+		m.position = magic.IntVector2(-6, 0)
+	end
 	magic.SubscribeToEvent(b, "Released", function()
 		enter(key, page)
 	end)
