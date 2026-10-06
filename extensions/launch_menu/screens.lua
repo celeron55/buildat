@@ -343,6 +343,13 @@ function M.show_connect_to_server()
 	magic.SubscribeToEvent(search, "TextFinished", show_public)
 	local function refresh(ask)
 		starport.fetch(function(rows, info)
+			-- The answer can come after the screen was closed, and its
+			-- elements are gone then
+			local open = false
+			for _, r in ipairs(uistack.main.stack) do
+				if r == root then open = true end
+			end
+			if not open then return end
 			sp_rows = rows
 			sp_title.text = "Public servers: " .. #rows ..
 					(info.hidden > 0 and ", " .. info.hidden ..
