@@ -614,6 +614,10 @@ void PS()
     float spec, power, refl, alpha;
     Surface(vWorldPos.xyz, normal, albedo, spec, power, refl, emissive, alpha);
     albedo *= vColor.rgb;
+    // The technical plan look: no materials, the floors one pale grey and
+    // the ground its tint of it
+    if (cPlanLook > 1.5)
+        albedo = vec3(0.92) * vColor.rgb;
     // A lamp switched off: its vertices' alpha is 0
     emissive *= vColor.a;
     // What of the ambient reaches this face

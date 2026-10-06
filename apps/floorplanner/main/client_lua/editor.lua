@@ -68,7 +68,7 @@ local S = {
 	lighting = buildat.storage_read("lighting") or "pbr",
 	view = "2d",
 	show_ids = false, -- the material id decals
-	plan_look = true, -- the plan view in flat colours (L)
+	plan_look = 1, -- the plan view's look (L): 0 lit, 1 flat, 2 technical
 	tool = "select",
 	voxel_mode = "place", -- the voxel tool's click in 3D
 	angle = 4,      -- index into ANGLE_STEPS: the angle snap
@@ -347,7 +347,10 @@ function M.build_ground()
 		return
 	end
 	local pbr = M.pbr_now()
-	local key = tostring(pbr) .. ":" .. tostring(M.ground_row)
+	-- The technical plan look's ground darker than its floors
+	local tech = S.view == "2d" and S.plan_look == 2
+	local key = tostring(pbr) .. ":" .. tostring(M.ground_row) .. ":" ..
+			tostring(tech)
 	if key == M.ground_key then
 		return
 	end
@@ -370,7 +373,8 @@ function M.build_ground()
 		end
 	end
 	flat_polygon(g, pts, 0, M.UP3,
-			pbr and M.ground_row or magic.Color(0.85, 0.85, 0.83))
+			pbr and M.ground_row or tech and magic.Color(0.6, 0.6, 0.6) or
+			magic.Color(0.85, 0.85, 0.83))
 	g:Commit()
 	g:SetMaterial(0, lit_material)
 end
@@ -616,7 +620,21 @@ end
 
 -- A palette entry's colour as the plan view and the swatches show it: its
 -- own colour with its finish applied, without the pattern
-local function palette_rgb(id)
+local palette_rgb
+
+-- **The technical plan look** (a playtest, 2026-10-06): an object's cap
+-- in one mid grey, not its material's colour
+function M.cap_rgb(mat)
+	return S.plan_look == 2 and 0x9a9a9a or palette_rgb(mat)
+end
+
+-- and its faces, which the shader would make as pale as a floor
+function M.tech_tint()
+	return S.view == "2d" and S.plan_look == 2 and
+			magic.Color(0.65, 0.65, 0.65) or nil
+end
+
+function palette_rgb(id)
 	local e = id and id ~= 0 and doc.ents[id]
 	if not e or e.type ~= "palette" then
 		return 0xb0b0b0
@@ -2753,9 +2771,10 @@ local function build_layout(seen_voxels, wells)
 			local g, node = geometry(e.align == 1 and P.overhead or P.walls)
 			node.position = magic.Vector3(W(it.x), W(it.y), W(it.z))
 			node.rotation = magic.Quaternion(it.pitch, it.yaw, it.roll)
-			local rgb = palette_rgb(def.mat)
+			local rgb = M.cap_rgb(def.mat)
 			box_geometry(g, W(def.w) / 2, W(def.h) / 2, W(def.d) / 2,
-					row(def.mat), nil, nil, nil, not lamp_on(id) and UNLIT or nil)
+					row(def.mat), nil, nil, nil,
+					M.tech_tint() or not lamp_on(id) and UNLIT or nil)
 			commit(g, lit_material)
 			cap(it.foot, it.y0, it.y1, rgb_color(rgb, 0.7), rgb_color(rgb, 0.9))
 			solids[#solids + 1] = {pts = it.foot, y0 = it.y0, y1 = it.y1}
@@ -2764,12 +2783,12 @@ local function build_layout(seen_voxels, wells)
 			local g, node = geometry(e.align == 1 and P.overhead or P.walls)
 			node.position = magic.Vector3(W(it.x), W(it.y), W(it.z))
 			node.rotation = magic.Quaternion(it.pitch, it.yaw, it.roll)
-			local rgb = palette_rgb(def.mat)
+			local rgb = M.cap_rgb(def.mat)
 			local flat = it.pitch % 360 == 0 and it.roll % 360 == 0
 			for _, b in ipairs(geom.stair_steps(def.w, def.h, def.d, def.steps)) do
 				box_geometry(g, W(b[4] - b[1]) / 2, W(b[5] - b[2]) / 2,
 						W(b[6] - b[3]) / 2, row(def.mat), W(b[1] + b[4]) / 2,
-						W(b[2] + b[5]) / 2, W(b[3] + b[6]) / 2)
+						W(b[2] + b[5]) / 2, W(b[3] + b[6]) / 2, M.tech_tint())
 				-- simplified: stairs pitched or rolled are walked as their box
 				if flat then
 					local pts = {}
@@ -5263,8 +5282,13 @@ local function set_view(v)
 		-- The lamps' brightness and the ground go with it
 		S.dirty = true
 	end
-	-- The plan view's look: flat colours, or the materials lit
-	local flat = v == "2d" and S.plan_look and 1 or 0
+	-- The plan view's look: the materials lit or flat, or technical
+	local flat = v == "2d" and S.plan_look or 0
+	if flat ~= S.shown_look then
+		-- The ground's and the objects' caps' colours go with it
+		S.shown_look = flat
+		S.dirty = true
+	end
 	lit_material:SetShaderParameter("PlanLook", flat)
 	glass_material:SetShaderParameter("PlanLook", flat)
 	caps_node.enabled = v == "2d"
@@ -7171,9 +7195,10 @@ do
 			set_view(S.view)
 			client_settings_page()
 		end)
-		panel.check(w, "The plan in flat colours (" .. keys.name("flat") .. ")",
-				S.plan_look, function()
-			S.plan_look = not S.plan_look
+		panel.dropdown(w, "The plan's look (" .. keys.name("flat") .. ")",
+				{{"Materials, lit", 0}, {"Materials, flat colours", 1},
+				{"Technical: no materials", 2}}, S.plan_look, function(v)
+			S.plan_look = v
 			set_view(S.view)
 			client_settings_page()
 		end)
@@ -9199,7 +9224,7 @@ do
 		elseif is("next_user") then
 			go_to_next_user()
 		elseif is("flat") then
-			S.plan_look = not S.plan_look
+			S.plan_look = (S.plan_look + 1) % 3
 			set_view(S.view)
 		elseif is("view_2d") then
 			M.pick_view("2d")
@@ -9448,7 +9473,8 @@ local function plan_symbol(id, it, line)
 	local def = doc.ents[it.def].ints
 	local e = doc.ents[id].ints
 	local f = it.frame
-	local col = magic.Color(0.2, 0.2, 0.25)
+	local col = S.plan_look == 2 and magic.Color(0.1, 0.4, 0.9) or
+			magic.Color(0.2, 0.2, 0.25)
 	local function at(a, c)
 		-- A point a along the wall from the centre, c across it
 		return f.ax + f.ux * (it.along + a) + f.nx * c,
@@ -10217,7 +10243,7 @@ local function draw_overlay()
 		end
 		if buildat.set_line_geometry and not S.drag then
 			local key = M.build_gen .. ":" .. mm_per_px() .. ":" .. cut ..
-					":" .. tostring(S.layout)
+					":" .. tostring(S.layout) .. ":" .. S.plan_look
 			if key ~= M.plan_lines_key then
 				M.plan_lines_key = key
 				local out = {}
