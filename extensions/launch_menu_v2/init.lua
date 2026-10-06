@@ -42,6 +42,7 @@ local web = page ~= nil
 
 local CONTINUE_MAX = 10
 local SEARCH_MIN = 2
+local SEARCH_CAP = 20
 local ROW_HEIGHT = 28
 local PANEL_WIDTH = 300
 local GAME_RUNNING = "empty (game is running)"
@@ -377,8 +378,10 @@ local function list_view(parent, width, height)
 	local viewport = parent:CreateChild("UIElement")
 	viewport.clipChildren = true
 	viewport.enabled = true
+	-- **The layout is set in fit(), once the rows are in**: a vertical
+	-- layout is redone for every child added, so 300 rows took 1.8 s
+	-- where 50 took 30 ms ([SEARCH_CAP])
 	local list = viewport:CreateChild("UIElement")
-	list:SetLayout(LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
 	list:SetFixedWidth(width)
 	list.enabled = true
 	local view = {viewport = viewport, list = list}
@@ -400,6 +403,7 @@ local function list_view(parent, width, height)
 		return b
 	end
 	function view:fit()
+		list:SetLayout(LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
 		viewport:SetFixedSize(width, math.max(ROW_HEIGHT,
 				math.min(height, list.height)))
 	end
@@ -433,6 +437,7 @@ end
 local browse, settings
 
 local function home(query)
+	local t0 = api.get_time_us()
 	local width = math.min(magic.ui.root.width - 40, 760)
 	local root, window = screen("launch_menu_v2", width,
 			"Type to search apps, saves and servers", query)
@@ -472,9 +477,14 @@ local function home(query)
 				"Display and sound, the keys, Luanti's, the developer's."},
 				nil, function() settings() end)
 	else
+		-- At most SEARCH_CAP a kind, the best first; Browse has the rest
 		for _, group in ipairs(search(entries, query)) do
-			view:header(KIND_TITLE[group.kind])
-			for _, e in ipairs(group) do row(e, nil, e.run) end
+			view:header(KIND_TITLE[group.kind] .. (#group > SEARCH_CAP and
+					", " .. SEARCH_CAP .. " of " .. #group or ""))
+			for i = 1, math.min(#group, SEARCH_CAP) do
+				local e = group[i]
+				row(e, nil, e.run)
+			end
 		end
 		if #items == 0 then
 			text(view.list, "Nothing matches \"" .. query ..
@@ -515,7 +525,8 @@ local function home(query)
 		view:show(button)
 	end)
 	log:info("launch_menu_v2: " .. #items .. " rows" ..
-			(query ~= "" and " for \"" .. query .. "\"" or ""))
+			(query ~= "" and " for \"" .. query .. "\"" or "") .. " in " ..
+			math.floor((api.get_time_us() - t0) / 1000) .. " ms")
 end
 
 -- One kind's list, searchable and sorted, with the selection's detail
