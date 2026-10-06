@@ -1233,7 +1233,8 @@ function M.safe.show_message_dialog(message, on_close)
 	ok_button:SetFocus(true)
 end
 
--- yes_label is the first button's, "Force kill" when absent (its first user)
+-- yes_label is the first button's, "Yes" when absent ([DELETE_WORDING]:
+-- it was "Force kill", its first user's, and a deletion asked that)
 function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label)
 	local root = uistack.main:push({desc="show_confirm_dialog"})
 
@@ -1266,7 +1267,7 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label)
 	local yes_text = yes_button:CreateChild("Text")
 	yes_text:SetName("ButtonText")
 	yes_text:SetStyleAuto()
-	yes_text.text = yes_label or "Force kill"
+	yes_text.text = yes_label or "Yes"
 	yes_text:SetTextAlignment(HA_CENTER)
 
 	local no_button = window:CreateChild("Button")

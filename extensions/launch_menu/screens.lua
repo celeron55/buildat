@@ -620,7 +620,7 @@ local function show_waiting_for_old_server(game, launch)
 					do_start_local_game(game, launch)
 				end,
 				function()
-				end)
+				end, "Force kill")
 		end
 	end)
 

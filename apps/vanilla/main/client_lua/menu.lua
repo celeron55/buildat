@@ -518,7 +518,7 @@ function draw(saves, save_games)
 			waiting("Moving " .. name .. " to the trash...")
 			buildat.send_packet("main:delete",
 					cereal.binary_output({name}, {"array", "string"}))
-		end, function() end)
+		end, function() end, "Move to the trash")
 	end, fit(420))
 	if selected_save then
 		select(selected_save)
