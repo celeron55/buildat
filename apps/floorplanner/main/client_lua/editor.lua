@@ -3164,6 +3164,26 @@ local function nearest_node(x, z, r, except)
 	return best
 end
 
+-- The node of the wall join whose face corner is within r of (x, z), the
+-- nearest corner's; nil if none
+function M.corner_node(x, z, r, except)
+	local best, bd = nil, r
+	for id, o in pairs(outlines) do
+		local w = wall_data[id]
+		for _, p in ipairs(w and o.pts or {}) do
+			local d = geom.len(p[1] - x, p[2] - z)
+			if d <= bd then
+				local n = geom.len(p[1] - w.ax, p[2] - w.az) <=
+						geom.len(p[1] - w.bx, p[2] - w.bz) and w.a_node or w.b_node
+				if not (except and except[n]) then
+					best, bd = n, d
+				end
+			end
+		end
+	end
+	return best
+end
+
 -- Every edge a point can land on: the walls, and the rooms' edges that have
 -- no wall. {u, v, wall = id or nil}
 local function edges()
@@ -3684,6 +3704,14 @@ local function snapped_point(from, except)
 	end
 	local r = snap_radius()
 	local n = nearest_node(x, z, r, except)
+	-- **A wall's face corner takes the node of its join** while a room or
+	-- a wall is drawn (a playtest, 2026-10-06): a room drawn at the walls'
+	-- inner corners is on their nodes, its area to their faces (`net`),
+	-- and a wall drawn to another's corner joins it there. Not for a drag,
+	-- which would merge a node it went near.
+	if not n and not S.drag and (S.tool == "room" or S.tool == "wall") then
+		n = M.corner_node(x, z, r, except)
+	end
 	if n then
 		local nx, nz = node_pos(n)
 		return nx, nz, {node = n}
@@ -3785,6 +3813,82 @@ end
 -- The gaps from an instance's footprint to the nearest wall face along its
 -- own four axes: {{dir = {ux, uz}, half = mm, gap = mm}, ...}; gap is nil
 -- where no wall is that way
+-- **A door's, window's or opening's gaps along its wall** (a playtest,
+-- 2026-10-06: measured from the nearest T, not the wall's end): each way,
+-- from the hole's edge to the face of the nearest wall that meets this
+-- one -- at a T or a corner, past a node that only splits a straight
+-- wall -- where that face crosses this wall's line; the wall's end where
+-- none meets it. {hw = the half width measured, {face = t, edge = t} for
+-- the a way, then the b way}, t along the wall from its a end; nil if
+-- it is not in a wall.
+function M.opening_gaps(id)
+	local it, e = inst_data[id], doc.ents[id]
+	local def = e and doc.ents[e.ints.def]
+	local f = it and it.frame
+	local wd = e and wall_data[e.ints.host]
+	if not (it and it.hosted and f and def and wd) then
+		return nil
+	end
+	local hw = def.ints.w / 2
+	-- From the glass's edges for a window measured by its glass
+	if def.ints.kind == KIND.window and def.ints.measure == 1 then
+		hw = hw - 2 * FRAME_W
+	end
+	local out = {hw = hw}
+	for side, start in ipairs({{wd.a_node, -1}, {wd.b_node, 1}}) do
+		local n, sign, from = start[1], start[2], e.ints.host
+		local edge = it.along + sign * hw
+		local face
+		for _ = 1, 50 do
+			local nx, nz = node_pos(n)
+			local others = {}
+			for wid, w in pairs(wall_data) do
+				if wid ~= from and (w.a_node == n or w.b_node == n) then
+					others[#others + 1] = wid
+				end
+			end
+			-- One wall going on along the same line: on to its far end
+			local w1 = #others == 1 and wall_data[others[1]]
+			local o = w1 and (w1.a_node == n and w1.b_node or w1.a_node)
+			local ox, oz = 0, 0
+			if o then
+				ox, oz = node_pos(o)
+			end
+			local dx, dz = ox - nx, oz - nz
+			if o and math.abs(dx * f.uz - dz * f.ux) < 1 and
+					(dx * f.ux + dz * f.uz) * sign > 0 then
+				n, from = o, others[1]
+			else
+				face = (nx - f.ax) * f.ux + (nz - f.az) * f.uz
+				-- The faces of the walls meeting here where they cross
+				-- this one's line: the nearest to the hole on its side
+				local best
+				for _, wid in ipairs(others) do
+					local w = wall_data[wid]
+					local l = geom.len(w.bx - w.ax, w.bz - w.az)
+					local vx, vz = (w.bx - w.ax) / l, (w.bz - w.az) / l
+					local den = f.ux * vz - f.uz * vx
+					if l > 0 and math.abs(den) > 1e-6 then
+						local lo, ro = geom.offsets(w.thickness, w.justify, w.shift)
+						for _, off in ipairs({lo, -ro}) do
+							local px, pz = w.ax - vz * off, w.az + vx * off
+							local t = ((px - f.ax) * vz - (pz - f.az) * vx) / den
+							if (t - edge) * sign >= 0 and (not best or
+									math.abs(t - edge) < math.abs(best - edge)) then
+								best = t
+							end
+						end
+					end
+				end
+				face = best or face
+				break
+			end
+		end
+		out[side] = {face = face or edge, edge = edge}
+	end
+	return out
+end
+
 local function wall_gaps(id)
 	local it = inst_data[id]
 	local out = {}
@@ -5535,6 +5639,20 @@ local function build_props()
 		-- the frame and the sash on each side (build_hosted's FRAME_W
 		-- twice). A double casement's glass is from its one outer edge to
 		-- the other, the sashes' middle stiles over it.
+		-- The gaps each way to the nearest wall meeting this one, typed to
+		-- place it by that edge (a playtest, 2026-10-06)
+		local g = M.opening_gaps(sel.id)
+		for k = 1, g and 2 or 0 do
+			panel.field(props, "Gap " .. k .. " mm",
+					math.floor(math.abs(g[k].edge - g[k].face) + 0.5), function(t)
+				local v = tonumber(t)
+				if v then
+					local along = k == 1 and g[1].face + v + g.hw or
+							g[2].face - v - g.hw
+					set(sel.id, {ints = {along = math.floor(along + 0.5)}})
+				end
+			end)
+		end
 		local glass = p.kind == KIND.window and p.measure == 1
 		if p.kind == KIND.window then
 			panel.dropdown(props, "Sizes of", {{"the frame", 0}, {"the glass", 1}},
@@ -10121,31 +10239,29 @@ local function draw_overlay()
 					mm_text(geom.len(d.x - c.p[1], d.z - c.p[2])))
 		end
 	end
-	-- **A door, window or opening moved along its wall** (user): what is
-	-- left of the wall on each side, from the hole's edge to the wall's
-	-- end, on that part of the wall.
-	-- simplified: to the end of the wall's line, which at a corner is
-	-- half the other wall's thickness past the face seen there
+	-- **A door, window or opening moved along its wall, or selected**
+	-- (user; a playtest, 2026-10-06): what is left of the wall each way,
+	-- from the hole's edge to the nearest wall meeting this one
+	-- (M.opening_gaps), numbered as the panel's Gap fields are
 	local dr = S.drag
+	local shown = {}
 	if dr and dr.kind == "move" and dr.moved and dr.inst then
-		for id in pairs(dr.inst) do
-			local it = inst_data[id]
-			local e = doc.ents[id]
-			local def = e and doc.ents[e.ints.def]
-			if it and it.hosted and it.frame and def then
-				local f, hw = it.frame, def.ints.w / 2
-				-- From the glass's edges for a window measured by its glass
-				if def.ints.kind == KIND.window and def.ints.measure == 1 then
-					hw = hw - 2 * FRAME_W
-				end
-				for _, span in ipairs({{0, it.along - hw},
-						{it.along + hw, f.len}}) do
-					if span[2] - span[1] > 0 then
-						local t = (span[1] + span[2]) / 2
-						world_label(f.ax + f.ux * t, 0, f.az + f.uz * t,
-								mm_text(span[2] - span[1]))
-					end
-				end
+		shown = dr.inst
+	elseif not dr and S.primary and S.sel[S.primary] == "instance" then
+		shown = {[S.primary] = true}
+	end
+	for id in pairs(shown) do
+		local g = M.opening_gaps(id)
+		local f = g and inst_data[id].frame
+		for k = 1, g and 2 or 0 do
+			local a, b = g[k].face, g[k].edge
+			if (b - a) * (k == 1 and 1 or -1) > 0 then
+				local t = (a + b) / 2
+				local blue = magic.Color(0.2, 0.6, 1.0)
+				line(f.ax + f.ux * a, f.az + f.uz * a, f.ax + f.ux * b,
+						f.az + f.uz * b, blue)
+				world_label(f.ax + f.ux * t, 0, f.az + f.uz * t,
+						k .. ": " .. mm_text(math.abs(b - a)))
 			end
 		end
 	end
