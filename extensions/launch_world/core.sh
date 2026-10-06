@@ -70,18 +70,18 @@ fi
 	echo "keypress Down"
 	echo "wait_log 5000 attract: back to the standing place"
 	# **The 2D menu and back** ([LAUNCH_WORLD] stage 2's done-when): the
-	# dialog's third row (launch_menu_v2), then its Display and sound by
-	# the keyboard -- typed and taken, the Launch UI row opened and the
-	# room picked from the list. One Tab afterwards is one station: a
-	# window of the menu's left on top, or a second room booted, makes
-	# it none or two.
+	# dialog's third row (launch_menu_v2, the room closed), then its
+	# Display and sound by the keyboard -- typed and taken, the Launch UI
+	# row opened and the room picked from the list, which boots a new
+	# one. One Tab afterwards is one station: a window of the menu's left
+	# on top, or the old room still listening, makes it none or two.
 	echo "delay 1500"
 	echo "keypress Escape"
 	echo "wait_log 5000 pause: open"
 	echo "keypress Down"
 	echo "keypress Down"
 	echo "keypress Return"
-	echo "wait_log 10000 input: handed to whatever holds the screen"
+	echo "wait_log 10000 room: closed"
 	echo "delay 1500"
 	for c in D I S; do echo "keypress $c"; done
 	echo "delay 500"
@@ -135,10 +135,11 @@ back=$(grep -ac "game: back in the room" "$out/cli.log")
 pulled=$(grep -ac "launch: pull (" "$out/cli.log")
 attract=$(grep -ac "attract: over the wall" "$out/cli.log")
 attract_back=$(grep -ac "attract: back to the standing place" "$out/cli.log")
-# After the switch back: the screen is the room's again, and one Tab is
-# one station
-switched=$(grep -ac "set_launch_ui: launch_world is running; it has the screen again" "$out/cli.log")
-tabs_after=$(sed -n '/it has the screen again/,$p' "$out/cli.log" | grep -ac "station: floor")
+# After the switch back: the room was closed, a new one has the screen,
+# and one Tab is one station
+switched=$(sed -n '/launch_w.*: room: closed/,$p' "$out/cli.log" |
+		grep -ac "launch_w.*: input: the room has the screen again")
+tabs_after=$(sed -n '/launch_w.*: room: closed/,$p' "$out/cli.log" | grep -ac "station: floor")
 # **The trust colour's sample after every leave** ([TRUST_OVERLAY_LEAVE]):
 # shown at the start and again after each game, and shown last. It was
 # gone for good after the first leave: the client kept the left

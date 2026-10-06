@@ -3062,8 +3062,10 @@ end
 -- and **declared here rather than beside the other room state at the
 -- end of the file** -- the Update handler is subscribed a thousand
 -- lines above that and fires while the chunk is still building the
--- room, where the sandbox refuses an undeclared global.
-held_was = false
+-- room, where the sandbox refuses an undeclared global. **True until
+-- the first frame**: a room booted from another launch UI's Enter (its
+-- chooser) heard that same key and launched the first orb (2026-10-06).
+held_was = true
 
 -- **One gate, asked once a frame** ([LAUNCH_WORLD], 2026-09-24:
 -- "whatever holds the screen owns the input"). Three faults of this
@@ -3567,10 +3569,24 @@ local orb_base_scale = {}
 -- that": LookAt writes a rotation and nothing else builds one
 local turner = scene:CreateChild("turner")
 -- The way back to the menu, shown while the room is what the player is
--- using (ui_utils.menu_button); the pause menu's "2D menu" is the same
+-- using (ui_utils.menu_button); the pause menu's "2D menu" is the same.
+-- **Both close the room** (user, 2026-10-06): it is not left drawing and
+-- sounding behind the menu. Its screen elements and view go here, its
+-- sound with its scene, and set_launch_ui's close drops its handlers,
+-- so picking it again boots a new one. launch_overlay is assigned
+-- further down, before anything can call this.
+function close_room()
+	for _, e in ipairs(room_ui) do e:Remove() end
+	room_ui = {}
+	launch_overlay:Remove()
+	room_menu_button:Remove()
+	scene:SetDeepEnabled(false)
+	magic.set_preferred_viewports({})
+	log:info("room: closed")
+end
 room_menu_button = require("buildat/extension/ui_utils")
 room_menu_button = (room_menu_button.safe or room_menu_button)
-		.menu_button(magic.ui.root)
+		.menu_button(magic.ui.root, close_room, {close = true})
 function handle_orb_update(event_type, event_data)
 	room_menu_button.visible = not (launching or screen_taken())
 	-- **An animation stands down for a screen on top of the room and
@@ -3741,6 +3757,16 @@ function handle_orb_click(event_type, event_data)
 		return
 	end
 	if event_data:GetInt("Button") ~= magic.MOUSEB_LEFT then return end
+	-- The Menu button's click is its own, not an orb's under it
+	local x, y = event_data:GetInt("X"), event_data:GetInt("Y")
+	local mb = room_menu_button
+	if mb.visible then
+		local p = mb.screenPosition
+		if x >= p.x and x < p.x + mb.width and
+				y >= p.y and y < p.y + mb.height then
+			return
+		end
+	end
 	local w = math.max(1, magic.ui.root.width)
 	local h = math.max(1, magic.ui.root.height)
 	local b = orb_at(event_data:GetInt("X") / w, event_data:GetInt("Y") / h)
@@ -4840,7 +4866,8 @@ local PAUSE_ITEMS = {
 		-- is remembered as a preference and the other UI is booted now,
 		-- so switching is one action from either side ([TWO_AUDIENCES])
 		-- rather than a flag and a restart.
-		local ok, why = api.set_launch_ui("launch_menu_v2")
+		close_room()
+		local ok, why = api.set_launch_ui("launch_menu_v2", {close = true})
 		if not ok then
 			log:warning("pause: " .. tostring(why))
 			notice(tostring(why))

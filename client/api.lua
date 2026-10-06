@@ -886,8 +886,15 @@ end
 -- preference would take it, but a slot is picked from what there is.
 -- The launch UIs booted in this client, the one it started with too
 local booted_launch_uis = {}
-buildat.safe.set_launch_ui = function(name)
-	booted_launch_uis[__buildat_menu_extension_name or "launch_menu"] = true
+buildat.safe.set_launch_ui = function(name, opts)
+	local old = __buildat_menu_extension_name or "launch_menu"
+	-- **close**: the old one is taken down rather than left running
+	-- under this one, and switching back to it boots it again. It
+	-- takes its own elements and view down first; this drops the
+	-- handlers it subscribed.
+	local close = type(opts) == "table" and opts.close == true and
+			old ~= name
+	booted_launch_uis[old] = not close or nil
 	local found = nil
 	for _, e in ipairs(buildat.safe.list_launch_uis()) do
 		if e.name == name then
@@ -926,6 +933,12 @@ buildat.safe.set_launch_ui = function(name)
 		end)
 		if not ok_pop then
 			log:warning("set_launch_ui: clearing the stack: " .. tostring(why))
+		end
+	end
+	if close then
+		local urho3d = __buildat_loaded_extension("urho3d")
+		if urho3d and urho3d.drop_handlers_of then
+			urho3d.drop_handlers_of(old)
 		end
 	end
 	__buildat_menu_extension_name = name

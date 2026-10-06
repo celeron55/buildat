@@ -494,12 +494,14 @@ buildat.safe.list_launch_uis() -> {{name, title, description, experimental},
   says it is one by shipping launch_ui.txt. Its first line is the title, the
   second the description. A "hidden" line keeps it off the list without
   keeping it out of the slot; an "experimental" line makes experimental true.
-buildat.safe.set_launch_ui(name) -> true, or false and why
+buildat.safe.set_launch_ui(name[, {close = true}]) -> true, or false and why
 - Remember the name and boot that extension now, so the switch is one action
   rather than a restart. Only a listed one. Every screen on the main UI stack
   goes first: they are the old launch UI's. A launch UI whose launch_ui.txt
   has a "persistent" line keeps running under another one and is booted once;
-  switching back to it gives it the screen again.
+  switching back to it gives it the screen again. close takes the old one down
+  instead: its global event handlers are dropped and switching back boots it
+  again. Its own elements and view are the old one's to remove first.
 buildat.safe.launch_ui_name() -> the launch UI that holds the screen
 - A launch UI still running under another one asks this to know it does not,
   and hands the input back.

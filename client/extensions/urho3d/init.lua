@@ -275,6 +275,23 @@ local function drop_sandbox_handlers(keep)
 	return n
 end
 
+-- Every global handler one sandboxed extension subscribed, dropped: a
+-- launch UI closed rather than left running under the next one
+-- (set_launch_ui's close)
+local function drop_handlers_of(owner)
+	local n = 0
+	for _, list in pairs(global_event_mux) do
+		for i = #list, 1, -1 do
+			if list[i].sandbox and list[i].owner == owner then
+				table.remove(list, i)
+				n = n + 1
+			end
+		end
+	end
+	log:info("drop_handlers_of(" .. owner .. "): " .. n .. " handlers dropped")
+	return n
+end
+
 local function remove_global_event_handler(event_type, cb_name)
 	local list = global_event_mux[event_type]
 	if not list then
@@ -1226,6 +1243,7 @@ local M = {}
 M.trust_color = trust_color
 M.trust_code_text = trust_code_text
 M.drop_sandbox_handlers = drop_sandbox_handlers
+M.drop_handlers_of = drop_handlers_of
 M.safe = Safe
 M.unsafe = Unsafe
 

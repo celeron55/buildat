@@ -854,8 +854,9 @@ end
 -- bottom right corner of parent, for a launch UI with no menu of its own
 -- to switch from (the console, the room). It switches to launch_menu_v2;
 -- before(), if given, runs first, for one that has to take its own
--- screen down. Returns the button, whose visible the caller may set.
-function M.safe.menu_button(parent, before)
+-- screen down, and opts go to set_launch_ui ({close = true}). Returns
+-- the button, whose visible the caller may set.
+function M.safe.menu_button(parent, before, opts)
 	local box = parent:CreateChild("UIElement")
 	box.defaultStyle = magic.cache:GetResource("XMLFile",
 			"launch_menu/res/main_style.xml")
@@ -878,7 +879,7 @@ function M.safe.menu_button(parent, before)
 	magic.SubscribeToEvent(b, "Released", function()
 		if before then before() end
 		local ok, why = (buildat.safe or buildat).set_launch_ui(
-				"launch_menu_v2")
+				"launch_menu_v2", opts)
 		if not ok then
 			log:warning("menu_button: " .. tostring(why))
 			M.safe.show_message_dialog(tostring(why))
