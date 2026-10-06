@@ -430,6 +430,10 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->graphics.render_scale_auto = true;
 			continue;
 		}
+		if(key == "ui_size" && value == "auto"){
+			opt->ui_size_auto = true;
+			continue;
+		}
 		char *end = nullptr;
 		double v = strtod(value.c_str(), &end);
 		if(value.empty() || *end != '\0'){
@@ -459,6 +463,10 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->sound_volume_db = (float)v;
 		} else if(key == "sound_mute"){
 			opt->sound_mute = (v != 0);
+		} else if(key == "ui_size"){
+			in_range = (v >= 0.5 && v <= 3.0);
+			opt->ui_size = (float)v;
+			opt->ui_size_auto = false;
 		} else if(key == "log_level"){
 			in_range = (v >= 0 && v <= 6);
 			opt->log_level = (int)v;
@@ -508,6 +516,12 @@ static void check_parse_preference_options()
 			!app::parse_preference_options("web_idle_fps=10", &o, &err) ||
 			o.graphics.web_idle_fps != 10)
 		throw Exception("parse_preference_options: web_idle_fps's choices");
+	if(app::parse_preference_options("ui_size=4", &o, &err) ||
+			!app::parse_preference_options("ui_size=1.25", &o, &err) ||
+			o.ui_size != 1.25f || o.ui_size_auto ||
+			!app::parse_preference_options("ui_size=auto", &o, &err) ||
+			!o.ui_size_auto)
+		throw Exception("parse_preference_options: ui_size's values");
 	if(app::parse_preference_options("nonesuch=1", &o, &err))
 		throw Exception("parse_preference_options: took an unknown key");
 }
@@ -667,6 +681,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	// on the other -- which is why the key is a new one.
 	const json::Value &jsv_old = o.get("sound_volume");
 	const json::Value &jsm = o.get("sound_mute");
+	const json::Value &jus = o.get("ui_size");
 	const json::Value &jui = o.get("launch_ui");
 	const json::Value &jdu = o.get("default_username");
 	const json::Value &jll = o.get("log_level");
@@ -714,6 +729,10 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	}
 	if(jsm.is_boolean())
 		items += ss_()+(items.empty()?"":",")+"sound_mute="+(jsm.as_boolean()?"1":"0");
+	if(jus.is_number())
+		items += ss_()+(items.empty()?"":",")+"ui_size="+ftos(jus.as_number());
+	else if(jus.is_string() && jus.as_string() == "auto")
+		items += ss_()+(items.empty()?"":",")+"ui_size=auto";
 	if(jui.is_string())
 		items += ss_()+(items.empty()?"":",")+"launch_ui="+jui.as_string();
 	if(jdu.is_string())
@@ -785,6 +804,10 @@ static void save_preferences(const app::Options &opt)
 	o.set("multisampling", opt.graphics.multisampling);
 	o.set("sound_volume_db", opt.sound_volume_db);
 	o.set("sound_mute", opt.sound_mute);
+	if(opt.ui_size_auto)
+		o.set("ui_size", "auto");
+	else
+		o.set("ui_size", opt.ui_size);
 	o.set("log_level", opt.log_level);
 	o.set("server_log_level", opt.server_log_level);
 	o.set("launch_ui", opt.launch_ui);
@@ -2100,6 +2123,8 @@ struct CApp: public App, public magic::Application
 			double cfg = g_client_config.get<double>("ui_scale");
 			if(cfg > 0)
 				s = (float)cfg;
+			else if(!m_options.ui_size_auto)
+				s = m_options.ui_size;
 			else {
 				// From the logical size in a scripted client, so that the
 				// layout does not move with the window ([SEQ_FIXED_SIZE])
@@ -3435,6 +3460,9 @@ struct CApp: public App, public magic::Application
 		}
 		if(g.render_scale != b.render_scale)
 			apply_preferred_viewports();
+		if(m_options.ui_size != before.ui_size ||
+				m_options.ui_size_auto != before.ui_size_auto)
+			apply_ui_scale();
 	}
 
 	void apply_sound_preferences()
@@ -4170,7 +4198,8 @@ struct CApp: public App, public magic::Application
 	static const char** preference_names()
 	{
 		static const char *names[] = {"render_scale", "vsync", "max_fps",
-				"multisampling", "sound_volume_db", "sound_mute", "launch_ui",
+				"multisampling", "sound_volume_db", "sound_mute", "ui_size",
+				"launch_ui",
 				"default_username",
 #ifdef __EMSCRIPTEN__
 				// Only where it does something
@@ -4221,6 +4250,10 @@ struct CApp: public App, public magic::Application
 			lua_pushnumber(L, o.sound_volume_db);
 		else if(name == "sound_mute")
 			lua_pushboolean(L, o.sound_mute);
+		else if(name == "ui_size" && o.ui_size_auto)
+			lua_pushstring(L, "auto");
+		else if(name == "ui_size")
+			lua_pushnumber(L, o.ui_size);
 		else if(name == "launch_ui")
 			lua_pushstring(L, o.launch_ui.c_str());
 		else if(name == "default_username")

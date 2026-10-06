@@ -102,6 +102,21 @@ local PREFERENCES = {
 		label = "Mute",
 		values = {false, true},
 	},
+	-- The UI scale; "auto" follows the window
+	{
+		name = "ui_size",
+		label = "UI size",
+		values = {"auto", 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0},
+		show = function(v)
+			-- The scale it comes to, while it is the one in use
+			if v == "auto" and api.get_preference("ui_size") == "auto" then
+				return "automatic (" .. percent(api.get_ui_scale()) .. ")"
+			elseif v == "auto" then
+				return "automatic"
+			end
+			return percent(v)
+		end,
+	},
 	-- The two logs' levels ([LOG_LEVEL_PREF]): a box report without a
 	-- shell. The client's takes at once, the server's on its next start;
 	-- -l on the command line wins for that run. The logs are

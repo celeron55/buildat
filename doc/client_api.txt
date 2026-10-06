@@ -103,7 +103,7 @@ buildat.get_sound() -> mute, db; buildat.set_sound(mute, db) -> ok, err
 
 buildat.get_render_scale() -> share, automatic
 buildat.set_render_scale(share or "auto") -> ok, err
-- The other preference an app may write: render_scale (see "Engine
+- A second preference an app may write: render_scale (see "Engine
   settings"), from an app's own settings, since the web client has no
   launcher to reach Engine settings through. The frame's cost, not its look.
 - "auto", the default, is the client's choice, made again at each start and
@@ -111,6 +111,13 @@ buildat.set_render_scale(share or "auto") -> ok, err
   canvas for the 3D, at most 0.5 on a screen over 3000 device pixels on a
   side or on a software renderer, rounded down to 1, 0.75, 0.67, 0.5, 0.33
   or 0.25.
+
+buildat.get_ui_size() -> the UI scale now, automatic
+buildat.set_ui_size(scale or "auto") -> ok, err
+- A third preference an app may write: ui_size (see "Engine settings"), for
+  the same reason as render_scale. "auto", the default, follows the window
+  (the short side over 1080); a scale is 0.5 to 3. It takes at once, and a
+  set_ui_scale() of the app's own wins over it.
 
 buildat.take_screenshot() -> file name, or nil and why not
 - Into <user>/screenshots, named by the date and time. The caller says when
@@ -808,6 +815,9 @@ overridden for one run by -o (see README.md).
     multisampling   MSAA samples: 1, 2, 4, 8 or 16
     sound_volume_db decibels below full, 0 to -30 and off under it
     sound_mute      that gain forced to zero
+    ui_size         the UI scale, 0.5 to 3, or "auto", the default, which
+                    follows the window (see get_ui_size); -u for a run
+                    wins over it
     default_username the name an app offers when it asks for one, "User"
                     by default: 1 to 20 letters, digits, _ and -
 

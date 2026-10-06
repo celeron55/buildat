@@ -83,6 +83,11 @@ namespace app
 		// gain is made from it where it is applied and nowhere else.
 		float sound_volume_db = 0.0f;
 		bool sound_mute = false;
+		// **The UI's size** (user, 2026-10-06, a floorplanner playtest):
+		// the UI scale, or "auto", the default, which follows the window
+		// (apply_ui_scale). -u for a run wins over it.
+		float ui_size = 1.0f;
+		bool ui_size_auto = true;
 		// The client's own log level and the one it hands its local server
 		// as -l ([LOG_LEVEL_PREF]): a box report without a shell. 3 is
 		// info; -l on the command line wins for that run.

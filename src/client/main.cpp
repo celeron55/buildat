@@ -198,6 +198,7 @@ int main(int argc, char *argv[])
 			"  -o [k=v,...]         Set preferences; not remembered. Keys:\n"
 			"                       render_scale, vsync, max_fps,\n"
 			"                       multisampling, sound_volume_db, sound_mute,\n"
+			"                       ui_size (auto, or the UI scale 0.5 to 3),\n"
 			"                       web_idle_fps (the web client: 1, 5, 10,\n"
 			"                       30 or 60 while unfocused or idle)\n"
 			"  -c [commands]        Run command sequence and exit\n"

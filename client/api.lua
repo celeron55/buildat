@@ -1414,6 +1414,20 @@ buildat.safe.set_render_scale = function(v)
 	end
 	return __buildat_set_preference("render_scale", tostring(v))
 end
+-- **The UI's size, a third** (user, 2026-10-06): for the same reason, from
+-- an app's own settings. get_ui_size() -> the UI scale now, automatic;
+-- set_ui_size(scale or "auto") -> true, or false and why. "auto" follows
+-- the window; a scale is 0.5 to 3.
+buildat.safe.get_ui_size = function()
+	return __buildat_get_ui_scale(),
+			__buildat_get_preference("ui_size") == "auto"
+end
+buildat.safe.set_ui_size = function(v)
+	if type(v) ~= "number" and v ~= "auto" then
+		return false, "set_ui_size(scale): a number or \"auto\""
+	end
+	return __buildat_set_preference("ui_size", tostring(v))
+end
 -- The bytes of a file the server served, or nil ([BLOCKED_MODULE]): a
 -- module that is busy answers no packet, and client_file is a module of its
 -- own, so a table served as a file reaches the client anyway. The sandbox
