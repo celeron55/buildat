@@ -25,6 +25,18 @@ local log = buildat.Logger("accounts")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local ui_utils = require("buildat/extension/ui_utils")
+-- simplified: a client before 0.6.48 has no rgb and no SetStyle (this
+-- file is the server's, sent to any client): it gets the old colours and
+-- the plain button. Drop when old clients are refused.
+local rgb = (ui_utils.safe or ui_utils).rgb or function(name)
+	return unpack(({warn = {1, 0.8, 0.4}, error = {1, 0.4, 0.4},
+			dim = {0.7, 0.7, 0.7}})[name])
+end
+local function main_style(b)
+	if not pcall(function() b:SetStyle("PrimaryButton") end) then
+		b:SetStyleAuto()
+	end
+end
 
 local M = {
 	hello = {},
@@ -155,7 +167,7 @@ local function show_totp(error_text)
 	e.minHeight = 26
 	e.textSelectable = true
 	if error_text and error_text ~= "" then
-		page_text(w, error_text, magic.Color(1.0, 0.4, 0.4))
+		page_text(w, error_text, magic.Color(rgb("error")))
 	end
 	local function go()
 		local l = last_login
@@ -163,7 +175,7 @@ local function show_totp(error_text)
 	end
 	magic.SubscribeToEvent(e, "TextFinished", go)
 	local b = w:CreateChild("Button")
-	b:SetStyleAuto()
+	main_style(b)
 	b.minHeight = 30
 	local bt = b:CreateChild("Text")
 	bt:SetStyleAuto()
@@ -251,7 +263,7 @@ local function show_login(error_text)
 		if not buildat.connection_encrypted() then
 			local warn = label("The password is sent unencrypted: use a " ..
 					"trusted network")
-			warn:SetColor(magic.Color(1.0, 0.8, 0.4))
+			warn:SetColor(magic.Color(rgb("warn")))
 		end
 	end
 	if not is_local then
@@ -276,10 +288,10 @@ local function show_login(error_text)
 	end
 	if error_text then
 		local e = label(error_text)
-		e:SetColor(magic.Color(1.0, 0.4, 0.4))
+		e:SetColor(magic.Color(rgb("error")))
 	end
 	local button = w:CreateChild("Button")
-	button:SetStyleAuto()
+	main_style(button)
 	button.minHeight = 30
 	local bt = button:CreateChild("Text")
 	bt:SetStyleAuto()
@@ -371,11 +383,11 @@ function show_create(error_text)
 	if not buildat.connection_encrypted() then
 		local warn = label("The password is sent unencrypted: use a trusted "..
 				"network")
-		warn:SetColor(magic.Color(1.0, 0.8, 0.4))
+		warn:SetColor(magic.Color(rgb("warn")))
 	end
 	if error_text then
 		local e = label(error_text)
-		e:SetColor(magic.Color(1.0, 0.4, 0.4))
+		e:SetColor(magic.Color(rgb("error")))
 	end
 	local function create()
 		local n = name:GetText()
@@ -390,7 +402,7 @@ function show_create(error_text)
 		send_login(n, pw, code and code:GetText() or "", nil, nil, "", "", true)
 	end
 	local button = w:CreateChild("Button")
-	button:SetStyleAuto()
+	main_style(button)
 	button.minHeight = 30
 	button:SetFocusMode(magic.FM_FOCUSABLE)
 	local bt = button:CreateChild("Text")
@@ -630,9 +642,10 @@ local function row(parent)
 	return r
 end
 
-local function button(parent, text, on_click)
+-- main: the screen's one main button, amber ([MENU_BRAND])
+local function button(parent, text, on_click, main)
 	local b = parent:CreateChild("Button")
-	b:SetStyleAuto()
+	if main then main_style(b) else b:SetStyleAuto() end
 	b.minHeight = 28
 	local t = b:CreateChild("Text")
 	t:SetStyleAuto()
@@ -664,7 +677,7 @@ local function field(parent, label, secret, on_finish)
 	return e
 end
 
-local YELLOW = magic.Color(1.0, 0.8, 0.4)
+local WARN = magic.Color(rgb("warn"))
 
 -- The open dropdown's choices, one at a time (the Starport page's)
 local popup = nil
@@ -677,7 +690,7 @@ local function close_popup()
 		popup = nil
 	end
 end
-local GREY = magic.Color(0.7, 0.7, 0.7)
+local DIM = magic.Color(rgb("dim"))
 
 local chat_list = nil
 -- The width a line of the chat wraps to: the page's less its margins and
@@ -734,7 +747,7 @@ M.back = function() go_back() end
 passwd_page = function(back, message)
 	local w = open_page("passwd", "Change password", back)
 	if message then
-		page_text(w, message, YELLOW)
+		page_text(w, message, WARN)
 	end
 	local old, new1, new2
 	local function change()
@@ -795,7 +808,7 @@ totp_page = function(back)
 	local w = open_page("totp", "Two-step login (TOTP)", back)
 	local st = totp_state
 	if st.error ~= "" then
-		page_text(w, st.error, YELLOW)
+		page_text(w, st.error, WARN)
 	end
 	if st.secret ~= "" then
 		page_text(w, "Add this key to an authenticator app, then enter " ..
@@ -851,10 +864,10 @@ end
 account_page = function(back, message)
 	local w = open_page("account", "My account", back)
 	if M.name and M.name ~= "" then
-		page_text(w, "Logged in as " .. M.name, GREY)
+		page_text(w, "Logged in as " .. M.name, DIM)
 	end
 	if message then
-		page_text(w, message, YELLOW)
+		page_text(w, message, WARN)
 	end
 	-- [ACCOUNT_BUTTON]: ask for the users once to learn admin-ness. The
 	-- server answers only an admin (on_admin drops the rest), so M.users
@@ -868,7 +881,7 @@ account_page = function(back, message)
 	button(w, "Two-step login...", function() M.totp_page(here) end)
 	-- [STARPORT] 10g: this account the one a Starport ID logs in as
 	if M.hello.starport == 1 then
-		page_text(w, "A linked Starport ID logs in as this account.", GREY)
+		page_text(w, "A linked Starport ID logs in as this account.", DIM)
 		button(w, "Link a Starport ID...", function()
 			local ok, starport = pcall(require, "buildat/extension/starport")
 			if not ok or not starport.id_token_here then
@@ -919,7 +932,7 @@ ban_page = function(name, back)
 	local buttons, rb = {}, nil
 	local function draw()
 		for k, b in pairs(buttons) do
-			b:GetChild(0):SetColor(k == reason and YELLOW or
+			b:GetChild(0):SetColor(k == reason and WARN or
 					magic.Color(1, 1, 1))
 		end
 		rb:GetChild(0):SetText((report and "[x]" or "[ ]") ..
@@ -1022,7 +1035,7 @@ users_page = function(back)
 	local code = message:match("^Invite code: (%w+)$")
 	if code then
 		local r = row(w)
-		page_text(r, "Invite code", YELLOW):SetWordwrap(false)
+		page_text(r, "Invite code", WARN):SetWordwrap(false)
 		local e = r:CreateChild("LineEdit")
 		e:SetStyleAuto()
 		e.minHeight = 26
@@ -1035,7 +1048,7 @@ users_page = function(back)
 			notice("Copied the invite code")
 		end)
 	else
-		page_text(w, message ~= "" and message or " ", YELLOW).minHeight = 22
+		page_text(w, message ~= "" and message or " ", WARN).minHeight = 22
 	end
 	local u = M.users
 	if not u then
@@ -1060,7 +1073,7 @@ users_page = function(back)
 		page_text(w, "Every admin logs in only by a Starport ID: while the "..
 				"Starport cannot be reached, nobody can manage this server. "..
 				"Give an admin a local password (Password... on their row).",
-				magic.Color(1.0, 0.4, 0.4))
+				magic.Color(rgb("error")))
 	end
 	-- **The accounts, invites and bans in a list that scrolls** (user,
 	-- 2026-09-30): a server's users are more than a phone's screen. Its
@@ -1079,7 +1092,7 @@ users_page = function(back)
 	-- [STARPORT] 10g: Starport IDs waiting for an admin
 	for _, name in ipairs(u.approvals or {}) do
 		local it = item()
-		page_text(it, name .. ": a Starport ID waiting to be let in", YELLOW)
+		page_text(it, name .. ": a Starport ID waiting to be let in", WARN)
 		local r = row(it)
 		lines = lines + 2
 		button(r, "Let in", function() M.admin("approve", name) end)
@@ -1255,7 +1268,7 @@ local DESCRIPTORS = {
 	{"gambling", "Gambling", {"no", "yes"}},
 	{"personal_data", "Personal data", {"no", "yes"}},
 }
-local RED = magic.Color(1.0, 0.35, 0.35)
+local ERROR = magic.Color(rgb("error"))
 
 
 -- A dropdown: its label, and a button saying the value, a red "?" for none;
@@ -1291,7 +1304,7 @@ local function dropdown(parent, label, choices, current, on_choose)
 	end)
 	b:SetFixedWidth(118)
 	if not current then
-		b:GetChild(0):SetColor(RED)
+		b:GetChild(0):SetColor(ERROR)
 	end
 	return b
 end
@@ -1429,7 +1442,7 @@ starport_help = function()
 		x:SetFixedWidth(width)
 		if t:sub(1, 2) == "# " then
 			x:SetText(t:sub(3))
-			x:SetColor(YELLOW)
+			x:SetColor(WARN)
 		else
 			x:SetText(t)
 		end
@@ -1456,10 +1469,10 @@ starport_page = function(back, confirm_remove)
 		buildat.send_packet("starport:config_set", encode(c))
 	end
 	if info.message and info.message ~= "" then
-		page_text(w, info.message, YELLOW)
+		page_text(w, info.message, WARN)
 	end
 	page_text(w, "Kept in the app's starport.json; an edit there counts too",
-			GREY)
+			DIM)
 	local r = row(w)
 	button(r, c.enabled == false and "Starport: off" or "Starport: on",
 			function()
@@ -1491,12 +1504,12 @@ starport_page = function(back, confirm_remove)
 		end
 		page_text(w, tostring(s.linked or 0) .. " accounts linked to its IDs" ..
 				((s.subscribed and #s.subscribed > 0) and "; follows " ..
-				table.concat(s.subscribed, ", ") or ""), GREY)
+				table.concat(s.subscribed, ", ") or ""), DIM)
 		if confirm_remove == s.url then
 			page_text(w, "Remove it? Its listing is withdrawn at once, and "..
 					tostring(s.linked or 0) .. " accounts cannot log in by "..
 					"their IDs while it is gone (an admin can give them "..
-					"passwords).", YELLOW)
+					"passwords).", WARN)
 			local rr = row(w)
 			button(rr, "Remove", function()
 				table.remove(c.starports, i)
@@ -1584,7 +1597,7 @@ starport_page = function(back, confirm_remove)
 		end
 	end
 	page_text(w, "Access from the Accounts page is now: " ..
-			tostring(info.access_now or "?"), GREY)
+			tostring(info.access_now or "?"), DIM)
 	-- Three to a row: the page is long, and wide enough for them
 	local dr
 	local n = 0

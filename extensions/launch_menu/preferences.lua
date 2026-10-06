@@ -209,10 +209,10 @@ local function show_launch_uis(uis, now)
 		line(e.title .. "   (" .. e.name .. ")" ..
 				(e.name == now and "   - in use" or ""))
 		if e.experimental then
-			line("experimental", 12, magic.Color(1, 0.35, 0.3))
+			line("experimental", 12, magic.Color(ui_utils.rgb("error")))
 		end
 		if e.description then
-			local d = line(e.description, 12, magic.Color(0.7, 0.7, 0.7))
+			local d = line(e.description, 12, magic.Color(ui_utils.rgb("dim")))
 			-- simplified: 400 and not the row's 444, since under a UI
 			-- scale the wrap measures a line narrower than it is drawn;
 			-- the real fix is in the font scaling, not here

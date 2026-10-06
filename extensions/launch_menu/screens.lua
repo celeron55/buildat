@@ -54,9 +54,9 @@ end
 
 local MENU_BUTTON_WIDTH = 200
 
-local function make_button(parent, label)
+local function make_button(parent, label, main)
 	local button = parent:CreateChild("Button")
-	button:SetStyleAuto()
+	if main then button:SetStyle("PrimaryButton") else button:SetStyleAuto() end
 	button:SetName("Button")
 	button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	button.minHeight = 24
@@ -90,7 +90,7 @@ local function make_game_button(parent, name, size)
 	size_text:SetStyleAuto()
 	size_text.text = format_bytes(size)
 	size_text:SetFontSize(12)
-	size_text.color = magic.Color(0.5, 0.5, 0.5)
+	size_text.color = magic.Color(ui_utils.rgb("dim"))
 	size_text:SetTextAlignment(HA_RIGHT)
 	return button
 end
@@ -476,7 +476,7 @@ function M.show_connect_to_server()
 				picked.address == address and picked.fallbacks or nil)
 	end
 
-	local connect_button = make_button(window, "Connect")
+	local connect_button = make_button(window, "Connect", true)
 	magic.SubscribeToEvent(connect_button, "Released", function()
 		do_connect()
 	end)

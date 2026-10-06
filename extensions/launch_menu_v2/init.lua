@@ -346,12 +346,13 @@ end
 
 local entries = nil
 
+-- c: a colour's name, ui_utils.rgb's
 local function text(parent, s, size, c)
 	local t = parent:CreateChild("Text")
 	t:SetStyleAuto()
 	t.text = s
 	if size then t:SetFontSize(size) end
-	if c then t.color = magic.Color(c, c, c) end
+	if c then t.color = magic.Color(ui_utils.rgb(c)) end
 	return t
 end
 
@@ -367,9 +368,9 @@ local function screen(desc, width, heading, query)
 	window:SetAlignment(HA_LEFT, VA_CENTER)
 	window:SetFixedWidth(width)
 	local version, hash = api.version()
-	text(window, "Buildat " .. version .. " " .. hash, 11, 0.6)
+	text(window, "Buildat " .. version .. " " .. hash, 11, "dim")
 	text(window, query == "" and heading or "Search: " .. query .. "_", 20,
-			query == "" and 0.6 or 0.9)
+			query == "" and "dim" or "text")
 	return root, window
 end
 
@@ -386,7 +387,7 @@ local function list_view(parent, width, height)
 	list.enabled = true
 	local view = {viewport = viewport, list = list}
 	function view:header(s)
-		text(list, s, 13, 0.6):SetFixedHeight(ROW_HEIGHT - 4)
+		text(list, s, 13, "dim"):SetFixedHeight(ROW_HEIGHT - 4)
 	end
 	function view:row(e, badge)
 		local b = list:CreateChild("Button")
@@ -398,7 +399,7 @@ local function list_view(parent, width, height)
 		label:SetName("ButtonText")
 		label:SetFixedWidth(math.floor(width * 0.62))
 		label:SetAlignment(HA_LEFT, VA_CENTER)
-		text(b, badge or e.badge or "", 12, 0.55):SetAlignment(HA_LEFT,
+		text(b, badge or e.badge or "", 12, "dim"):SetAlignment(HA_LEFT,
 				VA_CENTER)
 		return b
 	end
@@ -488,13 +489,13 @@ local function home(query)
 		end
 		if #items == 0 then
 			text(view.list, "Nothing matches \"" .. query ..
-					"\" (Backspace, Escape)", nil, 0.7)
+					"\" (Backspace, Escape)", nil, "dim")
 		end
 	end
 	view:fit()
 
 	-- The selection's description, under the list
-	local desc = text(window, "", 13, 0.7)
+	local desc = text(window, "", 13, "dim")
 	desc:SetWordwrap(true)
 	desc:SetFixedWidth(width - 32)
 	desc:SetFixedHeight(40)
@@ -580,7 +581,7 @@ browse = function(kind, query, by)
 	if #items == 0 then
 		text(view.list, query == "" and "Nothing here yet" or
 				"Nothing matches \"" .. query .. "\" (Backspace, Escape)",
-				nil, 0.7)
+				nil, "dim")
 	end
 	view:fit()
 
@@ -588,23 +589,24 @@ browse = function(kind, query, by)
 	local function fill(e)
 		panel:RemoveAllChildren()
 		action_buttons = {}
-		text(panel, e.label, 18, 0.9)
+		text(panel, e.label, 18)
 		text(panel, KIND_TITLE[kind] .. (e.badge and ", " .. e.badge or ""),
-				12, 0.55)
+				12, "dim")
 		if e.description and e.description ~= "" then
-			local d = text(panel, e.description, 13, 0.75)
+			local d = text(panel, e.description, 13, "dim")
 			d:SetWordwrap(true)
 			d:SetFixedWidth(narrow and width - 32 or PANEL_WIDTH)
 		end
 		if e.size then
 			text(panel, string.format("Size: %.1f MB", e.size / 1048576),
-					12, 0.6)
+					12, "dim")
 		end
 		text(panel, e.last and "Last used " .. ago(e.last, now) or
-				"Not used yet", 12, 0.6)
-		for _, a in ipairs(e.actions) do
+				"Not used yet", 12, "dim")
+		for i, a in ipairs(e.actions) do
 			local b = panel:CreateChild("Button")
-			b:SetStyleAuto()
+			-- The first is the thing's own: Play, Continue, Join
+			if i == 1 then b:SetStyle("PrimaryButton") else b:SetStyleAuto() end
 			b:SetLayout(LM_VERTICAL, 0, magic.IntRect(10, 3, 10, 3))
 			b:SetFixedHeight(ROW_HEIGHT)
 			b:SetFocusMode(magic.FM_FOCUSABLE)
@@ -705,7 +707,7 @@ settings = function()
 		end
 	end
 	view:fit()
-	local desc = text(window, "", 13, 0.7)
+	local desc = text(window, "", 13, "dim")
 	desc:SetWordwrap(true)
 	desc:SetFixedWidth(width - 32)
 	desc:SetFixedHeight(40)
@@ -794,7 +796,7 @@ controls = function(focus)
 		end
 	end
 	view:fit()
-	local line = text(window, "", 13, 0.7)
+	local line = text(window, "", 13, "dim")
 	line:SetFixedHeight(20)
 	local listening = nil
 	-- The Enter that started a capture reaches the screen's handler after

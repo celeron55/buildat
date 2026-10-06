@@ -3975,7 +3975,7 @@ show_connect_dialog = function(address, name)
 		end
 	end
 
-	menu:add("Connect", connect)
+	menu:add("Connect", connect, true)
 	menu:add("Cancel", cancel)
 
 	-- Enter in a field is the field's ([ONE_FOCUS]): on to the next one,

@@ -985,8 +985,8 @@ show_message_dialog(message [, on_close])
 - A modal dialog with an Ok button; a second call while one is up appends to
   it. Escape closes it.
 show_confirm_dialog(message, on_yes, on_no[, yes_label])
-- Two buttons, yes_label ("Force kill" when absent) and Cancel, which has the
-  focus.
+- Two buttons, yes_label ("Force kill" when absent), the main one, and
+  Cancel, which has the focus.
 show_notice(text)
 - A line at the top of the screen for six seconds, taking neither the mouse
   nor the focus: what a caught error is shown as in an app ([MENU_ERRORS])
@@ -1000,7 +1000,14 @@ bind_button_menu(root, items, on_other_key) -> nav
 vertical_menu(root, options) -> menu
 - A vertical Window on a uistack root with the same keyboard and mouse
   navigation; :add("Label", action) creates a button, :add(button, action)
-  registers one; extra widgets go on menu.window.
+  registers one; extra widgets go on menu.window. :add("Label", action,
+  true) makes the screen's main button.
+rgb(name) -> r, g, b
+- The menus' colours ([MENU_BRAND]): "text", "dim", "warn", "error",
+  "focus", "main"; magic.Color(ui_utils.rgb("error")).
+The look is launch_menu/res/main_style.xml, Buildat's (the same as its web
+pages'), each element type styled by SetStyleAuto(); a screen's one main
+button (OK, Join, Play, Log in) is el:SetStyle("PrimaryButton") instead.
 add_paged(menu, items, {page, per_page, redraw}) -> pages, page
 - Page buttons for a menu longer than the screen; the caller redraws.
 keyboard_page(win)
@@ -1013,6 +1020,10 @@ keyboard_page(win)
   built after its window is made is covered. bind_button_menu and
   vertical_menu give the same letters on their selection; a menu whose
   letters are its own passes {letters = false}.
+menu_button(parent [, before, opts]) -> element
+- A "Menu" button in parent's bottom right corner that switches to
+  launch_menu_v2, for a launch UI with no menu of its own; before() runs
+  first, opts go to set_launch_ui ({close = true}). Not focusable.
 unmark(label) -> label
 - A label without its letter's brackets ("[C]hange" is "Change"; a
   checkbox's "[x]" is left), as the scan and Escape's search for Back read
@@ -2298,7 +2309,7 @@ magic.TextureCube: GetRenderSurface, SetData, SetSize, new
 magic.Time: GetElapsedTime, frameNumber, timeStep
 magic.ToolTip: delay
 magic.UI: GetScale, SetClipboardText, SetFocusElement, SetScale, SetUseSystemClipboard, focusElement, root, scale
-magic.UIElement: CreateChild, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyleAuto, SetText, SetVisible, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, verticalAlignment, visible, width
+magic.UIElement: CreateChild, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyle, SetStyleAuto, SetText, SetVisible, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, verticalAlignment, visible, width
 magic.UnsubscribeFromEvent: 
 magic.VAR_BOOL: 
 magic.VAR_BUFFER: 
@@ -2353,5 +2364,5 @@ extension.launch_console: show
 extension.serverlist: refresh, servers
 extension.skycube: new
 extension.test: f
-extension.ui_utils: add_paged, bind_button_menu, keyboard_page, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, unmark, vertical_menu
+extension.ui_utils: add_paged, bind_button_menu, keyboard_page, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, unmark, vertical_menu
 ---- end of the generated listing ----

@@ -20,6 +20,10 @@ local api = buildat.safe or buildat
 local log = buildat.Logger("launch_console")
 local urho3d = require("buildat/extension/urho3d")
 local magic = urho3d.Vector3 and urho3d or urho3d.safe
+-- The words in the menus' colours ([MENU_BRAND]); the panels are its own
+local ui_utils = require("buildat/extension/ui_utils")
+local rgb = (ui_utils.safe or ui_utils).rgb
+local function color(name) return magic.Color(rgb(name)) end
 local M = {}
 -- What Urho3D must not free while the console is up: an Image and the
 -- Texture2D made from it ([the Material lifetime rule], and the same
@@ -138,14 +142,14 @@ local function open(opts)
 		local t = e.textElement
 		if t then
 			t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
-			t:SetColor(magic.Color(0.92, 0.95, 1.0, 1))
+			t:SetColor(color("text"))
 			t:SetPosition(4, 3)
 		end
 		local cur = e.cursor
 		if cur then
 			cur.texture = white_tex
 			cur.imageRect = magic.IntRect(0, 0, 2, 2)
-			cur.color = magic.Color(0.95, 0.85, 0.35, 1)
+			cur.color = color("main")
 			cur:SetFixedSize(2, 16)
 		end
 		return e
@@ -164,7 +168,7 @@ local function open(opts)
 	hint:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
 	hint:SetPosition(MARGIN, h - 54)
 	hint:SetFixedWidth(half - 2 * MARGIN)
-	hint:SetColor(magic.Color(0.55, 0.60, 0.68, 1))
+	hint:SetColor(color("dim"))
 	hint.text = "Tab moves the keyboard; in here Enter finds the next, " ..
 			"Shift+Enter the one before"
 
@@ -198,7 +202,7 @@ local function open(opts)
 	local doc = left:CreateChild("Text")
 	doc:SetSelectionColor(magic.Color(0.30, 0.42, 0.16, 1))
 	doc:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
-	doc:SetColor(magic.Color(0.78, 0.82, 0.88, 1))
+	doc:SetColor(color("text"))
 	doc.text = table.concat(lines, "\n")
 	-- simplified: the document is read, not copied out of. A `Text`
 	-- does have a selection -- it is what the search's match is drawn
@@ -260,7 +264,7 @@ local function open(opts)
 	out:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
 	out:SetPosition(MARGIN, MARGIN)
 	out:SetFixedWidth(w - half - 2 * MARGIN)
-	out:SetColor(magic.Color(0.80, 0.86, 0.92, 1))
+	out:SetColor(color("text"))
 	out:SetWordwrap(true)
 	out.text = table.concat(out_lines, "\n")
 	local input = field(right, MARGIN, h - 30, w - half - 2 * MARGIN)

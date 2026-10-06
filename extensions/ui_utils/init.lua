@@ -14,6 +14,23 @@ local dump = buildat.dump
 local uistack = require("buildat/extension/uistack")
 local M = {safe = {}}
 
+-- **The menus' colours** ([MENU_BRAND], c_quiet, src/interface/web_brand.h):
+-- what a menu colours by hand rather than through main_style.xml. Numbers,
+-- not Colors -- a sandbox's property takes only its own -- and through a
+-- function, as the sandbox's view of a table unpacks as empty:
+-- magic.Color(ui_utils.rgb("error")). text, dim and focus are the style's.
+local colors = {
+	text = {0.867, 0.867, 0.867},  -- #ddd
+	dim = {0.6, 0.6, 0.6},         -- #999
+	warn = {1, 0.8, 0.4},
+	error = {1, 0.36, 0.36},       -- #ff5c5c
+	focus = {0.149, 0.851, 1},     -- #26d9ff
+	main = {1, 0.62, 0.122},       -- #ff9e1f, the main button
+}
+function M.safe.rgb(name)
+	return unpack(colors[name])
+end
+
 -- API naming:
 -- show_*_notification()
 -- show_*_dialog()
@@ -676,9 +693,9 @@ function M.safe.bind_button_menu(root, items, on_other_key, options)
 	return nav
 end
 
-local function make_menu_button(parent, label, options)
+local function make_menu_button(parent, label, options, main)
 	local button = parent:CreateChild("Button")
-	button:SetStyleAuto()
+	if main then button:SetStyle("PrimaryButton") else button:SetStyleAuto() end
 	button:SetName("Button")
 	button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	button.minHeight = options.min_height or 24
@@ -696,6 +713,7 @@ end
 -- Vertical Window on a uistack root, with the same keyboard/mouse nav.
 -- Extra widgets (logo, titles) go on menu.window before :add().
 -- :add("Label", action) creates a button; :add(button, action) registers one.
+-- :add("Label", action, true): the screen's main button, amber ([MENU_BRAND]).
 function M.safe.vertical_menu(root, options)
 	options = options or {}
 	-- SetStyleAuto() below needs a style to find, and a root that has none
@@ -721,10 +739,10 @@ function M.safe.vertical_menu(root, options)
 
 	local menu = {window = window}
 
-	function menu:add(label_or_button, action)
+	function menu:add(label_or_button, action, main)
 		local button = label_or_button
 		if type(label_or_button) == "string" then
-			button = make_menu_button(window, label_or_button, options)
+			button = make_menu_button(window, label_or_button, options, main)
 		end
 		nav:add(button, action)
 		return button
@@ -859,7 +877,7 @@ function M.safe.show_notice(text)
 	t.defaultStyle = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 	t:SetStyleAuto()
 	t.text = tostring(text)
-	t.color = magic.Color(1, 0.6, 0.5)
+	t.color = magic.Color(M.safe.rgb("error"))
 	t:SetAlignment(HA_CENTER, VA_TOP)
 	t:SetPosition(0, 40 + 24 * #notices)
 	t.priority = 1000
@@ -972,7 +990,7 @@ function M.safe.show_message_dialog(message, on_close)
 	fit_window()
 
 	local ok_button = window:CreateChild("Button")
-	ok_button:SetStyleAuto()
+	ok_button:SetStyle("PrimaryButton")
 	ok_button:SetName("Button")
 	ok_button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	ok_button.minHeight = 20
@@ -1043,7 +1061,7 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label)
 	end
 
 	local yes_button = window:CreateChild("Button")
-	yes_button:SetStyleAuto()
+	yes_button:SetStyle("PrimaryButton")
 	yes_button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	yes_button.minHeight = 20
 	local yes_text = yes_button:CreateChild("Text")

@@ -14,6 +14,18 @@ local log = buildat.Logger("vanilla")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local ui_utils = require("buildat/extension/ui_utils")
+-- simplified: a client before 0.6.48 has no rgb and no SetStyle (this
+-- file is the app's, sent to any client): it gets the old colours and
+-- the plain button. Drop when old clients are refused.
+local rgb = (ui_utils.safe or ui_utils).rgb or function(name)
+	return unpack(({warn = {1, 0.8, 0.4}, error = {1, 0.4, 0.4},
+			dim = {0.7, 0.7, 0.7}})[name])
+end
+local function main_style(b)
+	if not pcall(function() b:SetStyle("PrimaryButton") end) then
+		b:SetStyleAuto()
+	end
+end
 local uistack = require("buildat/extension/uistack")
 
 local root = nil
@@ -253,9 +265,10 @@ local panel = nil
 
 -- A menu button under any parent, registered with the menu's keyboard
 -- walk: the same shape ui_utils' menu:add(label) makes on its own window
-local function button_on(menu, parent, label, action, width)
+-- main: the screen's main button, amber ([MENU_BRAND])
+local function button_on(menu, parent, label, action, width, main)
 	local b = parent:CreateChild("Button")
-	b:SetStyleAuto()
+	if main then main_style(b) else b:SetStyleAuto() end
 	b:SetName("Button")
 	b:SetLayout(magic.LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	-- A fixed height, not the column's share of what is left: a vertical
@@ -493,7 +506,7 @@ function draw(saves, save_games)
 		if selected_save then
 			play(selected_save)
 		end
-	end, fit(420))
+	end, fit(420), true)
 	button_on(menu, right, "Delete...", function()
 		local name = selected_save
 		if not name then
@@ -782,7 +795,7 @@ function draw_contentdb(flat)
 		warn:SetStyleAuto()
 		warn:SetText("A game's mods run on this server: " ..
 				"install only games you trust.")
-		warn:SetColor(magic.Color(1.0, 0.8, 0.4))
+		warn:SetColor(magic.Color(rgb("warn")))
 	end
 	local edit = menu.window:CreateChild("LineEdit")
 	edit:SetStyleAuto()
@@ -942,7 +955,7 @@ function draw_new_save_name(gameid, state)
 		local why = menu.window:CreateChild("Text")
 		why:SetStyleAuto()
 		why:SetText(state.error)
-		why.color = magic.Color(1, 0.5, 0.5)
+		why.color = magic.Color(rgb("error"))
 	end
 	local text = menu.window:CreateChild("Text")
 	text:SetStyleAuto()
@@ -1193,7 +1206,7 @@ local function draw_game_settings(flat)
 		t:SetStyleAuto()
 		t:SetText(note)
 		if note ~= "Saved." then
-			t.color = magic.Color(1, 0.5, 0.5)
+			t.color = magic.Color(rgb("error"))
 		end
 	end
 	local items = {}

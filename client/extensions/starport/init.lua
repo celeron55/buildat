@@ -23,6 +23,7 @@ local log = buildat.Logger("extension/starport")
 local network = require("buildat/extension/network")
 local uistack = require("buildat/extension/uistack")
 local magic = require("buildat/extension/urho3d").safe
+local rgb = require("buildat/extension/ui_utils").safe.rgb
 local group = dofile(__buildat_extension_path("starport") .. "/group.lua")
 local M = {safe = {}}
 
@@ -752,9 +753,10 @@ local function add_row(parent)
 	return r
 end
 
-local function add_button(parent, label, on_click, enabled)
+-- main: the screen's one main button, amber ([MENU_BRAND])
+local function add_button(parent, label, on_click, enabled, main)
 	local b = parent:CreateChild("Button")
-	b:SetStyleAuto()
+	if main then b:SetStyle("PrimaryButton") else b:SetStyleAuto() end
 	b.minHeight = 24
 	local t = b:CreateChild("Text")
 	t:SetStyleAuto()
@@ -762,7 +764,7 @@ local function add_button(parent, label, on_click, enabled)
 	t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	b.minWidth = t.width + 16
 	if enabled == false then
-		t.color = magic.Color(0.5, 0.5, 0.5)
+		t.color = magic.Color(rgb("dim"))
 	else
 		magic.SubscribeToEvent(b, "Released", function() on_click() end)
 	end
@@ -805,8 +807,8 @@ local function add_edit(parent, value, secret)
 	return e
 end
 
-local YELLOW = magic.Color(1.0, 0.8, 0.4)
-local GREY = magic.Color(0.7, 0.7, 0.7)
+local WARN = magic.Color(rgb("warn"))
+local DIM = magic.Color(rgb("dim"))
 
 local settings_page
 -- What open_settings() was given: the list filtered again by what changed
@@ -864,11 +866,11 @@ settings_page = function(can, again, message)
 	settings_root = root
 	add_text(w, "Starport: the lists of public servers")
 	if message then
-		add_text(w, message, YELLOW)
+		add_text(w, message, WARN)
 	end
 	if e.managed.starports or e.managed.filters or e.managed.direct_connect then
 		add_text(w, "Some of these are set by " .. managed_path() ..
-				" and cannot be changed here.", GREY)
+				" and cannot be changed here.", DIM)
 	end
 	local lock_starports = can and not e.managed.starports
 	for i, url in ipairs(e.starports) do
@@ -968,10 +970,10 @@ settings_page = function(can, again, message)
 			"Off: your key is not sent, so Starports keep nothing new of "..
 			"your use; your reports weigh as a new key's and get no "..
 			"outcomes. The key is kept: turned on again, it is sent with "..
-			"its standing as it was."), GREY)
+			"its standing as it was."), DIM)
 	if not s.send_key then
 		add_text(w, "The keys are in " .. STATE_PATH .. " (\"keys\"). "..
-				"Deleting them there starts over with new ones.", GREY)
+				"Deleting them there starts over with new ones.", DIM)
 	end
 	-- 5c
 	r = add_row(w)
@@ -1016,7 +1018,7 @@ settings_page = function(can, again, message)
 		settings_page(can, true)
 	end, can and s.pin ~= "")
 	add_text(w, "The lock covers this client only: not someone with the "..
-			"computer's administrator rights.", GREY)
+			"computer's administrator rights.", DIM)
 
 	if #s.receipts > 0 then
 		add_text(w, "Your reports:")
@@ -1024,7 +1026,7 @@ settings_page = function(can, again, message)
 			local x = s.receipts[i]
 			add_text(w, x.name .. ": " .. x.reason .. ": " ..
 					(x.outcome and x.outcome ~= "" and x.outcome or
-					x.state or "sent"), GREY)
+					x.state or "sent"), DIM)
 		end
 	end
 	add_button(w, "Back", function()
@@ -1205,7 +1207,7 @@ function M.id_login(url, then_cb, message)
 	local root, w = open_window("starport id login", 520)
 	add_text(w, "Starport ID at " .. url)
 	if message then
-		add_text(w, message, YELLOW)
+		add_text(w, message, WARN)
 	end
 	local r = add_row(w)
 	add_label(r, "Name", 120)
@@ -1235,7 +1237,7 @@ function M.id_login(url, then_cb, message)
 			if res.remind_email and then_cb then
 				-- Said, and what the login was for goes on
 				local root2, w2 = open_window("starport id remind", 520)
-				add_text(w2, remind, YELLOW)
+				add_text(w2, remind, WARN)
 				local rr = add_row(w2)
 				add_button(rr, "Add one...", close_and(root2, function()
 					M.id_page(url)
@@ -1251,7 +1253,7 @@ function M.id_login(url, then_cb, message)
 	magic.SubscribeToEvent(password, "TextFinished", go)
 	magic.SubscribeToEvent(totp, "TextFinished", go)
 	r = add_row(w)
-	add_button(r, "Log in", go)
+	add_button(r, "Log in", go, nil, true)
 	add_button(r, "Make an ID...", function()
 		uistack.main:pop(root)
 		M.id_register(url, then_cb)
@@ -1355,7 +1357,7 @@ function M.id_register(url, then_cb)
 				"logged in, your report key, and a separate identity for "..
 				"each community you join. That is all, on purpose: it is "..
 				"made for privacy, and nothing more is asked or kept than "..
-				"logging in, the age limits and moderation need.", GREY)
+				"logging in, the age limits and moderation need.", DIM)
 		local r = add_row(w)
 		add_label(r, "Name", 200)
 		local name = add_edit(r, "")
@@ -1369,7 +1371,7 @@ function M.id_register(url, then_cb)
 		add_label(r, "Recovery e-mail (optional)", 200)
 		local email = add_edit(r, "")
 		add_text(w, "Without one, a forgotten password is the end of the ID "..
-				"and its standing. You can add it later.", GREY)
+				"and its standing. You can add it later.", DIM)
 		local get_age = age_rows(w)
 		local status = add_text(w, "")
 		r = add_row(w)
@@ -1432,11 +1434,11 @@ function M.id_page(url, message)
 		add_text(w, "Starport ID " .. me.name .. " at " .. url .. " (age " ..
 				me.band .. ", " .. me.logins .. " logins)")
 		if message and message ~= "" then
-			add_text(w, message, YELLOW)
+			add_text(w, message, WARN)
 		end
 		for _, st in ipairs(me.statements or {}) do
 			add_text(w, tostring(st.action) .. " for " .. tostring(st.reason) ..
-					": " .. tostring(st.text), YELLOW)
+					": " .. tostring(st.text), WARN)
 		end
 		-- With TOTP on, the e-mail's and the password's changes take a code
 		-- from its row too ([WEB_ID_TRUST] (b))
@@ -1560,7 +1562,7 @@ function M.id_page(url, message)
 				add_text(w2, "Logged in now:")
 				for _, x in ipairs(res.sessions or {}) do
 					add_text(w2, line(x) .. (x.this and " (this one)" or ""),
-							x.this and GREY or nil)
+							x.this and DIM or nil)
 				end
 				add_text(w2, "The last logins:")
 				for i = #(res.recent or {}), 1, -1 do
@@ -1618,7 +1620,7 @@ local function ask_age(url, session, on_done)
 				"your ID joins one, say whether you are 18 or over. That "..
 				"is all that is kept for an adult; under 18, the birth "..
 				"year. You can change it later: Starport settings..., "..
-				"Starport ID..., Change the age...", GREY)
+				"Starport ID..., Change the age...", DIM)
 		local get_age = age_rows(w)
 		local st = add_text(w, "")
 		local rr = add_row(w)
@@ -1793,7 +1795,7 @@ function M.safe.id_token_here(cb, rename_reason)
 			end
 			magic.SubscribeToEvent(e, "TextFinished", go)
 			local rr = add_row(w)
-			add_button(rr, "Log in", go)
+			add_button(rr, "Log in", go, nil, true)
 			add_button(rr, "Cancel", close_and(root, function()
 				cb(nil, "cancelled")
 			end))
@@ -1806,7 +1808,7 @@ function M.safe.id_token_here(cb, rename_reason)
 		local function name_prompt(reason, suggest, rename)
 			local root, w = open_window("starport id name", 520)
 			if reason then
-				add_text(w, reason, YELLOW)
+				add_text(w, reason, WARN)
 			end
 			add_text(w, "The name to use in " .. community .. ". Only this "..
 					"community sees it; others do not see which name you "..
@@ -1918,14 +1920,14 @@ local function aitta_page(message, query, on_discuss)
 	add_text(w, "Apps from Aitta: " .. e.aitta)
 	if not e.filters.unreviewed then
 		add_text(w, "This client's filters hide unreviewed content, and " ..
-				"everything on Aitta is unreviewed.", YELLOW)
+				"everything on Aitta is unreviewed.", WARN)
 		add_button(w, "Back", function() uistack.main:pop(root) end)
 		return
 	end
 	add_text(w, "Nobody has reviewed these. An app runs in the server's " ..
-			"box: it cannot reach your files, only its own saves.", GREY)
+			"box: it cannot reach your files, only its own saves.", DIM)
 	if message then
-		add_text(w, message, YELLOW)
+		add_text(w, message, WARN)
 	end
 	local sr = add_row(w)
 	local search = add_edit(sr, query or "")
@@ -1934,7 +1936,7 @@ local function aitta_page(message, query, on_discuss)
 		uistack.main:pop(root)
 		aitta_page(nil, text, on_discuss)
 	end)
-	local status = add_text(w, "Fetching the list...", GREY)
+	local status = add_text(w, "Fetching the list...", DIM)
 	add_button(w, "Back", function() uistack.main:pop(root) end)
 	local q = (query or ""):lower()
 	network.http_get(e.aitta .. "/api/aitta/list", function(body, err)
@@ -2003,7 +2005,7 @@ local function aitta_page(message, query, on_discuss)
 					end)
 				end
 				if rel.description and rel.description ~= "" then
-					add_text(w, "    " .. tostring(rel.description), GREY)
+					add_text(w, "    " .. tostring(rel.description), DIM)
 				end
 			end
 		end
@@ -2108,7 +2110,7 @@ local function open_report_row(row)
 		buttons[r[1]] = add_button(w, r[2], function()
 			reason = r[1]
 			for k, b in pairs(buttons) do
-				b:GetChild(0).color = k == reason and YELLOW or
+				b:GetChild(0).color = k == reason and WARN or
 						magic.Color(1, 1, 1)
 			end
 		end)
@@ -2274,7 +2276,7 @@ function M.safe.open_report_here()
 					table.concat(asked, ", ") .. ".")
 		end
 		for _, e in ipairs(errors) do
-			add_text(w, "Did not answer: " .. e, YELLOW)
+			add_text(w, "Did not answer: " .. e, WARN)
 		end
 		log:info("report here: " .. math.min(#last_rows, 20) ..
 				" listings offered to pick by name")

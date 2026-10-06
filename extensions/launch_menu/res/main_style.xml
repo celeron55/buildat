@@ -10,6 +10,10 @@
         <attribute name="Hover Image Offset" value="0 16" />
         <attribute name="Pressed Child Offset" value="0 0" />
     </element>
+    <!-- [MENU_BRAND]: the one main button of a screen, amber -->
+    <element type="PrimaryButton" style="Button" auto="false">
+        <attribute name="Image Rect" value="160 80 176 96" />
+    </element>
     <element type="CheckBox" style="BorderImage">
         <attribute name="Min Size" value="16 16" />
         <attribute name="Max Size" value="16 16" />
@@ -89,7 +93,7 @@
         <attribute name="Hover Image Offset" value="0 16" />    <!-- Background color of the hover image IS the hover color of LineEdit -->
         <element type="Text" internal="true">
             <attribute name="Color" value="0.867 0.867 0.867 1" />
-            <attribute name="Selection Color" value="0.45 0.45 0.48 1" />
+            <attribute name="Selection Color" value="0.2 0.224 0.353 1" />
 			<attribute name="Font" value="Font;Fonts/Overpass-Regular.ttf" />
 			<attribute name="Font Size" value="16" />
         </element>
@@ -181,8 +185,8 @@
     </element>
     <element type="DialogWindow" style="Window" auto="false">
         <attribute name="Is Movable" value="true" />
-        <attribute name="Modal Shade Color" value="0.05 0.05 0.05 0.55" />
-        <attribute name="Modal Frame Color" value="0.867 0.867 0.867" />
+        <attribute name="Modal Shade Color" value="0.04 0.04 0.06 0.6" />
+        <attribute name="Modal Frame Color" value="0.227 0.227 0.282" />
         <attribute name="Modal Frame Size" value="2 2" />
     </element>
     <element type="ListRow">

@@ -1985,6 +1985,10 @@ function M.define(dst, util)
 			SetPosition = util.self_function(
 					"SetPosition", {}, {"UIElement", "number", "number"}),
 			SetStyleAuto = util.self_function("SetStyleAuto", {}, {"UIElement"}),
+			-- A non-auto style of the element's defaultStyle, by name
+			-- ("PrimaryButton", [MENU_BRAND])
+			SetStyle = util.self_function("SetStyle", {},
+					{"UIElement", "string"}),
 			-- A size that is both the minimum and the maximum, which is what
 			-- a layout leaves alone. Functions rather than the fixedWidth /
 			-- fixedHeight / fixedSize properties, which have no setter in

@@ -116,7 +116,7 @@ function M.boot(launch_action, query)
 	query = query or ""
 	local root = uistack.main:push({desc = "boot"})
 
-	local style = magic.cache:GetResource("XMLFile", "launch_menu/res/boot_style.xml")
+	local style = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 	root.defaultStyle = style
 
 	local layout = root:CreateChild("Window")
@@ -154,7 +154,7 @@ function M.boot(launch_action, query)
 	label:SetStyleAuto()
 	label.text = version .. " " .. hash
 	label:SetFontSize(11)
-	label.color = magic.Color(0.6, 0.6, 0.6)
+	label.color = magic.Color(ui_utils.rgb("dim"))
 	label:SetTextAlignment(HA_LEFT)
 
 	local title = layout:CreateChild("Text")
@@ -162,7 +162,7 @@ function M.boot(launch_action, query)
 	title.text = query == "" and "Buildat" or ("Buildat: " .. query .. "_")
 	title:SetFontSize(28)
 	title:SetTextAlignment(HA_CENTER)
-	title.color = magic.Color(0.867, 0.867, 0.867)
+	title.color = magic.Color(ui_utils.rgb("text"))
 
 	-- The grid, inside a viewport that is as tall as the window allows
 	-- and clips the rest: a grid of more lines than fit scrolls by the
@@ -291,7 +291,7 @@ function M.boot(launch_action, query)
 		none:SetStyleAuto()
 		none.text = "Nothing matches \"" .. query .. "\" (Backspace, Escape)"
 		none:SetTextAlignment(HA_CENTER)
-		none.color = magic.Color(0.7, 0.7, 0.7)
+		none.color = magic.Color(ui_utils.rgb("dim"))
 	end
 
 	-- The selected entry's name and description, to the right of the logo
@@ -307,14 +307,14 @@ function M.boot(launch_action, query)
 	desc_name:SetFontSize(22)
 	desc_name:SetPosition(desc_x, 40)
 	desc_name:SetFixedWidth(desc_w)
-	desc_name.color = magic.Color(0.867, 0.867, 0.867)
+	desc_name.color = magic.Color(ui_utils.rgb("text"))
 	local desc_text = logo_holder:CreateChild("Text")
 	desc_text:SetStyleAuto()
 	desc_text:SetFontSize(14)
 	desc_text:SetPosition(desc_x, 72)
 	desc_text:SetFixedWidth(desc_w)
 	desc_text:SetWordwrap(true)
-	desc_text.color = magic.Color(0.7, 0.7, 0.7)
+	desc_text.color = magic.Color(ui_utils.rgb("dim"))
 	local function show_description(item)
 		desc_name.text = item and item.label or ""
 		desc_text.text = item and item.description or ""

@@ -187,7 +187,7 @@ open = function()
 	-- wants: escape (natively) and a click off the menu do the same, but a
 	-- menu whose only way back is a key nobody was told about is a menu
 	-- that traps people
-	accounts.page_button(w, "Continue playing", close)
+	accounts.page_button(w, "Continue playing", close, true)
 	accounts.page_button(w, "Key bindings", function()
 		page(function()
 			o.keys.draw(function() later(open) end)
