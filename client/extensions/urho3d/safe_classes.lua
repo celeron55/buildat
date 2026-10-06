@@ -164,8 +164,11 @@ function M.define(dst, util)
 					end
 					return v:GetBuffer()
 				end),
+			-- UIElement too: the UI events' Element fields (ItemSelected,
+			-- MenuSelected, ...) go through here on their way to a handler,
+			-- and without it none of them ever arrived
 			SetPtr = util.wrap_function({"VariantMap", "string",
-					{"Node", "Component"}},
+					{"Node", "Component", "UIElement"}},
 				function(self, key, value)
 					self[key] = value
 				end),
@@ -2139,6 +2142,9 @@ function M.define(dst, util)
 			ClearSelection = util.self_function("ClearSelection", {},
 					{"Text"}),
 			SetSelectionColor = util.self_function("SetSelectionColor", {},
+					{"Text", "Color"}),
+			-- The background under the mouse: a dropdown's entries
+			SetHoverColor = util.self_function("SetHoverColor", {},
 					{"Text", "Color"}),
 			-- A shadow or an outline under the letters, which is what makes
 			-- text over a world readable: a HUD over snow or sand is white
