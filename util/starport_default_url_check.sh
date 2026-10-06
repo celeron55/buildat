@@ -58,7 +58,7 @@ printf 'delay 6000\nquit\n' > "$tmp/cmds.txt"
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$setup \
 	BUILDAT_HEARTH_ADMIN="setting starport_ids anyone https://127.0.0.1:$ANTLS" \
-	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$AN -c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
 grep -q "Joined as admin" "$tmp/admin.log" || fail "the admin's join ($tmp/admin.log)"
 python3 - "$json" "$SP" "$ANTLS" <<'PY' || fail "starport.json ($json)"
@@ -93,7 +93,7 @@ assert r["ok"], r
 print(r["result"]["token"])
 PY
 ) || fail "the ID API ($tmp/sp.log)"
-BUILDAT_HEARTH_STARPORT=$token timeout 90 Build/bin/buildat -D "$tmp/cl" \
+BUILDAT_HEARTH_STARPORT=$token timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
 	-w 800x600 -l 3 -s 127.0.0.1:$AN -c @"$tmp/cmds.txt" > "$tmp/id.log" 2>&1
 grep -q "Joined as fromid" "$tmp/id.log" ||
 	fail "the ID did not join ($tmp/id.log, $tmp/hearth.log)"
@@ -132,7 +132,7 @@ PY
 sleep 2
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	BUILDAT_HEARTH_ADMIN="setting starport_ids anyone" \
-	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$AN -c @"$tmp/cmds.txt" > "$tmp/admin2.log" 2>&1
 grep -q "hello: Starport IDs not taken" "$tmp/admin2.log" ||
 	fail "\"enabled\": false did not read as IDs off ($tmp/admin2.log)"

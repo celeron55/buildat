@@ -90,7 +90,7 @@ done
 printf 'delay 6000\nquit\n' > "$tmp/cmds.txt"
 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 	BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="$reqs" \
-	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_admin.log" 2>&1
 list=$(curl -s -m 10 "localhost:$SP/api/list")
 echo "$list" | grep -q "Play hearth" && echo "$list" | grep -q "Play aitta" ||
@@ -106,7 +106,7 @@ PY
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/hearth.log" | tail -1 | cut -d' ' -f3)
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$setup timeout 90 \
-	Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
+	Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
 	-c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
 grep -q "Joined as admin" "$tmp/admin.log" || fail "the admin's join ($tmp/admin.log)"
 

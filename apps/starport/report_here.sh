@@ -63,7 +63,7 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_
 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
-	timeout 90 Build/bin/buildat -D $tmp/cl -w 800x600 -l 3 -s 127.0.0.1:$SP -c @$tmp/cmds.txt > $tmp/cl.log 2>&1
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D $tmp/cl -w 800x600 -l 3 -s 127.0.0.1:$SP -c @$tmp/cmds.txt > $tmp/cl.log 2>&1
 curl -s 127.0.0.1:$SP/api/list | python3 -c "import json,sys; print('listed:', [(s['host'],s['port'],s.get('tls')) for s in json.load(sys.stdin)['servers']])"
 # The player's client: this Starport only, accepted
 now=$(date +%s)
@@ -83,6 +83,6 @@ screenshot $tmp/report.png
 quit
 C
 BUILDAT_FP_CREATE=1 BUILDAT_FP_NAME=op BUILDAT_FP_PASSWORD=pw123456 BUILDAT_FP_CODE=$fpcode \
-	timeout 90 Build/bin/buildat -D $tmp/fc -w 800x500 -l 3 -s "$2" -c @$tmp/fcmds.txt 2>&1 |
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D $tmp/fc -w 800x500 -l 3 -s "$2" -c @$tmp/fcmds.txt 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > $tmp/fc.log
 grep -a "report here" $tmp/fc.log | sed 's/.*extensio: //'

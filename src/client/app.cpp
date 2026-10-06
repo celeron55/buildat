@@ -3224,14 +3224,14 @@ struct CApp: public App, public magic::Application
 	// **Which extension is the launch UI** ([LAUNCH_SANDBOX]: a slot an
 	// extension fills, not a setting with three values). `-m` wins for
 	// the run it is given on; otherwise it is the saved preference,
-	// which defaults to `launch_menu`.
+	// which defaults to `launch_menu_v2`.
 	ss_ launch_ui_name()
 	{
 		const ss_ named = g_client_config.get<ss_>("menu_extension_name");
 		if(!named.empty())
 			return named;
 		if(m_options.launch_ui.empty())
-			return "launch_menu";
+			return "launch_menu_v2";
 		return m_options.launch_ui;
 	}
 

@@ -163,7 +163,7 @@ screenshot $out/hill_after.png
 delay 500
 quit
 CMDS
-bin/buildat -s localhost:29781 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
+bin/buildat -o launch_ui=launch_menu -s localhost:29781 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
 	-c @"$out/cmds.txt" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/hill_cli.log"
 sleep 2
 kill -INT "$srv" 2>/dev/null

@@ -23,7 +23,7 @@ cd "$here/Build"
 # 1
 printf 'delay 30000\nquit\n' > "$t/long"
 printf 'delay 3000\nquit\n' > "$t/short"
-timeout 90 bin/buildat -C "$t/cache" -D "$t/ua" -a app/digger/play -w 640x360 -l 3 \
+timeout 90 bin/buildat -o launch_ui=launch_menu -C "$t/cache" -D "$t/ua" -a app/digger/play -w 640x360 -l 3 \
 	-o sound_mute=1 -c @"$t/long" > "$t/a.log" 2>&1 &
 a=$!
 for _ in $(seq 60); do
@@ -36,7 +36,7 @@ read -r server client < "$t/cache/local_server.pid" ||
 [ "$(ps -o ppid= -p "$client" | tr -d ' ')" = "$a" ] ||
 	fail "the pidfile names client $client, not A"
 kill -0 "$server" || fail "A's server is not running"
-timeout 60 bin/buildat -C "$t/cache" -D "$t/ub" -w 640x360 -l 3 \
+timeout 60 bin/buildat -o launch_ui=launch_menu -C "$t/cache" -D "$t/ub" -w 640x360 -l 3 \
 	-o sound_mute=1 -c @"$t/short" > "$t/b.log" 2>&1
 grep -q "Adopted leftover" "$t/b.log" && fail "B adopted A's server"
 kill -0 "$server" || fail "B's quit stopped A's server"
@@ -44,7 +44,7 @@ kill -0 "$server" || fail "B's quit stopped A's server"
 # 2
 log=$(ls -d "$here"/Build/cache 2>/dev/null || echo "${XDG_CACHE_HOME:-$HOME/.cache}/buildat")/buildat.log
 before=$(stat -c %Y "$log" 2>/dev/null)
-timeout 60 bin/buildat -D "$t/uc" -w 640x360 -l 3 -o sound_mute=1 \
+timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/uc" -w 640x360 -l 3 -o sound_mute=1 \
 	-c @"$t/short" > "$t/c.log" 2>&1
 [ "$(stat -c %Y "$log" 2>/dev/null)" = "$before" ] ||
 	fail "a scripted client wrote $log"

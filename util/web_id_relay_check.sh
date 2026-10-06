@@ -158,7 +158,7 @@ wait_log 30000 RELAYTEST END
 quit
 EOF
 BUILDAT_HTTP_RELAY=1 \
-	timeout 60 bin/buildat -D "$t/cl" -w 800x600 -l 3 -o sound_mute=1 \
+	timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 -o sound_mute=1 \
 	-s "127.0.0.1:$port" -c @"$t/cmds" > "$t/cl.log" 2>&1
 
 nolog "$t/cl.log" | grep -q "RELAYTEST END" ||

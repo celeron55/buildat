@@ -54,14 +54,14 @@ BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
-	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_admin.log" 2>&1
 curl -s -m 10 "localhost:$SP/api/list" | grep -q "\"$id\"" ||
 	fail "the claim ($tmp/sp_admin.log)"
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/f.log" | tail -1 | cut -d' ' -f3)
 BUILDAT_FP_NAME=webop BUILDAT_FP_PASSWORD=webpass123 BUILDAT_FP_CREATE=1 \
 	BUILDAT_FP_CODE=$setup timeout 90 \
-	Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
+	Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
 	-c @"$tmp/cmds.txt" > "$tmp/op.log" 2>&1
 grep -q "Joined as webop" "$tmp/op.log" || fail "the account ($tmp/op.log)"
 

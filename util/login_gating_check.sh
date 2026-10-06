@@ -70,7 +70,7 @@ srv_log=$t/srv.log
 join(){
 	printf 'delay 1500\nquit\n' > "$t/seq"
 	env "${jp}_NAME=$2" "${jp}_PASSWORD=$3" "${jp}_CREATE=$4" "${jp}_CODE=$5" \
-		timeout 40 bin/buildat -s "127.0.0.1:$port" -D "$t/$1" \
+		timeout 40 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$t/$1" \
 		-w 640x480 -u 1 -l 3 -o sound_mute=1 -c @"$t/seq" \
 		> "$t/$1.log" 2>&1
 	nolog "$t/$1.log"
@@ -165,7 +165,7 @@ echo "$c" | grep -qF "Joined as erin" || fail "the kept login's account
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
 # rejoin <userdir>: the stored token only, as a client with no name set
 rejoin(){
-	timeout 40 bin/buildat -s "127.0.0.1:$port" -D "$t/$1" -w 640x480 -u 1 \
+	timeout 40 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$t/$1" -w 640x480 -u 1 \
 		-l 3 -o sound_mute=1 -c @"$t/seq" > "$t/$1.re.log" 2>&1
 	nolog "$t/$1.re.log"
 }

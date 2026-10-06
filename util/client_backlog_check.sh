@@ -35,7 +35,7 @@ for _ in $(seq 240); do
 	sleep 0.5
 done
 printf 'delay 30000\nquit\n' > "$t/seq"
-BUILDAT_PACKET_DRAIN_US=1 timeout 90 bin/buildat -s 127.0.0.1:$port \
+BUILDAT_PACKET_DRAIN_US=1 timeout 90 bin/buildat -o launch_ui=launch_menu -s 127.0.0.1:$port \
 	-D "$t/cl" -w 640x480 -u 1 -l 3 -o sound_mute=1 -c @"$t/seq" \
 	> "$t/cl.log" 2>&1
 grep -q "replicat.*peer [0-9]* held: [0-9]* bytes" "$t/srv.log" ||

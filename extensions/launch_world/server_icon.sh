@@ -36,7 +36,7 @@ grep -aq "The server's icon: .*server_icon.png" "$t/srv.log" ||
 grep -aq "server_icon.png scaled down to 64" "$t/srv.log" ||
 	fail "the 120-pixel icon was not scaled down"
 printf 'delay 8000\nquit\n' > "$t/cmds"
-timeout 90 bin/buildat -D "$t/cl" -C "$t/cache" -s localhost:$P -w 640x360 -l 3 \
+timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -C "$t/cache" -s localhost:$P -w 640x360 -l 3 \
 	-o sound_mute=1 -c @"$t/cmds" > "$t/cl1.log" 2>&1
 grep -aq "server icon from localhost:$P kept" "$t/cl1.log" ||
 	fail "the client did not keep the icon"
@@ -77,7 +77,7 @@ BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
-	timeout 90 bin/buildat -D "$t/cl_sp" -w 640x360 -l 3 -o sound_mute=1 \
+	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_sp" -w 640x360 -l 3 -o sound_mute=1 \
 	-s 127.0.0.1:$SP -c @"$t/cmds" > "$t/cl_sp.log" 2>&1
 list(){ curl -s -m 5 "127.0.0.1:$SP/api/list"; }
 for _ in $(seq 180); do

@@ -38,7 +38,7 @@ printf 'accepted,address,description,created,last_attempt,name,icon,server\n"tru
 	$now $now $A > "$t/u/network_addresses.csv"
 client(){   # port, sequence -> $t/c$port.log
 	printf "$2" > "$t/seq$1"
-	timeout 60 bin/buildat -s localhost:$1 -D "$t/u" -w 800x600 -l 3 \
+	timeout 60 bin/buildat -o launch_ui=launch_menu -s localhost:$1 -D "$t/u" -w 800x600 -l 3 \
 		-o sound_mute=1 -c @"$t/seq$1" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' \
 		> "$t/c$1.log"
 }

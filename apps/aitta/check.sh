@@ -56,7 +56,7 @@ printf 'delay 8000\nquit\n' > "$t/cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_CODE=$code \
 BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}" \
-	timeout 90 bin/buildat -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
+	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
 	-c @"$t/cmds" > "$t/cl.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl.log" ||
 	fail "the bind did not go through ($(grep -a 'ai:' "$t/cl.log" | head -2))"
@@ -89,7 +89,7 @@ zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.2"
 # 4. Delisted
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_REQS='{"cmd":"delist","release":"tester/demo/1.0"}' \
-	timeout 90 bin/buildat -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
+	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
 	-c @"$t/cmds" > "$t/cl2.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl2.log" || fail "the delist did not go through"
 curl -s "http://127.0.0.1:$P/api/aitta/list" | grep -q '"version":"1.0"' &&

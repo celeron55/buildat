@@ -57,7 +57,7 @@ done
 	echo "delay 300"; echo "event scan 4 walk2"; echo "keyup w"
 	echo "delay 500"; echo "quit"
 } > "$t/seq"
-timeout 400 bin/buildat -s 127.0.0.1:$P -D "$t/cl" -w 800x600 -u 1 -l 3 \
+timeout 400 bin/buildat -o launch_ui=launch_menu -s 127.0.0.1:$P -D "$t/cl" -w 800x600 -u 1 -l 3 \
 	-o sound_mute=1 -c @"$t/seq" > "$t/cl.log" 2>&1
 grep -a "scan [a-z0-9]*: rider" "$t/cl.log" | sed 's/.*: rider [^ ]* //' > "$t/riders"
 n=$(wc -l < "$t/riders")

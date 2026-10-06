@@ -49,7 +49,7 @@ printf 'delay 8000\nquit\n' > "$t/cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_CODE=$ca \
 BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}" \
-	timeout 90 bin/buildat -D "$t/cl_a" -w 800x600 -l 3 -o sound_mute=1 \
+	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_a" -w 800x600 -l 3 -o sound_mute=1 \
 	-s 127.0.0.1:$A -c @"$t/cmds" > "$t/cl_a.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl_a.log" || fail "the bind did not go through"
 publish(){ # name home [version]
@@ -81,7 +81,7 @@ printf 'delay 6000\nquit\n' > "$t/cmds_h"
 BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
 BUILDAT_HEARTH_CODE=$ch \
 BUILDAT_HEARTH_REQS="{\"cmd\":\"release_sources\",\"aittas\":[\"http://127.0.0.1:$A\"],\"addresses\":[\"http://127.0.0.1:$H\"]}" \
-	timeout 90 bin/buildat -D "$t/cl_h" -w 800x600 -l 3 -o sound_mute=1 \
+	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_h" -w 800x600 -l 3 -o sound_mute=1 \
 	-s 127.0.0.1:$H -c @"$t/cmds_h" > "$t/cl_h.log" 2>&1
 grep -aq 'hr: {.*"ok":true' "$t/cl_h.log" ||
 	fail "release_sources: $(grep -a 'hr: ' "$t/cl_h.log" | head -2)"
@@ -109,7 +109,7 @@ BUILDAT_HEARTH_REQS='{"cmd":"new_thread","feedback":true,"subject":"tester/demo 
 {"cmd":"status","thread":2,"status":"fixed","fixed_in":"1.1"}
 {"cmd":"status","thread":1,"status":"fixed"}
 {"cmd":"new_thread","topic":1,"title":"x","body":"x","kind":"bug"}' \
-	timeout 90 bin/buildat -D "$t/user" -C "$t/cache_f" -w 800x600 -l 3 \
+	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/user" -C "$t/cache_f" -w 800x600 -l 3 \
 	-o sound_mute=1 -a installed/tester.demo@1.0/feedback -c @"$t/cmds_h" \
 	> "$t/cl_f.log" 2>&1
 f=$(grep -a "hr feedback: " "$t/cl_f.log")
@@ -146,7 +146,7 @@ BUILDAT_HEARTH_REQS='{"cmd":"notifications"}
 {"cmd":"link","thread":4,"subject":"tester/demo '"$(cat "$t/pub")"'"}
 {"cmd":"link","thread":4,"subject":"tester/nothing k"}
 {"cmd":"new_thread","topic":1,"title":"Same name","body":"x","subject":"tester/demo otherkey"}' \
-	timeout 90 bin/buildat -D "$t/cl_h" -w 800x600 -l 3 -o sound_mute=1 \
+	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_h" -w 800x600 -l 3 -o sound_mute=1 \
 	-s 127.0.0.1:$H -c @"$t/cmds_h" > "$t/cl_n.log" 2>&1
 grep -a '"id":1001' "$t/cl_n.log" | grep -q '"kind":"fixed","message":0,"note":"1.1"' ||
 	fail "the reporter was not told: $(grep -a '"id":1001' "$t/cl_n.log")"

@@ -64,7 +64,7 @@ quit
 EOF
 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CREATE=1 \
 	BUILDAT_SP_CODE="$code" \
-	timeout 60 bin/buildat -D "$t/cl" -w 1280x800 -l 3 -o sound_mute=1 \
+	timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 1280x800 -l 3 -o sound_mute=1 \
 	-s "127.0.0.1:$port" -c @"$t/cmds" > "$t/cl.log" 2>&1
 [ -n "${SHOT:-}" ] && cp "$t"/acc1.png "$t"/ov.png "$t"/acc2.png "$SHOT/" 2>/dev/null
 

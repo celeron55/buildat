@@ -32,7 +32,7 @@ server() { # app user_dir log
 client() { # env_prefix name password code cmds log [extra env]
 	local p=$1 n=$2 pw=$3 c=$4 cmds=$5 log=$6; shift 6
 	env "${p}_NAME=$n" "${p}_PASSWORD=$pw" "${p}_CODE=$c" "$@" \
-		timeout 150 bin/buildat -s localhost:$port -D "$out/cli_$(basename "$log" .log)" \
+		timeout 150 bin/buildat -o launch_ui=launch_menu -s localhost:$port -D "$out/cli_$(basename "$log" .log)" \
 		-w 640x400 -l 3 -c @"$cmds" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$log"
 }
 cmds() { local n=$1; shift; printf '%s\n' "$@" > "$out/$n.txt"; }

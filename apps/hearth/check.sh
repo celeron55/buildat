@@ -57,7 +57,7 @@ client(){ # name password log requests [env...]
 	# CREATE: an unknown name is made rather than refused; a known one logs in
 	env BUILDAT_HEARTH_NAME=$n BUILDAT_HEARTH_PASSWORD=$pw BUILDAT_HEARTH_CREATE=1 \
 		BUILDAT_HEARTH_CODE=$code BUILDAT_HEARTH_REQS="$reqs" "$@" \
-		timeout 90 bin/buildat -D "$t/cl_$n" -w 800x600 -l 3 -o sound_mute=1 \
+		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$n" -w 800x600 -l 3 -o sound_mute=1 \
 		-s 127.0.0.1:$P -c @"$t/cmds_$n" > "$log" 2>&1
 }
 answer(){ # log id

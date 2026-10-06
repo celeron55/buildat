@@ -63,7 +63,7 @@ EOF
 	BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
-		timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+		timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 		-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_$app.log" 2>&1
 	curl -s -m 10 "localhost:$SP/api/list" | grep -q "\"$id\"" ||
 		fail "$app: the claim ($tmp/sp_$app.log)"
@@ -83,7 +83,7 @@ PY
 	) || fail "$app: the ID API"
 	setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/$app.log" | tail -1 | cut -d' ' -f3)
 	env "${prefix}_STARPORT=$token" "${prefix}_CODE=$setup" timeout 90 \
-		Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
+		Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
 		-c @"$tmp/cmds.txt" > "$tmp/cl_$app.log" 2>&1
 	grep -q "Joined as grown$app" "$tmp/cl_$app.log" &&
 		grep -q "grown$app claimed the server with the setup code" "$tmp/$app.log" ||

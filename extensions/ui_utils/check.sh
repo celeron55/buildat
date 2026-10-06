@@ -49,7 +49,7 @@ delay 1500
 quit
 CMDS
 BUILDAT_FP_CREATE=1 BUILDAT_FP_NAME=op BUILDAT_FP_PASSWORD=pw123456 BUILDAT_FP_CODE=$code \
-	timeout 120 bin/buildat -s localhost:$port -D "$out/cli" -w 800x500 -l 4 \
+	timeout 120 bin/buildat -o launch_ui=launch_menu -s localhost:$port -D "$out/cli" -w 800x500 -l 4 \
 	-c @"$out/cmds.txt" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 grep -a "ui_utils: keyboard" "$out/cli.log" | sed 's/.*ui_utils: //' > "$out/keys.txt"
 cat "$out/keys.txt"

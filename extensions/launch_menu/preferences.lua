@@ -254,7 +254,8 @@ function M.show()
 	-- not by running them.
 	local uis = api.list_launch_uis and api.list_launch_uis() or {}
 	if #uis > 1 then
-		local now = api.get_preference("launch_ui") or "launch_menu"
+		-- The one running, which a -m run need not have saved
+		local now = api.launch_ui_name()
 		local at = 1
 		for i, e in ipairs(uis) do
 			if e.name == now then at = i end

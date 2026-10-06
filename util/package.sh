@@ -719,7 +719,7 @@ smoke_test() {
 	sleep 5
 	printf 'delay 25000\nscreenshot %s/shot.png\nquit\n' "$dir" > "$dir/cmds.txt"
 	# Software GL where there is no GPU (the container); harmless with one
-	(cd "$unpacked" && LIBGL_ALWAYS_SOFTWARE=1 timeout 120 bin/buildat -s "localhost:$port" -w 640x360 -l 3 -c @"$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
+	(cd "$unpacked" && LIBGL_ALWAYS_SOFTWARE=1 timeout 120 bin/buildat -o launch_ui=launch_menu -s "localhost:$port" -w 640x360 -l 3 -c @"$dir/cmds.txt" > "$dir/cli.log" 2>&1) || true
 	kill -INT "$srv" 2>/dev/null || true
 	for i in $(seq 1 30); do
 		kill -0 "$srv" 2>/dev/null || break

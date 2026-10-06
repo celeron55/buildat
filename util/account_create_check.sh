@@ -52,7 +52,7 @@ join(){
 	printf 'delay 6000\nquit\n' > "$t/seq"
 	BUILDAT_JOIN_NAME="$2" BUILDAT_JOIN_PASSWORD="$3" \
 		BUILDAT_JOIN_CREATE="$4" BUILDAT_JOIN_CODE="$5" \
-		timeout 40 bin/buildat -s "127.0.0.1:$port" -D "$t/$1" \
+		timeout 40 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$t/$1" \
 		-w 640x480 -u 1 -l 3 -o sound_mute=1 -c @"$t/seq" \
 		> "$t/$1.log" 2>&1
 	nolog "$t/$1.log"

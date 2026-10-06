@@ -67,7 +67,7 @@ done
 } > "$out/cmds.txt"
 echo "$app on $game, seed $seed, $rounds rounds, port $port"
 cd "$here/Build/${BUILD-asan}"
-bin/buildat -s "127.0.0.1:$port" -D "$out/user" -w 640x360 -l 3 \
+bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$out/user" -w 640x360 -l 3 \
 	-o sound_mute=1 -U "$here/3rdparty/Urho3D" -P "$here" -C "$out/cache" \
 	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1 &
 cli=$!

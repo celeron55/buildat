@@ -85,7 +85,7 @@ shoot()
 	# **The window size is the check's, not the desk's**: the framings
 	# are comparable between runs only at one size, and -w leaves the
 	# remembered one alone
-	run_client 90 "$out/cli.log" timeout 300 bin/buildat \
+	run_client 90 "$out/cli.log" timeout 300 bin/buildat -o launch_ui=launch_menu \
 		-s "localhost:$port" -w 1600x900 -l 3 \
 		-c @../apps/voxel_lighting/check.txt > /dev/null 2>&1
 	local rc=$?

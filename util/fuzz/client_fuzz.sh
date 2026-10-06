@@ -35,7 +35,7 @@ echo "seed $seed, port $port"
 end=$(( $(date +%s) + secs )); runs=0; bad=""
 while [ "$(date +%s)" -lt "$end" ]; do
 	runs=$((runs + 1))
-	bin/buildat -s "127.0.0.1:$port" -D "$out/user" \
+	bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$out/user" \
 		-w 640x360 -l 3 -o sound_mute=1 -U "$here/3rdparty/Urho3D" -P "$here" \
 		-C "$out/cache" -c @"$out/cmds.txt" \
 		> "$out/cli.log" 2>&1 &

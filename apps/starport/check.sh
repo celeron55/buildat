@@ -108,7 +108,7 @@ BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}
 {\"cmd\":\"decide\",\"group\":\"$id|spam\",\"decision\":\"dismiss\"}
 {\"cmd\":\"fleet_create\",\"name\":\"Check fleet\"}" \
-	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/cl.log" 2>&1
 n=$(grep -c 'sp: {"id":[0-9]*,"ok":true' "$tmp/cl.log")
 [ "$n" -ge 5 ] || fail "$n of 5 commands went through (cl.log)"
@@ -174,13 +174,13 @@ echo "ok: IDs made, an adult's year not kept, a token got"
 printf 'delay 8000\nquit\n' > "$tmp/cmds2.txt"
 # The server has no admin yet: the setup code makes the ID it (10g)
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/an2.log" | tail -1 | cut -d' ' -f3)
-BUILDAT_FP_STARPORT=$token timeout 90 Build/bin/buildat -D "$tmp/cl" \
+BUILDAT_FP_STARPORT=$token timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
 	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
 	> "$tmp/cl2.log" 2>&1
 grep -q "Login refused: This server has no admin yet" "$tmp/cl2.log" ||
 	fail "an ID got in before the server had an admin (cl2.log)"
 BUILDAT_FP_STARPORT=$token BUILDAT_FP_CODE=$setup timeout 90 \
-	Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN2 \
+	Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN2 \
 	-c @"$tmp/cmds2.txt" > "$tmp/cl2.log" 2>&1
 grep -q "Joined as grownup" "$tmp/cl2.log" &&
 	grep -q "New account grownup for a Starport ID" "$tmp/an2.log" &&
@@ -213,7 +213,7 @@ PY
 printf 'delay 8000\nquit\n' > "$tmp/cmds3.txt"
 BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
 BUILDAT_SP_REQS='{"cmd":"blocklist_create","name":"Check list"}' \
-	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl3.log" 2>&1
 list=$(grep -o '"id":"[0-9a-f]*","name":"Check list"' "$tmp/cl3.log" |
 	head -1 | cut -d'"' -f4)
@@ -222,7 +222,7 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
 BUILDAT_SP_REQS="{\"cmd\":\"blocklist_publish\",\"list\":\"$list\",\"scope\":\"listing:$id\"}
 {\"cmd\":\"blocklist_subscribe\",\"list\":\"$list\",\"scope\":\"fleet:${fleet%%:*}\"}
 {\"cmd\":\"queue\"}" \
-	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl3.log" 2>&1
 grep -q '"id":"id:grown|harassment"' "$tmp/cl3.log" ||
 	fail "the ban is not in the queue as a report about the ID (cl3.log)"
@@ -238,7 +238,7 @@ for _ in $(seq 120); do
 	sleep 1
 done
 sleep 3
-BUILDAT_FP_STARPORT=$token timeout 90 Build/bin/buildat -D "$tmp/cl" \
+BUILDAT_FP_STARPORT=$token timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
 	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
 	> "$tmp/cl4.log" 2>&1
 grep -q "Login refused: Banned by a blocklist" "$tmp/cl4.log" ||
@@ -276,7 +276,7 @@ print(" ".join(out))
 PY
 ) || fail "an unlisted server's token, by address"
 tnew=$tokens
-BUILDAT_FP_STARPORT=$tnew timeout 90 Build/bin/buildat -D "$tmp/cl" \
+BUILDAT_FP_STARPORT=$tnew timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
 	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
 	> "$tmp/cl5.log" 2>&1
 grep -q "Login refused: Your Starport ID waits" "$tmp/cl5.log" ||
@@ -303,7 +303,7 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
 BUILDAT_SP_ADMIN="add mod modpass1234" \
 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"moderators\":[\"mod\"],\"notice\":{\"text\":\"Check notice\",\"priority\":\"high\"}}}
 {\"cmd\":\"act\",\"listing\":\"$id\",\"action\":\"hide\",\"reason\":\"other\",\"text\":\"for the check\",\"days\":0}" \
-	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl6.log" 2>&1
 [ "$(grep -c 'sp: {"id":[0-9]*,"ok":true' "$tmp/cl6.log")" -ge 2 ] ||
 	fail "the notice, the moderator or the hide (cl6.log)"
@@ -311,7 +311,7 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=mod BUILDAT_SP_PASSWORD=modpass1234 \
 BUILDAT_SP_REQS='{"cmd":"me"}
 {"cmd":"overview"}
 {"cmd":"overview"}' \
-	timeout 90 Build/bin/buildat -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl7.log" 2>&1
 python3 - "$tmp/cl7.log" <<'PY' || fail "mod's Overview (cl7.log)"
 import json, re, sys
@@ -331,7 +331,7 @@ echo "ok: the Overview: the notice, another's hide unseen, then seen"
 # 9
 sp_reqs(){ # account password requests log
 	BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=$1 BUILDAT_SP_PASSWORD=$2 \
-	BUILDAT_SP_REQS=$3 timeout 90 Build/bin/buildat -D "$tmp/cl" \
+	BUILDAT_SP_REQS=$3 timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
 		-w 800x600 -l 3 -s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/$4" 2>&1
 }
 sp_reqs admin checkpass '{"cmd":"me"}' cl8.log

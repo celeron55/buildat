@@ -79,7 +79,7 @@ run_drive(){
 		echo "delay 1000"
 		echo "quit"
 	} > "$t/seq.$1"
-	timeout 90 bin/buildat -s "127.0.0.1:$port" -D "$t/$1" \
+	timeout 90 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$t/$1" \
 		-w 1000x700 -u 1 -l 3 -o sound_mute=1 -c @"$t/seq.$1" \
 		> "$t/$1.log" 2>&1
 }

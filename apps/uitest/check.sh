@@ -24,7 +24,7 @@ srv=$(check_pgrep buildat_server | head -1)
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 { echo "delay 4000"; echo "screenshot $out/uitest.png"; echo "delay 500"
 	echo "quit"; } > "$out/cmds.txt"
-bin/buildat -s localhost:29793 -w 640x480 -l 3 -c @"$out/cmds.txt" 2>&1 |
+bin/buildat -o launch_ui=launch_menu -s localhost:29793 -w 640x480 -l 3 -c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done

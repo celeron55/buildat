@@ -32,7 +32,7 @@ for _ in $(seq 120); do
 done
 grep -q "STATUS Listening" "$t/srv.log" || fail "digger did not start"
 printf 'delay 150000\nquit\n' > "$t/seq"
-timeout 240 bin/buildat -s localhost:$P -D "$t/u" -w 640x360 -l 3 \
+timeout 240 bin/buildat -o launch_ui=launch_menu -s localhost:$P -D "$t/u" -w 640x360 -l 3 \
 	-o sound_mute=1 -c @"$t/seq" > "$t/c.log" 2>&1 &
 c=$!
 # 1
