@@ -339,7 +339,8 @@ local show_connect_dialog
 -- mode: which of unlit, shadows and pbr to draw the world in; see the connect
 -- dialog, where it is chosen, and world.lua for what it changes
 local function show_client(host, port, name, password, mode)
-	local root = uistack.main:push({desc="luanti_client"})
+	-- A click on nothing over the world is the game's, not Back
+	local root = uistack.main:push({desc="luanti_client", tap_outside = false})
 	-- A world is on the screen from here on: a caught error is a notice
 	-- line rather than a dialog, which under a session would take the
 	-- mouse from the player ([MENU_ERRORS])

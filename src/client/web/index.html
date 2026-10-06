@@ -125,6 +125,24 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		} catch(e){}
 	}
 	document.addEventListener('touchend', sync_fullscreen, true);
+	// **The browser's Back is the client's** ([TAP_BACK]): one entry of
+	// this page's own sits on the history, and Back onto the page's first
+	// one is Escape on the client's top screen (app.cpp reads buildatBack)
+	// with the entry put back -- while a screen is over the first one
+	// (buildatBackDepth, uistack). On the first screen Back leaves.
+	// simplified: a browser skips an entry the page got no tap or key on,
+	// so Back before any input leaves at once, and two Backs with no input
+	// between them may leave too
+	history.pushState({buildat: 1}, '');
+	window.addEventListener('popstate', function(){
+		var m = window.Module;
+		if(m && (m.buildatBackDepth | 0) > 1){
+			history.pushState({buildat: 1}, '');
+			m.buildatBack = (m.buildatBack | 0) + 1;
+		} else {
+			history.back();
+		}
+	});
 	window.Module = {
 		canvas: canvas,
 		arguments: args,

@@ -180,7 +180,7 @@ local function connect_or_show_error(address, fallbacks)
 			-- drawn through the world, and the scan a driven run reads
 			-- stands aside only for a top named "game is running". A
 			-- launcher leaving a game pops the whole stack.
-			uistack.main:push({desc = GAME_RUNNING})
+			uistack.main:push({desc = GAME_RUNNING, tap_outside = false})
 			magic.ui:SetFocusElement(nil)
 		elseif fallbacks and #fallbacks > 0 then
 			log:info("connect_server() failed; the pool's next server")

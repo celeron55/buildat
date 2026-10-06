@@ -2366,6 +2366,8 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(launch_ui_fell_back)
 		DEF_BUILDAT_FUNC(get_env)
 		DEF_BUILDAT_FUNC(is_scripted)
+		DEF_BUILDAT_FUNC(press_back)
+		DEF_BUILDAT_FUNC(set_back_depth)
 		DEF_BUILDAT_FUNC(leave_to_menu)
 		DEF_BUILDAT_FUNC(http_get)
 		DEF_BUILDAT_FUNC(http_poll)
@@ -3028,6 +3030,13 @@ struct CApp: public App, public magic::Application
 #ifdef __EMSCRIPTEN__
 		web_text_sync(GetSubsystem<magic::UI>());
 		web_idle_step();
+		// [TAP_BACK] the browser's Back, each one Escape (index.html)
+		for(int n = EM_ASM_INT({ var n = Module.buildatBack | 0;
+				Module.buildatBack = 0; return n; }); n > 0; n--){
+			ss_ err;
+			client::command_seq::inject_key(GetSubsystem<magic::Input>(),
+					"Escape", true, true, &err);
+		}
 #endif
 		update_ui_fit();
 		// A local server on its way out is reaped here rather than in
@@ -4453,6 +4462,34 @@ struct CApp: public App, public magic::Application
 		lua_pop(L, 1);
 		lua_pushboolean(L, self->m_command_seq_active);
 		return 1;
+	}
+
+	// [TAP_BACK] press_back(): Escape, pressed and let go, as the keyboard
+	// would: every screen's own Escape handling is what Back does
+	static int l_press_back(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		ss_ err;
+		if(!client::command_seq::inject_key(
+				self->GetSubsystem<magic::Input>(), "Escape", true, true, &err))
+			log_w(MODULE, "press_back: %s", cs(err));
+		return 0;
+	}
+
+	// [TAP_BACK] set_back_depth(n): how many screens the main stack holds,
+	// which the web page's Back reads: above 1 Back is Escape, at 1 it
+	// leaves the page
+	static int l_set_back_depth(lua_State *L)
+	{
+		const int n = (int)luaL_checkinteger(L, 1);
+#ifdef __EMSCRIPTEN__
+		EM_ASM({ Module.buildatBackDepth = $0; }, n);
+#else
+		(void)n;
+#endif
+		return 0;
 	}
 
 	// list_preferences() -> {name, ...}

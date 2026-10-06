@@ -1,0 +1,20 @@
+[
+	["nav", "${URL}"],
+	["waitlog", "launch_menu_v2", 120],
+	["wait", 3000],
+	["tap", 300, 457],
+	["wait", 1500],
+	["eval", "'settings: depth ' + Module.buildatBackDepth"],
+	["eval", "history.back(), 'back'"],
+	["wait", 1500],
+	["eval", "'after Back: depth ' + Module.buildatBackDepth + ' ' + location.href"],
+	["tap", 300, 457],
+	["wait", 1500],
+	["eval", "'settings again: depth ' + Module.buildatBackDepth"],
+	["tap", 60, 700],
+	["wait", 1500],
+	["eval", "'after tap: depth ' + Module.buildatBackDepth"],
+	["eval", "history.back(), 'back on Home'"],
+	["wait", 2000],
+	["eval", "'left: ' + location.href"]
+]

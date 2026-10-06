@@ -585,6 +585,10 @@ buildat.safe.leave_to_menu = __buildat_leave_to_menu
 -- asks before taking the mouse: a check shares a desk with the person
 -- whose mouse it is ([BOX_PLAYTEST_3])
 buildat.safe.is_scripted = __buildat_is_scripted
+-- [TAP_BACK] uistack's: Escape pressed as Back, and the main stack's depth
+-- for the web page's Back
+buildat.press_back = __buildat_press_back
+buildat.set_back_depth = __buildat_set_back_depth
 
 -- **The client's preferences, against a fixed key set**: the names are
 -- `list_preferences()`'s and nothing else, which is what keeps this a

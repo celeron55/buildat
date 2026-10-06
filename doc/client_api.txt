@@ -1037,6 +1037,8 @@ input: what every menu and dialog in the tree is pushed onto.
 uistack.main -> the stack over magic.ui.root
 uistack.UIStack(root) -> a stack of its own
 - :push({desc = "..."}) -> root element; :pop(root) (the top, or it raises);
+  {tap_outside = false}: a click on nothing while it is the top is not
+  Back (a game's own layer over its world; doc/conventions.txt).
   root:SubscribeToStackEvent(event_name, callback) subscribes for as long as
   the root is on the stack.
 - :pop() of an entry whose element has already been removed -- a sandbox reset

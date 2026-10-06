@@ -19,6 +19,15 @@ UIStackElement.SubscribeToStackEvent = {}
 assert(UIStackElement)
 
 local ui_stack_name_i = 1  -- For generating a unique name for each stack
+-- [TAP_BACK] The entries pushed with {tap_outside = false}: a world's own
+-- layer, where a click on nothing is the game's
+local no_tap_outside = setmetatable({}, {__mode = "k"})
+-- The main stack's depth to the web page's Back (index.html)
+local function depth_changed(stack)
+	if stack == M.main then
+		buildat.set_back_depth(#stack.stack)
+	end
+end
 local last_stack_with_pushed_element = nil
 
 -- Root can be a sandboxed or non-sandboxed element
@@ -157,6 +166,10 @@ function M.UIStack(root)
 
 		table.insert(self.stack, element)
 		last_stack_with_pushed_element = self
+		if options.tap_outside == false then
+			no_tap_outside[element] = true
+		end
+		depth_changed(self)
 		return element
 	end
 	-- Everything above `root` popped, top down, root itself included when
@@ -203,6 +216,7 @@ function M.UIStack(root)
 				below:SetVisible(true)
 				below:SetFocus(true)
 			end
+			depth_changed(self)
 			return
 		end
 		local top = table.remove(self.stack)
@@ -218,6 +232,7 @@ function M.UIStack(root)
 			top:SetVisible(true)
 			top:SetFocus(true)
 		end
+		depth_changed(self)
 	end
 	return self
 end
@@ -228,6 +243,27 @@ M.safe.UIStack = M.UIStack
 
 M.main = M.safe.UIStack(magic.ui.root)
 M.safe.main = M.main
+
+-- **A tap or click on nothing is Back** ([TAP_BACK]): Escape, so each
+-- screen goes back the way its Escape does, and a touchscreen, which has
+-- no Escape, gets out of every menu. Not on the first screen, which has
+-- nothing under it (Escape there is Quit), and not on an entry pushed with
+-- {tap_outside = false}. "Nothing" is what Urho3D's own click found: no
+-- enabled element there. The cursor hidden (a game holding the mouse),
+-- there is no UIMouseClick.
+magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
+	local stack = M.main.stack
+	local top = stack[#stack]
+	if #stack < 2 or no_tap_outside[top] or element_gone(top) then
+		return
+	end
+	if ui:GetElementAt(IntVector2(event_data:GetInt("X"),
+			event_data:GetInt("Y")), true) ~= nil then
+		return
+	end
+	log:verbose("UIStack: a click on nothing; Back")
+	buildat.press_back()
+end)
 -- Set by whoever answers `event scan` for the world (vanilla's scan.lua),
 -- so the menu's answer below stands aside once it is there
 M.world_scan = false
