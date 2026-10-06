@@ -132,6 +132,9 @@ static json::Value default_settings()
 	s.set("max_size", (int64_t)50 * 1000 * 1000);
 	// Seconds before a package's next release is listed (http_list)
 	s.set("update_delay", (int64_t)0);
+	// [FRONT_PAGES]: seconds a release is listed before the page at /
+	// shows it, so it can be delisted first
+	s.set("page_delay", (int64_t)3600);
 	return s;
 }
 
@@ -358,7 +361,8 @@ struct Module: public interface::Module
 		ss_ b = "<div class=\"box\"><b>"+(latest ? "<a href=\"/p/"+html(pkg)+
 				"\">"+html(pkg)+"</a>" : html(pkg))+"</b> "+
 				html(jstr(rel, "version"))+" <span class=\"meta\">"+
-				html(jstr(rel, "kind"))+", "+date((int64_t)rel.get("time")
+				html(jstr(rel, "kind"))+", for "+html(jstr(rel, "audience"))+
+				", "+date((int64_t)rel.get("time")
 				.as_number())+", "+(size < 1000 ? itos(size)+" bytes" : size < 1000000 ?
 				itos(size / 1000)+" kB" :
 				itos(size / 1000000)+" MB")+", unreviewed</span>";
@@ -400,10 +404,19 @@ struct Module: public interface::Module
 			return send(503, html_type, interface::web_brand::page("Aitta",
 					"Aitta", "<p>Starting.</p>"));
 		const json::Value all = listed_releases();
-		// Newest first; a package's latest is its first
+		// Only what suits a teen, listed "page_delay" seconds (an older
+		// save has none: an hour), with no way to show more
+		const json::Value &pd = m_settings.get("page_delay");
+		const int64_t delay = pd.is_number() ? (int64_t)pd.as_number() : 3600;
 		sv_<json::Value> rels;
-		for(unsigned i = 0; i < all.size(); i++)
-			rels.push_back(all.at(i));
+		for(unsigned i = 0; i < all.size(); i++){
+			const json::Value &rel = all.at(i);
+			const ss_ a = jstr(rel, "audience");
+			if((a == "everyone" || a == "teen") &&
+					now_s() - (int64_t)rel.get("time").as_number() >= delay)
+				rels.push_back(rel);
+		}
+		// Newest first; a package's latest is its first
 		std::sort(rels.begin(), rels.end(), [](const json::Value &a,
 				const json::Value &b){
 			return a.get("time").as_number() > b.get("time").as_number();
@@ -598,7 +611,8 @@ struct Module: public interface::Module
 			return drop("cannot store the archive");
 		json::Value rel = json::object();
 		for(const char *k : {"author", "name", "version", "description",
-				"license_code", "license_media", "home_hearth", "changelog"})
+				"license_code", "license_media", "home_hearth", "changelog",
+				"audience"})
 			rel.set(k, jstr(m, k));
 		rel.set("engine_api", m.get("engine_api"));
 		rel.set("kind", interface::aitta::kind_of(m));
@@ -634,7 +648,7 @@ struct Module: public interface::Module
 	}
 
 	// -----------------------------------------------------------------------
-	// The app: an author binds a key; the admin delists
+	// The app: an author binds a key; the admin delists and sets settings
 
 	void on_req(const network::Packet &packet)
 	{
@@ -720,6 +734,24 @@ struct Module: public interface::Module
 			put("releases", id, rel);
 			log_i(MODULE, "%s: %s %s", cs(name), cs(cmd), cs(id));
 			return json::Value(true);
+		}
+		// Settings by name, each one default_settings has
+		if(cmd == "set_settings"){
+			if(!admin)
+				throw Exception("only the admin sets settings");
+			const json::Value &s = q.get("settings");
+			if(!s.is_object())
+				throw Exception("settings: an object");
+			json::Value next = m_settings.deepcopy();
+			for(json::Iterator it(s); it.valid(); it.next()){
+				if(default_settings().get(it.key()).is_undefined())
+					throw Exception("no such setting: "+it.key());
+				next.set(it.key(), it.value());
+			}
+			m_settings = next;
+			put("settings", "settings", m_settings);
+			log_i(MODULE, "%s set %s", cs(name), cs(s.stringify()));
+			return m_settings;
 		}
 		throw Exception("no such command: "+cmd);
 	}

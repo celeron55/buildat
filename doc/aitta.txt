@@ -19,7 +19,10 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
         "home_hearth": "https://forum.buildat.org",   optional: where
                                       its feedback and news go
         "changelog": "CHANGELOG.md",  optional: a file in the archive
-        "kind": "app"                 optional: "app" or "extension"
+        "kind": "app",                optional: "app" or "extension"
+        "audience": "everyone"        optional: "everyone", "teen" or
+                                      "adult"; Aitta's page at / lists
+                                      only "everyone" and "teen"
     }
 
 A package of kind "extension" is a client extension: init.lua at its
@@ -68,6 +71,10 @@ settings), the size -- and listed, unreviewed. The admin can delist.
 A package's later release is listed once it is the settings'
 "update_delay" seconds old (0 by default), so a release made with a
 stolen key can be reported and delisted before clients are offered it.
+The page at / is for a browser that may be anyone's: it lists a release
+only once it is "page_delay" seconds old (3600 by default), and only one
+whose audience is "everyone" or "teen". The admin changes a setting
+with the app's request {"cmd": "set_settings", "settings": {...}}.
 
     GET  /api/aitta/list                      the listed releases, JSON
     GET  /api/aitta/archive/<sha256>.zip|.sig a listed release's files

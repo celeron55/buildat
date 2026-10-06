@@ -81,6 +81,17 @@ namespace interface
 			return r;
 		}
 
+		// s cut to n bytes at most, at a UTF-8 character's start, "..."
+		// after what was cut ([FRONT_PAGES]: one listing can't fill a page)
+		inline ss_ cut(const ss_ &s, size_t n)
+		{
+			if(s.size() <= n)
+				return s;
+			while(n > 0 && (s[n] & 0xC0) == 0x80)
+				n--;
+			return s.substr(0, n)+"...";
+		}
+
 		// [FRONT_PAGES]: a read-only page of an app's own (Aitta's, the
 		// Starport's front page): the header with the logo and the app's
 		// name, linking to /, and the way into the client under it.

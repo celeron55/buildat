@@ -9,6 +9,8 @@
 # Starport under a name with a <script> in it: the Starport's page shows
 # it as text, "Native client only" (no TLS), and the kind filter keeps it
 # or leaves it out. Nothing offers to show what does not suit a teen.
+# Both pages hold back what is new for an hour: the check sets that to 0
+# after seeing it hold the release back. An adult release stays off.
 #   util/front_pages_check.sh
 set -u
 . "$(dirname "$0")/check_paths.sh"
@@ -56,7 +58,7 @@ grep -q "Nothing is published" <<< "$(page $AI/index.html)" &&
 read -r _ _ id _ _ ccode < <(grep -v "^#" "$t/ai/apps/aitta/starport_claim.txt")
 printf 'delay 6000\nquit\n' > "$t/cmds"
 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
-	BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
+	BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false,\"page_delay\":0}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
@@ -75,11 +77,22 @@ echo 'int x;' > "$t/demo/main/main.cpp"
 echo "return function(ctx) return {} end" > "$t/demo/launcher/init.lua"
 printf '{"author": "tester", "name": "demo", "version": "1.0", "engine_api": 1,
 	"license_code": "MIT", "license_media": "CC0-1.0",
-	"description": "a <script>alert(2)</script> check",
+	"description": "a <script>alert(2)</script> check", "audience": "teen",
 	"home_hearth": "http://127.0.0.1:1/"}\n' > "$t/demo/meta.json"
 zip=$(Build/bin/buildat aitta pack "$t/demo" "$t/key" "$t/out" 2>/dev/null) || fail "pack"
 Build/bin/buildat aitta publish "$zip" 127.0.0.1:$AI 2>&1 | grep -q "listed: tester/demo/1.0" ||
 	fail "publish"
+sed -i 's/"demo"/"grown"/; s/"teen"/"adult"/' "$t/demo/meta.json"
+zip=$(Build/bin/buildat aitta pack "$t/demo" "$t/key" "$t/out" 2>/dev/null) || fail "pack grown"
+Build/bin/buildat aitta publish "$zip" 127.0.0.1:$AI 2>&1 | grep -q "listed: tester/grown/1.0" ||
+	fail "publish grown"
+grep -q "Nothing is published here yet" <<< "$(page $AI/)" ||
+	fail "Aitta's / shows a release listed less than an hour ago"
+BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
+	BUILDAT_AITTA_REQS='{"cmd":"set_settings","settings":{"page_delay":0}}' \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$t/cl_a" -w 800x600 -l 3 \
+	-o sound_mute=1 -s 127.0.0.1:$AI -c @"$t/cmds" > "$t/cl_a2.log" 2>&1
+grep -aq '"page_delay":0' "$t/cl_a2.log" || fail "set_settings ($t/cl_a2.log)"
 
 p=$(page $AI/)
 grep -q "<script>" <<< "$p" && fail "Aitta's / runs a release's <script>"
@@ -89,7 +102,10 @@ grep -q 'href="/p/tester/demo"' <<< "$p" || fail "no link to the package's page"
 grep -q '/api/aitta/archive/[0-9a-f]*\.zip' <<< "$p" || fail "no .zip link"
 grep -q 'http://127.0.0.1:1/p/tester/demo" rel="nofollow noopener">Discuss' <<< "$p" ||
 	fail "no Discuss link to the home Hearth"
+grep -q "tester/grown" <<< "$p" && fail "Aitta's / lists an adult release"
 grep -q "<h1>tester/demo</h1>" <<< "$(page $AI/p/tester/demo)" || fail "the package's page"
+[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$AI/p/tester/grown")" = 404 ] ||
+	fail "Aitta's /p/ shows an adult release"
 echo "ok: Aitta's / and /p/, the release's text escaped"
 
 p=$(page $SP/)

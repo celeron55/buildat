@@ -266,6 +266,12 @@ ss_ check_manifest(const json::Value &m)
 				"characters at most";
 	if(!str("changelog").empty() && !archive_path_ok(str("changelog")))
 		return "\"changelog\": a path inside the archive, like CHANGELOG.md";
+	// [FRONT_PAGES]: who it suits; a browser's page at / lists only
+	// "everyone" and "teen"
+	const json::Value &aud = m.get("audience");
+	if(!aud.is_undefined() && str("audience") != "everyone" &&
+			str("audience") != "teen" && str("audience") != "adult")
+		return "\"audience\": \"everyone\", \"teen\" or \"adult\"";
 	const json::Value &kind = m.get("kind");
 	if(!kind.is_undefined() && str("kind") != "app" && str("kind") != "extension")
 		return "\"kind\": \"app\" or \"extension\"";

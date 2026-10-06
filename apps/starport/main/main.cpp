@@ -20,7 +20,8 @@
 //   GET /brand/<file>        the pages' font and logo ([HTML_BRAND])
 //   GET /                    the listed servers and the numbers as a page,
 //                            ?kind=, ?audience= ([FRONT_PAGES]), only
-//                            what suits a teen;
+//                            what suits a teen, claimed an hour, with no
+//                            open report;
 //                            the web client is at /index.html
 // The API answers any origin (CORS *): it takes no cookies.
 // In the app, "sp:req" carries a JSON {id, cmd, ...} from a joined client
@@ -614,6 +615,9 @@ static json::Value default_settings()
 	// to it ([STARPORT] 2a); off for a test instance, the address then
 	// taken as given
 	s.set("email_confirmation", true);
+	// [FRONT_PAGES]: seconds a listing is claimed before the page at /
+	// shows it, so reports reach it first
+	s.set("page_delay", (int64_t)3600);
 	// Whether players can make Starport IDs here (10)
 	s.set("id_registration", true);
 	// [WEB_ID_TRUST]: web pages besides a listed server's own that
@@ -1118,6 +1122,8 @@ struct Module: public interface::Module
 			l.set("fleet", fid);
 			l.set("pool", pool);
 			l.set("owner", jstr(f, "owner"));
+			if(l.get("claimed").is_undefined())
+				l.set("claimed", now_s());
 			return;
 		}
 		// One the fleet's new code turned away just leaves; one that never
@@ -1914,22 +1920,43 @@ struct Module: public interface::Module
 	// -----------------------------------------------------------------------
 	// [FRONT_PAGES]: what / shows a browser, read-only, from what the API
 	// hands out to anyone. Filters are links: ?kind=, ?audience=. Only
-	// what suits a teen, with no way to show more: an adult listing and
-	// those kept out of filtered views are left out.
+	// what suits a teen and has been looked at for a while, with no way to
+	// show more: left out are an adult listing, one kept out of filtered
+	// views, one saying yes to sexual content, drugs or gambling or with
+	// unmoderated chat or content, one with an open report, and one
+	// claimed less than "page_delay" ago. The busiest first.
+	// simplified: the delay counts from the claim, so a name or icon
+	// changed later shows at once; hold a changed listing back too if
+	// that is abused.
+
+	// Whether the page at / leaves a listing out for its words
+	static bool page_unsuitable(const json::Value &s)
+	{
+		const ss_ a = jstr(s, "audience");
+		if((a != "everyone" && a != "teen") || s.get("restricted").is_true())
+			return true;
+		const json::Value &d = s.get("descriptors");
+		for(const char *k : {"sexual", "drugs", "gambling"})
+			if(jstr(d, k) == "yes")
+				return true;
+		return jstr(d, "chat") == "unmoderated" ||
+				jstr(d, "ugc") == "unmoderated";
+	}
 
 	static ss_ server_box(const json::Value &s)
 	{
 		using interface::web_brand::html;
+		using interface::web_brand::cut;
 		ss_ b = "<div class=\"box\">";
 		if(!jstr(s, "icon").empty())
 			b += "<img class=\"icon\" src=\"/api/icon/"+html(jstr(s, "icon"))+
 					"\" width=\"48\" height=\"48\" alt=\"\">";
 		const ss_ host = jstr(s, "host");
 		const int64_t port = jint(s, "port");
-		b += "<b>"+html(jstr(s, "name"))+"</b> <span class=\"meta\">"+
+		b += "<b>"+html(cut(jstr(s, "name"), 60))+"</b> <span class=\"meta\">"+
 				html(host)+":"+itos(port)+"</span>";
 		if(!jstr(s, "description").empty())
-			b += "<br>"+html(jstr(s, "description"));
+			b += "<br>"+html(cut(jstr(s, "description"), 300));
 		sv_<ss_> m;
 		for(const char *k : {"app", "kind", "audience"})
 			if(!jstr(s, k).empty())
@@ -2007,6 +2034,17 @@ struct Module: public interface::Module
 		for(const char *a : {"everyone", "teen"})
 			c += " "+link(kind, a, a, audience == a);
 		c += "</p>\n";
+		// What an open report is about: its listing, or a whole fleet
+		std::set<ss_> reported;
+		for(const ss_ &gid : store("groups")->list("")){
+			const json::Value g = load("groups", gid);
+			if(jstr(g, "state") != "open")
+				continue;
+			reported.insert(jstr(g, "listing"));
+			if(!jstr(g, "fleet").empty())
+				reported.insert(jstr(g, "fleet"));
+		}
+		reported.erase("");
 		// Fleets as groups, their servers under them; the rest after
 		sm_<ss_, sv_<json::Value>> fleets;
 		sm_<ss_, json::Value> fleet_of;
@@ -2018,8 +2056,12 @@ struct Module: public interface::Module
 				continue;
 			if(!audience.empty() && jstr(s, "audience") != audience)
 				continue;
-			const ss_ a = jstr(s, "audience");
-			if((a != "everyone" && a != "teen") || s.get("restricted").is_true())
+			if(page_unsuitable(s) || reported.count(jstr(s, "id")) ||
+					reported.count(jstr(s.get("fleet"), "id")))
+				continue;
+			const json::Value l = load("listings", jstr(s, "id"));
+			if(now_s() - std::max(jint(l, "first_seen"), jint(l, "claimed")) <
+					(int64_t)setting_num("page_delay"))
 				continue;
 			const ss_ fid = jstr(s.get("fleet"), "id");
 			if(fid.empty()){
@@ -2029,12 +2071,37 @@ struct Module: public interface::Module
 				fleet_of[fid] = s.get("fleet");
 			}
 		}
+		// The busiest first: servers by players, fleets by their total
+		auto players = [](const sv_<json::Value> &v){
+			int64_t n = 0;
+			for(const json::Value &s : v)
+				n += jint(s, "players");
+			return n;
+		};
+		auto busiest = [](sv_<json::Value> &v){
+			std::stable_sort(v.begin(), v.end(), [](const json::Value &a,
+					const json::Value &b){
+				return jint(a, "players") > jint(b, "players");
+			});
+		};
+		busiest(lone);
+		sv_<ss_> order;
 		for(auto &pair : fleets){
-			const json::Value &f = fleet_of[pair.first];
-			c += "<h2>"+html(jstr(f, "name"))+"</h2>";
+			busiest(pair.second);
+			order.push_back(pair.first);
+		}
+		std::stable_sort(order.begin(), order.end(), [&](const ss_ &a,
+				const ss_ &b){
+			return players(fleets[a]) > players(fleets[b]);
+		});
+		using interface::web_brand::cut;
+		for(const ss_ &fid : order){
+			const json::Value &f = fleet_of[fid];
+			c += "<h2>"+html(cut(jstr(f, "name"), 60))+"</h2>";
 			if(!jstr(f, "description").empty())
-				c += "<p class=\"meta\">"+html(jstr(f, "description"))+"</p>";
-			for(const json::Value &s : pair.second)
+				c += "<p class=\"meta\">"+html(cut(jstr(f, "description"),
+						300))+"</p>";
+			for(const json::Value &s : fleets[fid])
 				c += server_box(s);
 		}
 		if(!lone.empty() || fleets.empty())
@@ -3148,13 +3215,15 @@ struct Module: public interface::Module
 			if(!ol.is_object() || jstr(ol, "owner") != name)
 				throw Exception("the listing replaced is not yours");
 			for(const char *k : {"status", "status_until", "status_auto",
-					"relabel", "strikes", "first_seen"})
+					"relabel", "strikes", "first_seen", "claimed"})
 				if(!ol.get(k).is_undefined())
 					l.set(k, ol.get(k));
 			store("listings")->remove(old);
 			audit(name, jstr(l, "id"), "replace", "", "replaces "+old, false);
 		}
 		l.set("owner", name);
+		if(l.get("claimed").is_undefined())
+			l.set("claimed", now_s());
 		put("listings", jstr(l, "id"), l);
 		audit(name, jstr(l, "id"), "claim", "", "", false);
 		return listing_summary(l);
