@@ -44,6 +44,7 @@ local CONTINUE_MAX = 10
 local SEARCH_MIN = 2
 local SEARCH_CAP = 20
 local ROW_HEIGHT = 28
+local ICON_SIZE = 20
 local PANEL_WIDTH = 300
 local GAME_RUNNING = "empty (game is running)"
 
@@ -197,6 +198,7 @@ local function gather()
 		if not ok then log:warning(tostring(why)) end
 	end
 	add({label = "Display and sound", kind = "action", badge = "Settings",
+		icon = "launch_menu/res/icon_preferences.png",
 		section = "Display and sound",
 		description = "What every app honours: the window, the sound, " ..
 				"the mouse, and which launch UI this is.",
@@ -205,6 +207,7 @@ local function gather()
 	console = console and (console.show and console or console.safe)
 	if console and console.show then
 		add({label = "Developer console", kind = "action",
+			icon = "launch_menu/res/icon_console.png",
 			badge = "Developer", section = "Developer",
 			description = "A Lua console in the sandbox, with the API " ..
 					"document beside it.",
@@ -216,9 +219,12 @@ local function gather()
 	local app_label = {vanilla = "Luanti"}
 	local by_from = {}
 	local actions = api.launch_actions()
+	-- And an app's icon, for its saves: the first of its actions'
+	local icon_of = {}
 	for _, a in ipairs(actions) do
 		local app = a.from:match("^app/(.+)$")
 		if app and not app_label[app] then app_label[app] = a.label end
+		icon_of[a.from] = icon_of[a.from] or a.icon
 	end
 	for _, a in ipairs(actions) do
 		-- Locally started things need a local server, which a page has not
@@ -241,7 +247,7 @@ local function gather()
 			local e = add({label = a.label, kind = kind,
 				badge = SETTINGS_KEYS[a.key] and "Settings" or badge,
 				section = SETTINGS_KEYS[a.key] and "Luanti", key = a.key,
-				from = a.from,
+				from = a.from, icon = a.icon,
 				id = a.from .. "/" .. tostring(a.id),
 				size = kind == "app" and a.kind ~= "builtin" and
 						a.significance or nil,
@@ -268,6 +274,7 @@ local function gather()
 			local last = math.max(sv.last_launched or 0, sv.modified and
 					math.floor(sv.modified / 1000000) or 0)
 			add({label = sv.name, kind = "save", badge = parent,
+				icon = icon_of["app/" .. sv.app],
 				description = "Continue this save of " .. parent .. ".",
 				last = last > 0 and last or nil,
 				run = function()
@@ -395,6 +402,17 @@ local function list_view(parent, width, height)
 		b:SetName("Button")
 		b:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(10, 2, 10, 2))
 		b:SetFixedHeight(ROW_HEIGHT)
+		-- The action's own icon, small enough to keep the row's height;
+		-- an empty one where there is none, so that the labels line up
+		local tex = e.icon and magic.cache:GetResource("Texture2D", e.icon)
+		local icon = b:CreateChild(tex and "BorderImage" or "UIElement")
+		icon:SetFixedSize(ICON_SIZE, ICON_SIZE)
+		if tex then
+			-- A game's own icon is pixel art
+			tex.filterMode = magic.FILTER_NEAREST
+			icon.texture = tex
+			icon.blendMode = magic.BLEND_ALPHA
+		end
 		local label = text(b, e.label)
 		label:SetName("ButtonText")
 		label:SetFixedWidth(math.floor(width * 0.62))
