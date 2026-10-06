@@ -195,7 +195,7 @@ Luanti and the path trace, read by probes.sh), and util/bench_worldgen.sh.
 Environment variables the module and its runners read: BUILDAT_LUANTI_GAME,
 _SAVE, _LUA (a fixture file), _PBR (the render mode), _LINEAR, _TONEMAP,
 _CLOUD_N, _TRANSLUCENCY, _JIT, _LUAPROF, _ABLATE (diagnostics),
-_DAWN_GLOW, _DAWN_AMBIENT, _DUSK_BAND, _DUSK_AWAY (the pbr sky's dawn and
+_DAWN_GLOW, _DAWN_AMBIENT, _DUSK_BAND, _DUSK_AWAY, _DUSK_SKY, _DUSK_CLOUD (the pbr sky's dawn and
 dusk glow, apps/vanilla/main/client_lua/luanti_sky.lua), and
 LUANTI_EXTRA_IMPORT_PATH; a player never sets any of them -- the settings
 menu holds what a player changes.

@@ -272,6 +272,24 @@ function PHYS.sun(height)
 	end
 	return PHYS.sun_e0 * math.exp(-PHYS.sun_tau / math.max(height, 0.05))
 end
+-- The sun's colour at a height, its luminance one: Rayleigh transmittance
+-- through an air mass of 1 / sin(elevation), the optical depths sea
+-- level's at 680, 550 and 440 nm ([PBR_FIT] term 3)
+function PHYS.sun_color(height)
+	local m = 1 / math.max(height, 0.05)
+	local r, g, b = math.exp(-0.05 * m), math.exp(-0.10 * m),
+			math.exp(-0.24 * m)
+	local lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+	return magic.Color(r / lum, g / lum, b / lum)
+end
+-- How far under our horizon the sun still lights the clouds: the dip of
+-- the horizon from 7 km up, acos(R / (R + h)), in sine
+PHYS.cloud_dip = 0.047
+do
+	local hi, lo = PHYS.sun_color(1), PHYS.sun_color(0)
+	assert(hi.b / hi.r > 0.75 and lo.b / lo.r < 0.05,
+			"white overhead, red on the horizon")
+end
 PHYS.SUN_COLOR = magic.Color(1.0, 0.96, 0.88)
 PHYS.MOON_COLOR = magic.Color(0.55, 0.68, 1.0)
 -- Reassigned when a game says what its horizon is; see sub_sky below
@@ -1592,17 +1610,9 @@ local function apply_sky_of_hour(force)
 			game_sky.sun_tint or luanti_sky.SUN_TINT, share)
 	if not sky_now.unlit then
 		-- pbr: the sun's colour from its elevation, not a tint at a
-		-- clock ([PBR_FIT] term 3): Rayleigh transmittance through an
-		-- air mass of 1 / sin(elevation), normalised to a luminance of
-		-- one so PHYS.sun() keeps the level. The optical depths are sea
-		-- level's at 680, 550 and 440 nm; white overhead, red across the
-		-- horizon. simplified: no ozone, no aerosol; the dawn's target
-		-- is the render's 05:45 (see the plan).
-		local m = 1 / math.max(sky_now.height or 0, 0.05)
-		local r, g, b = math.exp(-0.05 * m), math.exp(-0.10 * m),
-				math.exp(-0.24 * m)
-		local lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-		sky_lights.sun.color = magic.Color(r / lum, g / lum, b / lum)
+		-- clock (PHYS.sun_color). simplified: no ozone, no aerosol; the
+		-- dawn's target is the render's 05:45 (see the plan).
+		sky_lights.sun.color = PHYS.sun_color(sky_now.height or 0)
 		-- And the disc drawn at that: E0 of the hour over the disc's
 		-- solid angle, pi times the half-width squared (0.075 is the
 		-- tangent of the half-angle, near enough), in the same colour.
@@ -1712,17 +1722,33 @@ local function apply_sky_of_hour(force)
 		local n = tonumber(buildat.get_env("BUILDAT_LUANTI_CLOUD_N") or "")
 				or PHYS.cloud_n
 		local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
-		local k_sun = math.max(0, (n * PHYS.sky_zenith * math.pi /
-				math.max(lum(albedo), 1e-6) - noon_mean) / PHYS.sun(1))
-		local e = PHYS.sun(sky_now.height or 0) *
-				math.max(sky_now.height or 0, 0) * k_sun / math.pi
-		local sc = sky_lights.sun.color
+		-- [DUSK_CLOUD]: a dome of radiance L puts pi L on a face, which
+		-- reflects albedo L: the sky's share is the dome's mean as it is.
+		-- It was over pi, which k_sun made up for at noon and nothing did
+		-- after sunset, where the sun's share is gone: the clouds were a
+		-- third of the sky they hang in.
+		local k_sun = math.max(0, (n * PHYS.sky_zenith /
+				math.max(lum(albedo), 1e-6) - noon_mean) * math.pi /
+				PHYS.sun(1))
+		-- The sun as the clouds see it: from 7 km up it sets
+		-- PHYS.cloud_dip later, through the longer air that reddens it
+		local h = (sky_now.height or 0) + PHYS.cloud_dip
+		local e = PHYS.sun(h) * math.max(h, 0) * k_sun / math.pi
+		local sc = PHYS.sun_color(h)
+		-- And the dusk glow is sky light too: what a cloud gets of it is
+		-- the dome's mean of LuantiSky's glow term, (1 - y)^2 over the
+		-- hemisphere (a third) times away + (1 - away) of a quarter for
+		-- cos^2 towards the sun. BUILDAT_LUANTI_DUSK_CLOUD scales it.
+		local gm = luanti_sky.dawn_glow(sky_now.height or 0) *
+				luanti_sky.DUSK_SKY * luanti_sky.DUSK_CLOUD *
+				(luanti_sky.DUSK_AWAY + (1 - luanti_sky.DUSK_AWAY) / 4) / 3
+		local gc = luanti_sky.DAWN_COLOR
 		world_sky:set_cloud_lit(
 				{r = albedo.r * e * sc.r, g = albedo.g * e * sc.g,
 					b = albedo.b * e * sc.b},
-				{r = albedo.r * sky_mean.r / math.pi,
-					g = albedo.g * sky_mean.g / math.pi,
-					b = albedo.b * sky_mean.b / math.pi})
+				{r = albedo.r * (sky_mean.r + gm * gc.r),
+					g = albedo.g * (sky_mean.g + gm * gc.g),
+					b = albedo.b * (sky_mean.b + gm * gc.b)})
 	end
 	-- And so does what a pond mirrors: the cube map it comes from is baked
 	-- at noon, so without this the water is a bright blue sky at midnight
@@ -1962,7 +1988,8 @@ local function update_sky(dt)
 		local glow = luanti_sky.dawn_glow(height)
 		local gc = luanti_sky.DAWN_COLOR
 		local ga = glow * luanti_sky.DAWN_AMBIENT
-		world_sky:set_dawn_glow(glow * gc.r, glow * gc.g, glow * gc.b,
+		local gs = glow * luanti_sky.DUSK_SKY
+		world_sky:set_dawn_glow(gs * gc.r, gs * gc.g, gs * gc.b,
 				luanti_sky.dusk_tint(height))
 		zone.ambientColor = magic.Color(c.r * k + ga * gc.r,
 				c.g * k + ga * gc.g, c.b * k + ga * gc.b)

@@ -262,6 +262,12 @@ M.DAWN_COLOR = {r = 1.0, g = 0.55, b = 0.25}
 --   BUILDAT_LUANTI_DUSK_BAND, BUILDAT_LUANTI_DUSK_AWAY
 M.DUSK_BAND = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_BAND") or "") or 2.0
 M.DUSK_AWAY = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_AWAY") or "") or 0.3
+-- [DUSK_CLOUD]: the share of the glow and the band the sky itself shows
+-- (the ambient keeps all of it), and a gain on the glow the clouds get as
+-- sky light (1 is the dome's mean).
+--   BUILDAT_LUANTI_DUSK_SKY, BUILDAT_LUANTI_DUSK_CLOUD
+M.DUSK_SKY = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_SKY") or "") or 0.7
+M.DUSK_CLOUD = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_CLOUD") or "") or 1
 
 -- **The dusk as one ramp** ([DUSK_SKY], the user's anchors, 2026-10-04):
 -- blue sky with the sun -> bright orange -> orange -> dark orange -> dark.
@@ -274,7 +280,10 @@ M.DUSK_AWAY = tonumber(buildat.get_env("BUILDAT_LUANTI_DUSK_AWAY") or "") or 0.3
 -- that tilts it moves the hours a little.
 M.DUSK_FROM = 0.079   -- 18:40, 05:20
 M.DUSK_PEAK = -0.151  -- 19:30, 04:30
-M.DUSK_TO = PREDAWN_LOW  -- 20:20, 03:40
+-- The stretch from the peak to dark halved (user, 2026-10-06): the meter
+-- holds it at one brightness, so it read as a flat orange hour. The
+-- predawn light keeps its own -0.403.
+M.DUSK_TO = -0.279  -- 19:55, 04:05
 -- How each part of it is crossed, the options round's two:
 --   BUILDAT_LUANTI_DUSK_CURVE=linear|eased
 M.DUSK_CURVE = buildat.get_env("BUILDAT_LUANTI_DUSK_CURVE") or "eased"
@@ -293,7 +302,7 @@ function M.dusk_tint(height)
 end
 
 -- The glow's radiance at a sun's height: up from 18:40, the most at 19:30,
--- gone at 20:20
+-- gone at 19:55
 function M.dawn_glow(height)
 	if height >= M.DUSK_FROM or height <= M.DUSK_TO then
 		return 0
@@ -304,7 +313,7 @@ function M.dawn_glow(height)
 			(M.DUSK_PEAK - M.DUSK_TO))
 end
 assert(M.dawn_glow(0.1) == 0 and M.dawn_glow(-0.45) == 0,
-		"no glow before 18:40 or after 20:20")
+		"no glow before 18:40 or after 19:55")
 assert(math.abs(M.dawn_glow(M.DUSK_PEAK) - M.DAWN_GLOW) < 0.001,
 		"the most at 19:30")
 assert(math.abs(M.dawn_glow(-0.001) - M.dawn_glow(0.001)) < 0.02 * M.DAWN_GLOW,
@@ -506,7 +515,7 @@ function M.new(scene, sun_dir, defaults)
 	function self:set_dawn_glow(r, g, b, tint)
 		material:SetShaderParameter("DawnGlow", magic.Vector3(r, g, b))
 		material:SetShaderParameter("DuskBand", magic.Vector3(
-				M.DUSK_BAND, M.DUSK_AWAY, tint or 0))
+				M.DUSK_BAND * M.DUSK_SKY, M.DUSK_AWAY, tint or 0))
 	end
 
 	-- The game's own picture of it, or nil for the shader's painted square.
