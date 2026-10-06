@@ -166,7 +166,7 @@ PhysicsWorld::~PhysicsWorld()
         for (PODVector<RigidBody*>::Iterator i = rigidBodies_.Begin(); i != rigidBodies_.End(); ++i)
             (*i)->ReleaseBody();
 
-        for (PODVector<CollisionShape*>::Iterator i = collisionShapes_.Begin(); i != collisionShapes_.End(); ++i)
+        for (HashSet<CollisionShape*>::Iterator i = collisionShapeSet_.Begin(); i != collisionShapeSet_.End(); ++i)
             (*i)->ReleaseShape();
     }
 
@@ -723,12 +723,12 @@ void PhysicsWorld::RemoveRigidBody(RigidBody* body)
 
 void PhysicsWorld::AddCollisionShape(CollisionShape* shape)
 {
-    collisionShapes_.Push(shape);
+    collisionShapeSet_.Insert(shape);
 }
 
 void PhysicsWorld::RemoveCollisionShape(CollisionShape* shape)
 {
-    collisionShapes_.Remove(shape);
+    collisionShapeSet_.Erase(shape);
 }
 
 void PhysicsWorld::AddConstraint(Constraint* constraint)

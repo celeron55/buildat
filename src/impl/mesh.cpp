@@ -2823,13 +2823,18 @@ void generate_voxel_physics_boxes(
 	// temporary volume.
 
 	for(int z0 = lc.getZ(); z0 <= uc.getZ(); z0++){
-		// Loop until this z0 plane is done, then handle the next one
+		// Loop until this z0 plane is done, then handle the next one. The
+		// search goes on from where it found the last voxel: a voxel only
+		// ever goes from 1 to 2, so nothing before that is 1 any more, and
+		// starting over at the plane's corner for every box was the most
+		// of a chunk's cost on a VoxeLibre server ([VOXEL_PHYSICS_LAG])
+		int sx = lc.getX(), sy = lc.getY();
 		for(;;){
 			// Find a solid non-covered voxel (v=1) on the z0 plane
 			int x0 = INT_MAX;
 			int y0 = INT_MAX;
-			for(int x = lc.getX(); x <= uc.getX(); x++){
-				for(int y = lc.getY(); y <= uc.getY(); y++){
+			for(int x = sx; x <= uc.getX(); x++){
+				for(int y = (x == sx ? sy : lc.getY()); y <= uc.getY(); y++){
 					uint8_t v = volume.getVoxelAt(x, y, z0);
 					if(v == 1){
 						x0 = x;
@@ -2840,6 +2845,8 @@ void generate_voxel_physics_boxes(
 			}
 			break; // Done
 		found_non_covered_voxel:
+			sx = x0;
+			sy = y0;
 			// Stretch this box first in x, then y and then z to be as large as
 			// possible without covering any non-solid voxels
 			int x1 = x0;

@@ -866,13 +866,28 @@ BoundingBox CollisionShape::GetWorldBoundingBox() const
         return BoundingBox();
 }
 
+// btCompoundShape::removeChildShape() less its recalculateLocalAabb(), which
+// asks every child for its AABB: a node of N shapes built or moved one shape
+// at a time was N squared getAabb() calls (buildat: voxelworld's terrain
+// boxes, a quarter of a VoxeLibre server's time). The rigid body's compound
+// shape is read only for its children -- UpdateMass() copies them into the
+// shifted compound the body collides with -- so its own AABB is not used.
+static void RemoveFromCompound(btCompoundShape* compound, btCollisionShape* shape)
+{
+    for (int i = compound->getNumChildShapes() - 1; i >= 0; --i)
+    {
+        if (compound->getChildShape(i) == shape)
+            compound->removeChildShapeByIndex(i);
+    }
+}
+
 void CollisionShape::NotifyRigidBody(bool updateMass)
 {
     btCompoundShape* compound = GetParentCompoundShape();
     if (node_ && shape_ && compound)
     {
         // Remove the shape first to ensure it is not added twice
-        compound->removeChildShape(shape_.Get());
+        RemoveFromCompound(compound, shape_.Get());
 
         if (IsEnabledEffective())
         {
@@ -915,7 +930,7 @@ void CollisionShape::ReleaseShape()
     btCompoundShape* compound = GetParentCompoundShape();
     if (shape_ && compound)
     {
-        compound->removeChildShape(shape_.Get());
+        RemoveFromCompound(compound, shape_.Get());
         rigidBody_->UpdateMass();
     }
 

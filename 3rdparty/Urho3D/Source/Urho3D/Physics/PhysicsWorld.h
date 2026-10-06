@@ -312,7 +312,8 @@ private:
     WeakPtr<Scene> scene_;
     /// Rigid bodies in the world.
     PODVector<RigidBody*> rigidBodies_;
-    /// Collision shapes in the world.
+    /// Unused (buildat): collisionShapeSet_ below is the collision shapes in
+    /// the world. Kept so that the members after it stay where they were.
     PODVector<CollisionShape*> collisionShapes_;
     /// Constraints in the world.
     PODVector<Constraint*> constraints_;
@@ -356,6 +357,10 @@ private:
     DebugRenderer* debugRenderer_;
     /// Debug draw flags.
     int debugMode_;
+    /// Collision shapes in the world (buildat): a set, as removing one from
+    /// a vector searched all of them -- a terrain of many box shapes paid
+    /// that per shape. Last, so that no member before it moves.
+    HashSet<CollisionShape*> collisionShapeSet_;
 };
 
 /// Register Physics library objects.

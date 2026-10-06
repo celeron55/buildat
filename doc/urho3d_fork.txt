@@ -353,3 +353,19 @@ Source/ThirdParty/STB/stb_vorbis.h
 Upstream v1.22, unmodified, in place of v1.09, whose compute_codewords
 wrote past a 32-entry stack array on a crafted .ogg -- a file a server can
 hand the client as a sound.
+
+Many collision shapes on one node ([VOXEL_PHYSICS_LAG])
+-------------------------------------------------------
+Source/Urho3D/Physics/CollisionShape.cpp, Physics/PhysicsWorld.{cpp,h}
+
+A CollisionShape set, moved or released takes itself out of the rigid
+body's compound shape with btCompoundShape::removeChildShape(), which
+recalculates the compound's AABB over every child: building a node of N
+box shapes was N squared getAabb() calls. It removes by index now and
+leaves that AABB alone; nothing reads it (UpdateMass() copies the children
+into the shifted compound the body collides with). PhysicsWorld's list of
+shapes is a HashSet, collisionShapeSet_, appended at the class's end so
+that no member moves for a module compiled against the old header; the
+old PODVector, whose Remove() searched every shape in the world for each
+one removed, stays where it was, empty. voxelworld's terrain boxes on a
+VoxeLibre server were a quarter of its time before this.
