@@ -2,9 +2,12 @@
 
 Buildat
 =======
-A small engine for networked 3D apps. The server runs C++ modules it
-compiles at runtime; the client runs the app's Lua in a sandbox, sent by
-the server, so joining a server is all a player installs.
+A small engine and platform for networked 3D apps and games. The engine:
+the server runs C++ modules it compiles at runtime; the client runs the
+app's Lua in a sandbox, sent by the server, so joining a server is all a
+player installs. The platform: a public server list and login
+(Starport), signed apps (Aitta) and forums (Hearth) -- apps on the same
+engine, which anyone can run.
 
 What runs on it:
 

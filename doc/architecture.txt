@@ -4,7 +4,7 @@ What the engine is made of and how the parts talk: the client, the server,
 modules, extensions, the launch grid, the network, the voxel world. The client's
 Lua API is client_api.txt and a C++ module's is server_api.txt.
 
-A small engine for networked 3D apps. License: Apache 2.0.
+A small engine and platform for networked 3D apps and games. License: Apache 2.0.
 
 Client
 ------
