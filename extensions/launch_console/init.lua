@@ -386,6 +386,20 @@ local function open(opts)
 		run(line)
 	end
 	magic.SubscribeToEvent("KeyDown", "launch_console_key")
+	-- As the launch UI, a way back to the menu that needs no knowing
+	-- set_launch_ui(); over the room, Escape is that way already
+	if not opts.on_close then
+		local u = require("buildat/extension/ui_utils")
+		u = u.safe or u
+		local menu = u.menu_button(root, function()
+			magic.UnsubscribeFromEvent("KeyDown", "launch_console_key")
+			root:Remove()
+			magic.ui:SetFocusElement(nil)
+			log:info("console: closed for the menu")
+		end)
+		-- Above the input line, which runs the whole column's width
+		menu:SetPosition(-10, -40)
+	end
 
 	-- **The verb's own check**, run at boot and logged: an expression, a
 	-- statement whose effect the next line sees (the environment is the

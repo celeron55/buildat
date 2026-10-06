@@ -70,11 +70,11 @@ fi
 	echo "keypress Down"
 	echo "wait_log 5000 attract: back to the standing place"
 	# **The 2D menu and back** ([LAUNCH_WORLD] stage 2's done-when): the
-	# dialog's third row, then launch_menu's Engine settings by the
-	# keyboard -- typed and taken, the Launch UI row stepped twice
-	# (launch_menu, the menu over the room, the room) and used. One Tab
-	# afterwards is one station: a window of the menu's left on top, or
-	# a second room booted, makes it none or two.
+	# dialog's third row (launch_menu_v2), then its Display and sound by
+	# the keyboard -- typed and taken, the Launch UI row opened and the
+	# room picked from the list. One Tab afterwards is one station: a
+	# window of the menu's left on top, or a second room booted, makes
+	# it none or two.
 	echo "delay 1500"
 	echo "keypress Escape"
 	echo "wait_log 5000 pause: open"
@@ -83,13 +83,11 @@ fi
 	echo "keypress Return"
 	echo "wait_log 10000 input: handed to whatever holds the screen"
 	echo "delay 1500"
-	for c in E N G I N E; do echo "keypress $c"; done
+	for c in D I S; do echo "keypress $c"; done
 	echo "delay 500"
 	echo "keypress Return"
 	echo "delay 1500"
-	for i in 1 2; do echo "keypress L"; echo "keypress Return"; echo "delay 300"; done
-	echo "keypress U"
-	echo "keypress Return"
+	for i in 1 2; do echo "keypress L"; echo "keypress Return"; echo "delay 500"; done
 	echo "wait_log 10000 has the screen again"
 	echo "delay 1500"
 	echo "keypress Tab"

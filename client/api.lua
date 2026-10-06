@@ -851,22 +851,28 @@ buildat.safe.list_launch_uis = function()
 			if f then
 				local text = f:read("*a")
 				f:close()
-				local title = text:match("^([^\r\n]*)")
+				local title, description =
+						text:match("^([^\r\n]*)\r?\n?([^\r\n]*)")
 				-- **"hidden" keeps it out of the list, not out of the
 				-- slot**: a launch UI that exists to be tested is still
 				-- selectable by name (`-m`, or the preference), and a
 				-- person picking a launcher should not be offered one
 				-- whose whole job is to try to break out of the sandbox.
-				local hidden = false
+				local hidden, experimental = false, false
 				for line in text:gmatch("[^\r\n]+") do
 					if line:match("^%s*hidden%s*$") then
 						hidden = true
+					elseif line:match("^%s*experimental%s*$") then
+						experimental = true
 					end
 				end
 				if not hidden then
 					out[#out + 1] = {name = e.name,
 							title = (title ~= nil and title ~= "") and
-							title or e.name}
+							title or e.name,
+							description = description ~= "" and
+							description or nil,
+							experimental = experimental}
 				end
 			end
 		end

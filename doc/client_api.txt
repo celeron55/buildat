@@ -488,10 +488,12 @@ buildat.safe.quit()
 buildat.safe.provide_launch_interface(t) -> true, or false and why
 - Give the client entered_app, leave_app, in_app and show_dead_server.
   Merged, not replaced, since a launch UI may be a composition of two.
-buildat.safe.list_launch_uis() -> {{name, title, ...}, ...}
+buildat.safe.list_launch_uis() -> {{name, title, description, experimental},
+                                     ...}
 - The launch UIs this client has, listed without running one: an extension
-  says it is one by shipping launch_ui.txt. A "hidden" line keeps it off the
-  list without keeping it out of the slot.
+  says it is one by shipping launch_ui.txt. Its first line is the title, the
+  second the description. A "hidden" line keeps it off the list without
+  keeping it out of the slot; an "experimental" line makes experimental true.
 buildat.safe.set_launch_ui(name) -> true, or false and why
 - Remember the name and boot that extension now, so the switch is one action
   rather than a restart. Only a listed one. Every screen on the main UI stack

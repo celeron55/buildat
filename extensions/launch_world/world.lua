@@ -3566,7 +3566,13 @@ local orb_base_scale = {}
 -- A node nobody draws, borrowed for the arithmetic of "which way is
 -- that": LookAt writes a rotation and nothing else builds one
 local turner = scene:CreateChild("turner")
+-- The way back to the menu, shown while the room is what the player is
+-- using (ui_utils.menu_button); the pause menu's "2D menu" is the same
+room_menu_button = require("buildat/extension/ui_utils")
+room_menu_button = (room_menu_button.safe or room_menu_button)
+		.menu_button(magic.ui.root)
 function handle_orb_update(event_type, event_data)
+	room_menu_button.visible = not (launching or screen_taken())
 	-- **An animation stands down for a screen on top of the room and
 	-- not for a launch** ([LAUNCH_FROZEN]): the launch is seconds of
 	-- this room's own movement
@@ -4834,7 +4840,7 @@ local PAUSE_ITEMS = {
 		-- is remembered as a preference and the other UI is booted now,
 		-- so switching is one action from either side ([TWO_AUDIENCES])
 		-- rather than a flag and a restart.
-		local ok, why = api.set_launch_ui("launch_menu")
+		local ok, why = api.set_launch_ui("launch_menu_v2")
 		if not ok then
 			log:warning("pause: " .. tostring(why))
 			notice(tostring(why))

@@ -850,6 +850,43 @@ function M.safe.show_notice(text)
 	end
 end
 
+-- **A way back to the menu** (user, 2026-10-06): a "Menu" button in the
+-- bottom right corner of parent, for a launch UI with no menu of its own
+-- to switch from (the console, the room). It switches to launch_menu_v2;
+-- before(), if given, runs first, for one that has to take its own
+-- screen down. Returns the button, whose visible the caller may set.
+function M.safe.menu_button(parent, before)
+	local box = parent:CreateChild("UIElement")
+	box.defaultStyle = magic.cache:GetResource("XMLFile",
+			"launch_menu/res/main_style.xml")
+	box:SetAlignment(HA_RIGHT, magic.VA_BOTTOM)
+	box:SetFixedSize(80, 30)
+	box:SetPosition(-10, -10)
+	box.priority = 950
+	local b = box:CreateChild("Button")
+	b:SetStyleAuto()
+	b:SetName("Button")
+	b:SetFixedSize(80, 30)
+	b:SetLayout(LM_VERTICAL, 0, magic.IntRect(0, 0, 0, 0))
+	-- A click's, not the keyboard's: Tab in the console cycles its
+	-- fields, and Enter on this would leave it
+	b:SetFocusMode(FM_NOTFOCUSABLE)
+	local t = b:CreateChild("Text")
+	t:SetStyleAuto()
+	t.text = "Menu"
+	t:SetTextAlignment(HA_CENTER)
+	magic.SubscribeToEvent(b, "Released", function()
+		if before then before() end
+		local ok, why = (buildat.safe or buildat).set_launch_ui(
+				"launch_menu_v2")
+		if not ok then
+			log:warning("menu_button: " .. tostring(why))
+			M.safe.show_message_dialog(tostring(why))
+		end
+	end)
+	return box
+end
+
 function M.safe.show_message_dialog(message, on_close)
 	-- Don't stack multiple dialogs
 	if message_handle then

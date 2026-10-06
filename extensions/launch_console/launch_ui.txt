@@ -1,3 +1,4 @@
-The console
+Console
 The API document on the left, a Lua console on the right.
 sandboxed
+experimental

@@ -171,6 +171,71 @@ local function make_row(window, label)
 	return button, text
 end
 
+-- The launch UIs as a list, the one in use first: each its title, its
+-- extension name, its description and whether it is experimental.
+-- Picking one switches to it; Back and Escape leave it as it is.
+local function show_launch_uis(uis, now)
+	local root = uistack.main:push({desc = "launch UIs"})
+	local menu = ui_utils.vertical_menu(root, {
+		on_key = function(key)
+			if key == KEY_ESCAPE then
+				uistack.main:pop(root)
+				return true
+			end
+		end,
+	})
+	local title = menu.window:CreateChild("Text")
+	title:SetStyleAuto()
+	title.text = "Launch UI"
+	title:SetFontSize(20)
+	local order = {}
+	for _, e in ipairs(uis) do
+		table.insert(order, e.name == now and 1 or #order + 1, e)
+	end
+	for _, e in ipairs(order) do
+		local button = menu.window:CreateChild("Button")
+		button:SetStyleAuto()
+		button:SetName("Button")
+		button:SetLayout(LM_VERTICAL, 2, magic.IntRect(8, 4, 8, 6))
+		button:SetFixedWidth(460)
+		local function line(text, size, colour)
+			local t = button:CreateChild("Text")
+			t:SetStyleAuto()
+			t.text = text
+			if size then t:SetFontSize(size) end
+			if colour then t.color = colour end
+			return t
+		end
+		line(e.title .. "   (" .. e.name .. ")" ..
+				(e.name == now and "   - in use" or ""))
+		if e.experimental then
+			line("experimental", 12, magic.Color(1, 0.35, 0.3))
+		end
+		if e.description then
+			local d = line(e.description, 12, magic.Color(0.7, 0.7, 0.7))
+			-- simplified: 400 and not the row's 444, since under a UI
+			-- scale the wrap measures a line narrower than it is drawn;
+			-- the real fix is in the font scaling, not here
+			d:SetFixedWidth(400)
+			d:SetWordwrap(true)
+		end
+		menu:add(button, function()
+			if e.name == now then
+				uistack.main:pop(root)
+				return
+			end
+			local ok, err = api.set_launch_ui(e.name)
+			if not ok then
+				log:warning("launch_ui: " .. tostring(err))
+				ui_utils.show_message_dialog("Launch UI: " .. tostring(err))
+			end
+		end)
+	end
+	menu:add("Back", function()
+		uistack.main:pop(root)
+	end)
+end
+
 function M.show()
 	local root = uistack.main:push({desc = "preferences"})
 
@@ -248,52 +313,23 @@ function M.show()
 	end
 
 	-- **Which launch UI this is** ([LAUNCH_SANDBOX]'s slot, and
-	-- [TWO_AUDIENCES]: switching is one action from either side, and the
-	-- room's pause dialog already has it going the other way). The
+	-- [TWO_AUDIENCES]: switching is one action from either side). The
 	-- listing is read from the extensions that ship a `launch_ui.txt`,
-	-- not by running them.
+	-- not by running them. **Looking is not taking** (user, 2026-09-24):
+	-- one of the options is a bare console, so the row only says which
+	-- one is in use and opens the list, and the list takes nothing until
+	-- an entry is picked (2026-10-06: the cycling row and its "Use"
+	-- button under it read as two settings, and a long title did not fit).
 	local uis = api.list_launch_uis and api.list_launch_uis() or {}
 	if #uis > 1 then
-		-- The one running, which a -m run need not have saved
 		local now = api.launch_ui_name()
-		local at = 1
-		for i, e in ipairs(uis) do
-			if e.name == now then at = i end
+		local now_title = now
+		for _, e in ipairs(uis) do
+			if e.name == now then now_title = e.title end
 		end
-		local button, text = make_row(menu.window, "Launch UI")
-		local take, take_text = make_row(menu.window, "Launch UI")
-		-- **Looking is not taking** (user, 2026-09-24): the row used to
-		-- boot each option as it stepped onto it, and one of the steps
-		-- is a bare console -- at which point there is no menu left and
-		-- no way back for anyone who does not know
-		-- `buildat.set_launch_ui("launch_menu")`. A cycling row cannot show
-		-- the next option without taking it, and taking this one
-		-- destroys the row; so the row cycles a **candidate** and the
-		-- one under it takes it. Switching is still one action from
-		-- either side ([TWO_AUDIENCES]) -- the action is "use it".
-		local function relabel()
-			local same = uis[at].name == now
-			-- The row is 320 wide and a title plus a suffix runs past
-			-- it, so which one is in use is the second row's to say
-			text.text = "Launch UI: " .. uis[at].title
-			take_text.text = same and "This one is in use" or
-					("Use " .. uis[at].title)
-		end
-		menu:add(button, function()
-			at = at % #uis + 1
-			relabel()
-		end)
-		menu:add(take, function()
-			if uis[at].name == now then
-				return
-			end
-			local ok, err = api.set_launch_ui(uis[at].name)
-			if not ok then
-				log:warning("launch_ui: " .. tostring(err))
-				ui_utils.show_message_dialog("Launch UI: " .. tostring(err))
-			end
-		end)
-		relabel()
+		local button = make_row(menu.window, "Launch UI: " .. now_title ..
+				"  >")
+		menu:add(button, function() show_launch_uis(uis, now) end)
 	end
 
 	menu:add("Back", function()
