@@ -8,7 +8,7 @@
 # and /p/<author>/<name> lists its versions. The Aitta is announced to the
 # Starport under a name with a <script> in it: the Starport's page shows
 # it as text, "Native client only" (no TLS), and the kind filter keeps it
-# or leaves it out.
+# or leaves it out. Nothing offers to show what does not suit a teen.
 #   util/front_pages_check.sh
 set -u
 . "$(dirname "$0")/check_paths.sh"
@@ -100,6 +100,7 @@ grep -q "Native client only" <<< "$p" || fail "no Native client only"
 grep -q 'href="/id"' <<< "$p" || fail "no link to the ID page"
 grep -q "Shop &lt;" <<< "$(page "$SP/?kind=app")" || fail "?kind=app lost it"
 grep -q "Shop &lt;" <<< "$(page "$SP/?kind=world")" && fail "?kind=world kept it"
+grep -qi "adult" <<< "$p" && fail "the Starport's / offers adult listings"
 grep -q "A Starport:" <<< "$(page $SP/index.html)" &&
 	fail "the Starport's /index.html is the page, not the web client"
 echo "PASS: Aitta and the Starport answer / with their pages, untrusted text as text, the web client at /index.html"

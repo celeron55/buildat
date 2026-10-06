@@ -19,7 +19,8 @@
 //                            ID's settings are on ([WEB_ID_TRUST])
 //   GET /brand/<file>        the pages' font and logo ([HTML_BRAND])
 //   GET /                    the listed servers and the numbers as a page,
-//                            ?kind=, ?audience=, ?adult=1 ([FRONT_PAGES]);
+//                            ?kind=, ?audience= ([FRONT_PAGES]), only
+//                            what suits a teen;
 //                            the web client is at /index.html
 // The API answers any origin (CORS *): it takes no cookies.
 // In the app, "sp:req" carries a JSON {id, cmd, ...} from a joined client
@@ -1912,8 +1913,9 @@ struct Module: public interface::Module
 
 	// -----------------------------------------------------------------------
 	// [FRONT_PAGES]: what / shows a browser, read-only, from what the API
-	// hands out to anyone. Filters are links: ?kind=, ?audience=, and
-	// ?adult=1 for the adult listings and those kept out of filtered views.
+	// hands out to anyone. Filters are links: ?kind=, ?audience=. Only
+	// what suits a teen, with no way to show more: an adult listing and
+	// those kept out of filtered views are left out.
 
 	static ss_ server_box(const json::Value &s)
 	{
@@ -1983,17 +1985,13 @@ struct Module: public interface::Module
 		ss_ audience = query_value(r.query, "audience");
 		if(!in_set(kind, KINDS))
 			kind = "";
-		if(!in_set(audience, AUDIENCES))
+		if(audience != "everyone" && audience != "teen")
 			audience = "";
-		const bool adult = query_value(r.query, "adult") == "1" ||
-				audience == "adult";
-		// A filter's link keeps the others
-		auto link = [&](const ss_ &k, const ss_ &a, bool ad, const ss_ &text,
-				bool on){
+		// A filter's link keeps the other
+		auto link = [&](const ss_ &k, const ss_ &a, const ss_ &text, bool on){
 			ss_ q;
 			if(!k.empty()) q += "&kind="+k;
 			if(!a.empty()) q += "&audience="+a;
-			if(ad && a != "adult") q += "&adult=1";
 			if(!q.empty()) q[0] = '?';
 			return on ? "<b>"+text+"</b>" :
 					"<a href=\"/"+q+"\">"+text+"</a>";
@@ -2002,15 +2000,13 @@ struct Module: public interface::Module
 				"servers that announce themselves here, and the Starport ID "
 				"their players log in with. The Buildat client lists these "
 				"servers and joins them.</p>\n<p class=\"meta\">Kind: "+
-				link("", audience, adult, "all", kind.empty());
+				link("", audience, "all", kind.empty());
 		for(const char *k : KINDS)
-			c += " "+link(k, audience, adult, k, kind == k);
-		c += "<br>Audience: "+link(kind, "", adult, "all", audience.empty());
-		for(const char *a : AUDIENCES)
-			c += " "+link(kind, a, adult, a, audience == a);
-		c += "<br>"+(adult ? link(kind, audience == "adult" ? "" : audience,
-				false, "Hide adult listings", false) : link(kind, audience, true,
-				"Show adult listings", false))+"</p>\n";
+			c += " "+link(k, audience, k, kind == k);
+		c += "<br>Audience: "+link(kind, "", "all", audience.empty());
+		for(const char *a : {"everyone", "teen"})
+			c += " "+link(kind, a, a, audience == a);
+		c += "</p>\n";
 		// Fleets as groups, their servers under them; the rest after
 		sm_<ss_, sv_<json::Value>> fleets;
 		sm_<ss_, json::Value> fleet_of;
@@ -2022,8 +2018,8 @@ struct Module: public interface::Module
 				continue;
 			if(!audience.empty() && jstr(s, "audience") != audience)
 				continue;
-			if(!adult && (jstr(s, "audience") == "adult" ||
-					s.get("restricted").is_true()))
+			const ss_ a = jstr(s, "audience");
+			if((a != "everyone" && a != "teen") || s.get("restricted").is_true())
 				continue;
 			const ss_ fid = jstr(s.get("fleet"), "id");
 			if(fid.empty()){
