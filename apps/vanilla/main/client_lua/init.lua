@@ -1841,16 +1841,20 @@ local function update_sky(dt)
 			(luanti.world_info() or {}).orbit_tilt)
 	local sx, sy, sz =
 			luanti_sky.sun_direction(luanti_sky.stepped_time(daylight), tilt)
-	local _, smooth_sy = luanti_sky.sun_direction(daylight, tilt)
+	local mx, smooth_sy, mz = luanti_sky.sun_direction(daylight, tilt)
 	local height = smooth_sy
 	-- The light travels the other way, which is what a Light's direction is.
-	-- **Nothing else is done to it**: the sun is drawn from this same vector
+	-- **Nothing else is done to it**: the sun is drawn from the same orbit
 	-- below, so anything added here would move the sun away from its own
 	-- light. The tilt above is the only thing that turns the orbit.
 	local dir = normalized({x = -sx, y = -sy, z = -sz})
 	-- And the sky is given the sun's, always: it draws the moon opposite,
-	-- so there is nothing to flip at nightfall
-	world_sky:set_sun_direction(dir)
+	-- so there is nothing to flip at nightfall. **The unstepped one**
+	-- (user, 2026-10-06): the sun, the moon and the stars moved in jumps
+	-- of a step, which is a degree and a half every five seconds at the
+	-- default speed. Drawn smooth, the sun is at most half a step from
+	-- where its shadow is cast from, which does not show.
+	world_sky:set_sun_direction(normalized({x = -mx, y = -smooth_sy, z = -mz}))
 	sky_cube.refresh(false)
 
 	-- Dawn and dusk are the half hour either side of the horizon rather
