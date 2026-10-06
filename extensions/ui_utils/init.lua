@@ -226,6 +226,19 @@ end
 -- moves the focus instead, unless a field is being typed in.
 -- options.letters = false: no letters, for a menu whose letters are its
 -- own (the launch grid's type-to-filter)
+-- PageUp and PageDown move this many items ([MENU_FAST_SCROLL])
+local PAGE = 10
+
+-- How many rows one wheel click moves in a menu of n items in rows of
+-- columns: a list of any length is crossed in 10 to 20 clicks
+local function wheel_step(n, columns)
+	return math.max(1, math.ceil(math.ceil(n / columns) / 20))
+end
+assert(wheel_step(15, 1) == 1 and wheel_step(20, 1) == 1 and
+		wheel_step(21, 1) == 2 and wheel_step(60, 1) == 3 and
+		wheel_step(300, 1) == 15 and wheel_step(84, 4) == 2,
+		"wheel_step")
+
 local function button_menu_nav(root, options)
 	local use_letters = not (options and options.letters == false)
 	local items = {}
@@ -398,6 +411,11 @@ local function button_menu_nav(root, options)
 			select_i(selected - columns)
 		elseif key == KEY_DOWN then
 			select_i(selected + columns)
+		elseif key == magic.KEY_PAGEUP or key == magic.KEY_PAGEDOWN then
+			-- [MENU_FAST_SCROLL]: ten items, ten rows in a grid, clamped
+			local d = (key == magic.KEY_PAGEUP and -PAGE or PAGE) * columns
+			select_i(math.max(1, math.min(#items,
+					math.max(selected, 1) + d)))
 		elseif key == KEY_RETURN or key == KEY_RETURN2 or key == KEY_KP_ENTER then
 			return
 		else
@@ -417,16 +435,19 @@ local function button_menu_nav(root, options)
 		end
 	end)
 
-	-- The wheel moves the selection a row at a time, and the menu's
-	-- on_change scrolls it into view; clamped rather than wrapped, so a
-	-- wheel past the end stops on the last item, which is how a partial
-	-- last row is reached ([LAUNCH_GRID])
+	-- The wheel moves the selection, and the menu's on_change scrolls it
+	-- into view; clamped rather than wrapped, so a wheel past the end
+	-- stops on the last item, which is how a partial last row is reached
+	-- ([LAUNCH_GRID]). **Its step grows with the list**
+	-- ([MENU_FAST_SCROLL]): a row a click up to 20 rows, two up to 40,
+	-- so any list is crossed in 10 to 20 clicks.
 	root:SubscribeToStackEvent("MouseWheel", function(event_type, event_data)
 		if #items == 0 then
 			return
 		end
 		sync()
-		local i = math.max(selected, 1) - event_data:GetInt("Wheel") * columns
+		local i = math.max(selected, 1) - event_data:GetInt("Wheel") *
+				wheel_step(#items, columns) * columns
 		select_i(math.max(1, math.min(#items, i)))
 	end)
 
@@ -586,6 +607,19 @@ function M.safe.keyboard_page(win)
 		local typing = focus ~= nil and focus:GetTypeName() == "LineEdit"
 		-- A multi-line field's rows are its up and down ([HEARTH_MVP])
 		local rows = typing and focus:IsMultiLine()
+		if not typing and (key == magic.KEY_PAGEUP or
+				key == magic.KEY_PAGEDOWN) then
+			local at = 0
+			for i, e in ipairs(page.items) do
+				if shown(e) and e:HasFocus() then
+					at = i
+				end
+			end
+			local d = key == magic.KEY_PAGEUP and -PAGE or PAGE
+			page.items[math.max(1, math.min(#page.items,
+					math.max(at, 1) + d))]:SetFocus(true)
+			return
+		end
 		if (not rows and (key == KEY_UP or key == KEY_DOWN)) or
 				(not typing and (key == KEY_LEFT or key == KEY_RIGHT)) then
 			local at = 0
