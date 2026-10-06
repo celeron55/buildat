@@ -116,11 +116,13 @@ function doc.send(ops, done, kind)
 		wire[i] = {op = OP_CODES[op.op], ent = {id = e.id, type = e.type or "",
 				ints = ints, strs = e.strs or {}, lists = e.lists or {}}}
 	end
-	doc.pending[seq] = {kind = kind, done = done or function(err)
+	doc.pending[seq] = {kind = kind, merge = doc.merge_tag,
+			done = done or function(err)
 		if err ~= "" then
 			doc.notice("Refused: " .. err)
 		end
 	end}
+	doc.merge_tag = nil
 	buildat.send_packet("fp:batch",
 			cereal.binary_output({seq = seq, ops = wire}, BATCH))
 end
@@ -172,6 +174,45 @@ local function copy(t)
 		o[k] = type(v) == "table" and copy(v) or v
 	end
 	return o
+end
+
+-- **Edits that are one undo step** (user, 2026-10-06: the movement keys'
+-- moves during one selection): doc.merge_tag set before doc.send tags
+-- that batch, and a batch's inverse whose tag is the undo stack's top's
+-- goes into it. `older` is undone last, so its values stay and the newer
+-- one's expected values replace its. Only sets merge; nil otherwise.
+function doc.merge_inverse(older, newer)
+	for _, op in ipairs(older) do
+		if op.op ~= "set" then
+			return nil
+		end
+	end
+	local out, by_id = copy(older), {}
+	for _, op in ipairs(out) do
+		by_id[op.ent.id] = op
+	end
+	for _, op in ipairs(newer) do
+		if op.op ~= "set" then
+			return nil
+		end
+		local o = by_id[op.ent.id]
+		if not o then
+			o = copy(op)
+			out[#out + 1] = o
+			by_id[op.ent.id] = o
+		else
+			for _, part in ipairs({"ints", "strs", "lists"}) do
+				for k, v in pairs(op.ent[part]) do
+					if o.ent[part][k] == nil then
+						o.ent[part][k] = v
+					end
+					o.expect[part][k] = op.expect[part][k]
+				end
+			end
+		end
+	end
+	out.merge = older.merge
+	return out
 end
 
 -- What undoes a batch, from what the server says it changed and the
@@ -324,7 +365,15 @@ buildat.sub_packet("fp:batch_result", function(data)
 	-- a redo undone again
 	if r.error == "" and p.inverse and #p.inverse > 0 then
 		local stack = p.kind == "undo" and doc.redo_stack or doc.undo_stack
-		stack[#stack + 1] = p.inverse
+		local top = stack[#stack]
+		local merged = p.merge and not p.kind and top and top.merge == p.merge
+				and doc.merge_inverse(top, p.inverse)
+		if merged then
+			stack[#stack] = merged
+		else
+			p.inverse.merge = not p.kind and p.merge or nil
+			stack[#stack + 1] = p.inverse
+		end
 		if #stack > UNDO_DEPTH then
 			table.remove(stack, 1)
 		end

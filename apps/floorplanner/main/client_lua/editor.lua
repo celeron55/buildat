@@ -8136,7 +8136,10 @@ do
 		M.drag_slides(d, sel)
 		M.slide_deltas(d)
 		S.drag = d
+		-- One undo step for the selection's moves by the keys (user)
+		doc.merge_tag = "keys " .. M.sel_gen
 		end_drag()
+		doc.merge_tag = nil
 		return true
 	end
 
@@ -10197,6 +10200,7 @@ local plan_lines_node = scene:CreateChild("PlanLines")
 -- view leaves that or the step changes
 local grid_node = scene:CreateChild("PlanGrid")
 M.build_gen = 0
+M.sel_gen = 0
 
 local function draw_overlay()
 	local y = S.view == "2d" and W(settings().cut) - 0.001 or 0.004
@@ -10465,6 +10469,16 @@ local function draw_overlay()
 						k .. ": " .. mm_text(math.abs(b - a)))
 			end
 		end
+	end
+	-- A new selection, by what is in it, for doc.merge_tag
+	local ids = {}
+	for id in pairs(S.tool == "node" and S.nodes or S.sel) do
+		ids[#ids + 1] = id
+	end
+	table.sort(ids)
+	local key = table.concat(ids, " ")
+	if key ~= M.sel_key then
+		M.sel_key, M.sel_gen = key, M.sel_gen + 1
 	end
 	-- **How far the selected thing has moved since it was selected** (user,
 	-- 2026-10-06), by drags and the movement keys alike, in X and Z
