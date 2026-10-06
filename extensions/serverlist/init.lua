@@ -20,10 +20,11 @@ local log = buildat.Logger("serverlist")
 local M = {safe = {}}
 local network = require("buildat/extension/network")
 
--- The list this client knows: Luanti's official one is a row in the
--- client's own address store, which is where the uri comes from rather
--- than from a constant here. BUILDAT_SERVERLIST_URL overrides it, which
--- is what the check serves its own list on.
+-- The list this client knows: Luanti's official one.
+-- BUILDAT_SERVERLIST_URL overrides it, which is what the check serves its
+-- own list on. It used to be the first https row of the client's address
+-- store, which became a Starport's once the client had talked to one, and
+-- the list was then asked of the Starport.
 local DEFAULT_URL = "https://servers.luanti.org"
 -- In the extension's own storage (user/serverlist/)
 local CACHE = "serverlist.csv"
@@ -37,11 +38,6 @@ local function list_url()
 	local env = buildat.get_env and buildat.get_env("BUILDAT_SERVERLIST_URL")
 	if env and env ~= "" then
 		return env
-	end
-	for _, a in ipairs(network.known_addresses()) do
-		if a.uri:sub(1, 5) == "https" then
-			return a.uri
-		end
 	end
 	return DEFAULT_URL
 end
