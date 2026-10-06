@@ -2962,6 +2962,9 @@ rebuild = function()
 	-- A slow one in the log, by its parts, for what a drag costs
 	-- ([FP_DRAG_COST]); a drag rebuilds each frame
 	local ms = (buildat.get_time_us() - t0) / 1000
+	if ms > 30 and M.drag_is_light(S.drag) then
+		S.drag.light = true
+	end
 	if ms > 30 then
 		local parts = {}
 		for _, k in ipairs(M.lap_order) do
@@ -2971,6 +2974,29 @@ rebuild = function()
 				S.drag and " (drag " .. tostring(S.drag.kind) .. ")" or "",
 				M.lap_tris, table.concat(parts, ", ")))
 	end
+end
+-- **A slow drag of doors and windows rebuilds on release** ([FP_DRAG_COST],
+-- user 2026-10-06): once a rebuild of the drag takes over 30 ms, the rest
+-- of it only places the instances again, which the plan view's symbols,
+-- the outlines and the gaps are drawn from; the walls' holes and the 3D
+-- meshes stay where they were until the release (end_drag rebuilds)
+function M.drag_is_light(d)
+	if not d or d.kind ~= "move" or next(d.nodes) or not next(d.inst) then
+		return false
+	end
+	for id in pairs(d.inst) do
+		local it = inst_data[id]
+		if not (it and it.hosted) then
+			return false
+		end
+	end
+	return true
+end
+function M.rebuild_light()
+	-- The current layout's, which rebuild() made last
+	build_inst_data()
+	place.layers[#place.layers].insts = inst_data
+	S.dirty = false
 end
 end
 
@@ -11038,7 +11064,9 @@ function M.update(dt)
 	place_cameras()
 	send_presence(dt)
 	stream_drag(dt)
-	if S.dirty then
+	if S.dirty and S.drag and S.drag.light then
+		M.rebuild_light()
+	elseif S.dirty then
 		rebuild()
 	end
 	M.apply_daylight()
