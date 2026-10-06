@@ -10,7 +10,9 @@
 # left by Escape gives its parent back the selection it was opened from:
 # Down after it goes on from there, not from the top. A row the mouse
 # selected is let go when the mouse leaves it, and Down brings it back; one
-# the keys selected stays wherever the mouse goes. Then in Firefox
+# the keys selected stays wherever the mouse goes. In the Servers list a
+# clicked row is locked: the panel stays its while the mouse is over
+# another row, and an arrow key lets go. Then in Firefox
 # (with web/ from util/build_web.sh, skipped without), apps/play's page,
 # by touch: the browser's Back and a tap on nothing each close Settings,
 # and Back on Home leaves the page.
@@ -112,7 +114,37 @@ n=$(grep -ac 'push(): .*show_confirm_dialog' "$t/log")
 [ "$n" = 2 ] || fail "$n Quit dialogs, not 2 (a click on nothing on Home asks to quit?)"
 grep -aq "command: quit" "$t/log" && fail "the arrows' Quit did not quit"
 [ "$(grep -ac 'pop(): .*show_confirm_dialog' "$t/log")" = 2 ] || fail "the arrows' Cancel"
-echo "ok: a click on nothing is Back above the first screen, and nothing on it"
+
+# Home's Browse > Servers, its rows at 800x600: a click on the second, the
+# mouse on the third, then Down
+cat > "$t/cmds2" <<C
+wait_log_any 20000 launch_menu_v2: home
+delay 800
+keypress Down
+keypress Return
+delay 1000
+mouse_pos 200 288
+mouse_click left
+delay 300
+mouse_pos 200 308
+delay 400
+event scan
+keypress Down
+delay 400
+event scan
+quit
+C
+timeout 60 Build/bin/buildat -o launch_ui=launch_menu_v2 -D "$t/u2" -w 800x600 -l 4 \
+	-o sound_mute=1 -c @"$t/cmds2" > "$t/log2" 2>&1
+cp "$t/log2" "$t/log"
+grep -aq "launch_menu_v2: locked Fetch the server list" "$t/log2" || fail "the click locked nothing"
+# The panel's heading, and the focus, in each scan
+p(){ awk -v n="$1" '/command: event scan/{i++} i == n && /size 166x20 text/{
+	sub(/.*text /, ""); print; exit}' "$t/log2"; }
+[ "$(p 1)" = '"Fetch the server list"' ] || fail "the panel left the locked row for the hovered one: $(p 1)"
+grep -aq "launch_menu_v2: unlocked" "$t/log2" || fail "Down did not let go"
+[ "$(p 2)" != '"Fetch the server list"' ] || fail "the panel stayed locked after Down"
+echo "ok: a click on nothing is Back above the first screen, and nothing on it; a click locks a row"
 
 [ -f web/buildat.wasm ] || { echo "PASS (web part skipped: no web/)"; exit 0; }
 timeout 300 util/web_drive.sh firefox play util/tap_back_web.json "$t/web" \

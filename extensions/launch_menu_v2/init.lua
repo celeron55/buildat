@@ -551,6 +551,10 @@ browse = function(kind, query, by)
 	local panel = body:CreateChild("UIElement")
 	panel:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
 	panel:SetFixedWidth(narrow and width - 32 or PANEL_WIDTH)
+	-- A height that holds any entry's panel, so the window, which is
+	-- centred, does not move the rows under the mouse as the panel changes
+	-- simplified: a description longer than five lines still grows it
+	panel.minHeight = math.min(room, 220)
 
 	local of_kind = {}
 	for _, e in ipairs(entries) do
@@ -561,11 +565,17 @@ browse = function(kind, query, by)
 	local items = {}
 	local action_buttons = {}
 	local current = nil
+	-- **A clicked row is locked** (user, 2026-10-06): amber, and the
+	-- panel is its while the mouse crosses other rows on the way to the
+	-- panel's buttons. Another click locks another; an arrow key lets go,
+	-- and the panel follows the selection again.
+	local locked = nil
+	local lock
 	local last_click = {}
 	for _, e in ipairs(shown) do
 		local item = {entry = e}
 		item.button = view:row(e)
-		-- Enter runs it; a click selects it and a second one runs it
+		-- Enter runs it; a click locks it and a second one runs it
 		item.action = function()
 			local t = api.get_time_us()
 			local enter = magic.input:GetKeyDown(magic.KEY_RETURN) or
@@ -573,6 +583,8 @@ browse = function(kind, query, by)
 			if enter or (last_click[e] and t - last_click[e] < 500000) then
 				log:info("launch_menu_v2: " .. e.kind .. " " .. e.label)
 				e.run()
+			elseif not enter then
+				lock(item)
 			end
 			last_click[e] = t
 		end
@@ -619,6 +631,25 @@ browse = function(kind, query, by)
 			action_buttons[#action_buttons + 1] = b
 		end
 	end
+	-- The locked row's label in the main button's amber. Not the
+	-- PrimaryButton style: a style brings a size of its own, and the rows
+	-- then overlapped
+	local function amber(item, on)
+		local label = item.button:GetChild("ButtonText")
+		if label then
+			label.color = magic.Color(ui_utils.rgb(on and "main" or "text"))
+		end
+	end
+	lock = function(item)
+		if item == locked then return end
+		if locked then amber(locked, false) end
+		locked = item
+		if item then amber(item, true) end
+		log:info("launch_menu_v2: " .. (item and "locked " .. item.entry.label
+				or "unlocked"))
+		local subject = item or current
+		if subject then fill(subject.entry) end
+	end
 	local function in_actions()
 		for i, b in ipairs(action_buttons) do
 			if b:HasFocus() then return i end
@@ -637,7 +668,8 @@ browse = function(kind, query, by)
 				action_buttons[j]:SetFocus(true)
 				return true
 			elseif key == KEY_LEFT or key == KEY_ESCAPE then
-				if current then current.button:SetFocus(true) end
+				local back = locked or current
+				if back then back.button:SetFocus(true) end
 				return true
 			end
 			return key == KEY_RIGHT or key == KEY_TAB
@@ -647,6 +679,10 @@ browse = function(kind, query, by)
 			return true
 		end
 		if key == KEY_LEFT then return true end
+		if key == KEY_UP or key == KEY_DOWN or key == magic.KEY_PAGEUP or
+				key == magic.KEY_PAGEDOWN then
+			lock(nil)
+		end
 		if key == magic.KEY_S and
 				magic.input:GetQualifierDown(magic.QUAL_CTRL) then
 			uistack.main:pop(root)
@@ -668,7 +704,7 @@ browse = function(kind, query, by)
 		local item = index and items[index]
 		if not (selected and item) or item == current then return end
 		current = item
-		fill(item.entry)
+		if not locked then fill(item.entry) end
 		view:show(button)
 	end)
 	log:info("launch_menu_v2: " .. kind .. ", " .. #items .. " rows" ..
