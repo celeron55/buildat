@@ -8,7 +8,9 @@
 # dialog then goes by the arrows: Left, Right, Enter is Cancel, and Down,
 # Down, Up, Enter is Quit (a playtest found only Tab there). A screen
 # left by Escape gives its parent back the selection it was opened from:
-# Down after it goes on from there, not from the top. Then in Firefox
+# Down after it goes on from there, not from the top. A row the mouse
+# selected is let go when the mouse leaves it, and Down brings it back; one
+# the keys selected stays wherever the mouse goes. Then in Firefox
 # (with web/ from util/build_web.sh, skipped without), apps/play's page,
 # by touch: the browser's Back and a tap on nothing each close Settings,
 # and Back on Home leaves the page.
@@ -38,6 +40,20 @@ event scan
 mouse_pos 5 300
 mouse_click left
 delay 800
+event scan
+mouse_pos 260 345
+delay 300
+event scan
+mouse_pos 700 345
+delay 300
+event scan
+keypress Down
+delay 300
+event scan
+keypress Up
+delay 200
+mouse_pos 5 100
+delay 300
 event scan
 keypress Down
 keypress Down
@@ -79,11 +95,19 @@ grep -c "click on nothing" <<< "$scans" | grep -qx 1 ||
 awk '/UIStack:pop/{exit} /text "Display and sound"/{f=1} END{exit !f}' <<< "$scans" ||
 	fail "a click in Settings' window closed it"
 grep -q 'pop(): .*launch_menu_v2 settings' <<< "$scans" || fail "Settings did not go"
-# The last two scans' focus: the third row, before and after the second's
-# screen came and went
-focus=$(grep -a "^scan scan: focus" "$t/log" | tail -2)
-[ "$(wc -l <<< "$focus")" = 2 ] && [ "$(uniq <<< "$focus" | wc -l)" = 1 ] ||
-	fail "the selection was not given back: $focus"
+# Each scan's focus, by its number: 4 a hovered row, 5 none (the mouse
+# left), 6 that row again (Down), 7 the row above (Up, the mouse gone
+# away), 8 and 9 the third row, before and after the second's screen came
+# and went
+f(){ awk -v n="$1" '/command: event scan/{i++} i == n && /^scan scan: focus/{
+	print $4, $6; exit}' "$t/log"; }
+[ "$(f 4 | cut -d' ' -f1)" = Button ] || fail "hovering a row: $(f 4)"
+[ "$(f 5 | cut -d' ' -f1)" != Button ] || fail "the mouse left the row and it stayed: $(f 5)"
+[ "$(f 6)" = "$(f 4)" ] || fail "Down after the mouse left: $(f 6), not $(f 4)"
+[ "$(f 7 | cut -d' ' -f1)" = Button ] && [ "$(f 7)" != "$(f 6)" ] ||
+	fail "a row the keys chose went with the mouse: $(f 7)"
+[ -n "$(f 8)" ] && [ "$(f 9)" = "$(f 8)" ] ||
+	fail "the selection was not given back: $(f 8) then $(f 9)"
 n=$(grep -ac 'push(): .*show_confirm_dialog' "$t/log")
 [ "$n" = 2 ] || fail "$n Quit dialogs, not 2 (a click on nothing on Home asks to quit?)"
 grep -aq "command: quit" "$t/log" && fail "the arrows' Quit did not quit"

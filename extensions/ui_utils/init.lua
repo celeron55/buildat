@@ -261,6 +261,13 @@ local function button_menu_nav(root, options)
 	local items = {}
 	-- The focused item's index, 0 for none: read from the focus
 	local selected = 0
+	-- **A selection the mouse made goes when the mouse leaves its button**
+	-- (user, 2026-10-06): a highlight is what a click would press, and a
+	-- click just beside a button presses nothing. One the keys or the
+	-- wheel made stays wherever the mouse goes. anchor is the item the
+	-- mouse left, which the next arrow brings back rather than the first.
+	local by_mouse = false
+	local anchor = 0
 	local on_other_key = nil
 	local on_change = nil
 	-- [MENU_KEYS]: a letter selects its item, as keyboard_page's focuses
@@ -332,6 +339,21 @@ local function button_menu_nav(root, options)
 		function(self, event_type, event_data)
 			if not typing() then
 				select_i(i)
+				by_mouse = true
+			end
+		end)
+		magic.SubscribeToEvent(button, "HoverEnd",
+		function(self, event_type, event_data)
+			-- Not under a screen pushed over this one: the focus is that
+			-- screen's (a click that opened it ends the hover too)
+			if not by_mouse or gone(root) or not root.visible then
+				return
+			end
+			sync()
+			if selected == i then
+				anchor = i
+				root:SetFocus(true)
+				sync()
 			end
 		end)
 		apply()
@@ -416,10 +438,13 @@ local function button_menu_nav(root, options)
 		sync()
 		-- Left and right as well as up and down, because a menu can be a row
 		-- as well as a column and a player should not have to know which.
-		-- From none, the first. Enter is the focused button's own.
+		-- From none, the one the mouse left, else the first. Enter is the
+		-- focused button's own.
+		-- Whatever is selected from here on, the keys chose it
+		by_mouse = false
 		if selected == 0 and (key == KEY_LEFT or key == KEY_RIGHT or
 				key == KEY_UP or key == KEY_DOWN) then
-			select_i(1)
+			select_i(anchor >= 1 and anchor <= #items and anchor or 1)
 		elseif key == KEY_LEFT then
 			select_i(selected - 1)
 		elseif key == KEY_RIGHT then
@@ -462,6 +487,7 @@ local function button_menu_nav(root, options)
 		if #items == 0 then
 			return
 		end
+		by_mouse = false
 		sync()
 		local i = math.max(selected, 1) - event_data:GetInt("Wheel") *
 				wheel_step(#items, columns) * columns
