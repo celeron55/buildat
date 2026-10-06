@@ -12,10 +12,10 @@
 -- widgets that knows nothing about the file and cannot set a value a flag
 -- could not.
 --
--- One button per preference, cycling through the values worth offering.
--- Cycling rather than a slider because the keyboard navigation this menu
--- already has moves up and down a list of buttons, and a slider inside one
--- would need a second kind of focus for one screen's sake.
+-- A dropdown per preference, of the values worth offering
+-- ([ENGINE_SETTINGS_DROPDOWNS], user 2026-10-06: they were buttons that
+-- cycled), in launch_menu_v2's Server filter's style. The menu's arrows
+-- reach each one and Enter opens it, Urho3D's own.
 -- Run by the menu's own verb, so it loads on either side
 -- ([LAUNCH_SANDBOX]): `require` answers an extension's safe half inside
 -- the sandbox and the whole extension outside it, and the safe half
@@ -32,8 +32,9 @@ ui_utils = ui_utils.bind_button_menu and ui_utils or ui_utils.safe
 -- **The constants are globals in trusted Lua and fields of the safe
 -- table in the sandbox**, so they are named once here and the code
 -- below reads the same on both sides ([LAUNCH_SANDBOX])
-local HA_CENTER, KEY_ESCAPE, LM_VERTICAL =
-		magic.HA_CENTER, magic.KEY_ESCAPE, magic.LM_VERTICAL
+local HA_CENTER, KEY_ESCAPE, LM_VERTICAL, LM_HORIZONTAL =
+		magic.HA_CENTER, magic.KEY_ESCAPE, magic.LM_VERTICAL,
+		magic.LM_HORIZONTAL
 
 local M = {}
 
@@ -186,6 +187,52 @@ local function make_row(window, label)
 	return button, text
 end
 
+-- A label and a dropdown of `choices` (texts) beside it, `index` chosen;
+-- picked(i) on another. launch_menu_v2's Server filter's look: the arrow at
+-- its right end, the entry under the mouse highlighted, the chosen one
+-- less (main_style.xml's button and button-line greys).
+local DROP_W, ROW_H = 240, 28
+local function make_dropdown(window, label, choices, index, picked)
+	local row = window:CreateChild("UIElement")
+	row:SetLayout(LM_HORIZONTAL, 10, magic.IntRect(0, 0, 0, 0))
+	local t = row:CreateChild("Text")
+	t:SetStyleAuto()
+	t.text = label
+	t:SetFixedWidth(300)
+	local drop = row:CreateChild("DropDownList")
+	drop:SetStyleAuto()
+	-- No letter in the shown choice ([MENU_KEYS]): it is a value, and the
+	-- choice shown is a copy of the picked entry
+	drop:SetName("no_letter")
+	drop:SetFixedSize(DROP_W, ROW_H)
+	drop.resizePopup = true
+	drop.placeholder:SetFixedWidth(DROP_W - 28)
+	local arrow = drop:CreateChild("Text")
+	arrow:SetStyleAuto()
+	arrow.text = "▼"
+	arrow:SetFontSize(12)
+	arrow.color = magic.Color(ui_utils.rgb("dim"))
+	for i, c in ipairs(choices) do
+		local item = window:CreateChild("Text")
+		item:SetStyleAuto()
+		item.text = c
+		item:SetFixedHeight(ROW_H - 4)
+		drop:AddItem(item)
+		item.enabled = true
+		item:SetSelectionColor(magic.Color(0.2, 0.2, 0.25))
+		item:SetHoverColor(magic.Color(0.33, 0.33, 0.4))
+		if i == index then drop:SetSelection(i - 1) end
+	end
+	magic.SubscribeToEvent(drop, "ItemSelected", function(_, _, data)
+		local i = data:GetInt("Selection") + 1
+		if i ~= index and choices[i] then
+			index = i
+			picked(i)
+		end
+	end)
+	return drop
+end
+
 -- The launch UIs as a list, the one in use first: each its title, its
 -- extension name, its description and whether it is experimental.
 -- Picking one switches to it; Back and Escape leave it as it is.
@@ -275,27 +322,24 @@ function M.show()
 			-- row out rather than showing a control that does nothing
 			log:warning("No preference by the name "..pref.name)
 		else
-			local index = nearest_index(pref, value)
-			local button, text = make_row(menu.window, pref.label)
-			local function relabel()
-				text.text =
-						pref.label..": "..show_value(pref, pref.values[index])
+			local choices = {}
+			for i, v in ipairs(pref.values) do
+				choices[i] = show_value(pref, v)
 			end
-			menu:add(button, function()
-				index = index % #pref.values + 1
-				local ok, err = api.set_preference(pref.name,
-						pref.values[index])
+			local drop = make_dropdown(menu.window, pref.label, choices,
+					nearest_index(pref, value), function(i)
+				local ok, err = api.set_preference(pref.name, pref.values[i])
 				if not ok then
 					-- Cannot happen with the values above, and saying so is
-					-- better than a button that quietly does nothing
+					-- better than a control that quietly does nothing
 					log:warning(pref.name..": "..tostring(err))
 					ui_utils.show_message_dialog(
 							pref.label..": "..tostring(err))
-					return
 				end
-				relabel()
 			end)
-			relabel()
+			-- The press is the dropdown's own; this only puts it in the
+			-- arrows' order
+			menu:add(drop, function() end)
 		end
 	end
 
