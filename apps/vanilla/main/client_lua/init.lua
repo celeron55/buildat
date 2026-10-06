@@ -1681,8 +1681,10 @@ local function apply_sky_of_hour(force)
 	local moon_picture = body_picture_of("moon", game_sky.moon_texture)
 	world_sky:set_moon_texture(moon_picture)
 	-- The disc's size is update_sky()'s: the moon is out in its hours
-	-- only, and until the server has said the hour there are none
-	world_sky:set_moon_look(0)
+	-- only, and until the server has said the hour there are none. Kept
+	-- on sky_now, because update_sky() ends by calling this: a 0 here
+	-- undid its size every frame and the moon was never drawn.
+	world_sky:set_moon_look(sky_now.moon_half or 0)
 
 	-- The stars come out as the light goes: Luanti's day_opacity is zero by
 	-- default, which is a sky with none in it until the sun is down
@@ -1819,6 +1821,7 @@ local function update_sky(dt)
 	local moon_half = (game_sky.moon_visible ~= false and
 			luanti_sky.moon_amount(daylight) > 0) and
 			luanti_sky.MOON_HALF * (game_sky.moon_scale or 1) or 0
+	sky_now.moon_half = moon_half
 	world_sky:set_moon_look(moon_half)
 
 	-- Where the sun is. Luanti's own stretched day, out of luanti_sky, and

@@ -398,17 +398,23 @@ void PS()
     // that are not behind them. The sun goes the colour of the tint as it
     // comes down to the horizon, which is where that colour belongs; higher
     // up it is its own.
+    //
+    // Both are cut off at the horizon, as the ground covers them (user,
+    // 2026-10-06): with no ground drawn there -- the world still loading,
+    // a sky island -- the sun showed through at night. Their pictures'
+    // glow goes with them.
+    float above = clamp(d.y / max(fwidth(d.y), 1e-5) + 0.5, 0.0, 1.0);
     if(cSunSize > 0.0 && dot(cSunRadiance, vec3(1.0)) > 0.0){
         // A disc, not the square, at the radiance the client says
         vec3 body = Body(d, sun, cSunSize);
         vec2 at = (body.yz - 0.5) * cSunSize * 2.0;
-        float cover = body.x * (1.0 - smoothstep(cSunSize - BODY_EDGE,
-                cSunSize + BODY_EDGE, length(at)));
+        float cover = body.x * above * (1.0 - smoothstep(
+                cSunSize - BODY_EDGE, cSunSize + BODY_EDGE, length(at)));
         color = mix(color, cSunRadiance, cover);
     } else if(cSunSize > 0.0){
         vec3 body = Body(d, sun, cSunSize);
         vec3 sun_color = mix(SUN_COLOR, cSunTint * 1.6, low);
-        float cover = body.x;
+        float cover = body.x * above;
         if(cSunTextured > 0.5){
             // The texture's own colours, and its alpha as the coverage: a
             // sun drawn as a disc in a square image is a disc here too
@@ -422,13 +428,19 @@ void PS()
     if(cMoonSize > 0.0){
         vec3 body = Body(d, -sun, cMoonSize);
         vec3 moon_color = MOON_COLOR;
-        float cover = body.x;
+        float cover = body.x * above;
         if(cMoonTextured > 0.5){
             vec4 tex = texture2D(sNormalMap, vec2(body.y, 1.0 - body.z));
             moon_color = tex.rgb;
             cover *= tex.a;
         }
-        color = mix(color, moon_color, cover);
+        // pbr adds it to the sky (user, 2026-10-06): the moon is lit, not
+        // a hole, so its dark seas show the sky in front of it rather than
+        // black, and it fades into a bright sky without a seam. A "brighter
+        // than the sky" comparison switched colour abruptly where the two
+        // crossed. The parity modes cover the sky with it, as Luanti does.
+        color = cSkyPhysical > 0.5 ? color + moon_color * cover
+                : mix(color, moon_color, cover);
     }
 
     // **The treeline** (user, 2026-10-01): a forest TREE_DISTANCE away,
