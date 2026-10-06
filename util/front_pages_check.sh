@@ -1,0 +1,105 @@
+#!/bin/bash
+# tier: full
+# cost: ~1.5 min (2026-10-06)
+# covers: apps/starport/main/main.cpp apps/aitta/main/main.cpp src/interface/web_brand.h
+# [FRONT_PAGES]: a Starport and an Aitta answer / with a read-only page and
+# leave /index.html to the web client. Aitta's says nothing is published,
+# then lists a release whose description has a <script> in it, as text,
+# and /p/<author>/<name> lists its versions. The Aitta is announced to the
+# Starport under a name with a <script> in it: the Starport's page shows
+# it as text, "Native client only" (no TLS), and the kind filter keeps it
+# or leaves it out.
+#   util/front_pages_check.sh
+set -u
+. "$(dirname "$0")/check_paths.sh"
+here=$(cd "$(dirname "$0")/.." && pwd)
+t=$(mktemp -d)
+pids=()
+trap 'kill ${pids[@]} 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "${t:?}"' EXIT
+fail(){ echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
+SP=29871 AI=29872
+# The boxed servers reach each other: the announce and its check
+export BUILDAT_CONNECT_PORTS="$SP,$AI"
+cd "$here"
+page(){ curl -s -m 10 "http://127.0.0.1:$1"; }
+
+Build/bin/buildat_server -m apps/starport -D "$t/sp" -P $SP -l 3 > "$t/sp.log" 2>&1 &
+pids+=($!)
+for _ in $(seq 120); do grep -q "setup code" "$t/sp.log" && break; sleep 1; done
+code=$(grep -ao "setup code [A-Z0-9]*" "$t/sp.log" | cut -d' ' -f3)
+[ -n "$code" ] || fail "the Starport did not start ($t/sp.log)"
+mkdir -p "$t/ai/apps/aitta"
+cat > "$t/ai/apps/aitta/starport.json" <<J
+{"starports": ["http://127.0.0.1:$SP"], "name": "Shop <script>alert(1)</script>",
+ "login": "both", "kind": "app", "audience": "everyone", "access": "auto",
+ "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
+  "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
+  "gambling": "no", "personal_data": "no"}}
+J
+Build/bin/buildat_server -m apps/aitta -D "$t/ai" -P $AI -l 3 \
+	> "$t/ai.log" 2>&1 &
+pids+=($!)
+for _ in $(seq 180); do grep -q "verified ok" "$t/sp.log" && break; sleep 1; done
+grep -q "verified ok" "$t/sp.log" || fail "the Aitta's listing ($t/sp.log)"
+
+# Aitta's page before anything is published, and the web client's
+p=$(page $AI/)
+grep -q "Nothing is published here yet" <<< "$p" || fail "Aitta's / before a release: $p"
+grep -q 'href="/index.html"' <<< "$p" || fail "Aitta's / has no way into the client"
+grep -q "Nothing is published" <<< "$(page $AI/index.html)" &&
+	fail "Aitta's /index.html is the page, not the web client"
+[ "$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:$AI/brand/logo.png")" = 200 ] ||
+	fail "Aitta does not serve /brand/"
+
+# The Aitta's listing claimed, so the Starport lists it; tester bound to a
+# key on the Aitta
+read -r _ _ id _ _ ccode < <(grep -v "^#" "$t/ai/apps/aitta/starport_claim.txt")
+printf 'delay 6000\nquit\n' > "$t/cmds"
+BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
+	BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
+{\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
+{\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
+	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$t/cmds" > "$t/sp_admin.log" 2>&1
+page $SP/api/list | grep -q "Shop <script>" || fail "the claim ($t/sp_admin.log)"
+Build/bin/buildat aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
+ca=$(grep -ao "setup code [A-Z0-9]*" "$t/ai.log" | cut -d' ' -f3)
+BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
+	BUILDAT_AITTA_CODE=$ca \
+	BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}" \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$t/cl_a" -w 800x600 -l 3 \
+	-o sound_mute=1 -s 127.0.0.1:$AI -c @"$t/cmds" > "$t/cl_a.log" 2>&1
+grep -aq 'ai: {"id":1,"ok":true' "$t/cl_a.log" || fail "the bind ($t/cl_a.log)"
+mkdir -p "$t/demo/main" "$t/demo/launcher"
+echo 'int x;' > "$t/demo/main/main.cpp"
+echo "return function(ctx) return {} end" > "$t/demo/launcher/init.lua"
+printf '{"author": "tester", "name": "demo", "version": "1.0", "engine_api": 1,
+	"license_code": "MIT", "license_media": "CC0-1.0",
+	"description": "a <script>alert(2)</script> check",
+	"home_hearth": "http://127.0.0.1:1/"}\n' > "$t/demo/meta.json"
+zip=$(Build/bin/buildat aitta pack "$t/demo" "$t/key" "$t/out" 2>/dev/null) || fail "pack"
+Build/bin/buildat aitta publish "$zip" 127.0.0.1:$AI 2>&1 | grep -q "listed: tester/demo/1.0" ||
+	fail "publish"
+
+p=$(page $AI/)
+grep -q "<script>" <<< "$p" && fail "Aitta's / runs a release's <script>"
+grep -q "a &lt;script&gt;alert(2)&lt;/script&gt; check" <<< "$p" ||
+	fail "Aitta's / does not show the release as text: $p"
+grep -q 'href="/p/tester/demo"' <<< "$p" || fail "no link to the package's page"
+grep -q '/api/aitta/archive/[0-9a-f]*\.zip' <<< "$p" || fail "no .zip link"
+grep -q 'http://127.0.0.1:1/p/tester/demo" rel="nofollow noopener">Discuss' <<< "$p" ||
+	fail "no Discuss link to the home Hearth"
+grep -q "<h1>tester/demo</h1>" <<< "$(page $AI/p/tester/demo)" || fail "the package's page"
+echo "ok: Aitta's / and /p/, the release's text escaped"
+
+p=$(page $SP/)
+grep -q "<script>" <<< "$p" && fail "the Starport's / runs a listing's <script>"
+grep -q "Shop &lt;script&gt;alert(1)&lt;/script&gt;" <<< "$p" ||
+	fail "the Starport's / does not show the listing: $p"
+grep -q "Native client only" <<< "$p" || fail "no Native client only"
+grep -q 'href="/id"' <<< "$p" || fail "no link to the ID page"
+grep -q "Shop &lt;" <<< "$(page "$SP/?kind=app")" || fail "?kind=app lost it"
+grep -q "Shop &lt;" <<< "$(page "$SP/?kind=world")" && fail "?kind=world kept it"
+grep -q "A Starport:" <<< "$(page $SP/index.html)" &&
+	fail "the Starport's /index.html is the page, not the web client"
+echo "PASS: Aitta and the Starport answer / with their pages, untrusted text as text, the web client at /index.html"

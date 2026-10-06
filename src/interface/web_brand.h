@@ -56,9 +56,47 @@ namespace interface
 			"form[id]>button:first-of-type{background:#ff9e1f;color:#111;"
 			"border-color:#ff9e1f}"
 			"fieldset{border:1px solid #3a3a48;border-radius:4px;margin:1em 0}"
-			"#err{color:#ff5c5c}#ok{color:#26d9ff}b{color:#fff}";
+			"#err{color:#ff5c5c}#ok{color:#26d9ff}b{color:#fff}"
+			// [FRONT_PAGES]: a host or a key does not widen a phone's page
+			".box{overflow-wrap:anywhere}"
+			".box img.icon{float:left;margin:.3em .8em .3em 0}"
+			".box::after{content:\"\";display:block;clear:both}";
 
 		static const char *logo = "<img src=\"/brand/logo.png\" alt=\"\">";
+
+		// Text for HTML, an attribute's value included
+		inline ss_ html(const ss_ &s)
+		{
+			ss_ r;
+			for(char c : s){
+				switch(c){
+				case '&': r += "&amp;"; break;
+				case '<': r += "&lt;"; break;
+				case '>': r += "&gt;"; break;
+				case '"': r += "&quot;"; break;
+				case '\'': r += "&#39;"; break;
+				default: r += c;
+				}
+			}
+			return r;
+		}
+
+		// [FRONT_PAGES]: a read-only page of an app's own (Aitta's, the
+		// Starport's front page): the header with the logo and the app's
+		// name, linking to /, and the way into the client under it.
+		// content is HTML, its untrusted text already through html().
+		inline ss_ page(const ss_ &title, const ss_ &name, const ss_ &content)
+		{
+			return "<!doctype html>\n<html lang=\"en\"><head>"
+					"<meta charset=\"utf-8\"><meta name=\"viewport\" "
+					"content=\"width=device-width, initial-scale=1\"><title>"+
+					html(title)+"</title><style>"+css+"</style></head><body>"
+					"<header><a class=\"brand\" href=\"/\">"+logo+html(name)+
+					"</a></header>\n"+content+"\n<p class=\"meta\">"
+					"<a href=\"/index.html\">Open in the Buildat client</a> "
+					"(in the browser) &middot; <a href=\"https://www.buildat.org/"
+					"\">www.buildat.org</a></p></body></html>\n";
+		}
 
 		// The file at /brand/<name>, from the share's client/data (which
 		// CMakeLists installs for a server build too), and its type; false

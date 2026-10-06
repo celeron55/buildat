@@ -18,6 +18,9 @@
 //   GET /authorize, GET /id  the pages a web client signs in by and an
 //                            ID's settings are on ([WEB_ID_TRUST])
 //   GET /brand/<file>        the pages' font and logo ([HTML_BRAND])
+//   GET /                    the listed servers and the numbers as a page,
+//                            ?kind=, ?audience=, ?adult=1 ([FRONT_PAGES]);
+//                            the web client is at /index.html
 // The API answers any origin (CORS *): it takes no cookies.
 // In the app, "sp:req" carries a JSON {id, cmd, ...} from a joined client
 // and "sp:res" the answer {id, ok, result | error}.
@@ -780,6 +783,7 @@ struct Module: public interface::Module
 			iface->claim_http_path("/authorize");
 			iface->claim_http_path("/id");
 			iface->claim_http_path("/brand/");
+			iface->claim_http_path("/"); // [FRONT_PAGES]; the client is at /index.html
 		});
 		// m_last_day stays 0: the daily pass runs at the first tick too, so a
 		// Starport down at midnight still clears what the retention ends
@@ -863,7 +867,9 @@ struct Module: public interface::Module
 			body = json::object();
 		}
 		ss_ data, type;
-		if(r.path == "/api/announce" && r.method == "POST")
+		if(r.path == "/" && r.method == "GET")
+			front_page(r);
+		else if(r.path == "/api/announce" && r.method == "POST")
 			api_announce(r, body);
 		else if(r.path == "/api/delist" && r.method == "POST")
 			api_delist(r, body);
@@ -1357,6 +1363,17 @@ struct Module: public interface::Module
 		const ss_ key = jstr(b, "key");
 		if(!key.empty())
 			key_seen(key);
+		json::Value v = json::object();
+		v.set("ok", true);
+		v.set("starport", jstr(m_settings, "name"));
+		v.set("servers", listed_servers());
+		respond(r, 200, v);
+	}
+
+	// What /api/list hands out: the listed servers, and those hidden from
+	// filtered views marked restricted
+	json::Value listed_servers()
+	{
 		json::Value servers = json::array();
 		for(const ss_ &id : store("listings")->list("")){
 			const json::Value l = load("listings", id);
@@ -1389,11 +1406,7 @@ struct Module: public interface::Module
 			}
 			servers.append(s);
 		}
-		json::Value v = json::object();
-		v.set("ok", true);
-		v.set("starport", jstr(m_settings, "name"));
-		v.set("servers", servers);
-		respond(r, 200, v);
+		return servers;
 	}
 
 	// -- 5a. A key's standing
@@ -1863,6 +1876,11 @@ struct Module: public interface::Module
 			refuse(r, "asked too often");
 			return;
 		}
+		respond(r, 200, transparency());
+	}
+
+	json::Value transparency()
+	{
 		json::Value by_reason = json::object(), by_action = json::object();
 		sv_<int64_t> times;
 		int64_t reports = 0;
@@ -1889,7 +1907,169 @@ struct Module: public interface::Module
 		v.set("actions", by_action);
 		v.set("median_seconds_to_decide", times.empty() ? (int64_t)0 :
 				times[times.size() / 2]);
-		respond(r, 200, v);
+		return v;
+	}
+
+	// -----------------------------------------------------------------------
+	// [FRONT_PAGES]: what / shows a browser, read-only, from what the API
+	// hands out to anyone. Filters are links: ?kind=, ?audience=, and
+	// ?adult=1 for the adult listings and those kept out of filtered views.
+
+	static ss_ server_box(const json::Value &s)
+	{
+		using interface::web_brand::html;
+		ss_ b = "<div class=\"box\">";
+		if(!jstr(s, "icon").empty())
+			b += "<img class=\"icon\" src=\"/api/icon/"+html(jstr(s, "icon"))+
+					"\" width=\"48\" height=\"48\" alt=\"\">";
+		const ss_ host = jstr(s, "host");
+		const int64_t port = jint(s, "port");
+		b += "<b>"+html(jstr(s, "name"))+"</b> <span class=\"meta\">"+
+				html(host)+":"+itos(port)+"</span>";
+		if(!jstr(s, "description").empty())
+			b += "<br>"+html(jstr(s, "description"));
+		sv_<ss_> m;
+		for(const char *k : {"app", "kind", "audience"})
+			if(!jstr(s, k).empty())
+				m.push_back(k == ss_("audience") ? "for "+jstr(s, k) : jstr(s, k));
+		m.push_back(itos(jint(s, "players"))+" of "+itos(jint(s, "players_max"))+
+				" players");
+		if(!jstr(s, "region").empty())
+			m.push_back(jstr(s, "region"));
+		if(!jstr(s, "version").empty())
+			m.push_back("version "+jstr(s, "version"));
+		m.push_back("access: "+jstr(s, "access"));
+		m.push_back("login: "+jstr(s, "login", "local"));
+		// The descriptors in words, those that say something
+		const json::Value &d = s.get("descriptors");
+		for(const auto &pair : DESCRIPTORS){
+			const ss_ v = jstr(d, pair.first.c_str());
+			if(v.empty() || v == "none" || v == "no")
+				continue;
+			ss_ k = pair.first;
+			std::replace(k.begin(), k.end(), '_', ' ');
+			m.push_back(v == "yes" ? k : v+" "+k);
+		}
+		ss_ line;
+		for(const ss_ &x : m)
+			line += (line.empty() ? "" : ", ")+html(x);
+		b += "<br><span class=\"meta\">"+line+"</span><br>";
+		// A server behind TLS serves the web client; its address as the
+		// client's list has it
+		if(s.get("tls").is_true())
+			b += "<a href=\"https://"+html(host)+(port == 443 ? ss_() :
+					":"+itos(port))+"/index.html\" rel=\"nofollow noopener\">"
+					"Play in your browser</a>";
+		else
+			b += "<span class=\"meta\">Native client only</span>";
+		if(!jstr(s, "signup_url").empty())
+			b += " <span class=\"meta\">&middot; sign up at "+
+					html(jstr(s, "signup_url"))+"</span>";
+		return b+"</div>\n";
+	}
+
+	void front_page(const network::HttpRequest &r)
+	{
+		using interface::web_brand::html;
+		if(!rate_ok("page", r.address, 30, 60)){
+			network::access(m_server, [&](network::Interface *iface){
+				iface->http_respond(r.peer, 429, "text/plain",
+						"Too many requests; try again in a minute.\n");
+			});
+			return;
+		}
+		const ss_ name = jstr(m_settings, "name");
+		ss_ kind = query_value(r.query, "kind");
+		ss_ audience = query_value(r.query, "audience");
+		if(!in_set(kind, KINDS))
+			kind = "";
+		if(!in_set(audience, AUDIENCES))
+			audience = "";
+		const bool adult = query_value(r.query, "adult") == "1" ||
+				audience == "adult";
+		// A filter's link keeps the others
+		auto link = [&](const ss_ &k, const ss_ &a, bool ad, const ss_ &text,
+				bool on){
+			ss_ q;
+			if(!k.empty()) q += "&kind="+k;
+			if(!a.empty()) q += "&audience="+a;
+			if(ad && a != "adult") q += "&adult=1";
+			if(!q.empty()) q[0] = '?';
+			return on ? "<b>"+text+"</b>" :
+					"<a href=\"/"+q+"\">"+text+"</a>";
+		};
+		ss_ c = "<h1>"+html(name)+"</h1><p>A Starport: a list of Buildat "
+				"servers that announce themselves here, and the Starport ID "
+				"their players log in with. The Buildat client lists these "
+				"servers and joins them.</p>\n<p class=\"meta\">Kind: "+
+				link("", audience, adult, "all", kind.empty());
+		for(const char *k : KINDS)
+			c += " "+link(k, audience, adult, k, kind == k);
+		c += "<br>Audience: "+link(kind, "", adult, "all", audience.empty());
+		for(const char *a : AUDIENCES)
+			c += " "+link(kind, a, adult, a, audience == a);
+		c += "<br>"+(adult ? link(kind, audience == "adult" ? "" : audience,
+				false, "Hide adult listings", false) : link(kind, audience, true,
+				"Show adult listings", false))+"</p>\n";
+		// Fleets as groups, their servers under them; the rest after
+		sm_<ss_, sv_<json::Value>> fleets;
+		sm_<ss_, json::Value> fleet_of;
+		sv_<json::Value> lone;
+		const json::Value all = listed_servers();
+		for(unsigned i = 0; i < all.size(); i++){
+			const json::Value &s = all.at(i);
+			if(!kind.empty() && jstr(s, "kind") != kind)
+				continue;
+			if(!audience.empty() && jstr(s, "audience") != audience)
+				continue;
+			if(!adult && (jstr(s, "audience") == "adult" ||
+					s.get("restricted").is_true()))
+				continue;
+			const ss_ fid = jstr(s.get("fleet"), "id");
+			if(fid.empty()){
+				lone.push_back(s);
+			} else {
+				fleets[fid].push_back(s);
+				fleet_of[fid] = s.get("fleet");
+			}
+		}
+		for(auto &pair : fleets){
+			const json::Value &f = fleet_of[pair.first];
+			c += "<h2>"+html(jstr(f, "name"))+"</h2>";
+			if(!jstr(f, "description").empty())
+				c += "<p class=\"meta\">"+html(jstr(f, "description"))+"</p>";
+			for(const json::Value &s : pair.second)
+				c += server_box(s);
+		}
+		if(!lone.empty() || fleets.empty())
+			c += "<h2>Servers</h2>\n";
+		for(const json::Value &s : lone)
+			c += server_box(s);
+		if(lone.empty() && fleets.empty())
+			c += "<p>No servers are listed here"+ss_(kind.empty() &&
+					audience.empty() ? "" : " with these filters")+".</p>\n";
+		const json::Value t = transparency();
+		const int64_t median = jint(t, "median_seconds_to_decide");
+		c += "<h2>Moderation</h2><p>"+itos(jint(t, "reports"))+" reports "
+				"received; ";
+		ss_ acts;
+		const json::Value &a = t.get("actions");
+		for(json::Iterator it(a); it.valid(); it.next())
+			acts += (acts.empty() ? "" : ", ")+html(it.key())+" "+
+					itos(jint(a, it.ckey()));
+		c += (acts.empty() ? ss_("no actions taken") : "actions: "+acts)+
+				"; the median time to decide a report: "+(median == 0 ?
+				ss_("none decided yet") : median < 7200 ?
+				itos(median / 60)+" minutes" : itos(median / 3600)+" hours")+
+				". <a href=\"/api/transparency\">The numbers</a>.</p>\n"
+				"<h2>Privacy</h2><p>This page sets no cookies and loads nothing "
+				"from elsewhere. A Starport ID keeps a name, a password and "
+				"what you choose to add; <a href=\"/id\">the ID page</a> shows "
+				"and changes yours.</p>\n";
+		network::access(m_server, [&](network::Interface *iface){
+			iface->http_respond(r.peer, 200, "text/html; charset=utf-8",
+					interface::web_brand::page(name, name, c));
+		});
 	}
 
 	// -----------------------------------------------------------------------

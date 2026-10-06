@@ -19,6 +19,10 @@
 //                                   signature good for the hash it names.
 //   POST upload_part?sha256=&offset=  body: the next bytes, 60000 at most
 //   POST upload_end?sha256=         the checks, and the listing
+// And a browser's pages ([FRONT_PAGES]), the web client at /index.html:
+//   GET  /                          each package's latest release
+//   GET  /p/<author>/<name>         a package's listed releases
+//   GET  /brand/<file>              the pages' font and logo
 // In the app, "ai:req" carries a JSON {id, cmd, ...} from a joined client
 // and "ai:res" the answer {id, ok, result | error}.
 //
@@ -38,12 +42,15 @@
 #include "interface/aitta.h"
 #include "interface/zip.h"
 #include "interface/bignum.h"
+#include "interface/web_brand.h"
 #include "client_file/api.h"
 #include "network/api.h"
 #include "storage/api.h"
 #include "accounts/api.h"
 #include <ctime>
 #include <map>
+#include <set>
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #define MODULE "main"
@@ -207,6 +214,12 @@ struct Module: public interface::Module
 		m_tmp = c.get<ss_>("cache_path")+"/apps/"+app+"/tmp";
 		interface::fs::create_directories(m_archives);
 		interface::fs::create_directories(m_tmp);
+		// [FRONT_PAGES]: a browser's pages; the web client is at /index.html
+		network::access(m_server, [&](network::Interface *iface){
+			iface->claim_http_path("/");
+			iface->claim_http_path("/p/");
+			iface->claim_http_path("/brand/");
+		});
 		log_i(MODULE, "Aitta: %zu releases", store("releases")->list("").size());
 	}
 
@@ -246,6 +259,9 @@ struct Module: public interface::Module
 	void on_http(const network::HttpRequest &r)
 	{
 		const ss_ base = "/api/aitta/";
+		if(r.path == "/" || r.path.compare(0, 3, "/p/") == 0 ||
+				r.path.compare(0, 7, "/brand/") == 0)
+			return html_page(r);
 		if(r.path.compare(0, base.size(), base) != 0)
 			return;
 		if(!m_save)
@@ -290,6 +306,14 @@ struct Module: public interface::Module
 	// package's first listed release is listed at once: it updates nothing.
 	void http_list(const network::HttpRequest &r)
 	{
+		json::Value v = json::object();
+		v.set("ok", true);
+		v.set("releases", listed_releases());
+		respond(r, v);
+	}
+
+	json::Value listed_releases()
+	{
 		const json::Value &d = m_settings.get("update_delay");
 		const int64_t delay = d.is_number() ? (int64_t)d.as_number() : 0;
 		const json::Value all = releases(false);
@@ -307,10 +331,116 @@ struct Module: public interface::Module
 		for(unsigned i = 0; i < all.size(); i++)
 			if(first[pkg(i)] == i || now_s() - time(i) >= delay)
 				list.append(all.at(i));
-		json::Value v = json::object();
-		v.set("ok", true);
-		v.set("releases", list);
-		respond(r, v);
+		return list;
+	}
+
+	// -----------------------------------------------------------------------
+	// [FRONT_PAGES]: what a browser is shown, read-only, from what list
+	// hands out: / lists each package's latest release, /p/<author>/<name>
+	// a package's every listed one
+
+	static ss_ date(int64_t t)
+	{
+		const time_t tt = (time_t)t;
+		struct tm tm;
+		gmtime_r(&tt, &tm);
+		char b[16];
+		strftime(b, sizeof b, "%Y-%m-%d", &tm);
+		return b;
+	}
+
+	static ss_ release_box(const json::Value &rel, bool latest)
+	{
+		using interface::web_brand::html;
+		const ss_ pkg = jstr(rel, "author")+"/"+jstr(rel, "name");
+		const ss_ sha = jstr(rel, "sha256");
+		const int64_t size = (int64_t)rel.get("size").as_number();
+		ss_ b = "<div class=\"box\"><b>"+(latest ? "<a href=\"/p/"+html(pkg)+
+				"\">"+html(pkg)+"</a>" : html(pkg))+"</b> "+
+				html(jstr(rel, "version"))+" <span class=\"meta\">"+
+				html(jstr(rel, "kind"))+", "+date((int64_t)rel.get("time")
+				.as_number())+", "+(size < 1000 ? itos(size)+" bytes" : size < 1000000 ?
+				itos(size / 1000)+" kB" :
+				itos(size / 1000000)+" MB")+", unreviewed</span>";
+		if(!jstr(rel, "description").empty())
+			b += "<br>"+html(jstr(rel, "description"));
+		b += "<br><span class=\"meta\">Licence: code "+
+				html(jstr(rel, "license_code"))+", media "+
+				html(jstr(rel, "license_media"))+"<br>Signed by the key <code>"+
+				html(jstr(rel, "key"))+"</code></span><br>"
+				"<a href=\"/api/aitta/archive/"+html(sha)+".zip\">.zip</a> "
+				"<a href=\"/api/aitta/archive/"+html(sha)+".sig\">.sig</a>";
+		// Its discussion at its home Hearth, as the client's "Discuss"
+		const ss_ home = jstr(rel, "home_hearth");
+		if(home.compare(0, 8, "https://") == 0 ||
+				home.compare(0, 7, "http://") == 0)
+			b += " <a href=\""+html(home.back() == '/' ? home.substr(0,
+					home.size() - 1) : home)+"/p/"+html(pkg)+"\" "
+					"rel=\"nofollow noopener\">Discuss</a>";
+		return b+"</div>\n";
+	}
+
+	void html_page(const network::HttpRequest &r)
+	{
+		auto send = [&](int status, const ss_ &type, const ss_ &body,
+				const ss_ &headers = ""){
+			network::access(m_server, [&](network::Interface *iface){
+				iface->http_respond(r.peer, status, type, body, headers);
+			});
+		};
+		ss_ data, type;
+		if(r.path.compare(0, 7, "/brand/") == 0){
+			if(interface::web_brand::file(m_server->get_config().get<ss_>(
+					"share_path"), r.path.substr(7), data, type))
+				return send(200, type, data, "Cache-Control: max-age=86400\r\n");
+			return send(404, "text/plain", "Not found\n");
+		}
+		const ss_ html_type = "text/html; charset=utf-8";
+		if(!m_save)
+			return send(503, html_type, interface::web_brand::page("Aitta",
+					"Aitta", "<p>Starting.</p>"));
+		const json::Value all = listed_releases();
+		// Newest first; a package's latest is its first
+		sv_<json::Value> rels;
+		for(unsigned i = 0; i < all.size(); i++)
+			rels.push_back(all.at(i));
+		std::sort(rels.begin(), rels.end(), [](const json::Value &a,
+				const json::Value &b){
+			return a.get("time").as_number() > b.get("time").as_number();
+		});
+		auto pkg = [](const json::Value &rel){
+			return jstr(rel, "author")+"/"+jstr(rel, "name");
+		};
+		using interface::web_brand::html;
+		ss_ c;
+		if(r.path.compare(0, 3, "/p/") == 0){
+			const ss_ want = r.path.substr(3);
+			for(const json::Value &rel : rels)
+				if(pkg(rel) == want)
+					c += release_box(rel, false);
+			if(c.empty())
+				return send(404, html_type, interface::web_brand::page(
+						"Not found", "Aitta", "<p>No package of that name is "
+						"listed here. <a href=\"/\">The list</a>.</p>"));
+			return send(200, html_type, interface::web_brand::page(want+
+					" - Aitta", "Aitta", "<h1>"+html(want)+"</h1><p class=\""
+					"meta\">Every listed release, the newest first.</p>\n"+c));
+		}
+		std::set<ss_> seen;
+		for(const json::Value &rel : rels)
+			if(seen.insert(pkg(rel)).second)
+				c += release_box(rel, true);
+		ss_ body = "<h1>Aitta</h1><p>A registry of Buildat apps and "
+				"extensions: their authors sign each release with their own "
+				"key, and Aitta lists it. Nothing here is reviewed. An app "
+				"runs in the server's box, where it reaches only its own "
+				"saves.</p><p>To install one, open the Buildat client and "
+				"pick <b>Apps from Aitta</b>; it checks the signature before "
+				"it installs.</p>\n";
+		body += c.empty() ? "<p>Nothing is published here yet.</p>\n" :
+				"<h2>Packages</h2>\n"+c;
+		send(200, html_type, interface::web_brand::page("Aitta", "Aitta",
+				body));
 	}
 
 	void http_release(const network::HttpRequest &r)

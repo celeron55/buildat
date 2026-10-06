@@ -71,6 +71,11 @@ stolen key can be reported and delisted before clients are offered it.
 
     GET  /api/aitta/list                      the listed releases, JSON
     GET  /api/aitta/archive/<sha256>.zip|.sig a listed release's files
+    GET  /                                    a page of each package's latest
+                                              release, for a browser
+    GET  /p/<author>/<name>                   a package's listed releases
+
+The web client of an Aitta server is at /index.html.
 
 Browsing and installing in the client
 -------------------------------------
