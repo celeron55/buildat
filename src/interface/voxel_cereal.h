@@ -38,16 +38,19 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelVariant &v)
 	{
-		uint8_t version = 2;
+		uint8_t version = 3;
 		archive(version, v.shape, v.color, v.liquid_top, v.textures);
 		for(size_t i = 0; i < 6; i++)
 			archive(v.tile_order[i], v.tile_turns[i]);
+		// Version 3 added what stops the player ([VL_STAIRS])
+		if(version >= 3)
+			archive(v.collision_boxes);
 	}
 
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 23;
+		uint8_t version = 24;
 		archive(
 				version,
 				v.name,
@@ -146,6 +149,11 @@ namespace interface
 		// one is up, nought meaning "the same" ([SIGIL_ROUND])
 		if(version >= 23){
 			archive(v.uv_scale_v);
+		}
+		// Version 24 added what stops the player when it is not the cube
+		// ([VL_STAIRS])
+		if(version >= 24){
+			archive(v.collision_boxes);
 		}
 	}
 

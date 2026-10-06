@@ -1763,6 +1763,23 @@ local function node_boxes(def)
 	return out
 end
 
+-- What the player's physics stops at, when it is not the whole cube: the
+-- fixed collision_box, or the fixed node_box when there is none -- the same
+-- fallback as core.get_node_boxes() below. simplified: a "leveled",
+-- "wallmounted" or "connected" box is left the cube it was.
+local function collision_boxes(def)
+	local cb = def and (def.collision_box or def.node_box)
+	if type(cb) ~= "table" or cb.type ~= "fixed" then
+		return nil
+	end
+	local out = {}
+	flatten_boxes(cb.fixed, out)
+	if #out == 0 then
+		return nil
+	end
+	return out
+end
+
 -- A "connected" node box, as the mesher's tagged quads: the fixed boxes
 -- untagged, and each connect_* set tagged with the direction it needs a
 -- neighbour in -- the same tag a fence's bars carry (1 +y, 2 -y, 3 +x, 4
@@ -1946,6 +1963,7 @@ function core.__voxel_defs()
 			-- sixteen frames at once
 			tile_frames = tile_frame_aspects(six_tile_defs(def, is_liquid)),
 			node_box = (drawtype == "nodebox") and node_boxes(def) or nil,
+			collision_box = collision_boxes(def),
 			node_box_connected = (drawtype == "nodebox") and
 					node_boxes_connected(def) or nil,
 			node_box_connects = (drawtype == "nodebox") and

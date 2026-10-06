@@ -481,6 +481,35 @@ static uint32_t vreg_light_lamp_of(VoxelRegistry &reg, const interface::VoxelIns
 	return f.light_lamp.bound() ? f.light_lamp.get(v.data) : 0;
 }
 
+// What stops a player in this voxel when it is not the whole cube, as the
+// client's physics takes it: {{x0, y0, z0, x1, y1, z1}, ...}, the variant's
+// own when its param picks one that has them. nil for the cube, and for a
+// voxel that stops nothing -- physically_solid is the question for that.
+static luabind::object vreg_collision_boxes_of(VoxelRegistry &reg,
+		const interface::VoxelInstance &v, lua_State *L)
+{
+	const interface::VoxelFormat &f = reg.get_format();
+	const interface::VoxelDefinition *def =
+			reg.get((interface::VoxelTypeId)f.id_of(v.data));
+	if(!def || def->collision_boxes.empty())
+		return luabind::object();
+	const sv_<float> *boxes = &def->collision_boxes;
+	if(!def->variants.empty() && f.param.bound()){
+		const size_t i = def->variant_of_param[f.param.get(v.data) & 0xff];
+		if(i < def->variants.size() &&
+				!def->variants[i].collision_boxes.empty())
+			boxes = &def->variants[i].collision_boxes;
+	}
+	luabind::object t = luabind::newtable(L);
+	for(size_t b = 0; b + 6 <= boxes->size(); b += 6){
+		luabind::object box = luabind::newtable(L);
+		for(size_t k = 0; k < 6; k++)
+			box[k + 1] = (*boxes)[b + k];
+		t[b / 6 + 1] = box;
+	}
+	return t;
+}
+
 // By value rather than through VoxelRegistry::get()'s const reference, which
 // luabind will not bind a Lua number to: a number is a temporary and there
 // is nothing for the reference to point at
@@ -765,6 +794,7 @@ void init_voxel(lua_State *L)
 			.def("with_id", &vreg_with_id)
 			.def("light_sky_of", &vreg_light_sky_of)
 			.def("light_lamp_of", &vreg_light_lamp_of)
+			.def("collision_boxes_of", &vreg_collision_boxes_of)
 		,
 		def("__buildat_createVoxelRegistry", &createVoxelRegistry)
 	];

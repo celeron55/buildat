@@ -2439,10 +2439,9 @@ end
 -- as well: standing still in a world that is still loading is better than
 -- falling through it.
 --
--- simplified: a whole cube per solid voxel, so a slab or a stair is a full
--- one to walk into. player.lua takes the boxes a voxel is made of instead,
--- and the registry has them (VoxelDefinition::shape); what is missing is
--- the physical boxes, which the mesher's shapes are not.
+-- A slab or a stair is the boxes its collision_box names, turned by its
+-- param, which is what lets a player walk up stairs ([VL_STAIRS]);
+-- anything else solid is the whole cube.
 local function node_stops(x, y, z)
 	local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
 	if v == nil then
@@ -2454,7 +2453,10 @@ local function node_stops(x, y, z)
 		return true
 	end
 	local def = reg:get_by_id(id)
-	return def == nil or def.physically_solid
+	if def == nil then
+		return true
+	end
+	return def.physically_solid and (reg:collision_boxes_of(v) or true)
 end
 
 -- And what the player is standing in, which is the same registry flag the

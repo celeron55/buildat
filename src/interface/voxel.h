@@ -123,6 +123,9 @@ namespace interface
 		// VoxelDefinition::liquid_top. Luanti's flowing liquids put their
 		// level in param2.
 		float liquid_top = 0.5f;
+		// What stops the player, as VoxelDefinition::collision_boxes; empty
+		// for the definition's own
+		sv_<float> collision_boxes;
 	};
 
 	struct VoxelDefinition
@@ -281,6 +284,12 @@ namespace interface
 		// is what does anything with it -- nothing here draws differently
 		// for it.
 		bool climbable = false;
+		// What stops a player in a physically solid voxel when it is not
+		// the whole cube, a stair or a slab: boxes of six numbers each, x0
+		// y0 z0 x1 y1 z1 in the voxel's own -0.5...0.5. Empty is the cube.
+		// A variant can have its own; see VoxelVariant. Only the client's
+		// physics reads it ([VL_STAIRS]).
+		sv_<float> collision_boxes;
 		// How much this voxel holds a body back, 0 for not at all. Luanti's
 		// own move_resistance, which defaults to liquid_viscosity: water is
 		// 1 and lava is 7, and a game can put it on anything. The client's

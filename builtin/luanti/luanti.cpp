@@ -262,6 +262,32 @@ static void turn_quads(const sv_<interface::VoxelQuad> &in, uint8_t d,
 	}
 }
 
+// Boxes, six numbers each, turned the same way and clamped to the voxel's
+// own cube. simplified: what reaches outside the cube -- a fence's 1.5 --
+// is cut off, because the client's physics asks each cell for its own
+// boxes; a fence stays as tall as the cube it was.
+static void turn_boxes(const sv_<float> &in, uint8_t d, sv_<float> &out)
+{
+	int m[3][3] = {};
+	facedir_matrix(d, m);
+	out.clear();
+	for(size_t b = 0; b + 6 <= in.size(); b += 6){
+		float t[2][3];
+		for(size_t c = 0; c < 2; c++){
+			for(size_t r = 0; r < 3; r++){
+				float v = 0;
+				for(size_t k = 0; k < 3; k++)
+					v += m[r][k] * in[b + c * 3 + k];
+				t[c][r] = std::min(0.5f, std::max(-0.5f, v));
+			}
+		}
+		for(size_t c = 0; c < 2; c++)
+			for(size_t r = 0; r < 3; r++)
+				out.push_back(c == 0 ? std::min(t[0][r], t[1][r]) :
+						std::max(t[0][r], t[1][r]));
+	}
+}
+
 // One point turned a quarter at a time in the plane of two of its axes, and
 // the same by an arbitrary angle. Irrlicht's rotateXZBy and friends, which is
 // all Luanti's own node shapes turn by.
@@ -5059,6 +5085,8 @@ struct Module: public interface::Module, public luanti::Interface
 			table_six_numbers(L, "tile_frames", tile_aspect);
 			sv_<float> boxes;
 			table_numbers(L, "node_box", boxes);
+			sv_<float> collision_boxes;
+			table_numbers(L, "collision_box", collision_boxes);
 			sv_<float> connected_boxes;
 			table_numbers(L, "node_box_connected", connected_boxes);
 			const ss_ connects = table_string(L, "node_box_connects");
@@ -5250,6 +5278,10 @@ struct Module: public interface::Module, public luanti::Interface
 					// take it sideways out of that voxel.
 					turn_quads(shape, d, var.shape);
 				}
+				// And what stops the player, turned the same way; empty for
+				// the definition's own
+				if(walkable && !empty && d != 0)
+					turn_boxes(collision_boxes, d, var.collision_boxes);
 				facing_variants.push_back(var);
 			}
 
@@ -5358,6 +5390,8 @@ struct Module: public interface::Module, public luanti::Interface
 			// Nothing here draws differently for it; the client's own
 			// physics is what reads it. See "the interaction gaps".
 			vdef.climbable = climbable;
+			if(walkable && !empty)
+				turn_boxes(collision_boxes, 0, vdef.collision_boxes);
 			vdef.move_resistance = (uint8_t)(move_resistance < 0 ? 0 :
 					(move_resistance > 255 ? 255 : move_resistance));
 			vdef.bouncy = (uint8_t)(bouncy < 0 ? 0 : (bouncy > 255 ? 255 : bouncy));
