@@ -441,6 +441,8 @@ static const char *const COLUMNS_ADDED[][3] = {
 	{"topics", "tracker", "INTEGER NOT NULL DEFAULT 0"},
 	{"threads", "link", "TEXT NOT NULL DEFAULT ''"},
 	{"threads", "link_by", "TEXT NOT NULL DEFAULT ''"},
+	// [HEARTH_UI]: the last message read, for what is unread since
+	{"reads", "last", "INTEGER NOT NULL DEFAULT 0"},
 };
 // What a poster picks a thread to be ([PACKAGE_SUBJECT]); "release" is
 // Hearth's own
@@ -669,9 +671,15 @@ struct Module: public interface::Module
 			Q cols(m_db, (ss_("SELECT count(*) FROM pragma_table_info('")+
 					c[0]+"') WHERE name = '"+c[1]+"'").c_str());
 			cols.step();
-			if(cols.i(0) == 0)
+			if(cols.i(0) == 0){
 				exec((ss_("ALTER TABLE ")+c[0]+" ADD COLUMN "+c[1]+" "+c[2])
 						.c_str());
+				// What was read before the position was kept counts as
+				// read to its end, not as all of it new
+				if(ss_(c[0]) == "reads")
+					exec("UPDATE reads SET last = (SELECT ifnull(max(id), 0) "
+							"FROM messages WHERE thread = reads.thread)");
+			}
 		}
 		network::access(m_server, [&](network::Interface *iface){
 			iface->claim_http_path("/");
@@ -1753,6 +1761,15 @@ struct Module: public interface::Module
 	{
 		if(admin)
 			return 2;
+		const json::Value t = trust(name);
+		return t.get("day").is_true() && jint(t, "read") >= 5 &&
+				jint(t, "stood") >= 3 && jint(t, "hidden") == 0 ? 1 : 0;
+	}
+
+	// What level() is reached by, as counts: a day since the first visit,
+	// threads read, messages standing, messages hidden in the last 30 days
+	json::Value trust(const ss_ &name)
+	{
 		const int64_t now = now_s();
 		Q h(m_db, "SELECT count(*) FROM messages WHERE author = ? AND "
 				"hidden = 0");
@@ -1766,8 +1783,28 @@ struct Module: public interface::Module
 		const int64_t first = f.step() ? f.i(0) : now;
 		Q r(m_db, "SELECT count(*) FROM reads WHERE account = ?");
 		r.b(name).step();
-		return now - first >= 86400 && r.i(0) >= 5 && stood >= 3 &&
-				hd.i(0) == 0 ? 1 : 0;
+		json::Value v = json::object();
+		v.set("day", now - first >= 86400);
+		v.set("read", r.i(0));
+		v.set("stood", stood);
+		v.set("hidden", hd.i(0));
+		return v;
+	}
+
+	// [HEARTH_UI]: each thread in `list` marked "unread" for `name` when
+	// it has someone else's message after the last one read
+	void mark_unread(json::Value &list, const ss_ &name)
+	{
+		for(unsigned i = 0; i < list.size(); i++){
+			Q q(m_db, "SELECT (SELECT ifnull(max(id), 0) FROM messages WHERE "
+					"thread = ?1 AND hidden = 0 AND author != ?2) > "
+					"ifnull((SELECT last FROM "
+					"reads WHERE account = ?2 AND thread = ?1), 0)");
+			json::Value t = list.at(i);
+			q.b(jint(t, "id")).b(name).step();
+			t.set("unread", q.i(0) != 0);
+			list.set_at(i, t);
+		}
 	}
 
 	// `who`: an address, "@" and an account, or "page " and an address
@@ -1867,6 +1904,8 @@ struct Module: public interface::Module
 			v.set("account", name);
 			v.set("admin", admin);
 			v.set("unseen", unseen(name));
+			// The client's clock for "3 h ago" ([HEARTH_UI])
+			v.set("now", now_s());
 			Q mb(m_db, "INSERT OR IGNORE INTO members(account, first_seen) "
 					"VALUES(?, ?)");
 			mb.b(name).b(now_s()).step();
@@ -1884,14 +1923,18 @@ struct Module: public interface::Module
 		if(cmd == "topics"){
 			json::Value v = json::object();
 			v.set("topics", topics());
-			v.set("latest", latest_threads(20));
+			json::Value latest = latest_threads(20);
+			mark_unread(latest, name);
+			v.set("latest", latest);
 			return v;
 		}
 		if(cmd == "topic"){
 			json::Value t = topic(jint(q, "topic"));
 			if(!t.is_object())
 				throw Exception("no such topic");
-			t.set("threads", threads(jint(q, "topic")));
+			json::Value list = threads(jint(q, "topic"));
+			mark_unread(list, name);
+			t.set("threads", list);
 			return t;
 		}
 		if(cmd == "thread"){
@@ -1916,6 +1959,18 @@ struct Module: public interface::Module
 			Q rd(m_db, "INSERT OR IGNORE INTO reads(account, thread) "
 					"VALUES(?, ?)");
 			rd.b(name).b(jint(q, "thread")).step();
+			// [HEARTH_UI]: the last read before this part ("read", where
+			// the client draws "new since"), then this part's last
+			Q rl(m_db, "SELECT last FROM reads WHERE account = ? AND thread = ?");
+			rl.b(name).b(jint(q, "thread")).step();
+			t.set("read", rl.i(0));
+			const json::Value &part = t.get("list");
+			if(part.size() > 0){
+				Q ru(m_db, "UPDATE reads SET last = max(last, ?) WHERE "
+						"account = ? AND thread = ?");
+				ru.b(jint(part.at(part.size() - 1), "id")).b(name)
+						.b(jint(q, "thread")).step();
+			}
 			Q f(m_db, "SELECT 1 FROM follows WHERE account = ? AND thread = ?");
 			f.b(name).b(jint(q, "thread"));
 			t.set("following", f.step());
@@ -1934,6 +1989,57 @@ struct Module: public interface::Module
 			while(t.step())
 				list.append(thread_row(t));
 			return list;
+		}
+		// [HEARTH_UI] **An account's page**: its level, its last messages
+		// that stand (the HTML face's /u/), and to its owner what its
+		// level is reached by
+		if(cmd == "account"){
+			const ss_ who = jstr(q, "name");
+			need(text_ok(who, NAME_MAX, false, "the name"));
+			json::Value v = json::object();
+			v.set("name", who);
+			bool is_admin = false;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				is_admin = a->is_admin(who);
+			});
+			v.set("level", (int64_t)level(who, is_admin));
+			if(who == name)
+				v.set("trust", trust(who));
+			json::Value list = json::array();
+			Q m(m_db, "SELECT m.id, m.thread, t.title, m.created, "
+					"substr(m.body, 1, 200) FROM messages m "
+					"JOIN threads t ON t.id = m.thread WHERE m.author = ? "
+					"AND m.hidden = 0 AND t.hidden = 0 "
+					"ORDER BY m.id DESC LIMIT 50");
+			m.b(who);
+			while(m.step()){
+				json::Value r = json::object();
+				r.set("message", m.i(0));
+				r.set("thread", m.i(1));
+				r.set("title", m.s(2));
+				r.set("created", m.i(3));
+				r.set("body", m.s(4));
+				list.append(r);
+			}
+			v.set("messages", list);
+			return v;
+		}
+		// [HEARTH_UI] The threads followed, the unread first
+		if(cmd == "following"){
+			json::Value list = json::array();
+			Q t(m_db, "SELECT " THREAD_COLUMNS " FROM threads WHERE id IN "
+					"(SELECT thread FROM follows WHERE account = ?) AND "
+					"(hidden = 0 OR author = ?) ORDER BY last DESC LIMIT 200");
+			t.b(name).b(name);
+			while(t.step())
+				list.append(thread_row(t));
+			mark_unread(list, name);
+			json::Value out = json::array();
+			for(int pass = 0; pass < 2; pass++)
+				for(unsigned i = 0; i < list.size(); i++)
+					if(list.at(i).get("unread").is_true() == (pass == 0))
+						out.append(list.at(i));
+			return out;
 		}
 		// The packages this Hearth has threads about, to link a thread to
 		if(cmd == "subjects"){
@@ -2005,6 +2111,20 @@ struct Module: public interface::Module
 			return json::Value((int64_t)sqlite3_last_insert_rowid(m_db));
 		}
 		// [HEARTH_TRACKER]: a topic made a tracker, or not
+		// [HEARTH_UI] A topic's name and what it is about, by the admin
+		if(cmd == "edit_topic"){
+			if(!admin)
+				throw Exception("only the admin edits topics");
+			const ss_ topic_name = jstr(q, "name"), about = jstr(q, "about");
+			need(text_ok(topic_name, NAME_MAX, false, "the name"));
+			if(!about.empty())
+				need(text_ok(about, 400, false, "the description"));
+			Q u(m_db, "UPDATE topics SET name = ?, about = ? WHERE id = ?");
+			u.b(topic_name).b(about).b(jint(q, "topic")).step();
+			if(sqlite3_changes(m_db) == 0)
+				throw Exception("no such topic");
+			return json::Value(true);
+		}
 		if(cmd == "topic_tracker"){
 			if(!admin)
 				throw Exception("only the admin marks a tracker");
@@ -2138,6 +2258,12 @@ struct Module: public interface::Module
 			if(!admin)
 				throw Exception("only the admin sets the files' budget");
 			json::Value v = file_settings();
+			bool any = false;
+			for(const char *k : FILE_SETTINGS)
+				any = any || !q.get(k).is_undefined();
+			// None given: the settings as they are, the sweep left alone
+			if(!any)
+				return v;
 			for(const char *k : FILE_SETTINGS){
 				const json::Value &x = q.get(k);
 				if(x.is_undefined())
@@ -2170,6 +2296,9 @@ struct Module: public interface::Module
 			if(!admin)
 				throw Exception("only the admin sets the release sources");
 			json::Value v = setting("release_sources");
+			// Neither given: as they are, nothing fetched again
+			if(q.get("aittas").is_undefined() && q.get("addresses").is_undefined())
+				return v;
 			for(const char *k : {"aittas", "addresses"}){
 				const json::Value &l = q.get(k);
 				if(l.is_undefined())

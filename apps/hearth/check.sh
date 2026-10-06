@@ -426,7 +426,33 @@ client admin checkpass12 "$t/admin10.log" '' BUILDAT_HEARTH_OPEN=1
 grep -a '^.*hr: ' "$t/admin10.log" | grep -q '"more":true' &&
 	grep -a 'hr: ' "$t/admin10.log" | grep -q 'END20' ||
 	fail "the client did not read the long thread on"
+# 11. [HEARTH_UI]: the read position -- a thread with a message bob has
+# not read is unread to him, and read once he has opened it; "thread"
+# says where he was; a followed thread is listed; an account's page gives
+# the trust counts to its owner alone; only the admin edits a topic
+client admin checkpass12 "$t/admin11.log" '{"cmd":"new_thread","topic":1,"title":"Unread","body":"Read me"}
+{"cmd":"edit_topic","topic":1,"name":"Help","about":"Questions & answers"}'
+nt=$(answer "$t/admin11.log" 1001 | grep -o '"result":[0-9]*' | cut -d: -f2)
+[ -n "$nt" ] || fail "the new thread: $(answer "$t/admin11.log" 1001)"
+answer "$t/admin11.log" 1002 | grep -q '"ok":true' || fail "the admin's topic edit"
+client bob bobpass1234 "$t/bob11.log" '{"cmd":"topic","topic":1}
+{"cmd":"thread","thread":'$nt'}
+{"cmd":"topic","topic":1}
+{"cmd":"follow","thread":'$nt',"on":true}
+{"cmd":"following"}
+{"cmd":"account","name":"bob"}
+{"cmd":"account","name":"admin"}
+{"cmd":"edit_topic","topic":1,"name":"Mine","about":""}'
+unread(){ answer "$t/bob11.log" $1 | grep -o "{[^{}]*\"id\":$nt,[^{}]*}" | grep -o '"unread":[a-z]*'; }
+[ "$(unread 1001)" = '"unread":true' ] || fail "unread before reading: $(unread 1001)"
+answer "$t/bob11.log" 1002 | grep -q '"read":0' || fail "where bob was: $(answer "$t/bob11.log" 1002 | head -c 300)"
+[ "$(unread 1003)" = '"unread":false' ] || fail "unread after reading: $(unread 1003)"
+answer "$t/bob11.log" 1005 | grep -q "\"id\":$nt," || fail "following: $(answer "$t/bob11.log" 1005 | head -c 300)"
+answer "$t/bob11.log" 1006 | grep -q '"trust":{' || fail "bob's own trust counts"
+answer "$t/bob11.log" 1007 | grep -q '"trust"' && fail "the admin's trust counts shown to bob"
+answer "$t/bob11.log" 1008 | grep -q '"ok":false' || fail "bob edited a topic"
+
 n429=0
 for _ in $(seq 130); do [ "$(get /)" = 429 ] && n429=$((n429 + 1)); done
 [ $n429 -gt 0 ] || fail "no page limit per address"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept; a patch ticket by a new account applied with git am; a long thread read in parts; pages limited"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; pages limited"
