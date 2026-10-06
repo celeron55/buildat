@@ -72,6 +72,7 @@ local TOSERVER = {
 	DELETEDBLOCKS = 0x25,
 	INVENTORY_ACTION = 0x31,
 	CHAT_MESSAGE  = 0x32,
+	DAMAGE        = 0x35,
 	INTERACT      = 0x39,
 	NODEMETA_FIELDS = 0x3b,
 	INVENTORY_FIELDS = 0x3c,
@@ -93,6 +94,7 @@ local TOSERVER_DELIVERY = {
 	[TOSERVER.INVENTORY_ACTION] = {0, true},
 	[TOSERVER.CHAT_MESSAGE]  = {0, true},
 	[TOSERVER.INTERACT]      = {0, true},
+	[TOSERVER.DAMAGE]        = {0, true},
 	[TOSERVER.NODEMETA_FIELDS] = {0, true},
 	[TOSERVER.INVENTORY_FIELDS] = {0, true},
 	[TOSERVER.REQUEST_MEDIA] = {1, true},
@@ -1519,6 +1521,12 @@ function M.new(socket, options, log)
 
 	-- Says something, or runs a command when it starts with a slash. The
 	-- server answers a command with a chat message of its own.
+	-- What a landing cost, in hp, which Luanti's client works out itself and
+	-- the server takes as said (Client::sendDamage)
+	function self:send_damage(amount)
+		send_command(TOSERVER.DAMAGE, serialize.writer():u16(amount):data())
+	end
+
 	function self:send_chat(text)
 		if text == "" then
 			return

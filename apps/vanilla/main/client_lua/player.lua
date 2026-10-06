@@ -520,12 +520,17 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 					self.vz * self.vz)
 			if len > 1e-6 then
 				local dl
-				if self.in_liquid then
+				if self.in_liquid or self.in_liquid_stable then
+					-- Luanti keeps both fluidities in BS units (x10) and
+					-- the speed too, so the speed's BS cancels and the cap
+					-- keeps its own: in nodes, v / fluidity capped at ten
+					-- times the smooth one. The other way round, the cap
+					-- was a tenth of Luanti's and water barely slowed a walk.
 					local fluidity = math.max(0.001, m.liquid_fluidity *
 							math.max(1, ov.liquid_fluidity or 1))
 					local smooth = math.max(0, m.liquid_fluidity_smooth *
 							(ov.liquid_fluidity_smooth or 1))
-					dl = math.min(len * 10 / fluidity, smooth)
+					dl = math.min(len / fluidity, smooth * 10)
 				else
 					dl = len
 				end
@@ -738,6 +743,16 @@ do
 			"player: a node that holds a body back does not slow it")
 	assert(web.vx < wettish.vx,
 			"player: a thicker node is not thicker")
+	-- And water at Luanti's defaults pulls a walk of 4 down to about 3,
+	-- where the acceleration (30) meets the drag (10 v)
+	local swimmer = M.new(nothing_stops, function() return true end, nil,
+			function() return 1 end)
+	for _ = 1, 40 do
+		swimmer:update(0.05, {x = 1, z = 0})
+	end
+	assert(swimmer.vx > 2.5 and swimmer.vx < 3.3,
+			"player: water does not slow a walk to its pace, vx = " ..
+			swimmer.vx)
 
 	-- A ladder holds the player where they are, and jump and sneak move
 	-- them along it -- which is the whole of climbing

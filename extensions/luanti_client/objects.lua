@@ -111,6 +111,15 @@ function M.apply_message(obj, r)
 			-- is how long this move should take
 			obj.interval = interval > 0 and interval or 0.1
 		end
+	elseif cmd == M.CMD_UPDATE_ARMOR_GROUPS then
+		-- The whole set each time; what the player's own says is read for
+		-- fall damage (immortal, fall_damage_add_percent)
+		local groups = {}
+		for _ = 1, r:u16() do
+			local name = r:string()
+			groups[name] = r:s16()
+		end
+		obj.armor_groups = groups
 	elseif cmd == M.CMD_SET_TEXTURE_MOD then
 		obj.texture_mod = r:string()
 		obj.visual_stale = true

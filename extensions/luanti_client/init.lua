@@ -1073,7 +1073,8 @@ local function show_client(host, port, name, password, mode)
 				function(x, y, z) return view:is_solid(x, y, z) end,
 				function(x, y, z) return view:is_liquid(x, y, z) end,
 				nil,
-				function(x, y, z) return view:resistance_at(x, y, z) end)
+				function(x, y, z) return view:resistance_at(x, y, z) end,
+				function(x, y, z) return view:groups_at(x, y, z) end)
 		client.on_movement = function(m)
 			avatar.movement = m
 			add_line("The game's movement constants arrived")
@@ -2939,6 +2940,34 @@ local function show_client(host, port, name, password, mode)
 			end
 
 			local x, y, z = avatar:update(dtime, wish)
+			-- **Fall damage** (ClientEnvironment::step): Luanti's client
+			-- works out what a landing costs and sends that. A node a
+			-- second over 14 is a point, scaled by the fall_damage_add_percent
+			-- of the node landed on and of the player's armor.
+			-- simplified: the node is the one under the feet after the
+			-- step, not the one the collision hit; they differ only at an
+			-- edge.
+			if avatar.landed_at then
+				local speed = avatar.landed_at
+				avatar.landed_at = nil
+				local armor = {}
+				for _, obj in pairs(world_objects) do
+					if obj.is_self then
+						armor = obj.armor_groups or {}
+					end
+				end
+				local node = view:groups_at(math.floor(x + 0.5),
+						math.floor(y + 0.4), math.floor(z + 0.5)) or {}
+				local factor = (1 + (node.fall_damage_add_percent or 0) / 100) *
+						(1 + (armor.fall_damage_add_percent or 0) / 100)
+				speed = speed * factor
+				if speed > 14 and factor > 0 and (armor.immortal or 0) == 0 then
+					local damage = math.min(math.floor(speed - 14 + 0.5), 65535)
+					if damage > 0 then
+						client:send_damage(damage)
+					end
+				end
+			end
 			client:set_position(x, y, z, pitch, yaw)
 			client:set_motion(avatar.vx, avatar.vy, avatar.vz, keys)
 			local speed_xz = math.sqrt(avatar.vx * avatar.vx + avatar.vz * avatar.vz)

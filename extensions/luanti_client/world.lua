@@ -1426,6 +1426,7 @@ function M.new(magic, buildat, log, options)
 	self.node_solid = nil
 	self.node_liquid = {}
 	self.node_resistance = {}
+	self.node_groups = {}
 	-- The screen tint of the node the camera is in, per node id; see
 	-- post_effect_at(). Only the nodes that have one are in here.
 	self.node_post_effect = {}
@@ -2136,6 +2137,13 @@ function M.new(magic, buildat, log, options)
 	function self:resistance_at(x, y, z)
 		local id = self:node_at(x, y, z)
 		return (id ~= nil and self.node_resistance[id]) or 0
+	end
+
+	-- The node's groups, nil where there is no node yet: what standing on it
+	-- does (bouncy, slippery, ...) and what landing on it costs
+	function self:groups_at(x, y, z)
+		local id = self:node_at(x, y, z)
+		return id ~= nil and self.node_groups[id] or nil
 	end
 
 	-- Whether a ray stops at a node. Air does not stop one and neither does
@@ -4355,6 +4363,7 @@ function M.new(magic, buildat, log, options)
 		local solid = {}
 		local liquid = {}
 		local resistance = {}
+		local groups = {}
 		local post_effect = {}
 		local selection = {}
 		local pointable = {}
@@ -4406,6 +4415,7 @@ function M.new(magic, buildat, log, options)
 			-- LocalPlayer has it; a game sets it either way
 			liquid[id] = def.liquid_move_physics == true
 			resistance[id] = def.move_resistance or 0
+			groups[id] = def.groups
 			if def.post_effect_color and def.post_effect_color.a > 0 then
 				post_effect[id] = def.post_effect_color
 			end
@@ -4521,6 +4531,7 @@ function M.new(magic, buildat, log, options)
 			self.node_solid = solid
 			self.node_liquid = liquid
 			self.node_resistance = resistance
+			self.node_groups = groups
 			self.node_post_effect = post_effect
 			self.node_selection = selection
 			self.node_pointable = pointable
