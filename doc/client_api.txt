@@ -400,9 +400,14 @@ these does one nameable thing, and none is a general capability, because every
 addition here is attack surface for every app too.
 
 buildat.safe.launch_actions() -> {{key, id, label, icon, kind, from,
-  description, order, category, significance, last_launched}, ...}
+  description, order, category, significance, network, listed_by,
+  last_launched}, ...}
 - The launch grid's tiles as plain data: no functions and no paths. The list
   is what the sandboxed launcher files built ([LAUNCH_GRID]).
+- network: what a server or a connect action speaks, "Luanti" for
+  luanti_client's and serverlist's; absent means Buildat. listed_by: the list
+  a server came from, "Luanti server list" for serverlist's. Both are short
+  names a launch UI shows and filters by, and either may be absent.
 - last_launched is unix seconds, and absent for a key that never was, so a
   launch UI can sort by recency without keeping a list of its own
   ([LAUNCH_API]). The list is <user>/launch_history.csv, the newest 200.

@@ -60,9 +60,9 @@ local CATALOG_KEYS = {["extension/launch_menu/aitta"] = true,
 		["app/vanilla/contentdb"] = true,
 		["builtin/luanti/import_game"] = true,
 		["builtin/luanti/import_world"] = true}
-local SERVER_KEYS = {["extension/launch_menu/connect"] = "Buildat",
-		["extension/luanti_client/connect"] = "Luanti",
-		["extension/serverlist/refresh"] = "Luanti"}
+local SERVER_KEYS = {["extension/launch_menu/connect"] = true,
+		["extension/luanti_client/connect"] = true,
+		["extension/serverlist/refresh"] = true}
 -- And the settings screens that are tiles, which the Settings tree has
 local SETTINGS_KEYS = {["app/vanilla/settings"] = true,
 		["extension/luanti_client/settings"] = true}
@@ -134,6 +134,39 @@ local function recent(entries, n)
 	local out = {}
 	for i = 1, math.min(n, #used) do out[i] = used[i] end
 	return out
+end
+
+-- **The Servers list's filters** ([SERVER_FILTER]): All, the ones joined
+-- before, then one per list the servers came from and one per network,
+-- out of what the entries say rather than a fixed set, so an app's own
+-- server tiles bring their own
+local function server_filters(list)
+	-- This menu's own two lists are offered when they are empty too
+	local lists, networks = {"Starport"}, {}
+	local seen = {Starport = true, LAN = not web or nil}
+	if not web then lists[2] = "LAN" end
+	for _, e in ipairs(list) do
+		if e.listed_by and not seen[e.listed_by] then
+			seen[e.listed_by] = true
+			lists[#lists + 1] = e.listed_by
+		end
+		if e.network and not seen[e.network] then
+			seen[e.network] = true
+			networks[#networks + 1] = e.network
+		end
+	end
+	table.sort(lists)
+	table.sort(networks)
+	local out = {"All", "Previously connected"}
+	for _, f in ipairs(lists) do out[#out + 1] = f end
+	for _, f in ipairs(networks) do out[#out + 1] = f end
+	return out
+end
+
+local function passes(e, filter)
+	if filter == "All" then return true end
+	if filter == "Previously connected" then return e.last ~= nil end
+	return e.listed_by == filter or e.network == filter
 end
 
 -- "3 h ago": when a thing was last used, for the panel
@@ -239,12 +272,16 @@ local function gather()
 					SETTINGS_KEYS[a.key] and "action" or
 					(cat == "app" or cat == "game") and "app" or
 					cat == "server" and "server" or "action"
-			local badge = SERVER_KEYS[a.key] or
+			-- A server's network and list are its own to say
+			-- ([SERVER_FILTER]); one that says none is Buildat's
+			local network = kind == "server" and (a.network or "Buildat") or
+					nil
+			local badge = kind == "server" and network ..
+					(a.listed_by and ", " .. a.listed_by or "") or
 					cat == "game" and "Luanti" or
-					a.kind == "installed" and "Aitta" or
-					cat == "server" and (a.from == "extension/serverlist" or
-					a.from == "extension/luanti_client") and "Luanti" or nil
+					a.kind == "installed" and "Aitta" or nil
 			local e = add({label = a.label, kind = kind,
+				network = network, listed_by = a.listed_by,
 				badge = SETTINGS_KEYS[a.key] and "Settings" or badge,
 				section = SETTINGS_KEYS[a.key] and "Luanti", key = a.key,
 				from = a.from, icon = a.icon,
@@ -286,6 +323,7 @@ local function gather()
 			local address = s.host .. ":" .. s.port
 			add({label = s.name ~= "" and s.name or address,
 				kind = "server", badge = "Buildat, LAN",
+				network = "Buildat", listed_by = "LAN",
 				description = address .. "   " .. tostring(s.app) .. ", " ..
 						tostring(s.players) .. " playing",
 				run = function() api.join_server(address) end})
@@ -314,6 +352,7 @@ local function gather()
 			known[address] = true
 			add({label = a.name ~= "" and a.name or address,
 				kind = "server", unseen = unseen[address],
+				network = "Buildat",
 				badge = unseen[address] and "Buildat, " .. unseen[address] ..
 						" new" or "Buildat",
 				description = address .. (a.description ~= "" and
@@ -333,6 +372,7 @@ local function gather()
 		if not known[address] and not (page == "1" and not row.tls) then
 			add({label = tostring(row.name), kind = "server",
 				badge = "Buildat, Starport",
+				network = "Buildat", listed_by = "Starport",
 				description = address .. "   " ..
 						tostring(row.players or 0) .. " playing",
 				run = function() api.join_server(address) end})
@@ -352,6 +392,10 @@ local function search_char(key)
 end
 
 local entries = nil
+-- What runs on the next frame rather than inside the event that asked
+-- for it: a screen popped inside its own dropdown's ItemSelected stayed
+-- drawn under the next one
+local deferred = nil
 
 -- c: a colour's name, ui_utils.rgb's
 local function text(parent, s, size, c)
@@ -554,13 +598,58 @@ end
 -- screen the panel is under the list.
 -- simplified: one scrolled list rather than pages; hundreds of rows are
 -- hundreds of buttons, which is fine at this size.
-browse = function(kind, query, by)
+browse = function(kind, query, by, filter)
+	filter = filter or "All"
 	local narrow = magic.ui.root.width < 760
 	local width = math.min(magic.ui.root.width - 40, 1000)
 	local list_w = narrow and width - 32 or width - 32 - PANEL_WIDTH - 12
 	local root, window = screen("launch_menu_v2 " .. kind, width,
 			KIND_TITLE[kind] .. "   (type to search; Ctrl+S sorts by " ..
-			(by == "name" and "recent use" or "name") .. ")", query)
+			(by == "name" and "recent use" or "name") ..
+			(kind == "server" and "; Ctrl+F filters" or "") .. ")", query)
+	local of_kind = {}
+	for _, e in ipairs(entries) do
+		if e.kind == kind then of_kind[#of_kind + 1] = e end
+	end
+	local filters = kind == "server" and server_filters(of_kind) or nil
+	local function refilter(f)
+		uistack.main:pop(root)
+		browse(kind, query, by, f)
+	end
+	if filters then
+		local drop = window:CreateChild("DropDownList")
+		drop:SetStyleAuto()
+		drop:SetFixedSize(240, ROW_HEIGHT)
+		drop.resizePopup = true
+		-- The arrow at its right end, floor planner's (panel.lua M.mark):
+		-- the list lays its children out in a row, so the choice's text
+		-- takes all but the arrow's room
+		drop.placeholder:SetFixedWidth(240 - 28)
+		text(drop, "▼", 12, "dim")
+		for i, f in ipairs(filters) do
+			local t = text(window, f)
+			t:SetFixedHeight(ROW_HEIGHT - 4)
+			drop:AddItem(t)
+			if f == filter then drop:SetSelection(i - 1) end
+			-- The entry under the mouse is highlighted, the chosen one
+			-- less: main_style.xml's button and button-line greys. Text
+			-- draws neither without a colour, and only when enabled.
+			t.enabled = true
+			t:SetSelectionColor(magic.Color(0.2, 0.2, 0.25))
+			t:SetHoverColor(magic.Color(0.33, 0.33, 0.4))
+		end
+		magic.SubscribeToEvent(drop, "ItemSelected", function(_, _, data)
+			local f = filters[data:GetInt("Selection") + 1]
+			if f and f ~= filter then
+				deferred = function() refilter(f) end
+			end
+		end)
+		local kept = {}
+		for _, e in ipairs(of_kind) do
+			if passes(e, filter) then kept[#kept + 1] = e end
+		end
+		of_kind = kept
+	end
 	local body = window:CreateChild("UIElement")
 	body:SetLayout(narrow and LM_VERTICAL or LM_HORIZONTAL, 12,
 			magic.IntRect(0, 0, 0, 0))
@@ -574,12 +663,18 @@ browse = function(kind, query, by)
 	-- simplified: a description longer than five lines still grows it
 	panel.minHeight = math.min(room, 220)
 
-	local of_kind = {}
-	for _, e in ipairs(entries) do
-		if e.kind == kind then of_kind[#of_kind + 1] = e end
-	end
 	local shown = search(of_kind, #query < SEARCH_MIN and "" or query,
 			by)[1] or {}
+	-- The LAN's servers first, whatever the order: they answered just now
+	-- (user, 2026-10-06)
+	if kind == "server" then
+		local lan, rest = {}, {}
+		for _, e in ipairs(shown) do
+			table.insert(e.listed_by == "LAN" and lan or rest, e)
+		end
+		for _, e in ipairs(rest) do lan[#lan + 1] = e end
+		shown = lan
+	end
 	local items = {}
 	local action_buttons = {}
 	local current = nil
@@ -704,13 +799,22 @@ browse = function(kind, query, by)
 		if key == magic.KEY_S and
 				magic.input:GetQualifierDown(magic.QUAL_CTRL) then
 			uistack.main:pop(root)
-			browse(kind, query, by == "name" and "recent" or "name")
+			browse(kind, query, by == "name" and "recent" or "name", filter)
 			return true
 		end
 		local q = search_key(key, query)
 		if q then
 			uistack.main:pop(root)
-			browse(kind, q, by)
+			browse(kind, q, by, filter)
+			return true
+		end
+		if filters and key == magic.KEY_F and
+				magic.input:GetQualifierDown(magic.QUAL_CTRL) then
+			local i = 1
+			for j, f in ipairs(filters) do
+				if f == filter then i = j end
+			end
+			refilter(filters[i % #filters + 1])
 			return true
 		end
 		if key == KEY_ESCAPE then
@@ -998,6 +1102,11 @@ end
 M.refresh = to_home
 
 magic.SubscribeToEvent("Update", function()
+	if deferred then
+		local f = deferred
+		deferred = nil
+		f()
+	end
 	if not stale then return end
 	local top = uistack.main:top()
 	if top and top:GetName():find(": launch_menu_v2$") then

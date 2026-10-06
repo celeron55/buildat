@@ -28,6 +28,7 @@ return function(ctx)
 			-- the player count, which a launch UI ranks and scales by
 			-- without having to know what a server is
 			category = "server",
+			network = "Luanti", listed_by = "Luanti server list",
 			significance = s.players,
 			order = 300 + i,
 			description = s.address .. "   " .. s.players .. " playing",
@@ -44,7 +45,7 @@ return function(ctx)
 		id = "refresh",
 		label = #out > 0 and "Fetch the server list again" or
 				"Fetch the server list",
-		order = 299,
+		order = 299, network = "Luanti", listed_by = "Luanti server list",
 		description = "Ask the list this client knows for its servers",
 		run = function() sl.refresh() end,
 	}

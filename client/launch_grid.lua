@@ -243,6 +243,18 @@ local function category_of(a)
 	return nil
 end
 
+-- Where a server is ([SERVER_FILTER]): `network` is what it speaks and
+-- plays, "Luanti" for luanti_client's and serverlist's, absent for
+-- Buildat's own; `listed_by` the list it came from ("Luanti server
+-- list"). Short names a launch UI shows and filters by; open sets, as the
+-- category is.
+local function short_name(s)
+	if type(s) == "string" and #s > 0 and #s <= 40 then
+		return s
+	end
+	return nil
+end
+
 -- An installed app's home Hearth, from its meta.json
 local function feedback_target(source)
 	local f = io.open(source.path .. "/meta.json", "rb")
@@ -357,6 +369,8 @@ function M.actions(log)
 							((source.kind == "app" or source.kind == "installed")
 							and "app" or "action"),
 					significance = significance_of(a, source, app_sizes),
+					network = short_name(a.network),
+					listed_by = short_name(a.listed_by),
 					run = function()
 						local ok, err = pcall(run)
 						if not ok then

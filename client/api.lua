@@ -283,6 +283,9 @@ buildat.safe.launch_actions = function()
 			-- rank and scale by within one. Both are plain data and both
 			-- may be absent.
 			category = a.category, significance = a.significance,
+			-- What a server speaks and which list it came from, or
+			-- absent ([SERVER_FILTER])
+			network = a.network, listed_by = a.listed_by,
 			-- When this key was last launched, in unix seconds, or
 			-- absent for one that never was
 			last_launched = history[key]}

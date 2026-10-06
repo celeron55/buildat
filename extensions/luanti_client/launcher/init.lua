@@ -10,7 +10,7 @@
 return function(ctx)
 	local out = {
 		{id = "connect", label = "Play on a Luanti server",
-			icon = "luanti.png", order = 20,
+			icon = "luanti.png", order = 20, network = "Luanti",
 			description = "Connect this client to a Luanti server",
 			run = function() ctx.launch{extension = "luanti_client"} end},
 		-- The client's own settings ([EXT_SETTINGS]): a trusted screen on
@@ -33,6 +33,7 @@ return function(ctx)
 			out[#out + 1] = {
 				id = "s_" .. address:gsub("[^%w%.%-]", "_"),
 				label = address, icon = "luanti.png", category = "server",
+				network = "Luanti",
 				order = 290,
 				description = address .. (a.name ~= "" and "   as " ..
 						a.name or ""),
