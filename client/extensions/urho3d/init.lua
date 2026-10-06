@@ -1155,6 +1155,26 @@ end
 -- get F9.
 local trust_shown = true
 local trust_in_game = nil
+-- **A local save is a game from its start** ([LOCAL_SAVE_STARPORT]): the
+-- launcher's "Starting <game>..." screen is up (launch_menu's
+-- screens.lua, which launch_menu_v2 uses too), or the connecting screen
+-- that follows it, before there is a server address to go by
+local was_launching = false
+local function launching_local()
+	local us = package.loaded["buildat/extension/uistack"]
+	local stack = us and us.main and us.main.stack or {}
+	local starting, connecting = false, false
+	for _, e in ipairs(stack) do
+		local ok, name = pcall(function() return e:GetName() end)
+		if ok and type(name) == "string" then
+			starting = starting or name:find(": starting_local_server", 1, true) ~= nil or
+					name:find(": stopping_old_server", 1, true) ~= nil
+			connecting = connecting or name:find(": connecting", 1, true) ~= nil
+		end
+	end
+	was_launching = starting or (was_launching and connecting)
+	return was_launching
+end
 add_global_event_handler("KeyDown", "__buildat_trust_f9", function(_, event_data)
 	if event_data["Key"]:GetInt() == overlay_key and
 			not event_data["Repeat"]:GetBool() then
@@ -1194,7 +1214,8 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 	-- it says it has a world up through ui_utils.set_in_game, which the
 	-- error dialogs read as well (client/sandbox.lua)
 	local uu = package.loaded["buildat/extension/ui_utils"]
-	local in_game = address ~= nil or (uu ~= nil and uu.in_app == true)
+	local in_game = address ~= nil or (uu ~= nil and uu.in_app == true) or
+			launching_local()
 	if in_game ~= trust_in_game then
 		trust_in_game = in_game
 		trust_shown = not trust_in_game
