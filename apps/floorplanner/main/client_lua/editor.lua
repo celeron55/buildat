@@ -7275,6 +7275,25 @@ do
 			buildat.set_render_scale(v)
 			client_settings_page()
 		end)
+		-- The engine's ui_size (user, 2026-10-06): the UI scale, or
+		-- automatic, which follows the window; a client older than it has
+		-- no such call
+		if buildat.get_ui_size then
+			local now, ui_auto = buildat.get_ui_size()
+			local sizes, ui_near = {{ui_auto and "automatic (" .. pct(now) .. ")"
+					or "automatic", "auto"}}, 1
+			for _, v in ipairs({0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3}) do
+				sizes[#sizes + 1] = {pct(v), v}
+				if math.abs(v - now) < math.abs(ui_near - now) then
+					ui_near = v
+				end
+			end
+			panel.dropdown(w, "UI size", sizes, ui_auto and "auto" or ui_near,
+					function(v)
+				buildat.set_ui_size(v)
+				client_settings_page()
+			end)
+		end
 		-- How the 3D view and walking are lit ([FP_DAYLIGHT])
 		-- Lightest first
 		panel.dropdown(w, "3D lighting", {{"Unlit: plain, and lighter", "unlit"},
