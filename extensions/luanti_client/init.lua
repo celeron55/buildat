@@ -3668,6 +3668,7 @@ local function show_client(host, port, name, password, mode)
 			for _, bar in ipairs(crosshair) do
 				bar:Remove()
 			end
+			hotbar_row:destroy()
 			if held_element then
 				held_element:Remove()
 				held_element = nil

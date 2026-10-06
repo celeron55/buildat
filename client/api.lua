@@ -934,7 +934,17 @@ end
 
 -- The two read-only enumerations a launcher draws its room from
 buildat.safe.list_apps = __buildat_list_apps
-buildat.safe.list_saves = __buildat_list_saves
+-- A save's last_launched is launch_save's note: playing one need not
+-- write its file, so the file's time alone does not say it was played
+buildat.safe.list_saves = function(...)
+	local history = launch_history_read()
+	local saves = __buildat_list_saves(...)
+	for _, sv in ipairs(saves) do
+		sv.last_launched = history["save/" .. tostring(sv.app) .. "/" ..
+				tostring(sv.name)]
+	end
+	return saves
+end
 -- launch_save(game, name): open one of them. A save is the player's own
 -- and the launch grid has no tile for it, so this is the one launch a
 -- launcher asks for by name rather than by key ([LAUNCH_WORLD]: a save
@@ -959,6 +969,7 @@ buildat.safe.launch_save = function(game, name)
 		return false, "launch_save(" .. game .. ", " .. name ..
 				"): no such save"
 	end
+	launch_history_note("save/" .. game .. "/" .. name)
 	launch_grid.screens().start_local_app(game, "save=" .. name)
 	return true
 end

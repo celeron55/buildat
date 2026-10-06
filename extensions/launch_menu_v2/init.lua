@@ -41,6 +41,7 @@ local page = api.get_env("BUILDAT_PAGE_HTTPS")
 local web = page ~= nil
 
 local CONTINUE_MAX = 10
+local SEARCH_MIN = 2
 local ROW_HEIGHT = 28
 local PANEL_WIDTH = 300
 local GAME_RUNNING = "empty (game is running)"
@@ -171,6 +172,10 @@ end
 -- asked at most once a minute
 local unseen = {}
 local unseen_asked = nil
+-- Set when an app, save or server is run from here: a game's own way
+-- out (luanti_client's leave) pops its screens without leave_app, so
+-- Home comes back on top as drawn before it, and is drawn again then
+local stale = false
 
 -- Every source, as entries of one shape: {label, kind, badge,
 -- description, last (unix s or nil), size, actions = {{label, run}}};
@@ -179,6 +184,10 @@ local function gather()
 	local entries = {}
 	local function add(e)
 		e.actions = e.actions or {}
+		local run = e.run
+		if e.kind ~= "action" then
+			e.run = function() stale = true run() end
+		end
 		table.insert(e.actions, 1, {label = PRIMARY[e.kind], run = e.run})
 		entries[#entries + 1] = e
 		return e
@@ -252,12 +261,14 @@ local function gather()
 	end
 	if not web then
 		-- The saves straight into their world; when one was last played
-		-- is when its file was written
+		-- is when it was launched or its file written, the later
 		for _, sv in ipairs(api.list_saves()) do
 			local parent = app_label[sv.app] or sv.app
+			local last = math.max(sv.last_launched or 0, sv.modified and
+					math.floor(sv.modified / 1000000) or 0)
 			add({label = sv.name, kind = "save", badge = parent,
 				description = "Continue this save of " .. parent .. ".",
-				last = sv.modified and math.floor(sv.modified / 1000000),
+				last = last > 0 and last or nil,
 				run = function()
 					warn_if(api.launch_save(sv.app, sv.name))
 				end})
@@ -435,7 +446,9 @@ local function home(query)
 				run()
 			end}
 	end
-	if query == "" then
+	-- One character matches nearly everything, and drawing that many
+	-- rows stalls each keypress: the search starts at two
+	if #query < SEARCH_MIN then
 		local cont = recent(entries, CONTINUE_MAX)
 		if #cont > 0 then
 			view:header("Continue")
@@ -531,7 +544,8 @@ browse = function(kind, query, by)
 	for _, e in ipairs(entries) do
 		if e.kind == kind then of_kind[#of_kind + 1] = e end
 	end
-	local shown = search(of_kind, query, by)[1] or {}
+	local shown = search(of_kind, #query < SEARCH_MIN and "" or query,
+			by)[1] or {}
 	local items = {}
 	local action_buttons = {}
 	local current = nil
@@ -842,6 +856,7 @@ end
 
 -- launch_action is -a's kind/name/id, run over Home as picking it would
 function M.boot(launch_action)
+	stale = false
 	entries = gather()
 	home("")
 	local net = require("buildat/extension/network")
@@ -914,6 +929,15 @@ end
 
 -- Drawn again, as at boot: what it lists has changed under it
 M.refresh = to_home
+
+magic.SubscribeToEvent("Update", function()
+	if not stale then return end
+	local top = uistack.main:top()
+	if top and top:GetName():find(": launch_menu_v2$") then
+		log:info("launch_menu_v2: back on Home, drawn again")
+		M.refresh()
+	end
+end)
 
 function M.leave_app()
 	if not M.in_app() and not api.local_server_running() then
