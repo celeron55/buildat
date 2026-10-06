@@ -6,7 +6,9 @@
 # for a click in its window, goes for a click beside it, and Home, the
 # first screen, stays as it is for one (no Quit dialog). Escape's Quit
 # dialog then goes by the arrows: Left, Right, Enter is Cancel, and Down,
-# Down, Up, Enter is Quit (a playtest found only Tab there). Then in Firefox
+# Down, Up, Enter is Quit (a playtest found only Tab there). A screen
+# left by Escape gives its parent back the selection it was opened from:
+# Down after it goes on from there, not from the top. Then in Firefox
 # (with web/ from util/build_web.sh, skipped without), apps/play's page,
 # by touch: the browser's Back and a tap on nothing each close Settings,
 # and Back on Home leaves the page.
@@ -37,6 +39,19 @@ mouse_pos 5 300
 mouse_click left
 delay 800
 event scan
+keypress Down
+keypress Down
+keypress Down
+delay 300
+event scan
+keypress Up
+keypress Return
+delay 1000
+keypress Escape
+delay 800
+keypress Down
+delay 300
+event scan
 keypress Escape
 delay 500
 keypress Left
@@ -64,6 +79,11 @@ grep -c "click on nothing" <<< "$scans" | grep -qx 1 ||
 awk '/UIStack:pop/{exit} /text "Display and sound"/{f=1} END{exit !f}' <<< "$scans" ||
 	fail "a click in Settings' window closed it"
 grep -q 'pop(): .*launch_menu_v2 settings' <<< "$scans" || fail "Settings did not go"
+# The last two scans' focus: the third row, before and after the second's
+# screen came and went
+focus=$(grep -a "^scan scan: focus" "$t/log" | tail -2)
+[ "$(wc -l <<< "$focus")" = 2 ] && [ "$(uniq <<< "$focus" | wc -l)" = 1 ] ||
+	fail "the selection was not given back: $focus"
 n=$(grep -ac 'push(): .*show_confirm_dialog' "$t/log")
 [ "$n" = 2 ] || fail "$n Quit dialogs, not 2 (a click on nothing on Home asks to quit?)"
 grep -aq "command: quit" "$t/log" && fail "the arrows' Quit did not quit"

@@ -22,6 +22,37 @@ local ui_stack_name_i = 1  -- For generating a unique name for each stack
 -- [TAP_BACK] The entries pushed with {tap_outside = false}: a world's own
 -- layer, where a click on nothing is the game's
 local no_tap_outside = setmetatable({}, {__mode = "k"})
+-- **Where the focus was in an entry when one was pushed over it**: a
+-- path of child indices from the entry's element, so that its pop puts
+-- the focus, and with it a menu's selection, back where it was. Indices
+-- rather than the element: one removed meanwhile is then not reached,
+-- the walk just stops short.
+local focus_paths = setmetatable({}, {__mode = "k"})
+local function focus_path(entry)
+	local top = getmetatable(entry).unsafe
+	local f = ui:GetFocusElement()
+	local path = {}
+	while f and f ~= top do
+		local parent = f:GetParent()
+		local at
+		for i = 0, parent and parent:GetNumChildren() - 1 or -1 do
+			if parent:GetChild(i) == f then at = i break end
+		end
+		if not at then return nil end
+		table.insert(path, 1, at)
+		f = parent
+	end
+	return f and path or nil
+end
+local function refocus(entry)
+	local e = entry
+	for _, i in ipairs(focus_paths[entry] or {}) do
+		local child = e:GetChild(i)
+		if not child then break end
+		e = child
+	end
+	e:SetFocus(true)
+end
 -- The main stack's depth to the web page's Back (index.html)
 local function depth_changed(stack)
 	if stack == M.main then
@@ -75,6 +106,7 @@ function M.UIStack(root)
 		end
 		if #self.stack >= 1 then
 			local top = self.stack[#self.stack]
+			focus_paths[top] = focus_path(top)
 			top:SetVisible(false)
 		end
 		local element_name =
@@ -230,7 +262,7 @@ function M.UIStack(root)
 		if #self.stack >= 1 then
 			local top = self.stack[#self.stack]
 			top:SetVisible(true)
-			top:SetFocus(true)
+			refocus(top)
 		end
 		depth_changed(self)
 	end
