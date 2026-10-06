@@ -999,7 +999,6 @@ function M.safe.show_message_dialog(message, on_close)
 	ok_button_text:SetStyleAuto()
 	ok_button_text.text = "Ok"
 	ok_button_text:SetTextAlignment(HA_CENTER)
-	ok_button:SetFocus(true)
 
 	message_handle = {
 		append = function(text)
@@ -1020,19 +1019,12 @@ function M.safe.show_message_dialog(message, on_close)
 		end
 	end
 
-	magic.SubscribeToEvent(ok_button, "Released",
-	function(self, event_type, event_data)
-		log:info("show_message_dialog: ok_button clicked")
+	-- The menu's keys: Enter, and Escape on the "Ok" that is the way back
+	M.safe.bind_button_menu(root, {{ok_button, function()
+		log:info("show_message_dialog: closed")
 		close()
-	end)
-
-	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-		local key = event_data:GetInt("Key")
-		if key == KEY_ESCAPE then
-			log:info("show_message_dialog: KEY_ESCAPE pressed")
-			close()
-		end
-	end)
+	end}})
+	ok_button:SetFocus(true)
 end
 
 -- yes_label is the first button's, "Force kill" when absent (its first user)
@@ -1061,38 +1053,34 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label)
 	end
 
 	local yes_button = window:CreateChild("Button")
+	yes_button:SetName("Button")
 	yes_button:SetStyle("PrimaryButton")
 	yes_button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	yes_button.minHeight = 20
 	local yes_text = yes_button:CreateChild("Text")
+	yes_text:SetName("ButtonText")
 	yes_text:SetStyleAuto()
 	yes_text.text = yes_label or "Force kill"
 	yes_text:SetTextAlignment(HA_CENTER)
 
 	local no_button = window:CreateChild("Button")
+	no_button:SetName("Button")
 	no_button:SetStyleAuto()
 	no_button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	no_button.minHeight = 20
 	local no_text = no_button:CreateChild("Text")
+	no_text:SetName("ButtonText")
 	no_text:SetStyleAuto()
 	no_text.text = "Cancel"
 	no_text:SetTextAlignment(HA_CENTER)
-	no_button:SetFocus(true)
 
-	magic.SubscribeToEvent(yes_button, "Released",
-	function(self, event_type, event_data)
-		finish(true)
-	end)
-	magic.SubscribeToEvent(no_button, "Released",
-	function(self, event_type, event_data)
-		finish(false)
-	end)
-	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
-		local key = event_data:GetInt("Key")
-		if key == KEY_ESCAPE then
-			finish(false)
-		end
-	end)
+	-- The menu's keys ([MENU_KEYS]): the arrows, a letter, Enter, and
+	-- Escape on "Cancel", the way back
+	M.safe.bind_button_menu(root, {
+		{yes_button, function() finish(true) end},
+		{no_button, function() finish(false) end},
+	})
+	no_button:SetFocus(true)
 end
 
 -- A small non-modal notice in the top right corner. It does not take focus and

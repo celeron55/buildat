@@ -4,7 +4,9 @@
 # covers: client/extensions/uistack/init.lua src/client/app.cpp
 # [TAP_BACK]: a click on nothing is Back. launch_menu_v2's Settings stays up
 # for a click in its window, goes for a click beside it, and Home, the
-# first screen, stays as it is for one (no Quit dialog). Then in Firefox
+# first screen, stays as it is for one (no Quit dialog). Escape's Quit
+# dialog then goes by the arrows: Left, Right, Enter is Cancel, and Down,
+# Down, Up, Enter is Quit (a playtest found only Tab there). Then in Firefox
 # (with web/ from util/build_web.sh, skipped without), apps/play's page,
 # by touch: the browser's Back and a tap on nothing each close Settings,
 # and Back on Home leaves the page.
@@ -35,6 +37,19 @@ mouse_pos 5 300
 mouse_click left
 delay 800
 event scan
+keypress Escape
+delay 500
+keypress Left
+keypress Right
+keypress Return
+delay 600
+keypress Escape
+delay 500
+keypress Down
+keypress Down
+keypress Up
+keypress Return
+delay 3000
 quit
 C
 timeout 60 Build/bin/buildat -o launch_ui=launch_menu_v2 -D "$t/u" -w 800x600 -l 4 \
@@ -49,7 +64,10 @@ grep -c "click on nothing" <<< "$scans" | grep -qx 1 ||
 awk '/UIStack:pop/{exit} /text "Display and sound"/{f=1} END{exit !f}' <<< "$scans" ||
 	fail "a click in Settings' window closed it"
 grep -q 'pop(): .*launch_menu_v2 settings' <<< "$scans" || fail "Settings did not go"
-grep -aq 'push(): .*show_confirm_dialog' "$t/log" && fail "a click on nothing on Home asked to quit"
+n=$(grep -ac 'push(): .*show_confirm_dialog' "$t/log")
+[ "$n" = 2 ] || fail "$n Quit dialogs, not 2 (a click on nothing on Home asks to quit?)"
+grep -aq "command: quit" "$t/log" && fail "the arrows' Quit did not quit"
+[ "$(grep -ac 'pop(): .*show_confirm_dialog' "$t/log")" = 2 ] || fail "the arrows' Cancel"
 echo "ok: a click on nothing is Back above the first screen, and nothing on it"
 
 [ -f web/buildat.wasm ] || { echo "PASS (web part skipped: no web/)"; exit 0; }
