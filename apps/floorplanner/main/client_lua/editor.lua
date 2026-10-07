@@ -7401,9 +7401,7 @@ do
 	-- **Who may use this plan** ([FP_PLANS] 5): its owner's and an admin's.
 	-- The server sends the list when they enter it and after every change.
 	local members_page
-	local PUBLIC_CHOICES = {{"cannot see it", 0}, {"can read", 1},
-			{"can edit", 2}}
-	local ROLE_CHOICES = {{"others'", ""}, {"reader", "viewer"},
+	local ROLE_CHOICES = {{"not a member", ""}, {"reader", "viewer"},
 			{"editor", "editor"}}
 
 	local function delete_plan_page()
@@ -7431,9 +7429,10 @@ do
 			return
 		end
 		panel.label(w, "Owner: " .. (m.owner ~= "" and m.owner or "(none)"))
-		panel.dropdown(w, "Others", PUBLIC_CHOICES, m.pub, function(v)
-			doc.plan_admin("public", "", tostring(v))
-		end)
+		-- No "everyone" ([FP_GROUPS]): its members, and the groups its
+		-- owner shares it with on the plans page's Groups
+		panel.label(w, "Groups: " .. (m.groups ~= "" and m.groups or
+				"none (shared under Groups on the plans page)"))
 		for _, member in ipairs(m.members) do
 			if member.name ~= m.owner then
 				local r = panel.row(w)
@@ -7444,6 +7443,11 @@ do
 				end)
 			end
 		end
+		panel.field(w, "Add a reader by name", "", function(n)
+			if n ~= "" then
+				doc.plan_admin("role", n, "viewer")
+			end
+		end, 140)
 		panel.button(w, "Delete this plan...", delete_plan_page)
 		panel.button(w, "Back", function()
 			doc.admin_message = nil

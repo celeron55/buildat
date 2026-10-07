@@ -398,10 +398,10 @@ end)
 -- sends an admin at the join and after every change; what a request came to
 local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
 		{"arg", "string"}, {"on", "byte"}}
--- A plan's members ([FP_PLANS] 5): its owner, whether others read or edit
--- it, and each account's role in it
+-- A plan's members ([FP_PLANS] 5): its owner, the groups it is shared
+-- with ([FP_GROUPS]), and the accounts with a role in it
 local MEMBERS = {"object", {"plan", "string"}, {"owner", "string"},
-	{"pub", "int32_t"},
+	{"groups", "string"},
 	{"members", {"array", {"object", {"name", "string"}, {"role", "string"}}}},
 }
 doc.members = nil
@@ -444,9 +444,11 @@ end)
 
 buildat.sub_packet("fp:privs", function(data)
 	doc.privs = {}
-	for _, p in ipairs(cereal.binary_input(data, {"array", "string"})) do
+	local list = cereal.binary_input(data, {"array", "string"})
+	for _, p in ipairs(list) do
 		doc.privs[p] = true
 	end
+	log:info("Privileges: " .. table.concat(list, " "))
 	if doc.privs_changed then
 		doc.privs_changed()
 	end
@@ -726,6 +728,9 @@ local login_window = nil
 -- screen's width less a margin on a narrow one, a phone's ([FP_TOUCH] 2),
 -- and its texts wrap to it
 local function page_window(width)
+	-- Not a groups page or the plans, until one says it is
+	doc.groups_page = nil
+	doc.on_plans = false
 	local w = magic.ui.root:CreateChild("Window")
 	w:SetStyleAuto()
 	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
@@ -866,10 +871,32 @@ show_plans = function(message)
 		bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 		magic.SubscribeToEvent(b, "Released", f)
 	end
+	doc.on_plans = true
 	log:info("Plan picker: " .. #doc.plans .. " plans")
 	text("Floor planner: open a plan")
 	if message and message ~= "" then
 		text(message, magic.Color(1.0, 0.4, 0.4))
+	end
+	-- The invites to a group ([FP_GROUPS]), here rather than in a dialog
+	-- that the page, drawn again, would cover
+	for _, inv in ipairs(doc.groups and doc.groups.invites or {}) do
+		log:info("Invited to the group " .. inv.name .. " by " .. inv.by)
+		text(inv.by .. " invites you to the group \"" .. inv.name .. "\"",
+				magic.Color(1.0, 0.8, 0.4))
+		local r = w:CreateChild("UIElement")
+		r:SetLayout(magic.LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
+		for _, a in ipairs({{"Accept", "accept"}, {"Decline", "decline"}}) do
+			local b = r:CreateChild("Button")
+			b:SetStyleAuto()
+			b.minHeight = 28
+			local bt = b:CreateChild("Text")
+			bt:SetStyleAuto()
+			bt:SetText(a[1])
+			bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+			magic.SubscribeToEvent(b, "Released", function()
+				doc.group_cmd(a[2], inv.id)
+			end)
+		end
 	end
 	-- The one this user was in last, first
 	local last = buildat.storage_read("plan")
@@ -904,6 +931,7 @@ show_plans = function(message)
 	magic.SubscribeToEvent(e, "TextFinished", create)
 	button("New plan", create)
 	button("Import a plan...", function() doc.show_import() end)
+	button("Groups...", function() doc.show_groups() end)
 	-- The basics, step by step ([FP_TUTORIAL])
 	button("Tutorial", function() doc.tutorial.start() end)
 	button("Menu...", picker_menu)
@@ -987,6 +1015,268 @@ function doc.show_import(message)
 	button("Back", function() show_plans() end)
 end
 
+-- **Groups** ([FP_GROUPS]; user, 2026-10-07): a user's groups, their
+-- members and the plans shared into them, the invites to the user, and
+-- what the user's plans take of their storage. The server sends it at
+-- the join and after every change; a group's admins invite, remove and
+-- make admins, and any member shares their own plans into it.
+local GROUPS = {"object",
+	{"groups", {"array", {"object", {"id", "int32_t"}, {"name", "string"},
+		{"role", "string"},
+		{"members", {"unordered_map", "string", "string"}},
+		{"invites", {"array", "string"}},
+		{"shares", {"array", {"object", {"plan", "string"},
+			{"rest", {"object", {"owner", "string"}, {"role", "string"}}}}}},
+	}}},
+	{"invites", {"array", {"object", {"id", "int32_t"}, {"name", "string"},
+		{"by", "string"}}}},
+	{"own_plans", {"array", "string"}},
+	{"used_kib", "int32_t"}, {"limit_kib", "int32_t"},
+}
+local GROUP_REQUEST = {"object", {"cmd", "string"}, {"group", "int32_t"},
+		{"name", "string"}, {"arg", "string"}}
+doc.groups = nil
+doc.groups_page = nil -- the open groups page's redraw
+local group_message = nil
+local invites_asked = {}
+
+local function group_cmd(cmd, group, name, arg)
+	buildat.send_packet("fp:group", cereal.binary_output({cmd = cmd,
+			group = group or 0, name = name or "", arg = arg or ""},
+			GROUP_REQUEST))
+end
+doc.group_cmd = group_cmd
+
+-- An invite asks at once: in a plan by a dialog, on the plans page in
+-- its list; again at the next join if not answered
+local function ask_invites()
+	for _, inv in ipairs(doc.groups.invites) do
+		if not invites_asked[inv.id] then
+			invites_asked[inv.id] = true
+			log:info("Invited to the group " .. inv.name .. " by " .. inv.by)
+			require("buildat/extension/ui_utils").show_confirm_dialog(
+					inv.by .. " invites you to the group \"" .. inv.name .. "\"",
+					function() group_cmd("accept", inv.id) end,
+					function() group_cmd("decline", inv.id) end, "Accept",
+					"Decline")
+			return
+		end
+	end
+end
+
+local group_script_done = false
+buildat.sub_packet("fp:groups", function(data)
+	doc.groups = cereal.binary_input(data, GROUPS)
+	log:info("Groups: " .. #doc.groups.groups .. ", invites to me: " ..
+			#doc.groups.invites)
+	-- A check's requests, a line each, "cmd group [name [arg]]", once
+	local script = buildat.get_env("BUILDAT_FP_GROUP")
+	if script and not group_script_done then
+		group_script_done = true
+		for l in script:gmatch("[^\n]+") do
+			local cmd, group, name, arg = l:match("^(%S+)%s+(%d+)%s*(%S*)%s*(%S*)")
+			if cmd then
+				group_cmd(cmd, tonumber(group), name, arg)
+			end
+		end
+	end
+	if doc.in_plan then
+		ask_invites()
+	elseif doc.on_plans then
+		show_plans()
+	end
+	if doc.groups_page then
+		doc.groups_page()
+	end
+end)
+buildat.sub_packet("fp:group_result", function(data)
+	local t = cereal.binary_input(data, TEXT).text
+	if t ~= "" then
+		log:info("Group: " .. t)
+		group_message = t
+		if doc.groups_page then
+			doc.groups_page()
+		end
+	end
+end)
+
+local function hrow(w)
+	local r = w:CreateChild("UIElement")
+	r:SetLayout(magic.LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
+	return r
+end
+local function small_button(r, t, f)
+	local b = r:CreateChild("Button")
+	b:SetStyleAuto()
+	b.minHeight = 26
+	local bt = b:CreateChild("Text")
+	bt:SetStyleAuto()
+	bt:SetText(t)
+	bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	b.minWidth = bt.width + 16
+	magic.SubscribeToEvent(b, "Released", f)
+	return b
+end
+local function row_text(r, t)
+	local l = r:CreateChild("Text")
+	l:SetStyleAuto()
+	l:SetText(t)
+	l.minWidth = 150
+	return l
+end
+local function name_field(w, on_go)
+	local e = w:CreateChild("LineEdit")
+	e:SetStyleAuto()
+	e.minHeight = 26
+	e.textSelectable = true
+	magic.SubscribeToEvent(e, "TextFinished", function() on_go(e:GetText()) end)
+	return e
+end
+local function kib_text(kib)
+	return string.format("%.1f MB", kib / 1024)
+end
+
+local function show_group(id)
+	local g = nil
+	for _, x in ipairs(doc.groups.groups) do
+		if x.id == id then
+			g = x
+		end
+	end
+	if not g then
+		return doc.show_groups()
+	end
+	local w, text, button = page("Group: " .. g.name)
+	doc.groups_page = function() show_group(id) end
+	if group_message then
+		text(group_message, magic.Color(1.0, 0.4, 0.4))
+		group_message = nil
+	end
+	local me = accounts.name
+	local admin = g.role == "admin"
+	text("Members:")
+	local names = {}
+	for n in pairs(g.members) do
+		names[#names + 1] = n
+	end
+	table.sort(names)
+	for _, n in ipairs(names) do
+		local r = hrow(w)
+		row_text(r, n .. (g.members[n] == "admin" and " (admin)" or ""))
+		if admin and n ~= me then
+			if g.members[n] == "admin" then
+				small_button(r, "Not admin", function() group_cmd("admin", id, n, "0") end)
+			else
+				small_button(r, "Make admin", function() group_cmd("admin", id, n, "1") end)
+			end
+			small_button(r, "Remove", function() group_cmd("remove", id, n) end)
+		end
+	end
+	if admin then
+		for _, n in ipairs(g.invites) do
+			local r = hrow(w)
+			row_text(r, n .. " (invited)")
+			small_button(r, "Cancel the invite", function() group_cmd("cancel", id, n) end)
+		end
+		text("Invite by name:")
+		local e = name_field(w, function(t)
+			if t ~= "" then
+				group_cmd("invite", id, t)
+			end
+		end)
+		button("Invite", function()
+			if e:GetText() ~= "" then
+				group_cmd("invite", id, e:GetText())
+			end
+		end)
+	end
+	text("Plans shared here (open one from the plans; a copy is yours):")
+	local shared = {}
+	for _, sh in ipairs(g.shares) do
+		shared[sh.plan] = true
+		local r = hrow(w)
+		row_text(r, sh.plan .. " (" .. sh.rest.owner .. "'s, " ..
+				(sh.rest.role == "editor" and "can edit" or "can read") .. ")")
+		if sh.rest.owner == me then
+			local other = sh.rest.role == "editor" and "viewer" or "editor"
+			small_button(r, other == "editor" and "Make editable" or
+					"Make read-only", function()
+				group_cmd("share", id, sh.plan, other)
+			end)
+			small_button(r, "Unshare", function() group_cmd("unshare", id, sh.plan) end)
+		end
+	end
+	if #g.shares == 0 then
+		text("  none yet")
+	end
+	local first = true
+	for _, plan in ipairs(doc.groups.own_plans) do
+		if not shared[plan] then
+			if first then
+				text("Share a plan of yours:")
+				first = false
+			end
+			local r = hrow(w)
+			row_text(r, plan)
+			small_button(r, "Read-only", function() group_cmd("share", id, plan, "viewer") end)
+			small_button(r, "Editable", function() group_cmd("share", id, plan, "editor") end)
+		end
+	end
+	button("Leave the group", function() group_cmd("leave", id) end)
+	if admin then
+		button("Delete the group", function()
+			require("buildat/extension/ui_utils").show_confirm_dialog(
+					"Delete the group \"" .. g.name .. "\"? Its plans stay " ..
+					"their owners'; they are no longer shared here.",
+					function() group_cmd("delete", id) end, nil, "Delete")
+		end)
+	end
+	button("Back", function() doc.show_groups() end)
+end
+
+function doc.show_groups()
+	if not doc.groups then
+		doc.groups_page = doc.show_groups
+		group_cmd("list")
+		return
+	end
+	local w, text, button = page("Groups")
+	doc.groups_page = doc.show_groups
+	if group_message then
+		text(group_message, magic.Color(1.0, 0.4, 0.4))
+		group_message = nil
+	end
+	local gs = doc.groups
+	text("Your plans take " .. kib_text(gs.used_kib) ..
+			(gs.limit_kib > 0 and " of " .. kib_text(gs.limit_kib) or ""))
+	for _, g in ipairs(gs.groups) do
+		local n = 0
+		for _ in pairs(g.members) do
+			n = n + 1
+		end
+		button(g.name .. "  (" .. n .. (n == 1 and " member" or " members") ..
+				(g.role == "admin" and ", admin" or "") .. ")", function()
+			show_group(g.id)
+		end)
+	end
+	if #gs.groups == 0 then
+		text("You are in no group. A group's members share plans with " ..
+				"each other.")
+	end
+	text("A new group, by name:")
+	local e = name_field(w, function(t)
+		if t ~= "" then
+			group_cmd("create", 0, t)
+		end
+	end)
+	button("Create group", function()
+		if e:GetText() ~= "" then
+			group_cmd("create", 0, e:GetText())
+		end
+	end)
+	button("Back", function() show_plans() end)
+end
+
 -- The picked file, once it has been read
 local function poll_picked()
 	if not picking then
@@ -1028,6 +1318,11 @@ end)
 
 buildat.sub_packet("fp:plans", function(data)
 	doc.plans = cereal.binary_input(data, PLAN_ROWS)
+	local list = {}
+	for _, p in ipairs(doc.plans) do
+		list[#list + 1] = p.name .. " (" .. p.role .. ")"
+	end
+	log:info("Plans: " .. table.concat(list, ", "))
 	if doc.in_plan then
 		return
 	end
@@ -1089,6 +1384,12 @@ buildat.sub_packet("fp:entered", function(data)
 		buildat.storage_write("plan", doc.plan_name)
 	end
 	log:info("Entered the plan " .. doc.plan_name)
+	-- A check's copy of the first plan entered
+	local copy = buildat.get_env("BUILDAT_FP_COPY")
+	if copy and not doc.copy_done then
+		doc.copy_done = true
+		doc.copy_plan(copy)
+	end
 end)
 
 -- Out of the plan ([FP_OTHER_PLAN], [FP_PLANS] 4): nothing of it is kept,

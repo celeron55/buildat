@@ -630,6 +630,7 @@ struct Plan
 	// The save's images/ as files for the clients: the pictures a plan can
 	// be traced over. Put there by hand; a name is one file name.
 	sv_<ss_> m_images;
+	uint64_t m_images_bytes = 0;
 	// Seconds with nobody in it
 	float m_idle = 0;
 	// Written to since the last backup, and when that was
@@ -710,6 +711,7 @@ struct Plan
 	{
 		namespace fs = interface::fs;
 		m_images.clear();
+		m_images_bytes = 0;
 		ss_ dir = m_save->path()+"/images";
 		fs::create_directories(dir);
 		for(const fs::Node &n : fs::list_directory(dir)){
@@ -721,6 +723,7 @@ struct Plan
 				continue;
 			}
 			m_images.push_back(n.name);
+			m_images_bytes += fs::file_size(dir+"/"+n.name);
 			client_file::access(m_server, [&](client_file::Interface *i){
 				i->add_file_path("main/images/"+m_name+"/"+n.name, dir+"/"+n.name);
 			});
@@ -844,6 +847,28 @@ struct Plan
 			if(pair.second.type == type)
 				return &pair.second;
 		return nullptr;
+	}
+
+	// What the plan takes against its owner's USER_BYTES: its entities
+	// and voxels as stored, and its pictures
+	// simplified: the stored size by its parts, not the database file's,
+	// which does not shrink when things are deleted; backups uncounted
+	uint64_t bytes()
+	{
+		uint64_t n = m_images_bytes;
+		for(auto &pair : m_ents){
+			const Entity &e = pair.second;
+			n += 16 + e.type.size();
+			for(auto &i : e.ints)
+				n += i.first.size() + 4;
+			for(auto &t : e.strs)
+				n += t.first.size() + t.second.size();
+			for(auto &l : e.lists)
+				n += l.first.size() + 4 * l.second.size();
+		}
+		for(auto &pair : m_voxels)
+			n += 8 * pair.second.size();
+		return n;
 	}
 
 	void flush()
@@ -1194,9 +1219,33 @@ struct Plan
 
 // How long a plan with nobody in it stays open ([FP_PLANS] 3)
 static const float PLAN_IDLE_S = 60;
-// A plan's role for a user ([FP_PLANS] 2), as meta/public gives it to
-// everyone who has none of their own
-static const int32_t PUBLIC_NONE = 0, PUBLIC_READ = 1, PUBLIC_EDIT = 2;
+// **Storage per user** ([FP_GROUPS]; user, 2026-10-07): the plans a user
+// owns, with their pictures, at most this; the server's admin uncounted
+static const uint64_t USER_BYTES = 5 * 1024 * 1024;
+
+// **A group** ([FP_GROUPS]; user, 2026-10-07): members (admins are
+// members with that role), the invites it has out and the plans its
+// members shared into it. Seen by its members only; an invitee sees its
+// name. One key each in the _groups save.
+struct Group
+{
+	ss_ name;
+	std::map<ss_, ss_> members; // user -> "admin" or "member"
+	std::map<ss_, ss_> invites; // user -> who invited them
+	std::map<ss_, ss_> shares;  // plan -> "viewer" or "editor"
+
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(name, members, invites, shares);
+	}
+};
+
+static ss_ mb_text(uint64_t bytes)
+{
+	char buf[32];
+	snprintf(buf, sizeof buf, "%.1f MB", bytes / (1024.0 * 1024.0));
+	return buf;
+}
 
 // A plan's name: what a save's directory can be called on every system,
 // and never the server's own store, whose name begins with _
@@ -1222,6 +1271,11 @@ struct Module: public interface::Module
 	// builtin/accounts')
 	std::map<network::PeerId, Peer> m_peers;
 
+	// [FP_GROUPS] by id, and where they are kept
+	std::map<int32_t, Group> m_groups;
+	int32_t m_next_group = 1;
+	storage::Save *m_groups_save = nullptr;
+
 	Module(interface::Server *server):
 		interface::Module(MODULE),
 		m_server(server)
@@ -1246,7 +1300,7 @@ struct Module: public interface::Module
 				"fp:voxels", "fp:lock", "fp:unlock",
 				"fp:preview", "fp:presence", "fp:export", "fp:import",
 				"fp:backups", "fp:open_backup", "fp:restore_backup",
-				"fp:set_editing"})
+				"fp:set_editing", "fp:group"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -1284,6 +1338,8 @@ struct Module: public interface::Module
 				on_restore_backup, network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:set_editing",
 				on_set_editing, network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:group", on_group,
+				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:chat", on_chat,
@@ -1340,7 +1396,42 @@ struct Module: public interface::Module
 			for(const storage::SaveInfo &i : istorage->list())
 				if(i.name.compare(0, 8, "_backup-") == 0)
 					istorage->remove(i.name);
+			m_groups_save = istorage->open("_groups");
+			if(!m_groups_save)
+				m_groups_save = istorage->create("_groups");
 		});
+		if(!m_groups_save)
+			throw Exception("floorplanner: could not open or create _groups");
+		load_groups();
+		end_public();
+	}
+
+	// **No public plans** ([FP_GROUPS]; user, 2026-10-07): a plan's
+	// meta/public, which gave everyone a role, goes at the first start
+	// that has groups; each plan it opened is in the log once, and the
+	// setting stays as meta/public_was
+	void end_public()
+	{
+		for(const ss_ &name : plan_names()){
+			storage::access(m_server, [&](storage::Interface *istorage){
+				storage::Save *save = istorage->open(name);
+				if(!save)
+					return;
+				storage::Store *store = save->store("main");
+				ss_ v, owner;
+				if(store->get("meta/public", v)){
+					store->get("meta/owner", owner);
+					if(v != "0")
+						log_w(MODULE, "The plan %s (%s's) was %s by everyone; "
+								"now only by its owner, its members and its "
+								"groups", cs(name), cs(owner), v == "2" ?
+								"editable" : "readable");
+					store->set("meta/public_was", v);
+					store->remove("meta/public");
+				}
+				istorage->close(save);
+			});
+		}
 	}
 
 	// Plans
@@ -1410,6 +1501,8 @@ struct Module: public interface::Module
 			return;
 		it->second->flush();
 		const bool view = !it->second->m_backup_of.empty();
+		if(!view)
+			it->second->m_store->set("meta/bytes", itos(it->second->bytes()));
 		close_save(it->second.get());
 		m_plans.erase(it);
 		if(view){
@@ -1461,19 +1554,19 @@ struct Module: public interface::Module
 	// for a plan not in use is opened for it
 	struct PlanMeta
 	{
+		ss_ name;
 		ss_ owner;
-		int32_t pub = PUBLIC_READ;
 		std::map<ss_, ss_> roles; // name -> editor or viewer
+		uint64_t bytes = 0;       // a closed plan's, as last closed
 	};
 
-	PlanMeta read_meta(storage::Store *store)
+	PlanMeta read_meta(storage::Store *store, const ss_ &name)
 	{
 		PlanMeta m;
+		m.name = name;
 		ss_ v;
 		if(store->get("meta/owner", v))
 			m.owner = v;
-		if(store->get("meta/public", v))
-			m.pub = std::max(PUBLIC_NONE, std::min(PUBLIC_EDIT, atoi(v.c_str())));
 		for(const ss_ &key : store->list("role/"))
 			if(store->get(key, v))
 				m.roles[key.substr(5)] = v;
@@ -1483,14 +1576,33 @@ struct Module: public interface::Module
 	PlanMeta plan_meta(const ss_ &name)
 	{
 		auto it = m_plans.find(name);
-		if(it != m_plans.end())
-			return read_meta(it->second->m_store);
+		if(it != m_plans.end()){
+			PlanMeta m = read_meta(it->second->m_store, name);
+			m.bytes = it->second->bytes();
+			return m;
+		}
 		PlanMeta m;
+		m.name = name;
 		storage::access(m_server, [&](storage::Interface *istorage){
 			storage::Save *save = istorage->open(name);
 			if(!save)
 				return;
-			m = read_meta(save->store("main"));
+			storage::Store *store = save->store("main");
+			m = read_meta(store, name);
+			ss_ v;
+			if(store->get("meta/bytes", v)){
+				m.bytes = std::stoull("0"+v);
+			} else {
+				// Closed before [FP_GROUPS]: its files
+				namespace fs = interface::fs;
+				const ss_ path = save->path();
+				for(const char *f : {"/save.sqlite", "/save.sqlite-wal"})
+					if(fs::path_exists(path+f))
+						m.bytes += fs::file_size(path+f);
+				for(const fs::Node &n : fs::list_directory(path+"/images"))
+					if(!n.is_directory)
+						m.bytes += fs::file_size(path+"/images/"+n.name);
+			}
 			istorage->close(save);
 		});
 		return m;
@@ -1506,7 +1618,8 @@ struct Module: public interface::Module
 	}
 
 	// What a user is in a plan: admin, owner, editor, viewer, or "" (not
-	// let in)
+	// let in). Past owner and admin, the highest of their own role and
+	// those of the groups they are in that it is shared with ([FP_GROUPS])
 	ss_ role_in(const PlanMeta &m, const ss_ &user)
 	{
 		// Owner first: the admin's own plan is theirs as well
@@ -1514,11 +1627,21 @@ struct Module: public interface::Module
 			return "owner";
 		if(is_admin(user))
 			return "admin";
+		auto rank = [](const ss_ &r){
+			return r == "editor" ? 2 : r == "viewer" ? 1 : 0;
+		};
+		ss_ role;
 		auto it = m.roles.find(user);
 		if(it != m.roles.end())
-			return it->second;
-		return m.pub == PUBLIC_EDIT ? "editor" :
-				m.pub == PUBLIC_READ ? "viewer" : "";
+			role = it->second;
+		for(auto &pair : m_groups){
+			const Group &g = pair.second;
+			auto share = g.shares.find(m.name);
+			if(share != g.shares.end() && g.members.count(user) &&
+					rank(share->second) > rank(role))
+				role = share->second;
+		}
+		return role;
 	}
 
 	static bool role_edits(const ss_ &role)
@@ -1559,7 +1682,8 @@ struct Module: public interface::Module
 		if(plan && !plan->m_backup_of.empty())
 			return role_in(plan_meta(plan->m_backup_of),
 					m_peers[peer].name).empty() ? "" : "viewer";
-		return plan ? role_in(read_meta(plan->m_store), m_peers[peer].name) : "";
+		return plan ? role_in(read_meta(plan->m_store, plan->m_name),
+				m_peers[peer].name) : "";
 	}
 
 	// **Viewing or editing** (user, 2026-09-30): a plan opens for viewing,
@@ -1799,6 +1923,8 @@ struct Module: public interface::Module
 			return refuse("There is no plan called "+req.name);
 		if(exists && role_in(plan_meta(req.name), user).empty())
 			return refuse("The plan "+req.name+" is not open to you");
+		if(req.create && !over_limit(user).empty())
+			return refuse(over_limit(user));
 		Plan *plan = open_plan(req.name, req.create);
 		if(!plan)
 			return refuse("Could not open the plan "+req.name);
@@ -1848,6 +1974,9 @@ struct Module: public interface::Module
 			return refuse("\""+name+"\" is not a name a plan can have");
 		if(name_taken(name))
 			return refuse("There is a plan called \""+name+"\" already");
+		const ss_ full = over_limit(user, from_plan->bytes());
+		if(!full.empty())
+			return refuse(full);
 		namespace fs = interface::fs;
 		from_plan->flush();
 		const ss_ from = from_plan->m_save->path();
@@ -1871,7 +2000,6 @@ struct Module: public interface::Module
 			return refuse("Could not copy the plan");
 		}
 		copy->m_store->set("meta/owner", user);
-		copy->m_store->set("meta/public", itos(PUBLIC_READ));
 		for(const ss_ &key : copy->m_store->list("role/"))
 			copy->m_store->remove(key);
 		log_i(MODULE, "%s copied the plan %s as %s", cs(user),
@@ -2138,6 +2266,9 @@ struct Module: public interface::Module
 			return refuse("\""+req.name+"\" is not a name a plan can have");
 		if(name_taken(req.name))
 			return refuse("There is a plan called \""+req.name+"\" already");
+		const ss_ full = over_limit(user, req.file.size());
+		if(!full.empty())
+			return refuse(full);
 		PlanFile f;
 		if(!unpack(req.file, f) || f.magic != EXPORT_MAGIC)
 			return refuse("That is not a plan file");
@@ -2290,7 +2421,6 @@ struct Module: public interface::Module
 		}
 		plan->find_images();
 		plan->m_store->set("meta/owner", user);
-		plan->m_store->set("meta/public", itos(PUBLIC_READ));
 		plan->flush();
 		log_i(MODULE, "%s imported the plan %s: %zu entities, %zu voxel volumes,"
 				" %zu pictures", cs(user), cs(req.name), f.ents.size(),
@@ -2300,8 +2430,10 @@ struct Module: public interface::Module
 		send_plans_to_idle();
 	}
 
-	// A plan's members and visibility ([FP_PLANS] 5), its owner's and an
-	// admin's: every account with its role here
+	// A plan's members ([FP_PLANS] 5), its owner's and an admin's: the
+	// accounts with a role here -- not every account, which with open
+	// registration is everyone's name to anyone who makes a plan
+	// ([FP_GROUPS]) -- and the groups it is shared with
 	struct MemberRow
 	{
 		ss_ name;
@@ -2316,11 +2448,11 @@ struct Module: public interface::Module
 	{
 		ss_ plan;
 		ss_ owner;
-		int32_t pub = PUBLIC_READ;
+		ss_ groups; // "name (can read), ..."
 		sv_<MemberRow> members;
 		template<class Archive>
 		void serialize(Archive &archive){
-			archive(plan, owner, pub, members);
+			archive(plan, owner, groups, members);
 		}
 	};
 
@@ -2329,20 +2461,21 @@ struct Module: public interface::Module
 		Plan *plan = plan_of(peer);
 		if(!plan)
 			return;
-		PlanMeta m = read_meta(plan->m_store);
+		PlanMeta m = read_meta(plan->m_store, plan->m_name);
 		MembersInfo info;
 		info.plan = plan->m_name;
 		info.owner = m.owner;
-		info.pub = m.pub;
-		sv_<ss_> names;
-		accounts::access(m_server, [&](accounts::Interface *i){
-			names = i->account_names();
-		});
-		for(const ss_ &name : names){
+		for(auto &pair : m_groups){
+			auto share = pair.second.shares.find(plan->m_name);
+			if(share != pair.second.shares.end())
+				info.groups += (info.groups.empty() ? "" : ", ")+
+						pair.second.name+(share->second == "editor" ?
+						" (can edit)" : " (can read)");
+		}
+		for(auto &pair : m.roles){
 			MemberRow row;
-			row.name = name;
-			auto it = m.roles.find(row.name);
-			row.role = it == m.roles.end() ? "" : it->second;
+			row.name = pair.first;
+			row.role = pair.second;
 			info.members.push_back(row);
 		}
 		send(peer, "fp:members", pack(info));
@@ -2403,14 +2536,6 @@ struct Module: public interface::Module
 			log_i(MODULE, "%s made %s %s in %s", cs(by), cs(r.name),
 					r.arg.empty() ? "no member" : cs(r.arg), cs(plan->m_name));
 			result("");
-		} else if(r.cmd == "public"){
-			const int32_t v = atoi(r.arg.c_str());
-			if(v < PUBLIC_NONE || v > PUBLIC_EDIT)
-				return result("No such setting");
-			plan->m_store->set("meta/public", itos(v));
-			log_i(MODULE, "%s set the plan %s public to %i", cs(by),
-					cs(plan->m_name), v);
-			result("");
 		} else if(r.cmd == "delete"){
 			const ss_ name = plan->m_name;
 			for(auto &pair : m_peers)
@@ -2421,12 +2546,344 @@ struct Module: public interface::Module
 				istorage->remove(name);
 			});
 			log_i(MODULE, "%s deleted the plan %s", cs(by), cs(name));
+			for(auto &pair : m_groups)
+				if(pair.second.shares.erase(name))
+					save_group(pair.first);
+			send_groups_all();
 			send_plans_to_idle();
 			return;
 		} else {
 			return;
 		}
 		plan_rights_changed(plan);
+	}
+
+	// Storage ([FP_GROUPS]): what a user's plans take, against USER_BYTES
+
+	// simplified: kept for USAGE_KEEP_S, so that a stream of edits does
+	// not open every closed plan each time; a user can go that much over
+	static constexpr int64_t USAGE_KEEP_S = 10;
+	std::map<ss_, std::pair<int64_t, uint64_t>> m_usage; // user -> time, bytes
+
+	uint64_t usage(const ss_ &user)
+	{
+		const int64_t now = (int64_t)time(nullptr);
+		auto it = m_usage.find(user);
+		if(it != m_usage.end() && now - it->second.first < USAGE_KEEP_S)
+			return it->second.second;
+		uint64_t n = 0;
+		for(const ss_ &name : plan_names()){
+			PlanMeta m = plan_meta(name);
+			if(m.owner == user)
+				n += m.bytes;
+		}
+		m_usage[user] = std::make_pair(now, n);
+		return n;
+	}
+
+	// Why `user` may not take `more` bytes: "" when they may
+	ss_ over_limit(const ss_ &user, uint64_t more = 0)
+	{
+		if(is_admin(user))
+			return "";
+		const uint64_t used = usage(user);
+		if(used + more <= USER_BYTES)
+			return "";
+		return "Your plans use "+mb_text(used)+" of the "+mb_text(USER_BYTES)+
+				" each user has"+(more ? ", and this takes "+mb_text(more) :
+				ss_())+": delete something first";
+	}
+
+	// A batch that makes something, or voxels added, in a plan whose owner
+	// is past the limit; changing and deleting go on
+	ss_ grows_past_limit(Plan &plan, const sv_<Op> &ops, size_t voxels_added)
+	{
+		bool grows = voxels_added > 0;
+		for(const Op &op : ops)
+			grows |= op.op == 0;
+		if(!grows)
+			return "";
+		ss_ owner;
+		plan.m_store->get("meta/owner", owner);
+		if(owner.empty())
+			return "";
+		const ss_ why = over_limit(owner);
+		if(why.empty())
+			return "";
+		return "The plan's owner "+owner+" is past the "+mb_text(USER_BYTES)+
+				" each user has ("+mb_text(usage(owner))+"): nothing more can "
+				"be added, only changed or deleted";
+	}
+
+	// Groups ([FP_GROUPS])
+
+	void load_groups()
+	{
+		storage::Store *store = m_groups_save->store("main");
+		ss_ v;
+		if(store->get("next", v))
+			m_next_group = std::max(1, atoi(v.c_str()));
+		for(const ss_ &key : store->list("g/")){
+			Group g;
+			if(store->get(key, v) && unpack(v, g))
+				m_groups[atoi(key.substr(2).c_str())] = g;
+		}
+		log_i(MODULE, "%zu groups", m_groups.size());
+	}
+
+	void save_group(int32_t id)
+	{
+		storage::Store *store = m_groups_save->store("main");
+		auto it = m_groups.find(id);
+		if(it == m_groups.end())
+			store->remove("g/"+itos(id));
+		else
+			store->set("g/"+itos(id), pack(it->second));
+	}
+
+	struct GroupRow
+	{
+		int32_t id = 0;
+		ss_ name;
+		ss_ role; // the user's: admin or member
+		std::map<ss_, ss_> members;
+		sv_<ss_> invites; // for its admins
+		sv_<std::pair<ss_, std::pair<ss_, ss_>>> shares; // plan, owner, role
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(id, name, role, members, invites, shares);
+		}
+	};
+	struct InviteRow
+	{
+		int32_t id = 0;
+		ss_ name;
+		ss_ by;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(id, name, by);
+		}
+	};
+	struct GroupsInfo
+	{
+		sv_<GroupRow> groups;
+		sv_<InviteRow> invites; // to this user
+		sv_<ss_> own_plans;
+		int32_t used_kib = 0;
+		int32_t limit_kib = 0; // 0: none (the admin)
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(groups, invites, own_plans, used_kib, limit_kib);
+		}
+	};
+
+	// A user's groups, the invites to them, their plans to share and their
+	// storage
+	void send_groups(network::PeerId peer)
+	{
+		const ss_ user = m_peers[peer].name;
+		if(user.empty())
+			return;
+		GroupsInfo info;
+		std::map<ss_, ss_> owners;
+		for(const ss_ &name : plan_names()){
+			PlanMeta m = plan_meta(name);
+			owners[name] = m.owner;
+			if(m.owner == user)
+				info.own_plans.push_back(name);
+		}
+		for(auto &pair : m_groups){
+			const Group &g = pair.second;
+			auto inv = g.invites.find(user);
+			if(inv != g.invites.end()){
+				InviteRow i;
+				i.id = pair.first;
+				i.name = g.name;
+				i.by = inv->second;
+				info.invites.push_back(i);
+			}
+			auto me = g.members.find(user);
+			if(me == g.members.end())
+				continue;
+			GroupRow row;
+			row.id = pair.first;
+			row.name = g.name;
+			row.role = me->second;
+			row.members = g.members;
+			if(me->second == "admin")
+				for(auto &i : g.invites)
+					row.invites.push_back(i.first);
+			for(auto &sh : g.shares)
+				row.shares.push_back(std::make_pair(sh.first,
+						std::make_pair(owners[sh.first], sh.second)));
+			info.groups.push_back(row);
+		}
+		const bool admin = is_admin(user);
+		m_usage.erase(user);
+		info.used_kib = (int32_t)std::min<uint64_t>(usage(user) / 1024,
+				INT32_MAX);
+		info.limit_kib = admin ? 0 : (int32_t)(USER_BYTES / 1024);
+		send(peer, "fp:groups", pack(info));
+	}
+
+	// After a group changed: each user's view of theirs, and everyone in a
+	// plan checked again, since a share or a membership changes roles
+	// simplified: everyone online, each their own; a server with many
+	// users would send to the group's members only
+	void send_groups_all()
+	{
+		for(auto &pair : m_peers)
+			send_groups(pair.first);
+		for(auto &pair : m_peers){
+			const ss_ &in = pair.second.plan;
+			if(in.empty() || pair.second.name.empty())
+				continue;
+			const ss_ role = peer_role(pair.first);
+			if(role.empty()){
+				to_plans(pair.first, "You are no longer let into this plan");
+				continue;
+			}
+			send_privs(pair.first);
+			if(role_manages(role))
+				send_members(pair.first);
+		}
+		send_plans_to_idle();
+	}
+
+	struct GroupRequest
+	{
+		ss_ cmd;
+		int32_t group = 0;
+		ss_ name; // a user's or a plan's
+		ss_ arg;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(cmd, group, name, arg);
+		}
+	};
+
+	void on_group(const network::Packet &packet)
+	{
+		auto pit = m_peers.find(packet.sender);
+		GroupRequest r;
+		if(pit == m_peers.end() || pit->second.name.empty() ||
+				!spend_msg(packet.sender, 5) || !unpack(packet.data, r))
+			return;
+		const ss_ user = pit->second.name;
+		auto result = [&](const ss_ &text){
+			send(packet.sender, "fp:group_result", pack(text));
+		};
+		if(r.cmd == "list")
+			return send_groups(packet.sender);
+		if(r.cmd == "create"){
+			if(r.name.empty() || r.name.size() > 40 || !valid_text(r.name))
+				return result("A group's name is 1 to 40 characters");
+			const int32_t id = m_next_group++;
+			m_groups_save->store("main")->set("next", itos(m_next_group));
+			m_groups[id].name = r.name;
+			m_groups[id].members[user] = "admin";
+			save_group(id);
+			log_i(MODULE, "%s made the group %i (%s)", cs(user), id, cs(r.name));
+			result("");
+			return send_groups_all();
+		}
+		auto git = m_groups.find(r.group);
+		if(git == m_groups.end())
+			return result("There is no such group");
+		Group &g = git->second;
+		const int32_t id = git->first;
+		auto me = g.members.find(user);
+		const bool member = me != g.members.end();
+		const bool admin = member && me->second == "admin";
+		size_t admins = 0;
+		for(auto &m : g.members)
+			admins += m.second == "admin";
+		// A member out: their plans' shares go with them
+		auto drop_member = [&](const ss_ &who){
+			g.members.erase(who);
+			for(auto it = g.shares.begin(); it != g.shares.end();){
+				if(plan_meta(it->first).owner == who)
+					it = g.shares.erase(it);
+				else
+					++it;
+			}
+		};
+		if(r.cmd == "accept" || r.cmd == "decline"){
+			if(!g.invites.erase(user))
+				return result("There is no invite to that group");
+			if(r.cmd == "accept")
+				g.members[user] = "member";
+			log_i(MODULE, "%s %s the invite to the group %i", cs(user),
+					r.cmd == "accept" ? "accepted" : "declined", id);
+		} else if(!member){
+			return result("You are not in that group");
+		} else if(r.cmd == "leave"){
+			if(admin && admins == 1 && g.members.size() > 1)
+				return result("Make another member an admin first, or delete "
+						"the group");
+			drop_member(user);
+			log_i(MODULE, "%s left the group %i", cs(user), id);
+			if(g.members.empty()){
+				m_groups.erase(git);
+				save_group(id);
+				result("");
+				return send_groups_all();
+			}
+		} else if(r.cmd == "share" || r.cmd == "unshare"){
+			if(plan_meta(r.name).owner != user || !valid_plan_name(r.name))
+				return result("You can share only your own plans");
+			if(r.cmd == "unshare")
+				g.shares.erase(r.name);
+			else if(r.arg == "viewer" || r.arg == "editor")
+				g.shares[r.name] = r.arg;
+			else
+				return result("A plan is shared to read or to edit");
+			log_i(MODULE, "%s %s the plan %s in the group %i%s", cs(user),
+					r.cmd == "share" ? "shared" : "unshared", cs(r.name), id,
+					r.cmd == "share" ? cs(" as "+r.arg) : "");
+		} else if(!admin){
+			return result("Only the group's admins can do that");
+		} else if(r.cmd == "invite"){
+			bool exists = false;
+			accounts::access(m_server, [&](accounts::Interface *i){
+				exists = i->exists(r.name);
+			});
+			if(!exists)
+				return result("No account "+r.name);
+			// A member, or one invited already: nothing
+			if(g.members.count(r.name) || g.invites.count(r.name))
+				return result("");
+			g.invites[r.name] = user;
+			log_i(MODULE, "%s invited %s to the group %i", cs(user),
+					cs(r.name), id);
+		} else if(r.cmd == "cancel"){
+			g.invites.erase(r.name);
+		} else if(r.cmd == "remove"){
+			if(r.name == user || !g.members.count(r.name))
+				return result("Leave the group instead");
+			drop_member(r.name);
+			log_i(MODULE, "%s removed %s from the group %i", cs(user),
+					cs(r.name), id);
+		} else if(r.cmd == "admin"){
+			auto m = g.members.find(r.name);
+			if(m == g.members.end())
+				return result("No member "+r.name);
+			if(r.arg != "1" && m->second == "admin" && admins == 1)
+				return result("A group keeps at least one admin");
+			m->second = r.arg == "1" ? "admin" : "member";
+		} else if(r.cmd == "delete"){
+			log_i(MODULE, "%s deleted the group %i (%s)", cs(user), id,
+					cs(g.name));
+			m_groups.erase(git);
+			save_group(id);
+			result("");
+			return send_groups_all();
+		} else {
+			return;
+		}
+		save_group(id);
+		result("");
+		send_groups_all();
 	}
 
 	// The local user: on this machine, of a server the launcher started
@@ -2586,7 +3043,7 @@ struct Module: public interface::Module
 		}
 		if(voxels.size() + added > MAX_VOXELS)
 			return "The volume is full";
-		return "";
+		return grows_past_limit(plan, {}, added);
 	}
 
 	// Drag locks, previews and presence
@@ -2740,6 +3197,7 @@ struct Module: public interface::Module
 				m_launch_plan : ss_()));
 		send_privs(login.peer);
 		send_plans(login.peer);
+		send_groups(login.peer);
 	}
 
 	void on_accounts_privs(const accounts::Login &login)
@@ -2822,6 +3280,8 @@ struct Module: public interface::Module
 			result.error = "Too many operations; slow down";
 		} else if(!(result.error = locked_by_other(*plan, batch.ops,
 				packet.sender)).empty()){
+		} else if(!(result.error = grows_past_limit(*plan, batch.ops,
+				0)).empty()){
 		} else {
 			peer.op_budget -= batch.ops.size();
 			set_<int32_t> changed, deleted;

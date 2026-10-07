@@ -1287,8 +1287,9 @@ function M.safe.show_message_dialog(message, on_close)
 end
 
 -- yes_label is the first button's, "Yes" when absent ([DELETE_WORDING]:
--- it was "Force kill", its first user's, and a deletion asked that)
-function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label)
+-- it was "Force kill", its first user's, and a deletion asked that);
+-- no_label the second's, "Cancel" when absent
+function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label)
 	local root = uistack.main:push({desc="show_confirm_dialog"})
 
 	local style = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
@@ -1331,7 +1332,7 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label)
 	local no_text = no_button:CreateChild("Text")
 	no_text:SetName("ButtonText")
 	no_text:SetStyleAuto()
-	no_text.text = "Cancel"
+	no_text.text = no_label or "Cancel"
 	no_text:SetTextAlignment(HA_CENTER)
 
 	-- The menu's keys ([MENU_KEYS]): the arrows, a letter, Enter, and
