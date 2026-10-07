@@ -464,9 +464,8 @@ local function list(reserve, options)
 	return ui.list_view(area, W, room(reserve), options)
 end
 
--- A row of the list: a one-line button with its badge, no letter (its
--- label is a title, and the arrows walk the list). `width`: the list's,
--- when it is not the page's.
+-- A row of the list: a one-line button with its badge. `width`: the
+-- list's, when it is not the page's.
 local function add_row(v, label, badge, on_click, width)
 	-- simplified: cut by a character's typical width, not measured
 	local max = math.floor((width or W) * 0.5 / 10)
@@ -474,7 +473,6 @@ local function add_row(v, label, badge, on_click, width)
 		label = label:sub(1, max - 3) .. "..."
 	end
 	local b = v:row({label = label}, badge)
-	b:SetName("no_letter")
 	if on_click then
 		magic.SubscribeToEvent(b, "Released", function() on_click() end)
 	end
@@ -494,7 +492,6 @@ local function add_box(v, name, head, body, head_color, on_click)
 	holder:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
 	local b = holder:CreateChild("Button")
 	b:SetStyleAuto()
-	b:SetName("no_letter")
 	b:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(8, 4, 8, 6))
 	text(b, head, head_color or DIM, W - 32):SetName(name or "")
 	if body and body ~= "" then
@@ -568,8 +565,8 @@ local function side(label, key, count, page)
 			count > 0 and MAIN or nil)
 	t:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
 	t.position = magic.IntVector2(6, 0)
-	-- The section shown: an arrow at the right, after the label (the first
-	-- Text, which keyboard_page letters), so the label does not move
+	-- The section shown: an arrow at the right, after the label, so the
+	-- label does not move
 	if key == section then
 		local m = text(b, "►", t.color)
 		m:SetAlignment(magic.HA_RIGHT, magic.VA_CENTER)

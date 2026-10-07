@@ -201,9 +201,6 @@ local function make_dropdown(window, label, choices, index, picked)
 	t:SetFixedWidth(300)
 	local drop = row:CreateChild("DropDownList")
 	drop:SetStyleAuto()
-	-- No letter in the shown choice ([MENU_KEYS]): it is a value, and the
-	-- choice shown is a copy of the picked entry
-	drop:SetName("no_letter")
 	drop:SetFixedSize(DROP_W, ROW_H)
 	drop.resizePopup = true
 	drop.placeholder:SetFixedWidth(DROP_W - 28)

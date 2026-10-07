@@ -7121,8 +7121,6 @@ do
 					keys_page()
 				end, S.binding == b.action, 110)
 				bt:SetFixedWidth(110)
-				-- Its label is a key's name ([MENU_KEYS])
-				bt:SetName("no_letter")
 				if keys.taken(b) then
 					bt:GetChild(0):SetColor(magic.Color(1.0, 0.35, 0.3))
 				end

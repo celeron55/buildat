@@ -211,8 +211,7 @@ function M.press(ux, uy)
 end
 
 -- **A menu by the keyboard** (user, 2026-10-01): ui_utils' keyboard
--- page ([MENU_KEYS]) -- the arrows, Tab, Enter or Space, and a letter a
--- button. Only for windows that are menus: a toolbar button kept focused
+-- page ([MENU_KEYS]) -- the arrows, Tab, Enter or Space. Only for windows that are menus: a toolbar button kept focused
 -- would be pressed again by the next Space.
 function M.keyboard_menu(win)
 	require("buildat/extension/ui_utils").keyboard_page(win)

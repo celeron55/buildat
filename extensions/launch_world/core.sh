@@ -83,11 +83,16 @@ fi
 	echo "keypress Return"
 	echo "wait_log 10000 room: closed"
 	echo "delay 1500"
-	for c in D I S; do echo "keypress $c"; done
+	echo "text dis"
 	echo "delay 500"
 	echo "keypress Return"
 	echo "delay 1500"
-	for i in 1 2; do echo "keypress L"; echo "keypress Return"; echo "delay 500"; done
+	# Up twice, past Back: the Launch UI row, then in its list the room,
+	# the last entry
+	for i in 1 2; do
+		echo "keypress Up"; echo "delay 200"; echo "keypress Up"; echo "delay 200"
+		echo "keypress Return"; echo "delay 500"
+	done
 	echo "wait_log 10000 has the screen again"
 	echo "delay 1500"
 	echo "keypress Tab"

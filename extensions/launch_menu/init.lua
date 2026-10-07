@@ -385,8 +385,7 @@ function M.boot(launch_action, query)
 			return true
 		end
 		-- Enter is the focused tile's own ([ONE_FOCUS])
-	-- Its letters are the search's, not a button's
-	end, {letters = false})
+	end)
 	nav:set_columns(columns)
 	nav:on_change(function(button, selected, index)
 		local c = selected and 1 or DIM

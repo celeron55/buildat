@@ -543,7 +543,7 @@ local function home(query)
 			end
 			return true
 		end
-	end, {letters = false})
+	end)
 	on_typed(root, query, home)
 	nav:on_change(function(button, selected, index)
 		local item = index and items[index]
@@ -812,7 +812,7 @@ browse = function(kind, query, by, filter, focus_filter)
 			uistack.main:pop(root)
 			return true
 		end
-	end, {letters = false})
+	end)
 	on_typed(root, query, function(q) browse(kind, q, by, filter) end)
 	nav:on_change(function(button, selected, index)
 		local item = index and items[index]
@@ -870,7 +870,7 @@ settings = function()
 			uistack.main:pop(root)
 			return true
 		end
-	end, {letters = false})
+	end)
 	nav:on_change(function(button, selected, index)
 		local item = index and items[index]
 		if selected and item then
@@ -1011,7 +1011,7 @@ controls = function(focus)
 			uistack.main:pop(root)
 			return true
 		end
-	end, {letters = false})
+	end)
 	nav:on_change(function(button, sel, index)
 		if sel and index then
 			selected = index

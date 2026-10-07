@@ -1046,22 +1046,14 @@ add_paged(menu, items, {page, per_page, redraw}) -> pages, page
 - Page buttons for a menu longer than the screen; the caller redraws.
 keyboard_page(win)
 - A window or a page by the keyboard ([MENU_KEYS]): its buttons take the
-  focus (Tab, Shift+Tab, Enter and Space are Urho3D's), Up and Down move it,
-  and every button gets a letter drawn in brackets ("[C]hange password...")
-  that focuses it; "&" in a label names its own letter, a button named
-  "no_letter" gets none, and a touch client (BUILDAT_TOUCH) none at all.
+  focus (Tab, Shift+Tab, Enter and Space are Urho3D's), Up and Down move it.
   Read a frame after the call and again after a key or a click, so a page
-  built after its window is made is covered. bind_button_menu and
-  vertical_menu give the same letters on their selection; a menu whose
-  letters are its own passes {letters = false}.
+  built after its window is made is covered. No letter shortcuts
+  ([NO_LETTER_KEYS]).
 menu_button(parent [, before, opts]) -> element
 - A "Menu" button in parent's bottom right corner that switches to
   launch_menu_v2, for a launch UI with no menu of its own; before() runs
   first, opts go to set_launch_ui ({close = true}). Not focusable.
-unmark(label) -> label
-- A label without its letter's brackets ("[C]hange" is "Change"; a
-  checkbox's "[x]" is left), as the scan and Escape's search for Back read
-  one.
 
 uistack
 -------
@@ -2400,5 +2392,5 @@ extension.launch_console: show
 extension.serverlist: refresh, servers
 extension.skycube: new
 extension.test: f
-extension.ui_utils: add_paged, bind_button_menu, keyboard_columns, keyboard_page, list_view, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, unmark, vertical_menu
+extension.ui_utils: add_paged, bind_button_menu, keyboard_columns, keyboard_page, list_view, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, vertical_menu
 ---- end of the generated listing ----

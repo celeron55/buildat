@@ -255,8 +255,5 @@ nothing is the game's, is pushed with {tap_outside = false}.
 Every menu is by the keyboard without a line of its own ([MENU_KEYS]): a
 page made with ui_utils.keyboard_page (every Accounts page through its
 page_window, floorplanner's pages) or a menu through bind_button_menu /
-vertical_menu gets the arrows, Tab, Enter, and a letter for each button,
-drawn in brackets in its label. A maker writes the plain label; "&" in it
-picks the letter, and a button whose label is a key's name (a key editor)
-is named "no_letter". A label is read without its letter's brackets
-(ui_utils.unmark) wherever code compares one.
+vertical_menu gets the arrows, Tab and Enter. No letter shortcuts
+([NO_LETTER_KEYS], user 2026-10-07): a label is what it says.

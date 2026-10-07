@@ -72,11 +72,12 @@ printf 'accepted,address,description,created,last_attempt,name,icon,server\n"tru
 fpcode=$(grep -ao "setup code [A-Z0-9]*" $tmp/an.log | tail -1 | awk '{print $3}')
 cat > $tmp/fcmds.txt <<C
 delay 7000
-keypress down
-keypress m
+keypress up
 keypress return
 delay 1500
-keypress r
+keypress down
+keypress down
+keypress down
 keypress return
 delay 4000
 screenshot $tmp/report.png
