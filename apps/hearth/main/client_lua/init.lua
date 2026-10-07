@@ -590,9 +590,19 @@ draw_sidebar = function()
 	end)
 	side("Following", "following", 0, function() show_following() end)
 	text(sidebar, "Topics", DIM)
-	-- Each subtopic under its parent; the server gives the top level first
+	-- Each subtopic under its parent; the server gives the top level first.
+	-- **A name cut at 12 characters with "…"** (user, 2026-10-07): the
+	-- sidebar is narrow, and the topic's page has the whole name
+	local function cut(name)
+		local chars = {}
+		for c in tostring(name):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+			chars[#chars + 1] = c
+		end
+		return #chars <= 12 and tostring(name) or
+				table.concat(chars, "", 1, 11) .. "…"
+	end
 	local function topic(t, indent)
-		side(indent .. t.name, "topic " .. t.id, 0, function()
+		side(indent .. cut(t.name), "topic " .. t.id, 0, function()
 			show_topic(t.id)
 		end)
 	end
