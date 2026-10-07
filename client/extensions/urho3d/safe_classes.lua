@@ -2763,6 +2763,10 @@ function M.define(dst, util)
 				function(self, key)
 					return not __buildat_client_keys[key] and self:GetKeyDown(key)
 				end),
+			-- Whether shift, ctrl or alt is held (QUAL_*): what GetKeyDown
+			-- of those keys says in one call ([V2_TYPING])
+			GetQualifierDown = util.self_function("GetQualifierDown",
+					{"boolean"}, {"Input", "number"}),
 			IsMouseVisible = util.self_function("IsMouseVisible", {"boolean"},
 					{"Input"}),
 			-- A key's name and back, for a bindings file a person can read

@@ -382,14 +382,6 @@ end
 
 -- The character a key types into the search, or nil: key codes are SDL's,
 -- which are the lower case ASCII of what the key says
-local function search_char(key)
-	if (key >= 97 and key <= 122) or (key >= 48 and key <= 57) or
-			key == 32 or key == 45 or key == 46 then
-		return string.char(key)
-	end
-	return nil
-end
-
 local entries = nil
 -- What runs on the next frame rather than inside the event that asked
 -- for it: a screen popped inside its own dropdown's ItemSelected stayed
@@ -424,18 +416,49 @@ local function screen(desc, width, heading, query)
 	return root, window
 end
 
--- The keys a typed search takes: a character, Backspace, Escape to
--- clear. Answers the new query, or nil for a key that is not the search's.
+-- The keys a typed search takes besides its characters: Backspace, and
+-- Escape to clear. Answers the new query, or nil for a key that is not
+-- the search's.
 local function search_key(key, query)
-	local c = search_char(key)
-	if c and magic.input:GetKeyPress(key) then
-		return query .. c
-	elseif key == KEY_BACKSPACE and query ~= "" then
+	-- simplified: on the web SDL's text input is off unless a text field
+	-- has the focus (app.cpp, [WEB_KEYS]), so no TextInput comes and the
+	-- character is the key code's, as it was: a-z, 0-9, space, "-" and
+	-- "."; no shift, no layout. A hidden field taking the text would lift
+	-- it.
+	if web and magic.input:GetKeyPress(key) and ((key >= 97 and key <= 122) or
+			(key >= 48 and key <= 57) or key == 45 or key == 46 or
+			(key == 32 and query ~= "")) then
+		return query .. string.char(key)
+	end
+	if key == KEY_BACKSPACE and query ~= "" then
 		return query:sub(1, -2)
 	elseif key == KEY_ESCAPE and query ~= "" then
 		return ""
 	end
 	return nil
+end
+
+-- **The characters come from TextInput** ([V2_TYPING]): the layout and
+-- shift make them, so "_" is Shift+"-" on a Finnish keyboard; KeyDown's
+-- key code knew neither. A space only once something is typed: before
+-- that Space is the selected row's, after it only Enter runs one
+-- (spaced()). go(query) draws the screen again.
+local function on_typed(root, query, go)
+	root:SubscribeToStackEvent("TextInput", function(_, data)
+		local focus = magic.ui.focusElement
+		if focus and focus:GetTypeName() == "LineEdit" then return end
+		if magic.input:GetQualifierDown(magic.QUAL_CTRL) then return end
+		local t = data:GetString("Text")
+		if t == "" or (t == " " and query == "") then return end
+		uistack.main:pop(root)
+		go(query .. t)
+	end)
+end
+
+-- Whether a row's press is Space typed into a search, which is not a
+-- press: a focused Button presses itself on Space (Urho3D's OnKey)
+local function spaced(query)
+	return query ~= "" and magic.input:GetKeyDown(magic.KEY_SPACE)
 end
 
 local browse, settings
@@ -451,6 +474,7 @@ local function home(query)
 	local function row(e, badge, run)
 		items[#items + 1] = {button = view:row(e, badge), entry = e,
 			action = function()
+				if spaced(query) then return end
 				log:info("launch_menu_v2: " .. e.kind .. " " .. e.label)
 				run()
 			end}
@@ -520,6 +544,7 @@ local function home(query)
 			return true
 		end
 	end, {letters = false})
+	on_typed(root, query, home)
 	nav:on_change(function(button, selected, index)
 		local item = index and items[index]
 		if not (selected and item) then return end
@@ -633,6 +658,7 @@ browse = function(kind, query, by, filter, focus_filter)
 		item.button = view:row(e)
 		-- Enter runs it; a click locks it and a second one runs it
 		item.action = function()
+			if spaced(query) then return end
 			local t = api.get_time_us()
 			local enter = magic.input:GetKeyDown(magic.KEY_RETURN) or
 					magic.input:GetKeyDown(magic.KEY_KP_ENTER)
@@ -787,6 +813,7 @@ browse = function(kind, query, by, filter, focus_filter)
 			return true
 		end
 	end, {letters = false})
+	on_typed(root, query, function(q) browse(kind, q, by, filter) end)
 	nav:on_change(function(button, selected, index)
 		local item = index and items[index]
 		if not (selected and item) or item == current then return end

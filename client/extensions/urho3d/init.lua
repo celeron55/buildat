@@ -376,7 +376,8 @@ function Safe.SubscribeToEvent(x, y, z)
 		-- with its shift, so it read a Starport password as it was typed
 		-- into the client's own login dialog
 		if callback_is_sandboxed and (sub_event_type == "KeyDown" or
-				sub_event_type == "KeyUp") and
+				sub_event_type == "KeyUp" or
+				sub_event_type == "TextInput") and
 				magic_sandbox.is_secret_field(ui:GetFocusElement()) then
 			return
 		end

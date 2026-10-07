@@ -26,6 +26,13 @@ return {
 	KeyUp = {
 		Key = {variant = "Int", safe = "number"},
 	},
+	-- What a key typed, as the layout and shift make it ([V2_TYPING]):
+	-- "_" from Shift+"-" on a Finnish keyboard, which KeyDown's key code
+	-- cannot say. Nothing KeyDown does not already tell; withheld in a
+	-- secret field as KeyDown is (urho3d/init.lua).
+	TextInput = {
+		Text = {variant = "String", safe = "string"},
+	},
 	-- The window gained or lost input focus ([FOCUS_LOG]): what the
 	-- mouse's capture follows
 	InputFocus = {
