@@ -3746,7 +3746,8 @@ magic.SubscribeToEvent("Update", "handle_orb_update")
 -- sequence -- the UI polls the cursor instead, which is why hovering a
 -- dialog's row works and this did not -- so an orb lights up when it is
 -- clicked rather than when the mouse crosses it. Following the pointer
--- wants the cursor's own position, which the whitelist does not offer.
+-- would poll Input:GetMousePosition each frame, which the whitelist has
+-- now.
 
 -- **A click on an orb launches it**, which is what Enter does to the
 -- one being pointed at: the room's own menu, answering the mouse the

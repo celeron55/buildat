@@ -986,36 +986,14 @@ function M.safe.list_view(parent, width, height, options)
 					return
 				end
 				pending = false
-				-- Which row holds the focus: the focus named for a moment
-				-- and looked for under each row -- a script's element has
-				-- no parent to read, and its wrapper is not the same table
-				-- twice
-				local f = magic.ui.focusElement
-				if not f then
-					return
-				end
-				local was = f:GetName()
-				f:SetName("__list_view_focus")
-				local function has(e)
-					if e:GetName() == "__list_view_focus" then
-						return true
-					end
-					for i = 0, e:GetNumChildren() - 1 do
-						local c = e:GetChild(i)
-						if c and has(c) then
-							return true
-						end
-					end
-					return false
-				end
+				-- Which row holds the focus
 				for i = 0, list:GetNumChildren() - 1 do
 					local r = list:GetChild(i)
-					if r and has(r) then
+					if r and r:HasRecursiveFocus() then
 						view:show(r)
 						break
 					end
 				end
-				f:SetName(was)
 			end)
 		end
 	end

@@ -309,4 +309,21 @@ do
 	log:info("wrapped: a mesh built from Lua hangs on a node")
 end
 
+-- [SANDBOX_API_AUDIT]: a rotation applied to a vector, and the focus
+-- found under an element
+do
+	local v = magic.Quaternion(90, magic.Vector3(0, 1, 0)) *
+			magic.Vector3(1, 0, 0)
+	assert(math.abs(v.x) < 1e-4 and math.abs(v.z + 1) < 1e-4,
+			"a quaternion turns a vector: " .. v.x .. " " .. v.z)
+	local outer = magic.ui.root:CreateChild("UIElement")
+	local inner = outer:CreateChild("Button")
+	inner:SetFocusMode(magic.FM_FOCUSABLE)
+	inner:SetFocus(true)
+	assert(outer:HasRecursiveFocus() and not outer:HasFocus(),
+			"the focus found under an element")
+	outer:Remove()
+	log:info("wrapped: a quaternion turns a vector; the focus under an element")
+end
+
 return true

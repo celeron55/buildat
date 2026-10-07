@@ -3484,8 +3484,9 @@ local function show_client(host, port, name, password, mode)
 			end
 		end
 
-		-- The dig button. Urho3D's Input does not expose the button state to
-		-- the sandbox, so the two events are what says whether it is held.
+		-- The dig button: the two events say whether it is held, and the
+		-- press is when a use or a hit goes out (Input's
+		-- GetMouseButtonDown would say the state, not the moment).
 		local mouse_down_cb = magic.SubscribeToEvent("MouseButtonDown",
 				function(event_type, event_data)
 			if form then

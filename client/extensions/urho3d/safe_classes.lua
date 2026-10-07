@@ -267,9 +267,14 @@ function M.define(dst, util)
 			),
 		},
 		instance_meta = {
-			__mul = util.wrap_function({"Quaternion", {"number", "Quaternion"}},
+			-- A Vector3 rotated by it too ([SANDBOX_API_AUDIT]: a drone's
+			-- axes were child nodes' world positions for want of it)
+			__mul = util.wrap_function({"Quaternion",
+					{"number", "Quaternion", "Vector3"}},
 			function(self, n)
-				return util.wrap_instance("Quaternion", self * n)
+				local is_vector = type(n) ~= "number" and n.w == nil
+				return util.wrap_instance(is_vector and "Vector3" or
+						"Quaternion", self * n)
 			end),
 			__add = util.wrap_function({"Quaternion", "Quaternion"}, function(self, other)
 				return util.wrap_instance("Quaternion", self + other)
@@ -2040,6 +2045,18 @@ function M.define(dst, util)
 					"SetFocus", {}, {"UIElement", "boolean"}),
 			HasFocus = util.self_function(
 					"HasFocus", {"boolean"}, {"UIElement"}),
+			-- Whether it or one under it has the focus ([SANDBOX_API_AUDIT]:
+			-- list_view named the focus and searched every row for it)
+			HasRecursiveFocus = util.wrap_function({"UIElement"},
+				function(self)
+					local f = ui:GetFocusElement()
+					for _ = 1, 64 do
+						if f == nil then return false end
+						if f == self then return true end
+						f = f:GetParent()
+					end
+					return false
+				end),
 			GetName = util.self_function("GetName", {"string"}, {"UIElement"}),
 			-- Which kind of element this is -- "Button", "LineEdit" --
 			-- which is how the one with the focus is told apart from the
