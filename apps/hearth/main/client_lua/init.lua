@@ -344,6 +344,9 @@ local function build_frame()
 	W = narrow and inner or inner - 188
 	H = frame.height - 16
 	area:SetFixedSize(W, H)
+	-- [HEARTH_COLUMN_KEYS]: Up and Down in the sidebar or the page, Right
+	-- and Left between them
+	ui.keyboard_columns(frame, sidebar, area)
 	log:info("hearth: frame " .. frame.width .. "x" .. frame.height .. ", page " ..
 			W .. "x" .. H .. ", screen " .. magic.ui.root.width)
 	if narrow then
