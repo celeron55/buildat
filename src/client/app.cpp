@@ -5230,7 +5230,10 @@ struct CApp: public App, public magic::Application
 		int ok = EM_ASM_INT({
 			// The page's own origin, so a page with no game of its own
 			// (play.buildat.org, the Starport's web_clients) is told apart
-			var url = UTF8ToString($0) + '&origin=' +
+			// After a "?" of its own, or one put there: the plain /id page
+			// came as "/id&origin=", which the Starport has no call for
+			var url = UTF8ToString($0);
+			url += (url.indexOf('?') < 0 ? '?' : '&') + 'origin=' +
 					encodeURIComponent(location.origin);
 			Module['buildatAuthMsg'] = null;
 			Module['buildatAuthOrigin'] = new URL(url).origin;
