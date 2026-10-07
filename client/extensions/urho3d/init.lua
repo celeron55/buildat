@@ -1066,6 +1066,42 @@ local function open_id(sp)
 		sp.open_settings()
 	end
 end
+-- [STARPORT_RECOMMENDS]: the Hearth the Starport recommends, at the
+-- address client/launch_grid.lua's hearth_target makes
+local function join_hearth(hearth)
+	local scheme, host = hearth:match("^(https?)://([^/?#]+)")
+	buildat.safe.join_server(scheme == "https" and "https://" .. host or
+			(host:find(":%d+$") and host or host .. ":80"))
+end
+-- **The web has no trusted overlay** (user, 2026-10-07): the page and its
+-- code are the server's ([WEB_ID_TRUST]), so a colour or an ID line there
+-- would vouch for nothing, and the web holds no ID session to show. Only
+-- "Discuss" per Starport recommending a Hearth, at the top right.
+local is_web = GetPlatform() == "Web"
+local function rebuild_web_rows(hearths)
+	for _, r in ipairs(id_rows) do
+		r:Remove()
+	end
+	id_rows = {}
+	local y = 8
+	for _, h in ipairs(hearths) do
+		local r = ui.root:CreateChild("UIElement")
+		r:SetName("__trusted_hidden_id_" .. #id_rows + 1)
+		r.defaultStyle = cache:GetResource("XMLFile",
+				"launch_menu/res/main_style.xml")
+		r.priority = 2001
+		r:SetLayout(LM_HORIZONTAL, 8, IntRect(0, 0, 0, 0))
+		r:SetAlignment(HA_RIGHT, VA_TOP)
+		local host = #hearths > 1 and h.url:match("^%a+://([^/]+)")
+		local b = overlay_button(r, "Discuss" ..
+				(host and (" (" .. host .. ")") or ""),
+				function() join_hearth(h.hearth) end)
+		r:SetPosition(-8, y)
+		y = y + b:GetHeight() + 4
+		r.visible = trust_sample_shown == true
+		id_rows[#id_rows + 1] = r
+	end
+end
 local function rebuild_id_rows(ids, sp)
 	for _, r in ipairs(id_rows) do
 		r:Remove()
@@ -1108,16 +1144,9 @@ local function rebuild_id_rows(ids, sp)
 		-- A gap of its own, as the colour's line has
 		r:CreateChild("UIElement"):SetFixedSize(10, 4)
 		local url = id.url
-		-- [STARPORT_RECOMMENDS]: the Hearth the Starport recommends, at
-		-- the address client/launch_grid.lua's hearth_target makes
 		local hearth = sp.recommended_hearth and sp.recommended_hearth(url)
 		if hearth then
-			overlay_button(r, "Discuss", function()
-				local scheme, host = hearth:match("^(https?)://([^/?#]+)")
-				buildat.safe.join_server(scheme == "https" and
-						"https://" .. host or
-						(host:find(":%d+$") and host or host .. ":80"))
-			end)
+			overlay_button(r, "Discuss", function() join_hearth(hearth) end)
 		end
 		local b = overlay_button(r, "Log out", function()
 			sp.log_out(url)
@@ -1195,7 +1224,7 @@ add_global_event_handler("KeyDown", "__buildat_trust_f9", function(_, event_data
 	end
 end)
 Safe.SubscribeToEvent("Update", function(_, event_data)
-	if trust_sample == nil then
+	if trust_sample == nil and not is_web then
 		trust_sample = ui.root:CreateChild("UIElement")
 		trust_sample:SetName("__trusted_hidden_trust_color")
 		trust_sample.defaultStyle = cache:GetResource("XMLFile",
@@ -1257,7 +1286,9 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 	end
 	-- The colour's own line only until the starport extension is there
 	-- to build the buttons on the colour
-	trust_sample.visible = show and #id_rows == 0
+	if trust_sample then
+		trust_sample.visible = show and #id_rows == 0
+	end
 	for _, r in ipairs(id_rows) do
 		r.visible = show
 	end
@@ -1266,6 +1297,24 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 		if id_timer >= 0.5 or id_signature == nil then
 			id_timer = 0
 			local sp = starport_module()
+			if is_web then
+				local hearths, sig = {}, {}
+				for _, url in ipairs(sp and sp.starport_urls and
+						sp.starport_urls() or {}) do
+					local h = sp.recommended_hearth and sp.recommended_hearth(url)
+					if h then
+						hearths[#hearths + 1] = {url = url, hearth = h}
+						sig[#sig + 1] = url .. "|" .. h
+					end
+				end
+				sig = table.concat(sig, "\n")
+				if sig ~= id_signature and sp then
+					id_signature = sig
+					rebuild_web_rows(hearths)
+					log:info("trusted overlay: " .. #hearths .. " Discuss button(s)")
+				end
+				return
+			end
 			local ids = sp and sp.logged_in_ids() or {}
 			local sig = {sp and "" or "no extension"}
 			for _, id in ipairs(ids) do

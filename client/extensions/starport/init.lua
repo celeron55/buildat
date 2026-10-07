@@ -829,15 +829,19 @@ local function add_edit(parent, value, secret)
 	e:SetName(secret and "__trusted_secret" or "__trusted_field")
 	getmetatable(e).trusted_reader = true
 	-- A solid fill of the colour, the style's texture off: multiplied
-	-- into its dark texture, the colour came out near black
-	local urho3d = require("buildat/extension/urho3d")
-	local r, g, b = urho3d.trust_color()
-	getmetatable(e).unsafe:SetTexture(nil)
-	e.color = magic.Color(r, g, b, 1)
-	-- The trust code at its top right, as in the overlay and the title
-	local code = urho3d.trust_code_text(getmetatable(e).unsafe)
-	code:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
-	code:SetPosition(-3, 1)
+	-- into its dark texture, the colour came out near black. Not on the
+	-- web, whose page is the server's code: it shows no colour to match
+	-- (client/extensions/urho3d's is_web)
+	if __buildat_get_env("BUILDAT_PAGE_HTTPS") == nil then
+		local urho3d = require("buildat/extension/urho3d")
+		local r, g, b = urho3d.trust_color()
+		getmetatable(e).unsafe:SetTexture(nil)
+		e.color = magic.Color(r, g, b, 1)
+		-- The trust code at its top right, as in the overlay and the title
+		local code = urho3d.trust_code_text(getmetatable(e).unsafe)
+		code:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
+		code:SetPosition(-3, 1)
+	end
 	if secret then
 		e.echoCharacter = string.byte("*")
 	else
