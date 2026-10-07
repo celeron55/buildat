@@ -2,7 +2,7 @@
 	["nav", "${URL}"],
 	["waitlog", "run_script_file\\(accounts/accounts.lua\\)", 120],
 	["wait", 3000],
-	["click", 600, 581],
+	["click", 600, 566],
 	["wait", 1500],
 	["type", "smoke"], ["key", "Tab"],
 	["type", "smokepass"], ["key", "Tab"],
