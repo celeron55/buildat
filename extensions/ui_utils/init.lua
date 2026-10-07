@@ -1136,7 +1136,8 @@ end
 function M.safe.server_list(parent, options, on_pick)
 	options = options or {}
 	local width, height = options.width or 520, options.height or 480
-	local view = M.safe.list_view(parent, width, height, {wheel = 40})
+	local view = M.safe.list_view(parent, width, height,
+			{wheel = 40, follow_focus = true})
 	local detail = nil
 	if options.panel then
 		detail = options.panel:CreateChild("UIElement")

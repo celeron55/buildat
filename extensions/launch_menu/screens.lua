@@ -618,6 +618,11 @@ function M.show_connect_to_server()
 		uistack.main:pop(root)
 	end)
 
+	-- [JOIN_BUILDAT_KEYS]: Up and Down in the list or the column beside
+	-- it, Right and Left between them
+	ui_utils.keyboard_page(outer)
+	ui_utils.keyboard_columns(outer, left, window)
+
 	root:SubscribeToStackEvent("KeyDown", function(event_type, event_data)
 		if event_data:GetInt("Key") == KEY_ESCAPE then
 			uistack.main:pop(root)
