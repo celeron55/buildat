@@ -1708,6 +1708,31 @@ end
 M.chat_lines = {}
 M.chat_send = nil
 local CHAT_KEEP = 200
+-- **Chats by channel** ([FP_GROUP_CHAT]): an app with more than one sets
+-- chat_channels() -> {{key =, label =}, ...} (keys are strings), the
+-- first the default;
+-- chat_add(line, key) files a line under a key, and chat_send(text, key)
+-- gets the picked one. A channel not shown counts its new lines. With
+-- none set, one chat (vanilla's): the key is nil.
+M.chat_channels = nil
+local chat_by = {}
+local chat_unread = {}
+-- The open page's dropdown labels made again, its popup reading them
+local chat_relabel = nil
+-- The picked channel, kept per server; the first when it is gone
+local function chat_channel()
+	local list = M.chat_channels and M.chat_channels() or {}
+	if #list == 0 then
+		return nil, list
+	end
+	local saved = buildat.storage_read and buildat.storage_read("chat_channel")
+	for _, c in ipairs(list) do
+		if c.key == saved then
+			return c.key, list
+		end
+	end
+	return list[1].key, list
+end
 
 local function chat_row(text)
 	local t = chat_list:CreateChild("Text")
@@ -1722,25 +1747,81 @@ local function chat_to_end()
 	chat_list.viewPosition = magic.IntVector2(0, 1000000)
 end
 
-function M.chat_add(line)
-	M.chat_lines[#M.chat_lines + 1] = line
-	while #M.chat_lines > CHAT_KEEP do
-		table.remove(M.chat_lines, 1)
+-- The channel the chat page shows, nil with none
+function M.chat_shown()
+	return (chat_channel())
+end
+
+-- old: a line from before (a login's backlog), not counted as new
+function M.chat_add(line, key, old)
+	local lines = M.chat_lines
+	if key ~= nil then
+		chat_by[key] = chat_by[key] or {}
+		lines = chat_by[key]
 	end
-	if chat_list then
+	lines[#lines + 1] = line
+	while #lines > CHAT_KEEP do
+		table.remove(lines, 1)
+	end
+	local shown = chat_channel()
+	if key ~= shown then
+		if not old then
+			chat_unread[key] = (chat_unread[key] or 0) + 1
+			if chat_list and page_kind == "chat" and chat_relabel then
+				chat_relabel()
+			end
+		end
+	elseif chat_list then
 		chat_row(line)
 		chat_to_end()
 	end
 end
 
 function M.chat_page(back)
+	local key, list = chat_channel()
+	chat_relabel = nil
 	local w = open_page("chat", "Chat", back)
 	chat_width = math.max(100, w.width - 32 - 28)
+	if key ~= nil then
+		chat_unread[key] = nil
+		-- "name" or "name: 3 new"; a name twice gets its key. Made again
+		-- in place as lines come, so the popup reads the counts as they are
+		local labels, by_label = {}, {}
+		chat_relabel = function()
+			local seen = {}
+			for k in pairs(by_label) do
+				by_label[k] = nil
+			end
+			for i, c in ipairs(list) do
+				local l = c.label
+				if seen[l] then
+					l = l .. " #" .. tostring(c.key)
+				end
+				seen[c.label] = true
+				local n = chat_unread[c.key]
+				l = l .. (n and n > 0 and (": " .. n .. " new") or "")
+				labels[i] = l
+				by_label[l] = c.key
+				if c.key == key then
+					labels.current = l
+				end
+			end
+		end
+		chat_relabel()
+		local b = dropdown(row(w), "Chat in", labels, labels.current,
+				function(l)
+			if buildat.storage_write then
+				buildat.storage_write("chat_channel", by_label[l])
+			end
+			M.chat_page(back)
+		end)
+		b:SetFixedWidth(math.max(118, math.min(300, w.width - 180)))
+	end
 	chat_list = w:CreateChild("ListView")
 	chat_list:SetStyleAuto()
 	chat_list:SetFixedHeight(math.max(120,
 			math.floor(magic.ui.root.height * 0.5)))
-	for _, line in ipairs(M.chat_lines) do
+	for _, line in ipairs(key == nil and M.chat_lines or chat_by[key] or {}) do
 		chat_row(line)
 	end
 	local r = row(w)
@@ -1752,7 +1833,7 @@ function M.chat_page(back)
 	local function send()
 		local text = e:GetText()
 		if text ~= "" and M.chat_send then
-			M.chat_send(text)
+			M.chat_send(text, key)
 		end
 		e:SetText("")
 	end

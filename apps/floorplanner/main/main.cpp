@@ -23,6 +23,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/map.hpp>
 #include <cereal/types/vector.hpp>
+#include <deque>
 #include <cereal/types/string.hpp>
 #include <cereal/types/utility.hpp>
 #include <map>
@@ -1275,6 +1276,9 @@ struct Module: public interface::Module
 	std::map<int32_t, Group> m_groups;
 	int32_t m_next_group = 1;
 	storage::Save *m_groups_save = nullptr;
+	// [FP_GROUP_CHAT] each group's last lines, for a member who comes
+	// later (simplified: in memory, gone at a restart -- the user's pick)
+	std::map<int32_t, std::deque<ss_>> m_group_chat;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -1300,7 +1304,7 @@ struct Module: public interface::Module
 				"fp:voxels", "fp:lock", "fp:unlock",
 				"fp:preview", "fp:presence", "fp:export", "fp:import",
 				"fp:backups", "fp:open_backup", "fp:restore_backup",
-				"fp:set_editing", "fp:group"})
+				"fp:set_editing", "fp:group", "fp:group_chat"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -1343,6 +1347,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/fp:batch", on_batch,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:chat", on_chat,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/fp:group_chat", on_group_chat,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/fp:voxels", on_voxels,
 				network::Packet)
@@ -2825,6 +2831,7 @@ struct Module: public interface::Module
 			log_i(MODULE, "%s left the group %i", cs(user), id);
 			if(g.members.empty()){
 				m_groups.erase(git);
+				m_group_chat.erase(id);
 				save_group(id);
 				result("");
 				return send_groups_all();
@@ -2875,6 +2882,7 @@ struct Module: public interface::Module
 			log_i(MODULE, "%s deleted the group %i (%s)", cs(user), id,
 					cs(g.name));
 			m_groups.erase(git);
+			m_group_chat.erase(id);
 			save_group(id);
 			result("");
 			return send_groups_all();
@@ -3198,6 +3206,7 @@ struct Module: public interface::Module
 		send_privs(login.peer);
 		send_plans(login.peer);
 		send_groups(login.peer);
+		send_group_backlog(login.peer);
 	}
 
 	void on_accounts_privs(const accounts::Login &login)
@@ -3225,6 +3234,62 @@ struct Module: public interface::Module
 		}
 		send_to_plan(plan->m_name, "fp:chat",
 				pack("<"+m_peers[packet.sender].name+"> "+text));
+	}
+
+	// **A group's chat** ([FP_GROUP_CHAT]): to its members wherever they
+	// are, in any plan or none; old = 1 for the kept lines a login gets
+	struct GroupChat
+	{
+		int32_t group = 0;
+		ss_ text;
+		uint8_t old = 0;
+		template<class Archive>
+		void serialize(Archive &archive){
+			archive(group, text, old);
+		}
+	};
+	static const size_t GROUP_CHAT_KEEP = 50;
+
+	void on_group_chat(const network::Packet &packet)
+	{
+		auto pit = m_peers.find(packet.sender);
+		GroupChat c;
+		if(pit == m_peers.end() || pit->second.name.empty() ||
+				!spend_msg(packet.sender, 20) || !unpack(packet.data, c))
+			return;
+		if(c.text.empty() || c.text.size() > 500 || !valid_text(c.text))
+			return;
+		auto git = m_groups.find(c.group);
+		const ss_ user = pit->second.name;
+		if(git == m_groups.end() || !git->second.members.count(user))
+			return send_chat(packet.sender, "Not a member of that group");
+		c.text = "<"+user+"> "+c.text;
+		c.old = 0;
+		std::deque<ss_> &kept = m_group_chat[c.group];
+		kept.push_back(c.text);
+		while(kept.size() > GROUP_CHAT_KEEP)
+			kept.pop_front();
+		const ss_ data = pack(c);
+		for(auto &pair : m_peers)
+			if(git->second.members.count(pair.second.name))
+				send(pair.first, "fp:group_chat", data);
+	}
+
+	void send_group_backlog(network::PeerId peer)
+	{
+		const ss_ user = m_peers[peer].name;
+		for(auto &pair : m_group_chat){
+			auto git = m_groups.find(pair.first);
+			if(git == m_groups.end() || !git->second.members.count(user))
+				continue;
+			for(const ss_ &line : pair.second){
+				GroupChat c;
+				c.group = pair.first;
+				c.text = line;
+				c.old = 1;
+				send(peer, "fp:group_chat", pack(c));
+			}
+		}
 	}
 
 	struct AdminRequest

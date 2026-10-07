@@ -660,19 +660,55 @@ local function redraw_messages()
 	end
 end
 
-function doc.notice(text)
-	log:info(text)
+-- A line over the editor for a while
+local function show_message(text)
 	messages[#messages + 1] = {text = text, t = buildat.get_time_us()}
 	redraw_messages()
-	-- The chat console's too ([CHAT_CONSOLE]), which the pause menu opens
-	accounts.chat_add(text)
 end
-accounts.chat_send = function(text)
-	buildat.send_packet("fp:chat", cereal.binary_output({text = text}, TEXT))
+
+function doc.notice(text)
+	log:info(text)
+	show_message(text)
+	-- The chat console's too ([CHAT_CONSOLE]), which the pause menu opens
+	accounts.chat_add(text, "plan")
+end
+
+-- **The chat by group** ([FP_GROUP_CHAT]): the plan's own chat, "This
+-- plan", and one for each group the user is in. What is sent goes to the
+-- one the chat page has picked; over the editor show the plan's lines
+-- and the picked group's.
+accounts.chat_channels = function()
+	local list = {{key = "plan", label = "This plan"}}
+	for _, g in ipairs(doc.groups and doc.groups.groups or {}) do
+		list[#list + 1] = {key = "g" .. g.id, label = g.name}
+	end
+	return list
+end
+local GROUP_CHAT = {"object", {"group", "int32_t"}, {"text", "string"},
+		{"old", "byte"}}
+accounts.chat_send = function(text, key)
+	local group = key and tonumber(key:match("^g(%d+)$"))
+	if group then
+		buildat.send_packet("fp:group_chat", cereal.binary_output({
+				group = group, text = text, old = 0}, GROUP_CHAT))
+	else
+		buildat.send_packet("fp:chat", cereal.binary_output({text = text},
+				TEXT))
+	end
 end
 
 buildat.sub_packet("fp:chat", function(data)
 	doc.notice(cereal.binary_input(data, TEXT).text)
+end)
+
+buildat.sub_packet("fp:group_chat", function(data)
+	local c = cereal.binary_input(data, GROUP_CHAT)
+	local key = "g" .. c.group
+	log:info("group " .. c.group .. ": " .. c.text)
+	accounts.chat_add(c.text, key, c.old == 1)
+	if c.old ~= 1 and accounts.chat_shown() == key then
+		show_message(c.text)
+	end
 end)
 
 
@@ -711,8 +747,7 @@ local function open_chat(initial)
 		local text = chat_input:GetText()
 		close_chat()
 		if text ~= "" then
-			buildat.send_packet("fp:chat",
-					cereal.binary_output({text = text}, TEXT))
+			accounts.chat_send(text, accounts.chat_shown())
 		end
 	end)
 end
@@ -1074,6 +1109,17 @@ buildat.sub_packet("fp:groups", function(data)
 			local cmd, group, name, arg = l:match("^(%S+)%s+(%d+)%s*(%S*)%s*(%S*)")
 			if cmd then
 				group_cmd(cmd, tonumber(group), name, arg)
+			end
+		end
+	end
+	-- And a check's chat lines, "key text" a line ("plan" or "g<id>"), once
+	local say = buildat.get_env("BUILDAT_FP_CHAT")
+	if say and not doc.chat_script_done then
+		doc.chat_script_done = true
+		for l in say:gmatch("[^\n]+") do
+			local key, text = l:match("^(%S+)%s+(.+)$")
+			if key then
+				accounts.chat_send(text, key)
 			end
 		end
 	end
