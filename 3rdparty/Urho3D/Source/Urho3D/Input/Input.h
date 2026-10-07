@@ -297,6 +297,8 @@ public:
     bool IsMouseVisible() const { return mouseVisible_; }
     /// Return whether the mouse is currently being grabbed by an operation.
     bool IsMouseGrabbed() const { return mouseGrabbed_; }
+    /// buildat: return whether the mouse button event being sent is one SDL made of a touch.
+    bool IsTouchMouseEvent() const { return touchMouseEvent_; }
     /// Return whether the mouse is locked to the window
     bool IsMouseLocked() const;
 
@@ -474,6 +476,8 @@ private:
     /// buildat: when the last Escape key press came, system milliseconds
     unsigned emscriptenLastEscapeMs_;
 #endif
+    /// buildat [TOUCH_DROPDOWNS]: the mouse button event being sent is one SDL made of a touch
+    bool touchMouseEvent_ = false;
 };
 
 }

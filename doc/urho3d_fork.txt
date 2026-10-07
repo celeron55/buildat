@@ -369,3 +369,15 @@ that no member moves for a module compiled against the old header; the
 old PODVector, whose Remove() searched every shape in the world for each
 one removed, stays where it was, empty. voxelworld's terrain boxes on a
 VoxeLibre server were a quarter of its time before this.
+
+One press for a tap ([TOUCH_DROPDOWNS])
+---------------------------------------
+Source/Urho3D/Input/Input.{cpp,h}, Source/Urho3D/UI/UI.cpp
+
+SDL sends a touch's first finger as the left mouse button too (tagged
+SDL_TOUCH_MOUSEID), and Input sent both, so the UI took a tap as a press
+from the mouse and another from the touch. A DropDownList or Menu toggles
+its popup on each press: a tap opened it and closed it again. Input sets
+IsTouchMouseEvent() while it sends such a button event, and the UI's mouse
+button handlers skip it; the touch handlers take the tap. Games still see
+the button. touchMouseEvent_ is appended at the class's end.

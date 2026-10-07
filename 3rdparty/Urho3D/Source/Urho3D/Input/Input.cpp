@@ -1886,7 +1886,11 @@ void Input::HandleSDLEvent(void* sdlEvent)
 
     case SDL_MOUSEBUTTONDOWN:
         if (!touchEmulation_)
+        {
+            touchMouseEvent_ = evt.button.which == SDL_TOUCH_MOUSEID;
             SetMouseButton(1 << (evt.button.button - 1), true);
+            touchMouseEvent_ = false;
+        }
         else
         {
             int x, y;
@@ -1909,7 +1913,11 @@ void Input::HandleSDLEvent(void* sdlEvent)
 
     case SDL_MOUSEBUTTONUP:
         if (!touchEmulation_)
+        {
+            touchMouseEvent_ = evt.button.which == SDL_TOUCH_MOUSEID;
             SetMouseButton(1 << (evt.button.button - 1), false);
+            touchMouseEvent_ = false;
+        }
         else
         {
             int x, y;

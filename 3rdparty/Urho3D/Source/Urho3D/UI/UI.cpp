@@ -1516,6 +1516,13 @@ void UI::HandleMouseButtonDown(StringHash eventType, VariantMap& eventData)
 {
     using namespace MouseButtonDown;
 
+    // buildat [TOUCH_DROPDOWNS]: SDL sends a touch's first finger as the
+    // left button too; the touch is handled as one (HandleTouchBegin), and
+    // a tap here as well was two presses, which opened a DropDownList's
+    // popup and closed it again. Games still see the button.
+    if (GetSubsystem<Input>()->IsTouchMouseEvent())
+        return;
+
     mouseButtons_ = eventData[P_BUTTONS].GetInt();
     qualifiers_ = eventData[P_QUALIFIERS].GetInt();
     usingTouchInput_ = false;
@@ -1536,6 +1543,9 @@ void UI::HandleMouseButtonDown(StringHash eventType, VariantMap& eventData)
 void UI::HandleMouseButtonUp(StringHash eventType, VariantMap& eventData)
 {
     using namespace MouseButtonUp;
+
+    if (GetSubsystem<Input>()->IsTouchMouseEvent())
+        return;
 
     mouseButtons_ = eventData[P_BUTTONS].GetInt();
     qualifiers_ = eventData[P_QUALIFIERS].GetInt();
