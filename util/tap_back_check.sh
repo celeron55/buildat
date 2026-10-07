@@ -43,7 +43,7 @@ mouse_pos 5 300
 mouse_click left
 delay 800
 event scan
-mouse_pos 260 345
+mouse_pos 260 353
 delay 300
 event scan
 mouse_pos 700 345
@@ -123,10 +123,10 @@ delay 800
 keypress Down
 keypress Return
 delay 1000
-mouse_pos 200 288
+mouse_pos 200 298
 mouse_click left
 delay 300
-mouse_pos 200 308
+mouse_pos 200 318
 delay 400
 event scan
 keypress Down
