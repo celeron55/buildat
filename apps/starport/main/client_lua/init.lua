@@ -74,6 +74,7 @@ end
 
 local page = nil
 local redraw = nil   -- the page open, drawn again
+local page_back = nil -- its Back, for a page inside a page
 local message = nil  -- a line for the top of the next page drawn
 
 buildat.sub_packet("sp:res", function(data)
@@ -216,7 +217,7 @@ local function open(title, draw, back)
 	-- handle -- the tab's button lights up but the view stays this page's.
 	accounts.close_page()
 	local w = page_element()
-	redraw = draw
+	redraw, page_back = draw, back
 	if back or narrow then
 		button(row(w), "Back", back or show_sidebar)
 	end
@@ -1044,6 +1045,25 @@ pages = {
 	settings = settings_page,
 	accounts = function() accounts.users_page(home) end,
 }
+
+-- [ESC_ACCOUNT]: Escape is Back -- an accounts page's, a page's inside a
+-- page, the sidebar's on a narrow screen -- and at the top builtin's My
+-- account, in this window (user, 2026-10-07)
+magic.SubscribeToEvent("KeyDown", function(_, d)
+	if d:GetInt("Key") ~= magic.KEY_ESCAPE or not frame or
+			not frame.visible then
+		return
+	end
+	if accounts.page then
+		accounts.back()
+	elseif page_back then
+		page_back()
+	elseif narrow and view.visible then
+		show_sidebar()
+	else
+		accounts.show_account(redraw)
+	end
+end)
 
 -- Starport has its own account pages; no corner button ([ACCOUNT_BUTTON])
 accounts.no_account_button()

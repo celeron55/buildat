@@ -1108,14 +1108,22 @@ magic.SubscribeToEvent("Update", function()
 	end
 end)
 
+-- [ESC_ACCOUNT]: Escape is an accounts page's Back, the thread's
+-- composer, a page's Back, and at the top My account, as the top right
+-- Account button (user, 2026-10-07)
 magic.SubscribeToEvent("KeyDown", function(_, d)
-	if not area or not area.visible or d:GetInt("Key") ~= magic.KEY_ESCAPE then
+	if not frame or not frame.visible or
+			d:GetInt("Key") ~= magic.KEY_ESCAPE then
 		return
 	end
-	if selected and composer then
+	if accounts.page then
+		accounts.back()
+	elseif area.visible and selected and composer then
 		composer:SetFocus(true)
-	else
+	elseif area.visible and (#history > 0 or narrow) then
 		back()
+	else
+		accounts.show_account()
 	end
 end)
 

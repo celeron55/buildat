@@ -765,6 +765,11 @@ local function go_back()
 end
 -- Back from the page open, as its Back button: for a game's Esc
 M.back = function() go_back() end
+-- [ESC_ACCOUNT]: My account, as the top right Account button opens it;
+-- `back` is what its Back draws again (nothing: it closes)
+M.show_account = function(back)
+	account_page(back or function() end)
+end
 
 -- A user's own password; `message` is what the last change came to
 passwd_page = function(back, message)
