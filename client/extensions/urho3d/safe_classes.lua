@@ -2818,7 +2818,15 @@ function M.define(dst, util)
 					return not __buildat_client_keys[key] and
 							not hidden_key(key) and self:GetKeyPress(key)
 				end),
-			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),
+			-- Still while the trusted overlay is open over a game
+			-- ([OVERLAY_DISCUSS]): its cursor is the player's to point with
+			GetMouseMove = util.wrap_function({dst.IntVector2}, {"Input"},
+				function(self)
+					if util.mouse and util.mouse.overlay_open then
+						return IntVector2(0, 0)
+					end
+					return self:GetMouseMove()
+				end),
 			-- Where the pointer is, in window pixels: what the MouseMove
 			-- events add up to, read when a click needs it
 			GetMousePosition = util.self_function("GetMousePosition",

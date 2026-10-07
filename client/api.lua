@@ -185,6 +185,8 @@ end
 -- [LEAVE_WITH_REASON]: why the server is about to drop this client, a
 -- kick's text (builtin/accounts), said when it has
 local leave_reason = nil
+-- What runs, for the overlay's Discuss ([OVERLAY_DISCUSS], below)
+local local_launch, running_game = nil, nil
 buildat.safe.set_leave_reason = function(text)
 	leave_reason = tostring(text)
 end
@@ -580,6 +582,10 @@ buildat.safe.connect_start = function(address)
 	if feedback and feedback.address ~= address then
 		feedback = nil
 	end
+	-- What a server's code said of its game was that server's
+	if running_game and not running_game.leave then
+		running_game = nil
+	end
 	__buildat_connect_server_start(address)
 	return true
 end
@@ -610,9 +616,9 @@ end
 -- the composer
 buildat.safe.feedback = function()
 	local f = feedback
-	-- A server's is discussed_server()'s: a Hearth from before it read
-	-- this one as a package's and could not draw it
-	if f and f.server then
+	-- A server's or a game's is discussed()'s: a Hearth from before it
+	-- read this one as a package's and could not draw it
+	if f and (f.server or f.game) then
 		return nil
 	end
 	feedback = nil
@@ -715,7 +721,7 @@ buildat.safe.discuss_this_server = function(claim)
 	return true
 end
 -- discussed_server() -> {name, address, subject, title} or nil, once: the
--- Hearth's side of the above
+-- Hearth's side of the above, for a Hearth from before discussed()
 buildat.safe.discussed_server = function()
 	local f = feedback
 	if not (f and f.server) then
@@ -725,6 +731,154 @@ buildat.safe.discussed_server = function()
 	local s = f.server
 	return {name = s.name, address = s.address, subject = s.subject,
 		title = s.title}
+end
+
+-- **The overlay's Discuss in a game** ([OVERLAY_DISCUSS]): the server
+-- and the game, whichever are known, and the Hearth offers the choice.
+-- What runs is the client's to know: the local app it started
+-- (local_launch), or what a client of another kind running on the
+-- launcher says through set_running_game -- luanti_client its leave,
+-- the Official list's claim and the game id; vanilla its world's game.
+local function from_served()
+	-- 1 is this, 2 the verb, 3 who called it
+	local info = debug.getinfo(3, "S")
+	return info ~= nil and __buildat_served_chunks[info.source] ~= nil
+end
+-- set_running_game({leave =, claim = {name =, address =}, game =}) or
+-- nil. leave is taken only from the client's own extensions, never from
+-- a server's code; game is a Luanti game id.
+buildat.safe.set_running_game = function(t)
+	if t == nil then
+		running_game = nil
+		return true
+	end
+	if type(t) ~= "table" then
+		return false, "set_running_game(table or nil)"
+	end
+	local g = type(t.game) == "string" and t.game:match("^[%w_]+$") and
+			#t.game <= 64 and t.game or nil
+	local claim = type(t.claim) == "table" and {name = t.claim.name,
+			address = t.claim.address} or nil
+	local leave = type(t.leave) == "function" and not from_served() and
+			t.leave or nil
+	if from_served() then
+		-- A server's code names its game, and nothing else
+		running_game = running_game or {}
+		running_game.game = g
+	else
+		running_game = {leave = leave, claim = claim, game = g}
+	end
+	return true
+end
+-- A Luanti game by its id: its title from game.conf, and where it came
+-- from by the file its installer left beside it (vanilla's ContentDB
+-- download writes ".buildat_source", "contentdb:author/name")
+local function luanti_game(id)
+	local dir = __buildat_get_path("user") .. "/shared/vanilla/games/" .. id
+	local title = id
+	local f = io.open(dir .. "/game.conf", "rb")
+	if f then
+		local t = ("\n" .. f:read("*a")):match("\ntitle%s*=%s*([^\r\n]+)") or ""
+		f:close()
+		if #t > 0 and #t <= 60 and not t:find("%c") then
+			title = t
+		end
+	end
+	local src = nil
+	f = io.open(dir .. "/.buildat_source", "rb")
+	if f then
+		src = (f:read("*a") or ""):match("^contentdb:[%w_%-]+/[%w_%-]+")
+		f:close()
+	end
+	-- simplified: a game with no file is "unknown", whatever it is; a
+	-- game bundled with Buildat would name itself here
+	return {name = title, source = src or "unknown",
+		subject = "game:" .. (src or "unknown:" .. id)}
+end
+local function game_target()
+	if running_game and running_game.game then
+		return luanti_game(running_game.game)
+	end
+	local app = __buildat_local_server_running() and local_launch
+	if not app then
+		return nil
+	end
+	-- An app from Aitta is a package: its subject as [PACKAGE_SUBJECT]
+	-- makes it, and the Hearth's package page
+	local author, name, version = app:match("^([%w_]+)%.([%w_]+)@(.+)$")
+	if author then
+		local dir = __buildat_get_path("user") .. "/installed/" .. author ..
+				"/" .. name
+		local kf = io.open(dir .. "/key", "rb")
+		local key = kf and kf:read("*a"):match("%x+") or ""
+		if kf then kf:close() end
+		return {name = author .. "/" .. name, source = "aitta",
+			subject = author .. "/" .. name .. " " .. key,
+			package = author .. "/" .. name, version = version,
+			engine = tostring(buildat.version()), platform = GetPlatform()}
+	end
+	return {name = app, source = "buildat",
+		subject = "game:buildat:" .. app}
+end
+-- What the overlay's button says in a game, or nil out of one
+function __buildat_discuss_label()
+	if __buildat_server_address() and not __buildat_local_server_running() or
+			running_game and running_game.leave then
+		return "Discuss (leave server)"
+	elseif __buildat_server_address() then
+		return "Discuss (leave game)"
+	end
+	return nil
+end
+-- The overlay's Discuss in a game, to `hearth` (a Starport's URL for it):
+-- leave properly, then the Hearth with what is known
+function __buildat_discuss_from_overlay(hearth)
+	local hearth_address = launch_grid.hearth_address(hearth)
+	if not hearth_address then
+		return false
+	end
+	local claim = running_game and running_game.claim
+	local t = discuss_target(claim)
+	local server = t and {name = t.name, address = t.address,
+		subject = t.subject, title = t.title}
+	local game = game_target()
+	local leave = running_game and running_game.leave
+	running_game = nil
+	if __buildat_server_address() then
+		leave_reason = nil
+		if not leave_to_launcher() then
+			return false
+		end
+	elseif leave then
+		leave()
+	end
+	feedback = {address = hearth_address, server = server, game = game}
+	log:info("discuss from the overlay: " .. (server and server.subject or
+			"no server") .. ", " .. (game and game.subject or "no game") ..
+			" on " .. hearth_address)
+	local magic = require("buildat/extension/urho3d").safe
+	local sub
+	sub = magic.SubscribeToEvent("Update", function()
+		magic.UnsubscribeFromEvent("Update", sub)
+		require("buildat/extension/starport").join_with_id(hearth_address)
+	end)
+	return true
+end
+-- discussed() -> {server = {name, address, subject, title} or nil,
+-- game = {name, source, subject[, package, version, engine, platform]}
+-- or nil} or nil, once: the Hearth's side of either Discuss
+buildat.safe.discussed = function()
+	local f = feedback
+	if not (f and (f.server or f.game)) then
+		return nil
+	end
+	feedback = nil
+	local s, g = f.server, f.game
+	return {server = s and {name = s.name, address = s.address,
+			subject = s.subject, title = s.title},
+		game = g and {name = g.name, source = g.source, subject = g.subject,
+			package = g.package, version = g.version, engine = g.engine,
+			platform = g.platform}}
 end
 -- **Back to the launcher from a game** ([MENU_CONTEXT]): the connection
 -- dropped, the local server stopped and the sandbox's leavings cleared.
@@ -1460,11 +1614,6 @@ buildat.safe.local_server_running = __buildat_local_server_running
 -- (extensions/launch_menu/screens.lua, which runs in the sandbox). The
 -- user's and not a server's: a chunk a server sent may not start, stop
 -- or kill a process on this machine.
-local function from_served()
-	-- 1 is this, 2 the verb, 3 who called it
-	local info = debug.getinfo(3, "S")
-	return info ~= nil and __buildat_served_chunks[info.source] ~= nil
-end
 -- start_local_server(game[, launch]) -> true, or false and why. game is
 -- one list_apps() answers; launch is key=value lines for the server's
 -- -u, a key of a name's shape, which the module reads as it would a
@@ -1492,7 +1641,12 @@ buildat.safe.start_local_server = function(game, launch)
 			end
 		end
 	end
-	return __buildat_start_local_server(game, launch)
+	local ok, why = __buildat_start_local_server(game, launch)
+	if ok then
+		local_launch = game
+		running_game = nil
+	end
+	return ok, why
 end
 -- stop_local_server(force): asks it to stop, or kills it with force
 buildat.safe.stop_local_server = function(force)

@@ -68,14 +68,15 @@ local M = {safe = nil}
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat -c ...),
 -- which cannot easily clear a text field
 local DEFAULT_ADDRESS = buildat.get_env("BUILDAT_LUANTI_ADDRESS") or SETTINGS.address
--- [LUANTI_LISTED_JOIN]: a server is listed, for the pause menu's Discuss,
+-- [LUANTI_LISTED_JOIN]: a server is listed, for the Discuss buttons,
 -- when its address is on Luanti's official list as last fetched -- the
 -- dialog's Official tab this run, or the launcher's serverlist cache --
 -- whichever tab or field it was joined from.
 -- simplified: the dialog's fetch is kept for the run only; the cache
 -- has the busiest servers only
+-- listed(address) -> {name, game} or nil; game: the list's game id
 local official_names = {}
-local function listed_name(address)
+local function listed(address)
 	if official_names[address] then
 		return official_names[address]
 	end
@@ -83,7 +84,7 @@ local function listed_name(address)
 	for _, r in ipairs(ok and type(sl) == "table" and sl.servers and
 			sl.servers() or {}) do
 		if r.address == address then
-			return r.name
+			return {name = r.name, game = r.game}
 		end
 	end
 end
@@ -3687,6 +3688,9 @@ local function show_client(host, port, name, password, mode, origin)
 			if ui_utils.set_in_game then
 				ui_utils.set_in_game(false)
 			end
+			if buildat.set_running_game then
+				buildat.set_running_game(nil)
+			end
 			magic.UnsubscribeFromEvent("Update", update_cb)
 			magic.UnsubscribeFromEvent("MouseButtonDown", mouse_down_cb)
 			magic.UnsubscribeFromEvent("MouseButtonUp", mouse_up_cb)
@@ -3741,6 +3745,13 @@ local function show_client(host, port, name, password, mode, origin)
 		-- stack, which holds the world as the key and settings screens do.
 		-- Its Leave is the window's own close: the disconnect goes out, and
 		-- from buildat's menu the grid underneath is what is left.
+		-- The overlay's Discuss leaves through this ([OVERLAY_DISCUSS]),
+		-- and has the server off the list and its game
+		if buildat.set_running_game then
+			buildat.set_running_game({leave = function() leave() end,
+					claim = settings.origin,
+					game = settings.origin and settings.origin.game})
+		end
 		open_pause_menu = function()
 			settings.show_pause{bindings = BINDINGS, view = view,
 					open_chat = open_chat, leave = function(stay)
@@ -3991,9 +4002,9 @@ show_connect_dialog = function(address, name)
 		settings.save(kept)
 		local password = password_edit:GetText()
 		uistack.main:pop(root)
-		local listed = listed_name(address)
+		local l = listed(address)
 		show_client(host, port, name, password, DEFAULT_MODE,
-				listed and {name = listed, address = address})
+				l and {name = l.name, address = address, game = l.game})
 	end
 
 	local function cancel()
@@ -4125,7 +4136,8 @@ show_connect_dialog = function(address, name)
 					if srv.damage then flags[#flags + 1] = "damage" end
 					if srv.pvp then flags[#flags + 1] = "pvp" end
 					local addr = tostring(srv.address or "") .. ":" .. tostring(srv.port or 30000)
-					official_names[addr] = tostring(srv.name or addr)
+					official_names[addr] = {name = tostring(srv.name or addr),
+						game = tostring(srv.gameid or ""):match("^[%w_]+$")}
 					rows[#rows + 1] = {
 						name = tostring(srv.name or addr),
 						badge = string.format("%s/%s playing",

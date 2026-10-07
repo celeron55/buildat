@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~4 min (2026-10-07)
-# covers: client/api.lua discuss_this_server apps/hearth/main/main.cpp apps/hearth/main/client_lua/init.lua extensions/luanti_client/settings.lua
+# covers: client/api.lua discuss_this_server client/extensions/urho3d/init.lua apps/hearth/main/main.cpp apps/hearth/main/client_lua/init.lua extensions/luanti_client/settings.lua
 # [DISCUSS_SERVER]: "Discuss (leave server)" in luanti_client's pause
 # menu. A Starport recommending a Hearth, the Hearth listed there with an
 # admin, an ID logged in on the client, and a local devtest Luanti server
@@ -10,7 +10,9 @@
 # leaves, joins the Hearth with the ID and, with no thread about the
 # server, opens the new thread's form titled "<name> [<address>]"; with
 # one (made under the Servers topic by the first run), that thread. No
-# button for a server not off the list, or with no ID logged in.
+# button for a server not off the list, or with no ID logged in. The
+# overlay's Discuss in the game ([OVERLAY_DISCUSS]) leaves it too, and the
+# Hearth offers the server or its game.
 # Needs luanti in PATH and devtest in the desk's games.
 #   util/discuss_server_check.sh
 set -u
@@ -126,8 +128,10 @@ pause() { # dir log listed extra_cmds...
 	{
 		echo "delay 3000"
 		for _ in 1 2 3; do echo "keypress Return"; echo "delay 400"; done
-		echo "delay 12000"; echo "keypress Escape"; echo "delay 1500"
-		echo "event scan"
+		echo "delay 12000"
+		if [ -z "${OVERLAY:-}" ]; then
+			echo "keypress Escape"; echo "delay 1500"; echo "event scan"
+		fi
 		for c in "$@"; do echo "$c"; done
 		echo "quit"
 	} > "$tmp/c"
@@ -164,6 +168,27 @@ grep -aq "hearth: page Checked \[127.0.0.1:$LU\]" "$tmp/cl2.log" ||
 	fail "the server's thread was not opened ($tmp/cl2.log)"
 grep -aq "hearth: page A thread about" "$tmp/cl2.log" && fail "the form again ($tmp/cl2.log)"
 echo "ok: Discuss opens the server's thread"
+
+# [OVERLAY_DISCUSS]: the overlay's Discuss in the game leaves it, and the
+# Hearth asks whether it is about the server or its game; a thread about
+# the game, made as its form's Send would make it, is what the game's
+# choice opens
+HEARTH_REQS='{"cmd":"new_thread","game":true,"subject":"game:unknown:devtest","title":"devtest","body":"About it","kind":""}' \
+	OVERLAY=1 pause "$tmp/cl" "$tmp/cl5.log" "Check Server" \
+	"keypress F9" "delay 2500" "event scan" "mouse_pos 690 15" "mouse_click left" \
+	"wait_log 30000 Connect succeeded (127.0.0.1:$HE)" "delay 6000" \
+	"mouse_pos 300 98" "mouse_click left" "delay 3000"
+grep -aq "scan scan: mouse visible" "$tmp/cl5.log" ||
+	fail "the mouse is not free with the overlay open ($tmp/cl5.log)"
+grep -aq "hr discuss: .*game:unknown:devtest" "$tmp/cl5.log" ||
+	fail "the Hearth was not handed the game ($tmp/cl5.log)"
+grep -aq "hearth: page What is it about?" "$tmp/cl5.log" ||
+	fail "no choice between the server and the game ($tmp/cl5.log)"
+grep -aq 'hr: {"id":1001,"ok":true' "$tmp/cl5.log" ||
+	fail "the game's thread was not made ($tmp/cl5.log)"
+grep -aq "hearth: page devtest" "$tmp/cl5.log" ||
+	fail "the game's thread was not opened ($tmp/cl5.log)"
+echo "ok: the overlay's Discuss leaves the game and offers the server or the game"
 
 # Typed in: no button; listed but no ID: no button
 pause "$tmp/cl" "$tmp/cl3.log" ""

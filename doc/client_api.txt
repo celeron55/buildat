@@ -394,6 +394,17 @@ buildat.discuss_this_server([claim]) -> true, or false and why
   Luanti's list.
 buildat.discussed_server() -> {name, address, subject, title} or nil
 - The Hearth's side, once: subject is "server:<host>:<port>"
+buildat.discussed() -> {server =, game =} or nil
+- The Hearth's side of the above and of the overlay's Discuss in a game
+  ([OVERLAY_DISCUSS]), once: server as discussed_server() gives it, game
+  {name, source, subject[, package, version, engine, platform]}. source is
+  "contentdb:<author>/<name>", "buildat" (an app bundled with it), "aitta"
+  (with package and the rest, subject as Feedback's) or "unknown"; subject
+  "game:<source>", or "game:unknown:<id>"
+buildat.set_running_game({game =}) or nil
+- A server's code names the Luanti game its world runs (a game id), for
+  the overlay's Discuss; the client's own extensions (luanti_client) also
+  give leave and claim
 buildat.set_reload_on_return(bool)
 - On the web client: whether a disconnect while the page was away (a phone's
   browser dropping a page in the background) reloads the page when it is in

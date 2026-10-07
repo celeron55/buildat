@@ -147,7 +147,7 @@ for _, name in ipairs(safe_globals) do
 	end
 end
 
-local mouse = { hide_wanted = false }
+local mouse = { hide_wanted = false, overlay_open = false }
 
 -- What set_preferred_viewports() was last given, unsafe, for
 -- renderer:GetViewport(): a preferred viewport drawn at a render scale, or
@@ -665,7 +665,7 @@ Safe.SubscribeToEvent("KeyDown", function(_, event_data)
 	end
 end)
 Safe.SubscribeToEvent("MouseButtonDown", function()
-	if not mouse.hide_wanted then
+	if not mouse.hide_wanted or mouse.overlay_open then
 		return
 	end
 	if input:GetMouseMode() == MM_FREE then
@@ -680,7 +680,9 @@ Safe.SubscribeToEvent("InputFocus", function(_, event_data)
 	end
 	local focus = event_data:GetBool("Focus")
 	input:SetMouseChangeReason(focus and "focus regained" or "focus lost")
-	if focus then
+	if focus and mouse.overlay_open then
+		return
+	elseif focus then
 		input:SetMouseMode(MM_ABSOLUTE)
 		input:SetMouseVisible(false)
 	else
@@ -1147,7 +1149,17 @@ local function rebuild_id_rows(ids, sp)
 		local url = id.url
 		local hearth = sp.recommended_hearth and sp.recommended_hearth(url)
 		if hearth then
-			overlay_button(r, "Discuss", function() join_hearth(sp, hearth) end)
+			-- **In a game it leaves first** ([OVERLAY_DISCUSS]): a join
+			-- from inside one left luanti_client running, killed a local
+			-- server into "The server exited", or did nothing
+			local label = __buildat_discuss_label and __buildat_discuss_label()
+			overlay_button(r, label or "Discuss", function()
+				if not label then
+					join_hearth(sp, hearth)
+				elseif not __buildat_discuss_from_overlay(hearth) then
+					log:warning("overlay: Discuss could not leave the game")
+				end
+			end)
 		end
 		local b = overlay_button(r, "Log out", function()
 			sp.log_out(url)
@@ -1276,6 +1288,23 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 			end
 		end
 	end
+	-- **The overlay open in a game frees the mouse** (user, 2026-10-07):
+	-- the cursor shown and the game's mouse look still (GetMouseMove reads
+	-- nought), given back as it closes
+	local open = show and trust_in_game == true
+	if open ~= mouse.overlay_open then
+		mouse.overlay_open = open
+		if open then
+			mouse.saved_mode = input:GetMouseMode()
+			input:SetMouseChangeReason("the overlay open")
+			input:SetMouseMode(MM_FREE)
+			input:SetMouseVisible(true)
+		elseif mouse.hide_wanted then
+			input:SetMouseChangeReason("the overlay closed")
+			input:SetMouseMode(mouse.saved_mode or MM_ABSOLUTE)
+			input:SetMouseVisible(false)
+		end
+	end
 	if show ~= trust_sample_shown then
 		trust_sample_shown = show
 		-- Said when it changes ([TRUST_OVERLAY_LEAVE]): the sample gone
@@ -1317,7 +1346,8 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 				return
 			end
 			local ids = sp and sp.logged_in_ids() or {}
-			local sig = {sp and "" or "no extension"}
+			local sig = {(sp and "" or "no extension") .. "|" ..
+					tostring(__buildat_discuss_label and __buildat_discuss_label())}
 			for _, id in ipairs(ids) do
 				sig[#sig + 1] = id.url .. "|" .. id.name .. "|" ..
 						tostring(sp.recommended_hearth and

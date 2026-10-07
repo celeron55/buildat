@@ -2368,18 +2368,25 @@ struct Module: public interface::Module
 			// ([PACKAGE_SUBJECT])
 			// "server": the client's Discuss on a server it was playing
 			// on ([DISCUSS_SERVER]), "server:<host>:<port>" its subject
-			const bool server = q.get("server").is_true();
+			// "game": the same about a game ([OVERLAY_DISCUSS]),
+			// "game:<source>" its subject
+			const bool server = q.get("server").is_true(),
+					game = q.get("game").is_true();
 			const int64_t topic_id = q.get("feedback").is_true() ?
 					top_topic("Feedback", "About the packages at home here, "
 					"from their users' clients") :
 					server ? category_topic("servers", "Servers",
 					"About the game servers people play on") :
+					game ? category_topic("games", "Games",
+					"About the apps and games people play") :
 					jint(q, "topic");
 			const ss_ title = jstr(q, "title"), body = jstr(q, "body"),
 					subject = jstr(q, "subject"), kind = jstr(q, "kind"),
 					version = jstr(q, "version");
 			if(server && subject.rfind("server:", 0) != 0)
 				throw Exception("a server's thread has its subject");
+			if(game && subject.rfind("game:", 0) != 0)
+				throw Exception("a game's thread has its subject");
 			const json::Value top = topic(topic_id);
 			if(!top.is_object())
 				throw Exception("no such topic");

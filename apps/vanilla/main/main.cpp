@@ -475,7 +475,8 @@ struct Module: public interface::Module
 
 	// What the client shows of the server's: whether it is a public one,
 	// whether its user is an admin, the world running, and whether its user
-	// is the launcher's own -- the pause menu's pages
+	// is the launcher's own -- the pause menu's pages; and the world's
+	// game id, for the client's Discuss ([OVERLAY_DISCUSS])
 	void send_account(network::PeerInfo::Id peer)
 	{
 		bool is_local = false;
@@ -483,7 +484,8 @@ struct Module: public interface::Module
 			is_local = i->is_local(peer);
 		});
 		sv_<ss_> values{m_public ? "1" : "0", is_admin(peer) ? "1" : "0",
-				m_world_name, is_local ? "1" : "0"};
+				m_world_name, is_local ? "1" : "0",
+				m_world_name.empty() ? "" : gameid_of_save(m_world_name)};
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
@@ -2075,6 +2077,9 @@ struct Module: public interface::Module
 				continue;
 			}
 			interface::fs::remove_all(job->into_dir);
+			// Where it came from, for the client's Discuss to name the game
+			// to a Hearth ([OVERLAY_DISCUSS])
+			std::ofstream(to+"/.buildat_source") << "contentdb:" << job->q;
 			log_i(MODULE, "Installed game %s from ContentDB", cs(job->name));
 			menu_message(job->peer, job->name+" installed from ContentDB");
 		}

@@ -94,7 +94,9 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
                            subject "server:<host>:<port>", in the topic
                            of category "servers" (made "Servers" when
                            none is) -- the client's Discuss
-                           ([DISCUSS_SERVER])
+                           ([DISCUSS_SERVER]); or game=true and subject
+                           "game:<source>", in category "games"
+                           ([OVERLAY_DISCUSS])
     status                 the admin: a problem's (open, confirmed,
                            fixed, wontfix) or a patch's (open, applied,
                            wontfix), fixed_in a version

@@ -49,6 +49,11 @@ buildat.sub_packet("main:account", function(data)
 	local v = cereal.binary_input(data, {"array", "string"})
 	account = {public = v[1] == "1", admin = v[2] == "1", world = v[3] or "",
 			is_local = v[4] == "1"}
+	-- The world's game, for the client's Discuss in its overlay
+	-- ([OVERLAY_DISCUSS]); a client from before it has no such verb
+	if buildat.set_running_game and (v[5] or "") ~= "" then
+		buildat.set_running_game({game = v[5]})
+	end
 	o.keys.public = account.public
 	-- A menu up before this came (the web starts paused) is missing what
 	-- the account adds to it

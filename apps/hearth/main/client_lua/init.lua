@@ -536,7 +536,7 @@ end
 local show_home, show_topic, show_thread, show_notifications, show_following
 local show_search, show_account, show_compose, show_report, show_link
 local show_queue, show_settings, show_tracker_link, show_topic_edit
-local show_place, show_server, read_on
+local show_place, show_server, show_discussed, read_on
 
 -- A thread's row; unread marked
 local function thread_row(v, th)
@@ -1150,7 +1150,7 @@ show_compose = function(o)
 		title, key = "Feedback about " .. o.feedback.package .. " " ..
 				o.feedback.version, "feedback " .. o.feedback.subject
 	elseif o.server then
-		title, key = "A thread about " .. o.server.address,
+		title, key = "A thread about " .. (o.server.address or o.server.name),
 				"server " .. o.server.subject
 	else
 		title, key = "A new thread", "new " .. (o.topic or 0)
@@ -1158,6 +1158,11 @@ show_compose = function(o)
 	local w = open(title)
 	if o.feedback then
 		text(w, "Goes to this Hearth's Feedback topic, which its makers read",
+				DIM, W)
+	elseif o.game then
+		text(w, "Goes to this Hearth's topic for games" ..
+				(o.server.source == "unknown" and "; where it came from " ..
+				"is not known" or ""),
 				DIM, W)
 	elseif o.server then
 		text(w, "Goes to this Hearth's topic for servers", DIM, W)
@@ -1239,7 +1244,8 @@ show_compose = function(o)
 		if o.edit then
 			req("edit", {message = o.edit.id, body = b}, function() done() end)
 		elseif o.server then
-			req("new_thread", {server = true, subject = o.server.subject,
+			req("new_thread", {server = not o.game, game = o.game == true,
+					subject = o.server.subject,
 					title = title_e:GetText(), body = b, kind = kind()}, done)
 		elseif o.feedback then
 			local f = o.feedback
@@ -1631,11 +1637,12 @@ show_place = function(f)
 	end)
 end
 
--- **A server the player was on** ([DISCUSS_SERVER]): the client's Discuss
--- came here. Its thread, by the subject Hearth gave it; with none, the
--- threads whose words match its name to pick from, or straight to a new
--- one, titled with the name and the address
-show_server = function(d)
+-- **A server the player was on** ([DISCUSS_SERVER]), or with `game` a game
+-- they played ([OVERLAY_DISCUSS]): the client's Discuss came here. Its
+-- thread, by the subject Hearth gave it; with none, the threads whose
+-- words match its name to pick from, or straight to a new one, titled
+-- with the name (and a server's address)
+show_server = function(d, game)
 	open_thread = nil
 	-- In place of this page, which Back would only bring here again
 	local function instead(page)
@@ -1643,7 +1650,7 @@ show_server = function(d)
 		page()
 	end
 	local function compose()
-		instead(function() show_compose({server = d}) end)
+		instead(function() show_compose({server = d, game = game}) end)
 	end
 	req("subject", {subject = d.subject}, function(threads)
 		if #threads > 0 then
@@ -1659,7 +1666,7 @@ show_server = function(d)
 			end
 			local w = open(d.title)
 			button(w, "Start a thread about it...", function()
-				go(function() show_compose({server = d}) end)
+				go(function() show_compose({server = d, game = game}) end)
 			end, true)
 			local v = list()
 			v:header("Threads that may be about it")
@@ -1675,6 +1682,36 @@ show_server = function(d)
 			v:fit()
 		end, compose)
 	end)
+end
+
+-- The server, the game or both from the client's Discuss: with both,
+-- which one the player means is theirs to say
+local function show_game(g)
+	g.title = g.title or g.name
+	if g.package then
+		-- An Aitta package's place ([PACKAGE_SUBJECT])
+		show_place(g)
+	else
+		show_server(g, true)
+	end
+end
+show_discussed = function(dd)
+	if not (dd.server and dd.game) then
+		if dd.server then
+			return show_server(dd.server)
+		end
+		return show_game(dd.game)
+	end
+	open_thread = nil
+	local w = open("What is it about?")
+	button(row(w), "About this server, " .. dd.server.title, function()
+		go(function() show_server(dd.server) end)
+	end)
+	button(row(w), "About " .. dd.game.name, function()
+		go(function() show_game(dd.game) end)
+	end)
+	-- What is left of the page
+	w:CreateChild("UIElement")
 end
 
 buildat.sub_packet("hr:new", function(data)
@@ -1722,14 +1759,19 @@ accounts.on_joined = function()
 			-- came here with the app's package and versions, which start the
 			-- message and go with the thread as its subject
 			local f = buildat.feedback()
-			-- [DISCUSS_SERVER]; a client from before it has none
-			local ds = buildat.discussed_server and buildat.discussed_server()
-			if ds then
+			-- [OVERLAY_DISCUSS] or [DISCUSS_SERVER]; a client from before
+			-- them has neither
+			local dd = buildat.discussed and buildat.discussed()
+			if not dd and buildat.discussed_server then
+				local ds = buildat.discussed_server()
+				dd = ds and {server = ds}
+			end
+			if dd then
 				if scripted then
-					log:info("hr discuss: " .. encode(ds))
+					log:info("hr discuss: " .. encode(dd))
 				end
 				here = function() show_home() end
-				go(function() show_server(ds) end)
+				go(function() show_discussed(dd) end)
 			elseif f then
 				if scripted then
 					log:info("hr feedback: " .. encode(f))
