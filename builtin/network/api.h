@@ -180,6 +180,10 @@ namespace network
 		// them: starport_announce, a Starport's play page under that
 		// Starport's URL. A call replaces what `by` gave; none removes it.
 		virtual void set_ws_origins(const ss_ &by, const sv_<ss_> &origins) = 0;
+		// [SERVER_HEALTH] what /health answers: app, version, uptime_s,
+		// players, tick_gap_ms_avg and _max over the last minute,
+		// memory_bytes, as JSON
+		virtual ss_ health_json() = 0;
 	};
 
 	inline bool access(interface::Server *server,

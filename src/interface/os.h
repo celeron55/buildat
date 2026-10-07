@@ -12,6 +12,9 @@ namespace interface
 		ss_ get_current_exe_path();
 		// name without extension; looks next to the current executable
 		ss_ get_sibling_exe_path(const ss_ &name);
+		// The process's resident memory in bytes, 0 if unknown
+		// ([SERVER_HEALTH]; simplified: Linux and Windows, 0 on macOS)
+		int64_t memory_bytes();
 	}
 }
 

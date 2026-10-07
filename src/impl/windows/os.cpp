@@ -24,6 +24,14 @@ void sleep_us(int us)
 	usleep(us);
 }
 
+int64_t memory_bytes()
+{
+	PROCESS_MEMORY_COUNTERS pmc;
+	if(!GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof pmc))
+		return 0;
+	return (int64_t)pmc.WorkingSetSize;
+}
+
 struct HandleScope {
 	HANDLE h;
 	HandleScope(HANDLE h): h(h){}

@@ -3,6 +3,7 @@
 #include "interface/os.h"
 #include "interface/fs.h"
 #include <cstring>
+#include <cstdio>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -19,6 +20,18 @@ int64_t time_us()
 void sleep_us(int us)
 {
 	usleep(us);
+}
+
+int64_t memory_bytes()
+{
+	// statm: size, then resident, in pages
+	FILE *f = fopen("/proc/self/statm", "r");
+	if(!f)
+		return 0;
+	long size = 0, resident = 0;
+	const int n = fscanf(f, "%ld %ld", &size, &resident);
+	fclose(f);
+	return n == 2 ? (int64_t)resident * sysconf(_SC_PAGESIZE) : 0;
 }
 
 ss_ get_current_exe_path()

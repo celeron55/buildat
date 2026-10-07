@@ -42,6 +42,7 @@
 #include <sys/stat.h>
 #define MODULE "network"
 #include <thread>
+#include <random>
 #include <mutex>
 
 using interface::Event;
@@ -559,6 +560,14 @@ struct Module: public interface::Module, public network::Interface
 	bool m_lan_account = false;
 	int m_lan_fd = -1;
 	int64_t m_lan_next_us = 0;
+	// [SERVER_HEALTH]: since when, the gaps between the last minute's
+	// ticks as this module got them, and the token that lets /health in
+	// from elsewhere than this machine
+	const int64_t m_start_us = interface::os::time_us();
+	std::mutex m_health_mutex;
+	std::deque<int64_t> m_tick_gaps_us;
+	int64_t m_last_tick_us = 0;
+	ss_ m_health_token;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -629,6 +638,16 @@ struct Module: public interface::Module, public network::Interface
 
 	void on_tick()
 	{
+		{
+			const int64_t now = interface::os::time_us();
+			std::lock_guard<std::mutex> lock(m_health_mutex);
+			if(m_last_tick_us != 0)
+				m_tick_gaps_us.push_back(now - m_last_tick_us);
+			m_last_tick_us = now;
+			// A minute at 30 ticks a second
+			while(m_tick_gaps_us.size() > 1800)
+				m_tick_gaps_us.pop_front();
+		}
 		if(m_lan_name.empty())
 			return;
 		const int64_t now = interface::os::time_us();
@@ -664,8 +683,124 @@ struct Module: public interface::Module, public network::Interface
 		m_lan_next_us = 0;
 	}
 
+	// [SERVER_HEALTH] the token in the app's user directory, made at the
+	// first start: a monitor elsewhere than this machine sends it
+	void load_health_token()
+	{
+		const ss_ path = m_server->get_config().get<ss_>("user_path")+
+				"/apps/"+m_server->get_app_id()+"/health_token.txt";
+		std::ifstream in(path);
+		std::getline(in, m_health_token);
+		m_health_token = web::trim(m_health_token);
+		if(m_health_token.size() >= 16)
+			return;
+		std::random_device rd;
+		char hex[33];
+		for(int i = 0; i < 4; i++)
+			snprintf(hex + i * 8, 9, "%08x", (unsigned)rd());
+		m_health_token = hex;
+		interface::fs::create_directories(
+				interface::fs::strip_file_name(path));
+		std::ofstream out(path);
+		out<<m_health_token<<"\n";
+		if(out.good())
+			log_i(MODULE, "The /health token is in %s", cs(path));
+		else
+			log_w(MODULE, "Could not write %s: /health and /metrics answer "
+					"only this machine", cs(path));
+	}
+
+	// [SERVER_HEALTH] what /health, /metrics and the admin's page say
+	struct Health {
+		int64_t uptime_s, players, memory_bytes;
+		double tick_gap_ms_avg, tick_gap_ms_max;
+	};
+	Health health()
+	{
+		Health h;
+		int64_t sum = 0, max = 0;
+		size_t n = 0;
+		{
+			std::lock_guard<std::mutex> lock(m_health_mutex);
+			for(int64_t g : m_tick_gaps_us){
+				sum += g;
+				max = std::max(max, g);
+			}
+			n = m_tick_gaps_us.size();
+		}
+		h.uptime_s = (interface::os::time_us() - m_start_us) / 1000000;
+		h.players = (int64_t)list_peers().size();
+		h.memory_bytes = interface::os::memory_bytes();
+		// The tick is 1/30 s; a gap well over it is a server falling behind
+		h.tick_gap_ms_avg = n ? (double)sum / n / 1000.0 : 0.0;
+		h.tick_gap_ms_max = (double)max / 1000.0;
+		return h;
+	}
+
+	ss_ health_json()
+	{
+		const Health h = health();
+		json::Value v = json::object();
+		v.set("ok", json::Value(true));
+		v.set("app", m_server->get_app_id());
+		v.set("version", ss_(BUILDAT_VERSION));
+		v.set("uptime_s", h.uptime_s);
+		v.set("players", h.players);
+		v.set("tick_gap_ms_avg", h.tick_gap_ms_avg);
+		v.set("tick_gap_ms_max", h.tick_gap_ms_max);
+		v.set("memory_bytes", h.memory_bytes);
+		return v.stringify();
+	}
+
+	// Prometheus' text format
+	ss_ health_metrics()
+	{
+		const Health h = health();
+		char b[1024];
+		snprintf(b, sizeof b,
+				"# TYPE buildat_up gauge\nbuildat_up 1\n"
+				"# TYPE buildat_info gauge\n"
+				"buildat_info{app=\"%s\",version=\"%s\"} 1\n"
+				"# TYPE buildat_uptime_seconds gauge\n"
+				"buildat_uptime_seconds %lld\n"
+				"# TYPE buildat_players gauge\nbuildat_players %lld\n"
+				"# TYPE buildat_tick_gap_seconds gauge\n"
+				"buildat_tick_gap_seconds{stat=\"avg\"} %.6f\n"
+				"buildat_tick_gap_seconds{stat=\"max\"} %.6f\n"
+				"# TYPE buildat_memory_bytes gauge\n"
+				"buildat_memory_bytes %lld\n",
+				cs(m_server->get_app_id()), BUILDAT_VERSION,
+				(long long)h.uptime_s, (long long)h.players,
+				h.tick_gap_ms_avg / 1000.0, h.tick_gap_ms_max / 1000.0,
+				(long long)h.memory_bytes);
+		return b;
+	}
+
+	// /health and /metrics: this machine's, unless through a proxy (any
+	// forwarding header says so), or anyone's with the token
+	bool health_allowed(const Peer &peer, sm_<ss_, ss_> &headers,
+			const ss_ &query)
+	{
+		if(loopback(peer.socket->get_remote_address()) &&
+				headers["x-forwarded-for"].empty() &&
+				headers["forwarded"].empty() && headers["x-real-ip"].empty())
+			return true;
+		ss_ given = headers["authorization"];
+		if(given.compare(0, 7, "Bearer ") == 0)
+			given = web::trim(given.substr(7));
+		else
+			given = query.compare(0, 6, "token=") == 0 ? query.substr(6) : "";
+		if(given.size() != m_health_token.size() || m_health_token.empty())
+			return false;
+		unsigned char d = 0;
+		for(size_t i = 0; i < given.size(); i++)
+			d |= given[i] ^ m_health_token[i];
+		return d == 0;
+	}
+
 	void on_start()
 	{
+		load_health_token();
 		m_admin_favicon = interface::fs::read_icon_png(
 				m_server->get_config().get<ss_>("user_path")+"/apps/"+
 				m_server->get_app_id()+"/server_icon.png");
@@ -1038,6 +1173,22 @@ struct Module: public interface::Module, public network::Interface
 		}
 		const ss_ rest = req.substr(end + 4);
 		peer.http_request.clear();
+
+		if(method == "GET" && (target == "/health" || target == "/metrics")){
+			peer.closing = true;
+			if(!health_allowed(peer, headers, query)){
+				ss_ body = "The token from the server's health_token.txt\n";
+				peer.queue_raw(web::response("403 Forbidden",
+						"text/plain; charset=utf-8", body.size()) + body);
+				return true;
+			}
+			const bool json = target == "/health";
+			const ss_ body = json ? health_json()+"\n" : health_metrics();
+			peer.queue_raw(web::response("200 OK", json ?
+					"application/json" : "text/plain; version=0.0.4",
+					body.size()) + body);
+			return true;
+		}
 
 		// **An app's API** ([STARPORT]): handed to the modules, whose
 		// answer is http_respond()'s. A WebSocket upgrade wins over a

@@ -311,7 +311,15 @@ claim_http_path(prefix) ([HEARTH_MVP]: Hearth's pages), comes as
 KiB at most, address) and is answered with http_respond(peer, status,
 content_type, body). The web client's files are never claimed: it is at
 /play and /app ([PLAY_PATH]: a link picks by the listing's kind, world
-or arena -> /play), /index.html, and / unless "/" is claimed. listen_on(address) listens on another address too, on
+or arena -> /play), /index.html, and / unless "/" is claimed. /health
+(JSON: app, version, uptime_s, players, tick_gap_ms_avg and _max over
+the last minute -- 33 ms is on time --, memory_bytes) and /metrics (the
+same in Prometheus' text format) are a monitor's ([SERVER_HEALTH]):
+open from this machine, unless the request carries X-Forwarded-For,
+Forwarded or X-Real-IP (a proxy), and from elsewhere with the token in
+<user>/apps/<app>/health_token.txt, made at the first start, as
+"Authorization: Bearer <token>" or ?token=<token>. health_json() is
+the same JSON for a module. listen_on(address) listens on another address too, on
 the same port (a launcher's 127.0.0.1 game opened to the LAN);
 lan_announce(name, account) says every 2 s on the LAN group that this
 server is here, "" stops ([LAN_DISCOVERY]). Events:
