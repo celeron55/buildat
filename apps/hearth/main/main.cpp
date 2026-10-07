@@ -1406,7 +1406,7 @@ struct Module: public interface::Module
 				"aria-label=\"Search\"> <button>Search</button></form>"
 				"</header>\n"+content+
 				"\n<p class=\"meta\">Posts are CC-BY-SA. To take part, open "
-				"this server in the buildat client (<a href=\"/index.html\">"
+				"this server in the buildat client (<a href=\"/app\">"
 				"in the browser</a>).</p></body></html>\n";
 	}
 

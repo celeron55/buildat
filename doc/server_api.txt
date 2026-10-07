@@ -309,7 +309,9 @@ port: a request under /api/, or under a prefix the module claimed with
 claim_http_path(prefix) ([HEARTH_MVP]: Hearth's pages), comes as
 "network:http_request" (HttpRequest: peer, method, path, query, body of 64
 KiB at most, address) and is answered with http_respond(peer, status,
-content_type, body). listen_on(address) listens on another address too, on
+content_type, body). The web client's files are never claimed: it is at
+/play and /app ([PLAY_PATH]: a link picks by the listing's kind, world
+or arena -> /play), /index.html, and / unless "/" is claimed. listen_on(address) listens on another address too, on
 the same port (a launcher's 127.0.0.1 game opened to the LAN);
 lan_announce(name, account) says every 2 s on the LAN group that this
 server is here, "" stops ([LAN_DISCOVERY]). Events:

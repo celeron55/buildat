@@ -40,8 +40,8 @@ joining; the HTML face needs no account.
 
 The HTML face
 -------------
-Claimed from builtin/network (claim_http_path); /index.html and the rest
-stay the web client's.
+Claimed from builtin/network (claim_http_path); /app (also /play and
+/index.html) and the rest stay the web client's.
 
     /                the topics (one level of subtopics) and the latest
                      20 threads

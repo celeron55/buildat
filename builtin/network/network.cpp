@@ -433,6 +433,10 @@ static const std::pair<ss_, ss_>* web_file(const ss_ &target)
 {
 	static const sm_<ss_, std::pair<ss_, ss_>> files = {
 		{"/", {"index.html", "text/html; charset=utf-8"}},
+		// [PLAY_PATH] /play for a game, /app for the rest: a link picks by
+		// the listing's kind; /index.html for the links made before them
+		{"/play", {"index.html", "text/html; charset=utf-8"}},
+		{"/app", {"index.html", "text/html; charset=utf-8"}},
 		{"/index.html", {"index.html", "text/html; charset=utf-8"}},
 		{"/buildat.js", {"buildat.js", "application/javascript"}},
 		{"/buildat.wasm", {"buildat.wasm", "application/wasm"}},

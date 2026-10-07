@@ -82,7 +82,8 @@ with the app's request {"cmd": "set_settings", "settings": {...}}.
                                               release, for a browser
     GET  /p/<author>/<name>                   a package's listed releases
 
-The web client of an Aitta server is at /index.html.
+The web client of an Aitta server is at /app (/play and /index.html
+work too).
 
 Browsing and installing in the client
 -------------------------------------

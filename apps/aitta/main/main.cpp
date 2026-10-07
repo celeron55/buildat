@@ -19,7 +19,7 @@
 //                                   signature good for the hash it names.
 //   POST upload_part?sha256=&offset=  body: the next bytes, 60000 at most
 //   POST upload_end?sha256=         the checks, and the listing
-// And a browser's pages ([FRONT_PAGES]), the web client at /index.html:
+// And a browser's pages ([FRONT_PAGES]), the web client at /app:
 //   GET  /                          each package's latest release
 //   GET  /p/<author>/<name>         a package's listed releases
 //   GET  /brand/<file>              the pages' font and logo
@@ -217,7 +217,7 @@ struct Module: public interface::Module
 		m_tmp = c.get<ss_>("cache_path")+"/apps/"+app+"/tmp";
 		interface::fs::create_directories(m_archives);
 		interface::fs::create_directories(m_tmp);
-		// [FRONT_PAGES]: a browser's pages; the web client is at /index.html
+		// [FRONT_PAGES]: a browser's pages; the web client is at /app
 		network::access(m_server, [&](network::Interface *iface){
 			iface->claim_http_path("/");
 			iface->claim_http_path("/p/");

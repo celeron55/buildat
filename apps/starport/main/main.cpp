@@ -22,7 +22,7 @@
 //                            ?kind=, ?audience= ([FRONT_PAGES]), only
 //                            what suits a teen, claimed an hour, with no
 //                            open report;
-//                            the web client is at /index.html
+//                            the web client is at /app ([PLAY_PATH])
 // The API answers any origin (CORS *): it takes no cookies.
 // In the app, "sp:req" carries a JSON {id, cmd, ...} from a joined client
 // and "sp:res" the answer {id, ok, result | error}.
@@ -171,6 +171,12 @@ static bool in_set(const ss_ &s, std::initializer_list<const char*> set)
 
 static const std::initializer_list<const char*> KINDS =
 		{"world", "arena", "app", "other"};
+// [PLAY_PATH] the web client's path for a listing: a game's word or an
+// app's
+static ss_ play_path(const ss_ &kind)
+{
+	return kind == "world" || kind == "arena" ? "/play" : "/app";
+}
 static const std::initializer_list<const char*> AUDIENCES =
 		{"everyone", "teen", "adult"};
 static const std::initializer_list<const char*> ACCESSES =
@@ -822,7 +828,7 @@ struct Module: public interface::Module
 			iface->claim_http_path("/authorize");
 			iface->claim_http_path("/id");
 			iface->claim_http_path("/brand/");
-			iface->claim_http_path("/"); // [FRONT_PAGES]; the client is at /index.html
+			iface->claim_http_path("/"); // [FRONT_PAGES]; the client is at /app
 		});
 		// m_last_day stays 0: the daily pass runs at the first tick too, so a
 		// Starport down at midnight still clears what the retention ends
@@ -2030,7 +2036,8 @@ struct Module: public interface::Module
 					"Play in your browser</a>";
 		else if(s.get("tls").is_true())
 			b += "<a href=\"https://"+html(host)+(port == 443 ? ss_() :
-					":"+itos(port))+"/index.html\" rel=\"nofollow noopener\">"
+					":"+itos(port))+play_path(jstr(s, "kind"))+
+					"\" rel=\"nofollow noopener\">"
 					"Play in your browser</a>";
 		else
 			b += "<span class=\"meta\">Native client only</span>";
