@@ -645,7 +645,8 @@ function M.safe.keyboard_page(win)
 					page.left_at, page.side = i, 1
 				end
 			end
-			for _, e in ipairs(page_items(cols[2], {})) do
+			page.right_seen = page_items(cols[2], {})
+			for _, e in ipairs(page.right_seen) do
 				if e:HasFocus() then
 					page.side = 2
 				end
@@ -746,11 +747,12 @@ function M.safe.keyboard_page(win)
 				page.side = 1
 				return
 			end
-			-- The button may have drawn the sidebar again already, its
-			-- focus gone with it: the side last seen then
+			-- The button may have drawn the sidebar and its page again
+			-- already, its focus gone with it: the side and the page's
+			-- items last seen then
 			if (side or page.side) == 1 and (key == KEY_RETURN or
 					key == KEY_RETURN2 or key == KEY_KP_ENTER) then
-				page.to_right = {old = right,
+				page.to_right = {old = page.right_seen or right,
 					until_us = buildat.get_time_us() + 3000000}
 			end
 		end
