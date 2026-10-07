@@ -223,6 +223,10 @@ local function gather()
 			e.run = function() stale = true run() end
 		end
 		table.insert(e.actions, 1, {label = PRIMARY[e.kind], run = e.run})
+		-- A server with no icon of its own ([GLYPH_ICONS])
+		if e.kind == "server" and not e.icon then
+			e.glyph = "\u{1F310}"
+		end
 		entries[#entries + 1] = e
 		return e
 	end
@@ -496,6 +500,7 @@ local function home(query)
 			end
 			if n > 0 then
 				row({label = KIND_TITLE[kind], kind = "browse",
+					glyph = kind == "server" and "\u{1F310}" or nil,
 					description = n .. " to choose from"}, tostring(n),
 					function() browse(kind, "", "recent") end)
 			end
@@ -852,7 +857,7 @@ settings = function()
 			"Developer"}) do
 		if section == "Controls" then
 			view:header(section)
-			row({label = "Keys", description = "Every app's keys, the " ..
+			row({label = "Keys", glyph = "\u{2328}", description = "Every app's keys, the " ..
 					"shared ones that bind them all at once, and the " ..
 					"client's own."}, function() controls(1) end)
 		elseif by_section[section] then
@@ -893,6 +898,10 @@ local CLIENT_KEY_LABEL = {overlay = "Trusted overlay on and off",
 	profiler = "The engine's profiler (Ctrl: physics geometry)",
 	fullscreen = "Fullscreen on and off",
 	screenshot = "A screenshot (Ctrl: the sandbox scan)"}
+-- A shared name's glyph, and so an app's action under it ([GLYPH_ICONS])
+local KEY_GLYPH = {["move.forward"] = "\u{2191}", ["move.back"] = "\u{2193}",
+	["move.left"] = "\u{2190}", ["move.right"] = "\u{2192}",
+	jump = "\u{2B9D}", sneak = "\u{2B9F}", sprint = "\u{21DB}"}
 controls = function(focus)
 	local store = api.key_store()
 	local width = math.min(magic.ui.root.width - 40, 760)
@@ -901,8 +910,8 @@ controls = function(focus)
 	local view = ui_utils.list_view(window, width - 32,
 			magic.ui.root.height - 200)
 	local rows = {}
-	local function row(label, key, note, set, reset, unbind)
-		rows[#rows + 1] = {button = view:row({label = label},
+	local function row(label, key, note, set, reset, unbind, glyph)
+		rows[#rows + 1] = {button = view:row({label = label, glyph = glyph},
 				(key or "-") .. (note and "   " .. note or "")),
 			set = set, reset = reset, unbind = unbind, label = label}
 	end
@@ -935,7 +944,7 @@ controls = function(focus)
 				"each app's own, used by " .. (users[n] or 0) or
 				"used by " .. (users[n] or 0),
 				function(k) return api.set_shared_key(n, k) end,
-				function() return api.set_shared_key(n, nil) end)
+				function() return api.set_shared_key(n, nil) end, nil, KEY_GLYPH[n])
 	end
 	for _, a in ipairs(store.apps) do
 		if #a.actions > 0 then
@@ -946,7 +955,7 @@ controls = function(focus)
 						function(k) return api.set_app_keys(a.id, {[e.id] = k}) end,
 						function()
 							return api.set_app_keys(a.id, {[e.id] = false})
-						end)
+						end, nil, KEY_GLYPH[e.shared])
 			end
 		end
 	end

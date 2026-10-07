@@ -748,8 +748,10 @@ end
 --       row_height = 28, icon_size = 20, label_share = 0.62, spacing = 2,
 --       wheel = nil, follow_focus = false})
 --   view:header(s, size, color)  a heading row; dim, 13 by default
---   view:row(e, badge)           a Button: e.icon (a texture, or none),
---                                e.label, and badge (or e.badge) dim after
+--   view:row(e, badge)           a Button: e.icon (a texture, or none;
+--                                else e.glyph, a character of the font,
+--                                dim in its place), e.label, and badge
+--                                (or e.badge) dim after
 --   view:fit()                   lays the rows out; again after adding more
 --   view:show(e)                 scrolls so that e is in view
 --   view:scroll(dy)              by dy pixels, clamped; math.huge: the end
@@ -865,6 +867,10 @@ function M.safe.list_view(parent, width, height, options)
 			tex.filterMode = magic.FILTER_NEAREST
 			icon.texture = tex
 			icon.blendMode = magic.BLEND_ALPHA
+		elseif e.glyph then
+			-- [GLYPH_ICONS]
+			text(icon, e.glyph, icon_size + 2, "dim"):SetAlignment(HA_CENTER,
+					VA_CENTER)
 		end
 		local label = text(b, e.label)
 		label:SetName("ButtonText")
