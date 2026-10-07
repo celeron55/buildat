@@ -68,6 +68,25 @@ local M = {safe = nil}
 -- BUILDAT_LUANTI_ADDRESS is for scripted runs (bin/buildat -c ...),
 -- which cannot easily clear a text field
 local DEFAULT_ADDRESS = buildat.get_env("BUILDAT_LUANTI_ADDRESS") or SETTINGS.address
+-- [LUANTI_LISTED_JOIN]: a server is listed, for the pause menu's Discuss,
+-- when its address is on Luanti's official list as last fetched -- the
+-- dialog's Official tab this run, or the launcher's serverlist cache --
+-- whichever tab or field it was joined from.
+-- simplified: the dialog's fetch is kept for the run only; the cache
+-- has the busiest servers only
+local official_names = {}
+local function listed_name(address)
+	if official_names[address] then
+		return official_names[address]
+	end
+	local ok, sl = pcall(require, "buildat/extension/serverlist")
+	for _, r in ipairs(ok and type(sl) == "table" and sl.servers and
+			sl.servers() or {}) do
+		if r.address == address then
+			return r.name
+		end
+	end
+end
 local DEFAULT_NAME = buildat.get_env("BUILDAT_LUANTI_NAME") or SETTINGS.name
 -- The PBR checkbox's starting state. A scripted run has to hit the box by
 -- pixel coordinates otherwise, and a miss looks like the shader not working
@@ -3952,12 +3971,10 @@ show_connect_dialog = function(address, name)
 	-- Set below, once the dialog's buttons are there; connect() and cancel()
 	-- both have to drop it
 	local escape_cb = nil
-	-- The official list's row picked last: the address joined came from
-	-- Luanti's list while the field still says it
-	local listed = nil
-
 	local function connect()
-		local host, port = split_address(address_edit:GetText())
+		-- Read before the pop below removes the field
+		local address = address_edit:GetText()
+		local host, port = split_address(address)
 		local name = name_edit:GetText()
 		if name == "" then
 			ui_utils.show_message_dialog("A player name is needed")
@@ -3969,14 +3986,14 @@ show_connect_dialog = function(address, name)
 		end
 		-- The address and the name kept for next time ([EXT_SETTINGS])
 		local kept = settings.load()
-		kept.address = address_edit:GetText()
+		kept.address = address
 		kept.name = name
 		settings.save(kept)
 		local password = password_edit:GetText()
 		uistack.main:pop(root)
+		local listed = listed_name(address)
 		show_client(host, port, name, password, DEFAULT_MODE,
-				listed and listed.address == address_edit:GetText() and
-				listed or nil)
+				listed and {name = listed, address = address})
 	end
 
 	local function cancel()
@@ -4027,8 +4044,6 @@ show_connect_dialog = function(address, name)
 	local source = "recent"
 	pick = function(row, second)
 		address_edit:SetText(row.address)
-		listed = source == "official" and {name = row.name,
-				address = row.address} or nil
 		-- The name last used on that server ([BOX_PLAYTEST_2] 4)
 		if row.player_name and row.player_name ~= "" then
 			name_edit:SetText(row.player_name)
@@ -4110,6 +4125,7 @@ show_connect_dialog = function(address, name)
 					if srv.damage then flags[#flags + 1] = "damage" end
 					if srv.pvp then flags[#flags + 1] = "pvp" end
 					local addr = tostring(srv.address or "") .. ":" .. tostring(srv.port or 30000)
+					official_names[addr] = tostring(srv.name or addr)
 					rows[#rows + 1] = {
 						name = tostring(srv.name or addr),
 						badge = string.format("%s/%s playing",
@@ -4217,12 +4233,8 @@ function M.boot()
 		local host, port = split_address(DEFAULT_ADDRESS)
 		log:info("connecting to " .. host .. ":" .. port ..
 				" without the dialog, as BUILDAT_LUANTI_CONNECT asks")
-		-- BUILDAT_LUANTI_LISTED: the name a scripted run's server has as
-		-- if picked off Luanti's list ([DISCUSS_SERVER])
-		local listed = buildat.get_env("BUILDAT_LUANTI_LISTED")
 		show_client(host, port, DEFAULT_NAME,
-				buildat.get_env("BUILDAT_LUANTI_PASSWORD") or "", DEFAULT_MODE,
-				listed and {name = listed, address = host .. ":" .. port})
+				buildat.get_env("BUILDAT_LUANTI_PASSWORD") or "", DEFAULT_MODE)
 		return
 	end
 	show_connect_dialog()

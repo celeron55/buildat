@@ -5,7 +5,8 @@
 # [DISCUSS_SERVER]: "Discuss (leave server)" in luanti_client's pause
 # menu. A Starport recommending a Hearth, the Hearth listed there with an
 # admin, an ID logged in on the client, and a local devtest Luanti server
-# taken as picked off Luanti's list (BUILDAT_LUANTI_LISTED). The button
+# joined through luanti_client's dialog, listed by being in the launcher's
+# copy of Luanti's list ([LUANTI_LISTED_JOIN]). The button
 # leaves, joins the Hearth with the ID and, with no thread about the
 # server, opens the new thread's form titled "<name> [<address>]"; with
 # one (made under the Servers topic by the first run), that thread. No
@@ -110,21 +111,27 @@ EOF
 }
 client_dir "$tmp/cl" 1
 client_dir "$tmp/out" 0
-# luanti_client into the server, Escape, a scan of the pause menu; then
-# the menu's second last row, Discuss, and the ID's first-time "Use it"
+# luanti_client's dialog: Return through the address, name and password
+# fields joins; Escape, a scan of the pause menu; then the menu's second
+# last row, Discuss, and the ID's first-time "Use it". listed: the name
+# the launcher's serverlist cache has for the server, or none.
 pause() { # dir log listed extra_cmds...
 	local d=$1 log=$2 listed=$3
 	shift 3
+	rm -f "$d/serverlist/serverlist.csv"
+	if [ -n "$listed" ]; then
+		mkdir -p "$d/serverlist"
+		printf '127.0.0.1:%s|%s|0|devtest\n' $LU "$listed" > "$d/serverlist/serverlist.csv"
+	fi
 	{
+		echo "delay 3000"
+		for _ in 1 2 3; do echo "keypress Return"; echo "delay 400"; done
 		echo "delay 12000"; echo "keypress Escape"; echo "delay 1500"
 		echo "event scan"
 		for c in "$@"; do echo "$c"; done
 		echo "quit"
 	} > "$tmp/c"
-	local e=()
-	[ -n "$listed" ] && e=(BUILDAT_LUANTI_LISTED="$listed")
-	env "${e[@]}" BUILDAT_LUANTI_ADDRESS=127.0.0.1:$LU \
-		BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_NAME=discusser \
+	BUILDAT_LUANTI_ADDRESS=127.0.0.1:$LU BUILDAT_LUANTI_NAME=discusser \
 		BUILDAT_HEARTH_REQS="${HEARTH_REQS:-}" \
 		timeout 120 Build/bin/buildat -m luanti_client -D "$d" -w 800x600 -l 3 \
 		-o sound_mute=1 -c @"$tmp/c" > "$log" 2>&1
