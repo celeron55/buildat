@@ -10600,14 +10600,26 @@ local function draw_overlay()
 			end
 		end
 	end
-	-- Nodes, for the tools that pick them
-	if S.tool == "select" or S.tool == "node" then
+	-- Nodes, for the tools that pick them or snap to them. The Nodes, Wall
+	-- and Room tools draw them 10x the Select tool's size with 3x its
+	-- stroke ([FP_NODES]; user, 2026-10-07): three crosses a pixel apart
+	-- along x = z, which puts each arm's lines side by side.
+	-- simplified: in 3D "a pixel" is 1 cm whatever the distance
+	local big = S.tool == "node" or S.tool == "wall" or S.tool == "room"
+	if S.tool == "select" or big then
 		local size = S.view == "2d" and W(6 * mm_per_px()) or 0.08
+		local px = S.view == "2d" and mm_per_px() or 10
+		local strokes = big and {-px, 0, px} or {0}
+		if big then
+			size = size * 10
+		end
 		for _, n in ipairs(of_type("node")) do
 			local x, z = node_pos(n.id)
 			local on = S.sel[n.id] or S.nodes[n.id]
-			debug:AddCross(P(x, z), size, on and accent or
-					magic.Color(0.1, 0.3, 0.8), S.view ~= "2d")
+			for _, d in ipairs(strokes) do
+				debug:AddCross(P(x + d, z + d), size, on and accent or
+						magic.Color(0.1, 0.3, 0.8), S.view ~= "2d")
+			end
 		end
 	end
 	-- The box being dragged out, and a box's footprint being drawn
