@@ -23,12 +23,10 @@ fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/scroll.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P 29786 \
-	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
-for i in $(seq 1 400); do
-	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break
-	sleep 1
-done
+	start_server "$out/srv.log" "Mods loaded" 400 29786 \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
+	-l 3 ||
+	{ echo "FAIL: the server did not start"; exit 1; }
 sleep 5
 srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }

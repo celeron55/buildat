@@ -27,14 +27,10 @@ for f in index.html buildat.js buildat.wasm; do ln -s "$here/web/$f" "$t/web/$f"
 head -c 45000000 /dev/urandom | base64 > "$t/web/buildat.data"
 cd "$here/Build"
 P=29584
-bin/buildat_server -m ../apps/digger -D "$t/srv" -P $P -W "$t/web" -l 3 \
-	> "$t/srv.log" 2>&1 &
-s=$!
-for _ in $(seq 120); do
-	grep -q "STATUS Listening" "$t/srv.log" && break
-	sleep 1
-done
-grep -q "STATUS Listening" "$t/srv.log" || fail "digger did not start"
+start_server "$t/srv.log" "STATUS Listening" 120 $P \
+	bin/buildat_server -m ../apps/digger -D "$t/srv" -W "$t/web" -l 3 ||
+	fail "digger did not start"
+s=$SERVER_PID
 u=http://127.0.0.1:$P
 curl -s -H "Accept-Encoding: deflate" -o "$t/data" $u/buildat.data &
 c=$!

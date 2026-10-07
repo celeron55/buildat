@@ -23,12 +23,10 @@ fail(){ echo "FAIL: $*"; exit 1; }
 P=29874
 
 cd "$here/Build"
-bin/buildat_server -m ../apps/aitta -D "$t/srv" -P $P -l 3 > "$t/srv.log" 2>&1 &
-pid=$!
-for _ in $(seq 120); do
-	grep -q "setup code" "$t/srv.log" && break
-	sleep 1
-done
+start_server "$t/srv.log" "setup code" 120 $P \
+	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
+	fail "Aitta did not start"
+pid=$SERVER_PID
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "Aitta did not start (srv.log: $(tail -3 "$t/srv.log"))"
 

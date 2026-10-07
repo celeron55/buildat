@@ -113,13 +113,10 @@ LUA
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" -l 3 \
-	> "$out/srv.log" 2>&1 &
-srv=$!
-for i in $(seq 1 300); do
-	grep -aq "Mods loaded" "$out/srv.log" 2>/dev/null && break
-	sleep 1
-done
+	start_server "$out/srv.log" "Mods loaded" 300 "$port" \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
+	[ $? = 1 ] || exit 1 # its own verdict below
+srv=$SERVER_PID
 if ! grep -aq "Mods loaded" "$out/srv.log"; then
 	kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
 	echo "SKIP: the server did not come up" >&2; exit "$SKIP"

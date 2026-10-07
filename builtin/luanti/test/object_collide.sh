@@ -27,12 +27,9 @@ rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 trap 'check_pkill -INT buildat_server 2>/dev/null; true' EXIT
 BUILDAT_LUANTI_GAME="${GAME:-mineclone2}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/object_collide.lua" \
-	timeout 300 bin/buildat_server -u launcher=1 -m ../apps/vanilla -P 29791 \
-	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
-for i in $(seq 1 280); do
-	grep -aq "collidecheck: done" "$out/srv.log" 2>/dev/null && break
-	sleep 1
-done
+	start_server "$out/srv.log" "collidecheck: done" 280 29791 \
+	timeout 300 bin/buildat_server -u launcher=1 -m ../apps/vanilla \
+	-l 3 || [ $? = 1 ] || exit 1 # its own verdict below
 check_pkill -INT buildat_server 2>/dev/null
 if ! grep -aq "collidecheck: done" "$out/srv.log"; then
 	echo "SKIP: the run never got to its end; see $out/srv.log" >&2

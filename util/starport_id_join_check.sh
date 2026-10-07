@@ -26,13 +26,10 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 cd "$here"
 
-Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
-	> "$tmp/sp.log" 2>&1 &
-pids+=($!)
-for _ in $(seq 120); do
-	grep -q "setup code" "$tmp/sp.log" && break
-	sleep 1
-done
+start_server "$tmp/sp.log" "setup code" 120 $SP \
+	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3 ||
+	fail "the Starport did not start (sp.log)"
+pids+=($SERVER_PID)
 code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "the Starport did not start (sp.log)"
 printf 'delay 8000\nquit\n' > "$tmp/cmds.txt"

@@ -26,14 +26,10 @@ port=29776
 mkdir -p "$t/srv/shared/vanilla"
 echo '{"view_range": "200"}' > "$t/srv/shared/vanilla/settings.json"
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=backlog \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
-	-D "$t/srv" -P "$port" -l 3 > "$t/srv.log" 2>&1 &
-srv=$!
-for _ in $(seq 240); do
-	grep -q "STATUS Listening" "$t/srv.log" && break
-	kill -0 $srv 2>/dev/null || fail "server died ($(tail -5 "$t/srv.log"))"
-	sleep 0.5
-done
+start_server "$t/srv.log" "STATUS Listening" 120 "$port" \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/srv" -l 3 ||
+	fail "server did not listen"
+srv=$SERVER_PID
 printf 'delay 30000\nquit\n' > "$t/seq"
 BUILDAT_PACKET_DRAIN_US=1 timeout 90 bin/buildat -o launch_ui=launch_menu -s 127.0.0.1:$port \
 	-D "$t/cl" -w 640x480 -u 1 -l 3 -o sound_mute=1 -c @"$t/seq" \

@@ -22,10 +22,10 @@ fail() { echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 cd "$here"
 
 start() { # log
-	Build/bin/buildat_server -m apps/hearth -D "$tmp/srv" -P $P -l 3 > "$tmp/$1" 2>&1 &
-	pid=$!
-	for _ in $(seq 120); do grep -q "STATUS Listening" "$tmp/$1" && break; sleep 1; done
-	grep -q "STATUS Listening" "$tmp/$1" || fail "the server ($tmp/$1)"
+	start_server "$tmp/$1" "STATUS Listening" 120 $P \
+		Build/bin/buildat_server -m apps/hearth -D "$tmp/srv" -l 3 ||
+		fail "the server ($tmp/$1)"
+	pid=$SERVER_PID
 }
 stop() { kill $pid; wait $pid 2>/dev/null; pid=; }
 icon() { curl -s -m 10 -o "$tmp/$1" "http://127.0.0.1:$P/favicon.ico"; }

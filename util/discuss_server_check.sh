@@ -42,13 +42,10 @@ printf 'gameid = devtest\nbackend = sqlite3\n' > "$tmp/w/world.mt"
 LUANTI_GAME_PATH="$tmp/games" MINETEST_GAME_PATH="$tmp/games" \
 	luanti --server --world "$tmp/w" --port $LU > "$tmp/lu.log" 2>&1 &
 pids+=($!)
-Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
-	> "$tmp/sp.log" 2>&1 &
-pids+=($!)
-for _ in $(seq 120); do
-	grep -q "setup code" "$tmp/sp.log" && break
-	sleep 1
-done
+start_server "$tmp/sp.log" "setup code" 120 $SP \
+	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3 ||
+	fail "the Starport did not start (sp.log)"
+pids+=($SERVER_PID)
 code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "the Starport did not start (sp.log)"
 # Once the Starport listens, or the Hearth's first announce is lost

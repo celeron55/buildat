@@ -33,16 +33,11 @@ fail(){ echo "FAIL: $*"; exit 1; }
 
 port=29590
 # No launcher param: a public server that asks everyone to log in.
-bin/buildat_server -m ../apps/vanilla -D "$t/srv" -P "$port" -l 3 \
-	> "$t/srv.log" 2>&1 &
-srv=$!
 # The first start compiles the builtin modules (rccpp); allow for it
-for _ in $(seq 180); do
-	grep -q "STATUS Listening" "$t/srv.log" && break
-	kill -0 $srv 2>/dev/null || fail "server died ($(tail -5 "$t/srv.log"))"
-	sleep 0.5
-done
-grep -q "STATUS Listening" "$t/srv.log" || fail "server did not listen"
+start_server "$t/srv.log" "STATUS Listening" 90 "$port" \
+	bin/buildat_server -m ../apps/vanilla -D "$t/srv" -l 3 ||
+	fail "server did not listen"
+srv=$SERVER_PID
 code=$(nolog "$t/srv.log" | grep -oP 'setup code \K[A-Z0-9]+' | head -1)
 [ -n "$code" ] || fail "no setup code in the server log"
 

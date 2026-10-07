@@ -24,13 +24,10 @@ trap '[ -n "$s" ] && kill $s 2>/dev/null; rm -rf "$t"' EXIT
 fail(){ echo "FAIL: $*"; exit 1; }
 cd "$here/Build"
 P=29583
-bin/buildat_server -m ../apps/digger -D "$t/srv" -P $P -l 3 > "$t/srv.log" 2>&1 &
-s=$!
-for _ in $(seq 120); do
-	grep -q "STATUS Listening" "$t/srv.log" && break
-	sleep 1
-done
-grep -q "STATUS Listening" "$t/srv.log" || fail "digger did not start"
+start_server "$t/srv.log" "STATUS Listening" 120 $P \
+	bin/buildat_server -m ../apps/digger -D "$t/srv" -l 3 ||
+	fail "digger did not start"
+s=$SERVER_PID
 printf 'delay 150000\nquit\n' > "$t/seq"
 timeout 240 bin/buildat -o launch_ui=launch_menu -s localhost:$P -D "$t/u" -w 640x360 -l 3 \
 	-o sound_mute=1 -c @"$t/seq" > "$t/c.log" 2>&1 &

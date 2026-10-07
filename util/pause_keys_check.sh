@@ -38,15 +38,10 @@ port=29592
 # A launcher-started server is local ([VANILLA_PUBLIC]) and auto-starts the
 # bundled minimal game (no ContentDB), so the client lands in a world.
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=pausekeys \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
-	-D "$t/srv" -P "$port" -l 3 > "$t/srv.log" 2>&1 &
-srv=$!
-for _ in $(seq 240); do
-	grep -q "STATUS Listening" "$t/srv.log" && break
-	kill -0 $srv 2>/dev/null || fail "server died ($(tail -5 "$t/srv.log"))"
-	sleep 0.5
-done
-grep -q "STATUS Listening" "$t/srv.log" || fail "server did not listen"
+start_server "$t/srv.log" "STATUS Listening" 120 "$port" \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/srv" -l 3 ||
+	fail "server did not listen"
+srv=$SERVER_PID
 
 # The view-range button sits mid-window in the pause menu; at 1000x700 its
 # centre is about here (confirmed from a screenshot).

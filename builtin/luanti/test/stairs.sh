@@ -58,15 +58,12 @@ core.register_on_joinplayer(function(player)
 	core.after(1, tick)
 end)
 LUA
-port=$(( 29500 + (RANDOM % 90) ))
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" BUILDAT_LUANTI_SEED=5 \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" 2>&1 \
-	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
-for i in $(seq 1 200); do
-	grep -aq "Mods loaded" "$out/srv.log" 2>/dev/null && break
-	sleep 1
-done
+	start_server "$out/srv.log" "Mods loaded" 200 auto \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla ||
+	{ echo "FAIL: the server did not start"; exit 1; }
+port=$SERVER_PORT
 sleep 3
 srv=$(check_pgrep buildat_server | head -1)
 printf 'delay 9000\nkeydown W\ndelay 4000\nkeyup W\ndelay 3000\nkeydown D\ndelay 4000\nkeyup D\ndelay 500\nquit\n' > "$out/cmds.txt"

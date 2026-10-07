@@ -66,10 +66,10 @@ ln -s "$BUILDAT_USER_PATH/shared/vanilla/games" "$t/srv/shared/vanilla/games"
 cp "$me/ui_parity.lua" "$t/srv/shared/"
 cd "$here/Build"
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=uip BUILDAT_LUANTI_LUA="$t/srv/shared/ui_parity.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/srv" -P $P -l 3 \
-	> "$out/buildat_srv.log" 2>&1 &
-pid=$!
-for _ in $(seq 120); do ss -ltn | grep -q ":$P " && break; sleep 1; done
+	start_server "$out/buildat_srv.log" "Mods loaded" 120 $P \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/srv" -l 3 ||
+	{ echo "FAIL: the server did not start"; exit 1; }
+pid=$SERVER_PID
 printf "wait_log 90000 the server put the player at\ndelay 6000\nscreenshot $out/buildat_legacy.png\ndelay 8000\nscreenshot $out/buildat_real.png\ndelay 8000\nscreenshot $out/buildat_items.png\ndelay 6000\nmouse_pos 512 384\ndelay 500\nmouse_pos 513 384\ndelay 2000\nscreenshot $out/buildat_tips.png\ndelay 8000\nscreenshot $out/buildat_bg.png\nquit\n" > "$t/c"
 timeout 150 bin/buildat -s 127.0.0.1:$P -w ${W}x$H -u 1 -l 3 -o sound_mute=1 \
 	-c @"$t/c" > "$out/buildat_cli.log" 2>&1

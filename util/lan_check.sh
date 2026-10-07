@@ -53,14 +53,10 @@ EOF
 # start <port> [args]: digger, until it listens
 start(){
 	local port=$1; shift
-	bin/buildat_server -m ../apps/digger -D "$t/srv$port" -P "$port" -l 3 \
-		"$@" > "$t/srv$port.log" 2>&1 &
-	s=$!
-	for _ in $(seq 120); do
-		grep -q "STATUS Listening" "$t/srv$port.log" && return
-		sleep 1
-	done
-	fail "digger did not start ($(tail -3 "$t/srv$port.log"))"
+	start_server "$t/srv$port.log" "STATUS Listening" 120 "$port" \
+		bin/buildat_server -m ../apps/digger -D "$t/srv$port" -l 3 "$@" ||
+		fail "digger did not start"
+	s=$SERVER_PID
 }
 
 # 1

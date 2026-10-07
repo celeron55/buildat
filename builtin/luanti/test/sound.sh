@@ -51,13 +51,10 @@ fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=$save \
 	BUILDAT_LUANTI_LUA="$me/sound.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" -l 3 \
-	> "$out/srv.log" 2>&1 &
-srv=$!
-for i in $(seq 1 120); do
-	grep -aq "Running world" "$out/srv.log" && break
-	sleep 1
-done
+	start_server "$out/srv.log" "Running world" 120 "$port" \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
+	[ $? = 1 ] || exit 1 # its own verdict below
+srv=$SERVER_PID
 if ! grep -aq "Running world" "$out/srv.log"; then
 	echo "SKIP: the world did not come up"; kill -9 "$srv" 2>/dev/null; exit 77
 fi

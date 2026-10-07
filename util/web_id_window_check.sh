@@ -34,11 +34,10 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 cd "$here"
 
-Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
-	> "$tmp/sp.log" 2>&1 &
-pids+=($!)
-for _ in $(seq 120); do grep -q "setup code" "$tmp/sp.log" && break; sleep 1; done
-grep -q "setup code" "$tmp/sp.log" || fail "the Starport did not start"
+start_server "$tmp/sp.log" "setup code" 120 $SP \
+	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3 ||
+	fail "the Starport did not start"
+pids+=($SERVER_PID)
 mkdir -p "$tmp/h/apps/hearth"
 cat > "$tmp/h/apps/hearth/starport.json" <<J
 {"starports": ["http://127.0.0.1:$SP"], "name": "Web hearth", "login": "both",

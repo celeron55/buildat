@@ -41,12 +41,10 @@ P=29881
 U=http://127.0.0.1:$P
 
 cd "$here/Build"
-bin/buildat_server -m ../apps/hearth -D "$t/srv" -P $P -l 3 > "$t/srv.log" 2>&1 &
-pid=$!
-for _ in $(seq 120); do
-	grep -q "setup code" "$t/srv.log" && break
-	sleep 1
-done
+start_server "$t/srv.log" "setup code" 120 $P \
+	bin/buildat_server -m ../apps/hearth -D "$t/srv" -l 3 ||
+	fail "Hearth did not start"
+pid=$SERVER_PID
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "Hearth did not start (srv.log: $(tail -3 "$t/srv.log"))"
 
@@ -414,9 +412,10 @@ c.executemany("INSERT INTO messages(thread, author, body, created) "
         "VALUES(1, 'admin', ?, 1)", [("x" * 19990 + " END%d" % i,) for i in range(1, 21)])
 c.commit()
 PY
-bin/buildat_server -m ../apps/hearth -D "$t/srv" -P $P -l 3 > "$t/srv2.log" 2>&1 &
-pid=$!
-for _ in $(seq 120); do grep -q "Hearth: " "$t/srv2.log" && break; sleep 1; done
+start_server "$t/srv2.log" "Hearth: " 120 $P \
+	bin/buildat_server -m ../apps/hearth -D "$t/srv" -l 3 ||
+	fail "Hearth did not start again"
+pid=$SERVER_PID
 u=/t/1 pages=0
 while [ "$(get "$u")" = 200 ] && pages=$((pages + 1)) &&
 		u=$(grep -o '/t/1?after=[0-9]*' "$t/page"); do :; done

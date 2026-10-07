@@ -24,10 +24,10 @@ cd "$here"
 [ -s web/index.html ] || fail "no web/ (util/build_web.sh)"
 
 start() { # app dir
-	Build/bin/buildat_server -m "apps/$1" -D "$tmp/$2" -P $P -l 3 > "$tmp/$2.log" 2>&1 &
-	pid=$!
-	for _ in $(seq 120); do grep -q "STATUS Listening" "$tmp/$2.log" && break; sleep 1; done
-	grep -q "STATUS Listening" "$tmp/$2.log" || fail "the server ($tmp/$2.log)"
+	start_server "$tmp/$2.log" "STATUS Listening" 120 $P \
+		Build/bin/buildat_server -m "apps/$1" -D "$tmp/$2" -l 3 ||
+		fail "the server ($tmp/$2.log)"
+	pid=$SERVER_PID
 	sleep 1
 }
 stop() { kill $pid; wait $pid 2>/dev/null; pid=; }

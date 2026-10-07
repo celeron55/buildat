@@ -29,12 +29,9 @@ trap 'check_pkill -INT buildat_server 2>/dev/null; true' EXIT
 echo 'core.settings:set("time_speed", "0")' > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE=buildat_test_cold \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	timeout 400 bin/buildat_server -u launcher=1 -m ../apps/vanilla -P 29825 \
-	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
-for i in $(seq 1 300); do
-	grep -aq "Mods loaded" "$out/srv.log" 2>/dev/null && break
-	sleep 1
-done
+	start_server "$out/srv.log" "Mods loaded" 300 29825 \
+	timeout 400 bin/buildat_server -u launcher=1 -m ../apps/vanilla \
+	-l 3 || [ $? = 1 ] || exit 1 # its own verdict below
 if ! grep -aq "Mods loaded" "$out/srv.log" 2>/dev/null; then
 	echo "SKIP: the server did not load its mods" >&2; exit "$SKIP"
 fi
@@ -47,7 +44,7 @@ timeout 300 bin/buildat -s "localhost:29825" -C "$out/cache" -w 1280x720 \
 	-l 3 -c @"$out/cmds.txt" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' \
 	> "$out/cli.log"
 cached=$(sed -n 's/.*\([0-9][0-9]*\) of \([0-9][0-9]*\) announced files are cached.*/\1 \2/p' \
-		"$out/cli.log" | tail -1)
+		"$out/cli.log" | sort -n -k2 | tail -1) # the game's, not a later one-file announce
 if [ -z "$cached" ]; then
 	echo "FAIL: the client never said what it made of the announced files"
 	exit 1

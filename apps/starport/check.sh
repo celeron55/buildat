@@ -60,13 +60,10 @@ cat > "$tmp/an/apps/floorplanner/starport.json" <<EOF
   "gambling": "no", "personal_data": "no"}}
 EOF
 cd "$here"
-Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
-	> "$tmp/sp.log" 2>&1 &
-pids+=($!)
-for _ in $(seq 120); do
-	grep -q "setup code" "$tmp/sp.log" && break
-	sleep 1
-done
+start_server "$tmp/sp.log" "setup code" 120 $SP \
+	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3 ||
+	fail "the Starport did not start (sp.log)"
+pids+=($SERVER_PID)
 code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "the Starport did not start (sp.log)"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SP/brand/overpass.ttf")" = 200 ] ||
@@ -229,14 +226,11 @@ grep -q '"id":"id:grown|harassment"' "$tmp/cl3.log" ||
 echo "ok: a reported ban is in the queue, about the ID"
 # The fleet's server learns the list at its next announce: its start
 kill "${pids[-1]}"
-sleep 2
-Build/bin/buildat_server -m apps/floorplanner -D "$tmp/an2" -P $AN2 -l 3 \
-	> "$tmp/an2b.log" 2>&1 &
-pids+=($!)
-for _ in $(seq 120); do
-	grep -q "Announcing to" "$tmp/an2b.log" && break
-	sleep 1
-done
+wait "${pids[-1]}" 2>/dev/null
+start_server "$tmp/an2b.log" "Announcing to" 120 $AN2 \
+	Build/bin/buildat_server -m apps/floorplanner -D "$tmp/an2" -l 3 ||
+	fail "the fleet's server did not start again (an2b.log)"
+pids+=($SERVER_PID)
 sleep 3
 BUILDAT_FP_STARPORT=$token timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
 	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
@@ -358,13 +352,10 @@ addrs(){ sqlite3 "$tmp/sp/apps/starport/saves/starport/save.sqlite" "SELECT coun
 sp_reqs admin checkpass '{"cmd":"set_settings","settings":{"retention_days":0}}' cl12.log
 kill "${pids[0]}"
 wait "${pids[0]}" 2>/dev/null
-Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
-	> "$tmp/sp2.log" 2>&1 &
-pids+=($!)
-for _ in $(seq 60); do
-	grep -q "Daily:" "$tmp/sp2.log" && break
-	sleep 1
-done
+start_server "$tmp/sp2.log" "Daily:" 60 $SP \
+	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3 ||
+	fail "the Starport did not start again (sp2.log)"
+pids+=($SERVER_PID)
 [ "$(addrs)" = 0 ] ||
 	fail "$(addrs) login or session addresses kept past retention_days (sp2.log)"
 echo "ok: the daily pass clears login and session addresses past the retention"

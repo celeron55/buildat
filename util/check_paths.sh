@@ -67,8 +67,12 @@ export -f check_pgrep check_pkill
 # on 29500, another check) fails at once, naming it -- before, the check
 # waited out its timeout as "did not come up", or talked to the other
 # server. "auto" picks a free one in 29700-29999. A server that exits
-# while waited for fails at once too. Returns 1 on failure, with the
-# reason and the log's tail on stderr; the caller says FAIL.
+# while waited for fails at once too. Returns 1 when the server did not
+# come up, 2 when the port is taken, with the reason (and the log's tail)
+# on stderr; the caller says FAIL. A check with a verdict of its own on a
+# server that did not come up (a SKIP) keeps it, and still fails on a
+# taken port:
+#   start_server ... || [ $? = 1 ] || exit 1
 #   VAR=x start_server ...  sets VAR for the server, as for any command
 port_taken()
 {
@@ -86,7 +90,7 @@ start_server()
 	fi
 	if port_taken $port; then
 		echo "start_server: port $port is taken: $(ss -Hltnup "( sport = :$port )" 2>/dev/null | head -1)" >&2
-		return 1
+		return 2
 	fi
 	SERVER_PORT=$port
 	"$@" -P "$port" > >(sed -u -e 's/\x1b\[[0-9;]*m//g' > "$log") 2>&1 &

@@ -48,12 +48,10 @@ trap 'check_pkill -INT buildat_server 2>/dev/null; true' EXIT
   cat "$me/fixlight.lua"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="${GAME:-mineclone2}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	timeout 400 bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" \
-	-l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
-for i in $(seq 1 300); do
-	grep -aq "Mods loaded" "$out/srv.log" 2>/dev/null && break
-	sleep 1
-done
+	start_server "$out/srv.log" "Mods loaded" 300 "$port" \
+	timeout 400 bin/buildat_server -u launcher=1 -m ../apps/vanilla \
+	-l 3 ||
+	{ echo "FAIL: the server did not start"; exit 1; }
 # A player has to join for the fixture to have one to stand on
 { echo "wait_log 120000 the server put the player"; echo "delay 60000"
 	echo "quit"; } > "$out/cmds.txt"

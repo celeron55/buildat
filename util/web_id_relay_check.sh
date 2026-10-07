@@ -132,16 +132,11 @@ cat > "$srvuser/apps/relay_test/starport.json" <<EOF
 {"enabled": true, "starports": ["$SP"]}
 EOF
 
-bin/buildat_server -m "$app" -D "$srvuser" -P "$port" -l 3 \
-	> "$t/sp.log" 2>&1 &
-srv=$!
 # The first start compiles the builtin modules and the app (rccpp)
-for _ in $(seq 240); do
-	grep -q "STATUS Listening" "$t/sp.log" && break
-	kill -0 $srv 2>/dev/null || fail "server died ($(tail -5 "$t/sp.log"))"
-	sleep 0.5
-done
-grep -q "STATUS Listening" "$t/sp.log" || fail "server did not listen (sp.log)"
+start_server "$t/sp.log" "STATUS Listening" 120 "$port" \
+	bin/buildat_server -m "$app" -D "$srvuser" -l 3 ||
+	fail "server did not listen (sp.log)"
+srv=$SERVER_PID
 
 # Pre-accept the Starport address so the client's per-address network gate does
 # not open a dialog ([CONSENT_PER_SERVER]). The app calls network.http_post,

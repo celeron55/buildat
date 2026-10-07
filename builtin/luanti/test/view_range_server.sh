@@ -36,13 +36,9 @@ run_one() {
 		echo "$settings"; } > "$out/fixture_$name.lua"
 	BUILDAT_LUANTI_GAME="${GAME:-devtest}" \
 		BUILDAT_LUANTI_SAVE="$save" BUILDAT_LUANTI_LUA="$out/fixture_$name.lua" \
-		timeout 300 bin/buildat_server -u launcher=1 -m ../apps/vanilla \
-		-P 29822 -l 3 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' \
-		> "$out/srv_$name.log" &
-	for i in $(seq 1 300); do
-		grep -aq "world kept" "$out/srv_$name.log" 2>/dev/null && break
-		sleep 1
-	done
+		start_server "$out/srv_$name.log" "world kept" 300 29822 \
+		timeout 300 bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
+		{ echo "FAIL: the server did not start"; exit 1; }
 	check_pkill -INT buildat_server 2>/dev/null
 	for i in $(seq 1 60); do
 		check_pgrep buildat_server >/dev/null || break

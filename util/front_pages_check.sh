@@ -25,9 +25,10 @@ export BUILDAT_CONNECT_PORTS="$SP,$AI"
 cd "$here"
 page(){ curl -s -m 10 "http://127.0.0.1:$1"; }
 
-Build/bin/buildat_server -m apps/starport -D "$t/sp" -P $SP -l 3 > "$t/sp.log" 2>&1 &
-pids+=($!)
-for _ in $(seq 120); do grep -q "setup code" "$t/sp.log" && break; sleep 1; done
+start_server "$t/sp.log" "setup code" 120 $SP \
+	Build/bin/buildat_server -m apps/starport -D "$t/sp" -l 3 ||
+	fail "the Starport did not start ($t/sp.log)"
+pids+=($SERVER_PID)
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/sp.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "the Starport did not start ($t/sp.log)"
 mkdir -p "$t/ai/apps/aitta"

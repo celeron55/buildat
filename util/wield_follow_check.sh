@@ -38,14 +38,10 @@ echo "fixed_map_seed = 1727923235850308" >> "$t/srv/shared/vanilla/games/mineclo
 cd "$here/Build"
 P=29585
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=wield BUILDAT_LUANTI_FORCE_TIME=9000 \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/srv" -P $P -l 3 \
-	> "$t/srv.log" 2>&1 &
-s=$!
-for _ in $(seq 240); do
-	grep -q "STATUS Listening" "$t/srv.log" && break
-	kill -0 $s 2>/dev/null || fail "server died ($(tail -3 "$t/srv.log"))"
-	sleep 0.5
-done
+start_server "$t/srv.log" "STATUS Listening" 120 $P \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/srv" -l 3 ||
+	fail "server did not listen"
+s=$SERVER_PID
 {
 	echo "wait_log 300000 the server put the player"
 	echo "delay 15000"; echo "keypress c"; echo "delay 3000"

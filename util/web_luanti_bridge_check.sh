@@ -43,11 +43,10 @@ printf '{"list": [{"address": "127.0.0.1", "port": %d, "name": "Listed"}]}' \
 python3 -m http.server -b 127.0.0.1 -d "$tmp/list" $LIST > "$tmp/list.log" 2>&1 &
 pids+=($!)
 BUILDAT_CONNECT_PORTS=$LIST BUILDAT_LUANTI_LIST=http://127.0.0.1:$LIST \
-	Build/bin/buildat_server -m apps/play -D "$tmp/playsrv" -P $PLAY \
-	-l 3 > "$tmp/play.log" 2>&1 &
-pids+=($!)
-for _ in $(seq 120); do grep -q "Luanti's list: 1" "$tmp/play.log" && break; sleep 1; done
-grep -q "Luanti's list: 1" "$tmp/play.log" || fail "the list ($tmp/play.log)"
+start_server "$tmp/play.log" "Luanti's list: 1" 120 $PLAY \
+	Build/bin/buildat_server -m apps/play -D "$tmp/playsrv" -l 3 ||
+	fail "the list ($tmp/play.log)"
+pids+=($SERVER_PID)
 grep -q "Server for gameid" "$tmp/luanti.log" || fail "the Luanti server ($tmp/luanti.log)"
 
 WEB_DRIVE_URL="http://127.0.0.1:$PLAY/" "$here/util/web_drive.sh" firefox play \

@@ -37,15 +37,17 @@ python3 util/tls_proxy.py "$tmp/cert.pem" "$tmp/key.pem" \
 pids+=($!)
 mkdir -p "$tmp/sp/shared"
 cp "$tmp/cert.pem" "$tmp/sp/shared/check_ca.pem"
-BUILDAT_CA_FILE=$tmp/sp/shared/check_ca.pem Build/bin/buildat_server \
-	-m apps/starport -D "$tmp/sp" -P $SP -l 3 > "$tmp/sp.log" 2>&1 &
-pids+=($!)
 # Up before Hearth's first announce, which is not tried again for a while
-for _ in $(seq 180); do grep -q "setup code" "$tmp/sp.log" && break; sleep 1; done
-BUILDAT_STARPORT_DEFAULT=http://127.0.0.1:$SP Build/bin/buildat_server \
-	-m apps/hearth -D "$tmp/an" -P $AN -l 3 > "$tmp/hearth.log" 2>&1 &
-pids+=($!)
-for _ in $(seq 180); do grep -q "setup code" "$tmp/hearth.log" && break; sleep 1; done
+BUILDAT_CA_FILE=$tmp/sp/shared/check_ca.pem \
+start_server "$tmp/sp.log" "setup code" 180 $SP \
+	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3 ||
+	fail "the Starport did not start ($tmp/sp.log)"
+pids+=($SERVER_PID)
+BUILDAT_STARPORT_DEFAULT=http://127.0.0.1:$SP \
+start_server "$tmp/hearth.log" "setup code" 180 $AN \
+	Build/bin/buildat_server -m apps/hearth -D "$tmp/an" -l 3 ||
+	fail "Hearth did not start ($tmp/hearth.log)"
+pids+=($SERVER_PID)
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/hearth.log" | tail -1 | cut -d' ' -f3)
 [ -n "$setup" ] || fail "Hearth did not start ($tmp/hearth.log)"
 sleep 3

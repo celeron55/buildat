@@ -47,15 +47,10 @@ fail(){ echo "FAIL: $*"; exit 1; }
 # sets $srv and $code
 start(){
 	local d=$1 p=$2; shift 2
-	bin/buildat_server -m "../apps/$app" -D "$t/$d" -P "$p" -l 3 "$@" \
-		> "$t/$d.log" 2>&1 &
-	srv=$!
-	for _ in $(seq 180); do
-		grep -q "STATUS Listening" "$t/$d.log" && break
-		kill -0 $srv 2>/dev/null || fail "server died ($(tail -5 "$t/$d.log"))"
-		sleep 0.5
-	done
-	grep -q "STATUS Listening" "$t/$d.log" || fail "server did not listen"
+	start_server "$t/$d.log" "STATUS Listening" 90 "$p" \
+		bin/buildat_server -m "../apps/$app" -D "$t/$d" -l 3 "$@" ||
+		fail "server did not listen"
+	srv=$SERVER_PID
 	code=$(nolog "$t/$d.log" | grep -oP 'setup code \K[A-Z0-9]+' | head -1)
 }
 
