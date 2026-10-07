@@ -628,7 +628,8 @@ function M.kept()
 end
 
 -- The kept login ended, on the server and here, and the client off the
--- server: the next join asks again
+-- server, back to the launcher if it came from one: the next join asks
+-- again
 function M.logout()
 	local token = buildat.storage_read("token") or ""
 	if token ~= "" then
@@ -637,7 +638,7 @@ function M.logout()
 	end
 	buildat.storage_write("token", "")
 	buildat.storage_write("keep", "0")
-	buildat.disconnect()
+	buildat.leave()
 end
 
 function M.passwd(old, new)

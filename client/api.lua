@@ -184,9 +184,9 @@ end
 -- does -- a client started straight into a server has nothing to go back to
 buildat.safe.leave = function()
 	local m = buildat.menu_extension()
-	if m and m.leave_app then
-		m.leave_app()
-	else
+	-- A launcher with no game running under it (a client started
+	-- straight into a server) answers false
+	if not (m and m.leave_app and m.leave_app()) then
 		-- **Said out loud, because the quiet version of this is a dead
 		-- client**: with no launcher to go back to, leaving a game is a
 		-- disconnect and whatever drew the game is gone with it. That is
