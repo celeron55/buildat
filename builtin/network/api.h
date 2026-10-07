@@ -11,6 +11,56 @@ namespace network
 {
 	typedef size_t PeerId;
 
+	// The block an address is counted in for a limit against floods:
+	// IPv4 by /24 ("1.2.3.0/24", an IPv4-mapped one too), IPv6 by /64
+	// ("2001:db8:0:1::/64"); anything else as it is
+	inline ss_ address_bin(ss_ a)
+	{
+		const size_t zone = a.find('%');
+		if(zone != ss_::npos)
+			a.resize(zone);
+		if(a.find('.') != ss_::npos){
+			const size_t colon = a.find_last_of(':');
+			if(colon != ss_::npos)
+				a = a.substr(colon + 1);
+			const size_t dot = a.find_last_of('.');
+			return a.substr(0, dot)+".0/24";
+		}
+		if(a.find(':') == ss_::npos)
+			return a;
+		// The groups before "::" and after it, "::" being zeros between
+		const size_t dc = a.find("::");
+		const ss_ head = dc == ss_::npos ? a : a.substr(0, dc);
+		const ss_ tail = dc == ss_::npos ? ss_() : a.substr(dc + 2);
+		auto split = [](const ss_ &s){
+			sv_<ss_> out;
+			size_t at = 0;
+			while(!s.empty() && at <= s.size()){
+				size_t c = s.find(':', at);
+				if(c == ss_::npos)
+					c = s.size();
+				out.push_back(s.substr(at, c - at));
+				at = c + 1;
+			}
+			return out;
+		};
+		sv_<ss_> g = split(head);
+		const sv_<ss_> t = split(tail);
+		while(g.size() + t.size() < 8)
+			g.push_back("0");
+		g.insert(g.end(), t.begin(), t.end());
+		ss_ out;
+		for(size_t i = 0; i < 4 && i < g.size(); i++){
+			ss_ x = g[i];
+			for(char &c : x)
+				c = tolower((unsigned char)c);
+			while(x.size() > 1 && x[0] == '0')
+				x.erase(0, 1);
+			out += x+":";
+		}
+		return out+":/64";
+	}
+
 	struct PeerInfo
 	{
 		typedef PeerId Id;

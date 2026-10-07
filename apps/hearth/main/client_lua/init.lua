@@ -1353,12 +1353,12 @@ show_account = function(name)
 				"A member" or "A new account", DIM, W)
 		if a.trust and a.level == 0 then
 			local tr = a.trust
-			text(w, "A new account posts less and no links until all of " ..
-					"these hold: a day since its first visit (" ..
-					(tr.day and "yes" or "not yet") .. "); five threads read (" ..
-					tr.read .. "); three messages that stand (" .. tr.stood ..
-					"); none hidden in 30 days (" .. tr.hidden .. " hidden).",
-					nil, W)
+			text(w, "A new account posts less and no links until it has " ..
+					"been active on five days -- a day it read a thread or " ..
+					"wrote a message that stands, counted once the day is " ..
+					"over (" .. (tr.days or 0) .. " so far) -- with none of " ..
+					"its messages hidden in 30 days (" .. tr.hidden ..
+					" hidden).", nil, W)
 		end
 		local v = list()
 		for _, m in ipairs(a.messages) do

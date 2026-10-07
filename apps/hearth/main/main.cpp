@@ -426,6 +426,9 @@ static const char *SCHEMA =
 		"first_seen INTEGER NOT NULL);"
 	"CREATE TABLE IF NOT EXISTS reads(account TEXT NOT NULL, "
 		"thread INTEGER NOT NULL, PRIMARY KEY(account, thread));"
+	// The days (UTC, seconds / 86400) an account read a thread on
+	"CREATE TABLE IF NOT EXISTS active_days(account TEXT NOT NULL, "
+		"day INTEGER NOT NULL, PRIMARY KEY(account, day));"
 	// kind "report" (of a message, by anyone) or "appeal" (of its hiding,
 	// by its author); state "open", "upheld" or "dismissed"
 	"CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY, "
@@ -583,6 +586,8 @@ struct Limits { int threads_a_day, messages_an_hour; bool links; };
 static const Limits LIMITS[3] = {{2, 10, false}, {10, 60, true},
 		{1000000, 1000000, true}};
 static const int REPORTS_A_DAY = 10;
+// The days a new account is active on before it stands (level 1)
+static const int ACTIVE_DAYS = 5;
 // Searches a minute, per address on the HTTP face and per account by
 // packet: a search is a full-text query
 static const int SEARCHES_A_MINUTE = 30;
@@ -1805,31 +1810,28 @@ struct Module: public interface::Module
 		if(admin)
 			return 2;
 		const json::Value t = trust(name);
-		return t.get("day").is_true() && jint(t, "read") >= 5 &&
-				jint(t, "stood") >= 3 && jint(t, "hidden") == 0 ? 1 : 0;
+		return jint(t, "days") >= ACTIVE_DAYS && jint(t, "hidden") == 0 ?
+				1 : 0;
 	}
 
-	// What level() is reached by, as counts: a day since the first visit,
-	// threads read, messages standing, messages hidden in the last 30 days
+	// What level() is reached by, as counts: the days active, each
+	// counted once it is over -- a thread read on it, or a message
+	// written on it that stands; more of either on one day is no more
+	// trust, so it comes at a day's pace however busy a script is -- and
+	// messages hidden in the last 30 days
 	json::Value trust(const ss_ &name)
 	{
 		const int64_t now = now_s();
-		Q h(m_db, "SELECT count(*) FROM messages WHERE author = ? AND "
-				"hidden = 0");
-		h.b(name).step();
-		const int64_t stood = h.i(0);
 		Q hd(m_db, "SELECT count(*) FROM messages WHERE author = ? AND "
 				"hidden != 0 AND created > ?");
 		hd.b(name).b(now - 30 * 86400).step();
-		Q f(m_db, "SELECT first_seen FROM members WHERE account = ?");
-		f.b(name);
-		const int64_t first = f.step() ? f.i(0) : now;
-		Q r(m_db, "SELECT count(*) FROM reads WHERE account = ?");
-		r.b(name).step();
+		Q d(m_db, "SELECT count(*) FROM (SELECT day FROM active_days "
+				"WHERE account = ?1 AND day < ?2 UNION SELECT created / 86400 "
+				"FROM messages WHERE author = ?1 AND hidden = 0 AND "
+				"created / 86400 < ?2)");
+		d.b(name).b(now / 86400).step();
 		json::Value v = json::object();
-		v.set("day", now - first >= 86400);
-		v.set("read", r.i(0));
-		v.set("stood", stood);
+		v.set("days", d.i(0));
 		v.set("hidden", hd.i(0));
 		return v;
 	}
@@ -1877,9 +1879,8 @@ struct Module: public interface::Module
 	{
 		const int lv = level(name, admin);
 		const Limits &l = LIMITS[lv];
-		const char *how = lv == 0 ? " (a new account's limit, until a day "
-				"has passed, five threads are read and three of its messages "
-				"stand)" : "";
+		const char *how = lv == 0 ? " (a new account's limit, until it "
+				"has been active on five days)" : "";
 		// [HEARTH_TRACKER]: a new account's links go to the tracker domains
 		// only, refused elsewhere rather than queued
 		if(!l.links && has_link(text)){
@@ -2002,6 +2003,9 @@ struct Module: public interface::Module
 			Q rd(m_db, "INSERT OR IGNORE INTO reads(account, thread) "
 					"VALUES(?, ?)");
 			rd.b(name).b(jint(q, "thread")).step();
+			Q ad(m_db, "INSERT OR IGNORE INTO active_days(account, day) "
+					"VALUES(?, ?)");
+			ad.b(name).b(now_s() / 86400).step();
 			// [HEARTH_UI]: the last read before this part ("read", where
 			// the client draws "new since"), then this part's last
 			Q rl(m_db, "SELECT last FROM reads WHERE account = ? AND thread = ?");

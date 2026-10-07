@@ -1,26 +1,35 @@
 #!/bin/bash
 # tier: full
-# cost: ~4 min (2026-10-07)
+# cost: ~5 min (2026-10-07)
 # covers: src/server/main.cpp src/impl/linux/os.cpp builtin/starport_announce/** builtin/accounts/accounts.cpp apps/starport/main/main.cpp apps/hearth/main/main.cpp apps/aitta/main/main.cpp
 # [SIM_CLOCK]: a Starport, a Hearth listed on it and an Aitta, run with
 # --sim-clock and moved together through 183 days and then 5 years. What
 # runs on the calendar, and a few scripted attacks:
-#   0. day 0: Starport IDs (an adult, a teen of 14) and five new listings
-#      from one address, the sixth refused; ten wrong logins of alice from
-#      elsewhere, and alice's own refused; Hearth's patient spammer, sam,
-#      a new account: no links, two threads a day; he reads five threads
-#      and posts three replies; the admin's file under a budget of 0;
-#      Aitta: a release, not yet on the public page;
-#   1. +1 hour: alice logs in again; the release is on the page;
-#   2. +1 day: the sixth listing; sam stands, and his link spam goes in;
-#      carol reports it, the admin hides it, and sam is a new account again;
-#   3. +8 days: alice's login addresses are gone (retention_days 7);
-#   4. +31 days: alice's first session ended; the five listings, never
-#      announced again, are gone; Hearth's, announced after each jump, is
-#      not; sam's hidden message no longer counts against him;
-#   5. +183 days: the file, unused, deleted;
-#   6. +5 years, the Starport first: the teen is an adult; Hearth's listing
-#      gone and Hearth listed again under a new id.
+#   0. day 0: Starport IDs (an adult, a teen of 14), five from one /24
+#      and the sixth refused; five new listings from one address, the
+#      sixth refused, the first claimed; ten wrong logins of alice from a
+#      /24 do not keep her out, and 30 keep that /24 out of any login;
+#      Hearth's patient spammer, sam, a new account: no links, two
+#      threads a day; he reads five threads and posts three replies; the
+#      admin's file under a budget of 0; Aitta: a release, not yet on the
+#      public page;
+#   1. +1 hour: the /24 logs in again; the release is on the page;
+#   2. +1 day to +5 days: the sixth listing; sam active a day at a time,
+#      a new account until five days are over, then stands and his link
+#      spam goes in; carol reports it, the admin hides it, and sam is a
+#      new account again;
+#   3. +8 days: alice's login addresses are gone (retention_days 7); her
+#      first session used;
+#   4. +31 days: the session not used since day 0 ended, the one used on
+#      day 8 not; the unclaimed listings, never announced again, are
+#      gone, the claimed one is not; Hearth's, announced after each jump,
+#      is not;
+#   5. +183 days: the file, unused, deleted; sam's hidden message no
+#      longer counts against him; alice's session unused since day 31
+#      ended;
+#   6. +5 years, the Starport first: the teen is an adult; the claimed
+#      listing gone after its year; Hearth's listing gone and Hearth
+#      listed again under a new id.
 #   util/sim_clock_check.sh
 set -u
 . "$(dirname "$0")/check_paths.sh"
@@ -112,10 +121,20 @@ hid=$(grep -ao "Listed on http://127.0.0.1:$SP as [0-9a-f]*" "$t/hearth.log" | t
 r=$(sp 10.0.0.1 id/register '{"name":"alice","password":"alicepass1","adult":true}')
 sa1=$(echo "$r" | field session)
 [ -n "$sa1" ] || fail "alice's ID: $r"
+sa3=$(sp 10.0.0.1 id/login '{"name":"alice","password":"alicepass1"}' | field session)
+[ -n "$sa3" ] || fail "alice's second session"
 y=$(date -u +%Y)
 r=$(sp 10.0.0.2 id/register "{\"name\":\"teen\",\"password\":\"teenpass1\",\"birth_year\":$((y - 15))}")
 st=$(echo "$r" | field session)
 echo "$r" | grep -q '"band":"13-17"' || fail "the teen's ID: $r"
+for i in 3 4 5; do
+	sp 10.0.0.$i id/register "{\"name\":\"u$i\",\"password\":\"upass1234\",\"adult\":true}" |
+		grep -q '"ok":true' || fail "registration $i from 10.0.0.0/24"
+done
+sp 10.0.0.6 id/register '{"name":"u6","password":"upass1234","adult":true}' |
+	grep -q "too many new IDs" || fail "a sixth ID from 10.0.0.0/24 in a day"
+sp 10.1.0.1 id/register '{"name":"u7","password":"upass1234","adult":true}' |
+	grep -q '"ok":true' || fail "an ID from another /24"
 desc='"descriptors": {"violence": "none", "chat": "moderated", "ugc": "none", "language": "no", "sexual": "no", "drugs": "no", "purchases": "no", "gambling": "no", "personal_data": "no"}'
 listing(){ echo "{\"name\":\"Spam $1\",\"kind\":\"app\",\"audience\":\"everyone\",\"access\":\"open\",$desc,\"port\":9,\"address\":\"127.0.0.1\"${2:+,$2}}"; }
 lids=() lsecrets=()
@@ -129,9 +148,28 @@ sp 10.9.0.1 announce "$(listing 6)" | grep -q "too many new listings" ||
 for i in $(seq 10); do
 	sp 10.6.0.$i id/login '{"name":"alice","password":"guess'$i'"}' > /dev/null
 done
-r=$(sp 10.0.0.1 id/login '{"name":"alice","password":"alicepass1"}')
-echo "$r" | grep -q "too many logins" && alice_locked=1 || alice_locked=
-echo "ok: day 0 on the Starport${alice_locked:+ (alice locked out by ten guesses from elsewhere)}"
+sp 10.0.0.1 id/login '{"name":"alice","password":"alicepass1"}' | grep -q '"ok":true' ||
+	fail "alice kept out by ten wrong logins from another network"
+for i in $(seq 20); do
+	sp 10.6.0.$((i + 10)) id/login '{"name":"u'$i'","password":"guess"}' > /dev/null
+done
+sp 10.6.0.99 id/login '{"name":"u3","password":"upass1234"}' | grep -q "too many wrong logins" ||
+	fail "a /24 with 30 wrong logins in an hour not held back"
+sp 10.0.0.1 id/login '{"name":"u3","password":"upass1234"}' | grep -q '"ok":true' ||
+	fail "another /24 held back by 10.6.0.0/24's wrong logins"
+# The first listing claimed by the Starport's admin
+scode=$(grep -ao "setup code [A-Z0-9]*" "$t/sp.log" | cut -d' ' -f3)
+ccode=$(python3 -c 'import hmac,hashlib,sys; print(hmac.new(bytes.fromhex(sys.argv[1]), b"claim", hashlib.sha256).hexdigest()[:16])' "${lsecrets[0]}")
+printf 'delay 6000\nquit\n' > "$t/cmds_sp"
+BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$scode \
+BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
+{\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
+{\"cmd\":\"claim\",\"listing\":\"${lids[0]}\",\"code\":\"$ccode\"}" \
+	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_sp" -w 800x600 -l 3 \
+	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$t/cmds_sp" > "$t/sp_admin.log" 2>&1
+[ "$(grep -ac 'sp: {"id":[0-9]*,"ok":true' "$t/sp_admin.log")" -ge 3 ] ||
+	fail "the claim (sp_admin.log)"
+echo "ok: day 0 on the Starport"
 
 hc admin adminpass12 h_admin0.log '{"cmd":"new_topic","name":"Lounge","about":"Talk"}
 {"cmd":"new_thread","topic":1,"title":"One","body":"first"}
@@ -187,21 +225,32 @@ echo "ok: day 0 on Aitta"
 
 # 1. +1 hour
 advance $((H + 60))
-r=$(sp 10.0.0.1 id/login '{"name":"alice","password":"alicepass1"}')
+r=$(sp 10.6.0.99 id/login '{"name":"alice","password":"alicepass1"}')
 sa2=$(echo "$r" | field session)
-[ -n "$sa2" ] || fail "alice's login an hour later: $r"
+[ -n "$sa2" ] || fail "10.6.0.0/24's login an hour later: $r"
 curl -s "http://127.0.0.1:$AP/" | grep -q "demo" || fail "the release not on the public page after page_delay"
 echo "ok: +1 hour"
 
-# 2. +1 day
+# 2. +1 day to +5 days
 advance $D
 sp 10.9.0.1 announce "$(listing 6)" | grep -q '"ok":true' || fail "a new listing the next day"
-hc sam sampass1234 h_sam1.log '{"cmd":"me"}
+for day in 1 2 3 4; do
+	[ $day = 1 ] || advance $D
+	hc sam sampass1234 h_sam_d$day.log '{"cmd":"me"}
+{"cmd":"thread","thread":1}
+{"cmd":"thread","thread":2}
 {"cmd":"reply","thread":1,"body":"cheap deals at https://spam.example"}'
-[ "$(level h_sam1.log 1001)" = 1 ] || fail "sam did not stand after a day: $(ans h_sam1.log 1001)"
-spam=$(ans h_sam1.log 1002 | grep -o '"result":[0-9]*' | cut -d: -f2)
-[ -n "$spam" ] || fail "sam's link after a day: $(ans h_sam1.log 1002)"
-echo "found: a new account stands after a day, five threads read and three replies, and links freely"
+	[ "$(level h_sam_d$day.log 1001)" = 0 ] ||
+		fail "sam stood on day $day: $(ans h_sam_d$day.log 1001)"
+	ans h_sam_d$day.log 1004 | grep -q "no links yet" ||
+		fail "sam's link on day $day: $(ans h_sam_d$day.log 1004)"
+done
+advance $D
+hc sam sampass1234 h_sam5.log '{"cmd":"me"}
+{"cmd":"reply","thread":1,"body":"cheap deals at https://spam.example"}'
+[ "$(level h_sam5.log 1001)" = 1 ] || fail "sam did not stand after five active days: $(ans h_sam5.log 1001)"
+spam=$(ans h_sam5.log 1002 | grep -o '"result":[0-9]*' | cut -d: -f2)
+[ -n "$spam" ] || fail "sam's link after five days: $(ans h_sam5.log 1002)"
 hc carol carolpass1234 h_carol1.log "{\"cmd\":\"report\",\"message\":$spam,\"reason\":\"spam\"}"
 rep=$(ans h_carol1.log 1001 | grep -o '"result":[0-9]*' | cut -d: -f2)
 [ -n "$rep" ] || fail "carol's report: $(ans h_carol1.log 1001)"
@@ -211,24 +260,25 @@ hc sam sampass1234 h_sam1b.log '{"cmd":"me"}
 {"cmd":"reply","thread":2,"body":"more at https://spam.example"}'
 [ "$(level h_sam1b.log 1001)" = 0 ] || fail "sam still stands with a message hidden: $(ans h_sam1b.log 1001)"
 ans h_sam1b.log 1002 | grep -q "no links yet" || fail "sam's link after the hide: $(ans h_sam1b.log 1002)"
-echo "ok: +1 day"
+echo "ok: +1 to +5 days"
 
 # 3. +8 days: the daily pass after the retention
-advance $((7 * D))
-r=$(sp 10.0.0.1 id/sessions "{\"session\":\"$sa2\"}")
+advance $((3 * D))
+r=$(sp 10.0.0.1 id/sessions "{\"session\":\"$sa1\"}")
 echo "$r" | grep -q '"ok":true' || fail "alice's sessions: $r"
 echo "$r" | grep -q "10.0.0.1" && fail "alice's addresses kept past retention_days: $r"
 echo "ok: +8 days"
 
 # 4. +31 days, in jumps the announcer keeps up with
 advance $((23 * D))
-r=$(sp 10.0.0.1 id/me "{\"session\":\"$sa1\"}")
-echo "$r" | grep -q '"ok":true' && fail "alice's first session after 31 days: $r"
-r=$(sp 10.9.0.1 announce "$(listing 1 "\"id\":\"${lids[0]}\",\"secret\":\"${lsecrets[0]}\"")")
+sp 10.0.0.1 id/me "{\"session\":\"$sa3\"}" | grep -q '"ok":true' &&
+	fail "a session unused for 31 days"
+sp 10.0.0.1 id/me "{\"session\":\"$sa1\"}" | grep -q '"ok":true' ||
+	fail "a session used on day 8 ended on day 31"
+r=$(sp 10.9.0.1 announce "$(listing 2 "\"id\":\"${lids[1]}\",\"secret\":\"${lsecrets[1]}\"")")
 echo "$r" | grep -q "no such listing" || fail "a listing unannounced for 31 days: $r"
+listed "${lids[0]}" || fail "the claimed listing gone after 31 days"
 listed "$hid" || fail "Hearth's listing gone at 31 days, though announced after each jump"
-hc sam sampass1234 h_sam31.log '{"cmd":"me"}'
-[ "$(level h_sam31.log 1001)" = 1 ] || fail "sam after his hidden message's 30 days: $(ans h_sam31.log 1001)"
 grep -aq "file [0-9]* deleted" "$t/hearth.log" && fail "the file deleted before lod2_after"
 echo "ok: +31 days"
 
@@ -238,6 +288,10 @@ advance $((7 * D))
 sleep 2
 grep -aq "file [0-9]* deleted, unused" "$t/hearth.log" || fail "the unused file not deleted after 183 days (hearth.log)"
 listed "$hid" || fail "Hearth's listing gone by 183 days"
+sp 10.0.0.1 id/me "{\"session\":\"$sa1\"}" | grep -q '"ok":true' &&
+	fail "a session unused since day 31 on day 183"
+hc sam sampass1234 h_sam183.log '{"cmd":"me"}'
+[ "$(level h_sam183.log 1001)" = 1 ] || fail "sam after his hidden message's 30 days: $(ans h_sam183.log 1001)"
 echo "ok: +183 days, Hearth listed all along as $hid"
 
 # 6. +5 years, the Starport first: its daily pass drops Hearth's listing
@@ -245,6 +299,7 @@ advance $((5 * 365 * D)) sp
 T=$((T - 5 * 365 * D))
 advance $((5 * 365 * D)) "hearth aitta"
 listed "$hid" && fail "Hearth's listing kept 5 years unheard"
+listed "${lids[0]}" && fail "the claimed listing kept 5 years unheard"
 r=$(sp 10.0.0.2 id/login '{"name":"teen","password":"teenpass1"}')
 echo "$r" | grep -q '"adult":true' || fail "the teen not an adult after 5 years: $r"
 for _ in $(seq 60); do
@@ -254,4 +309,4 @@ done
 [ "$(grep -ac "Listed on http://127.0.0.1:$SP as" "$t/hearth.log")" -ge 2 ] ||
 	fail "Hearth not listed again after its listing went: $(grep -a 'Announce to' "$t/hearth.log" | tail -1)"
 echo "ok: +5 years"
-echo "PASS: a calendar moved by --sim-clock: limits per hour and day, retention, sessions, listings, a release's page delay, a new account's trust, a file's sweep, an age; Hearth listed through it and again after its listing went"
+echo "PASS: a calendar moved by --sim-clock: limits per hour and day and per /24, wrong logins held back by network and not by name, retention, sessions kept by use, listings (a claimed one a year), a release's page delay, a new account's trust by active days, a file's sweep, an age; Hearth listed through it and again after its listing went"

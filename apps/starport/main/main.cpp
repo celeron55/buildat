@@ -863,7 +863,9 @@ struct Module: public interface::Module
 	// windows that have passed are swept when the table is large, and
 	// past a ceiling of live ones a new key is refused: under a flood of
 	// made-up keys this fails closed.
-	bool rate_ok(const ss_ &what, ss_ who, int max, int64_t per)
+	// count false: whether one more would be within it, not counting it
+	bool rate_ok(const ss_ &what, ss_ who, int max, int64_t per,
+			bool count = true)
 	{
 		if(who.size() > 64)
 			who = hex(interface::sha256::calculate(who));
@@ -887,7 +889,8 @@ struct Module: public interface::Module
 		r.per = per;
 		if(r.count >= max)
 			return false;
-		r.count++;
+		if(count)
+			r.count++;
 		return true;
 	}
 
@@ -1002,6 +1005,19 @@ struct Module: public interface::Module
 			return false;
 		const int64_t until = jint(b, "until");
 		return until == 0 || until > now_s();
+	}
+
+	// An account that exists (an ID, or an operator who joined and has
+	// not used it as one), neither suspended nor banned
+	bool good_standing(const ss_ &name)
+	{
+		if(name.empty() || banned("account", name))
+			return false;
+		bool exists = false;
+		accounts::access(m_server, [&](accounts::Interface *a){
+			exists = a->exists(name);
+		});
+		return exists && jint(load("ids", name), "suspended_until") <= now_s();
 	}
 
 	// -- 2. Announce
@@ -2363,6 +2379,13 @@ struct Module: public interface::Module
 			store("sessions")->remove(key);
 			return "";
 		}
+		// Used, it lasts 30 days from now: activity is the proof. Written
+		// once a day at most
+		if(jint(s, "expires") < now_s() + 29 * 86400){
+			json::Value u = s;
+			u.set("expires", now_s() + 30 * 86400);
+			put("sessions", key, u);
+		}
 		return jstr(s, "name");
 	}
 
@@ -2454,8 +2477,9 @@ struct Module: public interface::Module
 		if(what == "register"){
 			if(!setting("id_registration").is_true())
 				throw Exception("this Starport makes no new IDs");
-			if(!rate_ok("id_register", r.address, 5, 86400))
-				throw Exception("too many new IDs from this address today");
+			if(!rate_ok("id_register", network::address_bin(r.address), 5,
+					86400))
+				throw Exception("too many new IDs from this network today");
 			const ss_ name = jstr(b, "name");
 			json::Value id = json::object();
 			const ss_ age_error = set_age(id, b);
@@ -2485,12 +2509,21 @@ struct Module: public interface::Module
 		}
 		if(what == "login"){
 			const ss_ name = jstr(b, "name");
-			if(!rate_ok("id_login_addr", r.address, 30, 3600) ||
-					!rate_ok("id_login_name", name, 10, 3600))
-				throw Exception("too many logins; try later");
+			// Wrong logins by the block of addresses they come from, not
+			// by the name: who a client says it is means nothing before
+			// it has logged in, and a limit by name was anyone's to keep
+			// its owner out
+			const ss_ bin = network::address_bin(r.address);
+			auto wrong = [&](const char *why){
+				rate_ok("id_login_wrong", bin, 30, 3600);
+				throw Exception(why);
+			};
+			if(!rate_ok("id_login_wrong", bin, 30, 3600, false))
+				throw Exception("too many wrong logins from this network; "
+						"try later");
 			json::Value id = load("ids", name);
 			if(!acc->check_password(name, jstr(b, "password")))
-				throw Exception("wrong name or password");
+				wrong("wrong name or password");
 			// An account made by joining the app (an operator's) is an ID
 			// too, from its first login here; its age is not said yet
 			if(!id.is_object()){
@@ -2505,7 +2538,7 @@ struct Module: public interface::Module
 				if(jstr(b, "totp").empty())
 					throw Exception("totp");
 				if(!acc->check_totp(name, jstr(b, "totp")))
-					throw Exception("wrong TOTP code");
+					wrong("wrong TOTP code");
 			}
 			if(jint(id, "suspended_until") > now_s())
 				throw Exception("this ID is suspended; its statement of "
@@ -2861,12 +2894,14 @@ struct Module: public interface::Module
 				if(t - jint(load("events", k), "ts") > 90 * 86400)
 					store("events")->remove(k);
 		});
-		// Listings not heard from in 30 days go, unless moderation has a
+		// Listings not heard from in 30 days go, a claimed one in a year
+		// while its owner is in good standing, unless moderation has a
 		// record of them
 		int gone = 0;
 		for(const ss_ &id : store("listings")->list("")){
 			const json::Value l = load("listings", id);
-			if(t - jint(l, "last_announce") > 30 * 86400 &&
+			if(t - jint(l, "last_announce") >
+					(good_standing(jstr(l, "owner")) ? 365 : 30) * 86400 &&
 					jstr(l, "status") == "active" &&
 					l.get("strikes").size() == 0){
 				store("listings")->remove(id);

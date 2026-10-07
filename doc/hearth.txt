@@ -188,9 +188,11 @@ A level is worked out at each post:
 
     0  a new account: 2 threads a day, 10 messages an hour, links to
        the tracker domains only
-    1  a day since it first came, 5 threads read, 3 of its messages
-       shown, none hidden in the last 30 days: 10 threads a day, 60
-       messages an hour
+    1  active on 5 days, none of its messages hidden in the last 30
+       days: 10 threads a day, 60 messages an hour. A day (UTC) is
+       active if the account read a thread or wrote a message that
+       stands on it, and counts once it is over: more on one day is
+       no more trust
     2  an admin: no limit
 
 An edit counts as a message. A link is "://", "www." or anything the

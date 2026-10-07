@@ -9,9 +9,10 @@ run their own. The official one is https://starport.buildat.org.
   not who is playing. Its kind (world, arena, app, other) is the
   file's, or else the app's own: `main/meta.json`'s "kind", experiment
   and check listed as other ([APP_CATEGORY]).
-  A listing not announced for 30 days is dropped, unless moderation has a
-  record of it; its server, back, is listed again under a new id and
-  claim code.
+  A listing not announced for 30 days is dropped -- a claimed one after
+  a year, while the account that claimed it exists and is not suspended
+  or banned -- unless moderation has a record of it; its server, back, is
+  listed again under a new id and claim code.
 - A server accepts Starport IDs only if its admin turns them on; local
   accounts work without one. A player uses an ID only by choosing "Sign in
   with your Starport ID".
@@ -24,6 +25,9 @@ run their own. The official one is https://starport.buildat.org.
   e-mail. It is deleted from its own settings. Mail goes through the
   server's SMTP server, set on the Server window's Health page; the old
   `smtp` setting moves there at the first start that has none.
+  A session lasts 30 days from its last use. Wrong logins are limited
+  by the network they come from (an IPv4 /24, an IPv6 /64), 30 an hour,
+  never by the name tried; new IDs to 5 a day from one network.
 - The address a login or a report came from is kept for `retention_days`,
   7 by default, which the Starport's admin sets; a daily pass then clears
   it. The ID sees its own recent logins with their addresses until then.

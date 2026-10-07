@@ -10,7 +10,7 @@
 # the password is checked.
 #   1. a wrong password is refused as "Wrong password" (the fail() path) and
 #      the server counts it (note_failure);
-#   2. the accumulated failures lock the name/address ("Too many failed
+#   2. the accumulated failures lock the address's /24 ("Too many failed
 #      logins"), the login rate limit working end-to-end.
 #   3. on the launcher's server (floorplanner) started with an owner token, a
 #      loopback client without the token is not local: a new account needs
@@ -85,7 +85,7 @@ $(echo "$c1" | grep -iE 'login|refused' | tail -5)"
 nolog "$srv_log" | grep -q "failed: Wrong password" ||
 	fail "the server did not log the wrong password as a counted failure"
 
-# 2. the accumulated failures lock the name/address
+# 2. the accumulated failures lock the address's /24
 locked=0
 for i in $(seq 2 11); do
 	ci=$(join "w$i" alice wrongpass000 0 "")
@@ -95,7 +95,7 @@ for i in $(seq 2 11); do
 	fi
 done
 [ "$locked" = 1 ] ||
-	fail "repeated wrong logins did not lock the name/address (no 'Too many failed logins')
+	fail "repeated wrong logins did not lock the address (no 'Too many failed logins')
 $(nolog "$srv_log" | grep -iE 'failed|refused' | tail -8)"
 
 kill $srv; wait $srv 2>/dev/null

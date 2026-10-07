@@ -233,6 +233,8 @@ struct Failures
 	int64_t wait_until_us = 0;
 };
 static const int64_t FAIL_WINDOW_US = 600LL * 1000000;
+// New accounts a day from one network::address_bin(), by open registration
+static const int NEW_ACCOUNTS_A_DAY = 5;
 static const int FAIL_LOCK = 10;
 
 // A code to type: no 0/O or 1/I to mistake for each other
@@ -426,8 +428,13 @@ struct Module: public interface::Module, public Interface
 	ss_ m_owner_token;
 	std::set<PeerId> m_owners;
 	std::map<PeerId, Peer> m_peers;
+	// A logged in account's wrong old passwords, by its name
 	std::map<ss_, Failures> m_name_failures;
+	// Failed logins, by network::address_bin()
 	std::map<ss_, Failures> m_address_failures;
+	// [SIM_CLOCK]: new accounts by open registration, by address_bin(),
+	// on the day of the second; simplified: in memory, a restart forgets
+	std::map<ss_, std::pair<int64_t, int>> m_new_accounts;
 	// [SERVER_ADMIN_PAGE]: test mails' answers, from their threads, which
 	// may outlive the module; sent to the admin who asked on a tick
 	struct MailResults { std::mutex m; std::vector<std::pair<PeerId, ss_>> r; };
@@ -479,6 +486,16 @@ struct Module: public interface::Module, public Interface
 					"after the window");
 		// A failure outside the window starts the count over, not doubling
 		// from where an old one left off
+		// The blocks the failures are counted in
+		const char *bins[][2] = {{"1.2.3.4", "1.2.3.0/24"},
+				{"::ffff:10.6.0.9", "10.6.0.0/24"},
+				{"2001:db8:0:1:a:b:c:d", "2001:db8:0:1::/64"},
+				{"2001:DB8::1", "2001:db8:0:0::/64"},
+				{"fe80::1%eth0", "fe80:0:0:0::/64"}};
+		for(auto &b : bins)
+			if(network::address_bin(b[0]) != b[1])
+				throw Exception(ss_("accounts: rate-limit self-check: ")+
+						b[0]+"'s block is "+network::address_bin(b[0]));
 		std::map<ss_, Failures> m2;
 		note_failure(m2, "b", 0);
 		note_failure(m2, "b", 601 * s);
@@ -1028,12 +1045,12 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 
-		// A name and an address that failed wait before they are tried
-		// again
+		// An address's block that failed waits before it tries again. Not
+		// the name: who a client says it is means nothing before it has
+		// logged in, and a name's wait was anyone's to keep its owner out
 		const int64_t now = interface::os::wall_us();
-		const int64_t wait = std::max(
-				failure_wait(m_name_failures, name, now),
-				failure_wait(m_address_failures, peer.address, now));
+		const ss_ bin = network::address_bin(peer.address);
+		const int64_t wait = failure_wait(m_address_failures, bin, now);
 		if(wait > 0 && !local){
 			log_i(MODULE, "Login of %s from %s refused: waiting after failures",
 					cs(name), cs(peer.address));
@@ -1042,8 +1059,7 @@ struct Module: public interface::Module, public Interface
 		}
 		auto fail = [&](const ss_ &why){
 			peer.failures++;
-			note_failure(m_name_failures, name, now);
-			note_failure(m_address_failures, peer.address, now);
+			note_failure(m_address_failures, bin, now);
 			log_i(MODULE, "Login of %s from %s failed: %s", cs(name),
 					cs(peer.address), cs(why));
 			reply(why);
@@ -1179,6 +1195,20 @@ struct Module: public interface::Module, public Interface
 				} else if(!m_access.open_registration){
 					return reply("New accounts need an invite code from an "
 							"admin");
+				} else {
+					// Open registration: a few a day from an address's
+					// block, which makes a flood of accounts a flood of
+					// blocks
+					const int64_t day = interface::os::wall_us() /
+							1000000 / 86400;
+					auto &n = m_new_accounts[network::address_bin(
+							peer.address)];
+					if(n.first != day)
+						n = {day, 0};
+					if(n.second >= NEW_ACCOUNTS_A_DAY)
+						return reply("No more new accounts from this "
+								"network today");
+					n.second++;
 				}
 			}
 			// A local account gets a password nobody knows, so its name
@@ -1199,7 +1229,6 @@ struct Module: public interface::Module, public Interface
 					"blocklist", cs(name));
 			return reply("Banned by a blocklist this server follows");
 		}
-		m_name_failures.erase(name);
 		update_setup_code();
 		if(cred.keep && !local && cred.token.empty()){
 			token = random_code(32);
