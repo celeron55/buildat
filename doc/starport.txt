@@ -9,6 +9,9 @@ run their own. The official one is https://starport.buildat.org.
   not who is playing. Its kind (world, arena, app, other) is the
   file's, or else the app's own: `main/meta.json`'s "kind", experiment
   and check listed as other ([APP_CATEGORY]).
+  A listing not announced for 30 days is dropped, unless moderation has a
+  record of it; its server, back, is listed again under a new id and
+  claim code.
 - A server accepts Starport IDs only if its admin turns them on; local
   accounts work without one. A player uses an ID only by choosing "Sign in
   with your Starport ID".

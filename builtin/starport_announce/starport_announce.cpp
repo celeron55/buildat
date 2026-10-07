@@ -148,6 +148,8 @@ struct Module: public interface::Module, public Interface
 	sm_<ss_, ss_> m_status;
 	sm_<ss_, sv_<ss_>> m_subscribed;
 	int64_t m_next_read_us = 0;
+	// [SIM_CLOCK]: how far the calendar is from the real clock
+	int64_t m_calendar_skew_us = 0;
 	// By the Starport's url
 	sm_<ss_, Listing> m_listings;
 	// 10d: the identities of the blocklists this server subscribes to, by
@@ -396,6 +398,15 @@ struct Module: public interface::Module, public Interface
 		if(!m_dir.empty() && now >= m_next_read_us){
 			m_next_read_us = now + 2000000;
 			read_config();
+		}
+		// [SIM_CLOCK]: a calendar moved ahead is announced at once, as
+		// the time between would have been, and the listing does not read
+		// offline (or, past 30 days, go) while the real clock waits out
+		// the interval
+		const int64_t skew = interface::os::wall_us() - now;
+		if(std::abs(skew - m_calendar_skew_us) > 60000000){
+			m_calendar_skew_us = skew;
+			announce_soon();
 		}
 		if(!m_start_announcing)
 			return;
@@ -707,6 +718,14 @@ struct Module: public interface::Module, public Interface
 				let_play_page_in(url, json::Value());
 			std::lock_guard<std::mutex> lock(m_mutex);
 			m_status[url] = "refused: "+why;
+			// The Starport dropped the listing (30 days unheard, or its
+			// data lost): listed anew shortly, with a new claim code,
+			// rather than refused forever
+			if(why == "no such listing, or not its secret" &&
+					m_listings.erase(url)){
+				save_state();
+				return false;
+			}
 			return why != "announced too often";
 		}
 		{
@@ -1029,7 +1048,8 @@ struct Module: public interface::Module, public Interface
 		if(blocked)
 			return "Banned by a blocklist this server follows";
 		const json::Value &exp = p.get("exp");
-		if(!exp.is_number() || exp.as_number() < (double)time(nullptr))
+		if(!exp.is_number() || exp.as_number() <
+				(double)(interface::os::wall_us() / 1000000))
 			return "The token has expired: log in to the Starport again";
 		host = host_of(host);
 		out->sub = p.get("sub").as_string();

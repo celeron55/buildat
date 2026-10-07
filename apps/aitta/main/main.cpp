@@ -37,6 +37,7 @@
 // <user>/apps/<app>/archives.
 #include "core/log.h"
 #include "core/json.h"
+#include "interface/os.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/server_config.h"
@@ -61,7 +62,8 @@
 
 using interface::Event;
 
-static int64_t now_s(){ return (int64_t)time(nullptr); }
+// [SIM_CLOCK]: the calendar, which a check may move
+static int64_t now_s(){ return interface::os::wall_us() / 1000000; }
 
 static ss_ jstr(const json::Value &v, const char *k)
 {

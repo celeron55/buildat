@@ -33,6 +33,7 @@
 #include "core/log.h"
 #include "core/json.h"
 #include "core/version.h"
+#include "interface/os.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/server_config.h"
@@ -64,7 +65,8 @@ namespace starport {
 // ---------------------------------------------------------------------------
 // Helpers
 
-static int64_t now_s(){ return (int64_t)time(nullptr); }
+// [SIM_CLOCK]: the calendar, which a check may move
+static int64_t now_s(){ return interface::os::wall_us() / 1000000; }
 static int64_t day_of(int64_t t){ return t / 86400; }
 
 static ss_ hex(const ss_ &raw){ return interface::sha256::hex(raw); }
@@ -2205,7 +2207,7 @@ struct Module: public interface::Module
 
 	static int64_t this_year()
 	{
-		const time_t t = time(nullptr);
+		const time_t t = now_s();
 		struct tm tm;
 		gmtime_r(&t, &tm);
 		return tm.tm_year + 1900;

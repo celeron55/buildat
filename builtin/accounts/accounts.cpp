@@ -668,7 +668,7 @@ struct Module: public interface::Module, public Interface
 		return m_store->get("token/"+interface::sha256::hex(
 					interface::sha256::calculate(token)), data) &&
 				unpack(data, kept) && kept.name == name &&
-				kept.expires_us >= interface::os::time_us() &&
+				kept.expires_us >= interface::os::wall_us() &&
 				get_account(name, account) && kept.hash == account.hash;
 	}
 
@@ -1030,7 +1030,7 @@ struct Module: public interface::Module, public Interface
 
 		// A name and an address that failed wait before they are tried
 		// again
-		const int64_t now = interface::os::time_us();
+		const int64_t now = interface::os::wall_us();
 		const int64_t wait = std::max(
 				failure_wait(m_name_failures, name, now),
 				failure_wait(m_address_failures, peer.address, now));
@@ -1454,7 +1454,7 @@ struct Module: public interface::Module, public Interface
 		Account account;
 		if(!get_account(name, account))
 			return;
-		const int64_t now = interface::os::time_us();
+		const int64_t now = interface::os::wall_us();
 		if(failure_wait(m_name_failures, name, now) > 0)
 			return result("Too many failed attempts; wait and try again");
 		if(pbkdf2_sha256(pw.first, account.salt, PBKDF2_ITERATIONS) !=
@@ -1552,6 +1552,8 @@ struct Module: public interface::Module, public Interface
 		const ss_ secret = totp_secret(name);
 		if(secret.empty() || code.size() != 6)
 			return false;
+		// Real time, not the calendar --sim-clock moves: the user's
+		// authenticator knows no other
 		const uint64_t now = (uint64_t)(interface::os::time_us() / 1000000) /
 				30;
 		// One step either way, for a clock a little off
@@ -1720,7 +1722,7 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		char date[64];
-		const time_t t = time(nullptr);
+		const time_t t = interface::os::wall_us() / 1000000;
 		struct tm tm;
 #ifdef _WIN32
 		gmtime_s(&tm, &t);

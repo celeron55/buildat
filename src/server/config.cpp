@@ -71,6 +71,8 @@ Config::Config()
 	// otherwise; see -R.
 	set_default("reload_modules", false);
 	set_default("compile_only", false);
+	// [SIM_CLOCK]: --sim-clock, never a setting
+	set_default("sim_clock", false);
 }
 
 bool Config::check_paths()

@@ -118,6 +118,11 @@ int main(int argc, char *argv[])
 			// first start's compile would otherwise eat
 			config.set("compile_only", true);
 			take = 1;
+		} else if(ss_(argv[i]) == "--sim-clock"){
+			// [SIM_CLOCK]: a check moves the calendar by writing seconds
+			// to <user_path>/sim_clock; only from this command line
+			config.set("sim_clock", true);
+			take = 1;
 		} else if(ss_(argv[i]) == "--lan-announce" && i + 1 < argc){
 			config.set("lan_announce", ss_(argv[i + 1]));
 			take = 2;
@@ -174,6 +179,9 @@ int main(int argc, char *argv[])
 			"                       all of your files\n"
 			"  --compile-only       Compile and load the modules, then exit\n"
 			"                       (1 if one failed); nothing is opened\n"
+			"  --sim-clock          Run the calendar ahead by the seconds\n"
+			"                       in user_path/sim_clock, read every tick\n"
+			"                       (for checks)\n"
 			;
 
 	int c;
@@ -340,6 +348,23 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	// [SIM_CLOCK]: opened before the box, which hides the user path's
+	// root; read again every tick, so a check writes it in place.
+	// simplified: a Windows box's child opens it after the box, and needs
+	// --unconfined for it
+	FILE *sim_clock = nullptr;
+	if(config.get<bool>("sim_clock")){
+		const ss_ path = config.get<ss_>("user_path")+"/sim_clock";
+		sim_clock = fopen(path.c_str(), "a+");
+		if(!sim_clock){
+			log_e(MODULE, "--sim-clock: cannot open %s", cs(path));
+			return 1;
+		}
+		// Unbuffered: a rewind within the buffer would read it again
+		setvbuf(sim_clock, nullptr, _IONBF, 0);
+		log_w(MODULE, "--sim-clock: the calendar is what %s says", cs(path));
+	}
+
 	// [PROCESS_SANDBOX]: the box, before anything of the app is loaded.
 	// Where it cannot be made the server refuses to start (decided
 	// 2026-10-02), and says how to start it anyway.
@@ -394,6 +419,7 @@ int main(int argc, char *argv[])
 		// Main loop
 		uint64_t next_tick_us = get_timeofday_us();
 		uint64_t t_per_tick = 1000000 / 30; // Same as physics FPS
+		long long sim_offset_s = 0;
 
 		for(;;){
 			if(g_shutdown_signal != 0){
@@ -419,6 +445,17 @@ int main(int argc, char *argv[])
 				if(next_tick_us < current_us - 1000 * 1000){
 					log_w("main", "Skipping %zuus", current_us - next_tick_us);
 					next_tick_us = current_us;
+				}
+				// [SIM_CLOCK]: a jump is seen by the tick after it, once:
+				// whatever runs on the calendar compares against it
+				long long v = 0;
+				if(sim_clock){
+					rewind(sim_clock);
+					if(fscanf(sim_clock, "%lld", &v) == 1 && v != sim_offset_s){
+						sim_offset_s = v;
+						interface::os::set_wall_offset_us(v * 1000000);
+						log_i(MODULE, "sim clock: %llds ahead", v);
+					}
 				}
 				interface::Event event("core:tick",
 						new interface::TickEvent(t_per_tick / 1e6));

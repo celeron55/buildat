@@ -33,6 +33,18 @@ A crash prints a symbolised backtrace on Linux (src/impl/linux/debug.cpp). Under
 scripted run the client's log carries it; fuzz.sh and drive.sh read
 "Crash:" as a failure.
 
+Simulated time
+--------------
+`buildat_server --sim-clock` runs the calendar ahead of the real clock by
+the seconds in <user_path>/sim_clock, read every tick; a check writes the
+file in place (`echo N > sim_clock`) and waits for the log's "sim clock:
+Ns ahead". Dates, expiries and the limits per hour or day read
+interface::os::wall_us(); timeouts, budgets and TOTP stay on
+interface::os::time_us(). A jump is one tick: what runs on the calendar
+compares against it. A server's Starport announcer announces at once after
+a jump. The option is only on the command line. util/sim_clock_check.sh
+runs a Starport, a Hearth and an Aitta through 183 days and 5 years.
+
 Sanitizers and fuzzing
 ----------------------
 cmake -DSANITIZE=address in a build directory of its own (Build/asan)

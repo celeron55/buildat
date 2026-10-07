@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/os.h"
 #include "interface/fs.h"
+#include <atomic>
 #include "core/log.h"
 #include <sys/time.h>
 #include "ports/windows_minimal.h"
@@ -17,6 +18,18 @@ int64_t time_us()
 	struct timeval tv;
 	gettimeofday(&tv, nullptr);
 	return (int64_t)tv.tv_sec * 1000000 + (int64_t)tv.tv_usec;
+}
+
+static std::atomic<int64_t> g_wall_offset_us{0};
+
+int64_t wall_us()
+{
+	return time_us() + g_wall_offset_us.load();
+}
+
+void set_wall_offset_us(int64_t offset_us)
+{
+	g_wall_offset_us = offset_us;
 }
 
 void sleep_us(int us)

@@ -8,6 +8,11 @@ namespace interface
 	namespace os
 	{
 		int64_t time_us();
+		// The calendar: time_us() plus an offset that only a server run
+		// with --sim-clock moves ([SIM_CLOCK]). For dates, expiries and
+		// limits per hour or day; time_us() for timeouts and budgets
+		int64_t wall_us();
+		void set_wall_offset_us(int64_t offset_us);
 		void sleep_us(int us);
 		ss_ get_current_exe_path();
 		// name without extension; looks next to the current executable

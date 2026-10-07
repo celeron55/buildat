@@ -497,7 +497,7 @@ interface/module.h: ModuleAskedToStop, Module, ~Module, init, event, get_interfa
 interface/module_info.h: ModuleDependency, ModuleMeta, ModuleInfo
 interface/mutex.h: Mutex, lock, unlock, MutexScope
 interface/noise.h: v3f, PseudoRandom, seed, next, range, NoiseParams, Noise, ~Noise, init, setSize, setSpreadFactor, setOctaves, resizeNoiseBuf, valueMap2D, valueMap3D, fbmMap2D, fbmMap2DModulated, fbmMap3D, transformNoiseMap, noise2d, noise3d, noise2d_value, noise3d_value, noise2d_fbm, noise2d_fbm_abs, noise3d_fbm, noise3d_fbm_abs, easeCurve, NoiseFbm2D, NoiseFbm2DNoTxfm, NoiseFbm2DPosOffset, NoiseFbm2DNoTxfmPosOffset, NoiseFbm3D
-interface/os.h: time_us, sleep_us, get_current_exe_path, get_sibling_exe_path, memory_bytes, free_bytes
+interface/os.h: time_us, wall_us, set_wall_offset_us, sleep_us, get_current_exe_path, get_sibling_exe_path, memory_bytes, free_bytes
 interface/packet_stream.h: PacketType, UnknownPacketReceived, OutgoingPacketTypeRegistry, set, get, get_name, IncomingPacketTypeRegistry, get_type, PacketStream, Fragments, input, output, define, send_new_types
 interface/polyvox_cereal.h: save, load
 interface/polyvox_numeric.h: container_coord, container_coord16
