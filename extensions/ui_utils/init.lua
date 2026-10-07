@@ -640,32 +640,25 @@ function M.safe.keyboard_page(win)
 		if cols and arranged and shown(win) then
 			-- The left one last focused there, by its place: a sidebar
 			-- drawn again has new buttons in the same places
-			for i, e in ipairs(page_items(cols[1], {})) do
+			local left, focused = page_items(cols[1], {}), false
+			for i, e in ipairs(left) do
 				if e:HasFocus() then
-					page.left_at, page.side = i, 1
+					page.left_at, page.side, focused = i, 1, true
 				end
 			end
-			page.right_seen = page_items(cols[2], {})
-			for _, e in ipairs(page.right_seen) do
+			for _, e in ipairs(page_items(cols[2], {})) do
 				if e:HasFocus() then
-					page.side = 2
+					page.side, focused = 2, true
 				end
 			end
-			-- After Enter on the left: the right's first item once its
-			-- page is a new one (one of the old items gone), or in 3 s
-			local wait = page.to_right
-			if wait and buildat.get_time_us() > wait.until_us then
-				page.to_right = nil
-			elseif wait then
-				local now = page_items(cols[2], {})
-				local new = #wait.old == 0 and #now > 0
-				for _, e in ipairs(wait.old) do
-					new = new or gone(e)
-				end
-				if new and #now > 0 then
-					page.to_right = nil
-					now[1]:SetFocus(true)
-				end
+			-- After Enter on the left: its button again once the sidebar
+			-- drawn again has dropped the focus, for 3 s
+			local wait = page.keep_left
+			if wait and buildat.get_time_us() > wait then
+				page.keep_left = nil
+			elseif wait and not focused and #left > 0 then
+				page.keep_left = nil
+				left[math.min(page.left_at or 1, #left)]:SetFocus(true)
 			end
 		end
 	end)
@@ -711,8 +704,8 @@ function M.safe.keyboard_page(win)
 		end
 		-- **Two columns** (keyboard_columns): Up and Down stay in the one
 		-- with the focus, Right goes to the right one's first item, Left
-		-- back to the left one's last; Enter on the left one goes right
-		-- once the page it opens is there
+		-- back to the left one's last; Enter on the left one stays there
+		-- (user, 2026-10-07: browsing the pages, Right to act in one)
 		local items = page.items
 		local side = nil
 		local cols = page.columns
@@ -731,6 +724,10 @@ function M.safe.keyboard_page(win)
 			end
 			-- Nothing focused (a page with nothing to focus came up after
 			-- Enter): an arrow key goes back to the left one's last
+			if key ~= KEY_RETURN and key ~= KEY_RETURN2 and
+					key ~= KEY_KP_ENTER then
+				page.keep_left = nil
+			end
 			if not side and #left > 0 and (key == KEY_UP or
 					key == KEY_DOWN or key == KEY_LEFT or key == KEY_RIGHT) then
 				left[math.min(page.left_at or 1, #left)]:SetFocus(true)
@@ -747,13 +744,11 @@ function M.safe.keyboard_page(win)
 				page.side = 1
 				return
 			end
-			-- The button may have drawn the sidebar and its page again
-			-- already, its focus gone with it: the side and the page's
-			-- items last seen then
+			-- The button may have drawn the sidebar again already, its
+			-- focus gone with it: the side last seen then
 			if (side or page.side) == 1 and (key == KEY_RETURN or
 					key == KEY_RETURN2 or key == KEY_KP_ENTER) then
-				page.to_right = {old = page.right_seen or right,
-					until_us = buildat.get_time_us() + 3000000}
+				page.keep_left = buildat.get_time_us() + 3000000
 			end
 		end
 		-- **Rows by Up and Down only** (user, 2026-10-07): Left and Right
