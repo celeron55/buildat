@@ -312,10 +312,16 @@ static void le(ss_ &o, uint32_t v, int bytes)
 		o += (char)((v >> (8 * i)) & 0xff);
 }
 
-static ss_ zip_directory(const ss_ &dir)
+sv_<ss_> package_files(const ss_ &dir)
 {
 	sv_<ss_> names;
 	collect(dir, "", names);
+	return names;
+}
+
+static ss_ zip_directory(const ss_ &dir)
+{
+	const sv_<ss_> names = package_files(dir);
 	ss_ out, central;
 	for(const ss_ &name : names){
 		const ss_ data = read_file(dir+"/"+name);

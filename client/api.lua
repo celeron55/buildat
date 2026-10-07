@@ -618,7 +618,7 @@ buildat.safe.feedback = function()
 	local f = feedback
 	-- A server's or a game's is discussed()'s: a Hearth from before it
 	-- read this one as a package's and could not draw it
-	if f and (f.server or f.game) then
+	if f and (f.server or f.game or f.bind) then
 		return nil
 	end
 	feedback = nil
@@ -719,6 +719,18 @@ buildat.safe.discuss_this_server = function(claim)
 		require("buildat/extension/starport").join_with_id(t.hearth)
 	end)
 	return true
+end
+-- **"Bind on <Aitta>..."** ([AITTA_PUBLISH_UI]): the publish screen
+-- (trusted) sets the author name and public key it made, with the
+-- Aitta's address, and joins it; the Aitta's page takes them once to
+-- fill its Bind form. aitta_bind() -> {author, key} or nil
+buildat.safe.aitta_bind = function()
+	local f = feedback
+	if not (f and f.bind) then
+		return nil
+	end
+	feedback = nil
+	return {author = tostring(f.bind.author), key = tostring(f.bind.key)}
 end
 -- discussed_server() -> {name, address, subject, title} or nil, once: the
 -- Hearth's side of the above, for a Hearth from before discussed()

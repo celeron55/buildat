@@ -249,6 +249,18 @@ local function gather()
 					"document beside it.",
 			run = function() console.show(function() end) end})
 	end
+	-- [AITTA_PUBLISH_UI]: the trusted side's screen, which a page has not
+	local starport = require("buildat/extension/starport")
+	starport = starport and (starport.open_publish and starport or
+			starport.safe)
+	if not web and starport and starport.open_publish then
+		add({label = "Publish an app or extension", kind = "action",
+			icon = "launch_menu/res/icon_local.png",
+			badge = "Developer", section = "Developer",
+			description = "Make one in your user folder, try it, then " ..
+					"pack, sign and publish it on an Aitta.",
+			run = function() starport.open_publish() end})
+	end
 	-- The launch actions: apps, Luanti games, the server list, catalogs,
 	-- tools. An app's other actions (vanilla's settings, an installed
 	-- release's feedback) are its panel's as well as their own entries.
@@ -282,7 +294,8 @@ local function gather()
 			local badge = kind == "server" and network ..
 					(a.listed_by and ", " .. a.listed_by or "") or
 					cat == "game" and "Luanti" or
-					a.kind == "installed" and "Aitta" or nil
+					a.kind == "installed" and "Aitta" or
+					a.kind == "dev" and "Dev" or nil
 			local e = add({label = a.label, kind = kind,
 				network = network, listed_by = a.listed_by,
 				badge = SETTINGS_KEYS[a.key] and "Settings" or badge,

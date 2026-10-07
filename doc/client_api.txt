@@ -401,6 +401,10 @@ buildat.discussed() -> {server =, game =} or nil
   "contentdb:<author>/<name>", "buildat" (an app bundled with it), "aitta"
   (with package and the rest, subject as Feedback's) or "unknown"; subject
   "game:<source>", or "game:unknown:<id>"
+buildat.aitta_bind() -> {author, key} or nil
+- On an Aitta's page, once: the author name and public key the publish
+  screen ([AITTA_PUBLISH_UI], doc/aitta.txt) joined it with, for its Bind
+  form
 buildat.set_running_game({game =}) or nil
 - A server's code names the Luanti game its world runs (a game id), for
   the overlay's Discuss; the client's own extensions (luanti_client) also

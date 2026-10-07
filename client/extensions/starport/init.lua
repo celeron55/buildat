@@ -2617,5 +2617,12 @@ M.open_report_here = M.safe.open_report_here
 M.id_token_here = M.safe.id_token_here
 M.take_id_join = M.safe.take_id_join
 M.group = M.safe.group
+-- [AITTA_PUBLISH_UI]: the publish screen, drawn with this file's dialogs
+dofile(__buildat_extension_path("starport") .. "/publish.lua")({M = M,
+	network = network, magic = magic, uistack = uistack,
+	open_window = open_window, add_text = add_text, add_label = add_label,
+	add_row = add_row, add_button = add_button, add_edit = add_edit,
+	effective = effective, WARN = WARN, DIM = DIM})
+M.open_publish = M.safe.open_publish
 return M
 -- vim: set noet ts=4 sw=4:

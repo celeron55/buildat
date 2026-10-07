@@ -59,6 +59,29 @@ The commands
         Uploads a release to an Aitta (apps/aitta). Its key has to be bound
         to its author name there first.
 
+Publishing from the client
+--------------------------
+Settings, Developer, "Publish an app or extension" (not on the web
+client) does the commands above without a terminal:
+  - Packages are directories in <user>/dev_apps/<name>; "New app..." and
+    "New extension..." write a small one there (an app with client Lua
+    only), and "Open folder" opens it. A dev app is a "Dev" tile on the
+    launch grid ("dev:<name>"; its server and saves know it as <name>);
+    a dev extension is loaded over an installed one of the same name.
+  - The manifest form edits meta.json, each field checked as it is typed,
+    the reason under it.
+  - "Create my publishing key" writes <user>/aitta_keys/<author>.key.
+    "Bind on <Aitta>..." joins the Aitta with the author name and public
+    key filled in its Bind form (the Aitta's account signs in there);
+    "Back to the launcher" returns. The screen asks the Aitta's
+    GET /api/aitta/info?key=<public key> ({ok, licences, author}) whether
+    the key is bound.
+  - "Pack and publish" packs into <user>/aitta_releases and uploads. A
+    version already published is refused with "Raise the version", which
+    raises the last number of the version and saves it; "Pack and
+    publish" again publishes that.
+util/aitta_publish_check.sh drives all of it.
+
 Aitta, the registry
 -------------------
 apps/aitta is a buildat app. An author joins it (its accounts: a local
@@ -78,6 +101,8 @@ with the app's request {"cmd": "set_settings", "settings": {...}}.
 
     GET  /api/aitta/list                      the listed releases, JSON
     GET  /api/aitta/archive/<sha256>.zip|.sig a listed release's files
+    GET  /api/aitta/info?key=<public key>     {ok, licences, author}: the
+                                              author the key is bound to
     GET  /                                    a page of each package's latest
                                               release, for a browser
     GET  /p/<author>/<name>                   a package's listed releases

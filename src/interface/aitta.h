@@ -41,6 +41,10 @@ namespace interface
 		// "<author>__<name>"
 		ss_ kind_of(const json::Value &m);
 
+		// What pack() puts in the archive: every file under dir, '/'
+		// separated, the names starting with '.' left out
+		sv_<ss_> package_files(const ss_ &dir);
+
 		// Packs app_dir (meta.json at its root) into out_dir and signs it
 		// with the key in key_path. Returns the zip's path; throws why not.
 		ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir);

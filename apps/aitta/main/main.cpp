@@ -10,6 +10,10 @@
 // The HTTP API, under /api/aitta/ on the server's port, JSON out, a
 // refusal {"ok": false, "error": ...} with status 200:
 //   GET  list                       the listed releases
+//   GET  info?key=<public key>      the licences taken here, and the
+//                                   author the key is bound to ("" for
+//                                   none): what the client's publish
+//                                   screen asks ([AITTA_PUBLISH_UI])
 //   GET  release?id=author/name/version  one, with its changelog's text
 //                                   ([PACKAGE_SUBJECT]: what a Hearth
 //                                   posts as the release's thread)
@@ -273,6 +277,8 @@ struct Module: public interface::Module
 		try {
 			if(call == "list")
 				return http_list(r);
+			if(call == "info")
+				return http_info(r);
 			if(call == "release")
 				return http_release(r);
 			if(call.compare(0, 8, "archive/") == 0)
@@ -312,6 +318,16 @@ struct Module: public interface::Module
 		json::Value v = json::object();
 		v.set("ok", true);
 		v.set("releases", listed_releases());
+		respond(r, v);
+	}
+
+	void http_info(const network::HttpRequest &r)
+	{
+		json::Value v = json::object();
+		v.set("ok", true);
+		v.set("licences", m_settings.get("licences"));
+		const ss_ key = query_value(r.query, "key");
+		v.set("author", is_hex(key, 130) ? get("keys", key) : "");
 		respond(r, v);
 	}
 

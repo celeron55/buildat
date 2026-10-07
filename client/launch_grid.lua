@@ -189,6 +189,10 @@ local function run_launcher(log, source)
 			if source.kind == "installed" then
 				request = {app = source.name, params = request.params}
 			end
+			-- And an author's own in <user>/dev_apps ([AITTA_PUBLISH_UI])
+			if source.kind == "dev" then
+				request = {app = "dev:" .. source.name, params = request.params}
+			end
 			do_launch(log, from, request)
 		end,
 	}
@@ -215,7 +219,8 @@ local function run_launcher(log, source)
 	return actions, from
 end
 
-local KIND_ORDER = {menu = 0, app = 1, installed = 1, builtin = 2, extension = 3}
+local KIND_ORDER = {menu = 0, app = 1, installed = 1, dev = 1, builtin = 2,
+	extension = 3}
 
 -- Every action the tree offers, checked and in the grid's order: explicit
 -- order first, then by kind -- apps, builtins, extensions -- then label
@@ -357,7 +362,7 @@ function M.actions(log)
 				local icon = ICON_FALLBACK
 				if a.resolved_icon then
 					icon = a.icon
-				elseif source.kind == "installed" then
+				elseif source.kind == "installed" or source.kind == "dev" then
 					-- simplified: an installed app's icon is the fallback,
 					-- as <user>/installed is no resource dir; the upgrade
 					-- is copying it under the cache as
@@ -381,8 +386,8 @@ function M.actions(log)
 					order = tonumber(a.order),
 					kind = source.kind, from = from,
 					category = category_of(a) or
-							((source.kind == "app" or source.kind == "installed")
-							and "app" or "action"),
+							((source.kind == "app" or source.kind == "installed" or
+							source.kind == "dev") and "app" or "action"),
 					significance = significance_of(a, source, app_sizes),
 					network = short_name(a.network),
 					listed_by = short_name(a.listed_by),

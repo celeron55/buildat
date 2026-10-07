@@ -46,6 +46,10 @@ end
 
 local message = nil
 local home
+-- **From the launcher's publish screen** ([AITTA_PUBLISH_UI]): the
+-- author name and key it made, to fill the form with; a client from
+-- before it has no aitta_bind
+local offer = buildat.aitta_bind and buildat.aitta_bind()
 
 buildat.sub_packet("ai:res", function(data)
 	local res = buildat.parse_json(data)
@@ -95,15 +99,23 @@ home = function()
 		end
 		if me.author == "" then
 			text(page, "Bind an author name to your key to publish. The key " ..
-					"is the line `bin/buildat aitta keygen <file>` printed; " ..
-					"the name is what your releases' meta.json say as " ..
-					"\"author\", and neither changes after.", GREY)
+					(offer and "and the name are your launcher's, from its " ..
+					"publish screen" or "is the line `bin/buildat aitta " ..
+					"keygen <file>` printed; the name is what your " ..
+					"releases' meta.json say as \"author\"") ..
+					", and neither changes after.", GREY)
 			local author = edit(page, "Author name (a-z, 0-9, _)")
 			local key = edit(page, "Public key")
+			if offer then
+				author:SetText(offer.author)
+				key:SetText(offer.key)
+			end
 			button(page, "Bind", function()
 				req("bind", {author = author:GetText(), key = key:GetText()},
 						function()
-					message = "Bound. Publish with: bin/buildat aitta " ..
+					message = offer and "Bound. Leave to the launcher and " ..
+							"publish from Settings, Developer." or
+							"Bound. Publish with: bin/buildat aitta " ..
 							"publish <release .zip> <this server's address>"
 					home()
 				end)
@@ -112,6 +124,8 @@ home = function()
 			text(page, "Author: " .. me.author .. "  key " ..
 					me.key:sub(1, 16) .. "...", GREY)
 		end
+		-- Where the publish screen is ([AITTA_PUBLISH_UI])
+		button(page, "Back to the launcher", function() buildat.leave() end)
 		text(page, #me.releases .. " releases, every one unreviewed:")
 		for _, r in ipairs(me.releases) do
 			local id = r.author .. "/" .. r.name .. "/" .. r.version

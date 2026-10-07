@@ -923,6 +923,51 @@ static ss_ installed_app_dir(const ss_ &id)
 			name+"/"+version;
 }
 
+// **An author's own app or extension** ([AITTA_PUBLISH_UI]), in
+// <user>/dev_apps/<name>/, run as it is there: an app is "dev:<name>" on
+// the grid and to start_local_server(), and its server calls it <name>,
+// as a tree app's (server::app_of()), saves and all. An extension is
+// "<author>__<name>" by its meta.json, as an installed one is, and the
+// one here is loaded over an installed one of the same name.
+static ss_ dev_apps_path()
+{
+	return g_client_config.get<ss_>("user_path")+"/dev_apps";
+}
+
+static ss_ dev_app_dir(const ss_ &id)
+{
+	if(id.compare(0, 4, "dev:") != 0 || !valid_app_name(id.substr(4)))
+		return "";
+	return dev_apps_path()+"/"+id.substr(4);
+}
+
+struct DevEntry { ss_ name, dir, kind, client_name; };
+// What is in dev_apps, sorted by name; client_name is an extension's
+// "<author>__<name>", "" where its meta.json does not say both yet
+static sv_<DevEntry> dev_entries()
+{
+	sv_<DevEntry> out;
+	for(const auto &n : interface::fs::list_directory(dev_apps_path())){
+		if(!n.is_directory || !valid_app_name(n.name))
+			continue;
+		DevEntry e{n.name, dev_apps_path()+"/"+n.name, "app", ""};
+		json::json_error_t err;
+		const json::Value m = json::load_file((e.dir+"/meta.json").c_str(),
+				&err);
+		e.kind = interface::aitta::kind_of(m);
+		if(e.kind == "extension" && m.get("author").is_string() &&
+				m.get("name").is_string() &&
+				valid_app_name(m.get("author").as_string()) &&
+				valid_app_name(m.get("name").as_string()))
+			e.client_name = m.get("author").as_string()+"__"+
+					m.get("name").as_string();
+		out.push_back(e);
+	}
+	std::sort(out.begin(), out.end(), [](const DevEntry &a, const DevEntry &b){
+		return a.name < b.name; });
+	return out;
+}
+
 // Every installed version's id, sorted: the apps', or the extensions'
 static sv_<ss_> installed_app_ids(bool extensions = false)
 {
@@ -950,6 +995,9 @@ static ss_ installed_extension_dir(const ss_ &name)
 	const size_t sep = name.find("__");
 	if(sep == ss_::npos)
 		return "";
+	for(const DevEntry &e : dev_entries())
+		if(!e.client_name.empty() && e.client_name == name)
+			return e.dir;
 	const ss_ prefix = name.substr(0, sep)+"."+name.substr(sep + 2)+"@";
 	for(const ss_ &id : installed_app_ids(true))
 		if(id.compare(0, prefix.size(), prefix) == 0)
@@ -962,6 +1010,8 @@ static ss_ app_dir(const ss_ &id)
 {
 	if(valid_app_name(id))
 		return g_client_config.get<ss_>("share_path")+"/apps/"+id;
+	if(!dev_app_dir(id).empty())
+		return dev_app_dir(id);
 	return installed_app_dir(id);
 }
 
@@ -990,6 +1040,8 @@ static ss_ app_kind(const ss_ &dir)
 static ss_ server_app_id(const ss_ &id)
 {
 	const size_t at = id.find('@');
+	if(!dev_app_dir(id).empty())
+		return id.substr(4);
 	return installed_app_dir(id).empty() ? id : id.substr(0, at);
 }
 
@@ -2407,6 +2459,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(disconnect)
 		DEF_BUILDAT_FUNC(list_apps)
 		DEF_BUILDAT_FUNC(aitta_install)
+		DEF_BUILDAT_FUNC(aitta_dev)
 		DEF_BUILDAT_FUNC(start_local_server)
 		DEF_BUILDAT_FUNC(list_launchers)
 		DEF_BUILDAT_FUNC(list_installed_games)
@@ -3725,12 +3778,33 @@ struct CApp: public App, public magic::Application
 			lua_setfield(L, -2, "launcher");
 			lua_rawseti(L, -2, i++);
 		}
+		// And an author's own ([AITTA_PUBLISH_UI]): an app with its
+		// launcher, run as dev:<name>; an extension as an installed one
+		for(const DevEntry &e : dev_entries()){
+			if(e.kind == "extension" && e.client_name.empty())
+				continue;
+			const ss_ path = interface::fs::get_absolute_path(e.dir);
+			lua_newtable(L);
+			lua_pushstring(L, e.kind == "app" ? "dev" : "extension");
+			lua_setfield(L, -2, "kind");
+			lua_pushstring(L, (e.kind == "app" ? e.name : e.client_name).c_str());
+			lua_setfield(L, -2, "name");
+			lua_pushstring(L, path.c_str());
+			lua_setfield(L, -2, "path");
+			lua_pushboolean(L, e.kind == "app" && interface::fs::path_exists(
+					path+"/launcher/init.lua"));
+			lua_setfield(L, -2, "launcher");
+			lua_rawseti(L, -2, i++);
+		}
 		// And the installed extensions ([AITTA]), with no launcher: a
 		// launcher launches apps, and one from Aitta launches only itself
 		for(const ss_ &id : installed_app_ids(true)){
 			const size_t dot = id.find('.'), at = id.find('@');
 			const ss_ name = id.substr(0, dot)+"__"+
 					id.substr(dot + 1, at - dot - 1);
+			// The author's own of the same name is the one loaded
+			if(installed_extension_dir(name) != installed_app_dir(id))
+				continue;
 			const ss_ path = interface::fs::get_absolute_path(
 					installed_app_dir(id));
 			lua_newtable(L);
@@ -3907,6 +3981,219 @@ struct CApp: public App, public magic::Application
 		return 1;
 	}
 
+	// **The publish screen's file work** ([AITTA_PUBLISH_UI]), trusted
+	// only (client/extensions/starport/publish.lua). aitta_dev(op, ...):
+	//   "list"                  {{name, kind, path}} of <user>/dev_apps
+	//   "new", name, kind       a minimal app or extension there -> its
+	//                           path, or nil and why
+	//   "check", json           why the manifest is refused, or ""
+	//   "engine_api"            the engine API a manifest says
+	//   "keygen", author        <user>/aitta_keys/<author>.key made ->
+	//                           the public key, or nil and why
+	//   "public", author        that key's public half, or nil
+	//   "files", name           what a pack of it takes, and the bytes
+	//   "pack", name            packed and signed with its author's key
+	//                           into <user>/aitta_releases -> the .zip's
+	//                           path, or nil and why
+	//   "open", path            the system's file manager there
+	static bool plain_aitta_name(const ss_ &s)
+	{
+		if(s.empty() || s.size() > 40)
+			return false;
+		for(char c : s)
+			if(!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+				return false;
+		return true;
+	}
+	static void write_text(const ss_ &path, const ss_ &text)
+	{
+		std::ofstream f(path, std::ios::binary);
+		f<<text;
+		if(!f.good())
+			throw Exception("cannot write "+path);
+	}
+	static ss_ read_text(const ss_ &path)
+	{
+		std::ifstream f(path, std::ios::binary);
+		std::ostringstream os;
+		os<<f.rdbuf();
+		return os.str();
+	}
+	static int l_aitta_dev(lua_State *L)
+	{
+		const ss_ op = lua_bindings::lua_tocppstring(L, 1);
+		const ss_ arg = lua_isstring(L, 2) ? lua_bindings::lua_tocppstring(L, 2) : "";
+		const ss_ user = g_client_config.get<ss_>("user_path");
+		const ss_ keys = user+"/aitta_keys";
+		try {
+			if(op == "list"){
+				lua_newtable(L);
+				int i = 1;
+				for(const DevEntry &e : dev_entries()){
+					lua_newtable(L);
+					lua_pushstring(L, e.name.c_str());
+					lua_setfield(L, -2, "name");
+					lua_pushstring(L, e.kind.c_str());
+					lua_setfield(L, -2, "kind");
+					lua_pushstring(L, interface::fs::get_absolute_path(
+							e.dir).c_str());
+					lua_setfield(L, -2, "path");
+					lua_rawseti(L, -2, i++);
+				}
+				return 1;
+			}
+			if(op == "new"){
+				const ss_ kind = lua_isstring(L, 3) ?
+						lua_bindings::lua_tocppstring(L, 3) : "app";
+				if(!plain_aitta_name(arg) || (kind == "extension" &&
+						(arg.front() == '_' || arg.back() == '_' ||
+						arg.find("__") != ss_::npos)))
+					throw Exception("A name is 1 to 40 of a-z, 0-9 and _"+
+							ss_(kind == "extension" ? ", with no \"__\" and "
+							"not starting or ending with _" : ""));
+				const ss_ dir = dev_apps_path()+"/"+arg;
+				if(interface::fs::path_exists(dir))
+					throw Exception(arg+" is there already");
+				// Its saves are under its name, as a bundled app's
+				if(kind == "app" && interface::fs::path_exists(
+						g_client_config.get<ss_>("share_path")+"/apps/"+arg))
+					throw Exception(arg+" is the name of an app that comes "
+							"with buildat");
+				json::Value m = json::object();
+				m.set("name", arg);
+				m.set("version", "0.1.0");
+				m.set("engine_api", (int64_t)interface::aitta::ENGINE_API);
+				m.set("kind", kind);
+				// simplified: written here and not copied from a template
+				// in share/, as it is three small files
+				if(kind == "extension"){
+					interface::fs::create_directories(dir);
+					write_text(dir+"/init.lua",
+							"-- "+arg+": a client extension, run in the sandbox.\n"
+							"-- An app's client Lua has it by require(), under\n"
+							"-- the name \"<author>__"+arg+"\".\n"
+							"local M = {safe = {}}\n\n"
+							"function M.safe.hello()\n"
+							"\treturn \"Hello from "+arg+"\"\n"
+							"end\n\n"
+							"return M\n");
+				} else if(kind == "app"){
+					interface::fs::create_directories(dir+"/launcher");
+					interface::fs::create_directories(dir+"/main/client_lua");
+					write_text(dir+"/launcher/init.lua",
+							"-- The tile on the launch grid\n"
+							"return function(ctx) return {{id = \"play\", label = \""+
+							arg+"\",\n\trun = function() ctx.launch{app = \""+arg+
+							"\"} end}} end\n");
+					write_text(dir+"/main/meta.json",
+							"{\n\t\"disable_cpp\": true,\n"
+							"\t\"client_main\": \"init.lua\",\n"
+							"\t\"dependencies\": [\n"
+							"\t\t{\"module\": \"network\"},\n"
+							"\t\t{\"module\": \"client_lua\"},\n"
+							"\t\t{\"module\": \"client_data\"}\n"
+							"\t]\n}\n");
+					write_text(dir+"/main/client_lua/init.lua",
+							"-- "+arg+": what the player sees. doc/client_api.txt\n"
+							"local log = buildat.Logger(\""+arg+"\")\n"
+							"local magic = require(\"buildat/extension/urho3d\")\n"
+							"log:info(\""+arg+" started\")\n"
+							"local t = magic.ui.root:CreateChild(\"Text\")\n"
+							"t:SetStyleAuto()\n"
+							"t.text = \"Hello from "+arg+"\"\n"
+							"t:SetFont(magic.cache:GetResource(\"Font\", buildat.font_mono), 24)\n"
+							"t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)\n");
+				} else {
+					throw Exception("kind: \"app\" or \"extension\"");
+				}
+				write_text(dir+"/meta.json", m.stringify()+"\n");
+				lua_pushstring(L, interface::fs::get_absolute_path(dir).c_str());
+				return 1;
+			}
+			if(op == "check"){
+				json::json_error_t err;
+				const json::Value m = json::load_string(arg.c_str(), &err);
+				lua_pushstring(L, interface::aitta::check_manifest(m).c_str());
+				return 1;
+			}
+			if(op == "engine_api"){
+				lua_pushinteger(L, interface::aitta::ENGINE_API);
+				return 1;
+			}
+			if(op == "keygen" || op == "public"){
+				if(!plain_aitta_name(arg))
+					throw Exception("An author name is 1 to 40 of a-z, 0-9 and _");
+				const ss_ path = keys+"/"+arg+".key";
+				if(op == "public"){
+					if(!interface::fs::path_exists(path))
+						return 0;
+					lua_pushstring(L, interface::aitta::public_of(
+							read_text(path)).c_str());
+					return 1;
+				}
+				if(interface::fs::path_exists(path))
+					throw Exception(path+" is there already; a key is "
+							"never overwritten");
+				ss_ key, pub;
+				interface::aitta::keygen(key, pub);
+				interface::fs::create_directories(keys);
+				write_text(path, key);
+				lua_pushstring(L, pub.c_str());
+				return 1;
+			}
+			if(op == "files" || op == "pack"){
+				const ss_ dir = dev_app_dir("dev:"+arg);
+				if(dir.empty() || !interface::fs::path_exists(dir))
+					throw Exception("no "+arg+" in "+dev_apps_path());
+				if(op == "files"){
+					const sv_<ss_> names = interface::aitta::package_files(dir);
+					lua_newtable(L);
+					int i = 1;
+					for(const ss_ &n : names){
+						lua_pushstring(L, n.c_str());
+						lua_rawseti(L, -2, i++);
+					}
+					lua_pushnumber(L, (lua_Number)
+							interface::fs::directory_tree_size(dir));
+					return 2;
+				}
+				json::json_error_t err;
+				const json::Value m = json::load_file((dir+"/meta.json").c_str(),
+						&err);
+				const ss_ author = m.get("author").is_string() ?
+						m.get("author").as_string() : "";
+				const ss_ key = keys+"/"+author+".key";
+				if(!plain_aitta_name(author) || !interface::fs::path_exists(key))
+					throw Exception("no key for the author \""+author+"\" in "+
+							keys);
+				lua_pushstring(L, interface::aitta::pack(dir, key,
+						user+"/aitta_releases").c_str());
+				return 1;
+			}
+			if(op == "open"){
+				// simplified: the system's opener through a shell, with the
+				// path quoted; a path with a quote in it is not opened
+				if(arg.find_first_of("'\"") != ss_::npos)
+					throw Exception("cannot open "+arg);
+#ifdef _WIN32
+				interface::process::shell_exec("start \"\" \""+arg+"\"");
+#elif defined(__APPLE__)
+				interface::process::shell_exec("open '"+arg+"'");
+#else
+				interface::process::shell_exec("xdg-open '"+arg+
+						"' >/dev/null 2>&1 &");
+#endif
+				lua_pushboolean(L, true);
+				return 1;
+			}
+		} catch(std::exception &e){
+			lua_pushnil(L);
+			lua_pushstring(L, e.what());
+			return 2;
+		}
+		return luaL_error(L, "aitta_dev: no op \"%s\"", op.c_str());
+	}
+
 	// aitta_install(zip, sig) -> the directory, or nil and why: a release
 	// fetched from an Aitta, checked and installed under <user>/installed
 	// ([AITTA_MVP]). Trusted only: client/extensions/starport.
@@ -3956,6 +4243,10 @@ struct CApp: public App, public magic::Application
 		std::sort(names.begin(), names.end());
 		for(const ss_ &id : installed_app_ids())
 			names.push_back(id);
+		// And an author's own ([AITTA_PUBLISH_UI])
+		for(const DevEntry &e : dev_entries())
+			if(e.kind == "app")
+				names.push_back("dev:"+e.name);
 		lua_newtable(L);
 		int i = 1;
 		for(const ss_ &name : names){
