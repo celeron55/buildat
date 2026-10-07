@@ -23,9 +23,6 @@ local _, accounts_err, accounts = buildat.run_script_file("accounts/accounts.lua
 if type(accounts) ~= "table" then
 	error("starport: could not load accounts.lua: " .. tostring(accounts_err))
 end
-accounts.on_kicked = function()
-	buildat.disconnect()
-end
 
 --
 -- JSON out; in is buildat.parse_json.

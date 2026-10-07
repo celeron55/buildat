@@ -21,9 +21,6 @@ local function close_wait()
 	end
 end
 
-accounts.on_kicked = function()
-	buildat.disconnect()
-end
 
 buildat.sub_packet("main:join_wait", function(data)
 	close_wait()

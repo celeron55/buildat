@@ -15,7 +15,7 @@
 --   on_users()             accounts.users changed (an admin's)
 --   on_admin_result(text)  what an admin request did; also accounts.message
 --   on_passwd(text)        "" when the password was changed, else why not
---   on_kicked(text)        before the client disconnects
+--   on_kicked(text)        before the server drops the connection
 --   notice(text)           a line the game shows; the log's by default
 -- A scripted client joins by the environment: <env>_NAME, <env>_PASSWORD,
 -- <env>_CODE and <env>_TOTP, or by a Starport ID's token in <env>_STARPORT;
@@ -609,6 +609,12 @@ end)
 buildat.sub_packet("accounts:kicked", function(data)
 	local text = cereal.binary_input(data, TEXT).text
 	notice(text)
+	-- [LEAVE_WITH_REASON]: the server drops the connection next, and the
+	-- client's leave to the launcher says this (a client before 0.6.67
+	-- has no set_leave_reason and shuts down on the drop)
+	if buildat.set_leave_reason then
+		buildat.set_leave_reason(text)
+	end
 	if M.on_kicked then
 		M.on_kicked(text)
 	end

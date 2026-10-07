@@ -347,9 +347,8 @@ struct CState: public State
 		}
 	}
 
-	// The server is gone. There is nothing to reconnect to and no way to put
-	// the client back in the menu -- leaving a game leaves the client, the
-	// same as buildat.disconnect() does; see l_disconnect() in app.cpp.
+	// The server is gone: the app goes back to the launcher with why, or
+	// shuts down with none under it; see lost_connection() in app.cpp.
 	// Without this the socket stays readable at end of file and every frame
 	// reads zero bytes and says so, forever.
 	void lost_connection(const ss_ &reason)

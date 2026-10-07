@@ -431,9 +431,6 @@ do
 	end
 	doc.tutorial = make(doc)
 end
-accounts.on_kicked = function()
-	buildat.disconnect()
-end
 -- A plan members page's own requests' results
 buildat.sub_packet("fp:admin_result", function(data)
 	doc.admin_message = cereal.binary_input(data, TEXT).text

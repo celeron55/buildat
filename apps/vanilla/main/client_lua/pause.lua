@@ -26,9 +26,6 @@ end
 accounts.logged_in = true
 -- The join's hello went to join.lua's copy; this one's My account reads it
 buildat.send_packet("accounts:get_hello", "")
-accounts.on_kicked = function()
-	buildat.disconnect()
-end
 -- The chat console ([CHAT_CONSOLE]): Luanti's chat, what came before this
 -- script and all that comes after
 for _, line in ipairs(luanti.chat_lines or {}) do

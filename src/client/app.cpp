@@ -1821,6 +1821,10 @@ struct CApp: public App, public magic::Application
 	// When the connection went, if a local server this client started
 	// might be what went with it; see lost_connection() and on_update()
 	int64_t m_lost_connection_us = 0;
+	// [LEAVE_WITH_REASON]: a remote server's connection went, and why;
+	// the leave waits for on_update(), out of the state's own reading
+	bool m_lost_remote = false;
+	ss_ m_lost_remote_why;
 
 	ss_ local_server_launch()
 	{
@@ -1899,17 +1903,34 @@ struct CApp: public App, public magic::Application
 		emscripten_pause_main_loop();
 		return;
 #endif
+		m_lost_remote_why = reason;
 		if(g_local_server.valid() && !g_local_server_log.empty()){
 			// The socket closes before the process is gone -- a crash
 			// writes its backtrace first -- so the verdict waits a moment
 			m_lost_connection_us = get_timeofday_us();
 			return;
 		}
-		shutdown();
+		m_lost_remote = true;
 	}
 
 	void check_lost_connection()
 	{
+		// **A remote server's leaving is the launcher's, with why**
+		// ([LEAVE_WITH_REASON], user 2026-10-07): a kick's text or the
+		// connection's end in a dialog over it. A client started straight
+		// into a server has no launcher under it and shuts down
+		if(m_lost_remote){
+			m_lost_remote = false;
+			lua_pushlstring(L, m_lost_remote_why.c_str(),
+					m_lost_remote_why.size());
+			lua_setglobal(L, "__buildat_lost_why");
+			if(!run_script_no_sandbox(
+					"if not __buildat_leave_lost(__buildat_lost_why) then\n"
+					"    __buildat_disconnect()\n"
+					"end\n"))
+				shutdown();
+			return;
+		}
 		if(m_lost_connection_us == 0)
 			return;
 		if(!interface::process::is_running(g_local_server)){
@@ -1932,8 +1953,9 @@ struct CApp: public App, public magic::Application
 				return;
 			shutdown();
 		} else if(get_timeofday_us() - m_lost_connection_us > 2000000){
+			// The server lives and dropped this client: a kick
 			m_lost_connection_us = 0;
-			shutdown();
+			m_lost_remote = true;
 		}
 	}
 
@@ -4973,6 +4995,7 @@ struct CApp: public App, public magic::Application
 			begin_stop_local_server();
 		self->m_state->reset();
 		self->m_lost_connection_us = 0;
+		self->m_lost_remote = false;
 		// **The last frame of the game goes with the game** ([MENU_LEAVE],
 		// 2026-09-27). A game drawn through set_preferred_viewports() --
 		// which is every game at a render scale -- is rendered into a

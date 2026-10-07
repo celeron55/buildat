@@ -182,11 +182,37 @@ end
 -- leave(): back to the launcher's grid when there is one under the game
 -- ([MENU_CONTEXT]: the game's own menu offers it), else what disconnect
 -- does -- a client started straight into a server has nothing to go back to
-buildat.safe.leave = function()
+-- [LEAVE_WITH_REASON]: why the server is about to drop this client, a
+-- kick's text (builtin/accounts), said when it has
+local leave_reason = nil
+buildat.safe.set_leave_reason = function(text)
+	leave_reason = tostring(text)
+end
+-- Back to the launcher, true when there was one to go back to; `why`, a
+-- dialog over it. A launcher with no game running under it (a client
+-- started straight into a server) answers false
+local function leave_to_launcher(why)
 	local m = buildat.menu_extension()
-	-- A launcher with no game running under it (a client started
-	-- straight into a server) answers false
 	if not (m and m.leave_app and m.leave_app()) then
+		return false
+	end
+	if why then
+		require("buildat/extension/ui_utils").safe.show_message_dialog(why)
+	end
+	return true
+end
+-- The connection to a remote server went (src/client/app.cpp,
+-- check_lost_connection): to the launcher with why, or false
+function __buildat_leave_lost(lost)
+	local why = leave_reason and "Left the server: " .. leave_reason or
+			"Left the server: " .. tostring(lost)
+	leave_reason = nil
+	log:info("leave: " .. why .. "; to the launcher if there is one")
+	return leave_to_launcher(why)
+end
+buildat.safe.leave = function()
+	leave_reason = nil
+	if not leave_to_launcher() then
 		-- **Said out loud, because the quiet version of this is a dead
 		-- client**: with no launcher to go back to, leaving a game is a
 		-- disconnect and whatever drew the game is gone with it. That is
