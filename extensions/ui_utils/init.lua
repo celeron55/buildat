@@ -864,7 +864,7 @@ function M.safe.list_view(parent, width, height, options)
 		local pending = false
 		if options.wheel then
 			on("MouseWheel", function(d)
-				local p = magic.input.mousePosition
+				local p = magic.input:GetMousePosition()
 				if over(p.x, p.y) then
 					view:scroll(-d:GetInt("Wheel") * options.wheel)
 				end

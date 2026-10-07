@@ -4105,8 +4105,10 @@ show_connect_dialog = function(address, name)
 			rows = official_rows or {}
 			status.text = official_rows and (#rows .. " servers") or "Fetching the list..."
 		end
+		-- From 2 characters (user, 2026-10-07): one matches so much that
+		-- the redraw lags at each key
 		local filter = filter_edit:GetText()
-		if filter ~= "" then
+		if #filter >= 2 then
 			local kept = {}
 			for _, r in ipairs(rows) do
 				if matches(r, filter) then
@@ -4193,9 +4195,16 @@ show_connect_dialog = function(address, name)
 	filter_edit.textSelectable = true
 	filter_edit:SetFixedSize(math.max(100, width - 32 - 2 * 156 - 60), 26)
 	filter_edit:SetText(SETTINGS.server_filter or "")
-	-- Filtered as it is typed; kept at Enter
+	-- Filtered as it is typed, redrawn only when what it filters by
+	-- changed; kept at Enter
+	local filtered_by = #filter_edit:GetText() >= 2 and filter_edit:GetText() or ""
 	magic.SubscribeToEvent(filter_edit, "TextChanged", function()
-		show()
+		local f = filter_edit:GetText()
+		f = #f >= 2 and f or ""
+		if f ~= filtered_by then
+			filtered_by = f
+			show()
+		end
 	end)
 	magic.SubscribeToEvent(filter_edit, "TextFinished", function()
 		-- Kept for the next time this screen opens

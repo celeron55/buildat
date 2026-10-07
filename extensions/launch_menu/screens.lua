@@ -276,14 +276,14 @@ function M.show_connect_to_server()
 	window:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
 	window:SetFixedWidth(narrow and width - 32 or PANEL_WIDTH)
 
-	-- The tabs, which list is shown, and a search of it
+	-- The tabs, which list is shown, and a filter of it
 	local search_row = left:CreateChild("UIElement")
 	search_row:SetLayout(LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
 	local tabs = search_row:CreateChild("UIElement")
 	tabs:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
 	local search_label = search_row:CreateChild("Text")
 	search_label:SetStyleAuto()
-	search_label.text = "Search"
+	search_label.text = "Filter"
 	search_label:SetFixedWidth(60)
 	local search = search_row:CreateChild("LineEdit")
 	search:SetStyleAuto()
@@ -334,7 +334,7 @@ function M.show_connect_to_server()
 	local web_tls_only = buildat.get_env("BUILDAT_PAGE_HTTPS") == "1"
 
 	-- **Public servers** from the Starports in the settings, merged and
-	-- filtered by the extension; a search narrows what came
+	-- filtered by the extension; the filter narrows what came
 	local sp_rows = {}
 	local lan_rows, used_rows = {}, {}
 	local function categories(x)
@@ -408,8 +408,14 @@ function M.show_connect_to_server()
 	-- Without direct connects there is only the Starports' list
 	local tab = "starport"
 	local tab_buttons = {}
-	redraw = function()
+	-- **From 2 characters** (user, 2026-10-07): one matches so much that
+	-- the list's redraw lags at each key
+	local function filter_text()
 		local q = search:GetText():lower()
+		return #q >= 2 and q or ""
+	end
+	redraw = function()
+		local q = filter_text()
 		for name, b in pairs(tab_buttons) do
 			b.selected = (name == tab)
 			-- In the main button's amber, as launch_menu_v2's locked row
@@ -429,7 +435,7 @@ function M.show_connect_to_server()
 			end
 		end
 		if #rows == 0 then
-			rows[1] = {header = q ~= "" and "Nothing matches the search" or
+			rows[1] = {header = q ~= "" and "Nothing matches the filter" or
 					tab == "used" and "No servers used yet" or
 					tab == "lan" and "Nothing heard on this network yet" or
 					"No public servers"}
@@ -452,9 +458,16 @@ function M.show_connect_to_server()
 			tab_buttons[t[1]] = b
 		end
 	end
-	magic.SubscribeToEvent(search, "TextFinished", function() redraw() end)
+	-- Filtered as it is typed, redrawn only when what it filters by changed
+	local filtered_by = ""
+	magic.SubscribeToEvent(search, "TextChanged", function()
+		if filter_text() ~= filtered_by then
+			filtered_by = filter_text()
+			redraw()
+		end
+	end)
 	local function refresh(ask)
-		starport.fetch(function(rows)
+		starport.fetch(function(rows, info)
 			-- The answer can come after the screen was closed, and its
 			-- elements are gone then
 			local open = false
