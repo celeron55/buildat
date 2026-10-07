@@ -541,10 +541,11 @@ What is done
 - A pause menu, which escape opens when nothing else is up
   ([LUANTI_PAUSE]): a screen on the UI stack (settings.lua show_pause)
   with Continue playing, Key bindings, Chat..., the sound, the render
-  scale and the view range steps, Settings... and Leave the game. Escape
-  or a click off it continues. Escape no longer ends the session by
-  itself -- Leave does, along the same path the window's own close button
-  takes.
+  scale and the view range steps, Settings..., Discuss (leave server)
+  for a server picked off Luanti's list ([DISCUSS_SERVER]) and Leave the
+  game. Escape or a click off it continues. Escape no longer ends the
+  session by itself -- Leave does, along the same path the window's own
+  close button takes.
 
   The debug lines in the corner start hidden and F5 brings them up. What this
   client has to say to the player -- that flying was refused, that noclip is

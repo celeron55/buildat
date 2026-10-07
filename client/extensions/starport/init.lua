@@ -2576,6 +2576,33 @@ function M.safe.open_report_here()
 	return true
 end
 
+-- [DISCUSS_SERVER]: the listing of the Buildat server this client is on,
+-- found as open_report_here finds it but only in the lists kept from the
+-- last fetch, with the Starport that lists it: {name, host, port,
+-- starport}, or nil. On M and never in M.safe.
+function M.listing_here()
+	local address = __buildat_server_address()
+	if not address then
+		return nil
+	end
+	local here = endpoint(address,
+			buildat.get_env("BUILDAT_PAGE_HTTPS") == "1")
+	local kept = read_json(LIST_CACHE) or {}
+	for _, url in ipairs(effective().starports) do
+		local k = kept[url]
+		for _, x in ipairs(type(k) == "table" and type(k.servers) == "table"
+				and k.servers or {}) do
+			if type(x) == "table" and x.host and x.port and
+					endpoint(tostring(x.host) .. ":" .. tostring(x.port),
+					x.tls == true) == here then
+				return {name = tostring(x.name or ""), host = tostring(x.host),
+					port = tonumber(x.port), starport = url}
+			end
+		end
+	end
+	return nil
+end
+
 -- group(servers[, fleet_id]): a fetch's servers as fleet, pool and
 -- server rows (group.lua), a pool's servers in the user's region first
 function M.safe.group(servers, fleet_id)

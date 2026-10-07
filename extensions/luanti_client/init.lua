@@ -340,7 +340,11 @@ local show_connect_dialog
 -- The screen that shows what the client is doing, and drives it every frame
 -- mode: which of unlit, shadows and pbr to draw the world in; see the connect
 -- dialog, where it is chosen, and world.lua for what it changes
-local function show_client(host, port, name, password, mode)
+-- origin: {name, address} of a server picked off Luanti's list, for the
+-- pause menu's Discuss ([DISCUSS_SERVER]); on settings' table, as the
+-- session callback below is at Lua's 60-upvalue line
+local function show_client(host, port, name, password, mode, origin)
+	settings.origin = origin
 	-- A click on nothing over the world is the game's, not Back
 	local root = uistack.main:push({desc="luanti_client", tap_outside = false})
 	-- A world is on the screen from here on: a caught error is a notice
@@ -3720,9 +3724,9 @@ local function show_client(host, port, name, password, mode)
 		-- from buildat's menu the grid underneath is what is left.
 		open_pause_menu = function()
 			settings.show_pause{bindings = BINDINGS, view = view,
-					open_chat = open_chat, leave = function()
+					open_chat = open_chat, leave = function(stay)
 				leave()
-				if SETTINGS.cancel_exits then
+				if SETTINGS.cancel_exits and not stay then
 					buildat.quit()
 				end
 			end}
@@ -3948,6 +3952,9 @@ show_connect_dialog = function(address, name)
 	-- Set below, once the dialog's buttons are there; connect() and cancel()
 	-- both have to drop it
 	local escape_cb = nil
+	-- The official list's row picked last: the address joined came from
+	-- Luanti's list while the field still says it
+	local listed = nil
 
 	local function connect()
 		local host, port = split_address(address_edit:GetText())
@@ -3967,7 +3974,9 @@ show_connect_dialog = function(address, name)
 		settings.save(kept)
 		local password = password_edit:GetText()
 		uistack.main:pop(root)
-		show_client(host, port, name, password, DEFAULT_MODE)
+		show_client(host, port, name, password, DEFAULT_MODE,
+				listed and listed.address == address_edit:GetText() and
+				listed or nil)
 	end
 
 	local function cancel()
@@ -4015,8 +4024,11 @@ show_connect_dialog = function(address, name)
 	-- The source row, then the filter beside it
 	local source_buttons = {}
 	local filter_edit
+	local source = "recent"
 	pick = function(row, second)
 		address_edit:SetText(row.address)
+		listed = source == "official" and {name = row.name,
+				address = row.address} or nil
 		-- The name last used on that server ([BOX_PLAYTEST_2] 4)
 		if row.player_name and row.player_name ~= "" then
 			name_edit:SetText(row.player_name)
@@ -4025,7 +4037,6 @@ show_connect_dialog = function(address, name)
 			connect()
 		end
 	end
-	local source = "recent"
 	local official_rows = nil
 	local status = left:CreateChild("Text")
 	status:SetStyleAuto()
@@ -4206,8 +4217,12 @@ function M.boot()
 		local host, port = split_address(DEFAULT_ADDRESS)
 		log:info("connecting to " .. host .. ":" .. port ..
 				" without the dialog, as BUILDAT_LUANTI_CONNECT asks")
+		-- BUILDAT_LUANTI_LISTED: the name a scripted run's server has as
+		-- if picked off Luanti's list ([DISCUSS_SERVER])
+		local listed = buildat.get_env("BUILDAT_LUANTI_LISTED")
 		show_client(host, port, DEFAULT_NAME,
-				buildat.get_env("BUILDAT_LUANTI_PASSWORD") or "", DEFAULT_MODE)
+				buildat.get_env("BUILDAT_LUANTI_PASSWORD") or "", DEFAULT_MODE,
+				listed and {name = listed, address = host .. ":" .. port})
 		return
 	end
 	show_connect_dialog()

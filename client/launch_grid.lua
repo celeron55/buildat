@@ -38,15 +38,22 @@ end
 -- A package's home Hearth (its manifest's home_hearth), as the address the
 -- client connects to: Hearth answers the web and the client on one port
 -- ("http://h:p/" is "h:p"; "https://h/" stays, a proxy with TLS)
-local function hearth_target(url, author, name, version, key)
+function M.hearth_address(url)
 	local scheme, host = tostring(url):match("^(https?)://([^/?#]+)")
 	if not scheme then
 		return nil
 	end
+	return scheme == "https" and "https://" .. host or
+			(host:find(":%d+$") and host or host .. ":80")
+end
+local function hearth_target(url, author, name, version, key)
+	local address = M.hearth_address(url)
+	if not address then
+		return nil
+	end
 	return {
 		url = url,
-		address = scheme == "https" and "https://" .. host or
-				(host:find(":%d+$") and host or host .. ":80"),
+		address = address,
 		subject = author .. "/" .. name .. " " .. key,
 		package = author .. "/" .. name, version = version,
 		engine = tostring(buildat.version()), platform = GetPlatform(),

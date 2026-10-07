@@ -601,10 +601,118 @@ end
 -- the composer
 buildat.safe.feedback = function()
 	local f = feedback
+	-- A server's is discussed_server()'s: a Hearth from before it read
+	-- this one as a package's and could not draw it
+	if f and f.server then
+		return nil
+	end
 	feedback = nil
 	return f and {subject = f.subject, package = f.package,
 			version = f.version, engine = f.engine, platform = f.platform,
 			place = f.place == true}
+end
+
+-- **"Discuss (leave server)"** ([DISCUSS_SERVER]): the server being
+-- played, on a Hearth -- its thread, or a new one filled in. Where it
+-- goes and what it says are this side's. On a Buildat server: what a
+-- Starport's kept list says of the address connected to, whatever the
+-- server's code passes, and the listing Starport's Hearth. With no
+-- Buildat server the caller is the client's own luanti_client, and claim
+-- is a Luanti server it joined off Luanti's list, {name =, address =};
+-- the Hearth is the first one a Starport recommends. Only for a player
+-- logged in to a Starport ID, whom the Hearth's login then takes.
+local DISCUSS_NAME_MAX = 60
+local function discuss_target(claim)
+	local ok, starport = pcall(require, "buildat/extension/starport")
+	if not ok or type(starport) ~= "table" or
+			#starport.logged_in_ids() == 0 then
+		return nil, "not logged in to a Starport ID"
+	end
+	local name, host, port, hearth
+	if __buildat_server_address() then
+		local l = starport.listing_here()
+		if not l then
+			return nil, "no Starport lists this server"
+		end
+		name, host, port = l.name, l.host, l.port
+		hearth = starport.recommended_hearth(l.starport) or
+				starport.safe.fallback_hearth()
+	else
+		if type(claim) ~= "table" or type(claim.name) ~= "string" or
+				type(claim.address) ~= "string" or #claim.address > 256 then
+			return nil, "discuss_this_server({name =, address =})"
+		end
+		name = claim.name
+		local a = claim.address
+		if a:sub(1, 1) == "[" then
+			host, port = a:match("^%[(.-)%]:?(%d*)$")
+		else
+			host, port = a:match("^([^:]*):?(%d*)$")
+		end
+		-- Luanti's own default
+		port = tonumber(port) or 30000
+		hearth = starport.safe.fallback_hearth()
+	end
+	if not host or host == "" or host:find("[%c%s]") then
+		return nil, "no address"
+	end
+	local address = (host:find(":") and "[" .. host .. "]" or host) .. ":" ..
+			port
+	local hearth_address = hearth and launch_grid.hearth_address(hearth)
+	if not hearth_address then
+		return nil, "no Starport recommends a Hearth"
+	end
+	-- The owner's text, which only fills a form the player edits.
+	-- simplified: a cut through a character drops the whole of it
+	name = name:gsub("%c", " "):gsub("%s+", " "):match("^%s*(.-)%s*$")
+	if #name > DISCUSS_NAME_MAX then
+		name = name:sub(1, DISCUSS_NAME_MAX):gsub("[\192-\255][\128-\191]*$",
+				"") .. "..."
+	end
+	return {name = name, address = address, hearth = hearth_address,
+		subject = "server:" .. host:lower() .. ":" .. port,
+		title = name ~= "" and name .. " [" .. address .. "]" or address}
+end
+-- can_discuss_this_server(claim) -> whether the button has somewhere to go
+buildat.safe.can_discuss_this_server = function(claim)
+	return discuss_target(claim) ~= nil
+end
+-- discuss_this_server(claim) -> true, or false and why: the game left
+-- (luanti_client leaves its own first), and the Hearth joined a frame
+-- on, out of the button's handler
+buildat.safe.discuss_this_server = function(claim)
+	local t, why = discuss_target(claim)
+	if not t then
+		return false, why
+	end
+	if __buildat_server_address() then
+		leave_reason = nil
+		if not leave_to_launcher() then
+			return false, "no launcher to go back to"
+		end
+	end
+	feedback = {address = t.hearth, server = {name = t.name,
+		address = t.address, subject = t.subject, title = t.title}}
+	log:info("discuss: " .. t.subject .. " on " .. t.hearth)
+	local magic = require("buildat/extension/urho3d").safe
+	local sub
+	sub = magic.SubscribeToEvent("Update", function()
+		magic.UnsubscribeFromEvent("Update", sub)
+		require("buildat/extension/starport").join_with_id(t.hearth)
+	end)
+	return true
+end
+-- discussed_server() -> {name, address, subject, title} or nil, once: the
+-- Hearth's side of the above
+buildat.safe.discussed_server = function()
+	local f = feedback
+	if not (f and f.server) then
+		return nil
+	end
+	feedback = nil
+	local s = f.server
+	return {name = s.name, address = s.address, subject = s.subject,
+		title = s.title}
 end
 -- **Back to the launcher from a game** ([MENU_CONTEXT]): the connection
 -- dropped, the local server stopped and the sandbox's leavings cleared.

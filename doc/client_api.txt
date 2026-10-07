@@ -379,6 +379,16 @@ buildat.disconnect()
 buildat.leave()
 - Back to the launcher's grid when there is one under the app
   ([MENU_CONTEXT]), else what disconnect() does
+buildat.can_discuss_this_server([claim]) -> bool
+buildat.discuss_this_server([claim]) -> true, or false and why
+- "Discuss (leave server)" ([DISCUSS_SERVER]): leaves for a Hearth and opens
+  the server's thread there, or a new one's form. For a player logged in to
+  a Starport ID. On a Buildat server the client finds the server in a
+  Starport's kept list and ignores claim; the Hearth is the one that
+  Starport recommends. With no Buildat server (luanti_client), claim is
+  {name =, address =} of a server picked off Luanti's list.
+buildat.discussed_server() -> {name, address, subject, title} or nil
+- The Hearth's side, once: subject is "server:<host>:<port>"
 buildat.set_reload_on_return(bool)
 - On the web client: whether a disconnect while the page was away (a phone's
   browser dropping a page in the background) reloads the page when it is in

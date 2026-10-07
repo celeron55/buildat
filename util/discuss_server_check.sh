@@ -1,0 +1,168 @@
+#!/bin/bash
+# tier: full
+# cost: ~4 min (2026-10-07)
+# covers: client/api.lua discuss_this_server apps/hearth/main/main.cpp apps/hearth/main/client_lua/init.lua extensions/luanti_client/settings.lua
+# [DISCUSS_SERVER]: "Discuss (leave server)" in luanti_client's pause
+# menu. A Starport recommending a Hearth, the Hearth listed there with an
+# admin, an ID logged in on the client, and a local devtest Luanti server
+# taken as picked off Luanti's list (BUILDAT_LUANTI_LISTED). The button
+# leaves, joins the Hearth with the ID and, with no thread about the
+# server, opens the new thread's form titled "<name> [<address>]"; with
+# one (made under the Servers topic by the first run), that thread. No
+# button for a server not off the list, or with no ID logged in.
+# Needs luanti in PATH and devtest in the desk's games.
+#   util/discuss_server_check.sh
+set -u
+. "$(dirname "$0")/check_paths.sh"
+here=$(cd "$(dirname "$0")/.." && pwd)
+G="$BUILDAT_USER_PATH/shared/vanilla/games/devtest"
+[ -d "$G" ] || { echo "SKIP: no devtest"; exit 0; }
+command -v luanti > /dev/null || { echo "SKIP: no luanti"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+tmp=$(mktemp -d "/tmp/buildat_discuss.XXXXXX")
+SP=29681
+HE=29682
+LU=30179
+export BUILDAT_CONNECT_PORTS="$SP,$HE"
+pids=()
+cleanup() {
+	for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
+	[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" || rm -rf "$tmp"
+}
+trap cleanup EXIT
+fail() { echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
+cd "$here"
+
+mkdir -p "$tmp/games" "$tmp/w"
+cp -r "$G" "$tmp/games/"
+printf 'gameid = devtest\nbackend = sqlite3\n' > "$tmp/w/world.mt"
+LUANTI_GAME_PATH="$tmp/games" MINETEST_GAME_PATH="$tmp/games" \
+	luanti --server --world "$tmp/w" --port $LU > "$tmp/lu.log" 2>&1 &
+pids+=($!)
+Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
+	> "$tmp/sp.log" 2>&1 &
+pids+=($!)
+for _ in $(seq 120); do
+	grep -q "setup code" "$tmp/sp.log" && break
+	sleep 1
+done
+code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
+[ -n "$code" ] || fail "the Starport did not start (sp.log)"
+# Once the Starport listens, or the Hearth's first announce is lost
+mkdir -p "$tmp/he/apps/hearth"
+cat > "$tmp/he/apps/hearth/starport.json" <<J
+{"starports": ["http://127.0.0.1:$SP"], "name": "Check hearth", "login": "both",
+ "kind": "app", "audience": "everyone", "access": "auto",
+ "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
+  "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
+  "gambling": "no", "personal_data": "no"}}
+J
+Build/bin/buildat_server -m apps/hearth -D "$tmp/he" -P $HE -l 3 \
+	> "$tmp/he.log" 2>&1 &
+pids+=($!)
+for _ in $(seq 180); do grep -q "verified ok" "$tmp/sp.log" && break; sleep 1; done
+grep -q "verified ok" "$tmp/sp.log" || fail "the Hearth was not listed ($tmp/he.log)"
+# The Starport's admin: the Hearth recommended, its listing claimed
+read -r _ _ id _ _ ccode < <(grep -v "^#" "$tmp/he/apps/hearth/starport_claim.txt")
+printf 'delay 8000\nquit\n' > "$tmp/cmds.txt"
+BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
+BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false,\"recommended_hearth\":\"http://127.0.0.1:$HE\"}}
+{\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
+{\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/admin" -w 800x600 -l 3 \
+	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
+# The Hearth's admin, an ID of its own by the setup code; and the reader's
+# session for the client
+read -r boss session < <(python3 - "$SP" "$id" <<'PY'
+import json, sys, time, urllib.request
+B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+def call(w, **k):
+    r = json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
+    assert r["ok"], r
+    return r["result"]
+y = time.gmtime().tm_year - 40
+b = call("id/register", name="boss", password="secret1", birth_year=y)
+t = call("id/token", session=b["session"], listing=sys.argv[2], name="boss")
+r = call("id/register", name="reader", password="secret1", birth_year=y)
+print(t["token"], r["session"])
+PY
+) || fail "the ID API"
+setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/he.log" | tail -1 | cut -d' ' -f3)
+BUILDAT_HEARTH_STARPORT=$boss BUILDAT_HEARTH_CODE=$setup timeout 90 \
+	Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/boss" -w 800x600 -l 3 \
+	-o sound_mute=1 -s 127.0.0.1:$HE -c @"$tmp/cmds.txt" > "$tmp/boss.log" 2>&1
+grep -q "claimed the server with the setup code" "$tmp/he.log" ||
+	fail "the Hearth got no admin ($tmp/boss.log)"
+
+# The client: the reader logged in, the Starport's recommendation as its
+# list fetch keeps it, the Luanti server's address allowed
+client_dir() { # dir with_id
+	mkdir -p "$1"
+	local ids=""
+	[ "$2" = 1 ] && ids="\"ids\": {\"http://127.0.0.1:$SP\": {\"session\": \"$session\", \"name\": \"reader\"}},"
+	cat > "$1/starport.json" <<EOF
+{"starports": ["http://127.0.0.1:$SP"], $ids
+ "recommends": {"http://127.0.0.1:$SP": {"hearth": "http://127.0.0.1:$HE", "aittas": []}}}
+EOF
+	local now; now=$(date +%s)
+	printf 'accepted,address,description,created,last_attempt,name,icon,server\n"true","http://127.0.0.1:%s","","%s","%s","","",""\n"true","udp://127.0.0.1:%s","","%s","%s","","",""\n' \
+		$SP $now $now $LU $now $now > "$1/network_addresses.csv"
+}
+client_dir "$tmp/cl" 1
+client_dir "$tmp/out" 0
+# luanti_client into the server, Escape, a scan of the pause menu; then
+# the menu's second last row, Discuss, and the ID's first-time "Use it"
+pause() { # dir log listed extra_cmds...
+	local d=$1 log=$2 listed=$3
+	shift 3
+	{
+		echo "delay 12000"; echo "keypress Escape"; echo "delay 1500"
+		echo "event scan"
+		for c in "$@"; do echo "$c"; done
+		echo "quit"
+	} > "$tmp/c"
+	local e=()
+	[ -n "$listed" ] && e=(BUILDAT_LUANTI_LISTED="$listed")
+	env "${e[@]}" BUILDAT_LUANTI_ADDRESS=127.0.0.1:$LU \
+		BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_NAME=discusser \
+		BUILDAT_HEARTH_REQS="${HEARTH_REQS:-}" \
+		timeout 120 Build/bin/buildat -m luanti_client -D "$d" -w 800x600 -l 3 \
+		-o sound_mute=1 -c @"$tmp/c" > "$log" 2>&1
+}
+DISCUSS=(
+	"mouse_pos 400 377" "mouse_click left"
+	"wait_log 30000 Connect succeeded (127.0.0.1:$HE)"
+	"delay 6000" "mouse_pos 330 326" "mouse_click left"
+	"delay 6000" "event scan")
+# No thread yet: the form, its title the listed name -- a control
+# character and a double space in it made one space -- and the address;
+# then a thread made as the form's Send would make it
+HEARTH_REQS="{\"cmd\":\"new_thread\",\"server\":true,\"subject\":\"server:127.0.0.1:$LU\",\"title\":\"Checked [127.0.0.1:$LU]\",\"body\":\"About it\",\"kind\":\"\"}" \
+	pause "$tmp/cl" "$tmp/cl1.log" $'Check \x01 Server' "${DISCUSS[@]}"
+grep -aq 'text "Discuss (leave server)"' "$tmp/cl1.log" ||
+	fail "no Discuss in the pause menu ($tmp/cl1.log)"
+grep -aq "hr discuss: .*server:127.0.0.1:$LU" "$tmp/cl1.log" ||
+	fail "the Hearth was not handed the server ($tmp/cl1.log)"
+grep -aq "hearth: page A thread about 127.0.0.1:$LU" "$tmp/cl1.log" ||
+	fail "no new thread's form ($tmp/cl1.log)"
+grep -aq "hearth: title Check Server \[127.0.0.1:$LU\]" "$tmp/cl1.log" ||
+	fail "the title is not filled in ($tmp/cl1.log)"
+echo "ok: Discuss with no thread opens the form, titled"
+
+# The thread made above is what the next Discuss opens (a request of
+# its own makes the Hearth say its pages)
+HEARTH_REQS='{"cmd":"me"}' \
+	pause "$tmp/cl" "$tmp/cl2.log" "Check Server" "${DISCUSS[@]}"
+grep -aq "hearth: page Checked \[127.0.0.1:$LU\]" "$tmp/cl2.log" ||
+	fail "the server's thread was not opened ($tmp/cl2.log)"
+grep -aq "hearth: page A thread about" "$tmp/cl2.log" && fail "the form again ($tmp/cl2.log)"
+echo "ok: Discuss opens the server's thread"
+
+# Typed in: no button; listed but no ID: no button
+pause "$tmp/cl" "$tmp/cl3.log" ""
+grep -aq 'text "Leave the game"' "$tmp/cl3.log" || fail "no pause menu ($tmp/cl3.log)"
+grep -aq 'text "Discuss (leave server)"' "$tmp/cl3.log" && fail "Discuss for a typed address"
+pause "$tmp/out" "$tmp/cl4.log" "Check Server"
+grep -aq 'text "Leave the game"' "$tmp/cl4.log" || fail "no pause menu ($tmp/cl4.log)"
+grep -aq 'text "Discuss (leave server)"' "$tmp/cl4.log" && fail "Discuss with no ID"
+echo "PASS: Discuss goes to the server's thread or a new one; not for a typed address or without an ID"

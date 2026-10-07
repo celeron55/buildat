@@ -418,6 +418,9 @@ local function open(title)
 	if not frame then
 		build_frame()
 	end
+	if scripted then
+		log:info("hearth: page " .. title)
+	end
 	area:RemoveAllChildren()
 	selected, composer, thread_list = nil, nil, nil
 	if narrow then
@@ -536,7 +539,7 @@ end
 local show_home, show_topic, show_thread, show_notifications, show_following
 local show_search, show_account, show_compose, show_report, show_link
 local show_queue, show_settings, show_tracker_link, show_topic_edit
-local show_place, read_on
+local show_place, show_server, read_on
 
 -- A thread's row; unread marked
 local function thread_row(v, th)
@@ -796,6 +799,16 @@ show_topic = function(id)
 					function()
 				req("topic_tracker", {topic = id, on = not t.tracker}, redraw)
 			end)
+			-- [DISCUSS_SERVER] Where the client's Discuss on a server
+			-- starts its thread; a Hearth older than that has no category
+			if t.category then
+				button(bar, t.category == "servers" and
+						"Not for servers' threads" or "For servers' threads",
+						function()
+					req("topic_category", {topic = id, category =
+							t.category == "servers" and "" or "servers"}, redraw)
+				end)
+			end
 		end
 		local shown = {}
 		for _, th in ipairs(t.threads) do
@@ -1139,6 +1152,9 @@ show_compose = function(o)
 	elseif o.feedback then
 		title, key = "Feedback about " .. o.feedback.package .. " " ..
 				o.feedback.version, "feedback " .. o.feedback.subject
+	elseif o.server then
+		title, key = "A thread about " .. o.server.address,
+				"server " .. o.server.subject
 	else
 		title, key = "A new thread", "new " .. (o.topic or 0)
 	end
@@ -1146,13 +1162,21 @@ show_compose = function(o)
 	if o.feedback then
 		text(w, "Goes to this Hearth's Feedback topic, which its makers read",
 				DIM, W)
+	elseif o.server then
+		text(w, "Goes to this Hearth's topic for servers", DIM, W)
 	end
 	local title_e, kind, topic_pick
 	if not o.edit then
 		title_e = edit(w, "Title", false, key .. " title", W)
+		if o.server and not drafts[key .. " title"] then
+			title_e:SetText(o.server.title)
+			if scripted then
+				log:info("hearth: title " .. o.server.title)
+			end
+		end
 		local bar = row(w)
 		local tracker = o.tracker
-		if not o.feedback then
+		if not o.feedback and not o.server then
 			-- The topic, picked here when the page did not come from one
 			local choices, at, names = {}, 1, {}
 			for _, t in ipairs(topics) do
@@ -1216,6 +1240,9 @@ show_compose = function(o)
 		end
 		if o.edit then
 			req("edit", {message = o.edit.id, body = b}, function() done() end)
+		elseif o.server then
+			req("new_thread", {server = true, subject = o.server.subject,
+					title = title_e:GetText(), body = b, kind = kind()}, done)
 		elseif o.feedback then
 			local f = o.feedback
 			req("new_thread", {feedback = true, subject = f.subject,
@@ -1606,6 +1633,52 @@ show_place = function(f)
 	end)
 end
 
+-- **A server the player was on** ([DISCUSS_SERVER]): the client's Discuss
+-- came here. Its thread, by the subject Hearth gave it; with none, the
+-- threads whose words match its name to pick from, or straight to a new
+-- one, titled with the name and the address
+show_server = function(d)
+	open_thread = nil
+	-- In place of this page, which Back would only bring here again
+	local function instead(page)
+		here = page
+		page()
+	end
+	local function compose()
+		instead(function() show_compose({server = d}) end)
+	end
+	req("subject", {subject = d.subject}, function(threads)
+		if #threads > 0 then
+			return instead(function() show_thread(threads[1].id) end)
+		end
+		local q = d.name:gsub("[^%w%s]", " "):match("^%s*(.-)%s*$")
+		if q == "" then
+			return compose()
+		end
+		req("search", {q = q}, function(results)
+			if #results == 0 then
+				return compose()
+			end
+			local w = open(d.title)
+			button(w, "Start a thread about it...", function()
+				go(function() show_compose({server = d}) end)
+			end, true)
+			local v = list()
+			v:header("Threads that may be about it")
+			local seen = {}
+			for _, r in ipairs(results) do
+				if not seen[r.thread] then
+					seen[r.thread] = true
+					add_row(v, r.title, "", function()
+						go(function() show_thread(r.thread) end)
+					end)
+				end
+			end
+			v:fit()
+		end, compose)
+	end)
+end
+
 buildat.sub_packet("hr:new", function(data)
 	local v = buildat.parse_json(data)
 	if type(v) ~= "table" or not open_thread or v.thread ~= open_thread.id then
@@ -1651,7 +1724,15 @@ accounts.on_joined = function()
 			-- came here with the app's package and versions, which start the
 			-- message and go with the thread as its subject
 			local f = buildat.feedback()
-			if f then
+			-- [DISCUSS_SERVER]; a client from before it has none
+			local ds = buildat.discussed_server and buildat.discussed_server()
+			if ds then
+				if scripted then
+					log:info("hr discuss: " .. encode(ds))
+				end
+				here = function() show_home() end
+				go(function() show_server(ds) end)
+			elseif f then
 				if scripted then
 					log:info("hr feedback: " .. encode(f))
 				end

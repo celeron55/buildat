@@ -316,6 +316,20 @@ function M.show_pause(o)
 		close()
 		M.show()
 	end)
+	-- [DISCUSS_SERVER]: a server picked off Luanti's list, its thread on a
+	-- Hearth; the client says whether there is one to go to (a Starport
+	-- ID logged in, a Hearth recommended). The label says the place goes.
+	local origin = M.origin
+	if origin and buildat.can_discuss_this_server(origin) then
+		menu:add("Discuss (leave server)", function()
+			close()
+			o.leave(true)
+			local ok, why = buildat.discuss_this_server(origin)
+			if not ok then
+				ui_utils.show_message_dialog("Not discussed: " .. tostring(why))
+			end
+		end)
+	end
 	menu:add("Leave the game", function()
 		close()
 		o.leave()

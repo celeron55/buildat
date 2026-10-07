@@ -271,6 +271,15 @@ open = function()
 			accounts.page_button(w, "Worlds...", worlds)
 		end
 	end
+	-- [DISCUSS_SERVER]: a server a Starport lists, its thread on a Hearth.
+	-- The client decides where it goes and what it says, and whether there
+	-- is somewhere (a client from before it has neither verb)
+	if buildat.can_discuss_this_server and buildat.can_discuss_this_server() then
+		accounts.page_button(w, "Discuss (leave server)", function()
+			close()
+			buildat.discuss_this_server()
+		end)
+	end
 	if not account.public and account.is_local then
 		if lan == nil then
 			accounts.page_button(w, "Open to LAN", function()

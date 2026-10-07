@@ -90,11 +90,16 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
                            top-level topic)
     new_thread             anyone; topic, title, body, subject, kind
                            ("", question, problem, idea, or patch in a
-                           tracker topic), version
+                           tracker topic), version; or server=true and
+                           subject "server:<host>:<port>", in the topic
+                           of category "servers" (made "Servers" when
+                           none is) -- the client's Discuss
+                           ([DISCUSS_SERVER])
     status                 the admin: a problem's (open, confirmed,
                            fixed, wontfix) or a patch's (open, applied,
                            wontfix), fixed_in a version
     topic_tracker          the admin: topic, on -- its threads are tickets
+    topic_category         the admin: topic, category ("servers" or "")
     tracker_link           a ticket's starter or the admin: thread, link
                            ("" takes it off); below
     tracker_domains        the list; the admin: add, remove (domains)

@@ -439,6 +439,9 @@ static const char *const COLUMNS_ADDED[][3] = {
 	{"threads", "version", "TEXT NOT NULL DEFAULT ''"},
 	{"threads", "fixed_in", "TEXT NOT NULL DEFAULT ''"},
 	{"topics", "tracker", "INTEGER NOT NULL DEFAULT 0"},
+	// [DISCUSS_SERVER]: what Hearth posts in by itself there: "servers",
+	// or ""
+	{"topics", "category", "TEXT NOT NULL DEFAULT ''"},
 	{"threads", "link", "TEXT NOT NULL DEFAULT ''"},
 	{"threads", "link_by", "TEXT NOT NULL DEFAULT ''"},
 	// [HEARTH_UI]: the last message read, for what is unread since
@@ -1077,6 +1080,22 @@ struct Module: public interface::Module
 		return sqlite3_last_insert_rowid(m_db);
 	}
 
+	// [DISCUSS_SERVER] The topic of a category, the first; with none, a
+	// top-level one made for it
+	int64_t category_topic(const char *category, const char *name,
+			const char *about)
+	{
+		Q q(m_db, "SELECT id FROM topics WHERE category = ? ORDER BY id "
+				"LIMIT 1");
+		q.b(ss_(category));
+		if(q.step())
+			return q.i(0);
+		const int64_t id = top_topic(name, about);
+		Q u(m_db, "UPDATE topics SET category = ? WHERE id = ?");
+		u.b(ss_(category)).b(id).step();
+		return id;
+	}
+
 	void exec(const char *sql)
 	{
 		Q q(m_db, sql);
@@ -1091,7 +1110,7 @@ struct Module: public interface::Module
 		json::Value list = json::array();
 		Q q(m_db, "SELECT t.id, t.parent, t.name, t.about, "
 				"(SELECT count(*) FROM threads WHERE topic = t.id AND hidden = 0), "
-				"t.tracker FROM topics t ORDER BY t.parent, t.id");
+				"t.tracker, t.category FROM topics t ORDER BY t.parent, t.id");
 		while(q.step()){
 			json::Value t = json::object();
 			t.set("id", q.i(0));
@@ -1100,6 +1119,7 @@ struct Module: public interface::Module
 			t.set("about", q.s(3));
 			t.set("threads", q.i(4));
 			t.set("tracker", q.i(5) != 0);
+			t.set("category", q.s(6));
 			list.append(t);
 		}
 		return list;
@@ -1107,7 +1127,8 @@ struct Module: public interface::Module
 
 	json::Value topic(int64_t id)
 	{
-		Q q(m_db, "SELECT name, about, parent, tracker FROM topics WHERE id = ?");
+		Q q(m_db, "SELECT name, about, parent, tracker, category FROM topics "
+				"WHERE id = ?");
 		q.b(id);
 		if(!q.step())
 			return json::Value();
@@ -1117,6 +1138,7 @@ struct Module: public interface::Module
 		t.set("about", q.s(1));
 		t.set("parent", q.i(2));
 		t.set("tracker", q.i(3) != 0);
+		t.set("category", q.s(4));
 		return t;
 	}
 
@@ -2125,6 +2147,20 @@ struct Module: public interface::Module
 				throw Exception("no such topic");
 			return json::Value(true);
 		}
+		// [DISCUSS_SERVER] A topic's category: where Hearth puts a thread
+		// about a server the client was playing on
+		if(cmd == "topic_category"){
+			if(!admin)
+				throw Exception("only the admin sets a topic's category");
+			const ss_ category = jstr(q, "category");
+			if(category != "" && category != "servers")
+				throw Exception("a category is \"servers\" or none");
+			Q u(m_db, "UPDATE topics SET category = ? WHERE id = ?");
+			u.b(category).b(jint(q, "topic")).step();
+			if(sqlite3_changes(m_db) == 0)
+				throw Exception("no such topic");
+			return json::Value(true);
+		}
 		if(cmd == "topic_tracker"){
 			if(!admin)
 				throw Exception("only the admin marks a tracker");
@@ -2330,12 +2366,20 @@ struct Module: public interface::Module
 			// "feedback": the client's Feedback... on an app, which knows
 			// the app's subject and not this Hearth's topics
 			// ([PACKAGE_SUBJECT])
+			// "server": the client's Discuss on a server it was playing
+			// on ([DISCUSS_SERVER]), "server:<host>:<port>" its subject
+			const bool server = q.get("server").is_true();
 			const int64_t topic_id = q.get("feedback").is_true() ?
 					top_topic("Feedback", "About the packages at home here, "
-					"from their users' clients") : jint(q, "topic");
+					"from their users' clients") :
+					server ? category_topic("servers", "Servers",
+					"About the game servers people play on") :
+					jint(q, "topic");
 			const ss_ title = jstr(q, "title"), body = jstr(q, "body"),
 					subject = jstr(q, "subject"), kind = jstr(q, "kind"),
 					version = jstr(q, "version");
+			if(server && subject.rfind("server:", 0) != 0)
+				throw Exception("a server's thread has its subject");
 			const json::Value top = topic(topic_id);
 			if(!top.is_object())
 				throw Exception("no such topic");
