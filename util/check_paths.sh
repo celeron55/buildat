@@ -55,4 +55,54 @@ check_pkill()
 }
 # For a python body's subprocess: bash -c "check_pgrep buildat_server"
 export -f check_pgrep check_pkill
+
+# **A check's server, started and waited for** ([CHECK_START_SERVER]):
+#
+#   start_server <log> <ready-regex> <timeout_s> <port|auto> <command...>
+#
+# runs the command with "-P <port>" added, its output ANSI-stripped into
+# <log>, and waits until <log> matches <ready-regex> (grep -E). Sets
+# SERVER_PID (the server itself, not a pipe's end) and SERVER_PORT.
+# **The port is checked first**: one already listened on (a desk server
+# on 29500, another check) fails at once, naming it -- before, the check
+# waited out its timeout as "did not come up", or talked to the other
+# server. "auto" picks a free one in 29700-29999. A server that exits
+# while waited for fails at once too. Returns 1 on failure, with the
+# reason and the log's tail on stderr; the caller says FAIL.
+#   VAR=x start_server ...  sets VAR for the server, as for any command
+port_taken()
+{
+	ss -Hltnu "( sport = :$1 )" 2>/dev/null | grep -q .
+}
+start_server()
+{
+	local log=$1 ready=$2 timeout=$3 port=$4 _i
+	shift 4
+	if [ "$port" = auto ]; then
+		for _i in $(seq 50); do
+			port=$((29700 + RANDOM % 300))
+			port_taken $port || break
+		done
+	fi
+	if port_taken $port; then
+		echo "start_server: port $port is taken: $(ss -Hltnup "( sport = :$port )" 2>/dev/null | head -1)" >&2
+		return 1
+	fi
+	SERVER_PORT=$port
+	"$@" -P "$port" > >(sed -u -e 's/\x1b\[[0-9;]*m//g' > "$log") 2>&1 &
+	SERVER_PID=$!
+	for _i in $(seq "$timeout"); do
+		grep -qaE "$ready" "$log" 2>/dev/null && return 0
+		if ! kill -0 $SERVER_PID 2>/dev/null; then
+			echo "start_server: the server exited before \"$ready\" ($log):" >&2
+			tail -15 "$log" >&2
+			return 1
+		fi
+		sleep 1
+	done
+	grep -qaE "$ready" "$log" 2>/dev/null && return 0
+	echo "start_server: no \"$ready\" in $timeout s ($log):" >&2
+	tail -15 "$log" >&2
+	return 1
+}
 # vim: set noet ts=4 sw=4:
