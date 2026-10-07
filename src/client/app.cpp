@@ -965,6 +965,27 @@ static ss_ app_dir(const ss_ &id)
 	return installed_app_dir(id);
 }
 
+// [APP_CATEGORY] what an app says it is: main/meta.json's "kind", or its
+// base's ("base" in the app's meta.json, as the loader takes it); "" for
+// none
+static ss_ app_kind(const ss_ &dir)
+{
+	// load_file writes its error into err: without one a missing file
+	// crashes it
+	json::json_error_t err;
+	const json::Value m = json::load_file((dir+"/main/meta.json").c_str(),
+			&err);
+	if(m.get("kind").is_string())
+		return m.get("kind").as_string();
+	const json::Value root = json::load_file((dir+"/meta.json").c_str(),
+			&err);
+	const json::Value &base = root.get("base");
+	if(base.is_string() && valid_app_name(base.as_string()))
+		return app_kind(g_client_config.get<ss_>("share_path")+"/apps/"+
+				base.as_string());
+	return "";
+}
+
 // What the app's server calls it: an installed one without its version
 static ss_ server_app_id(const ss_ &id)
 {
@@ -3920,7 +3941,8 @@ struct CApp: public App, public magic::Application
 		}
 	}
 
-	// list_apps() -> {{name=, size=}, ...}
+	// list_apps() -> {{name=, size=, kind=}, ...}; kind is main/meta.json's
+	// ([APP_CATEGORY]): world, arena, app, other, experiment, check or ""
 	static int l_list_apps(lua_State *L)
 	{
 		ss_ games_dir = g_client_config.get<ss_>("share_path")+"/apps";
@@ -3944,6 +3966,8 @@ struct CApp: public App, public magic::Application
 			lua_pushnumber(L, (lua_Number)interface::fs::directory_tree_size(
 					game_path));
 			lua_setfield(L, -2, "size");
+			lua_pushstring(L, app_kind(game_path).c_str());
+			lua_setfield(L, -2, "kind");
 			lua_rawseti(L, -2, i++);
 		}
 		return 1;

@@ -280,7 +280,10 @@ API specific to the extension environment:
 buildat.connect_server(address)
 - Address may include port in format "host:port" or "[host]:port"
 
-buildat.list_apps() -> {name, ...}, the apps under apps/
+buildat.list_apps() -> {{name, size, kind}, ...}, the apps under apps/
+  and the installed ones; kind is the app's main/meta.json "kind" (or its
+  base's): world, arena, app, other, experiment, check, or "" for none
+  ([APP_CATEGORY])
 buildat.list_launchers() -> {{kind, name, path, launcher = bool}, ...}
 - Every app, builtin and extension in the tree, for the launch grid
   ([LAUNCH_GRID]); launcher says whether it has a launcher/init.lua.
@@ -434,7 +437,7 @@ buildat.safe.launch(key) -> true, or false and why
 - Run one of them. The key is looked up in the table the trusted side built,
   so a sandbox can name nothing that is not on the grid. The key and the
   time go in the launch history.
-buildat.safe.list_apps() -> {name, ...}
+buildat.safe.list_apps() -> {{name, size, kind}, ...}
 buildat.safe.list_saves(app) -> {{name, ..., last_launched}, ...}
 - last_launched: when launch_save() last opened it, in unix seconds, or nil.
 buildat.safe.launch_save(app, name) -> true, or false and why

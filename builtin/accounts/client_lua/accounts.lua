@@ -1587,6 +1587,10 @@ starport_page = function(back, confirm_remove)
 		if draft.choice.access == nil then
 			draft.choice.access = "auto"
 		end
+		-- [APP_CATEGORY] the app's own kind unless the file says one
+		if draft.choice.kind == nil then
+			draft.choice.kind = valid(info.app_kind, CHOICES[1][3])
+		end
 		local d = type(c.descriptors) == "table" and c.descriptors or {}
 		for _, f in ipairs(DESCRIPTORS) do
 			draft.desc[f[1]] = valid(d[f[1]], f[3])

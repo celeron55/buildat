@@ -1,4 +1,5 @@
 {
+	"kind": "check",
 	"client_main": "init.lua",
 	"dependencies": [
 		{"module": "network"},

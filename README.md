@@ -33,15 +33,18 @@ as below. More at https://www.buildat.org.
 The apps
 --------
 Each directory in `apps/` is an app: pick it in the launch menu, or run
-`bin/buildat_server -m ../apps/<name>`.
+`bin/buildat_server -m ../apps/<name>`. An app says what it is in
+`main/meta.json`'s `"kind"` -- world, arena, app, other, experiment or
+check -- and the launch menu's "Local app" list is grouped by it; a
+Starport listing takes it as its kind unless `starport.json` names one.
 
-* Services: `vanilla` (Luanti games), `starport`, `aitta`, `hearth`,
-  `floorplanner`, and `play`, which serves the web client and has no game
-  of its own: its page starts on the launch menu (a Starport lists its
-  origin in `web_clients`, doc/starport.txt).
-* Games and demos: `digger`, `infidigger`, `bomber_drone` (a drone over
-  infidigger's terrain), `minigame`, `vanilla_voxel_physics` (vanilla with
-  voxel bodies that fall).
+* Games (world, arena): `vanilla` (Luanti games), `digger`, `infidigger`,
+  `bomber_drone` (a drone over infidigger's terrain), `minigame`,
+  `vanilla_voxel_physics` (vanilla with voxel bodies that fall).
+* Apps: `starport`, `aitta`, `hearth`, `floorplanner`.
+* Other: `play`, which serves the web client and has no game of its own:
+  its page starts on the launch menu (a Starport lists its origin in
+  `web_clients`, doc/starport.txt).
 * Experiments, not developed now: `undermine` (digger's world, which
   collapses), `aggregate` (undermine's world made of mixtures) and
   `aggregate_look`.

@@ -770,6 +770,66 @@ function M.start_local_app(game, launch)
 	show_waiting_for_old_server(game, launch)
 end
 
+-- [APP_CATEGORY] the apps by what they say they are (main/meta.json's
+-- kind), in this order; none or an unknown one is "Other"
+local GROUPS = {
+	{"Games", {world = true, arena = true}},
+	{"Apps", {app = true}},
+	{"Other", nil},
+	{"Experiments", {experiment = true}},
+	{"Checks", {check = true}},
+}
+local function group_of(kind)
+	for i, g in ipairs(GROUPS) do
+		if g[2] and g[2][kind] then
+			return i
+		end
+	end
+	return 3
+end
+
+-- Pages of rows, {header = title} or {app = entry}, at most per_page rows
+-- each: a group starts a new page unless all of it fits on this one, and
+-- a group longer than a page goes on with its header again
+local function app_pages(apps, per_page)
+	local by_group = {}
+	for _, a in ipairs(apps) do
+		local g = group_of(a.kind)
+		by_group[g] = by_group[g] or {}
+		table.insert(by_group[g], a)
+	end
+	local pages, cur = {}, {}
+	for i, g in ipairs(GROUPS) do
+		local list = by_group[i]
+		if list then
+			if #cur > 0 and #cur + 1 + #list > per_page then
+				pages[#pages + 1], cur = cur, {}
+			end
+			cur[#cur + 1] = {header = g[1]}
+			for _, a in ipairs(list) do
+				if #cur >= per_page then
+					pages[#pages + 1], cur = cur, {{header = g[1]}}
+				end
+				cur[#cur + 1] = {app = a}
+			end
+		end
+	end
+	if #cur > 0 then
+		pages[#pages + 1] = cur
+	end
+	return pages
+end
+do
+	local p = app_pages({{name = "c1", kind = "check"},
+			{name = "v", kind = "world"}, {name = "x"}, {name = "c2",
+			kind = "check"}}, 4)
+	assert(#p == 2 and p[1][1].header == "Games" and p[1][2].app.name == "v"
+			and p[1][3].header == "Other" and p[2][1].header == "Checks" and
+			#p[2] == 3)
+	p = app_pages({{kind = "app"}, {kind = "app"}, {kind = "app"}}, 3)
+	assert(#p == 2 and p[2][1].header == "Apps" and #p[2] == 2)
+end
+
 function M.show_local_apps(page)
 	local root = uistack.main:push({desc="local_game"})
 	root.defaultStyle = magic.cache:GetResource("XMLFile", STYLE)
@@ -788,17 +848,23 @@ function M.show_local_apps(page)
 	else
 		-- A page at a time: at 720 px high the whole list ran off the
 		-- screen, Back with it
-		-- simplified: 15 a page; a window under ~600 px high still clips
-		-- one, and the height read from the window is the upgrade
-		local per_page = 15
-		local pages = math.ceil(#games / per_page)
+		-- simplified: 15 rows a page; a window under ~600 px high still
+		-- clips one, and the height read from the window is the upgrade
+		local all = app_pages(games, 15)
+		local pages = #all
 		page = math.max(1, math.min(page or 1, pages))
-		for i = (page - 1) * per_page + 1, math.min(#games, page * per_page) do
-			local name = games[i].name
-			local button = make_game_button(menu.window, name, games[i].size)
-			menu:add(button, function()
-				M.start_local_app(name)
-			end)
+		for _, r in ipairs(all[page]) do
+			if r.header then
+				local h = menu.window:CreateChild("Text")
+				h:SetStyleAuto()
+				h.text = r.header
+			else
+				local name = r.app.name
+				local button = make_game_button(menu.window, name, r.app.size)
+				menu:add(button, function()
+					M.start_local_app(name)
+				end)
+			end
 		end
 		local function redraw(p)
 			uistack.main:pop(root)

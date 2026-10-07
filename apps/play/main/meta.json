@@ -1,4 +1,5 @@
 {
+	"kind": "other",
 	"dependencies": [
 		{"module": "network"}
 	]

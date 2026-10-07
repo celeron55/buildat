@@ -235,6 +235,17 @@ struct Module: public interface::Module, public Interface
 
 	ss_ config_path(){ return m_dir+"/starport.json"; }
 
+	// [APP_CATEGORY] the listing's kind when starport.json names none: the
+	// app's own, main/meta.json's "kind", the local-only ones as "other"
+	ss_ app_kind()
+	{
+		json::Value m = json::load_string(read_file(
+				m_server->get_module_path("main")+"/meta.json").c_str());
+		const ss_ k = m.get("kind").is_string() ? m.get("kind").as_string() :
+				"";
+		return k == "world" || k == "arena" || k == "app" ? k : "other";
+	}
+
 	json::Value config()
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
@@ -625,6 +636,8 @@ struct Module: public interface::Module, public Interface
 		body.set("login", ids_mode_of(cfg) == "off" ? "local" : "both");
 		body.set("access", access_of(cfg));
 		body.set("app", m_server->get_app_id());
+		if(!body.get("kind").is_string())
+			body.set("kind", app_kind());
 		body.set("version", ss_(BUILDAT_VERSION));
 		const json::Value &addr = cfg.get("address");
 		if(!public_address(addr.is_string() ? addr.as_string() : "",
@@ -887,6 +900,7 @@ struct Module: public interface::Module, public Interface
 		out.set("access_now", access_of(c));
 		out.set("message", message);
 		out.set("default_starport", default_starport());
+		out.set("app_kind", app_kind());
 		json::Value rows = json::array();
 		for(const ss_ &url : urls_of(c)){
 			json::Value r = json::object();

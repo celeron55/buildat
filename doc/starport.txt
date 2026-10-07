@@ -6,7 +6,9 @@ run their own. The official one is https://starport.buildat.org.
 
 - A server is listed only if its admin names a Starport in
   `starport.json`. Its announce carries its address, app and player count,
-  not who is playing.
+  not who is playing. Its kind (world, arena, app, other) is the
+  file's, or else the app's own: `main/meta.json`'s "kind", experiment
+  and check listed as other ([APP_CATEGORY]).
 - A server accepts Starport IDs only if its admin turns them on; local
   accounts work without one. A player uses an ID only by choosing "Sign in
   with your Starport ID".
