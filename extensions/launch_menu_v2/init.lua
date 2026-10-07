@@ -539,7 +539,7 @@ end
 -- screen the panel is under the list.
 -- simplified: one scrolled list rather than pages; hundreds of rows are
 -- hundreds of buttons, which is fine at this size.
-browse = function(kind, query, by, filter)
+browse = function(kind, query, by, filter, focus_filter)
 	filter = filter or "All"
 	local narrow = magic.ui.root.width < 760
 	local width = math.min(magic.ui.root.width - 40, 1000)
@@ -553,14 +553,16 @@ browse = function(kind, query, by, filter)
 		if e.kind == kind then of_kind[#of_kind + 1] = e end
 	end
 	local filters = kind == "server" and server_filters(of_kind) or nil
-	local function refilter(f)
+	local function refilter(f, focus_filter)
 		uistack.main:pop(root)
-		browse(kind, query, by, f)
+		browse(kind, query, by, f, focus_filter)
 	end
+	local drop = nil
 	if filters then
-		local drop = window:CreateChild("DropDownList")
+		drop = window:CreateChild("DropDownList")
 		drop:SetStyleAuto()
 		drop:SetFixedSize(240, ROW_HEIGHT)
+		drop:SetFocusMode(magic.FM_FOCUSABLE)
 		drop.resizePopup = true
 		-- The arrow at its right end, floor planner's (panel.lua M.mark):
 		-- the list lays its children out in a row, so the choice's text
@@ -582,7 +584,7 @@ browse = function(kind, query, by, filter)
 		magic.SubscribeToEvent(drop, "ItemSelected", function(_, _, data)
 			local f = filters[data:GetInt("Selection") + 1]
 			if f and f ~= filter then
-				deferred = function() refilter(f) end
+				deferred = function() refilter(f, true) end
 			end
 		end)
 		local kept = {}
@@ -712,6 +714,28 @@ browse = function(kind, query, by, filter)
 	end
 
 	local nav = ui_utils.bind_button_menu(root, items, function(key)
+		-- [V2_FILTER_KEYS]: the filter above the list, Up from its first
+		-- row; Left and Right step it, Down goes back to the list
+		if drop and drop:HasFocus() then
+			if key == KEY_LEFT or key == KEY_RIGHT then
+				local i = 1
+				for j, f in ipairs(filters) do
+					if f == filter then i = j end
+				end
+				refilter(filters[(i - 1 + (key == KEY_RIGHT and 1 or -1)) %
+						#filters + 1], true)
+				return true
+			elseif key == KEY_DOWN then
+				if items[1] then items[1].button:SetFocus(true) end
+				return true
+			elseif key == KEY_UP then
+				return true
+			end
+		elseif drop and key == KEY_UP and items[1] and
+				items[1].button:HasFocus() then
+			drop:SetFocus(true)
+			return true
+		end
 		local i = in_actions()
 		if i then
 			-- In the panel: up and down between its actions, Left or
@@ -770,6 +794,9 @@ browse = function(kind, query, by, filter)
 		if not locked then fill(item.entry) end
 		view:show(button)
 	end)
+	if focus_filter and drop then
+		drop:SetFocus(true)
+	end
 	log:info("launch_menu_v2: " .. kind .. ", " .. #items .. " rows" ..
 			(query ~= "" and " for \"" .. query .. "\"" or "") ..
 			", by " .. by)

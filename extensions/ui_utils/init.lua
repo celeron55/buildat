@@ -507,10 +507,11 @@ local function button_menu_nav(root, options)
 		end
 		checked = true
 		-- The first item has the focus to start with, unless the screen gave
-		-- it to something of its own (a field to type in)
+		-- it to something of its own (a field to type in, a dropdown)
 		local focus = magic.ui.focusElement
 		local kind = focus and focus:GetTypeName()
-		if items[1] and kind ~= "LineEdit" and kind ~= "Button" then
+		if items[1] and kind ~= "LineEdit" and kind ~= "Button" and
+				kind ~= "DropDownList" then
 			items[1].button:SetFocus(true)
 		end
 		sync()
