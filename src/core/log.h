@@ -30,6 +30,10 @@ bool log_lines_since_contain(long long since, const char *text);
 // Watch for one text in the lines logged from now on; one watch at a time
 void log_watch(const char *text);
 bool log_watch_seen();
+// The last warnings and errors, about 100, oldest first, a line each:
+// "YYYY-MM-DD HH:MM:SS W sys: text" in UTC ([SERVER_ADMIN_PAGE]). Kept in
+// memory only, from the start.
+size_t log_problems(char *buf, size_t size);
 
 // Try to stop using malloc() and other heavyweight interfaces. Call when
 // SIGSEGV or SIGABRT occurs to make the program much more likely to be able to

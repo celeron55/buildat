@@ -44,7 +44,6 @@ local function req(cmd, args, on)
 	buildat.send_packet("ai:req", encode(q))
 end
 
-local page = nil
 local message = nil
 local home
 
@@ -82,13 +81,14 @@ local function edit(parent, label)
 	return e
 end
 
+-- In builtin/accounts' Server window ([SERVER_ADMIN_PAGE]), an entry
+-- before its Account, Accounts and Health
 home = function()
 	req("me", nil, function(me)
-		if page then
-			page:Remove()
+		if not accounts.frame then
+			return accounts.server_window("aitta")
 		end
-		page = accounts.page_window(760)
-		text(page, "Aitta, as " .. tostring(me.account))
+		local page = accounts.server_open("Aitta, as " .. tostring(me.account))
 		if message then
 			text(page, message, YELLOW)
 			message = nil
@@ -145,5 +145,10 @@ accounts.on_joined = function()
 	home()
 end
 
+accounts.server_menu = function(add)
+	add(nil, "Aitta", "aitta", home)
+end
+-- Its accounts are in the window; no corner button ([ACCOUNT_BUTTON])
+accounts.no_account_button()
 accounts.start({title = "Aitta", env = "BUILDAT_AITTA"})
 -- vim: set noet ts=4 sw=4:

@@ -487,6 +487,9 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 				tcp += " "+itos(p);
 		}
 	}
+	config.set("box", "Landlock ABI "+itos(abi)+(abi >= 6 ?
+			" (files, abstract sockets, signals)" : " (files)")+
+			", seccomp; "+tcp);
 	log_i(MODULE, "The server is boxed: Landlock ABI %i (the filesystem%s), "
 			"seccomp (no unix sockets, no io_uring); %s. "
 			"%s and %s writable, %s/shared readable",

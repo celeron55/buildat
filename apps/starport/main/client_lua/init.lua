@@ -7,10 +7,10 @@
 -- with a JSON "sp:req" {id, cmd, ...} and draws its "sp:res"; the server
 -- (main.cpp) decides who may do what.
 --
--- **One window** ([STARPORT_UI]): a sidebar of every page, grouped under
--- grey headers, on the left; the page on the right, scrolling inside the
--- window, which keeps its size. Under 560 px the sidebar is a screen of
--- its own. The Overview comes first.
+-- **One window** ([STARPORT_UI]): builtin/accounts' Server window
+-- ([SERVER_ADMIN_PAGE]), Starport's pages put in its sidebar before
+-- builtin's (Mine / Account, Admin / Accounts, Health). The Overview
+-- comes first.
 --
 -- A scripted client sends BUILDAT_SP_REQS, JSON requests a line each, in
 -- order after the join, and logs each answer as "sp: <json>".
@@ -72,7 +72,6 @@ local function req(cmd, args, on)
 	buildat.send_packet("sp:req", encode(q))
 end
 
-local page = nil
 local redraw = nil   -- the page open, drawn again
 local page_back = nil -- its Back, for a page inside a page
 local message = nil  -- a line for the top of the next page drawn
@@ -154,74 +153,12 @@ local function copy_field(parent, label, value)
 	return copy_into(row(parent), label, value)
 end
 
-local frame, sidebar, view = nil, nil, nil
-local narrow = magic.ui.root.width < 560
-local page_width = 100
-
-local function build_frame()
-	frame = accounts.page_window(880)
-	frame:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(8, 8, 8, 8))
-	frame:SetFixedHeight(math.floor(magic.ui.root.height * 0.8))
-	local inner = frame.width - 16
-	sidebar = frame:CreateChild("UIElement")
-	sidebar:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
-	sidebar:SetFixedWidth(narrow and inner or 150)
-	view = frame:CreateChild("ScrollView")
-	view:SetStyleAuto()
-	view:SetFixedWidth(narrow and inner or inner - 150 - 8)
-	view.scrollBarsAutoVisible = true
-	-- Less the vertical bar and a margin
-	page_width = view.width - 24
-	-- [STARPORT_UI_KEYS]: Up and Down in the sidebar or the page, Right
-	-- and Left between them
-	ui.keyboard_columns(frame, sidebar, view)
-	if narrow then
-		view.visible = false
-	end
-end
-
--- On a narrow screen, the sidebar's screen again
-local function show_sidebar()
-	sidebar.visible = true
-	view.visible = false
-end
-
 -- A page: drawn into the window's right side, with the title, a Back for
 -- a step inside a page (`back`), and the message the last request left.
 -- `draw` draws it again, as after a failed request
-local function page_element()
-	if not frame then
-		build_frame()
-	end
-	-- builtin/accounts removes the pages it drew itself
-	if page then
-		pcall(function() page:Remove() end)
-	end
-	page = view:CreateChild("UIElement")
-	page:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(4, 4, 4, 4))
-	page:SetFixedWidth(page_width)
-	view.contentElement = page
-	view.viewPosition = magic.IntVector2(0, 0)
-	if narrow then
-		sidebar.visible = false
-		view.visible = true
-	end
-	return page
-end
-
 local function open(title, draw, back)
-	-- [STARPORT_ACCOUNTS_TAB]: a Starport-native page takes over the view, so
-	-- drop any accounts-module page first. Otherwise its M.page is left
-	-- pointing at the element page_element() is about to remove, and the next
-	-- open of the Accounts tab aborts in accounts' close_page on the stale
-	-- handle -- the tab's button lights up but the view stays this page's.
-	accounts.close_page()
-	local w = page_element()
+	local w = accounts.server_open(title, back)
 	redraw, page_back = draw, back
-	if back or narrow then
-		button(row(w), "Back", back or show_sidebar)
-	end
-	text(w, title)
 	if message then
 		text(w, message, YELLOW)
 		message = nil
@@ -362,83 +299,50 @@ end
 
 -- The last "me": the sidebar's entries and counts, and the Overview's
 local me = {}
-local current = "overview"
-local overview_page, servers_page, account_page, pages
+local overview_page, servers_page
 
-local function side_button(label, color, on_click)
-	local b = sidebar:CreateChild("Button")
-	b:SetStyleAuto()
-	b:SetFixedHeight(26)
-	local t = b:CreateChild("Text")
-	t:SetStyleAuto()
-	t:SetText(label)
-	t:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
-	t.position = magic.IntVector2(8, 0)
-	if color then
-		t:SetColor(color)
-	end
-	magic.SubscribeToEvent(b, "Released", function() on_click() end)
-end
-
--- A sidebar entry carries a count of what waits on it, in the highlight
--- colour while there is any. simplified: "any" stands for "any unseen";
--- per-item seen times are the upgrade
-local function draw_sidebar()
-	sidebar:RemoveAllChildren()
-	local function entry(label, key, count)
-		count = tonumber(count) or 0
-		side_button((key == current and "> " or "") .. label ..
-				(count > 0 and " (" .. count .. ")" or ""),
-				count > 0 and YELLOW or nil, function()
-			current = key
-			draw_sidebar()
-			pages[key]()
-		end)
-	end
-	local function header(t)
-		text(sidebar, t, GREY)
-	end
-	entry("Overview", "overview", me.unseen_events)
-	header("Mine")
-	entry("Servers", "servers", 0)
-	entry("Fleets", "fleets", 0)
-	entry("Blocklists", "blocklists", me.blocklist_offers)
-	entry("Account", "account", 0)
+-- The entries, before builtin's: a count of what waits on each
+accounts.server_menu = function(add)
+	add(nil, "Overview", "overview", overview_page, me.unseen_events)
+	add("Mine", "Servers", "servers", servers_page)
+	add("Mine", "Fleets", "fleets", function() fleets_page(me) end)
+	add("Mine", "Blocklists", "blocklists", function() blocklists_page(me) end,
+			me.blocklist_offers)
 	if me.moderator then
-		header("Moderation")
-		entry("Queue", "queue", me.queue)
-		entry("Listings", "listings", 0)
-		entry("Appeals", "appeals", me.open_appeals)
-		entry("Audit log", "audit", 0)
+		add("Moderation", "Queue", "queue", queue_page, me.queue)
+		add("Moderation", "Listings", "listings",
+				function() listings_page("") end)
+		add("Moderation", "Appeals", "appeals", appeals_page, me.open_appeals)
+		add("Moderation", "Audit log", "audit", audit_page)
 	end
 	if me.admin then
-		header("Admin")
-		entry("Settings", "settings", 0)
-		entry("Accounts", "accounts", 0)
+		add("Admin", "Settings", "settings", settings_page)
 	end
-	-- [STARPORT_COPY_IDS]: the Starport server's version, the one an
-	-- operator asks about
-	text(sidebar, "Buildat v" .. (me.version == nil and "?" or
-			tostring(me.version)), GREY)
 end
 
 -- "me" asked again, the sidebar drawn with it, and `draw` after
 local function refresh(draw)
 	req("me", {}, function(r)
 		me = r
-		if not frame then
-			build_frame()
-		end
-		draw_sidebar()
-		if draw then
-			draw()
+		-- [STARPORT_COPY_IDS]: the Starport server's version, the one an
+		-- operator asks about
+		accounts.server_footer = "Buildat v" .. (me.version == nil and "?" or
+				tostring(me.version))
+		if not accounts.frame then
+			accounts.server_window("overview")
+		else
+			accounts.server_sidebar()
+			if draw then
+				draw()
+			end
 		end
 	end)
 end
 
 -- The page open drawn again, with "me" asked again first
 home = function()
-	refresh(pages[current])
+	local key = accounts.server_current()
+	refresh(function() accounts.server_show(key) end)
 end
 
 overview_page = function()
@@ -461,9 +365,7 @@ overview_page = function()
 		local waiting = {}
 		local function wait(t, key, open_it)
 			waiting[#waiting + 1] = {t, open_it or function()
-				current = key
-				draw_sidebar()
-				pages[key]()
+				accounts.server_show(key)
 			end}
 		end
 		for _, st in ipairs(me.statements or {}) do
@@ -517,7 +419,7 @@ overview_page = function()
 		end
 		if (tonumber(me.unseen_events) or 0) > 0 then
 			me.unseen_events = 0
-			draw_sidebar()
+			accounts.server_sidebar()
 		end
 	end)
 end
@@ -565,10 +467,14 @@ servers_page = function()
 	end
 end
 
--- The account: the contact e-mail ([STARPORT] 2a), the password and
--- two-step login (builtin/accounts' pages, drawn in this window)
-account_page = function()
-	local w = open("Account", account_page)
+-- The contact e-mail ([STARPORT] 2a), on builtin's Account page (the
+-- password, two-step login, logging out)
+accounts.account_extra = function(w)
+	redraw, page_back = home, nil
+	if message then
+		text(w, message, YELLOW)
+		message = nil
+	end
 	if s(me.email) ~= "" then
 		text(w, "Contact e-mail (not shown to users): " .. me.email, GREY)
 	end
@@ -590,15 +496,6 @@ account_page = function()
 			end)
 		end)
 	end
-	local r = row(w)
-	button(r, "Change password...", function()
-		accounts.password_page(account_page)
-	end)
-	-- [STARPORT] 10a: recommended to whoever moderates
-	button(r, "Two-step login...", function()
-		accounts.totp_page(home)
-	end)
-	button(r, "Log out", accounts.logout)
 end
 
 -- An operator's fleets ([STARPORT] 2b): a server joins one by the line
@@ -861,7 +758,7 @@ listings_page = function(search)
 		-- simplified: the characters are for the default font's average
 		-- width (7 px); a long run of wide letters can still overflow
 		-- Inside the page's margins and clear of the scroll bar
-		local width = page_width - 40
+		local width = w.width - 40
 		local cols = {{"Name", 0.30}, {"Address", 0.27}, {"Kind", 0.12},
 			{"St", 0.05}, {"Last announce", 0.26}}
 		local function line(parent, values, color)
@@ -1024,44 +921,19 @@ accounts.on_joined = function()
 			end
 		end
 	end
-	-- builtin/accounts' pages (the password, two-step login, Accounts)
-	-- in this window
-	accounts.page_parent = function()
-		return page_element()
-	end
-	refresh(overview_page)
+	refresh()
 end
 
-pages = {
-	overview = overview_page,
-	servers = servers_page,
-	fleets = function() fleets_page(me) end,
-	blocklists = function() blocklists_page(me) end,
-	account = account_page,
-	queue = queue_page,
-	listings = function() listings_page("") end,
-	appeals = appeals_page,
-	audit = audit_page,
-	settings = settings_page,
-	accounts = function() accounts.users_page(home) end,
-}
-
--- [ESC_ACCOUNT]: Escape is Back -- an accounts page's, a page's inside a
--- page, the sidebar's on a narrow screen -- and at the top builtin's My
--- account, in this window (user, 2026-10-07)
+-- [ESC_ACCOUNT]: Escape is Back -- a page's, a page's inside a page, the
+-- sidebar's on a narrow screen -- and at the top builtin's Account
+-- (user, 2026-10-07)
 magic.SubscribeToEvent("KeyDown", function(_, d)
-	if d:GetInt("Key") ~= magic.KEY_ESCAPE or not frame or
-			not frame.visible then
+	if d:GetInt("Key") ~= magic.KEY_ESCAPE or not accounts.frame or
+			not accounts.frame.visible then
 		return
 	end
-	if accounts.page then
-		accounts.back()
-	elseif page_back then
-		page_back()
-	elseif narrow and view.visible then
-		show_sidebar()
-	else
-		accounts.show_account(redraw)
+	if not accounts.back() then
+		accounts.server_show("account")
 	end
 end)
 

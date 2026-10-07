@@ -7618,7 +7618,8 @@ end
 local function over_ui()
 	local s = magic.ui.scale
 	return panel.over({toolbar, props, palette_win, pause_win, picker_win,
-			place.win, S.touch_bar, doc.accounts.page, panel.popup}, S.mx / s,
+			place.win, S.touch_bar, doc.accounts.page, doc.accounts.frame,
+			panel.popup}, S.mx / s,
 			S.my / s)
 end
 
@@ -8874,7 +8875,7 @@ do
 		local sc = magic.ui.scale
 		local on_ui = panel.over({toolbar, props, palette_win, pause_win,
 				picker_win, place.win, S.touch_bar, doc.accounts.page,
-				panel.popup},
+				doc.accounts.frame, panel.popup},
 				x / sc, y / sc)
 		S.fingers[id] = {x = x, y = y, x0 = x, y0 = y, t0 = buildat.get_time_us(),
 				ui = on_ui}

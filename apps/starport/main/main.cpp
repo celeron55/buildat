@@ -629,11 +629,6 @@ static json::Value default_settings()
 	// [WEB_ID_TRUST]: web pages besides a listed server's own that
 	// /authorize sends a token to, as origins ("https://play.example.org")
 	s.set("web_clients", json::array());
-	// How the codes go: url smtp://host:587 or smtps://host:465
-	json::Value smtp = json::object();
-	for(const char *k : {"url", "from", "user", "password"})
-		smtp.set(k, "");
-	s.set("smtp", smtp);
 	s.set("moderators", json::array());
 	s.set("trusted_flaggers", json::array());
 	// [STARPORT_RECOMMENDS]: the Hearth a client's "Discuss" joins, and
@@ -823,6 +818,24 @@ struct Module: public interface::Module
 		if(!m_settings.is_object()){
 			m_settings = default_settings();
 			put("settings", "settings", m_settings);
+		}
+		// [SERVER_ADMIN_PAGE]: the mail server is the server's now, set on
+		// the Server window's Health page; this Starport's own, from
+		// before, goes there once
+		const json::Value old_smtp = m_settings.get("smtp");
+		if(old_smtp.is_object()){
+			bool taken = false;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				taken = a->offer_smtp(jstr(old_smtp, "url"),
+						jstr(old_smtp, "from"), jstr(old_smtp, "user"),
+						jstr(old_smtp, "password"));
+			});
+			if(taken){
+				json::Value next = m_settings.deepcopy();
+				next.del_key("smtp");
+				m_settings = next;
+				put("settings", "settings", m_settings);
+			}
 		}
 		network::access(m_server, [&](network::Interface *iface){
 			iface->claim_http_path("/authorize");
@@ -3152,13 +3165,13 @@ struct Module: public interface::Module
 			put("operators", name, o);
 			return json::Value("set");
 		}
-		const json::Value &smtp = setting("smtp");
-		if(jstr(smtp, "url").empty() || jstr(smtp, "from").empty())
-			throw Exception("this Starport cannot send mail: its admin sets "
-					"smtp, or turns email_confirmation off");
 		if(!interface::mail_supported())
 			throw Exception("this Starport's libcurl cannot send mail (a "
 					"minimal build): its admin installs a full one, or turns "
+					"email_confirmation off");
+		if(!can_mail())
+			throw Exception("this Starport cannot send mail: its admin sets "
+					"the mail server (Admin, Health), or turns "
 					"email_confirmation off");
 		if(!rate_ok("mail", name, 3, 3600))
 			throw Exception("three codes an hour; try later");
@@ -3178,57 +3191,34 @@ struct Module: public interface::Module
 		return json::Value("sent");
 	}
 
-	// Whether mail can go: the setting's server, and a libcurl that has SMTP
+	// Whether mail can go: the server's mail server ([SERVER_ADMIN_PAGE]),
+	// and a libcurl that has SMTP
 	bool can_mail()
 	{
-		const json::Value &smtp = setting("smtp");
-		return !jstr(smtp, "url").empty() && !jstr(smtp, "from").empty() &&
-				interface::mail_supported();
+		bool ok = false;
+		accounts::access(m_server, [&](accounts::Interface *a){
+			ok = a->can_mail();
+		});
+		return ok;
 	}
 
-	// A mail to an account's address, on a thread of its own holding
-	// copies only: the mail server may be slow, and this module may be
-	// gone before it answers. `to` is an address set_email let through:
-	// nothing in it ends a header line
+	// A mail to an account's address, by builtin/accounts on a thread of
+	// its own: a failure comes back holding copies only, as this module
+	// may be gone before the mail server answers. `to` is an address
+	// set_email let through: nothing in it ends a header line
 	void mail(const ss_ &account, const ss_ &to, const ss_ &subject,
 			const ss_ &text)
 	{
-		const json::Value &smtp = setting("smtp");
-		char date[64];
-		const time_t t = time(nullptr);
-		struct tm tm;
-		gmtime_r(&t, &tm);
-		strftime(date, sizeof date, "%a, %d %b %Y %H:%M:%S +0000", &tm);
-		ss_ body;
-		for(char c : text){
-			if(c == '\n')
-				body += "\r\n";
-			else if(c != '\r')
-				body += c;
-		}
-		ss_ subj;
-		for(char c : subject)
-			subj += c == '\r' || c == '\n' ? ' ' : c;
-		const ss_ message = ss_("Date: ")+date+"\r\n"
-				"From: "+jstr(smtp, "from")+"\r\n"
-				"To: "+to+"\r\n"
-				"Subject: "+subj+"\r\n"
-				"Content-Type: text/plain; charset=utf-8\r\n"
-				"\r\n"+body;
-		const ss_ url = jstr(smtp, "url"), user = jstr(smtp, "user"),
-				password = jstr(smtp, "password"), from = jstr(smtp, "from");
 		std::shared_ptr<MailFailures> failures = m_mail_failures;
-		std::thread([=](){
-			try {
-				interface::send_mail(url, user, password, from, to, message);
-				log_i(MODULE, "Mailed %s: %s", cs(account), cs(subj));
-			} catch(std::exception &e){
-				log_w(MODULE, "Mail to %s: %s", cs(account), e.what());
+		const ss_ who = account;
+		accounts::access(m_server, [&](accounts::Interface *a){
+			a->mail(to, subject, text, [=](const ss_ &error){
+				if(error.empty())
+					return;
 				std::lock_guard<std::mutex> lock(failures->m);
-				failures->lines.push_back("Mail to "+account+" failed: "+
-						e.what());
-			}
-		}).detach();
+				failures->lines.push_back("Mail to "+who+" failed: "+error);
+			});
+		});
 	}
 
 	json::Value cmd_confirm_email(const ss_ &name, const ss_ &code)

@@ -346,6 +346,7 @@ int main(int argc, char *argv[])
 	if(unconfined){
 		log_w(MODULE, "Unconfined (--unconfined or BUILDAT_UNCONFINED=1): "
 				"the app can reach every file you can");
+		config.set("box", "off (--unconfined)");
 	} else {
 		// Windows: the unboxed process is the box's parent, and is done
 		// when its child is -- whatever the child's code, never running
@@ -361,6 +362,12 @@ int main(int argc, char *argv[])
 					"BUILDAT_UNCONFINED=1.", cs(why));
 			return 1;
 		}
+#ifdef _WIN32
+		if(config.get<ss_>("box").empty())
+			config.set("box", config.get<bool>("boxed") ?
+					"an AppContainer and a job object" :
+					"off (BUILDAT_WINDOWS_BOX=0)");
+#endif
 	}
 
 	int exit_status = 0;

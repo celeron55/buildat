@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <sys/time.h>
 #include <unistd.h>
+#include <sys/statvfs.h>
 
 namespace interface {
 namespace os {
@@ -32,6 +33,14 @@ int64_t memory_bytes()
 	const int n = fscanf(f, "%ld %ld", &size, &resident);
 	fclose(f);
 	return n == 2 ? (int64_t)resident * sysconf(_SC_PAGESIZE) : 0;
+}
+
+int64_t free_bytes(const ss_ &path)
+{
+	struct statvfs st;
+	if(statvfs(path.c_str(), &st) != 0)
+		return -1;
+	return (int64_t)st.f_bavail * (int64_t)st.f_frsize;
 }
 
 ss_ get_current_exe_path()

@@ -322,6 +322,45 @@ static void remember_line(const char *fmt, va_list va_args)
 		watch_seen = true;
 }
 
+static const size_t PROBLEMS_MAX = 100;
+static std::deque<std::string> problems;
+
+static void remember_problem(int level, const char *sys, const char *fmt,
+		va_list va_args)
+{
+	char head[64], text[600];
+	const time_t now = time(nullptr);
+	struct tm t;
+#ifdef _WIN32
+	gmtime_s(&t, &now);
+#else
+	gmtime_r(&now, &t);
+#endif
+	strftime(head, sizeof head, "%Y-%m-%d %H:%M:%S", &t);
+	va_list copy;
+	va_copy(copy, va_args);
+	vsnprintf(text, sizeof text, fmt, copy);
+	va_end(copy);
+	problems.push_back(std::string(head)+(level <= CORE_ERROR ? " E " : " W ")+
+			sys+": "+text);
+	if(problems.size() > PROBLEMS_MAX)
+		problems.pop_front();
+}
+
+size_t log_problems(char *buf, size_t size)
+{
+	interface::MutexScope ms(log_mutex);
+	std::string all;
+	for(const std::string &line : problems)
+		all += line+"\n";
+	if(size > 0){
+		const size_t n = all.size() < size - 1 ? all.size() : size - 1;
+		memcpy(buf, all.data(), n);
+		buf[n] = 0;
+	}
+	return all.size();
+}
+
 void log_watch(const char *text)
 {
 	interface::MutexScope ms(log_mutex);
@@ -368,6 +407,11 @@ void log_(int level, const char *sys, const char *fmt, ...)
 	va_start(va_args, fmt);
 	remember_line(fmt, va_args);
 	va_end(va_args);
+	if(level <= CORE_WARNING){
+		va_start(va_args, fmt);
+		remember_problem(level, sys, fmt, va_args);
+		va_end(va_args);
+	}
 }
 
 void log_no_nl(int level, const char *sys, const char *fmt, ...)

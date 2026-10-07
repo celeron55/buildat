@@ -5,6 +5,7 @@
 #include "storage/api.h"
 #include "starport_announce/api.h"
 #include "core/log.h"
+#include "core/json.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/server_config.h"
@@ -12,6 +13,8 @@
 #include "interface/sha256.h"
 #include "interface/sha1.h"
 #include "interface/os.h"
+#include "interface/http.h"
+#include "interface/fs.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
 #include <cereal/types/vector.hpp>
@@ -20,6 +23,13 @@
 #include <set>
 #include <sstream>
 #include <map>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <ctime>
+#include <cstdio>
+#include <cstring>
+#include <cerrno>
 #define MODULE "accounts"
 
 using interface::Event;
@@ -277,9 +287,12 @@ struct Hello
 	uint8_t open_registration = 0;
 	// [STARPORT] 10c: a Starport ID logs in here
 	uint8_t starport = 0;
+	// [SERVER_ADMIN_PAGE]: the server has starport_announce, so an admin's
+	// Server window has its Starport panels (never on a Starport)
+	uint8_t announce = 0;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(local, setup, open_registration, starport);
+		archive(local, setup, open_registration, starport, announce);
 	}
 };
 
@@ -415,6 +428,11 @@ struct Module: public interface::Module, public Interface
 	std::map<PeerId, Peer> m_peers;
 	std::map<ss_, Failures> m_name_failures;
 	std::map<ss_, Failures> m_address_failures;
+	// [SERVER_ADMIN_PAGE]: test mails' answers, from their threads, which
+	// may outlive the module; sent to the admin who asked on a tick
+	struct MailResults { std::mutex m; std::vector<std::pair<PeerId, ss_>> r; };
+	std::shared_ptr<MailResults> m_mail_results =
+			std::make_shared<MailResults>();
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -477,6 +495,7 @@ struct Module: public interface::Module, public Interface
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
+		m_server->sub_event(this, Event::t("core:tick"));
 		for(const char *name : {"accounts:owner_token",
 				"accounts:get_hello", "accounts:login",
 				"accounts:admin", "accounts:passwd", "accounts:logout",
@@ -488,6 +507,7 @@ struct Module: public interface::Module, public Interface
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_VOIDN("core:start", on_start)
+		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
 		EVENT_TYPEN("network:client_connected", on_client_connected,
 				network::NewClient)
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
@@ -929,6 +949,7 @@ struct Module: public interface::Module, public Interface
 		starport_announce::access(m_server,
 				[&](starport_announce::Interface *s){
 			h.starport = s->accepts_ids() ? 1 : 0;
+			h.announce = 1;
 		});
 		send(peer, "accounts:hello", pack(h));
 	}
@@ -1381,6 +1402,22 @@ struct Module: public interface::Module, public Interface
 					r.cmd == "approve" ? "let in" : "turned away");
 			result(r.cmd == "approve" ? r.name+" may join" :
 					r.name+" was turned away");
+		} else if(r.cmd == "health"){
+			// [SERVER_ADMIN_PAGE]: on=1 runs the box check too
+			return send(packet.sender, "accounts:health",
+					health_json(r.on).stringify());
+		} else if(r.cmd == "smtp"){
+			return result(set_smtp(r.arg, by));
+		} else if(r.cmd == "test_mail"){
+			return result(test_mail(packet.sender, r.arg, by));
+		} else if(r.cmd == "announce_now"){
+			ss_ why = "This server has no Starport module";
+			starport_announce::access(m_server,
+					[&](starport_announce::Interface *s){
+				s->announce_soon();
+				why = "Announcing to the Starports now";
+			});
+			return result(why);
 		} else if(r.cmd == "setting"){
 			if(r.name != "open_registration")
 				return result("No such setting");
@@ -1635,6 +1672,237 @@ struct Module: public interface::Module, public Interface
 	bool registration_open()
 	{
 		return m_access.open_registration != 0;
+	}
+
+	// [SERVER_ADMIN_PAGE] The server's mail and the admin's health page
+
+	json::Value smtp()
+	{
+		ss_ data;
+		json::json_error_t err;
+		json::Value v = m_store && m_store->get("smtp", data) ?
+				json::load_string(data.c_str(), &err) : json::Value();
+		return v.is_object() ? v : json::object();
+	}
+
+	static ss_ jstr(const json::Value &o, const char *k)
+	{
+		const json::Value &v = o.get(k);
+		return v.is_string() ? v.as_string() : "";
+	}
+
+	// One address, nothing in it that ends a header line or lists another
+	static bool mail_address(const ss_ &a)
+	{
+		const size_t at = a.find('@');
+		return a.size() <= 200 && at != ss_::npos && at != 0 &&
+				at == a.rfind('@') && at + 1 != a.size() &&
+				a.find_first_of(" \t\r\n<>,;\"()") == ss_::npos;
+	}
+
+	bool can_mail()
+	{
+		const json::Value v = smtp();
+		return !jstr(v, "url").empty() && !jstr(v, "from").empty() &&
+				interface::mail_supported();
+	}
+
+	void mail(const ss_ &to, const ss_ &subject, const ss_ &text,
+			std::function<void(const ss_ &error)> done)
+	{
+		const json::Value v = smtp();
+		const ss_ url = jstr(v, "url"), user = jstr(v, "user"),
+				password = jstr(v, "password"), from = jstr(v, "from");
+		if(url.empty() || from.empty()){
+			if(done)
+				done("this server has no mail server set (the Server "
+						"window's Health page)");
+			return;
+		}
+		char date[64];
+		const time_t t = time(nullptr);
+		struct tm tm;
+#ifdef _WIN32
+		gmtime_s(&tm, &t);
+#else
+		gmtime_r(&t, &tm);
+#endif
+		// RFC 5322's names: strftime's %a and %b are the locale's
+		static const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu",
+				"Fri", "Sat"};
+		static const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May",
+				"Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+		snprintf(date, sizeof date, "%s, %02d %s %04d %02d:%02d:%02d +0000",
+				days[tm.tm_wday], tm.tm_mday, months[tm.tm_mon],
+				tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec);
+		ss_ body, subj;
+		for(char c : text){
+			if(c == '\n')
+				body += "\r\n";
+			else if(c != '\r')
+				body += c;
+		}
+		for(char c : subject)
+			subj += c == '\r' || c == '\n' ? ' ' : c;
+		const ss_ message = ss_("Date: ")+date+"\r\n"
+				"From: "+from+"\r\n"
+				"To: "+to+"\r\n"
+				"Subject: "+subj+"\r\n"
+				"Content-Type: text/plain; charset=utf-8\r\n"
+				"\r\n"+body;
+		std::thread([=](){
+			ss_ error;
+			try {
+				interface::send_mail(url, user, password, from, to, message);
+				log_i(MODULE, "Mailed %s: %s", cs(to), cs(subj));
+			} catch(std::exception &e){
+				error = e.what();
+				log_w(MODULE, "Mail to %s: %s", cs(to), e.what());
+			}
+			if(done)
+				done(error);
+		}).detach();
+	}
+
+	bool offer_smtp(const ss_ &url, const ss_ &from, const ss_ &user,
+			const ss_ &password)
+	{
+		if(!m_store)
+			return false;
+		if(url.empty() || !jstr(smtp(), "url").empty())
+			return true;
+		json::Value v = json::object();
+		v.set("url", url);
+		v.set("from", from);
+		v.set("user", user);
+		v.set("password", password);
+		m_store->set("smtp", v.stringify());
+		log_i(MODULE, "The mail server %s taken over as the server's",
+				cs(url));
+		return true;
+	}
+
+	// arg: {"url", "from", "user", "password"}; an empty password keeps
+	// the one set, so that the page never has it
+	ss_ set_smtp(const ss_ &arg, const ss_ &by)
+	{
+		json::json_error_t err;
+		const json::Value in = json::load_string(arg.c_str(), &err);
+		if(!in.is_object())
+			return "Not a setting";
+		json::Value v = smtp();
+		const ss_ url = jstr(in, "url"), from = jstr(in, "from");
+		if(!url.empty() && url.compare(0, 7, "smtp://") != 0 &&
+				url.compare(0, 8, "smtps://") != 0)
+			return "The server is smtp://host:587 or smtps://host:465";
+		if(!from.empty() && !mail_address(from))
+			return "The sender is one address";
+		v.set("url", url);
+		v.set("from", from);
+		v.set("user", jstr(in, "user"));
+		if(!jstr(in, "password").empty() || url.empty())
+			v.set("password", url.empty() ? "" : jstr(in, "password"));
+		m_store->set("smtp", v.stringify());
+		log_i(MODULE, "%s set the mail server to %s", cs(by),
+				url.empty() ? "none" : cs(url));
+		return url.empty() ? "No mail server" : "The mail server was saved";
+	}
+
+	ss_ test_mail(PeerId peer, const ss_ &to, const ss_ &by)
+	{
+		if(!mail_address(to))
+			return "Not an e-mail address";
+		if(!interface::mail_supported())
+			return "This server's libcurl cannot send mail (a minimal "
+					"build): install a full one";
+		std::shared_ptr<MailResults> results = m_mail_results;
+		mail(to, m_server->get_app_id()+": a test mail",
+				"A test mail from the server, sent by its admin "+by+".\n",
+				[=](const ss_ &error){
+			std::lock_guard<std::mutex> lock(results->m);
+			results->r.push_back(std::make_pair(peer, error.empty() ?
+					"Sent: the mail server took it for "+to :
+					"Not sent: "+error));
+		});
+		return "Sending to "+to+"...";
+	}
+
+	void on_tick(const interface::TickEvent &)
+	{
+		std::vector<std::pair<PeerId, ss_>> r;
+		{
+			std::lock_guard<std::mutex> lock(m_mail_results->m);
+			r.swap(m_mail_results->r);
+		}
+		for(auto &x : r){
+			json::Value v = json::object();
+			v.set("mail", x.second);
+			if(m_peers.count(x.first))
+				send(x.first, "accounts:health", v.stringify());
+		}
+	}
+
+	// A write that must work, in the app's cache, and one that must not,
+	// at the top of the user path: the box's half
+	json::Value box_check()
+	{
+		json::Value v = json::object();
+		const interface::ServerConfig &c = m_server->get_config();
+		auto try_write = [](const ss_ &path) -> ss_ {
+			FILE *f = fopen(path.c_str(), "wb");
+			if(!f)
+				return strerror(errno);
+			const bool ok = fputs("box check\n", f) >= 0;
+			fclose(f);
+			remove(path.c_str());
+			return ok ? "" : "the write failed";
+		};
+		const ss_ in = c.get<ss_>("cache_path")+"/box_check.txt";
+		const ss_ out = c.get<ss_>("user_path")+"/box_check.txt";
+		const ss_ in_err = try_write(in), out_err = try_write(out);
+		v.set("inside_ok", json::Value(in_err.empty()));
+		v.set("inside", in_err.empty() ? "a file written in the app's cache" :
+				"no file written in the app's cache: "+in_err);
+		v.set("outside_refused", json::Value(!out_err.empty()));
+		v.set("outside", out_err.empty() ? "a file written at the top of the "
+				"user path: the box is off" : "a file at the top of the user "
+				"path refused ("+out_err+")");
+		return v;
+	}
+
+	json::Value health_json(bool with_box)
+	{
+		json::Value v = json::object();
+		network::access(m_server, [&](network::Interface *inetwork){
+			json::json_error_t err;
+			v.set("running", json::load_string(
+					inetwork->health_json().c_str(), &err));
+		});
+		const interface::ServerConfig &c = m_server->get_config();
+		const ss_ app_user = c.get<ss_>("user_path")+"/apps/"+
+				m_server->get_app_id();
+		v.set("disk_path", app_user);
+		v.set("disk_used", (int64_t)interface::fs::directory_tree_size(app_user));
+		v.set("disk_free", interface::os::free_bytes(app_user));
+		v.set("box", c.get<ss_>("box"));
+		if(with_box)
+			v.set("box_check", box_check());
+		char buf[1];
+		const size_t n = log_problems(buf, 0);
+		ss_ problems(n + 1, '\0');
+		log_problems(&problems[0], problems.size());
+		problems.resize(n);
+		v.set("log", problems);
+		v.set("approvals", (int64_t)m_store->list("approval/").size());
+		const json::Value m = smtp();
+		json::Value sm = json::object();
+		sm.set("url", jstr(m, "url"));
+		sm.set("from", jstr(m, "from"));
+		sm.set("user", jstr(m, "user"));
+		sm.set("password_set", json::Value(!jstr(m, "password").empty()));
+		sm.set("supported", json::Value(interface::mail_supported()));
+		v.set("smtp", sm);
+		return v;
 	}
 
 	size_t linked_count(const ss_ &host)

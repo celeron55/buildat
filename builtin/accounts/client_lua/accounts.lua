@@ -61,7 +61,8 @@ local TOTP_RESULT = {"object", {"error", "string"}, {"secret", "string"},
 local LOGIN_RESULT = {"object", {"r", {"object", {"error", "string"},
 		{"token", "string"}}}, {"name", "string"}}
 local HELLO = {"object", {"local", "byte"}, {"setup", "byte"},
-		{"open_registration", "byte"}, {"starport", "byte"}}
+		{"open_registration", "byte"}, {"starport", "byte"},
+		{"announce", "byte"}}
 local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
 		{"arg", "string"}, {"on", "byte"}}
 local USERS = {"object",
@@ -83,6 +84,13 @@ local window = nil
 local page_kind, page_back, users_page, passwd_page = nil, nil, nil, nil
 local account_page
 local ban_page
+-- The Server window ([SERVER_ADMIN_PAGE]), below; its state and the
+-- functions the pages above it call
+local sw = {}
+local draw_sidebar, server_element, server_close
+local health_page, health_capture
+-- The Starport panel open: "starports", "listing" or "ids"
+local starport_page, sp_panel
 -- [ACCOUNT_BUTTON]: the corner button, whether an app turned it off, and the
 -- shower (forward-declared: the login handler above its definition calls it)
 local account_button, account_button_off = nil, false
@@ -433,6 +441,9 @@ end)
 
 buildat.sub_packet("accounts:hello", function(data)
 	M.hello = cereal.binary_input(data, HELLO)
+	if draw_sidebar then
+		draw_sidebar()
+	end
 	log:info("hello: Starport IDs " ..
 			(M.hello.starport == 1 and "taken" or "not taken"))
 	if M.hello.starport == 1 then
@@ -571,6 +582,18 @@ buildat.sub_packet("accounts:users", function(data)
 	if page_kind == "account" then
 		account_page(page_back)
 	end
+	-- The list says admin: the Server window's Admin entries, and the
+	-- page it was opened at if that was one
+	if sw.frame then
+		local wanted = sw.wanted
+		sw.wanted = nil
+		if not (wanted and M.server_show(wanted)) then
+			draw_sidebar()
+		end
+	end
+	if page_kind == "starport" and sp_panel == "ids" then
+		starport_page(page_back, "ids")
+	end
 	if M.on_users then
 		M.on_users()
 	end
@@ -581,6 +604,9 @@ buildat.sub_packet("accounts:admin_result", function(data)
 	log:info("admin result: " .. M.message)
 	if page_kind == "users" then
 		users_page(page_back)
+	end
+	if page_kind == "health" then
+		health_page(page_back)
 	end
 	if M.on_admin_result then
 		M.on_admin_result(M.message)
@@ -720,8 +746,12 @@ local chat_list = nil
 -- the list's scroll bar
 local chat_width = 100
 
-function M.close_page()
+local function drop_page()
 	close_popup()
+	-- What was typed on the Health page, kept over its redraws
+	if page_kind == "health" then
+		health_capture()
+	end
 	if M.page then
 		-- An app may have removed the element already (its own page_element
 		-- replaced it); a raw handle does not keep it alive, so Remove on the
@@ -733,14 +763,24 @@ function M.close_page()
 	chat_list = nil
 end
 
+-- The page open closed; and the Server window, unless it is the app's own
+-- (a game's "My account..." opened it)
+function M.close_page()
+	drop_page()
+	if sw.frame and sw.on_close then
+		server_close(true)
+	end
+end
+
 -- `help`, a function, puts a Help button at the title's right
 local function open_page(kind, title, back, width, help)
-	M.close_page()
+	drop_page()
 	page_kind, page_back = kind, back
-	-- An app with a window of its own for its pages (Starport's) sets
-	-- M.page_parent(width) to give what a page is drawn into instead
-	M.page = M.page_parent and M.page_parent(width or 560) or
-			page_window(width or 560)
+	-- In the Server window while it is up; else an app with a window of
+	-- its own for its pages sets M.page_parent(width) to give what a page
+	-- is drawn into
+	M.page = sw.frame and server_element() or M.page_parent and
+			M.page_parent(width or 560) or page_window(width or 560)
 	if help then
 		local r = M.page:CreateChild("UIElement")
 		r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
@@ -756,19 +796,20 @@ local function open_page(kind, title, back, width, help)
 	return M.page
 end
 
+-- Nothing at the top of a Server window that is the app's own
 local function go_back()
-	M.close_page()
-	M.message = nil
-	if page_back then
-		page_back()
+	local back = page_back
+	if back then
+		drop_page()
+		M.message = nil
+		back()
 	end
 end
--- Back from the page open, as its Back button: for a game's Esc
-M.back = function() go_back() end
--- [ESC_ACCOUNT]: My account, as the top right Account button opens it;
--- `back` is what its Back draws again (nothing: it closes)
+-- [ESC_ACCOUNT]: My account, in the Server window, as the top right
+-- Account button opens it; `back` is what its Back draws again (nothing:
+-- it closes)
 M.show_account = function(back)
-	account_page(back or function() end)
+	M.server_window("account", back or function() end)
 end
 
 -- A user's own password; `message` is what the last change came to
@@ -897,12 +938,9 @@ account_page = function(back, message)
 	if message then
 		page_text(w, message, WARN)
 	end
-	-- [ACCOUNT_BUTTON]: ask for the users once to learn admin-ness. The
-	-- server answers only an admin (on_admin drops the rest), so M.users
-	-- arriving means admin; the accounts:users handler redraws this page.
-	if not M.users and not M.list_asked then
-		M.list_asked = true
-		M.admin("list")
+	-- An app's own rows (Starport's contact e-mail)
+	if M.account_extra then
+		M.account_extra(w)
 	end
 	local here = function() account_page(back) end
 	button(w, "Change password...", function() passwd_page(here) end)
@@ -925,16 +963,16 @@ account_page = function(back, message)
 			end)
 		end)
 	end
-	-- [ACCOUNT_BUTTON]: an admin goes on to the server's accounts from here
-	if M.users then
-		button(w, "Accounts...", function()
-			users_page(function() account_page(back) end)
-		end)
-	end
 	button(w, "Log out", M.logout)
-	button(w, "Back", go_back)
+	if back then
+		button(w, "Back", go_back)
+	end
 end
-M.account_page = function(back) account_page(back) end
+-- A game's "My account...": the Server window at it; `back` is what
+-- closing the window goes back to
+M.account_page = function(back)
+	M.server_window("account", back or function() end)
+end
 
 buildat.sub_packet("accounts:totp_result", function(data)
 	local r = cereal.binary_input(data, TOTP_RESULT)
@@ -1081,7 +1119,9 @@ users_page = function(back)
 	local u = M.users
 	if not u then
 		page_text(w, "Waiting for the server...")
-		button(w, "Back", go_back)
+		if back then
+			button(w, "Back", go_back)
+		end
 		return
 	end
 	-- [STARPORT] 10g: admins that all log in by a Starport ID only are
@@ -1199,21 +1239,9 @@ users_page = function(back)
 			"Local accounts: invite only", function()
 		M.admin("setting", "open_registration", "", a.open_registration ~= 1)
 	end)
-	-- [STARPORT] 10g: off, anyone, approved only
-	local ids = u.starport_ids or "off"
-	local next_ids = {off = "anyone", anyone = "approved", approved = "off"}
-	button(w, ({off = "Starport IDs: off",
-		anyone = "Starport IDs: anyone may join",
-		approved = "Starport IDs: approved only"})[ids] or ids, function()
-		-- Turned on: where the admin reached the server goes along, the
-		-- public address of a starport.json that names no Starport yet
-		local mode = next_ids[ids] or "off"
-		local addr = ids == "off" and admin_public_address()
-		M.admin("setting", "starport_ids", addr and mode .. " " .. addr or mode)
-	end)
-	local r2 = row(w)
-	button(r2, "Starport...", function() M.starport_page(back) end)
-	button(r2, "Back", go_back)
+	if back then
+		button(w, "Back", go_back)
+	end
 end
 --
 -- **The server's Starport page** ([STARPORT] 10g): starport.json, which
@@ -1255,7 +1283,7 @@ assert(encode({a = {1, "x\n"}}) == '{"a":[1,"x\\n"]}')
 assert(encode({starports = {}}) == '{"starports":[]}')
 
 local starport_info = nil
-local starport_page, starport_help
+local starport_help
 buildat.sub_packet("starport:config", function(data)
 	starport_info = buildat.parse_json(data)
 	-- What the server has now is what is edited
@@ -1263,7 +1291,9 @@ buildat.sub_packet("starport:config", function(data)
 	-- Starport on or off changes whether IDs are taken: My account's link
 	buildat.send_packet("accounts:get_hello", "")
 	if page_kind == "starport" then
-		starport_page(page_back)
+		starport_page(page_back, sp_panel)
+	elseif page_kind == "health" then
+		health_page(page_back)
 	end
 end)
 
@@ -1343,9 +1373,9 @@ local STARPORT_HELP = {
 	"# What this page is",
 	"Starports are directories of public servers: players find servers in "..
 	"their lists, and log in with a Starport ID where a server allows it. "..
-	"This page decides whether this server is listed, on which Starports, "..
-	"and what the listing says. Who may join by a Starport ID (off, anyone, "..
-	"approved only) is set on the Accounts page.",
+	"These panels decide whether this server is listed, on which Starports, "..
+	"and what the listing says (Starports, The listing), and who may join by "..
+	"a Starport ID: off, anyone, approved only (ID logins).",
 	"Everything here is kept in this app's starport.json beside its saves. "..
 	"The server reads that file again within seconds of a change, so it can "..
 	"also be edited by hand or by a script, and nothing has to restart.",
@@ -1447,9 +1477,14 @@ local STARPORT_HELP = {
 
 starport_help = function()
 	close_popup()
+	if sw.help then
+		sw.help:Remove()
+	end
 	local w = page_window(720)
 	-- Over the Starport page (100) and its dropdowns (200)
 	w.priority = 300
+	-- A click on it is not one off the Server window
+	sw.help = w
 	page_text(w, "Starport: help")
 	local list = w:CreateChild("ListView")
 	list:SetStyleAuto()
@@ -1476,18 +1511,58 @@ starport_help = function()
 		end
 		list:AddItem(x)
 	end
-	button(w, "Close", function() w:Remove() end)
+	button(w, "Close", function()
+		w:Remove()
+		sw.help = nil
+	end)
 end
 
-starport_page = function(back, confirm_remove)
-	-- Wide: the listing's choices are many (page_window narrows it on a
-	-- narrow screen)
-	local w = open_page("starport", "Starport", back, 840, starport_help)
+-- **Split in three** ([SERVER_ADMIN_PAGE]; user: one page was long and
+-- confusing): the Starports, the listing, and who logs in by an ID
+local PANELS = {starports = "Starports", listing = "The listing",
+	ids = "ID logins"}
+starport_page = function(back, panel, confirm_remove)
+	sp_panel = panel
+	local w = open_page("starport", "Starport: " .. PANELS[panel], back, 840,
+			starport_help)
+	local function back_row()
+		if back then
+			button(w, "Back", go_back)
+		end
+	end
+	if panel == "ids" then
+		local u = M.users
+		page_text(w, "Whether players log in here by their Starport ID, "..
+				"made on a Starport this server is listed on. The Starports "..
+				"are on the Starports panel.", DIM)
+		if not u then
+			page_text(w, "Waiting for the server...")
+			return back_row()
+		end
+		-- [STARPORT] 10g: off, anyone, approved only
+		local ids = u.starport_ids or "off"
+		local next_ids = {off = "anyone", anyone = "approved", approved = "off"}
+		button(w, ({off = "Starport IDs: off",
+			anyone = "Starport IDs: anyone may join",
+			approved = "Starport IDs: approved only"})[ids] or ids, function()
+			-- Turned on: where the admin reached the server goes along, the
+			-- public address of a starport.json that names no Starport yet
+			local mode = next_ids[ids] or "off"
+			local addr = ids == "off" and admin_public_address()
+			M.admin("setting", "starport_ids", addr and mode .. " " .. addr or
+					mode)
+		end)
+		page_text(w, "Approved only: an ID's first join waits for an admin "..
+				"on the Accounts page.", DIM)
+		if M.message and M.message ~= "" then
+			page_text(w, M.message, WARN)
+		end
+		return back_row()
+	end
 	local info = starport_info
 	if not info then
 		page_text(w, "Waiting for the server...")
-		button(w, "Back", function() users_page(back) end)
-		return
+		return back_row()
 	end
 	local c = info.config or {}
 	if type(c.starports) ~= "table" then
@@ -1501,65 +1576,68 @@ starport_page = function(back, confirm_remove)
 	end
 	page_text(w, "Kept in the app's starport.json; an edit there counts too",
 			DIM)
-	local r = row(w)
-	button(r, c.enabled == false and "Starport: off" or "Starport: on",
-			function()
-		c.enabled = c.enabled == false
-		save()
-	end)
-	button(r, c.unlisted and "Unlisted: yes (IDs, not in the list)" or
-			"Unlisted: no", function()
-		c.unlisted = not c.unlisted
-		save()
-	end)
-	for i, s in ipairs(info.starports or {}) do
-		page_text(w, tostring(s.url) .. ": " .. tostring(s.status ~= "" and
-				s.status or "not announced yet"))
-		-- Read-only fields, not text: the two are copied to the
-		-- Starport's claim form
-		local cr = row(w)
-		for _, f in ipairs({{"Listing id", s.listing}, {"Claim code", s.claim}}) do
-			local l = page_text(cr, f[1])
-			l:SetWordwrap(false)
-			l:SetFixedWidth(100)
-			local e = cr:CreateChild("LineEdit")
-			e:SetStyleAuto()
-			e.minHeight = 26
-			e.editable = false
-			e.textCopyable = true
-			e.textSelectable = true
-			e:SetText(tostring(f[2] or "-"))
-		end
-		page_text(w, tostring(s.linked or 0) .. " accounts linked to its IDs" ..
-				((s.subscribed and #s.subscribed > 0) and "; follows " ..
-				table.concat(s.subscribed, ", ") or ""), DIM)
-		if confirm_remove == s.url then
-			page_text(w, "Remove it? Its listing is withdrawn at once, and "..
-					tostring(s.linked or 0) .. " accounts cannot log in by "..
-					"their IDs while it is gone (an admin can give them "..
-					"passwords).", WARN)
-			local rr = row(w)
-			button(rr, "Remove", function()
-				table.remove(c.starports, i)
-				save()
-			end)
-			button(rr, "Keep it", function() starport_page(back) end)
-		else
-			button(w, "Remove " .. tostring(s.url), function()
-				starport_page(back, s.url)
-			end)
-		end
-	end
-	local add = field(w, "Add a Starport", false, function() end)
-	-- One press of Add while none is named ([STARPORT_DEFAULT_URL])
-	add:SetText(#c.starports == 0 and info.default_starport or "https://")
-	button(w, "Add", function()
-		local url = add:GetText():gsub("/+$", "")
-		if url:match("^https?://[%w%.%-]+[:%d]*$") then
-			table.insert(c.starports, url)
+	if panel == "starports" then
+		local r = row(w)
+		button(r, c.enabled == false and "Starport: off" or "Starport: on",
+				function()
+			c.enabled = c.enabled == false
 			save()
+		end)
+		button(r, c.unlisted and "Unlisted: yes (IDs, not in the list)" or
+				"Unlisted: no", function()
+			c.unlisted = not c.unlisted
+			save()
+		end)
+		for i, s in ipairs(info.starports or {}) do
+			page_text(w, tostring(s.url) .. ": " .. tostring(s.status ~= "" and
+					s.status or "not announced yet"))
+			-- Read-only fields, not text: the two are copied to the
+			-- Starport's claim form
+			local cr = row(w)
+			for _, f in ipairs({{"Listing id", s.listing}, {"Claim code", s.claim}}) do
+				local l = page_text(cr, f[1])
+				l:SetWordwrap(false)
+				l:SetFixedWidth(100)
+				local e = cr:CreateChild("LineEdit")
+				e:SetStyleAuto()
+				e.minHeight = 26
+				e.editable = false
+				e.textCopyable = true
+				e.textSelectable = true
+				e:SetText(tostring(f[2] or "-"))
+			end
+			page_text(w, tostring(s.linked or 0) .. " accounts linked to its IDs" ..
+					((s.subscribed and #s.subscribed > 0) and "; follows " ..
+					table.concat(s.subscribed, ", ") or ""), DIM)
+			if confirm_remove == s.url then
+				page_text(w, "Remove it? Its listing is withdrawn at once, and "..
+						tostring(s.linked or 0) .. " accounts cannot log in by "..
+						"their IDs while it is gone (an admin can give them "..
+						"passwords).", WARN)
+				local rr = row(w)
+				button(rr, "Remove", function()
+					table.remove(c.starports, i)
+					save()
+				end)
+				button(rr, "Keep it", function() starport_page(back, panel) end)
+			else
+				button(w, "Remove " .. tostring(s.url), function()
+					starport_page(back, panel, s.url)
+				end)
+			end
 		end
-	end)
+		local add = field(w, "Add a Starport", false, function() end)
+		-- One press of Add while none is named ([STARPORT_DEFAULT_URL])
+		add:SetText(#c.starports == 0 and info.default_starport or "https://")
+		button(w, "Add", function()
+			local url = add:GetText():gsub("/+$", "")
+			if url:match("^https?://[%w%.%-]+[:%d]*$") then
+				table.insert(c.starports, url)
+				save()
+			end
+		end)
+		return back_row()
+	end
 	-- The listing: what the server says it is ([STARPORT] 3)
 	local function valid(v, choices)
 		for _, x in ipairs(choices) do
@@ -1644,7 +1722,7 @@ starport_page = function(back, confirm_remove)
 		dropdown(dr, f[2], f[3], draft.choice[f[1]], function(v)
 			take_text()
 			draft.choice[f[1]] = v
-			starport_page(back)
+			starport_page(back, panel)
 		end)
 	end
 	for _, f in ipairs(DESCRIPTORS) do
@@ -1652,7 +1730,7 @@ starport_page = function(back, confirm_remove)
 		dropdown(dr, f[2], f[3], draft.desc[f[1]], function(v)
 			take_text()
 			draft.desc[f[1]] = v
-			starport_page(back)
+			starport_page(back, panel)
 		end)
 	end
 	local r3 = row(w)
@@ -1683,20 +1761,544 @@ starport_page = function(back, confirm_remove)
 		end
 		save()
 	end)
-	button(r3, "Back", function()
-		close_popup()
-		users_page(back)
-	end)
+	if back then
+		button(r3, "Back", go_back)
+	end
 end
-M.starport_page = function(back)
+M.starport_page = function(back, panel)
 	starport_info = nil
 	buildat.send_packet("starport:config_get", "")
-	starport_page(back)
+	starport_page(back, panel or "starports")
 end
 
+-- A game's "Accounts...": the Server window at it
 M.users_page = function(back)
 	M.admin("list")
-	users_page(back)
+	M.server_window("accounts", back or function() end)
+end
+
+--
+-- **An admin's Health page** ([SERVER_ADMIN_PAGE]): what keeps a server
+-- working, each a reading or a button with its answer. The server sends
+-- "accounts:health" JSON for M.admin("health"), the box checked when `on`;
+-- a test mail's answer comes later in one of its own. An app adds rows by
+-- M.health_rows(w).
+--
+local health = {}
+-- The fields' text over the page's redraws
+local hp = {draft = {}, edits = {}}
+health_capture = function()
+	for k, e in pairs(hp.edits) do
+		hp.draft[k] = e:GetText()
+	end
+	hp.edits = {}
+end
+buildat.sub_packet("accounts:health", function(data)
+	local v = buildat.parse_json(data)
+	if type(v) ~= "table" then
+		return
+	end
+	for k, x in pairs(v) do
+		health[k] = x
+	end
+	if page_kind == "health" then
+		health_page(page_back)
+	end
+end)
+
+local function bytes(n)
+	n = tonumber(n) or -1
+	if n < 0 then
+		return "?"
+	elseif n >= 1e9 then
+		return string.format("%.1f GB", n / 1e9)
+	end
+	return string.format("%.1f MB", n / 1e6)
+end
+assert(bytes(2.5e9) == "2.5 GB" and bytes(1234567) == "1.2 MB" and
+		bytes(-1) == "?")
+
+local function duration(s)
+	s = math.floor(tonumber(s) or 0)
+	if s >= 86400 then
+		return string.format("%d d %d h", math.floor(s / 86400),
+				math.floor(s % 86400 / 3600))
+	end
+	return string.format("%d h %d min", math.floor(s / 3600),
+			math.floor(s % 3600 / 60))
+end
+assert(duration(90061) == "1 d 1 h" and duration(3720) == "1 h 2 min")
+
+health_page = function(back)
+	local w = open_page("health", "Health", back)
+	local h = health
+	local function head(t)
+		page_text(w, t, WARN)
+	end
+	local r0 = row(w)
+	button(r0, "Refresh", function() M.admin("health") end)
+	if M.message and M.message ~= "" then
+		page_text(r0, M.message, WARN):SetWordwrap(false)
+	end
+	if not h.running then
+		page_text(w, "Waiting for the server...")
+	end
+	-- An app's own first (user: the app's sections first)
+	if M.health_rows then
+		M.health_rows(w)
+	end
+
+	head("Mail")
+	local sm = type(h.smtp) == "table" and h.smtp or {}
+	if sm.supported == false then
+		page_text(w, "This server's libcurl cannot send mail (a minimal "..
+				"build): install a full one.", ERROR)
+	end
+	page_text(w, "The server's mail server, for everything on it that "..
+			"sends mail. smtp://host:587 (STARTTLS) or smtps://host:465.", DIM)
+	local function edit(key, label, value, secret)
+		local e = field(w, label, secret, function() end)
+		e:SetText(hp.draft[key] or value or "")
+		hp.edits[key] = e
+		return e
+	end
+	local url = edit("url", "Server", sm.url)
+	local from = edit("from", "From", sm.from)
+	local user = edit("user", "User", sm.user)
+	local pass = edit("password", "Password", "", true)
+	page_text(w, sm.password_set and "A password is set; leave it empty to "..
+			"keep it." or "No password set.", DIM)
+	button(w, "Save the mail server", function()
+		M.admin("smtp", "", encode({url = url:GetText(), from = from:GetText(),
+				user = user:GetText(), password = pass:GetText()}))
+		hp.draft.password = ""
+	end)
+	local to = edit("to", "Send to", "")
+	button(w, "Send a test mail", function()
+		M.admin("test_mail", "", to:GetText())
+	end)
+	if h.mail then
+		page_text(w, h.mail, h.mail:sub(1, 5) == "Sent:" and nil or WARN)
+	end
+	page_text(w, "Only the mail server's answer is checked here. Whether "..
+			"mail reaches inboxes (SPF, DKIM, DMARC) is for an online mail "..
+			"tester: find one, send its address a test mail from here, and "..
+			"read its report.", DIM)
+
+	head("The box")
+	page_text(w, "Layers: " .. tostring(h.box ~= nil and h.box ~= "" and
+			h.box or "?"))
+	button(w, "Check the box", function() M.admin("health", "", "", true) end)
+	local bc = h.box_check
+	if type(bc) == "table" then
+		page_text(w, (bc.inside_ok and "OK: " or "FAIL: ") ..
+				tostring(bc.inside), not bc.inside_ok and ERROR or nil)
+		page_text(w, (bc.outside_refused and "OK: " or "FAIL: ") ..
+				tostring(bc.outside), not bc.outside_refused and ERROR or nil)
+	end
+
+	if M.hello.announce == 1 then
+		head("Starport listings")
+		local info = starport_info
+		for _, x in ipairs(info and info.starports or {}) do
+			page_text(w, tostring(x.url) .. ": " .. tostring(x.status ~= "" and
+					x.status or "not announced yet"))
+		end
+		if info and #(info.starports or {}) == 0 then
+			page_text(w, "On no Starport (the Starports panel).", DIM)
+		end
+		button(w, "Announce now", function()
+			M.admin("announce_now")
+			-- The answers come in the next seconds
+			buildat.send_packet("starport:config_get", "")
+		end)
+	end
+
+	head("Address")
+	local addr = buildat.server_address and buildat.server_address() or "?"
+	local tls = buildat.connection_encrypted and buildat.connection_encrypted()
+	page_text(w, "Reached at " .. tostring(addr) .. (tls and ", under TLS" or
+			", not encrypted"))
+	page_text(w, "Public address: " .. (admin_public_address() or
+			"none (only an https address that is not this machine's or the "..
+			"LAN's counts)"), DIM)
+
+	head("Disk")
+	page_text(w, tostring(h.disk_path or "?") .. ": " .. bytes(h.disk_used) ..
+			" used, " .. bytes(h.disk_free) .. " free")
+
+	head("Running")
+	local run = type(h.running) == "table" and h.running or {}
+	page_text(w, "Buildat " .. tostring(run.version or "?") .. ", up " ..
+			duration(run.uptime_s) .. ", " .. tostring(run.players or "?") ..
+			" connected, ticks " .. string.format("%.0f ms (at most %.0f ms)",
+			tonumber(run.tick_gap_ms_avg) or 0,
+			tonumber(run.tick_gap_ms_max) or 0) .. ", memory " ..
+			bytes(run.memory_bytes))
+
+	head("Waiting on you")
+	local n = tonumber(h.approvals) or 0
+	if n > 0 then
+		button(w, n .. " Starport ID(s) waiting to be let in", function()
+			M.server_show("accounts")
+		end)
+	else
+		page_text(w, "Nothing.", DIM)
+	end
+
+	head("The log: the last warnings and errors")
+	local list = w:CreateChild("ListView")
+	list:SetStyleAuto()
+	list:SetFixedHeight(math.max(120, math.floor(magic.ui.root.height * 0.3)))
+	-- A tenth less: the wrap measures short (starport_help's)
+	local width = math.max(100, math.floor((w.width - 60) * 0.9))
+	local lines = 0
+	for line in tostring(h.log or ""):gmatch("[^\n]+") do
+		local t = list:CreateChild("Text")
+		t:SetStyleAuto()
+		t:SetWordwrap(true)
+		t:SetFixedWidth(width)
+		t:SetText(line)
+		if line:match("^%S+ %S+ E ") then
+			t:SetColor(ERROR)
+		end
+		list:AddItem(t)
+		lines = lines + 1
+	end
+	if lines == 0 then
+		page_text(w, "None since the start.", DIM)
+	end
+	list.viewPosition = magic.IntVector2(0, 1000000)
+	if back then
+		button(w, "Back", go_back)
+	end
+end
+M.health_page = function(back)
+	M.admin("health")
+	if M.hello.announce == 1 then
+		buildat.send_packet("starport:config_get", "")
+	end
+	health_page(back)
+end
+
+--
+-- **The Server window** ([SERVER_ADMIN_PAGE]; user, 2026-10-07): Starport's
+-- window ([STARPORT_UI]) made builtin's. A sidebar of entries under grey
+-- headers, each with a count of what waits on it; the page beside it,
+-- scrolling inside the window, which keeps its size; under 560 px the
+-- sidebar is a screen of its own ([STARPORT_UI_KEYS] for the keys).
+-- builtin's entries are Mine / Account and an admin's Admin / Accounts,
+-- the Starport panels (a server with starport_announce: never a Starport)
+-- and Health. An app puts its own first:
+--   accounts.server_menu = function(add)
+--       add(header or nil, label, key, draw, count)
+--   end
+-- a header of the same name shared. Opened with on_close (a game's "My
+-- account...") it has Close, its top page's Back closes it, and
+-- M.close_page() closes it too; without, it is the app's own UI.
+-- M.server_open(title, back) is an app's page in it, M.server_show(key)
+-- an entry, M.server_sidebar() the sidebar drawn again, M.frame the
+-- window (for a game's hit tests), M.server_footer a line under the
+-- sidebar.
+--
+M.server_menu = nil
+M.server_footer = nil
+
+local function show_sidebar()
+	drop_page()
+	sw.app_back = nil
+	sw.sidebar.visible = true
+	sw.view.visible = false
+end
+
+-- What Back does at a page's top: the sidebar on a narrow screen; closing
+-- a window a game opened
+local function top_back()
+	if sw.narrow then
+		return show_sidebar
+	end
+	return sw.on_close and function() server_close() end or nil
+end
+
+local function server_entries()
+	local list, by = {}, {}
+	local function add(header, label, key, draw, count)
+		local h = header or ""
+		if not by[h] then
+			by[h] = {header = header, items = {}}
+			list[#list + 1] = by[h]
+		end
+		local items = by[h].items
+		items[#items + 1] = {label = label, key = key, draw = draw,
+			count = count}
+	end
+	if M.server_menu then
+		M.server_menu(add)
+	end
+	add("Mine", "Account", "account", function()
+		account_page(top_back())
+	end)
+	-- The users list arriving says admin (the server answers no one else)
+	if M.users then
+		add("Admin", "Accounts", "accounts", function()
+			M.admin("list")
+			users_page(top_back())
+		end, #(M.users.approvals or {}))
+		if M.hello.announce == 1 then
+			for _, x in ipairs({{"Starports", "starports"},
+					{"Listing", "listing"}, {"ID logins", "ids"}}) do
+				add("Admin", x[1], x[2], function()
+					M.starport_page(top_back(), x[2])
+				end)
+			end
+		end
+		add("Admin", "Health", "health", function()
+			M.health_page(top_back())
+		end)
+	end
+	return list
+end
+
+local function side_button(label, color, on_click)
+	local b = sw.sidebar:CreateChild("Button")
+	b:SetStyleAuto()
+	b:SetFixedHeight(26)
+	local t = b:CreateChild("Text")
+	t:SetStyleAuto()
+	t:SetText(label)
+	t:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+	t.position = magic.IntVector2(8, 0)
+	if color then
+		t:SetColor(color)
+	end
+	magic.SubscribeToEvent(b, "Released", function() on_click() end)
+end
+
+-- simplified: a count is "any waiting", in the highlight colour; per-item
+-- seen times are the upgrade
+draw_sidebar = function()
+	if not sw.frame then
+		return
+	end
+	sw.sidebar:RemoveAllChildren()
+	for _, sec in ipairs(server_entries()) do
+		if sec.header then
+			page_text(sw.sidebar, sec.header, DIM)
+		end
+		for _, e in ipairs(sec.items) do
+			local count = tonumber(e.count) or 0
+			side_button((e.key == sw.current and "> " or "") .. e.label ..
+					(count > 0 and " (" .. count .. ")" or ""),
+					count > 0 and WARN or nil, function()
+				M.server_show(e.key)
+			end)
+		end
+	end
+	if sw.on_close then
+		side_button("Close", nil, function() server_close() end)
+	end
+	if M.server_footer then
+		page_text(sw.sidebar, M.server_footer, DIM)
+	end
+end
+M.server_sidebar = function() draw_sidebar() end
+
+local function build_frame()
+	local f = page_window(880)
+	f:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(8, 8, 8, 8))
+	f:SetFixedHeight(math.floor(magic.ui.root.height * 0.8))
+	local inner = f.width - 16
+	sw.narrow = magic.ui.root.width < 560
+	sw.frame = f
+	M.frame = f
+	sw.sidebar = f:CreateChild("UIElement")
+	sw.sidebar:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
+	sw.sidebar:SetFixedWidth(sw.narrow and inner or 150)
+	sw.view = f:CreateChild("ScrollView")
+	sw.view:SetStyleAuto()
+	sw.view:SetFixedWidth(sw.narrow and inner or inner - 150 - 8)
+	sw.view.scrollBarsAutoVisible = true
+	-- Less the vertical bar and a margin
+	sw.width = sw.view.width - 24
+	-- [STARPORT_UI_KEYS]: Up and Down in the sidebar or the page, Right
+	-- and Left between them
+	local columns = (ui_utils.safe or ui_utils).keyboard_columns
+	if columns then
+		columns(f, sw.sidebar, sw.view)
+	end
+	if sw.narrow then
+		sw.view.visible = false
+	end
+end
+
+-- The page's element in the window's right side, the last one gone
+server_element = function()
+	if sw.page then
+		pcall(function() sw.page:Remove() end)
+	end
+	local p = sw.view:CreateChild("UIElement")
+	-- A wide right margin: Urho3D's wrap measures a line up to a tenth
+	-- short of what it draws, and a long page's text ran under the bar.
+	-- simplified: the margin rather than a width on each wrapped text
+	p:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(4, 4,
+			8 + math.floor(sw.width * 0.08), 4))
+	p:SetFixedWidth(sw.width)
+	sw.view.contentElement = p
+	sw.view.viewPosition = magic.IntVector2(0, 0)
+	if sw.narrow then
+		sw.sidebar.visible = false
+		sw.view.visible = true
+	end
+	sw.page = p
+	sw.app_back = nil
+	return p
+end
+
+-- An app's page in the window: a Back over its title when there is
+-- somewhere to go back to (`back`, a step inside the app's page)
+function M.server_open(title, back)
+	drop_page()
+	local w = server_element()
+	local b = back or top_back()
+	sw.app_back = b
+	if b then
+		button(row(w), "Back", b)
+	end
+	page_text(w, title)
+	return w
+end
+
+-- The entry `key` shown; false if there is none (yet)
+function M.server_show(key)
+	for _, sec in ipairs(server_entries()) do
+		for _, e in ipairs(sec.items) do
+			if e.key == key then
+				sw.current = key
+				draw_sidebar()
+				e.draw()
+				return true
+			end
+		end
+	end
+	return false
+end
+
+function M.server_current()
+	return sw.current
+end
+
+-- The window up at `key`, or the first entry. An admin's entries come
+-- with the users list; one asked for before it is shown when it comes
+function M.server_window(key, on_close)
+	if not sw.frame then
+		build_frame()
+	end
+	sw.on_close = on_close
+	-- **Black behind a window a game opened** (user, 2026-10-07), 25 UI
+	-- pixels round it: told apart from the game's UI under it
+	if on_close and not sw.backdrop then
+		local b = magic.ui.root:CreateChild("BorderImage")
+		b.color = magic.Color(0, 0, 0, 1)
+		-- Over the game's own windows (100), the window over it
+		b.priority = 101
+		sw.frame.priority = 102
+		b.width = sw.frame.width + 50
+		b.height = sw.frame.height + 50
+		b.horizontalAlignment = magic.HA_CENTER
+		b.verticalAlignment = magic.VA_CENTER
+		b:SetPosition(0, 0)
+		sw.backdrop = b
+	end
+	if not M.users and not M.list_asked then
+		M.list_asked = true
+		M.admin("list")
+	end
+	if not M.server_show(key or sw.current or "") then
+		sw.wanted = key
+		M.server_show(server_entries()[1].items[1].key)
+	end
+end
+
+-- silent: not going back to what opened it (the game closes it itself)
+server_close = function(silent)
+	drop_page()
+	local on_close = sw.on_close
+	if sw.frame then
+		sw.frame:Remove()
+	end
+	if sw.help then
+		sw.help:Remove()
+	end
+	if sw.backdrop then
+		sw.backdrop:Remove()
+	end
+	sw = {}
+	M.frame = nil
+	if on_close and not silent then
+		on_close()
+	end
+end
+M.server_close = function(silent) server_close(silent) end
+
+-- **A click off a window a game opened closes it** (user, 2026-10-07),
+-- as Close does; not a click on its dropdown or its help. On the
+-- release, pressed off as well, so that the click that opened it does not
+-- count. The app's own window (Starport's) stays.
+local pressed_off = false
+local function off_window()
+	if not (sw.frame and sw.on_close) then
+		return false
+	end
+	local sc = magic.ui.scale or 1
+	local m = magic.input:GetMousePosition()
+	local ux, uy = m.x / sc, m.y / sc
+	for _, el in ipairs({sw.frame, popup or false, sw.help or false}) do
+		if el then
+			local p, sz = el.screenPosition, el.size
+			if ux >= p.x and uy >= p.y and ux < p.x + sz.x and
+					uy < p.y + sz.y then
+				return false
+			end
+		end
+	end
+	return true
+end
+magic.SubscribeToEvent("MouseButtonDown", function()
+	pressed_off = off_window()
+end)
+magic.SubscribeToEvent("MouseButtonUp", function()
+	if pressed_off and off_window() then
+		server_close()
+	end
+	pressed_off = false
+end)
+
+-- Back from where the window or a page is, as a Back button: for a game's
+-- Esc. False at the top of a window that is the app's own.
+M.back = function()
+	if popup then
+		close_popup()
+		return true
+	end
+	if M.page and page_back then
+		go_back()
+		return true
+	end
+	if sw.frame then
+		if sw.app_back then
+			sw.app_back()
+			return true
+		end
+		if sw.narrow and sw.view.visible then
+			show_sidebar()
+			return true
+		end
+		if sw.on_close then
+			server_close()
+			return true
+		end
+	end
+	return false
 end
 
 --
@@ -1874,14 +2476,15 @@ show_account_button = function()
 	b:SetFocusMode(magic.FM_FOCUSABLE)
 	local t = b:CreateChild("Text")
 	t:SetStyleAuto()
-	t:SetText("Account")
+	-- "Server": it opens the Server window (user, 2026-10-07)
+	t:SetText("Server")
 	t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	b:SetFixedWidth(t.width + 24)
 	b:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
 	b:SetPosition(-8, 8)
 	magic.SubscribeToEvent(b, "Released", function()
-		-- Back just closes the page; the app's own UI is under it
-		account_page(function() end)
+		-- Closing the window is all; the app's own UI is under it
+		M.server_window("account", function() end)
 	end)
 	account_button = b
 end

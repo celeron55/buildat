@@ -32,6 +32,14 @@ int64_t memory_bytes()
 	return (int64_t)pmc.WorkingSetSize;
 }
 
+int64_t free_bytes(const ss_ &path)
+{
+	ULARGE_INTEGER avail;
+	if(!GetDiskFreeSpaceExA(path.c_str(), &avail, nullptr, nullptr))
+		return -1;
+	return (int64_t)avail.QuadPart;
+}
+
 struct HandleScope {
 	HANDLE h;
 	HandleScope(HANDLE h): h(h){}

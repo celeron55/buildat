@@ -109,6 +109,21 @@ namespace accounts
 		virtual bool registration_open() = 0;
 		// 10g: how many accounts are linked to IDs of the Starport at host
 		virtual size_t linked_count(const ss_ &host) = 0;
+		// [SERVER_ADMIN_PAGE] **The server's mail**: the admin's SMTP
+		// setting, one for the server (user, 2026-10-07), set on the Server
+		// window's Health page. Whether it is set and libcurl speaks SMTP
+		virtual bool can_mail() = 0;
+		// A mail to `to` -- one address, which the caller checked has
+		// nothing in it that ends a header line -- on a thread of its own.
+		// done(error), "" when the SMTP server took it, is called on that
+		// thread, so it holds only copies.
+		virtual void mail(const ss_ &to, const ss_ &subject, const ss_ &text,
+				std::function<void(const ss_ &error)> done) = 0;
+		// An app's own SMTP setting from before, taken when the server has
+		// none (Starport's, once). True when the server has one now, so the
+		// app's can go.
+		virtual bool offer_smtp(const ss_ &url, const ss_ &from,
+				const ss_ &user, const ss_ &password) = 0;
 	};
 
 	inline bool access(interface::Server *server,

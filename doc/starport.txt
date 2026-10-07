@@ -18,7 +18,9 @@ run their own. The official one is https://starport.buildat.org.
   Starport settings say which Starports it uses; with none left there, it
   uses none.
 - A Starport ID holds a name, a password hash and, if given, a recovery
-  e-mail. It is deleted from its own settings.
+  e-mail. It is deleted from its own settings. Mail goes through the
+  server's SMTP server, set on the Server window's Health page; the old
+  `smtp` setting moves there at the first start that has none.
 - The address a login or a report came from is kept for `retention_days`,
   7 by default, which the Starport's admin sets; a daily pass then clears
   it. The ID sees its own recent logins with their addresses until then.

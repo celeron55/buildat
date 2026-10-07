@@ -1761,7 +1761,7 @@ magic.INSIDE:
 magic.INTERSECTS: 
 magic.Image: Clear, FlipHorizontal, FlipVertical, GetPixel, Resize, SetPixel, SetPixelInt, SetSize, components, compressed, height, new, width
 magic.IndexBuffer: SetData, SetShadowed, SetSize, indexCount, indexSize, new
-magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, GetMousePosition, IsMouseVisible, SetMouseMode, SetMouseVisible, mouseVisible
+magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, GetMousePosition, GetQualifierDown, IsMouseVisible, SetMouseMode, SetMouseVisible, mouseVisible
 magic.IntRect: bottom, left, right, top
 magic.IntVector2: x, y
 magic.IntVector3: Length, from_buildat, x, y, z
@@ -2337,7 +2337,7 @@ magic.TU_NORMAL:
 magic.TU_NORMALBUFFER: 
 magic.TU_SPECULAR: 
 magic.Technique: 
-magic.Text: ClearSelection, SetColor, SetFontSize, SetSelection, SetSelectionColor, SetTextAlignment, SetTextEffect, SetWordwrap, effectColor, text
+magic.Text: ClearSelection, SetColor, SetFontSize, SetHoverColor, SetSelection, SetSelectionColor, SetTextAlignment, SetTextEffect, SetWordwrap, effectColor, text
 magic.Text3D: SetAlignment, SetColor, SetFont, effectColor, effectStrokeThickness, faceCameraMode, fixedScreenSize, fontSize, material, opacity, text, textEffect, width, wordwrap
 magic.Texture: SetNumLevels, filterMode, height, width
 magic.Texture2D: GetRenderSurface, SetData, SetSize, new
@@ -2345,7 +2345,7 @@ magic.TextureCube: GetRenderSurface, SetData, SetSize, new
 magic.Time: GetElapsedTime, frameNumber, timeStep
 magic.ToolTip: delay
 magic.UI: GetScale, SetClipboardText, SetFocusElement, SetScale, SetUseSystemClipboard, focusElement, root, scale
-magic.UIElement: CreateChild, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyle, SetStyleAuto, SetText, SetVisible, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, verticalAlignment, visible, width
+magic.UIElement: CreateChild, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, HasRecursiveFocus, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyle, SetStyleAuto, SetText, SetVisible, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, verticalAlignment, visible, width
 magic.UnsubscribeFromEvent: 
 magic.VAR_BOOL: 
 magic.VAR_BUFFER: 
@@ -2400,5 +2400,5 @@ extension.launch_console: show
 extension.serverlist: refresh, servers
 extension.skycube: new
 extension.test: f
-extension.ui_utils: add_paged, bind_button_menu, keyboard_page, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, unmark, vertical_menu
+extension.ui_utils: add_paged, bind_button_menu, keyboard_columns, keyboard_page, list_view, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, unmark, vertical_menu
 ---- end of the generated listing ----

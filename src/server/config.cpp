@@ -20,6 +20,9 @@ Config::Config()
 	set_default("connect_ports", "");
 	// Started by a boxed parent, in the box (Windows; --boxed)
 	set_default("boxed", false);
+	// What the box is made of, for an admin's Health page
+	// ([SERVER_ADMIN_PAGE]); set by main() and server::confine()
+	set_default("box", "");
 	set_default("interface_path", "");
 	set_default("share_path", "");
 	set_default("cache_path", "");
