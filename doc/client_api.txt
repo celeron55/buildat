@@ -385,8 +385,10 @@ buildat.discuss_this_server([claim]) -> true, or false and why
   the server's thread there, or a new one's form. For a player logged in to
   a Starport ID. On a Buildat server the client finds the server in a
   Starport's kept list and ignores claim; the Hearth is the one that
-  Starport recommends. With no Buildat server (luanti_client), claim is
-  {name =, address =} of a server picked off Luanti's list.
+  Starport recommends; and only with a launcher under the game to leave to
+  (not in a client started with -s). With no Buildat server
+  (luanti_client), claim is {name =, address =} of a server picked off
+  Luanti's list.
 buildat.discussed_server() -> {name, address, subject, title} or nil
 - The Hearth's side, once: subject is "server:<host>:<port>"
 buildat.set_reload_on_return(bool)

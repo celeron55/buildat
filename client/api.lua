@@ -201,6 +201,15 @@ local function leave_to_launcher(why)
 	end
 	return true
 end
+-- Whether leave_to_launcher() would go anywhere, asked without leaving:
+-- the test the launch UIs' leave_app makes. A client started straight
+-- into a server (-s) has no game under a launcher.
+local function launcher_under_game()
+	local m = buildat.menu_extension()
+	return m ~= nil and m.leave_app ~= nil and
+			((m.in_app ~= nil and m.in_app() == true) or
+			__buildat_local_server_running() == true)
+end
 -- The connection to a remote server went (src/client/app.cpp,
 -- check_lost_connection): to the launcher with why, or false
 function __buildat_leave_lost(lost)
@@ -630,6 +639,9 @@ local function discuss_target(claim)
 	end
 	local name, host, port, hearth
 	if __buildat_server_address() then
+		if not launcher_under_game() then
+			return nil, "no launcher to go back to"
+		end
 		local l = starport.listing_here()
 		if not l then
 			return nil, "no Starport lists this server"
