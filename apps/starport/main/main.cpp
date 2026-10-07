@@ -2968,7 +2968,7 @@ struct Module: public interface::Module
 		for(const char *k : {"id", "name", "description", "host", "port",
 				"app", "status", "owner", "verify", "players", "relabel",
 				"fleet", "pool", "pool_mismatch",
-				"status_until"})
+				"status_until", "last_announce"})
 			s.set(k, l.get(k));
 		const json::Value e = effective(l);
 		for(const char *k : {"kind", "audience", "access", "descriptors"})

@@ -16,6 +16,8 @@
 -- order after the join, and logs each answer as "sp: <json>".
 local log = buildat.Logger("starport")
 local magic = require("buildat/extension/urho3d")
+local ui = require("buildat/extension/ui_utils")
+ui = ui.safe or ui
 
 local _, accounts_err, accounts = buildat.run_script_file("accounts/accounts.lua")
 if type(accounts) ~= "table" then
@@ -799,6 +801,43 @@ group_page = function(gid)
 	end)
 end
 
+-- **Listings as columns** ([STARPORT_LISTINGS_VIEW]; user, 2026-10-07):
+-- name, address, kind, a status letter and the last announce, each cut to
+-- its column; a row opens the listing's page. The status is main.cpp's
+-- served_status, long but for "listed", as a letter by its first word
+local STATUS_LETTERS = {
+	{"L", "listed", "listed"},
+	{"H", "hidden", "hidden from filtered views"},
+	{"U", "unlisted", "unlisted by its server: in no list, takes IDs"},
+	{"O", "offline", "offline: no announce in 15 minutes"},
+	{"W", "withdrawn", "withdrawn by its server"},
+	{"F", "filtered", "filtered out by this instance's filter"},
+	{"C", "unclaimed", "unclaimed: no operator has claimed it"},
+	{"V", "unverified", "unverified: its address being checked, or failed"},
+	{"D", "delisted", "delisted"},
+	{"B", "banned", "banned"},
+}
+local function status_letter(served)
+	local first = s(served):match("^%a+") or ""
+	for _, x in ipairs(STATUS_LETTERS) do
+		if x[2] == first then
+			return x[1]
+		end
+	end
+	return "?"
+end
+-- At most n characters, the last one "…" when cut
+local function cut(v, n)
+	local chars = {}
+	for c in s(v):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+		chars[#chars + 1] = c
+	end
+	return #chars <= n and s(v) or table.concat(chars, "", 1, n - 1) .. "…"
+end
+assert(status_letter("unverified: being checked") == "V" and
+		status_letter("listed") == "L" and cut("abcdef", 4) == "abc…" and
+		cut("abcd", 4) == "abcd")
+
 listings_page = function(search)
 	req("listings", {search = search}, function(ls)
 		local w = open("Listings", function() listings_page(search) end)
@@ -806,11 +845,62 @@ listings_page = function(search)
 		magic.SubscribeToEvent(e, "TextFinished", function()
 			listings_page(e:GetText())
 		end)
-		local l = list(w)
-		for _, x in ipairs(ls) do
-			l.button(s(x.name) .. " (" .. s(x.owner) .. "): " .. s(x.served),
-					function() listing_page(x) end)
+		-- A window of its own over the page (100), as accounts' Starport
+		-- help is
+		button(row(w), "Legend", function()
+			local lw = accounts.page_window(460)
+			lw.priority = 300
+			text(lw, "The status column")
+			for _, x in ipairs(STATUS_LETTERS) do
+				text(lw, x[1] .. "   " .. x[3], GREY)
+			end
+			button(row(lw), "Close", function() lw:Remove() end)
+		end)
+		-- The columns' shares of the width, and the characters each takes
+		-- simplified: the characters are for the default font's average
+		-- width (7 px); a long run of wide letters can still overflow
+		-- Inside the page's margins and clear of the scroll bar
+		local width = page_width - 40
+		local cols = {{"Name", 0.30}, {"Address", 0.27}, {"Kind", 0.12},
+			{"St", 0.05}, {"Last announce", 0.26}}
+		local function line(parent, values, color)
+			local r = parent:CreateChild("UIElement")
+			r:SetLayout(magic.LM_HORIZONTAL, 0, magic.IntRect(8, 0, 8, 0))
+			r:SetFixedHeight(24)
+			for i, c in ipairs(cols) do
+				local cw = math.floor((width - 16) * c[2])
+				local t = r:CreateChild("Text")
+				t:SetStyleAuto()
+				t:SetText(cut(values[i], math.max(2, math.floor(cw / 7) - 1)))
+				t:SetFixedWidth(cw)
+				t:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+				if color then t:SetColor(color) end
+			end
+			return r
 		end
+		local head = {}
+		for i, c in ipairs(cols) do head[i] = c[1] end
+		line(w, head, GREY)
+		local v = ui.list_view(w, width, math.max(120,
+				math.floor(magic.ui.root.height * 0.5)), {wheel = 40,
+				follow_focus = true})
+		for _, x in ipairs(ls) do
+			local b = v.list:CreateChild("Button")
+			b:SetStyleAuto()
+			b:SetFixedSize(width, 24)
+			b:SetFocusMode(magic.FM_FOCUSABLE)
+			local r = line(b, {x.name, s(x.host) .. ":" .. s(x.port), x.kind,
+					status_letter(x.served),
+					(tonumber(x.last_announce) or 0) > 0 and
+					when(x.last_announce) or "never"})
+			r:SetFixedWidth(width)
+			magic.SubscribeToEvent(b, "Released", function() listing_page(x) end)
+		end
+		if #ls == 0 then
+			v:header(search ~= "" and "Nothing matches the search" or
+					"No listings")
+		end
+		v:fit()
 	end)
 end
 
