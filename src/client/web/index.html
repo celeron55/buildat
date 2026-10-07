@@ -47,6 +47,13 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		'-w', window.innerWidth + 'x' + window.innerHeight];
 	if(server)
 		args.push('-s', server);
+	// [PLAY_LINKS] the play page's ?server=host:port, a Starport's link:
+	// the launch menu joins it if a Starport in its settings lists it.
+	// Only that shape is taken; the client checks it again.
+	var join = null;
+	var jm = /^\?server=([A-Za-z0-9.\-]{1,253}:[0-9]{1,5})$/.exec(location.search);
+	if(!server && jm)
+		join = jm[1];
 	// After ? come more arguments, space separated: ?-l 4 for a verbose
 	// log. **The log level, the UI scale and the preferences only**
 	// ([SECURITY_RUN_1]): a link is anybody's to write, and with every
@@ -186,6 +193,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			// Whether the pointer is a finger ([FP_TOUCH]): the client's UI
 			// scale, and the game's touch controls
 			Module.ENV.BUILDAT_TOUCH = coarse ? '1' : '0';
+			if(join)
+				Module.ENV.BUILDAT_JOIN = join;
 			// [PLAY_PAGE] (c): the page with no game of its own is
 			// apps/play's, whose bridge carries luanti_client's datagrams
 			if(!server)

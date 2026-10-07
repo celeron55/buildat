@@ -538,6 +538,8 @@ struct Module: public interface::Module, public network::Interface
 	sv_<std::thread> m_deflaters;
 	std::set<ss_> m_claimed_paths;
 	bool m_page_has_no_game = false;
+	// [PLAY_LINKS] set_ws_origins(): who gave them -> the origins
+	sm_<ss_, sv_<ss_>> m_ws_origins;
 	// [FAVICON] an app's override of /favicon.ico, served from memory; ""
 	// falls back to the default PNG beside the logo
 	ss_ m_favicon;
@@ -1064,7 +1066,8 @@ struct Module: public interface::Module, public network::Interface
 				return false;
 			if(!ws_origin_ok(headers["origin"], headers["host"],
 					peer.socket->get_local_address(),
-					!forwarded_for(peer, headers["x-forwarded-for"]).empty())){
+					!forwarded_for(peer, headers["x-forwarded-for"]).empty()) &&
+					!ws_origin_given(headers["origin"])){
 				log_w(MODULE, "Refused a WebSocket from %s: a page of %s, "
 						"asking for %s", cs(peer.socket->get_remote_address()),
 						cs(headers["origin"]), cs(headers["host"]));
@@ -1925,6 +1928,24 @@ struct Module: public interface::Module, public network::Interface
 	void set_favicon(const ss_ &png)
 	{
 		m_favicon = png;
+	}
+
+	void set_ws_origins(const ss_ &by, const sv_<ss_> &origins)
+	{
+		if(origins.empty())
+			m_ws_origins.erase(by);
+		else
+			m_ws_origins[by] = origins;
+	}
+
+	// One of set_ws_origins()'s, as a browser writes it
+	bool ws_origin_given(const ss_ &origin)
+	{
+		for(auto &pair : m_ws_origins)
+			for(const ss_ &o : pair.second)
+				if(web::lower(o) == web::lower(origin))
+					return true;
+		return false;
 	}
 
 	void set_page_title(const ss_ &name, bool admin)

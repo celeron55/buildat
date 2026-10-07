@@ -204,6 +204,35 @@ function M.connect(address)
 	connect_or_show_error(address)
 end
 
+-- **[PLAY_LINKS] A link's server**: the play page's ?server=, joined
+-- when a Starport in the settings lists it -- and on an https page, with
+-- TLS -- so that a link cannot send a visitor's browser into any server
+-- under the page's name. Otherwise the menu stays, with why.
+function M.join_listed(address)
+	local https = buildat.get_env("BUILDAT_PAGE_HTTPS") == "1"
+	log:info("A link asks to join " .. address)
+	starport.fetch(function(rows, info)
+		for _, x in ipairs(rows) do
+			-- A row's address is "https://host:port" behind TLS
+			local a = tostring(x.address)
+			if a:gsub("^https://", ""):lower() == address:lower() and
+					(x.tls or not https) then
+				M.connect(a)
+				return
+			end
+		end
+		log:info("A link's " .. address .. " is not listed; not joined")
+		show_error("The link asked to join " .. address .. ", which " ..
+				"no Starport in the settings lists" ..
+				(https and " with TLS" or "") .. ", so this page does " ..
+				"not join it.\nThe servers it can join are under Servers." ..
+				(#info.errors > 0 and "\n\n" .. table.concat(info.errors,
+				"\n") or ""))
+	-- Asking: the link was the user's click, and a Starport not asked yet
+	-- is the permission dialog rather than a "not listed"
+	end, true)
+end
+
 -- **Join a Buildat server**: launch_menu_v2's Servers layout
 -- (playtest, 2026-10-07): a title, the servers in one list, sectioned,
 -- and a column beside it with the picked one, the address fields and Join
@@ -425,7 +454,7 @@ function M.show_connect_to_server()
 	end
 	magic.SubscribeToEvent(search, "TextFinished", function() redraw() end)
 	local function refresh(ask)
-		starport.fetch(function(rows, info)
+		starport.fetch(function(rows)
 			-- The answer can come after the screen was closed, and its
 			-- elements are gone then
 			local open = false

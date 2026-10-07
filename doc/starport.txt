@@ -35,3 +35,11 @@ run their own. The official one is https://starport.buildat.org.
   ignored list are offered in one dialog on the launcher's screen, never
   under the PIN or the managed file; what is not added is ignored, and
   the client's Starport settings list both.
+- `play_url` (`https://play.buildat.org`; "" for none) is a play page:
+  a server serving the web client with no game of its own. The page at /
+  links each TLS server to `<play_url>/?server=host:port`; the page joins
+  it if a Starport in its own settings lists that address, with TLS on
+  an https page, and otherwise stays on the launcher and says why.
+  `/api/list` and the answer to an announce carry it as "play"; a listed
+  server lets that page's WebSocket in while the Starport lists it, and
+  `/authorize` takes its origin as if it were in `web_clients`.

@@ -634,6 +634,11 @@ static json::Value default_settings()
 	// the Aittas a client is offered, as addresses
 	s.set("recommended_hearth", "");
 	s.set("recommended_aittas", json::array());
+	// [PLAY_LINKS]: the play page ("https://play.example.org"; "" for
+	// none) the page at / links each TLS server to, which /api/list hands
+	// clients and an announce's answer hands each listed server, so that
+	// it lets the page's WebSocket in; it is one of web_clients too
+	s.set("play_url", "");
 	return s;
 }
 
@@ -767,6 +772,22 @@ struct Module: public interface::Module
 		v.set("hearth", setting("recommended_hearth"));
 		v.set("aittas", setting("recommended_aittas"));
 		return v;
+	}
+
+	// [PLAY_LINKS] the play page, without a trailing /, and its origin
+	ss_ play_url()
+	{
+		const json::Value &v = setting("play_url");
+		ss_ u = v.is_string() ? v.as_string() : "";
+		while(!u.empty() && u.back() == '/')
+			u.pop_back();
+		return u;
+	}
+	ss_ play_origin()
+	{
+		const ss_ u = play_url();
+		const size_t s = u.find("://");
+		return s == ss_::npos ? "" : u.substr(0, u.find('/', s + 3));
 	}
 
 	// [PLAY_OOTB] the defaults with the stored values over them: a setting
@@ -1101,6 +1122,8 @@ struct Module: public interface::Module
 		answer.set("ok", true);
 		answer.set("id", jstr(l, "id"));
 		answer.set("status", served_status(l));
+		if(jstr(l, "status") != "banned")
+			answer.set("play", play_url());
 		respond(r, 200, answer);
 	}
 
@@ -1388,6 +1411,7 @@ struct Module: public interface::Module
 		v.set("starport", jstr(m_settings, "name"));
 		v.set("servers", listed_servers());
 		v.set("recommends", recommends());
+		v.set("play", play_url());
 		respond(r, 200, v);
 	}
 
@@ -1957,7 +1981,7 @@ struct Module: public interface::Module
 				jstr(d, "ugc") == "unmoderated";
 	}
 
-	static ss_ server_box(const json::Value &s)
+	static ss_ server_box(const json::Value &s, const ss_ &play_url)
 	{
 		using interface::web_brand::html;
 		using interface::web_brand::cut;
@@ -1998,8 +2022,13 @@ struct Module: public interface::Module
 			line += (line.empty() ? "" : ", ")+html(x);
 		b += "<br><span class=\"meta\">"+line+"</span><br>";
 		// A server behind TLS serves the web client; its address as the
-		// client's list has it
-		if(s.get("tls").is_true())
+		// client's list has it. The Starport's play page joins it, where
+		// there is one ([PLAY_LINKS])
+		if(s.get("tls").is_true() && !play_url.empty())
+			b += "<a href=\""+html(play_url)+"/?server="+html(host)+":"+
+					itos(port)+"\" rel=\"nofollow noopener\">"
+					"Play in your browser</a>";
+		else if(s.get("tls").is_true())
 			b += "<a href=\"https://"+html(host)+(port == 443 ? ss_() :
 					":"+itos(port))+"/index.html\" rel=\"nofollow noopener\">"
 					"Play in your browser</a>";
@@ -2116,12 +2145,12 @@ struct Module: public interface::Module
 				c += "<p class=\"meta\">"+html(cut(jstr(f, "description"),
 						300))+"</p>";
 			for(const json::Value &s : fleets[fid])
-				c += server_box(s);
+				c += server_box(s, play_url());
 		}
 		if(!lone.empty() || fleets.empty())
 			c += "<h2>Servers</h2>\n";
 		for(const json::Value &s : lone)
-			c += server_box(s);
+			c += server_box(s, play_url());
 		if(lone.empty() && fleets.empty())
 			c += "<p>No servers are listed here"+ss_(kind.empty() &&
 					audience.empty() ? "" : " with these filters")+".</p>\n";
@@ -2749,6 +2778,8 @@ struct Module: public interface::Module
 		const ss_ want = jstr(b, "origin");
 		if(want.empty() || want == own)
 			return own;
+		if(!play_origin().empty() && want == play_origin())
+			return want;
 		const json::Value &c = setting("web_clients");
 		for(unsigned i = 0; c.is_array() && i < c.size(); i++)
 			if(c.at(i).is_string() && c.at(i).as_string() == want)

@@ -2612,6 +2612,27 @@ struct CApp: public App, public magic::Application
 				}
 				launch_ui_done: ;
 			}
+			// [PLAY_LINKS] a play page's ?server=host:port (index.html's
+			// BUILDAT_JOIN): joined if a Starport in the settings lists it.
+			// The shape is checked here too, since it goes into a script.
+			const char *join = getenv("BUILDAT_JOIN");
+			if(join && *join){
+				const ss_ a = join;
+				const size_t colon = a.rfind(':');
+				bool ok = colon != ss_::npos && colon > 0 &&
+						a.size() - colon >= 2 && a.size() - colon <= 6 &&
+						a.size() <= 260;
+				for(size_t i = 0; ok && i < a.size(); i++){
+					const char c = a[i];
+					ok = i > colon ? isdigit((unsigned char)c) != 0 :
+							i == colon || isalnum((unsigned char)c) ||
+							c == '.' || c == '-';
+				}
+				if(ok)
+					run_script_no_sandbox("__buildat_join_listed('"+a+"')");
+				else
+					log_w(MODULE, "BUILDAT_JOIN is not host:port; not joined");
+			}
 		}
 
 		// Create debug HUD

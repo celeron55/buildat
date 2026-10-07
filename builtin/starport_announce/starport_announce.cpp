@@ -225,6 +225,7 @@ struct Module: public interface::Module, public Interface
 
 	void on_start()
 	{
+		check_origin_of();
 		m_dir = m_server->get_config().get<ss_>("user_path")+"/apps/"+
 				m_server->get_app_id();
 		load_state();
@@ -523,9 +524,63 @@ struct Module: public interface::Module, public Interface
 		send_config(r.peer, write_config(c));
 	}
 
+	// **[PLAY_LINKS] A Starport's play page** -- its "play" in an answer
+	// to an announce, "https://play.example.org" -- opens this server's
+	// WebSocket while that Starport lists this server: the page's origin
+	// goes to the network module under the Starport's URL. Only a plain
+	// http(s)://host[:port] counts; anything else, or none, takes it out.
+	static ss_ origin_of(const ss_ &u)
+	{
+		const size_t s = u.find("://");
+		if(s == ss_::npos || (u.substr(0, s) != "https" &&
+				u.substr(0, s) != "http"))
+			return "";
+		const size_t end = u.find('/', s + 3);
+		const ss_ hp = u.substr(s + 3, end == ss_::npos ? ss_::npos :
+				end - s - 3);
+		if(hp.empty() || hp.size() > 255)
+			return "";
+		size_t colon = hp.find(':');
+		for(size_t i = 0; i < hp.size(); i++){
+			const char c = hp[i];
+			const bool ok = i > colon ? (c >= '0' && c <= '9') :
+					(isalnum((unsigned char)c) || c == '.' || c == '-');
+			if(!ok && i != colon)
+				return "";
+		}
+		if(colon == 0 || colon == hp.size() - 1)
+			return "";
+		ss_ o = u.substr(0, s + 3)+hp;
+		std::transform(o.begin(), o.end(), o.begin(), ::tolower);
+		return o;
+	}
+	static void check_origin_of()
+	{
+		if(origin_of("https://Play.Example.org/") != "https://play.example.org" ||
+				origin_of("http://127.0.0.1:29692") != "http://127.0.0.1:29692" ||
+				origin_of("https://a.org/x?y") != "https://a.org" ||
+				origin_of("javascript://a.org") != "" ||
+				origin_of("https://a.org\"><x") != "" ||
+				origin_of("https://a.org:") != "" ||
+				origin_of("https://a.org:80x") != "" ||
+				origin_of("") != "")
+			throw Exception("starport_announce: origin_of");
+	}
+	void let_play_page_in(const ss_ &url, const json::Value &play)
+	{
+		sv_<ss_> origins;
+		const ss_ o = play.is_string() ? origin_of(play.as_string()) : "";
+		if(!o.empty())
+			origins.push_back(o);
+		network::access(m_server, [&](network::Interface *iface){
+			iface->set_ws_origins(url, origins);
+		});
+	}
+
 	// 10g: off that Starport's list at once, not after its timeout
 	void withdraw(const ss_ &url)
 	{
+		let_play_page_in(url, json::Value());
 		json::Value body = json::object();
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
@@ -629,6 +684,8 @@ struct Module: public interface::Module, public Interface
 			const ss_ why = v.is_object() && v.get("error").is_string() ?
 					v.get("error").as_string() : answer.substr(0, 200);
 			log_w(MODULE, "Announce to %s refused: %s", cs(url), cs(why));
+			if(why != "announced too often")
+				let_play_page_in(url, json::Value());
 			std::lock_guard<std::mutex> lock(m_mutex);
 			m_status[url] = "refused: "+why;
 			return why != "announced too often";
@@ -665,6 +722,7 @@ struct Module: public interface::Module, public Interface
 						cs(l.id), cs(claim_code(l)),
 						cs(m_dir+"/starport_claim.txt"));
 		}
+		let_play_page_in(url, v.get("play"));
 		log_v(MODULE, "Announced to %s: %s", cs(url),
 				v.get("status").is_string() ? v.get("status").as_cstring() : "");
 		return true;

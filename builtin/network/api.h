@@ -175,6 +175,11 @@ namespace network
 		// that this server is here, under `name`; "" stops. `account`:
 		// whether joining needs one.
 		virtual void lan_announce(const ss_ &name, bool account) = 0;
+		// [PLAY_LINKS]: pages besides this server's own whose WebSocket is
+		// let in, as origins ("https://play.example.org"), under who gave
+		// them: starport_announce, a Starport's play page under that
+		// Starport's URL. A call replaces what `by` gave; none removes it.
+		virtual void set_ws_origins(const ss_ &by, const sv_<ss_> &origins) = 0;
 	};
 
 	inline bool access(interface::Server *server,

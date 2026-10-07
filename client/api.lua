@@ -1012,6 +1012,11 @@ buildat.safe.join_server = function(address)
 	launch_grid.screens().connect(address)
 	return true
 end
+-- [PLAY_LINKS] the play page's ?server=, from src/client/app.cpp once the
+-- launch UI is up: screens.lua joins it if it is listed
+function __buildat_join_listed(address)
+	launch_grid.screens().join_listed(address)
+end
 buildat.safe.show_engine_settings = function()
 	launch_grid.screens("preferences.lua").show()
 	return true
