@@ -17,15 +17,13 @@ t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 fail(){ echo "FAIL: $*"; cp "$t/log" /tmp/local_server_reuse.log; exit 1; }
 
-# Apps, then "devt" searches devtest's tile, which launches vanilla with
-# menu=worlds, luanti_game=devtest
+# Apps, then "devt" typed (by text: a keypress types nothing) searches
+# devtest's tile, which launches vanilla with menu=worlds,
+# luanti_game=devtest
 launch='mouse_pos 300 374
 mouse_click left
 delay 800
-keypress D
-keypress E
-keypress V
-keypress T
+text devt
 delay 500
 keypress Return
 wait_log 60000 handle_packet(): main:menu

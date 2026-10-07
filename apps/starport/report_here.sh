@@ -11,23 +11,37 @@
 # without it); and one where the listing is under another name for the
 # same host, which must offer the listing to pick.
 #
+# An address without the port means 29500, so those runs need the
+# server there; with 29500 taken (a server of the desk's) the server is on
+# 29643 and they are skipped, said as such.
+#
 #   apps/starport/report_here.sh            all of them
 #   apps/starport/report_here.sh ADDR JOIN  one: the public address
 #                                           ("" for none) and -s
 set -u
 . "$(dirname "$0")/../../util/check_paths.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
+if [ -z "${AN:-}" ]; then
+	AN=29500
+	ss -ltn | grep -q ":29500 " && AN=29643
+	export AN
+fi
 if [ $# -lt 2 ]; then
 	fail=0
-	for combo in "127.0.0.1:29500|127.0.0.1:29500" "127.0.0.1:29500|127.0.0.1" \
-			"127.0.0.1|127.0.0.1:29500" "127.0.0.1|127.0.0.1" \
-			"|127.0.0.1:29500" "|127.0.0.1"; do
+	for combo in "127.0.0.1:$AN|127.0.0.1:$AN" "127.0.0.1:$AN|127.0.0.1" \
+			"127.0.0.1|127.0.0.1:$AN" "127.0.0.1|127.0.0.1" \
+			"|127.0.0.1:$AN" "|127.0.0.1"; do
 		a=${combo%%|*} c=${combo##*|}
+		if [ $AN != 29500 ] && { [ -n "$a" ] && [ "${a#*:}" = "$a" ] ||
+				[ "${c#*:}" = "$c" ]; }; then
+			echo "public '$a', joined '$c': SKIP, 29500 is taken"
+			continue
+		fi
 		r=$("$0" "$a" "$c" | grep "report here: connected")
 		echo "public '$a', joined '$c': ${r##*; }"
 		echo "$r" | grep -q "; found$" || fail=1
 	done
-	r=$("$0" "localhost:29500" "127.0.0.1:29500" | grep "report here:")
+	r=$("$0" "localhost:$AN" "127.0.0.1:$AN" | grep "report here:")
 	echo "listed as localhost, joined as 127.0.0.1: $(echo "$r" | tail -1 | sed 's/.*report here: //')"
 	echo "$r" | grep -q "NOT FOUND" && echo "$r" | grep -q " 1 listings offered" || fail=1
 	[ $fail = 0 ] && echo "PASS: the report finds the listing however the address was written" ||
@@ -35,10 +49,10 @@ if [ $# -lt 2 ]; then
 	exit $fail
 fi
 tmp=$here/local/report_here; rm -rf $tmp; mkdir -p $tmp/sp $tmp/an/apps/floorplanner $tmp/cl $tmp/fc
-SP=29641; AN=29500
+SP=29641
 pids=()
 stop() { for p in "${pids[@]}"; do kill -INT $p 2>/dev/null; done
-	for _ in $(seq 30); do ss -ltn | grep -qE ":(29500|29641) " || break; sleep 1; done; }
+	for _ in $(seq 30); do ss -ltn | grep -qE ":($AN|$SP) " || break; sleep 1; done; }
 trap stop EXIT
 addr=""
 [ -n "$1" ] && addr="\"address\": \"$1\","
@@ -50,7 +64,8 @@ cat > $tmp/an/apps/floorplanner/starport.json <<J
   "gambling": "no", "personal_data": "no"}}
 J
 cd "$here"
-Build/bin/buildat_server -m apps/starport -D $tmp/sp -P $SP -l 3 > $tmp/sp.log 2>&1 & pids+=($!)
+# Its box lets it verify the listing on 29500 only, unless told
+BUILDAT_CONNECT_PORTS=$AN Build/bin/buildat_server -m apps/starport -D $tmp/sp -P $SP -l 3 > $tmp/sp.log 2>&1 & pids+=($!)
 for _ in $(seq 120); do grep -q "setup code" $tmp/sp.log && break; sleep 1; done
 code=$(grep -o "setup code [A-Z0-9]*" $tmp/sp.log | cut -d' ' -f3)
 # The announce is to a Starport on a port of the moment, which the
