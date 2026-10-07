@@ -27,3 +27,11 @@ run their own. The official one is https://starport.buildat.org.
   client with no game of its own, as `apps/play` does
   (`https://play.buildat.org`), is listed there to let its players sign
   in with an ID.
+- `recommended_hearth` (an http(s) address) and `recommended_aittas` (a
+  list of them) come to clients in `/api/list` and an ID's "me". A
+  logged-in ID's line in the launcher's overlay gets "Discuss", which
+  joins that Hearth; it is also the home Hearth of a package whose
+  manifest names none. Aittas the client has on neither its list nor its
+  ignored list are offered in one dialog on the launcher's screen, never
+  under the PIN or the managed file; what is not added is ignored, and
+  the client's Starport settings list both.

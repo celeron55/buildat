@@ -630,6 +630,10 @@ static json::Value default_settings()
 	s.set("smtp", smtp);
 	s.set("moderators", json::array());
 	s.set("trusted_flaggers", json::array());
+	// [STARPORT_RECOMMENDS]: the Hearth a client's "Discuss" joins, and
+	// the Aittas a client is offered, as addresses
+	s.set("recommended_hearth", "");
+	s.set("recommended_aittas", json::array());
 	return s;
 }
 
@@ -755,6 +759,15 @@ struct Module: public interface::Module
 		return defaults.get(k);
 	}
 	double setting_num(const char *k){ return setting(k).as_number(); }
+
+	// [STARPORT_RECOMMENDS], as /api/list and an ID's "me" carry it
+	json::Value recommends()
+	{
+		json::Value v = json::object();
+		v.set("hearth", setting("recommended_hearth"));
+		v.set("aittas", setting("recommended_aittas"));
+		return v;
+	}
 
 	// [PLAY_OOTB] the defaults with the stored values over them: a setting
 	// newer than this Starport's first start is on its Settings page too
@@ -1374,6 +1387,7 @@ struct Module: public interface::Module
 		v.set("ok", true);
 		v.set("starport", jstr(m_settings, "name"));
 		v.set("servers", listed_servers());
+		v.set("recommends", recommends());
 		respond(r, 200, v);
 	}
 
@@ -2235,6 +2249,7 @@ struct Module: public interface::Module
 				st.append(s);
 		}
 		me.set("statements", st);
+		me.set("recommends", recommends());
 		return me;
 	}
 

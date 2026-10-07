@@ -263,14 +263,22 @@ local function feedback_target(source)
 	end
 	local m = __buildat_parse_json(f:read("*a"))
 	f:close()
-	if type(m) ~= "table" or type(m.home_hearth) ~= "string" then
+	if type(m) ~= "table" then
+		return nil
+	end
+	-- [STARPORT_RECOMMENDS]: without its own, the Hearth a Starport
+	-- recommends
+	local ok, starport = pcall(require, "buildat/extension/starport")
+	local home = type(m.home_hearth) == "string" and m.home_hearth or
+			ok and type(starport) == "table" and starport.safe.fallback_hearth()
+	if not home then
 		return nil
 	end
 	local kf = io.open(source.path .. "/../key", "rb")
 	local key = kf and kf:read("*a"):match("%x+") or ""
 	if kf then kf:close() end
 	local author, name, version = source.name:match("^(.-)%.(.-)@(.*)$")
-	return hearth_target(m.home_hearth, author, name, version, key)
+	return hearth_target(home, author, name, version, key)
 end
 
 function M.actions(log)

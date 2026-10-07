@@ -1033,6 +1033,7 @@ local id_rows = {}
 local id_signature = nil
 local id_timer = 0
 local id_logouts = 0
+local offer_timer = 0
 local function starport_module()
 	local ok, sp = pcall(require, "buildat/extension/starport")
 	return ok and type(sp) == "table" and sp.logged_in_ids and sp or nil
@@ -1107,6 +1108,17 @@ local function rebuild_id_rows(ids, sp)
 		-- A gap of its own, as the colour's line has
 		r:CreateChild("UIElement"):SetFixedSize(10, 4)
 		local url = id.url
+		-- [STARPORT_RECOMMENDS]: the Hearth the Starport recommends, at
+		-- the address client/launch_grid.lua's hearth_target makes
+		local hearth = sp.recommended_hearth and sp.recommended_hearth(url)
+		if hearth then
+			overlay_button(r, "Discuss", function()
+				local scheme, host = hearth:match("^(https?)://([^/?#]+)")
+				buildat.safe.join_server(scheme == "https" and
+						"https://" .. host or
+						(host:find(":%d+$") and host or host .. ":80"))
+			end)
+		end
 		local b = overlay_button(r, "Log out", function()
 			sp.log_out(url)
 			id_signature = nil -- rebuilt at the next look
@@ -1221,6 +1233,19 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 		trust_shown = not trust_in_game
 	end
 	local show = trust_shown
+	-- [STARPORT_RECOMMENDS]: new Aittas are offered on the launcher's
+	-- screen only, never over a game
+	if not trust_in_game then
+		offer_timer = offer_timer + (event_data and
+				event_data:GetFloat("TimeStep") or 0)
+		if offer_timer >= 0.5 then
+			offer_timer = 0
+			local sp = starport_module()
+			if sp and sp.offer_aittas then
+				sp.offer_aittas()
+			end
+		end
+	end
 	if show ~= trust_sample_shown then
 		trust_sample_shown = show
 		-- Said when it changes ([TRUST_OVERLAY_LEAVE]): the sample gone
@@ -1244,7 +1269,9 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 			local ids = sp and sp.logged_in_ids() or {}
 			local sig = {sp and "" or "no extension"}
 			for _, id in ipairs(ids) do
-				sig[#sig + 1] = id.url .. "|" .. id.name
+				sig[#sig + 1] = id.url .. "|" .. id.name .. "|" ..
+						tostring(sp.recommended_hearth and
+						sp.recommended_hearth(id.url))
 			end
 			sig = table.concat(sig, "\n")
 			if sig ~= id_signature and sp then

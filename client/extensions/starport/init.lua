@@ -184,7 +184,18 @@ local function load_state()
 	state.keys = type(state.keys) == "table" and state.keys or {}
 	state.receipts = type(state.receipts) == "table" and state.receipts or {}
 	state.pin = state.pin or ""
-	state.aitta = type(state.aitta) == "string" and state.aitta or DEFAULT_AITTA
+	-- [STARPORT_RECOMMENDS]: the Aittas, a list since one `aitta`; those
+	-- removed or not taken when offered; and what each Starport
+	-- recommends, by Starport: {hearth =, aittas = {...}}
+	if type(state.aittas) ~= "table" then
+		state.aittas = {type(state.aitta) == "string" and state.aitta or
+				DEFAULT_AITTA}
+	end
+	state.aitta = nil
+	state.ignored_aittas = type(state.ignored_aittas) == "table" and
+			state.ignored_aittas or {}
+	state.recommends = type(state.recommends) == "table" and
+			state.recommends or {}
 	-- [STARPORT] 10: the Starport IDs logged in, by Starport: {session,
 	-- name, band, key}
 	state.ids = type(state.ids) == "table" and state.ids or {}
@@ -227,17 +238,40 @@ local function effective()
 			filters[k] = v
 		end
 	end
+	-- The managed file's "aittas", or its "aitta" of before the list
+	local m_aittas = type(m.aittas) == "table" and m.aittas or
+			type(m.aitta) == "string" and {m.aitta} or nil
 	return {
 		starports = starports,
 		filters = filters,
 		direct_connect = (m.direct_connect == nil) and s.direct_connect or
 				m.direct_connect == true,
 		send_key = s.send_key,
-		aitta = normalize_url(type(m.aitta) == "string" and m.aitta or s.aitta),
+		aittas = normalize_urls(m_aittas or s.aittas),
 		managed = {starports = m.starports ~= nil, filters = m.filters ~= nil,
-			direct_connect = m.direct_connect ~= nil, aitta = m.aitta ~= nil},
+			direct_connect = m.direct_connect ~= nil, aittas = m_aittas ~= nil},
 	}
 end
+
+-- Onto the list, and off the ignored one
+local function add_aitta(url)
+	local s = load_state()
+	for i = #s.ignored_aittas, 1, -1 do
+		if normalize_url(s.ignored_aittas[i]) == url then
+			table.remove(s.ignored_aittas, i)
+		end
+	end
+	for _, a in ipairs(s.aittas) do
+		if normalize_url(a) == url then
+			return
+		end
+	end
+	table.insert(s.aittas, url)
+end
+
+-- [STARPORT_RECOMMENDS]: what a Starport answered in /api/list or an ID's
+-- "me", kept; set below, with the dialog that offers it
+local note_recommends
 
 local function hex(bytes)
 	return (bytes:gsub(".", function(c)
@@ -418,10 +452,13 @@ local function poll_receipts()
 end
 
 -- Whether the network extension has the user's yes for a url's host
-local function accepted(url)
+-- `fresh`: and not asked again at the next request (network's
+-- ACCEPTANCE_VALID_S, a week)
+local function accepted(url, fresh)
 	local origin = url:match("^(https?://[^/]+)")
 	for _, a in ipairs(network.known_addresses()) do
-		if a.uri == origin and a.accepted then
+		if a.uri == origin and a.accepted and (not fresh or
+				os.time() - a.last_attempt < 7 * 24 * 3600) then
 			return true
 		end
 	end
@@ -581,6 +618,7 @@ function M.safe.fetch(cb, ask, extra)
 		local function got(body, err)
 			local v = body and network.parse_json(body)
 			if type(v) == "table" and v.ok and type(v.servers) == "table" then
+				note_recommends(url, v.recommends)
 				results[url] = v.servers
 				kept[url] = {ts = os.time(), servers = v.servers}
 				fetch_icons(url, v.servers)
@@ -695,7 +733,7 @@ magic.SubscribeToEvent("Update", function()
 	end
 end)
 
-local function open_window(desc, width)
+local function open_window(desc, width, on_escape)
 	local root = uistack.main:push({desc = desc})
 	root.defaultStyle = magic.cache:GetResource("XMLFile", STYLE)
 	local w = root:CreateChild("Window")
@@ -709,6 +747,9 @@ local function open_window(desc, width)
 	root:SubscribeToStackEvent("KeyDown", function(_, data)
 		if data:GetInt("Key") == magic.KEY_ESCAPE then
 			uistack.main:pop(root)
+			if on_escape then
+				on_escape()
+			end
 			return true
 		end
 	end)
@@ -837,6 +878,153 @@ local function ask_pin(on_done)
 	add_button(r, "View only", function() go(false) end)
 end
 
+-- [STARPORT_RECOMMENDS]: an address as a Starport sent it, or nil
+local function web_url(u)
+	return type(u) == "string" and u:match("^https?://[%w%.%-%[%]:]+/?$") and
+			normalize_url(u) or nil
+end
+
+-- The Aittas the Starports in the settings recommend that are on neither
+-- of this client's lists, as {aitta =, starport =}
+local function new_aittas()
+	local s, e = load_state(), effective()
+	local known = {}
+	for _, a in ipairs(e.aittas) do
+		known[a] = true
+	end
+	for _, a in ipairs(s.ignored_aittas) do
+		known[normalize_url(a)] = true
+	end
+	local out = {}
+	for _, url in ipairs(e.starports) do
+		local r = s.recommends[url]
+		for _, a in ipairs(r and r.aittas or {}) do
+			if not known[a] then
+				known[a] = true
+				out[#out + 1] = {aitta = a, starport = url}
+			end
+		end
+	end
+	return out
+end
+
+-- **The offer**: one dialog, a checkbox for each new Aitta under the
+-- Starport recommending it; the ones not added are ignored. Only where
+-- the user's word is the list's: not under the PIN or the managed file,
+-- and not in a scripted run unless BUILDAT_STARPORT_OFFER=1. Over a game
+-- it is not called (the trusted overlay calls it on the launcher's
+-- screen).
+local offer_root = nil
+local refreshed = false
+local id_refresh
+function M.offer_aittas()
+	local s, e = load_state(), effective()
+	if offer_root or s.pin ~= "" or e.managed.aittas or
+			(__buildat_is_scripted() and
+			buildat.get_env("BUILDAT_STARPORT_OFFER") ~= "1") then
+		return
+	end
+	-- At the start, what the logged-in IDs' Starports recommend now; one
+	-- whose host was not accepted for good waits for the login or a fetch
+	if not refreshed then
+		refreshed = true
+		for url in pairs(s.ids) do
+			if accepted(url, true) then
+				id_refresh(url, function() end)
+			end
+		end
+	end
+	local new = new_aittas()
+	if #new == 0 then
+		return
+	end
+	local checked = {}
+	local function close(add, popped)
+		if not popped then
+			uistack.main:pop(offer_root)
+		end
+		offer_root = nil
+		for i, x in ipairs(new) do
+			if add and checked[i] then
+				add_aitta(x.aitta)
+			else
+				table.insert(s.ignored_aittas, x.aitta)
+			end
+		end
+		save_state()
+		log:info("Aittas offered: " .. #new .. ", " ..
+				(add and "added the checked" or "not now"))
+	end
+	local root, w = open_window("starport aittas", 620, function()
+		close(false, true)
+	end)
+	offer_root = root
+	log:info("Offering " .. #new .. " Aitta(s)")
+	add_text(w, "Aittas are where people share apps: unreviewed, each " ..
+			"run in the server's box. Not added, an Aitta is not offered " ..
+			"again; the Starport settings can add it later.", DIM)
+	local last = nil
+	for i, x in ipairs(new) do
+		if x.starport ~= last then
+			last = x.starport
+			add_text(w, "Starport " .. x.starport .. " recommends:")
+		end
+		checked[i] = true
+		local b
+		b = add_button(w, "[x] " .. x.aitta, function()
+			checked[i] = not checked[i]
+			b:GetChild(0).text = (checked[i] and "[x] " or "[ ] ") .. x.aitta
+		end)
+	end
+	local r = add_row(w)
+	add_button(r, "Add", function() close(true) end, nil, true)
+	add_button(r, "Not now", function() close(false) end)
+end
+
+note_recommends = function(url, r)
+	if type(r) ~= "table" then
+		return
+	end
+	local aittas = {}
+	for _, a in ipairs(type(r.aittas) == "table" and r.aittas or {}) do
+		aittas[#aittas + 1] = web_url(a)
+	end
+	-- The Hearth as given: its address is made as a home Hearth's
+	-- (client/launch_grid.lua hearth_target)
+	local hearth = type(r.hearth) == "string" and
+			r.hearth:match("^https?://[%w%.%-%[%]:]+/?$") or nil
+	load_state().recommends[url] = {hearth = hearth,
+		aittas = aittas}
+	save_state()
+end
+
+-- The Hearth a Starport recommends, as a URL, or nil
+function M.recommended_hearth(url)
+	local r = load_state().recommends[url]
+	return r and r.hearth
+end
+
+-- A package's home Hearth when its manifest names none: the Hearth of the
+-- Starport recommending the Aitta it is from, or with no Aitta given,
+-- the first Starport in the settings that recommends one.
+-- simplified: an installed package does not know its Aitta, so it gets
+-- the first; keep the Aitta at install for the right one
+function M.safe.fallback_hearth(aitta)
+	local s = load_state()
+	for _, url in ipairs(effective().starports) do
+		local r = s.recommends[url]
+		if r and r.hearth then
+			local has = aitta == nil
+			for _, a in ipairs(r.aittas) do
+				has = has or a == aitta
+			end
+			if has then
+				return r.hearth
+			end
+		end
+	end
+end
+
 -- `hides`: the set says what is hidden, and [x] is still what is shown, as
 -- in the rows above it (user, 2026-10-02: all of them ticked hid them all)
 local function toggle_row(w, label, set, values, can, hides)
@@ -868,7 +1056,8 @@ settings_page = function(can, again, message)
 	if message then
 		add_text(w, message, WARN)
 	end
-	if e.managed.starports or e.managed.filters or e.managed.direct_connect then
+	if e.managed.starports or e.managed.filters or e.managed.direct_connect or
+			e.managed.aittas then
 		add_text(w, "Some of these are set by " .. managed_path() ..
 				" and cannot be changed here.", DIM)
 	end
@@ -939,14 +1128,39 @@ settings_page = function(can, again, message)
 		save_state()
 		settings_page(can, true)
 	end, fc)
+	-- [STARPORT_RECOMMENDS]: removed is ignored, not offered again
+	local ac = can and not e.managed.aittas
+	for i, url in ipairs(e.aittas) do
+		r = add_row(w)
+		add_label(r, "Aitta: " .. url, 360)
+		add_button(r, "Remove", function()
+			table.remove(s.aittas, i)
+			table.insert(s.ignored_aittas, url)
+			save_state()
+			settings_page(can, true)
+		end, ac)
+	end
 	r = add_row(w)
-	add_label(r, "Aitta", 240)
-	local aitta = add_edit(r, e.aitta)
-	add_button(r, "Set", function()
-		s.aitta = normalize_url(aitta:GetText())
+	local new_aitta = add_edit(r, "https://")
+	add_button(r, "Add Aitta", function()
+		local url = normalize_url(new_aitta:GetText())
+		if not url:match("^https?://[%w%.%-]+[:%d]*$") then
+			return settings_page(can, true, "An Aitta is a host name, or "..
+					"an http(s):// address")
+		end
+		add_aitta(url)
 		save_state()
 		settings_page(can, true)
-	end, can and not e.managed.aitta)
+	end, ac)
+	for i, url in ipairs(s.ignored_aittas) do
+		r = add_row(w)
+		add_label(r, "Ignored Aitta: " .. url, 360)
+		add_button(r, "Take back", function()
+			table.remove(s.ignored_aittas, i)
+			save_state()
+			settings_page(can, true)
+		end, ac)
+	end
 
 	-- 2b: a pool's server in the same region goes first
 	r = add_row(w)
@@ -1093,6 +1307,7 @@ local function keep_id(url, session, me)
 	s.ids[url] = {session = session, name = me.name, band = me.band,
 		key = me.key}
 	save_state()
+	note_recommends(url, me.recommends)
 end
 
 -- [ID_LINE]: the IDs logged in, for the launcher's trusted overlay
@@ -1124,7 +1339,7 @@ function M.log_out(url)
 	log:info("Logged out of the Starport ID at " .. url)
 end
 
-local function id_refresh(url, cb)
+id_refresh = function(url, cb)
 	local id = load_state().ids[url]
 	if not id then
 		return cb(nil, "not logged in")
@@ -1917,7 +2132,8 @@ end
 local function aitta_page(message, query, on_discuss)
 	local e = effective()
 	local root, w = open_window("aitta", 900)
-	add_text(w, "Apps from Aitta: " .. e.aitta)
+	add_text(w, "Apps from Aitta: " .. (#e.aittas > 0 and
+			table.concat(e.aittas, ", ") or "none in the Starport settings"))
 	if not e.filters.unreviewed then
 		add_text(w, "This client's filters hide unreviewed content, and " ..
 				"everything on Aitta is unreviewed.", WARN)
@@ -1939,16 +2155,48 @@ local function aitta_page(message, query, on_discuss)
 	local status = add_text(w, "Fetching the list...", DIM)
 	add_button(w, "Back", function() uistack.main:pop(root) end)
 	local q = (query or ""):lower()
-	network.http_get(e.aitta .. "/api/aitta/list", function(body, err)
-		if not body then
-			status:SetText("Could not fetch the list: " .. tostring(err))
-			return
+	-- Every Aitta's list, merged as Starports' are: a release shown once
+	-- by author/name, version and key, from the first Aitta listing it
+	local lists, errors, waiting = {}, {}, #e.aittas
+	local show
+	local function show_all()
+		local v, seen = {releases = {}}, {}
+		for _, a in ipairs(e.aittas) do
+			for _, rel in ipairs(lists[a] or {}) do
+				local id = type(rel) == "table" and table.concat({
+						tostring(rel.author), tostring(rel.name),
+						tostring(rel.version), tostring(rel.key)}, "/")
+				if id and not seen[id] then
+					seen[id] = true
+					rel.aitta = a
+					v.releases[#v.releases + 1] = rel
+				end
+			end
 		end
-		local v = network.parse_json(body)
-		if type(v) ~= "table" or not v.ok or type(v.releases) ~= "table" then
-			status:SetText("Aitta's answer was not a list")
-			return
+		show(v)
+		if #errors > 0 then
+			status:SetText(status:GetText() .. "; " .. table.concat(errors, "; "))
 		end
+	end
+	for _, a in ipairs(e.aittas) do
+		network.http_get(a .. "/api/aitta/list", function(body, err)
+			local v = body and network.parse_json(body)
+			if type(v) == "table" and v.ok and type(v.releases) == "table" then
+				lists[a] = v.releases
+			else
+				errors[#errors + 1] = a .. ": " .. tostring(body and
+						"the answer was not a list" or err)
+			end
+			waiting = waiting - 1
+			if waiting == 0 then
+				show_all()
+			end
+		end)
+	end
+	if waiting == 0 then
+		status:SetText("No Aittas in the Starport settings")
+	end
+	show = function(v)
 		local have = aitta_installed()
 		local shown = 0
 		for _, rel in ipairs(v.releases) do
@@ -1966,7 +2214,7 @@ local function aitta_page(message, query, on_discuss)
 				local installed = mine and mine[tostring(rel.version)]
 				add_button(r, installed and "Installed" or
 						(mine and "Update" or "Install"), function()
-					local base = e.aitta .. "/api/aitta/archive/" ..
+					local base = rel.aitta .. "/api/aitta/archive/" ..
 							tostring(rel.sha256)
 					status:SetText("Fetching " .. k .. "...")
 					network.http_get(base .. ".sig", function(sig, err1)
@@ -1997,8 +2245,12 @@ local function aitta_page(message, query, on_discuss)
 						end)
 					end)
 				end, not installed)
-				if on_discuss and type(rel.home_hearth) == "string" and
-						rel.home_hearth:match("^https?://") then
+				-- Without its own, the Hearth its Aitta's Starport recommends
+				if not (type(rel.home_hearth) == "string" and
+						rel.home_hearth:match("^https?://")) then
+					rel.home_hearth = M.safe.fallback_hearth(rel.aitta)
+				end
+				if on_discuss and rel.home_hearth then
 					add_button(r, "Discuss", function()
 						uistack.main:pop(root)
 						on_discuss(rel)
@@ -2011,7 +2263,7 @@ local function aitta_page(message, query, on_discuss)
 		end
 		status:SetText(q == "" and #v.releases .. " releases" or
 				shown .. " of " .. #v.releases .. " releases match")
-	end)
+	end
 end
 
 function M.safe.open_aitta(on_discuss)

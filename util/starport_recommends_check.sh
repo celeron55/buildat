@@ -1,0 +1,135 @@
+#!/bin/bash
+# tier: full
+# cost: 90s (2026-10-07)
+# covers: client/extensions/starport/init.lua apps/starport/main/main.cpp
+# [STARPORT_RECOMMENDS]: a Starport with a recommended Hearth and Aittas
+# serves them in /api/list and an ID's "me"; a launcher whose ID is logged
+# in there is offered the Aittas it lacks at the start, and the answer
+# lands: "Add" adds the checked one and ignores the unchecked one, and
+# a restart offers neither again. "Discuss" on the ID's line joins the
+# Hearth.
+set -u
+. "$(dirname "$0")/check_paths.sh"
+here=$(cd "$(dirname "$0")/.." && pwd)
+tmp=$(mktemp -d "/tmp/buildat_sprec.XXXXXX")
+SP=29671
+HE=29672
+A1=http://127.0.0.1:29673
+A2=http://127.0.0.1:29674
+export BUILDAT_CONNECT_PORTS="$SP,$HE"
+pids=()
+cleanup() {
+	for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
+	[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" || rm -rf "$tmp"
+}
+trap cleanup EXIT
+fail() { echo "FAIL: $*"; exit 1; }
+cd "$here"
+
+Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
+	> "$tmp/sp.log" 2>&1 &
+pids+=($!)
+Build/bin/buildat_server -m apps/hearth -D "$tmp/he" -P $HE -l 3 \
+	> "$tmp/he.log" 2>&1 &
+pids+=($!)
+for _ in $(seq 120); do
+	grep -q "setup code" "$tmp/sp.log" && break
+	sleep 1
+done
+code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
+[ -n "$code" ] || fail "the Starport did not start (sp.log)"
+printf 'delay 8000\nquit\n' > "$tmp/cmds.txt"
+BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
+BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"recommended_hearth\":\"http://127.0.0.1:$HE\",\"recommended_aittas\":[\"$A1\",\"$A2\"]}}" \
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/admin" -w 800x600 -l 3 \
+	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
+curl -s -m 10 "localhost:$SP/api/list" | grep -q "\"recommends\":.*$A2" ||
+	fail "/api/list has no recommends ($tmp/admin.log)"
+echo "ok: /api/list carries the recommendations"
+
+# An ID logged in on the launcher: its session in starport.json, the
+# Starport's host accepted, the first Aitta known only by the old "aitta"
+session=$(python3 - "$SP" <<'PY'
+import json, sys, time, urllib.request
+B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+r = json.loads(urllib.request.urlopen(B + "id/register", json.dumps(dict(
+    name="reader", password="secret1",
+    birth_year=time.gmtime().tm_year - 40)).encode()).read())
+assert r["ok"], r
+print(r["result"]["session"])
+PY
+) || fail "the ID API"
+mkdir -p "$tmp/cl"
+cat > "$tmp/cl/starport.json" <<EOF
+{"starports": ["http://127.0.0.1:$SP"], "aitta": "https://aitta.buildat.org",
+ "ids": {"http://127.0.0.1:$SP": {"session": "$session", "name": "reader"}}}
+EOF
+printf 'accepted,address,description,created,last_attempt,name,icon,server\n"true","http://127.0.0.1:%s","Starport","%s","%s","","",""\n' \
+	$SP $(date +%s) $(date +%s) > "$tmp/cl/network_addresses.csv"
+launcher() { # cmds log
+	BUILDAT_STARPORT_OFFER=1 timeout 120 Build/bin/buildat \
+		-o launch_ui=launch_menu_v2 -D "$tmp/cl" -w 800x600 -l 4 \
+		-o sound_mute=1 -c @"$1" > "$2" 2>&1
+}
+# The dialog at 800x600: the second Aitta unchecked, then "Add"
+cat > "$tmp/c1" <<C
+wait_log_any 30000 Offering 2 Aitta
+delay 1000
+mouse_pos 400 337
+mouse_click left
+delay 300
+mouse_pos 316 353
+mouse_click left
+wait_log 5000 Aittas offered
+delay 500
+quit
+C
+launcher "$tmp/c1" "$tmp/cl1.log"
+python3 - "$tmp/cl/starport.json" "$A1" "$A2" <<'PY' || fail "the answer did not land ($tmp/cl1.log)"
+import json, sys
+s = json.load(open(sys.argv[1]))
+assert s["aittas"] == ["https://aitta.buildat.org", sys.argv[2]], s["aittas"]
+assert s["ignored_aittas"] == [sys.argv[3]], s["ignored_aittas"]
+assert "aitta" not in s, s
+PY
+echo "ok: the checked Aitta added, the unchecked one ignored"
+
+# A restart offers neither again; "Discuss" (the ID line's first button)
+# joins the Hearth
+cat > "$tmp/c2" <<C
+wait_log_any 30000 trusted overlay: 1 Starport ID line
+delay 5000
+mouse_pos 725 15
+mouse_click left
+delay 10000
+quit
+C
+launcher "$tmp/c2" "$tmp/cl2.log"
+grep -q "Offering" "$tmp/cl2.log" && fail "offered again after a restart"
+echo "ok: not offered again"
+grep -q "Connect succeeded (127.0.0.1:$HE)" "$tmp/cl2.log" ||
+	fail "Discuss did not join the Hearth ($tmp/cl2.log)"
+echo "ok: Discuss joined the Hearth"
+
+# Taken back from the ignored list, offered again; closed, ignored again
+python3 - "$tmp/cl/starport.json" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))
+s["ignored_aittas"] = []
+json.dump(s, open(sys.argv[1], "w"))
+PY
+cat > "$tmp/c3" <<C
+wait_log_any 30000 Offering 1 Aitta
+delay 1000
+keypress escape
+wait_log 5000 Aittas offered
+quit
+C
+launcher "$tmp/c3" "$tmp/cl3.log"
+python3 - "$tmp/cl/starport.json" "$A2" <<'PY' || fail "a close did not ignore ($tmp/cl3.log)"
+import json, sys
+s = json.load(open(sys.argv[1]))
+assert s["ignored_aittas"] == [sys.argv[2]], s["ignored_aittas"]
+PY
+echo "ok: closing the dialog ignores"
+echo "PASS"

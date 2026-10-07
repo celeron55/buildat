@@ -86,9 +86,10 @@ The web client of an Aitta server is at /index.html.
 
 Browsing and installing in the client
 -------------------------------------
-"Apps from Aitta" on the launch grid lists the Aitta in the Starport
+"Apps from Aitta" on the launch grid lists the Aittas in the Starport
 settings (https://aitta.buildat.org by default; the managed file's
-"aitta" overrides it), each release with Install, or Update where
+"aittas", or "aitta" for one, overrides them), merged: a release listed
+on several is shown once. Each release has Install, or Update where
 another version of it is installed. The client fetches the release and
 its .sig and checks them itself before installing; the new version is on
 the grid at once. Aitta's list is unreviewed content: where the Starport
