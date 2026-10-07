@@ -646,9 +646,16 @@ function M.safe.keyboard_page(win)
 					page.left_at, page.side, focused = i, 1, true
 				end
 			end
+			page.at_start = nil
 			for _, e in ipairs(page_items(cols[2], {})) do
 				if e:HasFocus() then
 					page.side, focused = 2, true
+					-- The field's cursor before a key moves it: Left at its
+					-- start is the sidebar's
+					if e:GetTypeName() == "LineEdit" and
+							e.cursorPosition == 0 then
+						page.at_start = e
+					end
 				end
 			end
 			-- After Enter on the left: its button again once the sidebar
@@ -739,7 +746,11 @@ function M.safe.keyboard_page(win)
 				page.side = 2
 				return
 			end
-			if not typing and key == KEY_LEFT and side == 2 and #left > 0 then
+			-- simplified: two Lefts in one frame from the field's second
+			-- character stay in it; the next Left goes
+			if key == KEY_LEFT and side == 2 and #left > 0 and
+					(not typing or (page.at_start and
+					not gone(page.at_start) and page.at_start:HasFocus())) then
 				left[math.min(page.left_at or 1, #left)]:SetFocus(true)
 				page.side = 1
 				return
