@@ -1201,15 +1201,11 @@ show_compose = function(o)
 		end
 		kind = cycle(bar, "", kinds, o.feedback and 3 or 1)
 	end
-	local wide = W >= 600
-	local body_row = w:CreateChild("UIElement")
-	body_row:SetLayout(wide and magic.LM_HORIZONTAL or magic.LM_VERTICAL, 8,
-			magic.IntRect(0, 0, 0, 0))
-	local field_w = wide and math.floor(W / 2) - 4 or W
-	local left = body_row:CreateChild("UIElement")
-	left:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
-	local body = edit(left, "The message (Markdown)", true, key, field_w)
-	body:SetFixedHeight(wide and 200 or 120)
+	-- The field the page's width; the preview under it once Preview is
+	-- pressed, as a reply's ([HEARTH_NEW_PREVIEW]: beside it, it halved
+	-- the field)
+	local body = edit(w, "The message (Markdown)", true, key, W)
+	body:SetFixedHeight(W >= 600 and 200 or 120)
 	if o.edit and not drafts[key] then
 		body:SetText(o.edit.body)
 	elseif o.feedback and not drafts[key] then
@@ -1217,12 +1213,17 @@ show_compose = function(o)
 		body:SetText("App: " .. f.package .. " " .. f.version .. "\nEngine: " ..
 				f.engine .. "\nPlatform: " .. f.platform .. "\n\n")
 	end
-	local right = body_row:CreateChild("UIElement")
-	right:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(0, 0, 0, 0))
-	text(right, "Preview", DIM)
-	local shown = text(right, "", nil, field_w)
+	local pv, shown = nil, nil
 	local function show(s)
-		pcall(function() shown:SetText(s) end)
+		pcall(function()
+			-- What is left of the page under the buttons
+			pv = pv or list()
+			if shown then
+				shown:Remove()
+			end
+			shown = add_box(pv, nil, "Preview", s, MAIN)
+			pv:fit()
+		end)
 		if scripted then
 			log:info("hearth: preview " .. s)
 		end
@@ -1259,7 +1260,7 @@ show_compose = function(o)
 		button(r, o.edit and "Save" or o.feedback and "Send" or
 				"Start the thread", submit, true)
 	end)
-	-- A second after the last key, the preview again
+	-- A second after the last key, a preview shown again
 	local changed = nil
 	magic.SubscribeToEvent(body, "TextChanged", function()
 		changed = buildat.get_time_us()
@@ -1270,7 +1271,7 @@ show_compose = function(o)
 			magic.UnsubscribeFromEvent("Update", sub)
 			return
 		end
-		if changed and buildat.get_time_us() - changed > 1e6 then
+		if pv and changed and buildat.get_time_us() - changed > 1e6 then
 			changed = nil
 			req("preview", {body = body:GetText()}, function(h)
 				local s = html_text(tostring(h))
