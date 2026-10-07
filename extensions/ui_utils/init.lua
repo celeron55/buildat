@@ -951,7 +951,12 @@ function M.safe.list_view(parent, width, height, options)
 			end
 		end)
 	end
+	-- x, y in window pixels, as the mouse and a touch give them: the UI's
+	-- units are those over its scale ([JOIN_LIST_WHEEL]: at a scale not
+	-- 1 the wheel missed the list)
 	local function over(x, y)
+		local sc = magic.ui.scale
+		x, y = x / sc, y / sc
 		local at = viewport.screenPosition
 		return x >= at.x and x < at.x + viewport.width and
 				y >= at.y and y < at.y + viewport.height
