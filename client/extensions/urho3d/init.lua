@@ -1068,9 +1068,9 @@ local function open_id(sp)
 end
 -- [STARPORT_RECOMMENDS]: the Hearth the Starport recommends, at the
 -- address client/launch_grid.lua's hearth_target makes
-local function join_hearth(hearth)
+local function join_hearth(sp, hearth)
 	local scheme, host = hearth:match("^(https?)://([^/?#]+)")
-	buildat.safe.join_server(scheme == "https" and "https://" .. host or
+	sp.join_with_id(scheme == "https" and "https://" .. host or
 			(host:find(":%d+$") and host or host .. ":80"))
 end
 -- **The web has no trusted overlay** (user, 2026-10-07): the page and its
@@ -1078,7 +1078,7 @@ end
 -- would vouch for nothing, and the web holds no ID session to show. Only
 -- "Discuss" per Starport recommending a Hearth, at the top right.
 local is_web = GetPlatform() == "Web"
-local function rebuild_web_rows(hearths)
+local function rebuild_web_rows(hearths, sp)
 	for _, r in ipairs(id_rows) do
 		r:Remove()
 	end
@@ -1095,7 +1095,7 @@ local function rebuild_web_rows(hearths)
 		local host = #hearths > 1 and h.url:match("^%a+://([^/]+)")
 		local b = overlay_button(r, "Discuss" ..
 				(host and (" (" .. host .. ")") or ""),
-				function() join_hearth(h.hearth) end)
+				function() join_hearth(sp, h.hearth) end)
 		r:SetPosition(-8, y)
 		y = y + b:GetHeight() + 4
 		r.visible = trust_sample_shown == true
@@ -1146,7 +1146,7 @@ local function rebuild_id_rows(ids, sp)
 		local url = id.url
 		local hearth = sp.recommended_hearth and sp.recommended_hearth(url)
 		if hearth then
-			overlay_button(r, "Discuss", function() join_hearth(hearth) end)
+			overlay_button(r, "Discuss", function() join_hearth(sp, hearth) end)
 		end
 		local b = overlay_button(r, "Log out", function()
 			sp.log_out(url)
@@ -1310,7 +1310,7 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 				sig = table.concat(sig, "\n")
 				if sig ~= id_signature and sp then
 					id_signature = sig
-					rebuild_web_rows(hearths)
+					rebuild_web_rows(hearths, sp)
 					log:info("trusted overlay: " .. #hearths .. " Discuss button(s)")
 				end
 				return

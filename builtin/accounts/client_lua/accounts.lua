@@ -468,6 +468,22 @@ buildat.sub_packet("accounts:hello", function(data)
 		M.name = buildat.storage_read("name") or ""
 		log:info("Logging in as " .. M.name .. " with the kept login")
 		send_login(M.name, "", "", token)
+	elseif M.hello.starport == 1 and M.hello["local"] ~= 1 and
+			not M.id_join_tried then
+		-- Joined by the client's own "Discuss": the Starport ID first,
+		-- the dialog only when that does not give a token
+		M.id_join_tried = true
+		local ok, starport = pcall(require, "buildat/extension/starport")
+		if not (ok and starport.take_id_join and starport.take_id_join()) then
+			return show_login(nil)
+		end
+		log:info("Signing in with the Starport ID")
+		starport.id_token_here(function(token, why)
+			if not token then
+				return show_login(why ~= "cancelled" and why or nil)
+			end
+			send_login("", "", "", nil, false, "", token)
+		end)
 	else
 		show_login(nil)
 	end

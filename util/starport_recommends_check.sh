@@ -7,7 +7,8 @@
 # in there is offered the Aittas it lacks at the start, and the answer
 # lands: "Add" adds the checked one and ignores the unchecked one, and
 # a restart offers neither again. "Discuss" on the ID's line joins the
-# Hearth.
+# Hearth, listed on the Starport, and signs in with the ID by itself,
+# the login dialog only when that is refused.
 set -u
 . "$(dirname "$0")/check_paths.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -29,6 +30,14 @@ cd "$here"
 Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
 	> "$tmp/sp.log" 2>&1 &
 pids+=($!)
+mkdir -p "$tmp/he/apps/hearth"
+cat > "$tmp/he/apps/hearth/starport.json" <<J
+{"starports": ["http://127.0.0.1:$SP"], "name": "Check hearth", "login": "both",
+ "kind": "app", "audience": "everyone", "access": "auto",
+ "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
+  "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
+  "gambling": "no", "personal_data": "no"}}
+J
 Build/bin/buildat_server -m apps/hearth -D "$tmp/he" -P $HE -l 3 \
 	> "$tmp/he.log" 2>&1 &
 pids+=($!)
@@ -46,6 +55,8 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"r
 curl -s -m 10 "localhost:$SP/api/list" | grep -q "\"recommends\":.*$A2" ||
 	fail "/api/list has no recommends ($tmp/admin.log)"
 echo "ok: /api/list carries the recommendations"
+for _ in $(seq 120); do grep -q "verified ok" "$tmp/sp.log" && break; sleep 1; done
+grep -q "verified ok" "$tmp/sp.log" || fail "the Hearth was not listed ($tmp/he.log)"
 
 # An ID logged in on the launcher: its session in starport.json, the
 # Starport's host accepted, the first Aitta known only by the old "aitta"
@@ -95,13 +106,17 @@ PY
 echo "ok: the checked Aitta added, the unchecked one ignored"
 
 # A restart offers neither again; "Discuss" (the ID line's first button)
-# joins the Hearth
+# joins the Hearth and signs in with the ID: the Starport's first-time
+# "name to use in" prompt (Use it), and no login dialog before that
 cat > "$tmp/c2" <<C
 wait_log_any 30000 trusted overlay: 1 Starport ID line
 delay 5000
 mouse_pos 725 15
 mouse_click left
-delay 10000
+delay 4000
+mouse_pos 330 335
+mouse_click left
+delay 6000
 quit
 C
 launcher "$tmp/c2" "$tmp/cl2.log"
@@ -109,7 +124,14 @@ grep -q "Offering" "$tmp/cl2.log" && fail "offered again after a restart"
 echo "ok: not offered again"
 grep -q "Connect succeeded (127.0.0.1:$HE)" "$tmp/cl2.log" ||
 	fail "Discuss did not join the Hearth ($tmp/cl2.log)"
-echo "ok: Discuss joined the Hearth"
+# The Hearth has no admin yet, so it refuses the ID's login, and the
+# login dialog comes up with the reason: both halves of it seen
+grep -q "Signing in with the Starport ID" "$tmp/cl2.log" &&
+	grep -q "Login of reader from" "$tmp/he.log" ||
+	fail "Discuss did not sign in with the ID ($tmp/cl2.log)"
+grep -q "Login refused: This server has no admin yet" "$tmp/cl2.log" ||
+	fail "no login dialog after the refusal ($tmp/cl2.log)"
+echo "ok: Discuss joined the Hearth, signed in with the ID; the refusal to the dialog"
 
 # Taken back from the ignored list, offered again; closed, ignored again
 python3 - "$tmp/cl/starport.json" <<'PY'

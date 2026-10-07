@@ -1008,6 +1008,21 @@ function M.recommended_hearth(url)
 	return r and r.hearth
 end
 
+-- **Discuss signs in with the ID** (user, 2026-10-07): the join it makes
+-- is marked, and the server's login (builtin/accounts) takes the mark
+-- once and asks id_token_here before showing its dialog
+local id_join = nil
+function M.join_with_id(address)
+	id_join = canonical(address)
+	buildat.safe.join_server(address)
+end
+function M.safe.take_id_join()
+	local here = __buildat_server_address()
+	local yes = here ~= nil and id_join == canonical(here)
+	id_join = nil
+	return yes
+end
+
 -- A package's home Hearth when its manifest names none: the Hearth of the
 -- Starport recommending the Aitta it is from, or with no Aitta given,
 -- the first Starport in the settings that recommends one.
@@ -2573,6 +2588,7 @@ M.open_settings = M.safe.open_settings
 M.open_report = M.safe.open_report
 M.open_report_here = M.safe.open_report_here
 M.id_token_here = M.safe.id_token_here
+M.take_id_join = M.safe.take_id_join
 M.group = M.safe.group
 return M
 -- vim: set noet ts=4 sw=4:
