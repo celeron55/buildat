@@ -149,7 +149,7 @@ int main(int argc, char *argv[])
 			"  -l [integer]         Set maximum log level (0...5)\n"
 			"  -L [log file path]   Append log to a specified file\n"
 			"  -x [module_name]     Skip compiling specified module\n"
-			"  -A [address]         Set listening address (default any4)\n"
+			"  -A [address]         Set listening address (default any: IPv6 and IPv4)\n"
 			"  -P [port]            Set network port (default 29500, or the\n"
 			"                       app's default_port: Starport's 29595)\n"
 			"  -W [web_client_path] Serve the web client from here\n"

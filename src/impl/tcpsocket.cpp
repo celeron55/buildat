@@ -48,25 +48,64 @@ bool sockaddr_to_bytes(const sockaddr_storage *ptr, sv_<uchar> &to)
 	return false;
 }
 
+// IPv6 in RFC 5952's short form ("::1", "2001:db8::2:1"): the
+// network's and accounts' loopback tests compare against it, and a
+// spelled-out one ("0000:...:0001") never matched ([DUAL_STACK])
+static std::string ipv6_text(const sv_<uchar> &ip)
+{
+	uint32_t g[8];
+	for(int i = 0; i < 8; i++)
+		g[i] = ((uint32_t)ip[i * 2] << 8) | ip[i * 2 + 1];
+	// The longest run of two or more zero groups, the first of equals
+	int best = -1, best_n = 1;
+	for(int i = 0; i < 8; ){
+		int n = 0;
+		while(i + n < 8 && g[i + n] == 0)
+			n++;
+		if(n > best_n){
+			best = i;
+			best_n = n;
+		}
+		i += n ? n : 1;
+	}
+	std::ostringstream os;
+	os<<std::hex;
+	for(int i = 0; i < 8; i++){
+		if(i == best){
+			os<<"::";
+			i += best_n - 1;
+			continue;
+		}
+		if(i > 0 && i != best + best_n)
+			os<<":";
+		os<<g[i];
+	}
+	return os.str();
+}
+
 std::string address_bytes_to_string(const sv_<uchar> &ip)
 {
+	static const bool checked = [](){
+		auto t = [](sv_<uchar> b){ return ipv6_text(b); };
+		sv_<uchar> one(16, 0); one[15] = 1;
+		sv_<uchar> doc = {0x20,1,0x0d,0xb8,0,0,0,0,0,0,0,0,0,2,0,1};
+		sv_<uchar> any(16, 0);
+		sv_<uchar> mid = {0,1,0,0,0,0,0,2,0,0,0,0,0,0,0,3};
+		if(t(one) != "::1" || t(doc) != "2001:db8::2:1" || t(any) != "::" ||
+				t(mid) != "1:0:0:2::3")
+			log_e("tcpsocket", "ipv6_text self-check failed: %s %s %s %s",
+					t(one).c_str(), t(doc).c_str(), t(any).c_str(),
+					t(mid).c_str());
+		return true;
+	}();
+	(void)checked;
+	if(ip.size() == 16)
+		return ipv6_text(ip);
 	std::ostringstream os;
 	for(size_t i = 0; i < ip.size(); i++){
-		if(ip.size() == 4){
-			os<<std::dec<<std::setfill('0')<<std::setw(0)
-					<<((uint32_t)ip[i] & 0xff);
-			if(i < ip.size() - 1)
-				os<<".";
-		} else {
-			os<<std::hex<<std::setfill('0')<<std::setw(2)
-					<<((uint32_t)ip[i] & 0xff);
-			i++;
-			if(i < ip.size())
-				os<<std::hex<<std::setfill('0')<<std::setw(2)
-					<<((uint32_t)ip[i] & 0xff);
-			if(i < ip.size() - 1)
-				os<<":";
-		}
+		os<<((uint32_t)ip[i] & 0xff);
+		if(i < ip.size() - 1)
+			os<<".";
 	}
 	return os.str();
 }
@@ -252,7 +291,16 @@ struct CTCPSocket: public TCPSocket
 		m_fd = fd;
 		return true;
 	}
+	// "any" is one IPv6 socket that takes IPv4 too (an IPv4 peer reads as
+	// plain a.b.c.d, sockaddr_to_bytes), or IPv4 alone where IPv6 is off
+	// ([DUAL_STACK]); "any4" and "any6" are the one family
 	bool bind_fd(const ss_ &address, const ss_ &port)
+	{
+		if(address == "any")
+			return bind_fd_as("any6", port, true) || bind_fd_as("any4", port);
+		return bind_fd_as(address, port);
+	}
+	bool bind_fd_as(const ss_ &address, const ss_ &port, bool dual = false)
 	{
 		close_fd();
 
@@ -311,7 +359,7 @@ struct CTCPSocket: public TCPSocket
 						sizeof(val));
 #endif
 			if(res->ai_family == AF_INET6){
-				int val = 1;
+				int val = dual ? 0 : 1;
 				setsockopt(try_fd, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&val,
 						sizeof(val));
 			}

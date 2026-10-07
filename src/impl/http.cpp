@@ -163,7 +163,7 @@ ss_ http_get(const ss_ &url, ss_ *redirect)
 }
 
 ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type,
-		ss_ *redirect)
+		ss_ *redirect, bool ipv4)
 {
 	char errbuf[CURL_ERROR_SIZE] = {0};
 	CURL *c = easy(url, errbuf);
@@ -176,6 +176,8 @@ ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type,
 	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_string);
 	curl_easy_setopt(c, CURLOPT_WRITEDATA, &out);
 	curl_easy_setopt(c, CURLOPT_TIMEOUT, STRING_TIMEOUT_S);
+	if(ipv4)
+		curl_easy_setopt(c, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
 	try {
 		perform(c, url, errbuf, redirect);
 	} catch(...){

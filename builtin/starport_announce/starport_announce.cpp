@@ -685,7 +685,13 @@ struct Module: public interface::Module, public Interface
 		}
 		ss_ answer;
 		try {
-			answer = interface::http_post(url+"/api/announce", body.stringify());
+			// With no address named the Starport lists this server by where
+			// the announce came from; over IPv4, as when servers listened
+			// on IPv4 alone, so that a listing is not an IPv6 address an
+			// IPv4 player cannot reach ([DUAL_STACK])
+			answer = interface::http_post(url+"/api/announce",
+					body.stringify(), "application/json", nullptr,
+					!body.get("address").is_string());
 		} catch(std::exception &e){
 			log_w(MODULE, "Announce to %s: %s", cs(url), e.what());
 			std::lock_guard<std::mutex> lock(m_mutex);

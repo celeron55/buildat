@@ -193,7 +193,9 @@ content_type), http_download(url, path) through libcurl (ContentDB,
 [CONTENTDB]); send_mail and mail_supported (TLS unless the relay is on this
 machine). Given a `redirect` string, http_get and http_post do not follow
 a redirect but put its target there and answer "", for a caller that asks
-the user about every host; otherwise up to 8 are followed.
+the user about every host; otherwise up to 8 are followed. http_post's
+ipv4 sends over IPv4 alone (the Starport announce with no address named,
+[DUAL_STACK]).
 interface/aitta.h -- interface::aitta ([AITTA_MVP], doc/aitta.txt): an app
 as a signed package. keygen, public_of, sign, verify, verify_hash (ECDSA
 P-256 through Mbed TLS, deterministic), check_manifest, pack(app_dir,

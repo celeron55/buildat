@@ -33,7 +33,7 @@ Config::Config()
 	set_default("user_path", "");
 	set_default("urho3d_path", "");
 	set_default("compiler_command", "");
-	set_default("network_address", "any4");
+	set_default("network_address", "any");
 	set_default("network_port", "29500");
 	// The launcher's token for its own client, from BUILDAT_OWNER_TOKEN;
 	// see builtin/accounts. Empty for a server nobody launched.

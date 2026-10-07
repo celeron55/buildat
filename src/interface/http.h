@@ -17,10 +17,12 @@ namespace interface
 	// ([SECURITY_RUN_1]). Without it up to 8 are followed.
 	ss_ http_get(const ss_ &url, ss_ *redirect = nullptr);
 	// The body of a POST of `body` as `content_type` ([STARPORT]: a server
-	// announcing itself, a client's report); throws as http_get does
+	// announcing itself, a client's report); throws as http_get does.
+	// ipv4: over IPv4 only, for an announce whose source address is what
+	// it is listed by ([DUAL_STACK])
 	ss_ http_post(const ss_ &url, const ss_ &body,
 			const ss_ &content_type = "application/json",
-			ss_ *redirect = nullptr);
+			ss_ *redirect = nullptr, bool ipv4 = false);
 	// A mail through an SMTP server (smtp:// or smtps://; STARTTLS when the
 	// server offers it): `message` is the whole of it, headers and all,
 	// lines ending in CRLF. user empty: no login. Throws as http_get does.
