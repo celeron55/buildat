@@ -23,7 +23,23 @@ cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
-{ echo "delay 2500"; echo "quit"; } > "$out/cmds.txt"
+# "q" pressed on the launch UI, then "w" and "e" into the Starport ID
+# dialog's fields (the overlay's "Starport ID..." at the top right)
+cat > "$out/cmds.txt" <<EOF
+delay 2500
+keypress q
+delay 300
+mouse_pos 542 9
+mouse_click left
+delay 1500
+keypress w
+delay 300
+keypress Tab
+delay 300
+keypress e
+delay 300
+quit
+EOF
 bin/buildat -m sandbox_test -w 640x360 -l 3 \
 	-c @"$out/cmds.txt" 2>&1 |
 	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
@@ -62,6 +78,17 @@ if ! echo "$line" | grep -q "0 got through"; then
 	echo "FAIL: a launch UI reached past the verbs -- $line"
 	exit 1
 fi
+# **Polling the keys** ([SANDBOX_API_AUDIT]): the attack's Update handler
+# saw "q", so the poll works; "w" and "e" went into the client's own
+# fields, which nobody else hears, by event or by GetKeyPress
+if ! grep -aq "launch sandbox: polled q" "$out/cli.log"; then
+	echo "FAIL: the key poll did not see q on the launch UI"
+	exit 1
+fi
+if grep -aq "launch sandbox: polled [we]" "$out/cli.log"; then
+	echo "FAIL: a script polled a key typed into the Starport ID dialog"
+	exit 1
+fi
 # vim: set noet ts=4 sw=4:
-echo "PASS: a hostile launch UI reaches nothing past the verbs"
+echo "PASS: a hostile launch UI reaches nothing past the verbs, and polls no key typed into the Starport ID dialog"
 exit 0

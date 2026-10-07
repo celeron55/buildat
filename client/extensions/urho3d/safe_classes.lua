@@ -20,6 +20,26 @@ local function resource_name_ok(name)
 			not name:find("%.%.") and not name:find(":")
 end
 
+-- **Keys typed into a secret field are nobody else's, polled either**
+-- ([SECURITY_RUN_1] withholds the events; [SANDBOX_API_AUDIT]): a
+-- script asking GetKeyPress of every key each frame read a Starport
+-- password as well as KeyDown did. While one has the focus only the keys
+-- that move or finish answer.
+local function secret_focus()
+	return magic_sandbox.is_secret_field(ui:GetFocusElement())
+end
+local MOVE_KEYS = {}
+for _, name in ipairs({"KEY_RETURN", "KEY_RETURN2", "KEY_KP_ENTER",
+		"KEY_ESCAPE", "KEY_TAB", "KEY_UP", "KEY_DOWN", "KEY_LEFT", "KEY_RIGHT",
+		"KEY_HOME", "KEY_END", "KEY_PAGEUP", "KEY_PAGEDOWN", "KEY_BACKSPACE",
+		"KEY_DELETE"}) do
+	if _G[name] then MOVE_KEYS[_G[name]] = true end
+end
+assert(MOVE_KEYS[KEY_RETURN], "safe_classes: no key constants")
+local function hidden_key(key)
+	return not MOVE_KEYS[key] and secret_focus()
+end
+
 function M.define(dst, util)
 	util.wc("StringHash", {
 		unsafe_constructor = util.wrap_function({{"string"}},
@@ -2761,12 +2781,15 @@ function M.define(dst, util)
 			-- F9 to F12 are the client's ([CLIENT_KEYS]): never down
 			GetKeyDown = util.wrap_function({"Input", "number"},
 				function(self, key)
-					return not __buildat_client_keys[key] and self:GetKeyDown(key)
+					return not __buildat_client_keys[key] and
+							not hidden_key(key) and self:GetKeyDown(key)
 				end),
 			-- Whether shift, ctrl or alt is held (QUAL_*): what GetKeyDown
 			-- of those keys says in one call ([V2_TYPING])
-			GetQualifierDown = util.self_function("GetQualifierDown",
-					{"boolean"}, {"Input", "number"}),
+			GetQualifierDown = util.wrap_function({"Input", "number"},
+				function(self, qualifier)
+					return not secret_focus() and self:GetQualifierDown(qualifier)
+				end),
 			IsMouseVisible = util.self_function("IsMouseVisible", {"boolean"},
 					{"Input"}),
 			-- A key's name and back, for a bindings file a person can read
@@ -2775,7 +2798,8 @@ function M.define(dst, util)
 			GetKeyFromName = util.self_function("GetKeyFromName", {"number"}, {"Input", "string"}),
 			GetKeyPress = util.wrap_function({"Input", "number"},
 				function(self, key)
-					return not __buildat_client_keys[key] and self:GetKeyPress(key)
+					return not __buildat_client_keys[key] and
+							not hidden_key(key) and self:GetKeyPress(key)
 				end),
 			GetMouseMove = util.self_function("GetMouseMove", {dst.IntVector2}, {"Input"}),
 			-- Where the pointer is, in window pixels: what the MouseMove

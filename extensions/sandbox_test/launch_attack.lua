@@ -8,6 +8,7 @@
 -- launch UI runs. Each attempt is expected to be refused; the verdict
 -- line is what a check reads, and it names anything that got through.
 local log = buildat.Logger("sandbox_test")
+local magic = require("buildat/extension/urho3d")
 local M = {}
 
 -- One attempt: a name, and a function that returns what it reached.
@@ -114,6 +115,18 @@ function M.run()
 			log:verbose("launch sandbox: " .. a[1] .. ": " .. tostring(why))
 		end
 	end
+	-- **Polling the keys** ([SANDBOX_API_AUDIT]): every letter's
+	-- GetKeyPress each frame, logged as it is seen. The check presses one
+	-- here (it must be seen: the poll works) and one into the Starport ID
+	-- dialog's field (it must not: a secret field's keys are nobody
+	-- else's, polled or not)
+	magic.SubscribeToEvent("Update", function()
+		for key = 97, 122 do
+			if magic.input:GetKeyPress(key) then
+				log:info("launch sandbox: polled " .. string.char(key))
+			end
+		end
+	end)
 	-- The one line a check reads
 	log:info("launch sandbox: " .. #ATTEMPTS .. " reaches tried, " ..
 			#got_through .. " got through" ..
