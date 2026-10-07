@@ -636,6 +636,37 @@ function M.safe.keyboard_page(win)
 			dirty = false
 			rewalk(page)
 		end
+		local cols = page.columns
+		if cols and arranged and shown(win) then
+			-- The left one last focused there, by its place: a sidebar
+			-- drawn again has new buttons in the same places
+			for i, e in ipairs(page_items(cols[1], {})) do
+				if e:HasFocus() then
+					page.left_at, page.side = i, 1
+				end
+			end
+			for _, e in ipairs(page_items(cols[2], {})) do
+				if e:HasFocus() then
+					page.side = 2
+				end
+			end
+			-- After Enter on the left: the right's first item once its
+			-- page is a new one (one of the old items gone), or in 3 s
+			local wait = page.to_right
+			if wait and buildat.get_time_us() > wait.until_us then
+				page.to_right = nil
+			elseif wait then
+				local now = page_items(cols[2], {})
+				local new = #wait.old == 0 and #now > 0
+				for _, e in ipairs(wait.old) do
+					new = new or gone(e)
+				end
+				if new and #now > 0 then
+					page.to_right = nil
+					now[1]:SetFocus(true)
+				end
+			end
+		end
 	end)
 	key_sub = magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		if page_gone(page) or not shown(win) then
@@ -677,18 +708,69 @@ function M.safe.keyboard_page(win)
 					math.max(at, 1) + d))]:SetFocus(true)
 			return
 		end
-		if (not rows and (key == KEY_UP or key == KEY_DOWN)) or
-				(not typing and (key == KEY_LEFT or key == KEY_RIGHT)) then
+		-- **Two columns** (keyboard_columns): Up and Down stay in the one
+		-- with the focus, Right goes to the right one's first item, Left
+		-- back to the left one's last; Enter on the left one goes right
+		-- once the page it opens is there
+		local items = page.items
+		local side = nil
+		local cols = page.columns
+		if cols then
+			local left, right = page_items(cols[1], {}),
+					page_items(cols[2], {})
+			for i, e in ipairs(left) do
+				if e:HasFocus() then
+					side, items, page.left_at = 1, left, i
+				end
+			end
+			for _, e in ipairs(right) do
+				if e:HasFocus() then
+					side, items = 2, right
+				end
+			end
+			-- Nothing focused (a page with nothing to focus came up after
+			-- Enter): an arrow key goes back to the left one's last
+			if not side and #left > 0 and (key == KEY_UP or
+					key == KEY_DOWN or key == KEY_LEFT or key == KEY_RIGHT) then
+				left[math.min(page.left_at or 1, #left)]:SetFocus(true)
+				page.side = 1
+				return
+			end
+			if not typing and key == KEY_RIGHT and side == 1 and #right > 0 then
+				right[1]:SetFocus(true)
+				page.side = 2
+				return
+			end
+			if not typing and key == KEY_LEFT and side == 2 and #left > 0 then
+				left[math.min(page.left_at or 1, #left)]:SetFocus(true)
+				page.side = 1
+				return
+			end
+			-- The button may have drawn the sidebar again already, its
+			-- focus gone with it: the side last seen then
+			if (side or page.side) == 1 and (key == KEY_RETURN or
+					key == KEY_RETURN2 or key == KEY_KP_ENTER) then
+				page.to_right = {old = right,
+					until_us = buildat.get_time_us() + 3000000}
+			end
+		end
+		-- **Rows by Up and Down only** (user, 2026-10-07): Left and Right
+		-- are a field's cursor, or the columns'
+		if not rows and (key == KEY_UP or key == KEY_DOWN) and #items > 0 then
 			local at = 0
-			for i, e in ipairs(page.items) do
+			for i, e in ipairs(items) do
 				if shown(e) and e:HasFocus() then
 					at = i
 				end
 			end
-			local d = (key == KEY_DOWN or key == KEY_RIGHT) and 1 or -1
-			local n = #page.items
+			local d = key == KEY_DOWN and 1 or -1
+			local n = #items
 			local i = at == 0 and 1 or (at - 1 + d) % n + 1
-			page.items[i]:SetFocus(true)
+			items[i]:SetFocus(true)
+			-- Keys come several in a frame: kept now, not at the next Update
+			if side == 1 then
+				page.left_at = i
+			end
 			return
 		end
 		-- A letter, with no Ctrl or Alt, outside a text field
@@ -713,6 +795,18 @@ function M.safe.keyboard_page(win)
 		log:verbose("keyboard: " .. ch .. " to " .. (t and unmark(t.text) or "?"))
 	end)
 	return win
+end
+
+-- keyboard_columns(win, left, right): win's keyboard_page in two columns,
+-- a sidebar and the page beside it (Starport's window): see the keys in
+-- keyboard_page. Tab is Urho3D's UI's own, which moves the focus by itself.
+function M.safe.keyboard_columns(win, left, right)
+	local name = page_name(win)
+	for _, p in ipairs(keyboard_pages) do
+		if p.name == name and not page_gone(p) then
+			p.columns = {left, right}
+		end
+	end
 end
 
 -- Bind up/down/enter and hover selection to existing buttons on a uistack

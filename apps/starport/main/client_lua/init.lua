@@ -174,6 +174,9 @@ local function build_frame()
 	view.scrollBarsAutoVisible = true
 	-- Less the vertical bar and a margin
 	page_width = view.width - 24
+	-- [STARPORT_UI_KEYS]: Up and Down in the sidebar or the page, Right
+	-- and Left between them, Enter on the sidebar into its page
+	ui.keyboard_columns(frame, sidebar, view)
 	if narrow then
 		view.visible = false
 	end
