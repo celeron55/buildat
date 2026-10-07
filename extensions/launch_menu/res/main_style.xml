@@ -164,7 +164,8 @@
         <element type="BorderImage" internal="true">
             <attribute name="Image Rect" value="48 0 64 16" />
             <attribute name="Border" value="4 4 4 4" />
-            <attribute name="Hover Image Offset" value="16 16" />
+            <!-- No hover image: a scroll area under the mouse is not a
+                 thing to press ([STARPORT_PANEL_HOVER]) -->
             <attribute name="Clip Border" value="2 2 2 2" />
         </element>
     </element>
