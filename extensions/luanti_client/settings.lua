@@ -223,5 +223,111 @@ function M.show()
 	end)
 end
 
+-- The pause menu ([LUANTI_PAUSE]), as vanilla's apps/vanilla pause.lua
+-- is: a screen on the UI stack over the session, which holds the world
+-- as any screen over it does (init.lua's screen_above). Escape and a
+-- click off it are Continue.
+-- o: {bindings, view = world.lua's, open_chat(), leave()}
+-- simplified: the sound and render scale steps are copies of vanilla's,
+-- which is served to older clients and cannot require a shared one
+local SCALES = {1, 0.75, 0.67, 0.5, 0.33, 0.25}
+function M.show_pause(o)
+	local root = uistack.main:push({desc = "luanti_client pause"})
+	root.defaultStyle = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
+	local menu = ui_utils.vertical_menu(root, {min_width = 360})
+	local title = menu.window:CreateChild("Text")
+	title:SetStyleAuto()
+	title.text = "Paused"
+	local function close()
+		uistack.main:pop(root)
+	end
+	local function label(b, t)
+		b:GetChild("ButtonText"):SetText(t)
+	end
+	menu:add("Continue playing", close, true)
+	menu:add("Key bindings", function()
+		close()
+		M.show_keys(o.bindings, function() M.show_pause(o) end)
+	end)
+	menu:add("Chat...", function()
+		close()
+		o.open_chat()
+	end)
+	-- The player's ear, the client's preference: muted, then 0 dB and
+	-- down in 6 dB steps, then muted again ([VOLUME_LAW])
+	local function sound_text()
+		local mute, db = buildat.get_sound()
+		return mute and "Sound: muted" or (db <= -33 and "Sound: off" or
+				string.format("Sound: %d dB", db))
+	end
+	local sb
+	sb = menu:add(sound_text(), function()
+		local mute, db = buildat.get_sound()
+		if mute then
+			buildat.set_sound(false, 0)
+		elseif db > -30 then
+			buildat.set_sound(false, math.max(-30, db - 6))
+		else
+			buildat.set_sound(true, 0)
+		end
+		label(sb, sound_text())
+	end)
+	-- The 3D at a share of the window's pixels: each press the next step
+	-- down from automatic, round to automatic again
+	local function scale_text()
+		local now, auto = buildat.get_render_scale()
+		return string.format("Render scale: %s%d %%", auto and
+				"automatic, " or "", math.floor(now * 100 + 0.5))
+	end
+	local rs
+	rs = menu:add(scale_text(), function()
+		local now, auto = buildat.get_render_scale()
+		local nxt = auto and SCALES[1] or "auto"
+		if not auto then
+			for _, v in ipairs(SCALES) do
+				if v < now - 0.001 then
+					nxt = v
+					break
+				end
+			end
+		end
+		buildat.set_render_scale(nxt)
+		label(rs, scale_text())
+	end)
+	-- The settings' view range, now and for the next session.
+	-- simplified: the server's own limit is not known to the client (Luanti
+	-- sends none); past what it sends there is just fog
+	local s = M.load()
+	local vb
+	vb = menu:add("View range: " .. s.view_range, function()
+		local nxt = RANGES[1]
+		for _, n in ipairs(RANGES) do
+			if n > s.view_range then
+				nxt = n
+				break
+			end
+		end
+		s.view_range = nxt
+		M.save(s)
+		o.view:set_far_clip(nxt)
+		label(vb, "View range: " .. nxt)
+	end)
+	menu:add("Settings...", function()
+		close()
+		M.show()
+	end)
+	menu:add("Leave the game", function()
+		close()
+		o.leave()
+	end)
+	menu:on_key(function(key)
+		if key == KEY_ESCAPE then
+			close()
+			return true
+		end
+	end)
+	return root
+end
+
 return M
 -- vim: set noet ts=4 sw=4:

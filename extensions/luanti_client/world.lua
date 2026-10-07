@@ -868,6 +868,15 @@ function M.new(magic, buildat, log, options)
 		end
 	end
 
+	-- The view range from the pause menu ([LUANTI_PAUSE]); the fog keeps
+	-- its share of it, on or off
+	function self:set_far_clip(n)
+		zone.fogStart = zone.fogStart * n / far_clip
+		zone.fogEnd = zone.fogEnd * n / far_clip
+		far_clip = n
+		camera.farClip = n
+	end
+
 	function self:set_fov(fov, is_multiplier, transition_time)
 		self.fov_server = {fov = fov, is_multiplier = is_multiplier}
 		local want = BASE_FOV

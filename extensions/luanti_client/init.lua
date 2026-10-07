@@ -20,7 +20,7 @@ HA_CENTER, HA_LEFT, HA_RIGHT, KEY_1, KEY_8, KEY_A, KEY_C,
 		KEY_CTRL, KEY_D, KEY_ESCAPE, KEY_F1, KEY_F11, KEY_F12, KEY_F2, KEY_F3,
 		KEY_F5, KEY_F10, KEY_H, KEY_I, KEY_K, KEY_Q, KEY_S, KEY_SHIFT,
 		KEY_SPACE, KEY_T, KEY_V, KEY_W, KEY_Z, LM_HORIZONTAL, LM_VERTICAL,
-		MOUSEB_LEFT, MOUSEB_MIDDLE, MOUSEB_RIGHT, SOUND_MASTER, VA_CENTER,
+		MOUSEB_LEFT, MOUSEB_MIDDLE, MOUSEB_RIGHT, VA_CENTER,
 		VA_TOP =
 	magic.HA_CENTER, magic.HA_LEFT, magic.HA_RIGHT, magic.KEY_1,
 	magic.KEY_8, magic.KEY_A, magic.KEY_C, magic.KEY_CTRL, magic.KEY_D,
@@ -29,7 +29,7 @@ HA_CENTER, HA_LEFT, HA_RIGHT, KEY_1, KEY_8, KEY_A, KEY_C,
 	magic.KEY_I, magic.KEY_K, magic.KEY_Q, magic.KEY_S, magic.KEY_SHIFT,
 	magic.KEY_SPACE, magic.KEY_T, magic.KEY_V, magic.KEY_W, magic.KEY_Z,
 	magic.LM_HORIZONTAL, magic.LM_VERTICAL, magic.MOUSEB_LEFT,
-	magic.MOUSEB_MIDDLE, magic.MOUSEB_RIGHT, magic.SOUND_MASTER,
+	magic.MOUSEB_MIDDLE, magic.MOUSEB_RIGHT,
 	magic.VA_CENTER, magic.VA_TOP
 local uistack = require("buildat/extension/uistack")
 local ui_utils = require("buildat/extension/ui_utils")
@@ -3709,68 +3709,23 @@ local function show_client(host, port, name, password, mode)
 			mouse_look(false, "the session ended")
 			client:disconnect()
 			view:close()
-			uistack.main:pop(root)
+			-- With what is over it: the pause menu, its key and settings
+			-- screens, when the window is closed from under them
+			uistack.main:pop_to(root, true)
 		end
 
-		-- The pause menu: a formspec drawn by this client's own formspec
-		-- code rather than a dialog built by hand: the only thing that
-		-- differs from a game's form is where the buttons go, and a local
-		-- form's fields reach a function here instead of the server.
-		-- Escape closes it, because that is what close_form already does.
-		-- The key bindings and the settings it opens are screens on the
-		-- UI stack ([EXT_SETTINGS]).
-		local sound_muted = false
-
-		local function pause_spec()
-			-- Continuing is the first thing on it and the first thing a
-			-- player wants: escape does the same, but a menu whose only way
-			-- back to the game is a key nobody was told about is a menu that
-			-- traps people. button_exit closes the form by itself, which is
-			-- exactly what continuing is.
-			return "size[6,6.9]"..
-					"label[0.2,0.2;Paused]"..
-					"button_exit[0.4,1.0;5.2,0.8;btn_continue;"..
-					"Continue playing]"..
-					"button[0.4,2.1;5.2,0.8;btn_sound;"..
-					(sound_muted and "Unmute sound" or "Mute sound").."]"..
-					"button[0.4,3.2;5.2,0.8;btn_keys;Key bindings]"..
-					"button[0.4,4.3;5.2,0.8;btn_settings;Settings...]"..
-					"button[0.4,5.4;5.2,0.8;btn_exit;Exit]"
-		end
-
-		local menu_fields
-
-		menu_fields = function(fields)
-			if fields.btn_sound then
-				sound_muted = not sound_muted
-				magic.audio:SetMasterGain(SOUND_MASTER,
-						sound_muted and 0 or 1)
-				-- The label says which way it goes next, so the menu is
-				-- drawn again rather than left saying the wrong thing
-				open_local_form(pause_spec(), menu_fields)
-			elseif fields.btn_keys then
-				-- The shared editor ([EXT_SETTINGS]) on the UI stack, over
-				-- the closed form; back reopens the menu
-				close_form()
-				settings.show_keys(BINDINGS, open_pause_menu)
-			elseif fields.btn_settings then
-				close_form()
-				settings.show()
-			elseif fields.btn_back then
-				open_local_form(pause_spec(), menu_fields)
-			elseif fields.btn_exit then
-				-- The disconnect goes out and the window closes, which is
-				-- the same path the window's own close button takes; from
-				-- buildat's menu the grid underneath is what is left
+		-- The pause menu ([LUANTI_PAUSE]): settings.lua's screen on the UI
+		-- stack, which holds the world as the key and settings screens do.
+		-- Its Leave is the window's own close: the disconnect goes out, and
+		-- from buildat's menu the grid underneath is what is left.
+		open_pause_menu = function()
+			settings.show_pause{bindings = BINDINGS, view = view,
+					open_chat = open_chat, leave = function()
 				leave()
 				if SETTINGS.cancel_exits then
-					engine:Exit()
+					buildat.quit()
 				end
-			end
-		end
-
-		open_pause_menu = function()
-			open_local_form(pause_spec(), menu_fields)
+			end}
 		end
 
 		-- The client is going away: the window was closed, or a command
@@ -3795,7 +3750,7 @@ local function show_client(host, port, name, password, mode)
 				-- closing the client over it would be leaving the launcher
 				-- for a server's refusal ([BOX_PLAYTEST_2] 2)
 				if got_content and SETTINGS.cancel_exits then
-					engine:Exit()
+					buildat.quit()
 				else
 					-- Nothing of the game ever arrived, so this was the
 					-- address, the name or the password: back to where they
@@ -4025,7 +3980,7 @@ show_connect_dialog = function(address, name)
 		-- is quitting; launched from buildat's menu, that menu is what is
 		-- underneath and cancelling belongs to it. See M.launch below.
 		if SETTINGS.cancel_exits then
-			engine:Exit()
+			buildat.quit()
 		end
 	end
 
