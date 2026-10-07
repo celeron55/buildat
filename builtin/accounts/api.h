@@ -17,12 +17,13 @@
 // - A server with no admin prints a setup code; the first to join with it
 //   is the admin. A new account needs an invite from an admin, unless
 //   registration is open, which it is by default only on a server the
-//   launcher started.
+//   launcher started. Open registration takes at most 5 untrusted
+//   accounts made in 30 days from one network (has_priv "trusted").
 // - The launcher's own user of a server it started (launch parameter
 //   launcher=1, from 127.0.0.1 or ::1) joins by name alone, and is the
 //   first admin.
-// - Failed logins wait, doubling, per name and per address; every login is
-//   logged.
+// - Failed logins wait, doubling, per address's network; every login is
+//   logged. A kept login lasts 90 days from its last use.
 // - An admin kicks, bans and unbans, and manages the accounts and invites.
 //
 // The client's side is builtin/accounts/client_lua/accounts.lua: the join
@@ -124,6 +125,14 @@ namespace accounts
 		// app's can go.
 		virtual bool offer_smtp(const ss_ &url, const ss_ &from,
 				const ss_ &user, const ss_ &password) = 0;
+		// [TRUST_LADDER] An account's privileges beside "admin", which goes
+		// with it when it is deleted: "trusted" (an app's word that it is
+		// no new account any more, which frees its place in open
+		// registration's quota of untrusted accounts per network), and an
+		// app's roles ("helper", "moderator"). set_priv: "" when done, else
+		// why not; "admin" is not set so.
+		virtual bool has_priv(const ss_ &name, const ss_ &priv) = 0;
+		virtual ss_ set_priv(const ss_ &name, const ss_ &priv, bool on) = 0;
 	};
 
 	inline bool access(interface::Server *server,

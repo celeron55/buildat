@@ -35,8 +35,9 @@ Accounts and admins
 Joining is builtin/accounts: a local account or a Starport ID, as the
 server's admin set up its logins. A server with no admin logs "setup
 code <code>"; whoever joins with it is the admin. The server's admins
-are Hearth's admins and its moderators. Nothing is posted without
-joining; the HTML face needs no account.
+are Hearth's admins; the admin makes moderators, and a moderator
+helpers (Limits, below). Nothing is posted without joining; the HTML
+face needs no account.
 
 The HTML face
 -------------
@@ -85,12 +86,13 @@ is multi-line: Enter breaks the line, Ctrl+Enter sends.
 Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
 "hr:res" {id, ok, result | error}. The commands and who may use them:
 
-    me                     who this is: account, admin, unseen, level,
-                           open_reports (admin)
+    me                     who this is: account, admin, moderator,
+                           helper, unseen, level, open_reports (a helper
+                           and up)
     topics, topic, thread  read; "thread" with after=<id> gives the
                            messages after it, 1000 a call
     search                 30 a minute per account
-    new_topic              the admin; name, about, parent (0, or a
+    new_topic              a moderator; name, about, parent (0, or a
                            top-level topic)
     new_thread             anyone; topic, title, body, subject, kind
                            ("", question, problem, idea, or patch in a
@@ -101,28 +103,40 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
                            ([DISCUSS_SERVER]); or game=true and subject
                            "game:<source>", in category "games"
                            ([OVERLAY_DISCUSS])
-    status                 the admin: a problem's (open, confirmed,
+    status                 a moderator: a problem's (open, confirmed,
                            fixed, wontfix) or a patch's (open, applied,
                            wontfix), fixed_in a version
-    topic_tracker          the admin: topic, on -- its threads are tickets
-    topic_category         the admin: topic, category ("servers" or "")
-    tracker_link           a ticket's starter or the admin: thread, link
+    topic_tracker          a moderator: topic, on -- its threads are tickets
+    topic_category         a moderator: topic, category ("servers" or "")
+    tracker_link           a ticket's starter or a moderator: thread, link
                            ("" takes it off); below
-    tracker_domains        the list; the admin: add, remove (domains)
-    reply                  anyone; not in a hidden thread but the admin
-    edit                   the message's author or the admin
-    answered               whoever started the thread, or the admin;
+    tracker_domains        the list; a moderator: add, remove (domains)
+    reply                  anyone; not in a hidden thread but a moderator
+    edit                   the message's author or a moderator
+    answered               whoever started the thread, or a moderator;
                            message 0 takes it back; not the first message
     follow                 on true or false
     notifications          the latest 50; they are seen after
     report                 someone else's shown message, with a reason
-    appeal                 one's own hidden message, with a text
-    queue                  the admin: the open reports and appeals
-    moderate               the admin: a report hidden or dismissed, an
+    appeal                 one's own message a moderator hid, with a text
+    queue                  a helper and up: the open reports, appeals,
+                           tracker domains and held links
+    moderate               a moderator: a report hidden or dismissed, an
                            appeal restored or dismissed, a tracker
                            domain accepted or dismissed; a hide and an
                            appeal's dismissal need a statement, which its
-                           author is notified with
+                           author is notified with. A helper too: a held
+                           link approved (shown, its author trusted) or
+                           rejected (deleted)
+    trust                  a helper and up: name, on -- an account
+                           trusted (a member), or no longer; a helper
+                           takes back only its own, within 7 days
+    role                   name, role ("helper", "moderator" or ""): a
+                           moderator makes helpers, the admin moderators
+    staff                  a helper and up: the helpers and moderators
+    account                name: its level, its messages; to its owner
+                           its trust counts; to a helper and up who
+                           trusted it and whom it trusted
 
 Pushed by the server: "hr:new" {thread, message} to every client that
 has that thread open (a chat runs on it), and "hr:notify" {unseen} to
@@ -143,12 +157,16 @@ whoever started it or the admin.
 
 Hearth keeps a list of tracker domains (exact host names). A link to a
 listed domain is shown. A link to another is shown when whoever set it
-may post links now (level 1 or the admin, looked up when it is shown),
+may post links now (a member or up, looked up when it is shown),
 and setting it adds its domain to the list; a new account's waits in
 the moderation queue as a domain, and accepting it adds the domain.
-Removing a domain hides every new account's link to it; the admin also
-takes a single link off. A new account's links in a message are allowed
-to the listed domains and to Hearth's own pages, and refused elsewhere.
+Removing a domain hides every new account's link to it; a moderator
+also takes a single link off. A new account's links in a message are
+allowed to the listed domains and to Hearth's own pages; one elsewhere
+is held: the message (a new thread with it) is shown to its author
+alone, "Waiting for a helper to approve its link", and queued. One
+account has one held at a time. Approved, it is shown and its author
+trusted; rejected, it is deleted.
 
 A patch is a file named .patch or .diff of text whose first 10 lines
 have "From ", "diff --git ", "--- ", "+++ " or "@@ " at a line's start,
@@ -187,18 +205,35 @@ control characters but a tab, and a line break where lines are allowed.
 A level is worked out at each post:
 
     0  a new account: 2 threads a day, 10 messages an hour, links to
-       the tracker domains only
-    1  active on 5 days, none of its messages hidden in the last 30
-       days: 10 threads a day, 60 messages an hour. A day (UTC) is
-       active if the account read a thread or wrote a message that
-       stands on it, and counts once it is over: more on one day is
-       no more trust
-    2  an admin: no limit
+       the tracker domains only (others held, above)
+   10  a member: trusted, and none of its messages hidden by a
+       moderator in the last 30 days: 10 threads a day, 60 messages an
+       hour. Trusted is an accounts privilege: by 5 active days -- a
+       day (UTC) is active if the account read a thread or wrote a
+       message that stands on it, and counts once it is over, so more
+       on one day is no more trust -- or by a helper's or a
+       moderator's approval
+   20  a helper, made by a moderator: 20 threads a day, 120 messages an
+       hour; sees the queue, approves or rejects held links and trusts
+       accounts, 20 a day; nothing else of a moderator's
+   30  a moderator, made by the admin: no limit; the queue, the topics,
+       the tracker domains, a file deleted, helpers made and unmade
+   40  the admin: a moderator's, and what is server-wide -- the files'
+       settings, the release sources, moderators made and unmade
 
-An edit counts as a message. A link is "://", "www." or anything the
-markup makes a link of. An account reports 10 a day at most (an admin
-any number), and has one open report or appeal per message. Search on
-the HTML face is 30 a minute per address (429 after).
+The levels are spaced so one added later goes between two. An edit
+counts as a message. A link is "://", "www." or anything the markup
+makes a link of. An account reports 10 a day at most (a moderator any
+number), and has one open report or appeal per message.
+
+A report weighs by its reporter's level: a new account 0, a member 1, a
+helper and up 3, and nothing for 30 days after a moderator dismissed a
+message hidden by reports it made. The reports of one network (an IPv4
+/24 or an IPv6 /64) count once, at the highest. At 3 in all the message
+is hidden, "Reported; hidden until a moderator looks", unless its author
+is a helper or up; the moderator hides it (with a statement) or
+dismisses the report, which shows it again. Search on the HTML face is
+30 a minute per address (429 after).
 
 The environment
 ---------------

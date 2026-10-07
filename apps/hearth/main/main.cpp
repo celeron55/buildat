@@ -25,12 +25,14 @@
 // The records are one SQLite file, <user>/apps/<app>/hearth.sqlite, with
 // a full-text index beside them; every statement binds its values.
 //
-// **Before the public** ([HEARTH_MVP] step 6): automatic trust -- a new
-// account posts less and no links until a day has passed, it has read
-// five threads and three of its messages stand (a message hidden in the
-// last 30 days puts it back) -- with rate limits by level; reports of a
-// message, a queue for the moderators (the server's admins), a hidden
-// message's statement of reasons to its author, and the author's appeal.
+// **Before the public** ([HEARTH_MVP] step 6, [TRUST_LADDER]): levels --
+// a new account, a member (trusted: five active days, or a helper's or a
+// moderator's approval; a message hidden in the last 30 days puts it
+// back), a helper, a moderator, the admin -- with rate limits by level; a
+// new account's first link held for approval; reports of a message,
+// weighed by network, that hide it until a moderator looks; a queue for
+// the moderators, a hidden message's statement of reasons to its author,
+// and the author's appeal.
 // simplified: Hearth's own queue; Starport's reports, appeals and audit
 // log shared as a builtin is the upgrade, once a third app wants them.
 //
@@ -436,7 +438,15 @@ static const char *SCHEMA =
 		"reason TEXT NOT NULL, time INTEGER NOT NULL, "
 		"state TEXT NOT NULL DEFAULT 'open', handled_by TEXT NOT NULL DEFAULT '', "
 		"handled_time INTEGER NOT NULL DEFAULT 0, "
-		"statement TEXT NOT NULL DEFAULT '');"
+		"statement TEXT NOT NULL DEFAULT '', "
+		// [TRUST_LADDER] A report's network (address_bin(), kept while it
+		// is open) and weight
+		"bin TEXT NOT NULL DEFAULT '', weight INTEGER NOT NULL DEFAULT 0);"
+	// [TRUST_LADDER] Who trusted an account, when, and by which held
+	// message if by one
+	"CREATE TABLE IF NOT EXISTS approvals(account TEXT NOT NULL, "
+		"by TEXT NOT NULL, time INTEGER NOT NULL, "
+		"message INTEGER NOT NULL DEFAULT 0);"
 	// [FORUM] step 5: what was uploaded, at /f/<id>. lod 0 a file kept as
 	// it came (not an image), 1 an image as crushed on upload, 2 crushed
 	// again; "used" when a person last fetched it (or its upload)
@@ -463,6 +473,8 @@ static const char *const COLUMNS_ADDED[][3] = {
 	{"threads", "link_by", "TEXT NOT NULL DEFAULT ''"},
 	// [HEARTH_UI]: the last message read, for what is unread since
 	{"reads", "last", "INTEGER NOT NULL DEFAULT 0"},
+	{"reports", "bin", "TEXT NOT NULL DEFAULT ''"},
+	{"reports", "weight", "INTEGER NOT NULL DEFAULT 0"},
 };
 // What a poster picks a thread to be ([PACKAGE_SUBJECT]); "release" is
 // Hearth's own
@@ -580,11 +592,35 @@ static bool is_patch(const ss_ &name, const ss_ &data)
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
 		"/robots.txt", "/p/", "/brand/", "/u/", "/unseen"};
 
-// Trust ([HEARTH_MVP] step 6): what a level may post. Level 0 is a new
-// account, 1 one that has stood a while, 2 the admin
+// Trust ([HEARTH_MVP] step 6, [TRUST_LADDER]): the levels, spaced so one
+// added later goes between two; compared with >=, never ==. A helper and
+// a moderator are accounts privileges a moderator or the admin gives.
+static const int LV_NEW = 0, LV_MEMBER = 10, LV_HELPER = 20,
+		LV_MODERATOR = 30, LV_ADMIN = 40;
+// What a level may post
 struct Limits { int threads_a_day, messages_an_hour; bool links; };
-static const Limits LIMITS[3] = {{2, 10, false}, {10, 60, true},
-		{1000000, 1000000, true}};
+static Limits limits(int lv)
+{
+	return lv >= LV_MODERATOR ? Limits{1000000, 1000000, true} :
+			lv >= LV_HELPER ? Limits{20, 120, true} :
+			lv >= LV_MEMBER ? Limits{10, 60, true} : Limits{2, 10, false};
+}
+// messages.hidden: by a moderator (with a statement), a new account's
+// link held for approval, or hidden by reports until a moderator looks
+static const int HIDDEN = 1, HELD = 2, REPORTED = 3;
+static ss_ hidden_text(int64_t hidden, const ss_ &reason)
+{
+	return hidden == HELD ? "Waiting for a helper to approve its link" :
+			hidden == REPORTED ? "Reported; hidden until a moderator looks" :
+			"Hidden by a moderator: "+reason;
+}
+// Approvals a day by a helper, and how long it may take one back
+static const int APPROVALS_A_DAY = 20;
+static const int64_t UNDO_S = 7 * 86400;
+// A report weighs by its reporter's level (a member 1, a helper this);
+// a network's reports count once, at their highest; at this in all a
+// message is hidden until a moderator looks
+static const int HIDE_WEIGHT = 3;
 static const int REPORTS_A_DAY = 10;
 // The days a new account is active on before it stands (level 1)
 static const int ACTIVE_DAYS = 5;
@@ -762,11 +798,7 @@ struct Module: public interface::Module
 	// links trusted too
 	int level_of(const ss_ &name)
 	{
-		bool admin = false;
-		accounts::access(m_server, [&](accounts::Interface *a){
-			admin = !name.empty() && a->is_admin(name);
-		});
-		return level(name, admin);
+		return level(name);
 	}
 
 	// A ticket's link is shown when its domain is whitelisted, or whoever
@@ -774,7 +806,7 @@ struct Module: public interface::Module
 	bool link_shown(const ss_ &link, const ss_ &by)
 	{
 		return !link.empty() && (tracker_domains().count(url_host(link)) ||
-				level_of(by) >= 1);
+				level_of(by) >= LV_MEMBER);
 	}
 
 	// The patches a message links to (/f/<id>), their text inline, at most
@@ -1254,6 +1286,8 @@ struct Module: public interface::Module
 			v.set("edited", m.i(4));
 			v.set("hidden", hidden);
 			v.set("hidden_reason", m.s(6));
+			if(hidden)
+				v.set("hidden_text", hidden_text(m.i(5), m.s(6)));
 			v.set("patches", patches_in(jstr(v, "body")));
 			// A message's own bytes besides its body: many short ones fill
 			// a part too
@@ -1267,14 +1301,21 @@ struct Module: public interface::Module
 		return t;
 	}
 
+	// held: a new account's link waiting for approval ([TRUST_LADDER]),
+	// in nobody's view, index or notifications but its author's
+	// simplified: approved later, it tells no one, as a hide undone does
 	int64_t add_message(int64_t thread_id, const ss_ &author, const ss_ &body,
-			const ss_ &title, bool mention = true)
+			const ss_ &title, bool mention = true, bool held = false)
 	{
 		const int64_t t = now_s();
 		Q q(m_db, "INSERT INTO messages(thread, author, body, created) "
 				"VALUES(?, ?, ?, ?)");
 		q.b(thread_id).b(author).b(body).b(t).step();
 		const int64_t id = sqlite3_last_insert_rowid(m_db);
+		if(held){
+			hold(id, author);
+			return id;
+		}
 		Q s(m_db, "INSERT INTO search(rowid, title, body) VALUES(?, ?, ?)");
 		s.b(id).b(title).b(body).step();
 		Q u(m_db, "UPDATE threads SET last = ? WHERE id = ?");
@@ -1449,8 +1490,8 @@ struct Module: public interface::Module
 	{
 		const ss_ id = itos(jint(m, "id"));
 		if(m.get("hidden").is_true())
-			return "<div class=\"box\" id=\"m"+id+"\"><p class=\"meta\">"
-					"Hidden by a moderator: "+html(jstr(m, "hidden_reason"))+
+			return "<div class=\"box\" id=\"m"+id+"\"><p class=\"meta\">"+
+					html(jstr(m, "hidden_text"))+
 					"</p></div>\n";
 		return "<div class=\"box"+ss_(answer ? " answer" : "")+"\" id=\"m"+id+
 				"\"><p class=\"meta\">"+(answer ? "<b>This answered it:</b> " :
@@ -1703,6 +1744,7 @@ struct Module: public interface::Module
 			m.set("edited", q.i(4));
 			m.set("hidden", q.i(7) != 0);
 			m.set("hidden_reason", q.s(8));
+			m.set("hidden_text", hidden_text(q.i(7), q.s(8)));
 			const ss_ thread_title = q.s(6);
 			title = thread_title+" - Hearth";
 			body = "<p class=\"meta\">In <a href=\"/t/"+itos(q.i(5))+"#m"+
@@ -1770,10 +1812,8 @@ struct Module: public interface::Module
 		json::Value res = json::object();
 		res.set("id", q.get("id"));
 		ss_ name;
-		bool admin = false;
 		accounts::access(m_server, [&](accounts::Interface *a){
 			name = a->name_of(packet.sender);
-			admin = !name.empty() && a->is_admin(name);
 		});
 		ss_ error;
 		json::Value result;
@@ -1784,7 +1824,8 @@ struct Module: public interface::Module
 		else {
 			try {
 				exec("BEGIN");
-				result = handle(name, admin, jstr(q, "cmd"), q, packet.sender);
+				result = handle(name, level(name), jstr(q, "cmd"), q,
+						packet.sender);
 				exec("COMMIT");
 			} catch(std::exception &e){
 				sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
@@ -1804,14 +1845,108 @@ struct Module: public interface::Module
 		push();
 	}
 
-	// 0 a new account, 1 one that has stood a while, 2 the admin
-	int level(const ss_ &name, bool admin)
+	// An account's level: the admin, a moderator's or a helper's role, or
+	// a member while trusted -- by ACTIVE_DAYS, which trusts it in
+	// accounts from then on, or by an approval -- and no message of it
+	// hidden in the last 30 days
+	int level(const ss_ &name)
 	{
-		if(admin)
-			return 2;
+		int role = LV_NEW;
+		bool trusted = false;
+		accounts::access(m_server, [&](accounts::Interface *a){
+			if(name.empty() || !a->exists(name))
+				return;
+			role = a->is_admin(name) ? LV_ADMIN :
+					a->has_priv(name, "moderator") ? LV_MODERATOR :
+					a->has_priv(name, "helper") ? LV_HELPER : LV_NEW;
+			trusted = a->has_priv(name, "trusted");
+		});
+		if(role >= LV_HELPER)
+			return role;
 		const json::Value t = trust(name);
-		return jint(t, "days") >= ACTIVE_DAYS && jint(t, "hidden") == 0 ?
-				1 : 0;
+		if(!trusted && jint(t, "days") >= ACTIVE_DAYS){
+			accounts::access(m_server, [&](accounts::Interface *a){
+				trusted = a->set_priv(name, "trusted", true).empty();
+			});
+			log_i(MODULE, "%s is trusted, active on %i days", cs(name),
+					ACTIVE_DAYS);
+		}
+		return trusted && jint(t, "hidden") == 0 ? LV_MEMBER : LV_NEW;
+	}
+
+	// [TRUST_LADDER] A message held: hidden from all but its author, and
+	// in the queue for a helper's approval
+	void hold(int64_t message_id, const ss_ &author)
+	{
+		set_hidden(message_id, HELD, "");
+		Q i(m_db, "INSERT INTO reports(kind, message, by, reason, time) "
+				"VALUES('held', ?, ?, '', ?)");
+		i.b(message_id).b(author).b(now_s()).step();
+	}
+
+	// [TRUST_LADDER] `name` trusted, or no longer, by `by`; an approval is
+	// one a day of a helper's APPROVALS_A_DAY
+	void trust_account(const ss_ &name, const ss_ &by, int by_lv, bool on,
+			int64_t message_id = 0)
+	{
+		ss_ why;
+		if(on){
+			Q c(m_db, "SELECT count(*) FROM approvals WHERE by = ? AND "
+					"time > ?");
+			c.b(by).b(now_s() - 86400).step();
+			if(by_lv < LV_MODERATOR && c.i(0) >= APPROVALS_A_DAY)
+				throw Exception(itos(APPROVALS_A_DAY)+" approvals a day at "
+						"most");
+		} else if(by_lv < LV_MODERATOR){
+			Q a(m_db, "SELECT 1 FROM approvals WHERE account = ? AND by = ? "
+					"AND time > ?");
+			a.b(name).b(by).b(now_s() - UNDO_S);
+			if(!a.step())
+				throw Exception("a helper takes back only its own approval, "
+						"within 7 days");
+		}
+		accounts::access(m_server, [&](accounts::Interface *a){
+			why = a->set_priv(name, "trusted", on);
+		});
+		need(why);
+		if(on){
+			Q i(m_db, "INSERT INTO approvals(account, by, time, message) "
+					"VALUES(?, ?, ?, ?)");
+			i.b(name).b(by).b(now_s()).b(message_id).step();
+		} else {
+			Q d(m_db, "DELETE FROM approvals WHERE account = ?");
+			d.b(name).step();
+		}
+		log_i(MODULE, "%s %s %s", cs(by), on ? "trusted" : "no longer trusts",
+				cs(name));
+	}
+
+	// [TRUST_LADDER] A held message rejected: gone, with its thread if it
+	// started one
+	void delete_message(int64_t message_id)
+	{
+		Q m(m_db, "SELECT thread, (SELECT min(id) FROM messages WHERE "
+				"thread = m.thread) FROM messages m WHERE id = ?");
+		m.b(message_id);
+		if(!m.step())
+			return;
+		const int64_t thread_id = m.i(0);
+		const bool first = m.i(1) == message_id;
+		for(const char *sql : {"DELETE FROM messages WHERE id = ?",
+				"DELETE FROM search WHERE rowid = ?",
+				"DELETE FROM edits WHERE message = ?",
+				"DELETE FROM notifications WHERE message = ?"}){
+			Q d(m_db, sql);
+			d.b(message_id).step();
+		}
+		if(first)
+			for(const char *sql : {"DELETE FROM threads WHERE id = ?",
+					"DELETE FROM follows WHERE thread = ?",
+					"DELETE FROM notifications WHERE thread = ?",
+					"DELETE FROM reads WHERE thread = ?"}){
+				Q d(m_db, sql);
+				d.b(thread_id).step();
+			}
 	}
 
 	// What level() is reached by, as counts: the days active, each
@@ -1823,7 +1958,7 @@ struct Module: public interface::Module
 	{
 		const int64_t now = now_s();
 		Q hd(m_db, "SELECT count(*) FROM messages WHERE author = ? AND "
-				"hidden != 0 AND created > ?");
+				"hidden = 1 AND created > ?");
 		hd.b(name).b(now - 30 * 86400).step();
 		Q d(m_db, "SELECT count(*) FROM (SELECT day FROM active_days "
 				"WHERE account = ?1 AND day < ?2 UNION SELECT created / 86400 "
@@ -1873,22 +2008,27 @@ struct Module: public interface::Module
 				interface::markup::to_html(text).find("<a href") != ss_::npos;
 	}
 
-	// Whether `name` may post this now, by its level; why not
-	void check_limits(const ss_ &name, bool admin, bool new_thread,
+	// Whether `name` may post this now, by its level; why not. True when
+	// it is to be held: a new account's link elsewhere than the tracker
+	// domains ([HEARTH_TRACKER]) waits for a helper's approval
+	// ([TRUST_LADDER])
+	bool check_limits(const ss_ &name, int lv, bool new_thread,
 			const ss_ &text)
 	{
-		const int lv = level(name, admin);
-		const Limits &l = LIMITS[lv];
-		const char *how = lv == 0 ? " (a new account's limit, until it "
-				"has been active on five days)" : "";
-		// [HEARTH_TRACKER]: a new account's links go to the tracker domains
-		// only, refused elsewhere rather than queued
+		const Limits l = limits(lv);
+		const char *how = lv < LV_MEMBER ? " (a new account's limit, until "
+				"it has been active on five days or a helper approves it)" : "";
+		bool held = false;
 		if(!l.links && has_link(text)){
 			const std::set<ss_> domains = tracker_domains();
 			for(const ss_ &h : link_hosts(text))
-				if(!domains.count(h))
-					throw Exception(ss_("no links yet, but to the tracker "
-							"domains")+how);
+				held = held || !domains.count(h);
+			Q w(m_db, "SELECT 1 FROM reports WHERE kind = 'held' AND by = ? "
+					"AND state = 'open'");
+			w.b(name);
+			if(held && w.step())
+				throw Exception(ss_("a link of yours is waiting for "
+						"approval already")+how);
 		}
 		// An edit counts as a message: each keeps the old body
 		Q m(m_db, "SELECT (SELECT count(*) FROM messages WHERE author = ? "
@@ -1906,11 +2046,12 @@ struct Module: public interface::Module
 				throw Exception(itos(l.threads_a_day)+" new threads a day at "
 						"most"+how);
 		}
+		return held;
 	}
 
 	// Hidden or shown again: the message, its thread if it is the first,
 	// and the search index
-	void set_hidden(int64_t message_id, bool hidden, const ss_ &reason)
+	void set_hidden(int64_t message_id, int hidden, const ss_ &reason)
 	{
 		Q m(m_db, "SELECT m.thread, m.body, t.title, (SELECT min(id) FROM "
 				"messages WHERE thread = m.thread) FROM messages m JOIN threads t "
@@ -1921,7 +2062,8 @@ struct Module: public interface::Module
 		const bool first = m.i(3) == message_id;
 		Q u(m_db, "UPDATE messages SET hidden = ?, hidden_reason = ? "
 				"WHERE id = ?");
-		u.b((int64_t)hidden).b(hidden ? reason : ss_()).b(message_id).step();
+		u.b((int64_t)hidden).b(hidden == HIDDEN ? reason : ss_()).b(message_id)
+				.step();
 		if(first){
 			Q t(m_db, "UPDATE threads SET hidden = ? WHERE id = ?");
 			t.b((int64_t)hidden).b(m.i(0)).step();
@@ -1940,21 +2082,26 @@ struct Module: public interface::Module
 			throw Exception(why);
 	}
 
-	json::Value handle(const ss_ &name, bool admin, const ss_ &cmd,
+	json::Value handle(const ss_ &name, int lv, const ss_ &cmd,
 			const json::Value &q, network::PeerId peer)
 	{
+		// What was the admin's is a moderator's ([TRUST_LADDER]), but what
+		// is server-wide
+		const bool mod = lv >= LV_MODERATOR, admin = lv >= LV_ADMIN;
 		if(cmd == "me"){
 			json::Value v = json::object();
 			v.set("account", name);
 			v.set("admin", admin);
+			v.set("moderator", mod);
+			v.set("helper", lv >= LV_HELPER);
 			v.set("unseen", unseen(name));
 			// The client's clock for "3 h ago" ([HEARTH_UI])
 			v.set("now", now_s());
 			Q mb(m_db, "INSERT OR IGNORE INTO members(account, first_seen) "
 					"VALUES(?, ?)");
 			mb.b(name).b(now_s()).step();
-			v.set("level", (int64_t)level(name, admin));
-			if(admin){
+			v.set("level", (int64_t)lv);
+			if(lv >= LV_HELPER){
 				Q o(m_db, "SELECT count(*) FROM reports WHERE state = 'open'");
 				o.step();
 				v.set("open_reports", o.i(0));
@@ -1983,12 +2130,12 @@ struct Module: public interface::Module
 		}
 		if(cmd == "thread"){
 			json::Value t = thread(jint(q, "thread"), jint(q, "after"), name,
-					admin);
+					mod);
 			if(!t.is_object())
 				throw Exception("no such thread");
 			// Hidden: as its page shows it, the first message without its
-			// title, but to the admin and whoever started it
-			if(t.get("hidden").is_true() && !admin && jstr(t, "author") != name){
+			// title, but to a moderator and whoever started it
+			if(t.get("hidden").is_true() && !mod && jstr(t, "author") != name){
 				t.set("title", "A hidden thread");
 				json::Value first = json::array();
 				if(jint(q, "after") == 0 && t.get("list").size() > 0)
@@ -2045,13 +2192,29 @@ struct Module: public interface::Module
 			need(text_ok(who, NAME_MAX, false, "the name"));
 			json::Value v = json::object();
 			v.set("name", who);
-			bool is_admin = false;
-			accounts::access(m_server, [&](accounts::Interface *a){
-				is_admin = a->is_admin(who);
-			});
-			v.set("level", (int64_t)level(who, is_admin));
+			const int who_lv = level(who);
+			v.set("level", (int64_t)who_lv);
 			if(who == name)
 				v.set("trust", trust(who));
+			// [TRUST_LADDER] To a helper and up: who trusted it, and the
+			// accounts a helper trusted
+			if(lv >= LV_HELPER){
+				for(const char *k : {"approved_by", "approved"}){
+					json::Value l = json::array();
+					Q a(m_db, k[8] == '_' ? "SELECT by, time FROM approvals "
+							"WHERE account = ? ORDER BY time DESC LIMIT 10" :
+							"SELECT account, time FROM approvals WHERE by = ? "
+							"ORDER BY time DESC LIMIT 200");
+					a.b(who);
+					while(a.step()){
+						json::Value r = json::object();
+						r.set("name", a.s(0));
+						r.set("time", a.i(1));
+						l.append(r);
+					}
+					v.set(k, l);
+				}
+			}
 			json::Value list = json::array();
 			Q m(m_db, "SELECT m.id, m.thread, t.title, m.created, "
 					"substr(m.body, 1, 200) FROM messages m "
@@ -2098,7 +2261,7 @@ struct Module: public interface::Module
 			return list;
 		}
 		// A thread started elsewhere, linked to a package afterwards by its
-		// poster or the admin; only to a package already known here, so a
+		// poster or a moderator; only to a package already known here, so a
 		// link names a real release's key
 		if(cmd == "link"){
 			const int64_t thread_id = jint(q, "thread");
@@ -2107,9 +2270,9 @@ struct Module: public interface::Module
 			t.b(thread_id);
 			if(!t.step())
 				throw Exception("no such thread");
-			if(t.s(0) != name && !admin)
+			if(t.s(0) != name && !mod)
 				throw Exception("only whoever started the thread links it");
-			if(!t.s(1).empty() && !admin)
+			if(!t.s(1).empty() && !mod)
 				throw Exception("the thread is about a package already");
 			Q k(m_db, "SELECT 1 FROM threads WHERE kind = 'release' AND "
 					"subject = ?");
@@ -2134,9 +2297,9 @@ struct Module: public interface::Module
 			return search(text);
 		}
 		if(cmd == "new_topic"){
-			// The tree changes rarely, by a trusted hand: the admin's
-			if(!admin)
-				throw Exception("only the admin adds topics");
+			// The tree changes rarely, by a trusted hand: a moderator's
+			if(!mod)
+				throw Exception("only a moderator adds topics");
 			const ss_ topic_name = jstr(q, "name"), about = jstr(q, "about");
 			need(text_ok(topic_name, NAME_MAX, false, "the name"));
 			if(!about.empty())
@@ -2158,10 +2321,10 @@ struct Module: public interface::Module
 			return json::Value((int64_t)sqlite3_last_insert_rowid(m_db));
 		}
 		// [HEARTH_TRACKER]: a topic made a tracker, or not
-		// [HEARTH_UI] A topic's name and what it is about, by the admin
+		// [HEARTH_UI] A topic's name and what it is about, by a moderator
 		if(cmd == "edit_topic"){
-			if(!admin)
-				throw Exception("only the admin edits topics");
+			if(!mod)
+				throw Exception("only a moderator edits topics");
 			const ss_ topic_name = jstr(q, "name"), about = jstr(q, "about");
 			need(text_ok(topic_name, NAME_MAX, false, "the name"));
 			if(!about.empty())
@@ -2175,8 +2338,8 @@ struct Module: public interface::Module
 		// [DISCUSS_SERVER] A topic's category: where Hearth puts a thread
 		// about a server the client was playing on
 		if(cmd == "topic_category"){
-			if(!admin)
-				throw Exception("only the admin sets a topic's category");
+			if(!mod)
+				throw Exception("only a moderator sets a topic's category");
 			const ss_ category = jstr(q, "category");
 			if(category != "" && category != "servers")
 				throw Exception("a category is \"servers\" or none");
@@ -2187,8 +2350,8 @@ struct Module: public interface::Module
 			return json::Value(true);
 		}
 		if(cmd == "topic_tracker"){
-			if(!admin)
-				throw Exception("only the admin marks a tracker");
+			if(!mod)
+				throw Exception("only a moderator marks a tracker");
 			Q u(m_db, "UPDATE topics SET tracker = ? WHERE id = ?");
 			u.b((int64_t)q.get("on").is_true()).b(jint(q, "topic")).step();
 			if(sqlite3_changes(m_db) == 0)
@@ -2200,8 +2363,8 @@ struct Module: public interface::Module
 		if(cmd == "tracker_domains"){
 			std::set<ss_> domains = tracker_domains();
 			if(!q.get("add").is_undefined() || !q.get("remove").is_undefined()){
-				if(!admin)
-					throw Exception("only the admin sets the tracker domains");
+				if(!mod)
+					throw Exception("only a moderator sets the tracker domains");
 				for(const char *k : {"add", "remove"}){
 					const json::Value &l = q.get(k);
 					for(unsigned i = 0; l.is_array() && i < l.size(); i++){
@@ -2224,7 +2387,7 @@ struct Module: public interface::Module
 				l.append(d);
 			return l;
 		}
-		// A ticket's tracker link, by whoever started it or the admin; ""
+		// A ticket's tracker link, by whoever started it or a moderator; ""
 		// takes it off. On a domain not whitelisted: an account that may
 		// post links whitelists it, anyone else's waits in the queue
 		if(cmd == "tracker_link"){
@@ -2236,7 +2399,7 @@ struct Module: public interface::Module
 			t.b(thread_id);
 			if(!t.step())
 				throw Exception("no such thread");
-			if(t.s(0) != name && !admin)
+			if(t.s(0) != name && !mod)
 				throw Exception("only whoever started the ticket links it");
 			if(!t.i(2) || (t.s(1) != "problem" && t.s(1) != "patch"))
 				throw Exception("only a ticket (a problem or a patch in a "
@@ -2252,7 +2415,7 @@ struct Module: public interface::Module
 			std::set<ss_> domains = tracker_domains();
 			if(link.empty() || domains.count(host))
 				return json::Value(true);
-			if(LIMITS[level(name, admin)].links){
+			if(limits(lv).links){
 				domains.insert(host);
 				set_tracker_domains(domains);
 				log_i(MODULE, "%s added the tracker domain %s", cs(name),
@@ -2271,7 +2434,6 @@ struct Module: public interface::Module
 		}
 		if(cmd == "upload"){
 			// [FORUM] step 5: {name, data (hex)} -> {id, image}; at /f/<id>
-			const int lv = level(name, admin);
 			const ss_ file_name = jstr(q, "name");
 			const ss_ hex = jstr(q, "data");
 			if(hex.size() > UPLOAD_MAX * 2)
@@ -2280,14 +2442,14 @@ struct Module: public interface::Module
 			ss_ data = unhex(hex), type = "application/octet-stream";
 			// [HEARTH_TRACKER]: a patch, a new account's too
 			const bool patch = is_patch(file_name, data);
-			if(!LIMITS[lv].links && !patch)
+			if(!limits(lv).links && !patch)
 				throw Exception("no files yet but a patch (a new account's "
-						"limit, until a day has passed, five threads are read "
-						"and three of its messages stand)");
+						"limit, until it has been active on five days or a "
+						"helper approves it)");
 			Q c(m_db, "SELECT count(*) FROM files WHERE uploader = ? AND "
 					"created > ?");
 			c.b(name).b(now_s() - 3600).step();
-			if(lv < 2 && c.i(0) >= UPLOADS_AN_HOUR)
+			if(lv < LV_MODERATOR && c.i(0) >= UPLOADS_AN_HOUR)
 				throw Exception(itos(UPLOADS_AN_HOUR)+" files an hour at most");
 			need(text_ok(file_name, NAME_MAX, false, "the file's name"));
 			if(data.empty())
@@ -2341,10 +2503,10 @@ struct Module: public interface::Module
 			return v;
 		}
 		if(cmd == "delete_file"){
-			// A claim of copyright or personal data the admin has upheld:
+			// A claim of copyright or personal data a moderator has upheld:
 			// gone at once, whatever its use
-			if(!admin)
-				throw Exception("only the admin deletes a file");
+			if(!mod)
+				throw Exception("only a moderator deletes a file");
 			Q d(m_db, "DELETE FROM files WHERE id = ?");
 			d.b(jint(q, "file")).step();
 			if(sqlite3_changes(m_db) == 0)
@@ -2353,7 +2515,7 @@ struct Module: public interface::Module
 		}
 		if(cmd == "release_sources"){
 			// [PACKAGE_SUBJECT]: the Aittas read and this Hearth's own
-			// addresses, set by the admin; without either, the current
+			// addresses, set by a moderator; without either, the current
 			if(!admin)
 				throw Exception("only the admin sets the release sources");
 			json::Value v = setting("release_sources");
@@ -2427,7 +2589,7 @@ struct Module: public interface::Module
 			need(text_ok(body, BODY_MAX, true, "the message"));
 			if(!subject.empty())
 				need(text_ok(subject, 400, false, "the subject"));
-			check_limits(name, admin, true, title+"\n"+body);
+			const bool held = check_limits(name, lv, true, title+"\n"+body);
 			const int64_t t = now_s();
 			Q i(m_db, "INSERT INTO threads(topic, title, author, created, last, "
 					"subject, kind, status, version) VALUES(?, ?, ?, ?, ?, ?, ?, "
@@ -2436,17 +2598,17 @@ struct Module: public interface::Module
 					.b(ss_(kind == "problem" || kind == "patch" ? "open" : ""))
 					.b(version).step();
 			const int64_t id = sqlite3_last_insert_rowid(m_db);
-			add_message(id, name, body, title);
+			add_message(id, name, body, title, true, held);
 			return json::Value(id);
 		}
-		// A problem's status. simplified: the admin's; the package's owners
+		// A problem's status. simplified: a moderator's; the package's owners
 		// hold it once a Hearth account can be tied to an Aitta author
 		// ([PACKAGE_SUBJECT], a question to the user)
 		if(cmd == "status"){
 			const int64_t thread_id = jint(q, "thread");
 			const ss_ status = jstr(q, "status"), fixed_in = jstr(q, "fixed_in");
-			if(!admin)
-				throw Exception("only the admin sets a problem's status");
+			if(!mod)
+				throw Exception("only a moderator sets a problem's status");
 			Q t(m_db, "SELECT kind FROM threads WHERE id = ?");
 			t.b(thread_id);
 			if(!t.step() || (t.s(0) != "problem" && t.s(0) != "patch"))
@@ -2485,10 +2647,11 @@ struct Module: public interface::Module
 			need(text_ok(body, BODY_MAX, true, "the message"));
 			Q th(m_db, "SELECT hidden FROM threads WHERE id = ?");
 			th.b(thread_id).step();
-			if(th.i(0) && !admin)
+			if(th.i(0) && !mod)
 				throw Exception("the thread is hidden");
-			check_limits(name, admin, false, body);
-			return json::Value(add_message(thread_id, name, body, ""));
+			const bool held = check_limits(name, lv, false, body);
+			return json::Value(add_message(thread_id, name, body, "", true,
+					held));
 		}
 		if(cmd == "edit"){
 			const int64_t id = jint(q, "message");
@@ -2498,13 +2661,13 @@ struct Module: public interface::Module
 			m.b(id);
 			if(!m.step())
 				throw Exception("no such message");
-			if(m.s(0) != name && !admin)
+			if(m.s(0) != name && !mod)
 				throw Exception("only its author edits a message");
 			// What the moderator hid stays what the appeal is read against
-			if((m.i(2) || m.i(3)) && !admin)
+			if((m.i(2) || m.i(3)) && !mod)
 				throw Exception("a hidden message is not edited");
 			need(text_ok(body, BODY_MAX, true, "the message"));
-			check_limits(name, admin, false, body);
+			const bool held = check_limits(name, lv, false, body);
 			const int64_t t = now_s();
 			Q h(m_db, "INSERT INTO edits(message, body, time, editor) "
 					"VALUES(?, ?, ?, ?)");
@@ -2513,10 +2676,12 @@ struct Module: public interface::Module
 			u.b(body).b(t).b(id).step();
 			Q s(m_db, "UPDATE search SET body = ? WHERE rowid = ?");
 			s.b(body).b(id).step();
+			if(held)
+				hold(id, name);
 			return json::Value(true);
 		}
 		if(cmd == "answered"){
-			// By whoever asked (or the admin); message 0 takes it back
+			// By whoever asked (or a moderator); message 0 takes it back
 			const int64_t thread_id = jint(q, "thread"),
 					message_id = jint(q, "message");
 			Q t(m_db, "SELECT author, (SELECT min(id) FROM messages "
@@ -2524,7 +2689,7 @@ struct Module: public interface::Module
 			t.b(thread_id);
 			if(!t.step())
 				throw Exception("no such thread");
-			if(t.s(0) != name && !admin)
+			if(t.s(0) != name && !mod)
 				throw Exception("only whoever started the thread says what "
 						"answered it");
 			ss_ by;
@@ -2600,8 +2765,8 @@ struct Module: public interface::Module
 				throw Exception("no such message");
 			if(appeal && m.s(0) != name)
 				throw Exception("only its author appeals");
-			if(appeal && !m.i(1))
-				throw Exception("the message is not hidden");
+			if(appeal && m.i(1) != HIDDEN)
+				throw Exception("the message is not hidden by a moderator");
 			if(!appeal && m.s(0) == name)
 				throw Exception("one's own message is edited, not reported");
 			if(!appeal && m.i(1))
@@ -2612,21 +2777,48 @@ struct Module: public interface::Module
 			if(o.step())
 				throw Exception(appeal ? "the appeal is waiting already" :
 						"the report is waiting already");
-			Q d(m_db, "SELECT count(*) FROM reports WHERE by = ? AND time > ?");
+			Q d(m_db, "SELECT count(*) FROM reports WHERE by = ? AND time > ? "
+					"AND kind IN ('report', 'appeal')");
 			d.b(name).b(now_s() - 86400).step();
-			if(!admin && d.i(0) >= REPORTS_A_DAY)
+			if(!mod && d.i(0) >= REPORTS_A_DAY)
 				throw Exception(itos(REPORTS_A_DAY)+" reports a day at most");
-			Q i(m_db, "INSERT INTO reports(kind, message, by, reason, time) "
-					"VALUES(?, ?, ?, ?, ?)");
-			i.b(cmd).b(id).b(name).b(reason).b(now_s()).step();
-			return json::Value((int64_t)sqlite3_last_insert_rowid(m_db));
+			// [TRUST_LADDER] Its weight by the reporter's level, none while
+			// a hide it reported was undone in the last 30 days
+			int weight = lv >= LV_HELPER ? HIDE_WEIGHT : lv >= LV_MEMBER ? 1 : 0;
+			Q ov(m_db, "SELECT 1 FROM reports WHERE by = ? AND state = "
+					"'overturned' AND handled_time > ?");
+			ov.b(name).b(now_s() - 30 * 86400);
+			if(ov.step())
+				weight = 0;
+			ss_ bin;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				bin = network::address_bin(a->address_of(peer));
+			});
+			Q i(m_db, "INSERT INTO reports(kind, message, by, reason, time, "
+					"bin, weight) VALUES(?, ?, ?, ?, ?, ?, ?)");
+			i.b(cmd).b(id).b(name).b(reason).b(now_s()).b(appeal ? ss_() : bin)
+					.b((int64_t)(appeal ? 0 : weight)).step();
+			const int64_t report_id = sqlite3_last_insert_rowid(m_db);
+			// A network's reports once, at their highest; a helper's or
+			// above's message is only queued
+			Q w(m_db, "SELECT ifnull(sum(w), 0) FROM (SELECT max(weight) AS w "
+					"FROM reports WHERE kind = 'report' AND message = ? AND "
+					"state = 'open' GROUP BY bin)");
+			w.b(id).step();
+			if(!appeal && w.i(0) >= HIDE_WEIGHT && level(m.s(0)) < LV_HELPER){
+				set_hidden(id, REPORTED, "");
+				log_i(MODULE, "the message %lld hidden by reports until a "
+						"moderator looks", (long long)id);
+			}
+			return json::Value(report_id);
 		}
 		if(cmd == "queue"){
-			if(!admin)
-				throw Exception("only the admin moderates");
+			if(lv < LV_HELPER)
+				throw Exception("only a helper or a moderator sees the queue");
 			json::Value list = json::array();
 			Q r(m_db, "SELECT r.id, r.kind, r.message, r.by, r.reason, r.time, "
-					"m.author, m.body, m.thread, t.title, m.hidden_reason FROM "
+					"m.author, m.body, m.thread, t.title, m.hidden_reason, "
+					"m.hidden FROM "
 					"reports r JOIN messages m ON m.id = r.message JOIN threads t "
 					"ON t.id = m.thread WHERE r.state = 'open' ORDER BY r.id");
 			while(r.step()){
@@ -2642,25 +2834,58 @@ struct Module: public interface::Module
 				v.set("thread", r.i(8));
 				v.set("title", r.s(9));
 				v.set("hidden_reason", r.s(10));
+				v.set("hidden", r.i(11));
 				list.append(v);
 			}
 			return list;
 		}
 		if(cmd == "moderate"){
 			// hide (a report), restore (an appeal), dismiss (either). Hiding
-			// and refusing an appeal say why: the author is told it.
-			if(!admin)
-				throw Exception("only the admin moderates");
+			// and refusing an appeal say why: the author is told it. A held
+			// link ([TRUST_LADDER]): approve or reject, a helper's too.
+			if(lv < LV_HELPER)
+				throw Exception("only a moderator moderates");
 			const ss_ action = jstr(q, "action"), statement = jstr(q, "statement");
-			Q r(m_db, "SELECT r.kind, r.message, m.author, m.thread FROM reports r "
-					"JOIN messages m ON m.id = r.message WHERE r.id = ? AND "
-					"r.state = 'open'");
+			Q r(m_db, "SELECT r.kind, r.message, m.author, m.thread, m.hidden "
+					"FROM reports r JOIN messages m ON m.id = r.message WHERE "
+					"r.id = ? AND r.state = 'open'");
 			r.b(jint(q, "report"));
 			if(!r.step())
 				throw Exception("no such open report");
 			const bool appeal = r.s(0) == "appeal";
 			const int64_t message_id = r.i(1), thread_id = r.i(3);
 			const ss_ author = r.s(2);
+			auto settle = [&](const char *state){
+				Q u(m_db, "UPDATE reports SET state = ?, handled_by = ?, "
+						"handled_time = ?, statement = ?, bin = '' WHERE id = ?");
+				u.b(ss_(state)).b(name).b(now_s()).b(statement)
+						.b(jint(q, "report")).step();
+			};
+			if(r.s(0) == "held"){
+				if(action == "approve"){
+					trust_account(author, name, lv, true, message_id);
+					set_hidden(message_id, 0, "");
+				} else if(action == "reject"){
+					delete_message(message_id);
+				} else {
+					throw Exception("a held link is approved or rejected");
+				}
+				settle(action == "approve" ? "upheld" : "dismissed");
+				return json::Value(true);
+			}
+			if(!mod)
+				throw Exception("only a moderator moderates");
+			// Hidden by reports and dismissed: shown again, and its reports
+			// overturned, which weigh their reporters' next ones nothing
+			if(!appeal && action == "dismiss" && r.i(4) == REPORTED){
+				set_hidden(message_id, 0, "");
+				Q u(m_db, "UPDATE reports SET state = 'overturned', "
+						"handled_by = ?, handled_time = ?, statement = ?, "
+						"bin = '' WHERE state = 'open' AND kind = 'report' AND "
+						"message = ?");
+				u.b(name).b(now_s()).b(statement).b(message_id).step();
+				return json::Value(true);
+			}
 			// [HEARTH_TRACKER]: a tracker link's domain, accepted onto the
 			// whitelist or dismissed
 			if(r.s(0) == "domain"){
@@ -2673,10 +2898,7 @@ struct Module: public interface::Module
 					domains.insert(d.s(0));
 					set_tracker_domains(domains);
 				}
-				Q u(m_db, "UPDATE reports SET state = ?, handled_by = ?, "
-						"handled_time = ? WHERE id = ?");
-				u.b(ss_(action == "accept" ? "upheld" : "dismissed")).b(name)
-						.b(now_s()).b(jint(q, "report")).step();
+				settle(action == "accept" ? "upheld" : "dismissed");
 				return json::Value(true);
 			}
 			if(action != "dismiss" && action != (appeal ? "restore" : "hide"))
@@ -2687,10 +2909,10 @@ struct Module: public interface::Module
 			else if(!statement.empty())
 				need(text_ok(statement, 1000, true, "the statement"));
 			if(action == "hide"){
-				set_hidden(message_id, true, statement);
+				set_hidden(message_id, HIDDEN, statement);
 				notify(author, "hidden", thread_id, message_id, name, statement);
 			}else if(action == "restore"){
-				set_hidden(message_id, false, "");
+				set_hidden(message_id, 0, "");
 				notify(author, "restored", thread_id, message_id, name, statement);
 			}else if(appeal){
 				notify(author, "appeal_dismissed", thread_id, message_id, name,
@@ -2699,14 +2921,68 @@ struct Module: public interface::Module
 			// A hide settles the other reports of the message too
 			Q u(m_db, action == "dismiss" ?
 					"UPDATE reports SET state = ?, handled_by = ?, handled_time = ?, "
-					"statement = ? WHERE id = ?" :
+					"statement = ?, bin = '' WHERE id = ?" :
 					"UPDATE reports SET state = ?, handled_by = ?, handled_time = ?, "
-					"statement = ? WHERE state = 'open' AND kind = (SELECT kind "
+					"statement = ?, bin = '' WHERE state = 'open' AND kind = (SELECT kind "
 					"FROM reports WHERE id = ?5) AND message = (SELECT message "
 					"FROM reports WHERE id = ?5)");
 			u.b(ss_(action == "dismiss" ? "dismissed" : "upheld")).b(name)
 					.b(now_s()).b(statement).b(jint(q, "report")).step();
 			return json::Value(true);
+		}
+		// [TRUST_LADDER] {name, on}: an account trusted by a helper or a
+		// moderator, or no longer (a helper's own approval, within 7 days)
+		if(cmd == "trust"){
+			const ss_ who = jstr(q, "name");
+			if(lv < LV_HELPER)
+				throw Exception("only a helper or a moderator trusts an account");
+			need(text_ok(who, NAME_MAX, false, "the name"));
+			trust_account(who, name, lv, q.get("on").is_true());
+			return json::Value(true);
+		}
+		// {name, role}: "helper", "moderator" or "" (none). A moderator makes
+		// and unmakes helpers, the admin moderators too
+		if(cmd == "role"){
+			const ss_ who = jstr(q, "name"), role = jstr(q, "role");
+			if(role != "" && role != "helper" && role != "moderator")
+				throw Exception("a role is helper, moderator or none");
+			bool was_mod = false;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				was_mod = a->has_priv(who, "moderator");
+			});
+			if(lv < ((role == "moderator" || was_mod) ? LV_ADMIN : LV_MODERATOR))
+				throw Exception(role == "moderator" || was_mod ?
+						"only the admin makes or unmakes a moderator" :
+						"only a moderator makes or unmakes a helper");
+			ss_ why;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				why = a->set_priv(who, "helper", role == "helper");
+				if(why.empty())
+					why = a->set_priv(who, "moderator", role == "moderator");
+			});
+			need(why);
+			log_i(MODULE, "%s made %s %s", cs(name), cs(who),
+					role.empty() ? "no helper or moderator" : cs(role));
+			return json::Value(true);
+		}
+		// The helpers and the moderators, to a helper and up
+		if(cmd == "staff"){
+			if(lv < LV_HELPER)
+				throw Exception("only a helper or a moderator lists them");
+			json::Value list = json::array();
+			accounts::access(m_server, [&](accounts::Interface *a){
+				for(const ss_ &n : a->account_names()){
+					const ss_ role = a->has_priv(n, "moderator") ? "moderator" :
+							a->has_priv(n, "helper") ? "helper" : "";
+					if(role.empty())
+						continue;
+					json::Value v = json::object();
+					v.set("name", n);
+					v.set("role", role);
+					list.append(v);
+				}
+			});
+			return list;
 		}
 		throw Exception("no such command: "+cmd);
 	}

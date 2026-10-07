@@ -16,7 +16,7 @@
 #      the markup escaped, the edit shown), a message's own page, search
 #      (with a hostile query), a 404 for what is not there -- and the web
 #      client's page still the web client's;
-#   6. a new account's limits (no links, two threads a day, edits count
+#   6. a new account's limits (two threads a day, edits count
 #      as messages) and a report's handling: carol reports bob's thread,
 #      the admin hides it with a statement (gone from the portal and search,
 #      the notice on its page, bob notified with the statement), bob
@@ -28,6 +28,11 @@
 #      and past its time deleted.
 #   8. a tracker ([HEARTH_TRACKER]): a new account's patch, shown inline
 #      and applied with git am; links and tracker links by the domains.
+#  12. [TRUST_LADDER]: a new account's link held, one at a time, approved
+#      by a helper the admin made, which trusts its author; a helper makes
+#      no helper and takes back only its own approval; reports from one
+#      network count once, a helper's hides until a moderator looks, and
+#      a dismissal shows the message again.
 #
 #   apps/hearth/check.sh
 set -u
@@ -90,7 +95,7 @@ client bob bobpass1234 "$t/bob.log" '{"cmd":"reply","thread":1,"body":"bob was h
 {"cmd":"answered","thread":1,"message":3}'
 answer "$t/bob.log" 1001 | grep -q '"ok":true' ||
 	fail "bob's reply: $(answer "$t/bob.log" 1001) ($(grep -a "accounts" "$t/bob.log" | tail -2))"
-answer "$t/bob.log" 1002 | grep -q "only the admin" || fail "bob added a topic"
+answer "$t/bob.log" 1002 | grep -q "only a moderator" || fail "bob added a topic"
 answer "$t/bob.log" 1003 | grep -q "only its author" || fail "bob edited the admin's"
 answer "$t/bob.log" 1004 | grep -q "control character" || fail "a control character went in"
 answer "$t/bob.log" 1005 | grep -q "only whoever started" || fail "bob marked the answer"
@@ -171,20 +176,18 @@ grep -q "Hearth" <(curl -s "$U/index.html") && fail "/index.html is Hearth's"
 	fail "the portal loads from another origin"
 
 # 6. A new account's limits, a report, a hide, an appeal
-client bob bobpass1234 "$t/bob6.log" '{"cmd":"new_thread","topic":1,"title":"Lamps","body":"see www.lamps.example"}
+client bob bobpass1234 "$t/bob6.log" '{"cmd":"me"}
 {"cmd":"new_thread","topic":1,"title":"Cheap lamps","body":"Cheap lamps for everyone"}
 {"cmd":"new_thread","topic":1,"title":"More","body":"one more"}
 {"cmd":"new_thread","topic":1,"title":"Again","body":"and again"}
 {"cmd":"report","message":3,"reason":"mine"}
-{"cmd":"reply","thread":1,"body":"[lamps](//lamps.example)"}'"$(
+{"cmd":"me"}'"$(
 	for i in $(seq 10); do printf '\n{"cmd":"edit","message":3,"body":"b%s"}' $i; done)"
 grep -aq 'hr: {.*"level":0' "$t/bob6.log" || fail "bob is not a new account"
-answer "$t/bob6.log" 1001 | grep -q "no links yet, but to the tracker domains (a new account" || fail "a new account's link"
 answer "$t/bob6.log" 1002 | grep -q '"result":2' || fail "bob's thread: $(answer "$t/bob6.log" 1002)"
 answer "$t/bob6.log" 1003 | grep -q '"ok":true' || fail "bob's second thread"
 answer "$t/bob6.log" 1004 | grep -q "2 new threads a day" || fail "a third thread in a day"
 answer "$t/bob6.log" 1005 | grep -q "one's own" || fail "bob reported his own"
-answer "$t/bob6.log" 1006 | grep -q "no links yet" || fail "a link the markup makes"
 answer "$t/bob6.log" 1016 | grep -q "messages an hour" || fail "edits without a limit"
 client carol carolpass1234 "$t/carol.log" '{"cmd":"report","message":6,"reason":"spam"}
 {"cmd":"report","message":6,"reason":"spam!"}
@@ -379,13 +382,14 @@ answer "$t/tr_dave2.log" 1002 | grep -q "in a tracker topic" ||
 MS=4000 client dave davepass1234 "$t/tr_dave3.log" "{\"cmd\":\"reply\",\"thread\":$D,\"body\":\"see https://evil.example/x\"}
 {\"cmd\":\"tracker_link\",\"thread\":$D,\"link\":\"https://git.dave.example/buildat/tree/fix\"}
 {\"cmd\":\"thread\",\"thread\":$D}"
-answer "$t/tr_dave3.log" 1001 | grep -q "no links yet" ||
+answer "$t/tr_dave3.log" 1001 | grep -q '"ok":true' ||
 	fail "a new account's link off the tracker domains: $(answer "$t/tr_dave3.log" 1001)"
 [ "$(res "$t/tr_dave3.log" 1002 'r["result"]')" = False ] &&
 	[ "$(res "$t/tr_dave3.log" 1003 'r["result"]["link"] + "|" + r["result"]["link_waiting"] + "|" + str(r["result"]["ticket"]) + "|" + str(len(r["result"]["list"][0]["patches"]))')" = "|https://git.dave.example/buildat/tree/fix|True|1" ] ||
 	fail "the waiting tracker link: $(answer "$t/tr_dave3.log" 1003 | cut -c1-300)"
 [ "$(get /t/$D)" = 200 ] && grep -q "^+two" "$t/page" && grep -q "codeberg.org/dave" "$t/page" &&
-	! grep -q "Tracker:" "$t/page" ||
+	! grep -q "Tracker:" "$t/page" && ! grep -q "evil.example" "$t/page" &&
+	grep -q "Waiting for a helper to approve its link" "$t/page" ||
 	fail "the ticket's page before the domain: $(grep -c . "$t/page") lines"
 MS=4000 client admin checkpass12 "$t/tr_admin2.log" '{"cmd":"queue"}'
 R=$(res "$t/tr_admin2.log" 1001 '[x["id"] for x in r["result"] if x["kind"] == "domain" and x["reason"] == "git.dave.example"][0]')
@@ -451,7 +455,56 @@ answer "$t/bob11.log" 1006 | grep -q '"trust":{' || fail "bob's own trust counts
 answer "$t/bob11.log" 1007 | grep -q '"trust"' && fail "the admin's trust counts shown to bob"
 answer "$t/bob11.log" 1008 | grep -q '"ok":false' || fail "bob edited a topic"
 
-n429=0
-for _ in $(seq 130); do [ "$(get /)" = 429 ] && n429=$((n429 + 1)); done
+# 12. [TRUST_LADDER]: a held link, a helper, reports weighed by network
+num(){ answer "$1" $2 | grep -o '"result":[0-9]*' | cut -d: -f2; }
+B1=$(num "$t/bob.log" 1001)
+client admin checkpass12 "$t/admin12a.log" '' "BUILDAT_HEARTH_ADMIN=add erin erinpass1234"
+client erin erinpass1234 "$t/erin12.log" '{"cmd":"reply","thread":1,"body":"see [lamps](//erinlamps.example)"}
+{"cmd":"reply","thread":1,"body":"and https://two.example"}'
+held=$(num "$t/erin12.log" 1001)
+[ -n "$held" ] || fail "erin's link: $(answer "$t/erin12.log" 1001)"
+answer "$t/erin12.log" 1002 | grep -q "waiting for approval already" ||
+	fail "a second held link: $(answer "$t/erin12.log" 1002)"
+get /m/$held > /dev/null; grep -q "erinlamps.example" "$t/page" && fail "a held link on the page"
+client admin checkpass12 "$t/admin12.log" '{"cmd":"role","name":"carol","role":"helper"}'
+answer "$t/admin12.log" 1001 | grep -q '"ok":true' || fail "carol made a helper: $(answer "$t/admin12.log" 1001)"
+client carol carolpass1234 "$t/carol12.log" '{"cmd":"queue"}
+{"cmd":"role","name":"bob","role":"helper"}
+{"cmd":"me"}'
+R=$(res "$t/carol12.log" 1001 '[x["id"] for x in r["result"] if x["kind"] == "held" and x["message"] == '"$held"'][0]')
+[ -n "$R" ] || fail "the held link not in a helper's queue: $(answer "$t/carol12.log" 1001 | cut -c1-300)"
+answer "$t/carol12.log" 1002 | grep -q "only a moderator" || fail "a helper made a helper"
+answer "$t/carol12.log" 1003 | grep -q '"level":20' || fail "carol's level: $(answer "$t/carol12.log" 1003)"
+client carol carolpass1234 "$t/carol12b.log" "{\"cmd\":\"moderate\",\"report\":$R,\"action\":\"approve\"}
+{\"cmd\":\"account\",\"name\":\"erin\"}
+{\"cmd\":\"trust\",\"name\":\"bob\",\"on\":false}
+{\"cmd\":\"trust\",\"name\":\"dave\",\"on\":true}"
+answer "$t/carol12b.log" 1001 | grep -q '"ok":true' || fail "the approval: $(answer "$t/carol12b.log" 1001)"
+answer "$t/carol12b.log" 1002 | grep -q '"approved_by":\[{"name":"carol".*"level":10' ||
+	fail "erin after the approval: $(answer "$t/carol12b.log" 1002 | cut -c1-300)"
+answer "$t/carol12b.log" 1003 | grep -q "only its own approval" || fail "a helper took back another's trust"
+answer "$t/carol12b.log" 1004 | grep -q '"ok":true' || fail "carol trusted dave: $(answer "$t/carol12b.log" 1004)"
+get /m/$held > /dev/null; grep -q "erinlamps.example" "$t/page" || fail "the approved link not shown"
+# erin and dave, members on one network (every client is 127.0.0.1):
+# one report's weight, 1
+rep(){ client $1 $2 "$t/$3" "{\"cmd\":\"report\",\"message\":$B1,\"reason\":\"rude\"}"; }
+rep erin erinpass1234 erin12b.log
+rep dave davepass1234 dave12.log
+[ "$(get /m/$B1)" = 200 ] && ! grep -q "Reported; hidden" "$t/page" ||
+	fail "hidden by two members' reports from one network ($(answer "$t/dave12.log" 1001))"
+# A helper's, 3, hides it until a moderator looks; dismissed, it is
+# shown again, and the helper's next report weighs nothing
+rep carol carolpass1234 carol12c.log
+get /m/$B1 > /dev/null; grep -q "Reported; hidden until a moderator looks" "$t/page" ||
+	fail "a helper's report did not hide it ($(answer "$t/carol12c.log" 1001))"
+R2=$(num "$t/carol12c.log" 1001)
+client admin checkpass12 "$t/admin12b.log" "{\"cmd\":\"moderate\",\"report\":$R2,\"action\":\"dismiss\"}"
+[ "$(get /m/$B1)" = 200 ] && ! grep -q "Reported; hidden" "$t/page" ||
+	fail "shown again after the dismissal ($(answer "$t/admin12b.log" 1001))"
+rep carol carolpass1234 carol12d.log
+[ "$(get /m/$B1)" = 200 ] && ! grep -q "Reported; hidden" "$t/page" ||
+	fail "a report weighed after its reporter's was overturned"
+echo "ok: held links approved by a helper, reports by network"
+
 [ $n429 -gt 0 ] || fail "no page limit per address"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; pages limited"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; a held link approved by a helper, reports weighed by network; pages limited"

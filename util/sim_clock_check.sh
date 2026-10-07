@@ -9,24 +9,26 @@
 #      and the sixth refused; five new listings from one address, the
 #      sixth refused, the first claimed; ten wrong logins of alice from a
 #      /24 do not keep her out, and 30 keep that /24 out of any login;
-#      Hearth's patient spammer, sam, a new account: no links, two
+#      Hearth's patient spammer, sam, a new account: his link held, two
 #      threads a day; he reads five threads and posts three replies; the
-#      admin's file under a budget of 0; Aitta: a release, not yet on the
-#      public page;
+#      admin's file under a budget of 0; a kept login; open registration,
+#      five untrusted accounts from one network and the sixth refused
+#      until the admin trusts one ([TRUST_LADDER]); Aitta: a release, not
+#      yet on the public page;
 #   1. +1 hour: the /24 logs in again; the release is on the page;
 #   2. +1 day to +5 days: the sixth listing; sam active a day at a time,
-#      a new account until five days are over, then stands and his link
-#      spam goes in; carol reports it, the admin hides it, and sam is a
-#      new account again;
+#      a new account (his link waiting) until five days are over, then a
+#      member and his link spam goes in; carol reports it, the admin hides
+#      it, and sam is a new account again;
 #   3. +8 days: alice's login addresses are gone (retention_days 7); her
 #      first session used;
 #   4. +31 days: the session not used since day 0 ended, the one used on
 #      day 8 not; the unclaimed listings, never announced again, are
 #      gone, the claimed one is not; Hearth's, announced after each jump,
-#      is not;
+#      is not; the network's untrusted accounts no longer count;
 #   5. +183 days: the file, unused, deleted; sam's hidden message no
 #      longer counts against him; alice's session unused since day 31
-#      ended;
+#      ended; the kept login, used every 29 days, still logs in;
 #   6. +5 years, the Starport first: the teen is an adult; the claimed
 #      listing gone after its year; Hearth's listing gone and Hearth
 #      listed again under a new id.
@@ -112,7 +114,17 @@ hc(){
 		-o sound_mute=1 -s 127.0.0.1:$HP -c @"$t/cmds_$n" > "$t/$log" 2>&1
 }
 ans(){ grep -ao "hr: {.*\"id\":$2,.*" "$t/$1" | head -1; }
-level(){ ans "$1" "$2" | grep -o '"level":[0-9]' | cut -d: -f2; }
+level(){ ans "$1" "$2" | grep -o '"level":[0-9]*' | cut -d: -f2; }
+# A kept login's client: kl <log>, joined by its token alone
+kl(){
+	printf 'delay 3000\nquit\n' > "$t/cmds_kl"
+	BUILDAT_HEARTH_REQS='{"cmd":"me"}' timeout 90 bin/buildat -o launch_ui=launch_menu \
+		-D "$t/cl_keeper" -w 800x600 -l 3 -o sound_mute=1 -s 127.0.0.1:$HP \
+		-c @"$t/cmds_kl" > "$t/$1" 2>&1
+	grep -aq "Joined as keeper" "$t/$1"
+}
+# A new account by open registration, no code: reg <name>
+reg(){ MS=1500 hc $1 regpass1234 h_reg_$1.log '' BUILDAT_HEARTH_CODE=; }
 
 # 0. Day 0
 grep -aq "Listed on http://127.0.0.1:$SP as" "$t/hearth.log" || sleep 5
@@ -178,7 +190,8 @@ hc admin adminpass12 h_admin0.log '{"cmd":"new_topic","name":"Lounge","about":"T
 {"cmd":"new_thread","topic":1,"title":"Four","body":"fourth"}
 {"cmd":"new_thread","topic":1,"title":"Five","body":"fifth"}
 {"cmd":"upload","name":"notes.txt","data":"68656c6c6f"}
-{"cmd":"file_settings","budget":0}' "BUILDAT_HEARTH_ADMIN=add sam sampass1234"
+{"cmd":"file_settings","budget":0}' "BUILDAT_HEARTH_ADMIN=add sam sampass1234
+add keeper keeperpass12"
 for i in 1001 1002 1003 1004 1005 1006 1007 1008; do
 	ans h_admin0.log $i | grep -q '"ok":true' || fail "the admin's request $i: $(ans h_admin0.log $i)"
 done
@@ -198,10 +211,26 @@ hc sam sampass1234 h_sam0.log '{"cmd":"me"}
 {"cmd":"new_thread","topic":1,"title":"Third","body":"and again"}
 {"cmd":"me"}'
 [ "$(level h_sam0.log 1001)" = 0 ] || fail "sam is not a new account: $(ans h_sam0.log 1001)"
-ans h_sam0.log 1002 | grep -q "no links yet" || fail "sam's link on day 0: $(ans h_sam0.log 1002)"
-ans h_sam0.log 1012 | grep -q '"ok":true' || fail "sam's second thread: $(ans h_sam0.log 1012)"
-ans h_sam0.log 1013 | grep -q "2 new threads a day" || fail "sam's third thread: $(ans h_sam0.log 1013)"
+ans h_sam0.log 1002 | grep -q '"ok":true' || fail "sam's link on day 0: $(ans h_sam0.log 1002)"
+curl -s "http://127.0.0.1:$HP/" | grep -q "Deals" && fail "sam's held thread on the portal"
+# The held thread is one of his two today
+ans h_sam0.log 1011 | grep -q '"ok":true' || fail "sam's second thread: $(ans h_sam0.log 1011)"
+ans h_sam0.log 1012 | grep -q "2 new threads a day" || fail "sam's third thread: $(ans h_sam0.log 1012)"
 [ "$(level h_sam0.log 1014)" = 0 ] || fail "sam stood on day 0: $(ans h_sam0.log 1014)"
+MS=3000 hc keeper keeperpass12 h_keeper0.log '' BUILDAT_HEARTH_KEEP=1
+grep -aq "is kept logged in" "$t/hearth.log" || fail "the kept login (h_keeper0.log)"
+hc admin adminpass12 h_admin0c.log '' "BUILDAT_HEARTH_ADMIN=setting open_registration on"
+for n in n1 n2 n3 n4 n5; do
+	reg $n
+	grep -aq "Joined as $n" "$t/h_reg_$n.log" || fail "$n by open registration: $(grep -a "Login refused" "$t/h_reg_$n.log")"
+done
+reg n6
+grep -aq "Login refused: This network has 5 new accounts waiting" "$t/h_reg_n6.log" ||
+	fail "a sixth untrusted account from one network: $(grep -a "Login refused\|Joined as" "$t/h_reg_n6.log")"
+hc admin adminpass12 h_admin0d.log '{"cmd":"trust","name":"n1","on":true}'
+ans h_admin0d.log 1001 | grep -q '"ok":true' || fail "the admin trusting n1: $(ans h_admin0d.log 1001)"
+reg n6
+grep -aq "Joined as n6" "$t/h_reg_n6.log" || fail "n6 after n1 was trusted: $(grep -a "Login refused" "$t/h_reg_n6.log")"
 echo "ok: day 0 on Hearth"
 
 b="$here/Build/bin/buildat"
@@ -242,13 +271,13 @@ for day in 1 2 3 4; do
 {"cmd":"reply","thread":1,"body":"cheap deals at https://spam.example"}'
 	[ "$(level h_sam_d$day.log 1001)" = 0 ] ||
 		fail "sam stood on day $day: $(ans h_sam_d$day.log 1001)"
-	ans h_sam_d$day.log 1004 | grep -q "no links yet" ||
+	ans h_sam_d$day.log 1004 | grep -q "waiting for approval already" ||
 		fail "sam's link on day $day: $(ans h_sam_d$day.log 1004)"
 done
 advance $D
 hc sam sampass1234 h_sam5.log '{"cmd":"me"}
 {"cmd":"reply","thread":1,"body":"cheap deals at https://spam.example"}'
-[ "$(level h_sam5.log 1001)" = 1 ] || fail "sam did not stand after five active days: $(ans h_sam5.log 1001)"
+[ "$(level h_sam5.log 1001)" = 10 ] || fail "sam did not stand after five active days: $(ans h_sam5.log 1001)"
 spam=$(ans h_sam5.log 1002 | grep -o '"result":[0-9]*' | cut -d: -f2)
 [ -n "$spam" ] || fail "sam's link after five days: $(ans h_sam5.log 1002)"
 hc carol carolpass1234 h_carol1.log "{\"cmd\":\"report\",\"message\":$spam,\"reason\":\"spam\"}"
@@ -259,7 +288,7 @@ ans h_admin1.log 1001 | grep -q '"ok":true' || fail "the hide: $(ans h_admin1.lo
 hc sam sampass1234 h_sam1b.log '{"cmd":"me"}
 {"cmd":"reply","thread":2,"body":"more at https://spam.example"}'
 [ "$(level h_sam1b.log 1001)" = 0 ] || fail "sam still stands with a message hidden: $(ans h_sam1b.log 1001)"
-ans h_sam1b.log 1002 | grep -q "no links yet" || fail "sam's link after the hide: $(ans h_sam1b.log 1002)"
+ans h_sam1b.log 1002 | grep -q "waiting for approval already" || fail "sam's link after the hide: $(ans h_sam1b.log 1002)"
 echo "ok: +1 to +5 days"
 
 # 3. +8 days: the daily pass after the retention
@@ -280,10 +309,16 @@ echo "$r" | grep -q "no such listing" || fail "a listing unannounced for 31 days
 listed "${lids[0]}" || fail "the claimed listing gone after 31 days"
 listed "$hid" || fail "Hearth's listing gone at 31 days, though announced after each jump"
 grep -aq "file [0-9]* deleted" "$t/hearth.log" && fail "the file deleted before lod2_after"
+reg n7
+grep -aq "Joined as n7" "$t/h_reg_n7.log" || fail "the network's untrusted accounts after 30 days: $(grep -a "Login refused" "$t/h_reg_n7.log")"
+kl h_kl31.log || fail "the kept login on day 31 (h_kl31.log)"
 echo "ok: +31 days"
 
 # 5. To +183 days
-for _ in 1 2 3 4 5; do advance $((29 * D)); done
+for i in 1 2 3 4 5; do
+	advance $((29 * D))
+	kl h_kl_$i.log || fail "the kept login, used every 29 days, at day $((31 + 29 * i)) (h_kl_$i.log)"
+done
 advance $((7 * D))
 sleep 2
 grep -aq "file [0-9]* deleted, unused" "$t/hearth.log" || fail "the unused file not deleted after 183 days (hearth.log)"
@@ -291,7 +326,7 @@ listed "$hid" || fail "Hearth's listing gone by 183 days"
 sp 10.0.0.1 id/me "{\"session\":\"$sa1\"}" | grep -q '"ok":true' &&
 	fail "a session unused since day 31 on day 183"
 hc sam sampass1234 h_sam183.log '{"cmd":"me"}'
-[ "$(level h_sam183.log 1001)" = 1 ] || fail "sam after his hidden message's 30 days: $(ans h_sam183.log 1001)"
+[ "$(level h_sam183.log 1001)" = 10 ] || fail "sam after his hidden message's 30 days: $(ans h_sam183.log 1001)"
 echo "ok: +183 days, Hearth listed all along as $hid"
 
 # 6. +5 years, the Starport first: its daily pass drops Hearth's listing
@@ -309,4 +344,4 @@ done
 [ "$(grep -ac "Listed on http://127.0.0.1:$SP as" "$t/hearth.log")" -ge 2 ] ||
 	fail "Hearth not listed again after its listing went: $(grep -a 'Announce to' "$t/hearth.log" | tail -1)"
 echo "ok: +5 years"
-echo "PASS: a calendar moved by --sim-clock: limits per hour and day and per /24, wrong logins held back by network and not by name, retention, sessions kept by use, listings (a claimed one a year), a release's page delay, a new account's trust by active days, a file's sweep, an age; Hearth listed through it and again after its listing went"
+echo "PASS: a calendar moved by --sim-clock: limits per hour and day and per /24, wrong logins held back by network and not by name, retention, sessions kept by use, listings (a claimed one a year), a release's page delay, a new account's trust by active days, its link held, untrusted accounts per network, a kept login by use, a file's sweep, an age; Hearth listed through it and again after its listing went"

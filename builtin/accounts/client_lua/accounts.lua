@@ -552,14 +552,15 @@ buildat.sub_packet("accounts:login_result", function(data)
 	magic.ui:SetFocusElement(nil)
 	log:info("Joined as " .. tostring(M.name))
 	-- A scripted admin's requests, a line each, "cmd name [arg]" -- what a
-	-- check does as an admin (<env>_ADMIN; the server checks the admin)
+	-- check does as an admin (<env>_ADMIN; the server checks the admin);
+	-- "setting open_registration on" turns a setting on
 	local admin = buildat.get_env((opts.env or "BUILDAT_JOIN") .. "_ADMIN")
 	if admin and admin ~= "" and not M.admin_sent then
 		M.admin_sent = true
 		for l in admin:gmatch("[^\n]+") do
 			local cmd, name, arg = l:match("^(%S+)%s*(%S*)%s*(.*)$")
 			if cmd then
-				M.admin(cmd, name, arg, cmd == "priv")
+				M.admin(cmd, name, arg, cmd == "priv" or arg == "on")
 			end
 		end
 	end

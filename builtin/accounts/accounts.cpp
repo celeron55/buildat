@@ -233,8 +233,13 @@ struct Failures
 	int64_t wait_until_us = 0;
 };
 static const int64_t FAIL_WINDOW_US = 600LL * 1000000;
-// New accounts a day from one network::address_bin(), by open registration
-static const int NEW_ACCOUNTS_A_DAY = 5;
+// [TRUST_LADDER] Open registration's untrusted accounts: at most
+// UNTRUSTED_A_NETWORK made in the last UNTRUSTED_US from one
+// network::address_bin() and not trusted since, and UNTRUSTED_A_DAY made
+// in a day on the whole server (an IPv6 /48 is 65536 /64s)
+static const int UNTRUSTED_A_NETWORK = 5;
+static const int UNTRUSTED_A_DAY = 50;
+static const int64_t UNTRUSTED_US = 30LL * 24 * 3600 * 1000000;
 static const int FAIL_LOCK = 10;
 
 // A code to type: no 0/O or 1/I to mistake for each other
@@ -432,9 +437,6 @@ struct Module: public interface::Module, public Interface
 	std::map<ss_, Failures> m_name_failures;
 	// Failed logins, by network::address_bin()
 	std::map<ss_, Failures> m_address_failures;
-	// [SIM_CLOCK]: new accounts by open registration, by address_bin(),
-	// on the day of the second; simplified: in memory, a restart forgets
-	std::map<ss_, std::pair<int64_t, int>> m_new_accounts;
 	// [SERVER_ADMIN_PAGE]: test mails' answers, from their threads, which
 	// may outlive the module; sent to the admin who asked on a tick
 	struct MailResults { std::mutex m; std::vector<std::pair<PeerId, ss_>> r; };
@@ -682,11 +684,81 @@ struct Module: public interface::Module, public Interface
 		ss_ data;
 		if(token.empty() || token.size() > 100)
 			return false;
-		return m_store->get("token/"+interface::sha256::hex(
-					interface::sha256::calculate(token)), data) &&
-				unpack(data, kept) && kept.name == name &&
-				kept.expires_us >= interface::os::wall_us() &&
-				get_account(name, account) && kept.hash == account.hash;
+		const ss_ key = "token/"+interface::sha256::hex(
+				interface::sha256::calculate(token));
+		const int64_t now = interface::os::wall_us();
+		if(!(m_store->get(key, data) && unpack(data, kept) &&
+				kept.name == name && kept.expires_us >= now &&
+				get_account(name, account) && kept.hash == account.hash))
+			return false;
+		// [TRUST_LADDER]: KEEP_US from each use, written once a day at most
+		if(kept.expires_us < now + KEEP_US - 86400LL * 1000000){
+			kept.expires_us = now + KEEP_US;
+			m_store->set(key, pack(kept));
+		}
+		return true;
+	}
+
+	// [TRUST_LADDER] Why open registration takes no new account from the
+	// network `bin` now, or "". Forgets the untrusted/ records past
+	// UNTRUSTED_US or of an account trusted since; one of a deleted
+	// account counts on until then, so a deletion makes no room.
+	ss_ untrusted_quota(const ss_ &bin)
+	{
+		const int64_t now = interface::os::wall_us();
+		int in_bin = 0, today = 0;
+		for(const ss_ &key : m_store->list("untrusted/")){
+			ss_ v;
+			m_store->get(key, v);
+			const size_t sp = v.find(' ');
+			const int64_t made = sp == ss_::npos ? 0 :
+					atoll(v.c_str() + sp + 1);
+			const ss_ name = key.substr(10);
+			if(made < now - UNTRUSTED_US || has_priv(name, "trusted")){
+				m_store->remove(key);
+				continue;
+			}
+			if(v.substr(0, sp) == bin)
+				in_bin++;
+			if(made > now - 86400LL * 1000000)
+				today++;
+		}
+		if(in_bin >= UNTRUSTED_A_NETWORK)
+			return "This network has "+itos(UNTRUSTED_A_NETWORK)+" new "
+					"accounts waiting to be trusted: one more is made once a "
+					"moderator or a helper approves one of them, or it has "
+					"been active a few days";
+		if(today >= UNTRUSTED_A_DAY)
+			return "No more new accounts today; try tomorrow";
+		return "";
+	}
+
+	bool has_priv(const ss_ &name, const ss_ &priv)
+	{
+		Account account;
+		return !name.empty() && get_account(name, account) &&
+				account.has(priv);
+	}
+
+	ss_ set_priv(const ss_ &name, const ss_ &priv, bool on)
+	{
+		Account account;
+		if(!get_account(name, account))
+			return "No such account";
+		if(priv == "admin")
+			return "An admin is made in the Server window";
+		sv_<ss_> privs;
+		for(const ss_ &p : account.privs)
+			if(p != priv)
+				privs.push_back(p);
+		if(on)
+			privs.push_back(priv);
+		account.privs = privs;
+		set_account(name, account);
+		if(priv == "trusted" && on)
+			m_store->remove("untrusted/"+name);
+		privs_changed(name);
+		return "";
 	}
 
 	sv_<ss_> account_names()
@@ -1135,6 +1207,9 @@ struct Module: public interface::Module, public Interface
 				m_store->remove(key);
 				return fail("The saved login has ended: log in again");
 			}
+			// [TRUST_LADDER]: KEEP_US from each use
+			kept.expires_us = now + KEEP_US;
+			m_store->set(key, pack(kept));
 		} else if(get_account(name, account)){
 			if(!local && pbkdf2_sha256(password, account.salt,
 					PBKDF2_ITERATIONS) != account.hash)
@@ -1196,19 +1271,12 @@ struct Module: public interface::Module, public Interface
 					return reply("New accounts need an invite code from an "
 							"admin");
 				} else {
-					// Open registration: a few a day from an address's
-					// block, which makes a flood of accounts a flood of
-					// blocks
-					const int64_t day = interface::os::wall_us() /
-							1000000 / 86400;
-					auto &n = m_new_accounts[network::address_bin(
-							peer.address)];
-					if(n.first != day)
-						n = {day, 0};
-					if(n.second >= NEW_ACCOUNTS_A_DAY)
-						return reply("No more new accounts from this "
-								"network today");
-					n.second++;
+					const ss_ why = untrusted_quota(network::address_bin(
+							peer.address));
+					if(!why.empty())
+						return reply(why);
+					m_store->set("untrusted/"+name, network::address_bin(
+							peer.address)+" "+itos(interface::os::wall_us()));
 				}
 			}
 			// A local account gets a password nobody knows, so its name
@@ -1320,7 +1388,15 @@ struct Module: public interface::Module, public Interface
 				return result("No such account or privilege");
 			if(!r.on && account.has("admin") && admin_count() <= 1)
 				return result("The last admin keeps admin");
-			account.privs = r.on ? sv_<ss_>{"admin"} : sv_<ss_>{};
+			{
+				sv_<ss_> privs;
+				for(const ss_ &p : account.privs)
+					if(p != "admin")
+						privs.push_back(p);
+				if(r.on)
+					privs.push_back("admin");
+				account.privs = privs;
+			}
 			set_account(r.name, account);
 			privs_changed(r.name);
 			log_i(MODULE, "%s %s admin %s", cs(by), r.on ? "granted" : "revoked",
