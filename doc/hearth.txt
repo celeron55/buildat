@@ -56,6 +56,10 @@ Claimed from builtin/network (claim_http_path); /app (also /play and
                      browser saves it as
     /robots.txt      keeps crawlers off /f/
 
+A topic's or a thread's name has a cyan blob after it when it was
+written in within a day (●) or a smaller one within a week (•); a
+topic's counts its subtopics' threads ([HEARTH_BLOBS]).
+
 Anything else under those paths is a 404; a POST is a 404. A message is
 CommonMark with GitHub's tables, strikethrough, task lists and URL
 autolinks, and ||spoilers|| (interface::markup::to_html, md4c): raw HTML

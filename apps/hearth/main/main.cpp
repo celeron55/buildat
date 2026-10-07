@@ -290,6 +290,18 @@ static ss_ crush(const ss_ &in, bool jpeg, int long_max, int short_max,
 	return r;
 }
 
+// How recently a topic or a thread was written in ([HEARTH_BLOBS]): the
+// medium blob within a day, the small one within a week, else nothing
+static ss_ blob(int64_t last)
+{
+	const int64_t age = now_s() - last;
+	if(last <= 0 || age > 7 * 86400)
+		return "";
+	return age <= 86400 ?
+			" <span class=\"blob\" title=\"written in today\">\u25cf</span>" :
+			" <span class=\"blob\" title=\"written in this week\">\u2022</span>";
+}
+
 static ss_ time_text(int64_t t)
 {
 	time_t tt = (time_t)t;
@@ -1110,7 +1122,11 @@ struct Module: public interface::Module
 		json::Value list = json::array();
 		Q q(m_db, "SELECT t.id, t.parent, t.name, t.about, "
 				"(SELECT count(*) FROM threads WHERE topic = t.id AND hidden = 0), "
-				"t.tracker, t.category FROM topics t ORDER BY t.parent, t.id");
+				"t.tracker, t.category, "
+				// The newest thread's last, a top topic's subtopics' with it
+				"(SELECT max(last) FROM threads WHERE hidden = 0 AND topic IN "
+				"(SELECT id FROM topics WHERE id = t.id OR parent = t.id)) "
+				"FROM topics t ORDER BY t.parent, t.id");
 		while(q.step()){
 			json::Value t = json::object();
 			t.set("id", q.i(0));
@@ -1120,6 +1136,7 @@ struct Module: public interface::Module
 			t.set("threads", q.i(4));
 			t.set("tracker", q.i(5) != 0);
 			t.set("category", q.s(6));
+			t.set("active", q.i(7));
 			list.append(t);
 		}
 		return list;
@@ -1399,7 +1416,8 @@ struct Module: public interface::Module
 		return "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
 				"<meta name=\"viewport\" content=\"width=device-width, "
 				"initial-scale=1\"><title>"+html(title)+"</title><style>"+
-				interface::web_brand::css+"</style></head><body><header>"
+				interface::web_brand::css+".blob{color:#26d9ff}"
+				"</style></head><body><header>"
 				"<a class=\"brand\" href=\"/\">"+interface::web_brand::logo+
 				"Hearth</a>"
 				"<form action=\"/search\"><input name=\"q\" size=\"24\" "
@@ -1413,8 +1431,8 @@ struct Module: public interface::Module
 	ss_ thread_line(const json::Value &t)
 	{
 		return "<li><a href=\"/t/"+itos(jint(t, "id"))+"\">"+
-				html(jstr(t, "title"))+"</a> <span class=\"meta\">"+
-				(kind_text(t).empty() ? ss_() : html(kind_text(t))+", ")+
+				html(jstr(t, "title"))+"</a>"+blob(jint(t, "last"))+
+				" <span class=\"meta\">"+(kind_text(t).empty() ? ss_() : html(kind_text(t))+", ")+
 				(jint(t, "answer") ? "answered, " : "")+
 				html(jstr(t, "author"))+", "+itos(jint(t, "messages"))+
 				" messages, last "+time_text(jint(t, "last"))+"</span></li>\n";
@@ -1544,15 +1562,16 @@ struct Module: public interface::Module
 				if(jint(t, "parent") != 0)
 					continue;
 				body += "<li><a href=\"/topic/"+itos(jint(t, "id"))+"\">"+
-						html(jstr(t, "name"))+"</a> <span class=\"meta\">"+
-						html(jstr(t, "about"))+" ("+itos(jint(t, "threads"))+
+						html(jstr(t, "name"))+"</a>"+blob(jint(t, "active"))+
+						" <span class=\"meta\">"+html(jstr(t, "about"))+" ("+itos(jint(t, "threads"))+
 						" threads)</span>";
 				ss_ sub;
 				for(unsigned j = 0; j < ts.size(); j++)
 					if(jint(ts.at(j), "parent") == jint(t, "id"))
 						sub += "<li><a href=\"/topic/"+
 								itos(jint(ts.at(j), "id"))+"\">"+
-								html(jstr(ts.at(j), "name"))+"</a></li>";
+								html(jstr(ts.at(j), "name"))+"</a>"+
+								blob(jint(ts.at(j), "active"))+"</li>";
 				if(!sub.empty())
 					body += "<ul>"+sub+"</ul>";
 				body += "</li>\n";
