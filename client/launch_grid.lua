@@ -61,9 +61,9 @@ local function menu_actions()
 			icon = "launch_menu/res/icon_local.png", resolved_icon = true,
 			description = "Start an app on this machine",
 			run = function() M.screens().show_local_apps() end},
-		{id = "connect", label = "Connect to server", order = 2,
+		{id = "connect", label = "Join a Buildat server", order = 2,
 			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
-			description = "Join a buildat server",
+			description = "By its address, on this network or from the Starports",
 			run = function() M.screens().show_connect_to_server() end},
 	}
 	-- [AITTA_MVP]: Aitta's list is unreviewed content, so where the

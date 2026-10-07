@@ -71,7 +71,7 @@ def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
 time.sleep(6)
 els = scan()
-e = find(els, "Connect to server")
+e = find(els, "Join a Buildat server")
 if not e:
     fail("no connect entry on the first screen; saw " +
          ", ".join("%r" % x[5] for x in els or [])[:300])
@@ -86,10 +86,10 @@ address = [x for x in edits if x[5] == "localhost"]
 click(address[0] if address else edits[0])
 write("keypress End", *(["keypress Backspace"] * 40))
 write("text 192.0.2.1", "delay 200")
-e = find(els, "Connect")
+e = [x for x in els if x[5] == "Join" and x[3] > 0]
 if not e:
-    fail("no Connect button")
-click(e)
+    fail("no Join button")
+click(e[0])
 # Two readings while the connect runs: the counter has to have moved, which
 # is only true if the frame loop ran at all
 def counter():

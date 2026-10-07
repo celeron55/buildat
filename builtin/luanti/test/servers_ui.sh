@@ -3,7 +3,7 @@
 # tier: quick
 # cost: 27s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [SERVER_LIST]: the two connect screens, driven -- the launch menu's
-# "Connect to server" shot with the used addresses on the left; then the
+# "Join a Buildat server" shot with the used addresses on the left; then the
 # luanti_client's dialog, "Official list" picked, the permission dialog
 # accepted, the list read (rows with a players count) and shot. The
 # addresses file is put back after. Prints PASS or FAIL; the shots are
@@ -72,8 +72,8 @@ time.sleep(8)
 els = scan("a")
 if not els: fail("no menu scan")
 if stage == "launch":
-    b = find(els, "Connect to server")
-    if not b: fail("no Connect to server; saw " + ", ".join(e[5] for e in els)[:300])
+    b = find(els, "Join a Buildat server")
+    if not b: fail("no Join a Buildat server; saw " + ", ".join(e[5] for e in els)[:300])
     click(b)
     els = scan("b")
     if not (els and find(els, "Servers used")): fail("no used list; saw " + ", ".join(e[5] for e in els or [])[:300])

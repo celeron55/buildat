@@ -3,7 +3,7 @@
 # tier: quick
 # cost: 26s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [BOX_PLAYTEST_2] (13b): the server list's filter text is kept. The
-# luanti_client's "Play on a Luanti server" dialog is opened, "mine" typed
+# luanti_client's "Join a Luanti server" dialog is opened, "mine" typed
 # into the filter, the settings file read back, and the dialog opened again
 # in a second client to see the field filled. The settings file is put back
 # after. Prints PASS or FAIL.
@@ -67,7 +67,7 @@ def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
 time.sleep(8)
 els = scan("a")
-tile = find(els, "Play on a Luanti server")
+tile = find(els, "Join a Luanti server")
 if not tile: fail("no Luanti tile; saw " + ", ".join(e[5] for e in els or [])[:300])
 click(tile)
 els = scan("b")

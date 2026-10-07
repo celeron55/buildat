@@ -6,7 +6,7 @@
 # server through the bridge. A Luanti server (~/projects/luanti, devtest)
 # on 127.0.0.1, a served Luanti list (BUILDAT_LUANTI_LIST) without it,
 # apps/play serving web/; headless Firefox opens the page on 127.0.0.1,
-# picks "Play on a Luanti server", connects and logs in: a local page
+# picks "Join a Luanti server", connects and logs in: a local page
 # reaches this machine's servers ([WEB_LUANTI_JOIN]). A page asked for by
 # a public name is bridged to the listed address only, and refused this
 # machine's with the reason in the close frame.

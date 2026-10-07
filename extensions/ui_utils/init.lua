@@ -834,27 +834,38 @@ function M.safe.list_view(parent, width, height, options)
 	list:SetFixedWidth(width)
 	list.enabled = true
 	local view = {viewport = viewport, list = list}
-	if options.wheel or options.follow_focus then
-		local subs = {}
-		local pending = false
-		local function on(event, fn)
-			subs[event] = magic.SubscribeToEvent(event, function(t, d)
-				if gone(viewport) then
-					for e, sub in pairs(subs) do
-						magic.UnsubscribeFromEvent(e, sub)
-					end
-					return
+	local subs = {}
+	local function on(event, fn)
+		subs[event] = magic.SubscribeToEvent(event, function(t, d)
+			if gone(viewport) then
+				for e, sub in pairs(subs) do
+					magic.UnsubscribeFromEvent(e, sub)
 				end
-				if shown(viewport) then
-					fn(d)
-				end
-			end)
+				return
+			end
+			if shown(viewport) then
+				fn(d)
+			end
+		end)
+	end
+	local function over(x, y)
+		local at = viewport.screenPosition
+		return x >= at.x and x < at.x + viewport.width and
+				y >= at.y and y < at.y + viewport.height
+	end
+	-- **A finger drags it** (playtest, 2026-10-07): a touchscreen has no
+	-- wheel and no keys to walk it by
+	on("TouchMove", function(d)
+		if over(d:GetInt("X"), d:GetInt("Y")) then
+			view:scroll(-d:GetInt("DY"))
 		end
+	end)
+	if options.wheel or options.follow_focus then
+		local pending = false
 		if options.wheel then
 			on("MouseWheel", function(d)
-				local p, at = magic.input.mousePosition, viewport.screenPosition
-				if p.x >= at.x and p.x < at.x + viewport.width and
-						p.y >= at.y and p.y < at.y + viewport.height then
+				local p = magic.input.mousePosition
+				if over(p.x, p.y) then
 					view:scroll(-d:GetInt("Wheel") * options.wheel)
 				end
 			end)
@@ -1004,56 +1015,98 @@ function M.safe.add_paged(menu, items, options)
 	return pages, page
 end
 
--- A list of servers (or anything with a name and a line under it) in a
--- ListView, rows as buttons with their text left-aligned ([SERVER_LIST],
--- the shape [CONTENTDB_LIST]'s rows have):
+-- **A list of servers** in a list_view, the rows launch_menu_v2's
+-- Servers screen has ([SERVER_LIST]; that look since the playtest of
+-- 2026-10-07): one line each, the name and a dim badge, and the row
+-- under the mouse or picked last described in options.panel, the column
+-- beside the list, at its top.
 --
---   local list = ui_utils.server_list(parent, {width = 520, height = 480},
---       function(row, second) ... end)
---   list:set_rows({{name = , line = , data = }, ...})
+--   local list = ui_utils.server_list(parent, {width = 520, height = 480,
+--       panel = column}, function(row, second) ... end)
+--   list:set_rows({{name = , badge = , line = , icon = }, {header = }, ...})
+--
+-- options.hint is what the panel says before a pick.
 --
 -- on_pick(row, second) is called on a click, second true when the same
--- row was picked again within a second -- a double-click, or Enter on it.
--- set_rows() replaces what is shown; the caller filters before it.
+-- row was picked again within a second -- a double-click. set_rows()
+-- replaces what is shown; the caller filters before it. A {header = s}
+-- row is a heading.
 function M.safe.server_list(parent, options, on_pick)
 	options = options or {}
-	local view = parent:CreateChild("ListView")
-	view:SetStyleAuto()
-	view:SetFixedSize(options.width or 520, options.height or 480)
+	local width, height = options.width or 520, options.height or 480
+	local view = M.safe.list_view(parent, width, height, {wheel = 40})
+	local detail = nil
+	if options.panel then
+		detail = options.panel:CreateChild("UIElement")
+		-- **One height whatever it says**: the fields and Join under it
+		-- stay put as the mouse crosses rows on its way to them.
+		-- simplified: a description longer than this is cut off
+		detail:SetFixedHeight(options.detail_height or 130)
+		detail.clipChildren = true
+	end
 	local list = {view = view}
-	local last_name, last_us = nil, 0
-	function list:set_rows(rows)
-		view:RemoveAllItems()
-		for _, row in ipairs(rows) do
-			local b = view.contentElement:CreateChild("Button")
-			b:SetStyleAuto()
-			b:SetName("Button")
-			b:SetLayout(LM_VERTICAL, 2, magic.IntRect(8, 4, 8, 4))
-			b:SetFixedWidth((options.width or 520) - 40)
-			local name = b:CreateChild("Text")
-			name:SetName("ButtonText")
-			name:SetStyleAuto()
-			name.text = row.name or ""
-			name:SetTextAlignment(HA_LEFT)
-			-- A name is the server's own and may be long; it wraps
-			name:SetFixedWidth((options.width or 520) - 56)
-			name:SetWordwrap(true)
-			if row.line and row.line ~= "" then
-				local line = b:CreateChild("Text")
-				line:SetStyleAuto()
-				line.text = row.line
-				line:SetTextAlignment(HA_LEFT)
-				line:SetFixedWidth((options.width or 520) - 56)
-				line:SetWordwrap(true)
-			end
-			magic.SubscribeToEvent(b, "Released", function()
-				local now = buildat.get_time_us()
-				local second = (last_name == row.name and now - last_us < 1000000)
-				last_name, last_us = row.name, now
-				on_pick(row, second)
-			end)
-			view:AddItem(b)
+	local picked, last_us = nil, 0
+	local function describe(row)
+		if not detail or gone(detail) then
+			return
 		end
+		detail:RemoveAllChildren()
+		-- Placed by hand: a layout would share the spare height out
+		-- between the lines
+		local y = 0
+		local function text(s, size, color)
+			local t = detail:CreateChild("Text")
+			t:SetStyleAuto()
+			t.text = s
+			t:SetFontSize(size)
+			if color then t.color = magic.Color(M.safe.rgb(color)) end
+			t:SetWordwrap(true)
+			t:SetFixedWidth(options.panel.width)
+			t:SetPosition(0, y)
+			y = y + t.height + 4
+		end
+		if row then
+			text(row.name or "", 18)
+			if row.badge and row.badge ~= "" then text(row.badge, 12, "dim") end
+			if row.line and row.line ~= "" then text(row.line, 13, "dim") end
+		else
+			text(options.hint or "Pick a server, or type its address", 13,
+					"dim")
+		end
+	end
+	describe(nil)
+	function list:set_rows(rows)
+		view.list:RemoveAllChildren()
+		-- Free while the rows go in: a vertical layout is redone for each
+		-- one added (list_view's fit())
+		view.list:SetLayout(magic.LM_FREE, 0, magic.IntRect(0, 0, 0, 0))
+		view.list:SetPosition(0, 0)
+		for _, row in ipairs(rows) do
+			if row.header then
+				view:header(row.header)
+			else
+				local b = view:row({label = row.name or "", icon = row.icon},
+						row.badge)
+				b:SetFocusMode(magic.FM_FOCUSABLE)
+				magic.SubscribeToEvent(b, "HoverBegin", function()
+					describe(row)
+				end)
+				magic.SubscribeToEvent(b, "HoverEnd", function()
+					describe(picked)
+				end)
+				magic.SubscribeToEvent(b, "Released", function()
+					local now = buildat.get_time_us()
+					local second = picked == row and now - last_us < 1000000
+					picked, last_us = row, now
+					describe(row)
+					on_pick(row, second)
+				end)
+			end
+		end
+		view:fit()
+		-- The list's height stays: the window does not move under the
+		-- mouse as rows come and go
+		view.viewport:SetFixedSize(width, height)
 	end
 	return list
 end

@@ -308,6 +308,8 @@ local function labeled_edit(parent, label, value)
 	local text = parent:CreateChild("Text")
 	text:SetStyleAuto()
 	text.text = label
+	-- Fixed, so a tall column's spare room does not go into the labels
+	text:SetFixedHeight(text.height)
 	local edit = parent:CreateChild("LineEdit")
 	edit:SetStyleAuto()
 	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
@@ -3927,24 +3929,45 @@ show_connect_dialog = function(address, name)
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "launch_menu/res/main_style.xml")
 
-	local menu = ui_utils.vertical_menu(root, {min_width = 300})
+	-- **launch_menu_v2's Servers layout** (playtest, 2026-10-07): a
+	-- title, the source and the filter, the list, and beside it the
+	-- picked server, the fields and Join
+	local PANEL_WIDTH = 300
+	local narrow = magic.ui.root.width < 760
+	local width = math.min(magic.ui.root.width - 40, 1000)
+	local list_w = narrow and width - 32 or width - 32 - PANEL_WIDTH - 12
+	-- A fifth of the height to spare: a phone's browser bars take some of
+	-- the page as it scrolls (playtest, 2026-10-07)
+	local room = math.floor(magic.ui.root.height * 0.8) - 220 - (narrow and 330 or 0)
+	local menu = ui_utils.vertical_menu(root, {spacing = 8,
+			padding = magic.IntRect(16, 12, 16, 12)})
 	local outer = menu.window
+	outer:SetFixedWidth(width)
 
 	local title = outer:CreateChild("Text")
 	title:SetStyleAuto()
-	title.text = "Connect to a Luanti server"
+	title.text = "Join a Luanti server"
+	title:SetFontSize(20)
 
-	-- Two columns ([SERVER_LIST]): a list of servers on the left -- the
-	-- addresses this client has used, or Luanti's official list -- and the
-	-- fields on the right; a pick fills the address, a second pick connects
+	-- The list of servers on the left -- the addresses this client has
+	-- used, or Luanti's official list -- and the fields on the right; a
+	-- pick fills the address, a second pick connects ([SERVER_LIST])
+	local sources = outer:CreateChild("UIElement")
+	sources:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
 	local columns = outer:CreateChild("UIElement")
-	columns:SetLayout(LM_HORIZONTAL, 16, magic.IntRect(0, 0, 0, 0))
+	columns:SetLayout(narrow and LM_VERTICAL or LM_HORIZONTAL, 12,
+			magic.IntRect(0, 0, 0, 0))
 	local left = columns:CreateChild("UIElement")
 	left:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
-	left:SetFixedWidth(520)
+	left:SetFixedWidth(list_w)
 	local window = columns:CreateChild("UIElement")
 	window:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
-	window:SetFixedWidth(320)
+	window:SetFixedWidth(narrow and width - 32 or PANEL_WIDTH)
+	-- Made before the fields, so the picked server is described above them
+	local pick
+	local list = ui_utils.server_list(left, {width = list_w,
+			height = math.max(120, room), panel = window},
+			function(row, second) pick(row, second) end)
 
 	local address_edit = labeled_edit(window, "Address",
 			address or DEFAULT_ADDRESS)
@@ -4005,8 +4028,21 @@ show_connect_dialog = function(address, name)
 		end
 	end
 
-	menu:add("Connect", connect, true)
-	menu:add("Cancel", cancel)
+	local function button(label, main)
+		local b = window:CreateChild("Button")
+		if main then b:SetStyle("PrimaryButton") else b:SetStyleAuto() end
+		b:SetName("Button")
+		b:SetLayout(LM_VERTICAL, 0, magic.IntRect(0, 0, 0, 0))
+		b:SetFixedHeight(28)
+		local t = b:CreateChild("Text")
+		t:SetName("ButtonText")
+		t:SetStyleAuto()
+		t.text = label
+		t:SetTextAlignment(HA_CENTER)
+		return b
+	end
+	menu:add(button("Join", true), connect)
+	menu:add(button("Cancel"), cancel)
 
 	-- Enter in a field is the field's ([ONE_FOCUS]): on to the next one,
 	-- and the password's connects
@@ -4020,15 +4056,10 @@ show_connect_dialog = function(address, name)
 		connect()
 	end)
 
-	-- The left column: the source row, a filter, the list
-	local sources = left:CreateChild("UIElement")
-	sources:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
+	-- The source row, then the filter beside it
 	local source_buttons = {}
-	-- The filter is put back as it was left ([BOX_PLAYTEST_2] 13b)
-	local filter_edit = labeled_edit(left, "Filter",
-			SETTINGS.server_filter or "")
-	local list = ui_utils.server_list(left, {width = 520, height = 420},
-			function(row, second)
+	local filter_edit
+	pick = function(row, second)
 		address_edit:SetText(row.address)
 		-- The name last used on that server ([BOX_PLAYTEST_2] 4)
 		if row.player_name and row.player_name ~= "" then
@@ -4037,7 +4068,7 @@ show_connect_dialog = function(address, name)
 		if second then
 			connect()
 		end
-	end)
+	end
 	local source = "recent"
 	local official_rows = nil
 	local status = left:CreateChild("Text")
@@ -4054,11 +4085,14 @@ show_connect_dialog = function(address, name)
 	local function show()
 		for name, b in pairs(source_buttons) do
 			b.selected = (name == source)
+			-- In the main button's amber, as launch_menu_v2's locked row
+			b:GetChild("ButtonText").color = magic.Color(ui_utils.rgb(
+					name == source and "main" or "text"))
 		end
 		local rows = {}
 		if source == "recent" then
 			for _, e in ipairs(network.known_addresses()) do
-				local host, port = e.uri:match("^%a+://(.-):(%d+)$")
+				local host, port = e.uri:match("^udp://(.-):(%d+)$")
 				if host and e.accepted then
 					rows[#rows + 1] = {name = host .. ":" .. port,
 							address = host .. ":" .. port,
@@ -4108,11 +4142,13 @@ show_connect_dialog = function(address, name)
 					if srv.pvp then flags[#flags + 1] = "pvp" end
 					local addr = tostring(srv.address or "") .. ":" .. tostring(srv.port or 30000)
 					rows[#rows + 1] = {
-						name = string.format("%s   %s   %s/%s", tostring(srv.name or addr),
-								addr, tostring(srv.clients or 0), tostring(srv.clients_max or "?")),
+						name = tostring(srv.name or addr),
+						badge = string.format("%s/%s playing",
+								tostring(srv.clients or 0), tostring(srv.clients_max or "?")),
 						address = addr,
 						-- Two lines of it; the whole is the server's own page
-						line = tostring(srv.description or ""):sub(1, 150) ..
+						line = addr .. "\n" ..
+								tostring(srv.description or ""):sub(1, 150) ..
 								(#tostring(srv.description or "") > 150 and "..." or "") ..
 								(#flags > 0 and ("  [" .. table.concat(flags, ", ") .. "]") or "") ..
 								(srv.version and ("  " .. srv.version) or ""),
@@ -4129,7 +4165,7 @@ show_connect_dialog = function(address, name)
 		b:SetStyleAuto()
 		b:SetName("Button")
 		b:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
-		b:SetFixedSize(250, 26)
+		b:SetFixedSize(150, 26)
 		local t = b:CreateChild("Text")
 		t:SetName("ButtonText")
 		t:SetStyleAuto()
@@ -4147,6 +4183,16 @@ show_connect_dialog = function(address, name)
 	end
 	source_button("recent", "Servers used")
 	source_button("official", "Official list")
+	-- The filter is put back as it was left ([BOX_PLAYTEST_2] 13b)
+	local filter_label = sources:CreateChild("Text")
+	filter_label:SetStyleAuto()
+	filter_label.text = "  Filter"
+	filter_edit = sources:CreateChild("LineEdit")
+	filter_edit:SetStyleAuto()
+	filter_edit.textCopyable = true
+	filter_edit.textSelectable = true
+	filter_edit:SetFixedSize(math.max(100, width - 32 - 2 * 156 - 60), 26)
+	filter_edit:SetText(SETTINGS.server_filter or "")
 	-- Filtered as it is typed; kept at Enter
 	magic.SubscribeToEvent(filter_edit, "TextChanged", function()
 		show()

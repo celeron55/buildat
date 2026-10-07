@@ -137,13 +137,13 @@ C
 timeout 60 Build/bin/buildat -o launch_ui=launch_menu_v2 -D "$t/u2" -w 800x600 -l 4 \
 	-o sound_mute=1 -c @"$t/cmds2" > "$t/log2" 2>&1
 cp "$t/log2" "$t/log"
-grep -aq "launch_menu_v2: locked Fetch the server list" "$t/log2" || fail "the click locked nothing"
+grep -aq "launch_menu_v2: locked Join a Buildat server" "$t/log2" || fail "the click locked nothing"
 # The panel's heading, and the focus, in each scan
 p(){ awk -v n="$1" '/command: event scan/{i++} i == n && /size 166x20 text/{
 	sub(/.*text /, ""); print; exit}' "$t/log2"; }
-[ "$(p 1)" = '"Fetch the server list"' ] || fail "the panel left the locked row for the hovered one: $(p 1)"
+[ "$(p 1)" = '"Join a Buildat server"' ] || fail "the panel left the locked row for the hovered one: $(p 1)"
 grep -aq "launch_menu_v2: unlocked" "$t/log2" || fail "Down did not let go"
-[ "$(p 2)" != '"Fetch the server list"' ] || fail "the panel stayed locked after Down"
+[ "$(p 2)" != '"Join a Buildat server"' ] || fail "the panel stayed locked after Down"
 echo "ok: a click on nothing is Back above the first screen, and nothing on it; a click locks a row"
 
 [ -f web/buildat.wasm ] || { echo "PASS (web part skipped: no web/)"; exit 0; }

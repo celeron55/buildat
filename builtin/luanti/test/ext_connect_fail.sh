@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
 # cost: 16s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
-# [BOX_PLAYTEST_2] (2): the "Play on a Luanti server" tile from the grid,
+# [BOX_PLAYTEST_2] (2): the "Join a Luanti server" tile from the grid,
 # a connect to an address nothing answers at: the failure must be said in
 # a dialog and OK must return to the connect screen, not the grid and not
 # the desktop. Prints PASS or FAIL.
@@ -67,7 +67,7 @@ def fail(why):
 time.sleep(8)
 els = scan("a")
 if not els: fail("no menu scan")
-tiles = [e for e in els if "play on a luanti server" in e[5].lower() and e[3] > 0]
+tiles = [e for e in els if "join a luanti server" in e[5].lower() and e[3] > 0]
 if not tiles: fail("no connect tile; saw " + ", ".join(e[5] for e in els)[:300])
 click(max(tiles, key=lambda e: e[2]))
 addr = None
@@ -80,8 +80,8 @@ if not addr: fail("no address field; saw " + ", ".join(e[5] for e in els or [])[
 click(addr[0])
 write("keypress End", *(["keypress Backspace"] * 40))
 write("text 127.0.0.1:1", "delay 300")
-b = [e for e in els if e[5] == "Connect" and e[3] > 0]
-if not b: fail("no Connect button")
+b = [e for e in els if e[5] in ("Join", "[J]oin") and e[3] > 0]
+if not b: fail("no Join button")
 click(b[0])
 # The login to nothing times out; the dialog must say so, and OK must go
 # back to the connect screen rather than the grid

@@ -12,7 +12,7 @@
 # gives its own root the focus as it pushes it.
 #
 #   1. On the launch grid, Down moves the selection.
-#   2. On "Connect to server", which opens with the address field focused,
+#   2. On "Join a Buildat server", which opens with the address field focused,
 #      Down moves nothing: the field owns the keys that are text.
 #
 # The pictures are compared by how many pixels differ, because a focused
@@ -97,10 +97,10 @@ shot("b")
 els = scan()
 entry = None
 for e in els or []:
-	if "connect to server" in e[5].lower() and e[3] > 0:
+	if "join a buildat server" in e[5].lower() and e[3] > 0:
 		entry = e
 if entry is None:
-	print("FAIL: no \"Connect to server\" on the grid; saw " +
+	print("FAIL: no \"Join a Buildat server\" on the grid; saw " +
 			", ".join("%r" % x[5] for x in els or [])[:200])
 	write("quit"); sys.exit(1)
 write("mouse_pos %d %d" % (entry[1] + entry[3] // 2, entry[2] + entry[4] // 2),
