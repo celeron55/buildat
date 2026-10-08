@@ -24,8 +24,7 @@ pids=()
 trap 'for p in "${pids[@]}"; do kill -INT "$p" 2>/dev/null; done' EXIT
 
 server() { # app user_dir log
-	bin/buildat_server -m ../apps/$1 -D "$2" -P $port -l 3 2>&1 |
-		sed -u -e 's/\x1b\[[0-9;]*m//g' > "$3" &
+	bin/buildat_server -m ../apps/$1 -D "$2" -P $port -l 3 > "$3" 2>&1 &
 	for i in $(seq 1 180); do grep -q "setup code" "$3" 2>/dev/null && break; sleep 1; done
 	pids+=($(pgrep -f "buildat_server .*-D $2" | head -1))
 }
@@ -33,7 +32,7 @@ client() { # env_prefix name password code cmds log [extra env]
 	local p=$1 n=$2 pw=$3 c=$4 cmds=$5 log=$6; shift 6
 	env "${p}_NAME=$n" "${p}_PASSWORD=$pw" "${p}_CODE=$c" "$@" \
 		timeout 150 bin/buildat -o launch_ui=launch_menu -s localhost:$port -D "$out/cli_$(basename "$log" .log)" \
-		-w 640x400 -l 3 -c @"$cmds" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$log"
+		-w 640x400 -l 3 -c @"$cmds" > "$log" 2>&1
 }
 cmds() { local n=$1; shift; printf '%s\n' "$@" > "$out/$n.txt"; }
 

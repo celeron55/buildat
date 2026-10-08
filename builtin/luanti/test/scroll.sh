@@ -31,8 +31,7 @@ sleep 5
 srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
-bin/buildat -s localhost:29786 -w 1280x720 -l 3 -c - < "$fifo" 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
+bin/buildat -s localhost:29786 -w 1280x720 -l 3 -c - < "$fifo" > "$out/cli.log" 2>&1 &
 exec 3> "$fifo"
 python3 - "$out/cli.log" "$fifo" "$out/srv.log" <<'PYIN'
 import re, sys, time

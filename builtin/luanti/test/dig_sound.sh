@@ -152,7 +152,6 @@ SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE="$out/mix_still.raw" \
 	-w 640x400 -l 4 -o sound_mute=0 -c @"$out/cmds_still.txt" > /dev/null 2>&1
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli.log" "$out/srv.log"
 asked=$(grep -ac "dig_sound: dug " "$out/srv.log")
 name=$(grep -a "dig_sound: dug " "$out/srv.log" | head -1 |
 	sed 's/.*dug //')

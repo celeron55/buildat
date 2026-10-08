@@ -28,8 +28,8 @@ trap 'exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; check_pkill -INT buildat_s
 	if [ -f "$tmp/settings.json.bak" ]; then cp "$tmp/settings.json.bak" "$settings"; else rm -f "$settings"; fi;
 	[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"' EXIT
 # The grid by name, not by preference: keys_ui.sh says why ([MENU_FALLBACK])
-bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
-	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
+bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
+	> "$tmp/cli.log" 2>&1 &
 cli=$!
 exec 3> "$fifo"
 python3 - "$tmp/cli.log" "$fifo" "$BUILDAT_USER_PATH/shared/vanilla/settings.json" <<'PY'

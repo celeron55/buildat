@@ -51,8 +51,7 @@ shot() {   # $1 cut, $2 figure, $3 hop
 		${2:+BUILDAT_LAUNCH_MARK_FIGURE=$2} \
 		BUILDAT_LAUNCH_HOP="$3" \
 		timeout 180 bin/buildat -m launch_world -D "$out/emptyuser" \
-		-w 1280x720 -l 3 -c @"$out/cmds_$tag.txt" 2>&1 |
-		sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli_$tag.log"
+		-w 1280x720 -l 3 -c @"$out/cmds_$tag.txt" > "$out/cli_$tag.log" 2>&1
 }
 for hop in $HOPS; do
 	for fig in $FIGS; do

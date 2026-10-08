@@ -24,8 +24,7 @@ trap 'rm -rf "$secret_dir"' EXIT
 echo "secret" > "$secret_dir/secret"
 cd "$here/Build"
 BUILDAT_BOX_TEST_SECRET="$secret_dir/secret" timeout 300 bin/buildat_server \
-	-m ../apps/box_test -D "$out/user" -P 29871 -l 3 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log"
+	-m ../apps/box_test -D "$out/user" -P 29871 -l 3 > "$out/srv.log" 2>&1
 if ! grep -aq "The server is boxed" "$out/srv.log"; then
 	echo "FAIL: the server was not boxed --" \
 			"$(grep -a "box could not\|confine" "$out/srv.log" | head -1)"

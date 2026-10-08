@@ -42,7 +42,7 @@ mv "$t/app/test1/test1.cpp.new" "$t/app/test1/test1.cpp"
 cd "$here/Build"
 BUILDAT_UNCONFINED= timeout 120 "$b" --compile-only -u launcher=1 \
 	-m "$t/app" -D "$t/user" > "$t/log" 2>&1
-log=$(sed 's/\x1b\[[0-9;]*m//g' "$t/log")
+log=$(cat "$t/log")
 
 # The outside file must be denied by Landlock, not opened
 echo "$log" | grep -qF "$secret: Permission denied" ||

@@ -65,8 +65,7 @@ fi
 	echo "delay 500"
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -m launch_console -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
 back=$(grep -ac "console: 7\*6 = 42" "$out/cli.log")
 echo "the keyboard came back to the console $back times"
 if [ "$back" -lt 1 ]; then

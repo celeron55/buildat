@@ -108,7 +108,6 @@ fi
 mkdir -p "$out/user"
 run_client 40 "$out/cli.log" timeout 240 bin/buildat -m launch_world \
 	-D "$out/user" -w 640x360 -l 3 -c @"$out/cmds.txt" > /dev/null 2>&1
-sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli.log"
 
 contents=$(grep -a "launch_w.*: contents: " "$out/cli.log" | head -1 |
 	sed 's/.*contents: //')

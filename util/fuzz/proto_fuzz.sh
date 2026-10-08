@@ -131,11 +131,12 @@ print(held)' "$lan" "$port" 2>/dev/null)
 	echo "40 connections from $lan: ${held:-?} held"
 	[ "${held:-0}" = 32 ] || bad="40 connections from one address: ${held:-?} held, not 32"
 fi
-# A peer's bytes reach the log as \xNN: past the logger's own colours, no
-# escape or carriage return of the fuzzer's is left for a terminal to run
+# A peer's bytes reach the log as \xNN: no escape or carriage return of
+# the fuzzer's is left for a terminal to run (a log to a file has no
+# colours of the logger's own)
 if [ -z "$bad" ] && ! python3 -c '
-import re, sys
-d = re.sub(rb"\x1b\[[0-9;]*m", b"", open(sys.argv[1], "rb").read())
+import sys
+d = open(sys.argv[1], "rb").read()
 sys.exit(1 if b"\x1b" in d or b"\r" in d else 0)' "$out/srv.log"; then
 	bad="a control byte from a peer reached the log raw"
 fi

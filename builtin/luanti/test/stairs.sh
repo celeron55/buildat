@@ -68,7 +68,7 @@ sleep 3
 srv=$(check_pgrep buildat_server | head -1)
 printf 'delay 9000\nkeydown W\ndelay 4000\nkeyup W\ndelay 3000\nkeydown D\ndelay 4000\nkeyup D\ndelay 500\nquit\n' > "$out/cmds.txt"
 timeout 120 bin/buildat -s "localhost:$port" -w 640x360 -o sound_mute=1 \
-	-c @"$out/cmds.txt" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
 # The highest y and the furthest along the walk: past the stair (3) and up
 # on it on the way is the pass. A stair that is a whole cube, or one turned
 # the wrong way, puts a step of a whole voxel in the way and the player

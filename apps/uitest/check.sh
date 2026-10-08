@@ -13,8 +13,7 @@ cd "$here/Build"
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
-bin/buildat_server -m ../apps/uitest -P 29793 -l 3 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
+bin/buildat_server -m ../apps/uitest -P 29793 -l 3 > "$out/srv.log" 2>&1 &
 for i in $(seq 1 60); do
 	grep -q "Server::start\|Mods loaded" "$out/srv.log" 2>/dev/null && break
 	sleep 1
@@ -24,8 +23,7 @@ srv=$(check_pgrep buildat_server | head -1)
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 { echo "delay 4000"; echo "screenshot $out/uitest.png"; echo "delay 500"
 	echo "quit"; } > "$out/cmds.txt"
-bin/buildat -o launch_ui=launch_menu -s localhost:29793 -w 640x480 -l 3 -c @"$out/cmds.txt" 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+bin/buildat -o launch_ui=launch_menu -s localhost:29793 -w 640x480 -l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 for what in texture sound; do

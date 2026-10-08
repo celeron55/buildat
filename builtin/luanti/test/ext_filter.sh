@@ -25,8 +25,8 @@ run() {   # $1 = which pass; drives one client through the python below
 # and the scan found no tiles. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
-	bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
-		| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
+	bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
+		> "$tmp/cli.log" 2>&1 &
 	exec 3> "$fifo"
 	python3 - "$tmp/cli.log" "$fifo" "$file" "$1" <<'PY'
 import re, sys, time, json

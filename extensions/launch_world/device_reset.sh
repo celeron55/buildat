@@ -53,7 +53,6 @@ fi
 	echo "quit"; } > "$out/cmds.txt"
 run_client 40 "$out/cli.log" timeout 180 bin/buildat -m launch_world \
 	-D "$out/user" -w 1280x720 -l 3 -c @"$out/cmds.txt" > /dev/null 2>&1
-sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli.log"
 restored=$(grep -ac "screen mode changed" "$out/cli.log")
 python3 - "$out" "$restored" <<'PY'
 import sys

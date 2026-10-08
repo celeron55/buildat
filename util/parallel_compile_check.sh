@@ -21,7 +21,6 @@ run(){ # build dir, app, log
 	BUILDAT_UNCONFINED=1 timeout 300 "$b" --compile-only -m "$2" \
 		-D "$t/user" -r "$1" > "$3" 2>&1
 	local s=$?
-	sed -i 's/\x1b\[[0-9;]*m//g' "$3"
 	return $s
 }
 

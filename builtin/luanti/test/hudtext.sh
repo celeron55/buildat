@@ -44,7 +44,6 @@ trap 'kill -INT "$srv" 2>/dev/null' EXIT
 # A run that has stopped logging is taken down rather than waited out
 run_client 60 "$out/cli.log" bin/buildat -s localhost:29791 -w 1280x720 \
 	-l 3 -c @"$out/cmds.txt"
-sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli.log"
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 python3 - "$out/cli.log" <<'PY'

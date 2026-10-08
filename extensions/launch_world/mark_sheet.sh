@@ -57,8 +57,7 @@ shot() {   # $1 option ("" as shipped), $2 keys to type, $3 tag
 	env ${1:+BUILDAT_LAUNCH_MARK=$1} BUILDAT_LAUNCH_HOP="${HOP:-2.0}" \
 		BUILDAT_LAUNCH_HOP_FLAT=1 \
 		timeout 180 bin/buildat -m launch_world -D "$out/emptyuser" \
-		-w 1280x720 -l 3 -c @"$out/cmds_$1_$3.txt" 2>&1 |
-		sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli_$1_$3.log"
+		-w 1280x720 -l 3 -c @"$out/cmds_$1_$3.txt" > "$out/cli_$1_$3.log" 2>&1
 }
 # **The glowing orb first** ([MARK_ONEBIT], 2026-09-24): the settled
 # transform draws a thin outline, and the emission mask is where a thin

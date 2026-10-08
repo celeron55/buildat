@@ -133,8 +133,8 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_VOXELWORLD_KEEP_LOADED=1 \
 	BUILDAT_LUANTI_LUA="$boxed_fixture" \
 	BUILDAT_VIEW_RANGE="$RANGE" BUILDAT_VIEW_BOBBING=0 \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" 2>&1 \
-	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/srv.log" &
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" \
+	> "$tmp/srv.log" 2>&1 &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$tmp/srv.log" 2>/dev/null && break
 	grep -q "Shutdown:" "$tmp/srv.log" 2>/dev/null && break

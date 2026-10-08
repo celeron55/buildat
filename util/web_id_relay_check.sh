@@ -37,7 +37,7 @@ curl -sS -o /dev/null --max-time 8 "$SP/api/list" ||
 t=$(mktemp -d)
 srv=
 trap '[ -n "$srv" ] && kill $srv 2>/dev/null; rm -rf "$t"' EXIT
-nolog(){ sed 's/\x1b\[[0-9;]*m//g' "$1"; }
+nolog(){ cat "$1"; }
 fail(){ echo "FAIL: $*"; exit 1; }
 
 # A throwaway app: it relays (starport_announce) and runs a client script that

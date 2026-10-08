@@ -93,7 +93,7 @@ start_server()
 		return 2
 	fi
 	SERVER_PORT=$port
-	"$@" -P "$port" > >(sed -u -e 's/\x1b\[[0-9;]*m//g' > "$log") 2>&1 &
+	"$@" -P "$port" > "$log" 2>&1 &
 	SERVER_PID=$!
 	for _i in $(seq "$timeout"); do
 		grep -qaE "$ready" "$log" 2>/dev/null && return 0

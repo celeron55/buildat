@@ -62,7 +62,7 @@ srv=$(check_pgrep buildat_server | head -1)
 	echo "keyup Space"; echo "delay 12000"; echo "keypress K"; echo "delay 300"; echo "keypress K"
 	echo "delay 8000"; echo "quit"; } > "$tmp/cmds.txt"
 bin/buildat -s "localhost:$port" -w 640x360 -l 3 -c @"$tmp/cmds.txt" \
-	2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
+	> "$tmp/cli.log" 2>&1 &
 cli=$!
 for i in $(seq 1 60); do
 	kill -0 "$cli" 2>/dev/null || break

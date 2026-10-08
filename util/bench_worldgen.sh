@@ -104,8 +104,8 @@ for i in $(seq 1 "$runs"); do
 	BUILDAT_LUANTI_GAME="$game" BUILDAT_LUANTI_SAVE="$save" \
 		BUILDAT_LUANTI_LUA="$probe" \
 		"$build/bin/buildat_server" -u launcher=1 -m "$root/apps/vanilla" \
-		-D "$BUILDAT_USER_PATH" -P "$port" -l 4 2>&1 \
-		| sed -e 's/\x1b\[[0-9;]*m//g' > "$log" &
+		-D "$BUILDAT_USER_PATH" -P "$port" -l 4 \
+		> "$log" 2>&1 &
 	# Generation is over when no new section has been started for a while.
 	# Five seconds of quiet, and a cap so that a server that never settles
 	# does not hold the whole run.

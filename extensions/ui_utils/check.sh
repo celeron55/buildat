@@ -17,8 +17,7 @@ out="$here/local/menu_keys"
 rm -rf "$out"; mkdir -p "$out"
 cd "$here/Build"
 port=29881
-bin/buildat_server -m ../apps/floorplanner -D "$out/srv" -P $port -l 3 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
+bin/buildat_server -m ../apps/floorplanner -D "$out/srv" -P $port -l 3 > "$out/srv.log" 2>&1 &
 for i in $(seq 1 120); do
 	grep -q "setup code" "$out/srv.log" 2>/dev/null && break; sleep 1
 done
@@ -45,7 +44,7 @@ quit
 CMDS
 BUILDAT_FP_CREATE=1 BUILDAT_FP_NAME=op BUILDAT_FP_PASSWORD=pw123456 BUILDAT_FP_CODE=$code \
 	timeout 120 bin/buildat -o launch_ui=launch_menu -s localhost:$port -D "$out/cli" -w 800x500 -l 4 \
-	-c @"$out/cmds.txt" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
 grep -a "ui_utils: keyboard" "$out/cli.log" | sed 's/.*ui_utils: //' > "$out/keys.txt"
 cat "$out/keys.txt"
 fail=0

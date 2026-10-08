@@ -34,8 +34,7 @@ srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 printf 'wait_log 240000 chat: water_light: done\ndelay 500\nquit\n' > "$out/cmds.txt"
-bin/buildat -s localhost:29787 -w 640x480 -l 3 -c @"$out/cmds.txt" 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+bin/buildat -s localhost:29787 -w 640x480 -l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 python3 - "$out/srv.log" <<'PY'

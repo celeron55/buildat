@@ -38,8 +38,7 @@ for n in $names; do
 	# window, and a boot check that waits forever on the desk's weather
 	# reports nothing at all
 	timeout 90 bin/buildat -m "$n" -w 640x360 -l 3 \
-		-c @"$out/cmds.txt" 2>&1 |
-		sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/$n.log"
+		-c @"$out/cmds.txt" > "$out/$n.log" 2>&1
 	why=""
 	grep -aq "Crash: SIG" "$out/$n.log" && why="crashed"
 	grep -aq "did not load; falling back" "$out/$n.log" &&

@@ -33,7 +33,7 @@ srv=$(check_pgrep buildat_server | head -1)
 { echo "delay 15000"; echo "event scan before"; echo "keydown U"; echo "delay 3000"
 	echo "keyup U"; echo "delay 1000"; echo "event scan after"; echo "quit"; } > "$tmp/cmds.txt"
 bin/buildat -s "localhost:$port" -w 640x360 -l 3 -c @"$tmp/cmds.txt" \
-	2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
+	> "$tmp/cli.log" 2>&1 &
 cli=$!
 # The scan's lines say "scan scan:" whatever the word given; the two
 # scans are told apart by their order

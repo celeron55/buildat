@@ -95,8 +95,8 @@ else
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
 	bin/buildat_server -u launcher=1 -m "../apps/$GAME_DIR" -P "$port" \
-	-l "${LOG_LEVEL:-4}" 2>&1 \
-	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
+	-l "${LOG_LEVEL:-4}" \
+	> "$out/srv.log" 2>&1 &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break
 	grep -q "Shutdown:" "$out/srv.log" 2>/dev/null && break
@@ -133,8 +133,8 @@ fi
 server_arg="-s localhost:$cport"
 [ -n "${MENU_RUN:-}" ] && server_arg=""
 $menu_env bin/buildat $server_arg -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" $cold \
-	-c - < "$fifo" 2>&1 \
-	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
+	-c - < "$fifo" \
+	> "$out/cli.log" 2>&1 &
 cli=$!
 exec 3> "$fifo"
 # The world loading around the player is waited for, not guessed

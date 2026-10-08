@@ -21,8 +21,7 @@ cd "$here/Build"
 port=$(( 29600 + (RANDOM % 90) ))
 token=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
 BUILDAT_OWNER_TOKEN=$token bin/buildat_server -m ../apps/vanilla \
-	-A 127.0.0.1 -P "$port" -u launcher=1 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
+	-A 127.0.0.1 -P "$port" -u launcher=1 > "$out/srv.log" 2>&1 &
 srv_pid() { pgrep -f "[b]uildat_server -m ../apps/vanilla -A 127.0.0.1 -P $port"; }
 trap 'kill -9 $(srv_pid) 2>/dev/null' EXIT
 for i in $(seq 1 120); do

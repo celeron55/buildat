@@ -141,7 +141,7 @@ LUA
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla_voxel_physics -P 29781 \
-	-l "${LOG_LEVEL:-3}" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/hill_srv.log" &
+	-l "${LOG_LEVEL:-3}" > "$out/hill_srv.log" 2>&1 &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/hill_srv.log" 2>/dev/null && break
 	sleep 1
@@ -164,7 +164,7 @@ delay 500
 quit
 CMDS
 bin/buildat -o launch_ui=launch_menu -s localhost:29781 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
-	-c @"$out/cmds.txt" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/hill_cli.log"
+	-c @"$out/cmds.txt" > "$out/hill_cli.log" 2>&1
 sleep 2
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done

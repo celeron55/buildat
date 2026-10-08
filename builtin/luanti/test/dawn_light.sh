@@ -67,7 +67,6 @@ shoot() { # <tag> <extra env>
 	# A run that has stopped logging is taken down rather than waited out
 	run_client 60 "$out/cli_$tag.log" env BUILDAT_LUANTI_ADAPT=1000000 $2 \
 		bin/buildat -s localhost:29786 -w 640x480 -l 3 -c @"$cmds"
-	sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli_$tag.log"
 }
 # The fixture's clock starts on each join, so each client gets the whole
 # round of hours from the beginning

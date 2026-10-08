@@ -33,10 +33,12 @@ const int CORE_VERBOSE = 4;
 const int CORE_DEBUG = 5;
 const int CORE_TRACE = 6;
 
-#ifdef _WIN32
+// Coloured on a terminal only: a log read by a script or from a file has
+// nothing to strip ([CHECK_COVERAGE])
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
 static const bool use_colors = false;
 #else
-static const bool use_colors = true;
+static const bool use_colors = isatty(2);
 #endif
 
 static interface::Mutex log_mutex;

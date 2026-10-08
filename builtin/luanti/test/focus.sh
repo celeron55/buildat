@@ -47,7 +47,7 @@ srv=$(check_pgrep buildat_server | head -1)
 # Not a scripted client: one under -c keeps the cursor visible and its
 # focus forced, which is the opposite of what is tested. Killed at the end.
 bin/buildat -s "localhost:$port" -w 640x360 -l 3 \
-	2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
+	> "$tmp/cli.log" 2>&1 &
 cli=$!
 for i in $(seq 1 60); do
 	grep -aq "the first placement" "$tmp/cli.log" && break

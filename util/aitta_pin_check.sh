@@ -67,7 +67,7 @@ done
 run(){ # version [launch lines] -> the line
 	(cd "$here/Build" && timeout 120 bin/buildat_server \
 		-m "$t/user/installed/tester/pin/$1" -D "$t/user" -C "$t/cache" \
-		-P 29873 -l 3 ${2:+-u "$2"} 2>&1) | sed 's/\x1b\[[0-9;]*m//g' > "$t/srv_$1.log"
+		-P 29873 -l 3 ${2:+-u "$2"} 2>&1) > "$t/srv_$1.log"
 	grep -ao "pin_check: [a-z]*" "$t/srv_$1.log" | tail -1
 }
 r=$(run 1.0); [ "$r" = "pin_check: made" ] || fail "1.0 did not make its save: '$r' (srv_1.0.log: $(tail -3 "$t/srv_1.0.log"))"

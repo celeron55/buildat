@@ -83,7 +83,6 @@ run_client 60 "$out/cli.log" timeout 240 bin/buildat -s "localhost:$port" \
 	-w 640x400 -l 3 -c @"$out/cmds.txt" > /dev/null 2>&1
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli.log"
 had=$(grep -ac "nodes with a footstep" "$out/cli.log")
 known=$(grep -a "nodes with a footstep" "$out/cli.log" | head -1 |
 	sed -n 's/.*predictions, \([0-9]*\) nodes with a footstep.*/\1/p')

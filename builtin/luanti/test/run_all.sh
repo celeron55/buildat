@@ -22,7 +22,7 @@
 #
 # **What a runner covers is where it lives**, so most of them say
 # nothing: a check under extensions/<x>/ covers extensions/<x>/**, one
-# under games/<g>/ covers games/<g>/**, and one in this directory
+# under apps/<a>/ covers apps/<a>/**, one in util/ itself, and one in this directory
 # covers builtin/luanti/**. A "# covers:" line *adds* paths a runner
 # also proves -- the client's own sources, mostly -- and only the
 # runners that prove something outside their own tree carry one. A
@@ -61,14 +61,19 @@ root=$(cd "$here/../../.." && pwd)
 runners=""
 # **core.sh beside a check.sh** is the cheap runner an edit runs
 # ([CHECK_COST]): where the full one is dear, its tree carries a second
-# one, and --changed picks whichever is cheaper for what changed
-for f in "$here"/*.sh "$root"/extensions/*/check.sh "$root"/extensions/*/core.sh \
-		"$root"/games/*/check.sh; do
-	[ -f "$f" ] || continue
-	case "$(basename "$f")" in
-	lib.sh|contract.sh|fullscreen_gate.sh|run_all.sh) continue;;
-	esac
+# one, and --changed picks whichever is cheaper for what changed.
+# **A runner is a script with a "# tier:" line, wherever it is**
+# ([CHECK_COVERAGE]): a list of places missed util/ and apps/, and named
+# a games/ that had gone. A tier that is none of the three is an error,
+# not a runner nobody runs.
+for f in $(git -C "$root" grep -l '^# tier:' -- '*.sh'); do
+	f="$root/$f"
 	t=$(sed -n 's/^# tier: *//p' "$f" | head -1)
+	case "$t" in
+	quick|full|long) ;;
+	*) echo "run_all: ${f#"$root"/} has the tier \"$t\": quick, full or long" >&2
+		exit 2;;
+	esac
 	[ "$t" = "$tier" ] || continue
 	name=${f#"$root"/}
 	case "$f" in "$here"/*) name=$(basename "$f");; esac
@@ -82,7 +87,8 @@ costs="$out/costs"
 covers_of() {   # $1 path, $2 name
 	sed -n 's/^# covers: *//p' "$1" | tr ' ' '\n'
 	case "$2" in
-	extensions/*/*.sh|games/*/*.sh) echo "${2%/*}/**" ;;
+	extensions/*|apps/*) echo "$(echo "$2" | cut -d/ -f1-2)/**" ;;
+	util/*) echo "$2" ;;
 	*) echo "builtin/luanti/**" ;;
 	esac
 }

@@ -40,7 +40,7 @@ cd "$here/Build"
 t=$(mktemp -d)
 srv=
 trap '[ -n "$srv" ] && kill $srv 2>/dev/null; rm -rf "$t"' EXIT
-nolog(){ sed 's/\x1b\[[0-9;]*m//g' "$1"; }
+nolog(){ cat "$1"; }
 fail(){ echo "FAIL: $*"; exit 1; }
 
 # start <dir> <port> [server args...]: a server, its log in $t/<dir>.log;

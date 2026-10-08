@@ -57,8 +57,7 @@ shoot() { # <tag> <env>
 		echo "delay 500"
 		echo "quit"; } > "$out/cmds_$1.txt"
 	env $2 bin/buildat -s localhost:29788 -w 1280x720 -l 3 \
-		-c @"$out/cmds_$1.txt" 2>&1 |
-		sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli_$1.log"
+		-c @"$out/cmds_$1.txt" > "$out/cli_$1.log" 2>&1
 }
 shoot level "BUILDAT_LIQUID_CORNER_AVG="
 sleep 3

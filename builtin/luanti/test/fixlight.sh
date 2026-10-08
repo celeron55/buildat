@@ -56,7 +56,7 @@ BUILDAT_LUANTI_GAME="${GAME:-mineclone2}" BUILDAT_LUANTI_SAVE="$save" \
 { echo "wait_log 120000 the server put the player"; echo "delay 60000"
 	echo "quit"; } > "$out/cmds.txt"
 timeout 250 bin/buildat -s "localhost:$port" -w 640x480 -l 3 -c @"$out/cmds.txt" \
-	2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+	> "$out/cli.log" 2>&1
 for i in $(seq 1 60); do
 	grep -aq "fixcheck: done" "$out/srv.log" 2>/dev/null && break
 	sleep 1

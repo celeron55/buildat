@@ -107,8 +107,8 @@ keypress C
 delay 500
 quit
 CMDS
-bin/buildat -s localhost:29778 -w 1280x720 -l 3 -c @"$out/cmds.txt" 2>&1 \
-	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+bin/buildat -s localhost:29778 -w 1280x720 -l 3 -c @"$out/cmds.txt" \
+	> "$out/cli.log" 2>&1
 sleep 2
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done

@@ -25,8 +25,7 @@ fi
 	echo "delay 400"
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -m launch_menu_attract -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" 2>&1 |
-	sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log"
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
 if grep -aq "Crash: SIG" "$out/cli.log"; then
 	echo "FAIL: the client crashed --" \
 			"$(grep -a "Crash: SIG" "$out/cli.log" | head -1)"

@@ -41,8 +41,7 @@ sleep 3
 	echo "quit"; } > "$out/cmds.txt"
 # -C: a cache path of its own, empty, so nothing is there to be reused
 timeout 300 bin/buildat -s "localhost:29825" -C "$out/cache" -w 1280x720 \
-	-l 3 -c @"$out/cmds.txt" 2>&1 | sed -u -e 's/\x1b\[[0-9;]*m//g' \
-	> "$out/cli.log"
+	-l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1
 cached=$(sed -n 's/.*\([0-9][0-9]*\) of \([0-9][0-9]*\) announced files are cached.*/\1 \2/p' \
 		"$out/cli.log" | sort -n -k2 | tail -1) # the game's, not a later one-file announce
 if [ -z "$cached" ]; then

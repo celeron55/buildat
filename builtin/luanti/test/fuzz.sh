@@ -139,8 +139,8 @@ trap 'kill "$cli" 2>/dev/null; kill "${netsim:-}" 2>/dev/null; kill -INT "$srv" 
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
 	bin/buildat_server -u launcher=1 -m "../apps/$GAME_DIR" -P "$port" \
-	-l "${LOG_LEVEL:-4}" 2>&1 \
-	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/srv.log" &
+	-l "${LOG_LEVEL:-4}" \
+	> "$out/srv.log" 2>&1 &
 for i in $(seq 1 400); do
 	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break
 	grep -q "Shutdown:" "$out/srv.log" 2>/dev/null && break
@@ -162,8 +162,8 @@ if [ -n "${NETSIM:-}" ]; then
 	sleep 1
 fi
 bin/buildat -s "localhost:$cport" -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
-	-c @"$out/cmds.txt" 2>&1 \
-	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" &
+	-c @"$out/cmds.txt" \
+	> "$out/cli.log" 2>&1 &
 cli=$!
 # The walk plus the load, and then some: a client that has not exited by
 # then is hung, which is a finding of its own ([QUIT_HANG], seed 15 sat

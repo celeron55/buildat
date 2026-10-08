@@ -67,7 +67,7 @@ mkdir -p "$out/emptyuser"
 { echo "wait_log_any 30000 on the floor"; echo "quit"
 	} > "$out/cmds_cold.txt"
 examples=$(bin/buildat -m launch_world -D "$out/emptyuser" -w 640x360 -l 3 \
-	-c @"$out/cmds_cold.txt" 2>&1 | sed -e 's/\x1b\[[0-9;]*m//g' |
+	-c @"$out/cmds_cold.txt" 2>&1 |
 	grep -a "launch_w.*: servers: .* on the floor" | head -1 |
 	sed -n 's/.*floor, \([0-9]*\) of them the room.*/\1/p')
 echo "a client with no history draws ${examples:-0} suggested servers"
@@ -118,10 +118,8 @@ fi
 	} > "$out/cmds_back.txt"
 { echo "wait_log_any 30000 could not start a launch UI"; echo "quit"
 	} > "$out/cmds_nolauncher.txt"
-slot=$(bin/buildat -w 640x360 -l 3 -o launch_ui=launch_world 	-c @"$out/cmds_slot.txt" 2>&1 |
-	sed -e 's/\x1b\[[0-9;]*m//g' | grep -ac "launch_w.*: contents: ")
-back=$(bin/buildat -w 640x360 -l 3 -o launch_ui=nosuchthing 	-c @"$out/cmds_back.txt" 2>&1 |
-	sed -e 's/\x1b\[[0-9;]*m//g' | grep -av "wait_log" |
+slot=$(bin/buildat -w 640x360 -l 3 -o launch_ui=launch_world 	-c @"$out/cmds_slot.txt" 2>&1 | grep -ac "launch_w.*: contents: ")
+back=$(bin/buildat -w 640x360 -l 3 -o launch_ui=nosuchthing 	-c @"$out/cmds_back.txt" 2>&1 | grep -av "wait_log" |
 	grep -ac "the launch UI is launch_menu")
 # **And the room runs in the sandbox** ([LAUNCH_SANDBOX]), which is what
 # its launch_ui.txt asks for: the marker is what the client reads, so a
@@ -137,8 +135,7 @@ fi
 # so in its own window and keeps running -- it used to abort, which is
 # the one failure a slot anybody can fill must not have.
 last=$(BUILDAT_TEST_NO_LAUNCHER=1 bin/buildat -w 640x360 -l 3 \
-	-o launch_ui=nosuchthing -c @"$out/cmds_nolauncher.txt" 2>&1 |
-	sed -e 's/\x1b\[[0-9;]*m//g' | grep -av "wait_log" |
+	-o launch_ui=nosuchthing -c @"$out/cmds_nolauncher.txt" 2>&1 | grep -av "wait_log" |
 	grep -acE "could not start a launch UI|Crash: SIG")
 echo "the slot: picked by name $slot, fell back to the menu $back, sandboxed"
 if [ "$last" -ne 1 ]; then
@@ -575,7 +572,6 @@ wait_quiet 40 || true
 # minute already said.
 run_client 60 "$out/cli.log" timeout 600 bin/buildat -m launch_world \
  -w 1280x720 -l 3 -c @"$out/cmds.txt"
-sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/cli.log"
 # And the client has to have got to the end of the sequence
 if grep -aq "Crash: SIG" "$out/cli.log"; then
 	echo "FAIL: the client crashed --" \
@@ -901,7 +897,6 @@ wait_quiet 40 || true
 run_client 60 "$out/rows_cli.log" \
 	timeout 300 bin/buildat -m launch_world -w 640x400 -l 3 \
 	-c @"$out/cmds_rows.txt" > /dev/null 2>&1
-sed -i -e 's/\x1b\[[0-9;]*m//g' "$out/rows_cli.log"
 bays=$(grep -a "launch_w.*: bays " "$out/rows_cli.log" | head -1 |
 	sed 's/.*bays //')
 kinds=$(echo "$bays" | tr ' ' '\n' | grep "^[flrb]$" | sort -u | tr -d '\n')

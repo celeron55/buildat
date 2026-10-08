@@ -27,8 +27,8 @@ trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; exec 3>&-
 # and the scan found no tiles. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
-bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
-	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$tmp/cli.log" &
+bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
+	> "$tmp/cli.log" 2>&1 &
 cli=$!
 exec 3> "$fifo"
 python3 - "$tmp/cli.log" "$fifo" "$save/luanti/world.mt" "$out/world.png" "$SAVE" <<'PY'

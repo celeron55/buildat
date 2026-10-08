@@ -1,5 +1,5 @@
 #!/bin/bash
-# tier: fast
+# tier: quick
 # cost: ~25 s (2026-10-07)
 # covers: src/impl/tcpsocket.cpp src/server/config.cpp
 # [DUAL_STACK]: a server on the default address answers on ::1 and on

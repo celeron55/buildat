@@ -31,8 +31,8 @@ fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 # and the scan found no tiles. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
-( cd "$here/Build" && bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" 2>&1 \
-	| sed -u -e 's/\x1b\[[0-9;]*m//g' > "$out/cli.log" ) &
+( cd "$here/Build" && bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
+	> "$out/cli.log" 2>&1 ) &
 cli=$!
 trap 'kill "$cli" 2>/dev/null; check_pkill buildat_server 2>/dev/null' EXIT
 exec 3> "$fifo"
