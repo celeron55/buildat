@@ -12,7 +12,8 @@
 # local/vl_inv/<client>/, each beside its reference in
 # local/vl_inv/side_<n>.png (reference left, vanilla, luanti_client);
 # what to compare is the eye's. Asserted: every form shot, and every
-# click reached the game as the field it names. Needs the Luanti
+# click reached the game as the field it names, and the game's player
+# inventory callbacks refused one drag and were told of the next. Needs the Luanti
 # checkout and its server binary for luanti_client, as ext_hotbar.sh
 # does.
 #
@@ -41,6 +42,24 @@ core.register_on_mods_loaded(function()
 		table.sort(keys)
 		core.log("action", "vl_inv: fields " .. table.concat(keys, " "))
 	end)
+end)
+-- The game has its say on a move in the player inventory: the first drag
+-- is refused, which keeps the tree where it was, and the second is told
+local refused = false
+core.register_allow_player_inventory_action(function(player, action, inv, info)
+	if action == "move" and not refused then
+		refused = true
+		core.after(0.5, function()
+			core.log("action", "vl_inv: refused, main 1 " ..
+					inv:get_stack("main", 1):get_name())
+		end)
+		return 0
+	end
+end)
+core.register_on_player_inventory_action(function(player, action, inv, info)
+	core.log("action", "vl_inv: on " .. action .. " " .. info.from_list ..
+			" " .. info.from_index .. " " .. info.to_list .. " " ..
+			info.to_index .. " " .. info.count)
 end)
 core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
@@ -91,10 +110,14 @@ cmds(){ # out-dir
 		echo "delay 500"; echo "screenshot $1/s$i.png"
 		if [ $i = 1 ]; then
 			# The tree dragged from the hotbar row's first slot to the
-			# first slot above: picked up by the press, put by the release
-			echo "mouse_pos 400 578"; echo "delay 200"; echo "mouse_down left"
-			echo "delay 300"; echo "mouse_pos 400 388"; echo "delay 300"
-			echo "mouse_up left"; echo "delay 500"
+			# first slot above: picked up by the press, put by the release.
+			# Twice, as the game refuses the first.
+			for _ in 1 2; do
+				echo "mouse_pos 400 578"; echo "delay 200"
+				echo "mouse_down left"; echo "delay 300"
+				echo "mouse_pos 400 388"; echo "delay 300"
+				echo "mouse_up left"; echo "delay 1500"
+			done
 		fi
 	done
 	echo quit
@@ -108,6 +131,10 @@ check_sent(){ # client server-log
 	done
 	grep -aq "vl_inv: main 1 , main 10 mcl_core:tree" "$2" ||
 		failed+=("$1: the tree was not dragged to main 10")
+	grep -aq "vl_inv: refused, main 1 mcl_core:tree" "$2" ||
+		failed+=("$1: a refused move did not keep the tree in main 1")
+	[ "$(grep -ac "vl_inv: on move main 1 main 10 1" "$2")" = 1 ] ||
+		failed+=("$1: the move was not told once to the game")
 }
 failed=()
 

@@ -2792,6 +2792,59 @@ local function do_craft(ref, count)
 	update_craft_preview(ref)
 end
 
+-- The game's own say on a move that touches the player's inventory:
+-- core.register_allow_player_inventory_action and
+-- core.register_on_player_inventory_action. A move inside it is "move"; a
+-- stack leaving it is "take" and one arriving "put", which is how
+-- src/inventorymanager.cpp splits it. The first allow that answers with
+-- anything decides, and a number is a limit.
+local function player_actions(ref, from_mine, to_mine, from_list, from_i,
+		to_list, to_i, count, stack)
+	if from_mine and to_mine then
+		return {{"move", {from_list = from_list, to_list = to_list,
+				from_index = from_i, to_index = to_i, count = count}}}
+	end
+	local t = {}
+	if from_mine then
+		t[#t + 1] = {"take", {listname = from_list, index = from_i,
+				stack = ItemStack(stack)}}
+	end
+	if to_mine then
+		t[#t + 1] = {"put", {listname = to_list, index = to_i,
+				stack = ItemStack(stack)}}
+	end
+	return t
+end
+
+local function player_allowed(ref, actions, count)
+	for _, act in ipairs(actions) do
+		local ok, n = pcall(core.run_callbacks,
+				core.registered_allow_player_inventory_actions, 5, ref,
+				act[1], ref:get_inventory(), act[2])
+		if not ok then
+			core.log("error", "allow_player_inventory_action: " ..
+					tostring(n))
+			return 0
+		end
+		-- Below zero is Luanti's own "no limit"
+		if type(n) == "number" and n >= 0 then
+			count = math.min(count, n)
+		end
+	end
+	return count
+end
+
+local function player_told(ref, actions)
+	for _, act in ipairs(actions) do
+		local ok, err = pcall(core.run_callbacks,
+				core.registered_on_player_inventory_actions, 0, ref, act[1],
+				ref:get_inventory(), act[2])
+		if not ok then
+			core.log("error", "on_player_inventory_action: " .. tostring(err))
+		end
+	end
+end
+
 function core.__inventory_action(playername, a)
 	local id = players[playername]
 	local ref = id and core.object_refs[id]
@@ -2851,6 +2904,17 @@ function core.__inventory_action(playername, a)
 			return
 		end
 	end
+	local from_mine = not from_pos and not from_detached
+	local to_mine = not to_pos and not to_detached
+	if from_mine or to_mine then
+		local moving = ItemStack(stack)
+		moving:set_count(count)
+		count = player_allowed(ref, player_actions(ref, from_mine, to_mine,
+				from_list, from_i, to_list, to_i, count, moving), count)
+		if count <= 0 then
+			return
+		end
+	end
 	if not move_stack(from_inv, from_list, from_i, to_inv, to_list, to_i,
 			count) then
 		return
@@ -2870,6 +2934,12 @@ function core.__inventory_action(playername, a)
 			detached_moved(ref, from_detached, from_inv, from_list, from_i,
 					to_detached, to_inv, to_list, to_i, count, moved_stack)
 		end
+	end
+	if from_mine or to_mine then
+		local moved_stack = ItemStack(stack)
+		moved_stack:set_count(count)
+		player_told(ref, player_actions(ref, from_mine, to_mine, from_list,
+				from_i, to_list, to_i, count, moved_stack))
 	end
 end
 
