@@ -277,6 +277,21 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			c.type = Type::MouseClick;
 			if(!parse_button(rest, &c.x, error))
 				return fail(*error);
+		} else if(cmd == "click"){
+			// simplified: the label has no escapes; a " cannot be in it
+			c.type = Type::Click;
+			size_t q0 = rest.find('"');
+			size_t q1 = q0 == ss_::npos ? q0 : rest.find('"', q0 + 1);
+			c.s = trim_copy(rest.substr(0, q0));
+			if(q1 == ss_::npos || c.s.empty() || c.s.find(' ') != ss_::npos)
+				return fail("click <type> \"<label>\" [x y]");
+			c.param = rest.substr(q0 + 1, q1 - q0 - 1);
+			ss_ hint = trim_copy(rest.substr(q1 + 1));
+			if(!hint.empty()){
+				if(!parse_xy(hint, &c.x, &c.y, error))
+					return fail(*error);
+				c.n = 1;
+			}
 		} else if(cmd == "mouse_wheel"){
 			c.type = Type::MouseWheel;
 			if(!parse_i64(rest, &c.n))
@@ -388,10 +403,11 @@ static void self_check()
 			"screenshot /tmp/x.png\n"
 			"look 10 -20\n"
 			"look_dir 1 0 0\n"
+			"click Button \"No invites*\" 30 40\n"
 			"quit\n";
 	if(!parse_body(sample, &cs, &err))
 		throw Exception(ss_()+"command_seq self_check parse: "+err);
-	if(cs.size() != 15)
+	if(cs.size() != 16)
 		throw Exception("command_seq self_check count "+itos(cs.size()));
 	if(cs[0].type != Type::Delay || cs[0].n != 100)
 		throw Exception("command_seq self_check delay");
@@ -417,6 +433,9 @@ static void self_check()
 	if(cs[13].type != Type::Look || fabs(cs[13].yaw - 90.0) > 1e-9 ||
 			fabs(cs[13].pitch) > 1e-9)
 		throw Exception("command_seq self_check look_dir");
+	if(cs[14].type != Type::Click || cs[14].s != "Button" ||
+			cs[14].param != "No invites*" || cs[14].n != 1 || cs[14].y != 40)
+		throw Exception("command_seq self_check click");
 	if(!parse_body("nope 1\n", &cs, &err) && err.find("unknown command") != ss_::npos)
 		return;
 	throw Exception("command_seq self_check unknown command");
@@ -462,6 +481,9 @@ ss_ dump_command(const Command &c)
 		return "keyup "+c.s;
 	case Type::KeyPress:
 		return "keypress "+c.s;
+	case Type::Click:
+		return "click "+c.s+" \""+c.param+"\""+
+				(c.n ? " "+itos(c.x)+" "+itos(c.y) : "");
 	case Type::MousePos:
 		return "mouse_pos "+itos(c.x)+" "+itos(c.y);
 	case Type::MouseMove:

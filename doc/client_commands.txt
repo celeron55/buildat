@@ -148,6 +148,22 @@ mouse_click <button>
     event poll and nothing polling the button ever saw it down. A held
     button the input dropped is pressed again, as a held key is.
 
+click <type> "<label>" [x y]
+    A left click (mouse_pos and mouse_click) at the centre of a UI element
+    found by its type name (Button, LineEdit, CheckBox, Text, ...) and its
+    label: a Text's or a LineEdit's own text, otherwise its first child
+    Text's. The label is exact, or a prefix with a trailing *; it cannot
+    hold a ". The element is effectively visible, and the element under its
+    centre is it or a child of it, so nothing (a dialog, a dropdown's list)
+    is over it. Of several, the one nearest x y, in mouse_pos pixels.
+    None fails the sequence, and the error lists every element of the type
+    with its rectangle and why it was left (another label, hidden, covered
+    by what). For the checks that clicked at fixed pixels and missed
+    silently when a row moved; move one to it when it is next touched.
+
+        click Button "Accept" 283 154
+        click Button "No invites*"
+
 mouse_wheel <delta>
     Wheel ticks. Positive is away from the user.
 

@@ -160,10 +160,7 @@ EM_JS(void, web_dgram_close, (int id), {
 #include <DebugRenderer.h>
 #include <Profiler.h>
 #include <UI.h>
-#ifdef __EMSCRIPTEN__
 #include <LineEdit.h>
-#include <Text.h>
-#endif
 #include <Text.h>
 #include <Font.h>
 #include <CustomGeometry.h>
@@ -2983,6 +2980,93 @@ struct CApp: public App, public magic::Application
 		return false;
 	}
 
+	// [SEQ_CLICK]: where `click` goes, in the pixels mouse_pos takes (the
+	// scan's, ui_utils scan_pixels): the centre of the element of type
+	// c.s, effectively visible, whose label matches c.param, and which
+	// GetElementAt finds at that centre (it, a child of it, or, for an
+	// element that takes no input, its parent) -- so nothing is over it.
+	// Of several, the nearest the hint. None: *err lists every one of the
+	// type and why it was left.
+	bool command_seq_find_click(const client::command_seq::Command &c,
+			int *out_x, int *out_y, ss_ *err)
+	{
+		magic::UI *ui = GetSubsystem<magic::UI>();
+		magic::Graphics *g = GetSubsystem<magic::Graphics>();
+		magic::UIElement *root = ui->GetRoot();
+		int lw = logical_mode() ? m_logical_w : g->GetWidth();
+		float k = (float)lw / (float)std::max(1, root->GetWidth());
+		const ss_ &want = c.param;
+		bool prefix = !want.empty() && want.back() == '*';
+		ss_ want_s = prefix ? want.substr(0, want.size() - 1) : want;
+		auto label_of = [](magic::UIElement *e) -> ss_ {
+			if(auto *t = dynamic_cast<magic::Text*>(e))
+				return t->GetText().CString();
+			if(auto *l = dynamic_cast<magic::LineEdit*>(e))
+				return l->GetText().CString();
+			for(unsigned i = 0; i < e->GetNumChildren(); i++)
+				if(auto *t = dynamic_cast<magic::Text*>(e->GetChild(i)))
+					return t->GetText().CString();
+			return "";
+		};
+		auto under = [](magic::UIElement *e, magic::UIElement *a){
+			for(; e; e = e->GetParent())
+				if(e == a)
+					return true;
+			return false;
+		};
+		magic::PODVector<magic::UIElement*> all;
+		root->GetChildren(all, true);
+		magic::PODVector<magic::UIElement*> modal;
+		ui->GetRootModalElement()->GetChildren(modal, true);
+		all += modal;
+		ss_ why;
+		magic::UIElement *best = nullptr;
+		int64_t best_d = 0;
+		int bx = 0, by = 0;
+		for(magic::UIElement *e : all){
+			if(ss_(e->GetTypeName().CString()) != c.s)
+				continue;
+			ss_ label = label_of(e);
+			magic::IntVector2 ctr = e->GetScreenPosition() + e->GetSize() / 2;
+			int x = (int)(ctr.x_ * k), y = (int)(ctr.y_ * k);
+			ss_ rect = itos((int)(e->GetScreenPosition().x_ * k))+","+
+					itos((int)(e->GetScreenPosition().y_ * k))+" size "+
+					itos((int)(e->GetWidth() * k))+"x"+
+					itos((int)(e->GetHeight() * k));
+			ss_ left;
+			if(prefix ? label.compare(0, want_s.size(), want_s) != 0 :
+					label != want_s)
+				left = "another label";
+			else if(!e->IsVisibleEffective())
+				left = "hidden";
+			else {
+				magic::UIElement *hit = ui->GetElementAt(ctr, true);
+				if(!hit || !(under(hit, e) || (!e->IsEnabled() && under(e, hit))))
+					left = ss_()+"covered by "+(hit ? ss_(
+							hit->GetTypeName().CString())+" \""+label_of(hit)+
+							"\" \""+hit->GetName().CString()+"\"" : "nothing that takes input");
+			}
+			why += "\n  "+c.s+" \""+label+"\" at "+rect+": "+
+					(left.empty() ? "a candidate" : left);
+			if(!left.empty())
+				continue;
+			int64_t dx = x - c.x, dy = y - c.y;
+			int64_t d = c.n ? dx * dx + dy * dy : 0;
+			if(best && d >= best_d)
+				continue;
+			best = e; best_d = d; bx = x; by = y;
+		}
+		if(!best){
+			*err = "click: no visible, uncovered "+c.s+" \""+want+"\""+
+					(why.empty() ? ss_("; none of that type") : why);
+			return false;
+		}
+		log_v(MODULE, "click: %s at %i,%i%s", cs(c.s), bx, by, cs(why));
+		*out_x = bx;
+		*out_y = by;
+		return true;
+	}
+
 	bool command_seq_exec(const client::command_seq::Command &c)
 	{
 		using client::command_seq::Type;
@@ -3035,6 +3119,18 @@ struct CApp: public App, public magic::Application
 		case Type::MouseClick:
 			ok = client::command_seq::inject_mouse_button(
 					input, c.x, true, true, &err);
+			break;
+		case Type::Click:
+			{
+				int x, y;
+				ok = command_seq_find_click(c, &x, &y, &err) &&
+						client::command_seq::inject_mouse_pos(input,
+						logical_mode() ? (int)(m_logical_ox + x * m_logical_scale) : x,
+						logical_mode() ? (int)(m_logical_oy + y * m_logical_scale) : y,
+						&err) &&
+						client::command_seq::inject_mouse_button(
+						input, SDL_BUTTON_LEFT, true, true, &err);
+			}
 			break;
 		case Type::MouseWheel:
 			ok = client::command_seq::inject_mouse_wheel(input, (int)c.n, &err);

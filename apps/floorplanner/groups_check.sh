@@ -1,10 +1,11 @@
 #!/bin/bash
 # tier: full
-# cost: 3 min (2026-10-07)
+# cost: 3 min (2026-10-08)
 # covers: apps/floorplanner/main/main.cpp apps/floorplanner/main/client_lua/init.lua
 # [FP_GROUPS]: groups, invites, shares and the storage limit, as the plan
 # says it is done. Clients a, b, c and d, one after another or two at
-# once; read from their logs and the server's.
+# once; read from their logs and the server's. The invite's buttons are
+# clicked by label ([SEQ_CLICK]), and a covered one refused.
 #   apps/floorplanner/groups_check.sh
 set -u
 . "$(dirname "$0")/../../util/check_paths.sh"
@@ -62,7 +63,7 @@ last d1.log "Plans:" | grep -q "Plans: $" || fail "d sees plans: $(last d1.log P
 echo "ok: a new account sees no plans"
 
 # b online: the invite's dialog at once, accepted; c offline
-printf 'wait_log 30000 Invited to the group friends\ndelay 500\nmouse_pos 283 154\nmouse_click left\ndelay 2000\nquit\n' > "$tmp/cb"
+printf 'wait_log 30000 Invited to the group friends\ndelay 500\nclick Button "Accept" 283 154\ndelay 2000\nquit\n' > "$tmp/cb"
 CMDS="$tmp/cb" client b b1.log 0 &
 cb=$!
 sleep 6
@@ -70,7 +71,7 @@ client a a2.log 5 "BUILDAT_FP_GROUP=$(printf 'invite 1 b\ninvite 1 c\nshare 1 pa
 wait $cb
 grep -q "b accepted the invite to the group 1" "$tmp/fp.log" || fail "b did not accept ($tmp/b1.log)"
 echo "ok: b, online, accepted at once"
-printf 'wait_log 30000 Invited to the group friends\ndelay 500\nmouse_pos 356 154\nmouse_click left\ndelay 2000\nquit\n' > "$tmp/cc"
+printf 'wait_log 30000 Invited to the group friends\ndelay 500\nclick Button "Decline" 356 154\ndelay 2000\nquit\n' > "$tmp/cc"
 CMDS="$tmp/cc" client c c1.log 0
 grep -q "c declined the invite to the group 1" "$tmp/fp.log" || fail "c did not decline ($tmp/c1.log)"
 echo "ok: c, at the next join, declined"
@@ -111,4 +112,11 @@ server
 client d d3.log 5 BUILDAT_FP_PLAN=pe
 grep -a "Plan refused: Your plans use" "$tmp/d3.log" ||
 	fail "d was not refused ($tmp/d3.log)"
+
+# [SEQ_CLICK]: a click on a button under an open dropdown's list fails and
+# names what covers it (the menu's Mode list over "Plan settings...")
+printf 'wait_log 30000 Entered the plan\ndelay 1500\nkeypress Escape\ndelay 1000\nmouse_pos 320 145\nmouse_click left\ndelay 800\nclick Button "Plan settings..."\nquit\n' > "$tmp/cd4"
+CMDS="$tmp/cd4" client d d4.log 0 BUILDAT_FP_PLAN=pd
+grep -aq 'Button "Plan settings..." at .*: covered by Button "Viewing"' "$tmp/d4.log" ||
+	fail "a covered click not refused ($tmp/d4.log)"
 echo "PASS"

@@ -45,6 +45,11 @@ namespace command_seq
 		// the room's "hums" came twenty milliseconds early and every
 		// drive ran ninety seconds late).
 		WaitLogAny,
+		// click <type> "<label>" [x y]: a left click at the centre of the
+		// visible, uncovered UI element of that type whose label matches
+		// (a trailing * is a prefix), the nearest the hint ([SEQ_CLICK]).
+		// s is the type, param the label, n 1 with a hint in x, y.
+		Click,
 	};
 
 	struct Command
