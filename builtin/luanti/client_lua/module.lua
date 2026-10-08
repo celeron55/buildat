@@ -3055,7 +3055,9 @@ function M.dig_range(wield_index)
 end
 
 local ui = nil
-local form = nil          -- {formname =, spec =, at =, state =, drawn =}
+-- The form on the screen: res/form_session.lua's, made at its first use;
+-- session.form is {formname =, spec =, at =, state =, drawn =} or nil
+local session = nil
 local player_spec = ""    -- what the player's own inventory key opens
 -- A location -> the lists that are there, for the inventories a form draws
 -- that are not the player's own: "x,y,z" for the node the form is about,
@@ -3097,6 +3099,7 @@ local function make_ui()
 					string.sub(location, 1, 7) == "player:" then
 				lists = M.inventory
 			elseif location == "current_name" or location == "context" then
+				local form = session and session.form
 				lists = form and form.at and node_inventory[form.at] or nil
 			elseif string.sub(location, 1, 9) == "detached:" then
 				lists = node_inventory[location]
@@ -3124,286 +3127,85 @@ local function make_ui()
 	return ui
 end
 
--- How much of a stack a click picks up: the whole of it with the left
--- button, half with the right, the way Luanti's own inventory does
-local function take_count(stack, button)
-	if button == "right" then
-		return math.ceil(stack.count / 2)
-	end
-	return stack.count
+local ok_fsess, err_fsess, form_session =
+		buildat.run_script_file("luanti/form_session.lua")
+if not ok_fsess or type(form_session) ~= "table" then
+	error("luanti: could not load form_session.lua: " .. tostring(err_fsess))
 end
 
--- And how much of what is held a click puts down: all of it with the left
--- button, one with the right, ten with the middle. What is left stays held,
--- so a right button held over a row of slots lays one item in each.
-local function put_count(count, button)
-	if button == "right" then
-		return 1
+local function S()
+	if session then
+		return session
 	end
-	if button == "middle" then
-		return math.min(10, count)
-	end
-	return count
+	session = form_session.new({
+		magic = magic, log = log, formspec = formspec, ui = make_ui(),
+		send_fields = function(form, fields)
+			local flat = {form.formname}
+			for k, v in pairs(fields) do
+				flat[#flat + 1] = tostring(k)
+				flat[#flat + 1] = tostring(v)
+			end
+			buildat.send_packet("luanti:fields", cereal.binary_output(flat,
+					{"array", "string"}))
+		end,
+		move = function(count, from, to)
+			buildat.send_packet("luanti:inv_action", cereal.binary_output({
+				"move", from.location, from.list, tostring(from.index),
+				to.location, to.list, tostring(to.index), tostring(count),
+			}, {"array", "string"}))
+		end,
+		craft = function()
+			buildat.send_packet("luanti:inv_action", cereal.binary_output(
+					{"craft", "1"}, {"array", "string"}))
+		end,
+		item_description = function(name)
+			local desc = M.item_description(name)
+			return desc and M.strip_escapes(desc)
+		end,
+		item_image = function(name)
+			return texture_of(item_images[name])
+		end,
+		white = texture_of("[fill:1x1:#ffffffff"),
+		style = magic.cache:GetResource("XMLFile",
+				"launch_menu/res/main_style.xml"),
+		compose_stats = compose_stats,
+	})
+	return session
 end
 
-local function send_action(held, slot, count)
-	buildat.send_packet("luanti:inv_action", cereal.binary_output({
-		"move", held.location, held.list, tostring(held.index),
-		slot.location, slot.list, tostring(slot.index), tostring(count),
-	}, {"array", "string"}))
+local function current_form()
+	return session and session.form
 end
 
-local function form_fields()
-	local out = {}
-	for _, f in ipairs(form and form.drawn and form.drawn.fields or {}) do
-		out[f.name] = f.edit and f.edit:GetText() or f.value
-	end
-	return out
-end
-
-local function send_fields(fields)
-	-- A form of the client's own is nobody else's business: its fields go to
-	-- whoever opened it and nothing goes out
-	if form.handler then
-		form.handler(fields)
-		return
-	end
-	local flat = {form.formname}
-	for k, v in pairs(fields) do
-		flat[#flat + 1] = tostring(k)
-		flat[#flat + 1] = tostring(v)
-	end
-	buildat.send_packet("luanti:fields", cereal.binary_output(flat,
-			{"array", "string"}))
-end
-
---
--- The tooltip over what the cursor rests on
---
--- Two kinds: the text a form asked for over an area or an element of its
--- own, and -- over a slot, which wins because it is the more specific thing
--- -- what the item in it is. The game says where the mouse is, the way it
--- says where a click landed.
-
--- How long the cursor has to rest before it appears, which is Luanti's own
--- pause rather than a tooltip flashing past every slot the mouse crosses
-local TOOLTIP_DELAY = 0.35
-local mouse_at = nil
-local tooltip_over = nil
-local tooltip_wait = 0
-
--- Where the mouse is, in the UI's own coordinates -- the ones a click
--- arrives in. Called while a form is open; nil when the mouse is not on the
--- screen at all.
--- hover(x, y, held): where the cursor is, and whether the left button is
--- down. A form is drawn again from here only while a scrollbar's thumb is
--- being dragged ([FORMSPEC_SCROLL]); everything else reads mouse_at when it
--- is asked to.
+-- hover(x, y, held): where the cursor is, in the UI's own coordinates, and
+-- whether the left button is down (a scrollbar's thumb dragged); nil when
+-- the mouse is off the screen
 function M.hover(x, y, held)
-	if x == nil then
-		mouse_at = nil
-		return
-	end
-	mouse_at = {x, y}
-	if held then
-		M.form_drag(x, y)
-	end
+	S():hover(x, y, held)
 end
 
--- The left button held over a scrollbar sets its value from where the
--- cursor is, which is what dragging its thumb is
-function M.form_drag(x, y)
-	if not form or not form.drawn or not form.drawn.bars then
-		return false
-	end
-	local lx = x - form.drawn.origin[1]
-	local ly = y - form.drawn.origin[2]
-	for _, b in ipairs(form.drawn.bars) do
-		if lx >= b.x and lx < b.x + b.w and
-				ly >= b.y and ly < b.y + b.h then
-			local frac
-			if b.vertical then
-				frac = (ly - b.y) / math.max(1, b.h)
-			else
-				frac = (lx - b.x) / math.max(1, b.w)
-			end
-			local v = math.floor(math.max(0, math.min(1, frac)) * b.max)
-			form.state.scroll = form.state.scroll or {}
-			if v ~= (form.state.scroll[b.name] or 0) then
-				form.state.scroll[b.name] = v
-				draw_form()
-				local fields = form_fields()
-				fields[b.name] = "CHG:"..v
-				send_fields(fields)
-			end
-			return true
-		end
-	end
-	return false
+-- A button let go, "left", "right" or "middle": a stack dragged to a slot
+function M.release(button)
+	S():release(button)
 end
 
--- What Luanti's own client shows over an inventory slot: the item's
--- description, and the name it is known by under it.
---
---     Calcite
---     [mcl_amethyst:calcite]
-local function slot_tooltip(slot)
-	local stack = slot.stack
-	if stack == nil or stack.name == nil or stack.name == "" then
-		return nil
-	end
-	local desc = M.item_description(stack.name)
-	desc = desc and M.strip_escapes(desc) or ""
-	if desc == "" then
-		desc = stack.name
-	end
-	return desc .. "\n[" .. stack.name .. "]"
-end
-
--- Called every frame while a form is open
+-- Called every frame: a stale form drawn again, the tooltip, the stack in
+-- hand
 function M.update_tooltip(dtime)
-	local drawn = form and form.drawn
-	if drawn == nil or mouse_at == nil then
-		if tooltip_over then
-			tooltip_over = nil
-			make_ui():tooltip(magic.ui.root, nil)
-		end
-		return
-	end
-	local lx = mouse_at[1] - drawn.origin[1]
-	local ly = mouse_at[2] - drawn.origin[2]
-	-- The last one that covers the cursor: a form's later elements are the
-	-- ones on top. The text is worked out here rather than read off what
-	-- was hit, because a slot's is its item's.
-	local over, over_text = nil, nil
-	for _, t in ipairs(drawn.tooltips or {}) do
-		if lx >= t.x and lx < t.x + t.w and ly >= t.y and ly < t.y + t.h then
-			over, over_text = t, t.text
-		end
-	end
-	-- A tooltip[]'s own colours, or else listcolors' for the form
-	local bg, fg = drawn.tip_bg, drawn.tip_fg
-	for _, slot in ipairs(drawn.slots or {}) do
-		if lx >= slot.x and lx < slot.x + slot.size and
-				ly >= slot.y and ly < slot.y + slot.size then
-			local text = slot_tooltip(slot)
-			if text then
-				over, over_text = slot, text
-			end
-		end
-	end
-	if over ~= tooltip_over then
-		tooltip_over = over
-		tooltip_wait = 0
-		make_ui():tooltip(magic.ui.root, nil)
-		return
-	end
-	if over == nil then
-		return
-	end
-	tooltip_wait = tooltip_wait + dtime
-	if tooltip_wait >= TOOLTIP_DELAY then
-		make_ui():tooltip(magic.ui.root, over_text, mouse_at[1], mouse_at[2],
-				magic.ui.root.width, magic.ui.root.height, drawn.tip_offset,
-				over.bg or bg, over.fg or fg)
-	end
-end
-
-local function close_form(quit)
-	if not form then
-		return
-	end
-	-- quit says the player closed it -- an exit button, escape -- which a
-	-- game acts on: the death screen's respawn is "the player closed
-	-- __builtin:death". A form the server took away gets no quit.
-	if quit then
-		local fields = form_fields()
-		fields.quit = "true"
-		send_fields(fields)
-	end
-	if form.drawn then
-		form.drawn.window:Remove()
-	end
-	form = nil
-	tooltip_over = nil
-	make_ui():tooltip(magic.ui.root, nil)
-end
-
--- Pressing enter in a field sends the form the way a button does, with
--- which field it was among the fields; Luanti's own client calls them
--- key_enter and key_enter_field, and a game's search box is what reads
--- them ([FORM_ENTER]). field_close_on_enter[name;false] keeps the form
--- open, which is what a search wants.
-local function field_entered(name)
-	local fields = form_fields()
-	fields.key_enter = "true"
-	fields.key_enter_field = name
-	local closes = (form.drawn.close_on_enter or {})[name] ~= false
-	if closes then
-		fields.quit = "true"
-	end
-	log:verbose("form: enter in \""..tostring(name).."\"")
-	send_fields(fields)
-	if closes then
-		close_form(false)
-	end
-end
-
-local function draw_form()
-	if form.drawn then
-		form.drawn.window:Remove()
-		form.drawn = nil
-	end
-	local t0 = buildat.get_time_us()
-	compose_stats.n, compose_stats.us = 0, 0
-	local elements, size, real = formspec.parse(form.spec)
-	local t1 = buildat.get_time_us()
-	local root = magic.ui.root
-	local w, h = root.width, root.height
-	local layout = formspec.layout(size, real, w, h)
-	form.drawn = make_ui():show(root, elements, layout, w, h, form.state)
-	for _, f in ipairs(form.drawn.fields or {}) do
-		if f.edit then
-			local name = f.name
-			magic.SubscribeToEvent(f.edit, "TextFinished", function()
-				field_entered(name)
-			end)
-		end
-	end
-	local t2 = buildat.get_time_us()
-	-- A slow draw says where it went: the first open of a game's
-	-- inventory was 3.5 s in one frame in the fuzz campaign
-	-- ([FORMSPEC_FRAME]), and this is what tells the pictures from the
-	-- rest
-	if t2 - t0 >= 100000 then
-		local kinds = {}
-		for name, us in pairs(ui.kind_us or {}) do
-			kinds[#kinds + 1] = {name, us}
-		end
-		table.sort(kinds, function(a, b) return a[2] > b[2] end)
-		local by_kind = {}
-		for i = 1, math.min(4, #kinds) do
-			by_kind[i] = string.format("%s %.0f ms", kinds[i][1], kinds[i][2] / 1000)
-		end
-		log:info(string.format("form %s drawn in %.0f ms: parse %.0f ms, " ..
-				"%d elements, %d pictures composed in %.0f ms; %s",
-				form.formname, (t2 - t0) / 1000, (t1 - t0) / 1000,
-				#elements, compose_stats.n, compose_stats.us / 1000,
-				table.concat(by_kind, ", ")))
-	end
+	S():frame(dtime)
 end
 
 -- Only a form that has a model in it: drawing one again is cheap but it
 -- takes what the player typed in a field with it, and every other form on
 -- the screen when a model arrives is somebody else's
 form_model_arrived = function()
+	local form = current_form()
 	if form and string.find(form.spec, "model[", 1, true) then
-		draw_form()
+		session:redraw()
 	end
 end
 
 local function show_form(formname, spec, at, handler)
-	close_form(false)
 	-- What the last form was about is not what this one is about: the node
 	-- goes, because the server sends this form's own. The detached ones
 	-- stay -- they belong to nobody and the player's own inventory form,
@@ -3413,44 +3215,15 @@ local function show_form(formname, spec, at, handler)
 			node_inventory[at] = nil
 		end
 	end
-	if spec == "" then
-		return
-	end
-	form = {formname = formname, spec = spec, at = at ~= "" and at or nil,
-			state = {}, handler = handler}
-	draw_form()
+	S():open(spec, formname, {at = at ~= "" and at or nil,
+			handler = handler})
 end
 
--- The wheel over a scroll_container pages its bar ([FORMSPEC_SCROLL]):
--- the client that owns the mouse calls this while a form is open, since
--- the wheel is the hotbar's otherwise. delta is Urho3D's -- one notch up
--- is 1 -- and up scrolls towards the top of the container.
+-- The wheel over a form, Urho3D's delta ([FORMSPEC_SCROLL]): the client
+-- that owns the mouse calls this while a form is open, since the wheel is
+-- the hotbar's otherwise
 function M.form_wheel(delta)
-	if not form or not form.drawn or not form.drawn.scrolls or
-			not mouse_at then
-		return false
-	end
-	-- The containers are in the form's own coordinates, as a click is
-	local x = mouse_at[1] - form.drawn.origin[1]
-	local y = mouse_at[2] - form.drawn.origin[2]
-	for _, c in ipairs(form.drawn.scrolls) do
-		if c.bar and x >= c.x and x < c.x + c.w and
-				y >= c.y and y < c.y + c.h then
-			form.state.scroll = form.state.scroll or {}
-			local step = 100
-			local v = (form.state.scroll[c.bar] or 0) - delta * step
-			v = math.max(0, math.min(1000, v))
-			if v ~= (form.state.scroll[c.bar] or 0) then
-				form.state.scroll[c.bar] = v
-				draw_form()
-				local fields = form_fields()
-				fields[c.bar] = "CHG:"..v
-				send_fields(fields)
-			end
-			return true
-		end
-	end
-	return false
+	return S():wheel(delta)
 end
 
 -- A game's own window over the world, such as vanilla's pause menu: while
@@ -3466,7 +3239,7 @@ end
 -- form_open() -> whether a form is on the screen, so that whoever else is
 -- reading the mouse leaves it alone while one is
 function M.form_open()
-	return form ~= nil or held ~= nil
+	return current_form() ~= nil or held ~= nil
 end
 
 -- The open form's name and drawn window, for whoever reports what is on
@@ -3475,21 +3248,7 @@ end
 -- the screen, which list and index, and what is in it -- what a driver
 -- drags between. Nil when no form is open.
 function M.form_slots()
-	if form == nil or form.drawn == nil then
-		return nil
-	end
-	local ox, oy = form.drawn.origin[1], form.drawn.origin[2]
-	local out = {}
-	for _, slot in ipairs(form.drawn.slots or {}) do
-		out[#out + 1] = {
-			location = slot.location, list = slot.list, index = slot.index,
-			x = ox + slot.x, y = oy + slot.y, size = slot.size,
-			stack = slot.stack and slot.stack.name and
-					(slot.stack.name .. " " .. tostring(slot.stack.count or 1))
-					or "",
-		}
-	end
-	return out
+	return S():slots()
 end
 
 -- Every object the client has a node for, but the player's own, with
@@ -3549,6 +3308,7 @@ function M.objects()
 end
 
 function M.form_window()
+	local form = current_form()
 	if form == nil and held and held_window then
 		return "", held_window
 	end
@@ -3561,8 +3321,8 @@ end
 -- What the player's own inventory key opens. Nothing here binds a key: which
 -- key that is belongs to the game, and this is what it calls.
 function M.open_player_inventory()
-	if form then
-		close_form(true)
+	if current_form() then
+		S():close(true)
 		return
 	end
 	if player_spec == "" then
@@ -3583,159 +3343,24 @@ end
 
 -- The open form closed by the game itself, the way its Escape would
 function M.close_form()
-	if form then
-		close_form(true)
-	end
+	S():close(true)
 end
 
--- A click, from whoever is reading the mouse. Returns whether the form took
--- it, so that a click that was not on one still digs.
+-- A click, from whoever is reading the mouse: "left", "right" or
+-- "middle". Returns whether the form took it, so that a click that was not
+-- on one still digs.
 function M.click(x, y, button)
-	if not form or not form.drawn then
-		return false
-	end
-	local lx = x - form.drawn.origin[1]
-	local ly = y - form.drawn.origin[2]
-	local function inside(e)
-		return lx >= e.x and lx < e.x + e.w and ly >= e.y and ly < e.y + e.h
-	end
-	for _, b in ipairs(form.drawn.buttons) do
-		if inside(b) then
-			local fields = form_fields()
-			-- A hypertext's action says which one it was; a button says
-			-- only that it was pressed ([FORMSPEC_SCROLL])
-			fields[b.name] = b.value or ""
-			if b.exit then
-				fields.quit = "true"
-			end
-			send_fields(fields)
-			if b.exit then
-				close_form(false)
-			end
-			return true
-		end
-	end
-	-- A table's or a textlist's row: "CHG:<row>" goes back, as Luanti's own
-	-- client sends it, and a tree's row that opens opens or closes.
-	-- simplified: no "DCL:" for a double click
-	for _, t in ipairs(form.drawn.tables or {}) do
-		if inside(t) then
-			for _, r in ipairs(t.rows) do
-				if ly >= r.y and ly < r.y + t.row_h then
-					if r.opens then
-						form.state.open = form.state.open or {}
-						local open = form.state.open[t.name] or {}
-						form.state.open[t.name] = open
-						open[r.index] = not open[r.index] or nil
-						draw_form()
-					end
-					local fields = form_fields()
-					fields[t.name] = "CHG:" .. r.index
-					send_fields(fields)
-					break
-				end
-			end
-			return true
-		end
-	end
-	-- A tab or a checkbox: the form goes back with the new value in it, the
-	-- way Luanti's own client sends one
-	for _, t in ipairs(form.drawn.taps) do
-		if inside(t) then
-			-- A dropdown's own two taps ([FORMSPEC_SCROLL]): the box opens
-			-- and closes the list and sends nothing, an item in the list
-			-- is the choice and sends the form back with it
-			if t.open then
-				form.state.dropdown_open =
-						form.state.dropdown_open ~= t.name and t.name or nil
-				draw_form()
-				return true
-			end
-			if t.scroll then
-				-- A scrollbar's trough, paged ([FORMSPEC_SCROLL])
-				form.state.scroll = form.state.scroll or {}
-				local v = (form.state.scroll[t.name] or 0) + t.scroll
-				form.state.scroll[t.name] = math.max(0, math.min(1000, v))
-				draw_form()
-			end
-			if t.pick then
-				form.state.dropdown = form.state.dropdown or {}
-				form.state.dropdown[t.name] = t.pick
-				form.state.dropdown_open = nil
-				draw_form()
-			end
-			local fields = form_fields()
-			fields[t.name] = t.value
-			if t.check then
-				form.state.check[t.name] = t.value == "true"
-				draw_form()
-			end
-			send_fields(fields)
-			return true
-		end
-	end
-	-- A slot: the stack in it is picked up, or what is held is put down in
-	-- it. The move itself is the server's; what is held here is a drawing
-	-- and the highlight formspec_ui puts on the slot it came from.
-	for _, slot in ipairs(form.drawn.slots) do
-		if lx >= slot.x and lx < slot.x + slot.size and
-				ly >= slot.y and ly < slot.y + slot.size then
-			if form.state.held then
-				local held = form.state.held
-				local n = put_count(held.count, button)
-				send_action(held, slot, n)
-				held.count = held.count - n
-				if held.count <= 0 then
-					form.state.held = nil
-				end
-			elseif slot.stack and slot.list == "craftpreview" then
-				-- The grid's answer: a craft action makes it, into
-				-- craftresult, and that is what the hand then holds and
-				-- puts down as a move (Luanti's GUIFormSpecMenu does the
-				-- same two steps)
-				buildat.send_packet("luanti:inv_action", cereal.binary_output(
-						{"craft", "1"}, {"array", "string"}))
-				form.state.held = {location = slot.location,
-						list = "craftresult", index = 1,
-						count = slot.stack.count or 1}
-			elseif slot.stack then
-				form.state.held = {location = slot.location, list = slot.list,
-						index = slot.index,
-						count = take_count(slot.stack, button)}
-			end
-			draw_form()
-			return true
-		end
-	end
-	-- Somewhere else on the form: what is held is put back down where it
-	-- came from, which is nothing happening at all
-	if form.state.held then
-		form.state.held = nil
-		draw_form()
-	end
-	-- Everything else on the form swallows the click without meaning
-	-- anything, which is what keeps it from digging the node behind it
-	local inside = lx >= 0 and ly >= 0 and lx < form.drawn.size[1] and
-			ly < form.drawn.size[2]
-	-- **Outside it, the form closes** as Luanti's does, unless it says
-	-- allow_close[false] (a death screen): on a touchscreen that is the
-	-- one way out, having no Escape (user, 2026-09-30)
-	if not inside and not form.spec:find("allow_close%[false%]") then
-		close_form(true)
-		return true
-	end
-	return inside
+	return S():click(x, y, button)
 end
 
 -- Escape closes it, which is the player closing it
 function M.key(key)
-	if form and key == magic.KEY_ESCAPE then
-		close_form(true)
+	if S():key(key) then
 		return true
 	end
 	-- A held window's keys are its own: what is typed into its fields is
 	-- not the game's
-	if held and not form then
+	if held and not current_form() then
 		if key == magic.KEY_ESCAPE and not held_keep then
 			local close = held
 			held, held_window = nil, nil
@@ -3749,8 +3374,8 @@ end
 -- The move was the server's to make, so what a form shows is stale until the
 -- inventory comes back
 M.sub_inventory(function()
-	if form then
-		draw_form()
+	if session then
+		session:redraw()
 	end
 end)
 
@@ -3779,8 +3404,8 @@ buildat.sub_packet("luanti:node_inventory", function(data)
 		i = i + 2 + size
 	end
 	node_inventory[at] = lists
-	if form then
-		draw_form()
+	if session then
+		session:redraw()
 	end
 end)
 
@@ -3904,8 +3529,8 @@ startup_packet("luanti:item_images", "luanti_data/item_images.bin", function(dat
 		n = n + 1
 	end
 	log:info("luanti:item_images: " .. n .. " items")
-	if form then
-		draw_form()
+	if session then
+		session:redraw()
 	end
 	for _, f in ipairs(item_image_subs) do
 		f()

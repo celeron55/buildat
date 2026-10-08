@@ -796,7 +796,11 @@ function M.new(magic, buildat, log, ctx)
 				box(window, x + w + 1, thumb_y, bar_w - 2, thumb_h,
 						magic.Color(0.6, 0.6, 0.62, 0.95))
 			end
-			local selected = tonumber(e.fields[5])
+			-- The row the player picked, else the one the form names:
+			-- Luanti's own client selects a clicked row itself and the
+			-- game is only told
+			local selected = (state.selected or {})[name] or
+					tonumber(e.fields[5])
 			local on_screen = {}
 			for i = scroll + 1, math.min(#shown, scroll + visible) do
 				local row = shown[i]

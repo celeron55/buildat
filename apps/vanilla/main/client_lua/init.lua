@@ -3821,6 +3821,16 @@ magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
 			button == magic.MOUSEB_MIDDLE and "middle" or "left")
 end)
 
+-- A stack picked up by a press and let go over another slot: a drag
+magic.SubscribeToEvent("MouseButtonUp", function(event_type, event_data)
+	if not luanti.form_open() or keys.touch then
+		return
+	end
+	local button = event_data:GetInt("Button")
+	luanti.release(button == magic.MOUSEB_RIGHT and "right" or
+			button == magic.MOUSEB_MIDDLE and "middle" or "left")
+end)
+
 -- Official's three mode toggles ([FLY_MODES]): each says its line in the
 -- chat, with the note when the player lacks the privilege of the same
 -- name -- the mode is still switched, as official does, and the server

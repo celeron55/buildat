@@ -5,7 +5,7 @@
 # in both clients, beside official Luanti's own
 # (local/luanti_inventory_reference/, the user's): the inventory, the
 # recipe book, help, the achievements and their second entry. A fixture
-# opens the inventory as the inventory key would, again every six
+# opens the inventory as the inventory key would, again every ten
 # seconds, and the client clicks what a player would -- the recipe
 # book's, help's and the achievements' buttons, then the list's second
 # row -- and shoots each form the game answers with. The shots land in
@@ -46,43 +46,68 @@ core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
 	core.set_timeofday(0.5)
 	player:get_inventory():add_item("main", "mcl_core:tree")
-	-- The inventory for the first four; the fifth is a click in the
-	-- achievements the fourth opened
-	for i = 1, 5 do
-		core.after(10 + 6 * (i - 1), function()
-			if i < 5 then
+	-- The inventory for steps 1-4 and 6; 5 is a click in the achievements
+	-- 4 opened, 7 one in the help 6 opened
+	for i = 1, 7 do
+		core.after(10 + 10 * (i - 1), function()
+			if i == 2 then
+				-- Where step 1 dragged the tree to
+				local inv = player:get_inventory()
+				core.log("action", "vl_inv: main 1 " ..
+						inv:get_stack("main", 1):get_name() .. ", main 10 " ..
+						inv:get_stack("main", 10):get_name())
+			end
+			if i ~= 5 and i ~= 7 then
 				core.show_formspec(name, "", player:get_inventory_formspec())
 			end
 			core.chat_send_player(name, "vl_inv: step " .. i)
 		end)
 	end
-	core.after(10 + 6 * 5, function() core.close_formspec(name, "") end)
+	core.after(10 + 10 * 7, function() core.close_formspec(name, "") end)
 end)'
 # Each step starts on the chat line the fixture sends with it: neither
 # the server's timers nor a client's join line keep time with the other
-# end. Where the inventory's buttons and the list's second row are, at
-# 1280x720, is the same in both clients; what each click must send.
-clicks=("" "698 318" "758 318" "878 318" "700 243")
-sent=("" "__mcl_craftguide=" "__mcl_doc=" "__mcl_achievements=" "awards=CHG:2")
+# end. Where the inventory's buttons and the lists' rows are, at 1280x720,
+# is the same in both clients; what the step's last click must send. A
+# step's clicks are separated by ";", and "2x" before one doubles it: 6
+# opens help, its Blocks and the list's fifth entry, which is selected
+# and nothing else; 7 is a double click on the eighth, which opens it.
+clicks=("" "698 318" "758 318" "878 318" "700 243" \
+	"758 318;634 203;300 170" "2x 300 202")
+sent=("" "__mcl_craftguide=" "__mcl_doc=" "__mcl_achievements=" "awards=CHG:2" \
+	"doc_catlist=CHG:5" "doc_catlist=DCL:8")
 cmds(){ # out-dir
-	for i in 1 2 3 4 5; do
+	local i c
+	for i in 1 2 3 4 5 6 7; do
 		echo "wait_log 240000 chat: vl_inv: step $i"
 		echo "delay 1000"
-		if [ -n "${clicks[$((i - 1))]}" ]; then
-			echo "mouse_pos ${clicks[$((i - 1))]}"; echo "delay 200"
+		IFS=';' read -ra cs <<< "${clicks[$((i - 1))]}"
+		for c in "${cs[@]}"; do
+			echo "mouse_pos ${c#2x }"; echo "delay 200"
 			echo "mouse_click left"
+			if [ "${c#2x }" != "$c" ]; then echo "delay 100"; echo "mouse_click left"; fi
+			echo "delay 1500"
+		done
+		echo "delay 500"; echo "screenshot $1/s$i.png"
+		if [ $i = 1 ]; then
+			# The tree dragged from the hotbar row's first slot to the
+			# first slot above: picked up by the press, put by the release
+			echo "mouse_pos 400 578"; echo "delay 200"; echo "mouse_down left"
+			echo "delay 300"; echo "mouse_pos 400 388"; echo "delay 300"
+			echo "mouse_up left"; echo "delay 500"
 		fi
-		echo "delay 2000"; echo "screenshot $1/s$i.png"
 	done
 	echo quit
 }
 # Whether each click reached the game: the server log, the fields line
 check_sent(){ # client server-log
 	local i
-	for i in 2 3 4 5; do
+	for i in 2 3 4 5 6 7; do
 		grep -aq "vl_inv: fields .*${sent[$((i - 1))]}" "$2" ||
 			failed+=("$1: step $i sent no ${sent[$((i - 1))]}")
 	done
+	grep -aq "vl_inv: main 1 , main 10 mcl_core:tree" "$2" ||
+		failed+=("$1: the tree was not dragged to main 10")
 }
 failed=()
 
@@ -161,6 +186,15 @@ for n in range(1, 6):
 if missing:
     print("FAIL: not shot: " + ", ".join(missing))
     sys.exit(1)
+# The entry a click in help's list picked is shown picked, by the client:
+# the game is only told (step 6)
+for c in ("vanilla", "ext"):
+    p = "%s/%s/s6.png" % (out, c)
+    if os.path.exists(p):
+        px = Image.open(p).convert("RGB").getpixel((600, 172))
+        if not (px[1] > 120 and px[1] > px[0] + 40 and px[1] > px[2] + 40):
+            print("FAIL: %s: the picked entry is not shown picked (%s)" % (p, px))
+            sys.exit(1)
 print("PASS: the five forms shot, beside the reference in " + out)
 PY
 [ ${#failed[@]} -eq 0 ] || exit 1
