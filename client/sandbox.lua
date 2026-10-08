@@ -283,14 +283,14 @@ __buildat_latest_sandbox_global_wrapper = nil
 -- Save a number of old wrappers for debugging purposes
 __buildat_old_sandbox_global_wrappers = {}
 
+-- A ring of the last 300, overwritten in place ([SANDBOX_CALLS]): a
+-- table.remove(list, 1) on it shifted all of them a call
+local old_wrapper_i = 0
 local function debug_new_wrapper(sandbox)
 	if __buildat_latest_sandbox_global_wrapper then
-		table.insert(__buildat_old_sandbox_global_wrappers, __buildat_latest_sandbox_global_wrapper)
-		-- Keep a number of old wrappers.
-		-- These wrappers are created at quite a fast pace due to Update events.
-		if #__buildat_old_sandbox_global_wrappers > 60*5 then
-			table.remove(__buildat_old_sandbox_global_wrappers, 1)
-		end
+		old_wrapper_i = old_wrapper_i % (60*5) + 1
+		__buildat_old_sandbox_global_wrappers[old_wrapper_i] =
+				__buildat_latest_sandbox_global_wrapper
 	end
 	__buildat_latest_sandbox_global_wrapper_number = __buildat_latest_sandbox_global_wrapper_number + 1
 	__buildat_latest_sandbox_global_wrapper = sandbox
@@ -388,17 +388,35 @@ function __buildat_report_error(err)
 	end
 end
 
+local function report_failure(err)
+	log:error("Failed to run function:\n"..err)
+	local ok, why = pcall(__buildat_report_error, err)
+	if not ok then
+		log:warning("the error could not be shown: "..tostring(why))
+	end
+end
+
 function __buildat_run_function_in_sandbox(untrusted_function)
 	local status, err, retval = run_function_in_sandbox(
 			untrusted_function, __buildat_sandbox_environment)
 	if status == false then
-		log:error("Failed to run function:\n"..err)
-		local ok, why = pcall(__buildat_report_error, err)
-		if not ok then
-			log:warning("the error could not be shown: "..tostring(why))
-		end
+		report_failure(err)
 	end
 	return status, err, retval
+end
+
+-- The same for a function run again and again -- an event's delivery,
+-- every frame ([SANDBOX_CALLS]): its environment is made once, here,
+-- rather than a new one a call. The returned runner takes no arguments;
+-- what a call needs, the function reads from its upvalues.
+function __buildat_sandboxed_runner(untrusted_function)
+	setfenv(untrusted_function, wrap_globals(__buildat_sandbox_environment))
+	return function()
+		local status, err = __buildat_pcall(untrusted_function)
+		if status == false then
+			report_failure(err)
+		end
+	end
 end
 
 local function run_code_in_sandbox(untrusted_code, sandbox, chunkname,

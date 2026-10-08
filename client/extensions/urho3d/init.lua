@@ -60,6 +60,58 @@ local function type_allows_nil(valid_types)
 	return false
 end
 
+-- One argument checked and made unsafe; `what` names the call in the
+-- error
+local function checked(what, i, v, t)
+	if v == nil and not type_allows_nil(t) then
+		error(what.." argument "..i.." is nil")
+	end
+	return magic_sandbox.safe_to_unsafe(v, t)
+end
+
+-- f called with the checked arguments, the trailing nils left off as
+-- unpack(t, 1, table.maxn(t)) did: an argument passed as nil is not one
+-- absent to tolua, which counts them. Then the returns made safe.
+-- **Without a table a call** ([SANDBOX_CALLS]): up to four arguments and
+-- two returns, which is nearly all of them; the rest go the long way.
+local function call_checked(f, return_types, a1, a2, a3, a4)
+	local r1, r2
+	if a4 ~= nil then r1, r2 = f(a1, a2, a3, a4)
+	elseif a3 ~= nil then r1, r2 = f(a1, a2, a3)
+	elseif a2 ~= nil then r1, r2 = f(a1, a2)
+	elseif a1 ~= nil then r1, r2 = f(a1)
+	else r1, r2 = f() end
+	local n = #return_types
+	if n == 0 then
+		return
+	elseif n == 1 then
+		return magic_sandbox.unsafe_to_safe(r1, return_types[1])
+	end
+	return magic_sandbox.unsafe_to_safe(r1, return_types[1]),
+			magic_sandbox.unsafe_to_safe(r2, return_types[2])
+end
+
+-- f, or with method set, the function self has under the name `what`
+local function call_checked_long(what, f, return_types, param_types, ...)
+	local arg = {...}
+	local checked_arg = {}
+	for i = 1, #param_types do
+		checked_arg[i] = checked(what, i, arg[i], param_types[i])
+	end
+	if f == nil then
+		f = checked_arg[1][what]
+		if type(f) ~= 'function' then
+			error(dump(what).." not found in instance")
+		end
+	end
+	local wrapped_ret = {}
+	local ret = {f(unpack(checked_arg, 1, table.maxn(checked_arg)))}
+	for i = 1, #return_types do
+		wrapped_ret[i] = magic_sandbox.unsafe_to_safe(ret[i], return_types[i])
+	end
+	return unpack(wrapped_ret, 1, #return_types)
+end
+
 -- (return_types, param_types, f) or (param_types, f)
 local function wrap_function(return_types, param_types, f)
 	if type(param_types) == 'function' and f == nil then
@@ -67,48 +119,52 @@ local function wrap_function(return_types, param_types, f)
 		param_types = return_types
 		return_types = {"__safe"}
 	end
-	return function(...)
-		local arg = {...}
-		local checked_arg = {}
-		for i = 1, #param_types do
-			if arg[i] == nil and not type_allows_nil(param_types[i]) then
-				error("wrapped call argument "..i.." is nil")
-			end
-			checked_arg[i] = magic_sandbox.safe_to_unsafe(arg[i], param_types[i])
+	local what = "wrapped call"
+	local np = #param_types
+	if np > 4 or #return_types > 2 then
+		return function(...)
+			return call_checked_long(what, f, return_types, param_types, ...)
 		end
-		local wrapped_ret = {}
-		local ret = {f(unpack(checked_arg, 1, table.maxn(checked_arg)))}
-		for i = 1, #return_types do
-			wrapped_ret[i] = magic_sandbox.unsafe_to_safe(ret[i], return_types[i])
-		end
-		return unpack(wrapped_ret, 1, #return_types)
+	end
+	local p1, p2, p3, p4 = param_types[1], param_types[2], param_types[3],
+			param_types[4]
+	return function(a1, a2, a3, a4)
+		if np >= 1 then a1 = checked(what, 1, a1, p1) else a1 = nil end
+		if np >= 2 then a2 = checked(what, 2, a2, p2) else a2 = nil end
+		if np >= 3 then a3 = checked(what, 3, a3, p3) else a3 = nil end
+		if np >= 4 then a4 = checked(what, 4, a4, p4) else a4 = nil end
+		return call_checked(f, return_types, a1, a2, a3, a4)
 	end
 end
 
 local function self_function(function_name, return_types, param_types)
-	return function(...)
-		if #param_types < 1 then
-			error("At least one argument required (self)")
-		end
-		local arg = {...}
-		local checked_arg = {}
-		for i = 1, #param_types do
-			if arg[i] == nil and not type_allows_nil(param_types[i]) then
-				error(function_name.." argument "..i.." is nil")
-			end
-			checked_arg[i] = magic_sandbox.safe_to_unsafe(arg[i], param_types[i])
-		end
-		local wrapped_ret = {}
-		local self = checked_arg[1]
+	local np = #param_types
+	local function method(self)
 		local f = self[function_name]
 		if type(f) ~= 'function' then
 			error(dump(function_name).." not found in instance")
 		end
-		local ret = {f(unpack(checked_arg, 1, table.maxn(checked_arg)))}
-		for i = 1, #return_types do
-			wrapped_ret[i] = magic_sandbox.unsafe_to_safe(ret[i], return_types[i])
+		return f
+	end
+	if np < 1 then
+		return function()
+			error("At least one argument required (self)")
 		end
-		return unpack(wrapped_ret, 1, #return_types)
+	end
+	if np > 4 or #return_types > 2 then
+		return function(...)
+			return call_checked_long(function_name, nil, return_types,
+					param_types, ...)
+		end
+	end
+	local p1, p2, p3, p4 = param_types[1], param_types[2], param_types[3],
+			param_types[4]
+	return function(a1, a2, a3, a4)
+		a1 = checked(function_name, 1, a1, p1)
+		if np >= 2 then a2 = checked(function_name, 2, a2, p2) else a2 = nil end
+		if np >= 3 then a3 = checked(function_name, 3, a3, p3) else a3 = nil end
+		if np >= 4 then a4 = checked(function_name, 4, a4, p4) else a4 = nil end
+		return call_checked(method(a1), return_types, a1, a2, a3, a4)
 	end
 end
 
@@ -225,26 +281,16 @@ local function add_global_event_handler(event_type, cb_name, fn)
 		-- Urho3D cannot look up otherwise
 		local mux_name = "__buildat_mux_"..event_type:gsub("[^%w_]", "_")
 		_G[mux_name] = function(event_type_thing, unsafe_event_data)
-			-- A copy, because a handler is allowed to unsubscribe from
-			-- inside the event -- leaving a session on Escape does -- and
-			-- that would shorten the list being walked. One that has been
-			-- unsubscribed by an earlier handler is not called: it may have
-			-- been holding what it was about to touch.
-			local live = global_event_mux[event_type]
-			local list = {}
-			for i, entry in ipairs(live) do
-				list[i] = entry
-			end
+			-- A handler is allowed to unsubscribe from inside the event --
+			-- leaving a session on Escape does -- so a removal makes a new
+			-- list (drop_entries) and leaves this one as it was, its entry
+			-- marked: one unsubscribed by an earlier handler is not called,
+			-- as it may have been holding what it was about to touch. One
+			-- subscribed meanwhile waits for the next event.
+			local list = global_event_mux[event_type]
 			for i = 1, #list do
 				local entry = list[i]
-				local still_there = false
-				for _, e in ipairs(live) do
-					if e == entry then
-						still_there = true
-						break
-					end
-				end
-				if still_there then
+				if not entry.removed then
 					entry.fn(event_type_thing, unsafe_event_data)
 				end
 			end
@@ -256,20 +302,35 @@ local function add_global_event_handler(event_type, cb_name, fn)
 			sandbox = from_sandbox, owner = from_sandbox_owner})
 end
 
+-- The handlers of an event that `drop` picks, out: a new list, so that
+-- a mux walking the old one is not shifted under, and each one marked
+-- for that mux to skip. Returns how many.
+local function drop_entries(event_type, drop)
+	local list, kept, n = global_event_mux[event_type], {}, 0
+	for _, entry in ipairs(list) do
+		if drop(entry) then
+			entry.removed = true
+			n = n + 1
+		else
+			kept[#kept + 1] = entry
+		end
+	end
+	if n > 0 then
+		global_event_mux[event_type] = kept
+	end
+	return n
+end
+
 -- Every global handler a sandboxed script subscribed, dropped; the
 -- object-specific ones go with their objects
 -- `keep` is an extension whose handlers are not a game's -- the launch
 -- UI's, which has to still be there when the game is gone
 local function drop_sandbox_handlers(keep)
 	local n = 0
-	for event_type, list in pairs(global_event_mux) do
-		for i = #list, 1, -1 do
-			if list[i].sandbox and
-					not (keep and list[i].owner == keep) then
-				table.remove(list, i)
-				n = n + 1
-			end
-		end
+	for event_type in pairs(global_event_mux) do
+		n = n + drop_entries(event_type, function(e)
+			return e.sandbox and not (keep and e.owner == keep)
+		end)
 	end
 	log:info("drop_sandbox_handlers(): "..n.." handlers dropped")
 	return n
@@ -280,28 +341,20 @@ end
 -- (set_launch_ui's close)
 local function drop_handlers_of(owner)
 	local n = 0
-	for _, list in pairs(global_event_mux) do
-		for i = #list, 1, -1 do
-			if list[i].sandbox and list[i].owner == owner then
-				table.remove(list, i)
-				n = n + 1
-			end
-		end
+	for event_type in pairs(global_event_mux) do
+		n = n + drop_entries(event_type, function(e)
+			return e.sandbox and e.owner == owner
+		end)
 	end
 	log:info("drop_handlers_of(" .. owner .. "): " .. n .. " handlers dropped")
 	return n
 end
 
 local function remove_global_event_handler(event_type, cb_name)
-	local list = global_event_mux[event_type]
-	if not list then
+	if not global_event_mux[event_type] then
 		return
 	end
-	for i = #list, 1, -1 do
-		if list[i].name == cb_name then
-			table.remove(list, i)
-		end
-	end
+	drop_entries(event_type, function(e) return e.name == cb_name end)
 end
 
 -- The keys the client keeps ([CLIENT_KEYS]); safe_classes' Input reads
@@ -370,6 +423,81 @@ function Safe.SubscribeToEvent(x, y, z)
 	-- A script's own function, as against the client's: what a sandbox
 	-- makes runs in a sandbox environment, never in this one
 	local callback_is_sandboxed = getfenv(callback) ~= _G
+	-- The delivery is made once and run per event ([SANDBOX_CALLS]); the
+	-- event reaches it through these two, which it reads before it calls
+	-- the callback, so an event the callback causes cannot change them
+	-- under it
+	local current_thing, current_data
+	local error = error
+	local run = __buildat_sandboxed_runner(function()
+		local event_type_thing, unsafe_event_data = current_thing, current_data
+		current_thing, current_data = nil, nil
+		-- How the hell does one get a string out of event_type_thing?
+		-- It is not a Variant, and none of the Lua examples try to do anything
+		-- with it.
+		-- Let's just assume it's the correct one...
+		local got_event_type = sub_event_type
+		-- Filter event_data (Urho3D::VariantMap)
+		local safe_fields = safe_event_def(got_event_type)
+		if not safe_fields then
+			log:warning("Received unsafe event: "..dump(got_event_type))
+			return
+		end
+		-- 1.7 VariantMap is indexed: eventData["Key"] returns a Variant.
+		local safe_event_data = Safe.VariantMap()
+		for field_name, field_def in pairs(safe_fields) do
+			local variant_type = field_def.variant
+			local safe_type = field_def.safe
+			local variant = unsafe_event_data[field_name]
+			if variant == nil then
+				error("Value for field "..dump(field_name).." in "..
+						dump(got_event_type).." is nil")
+			end
+			-- 1.7 VariantMap __index returns an empty Variant for missing
+			-- keys, not nil. Treat empty as missing.
+			if variant.IsEmpty and variant:IsEmpty() then
+				error("Value for field "..dump(field_name).." in "..
+						dump(got_event_type).." is empty")
+			end
+			local safe_value = nil
+			if variant_type == "Ptr" then
+				local get_type = field_def.get_type or safe_type
+				local unsafe_value = variant:GetPtr(get_type)
+				if unsafe_value == nil then
+					error("Value for field "..dump(field_name).." as "..
+							dump(safe_type).." in "..dump(got_event_type)..
+							" gotten as "..dump(get_type).." is nil")
+				end
+				safe_value = wrap_instance(safe_type, unsafe_value)
+				safe_event_data:SetPtr(field_name, safe_value)
+			else
+				local get_type = field_def.get_type or variant_type
+				local getter = variant["Get"..get_type]
+				if type(getter) ~= "function" then
+					error("Variant has no Get"..get_type.." for field "..
+							dump(field_name).." in "..dump(got_event_type))
+				end
+				local unsafe_value = getter(variant)
+				if safe_type == 'number' or safe_type == 'string' or
+						safe_type == 'boolean' then
+					safe_value = magic_sandbox.unsafe_to_safe(unsafe_value, safe_type)
+				else
+					safe_value = wrap_instance(safe_type, unsafe_value)
+				end
+				local setter = safe_event_data["Set"..get_type]
+				if type(setter) ~= "function" then
+					error("Safe.VariantMap has no Set"..get_type)
+				end
+				setter(safe_event_data, field_name, safe_value)
+			end
+		end
+		-- Call callback
+		if object then
+			callback(object, got_event_type, safe_event_data)
+		else
+			callback(got_event_type, safe_event_data)
+		end
+	end)
 	_G[global_callback_name] = function(event_type_thing, unsafe_event_data)
 		-- **Keys typed into a secret field are nobody else's**
 		-- ([SECURITY_RUN_1]): a script's KeyDown is every key pressed,
@@ -391,75 +519,8 @@ function Safe.SubscribeToEvent(x, y, z)
 				__buildat_client_keys[unsafe_event_data["Key"]:GetInt()] then
 			return
 		end
-		local error = error
-		local f = function()
-			-- How the hell does one get a string out of event_type_thing?
-			-- It is not a Variant, and none of the Lua examples try to do anything
-			-- with it.
-			-- Let's just assume it's the correct one...
-			local got_event_type = sub_event_type
-			-- Filter event_data (Urho3D::VariantMap)
-			local safe_fields = safe_event_def(got_event_type)
-			if not safe_fields then
-				log:warning("Received unsafe event: "..dump(got_event_type))
-				return
-			end
-			-- 1.7 VariantMap is indexed: eventData["Key"] returns a Variant.
-			local safe_event_data = Safe.VariantMap()
-			for field_name, field_def in pairs(safe_fields) do
-				local variant_type = field_def.variant
-				local safe_type = field_def.safe
-				local variant = unsafe_event_data[field_name]
-				if variant == nil then
-					error("Value for field "..dump(field_name).." in "..
-							dump(got_event_type).." is nil")
-				end
-				-- 1.7 VariantMap __index returns an empty Variant for missing
-				-- keys, not nil. Treat empty as missing.
-				if variant.IsEmpty and variant:IsEmpty() then
-					error("Value for field "..dump(field_name).." in "..
-							dump(got_event_type).." is empty")
-				end
-				local safe_value = nil
-				if variant_type == "Ptr" then
-					local get_type = field_def.get_type or safe_type
-					local unsafe_value = variant:GetPtr(get_type)
-					if unsafe_value == nil then
-						error("Value for field "..dump(field_name).." as "..
-								dump(safe_type).." in "..dump(got_event_type)..
-								" gotten as "..dump(get_type).." is nil")
-					end
-					safe_value = wrap_instance(safe_type, unsafe_value)
-					safe_event_data:SetPtr(field_name, safe_value)
-				else
-					local get_type = field_def.get_type or variant_type
-					local getter = variant["Get"..get_type]
-					if type(getter) ~= "function" then
-						error("Variant has no Get"..get_type.." for field "..
-								dump(field_name).." in "..dump(got_event_type))
-					end
-					local unsafe_value = getter(variant)
-					if safe_type == 'number' or safe_type == 'string' or
-							safe_type == 'boolean' then
-						safe_value = magic_sandbox.unsafe_to_safe(unsafe_value, safe_type)
-					else
-						safe_value = wrap_instance(safe_type, unsafe_value)
-					end
-					local setter = safe_event_data["Set"..get_type]
-					if type(setter) ~= "function" then
-						error("Safe.VariantMap has no Set"..get_type)
-					end
-					setter(safe_event_data, field_name, safe_value)
-				end
-			end
-			-- Call callback
-			if object then
-				callback(object, got_event_type, safe_event_data)
-			else
-				callback(got_event_type, safe_event_data)
-			end
-		end
-		__buildat_run_function_in_sandbox(f)
+		current_thing, current_data = event_type_thing, unsafe_event_data
+		run()
 	end
 	if object then
 		local unsafe_object = getmetatable(object).unsafe
