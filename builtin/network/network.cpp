@@ -290,8 +290,13 @@ struct Peer
 	// PEER_SILENCE_US is dropped ([PEER_TIMEOUT])
 	int64_t last_recv_us = 0;
 
+	// A web client file being served: taken from the module's one copy a
+	// piece at a time as the socket drains, not copied whole per download
+	sp_<const ss_> file;
+	size_t file_at = 0;
 	size_t out_pending() const {
-		return out_buf.size() - out_sent + out_queued_bytes;
+		return out_buf.size() - out_sent + out_queued_bytes +
+				(file ? file->size() - file_at : 0);
 	}
 	// What the client says it has read and not yet handled
 	// (network:backlog, [CHUNK_RELOAD]): its read-ahead empties the
@@ -314,7 +319,14 @@ struct Peer
 			if(f != ordered_first.end() && --f->second == 0)
 				ordered_first.erase(f);
 			out_queue.pop_front();
+		} else if(file && file_at < file->size()){
+			const size_t n = std::min(file->size() - file_at,
+					(size_t)256 * 1024);
+			out_buf.assign(*file, file_at, n);
+			file_at += n;
+			return;
 		} else {
+			file.reset();
 			return;
 		}
 		out_queued_bytes -= out_buf.size();
@@ -1326,13 +1338,14 @@ struct Module: public interface::Module, public network::Interface
 				cs(path), body->size(), deflate ? ", deflated" : "");
 		// It goes out through the peer's queue like anything else, as far as
 		// the socket takes it at a time.
-		// simplified: the whole file is kept in memory, and copied per
-		// download; tens of megabytes. Reading it as the queue drains is the
-		// upgrade.
+		// The whole file is kept in memory once; each download reads it
+		// as its socket drains (Peer::refill), so a slow reader holds no
+		// copy of its own
 		peer.queue_raw(web::response("200 OK", wf_name->second,
 				body->size(), cache+(deflate ? "Content-Encoding: deflate\r\n" :
 				"")+"Vary: Accept-Encoding\r\n"));
-		peer.queue_raw(ss_(*body));
+		peer.file = body;
+		peer.file_at = 0;
 		return true;
 	}
 
@@ -1636,6 +1649,7 @@ struct Module: public interface::Module, public network::Interface
 				peer.out_latest.clear();
 				peer.ordered_first.clear();
 				peer.out_queued_bytes = 0;
+				peer.file.reset();
 				return;
 			}
 			if(sent == 0)

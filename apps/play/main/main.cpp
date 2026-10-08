@@ -219,6 +219,21 @@ struct Module: public interface::Module
 		if(getaddrinfo(to.substr(0, colon).c_str(), to.substr(colon + 1).c_str(),
 				&hints, &res) != 0 || !res)
 			return refuse(r.peer, "cannot resolve", to);
+		// **Only a public address, but for a local page**: the list names
+		// a server by a name its owner controls, which may point here or
+		// into this network by the time it is joined
+		if(!local){
+			const uint32_t a = ntohl(((struct sockaddr_in*)res->ai_addr)->
+					sin_addr.s_addr);
+			const bool private_ = (a >> 24) == 0 || (a >> 24) == 10 ||
+					(a >> 24) == 127 || (a >> 16) == 0xa9fe ||
+					(a >> 20) == 0xac1 || (a >> 16) == 0xc0a8 ||
+					(a >> 22) == (100 << 2 | 1) || (a >> 28) >= 0xe;
+			if(private_){
+				freeaddrinfo(res);
+				return refuse(r.peer, "not a public address", to);
+			}
+		}
 		int fd = socket(res->ai_family, SOCK_DGRAM, 0);
 		// What a server sends between two ticks waits here: a media burst
 		// overflowed the default (~200 KiB) and each loss stalls Luanti's
