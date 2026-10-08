@@ -404,7 +404,12 @@ static const char *INDEXES =
 	// in it older than `time` is unread
 	"CREATE TABLE IF NOT EXISTS topic_reads(account TEXT NOT NULL, "
 		"topic INTEGER NOT NULL, time INTEGER NOT NULL, "
-		"PRIMARY KEY(account, topic));";
+		"PRIMARY KEY(account, topic));"
+	// [HEARTH_THANKS]: one row an account a message; a thanks taken back
+	// keeps its row, not active, so giving it again tells no one twice
+	"CREATE TABLE IF NOT EXISTS thanks(message INTEGER NOT NULL, "
+		"account TEXT NOT NULL, time INTEGER NOT NULL, "
+		"active INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(message, account));";
 
 static const char *const COLUMNS_ADDED[][3] = {
 	{"threads", "answer", "INTEGER NOT NULL DEFAULT 0"},
@@ -1362,9 +1367,12 @@ struct Module: public interface::Module
 				l.s(0) : ss_());
 		json::Value list = json::array();
 		Q m(m_db, "SELECT id, author, body, created, edited, hidden, "
-				"hidden_reason FROM messages "
+				"hidden_reason, (SELECT count(*) FROM thanks WHERE "
+				"message = messages.id AND active = 1), (SELECT count(*) "
+				"FROM thanks WHERE message = messages.id AND account = ? AND "
+				"active = 1) FROM messages "
 				"WHERE thread = ? AND id > ? ORDER BY id");
-		m.b(id).b(after);
+		m.b(viewer).b(id).b(after);
 		size_t bytes = 0;
 		bool more = false;
 		while(m.step()){
@@ -1381,6 +1389,9 @@ struct Module: public interface::Module
 			v.set("edited", m.i(4));
 			v.set("hidden", hidden);
 			v.set("hidden_reason", m.s(6));
+			// A hidden message's thanks are kept and not shown
+			v.set("thanks", hidden ? (int64_t)0 : m.i(7));
+			v.set("thanked", m.i(8) != 0);
 			if(hidden)
 				v.set("hidden_text", hidden_text(m.i(5), m.s(6)));
 			v.set("patches", patches_in(jstr(v, "body")));
@@ -1734,7 +1745,9 @@ struct Module: public interface::Module
 					html(jstr(m, "hidden_text"))+
 					"</p></div>\n";
 		return "<div class=\"box"+ss_(answer ? " answer" : "")+"\" id=\"m"+id+
-				"\"><p class=\"meta\">"+(answer ? "<b>This answered it:</b> " :
+				"\"><p class=\"meta\">"+(jint(m, "thanks") > 0 ?
+				"<span style=\"float:right\">+"+itos(jint(m, "thanks"))+
+				"</span>" : "")+(answer ? "<b>This answered it:</b> " :
 				"")+"<b><a href=\"/u/"+html(jstr(m, "author"))+"\">"+
 				html(jstr(m, "author"))+"</a></b>, <a href=\"/m/"+id+"\">"+
 				time_text(jint(m, "created"))+"</a>"+(jint(m, "edited") ?
@@ -3197,6 +3210,65 @@ struct Module: public interface::Module
 			if(!by.empty() && by != name && !told.step())
 				notify(by, "answer", thread_id, message_id, name);
 			return json::Value(true);
+		}
+		if(cmd == "thank"){
+			// [HEARTH_THANKS]: {message, on}; the message's count back
+			const int64_t message_id = jint(q, "message");
+			const bool on = q.get("on").is_true();
+			if(lv < LV_MEMBER)
+				throw Exception("thanks are a "+level_name(LV_MEMBER)+"'s");
+			Q m(m_db, "SELECT m.author, m.thread, m.hidden, t.hidden FROM "
+					"messages m JOIN threads t ON t.id = m.thread WHERE "
+					"m.id = ?");
+			m.b(message_id);
+			if(!m.step() || m.i(2) != 0 || m.i(3) != 0)
+				throw Exception("no such message");
+			const ss_ author = m.s(0);
+			const int64_t thread_id = m.i(1);
+			if(author == name)
+				throw Exception("not your own message");
+			Q was(m_db, "SELECT active FROM thanks WHERE message = ? AND "
+					"account = ?");
+			was.b(message_id).b(name);
+			const bool had_row = was.step();
+			if(on && !(had_row && was.i(0))){
+				// simplified: a flat 60 an hour, past what a reader gives
+				Q r(m_db, "SELECT count(*) FROM thanks WHERE account = ? AND "
+						"time > ?");
+				r.b(name).b(now_s() - 3600).step();
+				if(r.i(0) >= 60)
+					throw Exception("60 thanks an hour at most");
+				Q t(m_db, "INSERT INTO thanks(message, account, time, active) "
+						"VALUES(?, ?, ?, 1) ON CONFLICT(message, account) DO "
+						"UPDATE SET active = 1, time = excluded.time");
+				t.b(message_id).b(name).b(now_s()).step();
+				// The author told once an account: gathered into the
+				// unseen one for this message while there is one, the
+				// latest name and the count of the others in its note
+				if(!had_row){
+					Q u(m_db, "SELECT id, note FROM notifications WHERE "
+							"account = ? AND kind = 'thanks' AND message = ? "
+							"AND seen = 0");
+					u.b(author).b(message_id);
+					if(u.step()){
+						Q g(m_db, "UPDATE notifications SET by = ?, time = ?, "
+								"note = ? WHERE id = ?");
+						g.b(name).b(now_s()).b(itos(atoll(u.s(1).c_str()) + 1))
+								.b(u.i(0)).step();
+						m_notified.insert(author);
+					} else {
+						notify(author, "thanks", thread_id, message_id, name);
+					}
+				}
+			} else if(!on){
+				Q t(m_db, "UPDATE thanks SET active = 0 WHERE message = ? AND "
+						"account = ?");
+				t.b(message_id).b(name).step();
+			}
+			Q c(m_db, "SELECT count(*) FROM thanks WHERE message = ? AND "
+					"active = 1");
+			c.b(message_id).step();
+			return json::Value(c.i(0));
 		}
 		if(cmd == "follow"){
 			const int64_t thread_id = jint(q, "thread");

@@ -493,14 +493,15 @@ local function add_box(v, name, head, body, head_color, on_click)
 	local b = holder:CreateChild("Button")
 	b:SetStyleAuto()
 	b:SetLayout(magic.LM_VERTICAL, 2, magic.IntRect(8, 4, 8, 6))
-	text(b, head, head_color or DIM, W - 32):SetName(name or "")
+	local h = text(b, head, head_color or DIM, W - 32)
+	h:SetName(name or "")
 	if body and body ~= "" then
 		text(b, body, nil, W - 32)
 	end
 	if on_click then
 		magic.SubscribeToEvent(b, "Released", function() on_click() end)
 	end
-	return holder, b
+	return holder, b, h
 end
 
 --
@@ -773,10 +774,20 @@ show_notifications = function()
 				restored = "restored your message in",
 				appeal_dismissed = "kept your message hidden in",
 				status = "set the status of",
-				fixed = "released a version that fixes"}
+				fixed = "released a version that fixes",
+				thanks = "thanked your message in"}
 		for _, n in ipairs(items) do
-			local _, b = add_box(v, nil, n.by .. " " .. (said[n.kind] or n.kind) ..
-					" " .. n.title .. " · " .. ago(n.time), n.note,
+			-- Thanks are gathered: the latest name, the others' count in
+			-- the note ([HEARTH_THANKS])
+			local by, note = n.by, n.note
+			if n.kind == "thanks" then
+				local others = tonumber(note) or 0
+				by = by .. (others == 1 and " and 1 other" or others > 1 and
+						" and " .. others .. " others" or "")
+				note = nil
+			end
+			local _, b = add_box(v, nil, by .. " " .. (said[n.kind] or n.kind) ..
+					" " .. n.title .. " · " .. ago(n.time), note,
 					not n.seen and MAIN or nil, function()
 				go(function() show_thread(n.thread, n.message) end)
 			end)
@@ -1003,8 +1014,14 @@ show_thread = function(id, at, missing)
 			for _, p in ipairs(m.patches or {}) do
 				body = body .. "\n\n" .. p.name .. "\n" .. p.text
 			end
-			local holder = add_box(v, "m" .. m.id, head, body,
+			local holder, _, head_text = add_box(v, "m" .. m.id, head, body,
 					is_answer and MAIN or nil)
+			-- [HEARTH_THANKS]: the count at the top right, as dim as the
+			-- author's name
+			if (m.thanks or 0) > 0 then
+				local c = text(head_text, "+" .. m.thanks, DIM)
+				c:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
+			end
 			-- Its actions, shown while it is selected
 			local acts = holder:CreateChild("UIElement")
 			acts:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(8, 0, 0, 2))
@@ -1032,6 +1049,14 @@ show_thread = function(id, at, missing)
 			elseif not m.hidden and m.author ~= me.account then
 				action("Report", function()
 					go(function() show_report(m, "report") end)
+				end)
+			end
+			-- A member's, on another's message; pressed again, taken back
+			if not m.hidden and m.author ~= me.account and
+					(me.level or 0) >= 10 then -- a member (api.h LV_MEMBER)
+				action(m.thanked and "Thanked (take back)" or "Thanks",
+						function()
+					req("thank", {message = m.id, on = not m.thanked}, redraw)
 				end)
 			end
 			if m.id ~= t.first and (t.author == me.account or me.moderator) then
