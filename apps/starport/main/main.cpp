@@ -2959,20 +2959,12 @@ struct Module: public interface::Module
 	}
 	bool is_admin(const ss_ &name)
 	{
-		bool admin = false;
-		accounts::access(m_server, [&](accounts::Interface *a){
-			admin = a->is_admin(name);
-		});
-		return admin;
+		return accounts::level(m_server, name) >= accounts::LV_ADMIN;
 	}
 	// A Steward or the Host in accounts' levels ([TRUST_LADDER])
 	bool is_moderator(const ss_ &name)
 	{
-		int lv = accounts::LV_NEW;
-		accounts::access(m_server, [&](accounts::Interface *a){
-			lv = a->level(name);
-		});
-		return lv >= accounts::LV_MODERATOR;
+		return accounts::level(m_server, name) >= accounts::LV_MODERATOR;
 	}
 
 	void on_req(const network::Packet &packet)

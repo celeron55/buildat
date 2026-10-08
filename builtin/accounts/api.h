@@ -170,6 +170,15 @@ namespace accounts
 			cb((accounts::Interface*)module->check_interface());
 		});
 	}
+	// An account's level (LV_*), LV_NEW without the accounts module; the
+	// admin's is LV_ADMIN, so `level(...) >= LV_MODERATOR` is a Steward or
+	// the Host
+	inline int level(interface::Server *server, const ss_ &name)
+	{
+		int lv = LV_NEW;
+		access(server, [&](Interface *a){ lv = a->level(name); });
+		return lv;
+	}
 }
 
 // vim: set noet ts=4 sw=4:

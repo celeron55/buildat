@@ -2098,10 +2098,7 @@ struct Module: public interface::Module
 	// or by an approval -- and no message of it hidden in the last 30 days
 	int level(const ss_ &name)
 	{
-		int lv = LV_NEW;
-		accounts::access(m_server, [&](accounts::Interface *a){
-			lv = a->level(name);
-		});
+		int lv = accounts::level(m_server, name);
 		if(lv >= LV_HELPER || name.empty())
 			return lv;
 		const json::Value t = trust(name);

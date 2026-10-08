@@ -1640,11 +1640,7 @@ struct Module: public interface::Module
 
 	bool is_admin(const ss_ &user)
 	{
-		bool admin = false;
-		accounts::access(m_server, [&](accounts::Interface *i){
-			admin = i->is_admin(user);
-		});
-		return admin;
+		return accounts::level(m_server, user) >= accounts::LV_ADMIN;
 	}
 
 	// What a user is in a plan: admin, owner, editor, viewer, or "" (not
