@@ -20,7 +20,8 @@
 // carries a JSON {id, cmd, ...} and "hr:res" the answer {id, ok, result |
 // error}; handle() says who may do what. Pushed to a client: "hr:new"
 // {thread, message} when the thread it has open gets a message (a chat
-// runs on it), and "hr:notify" {unseen} when it has a notification.
+// runs on it), "hr:notify" {unseen} when it has a notification, and
+// "hr:activity" {thread, topic, parent, author, time} for any new message.
 //
 // The records are one SQLite file, <user>/apps/<app>/hearth.sqlite, with
 // a full-text index beside them; every statement binds its values.
@@ -473,7 +474,12 @@ static const char *INDEXES =
 	"CREATE INDEX IF NOT EXISTS reports_state ON reports(state);"
 	"CREATE INDEX IF NOT EXISTS follows_thread ON follows(thread);"
 	"CREATE INDEX IF NOT EXISTS reads_thread ON reads(thread);"
-	"CREATE INDEX IF NOT EXISTS topics_parent ON topics(parent);";
+	"CREATE INDEX IF NOT EXISTS topics_parent ON topics(parent);"
+	// [HEARTH_NEW_MARKS]: a topic's "Mark all read", per account: nothing
+	// in it older than `time` is unread
+	"CREATE TABLE IF NOT EXISTS topic_reads(account TEXT NOT NULL, "
+		"topic INTEGER NOT NULL, time INTEGER NOT NULL, "
+		"PRIMARY KEY(account, topic));";
 
 static const char *const COLUMNS_ADDED[][3] = {
 	{"threads", "answer", "INTEGER NOT NULL DEFAULT 0"},
@@ -495,6 +501,9 @@ static const char *const COLUMNS_ADDED[][3] = {
 	{"reads", "last", "INTEGER NOT NULL DEFAULT 0"},
 	{"reports", "bin", "TEXT NOT NULL DEFAULT ''"},
 	{"reports", "weight", "INTEGER NOT NULL DEFAULT 0"},
+	// [HEARTH_NEW_MARKS]: Home's "Mark all read"; first_seen when 0.
+	// Not first_seen itself, which trust grows from
+	{"members", "since", "INTEGER NOT NULL DEFAULT 0"},
 };
 // What a poster picks a thread to be ([PACKAGE_SUBJECT]); "release" is
 // Hearth's own
@@ -669,6 +678,8 @@ struct Module: public interface::Module
 	sqlite3 *m_db = nullptr;
 	// The thread each client has open, for "hr:new"
 	sm_<network::PeerId, int64_t> m_viewing;
+	// The clients that have asked anything, for "hr:activity"
+	std::set<network::PeerId> m_joined;
 	// Searches and pages per address (or account) in the current minute
 	sm_<ss_, int> m_searches;
 	int64_t m_searches_minute = 0;
@@ -729,6 +740,7 @@ struct Module: public interface::Module
 	void on_client_disconnected(const network::OldClient &old)
 	{
 		m_viewing.erase(old.info.id);
+		m_joined.erase(old.info.id);
 	}
 
 	void on_start()
@@ -1223,16 +1235,42 @@ struct Module: public interface::Module
 	// -----------------------------------------------------------------------
 	// Reading and writing
 
-	json::Value topics()
+	// [HEARTH_NEW_MARKS] Where unread starts for an account: when it first
+	// opened Hearth, or its last "Mark all read" on Home
+	int64_t since(const ss_ &name)
+	{
+		Q q(m_db, "SELECT max(first_seen, since) FROM members WHERE account = ?");
+		q.b(name);
+		return q.step() ? q.i(0) : now_s();
+	}
+// A thread (the table or alias `t`) is unread to the account ?1 whose
+// start is ?2 when it has someone else's visible message after the last
+// one read, after the start and after its topic's "Mark all read". The
+// thread's last is a cheap first test: the newest message is its time.
+#define UNREAD(t) "(" t ".last > ?2 AND EXISTS(SELECT 1 FROM messages m " \
+		"WHERE m.thread = " t ".id AND m.hidden = 0 AND m.author != ?1 AND " \
+		"m.id > ifnull((SELECT last FROM reads WHERE account = ?1 AND " \
+		"thread = " t ".id), 0) AND m.created > max(?2, ifnull((SELECT time " \
+		"FROM topic_reads WHERE account = ?1 AND topic = " t ".topic), 0))))"
+
+	// With `name`, each topic's "unread" for that account, its subtopics'
+	// threads in
+	json::Value topics(const ss_ &name = "")
 	{
 		json::Value list = json::array();
-		Q q(m_db, "SELECT t.id, t.parent, t.name, t.about, "
+		const ss_ sql = ss_() + "SELECT t.id, t.parent, t.name, t.about, "
 				"(SELECT count(*) FROM threads WHERE topic = t.id AND hidden = 0), "
 				"t.tracker, t.category, "
 				// The newest thread's last, a top topic's subtopics' with it
 				"(SELECT max(last) FROM threads WHERE hidden = 0 AND topic IN "
-				"(SELECT id FROM topics WHERE id = t.id OR parent = t.id)) "
-				"FROM topics t ORDER BY t.parent, t.id");
+				"(SELECT id FROM topics WHERE id = t.id OR parent = t.id)), " +
+				(name.empty() ? ss_("0 ") : ss_("EXISTS(SELECT 1 FROM threads "
+				"WHERE hidden = 0 AND topic IN (SELECT id FROM topics WHERE "
+				"id = t.id OR parent = t.id) AND " UNREAD("threads") ") ")) +
+				"FROM topics t ORDER BY t.parent, t.id";
+		Q q(m_db, sql.c_str());
+		if(!name.empty())
+			q.b(name).b(since(name));
 		while(q.step()){
 			json::Value t = json::object();
 			t.set("id", q.i(0));
@@ -1243,6 +1281,8 @@ struct Module: public interface::Module
 			t.set("tracker", q.i(5) != 0);
 			t.set("category", q.s(6));
 			t.set("active", q.i(7));
+			if(!name.empty())
+				t.set("unread", q.i(8) != 0);
 			list.append(t);
 		}
 		return list;
@@ -1456,7 +1496,9 @@ struct Module: public interface::Module
 	}
 
 	// After a commit: "hr:new" to whoever has the thread open, "hr:notify"
-	// to whoever was notified
+	// to whoever was notified, and "hr:activity" {thread, topic, parent,
+	// author, time} to every client, which marks its rows by it
+	// ([HEARTH_NEW_MARKS])
 	void push()
 	{
 		sv_<std::tuple<network::PeerId, ss_, ss_>> out;
@@ -1467,6 +1509,21 @@ struct Module: public interface::Module
 			for(auto &pv : m_viewing)
 				if(pv.second == m_new_messages[i])
 					out.emplace_back(pv.first, "hr:new", v.stringify());
+			Q a(m_db, "SELECT t.topic, ifnull(p.parent, 0), m.author, "
+					"m.created FROM messages m JOIN threads t ON "
+					"t.id = m.thread LEFT JOIN topics p ON p.id = t.topic "
+					"WHERE m.id = ? AND t.hidden = 0");
+			a.b(m_new_messages[i + 1]);
+			if(!a.step())
+				continue;
+			json::Value act = json::object();
+			act.set("thread", m_new_messages[i]);
+			act.set("topic", a.i(0));
+			act.set("parent", a.i(1));
+			act.set("author", a.s(2));
+			act.set("time", a.i(3));
+			for(network::PeerId p : m_joined)
+				out.emplace_back(p, "hr:activity", act.stringify());
 		}
 		for(const ss_ &account : m_notified){
 			sv_<network::PeerId> peers;
@@ -1496,7 +1553,7 @@ struct Module: public interface::Module
 		// answer counted twice (BM25 is better the more negative); the other
 		// signals and recency join it with the computed portal
 		Q q(m_db, "SELECT m.id, m.thread, t.title, m.author, m.created, "
-				"snippet(search, 1, '\x01', '\x02', '...', 24) "
+				"snippet(search, 1, '\x01', '\x02', '...', 24), t.last "
 				"FROM search JOIN messages m ON m.id = search.rowid "
 				"JOIN threads t ON t.id = m.thread "
 				"WHERE search MATCH ? AND m.hidden = 0 AND t.hidden = 0 "
@@ -1511,6 +1568,7 @@ struct Module: public interface::Module
 			v.set("author", q.s(3));
 			v.set("created", q.i(4));
 			v.set("snippet", q.s(5));
+			v.set("last", q.i(6));
 			list.append(v);
 		}
 		return list;
@@ -1900,6 +1958,7 @@ struct Module: public interface::Module
 		else if(name.empty())
 			error = "join first";
 		else {
+			m_joined.insert(packet.sender);
 			try {
 				exec("BEGIN");
 				result = handle(name, level(name), jstr(q, "cmd"), q,
@@ -2048,18 +2107,23 @@ struct Module: public interface::Module
 		return v;
 	}
 
-	// [HEARTH_UI]: each thread in `list` marked "unread" for `name` when
-	// it has someone else's message after the last one read
+	// [HEARTH_UI]: each thread in `list` marked "unread" for `name`
+	// (UNREAD), in one query
 	void mark_unread(json::Value &list, const ss_ &name)
 	{
+		ss_ ids;
+		for(unsigned i = 0; i < list.size(); i++)
+			ids += (i ? "," : "") + itos(jint(list.at(i), "id"));
+		std::set<int64_t> unread;
+		const ss_ sql = "SELECT id FROM threads WHERE id IN (" + ids + ") AND "
+				UNREAD("threads");
+		Q q(m_db, sql.c_str());
+		q.b(name).b(since(name));
+		while(q.step())
+			unread.insert(q.i(0));
 		for(unsigned i = 0; i < list.size(); i++){
-			Q q(m_db, "SELECT (SELECT ifnull(max(id), 0) FROM messages WHERE "
-					"thread = ?1 AND hidden = 0 AND author != ?2) > "
-					"ifnull((SELECT last FROM "
-					"reads WHERE account = ?2 AND thread = ?1), 0)");
 			json::Value t = list.at(i);
-			q.b(jint(t, "id")).b(name).step();
-			t.set("unread", q.i(0) != 0);
+			t.set("unread", unread.count(jint(t, "id")) != 0);
 			list.set_at(i, t);
 		}
 	}
@@ -2191,11 +2255,42 @@ struct Module: public interface::Module
 			m_viewing.erase(peer);
 		if(cmd == "topics"){
 			json::Value v = json::object();
-			v.set("topics", topics());
+			v.set("topics", topics(name));
 			json::Value latest = latest_threads(20);
 			mark_unread(latest, name);
 			v.set("latest", latest);
+			// [HEARTH_NEW_MARKS] "Waiting for you": the unread threads of
+			// every topic, the followed first
+			// simplified: 50; the client shows five and the rest on "more"
+			json::Value waiting = json::array();
+			Q w(m_db, "SELECT " THREAD_COLUMNS ", EXISTS(SELECT 1 FROM "
+					"follows WHERE account = ?1 AND thread = threads.id) f "
+					"FROM threads WHERE hidden = 0 AND " UNREAD("threads")
+					" ORDER BY f DESC, last DESC LIMIT 50");
+			w.b(name).b(since(name));
+			while(w.step()){
+				json::Value t = thread_row(w);
+				t.set("unread", true);
+				t.set("followed", w.i(14) != 0);
+				waiting.append(t);
+			}
+			v.set("waiting", waiting);
 			return v;
+		}
+		// [HEARTH_NEW_MARKS] "Mark all read": a topic and its subtopics, or
+		// with no topic everything
+		if(cmd == "mark_read"){
+			const int64_t topic_id = jint(q, "topic");
+			if(topic_id == 0){
+				Q u(m_db, "UPDATE members SET since = ? WHERE account = ?");
+				u.b(now_s()).b(name).step();
+			} else {
+				Q u(m_db, "INSERT OR REPLACE INTO topic_reads(account, topic, "
+						"time) SELECT ?, id, ? FROM topics WHERE id = ?3 OR "
+						"parent = ?3");
+				u.b(name).b(now_s()).b(topic_id).step();
+			}
+			return json::Value(true);
 		}
 		if(cmd == "topic"){
 			json::Value t = topic(jint(q, "topic"));
@@ -2372,7 +2467,20 @@ struct Module: public interface::Module
 			need(text_ok(text, 200, false, "the search"));
 			if(!allowed("@"+name, SEARCHES_A_MINUTE))
 				throw Exception("too many searches; try again in a minute");
-			return search(text);
+			// Each result's thread's "unread" ([HEARTH_NEW_MARKS])
+			json::Value list = search(text), ths = json::array();
+			for(unsigned i = 0; i < list.size(); i++){
+				json::Value t = json::object();
+				t.set("id", jint(list.at(i), "thread"));
+				ths.append(t);
+			}
+			mark_unread(ths, name);
+			for(unsigned i = 0; i < list.size(); i++){
+				json::Value r = list.at(i);
+				r.set("unread", ths.at(i).get("unread"));
+				list.set_at(i, r);
+			}
+			return list;
 		}
 		if(cmd == "new_topic"){
 			// The tree changes rarely, by a trusted hand: a moderator's

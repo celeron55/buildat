@@ -878,6 +878,15 @@ function M.safe.list_view(parent, width, height, options)
 		label:SetAlignment(HA_LEFT, VA_CENTER)
 		text(b, badge or e.badge or "", 12, "dim"):SetAlignment(HA_LEFT,
 				VA_CENTER)
+		-- e.mark = {glyph, colour name}: a glyph at the right of the
+		-- label's column ([HEARTH_NEW_MARKS]), returned for the caller to
+		-- change
+		if e.mark then
+			local m = text(label, e.mark[1], nil, e.mark[2])
+			m:SetAlignment(HA_RIGHT, VA_CENTER)
+			m.position = magic.IntVector2(-4, 0)
+			return b, m
+		end
 		return b
 	end
 	function view:fit()

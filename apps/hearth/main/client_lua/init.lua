@@ -161,6 +161,21 @@ end
 assert(ago(100, 130) == "now" and ago(0, 7200) == "2 h ago" and
 		ago(951782400, 951782400 + 30 * 86400) == "2000-02-29")
 
+-- **New posts, marked where they are** ([HEARTH_NEW_MARKS]): the HTML
+-- face's blobs after a thread's or a topic's name -- ● for a message within
+-- a day, • within a week, nothing older; amber when unread to this account
+-- and then • however old, the brand's cyan when not. {glyph, colour name}.
+-- simplified: by the sizes and colours alone, no count.
+local function mark_for(last, unread, at)
+	local age = (at or now()) - (tonumber(last) or 0)
+	return {age < 86400 and "●" or (age < 7 * 86400 or unread) and "•" or "",
+			unread and "main" or "focus"}
+end
+assert(mark_for(0, false, 3600)[1] == "●" and
+		mark_for(0, true, 8 * 86400)[1] == "•" and
+		mark_for(0, false, 8 * 86400)[1] == "" and
+		mark_for(0, true, 0)[2] == "main")
+
 -- The markup's buttons under a message's field, for whoever does not know
 -- Markdown: each puts its Markdown in at the cursor.
 -- simplified: never wraps a selection -- a field's selection cannot be
@@ -439,6 +454,11 @@ local touch = buildat.get_env("BUILDAT_TOUCH") == "1"
 -- The open thread's list, laid out again as a message's actions show
 local thread_list = nil
 
+-- The marks drawn, so that "hr:activity" changes them in place: the
+-- page's and the sidebar's, each by "t<thread>" or "c<topic>" to
+-- {element, ..., unread = }
+local marks = {page = {}, side = {}}
+
 -- A page: the area emptied, Back (when there is somewhere to go back to),
 -- the title and what the last request said
 local function open(title)
@@ -449,6 +469,7 @@ local function open(title)
 		log:info("hearth: page " .. title)
 	end
 	area:RemoveAllChildren()
+	marks.page = {}
 	selected, composer, thread_list = nil, nil, nil
 	if narrow then
 		sidebar.visible = false
@@ -493,17 +514,17 @@ end
 
 -- A row of the list: a one-line button with its badge. `width`: the
 -- list's, when it is not the page's.
-local function add_row(v, label, badge, on_click, width)
+local function add_row(v, label, badge, on_click, width, mark)
 	-- simplified: cut by a character's typical width, not measured
 	local max = math.floor((width or W) * 0.5 / 10)
 	if #label > max then
 		label = label:sub(1, max - 3) .. "..."
 	end
-	local b = v:row({label = label}, badge)
+	local b, m = v:row({label = label, mark = mark}, badge)
 	if on_click then
 		magic.SubscribeToEvent(b, "Released", function() on_click() end)
 	end
-	return b
+	return b, m
 end
 
 -- A text row of the list, wrapped (an empty state, a note)
@@ -565,12 +586,49 @@ local show_search, show_account, show_compose, show_report, show_link
 local show_queue, show_settings, show_tracker_link, show_topic_edit
 local show_place, show_server, show_discussed, read_on
 
--- A thread's row; unread marked
-local function thread_row(v, th)
-	return add_row(v, (th.unread and "* " or "") .. th.title,
-			thread_badge(th), function()
+local function mark_name(mk)
+	return (mk[1] == "●" and "medium" or mk[1] == "•" and "small" or "none") ..
+			" " .. mk[2]
+end
+-- m is nil on a Buildat whose ui_utils draws no marks
+local function keep(where, key, m, mk, unread)
+	if scripted then
+		log:info("hearth: mark " .. where .. " " .. key .. " " .. mark_name(mk))
+	end
+	if not m then
+		return
+	end
+	local e = marks[where][key] or {}
+	e[#e + 1] = m
+	e.unread = e.unread or unread
+	marks[where][key] = e
+end
+local function set_mark(key, time, unread)
+	for where, all in pairs(marks) do
+		local e = all[key]
+		if e then
+			e.unread = e.unread or unread
+			local mk = mark_for(time, e.unread)
+			if scripted then
+				log:info("hearth: mark " .. where .. " " .. key .. " " ..
+						mark_name(mk) .. " live")
+			end
+			for _, m in ipairs(e) do
+				m.text = mk[1]
+				m:SetColor(C(mk[2]))
+			end
+		end
+	end
+end
+
+-- A thread's row, marked; `badge` when not thread_badge()
+local function thread_row(v, th, badge)
+	local mk = mark_for(th.last, th.unread)
+	local b, m = add_row(v, th.title, badge or thread_badge(th), function()
 		go(function() show_thread(th.id) end)
-	end)
+	end, nil, mk)
+	keep("page", "t" .. th.id, m, mk, th.unread)
+	return b
 end
 
 -- Who this client is ("me"), the topic tree as last read, and the thread
@@ -583,7 +641,7 @@ local open_thread = nil
 --
 -- The sidebar
 --
-local function side(label, key, count, page)
+local function side(label, key, count, page, mk)
 	count = tonumber(count) or 0
 	local b = sidebar:CreateChild("Button")
 	b:SetStyleAuto()
@@ -592,6 +650,13 @@ local function side(label, key, count, page)
 			count > 0 and MAIN or nil)
 	t:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
 	t.position = magic.IntVector2(6, 0)
+	local m = nil
+	if mk then
+		m = text(b, mk[1], C(mk[2]))
+		-- At the right, left of the section's arrow: one column, shown or not
+		m:SetAlignment(magic.HA_RIGHT, magic.VA_CENTER)
+		m.position = magic.IntVector2(-22, 0)
+	end
 	-- The section shown: an arrow at the right, after the label, so the
 	-- label does not move
 	if key == section then
@@ -602,6 +667,7 @@ local function side(label, key, count, page)
 	magic.SubscribeToEvent(b, "Released", function()
 		enter(key, page)
 	end)
+	return m
 end
 
 draw_sidebar = function()
@@ -609,6 +675,7 @@ draw_sidebar = function()
 		build_frame()
 	end
 	sidebar:RemoveAllChildren()
+	marks.side = {}
 	text(sidebar, "Hearth", nil, nil, 16)
 	side("Home", "home", 0, function() show_home() end)
 	side("Search", "search", 0, function() show_search("") end)
@@ -629,9 +696,9 @@ draw_sidebar = function()
 				table.concat(chars, "", 1, 11) .. "…"
 	end
 	local function topic(t, indent)
-		side(indent .. cut(t.name), "topic " .. t.id, 0, function()
-			show_topic(t.id)
-		end)
+		local mk = mark_for(t.active, t.unread)
+		keep("side", "c" .. t.id, side(indent .. cut(t.name), "topic " .. t.id,
+				0, function() show_topic(t.id) end, mk), mk, t.unread)
 	end
 	for _, t in ipairs(topics) do
 		if t.parent == 0 then
@@ -661,74 +728,83 @@ end
 -- The pages
 --
 
--- **Home**: what waits for this account, then the topics and the latest
+-- **Home**: what waits for this account, then the topics and the latest.
+-- "Waiting for you" is five unread threads, the followed first, and "more"
+-- for the rest the server sent.
+local all_waiting = false
 show_home = function()
 	open_thread = nil
 	req("topics", nil, function(r)
 		topics = r.topics
-		req("following", nil, function(followed)
-			local w = open("Hearth")
-			draw_sidebar()
-			local v = list()
-			local waiting = false
-			local function head()
-				if not waiting then
-					v:header("Waiting for you")
-					waiting = true
-				end
+		local w = open("Hearth")
+		draw_sidebar()
+		local bar = row(w)
+		button(bar, "Mark all read", function()
+			req("mark_read", {}, redraw)
+		end)
+		local v = list()
+		local waiting = false
+		local function head()
+			if not waiting then
+				v:header("Waiting for you")
+				waiting = true
 			end
-			if me.unseen > 0 then
-				head()
-				add_row(v, me.unseen .. (me.unseen == 1 and " new notification" or
-						" new notifications"), "", function()
-					enter("notifications", function() show_notifications() end)
+		end
+		if me.unseen > 0 then
+			head()
+			add_row(v, me.unseen .. (me.unseen == 1 and " new notification" or
+					" new notifications"), "", function()
+				enter("notifications", function() show_notifications() end)
+			end)
+		end
+		if me.helper and (me.open_reports or 0) > 0 then
+			head()
+			add_row(v, me.open_reports .. " reports open", "", function()
+				enter("queue", function() show_queue() end)
+			end)
+		end
+		local names = {}
+		for _, t in ipairs(topics) do
+			names[t.id] = t.name
+		end
+		for i, th in ipairs(r.waiting or {}) do
+			if i > 5 and not all_waiting then
+				add_row(v, (#r.waiting - 5) .. " more", "", function()
+					all_waiting = true
+					redraw()
 				end)
+				break
 			end
-			if me.helper and (me.open_reports or 0) > 0 then
-				head()
-				add_row(v, me.open_reports .. " reports open", "", function()
-					enter("queue", function() show_queue() end)
-				end)
-			end
-			for i, th in ipairs(followed) do
-				if not th.unread or i > 5 then
-					break
-				end
-				head()
-				thread_row(v, th)
-			end
-			v:header("Topics")
-			local names = {}
-			for _, t in ipairs(topics) do
-				names[t.id] = t.name
-			end
-			for _, t in ipairs(topics) do
-				if t.parent == 0 then
-					add_row(v, t.name, t.threads .. (t.threads == 1 and " thread" or " threads"), function()
-						enter("topic " .. t.id, function() show_topic(t.id) end)
-					end)
-					for _, s in ipairs(topics) do
-						if s.parent == t.id then
-							add_row(v, "    " .. s.name, s.threads .. (s.threads == 1 and " thread" or " threads"),
-									function()
-								enter("topic " .. s.id, function()
-									show_topic(s.id)
-								end)
-							end)
-						end
+			head()
+			thread_row(v, th, (names[th.topic] or "") .. " · " ..
+					thread_badge(th))
+		end
+		all_waiting = false
+		v:header("Topics")
+		local function topic_row(t, indent)
+			local mk = mark_for(t.active, t.unread)
+			local _, m = add_row(v, indent .. t.name, t.threads ..
+					(t.threads == 1 and " thread" or " threads"), function()
+				enter("topic " .. t.id, function() show_topic(t.id) end)
+			end, nil, mk)
+			keep("page", "c" .. t.id, m, mk, t.unread)
+		end
+		for _, t in ipairs(topics) do
+			if t.parent == 0 then
+				topic_row(t, "")
+				for _, s in ipairs(topics) do
+					if s.parent == t.id then
+						topic_row(s, "    ")
 					end
 				end
 			end
-			v:header("Latest")
-			for _, th in ipairs(r.latest) do
-				add_row(v, (th.unread and "* " or "") .. th.title,
-						(names[th.topic] or "") .. " · " .. thread_badge(th),
-						function()
-					go(function() show_thread(th.id) end)
-				end)
-			end
-			v:fit()
-		end)
+		end
+		v:header("Latest")
+		for _, th in ipairs(r.latest) do
+			thread_row(v, th, (names[th.topic] or "") .. " · " ..
+					thread_badge(th))
+		end
+		v:fit()
 	end)
 end
 
@@ -822,6 +898,15 @@ show_topic = function(id)
 			state.order = o
 			redraw()
 		end)
+		button(bar, "Mark all read", function()
+			req("mark_read", {topic = id}, function()
+				req("topics", nil, function(r)
+					topics = r.topics
+					draw_sidebar()
+					redraw()
+				end)
+			end)
+		end)
 		if me.moderator then
 			button(bar, t.tracker and "Not a tracker" or "Make it a tracker",
 					function()
@@ -878,6 +963,11 @@ show_thread = function(id, at, missing)
 	req("thread", {thread = id}, function(t)
 		place.topic = t.topic
 		local w = open(t.title)
+		-- What was unread there is read now: the sidebar's marks again
+		req("topics", nil, function(r)
+			topics = r.topics
+			draw_sidebar()
+		end)
 		local info = kind_text(t)
 		info = (info ~= "" and info .. (t.version ~= "" and
 				", reported in " .. t.version or "") .. " · " or "") ..
@@ -1494,9 +1584,8 @@ show_search = function(q)
 			if #threads > 0 then
 				v:header(#results .. " messages in " .. #threads .. " threads")
 				for _, r in ipairs(threads) do
-					add_row(v, r.title, "", function()
-						go(function() show_thread(r.thread) end)
-					end)
+					thread_row(v, {id = r.thread, title = r.title,
+							last = r.last, unread = r.unread}, "")
 				end
 				v:header("Messages")
 				for _, r in ipairs(results) do
@@ -1975,6 +2064,29 @@ buildat.sub_packet("hr:new", function(data)
 		return
 	end
 	read_on(open_thread)
+end)
+
+-- [HEARTH_NEW_MARKS] A new message anywhere: the rows drawn for its
+-- thread and its topics take their marks at once, and the topic tree keeps
+-- them for the next sidebar
+buildat.sub_packet("hr:activity", function(data)
+	local a = buildat.parse_json(data)
+	if type(a) ~= "table" then
+		return
+	end
+	local unread = a.author ~= me.account and
+			not (open_thread and open_thread.id == a.thread)
+	for _, t in ipairs(topics) do
+		if t.id == a.topic or t.id == a.parent then
+			t.active = a.time
+			t.unread = t.unread or unread
+		end
+	end
+	set_mark("t" .. tostring(a.thread), a.time, unread)
+	set_mark("c" .. tostring(a.topic), a.time, unread)
+	if a.parent ~= 0 then
+		set_mark("c" .. tostring(a.parent), a.time, unread)
+	end
 end)
 
 buildat.sub_packet("hr:notify", function(data)
