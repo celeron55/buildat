@@ -219,6 +219,7 @@ end
 -- asked at most once a minute
 local unseen = {}
 local unseen_asked = nil
+local starport_fetched = false
 -- Set when an app, save or server is run from here: a game's own way
 -- out (luanti_client's leave) pops its screens without leave_app, so
 -- Home comes back on top as drawn before it, and is drawn again then
@@ -388,8 +389,11 @@ local function gather()
 		if tile and a.last_attempt > (tile.last or 0) then
 			tile.last = a.last_attempt
 		end
-		if host and a.accepted and a.uri:sub(1, 6) == "tcp://" then
-			local address = host .. ":" .. port
+		-- One behind TLS is joined by its https address, which is also
+		-- what Starport's row for it is ([JOINED_TLS_SERVERS])
+		local tls = a.uri:sub(1, 8) == "https://"
+		if host and a.accepted and (tls or a.uri:sub(1, 6) == "tcp://") then
+			local address = (tls and "https://" or "") .. host .. ":" .. port
 			known[address] = true
 			add({label = a.name ~= "" and a.name or
 					listed_name[address] or address,
@@ -597,7 +601,9 @@ local function home(query)
 	end)
 	log:info("launch_menu_v2: " .. #items .. " rows" ..
 			(query ~= "" and " for \"" .. query .. "\"" or "") .. " in " ..
-			math.floor((api.get_time_us() - t0) / 1000) .. " ms")
+			math.floor((api.get_time_us() - t0) / 1000) .. " ms" ..
+			(items[1] and items[1].entry and
+				", first " .. tostring(items[1].entry.label) or ""))
 end
 
 -- One kind's list, searchable and sorted, with the selection's detail
@@ -1090,6 +1096,32 @@ function M.boot(launch_action)
 				M.refresh()
 			end
 		end)
+	end
+	-- Starport's list fetched once a run, as the Servers screen does: a
+	-- server listed since the last fetch is in no other source
+	-- ([JOINED_TLS_SERVERS]). Only the Starports already accepted are
+	-- asked; Home is drawn again if the list changed and Home is shown.
+	if not starport_fetched then
+		starport_fetched = true
+		local sp = require("buildat/extension/starport")
+		sp = sp and (sp.fetch and sp or sp.safe)
+		if sp and sp.fetch and sp.kept_rows then
+			local function said(rows)
+				local t = {}
+				for _, r in ipairs(rows) do
+					t[#t + 1] = tostring(r.address) .. " " .. tostring(r.name)
+				end
+				return table.concat(t, "\n")
+			end
+			local before = said(sp.kept_rows())
+			sp.fetch(function()
+				local top = uistack.main:top()
+				if said(sp.kept_rows()) ~= before and top and
+						top:GetName():find(": launch_menu_v2$") then
+					M.refresh()
+				end
+			end)
+		end
 	end
 	local fell_back = api.launch_ui_fell_back and api.launch_ui_fell_back()
 	if fell_back then

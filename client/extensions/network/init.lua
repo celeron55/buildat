@@ -878,13 +878,15 @@ function M.safe.unseen_counts(cb)
 	end
 end
 
--- remember_server_icon(uri, sha): a native server's icon, which the
--- client kept under the cache at connect ([LAUNCH_WORLD] (4)); its row is
--- made if the address has none, the player having connected to it. The
+-- remember_server(uri[, sha]): a server the client joined, its row made
+-- if the address has none and touched if it has ([JOINED_TLS_SERVERS]):
+-- "tcp://host:port", or "https://host:port" behind TLS. sha is the icon
+-- the client kept under the cache at connect ([LAUNCH_WORLD] (4)). The
 -- trusted side's alone: a server's script must not name what a row wears.
-function M.remember_server_icon(uri, sha)
-	if type(uri) ~= "string" or not uri:match("^tcp://[%w%.%-:%[%]]+$") or
-			type(sha) ~= "string" or not sha:match("^%x+$") or #sha ~= 64 then
+function M.remember_server(uri, sha)
+	if type(uri) ~= "string" or not (uri:match("^tcp://[%w%.%-:%[%]]+$") or
+			uri:match("^https://[%w%.%-:%[%]]+$")) or (sha ~= nil and
+			(type(sha) ~= "string" or not sha:match("^%x+$") or #sha ~= 64)) then
 		return false
 	end
 	local entries = load_store()
@@ -892,11 +894,13 @@ function M.remember_server_icon(uri, sha)
 	local now = os.time()
 	if not e then
 		e = {accepted = true, uri = uri, description = "", created = now,
-				name = "", server = ""}
+				name = "", icon = "", server = ""}
 		entries[key("", uri)] = e
 	end
 	e.last_attempt = now
-	e.icon = sha
+	if sha then
+		e.icon = sha
+	end
 	save_store(entries)
 	return true
 end

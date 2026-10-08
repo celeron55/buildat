@@ -528,6 +528,8 @@ function M.show_connect_to_server()
 			-- A Luanti server (udp://) is the Luanti client's to list
 			if e.uri:match("^udp://") then host = nil end
 			if host and e.accepted then
+				-- One behind TLS is joined by its https address
+				if e.uri:match("^https://") then host = "https://" .. host end
 				used_rows[#used_rows + 1] = {name = host .. ":" .. port,
 						host = host, port = port,
 						line = e.description ~= "" and e.description or nil}

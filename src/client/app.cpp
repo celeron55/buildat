@@ -1832,6 +1832,7 @@ struct CApp: public App, public magic::Application
 	void set_state(sp_<client::State> state)
 	{
 		m_state = state;
+		m_joined_noted = false;
 		m_router->set_client(state);
 	}
 
@@ -2054,8 +2055,6 @@ struct CApp: public App, public magic::Application
 	// extension's own store, a column of its own). Not for the local
 	// server the client started, whose address is a port of the moment,
 	// nor a pipe's.
-	// simplified: a TLS address (https://) is not kept; its row would
-	// need the scheme the room's list leaves out.
 	// **One a server** ([SECURITY_RUN_1]): each new PNG was a new file
 	// and a rewrite of the address store, so a server sending them in a
 	// loop filled the cache. The first one from an address in a run.
@@ -2099,40 +2098,75 @@ struct CApp: public App, public magic::Application
 		return sha;
 	}
 
-	ss_ m_icon_address;
-	void handle_server_icon(const ss_ &data)
+	// **The store's row for the server joined** ([JOINED_TLS_SERVERS]):
+	// "tcp://host:port", or "https://host:port" behind TLS -- the port
+	// always said, as Starport's rows have it, so that the two match.
+	// "" for the local server the client started, whose address is a
+	// port of the moment, and for a pipe.
+	ss_ store_uri()
 	{
 		const ss_ address = m_state ? m_state->get_address() : "";
-		if(address.empty() || address.compare(0, 5, "pipe:") == 0 ||
-				address.find("://") != ss_::npos || address == m_icon_address)
-			return;
+		if(address.empty() || address.compare(0, 5, "pipe:") == 0)
+			return "";
 		adopt_pidfile();
 		if(!g_local_server_app.empty() &&
 				interface::process::is_running(g_local_server) &&
 				(address == "localhost:"+g_local_server_port ||
 				address == "127.0.0.1:"+g_local_server_port))
-			return;
-		// The address as the network extension writes it: tcp://host:port
-		ss_ host, port;
-		if(!interface::split_host_port(address, &host, &port, "29500"))
-			return;
+			return "";
+		ss_ host, port, scheme = "tcp://";
+#ifdef __EMSCRIPTEN__
+		// A page on https has a secure WebSocket whatever the address says
+		if(EM_ASM_INT({ return location.protocol === 'https:' ? 1 : 0; }))
+			scheme = "https://";
+#endif
+		if(client::parse_secure_address(address, &host, &port))
+			scheme = "https://";
+		else if(address.find("://") != ss_::npos ||
+				!interface::split_host_port(address, &host, &port, "29500"))
+			return "";
 		const ss_ hostport = interface::join_host_port(host, port);
 		for(char c : hostport)
 			if(!(isalnum((unsigned char)c) || c == '.' || c == '-' ||
 					c == ':' || c == '[' || c == ']'))
-				return; // not an address the store's rows can carry
+				return ""; // not an address the store's rows can carry
+		return scheme+hostport;
+	}
+
+	// The row made or touched once a connection, at the server's first
+	// packet: a server joined is listed whether or not it sends an icon
+	bool m_joined_noted = false;
+	void note_joined()
+	{
+		m_joined_noted = true;
+		const ss_ uri = store_uri();
+		if(uri.empty())
+			return;
+		run_script_no_sandbox("require('buildat/extension/network')"
+				".remember_server('"+uri+"')");
+	}
+
+	ss_ m_icon_address;
+	void handle_server_icon(const ss_ &data)
+	{
+		const ss_ address = m_state ? m_state->get_address() : "";
+		const ss_ uri = store_uri();
+		if(uri.empty() || address == m_icon_address)
+			return;
 		const ss_ sha = keep_icon(data, address);
 		if(sha.empty())
 			return;
 		m_icon_address = address;
 		run_script_no_sandbox("require('buildat/extension/network')"
-				".remember_server_icon('tcp://"+hostport+"', '"+sha+"')");
+				".remember_server('"+uri+"', '"+sha+"')");
 		log_i(MODULE, "server icon from %s kept as %s", cs(address),
 				cs(sha.substr(0, 12)));
 	}
 
 	void handle_packet(const ss_ &name, const ss_ &data)
 	{
+		if(!m_joined_noted)
+			note_joined();
 		if(name == "core:server_icon"){
 			handle_server_icon(data);
 			return;
