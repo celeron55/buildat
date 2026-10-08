@@ -43,7 +43,7 @@ local texmod = dofile(dir.."/res/texmod.lua")
 -- a client
 dofile(dir.."/surface.lua")
 local inventory = dofile(dir.."/inventory.lua")
-local formspec = dofile(dir.."/formspec.lua")
+local formspec = dofile(dir.."/res/formspec.lua")
 local objects = dofile(dir.."/objects.lua")
 local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")

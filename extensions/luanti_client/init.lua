@@ -60,7 +60,7 @@ local luanti_hud = buildat.run_extension_file("hud.lua")
 luanti_hud.minimap = buildat.run_extension_file("res/minimap.lua")
 luanti_hud.hotbar = buildat.run_extension_file("res/hotbar.lua")
 local sounds = buildat.run_extension_file("sounds.lua")
-local formspec = buildat.run_extension_file("formspec.lua")
+local formspec = buildat.run_extension_file("res/formspec.lua")
 local formspec_ui = buildat.run_extension_file("formspec_ui.lua")
 local objects = buildat.run_extension_file("objects.lua")
 local M = {safe = nil}
