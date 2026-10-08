@@ -6,7 +6,8 @@
 # Starport's own window. A Starport, Hearth listed on it with IDs on and
 # serving the web client, and an ID made by the API; headless Firefox
 # (the window step is Firefox's) opens Hearth's page, clicks "Sign in with
-# your Starport ID", Open, and in the Starport's /authorize window logs in,
+# your Starport ID" (its window opens at once), and in the Starport's
+# /authorize window logs in,
 # allows, names itself and allows; the token comes back to Hearth's page
 # by postMessage and the join is by it. Also by the API: /authorize is
 # never framed, the API answers any origin, a token for an origin that is

@@ -1924,15 +1924,20 @@ local function web_authorize(url, listing, address, cb, rename_reason)
 			"opens in a window of its own; your password goes there only.")
 	local st = add_text(w, "")
 	local rr = add_row(w)
-	add_button(rr, "Open", function()
+	local function open()
 		st.text = __buildat_web_authorize(url .. q) and
 				"Waiting for the Starport's window..." or
-				"The browser blocked the window: allow pop-ups for this page"
-	end)
+				"The browser blocked the window: allow pop-ups for this "..
+				"page, then Open"
+	end
+	add_button(rr, "Open", open)
 	add_button(rr, "Cancel", close_and(root, function()
 		web_wait = nil
 		cb(nil, "cancelled")
 	end))
+	-- [PLAYTEST_1008] At once, from the press that came here, which the
+	-- browser counts as the user's; Open again where it blocked that
+	open()
 	web_wait = function(m)
 		for _, e in ipairs(uistack.main.stack) do
 			if e == root then

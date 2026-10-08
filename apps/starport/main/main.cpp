@@ -339,7 +339,7 @@ li{margin:.2em 0}
 <p>Signed in as <b class="me"></b>.</p>
 <label id="fleetl" class="hide">Your name on this server
  <input id="fleet"></label>
-<button>Allow</button><button type="button" id="cancel">Cancel</button>
+<button autofocus>Allow</button><button type="button" id="cancel">Cancel</button>
 <button type="button" class="logout">Log out</button>
 </form>
 <div id="settings" class="hide">
@@ -433,6 +433,9 @@ async function signed_in(){
 			$("fleetl").classList.remove("hide");
 			$("fleet").required = true;
 			$("fleet").focus();
+		} else {
+			// [PLAYTEST_1008]: Enter allows
+			$("allow").querySelector("button").focus();
 		}
 		return;
 	}
