@@ -52,6 +52,7 @@
 #include "interface/server_config.h"
 #include "interface/event.h"
 #include "interface/fs.h"
+#include "interface/bignum.h"
 #include "interface/markup.h"
 #include "interface/web_brand.h"
 #include "client_file/api.h"
@@ -453,7 +454,12 @@ static const char *SCHEMA =
 	"CREATE TABLE IF NOT EXISTS files(id INTEGER PRIMARY KEY, "
 		"name TEXT NOT NULL, type TEXT NOT NULL, data BLOB NOT NULL, "
 		"lod INTEGER NOT NULL, uploader TEXT NOT NULL, "
-		"created INTEGER NOT NULL, used INTEGER NOT NULL);";
+		"created INTEGER NOT NULL, used INTEGER NOT NULL);"
+	// The files a message names (/f/<id>), so a file only hidden messages
+	// name is not served ([SEC_HEARTH_FILES])
+	"CREATE TABLE IF NOT EXISTS file_links(file INTEGER NOT NULL, "
+		"message INTEGER NOT NULL, PRIMARY KEY(file, message)) "
+		"WITHOUT ROWID;";
 
 static const char *const COLUMNS_ADDED[][3] = {
 	{"threads", "answer", "INTEGER NOT NULL DEFAULT 0"},
@@ -723,6 +729,13 @@ struct Module: public interface::Module
 		const ss_ path = dir+"/hearth.sqlite";
 		if(sqlite3_open(path.c_str(), &m_db) != SQLITE_OK)
 			throw Exception("hearth: cannot open "+path);
+		bool fill_links;
+		{ // Closed before the schema's WAL pragma, which an open read stops
+			Q had(m_db, "SELECT count(*) FROM sqlite_master WHERE "
+					"name = 'file_links'");
+			had.step();
+			fill_links = had.i(0) == 0;
+		}
 		char *err = nullptr;
 		if(sqlite3_exec(m_db, SCHEMA, nullptr, nullptr, &err) != SQLITE_OK){
 			const ss_ e = err ? err : "";
@@ -743,6 +756,16 @@ struct Module: public interface::Module
 					exec("UPDATE reads SET last = (SELECT ifnull(max(id), 0) "
 							"FROM messages WHERE thread = reads.thread)");
 			}
+		}
+		// A file from before file_links: its links from every message once
+		if(fill_links){
+			exec("BEGIN");
+			{
+				Q m(m_db, "SELECT id, body FROM messages");
+				while(m.step())
+					link_files(m.i(0), m.s(1));
+			}
+			exec("COMMIT");
 		}
 		network::access(m_server, [&](network::Interface *iface){
 			iface->claim_http_path("/");
@@ -817,18 +840,38 @@ struct Module: public interface::Module
 	// The patches a message links to (/f/<id>), their text inline, at most
 	// PATCH_INLINE bytes of them; shown is a use, as a fetch is
 	static const size_t PATCH_INLINE = 256 * 1024;
-	json::Value patches_in(const ss_ &body)
+	// The file ids a body names as /f/<id>, in order, each once
+	static std::vector<int64_t> file_ids(const ss_ &body)
 	{
-		json::Value out = json::array();
+		std::vector<int64_t> out;
 		std::set<int64_t> seen;
-		size_t total = 0;
 		for(size_t at = 0; (at = body.find("/f/", at)) != ss_::npos; at += 3){
 			size_t e = at + 3;
 			while(e < body.size() && e - at < 18 && isdigit((unsigned char)body[e]))
 				e++;
 			const int64_t id = atoll(body.substr(at + 3, e - at - 3).c_str());
-			if(e == at + 3 || !seen.insert(id).second)
-				continue;
+			if(e != at + 3 && seen.insert(id).second)
+				out.push_back(id);
+		}
+		return out;
+	}
+
+	void link_files(int64_t message_id, const ss_ &body)
+	{
+		Q d(m_db, "DELETE FROM file_links WHERE message = ?");
+		d.b(message_id).step();
+		for(int64_t id : file_ids(body)){
+			Q i(m_db, "INSERT OR IGNORE INTO file_links(file, message) "
+					"VALUES(?, ?)");
+			i.b(id).b(message_id).step();
+		}
+	}
+
+	json::Value patches_in(const ss_ &body)
+	{
+		json::Value out = json::array();
+		size_t total = 0;
+		for(int64_t id : file_ids(body)){
 			Q f(m_db, "SELECT name, data FROM files WHERE id = ? AND type = ?");
 			f.b(id).b(ss_(PATCH_TYPE));
 			if(!f.step())
@@ -1317,6 +1360,7 @@ struct Module: public interface::Module
 				"VALUES(?, ?, ?, ?)");
 		q.b(thread_id).b(author).b(body).b(t).step();
 		const int64_t id = sqlite3_last_insert_rowid(m_db);
+		link_files(id, body);
 		if(held){
 			hold(id, author);
 			return id;
@@ -1589,9 +1633,17 @@ struct Module: public interface::Module
 			// /f/<id>, and anything after another / is the name it is saved as
 			const int64_t id = path_id(r.path.substr(0, r.path.find('/', 3)),
 					"/f/");
+			// Named only by hidden (or held) messages, or in hidden
+			// threads: not served ([SEC_HEARTH_FILES]). Named by none, it is
+			// its uploader's yet, by an id nobody guesses.
+			Q l(m_db, "SELECT count(*), ifnull(sum(m.hidden = 0 AND "
+					"t.hidden = 0), 0) FROM file_links k JOIN messages m ON "
+					"m.id = k.message JOIN threads t ON t.id = m.thread "
+					"WHERE k.file = ?");
+			l.b(id).step();
 			Q f(m_db, "SELECT type, data FROM files WHERE id = ?");
 			f.b(id);
-			if(id >= 0 && f.step()){
+			if(id >= 0 && !(l.i(0) > 0 && l.i(1) == 0) && f.step()){
 				Q u(m_db, "UPDATE files SET used = ? WHERE id = ?");
 				u.b(now_s()).b(id).step();
 				return respond(r, 200, f.s(1), f.s(0));
@@ -1940,7 +1992,8 @@ struct Module: public interface::Module
 		for(const char *sql : {"DELETE FROM messages WHERE id = ?",
 				"DELETE FROM search WHERE rowid = ?",
 				"DELETE FROM edits WHERE message = ?",
-				"DELETE FROM notifications WHERE message = ?"}){
+				"DELETE FROM notifications WHERE message = ?",
+				"DELETE FROM file_links WHERE message = ?"}){
 			Q d(m_db, sql);
 			d.b(message_id).step();
 		}
@@ -2473,12 +2526,20 @@ struct Module: public interface::Module
 				type = "image/jpeg";
 				lod = 1;
 			}
-			Q i(m_db, "INSERT INTO files(name, type, data, lod, uploader, "
-					"created, used) VALUES(?, ?, ?, ?, ?, ?, ?)");
-			i.b(file_name).b(type).blob(data).b(lod).b(name).b(now_s())
-					.b(now_s()).step();
+			// A random id, not the next one: a file not posted yet is
+			// not found by counting ([SEC_HEARTH_FILES]). Under 2^46, so
+			// Lua's tostring (%.14g) still writes it in digits.
+			// simplified: a collision is not retried; one in 2^46 per file
+			uint64_t r = 0;
+			const ss_ rb = interface::bignum::random_bytes(8);
+			memcpy(&r, rb.data(), sizeof r);
+			const int64_t file_id = (int64_t)(r & ((1ULL << 46) - 1)) + 1;
+			Q i(m_db, "INSERT INTO files(id, name, type, data, lod, uploader, "
+					"created, used) VALUES(?, ?, ?, ?, ?, ?, ?, ?)");
+			i.b(file_id).b(file_name).b(type).blob(data).b(lod).b(name)
+					.b(now_s()).b(now_s()).step();
 			json::Value v = json::object();
-			v.set("id", (int64_t)sqlite3_last_insert_rowid(m_db));
+			v.set("id", file_id);
 			v.set("image", lod == 1);
 			v.set("patch", patch);
 			v.set("bytes", (int64_t)data.size());
@@ -2681,6 +2742,7 @@ struct Module: public interface::Module
 			h.b(id).b(m.s(1)).b(t).b(name).step();
 			Q u(m_db, "UPDATE messages SET body = ?, edited = ? WHERE id = ?");
 			u.b(body).b(t).b(id).step();
+			link_files(id, body);
 			Q s(m_db, "UPDATE search SET body = ? WHERE rowid = ?");
 			s.b(body).b(id).step();
 			if(held)

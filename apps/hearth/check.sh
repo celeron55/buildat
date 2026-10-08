@@ -325,24 +325,34 @@ for i in 1001 1002 1003; do
 done
 answer "$t/admin_files.log" 1004 | grep -q "not an image Hearth can read" ||
 	fail "a fake PNG: $(answer "$t/admin_files.log" 1004)"
+res(){ # log id python-expression-of-r
+	answer "$1" $2 | sed 's/^hr: //' | python3 -c 'import json, sys
+r = json.load(sys.stdin); print(eval(sys.argv[1]))' "$3"
+}
+# The ids are random ([SEC_HEARTH_FILES])
+FJ=$(res "$t/admin_files.log" 1001 'r["result"]["id"]')
+FP=$(res "$t/admin_files.log" 1002 'r["result"]["id"]')
+FO=$(res "$t/admin_files.log" 1003 'r["result"]["id"]')
+[ "$FJ" -gt 1000 ] && [ "$FP" -gt 1000 ] ||
+	fail "file ids by counting: $FJ $FP $FO"
 image(){ # path -> "format WxH", or why not
 	python3 -c 'import sys; from PIL import Image; d = open(sys.argv[1], "rb").read()
 im = Image.open(sys.argv[1]); print(im.format, "%dx%d" % im.size, "EXIF" if b"SECRETPLACE" in d else "")' "$t/page" 2>&1
 }
-[ "$(get /f/1/far.jpg)" = 200 ] && [ "$(image)" = "JPEG 1920x480 " ] ||
+[ "$(get /f/$FJ/far.jpg)" = 200 ] && [ "$(image)" = "JPEG 1920x480 " ] ||
 	fail "the JPEG as served: $(image)"
-[ "$(get /f/2)" = 200 ] && [ "$(image)" = "PNG 3x2 " ] || fail "the PNG: $(image)"
-[ "$(get /f/3)" = 200 ] && [ "$(cat "$t/page")" = hello ] || fail "the other file"
+[ "$(get /f/$FP)" = 200 ] && [ "$(image)" = "PNG 3x2 " ] || fail "the PNG: $(image)"
+[ "$(get /f/$FO)" = 200 ] && [ "$(cat "$t/page")" = hello ] || fail "the other file"
 [ "$(get /robots.txt)" = 200 ] && grep -q "Disallow: /f/" "$t/page" ||
 	fail "robots.txt: $(cat "$t/page")"
 MS=4000 client admin checkpass12 "$t/admin_files2.log" '{"cmd":"file_settings","budget":0,"lod2_after":0}'
 answer "$t/admin_files2.log" 1001 | grep -q '"ok":true' ||
 	fail "the budget: $(answer "$t/admin_files2.log" 1001)"
-[ "$(get /f/1)" = 200 ] && [ "$(image)" = "JPEG 960x240 " ] ||
+[ "$(get /f/$FJ)" = 200 ] && [ "$(image)" = "JPEG 960x240 " ] ||
 	fail "the JPEG over the budget: $(image)"
-[ "$(get /f/3)" = 404 ] || fail "the other file over the budget was kept"
+[ "$(get /f/$FO)" = 404 ] || fail "the other file over the budget was kept"
 MS=4000 client admin checkpass12 "$t/admin_files3.log" '{"cmd":"file_settings","delete_after":0}'
-[ "$(get /f/1)" = 404 ] && [ "$(get /f/2)" = 404 ] ||
+[ "$(get /f/$FJ)" = 404 ] && [ "$(get /f/$FP)" = 404 ] ||
 	fail "past delete_after an image was kept"
 
 # 8. [HEARTH_TRACKER]: a tracker topic; a new account attaches a patch
@@ -350,10 +360,6 @@ MS=4000 client admin checkpass12 "$t/admin_files3.log" '{"cmd":"file_settings","
 # only to a tracker domain; its tracker link to a domain not on the list
 # waits for the admin, who accepts the domain; removing the domain hides
 # the link again; and the patch, fetched, applies with git am
-res(){ # log id python-expression-of-r
-	answer "$1" $2 | sed 's/^hr: //' | python3 -c 'import json, sys
-r = json.load(sys.stdin); print(eval(sys.argv[1]))' "$3"
-}
 g="git -c user.name=Dave -c user.email=dave@example.org"
 mkdir "$t/repo" && cd "$t/repo" && $g init -q && echo one > f.txt &&
 	$g add f.txt && $g commit -qm base && $g clone -q . ../repo2 &&
@@ -404,6 +410,16 @@ MS=4000 client admin checkpass12 "$t/tr_admin4.log" '{"cmd":"tracker_domains","r
 	grep -q two f.txt && cd "$here/Build" ||
 	fail "the patch as served does not apply with git am"
 echo "ok: a new account's patch ticket, inline and applied with git am; its links and its tracker link by the domains"
+# [SEC_HEARTH_FILES]: the ticket hidden, its patch is not served
+M=$(res "$t/tr_dave3.log" 1003 'r["result"]["list"][0]["id"]')
+MS=4000 client admin checkpass12 "$t/tr_admin5.log" "{\"cmd\":\"report\",\"message\":$M,\"reason\":\"x\"}
+{\"cmd\":\"queue\"}"
+R=$(res "$t/tr_admin5.log" 1002 "[x['id'] for x in r['result'] if x['message'] == $M][0]")
+MS=4000 client admin checkpass12 "$t/tr_admin6.log" "{\"cmd\":\"moderate\",\"report\":$R,\"action\":\"hide\",\"statement\":\"x\"}"
+answer "$t/tr_admin6.log" 1001 | grep -q '"ok":true' ||
+	fail "the ticket's hide: $(answer "$t/tr_admin6.log" 1001)"
+[ "$(get /f/$F/fix.patch)" = 404 ] || fail "a hidden ticket's patch is served"
+echo "ok: a hidden ticket's patch is not served"
 
 # 10. A long thread is read a part at a time: the page links on to the
 # rest, the client reads on by itself; and pages are limited per address.
