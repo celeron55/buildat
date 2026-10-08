@@ -134,6 +134,23 @@ foreach(URHO3D_ENGINE_SUBDIR ${URHO3D_ENGINE_SUBDIRS})
 	endif()
 endforeach()
 
+# ccache when it is there ([BUILD_TIME]), for this project and the engine;
+# -DBUILDAT_CCACHE=OFF goes without
+# simplified: not under emcc, which ccache does not know as a compiler;
+# the web build goes without until it is measured to work
+option(BUILDAT_CCACHE "Compile through ccache when it is found" ON)
+set(BUILDAT_LAUNCHER_ARGS "")
+if(BUILDAT_CCACHE AND NOT BUILDAT_WEB)
+	find_program(CCACHE_PROGRAM ccache)
+	if(CCACHE_PROGRAM)
+		set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+		set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+		set(BUILDAT_LAUNCHER_ARGS
+			"-DCMAKE_C_COMPILER_LAUNCHER=${CCACHE_PROGRAM}"
+			"-DCMAKE_CXX_COMPILER_LAUNCHER=${CCACHE_PROGRAM}")
+	endif()
+endif()
+
 # Build the in-tree engine as part of this project.
 get_filename_component(URHO3D_HOME_ABS "${URHO3D_HOME}" ABSOLUTE)
 get_filename_component(URHO3D_BUNDLED_HOME_ABS "${URHO3D_BUNDLED_HOME}" ABSOLUTE)
@@ -165,6 +182,7 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 		# and not the compilers, which the toolchain sets and Urho3D's
 		# native-tool checks must not inherit
 		${URHO3D_CROSS_ARGS}
+		${BUILDAT_LAUNCHER_ARGS}
 		-DURHO3D_LIB_TYPE=${URHO3D_LIB_TYPE}
 		-DURHO3D_LUA=${URHO3D_LUA}
 		-DURHO3D_SAFE_LUA=${URHO3D_SAFE_LUA}
@@ -195,14 +213,28 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 		set(URHO3D_CONFIGURE_ENV /usr/bin/env -i "PATH=$ENV{PATH}"
 			"HOME=$ENV{HOME}")
 	endif()
-	execute_process(
-		COMMAND ${URHO3D_CONFIGURE_ENV}
-			${CMAKE_COMMAND} ${URHO3D_BUNDLE_CMAKE_ARGS} "${URHO3D_HOME}"
-		WORKING_DIRECTORY "${URHO3D_BUILD_DIR}"
-		RESULT_VARIABLE URHO3D_CONFIGURE_RESULT
-	)
-	if(NOT URHO3D_CONFIGURE_RESULT EQUAL 0)
-		message(FATAL_ERROR "Failed to configure bundled Urho3D")
+	# Configured again only when its arguments changed ([BUILD_TIME]): a
+	# stamp of them, written after a configure that worked
+	set(URHO3D_CONFIGURE_STAMP_TEXT
+		"${URHO3D_CONFIGURE_ENV};${CMAKE_COMMAND};${URHO3D_BUNDLE_CMAKE_ARGS};${URHO3D_HOME}")
+	set(URHO3D_CONFIGURE_STAMP "${URHO3D_BUILD_DIR}/buildat_configure_stamp.txt")
+	set(URHO3D_CONFIGURE_STAMP_OLD "")
+	if(EXISTS "${URHO3D_CONFIGURE_STAMP}" AND
+			EXISTS "${URHO3D_BUILD_DIR}/CMakeCache.txt")
+		file(READ "${URHO3D_CONFIGURE_STAMP}" URHO3D_CONFIGURE_STAMP_OLD)
+	endif()
+	if(NOT URHO3D_CONFIGURE_STAMP_OLD STREQUAL URHO3D_CONFIGURE_STAMP_TEXT)
+		file(REMOVE "${URHO3D_CONFIGURE_STAMP}")
+		execute_process(
+			COMMAND ${URHO3D_CONFIGURE_ENV}
+				${CMAKE_COMMAND} ${URHO3D_BUNDLE_CMAKE_ARGS} "${URHO3D_HOME}"
+			WORKING_DIRECTORY "${URHO3D_BUILD_DIR}"
+			RESULT_VARIABLE URHO3D_CONFIGURE_RESULT
+		)
+		if(NOT URHO3D_CONFIGURE_RESULT EQUAL 0)
+			message(FATAL_ERROR "Failed to configure bundled Urho3D")
+		endif()
+		file(WRITE "${URHO3D_CONFIGURE_STAMP}" "${URHO3D_CONFIGURE_STAMP_TEXT}")
 	endif()
 	# $(MAKE) hands the sub-build the parent make's jobserver, so the engine
 	# builds with the -j the user gave and not with one of its own. Other
@@ -223,12 +255,27 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 				-P ${CMAKE_SOURCE_DIR}/util/web_urho3d_stale.cmake
 			COMMAND ${URHO3D_BUILD_COMMAND})
 	endif()
-	add_custom_target(urho3d_build
+	# Entered only when the engine's source changed or it has not been
+	# built here ([BUILD_TIME]): the stamp is rewritten when the tree's
+	# git id or diff changes, and the build depends on it
+	set(URHO3D_SOURCE_STAMP "${URHO3D_BUILD_DIR}/buildat_source_stamp.txt")
+	set(URHO3D_BUILT_STAMP "${URHO3D_BUILD_DIR}/buildat_built_stamp.txt")
+	add_custom_target(urho3d_source
+		COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}
+			-DOUT=${URHO3D_SOURCE_STAMP}
+			-P ${CMAKE_SOURCE_DIR}/util/urho3d_stamp.cmake
+		BYPRODUCTS "${URHO3D_SOURCE_STAMP}"
+	)
+	add_custom_command(OUTPUT "${URHO3D_BUILT_STAMP}"
 		COMMAND ${URHO3D_BUILD_COMMAND}
 		${URHO3D_POST_BUILD_COMMAND}
+		COMMAND ${CMAKE_COMMAND} -E touch "${URHO3D_BUILT_STAMP}"
+		DEPENDS "${URHO3D_SOURCE_STAMP}"
 		WORKING_DIRECTORY "${URHO3D_BUILD_DIR}"
 		COMMENT "Building bundled Urho3D"
 	)
+	add_custom_target(urho3d_build DEPENDS "${URHO3D_BUILT_STAMP}")
+	add_dependencies(urho3d_build urho3d_source)
 endif()
 
 if(NOT TARGET Urho3D AND BUILDAT_WEB)
@@ -397,8 +444,8 @@ add_custom_target(buildat_version ALL
 		-P ${CMAKE_SOURCE_DIR}/util/version.cmake
 	BYPRODUCTS ${BUILDAT_VERSION_CPP}
 	COMMENT "Reading the version and the git hash")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-	${CMAKE_SOURCE_DIR}/VERSION)
+# VERSION is not a configure dependency: the target reads it every build
+# ([BUILD_TIME]; a bump re-ran this configure and Urho3D's)
 set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} ${BUILDAT_VERSION_CPP})
 # sqlite's objects rather than a library: builtin/storage is a runtime-compiled
 # module and cannot link one, so buildat_core is what exports sqlite3_* to it.

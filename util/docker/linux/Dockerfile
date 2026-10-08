@@ -21,7 +21,7 @@ ARG DEBIAN_SNAPSHOT=20260920T000000Z
 RUN rm -f /etc/apt/sources.list.d/debian.sources \
 	&& printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s bookworm main\ndeb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s bookworm-security main\n' "$DEBIAN_SNAPSHOT" "$DEBIAN_SNAPSHOT" > /etc/apt/sources.list \
 	&& apt-get -o Acquire::Retries=5 update && apt-get install -y --no-install-recommends \
-	build-essential cmake git ca-certificates \
+	build-essential cmake git ca-certificates ccache \
 	libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev \
 	libcurl4-openssl-dev \
 	xvfb xauth libgl1-mesa-dri imagemagick zip tar gzip \

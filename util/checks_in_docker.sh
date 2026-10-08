@@ -43,14 +43,21 @@ git -C "$here" archive --format=tar HEAD > "$tarball"
 media="${BUILDAT_MEDIA_DIR:-$here/user/shared/vanilla}"
 mount_media=""
 [ -d "$media/games" ] && mount_media="-v $media:/work/buildat/local/check/user/shared/vanilla:z"
+# The compiler cache ([BUILD_TIME]), kept on the host between runs (CI
+# keeps the directory); the archive has no .git, so the hash by name
+ccache_dir="${BUILDAT_CCACHE_DIR:-$here/Build/ccache}"
+mkdir -p "$ccache_dir"
 docker run --rm -i \
 	-v "$out:/out:z" \
+	-v "$ccache_dir:/ccache:z" -e CCACHE_DIR=/ccache \
+	-e "BUILDAT_GIT_HASH=$(git -C "$here" rev-parse --short HEAD)" \
 	$mount_media \
 	-e "BUILDAT_CI=1" \
 	-e "ONLY=${ONLY:-}" \
 	-e "JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}" \
 	"$image" bash -c "
 		set -eu
+		trap 'chown -R $(id -u):$(id -g) /ccache 2>/dev/null || true' EXIT
 		mkdir -p /work/buildat && cd /work/buildat && tar -xf - &&
 		mkdir -p Build && cd Build &&
 		cmake .. -DCMAKE_BUILD_TYPE=Release > cmake.log 2>&1 ||

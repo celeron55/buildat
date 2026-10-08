@@ -32,13 +32,19 @@ trap 'rm -f "$tarball"' EXIT
 git -C "$here" archive --format=tar HEAD > "$tarball"
 # The archive has no .git, so the hash of what it holds goes in by name
 hash=$(git -C "$here" rev-parse --short HEAD)
+# The compiler cache ([BUILD_TIME]), kept on the host between runs (CI
+# keeps the directory)
+ccache_dir="${BUILDAT_CCACHE_DIR:-$here/Build/ccache}"
+mkdir -p "$ccache_dir"
 docker run --rm -i \
 	-v "$out:/out:z" \
+	-v "$ccache_dir:/ccache:z" -e CCACHE_DIR=/ccache \
 	-e "BUILDAT_GIT_HASH=$hash" \
 	-e "JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}" \
 	-e "WIN_VARIANTS=${WIN_VARIANTS:-1}" \
 	"$image" bash -c "
 		set -eu
+		trap 'chown -R $(id -u):$(id -g) /ccache 2>/dev/null || true' EXIT
 		mkdir -p /work/buildat && cd /work/buildat && tar -xf - &&
 		status=0
 		if [ "$target" = linux ]; then
