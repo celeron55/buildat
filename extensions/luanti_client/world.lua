@@ -23,6 +23,7 @@ local shapes = buildat.run_extension_file("shapes.lua")
 local particles = buildat.run_extension_file("res/particles.lua")
 local light_flood = buildat.run_extension_file("light.lua")
 local skyvis = buildat.run_extension_file("skyvis.lua")
+local sky_model = buildat.run_extension_file("res/sky_model.lua")
 -- BUILDAT_LUANTI_NO_SPOTS=1, the reference runs' switch: no sparkle on
 -- any surface, since the path-traced reference draws none. The module's
 -- bootstrap.lua honours the same variable.
@@ -426,13 +427,11 @@ function M.new(magic, buildat, log, options)
 	-- their direction, at the scale of one: the ratio Luanti draws them at.
 	-- A game's own scale multiplies these.
 	local SUN_HALF = 0.075
-	local MOON_HALF = 0.048
-	-- How many stars a game asks for by default, and how many of the star
-	-- grid's cells hold one at that count: the density was picked to look
-	-- right at Luanti's own default, so a game asking for more gets more in
-	-- proportion.
-	local STARS_DEFAULT = 1000
-	local STAR_DENSITY_DEFAULT = 0.004
+	local MOON_HALF = sky_model.MOON_HALF
+	-- How many stars a game asks for by default, and the share of the star
+	-- grid's cells that hold one at that count
+	local STARS_DEFAULT = sky_model.STARS_DEFAULT
+	local STAR_DENSITY_DEFAULT = sky_model.STAR_DENSITY_DEFAULT
 	-- The same for the clouds: how much of the sky is covered at the density
 	-- a game has unless it says otherwise
 	-- Luanti's own default cloud speed, in nodes a second, and what one node
@@ -573,34 +572,12 @@ function M.new(magic, buildat, log, options)
 	local MOON_BRIGHTNESS = 1.0
 	local MOON_COLOR = {0.55, 0.68, 1.0}
 
-	-- When the sun is in the scene and when the moon is, in Luanti's
-	-- 0...24000. Below the horizon a directional light shines up through the
-	-- world, and its specular -- the sparkle surface.lua asks for on water,
-	-- on snow and on ore -- is then the brightest thing in a night frame and
-	-- is coming from the wrong side of the sky. So the sun is taken out of
-	-- the scene for the night and the moon is put in, each fading over the
-	-- hour on either side of when the sun is level with the horizon.
-	local SUN_RISE = 5000     -- nothing before this
-	local SUN_UP = 6000       -- full sun from here
-	local SUN_SET = 18000     -- full sun until here
-	local SUN_DOWN = 19000    -- nothing after this
-
-	-- The moon's day is a little longer than the sun's night: it is going
-	-- before the sun arrives and does not come back until the sun is well
-	-- gone. That leaves it nine hours at full against the sun's twelve, which
-	-- is one more way of saying which of the two is the dim one, and it means
-	-- that by the time the sun is making any real light the moon has stopped.
-	local MOON_FADE_OUT = 4500   -- the moon starts going here
-	local MOON_OUT = 5500        -- and is gone here, the sun then half up
-	local MOON_FADE_IN = 18500   -- and comes back from here
-	local MOON_IN = 19500        -- to full here
-
-	-- Nothing above the horizon shines from under it. The clocks above are
-	-- where the fade is shaped; this is the line itself, taken from where the
-	-- body actually is, so that neither can light the undersides of the world
-	-- whatever the clock says. A couple of degrees of softness, because a
-	-- light that switches off in one frame is a light that pops.
-	local HORIZON_FADE = 0.05    -- sine of the angle, so about three degrees
+	-- When the sun and the moon are up, where the sun is and when its light
+	-- goes red: res/sky_model.lua, one copy with vanilla's ([LUANTI_SHARED])
+	local sun_amount, moon_amount = sky_model.sun_amount, sky_model.moon_amount
+	local above_horizon, low_sun = sky_model.above_horizon, sky_model.low_sun
+	local stepped_time = sky_model.stepped_time
+	local sun_direction = sky_model.sun_direction
 
 	local function clamp01(v)
 		return v < 0 and 0 or (v > 1 and 1 or v)
@@ -616,97 +593,6 @@ function M.new(magic, buildat, log, options)
 		return 0.2126 * rgb[1] + 0.7152 * rgb[2] + 0.0722 * rgb[3]
 	end
 
-	local function above_horizon(sine_of_elevation)
-		return clamp01(sine_of_elevation / HORIZON_FADE)
-	end
-
-	-- 0 before the rise, 1 between the rise and the set, 0 after it, and the
-	-- way across each ramp in between
-	local function up_between(time_of_day, rise_from, rise_to,
-			set_from, set_to)
-		local t = (time_of_day or 12000) % 24000
-		if t <= rise_from or t >= set_to then
-			return 0
-		elseif t < rise_to then
-			return (t - rise_from) / (rise_to - rise_from)
-		elseif t <= set_from then
-			return 1
-		end
-		return (set_to - t) / (set_to - set_from)
-	end
-
-	local function sun_amount(time_of_day)
-		return up_between(time_of_day, SUN_RISE, SUN_UP, SUN_SET, SUN_DOWN)
-	end
-
-	-- Where the sun is for the purpose of casting a shadow, which is not
-	-- quite where it is. A shadow map is rasterized afresh every frame, and a
-	-- light that has turned a little between two of them rasterizes it
-	-- differently, so the edges crawl -- which is what a sun that moves as
-	-- smoothly as this one now does made visible. Holding the direction still
-	-- for a step at a time trades the crawl for a small jump, which is far
-	-- easier not to see. The step is in Luanti's own units of the day, so it
-	-- is a fixed angle of sun however fast the game's clock runs: a hundred
-	-- of them is a degree and a half, and about five seconds at Luanti's own
-	-- default speed.
-	local SUN_STEP = 100
-
-	local function stepped_time(time_of_day)
-		local t = time_of_day or 12000
-		return math.floor(t / SUN_STEP + 0.5) * SUN_STEP
-	end
-
-	-- The half hour either side of the sun crossing the horizon, at each end
-	-- of the day, as 0 outside and 1 at the crossing itself. This is the
-	-- window dawn and dusk happen in: what the sun is red in, and what the
-	-- clouds take their colour from. Smooth at both ends, because a tint that
-	-- switches on is a tint you notice switching on.
-	local RED_HALF_WIDTH = 500
-
-	local function low_sun(time_of_day)
-		local t = (time_of_day or 12000) % 24000
-		local d = math.min(math.abs(t - SUN_RISE), math.abs(t - SUN_DOWN))
-		local u = 1 - d / RED_HALF_WIDTH
-		if u <= 0 then
-			return 0
-		end
-		return u * u * (3 - 2 * u)
-	end
-
-	-- What is up while the day is not: the same shape, read the other way
-	-- round, so that the four numbers above say when the moon is out rather
-	-- than being the sun's turned inside out
-	local function moon_amount(time_of_day)
-		return 1 - up_between(time_of_day, MOON_FADE_OUT, MOON_OUT,
-				MOON_FADE_IN, MOON_IN)
-	end
-
-	-- What the schedule has to hold, checked at load: the two never leave the
-	-- sky empty between them, and the moon is out of the way by the time the
-	-- sun is worth anything.
-	do
-		assert(above_horizon(-1) == 0 and above_horizon(0) == 0 and
-				above_horizon(1) == 1, "the horizon line")
-		assert(sun_amount(12000) == 1 and moon_amount(12000) == 0, "noon")
-		assert(sun_amount(0) == 0 and moon_amount(0) == 1, "midnight")
-		assert(moon_amount(SUN_RISE) > 0.4, "the moon is still up at sunrise")
-		assert(moon_amount(MOON_OUT) == 0 and sun_amount(MOON_OUT) > 0.4,
-				"the sun has the sky to itself once the moon is gone")
-		assert(sun_amount(SUN_DOWN) == 0 and moon_amount(SUN_DOWN) > 0.4,
-				"the moon is up by the time the sun is gone")
-		-- Dawn and dusk are a window around the crossings and nowhere else
-		assert(low_sun(SUN_RISE) == 1 and low_sun(SUN_DOWN) == 1,
-				"reddest as the sun crosses")
-		assert(low_sun(SUN_RISE - RED_HALF_WIDTH) == 0 and
-				low_sun(SUN_RISE + RED_HALF_WIDTH) == 0 and
-				low_sun(SUN_DOWN - RED_HALF_WIDTH) == 0 and
-				low_sun(SUN_DOWN + RED_HALF_WIDTH) == 0,
-				"and back to nothing half an hour either side")
-		assert(low_sun(12000) == 0 and low_sun(0) == 0,
-				"nothing of it at noon or at midnight")
-		assert(low_sun(SUN_RISE - 250) > 0.4 and low_sun(SUN_RISE - 250) < 0.6,
-				"and the way across it in between")
-	end
 
 	-- What the sky is worth as a light, against that. Two numbers, because
 	-- the sky's own colour is the wrong one to light a world with: it is the
@@ -3697,24 +3583,6 @@ function M.new(magic, buildat, log, options)
 		moon_tint = {127, 153, 204},
 	}
 
-	-- Where the sun is, as a direction to it. Luanti's own: the day is
-	-- stretched so that the night takes less than half of it
-	-- (getWickedTimeOfDay), and then the sun rises towards +X, stands
-	-- overhead at noon and sets towards -X.
-	local function sun_direction(time_of_day)
-		local t = ((time_of_day or 12000) % 24000) / 24000
-		local wn = 0.415 / 2
-		local w
-		if t > wn and t < 1 - wn then
-			w = (t - wn) / (1 - wn * 2) * 0.5 + 0.25
-		elseif t < 0.5 then
-			w = t / wn * 0.25
-		else
-			w = 1 - (1 - t) / wn * 0.25
-		end
-		local a = math.rad(w * 360 - 90)
-		return math.cos(a), math.sin(a), 0
-	end
 
 	-- The sun's own colour at noon. Luanti's sunlight_color() is the colour
 	-- of the sun and the sky together, because together is the only way
@@ -3724,17 +3592,6 @@ function M.new(magic, buildat, log, options)
 	-- warmer than this shows up undisguised in what a glint reflects.
 	-- apps/voxel_lighting's sun is the same colour.
 	local SUN_COLOR = {1.0, 0.96, 0.88}
-	-- How much of the horizon's own tint the light takes when the sun is down
-	-- among it. Not all of it: sun_tint is the colour a band of sky is
-	-- painted, which is deeper than the light that paints it.
-	-- How much of the horizon's colour the light takes at the reddest of it.
-	-- The window above says when; this says how much, and it is weighted
-	-- towards the crossing itself -- squared from the far end -- so that it
-	-- comes on gently at the edge of the window and is most of the way there
-	-- by the quarter hour. A sun a quarter of an hour off the horizon is
-	-- already red, and a share that only rose with the window was still a
-	-- warm white there.
-	local SUN_TINT_SHARE = 0.9
 	-- And how much of the sun's colour the clouds take while it is down
 	-- there. More than the light itself takes, because a cloud at dawn is
 	-- lit by nothing else and the sun is lighting it from below, where the
@@ -3854,33 +3711,20 @@ function M.new(magic, buildat, log, options)
 	-- belongs and is the same handover the sky shader does to the disc.
 	local function sun_light_color(time_of_day)
 		local tint = sky_color("sun_tint", 1)
-		local low = low_sun(time_of_day)
-		low = (1 - (1 - low) * (1 - low)) * SUN_TINT_SHARE
+		local low = sky_model.sun_tint_share(time_of_day)
 		return magic.Color(
 				SUN_COLOR[1] * (1 - low) + tint.r * low,
 				SUN_COLOR[2] * (1 - low) + tint.g * low,
 				SUN_COLOR[3] * (1 - low) + tint.b * low)
 	end
 
-	-- That the clock and the horizon agree, checked here rather than where
-	-- the clocks are written because sun_direction() is defined between the
-	-- two: the sun's ramp begins where the sun is level with the horizon and
-	-- ends where it is level again, so neither rule has to fight the other.
+	-- That a quarter of an hour off the horizon (05:00, 19:00) the light is
+	-- red rather than a warm white, which is the whole of what the window is
+	-- for
 	do
-		local function elevation(t)
-			local _, sy = sun_direction(t)
-			return sy
-		end
-		assert(math.abs(elevation(SUN_RISE)) < 0.02, "the sun rises at 05:00")
-		assert(math.abs(elevation(SUN_DOWN)) < 0.02, "the sun sets at 19:00")
-		assert(elevation(12000) > 0.9, "the sun is overhead at noon")
-		assert(elevation(0) < -0.9, "the sun is under the world at midnight")
-		-- And that a quarter of an hour off the horizon the light is red
-		-- rather than a warm white, which is the whole of what the window is
-		-- for
-		local setting = sun_light_color(SUN_DOWN - 250)
+		local setting = sun_light_color(19000 - 250)
 		assert(setting.r - setting.b > 0.5, "a quarter hour from setting")
-		local rising = sun_light_color(SUN_RISE + 250)
+		local rising = sun_light_color(5000 + 250)
 		assert(rising.r - rising.b > 0.5, "and a quarter hour after rising")
 		local noon = sun_light_color(12000)
 		assert(noon.r - noon.b < 0.15, "and its own colour the rest of the day")
@@ -4058,8 +3902,7 @@ function M.new(magic, buildat, log, options)
 				-- which this read off the wire and never used; see
 				-- [SKY_KNOBS] in doc/plan/rendering_plan.md.
 				local tint = sky_color("moon_tint", 1)
-				local low = low_sun(daylight_time)
-				low = (1 - (1 - low) * (1 - low)) * SUN_TINT_SHARE
+				local low = sky_model.sun_tint_share(daylight_time)
 				moon_light.color = magic.Color(
 						MOON_COLOR[1] * (1 - low) + tint.r * low,
 						MOON_COLOR[2] * (1 - low) + tint.g * low,

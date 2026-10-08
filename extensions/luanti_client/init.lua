@@ -264,30 +264,11 @@ local DAYNIGHT_RAMP = {
 	{5375, 0.500}, {5625, 0.675}, {5875, 0.875}, {6125, 1.000},
 }
 
--- The light the sky has before the sun is up ([DAWN_LIGHT]): Luanti's ramp
--- above sits at its 0.175 floor until 4:22, while the halo is drawn from the
--- sun's direction and is up well before that -- 4:00-5:00 read as a bright
--- halo over black ground, and 19:00-20:00 the same. Zero below -18 degrees
--- (where the stretched day puts 4:00), 0.3 at the horizon and nothing above
--- it, where the ramp is larger anyway. apps/vanilla's half is
--- luanti_sky.predawn(); the two clients keep their own copies of this the
--- way they keep their own of everything else drawn twice.
+-- The light the sky has before the sun is up ([DAWN_LIGHT]):
+-- res/sky_model.lua's predawn, opening at -18 degrees (where the stretched
+-- day puts 4:00) rather than vanilla's -24, which meets its dusk band
+local sky_model = buildat.run_extension_file("res/sky_model.lua")
 local PREDAWN_LOW = -0.309
-local PREDAWN_PEAK = 0.3
-
-local function predawn(height)
-	if not height or height >= 0 or height <= PREDAWN_LOW then
-		return 0
-	end
-	-- BUILDAT_LUANTI_NO_PREDAWN=1 turns it off, which is how dawn_light.sh
-	-- reads the same hours with and without it
-	local off = buildat.get_env("BUILDAT_LUANTI_NO_PREDAWN")
-	if off and off ~= "" then
-		return 0
-	end
-
-	return PREDAWN_PEAK * (height - PREDAWN_LOW) / -PREDAWN_LOW
-end
 
 -- override is what a server said the light is whatever the time is, or nil.
 -- BUILDAT_LUANTI_FORCE_DAY wins over it: a scripted run asked for daylight
@@ -322,7 +303,7 @@ local function daynight_ratio(time_of_day, override, height)
 			end
 		end
 	end
-	return math.max(ratio, predawn(height))
+	return math.max(ratio, sky_model.predawn(height, PREDAWN_LOW))
 end
 
 local function labeled_edit(parent, label, value)
